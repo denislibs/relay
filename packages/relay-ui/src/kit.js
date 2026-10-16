@@ -824,7 +824,54 @@ function LinearProgress(props) {
 /* ---------- EmptyState: drawn-in SVG illustration ---------- */
 function EmptyState(props) {
   var kind = props.kind || 'chats';
-  var art = kind === 'search'
+  var L = function (cls, attrs) { return h(attrs.tag || 'path', Object.assign({ class: 'rl-empty-line ' + (cls || ''), pathLength: 1 }, attrs, { tag: undefined })); };
+  // искорка: четырёхлучевая звёздочка с вогнутыми гранями (не «×» — не путать с «закрыть»)
+  var spark = function (x, y, cls) {
+    var r = 6, c = 1.2;
+    return h('path', { class: 'rl-empty-spark ' + (cls || ''), d: 'M' + x + ' ' + (y - r) + 'Q' + (x + c) + ' ' + (y - c) + ' ' + (x + r) + ' ' + y + 'Q' + (x + c) + ' ' + (y + c) + ' ' + x + ' ' + (y + r) + 'Q' + (x - c) + ' ' + (y + c) + ' ' + (x - r) + ' ' + y + 'Q' + (x - c) + ' ' + (y - c) + ' ' + x + ' ' + (y - r) + 'Z' });
+  };
+  var art = kind === 'media'
+    // две фотокарточки: на передней горы и солнце, которое всходит; вокруг мерцают искорки
+    ? h('svg', { class: 'rl-empty-art', viewBox: '0 0 160 120', 'aria-hidden': 'true' },
+      h('g', { class: 'rl-empty-float rl-empty-float-2' },
+        h('rect', { class: 'rl-empty-fill rl-empty-fill-in', x: 26, y: 20, width: 70, height: 56, rx: 9, transform: 'rotate(-9 61 48)' }),
+        L('', { tag: 'rect', x: 26, y: 20, width: 70, height: 56, rx: 9, transform: 'rotate(-9 61 48)' })),
+      h('g', { class: 'rl-empty-float' },
+        h('rect', { class: 'rl-empty-fill rl-empty-fill-out', x: 54, y: 36, width: 80, height: 62, rx: 9 }),
+        L('rl-empty-d2', { tag: 'rect', x: 54, y: 36, width: 80, height: 62, rx: 9 }),
+        h('g', { class: 'rl-empty-sun' }, h('circle', { class: 'rl-empty-sun-fill', cx: 112, cy: 56, r: 7 }), L('rl-empty-d3', { tag: 'circle', cx: 112, cy: 56, r: 7 })),
+        L('rl-empty-d3', { d: 'M60 90l20-22 13 13 9-8 26 17' })),
+      spark(140, 26), spark(20, 88, 'rl-empty-spark-2'), spark(146, 104, 'rl-empty-spark-3'))
+    : kind === 'files'
+    // документ с загнутым уголком, за ним второй; скрепка покачивается, «скачать» подпрыгивает
+    ? h('svg', { class: 'rl-empty-art', viewBox: '0 0 160 120', 'aria-hidden': 'true' },
+      h('g', { class: 'rl-empty-float rl-empty-float-2' },
+        h('path', { class: 'rl-empty-fill rl-empty-fill-in', d: 'M66 14h40a6 6 0 0 1 6 6v64a6 6 0 0 1-6 6H66a6 6 0 0 1-6-6V20a6 6 0 0 1 6-6z', transform: 'rotate(8 86 52)' }),
+        L('', { d: 'M66 14h40a6 6 0 0 1 6 6v64a6 6 0 0 1-6 6H66a6 6 0 0 1-6-6V20a6 6 0 0 1 6-6z', transform: 'rotate(8 86 52)' })),
+      h('g', { class: 'rl-empty-float' },
+        h('path', { class: 'rl-empty-fill rl-empty-fill-out', d: 'M52 24h38l18 18v56a6 6 0 0 1-6 6H52a6 6 0 0 1-6-6V30a6 6 0 0 1 6-6z' }),
+        L('rl-empty-d2', { d: 'M52 24h38l18 18v56a6 6 0 0 1-6 6H52a6 6 0 0 1-6-6V30a6 6 0 0 1 6-6z' }),
+        L('rl-empty-d2', { d: 'M90 24v12a6 6 0 0 0 6 6h12' }),
+        L('rl-empty-d3', { d: 'M58 60h36' }), L('rl-empty-d3', { d: 'M58 72h36' }), L('rl-empty-d3', { d: 'M58 84h22' }),
+        h('g', { class: 'rl-empty-clip' }, L('rl-empty-d3', { d: 'M60 12v22a7 7 0 0 0 14 0V10a5 5 0 0 0-10 0v22' }))),
+      h('g', { class: 'rl-empty-bob' },
+        h('circle', { class: 'rl-empty-fill rl-empty-fill-in', cx: 122, cy: 94, r: 13 }),
+        L('rl-empty-d3', { tag: 'circle', cx: 122, cy: 94, r: 13 }),
+        L('rl-empty-d3', { d: 'M122 87v13M116.5 95l5.5 5.5 5.5-5.5' })),
+      spark(28, 30), spark(136, 22, 'rl-empty-spark-2'))
+    : kind === 'links'
+    // два звена цепи сходятся и сцепляются; в точке сцепки вспыхивает искорка
+    ? h('svg', { class: 'rl-empty-art', viewBox: '0 0 160 120', 'aria-hidden': 'true' },
+      h('circle', { class: 'rl-empty-fill rl-empty-fill-soft', cx: 80, cy: 60, r: 46 }),
+      h('g', { transform: 'rotate(-35 80 60)' },
+        h('g', { class: 'rl-empty-link-a' },
+          h('rect', { class: 'rl-empty-fill rl-empty-fill-out', x: 34, y: 48, width: 54, height: 24, rx: 12 }),
+          L('', { tag: 'rect', x: 34, y: 48, width: 54, height: 24, rx: 12 })),
+        h('g', { class: 'rl-empty-link-b' },
+          L('rl-empty-d2', { tag: 'rect', x: 72, y: 48, width: 54, height: 24, rx: 12 }))),
+      h('g', { class: 'rl-empty-link-spark' }, spark(80, 60)),
+      spark(132, 24, 'rl-empty-spark-2'), spark(26, 96, 'rl-empty-spark-3'))
+    : kind === 'search'
     ? h('svg', { class: 'rl-empty-art', viewBox: '0 0 160 120', 'aria-hidden': 'true' },
       h('circle', { class: 'rl-empty-fill rl-empty-fill-in', cx: 70, cy: 56, r: 30 }),
       h('circle', { class: 'rl-empty-line', cx: 70, cy: 56, r: 30, pathLength: 1 }),
