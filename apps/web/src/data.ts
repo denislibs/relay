@@ -35,6 +35,9 @@ export function startData(me: Me): void {
     // сразу, не дожидаясь конца анимаций: список виртуальный (≈20 строк), а отложенный подъём чата
     // после отправки выглядит как запоздалый рывок
     setGlobal({ chats: chats.list(), chatsLoaded: true });
+    // открытый чат появился в списке — теперь известен собеседник: подписываемся на его статус
+    const g = getGlobal(), current = g.pendingChatId ?? g.openChatId;
+    if (current && peerFor !== current) watchPeer(current);
   });
   const counters = new Mirror();
   engine.watch({ kind: 'counters' }, (p) => { counters.apply(p); const c = counters.list()[0]; if (c) setGlobal({ counters: { unreadChats: c.unreadChats as number, unreadMessages: c.unreadMessages as number } }); });
@@ -71,12 +74,17 @@ function showPhase(s: Status): void {
 
 let switchTimer: ReturnType<typeof setTimeout> | null = null;
 let peerWatch: { close(): void } | null = null;
+let peerFor: number | null = null;   // для какого чата подписка уже решена (есть собеседник или это группа)
 
 /** Присутствие собеседника личного чата — отдельная маленькая подписка, живёт, пока чат открыт. */
 function watchPeer(chatId: number | null): void {
   peerWatch?.close();
   peerWatch = null;
-  const peerId = chatId ? (getGlobal().chats.find((c) => c.id === chatId)?.peerId as number | null | undefined) : null;
+  peerFor = null;
+  const chat = chatId ? getGlobal().chats.find((c) => c.id === chatId) : undefined;
+  // чата ещё нет в списке (открыт по #chat= до загрузки списка) — решим, когда список придёт
+  if (chat) peerFor = chatId;
+  const peerId = chat?.peerId as number | null | undefined;
   if (!peerId) { setGlobal({ peer: null }); return; }
   const m = new Mirror();
   peerWatch = engine.watch({ kind: 'presence', userId: peerId }, (p: Patch) => { m.apply(p); setGlobal({ peer: (m.list()[0] as Item) ?? null }); });
