@@ -46,8 +46,10 @@ test('a peer coming online and leaving is pushed to the other side; last seen is
 test('a reload inside the grace period does not flicker offline', async () => {
   const a = await login('Анна'), b = await login('Борис');
   await fetch(`${base}/dev/chats`, { method: 'POST', headers: { cookie: `relay_session=${a.token}` }, body: JSON.stringify({ kind: 'direct', title: null, memberIds: [a.userId, b.userId] }) });
-  const wa = await connect(a.token);
   const wb = await connect(b.token);
+  const firstOnline = nextFrame(wb, (f) => f.op === 'presence');
+  const wa = await connect(a.token);
+  await firstOnline;                       // объявление о первом входе A — до проверки, иначе оно попадёт в окно
   const seen: ServerFrame[] = [];
   wb.addEventListener('message', (e) => { const f = JSON.parse(String(e.data)) as ServerFrame; if (f.op === 'presence') seen.push(f); });
   wa.close();
