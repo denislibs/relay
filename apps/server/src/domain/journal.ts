@@ -32,7 +32,8 @@ export async function getUpdates(userId: number, since: number, limit = MAX_BATC
   const seq = await currentSeq(userId);
   if (since >= seq) return { items: [] as JournalEntry[], seq, more: false, tooLong: false };
   const [first] = await sql`select min(seq) as min from updates where user_id = ${userId}`;
-  if (first.min !== null && since < (first.min as number) - 1) return { items: [] as JournalEntry[], seq, more: false, tooLong: true };
+  // журнал почищен целиком (min = null) или дальше, чем since: клиенту нужен снимок
+  if (first.min === null || since < (first.min as number) - 1) return { items: [] as JournalEntry[], seq, more: false, tooLong: true };
   const rows = await sql`select seq, payload from updates where user_id = ${userId} and seq > ${since} order by seq limit ${limit}`;
   const items: JournalEntry[] = rows.map((r) => ({ seq: r.seq as number, update: r.payload as Update }));
   const last = items.length ? items[items.length - 1].seq : since;

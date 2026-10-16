@@ -50,3 +50,11 @@ test('a rolled-back transaction leaves no seq gap', async () => {
   await sql.begin((tx) => fanOut(tx, [a], ping(3)));
   expect((await getUpdates(a, 0)).items.map((i) => i.seq)).toEqual([1, 2]);
 });
+
+test('a fully trimmed journal is tooLong too, never an empty page with more', async () => {
+  const a = await makeUser();
+  for (let i = 1; i <= 2; i++) await sql.begin((tx) => fanOut(tx, [a], ping(i)));
+  await sql`delete from updates where user_id = ${a}`;
+  expect(await getUpdates(a, 1)).toMatchObject({ tooLong: true, items: [] });
+  expect((await getUpdates(a, 2)).tooLong).toBe(false); // догнал до конца — снимок не нужен
+});
