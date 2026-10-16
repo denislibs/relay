@@ -2,7 +2,7 @@ import { h } from 'preact';
 import { useState, useRef, useEffect, useLayoutEffect } from 'preact/hooks';
 import { requestMeasure, requestMutation, onHeavyAnimationEnd, beginHeavyAnimation } from './schedule.js';
 import { TWallpaper } from 'twallpaper';
-import { cx, ripple, reducedMotion, Icon, IconButton, Avatar, Badge, Button, Checkbox, MediaArt, MessageStatus, SearchField, ICONS } from './kit.js';
+import { cx, ripple, reducedMotion, Presence, Icon, IconButton, Avatar, Badge, Button, Checkbox, MediaArt, MessageStatus, SearchField, ICONS } from './kit.js';
 
 /* Relay UI kit — components added in the Preact version. */
 
@@ -281,6 +281,13 @@ function WindowList(props) {
   rows.sort(function (a, b) { return a.key < b.key ? -1 : a.key > b.key ? 1 : 0; });
   rows = rows.map(function (r) { return r.el; });
   return h('div', { ref: host, class: cx('rl-wlist', props.class), role: props.role, style: { height: n * rh } }, rows);
+}
+
+/* ---------- AsidePanel: right-hand floating card (user info, search…) that pushes the chat column ---------- */
+function AsidePanel(props) {
+  return h(Presence, { show: !!props.open, exitMs: 260 },
+    h('aside', { class: 'rl-shell-aside' },
+      h('section', { class: 'rl-panel rl-asidecard', 'aria-label': props.label || 'Панель' }, props.children)));
 }
 
 /* ---------- SideFrame: the floating sidebar card as a frame for SlideStack pages ---------- */
@@ -642,4 +649,4 @@ function GlassBar(props) {
   return h('header', { class: cx('rl-glassbar', props.class) }, props.children);
 }
 
-export { Wallpaper, nudgeWallpaper, buildPattern, DOODLES, PATTERN_SETS, FloatShell, SideResizer, SidebarCard, SidebarHeader, FolderTabs, Fab, GlassBar, WindowList, SideFrame, SlideStack, Menu, ReactionPicker, AttachMenu, MentionList, DropOverlay, LinkPreview, PollBubble, UnreadDivider, SelectionBar, ChatSearchBar, Highlight, ContactPicker, CallRow, StatusAvatar, LoginQR, VirtualList, BottomNav, Tooltip, plural };
+export { Wallpaper, nudgeWallpaper, buildPattern, DOODLES, PATTERN_SETS, FloatShell, SideResizer, SidebarCard, SidebarHeader, FolderTabs, Fab, GlassBar, WindowList, AsidePanel, SideFrame, SlideStack, Menu, ReactionPicker, AttachMenu, MentionList, DropOverlay, LinkPreview, PollBubble, UnreadDivider, SelectionBar, ChatSearchBar, Highlight, ContactPicker, CallRow, StatusAvatar, LoginQR, VirtualList, BottomNav, Tooltip, plural };

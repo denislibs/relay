@@ -1,6 +1,7 @@
-import { EmptyState, FloatShell, SideFrame, SlideStack } from '@relay/ui';
+import { AsidePanel, EmptyState, FloatShell, SideFrame, SlideStack } from '@relay/ui';
 import { useGlobal } from '../global';
 import { Chat } from './Chat';
+import { Info } from './Info';
 import { Login } from './Login';
 import { NewChat } from './NewChat';
 import { Settings } from './Settings';
@@ -18,11 +19,12 @@ export function App() {
   const boot = useGlobal((s) => s.boot);
   const openChatId = useGlobal((s) => s.openChatId);
   const view = useGlobal((s) => s.sidebarView);
+  const infoOpen = useGlobal((s) => s.infoOpen);
   if (boot === 'loading') return null;
   if (boot === 'login') return <Login />;
   return (
     <>
-      <FloatShell class={openChatId ? 'app-chat-open' : ''} sideWidth={savedSide} onSideResize={saveSide} sidebar={<SideFrame><SlideStack order={SIDE_PAGES} active={view} render={(k: string) => (k === 'settings' ? <Settings /> : <Sidebar />)} /></SideFrame>}>
+      <FloatShell class={openChatId ? 'app-chat-open' : ''} sideWidth={savedSide} onSideResize={saveSide} aside={<AsidePanel open={infoOpen && !!openChatId} label="Информация"><Info /></AsidePanel>} sidebar={<SideFrame><SlideStack order={SIDE_PAGES} active={view} render={(k: string) => (k === 'settings' ? <Settings /> : <Sidebar />)} /></SideFrame>}>
         {openChatId ? (
           <Chat key={openChatId} chatId={openChatId} />
         ) : (

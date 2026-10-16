@@ -1,7 +1,7 @@
 import { Avatar, Bubble, Composer, DateDivider, GlassBar, IconButton, Menu, ScrollToBottom, requestMeasure, requestMutation } from '@relay/ui';
 import { useEffect, useLayoutEffect, useRef, useState } from 'preact/hooks';
 import { loadOlder, openChat, saveDraft, send } from '../data';
-import { useGlobal } from '../global';
+import { setGlobal, useGlobal } from '../global';
 import { clock, dayKey, dayLabel, lastSeenText } from './format';
 import { useReadTracker } from './readTracker';
 
@@ -96,6 +96,7 @@ export function Chat({ chatId }: { chatId: number }) {
   const title = (chat?.title as string) || 'Чат №' + chatId;
   // как в Telegram: в норме подзаголовок — тип чата, а пока идёт подключение или обновление — стадия
   const phaseLabel = useGlobal((s) => s.syncLabel);
+  const infoOpen = useGlobal((s) => s.infoOpen);
   const peer = useGlobal((s) => s.peer);
   const [, tick] = useState(0);              // «5 мин. назад» должно стареть само
   useEffect(() => { const t = setInterval(() => tick((n) => n + 1), 30_000); return () => clearInterval(t); }, []);
@@ -112,13 +113,15 @@ export function Chat({ chatId }: { chatId: number }) {
     <>
       <GlassBar class={switching ? 'app-steady' : undefined}>
         <IconButton class="app-back" icon="arrowLeft" label="К списку чатов" onClick={() => openChat(null)} />
-        <Avatar name={title} size={40} />
-        <div class="rl-glassbar-title">
-          <b>{title}</b>
-          <span key={phaseLabel ?? (online ? 'on' : 'off')} class={phaseLabel ? 'app-phase' : online ? 'app-online' : undefined}>{phaseLabel ?? (subtitle || '\u00a0')}</span>
-        </div>
+        <button type="button" class="rl-glassbar-who" aria-label="Информация о чате" onClick={() => setGlobal({ infoOpen: !infoOpen })}>
+          <Avatar name={title} size={40} />
+          <span class="rl-glassbar-title">
+            <b>{title}</b>
+            <span key={phaseLabel ?? (online ? 'on' : 'off')} class={phaseLabel ? 'app-phase' : online ? 'app-online' : undefined}>{phaseLabel ?? (subtitle || '\u00a0')}</span>
+          </span>
+        </button>
         <IconButton icon="search" label="Поиск по чату" />
-        <IconButton icon="more" label="Ещё" />
+        <IconButton icon="more" label="Информация" onClick={() => setGlobal({ infoOpen: !infoOpen })} />
       </GlassBar>
       <div class="rl-feed" ref={feed} onScroll={onScroll} aria-live="polite">
         {messages.map((m, i) => {

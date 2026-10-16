@@ -25,6 +25,8 @@ export interface GlobalState {
   search: string;
   newChatOpen: boolean;
   sidebarView: 'chats' | 'settings';
+  infoOpen: boolean;   // правая панель «Информация»
+  muted: number[];     // чаты с выключенными уведомлениями (на этом устройстве)
   theme: ThemePref;
 }
 
@@ -44,6 +46,8 @@ let state: GlobalState = {
   search: '',
   newChatOpen: false,
   sidebarView: 'chats',
+  infoOpen: false,
+  muted: (() => { try { return JSON.parse(localStorage.getItem('relay.muted') ?? '[]'); } catch { return []; } })(),
   theme: loadTheme(),
 };
 const subscribers = new Set<() => void>();

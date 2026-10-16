@@ -24,6 +24,7 @@ export function Sidebar() {
   const search = useGlobal((s) => s.search);
   const openId = useGlobal((s) => s.pendingChatId ?? s.openChatId);
   const loaded = useGlobal((s) => s.chatsLoaded);
+  const mutedIds = useGlobal((s) => s.muted);
   // стадия в плейсхолдере поиска: короткие (до 400 мс) не показываем, показанную держим не меньше 800 мс
   const searchStatus = useGlobal((s) => s.syncLabel);
   // данных ещё нет: ждём снимок из кэша или первую загрузку с сервера
@@ -63,6 +64,7 @@ export function Sidebar() {
                   name={(c.title as string) || 'Чат №' + c.id}
                   preview={last?.body ?? 'Нет сообщений'}
                   draft={c.draft && c.id !== openId ? (c.draft as string) : undefined}
+                  muted={mutedIds.includes(c.id as number)}
                   time={chatTime((c.sortAt ?? c.lastAt) as string)}
                   unread={c.unread as number}
                   status={last && last.senderId === me.userId ? last.status : null}
