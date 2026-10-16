@@ -9,6 +9,7 @@ export interface ChatSummary {
   lastReadId: number;
   unread: number;
   last: Message | null;
+  peer?: { id: number; name: string } | null;
 }
 
 /**
@@ -48,6 +49,9 @@ export class Store {
     for (const chatId of new Set(outbox.map((o) => o.chatId))) await s.loadChatMessages(chatId);
     return s;
   }
+
+  /** чаты, известные только по сообщениям: им нужно название со снимка */
+  unnamed(): number[] { return [...this.chats.values()].filter((c) => !c.named).map((c) => c.id); }
 
   // ---------- чтение ----------
 
@@ -90,7 +94,9 @@ export class Store {
     for (const s of list) {
       const chat = this.ensureChat(s.id);
       chat.kind = s.kind;
-      chat.title = s.title;
+      chat.title = s.title ?? s.peer?.name ?? null;
+      chat.peerId = s.peer?.id ?? null;
+      chat.named = true;
       chat.lastReadId = Math.max(chat.lastReadId, s.lastReadId);
       chat.unread = s.unread;
       if (s.last) {
@@ -256,7 +262,7 @@ export class Store {
   private ensureChat(id: number): LocalChat {
     let c = this.chats.get(id);
     if (!c) {
-      c = { id, kind: 'direct', title: null, lastReadId: 0, unread: 0, knownMaxId: 0, peerReadUpTo: 0, historyComplete: false, last: null, lastAt: new Date(0).toISOString() };
+      c = { id, kind: 'direct', title: null, lastReadId: 0, unread: 0, knownMaxId: 0, peerReadUpTo: 0, historyComplete: false, peerId: null, named: false, last: null, lastAt: new Date(0).toISOString() };
       this.chats.set(id, c);
       this.markChat(c);
     }

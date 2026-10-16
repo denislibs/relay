@@ -15,7 +15,7 @@ function result(list: Item[]): Result {
 }
 
 const chatItem = (c: LocalChat): Item => ({
-  key: 'c' + c.id, id: c.id, kind: c.kind, title: c.title, unread: c.unread, lastReadId: c.lastReadId, lastAt: c.lastAt,
+  key: 'c' + c.id, id: c.id, kind: c.kind, title: c.title, peerId: c.peerId, unread: c.unread, lastReadId: c.lastReadId, lastAt: c.lastAt,
   last: c.last ? { key: c.last.key, id: c.last.id, senderId: c.last.senderId, body: c.last.body, status: c.last.status, createdAt: c.last.createdAt } : null,
 });
 const messageItem = (m: LocalMessage): Item => ({ ...m });
@@ -35,12 +35,15 @@ export function computeQuery(store: Store, q: Query): Result {
       for (const c of store.chats.values()) if (c.unread > 0) { unreadChats++; unreadMessages += c.unread; }
       return result([{ key: 'counters', unreadChats, unreadMessages }]);
     }
+    case 'status':
+      throw new Error('status is computed by the engine');
   }
 }
 
 /** Задевает ли изменение этих чатов результат подписки. */
 export function affects(q: Query, touched: Set<number>): boolean {
   if (!touched.size) return false;
+  if (q.kind === 'status') return false;
   return q.kind === 'messages' ? touched.has(q.chatId) : true;
 }
 

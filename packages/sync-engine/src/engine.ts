@@ -1,6 +1,7 @@
 import type { ClientFrame, Message, ServerFrame } from '@relay/protocol';
 import { openDb } from './idb';
 import { affects, computeQuery, diffResults, type Result } from './queries';
+import type { Item } from './types';
 import { Store, type ChatSummary } from './store';
 import { WsTransport } from './transport';
 import type { Action, EngineConfig, Patch, Query } from './types';
@@ -34,6 +35,8 @@ export class Engine {
   private historyLoads = new Map<number, Promise<void>>();
   private lastCreated = 0;
   private closed = false;
+  private statusSig = '';
+  private refreshing = false;
 
   private constructor(private cfg: EngineConfig, readonly store: Store, private db: IDBDatabase) {
     this.transport = new WsTransport(cfg.wsUrl, {
@@ -90,6 +93,23 @@ export class Engine {
 
   private changed(): void { this.schedule(); }
 
+  private statusItem(): Item {
+    return {
+      key: 'status',
+      online: this.online,
+      synced: this.ready,
+      syncing: this.syncing,
+      outbox: [...this.store.outbox.values()].filter((o) => !o.failed).length,
+      failed: [...this.store.outbox.values()].filter((o) => o.failed).length,
+    };
+  }
+
+  private compute(q: Query): Result {
+    if (q.kind !== 'status') return computeQuery(this.store, q);
+    const it = this.statusItem();
+    return { items: new Map([[it.key, it]]), order: [it.key], sig: new Map([[it.key, JSON.stringify(it)]]) };
+  }
+
   private schedule(): void {
     if (this.frameTimer || this.closed) return;
     this.frameTimer = setTimeout(() => { this.frameTimer = null; this.emit(); }, this.cfg.frameMs ?? 16);
@@ -98,10 +118,13 @@ export class Engine {
   private emit(): void {
     const touched = new Set(this.store.touched);
     this.store.touched.clear();
+    const sig = JSON.stringify(this.statusItem());
+    const statusChanged = sig !== this.statusSig;
+    this.statusSig = sig;
     for (const w of this.watchers.values()) {
-      if (!w.force && !affects(w.q, touched)) continue;
+      if (!w.force && !affects(w.q, touched) && !(w.q.kind === 'status' && statusChanged)) continue;
       w.force = false;
-      const next = computeQuery(this.store, w.q);
+      const next = this.compute(w.q);
       const patch = diffResults(w.prev, next);
       w.prev = next;
       if (patch) {
@@ -156,12 +179,14 @@ export class Engine {
   private onOpen(): void {
     this.online = true;
     this.ready = false;
+    this.changed();
     this.transport.send({ op: 'hello', lastSeq: this.store.lastSeq });
   }
 
   private onClose(): void {
     this.online = false;
     this.ready = false;
+    this.changed();
     const offline: ReqError = { code: 'offline', retry: true };
     this.syncWaiter?.reject(offline);
     this.syncWaiter = null;
@@ -257,9 +282,27 @@ export class Engine {
     }
     if (this.online) {
       this.ready = true;
+      this.changed();
       this.pumpOutbox();
       this.flushReads();
+      if (this.store.unnamed().length) this.refreshList();
     }
+  }
+
+  /** Сообщение пришло в чат, которого не было в снимке: подтянуть названия и собеседников. */
+  private refreshList(): void {
+    if (this.refreshing) return;
+    this.refreshing = true;
+    this.run(async () => {
+      try {
+        const list = await this.http<ChatSummary[]>('/chats');
+        this.store.applySnapshot(list);
+        await this.store.flush();
+        this.changed();
+      } finally {
+        this.refreshing = false;
+      }
+    });
   }
 
   private requestSync(since: number): Promise<SyncReply> {

@@ -22,6 +22,8 @@ export interface LocalChat {
   knownMaxId: number;     // максимальный id сообщения, который уже учтён в unread
   peerReadUpTo: number;   // до какого id собеседники прочитали мои сообщения
   historyComplete: boolean;
+  peerId: number | null;  // собеседник личного чата
+  named: boolean;         // название пришло со снимка (иначе чат узнали из сообщения)
   last: LocalMessage | null;
   lastAt: string;
 }
@@ -38,7 +40,8 @@ export interface OutboxEntry {
 export type Query =
   | { kind: 'chatList'; limit: number }
   | { kind: 'messages'; chatId: number; limit: number }
-  | { kind: 'counters' };
+  | { kind: 'counters' }
+  | { kind: 'status' };
 
 export type Item = { key: string } & Record<string, unknown>;
 
