@@ -30,3 +30,4 @@ body { background: var(--bg); color: var(--ink); font-family: var(--font-sans); 
 @keyframes app-fade-out { to { opacity: 0; } }
 @media (prefers-reduced-motion: reduce) { .app-skel > div, .app-listwrap > * { animation-duration: 1ms !important; animation-delay: 0ms !important; } }
 .rl-glassbar.app-steady { animation: none; }
+.rl-glassbar-title .app-phase { color: var(--brand-text); animation: rl-label-in var(--dur-base) var(--ease-out); }

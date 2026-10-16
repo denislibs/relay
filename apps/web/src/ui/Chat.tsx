@@ -1,4 +1,4 @@
-import { Avatar, Bubble, Composer, DateDivider, GlassBar, IconButton, Menu, ScrollToBottom, SyncIndicator, requestMeasure, requestMutation } from '@relay/ui';
+import { Avatar, Bubble, Composer, DateDivider, GlassBar, IconButton, Menu, ScrollToBottom, requestMeasure, requestMutation } from '@relay/ui';
 import { useEffect, useLayoutEffect, useRef, useState } from 'preact/hooks';
 import { loadOlder, openChat, send } from '../data';
 import { useGlobal } from '../global';
@@ -14,7 +14,6 @@ export function Chat({ chatId }: { chatId: number }) {
   const me = useGlobal((s) => s.me)!;
   const chat = useGlobal((s) => s.chats.find((c) => c.id === chatId));
   const messages = useGlobal((s) => s.messages);
-  const status = useGlobal((s) => s.status);
   const feed = useRef<HTMLDivElement>(null);
   const stick = useRef(true);              // лента прижата к низу
   const olderFrom = useRef<number | null>(null); // высота до подгрузки истории — якорь прокрутки
@@ -54,9 +53,8 @@ export function Chat({ chatId }: { chatId: number }) {
   }
 
   const title = (chat?.title as string) || 'Чат №' + chatId;
-  const sync = status.phase === 'offline' ? 'offline' : status.phase !== 'ready' || status.outbox ? 'syncing' : 'synced';
+  // как в Telegram: в норме подзаголовок — тип чата, а пока идёт подключение или обновление — стадия
   const phaseLabel = useGlobal((s) => s.syncLabel);
-  const syncLabel = phaseLabel ?? (status.outbox ? 'Отправка…' : undefined);
   const byId = new Map(messages.filter((m) => m.id != null).map((m) => [m.id as number, m]));
   const replyTo = replyKey ? messages.find((m) => m.key === replyKey) : undefined;
   const authorOf = (senderId: unknown) => (senderId === me.userId ? 'Вы' : title);
@@ -70,9 +68,8 @@ export function Chat({ chatId }: { chatId: number }) {
         <Avatar name={title} size={40} />
         <div class="rl-glassbar-title">
           <b>{title}</b>
-          <span>{chat?.kind === 'group' ? 'Группа' : 'Личный чат'}</span>
+          <span key={phaseLabel ?? 'kind'} class={phaseLabel ? 'app-phase' : undefined}>{phaseLabel ?? (chat?.kind === 'group' ? 'Группа' : 'Личный чат')}</span>
         </div>
-        <SyncIndicator state={sync} label={syncLabel} />
         <IconButton icon="search" label="Поиск по чату" />
         <IconButton icon="more" label="Ещё" />
       </GlassBar>
