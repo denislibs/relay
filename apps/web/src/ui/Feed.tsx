@@ -21,6 +21,7 @@ const EDGE = '750px';     // запас датчиков окна
 const TOP_ZONE = 72;      // шапка (48) + отступ (16) + воздух: выше — под шапкой, не «видно»
 const BOTTOM = 50;        // «у низа» — ближе 50 px
 const READ_EVERY = 150;   // отправка «вижу до id» не чаще
+const FIRST_PAINT = 24;   // при открытии внизу первым кадром — столько последних сообщений, остальное следующим кадром
 
 type RowProps = { m: Item; out: boolean; start: boolean; end: boolean; quoted?: Item; quoteAuthor?: string; quoteTone?: number; appear: boolean };
 
@@ -70,6 +71,8 @@ export function Feed({ chatId, meId, peerName, stick, onMenu }: {
   const programmatic = useRef(0);
   const placed = useRef(false);
   const [away, setAway] = useState(false);
+  // дешёвый первый показ (как постепенный рендер в tt): открыли внизу — сначала хвост, выше экрана — следующим кадром
+  const [partial, setPartial] = useState(() => !unreadFrom && !savedPosition(chatId));
   const initial = useRef<Set<string> | null>(null);
   if (initial.current === null && messages.length) initial.current = new Set(messages.map((m) => m.key));
 
@@ -105,6 +108,10 @@ export function Feed({ chatId, meId, peerName, stick, onMenu }: {
         target = Math.max(0, target);
         if (Math.abs(root.scrollTop - target) > 1) { programmatic.current++; root.scrollTop = target; }
       });
+      if (partial) {
+        // следующий кадр: якорь — первый видимый, дорисовать строки выше (якорь удержит позицию)
+        requestMeasure(() => { const v = firstVisible(root); if (v) anchor.current = { key: v.key, top: v.top }; requestMutation(() => setPartial(false)); });
+      }
       return;
     }
     const a = anchor.current, down = toBottom.current;
@@ -126,7 +133,7 @@ export function Feed({ chatId, meId, peerName, stick, onMenu }: {
       if (next !== null) next = Math.max(0, Math.min(next, max)); // за пределы браузер не прокрутит — и события не будет
       if (next !== null && Math.abs(next - top) > 0.5) { programmatic.current++; root.scrollTop = next; }
     });
-  }, [messages]);
+  }, [messages, partial]);
 
   // датчики у краёв окна: видны с запасом 750 px — сдвигаем окно; новые датчики (по ключу) срабатывают сразу
   const edges = useRef<IntersectionObserver | null>(null);
@@ -243,8 +250,9 @@ export function Feed({ chatId, meId, peerName, stick, onMenu }: {
   for (const m of messages) if (m.id != null) byId.set(m.id as number, m);
   const out: unknown[] = [];
   let prevDay = '', prevSender: unknown = null, unreadShown = false;
-  out.push(<div class="app-sentinel" data-dir="older" key={'o' + (messages[0]?.key ?? '')} aria-hidden="true" />);
-  messages.forEach((m, i) => {
+  if (!partial) out.push(<div class="app-sentinel" data-dir="older" key={'o' + (messages[0]?.key ?? '')} aria-hidden="true" />);
+  const shown = partial && messages.length > FIRST_PAINT ? messages.slice(messages.length - FIRST_PAINT) : messages;
+  shown.forEach((m, i) => {
     const day = dayKey(m.createdAt as string);
     const mine = m.senderId === meId;
     if (day !== prevDay) out.push(<DateDivider key={'d' + day}>{dayLabel(m.createdAt as string)}</DateDivider>);
@@ -252,7 +260,7 @@ export function Feed({ chatId, meId, peerName, stick, onMenu }: {
       unreadShown = true;
       out.push(<div class="app-unread-divider" key="unread" role="separator"><span>Непрочитанные сообщения</span></div>);
     }
-    const next = messages[i + 1];
+    const next = shown[i + 1];
     const start = prevSender !== m.senderId || day !== prevDay;
     const end = !next || next.senderId !== m.senderId || dayKey(next.createdAt as string) !== day;
     const quoted = m.replyToId != null ? byId.get(m.replyToId as number) : undefined;
