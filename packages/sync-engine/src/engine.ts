@@ -229,6 +229,7 @@ export class Engine {
         const clientId = crypto.randomUUID();
         this.lastCreated = Math.max(Date.now(), this.lastCreated + 1); // порядок черновиков внутри одной миллисекунды
         this.store.addPending({ clientId, chatId: a.chatId, body: a.body, replyToId: a.replyToId ?? null, createdAt: this.lastCreated, failed: false });
+        this.store.setDraft(a.chatId, '');   // отправили — черновик больше не нужен
         await this.store.flush();
         this.changed();
         this.pumpOutbox();
@@ -249,6 +250,10 @@ export class Engine {
       }
       case 'refreshChats': {
         if (this.online) this.refreshList();
+        return null;
+      }
+      case 'setDraft': {
+        if (this.store.setDraft(a.chatId, a.text)) { await this.store.flush(); this.changed(); }
         return null;
       }
       case 'loadMoreChats':

@@ -349,9 +349,12 @@ function Composer(props) {
   // @mention: the word under the caret that starts with @
   var m = /(^|\s)@([^\s@]*)$/.exec(value.slice(0, caret[0] < 0 ? value.length : caret[0]));
   var mentionList = m && props.members ? props.members.filter(function (x) { return x.name.toLowerCase().indexOf(m[2].toLowerCase()) >= 0; }).slice(0, 5) : null;
+  var inputRef = useRef(null);
   function send() {
-    if (!hasText) { if (props.onRecord) props.onRecord(); return; }
-    if (props.onSend) props.onSend(value.trim());
+    // текст — из самого поля: рендер идёт раз в кадр, и Enter сразу после ввода видел бы прошлое значение
+    var current = inputRef.current ? inputRef.current.value : value;
+    if (!current.trim()) { if (props.onRecord) props.onRecord(); return; }
+    if (props.onSend) props.onSend(current.trim());
     setValue('');
   }
   function pickMention(x) {
@@ -372,7 +375,7 @@ function Composer(props) {
         h(IconButton, { icon: attach[0] ? 'close' : 'attach', label: attach[0] ? 'Закрыть вложения' : 'Прикрепить', active: attach[0], class: 'rl-attach-toggle', onClick: function () { attach[1](!attach[0]); } }),
         h('label', { for: id, class: 'rl-sr' }, 'Сообщение'),
         h('input', {
-          id: id, type: 'text', value: value, placeholder: props.placeholder || 'Введите сообщение', autocomplete: 'off',
+          id: id, ref: inputRef, type: 'text', value: value, placeholder: props.placeholder || 'Введите сообщение', autocomplete: 'off',
           onInput: function (e) { setValue(e.target.value); caret[1](e.target.selectionStart); },
           onKeyDown: function (e) {
             if (e.key === 'Enter' && mentionList && mentionList.length) { e.preventDefault(); pickMention(mentionList[0]); return; }

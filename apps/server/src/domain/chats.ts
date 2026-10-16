@@ -56,6 +56,7 @@ export async function listChatsPage(userId: number, limit: number, before?: Dial
 }
 
 export async function listChats(userId: number, opts: ListOpts = {}): Promise<ChatSummary[]> {
+  // время списка — с точностью до мс: курсор уходит клиенту в ISO (мс), иначе на стыке страниц теряются чаты одной миллисекунды
   const rows = await sql`
     select c.id, c.kind, c.title, c.created_at as chat_created_at, cm.last_read_id,
            lm.id as m_id, lm.chat_id as m_chat_id, lm.sender_id as m_sender_id, lm.client_id as m_client_id,
@@ -65,17 +66,17 @@ export async function listChats(userId: number, opts: ListOpts = {}): Promise<Ch
            (select json_build_object('id', u.id, 'name', u.name) from chat_members pm join users u on u.id = pm.user_id
              where c.kind = 'direct' and pm.chat_id = c.id and pm.user_id <> ${userId} limit 1) as peer,
            (select coalesce(min(om.last_read_id), 0) from chat_members om where om.chat_id = c.id and om.user_id <> ${userId}) as peer_read_up_to,
-           coalesce(lm.created_at, c.created_at) as sort_at
+           date_trunc('milliseconds', coalesce(lm.created_at, c.created_at)) as sort_at
       from chat_members cm
       join chats c on c.id = cm.chat_id
       left join lateral (
         select * from messages where chat_id = c.id order by id desc limit 1
       ) lm on true
      where cm.user_id = ${userId}
-       ${opts.before ? sql`and (coalesce(lm.created_at, c.created_at), c.id) < (${opts.before.at}::timestamptz, ${opts.before.id})` : sql``}
+       ${opts.before ? sql`and (date_trunc('milliseconds', coalesce(lm.created_at, c.created_at)), c.id) < (${opts.before.at}::timestamptz, ${opts.before.id})` : sql``}
        ${opts.ids ? sql`and c.id = any(${opts.ids}::bigint[])` : sql``}
        ${opts.unreadOnly ? sql`and exists (select 1 from messages m where m.chat_id = c.id and m.id > cm.last_read_id and m.sender_id <> ${userId})` : sql``}
-     order by coalesce(lm.created_at, c.created_at) desc, c.id desc
+     order by date_trunc('milliseconds', coalesce(lm.created_at, c.created_at)) desc, c.id desc
      ${opts.limit ? sql`limit ${opts.limit}` : sql``}`;
   return rows.map((r) => ({
     id: r.id as number,

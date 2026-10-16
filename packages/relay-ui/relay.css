@@ -994,3 +994,5 @@ button.rl-quote { cursor: pointer; }
 @keyframes rl-tab-to-left { from { transform: none; } to { transform: translateX(-100%); } }
 @keyframes rl-tab-from-left { from { transform: translateX(-100%); } to { transform: none; } }
 @keyframes rl-tab-to-right { from { transform: none; } to { transform: translateX(100%); } }
+/* virtual lists position rows themselves: browser scroll anchoring would "help" by jumping the scroll on reorders */
+.rl-page-scroll, .rl-sidecard-body, .rl-wlist { overflow-anchor: none; }

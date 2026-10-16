@@ -229,6 +229,17 @@ export class Store {
     return true;
   }
 
+  /** Черновик чата: пустой текст — удалить. false — ничего не изменилось (тот же текст). */
+  setDraft(chatId: number, text: string): boolean {
+    const chat = this.chats.get(chatId);
+    if (!chat) return false;
+    const next = text.trim() ? { text, at: new Date().toISOString() } : null;
+    if ((chat.draft?.text ?? null) === (next?.text ?? null)) return false;
+    chat.draft = next;
+    this.markChat(chat);
+    return true;
+  }
+
   /** Куда дошла подгрузка диалогов. next = null — страниц больше нет. */
   setDialogsCursor(next: { at: string; id: number } | null): void {
     this.dialogsAt = next ? Date.parse(next.at) : 0;

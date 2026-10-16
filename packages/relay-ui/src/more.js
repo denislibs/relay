@@ -273,8 +273,13 @@ function WindowList(props) {
   var rows = [];
   for (var i = first; i < last; i++) {
     var key = props.getKey(items[i], i);
-    rows.push(h('div', { key: key, class: 'rl-wrow', style: { transform: 'translateY(' + i * rh + 'px)', height: rh } }, props.render(items[i], i)));
+    // z: верхние строки поверх — строка, поднимающаяся наверх, едет над соседями, а не под ними
+    rows.push({ key: key, el: h('div', { key: key, class: 'rl-wrow', style: { transform: 'translateY(' + i * rh + 'px)', height: rh, zIndex: n - i } }, props.render(items[i], i)) });
   }
+  // DOM-порядок стабилен (по ключу), место — только transform: если Preact переставит узел в DOM,
+  // CSS-переход у него сбросится и строка прыгнет вместо того, чтобы проехать
+  rows.sort(function (a, b) { return a.key < b.key ? -1 : a.key > b.key ? 1 : 0; });
+  rows = rows.map(function (r) { return r.el; });
   return h('div', { ref: host, class: cx('rl-wlist', props.class), role: props.role, style: { height: n * rh } }, rows);
 }
 

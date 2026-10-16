@@ -26,6 +26,7 @@ export interface LocalChat {
   named: boolean;         // название пришло со снимка (иначе чат узнали из сообщения)
   last: LocalMessage | null;
   lastAt: string;
+  draft?: { text: string; at: string } | null;   // неотправленный текст композера (общий для вкладок)
 }
 
 export interface OutboxEntry {
@@ -56,7 +57,8 @@ export type Action =
   | { type: 'loadOlder'; chatId: number }
   | { type: 'retry'; clientId: string }
   | { type: 'refreshChats' }
-  | { type: 'loadMoreChats' };
+  | { type: 'loadMoreChats' }
+  | { type: 'setDraft'; chatId: number; text: string };
 
 export interface EngineConfig {
   userId: number;

@@ -14,8 +14,12 @@ function result(list: Item[]): Result {
   return { items, order: list.map((i) => i.key), sig };
 }
 
+/** Место в списке — по более позднему из последнего сообщения и черновика (как в Telegram). */
+const sortAt = (c: LocalChat): string => (c.draft && c.draft.at > c.lastAt ? c.draft.at : c.lastAt);
+
 const chatItem = (c: LocalChat): Item => ({
   key: 'c' + c.id, id: c.id, kind: c.kind, title: c.title, peerId: c.peerId, unread: c.unread, lastReadId: c.lastReadId, lastAt: c.lastAt,
+  sortAt: sortAt(c), draft: c.draft?.text ?? null,
   last: c.last ? { key: c.last.key, id: c.last.id, senderId: c.last.senderId, body: c.last.body, status: c.last.status, createdAt: c.last.createdAt } : null,
 });
 const messageItem = (m: LocalMessage): Item => ({ ...m });
@@ -23,7 +27,7 @@ const messageItem = (m: LocalMessage): Item => ({ ...m });
 export function computeQuery(store: Store, q: Query): Result {
   switch (q.kind) {
     case 'chatList': {
-      const chats = [...store.chats.values()].sort((a, b) => (a.lastAt < b.lastAt ? 1 : a.lastAt > b.lastAt ? -1 : b.id - a.id));
+      const chats = [...store.chats.values()].sort((a, b) => { const x = sortAt(a), y = sortAt(b); return x < y ? 1 : x > y ? -1 : b.id - a.id; });
       return result(chats.slice(0, q.limit).map(chatItem));
     }
     case 'messages': {

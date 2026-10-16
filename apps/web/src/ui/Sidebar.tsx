@@ -62,7 +62,8 @@ export function Sidebar() {
                 <ChatRow
                   name={(c.title as string) || 'Чат №' + c.id}
                   preview={last?.body ?? 'Нет сообщений'}
-                  time={chatTime(c.lastAt as string)}
+                  draft={c.draft && c.id !== openId ? (c.draft as string) : undefined}
+                  time={chatTime((c.sortAt ?? c.lastAt) as string)}
                   unread={c.unread as number}
                   status={last && last.senderId === me.userId ? last.status : null}
                   active={c.id === openId}

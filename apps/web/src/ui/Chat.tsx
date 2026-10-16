@@ -1,6 +1,6 @@
 import { Avatar, Bubble, Composer, DateDivider, GlassBar, IconButton, Menu, ScrollToBottom, requestMeasure, requestMutation } from '@relay/ui';
 import { useEffect, useLayoutEffect, useRef, useState } from 'preact/hooks';
-import { loadOlder, openChat, send } from '../data';
+import { loadOlder, openChat, saveDraft, send } from '../data';
 import { useGlobal } from '../global';
 import { clock, dayKey, dayLabel, lastSeenText } from './format';
 import { useReadTracker } from './readTracker';
@@ -26,6 +26,29 @@ export function Chat({ chatId }: { chatId: number }) {
   if (initial.current === null && messages.length) initial.current = new Set(messages.map((m) => m.key));
 
   useReadTracker(chatId, feed, messages);
+
+  // черновик (как в Telegram): восстановить при открытии, сохранять через 2.5 с после ввода,
+  // сразу — при уходе из чата и закрытии вкладки; после отправки движок сам его очищает
+  const [text, setText] = useState(() => (chat?.draft as string) ?? '');
+  const saved = useRef(text);
+  const draftTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const flushDraft = () => {
+    if (draftTimer.current) { clearTimeout(draftTimer.current); draftTimer.current = null; }
+    if (latest.current !== saved.current) { saved.current = latest.current; saveDraft(chatId, latest.current); }
+  };
+  const latest = useRef(text);
+  const onType = (v: string) => {
+    setText(v);
+    latest.current = v;
+    if (draftTimer.current) clearTimeout(draftTimer.current);
+    draftTimer.current = setTimeout(flushDraft, 2500);
+  };
+  useEffect(() => {
+    const input = document.getElementById('composer') as HTMLInputElement | null;
+    if (input && text) input.setSelectionRange(text.length, text.length); // курсор — в конец текста
+    addEventListener('pagehide', flushDraft);
+    return () => { removeEventListener('pagehide', flushDraft); flushDraft(); };
+  }, []);
 
   // высота композера (растёт с цитатой ответа) → --composer-h: лента уходит под него ровно на эту высоту
   useLayoutEffect(() => {
@@ -134,7 +157,16 @@ export function Chat({ chatId }: { chatId: number }) {
         placeholder="Сообщение"
         replyTo={replyTo ? { author: authorOf(replyTo.senderId), text: replyTo.body, tone: replyTo.senderId === me.userId ? 1 : 3 } : null}
         onCancelReply={() => setReplyKey(null)}
-        onSend={(text: string) => { stick.current = true; send(chatId, text, (replyTo?.id as number) ?? null); setReplyKey(null); }}
+        value={text}
+        onChange={onType}
+        onSend={(body: string) => {
+          stick.current = true;
+          if (draftTimer.current) { clearTimeout(draftTimer.current); draftTimer.current = null; }
+          saved.current = latest.current = '';   // черновик очищает сам движок вместе с отправкой
+          setText('');
+          send(chatId, body, (replyTo?.id as number) ?? null);
+          setReplyKey(null);
+        }}
       />
       {menu && menuMsg ? (
         <>

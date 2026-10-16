@@ -150,3 +150,29 @@ test('dialogs load in pages: first page + every unread chat, then more on demand
   await st.until((l) => l[0].chatsComplete === true);
   expect(list.list().map((c) => c.id)).toEqual([...ids].reverse());
 });
+
+test('drafts: saved per chat, lift the chat in the list, survive a restart, cleared on send', async () => {
+  const a = await srv.login('a'), b = await srv.login('b');
+  const older = await srv.chat(a.token, [a.userId, b.userId]);
+  await sendMessage(b.userId, { chatId: older, clientId: crypto.randomUUID(), body: 'старое' });
+  const newer = await srv.chat(a.token, [a.userId, b.userId]);
+  await sendMessage(b.userId, { chatId: newer, clientId: crypto.randomUUID(), body: 'новое' });
+  const cfg = srv.config(a);
+  const ea = await open(cfg);
+  ea.connect();
+  const list = watchInto(ea, { kind: 'chatList', limit: 10 });
+  await list.until((l) => l.length === 2 && l[0].id === newer);
+
+  await ea.call({ type: 'setDraft', chatId: older, text: 'недописанное' });
+  await list.until((l) => l[0].id === older && l[0].draft === 'недописанное');   // черновик поднял чат
+
+  await ea.close();
+  const again = await open(cfg);                                            // перезагрузка: тот же IndexedDB
+  const list2 = watchInto(again, { kind: 'chatList', limit: 10 });
+  await list2.until((l) => l.find((c) => c.id === older)?.draft === 'недописанное');
+
+  await again.call({ type: 'sendMessage', chatId: older, body: 'недописанное' });
+  await list2.until((l) => l.find((c) => c.id === older)?.draft === null);
+  await again.call({ type: 'setDraft', chatId: newer, text: '   ' });         // пробелы — не черновик
+  expect(list2.list().find((c) => c.id === newer)?.draft).toBeNull();
+});

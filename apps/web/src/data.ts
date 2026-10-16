@@ -1,4 +1,4 @@
-import { deferDuringAnimation, nudgeWallpaper } from '@relay/ui';
+import { nudgeWallpaper } from '@relay/ui';
 import { connectEngine, EngineClient, Mirror } from '@relay/sync-engine/src/client';
 import type { Item, Patch } from '@relay/sync-engine/src/types';
 import { getGlobal, setGlobal, type Me, type Status } from './global';
@@ -32,9 +32,9 @@ export function startData(me: Me): void {
   const chats = new Mirror();
   engine.watch({ kind: 'chatList', limit: 1000 }, (p) => {
     chats.apply(p);
-    const apply = () => setGlobal({ chats: chats.list(), chatsLoaded: true });
-    // пустой список беречь нечего — первые данные показываем сразу, остальное после тяжёлых анимаций
-    if (!getGlobal().chats.length) apply(); else deferDuringAnimation(apply);
+    // сразу, не дожидаясь конца анимаций: список виртуальный (≈20 строк), а отложенный подъём чата
+    // после отправки выглядит как запоздалый рывок
+    setGlobal({ chats: chats.list(), chatsLoaded: true });
   });
   const counters = new Mirror();
   engine.watch({ kind: 'counters' }, (p) => { counters.apply(p); const c = counters.list()[0]; if (c) setGlobal({ counters: { unreadChats: c.unreadChats as number, unreadMessages: c.unreadMessages as number } }); });
@@ -121,6 +121,11 @@ export function loadOlder(): void {
 export async function send(chatId: number, body: string, replyToId: number | null = null): Promise<void> {
   nudgeWallpaper();
   await engine.call({ type: 'sendMessage', chatId, body, replyToId });
+}
+
+/** Черновик чата (пустой — удалить). Хранится в движке: общий для вкладок, переживает перезагрузку. */
+export function saveDraft(chatId: number, text: string): void {
+  engine.call({ type: 'setDraft', chatId, text }).catch(() => {});
 }
 
 /** Следующая страница диалогов; движок сам не пустит второй запрос, пока идёт первый. */
