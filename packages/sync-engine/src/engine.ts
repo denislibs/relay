@@ -55,10 +55,10 @@ export class Engine {
   async close(): Promise<void> {
     this.closed = true;
     this.disconnect();
-    if (this.frameTimer) clearTimeout(this.frameTimer);
-    if (this.readTimer) clearTimeout(this.readTimer);
+    if (this.frameTimer) { clearTimeout(this.frameTimer); this.frameTimer = null; }
+    if (this.readTimer) { clearTimeout(this.readTimer); this.readTimer = null; }
     this.watchers.clear();
-    await this.whenIdle(2000).catch(() => {});
+    await this.whenIdle(2000).catch((e) => console.warn(String(e)));
     await this.store.flush();
     this.db.close();
   }
@@ -387,7 +387,12 @@ export class Engine {
       (this.ready && [...this.store.outbox.values()].some((o) => !o.failed)) ||
       (this.ready && this.store.pendingReads.size > 0);
     while (busy()) {
-      if (Date.now() > end) throw new Error('engine did not become idle');
+      if (Date.now() > end) {
+        throw new Error('engine did not become idle: ' + JSON.stringify({
+          syncing: this.syncing, busy: this.busy, pending: this.pending.size, frame: this.frameTimer !== null, read: this.readTimer !== null,
+          wanted: this.transport.wanted, ready: this.ready, outbox: this.store.outbox.size, reads: this.store.pendingReads.size,
+        }));
+      }
       await new Promise((r) => setTimeout(r, 5));
     }
   }
