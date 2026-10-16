@@ -18,6 +18,8 @@ export function startData(me: Me): void {
       dbName: 'relay-' + me.userId,
       httpBase: location.origin,
       wsUrl: (location.protocol === 'https:' ? 'wss://' : 'ws://') + location.host + '/ws',
+      // страница диалогов — два экрана строк (как в Telegram: от высоты окна), не меньше 20
+      dialogsPage: Math.max(20, Math.ceil(innerHeight / 72) * 2),
     },
     sharedUrl: '/shared.worker.js',
     dedicatedUrl: '/dedicated.worker.js',

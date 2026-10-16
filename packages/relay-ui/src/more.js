@@ -246,9 +246,9 @@ function WindowList(props) {
   var host = useRef(null), range = useState([0, Math.min(items.length, 20)]);
   var n = items.length;
   var nearEnd = useRef(props.onNearEnd); nearEnd.current = props.onNearEnd;
-  // окно дошло до хвоста (осталось меньше двух экранов строк) — пора подгружать следующую страницу
+  // окно (видимое + overscan) упёрлось в хвост — до конца меньше полуэкрана строк, пора подгружать следующую страницу
   useEffect(function () {
-    if (nearEnd.current && n && range[0][1] >= n - over * 3) nearEnd.current();
+    if (nearEnd.current && n && range[0][1] >= n) nearEnd.current();
   }, [range[0][1], n]);
   useLayoutEffect(function () {
     var el = host.current, sc = el.parentElement;
