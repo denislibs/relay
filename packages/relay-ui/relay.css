@@ -880,21 +880,25 @@ button.rl-quote { cursor: pointer; }
 
 /* ---------- Shell surfaces (Telegram Web K feel): solid header and composer pills, rounded bubbles with a bottom tail ---------- */
 .rl-shell {
-  --tg-radius-bubble: 18px;
+  --tg-radius-bubble: 15px;
+  --tg-shadow-header: 0 1px 5px -1px rgba(0,0,0,0.21);
+  --tg-shadow-composer: 0 1px 8px 1px rgba(0,0,0,0.12);
+  --tg-shadow-bubble: 0 1px 2px rgba(16,35,47,0.15);
   --tg-shadow-pill: 0 1px 2px rgba(16,35,47,0.10), 0 2px 8px rgba(16,35,47,0.06);
 }
-.rl-shell .rl-glassbar { height: 56px; padding: 0 var(--space-2) 0 var(--space-3); border-radius: 28px; background: var(--raised); box-shadow: var(--tg-shadow-pill); -webkit-backdrop-filter: none; backdrop-filter: none; }
-.rl-shell .rl-glassbar-title b { font-weight: 600; font-size: 16px; }
-.rl-shell .rl-glassbar-title span { font-size: 13.5px; }
-.rl-shell .rl-glassbar .rl-iconbtn { color: var(--ink-muted); }
+.rl-shell .rl-glassbar { height: 48px; gap: 12px; padding: 0 4px; border-radius: 24px; background: var(--raised); box-shadow: var(--tg-shadow-header); -webkit-backdrop-filter: none; backdrop-filter: none; }
+.rl-shell .rl-glassbar-title b { font: 500 16px/22px var(--font-sans); }
+.rl-shell .rl-glassbar-title span { font-size: 14px; line-height: 18px; }
+.rl-shell .rl-glassbar .rl-iconbtn { width: 40px; height: 40px; color: var(--ink-muted); }
 
-.rl-shell .rl-composer { align-items: flex-end; gap: var(--space-2); }
-.rl-shell .rl-composer-field { align-items: center; min-height: 54px; padding: 4px 6px; border-radius: 27px; background: var(--raised); box-shadow: var(--tg-shadow-pill); }
-.rl-shell .rl-composer-field input { height: 46px; font-size: 16px; padding: 0 4px; }
-.rl-shell .rl-composer-field .rl-iconbtn { color: var(--ink-muted); }
-.rl-shell .rl-composer-send { width: 54px; height: 54px; box-shadow: var(--tg-shadow-pill); }
+/* composer: one pill; attach, field, emoji and the round send/mic button all sit inside it */
+.rl-shell .rl-composer { align-items: flex-end; gap: 0; min-height: 48px; padding: 4px; border-radius: 24px; background: var(--raised); box-shadow: var(--tg-shadow-composer); }
+.rl-shell .rl-composer-field { align-items: center; min-height: 40px; padding: 0; border-radius: 0; background: transparent; box-shadow: none; }
+.rl-shell .rl-composer-field input { height: 40px; font-size: 16px; line-height: 21px; padding: 0 4px; }
+.rl-shell .rl-composer-field .rl-iconbtn { width: 40px; height: 40px; color: var(--ink-muted); }
+.rl-shell .rl-composer-send { width: 40px; height: 40px; box-shadow: none; }
 
-.rl-shell .rl-bubble { padding: 6px 10px 7px 12px; border-radius: var(--tg-radius-bubble); box-shadow: var(--tg-shadow-pill); font-size: 15.5px; line-height: 21px; }
+.rl-shell .rl-bubble { padding: 6px 8px 7px 9px; border-radius: var(--tg-radius-bubble); box-shadow: var(--tg-shadow-bubble); font-size: 16px; line-height: 21px; }
 .rl-shell .rl-msgline + .rl-msgline { margin-top: 3px; }
 .rl-shell .rl-msgline-gap { margin-top: var(--space-3) !important; }
 /* tail: on the last bubble of a run, bottom corner, concave curve */

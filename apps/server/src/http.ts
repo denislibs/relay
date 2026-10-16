@@ -24,7 +24,8 @@ function serveStatic(pathname: string): Response {
   const inside = file === dist || file.startsWith(dist + sep);
   if (inside && existsSync(file) && statSync(file).isFile()) {
     const res = new Response(Bun.file(file));
-    if (file.endsWith('sw.js') || file.endsWith('index.html')) res.headers.set('cache-control', 'no-cache');
+    // имена файлов без хэша: браузер обязан перепроверять (ETag/Last-Modified), иначе после сборки держит старый CSS/JS
+    res.headers.set('cache-control', 'no-cache');
     return res;
   }
   if (!extname(decoded) && existsSync(join(dist, 'index.html'))) {
