@@ -1,0 +1,55 @@
+services:
+  postgres:
+    image: postgres:17-alpine
+    environment:
+      POSTGRES_USER: relay
+      POSTGRES_PASSWORD: relay
+      POSTGRES_DB: relay
+    ports: ["5433:5432"]
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+      - ./docker/postgres/init.sql:/docker-entrypoint-initdb.d/01-test-db.sql:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U relay"]
+      interval: 2s
+      timeout: 3s
+      retries: 30
+
+  migrate:
+    build: { context: ., dockerfile: apps/server/Dockerfile }
+    command: ["bun", "apps/server/src/migrate.ts"]
+    environment:
+      DATABASE_URL: postgres://relay:relay@postgres:5432/relay
+    depends_on:
+      postgres: { condition: service_healthy }
+
+  server:
+    build: { context: ., dockerfile: apps/server/Dockerfile }
+    command: ["bun", "--watch", "apps/server/src/main.ts"]
+    environment:
+      DATABASE_URL: postgres://relay:relay@postgres:5432/relay
+      PORT: "3000"
+      DEV_LOGIN: "1"
+    ports: ["3000:3000"]
+    volumes:
+      - ./apps:/app/apps
+      - ./packages:/app/packages
+    depends_on:
+      migrate: { condition: service_completed_successfully }
+
+  test:
+    build: { context: ., dockerfile: apps/server/Dockerfile }
+    profiles: ["test"]
+    working_dir: /app/apps/server
+    command: ["bun", "test"]
+    environment:
+      DATABASE_URL: postgres://relay:relay@postgres:5432/relay_test
+      DEV_LOGIN: "1"
+    volumes:
+      - ./apps:/app/apps
+      - ./packages:/app/packages
+    depends_on:
+      postgres: { condition: service_healthy }
+
+volumes:
+  pgdata: {}

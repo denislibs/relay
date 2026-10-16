@@ -1,0 +1,5 @@
+{
+  "name": "relay",
+  "private": true,
+  "workspaces": ["apps/*", "packages/*"]
+}

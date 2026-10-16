@@ -1,0 +1,7 @@
+{
+  "name": "@relay/server",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "dependencies": { "@relay/protocol": "workspace:*", "postgres": "3.4.9" }
+}

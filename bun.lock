@@ -1,0 +1,28 @@
+{
+  "lockfileVersion": 2,
+  "configVersion": 1,
+  "workspaces": {
+    "": {
+      "name": "relay",
+    },
+    "apps/server": {
+      "name": "@relay/server",
+      "version": "0.0.0",
+      "dependencies": {
+        "@relay/protocol": "workspace:*",
+        "postgres": "3.4.9",
+      },
+    },
+    "packages/protocol": {
+      "name": "@relay/protocol",
+      "version": "0.0.0",
+    },
+  },
+  "packages": {
+    "@relay/protocol": ["@relay/protocol@workspace:packages/protocol"],
+
+    "@relay/server": ["@relay/server@workspace:apps/server"],
+
+    "postgres": ["postgres@3.4.9", "", {}, "sha512-GD3qdB0x1z9xgFI6cdRD6xu2Sp2WCOEoe3mtnyB5Ee0XrrL5Pe+e4CCnJrRMnL1zYtRDZmQQVbvOttLnKDLnaw=="],
+  }
+}
