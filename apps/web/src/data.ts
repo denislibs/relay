@@ -1,6 +1,6 @@
 import { nudgeWallpaper } from '@relay/ui';
 import { connectEngine, EngineClient, Mirror } from '@relay/sync-engine/src/client';
-import type { Item, Patch, Query } from '@relay/sync-engine/src/types';
+import type { Item, Patch, Query, SearchResult } from '@relay/sync-engine/src/types';
 import { getGlobal, setGlobal, type FeedMeta, type Me, type Status } from './global';
 
 declare const __BUILD__: string;
@@ -128,9 +128,9 @@ let switchTimer: ReturnType<typeof setTimeout> | null = null;
  * (строка в списке подсвечивается сразу), затем шапка и лента меняются вместе. Без «пусто → часть → всё».
  * Открывается: на сохранённой позиции, иначе вокруг первого непрочитанного (с разделителем), иначе внизу.
  */
-export function openChat(chatId: number | null): void {
+export function openChat(chatId: number | null, target?: { id: number; sort: number }): void {
   const g = getGlobal();
-  if ((g.pendingChatId ?? g.openChatId) === chatId) return;
+  if ((g.pendingChatId ?? g.openChatId) === chatId) { if (target) focusMessage(target); return; }
   feed?.close();
   feed = null;
   if (switchTimer) { clearTimeout(switchTimer); switchTimer = null; }
@@ -141,14 +141,15 @@ export function openChat(chatId: number | null): void {
   const pos = positions.get(chatId);
   const unread = (chat?.unread as number) > 0 ? (chat!.lastReadId as number) : null;
   // ушли из середины истории в этой сессии — вернуться туда же; иначе — к первому непрочитанному; иначе — вниз
-  feedAnchor = pos ? { sort: pos.sort, side: 'center' } : unread != null ? { sort: unread + 0.5, side: 'center' } : undefined;
+  // открыть на найденном сообщении; иначе: ушли из середины истории — туда же; непрочитанное; низ
+  feedAnchor = target ? { sort: target.sort, side: 'center' } : pos ? { sort: pos.sort, side: 'center' } : unread != null ? { sort: unread + 0.5, side: 'center' } : undefined;
   moving = true;
   setGlobal({ pendingChatId: chatId });
   const m = new Mirror();
   feedMirror = m;
   const commit = () => {
     switchTimer && clearTimeout(switchTimer); switchTimer = null;
-    setGlobal({ openChatId: chatId, pendingChatId: null, messages: m.list() as Item[], feedMeta: (m.meta('~window') as unknown as FeedMeta) ?? null, unreadFrom: unread });
+    setGlobal({ openChatId: chatId, pendingChatId: null, messages: m.list() as Item[], feedMeta: (m.meta('~window') as unknown as FeedMeta) ?? null, unreadFrom: target ? null : unread, focus: target ? { ...target, nonce: Date.now(), replaced: true } : null });
   };
   // лента открытого чата — срочная: свои сообщения должны появляться в тот же кадр
   feed = engine.watch({ kind: 'messages', chatId, limit: WINDOW, anchor: feedAnchor }, (p: Patch) => {
@@ -194,6 +195,11 @@ export function typing(chatId: number): void {
 }
 /** Отправили — следующий набор снова сразу сообщит «печатаю». */
 export function typingDone(chatId: number): void { typingSent.delete(chatId); }
+
+/** Поиск сообщений (сервер; без сети — по кэшу на устройстве). */
+export function searchMessages(q: string, chatId?: number, beforeId?: number): Promise<SearchResult> {
+  return engine.call({ type: 'search', q, chatId, beforeId }) as Promise<SearchResult>;
+}
 
 /** Правка своего сообщения (онлайн). */
 export function editMessage(chatId: number, id: number, body: string): Promise<unknown> { return engine.call({ type: 'editMessage', chatId, id, body }); }

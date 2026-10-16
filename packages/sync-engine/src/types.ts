@@ -67,7 +67,8 @@ export type Action =
   | { type: 'typing'; chatId: number }
   | { type: 'editMessage'; chatId: number; id: number; body: string }
   | { type: 'deleteMessage'; chatId: number; id: number }
-  | { type: 'react'; chatId: number; id: number; emoji: string | null };
+  | { type: 'react'; chatId: number; id: number; emoji: string | null }
+  | { type: 'search'; q: string; chatId?: number; beforeId?: number; limit?: number };
 
 export interface EngineConfig {
   userId: number;
@@ -85,3 +86,7 @@ export interface EngineConfig {
 }
 
 export const PENDING_BASE = 2 ** 52;
+
+/** Результат поиска: сообщение и где оно (для перехода). source — откуда ответ (без сети ищем локально). */
+export interface SearchHit { chatId: number; chatTitle: string | null; id: number; sort: number; senderId: number; body: string; createdAt: string }
+export interface SearchResult { hits: SearchHit[]; hasMore: boolean; source: 'server' | 'local' }

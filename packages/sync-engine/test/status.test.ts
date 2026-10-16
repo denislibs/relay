@@ -276,3 +276,23 @@ test('edit, delete and reactions reach the other side through the journal', asyn
   const listB = watchInto(eb, { kind: 'chatList', limit: 5 });
   await listB.until((l) => (l[0]?.last as { deleted: boolean } | null)?.deleted === true);
 });
+
+test('search: server when online, cached messages when offline', async () => {
+  const a = await srv.login('a'), b = await srv.login('b');
+  const chatId = await srv.chat(a.token, [a.userId, b.userId]);
+  for (const body of ['обсудим отпуск', 'про отпуск позже', 'ничего']) await sendMessage(b.userId, { chatId, clientId: crypto.randomUUID(), body });
+  const ea = await open(srv.config(a));
+  ea.connect();
+  await ea.whenIdle();
+  const online = (await ea.call({ type: 'search', q: 'ОТПУСК' })) as { hits: { body: string; chatTitle: string }[]; source: string };
+  expect(online.source).toBe('server');
+  expect(online.hits.map((h) => h.body)).toEqual(['про отпуск позже', 'обсудим отпуск']);
+  expect(online.hits[0].chatTitle).toBe('b');
+  const feed = watchInto(ea, { kind: 'messages', chatId, limit: 10 });   // сообщения попадают в кэш
+  await feed.until((l) => l.length === 3);
+  await ea.whenIdle();
+  ea.disconnect();
+  const offline = (await ea.call({ type: 'search', q: 'отпуск', chatId })) as { hits: { body: string }[]; source: string };
+  expect(offline.source).toBe('local');
+  expect(offline.hits.map((h) => h.body)).toEqual(['про отпуск позже', 'обсудим отпуск']);
+});

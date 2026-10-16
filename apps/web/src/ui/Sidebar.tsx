@@ -1,18 +1,38 @@
-import { ChatRow, Menu, Presence, SlideStack, ChatRowSkeleton, useMinVisible, EmptyState, Fab, WindowList, FolderTabs, SidebarCard, SidebarHeader } from '@relay/ui';
+import { ChatRow, Highlight, Menu, Presence, SlideStack, ChatRowSkeleton, useMinVisible, EmptyState, Fab, WindowList, FolderTabs, SidebarCard, SidebarHeader } from '@relay/ui';
 import type { Item } from '@relay/sync-engine/src/types';
-import { loadMoreChats, openChat } from '../data';
+import { loadMoreChats, openChat, searchMessages } from '../data';
 import { setGlobal, useGlobal } from '../global';
-import { useState } from 'preact/hooks';
+import { useEffect, useState } from 'preact/hooks';
+import type { SearchHit } from '@relay/sync-engine/src/types';
 import { isDark } from '../theme';
 import { chatTime } from './format';
 import { setTheme } from './Settings';
 
 const FOLDERS = ['all', 'unread'];
+
+/** Фрагмент вокруг совпадения: превью узкое, а совпадение может быть в конце длинного сообщения. */
+function snippet(text: string, q: string): string {
+  const i = text.toLowerCase().indexOf(q.toLowerCase());
+  if (i <= 24) return text;
+  const from = text.lastIndexOf(' ', i - 12);
+  return '…' + text.slice(from > 0 ? from + 1 : i - 12);
+}
 const ROW = 72; // высота строки чата (--size-row) — список виртуальный, строки фиксированной высоты
 
 
 export function Sidebar() {
   const [menu, setMenu] = useState(false);
+  // поиск сообщений (сервер, без сети — кэш): через 300 мс после последнего нажатия, от двух символов
+  const [hits, setHits] = useState<{ q: string; list: SearchHit[]; source: string } | null>(null);
+  const searchQ = useGlobal((s) => s.search).trim();
+  useEffect(() => {
+    if (searchQ.length < 2) { setHits(null); return; }
+    let live = true;
+    const t = setTimeout(() => {
+      searchMessages(searchQ).then((r) => { if (live) setHits({ q: searchQ, list: r.hits, source: r.source }); }).catch(() => {});
+    }, 300);
+    return () => { live = false; clearTimeout(t); };
+  }, [searchQ]);
   const theme = useGlobal((s) => s.theme);
   const dark = isDark(theme);
   const view = useGlobal((s) => s.sidebarView);
@@ -42,7 +62,9 @@ export function Sidebar() {
   // одна папка: свой список и своя прокрутка (страница SlideStack)
   const renderFolder = (f: string) => {
     const list = listOf(f);
+    const results = f === 'all' && hits && hits.q === q.trim() ? hits : null;
     return (
+      <>
       <div class="app-listwrap">
         <Presence show={skeleton} exitMs={280}>
           <div class="app-skel" aria-busy="true" aria-label="Загрузка чатов">
@@ -75,7 +97,7 @@ export function Sidebar() {
               );
             }}
           />
-          {f === 'all' && !status.chatsComplete ? (
+          {f === 'all' && !q && !status.chatsComplete ? (
             <div class="app-more" role="status" aria-label="Загружаем ещё чаты">
               <svg width="22" height="22" viewBox="0 0 18 18" fill="none" aria-hidden="true"><circle cx="9" cy="9" r="7" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-dasharray="30 44" /></svg>
             </div>
@@ -89,6 +111,21 @@ export function Sidebar() {
           />
         )}
         </div>
+      {results ? (
+        <div class="app-results" aria-label="Найденные сообщения">
+          <div class="app-results-head">Сообщения{results.source === 'local' ? ' · на устройстве' : ''}</div>
+          {results.list.length ? results.list.map((h) => (
+            <ChatRow
+              key={'m' + h.id}
+              name={h.chatTitle ?? 'Чат №' + h.chatId}
+              preview={<Highlight text={snippet(h.body, results.q)} query={results.q} />}
+              time={chatTime(h.createdAt)}
+              onClick={() => openChat(h.chatId, { id: h.id, sort: h.sort })}
+            />
+          )) : <div class="app-results-empty">Сообщений не найдено</div>}
+        </div>
+      ) : null}
+      </>
     );
   };
 

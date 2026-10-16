@@ -1,5 +1,5 @@
 import type { Item } from '@relay/sync-engine/src/types';
-import { Bubble, DateDivider, ScrollToBottom, forceMeasure, isHeavyAnimating, onHeavyAnimationEnd, requestMeasure, requestMutation } from '@relay/ui';
+import { Bubble, DateDivider, Highlight, ScrollToBottom, forceMeasure, isHeavyAnimating, onHeavyAnimationEnd, requestMeasure, requestMutation } from '@relay/ui';
 import { memo } from 'preact/compat';
 import { useEffect, useLayoutEffect, useRef, useState } from 'preact/hooks';
 import { focusMessage, moveWindow, react, savePosition, savedPosition, seen } from '../data';
@@ -24,10 +24,10 @@ const READ_EVERY = 150;   // отправка «вижу до id» не чаще
 const FIRST_PAINT = 24;   // при открытии внизу первым кадром — столько последних сообщений, остальное следующим кадром
 
 type Quote = { id: number; sort: number; body: string; senderId: number };
-type RowProps = { m: Item; meId: number; out: boolean; start: boolean; end: boolean; quoted?: Quote | null; quoteAuthor?: string; quoteTone?: number; appear: boolean; flash: boolean; onReact: (m: Item, emoji: string) => void };
+type RowProps = { hl?: string; m: Item; meId: number; out: boolean; start: boolean; end: boolean; quoted?: Quote | null; quoteAuthor?: string; quoteTone?: number; appear: boolean; flash: boolean; onReact: (m: Item, emoji: string) => void };
 
 /** Строка ленты: перерисовывается только если изменилось её сообщение или место в группе. */
-const Row = memo(function Row({ m, meId, out, start, end, quoted, quoteAuthor, quoteTone, appear, flash, onReact }: RowProps) {
+const Row = memo(function Row({ hl, m, meId, out, start, end, quoted, quoteAuthor, quoteTone, appear, flash, onReact }: RowProps) {
   // реакции: по эмодзи — сколько и есть ли моя
   const list = (m.reactions as { userId: number; emoji: string }[] | undefined) ?? [];
   const chips: { emoji: string; count: number; mine: boolean }[] = [];
@@ -51,7 +51,7 @@ const Row = memo(function Row({ m, meId, out, start, end, quoted, quoteAuthor, q
         status={out ? m.status : undefined}
         appear={appear}
       >
-        {m.body}
+        {hl ? <Highlight text={m.body as string} query={hl} /> : m.body}
       </Bubble>
       {m.id != null ? <i class="app-mark" data-mid={m.id as number} aria-hidden="true" /> : null}
     </div>
@@ -70,8 +70,8 @@ function firstVisible(root: HTMLElement): { key: string; sort: number; top: numb
   return null;
 }
 
-export function Feed({ chatId, meId, peerName, stick, onMenu }: {
-  chatId: number; meId: number; peerName: string;
+export function Feed({ chatId, meId, peerName, stick, onMenu, highlight }: {
+  chatId: number; meId: number; peerName: string; highlight?: string;
   stick: { current: boolean };
   onMenu: (key: string, x: number, y: number) => void;
 }) {
@@ -89,7 +89,7 @@ export function Feed({ chatId, meId, peerName, stick, onMenu }: {
   const placed = useRef(false);
   const [away, setAway] = useState(false);
   // дешёвый первый показ (как постепенный рендер в tt): открыли внизу — сначала хвост, выше экрана — следующим кадром
-  const [partial, setPartial] = useState(() => !unreadFrom && !savedPosition(chatId));
+  const [partial, setPartial] = useState(() => !unreadFrom && !savedPosition(chatId) && !focus);
   const initial = useRef<Set<string> | null>(null);
   if (initial.current === null && messages.length) initial.current = new Set(messages.map((m) => m.key));
 
@@ -325,6 +325,7 @@ export function Feed({ chatId, meId, peerName, stick, onMenu }: {
     out.push(
       <Row
         key={m.key}
+        hl={highlight && (m.body as string).toLowerCase().includes(highlight.toLowerCase()) ? highlight : undefined}
         m={m}
         meId={meId}
         onReact={onReact}

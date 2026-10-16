@@ -7,6 +7,7 @@ import { createChat, getHistory, getMessagesByIds, listChats, listChatsPage } fr
 import { sql } from './db';
 import { DomainError } from './domain/errors';
 import { connected, disconnected, listPresence, type Publish } from './domain/presence';
+import { searchMessages } from './domain/search';
 import { handleFrame } from './ws';
 
 const STATUS: Record<string, number> = { bad_frame: 400, too_long: 400, unauthorized: 401, not_member: 403, not_found: 404 };
@@ -14,7 +15,7 @@ const fail = (code: string) => Response.json({ code }, { status: STATUS[code] ??
 
 export type WsData = { userId: number };
 
-const API = /^\/(health|me|chats|presence|ws|dev)(\/|$)/;
+const API = /^\/(health|me|chats|presence|search|ws|dev)(\/|$)/;
 
 /** Статика клиента из WEB_DIST. Путь не может выйти за папку; пути без расширения — SPA, отдаём index.html. */
 function serveStatic(pathname: string): Response {
@@ -68,6 +69,11 @@ export function createServer(opts: { port: number }): Server {
           const { kind, title, memberIds } = (await req.json()) as { kind: 'direct' | 'group'; title: string | null; memberIds: number[] };
           const ids = memberIds.includes(userId) ? memberIds : [userId, ...memberIds];
           return Response.json({ id: await createChat(kind, title, ids) });
+        }
+        if (req.method === 'GET' && url.pathname === '/search') {
+          // ?q=текст[&chatId=N][&beforeId=M][&limit=K]
+          const num = (k: string) => { const v = Number(url.searchParams.get(k)); return Number.isInteger(v) && v > 0 ? v : undefined; };
+          return Response.json(await searchMessages(userId, url.searchParams.get('q') ?? '', { chatId: num('chatId'), beforeId: num('beforeId'), limit: num('limit') }));
         }
         if (req.method === 'GET' && url.pathname === '/presence') {
           return Response.json(await listPresence(userId));

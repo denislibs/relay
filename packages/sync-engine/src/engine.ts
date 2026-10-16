@@ -1,10 +1,10 @@
 import type { ClientFrame, Message, ServerFrame } from '@relay/protocol';
-import { openDb } from './idb';
+import { getAll, getByChat, openDb } from './idb';
 import { affects, computeQuery, diffResults, messageWindow, type Result } from './queries';
 import type { Item } from './types';
 import { Store, type ChatSummary } from './store';
 import { WsTransport } from './transport';
-import type { Action, EngineConfig, Patch, Query } from './types';
+import type { Action, EngineConfig, LocalMessage, Patch, Query, SearchResult } from './types';
 
 export interface WatchHandle { update(q: Query): void; close(): void }
 
@@ -192,6 +192,32 @@ export class Engine {
     this.frameTimer = setTimeout(() => { this.frameTimer = null; this.emit(); }, this.cfg.frameMs ?? 16);
   }
 
+  /** Поиск: с сетью — на сервере (вся история), без сети — по сообщениям, сохранённым на устройстве. */
+  private async search(a: Extract<Action, { type: 'search' }>): Promise<SearchResult> {
+    const limit = a.limit ?? 30;
+    if (this.online) {
+      try {
+        const qs = new URLSearchParams({ q: a.q, limit: String(limit) });
+        if (a.chatId) qs.set('chatId', String(a.chatId));
+        if (a.beforeId) qs.set('beforeId', String(a.beforeId));
+        const res = await this.http<{ hits: { message: Message; chatTitle: string | null }[]; hasMore: boolean }>(`/search?${qs}`);
+        return {
+          hits: res.hits.map(({ message: m, chatTitle }) => ({ chatId: m.chatId, chatTitle: chatTitle ?? this.store.chats.get(m.chatId)?.title ?? null, id: m.id, sort: m.id, senderId: m.senderId, body: m.body, createdAt: m.createdAt })),
+          hasMore: res.hasMore, source: 'server',
+        };
+      } catch { /* сеть пропала посреди запроса — ищем локально */ }
+    }
+    const needle = a.q.trim().toLowerCase();
+    const all = a.chatId ? await getByChat(this.db, a.chatId) : await getAll<LocalMessage>(this.db, 'messages');
+    const found = all
+      .filter((m) => m.id != null && !m.deleted && (!a.beforeId || m.id < a.beforeId) && m.body.toLowerCase().includes(needle))
+      .sort((x, y) => y.sort - x.sort);
+    return {
+      hits: found.slice(0, limit).map((m) => ({ chatId: m.chatId, chatTitle: this.store.chats.get(m.chatId)?.title ?? null, id: m.id!, sort: m.sort, senderId: m.senderId, body: m.body, createdAt: m.createdAt })),
+      hasMore: found.length > limit, source: 'local',
+    };
+  }
+
   /** Отправить на сервер черновики этого устройства (сервер разнесёт их по остальным через журнал). */
   private pushDrafts(): void {
     if (!this.online || !this.ready) return;
@@ -318,6 +344,7 @@ export class Engine {
         catch (err) { if (m) { this.store.patchMessage(a.chatId, a.id, { reactions: prev }); this.changed(); } throw err; }
         return null;
       }
+      case 'search': return this.search(a);
       case 'loadMoreChats':
         await this.loadMoreChats();
         return null;

@@ -53,3 +53,12 @@ body { background: var(--bg); color: var(--ink); font-family: var(--font-sans); 
 .rl-shell .rl-feed .rl-date span { pointer-events: auto; transition: opacity 300ms var(--ease-out); }
 .rl-shell .rl-feed .rl-date.stuck span { opacity: 0; }
 .app-modal-text { margin: 0 0 var(--space-4); color: var(--ink-muted); font: 400 15px/21px var(--font-sans); text-align: center; }
+/* поиск: раздел «Сообщения» в списке слева и строка поиска по чату на месте шапки */
+.app-results { padding: var(--space-2) 0 var(--space-4); }
+.app-results-head { padding: var(--space-2) var(--space-3); color: var(--ink-muted); font: 500 13px/18px var(--font-sans); }
+.app-results-empty { padding: var(--space-3); color: var(--ink-muted); font: 400 14px/20px var(--font-sans); }
+.app-findbar { padding: 0 4px; animation: app-fade 160ms var(--ease-out) both; }
+.app-findbar .rl-csearch { flex: 1; display: flex; align-items: center; gap: 4px; background: transparent; -webkit-backdrop-filter: none; backdrop-filter: none; }
+.app-findbar .rl-csearch input { flex: 1; min-width: 0; height: 40px; border: 0; background: transparent; outline: none; font: 400 16px/21px var(--font-sans); color: var(--ink); }
+.app-findbar .rl-csearch-count { color: var(--ink-muted); font: 400 13px/18px var(--font-sans); white-space: nowrap; }
+.rl-glassbar.app-hidden { display: none; }

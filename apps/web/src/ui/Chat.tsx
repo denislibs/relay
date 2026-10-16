@@ -1,6 +1,7 @@
-import { Avatar, Button, Composer, GlassBar, IconButton, Menu, Modal, ReactionPicker, requestMutation } from '@relay/ui';
+import { Avatar, Button, ChatSearchBar, Composer, GlassBar, IconButton, Menu, Modal, ReactionPicker, requestMutation } from '@relay/ui';
 import { useEffect, useLayoutEffect, useRef, useState } from 'preact/hooks';
-import { deleteMessage, editMessage, openChat, react, saveDraft, send, typing, typingDone } from '../data';
+import { deleteMessage, editMessage, focusMessage, openChat, react, saveDraft, searchMessages, send, typing, typingDone } from '../data';
+import type { SearchHit } from '@relay/sync-engine/src/types';
 import { setGlobal, useGlobal } from '../global';
 import { Feed } from './Feed';
 import { lastSeenText } from './format';
@@ -20,6 +21,29 @@ export function Chat({ chatId }: { chatId: number }) {
   const [replyKey, setReplyKey] = useState<string | null>(null);
   const [editing, setEditing] = useState<{ id: number; original: string; draft: string } | null>(null);   // правка своего сообщения
   const [confirmDelete, setConfirmDelete] = useState<{ id: number } | null>(null);
+  // поиск по чату: строка вместо шапки, совпадения новые → старые, Enter — к более старому
+  const [finding, setFinding] = useState(false);
+  const [findQ, setFindQ] = useState('');
+  const [found, setFound] = useState<{ q: string; hits: SearchHit[]; at: number } | null>(null);
+  useEffect(() => {
+    const q = findQ.trim();
+    if (!finding || q.length < 2) { setFound(null); return; }
+    let live = true;
+    const t = setTimeout(() => searchMessages(q, chatId).then((r) => {
+      if (!live) return;
+      setFound({ q, hits: r.hits, at: 0 });
+      if (r.hits[0]) focusMessage({ id: r.hits[0].id, sort: r.hits[0].sort });
+    }).catch(() => {}), 300);
+    return () => { live = false; clearTimeout(t); };
+  }, [findQ, finding]);
+  const step = (d: 1 | -1) => setFound((f) => {
+    if (!f || !f.hits.length) return f;
+    const at = (f.at + d + f.hits.length) % f.hits.length;
+    focusMessage({ id: f.hits[at].id, sort: f.hits[at].sort });
+    return { ...f, at };
+  });
+  const closeFind = () => { setFinding(false); setFindQ(''); setFound(null); };
+  useEffect(() => { if (finding) (document.getElementById('chat-find') as HTMLInputElement | null)?.focus(); }, [finding]);
 
 
   // черновик (как в Telegram): восстановить при открытии, сохранять через 2.5 с после ввода,
@@ -81,7 +105,21 @@ export function Chat({ chatId }: { chatId: number }) {
   return (
     <>
       <span ref={shell} hidden />
-      <GlassBar class={switching ? 'app-steady' : undefined}>
+      {finding ? (
+        <div class="rl-glassbar app-findbar app-steady">
+          <ChatSearchBar
+            id="chat-find"
+            value={findQ}
+            total={found?.hits.length ?? 0}
+            index={found?.at ?? 0}
+            onQuery={setFindQ}
+            onNext={() => step(1)}
+            onPrev={() => step(-1)}
+            onClose={closeFind}
+          />
+        </div>
+      ) : null}
+      <GlassBar class={(switching ? 'app-steady' : '') + (finding ? ' app-hidden' : '')}>
         <IconButton class="app-back" icon="arrowLeft" label="К списку чатов" onClick={() => openChat(null)} />
         <button type="button" class="rl-glassbar-who" aria-label="Информация о чате" onClick={() => setGlobal({ infoOpen: !infoOpen })}>
           <Avatar name={title} size={40} />
@@ -90,10 +128,10 @@ export function Chat({ chatId }: { chatId: number }) {
             <span key={phaseLabel ?? (isTyping ? 'typing' : online ? 'on' : 'off')} class={phaseLabel ? 'app-phase' : isTyping || online ? 'app-online' : undefined}>{phaseLabel ?? (subtitle || '\u00a0')}</span>
           </span>
         </button>
-        <IconButton icon="search" label="Поиск по чату" />
+        <IconButton icon="search" label="Поиск по чату" onClick={() => setFinding(true)} />
         <IconButton icon="more" label="Информация" onClick={() => setGlobal({ infoOpen: !infoOpen })} />
       </GlassBar>
-      <Feed chatId={chatId} meId={me.userId} peerName={title} stick={stick} onMenu={(key, x, y) => setMenu({ key, x, y })} />
+      <Feed chatId={chatId} meId={me.userId} peerName={title} stick={stick} highlight={found?.q} onMenu={(key, x, y) => setMenu({ key, x, y })} />
       <Composer
         id="composer"
         placeholder="Сообщение"
