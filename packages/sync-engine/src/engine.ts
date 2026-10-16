@@ -8,7 +8,7 @@ import type { Action, EngineConfig, Patch, Query } from './types';
 
 export interface WatchHandle { update(q: Query): void; close(): void }
 
-interface Watcher { id: number; q: Query; cb: (p: Patch) => void; prev: Result | null; force: boolean }
+interface Watcher { id: number; q: Query; cb: (p: Patch) => void; prev: Result | null; force: boolean; gated: boolean }
 type ReqError = { code: string; retry: boolean };
 type SyncReply = Extract<ServerFrame, { op: 'updates' | 'tooLong' }>;
 
@@ -16,6 +16,8 @@ type SyncReply = Extract<ServerFrame, { op: 'updates' | 'tooLong' }>;
  * Движок синхронизации: владеет Store, держит соединение, догоняет журнал,
  * отправляет очередь, схлопывает прочтение и раздаёт подпискам патчи раз в кадр.
  */
+const HISTORY_GATE_MS = 400;
+
 export class Engine {
   private transport: WsTransport;
   private watchers = new Map<number, Watcher>();
@@ -103,12 +105,12 @@ export class Engine {
   // =====================================================================
 
   watch(q: Query, cb: (p: Patch) => void): WatchHandle {
-    const w: Watcher = { id: this.nextWatch++, q, cb, prev: null, force: true };
+    const w: Watcher = { id: this.nextWatch++, q, cb, prev: null, force: true, gated: q.kind === 'messages' };
     this.watchers.set(w.id, w);
     this.prepare(w);
     this.schedule();
     return {
-      update: (q2) => { w.q = q2; w.force = true; this.prepare(w); this.schedule(); },
+      update: (q2) => { const chatChanged = q2.kind === 'messages' && (w.q.kind !== 'messages' || w.q.chatId !== q2.chatId); w.q = q2; w.force = true; if (chatChanged) w.gated = true; this.prepare(w); this.schedule(); },
       close: () => { this.watchers.delete(w.id); },
     };
   }
@@ -116,10 +118,20 @@ export class Engine {
   private prepare(w: Watcher): void {
     if (w.q.kind !== 'messages') return;
     const { chatId, limit } = w.q;
+    const q = w.q;
+    // первый снимок ленты — уже готовый: кэш прочитан и, если сообщений меньше окна, история догружена
+    // (сервер ждём не дольше HISTORY_GATE_MS, без сети — не ждём); иначе интерфейс покажет пусто → часть → всё
+    const open = () => { if (w.q === q && w.gated) { w.gated = false; this.changed(); } };
     this.run(async () => {
-      await this.store.loadChatMessages(chatId);
-      this.changed();
-      await this.ensureHistory(chatId, limit);
+      try {
+        await this.store.loadChatMessages(chatId);
+        const history = this.ensureHistory(chatId, limit);
+        if (this.online && w.gated) await Promise.race([history.catch(() => {}), new Promise((r) => setTimeout(r, HISTORY_GATE_MS))]);
+        open();
+        await history;
+      } finally {
+        open();
+      }
     });
   }
 
@@ -177,6 +189,7 @@ export class Engine {
     for (const w of this.watchers.values()) {
       if (!w.force && !affects(w.q, touched) && !(w.q.kind === 'status' && statusChanged)) continue;
       if (hold && !w.force && w.q.kind !== 'status') continue;
+      if (w.gated) continue;
       w.force = false;
       const next = this.compute(w.q);
       const patch = diffResults(w.prev, next);

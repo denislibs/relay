@@ -14,7 +14,7 @@ export function Sidebar() {
   const status = useGlobal((s) => s.status);
   const folder = useGlobal((s) => s.folder);
   const search = useGlobal((s) => s.search);
-  const openId = useGlobal((s) => s.openChatId);
+  const openId = useGlobal((s) => s.pendingChatId ?? s.openChatId);
   const loaded = useGlobal((s) => s.chatsLoaded);
   // стадия в плейсхолдере поиска: короткие (до 400 мс) не показываем, показанную держим не меньше 800 мс
   const searchStatus = useGlobal((s) => s.syncLabel);

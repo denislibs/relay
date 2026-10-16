@@ -28,9 +28,17 @@ export function Chat({ chatId }: { chatId: number }) {
   useReadTracker(chatId, feed, messages);
 
   // после рендера: держим низ или якорь истории (замер → запись в одном кадре)
+  const placed = useRef(false);            // первая раскладка ленты уже прокручена вниз
   useLayoutEffect(() => {
     const el = feed.current;
     if (!el) return;
+    if (!placed.current && messages.length) {
+      // первый кадр чата — сразу внизу, до отрисовки: иначе мелькнёт верх ленты
+      placed.current = true;
+      const bottom = el.scrollHeight - el.clientHeight;
+      if (bottom > el.scrollTop) { programmatic.current++; el.scrollTop = bottom; } // scroll-событие будет только если позиция меняется
+      return;
+    }
     requestMeasure(() => {
       const h = el.scrollHeight;
       const from = olderFrom.current;

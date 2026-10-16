@@ -64,21 +64,34 @@ function showPhase(s: Status): void {
   labelTimer = setTimeout(() => { labelTimer = null; setGlobal({ syncLabel: null }); }, Math.max(0, MIN_LABEL_MS - (performance.now() - labelSince)));
 }
 
+let switchTimer: ReturnType<typeof setTimeout> | null = null;
+
+/**
+ * Переключение чата одним кадром: пока лента нового чата не готова, на экране остаётся прежний
+ * (строка в списке подсвечивается сразу), затем шапка и лента меняются вместе. Без «пусто → часть → всё».
+ */
 export function openChat(chatId: number | null): void {
-  if (getGlobal().openChatId === chatId) return;
+  const g = getGlobal();
+  if ((g.pendingChatId ?? g.openChatId) === chatId) return;
   feed?.close();
   feed = null;
   feedLimit = 60;
-  setGlobal({ openChatId: chatId, messages: [] });
+  if (switchTimer) { clearTimeout(switchTimer); switchTimer = null; }
   history.replaceState(null, '', chatId ? '#chat=' + chatId : location.pathname);
-  if (!chatId) return;
+  if (!chatId) { setGlobal({ openChatId: null, pendingChatId: null, messages: [] }); return; }
+  setGlobal({ pendingChatId: chatId });
   const m = new Mirror();
+  const commit = () => { switchTimer && clearTimeout(switchTimer); switchTimer = null; setGlobal({ openChatId: chatId, pendingChatId: null, messages: m.list() as Item[] }); };
   // лента открытого чата — срочная: свои сообщения должны появляться в тот же кадр
   feed = engine.watch({ kind: 'messages', chatId, limit: feedLimit }, (p: Patch) => {
-    if (getGlobal().openChatId !== chatId) return;
     m.apply(p);
+    const now = getGlobal();
+    if (now.pendingChatId === chatId) { commit(); return; }
+    if (now.openChatId !== chatId) return;
     setGlobal({ messages: m.list() as Item[] });
   });
+  // движок отдаёт готовую ленту почти сразу; если нет — не держим пользователя на прежнем чате
+  switchTimer = setTimeout(() => { if (getGlobal().pendingChatId === chatId) commit(); }, 700);
 }
 
 export function loadOlder(): void {

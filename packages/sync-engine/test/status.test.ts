@@ -95,3 +95,16 @@ test('catch-up after reconnect reaches the UI as one batch, not page by page', a
   const phases = st.patches.flatMap((p) => (p.op === 'snapshot' ? p.items : p.upsert)).map((i) => i.phase);
   expect(phases).toEqual(expect.arrayContaining(['offline', 'updating', 'ready']));   // стадия догонки видна, даже если она короче кадра
 }, 30000);
+
+test('opening a chat: the first feed patch is already complete (no empty or partial frames)', async () => {
+  const a = await srv.login('a'), b = await srv.login('b');
+  const chatId = await srv.chat(a.token, [a.userId, b.userId]);
+  for (let i = 0; i < 80; i++) await sendMessage(b.userId, { chatId, clientId: crypto.randomUUID(), body: 'h' + i });
+  const ea = await open({ ...srv.config(a), frameMs: 1, historyPage: 30 });
+  ea.connect();
+  await ea.whenIdle();
+  const feed = watchInto(ea, { kind: 'messages', chatId, limit: 60 });
+  await feed.until((l) => l.length === 60);
+  expect(feed.patches[0].op).toBe('snapshot');
+  expect((feed.patches[0] as { items: unknown[] }).items.length).toBe(60);
+});
