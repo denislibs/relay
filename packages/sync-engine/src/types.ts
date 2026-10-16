@@ -14,7 +14,13 @@ export interface LocalMessage {
   editedAt?: string | null;
   deleted?: boolean;
   reactions?: { userId: number; emoji: string }[];
+  kind?: 'text' | 'photo' | 'file';
+  attachment?: LocalAttachment | null;
+  progress?: number;      // загрузка файла 0..1, пока сообщение в очереди
 }
+
+/** Вложение сообщения; у неотправленного id пустой, пока файл не загружен. */
+export interface LocalAttachment { id: string; kind: 'photo' | 'file'; mime: string; name: string; size: number; w: number | null; h: number | null; thumb?: string | null }
 
 export interface LocalChat {
   id: number;
@@ -39,6 +45,7 @@ export interface OutboxEntry {
   replyToId: number | null;
   createdAt: number;
   failed: boolean;
+  attachment?: LocalAttachment | null;   // id появляется после загрузки файла
 }
 
 export type Query =
@@ -68,7 +75,9 @@ export type Action =
   | { type: 'editMessage'; chatId: number; id: number; body: string }
   | { type: 'deleteMessage'; chatId: number; id: number }
   | { type: 'react'; chatId: number; id: number; emoji: string | null }
-  | { type: 'search'; q: string; chatId?: number; beforeId?: number; limit?: number };
+  | { type: 'search'; q: string; chatId?: number; beforeId?: number; limit?: number }
+  | { type: 'chatMedia'; chatId: number; kind: 'photo' | 'file' }
+  | { type: 'sendFile'; chatId: number; body: string; file: Blob; name: string; mime: string; w?: number | null; h?: number | null; thumb?: string | null; replyToId?: number | null };
 
 export interface EngineConfig {
   userId: number;

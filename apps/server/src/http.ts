@@ -3,11 +3,12 @@ import type { Server } from 'bun';
 import { existsSync, statSync } from 'node:fs';
 import { extname, join, resolve, sep } from 'node:path';
 import { createSession, createUser, readSessionToken, sessionCookie, userIdFromToken } from './auth';
-import { createChat, getHistory, getMessagesByIds, listChats, listChatsPage } from './domain/chats';
+import { createChat, getChatMedia, getHistory, getMessagesByIds, listChats, listChatsPage } from './domain/chats';
 import { sql } from './db';
 import { DomainError } from './domain/errors';
 import { connected, disconnected, listPresence, type Publish } from './domain/presence';
 import { searchMessages } from './domain/search';
+import { fileFor, MAX_FILE, storeUpload } from './domain/files';
 import { handleFrame } from './ws';
 
 const STATUS: Record<string, number> = { bad_frame: 400, too_long: 400, unauthorized: 401, not_member: 403, not_found: 404 };
@@ -15,7 +16,7 @@ const fail = (code: string) => Response.json({ code }, { status: STATUS[code] ??
 
 export type WsData = { userId: number };
 
-const API = /^\/(health|me|chats|presence|search|ws|dev)(\/|$)/;
+const API = /^\/(health|me|chats|presence|search|upload|files|ws|dev)(\/|$)/;
 
 /** Статика клиента из WEB_DIST. Путь не может выйти за папку; пути без расширения — SPA, отдаём index.html. */
 function serveStatic(pathname: string): Response {
@@ -69,6 +70,32 @@ export function createServer(opts: { port: number }): Server {
           const { kind, title, memberIds } = (await req.json()) as { kind: 'direct' | 'group'; title: string | null; memberIds: number[] };
           const ids = memberIds.includes(userId) ? memberIds : [userId, ...memberIds];
           return Response.json({ id: await createChat(kind, title, ids) });
+        }
+        if (req.method === 'POST' && url.pathname === '/upload') {
+          // тело — сам файл; ?name=…&w=…&h=… (размеры фото считает клиент, он его уже декодировал)
+          const len = Number(req.headers.get('content-length') ?? 0);
+          if (len > MAX_FILE) return fail('too_long');
+          const n = (k: string) => { const v = Number(url.searchParams.get(k)); return Number.isFinite(v) && v > 0 ? v : undefined; };
+          return Response.json(await storeUpload(userId, await req.arrayBuffer(), { mime: req.headers.get('content-type') ?? '', name: url.searchParams.get('name') ?? 'file', w: n('w'), h: n('h') }));
+        }
+        const file = /^\/files\/([0-9a-f-]{36})$/.exec(url.pathname);
+        if ((req.method === 'GET' || req.method === 'HEAD') && file) {
+          const f = await fileFor(userId, file[1]);
+          if (!f) return new Response('Not found', { status: 404 });
+          const download = url.searchParams.get('download') === '1';
+          return new Response(Bun.file(f.path), { headers: {
+            'content-type': f.mime,
+            // id — содержимое не меняется: кэшируем навсегда, но только в этом браузере
+            'cache-control': 'private, max-age=31536000, immutable',
+            'content-disposition': `${download ? 'attachment' : 'inline'}; filename*=UTF-8''${encodeURIComponent(f.name)}`,
+            'x-content-type-options': 'nosniff',
+          } });
+        }
+        const media = /^\/chats\/(\d+)\/media$/.exec(url.pathname);
+        if (req.method === 'GET' && media) {
+          const kind = url.searchParams.get('kind') === 'file' ? 'file' : 'photo';
+          const before = Number(url.searchParams.get('beforeId')) || null;
+          return Response.json(await getChatMedia(userId, Number(media[1]), kind, before));
         }
         if (req.method === 'GET' && url.pathname === '/search') {
           // ?q=текст[&chatId=N][&beforeId=M][&limit=K]

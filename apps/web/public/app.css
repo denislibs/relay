@@ -62,3 +62,11 @@ body { background: var(--bg); color: var(--ink); font-family: var(--font-sans); 
 .app-findbar .rl-csearch input { flex: 1; min-width: 0; height: 40px; border: 0; background: transparent; outline: none; font: 400 16px/21px var(--font-sans); color: var(--ink); }
 .app-findbar .rl-csearch-count { color: var(--ink-muted); font: 400 13px/18px var(--font-sans); white-space: nowrap; }
 .rl-glassbar.app-hidden { display: none; }
+/* вложения: окно отправки и зона перетаскивания */
+.app-send-preview { display: block; max-width: 100%; max-height: 50vh; margin: 0 auto var(--space-3); border-radius: var(--radius-md); object-fit: contain; }
+.app-send-file { display: flex; flex-direction: column; gap: 2px; margin-bottom: var(--space-3); padding: var(--space-3); border-radius: var(--radius-md); background: var(--field); }
+.app-send-file span { color: var(--ink-muted); font-size: 13px; }
+.app-send-caption { width: 100%; margin-bottom: var(--space-3); }
+.app-drop { position: fixed; inset: 0; z-index: 50; }
+.app-media-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 2px; padding: 0 var(--space-3) var(--space-4); align-content: start; overflow-y: auto; }
+.app-media-cell { position: relative; aspect-ratio: 1; padding: 0; border: 0; overflow: hidden; border-radius: 4px; cursor: pointer; background: var(--field); }

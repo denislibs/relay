@@ -1,10 +1,10 @@
 import type { Item } from '@relay/sync-engine/src/types';
-import { Bubble, DateDivider, Highlight, ScrollToBottom, forceMeasure, isHeavyAnimating, onHeavyAnimationEnd, requestMeasure, requestMutation } from '@relay/ui';
+import { Bubble, DateDivider, FileBubble, Highlight, MediaBubble, MediaViewer, ScrollToBottom, forceMeasure, isHeavyAnimating, onHeavyAnimationEnd, requestMeasure, requestMutation } from '@relay/ui';
 import { memo } from 'preact/compat';
 import { useEffect, useLayoutEffect, useRef, useState } from 'preact/hooks';
-import { focusMessage, moveWindow, react, savePosition, savedPosition, seen } from '../data';
+import { focusMessage, localPreview, moveWindow, react, savePosition, savedPosition, seen } from '../data';
 import { setGlobal, useGlobal } from '../global';
-import { clock, dayKey, dayLabel } from './format';
+import { clock, dayKey, dayLabel, fileSize } from './format';
 
 /*
  * Лента сообщений, устроенная как в Telegram:
@@ -24,16 +24,54 @@ const READ_EVERY = 150;   // отправка «вижу до id» не чаще
 const FIRST_PAINT = 24;   // при открытии внизу первым кадром — столько последних сообщений, остальное следующим кадром
 
 type Quote = { id: number; sort: number; body: string; senderId: number };
-type RowProps = { hl?: string; m: Item; meId: number; out: boolean; start: boolean; end: boolean; quoted?: Quote | null; quoteAuthor?: string; quoteTone?: number; appear: boolean; flash: boolean; onReact: (m: Item, emoji: string) => void };
+type Att = { id: string; kind: 'photo' | 'file'; mime: string; name: string; size: number; w: number | null; h: number | null; thumb?: string | null };
+const fileUrl = (a: Att, download = false) => `/files/${a.id}${download ? '?download=1' : ''}`;
+type RowProps = { onOpen: (m: Item) => void; hl?: string; m: Item; meId: number; out: boolean; start: boolean; end: boolean; quoted?: Quote | null; quoteAuthor?: string; quoteTone?: number; appear: boolean; flash: boolean; onReact: (m: Item, emoji: string) => void };
 
 /** Строка ленты: перерисовывается только если изменилось её сообщение или место в группе. */
-const Row = memo(function Row({ hl, m, meId, out, start, end, quoted, quoteAuthor, quoteTone, appear, flash, onReact }: RowProps) {
+const Row = memo(function Row({ onOpen, hl, m, meId, out, start, end, quoted, quoteAuthor, quoteTone, appear, flash, onReact }: RowProps) {
   // реакции: по эмодзи — сколько и есть ли моя
   const list = (m.reactions as { userId: number; emoji: string }[] | undefined) ?? [];
   const chips: { emoji: string; count: number; mine: boolean }[] = [];
   for (const r of list) {
     const c = chips.find((x) => x.emoji === r.emoji);
     if (c) { c.count++; c.mine ||= r.userId === meId; } else chips.push({ emoji: r.emoji, count: 1, mine: r.userId === meId });
+  }
+  const att = m.attachment as Att | null | undefined;
+  const pending = m.status === 'pending' && typeof m.progress === 'number' && (m.progress as number) < 1;
+  const mark = m.id != null ? <i class="app-mark" data-mid={m.id as number} aria-hidden="true" /> : null;
+  if (att && !m.deleted && att.kind === 'photo' && att.w && att.h) {
+    // фото знает размеры заранее: рамка нужной высоты сразу, размытое превью, полная картинка — лениво
+    const src = localPreview(m.key) ?? (att.id ? fileUrl(att) : undefined);
+    return (
+      <div class="app-msg app-msg-media" data-key={m.key} data-sort={m.sort as number}>
+        <MediaBubble
+          from={out ? 'out' : 'in'} tail={end} groupStart={start} appear={appear}
+          items={[{ src, thumb: att.thumb, alt: att.name }]}
+          ratio={`${att.w} / ${att.h}`}
+          state={pending ? 'loading' : 'ready'} progress={m.progress as number}
+          caption={m.body ? (hl ? <Highlight text={m.body as string} query={hl} /> : m.body) : undefined}
+          time={clock(m.createdAt as string)} status={out ? m.status : undefined}
+          onOpen={() => onOpen(m)}
+        />
+        {mark}
+      </div>
+    );
+  }
+  if (att && !m.deleted && att.id !== undefined && att.kind === 'file') {
+    const ext = (att.name.split('.').pop() ?? 'file').slice(0, 4);
+    return (
+      <div class="app-msg" data-key={m.key} data-sort={m.sort as number}>
+        <FileBubble
+          from={out ? 'out' : 'in'} tail={end} groupStart={start}
+          name={att.name} ext={ext} meta={fileSize(att.size)}
+          state={pending ? 'loading' : att.id ? 'remote' : 'loading'} progress={m.progress as number}
+          time={clock(m.createdAt as string)} status={out ? m.status : undefined}
+          onDownload={() => { const a = document.createElement('a'); a.href = fileUrl(att, true); a.download = att.name; a.click(); }}
+        />
+        {mark}
+      </div>
+    );
   }
   return (
     <div class="app-msg" data-key={m.key} data-sort={m.sort as number}>
@@ -80,6 +118,7 @@ export function Feed({ chatId, meId, peerName, stick, onMenu, highlight }: {
   const unreadFrom = useGlobal((s) => s.unreadFrom);
   const focus = useGlobal((s) => s.focus);
   const [flashKey, setFlashKey] = useState<string | null>(null);
+  const [viewer, setViewer] = useState<number | null>(null);   // индекс фото в просмотрщике
   const unread = useGlobal((s) => (s.chats.find((c) => c.id === chatId)?.unread as number) ?? 0);
   const el = useRef<HTMLDivElement>(null);
   const metaRef = useRef(meta); metaRef.current = meta;
@@ -298,6 +337,17 @@ export function Feed({ chatId, meId, peerName, stick, onMenu, highlight }: {
     react(chatId, m.id as number, mine?.emoji === emoji ? null : emoji);
   }).current;
 
+  // просмотрщик: все фото текущего окна ленты
+  const photos = messages.filter((m) => !m.deleted && (m.attachment as Att | null)?.kind === 'photo' && (m.attachment as Att).w);
+  const onOpen = useRef((m: Item) => setViewer(-1 - photos.findIndex((p) => p.key === m.key))).current;
+  const openIndex = viewer === null ? null : viewer < 0 ? -1 - viewer : viewer;
+  useEffect(() => {
+    if (viewer === null) return;
+    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') setViewer(null); };   // Esc — где бы ни был фокус
+    addEventListener('keydown', onKey);
+    return () => removeEventListener('keydown', onKey);
+  }, [viewer]);
+
   // контекстное меню — одно на ленту, а не на каждый бабл (иначе обработчик ломал бы мемоизацию строк)
   const onContextMenu = (e: MouseEvent) => {
     const row = (e.target as Element).closest<HTMLElement>('.app-msg');
@@ -329,6 +379,7 @@ export function Feed({ chatId, meId, peerName, stick, onMenu, highlight }: {
         m={m}
         meId={meId}
         onReact={onReact}
+        onOpen={onOpen}
         out={mine}
         start={start}
         end={end}
@@ -346,6 +397,14 @@ export function Feed({ chatId, meId, peerName, stick, onMenu, highlight }: {
   return (
     <>
       <div class="rl-feed" ref={el} onScroll={onScroll} onClick={onClick} onContextMenu={onContextMenu} aria-live="polite">{out}</div>
+      {openIndex !== null && photos[openIndex] ? (
+        <MediaViewer
+          index={openIndex}
+          sender={peerName}
+          items={photos.map((m) => { const a = m.attachment as Att; return { src: localPreview(m.key) ?? fileUrl(a), w: a.w, h: a.h, caption: m.body, date: clock(m.createdAt as string) }; })}
+          onClose={() => setViewer(null)}
+        />
+      ) : null}
       <div class="rl-scrolldown-slot">
         <ScrollToBottom show={away || (meta ? !meta.live : false)} unread={unread} onClick={toLatest} />
       </div>

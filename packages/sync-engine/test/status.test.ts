@@ -296,3 +296,21 @@ test('search: server when online, cached messages when offline', async () => {
   expect(offline.source).toBe('local');
   expect(offline.hits.map((h) => h.body)).toEqual(['про отпуск позже', 'обсудим отпуск']);
 });
+
+test('sendFile: the blob waits in IndexedDB, uploads when online, the message carries the attachment', async () => {
+  process.env.FILES_DIR = '/tmp/relay-test-files';
+  const a = await srv.login('a'), b = await srv.login('b');
+  const chatId = await srv.chat(a.token, [a.userId, b.userId]);
+  const ea = await open(srv.config(a)), eb = await open(srv.config(b));
+  eb.connect();
+  // офлайн: сообщение уже в ленте с вложением без id
+  await ea.call({ type: 'sendFile', chatId, body: 'смотри', file: new Blob([new Uint8Array([1, 2, 3, 4])], { type: 'image/png' }), name: 'p.png', mime: 'image/png', w: 40, h: 30, thumb: null });
+  const feedA = watchInto(ea, { kind: 'messages', chatId, limit: 10 });
+  const pending = (await feedA.until((l) => l.length === 1))[0];
+  expect(pending).toMatchObject({ status: 'pending', kind: 'photo', attachment: { id: '', w: 40, h: 30, name: 'p.png' } });
+  ea.connect();
+  await feedA.until((l) => l[0].status === 'sent' && !!(l[0].attachment as { id: string }).id);
+  const feedB = watchInto(eb, { kind: 'messages', chatId, limit: 10 });
+  const got = (await feedB.until((l) => l.length === 1))[0];
+  expect(got).toMatchObject({ kind: 'photo', body: 'смотри', attachment: { w: 40, h: 30, mime: 'image/png', size: 4 } });
+});

@@ -1,5 +1,5 @@
 import type { ClientFrame, Message, ServerFrame } from '@relay/protocol';
-import { getAll, getByChat, openDb } from './idb';
+import { delBlob, getAll, getBlob, getByChat, openDb, putBlob } from './idb';
 import { affects, computeQuery, diffResults, messageWindow, type Result } from './queries';
 import type { Item } from './types';
 import { Store, type ChatSummary } from './store';
@@ -192,6 +192,35 @@ export class Engine {
     this.frameTimer = setTimeout(() => { this.frameTimer = null; this.emit(); }, this.cfg.frameMs ?? 16);
   }
 
+  /** Загрузка файла: XHR с прогрессом (есть в воркерах браузера), иначе fetch. Ошибка сети — повтор позже. */
+  private upload(clientId: string, blob: Blob, a: { name: string; mime: string; w: number | null; h: number | null }): Promise<{ id: string }> {
+    const qs = new URLSearchParams({ name: a.name });
+    if (a.w && a.h) { qs.set('w', String(a.w)); qs.set('h', String(a.h)); }
+    const url = `${this.cfg.httpBase}/upload?${qs}`;
+    const offline: ReqError = { code: 'offline', retry: true };
+    if (typeof XMLHttpRequest === 'undefined') {
+      return fetch(url, { method: 'POST', body: blob, headers: { 'content-type': a.mime, ...(this.cfg.headers ?? {}) }, credentials: 'include' })
+        .then(async (r) => { if (!r.ok) throw { code: 'upload', retry: r.status >= 500 } satisfies ReqError; return r.json() as Promise<{ id: string }>; }, () => { throw offline; });
+    }
+    return new Promise((resolve, reject) => {
+      const x = new XMLHttpRequest();
+      x.open('POST', url);
+      x.withCredentials = true;
+      x.setRequestHeader('content-type', a.mime);
+      for (const [k, v] of Object.entries(this.cfg.headers ?? {})) x.setRequestHeader(k, v);
+      let last = 0;
+      x.upload.onprogress = (e) => {
+        if (!e.lengthComputable || e.timeStamp - last < 100) return; // не чаще 10 раз в секунду
+        last = e.timeStamp;
+        this.store.setProgress(clientId, e.loaded / e.total);
+        this.changed();
+      };
+      x.onload = () => (x.status < 300 ? resolve(JSON.parse(x.responseText)) : reject({ code: 'upload', retry: x.status >= 500 } satisfies ReqError));
+      x.onerror = () => reject(offline);
+      x.send(blob);
+    });
+  }
+
   /** Поиск: с сетью — на сервере (вся история), без сети — по сообщениям, сохранённым на устройстве. */
   private async search(a: Extract<Action, { type: 'search' }>): Promise<SearchResult> {
     const limit = a.limit ?? 30;
@@ -345,6 +374,21 @@ export class Engine {
         return null;
       }
       case 'search': return this.search(a);
+      case 'chatMedia': return this.http<{ messages: Message[] }>(`/chats/${a.chatId}/media?kind=${a.kind}`).then((r) => r.messages);
+      case 'sendFile': {
+        // файл — в IDB (переживёт офлайн и перезагрузку), сообщение — в очередь; загрузка и отправка — в pumpOutbox
+        const clientId = crypto.randomUUID();
+        this.lastCreated = Math.max(Date.now(), this.lastCreated + 1);
+        await putBlob(this.db, clientId, a.file);
+        const photo = /^image\//.test(a.mime) && !!a.w && !!a.h;
+        this.store.addPending({ clientId, chatId: a.chatId, body: a.body, replyToId: a.replyToId ?? null, createdAt: this.lastCreated, failed: false,
+          attachment: { id: '', kind: photo ? 'photo' : 'file', mime: a.mime, name: a.name, size: a.file.size, w: photo ? a.w! : null, h: photo ? a.h! : null, thumb: a.thumb ?? null } });
+        this.store.setDraft(a.chatId, '');
+        await this.store.flush();
+        this.changed();
+        this.pumpOutbox();
+        return { clientId };
+      }
       case 'loadMoreChats':
         await this.loadMoreChats();
         return null;
@@ -600,8 +644,18 @@ export class Engine {
           const next = [...this.store.outbox.values()].find((o) => !o.failed);
           if (!next || !this.online) break;
           try {
-            const r = await this.request({ op: 'send', reqId: '', clientId: next.clientId, chatId: next.chatId, body: next.body, replyToId: next.replyToId });
+            if (next.attachment && !next.attachment.id) {
+              const blob = await getBlob(this.db, next.clientId);
+              if (!blob) { this.store.fail(next.clientId); await this.store.flush(); this.changed(); continue; }
+              const up = await this.upload(next.clientId, blob, next.attachment);
+              this.store.setUploaded(next.clientId, up.id);
+              await this.store.flush();
+              this.changed();
+            }
+            const att = next.attachment ? { id: next.attachment.id, thumb: next.attachment.thumb ?? null } : null;
+            const r = await this.request({ op: 'send', reqId: '', clientId: next.clientId, chatId: next.chatId, body: next.body, replyToId: next.replyToId, attachment: att });
             this.store.ack(next.clientId, r.id as number, r.createdAt as string);
+            if (att) delBlob(this.db, next.clientId).catch(() => {});
           } catch (e) {
             if ((e as ReqError).retry === false) this.store.fail(next.clientId);
             else break; // сеть — дождёмся переподключения, порядок сохранится

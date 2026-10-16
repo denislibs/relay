@@ -1,3 +1,4 @@
+import { attachmentForSend } from './files';
 import { clearDraftInTx } from './drafts';
 import type { Message } from '@relay/protocol';
 import { sql } from '../db';
@@ -9,10 +10,10 @@ export const MAX_BODY = 4096;
 
 export async function sendMessage(
   userId: number,
-  input: { chatId: number; clientId: string; body: string; replyToId?: number | null },
+  input: { chatId: number; clientId: string; body: string; replyToId?: number | null; attachment?: { id: string; thumb?: string | null } | null },
 ): Promise<{ message: Message; duplicate: boolean }> {
   const body = input.body.trim();
-  if (!body) throw new DomainError('bad_frame', 'empty body');
+  if (!body && !input.attachment) throw new DomainError('bad_frame', 'empty body'); // у вложения подпись необязательна
   if (body.length > MAX_BODY) throw new DomainError('too_long');
 
   return sql.begin(async (tx) => {
@@ -21,9 +22,11 @@ export async function sendMessage(
       const [target] = await tx`select 1 from messages where chat_id = ${input.chatId} and id = ${input.replyToId}`;
       if (!target) throw new DomainError('not_found', 'reply target');
     }
+    const attachment = input.attachment ? await attachmentForSend(tx, userId, input.attachment) : null;
+    const kind = attachment ? attachment.kind : 'text';
     const inserted = await tx`
-      insert into messages (chat_id, sender_id, client_id, kind, body, reply_to_id)
-      values (${input.chatId}, ${userId}, ${input.clientId}, 'text', ${body}, ${input.replyToId ?? null})
+      insert into messages (chat_id, sender_id, client_id, kind, body, reply_to_id, attachment)
+      values (${input.chatId}, ${userId}, ${input.clientId}, ${kind}, ${body}, ${input.replyToId ?? null}, ${attachment ? sql.json(attachment as never) : null})
       on conflict (sender_id, client_id) do nothing
       returning *`;
     if (inserted.length === 0) {

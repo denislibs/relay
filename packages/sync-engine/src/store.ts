@@ -199,6 +199,7 @@ export class Store {
       key: m.clientId, clientId: m.clientId, id: m.id, chatId: m.chatId, senderId: m.senderId,
       body: m.body, replyToId: m.replyToId, createdAt: m.createdAt, status, sort: m.id,
       editedAt: m.editedAt ?? null, deleted: !!m.deleted, reactions: m.reactions ?? prev?.reactions ?? [],
+      kind: m.kind ?? 'text', attachment: m.attachment ?? null,
     };
     if (countUnread && !mine && m.id > chat.lastReadId && m.id > chat.knownMaxId) chat.unread++;
     chat.knownMaxId = Math.max(chat.knownMaxId, m.id);
@@ -250,6 +251,7 @@ export class Store {
       key: o.clientId, clientId: o.clientId, id: null, chatId: o.chatId, senderId: this.userId,
       body: o.body, replyToId: o.replyToId, createdAt: new Date(o.createdAt).toISOString(),
       status: o.failed ? 'failed' : 'pending', sort: PENDING_BASE + o.createdAt,
+      kind: o.attachment ? o.attachment.kind : 'text', attachment: o.attachment ?? null, progress: o.attachment && !o.attachment.id ? 0 : undefined,
     });
   }
 
@@ -282,6 +284,21 @@ export class Store {
     const m = this.messages.get(o.chatId)?.get(clientId);
     if (m) this.putMessage({ ...m, status: 'pending' });
     return true;
+  }
+
+  /** Файл загружен — вложению неотправленного сообщения есть id (переживёт перезагрузку в outbox). */
+  setUploaded(clientId: string, id: string): void {
+    const o = this.outbox.get(clientId);
+    if (!o?.attachment) return;
+    o.attachment = { ...o.attachment, id };
+    this.dirtyOutbox.add(clientId);
+    this.setProgress(clientId, 1);
+  }
+  /** Прогресс загрузки файла неотправленного сообщения (в ленте — кольцо). */
+  setProgress(clientId: string, p: number): void {
+    const chatId = this.outbox.get(clientId)?.chatId;
+    const m = chatId != null ? this.messages.get(chatId)?.get(clientId) : undefined;
+    if (m) this.putMessage({ ...m, progress: p });
   }
 
   /** Правка/удаление/реакции загруженного сообщения (и превью последнего сообщения чата). Незагруженное — придёт с историей. */

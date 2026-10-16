@@ -201,6 +201,40 @@ export function searchMessages(q: string, chatId?: number, beforeId?: number): P
   return engine.call({ type: 'search', q, chatId, beforeId }) as Promise<SearchResult>;
 }
 
+/** Локальные копии своих файлов (objectURL) до и сразу после отправки — показываем без загрузки с сервера. */
+const localPreviews = new Map<string, string>();
+export function localPreview(clientId: string): string | undefined { return localPreviews.get(clientId); }
+
+/** Размеры фото и крошечное превью (24 px, JPEG) — чтобы лента знала место заранее и показала размытую картинку. */
+async function describeImage(file: Blob): Promise<{ w: number; h: number; thumb: string | null } | null> {
+  if (!/^image\/(jpeg|png|webp|gif|avif)$/.test(file.type)) return null;
+  try {
+    const bmp = await createImageBitmap(file);
+    const k = 24 / Math.max(bmp.width, bmp.height);
+    const c = document.createElement('canvas');
+    c.width = Math.max(1, Math.round(bmp.width * k)); c.height = Math.max(1, Math.round(bmp.height * k));
+    c.getContext('2d')!.drawImage(bmp, 0, 0, c.width, c.height);
+    const thumb = c.toDataURL('image/jpeg', 0.5);
+    const out = { w: bmp.width, h: bmp.height, thumb: thumb.length <= 4096 ? thumb : null };
+    bmp.close();
+    return out;
+  } catch { return null; }
+}
+
+/** Отправить файл (фото — с размерами и превью). Офлайн — уйдёт, когда появится сеть. */
+export async function sendFile(chatId: number, file: File, caption: string, replyToId: number | null = null): Promise<void> {
+  nudgeWallpaper();
+  if (feedAnchor && getGlobal().openChatId === chatId) moveWindow('latest');
+  const img = await describeImage(file);
+  const res = (await engine.call({ type: 'sendFile', chatId, body: caption, file, name: file.name || 'file', mime: file.type || 'application/octet-stream', w: img?.w ?? null, h: img?.h ?? null, thumb: img?.thumb ?? null, replyToId })) as { clientId: string };
+  if (img) localPreviews.set(res.clientId, URL.createObjectURL(file));
+}
+
+/** Медиа или файлы чата (вкладки панели «Информация»). */
+export function chatMedia(chatId: number, kind: 'photo' | 'file'): Promise<Item[]> {
+  return engine.call({ type: 'chatMedia', chatId, kind }) as Promise<Item[]>;
+}
+
 /** Правка своего сообщения (онлайн). */
 export function editMessage(chatId: number, id: number, body: string): Promise<unknown> { return engine.call({ type: 'editMessage', chatId, id, body }); }
 /** Удаление своего сообщения у всех (онлайн). */

@@ -39,10 +39,12 @@ services:
       DATABASE_URL: postgres://relay:relay@postgres:5432/relay
       PORT: "3000"
       DEV_LOGIN: "1"
+      FILES_DIR: /data/files
     ports: ["3000:3000"]
     volumes:
       - ./apps:/app/apps
       - ./packages:/app/packages
+      - files:/data/files    # загруженные вложения
     depends_on:
       migrate: { condition: service_completed_successfully }
       web: { condition: service_started }
@@ -76,4 +78,5 @@ services:
       postgres: { condition: service_healthy }
 
 volumes:
+  files:
   pgdata: {}

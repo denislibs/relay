@@ -5,14 +5,18 @@ export interface Message {
   chatId: Id;
   senderId: Id;
   clientId: string;
-  kind: 'text';
+  kind: 'text' | 'photo' | 'file';
   body: string;
   replyToId: Id | null;
   createdAt: string; // ISO
   editedAt?: string | null;
   deleted?: boolean;
   reactions?: Reaction[];
+  attachment?: Attachment | null;
 }
+
+/** Вложение: фото (знает размеры заранее — лента не прыгает) или файл. thumb — крошечное размытое превью. */
+export interface Attachment { id: string; kind: 'photo' | 'file'; mime: string; name: string; size: number; w: number | null; h: number | null; thumb?: string | null }
 
 /** Реакция: кто и какой эмодзи (одна от пользователя на сообщение). */
 export interface Reaction { userId: Id; emoji: string }
@@ -33,7 +37,7 @@ export type ErrorCode = 'bad_frame' | 'unauthorized' | 'not_member' | 'not_found
 export type ClientFrame =
   | { op: 'hello'; lastSeq: number }
   | { op: 'sync'; since: number }
-  | { op: 'send'; reqId: string; clientId: string; chatId: Id; body: string; replyToId?: Id | null }
+  | { op: 'send'; reqId: string; clientId: string; chatId: Id; body: string; replyToId?: Id | null; attachment?: { id: string; thumb?: string | null } | null }
   | { op: 'read'; reqId: string; chatId: Id; upToId: Id }
   | { op: 'typing'; chatId: Id }   // «печатаю» — без ответа, сервер пересылает остальным участникам
   | { op: 'draft'; reqId: string; chatId: Id; text: string }
@@ -76,7 +80,8 @@ export function parseClientFrame(raw: string): ClientFrame | null {
     case 'send':
       if (!str(f.reqId, 64) || !str(f.clientId, 36) || !UUID.test(f.clientId) || !int(f.chatId) || typeof f.body !== 'string') return null;
       if (f.replyToId != null && !int(f.replyToId)) return null;
-      return { op: 'send', reqId: f.reqId, clientId: f.clientId, chatId: f.chatId, body: f.body, replyToId: (f.replyToId as number | null) ?? null };
+      if (f.attachment != null && (typeof f.attachment !== 'object' || !str((f.attachment as { id: unknown }).id, 36))) return null;
+      return { op: 'send', reqId: f.reqId, clientId: f.clientId, chatId: f.chatId, body: f.body, replyToId: (f.replyToId as number | null) ?? null, attachment: (f.attachment as { id: string; thumb?: string | null } | null) ?? null };
     case 'read':
       return str(f.reqId, 64) && int(f.chatId) && int(f.upToId) ? { op: 'read', reqId: f.reqId, chatId: f.chatId, upToId: f.upToId } : null;
     default: return null;

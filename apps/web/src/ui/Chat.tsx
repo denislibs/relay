@@ -1,10 +1,10 @@
-import { Avatar, Button, ChatSearchBar, Composer, GlassBar, IconButton, Menu, Modal, ReactionPicker, requestMutation } from '@relay/ui';
+import { Avatar, Button, ChatSearchBar, Composer, DropOverlay, GlassBar, IconButton, Menu, Modal, Presence, ReactionPicker, requestMutation } from '@relay/ui';
 import { useEffect, useLayoutEffect, useRef, useState } from 'preact/hooks';
-import { deleteMessage, editMessage, focusMessage, openChat, react, saveDraft, searchMessages, send, typing, typingDone } from '../data';
+import { deleteMessage, editMessage, focusMessage, sendFile, openChat, react, saveDraft, searchMessages, send, typing, typingDone } from '../data';
 import type { SearchHit } from '@relay/sync-engine/src/types';
 import { setGlobal, useGlobal } from '../global';
 import { Feed } from './Feed';
-import { lastSeenText } from './format';
+import { fileSize, lastSeenText } from './format';
 
 let closedAt = -Infinity; // когда закрылась прежняя лента: близко по времени — значит, переключение между чатами
 
@@ -43,6 +43,36 @@ export function Chat({ chatId }: { chatId: number }) {
     return { ...f, at };
   });
   const closeFind = () => { setFinding(false); setFindQ(''); setFound(null); };
+
+  // вложения: выбор файла (скрепка), перетаскивание, вставка; перед отправкой — окно с превью и подписью
+  const picker = useRef<HTMLInputElement>(null);
+  const [pending, setPending] = useState<{ file: File; url: string | null; caption: string } | null>(null);
+  const [dragging, setDragging] = useState(false);
+  const offer = (file: File | null | undefined) => {
+    if (!file) return;
+    setPending({ file, url: /^image\//.test(file.type) ? URL.createObjectURL(file) : null, caption: latest.current });
+  };
+  const closePending = () => { if (pending?.url) URL.revokeObjectURL(pending.url); setPending(null); };
+  const sendPending = () => {
+    if (!pending) return;
+    stick.current = true;
+    typingDone(chatId);
+    sendFile(chatId, pending.file, pending.caption.trim(), (replyTo?.id as number) ?? null).catch(() => {});
+    if (pending.caption === latest.current) { setText(''); latest.current = saved.current = ''; }
+    setReplyKey(null);
+    closePending();
+  };
+  useEffect(() => {
+    let depth = 0;
+    const hasFiles = (e: DragEvent) => !!e.dataTransfer && [...e.dataTransfer.types].includes('Files');
+    const enter = (e: DragEvent) => { if (!hasFiles(e)) return; depth++; setDragging(true); };
+    const leave = () => { depth = Math.max(0, depth - 1); if (!depth) setDragging(false); };
+    const over = (e: DragEvent) => { if (hasFiles(e)) e.preventDefault(); };
+    const drop = (e: DragEvent) => { if (!hasFiles(e)) return; e.preventDefault(); depth = 0; setDragging(false); offer(e.dataTransfer!.files[0]); };
+    const paste = (e: ClipboardEvent) => { const f = [...(e.clipboardData?.files ?? [])][0]; if (f) { e.preventDefault(); offer(f); } };
+    addEventListener('dragenter', enter); addEventListener('dragleave', leave); addEventListener('dragover', over); addEventListener('drop', drop); addEventListener('paste', paste);
+    return () => { removeEventListener('dragenter', enter); removeEventListener('dragleave', leave); removeEventListener('dragover', over); removeEventListener('drop', drop); removeEventListener('paste', paste); };
+  }, []);
   useEffect(() => { if (finding) (document.getElementById('chat-find') as HTMLInputElement | null)?.focus(); }, [finding]);
 
 
@@ -142,6 +172,7 @@ export function Chat({ chatId }: { chatId: number }) {
         }}
         value={text}
         onChange={onType}
+        onAttach={(k: string) => { const el = picker.current!; el.accept = k === 'media' || k === 'camera' ? 'image/*,video/*' : ''; el.value = ''; el.click(); }}
         onSend={(body: string) => {
           if (editing) {
             if (body !== editing.original) editMessage(chatId, editing.id, body).catch(() => {});
@@ -186,6 +217,26 @@ export function Chat({ chatId }: { chatId: number }) {
           </>
         );
       })() : null}
+      <input ref={picker} type="file" hidden onChange={(e) => offer((e.target as HTMLInputElement).files?.[0])} />
+      <Presence show={dragging} exitMs={160}><div class="app-drop"><DropOverlay title="Отпустите, чтобы отправить" text="Фото и документы до 50 МБ" /></div></Presence>
+      {pending ? (
+        <Modal title={pending.url ? 'Отправить фото' : 'Отправить файл'} onClose={closePending} actions={[
+          <Button key="c" variant="ghost" onClick={closePending}>Отмена</Button>,
+          <Button key="s" onClick={sendPending}>Отправить</Button>,
+        ]}>
+          {pending.url ? <img class="app-send-preview" src={pending.url} alt="" /> : (
+            <div class="app-send-file"><b>{pending.file.name}</b><span>{fileSize(pending.file.size)}</span></div>
+          )}
+          <input
+            class="app-field app-send-caption"
+            placeholder="Подпись"
+            value={pending.caption}
+            onInput={(e) => setPending({ ...pending, caption: (e.target as HTMLInputElement).value })}
+            onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); sendPending(); } }}
+            autoFocus
+          />
+        </Modal>
+      ) : null}
       {confirmDelete ? (
         <Modal
           title="Удалить сообщение?"

@@ -46,3 +46,10 @@ export function lastSeenText(online: boolean, lastSeen: string | null, now = Dat
   if (days < 7) return `был(а) ${d.toLocaleDateString('ru-RU', { day: 'numeric', month: 'short' })} в ${at}`;
   return `был(а) ${pad(d.getDate())}.${pad(d.getMonth() + 1)}.${String(d.getFullYear()).slice(2)}`;
 }
+
+/** Размер файла: 812 Б, 34 КБ, 2,4 МБ. */
+export function fileSize(n: number): string {
+  if (n < 1024) return n + ' Б';
+  if (n < 1024 * 1024) return Math.round(n / 1024) + ' КБ';
+  return (n / 1024 / 1024).toFixed(1).replace('.', ',') + ' МБ';
+}

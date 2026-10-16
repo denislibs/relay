@@ -23,12 +23,13 @@ export function toMessage(r: Record<string, unknown>): Message {
     chatId: r.chat_id as number,
     senderId: r.sender_id as number,
     clientId: r.client_id as string,
-    kind: 'text',
+    kind: ((r.kind as string) ?? 'text') as Message['kind'],
     body: r.body as string,
     replyToId: (r.reply_to_id as number | null) ?? null,
     createdAt: (r.created_at as Date).toISOString(),
     editedAt: r.edited_at ? (r.edited_at as Date).toISOString() : null,
     deleted: !!r.deleted,
+    attachment: r.deleted ? null : ((r.attachment as Message['attachment']) ?? null),
   };
 }
 
@@ -81,7 +82,7 @@ export async function listChats(userId: number, opts: ListOpts = {}): Promise<Ch
   const rows = await sql`
     select c.id, c.kind, c.title, c.created_at as chat_created_at, cm.last_read_id,
            lm.id as m_id, lm.chat_id as m_chat_id, lm.sender_id as m_sender_id, lm.client_id as m_client_id,
-           lm.body as m_body, lm.reply_to_id as m_reply_to_id, lm.created_at as m_created_at, lm.edited_at as m_edited_at, lm.deleted as m_deleted,
+           lm.body as m_body, lm.kind as m_kind, lm.attachment as m_attachment, lm.reply_to_id as m_reply_to_id, lm.created_at as m_created_at, lm.edited_at as m_edited_at, lm.deleted as m_deleted,
            (select count(*) from messages m
              where m.chat_id = c.id and m.id > cm.last_read_id and m.sender_id <> ${userId})::int as unread,
            (select json_build_object('id', u.id, 'name', u.name) from chat_members pm join users u on u.id = pm.user_id
@@ -112,12 +113,23 @@ export async function listChats(userId: number, opts: ListOpts = {}): Promise<Ch
     draft: r.draft ? { text: (r.draft as { text: string }).text, at: new Date((r.draft as { at: string }).at).toISOString() } : null,
     last: r.m_id == null ? null : toMessage({
       id: r.m_id, chat_id: r.m_chat_id, sender_id: r.m_sender_id, client_id: r.m_client_id,
-      body: r.m_body, reply_to_id: r.m_reply_to_id, created_at: r.m_created_at, edited_at: r.m_edited_at, deleted: r.m_deleted,
+      body: r.m_body, kind: r.m_kind, attachment: r.m_attachment, reply_to_id: r.m_reply_to_id, created_at: r.m_created_at, edited_at: r.m_edited_at, deleted: r.m_deleted,
     }),
   }));
 }
 
 /** Конкретные сообщения чата по id (исходники цитат, которых нет в загруженной истории). */
+/** Медиа и файлы чата для вкладок панели «Информация»: новые сверху, страницами. */
+export async function getChatMedia(userId: number, chatId: number, kind: 'photo' | 'file', beforeId: number | null, limit = 60): Promise<{ messages: Message[]; hasMore: boolean }> {
+  await assertMember(sql, chatId, userId);
+  const rows = await sql`
+    select * from messages
+     where chat_id = ${chatId} and not deleted and kind = ${kind}
+       ${beforeId ? sql`and id < ${beforeId}` : sql``}
+     order by id desc limit ${limit + 1}`;
+  return { messages: rows.slice(0, limit).map(toMessage), hasMore: rows.length > limit };
+}
+
 export async function getMessagesByIds(userId: number, chatId: number, ids: number[]): Promise<Message[]> {
   await assertMember(sql, chatId, userId);
   if (!ids.length) return [];

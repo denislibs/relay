@@ -1,4 +1,7 @@
-import { Avatar, EmptyState, FolderTabs, InfoRow, PanelHeader, SlideStack, Switch } from '@relay/ui';
+import { Avatar, EmptyState, FolderTabs, InfoRow, LazyImage, PanelHeader, SlideStack, Switch } from '@relay/ui';
+import type { Item } from '@relay/sync-engine/src/types';
+import { chatMedia, focusMessage } from '../data';
+import { fileSize } from './format';
 import { useEffect, useState } from 'preact/hooks';
 import { setGlobal, useGlobal } from '../global';
 import { clock, dayLabel, lastSeenText } from './format';
@@ -24,6 +27,15 @@ export function Info() {
   const messages = useGlobal((s) => s.messages);
   const muted = useGlobal((s) => s.muted);
   const [tab, setTab] = useState('media');
+  // медиа и файлы чата — с сервера (вся история), при открытии вкладки
+  const [media, setMedia] = useState<{ photo?: Item[]; file?: Item[] }>({});
+  useEffect(() => {
+    if (tab === 'links') return;
+    const kind = tab === 'media' ? 'photo' : 'file';
+    let live = true;
+    chatMedia(chatId, kind).then((list) => { if (live) setMedia((m) => ({ ...m, [kind]: list })); }).catch(() => {});
+    return () => { live = false; };
+  }, [tab, chatId]);
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') close(); };
@@ -66,7 +78,21 @@ export function Info() {
         </div>
         <div class="rl-aside-pages">
           <SlideStack variant="tabs" order={TABS} active={tab} render={(k: string) =>
-            k === 'links' && links.length ? (
+            k === 'media' && media.photo?.length ? (
+              <div class="app-media-grid">
+                {media.photo.map((m) => { const a = m.attachment as { id: string; thumb?: string; name: string }; return (
+                  <button key={m.key} type="button" class="app-media-cell" aria-label={a.name} onClick={() => focusMessage({ id: m.id as number, sort: m.id as number })}>
+                    <LazyImage src={`/files/${a.id}`} thumb={a.thumb} alt={a.name} />
+                  </button>
+                ); })}
+              </div>
+            ) : k === 'files' && media.file?.length ? (
+              <ul class="rl-aside-links">
+                {media.file.map((m) => { const a = m.attachment as { id: string; name: string; size: number }; return (
+                  <li key={m.key}><a href={`/files/${a.id}?download=1`} download={a.name}><b>{a.name}</b><small>{fileSize(a.size)} · {dayLabel(m.createdAt as string)}</small></a></li>
+                ); })}
+              </ul>
+            ) : k === 'links' && links.length ? (
               <ul class="rl-aside-links">
                 {links.map((l) => (
                   <li key={l.key}><a href={l.url} target="_blank" rel="noopener noreferrer"><b>{l.url}</b><small>{dayLabel(l.at)}, {clock(l.at)}</small></a></li>

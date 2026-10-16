@@ -10,6 +10,14 @@ import { setTheme } from './Settings';
 
 const FOLDERS = ['all', 'unread'];
 
+/** Превью последнего сообщения в строке чата. */
+function previewOf(m: { deleted?: boolean; kind?: string; body: string; attachmentName?: string | null }): string {
+  if (m.deleted) return 'Сообщение удалено';
+  if (m.kind === 'photo') return '📷 ' + (m.body || 'Фото');
+  if (m.kind === 'file') return '📎 ' + (m.body || m.attachmentName || 'Файл');
+  return m.body;
+}
+
 /** Фрагмент вокруг совпадения: превью узкое, а совпадение может быть в конце длинного сообщения. */
 function snippet(text: string, q: string): string {
   const i = text.toLowerCase().indexOf(q.toLowerCase());
@@ -84,7 +92,7 @@ export function Sidebar() {
               return (
                 <ChatRow
                   name={(c.title as string) || 'Чат №' + c.id}
-                  preview={last ? ((last as { deleted?: boolean }).deleted ? 'Сообщение удалено' : last.body) : 'Нет сообщений'}
+                  preview={last ? previewOf(last as { deleted?: boolean; kind?: string; body: string; attachmentName?: string | null }) : 'Нет сообщений'}
                   draft={c.draft && c.id !== openId ? (c.draft as string) : undefined}
                   muted={mutedIds.includes(c.id as number)}
                   typing={!!c.typing}

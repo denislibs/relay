@@ -2,18 +2,21 @@ import type { LocalMessage } from './types';
 
 export type StoreName = 'chats' | 'messages' | 'outbox' | 'pendingReads' | 'meta';
 const STORES: StoreName[] = ['chats', 'messages', 'outbox', 'pendingReads', 'meta'];
-const VERSION = 1;
+const VERSION = 2; // 2: blobs — файлы, ждущие отправки
 
 export function openDb(name: string): Promise<IDBDatabase> {
   return new Promise((resolve, reject) => {
     const r = indexedDB.open(name, VERSION);
-    r.onupgradeneeded = () => {
+    r.onupgradeneeded = (e) => {
       const db = r.result;
-      db.createObjectStore('chats', { keyPath: 'id' });
-      db.createObjectStore('messages', { keyPath: 'key' }).createIndex('byChat', ['chatId', 'sort']);
-      db.createObjectStore('outbox', { keyPath: 'clientId' });
-      db.createObjectStore('pendingReads', { keyPath: 'chatId' });
-      db.createObjectStore('meta', { keyPath: 'k' });
+      if (e.oldVersion < 1) {
+        db.createObjectStore('chats', { keyPath: 'id' });
+        db.createObjectStore('messages', { keyPath: 'key' }).createIndex('byChat', ['chatId', 'sort']);
+        db.createObjectStore('outbox', { keyPath: 'clientId' });
+        db.createObjectStore('pendingReads', { keyPath: 'chatId' });
+        db.createObjectStore('meta', { keyPath: 'k' });
+      }
+      if (e.oldVersion < 2) db.createObjectStore('blobs', { keyPath: 'clientId' });
     };
     r.onsuccess = () => resolve(r.result);
     r.onerror = () => reject(r.error);
@@ -56,4 +59,16 @@ export function write(db: IDBDatabase, batch: WriteBatch): Promise<void> {
     t.onerror = () => reject(t.error);
     t.onabort = () => reject(t.error);
   });
+}
+
+/** Файл неотправленного сообщения: лежит в IDB, чтобы отправка пережила офлайн и перезагрузку. */
+export function putBlob(db: IDBDatabase, clientId: string, blob: Blob): Promise<unknown> {
+  return req(db.transaction('blobs', 'readwrite').objectStore('blobs').put({ clientId, blob }));
+}
+export async function getBlob(db: IDBDatabase, clientId: string): Promise<Blob | null> {
+  const row = (await req(db.transaction('blobs').objectStore('blobs').get(clientId))) as { blob: Blob } | undefined;
+  return row?.blob ?? null;
+}
+export function delBlob(db: IDBDatabase, clientId: string): Promise<unknown> {
+  return req(db.transaction('blobs', 'readwrite').objectStore('blobs').delete(clientId));
 }

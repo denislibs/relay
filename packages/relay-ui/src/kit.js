@@ -604,6 +604,25 @@ function MediaOverlay(props) {
   if (props.kind === 'video') return h('div', { class: 'rl-media-center' }, h('span', { class: 'rl-media-play' }, h(Icon, { name: 'play', size: 26 })));
   return null;
 }
+/* ---------- LazyImage: blurred thumb at once, the full image only when it is within 500px of the viewport ----------
+   One shared IntersectionObserver for all images. The box is sized by the parent (aspect ratio known up front),
+   so loading never shifts the feed. */
+var lazyIO = null, lazyCbs = typeof WeakMap === 'function' ? new WeakMap() : null;
+function lazyObserve(el, cb) {
+  if (!lazyIO) lazyIO = new IntersectionObserver(function (es) {
+    es.forEach(function (e) { if (!e.isIntersecting) return; var f = lazyCbs.get(e.target); if (f) { lazyCbs.delete(e.target); lazyIO.unobserve(e.target); f(); } });
+  }, { rootMargin: '500px 0px' });
+  lazyCbs.set(el, cb); lazyIO.observe(el);
+  return function () { lazyCbs.delete(el); lazyIO.unobserve(el); };
+}
+function LazyImage(props) {
+  var ref = useRef(null), vis = useState(!!props.eager), loaded = useState(false);
+  useEffect(function () { if (vis[0] || !ref.current) return; return lazyObserve(ref.current, function () { vis[1](true); }); }, []);
+  return h('span', { ref: ref, class: cx('rl-lazy', loaded[0] && 'rl-lazy-loaded') },
+    props.thumb ? h('img', { class: 'rl-lazy-thumb', src: props.thumb, alt: '', 'aria-hidden': 'true' }) : null,
+    vis[0] && props.src ? h('img', { class: 'rl-lazy-full', src: props.src, alt: props.alt || '', decoding: 'async', draggable: false, onLoad: function () { loaded[1](true); if (props.onLoad) props.onLoad(); } }) : null);
+}
+
 function MediaBubble(props) {
   var out = props.from === 'out';
   var items = props.items || [{ seed: props.seed || 0, kind: props.kind || 'image', duration: props.duration }];
@@ -613,7 +632,7 @@ function MediaBubble(props) {
   function cell(it, i) {
     var last = album && i === 3 && extra > 0;
     return h('button', { key: i, type: 'button', class: 'rl-media-cell', onClick: function () { if (props.onOpen && state === 'ready') props.onOpen(i); }, 'aria-label': it.kind === 'video' ? 'Открыть видео' : 'Открыть фото' },
-      h(MediaArt, { seed: it.seed, blur: state === 'remote' }),
+      it.src || it.thumb ? h(LazyImage, { src: it.src, thumb: it.thumb, alt: it.alt }) : h(MediaArt, { seed: it.seed, blur: state === 'remote' }),
       it.kind === 'video' && it.duration ? h('span', { class: 'rl-media-chip rl-media-chip-dur' }, h(Icon, { name: 'video', size: 14 }), fmtTime(it.duration)) : null,
       last ? h('span', { class: 'rl-media-more' }, '+' + (extra + 1)) : null,
       !album ? h(MediaOverlay, { state: state, kind: it.kind, progress: props.progress, size: props.size, onDownload: props.onDownload, onCancel: props.onCancel }) : null);
@@ -677,8 +696,8 @@ function MediaViewer(props) {
       h(IconButton, { icon: 'close', label: 'Закрыть', onClick: props.onClose })),
     h('div', { class: 'rl-viewer-stage' },
       h(IconButton, { icon: 'chevronLeft', label: 'Предыдущее', filled: true, class: 'rl-viewer-nav', disabled: i === 0, onClick: function () { go(-1); } }),
-      h('figure', { key: i, class: 'rl-viewer-media' },
-        h(MediaArt, { seed: it.seed }),
+      h('figure', { key: i, class: cx('rl-viewer-media', it.src && 'rl-viewer-real'), style: it.src && it.w && it.h ? { aspectRatio: it.w + ' / ' + it.h } : null },
+        it.src ? h('img', { class: 'rl-viewer-img', src: it.src, alt: it.caption || '' }) : h(MediaArt, { seed: it.seed }),
         it.kind === 'video' ? h('span', { class: 'rl-media-center' }, h('span', { class: 'rl-media-play rl-media-play-lg' }, h(Icon, { name: 'play', size: 34 }))) : null,
         it.caption ? h('figcaption', null, it.caption) : null),
       h(IconButton, { icon: 'chevronRight', label: 'Следующее', filled: true, class: 'rl-viewer-nav', disabled: i === items.length - 1, onClick: function () { go(1); } })),
@@ -902,4 +921,4 @@ function ScrollToBottom(props) {
 }
 
 
-export { ArchivedRow, ReplyQuote, ReactionChips, cx, chain, ripple, reducedMotion, omit, fmtTime, makeWave, ICONS, Icon, Button, IconButton, Avatar, Badge, Chip, SearchField, ChatRow, ChatRowSkeleton, Bubble, MessageStatus, TypingIndicator, DateDivider, Composer, Banner, Modal, NavRail, Checkbox, Toast, Card, Steps, MediaArt, ProgressRing, Waveform, VoiceMessage, VoiceRecorder, MediaBubble, FileBubble, MediaThumb, MediaViewer, Switch, PanelHeader, ProfileHeader, ActionTile, InfoRow, ReadMore, Presence, useMinVisible, FlipList, SyncIndicator, LinearProgress, EmptyState, ScrollToBottom };
+export { ArchivedRow, ReplyQuote, ReactionChips, cx, chain, ripple, reducedMotion, omit, fmtTime, makeWave, ICONS, Icon, Button, IconButton, Avatar, Badge, Chip, SearchField, ChatRow, ChatRowSkeleton, Bubble, MessageStatus, TypingIndicator, DateDivider, Composer, Banner, Modal, NavRail, Checkbox, Toast, Card, Steps, MediaArt, ProgressRing, Waveform, VoiceMessage, VoiceRecorder, MediaBubble, FileBubble, MediaThumb, MediaViewer, Switch, PanelHeader, ProfileHeader, ActionTile, InfoRow, ReadMore, Presence, useMinVisible, LazyImage, FlipList, SyncIndicator, LinearProgress, EmptyState, ScrollToBottom };
