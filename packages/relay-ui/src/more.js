@@ -497,11 +497,65 @@ function Wallpaper(props) {
    ===================================================================== */
 
 /* ---------- FloatShell: wallpaper everywhere, sidebar card + main area ---------- */
+/* ---------- SideResizer: drag the sidebar's right edge to change its width (like Telegram Web K) ----------
+   The width lives in a CSS variable on the shell (--side-w), changed once per frame while dragging —
+   no Preact render per pointer move. Double-click restores the default. onChange(width|null) on release. */
+function SideResizer(props) {
+  var min = props.min || 280, max = props.max || 600;
+  function clamp(w) { return Math.round(Math.max(min, Math.min(w, Math.min(max, window.innerWidth * 0.45)))); }
+  function shellOf(el) { return el.closest('.rl-shell'); }
+  function onPointerDown(e) {
+    if (e.button !== 0) return;
+    e.preventDefault();
+    var handle = e.currentTarget, shell = shellOf(handle), side = handle.parentElement;
+    var startX = e.clientX, startW = side.getBoundingClientRect().width, w = startW, queued = false;
+    handle.setPointerCapture(e.pointerId);
+    document.documentElement.classList.add('rl-resizing');
+    var end = beginHeavyAnimation(60000); // пока тянут — тяжёлую работу откладываем
+    function move(ev) {
+      w = clamp(startW + ev.clientX - startX);
+      if (queued) return;
+      queued = true;
+      requestMutation(function () { queued = false; shell.style.setProperty('--side-w', w + 'px'); });
+    }
+    function up(ev) {
+      if (ev && ev.clientX !== undefined) { w = clamp(startW + ev.clientX - startX); shell.style.setProperty('--side-w', w + 'px'); }
+      handle.removeEventListener('pointermove', move);
+      handle.removeEventListener('pointerup', up);
+      handle.removeEventListener('pointercancel', up);
+      document.documentElement.classList.remove('rl-resizing');
+      end();
+      if (props.onChange) props.onChange(w);
+    }
+    handle.addEventListener('pointermove', move);
+    handle.addEventListener('pointerup', up);
+    handle.addEventListener('pointercancel', up);
+  }
+  function onDblClick(e) {
+    shellOf(e.currentTarget).style.removeProperty('--side-w');
+    if (props.onChange) props.onChange(null);
+  }
+  function onKeyDown(e) {
+    if (e.key !== 'ArrowLeft' && e.key !== 'ArrowRight') return;
+    e.preventDefault();
+    var shell = shellOf(e.currentTarget), side = e.currentTarget.parentElement;
+    var w = clamp(side.getBoundingClientRect().width + (e.key === 'ArrowRight' ? 24 : -24));
+    shell.style.setProperty('--side-w', w + 'px');
+    if (props.onChange) props.onChange(w);
+  }
+  return h('div', { class: 'rl-side-resizer', role: 'separator', 'aria-orientation': 'vertical', 'aria-label': 'Ширина списка чатов', tabIndex: 0,
+    onPointerDown: onPointerDown, onDblClick: onDblClick, onKeyDown: onKeyDown, title: 'Потяните, чтобы изменить ширину; двойной клик — по умолчанию' });
+}
+
 function FloatShell(props) {
-  return h('div', { class: cx('rl-shell rl-wallpaper', props.wallpaper !== false && 'rl-shell-tw', props.class), style: props.style },
+  var ref = useRef(null);
+  // начальная ширина — один раз; дальше --side-w ведёт только ручка (иначе каждый рендер затирал бы перетаскивание)
+  useLayoutEffect(function () { if (props.sideWidth && ref.current) ref.current.style.setProperty('--side-w', props.sideWidth + 'px'); }, []);
+  return h('div', { ref: ref, class: cx('rl-shell rl-wallpaper', props.wallpaper !== false && 'rl-shell-tw', props.class), style: props.style },
     props.wallpaper !== false ? h(Wallpaper, { pattern: props.pattern }) : null,
     props.rail || null,
-    props.sidebar ? h('div', { class: 'rl-shell-side' }, props.sidebar) : null,
+    props.sidebar ? h('div', { class: 'rl-shell-side' }, props.sidebar,
+      props.onSideResize ? h(SideResizer, { min: props.sideMin, max: props.sideMax, onChange: props.onSideResize }) : null) : null,
     h('div', { class: 'rl-shell-main' }, props.children),
     props.aside || null);
 }
@@ -588,4 +642,4 @@ function GlassBar(props) {
   return h('header', { class: cx('rl-glassbar', props.class) }, props.children);
 }
 
-export { Wallpaper, nudgeWallpaper, buildPattern, DOODLES, PATTERN_SETS, FloatShell, SidebarCard, SidebarHeader, FolderTabs, Fab, GlassBar, WindowList, SideFrame, SlideStack, Menu, ReactionPicker, AttachMenu, MentionList, DropOverlay, LinkPreview, PollBubble, UnreadDivider, SelectionBar, ChatSearchBar, Highlight, ContactPicker, CallRow, StatusAvatar, LoginQR, VirtualList, BottomNav, Tooltip, plural };
+export { Wallpaper, nudgeWallpaper, buildPattern, DOODLES, PATTERN_SETS, FloatShell, SideResizer, SidebarCard, SidebarHeader, FolderTabs, Fab, GlassBar, WindowList, SideFrame, SlideStack, Menu, ReactionPicker, AttachMenu, MentionList, DropOverlay, LinkPreview, PollBubble, UnreadDivider, SelectionBar, ChatSearchBar, Highlight, ContactPicker, CallRow, StatusAvatar, LoginQR, VirtualList, BottomNav, Tooltip, plural };

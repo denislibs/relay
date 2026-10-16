@@ -9,6 +9,11 @@ import { Sidebar } from './Sidebar';
 // экраны боковой панели от корня вглубь: вперёд — слайд справа налево, назад — обратно
 const SIDE_PAGES = ['chats', 'settings'];
 
+// ширина списка чатов, которую пользователь вытянул за край (null — по умолчанию)
+const SIDE_KEY = 'relay.sideWidth';
+const savedSide = (() => { try { const v = Number(localStorage.getItem(SIDE_KEY)); return v > 0 ? v : undefined; } catch { return undefined; } })();
+const saveSide = (w: number | null) => { try { if (w) localStorage.setItem(SIDE_KEY, String(w)); else localStorage.removeItem(SIDE_KEY); } catch { /* приватный режим */ } };
+
 export function App() {
   const boot = useGlobal((s) => s.boot);
   const openChatId = useGlobal((s) => s.openChatId);
@@ -17,7 +22,7 @@ export function App() {
   if (boot === 'login') return <Login />;
   return (
     <>
-      <FloatShell class={openChatId ? 'app-chat-open' : ''} sidebar={<SideFrame><SlideStack order={SIDE_PAGES} active={view} render={(k: string) => (k === 'settings' ? <Settings /> : <Sidebar />)} /></SideFrame>}>
+      <FloatShell class={openChatId ? 'app-chat-open' : ''} sideWidth={savedSide} onSideResize={saveSide} sidebar={<SideFrame><SlideStack order={SIDE_PAGES} active={view} render={(k: string) => (k === 'settings' ? <Settings /> : <Sidebar />)} /></SideFrame>}>
         {openChatId ? (
           <Chat key={openChatId} chatId={openChatId} />
         ) : (
