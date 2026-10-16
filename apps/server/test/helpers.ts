@@ -8,3 +8,9 @@ export async function makeUser(name = 'user'): Promise<number> {
   const [row] = await sql`insert into users (name) values (${name}) returning id`;
   return row.id as number;
 }
+
+import { createChat } from '../src/domain/chats';
+
+export function makeChat(memberIds: number[], kind: 'direct' | 'group' = memberIds.length > 2 ? 'group' : 'direct'): Promise<number> {
+  return createChat(kind, kind === 'group' ? 'Группа' : null, memberIds);
+}
