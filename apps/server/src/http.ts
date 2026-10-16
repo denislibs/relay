@@ -115,7 +115,7 @@ export function createServer(opts: { port: number }): Server {
           ws.send(JSON.stringify({ op: 'err', code: 'bad_frame', retry: false }));
           return;
         }
-        for (const out of await handleFrame(ws.data.userId, frame)) ws.send(JSON.stringify(out));
+        for (const out of await handleFrame(ws.data.userId, frame, publish)) ws.send(JSON.stringify(out));
       },
     },
   });

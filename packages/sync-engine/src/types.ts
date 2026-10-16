@@ -60,7 +60,8 @@ export type Action =
   | { type: 'retry'; clientId: string }
   | { type: 'refreshChats' }
   | { type: 'loadMoreChats' }
-  | { type: 'setDraft'; chatId: number; text: string };
+  | { type: 'setDraft'; chatId: number; text: string }
+  | { type: 'typing'; chatId: number };
 
 export interface EngineConfig {
   userId: number;
@@ -73,7 +74,8 @@ export interface EngineConfig {
   readFlushMs?: number;
   backoffMs?: [number, number];
   historyPage?: number;
-  dialogsPage?: number;   // диалогов в странице (по умолчанию 100)
+  dialogsPage?: number;
+  typingMs?: number;      // сколько держать «печатает…» после последнего кадра (по умолчанию 6000)   // диалогов в странице (по умолчанию 100)
 }
 
 export const PENDING_BASE = 2 ** 52;

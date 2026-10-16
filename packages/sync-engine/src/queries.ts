@@ -58,7 +58,7 @@ export function computeQuery(store: Store, q: Query): Result {
   switch (q.kind) {
     case 'chatList': {
       const chats = [...store.chats.values()].sort((a, b) => { const x = sortAt(a), y = sortAt(b); return x < y ? 1 : x > y ? -1 : b.id - a.id; });
-      return result(chats.slice(0, q.limit).map(chatItem));
+      return result(chats.slice(0, q.limit).map((c) => ({ ...chatItem(c), typing: store.typing.has(c.id) })));
     }
     case 'messages': {
       // только окно: бинарный поиск по отсортированному кэшу, подписи — без сериализации

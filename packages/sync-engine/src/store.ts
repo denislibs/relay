@@ -96,6 +96,15 @@ export class Store {
   /** Исходники цитат вне загруженной истории — отдельно, чтобы не рвать непрерывность ленты. Только в памяти. */
   quotes = new Map<string, { id: number; sort: number; body: string; senderId: number }>();
   quoteFor(chatId: number, id: number) { return this.quotes.get(chatId + ':' + id); }
+  /** Кто сейчас печатает: chatId → userId. Только в памяти — это состояние момента. */
+  typing = new Map<number, Set<number>>();
+  setTyping(chatId: number, userId: number, on: boolean): void {
+    let set = this.typing.get(chatId);
+    if (on) { if (!set) { set = new Set(); this.typing.set(chatId, set); } if (set.has(userId)) return; set.add(userId); }
+    else { if (!set?.delete(userId)) return; if (!set.size) this.typing.delete(chatId); }
+    this.touch(chatId);
+  }
+
   /** Запросы недостающих цитат копятся здесь; движок забирает их после расчёта подписок. */
   quoteWants = new Map<number, Set<number>>();
   private quoteAsked = new Set<string>();
@@ -129,7 +138,9 @@ export class Store {
 
   applyUpdate(u: Update): void {
     switch (u.type) {
-      case 'newMessage': return this.applyMessage(u.message, true);
+      case 'newMessage':
+        this.setTyping(u.message.chatId, u.message.senderId, false); // написал — уже не «печатает»
+        return this.applyMessage(u.message, true);
       case 'readOwn': return this.applyOwnRead(u.chatId, u.upToId);
       case 'readBy': return this.applyPeerRead(u.chatId, u.upToId);
     }

@@ -59,3 +59,18 @@ test('a reload inside the grace period does not flicker offline', async () => {
   expect((await presenceOf(b.token)).find((p) => p.userId === a.userId)?.online).toBe(true);
   again.close(); wb.close();
 });
+
+test('typing is relayed to the other members only', async () => {
+  const a = await login('Анна'), b = await login('Борис');
+  const res = await fetch(`${base}/dev/chats`, { method: 'POST', headers: { cookie: `relay_session=${a.token}` }, body: JSON.stringify({ kind: 'direct', title: null, memberIds: [a.userId, b.userId] }) });
+  const { id: chatId } = (await res.json()) as { id: number };
+  const wa = await connect(a.token), wb = await connect(b.token);
+  const got = nextFrame(wb, (f) => f.op === 'typing');
+  const own: ServerFrame[] = [];
+  wa.addEventListener('message', (e) => { const f = JSON.parse(String(e.data)); if (f.op === 'typing') own.push(f); });
+  wa.send(JSON.stringify({ op: 'typing', chatId }));
+  expect(await got).toEqual({ op: 'typing', chatId, userId: a.userId });
+  await Bun.sleep(50);
+  expect(own).toEqual([]);   // себе не приходит
+  wa.close(); wb.close();
+});

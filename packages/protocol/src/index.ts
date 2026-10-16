@@ -25,6 +25,7 @@ export type ClientFrame =
   | { op: 'sync'; since: number }
   | { op: 'send'; reqId: string; clientId: string; chatId: Id; body: string; replyToId?: Id | null }
   | { op: 'read'; reqId: string; chatId: Id; upToId: Id }
+  | { op: 'typing'; chatId: Id }   // «печатаю» — без ответа, сервер пересылает остальным участникам
   | { op: 'ping' };
 
 /** Присутствие собеседника: в сети сейчас или когда был последний раз (ISO). */
@@ -38,6 +39,7 @@ export type ServerFrame =
   | { op: 'err'; reqId?: string; code: ErrorCode; retry: boolean }
   | { op: 'poke' }
   | { op: 'presence'; items: PresenceItem[] }
+  | { op: 'typing'; chatId: Id; userId: Id }
   | { op: 'pong' };
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -52,6 +54,7 @@ export function parseClientFrame(raw: string): ClientFrame | null {
     case 'hello': return int(f.lastSeq) ? { op: 'hello', lastSeq: f.lastSeq } : null;
     case 'sync': return int(f.since) ? { op: 'sync', since: f.since } : null;
     case 'ping': return { op: 'ping' };
+    case 'typing': return int(f.chatId) ? { op: 'typing', chatId: f.chatId } : null;
     case 'send':
       if (!str(f.reqId, 64) || !str(f.clientId, 36) || !UUID.test(f.clientId) || !int(f.chatId) || typeof f.body !== 'string') return null;
       if (f.replyToId != null && !int(f.replyToId)) return null;

@@ -50,6 +50,7 @@ export class Engine {
   private statusSig = '';
   private refreshing = false;
   private moreChats: Promise<void> | null = null;
+  private typingTimers = new Map<string, ReturnType<typeof setTimeout>>();
 
   private constructor(private cfg: EngineConfig, readonly store: Store, private db: IDBDatabase) {
     this.transport = new WsTransport(cfg.wsUrl, {
@@ -271,6 +272,9 @@ export class Engine {
         if (this.store.setDraft(a.chatId, a.text)) { await this.store.flush(); this.changed(); }
         return null;
       }
+      case 'typing':
+        if (this.online) this.transport.send({ op: 'typing', chatId: a.chatId });
+        return null;
       case 'loadMoreChats':
         await this.loadMoreChats();
         return null;
@@ -348,6 +352,15 @@ export class Engine {
       case 'poke':
         this.runSync();
         return;
+      case 'typing': {
+        // «печатает…» гаснет через typingMs после последнего кадра
+        const key = f.chatId + ':' + f.userId;
+        clearTimeout(this.typingTimers.get(key));
+        this.store.setTyping(f.chatId, f.userId, true);
+        this.typingTimers.set(key, setTimeout(() => { this.typingTimers.delete(key); this.store.setTyping(f.chatId, f.userId, false); this.changed(); }, this.cfg.typingMs ?? 6000));
+        this.changed();
+        return;
+      }
       case 'presence':
         for (const p of f.items) this.presence.set(p.userId, { online: p.online, lastSeen: p.lastSeen });
         this.presenceDirty = true;

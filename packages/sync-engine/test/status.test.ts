@@ -222,3 +222,21 @@ test('epoch: the server database was recreated — the client drops its stale ca
   again.connect();
   await list2.until((l) => l.length === 0);      // поколение сменилось — кэш выброшен
 });
+
+test('typing: shows on the peer side, fades after typingMs, clears when the message arrives', async () => {
+  const a = await srv.login('a'), b = await srv.login('b');
+  const chatId = await srv.chat(a.token, [a.userId, b.userId]);
+  const ea = await open(srv.config(a));
+  const eb = await open({ ...srv.config(b), typingMs: 150 });
+  ea.connect(); eb.connect();
+  await ea.whenIdle(); await eb.whenIdle();
+  const list = watchInto(eb, { kind: 'chatList', limit: 10 });
+  await list.until((l) => l.length === 1);
+  await ea.call({ type: 'typing', chatId });
+  await list.until((l) => l[0].typing === true);
+  await list.until((l) => l[0].typing === false, 2000);            // погасло само
+  await ea.call({ type: 'typing', chatId });
+  await list.until((l) => l[0].typing === true);
+  await ea.call({ type: 'sendMessage', chatId, body: 'готово' });
+  await list.until((l) => l[0].typing === false && (l[0].last as { body: string } | null)?.body === 'готово');
+});

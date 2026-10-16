@@ -1,6 +1,6 @@
 import { Avatar, Composer, GlassBar, IconButton, Menu, requestMutation } from '@relay/ui';
 import { useEffect, useLayoutEffect, useRef, useState } from 'preact/hooks';
-import { openChat, saveDraft, send } from '../data';
+import { openChat, saveDraft, send, typing, typingDone } from '../data';
 import { setGlobal, useGlobal } from '../global';
 import { Feed } from './Feed';
 import { lastSeenText } from './format';
@@ -31,6 +31,7 @@ export function Chat({ chatId }: { chatId: number }) {
   };
   const latest = useRef(text);
   const onType = (v: string) => {
+    if (v.trim() && v.length > latest.current.length) typing(chatId); // набирают (а не стирают) — «печатает…» у собеседника
     setText(v);
     latest.current = v;
     if (draftTimer.current) clearTimeout(draftTimer.current);
@@ -62,7 +63,8 @@ export function Chat({ chatId }: { chatId: number }) {
   useEffect(() => { const t = setInterval(() => tick((n) => n + 1), 30_000); return () => clearInterval(t); }, []);
   const myPeer = peer && chat?.peerId === peer.userId && peer.known ? peer : null;
   const online = !!myPeer?.online;
-  const subtitle = chat?.kind === 'group' ? 'Группа' : myPeer ? lastSeenText(online, myPeer.lastSeen as string | null) : '';
+  const isTyping = !!chat?.typing;
+  const subtitle = isTyping ? 'печатает…' : chat?.kind === 'group' ? 'Группа' : myPeer ? lastSeenText(online, myPeer.lastSeen as string | null) : '';
   const replyTo = replyKey ? messages.find((m) => m.key === replyKey) : undefined;
   const authorOf = (senderId: unknown) => (senderId === me.userId ? 'Вы' : title);
   const menuMsg = menu ? messages.find((m) => m.key === menu.key) : undefined;
@@ -76,7 +78,7 @@ export function Chat({ chatId }: { chatId: number }) {
           <Avatar name={title} size={40} />
           <span class="rl-glassbar-title">
             <b>{title}</b>
-            <span key={phaseLabel ?? (online ? 'on' : 'off')} class={phaseLabel ? 'app-phase' : online ? 'app-online' : undefined}>{phaseLabel ?? (subtitle || '\u00a0')}</span>
+            <span key={phaseLabel ?? (isTyping ? 'typing' : online ? 'on' : 'off')} class={phaseLabel ? 'app-phase' : isTyping || online ? 'app-online' : undefined}>{phaseLabel ?? (subtitle || '\u00a0')}</span>
           </span>
         </button>
         <IconButton icon="search" label="Поиск по чату" />
@@ -95,6 +97,7 @@ export function Chat({ chatId }: { chatId: number }) {
           if (draftTimer.current) { clearTimeout(draftTimer.current); draftTimer.current = null; }
           saved.current = latest.current = '';   // черновик очищает сам движок вместе с отправкой
           setText('');
+          typingDone(chatId);
           send(chatId, body, (replyTo?.id as number) ?? null);
           setReplyKey(null);
         }}

@@ -65,6 +65,7 @@ export function Sidebar() {
                   preview={last?.body ?? 'Нет сообщений'}
                   draft={c.draft && c.id !== openId ? (c.draft as string) : undefined}
                   muted={mutedIds.includes(c.id as number)}
+                  typing={!!c.typing}
                   time={chatTime((c.sortAt ?? c.lastAt) as string)}
                   unread={c.unread as number}
                   status={last && last.senderId === me.userId ? last.status : null}

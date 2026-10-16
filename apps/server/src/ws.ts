@@ -1,3 +1,4 @@
+import { sql } from './db';
 import { currentEpoch } from './domain/epoch';
 import type { ClientFrame, ServerFrame } from '@relay/protocol';
 import { DomainError } from './domain/errors';
@@ -5,10 +6,20 @@ import { currentSeq, getUpdates } from './domain/journal';
 import { sendMessage } from './domain/messages';
 import { markRead } from './domain/reads';
 
-export async function handleFrame(userId: number, frame: ClientFrame): Promise<ServerFrame[]> {
+/** publish — разослать кадр в топик пользователя (для «печатает…»); у тестов без сокетов — no-op. */
+export async function handleFrame(userId: number, frame: ClientFrame, publish: (topic: string, msg: string) => void = () => {}): Promise<ServerFrame[]> {
   const reqId = 'reqId' in frame ? frame.reqId : undefined;
   try {
     switch (frame.op) {
+      case 'typing': {
+        // участникам, кроме себя; не участник — молча игнорируем (это не данные, ответа нет)
+        const rows = await sql`select user_id from chat_members where chat_id = ${frame.chatId}`;
+        const members = rows.map((r) => r.user_id as number);
+        if (!members.includes(userId)) return [];
+        const msg = JSON.stringify({ op: 'typing', chatId: frame.chatId, userId } satisfies ServerFrame);
+        for (const m of members) if (m !== userId) publish(`user:${m}`, msg);
+        return [];
+      }
       case 'hello':
         return [{ op: 'hello', seq: await currentSeq(userId), epoch: await currentEpoch() }];
       case 'sync': {

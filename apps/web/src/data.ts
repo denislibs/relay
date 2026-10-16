@@ -184,6 +184,17 @@ export async function send(chatId: number, body: string, replyToId: number | nul
   await engine.call({ type: 'sendMessage', chatId, body, replyToId });
 }
 
+const typingSent = new Map<number, number>();
+/** «Печатаю»: не чаще раза в 3 с на чат (у собеседника отметка живёт 6 с). */
+export function typing(chatId: number): void {
+  const now = Date.now();
+  if (now - (typingSent.get(chatId) ?? 0) < 3000) return;
+  typingSent.set(chatId, now);
+  engine.call({ type: 'typing', chatId }).catch(() => {});
+}
+/** Отправили — следующий набор снова сразу сообщит «печатаю». */
+export function typingDone(chatId: number): void { typingSent.delete(chatId); }
+
 /** Черновик чата (пустой — удалить). Хранится в движке: общий для вкладок, переживает перезагрузку. */
 export function saveDraft(chatId: number, text: string): void {
   engine.call({ type: 'setDraft', chatId, text }).catch(() => {});
