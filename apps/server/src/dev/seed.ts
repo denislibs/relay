@@ -4,6 +4,7 @@
 // в чате 3–60 сообщений за последние 90 дней, в ~15% чатов есть непрочитанное.
 // Журнал изменений не пишется: клиент заберёт всё снимком (/chats) при первом входе.
 import { sql } from '../db';
+import { bumpEpoch } from '../domain/epoch';
 
 const arg = (name: string, def: number) => { const i = process.argv.indexOf('--' + name); return i > 0 ? Number(process.argv[i + 1]) : def; };
 const OWNERS = arg('owners', 31), CHATS = arg('chats', 500), GROUPS = arg('groups', 20);
@@ -40,6 +41,7 @@ const GROUP_TITLES = ['Команда frontend', 'Блок 5', 'Семья', 'Д
 
 async function reset() {
   await sql`truncate users, sessions, chats, chat_members, messages, user_seq, updates restart identity cascade`;
+  await bumpEpoch(); // id начнутся заново — клиенты должны выбросить старый кэш
 }
 
 async function insertUsers(names: string[]): Promise<number[]> {

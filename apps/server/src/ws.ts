@@ -1,3 +1,4 @@
+import { currentEpoch } from './domain/epoch';
 import type { ClientFrame, ServerFrame } from '@relay/protocol';
 import { DomainError } from './domain/errors';
 import { currentSeq, getUpdates } from './domain/journal';
@@ -9,7 +10,7 @@ export async function handleFrame(userId: number, frame: ClientFrame): Promise<S
   try {
     switch (frame.op) {
       case 'hello':
-        return [{ op: 'hello', seq: await currentSeq(userId) }];
+        return [{ op: 'hello', seq: await currentSeq(userId), epoch: await currentEpoch() }];
       case 'sync': {
         const page = await getUpdates(userId, frame.since);
         if (page.tooLong) return [{ op: 'tooLong', seq: page.seq }];

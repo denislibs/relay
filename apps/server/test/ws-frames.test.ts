@@ -24,7 +24,7 @@ test('send → ack, then sync returns the newMessage and hello reports seq', asy
   expect(upd).toMatchObject({ op: 'updates', from: 0, to: 1, more: false });
   expect((upd as { items: { update: { type: string } }[] }).items[0].update.type).toBe('newMessage');
 
-  expect(await handleFrame(b, { op: 'hello', lastSeq: 0 })).toEqual([{ op: 'hello', seq: 1 }]);
+  expect(await handleFrame(b, { op: 'hello', lastSeq: 0 })).toEqual([{ op: 'hello', seq: 1, epoch: expect.any(String) }]); // epoch — поколение базы
 });
 
 test('domain errors are not retryable, ping answers pong', async () => {

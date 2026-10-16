@@ -27,6 +27,8 @@ export class Store {
   lastSeq = 0;
   /** снимок с сервера уже лежит в кэше (иначе показывать нечего — идёт первая загрузка) */
   hydrated = false;
+  /** Поколение базы сервера, с которым синхронизирован кэш. */
+  epoch: string | null = null;
   /** Подгрузка диалогов страницами: курсор следующей страницы (время в мс + id) и «дальше пусто». */
   dialogsAt = 0;
   dialogsId = 0;
@@ -54,6 +56,7 @@ export class Store {
     const meta = await getAll<{ k: string; v: number }>(db, 'meta');
     s.lastSeq = s.seqAtFlush = meta.find((m) => m.k === 'lastSeq')?.v ?? 0;
     s.hydrated = !!meta.find((m) => m.k === 'hydrated')?.v;
+    s.epoch = ((meta as { k: string; v: unknown }[]).find((m) => m.k === 'epoch')?.v as string) ?? null;
     s.dialogsAt = meta.find((m) => m.k === 'dialogsAt')?.v ?? 0;
     s.dialogsId = meta.find((m) => m.k === 'dialogsId')?.v ?? 0;
     s.dialogsDone = !!meta.find((m) => m.k === 'dialogsDone')?.v;
@@ -247,6 +250,27 @@ export class Store {
     return true;
   }
 
+  /** Сервер пересоздал базу (другое поколение): выбросить всё — чаты, сообщения, очередь, указатели — и IDB тоже. */
+  async wipe(epoch: string): Promise<void> {
+    for (const id of this.chats.keys()) this.touch(id);
+    this.chats.clear(); this.messages.clear(); this.loaded.clear(); this.sorted.clear();
+    this.outbox.clear(); this.pendingReads.clear();
+    this.dirtyChats.clear(); this.dirtyMessages.clear(); this.dirtyOutbox.clear(); this.dirtyReads.clear();
+    this.lastSeq = this.seqAtFlush = 0;
+    this.hydrated = false;
+    this.dialogsAt = 0; this.dialogsId = 0; this.dialogsDone = false;
+    this.epoch = epoch;
+    const db = this.db as IDBDatabase;
+    const names = ['chats', 'messages', 'outbox', 'pendingReads', 'meta'];
+    const t = db.transaction(names, 'readwrite');
+    for (const n of names) t.objectStore(n).clear();
+    await new Promise<void>((res, rej) => { t.oncomplete = () => res(); t.onerror = () => rej(t.error); });
+    this.dirtyMeta = true;
+    await this.flush();
+  }
+
+  markMeta(): void { this.dirtyMeta = true; }
+
   /** Куда дошла подгрузка диалогов. next = null — страниц больше нет. */
   setDialogsCursor(next: { at: string; id: number } | null): void {
     this.dialogsAt = next ? Date.parse(next.at) : 0;
@@ -298,7 +322,7 @@ export class Store {
     batch.del.outbox = [...this.dirtyOutbox].filter((k) => !this.outbox.has(k));
     batch.put.pendingReads = [...this.dirtyReads].filter((c) => this.pendingReads.has(c)).map((c) => ({ chatId: c, upToId: this.pendingReads.get(c) }));
     batch.del.pendingReads = [...this.dirtyReads].filter((c) => !this.pendingReads.has(c));
-    if (this.dirtyMeta || this.lastSeq !== this.seqAtFlush) batch.put.meta = [{ k: 'lastSeq', v: this.lastSeq }, { k: 'hydrated', v: this.hydrated ? 1 : 0 }, { k: 'dialogsAt', v: this.dialogsAt }, { k: 'dialogsId', v: this.dialogsId }, { k: 'dialogsDone', v: this.dialogsDone ? 1 : 0 }];
+    if (this.dirtyMeta || this.lastSeq !== this.seqAtFlush) batch.put.meta = [{ k: 'lastSeq', v: this.lastSeq }, { k: 'hydrated', v: this.hydrated ? 1 : 0 }, { k: 'dialogsAt', v: this.dialogsAt }, { k: 'dialogsId', v: this.dialogsId }, { k: 'dialogsDone', v: this.dialogsDone ? 1 : 0 }, ...(this.epoch ? [{ k: 'epoch', v: this.epoch as unknown as number }] : [])];
     this.dirtyChats.clear(); this.dirtyMessages.clear(); this.dirtyOutbox.clear(); this.dirtyReads.clear(); this.dirtyMeta = false;
     const seq = this.lastSeq;
     await write(this.db, batch);

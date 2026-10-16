@@ -1,3 +1,4 @@
+import { sql } from '../../../apps/server/src/db';
 import { afterAll, afterEach, beforeEach, expect, test } from 'bun:test';
 import { sendMessage } from '../../../apps/server/src/domain/messages';
 import { Engine } from '../src/engine';
@@ -201,3 +202,23 @@ test('feed window: anchored by sort (end/start/center), loads history under it, 
   await feed.until((l) => l[0]?.id === ids[100] && l.length === 20);           // до хвоста осталось 20
   expect(meta()).toMatchObject({ hasNewer: false, live: true });
 }, 20000);
+
+test('epoch: the server database was recreated — the client drops its stale cache and starts over', async () => {
+  const a = await srv.login('a'), b = await srv.login('b');
+  const stale = await srv.chat(a.token, [a.userId, b.userId]);
+  const cfg = srv.config(a);
+  const ea = await open(cfg);
+  ea.connect();
+  const list = watchInto(ea, { kind: 'chatList', limit: 10 });
+  await list.until((l) => l.length === 1 && l[0].id === stale);
+  await ea.close();
+  // «пересоздали базу»: чата больше нет, поколение другое
+  await sql`delete from chats where id = ${stale}`;
+  const { bumpEpoch } = await import('../../../apps/server/src/domain/epoch');
+  await bumpEpoch();
+  const again = await open(cfg);
+  const list2 = watchInto(again, { kind: 'chatList', limit: 10 });
+  await list2.until((l) => l.length === 1);      // из кэша — старый чат
+  again.connect();
+  await list2.until((l) => l.length === 0);      // поколение сменилось — кэш выброшен
+});

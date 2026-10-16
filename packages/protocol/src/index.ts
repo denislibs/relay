@@ -31,7 +31,7 @@ export type ClientFrame =
 export interface PresenceItem { userId: number; online: boolean; lastSeen: string | null }
 
 export type ServerFrame =
-  | { op: 'hello'; seq: number }
+  | { op: 'hello'; seq: number; epoch: string }   // epoch — поколение базы; сменилось — кэш клиента недействителен
   | { op: 'updates'; from: number; to: number; items: JournalEntry[]; more: boolean }
   | { op: 'tooLong'; seq: number }
   | { op: 'ack'; reqId: string; result: Record<string, unknown> }

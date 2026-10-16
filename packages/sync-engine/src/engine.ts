@@ -302,10 +302,15 @@ export class Engine {
   private onFrame(f: ServerFrame): void {
     switch (f.op) {
       case 'hello':
-        // снимок — только когда кэш пуст; lastSeq = 0 бывает и у заполненного кэша (журнал пользователя ещё пуст)
         this.holding = true;
-        if (!this.store.hydrated) this.run(() => this.bootstrap(f.seq));
-        else this.runSync();
+        this.run(async () => {
+          // другое поколение базы (сервер пересоздан): старый кэш недействителен целиком
+          if (this.store.epoch && f.epoch && this.store.epoch !== f.epoch) { await this.store.wipe(f.epoch); this.changed(); }
+          else if (!this.store.epoch && f.epoch) { this.store.epoch = f.epoch; this.store.markMeta(); }
+          // снимок — только когда кэш пуст; lastSeq = 0 бывает и у заполненного кэша (журнал пользователя ещё пуст)
+          if (!this.store.hydrated) await this.bootstrap(f.seq);
+          else this.runSync();
+        });
         return;
       case 'updates':
       case 'tooLong': {
