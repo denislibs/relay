@@ -43,7 +43,9 @@ async function reset() {
 }
 
 async function insertUsers(names: string[]): Promise<number[]> {
-  const rows = await sql`insert into users ${sql(names.map((name) => ({ name })))} returning id`;
+  // «был(а) …»: чаще недавно, иногда несколько дней назад
+  const lastSeen = () => new Date(Date.now() - rnd() ** 2 * 6 * 86_400_000 - 120_000);
+  const rows = await sql`insert into users ${sql(names.map((name) => ({ name, last_seen_at: lastSeen() })))} returning id`;
   return rows.map((r) => r.id as number);
 }
 

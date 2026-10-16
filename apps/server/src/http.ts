@@ -6,6 +6,7 @@ import { createSession, createUser, readSessionToken, sessionCookie, userIdFromT
 import { createChat, getHistory, listChats } from './domain/chats';
 import { sql } from './db';
 import { DomainError } from './domain/errors';
+import { connected, disconnected, listPresence, type Publish } from './domain/presence';
 import { handleFrame } from './ws';
 
 const STATUS: Record<string, number> = { bad_frame: 400, too_long: 400, unauthorized: 401, not_member: 403, not_found: 404 };
@@ -13,7 +14,7 @@ const fail = (code: string) => Response.json({ code }, { status: STATUS[code] ??
 
 export type WsData = { userId: number };
 
-const API = /^\/(health|me|chats|ws|dev)(\/|$)/;
+const API = /^\/(health|me|chats|presence|ws|dev)(\/|$)/;
 
 /** Статика клиента из WEB_DIST. Путь не может выйти за папку; пути без расширения — SPA, отдаём index.html. */
 function serveStatic(pathname: string): Response {
@@ -35,7 +36,8 @@ function serveStatic(pathname: string): Response {
 }
 
 export function createServer(opts: { port: number }): Server {
-  return Bun.serve<WsData>({
+  const publish: Publish = (topic, msg) => { server.publish(topic, msg); };
+  const server = Bun.serve<WsData>({
     port: opts.port,
     async fetch(req, server) {
       const url = new URL(req.url);
@@ -67,6 +69,9 @@ export function createServer(opts: { port: number }): Server {
           const ids = memberIds.includes(userId) ? memberIds : [userId, ...memberIds];
           return Response.json({ id: await createChat(kind, title, ids) });
         }
+        if (req.method === 'GET' && url.pathname === '/presence') {
+          return Response.json(await listPresence(userId));
+        }
         if (req.method === 'GET' && url.pathname === '/chats') {
           return Response.json(await listChats(userId));
         }
@@ -86,6 +91,10 @@ export function createServer(opts: { port: number }): Server {
     websocket: {
       open(ws) {
         ws.subscribe(`user:${ws.data.userId}`);
+        connected(publish, ws.data.userId).catch((err) => console.error('presence:', err));
+      },
+      close(ws) {
+        disconnected(publish, ws.data.userId);
       },
       async message(ws, raw) {
         const frame = parseClientFrame(typeof raw === 'string' ? raw : new TextDecoder().decode(raw));
@@ -97,4 +106,5 @@ export function createServer(opts: { port: number }): Server {
       },
     },
   });
+  return server;
 }

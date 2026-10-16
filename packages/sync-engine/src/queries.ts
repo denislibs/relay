@@ -36,7 +36,8 @@ export function computeQuery(store: Store, q: Query): Result {
       return result([{ key: 'counters', unreadChats, unreadMessages }]);
     }
     case 'status':
-      throw new Error('status is computed by the engine');
+    case 'presence':
+      throw new Error(q.kind + ' is computed by the engine');
   }
 }
 

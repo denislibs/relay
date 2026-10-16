@@ -33,6 +33,10 @@ export class Engine {
   private syncing = false;
   /** Догоняем журнал после hello: данные копим и отдаём интерфейсу одной пачкой, чтобы список не ехал по частям. */
   private holding = false;
+  /** Присутствие собеседников: состояние момента, только в памяти; без связи — неизвестно. */
+  private presence = new Map<number, { online: boolean; lastSeen: string | null }>();
+  private presenceFetched = false;
+  private presenceDirty = false;   // присутствие не трогает чаты — свой флаг для подписок presence
   private acting = 0;       // действия пользователя в работе: их результат показываем сразу, даже во время догонки
   private syncAgain = false;
   private syncWaiter: { resolve(f: SyncReply): void; reject(e: ReqError): void } | null = null;
@@ -169,6 +173,11 @@ export class Engine {
   }
 
   private compute(q: Query): Result {
+    if (q.kind === 'presence') {
+      const p = this.presence.get(q.userId);
+      const it: Item = { key: 'p' + q.userId, userId: q.userId, known: !!p, online: p?.online ?? false, lastSeen: p?.lastSeen ?? null };
+      return { items: new Map([[it.key, it]]), order: [it.key], sig: new Map([[it.key, JSON.stringify(it)]]) };
+    }
     if (q.kind !== 'status') return computeQuery(this.store, q);
     const it = this.statusItem();
     return { items: new Map([[it.key, it]]), order: [it.key], sig: new Map([[it.key, JSON.stringify(it)]]) };
@@ -185,10 +194,12 @@ export class Engine {
     if (!hold) this.store.touched.clear(); // при удержании изменения копятся до конца догонки
     const sig = JSON.stringify(this.statusItem());
     const statusChanged = sig !== this.statusSig;
+    const presenceDirty = this.presenceDirty;
+    this.presenceDirty = false;
     this.statusSig = sig;
     for (const w of this.watchers.values()) {
-      if (!w.force && !affects(w.q, touched) && !(w.q.kind === 'status' && statusChanged)) continue;
-      if (hold && !w.force && w.q.kind !== 'status') continue;
+      if (!w.force && !affects(w.q, touched) && !(w.q.kind === 'status' && statusChanged) && !(w.q.kind === 'presence' && presenceDirty)) continue;
+      if (hold && !w.force && w.q.kind !== 'status' && w.q.kind !== 'presence') continue;
       if (w.gated) continue;
       w.force = false;
       const next = this.compute(w.q);
@@ -264,6 +275,9 @@ export class Engine {
   private onClose(): void {
     this.online = false;
     this.holding = false;
+    this.presence.clear();            // без связи не знаем, кто в сети
+    this.presenceDirty = true;
+    this.presenceFetched = false;
     if (this.wantOnline) this.failures++;
     this.ready = false;
     this.changed();
@@ -302,6 +316,11 @@ export class Engine {
       }
       case 'poke':
         this.runSync();
+        return;
+      case 'presence':
+        for (const p of f.items) this.presence.set(p.userId, { online: p.online, lastSeen: p.lastSeen });
+        this.presenceDirty = true;
+        this.changed();
         return;
       case 'pong':
         return;
@@ -369,7 +388,20 @@ export class Engine {
       this.pumpOutbox();
       this.flushReads();
       if (this.store.unnamed().length) this.refreshList();
+      if (!this.presenceFetched) this.fetchPresence();
     }
+  }
+
+  /** Снимок присутствия собеседников — раз на подключение; дальше приходят кадры presence. */
+  private fetchPresence(): void {
+    this.presenceFetched = true;
+    this.run(async () => {
+      const list = await this.http<{ userId: number; online: boolean; lastSeen: string | null }[]>('/presence');
+      if (!this.online) return;
+      for (const p of list) if (!this.presence.has(p.userId)) this.presence.set(p.userId, { online: p.online, lastSeen: p.lastSeen }); // живой кадр, пришедший раньше снимка, свежее
+      this.presenceDirty = true;
+      this.changed();
+    });
   }
 
   /** Сообщение пришло в чат, которого не было в снимке: подтянуть названия и собеседников. */

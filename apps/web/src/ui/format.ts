@@ -30,3 +30,19 @@ export function dayKey(iso: string): string {
   const d = new Date(iso);
   return `${d.getFullYear()}-${d.getMonth()}-${d.getDate()}`;
 }
+
+/** Подзаголовок личного чата, как в Telegram: «в сети», «был(а) 5 мин. назад», «был(а) вчера в 21:05»… */
+export function lastSeenText(online: boolean, lastSeen: string | null, now = Date.now()): string {
+  if (online) return 'в сети';
+  if (!lastSeen) return 'был(а) давно';
+  const d = new Date(lastSeen), ago = now - d.getTime();
+  if (ago < 60_000) return 'был(а) только что';
+  if (ago < 3_600_000) return `был(а) ${Math.floor(ago / 60_000)} мин. назад`;
+  const day = (x: Date) => new Date(x.getFullYear(), x.getMonth(), x.getDate()).getTime();
+  const days = Math.round((day(new Date(now)) - day(d)) / 86_400_000);
+  const at = `${pad(d.getHours())}:${pad(d.getMinutes())}`;
+  if (days === 0) return `был(а) в ${at}`;
+  if (days === 1) return `был(а) вчера в ${at}`;
+  if (days < 7) return `был(а) ${d.toLocaleDateString('ru-RU', { day: 'numeric', month: 'short' })} в ${at}`;
+  return `был(а) ${pad(d.getDate())}.${pad(d.getMonth() + 1)}.${String(d.getFullYear()).slice(2)}`;
+}

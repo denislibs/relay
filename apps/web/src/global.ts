@@ -18,7 +18,8 @@ export interface GlobalState {
   status: Status;
   syncLabel: string | null;   // стадия для поля поиска; каждая держится не меньше 600 мс
   openChatId: number | null;
-  pendingChatId: number | null;   // выбран, но лента ещё не готова: на экране прежний чат, строка уже подсвечена
+  pendingChatId: number | null;
+  peer: Item | null;   // присутствие собеседника открытого личного чата {userId, known, online, lastSeen}   // выбран, но лента ещё не готова: на экране прежний чат, строка уже подсвечена
   messages: Item[];
   folder: 'all' | 'unread';
   search: string;
@@ -37,6 +38,7 @@ let state: GlobalState = {
   syncLabel: null,
   openChatId: null,
   pendingChatId: null,
+  peer: null,
   messages: [],
   folder: 'all',
   search: '',

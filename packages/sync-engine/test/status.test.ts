@@ -108,3 +108,22 @@ test('opening a chat: the first feed patch is already complete (no empty or part
   expect(feed.patches[0].op).toBe('snapshot');
   expect((feed.patches[0] as { items: unknown[] }).items.length).toBe(60);
 });
+
+test('presence: the peer goes online and offline; unknown while disconnected', async () => {
+  process.env.RELAY_PRESENCE_GRACE_MS = '40';
+  const a = await srv.login('a'), b = await srv.login('b');
+  await srv.chat(a.token, [a.userId, b.userId]);
+  const ea = await open(srv.config(a));
+  const p = watchInto(ea, { kind: 'presence', userId: b.userId });
+  await p.until((l) => l[0]?.known === false);
+  ea.connect();
+  await p.until((l) => l[0].known === true && l[0].online === false);       // снимок: b ещё не заходил
+  const eb = await open(srv.config(b));
+  eb.connect();
+  await p.until((l) => l[0].online === true);                                 // живой кадр
+  await eb.close();
+  await p.until((l) => l[0].online === false && typeof l[0].lastSeen === 'string');
+  ea.disconnect();
+  await p.until((l) => l[0].known === false);
+  delete process.env.RELAY_PRESENCE_GRACE_MS;
+});

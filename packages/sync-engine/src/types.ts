@@ -41,7 +41,8 @@ export type Query =
   | { kind: 'chatList'; limit: number }
   | { kind: 'messages'; chatId: number; limit: number }
   | { kind: 'counters' }
-  | { kind: 'status' };
+  | { kind: 'status' }
+  | { kind: 'presence'; userId: number };
 
 export type Item = { key: string } & Record<string, unknown>;
 

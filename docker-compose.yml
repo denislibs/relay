@@ -20,6 +20,8 @@ services:
     command: ["bun", "apps/server/src/migrate.ts"]
     environment:
       DATABASE_URL: postgres://relay:relay@postgres:5432/relay
+    volumes:
+      - ./apps:/app/apps    # свежие миграции без пересборки образа
     depends_on:
       postgres: { condition: service_healthy }
 

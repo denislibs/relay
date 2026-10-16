@@ -2,7 +2,7 @@ import { Avatar, Bubble, Composer, DateDivider, GlassBar, IconButton, Menu, Scro
 import { useEffect, useLayoutEffect, useRef, useState } from 'preact/hooks';
 import { loadOlder, openChat, send } from '../data';
 import { useGlobal } from '../global';
-import { clock, dayKey, dayLabel } from './format';
+import { clock, dayKey, dayLabel, lastSeenText } from './format';
 import { useReadTracker } from './readTracker';
 
 let closedAt = -Infinity; // когда закрылась прежняя лента: близко по времени — значит, переключение между чатами
@@ -73,6 +73,12 @@ export function Chat({ chatId }: { chatId: number }) {
   const title = (chat?.title as string) || 'Чат №' + chatId;
   // как в Telegram: в норме подзаголовок — тип чата, а пока идёт подключение или обновление — стадия
   const phaseLabel = useGlobal((s) => s.syncLabel);
+  const peer = useGlobal((s) => s.peer);
+  const [, tick] = useState(0);              // «5 мин. назад» должно стареть само
+  useEffect(() => { const t = setInterval(() => tick((n) => n + 1), 30_000); return () => clearInterval(t); }, []);
+  const myPeer = peer && chat?.peerId === peer.userId && peer.known ? peer : null;
+  const online = !!myPeer?.online;
+  const subtitle = chat?.kind === 'group' ? 'Группа' : myPeer ? lastSeenText(online, myPeer.lastSeen as string | null) : '';
   const byId = new Map(messages.filter((m) => m.id != null).map((m) => [m.id as number, m]));
   const replyTo = replyKey ? messages.find((m) => m.key === replyKey) : undefined;
   const authorOf = (senderId: unknown) => (senderId === me.userId ? 'Вы' : title);
@@ -86,7 +92,7 @@ export function Chat({ chatId }: { chatId: number }) {
         <Avatar name={title} size={40} />
         <div class="rl-glassbar-title">
           <b>{title}</b>
-          <span key={phaseLabel ?? 'kind'} class={phaseLabel ? 'app-phase' : undefined}>{phaseLabel ?? (chat?.kind === 'group' ? 'Группа' : 'Личный чат')}</span>
+          <span key={phaseLabel ?? (online ? 'on' : 'off')} class={phaseLabel ? 'app-phase' : online ? 'app-online' : undefined}>{phaseLabel ?? (subtitle || '\u00a0')}</span>
         </div>
         <IconButton icon="search" label="Поиск по чату" />
         <IconButton icon="more" label="Ещё" />

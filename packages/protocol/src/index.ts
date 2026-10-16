@@ -27,6 +27,9 @@ export type ClientFrame =
   | { op: 'read'; reqId: string; chatId: Id; upToId: Id }
   | { op: 'ping' };
 
+/** Присутствие собеседника: в сети сейчас или когда был последний раз (ISO). */
+export interface PresenceItem { userId: number; online: boolean; lastSeen: string | null }
+
 export type ServerFrame =
   | { op: 'hello'; seq: number }
   | { op: 'updates'; from: number; to: number; items: JournalEntry[]; more: boolean }
@@ -34,6 +37,7 @@ export type ServerFrame =
   | { op: 'ack'; reqId: string; result: Record<string, unknown> }
   | { op: 'err'; reqId?: string; code: ErrorCode; retry: boolean }
   | { op: 'poke' }
+  | { op: 'presence'; items: PresenceItem[] }
   | { op: 'pong' };
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;

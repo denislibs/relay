@@ -65,6 +65,17 @@ function showPhase(s: Status): void {
 }
 
 let switchTimer: ReturnType<typeof setTimeout> | null = null;
+let peerWatch: { close(): void } | null = null;
+
+/** Присутствие собеседника личного чата — отдельная маленькая подписка, живёт, пока чат открыт. */
+function watchPeer(chatId: number | null): void {
+  peerWatch?.close();
+  peerWatch = null;
+  const peerId = chatId ? (getGlobal().chats.find((c) => c.id === chatId)?.peerId as number | null | undefined) : null;
+  if (!peerId) { setGlobal({ peer: null }); return; }
+  const m = new Mirror();
+  peerWatch = engine.watch({ kind: 'presence', userId: peerId }, (p: Patch) => { m.apply(p); setGlobal({ peer: (m.list()[0] as Item) ?? null }); });
+}
 
 /**
  * Переключение чата одним кадром: пока лента нового чата не готова, на экране остаётся прежний
@@ -78,6 +89,7 @@ export function openChat(chatId: number | null): void {
   feedLimit = 60;
   if (switchTimer) { clearTimeout(switchTimer); switchTimer = null; }
   history.replaceState(null, '', chatId ? '#chat=' + chatId : location.pathname);
+  watchPeer(chatId);
   if (!chatId) { setGlobal({ openChatId: null, pendingChatId: null, messages: [] }); return; }
   setGlobal({ pendingChatId: chatId });
   const m = new Mirror();

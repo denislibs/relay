@@ -1,4 +1,5 @@
 import { sql } from '../../../apps/server/src/db';
+import { resetPresence } from '../../../apps/server/src/domain/presence';
 import { createServer } from '../../../apps/server/src/http';
 import { startRealtime } from '../../../apps/server/src/realtime';
 import { Engine } from '../src/engine';
@@ -7,6 +8,7 @@ export { msg } from './fixtures';
 
 export async function resetDb(): Promise<void> {
   await sql`truncate users, sessions, chats, chat_members, messages, user_seq, updates restart identity cascade`;
+  resetPresence(); // id пользователей начнутся заново
 }
 
 export async function startTestServer() {
