@@ -27,6 +27,16 @@ export function Chat({ chatId }: { chatId: number }) {
 
   useReadTracker(chatId, feed, messages);
 
+  // высота композера (растёт с цитатой ответа) → --composer-h: лента уходит под него ровно на эту высоту
+  useLayoutEffect(() => {
+    const main = feed.current?.parentElement;
+    const wrap = main?.querySelector<HTMLElement>('.rl-composer-wrap');
+    if (!main || !wrap || typeof ResizeObserver !== 'function') return;
+    const ro = new ResizeObserver(([e]) => { const h = Math.round(e.borderBoxSize?.[0]?.blockSize ?? wrap.offsetHeight); requestMutation(() => main.style.setProperty('--composer-h', h + 'px')); });
+    ro.observe(wrap);
+    return () => ro.disconnect();
+  }, []);
+
   // после рендера: держим низ или якорь истории (замер → запись в одном кадре)
   const placed = useRef(false);            // первая раскладка ленты уже прокручена вниз
   useLayoutEffect(() => {

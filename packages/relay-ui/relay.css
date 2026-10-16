@@ -938,3 +938,20 @@ button.rl-quote { cursor: pointer; }
 .rl-wlist { position: relative; contain: strict; width: 100%; }
 .rl-wrow { position: absolute; left: 0; right: 0; top: 0; transition: transform 320ms cubic-bezier(0.2, 0, 0, 1); will-change: transform; }
 @media (prefers-reduced-motion: reduce) { .rl-wrow { transition: none; } }
+
+/* Telegram K geometry: 16px around the floating cards, 696px chat column */
+.rl-shell { --space-float: 16px; --chat-max: 696px; --header-h: 48px; }
+/* the feed runs under the header and composer pills and fades out towards them instead of being cut */
+.rl-shell .rl-glassbar, .rl-shell .rl-composer-wrap { position: relative; z-index: 3; }
+.rl-shell .rl-feed {
+  --top-zone: calc(var(--header-h) + var(--space-float));
+  --bottom-zone: calc(var(--composer-h, 48px) + var(--space-float));
+  margin: calc(-1 * var(--top-zone)) 0 calc(-1 * var(--bottom-zone));
+  padding: calc(var(--top-zone) + 8px) 0 calc(var(--bottom-zone) + 8px);
+  -webkit-mask-image: linear-gradient(to bottom, transparent 0, transparent calc(var(--top-zone) * 0.35), #000 calc(var(--top-zone) + 4px), #000 calc(100% - var(--bottom-zone) - 4px), transparent calc(100% - var(--bottom-zone) * 0.35), transparent 100%);
+  mask-image: linear-gradient(to bottom, transparent 0, transparent calc(var(--top-zone) * 0.35), #000 calc(var(--top-zone) + 4px), #000 calc(100% - var(--bottom-zone) - 4px), transparent calc(100% - var(--bottom-zone) * 0.35), transparent 100%);
+}
+.rl-shell .rl-scrolldown-slot { bottom: calc(var(--composer-h, 48px) + var(--space-float) + 12px); }
+/* white glyph on the accent send/mic button, both themes (as in Telegram) */
+.rl-shell .rl-composer-send { color: #fff; }
+.rl-shell .rl-composer-send .rl-ripple { background: #fff; }
