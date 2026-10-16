@@ -25,10 +25,11 @@ sw.addEventListener('fetch', (e) => {
     e.respondWith(fetch(e.request).catch(async () => (await caches.match('/')) ?? Response.error()));
     return;
   }
+  // имена файлов без хэша: сначала сеть (свежая сборка), кэш — когда сети нет
   e.respondWith(
-    caches.match(e.request).then((hit) => hit ?? fetch(e.request).then((res) => {
+    fetch(e.request).then((res) => {
       if (res.ok) { const copy = res.clone(); caches.open(CACHE).then((c) => c.put(e.request, copy)); }
       return res;
-    })),
+    }).catch(async () => (await caches.match(e.request)) ?? Response.error()),
   );
 });

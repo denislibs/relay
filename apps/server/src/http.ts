@@ -44,7 +44,9 @@ export function createServer(opts: { port: number }): Server {
 
         if (process.env.DEV_LOGIN === '1' && req.method === 'POST' && url.pathname === '/dev/login') {
           const { name } = (await req.json()) as { name: string };
-          const userId = await createUser(String(name ?? 'user'));
+          // dev: вход по имени — существующий пользователь (в т.ч. из сида) или новый
+          const [found] = await sql`select id from users where name = ${String(name ?? '')} order by id limit 1`;
+          const userId = found ? (found.id as number) : await createUser(String(name ?? 'user'));
           const token = await createSession(userId);
           return Response.json({ userId, token }, { headers: { 'set-cookie': sessionCookie(token) } });
         }

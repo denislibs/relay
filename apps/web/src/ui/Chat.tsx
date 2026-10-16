@@ -1,4 +1,4 @@
-import { Avatar, Bubble, Composer, DateDivider, GlassBar, IconButton, ScrollToBottom, SyncIndicator, requestMeasure, requestMutation } from '@relay/ui';
+import { Avatar, Bubble, Composer, DateDivider, GlassBar, IconButton, Menu, ScrollToBottom, SyncIndicator, requestMeasure, requestMutation } from '@relay/ui';
 import { useLayoutEffect, useRef, useState } from 'preact/hooks';
 import { loadOlder, openChat, send } from '../data';
 import { useGlobal } from '../global';
@@ -15,6 +15,9 @@ export function Chat({ chatId }: { chatId: number }) {
   const olderFrom = useRef<number | null>(null); // высота до подгрузки истории — якорь прокрутки
   const initial = useRef<Set<string> | null>(null);
   const [away, setAway] = useState(false);
+  const programmatic = useRef(0);          // сколько scroll-событий вызвали мы сами
+  const [menu, setMenu] = useState<{ x: number; y: number; key: string } | null>(null);
+  const [replyKey, setReplyKey] = useState<string | null>(null);
 
   if (initial.current === null && messages.length) initial.current = new Set(messages.map((m) => m.key));
 
@@ -28,14 +31,15 @@ export function Chat({ chatId }: { chatId: number }) {
       const h = el.scrollHeight;
       const from = olderFrom.current;
       requestMutation(() => {
-        if (from !== null) { el.scrollTop += h - from; olderFrom.current = null; }
-        else if (stick.current) el.scrollTop = h;
+        if (from !== null) { programmatic.current++; el.scrollTop += h - from; olderFrom.current = null; }
+        else if (stick.current && el.scrollTop + el.clientHeight < h) { programmatic.current++; el.scrollTop = h; }
       });
     });
   }, [messages]);
 
   function onScroll() {
     const el = feed.current!;
+    if (programmatic.current > 0) { programmatic.current--; return; } // наша же прокрутка не меняет «прижата к низу»
     requestMeasure(() => {
       const fromBottom = el.scrollHeight - el.scrollTop - el.clientHeight;
       stick.current = fromBottom < 80;
@@ -46,6 +50,10 @@ export function Chat({ chatId }: { chatId: number }) {
 
   const title = (chat?.title as string) || 'Чат №' + chatId;
   const sync = !status.online ? 'offline' : !status.synced || status.outbox ? 'syncing' : 'synced';
+  const byId = new Map(messages.filter((m) => m.id != null).map((m) => [m.id as number, m]));
+  const replyTo = replyKey ? messages.find((m) => m.key === replyKey) : undefined;
+  const authorOf = (senderId: unknown) => (senderId === me.userId ? 'Вы' : title);
+  const menuMsg = menu ? messages.find((m) => m.key === menu.key) : undefined;
   let prevDay = '', prevSender: number | null = null;
 
   return (
@@ -58,12 +66,17 @@ export function Chat({ chatId }: { chatId: number }) {
           <span>{chat?.kind === 'group' ? 'Группа' : 'Личный чат'}</span>
         </div>
         <SyncIndicator state={sync} />
+        <IconButton icon="search" label="Поиск по чату" />
+        <IconButton icon="more" label="Ещё" />
       </GlassBar>
       <div class="rl-feed" ref={feed} onScroll={onScroll} aria-live="polite">
-        {messages.map((m) => {
+        {messages.map((m, i) => {
           const day = dayKey(m.createdAt as string);
           const out = m.senderId === me.userId;
           const start = prevSender !== m.senderId || day !== prevDay;
+          const next = messages[i + 1];
+          const end = !next || next.senderId !== m.senderId || dayKey(next.createdAt as string) !== day;
+          const quoted = m.replyToId != null ? byId.get(m.replyToId as number) : undefined;
           const divider = day !== prevDay ? <DateDivider key={'d' + day}>{dayLabel(m.createdAt as string)}</DateDivider> : null;
           prevDay = day; prevSender = m.senderId as number;
           return [
@@ -71,8 +84,10 @@ export function Chat({ chatId }: { chatId: number }) {
             <div class="app-msg" key={m.key} data-msg-id={m.id ?? undefined}>
               <Bubble
                 from={out ? 'out' : 'in'}
-                tail={start}
+                tail={end}
                 groupStart={start}
+                reply={quoted ? { author: authorOf(quoted.senderId), text: quoted.body, tone: quoted.senderId === me.userId ? 1 : 3 } : undefined}
+                onContextMenu={(e: MouseEvent) => { e.preventDefault(); setMenu({ x: e.clientX, y: e.clientY, key: m.key as string }); }}
                 time={clock(m.createdAt as string)}
                 status={out ? m.status : undefined}
                 appear={initial.current !== null && !initial.current.has(m.key)}
@@ -86,7 +101,28 @@ export function Chat({ chatId }: { chatId: number }) {
       <div style={{ position: 'absolute', right: 24, bottom: 96, zIndex: 3 }}>
         <ScrollToBottom show={away} unread={chat?.unread as number} onClick={() => { const el = feed.current!; stick.current = true; el.scrollTo({ top: el.scrollHeight, behavior: 'smooth' }); }} />
       </div>
-      <Composer id="composer" placeholder="Сообщение" onSend={(text: string) => { stick.current = true; send(chatId, text); }} />
+      <Composer
+        id="composer"
+        placeholder="Сообщение"
+        replyTo={replyTo ? { author: authorOf(replyTo.senderId), text: replyTo.body, tone: replyTo.senderId === me.userId ? 1 : 3 } : null}
+        onCancelReply={() => setReplyKey(null)}
+        onSend={(text: string) => { stick.current = true; send(chatId, text, (replyTo?.id as number) ?? null); setReplyKey(null); }}
+      />
+      {menu && menuMsg ? (
+        <>
+          <div class="rl-msgmenu-scrim" onClick={() => setMenu(null)} onContextMenu={(e) => { e.preventDefault(); setMenu(null); }} />
+          <div class="rl-msgmenu" style={{ left: Math.min(menu.x, innerWidth - 230), top: Math.min(menu.y, innerHeight - 110) }}>
+            <Menu
+              label="Действия с сообщением"
+              onClose={() => setMenu(null)}
+              items={[
+                ...(menuMsg.id != null ? [{ icon: 'reply', label: 'Ответить', onClick: () => { setReplyKey(menuMsg.key as string); document.getElementById('composer')?.focus(); } }] : []),
+                { icon: 'copy', label: 'Копировать', onClick: () => { navigator.clipboard?.writeText(menuMsg.body as string).catch(() => {}); } },
+              ]}
+            />
+          </div>
+        </>
+      ) : null}
     </>
   );
 }

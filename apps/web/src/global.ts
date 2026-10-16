@@ -63,6 +63,7 @@ export function useGlobal<T>(select: (s: GlobalState) => T): T {
   useEffect(() => {
     const check = () => { if (!shallowEqual(sel.current(state), last.current)) force((x) => x + 1); };
     subscribers.add(check);
+    check(); // эффект срабатывает после отрисовки — состояние могло смениться раньше подписки
     return () => { subscribers.delete(check); };
   }, []);
   return value;

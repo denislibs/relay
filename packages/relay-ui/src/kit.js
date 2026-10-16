@@ -360,8 +360,7 @@ function Composer(props) {
       h(AttachMenu, { onPick: function (k) { attach[1](false); if (props.onAttach) props.onAttach(k); } })),
     h('div', { class: 'rl-composer' },
       h('div', { class: 'rl-composer-field' },
-        h(IconButton, { icon: attach[0] ? 'close' : 'plus', label: attach[0] ? 'Закрыть вложения' : 'Прикрепить', active: attach[0], class: 'rl-attach-toggle', onClick: function () { attach[1](!attach[0]); } }),
-        h(IconButton, { icon: 'smile', label: 'Эмодзи' }),
+        h(IconButton, { icon: attach[0] ? 'close' : 'attach', label: attach[0] ? 'Закрыть вложения' : 'Прикрепить', active: attach[0], class: 'rl-attach-toggle', onClick: function () { attach[1](!attach[0]); } }),
         h('label', { for: id, class: 'rl-sr' }, 'Сообщение'),
         h('input', {
           id: id, type: 'text', value: value, placeholder: props.placeholder || 'Введите сообщение', autocomplete: 'off',
@@ -371,7 +370,8 @@ function Composer(props) {
             if (e.key === 'Enter') { e.preventDefault(); send(); }
             if (e.key === 'Escape' && props.replyTo && props.onCancelReply) props.onCancelReply();
           }
-        })),
+        }),
+        h(IconButton, { icon: 'smile', label: 'Эмодзи', class: 'rl-emoji-toggle' })),
       h('button', { type: 'button', onPointerDown: ripple, class: 'rl-composer-send', 'aria-label': hasText ? 'Отправить' : 'Записать голосовое', onClick: send },
         h(Icon, { name: 'send', size: 22, class: hasText ? '' : 'rl-swap-off' }),
         h(Icon, { name: 'mic', size: 22, class: hasText ? 'rl-swap-off' : '' }))));

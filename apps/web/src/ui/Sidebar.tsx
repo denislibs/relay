@@ -19,8 +19,8 @@ export function Sidebar() {
     <SidebarCard
       header={<SidebarHeader me={me.name} searchId="side-search" value={search} placeholder="Поиск" onSearch={(e: Event) => setGlobal({ search: (e.target as HTMLInputElement).value })} />}
       tabs={<FolderTabs active={folder} onChange={(id: 'all' | 'unread') => setGlobal({ folder: id })} items={[
-        { id: 'all', label: 'Все', count: counters.unreadChats },
-        { id: 'unread', label: 'Непрочитанные', count: counters.unreadMessages },
+        { id: 'all', label: 'Все' },
+        { id: 'unread', label: 'Непрочитанные', count: counters.unreadChats },
       ]} />}
       banner={
         <Presence show={!status.online}>

@@ -38,6 +38,7 @@ export type ChatSummary = {
   unread: number;
   last: Message | null;
   peer: { id: number; name: string } | null; // собеседник личного чата
+  peerReadUpTo: number; // до какого id мои сообщения прочитаны всеми остальными участниками
 };
 
 export async function listChats(userId: number): Promise<ChatSummary[]> {
@@ -48,7 +49,8 @@ export async function listChats(userId: number): Promise<ChatSummary[]> {
            (select count(*) from messages m
              where m.chat_id = c.id and m.id > cm.last_read_id and m.sender_id <> ${userId})::int as unread,
            (select json_build_object('id', u.id, 'name', u.name) from chat_members pm join users u on u.id = pm.user_id
-             where c.kind = 'direct' and pm.chat_id = c.id and pm.user_id <> ${userId} limit 1) as peer
+             where c.kind = 'direct' and pm.chat_id = c.id and pm.user_id <> ${userId} limit 1) as peer,
+           (select coalesce(min(om.last_read_id), 0) from chat_members om where om.chat_id = c.id and om.user_id <> ${userId}) as peer_read_up_to
       from chat_members cm
       join chats c on c.id = cm.chat_id
       left join lateral (
@@ -63,6 +65,7 @@ export async function listChats(userId: number): Promise<ChatSummary[]> {
     lastReadId: r.last_read_id as number,
     unread: r.unread as number,
     peer: (r.peer as { id: number; name: string } | null) ?? null,
+    peerReadUpTo: (r.peer_read_up_to as number) ?? 0,
     last: r.m_id == null ? null : toMessage({
       id: r.m_id, chat_id: r.m_chat_id, sender_id: r.m_sender_id, client_id: r.m_client_id,
       body: r.m_body, reply_to_id: r.m_reply_to_id, created_at: r.m_created_at,

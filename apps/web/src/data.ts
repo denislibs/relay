@@ -25,7 +25,7 @@ export function startData(me: Me): void {
   engine.onReload(() => location.reload());
 
   const chats = new Mirror();
-  engine.watch({ kind: 'chatList', limit: 300 }, (p) => { chats.apply(p); deferDuringAnimation(() => setGlobal({ chats: chats.list() })); });
+  engine.watch({ kind: 'chatList', limit: 1000 }, (p) => { chats.apply(p); deferDuringAnimation(() => setGlobal({ chats: chats.list() })); });
   const counters = new Mirror();
   engine.watch({ kind: 'counters' }, (p) => { counters.apply(p); const c = counters.list()[0]; if (c) setGlobal({ counters: { unreadChats: c.unreadChats as number, unreadMessages: c.unreadMessages as number } }); });
   const status = new Mirror();
@@ -59,9 +59,9 @@ export function loadOlder(): void {
   feed.update({ kind: 'messages', chatId, limit: feedLimit });
 }
 
-export async function send(chatId: number, body: string): Promise<void> {
+export async function send(chatId: number, body: string, replyToId: number | null = null): Promise<void> {
   nudgeWallpaper();
-  await engine.call({ type: 'sendMessage', chatId, body });
+  await engine.call({ type: 'sendMessage', chatId, body, replyToId });
 }
 
 export function seen(chatId: number, upToId: number): void {

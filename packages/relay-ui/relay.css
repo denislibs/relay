@@ -867,3 +867,41 @@ button.rl-quote { cursor: pointer; }
 .rl-shell > :not(.rl-tw) { position: relative; z-index: 1; }
 .rl-shell > .rl-shell-side { z-index: 2; }
 .rl-tw .tw-canvas { animation: rl-fade 600ms var(--ease-out) both; }
+
+/* ---------- Shell surfaces (Telegram Web K feel): solid header and composer pills, rounded bubbles with a bottom tail ---------- */
+.rl-shell {
+  --tg-radius-bubble: 18px;
+  --tg-shadow-pill: 0 1px 2px rgba(16,35,47,0.10), 0 2px 8px rgba(16,35,47,0.06);
+}
+.rl-shell .rl-glassbar { height: 56px; padding: 0 var(--space-2) 0 var(--space-3); border-radius: 28px; background: var(--raised); box-shadow: var(--tg-shadow-pill); -webkit-backdrop-filter: none; backdrop-filter: none; }
+.rl-shell .rl-glassbar-title b { font-weight: 600; font-size: 16px; }
+.rl-shell .rl-glassbar-title span { font-size: 13.5px; }
+.rl-shell .rl-glassbar .rl-iconbtn { color: var(--ink-muted); }
+
+.rl-shell .rl-composer { align-items: flex-end; gap: var(--space-2); }
+.rl-shell .rl-composer-field { align-items: center; min-height: 54px; padding: 4px 6px; border-radius: 27px; background: var(--raised); box-shadow: var(--tg-shadow-pill); }
+.rl-shell .rl-composer-field input { height: 46px; font-size: 16px; padding: 0 4px; }
+.rl-shell .rl-composer-field .rl-iconbtn { color: var(--ink-muted); }
+.rl-shell .rl-composer-send { width: 54px; height: 54px; box-shadow: var(--tg-shadow-pill); }
+
+.rl-shell .rl-bubble { padding: 6px 10px 7px 12px; border-radius: var(--tg-radius-bubble); box-shadow: var(--tg-shadow-pill); font-size: 15.5px; line-height: 21px; }
+.rl-shell .rl-msgline + .rl-msgline { margin-top: 3px; }
+.rl-shell .rl-msgline-gap { margin-top: var(--space-3) !important; }
+/* tail: on the last bubble of a run, bottom corner, concave curve */
+.rl-shell .rl-bubble-tail.rl-bubble-in-side { border-top-left-radius: var(--tg-radius-bubble); border-bottom-left-radius: 0; }
+.rl-shell .rl-bubble-tail.rl-bubble-out { border-top-right-radius: var(--tg-radius-bubble); border-bottom-right-radius: 0; }
+.rl-shell .rl-bubble-tail::before { top: auto; bottom: 0; width: 10px; height: 18px; clip-path: none; }
+.rl-shell .rl-bubble-tail.rl-bubble-in-side::before { left: -9px; -webkit-mask: radial-gradient(ellipse 100% 100% at 0 0, transparent 98%, #000 100%); mask: radial-gradient(ellipse 100% 100% at 0 0, transparent 98%, #000 100%); }
+.rl-shell .rl-bubble-tail.rl-bubble-out::before { right: -9px; -webkit-mask: radial-gradient(ellipse 100% 100% at 100% 0, transparent 98%, #000 100%); mask: radial-gradient(ellipse 100% 100% at 100% 0, transparent 98%, #000 100%); }
+.rl-shell .rl-bubble-meta { right: 10px; bottom: 5px; font-size: 12px; }
+.rl-shell .rl-bubble-menu { display: none; }
+.rl-shell .rl-date span { border-radius: var(--radius-pill); box-shadow: none; background: color-mix(in srgb, var(--raised) 70%, transparent); -webkit-backdrop-filter: blur(8px); backdrop-filter: blur(8px); }
+
+/* message context menu: reaction pill above a soft rounded list */
+.rl-shell .rl-msgmenu { position: fixed; z-index: 40; display: flex; flex-direction: column; align-items: flex-start; gap: 8px; }
+.rl-shell .rl-msgmenu .rl-menu { position: relative; min-width: 200px; padding: 6px; border-radius: 16px; background: color-mix(in srgb, var(--raised) 88%, transparent); -webkit-backdrop-filter: blur(18px) saturate(1.6); backdrop-filter: blur(18px) saturate(1.6); }
+.rl-shell .rl-msgmenu .rl-menu-item { height: 40px; border-radius: 10px; padding: 0 var(--space-4) 0 var(--space-3); font-weight: 500; }
+.rl-shell .rl-msgmenu .rl-menu-item .rl-icon { color: var(--ink); }
+.rl-shell .rl-rpick { padding: 4px 6px; background: color-mix(in srgb, var(--raised) 92%, transparent); -webkit-backdrop-filter: blur(18px); backdrop-filter: blur(18px); }
+.rl-shell .rl-rpick-btn { width: 38px; height: 38px; font-size: 26px; }
+.rl-msgmenu-scrim { position: fixed; inset: 0; z-index: 39; }

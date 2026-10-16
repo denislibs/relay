@@ -10,6 +10,7 @@ export interface ChatSummary {
   unread: number;
   last: Message | null;
   peer?: { id: number; name: string } | null;
+  peerReadUpTo?: number;
 }
 
 /**
@@ -97,6 +98,7 @@ export class Store {
       chat.title = s.title ?? s.peer?.name ?? null;
       chat.peerId = s.peer?.id ?? null;
       chat.named = true;
+      if (s.peerReadUpTo && s.peerReadUpTo > chat.peerReadUpTo) this.applyPeerRead(s.id, s.peerReadUpTo);
       chat.lastReadId = Math.max(chat.lastReadId, s.lastReadId);
       chat.unread = s.unread;
       if (s.last) {

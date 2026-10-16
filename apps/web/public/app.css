@@ -18,3 +18,5 @@ body { background: var(--bg); color: var(--ink); font-family: var(--font-sans); 
   .app-chat-open .rl-shell-side + .rl-shell-main { display: flex; }
   .app-back { display: inline-flex; }
 }
+.app-field:focus-visible { outline: none; }
+.rl-feed { overflow-anchor: none; } /* якорь прокрутки держим сами (requestMeasure → requestMutation) */

@@ -53,3 +53,12 @@ test('direct chats carry the peer so the client can show a name', async () => {
   expect((await listChats(a))[0]).toMatchObject({ id: ab, peer: { id: b, name: 'Борис' } });
   expect((await listChats(b))[0]).toMatchObject({ peer: { id: a, name: 'Анна' } });
 });
+
+test('chat list carries how far the others have read my messages', async () => {
+  const a = await makeUser('a'), b = await makeUser('b');
+  const ab = await makeChat([a, b]);
+  const m = (await sendMessage(a, { chatId: ab, clientId: crypto.randomUUID(), body: 'x' })).message.id;
+  expect((await listChats(a))[0].peerReadUpTo).toBe(0);
+  await markRead(b, ab, m);
+  expect((await listChats(a))[0].peerReadUpTo).toBe(m);
+});

@@ -35,3 +35,15 @@ test('a chat first seen through a message gets its name from the server', async 
   const l = await list.until((x) => x.length === 1 && x[0].title === 'Анна');
   expect(l[0]).toMatchObject({ unread: 1, peerId: a.userId });
 });
+
+test('snapshot brings the peer read pointer, so my old messages show as read', async () => {
+  const a = await srv.login('a'), b = await srv.login('b');
+  const chatId = await srv.chat(a.token, [a.userId, b.userId]);
+  const { message } = await sendMessage(a.userId, { chatId, clientId: crypto.randomUUID(), body: 'давно' });
+  const { markRead } = await import('../../../apps/server/src/domain/reads');
+  await markRead(b.userId, chatId, message.id);
+  const ea = await open(srv.config(a));          // первый вход A — через снимок
+  ea.connect();
+  const list = watchInto(ea, { kind: 'chatList', limit: 50 });
+  await list.until((l) => (l[0]?.last as { status: string } | null)?.status === 'read');
+});
