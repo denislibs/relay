@@ -66,7 +66,8 @@ export function Chat({ chatId }: { chatId: number }) {
     const el = feed.current;
     if (!el) return;
     if (!placed.current && messages.length) {
-      // первый кадр чата — сразу внизу, до отрисовки: иначе мелькнёт верх ленты
+      // первый кадр чата — сразу внизу, до отрисовки: иначе мелькнёт верх ленты. Осознанное исключение
+      // из measure/mutate: одно чтение и одна запись внутри коммита, до первой отрисовки (через rAF был бы кадр с верхом)
       placed.current = true;
       const bottom = el.scrollHeight - el.clientHeight;
       if (bottom > el.scrollTop) { programmatic.current++; el.scrollTop = bottom; } // scroll-событие будет только если позиция меняется
@@ -153,7 +154,7 @@ export function Chat({ chatId }: { chatId: number }) {
         })}
       </div>
       <div class="rl-scrolldown-slot">
-        <ScrollToBottom show={away} unread={chat?.unread as number} onClick={() => { const el = feed.current!; stick.current = true; el.scrollTo({ top: el.scrollHeight, behavior: 'smooth' }); }} />
+        <ScrollToBottom show={away} unread={chat?.unread as number} onClick={() => { const el = feed.current!; stick.current = true; requestMeasure(() => { const top = el.scrollHeight; requestMutation(() => el.scrollTo({ top, behavior: 'smooth' })); }); }} />
       </div>
       <Composer
         id="composer"

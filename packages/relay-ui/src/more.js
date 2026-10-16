@@ -251,10 +251,7 @@ function WindowList(props) {
     if (nearEnd.current && n && range[0][1] >= n) nearEnd.current();
   }, [range[0][1], n]);
   useLayoutEffect(function () {
-    var el = host.current, sc = el.parentElement;
-    while (sc && sc !== document.body && !/(auto|scroll)/.test(getComputedStyle(sc).overflowY)) sc = sc.parentElement;
-    if (!sc) return;
-    var queued = false;
+    var el = host.current, sc = null, queued = false, ro = null, alive = true;
     function measure() {
       queued = false;
       var offset = el.getBoundingClientRect().top - sc.getBoundingClientRect().top + sc.scrollTop; // where the list starts in the scroller
@@ -263,12 +260,30 @@ function WindowList(props) {
       requestMutation(function () { range[1](function (r) { return r[0] === next[0] && r[1] === next[1] ? r : next; }); });
     }
     function onScroll() { if (!queued) { queued = true; requestMeasure(measure); } }
-    sc.addEventListener('scroll', onScroll, { passive: true });
-    var ro = typeof ResizeObserver === 'function' ? new ResizeObserver(onScroll) : null;
-    if (ro) ro.observe(sc);
-    onScroll();
-    return function () { sc.removeEventListener('scroll', onScroll); if (ro) ro.disconnect(); };
+    // прокручиваемого родителя ищем в фазе замера: getComputedStyle — это чтение стилей
+    requestMeasure(function () {
+      if (!alive) return;
+      sc = el.parentElement;
+      while (sc && sc !== document.body && !/(auto|scroll)/.test(getComputedStyle(sc).overflowY)) sc = sc.parentElement;
+      if (!sc) return;
+      sc.addEventListener('scroll', onScroll, { passive: true });
+      ro = typeof ResizeObserver === 'function' ? new ResizeObserver(onScroll) : null;
+      if (ro) ro.observe(sc);
+      queued = true; measure();
+    });
+    return function () { alive = false; if (sc) sc.removeEventListener('scroll', onScroll); if (ro) ro.disconnect(); };
   }, [rh, over]);
+  // строки переставились (чат поднялся наверх) — пока они едут, это тяжёлая анимация.
+  // Позиции известны без чтения DOM: индекс × высота строки
+  var lastIndex = useRef(null);
+  var nowIndex = {};
+  for (var q = Math.min(range[0][0], n); q < Math.min(range[0][1], n); q++) nowIndex[props.getKey(items[q], q)] = q;
+  useLayoutEffect(function () {
+    var prev = lastIndex.current, moved = false;
+    if (prev) for (var k in nowIndex) if (prev[k] !== undefined && prev[k] !== nowIndex[k]) { moved = true; break; }
+    lastIndex.current = nowIndex;
+    if (moved && !reducedMotion()) beginHeavyAnimation(320);
+  });
   var first = Math.min(range[0][0], n), last = Math.min(range[0][1], n);
   var rows = [];
   for (var i = first; i < last; i++) {
@@ -515,40 +530,46 @@ function SideResizer(props) {
     if (e.button !== 0) return;
     e.preventDefault();
     var handle = e.currentTarget, shell = shellOf(handle), side = handle.parentElement;
-    var startX = e.clientX, startW = side.getBoundingClientRect().width, w = startW, queued = false;
+    var startX = e.clientX, startW = null, w = null, queued = false, lastX = e.clientX;
+    requestMeasure(function () { startW = side.getBoundingClientRect().width; if (w === null) w = startW; });
     handle.setPointerCapture(e.pointerId);
+    function apply() { queued = false; if (startW === null) return; w = clamp(startW + lastX - startX); shell.style.setProperty('--side-w', w + 'px'); }
     document.documentElement.classList.add('rl-resizing');
     var end = beginHeavyAnimation(60000); // пока тянут — тяжёлую работу откладываем
     function move(ev) {
-      w = clamp(startW + ev.clientX - startX);
+      lastX = ev.clientX;
       if (queued) return;
       queued = true;
-      requestMutation(function () { queued = false; shell.style.setProperty('--side-w', w + 'px'); });
+      requestMutation(apply);
     }
     function up(ev) {
-      if (ev && ev.clientX !== undefined) { w = clamp(startW + ev.clientX - startX); shell.style.setProperty('--side-w', w + 'px'); }
+      if (ev && ev.clientX !== undefined) lastX = ev.clientX;
       handle.removeEventListener('pointermove', move);
       handle.removeEventListener('pointerup', up);
       handle.removeEventListener('pointercancel', up);
-      document.documentElement.classList.remove('rl-resizing');
-      end();
-      if (props.onChange) props.onChange(w);
+      requestMutation(function () {
+        apply();
+        document.documentElement.classList.remove('rl-resizing');
+        end();
+        if (props.onChange && w !== null) props.onChange(w);
+      });
     }
     handle.addEventListener('pointermove', move);
     handle.addEventListener('pointerup', up);
     handle.addEventListener('pointercancel', up);
   }
   function onDblClick(e) {
-    shellOf(e.currentTarget).style.removeProperty('--side-w');
-    if (props.onChange) props.onChange(null);
+    var shell = shellOf(e.currentTarget);
+    requestMutation(function () { shell.style.removeProperty('--side-w'); if (props.onChange) props.onChange(null); });
   }
   function onKeyDown(e) {
     if (e.key !== 'ArrowLeft' && e.key !== 'ArrowRight') return;
     e.preventDefault();
-    var shell = shellOf(e.currentTarget), side = e.currentTarget.parentElement;
-    var w = clamp(side.getBoundingClientRect().width + (e.key === 'ArrowRight' ? 24 : -24));
-    shell.style.setProperty('--side-w', w + 'px');
-    if (props.onChange) props.onChange(w);
+    var shell = shellOf(e.currentTarget), side = e.currentTarget.parentElement, step = e.key === 'ArrowRight' ? 24 : -24;
+    requestMeasure(function () {
+      var w = clamp(side.getBoundingClientRect().width + step);
+      requestMutation(function () { shell.style.setProperty('--side-w', w + 'px'); if (props.onChange) props.onChange(w); });
+    });
   }
   return h('div', { class: 'rl-side-resizer', role: 'separator', 'aria-orientation': 'vertical', 'aria-label': 'Ширина списка чатов', tabIndex: 0,
     onPointerDown: onPointerDown, onDblClick: onDblClick, onKeyDown: onKeyDown, title: 'Потяните, чтобы изменить ширину; двойной клик — по умолчанию' });
@@ -572,7 +593,7 @@ function SidebarCard(props) {
   var fab = useState(true), last = useRef(0), pending = useRef(false);
   function onScroll(e) {
     var el = e.target; // the scroller that moved (body itself or a page inside it)
-    if (!el || el.scrollTop === undefined) return;
+    if (!el || !('scrollTop' in el)) return; // только проверка свойства — без чтения раскладки
     if (pending.current) return;
     pending.current = true;
     requestMeasure(function () {

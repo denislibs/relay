@@ -538,9 +538,12 @@ function VoiceMessage(props) {
 
   function toggle() { st[1]({ playing: !s.playing, played: true, speed: s.speed }); }
   function seek(e) {
-    var rect = e.currentTarget.getBoundingClientRect();
-    progRef.current = Math.min(1, Math.max(0, (e.clientX - rect.left) / rect.width));
-    paint();
+    var el = e.currentTarget, x = e.clientX;
+    requestMeasure(function () {
+      var rect = el.getBoundingClientRect();
+      progRef.current = Math.min(1, Math.max(0, (x - rect.left) / rect.width));
+      requestMutation(paint);
+    });
   }
   function cycleSpeed() { st[1]({ playing: s.playing, played: s.played, speed: (s.speed + 1) % SPEEDS.length }); }
 
@@ -768,6 +771,8 @@ function FlipList(props) {
   useLayoutEffect(function () {
     var el = ref.current;
     if (!el) return;
+    // FLIP — осознанное исключение из measure/mutate: «первое» положение надо снять до отрисовки нового кадра,
+    // иначе браузер успеет показать строки уже на новых местах. Сначала все чтения, потом все записи.
     // positions inside the list (offsetTop), not in the viewport: scrolling must not count as a move
     var kids = el.children, next = {}, i, k;
     for (i = 0; i < kids.length; i++) { k = kids[i].getAttribute('data-flip'); next[k] = kids[i].offsetTop; } // measure everything first
