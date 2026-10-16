@@ -145,6 +145,9 @@ export class Store {
       case 'readOwn': return this.applyOwnRead(u.chatId, u.upToId);
       case 'readBy': return this.applyPeerRead(u.chatId, u.upToId);
       case 'draft': return this.applyRemoteDraft(u.chatId, u.text, u.at);
+      case 'messageEdited': return this.patchMessage(u.chatId, u.id, { body: u.body, editedAt: u.editedAt });
+      case 'messageDeleted': return this.patchMessage(u.chatId, u.id, { body: '', deleted: true, reactions: [] });
+      case 'reactions': return this.patchMessage(u.chatId, u.id, { reactions: u.reactions });
     }
   }
 
@@ -195,6 +198,7 @@ export class Store {
     const local: LocalMessage = {
       key: m.clientId, clientId: m.clientId, id: m.id, chatId: m.chatId, senderId: m.senderId,
       body: m.body, replyToId: m.replyToId, createdAt: m.createdAt, status, sort: m.id,
+      editedAt: m.editedAt ?? null, deleted: !!m.deleted, reactions: m.reactions ?? prev?.reactions ?? [],
     };
     if (countUnread && !mine && m.id > chat.lastReadId && m.id > chat.knownMaxId) chat.unread++;
     chat.knownMaxId = Math.max(chat.knownMaxId, m.id);
@@ -278,6 +282,14 @@ export class Store {
     const m = this.messages.get(o.chatId)?.get(clientId);
     if (m) this.putMessage({ ...m, status: 'pending' });
     return true;
+  }
+
+  /** Правка/удаление/реакции загруженного сообщения (и превью последнего сообщения чата). Незагруженное — придёт с историей. */
+  patchMessage(chatId: number, id: number, patch: Partial<LocalMessage>): void {
+    const m = this.messageById(chatId, id);
+    if (m) this.putMessage({ ...m, ...patch });
+    const chat = this.chats.get(chatId);
+    if (chat?.last && chat.last.id === id) { chat.last = { ...chat.last, ...patch }; this.markChat(chat); }
   }
 
   /** Черновики, ещё не отправленные на сервер (правки этого устройства). */

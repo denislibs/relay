@@ -195,6 +195,13 @@ export function typing(chatId: number): void {
 /** Отправили — следующий набор снова сразу сообщит «печатаю». */
 export function typingDone(chatId: number): void { typingSent.delete(chatId); }
 
+/** Правка своего сообщения (онлайн). */
+export function editMessage(chatId: number, id: number, body: string): Promise<unknown> { return engine.call({ type: 'editMessage', chatId, id, body }); }
+/** Удаление своего сообщения у всех (онлайн). */
+export function deleteMessage(chatId: number, id: number): Promise<unknown> { return engine.call({ type: 'deleteMessage', chatId, id }); }
+/** Реакция (null — снять). У себя применяется сразу. */
+export function react(chatId: number, id: number, emoji: string | null): void { engine.call({ type: 'react', chatId, id, emoji }).catch(() => {}); }
+
 /** Черновик чата (пустой — удалить). Хранится в движке: общий для вкладок, переживает перезагрузку. */
 export function saveDraft(chatId: number, text: string): void {
   engine.call({ type: 'setDraft', chatId, text }).catch(() => {});

@@ -255,3 +255,24 @@ test('drafts sync between devices of the same user through the journal', async (
   const onPhone = watchInto(phone, { kind: 'chatList', limit: 10 });
   await onPhone.until((l) => l[0]?.draft === null && (l[0].last as { body: string } | null)?.body === 'дописал на ноутбуке');
 });
+
+test('edit, delete and reactions reach the other side through the journal', async () => {
+  const a = await srv.login('a'), b = await srv.login('b');
+  const chatId = await srv.chat(a.token, [a.userId, b.userId]);
+  const ea = await open(srv.config(a)), eb = await open(srv.config(b));
+  ea.connect(); eb.connect();
+  await ea.call({ type: 'sendMessage', chatId, body: 'опечатка' });
+  await ea.whenIdle(); await eb.whenIdle();
+  const feedB = watchInto(eb, { kind: 'messages', chatId, limit: 20 });
+  const m = (await feedB.until((l) => l.length === 1 && l[0].id != null))[0];
+  await ea.call({ type: 'editMessage', chatId, id: m.id as number, body: 'исправлено' });
+  await feedB.until((l) => l[0].body === 'исправлено' && !!l[0].editedAt);
+  await eb.call({ type: 'react', chatId, id: m.id as number, emoji: '👍' });
+  await feedB.until((l) => (l[0].reactions as { emoji: string }[]).length === 1);   // у себя — сразу
+  const feedA = watchInto(ea, { kind: 'messages', chatId, limit: 20 });
+  await feedA.until((l) => (l[0]?.reactions as { emoji: string }[] | undefined)?.[0]?.emoji === '👍');
+  await ea.call({ type: 'deleteMessage', chatId, id: m.id as number });
+  await feedB.until((l) => l[0].deleted === true && l[0].body === '');
+  const listB = watchInto(eb, { kind: 'chatList', limit: 5 });
+  await listB.until((l) => (l[0]?.last as { deleted: boolean } | null)?.deleted === true);
+});

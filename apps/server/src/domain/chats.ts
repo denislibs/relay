@@ -27,7 +27,27 @@ export function toMessage(r: Record<string, unknown>): Message {
     body: r.body as string,
     replyToId: (r.reply_to_id as number | null) ?? null,
     createdAt: (r.created_at as Date).toISOString(),
+    editedAt: r.edited_at ? (r.edited_at as Date).toISOString() : null,
+    deleted: !!r.deleted,
   };
+}
+
+/** Подложить реакции к сообщениям (одним запросом). */
+export async function withReactions(messages: Message[]): Promise<Message[]> {
+  if (!messages.length) return messages;
+  const rows = await sql`
+    select chat_id, message_id, user_id, emoji from reactions
+     where (chat_id, message_id) in (select * from unnest(${messages.map((m) => m.chatId)}::bigint[], ${messages.map((m) => m.id)}::bigint[]))
+     order by created_at`;
+  const by = new Map<string, { userId: number; emoji: string }[]>();
+  for (const r of rows) {
+    const k = r.chat_id + ':' + r.message_id;
+    let list = by.get(k);
+    if (!list) { list = []; by.set(k, list); }
+    list.push({ userId: r.user_id as number, emoji: r.emoji as string });
+  }
+  for (const m of messages) m.reactions = by.get(m.chatId + ':' + m.id) ?? [];
+  return messages;
 }
 
 export type ChatSummary = {
@@ -61,7 +81,7 @@ export async function listChats(userId: number, opts: ListOpts = {}): Promise<Ch
   const rows = await sql`
     select c.id, c.kind, c.title, c.created_at as chat_created_at, cm.last_read_id,
            lm.id as m_id, lm.chat_id as m_chat_id, lm.sender_id as m_sender_id, lm.client_id as m_client_id,
-           lm.body as m_body, lm.reply_to_id as m_reply_to_id, lm.created_at as m_created_at,
+           lm.body as m_body, lm.reply_to_id as m_reply_to_id, lm.created_at as m_created_at, lm.edited_at as m_edited_at, lm.deleted as m_deleted,
            (select count(*) from messages m
              where m.chat_id = c.id and m.id > cm.last_read_id and m.sender_id <> ${userId})::int as unread,
            (select json_build_object('id', u.id, 'name', u.name) from chat_members pm join users u on u.id = pm.user_id
@@ -92,7 +112,7 @@ export async function listChats(userId: number, opts: ListOpts = {}): Promise<Ch
     draft: r.draft ? { text: (r.draft as { text: string }).text, at: new Date((r.draft as { at: string }).at).toISOString() } : null,
     last: r.m_id == null ? null : toMessage({
       id: r.m_id, chat_id: r.m_chat_id, sender_id: r.m_sender_id, client_id: r.m_client_id,
-      body: r.m_body, reply_to_id: r.m_reply_to_id, created_at: r.m_created_at,
+      body: r.m_body, reply_to_id: r.m_reply_to_id, created_at: r.m_created_at, edited_at: r.m_edited_at, deleted: r.m_deleted,
     }),
   }));
 }
@@ -102,7 +122,7 @@ export async function getMessagesByIds(userId: number, chatId: number, ids: numb
   await assertMember(sql, chatId, userId);
   if (!ids.length) return [];
   const rows = await sql`select * from messages where chat_id = ${chatId} and id = any(${ids}::bigint[]) order by id`;
-  return rows.map(toMessage);
+  return withReactions(rows.map(toMessage));
 }
 
 export async function getHistory(userId: number, chatId: number, before: number | null, limit: number): Promise<{ messages: Message[]; hasMore: boolean }> {
@@ -114,5 +134,5 @@ export async function getHistory(userId: number, chatId: number, before: number 
      order by id desc
      limit ${take + 1}`;
   const hasMore = rows.length > take;
-  return { messages: rows.slice(0, take).reverse().map(toMessage), hasMore };
+  return { messages: await withReactions(rows.slice(0, take).reverse().map(toMessage)), hasMore };
 }

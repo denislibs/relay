@@ -1048,3 +1048,5 @@ button.rl-quote { cursor: pointer; }
 @keyframes rl-empty-link-b { 0%, 100% { transform: translateX(9px); } 45%, 65% { transform: translateX(0); } }
 .rl-empty-link-spark .rl-empty-spark { animation: rl-empty-twinkle 3.2s ease-in-out 1.15s infinite; }
 @media (prefers-reduced-motion: reduce) { .rl-empty-sun, .rl-empty-spark, .rl-empty-clip, .rl-empty-bob, .rl-empty-link-a, .rl-empty-link-b { animation: none !important; } .rl-empty-sun-fill { animation-duration: 1ms !important; } }
+/* диалог с опасным действием — иконка в цвет кнопки */
+.rl-modal:has(.rl-btn-danger) .rl-modal-icon { color: var(--danger); }

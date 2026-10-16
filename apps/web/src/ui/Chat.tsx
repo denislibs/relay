@@ -1,6 +1,6 @@
-import { Avatar, Composer, GlassBar, IconButton, Menu, requestMutation } from '@relay/ui';
+import { Avatar, Button, Composer, GlassBar, IconButton, Menu, Modal, ReactionPicker, requestMutation } from '@relay/ui';
 import { useEffect, useLayoutEffect, useRef, useState } from 'preact/hooks';
-import { openChat, saveDraft, send, typing, typingDone } from '../data';
+import { deleteMessage, editMessage, openChat, react, saveDraft, send, typing, typingDone } from '../data';
 import { setGlobal, useGlobal } from '../global';
 import { Feed } from './Feed';
 import { lastSeenText } from './format';
@@ -18,6 +18,8 @@ export function Chat({ chatId }: { chatId: number }) {
   const stick = useRef(true);              // лента прижата к низу (Feed ведёт, отправка выставляет)
   const [menu, setMenu] = useState<{ x: number; y: number; key: string } | null>(null);
   const [replyKey, setReplyKey] = useState<string | null>(null);
+  const [editing, setEditing] = useState<{ id: number; original: string; draft: string } | null>(null);   // правка своего сообщения
+  const [confirmDelete, setConfirmDelete] = useState<{ id: number } | null>(null);
 
 
   // черновик (как в Telegram): восстановить при открытии, сохранять через 2.5 с после ввода,
@@ -95,11 +97,19 @@ export function Chat({ chatId }: { chatId: number }) {
       <Composer
         id="composer"
         placeholder="Сообщение"
-        replyTo={replyTo ? { author: authorOf(replyTo.senderId), text: replyTo.body, tone: replyTo.senderId === me.userId ? 1 : 3 } : null}
-        onCancelReply={() => setReplyKey(null)}
+        replyTo={editing ? { author: 'Редактирование', text: editing.original, tone: 1, icon: 'pencil' } : replyTo ? { author: authorOf(replyTo.senderId), text: replyTo.body, tone: replyTo.senderId === me.userId ? 1 : 3 } : null}
+        onCancelReply={() => {
+          if (editing) { setText(editing.draft); latest.current = saved.current = editing.draft; setEditing(null); return; } // правку отменили — вернуть черновик
+          setReplyKey(null);
+        }}
         value={text}
         onChange={onType}
         onSend={(body: string) => {
+          if (editing) {
+            if (body !== editing.original) editMessage(chatId, editing.id, body).catch(() => {});
+            setText(editing.draft); latest.current = saved.current = editing.draft; setEditing(null);
+            return;
+          }
           stick.current = true;
           if (draftTimer.current) { clearTimeout(draftTimer.current); draftTimer.current = null; }
           saved.current = latest.current = '';   // черновик очищает сам движок вместе с отправкой
@@ -109,20 +119,47 @@ export function Chat({ chatId }: { chatId: number }) {
           setReplyKey(null);
         }}
       />
-      {menu && menuMsg ? (
-        <>
-          <div class="rl-msgmenu-scrim" onClick={() => setMenu(null)} onContextMenu={(e) => { e.preventDefault(); setMenu(null); }} />
-          <div class="rl-msgmenu" style={{ left: Math.min(menu.x, innerWidth - 230), top: Math.min(menu.y, innerHeight - 110) }}>
-            <Menu
-              label="Действия с сообщением"
-              onClose={() => setMenu(null)}
-              items={[
-                ...(menuMsg.id != null ? [{ icon: 'reply', label: 'Ответить', onClick: () => { setReplyKey(menuMsg.key as string); document.getElementById('composer')?.focus(); } }] : []),
-                { icon: 'copy', label: 'Копировать', onClick: () => { navigator.clipboard?.writeText(menuMsg.body as string).catch(() => {}); } },
-              ]}
-            />
-          </div>
-        </>
+      {menu && menuMsg ? (() => {
+        const own = menuMsg.senderId === me.userId && !menuMsg.deleted && menuMsg.id != null;
+        const myReaction = ((menuMsg.reactions as { userId: number; emoji: string }[] | undefined) ?? []).find((r) => r.userId === me.userId)?.emoji;
+        return (
+          <>
+            <div class="rl-msgmenu-scrim" onClick={() => setMenu(null)} onContextMenu={(e) => { e.preventDefault(); setMenu(null); }} />
+            <div class="rl-msgmenu" style={{ left: Math.min(menu.x, innerWidth - 300), top: Math.min(menu.y, innerHeight - 240) }}>
+              {menuMsg.id != null && !menuMsg.deleted ? (
+                <ReactionPicker selected={myReaction} onPick={(emoji: string) => { react(chatId, menuMsg.id as number, myReaction === emoji ? null : emoji); setMenu(null); }} />
+              ) : null}
+              <Menu
+                label="Действия с сообщением"
+                onClose={() => setMenu(null)}
+                items={[
+                  ...(menuMsg.id != null && !menuMsg.deleted ? [{ icon: 'reply', label: 'Ответить', onClick: () => { setEditing(null); setReplyKey(menuMsg.key as string); document.getElementById('composer')?.focus(); } }] : []),
+                  ...(own ? [{ icon: 'pencil', label: 'Изменить', onClick: () => {
+                    setReplyKey(null);
+                    setEditing({ id: menuMsg.id as number, original: menuMsg.body as string, draft: latest.current });
+                    setText(menuMsg.body as string); latest.current = saved.current = menuMsg.body as string;
+                    document.getElementById('composer')?.focus();
+                  } }] : []),
+                  ...(!menuMsg.deleted ? [{ icon: 'copy', label: 'Копировать', onClick: () => { navigator.clipboard?.writeText(menuMsg.body as string).catch(() => {}); } }] : []),
+                  ...(own ? ['-' as const, { icon: 'trash', label: 'Удалить', danger: true, onClick: () => setConfirmDelete({ id: menuMsg.id as number }) }] : []),
+                ]}
+              />
+            </div>
+          </>
+        );
+      })() : null}
+      {confirmDelete ? (
+        <Modal
+          title="Удалить сообщение?"
+          icon="trash"
+          onClose={() => setConfirmDelete(null)}
+          actions={[
+            <Button key="c" variant="ghost" onClick={() => setConfirmDelete(null)}>Отмена</Button>,
+            <Button key="d" variant="danger" onClick={() => { deleteMessage(chatId, confirmDelete.id).catch(() => {}); setConfirmDelete(null); }}>Удалить у всех</Button>,
+          ]}
+        >
+          <p class="app-modal-text">Сообщение исчезнет у всех участников чата.</p>
+        </Modal>
       ) : null}
     </>
   );

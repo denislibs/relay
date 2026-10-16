@@ -2,7 +2,7 @@ import type { Item } from '@relay/sync-engine/src/types';
 import { Bubble, DateDivider, ScrollToBottom, forceMeasure, isHeavyAnimating, onHeavyAnimationEnd, requestMeasure, requestMutation } from '@relay/ui';
 import { memo } from 'preact/compat';
 import { useEffect, useLayoutEffect, useRef, useState } from 'preact/hooks';
-import { focusMessage, moveWindow, savePosition, savedPosition, seen } from '../data';
+import { focusMessage, moveWindow, react, savePosition, savedPosition, seen } from '../data';
 import { setGlobal, useGlobal } from '../global';
 import { clock, dayKey, dayLabel } from './format';
 
@@ -24,10 +24,17 @@ const READ_EVERY = 150;   // отправка «вижу до id» не чаще
 const FIRST_PAINT = 24;   // при открытии внизу первым кадром — столько последних сообщений, остальное следующим кадром
 
 type Quote = { id: number; sort: number; body: string; senderId: number };
-type RowProps = { m: Item; out: boolean; start: boolean; end: boolean; quoted?: Quote | null; quoteAuthor?: string; quoteTone?: number; appear: boolean; flash: boolean };
+type RowProps = { m: Item; meId: number; out: boolean; start: boolean; end: boolean; quoted?: Quote | null; quoteAuthor?: string; quoteTone?: number; appear: boolean; flash: boolean; onReact: (m: Item, emoji: string) => void };
 
 /** Строка ленты: перерисовывается только если изменилось её сообщение или место в группе. */
-const Row = memo(function Row({ m, out, start, end, quoted, quoteAuthor, quoteTone, appear, flash }: RowProps) {
+const Row = memo(function Row({ m, meId, out, start, end, quoted, quoteAuthor, quoteTone, appear, flash, onReact }: RowProps) {
+  // реакции: по эмодзи — сколько и есть ли моя
+  const list = (m.reactions as { userId: number; emoji: string }[] | undefined) ?? [];
+  const chips: { emoji: string; count: number; mine: boolean }[] = [];
+  for (const r of list) {
+    const c = chips.find((x) => x.emoji === r.emoji);
+    if (c) { c.count++; c.mine ||= r.userId === meId; } else chips.push({ emoji: r.emoji, count: 1, mine: r.userId === meId });
+  }
   return (
     <div class="app-msg" data-key={m.key} data-sort={m.sort as number}>
       <Bubble
@@ -36,6 +43,10 @@ const Row = memo(function Row({ m, out, start, end, quoted, quoteAuthor, quoteTo
         groupStart={start}
         reply={quoted ? { author: quoteAuthor, text: quoted.body, tone: quoteTone, onClick: noop } : undefined}
         flash={flash}
+        edited={!!m.editedAt && !m.deleted}
+        deleted={!!m.deleted}
+        reactions={chips.length ? chips : undefined}
+        onReactionClick={(emoji: string) => onReact(m, emoji)}
         time={clock(m.createdAt as string)}
         status={out ? m.status : undefined}
         appear={appear}
@@ -280,6 +291,13 @@ export function Feed({ chatId, meId, peerName, stick, onMenu }: {
     if (r) focusMessage({ id: r.id, sort: r.sort });
   };
 
+  // реакция под баблом: своя — снять, чужая — поставить такую же
+  const onReact = useRef((m: Item, emoji: string) => {
+    if (m.id == null) return;
+    const mine = ((m.reactions as { userId: number; emoji: string }[] | undefined) ?? []).find((r) => r.userId === meId);
+    react(chatId, m.id as number, mine?.emoji === emoji ? null : emoji);
+  }).current;
+
   // контекстное меню — одно на ленту, а не на каждый бабл (иначе обработчик ломал бы мемоизацию строк)
   const onContextMenu = (e: MouseEvent) => {
     const row = (e.target as Element).closest<HTMLElement>('.app-msg');
@@ -308,6 +326,8 @@ export function Feed({ chatId, meId, peerName, stick, onMenu }: {
       <Row
         key={m.key}
         m={m}
+        meId={meId}
+        onReact={onReact}
         out={mine}
         start={start}
         end={end}

@@ -6,6 +6,7 @@ import { currentSeq, getUpdates } from './domain/journal';
 import { sendMessage } from './domain/messages';
 import { markRead } from './domain/reads';
 import { saveDraft } from './domain/drafts';
+import { deleteMessage, editMessage, reactMessage } from './domain/messageOps';
 
 /** publish — разослать кадр в топик пользователя (для «печатает…»); у тестов без сокетов — no-op. */
 export async function handleFrame(userId: number, frame: ClientFrame, publish: (topic: string, msg: string) => void = () => {}): Promise<ServerFrame[]> {
@@ -37,6 +38,9 @@ export async function handleFrame(userId: number, frame: ClientFrame, publish: (
         const res = await markRead(userId, frame.chatId, frame.upToId);
         return [{ op: 'ack', reqId: frame.reqId, result: res }];
       }
+      case 'edit': return [{ op: 'ack', reqId: frame.reqId, result: await editMessage(userId, frame.chatId, frame.id, frame.body) }];
+      case 'delete': return [{ op: 'ack', reqId: frame.reqId, result: await deleteMessage(userId, frame.chatId, frame.id) }];
+      case 'react': return [{ op: 'ack', reqId: frame.reqId, result: await reactMessage(userId, frame.chatId, frame.id, frame.emoji) }];
       case 'draft': {
         const res = await saveDraft(userId, frame.chatId, frame.text);
         return [{ op: 'ack', reqId: frame.reqId, result: res }];

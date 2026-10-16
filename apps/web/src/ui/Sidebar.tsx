@@ -62,7 +62,7 @@ export function Sidebar() {
               return (
                 <ChatRow
                   name={(c.title as string) || 'Чат №' + c.id}
-                  preview={last?.body ?? 'Нет сообщений'}
+                  preview={last ? ((last as { deleted?: boolean }).deleted ? 'Сообщение удалено' : last.body) : 'Нет сообщений'}
                   draft={c.draft && c.id !== openId ? (c.draft as string) : undefined}
                   muted={mutedIds.includes(c.id as number)}
                   typing={!!c.typing}

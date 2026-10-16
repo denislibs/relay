@@ -11,6 +11,9 @@ export interface LocalMessage {
   createdAt: string;
   status: Status;
   sort: number;           // id, а у неподтверждённых — PENDING_BASE + время создания
+  editedAt?: string | null;
+  deleted?: boolean;
+  reactions?: { userId: number; emoji: string }[];
 }
 
 export interface LocalChat {
@@ -61,7 +64,10 @@ export type Action =
   | { type: 'refreshChats' }
   | { type: 'loadMoreChats' }
   | { type: 'setDraft'; chatId: number; text: string }
-  | { type: 'typing'; chatId: number };
+  | { type: 'typing'; chatId: number }
+  | { type: 'editMessage'; chatId: number; id: number; body: string }
+  | { type: 'deleteMessage'; chatId: number; id: number }
+  | { type: 'react'; chatId: number; id: number; emoji: string | null };
 
 export interface EngineConfig {
   userId: number;

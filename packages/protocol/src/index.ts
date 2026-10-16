@@ -9,17 +9,26 @@ export interface Message {
   body: string;
   replyToId: Id | null;
   createdAt: string; // ISO
+  editedAt?: string | null;
+  deleted?: boolean;
+  reactions?: Reaction[];
 }
+
+/** Реакция: кто и какой эмодзи (одна от пользователя на сообщение). */
+export interface Reaction { userId: Id; emoji: string }
 
 export type Update =
   | { type: 'newMessage'; message: Message }
   | { type: 'readOwn'; chatId: Id; upToId: Id }
   | { type: 'readBy'; chatId: Id; userId: Id; upToId: Id }
-  | { type: 'draft'; chatId: Id; text: string; at: string };   // черновик своих устройств; пустой текст — удалён
+  | { type: 'draft'; chatId: Id; text: string; at: string }
+  | { type: 'messageEdited'; chatId: Id; id: Id; body: string; editedAt: string }
+  | { type: 'messageDeleted'; chatId: Id; id: Id }
+  | { type: 'reactions'; chatId: Id; id: Id; reactions: Reaction[] };   // черновик своих устройств; пустой текст — удалён
 
 export interface JournalEntry { seq: number; update: Update }
 
-export type ErrorCode = 'bad_frame' | 'unauthorized' | 'not_member' | 'not_found' | 'too_long' | 'internal';
+export type ErrorCode = 'bad_frame' | 'unauthorized' | 'not_member' | 'not_found' | 'too_long' | 'forbidden' | 'internal';
 
 export type ClientFrame =
   | { op: 'hello'; lastSeq: number }
@@ -28,6 +37,9 @@ export type ClientFrame =
   | { op: 'read'; reqId: string; chatId: Id; upToId: Id }
   | { op: 'typing'; chatId: Id }   // «печатаю» — без ответа, сервер пересылает остальным участникам
   | { op: 'draft'; reqId: string; chatId: Id; text: string }
+  | { op: 'edit'; reqId: string; chatId: Id; id: Id; body: string }
+  | { op: 'delete'; reqId: string; chatId: Id; id: Id }
+  | { op: 'react'; reqId: string; chatId: Id; id: Id; emoji: string | null }
   | { op: 'ping' };
 
 /** Присутствие собеседника: в сети сейчас или когда был последний раз (ISO). */
@@ -57,6 +69,9 @@ export function parseClientFrame(raw: string): ClientFrame | null {
     case 'sync': return int(f.since) ? { op: 'sync', since: f.since } : null;
     case 'ping': return { op: 'ping' };
     case 'typing': return int(f.chatId) ? { op: 'typing', chatId: f.chatId } : null;
+    case 'edit': return str(f.reqId, 64) && int(f.chatId) && int(f.id) && typeof f.body === 'string' ? { op: 'edit', reqId: f.reqId, chatId: f.chatId, id: f.id, body: f.body } : null;
+    case 'delete': return str(f.reqId, 64) && int(f.chatId) && int(f.id) ? { op: 'delete', reqId: f.reqId, chatId: f.chatId, id: f.id } : null;
+    case 'react': return str(f.reqId, 64) && int(f.chatId) && int(f.id) && (f.emoji === null || str(f.emoji, 16)) ? { op: 'react', reqId: f.reqId, chatId: f.chatId, id: f.id, emoji: f.emoji as string | null } : null;
     case 'draft': return str(f.reqId, 64) && int(f.chatId) && typeof f.text === 'string' ? { op: 'draft', reqId: f.reqId, chatId: f.chatId, text: f.text } : null;
     case 'send':
       if (!str(f.reqId, 64) || !str(f.clientId, 36) || !UUID.test(f.clientId) || !int(f.chatId) || typeof f.body !== 'string') return null;

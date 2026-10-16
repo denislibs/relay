@@ -293,6 +293,31 @@ export class Engine {
       case 'typing':
         if (this.online) this.transport.send({ op: 'typing', chatId: a.chatId });
         return null;
+      case 'editMessage': {
+        if (!this.online) throw new Error('offline');
+        await this.request({ op: 'edit', reqId: '', chatId: a.chatId, id: a.id, body: a.body });
+        return null;
+      }
+      case 'deleteMessage': {
+        if (!this.online) throw new Error('offline');
+        await this.request({ op: 'delete', reqId: '', chatId: a.chatId, id: a.id });
+        return null;
+      }
+      case 'react': {
+        if (!this.online) throw new Error('offline');
+        // сразу у себя (реакция должна отзываться мгновенно), подтверждение и чужие — через журнал
+        const m = this.store.messageById(a.chatId, a.id);
+        const prev = m?.reactions ?? [];
+        if (m) {
+          const next = prev.filter((r) => r.userId !== this.cfg.userId);
+          if (a.emoji) next.push({ userId: this.cfg.userId, emoji: a.emoji });
+          this.store.patchMessage(a.chatId, a.id, { reactions: next });
+          this.changed();
+        }
+        try { await this.request({ op: 'react', reqId: '', chatId: a.chatId, id: a.id, emoji: a.emoji }); }
+        catch (err) { if (m) { this.store.patchMessage(a.chatId, a.id, { reactions: prev }); this.changed(); } throw err; }
+        return null;
+      }
       case 'loadMoreChats':
         await this.loadMoreChats();
         return null;
