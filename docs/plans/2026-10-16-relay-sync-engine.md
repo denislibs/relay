@@ -1,6 +1,6 @@
 # Relay Sync Engine Implementation Plan
 
-> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
+> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [x]`) syntax for tracking.
 
 **Goal:** Headless-движок клиента в `packages/sync-engine`: локальная база в IndexedDB, синхронизация с сервером этапа 1, очередь отправки, указатель прочтения и живые подписки с патчами; хосты SharedWorker и Dedicated Worker (с выбором лидера) и клиент для главного потока.
 
@@ -62,7 +62,7 @@ export type Action =
   | { type: 'seen'; chatId: number; upToId: number }
   | { type: 'loadOlder'; chatId: number }
   | { type: 'retry'; clientId: string };
-export interface EngineConfig { userId: number; dbName: string; httpBase: string; wsUrl: string; authHeaders?: () => Record<string, string>; frameMs?: number; readFlushMs?: number; backoffMs?: [number, number] }
+export interface EngineConfig { userId: number; dbName: string; httpBase: string; wsUrl: string; headers?: Record<string, string>; frameMs?: number; readFlushMs?: number; backoffMs?: [number, number]; historyPage?: number } // только сериализуемое: уходит в воркер
 
 // engine.ts
 export interface WatchHandle { update(q: Query): void; close(): void }
@@ -76,9 +76,9 @@ export class Engine {
 }
 
 // host-core.ts — протокол порта
-type ToHost = { t: 'hello'; build: string } | { t: 'watch' | 'update'; sub: number; query: Query } | { t: 'unwatch'; sub: number } | { t: 'call'; id: number; action: Action } | { t: 'ping' } | { t: 'bye' };
-type FromHost = { t: 'patches'; items: { sub: number; patch: Patch }[] } | { t: 'result'; id: number; ok: boolean; value?: unknown; error?: string } | { t: 'reload' } | { t: 'pong' };
-export interface PortLike { post(msg: FromHost): void; onMessage(cb: (msg: ToHost) => void): void }
+type ToHost = { t: 'hello'; build: string; config: EngineConfig } | { t: 'watch' | 'update'; sub: number; query: Query } | { t: 'unwatch'; sub: number } | { t: 'call'; id: number; action: Action } | { t: 'ping' } | { t: 'bye' };
+type FromHost = { t: 'ready' } | { t: 'patches'; items: { sub: number; patch: Patch }[] } | { t: 'result'; id: number; ok: boolean; value?: unknown; error?: string } | { t: 'reload' } | { t: 'pong' };
+export interface PortLike<In, Out> { post(m: Out): void; listen(cb: (m: In) => void): void }
 ```
 
 ---
@@ -86,37 +86,46 @@ export interface PortLike { post(msg: FromHost): void; onMessage(cb: (msg: ToHos
 ### Task 1: Пакет, IndexedDB и Store с сохранением
 **Files:** `package.json`, `bunfig.toml`, `src/types.ts`, `src/idb.ts`, `src/store.ts`, `test/setup.ts`, `test/helpers.ts`, `test/store.test.ts`; Modify: `apps/server/Dockerfile` (копировать `packages/sync-engine/package.json`), `docker-compose.yml` (сервис `test-engine`).
 
-- [ ] Тест `store.test.ts`: применить к Store `newMessage` и `readOwn`, `flush()` вместе с `lastSeq=2`, открыть второй Store на той же базе → чаты, последнее сообщение, `lastReadId`, `lastSeq` восстановлены; сообщения чата лениво грузятся `loadChatMessages(chatId)` в порядке `sort`.
-- [ ] Тест: повторный `newMessage` с тем же `clientId` не дублирует сообщение и не увеличивает `unread`; `newMessage` своего сообщения не увеличивает `unread`; `id ≤ knownMaxId` не увеличивает `unread`.
-- [ ] Реализация `idb.ts` (обёртка над IDB: stores `chats`(id), `messages`(key, index `byChat` = [chatId, sort]), `outbox`(clientId), `pendingReads`(chatId), `meta`(k)) и `store.ts`.
-- [ ] `docker compose run --rm --build test-engine bun test test/store.test.ts` → PASS. Commit.
+- [x] Тест `store.test.ts`: применить к Store `newMessage` и `readOwn`, `flush()` вместе с `lastSeq=2`, открыть второй Store на той же базе → чаты, последнее сообщение, `lastReadId`, `lastSeq` восстановлены; сообщения чата лениво грузятся `loadChatMessages(chatId)` в порядке `sort`.
+- [x] Тест: повторный `newMessage` с тем же `clientId` не дублирует сообщение и не увеличивает `unread`; `newMessage` своего сообщения не увеличивает `unread`; `id ≤ knownMaxId` не увеличивает `unread`.
+- [x] Реализация `idb.ts` (обёртка над IDB: stores `chats`(id), `messages`(key, index `byChat` = [chatId, sort]), `outbox`(clientId), `pendingReads`(chatId), `meta`(k)) и `store.ts`.
+- [x] `docker compose run --rm --build test-engine bun test test/store.test.ts` → PASS. Commit.
 
 ### Task 2: Подписки и патчи
 **Files:** `src/queries.ts`, `test/queries.test.ts`.
-- [ ] Тест: `chatList` упорядочен по `lastAt` убыв.; первый вызов → `snapshot`; изменение одного чата → `diff` с одним `upsert` и новым `order` только если порядок изменился; удаление → `remove`; одинаковый результат → патча нет. `messages` — последние `limit` по `sort`. `counters` — `{unreadChats, unreadMessages}`.
-- [ ] Реализация: `computeQuery(store, q): {items, order}` и `diffResults(prev, next): Patch | null` (сравнение элементов по стабильной сериализации).
-- [ ] PASS. Commit.
+- [x] Тест: `chatList` упорядочен по `lastAt` убыв.; первый вызов → `snapshot`; изменение одного чата → `diff` с одним `upsert` и новым `order` только если порядок изменился; удаление → `remove`; одинаковый результат → патча нет. `messages` — последние `limit` по `sort`. `counters` — `{unreadChats, unreadMessages}`.
+- [x] Реализация: `computeQuery(store, q): {items, order}` и `diffResults(prev, next): Patch | null` (сравнение элементов по стабильной сериализации).
+- [x] PASS. Commit.
 
 ### Task 3: Транспорт и синхронизация
 **Files:** `src/transport.ts`, `src/engine.ts`, `test/engine.test.ts`.
-- [ ] Тест (сервер этапа 1 запускается в процессе теста): два движка A и B; B смотрит `chatList` и `messages`; A отправляет через сервер → B получает `poke` → `sync` → патч с сообщением и `unread=1`.
-- [ ] Тест: первый вход с пустой базой при уже существующих сообщениях → снимок `/chats`, `unread` из снимка не удваивается последующим `sync`.
-- [ ] Тест: `tooLong` (журнал B очищен на сервере, у B старый `lastSeq`) → движок берёт снимок и продолжает.
-- [ ] Тест: `loadOlder` подгружает историю по HTTP и расширяет подписку.
-- [ ] Реализация транспорта (backoff `[250, 5000]`, `onOpen/onFrame/onClose`) и `Engine` (bootstrap, цикл `sync` с `more`, `poke`, применение, flush, планирование патчей раз в `frameMs`).
-- [ ] PASS. Commit.
+- [x] Тест (сервер этапа 1 запускается в процессе теста): два движка A и B; B смотрит `chatList` и `messages`; A отправляет через сервер → B получает `poke` → `sync` → патч с сообщением и `unread=1`.
+- [x] Тест: первый вход с пустой базой при уже существующих сообщениях → снимок `/chats`, `unread` из снимка не удваивается последующим `sync`.
+- [x] Тест: `tooLong` (журнал B очищен на сервере, у B старый `lastSeq`) → движок берёт снимок и продолжает.
+- [x] Тест: `loadOlder` подгружает историю по HTTP и расширяет подписку.
+- [x] Реализация транспорта (backoff `[250, 5000]`, `onOpen/onFrame/onClose`) и `Engine` (bootstrap, цикл `sync` с `more`, `poke`, применение, flush, планирование патчей раз в `frameMs`).
+- [x] PASS. Commit.
 
 ### Task 4: Outbox и ReadTracker
 **Files:** Modify `src/engine.ts`; `test/outbox.test.ts`, `test/reads.test.ts`.
-- [ ] Тест outbox: `disconnect()` → `sendMessage` → в подписке сразу `pending`; переоткрыть движок с той же базой (перезапуск вкладки) → сообщение и очередь на месте; `connect()` → `sent`, у собеседника появилось ровно одно сообщение; порядок трёх офлайн-сообщений сохраняется.
-- [ ] Тест: неповторяемая ошибка (пустое тело) → `failed`; `retry` переотправляет.
-- [ ] Тест reads: B шлёт 20 `seen` подряд → на сервер уходит один `read` с максимумом; `unread` гаснет сразу локально; у A статус своего сообщения → `read`; `seen` в офлайне переживает перезапуск и уходит после подключения.
-- [ ] Реализация: очередь по порядку, один кадр в полёте, `ack`/`err` по `reqId`; ReadTracker с `pendingReads`.
-- [ ] PASS. Commit.
+- [x] Тест outbox: `disconnect()` → `sendMessage` → в подписке сразу `pending`; переоткрыть движок с той же базой (перезапуск вкладки) → сообщение и очередь на месте; `connect()` → `sent`, у собеседника появилось ровно одно сообщение; порядок трёх офлайн-сообщений сохраняется.
+- [x] Тест: неповторяемая ошибка (пустое тело) → `failed`; `retry` переотправляет.
+- [x] Тест reads: B шлёт 20 `seen` подряд → на сервер уходит один `read` с максимумом; `unread` гаснет сразу локально; у A статус своего сообщения → `read`; `seen` в офлайне переживает перезапуск и уходит после подключения.
+- [x] Реализация: очередь по порядку, один кадр в полёте, `ack`/`err` по `reqId`; ReadTracker с `pendingReads`.
+- [x] PASS. Commit.
 
 ### Task 5: Хосты и клиент
 **Files:** `src/host-core.ts`, `src/hosts/shared.worker.ts`, `src/hosts/dedicated.ts`, `src/hosts/dedicated.worker.ts`, `src/client.ts`, `src/index.ts`, `test/hosts.test.ts`.
-- [ ] Тест HostCore через `MessageChannel`: два клиента подписаны на разные чаты → каждый получает только свои патчи; `call(sendMessage)` → `result` с `clientId`; несовпадение `build` → `reload`; `bye` снимает подписки клиента.
-- [ ] Тест Dedicated: две «вкладки» с общим фейковым `locks` и BroadcastChannel → первая лидер, вторая проксирует; подписка второй получает патчи; лидер закрывается → вторая становится лидером, переподписывается и продолжает получать патчи.
-- [ ] Тест `Mirror`: применение `snapshot`/`diff` даёт тот же список, что и прямой `computeQuery`.
-- [ ] PASS. Полный прогон `docker compose run --rm test && docker compose run --rm test-engine`. Commit.
+- [x] Тест HostCore через `MessageChannel`: два клиента подписаны на разные чаты → каждый получает только свои патчи; `call(sendMessage)` → `result` с `clientId`; несовпадение `build` → `reload`; `bye` снимает подписки клиента.
+- [x] Тест Dedicated: две «вкладки» с общим фейковым `locks` и BroadcastChannel → первая лидер, вторая проксирует; подписка второй получает патчи; лидер закрывается → вторая становится лидером, переподписывается и продолжает получать патчи.
+- [x] Тест `Mirror`: применение `snapshot`/`diff` даёт тот же список, что и прямой `computeQuery`.
+- [x] PASS. Полный прогон `docker compose run --rm test && docker compose run --rm test-engine`. Commit.
+
+## Итог выполнения (2026-10-16)
+
+Все задачи выполнены; `docker compose run --rm test` — 32 pass, `docker compose run --rm test-engine` — 22 pass. Отличия от плана, найденные по ходу:
+- Конфиг движка уходит в воркер через `postMessage`, поэтому вместо функции `authHeaders` — статический `headers` (в браузере не нужен: cookie сессии уходит сам).
+- `hello` от вкладки несёт `config`: движок открывается лениво по первому `hello`; хост отвечает `{t:'ready'}`.
+- Исправлен сервер: полностью очищенный журнал (`min(seq) = null`) теперь `tooLong`, а не пустая страница с `more: true`. В движке — защита от такой «дыры».
+- Входящие сообщения имеют статус `sent` (статус значим только для своих).
+- Пересчёт `unread` при частичном прочтении вычитает известные чужие сообщения в диапазоне `(старый указатель, новый]`; при прочтении до конца — 0.

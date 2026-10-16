@@ -367,7 +367,7 @@ export class Engine {
   // =====================================================================
 
   private async http<T>(path: string): Promise<T> {
-    const res = await fetch(this.cfg.httpBase + path, { headers: this.cfg.authHeaders?.() });
+    const res = await fetch(this.cfg.httpBase + path, { headers: this.cfg.headers, credentials: 'include' });
     if (!res.ok) throw new Error(`HTTP ${res.status} ${path}`);
     return (await res.json()) as T;
   }

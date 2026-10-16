@@ -27,7 +27,7 @@ export async function startTestServer() {
       return {
         userId: user.userId, dbName, httpBase: base,
         wsUrl: `ws://localhost:${server.port}/ws?token=${user.token}`,
-        authHeaders: () => ({ cookie: `relay_session=${user.token}` }),
+        headers: { cookie: `relay_session=${user.token}` },
         frameMs: 5, readFlushMs: 30, backoffMs: [20, 200],
       };
     },

@@ -57,7 +57,8 @@ export interface EngineConfig {
   dbName: string;
   httpBase: string;
   wsUrl: string;
-  authHeaders?: () => Record<string, string>;
+  /** Только сериализуемое: конфиг уходит в воркер через postMessage. В браузере не нужен — cookie сессии уходит сам. */
+  headers?: Record<string, string>;
   frameMs?: number;
   readFlushMs?: number;
   backoffMs?: [number, number];
