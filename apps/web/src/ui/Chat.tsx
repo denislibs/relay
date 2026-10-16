@@ -37,6 +37,13 @@ export function Chat({ chatId }: { chatId: number }) {
     if (draftTimer.current) clearTimeout(draftTimer.current);
     draftTimer.current = setTimeout(flushDraft, 2500);
   };
+  // черновик поменяли на другом устройстве (или стёрли отправкой там): здесь ничего не набирали — подхватываем
+  const remoteDraft = (chat?.draft as string | null | undefined) ?? '';
+  useEffect(() => {
+    if (draftTimer.current || latest.current !== saved.current || remoteDraft === latest.current) return;
+    saved.current = latest.current = remoteDraft;
+    setText(remoteDraft);
+  }, [remoteDraft]);
   useEffect(() => {
     const input = document.getElementById('composer') as HTMLInputElement | null;
     if (input && text) input.setSelectionRange(text.length, text.length); // курсор — в конец текста

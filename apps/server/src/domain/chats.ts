@@ -39,6 +39,7 @@ export type ChatSummary = {
   last: Message | null;
   peer: { id: number; name: string } | null; // собеседник личного чата
   peerReadUpTo: number; // до какого id мои сообщения прочитаны всеми остальными участниками
+  draft?: { text: string; at: string } | null; // черновик этого пользователя (синхронизируется между устройствами)
   sortAt?: string; // ключ сортировки списка (последнее сообщение или создание чата) — из него курсор страницы
 };
 
@@ -66,7 +67,8 @@ export async function listChats(userId: number, opts: ListOpts = {}): Promise<Ch
            (select json_build_object('id', u.id, 'name', u.name) from chat_members pm join users u on u.id = pm.user_id
              where c.kind = 'direct' and pm.chat_id = c.id and pm.user_id <> ${userId} limit 1) as peer,
            (select coalesce(min(om.last_read_id), 0) from chat_members om where om.chat_id = c.id and om.user_id <> ${userId}) as peer_read_up_to,
-           date_trunc('milliseconds', coalesce(lm.created_at, c.created_at)) as sort_at
+           date_trunc('milliseconds', coalesce(lm.created_at, c.created_at)) as sort_at,
+           (select json_build_object('text', d.text, 'at', d.updated_at) from drafts d where d.user_id = ${userId} and d.chat_id = c.id) as draft
       from chat_members cm
       join chats c on c.id = cm.chat_id
       left join lateral (
@@ -87,6 +89,7 @@ export async function listChats(userId: number, opts: ListOpts = {}): Promise<Ch
     peer: (r.peer as { id: number; name: string } | null) ?? null,
     peerReadUpTo: (r.peer_read_up_to as number) ?? 0,
     sortAt: new Date(r.sort_at as string).toISOString(),
+    draft: r.draft ? { text: (r.draft as { text: string }).text, at: new Date((r.draft as { at: string }).at).toISOString() } : null,
     last: r.m_id == null ? null : toMessage({
       id: r.m_id, chat_id: r.m_chat_id, sender_id: r.m_sender_id, client_id: r.m_client_id,
       body: r.m_body, reply_to_id: r.m_reply_to_id, created_at: r.m_created_at,

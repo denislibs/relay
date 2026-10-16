@@ -5,6 +5,7 @@ import { DomainError } from './domain/errors';
 import { currentSeq, getUpdates } from './domain/journal';
 import { sendMessage } from './domain/messages';
 import { markRead } from './domain/reads';
+import { saveDraft } from './domain/drafts';
 
 /** publish — разослать кадр в топик пользователя (для «печатает…»); у тестов без сокетов — no-op. */
 export async function handleFrame(userId: number, frame: ClientFrame, publish: (topic: string, msg: string) => void = () => {}): Promise<ServerFrame[]> {
@@ -34,6 +35,10 @@ export async function handleFrame(userId: number, frame: ClientFrame, publish: (
       }
       case 'read': {
         const res = await markRead(userId, frame.chatId, frame.upToId);
+        return [{ op: 'ack', reqId: frame.reqId, result: res }];
+      }
+      case 'draft': {
+        const res = await saveDraft(userId, frame.chatId, frame.text);
         return [{ op: 'ack', reqId: frame.reqId, result: res }];
       }
       case 'ping':

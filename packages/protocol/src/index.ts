@@ -14,7 +14,8 @@ export interface Message {
 export type Update =
   | { type: 'newMessage'; message: Message }
   | { type: 'readOwn'; chatId: Id; upToId: Id }
-  | { type: 'readBy'; chatId: Id; userId: Id; upToId: Id };
+  | { type: 'readBy'; chatId: Id; userId: Id; upToId: Id }
+  | { type: 'draft'; chatId: Id; text: string; at: string };   // черновик своих устройств; пустой текст — удалён
 
 export interface JournalEntry { seq: number; update: Update }
 
@@ -26,6 +27,7 @@ export type ClientFrame =
   | { op: 'send'; reqId: string; clientId: string; chatId: Id; body: string; replyToId?: Id | null }
   | { op: 'read'; reqId: string; chatId: Id; upToId: Id }
   | { op: 'typing'; chatId: Id }   // «печатаю» — без ответа, сервер пересылает остальным участникам
+  | { op: 'draft'; reqId: string; chatId: Id; text: string }
   | { op: 'ping' };
 
 /** Присутствие собеседника: в сети сейчас или когда был последний раз (ISO). */
@@ -55,6 +57,7 @@ export function parseClientFrame(raw: string): ClientFrame | null {
     case 'sync': return int(f.since) ? { op: 'sync', since: f.since } : null;
     case 'ping': return { op: 'ping' };
     case 'typing': return int(f.chatId) ? { op: 'typing', chatId: f.chatId } : null;
+    case 'draft': return str(f.reqId, 64) && int(f.chatId) && typeof f.text === 'string' ? { op: 'draft', reqId: f.reqId, chatId: f.chatId, text: f.text } : null;
     case 'send':
       if (!str(f.reqId, 64) || !str(f.clientId, 36) || !UUID.test(f.clientId) || !int(f.chatId) || typeof f.body !== 'string') return null;
       if (f.replyToId != null && !int(f.replyToId)) return null;

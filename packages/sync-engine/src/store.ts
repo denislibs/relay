@@ -3,6 +3,7 @@ import { getAll, getByChat, write, type WriteBatch } from './idb';
 import { PENDING_BASE, type LocalChat, type LocalMessage, type OutboxEntry } from './types';
 
 export interface ChatSummary {
+  draft?: { text: string; at: string } | null;
   sortAt?: string;
   id: number;
   kind: 'direct' | 'group';
@@ -143,6 +144,7 @@ export class Store {
         return this.applyMessage(u.message, true);
       case 'readOwn': return this.applyOwnRead(u.chatId, u.upToId);
       case 'readBy': return this.applyPeerRead(u.chatId, u.upToId);
+      case 'draft': return this.applyRemoteDraft(u.chatId, u.text, u.at);
     }
   }
 
@@ -162,6 +164,7 @@ export class Store {
       chat.kind = s.kind;
       chat.title = s.title ?? s.peer?.name ?? null;
       chat.peerId = s.peer?.id ?? null;
+      if (s.draft && (!chat.draft || s.draft.at > chat.draft.at) && !this.pendingDrafts.has(s.id)) chat.draft = s.draft;
       chat.named = true;
       if (s.peerReadUpTo && s.peerReadUpTo > chat.peerReadUpTo) this.applyPeerRead(s.id, s.peerReadUpTo);
       chat.lastReadId = Math.max(chat.lastReadId, s.lastReadId);
@@ -275,6 +278,20 @@ export class Store {
     const m = this.messages.get(o.chatId)?.get(clientId);
     if (m) this.putMessage({ ...m, status: 'pending' });
     return true;
+  }
+
+  /** Черновики, ещё не отправленные на сервер (правки этого устройства). */
+  pendingDrafts = new Set<number>();
+
+  /** Черновик с другого устройства (журнал) или из снимка: локальный неотправленный и более новый — главнее. */
+  applyRemoteDraft(chatId: number, text: string, at: string): void {
+    const chat = this.chats.get(chatId);
+    if (!chat) return;
+    if (this.pendingDrafts.has(chatId) && chat.draft && chat.draft.at > at) return;
+    const next = text ? { text, at } : null;
+    if ((chat.draft?.text ?? null) === (next?.text ?? null)) return;
+    chat.draft = next;
+    this.markChat(chat);
   }
 
   /** Черновик чата: пустой текст — удалить. false — ничего не изменилось (тот же текст). */

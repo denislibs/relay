@@ -192,6 +192,19 @@ export class Engine {
     this.frameTimer = setTimeout(() => { this.frameTimer = null; this.emit(); }, this.cfg.frameMs ?? 16);
   }
 
+  /** Отправить на сервер черновики этого устройства (сервер разнесёт их по остальным через журнал). */
+  private pushDrafts(): void {
+    if (!this.online || !this.ready) return;
+    for (const chatId of [...this.store.pendingDrafts]) {
+      const text = this.store.chats.get(chatId)?.draft?.text ?? '';
+      this.run(async () => {
+        await this.request({ op: 'draft', reqId: '', chatId, text });
+        // за время запроса текст могли поменять — тогда он уйдёт следующим вызовом
+        if ((this.store.chats.get(chatId)?.draft?.text ?? '') === text) this.store.pendingDrafts.delete(chatId);
+      });
+    }
+  }
+
   /** Цитаты, исходники которых не загружены: одним запросом на чат, в фоне. */
   private fetchQuotes(): void {
     if (!this.online || !this.store.quoteWants.size) return;
@@ -269,7 +282,12 @@ export class Engine {
         return null;
       }
       case 'setDraft': {
-        if (this.store.setDraft(a.chatId, a.text)) { await this.store.flush(); this.changed(); }
+        if (this.store.setDraft(a.chatId, a.text)) {
+          this.store.pendingDrafts.add(a.chatId);
+          await this.store.flush();
+          this.changed();
+          this.pushDrafts();
+        }
         return null;
       }
       case 'typing':
@@ -430,6 +448,7 @@ export class Engine {
       this.changed();
       this.pumpOutbox();
       this.flushReads();
+      this.pushDrafts();
       if (this.store.unnamed().length) this.refreshList();
       if (!this.presenceFetched) this.fetchPresence();
     }

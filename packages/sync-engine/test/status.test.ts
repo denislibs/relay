@@ -240,3 +240,18 @@ test('typing: shows on the peer side, fades after typingMs, clears when the mess
   await ea.call({ type: 'sendMessage', chatId, body: 'готово' });
   await list.until((l) => l[0].typing === false && (l[0].last as { body: string } | null)?.body === 'готово');
 });
+
+test('drafts sync between devices of the same user through the journal', async () => {
+  const a = await srv.login('a'), b = await srv.login('b');
+  const chatId = await srv.chat(a.token, [a.userId, b.userId]);
+  const phone = await open(srv.config(a)), laptop = await open(srv.config(a));
+  phone.connect(); laptop.connect();
+  await phone.whenIdle(); await laptop.whenIdle();
+  const onLaptop = watchInto(laptop, { kind: 'chatList', limit: 10 });
+  await onLaptop.until((l) => l.length === 1);
+  await phone.call({ type: 'setDraft', chatId, text: 'начал на телефоне' });
+  await onLaptop.until((l) => l[0].draft === 'начал на телефоне');
+  await laptop.call({ type: 'sendMessage', chatId, body: 'дописал на ноутбуке' });
+  const onPhone = watchInto(phone, { kind: 'chatList', limit: 10 });
+  await onPhone.until((l) => l[0]?.draft === null && (l[0].last as { body: string } | null)?.body === 'дописал на ноутбуке');
+});

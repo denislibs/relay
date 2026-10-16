@@ -1,3 +1,4 @@
+import { clearDraftInTx } from './drafts';
 import type { Message } from '@relay/protocol';
 import { sql } from '../db';
 import { assertMember, toMessage } from './chats';
@@ -32,6 +33,7 @@ export async function sendMessage(
     const message = toMessage(inserted[0]);
     const members = await tx`select user_id from chat_members where chat_id = ${input.chatId}`;
     await fanOut(tx, members.map((m) => m.user_id as number), { type: 'newMessage', message });
+    await clearDraftInTx(tx, userId, input.chatId); // отправили — черновик на всех устройствах больше не нужен
     return { message, duplicate: false };
   });
 }
