@@ -245,6 +245,11 @@ function WindowList(props) {
   var items = props.items || [], rh = props.rowHeight || 72, over = props.overscan == null ? 6 : props.overscan;
   var host = useRef(null), range = useState([0, Math.min(items.length, 20)]);
   var n = items.length;
+  var nearEnd = useRef(props.onNearEnd); nearEnd.current = props.onNearEnd;
+  // окно дошло до хвоста (осталось меньше двух экранов строк) — пора подгружать следующую страницу
+  useEffect(function () {
+    if (nearEnd.current && n && range[0][1] >= n - over * 3) nearEnd.current();
+  }, [range[0][1], n]);
   useLayoutEffect(function () {
     var el = host.current, sc = el.parentElement;
     while (sc && sc !== document.body && !/(auto|scroll)/.test(getComputedStyle(sc).overflowY)) sc = sc.parentElement;

@@ -1,5 +1,5 @@
 import { beforeEach, expect, test } from 'bun:test';
-import { getHistory, listChats } from '../src/domain/chats';
+import { createChat, getHistory, listChats, listChatsPage } from '../src/domain/chats';
 import { sendMessage } from '../src/domain/messages';
 import { markRead } from '../src/domain/reads';
 import { makeChat, makeUser, resetDb } from './helpers';
@@ -61,4 +61,25 @@ test('chat list carries how far the others have read my messages', async () => {
   expect((await listChats(a))[0].peerReadUpTo).toBe(0);
   await markRead(b, ab, m);
   expect((await listChats(a))[0].peerReadUpTo).toBe(m);
+});
+
+test('dialogs come in pages by last activity with a cursor; filters by ids and unread', async () => {
+  const a = await makeUser('a'), b = await makeUser('b');
+  const ids: number[] = [];
+  for (let i = 0; i < 5; i++) {
+    const id = await createChat('direct', null, [a, b]);
+    ids.push(id);
+    await sendMessage(b, { chatId: id, clientId: crypto.randomUUID(), body: 'm' + i });   // позже созданный — свежее
+  }
+  const p1 = await listChatsPage(a, 2);
+  expect(p1.chats.map((c) => c.id)).toEqual([ids[4], ids[3]]);
+  const p2 = await listChatsPage(a, 2, p1.next!);
+  expect(p2.chats.map((c) => c.id)).toEqual([ids[2], ids[1]]);
+  const p3 = await listChatsPage(a, 2, p2.next!);
+  expect(p3.chats.map((c) => c.id)).toEqual([ids[0]]);
+  expect(p3.next).toBeNull();
+  expect((await listChats(a, { ids: [ids[1], ids[3]] })).map((c) => c.id).sort()).toEqual([ids[1], ids[3]].sort());
+  await markRead(a, ids[2], (await listChats(a, { ids: [ids[2]] }))[0].last!.id);
+  expect((await listChats(a, { unreadOnly: true })).map((c) => c.id)).not.toContain(ids[2]);
+  expect((await listChats(a, { unreadOnly: true })).length).toBe(4);
 });

@@ -3,6 +3,7 @@ import { getAll, getByChat, write, type WriteBatch } from './idb';
 import { PENDING_BASE, type LocalChat, type LocalMessage, type OutboxEntry } from './types';
 
 export interface ChatSummary {
+  sortAt?: string;
   id: number;
   kind: 'direct' | 'group';
   title: string | null;
@@ -26,6 +27,10 @@ export class Store {
   lastSeq = 0;
   /** снимок с сервера уже лежит в кэше (иначе показывать нечего — идёт первая загрузка) */
   hydrated = false;
+  /** Подгрузка диалогов страницами: курсор следующей страницы (время в мс + id) и «дальше пусто». */
+  dialogsAt = 0;
+  dialogsId = 0;
+  dialogsDone = false;
   /** чаты, изменившиеся с последнего прохода подписок */
   touched = new Set<number>();
 
@@ -49,6 +54,9 @@ export class Store {
     const meta = await getAll<{ k: string; v: number }>(db, 'meta');
     s.lastSeq = s.seqAtFlush = meta.find((m) => m.k === 'lastSeq')?.v ?? 0;
     s.hydrated = !!meta.find((m) => m.k === 'hydrated')?.v;
+    s.dialogsAt = meta.find((m) => m.k === 'dialogsAt')?.v ?? 0;
+    s.dialogsId = meta.find((m) => m.k === 'dialogsId')?.v ?? 0;
+    s.dialogsDone = !!meta.find((m) => m.k === 'dialogsDone')?.v;
     // чаты с неотправленным — сразу в память, чтобы черновики были видны
     for (const chatId of new Set(outbox.map((o) => o.chatId))) await s.loadChatMessages(chatId);
     return s;
@@ -92,10 +100,15 @@ export class Store {
 
   /** Снимок списка чатов (первый вход или tooLong). */
   applySnapshot(list: ChatSummary[]): void {
-    if (!this.hydrated) { this.hydrated = true; this.dirtyMeta = true; }
     const keep = new Set(list.map((c) => c.id));
     for (const c of this.outbox.values()) keep.add(c.chatId);
-    for (const id of [...this.chats.keys()]) if (!keep.has(id)) { this.chats.delete(id); this.messages.delete(id); this.loaded.delete(id); this.touch(id); }
+    for (const id of [...this.chats.keys()]) if (!keep.has(id)) { this.chats.delete(id); this.messages.delete(id); this.loaded.delete(id); this.dirtyChats.add(id); this.touch(id); } // dirty → удалится и из IDB
+    this.applyChats(list);
+  }
+
+  /** Слить пришедшие чаты (страница, «непрочитанные», точечная подгрузка), ничего не удаляя. */
+  applyChats(list: ChatSummary[]): void {
+    if (!this.hydrated) { this.hydrated = true; this.dirtyMeta = true; }
     for (const s of list) {
       const chat = this.ensureChat(s.id);
       chat.kind = s.kind;
@@ -216,6 +229,23 @@ export class Store {
     return true;
   }
 
+  /** Куда дошла подгрузка диалогов. next = null — страниц больше нет. */
+  setDialogsCursor(next: { at: string; id: number } | null): void {
+    this.dialogsAt = next ? Date.parse(next.at) : 0;
+    this.dialogsId = next ? next.id : 0;
+    this.dialogsDone = !next;
+    this.dirtyMeta = true;
+  }
+
+  /** Страницы диалогов — заново (tooLong): чаты без неотправленного забываем, курсор в начало. */
+  resetDialogs(): void {
+    const keep = new Set([...this.outbox.values()].map((o) => o.chatId));
+    for (const id of [...this.chats.keys()]) if (!keep.has(id)) { this.chats.delete(id); this.messages.delete(id); this.loaded.delete(id); this.dirtyChats.add(id); this.touch(id); } // dirty → удалится и из IDB
+    this.dialogsAt = 0; this.dialogsId = 0; this.dialogsDone = false;
+    this.dirtyMeta = true;
+    this.clearPersistedMessages = true;
+  }
+
   /** tooLong: забыть всё серверное, оставив неотправленное. */
   resetForSnapshot(): void {
     for (const chatId of [...this.chats.keys()]) {
@@ -250,7 +280,7 @@ export class Store {
     batch.del.outbox = [...this.dirtyOutbox].filter((k) => !this.outbox.has(k));
     batch.put.pendingReads = [...this.dirtyReads].filter((c) => this.pendingReads.has(c)).map((c) => ({ chatId: c, upToId: this.pendingReads.get(c) }));
     batch.del.pendingReads = [...this.dirtyReads].filter((c) => !this.pendingReads.has(c));
-    if (this.dirtyMeta || this.lastSeq !== this.seqAtFlush) batch.put.meta = [{ k: 'lastSeq', v: this.lastSeq }, { k: 'hydrated', v: this.hydrated ? 1 : 0 }];
+    if (this.dirtyMeta || this.lastSeq !== this.seqAtFlush) batch.put.meta = [{ k: 'lastSeq', v: this.lastSeq }, { k: 'hydrated', v: this.hydrated ? 1 : 0 }, { k: 'dialogsAt', v: this.dialogsAt }, { k: 'dialogsId', v: this.dialogsId }, { k: 'dialogsDone', v: this.dialogsDone ? 1 : 0 }];
     this.dirtyChats.clear(); this.dirtyMessages.clear(); this.dirtyOutbox.clear(); this.dirtyReads.clear(); this.dirtyMeta = false;
     const seq = this.lastSeq;
     await write(this.db, batch);

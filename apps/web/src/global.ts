@@ -6,7 +6,7 @@ import type { Item } from '@relay/sync-engine/src/types';
 
 export interface Me { userId: number; name: string }
 export type Phase = 'connecting' | 'offline' | 'loading' | 'updating' | 'ready';
-export interface Status { phase: Phase; hydrated: boolean; online: boolean; synced: boolean; syncing: boolean; outbox: number; failed: number }
+export interface Status { phase: Phase; hydrated: boolean; chatsComplete?: boolean; chatsCursorAt?: number; online: boolean; synced: boolean; syncing: boolean; outbox: number; failed: number }
 
 /** Один объект: зеркало видимых данных из воркера + состояние интерфейса этой вкладки. */
 export interface GlobalState {

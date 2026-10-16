@@ -55,7 +55,8 @@ export type Action =
   | { type: 'seen'; chatId: number; upToId: number }
   | { type: 'loadOlder'; chatId: number }
   | { type: 'retry'; clientId: string }
-  | { type: 'refreshChats' };
+  | { type: 'refreshChats' }
+  | { type: 'loadMoreChats' };
 
 export interface EngineConfig {
   userId: number;
@@ -68,6 +69,7 @@ export interface EngineConfig {
   readFlushMs?: number;
   backoffMs?: [number, number];
   historyPage?: number;
+  dialogsPage?: number;   // диалогов в странице (по умолчанию 100)
 }
 
 export const PENDING_BASE = 2 ** 52;

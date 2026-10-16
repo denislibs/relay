@@ -127,3 +127,26 @@ test('presence: the peer goes online and offline; unknown while disconnected', a
   await p.until((l) => l[0].known === false);
   delete process.env.RELAY_PRESENCE_GRACE_MS;
 });
+
+test('dialogs load in pages: first page + every unread chat, then more on demand until complete', async () => {
+  const a = await srv.login('a'), b = await srv.login('b');
+  const ids: number[] = [];
+  for (let i = 0; i < 7; i++) {
+    const id = await srv.chat(a.token, [a.userId, b.userId]);
+    ids.push(id);
+    // самый старый чат — непрочитанный (пишет b), остальные — мои сообщения
+    await sendMessage(i === 0 ? b.userId : a.userId, { chatId: id, clientId: crypto.randomUUID(), body: 'm' + i });
+  }
+  const ea = await open({ ...srv.config(a), dialogsPage: 3 });
+  const list = watchInto(ea, { kind: 'chatList', limit: 100 });
+  const st = watchInto(ea, { kind: 'status' });
+  ea.connect();
+  await list.until((l) => l.length === 4);                      // страница (6,5,4) + непрочитанный 0
+  expect(list.list().map((c) => c.id)).toEqual([ids[6], ids[5], ids[4], ids[0]]);
+  expect(st.list()[0].chatsComplete).toBe(false);
+  await ea.call({ type: 'loadMoreChats' });
+  await list.until((l) => l.length === 7);
+  await ea.call({ type: 'loadMoreChats' });                      // последняя страница: только 0, он уже есть
+  await st.until((l) => l[0].chatsComplete === true);
+  expect(list.list().map((c) => c.id)).toEqual([...ids].reverse());
+});

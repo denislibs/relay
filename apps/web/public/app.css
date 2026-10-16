@@ -37,3 +37,6 @@ body { background: var(--bg); color: var(--ink); font-family: var(--font-sans); 
 .app-sidemenu .rl-menu-item { border-radius: 10px; font-weight: 500; }
 .app-sidemenu .rl-menu-item .rl-icon { color: var(--ink); }
 .rl-glassbar-title .app-online { color: var(--brand-text); }
+/* хвост списка, пока сервер не отдал все страницы диалогов */
+.app-more { display: flex; justify-content: center; padding: 14px 0 4px; color: var(--brand-text); }
+.app-more circle { transform-origin: 9px 9px; animation: rl-spin 900ms linear infinite; }

@@ -39,9 +39,23 @@ export type ChatSummary = {
   last: Message | null;
   peer: { id: number; name: string } | null; // собеседник личного чата
   peerReadUpTo: number; // до какого id мои сообщения прочитаны всеми остальными участниками
+  sortAt?: string; // ключ сортировки списка (последнее сообщение или создание чата) — из него курсор страницы
 };
 
-export async function listChats(userId: number): Promise<ChatSummary[]> {
+/** Курсор страницы диалогов: время последнего сообщения (или создания чата) и id — как offset_date/offset_peer в Telegram. */
+export interface DialogCursor { at: string; id: number }
+export interface ListOpts { limit?: number; before?: DialogCursor; ids?: number[]; unreadOnly?: boolean }
+
+/** Страница диалогов, новые сверху, и курсор следующей (null — дальше пусто). */
+export async function listChatsPage(userId: number, limit: number, before?: DialogCursor): Promise<{ chats: ChatSummary[]; next: DialogCursor | null }> {
+  const chats = await listChats(userId, { limit: limit + 1, before });
+  const more = chats.length > limit;
+  const page = more ? chats.slice(0, limit) : chats;
+  const last = page[page.length - 1];
+  return { chats: page, next: more && last ? { at: last.sortAt!, id: last.id } : null };
+}
+
+export async function listChats(userId: number, opts: ListOpts = {}): Promise<ChatSummary[]> {
   const rows = await sql`
     select c.id, c.kind, c.title, c.created_at as chat_created_at, cm.last_read_id,
            lm.id as m_id, lm.chat_id as m_chat_id, lm.sender_id as m_sender_id, lm.client_id as m_client_id,
@@ -50,14 +64,19 @@ export async function listChats(userId: number): Promise<ChatSummary[]> {
              where m.chat_id = c.id and m.id > cm.last_read_id and m.sender_id <> ${userId})::int as unread,
            (select json_build_object('id', u.id, 'name', u.name) from chat_members pm join users u on u.id = pm.user_id
              where c.kind = 'direct' and pm.chat_id = c.id and pm.user_id <> ${userId} limit 1) as peer,
-           (select coalesce(min(om.last_read_id), 0) from chat_members om where om.chat_id = c.id and om.user_id <> ${userId}) as peer_read_up_to
+           (select coalesce(min(om.last_read_id), 0) from chat_members om where om.chat_id = c.id and om.user_id <> ${userId}) as peer_read_up_to,
+           coalesce(lm.created_at, c.created_at) as sort_at
       from chat_members cm
       join chats c on c.id = cm.chat_id
       left join lateral (
         select * from messages where chat_id = c.id order by id desc limit 1
       ) lm on true
      where cm.user_id = ${userId}
-     order by coalesce(lm.created_at, c.created_at) desc, c.id desc`;
+       ${opts.before ? sql`and (coalesce(lm.created_at, c.created_at), c.id) < (${opts.before.at}::timestamptz, ${opts.before.id})` : sql``}
+       ${opts.ids ? sql`and c.id = any(${opts.ids}::bigint[])` : sql``}
+       ${opts.unreadOnly ? sql`and exists (select 1 from messages m where m.chat_id = c.id and m.id > cm.last_read_id and m.sender_id <> ${userId})` : sql``}
+     order by coalesce(lm.created_at, c.created_at) desc, c.id desc
+     ${opts.limit ? sql`limit ${opts.limit}` : sql``}`;
   return rows.map((r) => ({
     id: r.id as number,
     kind: r.kind as 'direct' | 'group',
@@ -66,6 +85,7 @@ export async function listChats(userId: number): Promise<ChatSummary[]> {
     unread: r.unread as number,
     peer: (r.peer as { id: number; name: string } | null) ?? null,
     peerReadUpTo: (r.peer_read_up_to as number) ?? 0,
+    sortAt: new Date(r.sort_at as string).toISOString(),
     last: r.m_id == null ? null : toMessage({
       id: r.m_id, chat_id: r.m_chat_id, sender_id: r.m_sender_id, client_id: r.m_client_id,
       body: r.m_body, reply_to_id: r.m_reply_to_id, created_at: r.m_created_at,

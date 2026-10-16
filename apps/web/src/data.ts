@@ -118,6 +118,11 @@ export async function send(chatId: number, body: string, replyToId: number | nul
   await engine.call({ type: 'sendMessage', chatId, body, replyToId });
 }
 
+/** Следующая страница диалогов; движок сам не пустит второй запрос, пока идёт первый. */
+export function loadMoreChats(): void {
+  engine.call({ type: 'loadMoreChats' }).catch(() => {});
+}
+
 export function seen(chatId: number, upToId: number): void {
   engine.call({ type: 'seen', chatId, upToId }).catch(() => {});
 }

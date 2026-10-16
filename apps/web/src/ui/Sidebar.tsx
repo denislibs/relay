@@ -1,6 +1,6 @@
 import { ChatRow, Menu, Presence, SlideStack, ChatRowSkeleton, useMinVisible, EmptyState, Fab, WindowList, FolderTabs, SidebarCard, SidebarHeader } from '@relay/ui';
 import type { Item } from '@relay/sync-engine/src/types';
-import { openChat } from '../data';
+import { loadMoreChats, openChat } from '../data';
 import { setGlobal, useGlobal } from '../global';
 import { useState } from 'preact/hooks';
 import { isDark } from '../theme';
@@ -31,7 +31,12 @@ export function Sidebar() {
   const skeleton = useMinVisible(waiting, { delay: 150, min: 600 });
 
   const q = search.trim().toLowerCase();
-  const listOf = (f: string) => chats.filter((c) => (f === 'all' || (c.unread as number) > 0) && (!q || String(c.title ?? '').toLowerCase().includes(q)));
+  // «Все» — только непрерывно загруженный диапазон (как в Telegram): старые непрочитанные из-за курсора
+  // покажутся, когда до них дойдёт подгрузка, а не висят внизу, над которыми потом вставляются страницы
+  const loadedFrom = status.chatsComplete || !status.chatsCursorAt ? 0 : status.chatsCursorAt;
+  const listOf = (f: string) => chats.filter((c) =>
+    (f === 'all' ? Date.parse(c.lastAt as string) >= loadedFrom : (c.unread as number) > 0) &&
+    (!q || String(c.title ?? '').toLowerCase().includes(q)));
 
   // одна папка: свой список и своя прокрутка (страница SlideStack)
   const renderFolder = (f: string) => {
@@ -44,9 +49,11 @@ export function Sidebar() {
           </div>
         </Presence>
         {waiting || skeleton ? null : list.length ? (
+          <>
           <WindowList
             role="list"
             items={list}
+            onNearEnd={f === 'all' && !status.chatsComplete ? loadMoreChats : undefined}
             rowHeight={ROW}
             getKey={(c: Item) => 'c' + c.id}
             render={(c: Item) => {
@@ -64,6 +71,12 @@ export function Sidebar() {
               );
             }}
           />
+          {f === 'all' && !status.chatsComplete ? (
+            <div class="app-more" role="status" aria-label="Загружаем ещё чаты">
+              <svg width="22" height="22" viewBox="0 0 18 18" fill="none" aria-hidden="true"><circle cx="9" cy="9" r="7" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-dasharray="30 44" /></svg>
+            </div>
+          ) : null}
+          </>
         ) : (
           <EmptyState
             kind={q ? 'search' : 'chats'}

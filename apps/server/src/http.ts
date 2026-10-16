@@ -3,7 +3,7 @@ import type { Server } from 'bun';
 import { existsSync, statSync } from 'node:fs';
 import { extname, join, resolve, sep } from 'node:path';
 import { createSession, createUser, readSessionToken, sessionCookie, userIdFromToken } from './auth';
-import { createChat, getHistory, listChats } from './domain/chats';
+import { createChat, getHistory, listChats, listChatsPage } from './domain/chats';
 import { sql } from './db';
 import { DomainError } from './domain/errors';
 import { connected, disconnected, listPresence, type Publish } from './domain/presence';
@@ -72,8 +72,19 @@ export function createServer(opts: { port: number }): Server {
         if (req.method === 'GET' && url.pathname === '/presence') {
           return Response.json(await listPresence(userId));
         }
+        if (req.method === 'GET' && url.pathname === '/chats/page') {
+          // страница диалогов: ?limit=100&beforeAt=ISO&beforeId=N (курсор из предыдущей страницы)
+          const limit = Math.min(Math.max(Number(url.searchParams.get('limit') ?? 100), 1), 500);
+          const at = url.searchParams.get('beforeAt'), id = url.searchParams.get('beforeId');
+          return Response.json(await listChatsPage(userId, limit, at && id ? { at, id: Number(id) } : undefined));
+        }
         if (req.method === 'GET' && url.pathname === '/chats') {
-          return Response.json(await listChats(userId));
+          // ?ids=1,2,3 — конкретные чаты; ?unread=1 — все с непрочитанными; без параметров — весь список
+          const ids = url.searchParams.get('ids');
+          return Response.json(await listChats(userId, {
+            ids: ids ? ids.split(',').map(Number).filter((n) => Number.isInteger(n) && n > 0).slice(0, 500) : undefined,
+            unreadOnly: url.searchParams.get('unread') === '1',
+          }));
         }
         const hist = /^\/chats\/(\d+)\/messages$/.exec(url.pathname);
         if (req.method === 'GET' && hist) {

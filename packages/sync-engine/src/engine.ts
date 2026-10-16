@@ -49,6 +49,7 @@ export class Engine {
   private closed = false;
   private statusSig = '';
   private refreshing = false;
+  private moreChats: Promise<void> | null = null;
 
   private constructor(private cfg: EngineConfig, readonly store: Store, private db: IDBDatabase) {
     this.transport = new WsTransport(cfg.wsUrl, {
@@ -164,6 +165,8 @@ export class Engine {
       key: 'status',
       phase: this.phase(),
       hydrated: this.store.hydrated,   // в кэше есть данные с сервера
+      chatsComplete: this.store.dialogsDone,   // все страницы диалогов загружены
+      chatsCursorAt: this.store.dialogsAt,     // докуда загружен непрерывный диапазон (мс; 0 — ещё не грузили)
       online: this.online,
       synced: this.ready,
       syncing: this.syncing,
@@ -248,6 +251,9 @@ export class Engine {
         if (this.online) this.refreshList();
         return null;
       }
+      case 'loadMoreChats':
+        await this.loadMoreChats();
+        return null;
       case 'retry': {
         if (this.store.unfail(a.clientId)) {
           await this.store.flush();
@@ -331,8 +337,7 @@ export class Engine {
   private async bootstrap(seq: number): Promise<void> {
     this.syncing = true;
     try {
-      const list = await this.http<ChatSummary[]>('/chats');
-      this.store.applySnapshot(list);
+      await this.loadFirstDialogs();
       this.store.lastSeq = seq;
       await this.store.flush();
       this.changed();
@@ -360,8 +365,8 @@ export class Engine {
           const gap = f.op === 'updates' && f.more && f.items.length === 0;
           if (f.op === 'tooLong' || gap) {
             this.store.resetForSnapshot();
-            const list = await this.http<ChatSummary[]>('/chats');
-            this.store.applySnapshot(list);
+            this.store.resetDialogs();
+            await this.loadFirstDialogs();
             this.store.lastSeq = f.op === 'tooLong' ? f.seq : f.to;
             await this.store.flush();
             this.changed();
@@ -404,14 +409,46 @@ export class Engine {
     });
   }
 
+  /** Первая страница диалогов и все чаты с непрочитанными (папка «Непрочитанные» и её счётчик — полные). */
+  private async loadFirstDialogs(): Promise<void> {
+    const [page, unread] = await Promise.all([
+      this.http<{ chats: ChatSummary[]; next: { at: string; id: number } | null }>(`/chats/page?limit=${this.cfg.dialogsPage ?? 100}`),
+      this.http<ChatSummary[]>('/chats?unread=1'),
+    ]);
+    this.store.applyChats([...page.chats, ...unread]);
+    this.store.setDialogsCursor(page.next);
+  }
+
+  /** Следующая страница диалогов (список докрутили до конца). Один запрос за раз. */
+  private loadMoreChats(): Promise<void> {
+    if (this.store.dialogsDone || !this.store.hydrated) return Promise.resolve();
+    this.moreChats ??= (async () => {
+      try {
+        const at = new Date(this.store.dialogsAt).toISOString();
+        const page = await this.http<{ chats: ChatSummary[]; next: { at: string; id: number } | null }>(`/chats/page?limit=${this.cfg.dialogsPage ?? 100}&beforeAt=${encodeURIComponent(at)}&beforeId=${this.store.dialogsId}`);
+        this.store.applyChats(page.chats);
+        this.store.setDialogsCursor(page.next);
+        await this.store.flush();
+        this.changed();
+      } finally {
+        this.moreChats = null;
+      }
+    })();
+    return this.moreChats;
+  }
+
   /** Сообщение пришло в чат, которого не было в снимке: подтянуть названия и собеседников. */
   private refreshList(): void {
     if (this.refreshing) return;
     this.refreshing = true;
     this.run(async () => {
       try {
-        const list = await this.http<ChatSummary[]>('/chats');
-        this.store.applySnapshot(list);
+        // чаты, известные только по сообщениям, — точечно по id; иначе (новый чат) — свежая первая страница
+        const unnamed = this.store.unnamed();
+        const list = unnamed.length
+          ? await this.http<ChatSummary[]>(`/chats?ids=${unnamed.slice(0, 500).join(',')}`)
+          : (await this.http<{ chats: ChatSummary[] }>(`/chats/page?limit=${this.cfg.dialogsPage ?? 100}`)).chats;
+        this.store.applyChats(list);
         await this.store.flush();
         this.changed();
       } finally {
