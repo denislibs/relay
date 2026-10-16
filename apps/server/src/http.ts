@@ -1,7 +1,9 @@
+import { parseClientFrame } from '@relay/protocol';
 import type { Server } from 'bun';
 import { createSession, createUser, readSessionToken, sessionCookie, userIdFromToken } from './auth';
 import { createChat, getHistory, listChats } from './domain/chats';
 import { DomainError } from './domain/errors';
+import { handleFrame } from './ws';
 
 const STATUS: Record<string, number> = { bad_frame: 400, too_long: 400, unauthorized: 401, not_member: 403, not_found: 404 };
 const fail = (code: string) => Response.json({ code }, { status: STATUS[code] ?? 500 });
@@ -51,7 +53,17 @@ export function createServer(opts: { port: number }): Server {
       }
     },
     websocket: {
-      message() {},
+      open(ws) {
+        ws.subscribe(`user:${ws.data.userId}`);
+      },
+      async message(ws, raw) {
+        const frame = parseClientFrame(typeof raw === 'string' ? raw : new TextDecoder().decode(raw));
+        if (!frame) {
+          ws.send(JSON.stringify({ op: 'err', code: 'bad_frame', retry: false }));
+          return;
+        }
+        for (const out of await handleFrame(ws.data.userId, frame)) ws.send(JSON.stringify(out));
+      },
     },
   });
 }
