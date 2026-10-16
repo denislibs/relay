@@ -905,3 +905,12 @@ button.rl-quote { cursor: pointer; }
 .rl-shell .rl-rpick { padding: 4px 6px; background: color-mix(in srgb, var(--raised) 92%, transparent); -webkit-backdrop-filter: blur(18px); backdrop-filter: blur(18px); }
 .rl-shell .rl-rpick-btn { width: 38px; height: 38px; font-size: 26px; }
 .rl-msgmenu-scrim { position: fixed; inset: 0; z-index: 39; }
+
+/* chat column: header, feed and composer share one centred width, wallpaper stays full-bleed */
+.rl-shell { --chat-max: 688px; }
+.rl-shell .rl-glassbar, .rl-shell .rl-composer-wrap { width: 100%; max-width: var(--chat-max); margin-inline: auto; }
+.rl-shell .rl-composer-wrap { padding: 0; }
+.rl-shell .rl-feed > * { width: 100%; max-width: var(--chat-max); margin-inline: auto; }
+.rl-shell .rl-msgline { padding: 0 10px; }
+.rl-shell .rl-scrolldown-slot { position: absolute; z-index: 3; bottom: 76px; right: max(16px, calc((100% - var(--chat-max)) / 2 - 64px)); }
+.rl-shell .rl-bubble { max-width: min(85%, 580px); }

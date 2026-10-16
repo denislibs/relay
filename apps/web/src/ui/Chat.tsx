@@ -98,7 +98,7 @@ export function Chat({ chatId }: { chatId: number }) {
           ];
         })}
       </div>
-      <div style={{ position: 'absolute', right: 24, bottom: 96, zIndex: 3 }}>
+      <div class="rl-scrolldown-slot">
         <ScrollToBottom show={away} unread={chat?.unread as number} onClick={() => { const el = feed.current!; stick.current = true; el.scrollTo({ top: el.scrollHeight, behavior: 'smooth' }); }} />
       </div>
       <Composer
