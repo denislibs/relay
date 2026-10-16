@@ -1,4 +1,4 @@
-import { Avatar, Bubble, Composer, DateDivider, GlassBar, IconButton, Menu, ScrollToBottom, requestMeasure, requestMutation } from '@relay/ui';
+import { Avatar, Bubble, Composer, DateDivider, GlassBar, IconButton, Menu, ScrollToBottom, forceMeasure, requestMeasure, requestMutation } from '@relay/ui';
 import { useEffect, useLayoutEffect, useRef, useState } from 'preact/hooks';
 import { loadOlder, openChat, saveDraft, send } from '../data';
 import { setGlobal, useGlobal } from '../global';
@@ -69,16 +69,19 @@ export function Chat({ chatId }: { chatId: number }) {
       // первый кадр чата — сразу внизу, до отрисовки: иначе мелькнёт верх ленты. Осознанное исключение
       // из measure/mutate: одно чтение и одна запись внутри коммита, до первой отрисовки (через rAF был бы кадр с верхом)
       placed.current = true;
-      const bottom = el.scrollHeight - el.clientHeight;
-      if (bottom > el.scrollTop) { programmatic.current++; el.scrollTop = bottom; } // scroll-событие будет только если позиция меняется
+      forceMeasure(() => {
+        const bottom = el.scrollHeight - el.clientHeight;
+        if (bottom > el.scrollTop) { programmatic.current++; el.scrollTop = bottom; } // scroll-событие будет только если позиция меняется
+      });
       return;
     }
     requestMeasure(() => {
-      const h = el.scrollHeight;
+      // все чтения — здесь; в фазе записи только присваивания
+      const h = el.scrollHeight, top = el.scrollTop, ch = el.clientHeight;
       const from = olderFrom.current;
       requestMutation(() => {
-        if (from !== null) { programmatic.current++; el.scrollTop += h - from; olderFrom.current = null; }
-        else if (stick.current && el.scrollTop + el.clientHeight < h) { programmatic.current++; el.scrollTop = h; }
+        if (from !== null) { programmatic.current++; el.scrollTop = top + h - from; olderFrom.current = null; }
+        else if (stick.current && top + ch < h) { programmatic.current++; el.scrollTop = h; }
       });
     });
   }, [messages]);

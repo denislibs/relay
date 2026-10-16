@@ -3,3 +3,4 @@
 export * from './kit.js';
 export * from './more.js';
 export * from './schedule.js';
+export { enableStrictDom } from './strict.js';

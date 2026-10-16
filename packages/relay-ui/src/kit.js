@@ -1,7 +1,7 @@
 import { h, Fragment, toChildArray } from 'preact';
 import { useState, useRef, useEffect, useLayoutEffect } from 'preact/hooks';
 import { MentionList, AttachMenu } from './more.js';
-import { requestMeasure, requestMutation, beginHeavyAnimation, onHeavyAnimationEnd, isHeavyAnimating } from './schedule.js';
+import { requestMeasure, requestMutation, beginHeavyAnimation, onHeavyAnimationEnd, isHeavyAnimating, forceMeasure } from './schedule.js';
 
 /* Relay UI kit — Preact. Ported 1:1 from the original kit; see index.js for the public surface. */
 
@@ -768,7 +768,7 @@ function useMinVisible(want, opts) {
 /* ---------- FlipList: reorders animate (FLIP), new items fade in ---------- */
 function FlipList(props) {
   var ref = useRef(null), prev = useRef(null);
-  useLayoutEffect(function () {
+  useLayoutEffect(function () { forceMeasure(function () {
     var el = ref.current;
     if (!el) return;
     // FLIP — осознанное исключение из measure/mutate: «первое» положение надо снять до отрисовки нового кадра,
@@ -793,7 +793,7 @@ function FlipList(props) {
       }
     }
     prev.current = next;
-  });
+  }); });
   return h('div', { ref: ref, class: (props.className || props.class), style: Object.assign({ position: 'relative' }, props.style), role: props.role },
     toChildArray(props.children).map(function (ch) { return ch ? h('div', { key: ch.key, 'data-flip': ch.key, class: 'rl-flip-item' }, ch) : null; }));
 }

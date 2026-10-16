@@ -1,0 +1,92 @@
+/* Strict DOM — dev-проверка дисциплины measure/mutate (написана с нуля, MIT).
+   Перехватывает чтения раскладки и записи в DOM и сообщает, кто нарушил порядок кадра:
+     • чтение в фазе mutate;
+     • запись в фазе measure;
+     • чтение вне фаз, когда после последней раскладки уже были записи (принудительный пересчёт).
+   Записи вне фаз разрешены (обработчики событий), они лишь «пачкают» раскладку.
+   Осознанные исключения — через forceMeasure(fn) из schedule.js.
+   Отчёт: console.warn по первому разу с каждого места + window.__strictDom.report(). */
+import { currentPhase } from './schedule.js';
+
+var enabled = false, dirty = false, sites = new Map(), opts = {};
+
+// стек: violation → onRead/onWrite → обёртка → вызвавший код. Первые три кадра — наши (в бандле имени файла нет)
+function where(stack) {
+  var lines = String(stack || '').split('\n').slice(1).map(function (l) { return l.trim().replace(/^at\s+/, ''); });
+  return lines.slice(3, 5).join('  ←  ') || '?';
+}
+
+function violation(kind, prop) {
+  var err = new Error('[strict-dom] ' + kind + ': ' + prop);
+  var at = where(err.stack);
+  if (opts.ignore && opts.ignore.test(at)) return;
+  var key = kind + ' ' + prop + ' @ ' + at;
+  var v = sites.get(key);
+  if (v) { v.count++; return; }
+  sites.set(key, { kind: kind, prop: prop, at: at, phase: currentPhase(), count: 1, stack: err.stack });
+  console.warn('[strict-dom] ' + kind + ' — ' + prop + '\n    at ' + at);
+}
+
+function onRead(prop) {
+  if (!enabled) return;
+  var ph = currentPhase();
+  if (ph === 'mutate') violation('read in mutate phase', prop);
+  else if (ph === null && dirty) violation('forced layout (read after writes, outside measure)', prop);
+  dirty = false; // раскладка теперь посчитана
+}
+
+function onWrite(prop) {
+  if (!enabled) return;
+  if (currentPhase() === 'measure') violation('write in measure phase', prop);
+  dirty = true;
+}
+
+function wrapMethod(proto, name, hook) {
+  var orig = proto && proto[name];
+  if (typeof orig !== 'function') return;
+  proto[name] = function () { hook(name); return orig.apply(this, arguments); };
+}
+function wrapAccessor(proto, name, onGet, onSet) {
+  var d = proto && Object.getOwnPropertyDescriptor(proto, name);
+  if (!d || !d.configurable) return;
+  Object.defineProperty(proto, name, {
+    configurable: true, enumerable: d.enumerable,
+    get: d.get ? function () { if (onGet) onGet(name); return d.get.call(this); } : undefined,
+    set: d.set ? function (v) { if (onSet) onSet(name); d.set.call(this, v); } : undefined,
+  });
+}
+
+var READ_GETTERS = {
+  Element: ['clientTop', 'clientLeft', 'clientWidth', 'clientHeight', 'scrollTop', 'scrollLeft', 'scrollWidth', 'scrollHeight'],
+  HTMLElement: ['offsetTop', 'offsetLeft', 'offsetWidth', 'offsetHeight', 'offsetParent', 'innerText'],
+};
+var READ_METHODS = { Element: ['getBoundingClientRect', 'getClientRects'] };
+var WRITE_METHODS = {
+  Node: ['appendChild', 'insertBefore', 'removeChild', 'replaceChild'],
+  Element: ['setAttribute', 'removeAttribute', 'toggleAttribute', 'append', 'prepend', 'remove', 'replaceWith', 'before', 'after', 'scrollTo', 'scrollBy', 'scrollIntoView'],
+  DOMTokenList: ['add', 'remove', 'toggle', 'replace'],
+  CSSStyleDeclaration: ['setProperty', 'removeProperty'],
+};
+
+/** Включить (один раз за страницу). opts.ignore — RegExp мест, которые не проверять (сторонние библиотеки). */
+export function enableStrictDom(options) {
+  if (enabled || typeof window === 'undefined') return;
+  enabled = true;
+  opts = options || {};
+  Object.keys(READ_GETTERS).forEach(function (k) { READ_GETTERS[k].forEach(function (n) { wrapAccessor(window[k] && window[k].prototype, n, onRead, n === 'scrollTop' || n === 'scrollLeft' ? onWrite : null); }); });
+  Object.keys(READ_METHODS).forEach(function (k) { READ_METHODS[k].forEach(function (n) { wrapMethod(window[k] && window[k].prototype, n, onRead); }); });
+  Object.keys(WRITE_METHODS).forEach(function (k) { WRITE_METHODS[k].forEach(function (n) { wrapMethod(window[k] && window[k].prototype, n, onWrite); }); });
+  // style.width = …, style.transform = … — аксессоры CSSStyleDeclaration; textContent / innerHTML — записи
+  var csp = window.CSSStyleDeclaration && CSSStyleDeclaration.prototype;
+  if (csp) Object.getOwnPropertyNames(csp).forEach(function (n) { var d = Object.getOwnPropertyDescriptor(csp, n); if (d && d.set && n !== 'parentRule') wrapAccessor(csp, n, null, onWrite); });
+  wrapAccessor(Node.prototype, 'textContent', null, onWrite);
+  wrapAccessor(Element.prototype, 'innerHTML', null, onWrite);
+  var gcs = window.getComputedStyle;
+  window.getComputedStyle = function (el, pseudo) { onRead('getComputedStyle'); return gcs.call(window, el, pseudo); };
+  // после отрисовки кадра раскладка чистая: снимаем «грязь» сразу за rAF (задача после рендера)
+  (function loop() { requestAnimationFrame(function () { setTimeout(function () { dirty = false; }, 0); loop(); }); })();
+  window.__strictDom = {
+    report: function () { return Array.from(sites.values()).map(function (v) { return { kind: v.kind, prop: v.prop, at: v.at, phase: v.phase, count: v.count }; }); },
+    reset: function () { sites.clear(); },
+  };
+}

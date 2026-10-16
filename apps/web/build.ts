@@ -24,7 +24,7 @@ async function build(): Promise<void> {
     naming: '[name].[ext]',
     minify: !isWatch,
     sourcemap: 'linked',
-    define: { __BUILD__: JSON.stringify(BUILD) },
+    define: { __BUILD__: JSON.stringify(BUILD), __DEV__: JSON.stringify(isWatch) },
   });
   if (!res.success) {
     for (const log of res.logs) console.error(log);

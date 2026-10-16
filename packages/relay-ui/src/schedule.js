@@ -11,6 +11,9 @@
    deferDuringAnimation(fn)  runs fn now, or after the current heavy animation */
 
 var measures = [], mutations = [], scheduled = false;
+/* текущая фаза кадра: 'measure' | 'mutate' | 'free' (forceMeasure) | null — для проверки strict-dom */
+var phase = null;
+export function currentPhase() { return phase; }
 var heavy = 0, endWaiters = [], idleWaiters = [];
 
 function raf(fn) { return typeof requestAnimationFrame === 'function' ? requestAnimationFrame(fn) : setTimeout(fn, 16); }
@@ -19,8 +22,11 @@ function flush() {
   scheduled = false;
   var m = measures, w = mutations;
   measures = []; mutations = [];
+  phase = 'measure';
   for (var i = 0; i < m.length; i++) safe(m[i]);
+  phase = 'mutate';
   for (var j = 0; j < w.length; j++) safe(w[j]);
+  phase = null;
   // work queued during this frame (a measure scheduling a mutation) lands in the next frame
   if (measures.length || mutations.length) schedule();
 }
@@ -29,6 +35,13 @@ function schedule() { if (!scheduled) { scheduled = true; raf(flush); } }
 
 export function requestMeasure(fn) { measures.push(fn); schedule(); }
 export function requestMutation(fn) { mutations.push(fn); schedule(); }
+/* Осознанное исключение: чтение и запись прямо сейчас, вне кадра (FLIP, первая раскладка до отрисовки).
+   Strict-dom такие места не помечает — они видны в коде по этому вызову. */
+export function forceMeasure(fn) {
+  var prev = phase;
+  phase = 'free';
+  try { return fn(); } finally { phase = prev; }
+}
 /* measure now-ish, then mutate with what was measured — the common pair */
 export function measureThenMutate(read, write) { requestMeasure(function () { var v = read(); requestMutation(function () { write(v); }); }); }
 

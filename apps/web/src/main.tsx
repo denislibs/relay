@@ -1,7 +1,13 @@
+import { enableStrictDom } from '@relay/ui';
 import { render } from 'preact';
 import { startData } from './data';
 import { setGlobal, type Me } from './global';
 import { App } from './ui/App';
+
+declare const __DEV__: boolean;
+
+// dev-сборка: проверка дисциплины measure/mutate (чтение раскладки в фазе записи и наоборот)
+if (__DEV__) enableStrictDom({ ignore: /twallpaper/ });
 
 const ME_KEY = 'relay.me';
 
