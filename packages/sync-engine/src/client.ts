@@ -75,7 +75,9 @@ export class Mirror {
     for (const i of p.upsert) this.items.set(i.key, i);
     if (p.order) this.order = p.order;
   }
-  list(): Item[] { return this.order.map((k) => this.items.get(k)!).filter(Boolean); }
+  /** Данные без служебных элементов (ключи на «~», например ~window — края окна ленты). */
+  list(): Item[] { return this.order.map((k) => this.items.get(k)!).filter((i) => i && !i.key.startsWith('~')); }
+  meta(key: string): Item | undefined { return this.items.get(key); }
 }
 
 /** SharedWorker, если он есть; иначе Dedicated Worker с выбором лидера. */

@@ -1,15 +1,14 @@
 import { nudgeWallpaper } from '@relay/ui';
 import { connectEngine, EngineClient, Mirror } from '@relay/sync-engine/src/client';
-import type { Item, Patch } from '@relay/sync-engine/src/types';
-import { getGlobal, setGlobal, type Me, type Status } from './global';
+import type { Item, Patch, Query } from '@relay/sync-engine/src/types';
+import { getGlobal, setGlobal, type FeedMeta, type Me, type Status } from './global';
 
 declare const __BUILD__: string;
 
 let engine: EngineClient;
-let feed: { update(q: { kind: 'messages'; chatId: number; limit: number }): void; close(): void } | null = null;
+let feed: { update(q: Query): void; close(): void } | null = null;
 // порция ленты — два экрана сообщений (строка-бабл ≈ 40 px), не меньше 30: как и страница диалогов, от высоты окна
 const FEED_PAGE = Math.max(30, Math.ceil(innerHeight / 40) * 2);
-let feedLimit = FEED_PAGE;
 
 /** Подписки движка → GlobalState. Несрочное применяем после тяжёлых анимаций. */
 export function startData(me: Me): void {
@@ -72,7 +71,6 @@ function showPhase(s: Status): void {
   labelTimer = setTimeout(() => { labelTimer = null; setGlobal({ syncLabel: null }); }, Math.max(0, MIN_LABEL_MS - (performance.now() - labelSince)));
 }
 
-let switchTimer: ReturnType<typeof setTimeout> | null = null;
 let peerWatch: { close(): void } | null = null;
 let peerFor: number | null = null;   // для какого чата подписка уже решена (есть собеседник или это группа)
 
@@ -94,40 +92,86 @@ function watchPeer(chatId: number | null): void {
  * Переключение чата одним кадром: пока лента нового чата не готова, на экране остаётся прежний
  * (строка в списке подсвечивается сразу), затем шапка и лента меняются вместе. Без «пусто → часть → всё».
  */
+type Anchor = { sort: number; side: 'end' | 'start' | 'center' };
+const WINDOW = FEED_PAGE * 2;                  // сообщений в DOM: две порции (как окно viewport в Telegram)
+let feedAnchor: Anchor | undefined;            // undefined — живой хвост
+let moving = false;                            // окно сдвигается — следующий сдвиг ждёт патча
+let feedMirror: Mirror | null = null;
+/** Позиция прокрутки чата при уходе: первый видимый бабл и его отступ (нет записи — чат был внизу). */
+const positions = new Map<number, { key: string; sort: number; offset: number }>();
+
+export function savePosition(chatId: number, pos: { key: string; sort: number; offset: number } | null): void {
+  if (pos) positions.set(chatId, pos); else positions.delete(chatId);
+}
+export function savedPosition(chatId: number) { return positions.get(chatId) ?? null; }
+
+function setFeed(chatId: number, anchor: Anchor | undefined): void {
+  feedAnchor = anchor;
+  moving = true;
+  feed?.update({ kind: 'messages', chatId, limit: WINDOW, anchor });
+}
+
+/** Сдвинуть окно ленты на порцию: к старым (верх) или к новым (низ). Дальняя сторона обрезается. */
+export function moveWindow(dir: 'older' | 'newer' | 'latest'): void {
+  const g = getGlobal(), chatId = g.openChatId, meta = g.feedMeta;
+  if (!chatId || !feed || moving) return;
+  const ms = g.messages;
+  if (dir === 'latest') { if (feedAnchor) setFeed(chatId, undefined); return; }
+  if (!ms.length) return;
+  if (dir === 'older' && meta?.hasOlder) setFeed(chatId, { sort: ms[Math.min(ms.length - 1, FEED_PAGE - 1)].sort as number, side: 'end' });
+  if (dir === 'newer' && meta?.hasNewer) setFeed(chatId, { sort: ms[Math.max(0, ms.length - FEED_PAGE)].sort as number, side: 'start' });
+}
+
+let switchTimer: ReturnType<typeof setTimeout> | null = null;
+/**
+ * Переключение чата одним кадром: пока лента нового чата не готова, на экране остаётся прежний
+ * (строка в списке подсвечивается сразу), затем шапка и лента меняются вместе. Без «пусто → часть → всё».
+ * Открывается: на сохранённой позиции, иначе вокруг первого непрочитанного (с разделителем), иначе внизу.
+ */
 export function openChat(chatId: number | null): void {
   const g = getGlobal();
   if ((g.pendingChatId ?? g.openChatId) === chatId) return;
   feed?.close();
   feed = null;
-  feedLimit = FEED_PAGE;
   if (switchTimer) { clearTimeout(switchTimer); switchTimer = null; }
   history.replaceState(null, '', chatId ? '#chat=' + chatId : location.pathname);
   watchPeer(chatId);
-  if (!chatId) { setGlobal({ openChatId: null, pendingChatId: null, messages: [] }); return; }
+  if (!chatId) { setGlobal({ openChatId: null, pendingChatId: null, messages: [], feedMeta: null, unreadFrom: null }); return; }
+  const chat = g.chats.find((c) => c.id === chatId);
+  const pos = positions.get(chatId);
+  const unread = (chat?.unread as number) > 0 ? (chat!.lastReadId as number) : null;
+  // ушли из середины истории в этой сессии — вернуться туда же; иначе — к первому непрочитанному; иначе — вниз
+  feedAnchor = pos ? { sort: pos.sort, side: 'center' } : unread != null ? { sort: unread + 0.5, side: 'center' } : undefined;
+  moving = true;
   setGlobal({ pendingChatId: chatId });
   const m = new Mirror();
-  const commit = () => { switchTimer && clearTimeout(switchTimer); switchTimer = null; setGlobal({ openChatId: chatId, pendingChatId: null, messages: m.list() as Item[] }); };
+  feedMirror = m;
+  const commit = () => {
+    switchTimer && clearTimeout(switchTimer); switchTimer = null;
+    setGlobal({ openChatId: chatId, pendingChatId: null, messages: m.list() as Item[], feedMeta: (m.meta('~window') as unknown as FeedMeta) ?? null, unreadFrom: unread });
+  };
   // лента открытого чата — срочная: свои сообщения должны появляться в тот же кадр
-  feed = engine.watch({ kind: 'messages', chatId, limit: feedLimit }, (p: Patch) => {
+  feed = engine.watch({ kind: 'messages', chatId, limit: WINDOW, anchor: feedAnchor }, (p: Patch) => {
     m.apply(p);
+    moving = false;
     const now = getGlobal();
     if (now.pendingChatId === chatId) { commit(); return; }
     if (now.openChatId !== chatId) return;
-    setGlobal({ messages: m.list() as Item[] });
+    const meta = (m.meta('~window') as unknown as FeedMeta) ?? null;
+    setGlobal({ messages: m.list() as Item[], feedMeta: meta });
+    // окно дошло до последних сообщений — снова живой хвост (новые сообщения появятся сами)
+    if (feedAnchor && meta?.live && !meta.hasNewer) { feedAnchor = undefined; feed?.update({ kind: 'messages', chatId, limit: WINDOW }); }
   });
   // движок отдаёт готовую ленту почти сразу; если нет — не держим пользователя на прежнем чате
   switchTimer = setTimeout(() => { if (getGlobal().pendingChatId === chatId) commit(); }, 700);
 }
 
-export function loadOlder(): void {
-  const chatId = getGlobal().openChatId;
-  if (!chatId || !feed) return;
-  feedLimit += FEED_PAGE;
-  feed.update({ kind: 'messages', chatId, limit: feedLimit });
-}
+/** Прежний вызов «ещё истории» — теперь сдвиг окна к старым. */
+export function loadOlder(): void { moveWindow('older'); }
 
 export async function send(chatId: number, body: string, replyToId: number | null = null): Promise<void> {
   nudgeWallpaper();
+  if (feedAnchor && getGlobal().openChatId === chatId) moveWindow('latest'); // своё сообщение — внизу, как в Telegram
   await engine.call({ type: 'sendMessage', chatId, body, replyToId });
 }
 

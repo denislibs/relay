@@ -47,7 +47,7 @@ export function watchInto(engine: Engine, q: Query) {
     if (p.op === 'snapshot') { items.clear(); for (const it of p.items) items.set(it.key, it); order = p.order; }
     else { for (const k of p.remove) items.delete(k); for (const it of p.upsert) items.set(it.key, it); if (p.order) order = p.order; }
   });
-  const list = () => order.map((k) => items.get(k)!).filter(Boolean);
+  const list = () => order.map((k) => items.get(k)!).filter((i) => i && !i.key.startsWith('~')); // служебные элементы (~window) — не данные
   return {
     handle, patches, list,
     async until(pred: (l: Item[]) => boolean, ms = 3000): Promise<Item[]> {

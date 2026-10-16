@@ -1,6 +1,6 @@
 import type { ClientFrame, Message, ServerFrame } from '@relay/protocol';
 import { openDb } from './idb';
-import { affects, computeQuery, diffResults, type Result } from './queries';
+import { affects, computeQuery, diffResults, messageWindow, type Result } from './queries';
 import type { Item } from './types';
 import { Store, type ChatSummary } from './store';
 import { WsTransport } from './transport';
@@ -130,7 +130,7 @@ export class Engine {
     this.run(async () => {
       try {
         await this.store.loadChatMessages(chatId);
-        const history = this.ensureHistory(chatId, limit);
+        const history = this.ensureWindow(q);
         if (this.online && w.gated) await Promise.race([history.catch(() => {}), new Promise((r) => setTimeout(r, HISTORY_GATE_MS))]);
         open();
         await history;
@@ -540,6 +540,27 @@ export class Engine {
   // =====================================================================
   // История
   // =====================================================================
+
+  /** Догрузить историю под окно запроса; если окно у самого края загруженного — ещё страницу наперёд. */
+  private async ensureWindow(q: Extract<Query, { kind: 'messages' }>): Promise<void> {
+    const page = this.cfg.historyPage ?? 50;
+    for (let guard = 0; guard < 200; guard++) {
+      const chat = this.store.chats.get(q.chatId);
+      if (!chat || chat.historyComplete) return;
+      const all = this.store.chatMessages(q.chatId);
+      const { from, to } = messageWindow(all, q);
+      let short: boolean;
+      if (!q.anchor) short = all.length < q.limit;
+      else {
+        const reached = all.length > 0 && all[0].sort <= q.anchor.sort;   // якорь уже среди загруженных
+        short = !reached || (q.anchor.side !== 'start' && from === 0 && to - from < q.limit);
+      }
+      if (short) { await this.ensureHistory(q.chatId, all.length + page); continue; }
+      // окно близко к старому краю — страница наперёд, в фоне, чтобы прокрутка вверх не упиралась
+      if (from < page) this.run(() => this.ensureHistory(q.chatId, all.length + page));
+      return;
+    }
+  }
 
   private ensureHistory(chatId: number, limit: number): Promise<void> {
     const have = this.store.chatMessages(chatId).length;

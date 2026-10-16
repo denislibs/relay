@@ -78,10 +78,17 @@ export class Store {
     this.touch(chatId);
   }
 
+  /** Сообщения чата по порядку. Массив кэшируется до следующего изменения чата — не мутировать. */
   chatMessages(chatId: number): LocalMessage[] {
-    const map = this.messages.get(chatId);
-    return map ? [...map.values()].sort((a, b) => a.sort - b.sort) : [];
+    let arr = this.sorted.get(chatId);
+    if (!arr) {
+      const map = this.messages.get(chatId);
+      arr = map ? [...map.values()].sort((a, b) => a.sort - b.sort) : [];
+      this.sorted.set(chatId, arr);
+    }
+    return arr;
   }
+  private sorted = new Map<number, LocalMessage[]>();
 
   oldestId(chatId: number): number | null {
     for (const m of this.chatMessages(chatId)) if (m.id != null) return m.id;
@@ -332,7 +339,7 @@ export class Store {
     this.touch(c.id);
   }
 
-  private touch(chatId: number): void { this.touched.add(chatId); }
+  private touch(chatId: number): void { this.touched.add(chatId); this.sorted.delete(chatId); }
 
   /** Дочитали до конца — 0; иначе вычитаем известные чужие сообщения из прочитанного диапазона (from, to]. */
   private unreadAfterRead(chat: LocalChat, from: number, to: number): number {

@@ -1,9 +1,9 @@
-import { Avatar, Bubble, Composer, DateDivider, GlassBar, IconButton, Menu, ScrollToBottom, forceMeasure, requestMeasure, requestMutation } from '@relay/ui';
+import { Avatar, Composer, GlassBar, IconButton, Menu, requestMutation } from '@relay/ui';
 import { useEffect, useLayoutEffect, useRef, useState } from 'preact/hooks';
-import { loadOlder, openChat, saveDraft, send } from '../data';
+import { openChat, saveDraft, send } from '../data';
 import { setGlobal, useGlobal } from '../global';
-import { clock, dayKey, dayLabel, lastSeenText } from './format';
-import { useReadTracker } from './readTracker';
+import { Feed } from './Feed';
+import { lastSeenText } from './format';
 
 let closedAt = -Infinity; // когда закрылась прежняя лента: близко по времени — значит, переключение между чатами
 
@@ -14,18 +14,11 @@ export function Chat({ chatId }: { chatId: number }) {
   const me = useGlobal((s) => s.me)!;
   const chat = useGlobal((s) => s.chats.find((c) => c.id === chatId));
   const messages = useGlobal((s) => s.messages);
-  const feed = useRef<HTMLDivElement>(null);
-  const stick = useRef(true);              // лента прижата к низу
-  const olderFrom = useRef<number | null>(null); // высота до подгрузки истории — якорь прокрутки
-  const initial = useRef<Set<string> | null>(null);
-  const [away, setAway] = useState(false);
-  const programmatic = useRef(0);          // сколько scroll-событий вызвали мы сами
+  const shell = useRef<HTMLSpanElement>(null);
+  const stick = useRef(true);              // лента прижата к низу (Feed ведёт, отправка выставляет)
   const [menu, setMenu] = useState<{ x: number; y: number; key: string } | null>(null);
   const [replyKey, setReplyKey] = useState<string | null>(null);
 
-  if (initial.current === null && messages.length) initial.current = new Set(messages.map((m) => m.key));
-
-  useReadTracker(chatId, feed, messages);
 
   // черновик (как в Telegram): восстановить при открытии, сохранять через 2.5 с после ввода,
   // сразу — при уходе из чата и закрытии вкладки; после отправки движок сам его очищает
@@ -52,50 +45,13 @@ export function Chat({ chatId }: { chatId: number }) {
 
   // высота композера (растёт с цитатой ответа) → --composer-h: лента уходит под него ровно на эту высоту
   useLayoutEffect(() => {
-    const main = feed.current?.parentElement;
+    const main = shell.current?.closest<HTMLElement>('.rl-shell-main');
     const wrap = main?.querySelector<HTMLElement>('.rl-composer-wrap');
     if (!main || !wrap || typeof ResizeObserver !== 'function') return;
     const ro = new ResizeObserver(([e]) => { const h = Math.round(e.borderBoxSize?.[0]?.blockSize ?? wrap.offsetHeight); requestMutation(() => main.style.setProperty('--composer-h', h + 'px')); });
     ro.observe(wrap);
     return () => ro.disconnect();
   }, []);
-
-  // после рендера: держим низ или якорь истории (замер → запись в одном кадре)
-  const placed = useRef(false);            // первая раскладка ленты уже прокручена вниз
-  useLayoutEffect(() => {
-    const el = feed.current;
-    if (!el) return;
-    if (!placed.current && messages.length) {
-      // первый кадр чата — сразу внизу, до отрисовки: иначе мелькнёт верх ленты. Осознанное исключение
-      // из measure/mutate: одно чтение и одна запись внутри коммита, до первой отрисовки (через rAF был бы кадр с верхом)
-      placed.current = true;
-      forceMeasure(() => {
-        const bottom = el.scrollHeight - el.clientHeight;
-        if (bottom > el.scrollTop) { programmatic.current++; el.scrollTop = bottom; } // scroll-событие будет только если позиция меняется
-      });
-      return;
-    }
-    requestMeasure(() => {
-      // все чтения — здесь; в фазе записи только присваивания
-      const h = el.scrollHeight, top = el.scrollTop, ch = el.clientHeight;
-      const from = olderFrom.current;
-      requestMutation(() => {
-        if (from !== null) { programmatic.current++; el.scrollTop = top + h - from; olderFrom.current = null; }
-        else if (stick.current && top + ch < h) { programmatic.current++; el.scrollTop = h; }
-      });
-    });
-  }, [messages]);
-
-  function onScroll() {
-    const el = feed.current!;
-    if (programmatic.current > 0) { programmatic.current--; return; } // наша же прокрутка не меняет «прижата к низу»
-    requestMeasure(() => {
-      const fromBottom = el.scrollHeight - el.scrollTop - el.clientHeight;
-      stick.current = fromBottom < 80;
-      setAway(fromBottom > el.clientHeight);
-      if (el.scrollTop < 160 && olderFrom.current === null) { olderFrom.current = el.scrollHeight; loadOlder(); }
-    });
-  }
 
   const title = (chat?.title as string) || 'Чат №' + chatId;
   // как в Telegram: в норме подзаголовок — тип чата, а пока идёт подключение или обновление — стадия
@@ -107,14 +63,13 @@ export function Chat({ chatId }: { chatId: number }) {
   const myPeer = peer && chat?.peerId === peer.userId && peer.known ? peer : null;
   const online = !!myPeer?.online;
   const subtitle = chat?.kind === 'group' ? 'Группа' : myPeer ? lastSeenText(online, myPeer.lastSeen as string | null) : '';
-  const byId = new Map(messages.filter((m) => m.id != null).map((m) => [m.id as number, m]));
   const replyTo = replyKey ? messages.find((m) => m.key === replyKey) : undefined;
   const authorOf = (senderId: unknown) => (senderId === me.userId ? 'Вы' : title);
   const menuMsg = menu ? messages.find((m) => m.key === menu.key) : undefined;
-  let prevDay = '', prevSender: number | null = null;
 
   return (
     <>
+      <span ref={shell} hidden />
       <GlassBar class={switching ? 'app-steady' : undefined}>
         <IconButton class="app-back" icon="arrowLeft" label="К списку чатов" onClick={() => openChat(null)} />
         <button type="button" class="rl-glassbar-who" aria-label="Информация о чате" onClick={() => setGlobal({ infoOpen: !infoOpen })}>
@@ -127,38 +82,7 @@ export function Chat({ chatId }: { chatId: number }) {
         <IconButton icon="search" label="Поиск по чату" />
         <IconButton icon="more" label="Информация" onClick={() => setGlobal({ infoOpen: !infoOpen })} />
       </GlassBar>
-      <div class="rl-feed" ref={feed} onScroll={onScroll} aria-live="polite">
-        {messages.map((m, i) => {
-          const day = dayKey(m.createdAt as string);
-          const out = m.senderId === me.userId;
-          const start = prevSender !== m.senderId || day !== prevDay;
-          const next = messages[i + 1];
-          const end = !next || next.senderId !== m.senderId || dayKey(next.createdAt as string) !== day;
-          const quoted = m.replyToId != null ? byId.get(m.replyToId as number) : undefined;
-          const divider = day !== prevDay ? <DateDivider key={'d' + day}>{dayLabel(m.createdAt as string)}</DateDivider> : null;
-          prevDay = day; prevSender = m.senderId as number;
-          return [
-            divider,
-            <div class="app-msg" key={m.key} data-msg-id={m.id ?? undefined}>
-              <Bubble
-                from={out ? 'out' : 'in'}
-                tail={end}
-                groupStart={start}
-                reply={quoted ? { author: authorOf(quoted.senderId), text: quoted.body, tone: quoted.senderId === me.userId ? 1 : 3 } : undefined}
-                onContextMenu={(e: MouseEvent) => { e.preventDefault(); setMenu({ x: e.clientX, y: e.clientY, key: m.key as string }); }}
-                time={clock(m.createdAt as string)}
-                status={out ? m.status : undefined}
-                appear={initial.current !== null && !initial.current.has(m.key)}
-              >
-                {m.body}
-              </Bubble>
-            </div>,
-          ];
-        })}
-      </div>
-      <div class="rl-scrolldown-slot">
-        <ScrollToBottom show={away} unread={chat?.unread as number} onClick={() => { const el = feed.current!; stick.current = true; requestMeasure(() => { const top = el.scrollHeight; requestMutation(() => el.scrollTo({ top, behavior: 'smooth' })); }); }} />
-      </div>
+      <Feed chatId={chatId} meId={me.userId} peerName={title} stick={stick} onMenu={(key, x, y) => setMenu({ key, x, y })} />
       <Composer
         id="composer"
         placeholder="Сообщение"

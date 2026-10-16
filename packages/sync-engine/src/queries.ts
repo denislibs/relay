@@ -22,7 +22,35 @@ const chatItem = (c: LocalChat): Item => ({
   sortAt: sortAt(c), draft: c.draft?.text ?? null,
   last: c.last ? { key: c.last.key, id: c.last.id, senderId: c.last.senderId, body: c.last.body, status: c.last.status, createdAt: c.last.createdAt } : null,
 });
-const messageItem = (m: LocalMessage): Item => ({ ...m });
+// элемент сообщения переиспользуется, пока сообщение не изменилось: дешёвая подпись вместо JSON.stringify
+const msgSig = (m: LocalMessage): string => `${m.id}|${m.status}|${m.sort}|${m.replyToId}|${m.body}`;
+const msgCache = new WeakMap<LocalMessage, { sig: string; item: Item }>();
+const messageItem = (m: LocalMessage): { item: Item; sig: string } => {
+  const sig = msgSig(m);
+  let c = msgCache.get(m);
+  if (!c || c.sig !== sig) { c = { sig, item: { ...m } }; msgCache.set(m, c); }
+  return c;
+};
+
+/** Первый индекс с sort >= s (массив отсортирован по sort). */
+function lowerBound(arr: LocalMessage[], s: number): number {
+  let lo = 0, hi = arr.length;
+  while (lo < hi) { const mid = (lo + hi) >> 1; if (arr[mid].sort < s) lo = mid + 1; else hi = mid; }
+  return lo;
+}
+
+/** Границы окна ленты [from, to) по запросу. */
+export function messageWindow(all: LocalMessage[], q: Extract<Query, { kind: 'messages' }>): { from: number; to: number } {
+  const n = all.length, limit = q.limit;
+  if (!q.anchor) return { from: Math.max(0, n - limit), to: n };
+  const i = lowerBound(all, q.anchor.sort);
+  if (q.anchor.side === 'end') { const to = Math.min(n, i < n && all[i].sort === q.anchor.sort ? i + 1 : i); return { from: Math.max(0, to - limit), to }; }
+  if (q.anchor.side === 'start') return { from: i, to: Math.min(n, i + limit) };
+  let from = Math.max(0, i - (limit >> 1));
+  const to = Math.min(n, from + limit);
+  from = Math.max(0, to - limit);
+  return { from, to };
+}
 
 export function computeQuery(store: Store, q: Query): Result {
   switch (q.kind) {
@@ -31,8 +59,16 @@ export function computeQuery(store: Store, q: Query): Result {
       return result(chats.slice(0, q.limit).map(chatItem));
     }
     case 'messages': {
+      // только окно: бинарный поиск по отсортированному кэшу, подписи — без сериализации
       const all = store.chatMessages(q.chatId);
-      return result(all.slice(Math.max(0, all.length - q.limit)).map(messageItem));
+      const { from, to } = messageWindow(all, q);
+      const chat = store.chats.get(q.chatId);
+      const items = new Map<string, Item>(), sig = new Map<string, string>(), order: string[] = [];
+      for (let k = from; k < to; k++) { const { item, sig: g } = messageItem(all[k]); items.set(item.key, item); sig.set(item.key, g); order.push(item.key); }
+      // служебный элемент: есть ли что-то за краями окна (интерфейс по нему решает, двигать ли окно)
+      const meta: Item = { key: '~window', hasOlder: from > 0 || !chat?.historyComplete, hasNewer: to < all.length, live: !q.anchor || to === all.length };
+      items.set(meta.key, meta); sig.set(meta.key, `${meta.hasOlder}|${meta.hasNewer}|${meta.live}`); order.push(meta.key);
+      return { items, sig, order };
     }
     case 'counters': {
       let unreadChats = 0, unreadMessages = 0;

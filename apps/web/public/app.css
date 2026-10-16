@@ -41,3 +41,14 @@ body { background: var(--bg); color: var(--ink); font-family: var(--font-sans); 
 .app-more { display: flex; justify-content: center; padding: 14px 0 4px; color: var(--brand-text); }
 .app-more circle { transform-origin: 9px 9px; animation: rl-spin 900ms linear infinite; }
 .rl-profile-sub.app-online { color: var(--brand-text); }
+
+/* ---------- лента: окно, датчики, метки прочтения, разделитель непрочитанного, «липкие» даты ---------- */
+.rl-feed { position: relative; }
+.app-msg { position: relative; }
+.app-sentinel { flex: 0 0 1px; height: 1px; margin: -1px 0 0; pointer-events: none; }
+.app-mark { position: absolute; left: 0; right: 0; bottom: 0; height: 1px; pointer-events: none; }
+.app-unread-divider { display: flex; justify-content: center; margin: var(--space-3) 0; padding: 6px 0; background: color-mix(in srgb, var(--raised) 72%, transparent); color: var(--brand-text); font: 500 13.5px/18px var(--font-sans); animation: app-fade 300ms var(--ease-out) both; }
+/* sticky top считается от края с учётом padding-top ленты (он уже равен шапке + отступу) — поэтому только 8px */
+.rl-shell .rl-feed .rl-date { position: sticky; top: 8px; z-index: 2; pointer-events: none; }
+.rl-shell .rl-feed .rl-date span { pointer-events: auto; transition: opacity 300ms var(--ease-out); }
+.rl-shell .rl-feed .rl-date.stuck span { opacity: 0; }

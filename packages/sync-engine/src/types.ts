@@ -40,7 +40,9 @@ export interface OutboxEntry {
 
 export type Query =
   | { kind: 'chatList'; limit: number }
-  | { kind: 'messages'; chatId: number; limit: number }
+  /** Окно ленты: без якоря — последние limit (живой хвост); с якорем — limit сообщений, которые
+   *  заканчиваются на sort (end), начинаются с него (start) или стоят вокруг него (center). */
+  | { kind: 'messages'; chatId: number; limit: number; anchor?: { sort: number; side: 'end' | 'start' | 'center' } }
   | { kind: 'counters' }
   | { kind: 'status' }
   | { kind: 'presence'; userId: number };

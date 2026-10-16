@@ -4,6 +4,9 @@ import { requestMutation } from '@relay/ui';
 import { loadTheme, type ThemePref } from './theme';
 import type { Item } from '@relay/sync-engine/src/types';
 
+/** Края окна ленты: есть ли сообщения раньше/позже, окно ли это живого хвоста. */
+export interface FeedMeta { hasOlder: boolean; hasNewer: boolean; live: boolean }
+
 export interface Me { userId: number; name: string }
 export type Phase = 'connecting' | 'offline' | 'loading' | 'updating' | 'ready';
 export interface Status { phase: Phase; hydrated: boolean; chatsComplete?: boolean; chatsCursorAt?: number; online: boolean; synced: boolean; syncing: boolean; outbox: number; failed: number }
@@ -21,6 +24,8 @@ export interface GlobalState {
   pendingChatId: number | null;
   peer: Item | null;   // присутствие собеседника открытого личного чата {userId, known, online, lastSeen}   // выбран, но лента ещё не готова: на экране прежний чат, строка уже подсвечена
   messages: Item[];
+  feedMeta: FeedMeta | null;
+  unreadFrom: number | null;   // lastReadId на момент открытия: разделитель «Непрочитанные» (заморожен)
   folder: 'all' | 'unread';
   search: string;
   newChatOpen: boolean;
@@ -42,6 +47,8 @@ let state: GlobalState = {
   pendingChatId: null,
   peer: null,
   messages: [],
+  feedMeta: null,
+  unreadFrom: null,
   folder: 'all',
   search: '',
   newChatOpen: false,

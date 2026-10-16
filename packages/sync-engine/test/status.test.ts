@@ -106,7 +106,7 @@ test('opening a chat: the first feed patch is already complete (no empty or part
   const feed = watchInto(ea, { kind: 'messages', chatId, limit: 60 });
   await feed.until((l) => l.length === 60);
   expect(feed.patches[0].op).toBe('snapshot');
-  expect((feed.patches[0] as { items: unknown[] }).items.length).toBe(60);
+  expect((feed.patches[0] as { items: { key: string }[] }).items.filter((i) => !i.key.startsWith('~')).length).toBe(60);
 });
 
 test('presence: the peer goes online and offline; unknown while disconnected', async () => {
@@ -176,3 +176,28 @@ test('drafts: saved per chat, lift the chat in the list, survive a restart, clea
   await again.call({ type: 'setDraft', chatId: newer, text: '   ' });         // пробелы — не черновик
   expect(list2.list().find((c) => c.id === newer)?.draft).toBeNull();
 });
+
+test('feed window: anchored by sort (end/start/center), loads history under it, reports edges', async () => {
+  const a = await srv.login('a'), b = await srv.login('b');
+  const chatId = await srv.chat(a.token, [a.userId, b.userId]);
+  const ids: number[] = [];
+  for (let i = 0; i < 120; i++) ids.push((await sendMessage(b.userId, { chatId, clientId: crypto.randomUUID(), body: 'm' + i })).message.id);
+  const ea = await open({ ...srv.config(a), historyPage: 20 });
+  ea.connect();
+  await ea.whenIdle();
+  const feed = watchInto(ea, { kind: 'messages', chatId, limit: 30 });
+  await feed.until((l) => l.length === 30);
+  expect(feed.list().at(-1)!.id).toBe(ids[119]);
+  const meta = () => feed.patches.flatMap((p) => (p.op === 'snapshot' ? p.items : p.upsert)).filter((i) => i.key === '~window').at(-1)!;
+  expect(meta()).toMatchObject({ hasOlder: true, hasNewer: false, live: true });
+
+  feed.handle.update({ kind: 'messages', chatId, limit: 30, anchor: { sort: ids[10], side: 'center' } });   // далеко в истории
+  await feed.until((l) => l.length === 30 && l.some((m) => m.id === ids[10]), 5000);
+  expect(meta()).toMatchObject({ hasNewer: true, live: false });
+
+  feed.handle.update({ kind: 'messages', chatId, limit: 30, anchor: { sort: ids[29], side: 'end' } });
+  await feed.until((l) => l.at(-1)?.id === ids[29] && l[0].id === ids[0]);
+  feed.handle.update({ kind: 'messages', chatId, limit: 30, anchor: { sort: ids[100], side: 'start' } });
+  await feed.until((l) => l[0]?.id === ids[100] && l.length === 20);           // до хвоста осталось 20
+  expect(meta()).toMatchObject({ hasNewer: false, live: true });
+}, 20000);
