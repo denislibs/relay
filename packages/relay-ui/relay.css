@@ -339,6 +339,7 @@ body { margin: 0; font-family: var(--font-sans); color: var(--ink); background: 
 .rl-switch-knob { position: absolute; left: 3px; top: 3px; width: 14px; height: 14px; border-radius: 50%; background: var(--outline); transition: transform var(--dur-fast) var(--ease-standard), background-color var(--dur-instant) var(--ease-standard), width var(--dur-instant) var(--ease-standard); }
 .rl-switch input:checked + .rl-switch-track { background: var(--brand-strong); border-color: var(--brand-strong); }
 .rl-switch input:checked + .rl-switch-track .rl-switch-knob { transform: translateX(16px); background: var(--bg); }
+.rl-switch input:disabled + .rl-switch-track { opacity: .45; }
 .rl-switch:active .rl-switch-knob { width: 18px; }
 .rl-switch input:checked:active + .rl-switch-track .rl-switch-knob { transform: translateX(12px); }
 .rl-switch input:focus-visible + .rl-switch-track { outline: 2px solid var(--brand-text); outline-offset: 2px; }

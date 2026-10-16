@@ -3,6 +3,7 @@ import type { Item } from '@relay/sync-engine/src/types';
 import { chatMedia, focusMessage } from '../data';
 import { fileSize } from './format';
 import { useEffect, useState } from 'preact/hooks';
+import { syncMuted } from '../notify';
 import { setGlobal, useGlobal } from '../global';
 import { clock, dayLabel, lastSeenText } from './format';
 
@@ -17,6 +18,7 @@ function toggleMuted(chatId: number, muted: number[]): void {
   const next = muted.includes(chatId) ? muted.filter((x) => x !== chatId) : [...muted, chatId];
   try { localStorage.setItem(MUTED_KEY, JSON.stringify(next)); } catch { /* приватный режим */ }
   setGlobal({ muted: next });
+  syncMuted();
 }
 
 /** Правая панель «Информация» о собеседнике или группе — как User Info в Telegram. */

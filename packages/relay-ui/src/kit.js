@@ -432,7 +432,7 @@ function NavRail(props) {
 function Checkbox(props) {
   var id = props.id || 'rl-check';
   return h('label', { class: cx('rl-check', (props.className || props.class)), for: id },
-    h('input', { id: id, type: 'checkbox', checked: props.checked, defaultChecked: props.defaultChecked, onChange: props.onChange }),
+    h('input', { id: id, type: 'checkbox', checked: props.checked, disabled: props.disabled, defaultChecked: props.defaultChecked, onChange: props.onChange }),
     h('span', { class: 'rl-check-box', 'aria-hidden': 'true' },
       h('svg', { width: 14, height: 14, viewBox: '0 0 24 24', fill: 'none', stroke: 'currentColor', 'stroke-width': 3, 'stroke-linecap': 'round', 'stroke-linejoin': 'round' }, h('path', { d: 'M5 12.5l4.5 4.5L19 7.5' }))),
     props.children);

@@ -2,6 +2,7 @@ import { nudgeWallpaper } from '@relay/ui';
 import { connectEngine, EngineClient, Mirror } from '@relay/sync-engine/src/client';
 import type { Item, Patch, Query, SearchResult } from '@relay/sync-engine/src/types';
 import { getGlobal, setGlobal, type FeedMeta, type Me, type Status } from './global';
+import { notifyIncoming, startNotify } from './notify';
 
 declare const __BUILD__: string;
 
@@ -29,8 +30,19 @@ export function startData(me: Me): void {
   engine.onReload(() => location.reload());
 
   const chats = new Mirror();
+  let seen: Map<number, number> | null = null;
   engine.watch({ kind: 'chatList', limit: 1000 }, (p) => {
+    const before = seen;
     chats.apply(p);
+    seen = new Map(chats.list().map((c) => [c.id as number, ((c.last as { id?: number } | null)?.id ?? 0)]));
+    // новое чужое сообщение в чате, который уже знали (первый снимок из IndexedDB — не новость)
+    if (before) for (const c of chats.list()) {
+      const last = c.last as { id: number | null; senderId: number; body: string; kind?: string; attachment?: { name: string } | null; createdAt: string } | null;
+      if (!last?.id || last.senderId === me.userId || last.id <= (before.get(c.id as number) ?? 0)) continue;
+      if (c.id === getGlobal().openChatId && document.visibilityState === 'visible') continue;
+      notifyIncoming({ id: c.id as number, title: (c.title as string) || 'Чат №' + c.id, muted: getGlobal().muted.includes(c.id as number) },
+        { id: last.id, body: last.body, kind: last.kind, attachmentName: last.attachment?.name, createdAt: last.createdAt });
+    }
     // сразу, не дожидаясь конца анимаций: список виртуальный (≈20 строк), а отложенный подъём чата
     // после отправки выглядит как запоздалый рывок
     setGlobal({ chats: chats.list(), chatsLoaded: true });
@@ -43,6 +55,7 @@ export function startData(me: Me): void {
   const status = new Mirror();
   engine.watch({ kind: 'status' }, (p) => { status.apply(p); const s = status.list()[0] as unknown as Status | undefined; if (s) { setGlobal({ status: s }); showPhase(s); } });
 
+  startNotify((id) => { focus(); openChat(id); });
   const open = Number(new URLSearchParams(location.hash.slice(1)).get('chat')) || null;
   if (open) openChat(open);
 }

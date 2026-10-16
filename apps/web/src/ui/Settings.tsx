@@ -1,4 +1,5 @@
-import { Icon, InfoRow, PanelHeader, ProfileHeader } from '@relay/ui';
+import { Icon, InfoRow, PanelHeader, ProfileHeader, Switch } from '@relay/ui';
+import { setNotify } from '../notify';
 import { useEffect } from 'preact/hooks';
 import { setGlobal, useGlobal } from '../global';
 import { applyTheme, type ThemePref } from '../theme';
@@ -16,6 +17,14 @@ export function setTheme(pref: ThemePref): void {
   setGlobal({ theme: pref });
 }
 
+const NOTIFY_HINT: Record<string, string> = {
+  on: 'Даже когда вкладка закрыта',
+  off: 'Выключены на этом устройстве',
+  default: 'Нужно разрешение браузера',
+  denied: 'Запрещены в настройках браузера',
+  unsupported: 'Браузер не поддерживает',
+};
+
 const back = () => setGlobal({ sidebarView: 'chats' });
 
 export function Settings() {
@@ -23,6 +32,8 @@ export function Settings() {
   const theme = useGlobal((s) => s.theme);
   const chats = useGlobal((s) => s.chats.length);
   const status = useGlobal((s) => s.status);
+  const notify = useGlobal((s) => s.notify);
+  const pushReady = useGlobal((s) => s.pushReady);
 
   // Esc — назад к чатам, как стрелка
   useEffect(() => {
@@ -47,6 +58,15 @@ export function Settings() {
               trailing={theme === t.pref ? <span class="rl-check-mark" aria-label="выбрано"><Icon name="check" size={22} /></span> : null}
             />
           ))}
+        </div>
+        <div class="rl-settings-group">
+          <div class="rl-settings-caption">Уведомления</div>
+          <InfoRow
+            icon={notify === 'on' ? 'bell' : 'bellOff'}
+            title="Новые сообщения"
+            subtitle={notify === 'on' && !pushReady ? 'Пока открыта вкладка' : NOTIFY_HINT[notify]}
+            trailing={<Switch id="settings-notify" label="Уведомления о сообщениях" checked={notify === 'on'} disabled={notify === 'unsupported' || notify === 'denied'} onChange={() => setNotify(notify !== 'on')} />}
+          />
         </div>
         <div class="rl-settings-group">
           <div class="rl-settings-caption">Данные</div>

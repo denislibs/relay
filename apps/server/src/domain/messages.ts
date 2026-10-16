@@ -5,6 +5,7 @@ import { sql } from '../db';
 import { assertMember, toMessage } from './chats';
 import { DomainError } from './errors';
 import { fanOut } from './journal';
+import { pushNewMessage } from './push';
 
 export const MAX_BODY = 4096;
 
@@ -16,7 +17,7 @@ export async function sendMessage(
   if (!body && !input.attachment) throw new DomainError('bad_frame', 'empty body'); // у вложения подпись необязательна
   if (body.length > MAX_BODY) throw new DomainError('too_long');
 
-  return sql.begin(async (tx) => {
+  const res = await sql.begin(async (tx) => {
     await assertMember(tx, input.chatId, userId);
     if (input.replyToId != null) {
       const [target] = await tx`select 1 from messages where chat_id = ${input.chatId} and id = ${input.replyToId}`;
@@ -39,4 +40,7 @@ export async function sendMessage(
     await clearDraftInTx(tx, userId, input.chatId); // отправили — черновик на всех устройствах больше не нужен
     return { message, duplicate: false };
   });
+  // после коммита и не дожидаясь: доставка в push-сервис не должна тормозить ack
+  if (!res.duplicate) void pushNewMessage(res.message).catch((e) => console.warn('push', String(e)));
+  return res;
 }

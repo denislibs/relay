@@ -10,13 +10,14 @@ import { connected, disconnected, listPresence, type Publish } from './domain/pr
 import { searchMessages } from './domain/search';
 import { fileFor, MAX_FILE, storeUpload } from './domain/files';
 import { handleFrame } from './ws';
+import { subscribe, unsubscribe, vapidKeys } from './domain/push';
 
 const STATUS: Record<string, number> = { bad_frame: 400, too_long: 400, unauthorized: 401, not_member: 403, not_found: 404 };
 const fail = (code: string) => Response.json({ code }, { status: STATUS[code] ?? 500 });
 
 export type WsData = { userId: number };
 
-const API = /^\/(health|me|chats|presence|search|upload|files|ws|dev)(\/|$)/;
+const API = /^\/(health|me|chats|presence|search|upload|files|push|ws|dev)(\/|$)/;
 
 /** Статика клиента из WEB_DIST. Путь не может выйти за папку; пути без расширения — SPA, отдаём index.html. */
 function serveStatic(pathname: string): Response {
@@ -56,6 +57,8 @@ export function createServer(opts: { port: number }): Server {
           return Response.json({ userId, token }, { headers: { 'set-cookie': sessionCookie(token) } });
         }
 
+        // публичный ключ VAPID — не секрет
+        if (req.method === 'GET' && url.pathname === '/push/key') return Response.json({ key: (await vapidKeys()).publicKey });
         const userId = await userIdFromToken(readSessionToken(req));
         if (!userId) return fail('unauthorized');
 
@@ -96,6 +99,16 @@ export function createServer(opts: { port: number }): Server {
           const kind = url.searchParams.get('kind') === 'file' ? 'file' : 'photo';
           const before = Number(url.searchParams.get('beforeId')) || null;
           return Response.json(await getChatMedia(userId, Number(media[1]), kind, before));
+        }
+        if (url.pathname === '/push/subscription' && (req.method === 'POST' || req.method === 'DELETE')) {
+          const body = (await req.json()) as { endpoint: string; keys: { p256dh: string; auth: string }; muted?: number[] };
+          if (typeof body?.endpoint !== 'string') return fail('bad_frame');
+          if (req.method === 'DELETE') await unsubscribe(userId, body.endpoint);
+          else {
+            if (typeof body.keys?.p256dh !== 'string' || typeof body.keys?.auth !== 'string') return fail('bad_frame');
+            try { await subscribe(userId, body); } catch { return fail('bad_frame'); }
+          }
+          return Response.json({ ok: true });
         }
         if (req.method === 'GET' && url.pathname === '/search') {
           // ?q=текст[&chatId=N][&beforeId=M][&limit=K]

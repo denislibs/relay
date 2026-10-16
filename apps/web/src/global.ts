@@ -1,3 +1,4 @@
+import type { NotifyState } from './notify';
 import { options } from 'preact';
 import { useEffect, useRef, useState } from 'preact/hooks';
 import { requestMutation } from '@relay/ui';
@@ -34,6 +35,8 @@ export interface GlobalState {
   infoOpen: boolean;   // правая панель «Информация»
   muted: number[];     // чаты с выключенными уведомлениями (на этом устройстве)
   theme: ThemePref;
+  notify: NotifyState;   // уведомления на этом устройстве
+  pushReady: boolean;    // подписка Web Push принята сервером: уведомит и без открытой вкладки
 }
 
 let state: GlobalState = {
@@ -58,6 +61,8 @@ let state: GlobalState = {
   infoOpen: false,
   muted: (() => { try { return JSON.parse(localStorage.getItem('relay.muted') ?? '[]'); } catch { return []; } })(),
   theme: loadTheme(),
+  notify: 'unsupported',
+  pushReady: false,
 };
 const subscribers = new Set<() => void>();
 
