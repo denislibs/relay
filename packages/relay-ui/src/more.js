@@ -273,6 +273,44 @@ function WindowList(props) {
   return h('div', { ref: host, class: cx('rl-wlist', props.class), role: props.role, style: { height: n * rh } }, rows);
 }
 
+/* ---------- SideFrame: the floating sidebar card as a frame for SlideStack pages ---------- */
+function SideFrame(props) {
+  return h('section', { class: cx('rl-sidecard', props.class), 'aria-label': props.label || 'Боковая панель' }, props.children);
+}
+
+/* ---------- SlideStack: screens that slide like Telegram's sidebar ----------
+   order: page keys from root to deepest. Going deeper slides the new page in from the right while the
+   old one drifts left and dims; going back plays it in reverse. The root page stays mounted (hidden,
+   not removed), so the chat list keeps its scroll position and virtual window. */
+var SLIDE_MS = 300;
+function SlideStack(props) {
+  var order = props.order || [], active = props.active;
+  var st = useState(null), anim = st[0]; // { from, to, dir: 1 push | -1 pop }
+  var prev = useRef(active);
+  useLayoutEffect(function () {
+    if (prev.current === active) return;
+    var from = prev.current;
+    prev.current = active;
+    if (reducedMotion()) { st[1](null); return; }
+    var dir = order.indexOf(active) > order.indexOf(from) ? 1 : -1;
+    st[1]({ from: from, to: active, dir: dir });
+    var end = beginHeavyAnimation(SLIDE_MS);
+    var t = setTimeout(function () { st[1](null); end(); }, SLIDE_MS);
+    return function () { clearTimeout(t); end(); };
+  }, [active]);
+  var root = order[0];
+  return h('div', { class: 'rl-slides' }, order.map(function (key) {
+    var isActive = key === active, leaving = anim && anim.from === key;
+    if (!isActive && !leaving && key !== root) return null;
+    var cls = 'rl-slide';
+    if (anim && (isActive || leaving)) {
+      var push = anim.dir > 0;
+      cls += isActive ? (push ? ' rl-slide-in-push' : ' rl-slide-in-pop') : (push ? ' rl-slide-out-push' : ' rl-slide-out-pop');
+    } else if (!isActive) cls += ' rl-slide-parked';
+    return h('div', { key: key, class: cls, inert: !isActive || undefined, 'aria-hidden': !isActive || undefined }, props.render(key));
+  }));
+}
+
 function VirtualList(props) {
   var items = props.items || [], est = props.estimate || 64, over = props.overscan || 6;
   var host = useRef(null), heights = useRef({}), st = useState({ top: 0, height: 600 });
@@ -474,7 +512,8 @@ function SidebarCard(props) {
       if (show !== fab[0]) fab[1](show);
     });
   }
-  return h('section', { class: cx('rl-sidecard', props.class), 'aria-label': props.label || 'Чаты' },
+  // embedded: a page inside SideFrame/SlideStack — same content, the card surface belongs to the frame
+  return h(props.embedded ? 'div' : 'section', { class: cx(props.embedded ? 'rl-sidepage' : 'rl-sidecard', props.class), 'aria-label': props.label || 'Чаты' },
     props.header || null,
     props.tabs || null,
     props.banner || null,
@@ -537,4 +576,4 @@ function GlassBar(props) {
   return h('header', { class: cx('rl-glassbar', props.class) }, props.children);
 }
 
-export { Wallpaper, nudgeWallpaper, buildPattern, DOODLES, PATTERN_SETS, FloatShell, SidebarCard, SidebarHeader, FolderTabs, Fab, GlassBar, WindowList, Menu, ReactionPicker, AttachMenu, MentionList, DropOverlay, LinkPreview, PollBubble, UnreadDivider, SelectionBar, ChatSearchBar, Highlight, ContactPicker, CallRow, StatusAvatar, LoginQR, VirtualList, BottomNav, Tooltip, plural };
+export { Wallpaper, nudgeWallpaper, buildPattern, DOODLES, PATTERN_SETS, FloatShell, SidebarCard, SidebarHeader, FolderTabs, Fab, GlassBar, WindowList, SideFrame, SlideStack, Menu, ReactionPicker, AttachMenu, MentionList, DropOverlay, LinkPreview, PollBubble, UnreadDivider, SelectionBar, ChatSearchBar, Highlight, ContactPicker, CallRow, StatusAvatar, LoginQR, VirtualList, BottomNav, Tooltip, plural };

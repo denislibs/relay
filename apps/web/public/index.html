@@ -9,9 +9,11 @@
   <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 32 32%22%3E%3Crect width=%2232%22 height=%2232%22 rx=%2216%22 fill=%22%2325d366%22/%3E%3Cpath d=%22M9 12h14M9 17h9%22 stroke=%22white%22 stroke-width=%222.6%22 stroke-linecap=%22round%22/%3E%3C/svg%3E">
   <title>Relay</title>
   <!-- до загрузки CSS и обоев: фон уже в цвет темы, без белой/чёрной вспышки -->
+  <script>try { var t = localStorage.getItem('relay.theme'); if (t === 'light' || t === 'dark') document.documentElement.setAttribute('data-theme', t); } catch (e) {}</script>
   <style>
     html { background: linear-gradient(135deg, #dbddbb, #88b884 45%, #6ba587 70%, #d5d88d) fixed; }
-    @media (prefers-color-scheme: dark) { html { background: #000; } }
+    @media (prefers-color-scheme: dark) { html:not([data-theme="light"]) { background: #000; } }
+    html[data-theme="dark"] { background: #000; }
   </style>
   <link rel="stylesheet" href="/tokens.css">
   <link rel="stylesheet" href="/relay.css">

@@ -31,3 +31,8 @@ body { background: var(--bg); color: var(--ink); font-family: var(--font-sans); 
 @media (prefers-reduced-motion: reduce) { .app-skel > div, .app-listwrap > * { animation-duration: 1ms !important; animation-delay: 0ms !important; } }
 .rl-glassbar.app-steady { animation: none; }
 .rl-glassbar-title .app-phase { color: var(--brand-text); animation: rl-label-in var(--dur-base) var(--ease-out); }
+/* главное меню под гамбургером: выпадает из угла кнопки */
+.app-sidemenu { position: absolute; top: 56px; left: 12px; z-index: 40; }
+.app-sidemenu .rl-menu { position: relative; transform-origin: top left; min-width: 232px; padding: 6px; border-radius: 16px; background: color-mix(in srgb, var(--raised) 90%, transparent); -webkit-backdrop-filter: blur(18px) saturate(1.6); backdrop-filter: blur(18px) saturate(1.6); }
+.app-sidemenu .rl-menu-item { border-radius: 10px; font-weight: 500; }
+.app-sidemenu .rl-menu-item .rl-icon { color: var(--ink); }

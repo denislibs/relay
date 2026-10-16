@@ -1,13 +1,20 @@
-import { ChatRow, Presence, ChatRowSkeleton, useMinVisible, EmptyState, Fab, WindowList, FolderTabs, SidebarCard, SidebarHeader } from '@relay/ui';
+import { ChatRow, Menu, Presence, ChatRowSkeleton, useMinVisible, EmptyState, Fab, WindowList, FolderTabs, SidebarCard, SidebarHeader } from '@relay/ui';
 import type { Item } from '@relay/sync-engine/src/types';
 import { openChat } from '../data';
 import { setGlobal, useGlobal } from '../global';
+import { useState } from 'preact/hooks';
+import { isDark } from '../theme';
 import { chatTime } from './format';
+import { setTheme } from './Settings';
 
 const ROW = 72; // высота строки чата (--size-row) — список виртуальный, строки фиксированной высоты
 
 
 export function Sidebar() {
+  const [menu, setMenu] = useState(false);
+  const theme = useGlobal((s) => s.theme);
+  const dark = isDark(theme);
+  const view = useGlobal((s) => s.sidebarView);
   const me = useGlobal((s) => s.me)!;
   const chats = useGlobal((s) => s.chats);
   const counters = useGlobal((s) => s.counters);
@@ -27,11 +34,32 @@ export function Sidebar() {
 
   return (
     <SidebarCard
-      header={<SidebarHeader status={searchStatus ?? undefined} me={me.name} searchId="side-search" value={search} placeholder="Поиск" onSearch={(e: Event) => setGlobal({ search: (e.target as HTMLInputElement).value })} />}
+      embedded
+      header={<SidebarHeader onMenu={() => setMenu(true)} status={searchStatus ?? undefined} me={me.name} searchId="side-search" value={search} placeholder="Поиск" onSearch={(e: Event) => setGlobal({ search: (e.target as HTMLInputElement).value })} />}
       tabs={<FolderTabs active={folder} onChange={(id: 'all' | 'unread') => setGlobal({ folder: id })} items={[
         { id: 'all', label: 'Все' },
         { id: 'unread', label: 'Непрочитанные', count: counters.unreadChats },
       ]} />}
+      banner={
+        <>
+          {menu ? <div class="rl-msgmenu-scrim" onClick={() => setMenu(false)} /> : null}
+          {/* при переходе на другой экран меню снимаем сразу, без анимации исчезания поверх слайда */}
+          {view === 'chats' ? <Presence show={menu} exitMs={160}>
+            <div class="app-sidemenu">
+              <Menu
+                label="Главное меню"
+                onClose={() => setMenu(false)}
+                items={[
+                  { icon: 'settings', label: 'Настройки', onClick: () => { setMenu(false); setGlobal({ sidebarView: 'settings' }); } },
+                  { icon: dark ? 'sun' : 'moon', label: dark ? 'Дневной режим' : 'Ночной режим', onClick: () => setTheme(dark ? 'light' : 'dark') },
+                  '-',
+                  { icon: 'pencil', label: 'Новый чат', onClick: () => setGlobal({ newChatOpen: true }) },
+                ]}
+              />
+            </div>
+          </Presence> : null}
+        </>
+      }
       fab={<Fab label="Новый чат" onClick={() => setGlobal({ newChatOpen: true })} />}
     >
       <div class="app-listwrap">

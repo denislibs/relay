@@ -1,6 +1,7 @@
 import { options } from 'preact';
 import { useEffect, useRef, useState } from 'preact/hooks';
 import { requestMutation } from '@relay/ui';
+import { loadTheme, type ThemePref } from './theme';
 import type { Item } from '@relay/sync-engine/src/types';
 
 export interface Me { userId: number; name: string }
@@ -22,6 +23,8 @@ export interface GlobalState {
   folder: 'all' | 'unread';
   search: string;
   newChatOpen: boolean;
+  sidebarView: 'chats' | 'settings';
+  theme: ThemePref;
 }
 
 let state: GlobalState = {
@@ -38,6 +41,8 @@ let state: GlobalState = {
   folder: 'all',
   search: '',
   newChatOpen: false,
+  sidebarView: 'chats',
+  theme: loadTheme(),
 };
 const subscribers = new Set<() => void>();
 
