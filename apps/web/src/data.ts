@@ -7,7 +7,9 @@ declare const __BUILD__: string;
 
 let engine: EngineClient;
 let feed: { update(q: { kind: 'messages'; chatId: number; limit: number }): void; close(): void } | null = null;
-let feedLimit = 60;
+// порция ленты — два экрана сообщений (строка-бабл ≈ 40 px), не меньше 30: как и страница диалогов, от высоты окна
+const FEED_PAGE = Math.max(30, Math.ceil(innerHeight / 40) * 2);
+let feedLimit = FEED_PAGE;
 
 /** Подписки движка → GlobalState. Несрочное применяем после тяжёлых анимаций. */
 export function startData(me: Me): void {
@@ -20,6 +22,7 @@ export function startData(me: Me): void {
       wsUrl: (location.protocol === 'https:' ? 'wss://' : 'ws://') + location.host + '/ws',
       // страница диалогов — два экрана строк (как в Telegram: от высоты окна), не меньше 20
       dialogsPage: Math.max(20, Math.ceil(innerHeight / 72) * 2),
+      historyPage: FEED_PAGE,   // история с сервера — той же порцией
     },
     sharedUrl: '/shared.worker.js',
     dedicatedUrl: '/dedicated.worker.js',
@@ -88,7 +91,7 @@ export function openChat(chatId: number | null): void {
   if ((g.pendingChatId ?? g.openChatId) === chatId) return;
   feed?.close();
   feed = null;
-  feedLimit = 60;
+  feedLimit = FEED_PAGE;
   if (switchTimer) { clearTimeout(switchTimer); switchTimer = null; }
   history.replaceState(null, '', chatId ? '#chat=' + chatId : location.pathname);
   watchPeer(chatId);
@@ -111,7 +114,7 @@ export function openChat(chatId: number | null): void {
 export function loadOlder(): void {
   const chatId = getGlobal().openChatId;
   if (!chatId || !feed) return;
-  feedLimit += 40;
+  feedLimit += FEED_PAGE;
   feed.update({ kind: 'messages', chatId, limit: feedLimit });
 }
 
