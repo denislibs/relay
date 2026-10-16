@@ -28,7 +28,7 @@ export async function currentSeq(userId: number): Promise<number> {
   return row ? (row.seq as number) : 0;
 }
 
-export async function getUpdates(userId: number, since: number, limit = MAX_BATCH) {
+export async function getUpdates(userId: number, since: number, limit = Number(process.env.RELAY_SYNC_BATCH) || MAX_BATCH) {
   const seq = await currentSeq(userId);
   if (since >= seq) return { items: [] as JournalEntry[], seq, more: false, tooLong: false };
   const [first] = await sql`select min(seq) as min from updates where user_id = ${userId}`;

@@ -15,6 +15,7 @@ export interface GlobalState {
   chatsLoaded: boolean;   // первый снимок списка из воркера уже пришёл
   counters: { unreadChats: number; unreadMessages: number };
   status: Status;
+  syncLabel: string | null;   // стадия для поля поиска; каждая держится не меньше 600 мс
   openChatId: number | null;
   messages: Item[];
   folder: 'all' | 'unread';
@@ -29,6 +30,7 @@ let state: GlobalState = {
   chatsLoaded: false,
   counters: { unreadChats: 0, unreadMessages: 0 },
   status: { phase: 'connecting', hydrated: false, online: false, synced: false, syncing: false, outbox: 0, failed: 0 },
+  syncLabel: null,
   openChatId: null,
   messages: [],
   folder: 'all',

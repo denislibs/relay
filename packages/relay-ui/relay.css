@@ -55,6 +55,12 @@ body { margin: 0; font-family: var(--font-sans); color: var(--ink); background: 
 .rl-search:focus-within { border-color: var(--brand-text); background: var(--bg); }
 .rl-search input { flex: 1; min-width: 0; border: 0; background: transparent; outline: none; font: 400 15px/20px var(--font-sans); color: var(--ink); }
 .rl-search input::placeholder { color: var(--ink-muted); }
+.rl-search-icon { position: relative; display: inline-flex; width: 18px; height: 18px; flex-shrink: 0; }
+.rl-search-icon > * { position: absolute; inset: 0; transition: opacity var(--dur-fast) var(--ease-out), transform var(--dur-fast) var(--ease-out); }
+.rl-search-spin { opacity: 0; transform: scale(0.6); color: var(--brand-text); }
+.rl-search-spin circle { transform-origin: 9px 9px; animation: rl-spin 900ms linear infinite; }
+.rl-search-busy .rl-search-icon .rl-icon { opacity: 0; transform: scale(0.6) rotate(-45deg); }
+.rl-search-busy .rl-search-spin { opacity: 1; transform: none; }
 
 /* ---------- ChatRow ---------- */
 .rl-row { display: flex; align-items: center; gap: var(--space-3); width: 100%; height: var(--size-row); padding: 0 var(--space-3); border: 0; border-radius: var(--radius-lg); background: transparent; color: var(--ink); font: inherit; text-align: left; cursor: pointer; transition: background-color var(--dur-instant) var(--ease-out); }
@@ -923,3 +929,8 @@ button.rl-quote { cursor: pointer; }
 .rl-shell-tw { background: linear-gradient(135deg, var(--wallpaper-1), var(--wallpaper-4) 45%, var(--wallpaper-2) 70%, var(--wallpaper-3)); }
 @media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) .rl-shell-tw { background: var(--wallpaper-pattern); } }
 :root[data-theme="dark"] .rl-shell-tw { background: var(--wallpaper-pattern); }
+
+/* WindowList: absolutely placed rows; a reorder slides, a scroll does not */
+.rl-wlist { position: relative; contain: strict; width: 100%; }
+.rl-wrow { position: absolute; left: 0; right: 0; top: 0; transition: transform 320ms cubic-bezier(0.2, 0, 0, 1); will-change: transform; }
+@media (prefers-reduced-motion: reduce) { .rl-wrow { transition: none; } }

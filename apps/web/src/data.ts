@@ -34,10 +34,34 @@ export function startData(me: Me): void {
   const counters = new Mirror();
   engine.watch({ kind: 'counters' }, (p) => { counters.apply(p); const c = counters.list()[0]; if (c) setGlobal({ counters: { unreadChats: c.unreadChats as number, unreadMessages: c.unreadMessages as number } }); });
   const status = new Mirror();
-  engine.watch({ kind: 'status' }, (p) => { status.apply(p); const s = status.list()[0]; if (s) setGlobal({ status: s as unknown as Status }); });
+  engine.watch({ kind: 'status' }, (p) => { status.apply(p); const s = status.list()[0] as unknown as Status | undefined; if (s) { setGlobal({ status: s }); showPhase(s); } });
 
   const open = Number(new URLSearchParams(location.hash.slice(1)).get('chat')) || null;
   if (open) openChat(open);
+}
+
+const PHASE_LABEL: Record<string, string> = {
+  connecting: 'Подключение…',
+  loading: 'Загрузка чатов…',
+  updating: 'Обновление…',
+  offline: 'Ожидание сети…',
+};
+const MIN_LABEL_MS = 600;
+let labelSince = 0;
+let labelTimer: ReturnType<typeof setTimeout> | null = null;
+
+/**
+ * Надпись стадии в поле поиска. Ведётся здесь, на каждом патче статуса, а не в рендере:
+ * «Обновление…» бывает короче кадра и в рендер бы не попало. Новая стадия сменяет прежнюю сразу,
+ * а последняя держится не меньше MIN_LABEL_MS — её успевают прочитать, и она не мигает.
+ */
+function showPhase(s: Status): void {
+  const want = s.phase === 'ready' ? null : PHASE_LABEL[s.phase] + (s.phase === 'offline' && s.outbox ? ` В очереди: ${s.outbox}` : '');
+  const shown = getGlobal().syncLabel;
+  if (labelTimer) { clearTimeout(labelTimer); labelTimer = null; }
+  if (want === shown) return;
+  if (want !== null) { labelSince = performance.now(); setGlobal({ syncLabel: want }); return; }
+  labelTimer = setTimeout(() => { labelTimer = null; setGlobal({ syncLabel: null }); }, Math.max(0, MIN_LABEL_MS - (performance.now() - labelSince)));
 }
 
 export function openChat(chatId: number | null): void {

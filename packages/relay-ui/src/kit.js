@@ -194,10 +194,16 @@ function Chip(props) {
 /* ---------- SearchField ---------- */
 function SearchField(props) {
   var id = props.id || 'rl-search';
-  return h('div', { class: cx('rl-search', (props.className || props.class)) },
+  // status: «Подключение…», «Обновление…» — лупа сменяется лоадером, текст встаёт на место плейсхолдера
+  var busy = !!props.status;
+  return h('div', { class: cx('rl-search', busy && 'rl-search-busy', (props.className || props.class)) },
     h('label', { for: id, class: 'rl-sr' }, props.label || 'Поиск'),
-    h(Icon, { name: 'search', size: 18 }),
-    h('input', { id: id, type: 'search', placeholder: props.placeholder || 'Поиск или новый чат', value: props.value, onInput: props.onInput || props.onChange, autocomplete: 'off' }));
+    h('span', { class: 'rl-search-icon', 'aria-hidden': 'true' },
+      h(Icon, { name: 'search', size: 18 }),
+      h('svg', { class: 'rl-search-spin', width: 18, height: 18, viewBox: '0 0 18 18', fill: 'none' },
+        h('circle', { cx: 9, cy: 9, r: 7, stroke: 'currentColor', 'stroke-width': 2, 'stroke-linecap': 'round', 'stroke-dasharray': '30 44' }))),
+    h('input', { id: id, type: 'search', placeholder: busy ? props.status : (props.placeholder || 'Поиск или новый чат'), value: props.value, onInput: props.onInput || props.onChange, autocomplete: 'off' }),
+    busy ? h('span', { class: 'rl-sr', role: 'status' }, props.status) : null);
 }
 
 /* ---------- MessageStatus ---------- */

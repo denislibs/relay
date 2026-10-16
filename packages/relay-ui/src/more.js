@@ -238,6 +238,41 @@ function LoginQR(props) {
 }
 
 /* ---------- VirtualList: windowed list with variable heights, measure → mutate ---------- */
+/* ---------- WindowList: fixed-height rows virtualised inside the nearest scrolling ancestor ----------
+   Only rows in view (+ overscan) are in the DOM. Rows are absolutely placed, so a reorder is a transform
+   change that CSS animates; scrolling never touches transforms, so it never animates. */
+function WindowList(props) {
+  var items = props.items || [], rh = props.rowHeight || 72, over = props.overscan == null ? 6 : props.overscan;
+  var host = useRef(null), range = useState([0, Math.min(items.length, 20)]);
+  var n = items.length;
+  useLayoutEffect(function () {
+    var el = host.current, sc = el.parentElement;
+    while (sc && sc !== document.body && !/(auto|scroll)/.test(getComputedStyle(sc).overflowY)) sc = sc.parentElement;
+    if (!sc) return;
+    var queued = false;
+    function measure() {
+      queued = false;
+      var offset = el.getBoundingClientRect().top - sc.getBoundingClientRect().top + sc.scrollTop; // where the list starts in the scroller
+      var top = sc.scrollTop - offset, bottom = top + sc.clientHeight;
+      var next = [Math.max(0, Math.floor(top / rh) - over), Math.ceil(bottom / rh) + over];
+      requestMutation(function () { range[1](function (r) { return r[0] === next[0] && r[1] === next[1] ? r : next; }); });
+    }
+    function onScroll() { if (!queued) { queued = true; requestMeasure(measure); } }
+    sc.addEventListener('scroll', onScroll, { passive: true });
+    var ro = typeof ResizeObserver === 'function' ? new ResizeObserver(onScroll) : null;
+    if (ro) ro.observe(sc);
+    onScroll();
+    return function () { sc.removeEventListener('scroll', onScroll); if (ro) ro.disconnect(); };
+  }, [rh, over]);
+  var first = Math.min(range[0][0], n), last = Math.min(range[0][1], n);
+  var rows = [];
+  for (var i = first; i < last; i++) {
+    var key = props.getKey(items[i], i);
+    rows.push(h('div', { key: key, class: 'rl-wrow', style: { transform: 'translateY(' + i * rh + 'px)', height: rh } }, props.render(items[i], i)));
+  }
+  return h('div', { ref: host, class: cx('rl-wlist', props.class), role: props.role, style: { height: n * rh } }, rows);
+}
+
 function VirtualList(props) {
   var items = props.items || [], est = props.estimate || 64, over = props.overscan || 6;
   var host = useRef(null), heights = useRef({}), st = useState({ top: 0, height: 600 });
@@ -453,7 +488,7 @@ function SidebarHeader(props) {
     props.back
       ? h(IconButton, { icon: 'arrowLeft', label: 'Назад', onClick: props.onBack, class: 'rl-sidehead-back' })
       : h(IconButton, { icon: 'menu', label: 'Меню', onClick: props.onMenu }),
-    h(SearchField, { id: props.searchId || 'rl-side-search', placeholder: props.placeholder || 'Поиск', value: props.value, onInput: props.onSearch, class: 'rl-sidehead-search' }),
+    h(SearchField, { id: props.searchId || 'rl-side-search', placeholder: props.placeholder || 'Поиск', status: props.status, value: props.value, onInput: props.onSearch, class: 'rl-sidehead-search' }),
     props.trailing !== undefined ? props.trailing : props.me ? h('button', { type: 'button', class: 'rl-sidehead-me', 'aria-label': 'Профиль', onClick: props.onMe }, h(Avatar, { name: props.me, size: 36 })) : null);
 }
 
@@ -502,4 +537,4 @@ function GlassBar(props) {
   return h('header', { class: cx('rl-glassbar', props.class) }, props.children);
 }
 
-export { Wallpaper, nudgeWallpaper, buildPattern, DOODLES, PATTERN_SETS, FloatShell, SidebarCard, SidebarHeader, FolderTabs, Fab, GlassBar, Menu, ReactionPicker, AttachMenu, MentionList, DropOverlay, LinkPreview, PollBubble, UnreadDivider, SelectionBar, ChatSearchBar, Highlight, ContactPicker, CallRow, StatusAvatar, LoginQR, VirtualList, BottomNav, Tooltip, plural };
+export { Wallpaper, nudgeWallpaper, buildPattern, DOODLES, PATTERN_SETS, FloatShell, SidebarCard, SidebarHeader, FolderTabs, Fab, GlassBar, WindowList, Menu, ReactionPicker, AttachMenu, MentionList, DropOverlay, LinkPreview, PollBubble, UnreadDivider, SelectionBar, ChatSearchBar, Highlight, ContactPicker, CallRow, StatusAvatar, LoginQR, VirtualList, BottomNav, Tooltip, plural };

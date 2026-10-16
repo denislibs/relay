@@ -29,6 +29,9 @@ export class Engine {
   private netDown = typeof navigator !== 'undefined' && navigator.onLine === false;
   private ready = false;    // первый sync после подключения завершён
   private syncing = false;
+  /** Догоняем журнал после hello: данные копим и отдаём интерфейсу одной пачкой, чтобы список не ехал по частям. */
+  private holding = false;
+  private acting = 0;       // действия пользователя в работе: их результат показываем сразу, даже во время догонки
   private syncAgain = false;
   private syncWaiter: { resolve(f: SyncReply): void; reject(e: ReqError): void } | null = null;
   private reqSeq = 0;
@@ -120,7 +123,22 @@ export class Engine {
     });
   }
 
-  private changed(): void { this.schedule(); }
+  private changed(): void { this.pushStatus(); this.schedule(); }
+
+  /** Смена стадии уходит сразу, не дожидаясь кадра: иначе короткая «догонка» склеится и интерфейс её не покажет. */
+  private pushStatus(): void {
+    if (this.closed) return;
+    const sig = JSON.stringify(this.statusItem());
+    if (sig === this.statusSig) return;
+    this.statusSig = sig;
+    for (const w of this.watchers.values()) {
+      if (w.q.kind !== 'status' || w.force) continue;
+      const next = this.compute(w.q);
+      const patch = diffResults(w.prev, next);
+      w.prev = next;
+      if (patch) { try { w.cb(patch); } catch (err) { console.error('watch callback failed', err); } }
+    }
+  }
 
   /** Текущий статус (то же, что приходит в подписку status). */
   status(): Item { return this.statusItem(); }
@@ -150,13 +168,15 @@ export class Engine {
   }
 
   private emit(): void {
+    const hold = this.holding && this.acting === 0;
     const touched = new Set(this.store.touched);
-    this.store.touched.clear();
+    if (!hold) this.store.touched.clear(); // при удержании изменения копятся до конца догонки
     const sig = JSON.stringify(this.statusItem());
     const statusChanged = sig !== this.statusSig;
     this.statusSig = sig;
     for (const w of this.watchers.values()) {
       if (!w.force && !affects(w.q, touched) && !(w.q.kind === 'status' && statusChanged)) continue;
+      if (hold && !w.force && w.q.kind !== 'status') continue;
       w.force = false;
       const next = this.compute(w.q);
       const patch = diffResults(w.prev, next);
@@ -172,6 +192,11 @@ export class Engine {
   // =====================================================================
 
   async call(a: Action): Promise<unknown> {
+    this.acting++;
+    try { return await this.act(a); } finally { this.acting--; }
+  }
+
+  private async act(a: Action): Promise<unknown> {
     switch (a.type) {
       case 'sendMessage': {
         const clientId = crypto.randomUUID();
@@ -225,6 +250,7 @@ export class Engine {
 
   private onClose(): void {
     this.online = false;
+    this.holding = false;
     if (this.wantOnline) this.failures++;
     this.ready = false;
     this.changed();
@@ -238,7 +264,9 @@ export class Engine {
   private onFrame(f: ServerFrame): void {
     switch (f.op) {
       case 'hello':
-        if (this.store.lastSeq === 0) this.run(() => this.bootstrap(f.seq));
+        // снимок — только когда кэш пуст; lastSeq = 0 бывает и у заполненного кэша (журнал пользователя ещё пуст)
+        this.holding = true;
+        if (!this.store.hydrated) this.run(() => this.bootstrap(f.seq));
         else this.runSync();
         return;
       case 'updates':
@@ -323,6 +351,7 @@ export class Engine {
     }
     if (this.online) {
       this.ready = true;
+      this.holding = false;   // всё накопленное уйдёт одним патчем
       this.changed();
       this.pumpOutbox();
       this.flushReads();

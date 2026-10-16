@@ -72,3 +72,26 @@ test('status phase turns offline once connection attempts keep failing', async (
   ea.connect();
   await st.until((l) => l[0]?.phase === 'offline' && l[0].online === false);
 });
+
+test('catch-up after reconnect reaches the UI as one batch, not page by page', async () => {
+  const a = await srv.login('a'), b = await srv.login('b');
+  const chats = [];
+  for (let i = 0; i < 3; i++) chats.push(await srv.chat(a.token, [a.userId, b.userId]));
+  const ea = await open({ ...srv.config(a), frameMs: 1 });   // кадр 1 мс: без удержания каждая страница ушла бы отдельно
+  ea.connect();
+  const list = watchInto(ea, { kind: 'chatList', limit: 50 });
+  await list.until((l) => l.length === 3);
+  await ea.whenIdle();
+  ea.disconnect();
+  for (let i = 0; i < 300; i++) await sendMessage(b.userId, { chatId: chats[i % 3], clientId: crypto.randomUUID(), body: 'm' + i });
+  process.env.RELAY_SYNC_BATCH = '20';               // 15 страниц журнала
+  const before = list.patches.length;
+  const st = watchInto(ea, { kind: 'status' });
+  await st.until((l) => l[0]?.phase === 'offline');
+  ea.connect();
+  await list.until((l) => l.reduce((s, c) => s + (c.unread as number), 0) === 300, 8000).finally(() => { delete process.env.RELAY_SYNC_BATCH; });
+  await Bun.sleep(50);
+  expect(list.patches.length - before).toBe(1);
+  const phases = st.patches.flatMap((p) => (p.op === 'snapshot' ? p.items : p.upsert)).map((i) => i.phase);
+  expect(phases).toEqual(expect.arrayContaining(['offline', 'updating', 'ready']));   // стадия догонки видна, даже если она короче кадра
+}, 30000);

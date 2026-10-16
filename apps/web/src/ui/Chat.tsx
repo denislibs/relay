@@ -4,7 +4,6 @@ import { loadOlder, openChat, send } from '../data';
 import { useGlobal } from '../global';
 import { clock, dayKey, dayLabel } from './format';
 import { useReadTracker } from './readTracker';
-import { PHASE_LABEL } from './Sidebar';
 
 let closedAt = -Infinity; // когда закрылась прежняя лента: близко по времени — значит, переключение между чатами
 
@@ -56,7 +55,8 @@ export function Chat({ chatId }: { chatId: number }) {
 
   const title = (chat?.title as string) || 'Чат №' + chatId;
   const sync = status.phase === 'offline' ? 'offline' : status.phase !== 'ready' || status.outbox ? 'syncing' : 'synced';
-  const syncLabel = status.phase !== 'ready' && status.phase !== 'offline' ? PHASE_LABEL[status.phase] : status.outbox ? 'Отправка…' : undefined;
+  const phaseLabel = useGlobal((s) => s.syncLabel);
+  const syncLabel = phaseLabel ?? (status.outbox ? 'Отправка…' : undefined);
   const byId = new Map(messages.filter((m) => m.id != null).map((m) => [m.id as number, m]));
   const replyTo = replyKey ? messages.find((m) => m.key === replyKey) : undefined;
   const authorOf = (senderId: unknown) => (senderId === me.userId ? 'Вы' : title);
