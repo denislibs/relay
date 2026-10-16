@@ -979,3 +979,18 @@ button.rl-quote { cursor: pointer; }
 .rl-settings .rl-inforow { border-radius: var(--radius-md); }
 .rl-settings .rl-profile { padding-top: var(--space-2); }
 .rl-check-mark { color: var(--brand-text); display: inline-flex; }
+
+/* paged sidebar body: pages (SlideStack) scroll on their own */
+.rl-sidecard-paged { display: flex; overflow: hidden; padding: 0; }
+.rl-sidecard-paged .rl-slide { background: transparent; }
+.rl-page-scroll { flex: 1; min-height: 0; overflow-y: auto; padding: 0 var(--space-2) 88px; overscroll-behavior: contain; scrollbar-width: thin; scrollbar-color: var(--line) transparent; }
+/* tabs variant: folders swap sideways at full width, no dimming (deeper = to the right) */
+.rl-slides-tabs .rl-slide-in-push { animation-name: rl-tab-from-right; box-shadow: none; }
+.rl-slides-tabs .rl-slide-out-push { animation-name: rl-tab-to-left; }
+.rl-slides-tabs .rl-slide-in-pop { animation-name: rl-tab-from-left; }
+.rl-slides-tabs .rl-slide-out-pop { animation-name: rl-tab-to-right; box-shadow: none; }
+.rl-slides-tabs .rl-slide-in-push, .rl-slides-tabs .rl-slide-out-push, .rl-slides-tabs .rl-slide-in-pop, .rl-slides-tabs .rl-slide-out-pop { animation-duration: 250ms; }
+@keyframes rl-tab-from-right { from { transform: translateX(100%); } to { transform: none; } }
+@keyframes rl-tab-to-left { from { transform: none; } to { transform: translateX(-100%); } }
+@keyframes rl-tab-from-left { from { transform: translateX(-100%); } to { transform: none; } }
+@keyframes rl-tab-to-right { from { transform: none; } to { transform: translateX(100%); } }

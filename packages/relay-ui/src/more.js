@@ -299,7 +299,7 @@ function SlideStack(props) {
     return function () { clearTimeout(t); end(); };
   }, [active]);
   var root = order[0];
-  return h('div', { class: 'rl-slides' }, order.map(function (key) {
+  return h('div', { class: cx('rl-slides', props.variant === 'tabs' && 'rl-slides-tabs') }, order.map(function (key) {
     var isActive = key === active, leaving = anim && anim.from === key;
     if (!isActive && !leaving && key !== root) return null;
     var cls = 'rl-slide';
@@ -500,7 +500,8 @@ function FloatShell(props) {
 function SidebarCard(props) {
   var fab = useState(true), last = useRef(0), pending = useRef(false);
   function onScroll(e) {
-    var el = e.currentTarget;
+    var el = e.target; // the scroller that moved (body itself or a page inside it)
+    if (!el || el.scrollTop === undefined) return;
     if (pending.current) return;
     pending.current = true;
     requestMeasure(function () {
@@ -517,7 +518,8 @@ function SidebarCard(props) {
     props.header || null,
     props.tabs || null,
     props.banner || null,
-    h('div', { class: 'rl-sidecard-body', onScroll: onScroll }, props.children),
+    // capture: scroll doesn't bubble, and with paged content (props.paged) each page scrolls on its own
+    h('div', { class: cx('rl-sidecard-body', props.paged && 'rl-sidecard-paged'), onScrollCapture: onScroll }, props.children),
     props.fab ? h('div', { class: cx('rl-fab-slot', !fab[0] && 'rl-fab-hidden') }, props.fab) : null);
 }
 
