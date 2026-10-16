@@ -24,6 +24,9 @@ export class Engine {
   private readTimer: ReturnType<typeof setTimeout> | null = null;
 
   private online = false;   // сокет открыт
+  private wantOnline = false; // connect() вызван, ждём сокет
+  private failures = 0;     // неудачных попыток подряд с последнего открытия
+  private netDown = typeof navigator !== 'undefined' && navigator.onLine === false;
   private ready = false;    // первый sync после подключения завершён
   private syncing = false;
   private syncAgain = false;
@@ -52,8 +55,34 @@ export class Engine {
     return new Engine(cfg, store, db);
   }
 
-  connect(): void { if (!this.closed) this.transport.start(); }
-  disconnect(): void { this.transport.stop(); }
+  connect(): void {
+    if (this.closed) return;
+    this.wantOnline = true;
+    this.watchNetwork();
+    this.transport.start();
+  }
+  disconnect(): void { this.wantOnline = false; this.transport.stop(); this.changed(); }
+
+  /** События сети воркера/окна: «нет сети» показываем сразу, а при возврате сети подключаемся без ожидания паузы. */
+  private watchNetwork(): void {
+    const g = globalThis as { addEventListener?: (t: string, cb: () => void) => void };
+    if (typeof g.addEventListener !== 'function' || this.netWatched) return;
+    this.netWatched = true;
+    g.addEventListener('offline', () => { this.netDown = true; this.changed(); });
+    g.addEventListener('online', () => { this.netDown = false; this.changed(); this.transport.retryNow(); });
+  }
+  private netWatched = false;
+
+  /**
+   * Стадия для интерфейса:
+   * connecting — пытаемся подключиться; offline — сети нет или попытки не удаются;
+   * loading — подключились, а кэш пуст (первый снимок); updating — догоняем журнал; ready — всё сошлось.
+   */
+  private phase(): 'connecting' | 'offline' | 'loading' | 'updating' | 'ready' {
+    if (!this.online) return this.wantOnline && !this.netDown && this.failures < 2 ? 'connecting' : 'offline';
+    if (this.ready) return 'ready';
+    return this.store.hydrated ? 'updating' : 'loading';
+  }
 
   async close(): Promise<void> {
     this.closed = true;
@@ -93,9 +122,14 @@ export class Engine {
 
   private changed(): void { this.schedule(); }
 
+  /** Текущий статус (то же, что приходит в подписку status). */
+  status(): Item { return this.statusItem(); }
+
   private statusItem(): Item {
     return {
       key: 'status',
+      phase: this.phase(),
+      hydrated: this.store.hydrated,   // в кэше есть данные с сервера
       online: this.online,
       synced: this.ready,
       syncing: this.syncing,
@@ -182,6 +216,8 @@ export class Engine {
 
   private onOpen(): void {
     this.online = true;
+    this.failures = 0;
+    this.netDown = false;
     this.ready = false;
     this.changed();
     this.transport.send({ op: 'hello', lastSeq: this.store.lastSeq });
@@ -189,6 +225,7 @@ export class Engine {
 
   private onClose(): void {
     this.online = false;
+    if (this.wantOnline) this.failures++;
     this.ready = false;
     this.changed();
     const offline: ReqError = { code: 'offline', retry: true };

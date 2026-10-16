@@ -27,5 +27,8 @@ ${themed('dark')}
   color-scheme: dark;
 }
 `;
-await Bun.write(join(import.meta.dir, 'tokens.css'), css);
+// пишем только при изменении: сборщик клиента следит за этой папкой, лишняя запись = бесконечная пересборка
+const out = join(import.meta.dir, 'tokens.css');
+const file = Bun.file(out);
+if (!(await file.exists()) || (await file.text()) !== css) await Bun.write(out, css);
 console.log('tokens.css written');

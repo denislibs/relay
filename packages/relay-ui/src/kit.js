@@ -203,6 +203,7 @@ function SearchField(props) {
 /* ---------- MessageStatus ---------- */
 function MessageStatus(props) {
   var s = props.status || 'sent';
+  var first = useRef(s); // рисуем галочки только при смене статуса, не при появлении на экране
   var size = props.size || 16;
   if (s === 'pending') {
     return h('span', { class: 'rl-status rl-status-clock', role: 'img', 'aria-label': 'в очереди' },
@@ -214,7 +215,7 @@ function MessageStatus(props) {
   }
   var two = s === 'delivered' || s === 'read';
   var label = s === 'read' ? 'прочитано' : two ? 'доставлено' : 'отправлено';
-  return h('span', { key: s, class: cx('rl-status', s === 'read' && 'rl-status-read'), role: 'img', 'aria-label': label },
+  return h('span', { key: s, class: cx('rl-status', s === 'read' && 'rl-status-read', s !== first.current && 'rl-status-anim'), role: 'img', 'aria-label': label },
     h('svg', { width: two ? size : size - 2, height: Math.round(size * 0.75), viewBox: two ? '0 0 18 12' : '0 0 16 12', fill: 'none', stroke: 'currentColor', 'stroke-width': 1.8, 'stroke-linecap': 'round', 'stroke-linejoin': 'round' },
       two
         ? [h('path', { key: 1, class: 'rl-draw', d: 'M1 6.5l3.2 3.2L11 2.5' }), h('path', { key: 2, class: 'rl-draw', d: 'M7.5 9.2l.5.5L15 2.5' })]
@@ -732,28 +733,52 @@ function Presence(props) {
   return h('div', { class: 'rl-presence', 'data-state': props.show ? 'open' : 'closing' }, props.children);
 }
 
+/* ---------- useMinVisible: loaders that never flicker ----------
+   Turns on only if `want` lasts longer than `delay` (fast loads show nothing),
+   and once on stays at least `min` ms so it can fade out instead of blinking. */
+function useMinVisible(want, opts) {
+  var delay = opts && opts.delay != null ? opts.delay : 150;
+  var min = opts && opts.min != null ? opts.min : 600;
+  var st = useState(false), on = st[0];
+  var since = useRef(0), latest = useRef(want);
+  latest.current = want; // таймер может сработать между рендером и эффектом — смотрим на свежее значение
+  useEffect(function () {
+    var t;
+    if (want && !on) t = setTimeout(function () { if (!latest.current) return; since.current = performance.now(); st[1](true); }, delay);
+    else if (!want && on) t = setTimeout(function () { st[1](false); }, Math.max(0, min - (performance.now() - since.current)));
+    return function () { clearTimeout(t); };
+  }, [want, on]);
+  return on;
+}
+
 /* ---------- FlipList: reorders animate (FLIP), new items fade in ---------- */
 function FlipList(props) {
   var ref = useRef(null), prev = useRef(null);
   useLayoutEffect(function () {
     var el = ref.current;
     if (!el) return;
+    // positions inside the list (offsetTop), not in the viewport: scrolling must not count as a move
     var kids = el.children, next = {}, i, k;
-    for (i = 0; i < kids.length; i++) { k = kids[i].getAttribute('data-flip'); next[k] = kids[i].getBoundingClientRect().top; } // measure everything first
+    for (i = 0; i < kids.length; i++) { k = kids[i].getAttribute('data-flip'); next[k] = kids[i].offsetTop; } // measure everything first
     if (prev.current && !reducedMotion()) {
-      var moved = false;
-      for (i = 0; i < kids.length; i++) { k = kids[i].getAttribute('data-flip'); if (prev.current[k] === undefined || Math.abs(prev.current[k] - next[k]) > 1) moved = true; }
-      if (moved) beginHeavyAnimation(320);
-      for (i = 0; i < kids.length; i++) { // then mutate
+      var base = el.getBoundingClientRect().top, vh = window.innerHeight;
+      var seen = function (y) { return base + y > -120 && base + y < vh + 120; }; // only rows the user can see
+      var moved = false, todo = [];
+      for (i = 0; i < kids.length; i++) {
         k = kids[i].getAttribute('data-flip');
         var was = prev.current[k];
-        if (was === undefined) kids[i].animate([{ opacity: 0, transform: 'scale(0.96)' }, { opacity: 1, transform: 'none' }], { duration: 220, easing: 'cubic-bezier(0.1, 0.82, 0.25, 1)' });
-        else if (Math.abs(was - next[k]) > 1) kids[i].animate([{ transform: 'translateY(' + (was - next[k]) + 'px)' }, { transform: 'none' }], { duration: 320, easing: 'cubic-bezier(0.2, 0, 0, 1)' });
+        if (was === undefined) { if (seen(next[k])) todo.push([kids[i], null]); }
+        else if (Math.abs(was - next[k]) > 1 && (seen(was) || seen(next[k]))) { moved = true; todo.push([kids[i], was - next[k]]); }
+      }
+      if (moved) beginHeavyAnimation(320);
+      for (i = 0; i < todo.length; i++) { // then mutate
+        if (todo[i][1] === null) todo[i][0].animate([{ opacity: 0, transform: 'scale(0.96)' }, { opacity: 1, transform: 'none' }], { duration: 220, easing: 'cubic-bezier(0.1, 0.82, 0.25, 1)' });
+        else todo[i][0].animate([{ transform: 'translateY(' + todo[i][1] + 'px)' }, { transform: 'none' }], { duration: 320, easing: 'cubic-bezier(0.2, 0, 0, 1)' });
       }
     }
     prev.current = next;
   });
-  return h('div', { ref: ref, class: (props.className || props.class), style: props.style, role: props.role },
+  return h('div', { ref: ref, class: (props.className || props.class), style: Object.assign({ position: 'relative' }, props.style), role: props.role },
     toChildArray(props.children).map(function (ch) { return ch ? h('div', { key: ch.key, 'data-flip': ch.key, class: 'rl-flip-item' }, ch) : null; }));
 }
 
@@ -761,12 +786,13 @@ function FlipList(props) {
 var SYNC_LABEL = { synced: 'Синхронизировано', syncing: 'Синхронизация…', offline: 'Нет сети', error: 'Ошибка синхронизации' };
 function SyncIndicator(props) {
   var s = props.state || 'synced';
+  var first = useRef(s);
   var inner =
     s === 'syncing' ? h('g', { key: 'sy', class: 'rl-sync-spin' }, h('path', { d: 'M9.2 13.2a3 3 0 0 1 5.3-1.4' }), h('path', { d: 'M14.8 14.8a3 3 0 0 1-5.3 1.4' }), h('path', { d: 'M14.6 10.6v1.4h-1.4' }), h('path', { d: 'M9.4 17.4V16h1.4' }))
     : s === 'synced' ? h('path', { key: 'ok', class: 'rl-sync-draw', d: 'M9.3 14.3l1.9 1.9 3.7-3.9' })
     : s === 'error' ? h('g', { key: 'er', class: 'rl-sync-pop' }, h('path', { d: 'M12 11.5v2.6' }), h('path', { d: 'M12 16.4h.01' }))
     : h('path', { key: 'off', class: 'rl-sync-draw', d: 'M4 4l16 16' });
-  return h('span', { class: 'rl-sync rl-sync-' + s, role: 'status', 'aria-live': 'polite' },
+  return h('span', { class: cx('rl-sync rl-sync-' + s, s === first.current && 'rl-sync-steady'), role: 'status', 'aria-live': 'polite' },
     h('svg', { width: 22, height: 22, viewBox: '0 0 24 24', fill: 'none', stroke: 'currentColor', 'stroke-width': 1.8, 'stroke-linecap': 'round', 'stroke-linejoin': 'round', 'aria-hidden': 'true' },
       h('path', { class: 'rl-sync-cloud', d: ICONS.cloud[0] }), inner),
     props.label === false ? null : h('span', { key: s, class: 'rl-sync-label' }, props.label || SYNC_LABEL[s]));
@@ -813,4 +839,4 @@ function ScrollToBottom(props) {
 }
 
 
-export { ArchivedRow, ReplyQuote, ReactionChips, cx, chain, ripple, reducedMotion, omit, fmtTime, makeWave, ICONS, Icon, Button, IconButton, Avatar, Badge, Chip, SearchField, ChatRow, ChatRowSkeleton, Bubble, MessageStatus, TypingIndicator, DateDivider, Composer, Banner, Modal, NavRail, Checkbox, Toast, Card, Steps, MediaArt, ProgressRing, Waveform, VoiceMessage, VoiceRecorder, MediaBubble, FileBubble, MediaThumb, MediaViewer, Switch, PanelHeader, ProfileHeader, ActionTile, InfoRow, ReadMore, Presence, FlipList, SyncIndicator, LinearProgress, EmptyState, ScrollToBottom };
+export { ArchivedRow, ReplyQuote, ReactionChips, cx, chain, ripple, reducedMotion, omit, fmtTime, makeWave, ICONS, Icon, Button, IconButton, Avatar, Badge, Chip, SearchField, ChatRow, ChatRowSkeleton, Bubble, MessageStatus, TypingIndicator, DateDivider, Composer, Banner, Modal, NavRail, Checkbox, Toast, Card, Steps, MediaArt, ProgressRing, Waveform, VoiceMessage, VoiceRecorder, MediaBubble, FileBubble, MediaThumb, MediaViewer, Switch, PanelHeader, ProfileHeader, ActionTile, InfoRow, ReadMore, Presence, useMinVisible, FlipList, SyncIndicator, LinearProgress, EmptyState, ScrollToBottom };

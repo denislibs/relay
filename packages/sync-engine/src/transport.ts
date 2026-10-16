@@ -33,6 +33,15 @@ export class WsTransport {
     }
   }
 
+  /** Сеть вернулась: не ждём конца паузы перед следующей попыткой. */
+  retryNow(): void {
+    if (!this.wanted || this.ws || !this.timer) return;
+    clearTimeout(this.timer);
+    this.timer = null;
+    this.attempt = 0;
+    this.open();
+  }
+
   isOpen(): boolean {
     return this.ws?.readyState === WebSocket.OPEN;
   }

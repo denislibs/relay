@@ -1,11 +1,17 @@
 import { Avatar, Bubble, Composer, DateDivider, GlassBar, IconButton, Menu, ScrollToBottom, SyncIndicator, requestMeasure, requestMutation } from '@relay/ui';
-import { useLayoutEffect, useRef, useState } from 'preact/hooks';
+import { useEffect, useLayoutEffect, useRef, useState } from 'preact/hooks';
 import { loadOlder, openChat, send } from '../data';
 import { useGlobal } from '../global';
 import { clock, dayKey, dayLabel } from './format';
 import { useReadTracker } from './readTracker';
+import { PHASE_LABEL } from './Sidebar';
+
+let closedAt = -Infinity; // когда закрылась прежняя лента: близко по времени — значит, переключение между чатами
 
 export function Chat({ chatId }: { chatId: number }) {
+  // при переключении чатов шапка остаётся на месте — въезжает только при первом открытии
+  const switching = useRef(performance.now() - closedAt < 200).current;
+  useEffect(() => () => { closedAt = performance.now(); }, []);
   const me = useGlobal((s) => s.me)!;
   const chat = useGlobal((s) => s.chats.find((c) => c.id === chatId));
   const messages = useGlobal((s) => s.messages);
@@ -49,7 +55,8 @@ export function Chat({ chatId }: { chatId: number }) {
   }
 
   const title = (chat?.title as string) || 'Чат №' + chatId;
-  const sync = !status.online ? 'offline' : !status.synced || status.outbox ? 'syncing' : 'synced';
+  const sync = status.phase === 'offline' ? 'offline' : status.phase !== 'ready' || status.outbox ? 'syncing' : 'synced';
+  const syncLabel = status.phase !== 'ready' && status.phase !== 'offline' ? PHASE_LABEL[status.phase] : status.outbox ? 'Отправка…' : undefined;
   const byId = new Map(messages.filter((m) => m.id != null).map((m) => [m.id as number, m]));
   const replyTo = replyKey ? messages.find((m) => m.key === replyKey) : undefined;
   const authorOf = (senderId: unknown) => (senderId === me.userId ? 'Вы' : title);
@@ -58,14 +65,14 @@ export function Chat({ chatId }: { chatId: number }) {
 
   return (
     <>
-      <GlassBar>
+      <GlassBar class={switching ? 'app-steady' : undefined}>
         <IconButton class="app-back" icon="arrowLeft" label="К списку чатов" onClick={() => openChat(null)} />
         <Avatar name={title} size={40} />
         <div class="rl-glassbar-title">
           <b>{title}</b>
           <span>{chat?.kind === 'group' ? 'Группа' : 'Личный чат'}</span>
         </div>
-        <SyncIndicator state={sync} />
+        <SyncIndicator state={sync} label={syncLabel} />
         <IconButton icon="search" label="Поиск по чату" />
         <IconButton icon="more" label="Ещё" />
       </GlassBar>

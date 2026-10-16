@@ -47,3 +47,28 @@ test('snapshot brings the peer read pointer, so my old messages show as read', a
   const list = watchInto(ea, { kind: 'chatList', limit: 50 });
   await list.until((l) => (l[0]?.last as { status: string } | null)?.status === 'read');
 });
+
+test('status phase: connecting right after connect, ready when synced; the cache stays hydrated across restarts', async () => {
+  const a = await srv.login('a'), b = await srv.login('b');
+  await srv.chat(a.token, [a.userId, b.userId]);
+  const cfg = srv.config(a);
+  const ea = await open(cfg);
+  expect(ea.status()).toMatchObject({ phase: 'offline', hydrated: false }); // подключаться ещё не просили
+  ea.connect();
+  expect(ea.status().phase).toBe('connecting');
+  const st = watchInto(ea, { kind: 'status' });
+  await st.until((l) => l[0]?.phase === 'ready' && l[0].hydrated === true);
+  await ea.close();
+  const again = await open(cfg);                  // перезагрузка страницы: тот же IndexedDB
+  expect(again.status()).toMatchObject({ phase: 'offline', hydrated: true });
+  again.connect();
+  await watchInto(again, { kind: 'status' }).until((l) => l[0]?.phase === 'ready');
+});
+
+test('status phase turns offline once connection attempts keep failing', async () => {
+  const a = await srv.login('a');
+  const ea = await open({ ...srv.config(a), wsUrl: 'ws://127.0.0.1:1/ws', backoffMs: [10, 20] });
+  const st = watchInto(ea, { kind: 'status' });
+  ea.connect();
+  await st.until((l) => l[0]?.phase === 'offline' && l[0].online === false);
+});

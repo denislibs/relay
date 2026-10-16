@@ -34,8 +34,8 @@ async function build(): Promise<void> {
   await cp(join(root, 'public'), tmp, { recursive: true });
   await cp(join(ui, 'relay.css'), join(tmp, 'relay.css'));
   await cp(join(ui, 'tokens.css'), join(tmp, 'tokens.css'));
-  await rm(dist, { recursive: true, force: true });
-  await cp(tmp, dist, { recursive: true });
+  // поверх старой сборки, без удаления папки: сервер ни на миг не остаётся без index.html
+  await cp(tmp, dist, { recursive: true, force: true });
   await rm(tmp, { recursive: true, force: true });
   console.log(`web built ${BUILD}`);
 }
@@ -43,6 +43,9 @@ async function build(): Promise<void> {
 await build();
 if (isWatch) {
   let t: ReturnType<typeof setTimeout> | undefined;
-  const again = () => { clearTimeout(t); t = setTimeout(() => build().catch(console.error), 150); };
+  const again = (_e: string, file: string | null) => {
+    if (file && /(^|\/)tokens\.css$/.test(file)) return; // результат build-tokens, а не исходник
+    clearTimeout(t); t = setTimeout(() => build().catch(console.error), 150);
+  };
   for (const dir of [join(root, 'src'), join(root, 'public'), join(ui), join(root, '..', '..', 'packages', 'sync-engine', 'src')]) fsWatch(dir, { recursive: true }, again);
 }

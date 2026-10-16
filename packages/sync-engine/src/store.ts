@@ -24,6 +24,8 @@ export class Store {
   outbox = new Map<string, OutboxEntry>();
   pendingReads = new Map<number, number>();
   lastSeq = 0;
+  /** снимок с сервера уже лежит в кэше (иначе показывать нечего — идёт первая загрузка) */
+  hydrated = false;
   /** чаты, изменившиеся с последнего прохода подписок */
   touched = new Set<number>();
 
@@ -46,6 +48,7 @@ export class Store {
     for (const r of await getAll<{ chatId: number; upToId: number }>(db, 'pendingReads')) s.pendingReads.set(r.chatId, r.upToId);
     const meta = await getAll<{ k: string; v: number }>(db, 'meta');
     s.lastSeq = s.seqAtFlush = meta.find((m) => m.k === 'lastSeq')?.v ?? 0;
+    s.hydrated = !!meta.find((m) => m.k === 'hydrated')?.v;
     // чаты с неотправленным — сразу в память, чтобы черновики были видны
     for (const chatId of new Set(outbox.map((o) => o.chatId))) await s.loadChatMessages(chatId);
     return s;
@@ -89,6 +92,7 @@ export class Store {
 
   /** Снимок списка чатов (первый вход или tooLong). */
   applySnapshot(list: ChatSummary[]): void {
+    if (!this.hydrated) { this.hydrated = true; this.dirtyMeta = true; }
     const keep = new Set(list.map((c) => c.id));
     for (const c of this.outbox.values()) keep.add(c.chatId);
     for (const id of [...this.chats.keys()]) if (!keep.has(id)) { this.chats.delete(id); this.messages.delete(id); this.loaded.delete(id); this.touch(id); }
@@ -246,7 +250,7 @@ export class Store {
     batch.del.outbox = [...this.dirtyOutbox].filter((k) => !this.outbox.has(k));
     batch.put.pendingReads = [...this.dirtyReads].filter((c) => this.pendingReads.has(c)).map((c) => ({ chatId: c, upToId: this.pendingReads.get(c) }));
     batch.del.pendingReads = [...this.dirtyReads].filter((c) => !this.pendingReads.has(c));
-    if (this.dirtyMeta || this.lastSeq !== this.seqAtFlush) batch.put.meta = [{ k: 'lastSeq', v: this.lastSeq }];
+    if (this.dirtyMeta || this.lastSeq !== this.seqAtFlush) batch.put.meta = [{ k: 'lastSeq', v: this.lastSeq }, { k: 'hydrated', v: this.hydrated ? 1 : 0 }];
     this.dirtyChats.clear(); this.dirtyMessages.clear(); this.dirtyOutbox.clear(); this.dirtyReads.clear(); this.dirtyMeta = false;
     const seq = this.lastSeq;
     await write(this.db, batch);

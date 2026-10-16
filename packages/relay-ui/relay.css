@@ -5,6 +5,8 @@ body { margin: 0; font-family: var(--font-sans); color: var(--ink); background: 
 .rl, .rl *, .rl *::before, .rl *::after { box-sizing: border-box; }
 .rl-sr { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
 .rl :focus-visible { outline: 2px solid var(--brand-text); outline-offset: 2px; }
+/* text fields always match :focus-visible; their container (pill, field) shows focus instead of a square ring */
+.rl :is(input:not([type="checkbox"]):not([type="radio"]):not([type="range"]), textarea, [contenteditable]):focus-visible, .rl [tabindex="-1"]:focus { outline: none; }
 
 /* ---------- Icon ---------- */
 .rl-icon { display: inline-block; flex-shrink: 0; vertical-align: middle; }
@@ -92,8 +94,8 @@ body { margin: 0; font-family: var(--font-sans); color: var(--ink); background: 
 .rl-status { display: inline-flex; color: var(--bubble-meta); }
 .rl-status-read { color: var(--tick-read); }
 .rl-status-failed { color: var(--danger); }
-.rl-status path.rl-draw { stroke-dasharray: 20; stroke-dashoffset: 0; animation: rl-draw var(--dur-fast) var(--ease-out) both; }
-.rl-status path.rl-draw + path.rl-draw { animation-delay: 60ms; }
+.rl-status-anim path.rl-draw { stroke-dasharray: 20; stroke-dashoffset: 0; animation: rl-draw var(--dur-fast) var(--ease-out) both; }
+.rl-status-anim path.rl-draw + path.rl-draw { animation-delay: 60ms; }
 .rl-status-clock .rl-hand { transform-origin: 12px 12px; animation: rl-spin 1.6s linear infinite; }
 
 /* ---------- Typing ---------- */
@@ -450,6 +452,8 @@ body { margin: 0; font-family: var(--font-sans); color: var(--ink); background: 
 .rl-sync-pop { transform-origin: 12px 14px; transform-box: view-box; animation: rl-pop var(--dur-base) var(--ease-out); }
 .rl-sync-syncing .rl-sync-cloud { animation: rl-cloud 1.6s ease-in-out infinite; }
 .rl-sync-label { animation: rl-label-in var(--dur-base) var(--ease-out); white-space: nowrap; }
+/* то же состояние, что при монтировании (например, при смене чата): без анимаций прорисовки */
+.rl-sync-steady .rl-sync-label, .rl-sync-steady .rl-sync-draw, .rl-sync-steady .rl-sync-pop { animation: none; stroke-dashoffset: 0; }
 @keyframes rl-draw-30 { to { stroke-dashoffset: 0; } }
 @keyframes rl-cloud { 0%, 100% { opacity: 1; } 50% { opacity: 0.55; } }
 @keyframes rl-label-in { from { opacity: 0; transform: translateY(4px); } to { opacity: 1; transform: none; } }
@@ -914,3 +918,8 @@ button.rl-quote { cursor: pointer; }
 .rl-shell .rl-msgline { padding: 0 10px; }
 .rl-shell .rl-scrolldown-slot { position: absolute; z-index: 3; bottom: 76px; right: max(16px, calc((100% - var(--chat-max)) / 2 - 64px)); }
 .rl-shell .rl-bubble { max-width: min(85%, 580px); }
+
+/* under the wallpaper canvas while it fades in: a static gradient in the same colours, so the first paint already matches */
+.rl-shell-tw { background: linear-gradient(135deg, var(--wallpaper-1), var(--wallpaper-4) 45%, var(--wallpaper-2) 70%, var(--wallpaper-3)); }
+@media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) .rl-shell-tw { background: var(--wallpaper-pattern); } }
+:root[data-theme="dark"] .rl-shell-tw { background: var(--wallpaper-pattern); }

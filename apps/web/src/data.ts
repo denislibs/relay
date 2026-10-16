@@ -25,7 +25,12 @@ export function startData(me: Me): void {
   engine.onReload(() => location.reload());
 
   const chats = new Mirror();
-  engine.watch({ kind: 'chatList', limit: 1000 }, (p) => { chats.apply(p); deferDuringAnimation(() => setGlobal({ chats: chats.list() })); });
+  engine.watch({ kind: 'chatList', limit: 1000 }, (p) => {
+    chats.apply(p);
+    const apply = () => setGlobal({ chats: chats.list(), chatsLoaded: true });
+    // пустой список беречь нечего — первые данные показываем сразу, остальное после тяжёлых анимаций
+    if (!getGlobal().chats.length) apply(); else deferDuringAnimation(apply);
+  });
   const counters = new Mirror();
   engine.watch({ kind: 'counters' }, (p) => { counters.apply(p); const c = counters.list()[0]; if (c) setGlobal({ counters: { unreadChats: c.unreadChats as number, unreadMessages: c.unreadMessages as number } }); });
   const status = new Mirror();

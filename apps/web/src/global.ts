@@ -4,13 +4,15 @@ import { requestMutation } from '@relay/ui';
 import type { Item } from '@relay/sync-engine/src/types';
 
 export interface Me { userId: number; name: string }
-export interface Status { online: boolean; synced: boolean; syncing: boolean; outbox: number; failed: number }
+export type Phase = 'connecting' | 'offline' | 'loading' | 'updating' | 'ready';
+export interface Status { phase: Phase; hydrated: boolean; online: boolean; synced: boolean; syncing: boolean; outbox: number; failed: number }
 
 /** Один объект: зеркало видимых данных из воркера + состояние интерфейса этой вкладки. */
 export interface GlobalState {
   boot: 'loading' | 'login' | 'app';
   me: Me | null;
   chats: Item[];
+  chatsLoaded: boolean;   // первый снимок списка из воркера уже пришёл
   counters: { unreadChats: number; unreadMessages: number };
   status: Status;
   openChatId: number | null;
@@ -24,8 +26,9 @@ let state: GlobalState = {
   boot: 'loading',
   me: null,
   chats: [],
+  chatsLoaded: false,
   counters: { unreadChats: 0, unreadMessages: 0 },
-  status: { online: false, synced: false, syncing: false, outbox: 0, failed: 0 },
+  status: { phase: 'connecting', hydrated: false, online: false, synced: false, syncing: false, outbox: 0, failed: 0 },
   openChatId: null,
   messages: [],
   folder: 'all',

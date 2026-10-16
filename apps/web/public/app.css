@@ -18,5 +18,15 @@ body { background: var(--bg); color: var(--ink); font-family: var(--font-sans); 
   .app-chat-open .rl-shell-side + .rl-shell-main { display: flex; }
   .app-back { display: inline-flex; }
 }
-.app-field:focus-visible { outline: none; }
 .rl-feed { overflow-anchor: none; } /* якорь прокрутки держим сами (requestMeasure → requestMutation) */
+@keyframes app-fade { from { opacity: 0; } to { opacity: 1; } }
+/* скелетон ↔ список: скелетон всплывает построчно, уходит поверх появляющегося списка (crossfade) */
+.app-listwrap { position: relative; }
+.app-skel > div { animation: app-rise 320ms var(--ease-out) both; animation-delay: calc(var(--i) * 35ms); }
+.app-listwrap > .rl-presence[data-state="closing"] { position: absolute; inset: 0 0 auto 0; z-index: 1; pointer-events: none; }
+.app-listwrap > .rl-presence[data-state="closing"] .app-skel { animation: app-fade-out 280ms var(--ease-in) both; }
+.app-listwrap > :not(.rl-presence) { animation: app-fade 320ms var(--ease-out) both; }
+@keyframes app-rise { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: none; } }
+@keyframes app-fade-out { to { opacity: 0; } }
+@media (prefers-reduced-motion: reduce) { .app-skel > div, .app-listwrap > * { animation-duration: 1ms !important; animation-delay: 0ms !important; } }
+.rl-glassbar.app-steady { animation: none; }
