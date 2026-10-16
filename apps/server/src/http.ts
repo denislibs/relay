@@ -1,7 +1,10 @@
 import { parseClientFrame } from '@relay/protocol';
 import type { Server } from 'bun';
+import { existsSync, statSync } from 'node:fs';
+import { extname, join, resolve, sep } from 'node:path';
 import { createSession, createUser, readSessionToken, sessionCookie, userIdFromToken } from './auth';
 import { createChat, getHistory, listChats } from './domain/chats';
+import { sql } from './db';
 import { DomainError } from './domain/errors';
 import { handleFrame } from './ws';
 
@@ -10,6 +13,26 @@ const fail = (code: string) => Response.json({ code }, { status: STATUS[code] ??
 
 export type WsData = { userId: number };
 
+const API = /^\/(health|me|chats|ws|dev)(\/|$)/;
+
+/** Статика клиента из WEB_DIST. Путь не может выйти за папку; пути без расширения — SPA, отдаём index.html. */
+function serveStatic(pathname: string): Response {
+  const dist = resolve(process.env.WEB_DIST ?? join(import.meta.dir, '..', '..', 'web', 'dist'));
+  let decoded: string;
+  try { decoded = decodeURIComponent(pathname); } catch { return new Response('Bad request', { status: 400 }); }
+  const file = resolve(dist, '.' + (decoded === '/' ? '/index.html' : decoded));
+  const inside = file === dist || file.startsWith(dist + sep);
+  if (inside && existsSync(file) && statSync(file).isFile()) {
+    const res = new Response(Bun.file(file));
+    if (file.endsWith('sw.js') || file.endsWith('index.html')) res.headers.set('cache-control', 'no-cache');
+    return res;
+  }
+  if (!extname(decoded) && existsSync(join(dist, 'index.html'))) {
+    return new Response(Bun.file(join(dist, 'index.html')), { headers: { 'cache-control': 'no-cache' } });
+  }
+  return new Response('Not found', { status: 404 });
+}
+
 export function createServer(opts: { port: number }): Server {
   return Bun.serve<WsData>({
     port: opts.port,
@@ -17,6 +40,7 @@ export function createServer(opts: { port: number }): Server {
       const url = new URL(req.url);
       try {
         if (url.pathname === '/health') return Response.json({ ok: true });
+        if (req.method === 'GET' && !API.test(url.pathname)) return serveStatic(url.pathname);
 
         if (process.env.DEV_LOGIN === '1' && req.method === 'POST' && url.pathname === '/dev/login') {
           const { name } = (await req.json()) as { name: string };
@@ -28,6 +52,10 @@ export function createServer(opts: { port: number }): Server {
         const userId = await userIdFromToken(readSessionToken(req));
         if (!userId) return fail('unauthorized');
 
+        if (req.method === 'GET' && url.pathname === '/me') {
+          const [u] = await sql`select id, name from users where id = ${userId}`;
+          return Response.json({ userId: u.id, name: u.name });
+        }
         if (url.pathname === '/ws') {
           return server.upgrade(req, { data: { userId } }) ? undefined : fail('bad_frame');
         }

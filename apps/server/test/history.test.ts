@@ -46,3 +46,10 @@ test('history is members only', async () => {
   const ab = await makeChat([a, b]);
   await expect(getHistory(c, ab, null, 10)).rejects.toMatchObject({ code: 'not_member' });
 });
+
+test('direct chats carry the peer so the client can show a name', async () => {
+  const a = await makeUser('Анна'), b = await makeUser('Борис');
+  const ab = await makeChat([a, b]);
+  expect((await listChats(a))[0]).toMatchObject({ id: ab, peer: { id: b, name: 'Борис' } });
+  expect((await listChats(b))[0]).toMatchObject({ peer: { id: a, name: 'Анна' } });
+});

@@ -37,6 +37,7 @@ export type ChatSummary = {
   lastReadId: number;
   unread: number;
   last: Message | null;
+  peer: { id: number; name: string } | null; // собеседник личного чата
 };
 
 export async function listChats(userId: number): Promise<ChatSummary[]> {
@@ -45,7 +46,9 @@ export async function listChats(userId: number): Promise<ChatSummary[]> {
            lm.id as m_id, lm.chat_id as m_chat_id, lm.sender_id as m_sender_id, lm.client_id as m_client_id,
            lm.body as m_body, lm.reply_to_id as m_reply_to_id, lm.created_at as m_created_at,
            (select count(*) from messages m
-             where m.chat_id = c.id and m.id > cm.last_read_id and m.sender_id <> ${userId})::int as unread
+             where m.chat_id = c.id and m.id > cm.last_read_id and m.sender_id <> ${userId})::int as unread,
+           (select json_build_object('id', u.id, 'name', u.name) from chat_members pm join users u on u.id = pm.user_id
+             where c.kind = 'direct' and pm.chat_id = c.id and pm.user_id <> ${userId} limit 1) as peer
       from chat_members cm
       join chats c on c.id = cm.chat_id
       left join lateral (
@@ -59,6 +62,7 @@ export async function listChats(userId: number): Promise<ChatSummary[]> {
     title: (r.title as string | null) ?? null,
     lastReadId: r.last_read_id as number,
     unread: r.unread as number,
+    peer: (r.peer as { id: number; name: string } | null) ?? null,
     last: r.m_id == null ? null : toMessage({
       id: r.m_id, chat_id: r.m_chat_id, sender_id: r.m_sender_id, client_id: r.m_client_id,
       body: r.m_body, reply_to_id: r.m_reply_to_id, created_at: r.m_created_at,
