@@ -92,6 +92,33 @@ export class Store {
     return arr;
   }
   private sorted = new Map<number, LocalMessage[]>();
+  private ids = new Map<number, Map<number, LocalMessage>>();
+  /** Исходники цитат вне загруженной истории — отдельно, чтобы не рвать непрерывность ленты. Только в памяти. */
+  quotes = new Map<string, { id: number; sort: number; body: string; senderId: number }>();
+  quoteFor(chatId: number, id: number) { return this.quotes.get(chatId + ':' + id); }
+  /** Запросы недостающих цитат копятся здесь; движок забирает их после расчёта подписок. */
+  quoteWants = new Map<number, Set<number>>();
+  private quoteAsked = new Set<string>();
+  wantQuotes(chatId: number, ids: number[]): void {
+    for (const id of ids) {
+      const k = chatId + ':' + id;
+      if (this.quoteAsked.has(k)) continue;
+      this.quoteAsked.add(k);
+      let set = this.quoteWants.get(chatId);
+      if (!set) { set = new Set(); this.quoteWants.set(chatId, set); }
+      set.add(id);
+    }
+  }
+  addQuotes(chatId: number, list: Message[]): void {
+    for (const m of list) this.quotes.set(chatId + ':' + m.id, { id: m.id, sort: m.id, body: m.body, senderId: m.senderId });
+    this.touch(chatId);
+  }
+  /** Сообщение чата по серверному id (для цитат); индекс строится вместе с отсортированным кэшем. */
+  messageById(chatId: number, id: number): LocalMessage | undefined {
+    let idx = this.ids.get(chatId);
+    if (!idx) { idx = new Map(); for (const m of this.chatMessages(chatId)) if (m.id != null) idx.set(m.id, m); this.ids.set(chatId, idx); }
+    return idx.get(id);
+  }
 
   oldestId(chatId: number): number | null {
     for (const m of this.chatMessages(chatId)) if (m.id != null) return m.id;
@@ -253,7 +280,7 @@ export class Store {
   /** Сервер пересоздал базу (другое поколение): выбросить всё — чаты, сообщения, очередь, указатели — и IDB тоже. */
   async wipe(epoch: string): Promise<void> {
     for (const id of this.chats.keys()) this.touch(id);
-    this.chats.clear(); this.messages.clear(); this.loaded.clear(); this.sorted.clear();
+    this.chats.clear(); this.messages.clear(); this.loaded.clear(); this.sorted.clear(); this.ids.clear();
     this.outbox.clear(); this.pendingReads.clear();
     this.dirtyChats.clear(); this.dirtyMessages.clear(); this.dirtyOutbox.clear(); this.dirtyReads.clear();
     this.lastSeq = this.seqAtFlush = 0;
@@ -363,7 +390,7 @@ export class Store {
     this.touch(c.id);
   }
 
-  private touch(chatId: number): void { this.touched.add(chatId); this.sorted.delete(chatId); }
+  private touch(chatId: number): void { this.touched.add(chatId); this.sorted.delete(chatId); this.ids.delete(chatId); }
 
   /** Дочитали до конца — 0; иначе вычитаем известные чужие сообщения из прочитанного диапазона (from, to]. */
   private unreadAfterRead(chat: LocalChat, from: number, to: number): number {

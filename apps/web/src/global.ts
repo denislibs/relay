@@ -25,7 +25,8 @@ export interface GlobalState {
   peer: Item | null;   // присутствие собеседника открытого личного чата {userId, known, online, lastSeen}   // выбран, но лента ещё не готова: на экране прежний чат, строка уже подсвечена
   messages: Item[];
   feedMeta: FeedMeta | null;
-  unreadFrom: number | null;   // lastReadId на момент открытия: разделитель «Непрочитанные» (заморожен)
+  unreadFrom: number | null;
+  focus: { id: number; sort: number; nonce: number; replaced: boolean } | null;   // перейти к сообщению и подсветить   // lastReadId на момент открытия: разделитель «Непрочитанные» (заморожен)
   folder: 'all' | 'unread';
   search: string;
   newChatOpen: boolean;
@@ -49,6 +50,7 @@ let state: GlobalState = {
   messages: [],
   feedMeta: null,
   unreadFrom: null,
+  focus: null,
   folder: 'all',
   search: '',
   newChatOpen: false,

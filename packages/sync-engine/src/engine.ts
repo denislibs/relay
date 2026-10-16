@@ -191,6 +191,20 @@ export class Engine {
     this.frameTimer = setTimeout(() => { this.frameTimer = null; this.emit(); }, this.cfg.frameMs ?? 16);
   }
 
+  /** Цитаты, исходники которых не загружены: одним запросом на чат, в фоне. */
+  private fetchQuotes(): void {
+    if (!this.online || !this.store.quoteWants.size) return;
+    const wants = [...this.store.quoteWants.entries()];
+    this.store.quoteWants.clear();
+    for (const [chatId, ids] of wants) {
+      this.run(async () => {
+        const res = await this.http<{ messages: Message[] }>(`/chats/${chatId}/messages?ids=${[...ids].join(',')}`);
+        this.store.addQuotes(chatId, res.messages);
+        this.changed();
+      });
+    }
+  }
+
   private emit(): void {
     const hold = this.holding && this.acting === 0;
     const touched = new Set(this.store.touched);
@@ -212,6 +226,7 @@ export class Engine {
         try { w.cb(patch); } catch (err) { console.error('watch callback failed', err); }
       }
     }
+    this.fetchQuotes();
   }
 
   // =====================================================================
@@ -560,20 +575,22 @@ export class Engine {
         const reached = all.length > 0 && all[0].sort <= q.anchor.sort;   // якорь уже среди загруженных
         short = !reached || (q.anchor.side !== 'start' && from === 0 && to - from < q.limit);
       }
-      if (short) { await this.ensureHistory(q.chatId, all.length + page); continue; }
+      // далеко в истории (переход к сообщению) — крупными страницами, а не десятками мелких запросов
+      const far = q.anchor && all.length > 0 && all[0].sort > q.anchor.sort;
+      if (short) { await this.ensureHistory(q.chatId, all.length + (far ? 200 : page), far ? 200 : undefined); continue; }
       // окно близко к старому краю — страница наперёд, в фоне, чтобы прокрутка вверх не упиралась
       if (from < page) this.run(() => this.ensureHistory(q.chatId, all.length + page));
       return;
     }
   }
 
-  private ensureHistory(chatId: number, limit: number): Promise<void> {
+  private ensureHistory(chatId: number, limit: number, pageSize?: number): Promise<void> {
     const have = this.store.chatMessages(chatId).length;
     const chat = this.store.chats.get(chatId);
     if (have >= limit || chat?.historyComplete) return Promise.resolve();
     const running = this.historyLoads.get(chatId);
     if (running) return running.then(() => this.ensureHistory(chatId, limit));
-    const page = this.cfg.historyPage ?? 50;
+    const page = pageSize ?? this.cfg.historyPage ?? 50;
     const p = (async () => {
       while (this.store.chatMessages(chatId).length < limit && !this.store.chats.get(chatId)?.historyComplete) {
         const before = this.store.oldestId(chatId);

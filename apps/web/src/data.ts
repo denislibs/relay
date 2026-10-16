@@ -166,6 +166,15 @@ export function openChat(chatId: number | null): void {
   switchTimer = setTimeout(() => { if (getGlobal().pendingChatId === chatId) commit(); }, 700);
 }
 
+/** Перейти к сообщению открытого чата (цитата, поиск): в окне — прокрутка, нет — окно вокруг него. */
+export function focusMessage(target: { id: number; sort: number }): void {
+  const g = getGlobal(), chatId = g.openChatId;
+  if (!chatId) return;
+  const inWindow = g.messages.some((m) => m.id === target.id);
+  setGlobal({ focus: { ...target, nonce: Date.now(), replaced: !inWindow } });
+  if (!inWindow) { moving = false; setFeed(chatId, { sort: target.sort, side: 'center' }); }
+}
+
 /** Прежний вызов «ещё истории» — теперь сдвиг окна к старым. */
 export function loadOlder(): void { moveWindow('older'); }
 

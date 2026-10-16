@@ -3,7 +3,7 @@ import type { Server } from 'bun';
 import { existsSync, statSync } from 'node:fs';
 import { extname, join, resolve, sep } from 'node:path';
 import { createSession, createUser, readSessionToken, sessionCookie, userIdFromToken } from './auth';
-import { createChat, getHistory, listChats, listChatsPage } from './domain/chats';
+import { createChat, getHistory, getMessagesByIds, listChats, listChatsPage } from './domain/chats';
 import { sql } from './db';
 import { DomainError } from './domain/errors';
 import { connected, disconnected, listPresence, type Publish } from './domain/presence';
@@ -88,6 +88,8 @@ export function createServer(opts: { port: number }): Server {
         }
         const hist = /^\/chats\/(\d+)\/messages$/.exec(url.pathname);
         if (req.method === 'GET' && hist) {
+          const ids = url.searchParams.get('ids');
+          if (ids) return Response.json({ messages: await getMessagesByIds(userId, Number(hist[1]), ids.split(',').map(Number).filter((n) => Number.isInteger(n) && n > 0).slice(0, 100)) });
           const before = url.searchParams.get('before');
           const limit = Number(url.searchParams.get('limit') ?? 50);
           return Response.json(await getHistory(userId, Number(hist[1]), before ? Number(before) : null, limit));

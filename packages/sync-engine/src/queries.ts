@@ -23,12 +23,14 @@ const chatItem = (c: LocalChat): Item => ({
   last: c.last ? { key: c.last.key, id: c.last.id, senderId: c.last.senderId, body: c.last.body, status: c.last.status, createdAt: c.last.createdAt } : null,
 });
 // элемент сообщения переиспользуется, пока сообщение не изменилось: дешёвая подпись вместо JSON.stringify
-const msgSig = (m: LocalMessage): string => `${m.id}|${m.status}|${m.sort}|${m.replyToId}|${m.body}`;
+// цитата — короткая копия исходного сообщения, если оно есть в кэше (видна, даже когда оригинал вне окна)
+type Quote = { id: number; sort: number; body: string; senderId: number } | null;
+const msgSig = (m: LocalMessage, q: Quote): string => `${m.id}|${m.status}|${m.sort}|${m.replyToId}|${m.body}|${q ? q.id + ':' + q.body : ''}`;
 const msgCache = new WeakMap<LocalMessage, { sig: string; item: Item }>();
-const messageItem = (m: LocalMessage): { item: Item; sig: string } => {
-  const sig = msgSig(m);
+const messageItem = (m: LocalMessage, q: Quote): { item: Item; sig: string } => {
+  const sig = msgSig(m, q);
   let c = msgCache.get(m);
-  if (!c || c.sig !== sig) { c = { sig, item: { ...m } }; msgCache.set(m, c); }
+  if (!c || c.sig !== sig) { c = { sig, item: { ...m, reply: q } }; msgCache.set(m, c); }
   return c;
 };
 
@@ -64,10 +66,22 @@ export function computeQuery(store: Store, q: Query): Result {
       const { from, to } = messageWindow(all, q);
       const chat = store.chats.get(q.chatId);
       const items = new Map<string, Item>(), sig = new Map<string, string>(), order: string[] = [];
-      for (let k = from; k < to; k++) { const { item, sig: g } = messageItem(all[k]); items.set(item.key, item); sig.set(item.key, g); order.push(item.key); }
+      const missingQuotes = new Set<number>();
+      for (let k = from; k < to; k++) {
+        const m = all[k];
+        let quote: Quote = null;
+        if (m.replyToId != null) {
+          const r = store.messageById(q.chatId, m.replyToId);
+          quote = r ? { id: r.id!, sort: r.sort, body: r.body, senderId: r.senderId } : store.quoteFor(q.chatId, m.replyToId) ?? null;
+          if (!quote) missingQuotes.add(m.replyToId);
+        }
+        const { item, sig: g } = messageItem(m, quote);
+        items.set(item.key, item); sig.set(item.key, g); order.push(item.key);
+      }
       // служебный элемент: есть ли что-то за краями окна (интерфейс по нему решает, двигать ли окно)
       const meta: Item = { key: '~window', hasOlder: from > 0 || !chat?.historyComplete, hasNewer: to < all.length, live: !q.anchor || to === all.length };
       items.set(meta.key, meta); sig.set(meta.key, `${meta.hasOlder}|${meta.hasNewer}|${meta.live}`); order.push(meta.key);
+      if (missingQuotes.size) store.wantQuotes(q.chatId, [...missingQuotes]);
       return { items, sig, order };
     }
     case 'counters': {

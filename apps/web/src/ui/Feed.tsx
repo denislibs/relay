@@ -2,8 +2,8 @@ import type { Item } from '@relay/sync-engine/src/types';
 import { Bubble, DateDivider, ScrollToBottom, forceMeasure, isHeavyAnimating, onHeavyAnimationEnd, requestMeasure, requestMutation } from '@relay/ui';
 import { memo } from 'preact/compat';
 import { useEffect, useLayoutEffect, useRef, useState } from 'preact/hooks';
-import { moveWindow, savePosition, savedPosition, seen } from '../data';
-import { useGlobal } from '../global';
+import { focusMessage, moveWindow, savePosition, savedPosition, seen } from '../data';
+import { setGlobal, useGlobal } from '../global';
 import { clock, dayKey, dayLabel } from './format';
 
 /*
@@ -23,17 +23,19 @@ const BOTTOM = 50;        // «у низа» — ближе 50 px
 const READ_EVERY = 150;   // отправка «вижу до id» не чаще
 const FIRST_PAINT = 24;   // при открытии внизу первым кадром — столько последних сообщений, остальное следующим кадром
 
-type RowProps = { m: Item; out: boolean; start: boolean; end: boolean; quoted?: Item; quoteAuthor?: string; quoteTone?: number; appear: boolean };
+type Quote = { id: number; sort: number; body: string; senderId: number };
+type RowProps = { m: Item; out: boolean; start: boolean; end: boolean; quoted?: Quote | null; quoteAuthor?: string; quoteTone?: number; appear: boolean; flash: boolean };
 
 /** Строка ленты: перерисовывается только если изменилось её сообщение или место в группе. */
-const Row = memo(function Row({ m, out, start, end, quoted, quoteAuthor, quoteTone, appear }: RowProps) {
+const Row = memo(function Row({ m, out, start, end, quoted, quoteAuthor, quoteTone, appear, flash }: RowProps) {
   return (
     <div class="app-msg" data-key={m.key} data-sort={m.sort as number}>
       <Bubble
         from={out ? 'out' : 'in'}
         tail={end}
         groupStart={start}
-        reply={quoted ? { author: quoteAuthor, text: quoted.body, tone: quoteTone } : undefined}
+        reply={quoted ? { author: quoteAuthor, text: quoted.body, tone: quoteTone, onClick: noop } : undefined}
+        flash={flash}
         time={clock(m.createdAt as string)}
         status={out ? m.status : undefined}
         appear={appear}
@@ -44,6 +46,8 @@ const Row = memo(function Row({ m, out, start, end, quoted, quoteAuthor, quoteTo
     </div>
   );
 });
+
+const noop = () => {}; // цитата — кнопка; сам клик ловит лента (один обработчик на всех)
 
 /** Первый бабл, видимый ниже шапки, и его отступ от верха ленты (только в фазе замера). */
 function firstVisible(root: HTMLElement): { key: string; sort: number; top: number } | null {
@@ -63,6 +67,8 @@ export function Feed({ chatId, meId, peerName, stick, onMenu }: {
   const messages = useGlobal((s) => s.messages);
   const meta = useGlobal((s) => s.feedMeta);
   const unreadFrom = useGlobal((s) => s.unreadFrom);
+  const focus = useGlobal((s) => s.focus);
+  const [flashKey, setFlashKey] = useState<string | null>(null);
   const unread = useGlobal((s) => (s.chats.find((c) => c.id === chatId)?.unread as number) ?? 0);
   const el = useRef<HTMLDivElement>(null);
   const metaRef = useRef(meta); metaRef.current = meta;
@@ -238,6 +244,42 @@ export function Feed({ chatId, meId, peerName, stick, onMenu }: {
     requestMeasure(() => { const top = root.scrollHeight; requestMutation(() => root.scrollTo({ top, behavior: 'smooth' })); });
   };
 
+  // переход к сообщению: строка в окне — плавно к ней (по центру) и подсветить; нет — ждём новое окно
+  useLayoutEffect(() => {
+    const root = el.current;
+    if (!root || !focus || !placed.current) return;
+    const row = root.querySelector<HTMLElement>(`.app-msg[data-sort="${focus.sort}"]`);
+    if (!row) return;
+    setGlobal({ focus: null });
+    stick.current = false;
+    anchor.current = null;
+    setFlashKey(row.dataset.key!);
+    if (focus.replaced) {
+      // окно заменили целиком — сразу по центру, до отрисовки (иначе кадр со старой позицией и долгая прокрутка)
+      forceMeasure(() => {
+        const top = Math.max(0, row.offsetTop - (root.clientHeight - row.offsetHeight) / 2);
+        if (Math.abs(root.scrollTop - top) > 1) { programmatic.current++; root.scrollTop = top; }
+      });
+    } else {
+      requestMeasure(() => {
+        const top = Math.max(0, row.offsetTop - (root.clientHeight - row.offsetHeight) / 2);
+        requestMutation(() => root.scrollTo({ top, behavior: 'smooth' }));
+      });
+    }
+    const t = setTimeout(() => setFlashKey(null), 1600);
+    return () => clearTimeout(t);
+  }, [focus, messages]);
+
+  // клик по цитате — к исходному сообщению
+  const onClick = (e: MouseEvent) => {
+    const quote = (e.target as Element).closest('.rl-quote');
+    const row = quote?.closest<HTMLElement>('.app-msg');
+    if (!row) return;
+    const m = messages.find((x) => x.key === row.dataset.key);
+    const r = m?.reply as Quote | null | undefined;
+    if (r) focusMessage({ id: r.id, sort: r.sort });
+  };
+
   // контекстное меню — одно на ленту, а не на каждый бабл (иначе обработчик ломал бы мемоизацию строк)
   const onContextMenu = (e: MouseEvent) => {
     const row = (e.target as Element).closest<HTMLElement>('.app-msg');
@@ -246,8 +288,6 @@ export function Feed({ chatId, meId, peerName, stick, onMenu }: {
     onMenu(row.dataset.key!, e.clientX, e.clientY);
   };
 
-  const byId = new Map<number, Item>();
-  for (const m of messages) if (m.id != null) byId.set(m.id as number, m);
   const out: unknown[] = [];
   let prevDay = '', prevSender: unknown = null, unreadShown = false;
   if (!partial) out.push(<div class="app-sentinel" data-dir="older" key={'o' + (messages[0]?.key ?? '')} aria-hidden="true" />);
@@ -263,7 +303,7 @@ export function Feed({ chatId, meId, peerName, stick, onMenu }: {
     const next = shown[i + 1];
     const start = prevSender !== m.senderId || day !== prevDay;
     const end = !next || next.senderId !== m.senderId || dayKey(next.createdAt as string) !== day;
-    const quoted = m.replyToId != null ? byId.get(m.replyToId as number) : undefined;
+    const quoted = m.reply as Quote | null;
     out.push(
       <Row
         key={m.key}
@@ -275,6 +315,7 @@ export function Feed({ chatId, meId, peerName, stick, onMenu }: {
         quoteAuthor={quoted ? (quoted.senderId === meId ? 'Вы' : peerName) : undefined}
         quoteTone={quoted ? (quoted.senderId === meId ? 1 : 3) : undefined}
         appear={initial.current !== null && !initial.current.has(m.key)}
+        flash={flashKey === m.key}
       />,
     );
     prevDay = day; prevSender = m.senderId;
@@ -283,7 +324,7 @@ export function Feed({ chatId, meId, peerName, stick, onMenu }: {
 
   return (
     <>
-      <div class="rl-feed" ref={el} onScroll={onScroll} onContextMenu={onContextMenu} aria-live="polite">{out}</div>
+      <div class="rl-feed" ref={el} onScroll={onScroll} onClick={onClick} onContextMenu={onContextMenu} aria-live="polite">{out}</div>
       <div class="rl-scrolldown-slot">
         <ScrollToBottom show={away || (meta ? !meta.live : false)} unread={unread} onClick={toLatest} />
       </div>

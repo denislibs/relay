@@ -94,9 +94,17 @@ export async function listChats(userId: number, opts: ListOpts = {}): Promise<Ch
   }));
 }
 
+/** Конкретные сообщения чата по id (исходники цитат, которых нет в загруженной истории). */
+export async function getMessagesByIds(userId: number, chatId: number, ids: number[]): Promise<Message[]> {
+  await assertMember(sql, chatId, userId);
+  if (!ids.length) return [];
+  const rows = await sql`select * from messages where chat_id = ${chatId} and id = any(${ids}::bigint[]) order by id`;
+  return rows.map(toMessage);
+}
+
 export async function getHistory(userId: number, chatId: number, before: number | null, limit: number): Promise<{ messages: Message[]; hasMore: boolean }> {
   await assertMember(sql, chatId, userId);
-  const take = Math.min(Math.max(limit, 1), 100);
+  const take = Math.min(Math.max(limit, 1), 200);
   const rows = await sql`
     select * from messages
      where chat_id = ${chatId} and (${before}::bigint is null or id < ${before})
