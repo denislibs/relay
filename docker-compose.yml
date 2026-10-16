@@ -51,5 +51,19 @@ services:
     depends_on:
       postgres: { condition: service_healthy }
 
+  test-engine:
+    build: { context: ., dockerfile: apps/server/Dockerfile }
+    profiles: ["test"]
+    working_dir: /app/packages/sync-engine
+    command: ["bun", "test"]
+    environment:
+      DATABASE_URL: postgres://relay:relay@postgres:5432/relay_test
+      DEV_LOGIN: "1"
+    volumes:
+      - ./apps:/app/apps
+      - ./packages:/app/packages
+    depends_on:
+      postgres: { condition: service_healthy }
+
 volumes:
   pgdata: {}

@@ -17,11 +17,25 @@
       "name": "@relay/protocol",
       "version": "0.0.0",
     },
+    "packages/sync-engine": {
+      "name": "@relay/sync-engine",
+      "version": "0.0.0",
+      "dependencies": {
+        "@relay/protocol": "workspace:*",
+      },
+      "devDependencies": {
+        "fake-indexeddb": "6.2.5",
+      },
+    },
   },
   "packages": {
     "@relay/protocol": ["@relay/protocol@workspace:packages/protocol"],
 
     "@relay/server": ["@relay/server@workspace:apps/server"],
+
+    "@relay/sync-engine": ["@relay/sync-engine@workspace:packages/sync-engine"],
+
+    "fake-indexeddb": ["fake-indexeddb@6.2.5", "", {}, "sha512-CGnyrvbhPlWYMngksqrSSUT1BAVP49dZocrHuK0SvtR0D5TMs5wP0o3j7jexDJW01KSadjBp1M/71o/KR3nD1w=="],
 
     "postgres": ["postgres@3.4.9", "", {}, "sha512-GD3qdB0x1z9xgFI6cdRD6xu2Sp2WCOEoe3mtnyB5Ee0XrrL5Pe+e4CCnJrRMnL1zYtRDZmQQVbvOttLnKDLnaw=="],
   }
