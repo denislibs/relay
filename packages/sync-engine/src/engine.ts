@@ -161,6 +161,10 @@ export class Engine {
         await this.ensureHistory(a.chatId, this.store.chatMessages(a.chatId).length + (this.cfg.historyPage ?? 50));
         return null;
       }
+      case 'refreshChats': {
+        if (this.online) this.refreshList();
+        return null;
+      }
       case 'retry': {
         if (this.store.unfail(a.clientId)) {
           await this.store.flush();

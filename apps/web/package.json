@@ -1,0 +1,12 @@
+{
+  "name": "@relay/web",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "dependencies": {
+    "@relay/protocol": "workspace:*",
+    "@relay/sync-engine": "workspace:*",
+    "@relay/ui": "workspace:*",
+    "preact": "10.29.8"
+  }
+}

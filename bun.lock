@@ -13,9 +13,27 @@
         "postgres": "3.4.9",
       },
     },
+    "apps/web": {
+      "name": "@relay/web",
+      "version": "0.0.0",
+      "dependencies": {
+        "@relay/protocol": "workspace:*",
+        "@relay/sync-engine": "workspace:*",
+        "@relay/ui": "workspace:*",
+        "preact": "10.29.8",
+      },
+    },
     "packages/protocol": {
       "name": "@relay/protocol",
       "version": "0.0.0",
+    },
+    "packages/relay-ui": {
+      "name": "@relay/ui",
+      "version": "0.0.0",
+      "dependencies": {
+        "preact": "10.29.8",
+        "twallpaper": "2.1.2",
+      },
     },
     "packages/sync-engine": {
       "name": "@relay/sync-engine",
@@ -35,8 +53,16 @@
 
     "@relay/sync-engine": ["@relay/sync-engine@workspace:packages/sync-engine"],
 
+    "@relay/ui": ["@relay/ui@workspace:packages/relay-ui"],
+
+    "@relay/web": ["@relay/web@workspace:apps/web"],
+
     "fake-indexeddb": ["fake-indexeddb@6.2.5", "", {}, "sha512-CGnyrvbhPlWYMngksqrSSUT1BAVP49dZocrHuK0SvtR0D5TMs5wP0o3j7jexDJW01KSadjBp1M/71o/KR3nD1w=="],
 
     "postgres": ["postgres@3.4.9", "", {}, "sha512-GD3qdB0x1z9xgFI6cdRD6xu2Sp2WCOEoe3mtnyB5Ee0XrrL5Pe+e4CCnJrRMnL1zYtRDZmQQVbvOttLnKDLnaw=="],
+
+    "preact": ["preact@10.29.8", "", { "peerDependencies": { "preact-render-to-string": ">=5" }, "optionalPeers": ["preact-render-to-string"] }, "sha512-ej2aVZ+vZ8WO7tvlQWRM9N63A0KzF9q4mWJfDUHgYaIofWY9hu74QdnQrjoPMmZi2/nZ5gN0bJCQF49xQqx09Q=="],
+
+    "twallpaper": ["twallpaper@2.1.2", "", {}, "sha512-au6EKb5h7PClCrYvv3RwcI5VeqS+Pa3eUoXSRbhkblKtbBI5IF9l4jZbA0V9Gp86KRfi8fIqQpDkzBl+H0Lpaw=="],
   }
 }

@@ -40,7 +40,7 @@ export function createServer(opts: { port: number }): Server {
       const url = new URL(req.url);
       try {
         if (url.pathname === '/health') return Response.json({ ok: true });
-        if (req.method === 'GET' && !API.test(url.pathname)) return serveStatic(url.pathname);
+        if ((req.method === 'GET' || req.method === 'HEAD') && !API.test(url.pathname)) return serveStatic(url.pathname);
 
         if (process.env.DEV_LOGIN === '1' && req.method === 'POST' && url.pathname === '/dev/login') {
           const { name } = (await req.json()) as { name: string };

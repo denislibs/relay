@@ -1,0 +1,20 @@
+/* Только раскладка приложения поверх relay.css — цвета и формы берутся из дизайн-системы. */
+html, body, #app { height: 100%; margin: 0; }
+body { background: var(--bg); color: var(--ink); font-family: var(--font-sans); overflow: hidden; }
+#app > .rl-shell { height: 100%; box-sizing: border-box; }
+.app-msg + .app-msg .rl-msgline { margin-top: 2px; }
+.app-msg + .app-msg .rl-msgline-gap { margin-top: var(--space-2); }
+.app-center { display: flex; align-items: center; justify-content: center; height: 100%; padding: var(--space-4); box-sizing: border-box; }
+.app-login { width: min(100%, 440px); display: flex; flex-direction: column; gap: var(--space-4); }
+.app-login h1 { margin: 0; font: 500 28px/34px var(--font-sans); }
+.app-login p { margin: 0; color: var(--ink-muted); font: 400 15px/21px var(--font-sans); }
+.app-field { height: 48px; padding: 0 var(--space-4); border: 2px solid var(--outline); border-radius: var(--radius-pill); background: var(--bg); color: var(--ink); font: 400 16px/1 var(--font-sans); outline: none; transition: border-color var(--dur-instant) var(--ease-standard); }
+.app-field:focus { border-color: var(--brand-text); }
+.app-empty-main { flex: 1; display: flex; align-items: center; justify-content: center; }
+.app-empty-main .rl-empty { border-radius: var(--radius-panel); background: var(--glass); backdrop-filter: blur(20px); -webkit-backdrop-filter: blur(20px); }
+.app-back { display: none; }
+@media (max-width: 720px) {
+  .app-chat-open .rl-shell-side { display: none; }
+  .app-chat-open .rl-shell-side + .rl-shell-main { display: flex; }
+  .app-back { display: inline-flex; }
+}

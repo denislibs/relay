@@ -23,6 +23,13 @@ services:
     depends_on:
       postgres: { condition: service_healthy }
 
+  web:
+    build: { context: ., dockerfile: apps/server/Dockerfile }
+    command: ["bun", "apps/web/build.ts", "--watch"]
+    volumes:
+      - ./apps:/app/apps
+      - ./packages:/app/packages
+
   server:
     build: { context: ., dockerfile: apps/server/Dockerfile }
     command: ["bun", "--watch", "apps/server/src/main.ts"]
@@ -36,6 +43,7 @@ services:
       - ./packages:/app/packages
     depends_on:
       migrate: { condition: service_completed_successfully }
+      web: { condition: service_started }
 
   test:
     build: { context: ., dockerfile: apps/server/Dockerfile }

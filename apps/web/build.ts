@@ -1,0 +1,48 @@
+// Сборка клиента в dist: main, Service Worker, два хоста движка, html и стили дизайн-системы.
+//   bun apps/web/build.ts            — одна сборка
+//   bun apps/web/build.ts --watch    — пересборка при изменениях (dev)
+import { watch as fsWatch } from 'node:fs';
+import { cp, mkdir, rm } from 'node:fs/promises';
+import { join } from 'node:path';
+
+const root = import.meta.dir;
+const ui = join(root, '..', '..', 'packages', 'relay-ui');
+const engineHosts = join(root, '..', '..', 'packages', 'sync-engine', 'src', 'hosts');
+const dist = join(root, 'dist');
+const isWatch = process.argv.includes('--watch');
+
+async function build(): Promise<void> {
+  const BUILD = process.env.BUILD_ID ?? Date.now().toString(36);
+  await Bun.$`bun ${join(ui, 'build-tokens.ts')}`.quiet();
+  const tmp = dist + '.tmp';
+  await rm(tmp, { recursive: true, force: true });
+  await mkdir(tmp, { recursive: true });
+  const res = await Bun.build({
+    entrypoints: [join(root, 'src', 'main.tsx'), join(root, 'src', 'sw.ts'), join(engineHosts, 'shared.worker.ts'), join(engineHosts, 'dedicated.worker.ts')],
+    outdir: tmp,
+    target: 'browser',
+    naming: '[name].[ext]',
+    minify: !isWatch,
+    sourcemap: 'linked',
+    define: { __BUILD__: JSON.stringify(BUILD) },
+  });
+  if (!res.success) {
+    for (const log of res.logs) console.error(log);
+    if (!isWatch) process.exit(1);
+    return;
+  }
+  await cp(join(root, 'public'), tmp, { recursive: true });
+  await cp(join(ui, 'relay.css'), join(tmp, 'relay.css'));
+  await cp(join(ui, 'tokens.css'), join(tmp, 'tokens.css'));
+  await rm(dist, { recursive: true, force: true });
+  await cp(tmp, dist, { recursive: true });
+  await rm(tmp, { recursive: true, force: true });
+  console.log(`web built ${BUILD}`);
+}
+
+await build();
+if (isWatch) {
+  let t: ReturnType<typeof setTimeout> | undefined;
+  const again = () => { clearTimeout(t); t = setTimeout(() => build().catch(console.error), 150); };
+  for (const dir of [join(root, 'src'), join(root, 'public'), join(ui), join(root, '..', '..', 'packages', 'sync-engine', 'src')]) fsWatch(dir, { recursive: true }, again);
+}

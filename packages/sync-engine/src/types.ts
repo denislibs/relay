@@ -53,7 +53,8 @@ export type Action =
   | { type: 'sendMessage'; chatId: number; body: string; replyToId?: number | null }
   | { type: 'seen'; chatId: number; upToId: number }
   | { type: 'loadOlder'; chatId: number }
-  | { type: 'retry'; clientId: string };
+  | { type: 'retry'; clientId: string }
+  | { type: 'refreshChats' };
 
 export interface EngineConfig {
   userId: number;
