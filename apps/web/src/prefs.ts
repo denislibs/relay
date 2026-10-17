@@ -171,6 +171,7 @@ export function applyPrefs(p: Prefs = current): void {
   if ((p.timeFormat ?? localeTimeFormat()) === '12h') root.setAttribute('data-time12', ''); else root.removeAttribute('data-time12'); // время в пузыре шире
   if (p.anim.ui) root.removeAttribute('data-anim'); else root.setAttribute('data-anim', '0');
   if (p.anim.blur) root.removeAttribute('data-blur'); else root.setAttribute('data-blur', '0');
+  if (p.anim.wallpaper) root.removeAttribute('data-wpanim'); else root.setAttribute('data-wpanim', '0');
 }
 
 function commit(next: Prefs, persist: boolean): void {

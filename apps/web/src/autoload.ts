@@ -1,4 +1,4 @@
-import type { Prefs } from './prefs';
+import { getPrefs, type Prefs } from './prefs';
 
 // Автозагрузка медиа: чистое решение «грузить ли вложение само». Медиа-код вызывает shouldAutoload
 // с getPrefs().autoload; настройки хранятся на устройстве (prefs.ts).
@@ -27,4 +27,9 @@ export function autoloadSubtitle(al: Autoload, kind: MediaKind): string {
 /** Значения автозагрузки совпадают с умолчаниями (кнопка «Сбросить» неактивна). */
 export function isDefaultAutoload(al: Autoload, def: Autoload): boolean {
   return JSON.stringify(al) === JSON.stringify(def);
+}
+
+/** Автовоспроизведение GIF / беззвучного видео (Анимации и производительность). Для медиа-сессии: вызывать перед play(). */
+export function canAutoplay(kind: 'gif' | 'video', prefs: { anim: Prefs['anim'] } = getPrefs()): boolean {
+  return kind === 'gif' ? prefs.anim.autoplayGif : prefs.anim.autoplayVideo;
 }

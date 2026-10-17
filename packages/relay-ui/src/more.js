@@ -478,8 +478,9 @@ function buildPattern(set) {
 }
 var wallpapers = [];
 /* Shift every mounted wallpaper's gradient one step — call on send / receive, like Telegram. */
+function wpMotion() { return !reducedMotion() && document.documentElement.dataset.wpanim !== '0'; }
 function nudgeWallpaper() {
-  if (reducedMotion()) return;
+  if (!wpMotion()) return; // «Анимация обоев» выключена — градиент стоит
   wallpapers.forEach(function (w) { var end = beginHeavyAnimation(700); w.toNextPosition(end); });
 }
 function readTheme(el) {
@@ -537,7 +538,7 @@ function Wallpaper(props) {
             ? { image: buildPattern(set), mask: true, background: t.ink, size: '420px', opacity: P.maskOpacity || 0.55 }
             : { image: buildPattern(set), mask: false, background: 'transparent', size: '420px', opacity: P.patternOpacity || 0.5, blur: 0 };
           if (!wp) {
-            wp = new TWallpaper(el, { colors: colors, fps: 60, tails: 90, animate: !!P.animate && !reducedMotion(), scrollAnimate: !!P.scrollAnimate && !reducedMotion(), pattern: pattern });
+            wp = new TWallpaper(el, { colors: colors, fps: 60, tails: 90, animate: !!P.animate && wpMotion(), scrollAnimate: !!P.scrollAnimate && wpMotion(), pattern: pattern });
             wp.init();
             wallpapers.push(wp);
           } else {

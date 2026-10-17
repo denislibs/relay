@@ -12,7 +12,11 @@ function cx() {
   return out.join(' ');
 }
 /* ---------- Motion helpers ---------- */
-function reducedMotion() { return !!(window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches); }
+// Система просит меньше движения ИЛИ в настройках выключены анимации интерфейса (data-anim="0" на <html>).
+function reducedMotion() {
+  if (document.documentElement.dataset.anim === '0') return true;
+  return !!(window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches);
+}
 function chain(a, b) { return function (e) { if (a) a(e); if (b) b(e); }; }
 // Pointer ripple: one measure (rect) then one mutation (append), in that order — the fasterdom rule.
 function ripple(e) {

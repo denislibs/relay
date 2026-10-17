@@ -15,7 +15,8 @@
     if (t === 'light' || t === 'dark') d.setAttribute('data-theme', t);
     if (ok && typeof p.textSize === 'number' && p.textSize >= 12 && p.textSize <= 20) d.style.setProperty('--message-text-size', Math.round(p.textSize) + 'px');
     if (typeof a.ui === 'boolean' ? !a.ui : r) d.setAttribute('data-anim', '0');
-    if (typeof a.blur === 'boolean' ? !a.blur : r) d.setAttribute('data-blur', '0'); } catch (e) {}</script>
+    if (typeof a.blur === 'boolean' ? !a.blur : r) d.setAttribute('data-blur', '0');
+    if (typeof a.wallpaper === 'boolean' ? !a.wallpaper : r) d.setAttribute('data-wpanim', '0'); } catch (e) {}</script>
   <style>
     html { background: linear-gradient(135deg, #dbddbb, #88b884 45%, #6ba587 70%, #d5d88d) fixed; }
     @media (prefers-color-scheme: dark) { html:not([data-theme="light"]) { background: #000; } }

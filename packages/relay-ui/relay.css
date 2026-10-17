@@ -1153,3 +1153,27 @@ button.rl-quote { cursor: pointer; }
 .rl-rich-link:hover { text-decoration: underline; }
 .rl-rich-mention:not(button) { color: var(--brand-text); }
 @media (prefers-reduced-motion: reduce) { .rl-radio::after, .rl-tf-label, .rl-range-input::-webkit-slider-thumb { transition: none; } }
+
+/* ---------- Производительность: «Анимации интерфейса» выключены (<html data-anim="0">) ----------
+   Слайды — без анимации вовсе (новая страница сразу на месте). Остальное — за 1ms до конечного кадра,
+   чтобы fill-состояния (появление, галочки) не залипли. Спиннеры, шиммер скелета и «печатает» не трогаем:
+   они показывают состояние, а не украшают. Не глобальное `*`, только поддеревья Relay. */
+html[data-anim="0"] .rl-slide { animation: none !important; box-shadow: none !important; }
+html[data-anim="0"] :is([class*="rl-"], [class*="app-"], [class*="rl-"] *, [class*="app-"] *):not(:is(.rl-ring-spin, .rl-search-spin, .app-more, .rl-sync-spin, .rl-sync-syncing, .rl-linear-indet, .rl-skel, .app-skel, .rl-typing, .rl-typing-inline, .rl-status-clock, .rl-rec-dot, .rl-rec-pulse) , :is(.rl-ring-spin, .rl-search-spin, .app-more, .rl-sync-spin, .rl-sync-syncing, .rl-linear-indet, .rl-skel, .app-skel, .rl-typing, .rl-typing-inline, .rl-status-clock, .rl-rec-dot, .rl-rec-pulse) *),
+html[data-anim="0"] :is([class*="rl-"], [class*="app-"], [class*="rl-"] *, [class*="app-"] *):not(:is(.rl-ring-spin, .rl-search-spin, .app-more, .rl-sync-spin, .rl-sync-syncing, .rl-linear-indet, .rl-skel, .app-skel, .rl-typing, .rl-typing-inline, .rl-status-clock, .rl-rec-dot, .rl-rec-pulse), :is(.rl-ring-spin, .rl-search-spin, .app-more, .rl-sync-spin, .rl-sync-syncing, .rl-linear-indet, .rl-skel, .app-skel, .rl-typing, .rl-typing-inline, .rl-status-clock, .rl-rec-dot, .rl-rec-pulse) *)::before,
+html[data-anim="0"] :is([class*="rl-"], [class*="app-"], [class*="rl-"] *, [class*="app-"] *):not(:is(.rl-ring-spin, .rl-search-spin, .app-more, .rl-sync-spin, .rl-sync-syncing, .rl-linear-indet, .rl-skel, .app-skel, .rl-typing, .rl-typing-inline, .rl-status-clock, .rl-rec-dot, .rl-rec-pulse), :is(.rl-ring-spin, .rl-search-spin, .app-more, .rl-sync-spin, .rl-sync-syncing, .rl-linear-indet, .rl-skel, .app-skel, .rl-typing, .rl-typing-inline, .rl-status-clock, .rl-rec-dot, .rl-rec-pulse) *)::after {
+  animation-duration: 1ms !important; animation-delay: 0s !important; animation-iteration-count: 1 !important; transition: none !important;
+}
+
+/* ---------- «Размытие» выключено (<html data-blur="0">): сплошные поверхности вместо backdrop-filter ---------- */
+html[data-blur="0"] .rl-drop,
+html[data-blur="0"] .rl-glassbar,
+html[data-blur="0"] .rl-shell .rl-csearch,
+html[data-blur="0"] .rl-shell .rl-date span,
+html[data-blur="0"] .rl-shell .rl-unread,
+html[data-blur="0"] .rl-shell .rl-msgmenu .rl-menu,
+html[data-blur="0"] .rl-shell .rl-rpick { -webkit-backdrop-filter: none; backdrop-filter: none; }
+html[data-blur="0"] .rl-glassbar, html[data-blur="0"] .rl-shell .rl-csearch { background: color-mix(in srgb, var(--raised) 96%, transparent); }
+html[data-blur="0"] .rl-shell .rl-glassbar { background: var(--raised); }
+html[data-blur="0"] .rl-shell .rl-date span { background: color-mix(in srgb, var(--raised) 96%, transparent); }
+html[data-blur="0"] .rl-shell .rl-msgmenu .rl-menu, html[data-blur="0"] .rl-shell .rl-rpick { background: color-mix(in srgb, var(--raised) 96%, transparent); }
