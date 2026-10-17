@@ -19,7 +19,7 @@ test('GET /me needs a session and returns the user', async () => {
   expect((await fetch(`${base}/me`)).status).toBe(401);
   const login = await (await fetch(`${base}/dev/login`, { method: 'POST', body: JSON.stringify({ name: 'Анна' }) })).json() as { userId: number; token: string };
   const me = await fetch(`${base}/me`, { headers: { cookie: `relay_session=${login.token}` } });
-  expect(await me.json()).toEqual({ userId: login.userId, name: 'Анна' });
+  expect(await me.json()).toMatchObject({ userId: login.userId, name: 'Анна' });
 });
 
 test('static files and SPA fallback are served without a session', async () => {

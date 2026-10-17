@@ -44,10 +44,34 @@ async function reset() {
   await bumpEpoch(); // id начнутся заново — клиенты должны выбросить старый кэш
 }
 
-async function insertUsers(names: string[]): Promise<number[]> {
+const TR: Record<string, string> = { а: 'a', б: 'b', в: 'v', г: 'g', д: 'd', е: 'e', ё: 'e', ж: 'zh', з: 'z', и: 'i', й: 'y', к: 'k', л: 'l', м: 'm', н: 'n', о: 'o', п: 'p', р: 'r', с: 's', т: 't', у: 'u', ф: 'f', х: 'kh', ц: 'ts', ч: 'ch', ш: 'sh', щ: 'sch', ъ: '', ы: 'y', ь: '', э: 'e', ю: 'yu', я: 'ya' };
+const translit = (s: string) => [...s.toLowerCase()].map((c) => TR[c] ?? (/[a-z0-9]/.test(c) ? c : '_')).join('');
+const BIOS = ['Люблю кофе ☕ и долгие прогулки', 'Дизайнер. Портфолио: https://example.com/portfolio', 'Бегу по утрам 🏃 Пишу код по вечерам', 'Путешествую и фотографирую 📷', null, null, 'Работаю над @relay_team 🚀', 'Читаю, готовлю, иногда сплю 😴', null, 'Мама двоих 👨‍👩‍👧‍👦 и кота'];
+let userNo = 0;
+const usedNames = new Set<string>();
+/** Детерминированные профильные поля: username (транслит, уникальный), телефон +7900…, био и день рождения у части. */
+function profile(name: string, withUsername: boolean) {
+  const n = userNo++;
+  const [first, ...rest] = name.split(' ');
+  let username: string | null = null;
+  if (withUsername) {
+    let u = `${translit(first)}_${translit(rest.join(' '))}`.replace(/_+/g, '_').replace(/^_|_$/g, '').slice(0, 32);
+    while (usedNames.has(u) || u.length < 5) u = `${u.slice(0, 28)}_${n}`;
+    usedNames.add(u);
+    username = u;
+  }
+  return {
+    first_name: first, last_name: rest.join(' ') || null, username,
+    phone: `+7900${String(1000000 + n).slice(-7)}`,
+    bio: BIOS[n % BIOS.length],
+    birthday: n % 3 === 0 ? sql.json({ day: 1 + (n % 28), month: 1 + (n % 12), ...(n % 2 ? { year: 1980 + (n % 25) } : {}) }) : null,
+  };
+}
+
+async function insertUsers(names: string[], withUsername = true): Promise<number[]> {
   // «был(а) …»: чаще недавно, иногда несколько дней назад
   const lastSeen = () => new Date(Date.now() - rnd() ** 2 * 6 * 86_400_000 - 120_000);
-  const rows = await sql`insert into users ${sql(names.map((name) => ({ name, last_seen_at: lastSeen() })))} returning id`;
+  const rows = await sql`insert into users ${sql(names.map((name) => ({ name, last_seen_at: lastSeen(), ...profile(name, withUsername) })))} returning id`;
   return rows.map((r) => r.id as number);
 }
 
@@ -61,7 +85,7 @@ async function main() {
   const all = Array.from({ length: OWNERS + CHATS + 200 }, (_, i) => personName(i));
   const ownerNames = ['Анна Смирнова', ...all.filter((n) => n !== 'Анна Смирнова').slice(0, OWNERS - 1)];
   const owners = await insertUsers(ownerNames);
-  const contacts = await insertUsers(all.filter((n) => !ownerNames.includes(n)).slice(0, CHATS + 200));
+  const contacts = await insertUsers(all.filter((n) => !ownerNames.includes(n)).slice(0, CHATS + 200), true);
   console.log(`users: ${owners.length} owners + ${contacts.length} contacts`);
 
   const now = Date.now();

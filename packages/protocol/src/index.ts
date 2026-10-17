@@ -28,11 +28,28 @@ export type Update =
   | { type: 'draft'; chatId: Id; text: string; at: string }
   | { type: 'messageEdited'; chatId: Id; id: Id; body: string; editedAt: string }
   | { type: 'messageDeleted'; chatId: Id; id: Id }
-  | { type: 'reactions'; chatId: Id; id: Id; reactions: Reaction[] };   // черновик своих устройств; пустой текст — удалён
+  | { type: 'reactions'; chatId: Id; id: Id; reactions: Reaction[] }
+  | { type: 'userUpdated'; user: PublicUser };   // профиль изменился: себе и всем, кто видит пользователя   // черновик своих устройств; пустой текст — удалён
+
+/** День рождения: год необязателен. */
+export interface Birthday { day: number; month: number; year?: number }
+
+/** Профиль глазами зрителя (скрытые правилами приватности поля сервер не отдаёт). */
+export interface PublicUser {
+  id: Id; name: string; firstName: string; lastName: string;
+  username: string | null; bio: string | null; birthday: Birthday | null; phone: string | null;
+}
+
+/** Собственный профиль (GET /me). userId и name — совместимость со старым клиентом. */
+export interface Me {
+  userId: Id; name: string; firstName: string; lastName: string;
+  username: string | null; bio: string | null; birthday: Birthday | null; phone: string | null;
+}
 
 export interface JournalEntry { seq: number; update: Update }
 
-export type ErrorCode = 'bad_frame' | 'unauthorized' | 'not_member' | 'not_found' | 'too_long' | 'forbidden' | 'internal';
+export type ErrorCode = 'bad_frame' | 'unauthorized' | 'not_member' | 'not_found' | 'too_long' | 'forbidden' | 'internal'
+  | 'username_invalid' | 'username_taken' | 'username_reserved' | 'bio_too_long' | 'name_invalid' | 'birthday_invalid';
 
 export type ClientFrame =
   | { op: 'hello'; lastSeq: number }

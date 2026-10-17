@@ -10,14 +10,15 @@ import { connected, disconnected, listPresence, type Publish } from './domain/pr
 import { searchMessages } from './domain/search';
 import { fileFor, MAX_FILE, storeUpload } from './domain/files';
 import { handleFrame } from './ws';
+import { checkUsername, getMe, getUser, setUsername, updateProfile } from './domain/profile';
 import { subscribe, unsubscribe, vapidKeys } from './domain/push';
 
-const STATUS: Record<string, number> = { bad_frame: 400, too_long: 400, unauthorized: 401, not_member: 403, not_found: 404 };
+const STATUS: Record<string, number> = { bad_frame: 400, too_long: 400, username_invalid: 400, username_reserved: 400, username_taken: 409, bio_too_long: 400, name_invalid: 400, birthday_invalid: 400, unauthorized: 401, not_member: 403, not_found: 404 };
 const fail = (code: string) => Response.json({ code }, { status: STATUS[code] ?? 500 });
 
 export type WsData = { userId: number };
 
-const API = /^\/(health|me|chats|presence|search|upload|files|push|ws|dev|logout)(\/|$)/;
+const API = /^\/(health|me|users|chats|presence|search|upload|files|push|ws|dev|logout)(\/|$)/;
 
 /** Статика клиента из WEB_DIST. Путь не может выйти за папку; пути без расширения — SPA, отдаём index.html. */
 function serveStatic(pathname: string): Response {
@@ -49,10 +50,12 @@ export function createServer(opts: { port: number }): Server {
         if ((req.method === 'GET' || req.method === 'HEAD') && !API.test(url.pathname)) return serveStatic(url.pathname);
 
         if (process.env.DEV_LOGIN === '1' && req.method === 'POST' && url.pathname === '/dev/login') {
-          const { name } = (await req.json()) as { name: string };
+          const { name, phone } = (await req.json()) as { name: string; phone?: string };
           // dev: вход по имени — существующий пользователь (в т.ч. из сида) или новый
           const [found] = await sql`select id from users where name = ${String(name ?? '')} order by id limit 1`;
           const userId = found ? (found.id as number) : await createUser(String(name ?? 'user'));
+          // dev: телефон нужен только для проверки профиля (SMS-входа нет); занятый номер не мешает входу
+          if (typeof phone === 'string') await sql`update users set phone = ${phone} where id = ${userId} and phone is null`.catch(() => {});
           const token = await createSession(userId);
           return Response.json({ userId, token }, { headers: { 'set-cookie': sessionCookie(token) } });
         }
@@ -63,9 +66,21 @@ export function createServer(opts: { port: number }): Server {
         if (!userId) return fail('unauthorized');
 
         if (req.method === 'GET' && url.pathname === '/me') {
-          const [u] = await sql`select id, name from users where id = ${userId}`;
-          return Response.json({ userId: u.id, name: u.name });
+          return Response.json(await getMe(userId));
         }
+        if (req.method === 'PATCH' && url.pathname === '/me') {
+          return Response.json(await updateProfile(userId, await req.json().catch(() => null)));
+        }
+        if (req.method === 'PUT' && url.pathname === '/me/username') {
+          const body = (await req.json().catch(() => null)) as { username?: unknown } | null;
+          if (!body || !('username' in body)) return fail('bad_frame');
+          return Response.json(await setUsername(userId, body.username));
+        }
+        if (req.method === 'GET' && url.pathname === '/users/check-username') {
+          return Response.json(await checkUsername(userId, url.searchParams.get('u')));
+        }
+        const user = /^\/users\/(\d+)$/.exec(url.pathname);
+        if (req.method === 'GET' && user) return Response.json(await getUser(userId, Number(user[1])));
         if (req.method === 'POST' && url.pathname === '/logout') {
           const token = readSessionToken(req);
           if (token) await deleteSession(token);
