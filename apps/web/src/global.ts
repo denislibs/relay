@@ -52,7 +52,12 @@ export interface GlobalState {
   sessionsOffline: boolean;         // последний запрос списка не дошёл (нет сети)
   opsKeys: string[];                // ключи операций настроек в очереди: оптимистичный вид сеансов
   names: Record<number, string>;   // имена людей по id (авторы сообщений); кэш переживает перезагрузку
+  devSim: DevSimFlags | null;      // имитатор сети движка включён (status.devSim): плашка «Режим разработчика»
+  devTab: DevTab;                  // вкладка раздела «Для разработчиков»
 }
+
+export type DevTab = 'overview' | 'log' | 'network' | 'data' | 'errors';
+export interface DevSimFlags { offline: boolean; profile: { latency: number; jitter: number; lossPct: number; kbps: number } | null; dropNextUpdates: boolean; forceTooLong: boolean; persist: boolean }
 
 /** Настройки аккаунта (общие для устройств). loaded — снимок с сервера уже был; pending — есть неподтверждённые правки. */
 export interface AccountSettings { notify: Record<'direct' | 'group', { muted: boolean; preview: boolean }>; sessionsTtlDays: number; privacy: PrivacyRules; loaded: boolean; pending: boolean }
@@ -97,6 +102,8 @@ let state: GlobalState = {
   sessionsOffline: false,
   opsKeys: [],
   names: (() => { try { return JSON.parse(localStorage.getItem('relay.names') ?? '{}'); } catch { return {}; } })(),
+  devSim: null,
+  devTab: 'overview',
 };
 const subscribers = new Set<() => void>();
 

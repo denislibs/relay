@@ -4,6 +4,7 @@ import { getGlobal, setGlobal, useGlobal } from '../../global';
 import { back, go } from '../../nav';
 import { sessionsView } from '@relay/sync-engine/src/sessions';
 import { markSelfLogout, prefetch, prefetchAll } from '../../settingsData';
+import { setPref } from '../../prefs';
 import { birthdayText } from '../format';
 import { useScrollMemory } from '../useScrollMemory';
 
@@ -50,6 +51,9 @@ export function Main() {
   const lastToast = useRef('');
   const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
+  const devOn = useGlobal((s) => s.prefs.dev.enabled);
+  const taps = useRef<number[]>([]);
+
   useEffect(() => { prefetchAll(SECTIONS.map((s) => s.path)); }, []);
   useEffect(() => () => { if (timer.current) clearTimeout(timer.current); }, []);
 
@@ -63,6 +67,18 @@ export function Main() {
     navigator.clipboard?.writeText(text).then(() => flash('Скопировано')).catch(() => { /* буфер недоступен */ });
   }
 
+  // пять нажатий на заголовок за 2 с открывают скрытый раздел (флаг на устройстве)
+  function onTitleTap(e: MouseEvent): void {
+    if (!(e.target as HTMLElement).closest('h2')) return;
+    const now = Date.now();
+    taps.current = taps.current.filter((t) => now - t < 2000).concat(now);
+    if (taps.current.length < 5) return;
+    taps.current = [];
+    if (devOn) return;
+    setPref('dev.enabled', true);
+    flash('Раздел для разработчиков включён');
+  }
+
   const phone = me.phone ? (me.phone.startsWith('+') ? me.phone : '+' + me.phone) : null;
   const username = me.username ? '@' + me.username.replace(/^@/, '') : null;
   const bio = me.bio?.trim() || null;
@@ -71,6 +87,7 @@ export function Main() {
 
   return (
     <div class="rl-sidepage" aria-label="Настройки">
+      <div class="app-contents" onClick={onTitleTap}>
       <PanelHeader
         icon="arrowLeft" closeLabel="Назад" title="Настройки" onClose={() => void back()}
         actions={[
@@ -78,6 +95,7 @@ export function Main() {
           { icon: 'more', label: 'Ещё', popup: true, onClick: () => setMenu(true) },
         ]}
       />
+      </div>
       {menu ? <div class="rl-msgmenu-scrim" onClick={() => setMenu(false)} /> : null}
       <Presence show={menu} exitMs={160}>
         <div class="app-pagemenu">
@@ -109,6 +127,11 @@ export function Main() {
               <InfoRow tile={s.tile} icon={s.icon} title={s.title} subtitle={s.subtitle} value={s.path === 'settings/sessions' && sessionCount != null ? sessionCount : undefined} onClick={() => void go(s.path)} />
             </div>
           ))}
+          <Presence show={devOn} exitMs={220}>
+            <div class="app-devrow" onPointerEnter={() => prefetch('settings/dev')}>
+              <InfoRow tile="gray" icon="bug" title="Для разработчиков" subtitle="Синхронизация, сеть, хранилище" onClick={() => void go('settings/dev')} />
+            </div>
+          </Presence>
         </Section>
         <Section title="О приложении">
           <InfoRow icon="info" title="Relay" subtitle={'Сборка ' + __BUILD__} />

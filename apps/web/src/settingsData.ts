@@ -2,13 +2,13 @@
 // слайд приезжает уже заполненным. Подписки настроек (me, ops, user) живут здесь, а не в data.ts.
 
 import { connectEngine, Mirror, type EngineClient } from '@relay/sync-engine/src/client';
-import type { Action, Item, Patch } from '@relay/sync-engine/src/types';
+import type { Action, Item, Patch, Query } from '@relay/sync-engine/src/types';
 import { useEffect, useState } from 'preact/hooks';
 import type { PrivacyKey, PrivacyMode, SessionInfo } from '@relay/protocol';
 import { isSessionOp, sessionsView } from '@relay/sync-engine/src/sessions';
 import { reducedMotion } from '@relay/ui';
 import { engineConfig } from './engineConfig';
-import { getGlobal, setGlobal, type AccountSettings, type Me } from './global';
+import { getGlobal, setGlobal, type AccountSettings, type DevSimFlags, type Me } from './global';
 
 declare const __BUILD__: string;
 
@@ -127,6 +127,9 @@ export function startSettingsData(me: Me): void {
   engine.watch({ kind: 'status' }, (p) => {
     statusM.apply(p);
     const st = statusM.list()[0];
+    // флаги имитатора сети (раздел «Для разработчиков»): плашка во всех вкладках; ссылка не меняется, пока флаги те же
+    const sim = (st?.devSim ?? null) as DevSimFlags | null;
+    if (JSON.stringify(sim) !== JSON.stringify(getGlobal().devSim)) setGlobal({ devSim: sim });
     if (st?.terminated) onTerminated(st.terminatedReason === 'logout' ? 'logout' : 'terminated');
   });
 }
@@ -223,3 +226,12 @@ export function useUser(userId: number | null | undefined): Item | null {
 
 /** Очистка локальных данных: движок стирает кэш и берёт снимок заново; keepOutbox — не трогать неотправленное. */
 export const resetLocal = (keepOutbox: boolean): Promise<unknown> => call({ type: 'resetLocal', keepOutbox });
+
+// ---------- раздел «Для разработчиков» ----------
+
+/** Подписка раздела (devStats, devLog): живёт, только пока открыт раздел. */
+export function watchDev(q: Query, cb: (p: Patch) => void): { update(q: Query): void; close(): void } {
+  if (!engine) return { update() {}, close() {} };
+  return engine.watch(q, cb);
+}
+export const devCall = <T = unknown>(cmd: string, args?: unknown): Promise<T> => call<T>({ type: 'dev', cmd, args } as Action);

@@ -1,4 +1,4 @@
-import { ChatRowSkeleton, ConfirmDialog, InfoRow, PanelHeader, Presence, ProgressRing, Section, Switch, plural, useMinVisible } from '@relay/ui';
+import { ChatRowSkeleton, ConfirmDialog, InfoRow, PanelHeader, Presence, ProgressRing, Section, Switch, useMinVisible } from '@relay/ui';
 import { useEffect, useRef, useState } from 'preact/hooks';
 import { autoloadSubtitle, isDefaultAutoload, type MediaKind } from '../../autoload';
 import { useGlobal } from '../../global';
@@ -7,6 +7,7 @@ import { defaultPrefs, setPrefs } from '../../prefs';
 import { getPendingOps, resetLocal, showToast } from '../../settingsData';
 import { clearMediaCaches, formatBytes, readStorage, type StorageInfo } from '../../storageInfo';
 import { useScrollMemory } from '../useScrollMemory';
+import { clearLocalDialog } from './clearLocal';
 
 const KINDS: [MediaKind, string, string, 'blue' | 'orange' | 'purple'][] = [
   ['photo', 'Фото', 'image', 'blue'], ['video', 'Видео', 'video', 'purple'], ['file', 'Файлы', 'file', 'orange'],
@@ -53,12 +54,10 @@ export function Data() {
   const n = unsent;
   const dialog = {
     cache: { title: 'Очистить кэш медиа?', text: 'Загруженные фото, видео и файлы удалятся с устройства. При необходимости они скачаются снова.', confirm: 'Очистить', run: clearCache },
-    local: n > 0
-      ? { title: 'Очистить локальные данные?', text: `${n} ${plural(n, 'сообщение ещё не отправлено', 'сообщения ещё не отправлены', 'сообщений ещё не отправлено')}. Можно оставить их и отправить позже или удалить вместе с остальным. Черновики удалятся в любом случае. Чаты загрузятся с сервера заново.`, confirm: 'Удалить всё', run: () => clearLocal(false) }
-      : { title: 'Очистить локальные данные?', text: 'Чаты, сообщения и черновики на устройстве удалятся, чаты загрузятся с сервера заново. Неотправленного нет.', confirm: 'Очистить', run: () => clearLocal(true) },
+    local: clearLocalDialog(n, (keep) => void clearLocal(keep)),
     autoload: { title: 'Сбросить настройки автозагрузки?', text: 'Для фото, видео и файлов вернутся значения по умолчанию.', confirm: 'Сбросить', run: () => { setAsk(null); setPrefs({ 'autoload.enabled': def.enabled, 'autoload.photo': def.photo, 'autoload.video': def.video, 'autoload.file': def.file, 'autoload.fileMaxMb': def.fileMaxMb }); } },
   }[lastAsk];
-  const extra = lastAsk === 'local' && n > 0 ? { label: 'Оставить неотправленные', onClick: () => void clearLocal(true) } : undefined;
+  const extra = lastAsk === 'local' ? clearLocalDialog(n, (keep) => void clearLocal(keep)).extra : undefined;
 
   return (
     <div class="rl-sidepage" aria-label="Данные и память">

@@ -27,6 +27,10 @@ export const lossy = (s: SimState): boolean => s.dropNextUpdates || (!!s.profile
 
 export const simActive = (s: SimState): boolean => s.offline || !!s.profile || s.dropNextUpdates || s.forceTooLong;
 
+/** Флаги для подписки status (плашка «Режим разработчика» во всех вкладках): null, пока имитатор выключен. */
+export const simFlags = (s: SimState): { offline: boolean; profile: NetProfile | null; dropNextUpdates: boolean; forceTooLong: boolean; persist: boolean } | null =>
+  simActive(s) ? { offline: s.offline, profile: s.profile, dropNextUpdates: s.dropNextUpdates, forceTooLong: s.forceTooLong, persist: s.persist } : null;
+
 const SIM_META = 'devSim';
 type Persisted = Pick<SimState, 'offline' | 'profile'>;
 

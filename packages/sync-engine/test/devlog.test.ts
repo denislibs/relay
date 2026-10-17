@@ -470,3 +470,48 @@ test('perf: recording an updates frame of 500 items stays a small fraction of ap
   for (let i = 0; i < 3 && best > 0.02; i++) best = Math.min(best, (await measureRecording()).ratio);
   expect(best).toBeLessThanOrEqual(0.05);
 });
+
+test('status carries simulator flags (devSim) only while a mode is on', async () => {
+  const { a } = await pair();
+  const ea = await open(srv.config(a));
+  ea.connect();
+  await ea.whenIdle();
+  const status = watchInto(ea, { kind: 'status' });
+  await status.until((l) => l.length === 1);
+  expect(status.list()[0].devSim).toBeNull();
+  await dev(ea, 'netProfile', { profile: { latency: 300, jitter: 0, lossPct: 0, kbps: 400 } });
+  const on = await status.until((l) => !!l[0]?.devSim);
+  expect(on[0].devSim).toMatchObject({ offline: false, profile: { latency: 300, kbps: 400 } });
+  await dev(ea, 'netProfile', { profile: null });
+  await status.until((l) => l[0]?.devSim === null);
+});
+
+test('idbRead: paged, read-only store viewer; messages of one chat by sort with key search; bodies trimmed', async () => {
+  const { a, b, chatId } = await pair();
+  const long = 'я'.repeat(100);
+  for (let i = 0; i < 5; i++) await sendMessage(b.userId, { chatId, clientId: crypto.randomUUID(), body: i === 0 ? long : 'm' + i });
+  const ea = await open(srv.config(a));
+  ea.connect();
+  await ea.whenIdle();
+  const feed = watchInto(ea, { kind: 'messages', chatId, limit: 50 });
+  await feed.until((l) => l.length === 5);
+  await ea.whenIdle();
+  type R = { rows: { key: string; value: Record<string, unknown> }[]; offset: number; more: boolean };
+  const chats = await dev(ea, 'idbRead', { store: 'chats' }) as R;
+  expect(chats.rows.map((r) => r.key)).toEqual([String(chatId)]);
+  const p1 = await dev(ea, 'idbRead', { store: 'messages', chatId, limit: 3 }) as R;
+  expect(p1.rows.length).toBe(3);
+  expect(p1.more).toBe(true);
+  expect((p1.rows[0].value.body as string).length).toBe(41);   // обрезано, как в журнале
+  const p2 = await dev(ea, 'idbRead', { store: 'messages', chatId, limit: 3, offset: 3 }) as R;
+  expect(p2.rows.length).toBe(2);
+  expect(p2.more).toBe(false);
+  const sorts = [...p1.rows, ...p2.rows].map((r) => r.value.sort as number);
+  expect(sorts).toEqual([...sorts].sort((x, y) => x - y));
+  const k = p2.rows[1].key;
+  const found = await dev(ea, 'idbRead', { store: 'messages', chatId, q: k }) as R;
+  expect(found.rows.map((r) => r.key)).toEqual([k]);
+  const meta = await dev(ea, 'idbRead', { store: 'meta' }) as R;
+  expect(meta.rows.some((r) => r.key === 'lastSeq')).toBe(true);
+  await expect(dev(ea, 'idbRead', { store: 'blobs' })).rejects.toThrow(/bad_store/);
+});

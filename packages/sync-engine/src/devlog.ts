@@ -2,6 +2,7 @@ import type { ClientFrame, ServerFrame } from '@relay/protocol';
 import { lossy, newSim, normProfile, saveSim, simActive, simFetch, type SimState } from './devsim';
 import { buildStats, countStores, estimateBytes, type DevWatcher, type HostInfo, type EngineView, type SyncCounters } from './devstats';
 import type { DevAction, Item, Patch, Query } from './types';
+import { readStore } from './devdata';
 
 /**
  * Раздел «Для разработчиков»: журнал движка и его доставка подпискам (devLog), команды dev.*.
@@ -322,6 +323,7 @@ export class DevTools {
       case 'retryFailed': return { count: await this.hooks.retryFailed() };
       case 'discardFailed': return { count: await this.hooks.discardFailed() };
       case 'clearLog': this.log.clear(); return null;
+      case 'idbRead': return readStore(this.db, a.args);
     }
   }
 }

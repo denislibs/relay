@@ -38,7 +38,7 @@ export function pushError(source: ErrorSource, message: string, stack?: string |
 export const getErrors = (): DevError[] => errors;
 /** Новых с последнего просмотра вкладки «Ошибки». */
 export const newErrorCount = (): number => errors.filter((e) => e.id > errSeen).length;
-export function markErrorsSeen(): void { errSeen = errSeq; for (const fn of errSubs) fn(); }
+export function markErrorsSeen(): void { if (errSeen === errSeq) return; errSeen = errSeq; for (const fn of errSubs) fn(); }
 export function subscribeErrors(fn: () => void): () => void { errSubs.add(fn); return () => { errSubs.delete(fn); }; }
 export function clearErrors(): void { errors = []; errSeen = errSeq; for (const fn of errSubs) fn(); }
 

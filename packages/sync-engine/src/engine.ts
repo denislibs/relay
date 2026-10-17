@@ -12,7 +12,7 @@ import { applyUserUpdated, meItem, meView, OP_PROFILE, OP_USERNAME, userItem } f
 import { OP_SESSIONS_TTL, Sessions } from './sessions';
 import { SessionEnd } from './session';
 import { DevTools, loadSim, type SimState, type SubStat } from './devlog';
-import { watchLoss } from './devsim';
+import { simFlags, watchLoss } from './devsim';
 import type { Action, EngineConfig, LocalMessage, Patch, Query, SearchResult } from './types';
 
 export interface WatchHandle { update(q: Query): void; close(): void }
@@ -293,6 +293,7 @@ export class Engine {
       outbox: [...this.store.outbox.values()].filter((o) => !o.failed).length,
       failed: [...this.store.outbox.values()].filter((o) => o.failed).length,
       ...this.session.status(),
+      devSim: simFlags(this.dev.sim),   // имитатор сети включён — плашка «Режим разработчика» во всех вкладках
     };
   }
 
@@ -630,7 +631,7 @@ export class Engine {
         return null;
       }
       case 'resetLocal': return this.resetLocal(a.keepOutbox !== false);
-      case 'dev': return this.dev.command(a);
+      case 'dev': return this.dev.command(a).finally(() => this.pushStatus());   // флаги имитатора — в status сразу
       case 'search': return this.search(a);
       case 'chatMedia': return this.http<{ messages: Message[] }>(`/chats/${a.chatId}/media?kind=${a.kind}`).then((r) => r.messages);
       case 'sendFile': {

@@ -139,7 +139,9 @@ export type DevAction =
   | { type: 'dev'; cmd: 'offline'; args: { on: boolean; persist?: boolean } }
   | { type: 'dev'; cmd: 'netProfile'; args: { profile: NetProfile | null; persist?: boolean } }
   | { type: 'dev'; cmd: 'persist'; args: { on: boolean } }
-  | { type: 'dev'; cmd: 'dropSocket' | 'dropNextUpdates' | 'forceTooLong' | 'resync' | 'restartWorker' | 'retryFailed' | 'discardFailed' | 'clearLog'; args?: undefined };
+  | { type: 'dev'; cmd: 'dropSocket' | 'dropNextUpdates' | 'forceTooLong' | 'resync' | 'restartWorker' | 'retryFailed' | 'discardFailed' | 'clearLog'; args?: undefined }
+  /** просмотр стора IDB постранично (devdata.ts), только чтение: {rows, offset, more} */
+  | { type: 'dev'; cmd: 'idbRead'; args: import('./devdata').IdbReadArgs };
 
 export interface EngineConfig {
   /** сколько resetLocal ждёт идущую работу, мс (по умолчанию 8000) */
