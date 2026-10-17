@@ -1,4 +1,5 @@
-import { AsidePanel, EmptyState, FloatShell, SideFrame, SlideStack } from '@relay/ui';
+import { AsidePanel, EmptyState, FloatShell, Presence, SideFrame, SlideStack, Toast } from '@relay/ui';
+import { useRef } from 'preact/hooks';
 import { useGlobal } from '../global';
 import { orderFor } from '../nav';
 import { Chat } from './Chat';
@@ -8,6 +9,7 @@ import { NewChat } from './NewChat';
 import { LegacyPage } from './Settings';
 import { Main } from './settings/Main';
 import { Placeholder } from './settings/Placeholder';
+import { Profile } from './settings/Profile';
 import { Sidebar } from './Sidebar';
 
 
@@ -27,7 +29,7 @@ export function App() {
   if (boot === 'login') return <Login />;
   return (
     <>
-      <FloatShell class={openChatId ? 'app-chat-open' : ''} sideWidth={savedSide} onSideResize={saveSide} aside={<AsidePanel open={infoOpen && !!openChatId} label="Информация"><Info /></AsidePanel>} sidebar={<SideFrame><SlideStack order={orderFor(view)} active={view} render={(k: string) => (k === 'chats' ? <Sidebar /> : k === 'settings' ? <Main /> : LEGACY[k] ? <LegacyPage path={k} title={LEGACY[k]} /> : <Placeholder path={k} />)} /></SideFrame>}>
+      <FloatShell class={openChatId ? 'app-chat-open' : ''} sideWidth={savedSide} onSideResize={saveSide} aside={<AsidePanel open={infoOpen && !!openChatId} label="Информация"><Info /></AsidePanel>} sidebar={<SideFrame><SlideStack order={orderFor(view)} active={view} render={(k: string) => (k === 'chats' ? <Sidebar /> : k === 'settings' ? <Main /> : k === 'settings/profile' ? <Profile /> : LEGACY[k] ? <LegacyPage path={k} title={LEGACY[k]} /> : <Placeholder path={k} />)} /></SideFrame>}>
         {openChatId ? (
           <Chat key={openChatId} chatId={openChatId} />
         ) : (
@@ -37,6 +39,19 @@ export function App() {
         )}
       </FloatShell>
       <NewChat />
+      <AppToast />
     </>
+  );
+}
+
+/** Общий тост (ошибки сохранения настроек): живёт над всем приложением, уходит плавно. */
+function AppToast() {
+  const toast = useGlobal((s) => s.toast);
+  const last = useRef('');
+  if (toast) last.current = toast.text;
+  return (
+    <Presence show={!!toast} exitMs={200}>
+      <div class="app-toast app-toast-global"><Toast>{toast?.text ?? last.current}</Toast></div>
+    </Presence>
   );
 }

@@ -53,3 +53,28 @@ export function fileSize(n: number): string {
   if (n < 1024 * 1024) return Math.round(n / 1024) + ' КБ';
   return (n / 1024 / 1024).toFixed(1).replace('.', ',') + ' МБ';
 }
+
+/** День рождения: год необязателен. */
+export interface Birthday { day: number; month: number; year?: number }
+
+export const MONTHS_GEN = ['января', 'февраля', 'марта', 'апреля', 'мая', 'июня', 'июля', 'августа', 'сентября', 'октября', 'ноября', 'декабря'];
+
+/** Полных лет на дату now (по местному календарю). */
+export function age(b: Birthday, now = new Date()): number | null {
+  if (!b.year) return null;
+  let n = now.getFullYear() - b.year;
+  if (now.getMonth() + 1 < b.month || (now.getMonth() + 1 === b.month && now.getDate() < b.day)) n--;
+  return n >= 0 ? n : null;
+}
+
+const yearsWord = (n: number) => {
+  const d = n % 10, h = n % 100;
+  return d === 1 && h !== 11 ? 'год' : d >= 2 && d <= 4 && (h < 12 || h > 14) ? 'года' : 'лет';
+};
+
+/** «29 апреля (34 года)»; без года — «29 апреля». */
+export function birthdayText(b: Birthday, now = new Date()): string {
+  const base = `${b.day} ${MONTHS_GEN[b.month - 1] ?? ''}`.trim();
+  const a = age(b, now);
+  return a == null ? base : `${base} (${a} ${yearsWord(a)})`;
+}

@@ -3,6 +3,7 @@ import { render } from 'preact';
 import { startData } from './data';
 import { getGlobal, setGlobal, type Me } from './global';
 import * as nav from './nav';
+import { startSettingsData } from './settingsData';
 import { App } from './ui/App';
 
 declare const __DEV__: boolean;
@@ -31,6 +32,7 @@ async function boot(): Promise<void> {
   }
   setGlobal({ me, boot: 'app' });
   startData(me);
+  startSettingsData(me);
 }
 
 nav.installNav({ get: () => getGlobal().sidebarView, set: (p) => setGlobal({ sidebarView: p }), escBusy: () => getGlobal().infoOpen && !!getGlobal().openChatId });

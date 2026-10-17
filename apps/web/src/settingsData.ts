@@ -1,5 +1,12 @@
 // Данные разделов настроек. Предзагрузка: на главной странице и при наведении на строку раздела —
-// слайд приезжает уже заполненным. Пока пусто, последующие задачи подключают свои подписки.
+// слайд приезжает уже заполненным. Подписки настроек (me, ops, user) живут здесь, а не в data.ts.
+
+import { connectEngine, Mirror, type EngineClient } from '@relay/sync-engine/src/client';
+import type { Action, Item, Patch } from '@relay/sync-engine/src/types';
+import { useEffect, useState } from 'preact/hooks';
+import { getGlobal, setGlobal, type Me } from './global';
+
+declare const __BUILD__: string;
 
 const loaders = new Map<string, () => void>();
 
@@ -12,3 +19,96 @@ export function prefetch(path: string): void {
 
 /** Пути разделов главной страницы — предзагружаем все при открытии. */
 export function prefetchAll(paths: string[]): void { for (const p of paths) prefetch(p); }
+
+// ---------- движок ----------
+
+// Своё соединение с тем же движком (SharedWorker/лидер один на все вкладки): data.ts свой клиент наружу не отдаёт.
+// Конфиг — как в data.ts: хост берёт конфиг первого hello, поэтому он обязан совпадать.
+let engine: EngineClient | null = null;
+
+/** Тексты отказов сервера (opFailed). */
+const FAIL_TEXT: Record<string, string> = {
+  username_taken: 'Это имя уже занято',
+  username_reserved: 'Это имя уже занято',
+  username_invalid: 'Недопустимое имя пользователя',
+  bio_too_long: 'Слишком длинный текст о себе',
+  name_invalid: 'Укажите имя',
+};
+export const failText = (code: string): string => FAIL_TEXT[code] ?? 'Не удалось сохранить изменения';
+
+let toastSeq = 0;
+let toastTimer: ReturnType<typeof setTimeout> | null = null;
+/** Общий тост приложения: держится 2,5 с, новый сменяет прежний. */
+export function showToast(text: string): void {
+  const id = ++toastSeq;
+  setGlobal({ toast: { text, id } });
+  if (toastTimer) clearTimeout(toastTimer);
+  toastTimer = setTimeout(() => { if (getGlobal().toast?.id === id) setGlobal({ toast: null }); }, 2500);
+}
+
+const ME_KEY = 'relay.me';
+
+export function startSettingsData(me: Me): void {
+  const feedPage = Math.max(30, Math.ceil(innerHeight / 40) * 2);
+  engine = connectEngine({
+    build: __BUILD__,
+    config: {
+      userId: me.userId,
+      dbName: 'relay-' + me.userId,
+      httpBase: location.origin,
+      wsUrl: (location.protocol === 'https:' ? 'wss://' : 'ws://') + location.host + '/ws',
+      dialogsPage: Math.max(20, Math.ceil(innerHeight / 72) * 2),
+      historyPage: feedPage,
+    },
+    sharedUrl: '/shared.worker.js',
+    dedicatedUrl: '/dedicated.worker.js',
+  });
+
+  // свой профиль: база сервера + ещё не подтверждённые правки — правка видна сразу, в том числе без сети
+  const meM = new Mirror();
+  engine.watch({ kind: 'me' }, (p) => {
+    meM.apply(p);
+    const it = meM.list()[0];
+    if (!it) return;
+    const { key: _key, ...rest } = it;
+    const next = rest as unknown as Me;
+    setGlobal({ me: next });
+    try { localStorage.setItem(ME_KEY, JSON.stringify(next)); } catch { /* приватный режим */ }
+  });
+
+  // отказы сервера: тост на каждый новый (случившиеся до подписки — уже не новость)
+  const opsM = new Mirror();
+  let seen = -1;
+  engine.watch({ kind: 'ops' }, (p) => {
+    opsM.apply(p);
+    const failures = (opsM.list()[0]?.failures ?? []) as { id: number; code: string }[];
+    const max = failures.reduce((m, f) => Math.max(m, f.id), 0);
+    if (seen >= 0) {
+      const fresh = failures.filter((f) => f.id > seen);
+      if (fresh.length) showToast(failText(fresh[fresh.length - 1].code));
+    }
+    seen = Math.max(seen, max);
+  });
+}
+
+const call = <T>(a: Action): Promise<T> => (engine ? engine.call<T>(a) : Promise.reject(new Error('engine not started')));
+
+export interface ProfilePatch { firstName?: string; lastName?: string; bio?: string | null; birthday?: { day: number; month: number; year?: number } | null }
+export const updateProfile = (patch: ProfilePatch): Promise<unknown> => call({ type: 'updateProfile', ...patch });
+export const setUsername = (username: string | null): Promise<unknown> => call({ type: 'setUsername', username });
+export type UsernameCheck = { ok: true } | { ok: false; reason: 'invalid' | 'taken' | 'reserved' } | { offline: true };
+export const checkUsername = (username: string): Promise<UsernameCheck> =>
+  call<UsernameCheck>({ type: 'checkUsername', username }).catch(() => ({ offline: true as const }));
+
+/** Профиль человека (PublicUser) — подписка движка, пока компонент смонтирован. */
+export function useUser(userId: number | null | undefined): Item | null {
+  const [user, setUser] = useState<Item | null>(null);
+  useEffect(() => {
+    setUser(null);
+    if (!userId || !engine) return;
+    const m = new Mirror();
+    const w = engine.watch({ kind: 'user', userId }, (p: Patch) => { m.apply(p); setUser(m.list()[0] ?? null); });
+    return () => w.close();
+  }, [userId]);
+  return user;
+}

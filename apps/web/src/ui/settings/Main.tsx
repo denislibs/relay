@@ -3,6 +3,7 @@ import { useEffect, useRef, useState } from 'preact/hooks';
 import { getGlobal, setGlobal, useGlobal } from '../../global';
 import { back, go } from '../../nav';
 import { prefetch, prefetchAll } from '../../settingsData';
+import { birthdayText } from '../format';
 import { useScrollMemory } from '../useScrollMemory';
 
 declare const __BUILD__: string;
@@ -23,14 +24,6 @@ const SECTIONS: SectionRow[] = [
 
 // число сеансов подключит B9; пока значение не показываем
 const sessionCount: number | null = null;
-
-const ISO_DAY = /^(\d{4})-(\d{2})-(\d{2})$/;
-function birthdayText(v: string): string {
-  const m = ISO_DAY.exec(v);
-  if (!m) return v;
-  const d = new Date(Date.UTC(+m[1], +m[2] - 1, +m[3]));
-  return d.toLocaleDateString('ru-RU', { day: 'numeric', month: 'long', year: +m[1] > 1 ? 'numeric' : undefined, timeZone: 'UTC' });
-}
 
 /** Выход: сервер удаляет сеанс; без подтверждения сервера остаёмся в системе (иначе cookie жива и вход вернётся). */
 async function logout(): Promise<boolean> {

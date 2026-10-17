@@ -9,8 +9,8 @@ import type { Item } from '@relay/sync-engine/src/types';
 /** Края окна ленты: есть ли сообщения раньше/позже, окно ли это живого хвоста. */
 export interface FeedMeta { hasOlder: boolean; hasNewer: boolean; live: boolean }
 
-/** Поля профиля приходят позже (B1) — до тех пор опциональны, строки без значения не показываем. */
-export interface Me { userId: number; name: string; firstName?: string; lastName?: string; username?: string | null; bio?: string | null; birthday?: string | null; phone?: string | null }
+/** Свой профиль (GET /me, дальше — подписка me движка). Поля опциональны: старый кэш relay.me их не знает. */
+export interface Me { userId: number; name: string; firstName?: string; lastName?: string; username?: string | null; bio?: string | null; birthday?: { day: number; month: number; year?: number } | null; phone?: string | null }
 export type Phase = 'connecting' | 'offline' | 'loading' | 'updating' | 'ready';
 export interface Status { phase: Phase; hydrated: boolean; chatsComplete?: boolean; chatsCursorAt?: number; online: boolean; synced: boolean; syncing: boolean; outbox: number; failed: number }
 
@@ -40,6 +40,7 @@ export interface GlobalState {
   prefs: Prefs;       // настройки устройства, см. prefs.ts
   notify: NotifyState;   // уведомления на этом устройстве
   pushReady: boolean;    // подписка Web Push принята сервером: уведомит и без открытой вкладки
+  toast: { text: string; id: number } | null;   // общий тост приложения (ошибки сохранения настроек и т. п.)
 }
 
 let state: GlobalState = {
@@ -67,6 +68,7 @@ let state: GlobalState = {
   prefs: getPrefs(),
   notify: 'unsupported',
   pushReady: false,
+  toast: null,
 };
 const subscribers = new Set<() => void>();
 

@@ -1,11 +1,12 @@
-import { Avatar, EmptyState, FolderTabs, InfoRow, LazyImage, PanelHeader, SlideStack, Switch } from '@relay/ui';
+import { Avatar, EmptyState, FolderTabs, InfoRow, LazyImage, PanelHeader, RichText, SettingsIcon, SlideStack, Switch } from '@relay/ui';
 import type { Item } from '@relay/sync-engine/src/types';
 import { chatMedia, focusMessage } from '../data';
 import { fileSize } from './format';
 import { useEffect, useState } from 'preact/hooks';
 import { syncMuted } from '../notify';
 import { setGlobal, useGlobal } from '../global';
-import { clock, dayLabel, lastSeenText } from './format';
+import { birthdayText, clock, dayLabel, lastSeenText, type Birthday } from './format';
+import { showToast, useUser } from '../settingsData';
 
 const TABS = ['media', 'files', 'links'];
 const URL_RE = /https?:\/\/[^\s<>"']+/g;
@@ -29,6 +30,8 @@ export function Info() {
   const messages = useGlobal((s) => s.messages);
   const muted = useGlobal((s) => s.muted);
   const [tab, setTab] = useState('media');
+  // профиль собеседника личного чата: только то, что сервер разрешил показать
+  const user = useUser(chat?.kind === 'direct' ? (chat.peerId as number | null) : null);
   // медиа и файлы чата — с сервера (вся история), при открытии вкладки
   const [media, setMedia] = useState<{ photo?: Item[]; file?: Item[] }>({});
   useEffect(() => {
@@ -63,8 +66,10 @@ export function Info() {
           <div class={'rl-profile-sub' + (myPeer?.online ? ' app-online' : '')}>{subtitle || ' '}</div>
         </div>
         <div class="rl-aside-group">
-          <InfoRow icon={group ? 'community' : 'contact'} title={title} subtitle={group ? 'Название группы' : 'Имя'} />
+          <InfoRow tile="orange" icon={group ? 'community' : 'contact'} title={title} subtitle={group ? 'Название группы' : 'Имя'} />
+          {!group && user ? <PeerRows user={user} /> : null}
           <InfoRow
+            tile="red"
             icon={muted.includes(chatId) ? 'bellOff' : 'bell'}
             title="Уведомления"
             subtitle={muted.includes(chatId) ? 'Выключены на этом устройстве' : 'Включены'}
@@ -110,6 +115,29 @@ export function Info() {
           } />
         </div>
       </div>
+    </>
+  );
+}
+
+const copy = (text: string) => { navigator.clipboard?.writeText(text).then(() => showToast('Скопировано')).catch(() => { /* буфер недоступен */ }); };
+
+/** @username, «О себе», «День рождения», «Телефон» — каждая строка, только если поле видно. */
+function PeerRows({ user }: { user: Item }) {
+  const username = user.username ? '@' + String(user.username) : null;
+  const bio = (user.bio as string | null)?.trim() || null;
+  const birthday = user.birthday ? birthdayText(user.birthday as Birthday) : null;
+  const phone = user.phone ? String(user.phone) : null;
+  return (
+    <>
+      {username ? <InfoRow tile="blue" icon="at" title={username} subtitle="Имя пользователя" onClick={() => copy(username)} /> : null}
+      {bio ? (
+        <div class="rl-inforow rl-inforow-static">
+          <SettingsIcon icon="info" color="gray" />
+          <span class="rl-inforow-text"><span class="rl-bio app-info-bio"><RichText text={bio} /></span><small>О себе</small></span>
+        </div>
+      ) : null}
+      {birthday ? <InfoRow tile="purple" icon="cake" title={birthday} subtitle="День рождения" /> : null}
+      {phone ? <InfoRow tile="green" icon="phone" title={phone} subtitle="Телефон" onClick={() => copy(phone)} /> : null}
     </>
   );
 }
