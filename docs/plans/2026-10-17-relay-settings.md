@@ -302,10 +302,13 @@ contacts
 ## File Structure
 
 ```
-apps/server/migrations/004_profile.sql      users: first_name, last_name, username (citext unique), bio, birthday, phone (unique), username_lower индекс
-apps/server/migrations/005_contacts.sql     contacts(owner_id, user_id, first_name, last_name, note, created_at, pk(owner,user)); blocks(owner_id, user_id, created_at)
-apps/server/migrations/006_settings.sql     user_settings(user_id pk, notify jsonb, sessions_ttl_days int); privacy_rules(user_id, key, mode, allow bigint[], deny bigint[], pk(user,key))
-apps/server/migrations/007_sessions.sql     sessions: id identity, device, ip, created_at, last_active_at
+apps/server/migrations/100_profile.sql      users: first_name, last_name, username (citext unique), bio, birthday, phone (unique), username_lower индекс
+apps/server/migrations/101_contacts.sql     contacts(owner_id, user_id, first_name, last_name, note, created_at, pk(owner,user)); blocks(owner_id, user_id, created_at)
+apps/server/migrations/102_settings.sql     user_settings(user_id pk, notify jsonb, sessions_ttl_days int); privacy_rules(user_id, key, mode, allow bigint[], deny bigint[], pk(user,key))
+apps/server/migrations/103_privacy.sql      privacy_rules (вынесено из 102)
+apps/server/migrations/104_sessions.sql     sessions: id identity, device, ip, created_at, last_active_at
+apps/server/migrations/105_push_session.sql push_subscriptions.session_id (каскад при удалении сеанса), hide_text
+                                            Диапазон 1xx зарезервирован за этой веткой (раннер применяет файлы по имени): у master — 0xx.
 apps/server/src/domain/profile.ts           getMe, updateProfile, checkUsername, resolveUser(@username|phone), publicUser(viewer, user) с правилами
 apps/server/src/domain/contacts.ts          addContact, updateContact, removeContact, listContacts, block/unblock/listBlocked
 apps/server/src/domain/privacy.ts           getRules, setRule, canSee(viewer, owner, key) — одна функция, через которую идут все выдачи
@@ -348,9 +351,9 @@ GET    /me                         → Me {userId, firstName, lastName, username
 PATCH  /me                         {firstName?, lastName?, bio?, birthday?|null}  → Me
 PUT    /me/username                {username|null} → Me | 409 username_taken | 400 username_invalid
 GET    /users/check-username?u=    → {ok} | {ok:false, reason}
-GET    /users/resolve?q=@name|+7…  → PublicUser | 404
+POST   /users/resolve {query: @name|+7…} → PublicUser | 404   (POST: номер не попадает в URL и журналы доступа)
 GET    /users/:id                  → PublicUser (поля по правилам; имя — контактное, если есть)
-GET    /contacts                   → Contact[] ;  POST /contacts {userId|query, firstName, lastName}
+GET    /contacts                   → {contacts: Contact[], seq} ;  POST /contacts {userId|query, firstName, lastName}
 PATCH  /contacts/:userId {firstName?, lastName?, note?} ;  DELETE /contacts/:userId
 GET    /blocks ; PUT /blocks/:userId ; DELETE /blocks/:userId
 GET    /settings                   → {notify:{direct:{muted,preview}, group:{…}}, sessionsTtlDays, privacy:{key:{mode,allow,deny}}}
@@ -404,7 +407,7 @@ DELETE /sessions/:id ; DELETE /sessions?others=1
 ### Этап B. MVP
 
 #### Task B1: Профиль — сервер
-**Files:** `migrations/004_profile.sql`, `domain/profile.ts`, `http.ts`, `protocol`, `dev/seed.ts`, `test/profile.test.ts`.
+**Files:** `migrations/100_profile.sql`, `domain/profile.ts`, `http.ts`, `protocol`, `dev/seed.ts`, `test/profile.test.ts`.
 - [ ] Миграция: `first_name` (из `name`), `last_name`, `username citext unique`, `bio text check (length ≤ 140)`, `birthday jsonb {day,month,year?}`, `phone text unique`; `name` остаётся вычисляемым отображением `first + ' ' + last` (обновляется в той же транзакции) — старый код не ломается.
 - [ ] `PATCH /me`, `PUT /me/username`, `GET /users/check-username`: правила длины/символов, зарезервированные имена (`admin`, `relay`, `support`…), гонка двух одинаковых — один получает 409 (уникальный индекс, не проверка «до»).
 - [ ] Журнал: `userUpdated {user: PublicUser}` себе и всем, кто видит пользователя (собеседники, участники групп, владельцы контакта). Публичное представление — через `publicUser(viewer, user)`, чтобы скрытые поля не утекали в журнал.
@@ -419,7 +422,7 @@ DELETE /sessions/:id ; DELETE /sessions?others=1
 - [ ] Playwright: Анна меняет имя и bio со ссылкой и эмодзи → у Бориса в списке чатов и «Информации» новое имя и кликабельная ссылка; занятый username — ошибка под полем; офлайн-правка → после сети сохранилась.
 
 #### Task B3: Контакты
-**Files:** `migrations/005_contacts.sql`, `domain/contacts.ts`, `domain/chats.ts` (контактное имя в `peer`), `sync-engine` (`contacts`), `ui/contacts/*`, `Info.tsx`.
+**Files:** `migrations/101_contacts.sql`, `domain/contacts.ts`, `domain/chats.ts` (контактное имя в `peer`), `sync-engine` (`contacts`), `ui/contacts/*`, `Info.tsx`.
 - [ ] Сервер: `addContact` по `userId` или запросу (`@username`, телефон с учётом `phone`-правила «кто найдёт по номеру»), `updateContact` (имя, фамилия, заметка ≤ 128), `removeContact`, `listContacts` с присутствием; `contactsChanged` в журнал владельцу.
 - [ ] `listChats` и `/users/:id` возвращают контактное имя владельцу; собеседник его не видит.
 - [ ] Страница «Контакты»: поиск (локально по имени/username), сортировка «в сети» → по визиту, FAB «Добавить контакт», пустое состояние `EmptyState kind="contacts"` (новая анимированная картинка в стиле существующих).
@@ -438,7 +441,7 @@ DELETE /sessions/:id ; DELETE /sessions?others=1
 - [ ] Playwright: Ctrl+Enter-режим — Enter даёт перенос, Ctrl+Enter отправляет; смена обоев видна сразу и после перезагрузки; 12 ч — время в списке и ленте.
 
 #### Task B5: Уведомления
-**Files:** `migrations/006_settings.sql`, `domain/settings.ts`, `ui/settings/Notifications.tsx`, `prefs.ts`. Согласовать с основной сессией (пуши, этап 6): интерфейс и умолчания — здесь, доставка — там.
+**Files:** `migrations/102_settings.sql`, `migrations/103_privacy.sql`, `domain/settings.ts`, `ui/settings/Notifications.tsx`, `prefs.ts`. Согласовать с основной сессией (пуши, этап 6): интерфейс и умолчания — здесь, доставка — там.
 - [ ] Блок «В браузере»: «Уведомления» (запрос `Notification.requestPermission`, отказ → откат и подпись «Запрещено в браузере»), «Когда вкладка закрыта» (Web Push; пока нет механизма — строка неактивна с подписью «Скоро»).
 - [ ] Блок «Звук»: ⇄ и громкость 0–100 % с примером при отпускании.
 - [ ] Блоки «Личные чаты» и «Группы»: «Уведомления» и «Предпросмотр сообщений» → `PUT /settings/notify/:type` → `settingsChanged`.
@@ -469,7 +472,7 @@ DELETE /sessions/:id ; DELETE /sessions?others=1
 - [ ] Playwright: «Экономия» → переход в настройки без слайда (мгновенно), меню без размытия; «Максимум» → всё возвращается; `performance` trace перехода — без long tasks > 50 мс.
 
 #### Task B9: Активные сеансы
-**Files:** `migrations/007_sessions.sql`, `domain/sessions.ts`, `auth.ts` (`createSession` пишет устройство/IP, `userIdFromToken` трогает `last_active_at`), `http.ts`, `realtime.ts`/`ws.ts` (топик `session:<id>`), `ui/settings/Sessions.tsx`, `main.tsx` (выход по `sessionTerminated`/401).
+**Files:** `migrations/104_sessions.sql`, `migrations/105_push_session.sql`, `domain/sessions.ts`, `auth.ts` (`createSession` пишет устройство/IP, `userIdFromToken` трогает `last_active_at`), `http.ts`, `realtime.ts`/`ws.ts` (топик `session:<id>`), `ui/settings/Sessions.tsx`, `main.tsx` (выход по `sessionTerminated`/401).
 - [ ] Устройство — грубый разбор User-Agent на сервере («Chrome 141, macOS»), IP — из `x-forwarded-for` за прокси или `server.requestIP`.
 - [ ] Список, «Завершить», «Завершить все другие», автозавершение (`sessions_ttl_days`, чистка при входе и раз в час).
 - [ ] Завершённый сеанс: сокет закрывается, следующий HTTP → 401; клиент показывает тост «Сеанс завершён на другом устройстве» и плавно уходит на вход, IDB очищается.
@@ -502,7 +505,7 @@ DELETE /sessions/:id ; DELETE /sessions?others=1
 - [ ] 5 нажатий за 2 с на «Настройки» → тост «Раздел для разработчиков включён» → строка появляется плавно (`Presence`); «Скрыть раздел» на странице убирает её.
 - [ ] Вкладки «Обзор / Журнал / Сеть / Данные / Ошибки»; журнал — `WindowList` с автопрокруткой, фильтр-чипы, раскрытие JSON текстом; «Скачать диагностику» → `Blob` + `<a download>` (`relay-diagnostics-<build>-<время>.json`).
 - [ ] Плашка в шапке, пока включён любой режим сети; клик по ней открывает вкладку «Сеть».
-- [ ] Playwright: открыть раздел; «Симулировать офлайн» → баннер «Нет сети», отправленное сообщение с часиками; выключить → сообщение `sent`, в журнале видны `hello` → `sync` → `ack`; «Разорвать сокет» → в журнале disconnect → backoff → `hello`, отставание seq вернулось к 0; «Медленная сеть: 3G» → задержка ack в журнале ≈ 300 мс; «Дыра в журнале» → в журнале повторный `sync`; диагностика скачивается и не содержит полных текстов сообщений; в консоли нет ошибок.
+- [ ] Playwright: открыть раздел; «Симулировать офлайн» → индикатор «Ожидание сети…» в шапке (отдельного баннера «Нет сети» в приложении нет), отправленное сообщение с часиками; выключить → сообщение `sent`, в журнале видны `hello` → `sync` → `ack`; «Разорвать сокет» → в журнале disconnect → backoff → `hello`, отставание seq вернулось к 0; «Медленная сеть: 3G» → задержка ack в журнале ≈ 300 мс; «Дыра в журнале» → в журнале повторный `sync`; диагностика скачивается и не содержит полных текстов сообщений; в консоли нет ошибок.
 
 ---
 
