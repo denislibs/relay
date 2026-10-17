@@ -1,5 +1,6 @@
 import type { Birthday, Me, PublicUser } from '@relay/protocol';
 import { getAll } from './idb';
+import { cleanName, cleanText } from './text';
 import type { PendingOp } from './ops';
 import type { Store } from './store';
 import type { Item } from './types';
@@ -90,8 +91,7 @@ export function applyUserUpdated(store: Store, u: PublicUser, seq?: number): voi
   }
 }
 
-const cleanName = (s: string) => s.trim().replace(/\s+/g, ' ');
-const cleanBio = (s: string | null) => (s == null ? null : s.replace(/\r\n?/g, '\n').trim() || null);
+const cleanBio = (s: string | null) => (s == null ? null : cleanText(s) || null);
 export const cleanUsername = (s: string | null) => (s ? s.trim().replace(/^@/, '').toLowerCase() || null : null);
 
 /** Свой профиль, как его видит интерфейс: база сервера + ещё не подтверждённые правки из очереди (по порядку). */

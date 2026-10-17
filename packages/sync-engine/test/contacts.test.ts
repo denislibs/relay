@@ -1,5 +1,5 @@
 import { afterAll, afterEach, beforeEach, expect, test } from 'bun:test';
-import { contactsView } from '../src/contacts';
+import { ContactsCache, contactsView } from '../src/contacts';
 import { Engine } from '../src/engine';
 import { resetDb, startTestServer, watchInto } from './helpers';
 
@@ -131,4 +131,66 @@ test('contactsView replays ops in order over the base', () => {
   ], new Map());
   expect([...v.keys()]).toEqual([2]);
   expect(v.get(2)).toMatchObject({ firstName: 'Боря', lastName: 'К', note: 'n', pending: true });
+});
+
+test('race: a snapshot without the contact lands before the older journal removal → the public name still comes back', async () => {
+  const a = await srv.login('Анна'), b = await srv.login('Борис');
+  const chatId = await srv.chat(a.token, [a.userId, b.userId]);
+  await api(a.token, 'POST', '/contacts', { userId: b.userId, firstName: 'Боря' });
+  const ea = await open(srv.config(a));
+  ea.connect();
+  await ea.whenIdle();
+  const list = watchInto(ea, { kind: 'chatList', limit: 50 });
+  await list.until((l) => titleOf(chatId)(l) === 'Боря');
+  ea.disconnect();
+  // удалили на другом устройстве; снимок (seq 10) приходит раньше записи журнала (seq 9)
+  const user = { id: b.userId, name: 'Борис', firstName: 'Борис', lastName: '', publicName: 'Борис', username: null, bio: null, birthday: null, phone: null };
+  ea.store.contacts.applySnapshot([], 1000);
+  ea.store.applyUpdate({ type: 'contactsChanged', removed: b.userId, user }, 999);
+  watchInto(ea, { kind: 'counters' });   // проход подписок
+  await list.until((l) => titleOf(chatId)(l) === 'Борис');
+  expect(ea.store.chats.get(chatId)!.title).toBe('Борис');   // и в базе (IDB) — не только на экране
+});
+
+test('remote removal while closed: reopen shows the public name; cached profile loses the contact name', async () => {
+  const a = await srv.login('Анна'), b = await srv.login('Борис');
+  await api(b.token, 'PUT', '/me/username', { username: 'boris_k' });
+  const chatId = await srv.chat(a.token, [a.userId, b.userId]);
+  await api(a.token, 'POST', '/contacts', { userId: b.userId, firstName: 'Боря' });
+  const cfg = srv.config(a);
+  const ea = await open(cfg);
+  ea.connect();
+  await ea.whenIdle();
+  const user = watchInto(ea, { kind: 'user', userId: b.userId });
+  await user.until((l) => l[0]?.name === 'Боря');
+  await closeOne(ea);
+  await api(a.token, 'DELETE', `/contacts/${b.userId}`);
+  const e2 = await open(cfg);
+  e2.connect();
+  await e2.whenIdle();
+  const list = watchInto(e2, { kind: 'chatList', limit: 50 });
+  await list.until((l) => titleOf(chatId)(l) === 'Борис');
+  const u2 = watchInto(e2, { kind: 'user', userId: b.userId });
+  await u2.until((l) => l[0]?.name === 'Борис');
+});
+
+test('removal of a contact without a shared chat (server sends user: null) drops the contact name from the cache', async () => {
+  const a = await srv.login('Анна'), b = await srv.login('Борис');
+  await api(b.token, 'PUT', '/me/username', { username: 'boris_k' });
+  await api(a.token, 'POST', '/contacts', { query: '@boris_k', firstName: 'Боря' });
+  const ea = await open(srv.config(a));
+  ea.connect();
+  await ea.whenIdle();
+  const user = watchInto(ea, { kind: 'user', userId: b.userId });
+  await user.until((l) => l[0]?.name === 'Боря');
+  await api(a.token, 'DELETE', `/contacts/${b.userId}`);
+  await user.until((l) => l[0]?.name === 'Борис' && l[0]?.firstName === 'Борис');
+});
+
+test('after reset (epoch wipe) contacts are not «loaded» until a real snapshot', () => {
+  const c = new ContactsCache();
+  c.applySnapshot([], 5);
+  expect(ContactsCache.load([c.collect()!]).loaded).toBe(true);
+  c.reset();
+  expect(ContactsCache.load([c.collect()!]).loaded).toBe(false);
 });
