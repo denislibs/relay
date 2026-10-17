@@ -20,12 +20,33 @@ export function EditContact({ path, active }: { path: string; active: boolean })
   useEffect(() => { if (active && loaded && !contact) leave(); }, [active, loaded, !contact]);
   return (
     <div class="rl-sidepage" aria-label="Изменить контакт">
-      {contact ? <EditForm contact={contact} leave={leave} /> : <PanelHeader icon="arrowLeft" closeLabel="Назад" title="Изменить контакт" onClose={() => void back()} />}
+      {contact ? <EditForm contact={contact} leave={leave} onBack={() => void back()} navGuard /> : <PanelHeader icon="arrowLeft" closeLabel="Назад" title="Изменить контакт" onClose={() => void back()} />}
     </div>
   );
 }
 
-function EditForm({ contact, leave }: { contact: Item; leave: () => void }) {
+/**
+ * «Изменить контакт» внутри правой панели «Информация»: тот же экран, но «Назад» возвращает к профилю
+ * в панели, а не по навигации слева. Несохранённые правки спрашивает сама форма.
+ */
+export function EditContactPanel({ userId, onDone }: { userId: number; onDone: () => void }) {
+  const contact = useGlobal((s) => s.contacts.find((c) => c.userId === userId));
+  const loaded = useGlobal((s) => s.contactsLoaded);
+  const left = useRef(false);
+  const leave = () => { if (left.current) return; left.current = true; onDone(); };
+  useEffect(() => { if (loaded && !contact) leave(); }, [loaded, !contact]);
+  return (
+    <div class="rl-sidepage" aria-label="Изменить контакт">
+      {contact ? <EditForm contact={contact} leave={leave} onBack={leave} /> : <PanelHeader icon="arrowLeft" closeLabel="Назад" title="Изменить контакт" onClose={leave} />}
+    </div>
+  );
+}
+
+/**
+ * navGuard — страница навигации слева: уход с правками перехватывает nav (setLeaveGuard).
+ * Без него (правая панель) «Назад» и Esc сами спрашивают «Сбросить изменения?».
+ */
+function EditForm({ contact, leave, onBack, navGuard }: { contact: Item; leave: () => void; onBack: () => void; navGuard?: boolean }) {
   const userId = contact.userId as number;
   const chat = useGlobal((s) => s.chats.find((c) => c.kind === 'direct' && c.peerId === userId));
   const muted = useGlobal((s) => s.muted);
@@ -44,20 +65,33 @@ function EditForm({ contact, leave }: { contact: Item; leave: () => void }) {
   // уход с несохранёнными правками: «Сбросить изменения?»
   const arm = () => setLeaveGuard(() => new Promise<boolean>((resolve) => setAsk(() => resolve)));
   useEffect(() => {
+    if (!navGuard) return;
     if (!dirty) { setLeaveGuard(null); return; }
     arm();
     return () => setLeaveGuard(null);
   }, [dirty]);
   const answer = (leave: boolean) => { ask?.(leave); setAsk(null); };
+  // назад из панели: с правками — сначала спросить
+  const tryBack = () => {
+    if (navGuard || !dirty) { onBack(); return; }
+    void new Promise<boolean>((resolve) => setAsk(() => resolve)).then((ok) => { if (ok) onBack(); });
+  };
+  // Esc в панели — тоже «Назад» (у Информации свой Esc, он при открытой правке молчит)
+  useEffect(() => {
+    if (navGuard) return;
+    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape' && !e.defaultPrevented && !ask && !confirmRemove) { e.preventDefault(); tryBack(); } };
+    addEventListener('keydown', onKey);
+    return () => removeEventListener('keydown', onKey);
+  });
 
   function save(): void {
     if (!dirty || !ok) return;
-    setLeaveGuard(null);
-    void updateContact(userId, contactPatch(contact, form)).then(leave, () => { arm(); showToast('Не удалось сохранить изменения'); });
+    if (navGuard) setLeaveGuard(null);
+    void updateContact(userId, contactPatch(contact, form)).then(leave, () => { if (navGuard) arm(); showToast('Не удалось сохранить изменения'); });
   }
   function remove(): void {
     setConfirmRemove(false);
-    setLeaveGuard(null);
+    if (navGuard) setLeaveGuard(null);
     void removeContact(userId).then(leave, () => showToast('Не удалось сохранить изменения'));
   }
 
@@ -73,7 +107,7 @@ function EditForm({ contact, leave }: { contact: Item; leave: () => void }) {
 
   return (
     <>
-      <PanelHeader icon="arrowLeft" closeLabel="Назад" title="Изменить контакт" onClose={() => void back()} />
+      <PanelHeader icon="arrowLeft" closeLabel="Назад" title="Изменить контакт" onClose={tryBack} />
       <div class="rl-settings app-profile-form">
         <ProfileHeader name={name} tone={peerTone(userId)} size={96} subtitle={publicName && publicName !== name ? `Имя в Relay: ${publicName}` : undefined} />
         <Section footer="Имя и фамилия видны только вам">

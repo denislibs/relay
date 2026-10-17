@@ -8,9 +8,10 @@ import { syncMuted } from '../notify';
 import { setGlobal, useGlobal } from '../global';
 import { birthdayText, clock, dayLabel, lastSeenText, type Birthday } from './format';
 import { showToast, useUser } from '../settingsData';
-import { go } from '../nav';
+import { EditContactPanel } from './contacts/EditContact';
 
 const TABS = ['media', 'files', 'links'];
+const PAGES = ['info', 'edit'];   // «Изменить контакт» выезжает внутри панели справа налево
 const URL_RE = /https?:\/\/[^\s<>"']+/g;
 const close = () => setGlobal({ infoOpen: false });
 
@@ -32,6 +33,8 @@ export function Info() {
   const messages = useGlobal((s) => s.messages);
   const muted = useGlobal((s) => s.muted);
   const [tab, setTab] = useState('media');
+  const [page, setPage] = useState('info');
+  useEffect(() => setPage('info'), [chatId]);   // другой чат — снова профиль
   // профиль собеседника личного чата: только то, что сервер разрешил показать
   const peerId = chat?.kind === 'direct' ? (chat.peerId as number | null) : null;
   const user = useUser(peerId);
@@ -49,10 +52,11 @@ export function Info() {
   }, [tab, chatId]);
 
   useEffect(() => {
+    if (page !== 'info') return;   // на правке Esc — «Назад», его ловит форма
     const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape' && !e.defaultPrevented) { e.preventDefault(); close(); } };
     addEventListener('keydown', onKey);
     return () => removeEventListener('keydown', onKey);
-  }, []);
+  }, [page]);
 
   const title = (chat?.title as string) || 'Чат №' + chatId;
   const group = chat?.kind === 'group';
@@ -62,10 +66,22 @@ export function Info() {
     .flatMap((m) => ((m.body as string).match(URL_RE) ?? []).map((url) => ({ url, at: m.createdAt as string, key: m.key + url })))
     .reverse();
 
+  const addContact = () => setGlobal({ newContact: {
+    // запрос — то, что видно человеку: @имя или телефон; нет ни того, ни другого — поле пустое, добавим по id
+    query: user?.username ? '@' + String(user.username) : user?.phone ? String(user.phone) : '', userId: peerId!,
+    firstName: String(user?.firstName ?? title.split(' ')[0] ?? ''), lastName: String(user?.lastName ?? ''),
+  } });
+  // шапка справа: контакт — ✎ «Изменить», не контакт — «Добавить в контакты» (как в Telegram)
+  const action = !peerId || !contactsLoaded ? undefined
+    : contact ? { icon: 'pencil', label: 'Изменить контакт', onClick: () => setPage('edit') }
+    : { icon: 'userPlus', label: 'Добавить в контакты', onClick: addContact };
+
   return (
-    <>
-      <PanelHeader icon="close" closeLabel="Закрыть" title="Информация" onClose={close}
-        action={contact ? { icon: 'pencil', label: 'Изменить контакт', onClick: () => void go(`contacts/${peerId}/edit`) } : undefined} />
+    <SlideStack order={PAGES} active={page} render={(k: string) => k === 'edit' && peerId ? (
+      <EditContactPanel userId={peerId} onDone={() => setPage('info')} />
+    ) : (
+    <div class="rl-sidepage">
+      <PanelHeader icon="close" closeLabel="Закрыть" title="Информация" onClose={close} action={action} />
       <div class="rl-aside-body">
         <div class="rl-profile">
           <Avatar name={title} tone={chatTone(chat)} size={120} />
@@ -80,13 +96,6 @@ export function Info() {
               <SettingsIcon icon="pencil" color="gray" />
               <span class="rl-inforow-text"><span class="rl-bio app-info-bio"><RichText text={String(contact.note)} /></span><small>Заметки</small></span>
             </div>
-          ) : null}</Expand>
-          <Expand show={!!peerId && contactsLoaded && !contact}>{peerId && contactsLoaded && !contact ? (
-            <InfoRow tile="blue" icon="userPlus" title="Добавить в контакты" onClick={() => setGlobal({ newContact: {
-              // запрос — то, что видно человеку: @имя или телефон; нет ни того, ни другого — поле пустое, добавим по id
-              query: user?.username ? '@' + String(user.username) : user?.phone ? String(user.phone) : '', userId: peerId,
-              firstName: String(user?.firstName ?? title.split(' ')[0] ?? ''), lastName: String(user?.lastName ?? ''),
-            } })} />
           ) : null}</Expand>
           <InfoRow
             tile="red"
@@ -135,7 +144,8 @@ export function Info() {
           } />
         </div>
       </div>
-    </>
+    </div>
+    )} />
   );
 }
 
