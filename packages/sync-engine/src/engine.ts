@@ -9,6 +9,7 @@ import { WsTransport } from './transport';
 import { loadOps, Ops, type PendingOp } from './ops';
 import { isNotifyOp, normalizeRule, notifyKey, privacyKey, settingsItem, settingsView } from './settings';
 import { applyUserUpdated, meItem, meView, OP_PROFILE, OP_USERNAME, userItem } from './profile';
+import { OP_SESSIONS_TTL, Sessions } from './sessions';
 import type { Action, EngineConfig, LocalMessage, Patch, Query, SearchResult } from './types';
 
 export interface WatchHandle { update(q: Query): void; close(): void }
@@ -62,6 +63,8 @@ export class Engine {
   private readonly contacts: Contacts;
   /** чёрный список (blocks.ts) */
   private readonly blocks: Blocks;
+  /** активные сеансы (sessions.ts) */
+  private readonly sessions: Sessions;
   /** чужие профили, которых нет в кэше: подгрузим, когда будет связь; asked — уже спрашивали за это подключение */
   private userWants = new Set<number>();
   private usersAsked = new Set<number>();
@@ -72,6 +75,7 @@ export class Engine {
       done: (op, value) => this.opDone(op, value),
       changed: () => this.changed(),
       run: (fn) => this.run(fn),
+      unauthorized: () => this.terminate(),
     });
     this.contacts = new Contacts({
       store, ops: this.ops, httpBase: cfg.httpBase, headers: cfg.headers,
@@ -84,6 +88,7 @@ export class Engine {
       changed: () => this.changed(),
     });
     this.blocks = new Blocks({ store, ops: this.ops, http: (path) => this.http(path), run: (fn) => this.run(fn), changed: () => this.changed() });
+    this.sessions = new Sessions({ ops: this.ops, online: () => this.online, http: (path) => this.http(path) });
     store.titleOf = (c) => this.contacts.titleOf(c);
     this.transport = new WsTransport(cfg.wsUrl, {
       onOpen: () => this.onOpen(),
@@ -116,8 +121,54 @@ export class Engine {
     this.onObsoleteCb();
   }
 
+  // ---- сеанс завершён (sessionTerminated, 401 на HTTP или при подключении) ----
+  private terminated = false;
+  private onTerminatedCb: () => void = () => {};
+  private lastProbe = 0;
+  /** Движок стёр локальные данные и закрылся после завершения сеанса (хост забывает его). */
+  onTerminated(cb: () => void): void { this.onTerminatedCb = cb; }
+
+  /**
+   * Сеанса больше нет: перестать подключаться и отправлять, сказать интерфейсу (status.terminated),
+   * затем стереть локальные данные (как выход) и закрыться. Повторный вход откроет новый движок.
+   */
+  private terminate(): void {
+    if (this.terminated || this.closed) return;
+    this.terminated = true;
+    this.ops.close();
+    this.wantOnline = false;
+    this.transport.stop();
+    this.pushStatus();
+    this.run(async () => {
+      // идущая работа (синхронизация, отправка) обрывается без сети — ждём её недолго, как resetLocal
+      const end = Date.now() + 3000;
+      while ((this.syncing || this.pumping || this.busy > 1) && Date.now() < end) await new Promise((r) => setTimeout(r, 10));
+      if (this.closed) return;   // вкладка/хост уже закрывают движок сами
+      this.emit();   // последние патчи (и status.terminated) — подпискам, которые ещё не получили первый снимок
+      this.closed = true;
+      this.dead = true;
+      if (this.frameTimer) { clearTimeout(this.frameTimer); this.frameTimer = null; }
+      if (this.readTimer) { clearTimeout(this.readTimer); this.readTimer = null; }
+      for (const t of this.typingTimers.values()) clearTimeout(t);
+      this.typingTimers.clear();
+      this.watchers.clear();
+      try { await this.store.wipe(null); } catch { /* база уже закрывается */ }
+      this.db.close();
+      try { indexedDB.deleteDatabase(this.cfg.dbName); } catch { /* */ }
+      this.onTerminatedCb();
+    });
+  }
+
+  /** Сокет не открылся: может быть, сеанс завершён, пока нас не было (сервер отвечает 401 на подключение). */
+  private probeSession(): void {
+    if (this.terminated || this.closed || Date.now() - this.lastProbe < 3000) return;
+    this.lastProbe = Date.now();
+    fetch(this.cfg.httpBase + '/me', { headers: this.cfg.headers, credentials: 'include' })
+      .then((r) => { if (r.status === 401) this.terminate(); }, () => { /* сети нет */ });
+  }
+
   connect(): void {
-    if (this.closed) return;
+    if (this.closed || this.terminated) return;
     this.wantOnline = true;
     this.watchNetwork();
     this.transport.start();
@@ -227,6 +278,7 @@ export class Engine {
       syncing: this.syncing,
       outbox: [...this.store.outbox.values()].filter((o) => !o.failed).length,
       failed: [...this.store.outbox.values()].filter((o) => o.failed).length,
+      ...(this.terminated ? { terminated: true } : {}),
     };
   }
 
@@ -601,6 +653,13 @@ export class Engine {
       case 'block':
       case 'unblock':
         return this.blocks.act(a);
+      case 'listSessions':
+      case 'terminateSession':
+      case 'terminateOtherSessions':
+        return this.sessions.act(a);
+      case 'setSessionsTtl':
+        await this.ops.enqueue({ key: OP_SESSIONS_TTL, method: 'PUT', path: '/settings/sessions-ttl', body: { days: a.days } });
+        return null;
       case 'addContact':
       case 'updateContact':
       case 'removeContact':
@@ -636,6 +695,7 @@ export class Engine {
   }
 
   private onClose(): void {
+    const wasOpen = this.online;
     this.online = false;
     this.holding = false;
     this.presence.clear();            // без связи не знаем, кто в сети
@@ -650,6 +710,7 @@ export class Engine {
     this.syncWaiter = null;
     for (const p of this.pending.values()) p.reject(offline);
     this.pending.clear();
+    if (!wasOpen && this.wantOnline) this.probeSession();
   }
 
   private onFrame(f: ServerFrame): void {
@@ -705,6 +766,9 @@ export class Engine {
         for (const p of f.items) this.presence.set(p.userId, { online: p.online, lastSeen: p.lastSeen });
         this.presenceDirty = true;
         this.changed();
+        return;
+      case 'sessionTerminated':
+        this.terminate();
         return;
       case 'pong':
         return;
@@ -984,6 +1048,7 @@ export class Engine {
 
   private async http<T>(path: string): Promise<T> {
     const res = await fetch(this.cfg.httpBase + path, { headers: this.cfg.headers, credentials: 'include' });
+    if (res.status === 401) { this.terminate(); throw { code: 'offline', retry: false } satisfies ReqError; }   // сеанс завершён — не ошибка движка
     if (!res.ok) throw new Error(`HTTP ${res.status} ${path}`);
     return (await res.json()) as T;
   }

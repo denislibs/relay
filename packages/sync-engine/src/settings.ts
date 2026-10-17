@@ -1,5 +1,6 @@
 import { defaultPrivacy, PRIVACY_KEYS, type NotifyPref, type NotifyType, type PrivacyKey, type PrivacyRule, type PrivacyRules, type UserSettings } from '@relay/protocol';
 import type { PendingOp } from './ops';
+import { OP_SESSIONS_TTL } from './sessions';
 import type { Item } from './types';
 
 /** Настройки аккаунта в движке: умолчания уведомлений + правила конфиденциальности. */
@@ -115,7 +116,9 @@ export class SettingsCache {
 export function settingsView<S extends UserSettings & { privacy?: PrivacyRules }>(base: S, ops: readonly PendingOp[]): S {
   let notify = base.notify;
   let privacy = base.privacy;
+  let ttl = base.sessionsTtlDays;
   for (const op of ops) {
+    if (op.key === OP_SESSIONS_TTL) { const d = (op.body as { days?: unknown } | undefined)?.days; if (typeof d === 'number') ttl = d; continue; }
     const pk = privacyKeyOf(op.key);
     if (pk && privacy) { privacy = { ...privacy, [pk]: normalizeRule(pk, op.body) }; continue; }
     const t = notifyTypeOf(op.key);
@@ -124,7 +127,7 @@ export function settingsView<S extends UserSettings & { privacy?: PrivacyRules }
     const cur = notify[t];
     notify = { ...notify, [t]: { muted: typeof b.muted === 'boolean' ? b.muted : cur.muted, preview: typeof b.preview === 'boolean' ? b.preview : cur.preview } };
   }
-  return notify === base.notify && privacy === base.privacy ? base : { ...base, notify, privacy };
+  return notify === base.notify && privacy === base.privacy && ttl === base.sessionsTtlDays ? base : { ...base, notify, privacy, sessionsTtlDays: ttl };
 }
 
 /** Элемент подписки settings. */
@@ -133,4 +136,4 @@ export function settingsItem(view: AccountSettings, loaded: boolean, pending: bo
 }
 
 /** Ответ операции — новая база, если это наши настройки (уведомления или правило конфиденциальности). */
-export function isNotifyOp(op: PendingOp): boolean { return notifyTypeOf(op.key) !== null || privacyKeyOf(op.key) !== null; }
+export function isNotifyOp(op: PendingOp): boolean { return notifyTypeOf(op.key) !== null || privacyKeyOf(op.key) !== null || op.key === OP_SESSIONS_TTL; }

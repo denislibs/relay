@@ -73,7 +73,14 @@ export class HostCore {
     switch (m.t) {
       case 'hello': {
         if (m.build !== this.opts.build) { c.port.post({ t: 'reload' }); return; }
-        this.engine ??= this.opts.open(m.config).then((e) => { e.onObsolete(() => this.obsolete()); e.connect(); return e; });
+        this.engine ??= this.opts.open(m.config).then((e) => {
+          e.onObsolete(() => this.obsolete());
+          // сеанс завершён: движок стёр данные и закрылся; следующий вход (hello после входа) откроет новый
+          const opened = this.engine;
+          e.onTerminated(() => { if (this.engine === opened) this.engine = null; });
+          e.connect();
+          return e;
+        });
         await this.engine;
         c.port.post({ t: 'ready' });
         return;

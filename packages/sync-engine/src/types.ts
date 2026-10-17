@@ -112,6 +112,13 @@ export type Action =
   /** чёрный список — через очередь операций */
   | { type: 'block'; userId: number }
   | { type: 'unblock'; userId: number }
+  /** активные сеансы с сервера мимо кэша: {sessions} (без тех, чьё завершение ещё в очереди) | {offline:true} */
+  | { type: 'listSessions' }
+  /** завершить сеанс / все другие — через очередь операций */
+  | { type: 'terminateSession'; id: number }
+  | { type: 'terminateOtherSessions' }
+  /** срок автозавершения неактивных сеансов, дней (7 | 30 | 90 | 180 | 365) — через очередь операций */
+  | { type: 'setSessionsTtl'; days: number }
   /** стереть локальные данные и взять снимок заново; keepOutbox — не трогать неотправленное */
   | { type: 'resetLocal'; keepOutbox?: boolean }
   | { type: 'sendFile'; chatId: number; body: string; file: Blob; name: string; mime: string; w?: number | null; h?: number | null; thumb?: string | null; replyToId?: number | null };

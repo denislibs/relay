@@ -32,6 +32,8 @@ export interface OpsHooks {
   changed(): void;
   /** фоновая задача движка (whenIdle её дождётся) */
   run(fn: () => Promise<unknown>): void;
+  /** 401: сеанса больше нет — операция не выбрасывается, движок уходит в «сеанс завершён» */
+  unauthorized?(): void;
 }
 
 const MAX_FAILURES = 20;
@@ -163,6 +165,7 @@ export class Ops {
         body: op.body === undefined ? undefined : JSON.stringify(op.body),
       });
       if (res.ok) return { ok: true, value: await res.json().catch(() => null) };
+      if (res.status === 401) { this.hooks.unauthorized?.(); return { retry: true }; }
       if (res.status >= 500 || res.status === 408 || res.status === 429) return { retry: true };
       const j = (await res.json().catch(() => null)) as { code?: unknown } | null;
       return { ok: false, code: typeof j?.code === 'string' ? j.code : 'http_' + res.status };
