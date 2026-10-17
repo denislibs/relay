@@ -1,4 +1,4 @@
-import type { ClientFrame, Me, Message, PublicUser, ServerFrame } from '@relay/protocol';
+import type { ClientFrame, Me, UserSettings, Message, PublicUser, ServerFrame } from '@relay/protocol';
 import { Contacts } from './contacts';
 import { delBlob, getAll, getBlob, getByChat, openDb, putBlob } from './idb';
 import { affects, computeQuery, diffResults, messageWindow, type Result } from './queries';
@@ -6,6 +6,7 @@ import type { Item } from './types';
 import { Store, type ChatSummary } from './store';
 import { WsTransport } from './transport';
 import { loadOps, Ops, type PendingOp } from './ops';
+import { isNotifyOp, notifyKey, settingsItem, settingsView } from './settings';
 import { applyUserUpdated, meItem, meView, OP_PROFILE, OP_USERNAME, userItem } from './profile';
 import type { Action, EngineConfig, LocalMessage, Patch, Query, SearchResult } from './types';
 
@@ -235,6 +236,11 @@ export class Engine {
       const list = this.contacts.items();
       return { items: new Map(list.map((it) => [it.key, it])), order: list.map((it) => it.key), sig: new Map(list.map((it) => [it.key, JSON.stringify(it)])) };
     }
+    if (q.kind === 'settings') {
+      const s = this.store.settings, view = settingsView(s.base, this.ops.list);
+      const list = settingsItem(view, s.loaded, view !== s.base);
+      return { items: new Map(list.map((it) => [it.key, it])), order: list.map((it) => it.key), sig: new Map(list.map((it) => [it.key, JSON.stringify(it)])) };
+    }
     if (q.kind === 'me' || q.kind === 'user' || q.kind === 'ops') {
       const list = q.kind === 'ops' ? [this.ops.item()] : q.kind === 'me' ? meItem(this.meNow()) : userItem(this.store.profile, this.meNow(), q.userId);
       if (q.kind === 'user' && !list.length && q.userId !== this.cfg.userId) this.userWants.add(q.userId);
@@ -346,13 +352,15 @@ export class Engine {
     this.ops.dirty = false;
     const contactsDirty = this.store.contacts.dirty || opsDirty || presenceDirty || profileDirty;
     this.store.contacts.dirty = false;
+    const settingsDirty = this.store.settings.dirty || opsDirty;
+    this.store.settings.dirty = false;
     // me/user выводятся из очереди: при удержании изменение очереди не теряем — оно уйдёт с концом догонки
     this.store.profile.dirty = hold && profileDirty;
     this.statusSig = sig;
     for (const w of this.watchers.values()) {
-      const own = (w.q.kind === 'status' && statusChanged) || (w.q.kind === 'presence' && presenceDirty) || (w.q.kind === 'ops' && opsDirty) || ((w.q.kind === 'me' || w.q.kind === 'user') && profileDirty) || (w.q.kind === 'contacts' && contactsDirty);
+      const own = (w.q.kind === 'status' && statusChanged) || (w.q.kind === 'presence' && presenceDirty) || (w.q.kind === 'ops' && opsDirty) || ((w.q.kind === 'me' || w.q.kind === 'user') && profileDirty) || (w.q.kind === 'contacts' && contactsDirty) || (w.q.kind === 'settings' && settingsDirty);
       if (!w.force && !affects(w.q, touched) && !own) continue;
-      if (hold && !w.force && w.q.kind !== 'status' && w.q.kind !== 'presence' && w.q.kind !== 'ops' && w.q.kind !== 'contacts') continue;
+      if (hold && !w.force && w.q.kind !== 'status' && w.q.kind !== 'presence' && w.q.kind !== 'ops' && w.q.kind !== 'contacts' && w.q.kind !== 'settings') continue;
       if (w.gated) continue;
       w.force = false;
       const next = this.compute(w.q);
@@ -372,9 +380,25 @@ export class Engine {
   /** Операция подтверждена: ответ профиля — новая база (журнал принесёт то же самое ещё раз — не страшно). */
   private opDone(op: PendingOp, value: unknown): void {
     if (this.contacts.opDone(op, value)) return;
+    if (isNotifyOp(op)) {
+      // ответ — новая база: иначе между уходом операции из очереди и записью журнала переключатель мигнул бы
+      const v = value as (UserSettings & { seq?: number }) | null;
+      if (v?.notify && this.store.settings.apply({ notify: v.notify, sessionsTtlDays: v.sessionsTtlDays }, v.seq)) this.run(() => this.store.flush());
+      return;
+    }
     if ((op.key === OP_PROFILE || op.key === OP_USERNAME) && value && typeof value === 'object' && (value as Me).userId === this.cfg.userId) {
       if (this.store.profile.setMe(value as Me)) this.run(() => this.store.flush());
     }
+  }
+
+  /** Настройки аккаунта с сервера — после каждого hello (журнал мог потерять settingsChanged). */
+  private fetchSettings(): void {
+    this.run(async () => {
+      const r = await this.http<UserSettings & { seq?: number }>('/settings');
+      if (!this.store.settings.apply({ notify: r.notify, sessionsTtlDays: r.sessionsTtlDays }, r.seq)) return;
+      await this.store.flush();
+      this.changed();
+    });
   }
 
   /** Свой профиль с сервера — после каждого hello (кэш мог устареть, пока нас не было). */
@@ -509,6 +533,13 @@ export class Engine {
       case 'setUsername':
         await this.ops.enqueue({ key: OP_USERNAME, method: 'PUT', path: '/me/username', body: { username: a.username } });
         return null;
+      case 'setNotify': {
+        // в очередь уходит полное значение вида чата: слитые правки одного ключа не теряют соседнее поле
+        const cur = settingsView(this.store.settings.base, this.ops.list).notify[a.notifyType];
+        const body = { muted: a.muted ?? cur.muted, preview: a.preview ?? cur.preview };
+        await this.ops.enqueue({ key: notifyKey(a.notifyType), method: 'PUT', path: `/settings/notify/${a.notifyType}`, body });
+        return null;
+      }
       case 'addContact':
       case 'updateContact':
       case 'removeContact':
@@ -570,6 +601,7 @@ export class Engine {
           else if (!this.store.epoch && f.epoch) { this.store.epoch = f.epoch; this.store.markMeta(); }
           // снимок — только когда кэш пуст; lastSeq = 0 бывает и у заполненного кэша (журнал пользователя ещё пуст)
           this.fetchMe();
+          this.fetchSettings();
           this.contacts.fetch();
           if (!this.store.hydrated) await this.bootstrap(f.seq);
           else this.runSync();
@@ -649,6 +681,7 @@ export class Engine {
             this.store.resetForSnapshot();
             this.store.resetDialogs();
             this.contacts.fetch();
+            this.fetchSettings();
             await this.loadFirstDialogs();
             this.store.lastSeq = f.op === 'tooLong' ? f.seq : f.to;
             await this.store.flush();

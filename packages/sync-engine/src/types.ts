@@ -65,7 +65,9 @@ export type Query =
   /** очередь операций настроек: сколько ждёт и последние отказы сервера (opFailed) */
   | { kind: 'ops' }
   /** контакты (с ещё не подтверждёнными правками), с профилем и присутствием */
-  | { kind: 'contacts' };
+  | { kind: 'contacts' }
+  /** настройки аккаунта (с ещё не подтверждёнными правками): один элемент {notify, sessionsTtlDays, loaded, pending} */
+  | { kind: 'settings' };
 
 export type Item = { key: string } & Record<string, unknown>;
 
@@ -97,6 +99,8 @@ export type Action =
   | { type: 'removeContact'; userId: number }
   /** найти человека по @имени или номеру мимо очереди: {user} | {notFound:true} | {offline:true} */
   | { type: 'resolveUser'; query: string }
+  /** умолчания уведомлений для вида чата — через очередь операций (видно сразу, в том числе без сети) */
+  | { type: 'setNotify'; notifyType: 'direct' | 'group'; muted?: boolean; preview?: boolean }
   | { type: 'sendFile'; chatId: number; body: string; file: Blob; name: string; mime: string; w?: number | null; h?: number | null; thumb?: string | null; replyToId?: number | null };
 
 export interface EngineConfig {

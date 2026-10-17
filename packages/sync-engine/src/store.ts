@@ -2,6 +2,7 @@ import type { Message, Update } from '@relay/protocol';
 import { getAll, getByChat, write, type WriteBatch } from './idb';
 import { applyUserUpdated, ProfileCache } from './profile';
 import { applyContactsChanged, ContactsCache } from './contacts';
+import { SettingsCache } from './settings';
 import { PENDING_BASE, type LocalChat, type LocalMessage, type OutboxEntry } from './types';
 
 export interface ChatSummary {
@@ -42,6 +43,8 @@ export class Store {
   profile!: ProfileCache;
   /** контакты (contacts.ts) */
   contacts!: ContactsCache;
+  /** настройки аккаунта (settings.ts) */
+  settings!: SettingsCache;
   /** название чата для списка; движок подставляет контактное имя с учётом очереди операций */
   titleOf: (c: LocalChat) => string | null = (c) => c.title;
 
@@ -71,6 +74,7 @@ export class Store {
     s.dialogsDone = !!meta.find((m) => m.k === 'dialogsDone')?.v;
     s.profile = await ProfileCache.load(db, userId, meta as { k: string; v: unknown }[]);
     s.contacts = ContactsCache.load(meta as { k: string; v: unknown }[]);
+    s.settings = SettingsCache.load(meta as { k: string; v: unknown }[]);
     // чаты с неотправленным — сразу в память, чтобы черновики были видны
     for (const chatId of new Set(outbox.map((o) => o.chatId))) await s.loadChatMessages(chatId);
     return s;
@@ -161,6 +165,7 @@ export class Store {
       case 'reactions': return this.patchMessage(u.chatId, u.id, { reactions: u.reactions });
       case 'userUpdated': return applyUserUpdated(this, u.user, seq);
       case 'contactsChanged': return applyContactsChanged(this, u, seq);
+      case 'settingsChanged': this.settings.apply(u.settings, seq); return;
     }
   }
 
@@ -351,7 +356,7 @@ export class Store {
   async wipe(epoch: string): Promise<void> {
     for (const id of this.chats.keys()) this.touch(id);
     this.chats.clear(); this.messages.clear(); this.loaded.clear(); this.sorted.clear(); this.ids.clear();
-    this.outbox.clear(); this.pendingReads.clear(); this.profile.reset(); this.contacts.reset();
+    this.outbox.clear(); this.pendingReads.clear(); this.profile.reset(); this.contacts.reset(); this.settings.reset();
     this.dirtyChats.clear(); this.dirtyMessages.clear(); this.dirtyOutbox.clear(); this.dirtyReads.clear();
     this.lastSeq = this.seqAtFlush = 0;
     this.hydrated = false;
@@ -425,6 +430,8 @@ export class Store {
     if (prof.users.length) batch.put.users = prof.users;
     const contacts = this.contacts.collect();
     if (contacts) batch.put.meta = [...(batch.put.meta ?? []), contacts];
+    const settings = this.settings.collect();
+    if (settings) batch.put.meta = [...(batch.put.meta ?? []), settings];
     this.dirtyChats.clear(); this.dirtyMessages.clear(); this.dirtyOutbox.clear(); this.dirtyReads.clear(); this.dirtyMeta = false;
     const seq = this.lastSeq;
     await write(this.db, batch);

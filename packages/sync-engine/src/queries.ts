@@ -95,6 +95,7 @@ export function computeQuery(store: Store, q: Query): Result {
     case 'user':
     case 'ops':
     case 'contacts':
+    case 'settings':
       throw new Error(q.kind + ' is computed by the engine');
   }
 }
@@ -102,7 +103,7 @@ export function computeQuery(store: Store, q: Query): Result {
 /** Задевает ли изменение этих чатов результат подписки. */
 export function affects(q: Query, touched: Set<number>): boolean {
   if (!touched.size) return false;
-  if (q.kind === 'status' || q.kind === 'me' || q.kind === 'user' || q.kind === 'ops' || q.kind === 'contacts') return false;   // у них свои флаги в движке
+  if (q.kind === 'status' || q.kind === 'me' || q.kind === 'user' || q.kind === 'ops' || q.kind === 'contacts' || q.kind === 'settings') return false;   // у них свои флаги в движке
   return q.kind === 'messages' ? touched.has(q.chatId) : true;
 }
 
