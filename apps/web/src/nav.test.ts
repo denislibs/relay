@@ -5,7 +5,7 @@ const concrete = [
   'chats', 'settings', 'settings/profile', 'settings/general', 'settings/general/wallpaper', 'settings/notifications',
   'settings/privacy', 'settings/privacy/rule/lastSeen', 'settings/privacy/rule/lastSeen/allow', 'settings/privacy/rule/phone/deny',
   'settings/privacy/blocked', 'settings/data', 'settings/data/autoload/photo', 'settings/performance', 'settings/sessions',
-  'settings/dev', 'settings/dev/network', 'contacts', 'contacts/42/edit',
+  'settings/dev', 'contacts', 'contacts/42/edit',
 ];
 
 test('parentOf', () => {
@@ -13,7 +13,7 @@ test('parentOf', () => {
   expect(parentOf('settings/privacy/rule/lastSeen')).toBe('settings/privacy');
   expect(parentOf('settings/data/autoload/photo')).toBe('settings/data');
   expect(parentOf('contacts/42/edit')).toBe('contacts');
-  expect(parentOf('settings/dev/log')).toBe('settings/dev');
+  expect(pageIndex('settings/dev/log')).toBe(-1);   // вкладки раздела — не пути
   expect(parentOf('settings/general/wallpaper')).toBe('settings/general');
   expect(parentOf('settings')).toBe('chats');
   expect(parentOf('contacts')).toBe('chats');
@@ -95,5 +95,18 @@ test('guard отменяет уход', async () => {
   await go('settings');
   setLeaveGuard(() => false);
   await back();
+  expect(f.view()).toBe('settings');
+});
+
+test('popstate without our state (openChat replaceState(null)): stay on the current page and re-stamp the entry', async () => {
+  const f = fake();
+  await go('settings');
+  await go('settings/privacy');
+  await popForTest(null);
+  expect(f.view()).toBe('settings/privacy');
+  expect(f.hist.state).toEqual({ nav: 'settings/privacy', i: 2 });
+  await popForTest({ foo: 1 });
+  expect(f.view()).toBe('settings/privacy');
+  await back();   // дальше история сходится
   expect(f.view()).toBe('settings');
 });

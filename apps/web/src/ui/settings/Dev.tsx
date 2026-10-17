@@ -23,13 +23,11 @@ function useNewErrors(active: boolean): number {
 }
 
 /** «Для разработчиков» (скрытый раздел): вкладки Обзор / Журнал / Сеть / Данные / Ошибки. Данные живут, только пока страница открыта. */
-export function Dev(props: { path: string }) {
+export function Dev() {
   const tab = useGlobal((s) => s.devTab);
   const errs = useNewErrors(tab === 'errors');
 
   useEffect(() => {
-    const m = /^settings\/dev\/([a-z]+)$/.exec(props.path);
-    if (m && (TABS as string[]).includes(m[1])) setGlobal({ devTab: m[1] as DevTab });
     return openDevSession();
   }, []);
   useEffect(() => { setServerPolling(tab === 'overview'); return () => setServerPolling(false); }, [tab]);

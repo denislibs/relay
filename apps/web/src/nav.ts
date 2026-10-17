@@ -17,8 +17,7 @@ export const PAGES = [
   'settings/data/autoload/:type',
   'settings/performance',
   'settings/sessions',
-  'settings/dev',
-  'settings/dev/:tab',
+  'settings/dev',   // вкладка раздела — devTab в global, не путь
   'contacts',
   'contacts/:userId/edit',
 ];
@@ -118,8 +117,15 @@ let skipGuard = false;
 async function onPop(state: unknown): Promise<void> {
   if (!bind) return;
   const s = state as { nav?: string; i?: number } | null;
-  const target = s?.nav && pageIndex(s.nav) >= 0 ? s.nav : ROOT;
-  const i = s?.i ?? 0;
+  // запись без нашей отметки (data.ts openChat делает replaceState(null) под #chat=…): остаёмся где были
+  // и помечаем запись текущим путём, чтобы следующие переходы по истории сходились со stack
+  if (!s || typeof s.nav !== 'string' || typeof s.i !== 'number') {
+    skipGuard = false;
+    hist?.replaceState(stamp(current(), idx), '');
+    return;
+  }
+  const target = pageIndex(s.nav) >= 0 ? s.nav : ROOT;
+  const i = s.i;
   const mine = skipGuard;
   skipGuard = false;
   if (!mine && !(await canLeave())) {
