@@ -6,7 +6,7 @@ import { back, setLeaveGuard } from '../../nav';
 import { checkUsername, setUsername, showToast, updateProfile } from '../../settingsData';
 import { birthdayText, type Birthday } from '../format';
 import {
-  BIO_MAX, canSave, daysIn, formFromMe, isDirty, NAME_MAX, normUsername, profilePatch, usernameChanged, usernameShapeOk,
+  BIO_MAX, canSave, clip, cpLen, daysIn, formFromMe, isDirty, NAME_MAX, normUsername, profilePatch, usernameChanged, usernameShapeOk,
   USERNAME_TEXT, type ProfileForm, type UsernameStatus,
 } from './profileForm';
 
@@ -97,9 +97,10 @@ export function Profile() {
   useEffect(() => { if (!dirtyRef.current) setForm(formFromMe(me)); }, [me]);
 
   // уход с несохранёнными правками: «Сбросить изменения?»
+  const arm = () => setLeaveGuard(() => new Promise<boolean>((resolve) => setAsk(() => resolve)));
   useEffect(() => {
     if (!dirty) { setLeaveGuard(null); return; }
-    setLeaveGuard(() => new Promise<boolean>((resolve) => setAsk(() => resolve)));
+    arm();
     return () => setLeaveGuard(null);
   }, [dirty]);
   const answer = (leave: boolean) => { ask?.(leave); setAsk(null); };
@@ -112,7 +113,7 @@ export function Profile() {
     if (usernameChanged(me, form)) jobs.push(setUsername(normUsername(form.username) || null));
     setLeaveGuard(null);
     // правки уже в очереди движка (и видны), сервер подтвердит или откатит с тостом
-    void Promise.all(jobs).then(() => back(), () => showToast('Не удалось сохранить изменения'));
+    void Promise.all(jobs).then(() => back(), () => { arm(); showToast('Не удалось сохранить изменения'); });
   }
 
   const uname = normUsername(form.username);
@@ -121,6 +122,12 @@ export function Profile() {
   const link = uname && (!usernameChanged(me, form) || status === 'free' || status === 'offline') ? 'relay/@' + uname : null;
   const copy = (text: string) => { navigator.clipboard?.writeText(text).then(() => showToast('Скопировано')).catch(() => {}); };
   const name = `${form.firstName} ${form.lastName}`.trim() || me.name;
+  // длина — в кодовых точках, как на сервере: лишнее срезаем прямо в поле (иначе DOM разойдётся с состоянием)
+  const limited = (key: 'firstName' | 'lastName' | 'bio', max: number) => (v: string, e: Event) => {
+    const c = clip(v, max);
+    if (c !== v) (e.currentTarget as HTMLInputElement).value = c;
+    set({ [key]: c });
+  };
 
   return (
     <div class="rl-sidepage" aria-label="Изменить профиль">
@@ -128,9 +135,9 @@ export function Profile() {
       <div class="rl-settings app-profile-form">
         <ProfileHeader name={name} size={96} />
         <Section>
-          <TextField label="Имя" value={form.firstName} maxLength={NAME_MAX} error={form.firstName.trim() ? undefined : dirty ? 'Укажите имя' : undefined} onInput={(v: string) => set({ firstName: v })} autoComplete="given-name" />
-          <TextField label="Фамилия" value={form.lastName} maxLength={NAME_MAX} onInput={(v: string) => set({ lastName: v })} autoComplete="family-name" />
-          <TextField label="О себе" multiline rows={3} counter maxLength={BIO_MAX} value={form.bio} hint="Можно добавить пару строк о себе…" onInput={(v: string) => set({ bio: v })} />
+          <TextField label="Имя" value={form.firstName} maxLength={NAME_MAX} measure={cpLen} error={form.firstName.trim() ? undefined : dirty ? 'Укажите имя' : undefined} onInput={limited('firstName', NAME_MAX)} autoComplete="given-name" />
+          <TextField label="Фамилия" value={form.lastName} maxLength={NAME_MAX} measure={cpLen} onInput={limited('lastName', NAME_MAX)} autoComplete="family-name" />
+          <TextField label="О себе" multiline rows={3} counter maxLength={BIO_MAX} measure={cpLen} value={form.bio} hint="Можно добавить пару строк о себе…" onInput={limited('bio', BIO_MAX)} />
         </Section>
         <Section title="Имя пользователя">
           <TextField label="Имя пользователя" value={form.username} maxLength={33} error={unameErr} hint={unameHint} class={status === 'free' ? 'app-tf-ok' : undefined} onInput={(v: string) => set({ username: v })} autoComplete="username" />

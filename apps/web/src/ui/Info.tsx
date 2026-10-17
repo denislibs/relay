@@ -2,6 +2,7 @@ import { Avatar, EmptyState, FolderTabs, InfoRow, LazyImage, PanelHeader, RichTe
 import type { Item } from '@relay/sync-engine/src/types';
 import { chatMedia, focusMessage } from '../data';
 import { fileSize } from './format';
+import type { ComponentChildren } from 'preact';
 import { useEffect, useState } from 'preact/hooks';
 import { syncMuted } from '../notify';
 import { setGlobal, useGlobal } from '../global';
@@ -67,7 +68,7 @@ export function Info() {
         </div>
         <div class="rl-aside-group">
           <InfoRow tile="orange" icon={group ? 'community' : 'contact'} title={title} subtitle={group ? 'Название группы' : 'Имя'} />
-          {!group && user ? <PeerRows user={user} /> : null}
+          <Expand show={!group && !!user}>{!group && user ? <PeerRows user={user} /> : null}</Expand>
           <InfoRow
             tile="red"
             icon={muted.includes(chatId) ? 'bellOff' : 'bell'}
@@ -140,4 +141,19 @@ function PeerRows({ user }: { user: Item }) {
       {phone ? <InfoRow tile="green" icon="phone" title={phone} subtitle="Телефон" onClick={() => copy(phone)} /> : null}
     </>
   );
+}
+
+/**
+ * Строки, пришедшие позже панели, раскрываются по высоте, а не толкают вкладки рывком.
+ * Были с самого начала (кэш) — показываем сразу, без анимации.
+ */
+function Expand({ show, children }: { show: boolean; children: ComponentChildren }) {
+  const [state, setState] = useState<'instant' | 'closed' | 'open'>(show ? 'instant' : 'closed');
+  useEffect(() => {
+    if (!show) { setState('closed'); return; }
+    if (state !== 'closed') return;
+    const id = requestAnimationFrame(() => setState('open'));
+    return () => cancelAnimationFrame(id);
+  }, [show]);
+  return <div class="app-expand" data-state={show ? state : 'closed'}><div class="app-expand-inner">{children}</div></div>;
 }

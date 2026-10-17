@@ -78,17 +78,19 @@ function RangeRow(props) {
     })) : null);
 }
 
-/* ---------- TextField: плавающая подпись, счётчик «осталось», ошибка ---------- */
+/* ---------- TextField: плавающая подпись, счётчик «осталось», ошибка ----------
+   measure(value) — своя длина (например, в кодовых точках, как считает сервер): тогда нативный maxLength
+   (UTF-16) не ставится, а обрезает вызывающий в onInput. */
 function TextField(props) {
   var id = useId('rl-field-', props.id);
   var value = props.value == null ? '' : String(props.value);
-  var left = props.maxLength != null ? props.maxLength - value.length : null;
+  var left = props.maxLength != null ? props.maxLength - (props.measure ? props.measure(value) : value.length) : null;
   var showCount = props.counter && left != null;
   var Tag = props.multiline ? 'textarea' : 'input';
   var err = props.error;
   return h('div', { class: cx('rl-tf', value && 'rl-tf-filled', err && 'rl-tf-error', props.multiline && 'rl-tf-multi', (props.className || props.class)) },
     h('div', { class: 'rl-tf-box' },
-      h(Tag, { id: id, class: 'rl-tf-input', value: value, placeholder: ' ', maxLength: props.maxLength, disabled: props.disabled, rows: props.multiline ? (props.rows || 3) : undefined,
+      h(Tag, { id: id, class: 'rl-tf-input', value: value, placeholder: ' ', maxLength: props.measure ? undefined : props.maxLength, disabled: props.disabled, rows: props.multiline ? (props.rows || 3) : undefined,
         type: props.multiline ? undefined : (props.type || 'text'), autoComplete: props.autoComplete || 'off', inputMode: props.inputMode, autoFocus: props.autoFocus,
         'aria-invalid': err ? 'true' : undefined, 'aria-describedby': err ? id + '-err' : undefined,
         onInput: function (e) { if (props.onInput) props.onInput(e.currentTarget.value, e); },

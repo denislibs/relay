@@ -4,6 +4,7 @@
 import { connectEngine, Mirror, type EngineClient } from '@relay/sync-engine/src/client';
 import type { Action, Item, Patch } from '@relay/sync-engine/src/types';
 import { useEffect, useState } from 'preact/hooks';
+import { engineConfig } from './engineConfig';
 import { getGlobal, setGlobal, type Me } from './global';
 
 declare const __BUILD__: string;
@@ -23,7 +24,7 @@ export function prefetchAll(paths: string[]): void { for (const p of paths) pref
 // ---------- движок ----------
 
 // Своё соединение с тем же движком (SharedWorker/лидер один на все вкладки): data.ts свой клиент наружу не отдаёт.
-// Конфиг — как в data.ts: хост берёт конфиг первого hello, поэтому он обязан совпадать.
+// Конфиг — engineConfig.ts (обязан совпадать с data.ts, см. engineConfig.test.ts).
 let engine: EngineClient | null = null;
 
 /** Тексты отказов сервера (opFailed). */
@@ -49,20 +50,8 @@ export function showToast(text: string): void {
 const ME_KEY = 'relay.me';
 
 export function startSettingsData(me: Me): void {
-  const feedPage = Math.max(30, Math.ceil(innerHeight / 40) * 2);
-  engine = connectEngine({
-    build: __BUILD__,
-    config: {
-      userId: me.userId,
-      dbName: 'relay-' + me.userId,
-      httpBase: location.origin,
-      wsUrl: (location.protocol === 'https:' ? 'wss://' : 'ws://') + location.host + '/ws',
-      dialogsPage: Math.max(20, Math.ceil(innerHeight / 72) * 2),
-      historyPage: feedPage,
-    },
-    sharedUrl: '/shared.worker.js',
-    dedicatedUrl: '/dedicated.worker.js',
-  });
+  engine = connectEngine({ build: __BUILD__, config: engineConfig(me), sharedUrl: '/shared.worker.js', dedicatedUrl: '/dedicated.worker.js' });
+  engine.onReload(() => location.reload());   // движок другой сборки или база обновлена новой вкладкой
 
   // свой профиль: база сервера + ещё не подтверждённые правки — правка видна сразу, в том числе без сети
   const meM = new Mirror();
@@ -100,14 +89,22 @@ export type UsernameCheck = { ok: true } | { ok: false; reason: 'invalid' | 'tak
 export const checkUsername = (username: string): Promise<UsernameCheck> =>
   call<UsernameCheck>({ type: 'checkUsername', username }).catch(() => ({ offline: true as const }));
 
-/** Профиль человека (PublicUser) — подписка движка, пока компонент смонтирован. */
+// последний известный профиль по id в этой вкладке: повторное открытие «Информации» — без ожидания движка
+const userCache = new Map<number, Item>();
+
+/** Профиль человека (PublicUser) — подписка движка, пока компонент смонтирован; движок заодно перезапрашивает его с сервера. */
 export function useUser(userId: number | null | undefined): Item | null {
-  const [user, setUser] = useState<Item | null>(null);
+  const [user, setUser] = useState<Item | null>(() => (userId ? userCache.get(userId) ?? null : null));
   useEffect(() => {
-    setUser(null);
+    setUser(userId ? userCache.get(userId) ?? null : null);
     if (!userId || !engine) return;
     const m = new Mirror();
-    const w = engine.watch({ kind: 'user', userId }, (p: Patch) => { m.apply(p); setUser(m.list()[0] ?? null); });
+    const w = engine.watch({ kind: 'user', userId }, (p: Patch) => {
+      m.apply(p);
+      const u = m.list()[0] ?? null;
+      if (u) userCache.set(userId, u); else userCache.delete(userId);
+      setUser(u);
+    });
     return () => w.close();
   }, [userId]);
   return user;

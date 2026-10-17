@@ -93,3 +93,11 @@ body { background: var(--bg); color: var(--ink); font-family: var(--font-sans); 
 .app-uname-link:hover b { text-decoration: underline; }
 .app-info-bio { white-space: pre-wrap; overflow-wrap: anywhere; }
 .app-profile-form { padding-bottom: 88px; }   /* последняя строка не прячется под ✓ */
+/* строки профиля собеседника появляются плавно: высота 0 → авто (grid 0fr → 1fr) и проявление */
+.app-expand { display: grid; grid-template-rows: 0fr; transition: grid-template-rows var(--dur-base) var(--ease-out); }
+.app-expand-inner { min-height: 0; overflow: hidden; opacity: 0; transition: opacity var(--dur-base) var(--ease-out); }
+.app-expand:is([data-state="open"], [data-state="instant"]) { grid-template-rows: 1fr; }
+.app-expand:is([data-state="open"], [data-state="instant"]) > .app-expand-inner { opacity: 1; }
+.app-expand[data-state="instant"], .app-expand[data-state="instant"] > .app-expand-inner { transition: none; }
+@media (prefers-reduced-motion: reduce) { .app-expand, .app-expand-inner { transition: none; } }
+:root[data-anim="off"] .app-expand, :root[data-anim="off"] .app-expand-inner { transition: none; }

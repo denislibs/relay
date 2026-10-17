@@ -5,6 +5,11 @@ import type { Birthday } from '../format';
 export const NAME_MAX = 64;
 export const BIO_MAX = 140;
 
+/** Длина, как её считает сервер: в кодовых точках (эмодзи — одна, а не две UTF-16). */
+export const cpLen = (s: string) => [...s].length;
+/** Обрезать до max кодовых точек (суррогатная пара не рвётся). */
+export const clip = (s: string, max: number) => (s.length <= max ? s : [...s].slice(0, max).join(''));
+
 export interface ProfileForm { firstName: string; lastName: string; bio: string; username: string; birthday: Birthday | null }
 
 export const USERNAME_TEXT = {
@@ -56,7 +61,7 @@ export const isDirty = (me: Me, f: ProfileForm) => Object.keys(profilePatch(me, 
 
 /** Можно ли сохранить: имя есть, о себе в пределах, новое имя пользователя свободно (или проверить не удалось — решит сервер). */
 export function canSave(me: Me, f: ProfileForm, status: UsernameStatus): boolean {
-  if (!name(f.firstName) || [...bio(f.bio)].length > BIO_MAX) return false;
+  if (!name(f.firstName) || cpLen(bio(f.bio)) > BIO_MAX) return false;
   if (!usernameChanged(me, f) || !normUsername(f.username)) return true;
   return usernameShapeOk(f.username) && (status === 'free' || status === 'offline');
 }
