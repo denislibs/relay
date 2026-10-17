@@ -3,7 +3,7 @@ import { useEffect, useLayoutEffect, useRef, useState } from 'preact/hooks';
 import { deleteMessage, editMessage, focusMessage, sendFile, openChat, react, saveDraft, searchMessages, send, typing, typingDone } from '../data';
 import type { SearchHit } from '@relay/sync-engine/src/types';
 import { setGlobal, useGlobal } from '../global';
-import { unblockUser } from '../settingsData';
+import { unblockUser, useUser } from '../settingsData';
 import { Feed } from './Feed';
 import { fileSize, lastSeenText } from './format';
 
@@ -108,9 +108,10 @@ export function Chat({ chatId }: { chatId: number }) {
     return () => { removeEventListener('pagehide', flushDraft); flushDraft(); };
   }, []);
 
-  // личный чат и чёрный список: я заблокировал собеседника — или сервер отказал (он заблокировал меня) — вместо поля ввода плашка
+  // личный чат и чёрный список: я заблокировал собеседника или он меня (флаг blocksMe считает сервер) — вместо поля ввода плашка
   const iBlocked = useGlobal((s) => chat?.kind === 'direct' && chat.peerId != null && s.blocked.some((b) => b.userId === chat.peerId));
-  const theyBlocked = chat?.kind === 'direct' && messages.some((m) => m.status === 'failed' && m.error === 'blocked');
+  const peerUser = useUser(chat?.kind === 'direct' ? (chat.peerId as number | null) : null);
+  const theyBlocked = !!peerUser?.blocksMe;
   const plate = iBlocked ? 'mine' : theyBlocked ? 'theirs' : null;
 
   // высота композера (растёт с цитатой ответа) → --composer-h: лента уходит под него ровно на эту высоту
