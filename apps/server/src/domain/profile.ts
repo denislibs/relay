@@ -2,7 +2,7 @@ import type { Birthday, Me, PublicUser } from '@relay/protocol';
 import { sql, type Tx } from '../db';
 import { DomainError } from './errors';
 import { appendUpdates } from './journal';
-import { canSee, privacyCtx, type PrivacyCtx } from './privacy';
+import { blocksViewer, canSee, privacyCtx, type PrivacyCtx } from './privacy';
 
 const RESERVED = new Set(['admin', 'relay', 'support', 'settings', 'help', 'api', 'root', 'system', 'null', 'undefined', 'me']);
 const USERNAME = /^[a-z][a-z0-9_]{4,31}$/;
@@ -62,6 +62,7 @@ export function publicUser(viewer: number, r: Row, contact: ContactName | null |
     bio: canSee(viewer, r.id, 'bio', ctx) ? s.bio : null,
     birthday: canSee(viewer, r.id, 'birthday', ctx) ? s.birthday : null,
     phone: canSee(viewer, r.id, 'phone', ctx) ? s.phone : null,
+    blocksMe: blocksViewer(viewer, r.id, ctx),
   };
 }
 
@@ -116,16 +117,15 @@ export async function getUser(viewer: number, id: number): Promise<PublicUser> {
  * Правила приватности или чёрный список изменились: журнал зрителей хранит снимки профиля, поэтому тем,
  * у кого представление пользователя стало другим (поле пропало или появилось), — корректирующий userUpdated.
  * before/after — контексты до и после правки (after обычно — withRule/withBlock от before).
- * always — прислать даже без разницы (разблокированный по ней понимает, что писать снова можно).
  */
-export async function republishUser(tx: Tx, userId: number, viewers: number[], before: PrivacyCtx, after: PrivacyCtx, always = false): Promise<void> {
+export async function republishUser(tx: Tx, userId: number, viewers: number[], before: PrivacyCtx, after: PrivacyCtx): Promise<void> {
   if (!viewers.length) return;
   const [r] = await tx<Row[]>`select ${COLS} from users where id = ${userId}`;
   if (!r) return;
   const names = await contactNames(tx, userId, viewers);
   const out = viewers.flatMap((v) => {
     const was = publicUser(v, r, names.get(v), before), now = publicUser(v, r, names.get(v), after);
-    return !always && JSON.stringify(was) === JSON.stringify(now) ? [] : [{ userId: v, update: { type: 'userUpdated' as const, user: now } }];
+    return JSON.stringify(was) === JSON.stringify(now) ? [] : [{ userId: v, update: { type: 'userUpdated' as const, user: now } }];
   });
   await appendUpdates(tx, out);
 }

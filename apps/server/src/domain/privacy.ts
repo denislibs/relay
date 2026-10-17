@@ -99,17 +99,23 @@ export async function validRule(db: Db, userId: number, key: unknown, body: unkn
   if (!MODES.includes(mode) || (k === 'phoneDiscovery' && mode === 'nobody')) throw new DomainError('bad_frame');
   const list = (v: unknown): number[] => {
     if (v === undefined) return [];
-    if (!Array.isArray(v) || !v.every((x) => typeof x === 'number' && Number.isSafeInteger(x) && x > 0)) throw new DomainError('bad_frame');
-    const out = [...new Set(v as number[])].filter((x) => x !== userId);
-    if (out.length > MAX_EXCEPTIONS) throw new DomainError('bad_frame');
-    return out;
+    // длина — первой: дальше по массиву не ходим, пока не ясно, что он разумного размера
+    if (!Array.isArray(v) || v.length > MAX_EXCEPTIONS) throw new DomainError('bad_frame');
+    if (!v.every((x) => typeof x === 'number' && Number.isSafeInteger(x) && x > 0)) throw new DomainError('bad_frame');
+    return [...new Set(v as number[])].filter((x) => x !== userId);
   };
   // у «Кто найдёт по номеру» исключений нет
   let allow = k === 'phoneDiscovery' ? [] : list(b.allow);
   let deny = k === 'phoneDiscovery' ? [] : list(b.deny);
   const all = [...new Set([...allow, ...deny])];
   if (all.length) {
-    const known = new Set((await db`select id from users where id = any(${all}::bigint[])`).map((r) => Number(r.id)));
+    // только те, кого владелец и так видит (контакт или общий чат); остальных молча отбрасываем —
+    // ответ не различает «нет такого» и «не знакомы», иначе PUT стал бы способом перебрать id
+    const known = new Set((await db`
+      select u.id from users u
+       where u.id = any(${all}::bigint[])
+         and (exists (select 1 from contacts c where c.owner_id = ${userId} and c.user_id = u.id)
+              or exists (select 1 from chat_members a join chat_members b on b.chat_id = a.chat_id where a.user_id = ${userId} and b.user_id = u.id))`).map((r) => Number(r.id)));
     allow = allow.filter((x) => known.has(x));
     deny = deny.filter((x) => known.has(x));
   }
@@ -139,8 +145,17 @@ export function withBlock(ctx: PrivacyCtx, owner: number, user: number, on: bool
   return { ...ctx, blocks };
 }
 
-/** Заблокировал ли owner пользователя user. */
-export async function isBlocked(db: Db, owner: number, user: number): Promise<boolean> {
-  const [r] = await db`select 1 from blocks where owner_id = ${owner} and user_id = ${user}`;
+/** Заблокировал ли owner зрителя (для PublicUser.blocksMe: плашка вместо поля ввода у заблокированного). */
+export function blocksViewer(viewer: number, owner: number, ctx: PrivacyCtx): boolean {
+  return viewer !== owner && ctx.blocks.has(pair(owner, viewer));
+}
+
+/** Личный чат, собеседник в котором заблокировал userId: писать, править и ставить реакции туда нельзя. */
+export async function blockedInDirect(db: Db, chatId: number, userId: number): Promise<boolean> {
+  const [r] = await db`
+    select 1 from chats c
+      join chat_members o on o.chat_id = c.id and o.user_id <> ${userId}
+      join blocks b on b.owner_id = o.user_id and b.user_id = ${userId}
+     where c.id = ${chatId} and c.kind = 'direct'`;
   return !!r;
 }

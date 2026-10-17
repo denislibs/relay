@@ -6,7 +6,7 @@ import { clearSessionCookie, createSession, createUser, deleteSession, readSessi
 import { createChat, getChatMedia, getHistory, getMessagesByIds, listChats, listChatsPage } from './domain/chats';
 import { sql } from './db';
 import { DomainError } from './domain/errors';
-import { connected, disconnected, listPresence, reannounce, type Publish } from './domain/presence';
+import { connected, disconnected, listPresence, type Publish } from './domain/presence';
 import { searchMessages } from './domain/search';
 import { fileFor, MAX_FILE, storeUpload } from './domain/files';
 import { handleFrame } from './ws';
@@ -88,28 +88,23 @@ export function createServer(opts: { port: number }): Server {
         }
         if (url.pathname === '/contacts') {
           if (req.method === 'GET') return Response.json(await listContacts(userId));
-          if (req.method === 'POST') return Response.json(await addContact(userId, await req.json().catch(() => null)));
+          if (req.method === 'POST') return Response.json(await addContact(userId, await req.json().catch(() => null), publish));
         }
         const contact = /^\/contacts\/(\d{1,15})$/.exec(url.pathname);
         if (contact && req.method === 'PATCH') return Response.json(await updateContact(userId, Number(contact[1]), await req.json().catch(() => null)));
-        if (contact && req.method === 'DELETE') return Response.json(await removeContact(userId, Number(contact[1])));
+        if (contact && req.method === 'DELETE') return Response.json(await removeContact(userId, Number(contact[1]), publish));
         if (req.method === 'GET' && url.pathname === '/settings') return Response.json(await getSettings(userId));
         const notifyType = /^\/settings\/notify\/([a-z]{1,16})$/.exec(url.pathname);
         if (req.method === 'PUT' && notifyType) return Response.json(await setNotify(userId, notifyType[1], await req.json().catch(() => null)));
         const privacyKey = /^\/privacy\/([a-zA-Z]{1,16})$/.exec(url.pathname);
         if (req.method === 'PUT' && privacyKey) {
-          const res = await setPrivacy(userId, privacyKey[1], await req.json().catch(() => null));
-          // присутствие — не журнал: собеседникам (и себе — взаимность) после коммита
-          if (privacyKey[1] === 'lastSeen') reannounce(publish, userId).catch((e) => console.error('presence:', e));
-          return Response.json(res);
+          return Response.json(await setPrivacy(userId, privacyKey[1], await req.json().catch(() => null), publish));
         }
         if (req.method === 'GET' && url.pathname === '/blocks') return Response.json(await listBlocked(userId));
         const block = /^\/blocks\/(\d{1,15})$/.exec(url.pathname);
         if (block && (req.method === 'PUT' || req.method === 'DELETE')) {
           const target = Number(block[1]);
-          const res = req.method === 'PUT' ? await blockUser(userId, target) : await unblockUser(userId, target);
-          reannounce(publish, userId).catch((e) => console.error('presence:', e));
-          return Response.json(res);
+          return Response.json(req.method === 'PUT' ? await blockUser(userId, target, publish) : await unblockUser(userId, target, publish));
         }
         const user = /^\/users\/(\d{1,15})$/.exec(url.pathname);
         if (req.method === 'GET' && user) return Response.json(await getUser(userId, Number(user[1])));

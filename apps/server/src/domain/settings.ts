@@ -3,6 +3,7 @@ import { sql, type Tx } from '../db';
 import { DomainError } from './errors';
 import { appendUpdates } from './journal';
 import { getRules, privacyCtx, validRule, withRule, writeRule } from './privacy';
+import { reannounce, type Publish } from './presence';
 import { republishUser, selfSeq, viewersOf } from './profile';
 
 export const NOTIFY_TYPES: readonly NotifyType[] = ['direct', 'group'];
@@ -39,15 +40,17 @@ export async function getSettings(userId: number): Promise<SettingsSnapshot> {
 /**
  * Правило конфиденциальности (PUT /privacy/:key). Одной транзакцией: правило, privacyChanged себе
  * и корректирующий userUpdated тем зрителям, у кого из-за правила пропало или появилось поле профиля.
- * Присутствие (lastSeen) — не журнал: его переобъявляет вызывающий после коммита (presence.reannounce).
+ * Присутствие (lastSeen) — не журнал: переобъявляется после коммита (presence.reannounce), если передан publish.
  */
-export async function setPrivacy(userId: number, key: unknown, body: unknown): Promise<SettingsSnapshot> {
+export async function setPrivacy(userId: number, key: unknown, body: unknown, publish?: Publish): Promise<SettingsSnapshot> {
   const { key: k, rule } = await validRule(sql, userId, key, body);
-  return sql.begin(async (tx) => {
+  let changed = false;
+  const res = await sql.begin(async (tx) => {
     await tx`select 1 from users where id = ${userId} for no key update`;   // правки одного человека — по очереди
     const before = await getRules(tx, userId);
     if (JSON.stringify(before[k]) !== JSON.stringify(rule)) {
       await writeRule(tx, userId, k, rule);
+      changed = true;
       await appendUpdates(tx, [{ userId, update: { type: 'privacyChanged', rules: { ...before, [k]: rule } } }]);
       if (k === 'phone' || k === 'bio' || k === 'birthday') {
         const viewers = await viewersOf(tx, userId);
@@ -57,7 +60,10 @@ export async function setPrivacy(userId: number, key: unknown, body: unknown): P
       }
     }
     return snapshot(tx, userId);
-  }) as Promise<SettingsSnapshot>;
+  }) as SettingsSnapshot;
+  // присутствие — не журнал: собеседникам (и себе — взаимность) после коммита, только если правило правда сменилось
+  if (publish && changed && k === 'lastSeen') await reannounce(publish, userId).catch((e) => console.error('presence:', e));
+  return res;
 }
 
 /** Умолчания для получателя — для push (одним запросом по нескольким). */

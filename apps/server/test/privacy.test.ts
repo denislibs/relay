@@ -87,13 +87,14 @@ test('canSee truth table: self, deny > allow > mode, contacts = owner added view
 // ---------- API правил ----------
 
 test('GET /settings has privacy defaults; PUT /privacy/:key validates and normalizes lists; privacyChanged to self', async () => {
-  const a = await login('Анна'), b = await login('Борис'), v = await login('Вера');
+  const a = await login('Анна'), b = await login('Борис'), v = await login('Вера'), stranger = await login('Чужой');
+  await makeChat([a.userId, b.userId]); await makeChat([a.userId, v.userId]);
   expect((await (await call(a, 'GET', '/settings')).json()).privacy).toEqual(defaultPrivacy());
   for (const [key, body] of [['photo', { mode: 'everyone' }], ['bio', { mode: 'all' }], ['phoneDiscovery', { mode: 'nobody' }], ['bio', { mode: 'nobody', allow: ['x'] }], ['bio', null], ['bio', { mode: 'nobody', allow: Array.from({ length: 1001 }, (_, i) => i + 10_000) }]] as const) {
     expect([key, (await call(a, 'PUT', `/privacy/${key}`, body)).status]).toEqual([key, 400]);
   }
-  // себя, несуществующих и повторы — вон; человек в обоих списках остаётся только в deny
-  const r = await rule(a, 'bio', { mode: 'contacts', allow: [b.userId, b.userId, a.userId, 99999, v.userId], deny: [v.userId] });
+  // себя, несуществующих, незнакомых и повторы — вон (не отличая «нет такого» от «не знакомы»); в обоих списках — только deny
+  const r = await rule(a, 'bio', { mode: 'contacts', allow: [b.userId, b.userId, a.userId, 99999, stranger.userId, v.userId], deny: [v.userId] });
   expect(r.status).toBe(200);
   const s = await r.json();
   expect(s.privacy.bio).toEqual({ mode: 'contacts', allow: [b.userId], deny: [v.userId] });
@@ -260,7 +261,7 @@ test('blocked sender in a direct chat → err blocked (with seq), nothing in the
   const msgs = (await sql`select count(*)::int as n from messages`)[0].n;
 
   const out = await handleFrame(b.userId, { op: 'send', reqId: 'r1', clientId: crypto.randomUUID(), chatId: direct, body: 'после' });
-  expect(out).toEqual([{ op: 'err', reqId: 'r1', code: 'blocked', retry: false, seq: bLen }]);
+  expect(out).toEqual([{ op: 'err', reqId: 'r1', code: 'blocked', retry: false }]);
   expect((await journal(a.userId)).length).toBe(aLen);
   expect((await journal(b.userId)).length).toBe(bLen);
   expect((await sql`select count(*)::int as n from messages`)[0].n).toBe(msgs);
@@ -288,6 +289,85 @@ test('typing from a blocked user does not reach the blocker', async () => {
   expect(sent).toEqual([`user:${a.userId}`]);
   expect(seen).toEqual([]);
   wa.close();
+});
+
+test('PUT /privacy is not an existence oracle: a 1001-long list is 400 before anything else; unknown and unseen ids look the same', async () => {
+  const a = await login('Анна'), stranger = await login('Чужой');
+  expect((await rule(a, 'bio', { mode: 'nobody', allow: [...Array.from({ length: 1001 }, () => 'x')] as never })).status).toBe(400);
+  const r1 = await (await rule(a, 'bio', { mode: 'nobody', allow: [stranger.userId] })).json();
+  const r2 = await (await rule(a, 'bio', { mode: 'nobody', allow: [stranger.userId + 1000] })).json();
+  expect(r1.privacy.bio).toEqual({ mode: 'nobody', allow: [], deny: [] });
+  expect(r2.privacy.bio).toEqual(r1.privacy.bio);
+});
+
+test('adding/removing a contact republishes what the other person sees (phone via userUpdated, last seen live)', async () => {
+  const a = await login('Анна', '+79002223344'), b = await login('Борис');
+  await makeChat([a.userId, b.userId]);
+  await rule(a, 'lastSeen', { mode: 'contacts' });
+  await sql`update users set last_seen_at = now() - interval '1 hour'`;
+  const lastUser = async () => ofType(await journal(b.userId), 'userUpdated').filter((u) => u.user.id === a.userId).at(-1)?.user;
+  const wb = await connect(b);
+  const exact = nextFrame(wb, (f) => f.op === 'presence' && f.items[0]?.userId === a.userId);
+  await call(a, 'POST', '/contacts', { userId: b.userId, firstName: 'Борис' });
+  expect((await lastUser())?.phone).toBe('+79002223344');                               // номер появился без перезагрузки
+  const on = ((await exact) as Extract<ServerFrame, { op: 'presence' }>).items[0];
+  expect(on.lastSeen).not.toBe('recently');                                              // «недавно» → точное время
+  // переименование контакта видимость не меняет — новых записей Борису нет
+  const len = (await journal(b.userId)).length;
+  await call(a, 'POST', '/contacts', { userId: b.userId, firstName: 'Боря' });
+  expect((await journal(b.userId)).length).toBe(len);
+
+  const hidden = nextFrame(wb, (f) => f.op === 'presence' && f.items[0]?.userId === a.userId);
+  await call(a, 'DELETE', `/contacts/${b.userId}`);
+  expect((await lastUser())?.phone).toBeNull();                                          // номер пропал
+  expect(((await hidden) as Extract<ServerFrame, { op: 'presence' }>).items[0]).toEqual({ userId: a.userId, online: null, lastSeen: 'recently' });
+  wb.close();
+});
+
+test('blocksMe: set on block for the blocked viewer only, survives a profile edit by the blocker, cleared on unblock', async () => {
+  const a = await login('Анна'), b = await login('Борис');
+  await makeChat([a.userId, b.userId]);
+  expect((await userOf(b, a.userId)).blocksMe).toBe(false);
+  await call(a, 'PUT', `/blocks/${b.userId}`);
+  const last = async () => ofType(await journal(b.userId), 'userUpdated').filter((u) => u.user.id === a.userId).at(-1)!.user;
+  expect((await last()).blocksMe).toBe(true);
+  expect((await userOf(b, a.userId)).blocksMe).toBe(true);
+  expect((await userOf(a, b.userId)).blocksMe).toBe(false);   // блокирующему — нет
+  await call(a, 'PATCH', '/me', { bio: 'новое' });
+  expect(await last()).toMatchObject({ blocksMe: true, bio: null });   // правка профиля флаг не снимает
+  await call(a, 'DELETE', `/blocks/${b.userId}`);
+  expect(await last()).toMatchObject({ blocksMe: false, bio: 'новое' });
+});
+
+test('a blocked user cannot edit or react in the direct chat with the blocker (403 blocked, no journal); delete still works', async () => {
+  const a = await login('Анна'), b = await login('Борис'), v = await makeUser('Вера');
+  const direct = await makeChat([a.userId, b.userId]), group = await makeChat([a.userId, b.userId, v]);
+  const mine = await sendMessage(b.userId, { chatId: direct, clientId: crypto.randomUUID(), body: 'моё' });
+  const hers = await sendMessage(a.userId, { chatId: direct, clientId: crypto.randomUUID(), body: 'её' });
+  const inGroup = await sendMessage(b.userId, { chatId: group, clientId: crypto.randomUUID(), body: 'в группе' });
+  await call(a, 'PUT', `/blocks/${b.userId}`);
+  const aLen = (await journal(a.userId)).length;
+  expect(await handleFrame(b.userId, { op: 'edit', reqId: 'e', chatId: direct, id: mine.message.id, body: 'правка' })).toEqual([{ op: 'err', reqId: 'e', code: 'blocked', retry: false }]);
+  expect(await handleFrame(b.userId, { op: 'react', reqId: 'r', chatId: direct, id: hers.message.id, emoji: '👍' })).toEqual([{ op: 'err', reqId: 'r', code: 'blocked', retry: false }]);
+  expect((await journal(a.userId)).length).toBe(aLen);
+  expect((await sql`select body from messages where id = ${mine.message.id}`)[0].body).toBe('моё');
+  expect((await handleFrame(b.userId, { op: 'edit', reqId: 'g', chatId: group, id: inGroup.message.id, body: 'правка' }))[0].op).toBe('ack');
+  expect((await handleFrame(b.userId, { op: 'delete', reqId: 'd', chatId: direct, id: mine.message.id }))[0].op).toBe('ack');
+});
+
+test('no presence frames for no-op changes: repeated block/unblock, unchanged lastSeen rule', async () => {
+  const a = await login('Анна'), b = await login('Борис');
+  await makeChat([a.userId, b.userId]);
+  await rule(a, 'lastSeen', { mode: 'nobody' });
+  await call(a, 'PUT', `/blocks/${b.userId}`);
+  const wb = await connect(b);
+  const seen = frames(wb, 'presence');
+  await rule(a, 'lastSeen', { mode: 'nobody' });       // то же правило
+  await call(a, 'PUT', `/blocks/${b.userId}`);         // повтор
+  await call(a, 'DELETE', `/blocks/${b.userId}`);      // разблокировали, но время всё равно скрыто правилом — вид не изменился
+  await Bun.sleep(150);
+  expect(seen).toEqual([]);
+  wb.close();
 });
 
 // ---------- push ----------

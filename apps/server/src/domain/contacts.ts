@@ -2,8 +2,8 @@ import type { BlockedUser, Contact, PublicUser } from '@relay/protocol';
 import { sql, type Tx } from '../db';
 import { DomainError } from './errors';
 import { appendUpdates } from './journal';
-import { presenceFor } from './presence';
-import { canFindByPhone, privacyCtx, withBlock, type PrivacyCtx } from './privacy';
+import { announcePair, presenceFor, type PairChange, type Publish } from './presence';
+import { canFindByPhone, privacyCtx, type PrivacyCtx } from './privacy';
 import { canView, COLS, publicUser, publicUserFor, republishUser, selfSeq, validName, validText, type ContactName, type Row } from './profile';
 
 const NOTE_MAX = 128;
@@ -70,6 +70,23 @@ export async function listContacts(owner: number): Promise<{ contacts: Contact[]
 
 const validNote = (v: unknown) => validText(v, NOTE_MAX, 'note_too_long');
 
+/** Контекст пары до правки связи owner → userId (контакт, блокировка); обе стороны. */
+const pairCtx = (db: Tx | typeof sql, owner: number, userId: number) => privacyCtx(db, [[userId, owner]]);
+
+/**
+ * Связь owner → userId изменилась (добавил/удалил контакт, заблокировал/разблокировал): от неё зависит, что userId
+ * видит у owner (правила «Мои контакты», блокировка). В той же транзакции — корректирующий userUpdated ему,
+ * если он вообще видит owner; присутствие — после коммита (announcePair), только если вид поменялся.
+ */
+async function relinked(tx: Tx, owner: number, userId: number, before: PrivacyCtx): Promise<PairChange> {
+  const after = await pairCtx(tx, owner, userId);
+  if (await canView(tx, userId, owner)) await republishUser(tx, owner, [userId], before, after);
+  return { a: owner, b: userId, before, after };
+}
+const afterCommit = async (publish: Publish | undefined, change: PairChange | null) => {
+  if (publish && change) await announcePair(publish, change).catch((e) => console.error('presence:', e));
+};
+
 const plain = (v: unknown): v is Record<string, unknown> => !!v && typeof v === 'object' && !Array.isArray(v);
 
 /** Записать контакт и contactsChanged владельцу — одной транзакцией; ответ — то же, что в журнале, плюс seq. */
@@ -82,7 +99,7 @@ async function write(tx: Tx, owner: number, userId: number): Promise<Contact> {
 }
 
 /** Добавить (или переименовать, если уже есть) контакт по userId или по запросу (@имя, телефон). */
-export async function addContact(owner: number, body: unknown): Promise<Contact> {
+export async function addContact(owner: number, body: unknown, publish?: Publish): Promise<Contact> {
   if (!plain(body)) throw new DomainError('bad_frame');
   const first = validName(body.firstName, 1);
   const last = validName(body.lastName ?? '', 0);
@@ -96,13 +113,19 @@ export async function addContact(owner: number, body: unknown): Promise<Contact>
   } else {
     userId = (await resolveUser(owner, body.query)).id;
   }
-  return sql.begin(async (tx) => {
-    await tx`insert into contacts (owner_id, user_id, first_name, last_name, note)
+  let change: PairChange | null = null;
+  const res = await sql.begin(async (tx) => {
+    const before = await pairCtx(tx, owner, userId);
+    const ins = await tx`insert into contacts (owner_id, user_id, first_name, last_name, note)
              values (${owner}, ${userId}, ${first}, ${last}, ${note ?? ''})
              on conflict (owner_id, user_id) do update set first_name = excluded.first_name, last_name = excluded.last_name
-               ${note !== undefined ? sql`, note = excluded.note` : sql``}`;
+               ${note !== undefined ? sql`, note = excluded.note` : sql``}
+             returning (xmax = 0) as created`;
+    if (ins[0]?.created) change = await relinked(tx, owner, userId, before);   // новый контакт — «Мои контакты» у него теперь про него
     return write(tx, owner, userId);
-  }) as Promise<Contact>;
+  }) as Contact;
+  await afterCommit(publish, change);
+  return res;
 }
 
 export async function updateContact(owner: number, userId: number, patch: unknown): Promise<Contact> {
@@ -120,14 +143,19 @@ export async function updateContact(owner: number, userId: number, patch: unknow
 }
 
 /** Удалить контакт (повторное удаление — не ошибка). В журнал — removed и профиль уже без контактного имени. */
-export async function removeContact(owner: number, userId: number): Promise<{ removed: number; user: PublicUser | null; seq: number }> {
-  return sql.begin(async (tx) => {
+export async function removeContact(owner: number, userId: number, publish?: Publish): Promise<{ removed: number; user: PublicUser | null; seq: number }> {
+  let change: PairChange | null = null;
+  const res = await sql.begin(async (tx) => {
+    const before = await pairCtx(tx, owner, userId);
     const del = await tx`delete from contacts where owner_id = ${owner} and user_id = ${userId} returning user_id`;
+    if (del.length) change = await relinked(tx, owner, userId, before);
     const [r] = await tx<Row[]>`select ${COLS} from users where id = ${userId}`;
     const user = r && (await canView(tx, owner, userId)) ? await publicUserFor(tx, owner, r, null) : null;
     if (del.length) await appendUpdates(tx, [{ userId: owner, update: { type: 'contactsChanged', removed: userId, user } }]);
     return { removed: userId, user, seq: await selfSeq(tx, owner) };
-  }) as Promise<{ removed: number; user: PublicUser | null; seq: number }>;
+  }) as { removed: number; user: PublicUser | null; seq: number };
+  await afterCommit(publish, change);
+  return res;
 }
 
 // ---------- чёрный список ----------
@@ -166,31 +194,37 @@ export async function listBlocked(owner: number): Promise<{ blocked: BlockedUser
  * Заблокировать (повтор — не ошибка). Одной транзакцией: строка, blocksChanged владельцу и корректирующий
  * userUpdated заблокированному (о себе, дне рождения и номере он больше не узнает). Присутствие — после коммита.
  */
-export async function blockUser(owner: number, userId: number): Promise<BlockedUser> {
+export async function blockUser(owner: number, userId: number, publish?: Publish): Promise<BlockedUser> {
   // блокировать можно только тех, кого и так видно (общий чат, контакт): иначе перебором id можно узнать всех
   if (userId === owner || !(await canView(sql, owner, userId))) throw new DomainError('not_found');
-  return sql.begin(async (tx) => {
-    const before = await privacyCtx(tx, [[userId, owner]]);
+  let change: PairChange | null = null;
+  const res = await sql.begin(async (tx) => {
+    const before = await pairCtx(tx, owner, userId);
     const ins = await tx`insert into blocks (owner_id, user_id) values (${owner}, ${userId}) on conflict do nothing returning user_id`;
     const r = (await blockedRow(tx, owner, userId))!;
     const item = blockedOf(owner, r, await privacyCtx(tx, [[owner, userId]]));
     if (ins.length) {
       await appendUpdates(tx, [{ userId: owner, update: { type: 'blocksChanged', blocked: item } }]);
-      if (await canView(tx, userId, owner)) await republishUser(tx, owner, [userId], before, withBlock(before, owner, userId, true));
+      change = await relinked(tx, owner, userId, before);   // у него blocksMe: true, скрытые поля пропадают
     }
     return { ...item, seq: await selfSeq(tx, owner) };
-  }) as Promise<BlockedUser>;
+  }) as BlockedUser;
+  await afterCommit(publish, change);
+  return res;
 }
 
 /** Разблокировать (повтор — не ошибка): blocksChanged владельцу, разблокированному — профиль снова целиком. */
-export async function unblockUser(owner: number, userId: number): Promise<{ unblocked: number; seq: number }> {
-  return sql.begin(async (tx) => {
-    const before = await privacyCtx(tx, [[userId, owner]]);
+export async function unblockUser(owner: number, userId: number, publish?: Publish): Promise<{ unblocked: number; seq: number }> {
+  let change: PairChange | null = null;
+  const res = await sql.begin(async (tx) => {
+    const before = await pairCtx(tx, owner, userId);
     const del = await tx`delete from blocks where owner_id = ${owner} and user_id = ${userId} returning user_id`;
     if (del.length) {
       await appendUpdates(tx, [{ userId: owner, update: { type: 'blocksChanged', unblocked: userId } }]);
-      if (await canView(tx, userId, owner)) await republishUser(tx, owner, [userId], before, withBlock(before, owner, userId, false), true);
+      change = await relinked(tx, owner, userId, before);   // blocksMe: false — плашка у него снимается
     }
     return { unblocked: userId, seq: await selfSeq(tx, owner) };
-  }) as Promise<{ unblocked: number; seq: number }>;
+  }) as { unblocked: number; seq: number };
+  await afterCommit(publish, change);
+  return res;
 }

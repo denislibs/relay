@@ -50,8 +50,31 @@ async function announce(publish: Publish, item: PresenceItem): Promise<void> {
   for (const peer of peers) if (canSeeLastSeen(peer, item.userId, ctx)) publish(`user:${peer}`, msg);
 }
 
+/** Связь двух людей изменилась (контакт, блокировка): контексты приватности пары до и после. */
+export interface PairChange { a: number; b: number; before: PrivacyCtx; after: PrivacyCtx }
+
 /**
- * Правило «Последний визит» или чёрный список изменились: всем собеседникам — их нынешний вид этого человека
+ * Каждой стороне пары — её нынешний вид другой, но только если он изменился (точное время ↔ «недавно»)
+ * и только тому, кто этого человека вообще отслеживает (личный чат или контакт) — как listPresence.
+ */
+export async function announcePair(publish: Publish, c: PairChange): Promise<void> {
+  const dirs = ([[c.a, c.b], [c.b, c.a]] as const).filter(([v, o]) => canSeeLastSeen(v, o, c.before) !== canSeeLastSeen(v, o, c.after));
+  if (!dirs.length) return;
+  const rows = await sql`
+    select u.id, u.last_seen_at from users u where u.id = any(${[c.a, c.b]}::bigint[])`;
+  const seen = new Map(rows.map((r) => [Number(r.id), r.last_seen_at]));
+  for (const [v, o] of dirs) {
+    const [t] = await sql`select (
+        exists (select 1 from contacts where owner_id = ${v} and user_id = ${o})
+        or exists (select 1 from chat_members m join chats ch on ch.id = m.chat_id and ch.kind = 'direct'
+                    join chat_members x on x.chat_id = m.chat_id and x.user_id = ${o} where m.user_id = ${v})
+      ) as ok`;
+    if (t.ok) publish(`user:${v}`, JSON.stringify({ op: 'presence', items: [presenceFor(v, o, seen.get(o), c.after)] }));
+  }
+}
+
+/**
+ * Правило «Последний визит» изменилось: всем собеседникам — их нынешний вид этого человека
  * (в том числе «недавно»), а ему самому — снимок собеседников (взаимность меняет и то, что видит он).
  */
 export async function reannounce(publish: Publish, userId: number): Promise<void> {

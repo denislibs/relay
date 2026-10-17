@@ -75,6 +75,8 @@ export interface PublicUser {
   username: string | null; bio: string | null; birthday: Birthday | null; phone: string | null;
   /** собственное имя пользователя; name/firstName/lastName у владельца контакта — контактные */
   publicName?: string;
+  /** этот человек заблокировал зрителя: писать ему в личный чат нельзя (плашка вместо поля ввода) */
+  blocksMe?: boolean;
 }
 
 /** Контакт: имя, которое дал владелец (видно только ему), заметка, профиль и присутствие.
@@ -123,8 +125,7 @@ export type ServerFrame =
   | { op: 'updates'; from: number; to: number; items: JournalEntry[]; more: boolean }
   | { op: 'tooLong'; seq: number }
   | { op: 'ack'; reqId: string; result: Record<string, unknown> }
-  // seq — у отказа blocked: номер своего журнала в момент отказа (разблокировку клиент узнаёт по более позднему userUpdated)
-  | { op: 'err'; reqId?: string; code: ErrorCode; retry: boolean; seq?: number }
+  | { op: 'err'; reqId?: string; code: ErrorCode; retry: boolean }
   | { op: 'poke' }
   | { op: 'presence'; items: PresenceItem[] }
   | { op: 'typing'; chatId: Id; userId: Id }

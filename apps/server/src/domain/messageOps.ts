@@ -3,6 +3,7 @@ import { sql } from '../db';
 import { assertMember } from './chats';
 import { DomainError } from './errors';
 import { fanOut } from './journal';
+import { blockedInDirect } from './privacy';
 
 const MAX_BODY = 4096;
 const EMOJI = /^\p{Extended_Pictographic}(️|‍\p{Extended_Pictographic})*$/u;
@@ -23,6 +24,8 @@ export async function editMessage(userId: number, chatId: number, id: number, bo
   return sql.begin(async (tx) => {
     await assertMember(tx, chatId, userId);
     await ownMessage(tx, userId, chatId, id);
+    // заблокированный не правит сообщения в личном чате с тем, кто его заблокировал
+    if (await blockedInDirect(tx, chatId, userId)) throw new DomainError('blocked');
     const [row] = await tx`update messages set body = ${text}, edited_at = now() where chat_id = ${chatId} and id = ${id} returning edited_at`;
     const editedAt = new Date(row.edited_at as string).toISOString();
     await fanOut(tx, await membersOf(tx, chatId), { type: 'messageEdited', chatId, id, body: text, editedAt });
@@ -49,6 +52,7 @@ export async function reactMessage(userId: number, chatId: number, id: number, e
     await assertMember(tx, chatId, userId);
     const [m] = await tx`select deleted from messages where chat_id = ${chatId} and id = ${id}`;
     if (!m || m.deleted) throw new DomainError('not_found', 'message');
+    if (await blockedInDirect(tx, chatId, userId)) throw new DomainError('blocked');
     if (emoji) {
       await tx`insert into reactions (chat_id, message_id, user_id, emoji) values (${chatId}, ${id}, ${userId}, ${emoji})
                on conflict (chat_id, message_id, user_id) do update set emoji = excluded.emoji, created_at = now()`;

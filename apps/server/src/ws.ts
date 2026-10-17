@@ -51,8 +51,7 @@ export async function handleFrame(userId: number, frame: ClientFrame, publish: (
         return [{ op: 'pong' }];
     }
   } catch (err) {
-    // blocked — с номером своего журнала: разблокировку клиент узнает по более позднему userUpdated собеседника
-    if (err instanceof DomainError) return [{ op: 'err', reqId, code: err.code, retry: false, ...(err.code === 'blocked' ? { seq: await currentSeq(userId) } : {}) }];
+    if (err instanceof DomainError) return [{ op: 'err', reqId, code: err.code, retry: false }];
     console.error(err);
     return [{ op: 'err', reqId, code: 'internal', retry: true }];
   }
