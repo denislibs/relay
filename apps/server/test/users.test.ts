@@ -16,3 +16,14 @@ test('names of people I share a chat with, mine too; strangers stay hidden', asy
   expect(res.users.sort((p, q) => p.id - q.id)).toEqual([{ id: a.userId, name: 'Анна' }, { id: b.userId, name: 'Борис' }, { id: c.userId, name: 'Вера' }]);
   expect((await fetch(`${base}/users?ids=${a.userId}`)).status).toBe(401);
 });
+
+test('a contact name I set wins over the public name', async () => {
+  const a = await login('Анна'), b = await login('Борис');
+  await fetch(`${base}/dev/chats`, { method: 'POST', headers: as(a.token), body: JSON.stringify({ kind: 'direct', title: null, memberIds: [a.userId, b.userId] }) });
+  const put = await fetch(`${base}/contacts`, { method: 'POST', headers: as(a.token), body: JSON.stringify({ userId: b.userId, firstName: 'Боря', lastName: 'Дача' }) });
+  expect(put.ok).toBe(true);
+  const res = await (await fetch(`${base}/users?ids=${b.userId}`, { headers: as(a.token) })).json() as { users: { id: number; name: string }[] };
+  expect(res.users).toEqual([{ id: b.userId, name: 'Боря Дача' }]);
+  const theirs = await (await fetch(`${base}/users?ids=${b.userId}`, { headers: as(b.token) })).json() as { users: { id: number; name: string }[] };
+  expect(theirs.users).toEqual([{ id: b.userId, name: 'Борис' }]);
+});

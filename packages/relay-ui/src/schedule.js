@@ -8,13 +8,16 @@
    isHeavyAnimating()
    onHeavyAnimationEnd(fn)   fn runs once when the counter drops to zero (or now, if idle)
    onFullyIdle(fn)           fn runs when no heavy animation AND the browser is idle
-   deferDuringAnimation(fn)  runs fn now, or after the current heavy animation */
+   deferDuringAnimation(fn)  runs fn now, or after the current heavy animation
+   frameStats()              counters for the dev section: work in the last frame, deferred work */
 
 var measures = [], mutations = [], scheduled = false;
 /* текущая фаза кадра: 'measure' | 'mutate' | 'free' (forceMeasure) | null — для проверки strict-dom */
 var phase = null;
 export function currentPhase() { return phase; }
 var heavy = 0, endWaiters = [], idleWaiters = [];
+/* счётчики для раздела «Для разработчиков»: пара присваиваний на кадр, читаются только оттуда */
+var lastMeasures = 0, lastMutations = 0, frames = 0, deferredTotal = 0;
 
 function raf(fn) { return typeof requestAnimationFrame === 'function' ? requestAnimationFrame(fn) : setTimeout(fn, 16); }
 
@@ -22,6 +25,7 @@ function flush() {
   scheduled = false;
   var m = measures, w = mutations;
   measures = []; mutations = [];
+  lastMeasures = m.length; lastMutations = w.length; frames++;
   phase = 'measure';
   for (var i = 0; i < m.length; i++) safe(m[i]);
   phase = 'mutate';
@@ -59,7 +63,11 @@ export function beginHeavyAnimation(ms) {
 }
 export function isHeavyAnimating() { return heavy > 0; }
 export function onHeavyAnimationEnd(fn) { if (!heavy) fn(); else endWaiters.push(fn); }
-export function deferDuringAnimation(fn) { onHeavyAnimationEnd(fn); }
+export function deferDuringAnimation(fn) { if (heavy) deferredTotal++; onHeavyAnimationEnd(fn); }
+/* measures/mutations — задач в последнем кадре; deferred — сколько раз работа ждала конца тяжёлой анимации (всего), waiting — ждёт сейчас */
+export function frameStats() {
+  return { measures: lastMeasures, mutations: lastMutations, frames: frames, heavy: heavy > 0, heavyCount: heavy, deferred: deferredTotal, waiting: endWaiters.length, idleWaiting: idleWaiters.length };
+}
 
 var idleScheduled = false;
 function pumpIdle() {

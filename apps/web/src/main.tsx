@@ -1,13 +1,21 @@
 import { enableStrictDom } from '@relay/ui';
 import { render } from 'preact';
 import { startData } from './data';
-import { setGlobal, type Me } from './global';
+import { installErrorCapture } from './devtools/metrics';
+import { getGlobal, setGlobal, type Me } from './global';
+import * as nav from './nav';
+import { startScreenBlur } from './screenBlur';
+import { startSettingsData } from './settingsData';
+import { startTitle } from './title';
 import { App } from './ui/App';
 
 declare const __DEV__: boolean;
 
 // dev-сборка: проверка дисциплины measure/mutate (чтение раскладки в фазе записи и наоборот)
 if (__DEV__) enableStrictDom({ ignore: /twallpaper/ });
+
+// ошибки главного потока — всегда, в кольцо на 200 (раздел «Для разработчиков» → «Ошибки»)
+installErrorCapture();
 
 const ME_KEY = 'relay.me';
 
@@ -30,7 +38,16 @@ async function boot(): Promise<void> {
   }
   setGlobal({ me, boot: 'app' });
   startData(me);
+  startSettingsData(me);
 }
 
+nav.installNav({ get: () => getGlobal().sidebarView, set: (p) => setGlobal({ sidebarView: p }), escBusy: () => getGlobal().infoOpen && !!getGlobal().openChatId });
+if (__DEV__) (window as unknown as { __nav: typeof nav }).__nav = nav;   // для ручной проверки навигации
+// dev: раздел «Для разработчиков» для проверок — что сейчас в журнале и что ничего не работает при закрытом разделе
+if (__DEV__) void import('./devtools/session').then((s) => import('./devtools/metrics').then((m) => {
+  (window as unknown as { __dev: object }).__dev = { snapshot: s.devSnapshot, running: () => s.devRunning() || m.metricsRunning() };
+}));
+startTitle();
+startScreenBlur();
 render(<App />, document.getElementById('app')!);
 boot();

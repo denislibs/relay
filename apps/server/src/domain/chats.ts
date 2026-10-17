@@ -1,6 +1,7 @@
 import type { Message } from '@relay/protocol';
 import { sql, type Tx } from '../db';
 import { DomainError } from './errors';
+import { nameForSql } from './profile';
 
 export async function createChat(kind: 'direct' | 'group', title: string | null, memberIds: number[]): Promise<number> {
   return sql.begin(async (tx) => {
@@ -85,7 +86,8 @@ export async function listChats(userId: number, opts: ListOpts = {}): Promise<Ch
            lm.body as m_body, lm.kind as m_kind, lm.attachment as m_attachment, lm.reply_to_id as m_reply_to_id, lm.created_at as m_created_at, lm.edited_at as m_edited_at, lm.deleted as m_deleted,
            (select count(*) from messages m
              where m.chat_id = c.id and m.id > cm.last_read_id and m.sender_id <> ${userId})::int as unread,
-           (select json_build_object('id', u.id, 'name', u.name) from chat_members pm join users u on u.id = pm.user_id
+           (select json_build_object('id', u.id, 'name', ${nameForSql(userId)})   -- контактное имя — только владельцу
+              from chat_members pm join users u on u.id = pm.user_id
              where c.kind = 'direct' and pm.chat_id = c.id and pm.user_id <> ${userId} limit 1) as peer,
            (select coalesce(min(om.last_read_id), 0) from chat_members om where om.chat_id = c.id and om.user_id <> ${userId}) as peer_read_up_to,
            date_trunc('milliseconds', coalesce(lm.created_at, c.created_at)) as sort_at,

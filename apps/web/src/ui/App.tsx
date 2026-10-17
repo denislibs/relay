@@ -1,14 +1,32 @@
-import { AsidePanel, EmptyState, FloatShell, SideFrame, SlideStack } from '@relay/ui';
+import { AsidePanel, EmptyState, FloatShell, Presence, SideFrame, SlideStack, Toast } from '@relay/ui';
+import { useRef } from 'preact/hooks';
 import { useGlobal } from '../global';
+import { orderFor } from '../nav';
+import { useWallpaper } from '../wallpapers';
 import { Chat } from './Chat';
 import { Info } from './Info';
 import { Login } from './Login';
 import { NewChat } from './NewChat';
-import { Settings } from './Settings';
+import { Data } from './settings/Data';
+import { Autoload } from './settings/Autoload';
+import { Performance } from './settings/Performance';
+import { General } from './settings/General';
+import { Main } from './settings/Main';
+import { Notifications } from './settings/Notifications';
+import { Blocked } from './settings/Blocked';
+import { PeoplePicker } from './settings/PeoplePicker';
+import { Privacy } from './settings/Privacy';
+import { PrivacyRule } from './settings/PrivacyRule';
+import { Profile } from './settings/Profile';
+import { Sessions } from './settings/Sessions';
+import { Wallpaper } from './settings/Wallpaper';
+import { Dev, DevPlate } from './settings/Dev';
+import { Contacts } from './contacts/Contacts';
+import { EditContact } from './contacts/EditContact';
+import { NewContact } from './contacts/NewContact';
 import { Sidebar } from './Sidebar';
 
-// экраны боковой панели от корня вглубь: вперёд — слайд справа налево, назад — обратно
-const SIDE_PAGES = ['chats', 'settings'];
+
 
 // ширина списка чатов, которую пользователь вытянул за край (null — по умолчанию)
 const SIDE_KEY = 'relay.sideWidth';
@@ -20,11 +38,12 @@ export function App() {
   const openChatId = useGlobal((s) => s.openChatId);
   const view = useGlobal((s) => s.sidebarView);
   const infoOpen = useGlobal((s) => s.infoOpen);
+  const { wp, dark } = useWallpaper();
   if (boot === 'loading') return null;
-  if (boot === 'login') return <Login />;
+  if (boot === 'login') return <><Login /><AppToast /></>;   // тост «Сеанс завершён…» переживает уход на вход
   return (
     <>
-      <FloatShell class={openChatId ? 'app-chat-open' : ''} sideWidth={savedSide} onSideResize={saveSide} aside={<AsidePanel open={infoOpen && !!openChatId} label="Информация"><Info /></AsidePanel>} sidebar={<SideFrame><SlideStack order={SIDE_PAGES} active={view} render={(k: string) => (k === 'settings' ? <Settings /> : <Sidebar />)} /></SideFrame>}>
+      <FloatShell class={openChatId ? 'app-chat-open' : ''} pattern={wp.pattern} wallpaperColors={wp.colors} wallpaperBlur={wp.blur} wallpaperDark={dark} sideWidth={savedSide} onSideResize={saveSide} aside={<AsidePanel open={infoOpen && !!openChatId} label="Информация"><Info /></AsidePanel>} sidebar={<SideFrame><SlideStack order={orderFor(view)} active={view} render={(k: string) => (k === 'chats' ? <Sidebar /> : k === 'settings' ? <Main /> : k === 'settings/profile' ? <Profile /> : k === 'settings/general' ? <General /> : k === 'settings/general/wallpaper' ? <Wallpaper /> : k === 'settings/notifications' ? <Notifications /> : k === 'settings/privacy' ? <Privacy /> : k === 'settings/privacy/blocked' ? <Blocked /> : /^settings\/privacy\/rule\/[^/]+\/(allow|deny)$/.test(k) ? <PeoplePicker key={k} path={k} /> : /^settings\/privacy\/rule\/[^/]+$/.test(k) ? <PrivacyRule key={k} path={k} /> : k === 'contacts' ? <Contacts /> : /^contacts\/\d+\/edit$/.test(k) ? <EditContact key={k} path={k} active={k === view} /> : k === 'settings/performance' ? <Performance /> : k === 'settings/sessions' ? <Sessions /> : k === 'settings/data' ? <Data /> : /^settings\/data\/autoload\/(photo|video|file)$/.test(k) ? <Autoload path={k} /> : k === 'settings/dev' ? <Dev /> : null)} /></SideFrame>}>
         {openChatId ? (
           <Chat key={openChatId} chatId={openChatId} />
         ) : (
@@ -34,6 +53,21 @@ export function App() {
         )}
       </FloatShell>
       <NewChat />
+      <NewContact />
+      <DevPlate />
+      <AppToast />
     </>
+  );
+}
+
+/** Общий тост (ошибки сохранения настроек): живёт над всем приложением, уходит плавно. */
+function AppToast() {
+  const toast = useGlobal((s) => s.toast);
+  const last = useRef('');
+  if (toast) last.current = toast.text;
+  return (
+    <Presence show={!!toast} exitMs={200}>
+      <div class="app-toast app-toast-global"><Toast>{toast?.text ?? last.current}</Toast></div>
+    </Presence>
   );
 }

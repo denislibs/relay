@@ -1,5 +1,6 @@
 import type { Message } from '@relay/protocol';
 import { sql } from '../db';
+import { nameForSql } from './profile';
 import { assertMember, toMessage, withReactions } from './chats';
 import { DomainError } from './errors';
 
@@ -18,7 +19,8 @@ export async function searchMessages(userId: number, q: string, opts: { chatId?:
   const pattern = '%' + text.replace(/[\\%_]/g, (c) => '\\' + c) + '%';
   const rows = await sql`
     select m.*,
-           coalesce(c.title, (select u.name from chat_members pm join users u on u.id = pm.user_id
+           coalesce(c.title, (select ${nameForSql(userId)}
+                                from chat_members pm join users u on u.id = pm.user_id
                                where c.kind = 'direct' and pm.chat_id = c.id and pm.user_id <> ${userId} limit 1)) as chat_title
       from messages m
       join chat_members cm on cm.chat_id = m.chat_id and cm.user_id = ${userId}

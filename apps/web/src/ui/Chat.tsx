@@ -1,9 +1,11 @@
-import { Avatar, Button, peerTone, ChatSearchBar, Highlight, ripple, useMinVisible, requestMeasure, Composer, DropOverlay, GlassBar, IconButton, Menu, Modal, Presence, ReactionPicker, requestMutation } from '@relay/ui';
-import { useEffect, useLayoutEffect, useRef, useState } from 'preact/hooks';
+import { Avatar, Button, MediaPolicy, peerTone, ChatSearchBar, Highlight, ripple, useMinVisible, requestMeasure, Composer, DropOverlay, GlassBar, IconButton, Menu, Modal, Presence, ReactionPicker, requestMutation } from '@relay/ui';
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'preact/hooks';
 import { deleteMessage, editMessage, ensureNames, focusMessage, sendFile, openChat, react, saveDraft, searchMessages, send, typing, typingDone } from '../data';
 import type { SearchHit } from '@relay/sync-engine/src/types';
 import { setGlobal, useGlobal } from '../global';
+import { unblockUser, useUser } from '../settingsData';
 import { Feed } from './Feed';
+import { chatKindFor, mediaPolicy } from '../autoload';
 import { chatTime, chatTone, fileSize, lastSeenText, snippet } from './format';
 
 
@@ -11,6 +13,11 @@ export function Chat({ chatId }: { chatId: number }) {
   const me = useGlobal((s) => s.me)!;
   const chat = useGlobal((s) => s.chats.find((c) => c.id === chatId));
   const messages = useGlobal((s) => s.messages);
+  // «Автозагрузка медиа» / автовоспроизведение для ленты этого чата (MediaBubble кита читает контекст)
+  const isContact = useGlobal((s) => chat?.peerId != null && s.contacts.some((c) => c.userId === chat.peerId));
+  const autoload = useGlobal((s) => s.prefs.autoload);
+  const anim = useGlobal((s) => s.prefs.anim);
+  const policy = useMemo(() => mediaPolicy({ autoload, anim }, chatKindFor(chat, new Set(isContact ? [chat!.peerId as number] : []))), [autoload, anim, chat?.kind, chat?.peerId, isContact]);
   const shell = useRef<HTMLSpanElement>(null);
   const stick = useRef(true);              // лента прижата к низу (Feed ведёт, отправка выставляет)
   const [menu, setMenu] = useState<{ x: number; y: number; key: string } | null>(null);
@@ -135,6 +142,12 @@ export function Chat({ chatId }: { chatId: number }) {
     return () => { removeEventListener('pagehide', flushDraft); flushDraft(); };
   }, []);
 
+  // личный чат и чёрный список: я заблокировал собеседника или он меня (флаг blocksMe считает сервер) — вместо поля ввода плашка
+  const iBlocked = useGlobal((s) => chat?.kind === 'direct' && chat.peerId != null && s.blocked.some((b) => b.userId === chat.peerId));
+  const peerUser = useUser(chat?.kind === 'direct' ? (chat.peerId as number | null) : null);
+  const theyBlocked = !!peerUser?.blocksMe;
+  const plate = iBlocked ? 'mine' : theyBlocked ? 'theirs' : null;
+
   // высота композера (растёт с цитатой ответа) → --composer-h: лента уходит под него ровно на эту высоту
   useLayoutEffect(() => {
     const main = shell.current?.closest<HTMLElement>('.rl-shell-main');
@@ -143,11 +156,12 @@ export function Chat({ chatId }: { chatId: number }) {
     const ro = new ResizeObserver(([e]) => { const h = Math.round(e.borderBoxSize?.[0]?.blockSize ?? wrap.offsetHeight); requestMutation(() => main.style.setProperty('--composer-h', h + 'px')); });
     ro.observe(wrap);
     return () => ro.disconnect();
-  }, []);
+  }, [plate]);   // плашка вместо поля ввода — другой элемент
 
   const title = (chat?.title as string) || 'Чат №' + chatId;
   // как в Telegram: в норме подзаголовок — тип чата, а пока идёт подключение или обновление — стадия
   const phaseLabel = useGlobal((s) => s.syncLabel);
+  const sendKey = useGlobal((s) => s.prefs.sendKey);
   const infoOpen = useGlobal((s) => s.infoOpen);
   const peer = useGlobal((s) => s.peer);
   const [, tick] = useState(0);              // «5 мин. назад» должно стареть само
@@ -208,9 +222,23 @@ export function Chat({ chatId }: { chatId: number }) {
           </div>
         ) : null}
       </GlassBar>
-      <Feed chatId={chatId} meId={me.userId} peerName={title} stick={stick} highlight={found?.q} onMenu={(key, x, y) => setMenu({ key, x, y })} />
-      <Composer
+      <MediaPolicy.Provider value={policy}>
+        <Feed chatId={chatId} meId={me.userId} peerName={title} stick={stick} highlight={found?.q} onMenu={(key, x, y) => setMenu({ key, x, y })} />
+      </MediaPolicy.Provider>
+      {plate ? (
+        <div class="rl-composer-wrap app-plate-wrap">
+          <div class="rl-composer app-plate" role="status" key={plate}>
+            {plate === 'mine' ? (
+              <>
+                <span>Вы заблокировали этого пользователя</span>
+                <Button variant="ghost" onClick={() => { if (chat?.peerId != null) void unblockUser(chat.peerId as number); }}>Разблокировать</Button>
+              </>
+            ) : <span>Вы не можете отправлять сообщения этому пользователю</span>}
+          </div>
+        </div>
+      ) : <Composer
         id="composer"
+        sendKey={sendKey}
         placeholder="Сообщение"
         replyTo={editing ? { author: 'Редактирование', text: editing.original, tone: peerTone(me.userId), icon: 'pencil' } : replyTo ? { author: authorOf(replyTo.senderId), text: replyTo.body, tone: peerTone(replyTo.senderId) } : null}
         onCancelReply={() => {
@@ -234,7 +262,7 @@ export function Chat({ chatId }: { chatId: number }) {
           send(chatId, body, (replyTo?.id as number) ?? null);
           setReplyKey(null);
         }}
-      />
+      />}
       {menu && menuMsg ? (() => {
         const own = menuMsg.senderId === me.userId && !menuMsg.deleted && menuMsg.id != null;
         const myReaction = ((menuMsg.reactions as { userId: number; emoji: string }[] | undefined) ?? []).find((r) => r.userId === me.userId)?.emoji;

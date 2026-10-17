@@ -1,14 +1,23 @@
-import type { ClientFrame, Message, ServerFrame } from '@relay/protocol';
-import { delBlob, getAll, getBlob, getByChat, openDb, putBlob } from './idb';
+import type { ClientFrame, Me, SettingsSnapshot, Message, PublicUser, ServerFrame } from '@relay/protocol';
+import { Blocks } from './blocks';
+import { Contacts } from './contacts';
+import { delBlob, getAll, getBlob, getByChat, openDb, putBlob, write } from './idb';
 import { affects, computeQuery, diffResults, messageWindow, type Result } from './queries';
 import type { Item } from './types';
 import { Store, type ChatSummary } from './store';
 import { WsTransport } from './transport';
+import { loadOps, Ops, type PendingOp } from './ops';
+import { isNotifyOp, normalizeRule, notifyKey, privacyKey, settingsItem, settingsView } from './settings';
+import { applyUserUpdated, meItem, meView, OP_PROFILE, OP_USERNAME, userItem } from './profile';
+import { OP_SESSIONS_TTL, Sessions } from './sessions';
+import { SessionEnd } from './session';
+import { DevTools, loadSim, type SimState, type SubStat } from './devlog';
+import { simFlags, watchLoss } from './devsim';
 import type { Action, EngineConfig, LocalMessage, Patch, Query, SearchResult } from './types';
 
 export interface WatchHandle { update(q: Query): void; close(): void }
 
-interface Watcher { id: number; q: Query; cb: (p: Patch) => void; prev: Result | null; force: boolean; gated: boolean }
+interface Watcher { id: number; q: Query; cb: (p: Patch) => void; prev: Result | null; force: boolean; gated: boolean; stat?: SubStat; cursor?: number; first?: number }
 type ReqError = { code: string; retry: boolean };
 type SyncReply = Extract<ServerFrame, { op: 'updates' | 'tooLong' }>;
 
@@ -34,12 +43,12 @@ export class Engine {
   /** Догоняем журнал после hello: данные копим и отдаём интерфейсу одной пачкой, чтобы список не ехал по частям. */
   private holding = false;
   /** Присутствие собеседников: состояние момента, только в памяти; без связи — неизвестно. */
-  private presence = new Map<number, { online: boolean; lastSeen: string | null }>();
+  private presence = new Map<number, { online: boolean | null; lastSeen: string | null }>();
   private presenceFetched = false;
   private presenceDirty = false;   // присутствие не трогает чаты — свой флаг для подписок presence
   private acting = 0;       // действия пользователя в работе: их результат показываем сразу, даже во время догонки
   private syncAgain = false;
-  private syncWaiter: { resolve(f: SyncReply): void; reject(e: ReqError): void } | null = null;
+  private syncWaiter: { since: number; resolve(f: SyncReply): void; reject(e: ReqError): void } | null = null;
   private reqSeq = 0;
   private pending = new Map<string, { resolve(r: Record<string, unknown>): void; reject(e: ReqError): void }>();
   private pumping = false;
@@ -51,23 +60,127 @@ export class Engine {
   private refreshing = false;
   private moreChats: Promise<void> | null = null;
   private typingTimers = new Map<string, ReturnType<typeof setTimeout>>();
+  /** очередь операций настроек (ops.ts) */
+  readonly ops: Ops;
+  /** контакты (contacts.ts) */
+  private readonly contacts: Contacts;
+  /** чёрный список (blocks.ts) */
+  private readonly blocks: Blocks;
+  /** активные сеансы (sessions.ts) */
+  private readonly sessions: Sessions;
+  /** конец сеанса: sessionTerminated / 401 (session.ts) */
+  private readonly session: SessionEnd;
+  /** чужие профили, которых нет в кэше: подгрузим, когда будет связь; asked — уже спрашивали за это подключение */
+  private userWants = new Set<number>();
+  private usersAsked = new Set<number>();
+  /** раздел «Для разработчиков»: журнал, снимок состояния, имитатор сети (devlog.ts) */
+  readonly dev: DevTools;
 
-  private constructor(private cfg: EngineConfig, readonly store: Store, private db: IDBDatabase) {
+  private constructor(private cfg: EngineConfig, readonly store: Store, private db: IDBDatabase, ops: PendingOp[], sim: Pick<SimState, 'offline' | 'profile'> | null = null) {
+    this.dev = new DevTools(db, {
+      view: () => ({
+        userId: cfg.userId, epoch: this.store.epoch, lastSeq: this.store.lastSeq, phase: this.phase(), ready: this.ready, syncing: this.syncing,
+        socket: this.transport.view(), outbox: this.store.outbox.values(), pendingReads: this.store.pendingReads.size,
+        ops: { pending: this.ops.list.length, keys: [...new Set(this.ops.list.map((o) => o.key))], failures: this.ops.failures.length },
+        watchers: this.watchers.values(),
+      }),
+      schedule: () => this.schedule(),
+      ping: () => { if (this.online) this.transport.send({ op: 'ping' }); },
+      offline: (on) => this.simOffline(on),
+      dropSocket: () => this.transport.drop(),
+      sync: () => { if (this.online && this.ready) this.runSync(); },
+      resync: () => this.resync(),
+      restart: async () => { this.transport.stop(); if (this.wantOnline) this.transport.start(); return { restarted: 'reconnect' }; },
+      retryFailed: () => this.retryFailed(),
+      discardFailed: () => this.discardFailed(),
+    });
+    this.dev.restore(sim);
+    if (this.dev.sim.offline) this.netDown = true;
+    store.onFlush = (keys, ms) => this.dev.log.record('engine', 'flush', { keys }, undefined, ms);
+    this.ops = new Ops(db, ops, { base: cfg.httpBase, headers: cfg.headers, backoffMs: cfg.backoffMs, fetch: this.dev.fetch }, {
+      canSend: () => this.online && this.ready && !this.closed && !this.resetting,
+      done: (op, value) => this.opDone(op, value),
+      changed: () => this.changed(),
+      run: (fn) => this.run(fn),
+      unauthorized: () => this.session.end('terminated'),
+      log: (type, data) => this.dev.log.record('engine', type, data),
+    });
+    this.contacts = new Contacts({
+      store, ops: this.ops, httpBase: cfg.httpBase, headers: cfg.headers, fetch: this.dev.fetch,
+      online: () => this.online,
+      presence: () => this.presence,
+      seedPresence: (id, p) => { if (this.online && !this.presence.has(id)) { this.presence.set(id, p); this.presenceDirty = true; } },
+      refreshUser: (id) => { this.usersAsked.delete(id); this.userWants.add(id); },
+      http: (path) => this.http(path),
+      run: (fn) => this.run(fn),
+      changed: () => this.changed(),
+    });
+    this.blocks = new Blocks({ store, ops: this.ops, http: (path) => this.http(path), run: (fn) => this.run(fn), changed: () => this.changed() });
+    this.sessions = new Sessions({ ops: this.ops, online: () => this.online, http: (path) => this.http(path) });
+    this.session = new SessionEnd({
+      httpBase: cfg.httpBase, headers: cfg.headers, fetch: this.dev.fetch,
+      closed: () => this.closed,
+      stop: () => { this.dev.log.record('engine', 'sessionEnd', { reason: this.session.reason }); this.ops.close(); this.wantOnline = false; this.transport.stop(); },
+      notify: () => this.pushStatus(),
+      working: () => this.syncing || this.pumping || this.busy > 1,
+      run: (fn) => this.run(fn),
+      shutdown: () => {
+        if (this.closed) return false;
+        this.emit();   // последние патчи (и status.terminated) — подпискам, которые ещё не получили первый снимок
+        this.closed = true;
+        this.dead = true;
+        this.dev.stop();
+        if (this.frameTimer) { clearTimeout(this.frameTimer); this.frameTimer = null; }
+        if (this.readTimer) { clearTimeout(this.readTimer); this.readTimer = null; }
+        for (const t of this.typingTimers.values()) clearTimeout(t);
+        this.typingTimers.clear();
+        this.watchers.clear();
+        return true;
+      },
+      wipe: async () => {
+        await this.store.wipe(null).catch(() => {});
+        this.db.close();
+        try { indexedDB.deleteDatabase(cfg.dbName); } catch { /* */ }
+      },
+    });
+    store.titleOf = (c) => this.contacts.titleOf(c);
     this.transport = new WsTransport(cfg.wsUrl, {
       onOpen: () => this.onOpen(),
       onFrame: (f) => this.onFrame(f),
       onClose: () => this.onClose(),
-    }, cfg.backoffMs ?? [250, 5000]);
+    }, cfg.backoffMs ?? [250, 5000], this.dev);
   }
 
   static async open(cfg: EngineConfig): Promise<Engine> {
-    const db = await openDb(cfg.dbName);
+    let engine: Engine | null = null;
+    const db = await openDb(cfg.dbName, { onVersionChange: () => engine?.obsolete() });
     const store = await Store.open(db, cfg.userId);
-    return new Engine(cfg, store, db);
+    engine = new Engine(cfg, store, db, await loadOps(db), await loadSim(db));
+    return engine;
   }
 
+  private dead = false;
+  private onObsoleteCb: () => void = () => {};
+  /** База обновляется новой сборкой: этот движок закрыл IDB и больше не работает — вкладкам пора перезагрузиться. */
+  onObsolete(cb: () => void): void { this.onObsoleteCb = cb; }
+  private obsolete(): void {
+    if (this.dead) return;
+    this.dead = true;
+    this.closed = true;
+    this.ops.close();
+    this.disconnect();
+    this.dev.stop();
+    if (this.frameTimer) { clearTimeout(this.frameTimer); this.frameTimer = null; }
+    if (this.readTimer) { clearTimeout(this.readTimer); this.readTimer = null; }
+    this.watchers.clear();
+    this.onObsoleteCb();
+  }
+
+  /** Движок стёр локальные данные и закрылся после завершения сеанса (хост забывает его). */
+  onTerminated(cb: () => void): void { this.session.onDone(cb); }
+
   connect(): void {
-    if (this.closed) return;
+    if (this.closed || this.session.ended) return;
     this.wantOnline = true;
     this.watchNetwork();
     this.transport.start();
@@ -80,7 +193,7 @@ export class Engine {
     if (typeof g.addEventListener !== 'function' || this.netWatched) return;
     this.netWatched = true;
     g.addEventListener('offline', () => { this.netDown = true; this.changed(); });
-    g.addEventListener('online', () => { this.netDown = false; this.changed(); this.transport.retryNow(); });
+    g.addEventListener('online', () => { this.netDown = this.dev.sim.offline; this.changed(); this.transport.retryNow(); });   // офлайн имитатора сильнее
   }
   private netWatched = false;
 
@@ -96,8 +209,11 @@ export class Engine {
   }
 
   async close(): Promise<void> {
+    if (this.dead) return;   // IDB уже закрыта (versionchange)
     this.closed = true;
+    this.ops.close();
     this.disconnect();
+    this.dev.stop();
     if (this.frameTimer) { clearTimeout(this.frameTimer); this.frameTimer = null; }
     if (this.readTimer) { clearTimeout(this.readTimer); this.readTimer = null; }
     this.watchers.clear();
@@ -113,15 +229,18 @@ export class Engine {
   watch(q: Query, cb: (p: Patch) => void): WatchHandle {
     const w: Watcher = { id: this.nextWatch++, q, cb, prev: null, force: true, gated: q.kind === 'messages' };
     this.watchers.set(w.id, w);
+    if (q.kind === 'devStats' || q.kind === 'devLog') this.dev.track(this.watchers.values());
     this.prepare(w);
     this.schedule();
     return {
-      update: (q2) => { const chatChanged = q2.kind === 'messages' && (w.q.kind !== 'messages' || w.q.chatId !== q2.chatId); w.q = q2; w.force = true; if (chatChanged) w.gated = true; this.prepare(w); this.schedule(); },
-      close: () => { this.watchers.delete(w.id); },
+      update: (q2) => { const chatChanged = q2.kind === 'messages' && (w.q.kind !== 'messages' || w.q.chatId !== q2.chatId); w.q = q2; w.force = true; if (chatChanged) w.gated = true; this.dev.track(this.watchers.values()); this.prepare(w); this.schedule(); },
+      close: () => { this.watchers.delete(w.id); this.dev.track(this.watchers.values()); },
     };
   }
 
   private prepare(w: Watcher): void {
+    // профиль человека: из кэша сразу, а с сервера — заново на каждую новую подписку (открыли «Информацию»)
+    if (w.q.kind === 'user' && w.q.userId !== this.cfg.userId) { this.usersAsked.delete(w.q.userId); this.userWants.add(w.q.userId); return; }
     if (w.q.kind !== 'messages') return;
     const { chatId, limit } = w.q;
     const q = w.q;
@@ -154,7 +273,7 @@ export class Engine {
       const next = this.compute(w.q);
       const patch = diffResults(w.prev, next);
       w.prev = next;
-      if (patch) { try { w.cb(patch); } catch (err) { console.error('watch callback failed', err); } }
+      if (patch) { try { w.cb(patch); } catch (err) { console.error('watch callback failed', err); this.dev.log.error('watch callback', err); } }
     }
   }
 
@@ -173,6 +292,8 @@ export class Engine {
       syncing: this.syncing,
       outbox: [...this.store.outbox.values()].filter((o) => !o.failed).length,
       failed: [...this.store.outbox.values()].filter((o) => o.failed).length,
+      ...this.session.status(),
+      devSim: simFlags(this.dev.sim),   // имитатор сети включён — плашка «Режим разработчика» во всех вкладках
     };
   }
 
@@ -180,6 +301,28 @@ export class Engine {
     if (q.kind === 'presence') {
       const p = this.presence.get(q.userId);
       const it: Item = { key: 'p' + q.userId, userId: q.userId, known: !!p, online: p?.online ?? false, lastSeen: p?.lastSeen ?? null };
+      return { items: new Map([[it.key, it]]), order: [it.key], sig: new Map([[it.key, JSON.stringify(it)]]) };
+    }
+    if (q.kind === 'contacts') {
+      const list = this.contacts.items();
+      return { items: new Map(list.map((it) => [it.key, it])), order: list.map((it) => it.key), sig: new Map(list.map((it) => [it.key, JSON.stringify(it)])) };
+    }
+    if (q.kind === 'blocked') {
+      const list = this.blocks.items();
+      return { items: new Map(list.map((it) => [it.key, it])), order: list.map((it) => it.key), sig: new Map(list.map((it) => [it.key, JSON.stringify(it)])) };
+    }
+    if (q.kind === 'settings') {
+      const s = this.store.settings, view = settingsView(s.base, this.ops.list);
+      const list = settingsItem(view, s.loaded, view !== s.base);
+      return { items: new Map(list.map((it) => [it.key, it])), order: list.map((it) => it.key), sig: new Map(list.map((it) => [it.key, JSON.stringify(it)])) };
+    }
+    if (q.kind === 'me' || q.kind === 'user' || q.kind === 'ops') {
+      const list = q.kind === 'ops' ? [this.ops.item()] : q.kind === 'me' ? meItem(this.meNow()) : userItem(this.store.profile, this.meNow(), q.userId);
+      if (q.kind === 'user' && !list.length && q.userId !== this.cfg.userId) this.userWants.add(q.userId);
+      return { items: new Map(list.map((it) => [it.key, it])), order: list.map((it) => it.key), sig: new Map(list.map((it) => [it.key, JSON.stringify(it)])) };
+    }
+    if (q.kind === 'devStats' || q.kind === 'devLog') {
+      const it = q.kind === 'devStats' ? this.dev.stats() : { key: 'devLog' };   // devLog идёт мимо compute (dev.pushLog)
       return { items: new Map([[it.key, it]]), order: [it.key], sig: new Map([[it.key, JSON.stringify(it)]]) };
     }
     if (q.kind !== 'status') return computeQuery(this.store, q);
@@ -199,9 +342,10 @@ export class Engine {
     const url = `${this.cfg.httpBase}/upload?${qs}`;
     const offline: ReqError = { code: 'offline', retry: true };
     if (typeof XMLHttpRequest === 'undefined') {
-      return fetch(url, { method: 'POST', body: blob, headers: { 'content-type': a.mime, ...(this.cfg.headers ?? {}) }, credentials: 'include' })
-        .then(async (r) => { if (!r.ok) throw { code: 'upload', retry: r.status >= 500 } satisfies ReqError; return r.json() as Promise<{ id: string }>; }, () => { throw offline; });
+      return this.dev.fetch(url, { method: 'POST', body: blob, headers: { 'content-type': a.mime, ...(this.cfg.headers ?? {}) }, credentials: 'include' })
+        .then(async (r) => { if (this.session.unauthorized(r.status)) throw offline; if (!r.ok) throw { code: 'upload', retry: r.status >= 500 } satisfies ReqError; return r.json() as Promise<{ id: string }>; }, () => { throw offline; });
     }
+    if (this.dev.sim.offline) return Promise.reject(offline);   // dev: офлайн (задержку XHR имитатор не накладывает)
     return new Promise((resolve, reject) => {
       const x = new XMLHttpRequest();
       x.open('POST', url);
@@ -215,10 +359,47 @@ export class Engine {
         this.store.setProgress(clientId, e.loaded / e.total);
         this.changed();
       };
-      x.onload = () => (x.status < 300 ? resolve(JSON.parse(x.responseText)) : reject({ code: 'upload', retry: x.status >= 500 } satisfies ReqError));
+      x.onload = () => (x.status < 300 ? resolve(JSON.parse(x.responseText)) : this.session.unauthorized(x.status) ? reject(offline) : reject({ code: 'upload', retry: x.status >= 500 } satisfies ReqError));
       x.onerror = () => reject(offline);
       x.send(blob);
     });
+  }
+
+  /** Очистка локальных данных: общий wipe (как при смене epoch), затем повторный hello — он возьмёт снимок.
+   *  Пока идёт очистка, `resetting` не даёт стартовать hello/синхронизации/отправке/операциям; идущую работу ждём и при таймауте отказываем. */
+  private resetting = false;
+  /** hello/poke, пришедшие во время очистки: при отказе проигрываем их, иначе синхронизация встанет до переподключения */
+  private skipped: { hello: Extract<ServerFrame, { op: 'hello' }> | null; poke: boolean } = { hello: null, poke: false };
+  private async resetLocal(keepOutbox: boolean): Promise<void> {
+    if (this.resetting) throw new Error('reset_busy');
+    this.dev.log.record('engine', 'resetLocal', { keepOutbox });
+    this.resetting = true;
+    let ok = false;
+    try {
+      const end = Date.now() + (this.cfg.resetWaitMs ?? 8000);
+      while (this.syncing || this.pumping || this.ops.busy || this.busy > 0) {
+        if (Date.now() > end) throw new Error('reset_busy');
+        await new Promise((r) => setTimeout(r, 10));
+      }
+      await this.store.wipe(this.store.epoch, { outbox: keepOutbox });
+      if (!keepOutbox) this.ops.forget();
+      this.usersAsked.clear();
+      this.ready = false;
+      this.holding = false;
+      this.emit();   // подписки видят пустой кэш сразу: ответ на hello снова включит удержание до конца снимка
+      ok = true;
+    } finally {
+      this.resetting = false;
+      const sk = this.skipped;
+      this.skipped = { hello: null, poke: false };
+      if (!ok) {   // очистка не состоялась: возвращаем пропущенное и будим отправку
+        if (sk.hello) this.onFrame(sk.hello); else if (sk.poke) this.runSync();
+        this.ops.kick();
+        this.changed();
+      }
+    }
+    this.changed();
+    this.transport.send({ op: 'hello', lastSeq: 0 });
   }
 
   /** Поиск: с сетью — на сервере (вся история), без сети — по сообщениям, сохранённым на устройстве. */
@@ -275,6 +456,7 @@ export class Engine {
   }
 
   private emit(): void {
+    this.contacts.retitle();
     const hold = this.holding && this.acting === 0;
     const touched = new Set(this.store.touched);
     if (!hold) this.store.touched.clear(); // при удержании изменения копятся до конца догонки
@@ -282,20 +464,94 @@ export class Engine {
     const statusChanged = sig !== this.statusSig;
     const presenceDirty = this.presenceDirty;
     this.presenceDirty = false;
+    // профиль при удержании копится, как и чаты; очередь операций (тосты отказов) — сразу
+    const opsDirty = this.ops.dirty, profileDirty = this.store.profile.dirty || opsDirty;
+    this.ops.dirty = false;
+    const contactsDirty = this.store.contacts.dirty || opsDirty || presenceDirty || profileDirty;
+    this.store.contacts.dirty = false;
+    const settingsDirty = this.store.settings.dirty || opsDirty;
+    this.store.settings.dirty = false;
+    const blocksDirty = this.store.blocks.dirty || opsDirty || profileDirty;
+    this.store.blocks.dirty = false;
+    const devDirty = this.dev.statsDue;
+    // me/user выводятся из очереди: при удержании изменение очереди не теряем — оно уйдёт с концом догонки
+    this.store.profile.dirty = hold && profileDirty;
     this.statusSig = sig;
     for (const w of this.watchers.values()) {
-      if (!w.force && !affects(w.q, touched) && !(w.q.kind === 'status' && statusChanged) && !(w.q.kind === 'presence' && presenceDirty)) continue;
-      if (hold && !w.force && w.q.kind !== 'status' && w.q.kind !== 'presence') continue;
+      if (w.q.kind === 'devLog') { this.dev.pushLog(w); continue; }   // журнал: только новые события, пачкой раз в 250 мс
+      const own = (w.q.kind === 'devStats' && devDirty) || (w.q.kind === 'status' && statusChanged) || (w.q.kind === 'presence' && presenceDirty) || (w.q.kind === 'ops' && opsDirty) || ((w.q.kind === 'me' || w.q.kind === 'user') && profileDirty) || (w.q.kind === 'contacts' && contactsDirty) || (w.q.kind === 'settings' && settingsDirty) || (w.q.kind === 'blocked' && blocksDirty);
+      if (!w.force && !affects(w.q, touched) && !own) continue;
+      if (hold && !w.force && w.q.kind !== 'status' && w.q.kind !== 'presence' && w.q.kind !== 'ops' && w.q.kind !== 'contacts' && w.q.kind !== 'settings' && w.q.kind !== 'blocked' && w.q.kind !== 'devStats') continue;
       if (w.gated) continue;
       w.force = false;
       const next = this.compute(w.q);
       const patch = diffResults(w.prev, next);
       w.prev = next;
       if (patch) {
-        try { w.cb(patch); } catch (err) { console.error('watch callback failed', err); }
+        this.dev.patched(w, patch);
+        try { w.cb(patch); } catch (err) { console.error('watch callback failed', err); this.dev.log.error('watch callback', err); }
       }
     }
+    this.dev.afterEmit();
     this.fetchQuotes();
+    this.fetchUsers();
+  }
+
+  /** Свой профиль для интерфейса: база + очередь. */
+  private meNow(): Me | null { return meView(this.store.profile.me, this.ops.list); }
+
+  /** Операция подтверждена: ответ профиля — новая база (журнал принесёт то же самое ещё раз — не страшно). */
+  private opDone(op: PendingOp, value: unknown): void {
+    if (this.contacts.opDone(op, value)) return;
+    if (this.blocks.opDone(op, value)) return;
+    if (isNotifyOp(op)) {
+      // ответ — новая база: иначе между уходом операции из очереди и записью журнала переключатель мигнул бы
+      const v = value as (SettingsSnapshot) | null;
+      if (v?.notify && this.store.settings.apply({ notify: v.notify, sessionsTtlDays: v.sessionsTtlDays, privacy: v.privacy }, v.seq)) this.run(() => this.store.flush());
+      return;
+    }
+    if ((op.key === OP_PROFILE || op.key === OP_USERNAME) && value && typeof value === 'object' && (value as Me).userId === this.cfg.userId) {
+      if (this.store.profile.setMe(value as Me)) this.run(() => this.store.flush());
+    }
+  }
+
+  /** Настройки аккаунта с сервера — после каждого hello (журнал мог потерять settingsChanged). */
+  private fetchSettings(): void {
+    this.run(async () => {
+      const r = await this.http<SettingsSnapshot>('/settings');
+      if (!this.store.settings.apply({ notify: r.notify, sessionsTtlDays: r.sessionsTtlDays, privacy: r.privacy }, r.seq)) return;
+      await this.store.flush();
+      this.changed();
+    });
+  }
+
+  /** Свой профиль с сервера — после каждого hello (кэш мог устареть, пока нас не было). */
+  private fetchMe(): void {
+    const gen = this.store.profile.gen;
+    this.run(async () => {
+      const me = await this.http<Me>('/me');
+      if (this.store.profile.gen !== gen) return;   // пока ждали, пришло свежее (журнал или ответ операции)
+      if (!this.store.profile.setMe(me)) return;
+      await this.store.flush();
+      this.changed();
+    });
+  }
+
+  /** Чужие профили, о которых спросил интерфейс, — по одному запросу на человека за подключение. */
+  private fetchUsers(): void {
+    if (!this.online || !this.ready || !this.userWants.size) return;
+    const ids = [...this.userWants].filter((id) => !this.usersAsked.has(id));
+    this.userWants.clear();
+    for (const id of ids) {
+      this.usersAsked.add(id);
+      this.run(async () => {
+        let u: PublicUser;
+        try { u = await this.http<PublicUser>(`/users/${id}`); } catch { return; }   // 404 — не видим этого человека
+        applyUserUpdated(this.store, u);
+        await this.store.flush();
+        this.changed();
+      });
+    }
   }
 
   // =====================================================================
@@ -328,6 +584,7 @@ export class Engine {
         return null;
       }
       case 'loadOlder': {
+        this.dev.log.record('engine', 'loadOlder', { chatId: a.chatId });
         await this.store.loadChatMessages(a.chatId);
         await this.ensureHistory(a.chatId, this.store.chatMessages(a.chatId).length + (this.cfg.historyPage ?? 50));
         return null;
@@ -373,6 +630,8 @@ export class Engine {
         catch (err) { if (m) { this.store.patchMessage(a.chatId, a.id, { reactions: prev }); this.changed(); } throw err; }
         return null;
       }
+      case 'resetLocal': return this.resetLocal(a.keepOutbox !== false);
+      case 'dev': return this.dev.command(a).finally(() => this.pushStatus());   // флаги имитатора — в status сразу
       case 'search': return this.search(a);
       case 'chatMedia': return this.http<{ messages: Message[] }>(`/chats/${a.chatId}/media?kind=${a.kind}`).then((r) => r.messages);
       case 'sendFile': {
@@ -392,6 +651,52 @@ export class Engine {
       case 'loadMoreChats':
         await this.loadMoreChats();
         return null;
+      case 'updateProfile': {
+        const body: Record<string, unknown> = {};
+        for (const k of ['firstName', 'lastName', 'bio', 'birthday'] as const) if (a[k] !== undefined) body[k] = a[k];
+        if (Object.keys(body).length) await this.ops.enqueue({ key: OP_PROFILE, method: 'PATCH', path: '/me', body });
+        return null;
+      }
+      case 'setUsername':
+        await this.ops.enqueue({ key: OP_USERNAME, method: 'PUT', path: '/me/username', body: { username: a.username } });
+        return null;
+      case 'refreshSettings':
+        if (this.online && this.ready) this.fetchSettings();
+        return null;
+      case 'setNotify': {
+        // в очередь уходит полное значение вида чата: слитые правки одного ключа не теряют соседнее поле
+        const cur = settingsView(this.store.settings.base, this.ops.list).notify[a.notifyType];
+        const body = { muted: a.muted ?? cur.muted, preview: a.preview ?? cur.preview };
+        await this.ops.enqueue({ key: notifyKey(a.notifyType), method: 'PUT', path: `/settings/notify/${a.notifyType}`, body });
+        return null;
+      }
+      case 'setPrivacy': {
+        // правило целиком: тело схлопывается с прежней неотправленной правкой этого же правила
+        const body = normalizeRule(a.key, { mode: a.mode, allow: a.allow ?? [], deny: a.deny ?? [] });
+        if (a.key === 'phoneDiscovery') { body.allow = []; body.deny = []; }
+        await this.ops.enqueue({ key: privacyKey(a.key), method: 'PUT', path: `/privacy/${a.key}`, body });
+        return null;
+      }
+      case 'block':
+      case 'unblock':
+        return this.blocks.act(a);
+      case 'listSessions':
+      case 'terminateSession':
+      case 'terminateOtherSessions':
+        return this.sessions.act(a);
+      case 'setSessionsTtl':
+        await this.ops.enqueue({ key: OP_SESSIONS_TTL, method: 'PUT', path: '/settings/sessions-ttl', body: { days: a.days } });
+        return null;
+      case 'addContact':
+      case 'updateContact':
+      case 'removeContact':
+      case 'resolveUser':
+        return this.contacts.act(a);
+      case 'checkUsername': {
+        if (!this.online) return { offline: true };
+        try { return await this.http<{ ok: boolean; reason?: string }>(`/users/check-username?u=${encodeURIComponent(a.username)}`); }
+        catch { return { offline: true }; }
+      }
       case 'retry': {
         if (this.store.unfail(a.clientId)) {
           await this.store.flush();
@@ -417,11 +722,13 @@ export class Engine {
   }
 
   private onClose(): void {
+    const wasOpen = this.online;
     this.online = false;
     this.holding = false;
     this.presence.clear();            // без связи не знаем, кто в сети
     this.presenceDirty = true;
     this.presenceFetched = false;
+    this.usersAsked.clear();
     if (this.wantOnline) this.failures++;
     this.ready = false;
     this.changed();
@@ -430,17 +737,24 @@ export class Engine {
     this.syncWaiter = null;
     for (const p of this.pending.values()) p.reject(offline);
     this.pending.clear();
+    if (!wasOpen && this.wantOnline) this.session.probe();
   }
 
   private onFrame(f: ServerFrame): void {
     switch (f.op) {
       case 'hello':
+        if (this.resetting) { this.skipped.hello = f; return; }   // resetLocal пошлёт свой hello сама, а при отказе проиграет этот
+        this.dev.counters.serverSeq = f.seq;
         this.holding = true;
         this.run(async () => {
           // другое поколение базы (сервер пересоздан): старый кэш недействителен целиком
-          if (this.store.epoch && f.epoch && this.store.epoch !== f.epoch) { await this.store.wipe(f.epoch); this.changed(); }
+          if (this.store.epoch && f.epoch && this.store.epoch !== f.epoch) { this.dev.log.record('engine', 'epochWipe', { from: this.store.epoch, to: f.epoch }); await this.store.wipe(f.epoch); this.ops.forget(); this.changed(); }
           else if (!this.store.epoch && f.epoch) { this.store.epoch = f.epoch; this.store.markMeta(); }
           // снимок — только когда кэш пуст; lastSeq = 0 бывает и у заполненного кэша (журнал пользователя ещё пуст)
+          this.fetchMe();
+          this.fetchSettings();
+          this.contacts.fetch();
+          this.blocks.fetch();
           if (!this.store.hydrated) await this.bootstrap(f.seq);
           else this.runSync();
         });
@@ -448,6 +762,8 @@ export class Engine {
       case 'updates':
       case 'tooLong': {
         const w = this.syncWaiter;
+        if (w && f.op === 'updates' && f.from !== w.since) return;   // ответ на прежний запрос (повторён по таймауту) — не наш
+        this.dev.counters.serverSeq = Math.max(this.dev.counters.serverSeq ?? 0, f.op === 'updates' ? f.to : f.seq);
         this.syncWaiter = null;
         w?.resolve(f);
         return;
@@ -464,6 +780,7 @@ export class Engine {
         return;
       }
       case 'poke':
+        if (this.resetting) this.skipped.poke = true;
         this.runSync();
         return;
       case 'typing': {
@@ -480,6 +797,9 @@ export class Engine {
         this.presenceDirty = true;
         this.changed();
         return;
+      case 'sessionTerminated':
+        this.session.end(f.reason === 'logout' ? 'logout' : 'terminated');
+        return;
       case 'pong':
         return;
     }
@@ -487,6 +807,7 @@ export class Engine {
 
   /** Первый вход или tooLong: hello дал seq S → снимок → lastSeq = S → догоняем от S. */
   private async bootstrap(seq: number): Promise<void> {
+    if (this.resetting) return;
     this.syncing = true;
     try {
       await this.loadFirstDialogs();
@@ -500,11 +821,13 @@ export class Engine {
   }
 
   private runSync(): void {
+    if (this.resetting) return;
     if (this.syncing) { this.syncAgain = true; return; }
     this.run(() => this.syncLoop());
   }
 
   private async syncLoop(): Promise<void> {
+    if (this.resetting) return;
     if (this.syncing) { this.syncAgain = true; return; }
     this.syncing = true;
     try {
@@ -516,8 +839,13 @@ export class Engine {
           // защита: пустая пачка с more от сервера означает дыру — лечим снимком
           const gap = f.op === 'updates' && f.more && f.items.length === 0;
           if (f.op === 'tooLong' || gap) {
+            this.dev.counters.tooLongCount++;
+            this.dev.log.record('engine', 'snapshot', { reason: gap ? 'gap' : 'tooLong' });
             this.store.resetForSnapshot();
             this.store.resetDialogs();
+            this.contacts.fetch();
+            this.blocks.fetch();
+            this.fetchSettings();
             await this.loadFirstDialogs();
             this.store.lastSeq = f.op === 'tooLong' ? f.seq : f.to;
             await this.store.flush();
@@ -527,7 +855,7 @@ export class Engine {
           }
           for (const it of f.items) {
             if (it.seq <= this.store.lastSeq) continue;
-            this.store.applyUpdate(it.update);
+            this.store.applyUpdate(it.update, it.seq);
             this.store.lastSeq = it.seq;
           }
           await this.store.flush(); // данные и lastSeq — одной транзакцией
@@ -540,6 +868,7 @@ export class Engine {
     }
     if (this.online) {
       this.ready = true;
+      this.dev.counters.lastSyncAt = Date.now();
       this.holding = false;   // всё накопленное уйдёт одним патчем
       this.changed();
       this.pumpOutbox();
@@ -547,6 +876,8 @@ export class Engine {
       this.pushDrafts();
       if (this.store.unnamed().length) this.refreshList();
       if (!this.presenceFetched) this.fetchPresence();
+      this.ops.resume();
+      this.fetchUsers();
     }
   }
 
@@ -554,7 +885,7 @@ export class Engine {
   private fetchPresence(): void {
     this.presenceFetched = true;
     this.run(async () => {
-      const list = await this.http<{ userId: number; online: boolean; lastSeen: string | null }[]>('/presence');
+      const list = await this.http<{ userId: number; online: boolean | null; lastSeen: string | null }[]>('/presence');
       if (!this.online) return;
       for (const p of list) if (!this.presence.has(p.userId)) this.presence.set(p.userId, { online: p.online, lastSeen: p.lastSeen }); // живой кадр, пришедший раньше снимка, свежее
       this.presenceDirty = true;
@@ -612,23 +943,94 @@ export class Engine {
 
   private requestSync(since: number): Promise<SyncReply> {
     return new Promise((resolve, reject) => {
-      this.syncWaiter = { resolve, reject };
+      // dev: имитатор потерял кадр (потери, «Дыра в журнале») — тот же диапазон ещё раз, после трёх раз — обрыв
+      let tries = 0, stop = () => {};
+      const resend = () => {
+        if (this.syncWaiter !== w) return;
+        this.dev.log.record('engine', 'syncTimeout', { since, tries: ++tries });
+        if (tries >= 3 || !this.transport.send({ op: 'sync', since })) { this.syncWaiter = null; w.reject({ code: 'offline', retry: true }); this.transport.drop(); return; }
+        stop = watchLoss(this.dev.sim, this.cfg.syncTimeoutMs ?? 5000, resend);
+      };
+      const w = { since, resolve: (f: SyncReply) => { stop(); resolve(f); }, reject: (e: ReqError) => { stop(); reject(e); } };
+      this.syncWaiter = w;
       if (!this.transport.send({ op: 'sync', since })) {
         this.syncWaiter = null;
         reject({ code: 'offline', retry: true });
+        return;
       }
+      stop = watchLoss(this.dev.sim, this.cfg.syncTimeoutMs ?? 5000, resend);
     });
   }
 
   private request(frame: Extract<ClientFrame, { reqId: string }>): Promise<Record<string, unknown>> {
     const reqId = 'r' + ++this.reqSeq;
     return new Promise((resolve, reject) => {
-      this.pending.set(reqId, { resolve, reject });
+      // dev: ответ мог потерять имитатор — обрыв, переподключение, очередь уйдёт снова (сервер узнаёт повтор по clientId)
+      let stop = () => {};
+      this.pending.set(reqId, { resolve: (r) => { stop(); resolve(r); }, reject: (e) => { stop(); reject(e); } });
       if (!this.transport.send({ ...frame, reqId })) {
         this.pending.delete(reqId);
         reject({ code: 'offline', retry: true });
+        return;
       }
+      stop = watchLoss(this.dev.sim, this.cfg.requestTimeoutMs ?? 15_000, () => {
+        if (!this.pending.delete(reqId)) return;
+        this.dev.log.record('engine', 'requestTimeout', { op: frame.op, reqId });
+        reject({ code: 'offline', retry: true });
+        this.transport.drop();
+      });
     });
+  }
+
+  // =====================================================================
+  // Раздел «Для разработчиков»
+  // =====================================================================
+
+  /** Снимок без очистки кэша: профиль, настройки, контакты, блок-лист, первая страница диалогов; затем догон журнала. */
+  private async resync(): Promise<void> {
+    if (!this.online || !this.ready) throw new Error('offline');
+    this.fetchMe();
+    this.fetchSettings();
+    this.contacts.fetch();
+    this.blocks.fetch();
+    await this.loadFirstDialogs();
+    await this.store.flush();
+    this.changed();
+    this.runSync();
+  }
+
+  /** Офлайн имитатора: новые кадры и HTTP сразу получают отказ, а уже ушедшие запросы дожидаются ответа
+   *  (сервер их выполнил — отказ привёл бы к повтору); затем сокет закрывается (не дольше 5 с). */
+  private simOffline(on: boolean): void {
+    this.netDown = on || (typeof navigator !== 'undefined' && navigator.onLine === false);
+    this.changed();
+    if (!on) { this.transport.setOffline(false); return; }
+    this.run(async () => {
+      const end = Date.now() + 5000;
+      while ((this.pending.size || this.syncWaiter) && Date.now() < end) await new Promise((r) => setTimeout(r, 10));
+      if (this.dev.sim.offline) this.transport.setOffline(true);
+    });
+  }
+
+  /** «Повторить все»: неотправленные с отказом — снова в очередь; очередь операций — без паузы. */
+  private async retryFailed(): Promise<number> {
+    let n = 0;
+    for (const o of [...this.store.outbox.values()]) if (o.failed && this.store.unfail(o.clientId)) n++;
+    await this.store.flush();
+    this.changed();
+    this.pumpOutbox();
+    this.ops.resume();
+    return n;
+  }
+
+  /** «Отбросить failed»: неотправленные с отказом уходят из очереди и из ленты (и их файлы — из IDB). */
+  private async discardFailed(): Promise<number> {
+    const ids = this.store.discardFailed();
+    await this.store.flush();
+    if (ids.length) await write(this.db, { put: {}, del: { messages: ids } }).catch(() => {});
+    for (const id of ids) delBlob(this.db, id).catch(() => {});
+    this.changed();
+    return ids.length;
   }
 
   // =====================================================================
@@ -636,7 +1038,7 @@ export class Engine {
   // =====================================================================
 
   private pumpOutbox(): void {
-    if (!this.online || !this.ready || this.pumping) return;
+    if (this.resetting || !this.online || !this.ready || this.pumping) return;
     this.pumping = true;
     this.run(async () => {
       try {
@@ -657,7 +1059,8 @@ export class Engine {
             this.store.ack(next.clientId, r.id as number, r.createdAt as string);
             if (att) delBlob(this.db, next.clientId).catch(() => {});
           } catch (e) {
-            if ((e as ReqError).retry === false) this.store.fail(next.clientId);
+            // отказ сервера: код остаётся у сообщения (blocked — интерфейс заменит поле ввода плашкой)
+            if ((e as ReqError).retry === false) this.store.fail(next.clientId, (e as ReqError).code);
             else break; // сеть — дождёмся переподключения, порядок сохранится
           }
           await this.store.flush();
@@ -748,14 +1151,15 @@ export class Engine {
   // =====================================================================
 
   private async http<T>(path: string): Promise<T> {
-    const res = await fetch(this.cfg.httpBase + path, { headers: this.cfg.headers, credentials: 'include' });
+    const res = await this.dev.fetch(this.cfg.httpBase + path, { headers: this.cfg.headers, credentials: 'include' });
+    if (this.session.unauthorized(res.status)) throw { code: 'offline', retry: false } satisfies ReqError;   // сеанс завершён — не ошибка движка
     if (!res.ok) throw new Error(`HTTP ${res.status} ${path}`);
     return (await res.json()) as T;
   }
 
   private run(fn: () => Promise<unknown>): void {
     this.busy++;
-    fn().catch((err) => { if (!(err && (err as ReqError).code === 'offline')) console.error('sync engine:', err); })
+    fn().catch((err) => { if (!(err && (err as ReqError).code === 'offline')) { console.error('sync engine:', err); this.dev.log.error('engine', err); } })
       .finally(() => { this.busy--; });
   }
 
@@ -766,7 +1170,8 @@ export class Engine {
       this.syncing || this.busy > 0 || this.pending.size > 0 || this.frameTimer !== null || this.readTimer !== null ||
       (this.transport.wanted && !this.ready) ||
       (this.ready && [...this.store.outbox.values()].some((o) => !o.failed)) ||
-      (this.ready && this.store.pendingReads.size > 0);
+      (this.ready && this.store.pendingReads.size > 0) ||
+      this.ops.sending;
     while (busy()) {
       if (Date.now() > end) {
         throw new Error('engine did not become idle: ' + JSON.stringify({

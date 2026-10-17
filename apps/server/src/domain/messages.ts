@@ -5,7 +5,8 @@ import { sql } from '../db';
 import { assertMember, toMessage } from './chats';
 import { DomainError } from './errors';
 import { fanOut } from './journal';
-import { pushNewMessage } from './push';
+import { blockedInDirect } from './privacy';
+import { pushInBackground } from './push';
 
 export const MAX_BODY = 4096;
 
@@ -19,6 +20,12 @@ export async function sendMessage(
 
   const res = await sql.begin(async (tx) => {
     await assertMember(tx, input.chatId, userId);
+    // личный чат, а собеседник заблокировал отправителя: не пишем ничего (повтор уже принятого — по-прежнему ack)
+    if (await blockedInDirect(tx, input.chatId, userId)) {
+      const [existing] = await tx`select * from messages where sender_id = ${userId} and client_id = ${input.clientId}`;
+      if (existing) return { message: toMessage(existing), duplicate: true };
+      throw new DomainError('blocked');
+    }
     if (input.replyToId != null) {
       const [target] = await tx`select 1 from messages where chat_id = ${input.chatId} and id = ${input.replyToId}`;
       if (!target) throw new DomainError('not_found', 'reply target');
@@ -41,6 +48,6 @@ export async function sendMessage(
     return { message, duplicate: false };
   });
   // после коммита и не дожидаясь: доставка в push-сервис не должна тормозить ack
-  if (!res.duplicate) void pushNewMessage(res.message).catch((e) => console.warn('push', String(e)));
+  if (!res.duplicate) pushInBackground(res.message);
   return res;
 }

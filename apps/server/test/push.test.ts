@@ -1,6 +1,7 @@
 import { afterAll, beforeEach, expect, test } from 'bun:test';
 import { sql } from '../src/db';
 import { createServer } from '../src/http';
+import { NO_PREVIEW } from '@relay/protocol';
 import { sendMessage } from '../src/domain/messages';
 import { makeChat, makeUser, resetDb } from './helpers';
 
@@ -10,10 +11,10 @@ afterAll(() => { server.stop(true); push.stop(true); });
 beforeEach(async () => { await resetDb(); got.length = 0; status = 201; });
 
 // поддельный push-сервис: копит запросы, отвечает status
-const got: { auth: string; encoding: string; body: Uint8Array }[] = [];
+const got: { path: string; auth: string; encoding: string; body: Uint8Array }[] = [];
 let status = 201;
 const push = Bun.serve({ port: 0, async fetch(req) {
-  got.push({ auth: req.headers.get('authorization') ?? '', encoding: req.headers.get('content-encoding') ?? '', body: new Uint8Array(await req.arrayBuffer()) });
+  got.push({ path: new URL(req.url).pathname, auth: req.headers.get('authorization') ?? '', encoding: req.headers.get('content-encoding') ?? '', body: new Uint8Array(await req.arrayBuffer()) });
   return new Response(null, { status });
 } });
 const endpoint = (n: number) => `http://localhost:${push.port}/ep/${n}`;
@@ -49,14 +50,19 @@ async function browser() {
 }
 
 const waitFor = async (n: number) => { for (let i = 0; i < 50 && got.length < n; i++) await Bun.sleep(20); };
+/** сеанс пользователя (как после входа) — подписка без него невозможна */
+async function sessionFor(userId: number): Promise<number> {
+  const [r] = await sql`insert into sessions (token_hash, user_id, expires_at) values (${crypto.randomUUID()}, ${userId}, now() + interval '30 days') returning id`;
+  return Number(r.id);
+}
 
 test('offline member gets an encrypted push signed with the VAPID key; sender and muted chats do not', async () => {
   const a = await makeUser('Анна'), b = await makeUser('Борис');
   const chat = await makeChat([a, b]), other = await makeChat([a, b, await makeUser('Вера')]);
   const br = await browser();
   const { subscribe } = await import('../src/domain/push');
-  await subscribe(b, { endpoint: endpoint(1), keys: br.keys, muted: [other] });
-  await subscribe(a, { endpoint: endpoint(2), keys: (await browser()).keys });
+  await subscribe(b, { endpoint: endpoint(1), keys: br.keys, muted: [other] }, await sessionFor(b));
+  await subscribe(a, { endpoint: endpoint(2), keys: (await browser()).keys }, await sessionFor(a));
 
   const { message } = await sendMessage(a, { chatId: chat, clientId: crypto.randomUUID(), body: 'привет' });
   await sendMessage(a, { chatId: other, clientId: crypto.randomUUID(), body: 'в заглушённый' });
@@ -78,10 +84,149 @@ test('gone subscription is forgotten; HTTP subscribe needs a session', async () 
   const a = await makeUser('Анна'), b = await makeUser('Борис');
   const chat = await makeChat([a, b]);
   const { subscribe } = await import('../src/domain/push');
-  await subscribe(b, { endpoint: endpoint(3), keys: (await browser()).keys });
+  await subscribe(b, { endpoint: endpoint(3), keys: (await browser()).keys }, await sessionFor(b));
   status = 410;
   await sendMessage(a, { chatId: chat, clientId: crypto.randomUUID(), body: 'x' });
   await waitFor(1); await Bun.sleep(100);
   expect((await sql`select count(*)::int as n from push_subscriptions`)[0].n).toBe(0);
   expect((await fetch(`${base}/push/subscription`, { method: 'POST', body: JSON.stringify({ endpoint: endpoint(4), keys: { p256dh: 'x', auth: 'y' } }) })).status).toBe(401);
+});
+
+test('direct push is titled with the recipient\'s contact name for the sender; group body too', async () => {
+  const a = await makeUser('Анна'), b = await makeUser('Борис');
+  const chat = await makeChat([a, b]), group = await makeChat([a, b, await makeUser('Вера')]);
+  await sql`insert into contacts (owner_id, user_id, first_name, last_name) values (${b}, ${a}, 'Аня', 'С')`;
+  const br = await browser();
+  const { subscribe } = await import('../src/domain/push');
+  await subscribe(b, { endpoint: endpoint(5), keys: br.keys }, await sessionFor(b));
+  await sendMessage(a, { chatId: chat, clientId: crypto.randomUUID(), body: 'привет' });
+  await waitFor(1); await Bun.sleep(50);
+  expect(await br.decrypt(got[0].body)).toMatchObject({ title: 'Аня С', body: 'привет' });
+  await sendMessage(a, { chatId: group, clientId: crypto.randomUUID(), body: 'всем' });
+  await waitFor(2); await Bun.sleep(50);
+  expect(await br.decrypt(got[1].body)).toMatchObject({ title: 'Группа', body: 'Аня С: всем' });
+});
+
+// ---- подписка принадлежит сеансу ----
+type U = { userId: number; token: string };
+const login = async (name: string): Promise<U> =>
+  (await (await fetch(`${base}/dev/login`, { method: 'POST', body: JSON.stringify({ name }) })).json()) as U;
+const call = (u: U, method: string, path: string, body?: unknown) =>
+  fetch(`${base}${path}`, { method, headers: { cookie: `relay_session=${u.token}` }, body: body === undefined ? undefined : JSON.stringify(body) });
+const sessionIdOf = async (u: U) => ((await (await call(u, 'GET', '/sessions')).json()) as { id: number; current: boolean }[]).find((s) => s.current)!.id;
+const { settlePushes } = await import('../src/domain/push');
+/** отправить и дождаться всех push; вернуть пути endpoint'ов, куда ушло */
+async function sendAndCollect(from: number, chatId: number): Promise<string[]> {
+  got.length = 0;
+  await sendMessage(from, { chatId, clientId: crypto.randomUUID(), body: 'секрет' });
+  await settlePushes();
+  return got.map((g) => g.path).sort();
+}
+
+test('terminated and logged-out sessions get no push; the other session still does', async () => {
+  const a1 = await login('Анна'), a2 = await login('Анна'), a3 = await login('Анна');
+  const b = await makeUser('Борис');
+  const chat = await makeChat([a1.userId, b]);
+  for (const [u, n] of [[a1, 11], [a2, 12], [a3, 13]] as const) {
+    expect((await call(u, 'POST', '/push/subscription', { endpoint: endpoint(n), keys: (await browser()).keys })).status).toBe(200);
+  }
+  expect(await sendAndCollect(b, chat)).toEqual(['/ep/11', '/ep/12', '/ep/13']);
+
+  // «Завершить сеанс» a2 из a1
+  expect((await call(a1, 'DELETE', `/sessions/${await sessionIdOf(a2)}`)).status).toBe(200);
+  expect(await sendAndCollect(b, chat)).toEqual(['/ep/11', '/ep/13']);
+
+  // обычный выход a3
+  expect((await call(a3, 'POST', '/logout')).status).toBe(200);
+  expect(await sendAndCollect(b, chat)).toEqual(['/ep/11']);
+  expect((await sql`select endpoint from push_subscriptions`).map((r) => r.endpoint)).toEqual([endpoint(11)]);
+});
+
+test('terminate-others and the inactivity sweep drop subscriptions', async () => {
+  const a1 = await login('Анна'), a2 = await login('Анна');
+  const b = await makeUser('Борис');
+  const chat = await makeChat([a1.userId, b]);
+  await call(a1, 'POST', '/push/subscription', { endpoint: endpoint(21), keys: (await browser()).keys });
+  await call(a2, 'POST', '/push/subscription', { endpoint: endpoint(22), keys: (await browser()).keys });
+  expect(await sendAndCollect(b, chat)).toEqual(['/ep/21', '/ep/22']);
+
+  expect((await call(a1, 'DELETE', '/sessions?others=1')).status).toBe(200);
+  expect(await sendAndCollect(b, chat)).toEqual(['/ep/21']);
+
+  // автозавершение по неактивности
+  await sql`update sessions set last_active_at = now() - interval '400 days' where user_id = ${a1.userId}`;
+  const { sweepInactive } = await import('../src/domain/sessions');
+  await sweepInactive(a1.userId);
+  expect(await sendAndCollect(b, chat)).toEqual([]);
+  expect((await sql`select count(*)::int as n from push_subscriptions`)[0].n).toBe(0);
+});
+
+test('expired or inactive-past-TTL sessions get no push before the sweep removes them', async () => {
+  const a1 = await login('Анна'), a2 = await login('Анна'), a3 = await login('Анна');
+  const b = await makeUser('Борис');
+  const chat = await makeChat([a1.userId, b]);
+  for (const [u, n] of [[a1, 41], [a2, 42], [a3, 43]] as const) {
+    expect((await call(u, 'POST', '/push/subscription', { endpoint: endpoint(n), keys: (await browser()).keys })).status).toBe(200);
+  }
+  // a2 — срок cookie истёк; a3 — неактивен дольше срока владельца (30 дней); строки ещё на месте
+  await sql`insert into user_settings (user_id, sessions_ttl_days) values (${a1.userId}, 30) on conflict (user_id) do update set sessions_ttl_days = 30`;
+  await sql`update sessions set expires_at = now() - interval '1 minute' where id = ${await sessionIdOf(a2)}`;
+  await sql`update sessions set last_active_at = now() - interval '31 days' where id = ${await sessionIdOf(a3)}`;
+  expect(await sendAndCollect(b, chat)).toEqual(['/ep/41']);
+  expect((await sql`select count(*)::int as n from push_subscriptions`)[0].n).toBe(3);
+
+  // без своих настроек — срок по умолчанию (180 дней)
+  await sql`delete from user_settings where user_id = ${a1.userId}`;
+  expect(await sendAndCollect(b, chat)).toEqual(['/ep/41', '/ep/43']);
+  await sql`update sessions set last_active_at = now() - interval '181 days' where id = ${await sessionIdOf(a1)}`;
+  expect(await sendAndCollect(b, chat)).toEqual(['/ep/43']);
+});
+
+test('a subscription cannot exist without a session', async () => {
+  const a = await makeUser('Анна');
+  const fails = async (p: PromiseLike<unknown>) => { try { await p; return false; } catch { return true; } };
+  expect(await fails(sql`insert into push_subscriptions (endpoint, user_id, p256dh, auth) values (${endpoint(51)}, ${a}, 'x', 'y')`)).toBe(true);
+  expect((await sql`select count(*)::int as n from push_subscriptions`)[0].n).toBe(0);
+});
+
+test('migration 106 removes legacy subscriptions without a session and makes session_id required', async () => {
+  const a = await makeUser('Анна');
+  const sid = await sessionFor(a);
+  const text = await Bun.file(new URL('../migrations/106_push_session_required.sql', import.meta.url)).text();
+  // как было до 106: столбец допускает null, есть старая строка без сеанса; всё в транзакции, которую откатываем
+  const rollback = new Error('rollback');
+  await expect(sql.begin(async (tx) => {
+    await tx`alter table push_subscriptions alter column session_id drop not null`;
+    await tx`insert into push_subscriptions (endpoint, user_id, p256dh, auth, session_id) values (${endpoint(61)}, ${a}, 'x', 'y', null), (${endpoint(62)}, ${a}, 'x', 'y', ${sid})`;
+    await tx.unsafe(text);
+    await tx.unsafe(text);   // идемпотентна
+    expect((await tx`select endpoint from push_subscriptions`).map((r) => r.endpoint)).toEqual([endpoint(62)]);
+    expect((await tx`select is_nullable from information_schema.columns where table_name = 'push_subscriptions' and column_name = 'session_id'`)[0].is_nullable).toBe('NO');
+    throw rollback;
+  })).rejects.toBe(rollback);
+  expect((await sql`select is_nullable from information_schema.columns where table_name = 'push_subscriptions' and column_name = 'session_id'`)[0].is_nullable).toBe('NO');
+});
+
+test('hideText subscription gets «Relay» / «Новое сообщение»; the flag follows updates and SW resubscribe', async () => {
+  const a = await login('Анна');
+  const b = await makeUser('Борис');
+  const chat = await makeChat([a.userId, b]), group = await makeChat([a.userId, b, await makeUser('Вера')]);
+  const br = await browser();
+  await call(a, 'POST', '/push/subscription', { endpoint: endpoint(31), keys: br.keys, hideText: true });
+  await sendAndCollect(b, chat);
+  expect(await br.decrypt(got[0].body)).toMatchObject({ chatId: chat, title: 'Relay', body: NO_PREVIEW });
+  await sendAndCollect(b, group);
+  expect(await br.decrypt(got[0].body)).toMatchObject({ chatId: group, title: 'Relay', body: NO_PREVIEW });
+
+  // SW переподписался без флага и с новым endpoint — флаг переезжает
+  const br2 = await browser();
+  await call(a, 'POST', '/push/subscription', { endpoint: endpoint(32), keys: br2.keys, oldEndpoint: endpoint(31) });
+  expect(await sendAndCollect(b, chat)).toEqual(['/ep/32']);
+  expect(await br2.decrypt(got[0].body)).toMatchObject({ title: 'Relay', body: NO_PREVIEW });
+
+  // флаг сняли в настройках — снова имя и текст
+  await call(a, 'POST', '/push/subscription', { endpoint: endpoint(32), keys: br2.keys, hideText: false });
+  await sendAndCollect(b, chat);
+  expect(await br2.decrypt(got[0].body)).toMatchObject({ title: 'Борис', body: 'секрет' });
+  expect((await call(a, 'POST', '/push/subscription', { endpoint: endpoint(32), keys: br2.keys, hideText: 'yes' })).status).toBe(400);
 });

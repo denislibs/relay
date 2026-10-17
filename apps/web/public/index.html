@@ -9,7 +9,14 @@
   <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 32 32%22%3E%3Crect width=%2232%22 height=%2232%22 rx=%2216%22 fill=%22%2325d366%22/%3E%3Cpath d=%22M9 12h14M9 17h9%22 stroke=%22white%22 stroke-width=%222.6%22 stroke-linecap=%22round%22/%3E%3C/svg%3E">
   <title>Relay</title>
   <!-- до загрузки CSS и обоев: фон уже в цвет темы, без белой/чёрной вспышки -->
-  <script>try { var t = localStorage.getItem('relay.theme'); if (t === 'light' || t === 'dark') document.documentElement.setAttribute('data-theme', t); } catch (e) {}</script>
+  <script>try { var d = document.documentElement, s = localStorage, p = JSON.parse(s.getItem('relay.prefs') || 'null'), r = matchMedia('(prefers-reduced-motion: reduce)').matches;
+    p = p && typeof p === 'object' && !Array.isArray(p) ? p : {};
+    var ok = p.v === undefined || p.v === 1, t = p.theme || (p.v === undefined ? s.getItem('relay.theme') : null), a = ok && p.anim && typeof p.anim === 'object' ? p.anim : {};
+    if (t === 'light' || t === 'dark') d.setAttribute('data-theme', t);
+    if (ok && typeof p.textSize === 'number' && p.textSize >= 12 && p.textSize <= 20) d.style.setProperty('--message-text-size', Math.round(p.textSize) + 'px');
+    if (typeof a.ui === 'boolean' ? !a.ui : r) d.setAttribute('data-anim', '0');
+    if (typeof a.blur === 'boolean' ? !a.blur : r) d.setAttribute('data-blur', '0');
+    if (typeof a.wallpaper === 'boolean' ? !a.wallpaper : r) d.setAttribute('data-wpanim', '0'); } catch (e) {}</script>
   <style>
     html { background: linear-gradient(135deg, #dbddbb, #88b884 45%, #6ba587 70%, #d5d88d) fixed; }
     @media (prefers-color-scheme: dark) { html:not([data-theme="light"]) { background: #000; } }

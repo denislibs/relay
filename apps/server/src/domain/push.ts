@@ -1,5 +1,9 @@
+import { NO_PREVIEW } from '@relay/protocol';
 import { sql } from '../db';
+import { nameForSql } from './profile';
 import { isOnline } from './presence';
+import { DEFAULT_TTL_DAYS } from './sessions';
+import { notifyDefaults } from './settings';
 
 /**
  * Web Push без зависимостей: VAPID (RFC 8292) и шифрование aes128gcm (RFC 8291) на WebCrypto.
@@ -61,38 +65,87 @@ export async function encryptPayload(p256dh: string, auth: string, plaintext: Ui
   return cat(salt, rs, new Uint8Array([asPublic.length]), asPublic, record);
 }
 
-export async function subscribe(userId: number, s: { endpoint: string; keys: { p256dh: string; auth: string }; muted?: number[] }): Promise<void> {
+export interface SubscriptionInput {
+  endpoint: string; keys: { p256dh: string; auth: string };
+  muted?: number[]; hideText?: boolean;
+  /** pushsubscriptionchange: прежний endpoint этого браузера — настройки переезжают с него */
+  oldEndpoint?: string;
+}
+
+/** Подписка этого браузера; sessionId — сеанс, из которого подписались (его конец удаляет подписку). */
+export async function subscribe(userId: number, s: SubscriptionInput, sessionId: number): Promise<void> {
   const url = new URL(s.endpoint);   // бросит на мусоре
   if (url.protocol !== 'https:' && process.env.DEV_LOGIN !== '1') throw new Error('endpoint');
-  const muted = (s.muted ?? []).filter((n) => Number.isInteger(n)).slice(0, 10000);
-  await sql`
-    insert into push_subscriptions (endpoint, user_id, p256dh, auth, muted)
-    values (${s.endpoint}, ${userId}, ${s.keys.p256dh}, ${s.keys.auth}, ${muted})
-    on conflict (endpoint) do update set user_id = excluded.user_id, p256dh = excluded.p256dh, auth = excluded.auth, muted = excluded.muted`;
+  // не прислали muted / hideText (переподписка из SW) — берём из прежней строки этого пользователя
+  const prev = s.muted === undefined || typeof s.hideText !== 'boolean'
+    ? (await sql`select muted, hide_text from push_subscriptions
+                  where user_id = ${userId} and endpoint = any(${[s.endpoint, s.oldEndpoint].filter((e): e is string => typeof e === 'string')})
+                  order by (endpoint = ${s.endpoint}) desc limit 1`)[0]
+    : undefined;
+  const muted = (Array.isArray(s.muted) ? s.muted : (prev?.muted as number[] | undefined) ?? []).filter((n) => Number.isInteger(n)).slice(0, 10000);
+  const hideText = typeof s.hideText === 'boolean' ? s.hideText : prev?.hide_text === true;
+  await sql.begin(async (tx) => {
+    if (typeof s.oldEndpoint === 'string' && s.oldEndpoint !== s.endpoint) await tx`delete from push_subscriptions where endpoint = ${s.oldEndpoint} and user_id = ${userId}`;
+    await tx`
+      insert into push_subscriptions (endpoint, user_id, p256dh, auth, muted, hide_text, session_id)
+      values (${s.endpoint}, ${userId}, ${s.keys.p256dh}, ${s.keys.auth}, ${muted}, ${hideText}, ${sessionId})
+      on conflict (endpoint) do update set user_id = excluded.user_id, p256dh = excluded.p256dh, auth = excluded.auth,
+        muted = excluded.muted, hide_text = excluded.hide_text, session_id = excluded.session_id`;
+  });
 }
 
 export async function unsubscribe(userId: number, endpoint: string): Promise<void> {
   await sql`delete from push_subscriptions where endpoint = ${endpoint} and user_id = ${userId}`;
 }
 
+// ---- отправка в фоне: ack не ждёт push-сервис; тесты дожидаются хвоста (settlePushes) перед очисткой базы ----
+const pending = new Set<Promise<void>>();
+export function pushInBackground(m: Parameters<typeof pushNewMessage>[0]): void {
+  const p = pushNewMessage(m).catch((e) => console.warn('push', String(e))).finally(() => pending.delete(p));
+  pending.add(p);
+}
+/** Дождаться всех отправок в фоне (в т.ч. начатых, пока ждём). */
+export async function settlePushes(): Promise<void> {
+  while (pending.size) await Promise.allSettled([...pending]);
+}
+
 export type PushPayload = { chatId: number; id: number; title: string; body: string };
 
-/** Новое сообщение → push участникам без соединения, кроме отправителя и тех, у кого чат заглушён. */
+/** Новое сообщение → push участникам без соединения, кроме отправителя и тех, у кого чат заглушён.
+ *  Только подпискам живых сеансов: истёкший или неактивный дольше срока, но ещё не убранный sweepInactive — молчит. */
 export async function pushNewMessage(m: { chatId: number; id: number; senderId: number; body: string; kind?: string; attachment?: { name?: string } | null }): Promise<void> {
+  // имя отправителя — глазами получателя (контактное, если он его задал)
   const subs = await sql`
-    select s.endpoint, s.user_id, s.p256dh, s.auth from push_subscriptions s
+    select s.endpoint, s.user_id, s.p256dh, s.auth, s.hide_text,
+           (select ${nameForSql(sql`s.user_id`)} from users u where u.id = ${m.senderId}) as sender_name
+      from push_subscriptions s
     join chat_members cm on cm.user_id = s.user_id and cm.chat_id = ${m.chatId}
-    where s.user_id <> ${m.senderId} and not (${m.chatId} = any(s.muted))`;
-  const targets = subs.filter((s) => !isOnline(s.user_id as number));
+    join sessions se on se.id = s.session_id
+    left join user_settings us on us.user_id = s.user_id
+    where s.user_id <> ${m.senderId} and not (${m.chatId} = any(s.muted))
+      and se.expires_at > now()
+      and se.last_active_at > now() - make_interval(days => coalesce(us.sessions_ttl_days, ${DEFAULT_TTL_DAYS}))
+      and not exists (select 1 from blocks b where b.owner_id = s.user_id and b.user_id = ${m.senderId})   -- от заблокированного — никогда`;
+  const offline = subs.filter((s) => !isOnline(s.user_id as number));
+  if (!offline.length) return;
+  const [info] = await sql`select kind, title from chats where id = ${m.chatId}`;
+  // умолчания получателя для этого вида чата: выключено — не шлём; без предпросмотра — текст не отдаём
+  const defaults = await notifyDefaults(sql, [...new Set(offline.map((s) => s.user_id as number))]);
+  const kind = info.kind === 'group' ? 'group' : 'direct';
+  const prefOf = (userId: number) => defaults.get(userId)?.[kind] ?? { muted: false, preview: true };
+  const targets = offline.filter((s) => !prefOf(s.user_id as number).muted);
   if (!targets.length) return;
-  const [info] = await sql`
-    select c.kind, c.title, u.name from chats c, users u where c.id = ${m.chatId} and u.id = ${m.senderId}`;
   const preview = m.kind === 'photo' ? (m.body ? '🖼 ' + m.body : 'Фотография') : m.kind === 'file' ? '📎 ' + (m.body || m.attachment?.name || 'Файл') : m.body;
-  const payload: PushPayload = info.kind === 'group'
-    ? { chatId: m.chatId, id: m.id, title: (info.title as string) ?? 'Группа', body: `${info.name}: ${preview}` }
-    : { chatId: m.chatId, id: m.id, title: info.name as string, body: preview };
-  const plain = enc.encode(JSON.stringify(payload).slice(0, 3000));
   await Promise.all(targets.map(async (s) => {
+    const name = s.sender_name as string;
+    const shown = prefOf(s.user_id as number).preview;
+    // «Скрывать текст в уведомлениях» на этом устройстве — ни имени, ни текста (как и локальное уведомление)
+    const payload: PushPayload = s.hide_text === true
+      ? { chatId: m.chatId, id: m.id, title: 'Relay', body: NO_PREVIEW }
+      : kind === 'group'
+      ? { chatId: m.chatId, id: m.id, title: (info.title as string) ?? 'Группа', body: shown ? `${name}: ${preview}` : NO_PREVIEW }
+      : { chatId: m.chatId, id: m.id, title: name, body: shown ? preview : NO_PREVIEW };
+    const plain = enc.encode(JSON.stringify(payload).slice(0, 3000));
     try {
       const res = await fetch(s.endpoint as string, {
         method: 'POST',

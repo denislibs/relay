@@ -1,13 +1,14 @@
-import { ChatRow, Highlight, Menu, Presence, SlideStack, ChatRowSkeleton, useMinVisible, EmptyState, Fab, WindowList, FolderTabs, SidebarCard, SidebarHeader } from '@relay/ui';
+import { Avatar, ChatRow, Highlight, Menu, Presence, SlideStack, ChatRowSkeleton, useMinVisible, EmptyState, Fab, WindowList, FolderTabs, SidebarCard, SidebarHeader, peerTone } from '@relay/ui';
 import type { Item } from '@relay/sync-engine/src/types';
 import { loadMoreChats, openChat, searchMessages } from '../data';
 import { setGlobal, useGlobal } from '../global';
 import { useEffect, useRef, useState } from 'preact/hooks';
 import { memo } from 'preact/compat';
 import type { SearchHit } from '@relay/sync-engine/src/types';
+import { go } from '../nav';
 import { isDark } from '../theme';
 import { chatTime, chatTone, snippet } from './format';
-import { setTheme } from './Settings';
+import { applyTheme as setTheme } from '../theme';
 
 const FOLDERS = ['all', 'unread'];
 
@@ -75,6 +76,7 @@ export function Sidebar() {
     return () => { live = false; clearTimeout(t); };
   }, [searchQ]);
   const theme = useGlobal((s) => s.theme);
+  useGlobal((s) => s.prefs.timeFormat);   // смена формата времени перерисовывает время в списке
   const dark = isDark(theme);
   const view = useGlobal((s) => s.sidebarView);
   const me = useGlobal((s) => s.me)!;
@@ -156,7 +158,7 @@ export function Sidebar() {
     <SidebarCard
       embedded
       paged
-      header={<SidebarHeader onMenu={() => setMenu(true)} status={searchStatus ?? undefined} me={me.name} searchId="side-search" value={search} placeholder="Поиск" onSearch={(e: Event) => setGlobal({ search: (e.target as HTMLInputElement).value })} />}
+      header={<SidebarHeader onMenu={() => setMenu(true)} status={searchStatus ?? undefined} me={me.name} meTone={peerTone(me.userId)} searchId="side-search" value={search} placeholder="Поиск" onSearch={(e: Event) => setGlobal({ search: (e.target as HTMLInputElement).value })} />}
       tabs={<FolderTabs class="app-folders" active={folder} onChange={(id: 'all' | 'unread') => setGlobal({ folder: id })} items={[
         { id: 'all', label: 'Все' },
         { id: 'unread', label: 'Непрочитанные', count: counters.unreadChats },
@@ -170,11 +172,20 @@ export function Sidebar() {
               <Menu
                 label="Главное меню"
                 onClose={() => setMenu(false)}
+                header={
+                  <button type="button" role="menuitem" class="rl-menu-item app-menu-profile" onClick={() => { setMenu(false); void go('settings'); }}>
+                    <Avatar name={me.name} tone={peerTone(me.userId)} size={32} /><span>{me.name}</span>
+                  </button>
+                }
                 items={[
-                  { icon: 'settings', label: 'Настройки', onClick: () => { setMenu(false); setGlobal({ sidebarView: 'settings' }); } },
-                  { icon: dark ? 'sun' : 'moon', label: dark ? 'Дневной режим' : 'Ночной режим', onClick: () => setTheme(dark ? 'light' : 'dark') },
+                  { icon: 'account', label: 'Мой профиль', onClick: () => { setMenu(false); void go('settings'); } },
+                  { icon: 'contact', label: 'Контакты', onClick: () => { setMenu(false); void go('contacts'); } },
+                  { icon: 'settings', label: 'Настройки', onClick: () => { setMenu(false); void go('settings'); } },
                   '-',
-                  { icon: 'pencil', label: 'Новый чат', onClick: () => setGlobal({ newChatOpen: true }) },
+                  { icon: 'more', label: 'Ещё', submenu: [
+                    { icon: dark ? 'sun' : 'moon', label: dark ? 'Дневной режим' : 'Ночной режим', onClick: () => setTheme(dark ? 'light' : 'dark') },
+                    { icon: 'pencil', label: 'Новый чат', onClick: () => setGlobal({ newChatOpen: true }) },
+                  ] },
                 ]}
               />
             </div>

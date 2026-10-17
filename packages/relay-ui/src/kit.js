@@ -1,5 +1,5 @@
-import { h, Fragment, toChildArray } from 'preact';
-import { useState, useRef, useEffect, useLayoutEffect } from 'preact/hooks';
+import { h, Fragment, toChildArray, createContext } from 'preact';
+import { useState, useRef, useEffect, useLayoutEffect, useContext } from 'preact/hooks';
 import { createPortal } from 'preact/compat';
 import { MentionList, AttachMenu } from './more.js';
 import { requestMeasure, requestMutation, beginHeavyAnimation, onHeavyAnimationEnd, isHeavyAnimating, forceMeasure } from './schedule.js';
@@ -13,7 +13,11 @@ function cx() {
   return out.join(' ');
 }
 /* ---------- Motion helpers ---------- */
-function reducedMotion() { return !!(window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches); }
+// Система просит меньше движения ИЛИ в настройках выключены анимации интерфейса (data-anim="0" на <html>).
+function reducedMotion() {
+  if (document.documentElement.dataset.anim === '0') return true;
+  return !!(window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches);
+}
 function chain(a, b) { return function (e) { if (a) a(e); if (b) b(e); }; }
 // Pointer ripple: one measure (rect) then one mutation (append), in that order — the fasterdom rule.
 /* Ripple — круг из точки нажатия. Диаметр — до дальнего угла элемента, так что к концу роста он
@@ -83,6 +87,7 @@ var ICONS = {
   lock: ['M6 11h12v10H6z', 'M8.5 11V8a3.5 3.5 0 0 1 7 0v3'],
   download: ['M12 4v11', 'M7.5 10.5L12 15l4.5-4.5', 'M5 20h14'],
   chevronRight: ['M9 6l6 6-6 6'],
+  logout: ['M10 4H5v16h5', 'M15 8l4 4-4 4', 'M19 12H9'],
   arrowLeft: ['M19 12H5', 'M11 6l-6 6 6 6'],
   external: ['M8 16L16 8', 'M9 8h7v7'],
   video: ['M3 7h12v10H3z', 'M15 10.5l6-3.5v10l-6-3.5'],
@@ -123,6 +128,19 @@ var ICONS = {
   timer: ['M12 21a9 9 0 1 0-9-9', 'M12 7v5l3 2', 'M3 16h.01', 'M5.5 19.5h.01'],
   shield: ['M12 3l8 3v6c0 4.5-3.4 8-8 9-4.6-1-8-4.5-8-9V6z'],
   upload: ['M12 20V9', 'M7.5 13.5L12 9l4.5 4.5', 'M5 4h14'],
+  account: [C(12, 12, 9), C(12, 10, 3), 'M6.5 18.5a6 6 0 0 1 11 0'],
+  general: ['M4 7h9', 'M17 7h3', 'M4 17h3', 'M11 17h9', 'M15 4.5v5', 'M9 14.5v5'],
+  storage: ['M4 6c0-1.7 3.6-3 8-3s8 1.3 8 3-3.6 3-8 3-8-1.3-8-3', 'M4 6v6c0 1.7 3.6 3 8 3s8-1.3 8-3V6', 'M4 12v6c0 1.7 3.6 3 8 3s8-1.3 8-3v-6'],
+  folder: ['M3 6h6l2 2.5h10V19H3z'],
+  rocket: ['M12 3c3.5 2 5 5.5 5 9l-2 3H9l-2-3c0-3.5 1.5-7 5-9', C(12, 10, 1.5), 'M9 15l-2.5 3.5', 'M15 15l2.5 3.5', 'M12 15v5'],
+  globe: [C(12, 12, 9), 'M3 12h18', 'M12 3c2.5 2.5 3.5 5.5 3.5 9s-1 6.5-3.5 9c-2.5-2.5-3.5-5.5-3.5-9S9.5 5.5 12 3'],
+  devices: ['M3 5h14v10H3z', 'M1 19h18', 'M15 9h6v10h-6z'],
+  bug: ['M8 11a4 4 0 0 1 8 0v3a4 4 0 0 1-8 0z', 'M9.5 7.6a2.5 2.5 0 0 1 5 0', 'M12 11v7', 'M8 12.5H4.5', 'M16 12.5h3.5', 'M8.3 16.5l-3 2', 'M15.7 16.5l3 2', 'M8.6 9.2L5.5 7.5', 'M15.4 9.2l3.1-1.7', 'M10.4 5.4L9 3.6', 'M13.6 5.4L15 3.6'],
+  laptop: ['M5 5h14v10H5z', 'M2 19h20'],
+  smartphone: ['M7 3h10v18H7z', 'M11 18h2'],
+  at: [C(12, 12, 3.5), 'M15.5 12v1.5a2.5 2.5 0 0 0 5 0V12a8.5 8.5 0 1 0-3.4 6.8'],
+  cake: ['M4 12h16v8H4z', 'M4 15.5c2 1.5 3 1.5 4 0s2-1.5 4 0 3 1.5 4 0 2-1.5 4 0', 'M12 12V8', 'M12 3.5c1 1 1.5 1.8 0 3-1.5-1.2-1-2 0-3'],
+  block: [C(12, 12, 9), 'M5.6 5.6l12.8 12.8'],
   moon: ['M20.5 14.2A8.5 8.5 0 1 1 9.8 3.5a7 7 0 0 0 10.7 10.7z'],
   sun: [C(12, 12, 4), 'M12 2.5v2', 'M12 19.5v2', 'M2.5 12h2', 'M19.5 12h2', 'M5.3 5.3l1.4 1.4', 'M17.3 17.3l1.4 1.4', 'M5.3 18.7l1.4-1.4', 'M17.3 6.7l1.4-1.4']
 };
@@ -384,6 +402,16 @@ function Composer(props) {
     setValue(before + value.slice(caret[0] < 0 ? value.length : caret[0]));
     caret[1](-1);
   }
+  // поле растёт вместе с текстом (до max-height в CSS) и сжимается после отправки;
+  // сброс высоты и чтение scrollHeight — в одном кадре (иначе поле прыгает): осознанное исключение
+  useLayoutEffect(function () {
+    var el = inputRef.current;
+    if (!el) return;
+    forceMeasure(function () {
+      el.style.height = 'auto';
+      el.style.height = el.scrollHeight + 'px';
+    });
+  }, [value]);
   var id = props.id || 'rl-composer';
   return h('div', { class: cx('rl-composer-wrap', (props.className || props.class)) },
     h(Presence, { show: !!props.replyTo, exitMs: 160 },
@@ -396,12 +424,17 @@ function Composer(props) {
       h('div', { class: 'rl-composer-field' },
         h(IconButton, { icon: attach[0] ? 'close' : 'attach', label: attach[0] ? 'Закрыть вложения' : 'Прикрепить', active: attach[0], class: 'rl-attach-toggle', onClick: function () { attach[1](!attach[0]); } }),
         h('label', { for: id, class: 'rl-sr' }, 'Сообщение'),
-        h('input', {
-          id: id, ref: inputRef, type: 'text', value: value, placeholder: props.placeholder || 'Введите сообщение', autocomplete: 'off',
+        h('textarea', {
+          id: id, ref: inputRef, rows: 1, value: value, placeholder: props.placeholder || 'Введите сообщение', autocomplete: 'off',
           onInput: function (e) { setValue(e.target.value); caret[1](e.target.selectionStart); },
           onKeyDown: function (e) {
+            if (e.key === 'Enter' && (e.isComposing || e.keyCode === 229)) return;   // IME подтверждает ввод — не трогаем
             if (e.key === 'Enter' && mentionList && mentionList.length) { e.preventDefault(); pickMention(mentionList[0]); return; }
-            if (e.key === 'Enter') { e.preventDefault(); send(); }
+            if (e.key === 'Enter') {
+              // sendKey 'ctrlEnter': Enter — новая строка, Ctrl/⌘+Enter — отправка; иначе Enter отправляет, Shift+Enter — новая строка
+              var mod = e.ctrlKey || e.metaKey;
+              if (props.sendKey === 'ctrlEnter' ? mod : !e.shiftKey) { e.preventDefault(); send(); }   // иначе textarea сама вставит перенос
+            }
             if (e.key === 'Escape' && props.replyTo && props.onCancelReply) props.onCancelReply();
           }
         }),
@@ -645,11 +678,34 @@ function LazyImage(props) {
     vis[0] && props.src ? h('img', { class: 'rl-lazy-full', src: props.src, alt: props.alt || '', decoding: 'async', draggable: false, onLoad: function () { loaded[1](true); if (props.onLoad) props.onLoad(); } }) : null);
 }
 
+/* ---------- MediaPolicy: autoload of incoming media, set by the app per chat ----------
+   value: { photo: boolean, video: boolean } — false keeps the full image behind «Скачать» (thumb only).
+   No provider = load everything. Own (out) media is always shown: it is already local. */
+/** @type {import('preact').Context<{ photo?: boolean, video?: boolean } | null>} */
+var MediaPolicy = createContext(/** @type {{ photo?: boolean, video?: boolean } | null} */ (null));
+var mediaAsked = new Set();   // src the user asked to download in this tab: scrolling back does not hide it again
+function mediaHeld(policy, items, out) {
+  if (!policy || out) return false;
+  return items.some(function (it) {
+    if (!it.src || mediaAsked.has(it.src)) return false;
+    return it.kind === 'video' ? policy.video === false : policy.photo === false;
+  });
+}
+
 function MediaBubble(props) {
   var out = props.from === 'out';
   var items = props.items || [{ seed: props.seed || 0, kind: props.kind || 'image', duration: props.duration }];
   var album = items.length > 1;
-  var state = props.state || 'ready';
+  var policy = useContext(MediaPolicy), asked = useState(0);
+  var held = (props.state || 'ready') === 'ready' && mediaHeld(policy, items, out);
+  var state = held ? 'remote' : props.state || 'ready';
+  if (held) {
+    items = items.map(function (it) { return Object.assign({}, it, { src: undefined }); });
+    props = Object.assign({}, props, { onDownload: function () {
+      (props.items || []).forEach(function (it) { if (it.src) mediaAsked.add(it.src); });
+      asked[1](asked[0] + 1);
+    } });
+  }
   var extra = items.length - 4;
   function cell(it, i) {
     var last = album && i === 3 && extra > 0;
@@ -853,7 +909,8 @@ function PanelHeader(props) {
   return h('div', { class: 'rl-panel-head' },
     h(IconButton, { icon: props.icon || 'close', label: props.closeLabel || 'Закрыть', onClick: props.onClose }),
     h('h2', null, props.title),
-    props.action ? h(IconButton, { icon: props.action.icon, label: props.action.label, onClick: props.action.onClick }) : null);
+    props.action ? h(IconButton, { icon: props.action.icon, label: props.action.label, onClick: props.action.onClick }) : null,
+    props.actions ? props.actions.map(function (a, i) { return h(IconButton, { key: i, icon: a.icon, label: a.label, onClick: a.onClick, 'aria-haspopup': a.popup ? 'menu' : undefined }); }) : null);
 }
 function ProfileHeader(props) {
   return h('div', { class: 'rl-profile' },
@@ -866,11 +923,17 @@ function ActionTile(props) {
   return h('button', { type: 'button', class: 'rl-tile', onPointerDown: ripple, onClick: props.onClick },
     h('span', { class: 'rl-tile-icon' }, h(Icon, { name: props.icon, size: 24 })), h('span', null, props.label));
 }
+// Цветная плитка 32×32 с белой иконкой; color — blue|orange|red|gray|green|purple|pink
+function SettingsIcon(props) {
+  return h('span', { class: cx('rl-sicon', 'rl-sicon-' + (props.color || 'blue')), 'aria-hidden': 'true' }, h(Icon, { name: props.icon, size: 20, strokeWidth: 1.8 }));
+}
 function InfoRow(props) {
   var Tag = props.trailing && props.trailing.type === Switch ? 'div' : 'button';
   return h(Tag, { type: Tag === 'button' ? 'button' : undefined, class: cx('rl-inforow', props.danger && 'rl-inforow-danger'), onPointerDown: Tag === 'button' ? ripple : undefined, onClick: props.onClick },
-    h('span', { class: 'rl-inforow-icon' }, h(Icon, { name: props.icon, size: 24 })),
+    props.tile ? h(SettingsIcon, { icon: props.icon, color: props.tile })
+      : h('span', { class: 'rl-inforow-icon' }, h(Icon, { name: props.icon, size: 24 })),
     h('span', { class: 'rl-inforow-text' }, h('span', null, props.title), props.subtitle ? h('small', null, props.subtitle) : null),
+    props.value != null && props.value !== '' ? h('span', { class: 'rl-inforow-count rl-inforow-value' }, props.value) : null,
     props.count !== undefined ? h('span', { class: 'rl-inforow-count' }, props.count) : null,
     props.trailing || null);
 }
@@ -1024,6 +1087,25 @@ function EmptyState(props) {
           L('rl-empty-d2', { tag: 'rect', x: 72, y: 48, width: 54, height: 24, rx: 12 }))),
       h('g', { class: 'rl-empty-link-spark' }, spark(80, 60)),
       spark(132, 24, 'rl-empty-spark-2'), spark(26, 96, 'rl-empty-spark-3'))
+    : kind === 'contacts'
+    // двое: задний чуть выше и покачивается не в такт переднему; рядом подпрыгивает «+», вокруг мерцают искорки
+    ? h('svg', { class: 'rl-empty-art', viewBox: '0 0 160 120', 'aria-hidden': 'true' },
+      h('circle', { class: 'rl-empty-fill rl-empty-fill-soft', cx: 78, cy: 62, r: 46 }),
+      h('g', { class: 'rl-empty-float rl-empty-float-2' },
+        h('path', { class: 'rl-empty-fill rl-empty-fill-in', d: 'M30 88a26 26 0 0 1 52 0z' }),
+        h('circle', { class: 'rl-empty-fill rl-empty-fill-in', cx: 56, cy: 42, r: 13 }),
+        L('', { tag: 'circle', cx: 56, cy: 42, r: 13 }),
+        L('', { d: 'M30 88a26 26 0 0 1 52 0' })),
+      h('g', { class: 'rl-empty-float' },
+        h('path', { class: 'rl-empty-fill rl-empty-fill-out', d: 'M64 104a30 30 0 0 1 60 0z' }),
+        h('circle', { class: 'rl-empty-fill rl-empty-fill-out', cx: 94, cy: 52, r: 16 }),
+        L('rl-empty-d2', { tag: 'circle', cx: 94, cy: 52, r: 16 }),
+        L('rl-empty-d2', { d: 'M64 104a30 30 0 0 1 60 0' })),
+      h('g', { class: 'rl-empty-bob' },
+        h('circle', { class: 'rl-empty-fill rl-empty-fill-in', cx: 132, cy: 34, r: 12 }),
+        L('rl-empty-d3', { tag: 'circle', cx: 132, cy: 34, r: 12 }),
+        L('rl-empty-d3', { d: 'M132 28.5v11M126.5 34h11' })),
+      spark(28, 26), spark(146, 76, 'rl-empty-spark-2'), spark(20, 100, 'rl-empty-spark-3'))
     : kind === 'search'
     ? h('svg', { class: 'rl-empty-art', viewBox: '0 0 160 120', 'aria-hidden': 'true' },
       h('circle', { class: 'rl-empty-fill rl-empty-fill-in', cx: 70, cy: 56, r: 30 }),
@@ -1055,4 +1137,4 @@ function ScrollToBottom(props) {
 }
 
 
-export { peerTone, ArchivedRow, ReplyQuote, ReactionChips, cx, chain, ripple, reducedMotion, omit, fmtTime, makeWave, ICONS, Icon, Button, IconButton, Avatar, Badge, Chip, SearchField, ChatRow, ChatRowSkeleton, Bubble, MessageStatus, TypingIndicator, DateDivider, Composer, Banner, Modal, NavRail, Checkbox, Toast, Card, Steps, MediaArt, ProgressRing, Waveform, VoiceMessage, VoiceRecorder, MediaBubble, FileBubble, MediaThumb, MediaViewer, Switch, PanelHeader, ProfileHeader, ActionTile, InfoRow, ReadMore, Presence, useMinVisible, LazyImage, FlipList, SyncIndicator, LinearProgress, EmptyState, ScrollToBottom };
+export { peerTone, ArchivedRow, ReplyQuote, ReactionChips, cx, chain, ripple, reducedMotion, omit, fmtTime, makeWave, ICONS, Icon, Button, IconButton, Avatar, Badge, Chip, SearchField, ChatRow, ChatRowSkeleton, Bubble, MessageStatus, TypingIndicator, DateDivider, Composer, Banner, Modal, NavRail, Checkbox, Toast, Card, Steps, MediaArt, ProgressRing, Waveform, VoiceMessage, VoiceRecorder, MediaBubble, MediaPolicy, mediaHeld, FileBubble, MediaThumb, MediaViewer, Switch, PanelHeader, ProfileHeader, ActionTile, InfoRow, SettingsIcon, ReadMore, Presence, useMinVisible, LazyImage, FlipList, SyncIndicator, LinearProgress, EmptyState, ScrollToBottom };

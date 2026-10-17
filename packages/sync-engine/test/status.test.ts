@@ -314,3 +314,93 @@ test('sendFile: the blob waits in IndexedDB, uploads when online, the message ca
   const got = (await feedB.until((l) => l.length === 1))[0];
   expect(got).toMatchObject({ kind: 'photo', body: 'смотри', attachment: { w: 40, h: 30, mime: 'image/png', size: 4 } });
 });
+
+test('resetLocal wipes the cache and takes a fresh snapshot; unsent messages survive keepOutbox', async () => {
+  const a = await srv.login('a'), b = await srv.login('b');
+  const chatId = await srv.chat(a.token, [a.userId, b.userId]);
+  await sendMessage(b.userId, { chatId, clientId: crypto.randomUUID(), body: 'старое' });
+  const ea = await open(srv.config(a));
+  ea.connect();
+  await ea.whenIdle();
+  const list = watchInto(ea, { kind: 'chatList', limit: 50 });
+  await list.until((l) => l.length === 1);
+  ea.disconnect();
+  await ea.call({ type: 'sendMessage', chatId, body: 'не ушло' });
+  const st = watchInto(ea, { kind: 'status' });
+  await st.until((l) => l[0]?.outbox === 1);
+  await ea.call({ type: 'resetLocal', keepOutbox: true });
+  expect((await st.until((l) => l[0]?.hydrated === false))[0].outbox).toBe(1);   // кэш пуст, очередь цела
+  ea.connect();
+  await st.until((l) => l[0]?.hydrated === true && l[0].synced === true && l[0].outbox === 0);
+  await list.until((l) => l.length === 1);
+  const rows = await sql`select body from messages where chat_id = ${chatId} order by id`;
+  expect(rows.map((r: { body: string }) => r.body)).toEqual(['старое', 'не ушло']);
+});
+
+test('resetLocal without keepOutbox drops unsent messages; other clients of the host see the reset', async () => {
+  const a = await srv.login('a'), b = await srv.login('b');
+  const chatId = await srv.chat(a.token, [a.userId, b.userId]);
+  const ea = await open(srv.config(a));
+  ea.connect();
+  await ea.whenIdle();
+  const other = watchInto(ea, { kind: 'status' });   // «другая вкладка» — своя подписка на тот же движок
+  const list = watchInto(ea, { kind: 'chatList', limit: 50 });
+  await list.until((l) => l.length === 1);
+  ea.disconnect();
+  await ea.call({ type: 'sendMessage', chatId, body: 'потерять' });
+  await other.until((l) => l[0]?.outbox === 1);
+  await ea.call({ type: 'resetLocal', keepOutbox: false });
+  await other.until((l) => l[0]?.hydrated === false && l[0].outbox === 0);
+  await list.until((l) => l.length === 0);
+  ea.connect();
+  await other.until((l) => l[0]?.hydrated === true && l[0].synced === true);
+  await list.until((l) => l.length === 1);
+  const rows = await sql`select count(*)::int as n from messages where chat_id = ${chatId}`;
+  expect(rows[0].n).toBe(0);
+});
+
+test('resetLocal during the first snapshot waits for it, then re-snapshots (no wipe under live sync)', async () => {
+  const a = await srv.login('a'), b = await srv.login('b');
+  const chatId = await srv.chat(a.token, [a.userId, b.userId]);
+  await sendMessage(b.userId, { chatId, clientId: crypto.randomUUID(), body: 'один' });
+  const ea = await open(srv.config(a));
+  const list = watchInto(ea, { kind: 'chatList', limit: 50 });
+  const st = watchInto(ea, { kind: 'status' });
+  ea.connect();
+  await st.until((l) => l[0]?.online === true);   // hello ушёл, снимок идёт
+  await ea.call({ type: 'resetLocal', keepOutbox: true });
+  await st.until((l) => l[0]?.hydrated === true && l[0].synced === true);
+  await list.until((l) => l.length === 1);
+});
+
+test('resetLocal right after a send: the message is delivered exactly once, outbox not lost', async () => {
+  const a = await srv.login('a'), b = await srv.login('b');
+  const chatId = await srv.chat(a.token, [a.userId, b.userId]);
+  const ea = await open(srv.config(a));
+  ea.connect();
+  await ea.whenIdle();
+  const st = watchInto(ea, { kind: 'status' });
+  await ea.call({ type: 'sendMessage', chatId, body: 'раз' });
+  await ea.call({ type: 'resetLocal', keepOutbox: true });
+  await st.until((l) => l[0]?.hydrated === true && l[0].synced === true && l[0].outbox === 0);
+  await ea.whenIdle();
+  const rows = await sql`select body from messages where chat_id = ${chatId}`;
+  expect(rows.map((r: { body: string }) => r.body)).toEqual(['раз']);
+});
+
+test('resetLocal that times out replays the hello that arrived meanwhile, so sync resumes', async () => {
+  const a = await srv.login('a'), b = await srv.login('b');
+  const chatId = await srv.chat(a.token, [a.userId, b.userId]);
+  const ea = await open({ ...srv.config(a), resetWaitMs: 300 });
+  ea.connect();
+  await ea.whenIdle();
+  const list = watchInto(ea, { kind: 'chatList', limit: 50 });
+  await list.until((l) => l.length === 1);
+  (ea as unknown as { busy: number }).busy++;   // «идущая работа», которая не заканчивается
+  const reset = ea.call({ type: 'resetLocal', keepOutbox: true }).then(() => 'ok', (e: Error) => e.message);
+  ea.disconnect(); ea.connect();                 // hello придёт во время очистки
+  await sendMessage(b.userId, { chatId, clientId: crypto.randomUUID(), body: 'пока ждали' });
+  expect(await reset).toBe('reset_busy');
+  (ea as unknown as { busy: number }).busy--;
+  await list.until((l) => (l[0]?.last as { body: string } | null)?.body === 'пока ждали');
+});

@@ -17,15 +17,15 @@ function result(list: Item[]): Result {
 /** Место в списке — по более позднему из последнего сообщения и черновика (как в Telegram). */
 const sortAt = (c: LocalChat): string => (c.draft && c.draft.at > c.lastAt ? c.draft.at : c.lastAt);
 
-const chatItem = (c: LocalChat): Item => ({
-  key: 'c' + c.id, id: c.id, kind: c.kind, title: c.title, peerId: c.peerId, unread: c.unread, lastReadId: c.lastReadId, lastAt: c.lastAt,
+const chatItem = (c: LocalChat, title: string | null): Item => ({
+  key: 'c' + c.id, id: c.id, kind: c.kind, title, peerId: c.peerId, unread: c.unread, lastReadId: c.lastReadId, lastAt: c.lastAt,
   sortAt: sortAt(c), draft: c.draft?.text ?? null,
   last: c.last ? { key: c.last.key, id: c.last.id, senderId: c.last.senderId, body: c.last.body, status: c.last.status, createdAt: c.last.createdAt, deleted: !!c.last.deleted, kind: c.last.kind ?? 'text', attachmentName: c.last.attachment?.name ?? null } : null,
 });
 // элемент сообщения переиспользуется, пока сообщение не изменилось: дешёвая подпись вместо JSON.stringify
 // цитата — короткая копия исходного сообщения, если оно есть в кэше (видна, даже когда оригинал вне окна)
 type Quote = { id: number; sort: number; body: string; senderId: number } | null;
-const msgSig = (m: LocalMessage, q: Quote): string => `${m.id}|${m.status}|${m.sort}|${m.replyToId}|${m.body}|${m.editedAt ?? ''}|${m.deleted ? 1 : 0}|${m.reactions?.map((r) => r.userId + r.emoji).join(',') ?? ''}|${m.attachment ? m.attachment.id + ':' + (m.progress ?? '') : ''}|${q ? q.id + ':' + q.body : ''}`;
+const msgSig = (m: LocalMessage, q: Quote): string => `${m.id}|${m.status}|${m.sort}|${m.replyToId}|${m.body}|${m.editedAt ?? ''}|${m.deleted ? 1 : 0}|${m.reactions?.map((r) => r.userId + r.emoji).join(',') ?? ''}|${m.attachment ? m.attachment.id + ':' + (m.progress ?? '') : ''}|${q ? q.id + ':' + q.body : ''}|${m.error ?? ''}`;
 const msgCache = new WeakMap<LocalMessage, { sig: string; item: Item }>();
 const messageItem = (m: LocalMessage, q: Quote): { item: Item; sig: string } => {
   const sig = msgSig(m, q);
@@ -58,7 +58,7 @@ export function computeQuery(store: Store, q: Query): Result {
   switch (q.kind) {
     case 'chatList': {
       const chats = [...store.chats.values()].sort((a, b) => { const x = sortAt(a), y = sortAt(b); return x < y ? 1 : x > y ? -1 : b.id - a.id; });
-      return result(chats.slice(0, q.limit).map((c) => ({ ...chatItem(c), typing: store.typing.has(c.id) })));
+      return result(chats.slice(0, q.limit).map((c) => ({ ...chatItem(c, store.titleOf(c)), typing: store.typing.has(c.id) })));
     }
     case 'messages': {
       // только окно: бинарный поиск по отсортированному кэшу, подписи — без сериализации
@@ -91,6 +91,14 @@ export function computeQuery(store: Store, q: Query): Result {
     }
     case 'status':
     case 'presence':
+    case 'me':
+    case 'user':
+    case 'ops':
+    case 'contacts':
+    case 'settings':
+    case 'blocked':
+    case 'devStats':
+    case 'devLog':
       throw new Error(q.kind + ' is computed by the engine');
   }
 }
@@ -98,7 +106,7 @@ export function computeQuery(store: Store, q: Query): Result {
 /** Задевает ли изменение этих чатов результат подписки. */
 export function affects(q: Query, touched: Set<number>): boolean {
   if (!touched.size) return false;
-  if (q.kind === 'status') return false;
+  if (q.kind === 'status' || q.kind === 'me' || q.kind === 'user' || q.kind === 'ops' || q.kind === 'contacts' || q.kind === 'settings' || q.kind === 'blocked' || q.kind === 'devStats' || q.kind === 'devLog') return false;   // у них свои флаги в движке
   return q.kind === 'messages' ? touched.has(q.chatId) : true;
 }
 

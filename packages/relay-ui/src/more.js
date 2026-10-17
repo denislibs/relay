@@ -9,26 +9,36 @@ import { cx, ripple, reducedMotion, Presence, Icon, IconButton, Avatar, Badge, B
 /* ---------- Menu: popover list (message menu, chat context menu, header menu) ---------- */
 function Menu(props) {
   var ref = useRef(null);
-  var items = props.items || [];
+  var sub = useState(null);   // открытый второй уровень: { label, items } (пункт с submenu)
+  var level = sub[0];
+  var items = level ? [{ icon: 'chevronLeft', label: 'Назад', back: true }, '-'].concat(level.items) : (props.items || []);
   useEffect(function () {
     var first = ref.current && ref.current.querySelector('[role="menuitem"]');
     if (first) first.focus();
-  }, []);
+  }, [!!level]);
   function onKey(e) {
     var list = Array.prototype.slice.call(ref.current.querySelectorAll('[role="menuitem"]'));
     var i = list.indexOf(document.activeElement);
     if (e.key === 'ArrowDown') { e.preventDefault(); list[(i + 1) % list.length].focus(); }
     else if (e.key === 'ArrowUp') { e.preventDefault(); list[(i - 1 + list.length) % list.length].focus(); }
-    else if (e.key === 'Escape' && props.onClose) props.onClose();
+    else if (e.key === 'Escape') {
+      if (level) { e.stopPropagation(); sub[1](null); } else if (props.onClose) props.onClose();
+    }
   }
   var style = props.x !== undefined ? { left: props.x, top: props.y } : null;
-  return h('div', { ref: ref, class: cx('rl-menu', props.origin && 'rl-menu-' + props.origin), style: style, role: 'menu', 'aria-label': props.label || 'Меню', onKeyDown: onKey },
-    props.header || null,
+  return h('div', { ref: ref, class: cx('rl-menu', props.origin && 'rl-menu-' + props.origin), style: style, role: 'menu', 'aria-label': level ? level.label : (props.label || 'Меню'), onKeyDown: onKey },
+    level ? null : (props.header || null),
     items.map(function (it, i) {
       if (it === '-') return h('hr', { key: 'sep' + i, class: 'rl-menu-sep' });
-      return h('button', { key: it.label, type: 'button', role: 'menuitem', class: cx('rl-menu-item', it.danger && 'rl-menu-danger'), style: { '--i': i }, onPointerDown: ripple,
-        onClick: function () { if (it.onClick) it.onClick(); if (props.onClose) props.onClose(); } },
+      return h('button', { key: (level ? 's' : '') + it.label, type: 'button', role: 'menuitem', 'aria-haspopup': it.submenu ? 'menu' : undefined, class: cx('rl-menu-item', it.danger && 'rl-menu-danger'), style: { '--i': i }, onPointerDown: ripple,
+        onClick: function () {
+          if (it.back) { sub[1](null); return; }
+          if (it.submenu) { sub[1]({ label: it.label, items: it.submenu }); return; }
+          if (it.onClick) it.onClick();
+          if (props.onClose) props.onClose();
+        } },
         it.icon ? h(Icon, { name: it.icon, size: 20 }) : null, h('span', null, it.label),
+        it.submenu ? h(Icon, { name: 'chevronRight', size: 18 }) : null,
         it.hint ? h('kbd', null, it.hint) : null);
     }));
 }
@@ -169,34 +179,41 @@ function Highlight(props) {
   return parts;
 }
 
-/* ---------- ContactPicker: new chat / new group ---------- */
+/* ---------- ContactPicker: new chat / new group / people for a privacy exception ----------
+   Ключ человека — c.id (если задан), иначе имя; selected и onChange — массивы ключей. empty — текст, когда искать не в ком. */
 function ContactPicker(props) {
   var q = useState(''), sel = useState(props.selected || []);
   var multi = !!props.multi;
-  var list = (props.contacts || []).filter(function (c) { return c.name.toLowerCase().indexOf(q[0].toLowerCase()) >= 0; });
-  function toggle(c) {
-    if (!multi) { if (props.onPick) props.onPick(c); return; }
-    var has = sel[0].indexOf(c.name) >= 0;
-    var next = has ? sel[0].filter(function (n) { return n !== c.name; }) : sel[0].concat([c.name]);
+  var all = props.contacts || [];
+  var keyOf = function (c) { return c.id != null ? c.id : c.name; };
+  var byKey = {};
+  all.forEach(function (c) { byKey[keyOf(c)] = c; });
+  var needle = q[0].trim().toLowerCase();
+  var list = all.filter(function (c) { return c.name.toLowerCase().indexOf(needle) >= 0 || (c.about && String(c.about).toLowerCase().indexOf(needle) >= 0); });
+  function toggle(k) {
+    if (!multi) { if (props.onPick) props.onPick(byKey[k] || { name: k }); return; }
+    var has = sel[0].indexOf(k) >= 0;
+    var next = has ? sel[0].filter(function (n) { return n !== k; }) : sel[0].concat([k]);
     sel[1](next); if (props.onChange) props.onChange(next);
   }
   return h('div', { class: 'rl-picker' },
-    multi && sel[0].length ? h('div', { class: 'rl-picker-chips' }, sel[0].map(function (n) {
-      return h('button', { key: n, type: 'button', class: 'rl-picker-chip', onClick: function () { toggle({ name: n }); }, 'aria-label': 'Убрать ' + n },
-        h(Avatar, { name: n, size: 24 }), n, h(Icon, { name: 'close', size: 14 }));
+    multi && sel[0].length ? h('div', { class: 'rl-picker-chips' }, sel[0].map(function (k) {
+      var name = byKey[k] ? byKey[k].name : String(k);
+      return h('button', { key: k, type: 'button', class: 'rl-picker-chip', onClick: function () { toggle(k); }, 'aria-label': 'Убрать ' + name },
+        h(Avatar, { name: name, tone: byKey[k] ? byKey[k].tone : undefined, size: 24 }), name, h(Icon, { name: 'close', size: 14 }));
     })) : null,
     h('div', { class: 'rl-search rl-picker-search' },
-      h('label', { for: 'rl-picker-q', class: 'rl-sr' }, 'Поиск контактов'),
+      h('label', { for: 'rl-picker-q', class: 'rl-sr' }, props.searchLabel || 'Поиск контактов'),
       h(Icon, { name: 'search', size: 18 }),
-      h('input', { id: 'rl-picker-q', type: 'search', placeholder: 'Имя или номер', autocomplete: 'off', value: q[0], onInput: function (e) { q[1](e.target.value); } })),
+      h('input', { id: 'rl-picker-q', type: 'search', placeholder: props.placeholder || 'Имя или номер', autocomplete: 'off', value: q[0], onInput: function (e) { q[1](e.target.value); } })),
     h('div', { class: 'rl-picker-list', role: multi ? 'group' : 'list' },
       list.length ? list.map(function (c) {
-        var on = sel[0].indexOf(c.name) >= 0;
-        return h('button', { key: c.name, type: 'button', class: cx('rl-row rl-picker-row', on && 'rl-picker-on'), onPointerDown: ripple, onClick: function () { toggle(c); }, role: multi ? 'checkbox' : undefined, 'aria-checked': multi ? String(on) : undefined },
-          h(Avatar, { name: c.name, online: c.online }),
+        var k = keyOf(c), on = sel[0].indexOf(k) >= 0;
+        return h('button', { key: k, type: 'button', class: cx('rl-row rl-picker-row', on && 'rl-picker-on'), onPointerDown: ripple, onClick: function () { toggle(k); }, role: multi ? 'checkbox' : undefined, 'aria-checked': multi ? String(on) : undefined },
+          h(Avatar, { name: c.name, tone: c.tone, online: c.online }),
           h('span', { class: 'rl-row-main' }, h('span', { class: 'rl-row-name' }, c.name), h('span', { class: 'rl-row-preview' }, c.about || '')),
           multi ? h('span', { class: 'rl-picker-check', 'aria-hidden': 'true' }, h(Icon, { name: 'check', size: 14, strokeWidth: 3 })) : null);
-      }) : h('div', { class: 'rl-picker-empty' }, 'Никого не нашли по запросу «' + q[0] + '»')));
+      }) : h('div', { class: 'rl-picker-empty' }, needle || !props.empty ? 'Никого не нашли по запросу «' + q[0] + '»' : props.empty)));
 }
 
 /* ---------- CallRow ---------- */
@@ -507,13 +524,16 @@ function patternColor(colors) {
   var f = function (k) { var x = (k + hue / 60) % 6; return Math.round(255 * (val - val * sat * Math.max(0, Math.min(x, 4 - x, 1)))); };
   return 'rgba(' + f(5) + ',' + f(3) + ',' + f(1) + ',0.4)';
 }
-var patternCache = {};
+var patternCache = Object.create(null);
 function buildPattern(set, stroke) {
   set = set || 'catsAndDogs';
   stroke = stroke || '#000';
   var cacheKey = set + '|' + stroke;
-  if (patternCache[cacheKey]) return patternCache[cacheKey];
-  var names = PATTERN_SETS[set] || PATTERN_SETS.catsAndDogs;
+  // ключи — из localStorage пользователя: только собственные свойства (не __proto__ / constructor)
+  if (Object.prototype.hasOwnProperty.call(patternCache, cacheKey)) return patternCache[cacheKey];
+  if (!Object.prototype.hasOwnProperty.call(PATTERN_SETS, set)) set = 'catsAndDogs';
+  var names = PATTERN_SETS[set];
+  cacheKey = set + '|' + stroke;
   // deterministic scatter on a 420×420 tile (same tile size as the reference settings): 10×10 staggered, jittered cells
   var out = [], seed = set.length * 7 + 11, n = 0, G = 10, cell = 420 / G;
   function rnd() { seed = (seed * 9301 + 49297) % 233280; return seed / 233280; }
@@ -537,8 +557,9 @@ function buildPattern(set, stroke) {
 }
 var wallpapers = [];
 /* Shift every mounted wallpaper's gradient one step — call on send / receive, like Telegram. */
+function wpMotion() { return !reducedMotion() && document.documentElement.dataset.wpanim !== '0'; }
 function nudgeWallpaper() {
-  if (reducedMotion()) return;
+  if (!wpMotion()) return; // «Анимация обоев» выключена — градиент стоит
   wallpapers.forEach(function (w) { var end = beginHeavyAnimation(700); w.toNextPosition(end); });
 }
 function readTheme(el) {
@@ -550,48 +571,88 @@ function readTheme(el) {
   if (m) dark = (parseInt(m[1], 16) + parseInt(m[2], 16) + parseInt(m[3], 16)) / 3 < 96;
   return { colors: colors, dark: dark, ink: cs.getPropertyValue('--wallpaper-pattern').trim() || '#000000' };
 }
+var TW_VARS = ['--tw-image', '--tw-size', '--tw-opacity', '--tw-blur', '--tw-background'];
+/* Снимок текущих обоев поверх хоста: после смены цветов/узора тает за 300 мс (кроссфейд без вспышки). */
+function crossfadeSnapshot(el) {
+  var cv = el.querySelector('canvas.tw-canvas');
+  if (!cv || !cv.width) return;
+  var snap = document.createElement('div');
+  snap.className = 'rl-tw-snap';
+  TW_VARS.forEach(function (v) { snap.style.setProperty(v, el.style.getPropertyValue(v)); });
+  var copy = document.createElement('canvas');
+  copy.width = cv.width; copy.height = cv.height; copy.className = cv.className;
+  try { copy.getContext('2d').drawImage(cv, 0, 0); } catch (e) { return; }
+  snap.appendChild(copy);
+  var pat = el.querySelector('.tw-pattern');
+  if (pat) snap.appendChild(pat.cloneNode(false));
+  el.appendChild(snap);
+  var end = beginHeavyAnimation(320);
+  requestAnimationFrame(function () { requestAnimationFrame(function () { snap.style.opacity = '0'; }); });
+  setTimeout(function () { snap.remove(); end(); }, 340);
+}
+/* props: pattern (имя набора | false), colors (4 цвета | null = из темы), blur (bool).
+   Смена props применяется на лету; первое применение и смена темы — без снимка. */
 function Wallpaper(props) {
   var host = useRef(null);
+  var latest = useRef(props);
+  latest.current = props;
+  var rerun = useRef(null);
   useEffect(function () {
-    var el = host.current, wp = null, theme = null;
-    function apply() {
+    var el = host.current, wp = null, theme = null, lastKey = '';
+    function apply(animate) {
       requestMeasure(function () {
+        var P = latest.current;
+        // идёт смена темы: токены на <html> смешиваются (rgba, не hex) — применим по снятию класса
+        if (document.documentElement.classList.contains('rl-theme-switching')) return;
         var t = readTheme(el);
-        if (theme && t.dark === theme.dark && t.colors.join() === theme.colors.join()) return;
+        // props.dark — тема, с которой отрисован App; DOM переключился раньше рендера: ждём props (эффект по ним применит один раз)
+        if (typeof P.dark === 'boolean' && P.dark !== t.dark) return;
+        var custom = P.colors && P.colors.length >= 4 ? P.colors.slice(0, 4) : null;
+        var colors = custom || t.colors;
+        var key = [t.dark, colors.join(), P.pattern].join('|');
+        if (theme && key === lastKey) return;
         var modeChanged = theme && t.dark !== theme.dark;
-        theme = t;
+        var themeSwitch = !theme || modeChanged || (!custom && t.colors.join() !== theme.colors.join());
+        theme = t; lastKey = key;
         requestMutation(function () {
           // светлая ↔ тёмная: узор меняет режим (маска ↔ рисунок), а updatePattern режим маски не снимает — собираем заново
           if (wp && modeChanged) { wallpapers.splice(wallpapers.indexOf(wp), 1); wp.dispose(); wp = null; }
-          var set = typeof props.pattern === 'string' ? props.pattern : 'catsAndDogs';
-          var pattern = props.pattern === false ? undefined : t.dark
-            ? { image: buildPattern(set), mask: true, background: t.ink, size: '420px', opacity: props.maskOpacity || 0.55 }
+          var set = typeof P.pattern === 'string' ? P.pattern : 'catsAndDogs';
+          var pattern = P.pattern === false ? undefined : t.dark
+            ? { image: buildPattern(set), mask: true, background: t.ink, size: '420px', opacity: P.maskOpacity || 0.55 }
             // светлая тема: узор нарисован цветом, выведенным из фона (прозрачность уже в цвете)
-            : { image: buildPattern(set, patternColor(t.colors)), mask: false, background: 'transparent', size: '420px', opacity: 1, blur: 0 };
+            : { image: buildPattern(set, patternColor(colors)), mask: false, background: 'transparent', size: '420px', opacity: 1, blur: 0 };
           if (!wp) {
-            wp = new TWallpaper(el, { colors: t.colors, fps: 60, tails: 90, animate: !!props.animate && !reducedMotion(), scrollAnimate: !!props.scrollAnimate && !reducedMotion(), pattern: pattern });
+            wp = new TWallpaper(el, { colors: colors, fps: 60, tails: 90, animate: !!P.animate && wpMotion(), scrollAnimate: !!P.scrollAnimate && wpMotion(), pattern: pattern });
             wp.init();
             wallpapers.push(wp);
           } else {
-            wp.updateColors(t.colors);
+            if (animate && !themeSwitch && !reducedMotion()) crossfadeSnapshot(el);
+            wp.updateColors(colors);
+            if (typeof wp.drawGradient === 'function') wp.drawGradient();
             if (pattern) wp.updatePattern(pattern);
           }
         });
       });
     }
-    apply();
+    rerun.current = apply;
+    apply(false);
     // follow theme switches: data-theme on <html> and the OS setting
-    var mo = new MutationObserver(apply);
+    var mo = new MutationObserver(function () { apply(false); });
     mo.observe(document.documentElement, { attributes: true, attributeFilter: ['data-theme', 'class'] });
     var mq = window.matchMedia ? window.matchMedia('(prefers-color-scheme: dark)') : null;
-    if (mq && mq.addEventListener) mq.addEventListener('change', apply);
+    var onMq = function () { apply(false); };
+    if (mq && mq.addEventListener) mq.addEventListener('change', onMq);
     return function () {
       mo.disconnect();
-      if (mq && mq.removeEventListener) mq.removeEventListener('change', apply);
+      rerun.current = null;
+      if (mq && mq.removeEventListener) mq.removeEventListener('change', onMq);
       if (wp) { wallpapers.splice(wallpapers.indexOf(wp), 1); wp.dispose(); }
     };
   }, []);
-  return h('div', { ref: host, class: 'rl-tw', 'aria-hidden': 'true' });
+  var colorsKey = props.colors ? props.colors.join() : '';
+  useEffect(function () { if (rerun.current) rerun.current(true); }, [props.pattern, colorsKey, props.dark]);
+  return h('div', { ref: host, class: cx('rl-tw', props.blur && 'rl-tw-blur'), 'aria-hidden': 'true' });
 }
 
 /* =====================================================================
@@ -660,12 +721,15 @@ function FloatShell(props) {
   // начальная ширина — один раз; дальше --side-w ведёт только ручка (иначе каждый рендер затирал бы перетаскивание)
   useLayoutEffect(function () { if (props.sideWidth && ref.current) ref.current.style.setProperty('--side-w', props.sideWidth + 'px'); }, []);
   return h('div', { ref: ref, class: cx('rl-shell rl-wallpaper', props.wallpaper !== false && 'rl-shell-tw', props.class), style: props.style },
-    props.wallpaper !== false ? h(Wallpaper, { pattern: props.pattern }) : null,
+    props.wallpaper !== false ? h(Wallpaper, { pattern: props.pattern, colors: props.wallpaperColors, blur: props.wallpaperBlur, dark: props.wallpaperDark }) : null,
     props.rail || null,
     props.sidebar ? h('div', { class: 'rl-shell-side' }, props.sidebar,
       props.onSideResize ? h(SideResizer, { min: props.sideMin, max: props.sideMax, onChange: props.onSideResize }) : null) : null,
     h('div', { class: 'rl-shell-main' }, props.children),
-    props.aside || null);
+    props.aside || null,
+    // слой приватности экрана: виден только при html[data-screen-blur]; клик снимает размытие (логика — в приложении)
+    h('div', { class: 'rl-shell-veil', role: 'button', 'aria-label': 'Нажмите, чтобы показать', tabindex: -1 },
+      h('span', { class: 'rl-shell-veil-card' }, h(Icon, { name: 'lock', size: 28 }), h('span', null, 'Нажмите, чтобы показать'))));
 }
 
 /* ---------- SidebarCard: header, folder tabs, scrolling body, FAB that hides on scroll down ---------- */
@@ -702,7 +766,7 @@ function SidebarHeader(props) {
       ? h(IconButton, { icon: 'arrowLeft', label: 'Назад', onClick: props.onBack, class: 'rl-sidehead-back' })
       : h(IconButton, { icon: 'menu', label: 'Меню', onClick: props.onMenu }),
     h(SearchField, { id: props.searchId || 'rl-side-search', placeholder: props.placeholder || 'Поиск', status: props.status, value: props.value, onInput: props.onSearch, class: 'rl-sidehead-search' }),
-    props.trailing !== undefined ? props.trailing : props.me ? h('button', { type: 'button', class: 'rl-sidehead-me', 'aria-label': 'Профиль', onClick: props.onMe }, h(Avatar, { name: props.me, size: 36 })) : null);
+    props.trailing !== undefined ? props.trailing : props.me ? h('button', { type: 'button', class: 'rl-sidehead-me', 'aria-label': 'Профиль', onClick: props.onMe }, h(Avatar, { name: props.me, tone: props.meTone, size: 36 })) : null);
 }
 
 /* ---------- FolderTabs: pills with counters, one sliding indicator (measure → mutate) ---------- */

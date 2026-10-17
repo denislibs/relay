@@ -1,5 +1,9 @@
 import type { Message, Update } from '@relay/protocol';
 import { getAll, getByChat, write, type WriteBatch } from './idb';
+import { applyUserUpdated, ProfileCache } from './profile';
+import { applyContactsChanged, ContactsCache } from './contacts';
+import { SettingsCache } from './settings';
+import { applyBlocksChanged, BlocksCache } from './blocks';
 import { PENDING_BASE, type LocalChat, type LocalMessage, type OutboxEntry } from './types';
 
 export interface ChatSummary {
@@ -36,6 +40,16 @@ export class Store {
   dialogsDone = false;
   /** чаты, изменившиеся с последнего прохода подписок */
   touched = new Set<number>();
+  /** свой профиль и кэш чужих (profile.ts) */
+  profile!: ProfileCache;
+  /** контакты (contacts.ts) */
+  contacts!: ContactsCache;
+  /** настройки аккаунта (settings.ts) */
+  settings!: SettingsCache;
+  /** чёрный список (blocks.ts) */
+  blocks!: BlocksCache;
+  /** название чата для списка; движок подставляет контактное имя с учётом очереди операций */
+  titleOf: (c: LocalChat) => string | null = (c) => c.title;
 
   private messages = new Map<number, Map<string, LocalMessage>>();
   private loaded = new Set<number>();
@@ -45,6 +59,9 @@ export class Store {
   private dirtyReads = new Set<number>();
   private dirtyMeta = false;
   private seqAtFlush = 0;
+
+  /** dev: запись в IDB прошла (сколько ключей, мс) — журнал движка */
+  onFlush: ((keys: number, ms: number) => void) | null = null;
 
   private constructor(private db: IDBDatabase, readonly userId: number) {}
 
@@ -61,6 +78,10 @@ export class Store {
     s.dialogsAt = meta.find((m) => m.k === 'dialogsAt')?.v ?? 0;
     s.dialogsId = meta.find((m) => m.k === 'dialogsId')?.v ?? 0;
     s.dialogsDone = !!meta.find((m) => m.k === 'dialogsDone')?.v;
+    s.profile = await ProfileCache.load(db, userId, meta as { k: string; v: unknown }[]);
+    s.contacts = ContactsCache.load(meta as { k: string; v: unknown }[]);
+    s.settings = SettingsCache.load(meta as { k: string; v: unknown }[]);
+    s.blocks = BlocksCache.load(meta as { k: string; v: unknown }[]);
     // чаты с неотправленным — сразу в память, чтобы черновики были видны
     for (const chatId of new Set(outbox.map((o) => o.chatId))) await s.loadChatMessages(chatId);
     return s;
@@ -137,7 +158,8 @@ export class Store {
 
   // ---------- изменения с сервера ----------
 
-  applyUpdate(u: Update): void {
+  /** seq — номер записи журнала (нужен профилю, чтобы старая запись не откатила свежий ответ). */
+  applyUpdate(u: Update, seq?: number): void {
     switch (u.type) {
       case 'newMessage':
         this.setTyping(u.message.chatId, u.message.senderId, false); // написал — уже не «печатает»
@@ -148,6 +170,11 @@ export class Store {
       case 'messageEdited': return this.patchMessage(u.chatId, u.id, { body: u.body, editedAt: u.editedAt });
       case 'messageDeleted': return this.patchMessage(u.chatId, u.id, { body: '', deleted: true, reactions: [] });
       case 'reactions': return this.patchMessage(u.chatId, u.id, { reactions: u.reactions });
+      case 'userUpdated': return applyUserUpdated(this, u.user, seq);
+      case 'contactsChanged': return applyContactsChanged(this, u, seq);
+      case 'settingsChanged': this.settings.apply(u.settings, seq); return;
+      case 'privacyChanged': this.settings.applyPrivacy(u.rules, seq); return;
+      case 'blocksChanged': return applyBlocksChanged(this, u, seq);
     }
   }
 
@@ -252,6 +279,7 @@ export class Store {
       body: o.body, replyToId: o.replyToId, createdAt: new Date(o.createdAt).toISOString(),
       status: o.failed ? 'failed' : 'pending', sort: PENDING_BASE + o.createdAt,
       kind: o.attachment ? o.attachment.kind : 'text', attachment: o.attachment ?? null, progress: o.attachment && !o.attachment.id ? 0 : undefined,
+      ...(o.failed && o.error ? { error: o.error } : {}),
     });
   }
 
@@ -267,23 +295,48 @@ export class Store {
     this.markChat(chat);
   }
 
-  fail(clientId: string): void {
+  /** Сервер отказал (или отправить нечего). error — код отказа (blocked — собеседник заблокировал отправителя). */
+  fail(clientId: string, error?: string): void {
     const o = this.outbox.get(clientId);
     if (!o) return;
     o.failed = true;
+    if (error) o.error = error; else delete o.error;
     this.dirtyOutbox.add(clientId);
     const m = this.messages.get(o.chatId)?.get(clientId);
-    if (m) this.putMessage({ ...m, status: 'failed' });
+    if (m) this.putMessage({ ...m, status: 'failed', ...(error ? { error } : {}) });
   }
 
   unfail(clientId: string): boolean {
     const o = this.outbox.get(clientId);
     if (!o || !o.failed) return false;
     o.failed = false;
+    delete o.error;
     this.dirtyOutbox.add(clientId);
     const m = this.messages.get(o.chatId)?.get(clientId);
-    if (m) this.putMessage({ ...m, status: 'pending' });
+    if (m) { const { error: _e, ...rest } = m; this.putMessage({ ...rest, status: 'pending' }); }
     return true;
+  }
+
+  /** dev «Отбросить failed»: неотправленные с отказом — из очереди и из ленты. Строки сообщений в IDB удаляет движок. */
+  discardFailed(): string[] {
+    const ids: string[] = [];
+    for (const o of [...this.outbox.values()]) {
+      if (!o.failed) continue;
+      ids.push(o.clientId);
+      this.outbox.delete(o.clientId);
+      this.dirtyOutbox.add(o.clientId);
+      this.dirtyMessages.delete(o.clientId);
+      const map = this.messages.get(o.chatId);
+      map?.delete(o.clientId);
+      const chat = this.chats.get(o.chatId);
+      if (chat?.last?.key === o.clientId) {
+        let last: LocalMessage | null = null;
+        for (const m of map?.values() ?? []) if (!last || m.sort > last.sort) last = m;
+        chat.last = last;
+      }
+      if (chat) this.markChat(chat); else this.touch(o.chatId);
+    }
+    return ids;
   }
 
   /** Файл загружен — вложению неотправленного сообщения есть id (переживёт перезагрузку в outbox). */
@@ -335,20 +388,24 @@ export class Store {
   }
 
   /** Сервер пересоздал базу (другое поколение): выбросить всё — чаты, сообщения, очередь, указатели — и IDB тоже. */
-  async wipe(epoch: string): Promise<void> {
+  async wipe(epoch: string | null, keep: { outbox?: boolean } = {}): Promise<void> {
+    // «оставить неотправленное»: очередь отправки, её файлы и очередь операций переживают очистку
+    const saved = keep.outbox ? [...this.outbox.values()] : [];
     for (const id of this.chats.keys()) this.touch(id);
     this.chats.clear(); this.messages.clear(); this.loaded.clear(); this.sorted.clear(); this.ids.clear();
-    this.outbox.clear(); this.pendingReads.clear();
+    this.outbox.clear(); this.pendingReads.clear(); this.profile.reset(); this.contacts.reset(); this.settings.reset(); this.blocks.reset();
     this.dirtyChats.clear(); this.dirtyMessages.clear(); this.dirtyOutbox.clear(); this.dirtyReads.clear();
     this.lastSeq = this.seqAtFlush = 0;
     this.hydrated = false;
     this.dialogsAt = 0; this.dialogsId = 0; this.dialogsDone = false;
+    this.pendingDrafts.clear();   // черновики жили в стёртых чатах: пустой текст на сервер не отправляем
     this.epoch = epoch;
     const db = this.db as IDBDatabase;
-    const names = ['chats', 'messages', 'outbox', 'pendingReads', 'meta'];
+    const names = keep.outbox ? ['chats', 'messages', 'outbox', 'pendingReads', 'meta', 'users'] : ['chats', 'messages', 'outbox', 'pendingReads', 'meta', 'users', 'ops', 'blobs'];
     const t = db.transaction(names, 'readwrite');
     for (const n of names) t.objectStore(n).clear();
     await new Promise<void>((res, rej) => { t.oncomplete = () => res(); t.onerror = () => rej(t.error); });
+    for (const o of saved) this.addPending(o);
     this.dirtyMeta = true;
     await this.flush();
   }
@@ -390,6 +447,7 @@ export class Store {
   // ---------- сохранение ----------
 
   async flush(): Promise<void> {
+    const t0 = Date.now();
     const batch: WriteBatch = { put: {}, del: {} };
     if (this.clearPersistedMessages) {
       // сообщения удаляются отдельной транзакцией до записи новых
@@ -407,10 +465,25 @@ export class Store {
     batch.put.pendingReads = [...this.dirtyReads].filter((c) => this.pendingReads.has(c)).map((c) => ({ chatId: c, upToId: this.pendingReads.get(c) }));
     batch.del.pendingReads = [...this.dirtyReads].filter((c) => !this.pendingReads.has(c));
     if (this.dirtyMeta || this.lastSeq !== this.seqAtFlush) batch.put.meta = [{ k: 'lastSeq', v: this.lastSeq }, { k: 'hydrated', v: this.hydrated ? 1 : 0 }, { k: 'dialogsAt', v: this.dialogsAt }, { k: 'dialogsId', v: this.dialogsId }, { k: 'dialogsDone', v: this.dialogsDone ? 1 : 0 }, ...(this.epoch ? [{ k: 'epoch', v: this.epoch as unknown as number }] : [])];
+    const prof = this.profile.collect();
+    if (prof.me) batch.put.meta = [...(batch.put.meta ?? []), prof.me];
+    if (prof.users.length) batch.put.users = prof.users;
+    const contacts = this.contacts.collect();
+    if (contacts) batch.put.meta = [...(batch.put.meta ?? []), contacts];
+    const settings = this.settings.collect();
+    if (settings) batch.put.meta = [...(batch.put.meta ?? []), settings];
+    const blocks = this.blocks.collect();
+    if (blocks) batch.put.meta = [...(batch.put.meta ?? []), blocks];
     this.dirtyChats.clear(); this.dirtyMessages.clear(); this.dirtyOutbox.clear(); this.dirtyReads.clear(); this.dirtyMeta = false;
     const seq = this.lastSeq;
     await write(this.db, batch);
     this.seqAtFlush = seq;
+    if (this.onFlush) {
+      let keys = 0;
+      for (const v of Object.values(batch.put)) keys += v?.length ?? 0;
+      for (const v of Object.values(batch.del)) keys += v?.length ?? 0;
+      if (keys) this.onFlush(keys, Date.now() - t0);
+    }
   }
 
   // ---------- внутреннее ----------
@@ -442,11 +515,13 @@ export class Store {
     this.markChat(chat);
   }
 
-  private markChat(c: LocalChat): void {
+  markChat(c: LocalChat): void {
     this.dirtyChats.add(c.id);
     this.touch(c.id);
   }
 
+  /** Строка чата в подписках пересчитается (название зависит не только от самого чата). */
+  retouch(chatId: number): void { this.touch(chatId); }
   private touch(chatId: number): void { this.touched.add(chatId); this.sorted.delete(chatId); this.ids.delete(chatId); }
 
   /** Дочитали до конца — 0; иначе вычитаем известные чужие сообщения из прочитанного диапазона (from, to]. */

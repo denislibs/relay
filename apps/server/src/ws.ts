@@ -15,11 +15,13 @@ export async function handleFrame(userId: number, frame: ClientFrame, publish: (
     switch (frame.op) {
       case 'typing': {
         // участникам, кроме себя; не участник — молча игнорируем (это не данные, ответа нет)
-        const rows = await sql`select user_id from chat_members where chat_id = ${frame.chatId}`;
-        const members = rows.map((r) => r.user_id as number);
-        if (!members.includes(userId)) return [];
+        // кто заблокировал отправителя, «печатает…» от него не видит
+        const rows = await sql`
+          select m.user_id, exists (select 1 from blocks b where b.owner_id = m.user_id and b.user_id = ${userId}) as blocked
+            from chat_members m where m.chat_id = ${frame.chatId}`;
+        if (!rows.some((r) => r.user_id === userId)) return [];
         const msg = JSON.stringify({ op: 'typing', chatId: frame.chatId, userId } satisfies ServerFrame);
-        for (const m of members) if (m !== userId) publish(`user:${m}`, msg);
+        for (const r of rows) if (r.user_id !== userId && !r.blocked) publish(`user:${r.user_id}`, msg);
         return [];
       }
       case 'hello':
