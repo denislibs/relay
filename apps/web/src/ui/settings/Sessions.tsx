@@ -1,11 +1,12 @@
 import { Button, ChatRowSkeleton, ConfirmDialog, EmptyState, InfoRow, Menu, Modal, PanelHeader, Presence, SelectRow, Section, reducedMotion, useMinVisible } from '@relay/ui';
 import type { SessionInfo } from '@relay/protocol';
 import { sessionsView } from '@relay/sync-engine/src/sessions';
-import { useEffect, useRef, useState } from 'preact/hooks';
+import { useEffect, useState } from 'preact/hooks';
 import { useGlobal } from '../../global';
 import { back } from '../../nav';
 import { loadSessions, registerPrefetch, setSessionsTtl, terminateOtherSessions, terminateSession } from '../../settingsData';
 import { fullDateTime, sessionTime } from '../format';
+import { useLeaving } from '../useLeaving';
 
 // список берётся с сервера по запросу: на главной странице настроек и при наведении на строку раздела
 registerPrefetch('settings/sessions', () => { void loadSessions(); });
@@ -24,31 +25,6 @@ function deviceLook(device: string): { icon: string; tile: Tile } {
   const icon = /iOS|Android/.test(device) ? 'smartphone' : 'laptop';
   const tile: Tile = /^Chrome/.test(device) ? 'green' : /^(Safari|Edge)/.test(device) ? 'blue' : /^Firefox/.test(device) ? 'orange' : /^(Opera|Яндекс)/.test(device) ? 'red' : 'gray';
   return { icon, tile };
-}
-
-/** Строки, ушедшие из списка, ещё ms держатся на месте и схлопываются по высоте (а не пропадают рывком). */
-function useLeaving<T>(items: T[], key: (t: T) => string, ms: number): { item: T; key: string; leaving: boolean }[] {
-  const prev = useRef<{ item: T; key: string }[]>([]);
-  const leaving = useRef(new Map<string, { item: T; after: string | null }>());
-  const [, force] = useState(0);
-  const keys = new Set(items.map(key));
-  prev.current.forEach((p, i) => {
-    if (!keys.has(p.key) && !leaving.current.has(p.key) && ms > 0) leaving.current.set(p.key, { item: p.item, after: i > 0 ? prev.current[i - 1].key : null });
-  });
-  for (const k of [...leaving.current.keys()]) if (keys.has(k)) leaving.current.delete(k);
-  const out: { item: T; key: string; leaving: boolean }[] = items.map((item) => ({ item, key: key(item), leaving: false }));
-  for (const [k, v] of leaving.current) {
-    const at = v.after == null ? 0 : out.findIndex((o) => o.key === v.after) + 1;
-    out.splice(at > 0 || v.after == null ? at : out.length, 0, { item: v.item, key: k, leaving: true });
-  }
-  prev.current = out.filter((o) => !o.leaving).map(({ item, key }) => ({ item, key }));
-  const n = leaving.current.size;
-  useEffect(() => {
-    if (!n) return;
-    const t = setTimeout(() => { leaving.current.clear(); force((x) => x + 1); }, ms);
-    return () => clearTimeout(t);
-  }, [n]);
-  return out;
 }
 
 /** «Активные сеансы»: это устройство, другие сеансы (меню строки и детали), автозавершение неактивных. */

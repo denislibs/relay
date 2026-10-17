@@ -34,10 +34,20 @@ export function parseDevice(ua: string | null | undefined): string {
   return os ? `${browser}, ${os}` : browser;
 }
 
-/** IP клиента: за доверенным прокси (TRUST_PROXY=1) — первый адрес x-forwarded-for, иначе адрес сокета. */
-export function clientIp(req: Request, server: { requestIP(req: Request): { address: string } | null }): string | null {
+export interface IpSource { requestIP(req: Request): { address: string } | null }
+
+/**
+ * IP клиента. За доверенным прокси (TRUST_PROXY=1, TRUST_PROXY_HOPS=N — прокси в цепочке, по умолчанию 1) —
+ * N-я запись x-forwarded-for справа: её дописал наш прокси; левые записи присылает сам клиент, им верить нельзя.
+ * Без доверия к прокси (по умолчанию) — адрес сокета.
+ */
+export function clientIp(req: Request, server: IpSource): string | null {
   let ip: string | null = null;
-  if (process.env.TRUST_PROXY === '1') ip = req.headers.get('x-forwarded-for')?.split(',')[0]?.trim() || null;
+  const hops = Number(process.env.TRUST_PROXY_HOPS) || (process.env.TRUST_PROXY === '1' ? 1 : 0);
+  if (hops > 0) {
+    const chain = (req.headers.get('x-forwarded-for') ?? '').split(',').map((x) => x.trim()).filter(Boolean);
+    if (chain.length >= hops) ip = chain[chain.length - hops];
+  }
   if (!ip) ip = server.requestIP(req)?.address ?? null;
   if (!ip) return null;
   return ip.replace(/^::ffff:(\d+\.\d+\.\d+\.\d+)$/, '$1').slice(0, 64);

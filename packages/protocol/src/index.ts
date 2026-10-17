@@ -134,8 +134,9 @@ export type ServerFrame =
   | { op: 'poke' }
   | { op: 'presence'; items: PresenceItem[] }
   | { op: 'typing'; chatId: Id; userId: Id }
-  // сеанс этого сокета завершён (с другого устройства, выходом в другой вкладке, автозавершением); следом сокет закрывается
-  | { op: 'sessionTerminated' }
+  // сеанс этого сокета завершён; следом сокет закрывается. reason: logout — выход в другой вкладке этого же браузера,
+  // terminated — с другого устройства, автозавершением или сеанс пропал
+  | { op: 'sessionTerminated'; reason?: 'logout' | 'terminated' }
   | { op: 'pong' };
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;

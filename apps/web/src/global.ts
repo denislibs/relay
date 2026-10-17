@@ -13,7 +13,7 @@ export interface FeedMeta { hasOlder: boolean; hasNewer: boolean; live: boolean 
 /** Свой профиль (GET /me, дальше — подписка me движка). Поля опциональны: старый кэш relay.me их не знает. */
 export interface Me { userId: number; name: string; firstName?: string; lastName?: string; username?: string | null; bio?: string | null; birthday?: { day: number; month: number; year?: number } | null; phone?: string | null }
 export type Phase = 'connecting' | 'offline' | 'loading' | 'updating' | 'ready';
-export interface Status { phase: Phase; hydrated: boolean; chatsComplete?: boolean; chatsCursorAt?: number; online: boolean; synced: boolean; syncing: boolean; outbox: number; failed: number; terminated?: boolean }   // terminated — сеанс завершён (B9)
+export interface Status { phase: Phase; hydrated: boolean; chatsComplete?: boolean; chatsCursorAt?: number; online: boolean; synced: boolean; syncing: boolean; outbox: number; failed: number; terminated?: boolean; terminatedReason?: 'logout' | 'terminated' }   // terminated — сеанс завершён (B9)
 
 /** Один объект: зеркало видимых данных из воркера + состояние интерфейса этой вкладки. */
 export interface GlobalState {

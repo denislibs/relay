@@ -1,10 +1,10 @@
 import { afterAll, beforeEach, expect, test } from 'bun:test';
 import type { ServerFrame, SessionInfo } from '@relay/protocol';
 import { sql } from '../src/db';
-import { parseDevice } from '../src/device';
+import { clientIp, parseDevice } from '../src/device';
 import { getUpdates } from '../src/domain/journal';
 import { resetPresence } from '../src/domain/presence';
-import { sweepInactive } from '../src/domain/sessions';
+import { setLiveCheckMs, sweepInactive, touchLive } from '../src/domain/sessions';
 import { createServer } from '../src/http';
 import { startRealtime } from '../src/realtime';
 import { nextFrame, resetDb } from './helpers';
@@ -13,7 +13,7 @@ const server = createServer({ port: 0 });
 const stopRealtime = await startRealtime(server);
 const base = `http://localhost:${server.port}`;
 afterAll(async () => { await stopRealtime(); server.stop(true); });
-beforeEach(async () => { await resetDb(); resetPresence(); });
+beforeEach(async () => { await resetDb(); resetPresence(); setLiveCheckMs(60_000); });
 
 const UA = {
   chromeMac: 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/141.0.0.0 Safari/537.36',
@@ -89,7 +89,7 @@ test('terminated session: its ws gets sessionTerminated and closes, the next HTT
   const r = await call(a1, 'DELETE', `/sessions/${other.id}`);
   expect(r.status).toBe(200);
   expect(await r.json()).toEqual({ ok: true, id: other.id });
-  expect((await frame).op).toBe('sessionTerminated');
+  expect(await frame).toEqual({ op: 'sessionTerminated', reason: 'terminated' });
   expect(await code).toBe(4001);
   expect((await call(a2, 'GET', '/me')).status).toBe(401);
   expect((await list(a1)).map((s) => s.id)).not.toContain(other.id);
@@ -117,7 +117,7 @@ test("logout closes the other tab's socket of the same session", async () => {
   const c2 = closed(tab2);
   const r = await call(a, 'POST', '/logout');
   expect(r.status).toBe(200);
-  expect((await f2).op).toBe('sessionTerminated');
+  expect(await f2).toEqual({ op: 'sessionTerminated', reason: 'logout' });
   expect(await c2).toBe(4001);
   await closed(tab1);
   expect((await call(a, 'GET', '/me')).status).toBe(401);
@@ -187,4 +187,80 @@ test('a ws frame of another session never reaches this one', async () => {
   expect(seen.some((f) => f.op === 'sessionTerminated')).toBe(false);
   expect(w1.readyState).toBe(WebSocket.OPEN);
   w1.close();
+});
+
+test('x-forwarded-for: trusted only behind a proxy, and only the entry our proxy appended', () => {
+  const srvIp = { requestIP: () => ({ address: '::ffff:10.0.0.9' }) };
+  const req = (xff?: string) => new Request('http://x/', { headers: xff ? { 'x-forwarded-for': xff } : {} });
+  const env = { p: process.env.TRUST_PROXY, h: process.env.TRUST_PROXY_HOPS };
+  try {
+    delete process.env.TRUST_PROXY; delete process.env.TRUST_PROXY_HOPS;
+    expect(clientIp(req('6.6.6.6'), srvIp)).toBe('10.0.0.9');            // по умолчанию заголовку не верим
+    process.env.TRUST_PROXY = '1';
+    expect(clientIp(req('6.6.6.6, 203.0.113.7'), srvIp)).toBe('203.0.113.7');   // поддельная левая запись не берётся
+    expect(clientIp(req('203.0.113.7'), srvIp)).toBe('203.0.113.7');
+    expect(clientIp(req(), srvIp)).toBe('10.0.0.9');
+    process.env.TRUST_PROXY_HOPS = '2';   // CDN → nginx: вторая справа
+    expect(clientIp(req('6.6.6.6, 198.51.100.4, 10.1.1.1'), srvIp)).toBe('198.51.100.4');
+    expect(clientIp(req('10.1.1.1'), srvIp)).toBe('10.0.0.9');           // цепочка короче числа прокси — адрес сокета
+  } finally {
+    if (env.p === undefined) delete process.env.TRUST_PROXY; else process.env.TRUST_PROXY = env.p;
+    if (env.h === undefined) delete process.env.TRUST_PROXY_HOPS; else process.env.TRUST_PROXY_HOPS = env.h;
+  }
+});
+
+test('ws frames count as activity: a long-lived socket keeps its session out of the sweep', async () => {
+  const a = await login('Анна');
+  await call(a, 'PUT', '/settings/sessions-ttl', { days: 7 });
+  const ws = await openWs(a);
+  const [s] = await list(a);
+  await sql`update sessions set last_active_at = now() - interval '6 days 23 hours' where id = ${s.id}`;
+  setLiveCheckMs(0);
+  ws.send(JSON.stringify({ op: 'ping' }));
+  await nextFrame(ws, (f) => f.op === 'pong');
+  const [row] = await sql`select last_active_at from sessions where id = ${s.id}`;
+  expect(Date.now() - (row.last_active_at as Date).getTime()).toBeLessThan(10_000);
+  await sql`update sessions set last_active_at = now() - interval '6 days 23 hours' where id = ${s.id}`;
+  expect(await touchLive()).toEqual([]);   // минутный проход по живым сокетам тоже отмечает активность
+  expect(await sweepInactive()).toEqual([]);
+  expect(ws.readyState).toBe(WebSocket.OPEN);
+  ws.close();
+});
+
+test('session row deleted without NOTIFY: the socket is closed on its next frame or minute check', async () => {
+  const a1 = await login('Анна'), a2 = await login('Анна');
+  const w1 = await openWs(a1), w2 = await openWs(a2);
+  const [s1, s2] = (await list(a1)).sort((x, y) => x.id - y.id);
+  setLiveCheckMs(0);
+  // кадр, который что-то меняет, не выполняется: сокет получает sessionTerminated и закрывается
+  await sql`delete from sessions where id = ${s1.id}`;
+  const f1 = nextFrame(w1, (f) => f.op === 'sessionTerminated'), c1 = closed(w1);
+  w1.send(JSON.stringify({ op: 'draft', reqId: 'r1', chatId: 1, text: 'x' }));
+  expect(await f1).toEqual({ op: 'sessionTerminated', reason: 'terminated' });
+  expect(await c1).toBe(4001);
+  // молчащий сокет — минутный проход touchLive
+  await sql`delete from sessions where id = ${s2.id}`;
+  const f2 = nextFrame(w2, (f) => f.op === 'sessionTerminated'), c2 = closed(w2);
+  expect(await touchLive()).toEqual([s2.id]);
+  await f2;
+  expect(await c2).toBe(4001);
+});
+
+test('sliding expiry: an active session gets a fresh expires_at and cookie', async () => {
+  const a = await login('Анна');
+  const [s] = await list(a);
+  const fresh = await call(a, 'GET', '/me');
+  expect(fresh.headers.get('set-cookie')).toBeNull();   // свежий сеанс — cookie не трогаем
+  await sql`update sessions set expires_at = now() + interval '10 days' where id = ${s.id}`;
+  const r = await call(a, 'GET', '/me');
+  expect(r.status).toBe(200);
+  expect(r.headers.get('set-cookie')).toContain('Max-Age=' + 366 * 86400);
+  const [row] = await sql`select expires_at from sessions where id = ${s.id}`;
+  expect((row.expires_at as Date).getTime() - Date.now()).toBeGreaterThan(365 * 86_400_000);
+});
+
+test('DELETE /sessions without others=1 → 400', async () => {
+  const a1 = await login('Анна'); await login('Анна');
+  expect((await call(a1, 'DELETE', '/sessions')).status).toBe(400);
+  expect((await list(a1)).length).toBe(2);
 });

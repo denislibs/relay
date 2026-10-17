@@ -126,7 +126,8 @@ export function startSettingsData(me: Me): void {
   const statusM = new Mirror();
   engine.watch({ kind: 'status' }, (p) => {
     statusM.apply(p);
-    if (statusM.list()[0]?.terminated) onTerminated();
+    const st = statusM.list()[0];
+    if (st?.terminated) onTerminated(st.terminatedReason === 'logout' ? 'logout' : 'terminated');
   });
 }
 
@@ -156,7 +157,7 @@ let selfLogout = false;
 export function markSelfLogout(on: boolean): void { selfLogout = on; }
 
 let terminating = false;
-function onTerminated(): void {
+function onTerminated(reason: 'logout' | 'terminated'): void {
   if (terminating || selfLogout) return;
   terminating = true;
   try { localStorage.removeItem(ME_KEY); } catch { /* приватный режим */ }
@@ -168,7 +169,8 @@ function onTerminated(): void {
     setGlobal({ boot: 'login', sessions: null, opsKeys: [], openChatId: null, infoOpen: false });
     fade?.cancel();
     root?.animate?.([{ opacity: 0 }, { opacity: 1 }], { duration: ms, easing: 'ease-out' });
-    showToast('Сеанс завершён на другом устройстве', 4000);
+    // logout — выход в другой вкладке этого же браузера; иначе сеанс завершили с другого устройства (или автозавершением)
+    showToast(reason === 'logout' ? 'Вы вышли из Relay' : 'Сеанс завершён на другом устройстве', 4000);
   }, ms);
 }
 

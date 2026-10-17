@@ -30,7 +30,7 @@ test('sessionTerminated → terminal status, local data wiped, no reconnect', as
   const list = (await (await call(a1.token, 'GET', '/sessions')).json()) as SessionInfo[];
   const other = list.find((s) => !s.current)!;
   expect((await call(a1.token, 'DELETE', `/sessions/${other.id}`)).status).toBe(200);
-  await st.until((l) => l[0]?.terminated === true && l[0]?.online === false);
+  await st.until((l) => l[0]?.terminated === true && l[0]?.terminatedReason === 'terminated' && l[0]?.online === false);
   const end = Date.now() + 3000;
   while (!gone && Date.now() < end) await Bun.sleep(10);
   expect(gone).toBe(true);
@@ -83,4 +83,27 @@ test('sessionsView: others hides everything but the current session', () => {
   expect(sessionsView(list, []).map((x) => x.id)).toEqual([1, 2, 3]);
   expect(sessionsView(list, ['session:3', 'notify:direct']).map((x) => x.id)).toEqual([1, 2]);
   expect(sessionsView(list, ['sessions:others']).map((x) => x.id)).toEqual([1]);
+});
+
+test('logout in another tab of the same session → terminal status with reason logout', async () => {
+  const a = await srv.login('Анна');
+  const e = await open(srv.config(a));
+  const st = watchInto(e, { kind: 'status' });
+  e.connect();
+  await e.whenIdle();
+  expect((await call(a.token, 'POST', '/logout')).status).toBe(200);
+  await st.until((l) => l[0]?.terminated === true && l[0]?.terminatedReason === 'logout');
+});
+
+test('upload answered 401 (session row gone, socket still open) → terminal status', async () => {
+  const a = await srv.login('Анна'), b = await srv.login('Борис');
+  const chatId = await srv.chat(a.token, [a.userId, b.userId]);
+  const e = await open(srv.config(a));
+  const st = watchInto(e, { kind: 'status' });
+  e.connect();
+  await e.whenIdle();
+  await sql`delete from sessions where user_id = ${a.userId}`;   // без NOTIFY: сокет пока открыт
+  expect(e.status().online).toBe(true);
+  await e.call({ type: 'sendFile', chatId, body: '', file: new Blob(['x']), name: 'a.txt', mime: 'text/plain' });
+  await st.until((l) => l[0]?.terminated === true);
 });

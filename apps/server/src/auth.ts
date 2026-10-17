@@ -1,8 +1,8 @@
 import { createHash, randomBytes } from 'node:crypto';
 import { sql } from './db';
+import { clientIp, parseDevice, type IpSource } from './device';
+import { SESSION_DAYS, sweepInactive } from './domain/sessions';
 
-// предельный срок cookie и строки; настоящий предел — неактивность (user_settings.sessions_ttl_days, не больше года)
-const SESSION_DAYS = 366;
 const DEFAULT_TTL_DAYS = 180;
 const hash = (token: string) => createHash('sha256').update(token).digest('hex');
 
@@ -11,29 +11,41 @@ export async function createUser(name: string): Promise<number> {
   return row.id as number;
 }
 
-/** Новый сеанс; device — грубое имя из User-Agent (device.ts), ip — адрес входа. */
-export async function createSession(userId: number, meta: { device?: string | null; ip?: string | null } = {}): Promise<string> {
+/**
+ * Новый сеанс — единственный путь входа (любой будущий вход идёт через него): сначала чистка неактивных сеансов
+ * этого человека, затем строка с устройством (грубо по User-Agent) и IP входа.
+ */
+export async function createSession(userId: number, from?: { req: Request; server: IpSource }): Promise<string> {
+  await sweepInactive(userId).catch((e) => console.error('sessions sweep:', e));
+  const device = from ? parseDevice(from.req.headers.get('user-agent')) : null;
+  const ip = from ? clientIp(from.req, from.server) : null;
   const token = randomBytes(32).toString('base64url');
-  await sql`insert into sessions (token_hash, user_id, expires_at, device, ip) values (${hash(token)}, ${userId}, now() + ${SESSION_DAYS + ' days'}::interval, ${meta.device ?? null}, ${meta.ip ?? null})`;
+  await sql`insert into sessions (token_hash, user_id, expires_at, device, ip) values (${hash(token)}, ${userId}, now() + ${SESSION_DAYS + ' days'}::interval, ${device}, ${ip})`;
   return token;
 }
 
-export interface SessionRef { userId: number; sessionId: number }
+/** refresh — срок продлён: ответу нужен свежий cookie (sessionCookie). */
+export interface SessionRef { userId: number; sessionId: number; refresh: boolean }
 
 /**
  * Сеанс по токену. Неактивный дольше срока автозавершения — уже не действует (даже если чистка ещё не дошла).
  * last_active_at трогаем не чаще раза в минуту: один UPDATE только у «несвежей» строки.
+ * Срок строки скользит: отстал от «сейчас + SESSION_DAYS» больше чем на день — продлеваем (и выдаём cookie заново).
  */
 export async function sessionFromToken(token: string | null): Promise<SessionRef | null> {
   if (!token) return null;
   const [row] = await sql`
-    select s.id, s.user_id, s.last_active_at < now() - interval '1 minute' as stale
+    select s.id, s.user_id, s.last_active_at < now() - interval '1 minute' as stale,
+           s.expires_at < now() + ${SESSION_DAYS - 1 + ' days'}::interval as slide
       from sessions s left join user_settings us on us.user_id = s.user_id
      where s.token_hash = ${hash(token)} and s.expires_at > now()
        and s.last_active_at > now() - make_interval(days => coalesce(us.sessions_ttl_days, ${DEFAULT_TTL_DAYS}))`;
   if (!row) return null;
-  if (row.stale) await sql`update sessions set last_active_at = now() where id = ${row.id} and last_active_at < now() - interval '1 minute'`;
-  return { userId: Number(row.user_id), sessionId: Number(row.id) };
+  if (row.stale || row.slide) {
+    await sql`update sessions set last_active_at = now(), expires_at = greatest(expires_at, now() + ${SESSION_DAYS + ' days'}::interval)
+               where id = ${row.id} and (last_active_at < now() - interval '1 minute' or expires_at < now() + ${SESSION_DAYS - 1 + ' days'}::interval)`;
+  }
+  return { userId: Number(row.user_id), sessionId: Number(row.id), refresh: !!row.slide };
 }
 
 export async function userIdFromToken(token: string | null): Promise<number | null> {

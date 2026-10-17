@@ -3,6 +3,8 @@ import { sql, type Tx } from '../db';
 import { DomainError } from './errors';
 
 const DEFAULT_TTL_DAYS = 180;
+/** предельный срок cookie и строки (скользит от последней активности); настоящий предел — неактивность (sessions_ttl_days, не больше года) */
+export const SESSION_DAYS = 366;
 /** «в сети»: сокет в этом процессе или запрос не позже, чем столько назад */
 const ONLINE_MS = 2 * 60_000;
 
@@ -24,24 +26,76 @@ export function untrackSocket(sessionId: number, ws: LiveSocket): void {
 }
 export const isLive = (sessionId: number): boolean => live.has(sessionId);
 
-export const TERMINATED_FRAME = JSON.stringify({ op: 'sessionTerminated' });
+/** Почему сеанс закончился: выход в этом же браузере или завершение (с другого устройства, автозавершение). */
+export type EndReason = 'logout' | 'terminated';
+export const terminatedFrame = (reason: EndReason): string => JSON.stringify({ op: 'sessionTerminated', reason });
 /** 4001 — сеанс завершён: клиент не переподключается. */
 export const CLOSE_TERMINATED = 4001;
 
 /** Сеанс завершён (в любом процессе — через NOTIFY sessions): сокеты этого процесса закрываются.
- *  Кадр sessionTerminated к этому моменту уже опубликован в топик session:<id> (realtime.ts) и уходит раньше закрытия. */
-export function closeLive(sessionId: number): void {
+ *  frame — послать кадр самому (проверка сокета); из NOTIFY кадр уже опубликован в топик session:<id> (realtime.ts). */
+export function closeLive(sessionId: number, frame?: string): void {
   const set = live.get(sessionId);
   if (!set) return;
   live.delete(sessionId);
   for (const ws of set) {
-    try { ws.close(CLOSE_TERMINATED, 'session_terminated'); } catch { /* сокет уже закрыт */ }
+    try { if (frame) ws.send(frame); ws.close(CLOSE_TERMINATED, 'session_terminated'); } catch { /* сокет уже закрыт */ }
   }
 }
 
 /** Сообщить всем процессам о завершённых сеансах (уходит после коммита транзакции). */
-async function notifyTerminated(db: Tx | typeof sql, ids: number[]): Promise<void> {
-  if (ids.length) await db`select pg_notify('sessions', ${JSON.stringify(ids)})`;
+async function notifyTerminated(db: Tx | typeof sql, ids: number[], reason: EndReason = 'terminated'): Promise<void> {
+  if (ids.length) await db`select pg_notify('sessions', ${JSON.stringify({ ids, reason })})`;
+}
+
+/** Разбор NOTIFY sessions: {ids, reason} (или старый вид — массив id). */
+export function parseEnded(payload: string): { ids: number[]; reason: EndReason } | null {
+  let v: unknown;
+  try { v = JSON.parse(payload); } catch { return null; }
+  if (Array.isArray(v)) return { ids: v.map(Number), reason: 'terminated' };
+  const o = v as { ids?: unknown; reason?: unknown } | null;
+  if (!o || !Array.isArray(o.ids)) return null;
+  return { ids: o.ids.map(Number), reason: o.reason === 'logout' ? 'logout' : 'terminated' };
+}
+
+// ---- активность сокетов: NOTIFY бывает потерян (LISTEN переподключался), поэтому сокет сам проверяет свой сеанс ----
+
+/** как часто сокет отмечает активность и проверяет, что его сеанс жив (тесты ставят 0) */
+let checkMs = 60_000;
+export function setLiveCheckMs(ms: number): void { checkMs = ms; }
+export const liveCheckMs = (): number => checkMs;
+
+/**
+ * Отметить активность сеансов (last_active_at, скользящий expires_at) и вернуть те, что ещё живы:
+ * удалённые, истёкшие и неактивные дольше срока в ответ не попадают.
+ */
+export async function touchSessions(ids: number[]): Promise<Set<number>> {
+  if (!ids.length) return new Set();
+  const rows = await sql`
+    update sessions s set last_active_at = now(), expires_at = greatest(s.expires_at, now() + ${SESSION_DAYS + ' days'}::interval)
+     where s.id = any(${ids}) and s.expires_at > now()
+       and s.last_active_at > now() - make_interval(days => coalesce((select us.sessions_ttl_days from user_settings us where us.user_id = s.user_id), ${DEFAULT_TTL_DAYS}))
+     returning s.id`;
+  return new Set(rows.map((r) => Number(r.id)));
+}
+
+/** Сокет сеанса: пора отметиться (раз в checkMs)? Жив — true; нет — кадр sessionTerminated и закрытие 4001. */
+export async function checkSocket(sessionId: number, data: { checkedAt: number }): Promise<boolean> {
+  if (Date.now() - data.checkedAt < checkMs) return true;
+  data.checkedAt = Date.now();
+  const alive = await touchSessions([sessionId]);
+  if (alive.has(sessionId)) return true;
+  closeLive(sessionId, terminatedFrame('terminated'));
+  return false;
+}
+
+/** Все живые сокеты процесса разом (раз в минуту, realtime.ts): активность и закрытие тех, чей сеанс пропал. */
+export async function touchLive(): Promise<number[]> {
+  const ids = [...live.keys()];
+  const alive = await touchSessions(ids);
+  const dead = ids.filter((id) => !alive.has(id));
+  for (const id of dead) closeLive(id, terminatedFrame('terminated'));
+  return dead;
 }
 
 // ---- список и завершение ----
@@ -90,7 +144,7 @@ export async function terminateOthers(userId: number, currentId: number): Promis
 
 /** Выход (POST /logout) удалил строку: закрыть сокеты этого сеанса в других вкладках. */
 export function sessionEnded(id: number): Promise<void> {
-  return notifyTerminated(sql, [id]);
+  return notifyTerminated(sql, [id], 'logout');
 }
 
 /**

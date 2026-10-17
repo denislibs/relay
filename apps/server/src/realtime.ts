@@ -1,6 +1,6 @@
 import type { Server } from 'bun';
 import { sql } from './db';
-import { closeLive, TERMINATED_FRAME } from './domain/sessions';
+import { closeLive, parseEnded, terminatedFrame, touchLive } from './domain/sessions';
 
 const POKE = JSON.stringify({ op: 'poke' });
 
@@ -13,9 +13,12 @@ export async function startRealtime(server: Server): Promise<() => Promise<void>
   });
   // завершённые сеансы (в любом процессе): кадр в топик сеанса, затем сокеты этого процесса закрываются
   const subSessions = await sql.listen('sessions', (payload) => {
-    let ids: number[];
-    try { ids = JSON.parse(payload); } catch { return; }
-    for (const id of ids) { server.publish(`session:${id}`, TERMINATED_FRAME); closeLive(id); }
+    const ended = parseEnded(payload);
+    if (!ended) return;
+    for (const id of ended.ids) { server.publish(`session:${id}`, terminatedFrame(ended.reason)); closeLive(id); }
   });
-  return async () => { await sub.unlisten(); await subSessions.unlisten(); };
+  // раз в минуту: активность всех открытых сокетов и страховка на потерянный NOTIFY (сеанс пропал — сокет закрываем)
+  const timer = setInterval(() => { touchLive().catch((e) => console.error('sessions touch:', e)); }, 60_000);
+  timer.unref?.();
+  return async () => { clearInterval(timer); await sub.unlisten(); await subSessions.unlisten(); };
 }

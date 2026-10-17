@@ -3,8 +3,7 @@ import type { Server } from 'bun';
 import { existsSync, statSync } from 'node:fs';
 import { extname, join, resolve, sep } from 'node:path';
 import { clearSessionCookie, createSession, createUser, deleteSession, readSessionToken, sessionCookie, sessionFromToken } from './auth';
-import { clientIp, parseDevice } from './device';
-import { listSessions, sessionEnded, sweepInactive, terminateOthers, terminateSession, trackSocket, untrackSocket } from './domain/sessions';
+import { checkSocket, listSessions, sessionEnded, sweepInactive, terminateOthers, terminateSession, trackSocket, untrackSocket } from './domain/sessions';
 import { createChat, getChatMedia, getHistory, getMessagesByIds, listChats, listChatsPage } from './domain/chats';
 import { sql } from './db';
 import { DomainError } from './domain/errors';
@@ -20,7 +19,16 @@ import { addContact, blockUser, listBlocked, listContacts, removeContact, resolv
 const STATUS: Record<string, number> = { bad_frame: 400, too_long: 400, username_invalid: 400, username_reserved: 400, username_taken: 409, bio_too_long: 400, note_too_long: 400, name_invalid: 400, birthday_invalid: 400, unauthorized: 401, not_member: 403, blocked: 403, not_found: 404 };
 const fail = (code: string) => Response.json({ code }, { status: STATUS[code] ?? 500 });
 
-export type WsData = { userId: number; sessionId: number };
+/** checkedAt — когда сокет последний раз отмечал активность и проверял свой сеанс (domain/sessions.checkSocket). */
+export type WsData = { userId: number; sessionId: number; checkedAt: number };
+
+/** Срок сеанса продлён (sessionFromToken.refresh): ответ несёт свежий cookie. */
+const refreshed = new WeakMap<Request, string>();
+function withCookie(req: Request, res: Response | undefined): Response | undefined {
+  const token = refreshed.get(req);
+  if (token && res && !res.headers.has('set-cookie')) { try { res.headers.set('set-cookie', sessionCookie(token)); } catch { /* неизменяемые заголовки */ } }
+  return res;
+}
 
 const API = /^\/(health|me|users|contacts|settings|privacy|blocks|chats|presence|search|upload|files|push|sessions|ws|dev|logout)(\/|$)/;
 
@@ -47,7 +55,7 @@ export function createServer(opts: { port: number }): Server {
   const publish: Publish = (topic, msg) => { server.publish(topic, msg); };
   const server = Bun.serve<WsData>({
     port: opts.port,
-    async fetch(req, server) {
+    fetch: async (req, server) => withCookie(req, await (async () => {
       const url = new URL(req.url);
       try {
         if (url.pathname === '/health') return Response.json({ ok: true });
@@ -60,9 +68,8 @@ export function createServer(opts: { port: number }): Server {
           const userId = found ? (found.id as number) : await createUser(String(name ?? 'user'));
           // dev: телефон нужен только для проверки профиля (SMS-входа нет); занятый номер не мешает входу
           if (typeof phone === 'string') await sql`update users set phone = ${phone} where id = ${userId} and phone is null`.catch(() => {});
-          // чистка неактивных сеансов этого человека — при каждом входе
-          await sweepInactive(userId).catch((e) => console.error('sessions sweep:', e));
-          const token = await createSession(userId, { device: parseDevice(req.headers.get('user-agent')), ip: clientIp(req, server) });
+          // createSession сам чистит неактивные сеансы и пишет устройство/IP (общий путь для любого входа)
+          const token = await createSession(userId, { req, server });
           return Response.json({ userId, token }, { headers: { 'set-cookie': sessionCookie(token) } });
         }
 
@@ -71,6 +78,7 @@ export function createServer(opts: { port: number }): Server {
         const auth = await sessionFromToken(readSessionToken(req));
         if (!auth) return fail('unauthorized');
         const { userId, sessionId } = auth;
+        if (auth.refresh) { const t = readSessionToken(req); if (t && req.headers.get('cookie')?.includes('relay_session=')) refreshed.set(req, t); }
 
         if (req.method === 'GET' && url.pathname === '/me') {
           return Response.json(await getMe(userId));
@@ -112,7 +120,7 @@ export function createServer(opts: { port: number }): Server {
         }
         if (url.pathname === '/sessions') {
           if (req.method === 'GET') return Response.json(await listSessions(userId, sessionId));
-          if (req.method === 'DELETE' && url.searchParams.get('others') === '1') return Response.json(await terminateOthers(userId, sessionId));
+          if (req.method === 'DELETE') return url.searchParams.get('others') === '1' ? Response.json(await terminateOthers(userId, sessionId)) : fail('bad_frame');
         }
         const sess = /^\/sessions\/(\d{1,15})$/.exec(url.pathname);
         if (sess && req.method === 'DELETE') return Response.json(await terminateSession(userId, sessionId, Number(sess[1])));
@@ -132,7 +140,7 @@ export function createServer(opts: { port: number }): Server {
           return Response.json({ ok: true }, { headers: { 'set-cookie': clearSessionCookie() } });
         }
         if (url.pathname === '/ws') {
-          return server.upgrade(req, { data: { userId, sessionId } }) ? undefined : fail('bad_frame');
+          return server.upgrade(req, { data: { userId, sessionId, checkedAt: Date.now() } }) ? undefined : fail('bad_frame');
         }
         if (process.env.DEV_LOGIN === '1' && req.method === 'POST' && url.pathname === '/dev/chats') {
           const { kind, title, memberIds } = (await req.json()) as { kind: 'direct' | 'group'; title: string | null; memberIds: number[] };
@@ -211,7 +219,7 @@ export function createServer(opts: { port: number }): Server {
         console.error(err);
         return fail('internal');
       }
-    },
+    })()),
     websocket: {
       open(ws) {
         ws.subscribe(`user:${ws.data.userId}`);
@@ -229,6 +237,9 @@ export function createServer(opts: { port: number }): Server {
           ws.send(JSON.stringify({ op: 'err', code: 'bad_frame', retry: false }));
           return;
         }
+        // любой кадр (и отправка, и прочтение): раз в минуту — отметка активности и проверка, что сеанс жив;
+        // сеанс пропал (NOTIFY мог потеряться) — сокет закрыт, кадр не выполняем
+        if (!(await checkSocket(ws.data.sessionId, ws.data).catch(() => true))) return;
         for (const out of await handleFrame(ws.data.userId, frame, publish)) ws.send(JSON.stringify(out));
       },
     },
