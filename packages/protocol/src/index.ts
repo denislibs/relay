@@ -35,6 +35,9 @@ export type Update =
   // настройки аккаунта (общие для устройств) изменились: приходят целиком, только владельцу
   | { type: 'settingsChanged'; settings: UserSettings };
 
+/** Тело уведомления/push без предпросмотра: текст сообщения не раскрываем. */
+export const NO_PREVIEW = 'Новое сообщение';
+
 /** Вид чата для умолчаний уведомлений. */
 export type NotifyType = 'direct' | 'group';
 export interface NotifyPref { muted: boolean; preview: boolean }

@@ -106,6 +106,7 @@ export type UsernameCheck = { ok: true } | { ok: false; reason: 'invalid' | 'tak
 export const checkUsername = (username: string): Promise<UsernameCheck> =>
   call<UsernameCheck>({ type: 'checkUsername', username }).catch(() => ({ offline: true as const }));
 
+export const refreshSettings = (): Promise<unknown> => call({ type: 'refreshSettings' }).catch(() => null);
 export const setNotifyDefault = (notifyType: 'direct' | 'group', patch: { muted?: boolean; preview?: boolean }): Promise<unknown> =>
   call({ type: 'setNotify', notifyType, ...patch });
 

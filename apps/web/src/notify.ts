@@ -1,6 +1,7 @@
 import { getGlobal, setGlobal } from './global';
-import { NO_PREVIEW, planIncoming } from './notifyRules';
-import { getPrefs } from './prefs';
+import { NO_PREVIEW } from '@relay/protocol';
+import { planIncoming } from './notifyRules';
+import { getPrefs, setPref, subscribePrefs } from './prefs';
 import { playNotifySound } from './sound';
 
 /**
@@ -12,7 +13,7 @@ import { playNotifySound } from './sound';
  */
 export type NotifyState = 'unsupported' | 'default' | 'denied' | 'off' | 'on';
 
-const OFF_KEY = 'relay.notify.off';
+const OLD_OFF_KEY = 'relay.notify.off';   // раньше «выключено на устройстве» жило здесь; теперь prefs.notify.web
 const BG_KEY = 'relay.notify.bg';   // «когда вкладка закрыта» (Web Push): по умолчанию включено
 const supported = () => 'Notification' in window && 'serviceWorker' in navigator && 'PushManager' in window;
 
@@ -20,8 +21,7 @@ export function notifyState(): NotifyState {
   if (!supported()) return 'unsupported';
   if (Notification.permission === 'denied') return 'denied';
   if (Notification.permission === 'default') return 'default';
-  try { if (localStorage.getItem(OFF_KEY) === '1') return 'off'; } catch { /* без хранилища — включены */ }
-  return 'on';
+  return getPrefs().notify.web ? 'on' : 'off';
 }
 
 /** Хочет ли пользователь push при закрытой вкладке (отдельно от уведомлений в браузере). */
@@ -55,6 +55,9 @@ const quietly = (p: Promise<unknown>) => { p.catch((e) => console.warn('push:', 
 
 /** Старт приложения: состояние в global, подписка обновляется, клики по уведомлениям открывают чат. */
 export function startNotify(openChat: (id: number) => void): void {
+  // единый источник — prefs.notify.web: старый флаг переносим один раз и удаляем
+  try { if (localStorage.getItem(OLD_OFF_KEY) !== null) { if (localStorage.getItem(OLD_OFF_KEY) === '1') setPref('notify.web', false); localStorage.removeItem(OLD_OFF_KEY); } } catch { /* ok */ }
+  subscribePrefs(() => { const n = notifyState(); if (n !== getGlobal().notify) setGlobal({ notify: n }); });   // «web» сменили в другой вкладке
   setGlobal({ notify: notifyState() });
   if (getGlobal().notify === 'on' && getPrefs().notify.web && bgWanted()) quietly(syncSubscription());
   navigator.serviceWorker?.addEventListener('message', (e) => {
@@ -65,7 +68,7 @@ export function startNotify(openChat: (id: number) => void): void {
 /** Переключатель в настройках. Первое включение спрашивает разрешение браузера. */
 export async function setNotify(on: boolean): Promise<void> {
   if (!supported()) return;
-  try { localStorage.setItem(OFF_KEY, on ? '0' : '1'); } catch { /* ok */ }
+  setPref('notify.web', on);
   if (on && Notification.permission === 'default') await Notification.requestPermission();
   const state = notifyState();
   setGlobal({ notify: state });

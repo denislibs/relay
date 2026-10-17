@@ -180,12 +180,16 @@ function commit(next: Prefs, persist: boolean): void {
   for (const fn of listeners) fn(next);
 }
 
-export function setPref(path: string, value: unknown): void {
+/** Несколько путей одним коммитом: одна запись в хранилище и один проход подписчиков. */
+export function setPrefs(values: Record<string, unknown>): void {
   const d = defaultPrefs(reducedMotion());
-  let next = sanitize(merge(d, setPath(current, path, value)) as Prefs, d); // мусор не попадает ни в состояние, ни в хранилище
-  if (path === 'anim.level') next = { ...next, anim: animPreset(next.anim.level) };
+  let draft: Prefs = current;
+  for (const [path, value] of Object.entries(values)) draft = setPath(draft, path, value);
+  let next = sanitize(merge(d, draft) as Prefs, d); // мусор не попадает ни в состояние, ни в хранилище
+  if ('anim.level' in values) next = { ...next, anim: animPreset(next.anim.level) };
   commit(next, true);
 }
+export const setPref = (path: string, value: unknown): void => setPrefs({ [path]: value });
 
 /** Другие вкладки: то же значение подхватываем из события storage. */
 export function listenStorage(): void {

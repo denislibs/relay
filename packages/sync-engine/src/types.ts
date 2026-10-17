@@ -100,6 +100,8 @@ export type Action =
   /** найти человека по @имени или номеру мимо очереди: {user} | {notFound:true} | {offline:true} */
   | { type: 'resolveUser'; query: string }
   /** умолчания уведомлений для вида чата — через очередь операций (видно сразу, в том числе без сети) */
+  /** перезапросить настройки с сервера (предзагрузка раздела) */
+  | { type: 'refreshSettings' }
   | { type: 'setNotify'; notifyType: 'direct' | 'group'; muted?: boolean; preview?: boolean }
   | { type: 'sendFile'; chatId: number; body: string; file: Blob; name: string; mime: string; w?: number | null; h?: number | null; thumb?: string | null; replyToId?: number | null };
 

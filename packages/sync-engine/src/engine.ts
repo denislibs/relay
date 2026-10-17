@@ -533,6 +533,9 @@ export class Engine {
       case 'setUsername':
         await this.ops.enqueue({ key: OP_USERNAME, method: 'PUT', path: '/me/username', body: { username: a.username } });
         return null;
+      case 'refreshSettings':
+        if (this.online && this.ready) this.fetchSettings();
+        return null;
       case 'setNotify': {
         // в очередь уходит полное значение вида чата: слитые правки одного ключа не теряют соседнее поле
         const cur = settingsView(this.store.settings.base, this.ops.list).notify[a.notifyType];

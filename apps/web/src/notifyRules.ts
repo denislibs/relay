@@ -3,8 +3,6 @@ import type { NotifyState } from './notify';
 import type { Prefs } from './prefs';
 
 export interface NotifyPref { muted: boolean; preview: boolean }
-/** Тело уведомления без предпросмотра (так же, как у серверного push). */
-export const NO_PREVIEW = 'Новое сообщение';
 
 export interface IncomingInput {
   state: NotifyState;               // разрешение и включённость на этом устройстве

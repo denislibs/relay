@@ -1,5 +1,5 @@
 import { afterAll, afterEach, beforeEach, expect, test } from 'bun:test';
-import { settingsView } from '../src/settings';
+import { normalizeSettings, SettingsCache, settingsView } from '../src/settings';
 import { Engine } from '../src/engine';
 import { resetDb, startTestServer, watchInto } from './helpers';
 
@@ -75,4 +75,14 @@ test('a rejected change rolls back and reports opFailed', async () => {
   const ops = watchInto(e, { kind: 'ops' });
   await ops.until((l) => ((l[0]?.failures as unknown[]) ?? []).length === 1);
   await w.until((l) => (l[0]?.notify as { direct: { muted: boolean } }).direct.muted === false && l[0]?.pending === false);
+});
+
+test('partial settings from an old cache are completed per kind and never crash the view', () => {
+  const old = { notify: { group: { muted: true } } } as never;
+  const c = SettingsCache.load([{ k: 'settings', v: { base: old, seq: 3 } }]);
+  expect(c.base.notify).toEqual({ direct: { muted: false, preview: true }, group: { muted: true, preview: true } });
+  expect(() => settingsView(c.base, [op('notify:direct', { preview: false })])).not.toThrow();
+  expect(settingsView(c.base, [op('notify:direct', { preview: false })]).notify.direct).toEqual({ muted: false, preview: false });
+  expect(normalizeSettings({} as never).sessionsTtlDays).toBe(180);
+  expect(normalizeSettings({ notify: { direct: null } } as never).notify.direct.muted).toBe(false);
 });

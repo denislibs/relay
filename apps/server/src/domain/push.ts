@@ -1,3 +1,4 @@
+import { NO_PREVIEW } from '@relay/protocol';
 import { sql } from '../db';
 import { nameForSql } from './profile';
 import { isOnline } from './presence';
@@ -76,9 +77,6 @@ export async function subscribe(userId: number, s: { endpoint: string; keys: { p
 export async function unsubscribe(userId: number, endpoint: string): Promise<void> {
   await sql`delete from push_subscriptions where endpoint = ${endpoint} and user_id = ${userId}`;
 }
-
-/** Тело push без предпросмотра: текст сообщения не раскрываем. */
-export const NO_PREVIEW = 'Новое сообщение';
 
 export type PushPayload = { chatId: number; id: number; title: string; body: string };
 
