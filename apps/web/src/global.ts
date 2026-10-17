@@ -3,6 +3,7 @@ import { options } from 'preact';
 import { useEffect, useRef, useState } from 'preact/hooks';
 import { requestMutation } from '@relay/ui';
 import { loadTheme, type ThemePref } from './theme';
+import { getPrefs, subscribePrefs, listenStorage, applyPrefs, type Prefs } from './prefs';
 import type { Item } from '@relay/sync-engine/src/types';
 
 /** Края окна ленты: есть ли сообщения раньше/позже, окно ли это живого хвоста. */
@@ -34,7 +35,8 @@ export interface GlobalState {
   sidebarView: string;   // путь страницы боковой панели, см. nav.ts
   infoOpen: boolean;   // правая панель «Информация»
   muted: number[];     // чаты с выключенными уведомлениями (на этом устройстве)
-  theme: ThemePref;
+  theme: ThemePref;   // зеркало prefs.theme для прежних читателей
+  prefs: Prefs;       // настройки устройства, см. prefs.ts
   notify: NotifyState;   // уведомления на этом устройстве
   pushReady: boolean;    // подписка Web Push принята сервером: уведомит и без открытой вкладки
 }
@@ -61,6 +63,7 @@ let state: GlobalState = {
   infoOpen: false,
   muted: (() => { try { return JSON.parse(localStorage.getItem('relay.muted') ?? '[]'); } catch { return []; } })(),
   theme: loadTheme(),
+  prefs: getPrefs(),
   notify: 'unsupported',
   pushReady: false,
 };
@@ -68,6 +71,11 @@ const subscribers = new Set<() => void>();
 
 // Рендер Preact — в фазе записи кадра: замеры уже сделаны, layout не дёргается.
 options.debounceRendering = (cb) => requestMutation(cb);
+
+// prefs → GlobalState (в том числе из других вкладок)
+subscribePrefs((prefs) => setGlobal({ prefs, theme: prefs.theme }));
+listenStorage();
+applyPrefs();
 
 export const getGlobal = (): GlobalState => state;
 
