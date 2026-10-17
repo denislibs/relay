@@ -192,6 +192,8 @@ export interface ContactsHost {
   ops: Ops;
   httpBase: string;
   headers?: Record<string, string>;
+  /** HTTP движка (dev: имитатор сети); по умолчанию fetch */
+  fetch?: (url: string, init?: RequestInit) => Promise<Response>;
   online(): boolean;
   presence(): ReadonlyMap<number, Presence>;
   /** присутствие из ответа сервера, если живого ещё нет */
@@ -345,7 +347,7 @@ export class Contacts {
         let res: Response;
         try {
           // POST: номер телефона — в теле, не в URL
-          res = await fetch(`${this.h.httpBase}/users/resolve`, { method: 'POST', headers: { 'content-type': 'application/json', ...(this.h.headers ?? {}) }, credentials: 'include', body: JSON.stringify({ query: a.query }) });
+          res = await (this.h.fetch ?? fetch)(`${this.h.httpBase}/users/resolve`, { method: 'POST', headers: { 'content-type': 'application/json', ...(this.h.headers ?? {}) }, credentials: 'include', body: JSON.stringify({ query: a.query }) });
         } catch { return { offline: true }; }
         if (res.status === 404) return { notFound: true };
         if (!res.ok) return { offline: true };

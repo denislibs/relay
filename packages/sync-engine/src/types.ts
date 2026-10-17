@@ -71,7 +71,11 @@ export type Query =
   /** настройки аккаунта (с ещё не подтверждёнными правками): один элемент {notify, sessionsTtlDays, loaded, pending} */
   | { kind: 'settings' }
   /** чёрный список (с ещё не подтверждёнными правками), новые сверху; служебный ~blocked {loaded} */
-  | { kind: 'blocked' };
+  | { kind: 'blocked' }
+  /** раздел «Для разработчиков»: один элемент devStats — снимок состояния движка, не чаще раза в секунду */
+  | { kind: 'devStats' }
+  /** журнал движка (devlog.ts): снимок — события новее since, дальше — только новые, пачкой раз в 250 мс */
+  | { kind: 'devLog'; since: number };
 
 export type Item = { key: string } & Record<string, unknown>;
 
@@ -121,7 +125,19 @@ export type Action =
   | { type: 'setSessionsTtl'; days: number }
   /** стереть локальные данные и взять снимок заново; keepOutbox — не трогать неотправленное */
   | { type: 'resetLocal'; keepOutbox?: boolean }
+  /** раздел «Для разработчиков»: имитатор сети и служебные команды (devlog.ts) */
+  | DevAction
   | { type: 'sendFile'; chatId: number; body: string; file: Blob; name: string; mime: string; w?: number | null; h?: number | null; thumb?: string | null; replyToId?: number | null };
+
+/** Медленная сеть: задержка (мс, туда-обратно; на каждое направление — половина), джиттер (мс), потери кадров (%), полоса (Кбит/с, 0 — без ограничения). */
+export interface NetProfile { latency: number; jitter: number; lossPct: number; kbps: number }
+
+/** Команды раздела «Для разработчиков». persist — режим сети переживёт перезапуск (хранится в IDB meta). */
+export type DevAction =
+  | { type: 'dev'; cmd: 'offline'; args: { on: boolean; persist?: boolean } }
+  | { type: 'dev'; cmd: 'netProfile'; args: { profile: NetProfile | null; persist?: boolean } }
+  | { type: 'dev'; cmd: 'persist'; args: { on: boolean } }
+  | { type: 'dev'; cmd: 'dropSocket' | 'dropNextUpdates' | 'forceTooLong' | 'resync' | 'restartWorker' | 'retryFailed' | 'discardFailed' | 'clearLog'; args?: undefined };
 
 export interface EngineConfig {
   /** сколько resetLocal ждёт идущую работу, мс (по умолчанию 8000) */
@@ -137,6 +153,10 @@ export interface EngineConfig {
   backoffMs?: [number, number];
   historyPage?: number;
   dialogsPage?: number;
+  /** сколько ждать ответ на sync, прежде чем спросить тот же диапазон ещё раз (по умолчанию 5000) */
+  syncTimeoutMs?: number;
+  /** сколько ждать ack/err на запрос с reqId; без ответа соединение считается мёртвым (по умолчанию 15000) */
+  requestTimeoutMs?: number;
   typingMs?: number;      // сколько держать «печатает…» после последнего кадра (по умолчанию 6000)   // диалогов в странице (по умолчанию 100)
 }
 

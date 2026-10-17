@@ -60,6 +60,9 @@ export class Store {
   private dirtyMeta = false;
   private seqAtFlush = 0;
 
+  /** dev: запись в IDB прошла (сколько ключей, мс) — журнал движка */
+  onFlush: ((keys: number, ms: number) => void) | null = null;
+
   private constructor(private db: IDBDatabase, readonly userId: number) {}
 
   static async open(db: IDBDatabase, userId: number): Promise<Store> {
@@ -314,6 +317,28 @@ export class Store {
     return true;
   }
 
+  /** dev «Отбросить failed»: неотправленные с отказом — из очереди и из ленты. Строки сообщений в IDB удаляет движок. */
+  discardFailed(): string[] {
+    const ids: string[] = [];
+    for (const o of [...this.outbox.values()]) {
+      if (!o.failed) continue;
+      ids.push(o.clientId);
+      this.outbox.delete(o.clientId);
+      this.dirtyOutbox.add(o.clientId);
+      this.dirtyMessages.delete(o.clientId);
+      const map = this.messages.get(o.chatId);
+      map?.delete(o.clientId);
+      const chat = this.chats.get(o.chatId);
+      if (chat?.last?.key === o.clientId) {
+        let last: LocalMessage | null = null;
+        for (const m of map?.values() ?? []) if (!last || m.sort > last.sort) last = m;
+        chat.last = last;
+      }
+      if (chat) this.markChat(chat); else this.touch(o.chatId);
+    }
+    return ids;
+  }
+
   /** Файл загружен — вложению неотправленного сообщения есть id (переживёт перезагрузку в outbox). */
   setUploaded(clientId: string, id: string): void {
     const o = this.outbox.get(clientId);
@@ -422,6 +447,7 @@ export class Store {
   // ---------- сохранение ----------
 
   async flush(): Promise<void> {
+    const t0 = Date.now();
     const batch: WriteBatch = { put: {}, del: {} };
     if (this.clearPersistedMessages) {
       // сообщения удаляются отдельной транзакцией до записи новых
@@ -452,6 +478,12 @@ export class Store {
     const seq = this.lastSeq;
     await write(this.db, batch);
     this.seqAtFlush = seq;
+    if (this.onFlush) {
+      let keys = 0;
+      for (const v of Object.values(batch.put)) keys += v?.length ?? 0;
+      for (const v of Object.values(batch.del)) keys += v?.length ?? 0;
+      if (keys) this.onFlush(keys, Date.now() - t0);
+    }
   }
 
   // ---------- внутреннее ----------

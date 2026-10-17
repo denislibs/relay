@@ -36,6 +36,8 @@ export interface OpsHooks {
   run(fn: () => Promise<unknown>): void;
   /** 401: сеанса больше нет — операция не выбрасывается, движок уходит в «сеанс завершён» */
   unauthorized?(): void;
+  /** dev: журнал движка (opAck / opFail) */
+  log?(type: string, data: object): void;
 }
 
 const MAX_FAILURES = 20;
@@ -65,7 +67,7 @@ export class Ops {
   constructor(
     private db: IDBDatabase,
     list: PendingOp[],
-    private http: { base: string; headers?: Record<string, string>; backoffMs?: [number, number] },
+    private http: { base: string; headers?: Record<string, string>; backoffMs?: [number, number]; fetch?: (url: string, init?: RequestInit) => Promise<Response> },
     private hooks: OpsHooks,
   ) {
     this.list = list;
@@ -122,6 +124,7 @@ export class Ops {
           // одним синхронным шагом: операция уходит из очереди и ответ становится новой базой (hooks.done).
           // Иначе кадр, пересчитанный во время записи в IDB, показал бы старую базу без операции — переключатель мигнул бы
           this.list = this.list.filter((o) => o.id !== op.id);
+          this.hooks.log?.(r.ok ? 'opAck' : 'opFail', r.ok ? { key: op.key } : { key: op.key, code: r.code });
           if (r.ok) this.hooks.done(op, r.value);
           else {
             this.failures = [...this.failures, { id: this.nextFailure++, key: op.key, code: r.code, at: Date.now() }].slice(-MAX_FAILURES);
@@ -162,7 +165,7 @@ export class Ops {
 
   private async send(op: PendingOp): Promise<{ ok: true; value: unknown } | { ok: false; code: string } | { retry: true }> {
     try {
-      const res = await fetch(this.http.base + op.path, {
+      const res = await (this.http.fetch ?? fetch)(this.http.base + op.path, {
         method: op.method,
         headers: { 'content-type': 'application/json', ...(this.http.headers ?? {}) },
         credentials: 'include',

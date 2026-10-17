@@ -9,6 +9,8 @@ export type EndReason = 'logout' | 'terminated';
 export interface SessionEndHost {
   httpBase: string;
   headers?: Record<string, string>;
+  /** HTTP движка (dev: имитатор сети); по умолчанию fetch */
+  fetch?: (url: string, init?: RequestInit) => Promise<Response>;
   /** движок уже закрыт (вкладка/хост закрывают его сами) */
   closed(): boolean;
   /** перестать подключаться и отправлять: очередь операций, транспорт */
@@ -69,7 +71,7 @@ export class SessionEnd {
   probe(): void {
     if (this.reason || this.h.closed() || Date.now() - this.lastProbe < PROBE_MS) return;
     this.lastProbe = Date.now();
-    fetch(this.h.httpBase + '/me', { headers: this.h.headers, credentials: 'include' })
+    (this.h.fetch ?? fetch)(this.h.httpBase + '/me', { headers: this.h.headers, credentials: 'include' })
       .then((r) => { this.unauthorized(r.status); }, () => { /* сети нет */ });
   }
 }
