@@ -150,7 +150,8 @@ export function openChat(chatId: number | null, target?: { id: number; sort: num
   feed?.close();
   feed = null;
   if (switchTimer) { clearTimeout(switchTimer); switchTimer = null; }
-  history.replaceState(null, '', chatId ? '#chat=' + chatId : location.pathname);
+  // отметку навигации (nav.ts) не трогаем: без неё «Назад» из настроек не находит страницу чатов
+  history.replaceState(history.state, '', chatId ? '#chat=' + chatId : location.pathname);
   watchPeer(chatId);
   if (!chatId) { setGlobal({ openChatId: null, pendingChatId: null, messages: [], feedMeta: null, unreadFrom: null }); return; }
   const chat = g.chats.find((c) => c.id === chatId);

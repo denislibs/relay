@@ -120,7 +120,16 @@ async function onPop(state: unknown): Promise<void> {
   // запись без нашей отметки (data.ts openChat делает replaceState(null) под #chat=…): остаёмся где были
   // и помечаем запись текущим путём, чтобы следующие переходы по истории сходились со stack
   if (!s || typeof s.nav !== 'string' || typeof s.i !== 'number') {
+    const mine = skipGuard;
     skipGuard = false;
+    // наш back() шёл к родителю (stack[idx - 1]): доходим до него, иначе экран стоит, а браузер уже на запись назад,
+    // и следующий «Назад» уводит из приложения
+    if (mine && idx > 0) {
+      idx -= 1;
+      hist?.replaceState(stamp(stack[idx], idx), '');
+      bind.set(stack[idx]);
+      return;
+    }
     hist?.replaceState(stamp(current(), idx), '');
     return;
   }
