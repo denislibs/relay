@@ -58,7 +58,8 @@ body { margin: 0; font-family: var(--font-sans); color: var(--ink); background: 
 .rl-search-icon { position: relative; display: inline-flex; width: 18px; height: 18px; flex-shrink: 0; }
 .rl-search-icon > * { position: absolute; inset: 0; transition: opacity var(--dur-fast) var(--ease-out), transform var(--dur-fast) var(--ease-out); }
 .rl-search-spin { opacity: 0; transform: scale(0.6); color: var(--brand-text); }
-.rl-search-spin circle { transform-origin: 9px 9px; animation: rl-spin 900ms linear infinite; }
+/* крутится только во время загрузки: скрытый SVG-лоадер с бесконечной анимацией гонял стили и раскладку на каждом кадре */
+.rl-search-busy .rl-search-spin circle { transform-origin: 9px 9px; animation: rl-spin 900ms linear infinite; }
 .rl-search-busy .rl-search-icon .rl-icon { opacity: 0; transform: scale(0.6) rotate(-45deg); }
 .rl-search-busy .rl-search-spin { opacity: 1; transform: none; }
 
@@ -1036,8 +1037,10 @@ button.rl-tab:hover { color: var(--ink); }
 .rl-shell > .rl-presence { display: flex; }
 .rl-shell .rl-shell-aside { flex: 0 0 var(--aside-w, 420px); animation: rl-aside-in 280ms cubic-bezier(0.2, 0, 0, 1) both; }
 .rl-presence[data-state="closing"] > .rl-shell-aside { animation: rl-aside-out 240ms cubic-bezier(0.4, 0, 1, 1) both; }
-@keyframes rl-aside-in { from { margin-right: calc(-1 * var(--aside-w, 420px) - var(--space-float)); opacity: 0.4; } to { margin-right: 0; opacity: 1; } }
-@keyframes rl-aside-out { from { margin-right: 0; opacity: 1; } to { margin-right: calc(-1 * var(--aside-w, 420px) - var(--space-float)); opacity: 0.4; } }
+/* уходящая панель — вне потока на своём месте: колонка чата сразу занимает ширину (одна раскладка) */
+.rl-shell > .rl-presence[data-state="closing"] { position: absolute; top: var(--space-float); right: var(--space-float); bottom: var(--space-float); pointer-events: none; }
+@keyframes rl-aside-in { from { transform: translateX(calc(100% + var(--space-float))); opacity: 0.4; } to { transform: none; opacity: 1; } }
+@keyframes rl-aside-out { from { transform: none; opacity: 1; } to { transform: translateX(calc(100% + var(--space-float))); opacity: 0.4; } }
 .rl-asidecard { display: flex; flex-direction: column; min-height: 0; overflow: hidden; color: var(--ink); }
 .rl-asidecard .rl-panel-head h2 { flex: 1; font: 500 19px/24px var(--font-sans); margin: 0; }
 .rl-aside-body { flex: 1; min-height: 0; display: flex; flex-direction: column; overflow-y: auto; scrollbar-width: thin; }

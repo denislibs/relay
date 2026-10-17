@@ -1,6 +1,6 @@
 import { h } from 'preact';
 import { useState, useRef, useEffect, useLayoutEffect } from 'preact/hooks';
-import { requestMeasure, requestMutation, onHeavyAnimationEnd, beginHeavyAnimation } from './schedule.js';
+import { requestMeasure, requestMutation, onHeavyAnimationEnd, beginHeavyAnimation, forceMeasure } from './schedule.js';
 import { TWallpaper } from 'twallpaper';
 import { cx, ripple, reducedMotion, Presence, Icon, IconButton, Avatar, Badge, Button, Checkbox, MediaArt, MessageStatus, SearchField, ICONS } from './kit.js';
 
@@ -308,9 +308,46 @@ function WindowList(props) {
 }
 
 /* ---------- AsidePanel: right-hand floating card (user info, search…) that pushes the chat column ---------- */
+/* Правая панель. Ширина колонки чата меняется один раз (раскладка — одна), а плавность даёт transform:
+   панель въезжает/уезжает сдвигом (при уходе — вне потока), колонка чата FLIP-ом догоняет новый центр.
+   Так каждый кадр анимации — только композиция, без перераскладки ленты. */
+var ASIDE_MS = 280;
+/* x центральной колонки чата (шапка по центру; нет шапки — сама колонка) */
+function anchorX(aside) {
+  var shell = aside ? aside.closest('.rl-shell') : document.querySelector('.rl-shell');
+  var main = shell && shell.querySelector(':scope > .rl-shell-main');
+  if (!main) return null;
+  return forceMeasure(function () { return (main.querySelector('.rl-glassbar') || main).getBoundingClientRect().left; });
+}
 function AsidePanel(props) {
+  var ref = useRef(null), was = useRef(!!props.open), before = useRef(null);
+  // положение колонки до смены — замер в рендере, пока DOM ещё прежний (FLIP: First)
+  if (!!props.open !== was.current) before.current = anchorX(ref.current);
+  useLayoutEffect(function () {
+    var open = !!props.open;
+    if (was.current === open) return;
+    was.current = open;
+    var aside = ref.current, shell = aside && aside.closest('.rl-shell');
+    var main = shell && shell.querySelector(':scope > .rl-shell-main');
+    // узкий экран: панель поверх чата, колонка не меняется
+    if (!main || reducedMotion() || matchMedia('(max-width: 1100px)').matches) return;
+    var end = beginHeavyAnimation(ASIDE_MS + 20);
+    var from = before.current, to = anchorX(aside);
+    if (from == null || to == null || Math.abs(from - to) < 1) { end(); return; }
+    forceMeasure(function () {
+      main.style.transition = 'none';
+      main.style.willChange = 'transform';
+      main.style.transform = 'translateX(' + (from - to) + 'px)';
+    });
+    var raf = requestAnimationFrame(function () { requestMutation(function () {
+      main.style.transition = 'transform ' + ASIDE_MS + 'ms cubic-bezier(0.2, 0, 0, 1)';
+      main.style.transform = '';
+    }); });
+    var t = setTimeout(function () { requestMutation(function () { main.style.transition = ''; main.style.willChange = ''; }); end(); }, ASIDE_MS + 20);
+    return function () { cancelAnimationFrame(raf); clearTimeout(t); end(); };
+  }, [props.open]);
   return h(Presence, { show: !!props.open, exitMs: 260 },
-    h('aside', { class: 'rl-shell-aside' },
+    h('aside', { class: 'rl-shell-aside', ref: ref },
       h('section', { class: 'rl-panel rl-asidecard', 'aria-label': props.label || 'Панель' }, props.children)));
 }
 

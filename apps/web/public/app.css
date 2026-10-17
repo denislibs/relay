@@ -38,7 +38,7 @@ body { background: var(--bg); color: var(--ink); font-family: var(--font-sans); 
 .rl-glassbar-title .app-online { color: var(--brand-text); }
 /* хвост списка, пока сервер не отдал все страницы диалогов */
 .app-more { display: flex; justify-content: center; padding: 14px 0 4px; color: var(--brand-text); }
-.app-more circle { transform-origin: 9px 9px; animation: rl-spin 900ms linear infinite; }
+.app-more svg { animation: rl-spin 900ms linear infinite; }   /* вращаем сам svg (композитор), а не circle внутри — иначе раскладка каждый кадр */
 .rl-profile-sub.app-online { color: var(--brand-text); }
 
 /* ---------- лента: окно, датчики, метки прочтения, разделитель непрочитанного, «липкие» даты ---------- */
