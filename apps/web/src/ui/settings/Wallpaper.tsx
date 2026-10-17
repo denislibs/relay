@@ -6,17 +6,21 @@ import { useScrollMemory } from '../useScrollMemory';
 
 const DEFAULT_WP = { pattern: 'catsAndDogs', colors: null, blur: false };
 
-/** Фон превью: четыре цвета как у живых обоев; null — цвета темы. */
-export function swatchBackground(colors: string[] | null): string {
+const gradient = (colors: string[] | null): string => {
   const c = colors ?? [1, 2, 3, 4].map((i) => `var(--wallpaper-${i})`);
   return `linear-gradient(135deg, ${c[0]}, ${c[3]} 45%, ${c[1]} 70%, ${c[2]})`;
+};
+
+/** Фон превью как у живых обоев: светлая тема — градиент, тёмная — тёмная основа (как у холста). */
+export function swatchBackground(colors: string[] | null, dark = false): string {
+  return dark ? 'var(--wallpaper-pattern)' : gradient(colors);
 }
 
-/** Плитка-превью: градиент + узор поверх (маской, чтобы цвет узора подходил к теме). */
+/** Плитка-превью. Светлая: градиент + узор тёмным. Тёмная: как живой холст — узор залит градиентом поверх тёмной основы. */
 export function Swatch({ pattern, colors, dark, size }: { pattern: string; colors: string[] | null; dark: boolean; size?: number }) {
   return (
-    <span class={'app-swatch-fill' + (dark ? ' app-swatch-dark' : '')} style={{ background: swatchBackground(colors), ...(size ? { width: size + 'px', height: size + 'px' } : null) }}>
-      <span class="app-swatch-pattern" style={{ '--swatch-pattern': `url(${buildPattern(pattern)})` }} />
+    <span class={'app-swatch-fill' + (dark ? ' app-swatch-dark' : '')} style={{ background: swatchBackground(colors, dark), ...(size ? { width: size + 'px', height: size + 'px' } : null) }}>
+      <span class="app-swatch-pattern" style={{ '--swatch-pattern': `url(${buildPattern(pattern)})`, ...(dark ? { background: gradient(colors) } : null) }} />
     </span>
   );
 }

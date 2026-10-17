@@ -27,19 +27,18 @@ export const PATTERN_NAMES: Record<string, string> = { catsAndDogs: 'Коты и
 export const sameColors = (a: string[] | null, b: string[] | null): boolean =>
   a === b || (!!a && !!b && a.length === b.length && a.every((c, i) => c === b[i]));
 
-/** Текущая тема с учётом «Как в системе» (следит за настройкой ОС). */
+/** Текущая тема с учётом «Как в системе»: считается прямо при рендере (без отставания), ОС-настройка — по подписке. */
 export function useIsDark(): boolean {
   const pref = useGlobal((s) => s.prefs.theme);
-  const [dark, setDark] = useState(() => isDark(pref));
+  const [, tick] = useState(0);
   useEffect(() => {
-    setDark(isDark(pref));
     if (pref !== 'system' || typeof matchMedia === 'undefined') return;
     const mq = matchMedia('(prefers-color-scheme: dark)');
-    const on = () => setDark(mq.matches);
+    const on = () => tick((n) => n + 1);
     mq.addEventListener('change', on);
     return () => mq.removeEventListener('change', on);
   }, [pref]);
-  return dark;
+  return isDark(pref);
 }
 
 /** Обои текущей темы. */

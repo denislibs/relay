@@ -396,8 +396,9 @@ function Composer(props) {
           id: id, ref: inputRef, rows: 1, value: value, placeholder: props.placeholder || 'Введите сообщение', autocomplete: 'off',
           onInput: function (e) { setValue(e.target.value); caret[1](e.target.selectionStart); },
           onKeyDown: function (e) {
+            if (e.key === 'Enter' && (e.isComposing || e.keyCode === 229)) return;   // IME подтверждает ввод — не трогаем
             if (e.key === 'Enter' && mentionList && mentionList.length) { e.preventDefault(); pickMention(mentionList[0]); return; }
-            if (e.key === 'Enter' && !e.isComposing) {
+            if (e.key === 'Enter') {
               // sendKey 'ctrlEnter': Enter — новая строка, Ctrl/⌘+Enter — отправка; иначе Enter отправляет, Shift+Enter — новая строка
               var mod = e.ctrlKey || e.metaKey;
               if (props.sendKey === 'ctrlEnter' ? mod : !e.shiftKey) { e.preventDefault(); send(); }   // иначе textarea сама вставит перенос

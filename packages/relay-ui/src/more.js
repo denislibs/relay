@@ -516,6 +516,8 @@ function Wallpaper(props) {
       requestMeasure(function () {
         var P = latest.current;
         var t = readTheme(el);
+        // props.dark — тема, с которой отрисован App; DOM переключился раньше рендера: ждём props (эффект по ним применит один раз)
+        if (typeof P.dark === 'boolean' && P.dark !== t.dark) return;
         var custom = P.colors && P.colors.length >= 4 ? P.colors.slice(0, 4) : null;
         var colors = custom || t.colors;
         var key = [t.dark, colors.join(), P.pattern].join('|');
@@ -556,7 +558,7 @@ function Wallpaper(props) {
     };
   }, []);
   var colorsKey = props.colors ? props.colors.join() : '';
-  useEffect(function () { if (rerun.current) rerun.current(true); }, [props.pattern, colorsKey]);
+  useEffect(function () { if (rerun.current) rerun.current(true); }, [props.pattern, colorsKey, props.dark]);
   return h('div', { ref: host, class: cx('rl-tw', props.blur && 'rl-tw-blur'), 'aria-hidden': 'true' });
 }
 
@@ -626,7 +628,7 @@ function FloatShell(props) {
   // начальная ширина — один раз; дальше --side-w ведёт только ручка (иначе каждый рендер затирал бы перетаскивание)
   useLayoutEffect(function () { if (props.sideWidth && ref.current) ref.current.style.setProperty('--side-w', props.sideWidth + 'px'); }, []);
   return h('div', { ref: ref, class: cx('rl-shell rl-wallpaper', props.wallpaper !== false && 'rl-shell-tw', props.class), style: props.style },
-    props.wallpaper !== false ? h(Wallpaper, { pattern: props.pattern, colors: props.wallpaperColors, blur: props.wallpaperBlur }) : null,
+    props.wallpaper !== false ? h(Wallpaper, { pattern: props.pattern, colors: props.wallpaperColors, blur: props.wallpaperBlur, dark: props.wallpaperDark }) : null,
     props.rail || null,
     props.sidebar ? h('div', { class: 'rl-shell-side' }, props.sidebar,
       props.onSideResize ? h(SideResizer, { min: props.sideMin, max: props.sideMax, onChange: props.onSideResize }) : null) : null,

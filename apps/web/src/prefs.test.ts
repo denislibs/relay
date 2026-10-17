@@ -96,3 +96,21 @@ test('subscribePrefs notified on setPref', () => {
   setPref('textSize', 18); expect(got).toBe(18); off();
   setPref('textSize', 14); expect(got).toBe(18);
 });
+
+test('setPref wallpaper paths are sanitized', () => {
+  resetPrefsForTest(fake());
+  setPref('wallpaper.light.blur', true);
+  expect(getPrefs().wallpaper.light.blur).toBe(true);
+  setPref('wallpaper.light.blur', 'yes');
+  expect(getPrefs().wallpaper.light.blur).toBe(false);
+  setPref('wallpaper.dark.colors', ['#112233', 'red;}body{x', '#fff', '#000']);
+  expect(getPrefs().wallpaper.dark.colors).toBeNull();
+  setPref('wallpaper.dark.colors', ['#112233', '#abc', '#fff', '#000000']);
+  expect(getPrefs().wallpaper.dark.colors).toEqual(['#112233', '#abc', '#fff', '#000000']);
+  setPref('wallpaper.dark.colors', ['#112233']);
+  expect(getPrefs().wallpaper.dark.colors).toBeNull();
+  setPref('wallpaper.light.pattern', '"); x');
+  expect(getPrefs().wallpaper.light.pattern).toBe('catsAndDogs');
+  setPref('wallpaper.light.pattern', 'doodles');
+  expect(getPrefs().wallpaper.light.pattern).toBe('doodles');
+});

@@ -93,8 +93,12 @@ function sanitize(src: Prefs, d: Prefs): Prefs {
   p.autoload.fileMaxMb = nearest(FILE_MB, num(p.autoload.fileMaxMb, d.autoload.fileMaxMb));
   p.screen.blurDelay = nearest(BLUR_DELAY, num(p.screen.blurDelay, 0));
   for (const t of ['light', 'dark'] as const) {
-    const c = p.wallpaper[t].colors as unknown;
-    if (c !== null && !(Array.isArray(c) && c.every((x) => typeof x === 'string'))) p.wallpaper[t].colors = null;
+    const w = p.wallpaper[t];
+    const c = w.colors as unknown;
+    // ровно 4 hex-цвета (в CSS и twallpaper уходят как есть), иначе — цвета темы
+    if (c !== null && !(Array.isArray(c) && c.length === 4 && c.every((x) => typeof x === 'string' && /^#[0-9a-f]{3}([0-9a-f]{3})?$/i.test(x)))) w.colors = null;
+    if (typeof w.pattern !== 'string' || !/^[A-Za-z0-9_-]{1,32}$/.test(w.pattern)) w.pattern = d.wallpaper[t].pattern;
+    w.blur = w.blur === true;
   }
   return p;
 }

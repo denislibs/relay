@@ -128,7 +128,7 @@ body { margin: 0; font-family: var(--font-sans); color: var(--ink); background: 
 .rl-composer { display: flex; align-items: flex-end; gap: var(--space-1); padding: 8px 12px; background: var(--tray); }
 .rl-composer-field { flex: 1; min-width: 0; display: flex; align-items: flex-end; gap: 4px; min-height: 48px; padding: 4px 6px; border-radius: var(--radius-xl); background: var(--composer); }
 .rl-composer-field :is(input, textarea) { flex: 1; min-width: 0; height: 40px; border: 0; background: transparent; outline: none; font: 400 var(--message-text-size, 15px)/calc(var(--message-text-size, 15px) * 1.333) var(--font-sans); color: var(--ink); padding: 0 6px; }
-.rl-composer-field textarea { box-sizing: border-box; display: block; resize: none; max-height: 144px; padding-block: 9px; overflow-y: auto; }
+.rl-composer-field textarea { box-sizing: border-box; display: block; resize: none; height: auto; min-height: calc(var(--message-text-size, 15px) * 1.333 + 18px); max-height: 144px; padding-block: 9px; overflow-y: auto; }
 .rl-composer-field :is(input, textarea)::placeholder { color: var(--ink-muted); }
 .rl-composer-send { position: relative; width: 48px; height: 48px; border: 0; border-radius: 50%; background: var(--brand); color: var(--on-brand); cursor: pointer; flex-shrink: 0; transition: transform var(--dur-instant) var(--ease-out), background-color var(--dur-instant) var(--ease-out); }
 .rl-composer-send:hover { background: var(--brand-strong); }
@@ -906,7 +906,7 @@ button.rl-quote { cursor: pointer; }
 .rl-shell .rl-composer { align-items: flex-end; gap: 0; min-height: 48px; padding: 4px; border-radius: 24px; background: var(--raised); box-shadow: var(--tg-shadow-composer); }
 .rl-shell .rl-composer-field { align-items: center; min-height: 40px; padding: 0; border-radius: 0; background: transparent; box-shadow: none; }
 .rl-shell .rl-composer-field :is(input, textarea) { font-size: var(--message-text-size, 16px); line-height: calc(var(--message-text-size, 16px) * 1.3125); padding-inline: 4px; }
-.rl-shell .rl-composer-field textarea { padding-block: 9.5px; }
+.rl-shell .rl-composer-field textarea { padding-block: 9.5px; min-height: max(40px, calc(var(--message-text-size, 16px) * 1.3125 + 19px)); }
 .rl-shell .rl-composer-field .rl-iconbtn { width: 40px; height: 40px; color: var(--ink-muted); }
 .rl-shell .rl-composer-send { width: 40px; height: 40px; box-shadow: none; }
 

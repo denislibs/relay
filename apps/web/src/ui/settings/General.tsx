@@ -40,7 +40,7 @@ export function General() {
       <PanelHeader icon="arrowLeft" closeLabel="Назад" title="Общие настройки" onClose={() => void back()} />
       <div class="rl-settings" ref={scroll.ref} onScroll={scroll.onScroll}>
         <Section title="Настройки">
-          <div class="app-textpreview" style={{ background: swatchBackground(wp.colors) }} aria-hidden="true">
+          <div class="app-textpreview" style={{ background: swatchBackground(wp.colors, dark) }} aria-hidden="true">
             <Bubble from="in" tail time={hm(now)}>Привет! Так выглядит ваш текст.</Bubble>
             <Bubble from="out" tail time={hm(now)} status="read">Отлично, размер подходит.</Bubble>
           </div>

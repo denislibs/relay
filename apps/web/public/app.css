@@ -131,7 +131,7 @@ body { background: var(--bg); color: var(--ink); font-family: var(--font-sans); 
 .app-swatch-fill { position: absolute; inset: 0; display: block; }
 .app-swatch-mini { position: relative; display: block; width: 36px; height: 36px; border-radius: var(--radius-sm); overflow: hidden; }
 .app-swatch-pattern { position: absolute; inset: 0; background: #000; opacity: 0.22; -webkit-mask: var(--swatch-pattern) center / 150px auto repeat; mask: var(--swatch-pattern) center / 150px auto repeat; }
-.app-swatch-dark .app-swatch-pattern { background: #fff; opacity: 0.12; }
+.app-swatch-dark .app-swatch-pattern { opacity: 0.8; }
 .app-swatch-mini .app-swatch-pattern { -webkit-mask-size: 60px auto; mask-size: 60px auto; }
 @media (prefers-reduced-motion: reduce) { .app-swatch, .app-swatch-on::after { transition: none; animation: none; } }
 :root[data-anim="off"] .app-swatch, :root[data-anim="off"] .app-swatch-on::after { transition: none; animation: none; }
