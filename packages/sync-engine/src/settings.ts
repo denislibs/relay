@@ -83,8 +83,14 @@ export class SettingsCache {
    */
   apply(s: UserSettings & { privacy?: PrivacyRules }, seq?: number): boolean {
     if (seq !== undefined && seq < this.seq) return false;
+    const next = normalizeSettings({ ...s, privacy: s.privacy ?? this.base.privacy });
+    // то же самое (эхо журнала, повторный снимок): seq запоминаем, подписки не трогаем
+    if (this.loaded && JSON.stringify(next) === JSON.stringify(this.base)) {
+      if (seq !== undefined && seq > this.seq) { this.seq = seq; this.persist = true; }
+      return false;
+    }
     if (seq !== undefined) this.seq = seq;
-    this.base = normalizeSettings({ ...s, privacy: s.privacy ?? this.base.privacy });
+    this.base = next;
     this.loaded = true;
     this.dirty = true;
     this.persist = true;

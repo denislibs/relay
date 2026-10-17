@@ -59,18 +59,22 @@ export class ContactsCache {
   /** Контакт добавлен/изменён. seq — номер записи журнала (или ответа); не новее известного — не трогаем. */
   applyContact(c: Contact, seq = c.seq): boolean {
     if (seq !== undefined && seq <= this.seqOf(c.userId)) return false;
-    this.before(c.userId);
-    this.base.set(c.userId, baseOf(c));
+    const next = baseOf(c), prev = this.base.get(c.userId);
     if (seq !== undefined) this.seqs.set(c.userId, seq);
+    // то же самое (эхо своей правки): seq запоминаем, подписки не трогаем
+    if (prev && JSON.stringify(prev) === JSON.stringify(next)) { this.persist = true; return true; }
+    this.before(c.userId);
+    this.base.set(c.userId, next);
     this.touch();
     return true;
   }
 
   applyRemoved(userId: number, seq?: number): boolean {
     if (seq !== undefined && seq <= this.seqOf(userId)) return false;
+    if (seq !== undefined) this.seqs.set(userId, seq);
+    if (!this.base.has(userId)) { this.persist = true; return true; }   // и так нет — подписки не трогаем
     this.before(userId);
     this.base.delete(userId);
-    if (seq !== undefined) this.seqs.set(userId, seq);
     this.touch();
     return true;
   }
@@ -78,11 +82,18 @@ export class ContactsCache {
   /** Весь список на момент seq: всё, что не новее, заменяется снимком. */
   applySnapshot(list: Contact[], seq: number): void {
     const ids = new Set(list.map((c) => c.userId));
-    for (const c of list) if (seq >= this.seqOf(c.userId)) { const prev = this.base.get(c.userId); if (!prev || contactName(prev) !== contactName(c)) this.before(c.userId); this.base.set(c.userId, baseOf(c)); this.seqs.set(c.userId, seq); }
-    for (const id of [...this.base.keys()]) if (!ids.has(id) && seq >= this.seqOf(id)) { this.before(id); this.base.delete(id); this.seqs.set(id, seq); }
+    let changed = !this.loaded;
+    for (const c of list) if (seq >= this.seqOf(c.userId)) {
+      const prev = this.base.get(c.userId), next = baseOf(c);
+      if (!prev || contactName(prev) !== contactName(c)) this.before(c.userId);
+      if (!prev || JSON.stringify(prev) !== JSON.stringify(next)) changed = true;
+      this.base.set(c.userId, next); this.seqs.set(c.userId, seq);
+    }
+    for (const id of [...this.base.keys()]) if (!ids.has(id) && seq >= this.seqOf(id)) { this.before(id); this.base.delete(id); this.seqs.set(id, seq); changed = true; }
     this.floor = Math.max(this.floor, seq);
     this.loaded = true;
-    this.touch();
+    // снимок без перемен (после каждого hello) — подписки не трогаем, только запоминаем seq
+    if (changed) this.touch(); else this.persist = true;
   }
 
   /** Чьи контакты изменились в базе (и какими были до того) — забрать для переименования чатов. */

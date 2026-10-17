@@ -119,14 +119,16 @@ export class Ops {
           if (gen !== this.gen) continue;   // очередь забыли, пока ждали ответа: результат не применяем
           if ('retry' in r) { this.backoff(); break; }
           this.attempt = 0;
+          // одним синхронным шагом: операция уходит из очереди и ответ становится новой базой (hooks.done).
+          // Иначе кадр, пересчитанный во время записи в IDB, показал бы старую базу без операции — переключатель мигнул бы
           this.list = this.list.filter((o) => o.id !== op.id);
-          await write(this.db, { put: {}, del: { ops: [op.id] } });
           if (r.ok) this.hooks.done(op, r.value);
           else {
             this.failures = [...this.failures, { id: this.nextFailure++, key: op.key, code: r.code, at: Date.now() }].slice(-MAX_FAILURES);
           }
           this.dirty = true;
           this.hooks.changed();
+          await write(this.db, { put: {}, del: { ops: [op.id] } });
         }
       } finally {
         this.inflight = null;

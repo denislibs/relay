@@ -44,27 +44,36 @@ export class BlocksCache {
 
   applyBlocked(b: BlockedUser, seq = b.seq): boolean {
     if (seq !== undefined && seq <= this.seqOf(b.userId)) return false;
-    this.base.set(b.userId, baseOf(b));
+    const next = baseOf(b), prev = this.base.get(b.userId);
     if (seq !== undefined) this.seqs.set(b.userId, seq);
+    if (prev && JSON.stringify(prev) === JSON.stringify(next)) { this.persist = true; return true; }   // эхо — подписки не трогаем
+    this.base.set(b.userId, next);
     this.touch();
     return true;
   }
 
   applyUnblocked(userId: number, seq?: number): boolean {
     if (seq !== undefined && seq <= this.seqOf(userId)) return false;
-    this.base.delete(userId);
     if (seq !== undefined) this.seqs.set(userId, seq);
+    if (!this.base.has(userId)) { this.persist = true; return true; }   // и так нет — подписки не трогаем
+    this.base.delete(userId);
     this.touch();
     return true;
   }
 
   applySnapshot(list: BlockedUser[], seq: number): void {
     const ids = new Set(list.map((b) => b.userId));
-    for (const b of list) if (seq >= this.seqOf(b.userId)) { this.base.set(b.userId, baseOf(b)); this.seqs.set(b.userId, seq); }
-    for (const id of [...this.base.keys()]) if (!ids.has(id) && seq >= this.seqOf(id)) { this.base.delete(id); this.seqs.set(id, seq); }
+    let changed = !this.loaded;
+    for (const b of list) if (seq >= this.seqOf(b.userId)) {
+      const prev = this.base.get(b.userId), next = baseOf(b);
+      if (!prev || JSON.stringify(prev) !== JSON.stringify(next)) changed = true;
+      this.base.set(b.userId, next); this.seqs.set(b.userId, seq);
+    }
+    for (const id of [...this.base.keys()]) if (!ids.has(id) && seq >= this.seqOf(id)) { this.base.delete(id); this.seqs.set(id, seq); changed = true; }
     this.floor = Math.max(this.floor, seq);
     this.loaded = true;
-    this.touch();
+    // снимок без перемен — подписки не трогаем, только запоминаем seq
+    if (changed) this.touch(); else this.persist = true;
   }
 
   collect(): { k: string; v: unknown } | null {

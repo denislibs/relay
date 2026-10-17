@@ -44,6 +44,11 @@ export class ProfileCache {
   setMe(me: Me): boolean {
     const cur = this.me?.seq;
     if (me.seq !== undefined && cur !== undefined && me.seq < cur) return false;
+    // то же самое с тем же или более новым seq: запоминаем seq, подписки не трогаем
+    if (this.me && JSON.stringify({ ...this.me, seq: undefined }) === JSON.stringify({ ...me, seq: undefined })) {
+      if (me.seq !== undefined && me.seq !== cur) { this.me = me; this.dirtyMe = true; }
+      return false;
+    }
     this.me = me;
     this.gen++;
     this.dirtyMe = true;
