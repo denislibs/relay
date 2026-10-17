@@ -373,6 +373,13 @@ function Composer(props) {
     setValue(before + value.slice(caret[0] < 0 ? value.length : caret[0]));
     caret[1](-1);
   }
+  // поле растёт вместе с текстом (до max-height в CSS) и сжимается после отправки
+  useLayoutEffect(function () {
+    var el = inputRef.current;
+    if (!el) return;
+    el.style.height = 'auto';
+    el.style.height = el.scrollHeight + 'px';
+  }, [value]);
   var id = props.id || 'rl-composer';
   return h('div', { class: cx('rl-composer-wrap', (props.className || props.class)) },
     h(Presence, { show: !!props.replyTo, exitMs: 160 },
@@ -385,12 +392,16 @@ function Composer(props) {
       h('div', { class: 'rl-composer-field' },
         h(IconButton, { icon: attach[0] ? 'close' : 'attach', label: attach[0] ? 'Закрыть вложения' : 'Прикрепить', active: attach[0], class: 'rl-attach-toggle', onClick: function () { attach[1](!attach[0]); } }),
         h('label', { for: id, class: 'rl-sr' }, 'Сообщение'),
-        h('input', {
-          id: id, ref: inputRef, type: 'text', value: value, placeholder: props.placeholder || 'Введите сообщение', autocomplete: 'off',
+        h('textarea', {
+          id: id, ref: inputRef, rows: 1, value: value, placeholder: props.placeholder || 'Введите сообщение', autocomplete: 'off',
           onInput: function (e) { setValue(e.target.value); caret[1](e.target.selectionStart); },
           onKeyDown: function (e) {
             if (e.key === 'Enter' && mentionList && mentionList.length) { e.preventDefault(); pickMention(mentionList[0]); return; }
-            if (e.key === 'Enter') { e.preventDefault(); send(); }
+            if (e.key === 'Enter' && !e.isComposing) {
+              // sendKey 'ctrlEnter': Enter — новая строка, Ctrl/⌘+Enter — отправка; иначе Enter отправляет, Shift+Enter — новая строка
+              var mod = e.ctrlKey || e.metaKey;
+              if (props.sendKey === 'ctrlEnter' ? mod : !e.shiftKey) { e.preventDefault(); send(); }   // иначе textarea сама вставит перенос
+            }
             if (e.key === 'Escape' && props.replyTo && props.onCancelReply) props.onCancelReply();
           }
         }),

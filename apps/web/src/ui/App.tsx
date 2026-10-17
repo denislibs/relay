@@ -2,21 +2,24 @@ import { AsidePanel, EmptyState, FloatShell, Presence, SideFrame, SlideStack, To
 import { useRef } from 'preact/hooks';
 import { useGlobal } from '../global';
 import { orderFor } from '../nav';
+import { useWallpaper } from '../wallpapers';
 import { Chat } from './Chat';
 import { Info } from './Info';
 import { Login } from './Login';
 import { NewChat } from './NewChat';
 import { LegacyPage } from './Settings';
+import { General } from './settings/General';
 import { Main } from './settings/Main';
 import { Placeholder } from './settings/Placeholder';
 import { Profile } from './settings/Profile';
+import { Wallpaper } from './settings/Wallpaper';
 import { Contacts } from './contacts/Contacts';
 import { EditContact } from './contacts/EditContact';
 import { NewContact } from './contacts/NewContact';
 import { Sidebar } from './Sidebar';
 
 
-const LEGACY: Record<string, string> = { 'settings/general': 'Основные настройки', 'settings/notifications': 'Уведомления', 'settings/data': 'Данные и память' };
+const LEGACY: Record<string, string> = { 'settings/notifications': 'Уведомления', 'settings/data': 'Данные и память' };
 
 // ширина списка чатов, которую пользователь вытянул за край (null — по умолчанию)
 const SIDE_KEY = 'relay.sideWidth';
@@ -28,11 +31,12 @@ export function App() {
   const openChatId = useGlobal((s) => s.openChatId);
   const view = useGlobal((s) => s.sidebarView);
   const infoOpen = useGlobal((s) => s.infoOpen);
+  const { wp } = useWallpaper();
   if (boot === 'loading') return null;
   if (boot === 'login') return <Login />;
   return (
     <>
-      <FloatShell class={openChatId ? 'app-chat-open' : ''} sideWidth={savedSide} onSideResize={saveSide} aside={<AsidePanel open={infoOpen && !!openChatId} label="Информация"><Info /></AsidePanel>} sidebar={<SideFrame><SlideStack order={orderFor(view)} active={view} render={(k: string) => (k === 'chats' ? <Sidebar /> : k === 'settings' ? <Main /> : k === 'settings/profile' ? <Profile /> : k === 'contacts' ? <Contacts /> : /^contacts\/\d+\/edit$/.test(k) ? <EditContact key={k} path={k} active={k === view} /> : LEGACY[k] ? <LegacyPage path={k} title={LEGACY[k]} /> : <Placeholder path={k} />)} /></SideFrame>}>
+      <FloatShell class={openChatId ? 'app-chat-open' : ''} pattern={wp.pattern} wallpaperColors={wp.colors} wallpaperBlur={wp.blur} sideWidth={savedSide} onSideResize={saveSide} aside={<AsidePanel open={infoOpen && !!openChatId} label="Информация"><Info /></AsidePanel>} sidebar={<SideFrame><SlideStack order={orderFor(view)} active={view} render={(k: string) => (k === 'chats' ? <Sidebar /> : k === 'settings' ? <Main /> : k === 'settings/profile' ? <Profile /> : k === 'settings/general' ? <General /> : k === 'settings/general/wallpaper' ? <Wallpaper /> : k === 'contacts' ? <Contacts /> : /^contacts\/\d+\/edit$/.test(k) ? <EditContact key={k} path={k} active={k === view} /> : LEGACY[k] ? <LegacyPage path={k} title={LEGACY[k]} /> : <Placeholder path={k} />)} /></SideFrame>}>
         {openChatId ? (
           <Chat key={openChatId} chatId={openChatId} />
         ) : (

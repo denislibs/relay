@@ -1,20 +1,32 @@
+import { getPrefs, localeTimeFormat } from '../prefs';
+
+export { localeTimeFormat };
+
 const pad = (n: number) => String(n).padStart(2, '0');
 
-export function chatTime(iso: string | undefined): string {
+export type TimeFormat = '12h' | '24h';
+
+/** Часы:минуты в нужном формате; fmt не задан — настройка устройства (null → локаль). */
+export function hm(d: Date, fmt: TimeFormat = getPrefs().timeFormat ?? localeTimeFormat()): string {
+  if (fmt === '24h') return `${pad(d.getHours())}:${pad(d.getMinutes())}`;
+  const h = d.getHours();
+  return `${h % 12 || 12}:${pad(d.getMinutes())} ${h < 12 ? 'AM' : 'PM'}`;
+}
+
+export function chatTime(iso: string | undefined, fmt?: TimeFormat): string {
   if (!iso) return '';
   const d = new Date(iso), now = new Date();
   if (d.getTime() <= 0) return '';
   const day = (x: Date) => new Date(x.getFullYear(), x.getMonth(), x.getDate()).getTime();
   const diff = Math.round((day(now) - day(d)) / 86_400_000);
-  if (diff === 0) return `${pad(d.getHours())}:${pad(d.getMinutes())}`;
+  if (diff === 0) return hm(d, fmt);
   if (diff === 1) return 'Вчера';
   if (diff < 7) return d.toLocaleDateString('ru-RU', { weekday: 'short' });
   return `${pad(d.getDate())}.${pad(d.getMonth() + 1)}.${String(d.getFullYear()).slice(2)}`;
 }
 
-export function clock(iso: string): string {
-  const d = new Date(iso);
-  return `${pad(d.getHours())}:${pad(d.getMinutes())}`;
+export function clock(iso: string, fmt?: TimeFormat): string {
+  return hm(new Date(iso), fmt);
 }
 
 export function dayLabel(iso: string): string {
@@ -40,7 +52,7 @@ export function lastSeenText(online: boolean, lastSeen: string | null, now = Dat
   if (ago < 3_600_000) return `был(а) ${Math.floor(ago / 60_000)} мин. назад`;
   const day = (x: Date) => new Date(x.getFullYear(), x.getMonth(), x.getDate()).getTime();
   const days = Math.round((day(new Date(now)) - day(d)) / 86_400_000);
-  const at = `${pad(d.getHours())}:${pad(d.getMinutes())}`;
+  const at = hm(d);
   if (days === 0) return `был(а) в ${at}`;
   if (days === 1) return `был(а) вчера в ${at}`;
   if (days < 7) return `был(а) ${d.toLocaleDateString('ru-RU', { day: 'numeric', month: 'short' })} в ${at}`;

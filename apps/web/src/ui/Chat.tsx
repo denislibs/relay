@@ -120,6 +120,7 @@ export function Chat({ chatId }: { chatId: number }) {
   const title = (chat?.title as string) || 'Чат №' + chatId;
   // как в Telegram: в норме подзаголовок — тип чата, а пока идёт подключение или обновление — стадия
   const phaseLabel = useGlobal((s) => s.syncLabel);
+  const sendKey = useGlobal((s) => s.prefs.sendKey);
   const infoOpen = useGlobal((s) => s.infoOpen);
   const peer = useGlobal((s) => s.peer);
   const [, tick] = useState(0);              // «5 мин. назад» должно стареть само
@@ -164,6 +165,7 @@ export function Chat({ chatId }: { chatId: number }) {
       <Feed chatId={chatId} meId={me.userId} peerName={title} stick={stick} highlight={found?.q} onMenu={(key, x, y) => setMenu({ key, x, y })} />
       <Composer
         id="composer"
+        sendKey={sendKey}
         placeholder="Сообщение"
         replyTo={editing ? { author: 'Редактирование', text: editing.original, tone: 1, icon: 'pencil' } : replyTo ? { author: authorOf(replyTo.senderId), text: replyTo.body, tone: replyTo.senderId === me.userId ? 1 : 3 } : null}
         onCancelReply={() => {

@@ -7,7 +7,7 @@ import type { SearchHit } from '@relay/sync-engine/src/types';
 import { go } from '../nav';
 import { isDark } from '../theme';
 import { chatTime } from './format';
-import { setTheme } from './Settings';
+import { applyTheme as setTheme } from '../theme';
 
 const FOLDERS = ['all', 'unread'];
 
@@ -43,6 +43,7 @@ export function Sidebar() {
     return () => { live = false; clearTimeout(t); };
   }, [searchQ]);
   const theme = useGlobal((s) => s.theme);
+  useGlobal((s) => s.prefs.timeFormat);   // смена формата времени перерисовывает время в списке
   const dark = isDark(theme);
   const view = useGlobal((s) => s.sidebarView);
   const me = useGlobal((s) => s.me)!;

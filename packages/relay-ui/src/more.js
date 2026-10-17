@@ -484,44 +484,80 @@ function readTheme(el) {
   if (m) dark = (parseInt(m[1], 16) + parseInt(m[2], 16) + parseInt(m[3], 16)) / 3 < 96;
   return { colors: colors, dark: dark, ink: cs.getPropertyValue('--wallpaper-pattern').trim() || '#000000' };
 }
+var TW_VARS = ['--tw-image', '--tw-size', '--tw-opacity', '--tw-blur', '--tw-background'];
+/* Снимок текущих обоев поверх хоста: после смены цветов/узора тает за 300 мс (кроссфейд без вспышки). */
+function crossfadeSnapshot(el) {
+  var cv = el.querySelector('canvas.tw-canvas');
+  if (!cv || !cv.width) return;
+  var snap = document.createElement('div');
+  snap.className = 'rl-tw-snap';
+  TW_VARS.forEach(function (v) { snap.style.setProperty(v, el.style.getPropertyValue(v)); });
+  var copy = document.createElement('canvas');
+  copy.width = cv.width; copy.height = cv.height; copy.className = cv.className;
+  try { copy.getContext('2d').drawImage(cv, 0, 0); } catch (e) { return; }
+  snap.appendChild(copy);
+  var pat = el.querySelector('.tw-pattern');
+  if (pat) snap.appendChild(pat.cloneNode(false));
+  el.appendChild(snap);
+  var end = beginHeavyAnimation(320);
+  requestAnimationFrame(function () { requestAnimationFrame(function () { snap.style.opacity = '0'; }); });
+  setTimeout(function () { snap.remove(); end(); }, 340);
+}
+/* props: pattern (имя набора | false), colors (4 цвета | null = из темы), blur (bool).
+   Смена props применяется на лету; первое применение и смена темы — без снимка. */
 function Wallpaper(props) {
   var host = useRef(null);
+  var latest = useRef(props);
+  latest.current = props;
+  var rerun = useRef(null);
   useEffect(function () {
-    var el = host.current, wp = null, theme = null;
-    function apply() {
+    var el = host.current, wp = null, theme = null, lastKey = '';
+    function apply(animate) {
       requestMeasure(function () {
+        var P = latest.current;
         var t = readTheme(el);
-        if (theme && t.dark === theme.dark && t.colors.join() === theme.colors.join()) return;
-        theme = t;
+        var custom = P.colors && P.colors.length >= 4 ? P.colors.slice(0, 4) : null;
+        var colors = custom || t.colors;
+        var key = [t.dark, colors.join(), P.pattern].join('|');
+        if (theme && key === lastKey) return;
+        var themeSwitch = !theme || theme.dark !== t.dark || (!custom && t.colors.join() !== theme.colors.join());
+        theme = t; lastKey = key;
         requestMutation(function () {
-          var set = typeof props.pattern === 'string' ? props.pattern : 'catsAndDogs';
-          var pattern = props.pattern === false ? undefined : t.dark
-            ? { image: buildPattern(set), mask: true, background: t.ink, size: '420px', opacity: props.maskOpacity || 0.55 }
-            : { image: buildPattern(set), mask: false, background: 'transparent', size: '420px', opacity: props.patternOpacity || 0.5, blur: 0 };
+          var set = typeof P.pattern === 'string' ? P.pattern : 'catsAndDogs';
+          var pattern = P.pattern === false ? undefined : t.dark
+            ? { image: buildPattern(set), mask: true, background: t.ink, size: '420px', opacity: P.maskOpacity || 0.55 }
+            : { image: buildPattern(set), mask: false, background: 'transparent', size: '420px', opacity: P.patternOpacity || 0.5, blur: 0 };
           if (!wp) {
-            wp = new TWallpaper(el, { colors: t.colors, fps: 60, tails: 90, animate: !!props.animate && !reducedMotion(), scrollAnimate: !!props.scrollAnimate && !reducedMotion(), pattern: pattern });
+            wp = new TWallpaper(el, { colors: colors, fps: 60, tails: 90, animate: !!P.animate && !reducedMotion(), scrollAnimate: !!P.scrollAnimate && !reducedMotion(), pattern: pattern });
             wp.init();
             wallpapers.push(wp);
           } else {
-            wp.updateColors(t.colors);
+            if (animate && !themeSwitch && !reducedMotion()) crossfadeSnapshot(el);
+            wp.updateColors(colors);
+            if (typeof wp.drawGradient === 'function') wp.drawGradient();
             if (pattern) wp.updatePattern(pattern);
           }
         });
       });
     }
-    apply();
+    rerun.current = apply;
+    apply(false);
     // follow theme switches: data-theme on <html> and the OS setting
-    var mo = new MutationObserver(apply);
+    var mo = new MutationObserver(function () { apply(false); });
     mo.observe(document.documentElement, { attributes: true, attributeFilter: ['data-theme', 'class'] });
     var mq = window.matchMedia ? window.matchMedia('(prefers-color-scheme: dark)') : null;
-    if (mq && mq.addEventListener) mq.addEventListener('change', apply);
+    var onMq = function () { apply(false); };
+    if (mq && mq.addEventListener) mq.addEventListener('change', onMq);
     return function () {
       mo.disconnect();
-      if (mq && mq.removeEventListener) mq.removeEventListener('change', apply);
+      rerun.current = null;
+      if (mq && mq.removeEventListener) mq.removeEventListener('change', onMq);
       if (wp) { wallpapers.splice(wallpapers.indexOf(wp), 1); wp.dispose(); }
     };
   }, []);
-  return h('div', { ref: host, class: 'rl-tw', 'aria-hidden': 'true' });
+  var colorsKey = props.colors ? props.colors.join() : '';
+  useEffect(function () { if (rerun.current) rerun.current(true); }, [props.pattern, colorsKey]);
+  return h('div', { ref: host, class: cx('rl-tw', props.blur && 'rl-tw-blur'), 'aria-hidden': 'true' });
 }
 
 /* =====================================================================
@@ -590,7 +626,7 @@ function FloatShell(props) {
   // начальная ширина — один раз; дальше --side-w ведёт только ручка (иначе каждый рендер затирал бы перетаскивание)
   useLayoutEffect(function () { if (props.sideWidth && ref.current) ref.current.style.setProperty('--side-w', props.sideWidth + 'px'); }, []);
   return h('div', { ref: ref, class: cx('rl-shell rl-wallpaper', props.wallpaper !== false && 'rl-shell-tw', props.class), style: props.style },
-    props.wallpaper !== false ? h(Wallpaper, { pattern: props.pattern }) : null,
+    props.wallpaper !== false ? h(Wallpaper, { pattern: props.pattern, colors: props.wallpaperColors, blur: props.wallpaperBlur }) : null,
     props.rail || null,
     props.sidebar ? h('div', { class: 'rl-shell-side' }, props.sidebar,
       props.onSideResize ? h(SideResizer, { min: props.sideMin, max: props.sideMax, onChange: props.onSideResize }) : null) : null,

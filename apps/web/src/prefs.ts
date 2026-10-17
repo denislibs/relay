@@ -137,6 +137,14 @@ export function subscribePrefs(fn: (p: Prefs) => void): () => void { listeners.a
 /** Для тестов: подменить хранилище и перечитать. */
 export function resetPrefsForTest(kv: KV | null, reduced = false): Prefs { storage = kv; appliedTheme = null; current = loadPrefs(kv, reduced); return current; }
 
+/** Формат времени по умолчанию — из локали браузера (hourCycle h11/h12 = 12 часов). */
+export function localeTimeFormat(): '12h' | '24h' {
+  try {
+    const hc = new Intl.DateTimeFormat(undefined, { hour: 'numeric' }).resolvedOptions().hourCycle;
+    return hc === 'h11' || hc === 'h12' ? '12h' : '24h';
+  } catch { return '24h'; }
+}
+
 export function isDark(pref: ThemePref): boolean {
   return pref === 'dark' || (pref === 'system' && matchMedia('(prefers-color-scheme: dark)').matches);
 }
@@ -156,6 +164,7 @@ export function applyPrefs(p: Prefs = current): void {
   const root = document.documentElement;
   if (p.theme !== appliedTheme) { applyTheme(root, p.theme, appliedTheme !== null); appliedTheme = p.theme; }
   root.style.setProperty('--message-text-size', p.textSize + 'px');
+  if ((p.timeFormat ?? localeTimeFormat()) === '12h') root.setAttribute('data-time12', ''); else root.removeAttribute('data-time12'); // время в пузыре шире
   if (p.anim.ui) root.removeAttribute('data-anim'); else root.setAttribute('data-anim', '0');
   if (p.anim.blur) root.removeAttribute('data-blur'); else root.setAttribute('data-blur', '0');
 }
