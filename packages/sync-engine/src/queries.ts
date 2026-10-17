@@ -17,8 +17,8 @@ function result(list: Item[]): Result {
 /** Место в списке — по более позднему из последнего сообщения и черновика (как в Telegram). */
 const sortAt = (c: LocalChat): string => (c.draft && c.draft.at > c.lastAt ? c.draft.at : c.lastAt);
 
-const chatItem = (c: LocalChat): Item => ({
-  key: 'c' + c.id, id: c.id, kind: c.kind, title: c.title, peerId: c.peerId, unread: c.unread, lastReadId: c.lastReadId, lastAt: c.lastAt,
+const chatItem = (c: LocalChat, title: string | null): Item => ({
+  key: 'c' + c.id, id: c.id, kind: c.kind, title, peerId: c.peerId, unread: c.unread, lastReadId: c.lastReadId, lastAt: c.lastAt,
   sortAt: sortAt(c), draft: c.draft?.text ?? null,
   last: c.last ? { key: c.last.key, id: c.last.id, senderId: c.last.senderId, body: c.last.body, status: c.last.status, createdAt: c.last.createdAt, deleted: !!c.last.deleted, kind: c.last.kind ?? 'text', attachmentName: c.last.attachment?.name ?? null } : null,
 });
@@ -58,7 +58,7 @@ export function computeQuery(store: Store, q: Query): Result {
   switch (q.kind) {
     case 'chatList': {
       const chats = [...store.chats.values()].sort((a, b) => { const x = sortAt(a), y = sortAt(b); return x < y ? 1 : x > y ? -1 : b.id - a.id; });
-      return result(chats.slice(0, q.limit).map((c) => ({ ...chatItem(c), typing: store.typing.has(c.id) })));
+      return result(chats.slice(0, q.limit).map((c) => ({ ...chatItem(c, store.titleOf(c)), typing: store.typing.has(c.id) })));
     }
     case 'messages': {
       // только окно: бинарный поиск по отсортированному кэшу, подписи — без сериализации
@@ -94,6 +94,7 @@ export function computeQuery(store: Store, q: Query): Result {
     case 'me':
     case 'user':
     case 'ops':
+    case 'contacts':
       throw new Error(q.kind + ' is computed by the engine');
   }
 }
@@ -101,7 +102,7 @@ export function computeQuery(store: Store, q: Query): Result {
 /** Задевает ли изменение этих чатов результат подписки. */
 export function affects(q: Query, touched: Set<number>): boolean {
   if (!touched.size) return false;
-  if (q.kind === 'status' || q.kind === 'me' || q.kind === 'user' || q.kind === 'ops') return false;   // у них свои флаги в движке
+  if (q.kind === 'status' || q.kind === 'me' || q.kind === 'user' || q.kind === 'ops' || q.kind === 'contacts') return false;   // у них свои флаги в движке
   return q.kind === 'messages' ? touched.has(q.chatId) : true;
 }
 

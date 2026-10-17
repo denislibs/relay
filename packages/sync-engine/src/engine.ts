@@ -1,4 +1,5 @@
-import type { ClientFrame, Me, Message, PublicUser, ServerFrame } from '@relay/protocol';
+import type { ClientFrame, Contact, Me, Message, PublicUser, ServerFrame } from '@relay/protocol';
+import { contactIdOf, contactItems, contactKey, contactName, contactsView, retitle, type ContactView } from './contacts';
 import { delBlob, getAll, getBlob, getByChat, openDb, putBlob } from './idb';
 import { affects, computeQuery, diffResults, messageWindow, type Result } from './queries';
 import type { Item } from './types';
@@ -66,6 +67,7 @@ export class Engine {
       changed: () => this.changed(),
       run: (fn) => this.run(fn),
     });
+    store.titleOf = (c) => this.titleOf(c);
     this.transport = new WsTransport(cfg.wsUrl, {
       onOpen: () => this.onOpen(),
       onFrame: (f) => this.onFrame(f),
@@ -217,6 +219,12 @@ export class Engine {
       const it: Item = { key: 'p' + q.userId, userId: q.userId, known: !!p, online: p?.online ?? false, lastSeen: p?.lastSeen ?? null };
       return { items: new Map([[it.key, it]]), order: [it.key], sig: new Map([[it.key, JSON.stringify(it)]]) };
     }
+    if (q.kind === 'contacts') {
+      const list = this.store.contacts.loaded || this.ops.list.some((o) => contactIdOf(o.key)) ? contactItems(this.contactsNow(), this.store.profile.users, this.presence) : [];
+      // служебный элемент: снимок с сервера уже был (иначе пустой список — «ещё грузим», а не «нет контактов»)
+      list.push({ key: '~contacts', loaded: this.store.contacts.loaded });
+      return { items: new Map(list.map((it) => [it.key, it])), order: list.map((it) => it.key), sig: new Map(list.map((it) => [it.key, JSON.stringify(it)])) };
+    }
     if (q.kind === 'me' || q.kind === 'user' || q.kind === 'ops') {
       const list = q.kind === 'ops' ? [this.ops.item()] : q.kind === 'me' ? meItem(this.meNow()) : userItem(this.store.profile, this.meNow(), q.userId);
       if (q.kind === 'user' && !list.length && q.userId !== this.cfg.userId) this.userWants.add(q.userId);
@@ -315,6 +323,7 @@ export class Engine {
   }
 
   private emit(): void {
+    this.retitleContacts();
     const hold = this.holding && this.acting === 0;
     const touched = new Set(this.store.touched);
     if (!hold) this.store.touched.clear(); // при удержании изменения копятся до конца догонки
@@ -325,13 +334,15 @@ export class Engine {
     // профиль при удержании копится, как и чаты; очередь операций (тосты отказов) — сразу
     const opsDirty = this.ops.dirty, profileDirty = this.store.profile.dirty || opsDirty;
     this.ops.dirty = false;
+    const contactsDirty = this.store.contacts.dirty || opsDirty || presenceDirty || profileDirty;
+    this.store.contacts.dirty = false;
     // me/user выводятся из очереди: при удержании изменение очереди не теряем — оно уйдёт с концом догонки
     this.store.profile.dirty = hold && profileDirty;
     this.statusSig = sig;
     for (const w of this.watchers.values()) {
-      const own = (w.q.kind === 'status' && statusChanged) || (w.q.kind === 'presence' && presenceDirty) || (w.q.kind === 'ops' && opsDirty) || ((w.q.kind === 'me' || w.q.kind === 'user') && profileDirty);
+      const own = (w.q.kind === 'status' && statusChanged) || (w.q.kind === 'presence' && presenceDirty) || (w.q.kind === 'ops' && opsDirty) || ((w.q.kind === 'me' || w.q.kind === 'user') && profileDirty) || (w.q.kind === 'contacts' && contactsDirty);
       if (!w.force && !affects(w.q, touched) && !own) continue;
-      if (hold && !w.force && w.q.kind !== 'status' && w.q.kind !== 'presence' && w.q.kind !== 'ops') continue;
+      if (hold && !w.force && w.q.kind !== 'status' && w.q.kind !== 'presence' && w.q.kind !== 'ops' && w.q.kind !== 'contacts') continue;
       if (w.gated) continue;
       w.force = false;
       const next = this.compute(w.q);
@@ -345,11 +356,78 @@ export class Engine {
     this.fetchUsers();
   }
 
+  // ---------- контакты ----------
+
+  private contactsMemo: { version: number; ops: readonly PendingOp[]; view: Map<number, ContactView> } | null = null;
+  /** Контакты для интерфейса: база + очередь (мемо до изменения базы или очереди). */
+  private contactsNow(): Map<number, ContactView> {
+    const m = this.contactsMemo, c = this.store.contacts;
+    if (m && m.version === c.version && m.ops === this.ops.list) return m.view;
+    const view = contactsView(c.base, this.ops.list, this.store.profile.users);
+    this.contactsMemo = { version: c.version, ops: this.ops.list, view };
+    return view;
+  }
+
+  /** Название личного чата: контактное (с учётом очереди); контакт удаляется, но сервер ещё не ответил — своё имя человека. */
+  private titleOf(c: { kind: string; peerId: number | null; title: string | null }): string | null {
+    if (c.kind !== 'direct' || !c.peerId) return c.title;
+    const v = this.contactsNow().get(c.peerId);
+    if (v) return contactName(v) || c.title;
+    const was = this.store.contacts.base.get(c.peerId);
+    if (was) return this.store.profile.users.get(c.peerId)?.publicName ?? was.user.publicName ?? c.title;
+    return c.title;
+  }
+
+  private shownNames = new Map<number, string>();
+  /** Контактное имя изменилось (база, очередь, отказ сервера) — строки личных чатов с этим человеком пересчитать. */
+  private retitleContacts(): void {
+    const view = this.contactsNow();
+    const now = new Map<number, string>();
+    for (const [id, v] of view) now.set(id, contactName(v));
+    const changed: number[] = [];
+    for (const [id, n] of now) if (this.shownNames.get(id) !== n) changed.push(id);
+    for (const id of this.shownNames.keys()) if (!now.has(id)) changed.push(id);
+    this.shownNames = now;
+    if (!changed.length) return;
+    const ids = new Set(changed);
+    for (const c of this.store.chats.values()) if (c.kind === 'direct' && c.peerId && ids.has(c.peerId)) this.store.retouch(c.id);
+  }
+
+  /** Контакт с сервера (снимок или ответ): профиль — в кэш, присутствие — если живого ещё нет. */
+  private takeContact(c: Contact): void {
+    this.store.profile.applyUser(c.user);
+    if (c.presence && this.online && !this.presence.has(c.userId)) { this.presence.set(c.userId, c.presence); this.presenceDirty = true; }
+  }
+
+  /** Список контактов — после каждого hello и после tooLong (журнал мог потерять contactsChanged). */
+  private fetchContacts(): void {
+    this.run(async () => {
+      const r = await this.http<{ contacts: Contact[]; seq: number }>('/contacts');
+      this.store.contacts.applySnapshot(r.contacts, r.seq);
+      for (const c of r.contacts) { this.takeContact(c); if (this.store.contacts.base.has(c.userId)) retitle(this.store, c.userId, contactName(c) || c.user.name); }
+      await this.store.flush();
+      this.changed();
+    });
+  }
+
   /** Свой профиль для интерфейса: база + очередь. */
   private meNow(): Me | null { return meView(this.store.profile.me, this.ops.list); }
 
   /** Операция подтверждена: ответ профиля — новая база (журнал принесёт то же самое ещё раз — не страшно). */
   private opDone(op: PendingOp, value: unknown): void {
+    const cid = contactIdOf(op.key);
+    if (cid && value && typeof value === 'object') {
+      // ответ — новая база контакта (журнал принесёт то же самое ещё раз — seq не даст откатить)
+      const v = value as Contact & { removed?: number; user?: PublicUser | null; seq?: number };
+      if (v.removed === cid) {
+        if (this.store.contacts.applyRemoved(cid, v.seq) && v.user) { retitle(this.store, cid, v.user.name); this.store.profile.applyUser(v.user); }
+      } else if (v.userId === cid && this.store.contacts.applyContact(v)) {
+        retitle(this.store, cid, contactName(v) || v.user.name);
+        this.takeContact(v);
+      }
+      this.run(() => this.store.flush());
+      return;
+    }
     if ((op.key === OP_PROFILE || op.key === OP_USERNAME) && value && typeof value === 'object' && (value as Me).userId === this.cfg.userId) {
       if (this.store.profile.setMe(value as Me)) this.run(() => this.store.flush());
     }
@@ -487,6 +565,37 @@ export class Engine {
       case 'setUsername':
         await this.ops.enqueue({ key: OP_USERNAME, method: 'PUT', path: '/me/username', body: { username: a.username } });
         return null;
+      case 'addContact': {
+        await this.ops.enqueue({ key: contactKey(a.userId), method: 'POST', path: '/contacts', body: { userId: a.userId, firstName: a.firstName, lastName: a.lastName ?? '', ...(a.note !== undefined ? { note: a.note } : {}) } });
+        return null;
+      }
+      case 'updateContact': {
+        const key = contactKey(a.userId);
+        if (!this.contactsNow().has(a.userId)) return null;   // контакта нет (или уже удаляется) — править нечего
+        const patch: Record<string, unknown> = {};
+        for (const k of ['firstName', 'lastName', 'note'] as const) if (a[k] !== undefined) patch[k] = a[k];
+        if (!Object.keys(patch).length) return null;
+        // добавление ещё не подтверждено: правку — в само добавление (POST — upsert), иначе PATCH ушёл бы раньше контакта
+        const post = [...this.ops.list].reverse().find((o) => o.key === key);
+        if (post?.method === 'POST') await this.ops.enqueue({ key, method: 'POST', path: '/contacts', body: { ...(post.body as object), ...patch } });
+        else await this.ops.enqueue({ key, method: 'PATCH', path: `/contacts/${a.userId}`, body: patch });
+        return null;
+      }
+      case 'removeContact':
+        await this.ops.enqueue({ key: contactKey(a.userId), method: 'DELETE', path: `/contacts/${a.userId}` });
+        return null;
+      case 'resolveUser': {
+        if (!this.online) return { offline: true };
+        let res: Response;
+        try { res = await fetch(`${this.cfg.httpBase}/users/resolve?q=${encodeURIComponent(a.query)}`, { headers: this.cfg.headers, credentials: 'include' }); }
+        catch { return { offline: true }; }
+        if (res.status === 404) return { notFound: true };
+        if (!res.ok) return { offline: true };
+        const u = (await res.json()) as PublicUser;
+        this.store.profile.applyUser(u);   // добавление по id покажет имя и @username сразу
+        this.run(() => this.store.flush());
+        return { user: u };
+      }
       case 'checkUsername': {
         if (!this.online) return { offline: true };
         try { return await this.http<{ ok: boolean; reason?: string }>(`/users/check-username?u=${encodeURIComponent(a.username)}`); }
@@ -543,6 +652,7 @@ export class Engine {
           else if (!this.store.epoch && f.epoch) { this.store.epoch = f.epoch; this.store.markMeta(); }
           // снимок — только когда кэш пуст; lastSeq = 0 бывает и у заполненного кэша (журнал пользователя ещё пуст)
           this.fetchMe();
+          this.fetchContacts();
           if (!this.store.hydrated) await this.bootstrap(f.seq);
           else this.runSync();
         });
@@ -620,6 +730,7 @@ export class Engine {
           if (f.op === 'tooLong' || gap) {
             this.store.resetForSnapshot();
             this.store.resetDialogs();
+            this.fetchContacts();
             await this.loadFirstDialogs();
             this.store.lastSeq = f.op === 'tooLong' ? f.seq : f.to;
             await this.store.flush();

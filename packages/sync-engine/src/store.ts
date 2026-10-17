@@ -1,6 +1,7 @@
 import type { Message, Update } from '@relay/protocol';
 import { getAll, getByChat, write, type WriteBatch } from './idb';
 import { applyUserUpdated, ProfileCache } from './profile';
+import { applyContactsChanged, ContactsCache } from './contacts';
 import { PENDING_BASE, type LocalChat, type LocalMessage, type OutboxEntry } from './types';
 
 export interface ChatSummary {
@@ -39,6 +40,10 @@ export class Store {
   touched = new Set<number>();
   /** свой профиль и кэш чужих (profile.ts) */
   profile!: ProfileCache;
+  /** контакты (contacts.ts) */
+  contacts!: ContactsCache;
+  /** название чата для списка; движок подставляет контактное имя с учётом очереди операций */
+  titleOf: (c: LocalChat) => string | null = (c) => c.title;
 
   private messages = new Map<number, Map<string, LocalMessage>>();
   private loaded = new Set<number>();
@@ -65,6 +70,7 @@ export class Store {
     s.dialogsId = meta.find((m) => m.k === 'dialogsId')?.v ?? 0;
     s.dialogsDone = !!meta.find((m) => m.k === 'dialogsDone')?.v;
     s.profile = await ProfileCache.load(db, userId, meta as { k: string; v: unknown }[]);
+    s.contacts = ContactsCache.load(meta as { k: string; v: unknown }[]);
     // чаты с неотправленным — сразу в память, чтобы черновики были видны
     for (const chatId of new Set(outbox.map((o) => o.chatId))) await s.loadChatMessages(chatId);
     return s;
@@ -154,6 +160,7 @@ export class Store {
       case 'messageDeleted': return this.patchMessage(u.chatId, u.id, { body: '', deleted: true, reactions: [] });
       case 'reactions': return this.patchMessage(u.chatId, u.id, { reactions: u.reactions });
       case 'userUpdated': return applyUserUpdated(this, u.user, seq);
+      case 'contactsChanged': return applyContactsChanged(this, u, seq);
     }
   }
 
@@ -344,7 +351,7 @@ export class Store {
   async wipe(epoch: string): Promise<void> {
     for (const id of this.chats.keys()) this.touch(id);
     this.chats.clear(); this.messages.clear(); this.loaded.clear(); this.sorted.clear(); this.ids.clear();
-    this.outbox.clear(); this.pendingReads.clear(); this.profile.reset();
+    this.outbox.clear(); this.pendingReads.clear(); this.profile.reset(); this.contacts.reset();
     this.dirtyChats.clear(); this.dirtyMessages.clear(); this.dirtyOutbox.clear(); this.dirtyReads.clear();
     this.lastSeq = this.seqAtFlush = 0;
     this.hydrated = false;
@@ -416,6 +423,8 @@ export class Store {
     const prof = this.profile.collect();
     if (prof.me) batch.put.meta = [...(batch.put.meta ?? []), prof.me];
     if (prof.users.length) batch.put.users = prof.users;
+    const contacts = this.contacts.collect();
+    if (contacts) batch.put.meta = [...(batch.put.meta ?? []), contacts];
     this.dirtyChats.clear(); this.dirtyMessages.clear(); this.dirtyOutbox.clear(); this.dirtyReads.clear(); this.dirtyMeta = false;
     const seq = this.lastSeq;
     await write(this.db, batch);
@@ -456,6 +465,8 @@ export class Store {
     this.touch(c.id);
   }
 
+  /** Строка чата в подписках пересчитается (название зависит не только от самого чата). */
+  retouch(chatId: number): void { this.touch(chatId); }
   private touch(chatId: number): void { this.touched.add(chatId); this.sorted.delete(chatId); this.ids.delete(chatId); }
 
   /** Дочитали до конца — 0; иначе вычитаем известные чужие сообщения из прочитанного диапазона (from, to]. */

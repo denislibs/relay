@@ -63,7 +63,9 @@ export type Query =
   /** профиль человека (PublicUser); нет в кэше — движок подгрузит */
   | { kind: 'user'; userId: number }
   /** очередь операций настроек: сколько ждёт и последние отказы сервера (opFailed) */
-  | { kind: 'ops' };
+  | { kind: 'ops' }
+  /** контакты (с ещё не подтверждёнными правками), с профилем и присутствием */
+  | { kind: 'contacts' };
 
 export type Item = { key: string } & Record<string, unknown>;
 
@@ -89,6 +91,12 @@ export type Action =
   | { type: 'setUsername'; username: string | null }
   /** проверка имени пользователя мимо очереди: {ok} | {ok:false, reason} | {offline:true} */
   | { type: 'checkUsername'; username: string }
+  /** контакты — через очередь операций (видно сразу, в том числе без сети) */
+  | { type: 'addContact'; userId: number; firstName: string; lastName?: string; note?: string }
+  | { type: 'updateContact'; userId: number; firstName?: string; lastName?: string; note?: string }
+  | { type: 'removeContact'; userId: number }
+  /** найти человека по @имени или номеру мимо очереди: {user} | {notFound:true} | {offline:true} */
+  | { type: 'resolveUser'; query: string }
   | { type: 'sendFile'; chatId: number; body: string; file: Blob; name: string; mime: string; w?: number | null; h?: number | null; thumb?: string | null; replyToId?: number | null };
 
 export interface EngineConfig {
