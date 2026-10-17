@@ -45,6 +45,13 @@ test('logout deletes the session and clears the cookie', async () => {
   expect((await fetch(`${base}/me`, authed(a.token))).status).toBe(200);
   const out = await fetch(`${base}/logout`, { method: 'POST', ...authed(a.token) });
   expect(out.status).toBe(200);
-  expect(out.headers.get('set-cookie')).toContain('Max-Age=0');
+  const cookie = out.headers.get('set-cookie') ?? '';
+  expect(cookie).toContain('Max-Age=0');
+  expect(cookie).toContain('HttpOnly');
   expect((await fetch(`${base}/me`, authed(a.token))).status).toBe(401);
+});
+
+test('logout without a session is rejected', async () => {
+  const res = await fetch(`${base}/logout`, { method: 'POST' });
+  expect(res.status).toBe(401);
 });

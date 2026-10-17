@@ -1063,9 +1063,6 @@ button.rl-quote { cursor: pointer; }
 @media (prefers-reduced-motion: reduce) { .rl-lazy-full { transition: none; } }
 
 /* ---------- Settings kit ---------- */
-:root { --page: #f0f0f0; }
-@media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) { --page: #111212; } }
-:root[data-theme="dark"] { --page: #111212; }
 .rl-sicon { display: inline-flex; align-items: center; justify-content: center; flex-shrink: 0; width: 32px; height: 32px; border-radius: 8px; color: #fff; }
 .rl-sicon-blue { background: var(--tile-blue); } .rl-sicon-orange { background: var(--tile-orange); } .rl-sicon-red { background: var(--tile-red); }
 .rl-sicon-gray { background: var(--tile-gray); } .rl-sicon-green { background: var(--tile-green); } .rl-sicon-purple { background: var(--tile-purple); } .rl-sicon-pink { background: var(--tile-pink); }

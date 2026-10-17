@@ -32,14 +32,18 @@ function birthdayText(v: string): string {
   return d.toLocaleDateString('ru-RU', { day: 'numeric', month: 'long', year: +m[1] > 1 ? 'numeric' : undefined, timeZone: 'UTC' });
 }
 
-/** Выход: сервер удаляет сеанс, локальные данные пользователя чистим. */
-async function logout(): Promise<void> {
+/** Выход: сервер удаляет сеанс; без подтверждения сервера остаёмся в системе (иначе cookie жива и вход вернётся). */
+async function logout(): Promise<boolean> {
+  try {
+    const res = await fetch('/logout', { method: 'POST' });
+    if (!res.ok) return false;
+  } catch { return false; }
   const uid = getGlobal().me?.userId;
-  try { await fetch('/logout', { method: 'POST' }); } catch { /* нет сети — всё равно выходим локально */ }
   try { localStorage.removeItem('relay.me'); } catch { /* приватный режим */ }
   if (uid != null) try { indexedDB.deleteDatabase('relay-' + uid); } catch { /* */ }
   setGlobal({ boot: 'login' });
   location.reload();   // воркеры отпускают IndexedDB, база удаляется до конца
+  return true;
 }
 
 export function Main() {
@@ -48,18 +52,21 @@ export function Main() {
   const scroll = useScrollMemory('settings');
   const [menu, setMenu] = useState(false);
   const [confirm, setConfirm] = useState(false);
-  const [toast, setToast] = useState(false);
+  const [toast, setToast] = useState<string | null>(null);
+  const lastToast = useRef('');
   const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   useEffect(() => { prefetchAll(SECTIONS.map((s) => s.path)); }, []);
   useEffect(() => () => { if (timer.current) clearTimeout(timer.current); }, []);
 
+  function flash(text: string): void {
+    lastToast.current = text;
+    setToast(text);
+    if (timer.current) clearTimeout(timer.current);
+    timer.current = setTimeout(() => setToast(null), 2000);
+  }
   function copy(text: string): void {
-    navigator.clipboard?.writeText(text).then(() => {
-      setToast(true);
-      if (timer.current) clearTimeout(timer.current);
-      timer.current = setTimeout(() => setToast(false), 2000);
-    }).catch(() => { /* буфер недоступен */ });
+    navigator.clipboard?.writeText(text).then(() => flash('Скопировано')).catch(() => { /* буфер недоступен */ });
   }
 
   const phone = me.phone ? (me.phone.startsWith('+') ? me.phone : '+' + me.phone) : null;
@@ -90,7 +97,11 @@ export function Main() {
             {phone ? <InfoRow tile="green" icon="phone" title={phone} subtitle="Телефон" onClick={() => copy(phone)} /> : null}
             {username ? <InfoRow tile="blue" icon="at" title={username} subtitle="Имя пользователя" onClick={() => copy(username)} /> : null}
             {bio ? (
-              <div class="rl-inforow rl-inforow-static" onClick={(e) => { if (!(e.target as HTMLElement).closest('a')) copy(bio); }}>
+              <div
+                class="rl-inforow rl-inforow-static" role="button" tabIndex={0}
+                onClick={(e) => { if (!(e.target as HTMLElement).closest('a')) copy(bio); }}
+                onKeyDown={(e) => { if ((e.key === 'Enter' || e.key === ' ') && e.target === e.currentTarget) { e.preventDefault(); copy(bio); } }}
+              >
                 <SettingsIcon icon="info" color="gray" />
                 <span class="rl-inforow-text"><span class="rl-bio"><RichText text={bio} /></span><small>О себе</small></span>
               </div>
@@ -109,10 +120,10 @@ export function Main() {
           <InfoRow icon="info" title="Relay" subtitle={'Сборка ' + __BUILD__} />
         </Section>
       </div>
-      <Presence show={toast} exitMs={200}>
-        <div class="app-toast"><Toast>Скопировано</Toast></div>
+      <Presence show={toast != null} exitMs={200}>
+        <div class="app-toast"><Toast>{toast ?? lastToast.current}</Toast></div>
       </Presence>
-      <ConfirmDialog open={confirm} danger title="Выйти из Relay?" text="Чтобы войти снова, понадобится войти заново. Данные чатов на этом устройстве будут удалены." confirm="Выйти" cancel="Отмена" onCancel={() => setConfirm(false)} onConfirm={() => { setConfirm(false); void logout(); }} />
+      <ConfirmDialog open={confirm} danger title="Выйти из Relay?" text="Чтобы войти снова, понадобится войти заново. Данные чатов на этом устройстве будут удалены." confirm="Выйти" cancel="Отмена" onCancel={() => setConfirm(false)} onConfirm={() => { setConfirm(false); void logout().then((ok) => { if (!ok) flash('Не удалось выйти. Проверьте подключение.'); }); }} />
     </div>
   );
 }
