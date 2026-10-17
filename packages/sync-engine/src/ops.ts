@@ -4,12 +4,19 @@ import { getAll, write } from './idb';
  * Очередь операций настроек (профиль, контакты, уведомления, приватность, сеансы): HTTP-запросы,
  * которые переживают офлайн и перезапуск. Независима от очереди сообщений.
  *
- * - key — ключ схлопывания: новая операция с тем же ключом заменяет ещё не отправленную
- *   (PATCH — сливает поля, остальное — заменяет) и встаёт в конец очереди;
- * - отправка строго по одной, в порядке постановки (значит, и по каждому ключу — по порядку);
- * - сеть/5xx — повтор с нарастающей паузой; 4xx — операция выбрасывается, в failures — событие opFailed;
+ * - key — ключ схлопывания: новая операция с тем же ключом заменяет ещё не отправленную на её же месте
+ *   в очереди (PATCH — сливает поля, остальное — заменяет). Уже отправленную (в полёте) не трогает —
+ *   новая встаёт за ней, и последней на сервер придёт последняя правка;
+ * - отправка строго по одной, в порядке постановки — и между разными ключами тоже;
+ * - сеть/5xx — повтор с нарастающей паузой; 4xx — операция выбрасывается, в failures — событие opFailed.
+ *   Слитый PATCH падает целиком: отказ по одному полю (bio_too_long) теряет и соседнее (новое имя) —
+ *   поэтому интерфейс проверяет поля до постановки;
  * - оптимистичное состояние не хранится отдельно: его выводят из базы сервера + list (см. profile.ts meView).
  *   Поэтому оно само переживает перезапуск и само откатывается, когда операция ушла из очереди.
+ *
+ * ПРАВИЛО для каждого раздела (B3+): hooks.done обязан сразу сделать ответ 2xx новой базой своего состояния.
+ * Иначе между уходом операции из очереди и приходом записи журнала вид откатится к старой базе
+ * и тут же вернётся — переключатель «мигнёт» при подтверждении.
  */
 export type OpMethod = 'PATCH' | 'PUT' | 'POST' | 'DELETE';
 export interface PendingOp { id: number; key: string; method: OpMethod; path: string; body?: unknown; at: number }
@@ -48,6 +55,8 @@ export class Ops {
   private nextId: number;
   private nextFailure = 1;
   private closed = false;
+  /** растёт при forget(): ответ на операцию, отправленную до этого, принадлежит прежнему миру */
+  private gen = 0;
 
   constructor(
     private db: IDBDatabase,
@@ -61,20 +70,20 @@ export class Ops {
 
   /** Поставить операцию; промис — когда она записана в IDB (дальше уйдёт сама). */
   async enqueue(spec: OpSpec): Promise<void> {
-    const op: PendingOp = { id: this.nextId++, key: spec.key, method: spec.method, path: spec.path, at: Date.now() };
-    if (spec.body !== undefined) op.body = spec.body;
     const i = this.list.findIndex((o) => o.key === spec.key && o.id !== this.inflight);
-    const del: number[] = [];
+    // схлопывание — на месте прежней (тот же id: порядок между ключами и после перезапуска сохраняется)
+    const op: PendingOp = { id: i >= 0 ? this.list[i].id : this.nextId++, key: spec.key, method: spec.method, path: spec.path, at: Date.now() };
+    if (spec.body !== undefined) op.body = spec.body;
     if (i >= 0) {
       const old = this.list[i];
       if (old.method === 'PATCH' && op.method === 'PATCH' && old.path === op.path && plain(old.body) && plain(op.body)) op.body = { ...old.body, ...op.body };
-      this.list.splice(i, 1);
-      del.push(old.id);
+      this.list = this.list.map((o, k) => (k === i ? op : o));
+    } else {
+      this.list = [...this.list, op];
     }
-    this.list.push(op);
     this.dirty = true;
     this.hooks.changed();
-    await write(this.db, { put: { ops: [op] }, del: { ops: del } });
+    await write(this.db, { put: { ops: [op] }, del: {} });
     this.kick();
   }
 
@@ -97,9 +106,11 @@ export class Ops {
           const op = this.list[0];
           if (!op) break;
           this.inflight = op.id;
+          const gen = this.gen;
           const r = await this.send(op);
           this.inflight = null;
           if (this.closed) break;
+          if (gen !== this.gen) continue;   // очередь забыли, пока ждали ответа: результат не применяем
           if ('retry' in r) { this.backoff(); break; }
           this.attempt = 0;
           this.list = this.list.filter((o) => o.id !== op.id);
@@ -120,6 +131,7 @@ export class Ops {
 
   /** Забыть очередь (база сервера пересоздана — операции относятся к другому миру). IDB чистит Store.wipe. */
   forget(): void {
+    this.gen++;
     this.list = [];
     this.dirty = true;
     if (this.retryTimer) { clearTimeout(this.retryTimer); this.retryTimer = null; }

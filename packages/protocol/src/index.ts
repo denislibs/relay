@@ -40,10 +40,13 @@ export interface PublicUser {
   username: string | null; bio: string | null; birthday: Birthday | null; phone: string | null;
 }
 
-/** Собственный профиль (GET /me). userId и name — совместимость со старым клиентом. */
+/** Собственный профиль (GET /me). userId и name — совместимость со старым клиентом.
+ *  seq — номер записи своего журнала, на момент которой снят профиль: клиент не даёт старой записи userUpdated
+ *  откатить более свежий ответ. */
 export interface Me {
   userId: Id; name: string; firstName: string; lastName: string;
   username: string | null; bio: string | null; birthday: Birthday | null; phone: string | null;
+  seq?: number;
 }
 
 export interface JournalEntry { seq: number; update: Update }

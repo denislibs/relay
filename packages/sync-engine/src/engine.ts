@@ -74,9 +74,27 @@ export class Engine {
   }
 
   static async open(cfg: EngineConfig): Promise<Engine> {
-    const db = await openDb(cfg.dbName);
+    let engine: Engine | null = null;
+    const db = await openDb(cfg.dbName, { onVersionChange: () => engine?.obsolete() });
     const store = await Store.open(db, cfg.userId);
-    return new Engine(cfg, store, db, await loadOps(db));
+    engine = new Engine(cfg, store, db, await loadOps(db));
+    return engine;
+  }
+
+  private dead = false;
+  private onObsoleteCb: () => void = () => {};
+  /** База обновляется новой сборкой: этот движок закрыл IDB и больше не работает — вкладкам пора перезагрузиться. */
+  onObsolete(cb: () => void): void { this.onObsoleteCb = cb; }
+  private obsolete(): void {
+    if (this.dead) return;
+    this.dead = true;
+    this.closed = true;
+    this.ops.close();
+    this.disconnect();
+    if (this.frameTimer) { clearTimeout(this.frameTimer); this.frameTimer = null; }
+    if (this.readTimer) { clearTimeout(this.readTimer); this.readTimer = null; }
+    this.watchers.clear();
+    this.onObsoleteCb();
   }
 
   connect(): void {
@@ -109,6 +127,7 @@ export class Engine {
   }
 
   async close(): Promise<void> {
+    if (this.dead) return;   // IDB уже закрыта (versionchange)
     this.closed = true;
     this.ops.close();
     this.disconnect();
@@ -136,6 +155,8 @@ export class Engine {
   }
 
   private prepare(w: Watcher): void {
+    // профиль человека: из кэша сразу, а с сервера — заново на каждую новую подписку (открыли «Информацию»)
+    if (w.q.kind === 'user' && w.q.userId !== this.cfg.userId) { this.usersAsked.delete(w.q.userId); this.userWants.add(w.q.userId); return; }
     if (w.q.kind !== 'messages') return;
     const { chatId, limit } = w.q;
     const q = w.q;
@@ -304,7 +325,8 @@ export class Engine {
     // профиль при удержании копится, как и чаты; очередь операций (тосты отказов) — сразу
     const opsDirty = this.ops.dirty, profileDirty = this.store.profile.dirty || opsDirty;
     this.ops.dirty = false;
-    if (!hold) this.store.profile.dirty = false;
+    // me/user выводятся из очереди: при удержании изменение очереди не теряем — оно уйдёт с концом догонки
+    this.store.profile.dirty = hold && profileDirty;
     this.statusSig = sig;
     for (const w of this.watchers.values()) {
       const own = (w.q.kind === 'status' && statusChanged) || (w.q.kind === 'presence' && presenceDirty) || (w.q.kind === 'ops' && opsDirty) || ((w.q.kind === 'me' || w.q.kind === 'user') && profileDirty);
@@ -329,8 +351,7 @@ export class Engine {
   /** Операция подтверждена: ответ профиля — новая база (журнал принесёт то же самое ещё раз — не страшно). */
   private opDone(op: PendingOp, value: unknown): void {
     if ((op.key === OP_PROFILE || op.key === OP_USERNAME) && value && typeof value === 'object' && (value as Me).userId === this.cfg.userId) {
-      this.store.profile.setMe(value as Me);
-      this.run(() => this.store.flush());
+      if (this.store.profile.setMe(value as Me)) this.run(() => this.store.flush());
     }
   }
 
@@ -340,7 +361,7 @@ export class Engine {
     this.run(async () => {
       const me = await this.http<Me>('/me');
       if (this.store.profile.gen !== gen) return;   // пока ждали, пришло свежее (журнал или ответ операции)
-      this.store.profile.setMe(me);
+      if (!this.store.profile.setMe(me)) return;
       await this.store.flush();
       this.changed();
     });
@@ -608,7 +629,7 @@ export class Engine {
           }
           for (const it of f.items) {
             if (it.seq <= this.store.lastSeq) continue;
-            this.store.applyUpdate(it.update);
+            this.store.applyUpdate(it.update, it.seq);
             this.store.lastSeq = it.seq;
           }
           await this.store.flush(); // данные и lastSeq — одной транзакцией

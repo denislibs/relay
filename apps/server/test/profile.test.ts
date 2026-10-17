@@ -22,7 +22,18 @@ const updates = async (userId: number) => (await getUpdates(userId, 0)).items.ma
 test('GET /me: extended shape, userId and name kept', async () => {
   const a = await login('Анна Смирнова', '+79001234567');
   const me = await (await call(a, 'GET', '/me')).json();
-  expect(me).toEqual({ userId: a.userId, name: 'Анна Смирнова', firstName: 'Анна', lastName: 'Смирнова', username: null, bio: null, birthday: null, phone: '+79001234567' });
+  expect(me).toEqual({ userId: a.userId, name: 'Анна Смирнова', firstName: 'Анна', lastName: 'Смирнова', username: null, bio: null, birthday: null, phone: '+79001234567', seq: 0 });
+});
+
+test('Me.seq is the seq of the own userUpdated entry (orders responses against the journal)', async () => {
+  const a = await login('Анна');
+  const r1 = await (await call(a, 'PATCH', '/me', { bio: 'раз' })).json();
+  const r2 = await (await call(a, 'PUT', '/me/username', { username: 'anna_seq' })).json();
+  const items = (await getUpdates(a.userId, 0)).items.filter((i) => i.update.type === 'userUpdated');
+  expect([r1.seq, r2.seq]).toEqual(items.map((i) => i.seq));
+  expect(r2.seq).toBeGreaterThan(r1.seq);
+  expect((await (await call(a, 'GET', '/me')).json()).seq).toBe(r2.seq);
+  expect((await (await call(a, 'PATCH', '/me', { bio: 'раз' })).json()).seq).toBe(r2.seq);   // no-op: журнал не тронут
 });
 
 test('PATCH /me: name, bio, birthday; display name recomputed', async () => {

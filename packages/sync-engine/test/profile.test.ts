@@ -76,3 +76,18 @@ test('meView applies queued patches in order', () => {
   expect(v).toEqual({ userId: 1, name: 'Вера', firstName: 'Вера', lastName: '', username: 'vera_x', bio: 'hi', birthday: { day: 1, month: 2 }, phone: '+7' });
   expect(meView(null, [])).toBeNull();
 });
+
+test('own profile is ordered by journal seq: a late older userUpdated does not roll back a newer response', async () => {
+  const { ProfileCache } = await import('../src/profile');
+  const p = new ProfileCache(1);
+  const me = (bio: string, seq?: number) => ({ userId: 1, name: 'А', firstName: 'А', lastName: '', username: null, bio, birthday: null, phone: null, seq });
+  const pub = (bio: string) => ({ id: 1, name: 'А', firstName: 'А', lastName: '', username: null, bio, birthday: null, phone: null });
+  expect(p.setMe(me('ответ P2', 5))).toBe(true);
+  p.applyUser(pub('эхо P1'), 4);                 // запись журнала P1 опоздала
+  expect(p.me?.bio).toBe('ответ P2');
+  p.applyUser(pub('эхо P2'), 5);                 // эхо того же состояния — ничего не меняет
+  expect(p.me?.bio).toBe('ответ P2');
+  expect(p.setMe(me('ответ P1', 4))).toBe(false); // запоздавший ответ
+  p.applyUser(pub('с другого устройства'), 6);
+  expect(p.me).toMatchObject({ bio: 'с другого устройства', seq: 6 });
+});

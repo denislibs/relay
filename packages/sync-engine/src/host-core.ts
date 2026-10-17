@@ -73,7 +73,7 @@ export class HostCore {
     switch (m.t) {
       case 'hello': {
         if (m.build !== this.opts.build) { c.port.post({ t: 'reload' }); return; }
-        this.engine ??= this.opts.open(m.config).then((e) => { e.connect(); return e; });
+        this.engine ??= this.opts.open(m.config).then((e) => { e.onObsolete(() => this.obsolete()); e.connect(); return e; });
         await this.engine;
         c.port.post({ t: 'ready' });
         return;
@@ -102,6 +102,12 @@ export class HostCore {
         return;
       }
     }
+  }
+
+  /** Движок устарел (новая сборка обновляет базу): все вкладки перезагружаются на новую сборку. */
+  private obsolete(): void {
+    this.engine = null;
+    for (const c of this.clients) c.port.post({ t: 'reload' });
   }
 
   private queue(c: Client, sub: number, patch: Patch): void {

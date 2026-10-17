@@ -27,10 +27,20 @@ function shape(r: Row) {
   };
 }
 
+/** Последний номер своего журнала: профиль «на момент seq» (см. Me.seq). */
+async function selfSeq(tx: Tx | typeof sql, userId: number): Promise<number> {
+  const [s] = await tx`select seq from user_seq where user_id = ${userId}`;
+  return s ? Number(s.seq) : 0;
+}
+
 export async function getMe(userId: number): Promise<Me> {
-  const [r] = await sql<Row[]>`select ${COLS} from users where id = ${userId}`;
-  if (!r) throw new DomainError('not_found');
-  return { userId: r.id, ...shape(r) };
+  return sql.begin(async (tx) => {
+    // одна транзакция: профиль и seq — из одного снимка (repeatable read)
+    await tx`set transaction isolation level repeatable read`;
+    const [r] = await tx<Row[]>`select ${COLS} from users where id = ${userId}`;
+    if (!r) throw new DomainError('not_found');
+    return { userId: r.id, ...shape(r), seq: await selfSeq(tx, userId) };
+  }) as Promise<Me>;
 }
 
 /** Единственная точка правил приватности: B6 подставит сюда настоящую проверку (телефон, био, день рождения…). */
@@ -133,11 +143,11 @@ async function save(userId: number, change: (tx: Tx, cur: Row) => Promise<void>)
     if (!cur) throw new DomainError('not_found');
     await change(tx, cur);
     const [r] = await tx<Row[]>`select ${COLS} from users where id = ${userId}`;
-    if (JSON.stringify(cur) === JSON.stringify(r)) return { userId: r.id, ...shape(r) }; // ничего не изменилось — журнал не трогаем
+    if (JSON.stringify(cur) === JSON.stringify(r)) return { userId: r.id, ...shape(r), seq: await selfSeq(tx, userId) }; // ничего не изменилось — журнал не трогаем
     const viewers = await viewersOf(tx, userId);
     // каждому — своё представление (B6: скрытые поля)
     await appendUpdates(tx, [userId, ...viewers].map((v) => ({ userId: v, update: { type: 'userUpdated' as const, user: publicUser(v, r) } })));
-    return { userId: r.id, ...shape(r) };
+    return { userId: r.id, ...shape(r), seq: await selfSeq(tx, userId) };   // seq своей записи userUpdated (строка user_seq под замком транзакции)
   }) as Promise<Me>;
 }
 

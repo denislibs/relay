@@ -4,9 +4,15 @@ export type StoreName = 'chats' | 'messages' | 'outbox' | 'pendingReads' | 'meta
 const STORES: StoreName[] = ['chats', 'messages', 'outbox', 'pendingReads', 'meta', 'users', 'ops'];
 const VERSION = 3; // 2: blobs — файлы, ждущие отправки; 3: users — кэш профилей, ops — очередь операций настроек
 
-export function openDb(name: string): Promise<IDBDatabase> {
+/**
+ * onVersionChange: другая вкладка (новая сборка) открывает базу более новой версии. Соединение закрываем сразу,
+ * иначе её обновление ждёт нас вечно; движок после этого мёртв — хост просит вкладки перезагрузиться.
+ */
+export function openDb(name: string, opts: { onVersionChange?: () => void; version?: number } = {}): Promise<IDBDatabase> {
   return new Promise((resolve, reject) => {
-    const r = indexedDB.open(name, VERSION);
+    const r = indexedDB.open(name, opts.version ?? VERSION);
+    // старую версию держит открытой вкладка прежней сборки: ждём, пока она закроется (её onversionchange)
+    r.onblocked = () => console.warn(`idb ${name}: upgrade to v${opts.version ?? VERSION} is waiting for other tabs to close the old version`);
     r.onupgradeneeded = (e) => {
       const db = r.result;
       if (e.oldVersion < 1) {
@@ -19,7 +25,11 @@ export function openDb(name: string): Promise<IDBDatabase> {
       if (e.oldVersion < 2) db.createObjectStore('blobs', { keyPath: 'clientId' });
       if (e.oldVersion < 3) { db.createObjectStore('users', { keyPath: 'id' }); db.createObjectStore('ops', { keyPath: 'id' }); }
     };
-    r.onsuccess = () => resolve(r.result);
+    r.onsuccess = () => {
+      const db = r.result;
+      db.onversionchange = () => { db.close(); opts.onVersionChange?.(); };
+      resolve(db);
+    };
     r.onerror = () => reject(r.error);
   });
 }

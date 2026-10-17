@@ -34,17 +34,26 @@ export class ProfileCache {
     return p;
   }
 
-  setMe(me: Me): void {
+  /**
+   * Новая база своего профиля. Источники — ответ операции, GET /me, запись журнала — приходят вразнобой;
+   * упорядочивает их seq (номер своей записи журнала, на момент которой снят профиль): старое не откатывает новое.
+   */
+  setMe(me: Me): boolean {
+    const cur = this.me?.seq;
+    if (me.seq !== undefined && cur !== undefined && me.seq < cur) return false;
     this.me = me;
     this.gen++;
     this.dirtyMe = true;
     this.dirty = true;
+    return true;
   }
 
   /** Профиль из журнала или с сервера. Свой — новая база me (телефон из PublicUser себе виден). */
-  applyUser(u: PublicUser): void {
+  applyUser(u: PublicUser, seq?: number): void {
     if (u.id === this.userId) {
-      this.setMe({ userId: u.id, name: u.name, firstName: u.firstName, lastName: u.lastName, username: u.username, bio: u.bio, birthday: u.birthday, phone: u.phone ?? this.me?.phone ?? null });
+      // запись журнала не новее уже применённого ответа (своя же правка, эхо) — не откатываем
+      if (seq !== undefined && this.me?.seq !== undefined && seq <= this.me.seq) return;
+      this.setMe({ userId: u.id, name: u.name, firstName: u.firstName, lastName: u.lastName, username: u.username, bio: u.bio, birthday: u.birthday, phone: u.phone ?? this.me?.phone ?? null, seq: seq ?? this.me?.seq });
       return;
     }
     const prev = this.users.get(u.id);
@@ -73,8 +82,8 @@ export class ProfileCache {
 }
 
 /** userUpdated: кэш профилей + название личных чатов с этим человеком (строка списка переименуется сразу). */
-export function applyUserUpdated(store: Store, u: PublicUser): void {
-  store.profile.applyUser(u);
+export function applyUserUpdated(store: Store, u: PublicUser, seq?: number): void {
+  store.profile.applyUser(u, seq);
   // как на сервере в listChats: у личного чата нет своего названия, показываем имя собеседника
   for (const c of store.chats.values()) {
     if (c.kind === 'direct' && c.peerId === u.id && c.title !== u.name) { c.title = u.name; store.markChat(c); }
@@ -107,7 +116,9 @@ export function meView(base: Me | null, ops: readonly PendingOp[]): Me | null {
 
 /** Элемент подписки me. */
 export function meItem(me: Me | null): Item[] {
-  return me ? [{ key: 'me', ...me }] : [];
+  if (!me) return [];
+  const { seq: _seq, ...rest } = me;
+  return [{ key: 'me', ...rest }];
 }
 
 /** Элемент подписки user: свой — из meView (с оптимистичными правками), чужой — из кэша. */

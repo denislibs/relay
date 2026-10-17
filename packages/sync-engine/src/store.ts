@@ -141,7 +141,8 @@ export class Store {
 
   // ---------- изменения с сервера ----------
 
-  applyUpdate(u: Update): void {
+  /** seq — номер записи журнала (нужен профилю, чтобы старая запись не откатила свежий ответ). */
+  applyUpdate(u: Update, seq?: number): void {
     switch (u.type) {
       case 'newMessage':
         this.setTyping(u.message.chatId, u.message.senderId, false); // написал — уже не «печатает»
@@ -152,7 +153,7 @@ export class Store {
       case 'messageEdited': return this.patchMessage(u.chatId, u.id, { body: u.body, editedAt: u.editedAt });
       case 'messageDeleted': return this.patchMessage(u.chatId, u.id, { body: '', deleted: true, reactions: [] });
       case 'reactions': return this.patchMessage(u.chatId, u.id, { reactions: u.reactions });
-      case 'userUpdated': return applyUserUpdated(this, u.user);
+      case 'userUpdated': return applyUserUpdated(this, u.user, seq);
     }
   }
 
