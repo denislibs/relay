@@ -1,6 +1,7 @@
 import { afterAll, afterEach, beforeEach, expect, test } from 'bun:test';
 import { defaultPrivacy, type PrivacyRules } from '@relay/protocol';
 import { blocksView } from '../src/blocks';
+import { ProfileCache } from '../src/profile';
 import { Engine } from '../src/engine';
 import { SettingsCache, settingsView } from '../src/settings';
 import { resetDb, startTestServer, watchInto } from './helpers';
@@ -36,6 +37,7 @@ test('settingsView replays privacy ops; settingsChanged without privacy keeps th
 
 test('setPrivacy offline is visible at once, survives a restart, is sent on connect; a second session gets privacyChanged', async () => {
   const a = await srv.login('Анна'), b = await srv.login('Борис');
+  await srv.chat(a.token, [a.userId, b.userId]);   // в исключения берутся только знакомые
   const cfg = srv.config(a);
   const e = await open(cfg);
   e.connect(); await e.whenIdle();
@@ -81,7 +83,7 @@ test('blocksView: queue over base, newest first; pending flag', () => {
   expect(v.map((b) => [b.userId, b.pending, b.user.name])).toEqual([[3, true, 'U3'], [2, false, 'U2']]);
 });
 
-test('block/unblock: optimistic list, server state, blocksChanged to the second session; blocked send fails with a reason that clears on unblock', async () => {
+test('block/unblock: optimistic list, server state, blocksChanged to the second session; blocked viewer sees blocksMe, a send fails with a reason; unblock clears it', async () => {
   const a = await srv.login('Анна'), b = await srv.login('Борис');
   const chatId = await srv.chat(a.token, [a.userId, b.userId]);
   const ea = await open(srv.config(a)), ea2 = await open(srv.config(a)), eb = await open(srv.config(b));
@@ -98,37 +100,36 @@ test('block/unblock: optimistic list, server state, blocksChanged to the second 
   expect((await (await api(a.token, 'GET', '/blocks')).json()).blocked.map((x: { userId: number }) => x.userId)).toEqual([b.userId]);
   await wl2.until((x) => x.length === 1 && x[0].userId === b.userId);
 
-  // Борис пишет — отказ blocked остаётся у сообщения
+  // у Бориса профиль Анны — blocksMe: true (сразу, без попытки написать); отправка — отказ с причиной
+  const annaB = watchInto(eb, { kind: 'user', userId: a.userId });
+  await annaB.until((x) => x[0]?.blocksMe === true);
   const msgs = watchInto(eb, { kind: 'messages', chatId, limit: 50 });
   await eb.call({ type: 'sendMessage', chatId, body: 'привет' });
   const failed = await msgs.until((x) => x.some((m) => m.status === 'failed'));
   expect(failed.find((m) => m.status === 'failed')).toMatchObject({ error: 'blocked', body: 'привет' });
+  // правка профиля Анной флаг не снимает
+  await api(a.token, 'PATCH', '/me', { bio: 'новое' });
+  await eb.whenIdle(); await Bun.sleep(50);
+  expect(annaB.list()[0]?.blocksMe).toBe(true);
 
-  // разблокировали: свежий профиль Анны снимает причину (сообщение остаётся неотправленным)
+  // разблокировали: blocksMe снимается, писать снова можно
   await ea.call({ type: 'unblock', userId: b.userId });
   await ea.whenIdle();
   await wl.until((x) => x.length === 0);
   await wl2.until((x) => x.length === 0);
-  const cleared = await msgs.until((x) => x.some((m) => m.status === 'failed' && !m.error));
-  expect(cleared.filter((m) => m.status === 'failed').length).toBe(1);
-  // и снова можно писать
+  await annaB.until((x) => x[0]?.blocksMe === false && x[0]?.bio === 'новое');
   await eb.call({ type: 'sendMessage', chatId, body: 'снова' });
   await msgs.until((x) => x.some((m) => m.body === 'снова' && m.status === 'sent'));
 });
 
-test('a block made before the failed send does not clear the reason (its userUpdated is older than the refusal)', async () => {
-  const a = await srv.login('Анна'), b = await srv.login('Борис');
-  const chatId = await srv.chat(a.token, [a.userId, b.userId]);
-  await api(a.token, 'PATCH', '/me', { bio: 'о себе' });   // блокировка скроет bio — Борису придёт userUpdated
-  const eb = await open(srv.config(b));
-  eb.connect(); await eb.whenIdle();
-  eb.disconnect();
-  await api(a.token, 'PUT', `/blocks/${b.userId}`);
-  const msgs = watchInto(eb, { kind: 'messages', chatId, limit: 50 });
-  await eb.call({ type: 'sendMessage', chatId, body: 'привет' });
-  eb.connect();   // догонка журнала (userUpdated блокировки) и отправка идут вперемешку
-  await eb.whenIdle();
-  await msgs.until((x) => x.some((m) => m.status === 'failed'));
-  await Bun.sleep(100);
-  expect(msgs.list().find((m) => m.status === 'failed')?.error).toBe('blocked');
+test('profile cache: a snapshot or response older than an applied userUpdated does not overwrite it', () => {
+  const p = new ProfileCache(1);
+  const u = (bio: string) => ({ id: 2, name: 'Б', firstName: 'Б', lastName: '', username: null, bio, birthday: null, phone: null });
+  p.applyUser(u('свежее'), 10);
+  p.applyUser(u('старое'), 7);
+  expect(p.users.get(2)?.bio).toBe('свежее');
+  p.applyUser(u('новее'), 12);
+  expect(p.users.get(2)?.bio).toBe('новее');
+  p.applyUser(u('без seq'));   // GET /users/:id — как раньше
+  expect(p.users.get(2)?.bio).toBe('без seq');
 });

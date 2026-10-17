@@ -50,7 +50,6 @@ export interface OutboxEntry {
   failed: boolean;
   attachment?: LocalAttachment | null;   // id появляется после загрузки файла
   error?: string;         // код отказа сервера (failed)
-  errorSeq?: number;      // у blocked: номер своего журнала в момент отказа
 }
 
 export type Query =

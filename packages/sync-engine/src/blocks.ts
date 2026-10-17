@@ -85,7 +85,7 @@ export class BlocksCache {
 
 /** blocksChanged из журнала. */
 export function applyBlocksChanged(store: Store, u: Extract<Update, { type: 'blocksChanged' }>, seq?: number): void {
-  if (u.blocked) { if (store.blocks.applyBlocked(u.blocked, seq)) store.profile.applyUser(u.blocked.user); }
+  if (u.blocked) { if (store.blocks.applyBlocked(u.blocked, seq)) store.profile.applyUser(u.blocked.user, seq); }
   else if (u.unblocked) store.blocks.applyUnblocked(u.unblocked, seq);
 }
 
@@ -147,7 +147,8 @@ export class Blocks {
     this.h.run(async () => {
       const r = await this.h.http<{ blocked: BlockedUser[]; seq: number }>('/blocks');
       this.cache.applySnapshot(r.blocked, r.seq);
-      for (const b of r.blocked) if (this.cache.base.has(b.userId)) this.h.store.profile.applyUser(b.user);
+      // профиль из снимка — с его seq: более свежий userUpdated он не перетрёт
+      for (const b of r.blocked) if (this.cache.base.has(b.userId)) this.h.store.profile.applyUser(b.user, r.seq);
       await this.h.store.flush();
       this.h.changed();
     });
@@ -160,7 +161,7 @@ export class Blocks {
     const v = value as (BlockedUser & { unblocked?: number }) | null;
     if (v && typeof v === 'object') {
       if (v.unblocked === id) this.cache.applyUnblocked(id, v.seq);
-      else if (v.userId === id && this.cache.applyBlocked(v)) this.h.store.profile.applyUser(v.user);
+      else if (v.userId === id && this.cache.applyBlocked(v)) this.h.store.profile.applyUser(v.user, v.seq);
       this.h.run(() => this.h.store.flush());
     }
     return true;

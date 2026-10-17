@@ -14,7 +14,7 @@ import type { Action, EngineConfig, LocalMessage, Patch, Query, SearchResult } f
 export interface WatchHandle { update(q: Query): void; close(): void }
 
 interface Watcher { id: number; q: Query; cb: (p: Patch) => void; prev: Result | null; force: boolean; gated: boolean }
-type ReqError = { code: string; retry: boolean; seq?: number };
+type ReqError = { code: string; retry: boolean };
 type SyncReply = Extract<ServerFrame, { op: 'updates' | 'tooLong' }>;
 
 /**
@@ -647,7 +647,7 @@ export class Engine {
         if (!p) return;
         this.pending.delete(id);
         if (f.op === 'ack') p.resolve(f.result);
-        else p.reject({ code: f.code, retry: f.retry, ...(f.seq !== undefined ? { seq: f.seq } : {}) });
+        else p.reject({ code: f.code, retry: f.retry });
         return;
       }
       case 'poke':
@@ -850,7 +850,7 @@ export class Engine {
             if (att) delBlob(this.db, next.clientId).catch(() => {});
           } catch (e) {
             // отказ сервера: код остаётся у сообщения (blocked — интерфейс заменит поле ввода плашкой)
-            if ((e as ReqError).retry === false) this.store.fail(next.clientId, (e as ReqError).code, (e as ReqError).seq);
+            if ((e as ReqError).retry === false) this.store.fail(next.clientId, (e as ReqError).code);
             else break; // сеть — дождёмся переподключения, порядок сохранится
           }
           await this.store.flush();

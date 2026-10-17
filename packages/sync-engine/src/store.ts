@@ -167,7 +167,7 @@ export class Store {
       case 'messageEdited': return this.patchMessage(u.chatId, u.id, { body: u.body, editedAt: u.editedAt });
       case 'messageDeleted': return this.patchMessage(u.chatId, u.id, { body: '', deleted: true, reactions: [] });
       case 'reactions': return this.patchMessage(u.chatId, u.id, { reactions: u.reactions });
-      case 'userUpdated': applyUserUpdated(this, u.user, seq); return this.clearBlocked(u.user.id, seq);
+      case 'userUpdated': return applyUserUpdated(this, u.user, seq);
       case 'contactsChanged': return applyContactsChanged(this, u, seq);
       case 'settingsChanged': this.settings.apply(u.settings, seq); return;
       case 'privacyChanged': this.settings.applyPrivacy(u.rules, seq); return;
@@ -292,13 +292,12 @@ export class Store {
     this.markChat(chat);
   }
 
-  /** Сервер отказал (или отправить нечего). error — код отказа; blocked несёт errorSeq (см. clearBlocked). */
-  fail(clientId: string, error?: string, errorSeq?: number): void {
+  /** Сервер отказал (или отправить нечего). error — код отказа (blocked — собеседник заблокировал отправителя). */
+  fail(clientId: string, error?: string): void {
     const o = this.outbox.get(clientId);
     if (!o) return;
     o.failed = true;
     if (error) o.error = error; else delete o.error;
-    if (errorSeq !== undefined) o.errorSeq = errorSeq; else delete o.errorSeq;
     this.dirtyOutbox.add(clientId);
     const m = this.messages.get(o.chatId)?.get(clientId);
     if (m) this.putMessage({ ...m, status: 'failed', ...(error ? { error } : {}) });
@@ -308,27 +307,11 @@ export class Store {
     const o = this.outbox.get(clientId);
     if (!o || !o.failed) return false;
     o.failed = false;
-    delete o.error; delete o.errorSeq;
+    delete o.error;
     this.dirtyOutbox.add(clientId);
     const m = this.messages.get(o.chatId)?.get(clientId);
     if (m) { const { error: _e, ...rest } = m; this.putMessage({ ...rest, status: 'pending' }); }
     return true;
-  }
-
-  /**
-   * Собеседник прислал свежий профиль позже отказа blocked: значит, его чёрный список с тех пор менялся
-   * (разблокировка всегда шлёт userUpdated). Отказ остаётся неотправленным, но плашка «не можете отправлять» снимается.
-   * Блокировка, случившаяся до отказа, имеет seq не больше errorSeq — её запись плашку не снимает.
-   */
-  private clearBlocked(peerId: number, seq?: number): void {
-    if (seq === undefined) return;
-    for (const o of this.outbox.values()) {
-      if (o.error !== 'blocked' || (o.errorSeq ?? 0) >= seq || this.chats.get(o.chatId)?.peerId !== peerId) continue;
-      delete o.error; delete o.errorSeq;
-      this.dirtyOutbox.add(o.clientId);
-      const m = this.messages.get(o.chatId)?.get(o.clientId);
-      if (m) { const { error: _e, ...rest } = m; this.putMessage(rest); }
-    }
   }
 
   /** Файл загружен — вложению неотправленного сообщения есть id (переживёт перезагрузку в outbox). */

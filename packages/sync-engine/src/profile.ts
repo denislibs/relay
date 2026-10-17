@@ -25,6 +25,8 @@ export class ProfileCache {
   gen = 0;
   private dirtyMe = false;
   private dirtyUsers = new Set<number>();
+  /** seq журнала, с которым пришёл профиль человека (только в памяти): снимок или ответ старее — не перетирает */
+  private userSeqs = new Map<number, number>();
 
   constructor(readonly userId: number) {}
 
@@ -57,6 +59,10 @@ export class ProfileCache {
       this.setMe({ userId: u.id, name: u.name, firstName: u.firstName, lastName: u.lastName, username: u.username, bio: u.bio, birthday: u.birthday, phone: u.phone ?? this.me?.phone ?? null, seq: seq ?? this.me?.seq });
       return;
     }
+    if (seq !== undefined) {
+      if (seq < (this.userSeqs.get(u.id) ?? 0)) return;
+      this.userSeqs.set(u.id, seq);
+    }
     const prev = this.users.get(u.id);
     if (prev && JSON.stringify(prev) === JSON.stringify(u)) return;
     this.users.set(u.id, u);
@@ -75,6 +81,7 @@ export class ProfileCache {
   reset(): void {
     this.me = null;
     this.users.clear();
+    this.userSeqs.clear();
     this.dirtyMe = false;
     this.dirtyUsers.clear();
     this.gen++;
