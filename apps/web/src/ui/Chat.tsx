@@ -6,12 +6,8 @@ import { setGlobal, useGlobal } from '../global';
 import { Feed } from './Feed';
 import { chatTime, fileSize, lastSeenText, snippet } from './format';
 
-let closedAt = -Infinity; // когда закрылась прежняя лента: близко по времени — значит, переключение между чатами
 
 export function Chat({ chatId }: { chatId: number }) {
-  // при переключении чатов шапка остаётся на месте — въезжает только при первом открытии
-  const switching = useRef(performance.now() - closedAt < 200).current;
-  useEffect(() => () => { closedAt = performance.now(); }, []);
   const me = useGlobal((s) => s.me)!;
   const chat = useGlobal((s) => s.chats.find((c) => c.id === chatId));
   const messages = useGlobal((s) => s.messages);
@@ -167,7 +163,7 @@ export function Chat({ chatId }: { chatId: number }) {
   return (
     <>
       <span ref={shell} hidden />
-      <GlassBar class={(switching ? 'app-steady' : '') + (finding ? ' app-finding' : '')}>
+      <GlassBar class={finding ? 'app-finding' : ''}>
         <IconButton class="app-back" icon="arrowLeft" label="К списку чатов" onClick={() => openChat(null)} />
         <button type="button" class="rl-glassbar-who" aria-label="Информация о чате" onClick={() => setGlobal({ infoOpen: !infoOpen })}>
           <Avatar name={title} size={40} />

@@ -797,7 +797,7 @@ button.rl-quote { cursor: pointer; }
 @keyframes rl-fab-pop { 0% { transform: scale(0) rotate(-45deg); } 70% { transform: scale(1.08) rotate(4deg); } 100% { transform: none; } }
 
 /* ---------- GlassBar: floating chat header ---------- */
-.rl-glassbar { position: relative; z-index: 3; display: flex; align-items: center; gap: var(--space-3); height: 60px; margin: 0 0 0 0; padding: 0 var(--space-2) 0 var(--space-4); border-radius: var(--radius-panel); background: var(--glass); color: var(--ink); box-shadow: var(--shadow-panel); -webkit-backdrop-filter: blur(20px) saturate(1.4); backdrop-filter: blur(20px) saturate(1.4); animation: rl-card-in var(--dur-slow) var(--ease-out) 60ms both; }
+.rl-glassbar { position: relative; z-index: 3; display: flex; align-items: center; gap: var(--space-3); height: 60px; margin: 0 0 0 0; padding: 0 var(--space-2) 0 var(--space-4); border-radius: var(--radius-panel); background: var(--glass); color: var(--ink); box-shadow: var(--shadow-panel); -webkit-backdrop-filter: blur(20px) saturate(1.4); backdrop-filter: blur(20px) saturate(1.4); }
 .rl-glassbar-title { flex: 1; min-width: 0; display: flex; flex-direction: column; }
 .rl-glassbar-title b { font: 600 16px/21px var(--font-sans); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .rl-glassbar-title span { font: 400 13px/18px var(--font-sans); color: var(--ink-muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; transition: color var(--dur-fast) var(--ease-standard); }
@@ -842,7 +842,7 @@ button.rl-quote { cursor: pointer; }
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .rl-sidecard, .rl-glassbar, .rl-fab-main, .rl-folders-ind, .rl-fab-slot { animation-duration: 1ms !important; transition-duration: 1ms !important; }
+  .rl-sidecard, .rl-fab-main, .rl-folders-ind, .rl-fab-slot { animation-duration: 1ms !important; transition-duration: 1ms !important; }
 }
 
 
