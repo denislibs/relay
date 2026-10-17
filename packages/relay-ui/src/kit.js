@@ -908,6 +908,25 @@ function EmptyState(props) {
           L('rl-empty-d2', { tag: 'rect', x: 72, y: 48, width: 54, height: 24, rx: 12 }))),
       h('g', { class: 'rl-empty-link-spark' }, spark(80, 60)),
       spark(132, 24, 'rl-empty-spark-2'), spark(26, 96, 'rl-empty-spark-3'))
+    : kind === 'contacts'
+    // двое: задний чуть выше и покачивается не в такт переднему; рядом подпрыгивает «+», вокруг мерцают искорки
+    ? h('svg', { class: 'rl-empty-art', viewBox: '0 0 160 120', 'aria-hidden': 'true' },
+      h('circle', { class: 'rl-empty-fill rl-empty-fill-soft', cx: 78, cy: 62, r: 46 }),
+      h('g', { class: 'rl-empty-float rl-empty-float-2' },
+        h('path', { class: 'rl-empty-fill rl-empty-fill-in', d: 'M30 88a26 26 0 0 1 52 0z' }),
+        h('circle', { class: 'rl-empty-fill rl-empty-fill-in', cx: 56, cy: 42, r: 13 }),
+        L('', { tag: 'circle', cx: 56, cy: 42, r: 13 }),
+        L('', { d: 'M30 88a26 26 0 0 1 52 0' })),
+      h('g', { class: 'rl-empty-float' },
+        h('path', { class: 'rl-empty-fill rl-empty-fill-out', d: 'M64 104a30 30 0 0 1 60 0z' }),
+        h('circle', { class: 'rl-empty-fill rl-empty-fill-out', cx: 94, cy: 52, r: 16 }),
+        L('rl-empty-d2', { tag: 'circle', cx: 94, cy: 52, r: 16 }),
+        L('rl-empty-d2', { d: 'M64 104a30 30 0 0 1 60 0' })),
+      h('g', { class: 'rl-empty-bob' },
+        h('circle', { class: 'rl-empty-fill rl-empty-fill-in', cx: 132, cy: 34, r: 12 }),
+        L('rl-empty-d3', { tag: 'circle', cx: 132, cy: 34, r: 12 }),
+        L('rl-empty-d3', { d: 'M132 28.5v11M126.5 34h11' })),
+      spark(28, 26), spark(146, 76, 'rl-empty-spark-2'), spark(20, 100, 'rl-empty-spark-3'))
     : kind === 'search'
     ? h('svg', { class: 'rl-empty-art', viewBox: '0 0 160 120', 'aria-hidden': 'true' },
       h('circle', { class: 'rl-empty-fill rl-empty-fill-in', cx: 70, cy: 56, r: 30 }),
