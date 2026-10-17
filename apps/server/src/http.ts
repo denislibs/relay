@@ -2,7 +2,9 @@ import { parseClientFrame } from '@relay/protocol';
 import type { Server } from 'bun';
 import { existsSync, statSync } from 'node:fs';
 import { extname, join, resolve, sep } from 'node:path';
-import { clearSessionCookie, createSession, createUser, deleteSession, readSessionToken, sessionCookie, userIdFromToken } from './auth';
+import { clearSessionCookie, createSession, createUser, deleteSession, readSessionToken, sessionCookie, sessionFromToken } from './auth';
+import { clientIp, parseDevice } from './device';
+import { listSessions, sessionEnded, sweepInactive, terminateOthers, terminateSession, trackSocket, untrackSocket } from './domain/sessions';
 import { createChat, getChatMedia, getHistory, getMessagesByIds, listChats, listChatsPage } from './domain/chats';
 import { sql } from './db';
 import { DomainError } from './domain/errors';
@@ -12,15 +14,15 @@ import { fileFor, MAX_FILE, storeUpload } from './domain/files';
 import { handleFrame } from './ws';
 import { checkUsername, getMe, getUser, setUsername, updateProfile } from './domain/profile';
 import { subscribe, unsubscribe, vapidKeys } from './domain/push';
-import { getSettings, setNotify, setPrivacy } from './domain/settings';
+import { getSettings, setNotify, setPrivacy, setSessionsTtl } from './domain/settings';
 import { addContact, blockUser, listBlocked, listContacts, removeContact, resolveUser, unblockUser, updateContact } from './domain/contacts';
 
 const STATUS: Record<string, number> = { bad_frame: 400, too_long: 400, username_invalid: 400, username_reserved: 400, username_taken: 409, bio_too_long: 400, note_too_long: 400, name_invalid: 400, birthday_invalid: 400, unauthorized: 401, not_member: 403, blocked: 403, not_found: 404 };
 const fail = (code: string) => Response.json({ code }, { status: STATUS[code] ?? 500 });
 
-export type WsData = { userId: number };
+export type WsData = { userId: number; sessionId: number };
 
-const API = /^\/(health|me|users|contacts|settings|privacy|blocks|chats|presence|search|upload|files|push|ws|dev|logout)(\/|$)/;
+const API = /^\/(health|me|users|contacts|settings|privacy|blocks|chats|presence|search|upload|files|push|sessions|ws|dev|logout)(\/|$)/;
 
 /** Статика клиента из WEB_DIST. Путь не может выйти за папку; пути без расширения — SPA, отдаём index.html. */
 function serveStatic(pathname: string): Response {
@@ -58,14 +60,17 @@ export function createServer(opts: { port: number }): Server {
           const userId = found ? (found.id as number) : await createUser(String(name ?? 'user'));
           // dev: телефон нужен только для проверки профиля (SMS-входа нет); занятый номер не мешает входу
           if (typeof phone === 'string') await sql`update users set phone = ${phone} where id = ${userId} and phone is null`.catch(() => {});
-          const token = await createSession(userId);
+          // чистка неактивных сеансов этого человека — при каждом входе
+          await sweepInactive(userId).catch((e) => console.error('sessions sweep:', e));
+          const token = await createSession(userId, { device: parseDevice(req.headers.get('user-agent')), ip: clientIp(req, server) });
           return Response.json({ userId, token }, { headers: { 'set-cookie': sessionCookie(token) } });
         }
 
         // публичный ключ VAPID — не секрет
         if (req.method === 'GET' && url.pathname === '/push/key') return Response.json({ key: (await vapidKeys()).publicKey });
-        const userId = await userIdFromToken(readSessionToken(req));
-        if (!userId) return fail('unauthorized');
+        const auth = await sessionFromToken(readSessionToken(req));
+        if (!auth) return fail('unauthorized');
+        const { userId, sessionId } = auth;
 
         if (req.method === 'GET' && url.pathname === '/me') {
           return Response.json(await getMe(userId));
@@ -100,6 +105,17 @@ export function createServer(opts: { port: number }): Server {
         if (req.method === 'PUT' && privacyKey) {
           return Response.json(await setPrivacy(userId, privacyKey[1], await req.json().catch(() => null), publish));
         }
+        if (req.method === 'PUT' && url.pathname === '/settings/sessions-ttl') {
+          const res = await setSessionsTtl(userId, await req.json().catch(() => null));
+          await sweepInactive(userId).catch((e) => console.error('sessions sweep:', e));   // новый срок короче — старые сеансы уходят сразу
+          return Response.json(res);
+        }
+        if (url.pathname === '/sessions') {
+          if (req.method === 'GET') return Response.json(await listSessions(userId, sessionId));
+          if (req.method === 'DELETE' && url.searchParams.get('others') === '1') return Response.json(await terminateOthers(userId, sessionId));
+        }
+        const sess = /^\/sessions\/(\d{1,15})$/.exec(url.pathname);
+        if (sess && req.method === 'DELETE') return Response.json(await terminateSession(userId, sessionId, Number(sess[1])));
         if (req.method === 'GET' && url.pathname === '/blocks') return Response.json(await listBlocked(userId));
         const block = /^\/blocks\/(\d{1,15})$/.exec(url.pathname);
         if (block && (req.method === 'PUT' || req.method === 'DELETE')) {
@@ -110,11 +126,13 @@ export function createServer(opts: { port: number }): Server {
         if (req.method === 'GET' && user) return Response.json(await getUser(userId, Number(user[1])));
         if (req.method === 'POST' && url.pathname === '/logout') {
           const token = readSessionToken(req);
-          if (token) await deleteSession(token);
+          const ended = token ? await deleteSession(token) : null;
+          // сокеты этого же сеанса в других вкладках закрываются (sessionTerminated)
+          if (ended != null) await sessionEnded(ended).catch((e) => console.error('sessions:', e));
           return Response.json({ ok: true }, { headers: { 'set-cookie': clearSessionCookie() } });
         }
         if (url.pathname === '/ws') {
-          return server.upgrade(req, { data: { userId } }) ? undefined : fail('bad_frame');
+          return server.upgrade(req, { data: { userId, sessionId } }) ? undefined : fail('bad_frame');
         }
         if (process.env.DEV_LOGIN === '1' && req.method === 'POST' && url.pathname === '/dev/chats') {
           const { kind, title, memberIds } = (await req.json()) as { kind: 'direct' | 'group'; title: string | null; memberIds: number[] };
@@ -197,9 +215,12 @@ export function createServer(opts: { port: number }): Server {
     websocket: {
       open(ws) {
         ws.subscribe(`user:${ws.data.userId}`);
+        ws.subscribe(`session:${ws.data.sessionId}`);
+        trackSocket(ws.data.sessionId, ws);
         connected(publish, ws.data.userId).catch((err) => console.error('presence:', err));
       },
       close(ws) {
+        untrackSocket(ws.data.sessionId, ws);
         disconnected(publish, ws.data.userId);
       },
       async message(ws, raw) {

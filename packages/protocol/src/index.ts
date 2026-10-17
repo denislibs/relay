@@ -48,6 +48,11 @@ export interface NotifyPref { muted: boolean; preview: boolean }
 /** Настройки аккаунта (GET /settings добавляет seq своей записи журнала на момент снимка). */
 export interface UserSettings { notify: Record<NotifyType, NotifyPref>; sessionsTtlDays: number }
 export interface SettingsSnapshot extends UserSettings { privacy?: PrivacyRules; seq?: number }
+/** Сроки автозавершения неактивных сеансов, дней (PUT /settings/sessions-ttl). */
+export const SESSION_TTLS: readonly number[] = [7, 30, 90, 180, 365];
+
+/** Сеанс (GET /sessions): устройство — грубо по User-Agent («Chrome 141, macOS»), IP входа; current — этот запрос. */
+export interface SessionInfo { id: Id; device: string; ip: string | null; createdAt: string; lastActiveAt: string; current: boolean; online: boolean }
 
 /** Правила конфиденциальности. phoneDiscovery — «Кто найдёт меня по номеру» (только everyone | contacts). */
 export type PrivacyKey = 'phone' | 'phoneDiscovery' | 'lastSeen' | 'bio' | 'birthday';
@@ -129,6 +134,8 @@ export type ServerFrame =
   | { op: 'poke' }
   | { op: 'presence'; items: PresenceItem[] }
   | { op: 'typing'; chatId: Id; userId: Id }
+  // сеанс этого сокета завершён (с другого устройства, выходом в другой вкладке, автозавершением); следом сокет закрывается
+  | { op: 'sessionTerminated' }
   | { op: 'pong' };
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;

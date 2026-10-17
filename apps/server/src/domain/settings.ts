@@ -1,4 +1,4 @@
-import type { NotifyPref, NotifyType, SettingsSnapshot, UserSettings } from '@relay/protocol';
+import { SESSION_TTLS, type NotifyPref, type NotifyType, type SettingsSnapshot, type UserSettings } from '@relay/protocol';
 import { sql, type Tx } from '../db';
 import { DomainError } from './errors';
 import { appendUpdates } from './journal';
@@ -92,6 +92,23 @@ export async function setNotify(userId: number, type: unknown, patch: unknown): 
     if (preview !== undefined) settings.notify[t].preview = preview;
     if (JSON.stringify(settings) !== before) {
       await tx`update user_settings set notify = ${tx.json(settings.notify as never)}, updated_at = now() where user_id = ${userId}`;
+      await appendUpdates(tx, [{ userId, update: { type: 'settingsChanged', settings } }]);
+    }
+    return snapshot(tx, userId);
+  }) as Promise<SettingsSnapshot>;
+}
+
+/** Срок автозавершения неактивных сеансов (7 | 30 | 90 | 180 | 365 дней) + settingsChanged себе. Сеансы старше нового срока завершает вызывающий (sweepInactive). */
+export async function setSessionsTtl(userId: number, body: unknown): Promise<SettingsSnapshot> {
+  const days = (body as { days?: unknown } | null)?.days;
+  if (typeof days !== 'number' || !SESSION_TTLS.includes(days)) throw new DomainError('bad_frame');
+  return sql.begin(async (tx) => {
+    await tx`insert into user_settings (user_id) values (${userId}) on conflict (user_id) do nothing`;
+    const [cur] = await tx<Row[]>`select notify, sessions_ttl_days from user_settings where user_id = ${userId} for update`;
+    const settings = shape(cur);
+    if (settings.sessionsTtlDays !== days) {
+      settings.sessionsTtlDays = days;
+      await tx`update user_settings set sessions_ttl_days = ${days}, updated_at = now() where user_id = ${userId}`;
       await appendUpdates(tx, [{ userId, update: { type: 'settingsChanged', settings } }]);
     }
     return snapshot(tx, userId);
