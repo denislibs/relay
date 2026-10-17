@@ -112,6 +112,16 @@ var ICONS = {
   timer: ['M12 21a9 9 0 1 0-9-9', 'M12 7v5l3 2', 'M3 16h.01', 'M5.5 19.5h.01'],
   shield: ['M12 3l8 3v6c0 4.5-3.4 8-8 9-4.6-1-8-4.5-8-9V6z'],
   upload: ['M12 20V9', 'M7.5 13.5L12 9l4.5 4.5', 'M5 4h14'],
+  account: [C(12, 12, 9), C(12, 10, 3), 'M6.5 18.5a6 6 0 0 1 11 0'],
+  general: ['M4 7h9', 'M17 7h3', 'M4 17h3', 'M11 17h9', 'M15 4.5v5', 'M9 14.5v5'],
+  storage: ['M4 6c0-1.7 3.6-3 8-3s8 1.3 8 3-3.6 3-8 3-8-1.3-8-3', 'M4 6v6c0 1.7 3.6 3 8 3s8-1.3 8-3V6', 'M4 12v6c0 1.7 3.6 3 8 3s8-1.3 8-3v-6'],
+  folder: ['M3 6h6l2 2.5h10V19H3z'],
+  rocket: ['M12 3c3.5 2 5 5.5 5 9l-2 3H9l-2-3c0-3.5 1.5-7 5-9', C(12, 10, 1.5), 'M9 15l-2.5 3.5', 'M15 15l2.5 3.5', 'M12 15v5'],
+  globe: [C(12, 12, 9), 'M3 12h18', 'M12 3c2.5 2.5 3.5 5.5 3.5 9s-1 6.5-3.5 9c-2.5-2.5-3.5-5.5-3.5-9S9.5 5.5 12 3'],
+  devices: ['M3 5h14v10H3z', 'M1 19h18', 'M15 9h6v10h-6z'],
+  at: [C(12, 12, 3.5), 'M15.5 12v1.5a2.5 2.5 0 0 0 5 0V12a8.5 8.5 0 1 0-3.4 6.8'],
+  cake: ['M4 12h16v8H4z', 'M4 15.5c2 1.5 3 1.5 4 0s2-1.5 4 0 3 1.5 4 0 2-1.5 4 0', 'M12 12V8', 'M12 3.5c1 1 1.5 1.8 0 3-1.5-1.2-1-2 0-3'],
+  block: [C(12, 12, 9), 'M5.6 5.6l12.8 12.8'],
   moon: ['M20.5 14.2A8.5 8.5 0 1 1 9.8 3.5a7 7 0 0 0 10.7 10.7z'],
   sun: [C(12, 12, 4), 'M12 2.5v2', 'M12 19.5v2', 'M2.5 12h2', 'M19.5 12h2', 'M5.3 5.3l1.4 1.4', 'M17.3 17.3l1.4 1.4', 'M5.3 18.7l1.4-1.4', 'M17.3 6.7l1.4-1.4']
 };
@@ -732,11 +742,17 @@ function ActionTile(props) {
   return h('button', { type: 'button', class: 'rl-tile', onPointerDown: ripple, onClick: props.onClick },
     h('span', { class: 'rl-tile-icon' }, h(Icon, { name: props.icon, size: 24 })), h('span', null, props.label));
 }
+// Цветная плитка 32×32 с белой иконкой; color — blue|orange|red|gray|green|purple|pink
+function SettingsIcon(props) {
+  return h('span', { class: cx('rl-sicon', 'rl-sicon-' + (props.color || 'blue')), 'aria-hidden': 'true' }, h(Icon, { name: props.icon, size: 20, strokeWidth: 1.8 }));
+}
 function InfoRow(props) {
   var Tag = props.trailing && props.trailing.type === Switch ? 'div' : 'button';
   return h(Tag, { type: Tag === 'button' ? 'button' : undefined, class: cx('rl-inforow', props.danger && 'rl-inforow-danger'), onPointerDown: Tag === 'button' ? ripple : undefined, onClick: props.onClick },
-    h('span', { class: 'rl-inforow-icon' }, h(Icon, { name: props.icon, size: 24 })),
+    props.tile ? h(SettingsIcon, { icon: props.icon, color: props.tile })
+      : h('span', { class: 'rl-inforow-icon' }, h(Icon, { name: props.icon, size: 24 })),
     h('span', { class: 'rl-inforow-text' }, h('span', null, props.title), props.subtitle ? h('small', null, props.subtitle) : null),
+    props.value != null && props.value !== '' ? h('span', { class: 'rl-inforow-count rl-inforow-value' }, props.value) : null,
     props.count !== undefined ? h('span', { class: 'rl-inforow-count' }, props.count) : null,
     props.trailing || null);
 }
@@ -921,4 +937,4 @@ function ScrollToBottom(props) {
 }
 
 
-export { ArchivedRow, ReplyQuote, ReactionChips, cx, chain, ripple, reducedMotion, omit, fmtTime, makeWave, ICONS, Icon, Button, IconButton, Avatar, Badge, Chip, SearchField, ChatRow, ChatRowSkeleton, Bubble, MessageStatus, TypingIndicator, DateDivider, Composer, Banner, Modal, NavRail, Checkbox, Toast, Card, Steps, MediaArt, ProgressRing, Waveform, VoiceMessage, VoiceRecorder, MediaBubble, FileBubble, MediaThumb, MediaViewer, Switch, PanelHeader, ProfileHeader, ActionTile, InfoRow, ReadMore, Presence, useMinVisible, LazyImage, FlipList, SyncIndicator, LinearProgress, EmptyState, ScrollToBottom };
+export { ArchivedRow, ReplyQuote, ReactionChips, cx, chain, ripple, reducedMotion, omit, fmtTime, makeWave, ICONS, Icon, Button, IconButton, Avatar, Badge, Chip, SearchField, ChatRow, ChatRowSkeleton, Bubble, MessageStatus, TypingIndicator, DateDivider, Composer, Banner, Modal, NavRail, Checkbox, Toast, Card, Steps, MediaArt, ProgressRing, Waveform, VoiceMessage, VoiceRecorder, MediaBubble, FileBubble, MediaThumb, MediaViewer, Switch, PanelHeader, ProfileHeader, ActionTile, InfoRow, SettingsIcon, ReadMore, Presence, useMinVisible, LazyImage, FlipList, SyncIndicator, LinearProgress, EmptyState, ScrollToBottom };
