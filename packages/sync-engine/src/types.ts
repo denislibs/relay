@@ -81,7 +81,9 @@ export type Item = { key: string } & Record<string, unknown>;
 
 export type Patch =
   | { op: 'snapshot'; items: Item[]; order: string[] }
-  | { op: 'diff'; upsert: Item[]; remove: string[]; order?: string[] };
+  | { op: 'diff'; upsert: Item[]; remove: string[]; order?: string[];
+      /** только для журнала (devLog): upsert — новые элементы в конец, remove — старейшие; порядок не присылается */
+      append?: boolean };
 
 export type Action =
   | { type: 'sendMessage'; chatId: number; body: string; replyToId?: number | null }
@@ -153,9 +155,9 @@ export interface EngineConfig {
   backoffMs?: [number, number];
   historyPage?: number;
   dialogsPage?: number;
-  /** сколько ждать ответ на sync, прежде чем спросить тот же диапазон ещё раз (по умолчанию 5000) */
+  /** dev, только под имитатором потерь: сколько ждать ответ на sync после потерянного кадра, прежде чем спросить ещё раз (по умолчанию 5000) */
   syncTimeoutMs?: number;
-  /** сколько ждать ack/err на запрос с reqId; без ответа соединение считается мёртвым (по умолчанию 15000) */
+  /** dev, только под имитатором потерь: сколько ждать ack/err после потерянного кадра, прежде чем считать соединение мёртвым (по умолчанию 15000) */
   requestTimeoutMs?: number;
   typingMs?: number;      // сколько держать «печатает…» после последнего кадра (по умолчанию 6000)   // диалогов в странице (по умолчанию 100)
 }

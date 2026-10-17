@@ -12,6 +12,7 @@ import { applyUserUpdated, meItem, meView, OP_PROFILE, OP_USERNAME, userItem } f
 import { OP_SESSIONS_TTL, Sessions } from './sessions';
 import { SessionEnd } from './session';
 import { DevTools, loadSim, type SimState, type SubStat } from './devlog';
+import { watchLoss } from './devsim';
 import type { Action, EngineConfig, LocalMessage, Patch, Query, SearchResult } from './types';
 
 export interface WatchHandle { update(q: Query): void; close(): void }
@@ -85,7 +86,7 @@ export class Engine {
       }),
       schedule: () => this.schedule(),
       ping: () => { if (this.online) this.transport.send({ op: 'ping' }); },
-      offline: (on) => { this.netDown = on || (typeof navigator !== 'undefined' && navigator.onLine === false); this.transport.setOffline(on); this.changed(); },
+      offline: (on) => this.simOffline(on),
       dropSocket: () => this.transport.drop(),
       sync: () => { if (this.online && this.ready) this.runSync(); },
       resync: () => this.resync(),
@@ -192,7 +193,7 @@ export class Engine {
     if (typeof g.addEventListener !== 'function' || this.netWatched) return;
     this.netWatched = true;
     g.addEventListener('offline', () => { this.netDown = true; this.changed(); });
-    g.addEventListener('online', () => { this.netDown = false; this.changed(); this.transport.retryNow(); });
+    g.addEventListener('online', () => { this.netDown = this.dev.sim.offline; this.changed(); this.transport.retryNow(); });   // офлайн имитатора сильнее
   }
   private netWatched = false;
 
@@ -742,7 +743,7 @@ export class Engine {
     switch (f.op) {
       case 'hello':
         if (this.resetting) { this.skipped.hello = f; return; }   // resetLocal пошлёт свой hello сама, а при отказе проиграет этот
-        this.dev.serverSeq = f.seq;
+        this.dev.counters.serverSeq = f.seq;
         this.holding = true;
         this.run(async () => {
           // другое поколение базы (сервер пересоздан): старый кэш недействителен целиком
@@ -761,7 +762,7 @@ export class Engine {
       case 'tooLong': {
         const w = this.syncWaiter;
         if (w && f.op === 'updates' && f.from !== w.since) return;   // ответ на прежний запрос (повторён по таймауту) — не наш
-        this.dev.serverSeq = Math.max(this.dev.serverSeq ?? 0, f.op === 'updates' ? f.to : f.seq);
+        this.dev.counters.serverSeq = Math.max(this.dev.counters.serverSeq ?? 0, f.op === 'updates' ? f.to : f.seq);
         this.syncWaiter = null;
         w?.resolve(f);
         return;
@@ -837,7 +838,7 @@ export class Engine {
           // защита: пустая пачка с more от сервера означает дыру — лечим снимком
           const gap = f.op === 'updates' && f.more && f.items.length === 0;
           if (f.op === 'tooLong' || gap) {
-            this.dev.tooLongCount++;
+            this.dev.counters.tooLongCount++;
             this.dev.log.record('engine', 'snapshot', { reason: gap ? 'gap' : 'tooLong' });
             this.store.resetForSnapshot();
             this.store.resetDialogs();
@@ -866,7 +867,7 @@ export class Engine {
     }
     if (this.online) {
       this.ready = true;
-      this.dev.lastSyncAt = Date.now();
+      this.dev.counters.lastSyncAt = Date.now();
       this.holding = false;   // всё накопленное уйдёт одним патчем
       this.changed();
       this.pumpOutbox();
@@ -939,45 +940,44 @@ export class Engine {
     });
   }
 
-  /** Ответа на sync нет (кадр потерян — dev: потери, «Дыра в журнале»): тот же диапазон спрашиваем ещё раз;
-   *  после трёх попыток соединение считаем мёртвым — обрыв, переподключение, догон от lastSeq. */
   private requestSync(since: number): Promise<SyncReply> {
-    const offline: ReqError = { code: 'offline', retry: true };
     return new Promise((resolve, reject) => {
-      let timer: ReturnType<typeof setTimeout> | null = null;
-      let tries = 0;
-      const done = () => { if (timer) clearTimeout(timer); timer = null; };
-      const w = { since, resolve: (f: SyncReply) => { done(); resolve(f); }, reject: (e: ReqError) => { done(); reject(e); } };
-      const arm = () => {
-        timer = setTimeout(() => {
-          if (this.syncWaiter !== w) return;
-          this.dev.log.record('engine', 'syncTimeout', { since, tries: ++tries });
-          if (tries >= 3 || !this.transport.send({ op: 'sync', since })) { this.syncWaiter = null; w.reject(offline); this.transport.drop(); return; }
-          arm();
-        }, this.cfg.syncTimeoutMs ?? 5000);
+      // dev: имитатор потерял кадр (потери, «Дыра в журнале») — тот же диапазон ещё раз, после трёх раз — обрыв
+      let tries = 0, stop = () => {};
+      const resend = () => {
+        if (this.syncWaiter !== w) return;
+        this.dev.log.record('engine', 'syncTimeout', { since, tries: ++tries });
+        if (tries >= 3 || !this.transport.send({ op: 'sync', since })) { this.syncWaiter = null; w.reject({ code: 'offline', retry: true }); this.transport.drop(); return; }
+        stop = watchLoss(this.dev.sim, this.cfg.syncTimeoutMs ?? 5000, resend);
       };
+      const w = { since, resolve: (f: SyncReply) => { stop(); resolve(f); }, reject: (e: ReqError) => { stop(); reject(e); } };
       this.syncWaiter = w;
-      if (!this.transport.send({ op: 'sync', since })) { this.syncWaiter = null; reject(offline); return; }
-      arm();
+      if (!this.transport.send({ op: 'sync', since })) {
+        this.syncWaiter = null;
+        reject({ code: 'offline', retry: true });
+        return;
+      }
+      stop = watchLoss(this.dev.sim, this.cfg.syncTimeoutMs ?? 5000, resend);
     });
   }
 
-  /** Без ack/err за requestTimeoutMs соединение считаем мёртвым: обрыв → переподключение → очередь уйдёт снова (сервер узнаёт повтор по clientId). */
   private request(frame: Extract<ClientFrame, { reqId: string }>): Promise<Record<string, unknown>> {
     const reqId = 'r' + ++this.reqSeq;
     return new Promise((resolve, reject) => {
-      const timer = setTimeout(() => {
+      // dev: ответ мог потерять имитатор — обрыв, переподключение, очередь уйдёт снова (сервер узнаёт повтор по clientId)
+      let stop = () => {};
+      this.pending.set(reqId, { resolve: (r) => { stop(); resolve(r); }, reject: (e) => { stop(); reject(e); } });
+      if (!this.transport.send({ ...frame, reqId })) {
+        this.pending.delete(reqId);
+        reject({ code: 'offline', retry: true });
+        return;
+      }
+      stop = watchLoss(this.dev.sim, this.cfg.requestTimeoutMs ?? 15_000, () => {
         if (!this.pending.delete(reqId)) return;
         this.dev.log.record('engine', 'requestTimeout', { op: frame.op, reqId });
         reject({ code: 'offline', retry: true });
         this.transport.drop();
-      }, this.cfg.requestTimeoutMs ?? 15_000);
-      this.pending.set(reqId, { resolve: (r) => { clearTimeout(timer); resolve(r); }, reject: (e) => { clearTimeout(timer); reject(e); } });
-      if (!this.transport.send({ ...frame, reqId })) {
-        this.pending.delete(reqId);
-        clearTimeout(timer);
-        reject({ code: 'offline', retry: true });
-      }
+      });
     });
   }
 
@@ -996,6 +996,19 @@ export class Engine {
     await this.store.flush();
     this.changed();
     this.runSync();
+  }
+
+  /** Офлайн имитатора: новые кадры и HTTP сразу получают отказ, а уже ушедшие запросы дожидаются ответа
+   *  (сервер их выполнил — отказ привёл бы к повтору); затем сокет закрывается (не дольше 5 с). */
+  private simOffline(on: boolean): void {
+    this.netDown = on || (typeof navigator !== 'undefined' && navigator.onLine === false);
+    this.changed();
+    if (!on) { this.transport.setOffline(false); return; }
+    this.run(async () => {
+      const end = Date.now() + 5000;
+      while ((this.pending.size || this.syncWaiter) && Date.now() < end) await new Promise((r) => setTimeout(r, 10));
+      if (this.dev.sim.offline) this.transport.setOffline(true);
+    });
   }
 
   /** «Повторить все»: неотправленные с отказом — снова в очередь; очередь операций — без паузы. */

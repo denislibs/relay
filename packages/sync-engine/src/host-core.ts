@@ -139,7 +139,14 @@ export class HostCore {
     // сообщения вкладок, пришедшие во время перезапуска, ждут уже новый движок
     const next = old.close().then(() => this.start(cfg));
     this.engine = next;
-    const e = await next;
+    let e: Engine;
+    try { e = await next; }
+    catch (err) {
+      // не открылся: хост не застревает на отклонённом промисе — вкладки перезагружаются и откроют движок заново (hello)
+      if (this.engine === next) { this.engine = null; this.live = null; }
+      for (const c of this.clients) c.port.post({ t: 'reload' });
+      throw err;
+    }
     // все подписки — заново на новом движке (и те, что успели прийти во время перезапуска: они могли попасть на старый)
     for (const c of this.clients) for (const [sub, q] of c.queries) { c.subs.get(sub)?.close(); c.subs.set(sub, e.watch(q, (patch) => this.queue(c, sub, patch))); }
     return { restarted: 'engine' };

@@ -74,6 +74,11 @@ export class Mirror {
     for (const k of p.remove) this.items.delete(k);
     for (const i of p.upsert) this.items.set(i.key, i);
     if (p.order) this.order = p.order;
+    else if (p.append) {   // журнал: убранные — старейшие, новые — в конец
+      const order = p.remove.length ? this.order.slice(p.remove.length) : this.order.slice();
+      for (const i of p.upsert) order.push(i.key);
+      this.order = order;
+    }
   }
   /** Данные без служебных элементов (ключи на «~», например ~window — края окна ленты). */
   list(): Item[] { return this.order.map((k) => this.items.get(k)!).filter((i) => i && !i.key.startsWith('~')); }

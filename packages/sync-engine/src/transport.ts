@@ -1,5 +1,6 @@
 import type { ClientFrame, ServerFrame } from '@relay/protocol';
-import { lost, oneWay, type DevTools, type TransportView } from './devlog';
+import type { DevTools, TransportView } from './devlog';
+import { lost, oneWay } from './devsim';
 
 export interface TransportHandlers {
   onOpen(): void;
@@ -63,12 +64,12 @@ export class WsTransport {
   }
 
   send(f: ClientFrame): boolean {
-    if (!this.isOpen()) return false;
+    if (!this.isOpen() || this.dev?.sim.offline) return false;   // dev: офлайн — новым кадрам отказ, пока сокет дожидается ответов
     const s = JSON.stringify(f);
     this.dev?.log.frameOut(f, s.length);
     const p = this.dev?.sim.profile ?? null;
     if (!p && !this.outQueued) { this.ws!.send(s); return true; }
-    if (f.op !== 'hello' && lost(p)) { this.dev!.log.record('engine', 'lost', { dir: 'out', op: f.op }); return true; }
+    if (f.op !== 'hello' && lost(p)) { this.dev!.sim.losses++; this.dev!.log.record('engine', 'lost', { dir: 'out', op: f.op }); return true; }
     const ws = this.ws!;
     this.outQueued++;
     this.later('out', p ? oneWay(p, s.length) : 0, () => { this.outQueued--; if (ws.readyState === WebSocket.OPEN) ws.send(s); });
@@ -82,7 +83,7 @@ export class WsTransport {
     try { ws.close(DROP_CODE, 'drop'); } catch { ws.close(); }
   }
 
-  /** dev: офлайн — закрыть сокет и не переподключаться; выключили — подключиться сразу. */
+  /** dev: офлайн — закрыть сокет и не переподключаться (новые кадры send уже не берёт); выключили — подключиться сразу. */
   setOffline(on: boolean): void {
     if (this.timer) { clearTimeout(this.timer); this.timer = null; }
     this.nextAt = this.nextDelay = null;
@@ -114,6 +115,21 @@ export class WsTransport {
     this.later('in', p ? oneWay(p, size) : 0, () => { this.inQueued--; if (this.ws === ws) fn(); });
   }
 
+  private receive(raw: string): void {
+    let f: ServerFrame;
+    try { f = JSON.parse(raw); } catch { return; }
+    const dev = this.dev;
+    if (dev) {
+      const sim = dev.sim;
+      // потери — любые кадры, кроме hello и sessionTerminated: без них сеанс не начать и не закончить, восстановиться нечем
+      if (f.op !== 'hello' && f.op !== 'sessionTerminated' && lost(sim.profile)) { sim.losses++; dev.log.frameIn(f, raw.length, 'lost'); return; }
+      if (f.op === 'updates' && sim.dropNextUpdates) { sim.dropNextUpdates = false; sim.losses++; dev.log.frameIn(f, raw.length, 'dropped'); return; }
+      if (f.op === 'updates' && sim.forceTooLong) { sim.forceTooLong = false; dev.log.frameIn(f, raw.length, 'asTooLong'); f = { op: 'tooLong', seq: f.to }; }
+      dev.log.frameIn(f, raw.length);
+    }
+    this.h.onFrame(f);
+  }
+
   private open(): void {
     if (this.dev?.sim.offline) return;   // dev: офлайн — ждём setOffline(false)
     this.nextAt = this.nextDelay = null;
@@ -123,19 +139,9 @@ export class WsTransport {
     ws.onopen = () => this.deliver(ws, 0, () => { this.attempt = 0; this.dev?.log.record('engine', 'open', null); this.h.onOpen(); });
     ws.onmessage = (e) => {
       const raw = String(e.data);
-      this.deliver(ws, raw.length, () => {
-        let f: ServerFrame;
-        try { f = JSON.parse(raw); } catch { return; }
-        const dev = this.dev;
-        if (dev) {
-          // потери — любые кадры, кроме hello и sessionTerminated: без них сеанс не начать и не закончить, восстановиться нечем
-          if (f.op !== 'hello' && f.op !== 'sessionTerminated' && lost(dev.sim.profile)) { dev.log.frameIn(f, raw.length, 'lost'); return; }
-          if (f.op === 'updates' && dev.sim.dropNextUpdates) { dev.sim.dropNextUpdates = false; dev.log.frameIn(f, raw.length, 'dropped'); return; }
-          if (f.op === 'updates' && dev.sim.forceTooLong) { dev.sim.forceTooLong = false; dev.log.frameIn(f, raw.length, 'asTooLong'); f = { op: 'tooLong', seq: f.to }; }
-          dev.log.frameIn(f, raw.length);
-        }
-        this.h.onFrame(f);
-      });
+      // без медленной сети — сразу, без замыкания на кадр
+      if (!this.inQueued && !this.dev?.sim.profile) this.receive(raw);
+      else this.deliver(ws, raw.length, () => this.receive(raw));
     };
     ws.onerror = () => {};
     ws.onclose = (e) => this.deliver(ws, 0, () => {
