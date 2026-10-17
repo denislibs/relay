@@ -11,6 +11,8 @@ import { connected, disconnected, listPresence, type Publish } from './domain/pr
 import { searchMessages } from './domain/search';
 import { fileFor, MAX_FILE, storeUpload } from './domain/files';
 import { handleFrame } from './ws';
+import { journalStats } from './domain/journal';
+import { notifyLatency } from './realtime';
 import { checkUsername, getMe, getUser, setUsername, updateProfile } from './domain/profile';
 import { usersByIds } from './domain/users';
 import { subscribe, unsubscribe, vapidKeys } from './domain/push';
@@ -22,6 +24,13 @@ const fail = (code: string) => Response.json({ code }, { status: STATUS[code] ??
 
 /** checkedAt — когда сокет последний раз отмечал активность и проверял свой сеанс (domain/sessions.checkSocket). */
 export type WsData = { userId: number; sessionId: number; checkedAt: number };
+
+/** Открытые сокеты пользователя в этом процессе (dev: /dev/stats). */
+const userSockets = new Map<number, number>();
+const countSocket = (userId: number, d: number) => {
+  const n = (userSockets.get(userId) ?? 0) + d;
+  if (n > 0) userSockets.set(userId, n); else userSockets.delete(userId);
+};
 
 /** Срок сеанса продлён (sessionFromToken.refresh): ответ несёт свежий cookie. */
 const refreshed = new WeakMap<Request, string>();
@@ -148,6 +157,10 @@ export function createServer(opts: { port: number }): Server {
           const ids = memberIds.includes(userId) ? memberIds : [userId, ...memberIds];
           return Response.json({ id: await createChat(kind, title, ids) });
         }
+        if (process.env.DEV_LOGIN === '1' && req.method === 'GET' && url.pathname === '/dev/stats') {
+          const [j, notifyMs] = await Promise.all([journalStats(userId), notifyLatency().catch(() => null)]);
+          return Response.json({ at: Date.now(), userId, seq: j.seq, sockets: userSockets.get(userId) ?? 0, journal: { size: j.size, minSeq: j.minSeq }, notifyMs });
+        }
         if (req.method === 'POST' && url.pathname === '/upload') {
           // тело — сам файл; ?name=…&w=…&h=… (размеры фото считает клиент, он его уже декодировал)
           const len = Number(req.headers.get('content-length') ?? 0);
@@ -229,10 +242,12 @@ export function createServer(opts: { port: number }): Server {
         ws.subscribe(`user:${ws.data.userId}`);
         ws.subscribe(`session:${ws.data.sessionId}`);
         trackSocket(ws.data.sessionId, ws);
+        countSocket(ws.data.userId, 1);
         connected(publish, ws.data.userId).catch((err) => console.error('presence:', err));
       },
       close(ws) {
         untrackSocket(ws.data.sessionId, ws);
+        countSocket(ws.data.userId, -1);
         disconnected(publish, ws.data.userId);
       },
       async message(ws, raw) {

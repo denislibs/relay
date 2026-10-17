@@ -39,3 +39,12 @@ export async function getUpdates(userId: number, since: number, limit = Number(p
   const last = items.length ? items[items.length - 1].seq : since;
   return { items, seq, more: last < seq, tooLong: false };
 }
+
+/** dev (/dev/stats): seq пользователя, сколько записей журнала у него хранится и с какой начинается (дальше — tooLong). */
+export async function journalStats(userId: number): Promise<{ seq: number; size: number; minSeq: number | null }> {
+  const [[s], [j]] = await Promise.all([
+    sql`select seq from user_seq where user_id = ${userId}`,
+    sql`select count(*)::int as size, min(seq) as min from updates where user_id = ${userId}`,
+  ]);
+  return { seq: s ? (s.seq as number) : 0, size: j.size as number, minSeq: j.min == null ? null : Number(j.min) };
+}

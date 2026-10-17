@@ -1,6 +1,7 @@
 import { enableStrictDom } from '@relay/ui';
 import { render } from 'preact';
 import { startData } from './data';
+import { installErrorCapture } from './devtools/metrics';
 import { getGlobal, setGlobal, type Me } from './global';
 import * as nav from './nav';
 import { startScreenBlur } from './screenBlur';
@@ -12,6 +13,9 @@ declare const __DEV__: boolean;
 
 // dev-сборка: проверка дисциплины measure/mutate (чтение раскладки в фазе записи и наоборот)
 if (__DEV__) enableStrictDom({ ignore: /twallpaper/ });
+
+// ошибки главного потока — всегда, в кольцо на 200 (раздел «Для разработчиков» → «Ошибки»)
+installErrorCapture();
 
 const ME_KEY = 'relay.me';
 

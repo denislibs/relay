@@ -4,6 +4,25 @@ import { closeLive, parseEnded, terminatedFrame, touchLive } from './domain/sess
 
 const POKE = JSON.stringify({ op: 'poke' });
 
+// dev (/dev/stats): задержка NOTIFY — pg_notify на своём канале и время до его прихода в LISTEN этого процесса
+const PING_CHANNEL = 'dev_ping';
+const pings = new Map<string, () => void>();
+let pingSub: Promise<unknown> | null = null;
+
+/** Один круг pg_notify → LISTEN, мс (≈ путь журнал → poke); null — не дождались за timeoutMs. */
+export async function notifyLatency(timeoutMs = 2000): Promise<number | null> {
+  pingSub ??= sql.listen(PING_CHANNEL, (token) => { pings.get(token)?.(); }).catch((e) => { pingSub = null; throw e; });
+  await pingSub;
+  const token = crypto.randomUUID();
+  const t0 = performance.now();
+  const got = new Promise<number | null>((resolve) => {
+    const timer = setTimeout(() => { pings.delete(token); resolve(null); }, timeoutMs);
+    pings.set(token, () => { clearTimeout(timer); pings.delete(token); resolve(Math.round((performance.now() - t0) * 10) / 10); });
+  });
+  await sql`select pg_notify(${PING_CHANNEL}, ${token})`;
+  return got;
+}
+
 /** Будит сокеты пользователей, чьи журналы изменились в любом процессе сервера. */
 export async function startRealtime(server: Server): Promise<() => Promise<void>> {
   const sub = await sql.listen('updates', (payload) => {
