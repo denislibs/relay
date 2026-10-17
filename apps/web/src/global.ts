@@ -51,6 +51,7 @@ export interface GlobalState {
   sessions: SessionInfo[] | null;   // активные сеансы с сервера (null — ещё не знаем); вид — sessionsView(sessions, opsKeys)
   sessionsOffline: boolean;         // последний запрос списка не дошёл (нет сети)
   opsKeys: string[];                // ключи операций настроек в очереди: оптимистичный вид сеансов
+  names: Record<number, string>;   // имена людей по id (авторы сообщений); кэш переживает перезагрузку
 }
 
 /** Настройки аккаунта (общие для устройств). loaded — снимок с сервера уже был; pending — есть неподтверждённые правки. */
@@ -95,6 +96,7 @@ let state: GlobalState = {
   sessions: null,
   sessionsOffline: false,
   opsKeys: [],
+  names: (() => { try { return JSON.parse(localStorage.getItem('relay.names') ?? '{}'); } catch { return {}; } })(),
 };
 const subscribers = new Set<() => void>();
 

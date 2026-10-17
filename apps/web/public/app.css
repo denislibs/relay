@@ -29,7 +29,6 @@ body { background: var(--bg); color: var(--ink); font-family: var(--font-sans); 
 @keyframes app-rise { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: none; } }
 @keyframes app-fade-out { to { opacity: 0; } }
 @media (prefers-reduced-motion: reduce) { .app-skel > div, .app-listwrap > * { animation-duration: 1ms !important; animation-delay: 0ms !important; } }
-.rl-glassbar.app-steady { animation: none; }
 .rl-glassbar-title .app-phase { color: var(--brand-text); animation: rl-label-in var(--dur-base) var(--ease-out); }
 /* главное меню под гамбургером: выпадает из угла кнопки */
 .app-sidemenu { position: absolute; top: 56px; left: 12px; z-index: 40; }
@@ -57,10 +56,6 @@ body { background: var(--bg); color: var(--ink); font-family: var(--font-sans); 
 .app-results { padding: var(--space-2) 0 var(--space-4); }
 .app-results-head { padding: var(--space-2) var(--space-3); color: var(--ink-muted); font: 500 13px/18px var(--font-sans); }
 .app-results-empty { padding: var(--space-3); color: var(--ink-muted); font: 400 14px/20px var(--font-sans); }
-.app-findbar { padding: 0 4px; animation: app-fade 160ms var(--ease-out) both; }
-.app-findbar .rl-csearch { flex: 1; display: flex; align-items: center; gap: 4px; background: transparent; -webkit-backdrop-filter: none; backdrop-filter: none; }
-.app-findbar .rl-csearch input { flex: 1; min-width: 0; height: 40px; border: 0; background: transparent; outline: none; font: 400 16px/21px var(--font-sans); color: var(--ink); }
-.app-findbar .rl-csearch-count { color: var(--ink-muted); font: 400 13px/18px var(--font-sans); white-space: nowrap; }
 .rl-glassbar.app-hidden { display: none; }
 /* вложения: окно отправки и зона перетаскивания */
 .app-send-preview { display: block; max-width: 100%; max-height: 50vh; margin: 0 auto var(--space-3); border-radius: var(--radius-md); object-fit: contain; }
@@ -173,3 +168,44 @@ html[data-blur="0"] .app-empty-main .rl-empty, html[data-blur="0"] .app-sidemenu
 .app-session-info dt { color: var(--ink-muted); }
 .app-session-info dd { margin: 0; text-align: right; overflow-wrap: anywhere; }
 .rl-settings .rl-inforow-value { animation: app-fade 200ms var(--ease-out) both; }
+/* переход к сообщению — как в Telegram: полоса на всю ширину чата за строкой, проявляется и тает */
+.rl-shell .rl-feed { container-type: inline-size; }   /* 100cqw у полосы = ширина ленты, без горизонтальной прокрутки */
+.app-msg-flash { isolation: isolate; }
+.app-msg-flash::before { content: ''; position: absolute; z-index: -1; top: -2px; bottom: -2px; left: 50%; width: 100cqw; transform: translateX(-50%);
+  background: var(--msg-highlight, rgba(0, 0, 0, .1)); pointer-events: none; animation: app-msg-band 1.6s ease-out both; }
+:root[data-theme="dark"] .app-msg-flash::before { --msg-highlight: rgba(255, 255, 255, .08); }
+@media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) .app-msg-flash::before { --msg-highlight: rgba(255, 255, 255, .08); } }
+@keyframes app-msg-band { 0% { opacity: 0; } 12%, 60% { opacity: 1; } 100% { opacity: 0; } }
+@media (prefers-reduced-motion: reduce) { .app-msg-flash::before { animation-duration: 1.2s; } }
+
+/* поиск по чату — как в Telegram: карточка внутри шапки между аватаром и правой кнопкой;
+   строка с лупой, ↑ ↓ ×; список совпадений — в той же карточке, под разделителем с отступами */
+.rl-glassbar.app-finding { overflow: visible; }
+.rl-glassbar.app-finding .rl-glassbar-title { visibility: hidden; }
+.app-findcard { position: absolute; z-index: 5; top: 4px; left: 52px; right: 52px; display: flex; flex-direction: column; border-radius: 20px; background: var(--raised);
+  box-shadow: 0 1px 2px rgba(0, 0, 0, .06), 0 4px 16px rgba(0, 0, 0, .1); transform-origin: right top; animation: app-findcard-in 180ms var(--ease-out) both; }
+@media (max-width: 720px) { .app-findcard { left: 96px; } }
+@keyframes app-findcard-in { from { opacity: 0; transform: scaleX(.96); } }
+.app-findcard .rl-csearch { height: 40px; padding: 0 4px 0 10px; gap: 2px; background: transparent; box-shadow: none; border-radius: 0; animation: none; -webkit-backdrop-filter: none; backdrop-filter: none; }
+.app-findcard .rl-csearch input { flex: 1; min-width: 0; height: 40px; padding: 0 8px; border: 0; background: transparent; outline: none; font: 400 16px/21px var(--font-sans); color: var(--ink); }
+.app-findcard .rl-csearch input::-webkit-search-cancel-button { -webkit-appearance: none; appearance: none; }
+.app-findcard .rl-csearch .rl-iconbtn { width: 36px; height: 36px; }
+.app-findcard .rl-csearch-icon { width: 22px; height: 22px; color: var(--ink-muted); transition: color var(--dur-instant) var(--ease-standard); }
+.app-findcard .rl-csearch:focus-within .rl-csearch-icon { color: var(--brand-text); }
+.app-findlist { position: relative; height: 0; max-height: min(360px, 55vh); overflow-y: auto; overscroll-behavior: contain; transition: height 220ms cubic-bezier(.2, 0, .2, 1), opacity 160ms ease; }
+.app-findlist-in { padding: 7px 8px 8px; }
+.app-findlist::before { content: ''; position: sticky; z-index: 1; display: block; top: 0; margin: 0 16px; height: 1px; background: color-mix(in srgb, var(--ink) 12%, transparent); }
+.rl-presence[data-state="closing"] .app-findlist { height: 0 !important; opacity: 0; }
+.app-findrow { position: relative; overflow: hidden; display: flex; align-items: center; gap: 12px; width: 100%; padding: 5px 8px; border: 0; border-radius: 12px; background: transparent; color: var(--ink); text-align: left; cursor: pointer; }
+.app-findrow:hover, .app-findrow-on { background: var(--hover); }
+.app-findrow-text { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
+.app-findrow-top { display: flex; align-items: baseline; gap: 8px; }
+.app-findrow-top b { flex: 1; min-width: 0; font: 500 15px/20px var(--font-sans); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.app-findrow-top time { font: 400 12px/16px var(--font-sans); color: var(--ink-muted); white-space: nowrap; }
+.app-findrow-body { font: 400 14px/19px var(--font-sans); color: var(--ink-muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.app-findrow-body .rl-mark, .rl-shell .rl-feed .rl-mark { padding: 1px 3px; border-radius: 4px; background: color-mix(in srgb, var(--brand-text, #3390ec) 18%, transparent); color: var(--ink); }
+.app-findempty { padding: 10px 16px 12px; text-align: center; color: var(--ink-muted); font: 400 15px/20px var(--font-sans); }
+.rl-shell .rl-feed .rl-mark-current { background: color-mix(in srgb, var(--brand-text, #3390ec) 34%, transparent); box-shadow: none; animation: none; }
+
+/* папки — отдельная полоса с тенью внутри карточки сайдбара, как в Telegram Web A */
+.app-folders { margin: 2px 12px 8px; }

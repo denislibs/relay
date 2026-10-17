@@ -1,4 +1,4 @@
-import { beginHeavyAnimation } from '@relay/ui';
+import { switchTheme } from './themeSwitch';
 // Настройки устройства: хранятся в localStorage (`relay.prefs`), применяются в apply() и
 // ещё раз — в index.html до первой отрисовки. loadPrefs достраивает недостающее умолчаниями
 // и отбрасывает неизвестное.
@@ -153,23 +153,14 @@ export function isDark(pref: ThemePref): boolean {
   return pref === 'dark' || (pref === 'system' && matchMedia('(prefers-color-scheme: dark)').matches);
 }
 
-function applyTheme(root: HTMLElement, pref: ThemePref, animate: boolean): void {
-  if (animate) { // цвета всей страницы переливаются — тяжёлая анимация
-    const end = beginHeavyAnimation(450);
-    root.classList.add('rl-theme-anim');
-    setTimeout(() => { root.classList.remove('rl-theme-anim'); end(); }, 450);
-  }
-  if (pref === 'system') root.removeAttribute('data-theme'); else root.setAttribute('data-theme', pref);
-}
-
-/** Выставляет на :root всё, что зависит от настроек. Тему плавно меняет, только если она сменилась. */
+/** Выставляет на :root всё, что зависит от настроек. Тему плавно меняет (themeSwitch.ts), только если она сменилась. */
 export function applyPrefs(p: Prefs = current): void {
   if (typeof document === 'undefined') return;
   const root = document.documentElement;
-  if (p.theme !== appliedTheme) { applyTheme(root, p.theme, appliedTheme !== null); appliedTheme = p.theme; }
+  if (p.anim.ui) root.removeAttribute('data-anim'); else root.setAttribute('data-anim', '0'); // до темы: смешивание смотрит на data-anim
+  if (p.theme !== appliedTheme) { switchTheme(root, p.theme, isDark(p.theme), appliedTheme !== null); appliedTheme = p.theme; }
   root.style.setProperty('--message-text-size', p.textSize + 'px');
   if ((p.timeFormat ?? localeTimeFormat()) === '12h') root.setAttribute('data-time12', ''); else root.removeAttribute('data-time12'); // время в пузыре шире
-  if (p.anim.ui) root.removeAttribute('data-anim'); else root.setAttribute('data-anim', '0');
   if (p.anim.blur) root.removeAttribute('data-blur'); else root.setAttribute('data-blur', '0');
   if (p.anim.wallpaper) root.removeAttribute('data-wpanim'); else root.setAttribute('data-wpanim', '0');
 }

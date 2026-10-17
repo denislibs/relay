@@ -2,6 +2,7 @@
 import { useEffect, useState } from 'preact/hooks';
 import { useGlobal } from './global';
 import { isDark, type WallpaperPref } from './prefs';
+import tokens from '@relay/ui/tokens.json';
 
 export interface ColorPreset { id: string; name: string; colors: string[] }
 
@@ -21,6 +22,15 @@ export const COLOR_PRESETS: { light: ColorPreset[]; dark: ColorPreset[] } = {
     { id: 'ocean', name: 'Океан', colors: ['#14283a', '#0f1e2c', '#1b3650', '#0a1621'] },
   ],
 };
+
+/** Цвета градиента «как в теме» (--wallpaper-1…4 из tokens.json) — для превью, где CSS-переменные не годятся. */
+export function themeWallpaperColors(dark: boolean): string[] {
+  const all = tokens.color.tokens as { name: string; value: string | { light: string; dark: string } }[];
+  return [1, 2, 3, 4].map((i) => {
+    const v = all.find((t) => t.name === 'wallpaper-' + i)?.value;
+    return typeof v === 'string' ? v : v ? v[dark ? 'dark' : 'light'] : '#dfe9d6';
+  });
+}
 
 export const PATTERN_NAMES: Record<string, string> = { catsAndDogs: 'Коты и собаки', doodles: 'Значки' };
 

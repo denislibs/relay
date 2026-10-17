@@ -62,7 +62,8 @@ export function updateTitle(): void {
   if (g.counters === lastIn.counters && g.openChatId === lastIn.open && g.chats === lastIn.chats && prefs === lastIn.prefs) return;
   lastIn = { counters: g.counters, open: g.openChatId, chats: g.chats, prefs };
   const unread = g.counters.unreadMessages;
-  const chatTitle = g.openChatId ? g.chats.find((c) => c.id === g.openChatId)?.title ?? null : null;
+  const t = g.openChatId ? g.chats.find((c) => c.id === g.openChatId)?.title : null;
+  const chatTitle = typeof t === 'string' ? t : null;
   const title = titleFor({ chatTitle, unread, prefs });
   if (title !== lastTitle) { lastTitle = title; document.title = title; }
   const badge = badgeCount(unread, prefs);

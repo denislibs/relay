@@ -151,15 +151,24 @@ function SelectionBar(props) {
 
 /* ---------- ChatSearchBar + Highlight ---------- */
 function ChatSearchBar(props) {
-  var total = props.total || 0, index = props.index || 0;
-  return h('div', { class: 'rl-csearch', role: 'search' },
-    h(IconButton, { icon: 'arrowLeft', label: 'Закрыть поиск', onClick: props.onClose }),
+  var total = props.total || 0;
+  // busy: идёт поиск — лупа сменяется лоадером (тот же, что в поиске сайдбара)
+  return h('div', { class: cx('rl-csearch', props.busy && 'rl-search-busy'), role: 'search' },
+    h('span', { class: 'rl-search-icon rl-csearch-icon', 'aria-hidden': 'true' },
+      h(Icon, { name: 'search', size: 22 }),
+      h('svg', { class: 'rl-search-spin', width: 22, height: 22, viewBox: '0 0 18 18', fill: 'none' },
+        h('circle', { cx: 9, cy: 9, r: 7, stroke: 'currentColor', 'stroke-width': 1.8, 'stroke-linecap': 'round', 'stroke-dasharray': '30 44' }))),
     h('label', { for: props.id || 'rl-csearch', class: 'rl-sr' }, 'Поиск по чату'),
-    h('input', { id: props.id || 'rl-csearch', type: 'search', placeholder: 'Поиск по чату', value: props.value, autocomplete: 'off', onInput: function (e) { if (props.onQuery) props.onQuery(e.target.value); },
-      onKeyDown: function (e) { if (e.key === 'Enter') { e.preventDefault(); if (e.shiftKey ? props.onPrev : props.onNext) (e.shiftKey ? props.onPrev : props.onNext)(); } } }),
-    h('span', { class: 'rl-csearch-count', 'aria-live': 'polite' }, total ? (index + 1) + ' из ' + total : props.value ? 'Нет совпадений' : ''),
-    h(IconButton, { icon: 'chevronUp', label: 'Предыдущее', disabled: !total, onClick: props.onPrev }),
-    h(IconButton, { icon: 'chevronDown', label: 'Следующее', disabled: !total, onClick: props.onNext }));
+    h('input', { id: props.id || 'rl-csearch', type: 'search', placeholder: 'Поиск', value: props.value, autocomplete: 'off', autoFocus: true,
+      onInput: function (e) { if (props.onQuery) props.onQuery(e.target.value); },
+      onFocus: props.onFocus,
+      onKeyDown: function (e) {
+        if (e.key === 'Enter') { e.preventDefault(); var f = e.shiftKey ? props.onPrev : props.onNext; if (f) f(); }
+        else if (e.key === 'Escape' && props.onClose) { e.preventDefault(); props.onClose(); }
+      } }),
+    h(IconButton, { icon: 'chevronUp', label: 'Предыдущее', disabled: !total, onClick: props.onNext }),
+    h(IconButton, { icon: 'chevronDown', label: 'Следующее', disabled: !total, onClick: props.onPrev }),
+    h(IconButton, { icon: 'close', label: 'Закрыть поиск', onClick: props.onClose }));
 }
 function Highlight(props) {
   var q = (props.query || '').trim();
@@ -191,7 +200,7 @@ function ContactPicker(props) {
     multi && sel[0].length ? h('div', { class: 'rl-picker-chips' }, sel[0].map(function (k) {
       var name = byKey[k] ? byKey[k].name : String(k);
       return h('button', { key: k, type: 'button', class: 'rl-picker-chip', onClick: function () { toggle(k); }, 'aria-label': 'Убрать ' + name },
-        h(Avatar, { name: name, size: 24 }), name, h(Icon, { name: 'close', size: 14 }));
+        h(Avatar, { name: name, tone: byKey[k] ? byKey[k].tone : undefined, size: 24 }), name, h(Icon, { name: 'close', size: 14 }));
     })) : null,
     h('div', { class: 'rl-search rl-picker-search' },
       h('label', { for: 'rl-picker-q', class: 'rl-sr' }, props.searchLabel || 'Поиск контактов'),
@@ -201,7 +210,7 @@ function ContactPicker(props) {
       list.length ? list.map(function (c) {
         var k = keyOf(c), on = sel[0].indexOf(k) >= 0;
         return h('button', { key: k, type: 'button', class: cx('rl-row rl-picker-row', on && 'rl-picker-on'), onPointerDown: ripple, onClick: function () { toggle(k); }, role: multi ? 'checkbox' : undefined, 'aria-checked': multi ? String(on) : undefined },
-          h(Avatar, { name: c.name, online: c.online }),
+          h(Avatar, { name: c.name, tone: c.tone, online: c.online }),
           h('span', { class: 'rl-row-main' }, h('span', { class: 'rl-row-name' }, c.name), h('span', { class: 'rl-row-preview' }, c.about || '')),
           multi ? h('span', { class: 'rl-picker-check', 'aria-hidden': 'true' }, h(Icon, { name: 'check', size: 14, strokeWidth: 3 })) : null);
       }) : h('div', { class: 'rl-picker-empty' }, needle || !props.empty ? 'Никого не нашли по запросу «' + q[0] + '»' : props.empty)));
@@ -450,10 +459,33 @@ var PATTERN_SETS = {
   catsAndDogs: ['catHead', 'paw', 'bone', 'dogHead', 'fish', 'yarn', 'catSit', 'doghouse', 'ball', 'dot', 'balloon', 'dogRun', 'heart', 'bowl', 'mouse', 'catSleep', 'swirl', 'bird', 'plane', 'feather', 'paw', 'cloudSmall', 'dot', 'heart'],
   doodles: ['chats', 'send', 'mic', 'check', 'clock', 'image', 'smile', 'phone', 'star', 'attach', 'camera', 'poll', 'lock', 'video', 'cloud', 'pin', 'bell', 'palette', 'contact', 'link']
 };
+/* Цвет узора выводится из фона, а не хранится отдельно: насыщенность чуть выше,
+   яркость ×0.65 на светлом фоне (на тёмном — наоборот, светлее), прозрачность 40%.
+   Так любые обои сразу получают узор в своём тоне. */
+function parseHex(c) {
+  var m = /^#?([0-9a-f]{2})([0-9a-f]{2})([0-9a-f]{2})/i.exec(c.trim());
+  return m ? [parseInt(m[1], 16), parseInt(m[2], 16), parseInt(m[3], 16)] : null;
+}
+function patternColor(colors) {
+  var rgb = [0, 0, 0], n = 0;
+  colors.forEach(function (c) { var x = parseHex(c); if (x) { rgb[0] += x[0]; rgb[1] += x[1]; rgb[2] += x[2]; n++; } });
+  if (!n) return 'rgba(0,0,0,0.4)';
+  var r = rgb[0] / n / 255, g = rgb[1] / n / 255, b = rgb[2] / n / 255;
+  var max = Math.max(r, g, b), min = Math.min(r, g, b), d = max - min, hue = 0;
+  if (d) hue = max === r ? ((g - b) / d) % 6 : max === g ? (b - r) / d + 2 : (r - g) / d + 4;
+  hue = (hue * 60 + 360) % 360;
+  var sat = max ? d / max : 0, val = max;
+  sat = Math.min(1, sat + 0.05 + 0.1 * (1 - sat));
+  val = val > 0.5 ? val * 0.65 : Math.min(1, 1 - val * 0.65);
+  var f = function (k) { var x = (k + hue / 60) % 6; return Math.round(255 * (val - val * sat * Math.max(0, Math.min(x, 4 - x, 1)))); };
+  return 'rgba(' + f(5) + ',' + f(3) + ',' + f(1) + ',0.4)';
+}
 var patternCache = {};
-function buildPattern(set) {
+function buildPattern(set, stroke) {
   set = set || 'catsAndDogs';
-  if (patternCache[set]) return patternCache[set];
+  stroke = stroke || '#000';
+  var cacheKey = set + '|' + stroke;
+  if (patternCache[cacheKey]) return patternCache[cacheKey];
   var names = PATTERN_SETS[set] || PATTERN_SETS.catsAndDogs;
   // deterministic scatter on a 420×420 tile (same tile size as the reference settings): 10×10 staggered, jittered cells
   var out = [], seed = set.length * 7 + 11, n = 0, G = 10, cell = 420 / G;
@@ -471,10 +503,10 @@ function buildPattern(set) {
       out.push('<g transform="translate(' + qx.toFixed(1) + ' ' + qy.toFixed(1) + ') rotate(' + rot + ') scale(' + sc + ') translate(-12 -12)">' + body + '</g>');
     });
   }
-  var svg = '<svg xmlns="http://www.w3.org/2000/svg" width="420" height="420" viewBox="0 0 420 420" fill="none" stroke="#000" stroke-width="1.1" stroke-linecap="round" stroke-linejoin="round">' + out.join('') + '</svg>';
+  var svg = '<svg xmlns="http://www.w3.org/2000/svg" width="420" height="420" viewBox="0 0 420 420" fill="none" stroke="' + stroke + '" stroke-width="1.1" stroke-linecap="round" stroke-linejoin="round">' + out.join('') + '</svg>';
   // twallpaper wraps the value in url(…) itself, so pass a quoted data URI
-  patternCache[set] = '"data:image/svg+xml;charset=utf-8,' + encodeURIComponent(svg) + '"';
-  return patternCache[set];
+  patternCache[cacheKey] = '"data:image/svg+xml;charset=utf-8,' + encodeURIComponent(svg) + '"';
+  return patternCache[cacheKey];
 }
 var wallpapers = [];
 /* Shift every mounted wallpaper's gradient one step — call on send / receive, like Telegram. */
@@ -523,6 +555,8 @@ function Wallpaper(props) {
     function apply(animate) {
       requestMeasure(function () {
         var P = latest.current;
+        // идёт смена темы: токены на <html> смешиваются (rgba, не hex) — применим по снятию класса
+        if (document.documentElement.classList.contains('rl-theme-switching')) return;
         var t = readTheme(el);
         // props.dark — тема, с которой отрисован App; DOM переключился раньше рендера: ждём props (эффект по ним применит один раз)
         if (typeof P.dark === 'boolean' && P.dark !== t.dark) return;
@@ -530,13 +564,17 @@ function Wallpaper(props) {
         var colors = custom || t.colors;
         var key = [t.dark, colors.join(), P.pattern].join('|');
         if (theme && key === lastKey) return;
-        var themeSwitch = !theme || theme.dark !== t.dark || (!custom && t.colors.join() !== theme.colors.join());
+        var modeChanged = theme && t.dark !== theme.dark;
+        var themeSwitch = !theme || modeChanged || (!custom && t.colors.join() !== theme.colors.join());
         theme = t; lastKey = key;
         requestMutation(function () {
+          // светлая ↔ тёмная: узор меняет режим (маска ↔ рисунок), а updatePattern режим маски не снимает — собираем заново
+          if (wp && modeChanged) { wallpapers.splice(wallpapers.indexOf(wp), 1); wp.dispose(); wp = null; }
           var set = typeof P.pattern === 'string' ? P.pattern : 'catsAndDogs';
           var pattern = P.pattern === false ? undefined : t.dark
             ? { image: buildPattern(set), mask: true, background: t.ink, size: '420px', opacity: P.maskOpacity || 0.55 }
-            : { image: buildPattern(set), mask: false, background: 'transparent', size: '420px', opacity: P.patternOpacity || 0.5, blur: 0 };
+            // светлая тема: узор нарисован цветом, выведенным из фона (прозрачность уже в цвете)
+            : { image: buildPattern(set, patternColor(colors)), mask: false, background: 'transparent', size: '420px', opacity: 1, blur: 0 };
           if (!wp) {
             wp = new TWallpaper(el, { colors: colors, fps: 60, tails: 90, animate: !!P.animate && wpMotion(), scrollAnimate: !!P.scrollAnimate && wpMotion(), pattern: pattern });
             wp.init();
@@ -681,41 +719,48 @@ function SidebarHeader(props) {
       ? h(IconButton, { icon: 'arrowLeft', label: 'Назад', onClick: props.onBack, class: 'rl-sidehead-back' })
       : h(IconButton, { icon: 'menu', label: 'Меню', onClick: props.onMenu }),
     h(SearchField, { id: props.searchId || 'rl-side-search', placeholder: props.placeholder || 'Поиск', status: props.status, value: props.value, onInput: props.onSearch, class: 'rl-sidehead-search' }),
-    props.trailing !== undefined ? props.trailing : props.me ? h('button', { type: 'button', class: 'rl-sidehead-me', 'aria-label': 'Профиль', onClick: props.onMe }, h(Avatar, { name: props.me, size: 36 })) : null);
+    props.trailing !== undefined ? props.trailing : props.me ? h('button', { type: 'button', class: 'rl-sidehead-me', 'aria-label': 'Профиль', onClick: props.onMe }, h(Avatar, { name: props.me, tone: props.meTone, size: 36 })) : null);
 }
 
 /* ---------- FolderTabs: pills with counters, one sliding indicator (measure → mutate) ---------- */
+/* FolderTabs — полоса табов (папки, вкладки медиа). Белая полоса с тенью; два слоя подписей:
+   нижний — серые кнопки, верхний (aria-hidden) — те же подписи в цвете бренда на светлой таблетке.
+   Верхний слой виден только в окне clip-path над активным табом; окно переезжает плавно, и текст
+   перекрашивается ровно там, где проходит таблетка. */
 function FolderTabs(props) {
-  var host = useRef(null), ind = useRef(null), first = useRef(true);
+  var host = useRef(null), track = useRef(null), top = useRef(null), first = useRef(true);
   var items = props.items || [];
   useLayoutEffect(function () {
     requestMeasure(function () {
-      var el = host.current && host.current.querySelector('[aria-selected="true"]');
+      var tr = track.current, el = tr && tr.querySelector('.rl-tab[aria-selected="true"]');
       if (!el) return;
-      var x = el.offsetLeft, w = el.offsetWidth, sl = host.current.scrollLeft, cw = host.current.clientWidth;
+      var x = el.offsetLeft, w = el.offsetWidth, tw = tr.offsetWidth, sl = host.current.scrollLeft, cw = host.current.clientWidth;
       requestMutation(function () {
-        var s = ind.current.style;
-        if (first.current || reducedMotion()) { s.transition = 'none'; first.current = false; } else { s.transition = ''; beginHeavyAnimation(260); }
-        s.width = w + 'px';
-        s.transform = 'translateX(' + x + 'px)';
-        // keep the active pill in view
+        var s = top.current.style;
+        if (first.current || reducedMotion()) { s.transition = 'none'; first.current = false; } else { s.transition = ''; beginHeavyAnimation(300); }
+        s.clipPath = 'inset(0 ' + (tw - x - w) + 'px 0 ' + x + 'px round 18px)';
+        // активный таб — в зоне видимости полосы
         if (x < sl || x + w > sl + cw) host.current.scrollTo({ left: x - 24, behavior: reducedMotion() ? 'auto' : 'smooth' });
       });
     });
-  }, [props.active, items.length]);
+  }, [props.active, items.map(function (t) { return t.id + ':' + (t.count || 0); }).join(',')]);
   function onKey(e) {
     var i = items.findIndex(function (t) { return t.id === props.active; });
     if (e.key === 'ArrowRight' && i < items.length - 1) props.onChange(items[i + 1].id);
     if (e.key === 'ArrowLeft' && i > 0) props.onChange(items[i - 1].id);
   }
-  return h('div', { ref: host, class: 'rl-folders', role: 'tablist', 'aria-label': 'Папки', onKeyDown: onKey },
-    h('span', { ref: ind, class: 'rl-folders-ind', 'aria-hidden': 'true' }),
-    items.map(function (t) {
-      var on = t.id === props.active;
-      return h('button', { key: t.id, type: 'button', role: 'tab', 'aria-selected': String(on), tabIndex: on ? 0 : -1, class: cx('rl-folder', on && 'rl-folder-on'), onPointerDown: ripple, onClick: function () { props.onChange(t.id); } },
-        h('span', null, t.label),
-        t.count ? h('span', { key: t.count, class: cx('rl-folder-count', t.muted && 'rl-folder-count-muted') }, t.count > 999 ? '999+' : t.count) : null);
-    }));
+  function inner(t, active) {
+    return [h('span', { key: 'l' }, t.label),
+      t.count ? h('span', { key: 'c' + t.count, class: cx('rl-folder-count', t.muted && 'rl-folder-count-muted', active && 'rl-folder-count-on') }, t.count > 999 ? '999+' : t.count) : null];
+  }
+  return h('div', { ref: host, class: cx('rl-tabs', props.class), role: 'tablist', 'aria-label': props.label || 'Папки', onKeyDown: onKey },
+    h('div', { ref: track, class: 'rl-tabs-track' },
+      items.map(function (t) {
+        var on = t.id === props.active;
+        return h('button', { key: t.id, type: 'button', role: 'tab', 'aria-selected': String(on), tabIndex: on ? 0 : -1, class: 'rl-tab', onPointerDown: ripple, onClick: function () { props.onChange(t.id); } }, inner(t, false));
+      }),
+      h('div', { ref: top, class: 'rl-tabs-top', 'aria-hidden': 'true' },
+        items.map(function (t) { return h('span', { key: t.id, class: 'rl-tab' }, inner(t, true)); }))));
 }
 
 /* ---------- Fab ---------- */
@@ -729,4 +774,4 @@ function GlassBar(props) {
   return h('header', { class: cx('rl-glassbar', props.class) }, props.children);
 }
 
-export { Wallpaper, nudgeWallpaper, buildPattern, DOODLES, PATTERN_SETS, FloatShell, SideResizer, SidebarCard, SidebarHeader, FolderTabs, Fab, GlassBar, WindowList, AsidePanel, SideFrame, SlideStack, Menu, ReactionPicker, AttachMenu, MentionList, DropOverlay, LinkPreview, PollBubble, UnreadDivider, SelectionBar, ChatSearchBar, Highlight, ContactPicker, CallRow, StatusAvatar, LoginQR, VirtualList, BottomNav, Tooltip, plural };
+export { patternColor, Wallpaper, nudgeWallpaper, buildPattern, DOODLES, PATTERN_SETS, FloatShell, SideResizer, SidebarCard, SidebarHeader, FolderTabs, Fab, GlassBar, WindowList, AsidePanel, SideFrame, SlideStack, Menu, ReactionPicker, AttachMenu, MentionList, DropOverlay, LinkPreview, PollBubble, UnreadDivider, SelectionBar, ChatSearchBar, Highlight, ContactPicker, CallRow, StatusAvatar, LoginQR, VirtualList, BottomNav, Tooltip, plural };

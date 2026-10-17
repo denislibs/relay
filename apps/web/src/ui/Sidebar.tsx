@@ -1,4 +1,4 @@
-import { Avatar, ChatRow, Highlight, Menu, Presence, SlideStack, ChatRowSkeleton, useMinVisible, EmptyState, Fab, WindowList, FolderTabs, SidebarCard, SidebarHeader } from '@relay/ui';
+import { Avatar, ChatRow, Highlight, Menu, Presence, SlideStack, ChatRowSkeleton, useMinVisible, EmptyState, Fab, WindowList, FolderTabs, SidebarCard, SidebarHeader, peerTone } from '@relay/ui';
 import type { Item } from '@relay/sync-engine/src/types';
 import { loadMoreChats, openChat, searchMessages } from '../data';
 import { setGlobal, useGlobal } from '../global';
@@ -6,7 +6,7 @@ import { useEffect, useState } from 'preact/hooks';
 import type { SearchHit } from '@relay/sync-engine/src/types';
 import { go } from '../nav';
 import { isDark } from '../theme';
-import { chatTime } from './format';
+import { chatTime, chatTone, snippet } from './format';
 import { applyTheme as setTheme } from '../theme';
 
 const FOLDERS = ['all', 'unread'];
@@ -20,12 +20,6 @@ function previewOf(m: { deleted?: boolean; kind?: string; body: string; attachme
 }
 
 /** Фрагмент вокруг совпадения: превью узкое, а совпадение может быть в конце длинного сообщения. */
-function snippet(text: string, q: string): string {
-  const i = text.toLowerCase().indexOf(q.toLowerCase());
-  if (i <= 24) return text;
-  const from = text.lastIndexOf(' ', i - 12);
-  return '…' + text.slice(from > 0 ? from + 1 : i - 12);
-}
 const ROW = 72; // высота строки чата (--size-row) — список виртуальный, строки фиксированной высоты
 
 
@@ -94,6 +88,7 @@ export function Sidebar() {
               return (
                 <ChatRow
                   name={(c.title as string) || 'Чат №' + c.id}
+                  avatarTone={chatTone(c)}
                   preview={last ? previewOf(last as { deleted?: boolean; kind?: string; body: string; attachmentName?: string | null }) : 'Нет сообщений'}
                   draft={c.draft && c.id !== openId ? (c.draft as string) : undefined}
                   muted={mutedIds.includes(c.id as number)}
@@ -143,8 +138,8 @@ export function Sidebar() {
     <SidebarCard
       embedded
       paged
-      header={<SidebarHeader onMenu={() => setMenu(true)} status={searchStatus ?? undefined} me={me.name} searchId="side-search" value={search} placeholder="Поиск" onSearch={(e: Event) => setGlobal({ search: (e.target as HTMLInputElement).value })} />}
-      tabs={<FolderTabs active={folder} onChange={(id: 'all' | 'unread') => setGlobal({ folder: id })} items={[
+      header={<SidebarHeader onMenu={() => setMenu(true)} status={searchStatus ?? undefined} me={me.name} meTone={peerTone(me.userId)} searchId="side-search" value={search} placeholder="Поиск" onSearch={(e: Event) => setGlobal({ search: (e.target as HTMLInputElement).value })} />}
+      tabs={<FolderTabs class="app-folders" active={folder} onChange={(id: 'all' | 'unread') => setGlobal({ folder: id })} items={[
         { id: 'all', label: 'Все' },
         { id: 'unread', label: 'Непрочитанные', count: counters.unreadChats },
       ]} />}
@@ -159,7 +154,7 @@ export function Sidebar() {
                 onClose={() => setMenu(false)}
                 header={
                   <button type="button" role="menuitem" class="rl-menu-item app-menu-profile" onClick={() => { setMenu(false); void go('settings'); }}>
-                    <Avatar name={me.name} size={32} /><span>{me.name}</span>
+                    <Avatar name={me.name} tone={peerTone(me.userId)} size={32} /><span>{me.name}</span>
                   </button>
                 }
                 items={[

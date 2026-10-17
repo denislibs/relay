@@ -1,3 +1,4 @@
+import { peerTone } from '@relay/ui';
 import { getPrefs, localeTimeFormat } from '../prefs';
 
 export { localeTimeFormat };
@@ -107,4 +108,18 @@ export function sessionTime(iso: string, now = new Date(), fmt?: TimeFormat): st
 export function fullDateTime(iso: string, fmt?: TimeFormat): string {
   const d = new Date(iso);
   return `${d.getDate()} ${MONTHS_GEN[d.getMonth()]} ${d.getFullYear()} в ${hm(d, fmt)}`;
+}
+
+/** Фрагмент вокруг совпадения: длинное начало обрезаем, чтобы найденное было видно в строке. */
+export function snippet(text: string, q: string): string {
+  const i = text.toLowerCase().indexOf(q.toLowerCase());
+  if (i <= 24) return text;
+  const from = text.lastIndexOf(' ', i - 12);
+  return '…' + text.slice(from > 0 ? from + 1 : i - 12);
+}
+
+/** Цвет чата: у личного — собеседника, у группы — по id чата. */
+export function chatTone(chat: Record<string, unknown> | null | undefined): number | undefined {
+  const id = (chat?.peerId as number | null | undefined) ?? (chat?.id as number | undefined);
+  return id == null ? undefined : peerTone(id);
 }

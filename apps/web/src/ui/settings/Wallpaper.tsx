@@ -1,7 +1,7 @@
-import { CheckRow, InfoRow, PanelHeader, PATTERN_SETS, buildPattern, Section } from '@relay/ui';
+import { CheckRow, InfoRow, PanelHeader, PATTERN_SETS, buildPattern, patternColor, Section } from '@relay/ui';
 import { setPref } from '../../prefs';
 import { back } from '../../nav';
-import { COLOR_PRESETS, PATTERN_NAMES, sameColors, useWallpaper } from '../../wallpapers';
+import { COLOR_PRESETS, PATTERN_NAMES, sameColors, themeWallpaperColors, useWallpaper } from '../../wallpapers';
 import { useScrollMemory } from '../useScrollMemory';
 
 const DEFAULT_WP = { pattern: 'catsAndDogs', colors: null, blur: false };
@@ -16,11 +16,11 @@ export function swatchBackground(colors: string[] | null, dark = false): string 
   return dark ? 'var(--wallpaper-pattern)' : gradient(colors);
 }
 
-/** Плитка-превью. Светлая: градиент + узор тёмным. Тёмная: как живой холст — узор залит градиентом поверх тёмной основы. */
+/** Плитка-превью. Светлая: градиент + узор цветом из фона (patternColor, как у живых обоев). Тёмная: как живой холст — узор залит градиентом поверх тёмной основы. */
 export function Swatch({ pattern, colors, dark, size }: { pattern: string; colors: string[] | null; dark: boolean; size?: number }) {
   return (
     <span class={'app-swatch-fill' + (dark ? ' app-swatch-dark' : '')} style={{ background: swatchBackground(colors, dark), ...(size ? { width: size + 'px', height: size + 'px' } : null) }}>
-      <span class="app-swatch-pattern" style={{ '--swatch-pattern': `url(${buildPattern(pattern)})`, ...(dark ? { background: gradient(colors) } : null) }} />
+      <span class="app-swatch-pattern" style={{ '--swatch-pattern': `url(${buildPattern(pattern)})`, ...(dark ? { background: gradient(colors) } : { background: patternColor(colors ?? themeWallpaperColors(false)), opacity: 1 }) }} />
     </span>
   );
 }

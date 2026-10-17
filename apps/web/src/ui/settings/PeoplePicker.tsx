@@ -1,4 +1,4 @@
-import { ConfirmDialog, ContactPicker, Fab, PanelHeader, Presence } from '@relay/ui';
+import { ConfirmDialog, ContactPicker, Fab, PanelHeader, Presence, peerTone } from '@relay/ui';
 import { useEffect, useState } from 'preact/hooks';
 import { useGlobal } from '../../global';
 import { back, setLeaveGuard } from '../../nav';
@@ -52,7 +52,7 @@ function Picker({ ruleKey, list, initial, title }: { ruleKey: RuleKey; list: 'al
       <PanelHeader icon="arrowLeft" closeLabel="Назад" title={title} onClose={() => void back()} />
       <div class="rl-page-scroll app-people">
         <ContactPicker
-          multi contacts={people} selected={initial} onChange={(ids: number[]) => setPicked(ids)}
+          multi contacts={people.map((p) => ({ ...p, tone: peerTone(p.id) }))} selected={initial} onChange={(ids: number[]) => setPicked(ids)}
           searchLabel="Поиск людей" placeholder="Имя или @имя пользователя"
           empty="Здесь появятся ваши контакты и собеседники по личным чатам."
         />

@@ -1,7 +1,7 @@
 import { Avatar, EmptyState, FolderTabs, InfoRow, LazyImage, PanelHeader, RichText, SettingsIcon, SlideStack, Switch } from '@relay/ui';
 import type { Item } from '@relay/sync-engine/src/types';
 import { chatMedia, focusMessage } from '../data';
-import { fileSize } from './format';
+import { chatTone, fileSize } from './format';
 import type { ComponentChildren } from 'preact';
 import { useEffect, useState } from 'preact/hooks';
 import { syncMuted } from '../notify';
@@ -68,7 +68,7 @@ export function Info() {
         action={contact ? { icon: 'pencil', label: 'Изменить контакт', onClick: () => void go(`contacts/${peerId}/edit`) } : undefined} />
       <div class="rl-aside-body">
         <div class="rl-profile">
-          <Avatar name={title} size={120} />
+          <Avatar name={title} tone={chatTone(chat)} size={120} />
           <div class="rl-profile-name">{title}</div>
           <div class={'rl-profile-sub' + (myPeer?.online ? ' app-online' : '')}>{subtitle || ' '}</div>
         </div>
@@ -97,7 +97,7 @@ export function Info() {
           />
         </div>
         <div class="rl-aside-tabs">
-          <FolderTabs active={tab} onChange={setTab} items={[
+          <FolderTabs label="Вложения чата" active={tab} onChange={setTab} items={[
             { id: 'media', label: 'Медиа' },
             { id: 'files', label: 'Файлы' },
             { id: 'links', label: 'Ссылки', count: links.length || undefined },

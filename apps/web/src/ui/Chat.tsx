@@ -1,18 +1,14 @@
-import { Avatar, Button, ChatSearchBar, Composer, DropOverlay, GlassBar, IconButton, Menu, Modal, Presence, ReactionPicker, requestMutation } from '@relay/ui';
+import { Avatar, Button, peerTone, ChatSearchBar, Highlight, ripple, useMinVisible, requestMeasure, Composer, DropOverlay, GlassBar, IconButton, Menu, Modal, Presence, ReactionPicker, requestMutation } from '@relay/ui';
 import { useEffect, useLayoutEffect, useRef, useState } from 'preact/hooks';
-import { deleteMessage, editMessage, focusMessage, sendFile, openChat, react, saveDraft, searchMessages, send, typing, typingDone } from '../data';
+import { deleteMessage, editMessage, ensureNames, focusMessage, sendFile, openChat, react, saveDraft, searchMessages, send, typing, typingDone } from '../data';
 import type { SearchHit } from '@relay/sync-engine/src/types';
 import { setGlobal, useGlobal } from '../global';
 import { unblockUser, useUser } from '../settingsData';
 import { Feed } from './Feed';
-import { fileSize, lastSeenText } from './format';
+import { chatTime, chatTone, fileSize, lastSeenText, snippet } from './format';
 
-let closedAt = -Infinity; // когда закрылась прежняя лента: близко по времени — значит, переключение между чатами
 
 export function Chat({ chatId }: { chatId: number }) {
-  // при переключении чатов шапка остаётся на месте — въезжает только при первом открытии
-  const switching = useRef(performance.now() - closedAt < 200).current;
-  useEffect(() => () => { closedAt = performance.now(); }, []);
   const me = useGlobal((s) => s.me)!;
   const chat = useGlobal((s) => s.chats.find((c) => c.id === chatId));
   const messages = useGlobal((s) => s.messages);
@@ -26,6 +22,9 @@ export function Chat({ chatId }: { chatId: number }) {
   const [finding, setFinding] = useState(false);
   const [findQ, setFindQ] = useState('');
   const [found, setFound] = useState<{ q: string; hits: SearchHit[]; at: number } | null>(null);
+  // список совпадений под строкой поиска (как в Telegram): открыт, пока печатаем; выбор или ↑↓ — сворачивает
+  const [listOpen, setListOpen] = useState(true);
+  const names = useGlobal((s) => s.names);
   useEffect(() => {
     const q = findQ.trim();
     if (!finding || q.length < 2) { setFound(null); return; }
@@ -33,17 +32,46 @@ export function Chat({ chatId }: { chatId: number }) {
     const t = setTimeout(() => searchMessages(q, chatId).then((r) => {
       if (!live) return;
       setFound({ q, hits: r.hits, at: 0 });
-      if (r.hits[0]) focusMessage({ id: r.hits[0].id, sort: r.hits[0].sort });
+      ensureNames([...new Set(r.hits.map((x) => x.senderId))]);
     }).catch(() => {}), 300);
     return () => { live = false; clearTimeout(t); };
   }, [findQ, finding]);
-  const step = (d: 1 | -1) => setFound((f) => {
-    if (!f || !f.hits.length) return f;
-    const at = (f.at + d + f.hits.length) % f.hits.length;
+  const pick = (at: number) => setFound((f) => {
+    if (!f || !f.hits[at]) return f;
+    setListOpen(false);
     focusMessage({ id: f.hits[at].id, sort: f.hits[at].sort });
     return { ...f, at };
   });
-  const closeFind = () => { setFinding(false); setFindQ(''); setFound(null); };
+  const step = (d: 1 | -1) => setFound((f) => {
+    if (!f || !f.hits.length) return f;
+    setListOpen(false);
+    // первый Enter после ввода — к самому новому совпадению, дальше — по шагам
+    const at = listOpen ? f.at : (f.at + d + f.hits.length) % f.hits.length;
+    focusMessage({ id: f.hits[at].id, sort: f.hits[at].sort });
+    return { ...f, at };
+  });
+  const closeFind = () => { setFinding(false); setFindQ(''); setFound(null); setListOpen(true); };
+  // лоадер в строке поиска: запрос ушёл, ответа на эту строку ещё нет (с задержкой и минимумом — не мигает)
+  const findWant = findQ.trim();
+  const searching = useMinVisible(finding && findWant.length >= 2 && found?.q !== findWant, { delay: 120, min: 450 });
+  // высота списка — плавно: меряем содержимое, ставим высоту коробке (переход по height)
+  const listBox = useRef<HTMLDivElement>(null);
+  const listInner = useRef<HTMLDivElement>(null);
+  useLayoutEffect(() => {
+    const box = listBox.current, inner = listInner.current;
+    if (!box || !inner || !listOpen) return;
+    requestMeasure(() => {
+      const h = Math.min(inner.scrollHeight, 360, Math.round(innerHeight * 0.55));
+      requestMutation(() => { box.style.height = h + 'px'; });
+    });
+  }, [found, listOpen, names]);
+  // Esc закрывает поиск, даже если фокус ушёл из поля (после выбора результата)
+  useEffect(() => {
+    if (!finding) return;
+    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape' && !e.defaultPrevented) closeFind(); };
+    addEventListener('keydown', onKey);
+    return () => removeEventListener('keydown', onKey);
+  }, [finding]);
 
   // вложения: выбор файла (скрепка), перетаскивание, вставка; перед отправкой — окно с превью и подписью
   const picker = useRef<HTMLInputElement>(null);
@@ -143,24 +171,10 @@ export function Chat({ chatId }: { chatId: number }) {
   return (
     <>
       <span ref={shell} hidden />
-      {finding ? (
-        <div class="rl-glassbar app-findbar app-steady">
-          <ChatSearchBar
-            id="chat-find"
-            value={findQ}
-            total={found?.hits.length ?? 0}
-            index={found?.at ?? 0}
-            onQuery={setFindQ}
-            onNext={() => step(1)}
-            onPrev={() => step(-1)}
-            onClose={closeFind}
-          />
-        </div>
-      ) : null}
-      <GlassBar class={(switching ? 'app-steady' : '') + (finding ? ' app-hidden' : '')}>
+      <GlassBar class={finding ? 'app-finding' : ''}>
         <IconButton class="app-back" icon="arrowLeft" label="К списку чатов" onClick={() => openChat(null)} />
         <button type="button" class="rl-glassbar-who" aria-label="Информация о чате" onClick={() => setGlobal({ infoOpen: !infoOpen })}>
-          <Avatar name={title} size={40} />
+          <Avatar name={title} tone={chatTone(chat)} size={40} />
           <span class="rl-glassbar-title">
             <b>{title}</b>
             <span key={phaseLabel ?? (isTyping ? 'typing' : online ? 'on' : 'off')} class={phaseLabel ? 'app-phase' : isTyping || online ? 'app-online' : undefined}>{phaseLabel ?? (subtitle || '\u00a0')}</span>
@@ -168,6 +182,39 @@ export function Chat({ chatId }: { chatId: number }) {
         </button>
         <IconButton icon="search" label="Поиск по чату" onClick={() => setFinding(true)} />
         <IconButton icon="more" label="Информация" onClick={() => setGlobal({ infoOpen: !infoOpen })} />
+        {/* поиск по чату — карточка внутри шапки, как в Telegram: аватар и правая кнопка остаются видны */}
+        {finding ? (
+          <div class={'app-findcard' + (listOpen && found ? ' app-findcard-open' : '')}>
+            <ChatSearchBar
+              id="chat-find"
+              value={findQ}
+              total={found?.hits.length ?? 0}
+              index={found?.at ?? 0}
+              onQuery={(q: string) => { setFindQ(q); setListOpen(true); }}
+              onFocus={() => setListOpen(true)}
+              onNext={() => step(1)}
+              onPrev={() => step(-1)}
+              onClose={closeFind}
+              busy={searching}
+            />
+            <Presence show={listOpen && !!found} exitMs={140}>
+              <div class="app-findlist" ref={listBox} role="listbox" aria-label="Найденные сообщения"><div class="app-findlist-in" ref={listInner}>
+                {found && found.hits.length ? found.hits.map((x, k) => {
+                  const who = names[x.senderId] ?? (x.senderId === me.userId ? me.name : chat?.kind === 'direct' ? title : '');
+                  return (
+                    <button type="button" role="option" aria-selected={k === found.at} key={x.id} class={'app-findrow' + (k === found.at ? ' app-findrow-on' : '')} onPointerDown={ripple} onClick={() => pick(k)}>
+                      <Avatar name={who} tone={peerTone(x.senderId)} size={40} />
+                      <span class="app-findrow-text">
+                        <span class="app-findrow-top"><b>{who}</b><time>{chatTime(x.createdAt)}</time></span>
+                        <span class="app-findrow-body"><Highlight text={snippet(x.body, found.q)} query={found.q} /></span>
+                      </span>
+                    </button>
+                  );
+                }) : <div class="app-findempty">Ничего не найдено</div>}
+              </div></div>
+            </Presence>
+          </div>
+        ) : null}
       </GlassBar>
       <Feed chatId={chatId} meId={me.userId} peerName={title} stick={stick} highlight={found?.q} onMenu={(key, x, y) => setMenu({ key, x, y })} />
       {plate ? (
@@ -185,7 +232,7 @@ export function Chat({ chatId }: { chatId: number }) {
         id="composer"
         sendKey={sendKey}
         placeholder="Сообщение"
-        replyTo={editing ? { author: 'Редактирование', text: editing.original, tone: 1, icon: 'pencil' } : replyTo ? { author: authorOf(replyTo.senderId), text: replyTo.body, tone: replyTo.senderId === me.userId ? 1 : 3 } : null}
+        replyTo={editing ? { author: 'Редактирование', text: editing.original, tone: peerTone(me.userId), icon: 'pencil' } : replyTo ? { author: authorOf(replyTo.senderId), text: replyTo.body, tone: peerTone(replyTo.senderId) } : null}
         onCancelReply={() => {
           if (editing) { setText(editing.draft); latest.current = saved.current = editing.draft; setEditing(null); return; } // правку отменили — вернуть черновик
           setReplyKey(null);

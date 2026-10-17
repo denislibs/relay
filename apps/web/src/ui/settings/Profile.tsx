@@ -1,4 +1,4 @@
-import { Button, ConfirmDialog, Fab, InfoRow, Modal, PanelHeader, Presence, ProfileHeader, Section, SelectRow, TextField } from '@relay/ui';
+import { Button, ConfirmDialog, Fab, InfoRow, Modal, PanelHeader, Presence, ProfileHeader, Section, SelectRow, TextField, peerTone } from '@relay/ui';
 import { render, type ComponentChildren } from 'preact';
 import { useEffect, useLayoutEffect, useRef, useState } from 'preact/hooks';
 import { useGlobal, type Me } from '../../global';
@@ -133,7 +133,7 @@ export function Profile() {
     <div class="rl-sidepage" aria-label="Изменить профиль">
       <PanelHeader icon="arrowLeft" closeLabel="Назад" title="Изменить профиль" onClose={() => void back()} />
       <div class="rl-settings app-profile-form">
-        <ProfileHeader name={name} size={96} />
+        <ProfileHeader name={name} tone={peerTone(me.userId)} size={96} />
         <Section>
           <TextField label="Имя" value={form.firstName} maxLength={NAME_MAX} measure={cpLen} error={form.firstName.trim() ? undefined : dirty ? 'Укажите имя' : undefined} onInput={limited('firstName', NAME_MAX)} autoComplete="given-name" />
           <TextField label="Фамилия" value={form.lastName} maxLength={NAME_MAX} measure={cpLen} onInput={limited('lastName', NAME_MAX)} autoComplete="family-name" />

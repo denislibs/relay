@@ -160,7 +160,7 @@ let terminating = false;
 function onTerminated(reason: 'logout' | 'terminated'): void {
   if (terminating || selfLogout) return;
   terminating = true;
-  try { localStorage.removeItem(ME_KEY); } catch { /* приватный режим */ }
+  try { localStorage.removeItem(ME_KEY); localStorage.removeItem('relay.names'); } catch { /* приватный режим */ }
   // IndexedDB стирает движок (он же её и держит); здесь — плавный уход на экран входа и тост
   const root = document.getElementById('app');
   const ms = reducedMotion() ? 0 : 220;

@@ -12,6 +12,7 @@ import { searchMessages } from './domain/search';
 import { fileFor, MAX_FILE, storeUpload } from './domain/files';
 import { handleFrame } from './ws';
 import { checkUsername, getMe, getUser, setUsername, updateProfile } from './domain/profile';
+import { usersByIds } from './domain/users';
 import { subscribe, unsubscribe, vapidKeys } from './domain/push';
 import { getSettings, setNotify, setPrivacy, setSessionsTtl } from './domain/settings';
 import { addContact, blockUser, listBlocked, listContacts, removeContact, resolveUser, unblockUser, updateContact } from './domain/contacts';
@@ -187,6 +188,9 @@ export function createServer(opts: { port: number }): Server {
           // ?q=текст[&chatId=N][&beforeId=M][&limit=K]
           const num = (k: string) => { const v = Number(url.searchParams.get(k)); return Number.isInteger(v) && v > 0 ? v : undefined; };
           return Response.json(await searchMessages(userId, url.searchParams.get('q') ?? '', { chatId: num('chatId'), beforeId: num('beforeId'), limit: num('limit') }));
+        }
+        if (req.method === 'GET' && url.pathname === '/users') {
+          return Response.json({ users: await usersByIds(userId, (url.searchParams.get('ids') ?? '').split(',').map(Number)) });
         }
         if (req.method === 'GET' && url.pathname === '/presence') {
           return Response.json(await listPresence(userId));

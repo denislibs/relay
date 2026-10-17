@@ -1,4 +1,4 @@
-import { ConfirmDialog, InfoRow, SettingsIcon, Menu, PanelHeader, Presence, ProfileHeader, RichText, Section, Toast } from '@relay/ui';
+import { ConfirmDialog, InfoRow, SettingsIcon, Menu, PanelHeader, Presence, ProfileHeader, RichText, Section, Toast, peerTone } from '@relay/ui';
 import { useEffect, useRef, useState } from 'preact/hooks';
 import { getGlobal, setGlobal, useGlobal } from '../../global';
 import { back, go } from '../../nav';
@@ -31,7 +31,7 @@ async function logout(): Promise<boolean> {
     if (!res.ok && res.status !== 401) { markSelfLogout(false); return false; }   // 401 — сеанса уже нет, выходим локально
   } catch { markSelfLogout(false); return false; }
   const uid = getGlobal().me?.userId;
-  try { localStorage.removeItem('relay.me'); } catch { /* приватный режим */ }
+  try { localStorage.removeItem('relay.me'); localStorage.removeItem('relay.names'); } catch { /* приватный режим */ }
   if (uid != null) try { indexedDB.deleteDatabase('relay-' + uid); } catch { /* */ }
   setGlobal({ boot: 'login' });
   location.reload();   // воркеры отпускают IndexedDB, база удаляется до конца
@@ -85,7 +85,7 @@ export function Main() {
         </div>
       </Presence>
       <div class="rl-settings" ref={scroll.ref} onScroll={scroll.onScroll}>
-        <ProfileHeader name={me.name} subtitle={status.phase === 'offline' ? 'нет сети' : 'в сети'} size={96} />
+        <ProfileHeader name={me.name} tone={peerTone(me.userId)} subtitle={status.phase === 'offline' ? 'нет сети' : 'в сети'} size={96} />
         {hasInfo ? (
           <Section>
             {phone ? <InfoRow tile="green" icon="phone" title={phone} subtitle="Телефон" onClick={() => copy(phone)} /> : null}

@@ -1,8 +1,8 @@
 import type { Item } from '@relay/sync-engine/src/types';
-import { Bubble, DateDivider, FileBubble, Highlight, MediaBubble, MediaViewer, ScrollToBottom, forceMeasure, isHeavyAnimating, onHeavyAnimationEnd, requestMeasure, requestMutation } from '@relay/ui';
+import { Bubble, peerTone, DateDivider, FileBubble, Highlight, MediaBubble, MediaViewer, ScrollToBottom, forceMeasure, isHeavyAnimating, onHeavyAnimationEnd, requestMeasure, requestMutation } from '@relay/ui';
 import { memo } from 'preact/compat';
 import { useEffect, useLayoutEffect, useRef, useState } from 'preact/hooks';
-import { focusMessage, localPreview, moveWindow, react, savePosition, savedPosition, seen } from '../data';
+import { ensureNames, focusMessage, localPreview, moveWindow, react, savePosition, savedPosition, seen } from '../data';
 import { setGlobal, useGlobal } from '../global';
 import { clock, dayKey, dayLabel, fileSize } from './format';
 
@@ -44,7 +44,7 @@ const Row = memo(function Row({ onOpen, hl, m, meId, out, start, end, quoted, qu
     // фото знает размеры заранее: рамка нужной высоты сразу, размытое превью, полная картинка — лениво
     const src = localPreview(m.key) ?? (att.id ? fileUrl(att) : undefined);
     return (
-      <div class="app-msg app-msg-media" data-key={m.key} data-sort={m.sort as number}>
+      <div class={flash ? 'app-msg app-msg-media app-msg-flash' : 'app-msg app-msg-media'} data-key={m.key} data-sort={m.sort as number}>
         <MediaBubble
           from={out ? 'out' : 'in'} tail={end} groupStart={start} appear={appear}
           items={[{ src, thumb: att.thumb, alt: att.name }]}
@@ -61,7 +61,7 @@ const Row = memo(function Row({ onOpen, hl, m, meId, out, start, end, quoted, qu
   if (att && !m.deleted && att.id !== undefined && att.kind === 'file') {
     const ext = (att.name.split('.').pop() ?? 'file').slice(0, 4);
     return (
-      <div class="app-msg" data-key={m.key} data-sort={m.sort as number}>
+      <div class={flash ? 'app-msg app-msg-flash' : 'app-msg'} data-key={m.key} data-sort={m.sort as number}>
         <FileBubble
           from={out ? 'out' : 'in'} tail={end} groupStart={start}
           name={att.name} ext={ext} meta={fileSize(att.size)}
@@ -74,13 +74,12 @@ const Row = memo(function Row({ onOpen, hl, m, meId, out, start, end, quoted, qu
     );
   }
   return (
-    <div class="app-msg" data-key={m.key} data-sort={m.sort as number}>
+    <div class={flash ? 'app-msg app-msg-flash' : 'app-msg'} data-key={m.key} data-sort={m.sort as number}>
       <Bubble
         from={out ? 'out' : 'in'}
         tail={end}
         groupStart={start}
         reply={quoted ? { author: quoteAuthor, text: quoted.body, tone: quoteTone, onClick: noop } : undefined}
-        flash={flash}
         edited={!!m.editedAt && !m.deleted}
         deleted={!!m.deleted}
         reactions={chips.length ? chips : undefined}
@@ -114,6 +113,7 @@ export function Feed({ chatId, meId, peerName, stick, onMenu, highlight }: {
   onMenu: (key: string, x: number, y: number) => void;
 }) {
   const messages = useGlobal((s) => s.messages);
+  const names = useGlobal((s) => s.names);
   const meta = useGlobal((s) => s.feedMeta);
   const unreadFrom = useGlobal((s) => s.unreadFrom);
   const focus = useGlobal((s) => s.focus);
@@ -316,9 +316,13 @@ export function Feed({ chatId, meId, peerName, stick, onMenu, highlight }: {
         requestMutation(() => root.scrollTo({ top, behavior: 'smooth' }));
       });
     }
+  }, [focus, messages]);
+  // полоса гаснет сама; таймер — свой: сброс focus выше перезапускает эффект перехода и снял бы его
+  useEffect(() => {
+    if (!flashKey) return;
     const t = setTimeout(() => setFlashKey(null), 1600);
     return () => clearTimeout(t);
-  }, [focus, messages]);
+  }, [flashKey]);
 
   // клик по цитате — к исходному сообщению
   const onClick = (e: MouseEvent) => {
@@ -339,14 +343,19 @@ export function Feed({ chatId, meId, peerName, stick, onMenu, highlight }: {
 
   // просмотрщик: все фото текущего окна ленты
   const photos = messages.filter((m) => !m.deleted && (m.attachment as Att | null)?.kind === 'photo' && (m.attachment as Att).w);
-  const onOpen = useRef((m: Item) => setViewer(-1 - photos.findIndex((p) => p.key === m.key))).current;
   const openIndex = viewer === null ? null : viewer < 0 ? -1 - viewer : viewer;
-  useEffect(() => {
-    if (viewer === null) return;
-    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') setViewer(null); };   // Esc — где бы ни был фокус
-    addEventListener('keydown', onKey);
-    return () => removeEventListener('keydown', onKey);
-  }, [viewer]);
+  // миниатюра k-го фото в ленте: из неё вьювер вылетает и в неё же возвращается (нет в окне — просто тает)
+  const photoKeys = photos.map((m) => m.key);
+  // авторы фото — во вьювере всегда имя отправителя; подгружаем заранее, пока вьювер закрыт
+  const authorIds = [...new Set(photos.map((m) => m.senderId as number))].join(',');
+  useEffect(() => { if (authorIds) ensureNames(authorIds.split(',').map(Number)); }, [authorIds]);
+  const keysRef = useRef(photoKeys); keysRef.current = photoKeys;
+  // ключи — из ref: колбэк стабилен (строки мемоизированы), а список фото растёт с новыми сообщениями
+  const onOpen = useRef((m: Item) => { const k = keysRef.current.indexOf(m.key); if (k >= 0) setViewer(-1 - k); }).current;
+  const originOf = useRef((k: number) => {
+    const key = keysRef.current[k];
+    return key ? el.current?.querySelector<HTMLElement>(`[data-key="${CSS.escape(key)}"] .rl-media-cell`) ?? null : null;
+  }).current;
 
   // контекстное меню — одно на ленту, а не на каждый бабл (иначе обработчик ломал бы мемоизацию строк)
   const onContextMenu = (e: MouseEvent) => {
@@ -385,7 +394,7 @@ export function Feed({ chatId, meId, peerName, stick, onMenu, highlight }: {
         end={end}
         quoted={quoted}
         quoteAuthor={quoted ? (quoted.senderId === meId ? 'Вы' : peerName) : undefined}
-        quoteTone={quoted ? (quoted.senderId === meId ? 1 : 3) : undefined}
+        quoteTone={quoted ? peerTone(quoted.senderId as number) : undefined}
         appear={initial.current !== null && !initial.current.has(m.key)}
         flash={flashKey === m.key}
       />,
@@ -401,7 +410,9 @@ export function Feed({ chatId, meId, peerName, stick, onMenu, highlight }: {
         <MediaViewer
           index={openIndex}
           sender={peerName}
-          items={photos.map((m) => { const a = m.attachment as Att; return { src: localPreview(m.key) ?? fileUrl(a), w: a.w, h: a.h, caption: m.body, date: clock(m.createdAt as string) }; })}
+          items={photos.map((m) => { const a = m.attachment as Att; return { sender: names[m.senderId as number] ?? '',   // не название группы: пока имени нет — пусто, оно подгружается заранее
+ src: localPreview(m.key) ?? fileUrl(a), thumb: a.thumb, w: a.w, h: a.h, name: a.name, download: fileUrl(a, true), caption: m.body, date: clock(m.createdAt as string) }; })}
+          origin={originOf}
           onClose={() => setViewer(null)}
         />
       ) : null}

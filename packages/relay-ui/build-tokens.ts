@@ -8,6 +8,16 @@ const themed = (theme: string) =>
 const fixed = [
   ...['spacing', 'radius', 'duration', 'easing', 'size', 'scale'].flatMap((f) => (t[f]?.tokens ?? []).map((x: { name: string; value: string }) => `  --${x.name}: ${x.value};`)),
   ...Object.entries(t.type.families as Record<string, string>).map(([k, v]) => `  --font-${k}: ${v};`),
+  // подложки цветов собеседников — из самого цвета, поэтому темы переключают их вместе с ним
+  ...[0, 1, 2, 3, 4, 5, 6].flatMap((i) => [
+    `  --peer-${i}-bg: color-mix(in srgb, var(--peer-${i}) 10%, transparent);`,
+    `  --peer-${i}-bg-active: color-mix(in srgb, var(--peer-${i}) 17%, transparent);`,
+  ]),
+  // заливка аватара без фото: насыщенный (светлый) вариант в обеих темах — на нём белые инициалы
+  ...t.color.tokens.filter((x: { name: string }) => /^peer-\d$/.test(x.name))
+    .map((x: { name: string; value: Record<string, string> }) => `  --${x.name}-fill: ${x.value.light};`),
+  // прежние цвета авторов (1–4) — псевдонимы палитры, для иллюстраций и иконок файлов
+  ...[5, 1, 2, 3].map((p, i) => `  --author-${i + 1}: var(--peer-${p});`),
 ].join('\n');
 
 const css = `/* generated from tokens.json — do not edit */
