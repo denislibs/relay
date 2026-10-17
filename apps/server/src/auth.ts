@@ -32,3 +32,12 @@ export function readSessionToken(req: Request): string | null {
 export function sessionCookie(token: string): string {
   return `relay_session=${encodeURIComponent(token)}; HttpOnly; SameSite=Lax; Path=/; Max-Age=${SESSION_DAYS * 86400}`;
 }
+
+/** Выход: удаляем строку текущего сеанса. */
+export async function deleteSession(token: string): Promise<void> {
+  await sql`delete from sessions where token_hash = ${hash(token)}`;
+}
+
+export function clearSessionCookie(): string {
+  return 'relay_session=; HttpOnly; SameSite=Lax; Path=/; Max-Age=0';
+}

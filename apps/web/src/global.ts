@@ -9,7 +9,8 @@ import type { Item } from '@relay/sync-engine/src/types';
 /** Края окна ленты: есть ли сообщения раньше/позже, окно ли это живого хвоста. */
 export interface FeedMeta { hasOlder: boolean; hasNewer: boolean; live: boolean }
 
-export interface Me { userId: number; name: string }
+/** Поля профиля приходят позже (B1) — до тех пор опциональны, строки без значения не показываем. */
+export interface Me { userId: number; name: string; firstName?: string; lastName?: string; username?: string | null; bio?: string | null; birthday?: string | null; phone?: string | null }
 export type Phase = 'connecting' | 'offline' | 'loading' | 'updating' | 'ready';
 export interface Status { phase: Phase; hydrated: boolean; chatsComplete?: boolean; chatsCursorAt?: number; online: boolean; synced: boolean; syncing: boolean; outbox: number; failed: number }
 

@@ -9,26 +9,36 @@ import { cx, ripple, reducedMotion, Presence, Icon, IconButton, Avatar, Badge, B
 /* ---------- Menu: popover list (message menu, chat context menu, header menu) ---------- */
 function Menu(props) {
   var ref = useRef(null);
-  var items = props.items || [];
+  var sub = useState(null);   // открытый второй уровень: { label, items } (пункт с submenu)
+  var level = sub[0];
+  var items = level ? [{ icon: 'chevronLeft', label: 'Назад', back: true }, '-'].concat(level.items) : (props.items || []);
   useEffect(function () {
     var first = ref.current && ref.current.querySelector('[role="menuitem"]');
     if (first) first.focus();
-  }, []);
+  }, [!!level]);
   function onKey(e) {
     var list = Array.prototype.slice.call(ref.current.querySelectorAll('[role="menuitem"]'));
     var i = list.indexOf(document.activeElement);
     if (e.key === 'ArrowDown') { e.preventDefault(); list[(i + 1) % list.length].focus(); }
     else if (e.key === 'ArrowUp') { e.preventDefault(); list[(i - 1 + list.length) % list.length].focus(); }
-    else if (e.key === 'Escape' && props.onClose) props.onClose();
+    else if (e.key === 'Escape') {
+      if (level) { e.stopPropagation(); sub[1](null); } else if (props.onClose) props.onClose();
+    }
   }
   var style = props.x !== undefined ? { left: props.x, top: props.y } : null;
-  return h('div', { ref: ref, class: cx('rl-menu', props.origin && 'rl-menu-' + props.origin), style: style, role: 'menu', 'aria-label': props.label || 'Меню', onKeyDown: onKey },
-    props.header || null,
+  return h('div', { ref: ref, class: cx('rl-menu', props.origin && 'rl-menu-' + props.origin), style: style, role: 'menu', 'aria-label': level ? level.label : (props.label || 'Меню'), onKeyDown: onKey },
+    level ? null : (props.header || null),
     items.map(function (it, i) {
       if (it === '-') return h('hr', { key: 'sep' + i, class: 'rl-menu-sep' });
-      return h('button', { key: it.label, type: 'button', role: 'menuitem', class: cx('rl-menu-item', it.danger && 'rl-menu-danger'), style: { '--i': i }, onPointerDown: ripple,
-        onClick: function () { if (it.onClick) it.onClick(); if (props.onClose) props.onClose(); } },
+      return h('button', { key: (level ? 's' : '') + it.label, type: 'button', role: 'menuitem', 'aria-haspopup': it.submenu ? 'menu' : undefined, class: cx('rl-menu-item', it.danger && 'rl-menu-danger'), style: { '--i': i }, onPointerDown: ripple,
+        onClick: function () {
+          if (it.back) { sub[1](null); return; }
+          if (it.submenu) { sub[1]({ label: it.label, items: it.submenu }); return; }
+          if (it.onClick) it.onClick();
+          if (props.onClose) props.onClose();
+        } },
         it.icon ? h(Icon, { name: it.icon, size: 20 }) : null, h('span', null, it.label),
+        it.submenu ? h(Icon, { name: 'chevronRight', size: 18 }) : null,
         it.hint ? h('kbd', null, it.hint) : null);
     }));
 }

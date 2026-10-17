@@ -72,6 +72,7 @@ var ICONS = {
   lock: ['M6 11h12v10H6z', 'M8.5 11V8a3.5 3.5 0 0 1 7 0v3'],
   download: ['M12 4v11', 'M7.5 10.5L12 15l4.5-4.5', 'M5 20h14'],
   chevronRight: ['M9 6l6 6-6 6'],
+  logout: ['M10 4H5v16h5', 'M15 8l4 4-4 4', 'M19 12H9'],
   arrowLeft: ['M19 12H5', 'M11 6l-6 6 6 6'],
   external: ['M8 16L16 8', 'M9 8h7v7'],
   video: ['M3 7h12v10H3z', 'M15 10.5l6-3.5v10l-6-3.5'],
@@ -729,7 +730,8 @@ function PanelHeader(props) {
   return h('div', { class: 'rl-panel-head' },
     h(IconButton, { icon: props.icon || 'close', label: props.closeLabel || 'Закрыть', onClick: props.onClose }),
     h('h2', null, props.title),
-    props.action ? h(IconButton, { icon: props.action.icon, label: props.action.label, onClick: props.action.onClick }) : null);
+    props.action ? h(IconButton, { icon: props.action.icon, label: props.action.label, onClick: props.action.onClick }) : null,
+    props.actions ? props.actions.map(function (a, i) { return h(IconButton, { key: i, icon: a.icon, label: a.label, onClick: a.onClick, 'aria-haspopup': a.popup ? 'menu' : undefined }); }) : null);
 }
 function ProfileHeader(props) {
   return h('div', { class: 'rl-profile' },

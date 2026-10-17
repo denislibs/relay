@@ -1,4 +1,4 @@
-import { ChatRow, Highlight, Menu, Presence, SlideStack, ChatRowSkeleton, useMinVisible, EmptyState, Fab, WindowList, FolderTabs, SidebarCard, SidebarHeader } from '@relay/ui';
+import { Avatar, ChatRow, Highlight, Menu, Presence, SlideStack, ChatRowSkeleton, useMinVisible, EmptyState, Fab, WindowList, FolderTabs, SidebarCard, SidebarHeader } from '@relay/ui';
 import type { Item } from '@relay/sync-engine/src/types';
 import { loadMoreChats, openChat, searchMessages } from '../data';
 import { setGlobal, useGlobal } from '../global';
@@ -156,11 +156,20 @@ export function Sidebar() {
               <Menu
                 label="Главное меню"
                 onClose={() => setMenu(false)}
+                header={
+                  <button type="button" role="menuitem" class="rl-menu-item app-menu-profile" onClick={() => { setMenu(false); void go('settings'); }}>
+                    <Avatar name={me.name} size={36} /><span>{me.name}</span>
+                  </button>
+                }
                 items={[
+                  { icon: 'account', label: 'Мой профиль', onClick: () => { setMenu(false); void go('settings'); } },
+                  { icon: 'contact', label: 'Контакты', onClick: () => { setMenu(false); void go('contacts'); } },
                   { icon: 'settings', label: 'Настройки', onClick: () => { setMenu(false); void go('settings'); } },
-                  { icon: dark ? 'sun' : 'moon', label: dark ? 'Дневной режим' : 'Ночной режим', onClick: () => setTheme(dark ? 'light' : 'dark') },
                   '-',
-                  { icon: 'pencil', label: 'Новый чат', onClick: () => setGlobal({ newChatOpen: true }) },
+                  { icon: 'more', label: 'Ещё', submenu: [
+                    { icon: dark ? 'sun' : 'moon', label: dark ? 'Дневной режим' : 'Ночной режим', onClick: () => setTheme(dark ? 'light' : 'dark') },
+                    { icon: 'pencil', label: 'Новый чат', onClick: () => setGlobal({ newChatOpen: true }) },
+                  ] },
                 ]}
               />
             </div>

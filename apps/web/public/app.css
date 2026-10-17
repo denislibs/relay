@@ -33,8 +33,8 @@ body { background: var(--bg); color: var(--ink); font-family: var(--font-sans); 
 .rl-glassbar-title .app-phase { color: var(--brand-text); animation: rl-label-in var(--dur-base) var(--ease-out); }
 /* главное меню под гамбургером: выпадает из угла кнопки */
 .app-sidemenu { position: absolute; top: 56px; left: 12px; z-index: 40; }
-.app-sidemenu .rl-menu { position: relative; transform-origin: top left; min-width: 232px; padding: 6px; border-radius: 16px; background: color-mix(in srgb, var(--raised) 90%, transparent); -webkit-backdrop-filter: blur(18px) saturate(1.6); backdrop-filter: blur(18px) saturate(1.6); }
-.app-sidemenu .rl-menu-item { border-radius: 10px; font-weight: 500; }
+.app-sidemenu .rl-menu, .app-pagemenu .rl-menu { position: relative; transform-origin: top left; min-width: 232px; padding: 6px; border-radius: 16px; background: color-mix(in srgb, var(--raised) 90%, transparent); -webkit-backdrop-filter: blur(18px) saturate(1.6); backdrop-filter: blur(18px) saturate(1.6); }
+.app-sidemenu .rl-menu-item, .app-pagemenu .rl-menu-item { border-radius: 10px; font-weight: 500; }
 .app-sidemenu .rl-menu-item .rl-icon { color: var(--ink); }
 .rl-glassbar-title .app-online { color: var(--brand-text); }
 /* хвост списка, пока сервер не отдал все страницы диалогов */
@@ -70,3 +70,16 @@ body { background: var(--bg); color: var(--ink); font-family: var(--font-sans); 
 .app-drop { position: fixed; inset: 0; z-index: 50; }
 .app-media-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 2px; padding: 0 var(--space-3) var(--space-4); align-content: start; overflow-y: auto; }
 .app-media-cell { position: relative; aspect-ratio: 1; padding: 0; border: 0; overflow: hidden; border-radius: 4px; cursor: pointer; background: var(--field); }
+
+/* страница настроек: меню ⋮ и тост «Скопировано» */
+.app-pagemenu { position: absolute; top: 52px; right: 12px; z-index: 40; }
+.app-pagemenu .rl-menu { transform-origin: top right; min-width: 200px; }
+.app-toast { position: absolute; left: 0; right: 0; bottom: 16px; z-index: 41; display: flex; justify-content: center; pointer-events: none; }
+.app-toast .rl-toast { pointer-events: auto; }
+.rl-inforow-static { cursor: pointer; }
+.rl-bio { white-space: pre-wrap; overflow-wrap: anywhere; }
+.app-menu-profile { width: 100%; gap: 12px; padding-block: 8px; font-weight: 600; border-radius: 10px; }
+.app-menu-profile + .rl-menu-item { margin-top: 0; }
+.app-menu-profile { height: 52px; }
+.app-menu-profile .rl-avatar { flex: none; }
+.app-menu-profile > span:last-child { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }

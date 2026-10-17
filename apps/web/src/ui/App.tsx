@@ -5,10 +5,13 @@ import { Chat } from './Chat';
 import { Info } from './Info';
 import { Login } from './Login';
 import { NewChat } from './NewChat';
-import { Settings } from './Settings';
+import { LegacyPage } from './Settings';
+import { Main } from './settings/Main';
 import { Placeholder } from './settings/Placeholder';
 import { Sidebar } from './Sidebar';
 
+
+const LEGACY: Record<string, string> = { 'settings/general': 'Основные настройки', 'settings/notifications': 'Уведомления', 'settings/data': 'Данные и память' };
 
 // ширина списка чатов, которую пользователь вытянул за край (null — по умолчанию)
 const SIDE_KEY = 'relay.sideWidth';
@@ -24,7 +27,7 @@ export function App() {
   if (boot === 'login') return <Login />;
   return (
     <>
-      <FloatShell class={openChatId ? 'app-chat-open' : ''} sideWidth={savedSide} onSideResize={saveSide} aside={<AsidePanel open={infoOpen && !!openChatId} label="Информация"><Info /></AsidePanel>} sidebar={<SideFrame><SlideStack order={orderFor(view)} active={view} render={(k: string) => (k === 'chats' ? <Sidebar /> : k === 'settings' ? <Settings /> : <Placeholder path={k} />)} /></SideFrame>}>
+      <FloatShell class={openChatId ? 'app-chat-open' : ''} sideWidth={savedSide} onSideResize={saveSide} aside={<AsidePanel open={infoOpen && !!openChatId} label="Информация"><Info /></AsidePanel>} sidebar={<SideFrame><SlideStack order={orderFor(view)} active={view} render={(k: string) => (k === 'chats' ? <Sidebar /> : k === 'settings' ? <Main /> : LEGACY[k] ? <LegacyPage path={k} title={LEGACY[k]} /> : <Placeholder path={k} />)} /></SideFrame>}>
         {openChatId ? (
           <Chat key={openChatId} chatId={openChatId} />
         ) : (

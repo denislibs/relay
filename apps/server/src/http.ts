@@ -2,7 +2,7 @@ import { parseClientFrame } from '@relay/protocol';
 import type { Server } from 'bun';
 import { existsSync, statSync } from 'node:fs';
 import { extname, join, resolve, sep } from 'node:path';
-import { createSession, createUser, readSessionToken, sessionCookie, userIdFromToken } from './auth';
+import { clearSessionCookie, createSession, createUser, deleteSession, readSessionToken, sessionCookie, userIdFromToken } from './auth';
 import { createChat, getChatMedia, getHistory, getMessagesByIds, listChats, listChatsPage } from './domain/chats';
 import { sql } from './db';
 import { DomainError } from './domain/errors';
@@ -17,7 +17,7 @@ const fail = (code: string) => Response.json({ code }, { status: STATUS[code] ??
 
 export type WsData = { userId: number };
 
-const API = /^\/(health|me|chats|presence|search|upload|files|push|ws|dev)(\/|$)/;
+const API = /^\/(health|me|chats|presence|search|upload|files|push|ws|dev|logout)(\/|$)/;
 
 /** Статика клиента из WEB_DIST. Путь не может выйти за папку; пути без расширения — SPA, отдаём index.html. */
 function serveStatic(pathname: string): Response {
@@ -65,6 +65,11 @@ export function createServer(opts: { port: number }): Server {
         if (req.method === 'GET' && url.pathname === '/me') {
           const [u] = await sql`select id, name from users where id = ${userId}`;
           return Response.json({ userId: u.id, name: u.name });
+        }
+        if (req.method === 'POST' && url.pathname === '/logout') {
+          const token = readSessionToken(req);
+          if (token) await deleteSession(token);
+          return Response.json({ ok: true }, { headers: { 'set-cookie': clearSessionCookie() } });
         }
         if (url.pathname === '/ws') {
           return server.upgrade(req, { data: { userId } }) ? undefined : fail('bad_frame');

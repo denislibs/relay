@@ -39,3 +39,12 @@ test('history of someone else`s chat is forbidden', async () => {
   expect(res.status).toBe(403);
   expect(await res.json()).toEqual({ code: 'not_member' });
 });
+
+test('logout deletes the session and clears the cookie', async () => {
+  const a = await login('Анна');
+  expect((await fetch(`${base}/me`, authed(a.token))).status).toBe(200);
+  const out = await fetch(`${base}/logout`, { method: 'POST', ...authed(a.token) });
+  expect(out.status).toBe(200);
+  expect(out.headers.get('set-cookie')).toContain('Max-Age=0');
+  expect((await fetch(`${base}/me`, authed(a.token))).status).toBe(401);
+});
