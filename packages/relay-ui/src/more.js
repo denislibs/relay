@@ -480,13 +480,16 @@ function patternColor(colors) {
   var f = function (k) { var x = (k + hue / 60) % 6; return Math.round(255 * (val - val * sat * Math.max(0, Math.min(x, 4 - x, 1)))); };
   return 'rgba(' + f(5) + ',' + f(3) + ',' + f(1) + ',0.4)';
 }
-var patternCache = {};
+var patternCache = Object.create(null);
 function buildPattern(set, stroke) {
   set = set || 'catsAndDogs';
   stroke = stroke || '#000';
   var cacheKey = set + '|' + stroke;
-  if (patternCache[cacheKey]) return patternCache[cacheKey];
-  var names = PATTERN_SETS[set] || PATTERN_SETS.catsAndDogs;
+  // ключи — из localStorage пользователя: только собственные свойства (не __proto__ / constructor)
+  if (Object.prototype.hasOwnProperty.call(patternCache, cacheKey)) return patternCache[cacheKey];
+  if (!Object.prototype.hasOwnProperty.call(PATTERN_SETS, set)) set = 'catsAndDogs';
+  var names = PATTERN_SETS[set];
+  cacheKey = set + '|' + stroke;
   // deterministic scatter on a 420×420 tile (same tile size as the reference settings): 10×10 staggered, jittered cells
   var out = [], seed = set.length * 7 + 11, n = 0, G = 10, cell = 420 / G;
   function rnd() { seed = (seed * 9301 + 49297) % 233280; return seed / 233280; }

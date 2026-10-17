@@ -95,7 +95,6 @@ body { background: var(--bg); color: var(--ink); font-family: var(--font-sans); 
 .app-expand:is([data-state="open"], [data-state="instant"]) > .app-expand-inner { opacity: 1; }
 .app-expand[data-state="instant"], .app-expand[data-state="instant"] > .app-expand-inner { transition: none; }
 @media (prefers-reduced-motion: reduce) { .app-expand, .app-expand-inner { transition: none; } }
-:root[data-anim="off"] .app-expand, :root[data-anim="off"] .app-expand-inner { transition: none; }
 
 /* ---------- контакты ---------- */
 .app-contacts-head { gap: var(--space-2); }
@@ -112,7 +111,6 @@ body { background: var(--bg); color: var(--ink); font-family: var(--font-sans); 
 .app-pop { display: inline-flex; animation: app-pop 260ms cubic-bezier(0.3, 1.4, 0.5, 1) both; }
 @keyframes app-pop { from { transform: scale(0.6); opacity: 0.4; } to { transform: none; opacity: 1; } }
 @media (prefers-reduced-motion: reduce) { .app-pop { animation: none; } }
-:root[data-anim="off"] .app-pop { animation: none; }
 
 /* ---------- общие настройки: превью текста, обои ---------- */
 .app-textpreview { display: flex; flex-direction: column; gap: var(--space-2); padding: var(--space-4) var(--space-4) var(--space-3); }
@@ -129,12 +127,10 @@ body { background: var(--bg); color: var(--ink); font-family: var(--font-sans); 
 .app-swatch-dark .app-swatch-pattern { opacity: 0.8; }
 .app-swatch-mini .app-swatch-pattern { -webkit-mask-size: 60px auto; mask-size: 60px auto; }
 @media (prefers-reduced-motion: reduce) { .app-swatch, .app-swatch-on::after { transition: none; animation: none; } }
-:root[data-anim="off"] .app-swatch, :root[data-anim="off"] .app-swatch-on::after { transition: none; animation: none; }
 
 /* личный чат и чёрный список: плашка вместо поля ввода */
 .app-plate, .rl-shell .app-plate { justify-content: center; align-items: center; gap: var(--space-2); padding: 4px 8px 4px 16px; min-height: 48px; color: var(--ink-muted); font: 400 15px/1.3 var(--font-sans); text-align: center; animation: app-fade var(--dur-base) var(--ease-out); }
 .app-plate .rl-btn { flex-shrink: 0; }
-:root[data-anim="off"] .app-plate { animation: none; }
 /* выбор людей (исключения, «Заблокировать»): список прокручивается внутри */
 .app-people { display: flex; flex-direction: column; padding-top: var(--space-2); }
 .app-people .rl-picker { flex: 1; min-height: 0; }

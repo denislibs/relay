@@ -908,7 +908,6 @@ button.rl-tab:hover { color: var(--ink); }
 .rl-tw-snap > * { position: absolute; inset: 0; width: 100%; height: 100%; }
 .rl-tw > :is(.tw-canvas, .tw-pattern) { transition: filter 300ms var(--ease-out), transform 300ms var(--ease-out); }
 .rl-tw-blur > :is(.tw-canvas, .tw-pattern) { filter: blur(12px); transform: scale(1.08); }
-:root[data-anim="off"] .rl-tw-snap, :root[data-anim="off"] .rl-tw > :is(.tw-canvas, .tw-pattern) { transition: none; }
 @media (prefers-reduced-motion: reduce) { .rl-tw-snap, .rl-tw > :is(.tw-canvas, .tw-pattern) { transition: none; } }
 .rl-shell-tw { background-image: none; }
 .rl-shell > :not(.rl-tw) { position: relative; z-index: 1; }
@@ -1172,7 +1171,6 @@ button.rl-tab:hover { color: var(--ink); }
 .rl-presence[data-state="closing"] .rl-confirm { animation: rl-pop-out var(--dur-base) var(--ease-in) forwards; }
 @keyframes rl-confirm-in { from { opacity: 0; transform: scale(0.96); } to { opacity: 1; transform: none; } }
 @media (prefers-reduced-motion: reduce) { .rl-confirm-scrim, .rl-confirm { animation-duration: 1ms !important; } }
-:root[data-anim="off"] .rl-confirm-scrim, :root[data-anim="off"] .rl-confirm { animation-duration: 1ms !important; }
 
 .rl-rich { white-space: pre-wrap; overflow-wrap: anywhere; }
 .rl-rich-link { color: var(--brand-text); text-decoration: none; background: none; border: 0; padding: 0; font: inherit; cursor: pointer; }
