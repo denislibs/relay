@@ -1,5 +1,6 @@
 import { expect, test } from 'bun:test';
-import { autoloadSubtitle, isDefaultAutoload, shouldAutoload } from './autoload';
+import { autoloadSubtitle, chatKindFor, isDefaultAutoload, mediaPolicy, shouldAutoload } from './autoload';
+import { mediaHeld } from '@relay/ui';
 import { defaultPrefs } from './prefs';
 
 const MB = 1024 * 1024;
@@ -37,4 +38,29 @@ test('isDefaultAutoload', () => {
   expect(isDefaultAutoload(a, al())).toBe(true);
   a.fileMaxMb = 50;
   expect(isDefaultAutoload(a, al())).toBe(false);
+});
+
+test('chatKindFor + mediaPolicy: per-chat photo autoload and autoplay flags', () => {
+  const contacts = new Set([7]);
+  expect(chatKindFor({ kind: 'group', peerId: null }, contacts)).toBe('group');
+  expect(chatKindFor({ kind: 'direct', peerId: 7 }, contacts)).toBe('contact');
+  expect(chatKindFor({ kind: 'direct', peerId: 8 }, contacts)).toBe('private');
+  expect(chatKindFor(undefined, contacts)).toBe('private');
+  const p = defaultPrefs();
+  expect(mediaPolicy(p, 'group')).toEqual({ photo: true, video: true, autoplayVideo: true, autoplayGif: true });
+  p.autoload.photo.groups = false; p.anim.autoplayGif = false;
+  expect(mediaPolicy(p, 'group')).toMatchObject({ photo: false, autoplayGif: false });
+  expect(mediaPolicy(p, 'contact').photo).toBe(true);
+  p.autoload.enabled = false;
+  expect(mediaPolicy(p, 'contact').photo).toBe(false);
+});
+
+test('kit mediaHeld: incoming photo held only when the policy says no; own media and no provider always load', () => {
+  const it = [{ src: '/files/a', kind: 'image' }];
+  expect(mediaHeld(null, it, false)).toBe(false);
+  expect(mediaHeld({ photo: true, video: true }, it, false)).toBe(false);
+  expect(mediaHeld({ photo: false, video: true }, it, false)).toBe(true);
+  expect(mediaHeld({ photo: false, video: true }, it, true)).toBe(false);   // своё
+  expect(mediaHeld({ photo: false, video: true }, [{ src: undefined, kind: 'image' }], false)).toBe(false);
+  expect(mediaHeld({ photo: true, video: false }, [{ src: '/files/v', kind: 'video' }], false)).toBe(true);
 });

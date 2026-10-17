@@ -1,5 +1,5 @@
-import { h, Fragment, toChildArray } from 'preact';
-import { useState, useRef, useEffect, useLayoutEffect } from 'preact/hooks';
+import { h, Fragment, toChildArray, createContext } from 'preact';
+import { useState, useRef, useEffect, useLayoutEffect, useContext } from 'preact/hooks';
 import { createPortal } from 'preact/compat';
 import { MentionList, AttachMenu } from './more.js';
 import { requestMeasure, requestMutation, beginHeavyAnimation, onHeavyAnimationEnd, isHeavyAnimating, forceMeasure } from './schedule.js';
@@ -678,11 +678,34 @@ function LazyImage(props) {
     vis[0] && props.src ? h('img', { class: 'rl-lazy-full', src: props.src, alt: props.alt || '', decoding: 'async', draggable: false, onLoad: function () { loaded[1](true); if (props.onLoad) props.onLoad(); } }) : null);
 }
 
+/* ---------- MediaPolicy: autoload of incoming media, set by the app per chat ----------
+   value: { photo: boolean, video: boolean } — false keeps the full image behind «Скачать» (thumb only).
+   No provider = load everything. Own (out) media is always shown: it is already local. */
+/** @type {import('preact').Context<{ photo?: boolean, video?: boolean } | null>} */
+var MediaPolicy = createContext(/** @type {{ photo?: boolean, video?: boolean } | null} */ (null));
+var mediaAsked = new Set();   // src the user asked to download in this tab: scrolling back does not hide it again
+function mediaHeld(policy, items, out) {
+  if (!policy || out) return false;
+  return items.some(function (it) {
+    if (!it.src || mediaAsked.has(it.src)) return false;
+    return it.kind === 'video' ? policy.video === false : policy.photo === false;
+  });
+}
+
 function MediaBubble(props) {
   var out = props.from === 'out';
   var items = props.items || [{ seed: props.seed || 0, kind: props.kind || 'image', duration: props.duration }];
   var album = items.length > 1;
-  var state = props.state || 'ready';
+  var policy = useContext(MediaPolicy), asked = useState(0);
+  var held = (props.state || 'ready') === 'ready' && mediaHeld(policy, items, out);
+  var state = held ? 'remote' : props.state || 'ready';
+  if (held) {
+    items = items.map(function (it) { return Object.assign({}, it, { src: undefined }); });
+    props = Object.assign({}, props, { onDownload: function () {
+      (props.items || []).forEach(function (it) { if (it.src) mediaAsked.add(it.src); });
+      asked[1](asked[0] + 1);
+    } });
+  }
   var extra = items.length - 4;
   function cell(it, i) {
     var last = album && i === 3 && extra > 0;
@@ -1114,4 +1137,4 @@ function ScrollToBottom(props) {
 }
 
 
-export { peerTone, ArchivedRow, ReplyQuote, ReactionChips, cx, chain, ripple, reducedMotion, omit, fmtTime, makeWave, ICONS, Icon, Button, IconButton, Avatar, Badge, Chip, SearchField, ChatRow, ChatRowSkeleton, Bubble, MessageStatus, TypingIndicator, DateDivider, Composer, Banner, Modal, NavRail, Checkbox, Toast, Card, Steps, MediaArt, ProgressRing, Waveform, VoiceMessage, VoiceRecorder, MediaBubble, FileBubble, MediaThumb, MediaViewer, Switch, PanelHeader, ProfileHeader, ActionTile, InfoRow, SettingsIcon, ReadMore, Presence, useMinVisible, LazyImage, FlipList, SyncIndicator, LinearProgress, EmptyState, ScrollToBottom };
+export { peerTone, ArchivedRow, ReplyQuote, ReactionChips, cx, chain, ripple, reducedMotion, omit, fmtTime, makeWave, ICONS, Icon, Button, IconButton, Avatar, Badge, Chip, SearchField, ChatRow, ChatRowSkeleton, Bubble, MessageStatus, TypingIndicator, DateDivider, Composer, Banner, Modal, NavRail, Checkbox, Toast, Card, Steps, MediaArt, ProgressRing, Waveform, VoiceMessage, VoiceRecorder, MediaBubble, MediaPolicy, mediaHeld, FileBubble, MediaThumb, MediaViewer, Switch, PanelHeader, ProfileHeader, ActionTile, InfoRow, SettingsIcon, ReadMore, Presence, useMinVisible, LazyImage, FlipList, SyncIndicator, LinearProgress, EmptyState, ScrollToBottom };

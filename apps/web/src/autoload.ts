@@ -33,3 +33,19 @@ export function isDefaultAutoload(al: Autoload, def: Autoload): boolean {
 export function canAutoplay(kind: 'gif' | 'video', prefs: { anim: Prefs['anim'] } = getPrefs()): boolean {
   return kind === 'gif' ? prefs.anim.autoplayGif : prefs.anim.autoplayVideo;
 }
+
+/** Вид чата для автозагрузки: группа; личный с контактом; личный с не-контактом. */
+export function chatKindFor(chat: Record<string, unknown> | undefined, contactIds: ReadonlySet<number>): ChatKind {
+  if (chat?.kind === 'group') return 'group';
+  return typeof chat?.peerId === 'number' && contactIds.has(chat.peerId) ? 'contact' : 'private';
+}
+
+/** Политика для MediaPolicy кита (лента чата): что грузить само. Видео пока нет — флаг для будущего MediaBubble. */
+export function mediaPolicy(prefs: { autoload: Autoload; anim: Prefs['anim'] }, chat: ChatKind): { photo: boolean; video: boolean; autoplayVideo: boolean; autoplayGif: boolean } {
+  return {
+    photo: shouldAutoload(prefs, { kind: 'photo', chat, size: 0 }),
+    video: shouldAutoload(prefs, { kind: 'video', chat, size: 0 }),
+    autoplayVideo: canAutoplay('video', prefs),
+    autoplayGif: canAutoplay('gif', prefs),
+  };
+}

@@ -1,10 +1,11 @@
-import { Avatar, Button, peerTone, ChatSearchBar, Highlight, ripple, useMinVisible, requestMeasure, Composer, DropOverlay, GlassBar, IconButton, Menu, Modal, Presence, ReactionPicker, requestMutation } from '@relay/ui';
-import { useEffect, useLayoutEffect, useRef, useState } from 'preact/hooks';
+import { Avatar, Button, MediaPolicy, peerTone, ChatSearchBar, Highlight, ripple, useMinVisible, requestMeasure, Composer, DropOverlay, GlassBar, IconButton, Menu, Modal, Presence, ReactionPicker, requestMutation } from '@relay/ui';
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'preact/hooks';
 import { deleteMessage, editMessage, ensureNames, focusMessage, sendFile, openChat, react, saveDraft, searchMessages, send, typing, typingDone } from '../data';
 import type { SearchHit } from '@relay/sync-engine/src/types';
 import { setGlobal, useGlobal } from '../global';
 import { unblockUser, useUser } from '../settingsData';
 import { Feed } from './Feed';
+import { chatKindFor, mediaPolicy } from '../autoload';
 import { chatTime, chatTone, fileSize, lastSeenText, snippet } from './format';
 
 
@@ -12,6 +13,11 @@ export function Chat({ chatId }: { chatId: number }) {
   const me = useGlobal((s) => s.me)!;
   const chat = useGlobal((s) => s.chats.find((c) => c.id === chatId));
   const messages = useGlobal((s) => s.messages);
+  // «Автозагрузка медиа» / автовоспроизведение для ленты этого чата (MediaBubble кита читает контекст)
+  const isContact = useGlobal((s) => chat?.peerId != null && s.contacts.some((c) => c.userId === chat.peerId));
+  const autoload = useGlobal((s) => s.prefs.autoload);
+  const anim = useGlobal((s) => s.prefs.anim);
+  const policy = useMemo(() => mediaPolicy({ autoload, anim }, chatKindFor(chat, new Set(isContact ? [chat!.peerId as number] : []))), [autoload, anim, chat?.kind, chat?.peerId, isContact]);
   const shell = useRef<HTMLSpanElement>(null);
   const stick = useRef(true);              // лента прижата к низу (Feed ведёт, отправка выставляет)
   const [menu, setMenu] = useState<{ x: number; y: number; key: string } | null>(null);
@@ -216,7 +222,9 @@ export function Chat({ chatId }: { chatId: number }) {
           </div>
         ) : null}
       </GlassBar>
-      <Feed chatId={chatId} meId={me.userId} peerName={title} stick={stick} highlight={found?.q} onMenu={(key, x, y) => setMenu({ key, x, y })} />
+      <MediaPolicy.Provider value={policy}>
+        <Feed chatId={chatId} meId={me.userId} peerName={title} stick={stick} highlight={found?.q} onMenu={(key, x, y) => setMenu({ key, x, y })} />
+      </MediaPolicy.Provider>
       {plate ? (
         <div class="rl-composer-wrap app-plate-wrap">
           <div class="rl-composer app-plate" role="status" key={plate}>
