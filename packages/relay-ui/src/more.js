@@ -170,34 +170,41 @@ function Highlight(props) {
   return parts;
 }
 
-/* ---------- ContactPicker: new chat / new group ---------- */
+/* ---------- ContactPicker: new chat / new group / people for a privacy exception ----------
+   Ключ человека — c.id (если задан), иначе имя; selected и onChange — массивы ключей. empty — текст, когда искать не в ком. */
 function ContactPicker(props) {
   var q = useState(''), sel = useState(props.selected || []);
   var multi = !!props.multi;
-  var list = (props.contacts || []).filter(function (c) { return c.name.toLowerCase().indexOf(q[0].toLowerCase()) >= 0; });
-  function toggle(c) {
-    if (!multi) { if (props.onPick) props.onPick(c); return; }
-    var has = sel[0].indexOf(c.name) >= 0;
-    var next = has ? sel[0].filter(function (n) { return n !== c.name; }) : sel[0].concat([c.name]);
+  var all = props.contacts || [];
+  var keyOf = function (c) { return c.id != null ? c.id : c.name; };
+  var byKey = {};
+  all.forEach(function (c) { byKey[keyOf(c)] = c; });
+  var needle = q[0].trim().toLowerCase();
+  var list = all.filter(function (c) { return c.name.toLowerCase().indexOf(needle) >= 0 || (c.about && String(c.about).toLowerCase().indexOf(needle) >= 0); });
+  function toggle(k) {
+    if (!multi) { if (props.onPick) props.onPick(byKey[k] || { name: k }); return; }
+    var has = sel[0].indexOf(k) >= 0;
+    var next = has ? sel[0].filter(function (n) { return n !== k; }) : sel[0].concat([k]);
     sel[1](next); if (props.onChange) props.onChange(next);
   }
   return h('div', { class: 'rl-picker' },
-    multi && sel[0].length ? h('div', { class: 'rl-picker-chips' }, sel[0].map(function (n) {
-      return h('button', { key: n, type: 'button', class: 'rl-picker-chip', onClick: function () { toggle({ name: n }); }, 'aria-label': 'Убрать ' + n },
-        h(Avatar, { name: n, size: 24 }), n, h(Icon, { name: 'close', size: 14 }));
+    multi && sel[0].length ? h('div', { class: 'rl-picker-chips' }, sel[0].map(function (k) {
+      var name = byKey[k] ? byKey[k].name : String(k);
+      return h('button', { key: k, type: 'button', class: 'rl-picker-chip', onClick: function () { toggle(k); }, 'aria-label': 'Убрать ' + name },
+        h(Avatar, { name: name, size: 24 }), name, h(Icon, { name: 'close', size: 14 }));
     })) : null,
     h('div', { class: 'rl-search rl-picker-search' },
-      h('label', { for: 'rl-picker-q', class: 'rl-sr' }, 'Поиск контактов'),
+      h('label', { for: 'rl-picker-q', class: 'rl-sr' }, props.searchLabel || 'Поиск контактов'),
       h(Icon, { name: 'search', size: 18 }),
-      h('input', { id: 'rl-picker-q', type: 'search', placeholder: 'Имя или номер', autocomplete: 'off', value: q[0], onInput: function (e) { q[1](e.target.value); } })),
+      h('input', { id: 'rl-picker-q', type: 'search', placeholder: props.placeholder || 'Имя или номер', autocomplete: 'off', value: q[0], onInput: function (e) { q[1](e.target.value); } })),
     h('div', { class: 'rl-picker-list', role: multi ? 'group' : 'list' },
       list.length ? list.map(function (c) {
-        var on = sel[0].indexOf(c.name) >= 0;
-        return h('button', { key: c.name, type: 'button', class: cx('rl-row rl-picker-row', on && 'rl-picker-on'), onPointerDown: ripple, onClick: function () { toggle(c); }, role: multi ? 'checkbox' : undefined, 'aria-checked': multi ? String(on) : undefined },
+        var k = keyOf(c), on = sel[0].indexOf(k) >= 0;
+        return h('button', { key: k, type: 'button', class: cx('rl-row rl-picker-row', on && 'rl-picker-on'), onPointerDown: ripple, onClick: function () { toggle(k); }, role: multi ? 'checkbox' : undefined, 'aria-checked': multi ? String(on) : undefined },
           h(Avatar, { name: c.name, online: c.online }),
           h('span', { class: 'rl-row-main' }, h('span', { class: 'rl-row-name' }, c.name), h('span', { class: 'rl-row-preview' }, c.about || '')),
           multi ? h('span', { class: 'rl-picker-check', 'aria-hidden': 'true' }, h(Icon, { name: 'check', size: 14, strokeWidth: 3 })) : null);
-      }) : h('div', { class: 'rl-picker-empty' }, 'Никого не нашли по запросу «' + q[0] + '»')));
+      }) : h('div', { class: 'rl-picker-empty' }, needle || !props.empty ? 'Никого не нашли по запросу «' + q[0] + '»' : props.empty)));
 }
 
 /* ---------- CallRow ---------- */
