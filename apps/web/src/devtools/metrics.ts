@@ -3,6 +3,7 @@
 // - ошибки (window error, unhandledrejection, ошибки движка/хоста из журнала, err-кадры сервера, отказы очереди)
 //   собираются всегда — в кольцо на 200 записей; это одна запись в массив на ошибку.
 
+import { START, cursorAt, isAfter, type LogCursor } from './logCursor';
 import { frameStats } from '@relay/ui';
 
 // ---------- ошибки ----------
@@ -60,11 +61,11 @@ export function installErrorCapture(): void {
 }
 
 /** События журнала движка, которые считаем ошибками (журнал приходит, пока открыт раздел; в буфере движка — 2000 последних). */
-let engineSeen = 0;
-export function ingestLogErrors(events: { id: number; t: number; kind: string; type: string; data: unknown }[]): void {
+let engineSeen: LogCursor = START;
+export function ingestLogErrors(events: { id: number; ep?: string; t: number; kind: string; type: string; data: unknown }[]): void {
   for (const ev of events) {
-    if (ev.id <= engineSeen) continue;
-    engineSeen = ev.id;
+    if (!isAfter(ev, engineSeen)) continue;
+    engineSeen = cursorAt(ev);   // новая эпоха (перезапуск движка) — курсор начинается заново
     const d = (ev.data ?? {}) as Record<string, unknown>;
     if (ev.kind === 'error') pushError(ev.type === 'host' ? 'host' : 'engine', `${ev.type}: ${String(d.message ?? '')}`, typeof d.stack === 'string' ? d.stack : null, ev.t);
     else if (ev.kind === 'ws-in' && ev.type === 'err') pushError('server', `err ${String(d.code ?? '')}${d.retry ? ' (повтор)' : ''}`, null, ev.t);

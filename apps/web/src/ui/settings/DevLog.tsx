@@ -4,6 +4,7 @@ import { useLayoutEffect, useMemo, useRef, useState } from 'preact/hooks';
 import { useDevLog } from '../../devtools/session';
 import { showToast } from '../../settingsData';
 import { stamp } from './devui';
+import { START, cursorAt, eventKey, isAfter, type LogCursor } from '../../devtools/logCursor';
 
 const ROW = 28;
 type Kind = 'ws-out' | 'ws-in' | 'engine' | 'error';
@@ -14,14 +15,15 @@ const TOP_TYPES = 10;
 // краткая сводка события (JSON одной строкой) — считаем один раз на событие
 const brief = new Map<string, string>();
 function summary(e: Item): string {
-  let s = brief.get(e.key);
+  const k = eventKey(e);   // с эпохой: после перезапуска движка e1… — другие события
+  let s = brief.get(k);
   if (s === undefined) {
     const d = e.data as Record<string, unknown> | null;
     s = d ? JSON.stringify(d.op === e.type ? { ...d, op: undefined } : d) : '';
     if (s === '{}') s = '';
     if (s.length > 120) s = s.slice(0, 120) + '…';
     if (brief.size > 4000) brief.clear();
-    brief.set(e.key, s);
+    brief.set(k, s);
   }
   return s;
 }
@@ -33,7 +35,7 @@ export function DevLog() {
   const [type, setType] = useState<string | null>(null);
   const [query, setQuery] = useState('');
   const [paused, setPaused] = useState<Item[] | null>(null);
-  const [cleared, setCleared] = useState(0);
+  const [cleared, setCleared] = useState<LogCursor>(START);
   const [sel, setSel] = useState<Item | null>(null);
   const lastSel = useRef<Item | null>(null);
   if (sel) lastSel.current = sel;
@@ -44,12 +46,12 @@ export function DevLog() {
   const source = paused ?? list;
   const types = useMemo(() => {
     const c = new Map<string, number>();
-    for (const e of source) if ((e.id as number) > cleared) c.set(e.type as string, (c.get(e.type as string) ?? 0) + 1);
+    for (const e of source) if (isAfter(e, cleared)) c.set(e.type as string, (c.get(e.type as string) ?? 0) + 1);
     return [...c.entries()].sort((a, b) => b[1] - a[1]).slice(0, TOP_TYPES).map(([t]) => t);
   }, [source, cleared]);
   const q = query.trim().toLowerCase();
   const rows = useMemo(() => source.filter((e) =>
-    (e.id as number) > cleared && (kind === 'all' || e.kind === kind) && (!type || e.type === type) &&
+    isAfter(e, cleared) && (kind === 'all' || e.kind === kind) && (!type || e.type === type) &&
     (!q || (e.type as string).toLowerCase().includes(q) || summary(e).toLowerCase().includes(q))), [source, cleared, kind, type, q]);
 
   // новые строки: прилипли к низу — прокрутить вниз (запись без чтения: браузер сам упрёт scrollTop в край), иначе считать «Новые»
@@ -76,7 +78,7 @@ export function DevLog() {
     const text = JSON.stringify(rows.map(({ key: _k, ...e }) => e), null, 2);
     navigator.clipboard?.writeText(text).then(() => showToast(`Скопировано событий: ${rows.length}`), () => showToast('Буфер обмена недоступен'));
   };
-  const clear = () => { const last = list.length ? (list[list.length - 1].id as number) : 0; setCleared(last); setPaused(null); setSel(null); setFresh(0); stuck.current = true; };
+  const clear = () => { setCleared(cursorAt(list[list.length - 1])); setPaused(null); setSel(null); setFresh(0); stuck.current = true; };
 
   const shown = sel ?? lastSel.current;
   return (

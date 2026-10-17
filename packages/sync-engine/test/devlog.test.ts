@@ -31,6 +31,13 @@ const has = (e: Engine, kind: DevEvent['kind'], type: string) => events(e).some(
 
 // ---------- буфер ----------
 
+test('every DevLog has its own epoch, stamped on each event', () => {
+  const a = new DevLog(), b = new DevLog();
+  expect(a.epoch).not.toBe(b.epoch);
+  expect(a.record('engine', 'x', null).ep).toBe(a.epoch);
+  expect(b.record('engine', 'x', null)).toMatchObject({ id: 1, ep: b.epoch });
+});
+
 test('ring buffer never exceeds 2000 and keeps order', () => {
   const log = new DevLog();
   for (let i = 0; i < 5000; i++) log.record('engine', 't', { i });
@@ -317,10 +324,21 @@ test('restartWorker through HostCore: engine re-opens, tabs keep their subscript
   await until(() => !!stats.meta('devStats'));
   expect((stats.meta('devStats')!.host as { kind: string; clients: number }).clients).toBe(1);
   const up0 = stats.meta('devStats')!.engineUptimeMs as number;
+  const ep0 = stats.meta('devStats')!.logEpoch as string;
+  const log = new Mirror();
+  tab.watch({ kind: 'devLog', since: 0 }, (p) => log.apply(p));
+  await until(() => log.list().length > 0);
+  expect(log.list().every((e) => e.ep === ep0)).toBe(true);
   expect(await tab.call({ type: 'dev', cmd: 'restartWorker' })).toEqual({ restarted: 'engine' });
   await sendMessage(b.userId, { chatId, clientId: crypto.randomUUID(), body: 'после перезапуска' });
   await until(() => m.list().some((x) => x.body === 'после перезапуска'), 4000);
   await until(() => (stats.meta('devStats')?.engineUptimeMs as number) < up0 + 500, 3000);
+  // новый движок — новая эпоха журнала: в devStats и в каждом событии (id снова с начала)
+  const ep1 = stats.meta('devStats')!.logEpoch as string;
+  expect(typeof ep1).toBe('string');
+  expect(ep1).not.toBe(ep0);
+  await until(() => log.list().some((e) => e.ep === ep1));
+  expect(log.list().filter((e) => e.ep === ep1).every((e) => typeof e.id === 'number')).toBe(true);
   expect(reloaded).toBe(false);
   tab.close();
   await core.close();

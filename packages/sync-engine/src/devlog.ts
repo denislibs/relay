@@ -14,7 +14,9 @@ import { readStore } from './devdata';
  *   снимок журнала можно показать, не показывая переписку.
  */
 export type DevKind = 'ws-in' | 'ws-out' | 'engine' | 'error';
-export interface DevEvent { id: number; t: number; kind: DevKind; type: string; data: object | null; size: number | undefined; ms: number | undefined }
+/** ep — эпоха журнала: случайный id экземпляра движка. После «Перезапустить воркер» id событий снова с 1,
+ *  и курсоры клиента (ошибки, «Очистить», кэш сводок) сбрасываются по смене ep. */
+export interface DevEvent { id: number; ep: string; t: number; kind: DevKind; type: string; data: object | null; size: number | undefined; ms: number | undefined }
 
 export const LOG_CAP = 2000;
 export const BODY_MAX = 40;
@@ -54,6 +56,8 @@ export function trimBodies(o: object): object {
 
 export class DevLog {
   private buf: (DevEvent | undefined)[] = new Array(LOG_CAP);
+  /** эпоха: новая на каждый экземпляр (движок создаёт свой DevLog при каждом старте) */
+  readonly epoch: string = Math.random().toString(36).slice(2, 10) + Date.now().toString(36);
   private next = 1;          // id следующего события (растёт всегда, буфер — по модулю)
   private floor = 0;         // «Очистить»: события с id ≤ floor больше не отдаём
   private reqs = new Map<string, number>();   // reqId → когда ушёл запрос
@@ -63,7 +67,7 @@ export class DevLog {
   rtt: number | null = null;
 
   record(kind: DevKind, type: string, data: object | null, size?: number, ms?: number): DevEvent {
-    const e: DevEvent = { id: this.next, t: Date.now(), kind, type, data, size, ms };
+    const e: DevEvent = { id: this.next, ep: this.epoch, t: Date.now(), kind, type, data, size, ms };
     this.buf[(this.next - 1) % LOG_CAP] = e;
     this.next++;
     return e;

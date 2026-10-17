@@ -90,6 +90,7 @@ export function buildStats(v: EngineView, o: { db: IDBDatabase; log: DevLog; sim
     idbVersion: o.db.version,
     host: h ? { kind: h.kind, clients: h.clients(), uptimeMs: now - h.startedAt } : null,
     engineUptimeMs: now - o.openedAt,
+    logEpoch: o.log.epoch,
     pingMs: o.log.rtt,
     sync: {
       lastSeq: v.lastSeq, serverSeq, lag: serverSeq == null ? null : Math.max(0, serverSeq - v.lastSeq),

@@ -28,3 +28,13 @@ test('engine log events: errors, server err frames and failed ops become errors 
   expect(getErrors().map((e) => e.source)).toEqual(['host', 'server', 'op']);
   expect(getErrors()[1].message).toBe('err internal (повтор)');
 });
+
+test('engine restart: a new log epoch resets the error cursor (ids start again at 1)', () => {
+  clearErrors();
+  ingestLogErrors([{ id: 5, ep: 'A', t: 1, kind: 'error', type: 'engine', data: { message: 'old' } }]);
+  // тот же id в той же эпохе — повтор; меньший id в новой эпохе — новое событие
+  ingestLogErrors([{ id: 5, ep: 'A', t: 1, kind: 'error', type: 'engine', data: { message: 'old' } }]);
+  ingestLogErrors([{ id: 1, ep: 'B', t: 2, kind: 'error', type: 'host', data: { message: 'after restart' } }]);
+  ingestLogErrors([{ id: 2, ep: 'B', t: 3, kind: 'ws-in', type: 'err', data: { code: 'internal' } }]);
+  expect(getErrors().map((e) => e.message)).toEqual(['engine: old', 'host: after restart', 'err internal']);
+});
