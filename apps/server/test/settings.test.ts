@@ -3,7 +3,6 @@ import { defaultPrivacy, type ServerFrame } from '@relay/protocol';
 import { sql } from '../src/db';
 import { getUpdates } from '../src/domain/journal';
 import { sendMessage } from '../src/domain/messages';
-import { subscribe } from '../src/domain/push';
 import { resetPresence } from '../src/domain/presence';
 import { createServer } from '../src/http';
 import { startRealtime } from '../src/realtime';
@@ -85,7 +84,7 @@ test('push respects the recipient defaults: muted kind sends nothing, no preview
   const b = await login('Борис');
   const direct = await makeChat([a, b.userId]), group = await makeChat([a, b.userId, await makeUser('Вера')]);
   const br = await pushBrowser();
-  await subscribe(b.userId, { endpoint: endpoint(1), keys: br.keys });
+  expect((await call(b, 'POST', '/push/subscription', { endpoint: endpoint(1), keys: br.keys })).status).toBe(200);
 
   await call(b, 'PUT', '/settings/notify/group', { muted: true });
   await sendMessage(a, { chatId: group, clientId: crypto.randomUUID(), body: 'в группу' });

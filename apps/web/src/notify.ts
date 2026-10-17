@@ -1,4 +1,4 @@
-import { getGlobal, setGlobal } from './global';
+import { getGlobal, setGlobal, subscribeGlobal } from './global';
 import { notifyText, planIncoming } from './notifyRules';
 import { getPrefs, setPref, subscribePrefs } from './prefs';
 import { playNotifySound } from './sound';
@@ -67,7 +67,16 @@ export function startNotify(openChat: (id: number) => void): void {
     if (p.screen.hideNotifyText !== hideText) { hideText = p.screen.hideNotifyText; syncMuted(); }
   });
   setGlobal({ notify: notifyState() });
-  if (getGlobal().notify === 'on' && getPrefs().notify.web && bgWanted()) quietly(syncSubscription());
+  // подписка — каждый старт: сервер хранит её только за живым сеансом (106_push_session_required), так она привязывается к текущему.
+  // Старт без сети — повторяем, когда соединение появится, пока сервер её не примет.
+  const wanted = () => getGlobal().notify === 'on' && getPrefs().notify.web && bgWanted();
+  if (wanted()) quietly(syncSubscription());
+  let wasOnline = getGlobal().status.online;
+  subscribeGlobal(() => {
+    const { online } = getGlobal().status;
+    if (online && !wasOnline && !getGlobal().pushReady && wanted()) quietly(syncSubscription());
+    wasOnline = online;
+  });
   navigator.serviceWorker?.addEventListener('message', (e) => {
     if (e.data?.type === 'openChat') openChat(Number(e.data.chatId));
   });

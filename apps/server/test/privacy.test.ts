@@ -5,7 +5,6 @@ import { getUpdates } from '../src/domain/journal';
 import { sendMessage } from '../src/domain/messages';
 import { canFindByPhone, canSee, canSeeLastSeen, type PrivacyCtx } from '../src/domain/privacy';
 import { resetPresence } from '../src/domain/presence';
-import { subscribe } from '../src/domain/push';
 import { createServer } from '../src/http';
 import { startRealtime } from '../src/realtime';
 import { handleFrame } from '../src/ws';
@@ -399,7 +398,7 @@ test('no push from a blocked sender (group message)', async () => {
   const group = await makeChat([a.userId, b, v]);
   await makeChat([a.userId, b]);
   const br = await pushBrowser();
-  await subscribe(a.userId, { endpoint: `http://localhost:${push.port}/ep/1`, keys: br.keys });
+  expect((await call(a, 'POST', '/push/subscription', { endpoint: `http://localhost:${push.port}/ep/1`, keys: br.keys })).status).toBe(200);
   await call(a, 'PUT', `/blocks/${b}`);
   await sendMessage(b, { chatId: group, clientId: crypto.randomUUID(), body: 'от заблокированного' });
   await sendMessage(v, { chatId: group, clientId: crypto.randomUUID(), body: 'от Веры' });

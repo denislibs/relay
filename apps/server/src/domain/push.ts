@@ -1,7 +1,8 @@
 import { NO_PREVIEW } from '@relay/protocol';
-import { sql, type Tx } from '../db';
+import { sql } from '../db';
 import { nameForSql } from './profile';
 import { isOnline } from './presence';
+import { DEFAULT_TTL_DAYS } from './sessions';
 import { notifyDefaults } from './settings';
 
 /**
@@ -72,7 +73,7 @@ export interface SubscriptionInput {
 }
 
 /** Подписка этого браузера; sessionId — сеанс, из которого подписались (его конец удаляет подписку). */
-export async function subscribe(userId: number, s: SubscriptionInput, sessionId: number | null = null): Promise<void> {
+export async function subscribe(userId: number, s: SubscriptionInput, sessionId: number): Promise<void> {
   const url = new URL(s.endpoint);   // бросит на мусоре
   if (url.protocol !== 'https:' && process.env.DEV_LOGIN !== '1') throw new Error('endpoint');
   // не прислали muted / hideText (переподписка из SW) — берём из прежней строки этого пользователя
@@ -97,11 +98,6 @@ export async function unsubscribe(userId: number, endpoint: string): Promise<voi
   await sql`delete from push_subscriptions where endpoint = ${endpoint} and user_id = ${userId}`;
 }
 
-/** Подписки без сеанса (до 105_push_session) — их не к чему привязать: выход и «Завершить другие» убирают их. */
-export async function dropUnboundSubscriptions(db: Tx | typeof sql, userId: number): Promise<void> {
-  await db`delete from push_subscriptions where user_id = ${userId} and session_id is null`;
-}
-
 // ---- отправка в фоне: ack не ждёт push-сервис; тесты дожидаются хвоста (settlePushes) перед очисткой базы ----
 const pending = new Set<Promise<void>>();
 export function pushInBackground(m: Parameters<typeof pushNewMessage>[0]): void {
@@ -115,7 +111,8 @@ export async function settlePushes(): Promise<void> {
 
 export type PushPayload = { chatId: number; id: number; title: string; body: string };
 
-/** Новое сообщение → push участникам без соединения, кроме отправителя и тех, у кого чат заглушён. */
+/** Новое сообщение → push участникам без соединения, кроме отправителя и тех, у кого чат заглушён.
+ *  Только подпискам живых сеансов: истёкший или неактивный дольше срока, но ещё не убранный sweepInactive — молчит. */
 export async function pushNewMessage(m: { chatId: number; id: number; senderId: number; body: string; kind?: string; attachment?: { name?: string } | null }): Promise<void> {
   // имя отправителя — глазами получателя (контактное, если он его задал)
   const subs = await sql`
@@ -123,7 +120,11 @@ export async function pushNewMessage(m: { chatId: number; id: number; senderId: 
            (select ${nameForSql(sql`s.user_id`)} from users u where u.id = ${m.senderId}) as sender_name
       from push_subscriptions s
     join chat_members cm on cm.user_id = s.user_id and cm.chat_id = ${m.chatId}
+    join sessions se on se.id = s.session_id
+    left join user_settings us on us.user_id = s.user_id
     where s.user_id <> ${m.senderId} and not (${m.chatId} = any(s.muted))
+      and se.expires_at > now()
+      and se.last_active_at > now() - make_interval(days => coalesce(us.sessions_ttl_days, ${DEFAULT_TTL_DAYS}))
       and not exists (select 1 from blocks b where b.owner_id = s.user_id and b.user_id = ${m.senderId})   -- от заблокированного — никогда`;
   const offline = subs.filter((s) => !isOnline(s.user_id as number));
   if (!offline.length) return;
