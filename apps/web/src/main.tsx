@@ -3,7 +3,9 @@ import { render } from 'preact';
 import { startData } from './data';
 import { getGlobal, setGlobal, type Me } from './global';
 import * as nav from './nav';
+import { startScreenBlur } from './screenBlur';
 import { startSettingsData } from './settingsData';
+import { startTitle } from './title';
 import { App } from './ui/App';
 
 declare const __DEV__: boolean;
@@ -37,5 +39,7 @@ async function boot(): Promise<void> {
 
 nav.installNav({ get: () => getGlobal().sidebarView, set: (p) => setGlobal({ sidebarView: p }), escBusy: () => getGlobal().infoOpen && !!getGlobal().openChatId });
 if (__DEV__) (window as unknown as { __nav: typeof nav }).__nav = nav;   // для ручной проверки навигации
+startTitle();
+startScreenBlur();
 render(<App />, document.getElementById('app')!);
 boot();

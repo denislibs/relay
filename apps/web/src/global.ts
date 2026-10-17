@@ -108,6 +108,9 @@ applyPrefs();
 
 export const getGlobal = (): GlobalState => state;
 
+/** Подписка вне компонентов (заголовок вкладки): вызывается на каждый setGlobal. */
+export function subscribeGlobal(fn: () => void): () => void { subscribers.add(fn); return () => { subscribers.delete(fn); }; }
+
 export function setGlobal(patch: Partial<GlobalState> | ((s: GlobalState) => Partial<GlobalState>)): void {
   const p = typeof patch === 'function' ? patch(state) : patch;
   state = { ...state, ...p };

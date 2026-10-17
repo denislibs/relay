@@ -1177,3 +1177,12 @@ html[data-blur="0"] .rl-glassbar, html[data-blur="0"] .rl-shell .rl-csearch { ba
 html[data-blur="0"] .rl-shell .rl-glassbar { background: var(--raised); }
 html[data-blur="0"] .rl-shell .rl-date span { background: color-mix(in srgb, var(--raised) 96%, transparent); }
 html[data-blur="0"] .rl-shell .rl-msgmenu .rl-menu, html[data-blur="0"] .rl-shell .rl-rpick { background: color-mix(in srgb, var(--raised) 96%, transparent); }
+
+/* ---------- Приватность экрана: html[data-screen-blur] размывает список, ленту и правую панель; шапки и обои остаются чёткими ---------- */
+.rl-sidecard-body, .rl-settings, .rl-feed, .rl-asidecard > :not(.rl-panel-head) { transition: filter 150ms ease, opacity 150ms ease; }
+:root[data-screen-blur] .rl-sidecard-body, :root[data-screen-blur] .rl-settings, :root[data-screen-blur] .rl-feed, :root[data-screen-blur] .rl-asidecard > :not(.rl-panel-head) { filter: blur(16px) brightness(.8); user-select: none; }
+.rl-shell > .rl-shell-veil { position: absolute; inset: 0; z-index: 50; display: flex; align-items: center; justify-content: center; cursor: pointer; opacity: 0; visibility: hidden; pointer-events: none; transition: opacity 150ms ease, visibility 0s linear 150ms; }
+:root[data-screen-blur] .rl-shell > .rl-shell-veil { opacity: 1; visibility: visible; pointer-events: auto; transition: opacity 150ms ease; }
+.rl-shell-veil-card { display: flex; flex-direction: column; align-items: center; gap: var(--space-2); padding: var(--space-4) var(--space-5); border-radius: var(--radius-panel); background: var(--glass); color: var(--ink); font: 500 15px/20px var(--font-sans); -webkit-backdrop-filter: blur(20px); backdrop-filter: blur(20px); box-shadow: var(--shadow-float); }
+:root[data-anim="0"] .rl-shell-veil, :root[data-anim="0"] .rl-sidecard-body, :root[data-anim="0"] .rl-settings, :root[data-anim="0"] .rl-feed, :root[data-anim="0"] .rl-asidecard > :not(.rl-panel-head) { transition: none; }
+@media (prefers-reduced-motion: reduce) { .rl-shell-veil, .rl-sidecard-body, .rl-settings, .rl-settings, .rl-feed, .rl-asidecard > :not(.rl-panel-head) { transition: none; } }

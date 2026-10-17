@@ -1,4 +1,5 @@
 // Чистые правила локальных уведомлений и звука — без DOM, чтобы проверять юнит-тестами.
+import { NO_PREVIEW } from '@relay/protocol';
 import type { NotifyState } from './notify';
 import type { Prefs } from './prefs';
 
@@ -33,3 +34,9 @@ export function volumeFromSlider(pct: number): { sound: boolean; volume: number 
   return { sound: volume > 0, volume };
 }
 export const volumePct = (v: number): number => Math.round(v * 100);
+
+/** Единственная точка, где собирается текст локального уведомления: «Скрывать текст» (экран) и «Предпросмотр» (аккаунт). */
+export function notifyText(msg: { title: string; text: string }, o: { preview: boolean; hideText: boolean }): { title: string; body: string } {
+  if (o.hideText) return { title: 'Relay', body: NO_PREVIEW };
+  return { title: msg.title, body: o.preview ? msg.text : NO_PREVIEW };
+}

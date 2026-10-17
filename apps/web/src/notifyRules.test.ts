@@ -32,3 +32,11 @@ test('sound: zero volume means off; enabling at zero restores 50 %', () => {
   expect(volumeFromSlider(140)).toEqual({ sound: true, volume: 1 });
   expect(volumePct(0.35)).toBe(35);
 });
+
+import { notifyText } from './notifyRules';
+test('notifyText honors hideText and preview', () => {
+  const m = { title: 'Анна', text: 'секрет' };
+  expect(notifyText(m, { preview: true, hideText: false })).toEqual({ title: 'Анна', body: 'секрет' });
+  expect(notifyText(m, { preview: false, hideText: false })).toEqual({ title: 'Анна', body: 'Новое сообщение' });
+  expect(notifyText(m, { preview: true, hideText: true })).toEqual({ title: 'Relay', body: 'Новое сообщение' });
+});

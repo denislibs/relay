@@ -641,7 +641,10 @@ function FloatShell(props) {
     props.sidebar ? h('div', { class: 'rl-shell-side' }, props.sidebar,
       props.onSideResize ? h(SideResizer, { min: props.sideMin, max: props.sideMax, onChange: props.onSideResize }) : null) : null,
     h('div', { class: 'rl-shell-main' }, props.children),
-    props.aside || null);
+    props.aside || null,
+    // слой приватности экрана: виден только при html[data-screen-blur]; клик снимает размытие (логика — в приложении)
+    h('div', { class: 'rl-shell-veil', role: 'button', 'aria-label': 'Нажмите, чтобы показать', tabindex: -1 },
+      h('span', { class: 'rl-shell-veil-card' }, h(Icon, { name: 'lock', size: 28 }), h('span', null, 'Нажмите, чтобы показать'))));
 }
 
 /* ---------- SidebarCard: header, folder tabs, scrolling body, FAB that hides on scroll down ---------- */

@@ -1,6 +1,7 @@
-import { ChatRowSkeleton, InfoRow, PanelHeader, Presence, Section, useMinVisible } from '@relay/ui';
+import { CheckRow, ChatRowSkeleton, InfoRow, PanelHeader, Presence, Section, SelectRow, useMinVisible } from '@relay/ui';
 import { useGlobal } from '../../global';
 import { back, go } from '../../nav';
+import { setPref } from '../../prefs';
 import { prefetch, refreshSettings, registerPrefetch } from '../../settingsData';
 import { useScrollMemory } from '../useScrollMemory';
 import { RULE_KEYS, RULE_TITLE, ruleSubtitle } from './privacyLogic';
@@ -22,6 +23,7 @@ export function Privacy() {
   // первый визит: правила с сервера ещё не пришли — скелет, без перескока с умолчаний
   const waiting = !loaded && phase !== 'offline';
   const skeleton = useMinVisible(waiting, { delay: 150, min: 600 });
+  const screen = useGlobal((s) => s.prefs.screen);
   const scroll = useScrollMemory('settings/privacy');
 
   return (
@@ -49,6 +51,18 @@ export function Privacy() {
             </Section>
           )}
         </div>
+        <Section title="Экран" footer="Эти настройки действуют только на этом устройстве.">
+          <CheckRow label="Размывать, когда вкладка не в фокусе" checked={screen.blur} onChange={(on: boolean) => setPref('screen.blur', on)} />
+          <Presence show={screen.blur} exitMs={200}>
+            <SelectRow
+              label="Задержка" value={screen.blurDelay} onChange={(v: number | string) => setPref('screen.blurDelay', Number(v))}
+              options={[{ value: 0, label: 'Сразу' }, { value: 5, label: '5 секунд' }, { value: 30, label: '30 секунд' }]}
+            />
+          </Presence>
+          <CheckRow label="Не показывать чат в заголовке вкладки" checked={screen.hideChatInTitle} onChange={(on: boolean) => setPref('screen.hideChatInTitle', on)} />
+          <CheckRow label="Не показывать непрочитанные в заголовке и значке" checked={screen.hideUnreadInTitle} onChange={(on: boolean) => setPref('screen.hideUnreadInTitle', on)} />
+          <CheckRow label="Скрывать текст в уведомлениях" checked={screen.hideNotifyText} onChange={(on: boolean) => setPref('screen.hideNotifyText', on)} />
+        </Section>
       </div>
     </div>
   );

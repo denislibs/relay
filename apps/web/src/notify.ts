@@ -1,6 +1,5 @@
 import { getGlobal, setGlobal } from './global';
-import { NO_PREVIEW } from '@relay/protocol';
-import { planIncoming } from './notifyRules';
+import { notifyText, planIncoming } from './notifyRules';
 import { getPrefs, setPref, subscribePrefs } from './prefs';
 import { playNotifySound } from './sound';
 
@@ -101,7 +100,7 @@ export function notifyIncoming(chat: { id: number; title: string; muted: boolean
   const plan = planIncoming({ state: g.notify, device: getPrefs().notify, chatMuted: chat.muted, pref: g.settings.notify[kind], hasFocus: document.hasFocus() });
   if (!plan.show) return;
   const text = m.kind === 'photo' ? (m.body ? '🖼 ' + m.body : 'Фотография') : m.kind === 'file' ? '📎 ' + (m.body || m.attachmentName || 'Файл') : m.body;
-  const body = plan.preview ? text : NO_PREVIEW;
-  quietly(navigator.serviceWorker.ready.then((reg) => reg.showNotification(chat.title, { body, tag: 'chat-' + chat.id, data: { chatId: chat.id } })));
+  const t = notifyText({ title: chat.title, text }, { preview: plan.preview, hideText: getPrefs().screen.hideNotifyText });
+  quietly(navigator.serviceWorker.ready.then((reg) => reg.showNotification(t.title, { body: t.body, tag: 'chat-' + chat.id, data: { chatId: chat.id } })));
   playNotifySound(plan.volume);
 }
