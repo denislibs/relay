@@ -1,4 +1,4 @@
-import { Avatar, Button, ChatSearchBar, Highlight, ripple, Composer, DropOverlay, GlassBar, IconButton, Menu, Modal, Presence, ReactionPicker, requestMutation } from '@relay/ui';
+import { Avatar, Button, ChatSearchBar, Highlight, ripple, useMinVisible, requestMeasure, Composer, DropOverlay, GlassBar, IconButton, Menu, Modal, Presence, ReactionPicker, requestMutation } from '@relay/ui';
 import { useEffect, useLayoutEffect, useRef, useState } from 'preact/hooks';
 import { deleteMessage, editMessage, ensureNames, focusMessage, sendFile, openChat, react, saveDraft, searchMessages, send, typing, typingDone } from '../data';
 import type { SearchHit } from '@relay/sync-engine/src/types';
@@ -54,6 +54,20 @@ export function Chat({ chatId }: { chatId: number }) {
     return { ...f, at };
   });
   const closeFind = () => { setFinding(false); setFindQ(''); setFound(null); setListOpen(true); };
+  // лоадер в строке поиска: запрос ушёл, ответа на эту строку ещё нет (с задержкой и минимумом — не мигает)
+  const findWant = findQ.trim();
+  const searching = useMinVisible(finding && findWant.length >= 2 && found?.q !== findWant, { delay: 120, min: 450 });
+  // высота списка — плавно: меряем содержимое, ставим высоту коробке (переход по height)
+  const listBox = useRef<HTMLDivElement>(null);
+  const listInner = useRef<HTMLDivElement>(null);
+  useLayoutEffect(() => {
+    const box = listBox.current, inner = listInner.current;
+    if (!box || !inner || !listOpen) return;
+    requestMeasure(() => {
+      const h = Math.min(inner.scrollHeight, 360, Math.round(innerHeight * 0.55));
+      requestMutation(() => { box.style.height = h + 'px'; });
+    });
+  }, [found, listOpen, names]);
   // Esc закрывает поиск, даже если фокус ушёл из поля (после выбора результата)
   useEffect(() => {
     if (!finding) return;
@@ -177,14 +191,15 @@ export function Chat({ chatId }: { chatId: number }) {
               onNext={() => step(1)}
               onPrev={() => step(-1)}
               onClose={closeFind}
+              busy={searching}
             />
             <Presence show={listOpen && !!found} exitMs={140}>
-              <div class="app-findlist" role="listbox" aria-label="Найденные сообщения">
+              <div class="app-findlist" ref={listBox} role="listbox" aria-label="Найденные сообщения"><div class="app-findlist-in" ref={listInner}>
                 {found && found.hits.length ? found.hits.map((x, k) => {
                   const who = names[x.senderId] ?? (x.senderId === me.userId ? me.name : chat?.kind === 'direct' ? title : '');
                   return (
                     <button type="button" role="option" aria-selected={k === found.at} key={x.id} class={'app-findrow' + (k === found.at ? ' app-findrow-on' : '')} onPointerDown={ripple} onClick={() => pick(k)}>
-                      <Avatar name={who} size={48} />
+                      <Avatar name={who} size={40} />
                       <span class="app-findrow-text">
                         <span class="app-findrow-top"><b>{who}</b><time>{chatTime(x.createdAt)}</time></span>
                         <span class="app-findrow-body"><Highlight text={snippet(x.body, found.q)} query={found.q} /></span>
@@ -192,7 +207,7 @@ export function Chat({ chatId }: { chatId: number }) {
                     </button>
                   );
                 }) : <div class="app-findempty">Ничего не найдено</div>}
-              </div>
+              </div></div>
             </Presence>
           </div>
         ) : null}

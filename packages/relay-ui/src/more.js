@@ -142,8 +142,12 @@ function SelectionBar(props) {
 /* ---------- ChatSearchBar + Highlight ---------- */
 function ChatSearchBar(props) {
   var total = props.total || 0;
-  return h('div', { class: 'rl-csearch', role: 'search' },
-    h('span', { class: 'rl-csearch-icon', 'aria-hidden': 'true' }, h(Icon, { name: 'search', size: 22 })),
+  // busy: идёт поиск — лупа сменяется лоадером (тот же, что в поиске сайдбара)
+  return h('div', { class: cx('rl-csearch', props.busy && 'rl-search-busy'), role: 'search' },
+    h('span', { class: 'rl-search-icon rl-csearch-icon', 'aria-hidden': 'true' },
+      h(Icon, { name: 'search', size: 22 }),
+      h('svg', { class: 'rl-search-spin', width: 22, height: 22, viewBox: '0 0 18 18', fill: 'none' },
+        h('circle', { cx: 9, cy: 9, r: 7, stroke: 'currentColor', 'stroke-width': 1.8, 'stroke-linecap': 'round', 'stroke-dasharray': '30 44' }))),
     h('label', { for: props.id || 'rl-csearch', class: 'rl-sr' }, 'Поиск по чату'),
     h('input', { id: props.id || 'rl-csearch', type: 'search', placeholder: 'Поиск', value: props.value, autocomplete: 'off', autoFocus: true,
       onInput: function (e) { if (props.onQuery) props.onQuery(e.target.value); },
