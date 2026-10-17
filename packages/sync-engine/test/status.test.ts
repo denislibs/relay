@@ -358,3 +358,32 @@ test('resetLocal without keepOutbox drops unsent messages; other clients of the 
   const rows = await sql`select count(*)::int as n from messages where chat_id = ${chatId}`;
   expect(rows[0].n).toBe(0);
 });
+
+test('resetLocal during the first snapshot waits for it, then re-snapshots (no wipe under live sync)', async () => {
+  const a = await srv.login('a'), b = await srv.login('b');
+  const chatId = await srv.chat(a.token, [a.userId, b.userId]);
+  await sendMessage(b.userId, { chatId, clientId: crypto.randomUUID(), body: 'один' });
+  const ea = await open(srv.config(a));
+  const list = watchInto(ea, { kind: 'chatList', limit: 50 });
+  const st = watchInto(ea, { kind: 'status' });
+  ea.connect();
+  await st.until((l) => l[0]?.online === true);   // hello ушёл, снимок идёт
+  await ea.call({ type: 'resetLocal', keepOutbox: true });
+  await st.until((l) => l[0]?.hydrated === true && l[0].synced === true);
+  await list.until((l) => l.length === 1);
+});
+
+test('resetLocal right after a send: the message is delivered exactly once, outbox not lost', async () => {
+  const a = await srv.login('a'), b = await srv.login('b');
+  const chatId = await srv.chat(a.token, [a.userId, b.userId]);
+  const ea = await open(srv.config(a));
+  ea.connect();
+  await ea.whenIdle();
+  const st = watchInto(ea, { kind: 'status' });
+  await ea.call({ type: 'sendMessage', chatId, body: 'раз' });
+  await ea.call({ type: 'resetLocal', keepOutbox: true });
+  await st.until((l) => l[0]?.hydrated === true && l[0].synced === true && l[0].outbox === 0);
+  await ea.whenIdle();
+  const rows = await sql`select body from messages where chat_id = ${chatId}`;
+  expect(rows.map((r: { body: string }) => r.body)).toEqual(['раз']);
+});

@@ -13,13 +13,14 @@ export function Autoload({ path }: { path: string }) {
   const kind = path.split('/').pop() as Kind;
   const al = useGlobal((s) => s.prefs.autoload);
   const scroll = useScrollMemory(path);
-  const v = al[kind] ?? al.photo;
+  const v = al[kind];
   const set = (field: 'contacts' | 'private' | 'groups') => (on: boolean) => setPref(`autoload.${kind}.${field}`, on);
-  const idx = Math.max(0, STEPS.indexOf(al.fileMaxMb));
+  // значение вне сетки (старые настройки) показываем на ближайшем шаге
+  const idx = STEPS.reduce((best, m, i) => (Math.abs(m - al.fileMaxMb) < Math.abs(STEPS[best] - al.fileMaxMb) ? i : best), 0);
 
   return (
     <div class="rl-sidepage" aria-label={TITLE[kind]}>
-      <PanelHeader icon="arrowLeft" closeLabel="Назад" title={TITLE[kind] ?? 'Автозагрузка'} onClose={() => void back()} />
+      <PanelHeader icon="arrowLeft" closeLabel="Назад" title={TITLE[kind]} onClose={() => void back()} />
       <div class="rl-settings" ref={scroll.ref} onScroll={scroll.onScroll}>
         <Section title="Автозагрузка" footer="Без автозагрузки вложение скачивается по нажатию.">
           <CheckRow label="Контакты" checked={v.contacts} onChange={set('contacts')} />

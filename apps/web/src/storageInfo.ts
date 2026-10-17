@@ -9,40 +9,51 @@ export function formatBytes(n: number): string {
   return Math.round(n) + ' Б';
 }
 
-export interface StorageInfo { used: number; quota: number; db: number; media: number }
+/** exact: браузер разделил IndexedDB и кэши (usageDetails); иначе db — «всё остальное». approx: у части записей кэша нет длины. */
+export interface StorageInfo { used: number; quota: number; db: number; media: number; exact: boolean; approx: boolean }
 
 async function mediaCaches(): Promise<Cache[]> {
   if (typeof caches === 'undefined') return [];
   try { return await Promise.all((await caches.keys()).filter((k) => MEDIA_CACHE.test(k)).map((k) => caches.open(k))); } catch { return []; }
 }
 
-/** Размер медиа-кэшей: content-length, а если заголовка нет — размер тела. Между записями отдаём управление. */
-export async function mediaCacheSize(): Promise<number> {
-  let sum = 0;
+const idle = (): Promise<void> => new Promise((r) => {
+  const ric = (globalThis as { requestIdleCallback?: (cb: () => void) => void }).requestIdleCallback;
+  if (ric) ric(() => r()); else setTimeout(r, 0);
+});
+
+let cached: { bytes: number; unknown: number } | null = null;
+
+/** Размер медиа-кэшей по content-length; тела не читаем. Записи без длины считаем неизвестными. Результат живёт, пока открыта страница. */
+export async function mediaCacheSize(): Promise<{ bytes: number; unknown: number }> {
+  if (cached) return cached;
+  let bytes = 0, unknown = 0, n = 0;
   for (const c of await mediaCaches()) {
     for (const req of await c.keys()) {
       const res = await c.match(req);
       if (!res) continue;
       const len = Number(res.headers.get('content-length'));
-      sum += len > 0 ? len : (await res.blob()).size;
-      await new Promise((r) => setTimeout(r, 0));
+      if (len > 0) bytes += len; else unknown++;
+      if (++n % 50 === 0) await idle();   // пачками, в простое
     }
   }
-  return sum;
+  return (cached = { bytes, unknown });
 }
 
 export async function clearMediaCaches(): Promise<void> {
+  cached = null;
   if (typeof caches === 'undefined') return;
   await Promise.all((await caches.keys()).filter((k) => MEDIA_CACHE.test(k)).map((k) => caches.delete(k)));
 }
 
 export async function readStorage(): Promise<StorageInfo> {
-  const media = await mediaCacheSize();
-  let used = 0, quota = 0, db = 0;
+  const m = await mediaCacheSize();
+  let used = 0, quota = 0, db = 0, exact = false;
   try {
     const e = (await navigator.storage.estimate()) as StorageEstimate & { usageDetails?: { indexedDB?: number; caches?: number } };
     used = e.usage ?? 0; quota = e.quota ?? 0;
-    db = e.usageDetails?.indexedDB ?? Math.max(0, used - (e.usageDetails?.caches ?? media));
+    exact = e.usageDetails?.indexedDB != null;
+    db = e.usageDetails?.indexedDB ?? Math.max(0, used - (e.usageDetails?.caches ?? m.bytes));
   } catch { /* оценка недоступна */ }
-  return { used: Math.max(used, media), quota, db, media };
+  return { used: Math.max(used, m.bytes), quota, db, media: m.bytes, exact, approx: m.unknown > 0 };
 }

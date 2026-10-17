@@ -10,6 +10,10 @@ import { getGlobal, setGlobal, type AccountSettings, type Me } from './global';
 
 declare const __BUILD__: string;
 
+/** Операции настроек, ещё не дошедшие до сервера. */
+let opsPending = 0;
+export const getPendingOps = (): number => opsPending;
+
 const loaders = new Map<string, () => void>();
 
 /** Раздел регистрирует свою предзагрузку (идемпотентную). */
@@ -95,6 +99,7 @@ export function startSettingsData(me: Me): void {
   let seen = -1;
   engine.watch({ kind: 'ops' }, (p) => {
     opsM.apply(p);
+    opsPending = (opsM.list()[0]?.pending as number | undefined) ?? 0;
     const failures = (opsM.list()[0]?.failures ?? []) as { id: number; code: string }[];
     const max = failures.reduce((m, f) => Math.max(m, f.id), 0);
     if (seen >= 0) {

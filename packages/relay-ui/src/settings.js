@@ -147,6 +147,7 @@ function ConfirmView(props) {
         p.text ? h('p', { class: 'rl-confirm-text' }, p.text) : null,
         h('div', { class: 'rl-confirm-actions', ref: actionsRef },
           h('button', { type: 'button', class: 'rl-confirm-btn', onClick: p.onCancel }, p.cancel || 'Отмена'),
+          p.extra ? h('button', { type: 'button', class: 'rl-confirm-btn', onClick: p.extra.onClick }, p.extra.label) : null,
           h('button', { type: 'button', class: cx('rl-confirm-btn', p.danger && 'rl-confirm-btn-danger'), onClick: p.onConfirm }, p.confirm || 'Ок')))));
 }
 function ConfirmDialog(props) {

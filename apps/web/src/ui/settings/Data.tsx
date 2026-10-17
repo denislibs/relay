@@ -1,10 +1,10 @@
-import { ChatRowSkeleton, ConfirmDialog, InfoRow, PanelHeader, Presence, Section, Switch, useMinVisible } from '@relay/ui';
-import { useEffect, useState } from 'preact/hooks';
+import { ChatRowSkeleton, ConfirmDialog, InfoRow, PanelHeader, Presence, ProgressRing, Section, Switch, plural, useMinVisible } from '@relay/ui';
+import { useEffect, useRef, useState } from 'preact/hooks';
 import { autoloadSubtitle, isDefaultAutoload, type MediaKind } from '../../autoload';
 import { useGlobal } from '../../global';
 import { back, go } from '../../nav';
 import { defaultPrefs, setPrefs } from '../../prefs';
-import { resetLocal, showToast } from '../../settingsData';
+import { getPendingOps, resetLocal, showToast } from '../../settingsData';
 import { clearMediaCaches, formatBytes, readStorage, type StorageInfo } from '../../storageInfo';
 import { useScrollMemory } from '../useScrollMemory';
 
@@ -22,40 +22,43 @@ export function Data() {
   const [ask, setAsk] = useState<'cache' | 'local' | 'autoload' | null>(null);
   const [lastAsk, setLastAsk] = useState<'cache' | 'local' | 'autoload'>('cache');   // текст диалога держится на время закрытия
   const [busy, setBusy] = useState(false);
+  const [unsent, setUnsent] = useState(0);   // сообщения (в очереди и с ошибкой) и правки, не дошедшие до сервера
+  const alive = useRef(true);
+  useEffect(() => () => { alive.current = false; }, []);
   const skeleton = useMinVisible(info == null, { delay: 150, min: 600 });
   const def = defaultPrefs().autoload;
   const isDef = isDefaultAutoload(al, def);
 
-  const recompute = () => { void readStorage().then(setInfo).catch(() => setInfo({ used: 0, quota: 0, db: 0, media: 0 })); };
+  const recompute = () => { void readStorage().then((i) => { if (alive.current) setInfo(i); }).catch(() => { if (alive.current) setInfo({ used: 0, quota: 0, db: 0, media: 0, exact: false, approx: false }); }); };
   useEffect(recompute, []);
-  const open = (k: 'cache' | 'local' | 'autoload') => { setLastAsk(k); setAsk(k); };
+  const open = (k: 'cache' | 'local' | 'autoload') => { if (k === 'local') setUnsent(status.outbox + status.failed + getPendingOps()); setLastAsk(k); setAsk(k); };
 
   const clearCache = async () => {
     setAsk(null);
     try { await clearMediaCaches(); showToast('Кэш медиа очищен'); } catch { showToast('Не удалось очистить кэш'); }
     recompute();
   };
-  const clearLocal = async () => {
+  const clearLocal = async (keepOutbox: boolean) => {
     setAsk(null);
     if (busy) return;
     setBusy(true);
     try {
-      await resetLocal(status.outbox === 0);   // неотправленное оставляем, пока пользователь не согласился его потерять
+      await resetLocal(keepOutbox);
       void go('chats');   // список покажет скелет, пока идёт снимок
-    } catch { showToast('Не удалось очистить данные'); }
-    setBusy(false);
-    recompute();
+    } catch { showToast('Не удалось очистить данные, попробуйте ещё раз'); }
+    if (alive.current) { setBusy(false); recompute(); }
   };
 
   const pct = (n: number) => (info && info.quota > 0 ? Math.max(n > 0 ? 1 : 0, (n / info.quota) * 100) : 0);
-  const lost = status.outbox;
+  const n = unsent;
   const dialog = {
     cache: { title: 'Очистить кэш медиа?', text: 'Загруженные фото, видео и файлы удалятся с устройства. При необходимости они скачаются снова.', confirm: 'Очистить', run: clearCache },
-    local: lost > 0
-      ? { title: 'Очистить локальные данные?', text: `${lost} ${lost === 1 ? 'сообщение ещё не отправлено' : 'сообщений ещё не отправлены'} — они будут потеряны. Чаты загрузятся с сервера заново.`, confirm: 'Очистить', run: clearLocal }
-      : { title: 'Очистить локальные данные?', text: 'Чаты и сообщения на устройстве удалятся и загрузятся с сервера заново. Всё отправлено — ничего не потеряется.', confirm: 'Очистить', run: clearLocal },
+    local: n > 0
+      ? { title: 'Очистить локальные данные?', text: `${n} ${plural(n, 'сообщение ещё не отправлено', 'сообщения ещё не отправлены', 'сообщений ещё не отправлено')}. Можно оставить их и отправить позже или удалить вместе с остальным. Черновики удалятся в любом случае. Чаты загрузятся с сервера заново.`, confirm: 'Удалить всё', run: () => clearLocal(false) }
+      : { title: 'Очистить локальные данные?', text: 'Чаты, сообщения и черновики на устройстве удалятся, чаты загрузятся с сервера заново. Неотправленного нет.', confirm: 'Очистить', run: () => clearLocal(true) },
     autoload: { title: 'Сбросить настройки автозагрузки?', text: 'Для фото, видео и файлов вернутся значения по умолчанию.', confirm: 'Сбросить', run: () => { setAsk(null); setPrefs({ 'autoload.enabled': def.enabled, 'autoload.photo': def.photo, 'autoload.video': def.video, 'autoload.file': def.file, 'autoload.fileMaxMb': def.fileMaxMb }); } },
   }[lastAsk];
+  const extra = lastAsk === 'local' && n > 0 ? { label: 'Оставить неотправленные', onClick: () => void clearLocal(true) } : undefined;
 
   return (
     <div class="rl-sidepage" aria-label="Данные и память">
@@ -88,8 +91,8 @@ export function Data() {
             </Presence>
             {info == null || skeleton ? null : (
               <>
-                <InfoRow icon="chats" title="Чаты и сообщения" value={formatBytes(info.db)} />
-                <InfoRow icon="image" title="Медиа" value={formatBytes(info.media)} />
+                <InfoRow icon="chats" title={info.exact ? 'Чаты и сообщения' : 'Данные приложения'} value={formatBytes(info.db)} />
+                <InfoRow icon="image" title="Медиа" value={(info.approx ? '≈ ' : '') + formatBytes(info.media)} />
               </>
             )}
           </div>
@@ -98,10 +101,10 @@ export function Data() {
         </Section>
         <Section footer="Очистка локальных данных не удаляет ничего на сервере.">
           <InfoRow icon="trash" title="Очистить кэш медиа" onClick={() => open('cache')} />
-          <InfoRow icon="trash" danger title="Очистить локальные данные" onClick={() => open('local')} />
+          <InfoRow icon="trash" danger title="Очистить локальные данные" onClick={busy ? undefined : () => open('local')} trailing={busy ? <span class="app-busy"><ProgressRing size={22} label="Очистка" /></span> : undefined} />
         </Section>
       </div>
-      <ConfirmDialog open={ask != null} danger={lastAsk !== 'autoload'} title={dialog.title} text={dialog.text} confirm={dialog.confirm} cancel="Отмена" onCancel={() => setAsk(null)} onConfirm={() => void dialog.run()} />
+      <ConfirmDialog open={ask != null} extra={extra} danger={lastAsk !== 'autoload'} title={dialog.title} text={dialog.text} confirm={dialog.confirm} cancel="Отмена" onCancel={() => setAsk(null)} onConfirm={() => void dialog.run()} />
     </div>
   );
 }

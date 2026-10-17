@@ -373,6 +373,7 @@ export class Store {
     this.lastSeq = this.seqAtFlush = 0;
     this.hydrated = false;
     this.dialogsAt = 0; this.dialogsId = 0; this.dialogsDone = false;
+    this.pendingDrafts.clear();   // черновики жили в стёртых чатах: пустой текст на сервер не отправляем
     this.epoch = epoch;
     const db = this.db as IDBDatabase;
     const names = keep.outbox ? ['chats', 'messages', 'outbox', 'pendingReads', 'meta', 'users'] : ['chats', 'messages', 'outbox', 'pendingReads', 'meta', 'users', 'ops', 'blobs'];

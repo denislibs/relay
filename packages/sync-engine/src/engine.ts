@@ -68,7 +68,7 @@ export class Engine {
 
   private constructor(private cfg: EngineConfig, readonly store: Store, private db: IDBDatabase, ops: PendingOp[]) {
     this.ops = new Ops(db, ops, { base: cfg.httpBase, headers: cfg.headers, backoffMs: cfg.backoffMs }, {
-      canSend: () => this.online && this.ready && !this.closed,
+      canSend: () => this.online && this.ready && !this.closed && !this.resetting,
       done: (op, value) => this.opDone(op, value),
       changed: () => this.changed(),
       run: (fn) => this.run(fn),
@@ -293,20 +293,32 @@ export class Engine {
     });
   }
 
-  /** Поиск: с сетью — на сервере (вся история), без сети — по сообщениям, сохранённым на устройстве. */
-  /** Очистка локальных данных: общий wipe (как при смене epoch), затем повторный hello — он возьмёт снимок. */
+  /** Очистка локальных данных: общий wipe (как при смене epoch), затем повторный hello — он возьмёт снимок.
+   *  Пока идёт очистка, `resetting` не даёт стартовать hello/синхронизации/отправке/операциям; идущую работу ждём и при таймауте отказываем. */
+  private resetting = false;
   private async resetLocal(keepOutbox: boolean): Promise<void> {
-    for (let i = 0; this.syncing && i < 200; i++) await new Promise((r) => setTimeout(r, 10));   // не рвём идущий снимок на полпути
-    await this.store.wipe(this.store.epoch, { outbox: keepOutbox });
-    if (!keepOutbox) this.ops.forget();
-    this.usersAsked.clear();
-    this.ready = false;
-    this.holding = false;
-    this.emit();   // подписки видят пустой кэш сразу: ответ на hello снова включит удержание до конца снимка
+    if (this.resetting) throw new Error('reset_busy');
+    this.resetting = true;
+    try {
+      const end = Date.now() + 8000;
+      while (this.syncing || this.pumping || this.ops.busy || this.busy > 0) {
+        if (Date.now() > end) throw new Error('reset_busy');
+        await new Promise((r) => setTimeout(r, 10));
+      }
+      await this.store.wipe(this.store.epoch, { outbox: keepOutbox });
+      if (!keepOutbox) this.ops.forget();
+      this.usersAsked.clear();
+      this.ready = false;
+      this.holding = false;
+      this.emit();   // подписки видят пустой кэш сразу: ответ на hello снова включит удержание до конца снимка
+    } finally {
+      this.resetting = false;
+    }
     this.changed();
     this.transport.send({ op: 'hello', lastSeq: 0 });
   }
 
+  /** Поиск: с сетью — на сервере (вся история), без сети — по сообщениям, сохранённым на устройстве. */
   private async search(a: Extract<Action, { type: 'search' }>): Promise<SearchResult> {
     const limit = a.limit ?? 30;
     if (this.online) {
@@ -632,6 +644,7 @@ export class Engine {
   private onFrame(f: ServerFrame): void {
     switch (f.op) {
       case 'hello':
+        if (this.resetting) return;   // resetLocal пошлёт свой hello сама
         this.holding = true;
         this.run(async () => {
           // другое поколение базы (сервер пересоздан): старый кэш недействителен целиком
@@ -688,6 +701,7 @@ export class Engine {
 
   /** Первый вход или tooLong: hello дал seq S → снимок → lastSeq = S → догоняем от S. */
   private async bootstrap(seq: number): Promise<void> {
+    if (this.resetting) return;
     this.syncing = true;
     try {
       await this.loadFirstDialogs();
@@ -701,11 +715,13 @@ export class Engine {
   }
 
   private runSync(): void {
+    if (this.resetting) return;
     if (this.syncing) { this.syncAgain = true; return; }
     this.run(() => this.syncLoop());
   }
 
   private async syncLoop(): Promise<void> {
+    if (this.resetting) return;
     if (this.syncing) { this.syncAgain = true; return; }
     this.syncing = true;
     try {
@@ -842,7 +858,7 @@ export class Engine {
   // =====================================================================
 
   private pumpOutbox(): void {
-    if (!this.online || !this.ready || this.pumping) return;
+    if (this.resetting || !this.online || !this.ready || this.pumping) return;
     this.pumping = true;
     this.run(async () => {
       try {

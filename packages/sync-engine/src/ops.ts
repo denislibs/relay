@@ -87,6 +87,8 @@ export class Ops {
     this.kick();
   }
 
+  get busy(): boolean { return this.pumping; }
+
   /** Есть ли что-то, что сейчас должно уходить (для whenIdle). */
   get sending(): boolean { return this.pumping || (this.list.length > 0 && !this.retryTimer && this.hooks.canSend()); }
 
