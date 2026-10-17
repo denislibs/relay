@@ -91,3 +91,20 @@ export function birthdayText(b: Birthday, now = new Date()): string {
   const a = age(b, now);
   return a == null ? base : `${base} (${a} ${yearsWord(a)})`;
 }
+
+const dayStart = (x: Date) => new Date(x.getFullYear(), x.getMonth(), x.getDate()).getTime();
+
+/** Последняя активность сеанса в списке: «сегодня в 14:05», «вчера», «12.10.26». */
+export function sessionTime(iso: string, now = new Date(), fmt?: TimeFormat): string {
+  const d = new Date(iso);
+  const days = Math.round((dayStart(now) - dayStart(d)) / 86_400_000);
+  if (days <= 0) return `сегодня в ${hm(d, fmt)}`;
+  if (days === 1) return 'вчера';
+  return `${pad(d.getDate())}.${pad(d.getMonth() + 1)}.${String(d.getFullYear()).slice(2)}`;
+}
+
+/** Полная дата для деталей сеанса: «17 октября 2026 в 14:05». */
+export function fullDateTime(iso: string, fmt?: TimeFormat): string {
+  const d = new Date(iso);
+  return `${d.getDate()} ${MONTHS_GEN[d.getMonth()]} ${d.getFullYear()} в ${hm(d, fmt)}`;
+}

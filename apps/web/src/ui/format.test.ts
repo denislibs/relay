@@ -17,3 +17,12 @@ test('chatTime: today uses the format, other days do not', () => {
   expect(chatTime(now.toISOString(), '24h')).toBe('21:05');
   expect(hm(new Date(2026, 0, 1, 15, 30), '12h')).toBe('3:30 PM');
 });
+
+test('sessionTime: today with time, yesterday, older as a date; fullDateTime', async () => {
+  const { sessionTime, fullDateTime } = await import('./format');
+  const now = new Date(2026, 9, 17, 18, 0);
+  expect(sessionTime(new Date(2026, 9, 17, 14, 5).toISOString(), now, '24h')).toBe('сегодня в 14:05');
+  expect(sessionTime(new Date(2026, 9, 16, 23, 59).toISOString(), now, '24h')).toBe('вчера');
+  expect(sessionTime(new Date(2026, 9, 3, 9, 0).toISOString(), now, '24h')).toBe('03.10.26');
+  expect(fullDateTime(new Date(2026, 9, 17, 14, 5).toISOString(), '24h')).toBe('17 октября 2026 в 14:05');
+});

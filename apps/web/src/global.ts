@@ -5,7 +5,7 @@ import { requestMutation } from '@relay/ui';
 import { loadTheme, type ThemePref } from './theme';
 import { getPrefs, subscribePrefs, listenStorage, applyPrefs, type Prefs } from './prefs';
 import type { Item } from '@relay/sync-engine/src/types';
-import { defaultPrivacy, type PrivacyRules } from '@relay/protocol';
+import { defaultPrivacy, type PrivacyRules, type SessionInfo } from '@relay/protocol';
 
 /** Края окна ленты: есть ли сообщения раньше/позже, окно ли это живого хвоста. */
 export interface FeedMeta { hasOlder: boolean; hasNewer: boolean; live: boolean }
@@ -13,7 +13,7 @@ export interface FeedMeta { hasOlder: boolean; hasNewer: boolean; live: boolean 
 /** Свой профиль (GET /me, дальше — подписка me движка). Поля опциональны: старый кэш relay.me их не знает. */
 export interface Me { userId: number; name: string; firstName?: string; lastName?: string; username?: string | null; bio?: string | null; birthday?: { day: number; month: number; year?: number } | null; phone?: string | null }
 export type Phase = 'connecting' | 'offline' | 'loading' | 'updating' | 'ready';
-export interface Status { phase: Phase; hydrated: boolean; chatsComplete?: boolean; chatsCursorAt?: number; online: boolean; synced: boolean; syncing: boolean; outbox: number; failed: number }
+export interface Status { phase: Phase; hydrated: boolean; chatsComplete?: boolean; chatsCursorAt?: number; online: boolean; synced: boolean; syncing: boolean; outbox: number; failed: number; terminated?: boolean }   // terminated — сеанс завершён (B9)
 
 /** Один объект: зеркало видимых данных из воркера + состояние интерфейса этой вкладки. */
 export interface GlobalState {
@@ -48,6 +48,9 @@ export interface GlobalState {
   newContact: NewContactDraft | null;   // открытая модалка «Новый контакт» и чем её заполнить
   blocked: Item[];          // подписка blocked движка: чёрный список (с неподтверждёнными правками)
   blockedLoaded: boolean;   // список с сервера уже был
+  sessions: SessionInfo[] | null;   // активные сеансы с сервера (null — ещё не знаем); вид — sessionsView(sessions, opsKeys)
+  sessionsOffline: boolean;         // последний запрос списка не дошёл (нет сети)
+  opsKeys: string[];                // ключи операций настроек в очереди: оптимистичный вид сеансов
 }
 
 /** Настройки аккаунта (общие для устройств). loaded — снимок с сервера уже был; pending — есть неподтверждённые правки. */
@@ -89,6 +92,9 @@ let state: GlobalState = {
   newContact: null,
   blocked: [],
   blockedLoaded: false,
+  sessions: null,
+  sessionsOffline: false,
+  opsKeys: [],
 };
 const subscribers = new Set<() => void>();
 

@@ -4,7 +4,9 @@
 import { connectEngine, Mirror, type EngineClient } from '@relay/sync-engine/src/client';
 import type { Action, Item, Patch } from '@relay/sync-engine/src/types';
 import { useEffect, useState } from 'preact/hooks';
-import type { PrivacyKey, PrivacyMode } from '@relay/protocol';
+import type { PrivacyKey, PrivacyMode, SessionInfo } from '@relay/protocol';
+import { isSessionOp, sessionsView } from '@relay/sync-engine/src/sessions';
+import { reducedMotion } from '@relay/ui';
 import { engineConfig } from './engineConfig';
 import { getGlobal, setGlobal, type AccountSettings, type Me } from './global';
 
@@ -46,12 +48,12 @@ export const failText = (code: string): string => FAIL_TEXT[code] ?? 'Не уд�
 
 let toastSeq = 0;
 let toastTimer: ReturnType<typeof setTimeout> | null = null;
-/** Общий тост приложения: держится 2,5 с, новый сменяет прежний. */
-export function showToast(text: string): void {
+/** Общий тост приложения: держится 2,5 с (или ms), новый сменяет прежний. */
+export function showToast(text: string, ms = 2500): void {
   const id = ++toastSeq;
   setGlobal({ toast: { text, id } });
   if (toastTimer) clearTimeout(toastTimer);
-  toastTimer = setTimeout(() => { if (getGlobal().toast?.id === id) setGlobal({ toast: null }); }, 2500);
+  toastTimer = setTimeout(() => { if (getGlobal().toast?.id === id) setGlobal({ toast: null }); }, ms);
 }
 
 const ME_KEY = 'relay.me';
@@ -100,14 +102,74 @@ export function startSettingsData(me: Me): void {
   engine.watch({ kind: 'ops' }, (p) => {
     opsM.apply(p);
     opsPending = (opsM.list()[0]?.pending as number | undefined) ?? 0;
-    const failures = (opsM.list()[0]?.failures ?? []) as { id: number; code: string }[];
+    const failures = (opsM.list()[0]?.failures ?? []) as { id: number; key: string; code: string }[];
     const max = failures.reduce((m, f) => Math.max(m, f.id), 0);
     if (seen >= 0) {
-      const fresh = failures.filter((f) => f.id > seen);
+      // сеанс уже завершён (404) — то, чего и хотели: не ошибка
+      const fresh = failures.filter((f) => f.id > seen && !(isSessionOp(f.key) && f.code === 'not_found'));
       if (fresh.length) showToast(failText(fresh[fresh.length - 1].code));
     }
     seen = Math.max(seen, max);
+    // ключи очереди — для оптимистичного вида сеансов; завершение ушло на сервер — список заново
+    const keys = (opsM.list()[0]?.keys ?? []) as string[];
+    const prev = getGlobal().opsKeys;
+    if (keys.join('\n') !== prev.join('\n')) {
+      // ушедшее завершение применяем к уже загруженному списку тем же кадром — иначе строка вернулась бы до ответа
+      const gone = prev.filter((k) => isSessionOp(k) && !keys.includes(k));
+      const list = getGlobal().sessions;
+      setGlobal({ opsKeys: keys, sessions: gone.length && list ? sessionsView(list, gone) : list });
+      if (gone.length) void loadSessions(true);
+    }
   });
+
+  // сеанс завершён (с другого устройства или автозавершением): движок уже стёр данные — уходим на вход
+  const statusM = new Mirror();
+  engine.watch({ kind: 'status' }, (p) => {
+    statusM.apply(p);
+    if (statusM.list()[0]?.terminated) onTerminated();
+  });
+}
+
+// ---------- активные сеансы ----------
+
+let sessionsGen = 0;
+let sessionsAt = 0;
+/** Список сеансов с сервера (через движок: без сети — {offline}). Предзагрузка главной страницы и страницы «Активные сеансы».
+ *  Применяется только ответ на последний запрос: более ранний мог быть снят до завершения сеанса. force — мимо паузы в 1 с. */
+export function loadSessions(force = false): Promise<void> {
+  if (!engine || (!force && Date.now() - sessionsAt < 1000)) return Promise.resolve();
+  sessionsAt = Date.now();
+  const gen = ++sessionsGen;
+  return call<{ sessions: SessionInfo[] } | { offline: true }>({ type: 'listSessions' })
+    .then((r) => {
+      if (gen !== sessionsGen) return;
+      if ('sessions' in r) setGlobal({ sessions: r.sessions, sessionsOffline: false }); else setGlobal({ sessionsOffline: true });
+    })
+    .catch(() => { if (gen === sessionsGen) setGlobal({ sessionsOffline: true }); });
+}
+export const terminateSession = (id: number): Promise<unknown> => call({ type: 'terminateSession', id });
+export const terminateOtherSessions = (): Promise<unknown> => call({ type: 'terminateOtherSessions' });
+export const setSessionsTtl = (days: number): Promise<unknown> => call({ type: 'setSessionsTtl', days });
+
+/** Эта вкладка сама выходит (POST /logout): своё же sessionTerminated — не «завершён на другом устройстве». */
+let selfLogout = false;
+export function markSelfLogout(on: boolean): void { selfLogout = on; }
+
+let terminating = false;
+function onTerminated(): void {
+  if (terminating || selfLogout) return;
+  terminating = true;
+  try { localStorage.removeItem(ME_KEY); } catch { /* приватный режим */ }
+  // IndexedDB стирает движок (он же её и держит); здесь — плавный уход на экран входа и тост
+  const root = document.getElementById('app');
+  const ms = reducedMotion() ? 0 : 220;
+  const fade = root?.animate?.([{ opacity: 1 }, { opacity: 0 }], { duration: ms, easing: 'ease-in', fill: 'forwards' });
+  setTimeout(() => {
+    setGlobal({ boot: 'login', sessions: null, opsKeys: [], openChatId: null, infoOpen: false });
+    fade?.cancel();
+    root?.animate?.([{ opacity: 0 }, { opacity: 1 }], { duration: ms, easing: 'ease-out' });
+    showToast('Сеанс завершён на другом устройстве', 4000);
+  }, ms);
 }
 
 const call = <T>(a: Action): Promise<T> => (engine ? engine.call<T>(a) : Promise.reject(new Error('engine not started')));

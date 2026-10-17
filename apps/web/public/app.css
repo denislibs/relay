@@ -162,3 +162,14 @@ body { background: var(--bg); color: var(--ink); font-family: var(--font-sans); 
 /* «Размытие» выключено: сплошные поверхности вместо backdrop-filter */
 html[data-blur="0"] .app-empty-main .rl-empty, html[data-blur="0"] .app-sidemenu .rl-menu, html[data-blur="0"] .app-pagemenu .rl-menu { -webkit-backdrop-filter: none; backdrop-filter: none; background: color-mix(in srgb, var(--raised) 96%, transparent); }
 .app-perf-note { margin: 0 var(--space-4) var(--space-3); color: var(--ink-muted); font: 400 13px/18px var(--font-sans); }
+
+/* Активные сеансы */
+.app-collapse { display: grid; grid-template-rows: 1fr; }
+.app-collapse > div { min-height: 0; overflow: hidden; }
+.app-collapse-out { pointer-events: none; animation: app-collapse 220ms var(--ease-in) both; }
+@keyframes app-collapse { from { grid-template-rows: 1fr; opacity: 1; } to { grid-template-rows: 0fr; opacity: 0; } }
+@media (prefers-reduced-motion: reduce) { .app-collapse-out { animation-duration: 1ms; } }
+.app-session-info { display: grid; grid-template-columns: auto 1fr; gap: 10px 16px; margin: 0; font: 400 15px/20px var(--font-sans); }
+.app-session-info dt { color: var(--ink-muted); }
+.app-session-info dd { margin: 0; text-align: right; overflow-wrap: anywhere; }
+.rl-settings .rl-inforow-value { animation: app-fade 200ms var(--ease-out) both; }

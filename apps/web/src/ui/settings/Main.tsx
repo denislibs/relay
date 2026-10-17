@@ -2,7 +2,8 @@ import { ConfirmDialog, InfoRow, SettingsIcon, Menu, PanelHeader, Presence, Prof
 import { useEffect, useRef, useState } from 'preact/hooks';
 import { getGlobal, setGlobal, useGlobal } from '../../global';
 import { back, go } from '../../nav';
-import { prefetch, prefetchAll } from '../../settingsData';
+import { sessionsView } from '@relay/sync-engine/src/sessions';
+import { markSelfLogout, prefetch, prefetchAll } from '../../settingsData';
 import { birthdayText } from '../format';
 import { useScrollMemory } from '../useScrollMemory';
 
@@ -22,15 +23,13 @@ const SECTIONS: SectionRow[] = [
   { path: 'settings/sessions', icon: 'devices', tile: 'blue', title: 'Активные сеансы', subtitle: 'Сеансы, автозавершение' },
 ];
 
-// число сеансов подключит B9; пока значение не показываем
-const sessionCount: number | null = null;
-
 /** Выход: сервер удаляет сеанс; без подтверждения сервера остаёмся в системе (иначе cookie жива и вход вернётся). */
 async function logout(): Promise<boolean> {
+  markSelfLogout(true);   // своё sessionTerminated после выхода — не «завершён на другом устройстве»
   try {
     const res = await fetch('/logout', { method: 'POST' });
-    if (!res.ok && res.status !== 401) return false;   // 401 — сеанса уже нет, выходим локально
-  } catch { return false; }
+    if (!res.ok && res.status !== 401) { markSelfLogout(false); return false; }   // 401 — сеанса уже нет, выходим локально
+  } catch { markSelfLogout(false); return false; }
   const uid = getGlobal().me?.userId;
   try { localStorage.removeItem('relay.me'); } catch { /* приватный режим */ }
   if (uid != null) try { indexedDB.deleteDatabase('relay-' + uid); } catch { /* */ }
@@ -42,6 +41,8 @@ async function logout(): Promise<boolean> {
 export function Main() {
   const me = useGlobal((s) => s.me)!;
   const status = useGlobal((s) => s.status);
+  // число сеансов справа на строке «Активные сеансы»: появляется, только когда список уже известен (предзагрузка)
+  const sessionCount = useGlobal((s) => (s.sessions ? sessionsView(s.sessions, s.opsKeys).length : null));
   const scroll = useScrollMemory('settings');
   const [menu, setMenu] = useState(false);
   const [confirm, setConfirm] = useState(false);
