@@ -38,8 +38,6 @@ export function createSwallow(setTimer: (fn: () => void, ms: number) => unknown,
   return {
     /** pointerdown по слою: ближайший click проглотить, но не дольше 500 мс. */
     arm() { off(); on = true; t = setTimer(() => { t = null; on = false; }, 500); },
-    /** pointerup/pointercancel: click, если будет, придёт сразу после — флаг сам погаснет по таймеру. */
-    release() {},
     /** click: true — проглотить. */
     take(): boolean { const was = on; off(); return was; },
     cancel: off,
@@ -48,15 +46,17 @@ export function createSwallow(setTimer: (fn: () => void, ms: number) => unknown,
 }
 
 // скрытое под размытием не читается скринридером и не берёт фокус: помечаем детей оболочки, снимаем только своё
-let marked: Element[] = [];
+let marked: { el: Element; aria: string | null }[] = [];
 function apply(on: boolean): void {
   const root = document.documentElement;
   if (on) root.setAttribute(ATTR, '1'); else root.removeAttribute(ATTR);
   if (on) {
-    marked = [...document.querySelectorAll('.rl-shell > :not(.rl-shell-veil)')].filter((el) => !el.hasAttribute('inert'));
-    for (const el of marked) { el.setAttribute('inert', ''); el.setAttribute('aria-hidden', 'true'); }
+    // дети оболочки и портальные диалоги в body; слой выше всех (z 2000) перехватывает указатель
+    marked = [...document.querySelectorAll('.rl-shell > :not(.rl-shell-veil), body > .rl-confirm-scrim')].filter((el) => !el.hasAttribute('inert'))
+      .map((el) => ({ el, aria: el.getAttribute('aria-hidden') }));
+    for (const m of marked) { m.el.setAttribute('inert', ''); m.el.setAttribute('aria-hidden', 'true'); }
   } else {
-    for (const el of marked) { el.removeAttribute('inert'); el.removeAttribute('aria-hidden'); }
+    for (const m of marked) { m.el.removeAttribute('inert'); if (m.aria === null) m.el.removeAttribute('aria-hidden'); else m.el.setAttribute('aria-hidden', m.aria); }
     marked = [];
   }
 }
@@ -83,12 +83,10 @@ export function startScreenBlur(): void {
   document.addEventListener('pointerdown', (e) => {
     if (!ctl.isOn()) return;
     e.preventDefault(); e.stopPropagation();
-    if ((e.target as Element | null)?.closest?.('.rl-shell-veil')) sw.arm();
+    sw.arm();   // любой pointerdown при размытии: ближайший click не дойдёт до содержимого
     ctl.back();
   }, true);
-  const drop = () => sw.release();
   document.addEventListener('pointercancel', () => sw.cancel(), true);
-  document.addEventListener('pointerup', drop, true);
   document.addEventListener('click', (e) => {
     if (!sw.take()) return;
     e.preventDefault(); e.stopPropagation();
