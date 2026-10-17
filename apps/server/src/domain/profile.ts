@@ -90,12 +90,20 @@ export async function contactNames(tx: Tx | typeof sql, userId: number, viewers:
   return new Map(rows.map((r) => [Number(r.owner_id), { first_name: r.first_name as string, last_name: r.last_name as string }]));
 }
 
-/** Может ли зритель смотреть профиль: общий чат или контакт в любую сторону. */
+/**
+ * Имя пользователя глазами зрителя в SQL: контактное, если зритель его задал, иначе своё.
+ * Таблица users в запросе обязана называться `u`; viewer — id или выражение (например, sql`s.user_id`).
+ */
+export const nameForSql = (viewer: number | ReturnType<typeof sql>) =>
+  sql`coalesce((select nullif(btrim(ct.first_name || ' ' || ct.last_name), '') from contacts ct where ct.owner_id = ${viewer} and ct.user_id = u.id), u.name)`;
+
+/** Может ли зритель смотреть профиль: общий чат или человек у зрителя в контактах.
+ *  Обратное направление («у кого я в контактах») доступа не даёт — иначе оно себя выдаёт. */
 export async function canView(db: Tx | typeof sql, viewer: number, id: number): Promise<boolean> {
   if (id === viewer) return true;
   const [r] = await db`select (
       exists (select 1 from chat_members a join chat_members b on b.chat_id = a.chat_id where a.user_id = ${id} and b.user_id = ${viewer})
-      or exists (select 1 from contacts where (owner_id = ${viewer} and user_id = ${id}) or (owner_id = ${id} and user_id = ${viewer}))
+      or exists (select 1 from contacts where owner_id = ${viewer} and user_id = ${id})
     ) as ok`;
   return !!r.ok;
 }
@@ -119,12 +127,17 @@ export function validName(v: unknown, min: number): string {
   return s;
 }
 
-function validBio(v: unknown): string | null {
-  if (v === null) return null;
+/** Многострочный текст (о себе, заметка): переводы строк — \n, управляющие и bidi/невидимые символы — вон, длина — в кодовых точках. */
+export function validText(v: unknown, max: number, code: 'bio_too_long' | 'note_too_long'): string {
   if (typeof v !== 'string') throw new DomainError('bad_frame');
   const s = v.replace(/\r\n?/g, '\n').replace(/[^\P{Cc}\n]|[\u202A-\u202E\u2066-\u2069\u200B\uFEFF]/gu, '').trim();
-  if (len(s) > 140) throw new DomainError('bio_too_long');
-  return s || null;
+  if (len(s) > max) throw new DomainError(code);
+  return s;
+}
+
+function validBio(v: unknown): string | null {
+  if (v === null) return null;
+  return validText(v, 140, 'bio_too_long') || null;
 }
 
 export function validBirthday(v: unknown): Birthday | null {

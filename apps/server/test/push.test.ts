@@ -85,3 +85,18 @@ test('gone subscription is forgotten; HTTP subscribe needs a session', async () 
   expect((await sql`select count(*)::int as n from push_subscriptions`)[0].n).toBe(0);
   expect((await fetch(`${base}/push/subscription`, { method: 'POST', body: JSON.stringify({ endpoint: endpoint(4), keys: { p256dh: 'x', auth: 'y' } }) })).status).toBe(401);
 });
+
+test('direct push is titled with the recipient\'s contact name for the sender; group body too', async () => {
+  const a = await makeUser('Анна'), b = await makeUser('Борис');
+  const chat = await makeChat([a, b]), group = await makeChat([a, b, await makeUser('Вера')]);
+  await sql`insert into contacts (owner_id, user_id, first_name, last_name) values (${b}, ${a}, 'Аня', 'С')`;
+  const br = await browser();
+  const { subscribe } = await import('../src/domain/push');
+  await subscribe(b, { endpoint: endpoint(5), keys: br.keys });
+  await sendMessage(a, { chatId: chat, clientId: crypto.randomUUID(), body: 'привет' });
+  await waitFor(1); await Bun.sleep(50);
+  expect(await br.decrypt(got[0].body)).toMatchObject({ title: 'Аня С', body: 'привет' });
+  await sendMessage(a, { chatId: group, clientId: crypto.randomUUID(), body: 'всем' });
+  await waitFor(2); await Bun.sleep(50);
+  expect(await br.decrypt(got[1].body)).toMatchObject({ title: 'Группа', body: 'Аня С: всем' });
+});

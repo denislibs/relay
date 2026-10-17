@@ -4,6 +4,7 @@ import { getUpdates } from '../src/domain/journal';
 import { parseQuery } from '../src/domain/contacts';
 import { resetPresence } from '../src/domain/presence';
 import { createServer } from '../src/http';
+import { sendMessage } from '../src/domain/messages';
 import { makeChat, nextFrame, resetDb } from './helpers';
 
 process.env.RELAY_PRESENCE_GRACE_MS = '60';
@@ -19,6 +20,7 @@ async function login(name: string, phone?: string): Promise<U> {
 }
 const call = (u: U, method: string, path: string, body?: unknown) =>
   fetch(`${base}${path}`, { method, headers: { cookie: `relay_session=${u.token}` }, body: body === undefined ? undefined : JSON.stringify(body) });
+const resolve = (u: U, query?: unknown) => call(u, 'POST', '/users/resolve', query === undefined ? {} : { query });
 const json = async (r: Response) => [r.status, await r.json()] as const;
 const journal = async (userId: number) => (await getUpdates(userId, 0)).items.map((i) => i.update);
 const ofType = <T extends Update['type']>(us: Update[], t: T) => us.filter((u): u is Extract<Update, { type: T }> => u.type === t);
@@ -38,22 +40,24 @@ test('parseQuery: @username, username, phone normalization', () => {
 test('resolve by @username and by phone; self and unknown → 404; phone hidden', async () => {
   const a = await login('Анна'), b = await login('Борис Котов', '+79001234567');
   await call(b, 'PUT', '/me/username', { username: 'boris_k' });
-  const [s1, u1] = await json(await call(a, 'GET', '/users/resolve?q=%40Boris_K'));
+  const [s1, u1] = await json(await resolve(a, '@Boris_K'));
   expect(s1).toBe(200);
   expect(u1).toMatchObject({ id: b.userId, name: 'Борис Котов', publicName: 'Борис Котов', username: 'boris_k', phone: null });
-  const [s2, u2] = await json(await call(a, 'GET', '/users/resolve?q=' + encodeURIComponent('8 (900) 123-45-67')));
+  const [s2, u2] = await json(await resolve(a, '8 (900) 123-45-67'));
   expect([s2, u2.id]).toEqual([200, b.userId]);
-  expect((await call(b, 'GET', '/users/resolve?q=boris_k')).status).toBe(404);   // себя не находим
-  const [s3, e3] = await json(await call(a, 'GET', '/users/resolve?q=nobody_here'));
+  expect((await resolve(b, 'boris_k')).status).toBe(404);   // себя не находим
+  const [s3, e3] = await json(await resolve(a, 'nobody_here'));
   expect([s3, e3.code]).toEqual([404, 'not_found']);
-  expect((await call(a, 'GET', '/users/resolve?q=%2B79990000000')).status).toBe(404);
-  expect((await call(a, 'GET', '/users/resolve')).status).toBe(404);
+  expect((await resolve(a, '+79990000000')).status).toBe(404);
+  expect((await resolve(a)).status).toBe(404);
+  expect((await call(a, 'GET', '/users/resolve?q=boris_k')).status).toBe(404);   // только POST: номер не в URL
 });
 
 test('add by query: contact name only for the owner (listChats, /users/:id, search), the other side sees the public name', async () => {
   const a = await login('Анна Смирнова'), b = await login('Борис Котов');
   await call(b, 'PUT', '/me/username', { username: 'boris_k' });
   const chatId = await makeChat([a.userId, b.userId]);
+  await sendMessage(b.userId, { chatId, clientId: crypto.randomUUID(), body: 'искомое слово' });
   const [st, c] = await json(await call(a, 'POST', '/contacts', { query: '@boris_k', firstName: ' Боря ', lastName: '' }));
   expect(st).toBe(200);
   expect(c).toMatchObject({ userId: b.userId, firstName: 'Боря', lastName: '', note: '', user: { id: b.userId, name: 'Боря', publicName: 'Борис Котов' }, presence: { online: false } });
@@ -63,6 +67,9 @@ test('add by query: contact name only for the owner (listChats, /users/:id, sear
   expect(await peerName(b, chatId)).toBe('Анна Смирнова');
   expect((await (await call(a, 'GET', `/users/${b.userId}`)).json()).name).toBe('Боря');
   expect((await (await call(b, 'GET', `/users/${a.userId}`)).json()).name).toBe('Анна Смирнова');
+  const hitTitle = async (u: U) => (await (await call(u, 'GET', '/search?q=' + encodeURIComponent('искомое'))).json()).hits[0]?.chatTitle;
+  expect(await hitTitle(a)).toBe('Боря');
+  expect(await hitTitle(b)).toBe('Анна Смирнова');
 
   // contactsChanged — владельцу, в журнал, seq ответа = seq записи
   const items = (await getUpdates(a.userId, 0)).items.filter((i) => i.update.type === 'contactsChanged');
@@ -87,9 +94,9 @@ test('userUpdated to the owner carries the contact name; others get the public o
   expect(toA[0].user).toMatchObject({ id: b.userId, name: 'Боря К', firstName: 'Боря', lastName: 'К', publicName: 'Борис', bio: 'новое' });
   const toC = ofType(await journal(c.userId), 'userUpdated');
   expect(toC[toC.length - 1].user).toMatchObject({ name: 'Борис', firstName: 'Борис', publicName: 'Борис' });
-  // контакт без общего чата — профиль доступен владельцу; и самому контакту (у кого он в контактах)
+  // контакт без общего чата — профиль доступен владельцу; обратное направление не выдаёт, у кого ты в контактах
   expect((await call(a, 'GET', `/users/${b.userId}`)).status).toBe(200);
-  expect((await call(b, 'GET', `/users/${a.userId}`)).status).toBe(200);
+  expect((await call(b, 'GET', `/users/${a.userId}`)).status).toBe(404);
   expect((await call(c, 'GET', `/users/${a.userId}`)).status).toBe(404);
 });
 

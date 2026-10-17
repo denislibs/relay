@@ -1,4 +1,5 @@
 import { sql } from '../db';
+import { nameForSql } from './profile';
 import { isOnline } from './presence';
 
 /**
@@ -79,20 +80,23 @@ export type PushPayload = { chatId: number; id: number; title: string; body: str
 
 /** Новое сообщение → push участникам без соединения, кроме отправителя и тех, у кого чат заглушён. */
 export async function pushNewMessage(m: { chatId: number; id: number; senderId: number; body: string; kind?: string; attachment?: { name?: string } | null }): Promise<void> {
+  // имя отправителя — глазами получателя (контактное, если он его задал)
   const subs = await sql`
-    select s.endpoint, s.user_id, s.p256dh, s.auth from push_subscriptions s
+    select s.endpoint, s.user_id, s.p256dh, s.auth,
+           (select ${nameForSql(sql`s.user_id`)} from users u where u.id = ${m.senderId}) as sender_name
+      from push_subscriptions s
     join chat_members cm on cm.user_id = s.user_id and cm.chat_id = ${m.chatId}
     where s.user_id <> ${m.senderId} and not (${m.chatId} = any(s.muted))`;
   const targets = subs.filter((s) => !isOnline(s.user_id as number));
   if (!targets.length) return;
-  const [info] = await sql`
-    select c.kind, c.title, u.name from chats c, users u where c.id = ${m.chatId} and u.id = ${m.senderId}`;
+  const [info] = await sql`select kind, title from chats where id = ${m.chatId}`;
   const preview = m.kind === 'photo' ? (m.body ? '🖼 ' + m.body : 'Фотография') : m.kind === 'file' ? '📎 ' + (m.body || m.attachment?.name || 'Файл') : m.body;
-  const payload: PushPayload = info.kind === 'group'
-    ? { chatId: m.chatId, id: m.id, title: (info.title as string) ?? 'Группа', body: `${info.name}: ${preview}` }
-    : { chatId: m.chatId, id: m.id, title: info.name as string, body: preview };
-  const plain = enc.encode(JSON.stringify(payload).slice(0, 3000));
   await Promise.all(targets.map(async (s) => {
+    const name = s.sender_name as string;
+    const payload: PushPayload = info.kind === 'group'
+      ? { chatId: m.chatId, id: m.id, title: (info.title as string) ?? 'Группа', body: `${name}: ${preview}` }
+      : { chatId: m.chatId, id: m.id, title: name, body: preview };
+    const plain = enc.encode(JSON.stringify(payload).slice(0, 3000));
     try {
       const res = await fetch(s.endpoint as string, {
         method: 'POST',

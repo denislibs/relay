@@ -80,8 +80,10 @@ export function createServer(opts: { port: number }): Server {
         if (req.method === 'GET' && url.pathname === '/users/check-username') {
           return Response.json(await checkUsername(userId, url.searchParams.get('u')));
         }
-        if (req.method === 'GET' && url.pathname === '/users/resolve') {
-          return Response.json(await resolveUser(userId, url.searchParams.get('q')));
+        if (req.method === 'POST' && url.pathname === '/users/resolve') {
+          // POST, а не ?q=: номер телефона не должен попадать в URL и журналы доступа
+          const body = (await req.json().catch(() => null)) as { query?: unknown } | null;
+          return Response.json(await resolveUser(userId, body?.query));
         }
         if (url.pathname === '/contacts') {
           if (req.method === 'GET') return Response.json(await listContacts(userId));

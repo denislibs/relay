@@ -3,10 +3,9 @@ import { sql, type Tx } from '../db';
 import { DomainError } from './errors';
 import { appendUpdates } from './journal';
 import { isOnline } from './presence';
-import { canFindByPhone, canView, COLS, publicUser, selfSeq, validName, type ContactName, type Row } from './profile';
+import { canFindByPhone, canView, COLS, publicUser, selfSeq, validName, validText, type ContactName, type Row } from './profile';
 
 const NOTE_MAX = 128;
-const len = (s: string) => [...s].length;
 
 /** Запрос «@имя» / «имя» / телефон → что искать. Телефон: без пробелов, дефисов и скобок, 8XXXXXXXXXX → +7…, обязателен «+». */
 export function parseQuery(raw: unknown): { username: string } | { phone: string } | null {
@@ -65,12 +64,7 @@ export async function listContacts(owner: number): Promise<{ contacts: Contact[]
   }) as Promise<{ contacts: Contact[]; seq: number }>;
 }
 
-function validNote(v: unknown): string {
-  if (typeof v !== 'string') throw new DomainError('bad_frame');
-  const s = v.replace(/\r\n?/g, '\n').replace(/[^\P{Cc}\n]|[‪-‮⁦-⁩​﻿]/gu, '').trim();
-  if (len(s) > NOTE_MAX) throw new DomainError('note_too_long');
-  return s;
-}
+const validNote = (v: unknown) => validText(v, NOTE_MAX, 'note_too_long');
 
 const plain = (v: unknown): v is Record<string, unknown> => !!v && typeof v === 'object' && !Array.isArray(v);
 
