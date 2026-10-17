@@ -1,6 +1,7 @@
 import { afterAll, beforeEach, expect, test } from 'bun:test';
 import { sql } from '../src/db';
 import { createServer } from '../src/http';
+import { NO_PREVIEW } from '@relay/protocol';
 import { sendMessage } from '../src/domain/messages';
 import { makeChat, makeUser, resetDb } from './helpers';
 
@@ -10,10 +11,10 @@ afterAll(() => { server.stop(true); push.stop(true); });
 beforeEach(async () => { await resetDb(); got.length = 0; status = 201; });
 
 // поддельный push-сервис: копит запросы, отвечает status
-const got: { auth: string; encoding: string; body: Uint8Array }[] = [];
+const got: { path: string; auth: string; encoding: string; body: Uint8Array }[] = [];
 let status = 201;
 const push = Bun.serve({ port: 0, async fetch(req) {
-  got.push({ auth: req.headers.get('authorization') ?? '', encoding: req.headers.get('content-encoding') ?? '', body: new Uint8Array(await req.arrayBuffer()) });
+  got.push({ path: new URL(req.url).pathname, auth: req.headers.get('authorization') ?? '', encoding: req.headers.get('content-encoding') ?? '', body: new Uint8Array(await req.arrayBuffer()) });
   return new Response(null, { status });
 } });
 const endpoint = (n: number) => `http://localhost:${push.port}/ep/${n}`;
@@ -99,4 +100,89 @@ test('direct push is titled with the recipient\'s contact name for the sender; g
   await sendMessage(a, { chatId: group, clientId: crypto.randomUUID(), body: 'всем' });
   await waitFor(2); await Bun.sleep(50);
   expect(await br.decrypt(got[1].body)).toMatchObject({ title: 'Группа', body: 'Аня С: всем' });
+});
+
+// ---- подписка принадлежит сеансу ----
+type U = { userId: number; token: string };
+const login = async (name: string): Promise<U> =>
+  (await (await fetch(`${base}/dev/login`, { method: 'POST', body: JSON.stringify({ name }) })).json()) as U;
+const call = (u: U, method: string, path: string, body?: unknown) =>
+  fetch(`${base}${path}`, { method, headers: { cookie: `relay_session=${u.token}` }, body: body === undefined ? undefined : JSON.stringify(body) });
+const sessionIdOf = async (u: U) => ((await (await call(u, 'GET', '/sessions')).json()) as { id: number; current: boolean }[]).find((s) => s.current)!.id;
+const { settlePushes } = await import('../src/domain/push');
+/** отправить и дождаться всех push; вернуть пути endpoint'ов, куда ушло */
+async function sendAndCollect(from: number, chatId: number): Promise<string[]> {
+  got.length = 0;
+  await sendMessage(from, { chatId, clientId: crypto.randomUUID(), body: 'секрет' });
+  await settlePushes();
+  return got.map((g) => g.path).sort();
+}
+
+test('terminated and logged-out sessions get no push; the other session still does', async () => {
+  const a1 = await login('Анна'), a2 = await login('Анна'), a3 = await login('Анна');
+  const b = await makeUser('Борис');
+  const chat = await makeChat([a1.userId, b]);
+  for (const [u, n] of [[a1, 11], [a2, 12], [a3, 13]] as const) {
+    expect((await call(u, 'POST', '/push/subscription', { endpoint: endpoint(n), keys: (await browser()).keys })).status).toBe(200);
+  }
+  expect(await sendAndCollect(b, chat)).toEqual(['/ep/11', '/ep/12', '/ep/13']);
+
+  // «Завершить сеанс» a2 из a1
+  expect((await call(a1, 'DELETE', `/sessions/${await sessionIdOf(a2)}`)).status).toBe(200);
+  expect(await sendAndCollect(b, chat)).toEqual(['/ep/11', '/ep/13']);
+
+  // обычный выход a3
+  expect((await call(a3, 'POST', '/logout')).status).toBe(200);
+  expect(await sendAndCollect(b, chat)).toEqual(['/ep/11']);
+  expect((await sql`select endpoint from push_subscriptions`).map((r) => r.endpoint)).toEqual([endpoint(11)]);
+});
+
+test('terminate-others and the inactivity sweep drop subscriptions; legacy rows without a session go on terminate-others / logout', async () => {
+  const a1 = await login('Анна'), a2 = await login('Анна');
+  const b = await makeUser('Борис');
+  const chat = await makeChat([a1.userId, b]);
+  await call(a1, 'POST', '/push/subscription', { endpoint: endpoint(21), keys: (await browser()).keys });
+  await call(a2, 'POST', '/push/subscription', { endpoint: endpoint(22), keys: (await browser()).keys });
+  const { subscribe } = await import('../src/domain/push');
+  await subscribe(a1.userId, { endpoint: endpoint(23), keys: (await browser()).keys });   // старая строка: без сеанса
+  expect(await sendAndCollect(b, chat)).toEqual(['/ep/21', '/ep/22', '/ep/23']);
+
+  expect((await call(a1, 'DELETE', '/sessions?others=1')).status).toBe(200);
+  expect(await sendAndCollect(b, chat)).toEqual(['/ep/21']);
+
+  // автозавершение по неактивности
+  await sql`update sessions set last_active_at = now() - interval '400 days' where user_id = ${a1.userId}`;
+  const { sweepInactive } = await import('../src/domain/sessions');
+  await sweepInactive(a1.userId);
+  expect(await sendAndCollect(b, chat)).toEqual([]);
+
+  // выход тоже убирает старые строки без сеанса
+  const a4 = await login('Анна');
+  await subscribe(a4.userId, { endpoint: endpoint(24), keys: (await browser()).keys });
+  await call(a4, 'POST', '/logout');
+  expect((await sql`select count(*)::int as n from push_subscriptions`)[0].n).toBe(0);
+});
+
+test('hideText subscription gets «Relay» / «Новое сообщение»; the flag follows updates and SW resubscribe', async () => {
+  const a = await login('Анна');
+  const b = await makeUser('Борис');
+  const chat = await makeChat([a.userId, b]), group = await makeChat([a.userId, b, await makeUser('Вера')]);
+  const br = await browser();
+  await call(a, 'POST', '/push/subscription', { endpoint: endpoint(31), keys: br.keys, hideText: true });
+  await sendAndCollect(b, chat);
+  expect(await br.decrypt(got[0].body)).toMatchObject({ chatId: chat, title: 'Relay', body: NO_PREVIEW });
+  await sendAndCollect(b, group);
+  expect(await br.decrypt(got[0].body)).toMatchObject({ chatId: group, title: 'Relay', body: NO_PREVIEW });
+
+  // SW переподписался без флага и с новым endpoint — флаг переезжает
+  const br2 = await browser();
+  await call(a, 'POST', '/push/subscription', { endpoint: endpoint(32), keys: br2.keys, oldEndpoint: endpoint(31) });
+  expect(await sendAndCollect(b, chat)).toEqual(['/ep/32']);
+  expect(await br2.decrypt(got[0].body)).toMatchObject({ title: 'Relay', body: NO_PREVIEW });
+
+  // флаг сняли в настройках — снова имя и текст
+  await call(a, 'POST', '/push/subscription', { endpoint: endpoint(32), keys: br2.keys, hideText: false });
+  await sendAndCollect(b, chat);
+  expect(await br2.decrypt(got[0].body)).toMatchObject({ title: 'Борис', body: 'секрет' });
+  expect((await call(a, 'POST', '/push/subscription', { endpoint: endpoint(32), keys: br2.keys, hideText: 'yes' })).status).toBe(400);
 });

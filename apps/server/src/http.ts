@@ -15,7 +15,7 @@ import { journalStats } from './domain/journal';
 import { notifyLatency } from './realtime';
 import { checkUsername, getMe, getUser, setUsername, updateProfile } from './domain/profile';
 import { usersByIds } from './domain/users';
-import { subscribe, unsubscribe, vapidKeys } from './domain/push';
+import { dropUnboundSubscriptions, subscribe, unsubscribe, vapidKeys, type SubscriptionInput } from './domain/push';
 import { getSettings, setNotify, setPrivacy, setSessionsTtl } from './domain/settings';
 import { addContact, blockUser, listBlocked, listContacts, removeContact, resolveUser, unblockUser, updateContact } from './domain/contacts';
 
@@ -145,6 +145,8 @@ export function createServer(opts: { port: number }): Server {
         if (req.method === 'POST' && url.pathname === '/logout') {
           const token = readSessionToken(req);
           const ended = token ? await deleteSession(token) : null;
+          // подписка Web Push сеанса ушла каскадом; старые подписки без сеанса — тоже
+          await dropUnboundSubscriptions(sql, userId).catch((e) => console.error('push:', e));
           // сокеты этого же сеанса в других вкладках закрываются (sessionTerminated)
           if (ended != null) await sessionEnded(ended).catch((e) => console.error('sessions:', e));
           return Response.json({ ok: true }, { headers: { 'set-cookie': clearSessionCookie() } });
@@ -188,12 +190,13 @@ export function createServer(opts: { port: number }): Server {
           return Response.json(await getChatMedia(userId, Number(media[1]), kind, before));
         }
         if (url.pathname === '/push/subscription' && (req.method === 'POST' || req.method === 'DELETE')) {
-          const body = (await req.json()) as { endpoint: string; keys: { p256dh: string; auth: string }; muted?: number[] };
+          const body = (await req.json().catch(() => null)) as SubscriptionInput | null;
           if (typeof body?.endpoint !== 'string') return fail('bad_frame');
           if (req.method === 'DELETE') await unsubscribe(userId, body.endpoint);
           else {
             if (typeof body.keys?.p256dh !== 'string' || typeof body.keys?.auth !== 'string') return fail('bad_frame');
-            try { await subscribe(userId, body); } catch { return fail('bad_frame'); }
+            if (body.hideText !== undefined && typeof body.hideText !== 'boolean') return fail('bad_frame');
+            try { await subscribe(userId, body, sessionId); } catch { return fail('bad_frame'); }
           }
           return Response.json({ ok: true });
         }

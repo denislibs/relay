@@ -1,6 +1,7 @@
 import type { SessionInfo } from '@relay/protocol';
 import { sql, type Tx } from '../db';
 import { DomainError } from './errors';
+import { dropUnboundSubscriptions } from './push';
 
 const DEFAULT_TTL_DAYS = 180;
 /** предельный срок cookie и строки (скользит от последней активности); настоящий предел — неактивность (sessions_ttl_days, не больше года) */
@@ -136,6 +137,8 @@ export async function terminateOthers(userId: number, currentId: number): Promis
   const ids = await sql.begin(async (tx) => {
     const rows = await tx`delete from sessions where user_id = ${userId} and id <> ${currentId} returning id`;
     const ids = rows.map((r) => Number(r.id));
+    // подписки Web Push завершённых сеансов уходят каскадом (session_id); старые без сеанса — тоже
+    await dropUnboundSubscriptions(tx, userId);
     await notifyTerminated(tx, ids);
     return ids;
   }) as number[];

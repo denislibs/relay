@@ -38,12 +38,16 @@ async function syncSubscription(): Promise<void> {
     const { key } = await (await fetch('/push/key')).json() as { key: string };
     sub = await reg.pushManager.subscribe({ userVisibleOnly: true, applicationServerKey: toBytes(key) });
   }
-  const res = await fetch('/push/subscription', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ ...sub.toJSON(), muted: getGlobal().muted }) });
+  // hideText — «Скрывать текст в уведомлениях» этого устройства: push придёт без имени и текста
+  const res = await fetch('/push/subscription', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ ...sub.toJSON(), muted: getGlobal().muted, hideText: getPrefs().screen.hideNotifyText }) });
   setGlobal({ pushReady: res.ok });
 }
 
-async function dropSubscription(): Promise<void> {
-  const sub = await (await navigator.serviceWorker.ready).pushManager.getSubscription();
+/** Отписать этот браузер от Web Push (сервер и SW). Без SW не ждём вечно: выход не должен зависнуть. */
+export async function dropSubscription(): Promise<void> {
+  if (!supported()) return;
+  const reg = await Promise.race([navigator.serviceWorker.ready, new Promise<null>((r) => setTimeout(() => r(null), 1500))]);
+  const sub = await reg?.pushManager.getSubscription();
   if (!sub) return;
   await fetch('/push/subscription', { method: 'DELETE', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ endpoint: sub.endpoint }) }).catch(() => {});
   await sub.unsubscribe();
@@ -56,7 +60,12 @@ const quietly = (p: Promise<unknown>) => { p.catch((e) => console.warn('push:', 
 export function startNotify(openChat: (id: number) => void): void {
   // единый источник — prefs.notify.web: старый флаг переносим один раз и удаляем
   try { if (localStorage.getItem(OLD_OFF_KEY) !== null) { if (localStorage.getItem(OLD_OFF_KEY) === '1') setPref('notify.web', false); localStorage.removeItem(OLD_OFF_KEY); } } catch { /* ok */ }
-  subscribePrefs(() => { const n = notifyState(); if (n !== getGlobal().notify) setGlobal({ notify: n }); });   // «web» сменили в другой вкладке
+  let hideText = getPrefs().screen.hideNotifyText;
+  subscribePrefs((p) => {
+    const n = notifyState(); if (n !== getGlobal().notify) setGlobal({ notify: n });   // «web» сменили в другой вкладке
+    // «Скрывать текст» — свойство подписки на сервере: сменили — обновляем её
+    if (p.screen.hideNotifyText !== hideText) { hideText = p.screen.hideNotifyText; syncMuted(); }
+  });
   setGlobal({ notify: notifyState() });
   if (getGlobal().notify === 'on' && getPrefs().notify.web && bgWanted()) quietly(syncSubscription());
   navigator.serviceWorker?.addEventListener('message', (e) => {

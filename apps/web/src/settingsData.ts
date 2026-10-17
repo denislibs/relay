@@ -9,6 +9,7 @@ import { isSessionOp, sessionsView } from '@relay/sync-engine/src/sessions';
 import { reducedMotion } from '@relay/ui';
 import { engineConfig } from './engineConfig';
 import { getGlobal, setGlobal, type AccountSettings, type DevSimFlags, type Me } from './global';
+import { dropSubscription } from './notify';
 
 declare const __BUILD__: string;
 
@@ -163,6 +164,8 @@ let terminating = false;
 function onTerminated(reason: 'logout' | 'terminated'): void {
   if (terminating || selfLogout) return;
   terminating = true;
+  // сервер удалил подписку вместе с сеансом; отписываем и браузер (best effort, не ждём)
+  void dropSubscription().catch(() => {});
   try { localStorage.removeItem(ME_KEY); localStorage.removeItem('relay.names'); } catch { /* приватный режим */ }
   // IndexedDB стирает движок (он же её и держит); здесь — плавный уход на экран входа и тост
   const root = document.getElementById('app');

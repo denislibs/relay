@@ -5,6 +5,7 @@ import { back, go } from '../../nav';
 import { sessionsView } from '@relay/sync-engine/src/sessions';
 import { markSelfLogout, prefetch, prefetchAll } from '../../settingsData';
 import { setPref } from '../../prefs';
+import { dropSubscription } from '../../notify';
 import { birthdayText } from '../format';
 import { useScrollMemory } from '../useScrollMemory';
 
@@ -31,6 +32,8 @@ async function logout(): Promise<boolean> {
     const res = await fetch('/logout', { method: 'POST' });
     if (!res.ok && res.status !== 401) { markSelfLogout(false); return false; }   // 401 — сеанса уже нет, выходим локально
   } catch { markSelfLogout(false); return false; }
+  // подписку сервер уже удалил вместе с сеансом; браузер тоже отписываем — новый вход подпишется заново
+  await dropSubscription().catch(() => {});
   const uid = getGlobal().me?.userId;
   try { localStorage.removeItem('relay.me'); localStorage.removeItem('relay.names'); } catch { /* приватный режим */ }
   if (uid != null) try { indexedDB.deleteDatabase('relay-' + uid); } catch { /* */ }

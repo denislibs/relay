@@ -66,6 +66,8 @@ sw.addEventListener('pushsubscriptionchange', (ev) => {
     const { key } = await (await fetch('/push/key')).json() as { key: string };
     const bytes = Uint8Array.from(atob(key.replace(/-/g, '+').replace(/_/g, '/')), (c) => c.charCodeAt(0));
     const sub = await sw.registration.pushManager.subscribe({ userVisibleOnly: true, applicationServerKey: bytes });
-    await fetch('/push/subscription', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(sub.toJSON()) });
+    // muted / hideText сервер переносит с прежнего endpoint
+    const oldEndpoint = (e as ExtendableEvent & { oldSubscription?: PushSubscription | null }).oldSubscription?.endpoint;
+    await fetch('/push/subscription', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ ...sub.toJSON(), oldEndpoint }) });
   })().catch(() => {}));
 });

@@ -6,7 +6,7 @@ import { assertMember, toMessage } from './chats';
 import { DomainError } from './errors';
 import { fanOut } from './journal';
 import { blockedInDirect } from './privacy';
-import { pushNewMessage } from './push';
+import { pushInBackground } from './push';
 
 export const MAX_BODY = 4096;
 
@@ -48,6 +48,6 @@ export async function sendMessage(
     return { message, duplicate: false };
   });
   // после коммита и не дожидаясь: доставка в push-сервис не должна тормозить ack
-  if (!res.duplicate) void pushNewMessage(res.message).catch((e) => console.warn('push', String(e)));
+  if (!res.duplicate) pushInBackground(res.message);
   return res;
 }
