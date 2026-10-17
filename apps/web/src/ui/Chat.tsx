@@ -3,6 +3,7 @@ import { useEffect, useLayoutEffect, useRef, useState } from 'preact/hooks';
 import { deleteMessage, editMessage, focusMessage, sendFile, openChat, react, saveDraft, searchMessages, send, typing, typingDone } from '../data';
 import type { SearchHit } from '@relay/sync-engine/src/types';
 import { setGlobal, useGlobal } from '../global';
+import { unblockUser } from '../settingsData';
 import { Feed } from './Feed';
 import { fileSize, lastSeenText } from './format';
 
@@ -107,6 +108,11 @@ export function Chat({ chatId }: { chatId: number }) {
     return () => { removeEventListener('pagehide', flushDraft); flushDraft(); };
   }, []);
 
+  // личный чат и чёрный список: я заблокировал собеседника — или сервер отказал (он заблокировал меня) — вместо поля ввода плашка
+  const iBlocked = useGlobal((s) => chat?.kind === 'direct' && chat.peerId != null && s.blocked.some((b) => b.userId === chat.peerId));
+  const theyBlocked = chat?.kind === 'direct' && messages.some((m) => m.status === 'failed' && m.error === 'blocked');
+  const plate = iBlocked ? 'mine' : theyBlocked ? 'theirs' : null;
+
   // высота композера (растёт с цитатой ответа) → --composer-h: лента уходит под него ровно на эту высоту
   useLayoutEffect(() => {
     const main = shell.current?.closest<HTMLElement>('.rl-shell-main');
@@ -115,7 +121,7 @@ export function Chat({ chatId }: { chatId: number }) {
     const ro = new ResizeObserver(([e]) => { const h = Math.round(e.borderBoxSize?.[0]?.blockSize ?? wrap.offsetHeight); requestMutation(() => main.style.setProperty('--composer-h', h + 'px')); });
     ro.observe(wrap);
     return () => ro.disconnect();
-  }, []);
+  }, [plate]);   // плашка вместо поля ввода — другой элемент
 
   const title = (chat?.title as string) || 'Чат №' + chatId;
   // как в Telegram: в норме подзаголовок — тип чата, а пока идёт подключение или обновление — стадия
@@ -163,7 +169,18 @@ export function Chat({ chatId }: { chatId: number }) {
         <IconButton icon="more" label="Информация" onClick={() => setGlobal({ infoOpen: !infoOpen })} />
       </GlassBar>
       <Feed chatId={chatId} meId={me.userId} peerName={title} stick={stick} highlight={found?.q} onMenu={(key, x, y) => setMenu({ key, x, y })} />
-      <Composer
+      {plate ? (
+        <div class="rl-composer-wrap app-plate-wrap">
+          <div class="rl-composer app-plate" role="status" key={plate}>
+            {plate === 'mine' ? (
+              <>
+                <span>Вы заблокировали этого пользователя</span>
+                <Button variant="ghost" onClick={() => { if (chat?.peerId != null) void unblockUser(chat.peerId as number); }}>Разблокировать</Button>
+              </>
+            ) : <span>Вы не можете отправлять сообщения этому пользователю</span>}
+          </div>
+        </div>
+      ) : <Composer
         id="composer"
         sendKey={sendKey}
         placeholder="Сообщение"
@@ -189,7 +206,7 @@ export function Chat({ chatId }: { chatId: number }) {
           send(chatId, body, (replyTo?.id as number) ?? null);
           setReplyKey(null);
         }}
-      />
+      />}
       {menu && menuMsg ? (() => {
         const own = menuMsg.senderId === me.userId && !menuMsg.deleted && menuMsg.id != null;
         const myReaction = ((menuMsg.reactions as { userId: number; emoji: string }[] | undefined) ?? []).find((r) => r.userId === me.userId)?.emoji;

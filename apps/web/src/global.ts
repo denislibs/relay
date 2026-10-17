@@ -5,6 +5,7 @@ import { requestMutation } from '@relay/ui';
 import { loadTheme, type ThemePref } from './theme';
 import { getPrefs, subscribePrefs, listenStorage, applyPrefs, type Prefs } from './prefs';
 import type { Item } from '@relay/sync-engine/src/types';
+import { defaultPrivacy, type PrivacyRules } from '@relay/protocol';
 
 /** Края окна ленты: есть ли сообщения раньше/позже, окно ли это живого хвоста. */
 export interface FeedMeta { hasOlder: boolean; hasNewer: boolean; live: boolean }
@@ -45,11 +46,13 @@ export interface GlobalState {
   contactsLoaded: boolean;   // список с сервера уже был (иначе пусто — значит «грузим»)
   settings: AccountSettings;   // настройки аккаунта (подписка settings движка): умолчания уведомлений
   newContact: NewContactDraft | null;   // открытая модалка «Новый контакт» и чем её заполнить
+  blocked: Item[];          // подписка blocked движка: чёрный список (с неподтверждёнными правками)
+  blockedLoaded: boolean;   // список с сервера уже был
 }
 
 /** Настройки аккаунта (общие для устройств). loaded — снимок с сервера уже был; pending — есть неподтверждённые правки. */
-export interface AccountSettings { notify: Record<'direct' | 'group', { muted: boolean; preview: boolean }>; sessionsTtlDays: number; loaded: boolean; pending: boolean }
-export const defaultAccountSettings = (): AccountSettings => ({ notify: { direct: { muted: false, preview: true }, group: { muted: false, preview: true } }, sessionsTtlDays: 180, loaded: false, pending: false });
+export interface AccountSettings { notify: Record<'direct' | 'group', { muted: boolean; preview: boolean }>; sessionsTtlDays: number; privacy: PrivacyRules; loaded: boolean; pending: boolean }
+export const defaultAccountSettings = (): AccountSettings => ({ notify: { direct: { muted: false, preview: true }, group: { muted: false, preview: true } }, sessionsTtlDays: 180, privacy: defaultPrivacy(), loaded: false, pending: false });
 
 /** Чем заполнить «Новый контакт»: из «Информации» — человек уже известен (userId), запрос лишь для вида. */
 export interface NewContactDraft { query?: string; firstName?: string; lastName?: string; userId?: number }
@@ -84,6 +87,8 @@ let state: GlobalState = {
   contactsLoaded: false,
   settings: defaultAccountSettings(),
   newContact: null,
+  blocked: [],
+  blockedLoaded: false,
 };
 const subscribers = new Set<() => void>();
 

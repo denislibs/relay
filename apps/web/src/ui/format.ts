@@ -46,6 +46,7 @@ export function dayKey(iso: string): string {
 /** Подзаголовок личного чата, как в Telegram: «в сети», «был(а) 5 мин. назад», «был(а) вчера в 21:05»… */
 export function lastSeenText(online: boolean, lastSeen: string | null, now = Date.now()): string {
   if (online) return 'в сети';
+  if (lastSeen === 'recently') return 'был(а) недавно';   // время скрыто правилом «Последний визит»
   if (!lastSeen) return 'был(а) давно';
   const d = new Date(lastSeen), ago = now - d.getTime();
   if (ago < 60_000) return 'был(а) только что';

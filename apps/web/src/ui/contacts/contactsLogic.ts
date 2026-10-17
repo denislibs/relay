@@ -8,7 +8,8 @@ export { clip, cpLen, NAME_MAX };
 
 /** Сначала «в сети», потом по последнему визиту (свежие выше), потом по имени. */
 export function sortContacts(list: Item[]): Item[] {
-  const seen = (c: Item) => (c.lastSeen ? Date.parse(c.lastSeen as string) : 0);
+  // «недавно» (время скрыто) — выше «давно», но ниже любого точного времени
+  const seen = (c: Item) => (c.lastSeen === 'recently' ? 1 : c.lastSeen ? Date.parse(c.lastSeen as string) || 0 : 0);
   return [...list].sort((a, b) =>
     Number(!!b.online) - Number(!!a.online) || seen(b) - seen(a) || String(a.name).localeCompare(String(b.name), 'ru'));
 }

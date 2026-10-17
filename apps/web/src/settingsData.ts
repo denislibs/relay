@@ -4,6 +4,7 @@
 import { connectEngine, Mirror, type EngineClient } from '@relay/sync-engine/src/client';
 import type { Action, Item, Patch } from '@relay/sync-engine/src/types';
 import { useEffect, useState } from 'preact/hooks';
+import type { PrivacyKey, PrivacyMode } from '@relay/protocol';
 import { engineConfig } from './engineConfig';
 import { getGlobal, setGlobal, type AccountSettings, type Me } from './global';
 
@@ -79,7 +80,14 @@ export function startSettingsData(me: Me): void {
   engine.watch({ kind: 'settings' }, (p) => {
     settingsM.apply(p);
     const it = settingsM.list()[0];
-    if (it) setGlobal({ settings: { notify: it.notify, sessionsTtlDays: it.sessionsTtlDays, loaded: !!it.loaded, pending: !!it.pending } as AccountSettings });
+    if (it) setGlobal({ settings: { notify: it.notify, sessionsTtlDays: it.sessionsTtlDays, privacy: it.privacy, loaded: !!it.loaded, pending: !!it.pending } as AccountSettings });
+  });
+
+  // чёрный список: страница «Заблокированные» и плашка вместо поля ввода в личном чате
+  const blockedM = new Mirror();
+  engine.watch({ kind: 'blocked' }, (p) => {
+    blockedM.apply(p);
+    setGlobal({ blocked: blockedM.list(), blockedLoaded: !!blockedM.meta('~blocked')?.loaded });
   });
 
   // отказы сервера: тост на каждый новый (случившиеся до подписки — уже не новость)
@@ -109,6 +117,11 @@ export const checkUsername = (username: string): Promise<UsernameCheck> =>
 export const refreshSettings = (): Promise<unknown> => call({ type: 'refreshSettings' }).catch(() => null);
 export const setNotifyDefault = (notifyType: 'direct' | 'group', patch: { muted?: boolean; preview?: boolean }): Promise<unknown> =>
   call({ type: 'setNotify', notifyType, ...patch });
+
+export const setPrivacy = (key: PrivacyKey, rule: { mode: PrivacyMode; allow?: number[]; deny?: number[] }): Promise<unknown> =>
+  call({ type: 'setPrivacy', key, ...rule });
+export const blockUser = (userId: number): Promise<unknown> => call({ type: 'block', userId });
+export const unblockUser = (userId: number): Promise<unknown> => call({ type: 'unblock', userId });
 
 export interface ContactPatch { firstName?: string; lastName?: string; note?: string }
 export const addContact = (userId: number, firstName: string, lastName = ''): Promise<unknown> => call({ type: 'addContact', userId, firstName, lastName });
