@@ -7,7 +7,8 @@ import { Chat } from './Chat';
 import { Info } from './Info';
 import { Login } from './Login';
 import { NewChat } from './NewChat';
-import { LegacyPage } from './Settings';
+import { Data } from './settings/Data';
+import { Autoload } from './settings/Autoload';
 import { General } from './settings/General';
 import { Main } from './settings/Main';
 import { Notifications } from './settings/Notifications';
@@ -24,7 +25,6 @@ import { NewContact } from './contacts/NewContact';
 import { Sidebar } from './Sidebar';
 
 
-const LEGACY: Record<string, string> = { 'settings/data': 'Данные и память' };
 
 // ширина списка чатов, которую пользователь вытянул за край (null — по умолчанию)
 const SIDE_KEY = 'relay.sideWidth';
@@ -41,7 +41,7 @@ export function App() {
   if (boot === 'login') return <Login />;
   return (
     <>
-      <FloatShell class={openChatId ? 'app-chat-open' : ''} pattern={wp.pattern} wallpaperColors={wp.colors} wallpaperBlur={wp.blur} wallpaperDark={dark} sideWidth={savedSide} onSideResize={saveSide} aside={<AsidePanel open={infoOpen && !!openChatId} label="Информация"><Info /></AsidePanel>} sidebar={<SideFrame><SlideStack order={orderFor(view)} active={view} render={(k: string) => (k === 'chats' ? <Sidebar /> : k === 'settings' ? <Main /> : k === 'settings/profile' ? <Profile /> : k === 'settings/general' ? <General /> : k === 'settings/general/wallpaper' ? <Wallpaper /> : k === 'settings/notifications' ? <Notifications /> : k === 'settings/privacy' ? <Privacy /> : k === 'settings/privacy/blocked' ? <Blocked /> : /^settings\/privacy\/rule\/[^/]+\/(allow|deny)$/.test(k) ? <PeoplePicker key={k} path={k} /> : /^settings\/privacy\/rule\/[^/]+$/.test(k) ? <PrivacyRule key={k} path={k} /> : k === 'contacts' ? <Contacts /> : /^contacts\/\d+\/edit$/.test(k) ? <EditContact key={k} path={k} active={k === view} /> : LEGACY[k] ? <LegacyPage path={k} title={LEGACY[k]} /> : <Placeholder path={k} />)} /></SideFrame>}>
+      <FloatShell class={openChatId ? 'app-chat-open' : ''} pattern={wp.pattern} wallpaperColors={wp.colors} wallpaperBlur={wp.blur} wallpaperDark={dark} sideWidth={savedSide} onSideResize={saveSide} aside={<AsidePanel open={infoOpen && !!openChatId} label="Информация"><Info /></AsidePanel>} sidebar={<SideFrame><SlideStack order={orderFor(view)} active={view} render={(k: string) => (k === 'chats' ? <Sidebar /> : k === 'settings' ? <Main /> : k === 'settings/profile' ? <Profile /> : k === 'settings/general' ? <General /> : k === 'settings/general/wallpaper' ? <Wallpaper /> : k === 'settings/notifications' ? <Notifications /> : k === 'settings/privacy' ? <Privacy /> : k === 'settings/privacy/blocked' ? <Blocked /> : /^settings\/privacy\/rule\/[^/]+\/(allow|deny)$/.test(k) ? <PeoplePicker key={k} path={k} /> : /^settings\/privacy\/rule\/[^/]+$/.test(k) ? <PrivacyRule key={k} path={k} /> : k === 'contacts' ? <Contacts /> : /^contacts\/\d+\/edit$/.test(k) ? <EditContact key={k} path={k} active={k === view} /> : k === 'settings/data' ? <Data /> : /^settings\/data\/autoload\/(photo|video|file)$/.test(k) ? <Autoload path={k} /> : <Placeholder path={k} />)} /></SideFrame>}>
         {openChatId ? (
           <Chat key={openChatId} chatId={openChatId} />
         ) : (

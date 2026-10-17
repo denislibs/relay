@@ -151,3 +151,6 @@ export function useUser(userId: number | null | undefined): Item | null {
   }, [userId]);
   return user;
 }
+
+/** Очистка локальных данных: движок стирает кэш и берёт снимок заново; keepOutbox — не трогать неотправленное. */
+export const resetLocal = (keepOutbox: boolean): Promise<unknown> => call({ type: 'resetLocal', keepOutbox });

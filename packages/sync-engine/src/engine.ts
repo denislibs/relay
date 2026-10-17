@@ -301,8 +301,10 @@ export class Engine {
     if (!keepOutbox) this.ops.forget();
     this.usersAsked.clear();
     this.ready = false;
+    this.holding = false;
+    this.emit();   // подписки видят пустой кэш сразу: ответ на hello снова включит удержание до конца снимка
     this.changed();
-    if (this.transport.send({ op: 'hello', lastSeq: 0 })) this.holding = true;
+    this.transport.send({ op: 'hello', lastSeq: 0 });
   }
 
   private async search(a: Extract<Action, { type: 'search' }>): Promise<SearchResult> {

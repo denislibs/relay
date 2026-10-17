@@ -146,3 +146,14 @@ body { background: var(--bg); color: var(--ink); font-family: var(--font-sans); 
 .app-block-pick { display: flex; flex-direction: column; height: min(60vh, 480px); margin: 0 calc(-1 * var(--space-4)); }
 .app-block-pick .rl-picker { flex: 1; min-height: 0; }
 .app-blocked-footer { text-align: center; padding: 0 var(--space-5); }
+
+/* Данные и память */
+.app-dim { opacity: .45; pointer-events: none; transition: opacity 200ms var(--ease-out); }
+.app-storage { padding: 14px 16px 8px; }
+.app-storebar { display: flex; height: 8px; border-radius: 4px; overflow: hidden; background: var(--surface-2, rgba(128,128,128,.18)); }
+.app-storebar span { display: block; height: 100%; transition: width 400ms var(--ease-out); }
+.app-store-db { background: var(--accent); }
+.app-store-media { background: #f5a623; }
+.app-store-total { margin-top: 8px; font-size: 13px; color: var(--text-secondary, inherit); }
+.app-store-total b { color: var(--text, inherit); font-weight: 600; }
+@media (prefers-reduced-motion: reduce) { .app-dim, .app-storebar span { transition-duration: 1ms; } }
