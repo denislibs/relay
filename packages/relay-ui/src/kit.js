@@ -16,28 +16,38 @@ function cx() {
 function reducedMotion() { return !!(window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches); }
 function chain(a, b) { return function (e) { if (a) a(e); if (b) b(e); }; }
 // Pointer ripple: one measure (rect) then one mutation (append), in that order — the fasterdom rule.
+/* Ripple — круг из точки нажатия. Диаметр — до дальнего угла элемента, так что к концу роста он
+   закрывает всё; рост плавный и не прерывается. Отпустили рано — круг дорастает почти до конца и
+   только потом гаснет: короткий клик не «мигает». Цвет нейтральный (--ripple), не цвет текста. */
+var RIPPLE_MS = 600, RIPPLE_FADE_MS = 300;
 function ripple(e) {
   var el = e.currentTarget;
-  if (!el || el.disabled || reducedMotion()) return;
-  var x = e.clientX, y = e.clientY, released = false, dot = null;
+  if (!el || el.disabled || reducedMotion() || (e.button != null && e.button !== 0)) return;
+  var x = e.clientX, y = e.clientY, start = performance.now(), dot = null, releasedAt = 0;
+  function fade() {
+    if (!dot) return;
+    var d = dot; dot = null;
+    requestMutation(function () { d.classList.add('rl-ripple-out'); setTimeout(function () { d.remove(); }, RIPPLE_FADE_MS + 40); });
+  }
   function done() {
-    released = true;
     window.removeEventListener('pointerup', done); window.removeEventListener('pointercancel', done);
-    if (dot) requestMutation(function () { dot.classList.add('rl-ripple-out'); setTimeout(function () { dot.remove(); }, 400); });
+    releasedAt = performance.now();
+    if (dot) setTimeout(fade, Math.max(0, RIPPLE_MS * 0.55 - (releasedAt - start)));
   }
   window.addEventListener('pointerup', done); window.addEventListener('pointercancel', done);
-  // measure in the measure phase, append in the mutation phase of the same frame
+  // замер — в фазе чтения, вставка — в фазе записи того же кадра
   requestMeasure(function () {
     var r = el.getBoundingClientRect();
     requestMutation(function () {
       var host = el.querySelector(':scope > .rl-ripple-host');
       if (!host) { host = document.createElement('span'); host.className = 'rl-ripple-host'; el.appendChild(host); }
-      var d = Math.max(r.width, r.height) * 2.2;
+      var cx = x - r.left, cy = y - r.top;
+      var d = 2 * Math.hypot(Math.max(cx, r.width - cx), Math.max(cy, r.height - cy));
       dot = document.createElement('span');
-      dot.className = 'rl-ripple' + (released ? ' rl-ripple-out' : '');
-      dot.style.cssText = 'width:' + d + 'px;height:' + d + 'px;left:' + (x - r.left - d / 2) + 'px;top:' + (y - r.top - d / 2) + 'px';
+      dot.className = 'rl-ripple';
+      dot.style.cssText = 'width:' + d + 'px;height:' + d + 'px;left:' + (cx - d / 2) + 'px;top:' + (cy - d / 2) + 'px';
       host.appendChild(dot);
-      if (released) setTimeout(function () { dot.remove(); }, 500);
+      if (releasedAt) setTimeout(fade, Math.max(0, RIPPLE_MS * 0.55 - (releasedAt - start)));
     });
   });
 }

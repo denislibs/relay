@@ -385,13 +385,16 @@ body { margin: 0; font-family: var(--font-sans); color: var(--ink); background: 
 /* ---------- Ripple (pointer-origin, grows while held, fades on release) ---------- */
 .rl-btn, .rl-iconbtn, .rl-chip, .rl-row, .rl-tile-icon, .rl-tile, .rl-inforow, .rl-thumb, .rl-composer-send, .rl-voice-play, .rl-fab { position: relative; -webkit-tap-highlight-color: transparent; }
 .rl-ripple-host { position: absolute; inset: 0; overflow: hidden; border-radius: inherit; pointer-events: none; z-index: 0; }
+/* рост — анимацией (не прерывается), угасание — переходом opacity поверх неё */
+.rl-ripple { position: absolute; border-radius: 50%; background: var(--ripple, rgba(0, 0, 0, .08)); transform: scale(0); will-change: transform, opacity;
+  animation: rl-ripple-grow 600ms cubic-bezier(.25, .8, .35, 1) forwards; transition: opacity 300ms linear; }
+.rl-ripple-out { opacity: 0; }
+@keyframes rl-ripple-grow { to { transform: scale(1); } }
+:root[data-theme="dark"] { --ripple: rgba(255, 255, 255, .08); }
+@media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) { --ripple: rgba(255, 255, 255, .08); } }
+.rl-btn-primary, .rl-composer-send, .rl-fab-main { --ripple: rgba(255, 255, 255, .22); }
 .rl-tile .rl-ripple-host { inset: 0 auto auto 50%; width: 60px; height: 48px; margin-left: -30px; border-radius: var(--radius-xl); }
-.rl-ripple { position: absolute; border-radius: 50%; background: currentColor; opacity: 0.14; transform: scale(0); animation: rl-ripple-in 420ms var(--ease-out) forwards; }
-.rl-btn-primary .rl-ripple, .rl-composer-send .rl-ripple { background: var(--on-brand); opacity: 0.18; }
-.rl-ripple-out { animation: rl-ripple-in 420ms var(--ease-out) forwards, rl-ripple-fade 380ms var(--ease-in) forwards; }
 .rl-btn > :not(.rl-ripple-host), .rl-iconbtn > :not(.rl-ripple-host):not(.rl-badge), .rl-chip > :not(.rl-ripple-host) { position: relative; z-index: 1; }
-@keyframes rl-ripple-in { to { transform: scale(1); } }
-@keyframes rl-ripple-fade { to { opacity: 0; } }
 
 /* ---------- Press everywhere ---------- */
 .rl-chip, .rl-row, .rl-inforow, .rl-iconbtn { transition: background-color var(--dur-instant) var(--ease-standard), color var(--dur-instant) var(--ease-standard), border-color var(--dur-instant) var(--ease-standard), transform var(--dur-instant) var(--ease-standard); }
@@ -789,7 +792,6 @@ button.rl-quote { cursor: pointer; }
 .rl-fab-main { position: relative; display: inline-flex; align-items: center; justify-content: center; width: 56px; height: 56px; border: 0; border-radius: 18px; background: var(--fab); color: var(--on-fab); box-shadow: var(--shadow-float); cursor: pointer; animation: rl-fab-pop var(--dur-slow) var(--ease-out) 200ms both; transition: border-radius var(--dur-base) var(--ease-out), transform var(--dur-instant) var(--ease-standard); }
 .rl-fab-main:hover { border-radius: 50%; }
 .rl-fab-main:active { transform: scale(var(--press-lg)); }
-.rl-fab-main .rl-ripple { background: var(--on-fab); opacity: 0.2; }
 .rl-fab-main .rl-ripple-host { border-radius: inherit; }
 .rl-fab-main:is(:hover, :focus-visible) [data-icon="pencil"] { animation: rl-wiggle 500ms var(--ease-out); }
 @keyframes rl-fab-pop { 0% { transform: scale(0) rotate(-45deg); } 70% { transform: scale(1.08) rotate(4deg); } 100% { transform: none; } }
@@ -976,7 +978,6 @@ button.rl-quote { cursor: pointer; }
 .rl-shell .rl-scrolldown-slot { bottom: calc(var(--composer-h, 48px) + var(--space-float) + 12px); }
 /* white glyph on the accent send/mic button, both themes (as in Telegram) */
 .rl-shell .rl-composer-send { color: #fff; }
-.rl-shell .rl-composer-send .rl-ripple { background: #fff; }
 
 /* ---------- SideFrame + SlideStack: sidebar screens slide right-to-left (deeper) and back ---------- */
 .rl-sidepage { position: relative; flex: 1; min-height: 0; display: flex; flex-direction: column; }
