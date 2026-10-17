@@ -1,5 +1,6 @@
 // Контакты без DOM: сортировка, поиск, форма «Изменить».
 import type { Item } from '@relay/sync-engine/src/types';
+import { cleanName as clean, cleanText as cleanNote } from '@relay/sync-engine/src/text';
 import { clip, cpLen, NAME_MAX } from '../settings/profileForm';
 
 export const NOTE_MAX = 128;
@@ -26,8 +27,6 @@ export function initialsOf(first: string, last: string): string {
 }
 
 export interface ContactForm { firstName: string; lastName: string; note: string }
-const clean = (s: string) => s.trim().replace(/\s+/g, ' ');
-const cleanNote = (s: string) => s.replace(/\r\n?/g, '\n').trim();
 
 export const formFromContact = (c: Item): ContactForm => ({ firstName: String(c.firstName ?? ''), lastName: String(c.lastName ?? ''), note: String(c.note ?? '') });
 

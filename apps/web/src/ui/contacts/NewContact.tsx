@@ -1,4 +1,4 @@
-import { Avatar, Button, Icon, Modal, Presence, TextField } from '@relay/ui';
+import { Avatar, Icon, Presence, TextField } from '@relay/ui';
 import { useEffect, useRef, useState } from 'preact/hooks';
 import { setGlobal, useGlobal, type NewContactDraft } from '../../global';
 import { addContact, resolveUser, showToast } from '../../settingsData';
@@ -19,7 +19,7 @@ export function NewContact() {
   if (draft) last.current = draft;
   return (
     <Presence show={!!draft} exitMs={200}>
-      <div class="app-modal-layer"><NewContactForm key={seq.current} draft={last.current} /></div>
+      <NewContactForm key={seq.current} draft={last.current} />
     </Presence>
   );
 }
@@ -38,7 +38,9 @@ function NewContactForm({ draft }: { draft: NewContactDraft }) {
     return () => removeEventListener('keydown', onKey, true);
   }, []);
 
-  const ready = !!query.trim() && !!first.trim() && !busy;
+  // открыли из «Информации» и запрос не меняли — человек уже известен (поле может быть пустым: нет ни @имени, ни телефона)
+  const known = draft.userId && query === (draft.query ?? '') ? draft.userId : null;
+  const ready = (!!query.trim() || !!known) && !!first.trim() && !busy;
   const limited = (set: (v: string) => void) => (v: string, e: Event) => {
     const c = clip(v, NAME_MAX);
     if (c !== v) (e.currentTarget as HTMLInputElement).value = c;
@@ -48,8 +50,7 @@ function NewContactForm({ draft }: { draft: NewContactDraft }) {
   async function done(e?: Event): Promise<void> {
     e?.preventDefault();
     if (!ready) return;
-    // открыли из «Информации» и запрос не меняли — человек уже известен
-    let userId = draft.userId && query === (draft.query ?? '') ? draft.userId : null;
+    let userId = known;
     if (!userId) {
       setBusy(true);
       const r = await resolveUser(query.trim());
@@ -64,25 +65,30 @@ function NewContactForm({ draft }: { draft: NewContactDraft }) {
   }
 
   const initials = initialsOf(first, lastName);
+  // как диалоги Telegram: заголовок слева, без ✕ (закрывают «Отмена», Esc и щелчок мимо)
   return (
-    <Modal title="Новый контакт" onClose={close} actions={<>
-      <Button variant="ghost" onClick={close}>Отмена</Button>
-      <Button disabled={!ready} onClick={() => void done()}>Готово</Button>
-    </>}>
-      <form class="app-newcontact" onSubmit={(e) => void done(e)}>
-        <div class="app-newcontact-avatar" aria-hidden="true">
-          {initials
-            ? <span key={initials} class="app-pop"><Avatar name={`${first} ${lastName}`.trim()} size={72} /></span>
-            : <span class="rl-avatar app-newcontact-empty" style={{ width: 72, height: 72 }}><Icon name="contact" size={32} /></span>}
+    <div class="rl-confirm-scrim" onClick={(e) => { if (e.target === e.currentTarget) close(); }}>
+      <div class="rl-confirm app-newcontact-dialog" role="dialog" aria-modal="true" aria-label="Новый контакт">
+        <h2 class="rl-confirm-title">Новый контакт</h2>
+        <form class="app-newcontact" onSubmit={(e) => void done(e)}>
+          <div class="app-newcontact-avatar" aria-hidden="true">
+            {initials
+              ? <span key={initials} class="app-pop"><Avatar name={`${first} ${lastName}`.trim()} size={72} /></span>
+              : <span class="rl-avatar app-newcontact-empty" style={{ width: 72, height: 72 }}><Icon name="contact" size={32} /></span>}
+          </div>
+          <div class="app-newcontact-fields">
+            <TextField label="Телефон или @имя пользователя" value={query} error={error} autoFocus autoComplete="off"
+              onInput={(v: string) => { setQuery(v); setError(undefined); }} />
+            <TextField label="Имя (обязательно)" value={first} maxLength={NAME_MAX} measure={cpLen} autoComplete="given-name" onInput={limited(setFirst)} />
+            <TextField label="Фамилия" value={lastName} maxLength={NAME_MAX} measure={cpLen} autoComplete="family-name" onInput={limited(setLast)} />
+          </div>
+          <button type="submit" hidden />
+        </form>
+        <div class="rl-confirm-actions">
+          <button type="button" class="rl-confirm-btn" onClick={close}>Отмена</button>
+          <button type="button" class="rl-confirm-btn" disabled={!ready} onClick={() => void done()}>Готово</button>
         </div>
-        <div class="app-newcontact-fields">
-          <TextField label="Телефон или @имя пользователя" value={query} error={error} autoFocus autoComplete="off"
-            onInput={(v: string) => { setQuery(v); setError(undefined); }} />
-          <TextField label="Имя (обязательно)" value={first} maxLength={NAME_MAX} measure={cpLen} autoComplete="given-name" onInput={limited(setFirst)} />
-          <TextField label="Фамилия" value={lastName} maxLength={NAME_MAX} measure={cpLen} autoComplete="family-name" onInput={limited(setLast)} />
-        </div>
-        <button type="submit" hidden />
-      </form>
-    </Modal>
+      </div>
+    </div>
   );
 }

@@ -107,7 +107,8 @@ body { background: var(--bg); color: var(--ink); font-family: var(--font-sans); 
 .app-contacts-head .rl-search { flex: 1; min-width: 0; }
 .app-contacts { padding-top: var(--space-1); }
 .rl-row-preview .app-online { color: var(--brand-text); }
-.app-modal-layer { position: fixed; inset: 0; z-index: 20; }
+.app-newcontact-dialog { width: min(100%, 520px); }
+.app-newcontact-dialog .rl-confirm-btn:disabled { opacity: 0.4; cursor: default; background: transparent; }
 .app-newcontact { display: flex; gap: var(--space-4); align-items: flex-start; text-align: left; }
 .app-newcontact-avatar { flex-shrink: 0; width: 72px; height: 72px; padding-top: 4px; }
 .app-newcontact-empty { display: inline-flex; align-items: center; justify-content: center; background: var(--field); color: var(--ink-muted); }

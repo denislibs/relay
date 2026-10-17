@@ -83,7 +83,8 @@ export function Info() {
           ) : null}</Expand>
           <Expand show={!!peerId && contactsLoaded && !contact}>{peerId && contactsLoaded && !contact ? (
             <InfoRow tile="blue" icon="userPlus" title="Добавить в контакты" onClick={() => setGlobal({ newContact: {
-              query: user?.username ? '@' + String(user.username) : String(peerId), userId: peerId,
+              // запрос — то, что видно человеку: @имя или телефон; нет ни того, ни другого — поле пустое, добавим по id
+              query: user?.username ? '@' + String(user.username) : user?.phone ? String(user.phone) : '', userId: peerId,
               firstName: String(user?.firstName ?? title.split(' ')[0] ?? ''), lastName: String(user?.lastName ?? ''),
             } })} />
           ) : null}</Expand>
