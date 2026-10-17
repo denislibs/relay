@@ -46,6 +46,9 @@ export function startData(me: Me): void {
     // сразу, не дожидаясь конца анимаций: список виртуальный (≈20 строк), а отложенный подъём чата
     // после отправки выглядит как запоздалый рывок
     setGlobal({ chats: chats.list(), chatsLoaded: true });
+    const seed: Record<number, string> = { [me.userId]: me.name };
+    for (const c of chats.list()) if (c.kind === 'direct' && c.peerId && c.title) seed[c.peerId as number] = c.title as string;
+    rememberNames(seed);
     // открытый чат появился в списке — теперь известен собеседник: подписываемся на его статус
     const g = getGlobal(), current = g.pendingChatId ?? g.openChatId;
     if (current && peerFor !== current) watchPeer(current);
@@ -275,4 +278,30 @@ export async function startDirectChat(peerId: number): Promise<void> {
   const { id } = (await res.json()) as { id: number };
   await engine.call({ type: 'refreshChats' });
   openChat(id);
+}
+
+/* Имена авторов: в личке это собеседник (уже есть в списке чатов), в группе — запрос /users пачкой.
+   Кэш в localStorage — без сети имена тоже на месте. */
+const askedNames = new Set<number>();
+let namesQueue: number[] = [];
+export function ensureNames(ids: number[]): void {
+  const known = getGlobal().names;
+  for (const id of ids) if (id && !known[id] && !askedNames.has(id)) { askedNames.add(id); namesQueue.push(id); }
+  if (!namesQueue.length) return;
+  queueMicrotask(flushNames);
+}
+async function flushNames(): Promise<void> {
+  const ids = namesQueue; namesQueue = [];
+  if (!ids.length) return;
+  try {
+    const { users } = await (await fetch('/users?ids=' + ids.join(','))).json() as { users: { id: number; name: string }[] };
+    rememberNames(Object.fromEntries(users.map((u) => [u.id, u.name])));
+  } catch { for (const id of ids) askedNames.delete(id); }   // без сети — спросим в следующий раз
+}
+function rememberNames(add: Record<number, string>): void {
+  const cur = getGlobal().names;
+  if (Object.entries(add).every(([id, n]) => cur[Number(id)] === n)) return;
+  const names = { ...cur, ...add };
+  setGlobal({ names });
+  try { localStorage.setItem('relay.names', JSON.stringify(names)); } catch { /* ok */ }
 }

@@ -2,7 +2,7 @@ import type { Item } from '@relay/sync-engine/src/types';
 import { Bubble, DateDivider, FileBubble, Highlight, MediaBubble, MediaViewer, ScrollToBottom, forceMeasure, isHeavyAnimating, onHeavyAnimationEnd, requestMeasure, requestMutation } from '@relay/ui';
 import { memo } from 'preact/compat';
 import { useEffect, useLayoutEffect, useRef, useState } from 'preact/hooks';
-import { focusMessage, localPreview, moveWindow, react, savePosition, savedPosition, seen } from '../data';
+import { ensureNames, focusMessage, localPreview, moveWindow, react, savePosition, savedPosition, seen } from '../data';
 import { setGlobal, useGlobal } from '../global';
 import { clock, dayKey, dayLabel, fileSize } from './format';
 
@@ -114,7 +114,7 @@ export function Feed({ chatId, meId, peerName, stick, onMenu, highlight }: {
   onMenu: (key: string, x: number, y: number) => void;
 }) {
   const messages = useGlobal((s) => s.messages);
-  const myName = useGlobal((s) => s.me?.name ?? 'Вы');
+  const names = useGlobal((s) => s.names);
   const meta = useGlobal((s) => s.feedMeta);
   const unreadFrom = useGlobal((s) => s.unreadFrom);
   const focus = useGlobal((s) => s.focus);
@@ -343,6 +343,9 @@ export function Feed({ chatId, meId, peerName, stick, onMenu, highlight }: {
   const openIndex = viewer === null ? null : viewer < 0 ? -1 - viewer : viewer;
   // миниатюра k-го фото в ленте: из неё вьювер вылетает и в неё же возвращается (нет в окне — просто тает)
   const photoKeys = photos.map((m) => m.key);
+  // авторы фото — во вьювере всегда имя отправителя; подгружаем заранее, пока вьювер закрыт
+  const authorIds = [...new Set(photos.map((m) => m.senderId as number))].join(',');
+  useEffect(() => { if (authorIds) ensureNames(authorIds.split(',').map(Number)); }, [authorIds]);
   const keysRef = useRef(photoKeys); keysRef.current = photoKeys;
   // ключи — из ref: колбэк стабилен (строки мемоизированы), а список фото растёт с новыми сообщениями
   const onOpen = useRef((m: Item) => { const k = keysRef.current.indexOf(m.key); if (k >= 0) setViewer(-1 - k); }).current;
@@ -404,7 +407,8 @@ export function Feed({ chatId, meId, peerName, stick, onMenu, highlight }: {
         <MediaViewer
           index={openIndex}
           sender={peerName}
-          items={photos.map((m) => { const a = m.attachment as Att; return { sender: m.senderId === meId ? myName : peerName, src: localPreview(m.key) ?? fileUrl(a), thumb: a.thumb, w: a.w, h: a.h, name: a.name, download: fileUrl(a, true), caption: m.body, date: clock(m.createdAt as string) }; })}
+          items={photos.map((m) => { const a = m.attachment as Att; return { sender: names[m.senderId as number] ?? '',   // не название группы: пока имени нет — пусто, оно подгружается заранее
+ src: localPreview(m.key) ?? fileUrl(a), thumb: a.thumb, w: a.w, h: a.h, name: a.name, download: fileUrl(a, true), caption: m.body, date: clock(m.createdAt as string) }; })}
           origin={originOf}
           onClose={() => setViewer(null)}
         />

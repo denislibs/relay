@@ -36,7 +36,8 @@ export interface GlobalState {
   muted: number[];     // чаты с выключенными уведомлениями (на этом устройстве)
   theme: ThemePref;
   notify: NotifyState;   // уведомления на этом устройстве
-  pushReady: boolean;    // подписка Web Push принята сервером: уведомит и без открытой вкладки
+  pushReady: boolean;
+  names: Record<number, string>;   // имена людей по id (авторы сообщений); кэш переживает перезагрузку    // подписка Web Push принята сервером: уведомит и без открытой вкладки
 }
 
 let state: GlobalState = {
@@ -63,6 +64,7 @@ let state: GlobalState = {
   theme: loadTheme(),
   notify: 'unsupported',
   pushReady: false,
+  names: (() => { try { return JSON.parse(localStorage.getItem('relay.names') ?? '{}'); } catch { return {}; } })(),
 };
 const subscribers = new Set<() => void>();
 

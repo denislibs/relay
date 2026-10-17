@@ -10,6 +10,7 @@ import { connected, disconnected, listPresence, type Publish } from './domain/pr
 import { searchMessages } from './domain/search';
 import { fileFor, MAX_FILE, storeUpload } from './domain/files';
 import { handleFrame } from './ws';
+import { usersByIds } from './domain/users';
 import { subscribe, unsubscribe, vapidKeys } from './domain/push';
 
 const STATUS: Record<string, number> = { bad_frame: 400, too_long: 400, unauthorized: 401, not_member: 403, not_found: 404 };
@@ -17,7 +18,7 @@ const fail = (code: string) => Response.json({ code }, { status: STATUS[code] ??
 
 export type WsData = { userId: number };
 
-const API = /^\/(health|me|chats|presence|search|upload|files|push|ws|dev)(\/|$)/;
+const API = /^\/(health|me|users|chats|presence|search|upload|files|push|ws|dev)(\/|$)/;
 
 /** Статика клиента из WEB_DIST. Путь не может выйти за папку; пути без расширения — SPA, отдаём index.html. */
 function serveStatic(pathname: string): Response {
@@ -114,6 +115,9 @@ export function createServer(opts: { port: number }): Server {
           // ?q=текст[&chatId=N][&beforeId=M][&limit=K]
           const num = (k: string) => { const v = Number(url.searchParams.get(k)); return Number.isInteger(v) && v > 0 ? v : undefined; };
           return Response.json(await searchMessages(userId, url.searchParams.get('q') ?? '', { chatId: num('chatId'), beforeId: num('beforeId'), limit: num('limit') }));
+        }
+        if (req.method === 'GET' && url.pathname === '/users') {
+          return Response.json({ users: await usersByIds(userId, (url.searchParams.get('ids') ?? '').split(',').map(Number)) });
         }
         if (req.method === 'GET' && url.pathname === '/presence') {
           return Response.json(await listPresence(userId));

@@ -800,8 +800,8 @@ function MediaViewer(props) {
       ref: function (n) { root.current = n; if (n && document.activeElement === document.body) n.focus(); } },
     h('div', { class: 'rl-viewer-backdrop', onClick: real ? close : undefined }),
     h('div', { class: 'rl-viewer-top' },
-      h(Avatar, { name: it.sender || props.sender, size: 40 }),   // автор этого фото, а не собеседник
-      h('div', { class: 'rl-viewer-who' }, h('b', null, it.sender || props.sender), h('span', null, it.date || props.date)),
+      h(Avatar, { name: it.sender != null ? it.sender : props.sender, size: 40 }),   // автор этого фото, а не собеседник
+      h('div', { class: 'rl-viewer-who' }, h('b', null, it.sender != null ? it.sender : props.sender), h('span', null, it.date || props.date)),
       h(IconButton, { icon: 'zoomIn', label: 'Увеличить' }),
       h(IconButton, { icon: 'reply', label: 'Ответить' }),
       real ? h('a', { class: 'rl-iconbtn', href: it.download || it.src, download: it.name || '', 'aria-label': 'Скачать', title: 'Скачать' }, h(Icon, { name: 'download', size: 24 })) : h(IconButton, { icon: 'download', label: 'Скачать' }),
