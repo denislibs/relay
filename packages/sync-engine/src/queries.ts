@@ -25,7 +25,7 @@ const chatItem = (c: LocalChat, title: string | null): Item => ({
 // элемент сообщения переиспользуется, пока сообщение не изменилось: дешёвая подпись вместо JSON.stringify
 // цитата — короткая копия исходного сообщения, если оно есть в кэше (видна, даже когда оригинал вне окна)
 type Quote = { id: number; sort: number; body: string; senderId: number } | null;
-const msgSig = (m: LocalMessage, q: Quote): string => `${m.id}|${m.status}|${m.sort}|${m.replyToId}|${m.body}|${m.editedAt ?? ''}|${m.deleted ? 1 : 0}|${m.reactions?.map((r) => r.userId + r.emoji).join(',') ?? ''}|${m.attachment ? m.attachment.id + ':' + (m.progress ?? '') : ''}|${q ? q.id + ':' + q.body : ''}`;
+const msgSig = (m: LocalMessage, q: Quote): string => `${m.id}|${m.status}|${m.sort}|${m.replyToId}|${m.body}|${m.editedAt ?? ''}|${m.deleted ? 1 : 0}|${m.reactions?.map((r) => r.userId + r.emoji).join(',') ?? ''}|${m.attachment ? m.attachment.id + ':' + (m.progress ?? '') : ''}|${q ? q.id + ':' + q.body : ''}|${m.error ?? ''}`;
 const msgCache = new WeakMap<LocalMessage, { sig: string; item: Item }>();
 const messageItem = (m: LocalMessage, q: Quote): { item: Item; sig: string } => {
   const sig = msgSig(m, q);
@@ -96,6 +96,7 @@ export function computeQuery(store: Store, q: Query): Result {
     case 'ops':
     case 'contacts':
     case 'settings':
+    case 'blocked':
       throw new Error(q.kind + ' is computed by the engine');
   }
 }
@@ -103,7 +104,7 @@ export function computeQuery(store: Store, q: Query): Result {
 /** Задевает ли изменение этих чатов результат подписки. */
 export function affects(q: Query, touched: Set<number>): boolean {
   if (!touched.size) return false;
-  if (q.kind === 'status' || q.kind === 'me' || q.kind === 'user' || q.kind === 'ops' || q.kind === 'contacts' || q.kind === 'settings') return false;   // у них свои флаги в движке
+  if (q.kind === 'status' || q.kind === 'me' || q.kind === 'user' || q.kind === 'ops' || q.kind === 'contacts' || q.kind === 'settings' || q.kind === 'blocked') return false;   // у них свои флаги в движке
   return q.kind === 'messages' ? touched.has(q.chatId) : true;
 }
 

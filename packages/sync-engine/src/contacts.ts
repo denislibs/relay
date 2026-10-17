@@ -9,9 +9,9 @@ export const OP_CONTACT = 'contact:';
 export const contactKey = (userId: number) => OP_CONTACT + userId;
 export const contactIdOf = (key: string): number | null => (key.startsWith(OP_CONTACT) ? Number(key.slice(OP_CONTACT.length)) || null : null);
 
-export interface ContactBase { userId: number; firstName: string; lastName: string; note: string; user: PublicUser; presence?: { online: boolean; lastSeen: string | null } }
+export interface ContactBase { userId: number; firstName: string; lastName: string; note: string; user: PublicUser; presence?: { online: boolean | null; lastSeen: string | null } }
 export interface ContactView extends ContactBase { pending: boolean }
-type Presence = { online: boolean; lastSeen: string | null };
+type Presence = { online: boolean | null; lastSeen: string | null };
 
 export const contactName = (c: { firstName: string; lastName: string }) => `${c.firstName} ${c.lastName}`.trim();
 

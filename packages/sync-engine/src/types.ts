@@ -1,4 +1,4 @@
-import type { Birthday } from '@relay/protocol';
+import type { Birthday, PrivacyKey, PrivacyMode } from '@relay/protocol';
 
 export type Status = 'pending' | 'sent' | 'read' | 'failed';
 
@@ -19,6 +19,7 @@ export interface LocalMessage {
   kind?: 'text' | 'photo' | 'file';
   attachment?: LocalAttachment | null;
   progress?: number;      // загрузка файла 0..1, пока сообщение в очереди
+  error?: string;         // почему не отправлено (failed): 'blocked' — собеседник заблокировал отправителя
 }
 
 /** Вложение сообщения; у неотправленного id пустой, пока файл не загружен. */
@@ -48,6 +49,8 @@ export interface OutboxEntry {
   createdAt: number;
   failed: boolean;
   attachment?: LocalAttachment | null;   // id появляется после загрузки файла
+  error?: string;         // код отказа сервера (failed)
+  errorSeq?: number;      // у blocked: номер своего журнала в момент отказа
 }
 
 export type Query =
@@ -67,7 +70,9 @@ export type Query =
   /** контакты (с ещё не подтверждёнными правками), с профилем и присутствием */
   | { kind: 'contacts' }
   /** настройки аккаунта (с ещё не подтверждёнными правками): один элемент {notify, sessionsTtlDays, loaded, pending} */
-  | { kind: 'settings' };
+  | { kind: 'settings' }
+  /** чёрный список (с ещё не подтверждёнными правками), новые сверху; служебный ~blocked {loaded} */
+  | { kind: 'blocked' };
 
 export type Item = { key: string } & Record<string, unknown>;
 
@@ -103,6 +108,11 @@ export type Action =
   /** перезапросить настройки с сервера (предзагрузка раздела) */
   | { type: 'refreshSettings' }
   | { type: 'setNotify'; notifyType: 'direct' | 'group'; muted?: boolean; preview?: boolean }
+  /** правило конфиденциальности целиком — через очередь операций */
+  | { type: 'setPrivacy'; key: PrivacyKey; mode: PrivacyMode; allow?: number[]; deny?: number[] }
+  /** чёрный список — через очередь операций */
+  | { type: 'block'; userId: number }
+  | { type: 'unblock'; userId: number }
   | { type: 'sendFile'; chatId: number; body: string; file: Blob; name: string; mime: string; w?: number | null; h?: number | null; thumb?: string | null; replyToId?: number | null };
 
 export interface EngineConfig {

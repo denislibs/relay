@@ -3,6 +3,7 @@ import { getAll, getByChat, write, type WriteBatch } from './idb';
 import { applyUserUpdated, ProfileCache } from './profile';
 import { applyContactsChanged, ContactsCache } from './contacts';
 import { SettingsCache } from './settings';
+import { applyBlocksChanged, BlocksCache } from './blocks';
 import { PENDING_BASE, type LocalChat, type LocalMessage, type OutboxEntry } from './types';
 
 export interface ChatSummary {
@@ -45,6 +46,8 @@ export class Store {
   contacts!: ContactsCache;
   /** настройки аккаунта (settings.ts) */
   settings!: SettingsCache;
+  /** чёрный список (blocks.ts) */
+  blocks!: BlocksCache;
   /** название чата для списка; движок подставляет контактное имя с учётом очереди операций */
   titleOf: (c: LocalChat) => string | null = (c) => c.title;
 
@@ -75,6 +78,7 @@ export class Store {
     s.profile = await ProfileCache.load(db, userId, meta as { k: string; v: unknown }[]);
     s.contacts = ContactsCache.load(meta as { k: string; v: unknown }[]);
     s.settings = SettingsCache.load(meta as { k: string; v: unknown }[]);
+    s.blocks = BlocksCache.load(meta as { k: string; v: unknown }[]);
     // чаты с неотправленным — сразу в память, чтобы черновики были видны
     for (const chatId of new Set(outbox.map((o) => o.chatId))) await s.loadChatMessages(chatId);
     return s;
@@ -163,9 +167,11 @@ export class Store {
       case 'messageEdited': return this.patchMessage(u.chatId, u.id, { body: u.body, editedAt: u.editedAt });
       case 'messageDeleted': return this.patchMessage(u.chatId, u.id, { body: '', deleted: true, reactions: [] });
       case 'reactions': return this.patchMessage(u.chatId, u.id, { reactions: u.reactions });
-      case 'userUpdated': return applyUserUpdated(this, u.user, seq);
+      case 'userUpdated': applyUserUpdated(this, u.user, seq); return this.clearBlocked(u.user.id, seq);
       case 'contactsChanged': return applyContactsChanged(this, u, seq);
       case 'settingsChanged': this.settings.apply(u.settings, seq); return;
+      case 'privacyChanged': this.settings.applyPrivacy(u.rules, seq); return;
+      case 'blocksChanged': return applyBlocksChanged(this, u, seq);
     }
   }
 
@@ -270,6 +276,7 @@ export class Store {
       body: o.body, replyToId: o.replyToId, createdAt: new Date(o.createdAt).toISOString(),
       status: o.failed ? 'failed' : 'pending', sort: PENDING_BASE + o.createdAt,
       kind: o.attachment ? o.attachment.kind : 'text', attachment: o.attachment ?? null, progress: o.attachment && !o.attachment.id ? 0 : undefined,
+      ...(o.failed && o.error ? { error: o.error } : {}),
     });
   }
 
@@ -285,23 +292,43 @@ export class Store {
     this.markChat(chat);
   }
 
-  fail(clientId: string): void {
+  /** Сервер отказал (или отправить нечего). error — код отказа; blocked несёт errorSeq (см. clearBlocked). */
+  fail(clientId: string, error?: string, errorSeq?: number): void {
     const o = this.outbox.get(clientId);
     if (!o) return;
     o.failed = true;
+    if (error) o.error = error; else delete o.error;
+    if (errorSeq !== undefined) o.errorSeq = errorSeq; else delete o.errorSeq;
     this.dirtyOutbox.add(clientId);
     const m = this.messages.get(o.chatId)?.get(clientId);
-    if (m) this.putMessage({ ...m, status: 'failed' });
+    if (m) this.putMessage({ ...m, status: 'failed', ...(error ? { error } : {}) });
   }
 
   unfail(clientId: string): boolean {
     const o = this.outbox.get(clientId);
     if (!o || !o.failed) return false;
     o.failed = false;
+    delete o.error; delete o.errorSeq;
     this.dirtyOutbox.add(clientId);
     const m = this.messages.get(o.chatId)?.get(clientId);
-    if (m) this.putMessage({ ...m, status: 'pending' });
+    if (m) { const { error: _e, ...rest } = m; this.putMessage({ ...rest, status: 'pending' }); }
     return true;
+  }
+
+  /**
+   * Собеседник прислал свежий профиль позже отказа blocked: значит, его чёрный список с тех пор менялся
+   * (разблокировка всегда шлёт userUpdated). Отказ остаётся неотправленным, но плашка «не можете отправлять» снимается.
+   * Блокировка, случившаяся до отказа, имеет seq не больше errorSeq — её запись плашку не снимает.
+   */
+  private clearBlocked(peerId: number, seq?: number): void {
+    if (seq === undefined) return;
+    for (const o of this.outbox.values()) {
+      if (o.error !== 'blocked' || (o.errorSeq ?? 0) >= seq || this.chats.get(o.chatId)?.peerId !== peerId) continue;
+      delete o.error; delete o.errorSeq;
+      this.dirtyOutbox.add(o.clientId);
+      const m = this.messages.get(o.chatId)?.get(o.clientId);
+      if (m) { const { error: _e, ...rest } = m; this.putMessage(rest); }
+    }
   }
 
   /** Файл загружен — вложению неотправленного сообщения есть id (переживёт перезагрузку в outbox). */
@@ -356,7 +383,7 @@ export class Store {
   async wipe(epoch: string): Promise<void> {
     for (const id of this.chats.keys()) this.touch(id);
     this.chats.clear(); this.messages.clear(); this.loaded.clear(); this.sorted.clear(); this.ids.clear();
-    this.outbox.clear(); this.pendingReads.clear(); this.profile.reset(); this.contacts.reset(); this.settings.reset();
+    this.outbox.clear(); this.pendingReads.clear(); this.profile.reset(); this.contacts.reset(); this.settings.reset(); this.blocks.reset();
     this.dirtyChats.clear(); this.dirtyMessages.clear(); this.dirtyOutbox.clear(); this.dirtyReads.clear();
     this.lastSeq = this.seqAtFlush = 0;
     this.hydrated = false;
@@ -432,6 +459,8 @@ export class Store {
     if (contacts) batch.put.meta = [...(batch.put.meta ?? []), contacts];
     const settings = this.settings.collect();
     if (settings) batch.put.meta = [...(batch.put.meta ?? []), settings];
+    const blocks = this.blocks.collect();
+    if (blocks) batch.put.meta = [...(batch.put.meta ?? []), blocks];
     this.dirtyChats.clear(); this.dirtyMessages.clear(); this.dirtyOutbox.clear(); this.dirtyReads.clear(); this.dirtyMeta = false;
     const seq = this.lastSeq;
     await write(this.db, batch);
