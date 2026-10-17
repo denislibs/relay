@@ -31,3 +31,7 @@ test('mentions: 5..32 chars, not inside words/emails', () => {
 test('mention inside url is part of the link', () => {
   expect(parseRich('https://t.me/@durov')).toEqual([{ t: 'link', v: 'https://t.me/@durov', href: 'https://t.me/@durov' }]);
 });
+test('scheme is case-insensitive', () => {
+  expect(parseRich('HTTPS://A.com/x')).toEqual([{ t: 'link', v: 'HTTPS://A.com/x', href: 'HTTPS://A.com/x' }]);
+  expect(parseRich('WWW.a.com')[0].href).toBe('https://WWW.a.com');
+});

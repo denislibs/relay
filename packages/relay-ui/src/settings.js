@@ -1,5 +1,5 @@
 import { h } from 'preact';
-import { useEffect, useRef } from 'preact/hooks';
+import { useEffect, useLayoutEffect, useRef } from 'preact/hooks';
 import { Icon, Modal, Button, SettingsIcon, cx, ripple } from './kit.js';
 
 /* Компоненты страниц настроек: карточки-секции, радио/чекбокс-строки, слайдер, поле, выбор, подтверждение, текст со ссылками. */
@@ -8,6 +8,8 @@ export { SettingsIcon };
 
 var uid = 0;
 function nextId(p) { return p + (++uid); }
+// id создаётся один раз на экземпляр, а не на каждый рендер
+function useId(p, given) { var r = useRef(null); if (r.current === null) r.current = nextId(p); return given || r.current; }
 
 /* ---------- Section: заголовок + карточка + подпись снизу ---------- */
 // role="radiogroup": стрелки ↑/↓ двигают выбор между RadioRow
@@ -23,18 +25,26 @@ function radioKeys(e) {
   next.focus(); next.click();
 }
 function Section(props) {
-  var id = props.id || nextId('rl-sect-');
+  var id = useId('rl-sect-', props.id);
   var group = props.role === 'radiogroup';
+  var cardRef = useRef(null);
+  // roving tabindex: Tab-стоп — выбранный радио, а если выбранного нет — первый доступный
+  useLayoutEffect(function () {
+    if (!group || !cardRef.current) return;
+    var rs = Array.prototype.slice.call(cardRef.current.querySelectorAll('[role="radio"]'));
+    var stop = rs.filter(function (r) { return r.getAttribute('aria-checked') === 'true' && !r.disabled; })[0] || rs.filter(function (r) { return !r.disabled; })[0];
+    rs.forEach(function (r) { r.tabIndex = r === stop ? 0 : -1; });
+  });
   return h('section', { class: cx('rl-sect', (props.className || props.class)) },
     props.title ? h('h3', { class: 'rl-sect-title', id: id }, props.title) : null,
-    h('div', { class: 'rl-sect-card', role: props.role, 'aria-labelledby': props.title ? id : undefined, onKeyDown: group ? radioKeys : undefined }, props.children),
+    h('div', { class: 'rl-sect-card', ref: cardRef, role: props.role, 'aria-labelledby': props.title ? id : undefined, onKeyDown: group ? radioKeys : undefined }, props.children),
     props.footer ? h('p', { class: 'rl-sect-footer' }, props.footer) : null);
 }
 
 /* ---------- RadioRow / CheckRow ---------- */
 function RadioRow(props) {
   return h('button', { type: 'button', role: 'radio', 'aria-checked': props.checked ? 'true' : 'false', disabled: props.disabled,
-    tabIndex: props.checked || props.tabIndex === 0 ? 0 : -1, class: cx('rl-optrow', props.checked && 'rl-optrow-on'),
+    tabIndex: props.checked ? 0 : -1, class: cx('rl-optrow', props.checked && 'rl-optrow-on'),
     onPointerDown: ripple, onClick: props.onClick || props.onChange },
     h('span', { class: 'rl-radio', 'aria-hidden': 'true' }),
     h('span', { class: 'rl-optrow-text' }, h('span', null, props.label || props.title), props.subtitle ? h('small', null, props.subtitle) : null));
@@ -53,7 +63,7 @@ function RangeRow(props) {
   var value = props.value != null ? props.value : min;
   var fmt = props.format || function (v) { return String(v); };
   var pct = max > min ? (value - min) / (max - min) * 100 : 0;
-  var id = props.id || nextId('rl-range-');
+  var id = useId('rl-range-', props.id);
   var marks = props.marks;
   return h('div', { class: cx('rl-range', props.disabled && 'rl-range-off') },
     h('div', { class: 'rl-range-head' },
@@ -70,7 +80,7 @@ function RangeRow(props) {
 
 /* ---------- TextField: плавающая подпись, счётчик «осталось», ошибка ---------- */
 function TextField(props) {
-  var id = props.id || nextId('rl-field-');
+  var id = useId('rl-field-', props.id);
   var value = props.value == null ? '' : String(props.value);
   var left = props.maxLength != null ? props.maxLength - value.length : null;
   var showCount = props.counter && left != null;
@@ -90,7 +100,7 @@ function TextField(props) {
 
 /* ---------- SelectRow: подпись слева, значение и ▾ справа; нативный select поверх ---------- */
 function SelectRow(props) {
-  var id = props.id || nextId('rl-sel-');
+  var id = useId('rl-sel-', props.id);
   var opts = props.options || [];
   var cur = opts.filter(function (o) { return o.value === props.value; })[0];
   return h('div', { class: cx('rl-selrow', props.disabled && 'rl-optrow-off') },
@@ -104,7 +114,8 @@ function SelectRow(props) {
 
 /* ---------- ConfirmDialog: Esc закрывает и гасит событие (nav.ts игнорирует defaultPrevented) ---------- */
 function ConfirmDialog(props) {
-  var actionsRef = useRef(null);
+  var actionsRef = useRef(null), cbRef = useRef(props);
+  cbRef.current = props;
   function btns() { var el = actionsRef.current; return el ? Array.prototype.slice.call(el.querySelectorAll('button')) : []; }
   var open = props.open !== false;
   useEffect(function () {
@@ -113,7 +124,7 @@ function ConfirmDialog(props) {
     var b = btns(), t = props.danger ? b[0] : b[b.length - 1]; // опасное действие — фокус на «Отмена»
     if (t) t.focus();
     function onKey(e) {
-      if (e.key === 'Escape') { e.preventDefault(); e.stopPropagation(); if (props.onCancel) props.onCancel(); }
+      if (e.key === 'Escape') { e.preventDefault(); e.stopPropagation(); if (cbRef.current.onCancel) cbRef.current.onCancel(); }
       else if (e.key === 'Tab') { // фокус не уходит за диалог
         var a = btns(), i = a.indexOf(document.activeElement);
         if (!a.length) return;
@@ -134,7 +145,7 @@ function ConfirmDialog(props) {
 }
 
 /* ---------- RichText: текст → узлы (текст / http(s)-ссылка / @упоминание), без innerHTML ---------- */
-var RICH_RE = /(?<![\w@\/.])((?:https?:\/\/|www\.)[^\s<>"'`]+)|(?<![\w@])(@[a-zA-Z][a-zA-Z0-9_]{4,31})(?![a-zA-Z0-9_])/g;
+var RICH_RE = /(?<![\w@\/.])((?:https?:\/\/|www\.)[^\s<>"'`]+)|(?<![\w@])(@[a-zA-Z][a-zA-Z0-9_]{4,31})(?![a-zA-Z0-9_])/gi;
 var TRAIL = '.,!?)';
 function trimUrl(u) {
   while (u.length) {
