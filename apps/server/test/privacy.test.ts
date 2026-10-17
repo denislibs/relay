@@ -274,6 +274,22 @@ test('blocked sender in a direct chat → err blocked (with seq), nothing in the
   expect((await handleFrame(b.userId, { op: 'send', reqId: 'r5', clientId: crypto.randomUUID(), chatId: direct, body: 'снова' }))[0].op).toBe('ack');
 });
 
+test('typing from a blocked user does not reach the blocker', async () => {
+  const a = await login('Анна'), b = await login('Борис');
+  const direct = await makeChat([a.userId, b.userId]);
+  await call(a, 'PUT', `/blocks/${b.userId}`);
+  const wa = await connect(a);
+  const seen = frames(wa, 'typing');
+  const sent: string[] = [];
+  await handleFrame(b.userId, { op: 'typing', chatId: direct }, (topic) => { sent.push(topic); });
+  expect(sent).toEqual([]);
+  await call(a, 'DELETE', `/blocks/${b.userId}`);
+  await handleFrame(b.userId, { op: 'typing', chatId: direct }, (topic) => { sent.push(topic); });
+  expect(sent).toEqual([`user:${a.userId}`]);
+  expect(seen).toEqual([]);
+  wa.close();
+});
+
 // ---------- push ----------
 const got: Uint8Array[] = [];
 const push = Bun.serve({ port: 0, async fetch(req) { got.push(new Uint8Array(await req.arrayBuffer())); return new Response(null, { status: 201 }); } });
