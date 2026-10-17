@@ -2,6 +2,7 @@ import { Bubble, InfoRow, PanelHeader, RadioRow, RangeRow, Section } from '@rela
 import { useEffect, useState } from 'preact/hooks';
 import { useGlobal } from '../../global';
 import { back, go } from '../../nav';
+import { ACCENTS } from '../../accent';
 import { setPref, type ThemePref } from '../../prefs';
 import { useWallpaper } from '../../wallpapers';
 import { hm, localeTimeFormat } from '../format';
@@ -52,6 +53,17 @@ export function General() {
         </Section>
         <Section title="Тема" role="radiogroup">
           {THEMES.map((t) => <RadioRow key={t.pref} label={t.title} checked={prefs.theme === t.pref} onClick={() => setPref('theme', t.pref)} />)}
+        </Section>
+        <Section title="Цвет акцента" role="radiogroup">
+          <div class="app-accents">
+            {ACCENTS.map((a) => (
+              <button
+                key={a.id} type="button" role="radio" class="app-accent" aria-checked={prefs.accent === a.id ? 'true' : 'false'}
+                aria-label={a.name} title={a.name} style={{ '--swatch': a.color }}
+                onClick={() => setPref('accent', a.id)}
+              />
+            ))}
+          </div>
         </Section>
         <Section title="Формат времени" role="radiogroup">
           <RadioRow label="12 часов" subtitle={hm(now, '12h')} checked={fmt === '12h'} onClick={() => setPref('timeFormat', '12h')} />

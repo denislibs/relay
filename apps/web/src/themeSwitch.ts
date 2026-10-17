@@ -1,10 +1,12 @@
 import { beginHeavyAnimation, reducedMotion, requestMutation } from '@relay/ui';
 import tokens from '@relay/ui/tokens.json';
-// Смена темы кадр за кадром: цвета токенов, у которых светлое и тёмное значения различаются,
-// смешиваются на <html> от старой темы к новой (≈200 мс). Остальные transition на это время
-// выключены (.rl-theme-switching): иначе каждый элемент переливался бы по-своему.
+import { accentCss, accentTokens } from './accent';
+// Смена темы и акцента кадр за кадром: цвета токенов смешиваются на <html> от старых значений
+// к новым (≈200 мс). Остальные transition на это время выключены (.rl-theme-switching):
+// иначе каждый элемент переливался бы по-своему.
 
 type Rgba = [number, number, number, number];
+type Theme = 'light' | 'dark';
 
 function parseColor(c: string): Rgba | null {
   const hex = /^#([0-9a-f]{3,8})$/i.exec(c.trim());
@@ -22,54 +24,95 @@ function parseColor(c: string): Rgba | null {
   return null;
 }
 
-// Цветовые токены, у которых светлое и тёмное значение различаются: их и смешиваем при смене темы
-const PAIRS = (tokens.color.tokens as { name: string; value: string | { light: string; dark: string } }[]).flatMap((t) => {
-  if (typeof t.value === 'string' || t.value.light === t.value.dark) return [];
-  const light = parseColor(t.value.light), dark = parseColor(t.value.dark);
-  return light && dark ? [{ name: '--' + t.name, light, dark }] : [];
-});
+const BASE = tokens.color.tokens as { name: string; value: string | { light: string; dark: string } }[];
+
+/** Цвета всех токенов темы с учётом акцента — то, что сейчас на экране. */
+function palette(theme: Theme, accent: string): Map<string, Rgba> {
+  const over = accentTokens(accent, theme);
+  const out = new Map<string, Rgba>();
+  for (const t of BASE) {
+    const raw = over[t.name] ?? (typeof t.value === 'string' ? t.value : t.value[theme]);
+    const c = parseColor(raw);
+    if (c) out.set('--' + t.name, c);
+  }
+  return out;
+}
 
 const DURATION_MS = 200;
 const ease = (t: number) => 1 - (1 - t) ** 3.5;   // быстрый старт, мягкая посадка
 let running = 0;
+let blended: string[] = [];   // какие свойства сейчас стоят инлайном
 
+const rgba = (c: Rgba) => `rgba(${c[0]},${c[1]},${c[2]},${c[3]})`;
 const setAttr = (root: HTMLElement, pref: string) => { if (pref === 'system') root.removeAttribute('data-theme'); else root.setAttribute('data-theme', pref); };
-const clear = (root: HTMLElement) => { for (const p of PAIRS) root.style.removeProperty(p.name); root.classList.remove('rl-theme-switching'); };
+const clear = (root: HTMLElement) => { for (const n of blended) root.style.removeProperty(n); blended = []; root.classList.remove('rl-theme-switching'); };
+const themeNow = (root: HTMLElement): Theme => {
+  const attr = root.getAttribute('data-theme');
+  return (attr ? attr === 'dark' : matchMedia('(prefers-color-scheme: dark)').matches) ? 'dark' : 'light';
+};
 
 /**
- * Ставит тему на <html>. animate=false (первое применение) — сразу. Иначе, если светлость меняется
- * и движение не урезано (reducedMotion учитывает data-anim="0"), — смешивание по кадрам.
+ * Смешивание from → to. swap() — настоящее переключение (атрибут темы или стиль акцента): делается
+ * в первом кадре, когда инлайн уже держит старые цвета, поэтому скачка нет. Новый вызов прерывает старый.
  */
-export function switchTheme(root: HTMLElement, pref: 'system' | 'light' | 'dark', toDark: boolean, animate: boolean): void {
-  const attr = root.getAttribute('data-theme');
-  const wasDark = attr ? attr === 'dark' : matchMedia('(prefers-color-scheme: dark)').matches;
+function blend(root: HTMLElement, from: Map<string, Rgba>, to: Map<string, Rgba>, swap: () => void, animate: boolean): void {
   const run = ++running;
-  if (!animate || wasDark === toDark || reducedMotion() || !PAIRS.length) {
-    clear(root);   // прерванное смешивание не оставляет переопределений
-    setAttr(root, pref);
+  const names = [...to.keys()].filter((n) => { const a = from.get(n), b = to.get(n)!; return a && a.some((x, i) => x !== b[i]); });
+  if (!animate || reducedMotion() || !names.length) {
+    requestMutation(() => { if (run !== running) return; clear(root); swap(); });   // прерванное смешивание не оставляет переопределений
     return;
   }
-
   const end = beginHeavyAnimation(DURATION_MS + 100);   // цвета всей страницы меняются — тяжёлая анимация
-  const from = wasDark ? 'dark' : 'light', to = toDark ? 'dark' : 'light';
   const start = performance.now();
   const frame = () => requestMutation(() => {
     if (run !== running) { end(); return; }             // поверх началась новая смена
     const t = Math.min(1, (performance.now() - start) / DURATION_MS);
     if (t >= 1) { clear(root); end(); return; }
     const k = ease(t);
-    for (const p of PAIRS) {
-      const a = p[from], b = p[to];
+    for (const n of names) {
+      const a = from.get(n)!, b = to.get(n)!;
       const c = (i: number) => Math.round(a[i] + (b[i] - a[i]) * k);
-      root.style.setProperty(p.name, `rgba(${c(0)},${c(1)},${c(2)},${+(a[3] + (b[3] - a[3]) * k).toFixed(3)})`);
+      root.style.setProperty(n, `rgba(${c(0)},${c(1)},${c(2)},${+(a[3] + (b[3] - a[3]) * k).toFixed(3)})`);
     }
     frame();
   });
   requestMutation(() => {
     if (run !== running) { end(); return; }
+    clear(root);
     root.classList.add('rl-theme-switching');
-    for (const p of PAIRS) { const a = p[from]; root.style.setProperty(p.name, `rgba(${a[0]},${a[1]},${a[2]},${a[3]})`); }
-    setAttr(root, pref);
+    for (const n of names) root.style.setProperty(n, rgba(from.get(n)!));
+    blended = names;
+    swap();
     frame();
   });
+}
+
+let accentNow = 'green';
+
+/**
+ * Ставит тему на <html>. animate=false (первое применение) — сразу. Иначе, если светлость меняется
+ * и движение не урезано (reducedMotion учитывает data-anim="0"), — смешивание по кадрам.
+ */
+export function switchTheme(root: HTMLElement, pref: 'system' | 'light' | 'dark', toDark: boolean, animate: boolean): void {
+  const from = themeNow(root), to: Theme = toDark ? 'dark' : 'light';
+  blend(root, palette(from, accentNow), palette(to, accentNow), () => setAttr(root, pref), animate && from !== to);
+}
+
+const ACCENT_CSS_KEY = 'relay.accentCss';
+
+/** Стиль акцента: один <style id="rl-accent"> в <head> (его же ставит index.html до первой отрисовки). */
+function accentStyle(): HTMLStyleElement {
+  let el = document.getElementById('rl-accent') as HTMLStyleElement | null;
+  if (!el) { el = document.createElement('style'); el.id = 'rl-accent'; document.head.appendChild(el); }
+  return el;
+}
+
+/** Меняет акцент; CSS запоминается для index.html, чтобы следующий запуск сразу был нужного цвета. */
+export function switchAccent(root: HTMLElement, id: string, animate: boolean): void {
+  const theme = themeNow(root);
+  const from = palette(theme, accentNow);
+  accentNow = id;
+  const css = accentCss(id);
+  try { if (css) localStorage.setItem(ACCENT_CSS_KEY, css); else localStorage.removeItem(ACCENT_CSS_KEY); } catch { /* приватный режим */ }
+  blend(root, from, palette(theme, id), () => { const el = accentStyle(); if (el.textContent !== css) el.textContent = css; }, animate);
 }

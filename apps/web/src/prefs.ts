@@ -1,4 +1,5 @@
-import { switchTheme } from './themeSwitch';
+import { ACCENT_IDS, DEFAULT_ACCENT } from './accent';
+import { switchAccent, switchTheme } from './themeSwitch';
 // Настройки устройства: хранятся в localStorage (`relay.prefs`), применяются в apply() и
 // ещё раз — в index.html до первой отрисовки. loadPrefs достраивает недостающее умолчаниями
 // и отбрасывает неизвестное.
@@ -7,6 +8,7 @@ export interface WallpaperPref { pattern: string; colors: string[] | null; blur:
 export interface Prefs {
   v: 1;
   theme: ThemePref;
+  accent: string;   // id набора из accent.ts
   textSize: number;
   wallpaper: { light: WallpaperPref; dark: WallpaperPref };
   sendKey: 'enter' | 'ctrlEnter';
@@ -36,6 +38,7 @@ export function defaultPrefs(reduced = false): Prefs {
   return {
     v: 1,
     theme: 'system',
+    accent: DEFAULT_ACCENT,
     textSize: 16,
     wallpaper: { light: wp(), dark: wp() },
     sendKey: 'enter',
@@ -85,6 +88,7 @@ function sanitize(src: Prefs, d: Prefs): Prefs {
   const p = JSON.parse(JSON.stringify(src)) as Prefs;
   p.v = 1;
   if (!THEMES.includes(p.theme)) p.theme = d.theme;
+  if (!ACCENT_IDS.includes(p.accent)) p.accent = d.accent;
   if (p.sendKey !== 'enter' && p.sendKey !== 'ctrlEnter') p.sendKey = d.sendKey;
   if (p.timeFormat !== '12h' && p.timeFormat !== '24h') p.timeFormat = null;
   if (![0, 1, 2].includes(p.anim.level)) p.anim.level = d.anim.level;
@@ -134,12 +138,13 @@ function reducedMotion(): boolean { try { return typeof matchMedia !== 'undefine
 let storage: KV | null = defaultStorage();
 let current: Prefs = loadPrefs(storage, reducedMotion());
 let appliedTheme: ThemePref | null = null;
+let appliedAccent: string | null = null;
 const listeners = new Set<(p: Prefs) => void>();
 
 export const getPrefs = (): Prefs => current;
 export function subscribePrefs(fn: (p: Prefs) => void): () => void { listeners.add(fn); return () => { listeners.delete(fn); }; }
 /** Для тестов: подменить хранилище и перечитать. */
-export function resetPrefsForTest(kv: KV | null, reduced = false): Prefs { storage = kv; appliedTheme = null; current = loadPrefs(kv, reduced); return current; }
+export function resetPrefsForTest(kv: KV | null, reduced = false): Prefs { storage = kv; appliedTheme = null; appliedAccent = null; current = loadPrefs(kv, reduced); return current; }
 
 /** Формат времени по умолчанию — из локали браузера (hourCycle h11/h12 = 12 часов). */
 export function localeTimeFormat(): '12h' | '24h' {
@@ -158,6 +163,7 @@ export function applyPrefs(p: Prefs = current): void {
   if (typeof document === 'undefined') return;
   const root = document.documentElement;
   if (p.anim.ui) root.removeAttribute('data-anim'); else root.setAttribute('data-anim', '0'); // до темы: смешивание смотрит на data-anim
+  if (p.accent !== appliedAccent) { switchAccent(root, p.accent, appliedAccent !== null); appliedAccent = p.accent; }   // до темы: тема смешивает уже акцентные цвета
   if (p.theme !== appliedTheme) { switchTheme(root, p.theme, isDark(p.theme), appliedTheme !== null); appliedTheme = p.theme; }
   root.style.setProperty('--message-text-size', p.textSize + 'px');
   if ((p.timeFormat ?? localeTimeFormat()) === '12h') root.setAttribute('data-time12', ''); else root.removeAttribute('data-time12'); // время в пузыре шире
