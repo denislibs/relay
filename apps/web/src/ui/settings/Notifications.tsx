@@ -36,7 +36,7 @@ export function Notifications() {
     if (on) playNotifySound(p.volume);
   };
   const webHint = state === 'unsupported' ? 'Не поддерживается' : state === 'denied' ? 'Запрещено в браузере' : undefined;
-  const bgHint = state === 'unsupported' ? 'Не поддерживается' : !webOn ? 'Сначала включите уведомления' : bg && pushReady ? 'Придут, даже если вкладка закрыта' : bg ? 'Подключаем…' : undefined;
+  const bgHint = state === 'unsupported' ? 'Не поддерживается' : !webOn ? 'Сначала включите уведомления' : bg && pushReady ? 'Придут, даже если вкладка закрыта' : bg ? 'Пока открыта вкладка' : undefined;
 
   const kind = (k: Kind, title: string) => {
     const p = settings[k];
