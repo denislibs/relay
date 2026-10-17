@@ -19,8 +19,30 @@ installErrorCapture();
 
 const ME_KEY = 'relay.me';
 
+function start(me: Me): void {
+  setGlobal({ me, boot: 'app' });
+  startData(me);
+  startSettingsData(me);
+}
+
 async function boot(): Promise<void> {
   if ('serviceWorker' in navigator) navigator.serviceWorker.register('/sw.js').catch(() => {});
+  // Уже входили на этом устройстве — стартуем сразу из локальных данных, как Telegram: первый кадр —
+  // готовый список и открытый чат, а не пустое окно на время запроса. Сеанс сверяем в фоне.
+  let cached: Me | null = null;
+  try { cached = JSON.parse(localStorage.getItem(ME_KEY) ?? 'null'); } catch { cached = null; }
+  if (cached) {
+    start(cached);
+    fetch('/me').then(async (res) => {
+      if (res.status === 401) { localStorage.removeItem(ME_KEY); location.reload(); return; }   // сеанс истёк — на вход
+      if (!res.ok) return;
+      const fresh = (await res.json()) as Me;
+      localStorage.setItem(ME_KEY, JSON.stringify(fresh));
+      if (fresh.userId !== cached.userId) location.reload();   // в другой вкладке вошли другим пользователем
+      else if (fresh.name !== cached.name) setGlobal({ me: fresh });
+    }).catch(() => { /* нет сети — работаем офлайн */ });
+    return;
+  }
   let me: Me | null = null;
   try {
     const res = await fetch('/me');
@@ -36,9 +58,7 @@ async function boot(): Promise<void> {
     try { me = JSON.parse(localStorage.getItem(ME_KEY) ?? 'null'); } catch { me = null; }
     if (!me) { setGlobal({ boot: 'login' }); return; }
   }
-  setGlobal({ me, boot: 'app' });
-  startData(me);
-  startSettingsData(me);
+  start(me);
 }
 
 nav.installNav({ get: () => getGlobal().sidebarView, set: (p) => setGlobal({ sidebarView: p }), escBusy: () => getGlobal().infoOpen && !!getGlobal().openChatId });
