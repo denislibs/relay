@@ -5,7 +5,7 @@ import { setGlobal, useGlobal } from '../global';
 import { useEffect, useState } from 'preact/hooks';
 import type { SearchHit } from '@relay/sync-engine/src/types';
 import { isDark } from '../theme';
-import { chatTime } from './format';
+import { chatTime, snippet } from './format';
 import { setTheme } from './Settings';
 
 const FOLDERS = ['all', 'unread'];
@@ -19,12 +19,6 @@ function previewOf(m: { deleted?: boolean; kind?: string; body: string; attachme
 }
 
 /** Фрагмент вокруг совпадения: превью узкое, а совпадение может быть в конце длинного сообщения. */
-function snippet(text: string, q: string): string {
-  const i = text.toLowerCase().indexOf(q.toLowerCase());
-  if (i <= 24) return text;
-  const from = text.lastIndexOf(' ', i - 12);
-  return '…' + text.slice(from > 0 ? from + 1 : i - 12);
-}
 const ROW = 72; // высота строки чата (--size-row) — список виртуальный, строки фиксированной высоты
 
 

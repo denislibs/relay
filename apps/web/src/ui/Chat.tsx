@@ -1,10 +1,10 @@
-import { Avatar, Button, ChatSearchBar, Composer, DropOverlay, GlassBar, IconButton, Menu, Modal, Presence, ReactionPicker, requestMutation } from '@relay/ui';
+import { Avatar, Button, ChatSearchBar, Highlight, ripple, Composer, DropOverlay, GlassBar, IconButton, Menu, Modal, Presence, ReactionPicker, requestMutation } from '@relay/ui';
 import { useEffect, useLayoutEffect, useRef, useState } from 'preact/hooks';
-import { deleteMessage, editMessage, focusMessage, sendFile, openChat, react, saveDraft, searchMessages, send, typing, typingDone } from '../data';
+import { deleteMessage, editMessage, ensureNames, focusMessage, sendFile, openChat, react, saveDraft, searchMessages, send, typing, typingDone } from '../data';
 import type { SearchHit } from '@relay/sync-engine/src/types';
 import { setGlobal, useGlobal } from '../global';
 import { Feed } from './Feed';
-import { fileSize, lastSeenText } from './format';
+import { chatTime, fileSize, lastSeenText, snippet } from './format';
 
 let closedAt = -Infinity; // когда закрылась прежняя лента: близко по времени — значит, переключение между чатами
 
@@ -25,6 +25,9 @@ export function Chat({ chatId }: { chatId: number }) {
   const [finding, setFinding] = useState(false);
   const [findQ, setFindQ] = useState('');
   const [found, setFound] = useState<{ q: string; hits: SearchHit[]; at: number } | null>(null);
+  // список совпадений под строкой поиска (как в Telegram): открыт, пока печатаем; выбор или ↑↓ — сворачивает
+  const [listOpen, setListOpen] = useState(true);
+  const names = useGlobal((s) => s.names);
   useEffect(() => {
     const q = findQ.trim();
     if (!finding || q.length < 2) { setFound(null); return; }
@@ -32,17 +35,25 @@ export function Chat({ chatId }: { chatId: number }) {
     const t = setTimeout(() => searchMessages(q, chatId).then((r) => {
       if (!live) return;
       setFound({ q, hits: r.hits, at: 0 });
-      if (r.hits[0]) focusMessage({ id: r.hits[0].id, sort: r.hits[0].sort });
+      ensureNames([...new Set(r.hits.map((x) => x.senderId))]);
     }).catch(() => {}), 300);
     return () => { live = false; clearTimeout(t); };
   }, [findQ, finding]);
-  const step = (d: 1 | -1) => setFound((f) => {
-    if (!f || !f.hits.length) return f;
-    const at = (f.at + d + f.hits.length) % f.hits.length;
+  const pick = (at: number) => setFound((f) => {
+    if (!f || !f.hits[at]) return f;
+    setListOpen(false);
     focusMessage({ id: f.hits[at].id, sort: f.hits[at].sort });
     return { ...f, at };
   });
-  const closeFind = () => { setFinding(false); setFindQ(''); setFound(null); };
+  const step = (d: 1 | -1) => setFound((f) => {
+    if (!f || !f.hits.length) return f;
+    setListOpen(false);
+    // первый Enter после ввода — к самому новому совпадению, дальше — по шагам
+    const at = listOpen ? f.at : (f.at + d + f.hits.length) % f.hits.length;
+    focusMessage({ id: f.hits[at].id, sort: f.hits[at].sort });
+    return { ...f, at };
+  });
+  const closeFind = () => { setFinding(false); setFindQ(''); setFound(null); setListOpen(true); };
 
   // вложения: выбор файла (скрепка), перетаскивание, вставка; перед отправкой — окно с превью и подписью
   const picker = useRef<HTMLInputElement>(null);
@@ -136,17 +147,34 @@ export function Chat({ chatId }: { chatId: number }) {
     <>
       <span ref={shell} hidden />
       {finding ? (
-        <div class="rl-glassbar app-findbar app-steady">
+        <div class={'rl-glassbar app-findbar app-steady' + (listOpen && found ? ' app-findbar-open' : '')}>
           <ChatSearchBar
             id="chat-find"
             value={findQ}
             total={found?.hits.length ?? 0}
             index={found?.at ?? 0}
-            onQuery={setFindQ}
+            onQuery={(q: string) => { setFindQ(q); setListOpen(true); }}
+            onFocus={() => setListOpen(true)}
             onNext={() => step(1)}
             onPrev={() => step(-1)}
             onClose={closeFind}
           />
+          <Presence show={listOpen && !!found} exitMs={140}>
+            <div class="app-findlist" role="listbox" aria-label="Найденные сообщения">
+              {found && found.hits.length ? found.hits.map((x, k) => {
+                const who = names[x.senderId] ?? (x.senderId === me.userId ? me.name : chat?.kind === 'direct' ? title : '');
+                return (
+                  <button type="button" role="option" aria-selected={k === found.at} key={x.id} class={'app-findrow' + (k === found.at ? ' app-findrow-on' : '')} onPointerDown={ripple} onClick={() => pick(k)}>
+                    <Avatar name={who} size={48} />
+                    <span class="app-findrow-text">
+                      <span class="app-findrow-top"><b>{who}</b><time>{chatTime(x.createdAt)}</time></span>
+                      <span class="app-findrow-body"><Highlight text={snippet(x.body, found.q)} query={found.q} /></span>
+                    </span>
+                  </button>
+                );
+              }) : <div class="app-findempty">Ничего не найдено</div>}
+            </div>
+          </Presence>
         </div>
       ) : null}
       <GlassBar class={(switching ? 'app-steady' : '') + (finding ? ' app-hidden' : '')}>

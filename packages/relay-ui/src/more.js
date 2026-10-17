@@ -141,15 +141,20 @@ function SelectionBar(props) {
 
 /* ---------- ChatSearchBar + Highlight ---------- */
 function ChatSearchBar(props) {
-  var total = props.total || 0, index = props.index || 0;
+  var total = props.total || 0;
   return h('div', { class: 'rl-csearch', role: 'search' },
-    h(IconButton, { icon: 'arrowLeft', label: 'Закрыть поиск', onClick: props.onClose }),
+    h('span', { class: 'rl-csearch-icon', 'aria-hidden': 'true' }, h(Icon, { name: 'search', size: 22 })),
     h('label', { for: props.id || 'rl-csearch', class: 'rl-sr' }, 'Поиск по чату'),
-    h('input', { id: props.id || 'rl-csearch', type: 'search', placeholder: 'Поиск по чату', value: props.value, autocomplete: 'off', onInput: function (e) { if (props.onQuery) props.onQuery(e.target.value); },
-      onKeyDown: function (e) { if (e.key === 'Enter') { e.preventDefault(); if (e.shiftKey ? props.onPrev : props.onNext) (e.shiftKey ? props.onPrev : props.onNext)(); } } }),
-    h('span', { class: 'rl-csearch-count', 'aria-live': 'polite' }, total ? (index + 1) + ' из ' + total : props.value ? 'Нет совпадений' : ''),
-    h(IconButton, { icon: 'chevronUp', label: 'Предыдущее', disabled: !total, onClick: props.onPrev }),
-    h(IconButton, { icon: 'chevronDown', label: 'Следующее', disabled: !total, onClick: props.onNext }));
+    h('input', { id: props.id || 'rl-csearch', type: 'search', placeholder: 'Поиск', value: props.value, autocomplete: 'off', autoFocus: true,
+      onInput: function (e) { if (props.onQuery) props.onQuery(e.target.value); },
+      onFocus: props.onFocus,
+      onKeyDown: function (e) {
+        if (e.key === 'Enter') { e.preventDefault(); var f = e.shiftKey ? props.onPrev : props.onNext; if (f) f(); }
+        else if (e.key === 'Escape' && props.onClose) { e.preventDefault(); props.onClose(); }
+      } }),
+    h(IconButton, { icon: 'chevronUp', label: 'Предыдущее', disabled: !total, onClick: props.onNext }),
+    h(IconButton, { icon: 'chevronDown', label: 'Следующее', disabled: !total, onClick: props.onPrev }),
+    h(IconButton, { icon: 'close', label: 'Закрыть поиск', onClick: props.onClose }));
 }
 function Highlight(props) {
   var q = (props.query || '').trim();

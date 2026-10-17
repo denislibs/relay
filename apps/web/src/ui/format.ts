@@ -53,3 +53,11 @@ export function fileSize(n: number): string {
   if (n < 1024 * 1024) return Math.round(n / 1024) + ' КБ';
   return (n / 1024 / 1024).toFixed(1).replace('.', ',') + ' МБ';
 }
+
+/** Фрагмент вокруг совпадения: длинное начало обрезаем, чтобы найденное было видно в строке. */
+export function snippet(text: string, q: string): string {
+  const i = text.toLowerCase().indexOf(q.toLowerCase());
+  if (i <= 24) return text;
+  const from = text.lastIndexOf(' ', i - 12);
+  return '…' + text.slice(from > 0 ? from + 1 : i - 12);
+}
