@@ -107,15 +107,22 @@ export async function validRule(db: Db, userId: number, key: unknown, body: unkn
   // у «Кто найдёт по номеру» исключений нет
   let allow = k === 'phoneDiscovery' ? [] : list(b.allow);
   let deny = k === 'phoneDiscovery' ? [] : list(b.deny);
-  const all = [...new Set([...allow, ...deny])];
+  // уже записанные в правило исключения остаются, даже если общего чата больше нет: иначе пересохранение
+  // (хоть смена режима) молча снимало бы «Никогда не показывать» с того, кто ушёл из общих чатов
+  const stored = new Set<number>();
+  if (allow.length || deny.length) {
+    const cur = (await getRules(db, userId))[k];
+    for (const x of [...cur.allow, ...cur.deny]) stored.add(Number(x));
+  }
+  const all = [...new Set([...allow, ...deny])].filter((x) => !stored.has(x));
   if (all.length) {
-    // только те, кого владелец и так видит (контакт или общий чат); остальных молча отбрасываем —
+    // новые — только те, кого владелец и так видит (контакт или общий чат); остальных молча отбрасываем —
     // ответ не различает «нет такого» и «не знакомы», иначе PUT стал бы способом перебрать id
-    const known = new Set((await db`
+    const known = new Set([...stored, ...(await db`
       select u.id from users u
        where u.id = any(${all}::bigint[])
          and (exists (select 1 from contacts c where c.owner_id = ${userId} and c.user_id = u.id)
-              or exists (select 1 from chat_members a join chat_members b on b.chat_id = a.chat_id where a.user_id = ${userId} and b.user_id = u.id))`).map((r) => Number(r.id)));
+              or exists (select 1 from chat_members a join chat_members b on b.chat_id = a.chat_id where a.user_id = ${userId} and b.user_id = u.id))`).map((r) => Number(r.id))]);
     allow = allow.filter((x) => known.has(x));
     deny = deny.filter((x) => known.has(x));
   }

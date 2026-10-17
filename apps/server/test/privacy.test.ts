@@ -291,6 +291,25 @@ test('typing from a blocked user does not reach the blocker', async () => {
   wa.close();
 });
 
+test('an exception survives a re-save after the owner and that person no longer share a chat; new unseen ids are still dropped', async () => {
+  const a = await login('Анна'), x = await login('Икс'), v = await login('Вера'), stranger = await login('Чужой');
+  const chat = await makeChat([a.userId, x.userId]); await makeChat([a.userId, v.userId]);
+  await call(a, 'PATCH', '/me', { bio: 'секрет' });
+  expect((await call(a, 'PUT', '/me/username', { username: 'anna_owner' })).status).toBe(200);
+  await rule(a, 'bio', { mode: 'everyone', deny: [x.userId], allow: [] });
+  // Икс уходит из единственного общего чата
+  await sql`delete from chat_members where chat_id = ${chat} and user_id = ${x.userId}`;
+  // владелец меняет режим, присылая тот же список; заодно пробует добавить незнакомого
+  const saved = await (await rule(a, 'bio', { mode: 'contacts', deny: [x.userId, stranger.userId], allow: [v.userId] })).json();
+  expect(saved.privacy.bio).toEqual({ mode: 'contacts', allow: [v.userId], deny: [x.userId] });
+  await rule(a, 'bio', { mode: 'everyone', deny: [x.userId] });
+  const r = await call(x, 'POST', '/users/resolve', { query: '@anna_owner' });
+  expect(r.status).toBe(200);
+  expect((await r.json()).bio).toBeNull();
+  // снять исключение по-прежнему можно
+  expect((await (await rule(a, 'bio', { mode: 'everyone' })).json()).privacy.bio).toEqual({ mode: 'everyone', allow: [], deny: [] });
+});
+
 test('PUT /privacy is not an existence oracle: a 1001-long list is 400 before anything else; unknown and unseen ids look the same', async () => {
   const a = await login('Анна'), stranger = await login('Чужой');
   expect((await rule(a, 'bio', { mode: 'nobody', allow: [...Array.from({ length: 1001 }, () => 'x')] as never })).status).toBe(400);
