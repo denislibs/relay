@@ -36,7 +36,7 @@ function birthdayText(v: string): string {
 async function logout(): Promise<boolean> {
   try {
     const res = await fetch('/logout', { method: 'POST' });
-    if (!res.ok) return false;
+    if (!res.ok && res.status !== 401) return false;   // 401 — сеанса уже нет, выходим локально
   } catch { return false; }
   const uid = getGlobal().me?.userId;
   try { localStorage.removeItem('relay.me'); } catch { /* приватный режим */ }
