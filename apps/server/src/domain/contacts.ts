@@ -1,9 +1,10 @@
-import type { Contact, PublicUser } from '@relay/protocol';
+import type { BlockedUser, Contact, PublicUser } from '@relay/protocol';
 import { sql, type Tx } from '../db';
 import { DomainError } from './errors';
 import { appendUpdates } from './journal';
-import { isOnline } from './presence';
-import { canFindByPhone, canView, COLS, publicUser, selfSeq, validName, validText, type ContactName, type Row } from './profile';
+import { presenceFor } from './presence';
+import { canFindByPhone, privacyCtx, withBlock, type PrivacyCtx } from './privacy';
+import { canView, COLS, publicUser, publicUserFor, republishUser, selfSeq, validName, validText, type ContactName, type Row } from './profile';
 
 const NOTE_MAX = 128;
 
@@ -23,11 +24,12 @@ export function parseQuery(raw: unknown): { username: string } | { phone: string
 
 type ContactRow = ContactName & { note: string };
 
-function contactOf(owner: number, r: Row, c: ContactRow, lastSeen: Date | null, seq?: number): Contact {
+function contactOf(owner: number, r: Row, c: ContactRow, lastSeen: Date | null, ctx: PrivacyCtx, seq?: number): Contact {
+  const p = presenceFor(owner, r.id, lastSeen, ctx);
   return {
     userId: r.id, firstName: c.first_name, lastName: c.last_name, note: c.note,
-    user: publicUser(owner, r, c),
-    presence: { online: isOnline(r.id), lastSeen: lastSeen ? new Date(lastSeen).toISOString() : null },
+    user: publicUser(owner, r, c, ctx),
+    presence: { online: p.online, lastSeen: p.lastSeen },
     ...(seq !== undefined ? { seq } : {}),
   };
 }
@@ -45,8 +47,9 @@ export async function resolveUser(viewer: number, raw: unknown): Promise<PublicU
     ? await sql<Row[]>`select ${COLS} from users where lower(username) = ${q.username}`
     : await sql<Row[]>`select ${COLS} from users where phone = ${q.phone}`;
   if (!r || r.id === viewer) throw new DomainError('not_found');
-  if ('phone' in q && !canFindByPhone(viewer, r.id)) throw new DomainError('not_found');
-  return publicUser(viewer, r, await contactRow(sql, viewer, r.id));
+  const ctx = await privacyCtx(sql, [[viewer, r.id]]);
+  if ('phone' in q && !canFindByPhone(viewer, r.id, ctx)) throw new DomainError('not_found');
+  return publicUser(viewer, r, await contactRow(sql, viewer, r.id), ctx);
 }
 
 /** Контакты владельца с присутствием (снимок на seq его журнала). */
@@ -59,7 +62,8 @@ export async function listContacts(owner: number): Promise<{ contacts: Contact[]
         from contacts c join users u on u.id = c.user_id
        where c.owner_id = ${owner}
        order by c.created_at, c.user_id`;
-    const contacts = rows.map((r) => contactOf(owner, r as unknown as Row, { first_name: r.c_first, last_name: r.c_last, note: r.c_note }, r.last_seen_at as Date | null));
+    const ctx = await privacyCtx(tx, rows.map((r) => [owner, Number(r.id)]));
+    const contacts = rows.map((r) => contactOf(owner, r as unknown as Row, { first_name: r.c_first, last_name: r.c_last, note: r.c_note }, r.last_seen_at as Date | null, ctx));
     return { contacts, seq: await selfSeq(tx, owner) };
   }) as Promise<{ contacts: Contact[]; seq: number }>;
 }
@@ -72,7 +76,7 @@ const plain = (v: unknown): v is Record<string, unknown> => !!v && typeof v === 
 async function write(tx: Tx, owner: number, userId: number): Promise<Contact> {
   const [r] = await tx`select ${COLS}, last_seen_at from users where id = ${userId}`;
   const c = (await contactRow(tx, owner, userId))!;
-  const contact = contactOf(owner, r as unknown as Row, c, r.last_seen_at as Date | null);
+  const contact = contactOf(owner, r as unknown as Row, c, r.last_seen_at as Date | null, await privacyCtx(tx, [[owner, userId]]));
   await appendUpdates(tx, [{ userId: owner, update: { type: 'contactsChanged', contact } }]);
   return { ...contact, seq: await selfSeq(tx, owner) };
 }
@@ -120,8 +124,73 @@ export async function removeContact(owner: number, userId: number): Promise<{ re
   return sql.begin(async (tx) => {
     const del = await tx`delete from contacts where owner_id = ${owner} and user_id = ${userId} returning user_id`;
     const [r] = await tx<Row[]>`select ${COLS} from users where id = ${userId}`;
-    const user = r && (await canView(tx, owner, userId)) ? publicUser(owner, r, null) : null;
+    const user = r && (await canView(tx, owner, userId)) ? await publicUserFor(tx, owner, r, null) : null;
     if (del.length) await appendUpdates(tx, [{ userId: owner, update: { type: 'contactsChanged', removed: userId, user } }]);
     return { removed: userId, user, seq: await selfSeq(tx, owner) };
   }) as Promise<{ removed: number; user: PublicUser | null; seq: number }>;
+}
+
+// ---------- чёрный список ----------
+
+type BlockRow = Row & { created_at: Date; c_first: string | null; c_last: string | null };
+const blockCols = sql`u.id, u.name, u.first_name, u.last_name, u.username, u.bio, u.birthday, u.phone, b.created_at, c.first_name as c_first, c.last_name as c_last`;
+
+function blockedOf(owner: number, r: BlockRow, ctx: PrivacyCtx): BlockedUser {
+  const c = r.c_first !== null ? { first_name: r.c_first, last_name: r.c_last ?? '' } : null;
+  return { userId: r.id, user: publicUser(owner, r, c, ctx), at: new Date(r.created_at).toISOString() };
+}
+
+async function blockedRow(db: Tx | typeof sql, owner: number, userId: number): Promise<BlockRow | null> {
+  const [r] = await db<BlockRow[]>`
+    select ${blockCols} from blocks b join users u on u.id = b.user_id
+      left join contacts c on c.owner_id = b.owner_id and c.user_id = b.user_id
+     where b.owner_id = ${owner} and b.user_id = ${userId}`;
+  return r ?? null;
+}
+
+/** Заблокированные владельцем, новые сверху (снимок на seq его журнала). */
+export async function listBlocked(owner: number): Promise<{ blocked: BlockedUser[]; seq: number }> {
+  return sql.begin(async (tx) => {
+    await tx`set transaction isolation level repeatable read`;
+    const rows = await tx<BlockRow[]>`
+      select ${blockCols} from blocks b join users u on u.id = b.user_id
+        left join contacts c on c.owner_id = b.owner_id and c.user_id = b.user_id
+       where b.owner_id = ${owner}
+       order by b.created_at desc, b.user_id desc`;
+    const ctx = await privacyCtx(tx, rows.map((r) => [owner, r.id]));
+    return { blocked: rows.map((r) => blockedOf(owner, r, ctx)), seq: await selfSeq(tx, owner) };
+  }) as Promise<{ blocked: BlockedUser[]; seq: number }>;
+}
+
+/**
+ * Заблокировать (повтор — не ошибка). Одной транзакцией: строка, blocksChanged владельцу и корректирующий
+ * userUpdated заблокированному (о себе, дне рождения и номере он больше не узнает). Присутствие — после коммита.
+ */
+export async function blockUser(owner: number, userId: number): Promise<BlockedUser> {
+  // блокировать можно только тех, кого и так видно (общий чат, контакт): иначе перебором id можно узнать всех
+  if (userId === owner || !(await canView(sql, owner, userId))) throw new DomainError('not_found');
+  return sql.begin(async (tx) => {
+    const before = await privacyCtx(tx, [[userId, owner]]);
+    const ins = await tx`insert into blocks (owner_id, user_id) values (${owner}, ${userId}) on conflict do nothing returning user_id`;
+    const r = (await blockedRow(tx, owner, userId))!;
+    const item = blockedOf(owner, r, await privacyCtx(tx, [[owner, userId]]));
+    if (ins.length) {
+      await appendUpdates(tx, [{ userId: owner, update: { type: 'blocksChanged', blocked: item } }]);
+      if (await canView(tx, userId, owner)) await republishUser(tx, owner, [userId], before, withBlock(before, owner, userId, true));
+    }
+    return { ...item, seq: await selfSeq(tx, owner) };
+  }) as Promise<BlockedUser>;
+}
+
+/** Разблокировать (повтор — не ошибка): blocksChanged владельцу, разблокированному — профиль снова целиком. */
+export async function unblockUser(owner: number, userId: number): Promise<{ unblocked: number; seq: number }> {
+  return sql.begin(async (tx) => {
+    const before = await privacyCtx(tx, [[userId, owner]]);
+    const del = await tx`delete from blocks where owner_id = ${owner} and user_id = ${userId} returning user_id`;
+    if (del.length) {
+      await appendUpdates(tx, [{ userId: owner, update: { type: 'blocksChanged', unblocked: userId } }]);
+      if (await canView(tx, userId, owner)) await republishUser(tx, owner, [userId], before, withBlock(before, owner, userId, false), true);
+    }
+    return { unblocked: userId, seq: await selfSeq(tx, owner) };
+  }) as Promise<{ unblocked: number; seq: number }>;
 }

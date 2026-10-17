@@ -1,11 +1,15 @@
-import type { PresenceItem } from '@relay/protocol';
+import { RECENTLY, type PresenceItem } from '@relay/protocol';
 import { sql } from '../db';
+import { canSeeLastSeen, privacyCtx, type PrivacyCtx } from './privacy';
 
 /**
  * Кто в сети: число открытых WebSocket пользователя в этом процессе.
  * «Не в сети» объявляем не сразу, а через GRACE_MS: перезагрузка вкладки или короткий обрыв не мигают
  * у собеседников. Изменения рассылаются собеседникам по личным чатам сразу, мимо журнала — это не данные,
  * а состояние момента. (Один процесс сервера; для нескольких понадобится общий реестр, например через NOTIFY.)
+ *
+ * Правило «Последний визит» (privacy.ts, с взаимностью): кому не положено — {online: null, lastSeen: 'recently'};
+ * таким собеседникам о входе и выходе не сообщаем вовсе — иначе само время кадра выдало бы, когда человек в сети.
  */
 const conns = new Map<number, number>();
 const leaving = new Map<number, ReturnType<typeof setTimeout>>();
@@ -15,6 +19,14 @@ export type Publish = (topic: string, msg: string) => void;
 
 export function isOnline(userId: number): boolean {
   return (conns.get(userId) ?? 0) > 0 || leaving.has(userId);
+}
+
+const hidden = (userId: number): PresenceItem => ({ userId, online: null, lastSeen: RECENTLY });
+const iso = (d: unknown) => (d ? new Date(d as string).toISOString() : null);
+
+/** Присутствие owner глазами viewer. */
+export function presenceFor(viewer: number, owner: number, lastSeenAt: unknown, ctx: PrivacyCtx): PresenceItem {
+  return canSeeLastSeen(viewer, owner, ctx) ? { userId: owner, online: isOnline(owner), lastSeen: iso(lastSeenAt) } : hidden(owner);
 }
 
 /** Кому сообщать о присутствии пользователя: собеседникам по личным чатам и тем, у кого он в контактах. */
@@ -29,9 +41,28 @@ async function peersOf(userId: number): Promise<number[]> {
   return rows.map((r) => Number(r.user_id));
 }
 
+/** Разослать присутствие пользователя тем собеседникам, кому его видно (остальным — ничего). */
 async function announce(publish: Publish, item: PresenceItem): Promise<void> {
+  const peers = await peersOf(item.userId);
+  if (!peers.length) return;
+  const ctx = await privacyCtx(sql, peers.map((p) => [p, item.userId]));
   const msg = JSON.stringify({ op: 'presence', items: [item] });
-  for (const peer of await peersOf(item.userId)) publish(`user:${peer}`, msg);
+  for (const peer of peers) if (canSeeLastSeen(peer, item.userId, ctx)) publish(`user:${peer}`, msg);
+}
+
+/**
+ * Правило «Последний визит» или чёрный список изменились: всем собеседникам — их нынешний вид этого человека
+ * (в том числе «недавно»), а ему самому — снимок собеседников (взаимность меняет и то, что видит он).
+ */
+export async function reannounce(publish: Publish, userId: number): Promise<void> {
+  const peers = await peersOf(userId);
+  if (peers.length) {
+    const ctx = await privacyCtx(sql, peers.map((p) => [p, userId]));
+    const [row] = await sql`select last_seen_at from users where id = ${userId}`;
+    for (const peer of peers) publish(`user:${peer}`, JSON.stringify({ op: 'presence', items: [presenceFor(peer, userId, row?.last_seen_at, ctx)] }));
+  }
+  const own = await listPresence(userId);
+  if (own.length) publish(`user:${userId}`, JSON.stringify({ op: 'presence', items: own }));
 }
 
 export async function connected(publish: Publish, userId: number): Promise<void> {
@@ -50,7 +81,7 @@ export function disconnected(publish: Publish, userId: number): void {
     leaving.delete(userId);
     if ((conns.get(userId) ?? 0) > 0) return;
     const [row] = await sql`update users set last_seen_at = now() where id = ${userId} returning last_seen_at`;
-    await announce(publish, { userId, online: false, lastSeen: row ? new Date(row.last_seen_at as string).toISOString() : null });
+    await announce(publish, { userId, online: false, lastSeen: row ? iso(row.last_seen_at) : null });
   }, graceMs()));
 }
 
@@ -65,11 +96,8 @@ export async function listPresence(userId: number): Promise<PresenceItem[]> {
         where m.user_id = ${userId}
        union
        select user_id from contacts where owner_id = ${userId})`;
-  return rows.map((r) => ({
-    userId: r.id as number,
-    online: isOnline(r.id as number),
-    lastSeen: r.last_seen_at ? new Date(r.last_seen_at as string).toISOString() : null,
-  }));
+  const ctx = await privacyCtx(sql, rows.map((r) => [userId, Number(r.id)]));
+  return rows.map((r) => presenceFor(userId, Number(r.id), r.last_seen_at, ctx));
 }
 
 /** Только для тестов: база сброшена, id пользователей начнутся заново — забыть соединения прежних тестов. */

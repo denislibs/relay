@@ -2,6 +2,7 @@ import type { Birthday, Me, PublicUser } from '@relay/protocol';
 import { sql, type Tx } from '../db';
 import { DomainError } from './errors';
 import { appendUpdates } from './journal';
+import { canSee, privacyCtx, type PrivacyCtx } from './privacy';
 
 const RESERVED = new Set(['admin', 'relay', 'support', 'settings', 'help', 'api', 'root', 'system', 'null', 'undefined', 'me']);
 const USERNAME = /^[a-z][a-z0-9_]{4,31}$/;
@@ -43,34 +44,30 @@ export async function getMe(userId: number): Promise<Me> {
   }) as Promise<Me>;
 }
 
-/** Единственная точка правил приватности: B6 подставит сюда настоящую проверку (телефон, био, день рождения…). */
-export function canSee(viewer: number, owner: number, field: 'phone' | 'username' | 'bio' | 'birthday'): boolean {
-  return field !== 'phone' || viewer === owner; // телефон — только себе, пока нет правил B6
-}
-
-/** Правило «Кто найдёт меня по номеру» (B6): пока находят все. */
-export function canFindByPhone(_viewer: number, _owner: number): boolean {
-  return true;
-}
-
 /** Имя, которое владелец дал контакту. */
 export type ContactName = { first_name: string; last_name: string };
 
 /**
  * Представление пользователя для конкретного зрителя. Всё, что уходит наружу (HTTP, журнал), идёт через эту функцию.
  * contact — запись зрителя об этом человеке: имя у зрителя — контактное (видно только ему), своё — в publicName.
+ * ctx — правила приватности на эту пару (privacyCtx): скрытые поля зритель не получает вовсе.
  */
-export function publicUser(viewer: number, r: Row, contact?: ContactName | null): PublicUser {
+export function publicUser(viewer: number, r: Row, contact: ContactName | null | undefined, ctx: PrivacyCtx): PublicUser {
   const s = shape(r);
   const c = contact && r.id !== viewer ? contact : null;
   return {
     id: r.id, name: c ? fullName(c.first_name, c.last_name) : s.name,
     firstName: c ? c.first_name : s.firstName, lastName: c ? c.last_name : s.lastName, publicName: s.name,
-    username: canSee(viewer, r.id, 'username') ? s.username : null,
-    bio: canSee(viewer, r.id, 'bio') ? s.bio : null,
-    birthday: canSee(viewer, r.id, 'birthday') ? s.birthday : null,
-    phone: canSee(viewer, r.id, 'phone') ? s.phone : null,
+    username: s.username,
+    bio: canSee(viewer, r.id, 'bio', ctx) ? s.bio : null,
+    birthday: canSee(viewer, r.id, 'birthday', ctx) ? s.birthday : null,
+    phone: canSee(viewer, r.id, 'phone', ctx) ? s.phone : null,
   };
+}
+
+/** Профиль одного пользователя для одного зрителя (контекст приватности — на эту пару). */
+export async function publicUserFor(db: Tx | typeof sql, viewer: number, r: Row, contact?: ContactName | null): Promise<PublicUser> {
+  return publicUser(viewer, r, contact, await privacyCtx(db, [[viewer, r.id]]));
 }
 
 /** Кто видит пользователя: все, с кем есть общий чат (личный или группа), и те, у кого он в контактах. */
@@ -112,7 +109,25 @@ export async function canView(db: Tx | typeof sql, viewer: number, id: number): 
 export async function getUser(viewer: number, id: number): Promise<PublicUser> {
   const [r] = await sql<Row[]>`select ${COLS} from users where id = ${id}`;
   if (!r || !(await canView(sql, viewer, id))) throw new DomainError('not_found');
-  return publicUser(viewer, r, (await contactNames(sql, id, [viewer])).get(viewer));
+  return publicUserFor(sql, viewer, r, (await contactNames(sql, id, [viewer])).get(viewer));
+}
+
+/**
+ * Правила приватности или чёрный список изменились: журнал зрителей хранит снимки профиля, поэтому тем,
+ * у кого представление пользователя стало другим (поле пропало или появилось), — корректирующий userUpdated.
+ * before/after — контексты до и после правки (after обычно — withRule/withBlock от before).
+ * always — прислать даже без разницы (разблокированный по ней понимает, что писать снова можно).
+ */
+export async function republishUser(tx: Tx, userId: number, viewers: number[], before: PrivacyCtx, after: PrivacyCtx, always = false): Promise<void> {
+  if (!viewers.length) return;
+  const [r] = await tx<Row[]>`select ${COLS} from users where id = ${userId}`;
+  if (!r) return;
+  const names = await contactNames(tx, userId, viewers);
+  const out = viewers.flatMap((v) => {
+    const was = publicUser(v, r, names.get(v), before), now = publicUser(v, r, names.get(v), after);
+    return !always && JSON.stringify(was) === JSON.stringify(now) ? [] : [{ userId: v, update: { type: 'userUpdated' as const, user: now } }];
+  });
+  await appendUpdates(tx, out);
 }
 
 // ---------- валидация ----------
@@ -187,8 +202,9 @@ async function save(userId: number, change: (tx: Tx, cur: Row) => Promise<void>)
     if (JSON.stringify(cur) === JSON.stringify(r)) return { userId: r.id, ...shape(r), seq: await selfSeq(tx, userId) }; // ничего не изменилось — журнал не трогаем
     const viewers = await viewersOf(tx, userId);
     const names = await contactNames(tx, userId, viewers);
-    // каждому — своё представление (B6: скрытые поля; владельцу контакта — его имя для этого человека)
-    await appendUpdates(tx, [userId, ...viewers].map((v) => ({ userId: v, update: { type: 'userUpdated' as const, user: publicUser(v, r, names.get(v)) } })));
+    const ctx = await privacyCtx(tx, viewers.map((v) => [v, userId]));
+    // каждому — своё представление (скрытые правилами поля; владельцу контакта — его имя для этого человека)
+    await appendUpdates(tx, [userId, ...viewers].map((v) => ({ userId: v, update: { type: 'userUpdated' as const, user: publicUser(v, r, names.get(v), ctx) } })));
     return { userId: r.id, ...shape(r), seq: await selfSeq(tx, userId) };   // seq своей записи userUpdated (строка user_seq под замком транзакции)
   }) as Promise<Me>;
 }

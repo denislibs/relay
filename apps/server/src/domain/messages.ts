@@ -19,6 +19,17 @@ export async function sendMessage(
 
   const res = await sql.begin(async (tx) => {
     await assertMember(tx, input.chatId, userId);
+    // личный чат, а собеседник заблокировал отправителя: не пишем ничего (повтор уже принятого — по-прежнему ack)
+    const [blocked] = await tx`
+      select 1 from chats c
+        join chat_members o on o.chat_id = c.id and o.user_id <> ${userId}
+        join blocks b on b.owner_id = o.user_id and b.user_id = ${userId}
+       where c.id = ${input.chatId} and c.kind = 'direct'`;
+    if (blocked) {
+      const [existing] = await tx`select * from messages where sender_id = ${userId} and client_id = ${input.clientId}`;
+      if (existing) return { message: toMessage(existing), duplicate: true };
+      throw new DomainError('blocked');
+    }
     if (input.replyToId != null) {
       const [target] = await tx`select 1 from messages where chat_id = ${input.chatId} and id = ${input.replyToId}`;
       if (!target) throw new DomainError('not_found', 'reply target');

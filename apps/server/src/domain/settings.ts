@@ -2,7 +2,8 @@ import type { NotifyPref, NotifyType, SettingsSnapshot, UserSettings } from '@re
 import { sql, type Tx } from '../db';
 import { DomainError } from './errors';
 import { appendUpdates } from './journal';
-import { selfSeq } from './profile';
+import { getRules, privacyCtx, validRule, withRule, writeRule } from './privacy';
+import { republishUser, selfSeq, viewersOf } from './profile';
 
 export const NOTIFY_TYPES: readonly NotifyType[] = ['direct', 'group'];
 const DEFAULT_TTL = 180;
@@ -21,12 +22,41 @@ function shape(r?: Row): UserSettings {
   return { notify: n, sessionsTtlDays: r?.sessions_ttl_days ?? DEFAULT_TTL };
 }
 
+/** Полный снимок настроек (с правилами приватности) в транзакции: любой ответ — состояние «на seq» целиком. */
+async function snapshot(tx: Tx, userId: number): Promise<SettingsSnapshot> {
+  const [r] = await tx<Row[]>`select notify, sessions_ttl_days from user_settings where user_id = ${userId}`;
+  return { ...shape(r), privacy: await getRules(tx, userId), seq: await selfSeq(tx, userId) };
+}
+
 /** Настройки пользователя; строки нет — умолчания. seq — своей записи журнала в том же снимке. */
 export async function getSettings(userId: number): Promise<SettingsSnapshot> {
   return sql.begin(async (tx) => {
     await tx`set transaction isolation level repeatable read`;
-    const [r] = await tx<Row[]>`select notify, sessions_ttl_days from user_settings where user_id = ${userId}`;
-    return { ...shape(r), seq: await selfSeq(tx, userId) };
+    return snapshot(tx, userId);
+  }) as Promise<SettingsSnapshot>;
+}
+
+/**
+ * Правило конфиденциальности (PUT /privacy/:key). Одной транзакцией: правило, privacyChanged себе
+ * и корректирующий userUpdated тем зрителям, у кого из-за правила пропало или появилось поле профиля.
+ * Присутствие (lastSeen) — не журнал: его переобъявляет вызывающий после коммита (presence.reannounce).
+ */
+export async function setPrivacy(userId: number, key: unknown, body: unknown): Promise<SettingsSnapshot> {
+  const { key: k, rule } = await validRule(sql, userId, key, body);
+  return sql.begin(async (tx) => {
+    await tx`select 1 from users where id = ${userId} for no key update`;   // правки одного человека — по очереди
+    const before = await getRules(tx, userId);
+    if (JSON.stringify(before[k]) !== JSON.stringify(rule)) {
+      await writeRule(tx, userId, k, rule);
+      await appendUpdates(tx, [{ userId, update: { type: 'privacyChanged', rules: { ...before, [k]: rule } } }]);
+      if (k === 'phone' || k === 'bio' || k === 'birthday') {
+        const viewers = await viewersOf(tx, userId);
+        const ctx = await privacyCtx(tx, viewers.map((v) => [v, userId]));
+        // ctx снят после записи правила — «до» восстанавливаем подменой
+        await republishUser(tx, userId, viewers, withRule(ctx, userId, k, before[k]), ctx);
+      }
+    }
+    return snapshot(tx, userId);
   }) as Promise<SettingsSnapshot>;
 }
 
@@ -58,6 +88,6 @@ export async function setNotify(userId: number, type: unknown, patch: unknown): 
       await tx`update user_settings set notify = ${tx.json(settings.notify as never)}, updated_at = now() where user_id = ${userId}`;
       await appendUpdates(tx, [{ userId, update: { type: 'settingsChanged', settings } }]);
     }
-    return { ...settings, seq: await selfSeq(tx, userId) };
+    return snapshot(tx, userId);
   }) as Promise<SettingsSnapshot>;
 }

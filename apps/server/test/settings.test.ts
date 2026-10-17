@@ -1,5 +1,5 @@
 import { afterAll, beforeEach, expect, test } from 'bun:test';
-import type { ServerFrame } from '@relay/protocol';
+import { defaultPrivacy, type ServerFrame } from '@relay/protocol';
 import { sql } from '../src/db';
 import { getUpdates } from '../src/domain/journal';
 import { sendMessage } from '../src/domain/messages';
@@ -24,7 +24,7 @@ const DEFAULTS = { direct: { muted: false, preview: true }, group: { muted: fals
 
 test('defaults without a row; PUT upserts, keeps the other fields and writes settingsChanged', async () => {
   const a = await login('Анна');
-  expect(await (await call(a, 'GET', '/settings')).json()).toEqual({ notify: DEFAULTS, sessionsTtlDays: 180, seq: 0 });
+  expect(await (await call(a, 'GET', '/settings')).json()).toEqual({ notify: DEFAULTS, sessionsTtlDays: 180, privacy: defaultPrivacy(), seq: 0 });
   expect((await sql`select count(*)::int as n from user_settings`)[0].n).toBe(0);
 
   const r = await call(a, 'PUT', '/settings/notify/group', { muted: true });

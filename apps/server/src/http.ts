@@ -6,21 +6,21 @@ import { clearSessionCookie, createSession, createUser, deleteSession, readSessi
 import { createChat, getChatMedia, getHistory, getMessagesByIds, listChats, listChatsPage } from './domain/chats';
 import { sql } from './db';
 import { DomainError } from './domain/errors';
-import { connected, disconnected, listPresence, type Publish } from './domain/presence';
+import { connected, disconnected, listPresence, reannounce, type Publish } from './domain/presence';
 import { searchMessages } from './domain/search';
 import { fileFor, MAX_FILE, storeUpload } from './domain/files';
 import { handleFrame } from './ws';
 import { checkUsername, getMe, getUser, setUsername, updateProfile } from './domain/profile';
 import { subscribe, unsubscribe, vapidKeys } from './domain/push';
-import { getSettings, setNotify } from './domain/settings';
-import { addContact, listContacts, removeContact, resolveUser, updateContact } from './domain/contacts';
+import { getSettings, setNotify, setPrivacy } from './domain/settings';
+import { addContact, blockUser, listBlocked, listContacts, removeContact, resolveUser, unblockUser, updateContact } from './domain/contacts';
 
-const STATUS: Record<string, number> = { bad_frame: 400, too_long: 400, username_invalid: 400, username_reserved: 400, username_taken: 409, bio_too_long: 400, note_too_long: 400, name_invalid: 400, birthday_invalid: 400, unauthorized: 401, not_member: 403, not_found: 404 };
+const STATUS: Record<string, number> = { bad_frame: 400, too_long: 400, username_invalid: 400, username_reserved: 400, username_taken: 409, bio_too_long: 400, note_too_long: 400, name_invalid: 400, birthday_invalid: 400, unauthorized: 401, not_member: 403, blocked: 403, not_found: 404 };
 const fail = (code: string) => Response.json({ code }, { status: STATUS[code] ?? 500 });
 
 export type WsData = { userId: number };
 
-const API = /^\/(health|me|users|contacts|settings|chats|presence|search|upload|files|push|ws|dev|logout)(\/|$)/;
+const API = /^\/(health|me|users|contacts|settings|privacy|blocks|chats|presence|search|upload|files|push|ws|dev|logout)(\/|$)/;
 
 /** Статика клиента из WEB_DIST. Путь не может выйти за папку; пути без расширения — SPA, отдаём index.html. */
 function serveStatic(pathname: string): Response {
@@ -96,6 +96,21 @@ export function createServer(opts: { port: number }): Server {
         if (req.method === 'GET' && url.pathname === '/settings') return Response.json(await getSettings(userId));
         const notifyType = /^\/settings\/notify\/([a-z]{1,16})$/.exec(url.pathname);
         if (req.method === 'PUT' && notifyType) return Response.json(await setNotify(userId, notifyType[1], await req.json().catch(() => null)));
+        const privacyKey = /^\/privacy\/([a-zA-Z]{1,16})$/.exec(url.pathname);
+        if (req.method === 'PUT' && privacyKey) {
+          const res = await setPrivacy(userId, privacyKey[1], await req.json().catch(() => null));
+          // присутствие — не журнал: собеседникам (и себе — взаимность) после коммита
+          if (privacyKey[1] === 'lastSeen') reannounce(publish, userId).catch((e) => console.error('presence:', e));
+          return Response.json(res);
+        }
+        if (req.method === 'GET' && url.pathname === '/blocks') return Response.json(await listBlocked(userId));
+        const block = /^\/blocks\/(\d{1,15})$/.exec(url.pathname);
+        if (block && (req.method === 'PUT' || req.method === 'DELETE')) {
+          const target = Number(block[1]);
+          const res = req.method === 'PUT' ? await blockUser(userId, target) : await unblockUser(userId, target);
+          reannounce(publish, userId).catch((e) => console.error('presence:', e));
+          return Response.json(res);
+        }
         const user = /^\/users\/(\d{1,15})$/.exec(url.pathname);
         if (req.method === 'GET' && user) return Response.json(await getUser(userId, Number(user[1])));
         if (req.method === 'POST' && url.pathname === '/logout') {

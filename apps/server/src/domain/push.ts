@@ -88,7 +88,8 @@ export async function pushNewMessage(m: { chatId: number; id: number; senderId: 
            (select ${nameForSql(sql`s.user_id`)} from users u where u.id = ${m.senderId}) as sender_name
       from push_subscriptions s
     join chat_members cm on cm.user_id = s.user_id and cm.chat_id = ${m.chatId}
-    where s.user_id <> ${m.senderId} and not (${m.chatId} = any(s.muted))`;
+    where s.user_id <> ${m.senderId} and not (${m.chatId} = any(s.muted))
+      and not exists (select 1 from blocks b where b.owner_id = s.user_id and b.user_id = ${m.senderId})   -- от заблокированного — никогда`;
   const online = subs.filter((s) => !isOnline(s.user_id as number));
   if (!online.length) return;
   const [info] = await sql`select kind, title from chats where id = ${m.chatId}`;

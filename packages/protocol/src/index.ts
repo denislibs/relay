@@ -33,7 +33,11 @@ export type Update =
   // контакт добавлен/изменён (contact) или удалён (removed + user — как его видно без контакта); только владельцу
   | { type: 'contactsChanged'; contact?: Contact; removed?: Id; user?: PublicUser | null }
   // настройки аккаунта (общие для устройств) изменились: приходят целиком, только владельцу
-  | { type: 'settingsChanged'; settings: UserSettings };
+  | { type: 'settingsChanged'; settings: UserSettings }
+  // правила конфиденциальности изменились: приходят целиком, только владельцу
+  | { type: 'privacyChanged'; rules: PrivacyRules }
+  // чёрный список: человек заблокирован (blocked) или разблокирован (unblocked); только владельцу
+  | { type: 'blocksChanged'; blocked?: BlockedUser; unblocked?: Id };
 
 /** Тело уведомления/push без предпросмотра: текст сообщения не раскрываем. */
 export const NO_PREVIEW = 'Новое сообщение';
@@ -43,7 +47,24 @@ export type NotifyType = 'direct' | 'group';
 export interface NotifyPref { muted: boolean; preview: boolean }
 /** Настройки аккаунта (GET /settings добавляет seq своей записи журнала на момент снимка). */
 export interface UserSettings { notify: Record<NotifyType, NotifyPref>; sessionsTtlDays: number }
-export interface SettingsSnapshot extends UserSettings { seq?: number }
+export interface SettingsSnapshot extends UserSettings { privacy?: PrivacyRules; seq?: number }
+
+/** Правила конфиденциальности. phoneDiscovery — «Кто найдёт меня по номеру» (только everyone | contacts). */
+export type PrivacyKey = 'phone' | 'phoneDiscovery' | 'lastSeen' | 'bio' | 'birthday';
+export type PrivacyMode = 'everyone' | 'contacts' | 'nobody';
+export const PRIVACY_KEYS: readonly PrivacyKey[] = ['phone', 'phoneDiscovery', 'lastSeen', 'bio', 'birthday'];
+/** Исключения: deny главнее allow, allow главнее mode. */
+export interface PrivacyRule { mode: PrivacyMode; allow: Id[]; deny: Id[] }
+export type PrivacyRules = Record<PrivacyKey, PrivacyRule>;
+/** Умолчания, когда правила нет: номер — контактам, остальное — всем. */
+export const defaultPrivacyRule = (key: PrivacyKey): PrivacyRule => ({ mode: key === 'phone' ? 'contacts' : 'everyone', allow: [], deny: [] });
+export const defaultPrivacy = (): PrivacyRules => ({
+  phone: defaultPrivacyRule('phone'), phoneDiscovery: defaultPrivacyRule('phoneDiscovery'), lastSeen: defaultPrivacyRule('lastSeen'),
+  bio: defaultPrivacyRule('bio'), birthday: defaultPrivacyRule('birthday'),
+});
+
+/** Заблокированный: профиль глазами владельца списка и когда заблокирован. seq — как у Contact. */
+export interface BlockedUser { userId: Id; user: PublicUser; at: string; seq?: number }
 
 /** День рождения: год необязателен. */
 export interface Birthday { day: number; month: number; year?: number }
@@ -61,7 +82,7 @@ export interface PublicUser {
 export interface Contact {
   userId: Id; firstName: string; lastName: string; note: string;
   user: PublicUser;
-  presence?: { online: boolean; lastSeen: string | null };
+  presence?: { online: boolean | null; lastSeen: string | null };
   seq?: number;
 }
 
@@ -77,7 +98,8 @@ export interface Me {
 export interface JournalEntry { seq: number; update: Update }
 
 export type ErrorCode = 'bad_frame' | 'unauthorized' | 'not_member' | 'not_found' | 'too_long' | 'forbidden' | 'internal'
-  | 'username_invalid' | 'username_taken' | 'username_reserved' | 'bio_too_long' | 'name_invalid' | 'birthday_invalid' | 'note_too_long';
+  | 'username_invalid' | 'username_taken' | 'username_reserved' | 'bio_too_long' | 'name_invalid' | 'birthday_invalid' | 'note_too_long'
+  | 'blocked';
 
 export type ClientFrame =
   | { op: 'hello'; lastSeq: number }
@@ -91,15 +113,18 @@ export type ClientFrame =
   | { op: 'react'; reqId: string; chatId: Id; id: Id; emoji: string | null }
   | { op: 'ping' };
 
-/** Присутствие собеседника: в сети сейчас или когда был последний раз (ISO). */
-export interface PresenceItem { userId: number; online: boolean; lastSeen: string | null }
+/** Присутствие собеседника: в сети сейчас или когда был последний раз (ISO).
+ *  Скрыто правилом «Последний визит» — {online: null, lastSeen: 'recently'} («был(а) недавно»). */
+export const RECENTLY = 'recently';
+export interface PresenceItem { userId: number; online: boolean | null; lastSeen: string | null }
 
 export type ServerFrame =
   | { op: 'hello'; seq: number; epoch: string }   // epoch — поколение базы; сменилось — кэш клиента недействителен
   | { op: 'updates'; from: number; to: number; items: JournalEntry[]; more: boolean }
   | { op: 'tooLong'; seq: number }
   | { op: 'ack'; reqId: string; result: Record<string, unknown> }
-  | { op: 'err'; reqId?: string; code: ErrorCode; retry: boolean }
+  // seq — у отказа blocked: номер своего журнала в момент отказа (разблокировку клиент узнаёт по более позднему userUpdated)
+  | { op: 'err'; reqId?: string; code: ErrorCode; retry: boolean; seq?: number }
   | { op: 'poke' }
   | { op: 'presence'; items: PresenceItem[] }
   | { op: 'typing'; chatId: Id; userId: Id }
