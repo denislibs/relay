@@ -176,7 +176,8 @@ function IconButton(props) {
   var rest = omit(props, ['icon', 'label', 'badge', 'active', 'filled', 'size', 'className', 'class']);
   return h('button', Object.assign({ type: 'button' }, rest, { onPointerDown: chain(rest.onPointerDown, ripple),
     class: cx('rl-iconbtn', props.filled && 'rl-iconbtn-filled', (props.className || props.class)),
-    'aria-label': props.label, title: props.label,
+    // без title: системная подсказка вылезает за край панели и окна (как в Telegram — подписи нет, есть aria-label)
+    'aria-label': props.label,
     'aria-pressed': props.active === undefined ? undefined : String(!!props.active)
   }),
     h(Icon, { name: props.icon, size: props.size || 22 }),

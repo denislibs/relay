@@ -164,7 +164,7 @@ body { margin: 0; font-family: var(--font-sans); color: var(--ink); background: 
 /* ---------- Checkbox ---------- */
 .rl-check { display: inline-flex; align-items: center; gap: var(--space-3); font: 500 15px/20px var(--font-sans); color: var(--ink); cursor: pointer; }
 .rl-check input { position: absolute; opacity: 0; width: 1px; height: 1px; }
-.rl-check-box { display: inline-flex; align-items: center; justify-content: center; width: 20px; height: 20px; border-radius: var(--radius-sm); border: 2px solid var(--ink-muted); color: var(--on-brand); transition: background-color var(--dur-instant) var(--ease-out), border-color var(--dur-instant) var(--ease-out); }
+.rl-check-box { display: inline-flex; align-items: center; justify-content: center; width: 20px; height: 20px; border-radius: var(--radius-sm); border: 2px solid var(--ink-muted); color: #fff; transition: background-color var(--dur-instant) var(--ease-out), border-color var(--dur-instant) var(--ease-out); }
 .rl-check input:checked + .rl-check-box { background: var(--brand); border-color: var(--brand); }
 .rl-check input:checked + .rl-check-box path { stroke-dasharray: 20; animation: rl-draw var(--dur-fast) var(--ease-out) both; }
 .rl-check input:not(:checked) + .rl-check-box svg { visibility: hidden; }
@@ -1131,8 +1131,8 @@ button.rl-tab:hover { color: var(--ink); }
 .rl-range-head { display: flex; justify-content: space-between; align-items: baseline; gap: var(--space-3); font: 400 16px/22px var(--font-sans); color: var(--ink); }
 .rl-range-value { color: var(--ink-muted); font-variant-numeric: tabular-nums; }
 .rl-range-input { -webkit-appearance: none; appearance: none; display: block; width: 100%; height: 24px; margin: var(--space-1) 0 0; background: transparent; cursor: pointer; }
-.rl-range-input::-webkit-slider-runnable-track { height: 4px; border-radius: 2px; background: linear-gradient(to right, var(--brand) var(--pct), var(--line-strong) var(--pct)); }
-.rl-range-input::-moz-range-track { height: 4px; border-radius: 2px; background: var(--line-strong); }
+.rl-range-input::-webkit-slider-runnable-track { height: 4px; border-radius: 2px; background: linear-gradient(to right, var(--brand) var(--pct), var(--line) var(--pct)); }
+.rl-range-input::-moz-range-track { height: 4px; border-radius: 2px; background: var(--line); }
 .rl-range-input::-moz-range-progress { height: 4px; border-radius: 2px; background: var(--brand); }
 .rl-range-input::-webkit-slider-thumb { -webkit-appearance: none; width: 18px; height: 18px; margin-top: -7px; border-radius: 50%; border: 0; background: var(--brand); box-shadow: 0 1px 3px rgba(0,0,0,.3); transition: transform var(--dur-instant) var(--ease-out); }
 .rl-range-input::-moz-range-thumb { width: 18px; height: 18px; border-radius: 50%; border: 0; background: var(--brand); }
