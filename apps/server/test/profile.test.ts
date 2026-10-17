@@ -135,7 +135,7 @@ test('GET /users/:id: self and chat peer ok, stranger 404', async () => {
   const a = await login('Анна', '+79005550001'), b = await login('Борис'), s = await login('Посторонний');
   await makeChat([a.userId, b.userId]);
   await call(a, 'PUT', '/me/username', { username: 'anna_x' });
-  expect(await (await call(b, 'GET', `/users/${a.userId}`)).json()).toEqual({ id: a.userId, name: 'Анна', firstName: 'Анна', lastName: '', username: 'anna_x', bio: null, birthday: null, phone: null });
+  expect(await (await call(b, 'GET', `/users/${a.userId}`)).json()).toEqual({ id: a.userId, name: 'Анна', firstName: 'Анна', lastName: '', publicName: 'Анна', username: 'anna_x', bio: null, birthday: null, phone: null });
   expect((await call(a, 'GET', `/users/${a.userId}`)).status).toBe(200);
   const r = await call(s, 'GET', `/users/${a.userId}`);
   expect([r.status, (await r.json()).code]).toEqual([404, 'not_found']);

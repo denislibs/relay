@@ -7,10 +7,10 @@ const RESERVED = new Set(['admin', 'relay', 'support', 'settings', 'help', 'api'
 const USERNAME = /^[a-z][a-z0-9_]{4,31}$/;
 const len = (s: string) => [...s].length;
 
-type Row = { id: number; name: string; first_name: string | null; last_name: string | null; username: string | null; bio: string | null; birthday: Birthday | null; phone: string | null };
-const COLS = sql`id, name, first_name, last_name, username, bio, birthday, phone`;
+export type Row = { id: number; name: string; first_name: string | null; last_name: string | null; username: string | null; bio: string | null; birthday: Birthday | null; phone: string | null };
+export const COLS = sql`id, name, first_name, last_name, username, bio, birthday, phone`;
 
-const fullName = (first: string, last: string) => `${first} ${last}`.trim();
+export const fullName = (first: string, last: string) => `${first} ${last}`.trim();
 
 /** Пользователи, созданные без раздельных полей (вход по имени), делятся по первому пробелу — как миграция. */
 function parts(r: Row): [string, string] {
@@ -28,7 +28,7 @@ function shape(r: Row) {
 }
 
 /** Последний номер своего журнала: профиль «на момент seq» (см. Me.seq). */
-async function selfSeq(tx: Tx | typeof sql, userId: number): Promise<number> {
+export async function selfSeq(tx: Tx | typeof sql, userId: number): Promise<number> {
   const [s] = await tx`select seq from user_seq where user_id = ${userId}`;
   return s ? Number(s.seq) : 0;
 }
@@ -44,15 +44,28 @@ export async function getMe(userId: number): Promise<Me> {
 }
 
 /** Единственная точка правил приватности: B6 подставит сюда настоящую проверку (телефон, био, день рождения…). */
-function canSee(viewer: number, owner: number, field: 'phone' | 'username' | 'bio' | 'birthday'): boolean {
+export function canSee(viewer: number, owner: number, field: 'phone' | 'username' | 'bio' | 'birthday'): boolean {
   return field !== 'phone' || viewer === owner; // телефон — только себе, пока нет правил B6
 }
 
-/** Представление пользователя для конкретного зрителя. Всё, что уходит наружу (HTTP, журнал), идёт через эту функцию. */
-export function publicUser(viewer: number, r: Row): PublicUser {
+/** Правило «Кто найдёт меня по номеру» (B6): пока находят все. */
+export function canFindByPhone(_viewer: number, _owner: number): boolean {
+  return true;
+}
+
+/** Имя, которое владелец дал контакту. */
+export type ContactName = { first_name: string; last_name: string };
+
+/**
+ * Представление пользователя для конкретного зрителя. Всё, что уходит наружу (HTTP, журнал), идёт через эту функцию.
+ * contact — запись зрителя об этом человеке: имя у зрителя — контактное (видно только ему), своё — в publicName.
+ */
+export function publicUser(viewer: number, r: Row, contact?: ContactName | null): PublicUser {
   const s = shape(r);
+  const c = contact && r.id !== viewer ? contact : null;
   return {
-    id: r.id, name: s.name, firstName: s.firstName, lastName: s.lastName,
+    id: r.id, name: c ? fullName(c.first_name, c.last_name) : s.name,
+    firstName: c ? c.first_name : s.firstName, lastName: c ? c.last_name : s.lastName, publicName: s.name,
     username: canSee(viewer, r.id, 'username') ? s.username : null,
     bio: canSee(viewer, r.id, 'bio') ? s.bio : null,
     birthday: canSee(viewer, r.id, 'birthday') ? s.birthday : null,
@@ -60,23 +73,38 @@ export function publicUser(viewer: number, r: Row): PublicUser {
   };
 }
 
-/** Кто видит пользователя: все, с кем есть общий чат (личный или группа). B3 добавит контакты. */
+/** Кто видит пользователя: все, с кем есть общий чат (личный или группа), и те, у кого он в контактах. */
 export async function viewersOf(tx: Tx | typeof sql, userId: number): Promise<number[]> {
   const rows = await tx`
-    select distinct b.user_id from chat_members a join chat_members b on b.chat_id = a.chat_id
-     where a.user_id = ${userId} and b.user_id <> ${userId}`;
-  return rows.map((r) => r.user_id as number);
+    select b.user_id from chat_members a join chat_members b on b.chat_id = a.chat_id
+     where a.user_id = ${userId} and b.user_id <> ${userId}
+    union
+    select owner_id from contacts where user_id = ${userId}`;
+  return rows.map((r) => Number(r.user_id));
 }
 
-/** Профиль другого пользователя; без общего чата — 404 (B3 ослабит для контактов и resolve). */
+/** Контактные имена этого человека у зрителей (зритель → имя). */
+export async function contactNames(tx: Tx | typeof sql, userId: number, viewers: number[]): Promise<Map<number, ContactName>> {
+  if (!viewers.length) return new Map();
+  const rows = await tx`select owner_id, first_name, last_name from contacts where user_id = ${userId} and owner_id = any(${viewers}::bigint[])`;
+  return new Map(rows.map((r) => [Number(r.owner_id), { first_name: r.first_name as string, last_name: r.last_name as string }]));
+}
+
+/** Может ли зритель смотреть профиль: общий чат или контакт в любую сторону. */
+export async function canView(db: Tx | typeof sql, viewer: number, id: number): Promise<boolean> {
+  if (id === viewer) return true;
+  const [r] = await db`select (
+      exists (select 1 from chat_members a join chat_members b on b.chat_id = a.chat_id where a.user_id = ${id} and b.user_id = ${viewer})
+      or exists (select 1 from contacts where (owner_id = ${viewer} and user_id = ${id}) or (owner_id = ${id} and user_id = ${viewer}))
+    ) as ok`;
+  return !!r.ok;
+}
+
+/** Профиль другого пользователя; без общего чата и контакта — 404 (найти по @имени/номеру — /users/resolve). */
 export async function getUser(viewer: number, id: number): Promise<PublicUser> {
   const [r] = await sql<Row[]>`select ${COLS} from users where id = ${id}`;
-  if (!r) throw new DomainError('not_found');
-  if (id !== viewer) {
-    const [shared] = await sql`select exists (select 1 from chat_members a join chat_members b on b.chat_id = a.chat_id where a.user_id = ${id} and b.user_id = ${viewer}) as ok`;
-    if (!shared.ok) throw new DomainError('not_found');
-  }
-  return publicUser(viewer, r);
+  if (!r || !(await canView(sql, viewer, id))) throw new DomainError('not_found');
+  return publicUser(viewer, r, (await contactNames(sql, id, [viewer])).get(viewer));
 }
 
 // ---------- валидация ----------
@@ -84,7 +112,7 @@ export async function getUser(viewer: number, id: number): Promise<PublicUser> {
 // C0/C1, bidi-переопределения и изоляты, U+200B, BOM. ZWJ/ZWNJ оставляем: на них держатся составные эмодзи и персидский.
 const BAD_CHARS = /[\p{Cc}\u202A-\u202E\u2066-\u2069\u200B\uFEFF]/u;
 
-function validName(v: unknown, min: number): string {
+export function validName(v: unknown, min: number): string {
   if (typeof v !== 'string') throw new DomainError('bad_frame');
   const s = v.trim().replace(/\s+/g, ' ');
   if (len(s) < min || len(s) > 64 || BAD_CHARS.test(s)) throw new DomainError('name_invalid');
@@ -145,8 +173,9 @@ async function save(userId: number, change: (tx: Tx, cur: Row) => Promise<void>)
     const [r] = await tx<Row[]>`select ${COLS} from users where id = ${userId}`;
     if (JSON.stringify(cur) === JSON.stringify(r)) return { userId: r.id, ...shape(r), seq: await selfSeq(tx, userId) }; // ничего не изменилось — журнал не трогаем
     const viewers = await viewersOf(tx, userId);
-    // каждому — своё представление (B6: скрытые поля)
-    await appendUpdates(tx, [userId, ...viewers].map((v) => ({ userId: v, update: { type: 'userUpdated' as const, user: publicUser(v, r) } })));
+    const names = await contactNames(tx, userId, viewers);
+    // каждому — своё представление (B6: скрытые поля; владельцу контакта — его имя для этого человека)
+    await appendUpdates(tx, [userId, ...viewers].map((v) => ({ userId: v, update: { type: 'userUpdated' as const, user: publicUser(v, r, names.get(v)) } })));
     return { userId: r.id, ...shape(r), seq: await selfSeq(tx, userId) };   // seq своей записи userUpdated (строка user_seq под замком транзакции)
   }) as Promise<Me>;
 }

@@ -29,7 +29,9 @@ export type Update =
   | { type: 'messageEdited'; chatId: Id; id: Id; body: string; editedAt: string }
   | { type: 'messageDeleted'; chatId: Id; id: Id }
   | { type: 'reactions'; chatId: Id; id: Id; reactions: Reaction[] }
-  | { type: 'userUpdated'; user: PublicUser };   // профиль изменился: себе и всем, кто видит пользователя
+  | { type: 'userUpdated'; user: PublicUser }   // профиль изменился: себе и всем, кто видит пользователя
+  // контакт добавлен/изменён (contact) или удалён (removed + user — как его видно без контакта); только владельцу
+  | { type: 'contactsChanged'; contact?: Contact; removed?: Id; user?: PublicUser | null };
 
 /** День рождения: год необязателен. */
 export interface Birthday { day: number; month: number; year?: number }
@@ -38,6 +40,17 @@ export interface Birthday { day: number; month: number; year?: number }
 export interface PublicUser {
   id: Id; name: string; firstName: string; lastName: string;
   username: string | null; bio: string | null; birthday: Birthday | null; phone: string | null;
+  /** собственное имя пользователя; name/firstName/lastName у владельца контакта — контактные */
+  publicName?: string;
+}
+
+/** Контакт: имя, которое дал владелец (видно только ему), заметка, профиль и присутствие.
+ *  seq — номер записи журнала владельца, на момент которой снят ответ (порядок ответов и журнала). */
+export interface Contact {
+  userId: Id; firstName: string; lastName: string; note: string;
+  user: PublicUser;
+  presence?: { online: boolean; lastSeen: string | null };
+  seq?: number;
 }
 
 /** Собственный профиль (GET /me). userId и name — совместимость со старым клиентом.
@@ -52,7 +65,7 @@ export interface Me {
 export interface JournalEntry { seq: number; update: Update }
 
 export type ErrorCode = 'bad_frame' | 'unauthorized' | 'not_member' | 'not_found' | 'too_long' | 'forbidden' | 'internal'
-  | 'username_invalid' | 'username_taken' | 'username_reserved' | 'bio_too_long' | 'name_invalid' | 'birthday_invalid';
+  | 'username_invalid' | 'username_taken' | 'username_reserved' | 'bio_too_long' | 'name_invalid' | 'birthday_invalid' | 'note_too_long';
 
 export type ClientFrame =
   | { op: 'hello'; lastSeq: number }

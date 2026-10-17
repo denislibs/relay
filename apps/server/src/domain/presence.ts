@@ -17,13 +17,16 @@ export function isOnline(userId: number): boolean {
   return (conns.get(userId) ?? 0) > 0 || leaving.has(userId);
 }
 
+/** Кому сообщать о присутствии пользователя: собеседникам по личным чатам и тем, у кого он в контактах. */
 async function peersOf(userId: number): Promise<number[]> {
   const rows = await sql`
-    select distinct o.user_id from chat_members m
+    select o.user_id from chat_members m
     join chats c on c.id = m.chat_id and c.kind = 'direct'
     join chat_members o on o.chat_id = m.chat_id and o.user_id <> m.user_id
-    where m.user_id = ${userId}`;
-  return rows.map((r) => r.user_id as number);
+    where m.user_id = ${userId}
+    union
+    select owner_id from contacts where user_id = ${userId}`;
+  return rows.map((r) => Number(r.user_id));
 }
 
 async function announce(publish: Publish, item: PresenceItem): Promise<void> {
@@ -51,14 +54,17 @@ export function disconnected(publish: Publish, userId: number): void {
   }, graceMs()));
 }
 
-/** Присутствие всех собеседников пользователя — снимок после подключения. */
+/** Присутствие всех собеседников и контактов пользователя — снимок после подключения. */
 export async function listPresence(userId: number): Promise<PresenceItem[]> {
   const rows = await sql`
-    select distinct u.id, u.last_seen_at from chat_members m
-    join chats c on c.id = m.chat_id and c.kind = 'direct'
-    join chat_members o on o.chat_id = m.chat_id and o.user_id <> m.user_id
-    join users u on u.id = o.user_id
-    where m.user_id = ${userId}`;
+    select u.id, u.last_seen_at from users u
+     where u.id in (
+       select o.user_id from chat_members m
+         join chats c on c.id = m.chat_id and c.kind = 'direct'
+         join chat_members o on o.chat_id = m.chat_id and o.user_id <> m.user_id
+        where m.user_id = ${userId}
+       union
+       select user_id from contacts where owner_id = ${userId})`;
   return rows.map((r) => ({
     userId: r.id as number,
     online: isOnline(r.id as number),
