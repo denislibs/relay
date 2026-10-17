@@ -1,7 +1,8 @@
 // «Скачать диагностику»: один JSON — обзор, последние 2000 событий журнала, ошибки. Без тел сообщений:
-// строки body/text/bio/thumb заменяются длиной (в журнале они и так обрезаны до 40 символов — здесь убираем совсем).
+// строки body/text/bio/thumb заменяются длиной (в журнале они и так обрезаны до 40 символов — здесь убираем совсем);
+// личные поля профиля и контакта (телефон, день рождения, имена, файлы) — тоже: файл прикладывают к баг-репорту.
 
-const SECRET = new Set(['body', 'text', 'bio', 'thumb', 'draft', 'note', 'q', 'query']);
+const SECRET = new Set(['body', 'text', 'bio', 'thumb', 'draft', 'note', 'q', 'query', 'phone', 'birthday', 'firstName', 'lastName', 'name', 'username']);
 const MAX_DEPTH = 8;
 
 export function redact(v: unknown, depth = 0): unknown {
@@ -10,7 +11,7 @@ export function redact(v: unknown, depth = 0): unknown {
   if (!v || typeof v !== 'object') return v;
   const out: Record<string, unknown> = {};
   for (const [k, x] of Object.entries(v as Record<string, unknown>)) {
-    out[k] = SECRET.has(k) && typeof x === 'string' ? `‹${x.length} симв.›` : redact(x, depth + 1);
+    out[k] = !SECRET.has(k) || x == null ? redact(x, depth + 1) : typeof x === 'string' ? `‹${x.length} симв.›` : '‹скрыто›';
   }
   return out;
 }

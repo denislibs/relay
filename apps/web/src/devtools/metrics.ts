@@ -106,6 +106,11 @@ function loop(now: number): void {
   rafId = requestAnimationFrame(loop);
 }
 
+/** Есть ли long tasks в этом браузере (null-карточка: «не поддерживается»). */
+export function longTasksSupported(po: { supportedEntryTypes?: readonly string[] } | undefined): boolean {
+  return !!po?.supportedEntryTypes?.includes('longtask');
+}
+
 function countDom(): void { domNodes = document.getElementsByTagName('*').length; }
 
 export function snapshot(): MainMetrics {
@@ -128,11 +133,14 @@ export function startMetrics(onTick: (m: MainMetrics) => void): () => void {
   if (users++ === 0) {
     frames = 0; fpsFrom = 0; fps = null; tasks = [];
     rafId = requestAnimationFrame(loop);
-    try {
-      observer = new PerformanceObserver((list) => { for (const e of list.getEntries()) tasks.push({ t: e.startTime, ms: Math.round(e.duration) }); });
-      observer.observe({ type: 'longtask', buffered: true });
-      longTaskSupported = true;
-    } catch { observer = null; longTaskSupported = false; }
+    // Firefox / Safari: observe({type:'longtask'}) молча ничего не делает — проверяем список типов заранее
+    longTaskSupported = longTasksSupported(typeof PerformanceObserver === 'undefined' ? undefined : PerformanceObserver);
+    if (longTaskSupported) {
+      try {
+        observer = new PerformanceObserver((list) => { for (const e of list.getEntries()) tasks.push({ t: e.startTime, ms: Math.round(e.duration) }); });
+        observer.observe({ type: 'longtask', buffered: true });
+      } catch { observer = null; longTaskSupported = false; }
+    }
     countDom();
     domTimer = setInterval(countDom, DOM_MS);
     tickTimer = setInterval(() => { const m = snapshot(); for (const fn of subs) fn(m); }, 1000);

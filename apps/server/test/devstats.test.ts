@@ -1,11 +1,11 @@
 import { afterAll, beforeEach, expect, test } from 'bun:test';
-import { createServer } from '../src/http';
+import { createServer, setDevStatsThrottleMs } from '../src/http';
 import { nextFrame, resetDb } from './helpers';
 
 const server = createServer({ port: 0 });
 const base = `http://localhost:${server.port}`;
 afterAll(() => server.stop(true));
-beforeEach(resetDb);
+beforeEach(async () => { await resetDb(); setDevStatsThrottleMs(0); });
 
 async function login(name: string) {
   const res = await fetch(`${base}/dev/login`, { method: 'POST', body: JSON.stringify({ name }) });
@@ -50,4 +50,16 @@ test('/dev/stats: seq, sockets, journal size and min(seq), NOTIFY latency', asyn
   // сокет закрыт — счётчик вернулся
   await Bun.sleep(100);
   expect((await (await fetch(`${base}/dev/stats`, authed(a.token))).json()).sockets).toBe(0);
+});
+
+test('/dev/stats is throttled to one computation per second per user (the repeat gets the cached answer)', async () => {
+  setDevStatsThrottleMs(1000);
+  const a = await login('Анна'), b = await login('Борис');
+  const [s1, s2] = await Promise.all([1, 2].map(async () => (await fetch(`${base}/dev/stats`, authed(a.token))).json()));
+  const s3 = await (await fetch(`${base}/dev/stats`, authed(a.token))).json();
+  expect(s2.at).toBe(s1.at);
+  expect(s3.at).toBe(s1.at);
+  expect((await (await fetch(`${base}/dev/stats`, authed(b.token))).json()).userId).toBe(b.userId);   // кэш — свой у каждого
+  await Bun.sleep(1050);
+  expect((await (await fetch(`${base}/dev/stats`, authed(a.token))).json()).at).toBeGreaterThan(s1.at);
 });

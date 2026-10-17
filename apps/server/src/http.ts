@@ -25,6 +25,11 @@ const fail = (code: string) => Response.json({ code }, { status: STATUS[code] ??
 /** checkedAt — когда сокет последний раз отмечал активность и проверял свой сеанс (domain/sessions.checkSocket). */
 export type WsData = { userId: number; sessionId: number; checkedAt: number };
 
+/** /dev/stats: ответ на пользователя живёт devStatsMs (тесты ставят 0). */
+let devStatsMs = 1000;
+const devStatsCache = new Map<number, { at: number; body: Promise<unknown> }>();
+export function setDevStatsThrottleMs(ms: number): void { devStatsMs = ms; devStatsCache.clear(); }
+
 /** Открытые сокеты пользователя в этом процессе (dev: /dev/stats). */
 const userSockets = new Map<number, number>();
 const countSocket = (userId: number, d: number) => {
@@ -160,8 +165,16 @@ export function createServer(opts: { port: number }): Server {
           return Response.json({ id: await createChat(kind, title, ids) });
         }
         if (process.env.DEV_LOGIN === '1' && req.method === 'GET' && url.pathname === '/dev/stats') {
-          const [j, notifyMs] = await Promise.all([journalStats(userId), notifyLatency().catch(() => null)]);
-          return Response.json({ at: Date.now(), userId, seq: j.seq, sockets: userSockets.get(userId) ?? 0, journal: { size: j.size, minSeq: j.minSeq }, notifyMs });
+          // count(*) по журналу и pg_notify — не чаще раза в devStatsMs на пользователя: повтор получает тот же ответ
+          const hit = devStatsCache.get(userId);
+          if (hit && Date.now() - hit.at < devStatsMs) return Response.json(await hit.body);
+          const body = (async () => {
+            const [j, notifyMs] = await Promise.all([journalStats(userId), notifyLatency().catch(() => null)]);
+            return { at: Date.now(), userId, seq: j.seq, sockets: userSockets.get(userId) ?? 0, journal: { size: j.size, minSeq: j.minSeq }, notifyMs };
+          })();
+          devStatsCache.set(userId, { at: Date.now(), body });
+          if (devStatsCache.size > 1000) devStatsCache.clear();
+          try { return Response.json(await body); } catch (e) { devStatsCache.delete(userId); throw e; }
         }
         if (req.method === 'POST' && url.pathname === '/upload') {
           // тело — сам файл; ?name=…&w=…&h=… (размеры фото считает клиент, он его уже декодировал)

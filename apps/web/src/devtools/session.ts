@@ -31,6 +31,7 @@ const emit = (t: Topic) => { for (const fn of subs[t]) fn(); };
 /** Открыть раздел (счётчик: повторное открытие не дублирует подписки). Возвращает закрытие. */
 export function openDevSession(): () => void {
   if (users++ === 0) {
+    serverStopped = false;   // новое открытие раздела — сервер спросим снова
     const sm = new Mirror();
     const ws = watchDev({ kind: 'devStats' }, (p) => { sm.apply(p); stats = sm.list()[0] ?? null; emit('stats'); });
     logM.items.clear(); logM.order = []; logList = [];
@@ -59,13 +60,20 @@ export function openDevSession(): () => void {
   };
 }
 
-/** Сервер опрашивается раз в 2 с, только пока видна вкладка «Обзор» и документ виден. */
+/** Сервер опрашивается раз в 2 с, только пока видна вкладка «Обзор» и документ виден.
+ *  404 (сервер без DEV_LOGIN) и 401 (сеанса нет) — опрос встаёт до следующего открытия раздела. */
 export function setServerPolling(on: boolean): void {
   serverWanted = on;
   pumpServer();
 }
+let serverStopped = false;
+/** Ответ сервера → что делать с опросом (чистая логика, для тестов). */
+export function pollVerdict(status: number): 'ok' | 'stop' | 'retry' {
+  if (status === 404 || status === 401) return 'stop';
+  return status >= 200 && status < 300 ? 'ok' : 'retry';
+}
 function pumpServer(): void {
-  const run = serverWanted && users > 0 && document.visibilityState === 'visible';
+  const run = serverWanted && users > 0 && !serverStopped && document.visibilityState === 'visible';
   if (!run) { if (serverTimer) clearTimeout(serverTimer); serverTimer = null; serverGen++; return; }
   if (serverTimer) return;
   const gen = ++serverGen;
@@ -73,8 +81,11 @@ function pumpServer(): void {
     try {
       const res = await fetch('/dev/stats', { credentials: 'include' });
       if (gen !== serverGen) return;
-      if (res.status === 404) { server = { stats: null, error: 'unavailable' }; emit('server'); serverTimer = null; return; }   // сервер без DEV_LOGIN
-      server = { stats: res.ok ? (await res.json()) as ServerStats : server.stats, error: res.ok ? null : 'offline' };
+      const v = pollVerdict(res.status);
+      if (v === 'stop') { serverStopped = true; server = { stats: null, error: 'unavailable' }; emit('server'); serverTimer = null; return; }
+      const body = v === 'ok' ? (await res.json()) as ServerStats : null;
+      if (gen !== serverGen) return;   // пока читали тело, опрос остановили
+      server = { stats: body ?? server.stats, error: body ? null : 'offline' };
     } catch { if (gen !== serverGen) return; server = { stats: server.stats, error: 'offline' }; }
     emit('server');
     serverTimer = setTimeout(tick, SERVER_MS);

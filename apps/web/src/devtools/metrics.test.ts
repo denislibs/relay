@@ -1,5 +1,5 @@
 import { expect, test } from 'bun:test';
-import { ERRORS_CAP, clearErrors, getErrors, ingestLogErrors, markErrorsSeen, newErrorCount, pushError } from './metrics';
+import { ERRORS_CAP, clearErrors, getErrors, ingestLogErrors, longTasksSupported, markErrorsSeen, newErrorCount, pushError } from './metrics';
 
 test('errors: ring of 200, repeats folded into a counter, new-errors count', () => {
   clearErrors();
@@ -37,4 +37,11 @@ test('engine restart: a new log epoch resets the error cursor (ids start again a
   ingestLogErrors([{ id: 1, ep: 'B', t: 2, kind: 'error', type: 'host', data: { message: 'after restart' } }]);
   ingestLogErrors([{ id: 2, ep: 'B', t: 3, kind: 'ws-in', type: 'err', data: { code: 'internal' } }]);
   expect(getErrors().map((e) => e.message)).toEqual(['engine: old', 'host: after restart', 'err internal']);
+});
+
+test('long tasks: supported only when the browser lists the entry type', () => {
+  expect(longTasksSupported({ supportedEntryTypes: ['longtask', 'paint'] })).toBe(true);
+  expect(longTasksSupported({ supportedEntryTypes: ['paint'] })).toBe(false);   // Firefox / Safari
+  expect(longTasksSupported({})).toBe(false);
+  expect(longTasksSupported(undefined)).toBe(false);
 });
