@@ -635,37 +635,44 @@ function SidebarHeader(props) {
 }
 
 /* ---------- FolderTabs: pills with counters, one sliding indicator (measure → mutate) ---------- */
+/* FolderTabs — полоса табов (папки, вкладки медиа). Белая полоса с тенью; два слоя подписей:
+   нижний — серые кнопки, верхний (aria-hidden) — те же подписи в цвете бренда на светлой таблетке.
+   Верхний слой виден только в окне clip-path над активным табом; окно переезжает плавно, и текст
+   перекрашивается ровно там, где проходит таблетка. */
 function FolderTabs(props) {
-  var host = useRef(null), ind = useRef(null), first = useRef(true);
+  var host = useRef(null), track = useRef(null), top = useRef(null), first = useRef(true);
   var items = props.items || [];
   useLayoutEffect(function () {
     requestMeasure(function () {
-      var el = host.current && host.current.querySelector('[aria-selected="true"]');
+      var tr = track.current, el = tr && tr.querySelector('.rl-tab[aria-selected="true"]');
       if (!el) return;
-      var x = el.offsetLeft, w = el.offsetWidth, sl = host.current.scrollLeft, cw = host.current.clientWidth;
+      var x = el.offsetLeft, w = el.offsetWidth, tw = tr.offsetWidth, sl = host.current.scrollLeft, cw = host.current.clientWidth;
       requestMutation(function () {
-        var s = ind.current.style;
-        if (first.current || reducedMotion()) { s.transition = 'none'; first.current = false; } else { s.transition = ''; beginHeavyAnimation(260); }
-        s.width = w + 'px';
-        s.transform = 'translateX(' + x + 'px)';
-        // keep the active pill in view
+        var s = top.current.style;
+        if (first.current || reducedMotion()) { s.transition = 'none'; first.current = false; } else { s.transition = ''; beginHeavyAnimation(300); }
+        s.clipPath = 'inset(0 ' + (tw - x - w) + 'px 0 ' + x + 'px round 18px)';
+        // активный таб — в зоне видимости полосы
         if (x < sl || x + w > sl + cw) host.current.scrollTo({ left: x - 24, behavior: reducedMotion() ? 'auto' : 'smooth' });
       });
     });
-  }, [props.active, items.length]);
+  }, [props.active, items.map(function (t) { return t.id + ':' + (t.count || 0); }).join(',')]);
   function onKey(e) {
     var i = items.findIndex(function (t) { return t.id === props.active; });
     if (e.key === 'ArrowRight' && i < items.length - 1) props.onChange(items[i + 1].id);
     if (e.key === 'ArrowLeft' && i > 0) props.onChange(items[i - 1].id);
   }
-  return h('div', { ref: host, class: 'rl-folders', role: 'tablist', 'aria-label': 'Папки', onKeyDown: onKey },
-    h('span', { ref: ind, class: 'rl-folders-ind', 'aria-hidden': 'true' }),
-    items.map(function (t) {
-      var on = t.id === props.active;
-      return h('button', { key: t.id, type: 'button', role: 'tab', 'aria-selected': String(on), tabIndex: on ? 0 : -1, class: cx('rl-folder', on && 'rl-folder-on'), onPointerDown: ripple, onClick: function () { props.onChange(t.id); } },
-        h('span', null, t.label),
-        t.count ? h('span', { key: t.count, class: cx('rl-folder-count', t.muted && 'rl-folder-count-muted') }, t.count > 999 ? '999+' : t.count) : null);
-    }));
+  function inner(t, active) {
+    return [h('span', { key: 'l' }, t.label),
+      t.count ? h('span', { key: 'c' + t.count, class: cx('rl-folder-count', t.muted && 'rl-folder-count-muted', active && 'rl-folder-count-on') }, t.count > 999 ? '999+' : t.count) : null];
+  }
+  return h('div', { ref: host, class: cx('rl-tabs', props.class), role: 'tablist', 'aria-label': props.label || 'Папки', onKeyDown: onKey },
+    h('div', { ref: track, class: 'rl-tabs-track' },
+      items.map(function (t) {
+        var on = t.id === props.active;
+        return h('button', { key: t.id, type: 'button', role: 'tab', 'aria-selected': String(on), tabIndex: on ? 0 : -1, class: 'rl-tab', onPointerDown: ripple, onClick: function () { props.onChange(t.id); } }, inner(t, false));
+      }),
+      h('div', { ref: top, class: 'rl-tabs-top', 'aria-hidden': 'true' },
+        items.map(function (t) { return h('span', { key: t.id, class: 'rl-tab' }, inner(t, true)); }))));
 }
 
 /* ---------- Fab ---------- */

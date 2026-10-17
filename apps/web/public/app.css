@@ -104,3 +104,6 @@ body { background: var(--bg); color: var(--ink); font-family: var(--font-sans); 
 .app-findrow-body .rl-mark, .rl-shell .rl-feed .rl-mark { padding: 1px 3px; border-radius: 4px; background: color-mix(in srgb, var(--brand-text, #3390ec) 18%, transparent); color: var(--ink); }
 .app-findempty { padding: 10px 16px 12px; text-align: center; color: var(--ink-muted); font: 400 15px/20px var(--font-sans); }
 .rl-shell .rl-feed .rl-mark-current { background: color-mix(in srgb, var(--brand-text, #3390ec) 34%, transparent); box-shadow: none; animation: none; }
+
+/* папки — отдельная полоса с тенью внутри карточки сайдбара, как в Telegram Web A */
+.app-folders { margin: 2px 12px 8px; }

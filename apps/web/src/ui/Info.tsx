@@ -72,7 +72,7 @@ export function Info() {
           />
         </div>
         <div class="rl-aside-tabs">
-          <FolderTabs active={tab} onChange={setTab} items={[
+          <FolderTabs label="Вложения чата" active={tab} onChange={setTab} items={[
             { id: 'media', label: 'Медиа' },
             { id: 'files', label: 'Файлы' },
             { id: 'links', label: 'Ссылки', count: links.length || undefined },

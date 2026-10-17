@@ -136,7 +136,7 @@ export function Sidebar() {
       embedded
       paged
       header={<SidebarHeader onMenu={() => setMenu(true)} status={searchStatus ?? undefined} me={me.name} searchId="side-search" value={search} placeholder="Поиск" onSearch={(e: Event) => setGlobal({ search: (e.target as HTMLInputElement).value })} />}
-      tabs={<FolderTabs active={folder} onChange={(id: 'all' | 'unread') => setGlobal({ folder: id })} items={[
+      tabs={<FolderTabs class="app-folders" active={folder} onChange={(id: 'all' | 'unread') => setGlobal({ folder: id })} items={[
         { id: 'all', label: 'Все' },
         { id: 'unread', label: 'Непрочитанные', count: counters.unreadChats },
       ]} />}
