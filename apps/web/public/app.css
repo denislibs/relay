@@ -70,3 +70,13 @@ body { background: var(--bg); color: var(--ink); font-family: var(--font-sans); 
 .app-drop { position: fixed; inset: 0; z-index: 50; }
 .app-media-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 2px; padding: 0 var(--space-3) var(--space-4); align-content: start; overflow-y: auto; }
 .app-media-cell { position: relative; aspect-ratio: 1; padding: 0; border: 0; overflow: hidden; border-radius: 4px; cursor: pointer; background: var(--field); }
+
+/* переход к сообщению — как в Telegram: полоса на всю ширину чата за строкой, проявляется и тает */
+.rl-shell .rl-feed { container-type: inline-size; }   /* 100cqw у полосы = ширина ленты, без горизонтальной прокрутки */
+.app-msg-flash { isolation: isolate; }
+.app-msg-flash::before { content: ''; position: absolute; z-index: -1; top: -2px; bottom: -2px; left: 50%; width: 100cqw; transform: translateX(-50%);
+  background: var(--msg-highlight, rgba(0, 0, 0, .1)); pointer-events: none; animation: app-msg-band 1.6s ease-out both; }
+:root[data-theme="dark"] .app-msg-flash::before { --msg-highlight: rgba(255, 255, 255, .08); }
+@media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) .app-msg-flash::before { --msg-highlight: rgba(255, 255, 255, .08); } }
+@keyframes app-msg-band { 0% { opacity: 0; } 12%, 60% { opacity: 1; } 100% { opacity: 0; } }
+@media (prefers-reduced-motion: reduce) { .app-msg-flash::before { animation-duration: 1.2s; } }

@@ -44,7 +44,7 @@ const Row = memo(function Row({ onOpen, hl, m, meId, out, start, end, quoted, qu
     // фото знает размеры заранее: рамка нужной высоты сразу, размытое превью, полная картинка — лениво
     const src = localPreview(m.key) ?? (att.id ? fileUrl(att) : undefined);
     return (
-      <div class="app-msg app-msg-media" data-key={m.key} data-sort={m.sort as number}>
+      <div class={flash ? 'app-msg app-msg-media app-msg-flash' : 'app-msg app-msg-media'} data-key={m.key} data-sort={m.sort as number}>
         <MediaBubble
           from={out ? 'out' : 'in'} tail={end} groupStart={start} appear={appear}
           items={[{ src, thumb: att.thumb, alt: att.name }]}
@@ -61,7 +61,7 @@ const Row = memo(function Row({ onOpen, hl, m, meId, out, start, end, quoted, qu
   if (att && !m.deleted && att.id !== undefined && att.kind === 'file') {
     const ext = (att.name.split('.').pop() ?? 'file').slice(0, 4);
     return (
-      <div class="app-msg" data-key={m.key} data-sort={m.sort as number}>
+      <div class={flash ? 'app-msg app-msg-flash' : 'app-msg'} data-key={m.key} data-sort={m.sort as number}>
         <FileBubble
           from={out ? 'out' : 'in'} tail={end} groupStart={start}
           name={att.name} ext={ext} meta={fileSize(att.size)}
@@ -74,13 +74,12 @@ const Row = memo(function Row({ onOpen, hl, m, meId, out, start, end, quoted, qu
     );
   }
   return (
-    <div class="app-msg" data-key={m.key} data-sort={m.sort as number}>
+    <div class={flash ? 'app-msg app-msg-flash' : 'app-msg'} data-key={m.key} data-sort={m.sort as number}>
       <Bubble
         from={out ? 'out' : 'in'}
         tail={end}
         groupStart={start}
         reply={quoted ? { author: quoteAuthor, text: quoted.body, tone: quoteTone, onClick: noop } : undefined}
-        flash={flash}
         edited={!!m.editedAt && !m.deleted}
         deleted={!!m.deleted}
         reactions={chips.length ? chips : undefined}
@@ -317,9 +316,13 @@ export function Feed({ chatId, meId, peerName, stick, onMenu, highlight }: {
         requestMutation(() => root.scrollTo({ top, behavior: 'smooth' }));
       });
     }
+  }, [focus, messages]);
+  // полоса гаснет сама; таймер — свой: сброс focus выше перезапускает эффект перехода и снял бы его
+  useEffect(() => {
+    if (!flashKey) return;
     const t = setTimeout(() => setFlashKey(null), 1600);
     return () => clearTimeout(t);
-  }, [focus, messages]);
+  }, [flashKey]);
 
   // клик по цитате — к исходному сообщению
   const onClick = (e: MouseEvent) => {
