@@ -2,7 +2,8 @@ import { ChatRow, Highlight, Menu, Presence, SlideStack, ChatRowSkeleton, useMin
 import type { Item } from '@relay/sync-engine/src/types';
 import { loadMoreChats, openChat, searchMessages } from '../data';
 import { setGlobal, useGlobal } from '../global';
-import { useEffect, useState } from 'preact/hooks';
+import { useEffect, useRef, useState } from 'preact/hooks';
+import { memo } from 'preact/compat';
 import type { SearchHit } from '@relay/sync-engine/src/types';
 import { isDark } from '../theme';
 import { chatTime, chatTone, snippet } from './format';
@@ -19,6 +20,44 @@ function previewOf(m: { deleted?: boolean; kind?: string; body: string; attachme
 }
 
 /** Фрагмент вокруг совпадения: превью узкое, а совпадение может быть в конце длинного сообщения. */
+/** «Загружаем ещё чаты» внизу списка: крутится, только пока виден — вне экрана бесконечная анимация зря будит стили каждый кадр. */
+function MoreLoader() {
+  const ref = useRef<HTMLDivElement>(null);
+  const [on, setOn] = useState(false);
+  useEffect(() => {
+    const el = ref.current;
+    if (!el) return;
+    const io = new IntersectionObserver(([e]) => setOn(e.isIntersecting));
+    io.observe(el);
+    return () => io.disconnect();
+  }, []);
+  return (
+    <div ref={ref} class={on ? 'app-more app-more-on' : 'app-more'} role="status" aria-label="Загружаем ещё чаты">
+      <svg width="22" height="22" viewBox="0 0 18 18" fill="none" aria-hidden="true"><circle cx="9" cy="9" r="7" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-dasharray="30 44" /></svg>
+    </div>
+  );
+}
+
+/** Строка списка чатов. memo: чат не изменился (тот же объект из Mirror) — строку не трогаем при сдвиге окна. */
+const SideRow = memo(function SideRow({ c, meId, active, showDraft, muted }: { c: Item; meId: number; active: boolean; showDraft: boolean; muted: boolean }) {
+  const last = c.last as { body: string; senderId: number; status: string } | null;
+  return (
+    <ChatRow
+      name={(c.title as string) || 'Чат №' + c.id}
+      avatarTone={chatTone(c)}
+      preview={last ? previewOf(last as { deleted?: boolean; kind?: string; body: string; attachmentName?: string | null }) : 'Нет сообщений'}
+      draft={showDraft ? (c.draft as string) : undefined}
+      muted={muted}
+      typing={!!c.typing}
+      time={chatTime((c.sortAt ?? c.lastAt) as string)}
+      unread={c.unread as number}
+      status={last && last.senderId === meId ? last.status : null}
+      active={active}
+      onClick={() => openChat(c.id as number)}
+    />
+  );
+});
+
 const ROW = 72; // высота строки чата (--size-row) — список виртуальный, строки фиксированной высоты
 
 
@@ -81,29 +120,10 @@ export function Sidebar() {
             onNearEnd={f === 'all' && !status.chatsComplete ? loadMoreChats : undefined}
             rowHeight={ROW}
             getKey={(c: Item) => 'c' + c.id}
-            render={(c: Item) => {
-              const last = c.last as { body: string; senderId: number; status: string } | null;
-              return (
-                <ChatRow
-                  name={(c.title as string) || 'Чат №' + c.id}
-                  avatarTone={chatTone(c)}
-                  preview={last ? previewOf(last as { deleted?: boolean; kind?: string; body: string; attachmentName?: string | null }) : 'Нет сообщений'}
-                  draft={c.draft && c.id !== openId ? (c.draft as string) : undefined}
-                  muted={mutedIds.includes(c.id as number)}
-                  typing={!!c.typing}
-                  time={chatTime((c.sortAt ?? c.lastAt) as string)}
-                  unread={c.unread as number}
-                  status={last && last.senderId === me.userId ? last.status : null}
-                  active={c.id === openId}
-                  onClick={() => openChat(c.id as number)}
-                />
-              );
-            }}
+            render={(c: Item) => <SideRow c={c} meId={me.userId} active={c.id === openId} showDraft={!!c.draft && c.id !== openId} muted={mutedIds.includes(c.id as number)} />}
           />
           {f === 'all' && !q && !status.chatsComplete ? (
-            <div class="app-more" role="status" aria-label="Загружаем ещё чаты">
-              <svg width="22" height="22" viewBox="0 0 18 18" fill="none" aria-hidden="true"><circle cx="9" cy="9" r="7" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-dasharray="30 44" /></svg>
-            </div>
+            <MoreLoader />
           ) : null}
           </>
         ) : (

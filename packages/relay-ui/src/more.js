@@ -254,6 +254,7 @@ function WindowList(props) {
   var items = props.items || [], rh = props.rowHeight || 72, over = props.overscan == null ? 6 : props.overscan;
   var host = useRef(null), range = useState([0, Math.min(items.length, 20)]);
   var n = items.length;
+  var cur = useRef(range[0]); cur.current = range[0];
   var nearEnd = useRef(props.onNearEnd); nearEnd.current = props.onNearEnd;
   // окно (видимое + overscan) упёрлось в хвост — до конца меньше полуэкрана строк, пора подгружать следующую страницу
   useEffect(function () {
@@ -265,7 +266,13 @@ function WindowList(props) {
       queued = false;
       var offset = el.getBoundingClientRect().top - sc.getBoundingClientRect().top + sc.scrollTop; // where the list starts in the scroller
       var top = sc.scrollTop - offset, bottom = top + sc.clientHeight;
-      var next = [Math.max(0, Math.floor(top / rh) - over), Math.ceil(bottom / rh) + over];
+      var vTop = Math.max(0, Math.floor(top / rh)), vBot = Math.ceil(bottom / rh);
+      // запас с гистерезисом: окно сдвигаем, только когда до его края осталось меньше двух строк,
+      // и сразу с полным запасом — иначе перерисовка всего списка на каждые 72 px прокрутки
+      var r = cur.current, edge = Math.min(2, over);
+      var covered = r[0] <= Math.max(0, vTop - edge) && r[1] >= vBot + edge;
+      var next = [Math.max(0, vTop - over), vBot + over];
+      if (covered && r[1] - r[0] <= next[1] - next[0] + over * 2) return;
       requestMutation(function () { range[1](function (r) { return r[0] === next[0] && r[1] === next[1] ? r : next; }); });
     }
     function onScroll() { if (!queued) { queued = true; requestMeasure(measure); } }
