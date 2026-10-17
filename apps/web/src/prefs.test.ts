@@ -1,5 +1,5 @@
 import { expect, test } from 'bun:test';
-import { PREFS_KEY, defaultPrefs, getPrefs, loadPrefs, resetPrefsForTest, setPath, setPref, type KV } from './prefs';
+import { PREFS_KEY, defaultPrefs, getPrefs, levelOf, loadPrefs, resetPrefsForTest, setPath, setPref, subscribePrefs, type KV } from './prefs';
 
 const fake = (init: Record<string, string> = {}): KV & { m: Record<string, string> } => {
   const m = { ...init };
@@ -47,4 +47,52 @@ test('setPref persists and notifies', () => {
   expect(getPrefs().textSize).toBe(20);
   expect(JSON.parse(kv.m[PREFS_KEY]).textSize).toBe(20);
   expect(resetPrefsForTest(kv).textSize).toBe(20);
+});
+
+test('version: persisted, missing = v1, unknown -> defaults keeping theme', () => {
+  const kv = fake(); resetPrefsForTest(kv); setPref('sendKey', 'ctrlEnter');
+  expect(JSON.parse(kv.m[PREFS_KEY]).v).toBe(1);
+  expect(loadPrefs(fake({ [PREFS_KEY]: JSON.stringify({ sendKey: 'ctrlEnter' }) })).sendKey).toBe('ctrlEnter');
+  const f = loadPrefs(fake({ [PREFS_KEY]: JSON.stringify({ v: 2, theme: 'dark', sendKey: 'ctrlEnter', textSize: 20 }) }));
+  expect(f).toEqual({ ...defaultPrefs(), theme: 'dark' });
+  expect(loadPrefs(fake({ [PREFS_KEY]: JSON.stringify({ v: 2, theme: 'neon' }) })).theme).toBe('system');
+});
+
+test('setPref rejects garbage and clamps', () => {
+  const kv = fake(); resetPrefsForTest(kv);
+  setPref('anim', null); setPref('wallpaper', 5); setPref('autoload.photo', 'x');
+  expect(getPrefs()).toEqual(defaultPrefs());
+  expect(JSON.parse(kv.m[PREFS_KEY])).toEqual(defaultPrefs());
+  setPref('notify.volume', 7); expect(getPrefs().notify.volume).toBe(1);
+  setPref('notify.volume', -1); expect(getPrefs().notify.volume).toBe(0);
+  setPref('autoload.fileMaxMb', 40); expect(getPrefs().autoload.fileMaxMb).toBe(50);
+  setPref('screen.blurDelay', 4); expect(getPrefs().screen.blurDelay).toBe(5);
+  setPref('textSize', 99); expect(getPrefs().textSize).toBe(20);
+  setPref('textSize', 13.6); expect(getPrefs().textSize).toBe(14);
+  setPref('textSize', 1); expect(getPrefs().textSize).toBe(12);
+});
+
+test('setPref does not mutate previous state', () => {
+  resetPrefsForTest(fake()); const before = getPrefs(); const snap = JSON.stringify(before);
+  setPref('textSize', 99);
+  expect(JSON.stringify(before)).toBe(snap);
+});
+
+test('anim level applies preset; flags leave level; levelOf custom', () => {
+  resetPrefsForTest(fake());
+  setPref('anim.level', 0);
+  expect(getPrefs().anim).toEqual({ level: 0, ui: false, wallpaper: false, blur: false, autoplayGif: false, autoplayVideo: false });
+  setPref('anim.level', 1);
+  expect(getPrefs().anim).toEqual({ level: 1, ui: true, wallpaper: false, blur: false, autoplayGif: true, autoplayVideo: true });
+  expect(levelOf(getPrefs().anim)).toBe(1);
+  setPref('anim.blur', true);
+  expect(getPrefs().anim.level).toBe(1); expect(levelOf(getPrefs().anim)).toBe('custom');
+  setPref('anim.level', 2);
+  expect(levelOf(getPrefs().anim)).toBe(2);
+});
+
+test('subscribePrefs notified on setPref', () => {
+  resetPrefsForTest(fake()); let got = 0; const off = subscribePrefs((p) => { got = p.textSize; });
+  setPref('textSize', 18); expect(got).toBe(18); off();
+  setPref('textSize', 14); expect(got).toBe(18);
 });

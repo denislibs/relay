@@ -5,6 +5,7 @@ import { beginHeavyAnimation } from '@relay/ui';
 export type ThemePref = 'system' | 'light' | 'dark';
 export interface WallpaperPref { pattern: string; colors: string[] | null; blur: boolean }
 export interface Prefs {
+  v: 1;
   theme: ThemePref;
   textSize: number;
   wallpaper: { light: WallpaperPref; dark: WallpaperPref };
@@ -33,6 +34,7 @@ const all = (v: boolean) => ({ contacts: v, private: v, groups: v });
 export function defaultPrefs(reduced = false): Prefs {
   const on = !reduced;
   return {
+    v: 1,
     theme: 'system',
     textSize: 16,
     wallpaper: { light: wp(), dark: wp() },
@@ -62,12 +64,34 @@ function merge(def: unknown, src: unknown): unknown {
 }
 
 const THEMES = ['system', 'light', 'dark'];
-function sanitize(p: Prefs, d: Prefs): Prefs {
+const FILE_MB = [1, 5, 10, 50, 100];
+const BLUR_DELAY = [0, 5, 30];
+const nearest = (steps: number[], v: number): number => steps.reduce((a, b) => (Math.abs(b - v) < Math.abs(a - v) ? b : a));
+const num = (v: unknown, d: number): number => (typeof v === 'number' && Number.isFinite(v) ? v : d);
+
+/** Пресеты флагов для уровня анимаций: 0 экономия, 1 быстро и красиво, 2 максимум. */
+export function animPreset(level: 0 | 1 | 2): Prefs['anim'] {
+  const on = level !== 0;
+  return { level, ui: on, wallpaper: level === 2, blur: level === 2, autoplayGif: on, autoplayVideo: on };
+}
+/** Уровень по флагам: 'custom', если флаги не совпадают с пресетом уровня («Своё»). */
+export function levelOf(a: Prefs['anim']): 0 | 1 | 2 | 'custom' {
+  const pr = animPreset(a.level);
+  return (['ui', 'wallpaper', 'blur', 'autoplayGif', 'autoplayVideo'] as const).every((k) => a[k] === pr[k]) ? a.level : 'custom';
+}
+
+/** Приводит значения к допустимым. Вход не меняет — работает с копией. */
+function sanitize(src: Prefs, d: Prefs): Prefs {
+  const p = JSON.parse(JSON.stringify(src)) as Prefs;
+  p.v = 1;
   if (!THEMES.includes(p.theme)) p.theme = d.theme;
   if (p.sendKey !== 'enter' && p.sendKey !== 'ctrlEnter') p.sendKey = d.sendKey;
   if (p.timeFormat !== '12h' && p.timeFormat !== '24h') p.timeFormat = null;
   if (![0, 1, 2].includes(p.anim.level)) p.anim.level = d.anim.level;
-  if (!(p.textSize >= 10 && p.textSize <= 40)) p.textSize = d.textSize;
+  p.textSize = Math.min(20, Math.max(12, Math.round(num(p.textSize, d.textSize))));
+  p.notify.volume = Math.min(1, Math.max(0, num(p.notify.volume, d.notify.volume)));
+  p.autoload.fileMaxMb = nearest(FILE_MB, num(p.autoload.fileMaxMb, d.autoload.fileMaxMb));
+  p.screen.blurDelay = nearest(BLUR_DELAY, num(p.screen.blurDelay, 0));
   for (const t of ['light', 'dark'] as const) {
     const c = p.wallpaper[t].colors as unknown;
     if (c !== null && !(Array.isArray(c) && c.every((x) => typeof x === 'string'))) p.wallpaper[t].colors = null;
@@ -81,7 +105,12 @@ export function loadPrefs(storage: KV | null = defaultStorage(), reduced = false
   let raw: string | null = null;
   try { raw = storage.getItem(PREFS_KEY); } catch { /* закрытое хранилище */ }
   if (raw !== null) {
-    try { return sanitize(merge(d, JSON.parse(raw)) as Prefs, d); } catch { return d; }
+    try {
+      const j = JSON.parse(raw);
+      if (isObj(j) && (j.v === undefined || j.v === 1)) return sanitize(merge(d, j) as Prefs, d); // без v — до версионирования, это v1
+      if (isObj(j) && THEMES.includes(j.theme as string)) d.theme = j.theme as ThemePref; // неизвестная версия: умолчания, тема — если читается
+    } catch { /* битый JSON */ }
+    return d;
   }
   // первого запуска ещё не было: переносим старую тему
   try { const t = storage.getItem(OLD_THEME_KEY); if (t === 'light' || t === 'dark') d.theme = t; } catch { /* */ }
@@ -139,14 +168,19 @@ function commit(next: Prefs, persist: boolean): void {
 }
 
 export function setPref(path: string, value: unknown): void {
-  commit(sanitize(setPath(current, path, value), defaultPrefs()), true);
+  const d = defaultPrefs(reducedMotion());
+  let next = sanitize(merge(d, setPath(current, path, value)) as Prefs, d); // мусор не попадает ни в состояние, ни в хранилище
+  if (path === 'anim.level') next = { ...next, anim: animPreset(next.anim.level) };
+  commit(next, true);
 }
 
 /** Другие вкладки: то же значение подхватываем из события storage. */
 export function listenStorage(): void {
   if (typeof addEventListener === 'undefined') return;
   addEventListener('storage', (e: StorageEvent) => {
-    if (e.key !== PREFS_KEY && e.key !== null) return;
+    let area: Storage | null = null;
+    try { area = localStorage; } catch { /* */ }
+    if (e.key !== PREFS_KEY || e.storageArea !== area) return;
     commit(loadPrefs(storage, reducedMotion()), false);
   });
 }
