@@ -1,4 +1,4 @@
-import { ConfirmDialog, InfoRow, Menu, PanelHeader, Presence, ProfileHeader, RichText, Section, Toast } from '@relay/ui';
+import { ConfirmDialog, InfoRow, SettingsIcon, Menu, PanelHeader, Presence, ProfileHeader, RichText, Section, Toast } from '@relay/ui';
 import { useEffect, useRef, useState } from 'preact/hooks';
 import { getGlobal, setGlobal, useGlobal } from '../../global';
 import { back, go } from '../../nav';
@@ -87,15 +87,15 @@ export function Main() {
         <ProfileHeader name={me.name} subtitle={status.phase === 'offline' ? 'нет сети' : 'в сети'} size={96} />
         {hasInfo ? (
           <Section>
-            {phone ? <InfoRow icon="phone" title={phone} subtitle="Телефон" onClick={() => copy(phone)} /> : null}
-            {username ? <InfoRow icon="at" title={username} subtitle="Имя пользователя" onClick={() => copy(username)} /> : null}
+            {phone ? <InfoRow tile="green" icon="phone" title={phone} subtitle="Телефон" onClick={() => copy(phone)} /> : null}
+            {username ? <InfoRow tile="blue" icon="at" title={username} subtitle="Имя пользователя" onClick={() => copy(username)} /> : null}
             {bio ? (
               <div class="rl-inforow rl-inforow-static" onClick={(e) => { if (!(e.target as HTMLElement).closest('a')) copy(bio); }}>
-                <span class="rl-inforow-icon"><svg class="rl-icon" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" aria-hidden="true"><path d="M12 11v5M12 8h.01" /><circle cx="12" cy="12" r="9" /></svg></span>
+                <SettingsIcon icon="info" color="gray" />
                 <span class="rl-inforow-text"><span class="rl-bio"><RichText text={bio} /></span><small>О себе</small></span>
               </div>
             ) : null}
-            {birthday ? <InfoRow icon="cake" title={birthday} subtitle="День рождения" onClick={() => copy(birthday)} /> : null}
+            {birthday ? <InfoRow tile="purple" icon="cake" title={birthday} subtitle="День рождения" onClick={() => copy(birthday)} /> : null}
           </Section>
         ) : null}
         <Section>

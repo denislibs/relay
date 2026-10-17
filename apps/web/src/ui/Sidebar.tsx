@@ -158,7 +158,7 @@ export function Sidebar() {
                 onClose={() => setMenu(false)}
                 header={
                   <button type="button" role="menuitem" class="rl-menu-item app-menu-profile" onClick={() => { setMenu(false); void go('settings'); }}>
-                    <Avatar name={me.name} size={36} /><span>{me.name}</span>
+                    <Avatar name={me.name} size={32} /><span>{me.name}</span>
                   </button>
                 }
                 items={[

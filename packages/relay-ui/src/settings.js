@@ -1,6 +1,6 @@
-import { h } from 'preact';
+import { h, render } from 'preact';
 import { useEffect, useLayoutEffect, useRef } from 'preact/hooks';
-import { Icon, Modal, Button, SettingsIcon, cx, ripple } from './kit.js';
+import { Icon, Presence, SettingsIcon, cx, ripple } from './kit.js';
 
 /* Компоненты страниц настроек: карточки-секции, радио/чекбокс-строки, слайдер, поле, выбор, подтверждение, текст со ссылками. */
 
@@ -112,19 +112,18 @@ function SelectRow(props) {
     } }, opts.map(function (o) { return h('option', { key: o.value, value: o.value }, o.label); })));
 }
 
-/* ---------- ConfirmDialog: Esc закрывает и гасит событие (nav.ts игнорирует defaultPrevented) ---------- */
-function ConfirmDialog(props) {
-  var actionsRef = useRef(null), cbRef = useRef(props);
-  cbRef.current = props;
-  function btns() { var el = actionsRef.current; return el ? Array.prototype.slice.call(el.querySelectorAll('button')) : []; }
+/* ---------- ConfirmDialog: по центру всего приложения (портал в body), Esc/скрим — отмена ---------- */
+function ConfirmView(props) {
+  var actionsRef = useRef(null);
   var open = props.open !== false;
+  function btns() { var el = actionsRef.current; return el ? Array.prototype.slice.call(el.querySelectorAll('button')) : []; }
   useEffect(function () {
     if (!open) return undefined;
     var prev = document.activeElement;
     var b = btns(), t = props.danger ? b[0] : b[b.length - 1]; // опасное действие — фокус на «Отмена»
     if (t) t.focus();
     function onKey(e) {
-      if (e.key === 'Escape') { e.preventDefault(); e.stopPropagation(); if (cbRef.current.onCancel) cbRef.current.onCancel(); }
+      if (e.key === 'Escape') { e.preventDefault(); e.stopPropagation(); if (props.cbRef.current.onCancel) props.cbRef.current.onCancel(); }
       else if (e.key === 'Tab') { // фокус не уходит за диалог
         var a = btns(), i = a.indexOf(document.activeElement);
         if (!a.length) return;
@@ -136,12 +135,33 @@ function ConfirmDialog(props) {
     window.addEventListener('keydown', onKey, true);
     return function () { window.removeEventListener('keydown', onKey, true); if (prev && prev.focus && document.contains(prev)) prev.focus(); };
   }, [open, props.danger]);
-  if (!open) return null;
-  return h(Modal, { title: props.title, onClose: props.onCancel },
-    props.text ? h('p', { class: 'rl-confirm-text' }, props.text) : null,
-    h('div', { class: 'rl-modal-actions rl-confirm-actions', ref: actionsRef },
-      h(Button, { variant: 'ghost', onClick: props.onCancel }, props.cancel || 'Отмена'),
-      h(Button, { variant: props.danger ? 'danger' : 'primary', onClick: props.onConfirm }, props.confirm || 'Ок')));
+  var p = props.cbRef.current;
+  return h(Presence, { show: open, exitMs: 200 },
+    h('div', { class: 'rl-confirm-scrim', onClick: function (e) { if (e.target === e.currentTarget && p.onCancel) p.onCancel(); } },
+      h('div', { class: 'rl-confirm', role: 'dialog', 'aria-modal': 'true', 'aria-label': p.title },
+        h('h2', { class: 'rl-confirm-title' }, p.title),
+        p.text ? h('p', { class: 'rl-confirm-text' }, p.text) : null,
+        h('div', { class: 'rl-confirm-actions', ref: actionsRef },
+          h('button', { type: 'button', class: 'rl-confirm-btn', onClick: p.onCancel }, p.cancel || 'Отмена'),
+          h('button', { type: 'button', class: cx('rl-confirm-btn', p.danger && 'rl-confirm-btn-danger'), onClick: p.onConfirm }, p.confirm || 'Ок')))));
+}
+function ConfirmDialog(props) {
+  var cbRef = useRef(props), hostRef = useRef(null);
+  cbRef.current = props;
+  var open = props.open !== false;
+  // хост в body живёт, пока компонент смонтирован (нужен для анимации закрытия)
+  useLayoutEffect(function () {
+    if (typeof document === 'undefined') return undefined;
+    var host = document.createElement('div');
+    host.className = 'rl';
+    document.body.appendChild(host);
+    hostRef.current = host;
+    return function () { render(null, host); host.remove(); hostRef.current = null; };
+  }, []);
+  useLayoutEffect(function () {
+    if (hostRef.current) render(h(ConfirmView, { open: open, danger: props.danger, cbRef: cbRef }), hostRef.current);
+  });
+  return null;
 }
 
 /* ---------- RichText: текст → узлы (текст / http(s)-ссылка / @упоминание), без innerHTML ---------- */
