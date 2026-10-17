@@ -18,7 +18,7 @@ export function NewChat() {
   }
   return (
     <Presence show={open}>
-      <div style={{ position: 'fixed', inset: 0, zIndex: 20 }}>
+      <div class="rl-dialog-host" style={{ position: 'fixed', inset: 0, zIndex: 20 }}>
         <Modal title="Новый чат" icon="chats" onClose={close} actions={[
           <Button key="c" variant="secondary" onClick={close}>Отмена</Button>,
           <Button key="o" onClick={() => create()}>Начать</Button>,

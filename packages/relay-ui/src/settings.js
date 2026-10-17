@@ -158,7 +158,7 @@ function ConfirmDialog(props) {
   useLayoutEffect(function () {
     if (typeof document === 'undefined') return undefined;
     var host = document.createElement('div');
-    host.className = 'rl';
+    host.className = 'rl rl-dialog-host';
     document.body.appendChild(host);
     hostRef.current = host;
     return function () { render(null, host); host.remove(); hostRef.current = null; };

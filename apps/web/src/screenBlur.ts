@@ -51,8 +51,8 @@ function apply(on: boolean): void {
   const root = document.documentElement;
   if (on) root.setAttribute(ATTR, '1'); else root.removeAttribute(ATTR);
   if (on) {
-    // дети оболочки и портальные диалоги в body; слой выше всех (z 2000) перехватывает указатель
-    marked = [...document.querySelectorAll('.rl-shell > :not(.rl-shell-veil), body > .rl-confirm-scrim')].filter((el) => !el.hasAttribute('inert'))
+    // дети оболочки и все хосты диалогов (.rl-dialog-host: портал в body или корень в #app); слой выше всех (z 2000) перехватывает указатель
+    marked = [...document.querySelectorAll('.rl-shell > :not(.rl-shell-veil), .rl-dialog-host')].filter((el) => !el.hasAttribute('inert'))
       .map((el) => ({ el, aria: el.getAttribute('aria-hidden') }));
     for (const m of marked) { m.el.setAttribute('inert', ''); m.el.setAttribute('aria-hidden', 'true'); }
   } else {

@@ -67,7 +67,7 @@ function NewContactForm({ draft }: { draft: NewContactDraft }) {
   const initials = initialsOf(first, lastName);
   // как диалоги Telegram: заголовок слева, без ✕ (закрывают «Отмена», Esc и щелчок мимо)
   return (
-    <div class="rl-confirm-scrim" onClick={(e) => { if (e.target === e.currentTarget) close(); }}>
+    <div class="rl-confirm-scrim rl-dialog-host" onClick={(e) => { if (e.target === e.currentTarget) close(); }}>
       <div class="rl-confirm app-newcontact-dialog" role="dialog" aria-modal="true" aria-label="Новый контакт">
         <h2 class="rl-confirm-title">Новый контакт</h2>
         <form class="app-newcontact" onSubmit={(e) => void done(e)}>

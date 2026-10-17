@@ -18,7 +18,7 @@ function Portal({ children }: { children: ComponentChildren }) {
   const host = useRef<HTMLDivElement | null>(null);
   useLayoutEffect(() => {
     const el = document.createElement('div');
-    el.className = 'rl app-portal';
+    el.className = 'rl app-portal rl-dialog-host';
     document.body.appendChild(el);
     host.current = el;
     return () => { render(null, el); el.remove(); host.current = null; };
