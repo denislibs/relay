@@ -39,7 +39,7 @@ test('PATCH /me: name, bio, birthday; display name recomputed', async () => {
 
 test('name validation', async () => {
   const a = await login('Анна');
-  for (const body of [{ firstName: '' }, { firstName: '   ' }, { firstName: 'x'.repeat(65) }, { lastName: 'y'.repeat(65) }, { firstName: 5 }, { firstName: 'a\u0000b' }]) {
+  for (const body of [{ firstName: '' }, { firstName: '   ' }, { firstName: 'x'.repeat(65) }, { lastName: 'y'.repeat(65) }, { firstName: 'a\u0000b' }]) {
     const res = await call(a, 'PATCH', '/me', body);
     expect([res.status, (await res.json()).code]).toEqual([400, 'name_invalid']);
   }
@@ -124,11 +124,61 @@ test('GET /users/:id: self and chat peer ok, stranger 404', async () => {
   const a = await login('Анна', '+79005550001'), b = await login('Борис'), s = await login('Посторонний');
   await makeChat([a.userId, b.userId]);
   await call(a, 'PUT', '/me/username', { username: 'anna_x' });
-  expect(await (await call(b, 'GET', `/users/${a.userId}`)).json()).toEqual({ id: a.userId, name: 'Анна', firstName: 'Анна', lastName: '', username: 'anna_x', bio: null, birthday: null, phone: '+79005550001' });
+  expect(await (await call(b, 'GET', `/users/${a.userId}`)).json()).toEqual({ id: a.userId, name: 'Анна', firstName: 'Анна', lastName: '', username: 'anna_x', bio: null, birthday: null, phone: null });
   expect((await call(a, 'GET', `/users/${a.userId}`)).status).toBe(200);
   const r = await call(s, 'GET', `/users/${a.userId}`);
   expect([r.status, (await r.json()).code]).toEqual([404, 'not_found']);
   expect((await call(s, 'GET', '/users/99999')).status).toBe(404);
+});
+
+test('compound emoji (ZWJ) survive in bio; ZWNJ names ok; bidi/zero-width stripped from bio', async () => {
+  const a = await login('Анна');
+  const bio = '👨‍👩‍👧‍👦 🏳️‍🌈';
+  expect((await (await call(a, 'PATCH', '/me', { bio })).json()).bio).toBe(bio);
+  expect((await (await call(a, 'PATCH', '/me', { bio: 'a\u202Eb\u200Bc' })).json()).bio).toBe('abc');
+  const fa = 'می\u200Cخواهم';
+  expect((await (await call(a, 'PATCH', '/me', { firstName: fa })).json()).firstName).toBe(fa);
+  const bad = await call(a, 'PATCH', '/me', { firstName: 'a\u202Eb' });
+  expect(bad.status).toBe(400);
+});
+
+test('non-string name/bio → 400 bad_frame', async () => {
+  const a = await login('Анна');
+  for (const body of [{ bio: 5 }, { firstName: 5 }, { lastName: {} }]) {
+    const r = await call(a, 'PATCH', '/me', body);
+    expect([r.status, (await r.json()).code]).toEqual([400, 'bad_frame']);
+  }
+});
+
+test('phone is never shown to peers (HTTP and journal), only to self', async () => {
+  const a = await login('Анна', '+79005550002'), b = await login('Борис');
+  await makeChat([a.userId, b.userId]);
+  await call(a, 'PATCH', '/me', { bio: 'x' });
+  expect((await updates(b.userId))[0].user.phone).toBeNull();
+  expect((await updates(a.userId))[0].user.phone).toBe('+79005550002');
+  expect((await (await call(b, 'GET', `/users/${a.userId}`)).json()).phone).toBeNull();
+});
+
+test('no-op PATCH writes nothing to the journal', async () => {
+  const a = await login('Анна'), b = await login('Борис');
+  await makeChat([a.userId, b.userId]);
+  await call(a, 'PATCH', '/me', { bio: 'x', birthday: { day: 1, month: 1 } });
+  const before = [(await getUpdates(a.userId, 0)).seq, (await getUpdates(b.userId, 0)).seq];
+  expect((await call(a, 'PATCH', '/me', { bio: 'x', birthday: { day: 1, month: 1 }, firstName: 'Анна' })).status).toBe(200);
+  expect((await call(a, 'PATCH', '/me', {})).status).toBe(200);
+  expect([(await getUpdates(a.userId, 0)).seq, (await getUpdates(b.userId, 0)).seq]).toEqual(before);
+});
+
+test('409 leaves no userUpdated row and no seq gap', async () => {
+  const a = await login('Анна'), b = await login('Борис');
+  await makeChat([a.userId, b.userId]);
+  await call(a, 'PUT', '/me/username', { username: 'taken_one' });
+  const before = [(await getUpdates(a.userId, 0)).seq, (await getUpdates(b.userId, 0)).seq];
+  expect((await call(b, 'PUT', '/me/username', { username: 'taken_one' })).status).toBe(409);
+  expect([(await getUpdates(a.userId, 0)).seq, (await getUpdates(b.userId, 0)).seq]).toEqual(before);
+  await call(b, 'PUT', '/me/username', { username: 'free_one' });
+  const items = (await getUpdates(b.userId, 0)).items;
+  expect(items.map((i) => i.seq)).toEqual(items.map((_, i) => i + 1));
 });
 
 test('dev login: phone set once, duplicate phone does not break login', async () => {

@@ -25,11 +25,11 @@ export type Update =
   | { type: 'newMessage'; message: Message }
   | { type: 'readOwn'; chatId: Id; upToId: Id }
   | { type: 'readBy'; chatId: Id; userId: Id; upToId: Id }
-  | { type: 'draft'; chatId: Id; text: string; at: string }
+  | { type: 'draft'; chatId: Id; text: string; at: string }   // черновик своих устройств; пустой текст — удалён
   | { type: 'messageEdited'; chatId: Id; id: Id; body: string; editedAt: string }
   | { type: 'messageDeleted'; chatId: Id; id: Id }
   | { type: 'reactions'; chatId: Id; id: Id; reactions: Reaction[] }
-  | { type: 'userUpdated'; user: PublicUser };   // профиль изменился: себе и всем, кто видит пользователя   // черновик своих устройств; пустой текст — удалён
+  | { type: 'userUpdated'; user: PublicUser };   // профиль изменился: себе и всем, кто видит пользователя
 
 /** День рождения: год необязателен. */
 export interface Birthday { day: number; month: number; year?: number }

@@ -34,7 +34,9 @@ export async function getMe(userId: number): Promise<Me> {
 }
 
 /** Единственная точка правил приватности: B6 подставит сюда настоящую проверку (телефон, био, день рождения…). */
-function canSee(_viewer: number, _owner: number, _field: 'phone' | 'username' | 'bio' | 'birthday'): boolean { return true; }
+function canSee(viewer: number, owner: number, field: 'phone' | 'username' | 'bio' | 'birthday'): boolean {
+  return field !== 'phone' || viewer === owner; // телефон — только себе, пока нет правил B6
+}
 
 /** Представление пользователя для конкретного зрителя. Всё, что уходит наружу (HTTP, журнал), идёт через эту функцию. */
 export function publicUser(viewer: number, r: Row): PublicUser {
@@ -60,16 +62,20 @@ export async function viewersOf(tx: Tx | typeof sql, userId: number): Promise<nu
 export async function getUser(viewer: number, id: number): Promise<PublicUser> {
   const [r] = await sql<Row[]>`select ${COLS} from users where id = ${id}`;
   if (!r) throw new DomainError('not_found');
-  if (id !== viewer && !(await viewersOf(sql, id)).includes(viewer)) throw new DomainError('not_found');
+  if (id !== viewer) {
+    const [shared] = await sql`select exists (select 1 from chat_members a join chat_members b on b.chat_id = a.chat_id where a.user_id = ${id} and b.user_id = ${viewer}) as ok`;
+    if (!shared.ok) throw new DomainError('not_found');
+  }
   return publicUser(viewer, r);
 }
 
 // ---------- валидация ----------
 
-const BAD_CHARS = /[\p{Cc}\p{Cf}]/u;
+// C0/C1, bidi-переопределения и изоляты, U+200B, BOM. ZWJ/ZWNJ оставляем: на них держатся составные эмодзи и персидский.
+const BAD_CHARS = /[\p{Cc}\u202A-\u202E\u2066-\u2069\u200B\uFEFF]/u;
 
 function validName(v: unknown, min: number): string {
-  if (typeof v !== 'string') throw new DomainError('name_invalid');
+  if (typeof v !== 'string') throw new DomainError('bad_frame');
   const s = v.trim().replace(/\s+/g, ' ');
   if (len(s) < min || len(s) > 64 || BAD_CHARS.test(s)) throw new DomainError('name_invalid');
   return s;
@@ -77,8 +83,8 @@ function validName(v: unknown, min: number): string {
 
 function validBio(v: unknown): string | null {
   if (v === null) return null;
-  if (typeof v !== 'string') throw new DomainError('bio_too_long');
-  const s = v.replace(/\r\n?/g, '\n').replace(/[^\P{Cc}\n]|\p{Cf}/gu, '').trim();
+  if (typeof v !== 'string') throw new DomainError('bad_frame');
+  const s = v.replace(/\r\n?/g, '\n').replace(/[^\P{Cc}\n]|[\u202A-\u202E\u2066-\u2069\u200B\uFEFF]/gu, '').trim();
   if (len(s) > 140) throw new DomainError('bio_too_long');
   return s || null;
 }
@@ -94,7 +100,7 @@ export function validBirthday(v: unknown): Birthday | null {
   if (year !== undefined && year !== null) {
     if (!int(year) || year < 1900 || year > now.getUTCFullYear()) throw bad();
     if (day > new Date(Date.UTC(year, month, 0)).getUTCDate()) throw bad();
-    if (Date.UTC(year, month - 1, day) > now.getTime()) throw bad();
+    if (Date.UTC(year, month - 1, day) > now.getTime() + 86_400_000) throw bad();
     return { day, month, year };
   }
   if (day > new Date(Date.UTC(2000, month, 0)).getUTCDate()) throw bad(); // без года 29 февраля допустимо
@@ -123,10 +129,11 @@ export async function checkUsername(userId: number, raw: unknown): Promise<Usern
 /** Применить изменение профиля и записать userUpdated себе и зрителям — одной транзакцией. */
 async function save(userId: number, change: (tx: Tx, cur: Row) => Promise<void>): Promise<Me> {
   return sql.begin(async (tx) => {
-    const [cur] = await tx<Row[]>`select ${COLS} from users where id = ${userId} for update`;
+    const [cur] = await tx<Row[]>`select ${COLS} from users where id = ${userId} for no key update`;
     if (!cur) throw new DomainError('not_found');
     await change(tx, cur);
     const [r] = await tx<Row[]>`select ${COLS} from users where id = ${userId}`;
+    if (JSON.stringify(cur) === JSON.stringify(r)) return { userId: r.id, ...shape(r) }; // ничего не изменилось — журнал не трогаем
     const viewers = await viewersOf(tx, userId);
     // каждому — своё представление (B6: скрытые поля)
     await appendUpdates(tx, [userId, ...viewers].map((v) => ({ userId: v, update: { type: 'userUpdated' as const, user: publicUser(v, r) } })));

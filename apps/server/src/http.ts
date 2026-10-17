@@ -79,7 +79,7 @@ export function createServer(opts: { port: number }): Server {
         if (req.method === 'GET' && url.pathname === '/users/check-username') {
           return Response.json(await checkUsername(userId, url.searchParams.get('u')));
         }
-        const user = /^\/users\/(\d+)$/.exec(url.pathname);
+        const user = /^\/users\/(\d{1,15})$/.exec(url.pathname);
         if (req.method === 'GET' && user) return Response.json(await getUser(userId, Number(user[1])));
         if (req.method === 'POST' && url.pathname === '/logout') {
           const token = readSessionToken(req);
