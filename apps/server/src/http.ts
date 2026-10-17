@@ -12,6 +12,7 @@ import { fileFor, MAX_FILE, storeUpload } from './domain/files';
 import { handleFrame } from './ws';
 import { checkUsername, getMe, getUser, setUsername, updateProfile } from './domain/profile';
 import { subscribe, unsubscribe, vapidKeys } from './domain/push';
+import { getSettings, setNotify } from './domain/settings';
 import { addContact, listContacts, removeContact, resolveUser, updateContact } from './domain/contacts';
 
 const STATUS: Record<string, number> = { bad_frame: 400, too_long: 400, username_invalid: 400, username_reserved: 400, username_taken: 409, bio_too_long: 400, note_too_long: 400, name_invalid: 400, birthday_invalid: 400, unauthorized: 401, not_member: 403, not_found: 404 };
@@ -19,7 +20,7 @@ const fail = (code: string) => Response.json({ code }, { status: STATUS[code] ??
 
 export type WsData = { userId: number };
 
-const API = /^\/(health|me|users|contacts|chats|presence|search|upload|files|push|ws|dev|logout)(\/|$)/;
+const API = /^\/(health|me|users|contacts|settings|chats|presence|search|upload|files|push|ws|dev|logout)(\/|$)/;
 
 /** Статика клиента из WEB_DIST. Путь не может выйти за папку; пути без расширения — SPA, отдаём index.html. */
 function serveStatic(pathname: string): Response {
@@ -92,6 +93,9 @@ export function createServer(opts: { port: number }): Server {
         const contact = /^\/contacts\/(\d{1,15})$/.exec(url.pathname);
         if (contact && req.method === 'PATCH') return Response.json(await updateContact(userId, Number(contact[1]), await req.json().catch(() => null)));
         if (contact && req.method === 'DELETE') return Response.json(await removeContact(userId, Number(contact[1])));
+        if (req.method === 'GET' && url.pathname === '/settings') return Response.json(await getSettings(userId));
+        const notifyType = /^\/settings\/notify\/([a-z]{1,16})$/.exec(url.pathname);
+        if (req.method === 'PUT' && notifyType) return Response.json(await setNotify(userId, notifyType[1], await req.json().catch(() => null)));
         const user = /^\/users\/(\d{1,15})$/.exec(url.pathname);
         if (req.method === 'GET' && user) return Response.json(await getUser(userId, Number(user[1])));
         if (req.method === 'POST' && url.pathname === '/logout') {

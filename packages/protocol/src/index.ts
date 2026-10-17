@@ -31,7 +31,16 @@ export type Update =
   | { type: 'reactions'; chatId: Id; id: Id; reactions: Reaction[] }
   | { type: 'userUpdated'; user: PublicUser }   // профиль изменился: себе и всем, кто видит пользователя
   // контакт добавлен/изменён (contact) или удалён (removed + user — как его видно без контакта); только владельцу
-  | { type: 'contactsChanged'; contact?: Contact; removed?: Id; user?: PublicUser | null };
+  | { type: 'contactsChanged'; contact?: Contact; removed?: Id; user?: PublicUser | null }
+  // настройки аккаунта (общие для устройств) изменились: приходят целиком, только владельцу
+  | { type: 'settingsChanged'; settings: UserSettings };
+
+/** Вид чата для умолчаний уведомлений. */
+export type NotifyType = 'direct' | 'group';
+export interface NotifyPref { muted: boolean; preview: boolean }
+/** Настройки аккаунта (GET /settings добавляет seq своей записи журнала на момент снимка). */
+export interface UserSettings { notify: Record<NotifyType, NotifyPref>; sessionsTtlDays: number }
+export interface SettingsSnapshot extends UserSettings { seq?: number }
 
 /** День рождения: год необязателен. */
 export interface Birthday { day: number; month: number; year?: number }

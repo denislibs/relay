@@ -1,6 +1,7 @@
 import { sql } from '../db';
 import { nameForSql } from './profile';
 import { isOnline } from './presence';
+import { notifyDefaults } from './settings';
 
 /**
  * Web Push без зависимостей: VAPID (RFC 8292) и шифрование aes128gcm (RFC 8291) на WebCrypto.
@@ -76,6 +77,9 @@ export async function unsubscribe(userId: number, endpoint: string): Promise<voi
   await sql`delete from push_subscriptions where endpoint = ${endpoint} and user_id = ${userId}`;
 }
 
+/** Тело push без предпросмотра: текст сообщения не раскрываем. */
+export const NO_PREVIEW = 'Новое сообщение';
+
 export type PushPayload = { chatId: number; id: number; title: string; body: string };
 
 /** Новое сообщение → push участникам без соединения, кроме отправителя и тех, у кого чат заглушён. */
@@ -87,15 +91,22 @@ export async function pushNewMessage(m: { chatId: number; id: number; senderId: 
       from push_subscriptions s
     join chat_members cm on cm.user_id = s.user_id and cm.chat_id = ${m.chatId}
     where s.user_id <> ${m.senderId} and not (${m.chatId} = any(s.muted))`;
-  const targets = subs.filter((s) => !isOnline(s.user_id as number));
-  if (!targets.length) return;
+  const online = subs.filter((s) => !isOnline(s.user_id as number));
+  if (!online.length) return;
   const [info] = await sql`select kind, title from chats where id = ${m.chatId}`;
+  // умолчания получателя для этого вида чата: выключено — не шлём; без предпросмотра — текст не отдаём
+  const defaults = await notifyDefaults(sql, [...new Set(online.map((s) => s.user_id as number))]);
+  const kind = info.kind === 'group' ? 'group' : 'direct';
+  const prefOf = (userId: number) => defaults.get(userId)?.[kind] ?? { muted: false, preview: true };
+  const targets = online.filter((s) => !prefOf(s.user_id as number).muted);
+  if (!targets.length) return;
   const preview = m.kind === 'photo' ? (m.body ? '🖼 ' + m.body : 'Фотография') : m.kind === 'file' ? '📎 ' + (m.body || m.attachment?.name || 'Файл') : m.body;
   await Promise.all(targets.map(async (s) => {
     const name = s.sender_name as string;
-    const payload: PushPayload = info.kind === 'group'
-      ? { chatId: m.chatId, id: m.id, title: (info.title as string) ?? 'Группа', body: `${name}: ${preview}` }
-      : { chatId: m.chatId, id: m.id, title: name, body: preview };
+    const shown = prefOf(s.user_id as number).preview;
+    const payload: PushPayload = kind === 'group'
+      ? { chatId: m.chatId, id: m.id, title: (info.title as string) ?? 'Группа', body: shown ? `${name}: ${preview}` : NO_PREVIEW }
+      : { chatId: m.chatId, id: m.id, title: name, body: shown ? preview : NO_PREVIEW };
     const plain = enc.encode(JSON.stringify(payload).slice(0, 3000));
     try {
       const res = await fetch(s.endpoint as string, {
