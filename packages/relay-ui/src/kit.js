@@ -173,11 +173,20 @@ function initials(name) {
   var b = parts.length > 1 ? parts[parts.length - 1][0] : '';
   return (a + b).toUpperCase();
 }
+/* Цвет собеседника: 7 оттенков палитры (--peer-0…6). У кого есть id — id % 7, иначе хэш имени. */
+var PEER_COLORS = 7;
+function peerTone(id) { return Math.abs(Math.trunc(id)) % PEER_COLORS; }
+function nameTone(name) {
+  var x = 0;
+  for (var i = 0; i < name.length; i++) x = (x * 31 + name.charCodeAt(i)) | 0;
+  return Math.abs(x) % PEER_COLORS;
+}
 function Avatar(props) {
   var size = props.size || 48;
+  var tone = props.tone != null ? props.tone : props.name ? nameTone(String(props.name)) : null;
   return h('span', {
-    class: cx('rl-avatar', (props.className || props.class)),
-    style: { width: size, height: size, fontSize: Math.round(size * 0.36) },
+    class: cx('rl-avatar', tone != null && !props.src && 'rl-avatar-tone', (props.className || props.class)),
+    style: { width: size, height: size, fontSize: Math.round(size * 0.36), '--avatar-tone': tone != null ? 'var(--peer-' + tone + '-fill)' : undefined },
     role: 'img', 'aria-label': props.name || 'Аватар'
   },
     props.src ? h('img', { src: props.src, alt: '' })
@@ -262,7 +271,7 @@ function ChatRow(props) {
   return h('button', Object.assign({ type: 'button' }, rest, { onPointerDown: chain(rest.onPointerDown, ripple),
     class: cx('rl-row', (props.className || props.class)), 'aria-current': props.active ? 'true' : undefined
   }),
-    h(Avatar, { name: props.avatar === undefined ? props.name : props.avatar, online: props.online }),
+    h(Avatar, { name: props.avatar === undefined ? props.name : props.avatar, tone: props.avatarTone, online: props.online }),
     h('span', { class: 'rl-row-main' },
       h('span', { class: 'rl-row-top' },
         h('span', { class: 'rl-row-name' }, props.name),
@@ -304,7 +313,7 @@ function Bubble(props) {
     },
       !deleted && !props.selectable ? h('button', { type: 'button', class: 'rl-bubble-menu', 'aria-label': 'Меню сообщения', onClick: props.onMenu }, h(Icon, { name: 'chevronDown', size: 18 })) : null,
       props.forwarded ? h('span', { class: 'rl-bubble-fwd' }, h(Icon, { name: 'forward', size: 14 }), 'Переслано') : null,
-      props.author && !deleted ? h('span', { class: 'rl-bubble-author', style: { color: 'var(--author-' + (props.authorTone || 1) + ')' } }, props.author) : null,
+      props.author && !deleted ? h('span', { class: 'rl-bubble-author', style: { color: 'var(--peer-' + (props.authorTone != null ? props.authorTone : 5) + ')' } }, props.author) : null,
       props.reply && !deleted ? h(ReplyQuote, Object.assign({ inBubble: true }, props.reply)) : null,
       deleted
         ? h('span', { class: 'rl-bubble-text rl-bubble-deleted-text' }, h(Icon, { name: 'ban', size: 16 }), out ? 'Вы удалили это сообщение' : 'Сообщение удалено')
@@ -326,8 +335,10 @@ function Bubble(props) {
 
 /* ---------- ReplyQuote: in a bubble or above the composer ---------- */
 function ReplyQuote(props) {
-  var tone = 'var(--author-' + (props.tone || 1) + ')';
-  return h(props.onClick ? 'button' : 'div', { type: props.onClick ? 'button' : undefined, class: cx('rl-quote', props.inBubble && 'rl-quote-in'), style: { '--quote-tone': tone }, onClick: props.onClick },
+  var n = props.tone != null ? props.tone : 5;   // номер цвета собеседника (--peer-N)
+  var tone = 'var(--peer-' + n + ')';
+  return h(props.onClick ? 'button' : 'div', { type: props.onClick ? 'button' : undefined, class: cx('rl-quote', props.inBubble && 'rl-quote-in'),
+    style: { '--quote-tone': tone, '--quote-bg': 'var(--peer-' + n + '-bg)', '--quote-bg-active': 'var(--peer-' + n + '-bg-active)' }, onClick: props.onClick },
     h('span', { class: 'rl-quote-body' },
       h('b', { style: { color: tone } }, props.author),
       h('span', { class: 'rl-quote-text' }, props.icon ? h(Icon, { name: props.icon, size: 14 }) : null, props.text)),
@@ -650,7 +661,7 @@ function MediaBubble(props) {
   }
   return h('div', { class: cx('rl-msgline', out && 'rl-msgline-out', props.groupStart && 'rl-msgline-gap') },
     h('div', { class: cx('rl-bubble rl-media', out ? 'rl-bubble-out' : 'rl-bubble-in-side', props.tail && 'rl-bubble-tail', props.appear && (out ? 'rl-appear-out' : 'rl-appear-in')) },
-      props.author ? h('span', { class: 'rl-bubble-author rl-media-author', style: { color: 'var(--author-' + (props.authorTone || 1) + ')' } }, props.author) : null,
+      props.author ? h('span', { class: 'rl-bubble-author rl-media-author', style: { color: 'var(--peer-' + (props.authorTone != null ? props.authorTone : 5) + ')' } }, props.author) : null,
       h('div', { class: cx('rl-media-frame', album && 'rl-media-album'), style: album ? null : { aspectRatio: props.ratio || '4 / 3' } },
         (album ? items.slice(0, 4) : items).map(cell),
         album && state !== 'ready' ? h(MediaOverlay, { state: state, progress: props.progress, size: props.size, onDownload: props.onDownload, onCancel: props.onCancel }) : null,
@@ -846,7 +857,7 @@ function PanelHeader(props) {
 }
 function ProfileHeader(props) {
   return h('div', { class: 'rl-profile' },
-    h(Avatar, { name: props.name, src: props.src, size: props.size || 120 }),
+    h(Avatar, { name: props.name, src: props.src, tone: props.tone, size: props.size || 120 }),
     h('div', { class: 'rl-profile-name' }, props.name),
     h('div', { class: 'rl-profile-sub' }, props.subtitle, props.accent ? [' · ', h('b', { key: 'a' }, props.accent)] : null),
     props.actions ? h('div', { class: 'rl-profile-actions' }, props.actions) : null);
@@ -1044,4 +1055,4 @@ function ScrollToBottom(props) {
 }
 
 
-export { ArchivedRow, ReplyQuote, ReactionChips, cx, chain, ripple, reducedMotion, omit, fmtTime, makeWave, ICONS, Icon, Button, IconButton, Avatar, Badge, Chip, SearchField, ChatRow, ChatRowSkeleton, Bubble, MessageStatus, TypingIndicator, DateDivider, Composer, Banner, Modal, NavRail, Checkbox, Toast, Card, Steps, MediaArt, ProgressRing, Waveform, VoiceMessage, VoiceRecorder, MediaBubble, FileBubble, MediaThumb, MediaViewer, Switch, PanelHeader, ProfileHeader, ActionTile, InfoRow, ReadMore, Presence, useMinVisible, LazyImage, FlipList, SyncIndicator, LinearProgress, EmptyState, ScrollToBottom };
+export { peerTone, ArchivedRow, ReplyQuote, ReactionChips, cx, chain, ripple, reducedMotion, omit, fmtTime, makeWave, ICONS, Icon, Button, IconButton, Avatar, Badge, Chip, SearchField, ChatRow, ChatRowSkeleton, Bubble, MessageStatus, TypingIndicator, DateDivider, Composer, Banner, Modal, NavRail, Checkbox, Toast, Card, Steps, MediaArt, ProgressRing, Waveform, VoiceMessage, VoiceRecorder, MediaBubble, FileBubble, MediaThumb, MediaViewer, Switch, PanelHeader, ProfileHeader, ActionTile, InfoRow, ReadMore, Presence, useMinVisible, LazyImage, FlipList, SyncIndicator, LinearProgress, EmptyState, ScrollToBottom };

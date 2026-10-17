@@ -1,10 +1,10 @@
-import { Avatar, Button, ChatSearchBar, Highlight, ripple, useMinVisible, requestMeasure, Composer, DropOverlay, GlassBar, IconButton, Menu, Modal, Presence, ReactionPicker, requestMutation } from '@relay/ui';
+import { Avatar, Button, peerTone, ChatSearchBar, Highlight, ripple, useMinVisible, requestMeasure, Composer, DropOverlay, GlassBar, IconButton, Menu, Modal, Presence, ReactionPicker, requestMutation } from '@relay/ui';
 import { useEffect, useLayoutEffect, useRef, useState } from 'preact/hooks';
 import { deleteMessage, editMessage, ensureNames, focusMessage, sendFile, openChat, react, saveDraft, searchMessages, send, typing, typingDone } from '../data';
 import type { SearchHit } from '@relay/sync-engine/src/types';
 import { setGlobal, useGlobal } from '../global';
 import { Feed } from './Feed';
-import { chatTime, fileSize, lastSeenText, snippet } from './format';
+import { chatTime, chatTone, fileSize, lastSeenText, snippet } from './format';
 
 
 export function Chat({ chatId }: { chatId: number }) {
@@ -166,7 +166,7 @@ export function Chat({ chatId }: { chatId: number }) {
       <GlassBar class={finding ? 'app-finding' : ''}>
         <IconButton class="app-back" icon="arrowLeft" label="К списку чатов" onClick={() => openChat(null)} />
         <button type="button" class="rl-glassbar-who" aria-label="Информация о чате" onClick={() => setGlobal({ infoOpen: !infoOpen })}>
-          <Avatar name={title} size={40} />
+          <Avatar name={title} tone={chatTone(chat)} size={40} />
           <span class="rl-glassbar-title">
             <b>{title}</b>
             <span key={phaseLabel ?? (isTyping ? 'typing' : online ? 'on' : 'off')} class={phaseLabel ? 'app-phase' : isTyping || online ? 'app-online' : undefined}>{phaseLabel ?? (subtitle || '\u00a0')}</span>
@@ -195,7 +195,7 @@ export function Chat({ chatId }: { chatId: number }) {
                   const who = names[x.senderId] ?? (x.senderId === me.userId ? me.name : chat?.kind === 'direct' ? title : '');
                   return (
                     <button type="button" role="option" aria-selected={k === found.at} key={x.id} class={'app-findrow' + (k === found.at ? ' app-findrow-on' : '')} onPointerDown={ripple} onClick={() => pick(k)}>
-                      <Avatar name={who} size={40} />
+                      <Avatar name={who} tone={peerTone(x.senderId)} size={40} />
                       <span class="app-findrow-text">
                         <span class="app-findrow-top"><b>{who}</b><time>{chatTime(x.createdAt)}</time></span>
                         <span class="app-findrow-body"><Highlight text={snippet(x.body, found.q)} query={found.q} /></span>
@@ -212,7 +212,7 @@ export function Chat({ chatId }: { chatId: number }) {
       <Composer
         id="composer"
         placeholder="Сообщение"
-        replyTo={editing ? { author: 'Редактирование', text: editing.original, tone: 1, icon: 'pencil' } : replyTo ? { author: authorOf(replyTo.senderId), text: replyTo.body, tone: replyTo.senderId === me.userId ? 1 : 3 } : null}
+        replyTo={editing ? { author: 'Редактирование', text: editing.original, tone: peerTone(me.userId), icon: 'pencil' } : replyTo ? { author: authorOf(replyTo.senderId), text: replyTo.body, tone: peerTone(replyTo.senderId) } : null}
         onCancelReply={() => {
           if (editing) { setText(editing.draft); latest.current = saved.current = editing.draft; setEditing(null); return; } // правку отменили — вернуть черновик
           setReplyKey(null);

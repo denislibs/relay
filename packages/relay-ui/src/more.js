@@ -442,10 +442,33 @@ var PATTERN_SETS = {
   catsAndDogs: ['catHead', 'paw', 'bone', 'dogHead', 'fish', 'yarn', 'catSit', 'doghouse', 'ball', 'dot', 'balloon', 'dogRun', 'heart', 'bowl', 'mouse', 'catSleep', 'swirl', 'bird', 'plane', 'feather', 'paw', 'cloudSmall', 'dot', 'heart'],
   doodles: ['chats', 'send', 'mic', 'check', 'clock', 'image', 'smile', 'phone', 'star', 'attach', 'camera', 'poll', 'lock', 'video', 'cloud', 'pin', 'bell', 'palette', 'contact', 'link']
 };
+/* Цвет узора выводится из фона, а не хранится отдельно: насыщенность чуть выше,
+   яркость ×0.65 на светлом фоне (на тёмном — наоборот, светлее), прозрачность 40%.
+   Так любые обои сразу получают узор в своём тоне. */
+function parseHex(c) {
+  var m = /^#?([0-9a-f]{2})([0-9a-f]{2})([0-9a-f]{2})/i.exec(c.trim());
+  return m ? [parseInt(m[1], 16), parseInt(m[2], 16), parseInt(m[3], 16)] : null;
+}
+function patternColor(colors) {
+  var rgb = [0, 0, 0], n = 0;
+  colors.forEach(function (c) { var x = parseHex(c); if (x) { rgb[0] += x[0]; rgb[1] += x[1]; rgb[2] += x[2]; n++; } });
+  if (!n) return 'rgba(0,0,0,0.4)';
+  var r = rgb[0] / n / 255, g = rgb[1] / n / 255, b = rgb[2] / n / 255;
+  var max = Math.max(r, g, b), min = Math.min(r, g, b), d = max - min, hue = 0;
+  if (d) hue = max === r ? ((g - b) / d) % 6 : max === g ? (b - r) / d + 2 : (r - g) / d + 4;
+  hue = (hue * 60 + 360) % 360;
+  var sat = max ? d / max : 0, val = max;
+  sat = Math.min(1, sat + 0.05 + 0.1 * (1 - sat));
+  val = val > 0.5 ? val * 0.65 : Math.min(1, 1 - val * 0.65);
+  var f = function (k) { var x = (k + hue / 60) % 6; return Math.round(255 * (val - val * sat * Math.max(0, Math.min(x, 4 - x, 1)))); };
+  return 'rgba(' + f(5) + ',' + f(3) + ',' + f(1) + ',0.4)';
+}
 var patternCache = {};
-function buildPattern(set) {
+function buildPattern(set, stroke) {
   set = set || 'catsAndDogs';
-  if (patternCache[set]) return patternCache[set];
+  stroke = stroke || '#000';
+  var cacheKey = set + '|' + stroke;
+  if (patternCache[cacheKey]) return patternCache[cacheKey];
   var names = PATTERN_SETS[set] || PATTERN_SETS.catsAndDogs;
   // deterministic scatter on a 420×420 tile (same tile size as the reference settings): 10×10 staggered, jittered cells
   var out = [], seed = set.length * 7 + 11, n = 0, G = 10, cell = 420 / G;
@@ -463,10 +486,10 @@ function buildPattern(set) {
       out.push('<g transform="translate(' + qx.toFixed(1) + ' ' + qy.toFixed(1) + ') rotate(' + rot + ') scale(' + sc + ') translate(-12 -12)">' + body + '</g>');
     });
   }
-  var svg = '<svg xmlns="http://www.w3.org/2000/svg" width="420" height="420" viewBox="0 0 420 420" fill="none" stroke="#000" stroke-width="1.1" stroke-linecap="round" stroke-linejoin="round">' + out.join('') + '</svg>';
+  var svg = '<svg xmlns="http://www.w3.org/2000/svg" width="420" height="420" viewBox="0 0 420 420" fill="none" stroke="' + stroke + '" stroke-width="1.1" stroke-linecap="round" stroke-linejoin="round">' + out.join('') + '</svg>';
   // twallpaper wraps the value in url(…) itself, so pass a quoted data URI
-  patternCache[set] = '"data:image/svg+xml;charset=utf-8,' + encodeURIComponent(svg) + '"';
-  return patternCache[set];
+  patternCache[cacheKey] = '"data:image/svg+xml;charset=utf-8,' + encodeURIComponent(svg) + '"';
+  return patternCache[cacheKey];
 }
 var wallpapers = [];
 /* Shift every mounted wallpaper's gradient one step — call on send / receive, like Telegram. */
@@ -491,12 +514,16 @@ function Wallpaper(props) {
       requestMeasure(function () {
         var t = readTheme(el);
         if (theme && t.dark === theme.dark && t.colors.join() === theme.colors.join()) return;
+        var modeChanged = theme && t.dark !== theme.dark;
         theme = t;
         requestMutation(function () {
+          // светлая ↔ тёмная: узор меняет режим (маска ↔ рисунок), а updatePattern режим маски не снимает — собираем заново
+          if (wp && modeChanged) { wallpapers.splice(wallpapers.indexOf(wp), 1); wp.dispose(); wp = null; }
           var set = typeof props.pattern === 'string' ? props.pattern : 'catsAndDogs';
           var pattern = props.pattern === false ? undefined : t.dark
             ? { image: buildPattern(set), mask: true, background: t.ink, size: '420px', opacity: props.maskOpacity || 0.55 }
-            : { image: buildPattern(set), mask: false, background: 'transparent', size: '420px', opacity: props.patternOpacity || 0.5, blur: 0 };
+            // светлая тема: узор нарисован цветом, выведенным из фона (прозрачность уже в цвете)
+            : { image: buildPattern(set, patternColor(t.colors)), mask: false, background: 'transparent', size: '420px', opacity: 1, blur: 0 };
           if (!wp) {
             wp = new TWallpaper(el, { colors: t.colors, fps: 60, tails: 90, animate: !!props.animate && !reducedMotion(), scrollAnimate: !!props.scrollAnimate && !reducedMotion(), pattern: pattern });
             wp.init();
@@ -686,4 +713,4 @@ function GlassBar(props) {
   return h('header', { class: cx('rl-glassbar', props.class) }, props.children);
 }
 
-export { Wallpaper, nudgeWallpaper, buildPattern, DOODLES, PATTERN_SETS, FloatShell, SideResizer, SidebarCard, SidebarHeader, FolderTabs, Fab, GlassBar, WindowList, AsidePanel, SideFrame, SlideStack, Menu, ReactionPicker, AttachMenu, MentionList, DropOverlay, LinkPreview, PollBubble, UnreadDivider, SelectionBar, ChatSearchBar, Highlight, ContactPicker, CallRow, StatusAvatar, LoginQR, VirtualList, BottomNav, Tooltip, plural };
+export { patternColor, Wallpaper, nudgeWallpaper, buildPattern, DOODLES, PATTERN_SETS, FloatShell, SideResizer, SidebarCard, SidebarHeader, FolderTabs, Fab, GlassBar, WindowList, AsidePanel, SideFrame, SlideStack, Menu, ReactionPicker, AttachMenu, MentionList, DropOverlay, LinkPreview, PollBubble, UnreadDivider, SelectionBar, ChatSearchBar, Highlight, ContactPicker, CallRow, StatusAvatar, LoginQR, VirtualList, BottomNav, Tooltip, plural };

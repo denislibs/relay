@@ -5,7 +5,7 @@ import { setGlobal, useGlobal } from '../global';
 import { useEffect, useState } from 'preact/hooks';
 import type { SearchHit } from '@relay/sync-engine/src/types';
 import { isDark } from '../theme';
-import { chatTime, snippet } from './format';
+import { chatTime, chatTone, snippet } from './format';
 import { setTheme } from './Settings';
 
 const FOLDERS = ['all', 'unread'];
@@ -86,6 +86,7 @@ export function Sidebar() {
               return (
                 <ChatRow
                   name={(c.title as string) || 'Чат №' + c.id}
+                  avatarTone={chatTone(c)}
                   preview={last ? previewOf(last as { deleted?: boolean; kind?: string; body: string; attachmentName?: string | null }) : 'Нет сообщений'}
                   draft={c.draft && c.id !== openId ? (c.draft as string) : undefined}
                   muted={mutedIds.includes(c.id as number)}

@@ -1,5 +1,5 @@
 import type { Item } from '@relay/sync-engine/src/types';
-import { Bubble, DateDivider, FileBubble, Highlight, MediaBubble, MediaViewer, ScrollToBottom, forceMeasure, isHeavyAnimating, onHeavyAnimationEnd, requestMeasure, requestMutation } from '@relay/ui';
+import { Bubble, peerTone, DateDivider, FileBubble, Highlight, MediaBubble, MediaViewer, ScrollToBottom, forceMeasure, isHeavyAnimating, onHeavyAnimationEnd, requestMeasure, requestMutation } from '@relay/ui';
 import { memo } from 'preact/compat';
 import { useEffect, useLayoutEffect, useRef, useState } from 'preact/hooks';
 import { ensureNames, focusMessage, localPreview, moveWindow, react, savePosition, savedPosition, seen } from '../data';
@@ -394,7 +394,7 @@ export function Feed({ chatId, meId, peerName, stick, onMenu, highlight }: {
         end={end}
         quoted={quoted}
         quoteAuthor={quoted ? (quoted.senderId === meId ? 'Вы' : peerName) : undefined}
-        quoteTone={quoted ? (quoted.senderId === meId ? 1 : 3) : undefined}
+        quoteTone={quoted ? peerTone(quoted.senderId as number) : undefined}
         appear={initial.current !== null && !initial.current.has(m.key)}
         flash={flashKey === m.key}
       />,

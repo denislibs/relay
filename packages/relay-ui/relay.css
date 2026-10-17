@@ -331,6 +331,7 @@ body { margin: 0; font-family: var(--font-sans); color: var(--ink); background: 
 .rl-panel-head { display: flex; align-items: center; gap: var(--space-4); height: 60px; padding: 0 var(--space-3); flex-shrink: 0; }
 .rl-panel-head h2 { flex: 1; margin: 0; font: 400 16px/22px var(--font-sans); }
 .rl-profile { display: flex; flex-direction: column; align-items: center; gap: var(--space-1); padding: var(--space-4) var(--space-4) var(--space-6); text-align: center; }
+.rl-avatar-tone { background: linear-gradient(color-mix(in srgb, var(--avatar-tone), #fff 22%), var(--avatar-tone)); color: #fff; }
 .rl-profile .rl-avatar { margin-bottom: var(--space-3); }
 .rl-profile-name { font: 400 24px/30px var(--font-sans); text-wrap: balance; }
 .rl-profile-sub { font: 400 16px/22px var(--font-sans); color: var(--ink-muted); }
@@ -519,8 +520,8 @@ body { margin: 0; font-family: var(--font-sans); color: var(--ink); background: 
 .rl-fab .rl-badge { position: absolute; top: -6px; right: -6px; }
 @keyframes rl-fab-in { from { opacity: 0; transform: translateY(12px) scale(0.6); } to { opacity: 1; transform: none; } }
 
-/* ---------- Smooth theme switch: add .rl-theme-anim to <html> for one frame around the change ---------- */
-.rl-theme-anim, .rl-theme-anim * { transition: background-color var(--dur-slow) var(--ease-standard), color var(--dur-slow) var(--ease-standard), border-color var(--dur-slow) var(--ease-standard), fill var(--dur-slow) var(--ease-standard) !important; }
+/* ---------- Theme switch: token colors are blended frame by frame on <html>; other transitions are off meanwhile ---------- */
+.rl-theme-switching, .rl-theme-switching *, .rl-theme-switching *::before, .rl-theme-switching *::after { transition: none !important; }
 
 @media (prefers-reduced-motion: reduce) {
   .rl-ripple, .rl-empty-line, .rl-empty-fill, .rl-empty-dot, .rl-empty-float, .rl-sync-draw, .rl-sync-spin, .rl-linear span, .rl-fab, .rl-slide-panel, .rl-icon, .rl-icon path { animation-duration: 1ms !important; animation-iteration-count: 1 !important; transition-duration: 1ms !important; }
@@ -559,8 +560,9 @@ body { margin: 0; font-family: var(--font-sans); color: var(--ink); background: 
 .rl-msgline-selected .rl-msg-check path { stroke-dasharray: 20; animation: rl-draw var(--dur-fast) var(--ease-out) both; }
 
 /* ---------- ReplyQuote ---------- */
-.rl-quote { position: relative; display: flex; align-items: stretch; gap: var(--space-2); width: 100%; min-width: 0; padding: 0; border: 0; border-radius: var(--radius-xs); background: var(--hover); color: var(--ink); text-align: left; font: inherit; overflow: hidden; }
-button.rl-quote { cursor: pointer; }
+.rl-quote { position: relative; display: flex; align-items: stretch; gap: var(--space-2); width: 100%; min-width: 0; padding: 0; border: 0; border-radius: var(--radius-xs); background: var(--quote-bg, var(--hover)); color: var(--ink); text-align: left; font: inherit; overflow: hidden; }
+button.rl-quote { cursor: pointer; transition: background-color var(--dur-instant) var(--ease-standard); }
+button.rl-quote:active { background: var(--quote-bg-active, var(--pressed)); }
 .rl-quote::before { content: ""; flex-shrink: 0; width: 4px; background: var(--quote-tone); }
 .rl-quote-in { margin: 2px 0 6px; min-width: 200px; }
 .rl-quote-body { flex: 1; min-width: 0; display: flex; flex-direction: column; padding: 6px 8px 6px 0; }
@@ -902,6 +904,8 @@ button.rl-tab:hover { color: var(--ink); }
 .rl-shell > :not(.rl-tw) { position: relative; z-index: 1; }
 .rl-shell > .rl-shell-side { z-index: 2; }
 .rl-tw .tw-canvas { animation: rl-fade 600ms var(--ease-out) both; }
+/* узор окрашен цветом из фона (patternColor) — без наложения overlay */
+.rl-tw .tw-pattern { mix-blend-mode: normal; }
 
 /* ---------- Shell surfaces (Telegram Web K feel): solid header and composer pills, rounded bubbles with a bottom tail ---------- */
 .rl-shell {

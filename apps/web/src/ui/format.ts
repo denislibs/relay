@@ -1,3 +1,4 @@
+import { peerTone } from '@relay/ui';
 const pad = (n: number) => String(n).padStart(2, '0');
 
 export function chatTime(iso: string | undefined): string {
@@ -60,4 +61,10 @@ export function snippet(text: string, q: string): string {
   if (i <= 24) return text;
   const from = text.lastIndexOf(' ', i - 12);
   return '…' + text.slice(from > 0 ? from + 1 : i - 12);
+}
+
+/** Цвет чата: у личного — собеседника, у группы — по id чата. */
+export function chatTone(chat: Record<string, unknown> | null | undefined): number | undefined {
+  const id = (chat?.peerId as number | null | undefined) ?? (chat?.id as number | undefined);
+  return id == null ? undefined : peerTone(id);
 }
