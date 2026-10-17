@@ -112,6 +112,8 @@ export type Action =
   /** чёрный список — через очередь операций */
   | { type: 'block'; userId: number }
   | { type: 'unblock'; userId: number }
+  /** стереть локальные данные и взять снимок заново; keepOutbox — не трогать неотправленное */
+  | { type: 'resetLocal'; keepOutbox?: boolean }
   | { type: 'sendFile'; chatId: number; body: string; file: Blob; name: string; mime: string; w?: number | null; h?: number | null; thumb?: string | null; replyToId?: number | null };
 
 export interface EngineConfig {

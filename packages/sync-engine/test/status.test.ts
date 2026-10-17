@@ -314,3 +314,47 @@ test('sendFile: the blob waits in IndexedDB, uploads when online, the message ca
   const got = (await feedB.until((l) => l.length === 1))[0];
   expect(got).toMatchObject({ kind: 'photo', body: 'смотри', attachment: { w: 40, h: 30, mime: 'image/png', size: 4 } });
 });
+
+test('resetLocal wipes the cache and takes a fresh snapshot; unsent messages survive keepOutbox', async () => {
+  const a = await srv.login('a'), b = await srv.login('b');
+  const chatId = await srv.chat(a.token, [a.userId, b.userId]);
+  await sendMessage(b.userId, { chatId, clientId: crypto.randomUUID(), body: 'старое' });
+  const ea = await open(srv.config(a));
+  ea.connect();
+  await ea.whenIdle();
+  const list = watchInto(ea, { kind: 'chatList', limit: 50 });
+  await list.until((l) => l.length === 1);
+  ea.disconnect();
+  await ea.call({ type: 'sendMessage', chatId, body: 'не ушло' });
+  const st = watchInto(ea, { kind: 'status' });
+  await st.until((l) => l[0]?.outbox === 1);
+  await ea.call({ type: 'resetLocal', keepOutbox: true });
+  expect((await st.until((l) => l[0]?.hydrated === false))[0].outbox).toBe(1);   // кэш пуст, очередь цела
+  ea.connect();
+  await st.until((l) => l[0]?.hydrated === true && l[0].synced === true && l[0].outbox === 0);
+  await list.until((l) => l.length === 1);
+  const rows = await sql`select body from messages where chat_id = ${chatId} order by id`;
+  expect(rows.map((r: { body: string }) => r.body)).toEqual(['старое', 'не ушло']);
+});
+
+test('resetLocal without keepOutbox drops unsent messages; other clients of the host see the reset', async () => {
+  const a = await srv.login('a'), b = await srv.login('b');
+  const chatId = await srv.chat(a.token, [a.userId, b.userId]);
+  const ea = await open(srv.config(a));
+  ea.connect();
+  await ea.whenIdle();
+  const other = watchInto(ea, { kind: 'status' });   // «другая вкладка» — своя подписка на тот же движок
+  const list = watchInto(ea, { kind: 'chatList', limit: 50 });
+  await list.until((l) => l.length === 1);
+  ea.disconnect();
+  await ea.call({ type: 'sendMessage', chatId, body: 'потерять' });
+  await other.until((l) => l[0]?.outbox === 1);
+  await ea.call({ type: 'resetLocal', keepOutbox: false });
+  await other.until((l) => l[0]?.hydrated === false && l[0].outbox === 0);
+  await list.until((l) => l.length === 0);
+  ea.connect();
+  await other.until((l) => l[0]?.hydrated === true && l[0].synced === true);
+  await list.until((l) => l.length === 1);
+  const rows = await sql`select count(*)::int as n from messages where chat_id = ${chatId}`;
+  expect(rows[0].n).toBe(0);
+});

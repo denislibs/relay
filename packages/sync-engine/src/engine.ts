@@ -294,6 +294,17 @@ export class Engine {
   }
 
   /** Поиск: с сетью — на сервере (вся история), без сети — по сообщениям, сохранённым на устройстве. */
+  /** Очистка локальных данных: общий wipe (как при смене epoch), затем повторный hello — он возьмёт снимок. */
+  private async resetLocal(keepOutbox: boolean): Promise<void> {
+    for (let i = 0; this.syncing && i < 200; i++) await new Promise((r) => setTimeout(r, 10));   // не рвём идущий снимок на полпути
+    await this.store.wipe(this.store.epoch, { outbox: keepOutbox });
+    if (!keepOutbox) this.ops.forget();
+    this.usersAsked.clear();
+    this.ready = false;
+    this.changed();
+    if (this.transport.send({ op: 'hello', lastSeq: 0 })) this.holding = true;
+  }
+
   private async search(a: Extract<Action, { type: 'search' }>): Promise<SearchResult> {
     const limit = a.limit ?? 30;
     if (this.online) {
@@ -516,6 +527,7 @@ export class Engine {
         catch (err) { if (m) { this.store.patchMessage(a.chatId, a.id, { reactions: prev }); this.changed(); } throw err; }
         return null;
       }
+      case 'resetLocal': return this.resetLocal(a.keepOutbox !== false);
       case 'search': return this.search(a);
       case 'chatMedia': return this.http<{ messages: Message[] }>(`/chats/${a.chatId}/media?kind=${a.kind}`).then((r) => r.messages);
       case 'sendFile': {
