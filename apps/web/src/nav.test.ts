@@ -110,3 +110,17 @@ test('popstate without our state (openChat replaceState(null)): stay on the curr
   await back();   // дальше история сходится
   expect(f.view()).toBe('settings');
 });
+
+test('back() to an entry openChat left without our stamp still lands on the parent; the next back does not leave the app', async () => {
+  const f = fake();
+  f.hist.replaceState(null as unknown as { nav: string; i: number });   // старый openChat: replaceState(null) на записи чатов
+  await go('settings');
+  await back();
+  expect(f.view()).toBe('chats');
+  expect(f.pos()).toBe(0);
+  expect(f.hist.state).toEqual({ nav: 'chats', i: 0 });
+  await go('settings');
+  await back();
+  expect(f.view()).toBe('chats');
+  expect(f.pos()).toBe(0);
+});
