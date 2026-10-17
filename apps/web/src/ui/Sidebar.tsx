@@ -4,6 +4,7 @@ import { loadMoreChats, openChat, searchMessages } from '../data';
 import { setGlobal, useGlobal } from '../global';
 import { useEffect, useState } from 'preact/hooks';
 import type { SearchHit } from '@relay/sync-engine/src/types';
+import { go } from '../nav';
 import { isDark } from '../theme';
 import { chatTime } from './format';
 import { setTheme } from './Settings';
@@ -156,7 +157,7 @@ export function Sidebar() {
                 label="Главное меню"
                 onClose={() => setMenu(false)}
                 items={[
-                  { icon: 'settings', label: 'Настройки', onClick: () => { setMenu(false); setGlobal({ sidebarView: 'settings' }); } },
+                  { icon: 'settings', label: 'Настройки', onClick: () => { setMenu(false); void go('settings'); } },
                   { icon: dark ? 'sun' : 'moon', label: dark ? 'Дневной режим' : 'Ночной режим', onClick: () => setTheme(dark ? 'light' : 'dark') },
                   '-',
                   { icon: 'pencil', label: 'Новый чат', onClick: () => setGlobal({ newChatOpen: true }) },

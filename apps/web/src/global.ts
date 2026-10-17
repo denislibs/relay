@@ -31,7 +31,7 @@ export interface GlobalState {
   folder: 'all' | 'unread';
   search: string;
   newChatOpen: boolean;
-  sidebarView: 'chats' | 'settings';
+  sidebarView: string;   // путь страницы боковой панели, см. nav.ts
   infoOpen: boolean;   // правая панель «Информация»
   muted: number[];     // чаты с выключенными уведомлениями (на этом устройстве)
   theme: ThemePref;

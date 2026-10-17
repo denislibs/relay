@@ -1,14 +1,14 @@
 import { AsidePanel, EmptyState, FloatShell, SideFrame, SlideStack } from '@relay/ui';
 import { useGlobal } from '../global';
+import { orderFor } from '../nav';
 import { Chat } from './Chat';
 import { Info } from './Info';
 import { Login } from './Login';
 import { NewChat } from './NewChat';
 import { Settings } from './Settings';
+import { Placeholder } from './settings/Placeholder';
 import { Sidebar } from './Sidebar';
 
-// экраны боковой панели от корня вглубь: вперёд — слайд справа налево, назад — обратно
-const SIDE_PAGES = ['chats', 'settings'];
 
 // ширина списка чатов, которую пользователь вытянул за край (null — по умолчанию)
 const SIDE_KEY = 'relay.sideWidth';
@@ -24,7 +24,7 @@ export function App() {
   if (boot === 'login') return <Login />;
   return (
     <>
-      <FloatShell class={openChatId ? 'app-chat-open' : ''} sideWidth={savedSide} onSideResize={saveSide} aside={<AsidePanel open={infoOpen && !!openChatId} label="Информация"><Info /></AsidePanel>} sidebar={<SideFrame><SlideStack order={SIDE_PAGES} active={view} render={(k: string) => (k === 'settings' ? <Settings /> : <Sidebar />)} /></SideFrame>}>
+      <FloatShell class={openChatId ? 'app-chat-open' : ''} sideWidth={savedSide} onSideResize={saveSide} aside={<AsidePanel open={infoOpen && !!openChatId} label="Информация"><Info /></AsidePanel>} sidebar={<SideFrame><SlideStack order={orderFor(view)} active={view} render={(k: string) => (k === 'chats' ? <Sidebar /> : k === 'settings' ? <Settings /> : <Placeholder path={k} />)} /></SideFrame>}>
         {openChatId ? (
           <Chat key={openChatId} chatId={openChatId} />
         ) : (

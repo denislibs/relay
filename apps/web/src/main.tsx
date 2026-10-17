@@ -1,7 +1,8 @@
 import { enableStrictDom } from '@relay/ui';
 import { render } from 'preact';
 import { startData } from './data';
-import { setGlobal, type Me } from './global';
+import { getGlobal, setGlobal, type Me } from './global';
+import * as nav from './nav';
 import { App } from './ui/App';
 
 declare const __DEV__: boolean;
@@ -32,5 +33,7 @@ async function boot(): Promise<void> {
   startData(me);
 }
 
+nav.installNav({ get: () => getGlobal().sidebarView, set: (p) => setGlobal({ sidebarView: p }), escBusy: () => getGlobal().infoOpen && !!getGlobal().openChatId });
+if (__DEV__) (window as unknown as { __nav: typeof nav }).__nav = nav;   // для ручной проверки навигации
 render(<App />, document.getElementById('app')!);
 boot();

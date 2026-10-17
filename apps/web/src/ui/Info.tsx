@@ -40,7 +40,7 @@ export function Info() {
   }, [tab, chatId]);
 
   useEffect(() => {
-    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') close(); };
+    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape' && !e.defaultPrevented) { e.preventDefault(); close(); } };
     addEventListener('keydown', onKey);
     return () => removeEventListener('keydown', onKey);
   }, []);

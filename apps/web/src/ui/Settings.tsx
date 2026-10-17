@@ -1,7 +1,8 @@
 import { Icon, InfoRow, PanelHeader, ProfileHeader, Switch } from '@relay/ui';
 import { setNotify } from '../notify';
-import { useEffect } from 'preact/hooks';
 import { setGlobal, useGlobal } from '../global';
+import { back } from '../nav';
+import { useScrollMemory } from './useScrollMemory';
 import { applyTheme, type ThemePref } from '../theme';
 
 declare const __BUILD__: string;
@@ -25,8 +26,6 @@ const NOTIFY_HINT: Record<string, string> = {
   unsupported: 'Браузер не поддерживает',
 };
 
-const back = () => setGlobal({ sidebarView: 'chats' });
-
 export function Settings() {
   const me = useGlobal((s) => s.me)!;
   const theme = useGlobal((s) => s.theme);
@@ -35,17 +34,12 @@ export function Settings() {
   const notify = useGlobal((s) => s.notify);
   const pushReady = useGlobal((s) => s.pushReady);
 
-  // Esc — назад к чатам, как стрелка
-  useEffect(() => {
-    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') back(); };
-    addEventListener('keydown', onKey);
-    return () => removeEventListener('keydown', onKey);
-  }, []);
+  const scroll = useScrollMemory('settings');
 
   return (
     <div class="rl-sidepage" aria-label="Настройки">
-      <PanelHeader icon="arrowLeft" closeLabel="Назад" title="Настройки" onClose={back} />
-      <div class="rl-settings">
+      <PanelHeader icon="arrowLeft" closeLabel="Назад" title="Настройки" onClose={() => void back()} />
+      <div class="rl-settings" ref={scroll.ref} onScroll={scroll.onScroll}>
         <ProfileHeader name={me.name} subtitle={status.phase === 'offline' ? 'нет сети' : 'в сети'} size={96} />
         <div class="rl-settings-group" role="radiogroup" aria-label="Тема">
           <div class="rl-settings-caption">Тема</div>
