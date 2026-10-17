@@ -117,6 +117,8 @@ export type Action =
   | { type: 'sendFile'; chatId: number; body: string; file: Blob; name: string; mime: string; w?: number | null; h?: number | null; thumb?: string | null; replyToId?: number | null };
 
 export interface EngineConfig {
+  /** сколько resetLocal ждёт идущую работу, мс (по умолчанию 8000) */
+  resetWaitMs?: number;
   userId: number;
   dbName: string;
   httpBase: string;

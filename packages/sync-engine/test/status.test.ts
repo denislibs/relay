@@ -387,3 +387,20 @@ test('resetLocal right after a send: the message is delivered exactly once, outb
   const rows = await sql`select body from messages where chat_id = ${chatId}`;
   expect(rows.map((r: { body: string }) => r.body)).toEqual(['раз']);
 });
+
+test('resetLocal that times out replays the hello that arrived meanwhile, so sync resumes', async () => {
+  const a = await srv.login('a'), b = await srv.login('b');
+  const chatId = await srv.chat(a.token, [a.userId, b.userId]);
+  const ea = await open({ ...srv.config(a), resetWaitMs: 300 });
+  ea.connect();
+  await ea.whenIdle();
+  const list = watchInto(ea, { kind: 'chatList', limit: 50 });
+  await list.until((l) => l.length === 1);
+  (ea as unknown as { busy: number }).busy++;   // «идущая работа», которая не заканчивается
+  const reset = ea.call({ type: 'resetLocal', keepOutbox: true }).then(() => 'ok', (e: Error) => e.message);
+  ea.disconnect(); ea.connect();                 // hello придёт во время очистки
+  await sendMessage(b.userId, { chatId, clientId: crypto.randomUUID(), body: 'пока ждали' });
+  expect(await reset).toBe('reset_busy');
+  (ea as unknown as { busy: number }).busy--;
+  await list.until((l) => (l[0]?.last as { body: string } | null)?.body === 'пока ждали');
+});

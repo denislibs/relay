@@ -296,11 +296,14 @@ export class Engine {
   /** Очистка локальных данных: общий wipe (как при смене epoch), затем повторный hello — он возьмёт снимок.
    *  Пока идёт очистка, `resetting` не даёт стартовать hello/синхронизации/отправке/операциям; идущую работу ждём и при таймауте отказываем. */
   private resetting = false;
+  /** hello/poke, пришедшие во время очистки: при отказе проигрываем их, иначе синхронизация встанет до переподключения */
+  private skipped: { hello: Extract<ServerFrame, { op: 'hello' }> | null; poke: boolean } = { hello: null, poke: false };
   private async resetLocal(keepOutbox: boolean): Promise<void> {
     if (this.resetting) throw new Error('reset_busy');
     this.resetting = true;
+    let ok = false;
     try {
-      const end = Date.now() + 8000;
+      const end = Date.now() + (this.cfg.resetWaitMs ?? 8000);
       while (this.syncing || this.pumping || this.ops.busy || this.busy > 0) {
         if (Date.now() > end) throw new Error('reset_busy');
         await new Promise((r) => setTimeout(r, 10));
@@ -311,8 +314,16 @@ export class Engine {
       this.ready = false;
       this.holding = false;
       this.emit();   // подписки видят пустой кэш сразу: ответ на hello снова включит удержание до конца снимка
+      ok = true;
     } finally {
       this.resetting = false;
+      const sk = this.skipped;
+      this.skipped = { hello: null, poke: false };
+      if (!ok) {   // очистка не состоялась: возвращаем пропущенное и будим отправку
+        if (sk.hello) this.onFrame(sk.hello); else if (sk.poke) this.runSync();
+        this.ops.kick();
+        this.changed();
+      }
     }
     this.changed();
     this.transport.send({ op: 'hello', lastSeq: 0 });
@@ -644,7 +655,7 @@ export class Engine {
   private onFrame(f: ServerFrame): void {
     switch (f.op) {
       case 'hello':
-        if (this.resetting) return;   // resetLocal пошлёт свой hello сама
+        if (this.resetting) { this.skipped.hello = f; return; }   // resetLocal пошлёт свой hello сама, а при отказе проиграет этот
         this.holding = true;
         this.run(async () => {
           // другое поколение базы (сервер пересоздан): старый кэш недействителен целиком
@@ -678,6 +689,7 @@ export class Engine {
         return;
       }
       case 'poke':
+        if (this.resetting) this.skipped.poke = true;
         this.runSync();
         return;
       case 'typing': {
