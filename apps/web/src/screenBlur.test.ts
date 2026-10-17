@@ -1,5 +1,5 @@
 import { expect, test } from 'bun:test';
-import { createBlurController } from './screenBlur';
+import { createBlurController, createSwallow } from './screenBlur';
 
 function rig(delay: number, enabled = true) {
   const timers: { fn: () => void; ms: number; dead: boolean }[] = [];
@@ -29,4 +29,24 @@ test('delay 5: long loss blurs when timer fires', () => {
 });
 test('disabled never blurs', () => {
   const { c } = rig(0, false); c.lost(); expect(c.isOn()).toBe(false);
+});
+
+test('lost twice does not restart the pending timer', () => {
+  const { c, timers } = rig(5);
+  c.lost(); c.lost();
+  expect(timers.length).toBe(1);
+});
+function sw() {
+  const timers: { fn: () => void; dead: boolean }[] = [];
+  const s = createSwallow((fn) => { const t = { fn, dead: false }; timers.push(t); return t; }, (t) => { (t as { dead: boolean }).dead = true; });
+  return { s, timers };
+}
+test('swallow: click right after arm is eaten once', () => {
+  const { s } = sw(); s.arm(); expect(s.take()).toBe(true); expect(s.take()).toBe(false);
+});
+test('swallow: drag without click expires, next click passes', () => {
+  const { s, timers } = sw(); s.arm(); timers[0].fn(); expect(s.take()).toBe(false);
+});
+test('swallow: pointercancel clears', () => {
+  const { s } = sw(); s.arm(); s.cancel(); expect(s.take()).toBe(false);
 });

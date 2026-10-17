@@ -1,5 +1,5 @@
 import { expect, test } from 'bun:test';
-import { planIncoming, soundOn, toggleSound, volumeFromSlider, volumePct } from './notifyRules';
+import { notifyText, planIncoming, soundOn, toggleSound, volumeFromSlider, volumePct } from './notifyRules';
 
 const base = { state: 'on' as const, device: { web: true, sound: true, volume: 0.5 }, chatMuted: false, pref: { muted: false, preview: true }, hasFocus: false };
 
@@ -33,7 +33,6 @@ test('sound: zero volume means off; enabling at zero restores 50 %', () => {
   expect(volumePct(0.35)).toBe(35);
 });
 
-import { notifyText } from './notifyRules';
 test('notifyText honors hideText and preview', () => {
   const m = { title: 'Анна', text: 'секрет' };
   expect(notifyText(m, { preview: true, hideText: false })).toEqual({ title: 'Анна', body: 'секрет' });
