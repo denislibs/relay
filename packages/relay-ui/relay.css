@@ -1182,6 +1182,25 @@ button.rl-tab:hover { color: var(--ink); }
 .rl-rich-mention:not(button) { color: var(--brand-text); }
 @media (prefers-reduced-motion: reduce) { .rl-radio::after, .rl-tf-label, .rl-range-input::-webkit-slider-thumb { transition: none; } }
 
+/* ---------- settings grid: one rhythm for every settings page ----------
+   card 8px from the panel edge with a 4px inset, so the hover pill (radius 12) is concentric with the card (16);
+   rows: 12px padding, a 32px lead slot (tile, icon, checkbox, radio), 16px gap — text starts 64px from the card edge on every row */
+.rl-sidepage:has(> .rl-settings) { background: var(--page); }
+.rl-sidepage:has(> .rl-settings) .rl-panel-head h2 { font: 500 19px/24px var(--font-sans); }
+.rl-settings .rl-profile-name { font: 500 22px/28px var(--font-sans); }
+.rl-settings .rl-profile-sub { font: 400 15px/20px var(--font-sans); }
+.rl-sect { margin: 0 0 var(--space-3); }
+.rl-sect:first-child { margin-top: var(--space-1); }
+.rl-sect-title { padding: var(--space-2) var(--space-6) 6px; font-weight: 500; }
+.rl-sect-footer { padding: 6px var(--space-6) 0; }
+.rl-sect-card { --hover: color-mix(in srgb, var(--ink) 5%, transparent); padding: var(--space-1); }
+.rl-sect-card :is(.rl-inforow, .rl-optrow, .rl-selrow) { gap: var(--space-4); min-height: 52px; padding: var(--space-2) var(--space-3); border-radius: var(--radius-md); }
+.rl-sect-card .rl-inforow-icon { width: 32px; justify-content: center; flex-shrink: 0; }
+.rl-sect-card :is(.rl-check-box, .rl-radio) { flex-shrink: 0; margin: 0 6px; }
+.rl-sect-card .rl-range { padding: var(--space-2) var(--space-3) var(--space-3); }
+.rl-sect-card .rl-tf { padding: var(--space-2) var(--space-3) 0; }
+.rl-sect-card :is(.rl-optrow, .rl-selrow, .rl-inforow):focus-visible, .rl-sect-card .rl-selrow:focus-within { outline-offset: -2px; border-radius: var(--radius-md); }
+
 /* ---------- Производительность: «Анимации интерфейса» выключены (<html data-anim="0">) ----------
    Слайды — без анимации вовсе (новая страница сразу на месте). Остальное — за 1ms до конечного кадра,
    чтобы fill-состояния (появление, галочки) не залипли. Спиннеры, шиммер скелета и «печатает» не трогаем:
