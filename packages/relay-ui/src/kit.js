@@ -1,5 +1,6 @@
 import { h, Fragment, toChildArray } from 'preact';
 import { useState, useRef, useEffect, useLayoutEffect } from 'preact/hooks';
+import { createPortal } from 'preact/compat';
 import { MentionList, AttachMenu } from './more.js';
 import { requestMeasure, requestMutation, beginHeavyAnimation, onHeavyAnimationEnd, isHeavyAnimating, forceMeasure } from './schedule.js';
 
@@ -673,37 +674,149 @@ function MediaThumb(props) {
 }
 
 /* ---------- MediaViewer: full-screen gallery ---------- */
+/* MediaViewer. Открытие — как в Telegram: фото «вылетает» из миниатюры в ленте и ложится по центру,
+   фон и панели проявляются; закрытие — обратно в ту же миниатюру (если она на экране), иначе тает.
+   Миниатюра на время просмотра скрыта — фото словно подняли с места. FLIP: коробка сразу стоит
+   в итоговом прямоугольнике, а transform временно возвращает её на место миниатюры. */
+var VIEWER_MS = 220;
+var VIEWER_TOP = 60, VIEWER_BOTTOM = 56, VIEWER_SIDE = 72;
+function viewerRect(w, hgt) {
+  var aw = Math.max(1, innerWidth - VIEWER_SIDE * 2), ah = Math.max(1, innerHeight - VIEWER_TOP - VIEWER_BOTTOM);
+  var k = Math.min(aw / w, ah / hgt, 1);
+  if (k < 1 || w * k < 320) k = Math.min(aw / w, ah / hgt, Math.max(1, 320 / w));   // мелкие не крошим, крупные вписываем
+  var W = Math.round(w * k), H = Math.round(hgt * k);
+  return { left: Math.round((innerWidth - W) / 2), top: Math.round(VIEWER_TOP + (ah - H) / 2), width: W, height: H };
+}
+function flipTo(from, to) {
+  return 'translate3d(' + (from.left - to.left) + 'px,' + (from.top - to.top) + 'px,0) scale(' + from.width / to.width + ',' + from.height / to.height + ')';
+}
+/* видимая область ленты: прокрутка минус стеклянные шапка и композер над ней */
+function visibleArea(el) {
+  var sc = el.parentElement;
+  while (sc && sc !== document.body) { var o = getComputedStyle(sc).overflowY; if (o === 'auto' || o === 'scroll') break; sc = sc.parentElement; }
+  var r = sc && sc !== document.body ? sc.getBoundingClientRect() : { top: 0, bottom: innerHeight, left: 0, right: innerWidth };
+  var top = r.top, bottom = r.bottom, host = sc && sc.parentElement;
+  var head = host && host.querySelector('.rl-glassbar'), comp = host && host.querySelector('.rl-composer');
+  if (head) top = Math.max(top, head.getBoundingClientRect().bottom);
+  if (comp) bottom = Math.min(bottom, comp.getBoundingClientRect().top);
+  return { top: top, bottom: bottom };
+}
 function MediaViewer(props) {
   var idx = useState(props.index || 0);
   var i = idx[0], items = props.items || [];
   var it = items[i] || {};
-  useEffect(function () { return beginHeavyAnimation(320); }, [i]);
-  if (props.open === false) return null;
-  function go(d) { idx[1](function (x) { return Math.min(items.length - 1, Math.max(0, x + d)); }); }
-  function onKey(e) {
-    if (e.key === 'ArrowRight') go(1);
-    else if (e.key === 'ArrowLeft') go(-1);
-    else if (e.key === 'Escape' && props.onClose) props.onClose();
+  var closing = useState(false);
+  var tick = useState(0);
+  var root = useRef(null), box = useRef(null), hidden = useRef(null), closeRef = useRef(null);
+  var real = !!it.src;
+  var rect = real && it.w && it.h ? viewerRect(it.w, it.h) : null;
+  function source(k) { return props.origin ? props.origin(k) : null; }
+  function hide(el) {   // скрыть миниатюру под просмотром (прежнюю — вернуть); только в фазе записи
+    if (hidden.current && hidden.current !== el) hidden.current.style.visibility = '';
+    hidden.current = el || null;
+    if (el) el.style.visibility = 'hidden';
   }
-  return h('div', { class: 'rl-viewer', role: 'dialog', 'aria-modal': 'true', 'aria-label': 'Просмотр медиа', tabIndex: -1, onKeyDown: onKey, ref: function (el) { if (el && document.activeElement === document.body) el.focus(); } },
+
+  // открытие: до первой отрисовки ставим коробку на место миниатюры, кадром позже — отпускаем
+  useLayoutEffect(function () {
+    var el = root.current, b = box.current, from = source(i);
+    if (!b || !rect || !from || reducedMotion()) { if (el) el.classList.remove('rl-viewer-pre'); if (from) hide(from); return; }
+    var end = beginHeavyAnimation(VIEWER_MS);
+    forceMeasure(function () {
+      var f = from.getBoundingClientRect(), r = parseFloat(getComputedStyle(from).borderTopLeftRadius) || 0;
+      b.style.transition = 'none';
+      b.style.transform = flipTo(f, rect);
+      b.style.borderRadius = (r * rect.width / f.width) + 'px / ' + (r * rect.height / f.height) + 'px';
+      hide(from);
+    });
+    var raf = requestAnimationFrame(function () { requestMutation(function () {
+      b.style.transition = ''; b.style.transform = ''; b.style.borderRadius = '';
+      el.classList.remove('rl-viewer-pre');
+    }); });
+    return function () { cancelAnimationFrame(raf); end(); };
+  }, []);
+
+  // листание: прячем миниатюру текущего фото, прежнюю показываем
+  useEffect(function () { var el = source(i); requestMutation(function () { if (!closing[0]) hide(el); }); }, [i]);
+  // уход со страницы просмотра без анимации — миниатюру вернуть
+  useEffect(function () { return function () { if (hidden.current) hidden.current.style.visibility = ''; }; }, []);
+  useEffect(function () {
+    var onResize = function () { tick[1](function (x) { return x + 1; }); };
+    addEventListener('resize', onResize);
+    return function () { removeEventListener('resize', onResize); };
+  }, []);
+
+  function close() {
+    if (closing[0] || closeRef.current) return;
+    closeRef.current = true;
+    closing[1](true);
+    var b = box.current, el = root.current, to = source(i);
+    var done = function () { requestMutation(function () { hide(null); }); if (props.onClose) props.onClose(); };
+    if (!b || !el || reducedMotion()) { done(); return; }
+    var end = beginHeavyAnimation(VIEWER_MS);
+    requestMeasure(function () {
+      var f = to && to.getBoundingClientRect(), area = to && visibleArea(to);
+      var fully = f && f.top >= area.top && f.bottom <= area.bottom;
+      var partly = f && f.bottom > area.top && f.top < area.bottom;
+      var r = to ? parseFloat(getComputedStyle(to).borderTopLeftRadius) || 0 : 0;
+      requestMutation(function () {
+        el.classList.add('rl-viewer-leaving');
+        if (rect && partly) {   // летим обратно в миниатюру; если её частично закрыла шапка — ещё и таем
+          hide(to);
+          b.style.transform = flipTo(f, rect);
+          b.style.borderRadius = (r * rect.width / f.width) + 'px / ' + (r * rect.height / f.height) + 'px';
+          if (!fully) b.style.opacity = '0';
+        } else {
+          b.style.opacity = '0';
+          if (rect) b.style.transform = 'translate3d(' + rect.width * 0.04 + 'px,' + rect.height * 0.04 + 'px,0) scale(0.92)';   // к центру: origin коробки — левый верх
+        }
+        setTimeout(function () { end(); done(); }, VIEWER_MS + 20);
+      });
+    });
+  }
+  function go(d) { idx[1](function (x) { return Math.min(items.length - 1, Math.max(0, x + d)); }); }
+  // клавиши — где бы ни был фокус
+  useEffect(function () {
+    var onKey = function (e) {
+      if (e.key === 'ArrowRight') go(1);
+      else if (e.key === 'ArrowLeft') go(-1);
+      else if (e.key === 'Escape') { e.stopPropagation(); close(); }
+    };
+    addEventListener('keydown', onKey, true);
+    return function () { removeEventListener('keydown', onKey, true); };
+  });
+  if (props.open === false) return null;
+
+  var media = real
+    ? h('div', { class: 'rl-viewer-box', ref: box, style: rect ? { left: rect.left + 'px', top: rect.top + 'px', width: rect.width + 'px', height: rect.height + 'px' } : null },
+        it.thumb ? h('img', { class: 'rl-viewer-thumb', src: it.thumb, alt: '', 'aria-hidden': 'true' }) : null,
+        h('img', { class: 'rl-viewer-img', src: it.src, alt: it.caption || '', decoding: 'async' }))
+    : h('figure', { key: i, class: 'rl-viewer-media' },
+        h(MediaArt, { seed: it.seed }),
+        it.kind === 'video' ? h('span', { class: 'rl-media-center' }, h('span', { class: 'rl-media-play rl-media-play-lg' }, h(Icon, { name: 'play', size: 34 }))) : null,
+        it.caption ? h('figcaption', null, it.caption) : null);
+
+  var tree = h('div', { class: cx('rl-viewer', real && 'rl-viewer-photo', real && rect && props.origin && 'rl-viewer-pre'), role: 'dialog', 'aria-modal': 'true', 'aria-label': 'Просмотр медиа', tabIndex: -1,
+      ref: function (n) { root.current = n; if (n && document.activeElement === document.body) n.focus(); } },
+    h('div', { class: 'rl-viewer-backdrop', onClick: real ? close : undefined }),
     h('div', { class: 'rl-viewer-top' },
-      h(Avatar, { name: props.sender, size: 40 }),
-      h('div', { class: 'rl-viewer-who' }, h('b', null, props.sender), h('span', null, it.date || props.date)),
+      h(Avatar, { name: it.sender || props.sender, size: 40 }),   // автор этого фото, а не собеседник
+      h('div', { class: 'rl-viewer-who' }, h('b', null, it.sender || props.sender), h('span', null, it.date || props.date)),
       h(IconButton, { icon: 'zoomIn', label: 'Увеличить' }),
-      h(IconButton, { icon: 'star', label: 'В избранное' }),
       h(IconButton, { icon: 'reply', label: 'Ответить' }),
-      h(IconButton, { icon: 'download', label: 'Скачать' }),
-      h(IconButton, { icon: 'close', label: 'Закрыть', onClick: props.onClose })),
+      real ? h('a', { class: 'rl-iconbtn', href: it.download || it.src, download: it.name || '', 'aria-label': 'Скачать', title: 'Скачать' }, h(Icon, { name: 'download', size: 24 })) : h(IconButton, { icon: 'download', label: 'Скачать' }),
+      h(IconButton, { icon: 'close', label: 'Закрыть', onClick: close })),
+    real ? media : null,
     h('div', { class: 'rl-viewer-stage' },
       h(IconButton, { icon: 'chevronLeft', label: 'Предыдущее', filled: true, class: 'rl-viewer-nav', disabled: i === 0, onClick: function () { go(-1); } }),
-      h('figure', { key: i, class: cx('rl-viewer-media', it.src && 'rl-viewer-real'), style: it.src && it.w && it.h ? { aspectRatio: it.w + ' / ' + it.h } : null },
-        it.src ? h('img', { class: 'rl-viewer-img', src: it.src, alt: it.caption || '' }) : h(MediaArt, { seed: it.seed }),
-        it.kind === 'video' ? h('span', { class: 'rl-media-center' }, h('span', { class: 'rl-media-play rl-media-play-lg' }, h(Icon, { name: 'play', size: 34 }))) : null,
-        it.caption ? h('figcaption', null, it.caption) : null),
+      real ? h('div', { class: 'rl-viewer-spacer', onClick: close }) : media,
       h(IconButton, { icon: 'chevronRight', label: 'Следующее', filled: true, class: 'rl-viewer-nav', disabled: i === items.length - 1, onClick: function () { go(1); } })),
-    h('div', { class: 'rl-viewer-strip' }, items.map(function (x, k) {
+    real && it.caption ? h('div', { class: 'rl-viewer-caption' }, it.caption) : null,
+    real ? null : h('div', { class: 'rl-viewer-strip' }, items.map(function (x, k) {
       return h(MediaThumb, { key: k, seed: x.seed, kind: x.kind, size: 56, selected: k === i, onClick: function () { idx[1](k); } });
     })));
+  // фото — поверх всего окна (сайдбар тоже), как в Telegram: порталом в body, вне стеков колонок
+  return real && typeof document !== 'undefined' ? createPortal(tree, document.body) : tree;
 }
 
 /* =====================================================================

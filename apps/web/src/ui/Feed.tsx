@@ -114,6 +114,7 @@ export function Feed({ chatId, meId, peerName, stick, onMenu, highlight }: {
   onMenu: (key: string, x: number, y: number) => void;
 }) {
   const messages = useGlobal((s) => s.messages);
+  const myName = useGlobal((s) => s.me?.name ?? 'Вы');
   const meta = useGlobal((s) => s.feedMeta);
   const unreadFrom = useGlobal((s) => s.unreadFrom);
   const focus = useGlobal((s) => s.focus);
@@ -339,14 +340,16 @@ export function Feed({ chatId, meId, peerName, stick, onMenu, highlight }: {
 
   // просмотрщик: все фото текущего окна ленты
   const photos = messages.filter((m) => !m.deleted && (m.attachment as Att | null)?.kind === 'photo' && (m.attachment as Att).w);
-  const onOpen = useRef((m: Item) => setViewer(-1 - photos.findIndex((p) => p.key === m.key))).current;
   const openIndex = viewer === null ? null : viewer < 0 ? -1 - viewer : viewer;
-  useEffect(() => {
-    if (viewer === null) return;
-    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') setViewer(null); };   // Esc — где бы ни был фокус
-    addEventListener('keydown', onKey);
-    return () => removeEventListener('keydown', onKey);
-  }, [viewer]);
+  // миниатюра k-го фото в ленте: из неё вьювер вылетает и в неё же возвращается (нет в окне — просто тает)
+  const photoKeys = photos.map((m) => m.key);
+  const keysRef = useRef(photoKeys); keysRef.current = photoKeys;
+  // ключи — из ref: колбэк стабилен (строки мемоизированы), а список фото растёт с новыми сообщениями
+  const onOpen = useRef((m: Item) => { const k = keysRef.current.indexOf(m.key); if (k >= 0) setViewer(-1 - k); }).current;
+  const originOf = useRef((k: number) => {
+    const key = keysRef.current[k];
+    return key ? el.current?.querySelector<HTMLElement>(`[data-key="${CSS.escape(key)}"] .rl-media-cell`) ?? null : null;
+  }).current;
 
   // контекстное меню — одно на ленту, а не на каждый бабл (иначе обработчик ломал бы мемоизацию строк)
   const onContextMenu = (e: MouseEvent) => {
@@ -401,7 +404,8 @@ export function Feed({ chatId, meId, peerName, stick, onMenu, highlight }: {
         <MediaViewer
           index={openIndex}
           sender={peerName}
-          items={photos.map((m) => { const a = m.attachment as Att; return { src: localPreview(m.key) ?? fileUrl(a), w: a.w, h: a.h, caption: m.body, date: clock(m.createdAt as string) }; })}
+          items={photos.map((m) => { const a = m.attachment as Att; return { sender: m.senderId === meId ? myName : peerName, src: localPreview(m.key) ?? fileUrl(a), thumb: a.thumb, w: a.w, h: a.h, name: a.name, download: fileUrl(a, true), caption: m.body, date: clock(m.createdAt as string) }; })}
+          origin={originOf}
           onClose={() => setViewer(null)}
         />
       ) : null}

@@ -292,6 +292,27 @@ body { margin: 0; font-family: var(--font-sans); color: var(--ink); background: 
 
 /* ---------- MediaViewer ---------- */
 .rl-viewer { position: absolute; inset: 0; z-index: 10; display: flex; flex-direction: column; background: var(--viewer-bg); color: var(--ink); outline: none; animation: rl-fade var(--dur-base) var(--ease-out) both; }
+/* фото: на весь экран поверх приложения, тёмная подложка как в Telegram; коробка летит из миниатюры (FLIP в kit.js) */
+.rl-viewer-photo { position: fixed; z-index: 60; background: none; color: #fff; animation: none; }
+.rl-viewer-backdrop { display: none; }
+.rl-viewer-photo .rl-viewer-backdrop { display: block; position: absolute; inset: 0; background: rgba(0, 0, 0, .9); transition: opacity 220ms ease; }
+.rl-viewer-photo .rl-viewer-top, .rl-viewer-photo .rl-viewer-nav, .rl-viewer-photo .rl-viewer-caption { transition: opacity 220ms ease; }
+.rl-viewer-photo .rl-viewer-top { position: relative; z-index: 2; }
+.rl-viewer-photo .rl-viewer-who span { color: rgba(255, 255, 255, .6); }
+.rl-viewer-photo .rl-iconbtn:not(.rl-iconbtn-filled) { color: rgba(255, 255, 255, .85); }
+.rl-viewer-photo .rl-iconbtn:not(.rl-iconbtn-filled):hover { background: rgba(255, 255, 255, .1); color: #fff; }
+.rl-viewer-photo .rl-viewer-stage { position: relative; z-index: 1; padding: 0 var(--space-4); pointer-events: none; }
+.rl-viewer-photo .rl-viewer-stage > * { pointer-events: auto; }
+.rl-viewer-spacer { flex: 1; align-self: stretch; }
+.rl-viewer-box { position: absolute; z-index: 1; overflow: hidden; transform-origin: 0 0; will-change: transform; background: rgba(255, 255, 255, .04);
+  transition: transform 220ms cubic-bezier(.2, 0, .2, 1), border-radius 220ms cubic-bezier(.2, 0, .2, 1), opacity 220ms ease; }
+.rl-viewer-box img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; display: block; max-width: none; max-height: none; border-radius: 0; }
+.rl-viewer-thumb { filter: blur(12px); transform: scale(1.06); }
+.rl-viewer-caption { position: absolute; z-index: 2; left: 50%; bottom: 12px; transform: translateX(-50%); max-width: min(680px, 90vw); padding: 6px 14px; border-radius: 12px; background: rgba(0, 0, 0, .45); color: #fff; font: 400 15px/21px var(--font-sans); text-align: center; }
+/* до старта и при уходе: подложка и панели прозрачны, коробка подлетает/улетает сама */
+.rl-viewer-pre .rl-viewer-backdrop, .rl-viewer-pre .rl-viewer-top, .rl-viewer-pre .rl-viewer-nav, .rl-viewer-pre .rl-viewer-caption,
+.rl-viewer-leaving .rl-viewer-backdrop, .rl-viewer-leaving .rl-viewer-top, .rl-viewer-leaving .rl-viewer-nav, .rl-viewer-leaving .rl-viewer-caption { opacity: 0; }
+.rl-viewer-leaving { pointer-events: none; }
 .rl-viewer-top { display: flex; align-items: center; gap: var(--space-1); height: 60px; padding: 0 var(--space-4); }
 .rl-viewer-who { flex: 1; min-width: 0; display: flex; flex-direction: column; margin-left: var(--space-2); }
 .rl-viewer-who b { font: 500 16px/22px var(--font-sans); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
@@ -1059,6 +1080,4 @@ button.rl-quote { cursor: pointer; }
 .rl-lazy-full { opacity: 0; transition: opacity 260ms var(--ease-out); }
 .rl-lazy-loaded .rl-lazy-full { opacity: 1; }
 .rl-media-cell { position: relative; }
-.rl-viewer-real { max-height: 80vh; max-width: min(90vw, 1200px); width: auto; height: auto; aspect-ratio: auto; background: transparent; }
-.rl-viewer-img { display: block; max-width: 100%; max-height: 80vh; object-fit: contain; border-radius: var(--radius-xs); }
 @media (prefers-reduced-motion: reduce) { .rl-lazy-full { transition: none; } }
