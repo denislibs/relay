@@ -1,9 +1,11 @@
-import type { ClientFrame, Message, ServerFrame } from '@relay/protocol';
+import type { ClientFrame, Me, Message, PublicUser, ServerFrame } from '@relay/protocol';
 import { delBlob, getAll, getBlob, getByChat, openDb, putBlob } from './idb';
 import { affects, computeQuery, diffResults, messageWindow, type Result } from './queries';
 import type { Item } from './types';
 import { Store, type ChatSummary } from './store';
 import { WsTransport } from './transport';
+import { loadOps, Ops, type PendingOp } from './ops';
+import { applyUserUpdated, meItem, meView, OP_PROFILE, OP_USERNAME, userItem } from './profile';
 import type { Action, EngineConfig, LocalMessage, Patch, Query, SearchResult } from './types';
 
 export interface WatchHandle { update(q: Query): void; close(): void }
@@ -51,8 +53,19 @@ export class Engine {
   private refreshing = false;
   private moreChats: Promise<void> | null = null;
   private typingTimers = new Map<string, ReturnType<typeof setTimeout>>();
+  /** очередь операций настроек (ops.ts) */
+  readonly ops: Ops;
+  /** чужие профили, которых нет в кэше: подгрузим, когда будет связь; asked — уже спрашивали за это подключение */
+  private userWants = new Set<number>();
+  private usersAsked = new Set<number>();
 
-  private constructor(private cfg: EngineConfig, readonly store: Store, private db: IDBDatabase) {
+  private constructor(private cfg: EngineConfig, readonly store: Store, private db: IDBDatabase, ops: PendingOp[]) {
+    this.ops = new Ops(db, ops, { base: cfg.httpBase, headers: cfg.headers, backoffMs: cfg.backoffMs }, {
+      canSend: () => this.online && this.ready && !this.closed,
+      done: (op, value) => this.opDone(op, value),
+      changed: () => this.changed(),
+      run: (fn) => this.run(fn),
+    });
     this.transport = new WsTransport(cfg.wsUrl, {
       onOpen: () => this.onOpen(),
       onFrame: (f) => this.onFrame(f),
@@ -63,7 +76,7 @@ export class Engine {
   static async open(cfg: EngineConfig): Promise<Engine> {
     const db = await openDb(cfg.dbName);
     const store = await Store.open(db, cfg.userId);
-    return new Engine(cfg, store, db);
+    return new Engine(cfg, store, db, await loadOps(db));
   }
 
   connect(): void {
@@ -97,6 +110,7 @@ export class Engine {
 
   async close(): Promise<void> {
     this.closed = true;
+    this.ops.close();
     this.disconnect();
     if (this.frameTimer) { clearTimeout(this.frameTimer); this.frameTimer = null; }
     if (this.readTimer) { clearTimeout(this.readTimer); this.readTimer = null; }
@@ -181,6 +195,11 @@ export class Engine {
       const p = this.presence.get(q.userId);
       const it: Item = { key: 'p' + q.userId, userId: q.userId, known: !!p, online: p?.online ?? false, lastSeen: p?.lastSeen ?? null };
       return { items: new Map([[it.key, it]]), order: [it.key], sig: new Map([[it.key, JSON.stringify(it)]]) };
+    }
+    if (q.kind === 'me' || q.kind === 'user' || q.kind === 'ops') {
+      const list = q.kind === 'ops' ? [this.ops.item()] : q.kind === 'me' ? meItem(this.meNow()) : userItem(this.store.profile, this.meNow(), q.userId);
+      if (q.kind === 'user' && !list.length && q.userId !== this.cfg.userId) this.userWants.add(q.userId);
+      return { items: new Map(list.map((it) => [it.key, it])), order: list.map((it) => it.key), sig: new Map(list.map((it) => [it.key, JSON.stringify(it)])) };
     }
     if (q.kind !== 'status') return computeQuery(this.store, q);
     const it = this.statusItem();
@@ -282,10 +301,15 @@ export class Engine {
     const statusChanged = sig !== this.statusSig;
     const presenceDirty = this.presenceDirty;
     this.presenceDirty = false;
+    // профиль при удержании копится, как и чаты; очередь операций (тосты отказов) — сразу
+    const opsDirty = this.ops.dirty, profileDirty = this.store.profile.dirty || opsDirty;
+    this.ops.dirty = false;
+    if (!hold) this.store.profile.dirty = false;
     this.statusSig = sig;
     for (const w of this.watchers.values()) {
-      if (!w.force && !affects(w.q, touched) && !(w.q.kind === 'status' && statusChanged) && !(w.q.kind === 'presence' && presenceDirty)) continue;
-      if (hold && !w.force && w.q.kind !== 'status' && w.q.kind !== 'presence') continue;
+      const own = (w.q.kind === 'status' && statusChanged) || (w.q.kind === 'presence' && presenceDirty) || (w.q.kind === 'ops' && opsDirty) || ((w.q.kind === 'me' || w.q.kind === 'user') && profileDirty);
+      if (!w.force && !affects(w.q, touched) && !own) continue;
+      if (hold && !w.force && w.q.kind !== 'status' && w.q.kind !== 'presence' && w.q.kind !== 'ops') continue;
       if (w.gated) continue;
       w.force = false;
       const next = this.compute(w.q);
@@ -296,6 +320,47 @@ export class Engine {
       }
     }
     this.fetchQuotes();
+    this.fetchUsers();
+  }
+
+  /** Свой профиль для интерфейса: база + очередь. */
+  private meNow(): Me | null { return meView(this.store.profile.me, this.ops.list); }
+
+  /** Операция подтверждена: ответ профиля — новая база (журнал принесёт то же самое ещё раз — не страшно). */
+  private opDone(op: PendingOp, value: unknown): void {
+    if ((op.key === OP_PROFILE || op.key === OP_USERNAME) && value && typeof value === 'object' && (value as Me).userId === this.cfg.userId) {
+      this.store.profile.setMe(value as Me);
+      this.run(() => this.store.flush());
+    }
+  }
+
+  /** Свой профиль с сервера — после каждого hello (кэш мог устареть, пока нас не было). */
+  private fetchMe(): void {
+    const gen = this.store.profile.gen;
+    this.run(async () => {
+      const me = await this.http<Me>('/me');
+      if (this.store.profile.gen !== gen) return;   // пока ждали, пришло свежее (журнал или ответ операции)
+      this.store.profile.setMe(me);
+      await this.store.flush();
+      this.changed();
+    });
+  }
+
+  /** Чужие профили, о которых спросил интерфейс, — по одному запросу на человека за подключение. */
+  private fetchUsers(): void {
+    if (!this.online || !this.ready || !this.userWants.size) return;
+    const ids = [...this.userWants].filter((id) => !this.usersAsked.has(id));
+    this.userWants.clear();
+    for (const id of ids) {
+      this.usersAsked.add(id);
+      this.run(async () => {
+        let u: PublicUser;
+        try { u = await this.http<PublicUser>(`/users/${id}`); } catch { return; }   // 404 — не видим этого человека
+        applyUserUpdated(this.store, u);
+        await this.store.flush();
+        this.changed();
+      });
+    }
   }
 
   // =====================================================================
@@ -392,6 +457,20 @@ export class Engine {
       case 'loadMoreChats':
         await this.loadMoreChats();
         return null;
+      case 'updateProfile': {
+        const body: Record<string, unknown> = {};
+        for (const k of ['firstName', 'lastName', 'bio', 'birthday'] as const) if (a[k] !== undefined) body[k] = a[k];
+        if (Object.keys(body).length) await this.ops.enqueue({ key: OP_PROFILE, method: 'PATCH', path: '/me', body });
+        return null;
+      }
+      case 'setUsername':
+        await this.ops.enqueue({ key: OP_USERNAME, method: 'PUT', path: '/me/username', body: { username: a.username } });
+        return null;
+      case 'checkUsername': {
+        if (!this.online) return { offline: true };
+        try { return await this.http<{ ok: boolean; reason?: string }>(`/users/check-username?u=${encodeURIComponent(a.username)}`); }
+        catch { return { offline: true }; }
+      }
       case 'retry': {
         if (this.store.unfail(a.clientId)) {
           await this.store.flush();
@@ -422,6 +501,7 @@ export class Engine {
     this.presence.clear();            // без связи не знаем, кто в сети
     this.presenceDirty = true;
     this.presenceFetched = false;
+    this.usersAsked.clear();
     if (this.wantOnline) this.failures++;
     this.ready = false;
     this.changed();
@@ -438,9 +518,10 @@ export class Engine {
         this.holding = true;
         this.run(async () => {
           // другое поколение базы (сервер пересоздан): старый кэш недействителен целиком
-          if (this.store.epoch && f.epoch && this.store.epoch !== f.epoch) { await this.store.wipe(f.epoch); this.changed(); }
+          if (this.store.epoch && f.epoch && this.store.epoch !== f.epoch) { await this.store.wipe(f.epoch); this.ops.forget(); this.changed(); }
           else if (!this.store.epoch && f.epoch) { this.store.epoch = f.epoch; this.store.markMeta(); }
           // снимок — только когда кэш пуст; lastSeq = 0 бывает и у заполненного кэша (журнал пользователя ещё пуст)
+          this.fetchMe();
           if (!this.store.hydrated) await this.bootstrap(f.seq);
           else this.runSync();
         });
@@ -547,6 +628,8 @@ export class Engine {
       this.pushDrafts();
       if (this.store.unnamed().length) this.refreshList();
       if (!this.presenceFetched) this.fetchPresence();
+      this.ops.resume();
+      this.fetchUsers();
     }
   }
 
@@ -766,7 +849,8 @@ export class Engine {
       this.syncing || this.busy > 0 || this.pending.size > 0 || this.frameTimer !== null || this.readTimer !== null ||
       (this.transport.wanted && !this.ready) ||
       (this.ready && [...this.store.outbox.values()].some((o) => !o.failed)) ||
-      (this.ready && this.store.pendingReads.size > 0);
+      (this.ready && this.store.pendingReads.size > 0) ||
+      this.ops.sending;
     while (busy()) {
       if (Date.now() > end) {
         throw new Error('engine did not become idle: ' + JSON.stringify({

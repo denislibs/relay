@@ -1,8 +1,8 @@
 import type { LocalMessage } from './types';
 
-export type StoreName = 'chats' | 'messages' | 'outbox' | 'pendingReads' | 'meta';
-const STORES: StoreName[] = ['chats', 'messages', 'outbox', 'pendingReads', 'meta'];
-const VERSION = 2; // 2: blobs — файлы, ждущие отправки
+export type StoreName = 'chats' | 'messages' | 'outbox' | 'pendingReads' | 'meta' | 'users' | 'ops';
+const STORES: StoreName[] = ['chats', 'messages', 'outbox', 'pendingReads', 'meta', 'users', 'ops'];
+const VERSION = 3; // 2: blobs — файлы, ждущие отправки; 3: users — кэш профилей, ops — очередь операций настроек
 
 export function openDb(name: string): Promise<IDBDatabase> {
   return new Promise((resolve, reject) => {
@@ -17,6 +17,7 @@ export function openDb(name: string): Promise<IDBDatabase> {
         db.createObjectStore('meta', { keyPath: 'k' });
       }
       if (e.oldVersion < 2) db.createObjectStore('blobs', { keyPath: 'clientId' });
+      if (e.oldVersion < 3) { db.createObjectStore('users', { keyPath: 'id' }); db.createObjectStore('ops', { keyPath: 'id' }); }
     };
     r.onsuccess = () => resolve(r.result);
     r.onerror = () => reject(r.error);

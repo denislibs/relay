@@ -1,3 +1,5 @@
+import type { Birthday } from '@relay/protocol';
+
 export type Status = 'pending' | 'sent' | 'read' | 'failed';
 
 export interface LocalMessage {
@@ -55,7 +57,13 @@ export type Query =
   | { kind: 'messages'; chatId: number; limit: number; anchor?: { sort: number; side: 'end' | 'start' | 'center' } }
   | { kind: 'counters' }
   | { kind: 'status' }
-  | { kind: 'presence'; userId: number };
+  | { kind: 'presence'; userId: number }
+  /** свой профиль (с ещё не подтверждёнными правками) */
+  | { kind: 'me' }
+  /** профиль человека (PublicUser); нет в кэше — движок подгрузит */
+  | { kind: 'user'; userId: number }
+  /** очередь операций настроек: сколько ждёт и последние отказы сервера (opFailed) */
+  | { kind: 'ops' };
 
 export type Item = { key: string } & Record<string, unknown>;
 
@@ -77,6 +85,10 @@ export type Action =
   | { type: 'react'; chatId: number; id: number; emoji: string | null }
   | { type: 'search'; q: string; chatId?: number; beforeId?: number; limit?: number }
   | { type: 'chatMedia'; chatId: number; kind: 'photo' | 'file' }
+  | { type: 'updateProfile'; firstName?: string; lastName?: string; bio?: string | null; birthday?: Birthday | null }
+  | { type: 'setUsername'; username: string | null }
+  /** проверка имени пользователя мимо очереди: {ok} | {ok:false, reason} | {offline:true} */
+  | { type: 'checkUsername'; username: string }
   | { type: 'sendFile'; chatId: number; body: string; file: Blob; name: string; mime: string; w?: number | null; h?: number | null; thumb?: string | null; replyToId?: number | null };
 
 export interface EngineConfig {

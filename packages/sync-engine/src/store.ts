@@ -1,5 +1,6 @@
 import type { Message, Update } from '@relay/protocol';
 import { getAll, getByChat, write, type WriteBatch } from './idb';
+import { applyUserUpdated, ProfileCache } from './profile';
 import { PENDING_BASE, type LocalChat, type LocalMessage, type OutboxEntry } from './types';
 
 export interface ChatSummary {
@@ -36,6 +37,8 @@ export class Store {
   dialogsDone = false;
   /** чаты, изменившиеся с последнего прохода подписок */
   touched = new Set<number>();
+  /** свой профиль и кэш чужих (profile.ts) */
+  profile!: ProfileCache;
 
   private messages = new Map<number, Map<string, LocalMessage>>();
   private loaded = new Set<number>();
@@ -61,6 +64,7 @@ export class Store {
     s.dialogsAt = meta.find((m) => m.k === 'dialogsAt')?.v ?? 0;
     s.dialogsId = meta.find((m) => m.k === 'dialogsId')?.v ?? 0;
     s.dialogsDone = !!meta.find((m) => m.k === 'dialogsDone')?.v;
+    s.profile = await ProfileCache.load(db, userId, meta as { k: string; v: unknown }[]);
     // чаты с неотправленным — сразу в память, чтобы черновики были видны
     for (const chatId of new Set(outbox.map((o) => o.chatId))) await s.loadChatMessages(chatId);
     return s;
@@ -148,6 +152,7 @@ export class Store {
       case 'messageEdited': return this.patchMessage(u.chatId, u.id, { body: u.body, editedAt: u.editedAt });
       case 'messageDeleted': return this.patchMessage(u.chatId, u.id, { body: '', deleted: true, reactions: [] });
       case 'reactions': return this.patchMessage(u.chatId, u.id, { reactions: u.reactions });
+      case 'userUpdated': return applyUserUpdated(this, u.user);
     }
   }
 
@@ -338,14 +343,14 @@ export class Store {
   async wipe(epoch: string): Promise<void> {
     for (const id of this.chats.keys()) this.touch(id);
     this.chats.clear(); this.messages.clear(); this.loaded.clear(); this.sorted.clear(); this.ids.clear();
-    this.outbox.clear(); this.pendingReads.clear();
+    this.outbox.clear(); this.pendingReads.clear(); this.profile.reset();
     this.dirtyChats.clear(); this.dirtyMessages.clear(); this.dirtyOutbox.clear(); this.dirtyReads.clear();
     this.lastSeq = this.seqAtFlush = 0;
     this.hydrated = false;
     this.dialogsAt = 0; this.dialogsId = 0; this.dialogsDone = false;
     this.epoch = epoch;
     const db = this.db as IDBDatabase;
-    const names = ['chats', 'messages', 'outbox', 'pendingReads', 'meta'];
+    const names = ['chats', 'messages', 'outbox', 'pendingReads', 'meta', 'users', 'ops'];
     const t = db.transaction(names, 'readwrite');
     for (const n of names) t.objectStore(n).clear();
     await new Promise<void>((res, rej) => { t.oncomplete = () => res(); t.onerror = () => rej(t.error); });
@@ -407,6 +412,9 @@ export class Store {
     batch.put.pendingReads = [...this.dirtyReads].filter((c) => this.pendingReads.has(c)).map((c) => ({ chatId: c, upToId: this.pendingReads.get(c) }));
     batch.del.pendingReads = [...this.dirtyReads].filter((c) => !this.pendingReads.has(c));
     if (this.dirtyMeta || this.lastSeq !== this.seqAtFlush) batch.put.meta = [{ k: 'lastSeq', v: this.lastSeq }, { k: 'hydrated', v: this.hydrated ? 1 : 0 }, { k: 'dialogsAt', v: this.dialogsAt }, { k: 'dialogsId', v: this.dialogsId }, { k: 'dialogsDone', v: this.dialogsDone ? 1 : 0 }, ...(this.epoch ? [{ k: 'epoch', v: this.epoch as unknown as number }] : [])];
+    const prof = this.profile.collect();
+    if (prof.me) batch.put.meta = [...(batch.put.meta ?? []), prof.me];
+    if (prof.users.length) batch.put.users = prof.users;
     this.dirtyChats.clear(); this.dirtyMessages.clear(); this.dirtyOutbox.clear(); this.dirtyReads.clear(); this.dirtyMeta = false;
     const seq = this.lastSeq;
     await write(this.db, batch);
@@ -442,7 +450,7 @@ export class Store {
     this.markChat(chat);
   }
 
-  private markChat(c: LocalChat): void {
+  markChat(c: LocalChat): void {
     this.dirtyChats.add(c.id);
     this.touch(c.id);
   }
