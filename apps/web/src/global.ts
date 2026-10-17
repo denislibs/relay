@@ -41,7 +41,13 @@ export interface GlobalState {
   notify: NotifyState;   // уведомления на этом устройстве
   pushReady: boolean;    // подписка Web Push принята сервером: уведомит и без открытой вкладки
   toast: { text: string; id: number } | null;   // общий тост приложения (ошибки сохранения настроек и т. п.)
+  contacts: Item[];          // подписка contacts движка (с неподтверждёнными правками)
+  contactsLoaded: boolean;   // список с сервера уже был (иначе пусто — значит «грузим»)
+  newContact: NewContactDraft | null;   // открытая модалка «Новый контакт» и чем её заполнить
 }
+
+/** Чем заполнить «Новый контакт»: из «Информации» — человек уже известен (userId), запрос лишь для вида. */
+export interface NewContactDraft { query?: string; firstName?: string; lastName?: string; userId?: number }
 
 let state: GlobalState = {
   boot: 'loading',
@@ -69,6 +75,9 @@ let state: GlobalState = {
   notify: 'unsupported',
   pushReady: false,
   toast: null,
+  contacts: [],
+  contactsLoaded: false,
+  newContact: null,
 };
 const subscribers = new Set<() => void>();
 

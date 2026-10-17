@@ -34,6 +34,8 @@ const FAIL_TEXT: Record<string, string> = {
   username_invalid: 'Недопустимое имя пользователя',
   bio_too_long: 'Слишком длинный текст о себе',
   name_invalid: 'Укажите имя',
+  note_too_long: 'Слишком длинная заметка',
+  not_found: 'Пользователь не найден в Relay',
 };
 export const failText = (code: string): string => FAIL_TEXT[code] ?? 'Не удалось сохранить изменения';
 
@@ -65,6 +67,13 @@ export function startSettingsData(me: Me): void {
     try { localStorage.setItem(ME_KEY, JSON.stringify(next)); } catch { /* приватный режим */ }
   });
 
+  // контакты: список для страницы «Контакты», «Информации» и модалки
+  const contactsM = new Mirror();
+  engine.watch({ kind: 'contacts' }, (p) => {
+    contactsM.apply(p);
+    setGlobal({ contacts: contactsM.list(), contactsLoaded: !!contactsM.meta('~contacts')?.loaded });
+  });
+
   // отказы сервера: тост на каждый новый (случившиеся до подписки — уже не новость)
   const opsM = new Mirror();
   let seen = -1;
@@ -88,6 +97,14 @@ export const setUsername = (username: string | null): Promise<unknown> => call({
 export type UsernameCheck = { ok: true } | { ok: false; reason: 'invalid' | 'taken' | 'reserved' } | { offline: true };
 export const checkUsername = (username: string): Promise<UsernameCheck> =>
   call<UsernameCheck>({ type: 'checkUsername', username }).catch(() => ({ offline: true as const }));
+
+export interface ContactPatch { firstName?: string; lastName?: string; note?: string }
+export const addContact = (userId: number, firstName: string, lastName = ''): Promise<unknown> => call({ type: 'addContact', userId, firstName, lastName });
+export const updateContact = (userId: number, patch: ContactPatch): Promise<unknown> => call({ type: 'updateContact', userId, ...patch });
+export const removeContact = (userId: number): Promise<unknown> => call({ type: 'removeContact', userId });
+export type ResolveResult = { user: Item & { id: number; name: string } } | { notFound: true } | { offline: true };
+export const resolveUser = (query: string): Promise<ResolveResult> =>
+  call<ResolveResult>({ type: 'resolveUser', query }).catch(() => ({ offline: true as const }));
 
 // последний известный профиль по id в этой вкладке: повторное открытие «Информации» — без ожидания движка
 const userCache = new Map<number, Item>();

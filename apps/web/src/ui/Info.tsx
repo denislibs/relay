@@ -8,6 +8,7 @@ import { syncMuted } from '../notify';
 import { setGlobal, useGlobal } from '../global';
 import { birthdayText, clock, dayLabel, lastSeenText, type Birthday } from './format';
 import { showToast, useUser } from '../settingsData';
+import { go } from '../nav';
 
 const TABS = ['media', 'files', 'links'];
 const URL_RE = /https?:\/\/[^\s<>"']+/g;
@@ -16,7 +17,7 @@ const close = () => setGlobal({ infoOpen: false });
 // уведомления выключаются только на этом устройстве (как «Без звука» локально): список chatId в localStorage
 const MUTED_KEY = 'relay.muted';
 export function loadMuted(): number[] { try { return JSON.parse(localStorage.getItem(MUTED_KEY) ?? '[]'); } catch { return []; } }
-function toggleMuted(chatId: number, muted: number[]): void {
+export function toggleMuted(chatId: number, muted: number[]): void {
   const next = muted.includes(chatId) ? muted.filter((x) => x !== chatId) : [...muted, chatId];
   try { localStorage.setItem(MUTED_KEY, JSON.stringify(next)); } catch { /* приватный режим */ }
   setGlobal({ muted: next });
@@ -32,7 +33,11 @@ export function Info() {
   const muted = useGlobal((s) => s.muted);
   const [tab, setTab] = useState('media');
   // профиль собеседника личного чата: только то, что сервер разрешил показать
-  const user = useUser(chat?.kind === 'direct' ? (chat.peerId as number | null) : null);
+  const peerId = chat?.kind === 'direct' ? (chat.peerId as number | null) : null;
+  const user = useUser(peerId);
+  // контакт: ✎ в шапке ведёт в «Изменить»; не контакт — «Добавить в контакты»
+  const contact = useGlobal((s) => (peerId ? s.contacts.find((c) => c.userId === peerId) ?? null : null));
+  const contactsLoaded = useGlobal((s) => s.contactsLoaded);
   // медиа и файлы чата — с сервера (вся история), при открытии вкладки
   const [media, setMedia] = useState<{ photo?: Item[]; file?: Item[] }>({});
   useEffect(() => {
@@ -59,7 +64,8 @@ export function Info() {
 
   return (
     <>
-      <PanelHeader icon="close" closeLabel="Закрыть" title="Информация" onClose={close} />
+      <PanelHeader icon="close" closeLabel="Закрыть" title="Информация" onClose={close}
+        action={contact ? { icon: 'pencil', label: 'Изменить контакт', onClick: () => void go(`contacts/${peerId}/edit`) } : undefined} />
       <div class="rl-aside-body">
         <div class="rl-profile">
           <Avatar name={title} size={120} />
@@ -69,6 +75,18 @@ export function Info() {
         <div class="rl-aside-group">
           <InfoRow tile="orange" icon={group ? 'community' : 'contact'} title={title} subtitle={group ? 'Название группы' : 'Имя'} />
           <Expand show={!group && !!user}>{!group && user ? <PeerRows user={user} /> : null}</Expand>
+          <Expand show={!!contact?.note}>{contact?.note ? (
+            <div class="rl-inforow rl-inforow-static">
+              <SettingsIcon icon="pencil" color="gray" />
+              <span class="rl-inforow-text"><span class="rl-bio app-info-bio"><RichText text={String(contact.note)} /></span><small>Заметки</small></span>
+            </div>
+          ) : null}</Expand>
+          <Expand show={!!peerId && contactsLoaded && !contact}>{peerId && contactsLoaded && !contact ? (
+            <InfoRow tile="blue" icon="userPlus" title="Добавить в контакты" onClick={() => setGlobal({ newContact: {
+              query: user?.username ? '@' + String(user.username) : String(peerId), userId: peerId,
+              firstName: String(user?.firstName ?? title.split(' ')[0] ?? ''), lastName: String(user?.lastName ?? ''),
+            } })} />
+          ) : null}</Expand>
           <InfoRow
             tile="red"
             icon={muted.includes(chatId) ? 'bellOff' : 'bell'}
