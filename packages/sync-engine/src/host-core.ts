@@ -33,6 +33,8 @@ export function fromMessagePort<In, Out>(port: { postMessage(m: unknown): void; 
 interface Client {
   port: PortLike<ToHost, FromHost>;
   subs: Map<number, WatchHandle>;
+  /** запросы подписок — чтобы переподписать вкладку на перезапущенный движок (dev: restartWorker) */
+  queries: Map<number, Query>;
   buf: { sub: number; patch: Patch }[];
   queued: boolean;
   lastSeen: number;
@@ -45,15 +47,19 @@ interface Client {
 export class HostCore {
   private engine: Promise<Engine> | null = null;
   private clients = new Set<Client>();
+  /** открытый движок (для журнала ошибок хоста) и конфиг последнего hello (для перезапуска) */
+  private live: Engine | null = null;
+  private cfg: EngineConfig | null = null;
+  private readonly startedAt = Date.now();
 
-  constructor(private opts: { build: string; open: (cfg: EngineConfig) => Promise<Engine> }) {}
+  constructor(private opts: { build: string; open: (cfg: EngineConfig) => Promise<Engine>; kind?: 'shared' | 'dedicated-leader' }) {}
 
   get size(): number { return this.clients.size; }
 
   attach(port: PortLike<ToHost, FromHost>): { detach(): void } {
-    const c: Client = { port, subs: new Map(), buf: [], queued: false, lastSeen: Date.now() };
+    const c: Client = { port, subs: new Map(), queries: new Map(), buf: [], queued: false, lastSeen: Date.now() };
     this.clients.add(c);
-    port.listen((m) => { this.onMessage(c, m).catch((err) => console.error('host:', err)); });
+    port.listen((m) => { this.onMessage(c, m).catch((err) => { console.error('host:', err); this.live?.dev.log.error('host', err); }); });
     return { detach: () => this.detach(c) };
   }
 
@@ -73,14 +79,7 @@ export class HostCore {
     switch (m.t) {
       case 'hello': {
         if (m.build !== this.opts.build) { c.port.post({ t: 'reload' }); return; }
-        this.engine ??= this.opts.open(m.config).then((e) => {
-          e.onObsolete(() => this.obsolete());
-          // сеанс завершён: движок стёр данные и закрылся; следующий вход (hello после входа) откроет новый
-          const opened = this.engine;
-          e.onTerminated(() => { if (this.engine === opened) this.engine = null; });
-          e.connect();
-          return e;
-        });
+        this.engine ??= this.start(m.config);
         await this.engine;
         c.port.post({ t: 'ready' });
         return;
@@ -94,12 +93,18 @@ export class HostCore {
     switch (m.t) {
       case 'watch': {
         c.subs.get(m.sub)?.close();
+        c.queries.set(m.sub, m.query);
         c.subs.set(m.sub, engine.watch(m.query, (patch) => this.queue(c, m.sub, patch)));
         return;
       }
-      case 'update': c.subs.get(m.sub)?.update(m.query); return;
-      case 'unwatch': c.subs.get(m.sub)?.close(); c.subs.delete(m.sub); return;
+      case 'update': c.queries.set(m.sub, m.query); c.subs.get(m.sub)?.update(m.query); return;
+      case 'unwatch': c.subs.get(m.sub)?.close(); c.subs.delete(m.sub); c.queries.delete(m.sub); return;
       case 'call': {
+        if (m.action.type === 'dev' && m.action.cmd === 'restartWorker') {
+          await this.restart().then((value) => c.port.post({ t: 'result', id: m.id, ok: true, value }),
+            (err) => c.port.post({ t: 'result', id: m.id, ok: false, error: String((err as Error)?.message ?? err) }));
+          return;
+        }
         try {
           const value = await engine.call(m.action);
           c.port.post({ t: 'result', id: m.id, ok: true, value });
@@ -111,9 +116,39 @@ export class HostCore {
     }
   }
 
+  private start(cfg: EngineConfig): Promise<Engine> {
+    this.cfg = cfg;
+    return this.opts.open(cfg).then((e) => {
+      e.onObsolete(() => this.obsolete());
+      // сеанс завершён: движок стёр данные и закрылся; следующий вход (hello после входа) откроет новый
+      e.onTerminated(() => { if (this.live === e) { this.engine = null; this.live = null; } });
+      e.dev.host = { build: this.opts.build, kind: this.opts.kind ?? 'shared', clients: () => this.clients.size, startedAt: this.startedAt };
+      this.live = e;
+      e.connect();
+      return e;
+    });
+  }
+
+  /** dev: перезапуск движка без перезагрузки вкладок — закрыть, открыть заново, переподписать все подписки
+   *  (первый патч новой подписки — снимок, зеркало вкладки заменяется целиком). */
+  private async restart(): Promise<unknown> {
+    if (!this.engine || !this.cfg) throw new Error('not_started');
+    const old = await this.engine, cfg = this.cfg;
+    this.live = null;
+    for (const c of this.clients) { for (const s of c.subs.values()) s.close(); c.subs.clear(); }
+    // сообщения вкладок, пришедшие во время перезапуска, ждут уже новый движок
+    const next = old.close().then(() => this.start(cfg));
+    this.engine = next;
+    const e = await next;
+    // все подписки — заново на новом движке (и те, что успели прийти во время перезапуска: они могли попасть на старый)
+    for (const c of this.clients) for (const [sub, q] of c.queries) { c.subs.get(sub)?.close(); c.subs.set(sub, e.watch(q, (patch) => this.queue(c, sub, patch))); }
+    return { restarted: 'engine' };
+  }
+
   /** Движок устарел (новая сборка обновляет базу): все вкладки перезагружаются на новую сборку. */
   private obsolete(): void {
     this.engine = null;
+    this.live = null;
     for (const c of this.clients) c.port.post({ t: 'reload' });
   }
 

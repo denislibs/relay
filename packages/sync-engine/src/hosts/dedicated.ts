@@ -84,7 +84,7 @@ export function createDedicatedHost(opts: {
     if (closed) { resolve(); return; }
     release = resolve;
     role = 'leader';
-    core = new HostCore({ build: opts.build, open: opts.open });
+    core = new HostCore({ build: opts.build, open: opts.open, kind: 'dedicated-leader' });
     core.attach({ post: toSelf, listen: (cb) => { feedLocal = cb; } });
     failCalls();             // вызовы, отправленные прежнему лидеру, потеряны
     replay(feedLocal!);      // своя вкладка — в собственный движок
