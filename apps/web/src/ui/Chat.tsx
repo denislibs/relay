@@ -54,6 +54,13 @@ export function Chat({ chatId }: { chatId: number }) {
     return { ...f, at };
   });
   const closeFind = () => { setFinding(false); setFindQ(''); setFound(null); setListOpen(true); };
+  // Esc закрывает поиск, даже если фокус ушёл из поля (после выбора результата)
+  useEffect(() => {
+    if (!finding) return;
+    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape' && !e.defaultPrevented) closeFind(); };
+    addEventListener('keydown', onKey);
+    return () => removeEventListener('keydown', onKey);
+  }, [finding]);
 
   // вложения: выбор файла (скрепка), перетаскивание, вставка; перед отправкой — окно с превью и подписью
   const picker = useRef<HTMLInputElement>(null);
@@ -146,38 +153,7 @@ export function Chat({ chatId }: { chatId: number }) {
   return (
     <>
       <span ref={shell} hidden />
-      {finding ? (
-        <div class={'rl-glassbar app-findbar app-steady' + (listOpen && found ? ' app-findbar-open' : '')}>
-          <ChatSearchBar
-            id="chat-find"
-            value={findQ}
-            total={found?.hits.length ?? 0}
-            index={found?.at ?? 0}
-            onQuery={(q: string) => { setFindQ(q); setListOpen(true); }}
-            onFocus={() => setListOpen(true)}
-            onNext={() => step(1)}
-            onPrev={() => step(-1)}
-            onClose={closeFind}
-          />
-          <Presence show={listOpen && !!found} exitMs={140}>
-            <div class="app-findlist" role="listbox" aria-label="Найденные сообщения">
-              {found && found.hits.length ? found.hits.map((x, k) => {
-                const who = names[x.senderId] ?? (x.senderId === me.userId ? me.name : chat?.kind === 'direct' ? title : '');
-                return (
-                  <button type="button" role="option" aria-selected={k === found.at} key={x.id} class={'app-findrow' + (k === found.at ? ' app-findrow-on' : '')} onPointerDown={ripple} onClick={() => pick(k)}>
-                    <Avatar name={who} size={48} />
-                    <span class="app-findrow-text">
-                      <span class="app-findrow-top"><b>{who}</b><time>{chatTime(x.createdAt)}</time></span>
-                      <span class="app-findrow-body"><Highlight text={snippet(x.body, found.q)} query={found.q} /></span>
-                    </span>
-                  </button>
-                );
-              }) : <div class="app-findempty">Ничего не найдено</div>}
-            </div>
-          </Presence>
-        </div>
-      ) : null}
-      <GlassBar class={(switching ? 'app-steady' : '') + (finding ? ' app-hidden' : '')}>
+      <GlassBar class={(switching ? 'app-steady' : '') + (finding ? ' app-finding' : '')}>
         <IconButton class="app-back" icon="arrowLeft" label="К списку чатов" onClick={() => openChat(null)} />
         <button type="button" class="rl-glassbar-who" aria-label="Информация о чате" onClick={() => setGlobal({ infoOpen: !infoOpen })}>
           <Avatar name={title} size={40} />
@@ -188,6 +164,38 @@ export function Chat({ chatId }: { chatId: number }) {
         </button>
         <IconButton icon="search" label="Поиск по чату" onClick={() => setFinding(true)} />
         <IconButton icon="more" label="Информация" onClick={() => setGlobal({ infoOpen: !infoOpen })} />
+        {/* поиск по чату — карточка внутри шапки, как в Telegram: аватар и правая кнопка остаются видны */}
+        {finding ? (
+          <div class={'app-findcard' + (listOpen && found ? ' app-findcard-open' : '')}>
+            <ChatSearchBar
+              id="chat-find"
+              value={findQ}
+              total={found?.hits.length ?? 0}
+              index={found?.at ?? 0}
+              onQuery={(q: string) => { setFindQ(q); setListOpen(true); }}
+              onFocus={() => setListOpen(true)}
+              onNext={() => step(1)}
+              onPrev={() => step(-1)}
+              onClose={closeFind}
+            />
+            <Presence show={listOpen && !!found} exitMs={140}>
+              <div class="app-findlist" role="listbox" aria-label="Найденные сообщения">
+                {found && found.hits.length ? found.hits.map((x, k) => {
+                  const who = names[x.senderId] ?? (x.senderId === me.userId ? me.name : chat?.kind === 'direct' ? title : '');
+                  return (
+                    <button type="button" role="option" aria-selected={k === found.at} key={x.id} class={'app-findrow' + (k === found.at ? ' app-findrow-on' : '')} onPointerDown={ripple} onClick={() => pick(k)}>
+                      <Avatar name={who} size={48} />
+                      <span class="app-findrow-text">
+                        <span class="app-findrow-top"><b>{who}</b><time>{chatTime(x.createdAt)}</time></span>
+                        <span class="app-findrow-body"><Highlight text={snippet(x.body, found.q)} query={found.q} /></span>
+                      </span>
+                    </button>
+                  );
+                }) : <div class="app-findempty">Ничего не найдено</div>}
+              </div>
+            </Presence>
+          </div>
+        ) : null}
       </GlassBar>
       <Feed chatId={chatId} meId={me.userId} peerName={title} stick={stick} highlight={found?.q} onMenu={(key, x, y) => setMenu({ key, x, y })} />
       <Composer
