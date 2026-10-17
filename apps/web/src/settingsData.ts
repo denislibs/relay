@@ -5,7 +5,7 @@ import { connectEngine, Mirror, type EngineClient } from '@relay/sync-engine/src
 import type { Action, Item, Patch } from '@relay/sync-engine/src/types';
 import { useEffect, useState } from 'preact/hooks';
 import { engineConfig } from './engineConfig';
-import { getGlobal, setGlobal, type Me } from './global';
+import { getGlobal, setGlobal, type AccountSettings, type Me } from './global';
 
 declare const __BUILD__: string;
 
@@ -74,6 +74,14 @@ export function startSettingsData(me: Me): void {
     setGlobal({ contacts: contactsM.list(), contactsLoaded: !!contactsM.meta('~contacts')?.loaded });
   });
 
+  // настройки аккаунта: умолчания уведомлений (страница «Уведомления» и локальные уведомления)
+  const settingsM = new Mirror();
+  engine.watch({ kind: 'settings' }, (p) => {
+    settingsM.apply(p);
+    const it = settingsM.list()[0];
+    if (it) setGlobal({ settings: { notify: it.notify, sessionsTtlDays: it.sessionsTtlDays, loaded: !!it.loaded, pending: !!it.pending } as AccountSettings });
+  });
+
   // отказы сервера: тост на каждый новый (случившиеся до подписки — уже не новость)
   const opsM = new Mirror();
   let seen = -1;
@@ -97,6 +105,9 @@ export const setUsername = (username: string | null): Promise<unknown> => call({
 export type UsernameCheck = { ok: true } | { ok: false; reason: 'invalid' | 'taken' | 'reserved' } | { offline: true };
 export const checkUsername = (username: string): Promise<UsernameCheck> =>
   call<UsernameCheck>({ type: 'checkUsername', username }).catch(() => ({ offline: true as const }));
+
+export const setNotifyDefault = (notifyType: 'direct' | 'group', patch: { muted?: boolean; preview?: boolean }): Promise<unknown> =>
+  call({ type: 'setNotify', notifyType, ...patch });
 
 export interface ContactPatch { firstName?: string; lastName?: string; note?: string }
 export const addContact = (userId: number, firstName: string, lastName = ''): Promise<unknown> => call({ type: 'addContact', userId, firstName, lastName });

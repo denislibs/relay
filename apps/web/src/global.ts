@@ -43,8 +43,13 @@ export interface GlobalState {
   toast: { text: string; id: number } | null;   // общий тост приложения (ошибки сохранения настроек и т. п.)
   contacts: Item[];          // подписка contacts движка (с неподтверждёнными правками)
   contactsLoaded: boolean;   // список с сервера уже был (иначе пусто — значит «грузим»)
+  settings: AccountSettings;   // настройки аккаунта (подписка settings движка): умолчания уведомлений
   newContact: NewContactDraft | null;   // открытая модалка «Новый контакт» и чем её заполнить
 }
+
+/** Настройки аккаунта (общие для устройств). loaded — снимок с сервера уже был; pending — есть неподтверждённые правки. */
+export interface AccountSettings { notify: Record<'direct' | 'group', { muted: boolean; preview: boolean }>; sessionsTtlDays: number; loaded: boolean; pending: boolean }
+export const defaultAccountSettings = (): AccountSettings => ({ notify: { direct: { muted: false, preview: true }, group: { muted: false, preview: true } }, sessionsTtlDays: 180, loaded: false, pending: false });
 
 /** Чем заполнить «Новый контакт»: из «Информации» — человек уже известен (userId), запрос лишь для вида. */
 export interface NewContactDraft { query?: string; firstName?: string; lastName?: string; userId?: number }
@@ -77,6 +82,7 @@ let state: GlobalState = {
   toast: null,
   contacts: [],
   contactsLoaded: false,
+  settings: defaultAccountSettings(),
   newContact: null,
 };
 const subscribers = new Set<() => void>();

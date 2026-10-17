@@ -57,7 +57,7 @@ function CheckRow(props) {
     h('span', { class: 'rl-optrow-text' }, h('span', null, props.label || props.title), props.subtitle ? h('small', null, props.subtitle) : null));
 }
 
-/* ---------- RangeRow: подпись, значение справа, слайдер (←/→ нативно, aria-valuetext) ---------- */
+/* ---------- RangeRow: подпись, значение справа, слайдер (←/→ нативно, aria-valuetext); onChange — пока тянут, onCommit — когда отпустили ---------- */
 function RangeRow(props) {
   var min = props.min != null ? props.min : 0, max = props.max != null ? props.max : 100, step = props.step || 1;
   var value = props.value != null ? props.value : min;
@@ -71,7 +71,9 @@ function RangeRow(props) {
       h('output', { class: 'rl-range-value', for: id }, fmt(value))),
     h('input', { id: id, type: 'range', class: 'rl-range-input', min: min, max: max, step: step, value: value, disabled: props.disabled,
       style: '--pct:' + pct + '%', 'aria-valuetext': fmt(value),
-      onInput: function (e) { if (props.onChange) props.onChange(Number(e.currentTarget.value), e); } }),
+      onInput: function (e) { if (props.onChange) props.onChange(Number(e.currentTarget.value), e); },
+      // change у range приходит при отпускании ползунка (и после клавиши)
+      onChange: function (e) { if (props.onCommit) props.onCommit(Number(e.currentTarget.value), e); } }),
     marks && marks.length ? h('div', { class: 'rl-range-marks', 'aria-hidden': 'true' }, marks.map(function (m, i) {
       var v = typeof m === 'object' ? m.value : m, label = typeof m === 'object' ? m.label : fmt(m);
       return h('span', { key: i, style: 'left:' + (max > min ? (v - min) / (max - min) * 100 : 0) + '%' }, label);
