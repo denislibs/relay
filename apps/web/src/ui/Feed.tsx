@@ -1,4 +1,5 @@
 import type { Item } from '@relay/sync-engine/src/types';
+import { senderAvatar } from '../profilePhoto';
 import type { Entity } from '@relay/protocol';
 import { Bubble, peerTone, DateDivider, DatePicker, FileBubble, MediaBubble, MessageText, VoiceBubble, MusicBubble, RoundBubble, player, MediaViewer, ScrollToBottom, beginHeavyAnimation, forceMeasure, isHeavyAnimating, onHeavyAnimationEnd, requestMeasure, requestMutation } from '@relay/ui';
 import { memo } from 'preact/compat';
@@ -657,7 +658,7 @@ export function Feed({ frameKey, active, chatId, meId, peerName, group, onAuthor
         <MediaViewer
           index={openIndex}
           sender={peerName}
-          items={photos.map((m) => { const a = m.attachment as Att; return { sender: names[m.senderId as number] ?? '',   // не название группы: пока имени нет — пусто, оно подгружается заранее
+          items={photos.map((m) => { const a = m.attachment as Att; return { sender: names[m.senderId as number] ?? '', avatar: senderAvatar(m.senderId as number),   // не название группы: пока имени нет — пусто, оно подгружается заранее
  src: localPreview(m.key) ?? fileUrl(a), thumb: a.thumb, w: a.w, h: a.h, name: a.name, download: fileUrl(a, true), caption: m.body, date: clock(m.createdAt as string) }; })}
           origin={originOf}
           onClose={() => setViewer(null)}

@@ -1,4 +1,5 @@
 import { Avatar, EmptyState, FolderTabs, Icon, LazyImage, MediaViewer, peerTone, player, SlideStack } from '@relay/ui';
+import { senderAvatar } from '../profilePhoto';
 import type { Item } from '@relay/sync-engine/src/types';
 import { useEffect, useRef, useState } from 'preact/hooks';
 import { chatMedia, chatMediaCounts, focusMessage, type MediaTab } from '../data';
@@ -111,7 +112,7 @@ function TabList({ chatId, tab }: { chatId: number; tab: MediaTab }) {
     {viewer !== null && photos[viewer] ? (
       <MediaViewer index={viewer}
         items={photos.map((m) => { const a = m.attachment!; return { src: fileUrl(a), thumb: a.thumb, w: a.w, h: a.h, name: a.name, download: fileUrl(a) + '?download=1', caption: m.body,
-          date: when(m.createdAt), sender: m.senderId === meId ? 'Вы' : names[m.senderId] ?? '' }; })}
+          date: when(m.createdAt), sender: m.senderId === meId ? 'Вы' : names[m.senderId] ?? '', avatar: senderAvatar(m.senderId) }; })}
         origin={(k: number) => grid.current?.querySelector<HTMLElement>(`[data-mid="${photos[k]?.id}"]`) ?? null}
         onClose={() => setViewer(null)} />
     ) : null}

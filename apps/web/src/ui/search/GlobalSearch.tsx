@@ -1,4 +1,5 @@
 import type { MediaTab, ProfilePhoto } from '@relay/protocol';
+import { senderAvatar } from '../../profilePhoto';
 import { Avatar, EmptyState, FolderTabs, Highlight, Icon, MediaViewer, peerTone, player, SlideStack } from '@relay/ui';
 import type { Item, SearchHit } from '@relay/sync-engine/src/types';
 import type { ComponentChildren } from 'preact';
@@ -289,7 +290,7 @@ function MediaTab({ kind, q }: { kind: MediaTab; q: string }) {
         {state.more ? <div ref={end} class="app-sm-more" /> : null}
         {viewer !== null && photos[viewer] ? (
           <MediaViewer index={viewer}
-            items={photos.map((h) => { const a = h.message.attachment!; return { src: fileUrl(a), thumb: a.thumb, w: a.w, h: a.h, name: a.name, download: fileUrl(a) + '?download=1', caption: h.message.body, date: when(h.message.createdAt), sender: who(h) }; })}
+            items={photos.map((h) => { const a = h.message.attachment!; return { src: fileUrl(a), thumb: a.thumb, w: a.w, h: a.h, name: a.name, download: fileUrl(a) + '?download=1', caption: h.message.body, date: when(h.message.createdAt), sender: who(h), avatar: senderAvatar(h.message.senderId) }; })}
             origin={(k: number) => grid.current?.querySelector<HTMLElement>(`[data-mid="${photos[k]?.message.id}"]`) ?? null}
             onClose={() => setViewer(null)} />
         ) : null}
