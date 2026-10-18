@@ -35,6 +35,7 @@ function onKey(e) {
   if (!top) return;
   if (e.key === 'Escape') {
     if (e.defaultPrevented) return;   // Esc уже съело что-то внутри окна (меню, поле с подсказками)
+    if (document.querySelector('[data-esc-layer]')) return;   // открыт выпадающий список поверх окна — Esc сначала ему
     e.preventDefault(); e.stopPropagation();
     if (top.ref.current.closeOnEsc !== false && top.ref.current.onClose) top.ref.current.onClose();
     return;

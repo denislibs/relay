@@ -1,4 +1,4 @@
-import { Button, ConfirmDialog, Fab, IconButton, InfoRow, Modal, PanelHeader, Presence, ProfileHeader, Section, Sticker, TextField, peerTone } from '@relay/ui';
+import { Button, ConfirmDialog, Fab, IconButton, InfoRow, Modal, PanelHeader, Presence, ProfileHeader, Section, SelectField, Sticker, TextField, peerTone } from '@relay/ui';
 import { usePhotoPicker } from './usePhotoPicker';
 import { useEffect, useRef, useState } from 'preact/hooks';
 import { useGlobal, type Me } from '../../global';
@@ -34,20 +34,6 @@ function useUsernameStatus(me: Me, value: string): UsernameStatus {
     return () => clearTimeout(t);
   }, [value, me.username]);
   return status;
-}
-
-/** Поле-список в стиле полей ввода: подпись на рамке, значение внутри, стрелка справа. */
-function SelectField({ label, value, options, onChange, class: cls }: { label: string; value: number; options: { value: number; label: string }[]; onChange: (v: number) => void; class?: string }) {
-  return (
-    <div class={'rl-tf rl-tf-filled app-bday-field ' + (cls ?? '')}>
-      <div class="rl-tf-box">
-        <select class="rl-tf-input app-bday-select" value={value} onChange={(e) => onChange(Number(e.currentTarget.value))}>
-          {options.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
-        </select>
-        <label class="rl-tf-label">{label}</label>
-      </div>
-    </div>
-  );
 }
 
 /** День рождения как в Telegram: торт, «Дата рождения», день · месяц · год в ряд, кто видит — в настройках. */

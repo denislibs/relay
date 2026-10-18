@@ -87,8 +87,6 @@ body { background: var(--bg); color: var(--ink); font-family: var(--font-sans); 
 .app-bday-row { display: grid; grid-template-columns: 1fr 1.7fr 1.15fr; gap: 10px; width: 100%; }
 .app-bday-row .rl-tf-msg:empty { display: none; }
 .app-bday-row .rl-tf-input { padding-right: 12px; }
-.app-bday-select { appearance: none; -webkit-appearance: none; cursor: pointer; padding-right: 30px !important;
-  background: no-repeat right 12px center / 12px url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 12 8'%3E%3Cpath d='M1 1.5l5 5 5-5' fill='none' stroke='%23888' stroke-width='1.6' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E"); }
 .app-bday-note { margin: 22px 0 0; font: 400 15px/20px var(--font-sans); color: var(--ink); text-align: center; }
 .app-bday-link { padding: 0; border: 0; background: none; color: var(--brand-text); font: inherit; cursor: pointer; }
 .app-bday-link:hover { text-decoration: underline; text-underline-offset: 2px; }
