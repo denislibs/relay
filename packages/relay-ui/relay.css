@@ -1072,6 +1072,12 @@ button.rl-tab:hover { color: var(--ink); }
 .rl-shell { --space-float: 16px; --chat-max: 696px; --header-h: 48px; }
 /* the feed runs under the header and composer pills and fades out towards them instead of being cut */
 .rl-shell .rl-glassbar, .rl-shell .rl-composer-wrap { position: relative; z-index: 3; }
+/* под полем ввода сообщения не видны резко, как в Telegram: от середины поля до края окна — размытая вуаль,
+   к верху сходящая на нет (лента под ней по-прежнему тянется до края окна) */
+.rl-shell .rl-composer-wrap::before { content: ''; position: absolute; z-index: -1; left: -12px; right: -12px; top: 30%; bottom: calc(-1 * var(--space-float) - 4px); pointer-events: none;
+  -webkit-backdrop-filter: blur(10px); backdrop-filter: blur(10px);
+  -webkit-mask-image: linear-gradient(to bottom, transparent, #000 55%); mask-image: linear-gradient(to bottom, transparent, #000 55%); }
+html[data-blur="0"] .rl-shell .rl-composer-wrap::before { -webkit-backdrop-filter: none; backdrop-filter: none; background: color-mix(in srgb, var(--page) 70%, transparent); }
 .rl-shell .rl-feed {
   --top-zone: calc(var(--header-h) + var(--space-float));
   --bottom-zone: calc(var(--composer-h, 48px) + var(--space-float));
