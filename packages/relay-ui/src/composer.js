@@ -9,7 +9,9 @@
 import { h } from 'preact';
 import { useEffect, useLayoutEffect, useRef, useState } from 'preact/hooks';
 import { cx, Icon, IconButton, Presence, ReplyQuote, reducedMotion, ripple } from './kit.js';
-import { AttachMenu, MentionList } from './more.js';
+import { AttachMenu, MentionList, Menu } from './more.js';
+import { peakHub, RecordBar, voiceSession } from './media/recording.js';
+import { startVoice } from './media/voiceRecorder.js';
 import { requestMeasure, requestMutation } from './schedule.js';
 import { covers, emptyValue, readDom, replaceContent, safeUrl, setSelection, splice, toggleFormat, toHtml, trimValue, valueFromClipboard } from './richtext.js';
 
@@ -51,6 +53,13 @@ function Composer(props) {
   if (props.replyTo) reply.current = props.replyTo;   // при закрытии полоса уходит со старым содержимым
   var latest = useRef(props);
   latest.current = props;
+  // запись голосового / кружка: { mode, session, limit }
+  var rec = useState(null), recNow = useRef(null);
+  recNow.current = rec[0];
+  var recToken = useRef(0);
+  var modeMenu = useState(false);
+  var modes = props.recordModes || [];
+  var recordMode = modes.indexOf(props.recordMode) >= 0 ? props.recordMode : modes[0] || null;
 
   /* ---------- высота ---------- */
   function fit(animate) {
@@ -124,11 +133,47 @@ function Composer(props) {
   });
 
   /* ---------- отправка ---------- */
+  /* ---------- запись ---------- */
+  function startRecording(mode) {
+    var token = ++recToken.current;
+    var p = latest.current;
+    if (editRef.current) editRef.current.blur();
+    var hub = peakHub();
+    var start = mode === 'round' && p.startRound ? p.startRound({ onPeak: hub.emit }) : startVoice({ onPeak: hub.emit }).then(function (r) { return voiceSession(r, hub); });
+    start.then(function (session) {
+      if (session.kind === 'round') session.onPeak = hub.subscribe;
+      // пока ждали разрешения, запись отменили или начали другую — выключаем микрофон/камеру
+      if (token !== recToken.current) { session.stop(true); return; }
+      rec[1]({ mode: mode, session: session, limit: false });
+      if (session.onLimit) session.onLimit(function () { if (recNow.current && recNow.current.session === session) rec[1](Object.assign({}, recNow.current, { limit: true })); });
+      if (latest.current.onRecording) latest.current.onRecording(mode);
+    }, function (err) {
+      if (token !== recToken.current) return;
+      if (latest.current.onRecordError) latest.current.onRecordError(err, mode);
+    });
+  }
+  function endRecording(cancel) {
+    var r = recNow.current;
+    recToken.current++;
+    if (!r) return;
+    rec[1](null);
+    if (latest.current.onRecording) latest.current.onRecording(null);
+    r.session.stop(cancel).then(function (res) {
+      if (cancel || !res) return;
+      var cb = r.mode === 'round' ? latest.current.onSendRound : latest.current.onSendVoice;
+      if (cb) cb(res);
+    }, function (e) { console.warn('record stop', e); });
+  }
+  // ушли из чата (или поле убрали) посреди записи — запись выбрасываем, как в Telegram
+  useEffect(function () { return function () { recToken.current++; var r = recNow.current; if (r) { r.session.stop(true); if (latest.current.onRecording) latest.current.onRecording(null); } }; }, []);
+  useEffect(function () { if (recNow.current) endRecording(true); }, [props.chatKey]);
+
   function send() {
     var el = editRef.current;
+    if (recNow.current) { endRecording(false); return; }
     if (!el || sending.current) return;
     var v = trimValue(readDom(el));
-    if (!v.text) { if (latest.current.onRecord) latest.current.onRecord(); return; }
+    if (!v.text) { if (recordMode && !latest.current.editing) startRecording(recordMode); return; }
     var res = latest.current.onSend ? latest.current.onSend(v) : undefined;
     if (res === false) return;   // вызывающий сам решил, что останется в поле (например, конец правки)
     sending.current = true;
@@ -335,7 +380,7 @@ function Composer(props) {
     if (!props.captureTyping) return;
     function onKey(e) {
       var el = editRef.current;
-      if (!el || e.defaultPrevented || e.isComposing || document.activeElement === el) return;
+      if (!el || recNow.current || e.defaultPrevented || e.isComposing || document.activeElement === el) return;
       if (isTextTarget(e.target) || isTextTarget(document.activeElement)) return;
       if (e.altKey || ((e.metaKey || e.ctrlKey) && !(e.code === 'KeyV' && !e.shiftKey))) return;
       if (!(e.metaKey || e.ctrlKey) && (e.key.length !== 1 || e.key === ' ' && document.activeElement && document.activeElement.nodeName === 'BUTTON')) return;
@@ -350,7 +395,9 @@ function Composer(props) {
   }, [props.captureTyping]);
 
   /* ---------- кнопка: микрофон / отправить / готово ---------- */
-  var mode = props.editing ? 'edit' : st.hasText ? 'send' : 'mic';
+  var mode = rec[0] ? 'send' : props.editing ? 'edit' : st.hasText ? 'send' : recordMode === 'round' ? 'round' : recordMode ? 'mic' : 'send';
+  var canSwitch = modes.length > 1 && (mode === 'mic' || mode === 'round');
+  var pressTimer = useRef(null);
   var ready = useRef(false);
   useEffect(function () { var t = setTimeout(function () { ready.current = true; if (sendRef.current) sendRef.current.setAttribute('data-ready', ''); }, 0); return function () { clearTimeout(t); }; }, []);
 
@@ -385,8 +432,16 @@ function Composer(props) {
       h('button', { key: 'link', type: 'button', class: cx('rl-fmtbtn', b.active.link && 'rl-fmtbtn-on'), 'aria-pressed': String(!!b.active.link), 'aria-label': b.active.link ? 'Убрать ссылку' : 'Ссылка', title: 'Ссылка ⌘K',
         onClick: function () { if (b.active.link) format('link', null); else openLink(); } }, h(Icon, { name: 'link', size: 20 })),
     ])) : null),
-    h('div', { class: 'rl-composer' },
-      h('div', { class: cx('rl-composer-field', st.empty && 'rl-composer-empty') },
+    h(Presence, { show: modeMenu[0], exitMs: 140 },
+      h('div', { class: 'rl-recmode' },
+        h('div', { class: 'rl-recmode-scrim', onClick: function () { modeMenu[1](false); } }),
+        h(Menu, { label: 'Тип сообщения', onClose: function () { modeMenu[1](false); }, items: [
+          { icon: 'mic', label: 'Голосовое сообщение', onClick: function () { modeMenu[1](false); if (props.onRecordModeChange) props.onRecordModeChange('voice'); } },
+          { icon: 'roundVideo', label: 'Видеосообщение', onClick: function () { modeMenu[1](false); if (props.onRecordModeChange) props.onRecordModeChange('round'); } },
+        ] }))),
+    h('div', { class: cx('rl-composer', rec[0] && 'rl-composer-recording') },
+      rec[0] ? h(RecordBar, { key: 'rec', session: rec[0].session, limitReached: rec[0].limit, forcePaused: rec[0].limit, onDelete: function () { endRecording(true); }, onPaused: props.onRecordPaused }) : null,
+      h('div', { class: cx('rl-composer-field', st.empty && 'rl-composer-empty'), hidden: !!rec[0] },
         h(IconButton, { icon: attach[0] ? 'close' : 'attach', label: attach[0] ? 'Закрыть вложения' : 'Прикрепить', active: attach[0], class: 'rl-attach-toggle', onClick: function () { attach[1](!attach[0]); } }),
         h('div', { class: 'rl-composer-input', ref: boxRef },
           h('div', {
@@ -403,12 +458,20 @@ function Composer(props) {
           h('span', { class: 'rl-composer-ph', 'aria-hidden': 'true' }, props.placeholder || 'Сообщение')),
         h(IconButton, { icon: 'smile', label: 'Эмодзи', class: 'rl-emoji-toggle' })),
       h('button', {
-        type: 'button', ref: sendRef, class: cx('rl-composer-send', 'rl-send-' + mode), 'aria-label': mode === 'edit' ? 'Сохранить' : mode === 'send' ? 'Отправить' : 'Записать голосовое',
-        onPointerDown: ripple, onMouseDown: function (e) { e.preventDefault(); },   // фокус остаётся в поле (клавиатура телефона не прячется)
-        onClick: send,
+        type: 'button', ref: sendRef, class: cx('rl-composer-send', 'rl-send-' + mode), 'aria-label': mode === 'edit' ? 'Сохранить' : mode === 'send' ? 'Отправить' : mode === 'round' ? 'Записать видеосообщение' : 'Записать голосовое',
+        onPointerDown: function (e) {
+          ripple(e);
+          // долгое нажатие пальцем — выбор: голосовое или кружок (мышью — правая кнопка)
+          if (canSwitch && e.pointerType === 'touch') pressTimer.current = setTimeout(function () { pressTimer.current = 'fired'; modeMenu[1](true); }, 200);
+        },
+        onPointerUp: function () { if (pressTimer.current && pressTimer.current !== 'fired') clearTimeout(pressTimer.current); },
+        onMouseDown: function (e) { e.preventDefault(); },   // фокус остаётся в поле (клавиатура телефона не прячется)
+        onContextMenu: function (e) { if (!canSwitch) return; e.preventDefault(); modeMenu[1](true); },
+        onClick: function () { if (pressTimer.current === 'fired') { pressTimer.current = null; return; } send(); },
       },
         h(Icon, { name: 'send', size: 22, class: cx('rl-sendicon', mode === 'send' && 'rl-sendicon-on') }),
         h(Icon, { name: 'mic', size: 22, class: cx('rl-sendicon', mode === 'mic' && 'rl-sendicon-on') }),
+        h(Icon, { name: 'roundVideo', size: 22, class: cx('rl-sendicon', mode === 'round' && 'rl-sendicon-on') }),
         h(Icon, { name: 'check', size: 22, class: cx('rl-sendicon', mode === 'edit' && 'rl-sendicon-on') }))));
 }
 

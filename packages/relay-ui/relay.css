@@ -1317,3 +1317,28 @@ html[data-blur="0"] .rl-shell .rl-msgmenu .rl-menu, html[data-blur="0"] .rl-shel
 /* текущая вкладка — в потоке (высота панели по содержимому), уходящая во время анимации — поверх */
 .rl-aside-pages .rl-slide:not(.rl-slide-parked):not(.rl-slide-out-push):not(.rl-slide-out-pop) { position: relative; inset: auto; width: 100%; }
 .rl-aside-pages .rl-aside-links { overflow: visible; }
+
+/* ---------- запись голосового / кружка: панель на месте поля ввода ---------- */
+.rl-composer-recording .rl-composer-field[hidden] { display: none; }
+.rl-recbar { flex: 1; min-width: 0; display: flex; align-items: center; gap: .25rem; min-height: 40px; animation: rl-recbar-in 200ms var(--ease-out) both; }
+@keyframes rl-recbar-in { from { opacity: 0; } to { opacity: 1; } }
+.rl-recbar .rl-iconbtn { width: 2.5rem; height: 2.5rem; flex-shrink: 0; }
+.rl-recbar-del { color: var(--danger, #e53935); }
+.rl-recbar-pill { flex: 1; min-width: 0; height: 2.5rem; display: flex; align-items: center; gap: .625rem; padding-inline: .5rem .75rem; box-sizing: border-box;
+  border-radius: 1.25rem; background: color-mix(in srgb, var(--brand) 10%, transparent); }
+.rl-recbar-ctl { width: 1.5rem; height: 1.5rem; flex-shrink: 0; display: grid; place-items: center; }
+.rl-recbar-dot { width: 10px; height: 10px; border-radius: 50%; background: var(--danger, #e53935);
+  animation: rl-rec-grow 200ms var(--ease-out), rl-rec-pulse 1s ease-in-out 200ms infinite alternate; }
+@keyframes rl-rec-grow { 0% { transform: scale(.5); } 60% { transform: scale(1.1); } 100% { transform: scale(1); } }
+@keyframes rl-rec-pulse { from { opacity: 1; } to { opacity: .4; } }
+.rl-recbar-play { width: 1.5rem; height: 1.5rem; padding: 0; border: 0; border-radius: 50%; display: grid; place-items: center; cursor: pointer;
+  background: var(--brand); color: #fff; animation: rl-rec-grow 200ms var(--ease-out); }
+.rl-recbar-wave { flex: 1; min-width: 0; height: 1.5rem; color: var(--brand); }
+.rl-recbar-wave-seek { cursor: pointer; }
+.rl-recbar-time { flex-shrink: 0; min-width: 3.75rem; text-align: right; font: 400 .875rem/1.375rem var(--font-sans); font-variant-numeric: tabular-nums; color: var(--ink); }
+.rl-recbar-pause .rl-icon { animation: rl-rec-grow 200ms var(--ease-out); }
+.rl-recbar-pause-off { opacity: .4; pointer-events: none; }
+/* выбор «голосовое / кружок» над кнопкой */
+.rl-recmode { position: absolute; right: 0; bottom: calc(100% + 6px); z-index: 30; }
+.rl-recmode-scrim { position: fixed; inset: 0; }
+.rl-recmode .rl-menu { position: relative; transform-origin: bottom right; }
