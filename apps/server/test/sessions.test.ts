@@ -8,6 +8,9 @@ import { announceLogin, confirmSession, listSessions, setLiveCheckMs, sweepInact
 import { createSession, sessionFromToken } from '../src/auth';
 import { createServer } from '../src/http';
 import { startRealtime } from '../src/realtime';
+import { ensurePeriodic } from '../src/jobs/queue';
+import '../src/jobs/kinds';
+import { drainJobs } from '../src/jobs/worker';
 import { makeUser, nextFrame, resetDb } from './helpers';
 
 const server = createServer({ port: 0 });
@@ -334,4 +337,15 @@ test('sweepInactive and logout emit sessionsChanged', async () => {
   expect(await count()).toBe(1);
   await call({ userId: a, token: keep }, 'POST', '/logout');
   expect(await count()).toBe(2);
+});
+
+test('the periodic sweep job ends expired sessions and reschedules itself in an hour', async () => {
+  const u = await makeUser('Анна');
+  const token = crypto.randomUUID();
+  await sql`insert into sessions (user_id, token_hash, expires_at) values (${u}, ${token}, now() - interval '1 minute')`;
+  await ensurePeriodic('sessions.sweep');
+  await drainJobs();
+  expect((await sql`select count(*)::int as n from sessions where user_id = ${u}`)[0].n).toBe(0);
+  const [job] = await sql`select attempts, run_at > now() + interval '59 minutes' as later from jobs where kind = 'sessions.sweep'`;
+  expect(job).toEqual({ attempts: 0, later: true });
 });
