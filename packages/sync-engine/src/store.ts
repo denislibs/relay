@@ -1,4 +1,4 @@
-import type { Entity, Message, Update } from '@relay/protocol';
+import type { Entity, Message, ProfilePhoto, Update } from '@relay/protocol';
 import { getAll, getByChat, write, type WriteBatch } from './idb';
 import { applyUserUpdated, ProfileCache } from './profile';
 import { applyContactsChanged, ContactsCache } from './contacts';
@@ -22,7 +22,7 @@ export interface ChatSummary {
   lastReadId: number;
   unread: number;
   last: Message | null;
-  peer?: { id: number; name: string; system?: true } | null;
+  peer?: { id: number; name: string; system?: true; photo?: ProfilePhoto | null } | null;
   peerReadUpTo?: number;
 }
 
@@ -206,6 +206,7 @@ export class Store {
       chat.kind = s.kind;
       chat.title = s.title ?? s.peer?.name ?? null;
       chat.peerId = s.peer?.id ?? null;
+      if (s.peer) chat.photo = s.peer.photo ?? null;
       if (s.peer?.system) chat.system = true; else delete chat.system;
       if (s.draft && (!chat.draft || s.draft.at > chat.draft.at) && !this.pendingDrafts.has(s.id)) chat.draft = s.draft;
       if (s.pinned) chat.pinned = s.pinned;

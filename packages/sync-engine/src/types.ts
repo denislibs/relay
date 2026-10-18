@@ -1,4 +1,4 @@
-import type { Birthday, ChatFolder, Entity, PrivacyKey, PrivacyMode, ProfileLink, ServiceType } from '@relay/protocol';
+import type { Birthday, ChatFolder, Entity, PrivacyKey, PrivacyMode, ProfileLink, ProfilePhoto, ServiceType } from '@relay/protocol';
 
 export type Status = 'pending' | 'sent' | 'read' | 'failed';
 
@@ -49,6 +49,7 @@ export interface LocalChat {
   lastAt: string;
   draft?: { text: string; at: string; entities?: Entity[] } | null;   // неотправленный текст композера (общий для вкладок)
   pinned?: number[];      // закреплённые сообщения (новые сверху)
+  photo?: ProfilePhoto | null;   // фото собеседника личного чата (из снимка списка и userUpdated)
 }
 
 export interface OutboxEntry {

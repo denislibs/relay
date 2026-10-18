@@ -63,7 +63,7 @@ export class ProfileCache {
     if (u.id === this.userId) {
       // запись журнала не новее уже применённого ответа (своя же правка, эхо) — не откатываем
       if (seq !== undefined && this.me?.seq !== undefined && seq <= this.me.seq) return;
-      this.setMe({ userId: u.id, name: u.name, firstName: u.firstName, lastName: u.lastName, username: u.username, bio: u.bio, birthday: u.birthday, links: u.links ?? [], phone: u.phone ?? this.me?.phone ?? null, seq: seq ?? this.me?.seq });
+      this.setMe({ userId: u.id, name: u.name, firstName: u.firstName, lastName: u.lastName, username: u.username, bio: u.bio, birthday: u.birthday, links: u.links ?? [], photo: u.photo ?? null, phone: u.phone ?? this.me?.phone ?? null, seq: seq ?? this.me?.seq });
       return;
     }
     if (seq !== undefined) {
@@ -101,7 +101,9 @@ export function applyUserUpdated(store: Store, u: PublicUser, seq?: number): voi
   store.profile.applyUser(u, seq);
   // как на сервере в listChats: у личного чата нет своего названия, показываем имя собеседника
   for (const c of store.chats.values()) {
-    if (c.kind === 'direct' && c.peerId === u.id && c.title !== u.name) { c.title = u.name; store.markChat(c); }
+    if (c.kind !== 'direct' || c.peerId !== u.id) continue;
+    const photo = u.photo ?? null;
+    if (c.title !== u.name || JSON.stringify(c.photo ?? null) !== JSON.stringify(photo)) { c.title = u.name; c.photo = photo; store.markChat(c); }
   }
 }
 
