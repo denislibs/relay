@@ -2,6 +2,7 @@ import type { BlockedUser, Contact, PublicUser } from '@relay/protocol';
 import { sql, type Tx } from '../db';
 import { DomainError } from './errors';
 import { appendUpdates } from './journal';
+import { onlineUsers } from './liveRegistry';
 import { announcePair, presenceFor, type PairChange, type Publish } from './presence';
 import { canFindByPhone, privacyCtx, type PrivacyCtx } from './privacy';
 import { systemUserId } from './service';
@@ -25,8 +26,11 @@ export function parseQuery(raw: unknown): { username: string } | { phone: string
 
 type ContactRow = ContactName & { note: string };
 
-function contactOf(owner: number, r: Row, c: ContactRow, lastSeen: Date | null, ctx: PrivacyCtx, seq?: number): Contact {
-  const p = presenceFor(owner, r.id, lastSeen, ctx);
+// Valkey недоступен — контакты всё равно отдаём, просто «не в сети»: онлайн эфемерен
+const onlineOf = (ids: number[]) => onlineUsers(ids).catch((e) => { console.error('live registry:', e); return new Set<number>(); });
+
+function contactOf(owner: number, r: Row, c: ContactRow, lastSeen: Date | null, ctx: PrivacyCtx, online: boolean, seq?: number): Contact {
+  const p = presenceFor(owner, r.id, lastSeen, ctx, online);
   return {
     userId: r.id, firstName: c.first_name, lastName: c.last_name, note: c.note,
     user: publicUser(owner, r, c, ctx),
@@ -64,7 +68,8 @@ export async function listContacts(owner: number): Promise<{ contacts: Contact[]
        where c.owner_id = ${owner}
        order by c.created_at, c.user_id`;
     const ctx = await privacyCtx(tx, rows.map((r) => [owner, Number(r.id)]));
-    const contacts = rows.map((r) => contactOf(owner, r as unknown as Row, { first_name: r.c_first, last_name: r.c_last, note: r.c_note }, r.last_seen_at as Date | null, ctx));
+    const online = await onlineOf(rows.map((r) => Number(r.id)));
+    const contacts = rows.map((r) => contactOf(owner, r as unknown as Row, { first_name: r.c_first, last_name: r.c_last, note: r.c_note }, r.last_seen_at as Date | null, ctx, online.has(Number(r.id))));
     return { contacts, seq: await selfSeq(tx, owner) };
   }) as Promise<{ contacts: Contact[]; seq: number }>;
 }
@@ -94,7 +99,8 @@ const plain = (v: unknown): v is Record<string, unknown> => !!v && typeof v === 
 async function write(tx: Tx, owner: number, userId: number): Promise<Contact> {
   const [r] = await tx`select ${COLS}, last_seen_at from users where id = ${userId}`;
   const c = (await contactRow(tx, owner, userId))!;
-  const contact = contactOf(owner, r as unknown as Row, c, r.last_seen_at as Date | null, await privacyCtx(tx, [[owner, userId]]));
+  const online = (await onlineOf([userId])).has(userId);
+  const contact = contactOf(owner, r as unknown as Row, c, r.last_seen_at as Date | null, await privacyCtx(tx, [[owner, userId]]), online);
   await appendUpdates(tx, [{ userId: owner, update: { type: 'contactsChanged', contact } }]);
   return { ...contact, seq: await selfSeq(tx, owner) };
 }

@@ -6,6 +6,7 @@ import { sendMessage } from '../src/domain/messages';
 import { postService } from '../src/domain/service';
 import '../src/jobs/kinds';
 import { drainJobs } from '../src/jobs/worker';
+import { connect, processAlive } from '../src/domain/liveRegistry';
 import { makeChat, makeUser, resetDb } from './helpers';
 
 const server = createServer({ port: 0 });
@@ -331,7 +332,8 @@ test('an online recipient (any process) gets no push', async () => {
   const chat = await makeChat([a, b]);
   const { subscribe } = await import('../src/domain/push');
   await subscribe(b, { endpoint: endpoint(23), keys: (await browser()).keys }, await sessionFor(b));
-  await sql`insert into live_conns (process_id, user_id, conns, seen_at) values (${crypto.randomUUID()}, ${b}, 1, now())`;
+  await processAlive('other-proc');
+  await connect(b, 'other-proc');
   got.length = 0;
   await sendMessage(a, { chatId: chat, clientId: crypto.randomUUID(), body: 'вижу сам' });
   await drainJobs();

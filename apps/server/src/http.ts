@@ -9,6 +9,7 @@ import { announceLogin, announceSessionsChanged, assertConfirmed, checkSocket, c
 import { createChat, getChatMedia, getChatMediaCounts, getHistory, getMessagesByIds, listChats, listChatsPage } from './domain/chats';
 import { sql } from './db';
 import { DomainError } from './domain/errors';
+import { processAlive } from './domain/liveRegistry';
 import { connected, disconnected, listPresence, type Publish } from './domain/presence';
 import { searchMessages } from './domain/search';
 import { confirmUpload, createUpload, downloadTtl, fileFor, signedDownload } from './domain/files';
@@ -339,6 +340,8 @@ export function createServer(opts: { port: number }): Server {
       },
     },
   });
+  // серверы без startRealtime (тесты) тоже считаются живыми для реестра онлайна
+  void processAlive().catch((e) => console.error('live registry:', e));
   // остановка сервера закрывает и соединение-подписчик (иначе тесты и процесс не завершатся)
   const stop = server.stop.bind(server);
   server.stop = (async (force?: boolean) => { await bus.close(); return stop(force); }) as typeof server.stop;

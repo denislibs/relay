@@ -1,4 +1,5 @@
 import { sql } from '../../../apps/server/src/db';
+import { processAlive } from '../../../apps/server/src/domain/liveRegistry';
 import { flushOwn } from '../../../apps/server/src/valkey';
 import { resetPresence } from '../../../apps/server/src/domain/presence';
 import { createServer } from '../../../apps/server/src/http';
@@ -9,6 +10,7 @@ export { msg } from './fixtures';
 
 export async function resetDb(): Promise<void> {
   await flushOwn();   // онлайн и прочее эфемерное прошлых тестов
+  await processAlive();   // ключ «процесс жив» стёрт вместе с остальным — серверы этого процесса снова в сумме онлайна
   // как resetDb сервера: системного пользователя «Relay» (миграция 110_service) не трогаем — база общая с тестами сервера
   await sql`truncate login_attempts, sessions, chats, chat_members, messages, user_seq, updates, jobs, jobs_dead restart identity cascade`;
   await sql`delete from users where not system`;
