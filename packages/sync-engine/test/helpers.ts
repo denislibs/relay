@@ -7,8 +7,11 @@ import type { EngineConfig, Patch, Query, Item } from '../src/types';
 export { msg } from './fixtures';
 
 export async function resetDb(): Promise<void> {
-  await sql`truncate users, sessions, chats, chat_members, messages, user_seq, updates restart identity cascade`;
-  resetPresence(); // id пользователей начнутся заново
+  // как resetDb сервера: системного пользователя «Relay» (миграция 110_service) не трогаем — база общая с тестами сервера
+  await sql`truncate login_attempts, sessions, chats, chat_members, messages, user_seq, updates restart identity cascade`;
+  await sql`delete from users where not system`;
+  await sql`insert into users (name, system) select 'Relay', true where not exists (select 1 from users where system)`;
+  resetPresence(); // присутствие прошлых тестов не должно протекать
 }
 
 export async function startTestServer() {

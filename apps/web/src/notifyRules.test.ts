@@ -1,5 +1,5 @@
 import { expect, test } from 'bun:test';
-import { notifyText, planIncoming, soundOn, toggleSound, volumeFromSlider, volumePct } from './notifyRules';
+import { incomingText, notifyText, planIncoming, soundOn, toggleSound, volumeFromSlider, volumePct } from './notifyRules';
 
 const base = { state: 'on' as const, device: { web: true, sound: true, volume: 0.5 }, chatMuted: false, pref: { muted: false, preview: true }, hasFocus: false };
 
@@ -38,4 +38,15 @@ test('notifyText honors hideText and preview', () => {
   expect(notifyText(m, { preview: true, hideText: false })).toEqual({ title: 'Анна', body: 'секрет' });
   expect(notifyText(m, { preview: false, hideText: false })).toEqual({ title: 'Анна', body: 'Новое сообщение' });
   expect(notifyText(m, { preview: true, hideText: true })).toEqual({ title: 'Relay', body: 'Новое сообщение' });
+});
+
+test('incomingText: login code is hidden in notifications, other messages keep their text', () => {
+  const code = { body: 'Код для входа в Relay: 48213\n\nНикому не сообщайте этот код', service: { type: 'login_code' } };
+  expect(incomingText(code)).not.toContain('48213');
+  expect(incomingText(code)).toContain('•••••');
+  expect(incomingText({ body: 'Новый вход 12345', service: { type: 'new_login' } })).toBe('Новый вход 12345');
+  expect(incomingText({ body: 'встреча 48213' })).toBe('встреча 48213');
+  expect(incomingText({ body: 'подпись', kind: 'photo' })).toBe('🖼 подпись');
+  expect(incomingText({ body: '', kind: 'voice' })).toBe('🎤 Голосовое сообщение');
+  expect(incomingText({ body: '', kind: 'file', attachmentName: 'a.pdf' })).toBe('📎 a.pdf');
 });

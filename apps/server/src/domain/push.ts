@@ -1,4 +1,4 @@
-import { NO_PREVIEW } from '@relay/protocol';
+import { hideSpoilers, NO_PREVIEW } from '@relay/protocol';
 import { sql } from '../db';
 import { nameForSql } from './profile';
 import { isOnline } from './presence';
@@ -109,11 +109,15 @@ export async function settlePushes(): Promise<void> {
   while (pending.size) await Promise.allSettled([...pending]);
 }
 
-export type PushPayload = { chatId: number; id: number; title: string; body: string };
+/** system — служебное сообщение Relay: SW ставит знак Relay иконкой. */
+export type PushPayload = { chatId: number; id: number; title: string; body: string; system?: true };
 
 /** Новое сообщение → push участникам без соединения, кроме отправителя и тех, у кого чат заглушён.
  *  Только подпискам живых сеансов: истёкший или неактивный дольше срока, но ещё не убранный sweepInactive — молчит. */
-export async function pushNewMessage(m: { chatId: number; id: number; senderId: number; body: string; kind?: string; attachment?: { name?: string } | null }): Promise<void> {
+export async function pushNewMessage(m: { chatId: number; id: number; senderId: number; body: string; entities?: { type: string; offset: number; length: number }[]; kind?: string; attachment?: { name?: string } | null; service?: { type: string } }): Promise<void> {
+  m = { ...m, body: hideSpoilers(m.body, m.entities) };   // скрытый текст в уведомление не уходит
+  // код входа не уходит в push-сервис и на экран блокировки
+  if (m.service?.type === 'login_code') m = { ...m, body: 'Код для входа в Relay' };
   // имя отправителя — глазами получателя (контактное, если он его задал)
   const subs = await sql`
     select s.endpoint, s.user_id, s.p256dh, s.auth, s.hide_text,
@@ -145,6 +149,7 @@ export async function pushNewMessage(m: { chatId: number; id: number; senderId: 
       : kind === 'group'
       ? { chatId: m.chatId, id: m.id, title: (info.title as string) ?? 'Группа', body: shown ? `${name}: ${preview}` : NO_PREVIEW }
       : { chatId: m.chatId, id: m.id, title: name, body: shown ? preview : NO_PREVIEW };
+    if (m.service) payload.system = true;
     const plain = enc.encode(JSON.stringify(payload).slice(0, 3000));
     try {
       const res = await fetch(s.endpoint as string, {

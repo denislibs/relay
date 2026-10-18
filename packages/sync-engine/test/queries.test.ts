@@ -55,3 +55,18 @@ test('messages returns the last `limit` by sort; counters sum unread', async () 
   const c = computeQuery(s, { kind: 'counters' });
   expect([...c.items.values()][0]).toMatchObject({ key: 'counters', unreadChats: 2, unreadMessages: 6 });
 });
+
+test('service chat: peer.system and message.service reach the chat list and the feed', async () => {
+  const s = await fresh();
+  const last = { ...msg({ id: 5, chatId: 30, senderId: 99 }), service: { type: 'login_code' as const } };
+  s.applySnapshot([{ id: 30, kind: 'direct', title: null, lastReadId: 0, unread: 1, last, peer: { id: 99, name: 'Relay', system: true } }]);
+  const item = [...computeQuery(s, { kind: 'chatList', limit: 50 }).items.values()][0];
+  expect(item.peer).toEqual({ id: 99, name: 'Relay', system: true });
+  expect((item.last as { service?: unknown }).service).toEqual({ type: 'login_code' });
+  const feed = [...computeQuery(s, { kind: 'messages', chatId: 30, limit: 10 }).items.values()];
+  expect(feed[0].service).toEqual({ type: 'login_code' });
+  // обычный личный чат — без пометки system
+  s.applySnapshot([{ id: 31, kind: 'direct', title: null, lastReadId: 0, unread: 0, last: null, peer: { id: 2, name: 'Bob' } }]);
+  const plain = computeQuery(s, { kind: 'chatList', limit: 50 }).items.get('c31')!;
+  expect((plain.peer as { system?: boolean }).system).toBeUndefined();
+});

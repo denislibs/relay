@@ -7,6 +7,8 @@ import { DomainError } from './errors';
 import { fanOut } from './journal';
 import { blockedInDirect } from './privacy';
 import { pushInBackground } from './push';
+import { isServiceChat } from './service';
+import { burnCodes } from './login';
 
 export const MAX_BODY = 4096;
 
@@ -21,6 +23,7 @@ export async function sendMessage(
 
   const res = await sql.begin(async (tx) => {
     await assertMember(tx, input.chatId, userId);
+    if (await isServiceChat(tx, input.chatId)) throw new DomainError('forbidden');   // служебный чат только для чтения
     // личный чат, а собеседник заблокировал отправителя: не пишем ничего (повтор уже принятого — по-прежнему ack)
     if (await blockedInDirect(tx, input.chatId, userId)) {
       const [existing] = await tx`select * from messages where sender_id = ${userId} and client_id = ${input.clientId}`;
@@ -43,6 +46,7 @@ export async function sendMessage(
       return { message: toMessage(existing), duplicate: true };
     }
     const message = toMessage(inserted[0]);
+    await burnCodes(tx, userId, body);
     const members = await tx`select user_id from chat_members where chat_id = ${input.chatId}`;
     await fanOut(tx, members.map((m) => m.user_id as number), { type: 'newMessage', message });
     await clearDraftInTx(tx, userId, input.chatId); // отправили — черновик на всех устройствах больше не нужен

@@ -9,14 +9,16 @@ import { memo } from 'preact/compat';
 import type { SearchHit } from '@relay/sync-engine/src/types';
 import { go } from '../nav';
 import { isDark } from '../theme';
-import { chatTime, chatTone, snippet } from './format';
+import { chatTime, chatTone, isSystemChat, shownBody, snippet } from './format';
 import { applyTheme as setTheme } from '../theme';
 import { previewBody, previewText, previewThumb, type LastMessage } from './preview';
 import { ALL, inFolder, toggleChatInFolder } from '../folders';
 import { saveFolder, showToast } from '../settingsData';
-import { useCallback } from 'preact/hooks';
 import { selectFolder, useFolderCtx, useFolderGuard, useFolderItems, useFolderMenu, useFolderPlace } from './folderNav';
 import { Button } from '@relay/ui';
+import { toggleMuted } from './Info';
+import { seen } from '../data';
+import { getGlobal } from '../global';
 
 
 /** Фрагмент вокруг совпадения: превью узкое, а совпадение может быть в конце длинного сообщения. */
@@ -39,7 +41,7 @@ function MoreLoader() {
 }
 
 /** Строка списка чатов. memo: чат не изменился (тот же объект из Mirror) — строку не трогаем при сдвиге окна. */
-const SideRow = memo(function SideRow({ c, meId, active, showDraft, muted, onMenu }: { c: Item; meId: number; active: boolean; showDraft: boolean; muted: boolean; onMenu?: (id: number, e: MouseEvent) => void }) {
+const SideRow = memo(function SideRow({ c, meId, active, showDraft, muted, onMenu }: { c: Item; meId: number; active: boolean; showDraft: boolean; muted: boolean; onMenu: (id: number, x: number, y: number) => void }) {
   const last = c.last as (LastMessage & { status: string }) | null;
   const thumb = last ? previewThumb(last) : null;
   // имя автора — только в группах (в личке и так ясно, кто пишет); своё — «Вы», чужое — первое слово имени
@@ -52,6 +54,8 @@ const SideRow = memo(function SideRow({ c, meId, active, showDraft, muted, onMen
     <ChatRow
       name={(c.title as string) || 'Чат №' + c.id}
       avatarTone={chatTone(c)}
+      logo={isSystemChat(c)}
+      verified={isSystemChat(c)}
       author={author}
       thumb={thumb}
       preview={last ? previewBody(last, !!thumb) : 'Нет сообщений'}
@@ -63,7 +67,7 @@ const SideRow = memo(function SideRow({ c, meId, active, showDraft, muted, onMen
       status={!draft && last && last.senderId === meId ? last.status : null}
       active={active}
       onClick={() => openChat(c.id as number)}
-      onContextMenu={onMenu ? (e: MouseEvent) => { e.preventDefault(); onMenu(c.id as number, e); } : undefined}
+      onContextMenu={(e: MouseEvent) => { e.preventDefault(); onMenu(c.id as number, e.clientX, e.clientY); }}
     />
   );
 });
@@ -73,6 +77,9 @@ const ROW = 72; // высота строки чата (--size-row) — спис�
 
 export function Sidebar() {
   const [menu, setMenu] = useState(false);
+  // контекстное меню строки чата (правая кнопка): как в Telegram — у курсора
+  const [rowMenu, setRowMenu] = useState<{ id: number; x: number; y: number } | null>(null);
+  const onRowMenu = useRef((id: number, x: number, y: number) => setRowMenu({ id, x, y })).current;
   // поиск сообщений (сервер, без сети — кэш): через 300 мс после последнего нажатия, от двух символов
   const [hits, setHits] = useState<{ q: string; list: SearchHit[]; source: string } | null>(null);
   const searchQ = useGlobal((s) => s.search).trim();
@@ -96,22 +103,6 @@ export function Sidebar() {
   const folderMenu = useFolderMenu();
   const ctx = useFolderCtx();
   useFolderGuard();
-  // меню чата (правая кнопка): «Добавить в папку» — подменю папок с галочками; внутри своей папки — «Убрать из папки»
-  const [chatMenu, setChatMenu] = useState<{ x: number; y: number; id: number } | null>(null);
-  const onRowMenu = useCallback((id: number, e: MouseEvent) => setChatMenu({ x: e.clientX, y: e.clientY, id }), []);
-  const menuChat = chatMenu ? chats.find((c) => c.id === chatMenu.id) : undefined;
-  const toggleIn = (fid: number) => {
-    const f = folders.find((x) => x.id === fid);
-    if (!f || !menuChat) return;
-    setChatMenu(null);
-    saveFolder(toggleChatInFolder(f, menuChat as never, ctx)).catch(() => showToast('Не удалось изменить папку'));
-  };
-  const activeFolder = useGlobal((s) => s.folder);
-  const current = folders.find((x) => x.id === activeFolder);
-  const chatMenuItems = menuChat ? [
-    { icon: 'folder', label: 'Добавить в папку', submenu: folders.map((f) => ({ icon: inFolder(f, menuChat as never, ctx) ? 'check' : 'folder', label: f.title, onClick: () => toggleIn(f.id) })) },
-    ...(current && inFolder(current, menuChat as never, ctx) ? [{ icon: 'close', label: 'Убрать из папки', onClick: () => toggleIn(current.id) }] : []),
-  ] : [];
   // Ctrl+Shift+1…9 — папка по номеру (как в Telegram Web A)
   useEffect(() => {
     if (place === 'none') return;
@@ -174,7 +165,7 @@ export function Sidebar() {
             onNearEnd={!status.chatsComplete ? loadMoreChats : undefined}
             rowHeight={ROW}
             getKey={(c: Item) => 'c' + c.id}
-            render={(c: Item) => <SideRow c={c} meId={me.userId} active={c.id === openId} showDraft={!!c.draft && c.id !== openId} muted={mutedIds.includes(c.id as number)} onMenu={folders.length ? onRowMenu : undefined} />}
+            render={(c: Item) => <SideRow c={c} meId={me.userId} active={c.id === openId} showDraft={!!c.draft && c.id !== openId} muted={mutedIds.includes(c.id as number)} onMenu={onRowMenu} />}
           />
           {!q && !status.chatsComplete ? (
             <MoreLoader />
@@ -202,7 +193,7 @@ export function Sidebar() {
             <ChatRow
               key={'m' + h.id}
               name={h.chatTitle ?? 'Чат №' + h.chatId}
-              preview={<Highlight text={snippet(h.body, results.q)} query={results.q} />}
+              preview={<Highlight text={snippet(shownBody(h), results.q)} query={results.q} />}
               time={chatTime(h.createdAt)}
               onClick={() => openInner(h.chatId, { id: h.id, sort: h.sort })}   // найденное — поверх открытого чата, «Назад» вернёт к нему
             />
@@ -222,6 +213,7 @@ export function Sidebar() {
       tabs={place === 'top' ? <FolderTabs class="app-folders" active={folder} onChange={selectFolder} onItemMenu={folderMenu.open} items={items.map((t, i) => (i === 0 ? { ...t, label: 'Все' } : t))} /> : null}
       banner={
         <>
+          <RowMenu at={rowMenu} onClose={() => setRowMenu(null)} />
           {menu ? <div class="rl-msgmenu-scrim" onClick={() => setMenu(false)} /> : null}
           {/* при переходе на другой экран меню снимаем сразу, без анимации исчезания поверх слайда */}
           {view === 'chats' ? <Presence show={menu} exitMs={160}>
@@ -254,14 +246,55 @@ export function Sidebar() {
     >
       <SlideStack variant="tabs" order={order} active={String(shown)} render={(f: string) => <div class="rl-page-scroll">{renderFolder(f)}</div>} />
       {folderMenu.node}
-      {chatMenu && menuChat ? (
+    </SidebarCard>
+  );
+}
+
+/** Действия с чатом по правой кнопке: только то, что умеет сервер (удаления/закрепления/архива пока нет). */
+function RowMenu({ at, onClose }: { at: { id: number; x: number; y: number } | null; onClose: () => void }) {
+  const chat = useGlobal((s) => (at ? s.chats.find((c) => c.id === at.id) : undefined));
+  const muted = useGlobal((s) => (at ? s.muted.includes(at.id) : false));
+  const last = useRef(at);
+  if (at) last.current = at;
+  const p = at ?? last.current;
+  const id = p?.id ?? 0;
+  const folders = useGlobal((s) => s.settings.folders);
+  const activeFolder = useGlobal((s) => s.folder);
+  const ctx = useFolderCtx();
+  // папки: «Добавить в папку» — подменю с галочками; внутри своей папки — ещё и «Убрать из папки»
+  const toggleIn = (fid: number) => {
+    const f = getGlobal().settings.folders.find((x) => x.id === fid);
+    if (!f || !chat) return;
+    onClose();
+    saveFolder(toggleChatInFolder(f, chat as never, ctx)).catch(() => showToast('Не удалось изменить папку'));
+  };
+  const current = folders.find((x) => x.id === activeFolder);
+  const folderItems = !chat || !folders.length ? [] : [
+    { icon: 'folder', label: 'Добавить в папку', submenu: folders.map((f) => ({ icon: inFolder(f, chat as never, ctx) ? 'check' : 'folder', label: f.title, onClick: () => toggleIn(f.id) })) },
+    ...(current && inFolder(current, chat as never, ctx) ? [{ icon: 'close', label: 'Убрать из папки', onClick: () => toggleIn(current.id) }] : []),
+  ];
+  const unread = (chat?.unread as number) > 0;
+  const lastId = ((chat?.last as { id?: number | null } | null)?.id ?? 0) || (chat?.knownMaxId as number) || 0;
+  return (
+    <Presence show={!!at && !!chat} exitMs={140}>
+      {p ? (
         <>
-          <div class="rl-msgmenu-scrim" onClick={() => setChatMenu(null)} onContextMenu={(e) => { e.preventDefault(); setChatMenu(null); }} />
-          <div class="rl-msgmenu" style={{ left: Math.min(chatMenu.x, innerWidth - 260), top: Math.min(chatMenu.y, innerHeight - 320) }}>
-            <Menu label={(menuChat.title as string) || 'Чат'} onClose={() => setChatMenu(null)} items={chatMenuItems} />
+          <div class="rl-msgmenu-scrim" onClick={onClose} onContextMenu={(e) => { e.preventDefault(); onClose(); }} />
+          <div class="rl-msgmenu" style={{ left: Math.min(p.x, innerWidth - 240), top: Math.min(p.y, innerHeight - 200) }}>
+            <Menu
+              label="Действия с чатом"
+              onClose={onClose}
+              items={[
+                { icon: 'newTab', label: 'Открыть в новой вкладке', onClick: () => { onClose(); window.open(location.pathname + '#chat=' + id, '_blank', 'noopener'); } },
+                ...(unread && lastId ? [{ icon: 'markRead', label: 'Отметить как прочитанное', onClick: () => { onClose(); seen(id, lastId); } }] : []),
+                { icon: muted ? 'bell' : 'bellOff', label: muted ? 'Включить уведомления' : 'Выключить уведомления', onClick: () => { onClose(); toggleMuted(id, getGlobal().muted); } },
+                ...folderItems,
+                { icon: 'info', label: 'Информация', onClick: () => { onClose(); openChat(id); setGlobal({ infoOpen: true }); } },
+              ]}
+            />
           </div>
         </>
       ) : null}
-    </SidebarCard>
+    </Presence>
   );
 }

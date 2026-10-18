@@ -1,6 +1,7 @@
 import { afterAll, afterEach, beforeEach, expect, test } from 'bun:test';
 import { sql } from '../../../apps/server/src/db';
 import { sendMessage } from '../../../apps/server/src/domain/messages';
+import { deleteMessage, editMessage } from '../../../apps/server/src/domain/messageOps';
 import { Engine } from '../src/engine';
 import { resetDb, startTestServer, watchInto } from './helpers';
 
@@ -74,4 +75,35 @@ test('watching a chat loads history from the server; growing the limit pages old
   await feed.until((l) => l.map((m) => m.body).join() === '5,6,7');
   feed.handle.update({ kind: 'messages', chatId, limit: 7 });
   await feed.until((l) => l.map((m) => m.body).join() === '1,2,3,4,5,6,7');
+});
+
+test('edits and deletions of a chat not opened since start reach the cached copy', async () => {
+  const a = await srv.login('a'), b = await srv.login('b');
+  const chatId = await srv.chat(a.token, [a.userId, b.userId]);
+  const ids: number[] = [];
+  for (let i = 1; i <= 3; i++) ids.push((await sendMessage(a.userId, { chatId, clientId: crypto.randomUUID(), body: 'm' + i })).message.id);
+  const cfg = srv.config(b);
+  const eb = await open(cfg);
+  eb.connect();
+  await eb.whenIdle();
+  const feed = watchInto(eb, { kind: 'messages', chatId, limit: 50 });
+  await feed.until((l) => l.length === 3);   // сообщения легли в кэш устройства
+  await eb.whenIdle();
+  await eb.close(); engines.length = 0;
+
+  // B снова в сети, но чат не открывает: правка и удаление приходят журналом
+  await deleteMessage(a.userId, chatId, ids[0]);
+  await editMessage(a.userId, chatId, ids[1], 'm2 правка');
+  const again = await open(cfg);
+  again.connect();
+  await again.whenIdle();
+  await again.close(); engines.length = 0;
+
+  // без сети лента читается из кэша: там уже правка и удаление
+  const offline = await open(cfg);
+  const cached = watchInto(offline, { kind: 'messages', chatId, limit: 50 });
+  const l = await cached.until((x) => x.length > 0);
+  const byId = new Map(l.map((m) => [m.id, m]));
+  expect(byId.get(ids[0])).toMatchObject({ deleted: true, body: '' });
+  expect(byId.get(ids[1])).toMatchObject({ body: 'm2 правка' });
 });

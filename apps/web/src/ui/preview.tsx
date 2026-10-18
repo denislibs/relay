@@ -1,4 +1,7 @@
+import { SPOILER_FILL } from '@relay/protocol';
+import { SpoilerText } from '@relay/ui';
 import type { ComponentChildren } from 'preact';
+import { hideCode } from './format';
 
 /** Превью последнего сообщения в строке чата — по правилам Telegram:
  *  оформление снимается, спойлер скрыт (настоящий текст в DOM не попадает), переносы — пробелы, не длиннее 200 знаков. */
@@ -6,11 +9,10 @@ import type { ComponentChildren } from 'preact';
 type Ent = { type: string; offset: number; length: number };
 export type LastMessage = {
   senderId: number; body: string; deleted?: boolean; kind?: string; attachmentName?: string | null;
-  entities?: Ent[] | null; thumb?: string | null; mime?: string | null;
+  entities?: Ent[] | null; thumb?: string | null; mime?: string | null; service?: { type: string } | null;
 };
 
 const MAX = 200;
-const BRAILLE = '⠺⠵⠞⠟⠽⠾⠷⠯';
 
 /** Текст с оформлением → куски для строки: обычный текст и спрятанные спойлеры. */
 export function previewText(text: string, entities?: Ent[] | null): ComponentChildren {
@@ -28,8 +30,8 @@ export function previewText(text: string, entities?: Ent[] | null): ComponentChi
     if (left <= 0) break;
     const n = Math.min(e.length, left);
     let hidden = '';
-    for (let i = 0; i < n; i++) hidden += text[e.offset + i] === ' ' ? ' ' : BRAILLE[(e.offset + i) % BRAILLE.length];
-    out.push(<span key={e.offset} class="rl-row-spoiler" aria-label="скрытый текст">{hidden}</span>);
+    for (let i = 0; i < n; i++) hidden += text[e.offset + i] === ' ' ? ' ' : SPOILER_FILL[(e.offset + i) % SPOILER_FILL.length];
+    out.push(<SpoilerText key={e.offset}>{hidden}</SpoilerText>);   // те же частицы, что в ленте; внутри — заглушка
     left -= n;
     at = Math.max(at, e.offset + e.length);
   }
@@ -48,7 +50,11 @@ export function previewThumb(m: LastMessage): { src: string; video: boolean } | 
 /** Текст после имени: подпись к медиа, а без подписи — тип. С миниатюрой эмодзи типа не нужен. */
 export function previewBody(m: LastMessage, withThumb: boolean): ComponentChildren {
   if (m.deleted) return 'Сообщение удалено';
-  const caption = m.body ? previewText(m.body, m.entities) : null;
+  // код входа в списке не показываем: цифры — точками, оформление (code над цифрами) отбрасываем
+  const code = m.service?.type === 'login_code';
+  const text = code ? hideCode(m.body) : m.body;
+  const entities = code ? [] : m.entities;
+  const caption = text ? previewText(text, entities) : null;
   if (m.kind === 'photo') return caption ?? (withThumb ? 'Фото' : '🖼 Фото');
   if (m.kind === 'voice') return 'Голосовое сообщение';
   if (m.kind === 'round') return 'Видеосообщение';

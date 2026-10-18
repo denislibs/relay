@@ -83,6 +83,8 @@ var ICONS = {
   clock: [C(12, 12, 9), 'M12 7v5l3 2'],
   alert: [C(12, 12, 9), 'M12 8v5', 'M12 16h.01'],
   info: [C(12, 12, 9), 'M12 11v5', 'M12 8h.01'],
+  newTab: ['M8 4h9a3 3 0 0 1 3 3v9a3 3 0 0 1-3 3H8a3 3 0 0 1-3-3V7a3 3 0 0 1 3-3z', 'M12.5 8.5v7', 'M9 12h7'],
+  markRead: ['M12 20a8 8 0 1 0-7.1-4.3L4 20l4.4-.9A8 8 0 0 0 12 20z', 'M8.5 12.2l2.4 2.4 4.6-4.9'],
   bellOff: ['M6.3 6.3A6 6 0 0 0 6 8v4l-2 4h12', 'M9 4a6 6 0 0 1 9 5v3l1 2', 'M10 20a2 2 0 0 0 4 0', 'M3 3l18 18'],
   lock: ['M6 11h12v10H6z', 'M8.5 11V8a3.5 3.5 0 0 1 7 0v3'],
   download: ['M12 4v11', 'M7.5 10.5L12 15l4.5-4.5', 'M5 20h14'],
@@ -118,6 +120,9 @@ var ICONS = {
   phoneOut: ['M5 4h3l2 5-2.5 1.5a11 11 0 0 0 6 6L15 14l5 2v3a2 2 0 0 1-2 2A16 16 0 0 1 3 6a2 2 0 0 1 2-2', 'M15 9l5-5', 'M16 4h4v4'],
   settings: [C(12, 12, 3), 'M12 2v3', 'M12 19v3', 'M2 12h3', 'M19 12h3', 'M4.9 4.9l2.1 2.1', 'M17 17l2.1 2.1', 'M4.9 19.1L7 17', 'M17 7l2.1-2.1'],
   copy: ['M8 8h12v12H8z', 'M4 16V4h12'],
+  eye: ['M2 12s3.6-7 10-7 10 7 10 7-3.6 7-10 7S2 12 2 12z', 'M12 9a3 3 0 1 0 0 6 3 3 0 0 0 0-6z'],
+  eyeOff: ['M3 3l18 18', 'M10.6 5.1A10 10 0 0 1 12 5c6.4 0 10 7 10 7a17 17 0 0 1-3.2 4.2', 'M6.6 6.6C3.9 8.3 2 12 2 12s3.6 7 10 7a9.7 9.7 0 0 0 5.4-1.6', 'M9.9 9.9a3 3 0 0 0 4.2 4.2'],
+  key: ['M14.5 3a6.5 6.5 0 0 0-6.2 8.5L3 16.8V21h4v-2.5h2.5V16h2.2l1.3-1.3A6.5 6.5 0 1 0 14.5 3z', 'M16 8.5h.01'],
   qr: ['M4 4h6v6H4z', 'M14 4h6v6h-6z', 'M4 14h6v6H4z', 'M14 14h2v2h-2z', 'M18 18h2v2h-2z', 'M14 18h2', 'M18 14h2'],
   link: ['M10 14a4 4 0 0 0 5.7 0l3-3a4 4 0 0 0-5.7-5.7l-1 1', 'M14 10a4 4 0 0 0-5.7 0l-3 3a4 4 0 0 0 5.7 5.7l1-1'],
   grip: ['M9 6h.01', 'M15 6h.01', 'M9 12h.01', 'M15 12h.01', 'M9 18h.01', 'M15 18h.01'],
@@ -213,8 +218,32 @@ function nameTone(name) {
   for (var i = 0; i < name.length; i++) x = (x * 31 + name.charCodeAt(i)) | 0;
   return Math.abs(x) % PEER_COLORS;
 }
+/* ---------- Знак Relay и значок «официальный» ---------- */
+// Свой рисунок: облачко сообщения с двумя встречными стрелками — «передача» (relay). Белым по фирменному градиенту.
+var LOGO_PATHS = ['M6 7.5A3.5 3.5 0 0 1 9.5 4h5A3.5 3.5 0 0 1 18 7.5v4a3.5 3.5 0 0 1-3.5 3.5H11l-3.6 3v-3.2A3.5 3.5 0 0 1 6 11.5z', 'M9.6 8.4h4.6l-1.4-1.3', 'M14.4 11h-4.6l1.4 1.3'];
+function RelayLogo(props) {
+  var size = props.size || 24;
+  return h('svg', { class: 'rl-logo-mark', width: size, height: size, viewBox: '0 0 24 24', fill: 'none', 'aria-hidden': 'true' },
+    LOGO_PATHS.map(function (d, i) {
+      return h('path', { key: i, d: d, fill: i === 0 ? '#fff' : 'none', stroke: i === 0 ? 'none' : 'var(--logo-ink)', 'stroke-width': 1.6, 'stroke-linecap': 'round', 'stroke-linejoin': 'round' });
+    }));
+}
+/** Значок подтверждённого (официального) аккаунта рядом с именем. size — px. */
+function Verified(props) {
+  var size = props.size || 16;
+  return h('span', { class: cx('rl-verified', props.class), role: 'img', 'aria-label': props.label || 'Официальный аккаунт', title: props.label || 'Официальный аккаунт', style: { width: size, height: size } },
+    h('svg', { width: size, height: size, viewBox: '0 0 16 16', 'aria-hidden': 'true' },
+      h('circle', { cx: 8, cy: 8, r: 8, fill: 'var(--verified)' }),
+      h('path', { d: 'M4.6 8.3l2.2 2.2 4.6-4.8', fill: 'none', stroke: '#fff', 'stroke-width': 1.9, 'stroke-linecap': 'round', 'stroke-linejoin': 'round' })));
+}
+
 function Avatar(props) {
   var size = props.size || 48;
+  if (props.logo) {
+    // официальный аккаунт: знак вместо инициалов
+    return h('span', { class: cx('rl-avatar', 'rl-avatar-logo', (props.className || props.class)), style: { width: size, height: size }, role: 'img', 'aria-label': props.name || 'Relay' },
+      h(RelayLogo, { size: Math.round(size * 0.62) }));
+  }
   var tone = props.tone != null ? props.tone : props.name ? nameTone(String(props.name)) : null;
   return h('span', {
     class: cx('rl-avatar', tone != null && !props.src && 'rl-avatar-tone', (props.className || props.class)),
@@ -291,7 +320,7 @@ function TypingIndicator(props) {
 /* ---------- ChatRow ---------- */
 function ChatRow(props) {
   var unread = props.unread || 0;
-  var rest = omit(props, ['name', 'preview', 'time', 'unread', 'muted', 'status', 'active', 'typing', 'online', 'avatar', 'author', 'thumb', 'pinned', 'draft', 'mentioned', 'className', 'class']);
+  var rest = omit(props, ['verified', 'logo', 'name', 'preview', 'time', 'unread', 'muted', 'status', 'active', 'typing', 'online', 'avatar', 'author', 'thumb', 'pinned', 'draft', 'mentioned', 'className', 'class']);
   // как в Telegram: «печатает» важнее черновика, черновик важнее сообщения;
   // строка сообщения — «Автор:», миниатюра 20 px (у видео — play), текст
   var thumb = props.thumb;
@@ -307,10 +336,12 @@ function ChatRow(props) {
   return h('button', Object.assign({ type: 'button' }, rest, { onPointerDown: chain(rest.onPointerDown, ripple),
     class: cx('rl-row', (props.className || props.class)), 'aria-current': props.active ? 'true' : undefined
   }),
-    h(Avatar, { name: props.avatar === undefined ? props.name : props.avatar, tone: props.avatarTone, online: props.online }),
+    h(Avatar, { name: props.avatar === undefined ? props.name : props.avatar, tone: props.avatarTone, online: props.online, logo: props.logo }),
     h('span', { class: 'rl-row-main' },
       h('span', { class: 'rl-row-top' },
-        h('span', { class: 'rl-row-name' }, props.name),
+        props.verified
+          ? h('span', { class: 'rl-row-name rl-row-name-verified' }, h('span', { class: 'rl-row-name-text' }, props.name), h(Verified, { size: 16 }))
+          : h('span', { class: 'rl-row-name' }, props.name),
         props.status ? h(MessageStatus, { status: props.status, size: 16 }) : null,
         h('span', { class: cx('rl-row-time', unread > 0 && !props.muted && 'rl-row-time-unread') }, props.time)),
       h('span', { class: 'rl-row-bottom' }, bottom,
@@ -1100,4 +1131,4 @@ function ScrollToBottom(props) {
 }
 
 
-export { peerTone, ArchivedRow, ReplyQuote, ReactionChips, cx, chain, ripple, reducedMotion, omit, fmtTime, makeWave, ICONS, Icon, Button, IconButton, Avatar, Badge, Chip, SearchField, ChatRow, ChatRowSkeleton, Bubble, MessageStatus, TypingIndicator, DateDivider, Banner, Modal, NavRail, Checkbox, Toast, Card, Steps, MediaArt, ProgressRing, Waveform, VoiceMessage, VoiceRecorder, MediaBubble, MediaPolicy, mediaHeld, FileBubble, MediaThumb, MediaViewer, Switch, PanelHeader, ProfileHeader, ActionTile, InfoRow, SettingsIcon, ReadMore, Presence, useMinVisible, LazyImage, FlipList, SyncIndicator, LinearProgress, EmptyState, ScrollToBottom };
+export { peerTone, RelayLogo, Verified, ArchivedRow, ReplyQuote, ReactionChips, cx, chain, ripple, reducedMotion, omit, fmtTime, makeWave, ICONS, Icon, Button, IconButton, Avatar, Badge, Chip, SearchField, ChatRow, ChatRowSkeleton, Bubble, MessageStatus, TypingIndicator, DateDivider, Banner, Modal, NavRail, Checkbox, Toast, Card, Steps, MediaArt, ProgressRing, Waveform, VoiceMessage, VoiceRecorder, MediaBubble, MediaPolicy, mediaHeld, FileBubble, MediaThumb, MediaViewer, Switch, PanelHeader, ProfileHeader, ActionTile, InfoRow, SettingsIcon, ReadMore, Presence, useMinVisible, LazyImage, FlipList, SyncIndicator, LinearProgress, EmptyState, ScrollToBottom };

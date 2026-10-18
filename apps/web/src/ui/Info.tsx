@@ -1,9 +1,9 @@
 import type { ProfileLink } from '@relay/protocol';
 import { ProfileLinks } from './links/ProfileLinks';
-import { Avatar, EmptyState, FolderTabs, InfoRow, LazyImage, PanelHeader, RichText, SettingsIcon, SlideStack, Switch } from '@relay/ui';
+import { Avatar, EmptyState, Icon, FolderTabs, InfoRow, LazyImage, PanelHeader, RichText, SettingsIcon, SlideStack, Switch, Verified } from '@relay/ui';
 import type { Item } from '@relay/sync-engine/src/types';
 import { chatMedia, focusMessage } from '../data';
-import { chatTone, fileSize } from './format';
+import { chatTone, fileSize, isSystemChat } from './format';
 import type { ComponentChildren } from 'preact';
 import { useEffect, useState } from 'preact/hooks';
 import { syncMuted } from '../notify';
@@ -40,7 +40,9 @@ export function Info() {
   const [page, setPage] = useState('info');
   useEffect(() => setPage('info'), [chatId]);   // другой чат — снова профиль
   // профиль собеседника личного чата: только то, что сервер разрешил показать
-  const peerId = chat?.kind === 'direct' ? (chat.peerId as number | null) : null;
+  // служебный чат «Relay»: без контакта, телефона и @имени — только уведомления
+  const system = isSystemChat(chat);
+  const peerId = chat?.kind === 'direct' && !system ? (chat.peerId as number | null) : null;
   const user = useUser(peerId);
   // контакт: ✎ в шапке ведёт в «Изменить»; не контакт — «Добавить в контакты»
   const contact = useGlobal((s) => (peerId ? s.contacts.find((c) => c.userId === peerId) ?? null : null));
@@ -65,7 +67,7 @@ export function Info() {
   const title = (chat?.title as string) || 'Чат №' + chatId;
   const group = chat?.kind === 'group';
   const myPeer = peer && chat?.peerId === peer.userId && peer.known ? peer : null;
-  const subtitle = group ? 'группа' : myPeer ? lastSeenText(!!myPeer.online, myPeer.lastSeen as string | null) : '';
+  const subtitle = system ? 'служебные уведомления' : group ? 'группа' : myPeer ? lastSeenText(!!myPeer.online, myPeer.lastSeen as string | null) : '';
   const links = messages
     .flatMap((m) => ((m.body as string).match(URL_RE) ?? []).map((url) => ({ url, at: m.createdAt as string, key: m.key + url })))
     .reverse();
@@ -88,8 +90,8 @@ export function Info() {
       <PanelHeader icon="close" closeLabel="Закрыть" title="Информация" onClose={close} action={action} />
       <div class="rl-aside-body">
         <div class="rl-profile">
-          <Avatar name={title} tone={chatTone(chat)} size={120} />
-          <div class="rl-profile-name">{title}</div>
+          <Avatar name={title} tone={chatTone(chat)} size={120} logo={system} />
+          <div class="rl-profile-name">{title}{system ? <Verified size={22} /> : null}</div>
           <div class={'rl-profile-sub' + (myPeer?.online ? ' app-online' : '')}>{subtitle || ' '}</div>
         </div>
         <Expand show={!group && !!(user?.links as ProfileLink[] | undefined)?.length}>{!group && user ? <ProfileLinks links={(user.links as ProfileLink[] | undefined) ?? []} /> : null}</Expand>

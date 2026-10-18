@@ -1,5 +1,5 @@
 import { getGlobal, setGlobal, subscribeGlobal } from './global';
-import { notifyText, planIncoming } from './notifyRules';
+import { incomingText, notifyText, planIncoming } from './notifyRules';
 import { getPrefs, setPref, subscribePrefs } from './prefs';
 import { playNotifySound } from './sound';
 
@@ -111,14 +111,14 @@ export function syncMuted(): void {
 const FRESH_MS = 2 * 60_000;   // догоняющая синхронизация после долгого офлайна не засыпает уведомлениями
 
 /** Пришло чужое сообщение (по патчу списка чатов): показать, если окно не в фокусе. */
-export function notifyIncoming(chat: { id: number; title: string; muted: boolean }, m: { id: number; body: string; kind?: string; attachmentName?: string | null; createdAt: string }): void {
+export function notifyIncoming(chat: { id: number; title: string; muted: boolean; system?: boolean }, m: { id: number; body: string; kind?: string; attachmentName?: string | null; createdAt: string; service?: { type: string } | null }): void {
   if (Date.now() - Date.parse(m.createdAt) > FRESH_MS) return;
   const g = getGlobal();
   const kind = g.chats.find((c) => c.id === chat.id)?.kind === 'group' ? 'group' : 'direct';
   const plan = planIncoming({ state: g.notify, device: getPrefs().notify, chatMuted: chat.muted, pref: g.settings.notify[kind], hasFocus: document.hasFocus() });
   if (!plan.show) return;
-  const text = m.kind === 'voice' ? '🎤 Голосовое сообщение' : m.kind === 'round' ? 'Видеосообщение' : m.kind === 'photo' ? (m.body ? '🖼 ' + m.body : 'Фотография') : m.kind === 'file' ? '📎 ' + (m.body || m.attachmentName || 'Файл') : m.body;
+  const text = incomingText(m);
   const t = notifyText({ title: chat.title, text }, { preview: plan.preview, hideText: getPrefs().screen.hideNotifyText });
-  quietly(navigator.serviceWorker.ready.then((reg) => reg.showNotification(t.title, { body: t.body, tag: 'chat-' + chat.id, data: { chatId: chat.id } })));
+  quietly(navigator.serviceWorker.ready.then((reg) => reg.showNotification(t.title, { body: t.body, tag: 'chat-' + chat.id, data: { chatId: chat.id }, ...(chat.system ? { icon: '/relay-logo-192.png' } : {}) })));
   playNotifySound(plan.volume);
 }

@@ -5,7 +5,7 @@ import { isMediaRequest, loadPolicy, savePolicy, serveMedia, sweepMedia, type Me
 declare const __BUILD__: string;
 const sw = self as unknown as ServiceWorkerGlobalScope;
 const CACHE = 'relay-shell-' + __BUILD__;
-const SHELL = ['/', '/main.js', '/relay.css', '/tokens.css', '/app.css', '/shared.worker.js', '/dedicated.worker.js'];
+const SHELL = ['/', '/main.js', '/relay.css', '/tokens.css', '/app.css', '/shared.worker.js', '/dedicated.worker.js', '/spoiler.worker.js'];
 const API = /^\/(health|me|users|contacts|settings|privacy|blocks|chats|presence|search|upload|files|push|sessions|ws|dev|logout)(\/|$)/;
 
 sw.addEventListener('install', (e) => {
@@ -75,14 +75,17 @@ sw.addEventListener('fetch', (e) => {
   );
 });
 
+/** Иконка уведомлений служебного чата Relay (официальный аккаунт). */
+const SYSTEM_ICON = '/relay-logo-192.png';
+
 // Web Push: сервер шлёт, когда у пользователя нет ни одной живой вкладки. Окно в фокусе — не мешаем.
 sw.addEventListener('push', (e) => {
-  const d = (() => { try { return e.data?.json() as { chatId: number; id: number; title: string; body: string }; } catch { return null; } })();
+  const d = (() => { try { return e.data?.json() as { chatId: number; id: number; title: string; body: string; system?: boolean }; } catch { return null; } })();
   if (!d) return;
   e.waitUntil((async () => {
     const wins = await sw.clients.matchAll({ type: 'window', includeUncontrolled: true });
     if (wins.some((w) => (w as WindowClient).focused)) return;
-    await sw.registration.showNotification(d.title, { body: d.body, tag: 'chat-' + d.chatId, data: { chatId: d.chatId } });
+    await sw.registration.showNotification(d.title, { body: d.body, tag: 'chat-' + d.chatId, data: { chatId: d.chatId }, ...(d.system ? { icon: SYSTEM_ICON } : {}) });
   })());
 });
 

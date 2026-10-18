@@ -4,6 +4,7 @@ import { DomainError } from './errors';
 import { appendUpdates } from './journal';
 import { announcePair, presenceFor, type PairChange, type Publish } from './presence';
 import { canFindByPhone, privacyCtx, type PrivacyCtx } from './privacy';
+import { systemUserId } from './service';
 import { canView, COLS, publicUser, publicUserFor, republishUser, selfSeq, validName, validText, type ContactName, type Row } from './profile';
 
 const NOTE_MAX = 128;
@@ -113,6 +114,7 @@ export async function addContact(owner: number, body: unknown, publish?: Publish
   } else {
     userId = (await resolveUser(owner, body.query)).id;
   }
+  if (userId === await systemUserId()) throw new DomainError('forbidden');   // «Relay» — не контакт
   let change: PairChange | null = null;
   const res = await sql.begin(async (tx) => {
     const before = await pairCtx(tx, owner, userId);
@@ -197,6 +199,7 @@ export async function listBlocked(owner: number): Promise<{ blocked: BlockedUser
 export async function blockUser(owner: number, userId: number, publish?: Publish): Promise<BlockedUser> {
   // блокировать можно только тех, кого и так видно (общий чат, контакт): иначе перебором id можно узнать всех
   if (userId === owner || !(await canView(sql, owner, userId))) throw new DomainError('not_found');
+  if (userId === await systemUserId()) throw new DomainError('forbidden');   // «Relay» не заблокировать: коды входа приходят от него
   let change: PairChange | null = null;
   const res = await sql.begin(async (tx) => {
     const before = await pairCtx(tx, owner, userId);

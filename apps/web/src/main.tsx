@@ -1,3 +1,4 @@
+import { configureSpoilers, installSpoilers } from '@relay/ui';
 import { fetchBuild, onVisible, startUpdateCheck } from './update';
 import { claimMediaCache, sendMediaPolicy } from './storageInfo';
 import { getPrefs, subscribePrefs, type Prefs } from './prefs';
@@ -71,6 +72,16 @@ async function boot(): Promise<void> {
   start(me);
 }
 
+// вход завершён (ui/auth): сеанс уже в cookie — узнаём, кто мы, и запускаем приложение без перезагрузки
+window.addEventListener('relay:signed-in', () => {
+  void fetch('/me').then(async (res) => {
+    if (!res.ok) { location.reload(); return; }
+    const me = (await res.json()) as Me;
+    localStorage.setItem(ME_KEY, JSON.stringify(me));
+    start(me);
+  }).catch(() => location.reload());
+});
+
 nav.installNav({ get: () => getGlobal().sidebarView, set: (p) => setGlobal({ sidebarView: p }), escBusy: () => getGlobal().infoOpen && !!getGlobal().openChatId });
 if (__DEV__) (window as unknown as { __nav: typeof nav }).__nav = nav;   // для ручной проверки навигации
 // dev: раздел «Для разработчиков» для проверок — что сейчас в журнале и что ничего не работает при закрытом разделе
@@ -78,6 +89,9 @@ if (__DEV__) void import('./devtools/session').then((s) => import('./devtools/me
   (window as unknown as { __dev: object }).__dev = { snapshot: s.devSnapshot, running: () => s.devRunning() || m.metricsRunning() };
 }));
 startTitle();
+// спойлеры: частицы рисует воркер (как в Telegram Web K); без него — CSS-точки
+configureSpoilers({ workerUrl: '/spoiler.worker.js' });
+installSpoilers();
 startUpdateCheck({ current: __BUILD__, fetchBuild, onUpdate: () => setGlobal({ updateReady: true }), onVisible });
 startScreenBlur();
 render(<App />, document.getElementById('app')!);

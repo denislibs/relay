@@ -36,6 +36,7 @@ body { margin: 0; font-family: var(--font-sans); color: var(--ink); background: 
 /* ---------- Avatar ---------- */
 .rl-avatar { position: relative; display: inline-flex; align-items: center; justify-content: center; flex-shrink: 0; border-radius: 50%; background: var(--avatar-bg); color: var(--avatar-fg); font-weight: 600; overflow: visible; user-select: none; }
 .rl-avatar img { width: 100%; height: 100%; border-radius: 50%; object-fit: cover; }
+.rl-avatar-logo { --logo-ink: #0b8a5f; background: linear-gradient(145deg, #2fd38a, #0f9d7a 55%, #0c7f86); box-shadow: inset 0 0 0 1px rgba(255,255,255,.12); }
 .rl-avatar-dot { position: absolute; right: 0; bottom: 0; width: 28%; height: 28%; min-width: 10px; min-height: 10px; border-radius: 50%; background: var(--brand); box-shadow: 0 0 0 2px var(--bg); }
 
 /* ---------- Badge ---------- */
@@ -79,7 +80,7 @@ body { margin: 0; font-family: var(--font-sans); color: var(--ink); background: 
 .rl-row-thumb { position: relative; display: inline-block; width: 20px; height: 20px; margin-right: 6px; vertical-align: -5px; }
 .rl-row-thumb img { width: 100%; height: 100%; border-radius: 4px; object-fit: cover; display: block; }
 .rl-row-thumb .rl-icon { position: absolute; inset: 0; margin: auto; color: #fff; filter: drop-shadow(0 0 2px rgb(0 0 0 / 0.5)); }
-.rl-row-spoiler { letter-spacing: 1px; opacity: 0.6; }
+.rl-row-spoiler { letter-spacing: 1px; }
 .rl-row-top .rl-status { flex: none; color: var(--brand-text); }
 .rl-row-top .rl-status-failed { color: var(--danger); }
 .rl-row-meta { display: inline-flex; align-items: center; gap: 6px; color: var(--ink-muted); }
@@ -151,14 +152,15 @@ body { margin: 0; font-family: var(--font-sans); color: var(--ink); background: 
 .rl-composer-editable :is(b, strong) { font-weight: 600; }
 .rl-composer-editable code { font-family: var(--font-mono, ui-monospace, SFMono-Regular, Menlo, monospace); font-size: .92em; color: var(--brand-text, var(--brand)); }
 .rl-composer-editable a { color: var(--brand-text, var(--brand)); text-decoration: underline; text-underline-offset: 2px; }
-.rl-composer-editable .rl-spoiler-edit { border-radius: 4px; background: color-mix(in srgb, var(--ink) 14%, transparent); }
+.rl-composer-editable .rl-spoiler-edit { border-radius: 4px; background: var(--rl-spoiler-dots-gray) 0 0 / 60px 20px, color-mix(in srgb, var(--ink) 10%, transparent); animation: rl-spoiler-dots-bg 7s linear infinite; }   /* в поле ввода текст виден, поверх бледные точки */
+@keyframes rl-spoiler-dots-bg { to { background-position: 60px 20px, 0 0; } }
 /* плейсхолдер — отдельный слой: при вводе уезжает вперёд и гаснет, при очистке возвращается */
 .rl-composer-ph { position: absolute; left: 6px; right: 6px; top: 9.5px; color: var(--ink-muted); font: 400 var(--message-text-size, 15px)/var(--line) var(--font-sans);
   white-space: nowrap; overflow: hidden; text-overflow: ellipsis; pointer-events: none; opacity: 0; transform: translateX(16px);
   transition: opacity 180ms var(--ease-out), transform 200ms var(--ease-out); }
 .rl-composer-empty .rl-composer-ph { opacity: 1; transform: none; }
-.rl-composer-send { position: relative; width: 48px; height: 48px; border: 0; border-radius: 50%; background: var(--brand); color: var(--on-brand); cursor: pointer; flex-shrink: 0; transition: transform var(--dur-instant) var(--ease-out), background-color var(--dur-instant) var(--ease-out); }
-.rl-composer-send:hover { background: var(--brand-strong); }
+.rl-composer-send { position: relative; width: 48px; height: 48px; border: 0; border-radius: 50%; background: var(--brand-strong); color: var(--on-brand); cursor: pointer; flex-shrink: 0; transition: transform var(--dur-instant) var(--ease-out), background-color var(--dur-instant) var(--ease-out); }
+.rl-composer-send:hover { background: color-mix(in srgb, var(--brand-strong) 90%, #000); }
 .rl-composer-send:active { transform: scale(var(--press-lg)); }
 .rl-composer-send .rl-icon { position: absolute; top: 50%; left: 50%; margin: -11px 0 0 -11px; transition: transform var(--dur-fast) var(--ease-out), opacity var(--dur-instant) var(--ease-out); }
 .rl-composer-send .rl-swap-off { opacity: 0; transform: scale(0.4) rotate(-45deg); }
@@ -191,11 +193,28 @@ body { margin: 0; font-family: var(--font-sans); color: var(--ink); background: 
 .rl-pre { display: block; margin: 2px 0; padding: 6px 8px; border-radius: 8px; font-family: var(--font-mono, ui-monospace, SFMono-Regular, Menlo, monospace); font-size: .9em; white-space: pre-wrap; background: color-mix(in srgb, currentColor 8%, transparent); }
 .rl-link { color: var(--brand-text, var(--brand)); text-decoration: underline; text-underline-offset: 2px; }
 .rl-msgline-out .rl-link { color: inherit; }
-.rl-spoiler { position: relative; border-radius: 4px; cursor: pointer; background: color-mix(in srgb, currentColor 22%, transparent);
-  -webkit-box-decoration-break: clone; box-decoration-break: clone; transition: background-color 300ms var(--ease-out); }
-.rl-spoiler .rl-spoiler-text { opacity: 0; filter: blur(4px); transition: opacity 300ms var(--ease-out), filter 300ms var(--ease-out); }
-.rl-spoiler-open { cursor: auto; background: transparent; }
-.rl-spoiler-open .rl-spoiler-text { opacity: 1; filter: none; }
+/* Спойлер (spoiler.js): закрытый — это сами точки цвета текста (фон currentColor под маской из точек,
+   два слоя плывут навстречу — мерцание); текст под ними невидим, но держит место.
+   Раскрытие — круг от места клика (--sx/--sy, радиус --sr): внутри круга маска сплошная, фона нет. */
+@property --rl-sr { syntax: '<length>'; inherits: false; initial-value: 0px; }
+.rl-spoiler { position: relative; border-radius: 4px; -webkit-box-decoration-break: clone; box-decoration-break: clone; }
+.rl-spoiler:not(.rl-spoiler-open) { cursor: pointer; user-select: none; -webkit-user-select: none;
+  background: currentColor;
+  -webkit-mask-image: var(--rl-spoiler-dots), var(--rl-spoiler-dots); mask-image: var(--rl-spoiler-dots), var(--rl-spoiler-dots);
+  -webkit-mask-size: 60px 20px, 78px 26px; mask-size: 60px 20px, 78px 26px;
+  animation: rl-spoiler-drift 7s linear infinite; }
+.rl-spoiler:not(.rl-spoiler-open) .rl-spoiler-text { opacity: 0; }
+@keyframes rl-spoiler-drift { from { -webkit-mask-position: 0 0, 0 0; mask-position: 0 0, 0 0; } to { -webkit-mask-position: 60px 20px, -78px 26px; mask-position: 60px 20px, -78px 26px; } }
+.rl-spoiler.rl-spoiler-revealing:not(.rl-spoiler-open) { animation: rl-spoiler-reveal 500ms ease-in forwards; background: radial-gradient(circle at var(--sx) var(--sy), transparent var(--rl-sr), currentColor calc(var(--rl-sr) + 1px));
+  -webkit-mask-image: radial-gradient(circle at var(--sx) var(--sy), #000 var(--rl-sr), transparent calc(var(--rl-sr) + 10px)), var(--rl-spoiler-dots);
+  mask-image: radial-gradient(circle at var(--sx) var(--sy), #000 var(--rl-sr), transparent calc(var(--rl-sr) + 10px)), var(--rl-spoiler-dots);
+  -webkit-mask-size: auto, 60px 20px; mask-size: auto, 60px 20px; }
+.rl-spoiler.rl-spoiler-revealing .rl-spoiler-text { opacity: 1 !important; }
+@keyframes rl-spoiler-reveal { from { --rl-sr: 0px; } to { --rl-sr: var(--sr); } }
+.rl-spoiler-open { cursor: auto; }
+/* в строке чата и в цитате — не раскрывается, только мерцает */
+.rl-spoiler-static { cursor: inherit !important; }
+@media (prefers-reduced-motion: reduce) { .rl-spoiler, .rl-spoiler-revealing { animation: none !important; } }
 
 /* ---------- Banner ---------- */
 .rl-banner { display: flex; align-items: center; gap: var(--space-3); padding: var(--space-3) var(--space-4); border-radius: var(--radius-lg); background: var(--positive-soft); color: var(--ink); font: 400 14px/20px var(--font-sans); animation: rl-slide-down var(--dur-base) var(--ease-out) both; }
@@ -660,16 +679,16 @@ button.rl-quote:active { background: var(--quote-bg-active, var(--pressed)); }
 @keyframes rl-rpick-pop { 0% { transform: scale(0) translateY(10px); opacity: 0; } 70% { transform: scale(1.15); opacity: 1; } 100% { transform: none; } }
 
 /* ---------- Menu ---------- */
-.rl-menu { position: absolute; z-index: 20; min-width: 220px; padding: 8px 0; border-radius: var(--radius-lg); background: var(--raised); color: var(--ink); box-shadow: var(--shadow-pop); transform-origin: top left; animation: rl-menu-in var(--dur-base) var(--ease-out) both; }
+.rl-menu { position: absolute; z-index: 20; min-width: 200px; padding: 4px; border-radius: 14px; background: var(--menu-bg); color: var(--ink); box-shadow: var(--menu-shadow); -webkit-backdrop-filter: blur(24px) saturate(1.8); backdrop-filter: blur(24px) saturate(1.8); transform-origin: top left; animation: rl-menu-in 160ms var(--ease-out) both; }
 .rl-menu-top-right { transform-origin: top right; }
 .rl-menu-bottom-left { transform-origin: bottom left; }
-.rl-menu-item { display: flex; align-items: center; gap: var(--space-4); width: 100%; height: 40px; padding: 0 var(--space-6) 0 var(--space-4); border: 0; background: transparent; color: inherit; font: 400 15px/20px var(--font-sans); text-align: left; cursor: pointer; animation: rl-menu-item 240ms var(--ease-out) both; animation-delay: calc(var(--i) * 18ms); transition: background-color var(--dur-instant) var(--ease-standard); }
+.rl-menu-item { display: flex; align-items: center; gap: 16px; width: 100%; height: 36px; padding: 0 18px 0 12px; border: 0; border-radius: 9px; background: transparent; color: inherit; font: 500 14.5px/20px var(--font-sans); text-align: left; cursor: pointer; transition: background-color 120ms var(--ease-standard); }
 .rl-menu-item:hover, .rl-menu-item:focus-visible { background: var(--hover); outline: none; }
-.rl-menu-item .rl-icon { color: var(--ink-muted); }
+.rl-menu-item .rl-icon { color: var(--ink); opacity: .9; }   /* как в Telegram: иконки одним цветом с текстом */
 .rl-menu-item span { flex: 1; }
 .rl-menu-item kbd { font: 400 12px/1 var(--font-sans); color: var(--ink-muted); }
 .rl-menu-danger, .rl-menu-danger .rl-icon { color: var(--danger); }
-.rl-menu-sep { height: 1px; margin: 6px 0; border: 0; background: var(--line); }
+.rl-menu-sep { height: 1px; margin: 4px 10px; border: 0; background: var(--line); }
 .rl-presence[data-state="closing"] .rl-menu, .rl-presence[data-state="closing"] .rl-rpick, .rl-presence[data-state="closing"] .rl-attach, .rl-presence[data-state="closing"] .rl-mentions { animation: rl-pop-out var(--dur-fast) var(--ease-in) forwards; }
 @keyframes rl-menu-in { from { opacity: 0; transform: scale(0.92); } to { opacity: 1; transform: none; } }
 @keyframes rl-menu-item { from { opacity: 0; transform: translateY(-4px); } to { opacity: 1; transform: none; } }
@@ -681,13 +700,12 @@ button.rl-quote:active { background: var(--quote-bg-active, var(--pressed)); }
 .rl-composer-reply .rl-quote { background: var(--composer); }
 @keyframes rl-reply-in { from { opacity: 0; max-height: 0; transform: translateY(8px); } to { opacity: 1; max-height: 96px; transform: none; } }
 @keyframes rl-reply-out { from { max-height: 96px; } to { opacity: 0; max-height: 0; transform: translateY(8px); } }
-.rl-attach-toggle .rl-icon { transition: transform var(--dur-base) var(--ease-out); }
-.rl-attach-toggle[aria-pressed="true"] .rl-icon { transform: rotate(90deg); }
-.rl-attach { position: absolute; left: 16px; bottom: calc(100% + 8px); z-index: 20; display: flex; flex-direction: column; padding: 8px; border-radius: var(--radius-lg); background: var(--raised); box-shadow: var(--shadow-pop); transform-origin: bottom left; animation: rl-menu-in var(--dur-base) var(--ease-out) both; }
-.rl-attach-item { display: flex; align-items: center; gap: var(--space-3); height: 44px; padding: 0 var(--space-4) 0 var(--space-2); border: 0; border-radius: var(--radius-md); background: transparent; color: var(--ink); font: 400 15px/20px var(--font-sans); text-align: left; cursor: pointer; animation: rl-attach-item 300ms var(--ease-out) both; animation-delay: calc(var(--i) * 28ms); }
+.rl-attach-toggle .rl-icon { transition: color 120ms var(--ease-standard); }
+.rl-attach-toggle[aria-pressed="true"] { color: var(--brand-text, var(--brand-strong)); background: transparent; }
+.rl-attach { position: absolute; left: 4px; bottom: calc(100% + 8px); z-index: 20; display: flex; flex-direction: column; min-width: 200px; padding: 4px; border-radius: 14px; background: var(--menu-bg); box-shadow: var(--menu-shadow); -webkit-backdrop-filter: blur(24px) saturate(1.8); backdrop-filter: blur(24px) saturate(1.8); transform-origin: bottom left; animation: rl-menu-in 160ms var(--ease-out) both; }
+.rl-attach-item { display: flex; align-items: center; gap: 16px; height: 36px; padding: 0 18px 0 12px; border: 0; border-radius: 9px; background: transparent; color: var(--ink); font: 500 14.5px/20px var(--font-sans); text-align: left; cursor: pointer; transition: background-color 120ms var(--ease-standard); }
 .rl-attach-item:hover { background: var(--hover); }
-.rl-attach-icon { display: inline-flex; align-items: center; justify-content: center; width: 32px; height: 32px; border-radius: 50%; color: var(--tone); transition: transform var(--dur-fast) var(--ease-out); }
-.rl-attach-item:hover .rl-attach-icon { transform: scale(1.15) rotate(-8deg); }
+.rl-attach-icon { display: inline-flex; align-items: center; justify-content: center; width: 24px; height: 24px; color: var(--ink); opacity: .9; }
 @keyframes rl-attach-item { from { opacity: 0; transform: translateY(10px) scale(0.9); } to { opacity: 1; transform: none; } }
 .rl-mentions { position: absolute; left: 64px; right: 76px; bottom: calc(100% + 4px); z-index: 20; max-height: 240px; overflow-y: auto; padding: 6px 0; border-radius: var(--radius-lg); background: var(--raised); box-shadow: var(--shadow-pop); transform-origin: bottom center; animation: rl-menu-in var(--dur-fast) var(--ease-out) both; }
 .rl-mention { display: flex; align-items: center; gap: var(--space-3); width: 100%; padding: 6px var(--space-4); border: 0; background: transparent; color: var(--ink); text-align: left; cursor: pointer; }
@@ -1042,9 +1060,7 @@ button.rl-tab:hover { color: var(--ink); }
 
 /* message context menu: reaction pill above a soft rounded list */
 .rl-shell .rl-msgmenu { position: fixed; z-index: 40; display: flex; flex-direction: column; align-items: flex-start; gap: 8px; }
-.rl-shell .rl-msgmenu .rl-menu { position: relative; min-width: 200px; padding: 6px; border-radius: 16px; background: color-mix(in srgb, var(--raised) 88%, transparent); -webkit-backdrop-filter: blur(18px) saturate(1.6); backdrop-filter: blur(18px) saturate(1.6); }
-.rl-shell .rl-msgmenu .rl-menu-item { height: 40px; border-radius: 10px; padding: 0 var(--space-4) 0 var(--space-3); font-weight: 500; }
-.rl-shell .rl-msgmenu .rl-menu-item .rl-icon { color: var(--ink); }
+.rl-shell .rl-msgmenu .rl-menu { position: relative; }   /* вид — общий у всех меню (.rl-menu) */
 .rl-shell .rl-rpick { padding: 4px 6px; background: color-mix(in srgb, var(--raised) 92%, transparent); -webkit-backdrop-filter: blur(18px); backdrop-filter: blur(18px); }
 .rl-shell .rl-rpick-btn { width: 38px; height: 38px; font-size: 26px; }
 .rl-msgmenu-scrim { position: fixed; inset: 0; z-index: 39; }
@@ -1076,7 +1092,7 @@ button.rl-tab:hover { color: var(--ink); }
   --top-zone: calc(var(--header-h) + var(--space-float));
   --bottom-zone: calc(var(--composer-h, 48px) + var(--space-float));
   margin: calc(-1 * var(--top-zone)) 0 calc(-1 * var(--bottom-zone));
-  padding: calc(var(--top-zone) + 8px) 0 calc(var(--bottom-zone) + 8px);
+  padding: calc(var(--top-zone) + 8px) 0 calc(var(--bottom-zone) - 6px);   /* последнее сообщение ≈10px над полем ввода, как в Telegram */
   -webkit-mask-image: linear-gradient(to bottom, transparent 0, transparent calc(var(--top-zone) * 0.35), #000 calc(var(--top-zone) + 4px), #000 calc(100% - var(--bottom-zone) - 4px), transparent calc(100% - var(--bottom-zone) * 0.35), transparent 100%);
   mask-image: linear-gradient(to bottom, transparent 0, transparent calc(var(--top-zone) * 0.35), #000 calc(var(--top-zone) + 4px), #000 calc(100% - var(--bottom-zone) - 4px), transparent calc(100% - var(--bottom-zone) * 0.35), transparent 100%);
 }
@@ -1340,6 +1356,46 @@ html[data-blur="0"] .rl-shell .rl-msgmenu .rl-menu, html[data-blur="0"] .rl-shel
 .rl-aside-pages .rl-slide:not(.rl-slide-parked):not(.rl-slide-out-push):not(.rl-slide-out-pop) { position: relative; inset: auto; width: 100%; }
 .rl-aside-pages .rl-aside-links { overflow: visible; }
 
+/* ---------- Owl: персонаж экрана входа ---------- */
+.rl-owl { --owl-body: #8b6a50; --owl-dark: #6d5240; --owl-belly: #ecdcc8; --owl-face: #f5e9da; --owl-eye: #fff; --owl-pupil: #2b2118; --owl-beak: #f2a33a; display: block; overflow: visible; }
+:root[data-theme="dark"] .rl-owl { --owl-body: #7d614b; --owl-dark: #5d4535; --owl-belly: #d9c6af; --owl-face: #e9d9c5; }
+@media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) .rl-owl { --owl-body: #7d614b; --owl-dark: #5d4535; --owl-belly: #d9c6af; --owl-face: #e9d9c5; } }
+.rl-owl-shadow { fill: var(--ink); opacity: .1; }
+.rl-owl-feet { fill: var(--owl-beak); }
+.rl-owl-body { fill: var(--owl-body); }
+.rl-owl-tuft, .rl-owl-wing { fill: var(--owl-dark); }
+.rl-owl-belly { fill: var(--owl-belly); }
+.rl-owl-marks { fill: none; stroke: var(--owl-dark); stroke-width: 1.6; stroke-linecap: round; stroke-linejoin: round; opacity: .55; }
+.rl-owl-face { fill: var(--owl-face); }
+.rl-owl-eye { fill: var(--owl-eye); }
+.rl-owl-pupil { fill: var(--owl-pupil); transition: transform .38s cubic-bezier(.3, .8, .4, 1); }
+.rl-owl-glint { fill: #fff; }
+.rl-owl-beak { fill: var(--owl-beak); }
+.rl-owl-lid { fill: var(--owl-face); transform-box: fill-box; transform-origin: 50% 0; transform: scaleY(0); }
+.rl-owl-head { transform-box: view-box; transform-origin: 60px 104px; transition: transform .5s cubic-bezier(.3, .8, .4, 1); }
+/* назад к «ожиданию» — быстро, как у оригинала */
+.rl-owl--idle .rl-owl-pupil, .rl-owl--idle .rl-owl-head { transition-duration: .18s; }
+.rl-owl--idle .rl-owl-breath { transform-box: view-box; transform-origin: 60px 110px; animation: rl-owl-breath 2.8s ease-in-out infinite; }
+.rl-owl--idle .rl-owl-lid, .rl-owl--track .rl-owl-lid { animation: rl-owl-blink 4.6s infinite; }
+@keyframes rl-owl-breath { 0%, 100% { transform: none; } 50% { transform: scale(1.018, 1.03); } }
+@keyframes rl-owl-blink { 0%, 93%, 100% { transform: scaleY(0); } 96% { transform: scaleY(1); } }
+/* крылья: в покое — по бокам; пароль — поднимаются к глазам */
+.rl-owl-wing { transform-box: fill-box; transition: transform .3s cubic-bezier(.3, .8, .4, 1), opacity .2s; }
+.rl-owl-wing-l { transform-origin: 30% 0; }
+.rl-owl-wing-r { transform-origin: 70% 0; }
+.rl-owl-cover { fill: var(--owl-dark); transform-box: view-box; transform-origin: var(--x) 60px; opacity: 0; transform: translateY(40px) rotate(-28deg) scale(.5); transition: transform .34s cubic-bezier(.3, .9, .35, 1.08), opacity .16s; }
+.rl-owl-cover-r { transform: translateY(40px) rotate(28deg) scale(.5); }
+.rl-owl-cover path { stroke: var(--owl-body); stroke-width: 1.2; stroke-linejoin: round; }
+.rl-owl--cover .rl-owl-wing { opacity: 0; transform: scaleY(.4); }
+.rl-owl--cover .rl-owl-cover { opacity: 1; transform: none; }
+.rl-owl--cover .rl-owl-lid { transform: scaleY(1); animation: none; }
+/* подглядывает: правое крыло опускается и чуть отходит, глаз открыт */
+.rl-owl--cover.rl-owl--peek .rl-owl-cover-r { transform: translate(5px, 12px) rotate(16deg); }
+.rl-owl--cover.rl-owl--peek .rl-owl-lid { transform: scaleY(0); }
+@media (prefers-reduced-motion: reduce) {
+  .rl-owl * { animation: none !important; transition-duration: 1ms !important; }
+}
+
 /* ---------- запись голосового / кружка: панель на месте поля ввода ---------- */
 .rl-composer-recording .rl-composer-field[hidden] { display: none; }
 .rl-recbar { flex: 1; min-width: 0; display: flex; align-items: center; gap: .25rem; min-height: 40px; animation: rl-recbar-in 200ms var(--ease-out) both; }
@@ -1448,3 +1504,29 @@ html[data-blur="0"] .rl-shell .rl-msgmenu .rl-menu, html[data-blur="0"] .rl-shel
 .rl-round-meta { position: absolute; right: .5rem; bottom: .5rem; display: inline-flex; align-items: center; gap: 3px; padding: 0 .375rem; border-radius: .75rem;
   background: rgba(0, 0, 0, .25); color: #fff; font: 400 .75rem/1.125rem var(--font-sans); }
 .rl-round-meta .rl-status { color: #fff; }
+
+/* Частицы из воркера (spoiler.js): наложение-canvas поверх сообщения; как только оно нарисовало
+   первый кадр (data-spoiler-live), CSS-точки уступают ему место, текст остаётся невидимым */
+.rl-spoiler-canvas { position: absolute; inset: 0; width: 100%; height: 100%; pointer-events: none; z-index: 1; }
+[data-spoiler-live] .rl-spoiler:not(.rl-spoiler-open) { background: none; -webkit-mask-image: none; mask-image: none; animation: none; }
+[data-spoiler-live] .rl-spoiler.rl-spoiler-revealing:not(.rl-spoiler-open) { animation: rl-spoiler-reveal 500ms ease-in forwards; background: none;
+  -webkit-mask-image: radial-gradient(circle at var(--sx) var(--sy), #000 var(--rl-sr), transparent calc(var(--rl-sr) + 10px));
+  mask-image: radial-gradient(circle at var(--sx) var(--sy), #000 var(--rl-sr), transparent calc(var(--rl-sr) + 10px)); -webkit-mask-size: auto; mask-size: auto; }
+
+/* Меню (главное, контекстное, вложения): одна поверхность — полупрозрачная с размытием, как в Telegram */
+:root { --menu-bg: color-mix(in srgb, var(--raised) 84%, transparent); --menu-shadow: 0 0 0 .5px rgba(0, 0, 0, .06), 0 6px 28px rgba(0, 0, 0, .16); }
+html[data-blur="0"] { --menu-bg: color-mix(in srgb, var(--raised) 97%, transparent); }
+html[data-blur="0"] .rl-menu, html[data-blur="0"] .rl-attach { -webkit-backdrop-filter: none; backdrop-filter: none; }
+/* тёмная тема: меню на тон светлее панели и с тенью — иначе сливается с карточкой */
+:root[data-theme="dark"] { --menu-bg: color-mix(in srgb, #2a2d2e 86%, transparent); --menu-shadow: 0 0 0 .5px rgba(255, 255, 255, .07), 0 8px 30px rgba(0, 0, 0, .5); }
+@media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) { --menu-bg: color-mix(in srgb, #2a2d2e 86%, transparent); --menu-shadow: 0 0 0 .5px rgba(255, 255, 255, .07), 0 8px 30px rgba(0, 0, 0, .5); } }
+
+/* ---------- Официальный аккаунт: значок у имени ---------- */
+:root { --verified: #2f8fe6; }
+:root[data-theme="dark"] { --verified: #4ea6f0; }
+@media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) { --verified: #4ea6f0; } }
+.rl-verified { display: inline-flex; flex-shrink: 0; vertical-align: -2px; margin-left: 4px; }
+.rl-verified svg { display: block; }
+.rl-row-name-verified { display: flex; align-items: center; }
+.rl-row-name-text { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.rl-row[aria-current="true"] .rl-avatar-logo { box-shadow: 0 0 0 2px rgba(255,255,255,.85); }   /* выбранная строка зелёная — знак не сливается */

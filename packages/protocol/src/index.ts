@@ -5,6 +5,9 @@ import type { ChatFolder } from './folders';
 
 export type Id = number;
 
+/** Служебное сообщение от системного пользователя: машинный тип для отрисовки и склейки повторов. */
+export type ServiceType = 'login_code' | 'new_login';
+
 export interface Message {
   id: Id;
   chatId: Id;
@@ -18,6 +21,7 @@ export interface Message {
   deleted?: boolean;
   reactions?: Reaction[];
   attachment?: Attachment | null;
+  service?: { type: ServiceType };   // есть только у служебных сообщений
   entities?: Entity[];   // оформление текста; нет или пусто — простой текст
   listened?: boolean;    // голосовое/кружок прослушан получателем
 }
@@ -107,7 +111,8 @@ export type Update =
   // правила конфиденциальности изменились: приходят целиком, только владельцу
   | { type: 'privacyChanged'; rules: PrivacyRules }
   // чёрный список: человек заблокирован (blocked) или разблокирован (unblocked); только владельцу
-  | { type: 'blocksChanged'; blocked?: BlockedUser; unblocked?: Id };
+  | { type: 'blocksChanged'; blocked?: BlockedUser; unblocked?: Id }
+  | { type: 'sessionsChanged' };   // список сеансов изменился: новый вход, подтверждение, завершение
 
 /** Тело уведомления/push без предпросмотра: текст сообщения не раскрываем. */
 export const NO_PREVIEW = 'Новое сообщение';
@@ -122,7 +127,7 @@ export interface SettingsSnapshot extends UserSettings { privacy?: PrivacyRules;
 export const SESSION_TTLS: readonly number[] = [7, 30, 90, 180, 365];
 
 /** Сеанс (GET /sessions): устройство — грубо по User-Agent («Chrome 141, macOS»), IP входа; current — этот запрос. */
-export interface SessionInfo { id: Id; device: string; ip: string | null; createdAt: string; lastActiveAt: string; current: boolean; online: boolean }
+export interface SessionInfo { id: Id; device: string; ip: string | null; createdAt: string; lastActiveAt: string; current: boolean; online: boolean; unconfirmed: boolean }
 
 /** Правила конфиденциальности. phoneDiscovery — «Кто найдёт меня по номеру» (только everyone | contacts). */
 export type PrivacyKey = 'phone' | 'phoneDiscovery' | 'lastSeen' | 'bio' | 'birthday';
@@ -146,6 +151,8 @@ export interface Birthday { day: number; month: number; year?: number }
 
 /** Профиль глазами зрителя (скрытые правилами приватности поля сервер не отдаёт). */
 export interface PublicUser {
+  /** системный пользователь «Relay»: служебные уведомления, ответить нельзя */
+  system?: true;
   id: Id; name: string; firstName: string; lastName: string;
   username: string | null; bio: string | null; birthday: Birthday | null; phone: string | null;
   links: ProfileLink[];   // ссылки на профили в других сервисах, в порядке владельца; видны всем
@@ -178,7 +185,9 @@ export interface JournalEntry { seq: number; update: Update }
 
 export type ErrorCode = 'bad_frame' | 'unauthorized' | 'not_member' | 'not_found' | 'too_long' | 'forbidden' | 'internal'
   | 'username_invalid' | 'username_taken' | 'username_reserved' | 'bio_too_long' | 'name_invalid' | 'birthday_invalid' | 'links_invalid' | 'note_too_long'
-  | 'blocked' | 'folder_title' | 'folder_empty' | 'folder_too_many_chats' | 'folder_emoji' | 'folders_limit';
+  | 'blocked' | 'code_invalid' | 'code_expired' | 'flood' | 'fresh_session'
+  | 'password_invalid' | 'password_missing' | 'recovery_unavailable' | 'email_invalid' | 'qr_expired' | 'passkey_not_found' | 'passkey_invalid'
+  | 'folder_title' | 'folder_empty' | 'folder_too_many_chats' | 'folder_emoji' | 'folders_limit';
 
 export type ClientFrame =
   | { op: 'hello'; lastSeq: number }
@@ -239,4 +248,22 @@ export function parseClientFrame(raw: string): ClientFrame | null {
       return str(f.reqId, 64) && int(f.chatId) && int(f.upToId) ? { op: 'read', reqId: f.reqId, chatId: f.chatId, upToId: f.upToId } : null;
     default: return null;
   }
+}
+
+/** Знаки-заглушки вместо скрытого текста (Брайль: похоже на «шум», ширина близка к буквам). */
+export const SPOILER_FILL = '⠺⠵⠞⠟⠽⠾⠷⠯';
+
+/**
+ * Текст, где спойлеры заменены заглушкой (пробелы и переводы строк сохраняются): для уведомлений,
+ * push и превью — туда, где спойлер не раскрыть, настоящий текст не попадает.
+ */
+export function hideSpoilers(text: string, entities?: readonly { type: string; offset: number; length: number }[] | null): string {
+  if (!entities?.length) return text;
+  let out: string[] | null = null;
+  for (const e of entities) {
+    if (e.type !== 'spoiler') continue;
+    out ??= text.split('');   // смещения — в единицах UTF-16, как и у сущностей
+    for (let i = e.offset; i < Math.min(text.length, e.offset + e.length); i++) if (!/\s/.test(text[i])) out[i] = SPOILER_FILL[i % SPOILER_FILL.length];
+  }
+  return out ? out.join('') : text;
 }

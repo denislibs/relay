@@ -1,9 +1,10 @@
 import { parseClientFrame } from '@relay/protocol';
+import { clientIp } from './device';
 import type { Server } from 'bun';
 import { existsSync, statSync } from 'node:fs';
 import { extname, join, resolve, sep } from 'node:path';
 import { clearSessionCookie, createSession, createUser, deleteSession, readSessionToken, sessionCookie, sessionFromToken } from './auth';
-import { checkSocket, listSessions, sessionEnded, sweepInactive, terminateOthers, terminateSession, trackSocket, untrackSocket } from './domain/sessions';
+import { announceLogin, announceSessionsChanged, assertConfirmed, checkSocket, confirmSession, listSessions, sessionEnded, sweepInactive, terminateOthers, terminateSession, trackSocket, untrackSocket } from './domain/sessions';
 import { createChat, getChatMedia, getHistory, getMessagesByIds, listChats, listChatsPage } from './domain/chats';
 import { sql } from './db';
 import { DomainError } from './domain/errors';
@@ -17,9 +18,10 @@ import { checkUsername, getMe, getUser, setUsername, updateProfile } from './dom
 import { usersByIds } from './domain/users';
 import { subscribe, unsubscribe, vapidKeys, type SubscriptionInput } from './domain/push';
 import { deleteFolder, getSettings, reorderFolders, saveFolder, setNotify, setPrivacy, setSessionsTtl } from './domain/settings';
+import { publicAuthRoute, privateAuthRoute } from './authRoutes';
 import { addContact, blockUser, listBlocked, listContacts, removeContact, resolveUser, unblockUser, updateContact } from './domain/contacts';
 
-const STATUS: Record<string, number> = { bad_frame: 400, too_long: 400, username_invalid: 400, username_reserved: 400, username_taken: 409, bio_too_long: 400, note_too_long: 400, name_invalid: 400, birthday_invalid: 400, links_invalid: 400, folder_title: 400, folder_empty: 400, folder_too_many_chats: 400, folder_emoji: 400, folders_limit: 400, unauthorized: 401, not_member: 403, blocked: 403, not_found: 404 };
+const STATUS: Record<string, number> = { bad_frame: 400, too_long: 400, username_invalid: 400, username_reserved: 400, username_taken: 409, bio_too_long: 400, note_too_long: 400, name_invalid: 400, birthday_invalid: 400, links_invalid: 400, folder_title: 400, folder_empty: 400, folder_too_many_chats: 400, folder_emoji: 400, folders_limit: 400, unauthorized: 401, not_member: 403, blocked: 403, not_found: 404, code_invalid: 400, code_expired: 400, flood: 429, fresh_session: 403, password_invalid: 400, password_missing: 400, recovery_unavailable: 400, email_invalid: 400, qr_expired: 400, passkey_not_found: 404, passkey_invalid: 400, forbidden: 403 };
 const fail = (code: string) => Response.json({ code }, { status: STATUS[code] ?? 500 });
 
 /** checkedAt — когда сокет последний раз отмечал активность и проверял свой сеанс (domain/sessions.checkSocket). */
@@ -47,7 +49,7 @@ function withCookie(req: Request, res: Response | undefined): Response | undefin
 
 const INLINE_MIME = /^(image\/(jpeg|png|webp|gif|avif)|video\/(mp4|webm|ogg|quicktime)|audio\/(mpeg|mp4|ogg|webm|wav|x-wav|aac|flac))$/;
 
-const API = /^\/(health|me|users|contacts|settings|privacy|blocks|chats|presence|search|upload|files|push|sessions|ws|dev|logout)(\/|$)/;
+const API = /^\/(health|me|users|contacts|settings|privacy|blocks|chats|presence|search|upload|files|push|sessions|ws|dev|logout|auth)(\/|$)/;
 
 /** Статика клиента из WEB_DIST. Путь не может выйти за папку; пути без расширения — SPA, отдаём index.html. */
 function serveStatic(pathname: string): Response {
@@ -81,7 +83,7 @@ export function createServer(opts: { port: number }): Server {
         if (process.env.DEV_LOGIN === '1' && req.method === 'POST' && url.pathname === '/dev/login') {
           const { name, phone } = (await req.json()) as { name: string; phone?: string };
           // dev: вход по имени — существующий пользователь (в т.ч. из сида) или новый
-          const [found] = await sql`select id from users where name = ${String(name ?? '')} order by id limit 1`;
+          const [found] = await sql`select id from users where name = ${String(name ?? '')} and not system order by id limit 1`;
           const userId = found ? (found.id as number) : await createUser(String(name ?? 'user'));
           // dev: телефон нужен только для проверки профиля (SMS-входа нет); занятый номер не мешает входу
           if (typeof phone === 'string') await sql`update users set phone = ${phone} where id = ${userId} and phone is null`.catch(() => {});
@@ -92,9 +94,13 @@ export function createServer(opts: { port: number }): Server {
 
         // публичный ключ VAPID — не секрет
         if (req.method === 'GET' && url.pathname === '/push/key') return Response.json({ key: (await vapidKeys()).publicKey });
+        const pub = await publicAuthRoute(req, url, server);
+        if (pub) return pub;
         const auth = await sessionFromToken(readSessionToken(req));
         if (!auth) return fail('unauthorized');
         const { userId, sessionId } = auth;
+        const priv = await privateAuthRoute(req, url, auth);
+        if (priv) return priv;
         if (auth.refresh) { const t = readSessionToken(req); if (t && req.headers.get('cookie')?.includes('relay_session=')) refreshed.set(req, t); }
 
         if (req.method === 'GET' && url.pathname === '/me') {
@@ -135,6 +141,7 @@ export function createServer(opts: { port: number }): Server {
           return Response.json(await setPrivacy(userId, privacyKey[1], await req.json().catch(() => null), publish));
         }
         if (req.method === 'PUT' && url.pathname === '/settings/sessions-ttl') {
+          await assertConfirmed(sql, sessionId);   // новый срок сразу завершает сеансы: свежий сеанс этого не может
           const res = await setSessionsTtl(userId, await req.json().catch(() => null));
           await sweepInactive(userId).catch((e) => console.error('sessions sweep:', e));   // новый срок короче — старые сеансы уходят сразу
           return Response.json(res);
@@ -145,6 +152,8 @@ export function createServer(opts: { port: number }): Server {
         }
         const sess = /^\/sessions\/(\d{1,15})$/.exec(url.pathname);
         if (sess && req.method === 'DELETE') return Response.json(await terminateSession(userId, sessionId, Number(sess[1])));
+        const confirm = /^\/sessions\/(\d{1,15})\/confirm$/.exec(url.pathname);
+        if (confirm && req.method === 'POST') return Response.json(await confirmSession(userId, sessionId, Number(confirm[1])));
         if (req.method === 'GET' && url.pathname === '/blocks') return Response.json(await listBlocked(userId));
         const block = /^\/blocks\/(\d{1,15})$/.exec(url.pathname);
         if (block && (req.method === 'PUT' || req.method === 'DELETE')) {
@@ -158,7 +167,10 @@ export function createServer(opts: { port: number }): Server {
           const ended = token ? await deleteSession(token) : null;
           // подписка Web Push сеанса ушла каскадом
           // сокеты этого же сеанса в других вкладках закрываются (sessionTerminated)
-          if (ended != null) await sessionEnded(ended).catch((e) => console.error('sessions:', e));
+          if (ended != null) {
+            await sessionEnded(ended).catch((e) => console.error('sessions:', e));
+            await announceSessionsChanged(userId).catch((e) => console.error('sessions:', e));
+          }
           return Response.json({ ok: true }, { headers: { 'set-cookie': clearSessionCookie() } });
         }
         if (url.pathname === '/ws') {

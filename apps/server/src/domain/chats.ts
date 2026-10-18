@@ -1,4 +1,4 @@
-import { normalizeEntities, type Entity, type Message } from '@relay/protocol';
+import { normalizeEntities, type Entity, type Message, type ServiceType } from '@relay/protocol';
 import { sql, type Tx } from '../db';
 import { DomainError } from './errors';
 import { nameForSql } from './profile';
@@ -33,6 +33,7 @@ export function toMessage(r: Record<string, unknown>): Message {
     attachment: r.deleted ? null : ((r.attachment as Message['attachment']) ?? null),
     ...((r.kind === 'voice' || r.kind === 'round') && !r.deleted ? { listened: !!r.listened } : {}),
     // из jsonb — в каноническом виде (порядок ключей у jsonb свой)
+    ...(r.service_type ? { service: { type: r.service_type as ServiceType } } : {}),
     ...(!r.deleted && Array.isArray(r.entities) && r.entities.length ? { entities: normalizeEntities(r.body as string, r.entities) } : {}),
   };
 }
@@ -62,7 +63,7 @@ export type ChatSummary = {
   lastReadId: number;
   unread: number;
   last: Message | null;
-  peer: { id: number; name: string } | null; // собеседник личного чата
+  peer: { id: number; name: string; system?: true } | null; // собеседник личного чата
   peerReadUpTo: number; // до какого id мои сообщения прочитаны всеми остальными участниками
   draft?: { text: string; at: string; entities?: Entity[] } | null; // черновик этого пользователя (синхронизируется между устройствами)
   sortAt?: string; // ключ сортировки списка (последнее сообщение или создание чата) — из него курсор страницы
@@ -86,10 +87,10 @@ export async function listChats(userId: number, opts: ListOpts = {}): Promise<Ch
   const rows = await sql`
     select c.id, c.kind, c.title, c.created_at as chat_created_at, cm.last_read_id,
            lm.id as m_id, lm.chat_id as m_chat_id, lm.sender_id as m_sender_id, lm.client_id as m_client_id,
-           lm.body as m_body, lm.kind as m_kind, lm.attachment as m_attachment, lm.reply_to_id as m_reply_to_id, lm.created_at as m_created_at, lm.edited_at as m_edited_at, lm.deleted as m_deleted, lm.entities as m_entities,
+           lm.body as m_body, lm.kind as m_kind, lm.attachment as m_attachment, lm.reply_to_id as m_reply_to_id, lm.created_at as m_created_at, lm.edited_at as m_edited_at, lm.deleted as m_deleted, lm.entities as m_entities, lm.service_type as m_service_type,
            (select count(*) from messages m
              where m.chat_id = c.id and m.id > cm.last_read_id and m.sender_id <> ${userId})::int as unread,
-           (select json_build_object('id', u.id, 'name', ${nameForSql(userId)})   -- контактное имя — только владельцу
+           (select json_build_object('id', u.id, 'name', ${nameForSql(userId)}, 'system', u.system)   -- контактное имя — только владельцу
               from chat_members pm join users u on u.id = pm.user_id
              where c.kind = 'direct' and pm.chat_id = c.id and pm.user_id <> ${userId} limit 1) as peer,
            (select coalesce(min(om.last_read_id), 0) from chat_members om where om.chat_id = c.id and om.user_id <> ${userId}) as peer_read_up_to,
@@ -112,13 +113,13 @@ export async function listChats(userId: number, opts: ListOpts = {}): Promise<Ch
     title: (r.title as string | null) ?? null,
     lastReadId: r.last_read_id as number,
     unread: r.unread as number,
-    peer: (r.peer as { id: number; name: string } | null) ?? null,
+    peer: r.peer ? { id: (r.peer as { id: number }).id, name: (r.peer as { name: string }).name, ...((r.peer as { system?: boolean }).system ? { system: true as const } : {}) } : null,
     peerReadUpTo: (r.peer_read_up_to as number) ?? 0,
     sortAt: new Date(r.sort_at as string).toISOString(),
     draft: r.draft ? { text: (r.draft as { text: string }).text, at: new Date((r.draft as { at: string }).at).toISOString(), ...((r.draft as { entities?: Entity[] | null }).entities?.length ? { entities: normalizeEntities((r.draft as { text: string }).text, (r.draft as { entities: Entity[] }).entities) } : {}) } : null,
     last: r.m_id == null ? null : toMessage({
       id: r.m_id, chat_id: r.m_chat_id, sender_id: r.m_sender_id, client_id: r.m_client_id,
-      body: r.m_body, kind: r.m_kind, attachment: r.m_attachment, reply_to_id: r.m_reply_to_id, created_at: r.m_created_at, edited_at: r.m_edited_at, deleted: r.m_deleted, entities: r.m_entities,
+      body: r.m_body, kind: r.m_kind, attachment: r.m_attachment, reply_to_id: r.m_reply_to_id, created_at: r.m_created_at, edited_at: r.m_edited_at, deleted: r.m_deleted, entities: r.m_entities, service_type: r.m_service_type,
     }),
   }));
 }

@@ -72,6 +72,16 @@ test('message bodies are truncated to 40 chars, one level into items/message/res
   expect(trimBodies(short)).toBe(short);   // нечего резать — без копии
 });
 
+test('login_code bodies are logged with digits hidden; other messages keep theirs', () => {
+  const code = { body: 'Код для входа в Relay: 12345', service: { type: 'login_code' } };
+  const plain = { body: 'встреча в 12345', service: undefined };
+  const out = trimBodies({ items: [code, plain], message: code }) as Record<string, any>;
+  expect(out.items[0].body).toBe('Код для входа в Relay: •••••');
+  expect(out.items[1].body).toBe('встреча в 12345');
+  expect(out.message.body).not.toContain('12345');
+  expect((trimBodies(code) as { body: string }).body).not.toContain('12345');
+});
+
 test('updates are summarized (from, to, count, types) and replies get request → response latency', async () => {
   const log = new DevLog();
   log.frameOut({ op: 'sync', since: 10 }, 20);
