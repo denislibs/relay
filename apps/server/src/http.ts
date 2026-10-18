@@ -1,4 +1,5 @@
 import { MEDIA_TABS, parseClientFrame, type MediaTab } from '@relay/protocol';
+import { getPreview, normalizeUrl } from './domain/linkPreview';
 import { searchMedia, searchPeople, topPeers } from './domain/globalSearch';
 import { createBus } from './bus';
 import { clientIp } from './device';
@@ -301,6 +302,11 @@ export function createServer(opts: { port: number }): Server {
         }
         if (req.method === 'GET' && url.pathname === '/users') {
           return Response.json({ users: await usersByIds(userId, (url.searchParams.get('ids') ?? '').split(',').map(Number)) });
+        }
+        if (req.method === 'GET' && url.pathname === '/link-preview') {
+          // превью ссылки для поля ввода (до отправки): тот же кэш, что и у сообщений; нет превью — { link: null }
+          const u = normalizeUrl(url.searchParams.get('url') ?? '');
+          return Response.json({ link: u ? await getPreview(u) : null });
         }
         if (req.method === 'GET' && url.pathname === '/presence') {
           return Response.json(await listPresence(userId));

@@ -6,6 +6,7 @@ import { sweepInactive } from '../domain/sessions';
 import { deliverPush, planPush, type PushMessage, type PushPayload } from '../domain/push';
 import { reindexStep, syncMessage } from '../search/messagesIndex';
 import { register } from './handlers';
+import { applyLinkPreview } from '../domain/messages';
 import { enqueue } from './queue';
 
 // новое сообщение → по задаче на подписку: повтор одной не шлёт остальным второй раз
@@ -51,4 +52,9 @@ register('search.reindex', async (p: { batch?: number; maxBatches?: number }) =>
 register('uploads.sweep', async () => {
   await sweepPendingUploads();
   return { again: { inSec: SWEEP_EVERY_SEC } };
+});
+
+// превью ссылки: страница грузится вне отправки — сообщение уже в ленте, превью дорисуется
+register('link.preview', async (p: { chatId: number; id: number; url: string }) => {
+  await applyLinkPreview(p);
 });
