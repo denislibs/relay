@@ -1,4 +1,4 @@
-import type { ClientFrame, Me, SettingsSnapshot, Message, PublicUser, ServerFrame } from '@relay/protocol';
+import type { ClientFrame, JournalEntry, Me, SettingsSnapshot, Message, PublicUser, ServerFrame } from '@relay/protocol';
 import { Blocks } from './blocks';
 import { Contacts } from './contacts';
 import { delBlob, getAll, getBlob, getByChat, openDb, putBlob, write } from './idb';
@@ -26,6 +26,15 @@ type SyncReply = Extract<ServerFrame, { op: 'updates' | 'tooLong' }>;
  * отправляет очередь, схлопывает прочтение и раздаёт подпискам патчи раз в кадр.
  */
 const HISTORY_GATE_MS = 400;
+
+/** Чаты, где пачка журнала правит уже существующие сообщения (правка, удаление, реакции, «прослушано»). */
+function patchedChats(items: JournalEntry[], after: number): Set<number> {
+  const out = new Set<number>();
+  for (const { seq, update: u } of items) {
+    if (seq > after && (u.type === 'messageEdited' || u.type === 'messageDeleted' || u.type === 'reactions' || u.type === 'mediaListened')) out.add(u.chatId);
+  }
+  return out;
+}
 
 export class Engine {
   private transport: WsTransport;
@@ -877,6 +886,9 @@ export class Engine {
             if (gap) break; // seq сервера неизвестен — не крутимся, ждём следующего poke
             continue;
           }
+          // правка/удаление/реакция меняют сообщение на месте: чат, не открытый с запуска, сначала читаем из кэша,
+          // иначе изменение потеряется, а lastSeq уйдёт дальше — и в кэше навсегда останется старая копия
+          for (const chatId of patchedChats(f.items, this.store.lastSeq)) await this.store.loadChatMessages(chatId);
           for (const it of f.items) {
             if (it.seq <= this.store.lastSeq) continue;
             this.store.applyUpdate(it.update, it.seq);
