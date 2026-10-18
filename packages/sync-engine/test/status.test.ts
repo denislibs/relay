@@ -152,6 +152,31 @@ test('dialogs load in pages: first page + every unread chat, then more on demand
   expect(list.list().map((c) => c.id)).toEqual([...ids].reverse());
 });
 
+test('opening a chat beyond the loaded dialog pages fetches just that chat, its history and peer', async () => {
+  const a = await srv.login('Анна'), b = await srv.login('Борис'), c = await srv.login('Вера');
+  const deep = await srv.chat(a.token, [a.userId, b.userId]);           // самый старый — за пределами первой страницы
+  await sendMessage(a.userId, { chatId: deep, clientId: crypto.randomUUID(), body: 'давно' });
+  for (let i = 0; i < 4; i++) {
+    const id = await srv.chat(a.token, [a.userId, c.userId]);
+    await sendMessage(a.userId, { chatId: id, clientId: crypto.randomUUID(), body: 'm' + i });
+  }
+  for (const cold of [false, true]) {                                     // лента открыта после снимка и до него
+    const ea = await open({ ...srv.config(a), dialogsPage: 2 });
+    const list = watchInto(ea, { kind: 'chatList', limit: 100 });
+    const st = watchInto(ea, { kind: 'status' });
+    if (!cold) { ea.connect(); await st.until((l) => l[0]?.synced === true); }
+    const feed = watchInto(ea, { kind: 'messages', chatId: deep, limit: 30 });
+    if (cold) ea.connect();
+    await list.until((l) => l.some((x) => x.id === deep && x.title === 'Борис' && x.peerId === b.userId));
+    await feed.until((l) => l.length === 1 && l[0].body === 'давно');
+    expect(list.list()).toHaveLength(3);                                    // страница из двух + открытый, остальные не тянули
+    expect(st.list()[0].chatsComplete).toBe(false);                         // курсор страниц не сдвинут
+    expect(Date.parse(list.list().find((x) => x.id === deep)!.lastAt as string)).toBeLessThan(st.list()[0].chatsCursorAt as number);
+    await ea.close();
+    engines.splice(engines.indexOf(ea), 1);
+  }
+});
+
 test('drafts: saved per chat, lift the chat in the list, survive a restart, cleared on send', async () => {
   const a = await srv.login('a'), b = await srv.login('b');
   const older = await srv.chat(a.token, [a.userId, b.userId]);

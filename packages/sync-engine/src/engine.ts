@@ -54,6 +54,7 @@ export class Engine {
   private pumping = false;
   private busy = 0;
   private historyLoads = new Map<number, Promise<void>>();
+  private chatLoads = new Map<number, Promise<void>>();   // точечная подгрузка открытого чата вне загруженных страниц
   private lastCreated = 0;
   private closed = false;
   private statusSig = '';
@@ -250,7 +251,8 @@ export class Engine {
     this.run(async () => {
       try {
         await this.store.loadChatMessages(chatId);
-        const history = this.ensureWindow(q);
+        // чат вне загруженных страниц (ссылка #chat=N): сначала он сам, иначе ни шапки, ни истории
+        const history = this.ensureOpenChat(chatId).catch(() => {}).then(() => this.ensureWindow(q));
         if (this.online && w.gated) await Promise.race([history.catch(() => {}), new Promise((r) => setTimeout(r, HISTORY_GATE_MS))]);
         open();
         await history;
@@ -875,6 +877,7 @@ export class Engine {
       this.flushReads();
       this.pushDrafts();
       if (this.store.unnamed().length) this.refreshList();
+      this.loadOpenChats();
       if (!this.presenceFetched) this.fetchPresence();
       this.ops.resume();
       this.fetchUsers();
@@ -919,6 +922,37 @@ export class Engine {
       }
     })();
     return this.moreChats;
+  }
+
+  /**
+   * Открытый чат, которого нет среди загруженных страниц диалогов (ссылка #chat=N, глубоко в списке): подтянуть
+   * только его. Ждём снимка — applyChats на пустом кэше отметил бы его загруженным и сорвал bootstrap; без сети
+   * и до снимка догрузит loadOpenChats после синхронизации. Строка в «Все» не всплывает: список показывает
+   * только непрерывный диапазон до курсора страниц, а чат старше курсора.
+   */
+  private ensureOpenChat(chatId: number): Promise<void> {
+    if (this.store.chats.get(chatId)?.named || !this.store.hydrated || !this.online) return Promise.resolve();
+    let p = this.chatLoads.get(chatId);
+    if (!p) {
+      p = (async () => {
+        const list = await this.http<ChatSummary[]>(`/chats?ids=${chatId}`);
+        if (!list.length) return;   // нет доступа или чата нет — шапка останется «Чат №N»
+        this.store.applyChats(list);
+        await this.store.flush();
+        this.changed();
+      })().finally(() => this.chatLoads.delete(chatId));
+      this.chatLoads.set(chatId, p);
+    }
+    return p;
+  }
+
+  /** После синхронизации: ленты, открытые до снимка или без сети, получают свой чат и историю. */
+  private loadOpenChats(): void {
+    for (const w of this.watchers.values()) {
+      const q = w.q;
+      if (q.kind !== 'messages' || this.store.chats.get(q.chatId)?.named) continue;
+      this.run(() => this.ensureOpenChat(q.chatId).then(() => this.ensureWindow(q)));
+    }
   }
 
   /** Сообщение пришло в чат, которого не было в снимке: подтянуть названия и собеседников. */
