@@ -14,6 +14,8 @@ import { activeFrame, setGlobal, useGlobal } from '../global';
 import { birthdayText, lastSeenText, type Birthday } from './format';
 import { showToast, useUser } from '../settingsData';
 import { EditContactPanel } from './contacts/EditContact';
+import type { ProfilePhoto } from '@relay/protocol';
+import { avatarPhoto } from '../profilePhoto';
 
 const PAGES = ['info', 'edit'];   // «Изменить контакт» выезжает внутри панели справа налево
 const close = () => setGlobal({ infoOpen: false });
@@ -76,7 +78,7 @@ export function Info() {
       <div class="rl-aside-body">
         <div class="rl-profile">
           <div class="app-prof-ava">
-            <Avatar name={title} tone={chatTone(chat)} size={120} logo={system} />
+            <Avatar name={title} tone={chatTone(chat)} size={120} logo={system} {...avatarPhoto(chat?.photo as ProfilePhoto | null, true)} />
             {peerId ? <ProfileMusicPill userId={peerId} /> : null}
           </div>
           <div class="rl-profile-name">{title}{system ? <Verified size={22} /> : null}</div>

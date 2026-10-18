@@ -15,6 +15,8 @@ import { showToast, unblockUser, useUser } from '../settingsData';
 import { Feed } from './Feed';
 import { chatKindFor, mediaPolicy } from '../autoload';
 import { chatTime, chatTone, fileSize, isSystemChat, lastSeenText, shownBody, snippet } from './format';
+import type { ProfilePhoto } from '@relay/protocol';
+import { avatarPhoto } from '../profilePhoto';
 
 
 const NO_MESSAGES: Item[] = [];
@@ -255,7 +257,7 @@ export function Chat({ chatId, frameKey, active }: { chatId: number; frameKey: s
         {/* поверх другого чата — «Назад» к нему (и на широком экране), нижний — к списку на узком */}
         <IconButton class={depth > 1 ? 'app-back app-back-inner' : 'app-back'} icon="arrowLeft" label={depth > 1 ? 'Назад' : 'К списку чатов'} onClick={closeChat} />
         <button type="button" class="rl-glassbar-who" aria-label="Информация о чате" onClick={() => setGlobal({ infoOpen: !infoOpen })}>
-          <Avatar name={title} tone={chatTone(chat)} size={40} logo={system} />
+          <Avatar name={title} tone={chatTone(chat)} size={40} logo={system} {...avatarPhoto(chat?.photo as ProfilePhoto | null)} />
           <span class="rl-glassbar-title">
             <b>{title}{system ? <Verified size={16} /> : null}</b>
             <span key={phaseLabel ?? (isTyping ? 'typing' : online ? 'on' : 'off')} class={phaseLabel ? 'app-phase' : isTyping || online ? 'app-online' : undefined}>{phaseLabel ?? (subtitle || '\u00a0')}</span>

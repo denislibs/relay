@@ -39,6 +39,12 @@ body { margin: 0; font-family: var(--font-sans); color: var(--ink); background: 
 .rl-avatar { position: relative; display: inline-flex; align-items: center; justify-content: center; flex-shrink: 0; border-radius: 50%; background: var(--avatar-bg); color: var(--avatar-fg); font-weight: 600; overflow: visible; user-select: none; }
 .rl-avatar img { width: 100%; height: 100%; border-radius: 50%; object-fit: cover; }
 .rl-avatar-logo { --logo-ink: #0b8a5f; background: linear-gradient(145deg, #2fd38a, #0f9d7a 55%, #0c7f86); box-shadow: inset 0 0 0 1px rgba(255,255,255,.12); }
+/* фото: инициалы под ним, размытое превью поверх, само фото проявляется по загрузке (из кэша — сразу) */
+.rl-avatar-thumb, .rl-avatar > .rl-avatar-img { position: absolute; inset: 0; border-radius: 50%; }
+.rl-avatar-thumb { background: center / cover no-repeat; filter: blur(3px); clip-path: circle(50%); }   /* clip-path режет уже размытое — без ореола за кругом */
+.rl-avatar > .rl-avatar-img { width: 100%; height: 100%; object-fit: cover; opacity: 0; transition: opacity 180ms ease; }
+.rl-avatar > .rl-avatar-img.is-ready { opacity: 1; }
+.rl-avatar > .rl-avatar-img.is-instant { transition: none; }
 .rl-avatar-dot { position: absolute; right: 0; bottom: 0; width: 28%; height: 28%; min-width: 10px; min-height: 10px; border-radius: 50%; background: var(--brand); box-shadow: 0 0 0 2px var(--bg); }
 
 /* ---------- Badge ---------- */
@@ -1704,3 +1710,21 @@ html[data-blur="0"] .rl-menu, html[data-blur="0"] .rl-attach { -webkit-backdrop-
 .rl-media-mosaic { position: relative; }
 .rl-media-tile { position: absolute; overflow: hidden; }
 .rl-media-tile > .rl-media-cell { position: absolute; inset: 0; border-radius: 0; }
+
+/* ---------- Фото профиля: кнопка-аватар с камерой и окно обрезки ---------- */
+.rl-profile-ava { position: relative; display: inline-flex; padding: 0; border: 0; background: none; border-radius: 50%; cursor: pointer; margin-bottom: var(--space-3); }
+.rl-profile-ava .rl-avatar { margin-bottom: 0; }
+.rl-profile-ava-cam { position: absolute; inset: 0; display: grid; place-items: center; border-radius: 50%; color: #fff; background: rgba(0, 0, 0, .32); opacity: 0; transition: opacity 160ms ease, transform 160ms ease; transform: scale(.96); }
+.rl-profile-ava:hover .rl-profile-ava-cam, .rl-profile-ava:focus-visible .rl-profile-ava-cam { opacity: 1; transform: none; }
+.rl-profile-ava.is-busy .rl-profile-ava-cam { opacity: 1; background: rgba(0, 0, 0, .4); }
+.rl-profile-ava-ring { position: absolute; inset: -4px; width: calc(100% + 8px); height: calc(100% + 8px); animation: rl-spin 1s linear infinite; pointer-events: none; }
+.rl-profile-ava-ring circle { fill: none; stroke: var(--brand); stroke-width: 3; stroke-linecap: round; stroke-dasharray: 90 300; }
+.rl-crop-modal .rl-mdl-body { display: flex; flex-direction: column; align-items: center; gap: 14px; }
+.rl-crop { position: relative; overflow: hidden; border-radius: 12px; background: #111; touch-action: none; cursor: grab; user-select: none; }
+.rl-crop:active { cursor: grabbing; }
+.rl-crop img { position: absolute; left: 0; top: 0; max-width: none; transform-origin: 0 0; will-change: transform; pointer-events: none; }
+.rl-crop.is-loading img { opacity: 0; }
+/* всё вне круга притемнено; тонкая светлая окружность — граница будущей аватарки */
+.rl-crop-mask { position: absolute; inset: 0; pointer-events: none; border-radius: 50%; box-shadow: 0 0 0 9999px rgba(0, 0, 0, .55), inset 0 0 0 1.5px rgba(255, 255, 255, .7); }
+.rl-crop-zoom { width: min(100%, 280px); accent-color: var(--brand); }
+.rl-crop-hint { margin: 0; color: var(--ink-2, var(--muted)); font-size: 13px; text-align: center; }

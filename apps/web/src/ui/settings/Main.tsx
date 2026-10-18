@@ -10,6 +10,7 @@ import { setPref } from '../../prefs';
 import { dropSubscription } from '../../notify';
 import { birthdayText } from '../format';
 import { useScrollMemory } from '../useScrollMemory';
+import { usePhotoPicker } from './usePhotoPicker';
 
 declare const __BUILD__: string;
 
@@ -48,6 +49,7 @@ async function logout(): Promise<boolean> {
 
 export function Main() {
   const me = useGlobal((s) => s.me)!;
+  const photo = usePhotoPicker(me.photo);
   const status = useGlobal((s) => s.status);
   // число сеансов справа на строке «Активные сеансы»: появляется, только когда список уже известен (предзагрузка)
   const sessionCount = useGlobal((s) => (s.sessions ? sessionsView(s.sessions, s.opsKeys).length : null));
@@ -111,7 +113,8 @@ export function Main() {
         </div>
       </Presence>
       <div class="rl-settings" ref={scroll.ref} onScroll={scroll.onScroll}>
-        <ProfileHeader name={me.name} tone={peerTone(me.userId)} subtitle={status.phase === 'offline' ? 'нет сети' : 'в сети'} size={96} />
+        <ProfileHeader name={me.name} tone={peerTone(me.userId)} subtitle={status.phase === 'offline' ? 'нет сети' : 'в сети'} size={96} {...photo.avatar} />
+        {photo.ui}
         <ProfileLinks links={links} />
         {hasInfo ? (
           <Section>

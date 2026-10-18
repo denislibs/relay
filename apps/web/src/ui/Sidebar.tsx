@@ -19,6 +19,10 @@ import { Button } from '@relay/ui';
 import { toggleMuted } from './Info';
 import { seen } from '../data';
 import { getGlobal } from '../global';
+import type { ProfilePhoto } from '@relay/protocol';
+import { avatarPhoto } from '../profilePhoto';
+
+const rowPhoto = (p: ProfilePhoto | null) => { const a = avatarPhoto(p); return { avatarSrc: a.src, avatarThumb: a.thumb }; };
 
 
 /** Фрагмент вокруг совпадения: превью узкое, а совпадение может быть в конце длинного сообщения. */
@@ -61,6 +65,7 @@ const SideRow = memo(function SideRow({ c, meId, active, showDraft, muted, onMen
     <ChatRow
       name={(c.title as string) || 'Чат №' + c.id}
       avatarTone={chatTone(c)}
+      {...rowPhoto(c.photo as ProfilePhoto | null)}
       logo={isSystemChat(c)}
       verified={isSystemChat(c)}
       author={author}
@@ -230,7 +235,7 @@ export function Sidebar() {
                 onClose={() => setMenu(false)}
                 header={
                   <button type="button" role="menuitem" class="rl-menu-item app-menu-profile" onClick={() => { setMenu(false); void go('settings'); }}>
-                    <Avatar name={me.name} tone={peerTone(me.userId)} size={32} /><span>{me.name}</span>
+                    <Avatar name={me.name} tone={peerTone(me.userId)} size={32} {...avatarPhoto(me.photo)} /><span>{me.name}</span>
                   </button>
                 }
                 items={[

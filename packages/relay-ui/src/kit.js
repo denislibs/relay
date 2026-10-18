@@ -269,16 +269,21 @@ function Avatar(props) {
       h(RelayLogo, { size: Math.round(size * 0.62) }));
   }
   var tone = props.tone != null ? props.tone : props.name ? nameTone(String(props.name)) : null;
+  // фото: под ним инициалы и размытое превью (thumb), само фото проявляется, когда загрузилось, —
+  // из кэша сразу, без мигания; ошибка загрузки — остаются превью/инициалы
   return h('span', {
-    class: cx('rl-avatar', tone != null && !props.src && 'rl-avatar-tone', (props.className || props.class)),
+    class: cx('rl-avatar', tone != null && 'rl-avatar-tone', props.src && 'rl-avatar-photo', (props.className || props.class)),
     style: { width: size, height: size, fontSize: Math.round(size * 0.36), '--avatar-tone': tone != null ? 'var(--peer-' + tone + '-fill)' : undefined },
     role: 'img', 'aria-label': props.name || 'Аватар'
   },
-    props.src ? h('img', { src: props.src, alt: '' })
-      : props.name ? initials(props.name)
-        : h(Icon, { name: 'community', size: Math.round(size * 0.5) }),
+    props.name ? initials(props.name) : props.src ? null : h(Icon, { name: 'community', size: Math.round(size * 0.5) }),
+    props.src && props.thumb ? h('span', { class: 'rl-avatar-thumb', style: { backgroundImage: 'url("' + props.thumb + '")' }, 'aria-hidden': 'true' }) : null,
+    props.src ? h('img', { key: props.src, class: 'rl-avatar-img', src: props.src, alt: '', decoding: 'async', draggable: false, ref: avatarImgReady, onLoad: avatarImgLoad }) : null,
     props.online ? h('span', { class: 'rl-avatar-dot', 'aria-hidden': 'true' }) : null);
 }
+// уже в кэше браузера — показать сразу (без перехода), иначе — по onLoad с плавным проявлением
+function avatarImgReady(el) { if (el && el.complete && el.naturalWidth) el.classList.add('is-instant', 'is-ready'); }
+function avatarImgLoad(e) { e.currentTarget.classList.add('is-ready'); }
 
 /* ---------- Badge ---------- */
 function Badge(props) {
@@ -360,7 +365,7 @@ function ChatRow(props) {
   return h('button', Object.assign({ type: 'button' }, rest, { onPointerDown: chain(rest.onPointerDown, ripple),
     class: cx('rl-row', (props.className || props.class)), 'aria-current': props.active ? 'true' : undefined
   }),
-    h(Avatar, { name: props.avatar === undefined ? props.name : props.avatar, tone: props.avatarTone, online: props.online, logo: props.logo }),
+    h(Avatar, { name: props.avatar === undefined ? props.name : props.avatar, tone: props.avatarTone, online: props.online, logo: props.logo, src: props.avatarSrc, thumb: props.avatarThumb }),
     h('span', { class: 'rl-row-main' },
       h('span', { class: 'rl-row-top' },
         props.verified
@@ -1016,7 +1021,12 @@ function PanelHeader(props) {
 }
 function ProfileHeader(props) {
   return h('div', { class: 'rl-profile' },
-    h(Avatar, { name: props.name, src: props.src, tone: props.tone, size: props.size || 120 }),
+    props.onAvatar
+      ? h('button', { type: 'button', class: cx('rl-profile-ava', props.busy && 'is-busy'), 'aria-label': props.avatarLabel || 'Изменить фото', onClick: props.onAvatar },
+          h(Avatar, { name: props.name, src: props.src, thumb: props.thumb, tone: props.tone, size: props.size || 120 }),
+          h('span', { class: 'rl-profile-ava-cam', 'aria-hidden': 'true' }, h(Icon, { name: 'camera', size: Math.round((props.size || 120) * 0.3) })),
+          props.busy ? h('svg', { class: 'rl-profile-ava-ring', viewBox: '0 0 100 100', 'aria-hidden': 'true' }, h('circle', { cx: 50, cy: 50, r: 48 })) : null)
+      : h(Avatar, { name: props.name, src: props.src, thumb: props.thumb, tone: props.tone, size: props.size || 120 }),
     h('div', { class: 'rl-profile-name' }, props.name),
     h('div', { class: 'rl-profile-sub' }, props.subtitle, props.accent ? [' · ', h('b', { key: 'a' }, props.accent)] : null),
     props.actions ? h('div', { class: 'rl-profile-actions' }, props.actions) : null);

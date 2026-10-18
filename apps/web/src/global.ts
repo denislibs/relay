@@ -1,4 +1,4 @@
-import type { ProfileLink } from '@relay/protocol';
+import type { ProfileLink, ProfilePhoto } from '@relay/protocol';
 import type { NotifyState } from './notify';
 import { options } from 'preact';
 import { useEffect, useRef, useState } from 'preact/hooks';
@@ -30,7 +30,7 @@ export interface ChatFrame {
 }
 
 /** Свой профиль (GET /me, дальше — подписка me движка). Поля опциональны: старый кэш relay.me их не знает. */
-export interface Me { userId: number; name: string; firstName?: string; lastName?: string; username?: string | null; bio?: string | null; birthday?: { day: number; month: number; year?: number } | null; phone?: string | null; links?: ProfileLink[] }
+export interface Me { userId: number; name: string; firstName?: string; lastName?: string; username?: string | null; bio?: string | null; birthday?: { day: number; month: number; year?: number } | null; phone?: string | null; links?: ProfileLink[]; photo?: ProfilePhoto | null }
 export type Phase = 'connecting' | 'offline' | 'loading' | 'updating' | 'ready';
 export interface Status { phase: Phase; hydrated: boolean; chatsComplete?: boolean; chatsCursorAt?: number; online: boolean; synced: boolean; syncing: boolean; outbox: number; failed: number; sessionsRev?: number; terminated?: boolean; terminatedReason?: 'logout' | 'terminated' }   // terminated — сеанс завершён (B9)
 

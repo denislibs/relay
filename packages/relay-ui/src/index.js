@@ -23,3 +23,4 @@ export * from './media/roundBubble.js';
 export * from './sticker.js';
 export * from './modal.js';
 export * from './calendar.js';
+export * from './avatarCrop.js';

@@ -1,4 +1,5 @@
 import { Button, ConfirmDialog, Fab, InfoRow, Modal, PanelHeader, Presence, ProfileHeader, Section, SelectRow, TextField, peerTone } from '@relay/ui';
+import { usePhotoPicker } from './usePhotoPicker';
 import { useEffect, useRef, useState } from 'preact/hooks';
 import { useGlobal, type Me } from '../../global';
 import { back, go, setLeaveGuard } from '../../nav';
@@ -72,6 +73,9 @@ export function Profile() {
   const ok = canSave(me, form, status);
   const set = (patch: Partial<ProfileForm>) => setForm((f) => ({ ...f, ...patch }));
 
+  const photo = usePhotoPicker(me.photo);
+  const [askDelete, setAskDelete] = useState(false);
+
   // профиль поменялся снаружи (другая вкладка/устройство), а здесь правок нет — показываем свежий
   const dirtyRef = useRef(dirty);
   dirtyRef.current = dirty;
@@ -114,7 +118,8 @@ export function Profile() {
     <div class="rl-sidepage" aria-label="Изменить профиль">
       <PanelHeader icon="arrowLeft" closeLabel="Назад" title="Изменить профиль" onClose={() => void back()} />
       <div class="rl-settings app-profile-form">
-        <ProfileHeader name={name} tone={peerTone(me.userId)} size={96} />
+        <ProfileHeader name={name} tone={peerTone(me.userId)} size={96} {...photo.avatar} />
+        {photo.ui}
         <Section>
           <TextField label="Имя" value={form.firstName} maxLength={NAME_MAX} measure={cpLen} error={form.firstName.trim() ? undefined : dirty ? 'Укажите имя' : undefined} onInput={limited('firstName', NAME_MAX)} autoComplete="given-name" />
           <TextField label="Фамилия" value={form.lastName} maxLength={NAME_MAX} measure={cpLen} onInput={limited('lastName', NAME_MAX)} autoComplete="family-name" />
@@ -132,10 +137,15 @@ export function Profile() {
           <InfoRow tile="purple" icon="cake" title={form.birthday ? birthdayText(form.birthday) : 'Не указан'} subtitle="День рождения" onClick={() => setBday(true)} />
           <InfoRow tile="blue" icon="link" title="Ссылки" subtitle={linksText(me.links?.length ?? 0)} onClick={() => void go('settings/profile/links')} />
         </Section>
+        <Section>
+          <InfoRow icon="camera" title={photo.has ? 'Сменить фото' : 'Поставить фото'} onClick={photo.pick} />
+          {me.photo && !photo.busy ? <InfoRow icon="trash" danger title="Удалить фото" onClick={() => setAskDelete(true)} /> : null}
+        </Section>
       </div>
       <Presence show={dirty && ok} exitMs={200}>
         <div class="rl-fab-slot"><Fab icon="check" label="Сохранить" onClick={save} /></div>
       </Presence>
+      <ConfirmDialog open={askDelete} danger title="Удалить фото?" text="Вместо фото снова будут инициалы." confirm="Удалить" cancel="Отмена" onCancel={() => setAskDelete(false)} onConfirm={() => { setAskDelete(false); photo.remove(); }} />
       {bday ? <BirthdayModal value={form.birthday} onClose={() => setBday(false)} onSave={(b) => { set({ birthday: b }); setBday(false); }} /> : null}
       <ConfirmDialog open={!!ask} danger title="Сбросить изменения?" text="Несохранённые изменения профиля пропадут." confirm="Сбросить" cancel="Отмена" onCancel={() => answer(false)} onConfirm={() => answer(true)} />
     </div>
