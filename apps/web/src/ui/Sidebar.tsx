@@ -9,7 +9,7 @@ import { memo } from 'preact/compat';
 import type { SearchHit } from '@relay/sync-engine/src/types';
 import { go } from '../nav';
 import { isDark } from '../theme';
-import { chatTime, chatTone, shownBody, snippet } from './format';
+import { chatTime, chatTone, isSystemChat, shownBody, snippet } from './format';
 import { applyTheme as setTheme } from '../theme';
 import { previewBody, previewText, previewThumb, type LastMessage } from './preview';
 import { toggleMuted } from './Info';
@@ -51,6 +51,8 @@ const SideRow = memo(function SideRow({ c, meId, active, showDraft, muted, onMen
     <ChatRow
       name={(c.title as string) || 'Чат №' + c.id}
       avatarTone={chatTone(c)}
+      logo={isSystemChat(c)}
+      verified={isSystemChat(c)}
       author={author}
       thumb={thumb}
       preview={last ? previewBody(last, !!thumb) : 'Нет сообщений'}

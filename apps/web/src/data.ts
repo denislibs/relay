@@ -42,7 +42,7 @@ export function startData(me: Me): void {
       const last = c.last as { id: number | null; senderId: number; body: string; kind?: string; attachment?: { name: string } | null; createdAt: string; service?: { type: string } } | null;
       if (!last?.id || last.senderId === me.userId || last.id <= (before.get(c.id as number) ?? 0)) continue;
       if (c.id === getGlobal().openChatId && document.visibilityState === 'visible') continue;
-      notifyIncoming({ id: c.id as number, title: (c.title as string) || 'Чат №' + c.id, muted: getGlobal().muted.includes(c.id as number) },
+      notifyIncoming({ id: c.id as number, title: (c.title as string) || 'Чат №' + c.id, muted: getGlobal().muted.includes(c.id as number), system: isSystemChat(c) },
         { id: last.id, body: hideSpoilers(last.body, (last as { entities?: Entity[] }).entities), kind: last.kind, attachmentName: last.attachment?.name, createdAt: last.createdAt, service: last.service });
     }
     // сразу, не дожидаясь конца анимаций: список виртуальный (≈20 строк), а отложенный подъём чата

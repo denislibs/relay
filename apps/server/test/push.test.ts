@@ -242,7 +242,9 @@ test('service push: login_code is masked, new_login keeps its text', async () =>
   pushService(code);
   await waitFor(1); await Bun.sleep(100);
   expect(got.length).toBe(1);
-  expect((await br.decrypt(got[0].body)).body).toBe('Код для входа в Relay');
+  const first = await br.decrypt(got[0].body);
+  expect(first.body).toBe('Код для входа в Relay');
+  expect(first.system).toBe(true);   // SW покажет знак Relay иконкой
 
   const login = await sql.begin((tx) => postService(tx, a, { type: 'new_login', body: 'Новый вход' }));
   pushService(login);

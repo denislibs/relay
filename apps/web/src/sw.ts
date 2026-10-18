@@ -75,14 +75,17 @@ sw.addEventListener('fetch', (e) => {
   );
 });
 
+/** Иконка уведомлений служебного чата Relay (официальный аккаунт). */
+const SYSTEM_ICON = '/relay-logo-192.png';
+
 // Web Push: сервер шлёт, когда у пользователя нет ни одной живой вкладки. Окно в фокусе — не мешаем.
 sw.addEventListener('push', (e) => {
-  const d = (() => { try { return e.data?.json() as { chatId: number; id: number; title: string; body: string }; } catch { return null; } })();
+  const d = (() => { try { return e.data?.json() as { chatId: number; id: number; title: string; body: string; system?: boolean }; } catch { return null; } })();
   if (!d) return;
   e.waitUntil((async () => {
     const wins = await sw.clients.matchAll({ type: 'window', includeUncontrolled: true });
     if (wins.some((w) => (w as WindowClient).focused)) return;
-    await sw.registration.showNotification(d.title, { body: d.body, tag: 'chat-' + d.chatId, data: { chatId: d.chatId } });
+    await sw.registration.showNotification(d.title, { body: d.body, tag: 'chat-' + d.chatId, data: { chatId: d.chatId }, ...(d.system ? { icon: SYSTEM_ICON } : {}) });
   })());
 });
 
