@@ -95,7 +95,9 @@ test('no live session: the stored hash is unmatchable outside dev', async () => 
   process.env.DEV_LOGIN = '0';
   try {
     const r = await requestCode('@zhora_x');
-    expect(r.via).toBe('none');
+    const ghost = await requestCode('@nobody_y');
+    expect(Object.keys(r).sort()).toEqual(Object.keys(ghost).sort());   // ответ тот же, что у неизвестного логина
+    expect(r).toMatchObject({ via: 'app', length: 5 });
     expect(r.devCode).toBeUndefined();
     for (let c = 0; c < 200; c++) await signIn(r.attemptId, String(c).padStart(5, '0')).catch(() => {});
     const [row] = await sql`select dead_at from login_attempts where id = ${r.attemptId}`;

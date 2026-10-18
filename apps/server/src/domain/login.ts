@@ -32,11 +32,12 @@ const MAX_WRONG_PER_HOUR = 15, MAX_PER_IP_HOUR = 30;
  * Попытка входа: код уходит в служебный чат на устройства, где аккаунт уже открыт.
  * Неизвестный логин отвечает так же: попытка записывается на системного пользователя со случайным хэшем,
  * её код не совпадёт никогда — по ответам нельзя понять, есть ли такой аккаунт (лимит тоже по строке логина).
- * via 'none' — открытых сеансов нет, код доставить некуда (SMS в Relay нет), хэш неугадываемый (кроме DEV_LOGIN).
+ * via всегда 'app': нет открытых сеансов — отвечаем так же, но код никому не доставляется и хэш неугадываемый
+ * (кроме DEV_LOGIN: там реальный хэш и devCode) — иначе ответ выдавал бы, есть ли аккаунт и открыт ли он.
  * Попытки не удаляются при использовании (dead_at) — иначе «запрос → 5 неверных → запрос» обходил бы часовой лимит.
  * ip — адрес запроса; null (вызов изнутри процесса) — без лимита по адресу.
  */
-export async function requestCode(login: string, ip: string | null = null): Promise<{ attemptId: string; via: 'app' | 'none'; length: 5; devCode?: string }> {
+export async function requestCode(login: string, ip: string | null = null): Promise<{ attemptId: string; via: 'app'; length: 5; devCode?: string }> {
   const attemptId = crypto.randomUUID();
   const key = normalize(login);
   const userId = await findUser(login);
@@ -44,7 +45,7 @@ export async function requestCode(login: string, ip: string | null = null): Prom
   const dev = process.env.DEV_LOGIN === '1';
   // запись без привязки к человеку: неавторизованный вызов не должен копить строки бесконечно (час нужен лимитам)
   await sql`delete from login_attempts where created_at < now() - interval '1 day'`;
-  let posted: Message | null = null, code = '', via: 'app' | 'none' = 'app';
+  let posted: Message | null = null, code = '';
   await sql.begin(async (tx) => {
     // замок на логин (и адрес): подсчёт и вставка в одной транзакции, параллельные запросы не обгонят лимит
     await tx`select pg_advisory_xact_lock(hashtext(${'login:' + key}))`;
@@ -61,7 +62,6 @@ export async function requestCode(login: string, ip: string | null = null): Prom
       return;
     }
     const [{ live }] = await tx`select count(*)::int as live from sessions where user_id = ${userId} and expires_at > now()`;
-    via = live ? 'app' : 'none';
     code = String(randomInt(0, 10 ** CODE_LENGTH)).padStart(CODE_LENGTH, '0');
     // некому получить код — реальный хэш хранится только в dev (devCode), иначе его мог бы лишь угадать злоумышленник
     const stored = live || dev ? hash(code) : hash(crypto.randomUUID());
@@ -69,7 +69,7 @@ export async function requestCode(login: string, ip: string | null = null): Prom
     if (live) posted = await postService(tx, userId, { type: 'login_code', ...codeMessage(code) });
   });
   if (posted) pushService(posted);   // push только после коммита
-  return { attemptId, via, length: CODE_LENGTH, ...(dev && code ? { devCode: code } : {}) };
+  return { attemptId, via: 'app', length: CODE_LENGTH, ...(dev && code ? { devCode: code } : {}) };
 }
 
 /**
