@@ -348,7 +348,7 @@ function Bubble(props) {
     },
       !deleted && !props.selectable ? h('button', { type: 'button', class: 'rl-bubble-menu', 'aria-label': 'Меню сообщения', onClick: props.onMenu }, h(Icon, { name: 'chevronDown', size: 18 })) : null,
       props.forwarded ? h('span', { class: 'rl-bubble-fwd' }, h(Icon, { name: 'forward', size: 14 }), 'Переслано') : null,
-      props.author && !deleted ? h('span', { class: 'rl-bubble-author', style: { color: 'var(--peer-' + (props.authorTone != null ? props.authorTone : 5) + ')' } }, props.author) : null,
+      props.author && !deleted ? h(props.onAuthorClick ? 'button' : 'span', { type: props.onAuthorClick ? 'button' : undefined, class: cx('rl-bubble-author', props.onAuthorClick && 'rl-bubble-author-link'), onClick: props.onAuthorClick, style: { color: 'var(--peer-' + (props.authorTone != null ? props.authorTone : 5) + ')' } }, props.author) : null,
       props.reply && !deleted ? h(ReplyQuote, Object.assign({ inBubble: true }, props.reply)) : null,
       deleted
         ? h('span', { class: 'rl-bubble-text rl-bubble-deleted-text' }, h(Icon, { name: 'ban', size: 16 }), out ? 'Вы удалили это сообщение' : 'Сообщение удалено')

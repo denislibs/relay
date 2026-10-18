@@ -98,6 +98,9 @@ body { margin: 0; font-family: var(--font-sans); color: var(--ink); background: 
 .rl-bubble-tail.rl-bubble-in-side::before { left: -8px; clip-path: polygon(100% 0, 0 0, 100% 100%); }
 .rl-bubble-tail.rl-bubble-out::before { right: -8px; clip-path: polygon(0 0, 100% 0, 0 100%); }
 .rl-bubble-author { display: block; margin-bottom: 2px; font: 600 13px/18px var(--font-sans); }
+.rl-bubble-author-link { padding: 0; border: 0; background: none; text-align: start; cursor: pointer; max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.rl-bubble-author-link:hover { text-decoration: underline; }
+.rl-bubble-author-link:focus-visible { outline: 2px solid currentColor; outline-offset: 2px; border-radius: 4px; }
 .rl-bubble-text { white-space: pre-wrap; }
 .rl-bubble-spacer { display: inline-block; width: 68px; height: 1px; }
 .rl-bubble-in-side .rl-bubble-spacer { width: 44px; }
@@ -864,7 +867,7 @@ button.rl-tab:hover { color: var(--ink); }
 /* ---------- FAB inside the card ---------- */
 .rl-fab-slot { position: absolute; right: var(--space-4); bottom: var(--space-4); z-index: 3; transition: transform var(--dur-base) var(--ease-out), opacity var(--dur-fast) var(--ease-standard); }
 .rl-fab-hidden { transform: translateY(96px) scale(0.6); opacity: 0; pointer-events: none; }
-.rl-fab-main { position: relative; display: inline-flex; align-items: center; justify-content: center; width: 56px; height: 56px; border: 0; border-radius: 50%; background: var(--fab); color: var(--on-fab); box-shadow: var(--shadow-float); cursor: pointer; transition: border-radius var(--dur-base) var(--ease-out), transform var(--dur-instant) var(--ease-standard); }
+.rl-fab-main { position: relative; display: inline-flex; align-items: center; justify-content: center; width: 56px; height: 56px; border: 0; border-radius: 50%; background: var(--fab); color: var(--on-fab); cursor: pointer; transition: border-radius var(--dur-base) var(--ease-out), transform var(--dur-instant) var(--ease-standard); }
 .rl-fab-main:active { transform: scale(var(--press-lg)); }
 .rl-fab-main .rl-ripple-host { border-radius: inherit; }
 .rl-fab-main:is(:hover, :focus-visible) [data-icon="pencil"] { animation: rl-wiggle 500ms var(--ease-out); }

@@ -1,22 +1,27 @@
 import { Avatar, Button, MediaPolicy, peerTone, ChatSearchBar, Highlight, ripple, useMinVisible, requestMeasure, Composer, DropOverlay, GlassBar, IconButton, Menu, Modal, Presence, ReactionPicker, requestMutation, applyMarkdown, emptyValue, sameValue, voiceSupported, PlayerBar, roundSupported, startRound } from '@relay/ui';
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'preact/hooks';
-import { sendVoice, sendRound, deleteMessage, editMessage, ensureNames, focusMessage, sendFile, openChat, react, saveDraft, searchMessages, send, typing, typingDone } from '../data';
+import { closeChat, deleteMessage, editMessage, ensureNames, focusMessage, openUserChat, sendFile, sendRound, sendVoice, react, saveDraft, searchMessages, send, typing, typingDone } from '../data';
 import type { Item, SearchHit } from '@relay/sync-engine/src/types';
 import type { Entity } from '@relay/protocol';
 
 type Value = { text: string; entities: Entity[] };
 type ComposerApi = { getValue(): Value; setValue(v: Value, opts?: { focus?: boolean; instant?: boolean }): void; focus(opts?: { end?: boolean }): void };
-import { setGlobal, useGlobal } from '../global';
+import { frameByKey, setGlobal, useGlobal } from '../global';
 import { showToast, unblockUser, useUser } from '../settingsData';
 import { Feed } from './Feed';
 import { chatKindFor, mediaPolicy } from '../autoload';
 import { chatTime, chatTone, fileSize, lastSeenText, snippet } from './format';
 
 
-export function Chat({ chatId }: { chatId: number }) {
+const NO_MESSAGES: Item[] = [];
+
+/** Чат в стеке. active — он на экране: только он ловит ввод, файлы и Esc; остальные живут тихо. */
+export function Chat({ chatId, frameKey, active }: { chatId: number; frameKey: string; active: boolean }) {
   const me = useGlobal((s) => s.me)!;
   const chat = useGlobal((s) => s.chats.find((c) => c.id === chatId));
-  const messages = useGlobal((s) => s.messages);
+  const messages = useGlobal((s) => frameByKey(s, frameKey)?.messages ?? NO_MESSAGES);
+  const depth = useGlobal((s) => s.chatStack.length);
+  const activeRef = useRef(active); activeRef.current = active;
   // «Автозагрузка медиа» / автовоспроизведение для ленты этого чата (MediaBubble кита читает контекст)
   const isContact = useGlobal((s) => chat?.peerId != null && s.contacts.some((c) => c.userId === chat.peerId));
   const autoload = useGlobal((s) => s.prefs.autoload);
@@ -83,7 +88,7 @@ export function Chat({ chatId }: { chatId: number }) {
   // Esc закрывает поиск, даже если фокус ушёл из поля (после выбора результата)
   useEffect(() => {
     if (!finding) return;
-    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape' && !e.defaultPrevented) closeFind(); };
+    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape' && !e.defaultPrevented && activeRef.current) { e.preventDefault(); closeFind(); } };
     addEventListener('keydown', onKey);
     return () => removeEventListener('keydown', onKey);
   }, [finding]);
@@ -109,11 +114,11 @@ export function Chat({ chatId }: { chatId: number }) {
   useEffect(() => {
     let depth = 0;
     const hasFiles = (e: DragEvent) => !!e.dataTransfer && [...e.dataTransfer.types].includes('Files');
-    const enter = (e: DragEvent) => { if (!hasFiles(e)) return; depth++; setDragging(true); };
+    const enter = (e: DragEvent) => { if (!activeRef.current || !hasFiles(e)) return; depth++; setDragging(true); };
     const leave = () => { depth = Math.max(0, depth - 1); if (!depth) setDragging(false); };
-    const over = (e: DragEvent) => { if (hasFiles(e)) e.preventDefault(); };
-    const drop = (e: DragEvent) => { if (!hasFiles(e)) return; e.preventDefault(); depth = 0; setDragging(false); offer(e.dataTransfer!.files[0]); };
-    const paste = (e: ClipboardEvent) => { const f = [...(e.clipboardData?.files ?? [])][0]; if (f) { e.preventDefault(); offer(f); } };
+    const over = (e: DragEvent) => { if (activeRef.current && hasFiles(e)) e.preventDefault(); };
+    const drop = (e: DragEvent) => { if (!activeRef.current || !hasFiles(e)) return; e.preventDefault(); depth = 0; setDragging(false); offer(e.dataTransfer!.files[0]); };
+    const paste = (e: ClipboardEvent) => { if (!activeRef.current) return; const f = [...(e.clipboardData?.files ?? [])][0]; if (f) { e.preventDefault(); offer(f); } };
     addEventListener('dragenter', enter); addEventListener('dragleave', leave); addEventListener('dragover', over); addEventListener('drop', drop); addEventListener('paste', paste);
     return () => { removeEventListener('dragenter', enter); removeEventListener('dragleave', leave); removeEventListener('dragover', over); removeEventListener('drop', drop); removeEventListener('paste', paste); };
   }, []);
@@ -148,7 +153,7 @@ export function Chat({ chatId }: { chatId: number }) {
     api.current?.setValue(latest.current, { instant: true });
   }, [remoteKey]);
   useEffect(() => {
-    if (latest.current.text) api.current?.focus({ end: true }); // курсор — в конец черновика
+    if (latest.current.text && activeRef.current) api.current?.focus({ end: true }); // курсор — в конец черновика
     addEventListener('pagehide', flushDraft);
     const hidden = () => { if (document.visibilityState === 'hidden') flushDraft(); };   // вкладку увели в фон — тоже сохранить
     document.addEventListener('visibilitychange', hidden);
@@ -195,7 +200,7 @@ export function Chat({ chatId }: { chatId: number }) {
 
   // высота композера (растёт с цитатой ответа) → --composer-h: лента уходит под него ровно на эту высоту
   useLayoutEffect(() => {
-    const main = shell.current?.closest<HTMLElement>('.rl-shell-main');
+    const main = shell.current?.closest<HTMLElement>('.app-chatcol');   // своя колонка стека
     const wrap = main?.querySelector<HTMLElement>('.rl-composer-wrap');
     if (!main || !wrap || typeof ResizeObserver !== 'function') return;
     const feed = main.querySelector<HTMLElement>('.rl-feed');
@@ -228,7 +233,8 @@ export function Chat({ chatId }: { chatId: number }) {
     <>
       <span ref={shell} hidden />
       <GlassBar class={finding ? 'app-finding' : ''}>
-        <IconButton class="app-back" icon="arrowLeft" label="К списку чатов" onClick={() => openChat(null)} />
+        {/* поверх другого чата — «Назад» к нему (и на широком экране), нижний — к списку на узком */}
+        <IconButton class={depth > 1 ? 'app-back app-back-inner' : 'app-back'} icon="arrowLeft" label={depth > 1 ? 'Назад' : 'К списку чатов'} onClick={closeChat} />
         <button type="button" class="rl-glassbar-who" aria-label="Информация о чате" onClick={() => setGlobal({ infoOpen: !infoOpen })}>
           <Avatar name={title} tone={chatTone(chat)} size={40} />
           <span class="rl-glassbar-title">
@@ -274,7 +280,7 @@ export function Chat({ chatId }: { chatId: number }) {
         ) : null}
       </GlassBar>
       <MediaPolicy.Provider value={policy}>
-        <Feed chatId={chatId} meId={me.userId} peerName={title} stick={stick} highlight={found?.q} onMenu={(key, x, y) => setMenu({ key, x, y })} />
+        <Feed frameKey={frameKey} active={active} chatId={chatId} meId={me.userId} peerName={title} group={chat?.kind === 'group'} onAuthor={openUserChat} stick={stick} highlight={found?.q} onMenu={(key, x, y) => setMenu({ key, x, y })} />
       </MediaPolicy.Provider>
       {plate ? (
         <div class="rl-composer-wrap app-plate-wrap">
@@ -291,7 +297,7 @@ export function Chat({ chatId }: { chatId: number }) {
         id="composer"
         apiRef={api}
         initialValue={initial}
-        captureTyping
+        captureTyping={active}
         sendKey={sendKey}
         placeholder="Сообщение"
         editing={!!editing}

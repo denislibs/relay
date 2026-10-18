@@ -1,5 +1,5 @@
 import { beforeEach, expect, test } from 'bun:test';
-import { PAGES, back, bindForTest, go, onEscape, orderFor, pageIndex, parentOf, popForTest, setLeaveGuard } from './nav';
+import { PAGES, back, bindChatDepth, bindForTest, go, onEscape, orderFor, pageIndex, parentOf, popChats, popForTest, pushChat, setLeaveGuard } from './nav';
 
 const concrete = [
   'chats', 'settings', 'settings/profile', 'settings/general', 'settings/general/wallpaper', 'settings/notifications',
@@ -40,13 +40,14 @@ test('orderFor подставляет конкретный путь на мес�
 });
 
 function fake() {
-  const entries: { nav: string; i: number }[] = [{ nav: 'chats', i: 0 }];
+  const entries: { nav: string; i: number; chat?: number }[] = [{ nav: 'chats', i: 0 }];
   let pos = 0, view = 'chats';
   const hist = {
     get state() { return entries[pos]; },
-    pushState(s: { nav: string; i: number }) { entries.length = pos + 1; entries.push(s); pos++; },
-    replaceState(s: { nav: string; i: number }) { entries[pos] = s; },
+    pushState(s: { nav: string; i: number; chat?: number }) { entries.length = pos + 1; entries.push(s); pos++; },
+    replaceState(s: { nav: string; i: number; chat?: number }) { entries[pos] = s; },
     back() { pos--; void popForTest(entries[pos]); },
+    go(n: number) { pos += n; void popForTest(entries[pos]); },
   };
   bindForTest({ get: () => view, set: (p) => { view = p; }, escBusy: () => busy }, hist);
   let busy = false;
@@ -104,7 +105,7 @@ test('popstate without our state (openChat replaceState(null)): stay on the curr
   await go('settings/privacy');
   await popForTest(null);
   expect(f.view()).toBe('settings/privacy');
-  expect(f.hist.state).toEqual({ nav: 'settings/privacy', i: 2 });
+  expect(f.hist.state).toEqual({ nav: 'settings/privacy', i: 2, chat: 0 });
   await popForTest({ foo: 1 });
   expect(f.view()).toBe('settings/privacy');
   await back();   // дальше история сходится
@@ -118,9 +119,72 @@ test('back() to an entry openChat left without our stamp still lands on the pare
   await back();
   expect(f.view()).toBe('chats');
   expect(f.pos()).toBe(0);
-  expect(f.hist.state).toEqual({ nav: 'chats', i: 0 });
+  expect(f.hist.state).toEqual({ nav: 'chats', i: 0, chat: 0 });
   await go('settings');
   await back();
   expect(f.view()).toBe('chats');
   expect(f.pos()).toBe(0);
+});
+
+// ---------- стек чатов ----------
+function chats() {
+  const f = fake();
+  const depths: number[] = [];
+  bindChatDepth((d) => { depths.push(d); });
+  return { ...f, depths };
+}
+
+test('чат поверх — своя запись истории; «Назад» браузера снимает по одному', async () => {
+  const f = chats();
+  pushChat(1);
+  pushChat(2);
+  expect(f.pos()).toBe(2);
+  expect(f.hist.state).toEqual({ nav: 'chats', i: 2, chat: 2 });
+  f.hist.back();
+  await Promise.resolve();
+  expect(f.depths).toEqual([1]);
+  f.hist.back();
+  await Promise.resolve();
+  expect(f.depths).toEqual([1, 0]);
+  expect(f.view()).toBe('chats');
+});
+
+test('popChats отматывает свои записи одним шагом (клик в списке сбрасывает стек)', async () => {
+  const f = chats();
+  pushChat(1);
+  pushChat(2);
+  popChats(0);
+  await Promise.resolve();
+  expect(f.pos()).toBe(0);
+  expect(f.depths).toEqual([0]);
+  // дальше история как обычно
+  await go('settings');
+  await back();
+  expect(f.view()).toBe('chats');
+  expect(f.pos()).toBe(0);
+});
+
+test('страница панели поверх чата: popChats не трогает её запись, Esc закрывает страницу, а не чат', async () => {
+  const f = chats();
+  pushChat(1);
+  await go('settings');
+  expect(f.hist.state).toEqual({ nav: 'settings', i: 2, chat: 1 });
+  onEscape({ key: 'Escape', defaultPrevented: false }, false);
+  await Promise.resolve(); await Promise.resolve();
+  expect(f.view()).toBe('chats');
+  expect(f.pos()).toBe(1);
+  // теперь сверху — чат: Esc снимает его
+  onEscape({ key: 'Escape', defaultPrevented: false }, false);
+  await Promise.resolve();
+  expect(f.depths.at(-1)).toBe(0);
+  expect(f.pos()).toBe(0);
+});
+
+test('запись, отличающаяся только глубиной чатов, не спрашивает guard несохранённой формы', async () => {
+  const f = chats();
+  pushChat(1);
+  setLeaveGuard(() => false);
+  f.hist.back();
+  await Promise.resolve();
+  expect(f.depths).toEqual([0]);
 });

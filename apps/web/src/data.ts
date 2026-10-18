@@ -1,14 +1,14 @@
-import { nudgeWallpaper, toBase64 } from '@relay/ui';
+import { beginHeavyAnimation, nudgeWallpaper, toBase64 } from '@relay/ui';
 import { connectEngine, EngineClient, Mirror } from '@relay/sync-engine/src/client';
 import type { Item, Patch, Query, SearchResult } from '@relay/sync-engine/src/types';
 import type { Entity } from '@relay/protocol';
-import { getGlobal, setGlobal, type FeedMeta, type Me, type Status } from './global';
+import { activeFrame, frameByKey, getGlobal, setGlobal, type ChatFrame, type FeedMeta, type Me, type Status } from './global';
+import { bindChatDepth, popChats, pushChat } from './nav';
 import { notifyIncoming, startNotify } from './notify';
 
 declare const __BUILD__: string;
 
 let engine: EngineClient;
-let feed: { update(q: Query): void; close(): void } | null = null;
 // порция ленты — два экрана сообщений (строка-бабл ≈ 40 px), не меньше 30: как и страница диалогов, от высоты окна
 const FEED_PAGE = Math.max(30, Math.ceil(innerHeight / 40) * 2);
 
@@ -59,6 +59,7 @@ export function startData(me: Me): void {
   const status = new Mirror();
   engine.watch({ kind: 'status' }, (p) => { status.apply(p); const s = status.list()[0] as unknown as Status | undefined; if (s) { setGlobal({ status: s }); showPhase(s); } });
 
+  bindChatDepth(onChatDepth);
   startNotify((id) => { focus(); openChat(id); });
   const open = Number(new URLSearchParams(location.hash.slice(1)).get('chat')) || null;
   if (open) openChat(open);
@@ -105,15 +106,8 @@ function watchPeer(chatId: number | null): void {
   peerWatch = engine.watch({ kind: 'presence', userId: peerId }, (p: Patch) => { m.apply(p); setGlobal({ peer: (m.list()[0] as Item) ?? null }); });
 }
 
-/**
- * Переключение чата одним кадром: пока лента нового чата не готова, на экране остаётся прежний
- * (строка в списке подсвечивается сразу), затем шапка и лента меняются вместе. Без «пусто → часть → всё».
- */
 type Anchor = { sort: number; side: 'end' | 'start' | 'center' };
 const WINDOW = FEED_PAGE * 2;                  // сообщений в DOM: две порции (как окно viewport в Telegram)
-let feedAnchor: Anchor | undefined;            // undefined — живой хвост
-let moving = false;                            // окно сдвигается — следующий сдвиг ждёт патча
-let feedMirror: Mirror | null = null;
 /** Позиция прокрутки чата при уходе: первый видимый бабл и его отступ (нет записи — чат был внизу). */
 const positions = new Map<number, { key: string; sort: number; offset: number }>();
 
@@ -122,76 +116,211 @@ export function savePosition(chatId: number, pos: { key: string; sort: number; o
 }
 export function savedPosition(chatId: number) { return positions.get(chatId) ?? null; }
 
-function setFeed(chatId: number, anchor: Anchor | undefined): void {
-  feedAnchor = anchor;
-  moving = true;
-  feed?.update({ kind: 'messages', chatId, limit: WINDOW, anchor });
+/* ---------- стек чатов ----------
+ * Как в Telegram Web: openChat (клик в списке) — нижний чат, стек сбрасывается; openInner (переход
+ * изнутри чата) — новый чат поверх, прежний остаётся живым в DOM (вернуться — мгновенно, на том же месте).
+ * У каждого кадра — своя подписка на окно ленты. */
+
+interface Session { chatId: number; watch: { update(q: Query): void; close(): void }; mirror: Mirror; anchor: Anchor | undefined; moving: boolean; first: boolean; timer: ReturnType<typeof setTimeout> | null }
+const sessions = new Map<string, Session>();
+let frameSeq = 0;
+let pendingBottom: { frame: ChatFrame; target?: { id: number; sort: number } } | null = null;   // новый нижний чат, лента ещё не готова
+const LEAVE_MS = 350;   // уход снятого чата: анимация 250 мс + запас
+
+const stack = () => getGlobal().chatStack;
+const topReady = () => activeFrame(getGlobal());
+
+function patchFrame(key: string, patch: Partial<ChatFrame>): void {
+  if (pendingBottom?.frame.key === key) { pendingBottom.frame = { ...pendingBottom.frame, ...patch }; return; }
+  setGlobal((s) => ({ chatStack: s.chatStack.map((f) => (f.key === key ? { ...f, ...patch } : f)) }));
 }
 
-/** Сдвинуть окно ленты на порцию: к старым (верх) или к новым (низ). Дальняя сторона обрезается. */
-export function moveWindow(dir: 'older' | 'newer' | 'latest'): void {
-  const g = getGlobal(), chatId = g.openChatId, meta = g.feedMeta;
-  if (!chatId || !feed || moving) return;
-  const ms = g.messages;
-  if (dir === 'latest') { if (feedAnchor) setFeed(chatId, undefined); return; }
-  if (!ms.length) return;
-  if (dir === 'older' && meta?.hasOlder) setFeed(chatId, { sort: ms[Math.min(ms.length - 1, FEED_PAGE - 1)].sort as number, side: 'end' });
-  if (dir === 'newer' && meta?.hasNewer) setFeed(chatId, { sort: ms[Math.max(0, ms.length - FEED_PAGE)].sort as number, side: 'start' });
+function closeSession(key: string): void {
+  const s = sessions.get(key);
+  if (!s) return;
+  s.watch.close();
+  if (s.timer) clearTimeout(s.timer);
+  sessions.delete(key);
 }
 
-let switchTimer: ReturnType<typeof setTimeout> | null = null;
-/**
- * Переключение чата одним кадром: пока лента нового чата не готова, на экране остаётся прежний
- * (строка в списке подсвечивается сразу), затем шапка и лента меняются вместе. Без «пусто → часть → всё».
- * Открывается: на сохранённой позиции, иначе вокруг первого непрочитанного (с разделителем), иначе внизу.
- */
-export function openChat(chatId: number | null, target?: { id: number; sort: number }): void {
-  const g = getGlobal();
-  if ((g.pendingChatId ?? g.openChatId) === chatId) { if (target) focusMessage(target); return; }
-  feed?.close();
-  feed = null;
-  if (switchTimer) { clearTimeout(switchTimer); switchTimer = null; }
-  // отметку навигации (nav.ts) не трогаем: без неё «Назад» из настроек не находит страницу чатов
-  history.replaceState(history.state, '', chatId ? '#chat=' + chatId : location.pathname);
-  watchPeer(chatId);
-  if (!chatId) { setGlobal({ openChatId: null, pendingChatId: null, messages: [], feedMeta: null, unreadFrom: null }); return; }
-  const chat = g.chats.find((c) => c.id === chatId);
+/** Окно ленты кадра; onFirst — первый снимок (или 700 мс без него: не держим пользователя на прежнем чате). */
+function startFeed(frame: ChatFrame, anchor: Anchor | undefined, onFirst: (patch: Partial<ChatFrame>) => void): void {
+  const s: Session = { chatId: frame.chatId, mirror: new Mirror(), anchor, moving: true, first: true, timer: null, watch: null as never };
+  sessions.set(frame.key, s);
+  const first = (patch: Partial<ChatFrame>) => { s.first = false; if (s.timer) { clearTimeout(s.timer); s.timer = null; } onFirst(patch); };
+  // лента — срочная: свои сообщения должны появляться в тот же кадр
+  s.watch = engine.watch({ kind: 'messages', chatId: frame.chatId, limit: WINDOW, anchor }, (p: Patch) => {
+    s.mirror.apply(p);
+    s.moving = false;
+    const meta = (s.mirror.meta('~window') as unknown as FeedMeta) ?? null;
+    const patch = { messages: s.mirror.list() as Item[], feedMeta: meta };
+    if (s.first) first(patch); else patchFrame(frame.key, patch);
+    // окно дошло до последних сообщений — снова живой хвост (новые сообщения появятся сами)
+    if (s.anchor && meta?.live && !meta.hasNewer) { s.anchor = undefined; s.watch.update({ kind: 'messages', chatId: frame.chatId, limit: WINDOW }); }
+  });
+  s.timer = setTimeout(() => { if (s.first) first({}); }, 700);
+}
+
+function newFrame(chatId: number, target?: { id: number; sort: number }): { frame: ChatFrame; anchor: Anchor | undefined } {
+  const chat = getGlobal().chats.find((c) => c.id === chatId);
   const pos = positions.get(chatId);
   const unread = (chat?.unread as number) > 0 ? (chat!.lastReadId as number) : null;
-  // ушли из середины истории в этой сессии — вернуться туда же; иначе — к первому непрочитанному; иначе — вниз
   // открыть на найденном сообщении; иначе: ушли из середины истории — туда же; непрочитанное; низ
-  feedAnchor = target ? { sort: target.sort, side: 'center' } : pos ? { sort: pos.sort, side: 'center' } : unread != null ? { sort: unread + 0.5, side: 'center' } : undefined;
-  moving = true;
-  setGlobal({ pendingChatId: chatId });
-  const m = new Mirror();
-  feedMirror = m;
-  const commit = () => {
-    switchTimer && clearTimeout(switchTimer); switchTimer = null;
-    setGlobal({ openChatId: chatId, pendingChatId: null, messages: m.list() as Item[], feedMeta: (m.meta('~window') as unknown as FeedMeta) ?? null, unreadFrom: target ? null : unread, focus: target ? { ...target, nonce: Date.now(), replaced: true } : null });
+  const anchor: Anchor | undefined = target ? { sort: target.sort, side: 'center' } : pos ? { sort: pos.sort, side: 'center' } : unread != null ? { sort: unread + 0.5, side: 'center' } : undefined;
+  const frame: ChatFrame = {
+    key: 'c' + ++frameSeq, chatId, ready: false, messages: [], feedMeta: null,
+    unreadFrom: target ? null : unread,
+    focus: target ? { ...target, nonce: Date.now(), replaced: true } : null,
   };
-  // лента открытого чата — срочная: свои сообщения должны появляться в тот же кадр
-  feed = engine.watch({ kind: 'messages', chatId, limit: WINDOW, anchor: feedAnchor }, (p: Patch) => {
-    m.apply(p);
-    moving = false;
-    const now = getGlobal();
-    if (now.pendingChatId === chatId) { commit(); return; }
-    if (now.openChatId !== chatId) return;
-    const meta = (m.meta('~window') as unknown as FeedMeta) ?? null;
-    setGlobal({ messages: m.list() as Item[], feedMeta: meta });
-    // окно дошло до последних сообщений — снова живой хвост (новые сообщения появятся сами)
-    if (feedAnchor && meta?.live && !meta.hasNewer) { feedAnchor = undefined; feed?.update({ kind: 'messages', chatId, limit: WINDOW }); }
-  });
-  // движок отдаёт готовую ленту почти сразу; если нет — не держим пользователя на прежнем чате
-  switchTimer = setTimeout(() => { if (getGlobal().pendingChatId === chatId) commit(); }, 700);
+  return { frame, anchor };
 }
 
-/** Перейти к сообщению открытого чата (цитата, поиск): в окне — прокрутка, нет — окно вокруг него. */
+/** Адрес и присутствие — по чату на экране. */
+function syncShown(): void {
+  const top = topReady();
+  history.replaceState(history.state, '', top ? '#chat=' + top.chatId : location.pathname);
+  if ((top?.chatId ?? null) !== peerFor) watchPeer(top?.chatId ?? null);
+}
+
+/** Отменить ещё не показанный чат (новый нижний или поверх): его лента не дождалась. */
+function cancelPending(): void {
+  if (pendingBottom) { closeSession(pendingBottom.frame.key); pendingBottom = null; }
+  const half = stack().filter((f) => !f.ready);
+  if (half.length) {
+    half.forEach((f) => closeSession(f.key));
+    setGlobal((s) => ({ chatStack: s.chatStack.filter((f) => f.ready) }));
+  }
+  if (getGlobal().pendingChatId != null) setGlobal({ pendingChatId: null });
+}
+
+/** Снять со стека всё выше index (анимация ухода). */
+function popTo(index: number): void {
+  const st = stack();
+  const removed = st.slice(index + 1);
+  if (!removed.length || index < 0) return;
+  removed.forEach((f) => closeSession(f.key));
+  beginHeavyAnimation(LEAVE_MS + 50);
+  setGlobal((s) => ({ chatStack: s.chatStack.slice(0, index + 1), chatLeaving: [...s.chatLeaving, ...removed], openChatId: s.chatStack[index].chatId, pendingChatId: null }));
+  setTimeout(() => setGlobal((s) => ({ chatLeaving: s.chatLeaving.filter((f) => !removed.includes(f)) })), LEAVE_MS);
+  popChats(index);
+  syncShown();
+}
+
+/** «Назад» браузера / Esc сменили глубину стека. */
+function onChatDepth(depth: number): void {
+  cancelPending();
+  if (depth < stack().length - 1) popTo(depth);
+  else syncShown();   // запись истории вернула прежний адрес — поправить на чат на экране
+}
+
+/** Чат из списка (или из адреса, уведомления): нижний кадр, стек сбрасывается. */
+export function openChat(chatId: number | null, target?: { id: number; sort: number }): void {
+  const g = getGlobal(), st = g.chatStack, top = topReady();
+  if (chatId != null && (g.pendingChatId ?? top?.chatId) === chatId && (st.length <= 1 || top?.chatId === chatId)) {
+    if (target) focusMessage(target);
+    return;
+  }
+  cancelPending();
+  if (!chatId) {
+    for (const f of st) closeSession(f.key);
+    popChats(0);
+    setGlobal({ chatStack: [], chatLeaving: [], openChatId: null, pendingChatId: null });
+    syncShown();
+    return;
+  }
+  // нижний чат стека и есть этот — просто вернуться к нему (с анимацией), как в Telegram
+  if (st.length > 1 && st[0].chatId === chatId) {
+    popTo(0);
+    if (target) focusMessage(target);
+    return;
+  }
+  const { frame, anchor } = newFrame(chatId, target);
+  pendingBottom = { frame, target };
+  setGlobal({ pendingChatId: chatId });
+  // пока лента нового чата не готова, на экране остаётся прежний; затем шапка и лента меняются одним кадром
+  startFeed(frame, anchor, (patch) => {
+    if (pendingBottom?.frame.key !== frame.key) return;
+    const ready: ChatFrame = { ...pendingBottom.frame, ...patch, ready: true, instant: true };
+    pendingBottom = null;
+    for (const f of stack()) closeSession(f.key);
+    popChats(0);
+    setGlobal({ chatStack: [ready], chatLeaving: [], openChatId: chatId, pendingChatId: null });
+    syncShown();
+  });
+}
+
+/** Чат изнутри другого (автор в группе, найденное сообщение): поверх стека, прежний остаётся живым. */
+export function openInner(chatId: number, target?: { id: number; sort: number }): void {
+  const g = getGlobal();
+  if (!topReady()) { openChat(chatId, target); return; }
+  cancelPending();
+  const st = g.chatStack;
+  const at = st.findIndex((f) => f.chatId === chatId);
+  if (at >= 0) {   // уже в стеке — снять всё выше него
+    if (at < st.length - 1) popTo(at);
+    if (target) focusMessage(target);
+    return;
+  }
+  const { frame, anchor } = newFrame(chatId, target);
+  // колонка сразу в DOM (скрыта): лента раскладывается и встаёт на позицию до показа
+  setGlobal({ chatStack: [...st, frame], pendingChatId: chatId });
+  startFeed(frame, anchor, (patch) => {
+    if (!stack().some((f) => f.key === frame.key)) return;
+    beginHeavyAnimation(LEAVE_MS + 50);
+    patchFrame(frame.key, { ...patch, ready: true });
+    setGlobal({ openChatId: chatId, pendingChatId: null });
+    pushChat(stack().length - 1);
+    syncShown();
+  });
+}
+
+/** Стрелка «Назад» в шапке: снять верхний чат; нижний — к списку чатов. */
+export function closeChat(): void {
+  const st = stack();
+  if (st.length > 1) popTo(st.length - 2);
+  else openChat(null);
+}
+
+/** Личный чат с человеком поверх текущего (автор сообщения в группе). Нет такого чата — создать. */
+export async function openUserChat(userId: number): Promise<void> {
+  const me = getGlobal().me;
+  if (!me || userId === me.userId) return;
+  const found = getGlobal().chats.find((c) => c.kind === 'direct' && c.peerId === userId);
+  if (found) { openInner(found.id as number); return; }
+  const id = await createDirectChat(userId);
+  openInner(id);
+}
+
+/** Сдвинуть окно ленты кадра на порцию: к старым (верх) или к новым (низ). Дальняя сторона обрезается. */
+export function moveWindow(dir: 'older' | 'newer' | 'latest', frameKey?: string): void {
+  const f = frameKey ? frameByKey(getGlobal(), frameKey) : topReady();
+  const s = f && sessions.get(f.key);
+  if (!f || !s || s.moving) return;
+  const ms = f.messages, meta = f.feedMeta;
+  const set = (anchor: Anchor | undefined) => { s.anchor = anchor; s.moving = true; s.watch.update({ kind: 'messages', chatId: f.chatId, limit: WINDOW, anchor }); };
+  if (dir === 'latest') { if (s.anchor) set(undefined); return; }
+  if (!ms.length) return;
+  if (dir === 'older' && meta?.hasOlder) set({ sort: ms[Math.min(ms.length - 1, FEED_PAGE - 1)].sort as number, side: 'end' });
+  if (dir === 'newer' && meta?.hasNewer) set({ sort: ms[Math.max(0, ms.length - FEED_PAGE)].sort as number, side: 'start' });
+}
+
+/** Перейти к сообщению чата на экране (цитата, поиск): в окне — прокрутка, нет — окно вокруг него. */
 export function focusMessage(target: { id: number; sort: number }): void {
-  const g = getGlobal(), chatId = g.openChatId;
-  if (!chatId) return;
-  const inWindow = g.messages.some((m) => m.id === target.id);
-  setGlobal({ focus: { ...target, nonce: Date.now(), replaced: !inWindow } });
-  if (!inWindow) { moving = false; setFeed(chatId, { sort: target.sort, side: 'center' }); }
+  const f = topReady();
+  const s = f && sessions.get(f.key);
+  if (!f || !s) return;
+  const inWindow = f.messages.some((m) => m.id === target.id);
+  patchFrame(f.key, { focus: { ...target, nonce: Date.now(), replaced: !inWindow } });
+  if (!inWindow) { s.anchor = { sort: target.sort, side: 'center' }; s.moving = true; s.watch.update({ kind: 'messages', chatId: f.chatId, limit: WINDOW, anchor: s.anchor }); }
+}
+
+/** Переход к сообщению выполнен — снять отметку кадра. */
+export function clearFocus(frameKey: string): void { patchFrame(frameKey, { focus: null }); }
+
+/** Лента чата ушла с якоря (своё сообщение — внизу, как в Telegram). */
+function toLatestOf(chatId: number): void {
+  const f = topReady();
+  if (f?.chatId === chatId && sessions.get(f.key)?.anchor) moveWindow('latest', f.key);
 }
 
 /** Прежний вызов «ещё истории» — теперь сдвиг окна к старым. */
@@ -199,7 +328,7 @@ export function loadOlder(): void { moveWindow('older'); }
 
 export async function send(chatId: number, body: string, replyToId: number | null = null, entities: Entity[] = []): Promise<void> {
   nudgeWallpaper();
-  if (feedAnchor && getGlobal().openChatId === chatId) moveWindow('latest'); // своё сообщение — внизу, как в Telegram
+  toLatestOf(chatId); // своё сообщение — внизу, как в Telegram
   await engine.call({ type: 'sendMessage', chatId, body, entities, replyToId });
 }
 
@@ -243,7 +372,7 @@ async function describeImage(file: Blob): Promise<{ w: number; h: number; thumb:
 /** Голосовое: Ogg/Opus, длительность в секундах и волна (63 байта). Локально играет сам записанный файл. */
 export async function sendVoice(chatId: number, rec: { blob: Blob; duration: number; waveform: Uint8Array }, replyToId: number | null = null): Promise<void> {
   nudgeWallpaper();
-  if (feedAnchor && getGlobal().openChatId === chatId) moveWindow('latest');
+  toLatestOf(chatId);
   const res = (await engine.call({ type: 'sendFile', chatId, body: '', file: rec.blob, name: 'voice.ogg', mime: 'audio/ogg', kind: 'voice', duration: rec.duration, waveform: toBase64(rec.waveform), replyToId })) as { clientId: string };
   localPreviews.set(res.clientId, URL.createObjectURL(rec.blob));
 }
@@ -251,7 +380,7 @@ export async function sendVoice(chatId: number, rec: { blob: Blob; duration: num
 /** Кружок: квадрат 400×400, до 60 с; превью — кадр из записи. */
 export async function sendRound(chatId: number, rec: { blob: Blob; duration: number; size: number; thumb: string | null }, replyToId: number | null = null): Promise<void> {
   nudgeWallpaper();
-  if (feedAnchor && getGlobal().openChatId === chatId) moveWindow('latest');
+  toLatestOf(chatId);
   const res = (await engine.call({ type: 'sendFile', chatId, body: '', file: rec.blob, name: 'video.mp4', mime: rec.blob.type.split(';')[0] || 'video/mp4', kind: 'round', duration: rec.duration, w: rec.size, h: rec.size, thumb: rec.thumb, replyToId })) as { clientId: string };
   localPreviews.set(res.clientId, URL.createObjectURL(rec.blob));
 }
@@ -261,7 +390,7 @@ export function markListened(chatId: number, id: number): void { engine.call({ t
 
 export async function sendFile(chatId: number, file: File, caption: string, replyToId: number | null = null): Promise<void> {
   nudgeWallpaper();
-  if (feedAnchor && getGlobal().openChatId === chatId) moveWindow('latest');
+  toLatestOf(chatId);
   const img = await describeImage(file);
   const res = (await engine.call({ type: 'sendFile', chatId, body: caption, file, name: file.name || 'file', mime: file.type || 'application/octet-stream', w: img?.w ?? null, h: img?.h ?? null, thumb: img?.thumb ?? null, replyToId })) as { clientId: string };
   if (img) localPreviews.set(res.clientId, URL.createObjectURL(file));
@@ -293,12 +422,16 @@ export function seen(chatId: number, upToId: number): void {
   engine.call({ type: 'seen', chatId, upToId }).catch(() => {});
 }
 
-export async function startDirectChat(peerId: number): Promise<void> {
+async function createDirectChat(peerId: number): Promise<number> {
   const res = await fetch('/dev/chats', { method: 'POST', body: JSON.stringify({ kind: 'direct', title: null, memberIds: [peerId] }) });
   if (!res.ok) throw new Error(res.status === 401 ? 'Сессия истекла' : 'Не удалось создать чат');
   const { id } = (await res.json()) as { id: number };
   await engine.call({ type: 'refreshChats' });
-  openChat(id);
+  return id;
+}
+
+export async function startDirectChat(peerId: number): Promise<void> {
+  openChat(await createDirectChat(peerId));
 }
 
 /* Имена авторов: в личке это собеседник (уже есть в списке чатов), в группе — запрос /users пачкой.

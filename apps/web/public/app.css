@@ -323,3 +323,23 @@ html[data-blur="0"] .app-empty-main .rl-empty, html[data-blur="0"] .app-sidemenu
 .app-banner-x { position: absolute; top: 4px; right: 4px; }
 .app-banner-x .rl-iconbtn { width: 32px; height: 32px; color: var(--ink-muted); }
 @media (prefers-reduced-motion: reduce) { .app-banner-slot { animation: none; transition: none; } }
+
+/* Стек чатов (как в Telegram Web): колонки лежат друг на друге, на экране — верхняя готовая.
+   Ниже неё — уехавшие влево, выше (готовится / уходит) — справа; смена — переход transform+opacity. */
+.app-chats { position: relative; flex: 1; min-height: 0; display: flex; }
+.app-chatcol {
+  position: absolute; inset: 0; display: flex; flex-direction: column; gap: var(--space-float);
+  transition: transform 250ms cubic-bezier(0.2, 0, 0, 1), opacity 250ms cubic-bezier(0.2, 0, 0, 1), visibility 0s linear 0s;
+}
+.app-chatcol-below, .app-chatcol-above {
+  opacity: 0; pointer-events: none; visibility: hidden;
+  transition: transform 250ms cubic-bezier(0.2, 0, 0, 1), opacity 250ms cubic-bezier(0.2, 0, 0, 1), visibility 0s linear 250ms;
+}
+.app-chatcol-below { transform: translate3d(-200px, 0, 0); }
+.app-chatcol-above { transform: translate3d(200px, 0, 0); z-index: 1; }
+.app-chatcol-on { z-index: 1; }
+.app-chatcol-instant { transition: none; }
+@media (prefers-reduced-motion: reduce) { .app-chatcol, .app-chatcol-below, .app-chatcol-above { transition: none; } }
+html[data-anim="0"] .app-chatcol, html[data-anim="0"] .app-chatcol-below, html[data-anim="0"] .app-chatcol-above { transition: none; }
+/* «Назад» поверх другого чата — и на широком экране */
+.app-back.app-back-inner { display: inline-flex; }
