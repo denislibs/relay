@@ -21,3 +21,4 @@ export * from './media/roundRecorder.js';
 export * from './media/roundView.js';
 export * from './media/roundBubble.js';
 export * from './sticker.js';
+export * from './modal.js';

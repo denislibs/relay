@@ -1,7 +1,7 @@
 import { PinnedBar } from './PinnedBar';
 import { Playlist } from './Playlist';
 import { inProfile, toggleProfileMusic, type Track } from '../music';
-import { Avatar, Button, Icon, MediaPolicy, peerTone, ChatSearchBar, Highlight, ripple, useMinVisible, requestMeasure, Composer, DropOverlay, GlassBar, IconButton, Menu, Modal, Presence, ReactionPicker, requestMutation, applyMarkdown, emptyValue, sameValue, voiceSupported, PlayerBar, roundSupported, startRound, Verified } from '@relay/ui';
+import { Avatar, Button, Icon, MediaPolicy, peerTone, ChatSearchBar, Highlight, ripple, useMinVisible, requestMeasure, Composer, DropOverlay, GlassBar, IconButton, Menu, Modal, ConfirmDialog, Presence, ReactionPicker, requestMutation, applyMarkdown, emptyValue, sameValue, voiceSupported, PlayerBar, roundSupported, startRound, Verified } from '@relay/ui';
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'preact/hooks';
 import { closeChat, deleteMessage, editMessage, ensureNames, focusMessage, openChat, openUserChat, pinMessage, unpinMessage, sendFile, sendFiles, sendRound, sendVoice, react, saveDraft, searchMessages, send, typing, typingDone } from '../data';
 import type { Item, SearchHit } from '@relay/sync-engine/src/types';
@@ -390,7 +390,7 @@ export function Chat({ chatId, frameKey, active }: { chatId: number; frameKey: s
       <input ref={picker} type="file" multiple hidden onChange={(e) => offer((e.target as HTMLInputElement).files)} />
       <Presence show={dragging} exitMs={160}><div class="app-drop"><DropOverlay title="Отпустите, чтобы отправить" text="Фото и документы до 50 МБ" /></div></Presence>
       {pending ? (
-        <Modal title={pending.files.length > 1 ? `Отправить файлы: ${pending.files.length}` : pending.url ? 'Отправить фото' : 'Отправить файл'} onClose={closePending} actions={[
+        <Modal size="slim" title={pending.files.length > 1 ? `Отправить файлы: ${pending.files.length}` : pending.url ? 'Отправить фото' : 'Отправить файл'} onClose={closePending} actions={[
           <Button key="c" variant="ghost" onClick={closePending}>Отмена</Button>,
           <Button key="s" onClick={sendPending}>Отправить</Button>,
         ]}>
@@ -407,19 +407,8 @@ export function Chat({ chatId, frameKey, active }: { chatId: number; frameKey: s
           />
         </Modal>
       ) : null}
-      {confirmDelete ? (
-        <Modal
-          title="Удалить сообщение?"
-          icon="trash"
-          onClose={() => setConfirmDelete(null)}
-          actions={[
-            <Button key="c" variant="ghost" onClick={() => setConfirmDelete(null)}>Отмена</Button>,
-            <Button key="d" variant="danger" onClick={() => { deleteMessage(chatId, confirmDelete.id).catch(() => {}); setConfirmDelete(null); }}>Удалить у всех</Button>,
-          ]}
-        >
-          <p class="app-modal-text">Сообщение исчезнет у всех участников чата.</p>
-        </Modal>
-      ) : null}
+      <ConfirmDialog open={!!confirmDelete} danger title="Удалить сообщение?" text="Сообщение исчезнет у всех участников чата." confirm="Удалить у всех"
+        onCancel={() => setConfirmDelete(null)} onConfirm={() => { if (confirmDelete) deleteMessage(chatId, confirmDelete.id).catch(() => {}); setConfirmDelete(null); }} />
     </>
   );
 }

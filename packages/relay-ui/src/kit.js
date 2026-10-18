@@ -460,21 +460,6 @@ function Banner(props) {
     props.onClose ? h(IconButton, { icon: 'close', label: 'Закрыть', onClick: props.onClose, size: 20 }) : null);
 }
 
-/* ---------- Modal (inline: the consumer positions the scrim's parent) ---------- */
-function Modal(props) {
-  if (props.open === false) return null;
-  return h('div', { class: 'rl-scrim', onClick: function (e) { if (e.target === e.currentTarget && props.onClose) props.onClose(); } },
-    h('div', { class: 'rl-modal', role: 'dialog', 'aria-modal': 'true', 'aria-label': props.title },
-      props.onClose ? h(IconButton, { icon: 'close', label: 'Закрыть', onClick: props.onClose, class: 'rl-modal-close' }) : null,
-      props.icon ? h('div', { class: 'rl-modal-icon' }, h(Icon, { name: props.icon, size: 64, strokeWidth: 1.4 })) : null,
-      h('h2', { class: 'rl-modal-title' }, props.title),
-      props.children,
-      props.actions ? h('div', { class: 'rl-modal-actions' }, props.actions) : null));
-}
-function Feature(props) {
-  return h('div', { class: 'rl-feature' }, h(Icon, { name: props.icon, size: 22 }), h('div', null, props.children));
-}
-Modal.Feature = Feature;
 
 /* ---------- NavRail ---------- */
 function NavRail(props) {
@@ -1154,4 +1139,4 @@ function ScrollToBottom(props) {
 }
 
 
-export { peerTone, RelayLogo, Verified, ArchivedRow, ReplyQuote, ReactionChips, cx, chain, ripple, reducedMotion, omit, fmtTime, makeWave, ICONS, Icon, Button, IconButton, Avatar, Badge, Chip, SearchField, ChatRow, ChatRowSkeleton, Bubble, MessageStatus, TypingIndicator, DateDivider, Banner, Modal, NavRail, Checkbox, Toast, Card, Steps, MediaArt, ProgressRing, Waveform, VoiceMessage, VoiceRecorder, MediaBubble, MediaPolicy, mediaHeld, FileBubble, MediaThumb, MediaViewer, Switch, PanelHeader, ProfileHeader, ActionTile, InfoRow, SettingsIcon, ReadMore, Presence, useMinVisible, LazyImage, FlipList, SyncIndicator, LinearProgress, EmptyState, ScrollToBottom };
+export { peerTone, RelayLogo, Verified, ArchivedRow, ReplyQuote, ReactionChips, cx, chain, ripple, reducedMotion, omit, fmtTime, makeWave, ICONS, Icon, Button, IconButton, Avatar, Badge, Chip, SearchField, ChatRow, ChatRowSkeleton, Bubble, MessageStatus, TypingIndicator, DateDivider, Banner, NavRail, Checkbox, Toast, Card, Steps, MediaArt, ProgressRing, Waveform, VoiceMessage, VoiceRecorder, MediaBubble, MediaPolicy, mediaHeld, FileBubble, MediaThumb, MediaViewer, Switch, PanelHeader, ProfileHeader, ActionTile, InfoRow, SettingsIcon, ReadMore, Presence, useMinVisible, LazyImage, FlipList, SyncIndicator, LinearProgress, EmptyState, ScrollToBottom };

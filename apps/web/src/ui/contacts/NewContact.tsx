@@ -1,4 +1,4 @@
-import { Avatar, Icon, Presence, TextField, peerTone } from '@relay/ui';
+import { Avatar, Icon, Modal, Presence, TextField, peerTone } from '@relay/ui';
 import { useEffect, useRef, useState } from 'preact/hooks';
 import { setGlobal, useGlobal, type NewContactDraft } from '../../global';
 import { addContact, resolveUser, showToast } from '../../settingsData';
@@ -32,11 +32,6 @@ function NewContactForm({ draft }: { draft: NewContactDraft }) {
   const [busy, setBusy] = useState(false);
   const live = useRef(true);
   useEffect(() => () => { live.current = false; }, []);
-  useEffect(() => {
-    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') { e.preventDefault(); e.stopPropagation(); close(); } };
-    addEventListener('keydown', onKey, true);
-    return () => removeEventListener('keydown', onKey, true);
-  }, []);
 
   // открыли из «Информации» и запрос не меняли — человек уже известен (поле может быть пустым: нет ни @имени, ни телефона)
   const known = draft.userId && query === (draft.query ?? '') ? draft.userId : null;
@@ -67,9 +62,10 @@ function NewContactForm({ draft }: { draft: NewContactDraft }) {
   const initials = initialsOf(first, lastName);
   // как диалоги Telegram: заголовок слева, без ✕ (закрывают «Отмена», Esc и щелчок мимо)
   return (
-    <div class="rl-confirm-scrim rl-dialog-host" onClick={(e) => { if (e.target === e.currentTarget) close(); }}>
-      <div class="rl-confirm app-newcontact-dialog" role="dialog" aria-modal="true" aria-label="Новый контакт">
-        <h2 class="rl-confirm-title">Новый контакт</h2>
+    <Modal title="Новый контакт" closeButton={false} size="confirm" onClose={close} class="app-newcontact-dialog" actions={[
+      <button key="no" type="button" class="rl-mdl-btn" onClick={close}>Отмена</button>,
+      <button key="ok" type="button" class="rl-mdl-btn" disabled={!ready} onClick={() => void done()}>Готово</button>,
+    ]}>
         <form class="app-newcontact" onSubmit={(e) => void done(e)}>
           <div class="app-newcontact-avatar" aria-hidden="true">
             {initials
@@ -84,11 +80,6 @@ function NewContactForm({ draft }: { draft: NewContactDraft }) {
           </div>
           <button type="submit" hidden />
         </form>
-        <div class="rl-confirm-actions">
-          <button type="button" class="rl-confirm-btn" onClick={close}>Отмена</button>
-          <button type="button" class="rl-confirm-btn" disabled={!ready} onClick={() => void done()}>Готово</button>
-        </div>
-      </div>
-    </div>
+    </Modal>
   );
 }

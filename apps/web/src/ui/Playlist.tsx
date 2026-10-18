@@ -1,4 +1,4 @@
-import { Icon, IconButton, Menu, ORDER_INFO, player } from '@relay/ui';
+import { Icon, IconButton, Menu, Modal, ORDER_INFO, player } from '@relay/ui';
 import { useEffect, useRef, useState } from 'preact/hooks';
 import { setGlobal, useGlobal } from '../global';
 import { inProfile, toggleProfileMusic, type Track } from '../music';
@@ -27,12 +27,6 @@ export function Playlist() {
     const el = listRef.current?.querySelector('[data-current]') as HTMLElement | null;
     el?.scrollIntoView({ block: 'center' });
   }, [open, st.key]);
-  useEffect(() => {
-    if (!open) return;
-    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') close(); };
-    addEventListener('keydown', onKey);
-    return () => removeEventListener('keydown', onKey);
-  }, [open]);
   const t = st.track as Track | null;
   if (!open || !t || t.kind !== 'music') return null;
   const list = (st.playlist ?? [t]) as Track[];
@@ -40,9 +34,7 @@ export function Playlist() {
   const mine = inProfile(t);
   const canProfile = mine || t.msgId != null;
   return (
-    <div class="rl-scrim app-pl-scrim" onClick={(e) => { if (e.target === e.currentTarget) close(); }}>
-      <div class="app-pl" role="dialog" aria-modal="true" aria-label="Плейлист">
-        <div class="app-pl-head"><IconButton icon="close" label="Закрыть" onClick={close} /><h2>Плейлист</h2></div>
+    <Modal title="Плейлист" onClose={close} size={360} class="app-pl-dialog" bodyClass="app-pl">
         {list.length > 1 ? (
           <div class="app-pl-list" ref={listRef}>
             {list.map((x) => {
@@ -90,7 +82,6 @@ export function Playlist() {
             <Icon name={mine ? 'musicRemove' : 'musicAdd'} size={22} />{mine ? 'Убрать из профиля' : 'Добавить в профиль'}
           </button>
         ) : null}
-      </div>
-    </div>
+    </Modal>
   );
 }

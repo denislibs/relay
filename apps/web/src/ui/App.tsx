@@ -1,7 +1,7 @@
 import { LinkEdit } from './links/LinkEdit';
 import { Links } from './links/Links';
 import { FolderColumn, useFolderPlace } from './folderNav';
-import { AsidePanel, EmptyState, FloatShell, Presence, SideFrame, SlideStack, Toast } from '@relay/ui';
+import { AsidePanel, EmptyState, FloatShell, ModalRoot, Presence, SideFrame, SlideStack, Toast } from '@relay/ui';
 import { useRef } from 'preact/hooks';
 import { useGlobal } from '../global';
 import { orderFor } from '../nav';
@@ -66,6 +66,7 @@ export function App() {
         )}
       </FloatShell>
       <NewChat />
+      <ModalRoot />
       <NewContact />
       <DevPlate />
       <AppToast />

@@ -1,6 +1,5 @@
 import { Button, ConfirmDialog, Fab, InfoRow, Modal, PanelHeader, Presence, ProfileHeader, Section, SelectRow, TextField, peerTone } from '@relay/ui';
-import { render, type ComponentChildren } from 'preact';
-import { useEffect, useLayoutEffect, useRef, useState } from 'preact/hooks';
+import { useEffect, useRef, useState } from 'preact/hooks';
 import { useGlobal, type Me } from '../../global';
 import { back, go, setLeaveGuard } from '../../nav';
 import { checkUsername, setUsername, showToast, updateProfile } from '../../settingsData';
@@ -13,20 +12,6 @@ import {
 const CHECK_DELAY = 400;
 const linksText = (n: number) => (n === 0 ? 'Добавить GitHub, LinkedIn, соцсети' : n % 10 === 1 && n % 100 !== 11 ? `${n} ссылка` : n % 10 >= 2 && n % 10 <= 4 && (n % 100 < 12 || n % 100 > 14) ? `${n} ссылки` : `${n} ссылок`);
 const MONTHS = ['Январь', 'Февраль', 'Март', 'Апрель', 'Май', 'Июнь', 'Июль', 'Август', 'Сентябрь', 'Октябрь', 'Ноябрь', 'Декабрь'];
-
-/** Слой поверх всего приложения (модалка не должна быть заперта в колонке боковой панели). */
-function Portal({ children }: { children: ComponentChildren }) {
-  const host = useRef<HTMLDivElement | null>(null);
-  useLayoutEffect(() => {
-    const el = document.createElement('div');
-    el.className = 'rl app-portal rl-dialog-host';
-    document.body.appendChild(el);
-    host.current = el;
-    return () => { render(null, el); el.remove(); host.current = null; };
-  }, []);
-  useLayoutEffect(() => { if (host.current) render(<>{children}</>, host.current); });
-  return null;
-}
 
 /** Проверка имени пользователя: форма — сразу, занятость — через 400 мс после последней правки. */
 function useUsernameStatus(me: Me, value: string): UsernameStatus {
@@ -60,14 +45,9 @@ function BirthdayModal({ value, onSave, onClose }: { value: Birthday | null; onS
   const future = !yearBad && y !== undefined && new Date(y, month - 1, day).getTime() > Date.now();
   const max = daysIn(month, yearBad ? undefined : y);
   const d = Math.min(day, max);
-  useEffect(() => {
-    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') { e.preventDefault(); e.stopPropagation(); onClose(); } };
-    addEventListener('keydown', onKey, true);
-    return () => removeEventListener('keydown', onKey, true);
-  }, []);
   const err = yearBad ? `Год от 1900 до ${nowYear}` : future ? 'Эта дата ещё не наступила' : undefined;
   return (
-    <Modal title="День рождения" onClose={onClose} actions={<>
+    <Modal title="День рождения" size="slim" onClose={onClose} actions={<>
       {value ? <Button variant="danger" onClick={() => onSave(null)}>Удалить</Button> : null}
       <Button variant="ghost" onClick={onClose}>Отмена</Button>
       <Button disabled={!!err} onClick={() => onSave(y === undefined ? { day: d, month } : { day: d, month, year: y })}>Сохранить</Button>
@@ -156,11 +136,7 @@ export function Profile() {
       <Presence show={dirty && ok} exitMs={200}>
         <div class="rl-fab-slot"><Fab icon="check" label="Сохранить" onClick={save} /></div>
       </Presence>
-      <Portal>
-        <Presence show={bday} exitMs={200}>
-          <BirthdayModal value={form.birthday} onClose={() => setBday(false)} onSave={(b) => { set({ birthday: b }); setBday(false); }} />
-        </Presence>
-      </Portal>
+      {bday ? <BirthdayModal value={form.birthday} onClose={() => setBday(false)} onSave={(b) => { set({ birthday: b }); setBday(false); }} /> : null}
       <ConfirmDialog open={!!ask} danger title="Сбросить изменения?" text="Несохранённые изменения профиля пропадут." confirm="Сбросить" cancel="Отмена" onCancel={() => answer(false)} onConfirm={() => answer(true)} />
     </div>
   );

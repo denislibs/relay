@@ -47,7 +47,7 @@ export function QrConfirm() {
   }
 
   return (
-    <Modal title="Войти на новом устройстве?" icon="devices" onClose={close} actions={error ? <Button onClick={close}>Понятно</Button> : (
+    <Modal title="Войти на новом устройстве?" size="slim" icon="devices" onClose={close} actions={error ? <Button onClick={close}>Понятно</Button> : (
       <><Button variant="ghost" onClick={close}>Отмена</Button><Button disabled={!info || busy} onClick={accept}>{busy ? 'Подтверждаем…' : 'Войти'}</Button></>
     )}>
       {error ? <p class="app-qr-text">{error}</p> : (
@@ -93,7 +93,7 @@ export function QrScanner(props: { onClose(): void }) {
   }, []);
 
   return (
-    <Modal title="Подключить устройство" onClose={props.onClose}>
+    <Modal title="Подключить устройство" size="slim" onClose={props.onClose}>
       {!supported || error ? (
         <p class="app-qr-text">{error ?? 'Этот браузер не умеет сканировать QR. Наведите камеру телефона на код — Relay откроется и спросит, подтвердить ли вход.'}</p>
       ) : (

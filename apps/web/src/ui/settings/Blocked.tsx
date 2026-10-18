@@ -74,7 +74,7 @@ export function Blocked() {
       ) : null}
       <div class="rl-fab-slot"><Fab icon="plus" label="Заблокировать пользователя" onClick={() => setPicking(true)} /></div>
       {picking ? (
-        <Modal title="Заблокировать пользователя" onClose={() => setPicking(false)}>
+        <Modal title="Заблокировать пользователя" size="slim" onClose={() => setPicking(false)}>
           <div class="app-block-pick">
             <ContactPicker
               contacts={people.map((p) => ({ ...p, tone: peerTone(p.id) }))} searchLabel="Поиск людей" placeholder="Имя или @имя пользователя"

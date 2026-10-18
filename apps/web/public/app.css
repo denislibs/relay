@@ -49,7 +49,6 @@ body { background: var(--bg); color: var(--ink); font-family: var(--font-sans); 
 .rl-shell .rl-feed .rl-date { position: sticky; top: 8px; z-index: 2; pointer-events: none; }
 .rl-shell .rl-feed .rl-date span { pointer-events: auto; transition: opacity 300ms var(--ease-out); }
 .rl-shell .rl-feed .rl-date.stuck span { opacity: 0; }
-.app-modal-text { margin: 0 0 var(--space-4); color: var(--ink-muted); font: 400 15px/21px var(--font-sans); text-align: center; }
 /* поиск: раздел «Сообщения» в списке слева и строка поиска по чату на месте шапки */
 .app-results { padding: var(--space-2) 0 var(--space-4); }
 .app-results-head { padding: var(--space-2) var(--space-3); color: var(--ink-muted); font: 500 13px/18px var(--font-sans); }
@@ -82,7 +81,6 @@ body { background: var(--bg); color: var(--ink); font-family: var(--font-sans); 
 
 /* профиль (B2) */
 .app-toast-global { position: fixed; bottom: 24px; z-index: 1001; }
-.app-portal .rl-scrim { position: fixed; z-index: 1000; }
 .app-bday { display: flex; flex-direction: column; gap: var(--space-2); }
 .app-bday .rl-tf { padding: var(--space-2) 0 0; }
 .app-tf-ok .rl-tf-msg { color: var(--brand-text); }
@@ -107,8 +105,6 @@ body { background: var(--bg); color: var(--ink); font-family: var(--font-sans); 
 .app-contacts-head .rl-search { flex: 1; min-width: 0; }
 .app-contacts { padding-top: var(--space-1); }
 .rl-row-preview .app-online { color: var(--brand-text); }
-.app-newcontact-dialog { width: min(100%, 520px); }
-.app-newcontact-dialog .rl-confirm-btn:disabled { opacity: 0.4; cursor: default; background: transparent; }
 .app-newcontact { display: flex; gap: var(--space-4); align-items: flex-start; text-align: left; }
 .app-newcontact-avatar { flex-shrink: 0; width: 72px; height: 72px; padding-top: 4px; }
 .app-newcontact-empty { display: inline-flex; align-items: center; justify-content: center; background: var(--field); color: var(--ink-muted); }
@@ -613,10 +609,8 @@ html[data-anim="0"] .app-chatcol, html[data-anim="0"] .app-chatcol-below, html[d
 .app-prof-music:hover { background: rgba(0, 0, 0, .5); }
 
 /* Окно плейлиста (Playlist.tsx) — как в Telegram */
-.app-pl-scrim { z-index: 70; }
-.app-pl { width: min(22.5rem, calc(100vw - 32px)); max-height: calc(100vh - 48px); display: flex; flex-direction: column; gap: 12px; padding: 8px 16px 16px; border-radius: 22px; background: var(--card); color: var(--ink); box-shadow: 0 12px 48px rgba(0,0,0,.3); animation: rl-modal-in 200ms var(--ease-out) both; }
-.app-pl-head { display: flex; align-items: center; gap: 8px; }
-.app-pl-head h2 { margin: 0; font: 500 19px/24px var(--font-sans); }
+.app-pl-dialog { background: var(--card); }
+.app-pl { display: flex; flex-direction: column; gap: 12px; padding: 0 16px 16px; }
 .app-pl-list { max-height: 24rem; overflow-y: auto; padding: 6px; border-radius: 16px; background: var(--raised); scrollbar-width: thin; }
 .app-pl-row { display: flex; align-items: center; gap: 12px; width: 100%; padding: 6px; border: 0; border-radius: 12px; background: none; text-align: left; cursor: pointer; color: var(--ink); }
 .app-pl-row:hover { background: var(--hover); }

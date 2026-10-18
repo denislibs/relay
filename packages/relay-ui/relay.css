@@ -229,12 +229,6 @@ body { margin: 0; font-family: var(--font-sans); color: var(--ink); background: 
 .rl-banner .rl-iconbtn { color: inherit; width: 32px; height: 32px; }
 
 /* ---------- Modal ---------- */
-.rl-scrim { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; padding: var(--space-4); background: var(--scrim); animation: rl-fade var(--dur-base) var(--ease-out) both; }
-.rl-modal { position: relative; width: min(100%, 520px); padding: 40px var(--space-6) var(--space-6); border-radius: var(--radius-xl); background: var(--raised); color: var(--ink); box-shadow: var(--shadow-modal); animation: rl-modal-in var(--dur-base) var(--ease-out) both; }
-.rl-modal-close { position: absolute; top: 12px; right: 12px; }
-.rl-modal-icon { display: flex; justify-content: center; margin-bottom: var(--space-3); color: var(--brand); }
-.rl-modal-title { margin: 0 0 var(--space-6); text-align: center; font: 600 20px/28px var(--font-sans); text-wrap: balance; }
-.rl-modal-actions { display: flex; justify-content: center; gap: var(--space-2); margin-top: var(--space-6); }
 .rl-feature { display: flex; gap: var(--space-4); align-items: flex-start; padding: 10px 0; font: 400 15px/21px var(--font-sans); }
 .rl-feature .rl-icon { margin-top: 1px; color: var(--ink); }
 
@@ -278,13 +272,12 @@ body { margin: 0; font-family: var(--font-sans); color: var(--ink); background: 
 @keyframes rl-spin { to { transform: rotate(360deg); } }
 @keyframes rl-typing { 0%, 60%, 100% { transform: translateY(0); opacity: 0.45; } 30% { transform: translateY(-3px); opacity: 1; } }
 @keyframes rl-fade { from { opacity: 0; } to { opacity: 1; } }
-@keyframes rl-modal-in { from { opacity: 0; transform: scale(0.95); } to { opacity: 1; transform: none; } }
 @keyframes rl-slide-down { from { opacity: 0; transform: translateY(-8px); } to { opacity: 1; transform: none; } }
 @keyframes rl-toast-in { from { opacity: 0; transform: translateY(20px); } to { opacity: 1; transform: none; } }
 @keyframes rl-shimmer { to { transform: translateX(100%); } }
 
 @media (prefers-reduced-motion: reduce) {
-  .rl *, .rl *::before, .rl *::after, .rl-badge, .rl-banner, .rl-modal, .rl-scrim, .rl-toast { animation-duration: 1ms !important; animation-iteration-count: 1 !important; transition-duration: 1ms !important; }
+  .rl *, .rl *::before, .rl *::after, .rl-badge, .rl-banner, .rl-mdl-dialog, .rl-mdl-backdrop, .rl-toast { animation-duration: 1ms !important; animation-iteration-count: 1 !important; transition-duration: 1ms !important; }
 }
 
 /* =====================================================================
@@ -542,8 +535,6 @@ body { margin: 0; font-family: var(--font-sans); color: var(--ink); background: 
 
 /* ---------- Presence exits ---------- */
 .rl-presence { display: contents; }
-.rl-presence[data-state="closing"] .rl-scrim { animation: rl-fade-out var(--dur-base) var(--ease-in) forwards; }
-.rl-presence[data-state="closing"] .rl-modal { animation: rl-pop-out var(--dur-base) var(--ease-in) forwards; }
 .rl-presence[data-state="closing"] .rl-viewer { animation: rl-fade-out var(--dur-base) var(--ease-in) forwards; }
 .rl-presence[data-state="closing"] .rl-viewer-media { animation: rl-pop-out var(--dur-base) var(--ease-in) forwards; }
 .rl-presence[data-state="closing"] .rl-toast { animation: rl-toast-out var(--dur-base) var(--ease-in) forwards; }
@@ -1197,7 +1188,6 @@ button.rl-tab:hover { color: var(--ink); }
 .rl-empty-link-spark .rl-empty-spark { animation: rl-empty-twinkle 3.2s ease-in-out 1.15s 3; }
 @media (prefers-reduced-motion: reduce) { .rl-empty-sun, .rl-empty-spark, .rl-empty-clip, .rl-empty-bob, .rl-empty-link-a, .rl-empty-link-b { animation: none !important; } .rl-empty-sun-fill { animation-duration: 1ms !important; } }
 /* диалог с опасным действием — иконка в цвет кнопки */
-.rl-modal:has(.rl-btn-danger) .rl-modal-icon { color: var(--danger); }
 
 /* ---------- LazyImage and real photos in media bubbles / viewer ---------- */
 .rl-lazy { position: absolute; inset: 0; display: block; overflow: hidden; background: var(--field); }
@@ -1268,19 +1258,6 @@ button.rl-tab:hover { color: var(--ink); }
 .rl-selrow-native { position: absolute; inset: 0; width: 100%; height: 100%; opacity: 0; cursor: pointer; font: inherit; }
 .rl-selrow:focus-within { outline: 2px solid var(--brand-text); outline-offset: -2px; }
 
-.rl-confirm-scrim { position: fixed; inset: 0; z-index: 1000; display: flex; align-items: center; justify-content: center; padding: var(--space-4); background: var(--scrim); animation: rl-fade var(--dur-base) var(--ease-out) both; }
-.rl-confirm { width: min(100%, 400px); padding: var(--space-6) var(--space-6) var(--space-4); border-radius: var(--radius-xl); background: var(--raised); color: var(--ink); box-shadow: var(--shadow-modal); animation: rl-confirm-in var(--dur-base) var(--ease-out) both; }
-.rl-confirm-title { margin: 0 0 var(--space-3); font: 600 20px/28px var(--font-sans); text-align: left; }
-.rl-confirm-text { margin: 0; text-align: left; font: 400 15px/22px var(--font-sans); color: var(--ink-muted); text-wrap: pretty; }
-.rl-confirm-actions { display: flex; justify-content: flex-end; flex-wrap: wrap; gap: var(--space-2); margin-top: var(--space-5); }
-.rl-confirm-btn { border: 0; background: transparent; padding: 0 var(--space-4); height: 40px; border-radius: var(--radius-pill); font: 600 15px/20px var(--font-sans); color: var(--brand-text); cursor: pointer; }
-.rl-confirm-btn:hover, .rl-confirm-btn:focus-visible { background: var(--accent-soft); outline: none; }
-.rl-confirm-btn-danger { color: var(--danger); }
-.rl-confirm-btn-danger:hover, .rl-confirm-btn-danger:focus-visible { background: var(--danger-soft); }
-.rl-presence[data-state="closing"] .rl-confirm-scrim { animation: rl-fade-out var(--dur-base) var(--ease-in) forwards; }
-.rl-presence[data-state="closing"] .rl-confirm { animation: rl-pop-out var(--dur-base) var(--ease-in) forwards; }
-@keyframes rl-confirm-in { from { opacity: 0; transform: scale(0.96); } to { opacity: 1; transform: none; } }
-@media (prefers-reduced-motion: reduce) { .rl-confirm-scrim, .rl-confirm { animation-duration: 1ms !important; } }
 
 .rl-rich { white-space: pre-wrap; overflow-wrap: anywhere; }
 .rl-rich-link { color: var(--brand-text); text-decoration: none; background: none; border: 0; padding: 0; font: inherit; cursor: pointer; }
@@ -1340,7 +1317,7 @@ html[data-blur="0"] .rl-shell .rl-msgmenu .rl-menu, html[data-blur="0"] .rl-shel
 :root[data-anim="0"] .rl-shell-veil, :root[data-anim="0"] .rl-sidecard-body, :root[data-anim="0"] .rl-settings, :root[data-anim="0"] .rl-feed, :root[data-anim="0"] .rl-asidecard > :not(.rl-panel-head) { transition: none; }
 @media (prefers-reduced-motion: reduce) { .rl-shell-veil, .rl-sidecard-body, .rl-settings, .rl-feed, .rl-asidecard > :not(.rl-panel-head) { transition: none; } }
 /* меню, вложения и диалоги лежат поверх оболочки — под размытием тоже не остаются чёткими */
-:root[data-screen-blur] .rl-menu, :root[data-screen-blur] .rl-msgmenu, :root[data-screen-blur] .rl-attach, :root[data-screen-blur] .rl-mentions, :root[data-screen-blur] .rl-confirm-scrim > * { filter: blur(16px) brightness(.8); }
+:root[data-screen-blur] .rl-menu, :root[data-screen-blur] .rl-msgmenu, :root[data-screen-blur] .rl-attach, :root[data-screen-blur] .rl-mentions, :root[data-screen-blur] .rl-mdl-dialog { filter: blur(16px) brightness(.8); }
 
 /* Вкладки над списком — плавающий слой (как в Telegram): список прокручивается под ним */
 .rl-sidecard-main { position: relative; flex: 1; min-height: 0; display: flex; flex-direction: column; }
@@ -1597,3 +1574,37 @@ html[data-blur="0"] .rl-menu, html[data-blur="0"] .rl-attach { -webkit-backdrop-
 .rl-sticker { position: relative; display: inline-block; flex: 0 0 auto; }
 .rl-sticker canvas { display: block; width: 100%; height: 100%; opacity: 0; transition: opacity var(--dur-base) var(--ease-out); }
 .rl-sticker-ready canvas { opacity: 1; }
+
+/* ---------- Модалки (modal.js): слой поверх всего приложения, размеры и движение — как в Telegram Web A ---------- */
+.rl-modal-layer { position: fixed; inset: 0; z-index: 1500; pointer-events: none; }
+.rl-mdl { position: fixed; inset: 0; display: flex; align-items: center; justify-content: center; padding: 2rem var(--space-4); pointer-events: auto; }
+.rl-mdl-backdrop { position: absolute; inset: 0; background: rgba(0, 0, 0, 0.25); animation: rl-fade 150ms ease both; }
+.rl-mdl-dialog { position: relative; display: flex; flex-direction: column; width: 100%; min-width: 17.5rem; max-width: 35rem; max-height: min(92vh, 50rem);
+  border-radius: 2rem; background: var(--raised); color: var(--ink); box-shadow: 0 4px 8px 2px var(--modal-shadow, #72727240); outline: none; isolation: isolate;
+  animation: rl-mdl-in 200ms ease both; }
+@media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) .rl-mdl-dialog { --modal-shadow: #1010109c; } }
+:root[data-theme="dark"] .rl-mdl-dialog { --modal-shadow: #1010109c; }
+.rl-mdl-narrow { max-width: 20rem; }
+.rl-mdl-confirm { max-width: 24rem; }
+.rl-mdl-slim { max-width: 26.25rem; max-height: min(92vh, 36rem); }
+.rl-mdl-closing { pointer-events: none; }
+.rl-mdl-closing .rl-mdl-backdrop { animation: rl-fade-out 150ms ease both; }
+.rl-mdl-closing .rl-mdl-dialog { animation: rl-mdl-out 200ms ease both; }
+@keyframes rl-mdl-in { from { opacity: 0; transform: translate3d(0, -1rem, 0); } to { opacity: 1; transform: none; } }
+@keyframes rl-mdl-out { from { opacity: 1; transform: none; } to { opacity: 0; transform: translate3d(0, 1rem, 0); } }
+.rl-mdl-head { display: flex; align-items: center; flex: 0 0 auto; min-height: 3.5rem; padding: 0.375rem 0.75rem 0; }
+.rl-mdl-title { flex: 1; min-width: 0; margin: 0 1rem; font: 500 20px/28px var(--font-sans); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.rl-mdl-head > .rl-mdl-title:only-child { margin: 0.5rem 0.75rem 0; }
+.rl-mdl-head-actions { display: flex; align-items: center; gap: 4px; }
+.rl-mdl-hero { display: flex; justify-content: center; padding-top: var(--space-2); color: var(--brand); }
+.rl-mdl-body { flex: 1 1 auto; min-height: 0; overflow-y: auto; padding: 1rem 1.5rem 1.1875rem; overscroll-behavior: contain; }
+.rl-mdl-actions { display: flex; flex-wrap: wrap; justify-content: flex-end; align-items: center; gap: 0.5rem; padding: 0 1rem 1rem; }
+.rl-mdl-text { margin: 0; font: 400 15px/22px var(--font-sans); color: var(--ink); text-wrap: pretty; white-space: pre-line; }
+/* текстовые кнопки диалога (подтверждение): справа, основная — цветом бренда, опасная — красным */
+.rl-mdl-btn { height: 40px; padding: 0 var(--space-4); border: 0; border-radius: var(--radius-pill); background: transparent; font: 600 15px/20px var(--font-sans); color: var(--brand-text); cursor: pointer; transition: background-color var(--dur-instant) var(--ease-standard); }
+.rl-mdl-btn:hover, .rl-mdl-btn:focus-visible { background: color-mix(in srgb, var(--brand-text) 10%, transparent); outline: none; }
+.rl-mdl-btn-danger { color: var(--danger); }
+.rl-mdl-btn:disabled { opacity: 0.4; cursor: default; background: transparent; }
+.rl-mdl-btn-danger:hover, .rl-mdl-btn-danger:focus-visible { background: color-mix(in srgb, var(--danger) 10%, transparent); }
+@media (max-width: 450px) { .rl-mdl-dialog { max-width: calc(100vw - 3rem); } }
+@media (prefers-reduced-motion: reduce) { .rl-mdl-dialog, .rl-mdl-closing .rl-mdl-dialog { animation-name: rl-fade; } .rl-mdl-closing .rl-mdl-dialog { animation-name: rl-fade-out; } }

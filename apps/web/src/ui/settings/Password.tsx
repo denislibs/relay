@@ -1,4 +1,4 @@
-import { Button, ConfirmDialog, InfoRow, Owl, PanelHeader, Section, TextField } from '@relay/ui';
+import { Button, ConfirmDialog, InfoRow, Owl, PanelHeader, Section, TextField, Modal } from '@relay/ui';
 import { useEffect, useRef, useState } from 'preact/hooks';
 import { getPassword, removePassword, savePassword, type PasswordState } from '../../authSettings';
 import { back } from '../../nav';
@@ -108,12 +108,13 @@ export function Password() {
 function OffPrompt(props: { onCancel(): void; onSubmit(v: string): void }) {
   const [v, setV] = useState('');
   return (
-    <div class="rl-scrim" onClick={(e) => { if (e.target === e.currentTarget) props.onCancel(); }}>
-      <form class="rl-modal" role="dialog" aria-modal="true" aria-label="Текущий пароль" onSubmit={(e) => { e.preventDefault(); if (v) props.onSubmit(v); }}>
-        <h2 class="rl-modal-title">Текущий пароль</h2>
+    <Modal title="Текущий пароль" size="confirm" onClose={props.onCancel} actions={[
+      <Button key="no" variant="ghost" onClick={props.onCancel}>Отмена</Button>,
+      <Button key="ok" type="submit" form="rl-pw-off" disabled={!v}>Далее</Button>,
+    ]}>
+      <form id="rl-pw-off" onSubmit={(e) => { e.preventDefault(); if (v) props.onSubmit(v); }}>
         <TextField label="Пароль" type="password" value={v} autoFocus onInput={(x: string) => setV(x)} />
-        <div class="rl-modal-actions"><Button variant="ghost" onClick={props.onCancel}>Отмена</Button><Button type="submit" disabled={!v}>Далее</Button></div>
       </form>
-    </div>
+    </Modal>
   );
 }

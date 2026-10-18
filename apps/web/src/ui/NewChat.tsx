@@ -1,4 +1,4 @@
-import { Button, Modal, Presence } from '@relay/ui';
+import { Button, Modal } from '@relay/ui';
 import { useState } from 'preact/hooks';
 import { startDirectChat } from '../data';
 import { setGlobal, useGlobal } from '../global';
@@ -17,9 +17,7 @@ export function NewChat() {
     try { await startDirectChat(id); close(); } catch (err) { setError((err as Error).message); }
   }
   return (
-    <Presence show={open}>
-      <div class="rl-dialog-host" style={{ position: 'fixed', inset: 0, zIndex: 20 }}>
-        <Modal title="Новый чат" icon="chats" onClose={close} actions={[
+        <Modal open={open} title="Новый чат" size="slim" onClose={close} actions={[
           <Button key="c" variant="secondary" onClick={close}>Отмена</Button>,
           <Button key="o" onClick={() => create()}>Начать</Button>,
         ]}>
@@ -30,7 +28,5 @@ export function NewChat() {
             {error ? <p role="alert" style={{ margin: 0, color: 'var(--danger)', textAlign: 'center' }}>{error}</p> : null}
           </form>
         </Modal>
-      </div>
-    </Presence>
   );
 }

@@ -133,7 +133,7 @@ export function Sessions() {
         </>
       ) : null}
       {shown ? (
-        <Modal title={shown.device} onClose={() => setDetails(null)} actions={shown.current ? null : (
+        <Modal title={shown.device} size="slim" onClose={() => setDetails(null)} actions={shown.current ? null : (
           <>
             {shown.unconfirmed ? <Button disabled={locked} onClick={() => void confirmSession(shown.id)}>Это я</Button> : null}
             <Button variant="danger" disabled={locked} onClick={() => end(shown.id)}>Завершить сеанс</Button>
