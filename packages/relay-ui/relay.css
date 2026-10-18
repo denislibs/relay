@@ -1459,11 +1459,8 @@ html[data-blur="0"] .rl-shell .rl-msgmenu .rl-menu, html[data-blur="0"] .rl-shel
 .rl-roundrec-media, .rl-roundrec-media video { position: absolute; inset: 0; width: 100%; height: 100%; }
 .rl-roundrec-video { object-fit: cover; }
 .rl-roundrec-mirror { transform: scaleX(-1); }
-.rl-roundrec-wait { position: absolute; inset: 0; background: linear-gradient(135deg, rgba(255,255,255,.35), rgba(0,0,0,.35));
-  -webkit-backdrop-filter: blur(1.25rem); backdrop-filter: blur(1.25rem); transition: opacity 300ms ease; }
-.rl-roundrec-wait::after { content: ''; position: absolute; inset: 0; background: linear-gradient(110deg, transparent 30%, rgba(255,255,255,.25) 50%, transparent 70%);
-  background-size: 250% 100%; animation: rl-roundrec-shimmer 1.4s linear infinite; }
-@keyframes rl-roundrec-shimmer { from { background-position: 120% 0; } to { background-position: -120% 0; } }
+.rl-roundrec-wait { position: absolute; inset: 0; background: rgba(110, 116, 122, .35);
+  -webkit-backdrop-filter: blur(28px) saturate(1.2); backdrop-filter: blur(28px) saturate(1.2); transition: opacity 300ms ease; }   /* как в Telegram: живой кадр камеры, сильно размытый, пока она «просыпается» */
 .rl-roundrec-ready .rl-roundrec-wait { opacity: 0; }
 .rl-roundrec-ring { position: absolute; inset: 0; transform: rotate(-90deg); }
 .rl-roundrec-ring circle { fill: none; stroke: rgba(255, 255, 255, .9); stroke-width: 2.5; stroke-linecap: round; }
@@ -1472,7 +1469,7 @@ html[data-blur="0"] .rl-shell .rl-msgmenu .rl-menu, html[data-blur="0"] .rl-shel
 .rl-round { position: relative; width: 15rem; height: 15rem; flex-shrink: 0; cursor: pointer; isolation: isolate; }
 .rl-round::before { content: ''; position: absolute; inset: 0; border-radius: 50%; background: #000; }
 .rl-round-thumb, .rl-round-video { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; border-radius: 50%; }
-.rl-round-thumb { filter: blur(10px); clip-path: circle(50%); transition: opacity 300ms var(--ease-out); }
+.rl-round-thumb { inset: -14px; width: calc(100% + 28px); height: calc(100% + 28px); border-radius: 0; filter: blur(14px) saturate(1.15); clip-path: circle(calc(50% - 14px)); transition: opacity 300ms var(--ease-out); }   /* размытие шире круга — края не темнеют */
 .rl-round-loaded .rl-round-thumb { opacity: 0; }
 .rl-round-video { opacity: 0; transition: opacity 300ms var(--ease-out); }
 .rl-round-loaded .rl-round-video { opacity: 1; }
@@ -1511,3 +1508,6 @@ html[data-blur="0"] .rl-menu, html[data-blur="0"] .rl-attach { -webkit-backdrop-
 .rl-row-name-verified { display: flex; align-items: center; }
 .rl-row-name-text { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .rl-row[aria-current="true"] .rl-avatar-logo { box-shadow: 0 0 0 2px rgba(255,255,255,.85); }   /* выбранная строка зелёная — знак не сливается */
+
+.rl-round-dl { display: inline-flex; align-items: center; justify-content: center; width: 54px; height: 54px; border-radius: 50%; background: var(--media-scrim); color: var(--on-media); }
+.rl-round-center .rl-ring-spin > svg, .rl-round-center .rl-ring > svg { animation: rl-ring-rotate 2s linear infinite; }   /* дуга и с известным прогрессом вращается — как в Telegram */
