@@ -81,6 +81,7 @@ body { margin: 0; font-family: var(--font-sans); color: var(--ink); background: 
 .rl-row-author { color: var(--ink); }
 .rl-row-thumb { position: relative; display: inline-block; width: 20px; height: 20px; margin-right: 6px; vertical-align: -5px; }
 .rl-row-thumb img { width: 100%; height: 100%; border-radius: 4px; object-fit: cover; display: block; }
+.rl-row-thumb-round img { border-radius: 50%; }
 .rl-row-thumb .rl-icon { position: absolute; inset: 0; margin: auto; color: #fff; filter: drop-shadow(0 0 2px rgb(0 0 0 / 0.5)); }
 .rl-row-spoiler { letter-spacing: 1px; }
 .rl-row-top .rl-status { flex: none; color: var(--brand-text); }

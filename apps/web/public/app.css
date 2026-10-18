@@ -640,6 +640,7 @@ html[data-anim="0"] .app-chatcol, html[data-anim="0"] .app-chatcol-below, html[d
 .app-pins-segs i { display: block; width: 2px; border-radius: 1px; background: color-mix(in srgb, var(--brand-strong) 35%, transparent); transition: background-color 200ms var(--ease-standard); }
 .app-pins-segs i.app-pins-on { background: var(--brand-strong); }
 .app-pins-thumb { flex: none; width: 36px; height: 36px; border-radius: 4px; object-fit: cover; }
+.app-pins-thumb-round { border-radius: 50%; }
 .app-pins-text { flex: 1; min-width: 0; display: flex; flex-direction: column; font: 400 14px/18px var(--font-sans); }
 .app-pins-text b { font-weight: 500; color: var(--brand-text, var(--brand-strong)); }
 .app-pins-text > span { color: var(--ink); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; animation: app-pins-swap 220ms var(--ease-out) both; }

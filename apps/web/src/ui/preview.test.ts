@@ -1,5 +1,5 @@
 import { expect, test } from 'bun:test';
-import { previewBody } from './preview';
+import { previewBody, previewThumb } from './preview';
 
 // Превью строки чата: у кода входа цифры — точками, оформление (code, спойлер) отбрасывается.
 const flat = (v: unknown): string => (Array.isArray(v) ? v.map(flat).join('') : typeof v === 'string' ? v : '');
@@ -18,4 +18,17 @@ test('previewBody: ordinary messages keep their digits and entities', () => {
   const out = previewBody(m, false);
   expect(flat(out)).toContain('48213');
   expect(hasSpan(out)).toBe(true);
+});
+
+test('music: cover becomes the thumb, text is «title — performer»', () => {
+  const m = { senderId: 1, body: '', kind: 'audio', attachmentName: 'x.mp3', attachmentTitle: 'Плачу в код', attachmentPerformer: 'niceraudiostream479', thumb: 'data:image/jpeg;base64,AA' };
+  expect(previewThumb(m)).toEqual({ src: m.thumb, video: false });
+  expect(flat(previewBody(m, true))).toBe('Плачу в код — niceraudiostream479');
+  expect(flat(previewBody({ ...m, thumb: null }, false))).toBe('🎧 Плачу в код — niceraudiostream479');
+});
+
+test('round video: circular thumb', () => {
+  const m = { senderId: 1, body: '', kind: 'round', thumb: 'data:image/jpeg;base64,AA' };
+  expect(previewThumb(m)).toEqual({ src: m.thumb, video: false, round: true });
+  expect(flat(previewBody(m, true))).toBe('Видеосообщение');
 });

@@ -54,7 +54,7 @@ export function PinnedBar({ chatId }: { chatId: number }) {
               {pinned.map((p, k) => <i key={p} class={k === i ? 'app-pins-on' : ''} style={{ height: seg + 'px' }} />)}
             </span>
           </span>
-          {thumb ? <img class="app-pins-thumb" src={thumb.src} alt="" /> : null}
+          {thumb ? <img class={'app-pins-thumb' + (thumb.round ? ' app-pins-thumb-round' : '')} src={thumb.src} alt="" /> : null}
           <span class="app-pins-text">
             <b>{n > 1 ? `Закреплённое сообщение #${n - i}` : 'Закреплённое сообщение'}</b>
             <span key={id}>{msg ? previewBody(msg as unknown as LastMessage, !!thumb) : '…'}</span>
