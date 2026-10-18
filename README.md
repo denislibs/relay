@@ -16,7 +16,7 @@ Dev-вход (`DEV_LOGIN=1`): `POST /dev/login {"name":"Анна"}` → cookie `
 
 Вложения лежат в S3-совместимом хранилище (SeaweedFS, бакет `relay-files`, ключ — id вложения): клиент берёт подписанный PUT у `POST /uploads`, кладёт файл прямо в хранилище и подтверждает `POST /uploads/:id/confirm` (сервер сверяет размер и тип по HEAD). `GET /files/:id` проверяет доступ и отвечает 302 на подписанный GET на 10 минут. Браузер ходит в хранилище по `S3_PUBLIC_ENDPOINT`. Подробности: `docs/plans/2026-10-18-s3-storage.md`.
 
-Планы: `docs/plans/`.
+Как всё устроено — [ARCHITECTURE.md](ARCHITECTURE.md). Планы: `docs/plans/`.
 
 ## Пакеты
 
