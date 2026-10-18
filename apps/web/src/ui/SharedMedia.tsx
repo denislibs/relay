@@ -50,9 +50,12 @@ export function SharedMedia({ chatId }: { chatId: number }) {
   );
   return (
     <>
-      <div class="rl-aside-tabs">
-        <FolderTabs label="Общие медиа" active={active} onChange={(id: MediaTab) => setTab(id)} items={tabs.map((t) => ({ id: t, label: LABEL[t] }))} />
-      </div>
+      {/* одна непустая вкладка — переключать нечего: вместо одинокой плашки заголовок раздела */}
+      {tabs.length > 1 ? (
+        <div class="rl-aside-tabs">
+          <FolderTabs label="Общие медиа" active={active} onChange={(id: MediaTab) => setTab(id)} items={tabs.map((t) => ({ id: t, label: LABEL[t] }))} />
+        </div>
+      ) : <h3 class="app-sm-heading">{LABEL[tabs[0]]}</h3>}
       <div class="rl-aside-pages">
         <SlideStack variant="tabs" order={tabs} active={active} render={(k: string) => <TabList key={chatId + k} chatId={chatId} tab={k as MediaTab} />} />
       </div>
@@ -97,10 +100,20 @@ function TabList({ chatId, tab }: { chatId: number; tab: MediaTab }) {
 function MediaCell({ m }: { m: Msg }) {
   const a = m.attachment!;
   const video = a.mime.startsWith('video/');
+  // видео без кадра-превью: первый кадр и длительность — из метаданных самого файла (как в Telegram)
+  const [len, setLen] = useState(a.duration ?? 0);
+  const [frame, setFrame] = useState(false);
   return (
     <button type="button" class="app-media-cell" aria-label={a.name} onClick={() => show(m)}>
-      {a.thumb || !video ? <LazyImage src={video ? '' : fileUrl(a)} thumb={a.thumb ?? undefined} alt={a.name} /> : <span class="app-media-video"><Icon name="play" size={28} /></span>}
-      {video && a.duration ? <span class="app-media-dur">{dur(a.duration)}</span> : null}
+      {a.thumb || !video ? <LazyImage src={video ? '' : fileUrl(a)} thumb={a.thumb ?? undefined} alt={a.name} /> : (
+        <span class="app-media-video">
+          <video class={'app-media-frame' + (frame ? ' app-media-frame-in' : '')} src={fileUrl(a) + '#t=0.1'} preload="metadata" muted playsInline tabIndex={-1} aria-hidden="true"
+            onLoadedMetadata={(e) => { const d = (e.currentTarget as HTMLVideoElement).duration; if (!len && Number.isFinite(d)) setLen(d); }}
+            onLoadedData={() => setFrame(true)} />
+          <Icon name="play" size={28} />
+        </span>
+      )}
+      {video && len ? <span class="app-media-dur">{dur(len)}</span> : null}
     </button>
   );
 }
