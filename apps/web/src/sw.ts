@@ -60,7 +60,7 @@ sw.addEventListener('fetch', (e) => {
     }));
     return;
   }
-  if (e.request.method !== 'GET' || url.origin !== location.origin || API.test(url.pathname)) return;
+  if (e.request.method !== 'GET' || url.origin !== location.origin || API.test(url.pathname) || url.pathname === '/version.json') return;
   if (e.request.mode === 'navigate') {
     // свежая разметка, но плохая сеть не держит дольше 3 с — тогда оболочка из кэша
     e.respondWith(networkFirst(e.request, async () => caches.match('/')).catch(() => Response.error()));

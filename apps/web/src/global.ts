@@ -39,6 +39,7 @@ export interface GlobalState {
   muted: number[];     // чаты с выключенными уведомлениями (на этом устройстве)
   theme: ThemePref;   // зеркало prefs.theme для прежних читателей
   prefs: Prefs;       // настройки устройства, см. prefs.ts
+  updateReady: boolean;   // на сервере новая сборка — предлагаем обновиться (update.ts)
   notify: NotifyState;   // уведомления на этом устройстве
   pushReady: boolean;    // подписка Web Push принята сервером: уведомит и без открытой вкладки
   toast: { text: string; id: number } | null;   // общий тост приложения (ошибки сохранения настроек и т. п.)
@@ -89,6 +90,7 @@ let state: GlobalState = {
   muted: (() => { try { return JSON.parse(localStorage.getItem('relay.muted') ?? '[]'); } catch { return []; } })(),
   theme: loadTheme(),
   prefs: getPrefs(),
+  updateReady: false,
   notify: 'unsupported',
   pushReady: false,
   toast: null,

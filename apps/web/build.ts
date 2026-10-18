@@ -32,6 +32,8 @@ async function build(): Promise<void> {
     return;
   }
   await cp(join(root, 'public'), tmp, { recursive: true });
+  // открытые вкладки сверяют свою сборку с этой (update.ts) и предлагают обновиться
+  await Bun.write(join(tmp, 'version.json'), JSON.stringify({ build: BUILD }));
   await cp(join(ui, 'relay.css'), join(tmp, 'relay.css'));
   await cp(join(ui, 'tokens.css'), join(tmp, 'tokens.css'));
   // поверх старой сборки, без удаления папки: сервер ни на миг не остаётся без index.html

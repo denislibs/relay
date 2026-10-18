@@ -1,3 +1,4 @@
+import { fetchBuild, onVisible, startUpdateCheck } from './update';
 import { claimMediaCache, sendMediaPolicy } from './storageInfo';
 import { getPrefs, subscribePrefs, type Prefs } from './prefs';
 import { enableStrictDom } from '@relay/ui';
@@ -12,6 +13,7 @@ import { startTitle } from './title';
 import { App } from './ui/App';
 
 declare const __DEV__: boolean;
+declare const __BUILD__: string;
 
 // dev-сборка: проверка дисциплины measure/mutate (чтение раскладки в фазе записи и наоборот)
 if (__DEV__) enableStrictDom({ ignore: /twallpaper/ });
@@ -76,6 +78,7 @@ if (__DEV__) void import('./devtools/session').then((s) => import('./devtools/me
   (window as unknown as { __dev: object }).__dev = { snapshot: s.devSnapshot, running: () => s.devRunning() || m.metricsRunning() };
 }));
 startTitle();
+startUpdateCheck({ current: __BUILD__, fetchBuild, onUpdate: () => setGlobal({ updateReady: true }), onVisible });
 startScreenBlur();
 render(<App />, document.getElementById('app')!);
 boot();

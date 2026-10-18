@@ -296,3 +296,13 @@ html[data-blur="0"] .app-empty-main .rl-empty, html[data-blur="0"] .app-sidemenu
 .app-accent:active { transform: scale(0.92); }
 .app-accent[aria-checked="true"] { box-shadow: 0 0 0 3px var(--raised), 0 0 0 5px var(--swatch); }
 .app-accent:focus-visible { outline: 2px solid var(--ink); outline-offset: 4px; }
+
+/* «Обновить Relay»: пилюля у нижнего края списка, слева от «Новый чат» (как в Telegram Web A) */
+.app-update-slot { position: absolute; left: var(--space-4); bottom: calc(var(--space-4) + 4px); z-index: 3; pointer-events: none; }
+.app-update { pointer-events: auto; display: inline-flex; align-items: center; gap: var(--space-2); height: 48px; padding: 0 var(--space-5) 0 var(--space-4); border: 0; border-radius: 24px; background: var(--brand-strong); color: #fff; font: 500 15px/1 var(--font-sans); box-shadow: var(--shadow-panel); cursor: pointer; position: relative; overflow: hidden; animation: app-update-in var(--dur-slow) var(--ease-out) both; }
+.app-update:hover { filter: brightness(1.05); }
+.app-update:focus-visible { outline: 2px solid var(--brand-text); outline-offset: 2px; }
+.rl-presence[data-state="closing"] .app-update { animation: app-update-out 200ms var(--ease-standard) forwards; }
+@keyframes app-update-in { from { opacity: 0; transform: translateY(16px) scale(0.96); } to { opacity: 1; transform: none; } }
+@keyframes app-update-out { to { opacity: 0; transform: translateY(8px); } }
+@media (prefers-reduced-motion: reduce) { .app-update { animation: none; } }

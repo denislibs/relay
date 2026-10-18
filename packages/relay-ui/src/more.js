@@ -756,7 +756,8 @@ function SidebarCard(props) {
     props.banner || null,
     // capture: scroll doesn't bubble, and with paged content (props.paged) each page scrolls on its own
     h('div', { class: cx('rl-sidecard-body', props.paged && 'rl-sidecard-paged'), onScrollCapture: onScroll }, props.children),
-    props.fab ? h('div', { class: cx('rl-fab-slot', !fab[0] && 'rl-fab-hidden') }, props.fab) : null);
+    props.fab ? h('div', { class: cx('rl-fab-slot', !fab[0] && 'rl-fab-hidden') }, props.fab) : null,
+    props.overlay || null);   // поверх списка у нижнего края (например «Обновить»)
 }
 
 /* ---------- SidebarHeader: menu, search pill, avatar ---------- */

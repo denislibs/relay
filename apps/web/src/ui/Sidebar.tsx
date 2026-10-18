@@ -1,3 +1,4 @@
+import { UpdatePill } from './UpdatePill';
 import { Avatar, ChatRow, Highlight, Menu, Presence, SlideStack, ChatRowSkeleton, useMinVisible, EmptyState, Fab, WindowList, FolderTabs, SidebarCard, SidebarHeader, peerTone } from '@relay/ui';
 import type { Item } from '@relay/sync-engine/src/types';
 import { loadMoreChats, openChat, searchMessages } from '../data';
@@ -193,6 +194,7 @@ export function Sidebar() {
         </>
       }
       fab={<Fab label="Новый чат" onClick={() => setGlobal({ newChatOpen: true })} />}
+      overlay={<UpdatePill />}
     >
       <SlideStack variant="tabs" order={FOLDERS} active={folder} render={(f: string) => <div class="rl-page-scroll">{renderFolder(f)}</div>} />
     </SidebarCard>
