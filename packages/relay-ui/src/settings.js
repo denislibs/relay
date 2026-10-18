@@ -98,9 +98,9 @@ function TextField(props) {
         'aria-invalid': err ? 'true' : undefined, 'aria-describedby': err ? id + '-err' : undefined,
         onInput: function (e) { if (props.onInput) props.onInput(e.currentTarget.value, e); },
         onBlur: props.onBlur, onKeyDown: props.onKeyDown }),
-      h('label', { class: 'rl-tf-label', for: id }, props.label),
+      h('label', { class: 'rl-tf-label', for: id }, err || props.label),   // ошибка — прямо в подписи, как в Telegram
       showCount ? h('span', { class: cx('rl-tf-count', left <= 5 && 'rl-tf-count-low'), 'aria-hidden': 'true' }, left) : null),
-    h('div', { class: 'rl-tf-msg', id: id + '-err', role: 'status', 'aria-live': 'polite' }, err || (props.hint || '')));
+    h('div', { class: 'rl-tf-msg', id: id + '-err', role: 'status', 'aria-live': 'polite' }, err ? h('span', { class: 'rl-sr-only' }, err) : (props.hint || '')));
 }
 
 /* ---------- SelectRow: подпись слева, значение и ▾ справа; нативный select поверх ---------- */
