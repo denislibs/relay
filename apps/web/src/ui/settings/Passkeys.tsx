@@ -1,4 +1,4 @@
-import { Button, ConfirmDialog, Icon, InfoRow, PanelHeader, Section } from '@relay/ui';
+import { Button, ConfirmDialog, Icon, InfoRow, PanelHeader, Section, Sticker } from '@relay/ui';
 import { useEffect, useState } from 'preact/hooks';
 import { createPasskey, deletePasskey, listPasskeys, passkeysSupported, type Passkey } from '../../authSettings';
 import { back } from '../../nav';
@@ -37,7 +37,7 @@ export function Passkeys() {
         {list == null ? null : list.length === 0 ? (
           <div class="app-passkey-intro">
             <div class="app-pw-head">
-              <span class="app-passkey-art"><Icon name="key" size={56} /></span>
+              <Sticker name="key" size={120} replay="click" />
               <h3>Защитите аккаунт</h3>
               <p>Входите без кода: паскей хранится в менеджере паролей и открывается Face ID, отпечатком или паролем устройства.</p>
             </div>
