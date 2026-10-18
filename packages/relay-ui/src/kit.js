@@ -684,6 +684,46 @@ function mediaHeld(policy, items, out) {
   });
 }
 
+/* Цвет хвостика у картинки без рамки — как в Telegram: цвет самого углового пикселя картинки
+   (своё — правый нижний, чужое — левый нижний). Сначала из полного изображения (если браузер разрешает читать
+   его пиксели), иначе — из встроенной миниатюры в её родном размере. Результат кэшируем по адресу. */
+var tailColors = new Map();
+function cornerPixel(src, out) {
+  return new Promise(function (resolve, reject) {
+    var img = new Image();
+    img.decoding = 'async';
+    img.onload = function () {
+      try {
+        var w = img.naturalWidth, hgt = img.naturalHeight, k = Math.min(1, 256 / Math.max(w, hgt)); // большое — уменьшаем до 256px: угол тот же
+        var c = document.createElement('canvas'); c.width = Math.max(1, Math.round(w * k)); c.height = Math.max(1, Math.round(hgt * k));
+        var x = c.getContext('2d', { willReadFrequently: true });
+        x.drawImage(img, 0, 0, c.width, c.height);
+        var d = x.getImageData(out ? c.width - 1 : 0, c.height - 1, 1, 1).data;
+        resolve('rgb(' + d[0] + ',' + d[1] + ',' + d[2] + ')');
+      } catch (e) { reject(e); }
+    };
+    img.onerror = reject;
+    img.src = src;
+  });
+}
+function useTailColor(full, thumb, out) {
+  var key = full || thumb ? (out ? 'r:' : 'l:') + (full || thumb) : null;
+  var st = useState(key ? tailColors.get(key) || null : null);
+  useEffect(function () {
+    if (!key) return undefined;
+    if (tailColors.has(key)) { st[1](tailColors.get(key)); return undefined; }
+    var alive = true;
+    // полное — только своё (тот же домен, blob:, data:): чужое с CORS скачалось бы второй раз
+    var own = full && (/^(data|blob):/.test(full) || new URL(full, location.href).origin === location.origin);
+    var p = own ? cornerPixel(full, out) : Promise.reject();
+    p.catch(function () { return thumb ? cornerPixel(thumb, out) : Promise.reject(); })
+      .then(function (color) { tailColors.set(key, color); if (alive) st[1](color); })
+      .catch(function () { /* нечем посчитать — останется нейтральный */ });
+    return function () { alive = false; };
+  }, [key]);
+  return key ? st[0] || '#ccc' : null;
+}
+
 function MediaBubble(props) {
   var out = props.from === 'out';
   var items = props.items || [{ seed: props.seed || 0, kind: props.kind || 'image', duration: props.duration }];
@@ -699,6 +739,10 @@ function MediaBubble(props) {
     } });
   }
   var extra = items.length - 4;
+  var mediaOnly = !props.caption && !props.author;
+  // у одиночного фото без рамки хвостик красится в цвет нижнего угла картинки (как в Telegram); у альбома — последней ячейки
+  var cornerOf = items[album ? Math.min(items.length, 4) - 1 : 0] || {};
+  var tailColor = useTailColor(mediaOnly && props.tail ? cornerOf.src : null, mediaOnly && props.tail ? cornerOf.thumb : null, out);
   function cell(it, i) {
     var last = album && i === 3 && extra > 0;
     return h('button', { key: i, type: 'button', class: 'rl-media-cell', onClick: function () { if (props.onOpen && state === 'ready') props.onOpen(i); }, 'aria-label': it.kind === 'video' ? 'Открыть видео' : 'Открыть фото' },
@@ -708,8 +752,10 @@ function MediaBubble(props) {
       !album ? h(MediaOverlay, { state: state, kind: it.kind, progress: props.progress, size: props.size, onDownload: props.onDownload, onCancel: props.onCancel }) : null);
   }
   return h('div', { class: cx('rl-msgline', out && 'rl-msgline-out', props.groupStart && 'rl-msgline-gap') },
-    // без подписи и автора — как в Telegram: картинка без рамки пузыря (без фона, отступов и хвостика), углы — от пузыря
-    h('div', { class: cx('rl-bubble rl-media', !props.caption && !props.author && 'rl-media-only', out ? 'rl-bubble-out' : 'rl-bubble-in-side', props.tail && (props.caption || props.author) && 'rl-bubble-tail', props.appear && (out ? 'rl-appear-out' : 'rl-appear-in')) },
+    // без подписи и автора — как в Telegram: картинка без рамки пузыря (без фона и отступов), углы — от пузыря;
+    // хвостик остаётся, а его цвет берётся из нижнего угла картинки (см. useTailColor)
+    h('div', { class: cx('rl-bubble rl-media', mediaOnly && 'rl-media-only', out ? 'rl-bubble-out' : 'rl-bubble-in-side', props.tail && 'rl-bubble-tail', props.appear && (out ? 'rl-appear-out' : 'rl-appear-in')),
+      style: tailColor ? { '--tail-bg': tailColor } : undefined },
       props.author ? h('span', { class: 'rl-bubble-author rl-media-author', style: { color: 'var(--peer-' + (props.authorTone != null ? props.authorTone : 5) + ')' } }, props.author) : null,
       h('div', { class: cx('rl-media-frame', album && 'rl-media-album'), style: album ? null : { aspectRatio: props.ratio || '4 / 3' } },
         (album ? items.slice(0, 4) : items).map(cell),
