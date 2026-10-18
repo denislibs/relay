@@ -12,6 +12,7 @@ import { connected, disconnected, listPresence, type Publish } from './domain/pr
 import { searchMessages } from './domain/search';
 import { confirmUpload, createUpload, downloadTtl, fileFor, signedDownload } from './domain/files';
 import { handleFrame } from './ws';
+import { addProfileMusic, listProfileMusic, removeProfileMusic } from './domain/profileMusic';
 import { journalStats } from './domain/journal';
 import { notifyLatency } from './realtime';
 import { checkUsername, getMe, getUser, setUsername, updateProfile } from './domain/profile';
@@ -114,6 +115,15 @@ export function createServer(opts: { port: number }): Server {
           if (!body || !('username' in body)) return fail('bad_frame');
           return Response.json(await setUsername(userId, body.username));
         }
+        const music = /^\/users\/(\d{1,15})\/music$/.exec(url.pathname);
+        if (req.method === 'GET' && music) return Response.json({ tracks: await listProfileMusic(userId, Number(music[1])) });
+        if (req.method === 'POST' && url.pathname === '/me/music') {
+          const body = (await req.json().catch(() => null)) as { chatId?: unknown; messageId?: unknown } | null;
+          if (!Number.isSafeInteger(body?.chatId) || !Number.isSafeInteger(body?.messageId)) return fail('bad_frame');
+          return Response.json({ tracks: await addProfileMusic(userId, body!.chatId as number, body!.messageId as number) });
+        }
+        const myTrack = /^\/me\/music\/([0-9a-f-]{36})$/.exec(url.pathname);
+        if (req.method === 'DELETE' && myTrack) return Response.json({ tracks: await removeProfileMusic(userId, myTrack[1]) });
         if (req.method === 'GET' && url.pathname === '/users/check-username') {
           return Response.json(await checkUsername(userId, url.searchParams.get('u')));
         }

@@ -1,6 +1,8 @@
+import { Playlist } from './Playlist';
+import { inProfile, toggleProfileMusic, type Track } from '../music';
 import { Avatar, Button, Icon, MediaPolicy, peerTone, ChatSearchBar, Highlight, ripple, useMinVisible, requestMeasure, Composer, DropOverlay, GlassBar, IconButton, Menu, Modal, Presence, ReactionPicker, requestMutation, applyMarkdown, emptyValue, sameValue, voiceSupported, PlayerBar, roundSupported, startRound, Verified } from '@relay/ui';
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'preact/hooks';
-import { closeChat, deleteMessage, editMessage, ensureNames, focusMessage, openUserChat, sendFile, sendRound, sendVoice, react, saveDraft, searchMessages, send, typing, typingDone } from '../data';
+import { closeChat, deleteMessage, editMessage, ensureNames, focusMessage, openChat, openUserChat, sendFile, sendRound, sendVoice, react, saveDraft, searchMessages, send, typing, typingDone } from '../data';
 import type { Item, SearchHit } from '@relay/sync-engine/src/types';
 import type { Entity } from '@relay/protocol';
 
@@ -235,6 +237,14 @@ export function Chat({ chatId, frameKey, active }: { chatId: number; frameKey: s
   return (
     <>
       <span ref={shell} hidden />
+      {/* плеер — остров над шапкой (как в Telegram): шапка плавно уезжает вниз, пока он открыт */}
+      <PlayerBar
+        onTitle={(t: Track) => { if (t.msgId != null && t.chatId) { if (t.chatId === chatId) focusMessage({ id: t.msgId, sort: t.msgId }); else openChat(t.chatId, { id: t.msgId, sort: t.msgId }); } }}
+        onPlaylist={() => setGlobal({ playlistOpen: true })}
+        inProfile={inProfile}
+        onToggleProfile={(t: Track) => { if (t.msgId != null || inProfile(t)) void toggleProfileMusic(t); else showToast('В профиль можно добавить трек из чата'); }}
+      />
+      <Playlist />
       <GlassBar class={finding ? 'app-finding' : ''}>
         {/* поверх другого чата — «Назад» к нему (и на широком экране), нижний — к списку на узком */}
         <IconButton class={depth > 1 ? 'app-back app-back-inner' : 'app-back'} icon="arrowLeft" label={depth > 1 ? 'Назад' : 'К списку чатов'} onClick={closeChat} />
@@ -247,7 +257,6 @@ export function Chat({ chatId, frameKey, active }: { chatId: number; frameKey: s
         </button>
         <IconButton icon="search" label="Поиск по чату" onClick={() => setFinding(true)} />
         <IconButton icon="more" label="Информация" onClick={() => setGlobal({ infoOpen: !infoOpen })} />
-        <PlayerBar />
         {/* поиск по чату — карточка внутри шапки, как в Telegram: аватар и правая кнопка остаются видны */}
         {finding ? (
           <div class={'app-findcard' + (listOpen && found ? ' app-findcard-open' : '')}>

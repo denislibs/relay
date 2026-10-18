@@ -1,10 +1,11 @@
 import type { Item } from '@relay/sync-engine/src/types';
 import type { Entity } from '@relay/protocol';
-import { Bubble, peerTone, DateDivider, FileBubble, MediaBubble, MessageText, VoiceBubble, RoundBubble, player, MediaViewer, ScrollToBottom, forceMeasure, isHeavyAnimating, onHeavyAnimationEnd, requestMeasure, requestMutation } from '@relay/ui';
+import { Bubble, peerTone, DateDivider, FileBubble, MediaBubble, MessageText, VoiceBubble, MusicBubble, RoundBubble, player, MediaViewer, ScrollToBottom, forceMeasure, isHeavyAnimating, onHeavyAnimationEnd, requestMeasure, requestMutation } from '@relay/ui';
 import { memo } from 'preact/compat';
 import { useEffect, useLayoutEffect, useRef, useState } from 'preact/hooks';
 import { clearFocus, ensureNames, focusMessage, localPreview, markListened, moveWindow, react, savePosition, savedPosition, seen } from '../data';
-import { frameByKey, getGlobal, useGlobal } from '../global';
+import { activeFrame, frameByKey, getGlobal, useGlobal } from '../global';
+import { toggleMusic, trackTitle } from '../music';
 import { showToast } from '../settingsData';
 import { clock, dayKey, dayLabel, fileSize } from './format';
 
@@ -93,7 +94,25 @@ const Row = memo(function Row({ chatId, voiceTitle, author, onAuthor, onOpen, hl
       </div>
     );
   }
-  if (att && !m.deleted && att.id !== undefined && (att.kind === 'file' || att.kind === 'audio')) {
+  if (att && !m.deleted && att.kind === 'audio') {
+    return (
+      <div class={flash ? 'app-msg app-msg-flash' : 'app-msg'} data-key={m.key} data-sort={m.sort as number}>
+        <MusicBubble
+          from={out ? 'out' : 'in'} tail={end} groupStart={start}
+          trackKey={m.key as string} title={trackTitle(att.name)} duration={att.duration ?? 0} size={fileSize(att.size)}
+          uploading={pending} progress={m.progress as number}
+          time={clock(m.createdAt as string)} status={out ? m.status : undefined}
+          onToggle={() => {
+            // плейлист — музыка загруженного окна ленты, новые сверху
+            const list = (activeFrame(getGlobal())?.messages ?? []).filter((x) => !x.deleted && (x.attachment as Att | null)?.kind === 'audio' && x.id != null).reverse();
+            toggleMusic(m as never, list as never, chatId);
+          }}
+        />
+        {mark}
+      </div>
+    );
+  }
+  if (att && !m.deleted && att.id !== undefined && att.kind === 'file') {
     const ext = (att.name.split('.').pop() ?? 'file').slice(0, 4);
     return (
       <div class={flash ? 'app-msg app-msg-flash' : 'app-msg'} data-key={m.key} data-sort={m.sort as number}>
@@ -139,10 +158,12 @@ const noop = () => {}; // цитата — кнопка; сам клик лов�
 function voiceTrack(m: Item, att: Att, chatId: number, author: string, out: boolean) {
   return {
     key: m.key as string,
+    kind: 'voice' as const,
     src: localPreview(m.key as string) ?? fileUrl(att),
     duration: att.duration ?? 0,
     title: author,
     subtitle: 'Голосовое сообщение',
+    chatId, msgId: (m.id as number | null) ?? null,
     onListened: !out && m.id != null && !m.listened ? () => markListened(chatId, m.id as number) : undefined,
   };
 }

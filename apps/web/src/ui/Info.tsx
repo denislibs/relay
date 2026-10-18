@@ -1,6 +1,7 @@
 import type { ProfileLink } from '@relay/protocol';
 import { ProfileLinks } from './links/ProfileLinks';
 import { SharedMedia } from './SharedMedia';
+import { loadProfileMusic, playProfile, type ProfileTrack } from '../music';
 import { Avatar, Icon, InfoRow, PanelHeader, RichText, SettingsIcon, SlideStack, Switch, Verified } from '@relay/ui';
 import type { Item } from '@relay/sync-engine/src/types';
 import { chatTone, isSystemChat } from './format';
@@ -72,7 +73,10 @@ export function Info() {
       <PanelHeader icon="close" closeLabel="Закрыть" title="Информация" onClose={close} action={action} />
       <div class="rl-aside-body">
         <div class="rl-profile">
-          <Avatar name={title} tone={chatTone(chat)} size={120} logo={system} />
+          <div class="app-prof-ava">
+            <Avatar name={title} tone={chatTone(chat)} size={120} logo={system} />
+            {peerId ? <ProfileMusicPill userId={peerId} /> : null}
+          </div>
           <div class="rl-profile-name">{title}{system ? <Verified size={22} /> : null}</div>
           <div class={'rl-profile-sub' + (myPeer?.online ? ' app-online' : '')}>{subtitle || ' '}</div>
         </div>
@@ -137,4 +141,21 @@ function Expand({ show, children }: { show: boolean; children: ComponentChildren
     return () => cancelAnimationFrame(id);
   }, [show]);
   return <div class="app-expand" data-state={show ? state : 'closed'}><div class="app-expand-inner">{children}</div></div>;
+}
+
+/** Музыка профиля — плашка поверх низа аватара (как в Telegram): «♪ трек ›», клик — играть и открыть плейлист. */
+function ProfileMusicPill({ userId }: { userId: number }) {
+  const [tracks, setTracks] = useState<ProfileTrack[]>([]);
+  useEffect(() => {
+    let live = true;
+    setTracks([]);
+    loadProfileMusic(userId).then((t) => { if (live) setTracks(t); }).catch(() => {});
+    return () => { live = false; };
+  }, [userId]);
+  if (!tracks.length) return null;
+  return (
+    <button type="button" class="app-prof-music" onClick={() => playProfile(userId, tracks)}>
+      <Icon name="music" size={14} /><span>{tracks[0].title}</span><Icon name="chevronRight" size={14} />
+    </button>
+  );
 }

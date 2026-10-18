@@ -58,6 +58,8 @@ export interface GlobalState {
   theme: ThemePref;   // зеркало prefs.theme для прежних читателей
   prefs: Prefs;       // настройки устройства, см. prefs.ts
   updateReady: boolean;   // на сервере новая сборка — предлагаем обновиться (update.ts)
+  playlistOpen: boolean;  // окно плейлиста музыки (music.ts)
+  myMusic: string[];      // id вложений, добавленных в мой профиль
   notify: NotifyState;   // уведомления на этом устройстве
   pushReady: boolean;    // подписка Web Push принята сервером: уведомит и без открытой вкладки
   toast: { text: string; id: number } | null;   // общий тост приложения (ошибки сохранения настроек и т. п.)
@@ -111,6 +113,8 @@ let state: GlobalState = {
   theme: loadTheme(),
   prefs: getPrefs(),
   updateReady: false,
+  playlistOpen: false,
+  myMusic: [],
   notify: 'unsupported',
   pushReady: false,
   toast: null,

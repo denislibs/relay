@@ -1446,7 +1446,15 @@ html[data-blur="0"] .rl-shell .rl-msgmenu .rl-menu, html[data-blur="0"] .rl-shel
 .rl-vb-dot { width: .5rem; height: .5rem; margin-inline-start: .375rem; border-radius: 50%; background: var(--voice-progress); }
 
 /* ---------- плеер под шапкой чата ---------- */
-.rl-playerbar { position: absolute; z-index: 4; left: 0; right: 0; top: calc(100% + 6px); height: 3rem; box-sizing: border-box;
+/* остров плеера над шапкой: раскрывается по высоте (шапка плавно уезжает вниз), пока раскрывается — обрезан */
+.rl-playerslot { display: grid; grid-template-rows: 1fr; width: 100%; max-width: var(--chat-max, none); margin-inline: auto; position: relative; z-index: 4; animation: rl-pslot-in 300ms cubic-bezier(.25, 1, .5, 1) both; }
+@keyframes rl-pslot-in { from { grid-template-rows: 0fr; } }
+.rl-presence[data-state="closing"] .rl-playerslot { animation: rl-pslot-out 300ms cubic-bezier(.33, 1, .68, 1) forwards; }
+@keyframes rl-pslot-out { to { grid-template-rows: 0fr; } }
+.rl-playerclip { min-height: 0; overflow: hidden; padding-bottom: 8px; animation: rl-unclip 1ms 300ms forwards; }   /* после раскрытия — меню плеера не обрезаются */
+@keyframes rl-unclip { to { overflow: visible; } }
+.rl-presence[data-state="closing"] .rl-playerclip { animation: none; overflow: hidden; }
+.rl-playerbar { position: relative; z-index: 4; height: 3rem; box-sizing: border-box;
   display: flex; align-items: center; gap: 2px; padding: 0 6px; border-radius: var(--radius-panel, 16px); background: var(--glass, var(--raised)); box-shadow: var(--shadow-panel, var(--shadow-float));
   -webkit-backdrop-filter: blur(20px) saturate(1.4); backdrop-filter: blur(20px) saturate(1.4); overflow: hidden;
   animation: rl-pbar-in 300ms cubic-bezier(.25, 1, .5, 1) both; }
@@ -1457,7 +1465,7 @@ html[data-blur="0"] .rl-shell .rl-msgmenu .rl-menu, html[data-blur="0"] .rl-shel
 .rl-playerbar-off { opacity: .35; pointer-events: none; }
 .rl-playerbar-play { position: relative; flex-shrink: 0; width: 2rem; height: 2rem; padding: 0; border: 0; border-radius: 50%; cursor: pointer; background: transparent; color: var(--brand-text, var(--brand)); }
 .rl-playerbar-play > .rl-icon { position: absolute; top: 50%; left: 50%; margin: -10px 0 0 -10px; transition: opacity .4s var(--ease-out), transform .6s cubic-bezier(.34, 1.56, .64, 1); }
-.rl-playerbar-text { flex: 1; min-width: 0; display: flex; flex-direction: column; margin-left: 6px; font: 400 13px/17px var(--font-sans); color: var(--ink-muted); }
+.rl-playerbar-text { flex: 1; min-width: 0; display: flex; flex-direction: column; align-items: flex-start; margin-left: 6px; padding: 0; border: 0; background: none; text-align: left; cursor: pointer; font: 400 13px/17px var(--font-sans); color: var(--ink-muted); }
 .rl-playerbar-text b { font-weight: 500; font-size: 14px; color: var(--ink); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .rl-playerbar-text > span { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; font-variant-numeric: tabular-nums; }
 .rl-playerbar-speed-wrap { position: relative; }
@@ -1465,7 +1473,12 @@ html[data-blur="0"] .rl-shell .rl-msgmenu .rl-menu, html[data-blur="0"] .rl-shel
   font: 600 11px/1 var(--font-sans); color: var(--ink-muted); }
 .rl-playerbar-speed-on { color: var(--brand-text, var(--brand)); }
 .rl-playerbar-menu { position: absolute; right: 0; top: calc(100% + 6px); z-index: 30; }
-.rl-playerbar-line { position: absolute; left: 0; right: 0; bottom: 0; height: 2px; background: var(--brand); transform: scaleX(0); transform-origin: left; }
+.rl-playerbar-seek { position: absolute; left: 0; right: 0; bottom: 0; height: 6px; cursor: pointer; }
+.rl-playerbar-line { position: absolute; left: 0; right: 0; bottom: 0; height: 2px; background: var(--brand-strong); transform: scaleX(0); transform-origin: left; pointer-events: none; }
+.rl-playerbar-seek:hover .rl-playerbar-line { height: 4px; }
+.rl-playerbar-vol { position: relative; }
+.rl-playerbar-volpop { position: absolute; left: 50%; top: calc(100% - 2px); z-index: 30; transform: translateX(-50%); padding: 12px 8px; border-radius: 14px; background: var(--menu-bg); box-shadow: var(--menu-shadow); -webkit-backdrop-filter: blur(24px); backdrop-filter: blur(24px); }
+.rl-playerbar-volpop input { writing-mode: vertical-lr; direction: rtl; width: 20px; height: 96px; accent-color: var(--brand-strong); }
 
 /* ---------- круг записи кружка ---------- */
 .rl-roundrec { position: fixed; z-index: 60; left: 50%; top: 50%; width: min(22.5rem, 70vmin); aspect-ratio: 1; border-radius: 50%; overflow: hidden;
@@ -1529,3 +1542,19 @@ html[data-blur="0"] .rl-menu, html[data-blur="0"] .rl-attach { -webkit-backdrop-
 
 .rl-round-dl { display: inline-flex; align-items: center; justify-content: center; width: 54px; height: 54px; border-radius: 50%; background: var(--media-scrim); color: var(--on-media); }
 .rl-round-center .rl-ring-spin > svg, .rl-round-center .rl-ring > svg { animation: rl-ring-rotate 2s linear infinite; }   /* дуга и с известным прогрессом вращается — как в Telegram */
+
+/* Музыка в ленте (musicBubble.js) */
+.rl-music { min-width: 260px; max-width: 340px; padding: 8px 10px 6px 8px; }
+.rl-music-row { display: flex; align-items: center; gap: 12px; }
+.rl-music-play { position: relative; flex: none; width: 48px; height: 48px; border: 0; border-radius: 50%; background: var(--brand-strong); color: #fff; cursor: pointer; }
+.rl-bubble-out .rl-music-play { background: var(--bubble-out-accent, var(--brand-strong)); }
+.rl-music-play > .rl-icon { position: absolute; top: 50%; left: 50%; margin: -12px 0 0 -12px; transition: opacity .4s var(--ease-out), transform .6s cubic-bezier(.34, 1.56, .64, 1); }
+.rl-music-text { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
+.rl-music-text b { font: 500 15px/20px var(--font-sans); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.rl-music-text > span, .rl-music-live > span { font: 400 13px/18px var(--font-sans); color: var(--meta, var(--ink-muted)); font-variant-numeric: tabular-nums; }
+.rl-music-live { display: flex; flex-direction: column; gap: 4px; }
+.rl-music-seek { position: relative; height: 10px; cursor: pointer; }
+.rl-music-seek::before, .rl-music-seek > i { content: ''; position: absolute; left: 0; right: 0; top: 4px; height: 2px; border-radius: 1px; }
+.rl-music-seek::before { background: color-mix(in srgb, currentColor 22%, transparent); }
+.rl-music-seek > i { background: var(--brand-strong); transform: scaleX(0); transform-origin: left; }
+.rl-music-meta { display: flex; justify-content: flex-end; align-items: center; gap: 3px; font: 400 12px/14px var(--font-sans); color: var(--meta, var(--ink-muted)); margin-top: 2px; }

@@ -3,6 +3,7 @@ import type { Item } from '@relay/sync-engine/src/types';
 import { useEffect, useRef, useState } from 'preact/hooks';
 import { chatMedia, chatMediaCounts, focusMessage, type MediaTab } from '../data';
 import { getGlobal, useGlobal } from '../global';
+import { toggleMusic, trackTitle } from '../music';
 import { clock, dayLabel, fileSize } from './format';
 
 // «Общие медиа» в правой панели — как в Telegram: Медиа, Файлы, Ссылки, Музыка, Голосовые.
@@ -12,7 +13,7 @@ const ORDER: MediaTab[] = ['media', 'file', 'link', 'audio', 'voice'];
 const LABEL: Record<MediaTab, string> = { media: 'Медиа', file: 'Файлы', link: 'Ссылки', audio: 'Музыка', voice: 'Голосовые' };
 
 type Att = { id: string; kind: string; mime: string; name: string; size: number; thumb?: string | null; duration?: number | null };
-type Msg = Item & { id: number; senderId: number; createdAt: string; body: string; attachment?: Att | null; entities?: { type: string; offset: number; length: number; url?: string }[] | null };
+type Msg = Item & { id: number; clientId: string; senderId: number; createdAt: string; body: string; attachment?: Att | null; entities?: { type: string; offset: number; length: number; url?: string }[] | null };
 
 const when = (iso: string) => `${dayLabel(iso)}, ${clock(iso)}`;
 const dur = (s?: number | null) => { s = Math.max(0, Math.round(s ?? 0)); return Math.floor(s / 60) + ':' + String(s % 60).padStart(2, '0'); };
@@ -144,28 +145,29 @@ function LinkRow({ m }: { m: Msg }) {
   );
 }
 
-/** Музыка и голосовые: круглая кнопка 48 px (у кружка — его кадр), играет во общем плеере, очередь — эта вкладка. */
+/** Музыка и голосовые: круглая кнопка 48 px (у кружка — его кадр). Ключ трека — ключ сообщения (как в ленте),
+ *  поэтому состояние кнопки общее с лентой и плеером; плейлист / очередь — эта вкладка. */
 function TrackRow({ m, chatId, items }: { m: Msg; chatId: number; items: Msg[] }) {
   const a = m.attachment!;
-  const key = 'sm:' + chatId + ':' + m.id;
+  const key = String(m.clientId);
   const [st, setSt] = useState(() => player.playerState());
   useEffect(() => player.subscribe(setSt), []);
   const playing = st.key === key && st.playing;
   const music = a.kind === 'audio';
   const g = getGlobal(), me = g.me?.userId;
   const chat = g.chats.find((c) => c.id === chatId);
-  const title = music ? a.name.replace(/\.[^.]{1,5}$/, '') : senderTitle(m.senderId, me, chat);
-  const track = (x: Msg) => ({ key: 'sm:' + chatId + ':' + x.id, src: fileUrl(x.attachment!), duration: x.attachment!.duration ?? 0,
-    title: x.attachment!.kind === 'audio' ? x.attachment!.name.replace(/\.[^.]{1,5}$/, '') : senderTitle(x.senderId, me, chat),
-    subtitle: x.attachment!.kind === 'audio' ? 'Музыка' : x.attachment!.kind === 'round' ? 'Видеосообщение' : 'Голосовое сообщение' });
+  const title = music ? trackTitle(a.name) : senderTitle(m.senderId, me, chat);
+  const voiceTrack = (x: Msg) => ({ key: String(x.clientId), kind: 'voice' as const, src: fileUrl(x.attachment!), duration: x.attachment!.duration ?? 0,
+    title: senderTitle(x.senderId, me, chat), subtitle: x.attachment!.kind === 'round' ? 'Видеосообщение' : 'Голосовое сообщение', chatId, msgId: x.id });
   const toggle = () => {
-    // очередь — список вкладки: у музыки «дальше» — старее (как в Telegram), у голосовых — новее
+    if (music) { toggleMusic(m as never, items as never, chatId); return; }
+    // голосовые: «дальше» — новее (как в Telegram), список вкладки — новые сверху
     player.setQueue((k: string, dir: 1 | -1) => {
-      const i = items.findIndex((x) => 'sm:' + chatId + ':' + x.id === k);
-      const j = i + (music ? dir : -dir);
-      return i >= 0 && items[j] ? track(items[j]) : null;
+      const i = items.findIndex((x) => String(x.clientId) === k);
+      const j = i - dir;
+      return i >= 0 && items[j] ? voiceTrack(items[j]) : null;
     });
-    player.toggle(track(m));
+    player.toggle(voiceTrack(m));
   };
   return (
     <div class="app-sm-row">
@@ -176,13 +178,16 @@ function TrackRow({ m, chatId, items }: { m: Msg; chatId: number; items: Msg[] }
       <div class="app-sm-text">
         <div class="app-sm-head">
           <b class="app-sm-title">{title}</b>
-          {!music ? <button type="button" class="app-sm-date app-sm-right" onClick={() => show(m)}>{clock(m.createdAt)}</button> : null}
+          {!music ? <button type="button" class="app-sm-date app-sm-right" onClick={() => show(m)}>{short(m.createdAt)}</button> : null}
         </div>
         <small>{dur(a.duration)}{music ? <> • <button type="button" class="app-sm-date" onClick={() => show(m)}>{when(m.createdAt)}</button></> : null}</small>
       </div>
     </div>
   );
 }
+
+/** Коротко, как в Telegram: сегодня — время, иначе — дата. */
+const short = (iso: string) => (new Date(iso).toDateString() === new Date().toDateString() ? clock(iso) : dayLabel(iso));
 
 /** «Вы → Имя чата» за свои, «Отправитель → Группа» в группе, иначе — имя (как в Telegram). */
 function senderTitle(senderId: number, me: number | undefined, chat: Item | undefined): string {
