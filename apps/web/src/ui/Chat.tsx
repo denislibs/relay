@@ -1,13 +1,13 @@
-import { Avatar, Button, MediaPolicy, peerTone, ChatSearchBar, Highlight, ripple, useMinVisible, requestMeasure, Composer, DropOverlay, GlassBar, IconButton, Menu, Modal, Presence, ReactionPicker, requestMutation, applyMarkdown, emptyValue, sameValue } from '@relay/ui';
+import { Avatar, Button, MediaPolicy, peerTone, ChatSearchBar, Highlight, ripple, useMinVisible, requestMeasure, Composer, DropOverlay, GlassBar, IconButton, Menu, Modal, Presence, ReactionPicker, requestMutation, applyMarkdown, emptyValue, sameValue, voiceSupported, PlayerBar, roundSupported, startRound } from '@relay/ui';
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'preact/hooks';
-import { closeChat, deleteMessage, editMessage, ensureNames, focusMessage, openUserChat, sendFile, react, saveDraft, searchMessages, send, typing, typingDone } from '../data';
+import { closeChat, deleteMessage, editMessage, ensureNames, focusMessage, openUserChat, sendFile, sendRound, sendVoice, react, saveDraft, searchMessages, send, typing, typingDone } from '../data';
 import type { Item, SearchHit } from '@relay/sync-engine/src/types';
 import type { Entity } from '@relay/protocol';
 
 type Value = { text: string; entities: Entity[] };
 type ComposerApi = { getValue(): Value; setValue(v: Value, opts?: { focus?: boolean; instant?: boolean }): void; focus(opts?: { end?: boolean }): void };
 import { frameByKey, setGlobal, useGlobal } from '../global';
-import { unblockUser, useUser } from '../settingsData';
+import { showToast, unblockUser, useUser } from '../settingsData';
 import { Feed } from './Feed';
 import { chatKindFor, mediaPolicy } from '../autoload';
 import { chatTime, chatTone, fileSize, lastSeenText, snippet } from './format';
@@ -33,6 +33,10 @@ export function Chat({ chatId, frameKey, active }: { chatId: number; frameKey: s
   const [replyKey, setReplyKey] = useState<string | null>(null);
   const [editing, setEditing] = useState<{ id: number; original: Value; draft: Value } | null>(null);   // правка своего сообщения
   const api = useRef<ComposerApi | null>(null);
+  // запись: голосовое — если браузер умеет Opus через WebCodecs, кружок — если умеет MP4 из canvas (не Safari)
+  const [recordModes, setRecordModes] = useState<string[]>([]);
+  useEffect(() => { let live = true; voiceSupported().then((ok: boolean) => { if (live) setRecordModes([...(ok ? ['voice'] : []), ...(roundSupported() ? ['round'] : [])]); }); return () => { live = false; }; }, []);
+  const [recordMode, setRecordMode] = useState<string>(() => { try { return localStorage.getItem('relay.recordMode') || 'voice'; } catch { return 'voice'; } });
   const [confirmDelete, setConfirmDelete] = useState<{ id: number } | null>(null);
   // поиск по чату: строка вместо шапки, совпадения новые → старые, Enter — к более старому
   const [finding, setFinding] = useState(false);
@@ -240,6 +244,7 @@ export function Chat({ chatId, frameKey, active }: { chatId: number; frameKey: s
         </button>
         <IconButton icon="search" label="Поиск по чату" onClick={() => setFinding(true)} />
         <IconButton icon="more" label="Информация" onClick={() => setGlobal({ infoOpen: !infoOpen })} />
+        <PlayerBar />
         {/* поиск по чату — карточка внутри шапки, как в Telegram: аватар и правая кнопка остаются видны */}
         {finding ? (
           <div class={'app-findcard' + (listOpen && found ? ' app-findcard-open' : '')}>
@@ -304,6 +309,16 @@ export function Chat({ chatId, frameKey, active }: { chatId: number; frameKey: s
         onChange={onType}
         onEditLast={editLast}
         onReplyNav={replyNav}
+        chatKey={chatId}
+        recordModes={recordModes}
+        startRound={startRound}
+        recordMode={recordMode}
+        onRecordModeChange={(m: string) => { setRecordMode(m); try { localStorage.setItem('relay.recordMode', m); } catch { /* без хранилища — до перезагрузки */ } }}
+        onRecordError={(err: { name?: string }, mode: string) => showToast(err?.name === 'NotAllowedError' || err?.name === 'NotFoundError'
+          ? (mode === 'round' ? 'Разрешите доступ к камере и микрофону, чтобы записывать видеосообщения' : 'Разрешите доступ к микрофону, чтобы записывать голосовые')
+          : mode === 'round' ? 'Не удалось записать видеосообщение' : 'Не удалось записать голосовое')}
+        onSendVoice={(r: { blob: Blob; duration: number; waveform: Uint8Array }) => { stick.current = true; sendVoice(chatId, r, (replyTo?.id as number) ?? null).catch(() => {}); setReplyKey(null); }}
+        onSendRound={(r: { blob: Blob; duration: number; size: number; thumb: string | null }) => { stick.current = true; sendRound(chatId, r, (replyTo?.id as number) ?? null).catch(() => {}); setReplyKey(null); }}
         onAttach={(k: string) => { const el = picker.current!; el.accept = k === 'media' || k === 'camera' ? 'image/*,video/*' : ''; el.value = ''; el.click(); }}
         onSend={(v: Value) => {
           if (editing) {

@@ -1,4 +1,4 @@
-import { beginHeavyAnimation, nudgeWallpaper } from '@relay/ui';
+import { beginHeavyAnimation, nudgeWallpaper, toBase64 } from '@relay/ui';
 import { connectEngine, EngineClient, Mirror } from '@relay/sync-engine/src/client';
 import type { Item, Patch, Query, SearchResult } from '@relay/sync-engine/src/types';
 import type { Entity } from '@relay/protocol';
@@ -369,6 +369,25 @@ async function describeImage(file: Blob): Promise<{ w: number; h: number; thumb:
 }
 
 /** Отправить файл (фото — с размерами и превью). Офлайн — уйдёт, когда появится сеть. */
+/** Голосовое: Ogg/Opus, длительность в секундах и волна (63 байта). Локально играет сам записанный файл. */
+export async function sendVoice(chatId: number, rec: { blob: Blob; duration: number; waveform: Uint8Array }, replyToId: number | null = null): Promise<void> {
+  nudgeWallpaper();
+  toLatestOf(chatId);
+  const res = (await engine.call({ type: 'sendFile', chatId, body: '', file: rec.blob, name: 'voice.ogg', mime: 'audio/ogg', kind: 'voice', duration: rec.duration, waveform: toBase64(rec.waveform), replyToId })) as { clientId: string };
+  localPreviews.set(res.clientId, URL.createObjectURL(rec.blob));
+}
+
+/** Кружок: квадрат 400×400, до 60 с; превью — кадр из записи. */
+export async function sendRound(chatId: number, rec: { blob: Blob; duration: number; size: number; thumb: string | null }, replyToId: number | null = null): Promise<void> {
+  nudgeWallpaper();
+  toLatestOf(chatId);
+  const res = (await engine.call({ type: 'sendFile', chatId, body: '', file: rec.blob, name: 'video.mp4', mime: rec.blob.type.split(';')[0] || 'video/mp4', kind: 'round', duration: rec.duration, w: rec.size, h: rec.size, thumb: rec.thumb, replyToId })) as { clientId: string };
+  localPreviews.set(res.clientId, URL.createObjectURL(rec.blob));
+}
+
+/** Голосовое или кружок прослушан (своё — нет). */
+export function markListened(chatId: number, id: number): void { engine.call({ type: 'listened', chatId, id }).catch(() => {}); }
+
 export async function sendFile(chatId: number, file: File, caption: string, replyToId: number | null = null): Promise<void> {
   nudgeWallpaper();
   toLatestOf(chatId);
