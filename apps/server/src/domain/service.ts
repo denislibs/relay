@@ -46,6 +46,7 @@ export async function postService(tx: Tx, userId: number, msg: { type: ServiceTy
   const message = toMessage(row);
   await fanOut(tx, [userId], { type: 'newMessage', message });
   await enqueue(tx, 'push.message', { message });
+  await enqueue(tx, 'search.sync', { id: message.id });   // коды входа обработчик сам не проиндексирует
   return message;
 }
 

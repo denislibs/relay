@@ -45,10 +45,17 @@ export async function syncMessage(id: number): Promise<void> {
   const [row] = await sql`select id, chat_id, body, deleted, service_type, attachment from messages where id = ${id}`;
   const doc = row ? docOf(row) : null;
   for (const uid of await targets()) {
-    const task = doc
-      ? await meili<{ taskUid: number }>(`/indexes/${uid}/documents`, { method: 'POST', body: [doc] })
-      : await meili<{ taskUid: number }>(`/indexes/${uid}/documents/${id}`, { method: 'DELETE' });
-    await waitTask(task.taskUid);
+    if (doc) {
+      // индекса может ещё не быть (перестройка впереди): Meilisearch создаст его сам, ключ — явно (id и chatId оба «*id»)
+      await waitTask((await meili<{ taskUid: number }>(`/indexes/${uid}/documents?primaryKey=id`, { method: 'POST', body: [doc] })).taskUid);
+      continue;
+    }
+    try {
+      await waitTask((await meili<{ taskUid: number }>(`/indexes/${uid}/documents/${id}`, { method: 'DELETE' })).taskUid);
+    } catch (e) {
+      // индекса ещё нет — убирать нечего (его построит перестройка)
+      if (!(e instanceof MeiliError && e.code === 'index_not_found')) throw e;
+    }
   }
 }
 
@@ -96,7 +103,7 @@ export async function reindexAll(batch = 1000): Promise<number> {
       if (!rows.length) break;
       after = Number(rows[rows.length - 1].id);
       const docs = rows.map(docOf).filter((d): d is Doc => d !== null);
-      if (docs.length) await waitTask((await meili<{ taskUid: number }>(`/indexes/${next}/documents`, { method: 'POST', body: docs })).taskUid, 120_000);
+      if (docs.length) await waitTask((await meili<{ taskUid: number }>(`/indexes/${next}/documents?primaryKey=id`, { method: 'POST', body: docs })).taskUid, 120_000);
       count += docs.length;
     }
     await waitTask((await meili<{ taskUid: number }>('/swap-indexes', { method: 'POST', body: [{ indexes: [live, next] }] })).taskUid);
