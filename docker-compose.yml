@@ -80,6 +80,18 @@ services:
       s3-init: { condition: service_completed_successfully }
       web: { condition: service_started }
 
+  worker:
+    build: { context: ., dockerfile: apps/server/Dockerfile }
+    command: ["bun", "--watch", "apps/server/src/worker.ts"]
+    environment:
+      DATABASE_URL: postgres://relay:relay@postgres:5432/relay
+      DEV_LOGIN: "1"
+    volumes:
+      - ./apps:/app/apps
+      - ./packages:/app/packages
+    depends_on:
+      migrate: { condition: service_completed_successfully }
+
   s3-init-test:
     image: chrislusf/seaweedfs:4.48
     profiles: ["test", "tools"]

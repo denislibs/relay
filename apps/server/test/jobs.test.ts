@@ -1,6 +1,8 @@
 import { beforeEach, expect, test } from 'bun:test';
 import { sql } from '../src/db';
 import { backoffMs, claim, complete, enqueue, ensurePeriodic, fail } from '../src/jobs/queue';
+import { PermanentError, register } from '../src/jobs/handlers';
+import { drainJobs, startWorker } from '../src/jobs/worker';
 import { resetDb } from './helpers';
 
 beforeEach(resetDb);
@@ -79,4 +81,52 @@ test('backoff grows and is capped at 10 minutes', () => {
   expect(backoffMs(1)).toBeLessThan(1300);
   expect(backoffMs(5)).toBeGreaterThan(12_000);
   expect(backoffMs(30)).toBeLessThanOrEqual(720_000);
+});
+
+test('drainJobs runs handlers, including jobs they enqueue', async () => {
+  const seen: number[] = [];
+  register('test.chain', async (p: { n: number }) => {
+    seen.push(p.n);
+    if (p.n < 3) await enqueue(sql, 'test.chain', { n: p.n + 1 });
+  });
+  await enqueue(sql, 'test.chain', { n: 1 });
+  expect(await drainJobs()).toBe(3);
+  expect(seen).toEqual([1, 2, 3]);
+  expect(await count('jobs')).toBe(0);
+});
+
+test('a throwing handler is retried later; PermanentError and unknown kinds are dead at once', async () => {
+  let calls = 0;
+  register('test.flaky', async () => { calls++; if (calls === 1) throw new Error('503'); });
+  register('test.bad', async () => { throw new PermanentError('400'); });
+  await enqueue(sql, 'test.flaky', {});
+  await enqueue(sql, 'test.bad', {});
+  await enqueue(sql, 'test.nobody', {});
+  await drainJobs();
+  expect(calls).toBe(1);
+  expect((await sql`select kind from jobs_dead order by kind`).map((r) => r.kind)).toEqual(['test.bad', 'test.nobody']);
+  await sql`update jobs set run_at = now()`;
+  await drainJobs();
+  expect(calls).toBe(2);
+  expect(await count('jobs')).toBe(0);
+});
+
+test('a handler returning again reschedules a periodic job', async () => {
+  register('test.tick', async () => ({ again: { inSec: 3600 } }));
+  await ensurePeriodic('test.tick');
+  await drainJobs();
+  expect(await count('jobs')).toBe(1);
+});
+
+test('two workers take every job exactly once and wake on NOTIFY', async () => {
+  const done: number[] = [];
+  register('test.count', async (p: { i: number }) => { await Bun.sleep(5); done.push(p.i); });
+  const w1 = startWorker({ concurrency: 5, pollMs: 60_000 });
+  const w2 = startWorker({ concurrency: 5, pollMs: 60_000 });
+  await Bun.sleep(100);                                  // оба успели подписаться на LISTEN
+  await sql.begin(async (tx) => { for (let i = 0; i < 40; i++) await enqueue(tx, 'test.count', { i }); });
+  for (let t = 0; t < 100 && done.length < 40; t++) await Bun.sleep(20);
+  await Promise.all([w1.stop(), w2.stop()]);
+  expect(done.length).toBe(40);
+  expect(new Set(done).size).toBe(40);
 });
