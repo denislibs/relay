@@ -749,13 +749,31 @@ function SidebarCard(props) {
       if (show !== fab[0]) fab[1](show);
     });
   }
+  // Вкладки (и подсказка над ними) — слой поверх списка, как в Telegram: список уходит под него,
+  // а его отступ сверху равен высоте слоя (--over-h; меняется плавно, когда подсказка раскрывается)
+  var main = useRef(null), over = useRef(null);
+  var floating = !!(props.tabs || props.top);
+  useLayoutEffect(function () {
+    var el = over.current, host = main.current;
+    if (!el || !host || typeof ResizeObserver !== 'function') return;
+    var ro = new ResizeObserver(function (entries) {
+      var b = entries[0].borderBoxSize && entries[0].borderBoxSize[0];
+      var hgt = b ? b.blockSize : entries[0].contentRect.height;
+      requestMutation(function () { host.style.setProperty('--over-h', Math.round(hgt) + 'px'); });
+    });
+    ro.observe(el);
+    return function () { ro.disconnect(); };
+  }, [floating]);
+  var body = h('div', { class: cx('rl-sidecard-body', props.paged && 'rl-sidecard-paged'), onScrollCapture: onScroll }, props.children);
   // embedded: a page inside SideFrame/SlideStack — same content, the card surface belongs to the frame
   return h(props.embedded ? 'div' : 'section', { class: cx(props.embedded ? 'rl-sidepage' : 'rl-sidecard', props.class), 'aria-label': props.label || 'Чаты' },
     props.header || null,
-    props.tabs || null,
     props.banner || null,
-    // capture: scroll doesn't bubble, and with paged content (props.paged) each page scrolls on its own
-    h('div', { class: cx('rl-sidecard-body', props.paged && 'rl-sidecard-paged'), onScrollCapture: onScroll }, props.children),
+    floating
+      ? h('div', { ref: main, class: 'rl-sidecard-main' },
+        h('div', { ref: over, class: 'rl-sidecard-over' }, props.top || null, props.tabs || null),
+        body)
+      : body,
     props.fab ? h('div', { class: cx('rl-fab-slot', !fab[0] && 'rl-fab-hidden') }, props.fab) : null,
     props.overlay || null);   // поверх списка у нижнего края (например «Обновить»)
 }

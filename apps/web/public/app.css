@@ -63,8 +63,8 @@ body { background: var(--bg); color: var(--ink); font-family: var(--font-sans); 
 .app-send-file span { color: var(--ink-muted); font-size: 13px; }
 .app-send-caption { width: 100%; margin-bottom: var(--space-3); }
 .app-drop { position: fixed; inset: 0; z-index: 50; }
-.app-media-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 2px; padding: 0 var(--space-3) var(--space-4); align-content: start; overflow-y: auto; }
-.app-media-cell { position: relative; aspect-ratio: 1; padding: 0; border: 0; overflow: hidden; border-radius: 4px; cursor: pointer; background: var(--field); }
+.app-media-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 1px; margin: 0 var(--space-3) var(--space-4); border-radius: 14px; overflow: hidden; align-content: start; }   /* как в Telegram: квадраты через 1px, скруглены только внешние углы */
+.app-media-cell { position: relative; aspect-ratio: 1; padding: 0; border: 0; overflow: hidden; cursor: pointer; background: var(--field); }
 
 /* страница настроек: меню ⋮ и тост «Скопировано» */
 .app-pagemenu { position: absolute; top: 52px; right: 12px; z-index: 40; }
@@ -306,3 +306,20 @@ html[data-blur="0"] .app-empty-main .rl-empty, html[data-blur="0"] .app-sidemenu
 @keyframes app-update-in { from { opacity: 0; transform: translateY(16px) scale(0.96); } to { opacity: 1; transform: none; } }
 @keyframes app-update-out { to { opacity: 0; transform: translateY(8px); } }
 @media (prefers-reduced-motion: reduce) { .app-update { animation: none; } }
+
+/* Подсказка над вкладками (уведомления, дни рождения): раскрывается по высоте, список плавно сдвигается */
+.app-banner-slot { display: grid; grid-template-rows: 1fr; opacity: 1; transition: grid-template-rows 220ms var(--ease-standard), opacity 180ms var(--ease-standard); animation: app-banner-in 240ms var(--ease-out) backwards; }
+.rl-presence[data-state="closing"] .app-banner-slot { grid-template-rows: 0fr; opacity: 0; }
+@keyframes app-banner-in { from { grid-template-rows: 0fr; opacity: 0; } }
+.app-banner-clip { min-height: 0; overflow: hidden; }
+.app-banner { position: relative; display: flex; align-items: center; gap: var(--space-3); margin: 6px 12px 2px; padding: 10px 40px 10px 14px; border-radius: 16px; background: var(--field); color: var(--ink); cursor: pointer; overflow: hidden; transition: background-color var(--dur-instant) var(--ease-standard); }
+.app-banner:hover { background: var(--hover); }
+.app-banner:focus-visible { outline: 2px solid var(--brand-text); outline-offset: -2px; }
+.app-banner-text { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
+.app-banner-text b { font: 600 15px/20px var(--font-sans); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.app-banner-text span { font: 400 13px/18px var(--font-sans); color: var(--ink-muted); }
+.app-banner-faces { display: flex; flex-direction: row-reverse; margin-right: 4px; }
+.app-banner-faces > * { margin-left: -8px; box-shadow: 0 0 0 2px var(--field); border-radius: 50%; }
+.app-banner-x { position: absolute; top: 4px; right: 4px; }
+.app-banner-x .rl-iconbtn { width: 32px; height: 32px; color: var(--ink-muted); }
+@media (prefers-reduced-motion: reduce) { .app-banner-slot { animation: none; transition: none; } }

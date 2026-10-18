@@ -159,7 +159,7 @@ export function contactItems(view: Map<number, ContactView>, users: ReadonlyMap<
     out.push({
       key: 'k' + c.userId, userId: c.userId, firstName: c.firstName, lastName: c.lastName, note: c.note,
       name: contactName(c) || u.publicName || u.name, publicName: u.publicName ?? c.user.publicName ?? null,
-      username: u.username, phone: u.phone, online: p?.online ?? false, lastSeen: p?.lastSeen ?? null, known: !!p, pending: c.pending,
+      username: u.username, phone: u.phone, birthday: u.birthday ?? null, online: p?.online ?? false, lastSeen: p?.lastSeen ?? null, known: !!p, pending: c.pending,
     });
   }
   return out;

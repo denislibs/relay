@@ -1,3 +1,4 @@
+import { ChatBanner } from './ChatBanner';
 import { UpdatePill } from './UpdatePill';
 import { Avatar, ChatRow, Highlight, Menu, Presence, SlideStack, ChatRowSkeleton, useMinVisible, EmptyState, Fab, WindowList, FolderTabs, SidebarCard, SidebarHeader, peerTone } from '@relay/ui';
 import type { Item } from '@relay/sync-engine/src/types';
@@ -160,6 +161,7 @@ export function Sidebar() {
       embedded
       paged
       header={<SidebarHeader onMenu={() => setMenu(true)} status={searchStatus ?? undefined} me={me.name} meTone={peerTone(me.userId)} searchId="side-search" value={search} placeholder="Поиск" onSearch={(e: Event) => setGlobal({ search: (e.target as HTMLInputElement).value })} />}
+      top={!search.trim() ? <ChatBanner /> : null}
       tabs={<FolderTabs class="app-folders" active={folder} onChange={(id: 'all' | 'unread') => setGlobal({ folder: id })} items={[
         { id: 'all', label: 'Все' },
         { id: 'unread', label: 'Непрочитанные', count: counters.unreadChats },
