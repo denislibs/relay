@@ -687,3 +687,13 @@ html[data-anim="0"] .app-chatcol, html[data-anim="0"] .app-chatcol-below, html[d
 .app-plinks .app-plink-row { padding-left: var(--space-6); }
 .app-plink-addr { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--brand-text); }
 .app-plinks-head .rl-inforow-text small { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+/* раскрытие списка ссылок: высота — мягко, строки выезжают лесенкой; сворачивание — быстрее и разом */
+.app-plinks > .app-expand { transition: grid-template-rows 340ms cubic-bezier(.22, .9, .3, 1); }
+.app-plinks > .app-expand > .app-expand-inner { opacity: 1; transition: none; }
+.app-plinks-item { opacity: 0; transform: translateY(-8px) scale(.98); transform-origin: 50% 0; transition: opacity 160ms ease, transform 200ms cubic-bezier(.4, 0, 1, 1); }
+.app-plinks.is-open .app-plinks-item { opacity: 1; transform: none; transition: opacity 260ms ease calc(60ms + var(--i) * 45ms), transform 340ms cubic-bezier(.22, .9, .3, 1) calc(60ms + var(--i) * 45ms); }
+.app-plinks-chev { transition: transform 340ms cubic-bezier(.22, .9, .3, 1); }
+.app-plinks-stack { transition: opacity 200ms ease, transform 300ms cubic-bezier(.22, .9, .3, 1); }
+.app-plinks.is-open .app-plinks-stack { opacity: 0; transform: translateX(8px); }
+@media (prefers-reduced-motion: reduce) { .app-plinks-item, .app-plinks > .app-expand { transition: none !important; } }

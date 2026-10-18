@@ -37,7 +37,7 @@ export function ProfileLinks({ links }: { links: ProfileLink[] }) {
       </button>
       <div class="app-expand" data-state={open ? 'open' : 'closed'}>
         <div class="app-expand-inner" role="list" aria-label="Ссылки">
-          {links.map((l) => <div role="listitem" key={l.service + ':' + l.handle}><LinkRow link={l} /></div>)}
+          {links.map((l, i) => <div role="listitem" class="app-plinks-item" style={{ '--i': i }} key={l.service + ':' + l.handle}><LinkRow link={l} /></div>)}
         </div>
       </div>
     </div>
