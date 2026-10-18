@@ -4,7 +4,9 @@ import { settlePushes } from '../src/domain/push';
 export async function resetDb(): Promise<void> {
   // push в фоне из прошлого теста не должен столкнуться с truncate (deadlock)
   await settlePushes();
-  await sql`truncate users, sessions, chats, chat_members, messages, user_seq, updates restart identity cascade`;
+  await sql`truncate sessions, chats, chat_members, messages, user_seq, updates restart identity cascade`;
+  // системного пользователя «Relay» (миграция 108) не трогаем
+  await sql`delete from users where not system`;
 }
 
 export async function makeUser(name = 'user'): Promise<number> {

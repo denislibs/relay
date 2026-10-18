@@ -81,7 +81,7 @@ export function createServer(opts: { port: number }): Server {
         if (process.env.DEV_LOGIN === '1' && req.method === 'POST' && url.pathname === '/dev/login') {
           const { name, phone } = (await req.json()) as { name: string; phone?: string };
           // dev: вход по имени — существующий пользователь (в т.ч. из сида) или новый
-          const [found] = await sql`select id from users where name = ${String(name ?? '')} order by id limit 1`;
+          const [found] = await sql`select id from users where name = ${String(name ?? '')} and not system order by id limit 1`;
           const userId = found ? (found.id as number) : await createUser(String(name ?? 'user'));
           // dev: телефон нужен только для проверки профиля (SMS-входа нет); занятый номер не мешает входу
           if (typeof phone === 'string') await sql`update users set phone = ${phone} where id = ${userId} and phone is null`.catch(() => {});
