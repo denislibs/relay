@@ -935,11 +935,16 @@ function MediaViewer(props) {
       var r = to ? parseFloat(getComputedStyle(to).borderTopLeftRadius) || 0 : 0;
       requestMutation(function () {
         el.classList.add('rl-viewer-leaving');
-        if (rect && partly) {   // летим обратно в миниатюру; если её частично закрыла шапка — ещё и таем
+        if (rect && partly) {   // летим обратно в миниатюру; если её частично закрыли шапка/поле ввода — обрезаем по видимой части, без растворения
           hide(to);
           b.style.transform = flipTo(f, rect);
           b.style.borderRadius = (r * rect.width / f.width) + 'px / ' + (r * rect.height / f.height) + 'px';
-          if (!fully) b.style.opacity = '0';
+          if (!fully) {
+            var k = rect.height / f.height;
+            b.style.clipPath = 'inset(0px 0px 0px 0px)';
+            b.getBoundingClientRect();   // зафиксировать начальную точку перехода
+            b.style.clipPath = 'inset(' + Math.max(0, area.top - f.top) * k + 'px 0px ' + Math.max(0, f.bottom - area.bottom) * k + 'px 0px)';
+          }
         } else {
           b.style.opacity = '0';
           if (rect) b.style.transform = 'translate3d(' + rect.width * 0.04 + 'px,' + rect.height * 0.04 + 'px,0) scale(0.92)';   // к центру: origin коробки — левый верх
