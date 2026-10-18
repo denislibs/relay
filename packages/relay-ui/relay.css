@@ -15,8 +15,10 @@ body { margin: 0; font-family: var(--font-sans); color: var(--ink); background: 
 .rl-btn { display: inline-flex; align-items: center; justify-content: center; gap: 8px; height: 40px; padding: 0 20px; border-radius: var(--radius-pill); border: 1px solid transparent; font: 600 14px/20px var(--font-sans); cursor: pointer; transition: background-color var(--dur-instant) var(--ease-standard), transform var(--dur-instant) var(--ease-standard), box-shadow var(--dur-instant) var(--ease-standard); }
 .rl-btn:active { transform: scale(var(--press-sm)); background: var(--pressed); }
 .rl-btn-lg { height: 52px; padding: 0 32px; font-size: 16px; }
-.rl-btn-primary { background: var(--brand); color: var(--on-brand); border-color: var(--line-strong); }
-.rl-btn-primary:hover, .rl-btn-primary:active { background: var(--brand-strong); }
+/* малая кнопка-«таблетка» в строке списка («Добавить»), как в Telegram: 28px, белый текст на заливке */
+.rl-btn-tiny { height: 28px; padding: 0 12px; font-size: 14px; line-height: 20px; }
+.rl-btn-primary { background: var(--button); color: var(--on-button); border-color: transparent; }
+.rl-btn-primary:hover, .rl-btn-primary:active { background: var(--button-hover); }
 .rl-btn-secondary { background: transparent; color: var(--ink); border-color: var(--line-strong); }
 .rl-btn-secondary:hover { background: var(--hover); }
 .rl-btn-ghost { background: transparent; color: var(--brand-text); }
@@ -1529,3 +1531,8 @@ html[data-blur="0"] .rl-menu, html[data-blur="0"] .rl-attach { -webkit-backdrop-
 
 .rl-round-dl { display: inline-flex; align-items: center; justify-content: center; width: 54px; height: 54px; border-radius: 50%; background: var(--media-scrim); color: var(--on-media); }
 .rl-round-center .rl-ring-spin > svg, .rl-round-center .rl-ring > svg { animation: rl-ring-rotate 2s linear infinite; }   /* дуга и с известным прогрессом вращается — как в Telegram */
+
+/* Анимированный стикер (TGS): место занято сразу, canvas проявляется, когда воркер нарисовал первый кадр */
+.rl-sticker { position: relative; display: inline-block; flex: 0 0 auto; }
+.rl-sticker canvas { display: block; width: 100%; height: 100%; opacity: 0; transition: opacity var(--dur-base) var(--ease-out); }
+.rl-sticker-ready canvas { opacity: 1; }

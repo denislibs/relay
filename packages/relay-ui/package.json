@@ -4,5 +4,9 @@
   "private": true,
   "type": "module",
   "main": "src/index.js",
-  "dependencies": { "preact": "10.29.8", "twallpaper": "2.1.2" }
+  "dependencies": {
+    "@lottiefiles/dotlottie-web": "0.80.0",
+    "preact": "10.29.8",
+    "twallpaper": "2.1.2"
+  }
 }

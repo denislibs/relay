@@ -3,7 +3,7 @@
 //   bun apps/web/build.ts --watch    — пересборка при изменениях (dev)
 import { watch as fsWatch } from 'node:fs';
 import { cp, mkdir, rm } from 'node:fs/promises';
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
 
 const root = import.meta.dir;
 const ui = join(root, '..', '..', 'packages', 'relay-ui');
@@ -36,6 +36,9 @@ async function build(): Promise<void> {
   await Bun.write(join(tmp, 'version.json'), JSON.stringify({ build: BUILD }));
   await cp(join(ui, 'relay.css'), join(tmp, 'relay.css'));
   await cp(join(ui, 'tokens.css'), join(tmp, 'tokens.css'));
+  // стикеры: исходники на TS → .tgs; движок Lottie (ThorVG, WASM) — рядом, без CDN: работает и без сети
+  await Bun.$`bun ${join(ui, 'stickers', 'build.ts')} ${join(tmp, 'stickers')}`.quiet();
+  await cp(join(dirname(Bun.resolveSync('@lottiefiles/dotlottie-web', ui)), 'dotlottie-player.wasm'), join(tmp, 'dotlottie-player.wasm'));
   // поверх старой сборки, без удаления папки: сервер ни на миг не остаётся без index.html
   await cp(tmp, dist, { recursive: true, force: true });
   await rm(tmp, { recursive: true, force: true });

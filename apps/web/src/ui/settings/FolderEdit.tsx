@@ -1,14 +1,13 @@
 import { FOLDER_LIMITS, folderError, graphemes, nextFolderId, normalizeFolder, type ChatFolder } from '@relay/protocol';
-import { Avatar, ConfirmDialog, Fab, Icon, IconButton, InfoRow, PanelHeader, Presence, Section, TextField } from '@relay/ui';
+import { Avatar, ConfirmDialog, Fab, Icon, IconButton, InfoRow, PanelHeader, Presence, Section, Sticker, TextField } from '@relay/ui';
 import { useEffect, useRef, useState } from 'preact/hooks';
 import { getGlobal, setGlobal, useGlobal, type FolderDraft } from '../../global';
 import { back, go, setLeaveGuard } from '../../nav';
 import { deleteFolder, failText, saveFolder, showToast } from '../../settingsData';
 import { chatTone } from '../format';
-import { FolderGlyph } from './Folders';
+import { FOLDER_EMOJI, FOLDER_ICONS } from '../../folders';
 
 /** Иконки на выбор (как набор иконок папок в Telegram, плюс «без иконки» — по типу). */
-export const FOLDER_EMOJI = ['💬', '📁', '⭐', '✅', '👤', '👥', '💼', '🏠', '❤️', '🎓', '🎮', '✈️', '🛒', '📢', '🔔', '🤖'];
 
 export const INCLUDE_TYPES = [
   { key: 'contacts', icon: 'contact', title: 'Контакты' },
@@ -128,11 +127,11 @@ export function FolderEdit({ path }: { path: string }) {
     <div class="rl-sidepage" aria-label={draft.isNew ? 'Новая папка' : 'Изменить папку'}>
       <PanelHeader icon="arrowLeft" closeLabel="Назад" title={draft.isNew ? 'Новая папка' : 'Изменить папку'} onClose={() => void back()} />
       <div class="rl-settings">
-        <div class="app-folder-hero"><FolderGlyph f={f} size={56} /></div>
+        <div class="app-folder-hero"><Sticker name="folderNew" size={100} replay="click" /></div>
         <Section title="Название папки">
           <div ref={input}>
             <TextField
-              value={f.title} maxLength={FOLDER_LIMITS.title} measure={graphemes} counter label="Название папки" error={titleErr ?? undefined}
+              value={f.title} maxLength={FOLDER_LIMITS.title} measure={graphemes} counter={FOLDER_LIMITS.title - graphemes(f.title) <= Math.round(FOLDER_LIMITS.title / 3)} label="Название папки" error={titleErr ?? undefined}
               onInput={(v: string) => { setErr(null); editDraft({ title: v }); }}
               onKeyDown={(e: KeyboardEvent) => { if (e.key === 'Enter') save(); }}
             />
@@ -140,7 +139,7 @@ export function FolderEdit({ path }: { path: string }) {
           <div class="app-folder-emoji" role="radiogroup" aria-label="Иконка папки">
             <button type="button" role="radio" aria-checked={f.emoji === null ? 'true' : 'false'} class="app-folder-emoji-btn" title="По типу чатов" onClick={() => editDraft({ emoji: null })}><Icon name="folder" size={22} /></button>
             {FOLDER_EMOJI.map((e) => (
-              <button key={e} type="button" role="radio" aria-checked={f.emoji === e ? 'true' : 'false'} class="app-folder-emoji-btn" onClick={() => editDraft({ emoji: e })}>{e}</button>
+              <button key={e} type="button" role="radio" aria-checked={f.emoji === e ? 'true' : 'false'} aria-label={e} class="app-folder-emoji-btn" onClick={() => editDraft({ emoji: e })}><Icon name={FOLDER_ICONS[e]} size={22} /></button>
             ))}
           </div>
         </Section>

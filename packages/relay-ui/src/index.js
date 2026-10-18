@@ -19,3 +19,4 @@ export * from './media/playerBar.js';
 export * from './media/roundRecorder.js';
 export * from './media/roundView.js';
 export * from './media/roundBubble.js';
+export * from './sticker.js';

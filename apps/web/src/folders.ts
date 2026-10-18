@@ -46,10 +46,19 @@ export function folderBadge(f: ChatFolder | null, chats: readonly FolderChat[], 
   return { count, muted: count > 0 && loud === 0 };
 }
 
-/** Иконка папки для вкладок слева: эмодзи папки, иначе по единственному типу, иначе общая папка. */
+/** Эмодзи папки → монохромный значок (как в Telegram: хранится эмодзи, рисуется иконка). Порядок — порядок выбора. */
+export const FOLDER_ICONS: Record<string, string> = {
+  '💬': 'chats', '📁': 'folder', '⭐': 'star', '✅': 'checkCircle', '👤': 'contact', '👥': 'community',
+  '💼': 'briefcase', '🏠': 'home', '❤️': 'heart', '🎓': 'graduation', '🎮': 'gamepad', '✈️': 'plane',
+  '🛒': 'cart', '📢': 'channels', '🔔': 'bell', '🤖': 'bot',
+};
+// 📁 в выборе не нужен: первая кнопка («по типу чатов») и так рисует папку
+export const FOLDER_EMOJI = Object.keys(FOLDER_ICONS).filter((e) => e !== '📁');
+
+/** Иконка папки для вкладок слева: значок по эмодзи (чужое эмодзи — как есть), иначе по единственному типу, иначе общая папка. */
 export function folderIcon(f: ChatFolder | null): { emoji: string } | { icon: string } {
   if (!f) return { icon: 'chats' };
-  if (f.emoji) return { emoji: f.emoji };
+  if (f.emoji) return FOLDER_ICONS[f.emoji] ? { icon: FOLDER_ICONS[f.emoji] } : { emoji: f.emoji };
   const only = onlyType(f);
   return { icon: only === 'groups' ? 'community' : only === 'contacts' || only === 'nonContacts' ? 'contact' : 'folder' };
 }

@@ -1,5 +1,5 @@
 import { FOLDER_LIMITS, nextFolderId, type ChatFolder } from '@relay/protocol';
-import { Button, ConfirmDialog, Icon, IconButton, InfoRow, PanelHeader, RadioRow, Section } from '@relay/ui';
+import { Button, ConfirmDialog, Icon, IconButton, InfoRow, PanelHeader, RadioRow, Section, Sticker } from '@relay/ui';
 import { useEffect, useRef, useState } from 'preact/hooks';
 import { folderChats, folderIcon, folderSubtitle, moveItem, recommendedFor, type FolderChat } from '../../folders';
 import { getGlobal, setGlobal, useGlobal } from '../../global';
@@ -79,7 +79,7 @@ export function Folders() {
       <PanelHeader icon="arrowLeft" closeLabel="Назад" title="Папки с чатами" onClose={() => void back()} />
       <div class="rl-settings">
         <div class="app-folders-intro">
-          <span class="app-links-hero" aria-hidden="true"><Icon name="folder" size={44} /></span>
+          <Sticker name="folder" size={100} replay="click" />
           <p>Создавайте папки для разных групп чатов и быстро переключайтесь между ними.</p>
           <Button variant="primary" onClick={create}><Icon name="plus" size={20} /> Создать папку</Button>
         </div>
@@ -114,9 +114,8 @@ export function Folders() {
           <Section title="Рекомендуемые папки">
             {recs.map((r) => (
               <div key={r.key} class="app-folder-rec">
-                <FolderGlyph f={{ ...r.folder, id: 0 }} />
                 <span class="rl-inforow-text"><span>{r.folder.title}</span><small>{r.description}</small></span>
-                <Button variant="primary" class="app-folder-add" onClick={() => saveFolder({ ...r.folder, id: nextFolderId(folders) }).catch(() => showToast('Не удалось добавить папку'))}>Добавить</Button>
+                <Button variant="primary" class="rl-btn-tiny" onClick={() => saveFolder({ ...r.folder, id: nextFolderId(folders) }).catch(() => showToast('Не удалось добавить папку'))}>Добавить</Button>
               </div>
             ))}
           </Section>

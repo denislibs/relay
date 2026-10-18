@@ -1,4 +1,4 @@
-import { configureSpoilers, installSpoilers } from '@relay/ui';
+import { configureSpoilers, configureStickers, installSpoilers } from '@relay/ui';
 import { fetchBuild, onVisible, startUpdateCheck } from './update';
 import { claimMediaCache, sendMediaPolicy } from './storageInfo';
 import { getPrefs, subscribePrefs, type Prefs } from './prefs';
@@ -91,6 +91,7 @@ if (__DEV__) void import('./devtools/session').then((s) => import('./devtools/me
 startTitle();
 // спойлеры: частицы рисует воркер (как в Telegram Web K); без него — CSS-точки
 configureSpoilers({ workerUrl: '/spoiler.worker.js' });
+configureStickers({ base: '/stickers/', wasmUrl: '/dotlottie-player.wasm' });
 installSpoilers();
 startUpdateCheck({ current: __BUILD__, fetchBuild, onUpdate: () => setGlobal({ updateReady: true }), onVisible });
 startScreenBlur();

@@ -1,5 +1,5 @@
 import { linkLabel, MAX_LINKS, type ProfileLink } from '@relay/protocol';
-import { Button, Icon, IconButton, InfoRow, PanelHeader, Section } from '@relay/ui';
+import { Button, Icon, IconButton, InfoRow, PanelHeader, Section, Sticker } from '@relay/ui';
 import { useRef, useState } from 'preact/hooks';
 import { useGlobal } from '../../global';
 import { back, go } from '../../nav';
@@ -62,7 +62,7 @@ export function Links() {
       <div class="rl-settings">
         {links.length === 0 ? (
           <div class="app-links-intro">
-            <span class="app-links-hero" aria-hidden="true"><Icon name="link" size={44} /></span>
+            <Sticker name="link" size={100} replay="click" />
             <h2>Ссылки в профиле</h2>
             <p>Покажите, где ещё вас можно найти, — прямо под именем.</p>
             <ul>
