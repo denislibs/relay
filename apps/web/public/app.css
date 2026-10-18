@@ -683,7 +683,7 @@ html[data-anim="0"] .app-chatcol, html[data-anim="0"] .app-chatcol-below, html[d
 .app-plinks.is-open .app-plinks-stack { opacity: 0; transition: opacity var(--dur-fast) var(--ease-out); }
 .app-plinks-stack { transition: opacity var(--dur-fast) var(--ease-out); }
 .app-plink-row { text-decoration: none; color: var(--ink); }
-.app-plink-row .app-svc { border-radius: 50%; margin: 0 4px; }
+.app-plink-row .app-svc { border-radius: 10px; box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--ink) 10%, transparent); }   /* как плитки-значки соседних строк; тёмный значок не тонет в тёмной карточке */
 .app-plinks .app-plink-row { padding-left: var(--space-6); }
 .app-plink-addr { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--brand-text); }
 .app-plinks-head .rl-inforow-text small { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
