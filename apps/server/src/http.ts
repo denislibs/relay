@@ -19,14 +19,14 @@ import { pinMessage, unpinMessage } from './domain/pins';
 import { addProfileMusic, listProfileMusic, removeProfileMusic } from './domain/profileMusic';
 import { journalStats } from './domain/journal';
 import { notifyLatency } from './realtime';
-import { checkUsername, getMe, getUser, setUsername, updateProfile } from './domain/profile';
+import { checkUsername, getMe, getUser, setUsername, updateProfile, setPhoto, deletePhoto } from './domain/profile';
 import { usersByIds } from './domain/users';
 import { subscribe, unsubscribe, vapidKeys, type SubscriptionInput } from './domain/push';
 import { deleteFolder, getSettings, reorderFolders, saveFolder, setNotify, setPrivacy, setSessionsTtl } from './domain/settings';
 import { publicAuthRoute, privateAuthRoute } from './authRoutes';
 import { addContact, blockUser, listBlocked, listContacts, removeContact, resolveUser, unblockUser, updateContact } from './domain/contacts';
 
-const STATUS: Record<string, number> = { bad_frame: 400, too_long: 400, username_invalid: 400, username_reserved: 400, username_taken: 409, bio_too_long: 400, note_too_long: 400, name_invalid: 400, birthday_invalid: 400, links_invalid: 400, folder_title: 400, folder_empty: 400, folder_too_many_chats: 400, folder_emoji: 400, folders_limit: 400, unauthorized: 401, not_member: 403, blocked: 403, not_found: 404, code_invalid: 400, code_expired: 400, flood: 429, fresh_session: 403, password_invalid: 400, password_missing: 400, recovery_unavailable: 400, email_invalid: 400, qr_expired: 400, passkey_not_found: 404, passkey_invalid: 400, forbidden: 403, upload_missing: 409, upload_mismatch: 400, upload_pending: 409 };
+const STATUS: Record<string, number> = { bad_frame: 400, too_long: 400, username_invalid: 400, username_reserved: 400, username_taken: 409, bio_too_long: 400, note_too_long: 400, name_invalid: 400, birthday_invalid: 400, links_invalid: 400, folder_title: 400, folder_empty: 400, folder_too_many_chats: 400, folder_emoji: 400, folders_limit: 400, unauthorized: 401, not_member: 403, blocked: 403, not_found: 404, code_invalid: 400, code_expired: 400, flood: 429, fresh_session: 403, password_invalid: 400, password_missing: 400, recovery_unavailable: 400, email_invalid: 400, qr_expired: 400, passkey_not_found: 404, passkey_invalid: 400, forbidden: 403, upload_missing: 409, upload_mismatch: 400, upload_pending: 409, photo_invalid: 400 };
 const fail = (code: string) => Response.json({ code }, { status: STATUS[code] ?? 500 });
 
 /** checkedAt — когда сокет последний раз отмечал активность и проверял свой сеанс (domain/sessions.checkSocket). */
@@ -125,6 +125,10 @@ export function createServer(opts: { port: number }): Server {
           const body = (await req.json().catch(() => null)) as { username?: unknown } | null;
           if (!body || !('username' in body)) return fail('bad_frame');
           return Response.json(await setUsername(userId, body.username));
+        }
+        if (url.pathname === '/me/photo') {
+          if (req.method === 'PUT') return Response.json(await setPhoto(userId, await req.json().catch(() => null)));
+          if (req.method === 'DELETE') return Response.json(await deletePhoto(userId));
         }
         const music = /^\/users\/(\d{1,15})\/music$/.exec(url.pathname);
         if (req.method === 'GET' && music) return Response.json({ tracks: await listProfileMusic(userId, Number(music[1])) });

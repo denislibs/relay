@@ -157,12 +157,17 @@ export interface BlockedUser { userId: Id; user: PublicUser; at: string; seq?: n
 export interface Birthday { day: number; month: number; year?: number }
 
 /** Профиль глазами зрителя (скрытые правилами приватности поля сервер не отдаёт). */
+/** Фото профиля: id — 640×640, small — 160×160 (оба — файлы /files/:id), thumb — крошечное размытое превью (data:URL), at — когда поставлено (мс). */
+export interface ProfilePhoto { id: string; small: string; thumb: string; at: number }
+
 export interface PublicUser {
   /** системный пользователь «Relay»: служебные уведомления, ответить нельзя */
   system?: true;
   id: Id; name: string; firstName: string; lastName: string;
   username: string | null; bio: string | null; birthday: Birthday | null; phone: string | null;
   links: ProfileLink[];   // ссылки на профили в других сервисах, в порядке владельца; видны всем
+  /** фото профиля; null — нет или зритель заблокирован */
+  photo?: ProfilePhoto | null;
   /** собственное имя пользователя; name/firstName/lastName у владельца контакта — контактные */
   publicName?: string;
   /** этот человек заблокировал зрителя: писать ему в личный чат нельзя (плашка вместо поля ввода) */
@@ -185,6 +190,7 @@ export interface Me {
   userId: Id; name: string; firstName: string; lastName: string;
   username: string | null; bio: string | null; birthday: Birthday | null; phone: string | null;
   links: ProfileLink[];
+  photo?: ProfilePhoto | null;
   seq?: number;
 }
 
@@ -195,7 +201,7 @@ export type ErrorCode = 'bad_frame' | 'unauthorized' | 'not_member' | 'not_found
   | 'blocked' | 'code_invalid' | 'code_expired' | 'flood' | 'fresh_session'
   | 'password_invalid' | 'password_missing' | 'recovery_unavailable' | 'email_invalid' | 'qr_expired' | 'passkey_not_found' | 'passkey_invalid'
   | 'folder_title' | 'folder_empty' | 'folder_too_many_chats' | 'folder_emoji' | 'folders_limit'
-  | 'upload_missing' | 'upload_mismatch' | 'upload_pending';
+  | 'upload_missing' | 'upload_mismatch' | 'upload_pending' | 'photo_invalid';
 
 export type ClientFrame =
   | { op: 'hello'; lastSeq: number }

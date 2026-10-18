@@ -1,4 +1,4 @@
-import { normalizeLinks, type Birthday, type Me, type ProfileLink, type PublicUser } from '@relay/protocol';
+import { normalizeLinks, type Birthday, type Me, type ProfileLink, type ProfilePhoto, type PublicUser } from '@relay/protocol';
 import { sql, type Tx } from '../db';
 import { DomainError } from './errors';
 import { appendUpdates } from './journal';
@@ -8,8 +8,8 @@ const RESERVED = new Set(['admin', 'relay', 'support', 'settings', 'help', 'api'
 const USERNAME = /^[a-z][a-z0-9_]{4,31}$/;
 const len = (s: string) => [...s].length;
 
-export type Row = { id: number; name: string; first_name: string | null; last_name: string | null; username: string | null; bio: string | null; birthday: Birthday | null; phone: string | null; links: ProfileLink[] };
-export const COLS = sql`id, name, first_name, last_name, username, bio, birthday, phone, links`;
+export type Row = { id: number; name: string; first_name: string | null; last_name: string | null; username: string | null; bio: string | null; birthday: Birthday | null; phone: string | null; links: ProfileLink[]; photo: ProfilePhoto | null };
+export const COLS = sql`id, name, first_name, last_name, username, bio, birthday, phone, links, photo`;
 
 export const fullName = (first: string, last: string) => `${first} ${last}`.trim();
 
@@ -24,7 +24,7 @@ function shape(r: Row) {
   const [firstName, lastName] = parts(r);
   return {
     name: r.name, firstName, lastName,
-    username: r.username, bio: r.bio, birthday: r.birthday, phone: r.phone, links: r.links ?? [],
+    username: r.username, bio: r.bio, birthday: r.birthday, phone: r.phone, links: r.links ?? [], photo: r.photo ?? null,
   };
 }
 
@@ -62,6 +62,7 @@ export function publicUser(viewer: number, r: Row, contact: ContactName | null |
     bio: canSee(viewer, r.id, 'bio', ctx) ? s.bio : null,
     birthday: canSee(viewer, r.id, 'birthday', ctx) ? s.birthday : null,
     phone: canSee(viewer, r.id, 'phone', ctx) ? s.phone : null,
+    photo: blocksViewer(viewer, r.id, ctx) ? null : s.photo,   // заблокированному — как в Telegram, без фото
     blocksMe: blocksViewer(viewer, r.id, ctx),
   };
 }
@@ -245,4 +246,33 @@ export async function setUsername(userId: number, raw: unknown): Promise<Me> {
     if ((e as { code?: string }).code === '23505') throw new DomainError('username_taken');
     throw e;
   }
+}
+
+// ---------- фото профиля ----------
+
+const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
+/** превью — несколько сотен байт: размытая 16×16; больше — уже не превью, а способ раздуть профиль */
+const THUMB = /^data:image\/(jpeg|webp|png);base64,[A-Za-z0-9+/]{16,4000}={0,2}$/;
+
+/**
+ * Поставить фото: клиент сам обрезал и ужал его до 640 и 160 и загрузил обычной загрузкой (/uploads).
+ * Проверяем, что это свои готовые квадратные картинки разумного размера — чужой файл «в профиль» не подсунуть.
+ */
+export async function setPhoto(userId: number, body: unknown): Promise<Me> {
+  const bad = () => new DomainError('photo_invalid');
+  if (!body || typeof body !== 'object') throw bad();
+  const { id, small, thumb } = body as Record<string, unknown>;
+  if (typeof id !== 'string' || typeof small !== 'string' || id === small || !UUID.test(id) || !UUID.test(small)) throw bad();
+  if (typeof thumb !== 'string' || !THUMB.test(thumb)) throw bad();
+  const rows = await sql`select id, width, height from attachments
+    where id = any(${[id, small]}::uuid[]) and owner_id = ${userId} and status = 'ready' and mime like 'image/%'`;
+  const side = (x: string) => { const r = rows.find((a) => a.id === x); return r && r.width === r.height ? Number(r.width) : 0; };
+  const b = side(id), s = side(small);
+  if (b < 160 || b > 1280 || s < 48 || s > 320) throw bad();
+  const photo: ProfilePhoto = { id, small, thumb, at: Date.now() };
+  return save(userId, async (tx) => { await tx`update users set photo = ${tx.json(photo as never)} where id = ${userId}`; });
+}
+
+export async function deletePhoto(userId: number): Promise<Me> {
+  return save(userId, async (tx) => { await tx`update users set photo = null where id = ${userId}`; });
 }

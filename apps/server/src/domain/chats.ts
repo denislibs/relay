@@ -1,4 +1,4 @@
-import { graphemes, normalizeEntities, type Entity, type MediaTab, type Message, type ServiceType } from '@relay/protocol';
+import { graphemes, normalizeEntities, type Entity, type MediaTab, type Message, type ProfilePhoto, type ServiceType } from '@relay/protocol';
 import { sql, type Tx } from '../db';
 import { DomainError } from './errors';
 import { fanOut } from './journal';
@@ -121,7 +121,7 @@ export type ChatSummary = {
   lastReadId: number;
   unread: number;
   last: Message | null;
-  peer: { id: number; name: string; system?: true } | null; // собеседник личного чата
+  peer: { id: number; name: string; system?: true; photo?: ProfilePhoto | null } | null; // собеседник личного чата
   peerReadUpTo: number; // до какого id мои сообщения прочитаны всеми остальными участниками
   draft?: { text: string; at: string; entities?: Entity[] } | null; // черновик этого пользователя (синхронизируется между устройствами)
   sortAt?: string; // ключ сортировки списка (последнее сообщение или создание чата) — из него курсор страницы
@@ -149,7 +149,8 @@ export async function listChats(userId: number, opts: ListOpts = {}): Promise<Ch
            lm.body as m_body, lm.kind as m_kind, lm.attachment as m_attachment, lm.reply_to_id as m_reply_to_id, lm.created_at as m_created_at, lm.edited_at as m_edited_at, lm.deleted as m_deleted, lm.entities as m_entities, lm.service_type as m_service_type,
            (select count(*) from messages m
              where m.chat_id = c.id and m.id > cm.last_read_id and m.sender_id <> ${userId})::int as unread,
-           (select json_build_object('id', u.id, 'name', ${nameForSql(userId)}, 'system', u.system)   -- контактное имя — только владельцу
+           (select json_build_object('id', u.id, 'name', ${nameForSql(userId)}, 'system', u.system,   -- контактное имя — только владельцу
+                    'photo', case when exists (select 1 from blocks b where b.owner_id = u.id and b.user_id = ${userId}) then null else u.photo end)
               from chat_members pm join users u on u.id = pm.user_id
              where c.kind = 'direct' and pm.chat_id = c.id and pm.user_id <> ${userId} limit 1) as peer,
            (select coalesce(min(om.last_read_id), 0) from chat_members om where om.chat_id = c.id and om.user_id <> ${userId}) as peer_read_up_to,
@@ -173,7 +174,7 @@ export async function listChats(userId: number, opts: ListOpts = {}): Promise<Ch
     title: (r.title as string | null) ?? null,
     lastReadId: r.last_read_id as number,
     unread: r.unread as number,
-    peer: r.peer ? { id: (r.peer as { id: number }).id, name: (r.peer as { name: string }).name, ...((r.peer as { system?: boolean }).system ? { system: true as const } : {}) } : null,
+    peer: r.peer ? { id: (r.peer as { id: number }).id, name: (r.peer as { name: string }).name, photo: (r.peer as { photo?: ProfilePhoto | null }).photo ?? null, ...((r.peer as { system?: boolean }).system ? { system: true as const } : {}) } : null,
     peerReadUpTo: (r.peer_read_up_to as number) ?? 0,
     sortAt: new Date(r.sort_at as string).toISOString(),
     pinned: ((r.pinned as number[] | null) ?? []).map(Number),
