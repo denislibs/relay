@@ -1,3 +1,6 @@
+import type { ProfileLink } from './links';
+export * from './links';
+
 export type Id = number;
 
 /** Служебное сообщение от системного пользователя: машинный тип для отрисовки и склейки повторов. */
@@ -150,6 +153,7 @@ export interface PublicUser {
   system?: true;
   id: Id; name: string; firstName: string; lastName: string;
   username: string | null; bio: string | null; birthday: Birthday | null; phone: string | null;
+  links: ProfileLink[];   // ссылки на профили в других сервисах, в порядке владельца; видны всем
   /** собственное имя пользователя; name/firstName/lastName у владельца контакта — контактные */
   publicName?: string;
   /** этот человек заблокировал зрителя: писать ему в личный чат нельзя (плашка вместо поля ввода) */
@@ -171,13 +175,14 @@ export interface Contact {
 export interface Me {
   userId: Id; name: string; firstName: string; lastName: string;
   username: string | null; bio: string | null; birthday: Birthday | null; phone: string | null;
+  links: ProfileLink[];
   seq?: number;
 }
 
 export interface JournalEntry { seq: number; update: Update }
 
 export type ErrorCode = 'bad_frame' | 'unauthorized' | 'not_member' | 'not_found' | 'too_long' | 'forbidden' | 'internal'
-  | 'username_invalid' | 'username_taken' | 'username_reserved' | 'bio_too_long' | 'name_invalid' | 'birthday_invalid' | 'note_too_long'
+  | 'username_invalid' | 'username_taken' | 'username_reserved' | 'bio_too_long' | 'name_invalid' | 'birthday_invalid' | 'links_invalid' | 'note_too_long'
   | 'blocked' | 'code_invalid' | 'code_expired' | 'flood' | 'fresh_session'
   | 'password_invalid' | 'password_missing' | 'recovery_unavailable' | 'email_invalid' | 'qr_expired' | 'passkey_not_found' | 'passkey_invalid';
 

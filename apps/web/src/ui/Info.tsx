@@ -1,3 +1,5 @@
+import type { ProfileLink } from '@relay/protocol';
+import { ProfileLinks } from './links/ProfileLinks';
 import { Avatar, EmptyState, Icon, FolderTabs, InfoRow, LazyImage, PanelHeader, RichText, SettingsIcon, SlideStack, Switch } from '@relay/ui';
 import type { Item } from '@relay/sync-engine/src/types';
 import { chatMedia, focusMessage } from '../data';
@@ -92,6 +94,7 @@ export function Info() {
           <div class="rl-profile-name">{title}{system ? <i class="app-verified" role="img" aria-label="Официальный аккаунт"><Icon name="check" size={14} /></i> : null}</div>
           <div class={'rl-profile-sub' + (myPeer?.online ? ' app-online' : '')}>{subtitle || ' '}</div>
         </div>
+        <Expand show={!group && !!(user?.links as ProfileLink[] | undefined)?.length}>{!group && user ? <ProfileLinks links={(user.links as ProfileLink[] | undefined) ?? []} /> : null}</Expand>
         <div class="rl-aside-group">
           {/* как в Telegram: имя уже в шапке — строками только то, чего там нет, и только если поле заполнено */}
           <Expand show={!group && !!user}>{!group && user ? <PeerRows user={user} /> : null}</Expand>

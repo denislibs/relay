@@ -22,7 +22,7 @@ const updates = async (userId: number) => (await getUpdates(userId, 0)).items.ma
 test('GET /me: extended shape, userId and name kept', async () => {
   const a = await login('Анна Смирнова', '+79001234567');
   const me = await (await call(a, 'GET', '/me')).json();
-  expect(me).toEqual({ userId: a.userId, name: 'Анна Смирнова', firstName: 'Анна', lastName: 'Смирнова', username: null, bio: null, birthday: null, phone: '+79001234567', seq: 0 });
+  expect(me).toEqual({ userId: a.userId, name: 'Анна Смирнова', firstName: 'Анна', lastName: 'Смирнова', username: null, bio: null, birthday: null, phone: '+79001234567', links: [], seq: 0 });
 });
 
 test('Me.seq is the seq of the own userUpdated entry (orders responses against the journal)', async () => {
@@ -135,7 +135,7 @@ test('GET /users/:id: self and chat peer ok, stranger 404', async () => {
   const a = await login('Анна', '+79005550001'), b = await login('Борис'), s = await login('Посторонний');
   await makeChat([a.userId, b.userId]);
   await call(a, 'PUT', '/me/username', { username: 'anna_x' });
-  expect(await (await call(b, 'GET', `/users/${a.userId}`)).json()).toEqual({ id: a.userId, name: 'Анна', firstName: 'Анна', lastName: '', publicName: 'Анна', username: 'anna_x', bio: null, birthday: null, phone: null, blocksMe: false });
+  expect(await (await call(b, 'GET', `/users/${a.userId}`)).json()).toEqual({ id: a.userId, name: 'Анна', firstName: 'Анна', lastName: '', publicName: 'Анна', username: 'anna_x', links: [], bio: null, birthday: null, phone: null, blocksMe: false });
   expect((await call(a, 'GET', `/users/${a.userId}`)).status).toBe(200);
   const r = await call(s, 'GET', `/users/${a.userId}`);
   expect([r.status, (await r.json()).code]).toEqual([404, 'not_found']);
@@ -197,4 +197,22 @@ test('dev login: phone set once, duplicate phone does not break login', async ()
   const b = await login('Борис', '+79001112233');
   expect((await (await call(a, 'GET', '/me')).json()).phone).toBe('+79001112233');
   expect((await (await call(b, 'GET', '/me')).json()).phone).toBeNull();
+});
+
+test('links: saved in order from names or pasted addresses, shown to chat peers through the journal, bad ones refused', async () => {
+  const a = await login('Анна'), b = await login('Борис');
+  await makeChat([a.userId, b.userId]);
+  const res = await call(a, 'PATCH', '/me', { links: [{ service: 'github', handle: 'https://github.com/hoho' }, { service: 'x', handle: '@xixi' }] });
+  expect(res.status).toBe(200);
+  const links = [{ service: 'github', handle: 'hoho' }, { service: 'x', handle: 'xixi' }];
+  expect((await res.json()).links).toEqual(links);
+  expect((await updates(b.userId)).at(-1)!.user).toMatchObject({ id: a.userId, links });
+  expect((await (await call(b, 'GET', `/users/${a.userId}`)).json()).links).toEqual(links);
+  // переставили — порядок сохраняется; остальные поля не трогаются
+  expect((await (await call(a, 'PATCH', '/me', { links: [links[1], links[0]] })).json()).links).toEqual([links[1], links[0]]);
+  for (const bad of [[{ service: 'github', handle: 'evil.io/x' }], [{ service: 'myspace', handle: 'a' }], 'x', Array.from({ length: 11 }, (_, i) => ({ service: 'github', handle: 'u' + i }))]) {
+    const r = await call(a, 'PATCH', '/me', { links: bad });
+    expect([r.status, (await r.json()).code]).toEqual([400, 'links_invalid']);
+  }
+  expect((await (await call(a, 'PATCH', '/me', { links: [] })).json()).links).toEqual([]);
 });

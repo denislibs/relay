@@ -1,4 +1,4 @@
-import type { Birthday, Me, PublicUser } from '@relay/protocol';
+import { normalizeLinks, type Birthday, type Me, type ProfileLink, type PublicUser } from '@relay/protocol';
 import { sql, type Tx } from '../db';
 import { DomainError } from './errors';
 import { appendUpdates } from './journal';
@@ -8,8 +8,8 @@ const RESERVED = new Set(['admin', 'relay', 'support', 'settings', 'help', 'api'
 const USERNAME = /^[a-z][a-z0-9_]{4,31}$/;
 const len = (s: string) => [...s].length;
 
-export type Row = { id: number; name: string; first_name: string | null; last_name: string | null; username: string | null; bio: string | null; birthday: Birthday | null; phone: string | null };
-export const COLS = sql`id, name, first_name, last_name, username, bio, birthday, phone`;
+export type Row = { id: number; name: string; first_name: string | null; last_name: string | null; username: string | null; bio: string | null; birthday: Birthday | null; phone: string | null; links: ProfileLink[] };
+export const COLS = sql`id, name, first_name, last_name, username, bio, birthday, phone, links`;
 
 export const fullName = (first: string, last: string) => `${first} ${last}`.trim();
 
@@ -24,7 +24,7 @@ function shape(r: Row) {
   const [firstName, lastName] = parts(r);
   return {
     name: r.name, firstName, lastName,
-    username: r.username, bio: r.bio, birthday: r.birthday, phone: r.phone,
+    username: r.username, bio: r.bio, birthday: r.birthday, phone: r.phone, links: r.links ?? [],
   };
 }
 
@@ -58,7 +58,7 @@ export function publicUser(viewer: number, r: Row, contact: ContactName | null |
   return {
     id: r.id, name: c ? fullName(c.first_name, c.last_name) : s.name,
     firstName: c ? c.first_name : s.firstName, lastName: c ? c.last_name : s.lastName, publicName: s.name,
-    username: s.username,
+    username: s.username, links: s.links,   // как @username — видны всем, кто видит профиль
     bio: canSee(viewer, r.id, 'bio', ctx) ? s.bio : null,
     birthday: canSee(viewer, r.id, 'birthday', ctx) ? s.birthday : null,
     phone: canSee(viewer, r.id, 'phone', ctx) ? s.phone : null,
@@ -216,6 +216,7 @@ export async function updateProfile(userId: number, patch: unknown): Promise<Me>
   const last = 'lastName' in p ? validName(p.lastName ?? '', 0) : undefined;
   const bio = 'bio' in p ? validBio(p.bio) : undefined;
   const birthday = 'birthday' in p ? validBirthday(p.birthday) : undefined;
+  const links = 'links' in p ? normalizeLinks(p.links) ?? (() => { throw new DomainError('links_invalid'); })() : undefined;
   return save(userId, async (tx, cur) => {
     const [pf, pl] = parts(cur);
     const f = first ?? pf;
@@ -224,7 +225,8 @@ export async function updateProfile(userId: number, patch: unknown): Promise<Me>
     const b = birthday === undefined ? cur.birthday : birthday;
     await tx`update users set first_name = ${f}, last_name = ${l || null}, name = ${name},
                bio = ${bio === undefined ? cur.bio : bio},
-               birthday = ${b === null ? null : tx.json(b as never)}
+               birthday = ${b === null ? null : tx.json(b as never)},
+               links = ${tx.json((links ?? cur.links ?? []) as never)}
              where id = ${userId}`;
   });
 }

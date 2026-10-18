@@ -2,7 +2,7 @@ import { Button, ConfirmDialog, Fab, InfoRow, Modal, PanelHeader, Presence, Prof
 import { render, type ComponentChildren } from 'preact';
 import { useEffect, useLayoutEffect, useRef, useState } from 'preact/hooks';
 import { useGlobal, type Me } from '../../global';
-import { back, setLeaveGuard } from '../../nav';
+import { back, go, setLeaveGuard } from '../../nav';
 import { checkUsername, setUsername, showToast, updateProfile } from '../../settingsData';
 import { birthdayText, type Birthday } from '../format';
 import {
@@ -11,6 +11,7 @@ import {
 } from './profileForm';
 
 const CHECK_DELAY = 400;
+const linksText = (n: number) => (n === 0 ? 'Добавить GitHub, LinkedIn, соцсети' : n % 10 === 1 && n % 100 !== 11 ? `${n} ссылка` : n % 10 >= 2 && n % 10 <= 4 && (n % 100 < 12 || n % 100 > 14) ? `${n} ссылки` : `${n} ссылок`);
 const MONTHS = ['Январь', 'Февраль', 'Март', 'Апрель', 'Май', 'Июнь', 'Июль', 'Август', 'Сентябрь', 'Октябрь', 'Ноябрь', 'Декабрь'];
 
 /** Слой поверх всего приложения (модалка не должна быть заперта в колонке боковой панели). */
@@ -149,6 +150,7 @@ export function Profile() {
         </Section>
         <Section>
           <InfoRow tile="purple" icon="cake" title={form.birthday ? birthdayText(form.birthday) : 'Не указан'} subtitle="День рождения" onClick={() => setBday(true)} />
+          <InfoRow tile="blue" icon="link" title="Ссылки" subtitle={linksText(me.links?.length ?? 0)} onClick={() => void go('settings/profile/links')} />
         </Section>
       </div>
       <Presence show={dirty && ok} exitMs={200}>

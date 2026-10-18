@@ -7,7 +7,7 @@ import { pushInBackground } from './push';
 type Db = Tx | typeof sql;
 let systemId: Promise<number> | null = null;
 
-/** Системный пользователь «Relay» (строка из миграции 109_service). Кэшируется на процесс. */
+/** Системный пользователь «Relay» (строка из миграции 110_service). Кэшируется на процесс. */
 export function systemUserId(): Promise<number> {
   return systemId ??= sql`select id from users where system limit 1`.then(([r]) => {
     if (!r) throw new Error('system user missing: run migrations');

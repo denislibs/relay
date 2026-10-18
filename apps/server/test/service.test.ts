@@ -44,11 +44,11 @@ test('the system user cannot be blocked or added as a contact (forbidden)', asyn
   expect((await sql`select count(*)::int as n from contacts where owner_id = ${a}`)[0].n).toBe(0);
 });
 
-test('109_service.sql runs again harmlessly: one system user, pending code sign-ins stay unconfirmed, new sessions default to confirmed', async () => {
+test('110_service.sql runs again harmlessly: one system user, pending code sign-ins stay unconfirmed, new sessions default to confirmed', async () => {
   const { createSession } = await import('../src/auth');
   const a = await makeUser('Анна');
   await createSession(a, undefined, { confirmed: false });
-  const text = await Bun.file(new URL('../migrations/109_service.sql', import.meta.url)).text();
+  const text = await Bun.file(new URL('../migrations/110_service.sql', import.meta.url)).text();
   await sql.begin((tx) => tx.unsafe(text));
   await sql.begin((tx) => tx.unsafe(text));
   expect((await sql`select count(*)::int as n from users where system`)[0].n).toBe(1);

@@ -5,6 +5,8 @@ export const PAGES = [
   'chats',
   'settings',
   'settings/profile',
+  'settings/profile/links',
+  'settings/profile/links/:item',   // new или номер ссылки
   'settings/general',
   'settings/general/wallpaper',
   'settings/notifications',

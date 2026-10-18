@@ -8,7 +8,7 @@ import { Store, type ChatSummary } from './store';
 import { WsTransport } from './transport';
 import { loadOps, Ops, type PendingOp } from './ops';
 import { isNotifyOp, normalizeRule, notifyKey, privacyKey, settingsItem, settingsView } from './settings';
-import { applyUserUpdated, meItem, meView, OP_PROFILE, OP_USERNAME, userItem } from './profile';
+import { applyUserUpdated, meItem, meView, OP_LINKS, OP_PROFILE, OP_USERNAME, userItem } from './profile';
 import { OP_SESSIONS_TTL, Sessions } from './sessions';
 import { SessionEnd } from './session';
 import { DevTools, loadSim, type SimState, type SubStat } from './devlog';
@@ -517,7 +517,7 @@ export class Engine {
       if (v?.notify && this.store.settings.apply({ notify: v.notify, sessionsTtlDays: v.sessionsTtlDays, privacy: v.privacy }, v.seq)) this.run(() => this.store.flush());
       return;
     }
-    if ((op.key === OP_PROFILE || op.key === OP_USERNAME) && value && typeof value === 'object' && (value as Me).userId === this.cfg.userId) {
+    if ((op.key === OP_PROFILE || op.key === OP_USERNAME || op.key === OP_LINKS) && value && typeof value === 'object' && (value as Me).userId === this.cfg.userId) {
       if (this.store.profile.setMe(value as Me)) this.run(() => this.store.flush());
     }
   }
@@ -673,6 +673,9 @@ export class Engine {
         if (Object.keys(body).length) await this.ops.enqueue({ key: OP_PROFILE, method: 'PATCH', path: '/me', body });
         return null;
       }
+      case 'setLinks':
+        await this.ops.enqueue({ key: OP_LINKS, method: 'PATCH', path: '/me', body: { links: a.links } });
+        return null;
       case 'setUsername':
         await this.ops.enqueue({ key: OP_USERNAME, method: 'PUT', path: '/me/username', body: { username: a.username } });
         return null;

@@ -109,7 +109,7 @@ export function blocksView(base: ReadonlyMap<number, BlockBase>, ops: readonly P
     if (!id) continue;
     if (op.method === 'DELETE') { view.delete(id); continue; }
     const prev = view.get(id);
-    const user = prev?.user ?? users.get(id) ?? { id, name: '', firstName: '', lastName: '', username: null, bio: null, birthday: null, phone: null };
+    const user = prev?.user ?? users.get(id) ?? { id, name: '', firstName: '', lastName: '', username: null, bio: null, birthday: null, phone: null, links: [] };
     view.set(id, { userId: id, user, at: prev?.at ?? new Date(op.at).toISOString(), pending: !prev || prev.pending });
   }
   return [...view.values()].sort((a, b) => (a.at < b.at ? 1 : a.at > b.at ? -1 : b.userId - a.userId));
