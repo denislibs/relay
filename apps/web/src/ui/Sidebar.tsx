@@ -2,7 +2,7 @@ import { ChatBanner } from './ChatBanner';
 import { UpdatePill } from './UpdatePill';
 import { Avatar, ChatRow, Highlight, Menu, Presence, SlideStack, ChatRowSkeleton, useMinVisible, EmptyState, Fab, WindowList, FolderTabs, SidebarCard, SidebarHeader, peerTone } from '@relay/ui';
 import type { Item } from '@relay/sync-engine/src/types';
-import { ensureNames, loadMoreChats, openChat, searchMessages } from '../data';
+import { ensureNames, loadMoreChats, openChat, openInner, searchMessages } from '../data';
 import { setGlobal, useGlobal } from '../global';
 import { useEffect, useRef, useState } from 'preact/hooks';
 import { memo } from 'preact/compat';
@@ -149,7 +149,7 @@ export function Sidebar() {
               name={h.chatTitle ?? 'Чат №' + h.chatId}
               preview={<Highlight text={snippet(h.body, results.q)} query={results.q} />}
               time={chatTime(h.createdAt)}
-              onClick={() => openChat(h.chatId, { id: h.id, sort: h.sort })}
+              onClick={() => openInner(h.chatId, { id: h.id, sort: h.sort })}   // найденное — поверх открытого чата, «Назад» вернёт к нему
             />
           )) : <div class="app-results-empty">Сообщений не найдено</div>}
         </div>

@@ -5,7 +5,9 @@ import { chatTone, fileSize } from './format';
 import type { ComponentChildren } from 'preact';
 import { useEffect, useState } from 'preact/hooks';
 import { syncMuted } from '../notify';
-import { setGlobal, useGlobal } from '../global';
+import { activeFrame, setGlobal, useGlobal } from '../global';
+
+const NO_MESSAGES: Item[] = [];
 import { birthdayText, clock, dayLabel, lastSeenText, type Birthday } from './format';
 import { showToast, useUser } from '../settingsData';
 import { EditContactPanel } from './contacts/EditContact';
@@ -30,7 +32,7 @@ export function Info() {
   const chatId = useGlobal((s) => s.openChatId)!;
   const chat = useGlobal((s) => s.chats.find((c) => c.id === s.openChatId));
   const peer = useGlobal((s) => s.peer);
-  const messages = useGlobal((s) => s.messages);
+  const messages = useGlobal((s) => activeFrame(s)?.messages ?? NO_MESSAGES);
   const muted = useGlobal((s) => s.muted);
   const [tab, setTab] = useState('media');
   const [page, setPage] = useState('info');

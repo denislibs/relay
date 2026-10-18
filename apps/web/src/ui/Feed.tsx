@@ -3,8 +3,8 @@ import type { Entity } from '@relay/protocol';
 import { Bubble, peerTone, DateDivider, FileBubble, MediaBubble, MessageText, MediaViewer, ScrollToBottom, forceMeasure, isHeavyAnimating, onHeavyAnimationEnd, requestMeasure, requestMutation } from '@relay/ui';
 import { memo } from 'preact/compat';
 import { useEffect, useLayoutEffect, useRef, useState } from 'preact/hooks';
-import { ensureNames, focusMessage, localPreview, moveWindow, react, savePosition, savedPosition, seen } from '../data';
-import { setGlobal, useGlobal } from '../global';
+import { clearFocus, ensureNames, focusMessage, localPreview, moveWindow, react, savePosition, savedPosition, seen } from '../data';
+import { frameByKey, useGlobal } from '../global';
 import { clock, dayKey, dayLabel, fileSize } from './format';
 
 /*
@@ -27,10 +27,10 @@ const FIRST_PAINT = 24;   // при открытии внизу первым к�
 type Quote = { id: number; sort: number; body: string; senderId: number };
 type Att = { id: string; kind: 'photo' | 'file'; mime: string; name: string; size: number; w: number | null; h: number | null; thumb?: string | null };
 const fileUrl = (a: Att, download = false) => `/files/${a.id}${download ? '?download=1' : ''}`;
-type RowProps = { onOpen: (m: Item) => void; hl?: string; m: Item; meId: number; out: boolean; start: boolean; end: boolean; quoted?: Quote | null; quoteAuthor?: string; quoteTone?: number; appear: boolean; flash: boolean; onReact: (m: Item, emoji: string) => void };
+type RowProps = { author?: string; onAuthor?: (m: Item) => void; onOpen: (m: Item) => void; hl?: string; m: Item; meId: number; out: boolean; start: boolean; end: boolean; quoted?: Quote | null; quoteAuthor?: string; quoteTone?: number; appear: boolean; flash: boolean; onReact: (m: Item, emoji: string) => void };
 
 /** Строка ленты: перерисовывается только если изменилось её сообщение или место в группе. */
-const Row = memo(function Row({ onOpen, hl, m, meId, out, start, end, quoted, quoteAuthor, quoteTone, appear, flash, onReact }: RowProps) {
+const Row = memo(function Row({ author, onAuthor, onOpen, hl, m, meId, out, start, end, quoted, quoteAuthor, quoteTone, appear, flash, onReact }: RowProps) {
   // реакции: по эмодзи — сколько и есть ли моя
   const list = (m.reactions as { userId: number; emoji: string }[] | undefined) ?? [];
   const chips: { emoji: string; count: number; mine: boolean }[] = [];
@@ -80,6 +80,9 @@ const Row = memo(function Row({ onOpen, hl, m, meId, out, start, end, quoted, qu
         from={out ? 'out' : 'in'}
         tail={end}
         groupStart={start}
+        author={author}
+        authorTone={author ? peerTone(m.senderId as number) : undefined}
+        onAuthorClick={author && onAuthor ? () => onAuthor(m) : undefined}
         reply={quoted ? { author: quoteAuthor, text: quoted.body, tone: quoteTone, onClick: noop } : undefined}
         edited={!!m.editedAt && !m.deleted}
         deleted={!!m.deleted}
@@ -108,16 +111,21 @@ function firstVisible(root: HTMLElement): { key: string; sort: number; top: numb
   return null;
 }
 
-export function Feed({ chatId, meId, peerName, stick, onMenu, highlight }: {
+const NO_MESSAGES: Item[] = [];
+
+export function Feed({ frameKey, active, chatId, meId, peerName, group, onAuthor, stick, onMenu, highlight }: {
+  frameKey: string; active: boolean;   // кадр стека чатов; active — на экране (только он отмечает прочитанное)
   chatId: number; meId: number; peerName: string; highlight?: string;
+  group: boolean; onAuthor: (userId: number) => void;   // в группе — имя автора над пачкой; клик — личный чат поверх
   stick: { current: boolean };
   onMenu: (key: string, x: number, y: number) => void;
 }) {
-  const messages = useGlobal((s) => s.messages);
+  const messages = useGlobal((s) => frameByKey(s, frameKey)?.messages ?? NO_MESSAGES);
   const names = useGlobal((s) => s.names);
-  const meta = useGlobal((s) => s.feedMeta);
-  const unreadFrom = useGlobal((s) => s.unreadFrom);
-  const focus = useGlobal((s) => s.focus);
+  const meta = useGlobal((s) => frameByKey(s, frameKey)?.feedMeta ?? null);
+  const unreadFrom = useGlobal((s) => frameByKey(s, frameKey)?.unreadFrom ?? null);
+  const focus = useGlobal((s) => frameByKey(s, frameKey)?.focus ?? null);
+  const activeRef = useRef(active); activeRef.current = active;
   const [flashKey, setFlashKey] = useState<string | null>(null);
   const [viewer, setViewer] = useState<number | null>(null);   // индекс фото в просмотрщике
   const unread = useGlobal((s) => (s.chats.find((c) => c.id === chatId)?.unread as number) ?? 0);
@@ -141,7 +149,7 @@ export function Feed({ chatId, meId, peerName, stick, onMenu, highlight }: {
       if (anchor.current) return; // предыдущий сдвиг ещё не применён
       const v = firstVisible(root);
       if (v) anchor.current = { key: v.key, top: v.top };
-      moveWindow(dir);
+      moveWindow(dir, frameKey);
     });
   };
 
@@ -201,6 +209,7 @@ export function Feed({ chatId, meId, peerName, stick, onMenu, highlight }: {
     return () => edges.current?.disconnect();
   }, [chatId]);
 
+  const scheduleRead = useRef<(() => void) | null>(null);   // вернулись к чату (верхний сняли) — отметить то, что видно
   // прочтение: метки под баблами (видна нижняя кромка — прочитано), отправка раз в 150 мс, пауза на тяжёлых анимациях
   const marks = useRef<IntersectionObserver | null>(null);
   const visible = useRef(new Set<number>());
@@ -209,7 +218,7 @@ export function Feed({ chatId, meId, peerName, stick, onMenu, highlight }: {
     const flush = () => {
       readTimer.current = null;
       if (isHeavyAnimating()) { onHeavyAnimationEnd(flush); return; }
-      if (document.visibilityState !== 'visible' || !document.hasFocus()) return;
+      if (!activeRef.current || document.visibilityState !== 'visible' || !document.hasFocus()) return;
       let max = 0;
       for (const id of visible.current) if (id > max) max = id;
       if (max) seen(chatId, max);
@@ -224,6 +233,7 @@ export function Feed({ chatId, meId, peerName, stick, onMenu, highlight }: {
     }, { root: el.current, rootMargin: `-${TOP_ZONE}px 0px -80px 0px` });
     addEventListener('focus', schedule);
     document.addEventListener('visibilitychange', schedule);
+    scheduleRead.current = schedule;
     return () => {
       marks.current?.disconnect();
       if (readTimer.current) clearTimeout(readTimer.current);
@@ -231,6 +241,8 @@ export function Feed({ chatId, meId, peerName, stick, onMenu, highlight }: {
       document.removeEventListener('visibilitychange', schedule);
     };
   }, [chatId]);
+
+  useEffect(() => { if (active) scheduleRead.current?.(); }, [active]);
 
   // наблюдать новые датчики и метки, отпускать ушедшие из окна
   const watched = useRef(new Set<Element>());
@@ -291,7 +303,7 @@ export function Feed({ chatId, meId, peerName, stick, onMenu, highlight }: {
   const toLatest = () => {
     stick.current = true;
     const root = el.current!;
-    if (metaRef.current && !metaRef.current.live) { toBottom.current = true; moveWindow('latest'); return; }
+    if (metaRef.current && !metaRef.current.live) { toBottom.current = true; moveWindow('latest', frameKey); return; }
     requestMeasure(() => { const top = root.scrollHeight; requestMutation(() => root.scrollTo({ top, behavior: 'smooth' })); });
   };
 
@@ -301,7 +313,7 @@ export function Feed({ chatId, meId, peerName, stick, onMenu, highlight }: {
     if (!root || !focus || !placed.current) return;
     const row = root.querySelector<HTMLElement>(`.app-msg[data-sort="${focus.sort}"]`);
     if (!row) return;
-    setGlobal({ focus: null });
+    clearFocus(frameKey);
     stick.current = false;
     anchor.current = null;
     setFlashKey(row.dataset.key!);
@@ -358,6 +370,10 @@ export function Feed({ chatId, meId, peerName, stick, onMenu, highlight }: {
     return key ? el.current?.querySelector<HTMLElement>(`[data-key="${CSS.escape(key)}"] .rl-media-cell`) ?? null : null;
   }).current;
 
+  const authorRef = useRef(onAuthor); authorRef.current = onAuthor;
+  const onAuthorRow = useRef((m: Item) => authorRef.current(m.senderId as number)).current;
+  useEffect(() => { if (group) ensureNames([...new Set(messages.filter((m) => m.senderId !== meId).map((m) => m.senderId as number))]); }, [group, messages]);
+
   // контекстное меню — одно на ленту, а не на каждый бабл (иначе обработчик ломал бы мемоизацию строк)
   const onContextMenu = (e: MouseEvent) => {
     const row = (e.target as Element).closest<HTMLElement>('.app-msg');
@@ -385,6 +401,8 @@ export function Feed({ chatId, meId, peerName, stick, onMenu, highlight }: {
     out.push(
       <Row
         key={m.key}
+        author={group && !mine && start && !m.deleted ? names[m.senderId as number] ?? '' : undefined}
+        onAuthor={onAuthorRow}
         hl={highlight && (m.body as string).toLowerCase().includes(highlight.toLowerCase()) ? highlight : undefined}
         m={m}
         meId={meId}
