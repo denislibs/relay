@@ -6,7 +6,8 @@ import { connectEngine, Mirror, type EngineClient } from '@relay/sync-engine/src
 import type { Action, Item, Patch, Query } from '@relay/sync-engine/src/types';
 import { useEffect, useState } from 'preact/hooks';
 import type { PrivacyKey, PrivacyMode, SessionInfo } from '@relay/protocol';
-import { isSessionOp, sessionsView } from '@relay/sync-engine/src/sessions';
+import { isSessionOp, sessionConfirmKey } from '@relay/sync-engine/src/sessions';
+import { sessionsSeen } from './banners';
 import { reducedMotion } from '@relay/ui';
 import { engineConfig } from './engineConfig';
 import { getGlobal, setGlobal, type AccountSettings, type DevSimFlags, type Me } from './global';
@@ -45,8 +46,13 @@ const FAIL_TEXT: Record<string, string> = {
   name_invalid: 'Укажите имя',
   note_too_long: 'Слишком длинная заметка',
   not_found: 'Пользователь не найден в Relay',
+  fresh_session: 'Сначала подтвердите этот вход на другом устройстве',
 };
 export const failText = (code: string): string => FAIL_TEXT[code] ?? 'Не удалось сохранить изменения';
+
+/** Операция над сеансом: завершение (isSessionOp) или подтверждение «Это вы?». */
+const CONFIRM_PREFIX = sessionConfirmKey(0).slice(0, -1);   // 'sessionConfirm:'
+const isSessionKey = (k: string): boolean => isSessionOp(k) || k.startsWith(CONFIRM_PREFIX);
 
 let toastSeq = 0;
 let toastTimer: ReturnType<typeof setTimeout> | null = null;
@@ -107,8 +113,8 @@ export function startSettingsData(me: Me): void {
     const failures = (opsM.list()[0]?.failures ?? []) as { id: number; key: string; code: string }[];
     const max = failures.reduce((m, f) => Math.max(m, f.id), 0);
     if (seen >= 0) {
-      // сеанс уже завершён (404) — то, чего и хотели: не ошибка
-      const fresh = failures.filter((f) => f.id > seen && !(isSessionOp(f.key) && f.code === 'not_found'));
+      // сеанс уже завершён (404) — то, чего и хотели (или подтверждать уже нечего): не ошибка
+      const fresh = failures.filter((f) => f.id > seen && !(isSessionKey(f.key) && f.code === 'not_found'));
       if (fresh.length) showToast(failText(fresh[fresh.length - 1].code));
     }
     seen = Math.max(seen, max);
@@ -117,9 +123,10 @@ export function startSettingsData(me: Me): void {
     const prev = getGlobal().opsKeys;
     if (keys.join('\n') !== prev.join('\n')) {
       // ушедшее завершение применяем к уже загруженному списку тем же кадром — иначе строка вернулась бы до ответа
-      const gone = prev.filter((k) => isSessionOp(k) && !keys.includes(k));
+      // так же подтверждение («Да, это я»): иначе плашка «Это вы?» вернулась бы на время перезагрузки списка
+      const gone = prev.filter((k) => isSessionKey(k) && !keys.includes(k));
       const list = getGlobal().sessions;
-      setGlobal({ opsKeys: keys, sessions: gone.length && list ? sessionsView(list, gone) : list });
+      setGlobal({ opsKeys: keys, sessions: gone.length && list ? sessionsSeen(list, gone) : list });
       if (gone.length) void loadSessions(true);
     }
   });
