@@ -427,3 +427,19 @@ html[data-anim="0"] .app-chatcol, html[data-anim="0"] .app-chatcol-below, html[d
 .auth-passkey > div { overflow: hidden; display: flex; flex-direction: column; align-items: center; }
 .auth-passkey-ready { grid-template-rows: 1fr; opacity: 1; }
 @media (prefers-reduced-motion: reduce) { .auth-card-in, .auth-card-out, .auth-digit, .auth-qr-img { animation-duration: 1ms !important; } }
+
+/* ---------- Настройки входа: облачный пароль, паскеи, QR ---------- */
+.app-pw-head { display: flex; flex-direction: column; align-items: center; gap: 12px; padding: 16px 24px 8px; text-align: center; }
+.app-pw-head p { margin: 0; font: 400 14px/20px var(--font-sans); color: var(--ink-muted); text-wrap: balance; }
+.app-pw-form { display: flex; flex-direction: column; }
+.app-pw-show { display: flex; align-items: center; gap: 10px; padding: 8px 24px 12px; font: 400 14px/20px var(--font-sans); color: var(--ink-muted); cursor: pointer; }
+.app-pw-error { margin: 0 24px 8px; font: 400 14px/20px var(--font-sans); color: var(--danger); }
+.app-pw-actions { padding: 8px 16px 24px; display: flex; }
+.app-pw-actions .rl-btn { flex: 1; }
+.app-passkey-intro { display: flex; flex-direction: column; }
+.app-qr-text { margin: 0 0 8px; font: 400 15px/21px var(--font-sans); color: var(--ink); text-align: center; }
+.app-qr-video { position: relative; width: 260px; height: 260px; margin: 0 auto 12px; border-radius: 20px; overflow: hidden; background: #000; }
+.app-qr-video video { width: 100%; height: 100%; object-fit: cover; }
+.app-qr-frame { position: absolute; inset: 40px; border: 3px solid rgba(255, 255, 255, .85); border-radius: 18px; box-shadow: 0 0 0 999px rgba(0, 0, 0, .35); }
+.app-pw-head h3 { margin: 0; font: 700 20px/26px var(--font-sans); color: var(--ink); }
+.app-passkey-art { display: flex; align-items: center; justify-content: center; width: 104px; height: 104px; border-radius: 50%; background: color-mix(in srgb, var(--brand) 14%, transparent); color: var(--brand-text); animation: auth-grow .4s var(--ease-out); }
