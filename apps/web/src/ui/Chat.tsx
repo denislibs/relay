@@ -240,7 +240,7 @@ export function Chat({ chatId, frameKey, active }: { chatId: number; frameKey: s
     });
     ro.observe(wrap);
     return () => { ro.disconnect(); if (feed) feed.style.transform = ''; };
-  }, [plate, system, !!selKeys]);   // плашка или панель выбора вместо поля ввода — другой элемент
+  }, [plate, system]);   // плашка вместо поля ввода — другой элемент
 
   const title = (chat?.title as string) || 'Чат №' + chatId;
   // как в Telegram: в норме подзаголовок — тип чата, а пока идёт подключение или обновление — стадия
@@ -354,16 +354,7 @@ export function Chat({ chatId, frameKey, active }: { chatId: number; frameKey: s
             ) : <span>Вы не можете отправлять сообщения этому пользователю</span>}
           </div>
         </div>
-      ) : selKeys ? (
-        <div class="rl-composer-wrap app-plate-wrap">
-          <div class="rl-composer app-selwrap">
-            <SelectionBar count={selected.length} onCancel={endSelect}
-              onForward={() => { const list = selected; endSelect(); startForward(chatId, list, nameOf); }}
-              onCopy={() => { navigator.clipboard?.writeText(selected.filter((m) => m.body).map((m) => m.body as string).join('\n\n')).catch(() => {}); showToast('Скопировано'); endSelect(); }}
-              onDelete={selected.length && selected.every((m) => m.senderId === me.userId) ? () => setConfirmDelete({ ids: selected.map((m) => m.id as number) }) : undefined} />
-          </div>
-        </div>
-      ) : <Composer
+      ) : <div class={'app-composer-host' + (selKeys ? ' is-selecting' : '')}><Composer
         id="composer"
         apiRef={api}
         initialValue={initial}
@@ -409,7 +400,17 @@ export function Chat({ chatId, frameKey, active }: { chatId: number; frameKey: s
           setReplyKey(null);
           return sent;   // поле очистится, когда сообщение встанет в ленту
         }}
-      />}
+      />
+        {/* режим выбора: панель «Выбрано: N» проявляется поверх поля ввода (поле остаётся на месте и гаснет), как в Telegram */}
+        <Presence show={!!selKeys} exitMs={200}>
+          <div class="app-selbar-layer">
+            <SelectionBar count={selected.length} onCancel={endSelect}
+              onForward={() => { const list = selected; endSelect(); startForward(chatId, list, nameOf); }}
+              onCopy={() => { navigator.clipboard?.writeText(selected.filter((m) => m.body).map((m) => m.body as string).join('\n\n')).catch(() => {}); showToast('Скопировано'); endSelect(); }}
+              onDelete={selected.length && selected.every((m) => m.senderId === me.userId) ? () => setConfirmDelete({ ids: selected.map((m) => m.id as number) }) : undefined} />
+          </div>
+        </Presence>
+      </div>}
       {menu && menuMsg ? (() => {
         const own = menuMsg.senderId === me.userId && !menuMsg.deleted && menuMsg.id != null;
         const myReaction = ((menuMsg.reactions as { userId: number; emoji: string }[] | undefined) ?? []).find((r) => r.userId === me.userId)?.emoji;

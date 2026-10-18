@@ -777,20 +777,30 @@ html[data-anim="0"] .app-chatcol, html[data-anim="0"] .app-chatcol-below, html[d
 @media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) { --gsearch-bg: var(--page); } }
 
 /* ---------- пересылка: выбор сообщений и круглая стрелка ---------- */
-/* режим выбора: слева кружок-галочка, строка сдвигается под него; отмеченная — подсветка от края до края */
+/* режим выбора, как в Telegram: кружки слева проявляются (0.2 с), входящие пузыри плавно уезжают вправо на 40px
+   transform'ом — лента не перестраивается; свои остаются на месте. Выход — то же в обратную сторону */
 .app-feed-selecting .app-msg { cursor: pointer; }
-.app-msg-sel { isolation: isolate; padding-left: 40px; transition: padding-left 200ms cubic-bezier(.33, 1, .68, 1); }
+.app-msg { isolation: isolate; }
+.rl-feed .app-msg .rl-msgline, .rl-feed .app-run-ava { transition: transform 200ms ease-out; }
+.app-feed-sel-on .app-msg .rl-msgline:not(.rl-msgline-out), .app-feed-sel-on .app-run-ava { transform: translateX(40px); }
 .app-msg-check { position: absolute; left: 4px; bottom: 6px; z-index: 1; display: grid; place-items: center; width: 24px; height: 24px; border: 2px solid #fff; border-radius: 50%;
-  background: rgba(0, 0, 0, .18); color: #fff; box-shadow: 0 1px 3px rgba(0, 0, 0, .2); animation: app-check-in 180ms cubic-bezier(.34, 1.56, .64, 1) both; }
+  background: rgba(0, 0, 0, .18); color: #fff; box-shadow: 0 1px 3px rgba(0, 0, 0, .2); opacity: 0; transition: opacity 200ms ease-out, background-color 150ms ease; }
+.app-feed-sel-on .app-msg-check { opacity: 1; }
 .app-msg-check .rl-icon { opacity: 0; transform: scale(.5); transition: opacity 120ms ease, transform 160ms cubic-bezier(.34, 1.56, .64, 1); }
-.app-msg-on .app-msg-check { background: var(--button, #3390ec); border-color: #fff; }
+.app-msg-on .app-msg-check { background: var(--button, #3390ec); }
 .app-msg-on .app-msg-check .rl-icon { opacity: 1; transform: none; }
-@keyframes app-check-in { from { opacity: 0; transform: scale(.4); } }
 .app-msg-on::before { content: ''; position: absolute; z-index: -1; top: -2px; bottom: -2px; left: 50%; width: calc(100cqw + 2 * var(--space-float, 16px)); transform: translateX(-50%);
-  background: color-mix(in srgb, var(--button, #3390ec) 18%, transparent); pointer-events: none; }
-/* поле ввода → панель «Выбрано: N» */
-.app-selwrap { padding: 0; background: transparent; box-shadow: none; }
-.app-selwrap .rl-selbar { flex: 1; height: 48px; padding: 0 6px; border-radius: 24px; background: var(--raised); box-shadow: var(--tg-shadow-composer, var(--shadow-float)); }
+  background: color-mix(in srgb, var(--button, #3390ec) 18%, transparent); pointer-events: none; opacity: 0; transition: opacity 150ms ease; }
+.app-feed-sel-on .app-msg-on::before { opacity: 1; }
+/* поле ввода и панель «Выбрано: N» в одном месте: панель проявляется поверх, поле гаснет и не ловит клики */
+.app-composer-host { position: relative; z-index: 3; flex-shrink: 0; width: 100%; max-width: var(--chat-max); margin-inline: auto; }
+.app-composer-host > .rl-composer-wrap { transition: opacity 200ms ease-out; }
+.app-composer-host.is-selecting > .rl-composer-wrap { opacity: 0; pointer-events: none; }
+.app-selbar-layer { position: absolute; left: 0; right: 0; bottom: 0; z-index: 4; animation: app-fade-in 200ms ease-out both; }
+.rl-presence[data-state="closing"] > .app-selbar-layer { animation: app-fade-out 200ms ease-out forwards; }
+@keyframes app-fade-in { from { opacity: 0; } }
+@keyframes app-fade-out { to { opacity: 0; } }
+.app-selbar-layer .rl-selbar { height: 48px; padding: 0 6px; border-radius: 24px; background: var(--raised); box-shadow: var(--tg-shadow-composer, var(--shadow-float)); animation: none; }
 
 /* круглая «Переслать» у пузыря: проявляется при наведении (на сенсорных — видна всегда); у своих — слева, у входящих — справа */
 .app-fwd-quick { align-self: flex-end; flex: none; display: grid; place-items: center; width: 34px; height: 34px; margin: 0 8px 2px; padding: 0; border: 0; border-radius: 50%;
@@ -800,14 +810,12 @@ html[data-anim="0"] .app-chatcol, html[data-anim="0"] .app-chatcol-below, html[d
 .app-msg:hover .app-fwd-quick, .app-fwd-quick:focus-visible { opacity: 1; transform: none; }
 .app-fwd-quick:hover { background: color-mix(in srgb, #000 34%, transparent); }
 @media (hover: none) { .app-fwd-quick { opacity: 1; transform: none; } }
-@media (prefers-reduced-motion: reduce) { .app-msg-sel, .app-msg-check, .app-msg-check .rl-icon, .app-fwd-quick { transition: none; animation: none; } }
+@media (prefers-reduced-motion: reduce) { .rl-feed .app-msg .rl-msgline, .rl-feed .app-run-ava, .app-msg-check, .app-msg-check .rl-icon, .app-fwd-quick, .app-composer-host > .rl-composer-wrap, .app-selbar-layer { transition: none; animation: none; } }
 
 /* ---------- группа: аватар автора слева от пачки входящих, как в Telegram ---------- */
 .app-msg-grp .rl-msgline { padding-left: calc(10px + 42px); }
-.app-msg-sel.app-msg-grp { padding-left: 40px; }
 .app-run { position: relative; }
 /* аватар — последним в пачке, наложен на низ последнего пузыря; sticky: при прокрутке держится у низа видимой ленты
    (над полем ввода, там же, где последнее сообщение) и не выходит за верх своей пачки */
 .app-run-ava { position: sticky; bottom: 0;   /* отсчёт — от нижнего отступа ленты: ровно там стоит последнее сообщение */
   z-index: 1; display: block; width: 34px; height: 34px; margin: -34px 0 0 10px; padding: 0; border: 0; border-radius: 50%; background: none; cursor: pointer; }
-.app-feed-selecting .app-run-ava { margin-left: 50px; transition: margin-left 200ms cubic-bezier(.33, 1, .68, 1); }

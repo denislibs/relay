@@ -617,6 +617,23 @@ export function Feed({ frameKey, active, chatId, meId, peerName, group, onAuthor
   const onAuthorRow = useRef((m: Item) => authorRef.current(m.senderId as number)).current;
   const onUserRow = useRef((userId: number) => authorRef.current(userId)).current;
   const selecting = useGlobal((s) => (s.selecting?.chatId === chatId ? s.selecting.keys : null));
+  // режим выбора, как в Telegram: входящие плавно сдвигаются вправо (transform, без перестройки), кружки проявляются;
+  // при выходе — всё обратно, поэтому кружки и отметки живут ещё 220 мс. selOn — второй кадр: переход с места, а не скачок
+  const lastSel = useRef<string[] | null>(null);
+  if (selecting) lastSel.current = selecting;
+  const [selVis, setSelVis] = useState(!!selecting);
+  const [selOn, setSelOn] = useState(!!selecting);
+  useEffect(() => {
+    if (selecting) {
+      setSelVis(true);
+      const r = requestAnimationFrame(() => requestAnimationFrame(() => setSelOn(true)));
+      return () => cancelAnimationFrame(r);
+    }
+    setSelOn(false);
+    const t = setTimeout(() => { setSelVis(false); lastSel.current = null; }, 220);
+    return () => clearTimeout(t);
+  }, [!!selecting]);
+  const selShown = selecting ?? (selVis ? lastSel.current : null);
   const me = useGlobal((s) => s.me);
   const nameOf = (id: number) => (id === meId ? me?.name ?? '' : names[id] ?? peerName);
   const nameRef = useRef(nameOf); nameRef.current = nameOf;
@@ -703,7 +720,7 @@ export function Feed({ frameKey, active, chatId, meId, peerName, group, onAuthor
         author={group && !mine && start && !m.deleted ? names[m.senderId as number] ?? '' : undefined}
         onAuthor={onAuthorRow}
         onUser={onUserRow}
-        sel={selecting ? selecting.includes(m.key as string) : undefined}
+        sel={selShown ? selShown.includes(m.key as string) : undefined}
         grp={group && !mine}
         onQuickForward={onQuickForward}
         hl={highlight && (m.body as string).toLowerCase().includes(highlight.toLowerCase()) ? highlight : undefined}
@@ -740,7 +757,7 @@ export function Feed({ frameKey, active, chatId, meId, peerName, group, onAuthor
 
   return (
     <>
-      <div class={selecting ? 'rl-feed app-feed-selecting' : 'rl-feed'} ref={el} onScroll={onScroll} onClick={onClick} onClickCapture={selecting ? onSelectClick : undefined} onContextMenu={onContextMenu} aria-live="polite">{out}</div>
+      <div class={'rl-feed' + (selVis ? ' app-feed-selecting' : '') + (selOn && selecting ? ' app-feed-sel-on' : '')} ref={el} onScroll={onScroll} onClick={onClick} onClickCapture={selecting ? onSelectClick : undefined} onContextMenu={onContextMenu} aria-live="polite">{out}</div>
       {openIndex !== null && photos[openIndex] ? (
         <MediaViewer
           index={openIndex}
