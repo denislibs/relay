@@ -621,7 +621,8 @@ export class Engine {
       case 'sendMessage': {
         const clientId = crypto.randomUUID();
         this.lastCreated = Math.max(Date.now(), this.lastCreated + 1); // порядок черновиков внутри одной миллисекунды
-        this.store.addPending({ clientId, chatId: a.chatId, body: a.body, entities: a.entities ?? [], replyToId: a.replyToId ?? null, createdAt: this.lastCreated, failed: false });
+        this.store.addPending({ clientId, chatId: a.chatId, body: a.body, entities: a.entities ?? [], replyToId: a.replyToId ?? null, createdAt: this.lastCreated, failed: false,
+          ...(a.noLinkPreview ? { noLinkPreview: true } : a.link ? { link: a.link } : {}) });
         this.store.setDraft(a.chatId, '');   // отправили — черновик больше не нужен
         await this.store.flush();
         this.changed();
@@ -1222,7 +1223,7 @@ export class Engine {
               this.changed();
             }
             const att = next.attachment ? { id: next.attachment.id, thumb: next.attachment.thumb ?? null } : null;
-            const r = await this.request({ op: 'send', reqId: '', clientId: next.clientId, chatId: next.chatId, body: next.body, entities: next.entities ?? [], replyToId: next.replyToId, attachment: next.forward ? null : att, ...(next.groupId ? { groupId: next.groupId } : {}), ...(next.forward ? { forward: next.forward } : {}) });
+            const r = await this.request({ op: 'send', reqId: '', clientId: next.clientId, chatId: next.chatId, body: next.body, entities: next.entities ?? [], replyToId: next.replyToId, attachment: next.forward ? null : att, ...(next.groupId ? { groupId: next.groupId } : {}), ...(next.forward ? { forward: next.forward } : {}), ...(next.noLinkPreview ? { noLinkPreview: true } : {}) });
             this.store.ack(next.clientId, r.id as number, r.createdAt as string);
             this.outboxAttempt = 0;
             if (att) delBlob(this.db, next.clientId).catch(() => {});

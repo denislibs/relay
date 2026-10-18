@@ -411,6 +411,24 @@ function ForwardTitle(props) {
     h('span', { class: 'rl-fwd-who', 'aria-hidden': 'true' }, h(Avatar, Object.assign({ name: f.name, tone: f.tone, size: 20 }, f.avatar || {})), h('b', null, f.name)));
 }
 
+/* ---------- WebPage: превью ссылки в пузыре (как в Telegram) ----------
+   link = { url, siteName, title, description, photo: { src, w, h } }, tone — цвет полосы и названия сайта.
+   Квадратная или маленькая картинка — миниатюрой справа (текст обтекает), остальные — во всю ширину под текстом. */
+function WebPage(props) {
+  var l = props.link, p = l.photo;
+  var small = p && (p.w === p.h || p.w < 320);
+  var host = '';
+  try { host = new URL(l.url).hostname.replace(/^www\./, ''); } catch (e) { host = l.url; }
+  return h('a', { class: cx('rl-webpage', small && 'rl-webpage-small'), href: l.url, target: '_blank', rel: 'noopener noreferrer', style: { '--lp-tone': props.tone || 'var(--brand-strong)' },
+      onClick: function (e) { e.stopPropagation(); } },
+    p && small ? h('img', { class: 'rl-webpage-thumb', src: p.src, alt: '', loading: 'lazy', decoding: 'async' }) : null,
+    h('b', { class: 'rl-webpage-site' }, l.siteName || host),
+    l.title ? h('span', { class: 'rl-webpage-title' }, l.title) : null,
+    // описание — до ~170 знаков с многоточием, как в Telegram
+    l.description ? h('span', { class: 'rl-webpage-desc' }, l.description.length > 170 ? l.description.slice(0, 168).trimEnd() + '…' : l.description) : null,
+    p && !small ? h('img', { class: 'rl-webpage-photo', src: p.src, alt: '', loading: 'lazy', decoding: 'async', width: p.w, height: p.h, style: { aspectRatio: p.w + ' / ' + p.h } }) : null);
+}
+
 /* ---------- Bubble ---------- */
 function Bubble(props) {
   var out = props.from === 'out';
@@ -429,6 +447,7 @@ function Bubble(props) {
       deleted
         ? h('span', { class: 'rl-bubble-text rl-bubble-deleted-text' }, h(Icon, { name: 'ban', size: 16 }), out ? 'Вы удалили это сообщение' : 'Сообщение удалено')
         : h('span', { class: 'rl-bubble-text' }, props.children),
+      props.link && !deleted ? h(WebPage, { link: props.link, tone: props.linkTone }) : null,
       h('span', { class: cx('rl-bubble-spacer', props.edited && 'rl-bubble-spacer-edited'), 'aria-hidden': 'true' }),
       h('span', { class: 'rl-bubble-meta' },
         props.edited ? h('span', { class: 'rl-bubble-edited' }, 'изм.') : null,
@@ -451,6 +470,8 @@ function ReplyQuote(props) {
   var tone = 'var(--peer-' + n + ')';
   return h(props.onClick ? 'button' : 'div', { type: props.onClick ? 'button' : undefined, class: cx('rl-quote', props.inBubble && 'rl-quote-in'),
     style: { '--quote-tone': tone, '--quote-bg': 'var(--peer-' + n + '-bg)', '--quote-bg-active': 'var(--peer-' + n + '-bg-active)' }, onClick: props.onClick },
+    // thumbSrc — настоящая картинка (превью ссылки): слева, как в Telegram
+    props.thumbSrc ? h('span', { class: 'rl-quote-thumb rl-quote-thumb-img' }, h('img', { src: props.thumbSrc, alt: '' })) : null,
     h('span', { class: 'rl-quote-body' },
       h('b', { style: { color: tone } }, props.author),
       h('span', { class: 'rl-quote-text' }, props.icon ? h(Icon, { name: props.icon, size: 14 }) : null, props.text)),
@@ -1311,4 +1332,4 @@ function ScrollToBottom(props) {
 }
 
 
-export { MsgLine, ForwardTitle, peerTone, RelayLogo, Verified, ArchivedRow, ReplyQuote, ReactionChips, cx, chain, ripple, reducedMotion, omit, fmtTime, makeWave, ICONS, Icon, Button, IconButton, Avatar, Badge, Chip, SearchField, ChatRow, ChatRowSkeleton, Bubble, MessageStatus, TypingIndicator, DateDivider, Banner, NavRail, Checkbox, Toast, Card, Steps, MediaArt, ProgressRing, Waveform, VoiceMessage, VoiceRecorder, MediaBubble, MediaPolicy, mediaHeld, FileBubble, MediaThumb, MediaViewer, Switch, PanelHeader, ProfileHeader, ActionTile, InfoRow, SettingsIcon, ReadMore, Presence, useMinVisible, LazyImage, FlipList, SyncIndicator, LinearProgress, EmptyState, ScrollToBottom };
+export { WebPage, MsgLine, ForwardTitle, peerTone, RelayLogo, Verified, ArchivedRow, ReplyQuote, ReactionChips, cx, chain, ripple, reducedMotion, omit, fmtTime, makeWave, ICONS, Icon, Button, IconButton, Avatar, Badge, Chip, SearchField, ChatRow, ChatRowSkeleton, Bubble, MessageStatus, TypingIndicator, DateDivider, Banner, NavRail, Checkbox, Toast, Card, Steps, MediaArt, ProgressRing, Waveform, VoiceMessage, VoiceRecorder, MediaBubble, MediaPolicy, mediaHeld, FileBubble, MediaThumb, MediaViewer, Switch, PanelHeader, ProfileHeader, ActionTile, InfoRow, SettingsIcon, ReadMore, Presence, useMinVisible, LazyImage, FlipList, SyncIndicator, LinearProgress, EmptyState, ScrollToBottom };

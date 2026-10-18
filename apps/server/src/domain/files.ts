@@ -118,6 +118,7 @@ export async function fileFor(userId: number, id: string): Promise<{ id: string;
        and (a.owner_id = ${userId} or exists (
          select 1 from messages m join chat_members cm on cm.chat_id = m.chat_id and cm.user_id = ${userId}
           where m.attachment->>'id' = ${id} and not m.deleted)
+       or exists (select 1 from link_previews lp where lp.photo_id = a.id)   -- картинка превью ссылки: публичная страница, видна всем
        or exists (   -- трек в чьём-то профиле: его видят все, кого владелец не заблокировал
          select 1 from profile_music p where p.attachment_id = a.id
             and not exists (select 1 from blocks b where b.owner_id = p.user_id and b.user_id = ${userId}))

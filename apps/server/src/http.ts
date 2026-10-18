@@ -1,4 +1,5 @@
 import { MEDIA_TABS, parseClientFrame, type MediaTab } from '@relay/protocol';
+import { getPreview, normalizeUrl } from './domain/linkPreview';
 import { searchMedia, searchPeople, topPeers } from './domain/globalSearch';
 import { createBus } from './bus';
 import { clientIp } from './device';
@@ -59,7 +60,7 @@ function withCookie(req: Request, res: Response | undefined): Response | undefin
 
 const INLINE_MIME = /^(image\/(jpeg|png|webp|gif|avif)|video\/(mp4|webm|ogg|quicktime)|audio\/(mpeg|mp4|ogg|webm|wav|x-wav|aac|flac))$/;
 
-const API = /^\/(health|me|users|contacts|settings|privacy|blocks|chats|presence|search|uploads|files|push|sessions|ws|dev|logout|auth)(\/|$)/;
+const API = /^\/(health|me|users|contacts|settings|privacy|blocks|chats|presence|search|uploads|files|push|sessions|ws|dev|logout|auth|link-preview)(\/|$)/;
 
 /** Статика клиента из WEB_DIST. Путь не может выйти за папку; пути без расширения — SPA, отдаём index.html. */
 function serveStatic(pathname: string): Response {
@@ -301,6 +302,11 @@ export function createServer(opts: { port: number }): Server {
         }
         if (req.method === 'GET' && url.pathname === '/users') {
           return Response.json({ users: await usersByIds(userId, (url.searchParams.get('ids') ?? '').split(',').map(Number)) });
+        }
+        if (req.method === 'GET' && url.pathname === '/link-preview') {
+          // превью ссылки для поля ввода (до отправки): тот же кэш, что и у сообщений; нет превью — { link: null }
+          const u = normalizeUrl(url.searchParams.get('url') ?? '');
+          return Response.json({ link: u ? await getPreview(u) : null });
         }
         if (req.method === 'GET' && url.pathname === '/presence') {
           return Response.json(await listPresence(userId));

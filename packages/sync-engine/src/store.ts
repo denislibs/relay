@@ -180,6 +180,7 @@ export class Store {
       case 'messageDeleted': return this.patchMessage(u.chatId, u.id, { body: '', deleted: true, reactions: [] });
       case 'reactions': return this.patchMessage(u.chatId, u.id, { reactions: u.reactions });
       case 'mediaListened': return this.patchMessage(u.chatId, u.id, { listened: true });
+      case 'linkPreview': return this.patchMessage(u.chatId, u.id, { link: u.link });
       case 'userUpdated': return applyUserUpdated(this, u.user, seq);
       case 'contactsChanged': return applyContactsChanged(this, u, seq);
       case 'settingsChanged': this.settings.apply(u.settings, seq); return;
@@ -245,6 +246,8 @@ export class Store {
       ...(m.service ? { service: m.service } : null),
       ...(m.groupId ? { groupId: m.groupId } : null),
       ...(m.fwdFrom ? { fwdFrom: m.fwdFrom } : null),
+      // сервер ещё грузит превью, а у нас оно уже есть (показано в поле ввода) — не прятать его до загрузки
+      ...(m.link ? { link: m.link.pending && prev?.link && !prev.link.pending && prev.link.url === m.link.url ? prev.link : m.link } : null),
     };
     if (countUnread && !mine && m.id > chat.lastReadId && m.id > chat.knownMaxId) chat.unread++;
     chat.knownMaxId = Math.max(chat.knownMaxId, m.id);
@@ -300,6 +303,7 @@ export class Store {
       ...(o.failed && o.error ? { error: o.error } : {}),
       ...(o.groupId ? { groupId: o.groupId } : {}),
       ...(o.fwdFrom ? { fwdFrom: o.fwdFrom } : {}),
+      ...(o.link ? { link: o.link } : {}),
     });
   }
 

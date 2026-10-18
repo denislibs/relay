@@ -26,6 +26,15 @@ export interface Message {
   entities?: Entity[];   // оформление текста; нет или пусто — простой текст
   listened?: boolean;    // голосовое/кружок прослушан получателем
   fwdFrom?: ForwardInfo | null;   // переслано: откуда (нет — своё или отправитель скрыт)
+  link?: LinkPreview | null;      // превью первой ссылки в тексте (pending — сервер ещё загружает страницу)
+}
+
+/** Превью ссылки: сайт, заголовок, описание и картинка (уже в нашем хранилище: /files/<id>). */
+export interface LinkPreview {
+  url: string;
+  pending?: boolean;
+  siteName?: string | null; title?: string | null; description?: string | null;
+  photo?: { id: string; w: number; h: number } | null;
 }
 
 /** Откуда пересланное: исходный автор (имя — на момент пересылки), чат и сообщение оригинала, когда оно написано. */
@@ -125,7 +134,8 @@ export type Update =
   // чёрный список: человек заблокирован (blocked) или разблокирован (unblocked); только владельцу
   | { type: 'blocksChanged'; blocked?: BlockedUser; unblocked?: Id }
   | { type: 'sessionsChanged' }
-  | { type: 'pins'; chatId: Id; ids: Id[] };   // закреплённые сообщения чата целиком (новые сверху)   // список сеансов изменился: новый вход, подтверждение, завершение
+  | { type: 'pins'; chatId: Id; ids: Id[] }
+  | { type: 'linkPreview'; chatId: Id; id: Id; link: LinkPreview | null };   // превью ссылки сообщения загрузилось (null — превью нет)   // закреплённые сообщения чата целиком (новые сверху)   // список сеансов изменился: новый вход, подтверждение, завершение
 
 /** Тело уведомления/push без предпросмотра: текст сообщения не раскрываем. */
 export const NO_PREVIEW = 'Новое сообщение';
@@ -214,7 +224,7 @@ export type ErrorCode = 'bad_frame' | 'unauthorized' | 'not_member' | 'not_found
 export type ClientFrame =
   | { op: 'hello'; lastSeq: number }
   | { op: 'sync'; since: number }
-  | { op: 'send'; reqId: string; clientId: string; chatId: Id; body: string; entities?: Entity[]; replyToId?: Id | null; attachment?: { id: string; thumb?: string | null } | null; groupId?: string | null; forward?: ForwardRef | null }
+  | { op: 'send'; reqId: string; clientId: string; chatId: Id; body: string; entities?: Entity[]; replyToId?: Id | null; attachment?: { id: string; thumb?: string | null } | null; groupId?: string | null; forward?: ForwardRef | null; noLinkPreview?: boolean }
   | { op: 'read'; reqId: string; chatId: Id; upToId: Id }
   | { op: 'typing'; chatId: Id }   // «печатаю» — без ответа, сервер пересылает остальным участникам
   | { op: 'draft'; reqId: string; chatId: Id; text: string; entities?: Entity[] }
@@ -272,7 +282,7 @@ export function parseClientFrame(raw: string): ClientFrame | null {
         if (typeof w !== 'object' || !int(w.chatId) || !int(w.id)) return null;
         forward = { chatId: w.chatId as number, id: w.id as number, hideSender: w.hideSender === true, hideCaption: w.hideCaption === true };
       }
-      return { op: 'send', reqId: f.reqId, clientId: f.clientId, chatId: f.chatId, body: f.body, entities: normalizeEntities(f.body, f.entities), replyToId: (f.replyToId as number | null) ?? null, attachment: (f.attachment as { id: string; thumb?: string | null } | null) ?? null, groupId: (f.groupId as string | null) ?? null, forward };
+      return { op: 'send', reqId: f.reqId, clientId: f.clientId, chatId: f.chatId, body: f.body, entities: normalizeEntities(f.body, f.entities), replyToId: (f.replyToId as number | null) ?? null, attachment: (f.attachment as { id: string; thumb?: string | null } | null) ?? null, groupId: (f.groupId as string | null) ?? null, forward, ...(f.noLinkPreview === true ? { noLinkPreview: true } : {}) };
     case 'read':
       return str(f.reqId, 64) && int(f.chatId) && int(f.upToId) ? { op: 'read', reqId: f.reqId, chatId: f.chatId, upToId: f.upToId } : null;
     default: return null;
