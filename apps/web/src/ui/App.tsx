@@ -1,5 +1,6 @@
 import { LinkEdit } from './links/LinkEdit';
 import { Links } from './links/Links';
+import { FolderColumn, useFolderPlace } from './folderNav';
 import { AsidePanel, EmptyState, FloatShell, Presence, SideFrame, SlideStack, Toast } from '@relay/ui';
 import { useRef } from 'preact/hooks';
 import { useGlobal } from '../global';
@@ -36,6 +37,7 @@ const savedSide = (() => { try { const v = Number(localStorage.getItem(SIDE_KEY)
 const saveSide = (w: number | null) => { try { if (w) localStorage.setItem(SIDE_KEY, String(w)); else localStorage.removeItem(SIDE_KEY); } catch { /* приватный режим */ } };
 
 export function App() {
+  const folderPlace = useFolderPlace();
   const boot = useGlobal((s) => s.boot);
   const openChatId = useGlobal((s) => s.openChatId);
   // чат из адреса ещё грузится: середина пустая (только обои), без мелькания «Выберите чат»
@@ -48,7 +50,7 @@ export function App() {
   if (boot === 'login') return <><Login /><AppToast /></>;   // тост «Сеанс завершён…» переживает уход на вход
   return (
     <>
-      <FloatShell class={openChatId ? 'app-chat-open' : ''} pattern={wp.pattern} wallpaperColors={wp.colors} wallpaperBlur={wp.blur} wallpaperDark={dark} sideWidth={savedSide} onSideResize={saveSide} aside={<AsidePanel open={infoOpen && !!openChatId} label="Информация"><Info /></AsidePanel>} sidebar={<SideFrame><SlideStack order={orderFor(view)} active={view} render={(k: string) => (k === 'chats' ? <Sidebar /> : k === 'settings' ? <Main /> : k === 'settings/profile' ? <Profile /> : k === 'settings/profile/links' ? <Links /> : /^settings\/profile\/links\/(new|\d+)$/.test(k) ? <LinkEdit key={k} path={k} /> : k === 'settings/general' ? <General /> : k === 'settings/general/wallpaper' ? <Wallpaper /> : k === 'settings/notifications' ? <Notifications /> : k === 'settings/privacy' ? <Privacy /> : k === 'settings/privacy/blocked' ? <Blocked /> : /^settings\/privacy\/rule\/[^/]+\/(allow|deny)$/.test(k) ? <PeoplePicker key={k} path={k} /> : /^settings\/privacy\/rule\/[^/]+$/.test(k) ? <PrivacyRule key={k} path={k} /> : k === 'contacts' ? <Contacts /> : /^contacts\/\d+\/edit$/.test(k) ? <EditContact key={k} path={k} active={k === view} /> : k === 'settings/performance' ? <Performance /> : k === 'settings/sessions' ? <Sessions /> : k === 'settings/data' ? <Data /> : /^settings\/data\/autoload\/(photo|video|file)$/.test(k) ? <Autoload path={k} /> : k === 'settings/dev' ? <Dev /> : null)} /></SideFrame>}>
+      <FloatShell class={openChatId ? 'app-chat-open' : ''} rail={folderPlace === 'left' ? <FolderColumn /> : null} pattern={wp.pattern} wallpaperColors={wp.colors} wallpaperBlur={wp.blur} wallpaperDark={dark} sideWidth={savedSide} onSideResize={saveSide} aside={<AsidePanel open={infoOpen && !!openChatId} label="Информация"><Info /></AsidePanel>} sidebar={<SideFrame><SlideStack order={orderFor(view)} active={view} render={(k: string) => (k === 'chats' ? <Sidebar /> : k === 'settings' ? <Main /> : k === 'settings/profile' ? <Profile /> : k === 'settings/profile/links' ? <Links /> : /^settings\/profile\/links\/(new|\d+)$/.test(k) ? <LinkEdit key={k} path={k} /> : k === 'settings/general' ? <General /> : k === 'settings/general/wallpaper' ? <Wallpaper /> : k === 'settings/notifications' ? <Notifications /> : k === 'settings/privacy' ? <Privacy /> : k === 'settings/privacy/blocked' ? <Blocked /> : /^settings\/privacy\/rule\/[^/]+\/(allow|deny)$/.test(k) ? <PeoplePicker key={k} path={k} /> : /^settings\/privacy\/rule\/[^/]+$/.test(k) ? <PrivacyRule key={k} path={k} /> : k === 'contacts' ? <Contacts /> : /^contacts\/\d+\/edit$/.test(k) ? <EditContact key={k} path={k} active={k === view} /> : k === 'settings/performance' ? <Performance /> : k === 'settings/sessions' ? <Sessions /> : k === 'settings/data' ? <Data /> : /^settings\/data\/autoload\/(photo|video|file)$/.test(k) ? <Autoload path={k} /> : k === 'settings/dev' ? <Dev /> : null)} /></SideFrame>}>
         {hasStack ? (
           <ChatStack />
         ) : pendingChatId ? null : (

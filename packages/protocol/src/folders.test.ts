@@ -11,12 +11,13 @@ test('normalize drops junk, dedupes ids and keeps a chat only in include when it
   expect(normalizeFolder(null)).toBeNull();
 });
 
-test('validation: title 1..12 graphemes, one emoji, at least one chat or type, chat limit', () => {
+test('validation: title 1..16 graphemes, one emoji, at least one chat or type, chat limit', () => {
   const ok = normalizeFolder(base)!;
   expect(folderError(ok)).toBeNull();
   expect(folderError({ ...ok, title: '' })).toBe('folder_title');
-  expect(folderError({ ...ok, title: 'абвгдеёжзийк' })).toBeNull();           // 12
-  expect(folderError({ ...ok, title: 'абвгдеёжзийкл' })).toBe('folder_title'); // 13
+  expect(folderError({ ...ok, title: 'Непрочитанные' })).toBeNull();            // 13 — длиннее лимита Telegram (12)
+  expect(folderError({ ...ok, title: 'абвгдеёжзийклмно' })).toBeNull();        // 16
+  expect(folderError({ ...ok, title: 'абвгдеёжзийклмноп' })).toBe('folder_title'); // 17
   expect(folderError({ ...ok, title: '👨‍👩‍👧 семья' })).toBeNull();
   expect(graphemes('👨‍👩‍👧')).toBe(1);
   expect(folderError({ ...ok, emoji: '💼' })).toBeNull();

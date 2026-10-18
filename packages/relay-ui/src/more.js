@@ -834,10 +834,61 @@ function FolderTabs(props) {
     h('div', { ref: track, class: 'rl-tabs-track' },
       items.map(function (t) {
         var on = t.id === props.active;
-        return h('button', { key: t.id, type: 'button', role: 'tab', 'aria-selected': String(on), tabIndex: on ? 0 : -1, class: 'rl-tab', onPointerDown: ripple, onClick: function () { props.onChange(t.id); } }, inner(t, false));
+        return h('button', { key: t.id, type: 'button', role: 'tab', 'aria-selected': String(on), tabIndex: on ? 0 : -1, class: 'rl-tab', onPointerDown: ripple, onClick: function () { props.onChange(t.id); }, onContextMenu: props.onItemMenu ? function (e) { e.preventDefault(); props.onItemMenu(t.id, e); } : undefined }, inner(t, false));
       }),
       h('div', { ref: top, class: 'rl-tabs-top', 'aria-hidden': 'true' },
         items.map(function (t) { return h('span', { key: t.id, class: 'rl-tab' }, inner(t, true)); }))));
+}
+
+/* ---------- FolderRail: папки колонкой слева (иконка, бейдж на иконке, подпись), таблетка под активной ---------- */
+/* Отдельная карточка слева от списка чатов. Подложка активной папки — один элемент, переезжает transform'ом
+   (замер в requestMeasure, запись в requestMutation; первый показ и смена размеров — без анимации). */
+function FolderRail(props) {
+  var list = useRef(null), pill = useRef(null), first = useRef(true);
+  var items = props.items || [];
+  function place(instant) {
+    requestMeasure(function () {
+      var el = list.current && list.current.querySelector('.rl-frail-item[aria-selected="true"]');
+      if (!el || !pill.current) return;
+      var y = el.offsetTop, hgt = el.offsetHeight;
+      var sc = list.current, st = sc.scrollTop, ch = sc.clientHeight;
+      requestMutation(function () {
+        var s = pill.current.style;
+        if (instant || first.current || reducedMotion()) { s.transition = 'none'; first.current = false; } else { s.transition = ''; beginHeavyAnimation(300); }
+        s.transform = 'translateY(' + y + 'px)';
+        s.height = hgt + 'px';
+        s.opacity = '1';
+        if (!instant && (y < st || y + hgt > st + ch)) sc.scrollTo({ top: y - 16, behavior: reducedMotion() ? 'auto' : 'smooth' });
+      });
+    });
+  }
+  useLayoutEffect(function () { place(false); }, [props.active, items.map(function (t) { return t.id; }).join(',')]);
+  useLayoutEffect(function () {
+    if (typeof ResizeObserver !== 'function' || !list.current) return;
+    var seen = false;
+    var ro = new ResizeObserver(function () { if (seen) place(true); seen = true; });
+    ro.observe(list.current);
+    return function () { ro.disconnect(); };
+  }, []);
+  function onKey(e) {
+    var i = items.findIndex(function (t) { return t.id === props.active; });
+    if (e.key === 'ArrowDown' && i < items.length - 1) { e.preventDefault(); props.onChange(items[i + 1].id); }
+    if (e.key === 'ArrowUp' && i > 0) { e.preventDefault(); props.onChange(items[i - 1].id); }
+  }
+  return h('nav', { class: cx('rl-frail', props.class), 'aria-label': props.label || 'Папки' },
+    h('div', { ref: list, class: 'rl-frail-list', role: 'tablist', 'aria-orientation': 'vertical', onKeyDown: onKey },
+      h('div', { ref: pill, class: 'rl-frail-pill', 'aria-hidden': 'true' }),
+      items.map(function (t) {
+        var on = t.id === props.active;
+        return h('button', { key: t.id, type: 'button', role: 'tab', 'aria-selected': String(on), tabIndex: on ? 0 : -1, class: 'rl-frail-item', title: t.label,
+          onClick: function () { props.onChange(t.id); },
+          onContextMenu: props.onItemMenu ? function (e) { e.preventDefault(); props.onItemMenu(t.id, e); } : undefined },
+          h('span', { class: 'rl-frail-icon' },
+            t.emoji ? h('span', { class: 'rl-frail-emoji', 'aria-hidden': 'true' }, t.emoji) : h(Icon, { name: t.icon || 'folder', size: 28 }),
+            t.count ? h('span', { class: cx('rl-frail-count', t.muted && 'rl-frail-count-muted') }, t.count > 99 ? '99+' : t.count) : null),
+          h('span', { class: 'rl-frail-label' }, t.label));
+      })),
+    props.onSettings ? h(IconButton, { icon: 'settings', label: props.settingsLabel || 'Настройки папок', class: 'rl-frail-settings', onClick: props.onSettings }) : null);
 }
 
 /* ---------- Fab ---------- */
@@ -851,4 +902,4 @@ function GlassBar(props) {
   return h('header', { class: cx('rl-glassbar', props.class) }, props.children);
 }
 
-export { patternColor, Wallpaper, nudgeWallpaper, buildPattern, DOODLES, PATTERN_SETS, FloatShell, SideResizer, SidebarCard, SidebarHeader, FolderTabs, Fab, GlassBar, WindowList, AsidePanel, SideFrame, SlideStack, Menu, ReactionPicker, AttachMenu, MentionList, DropOverlay, LinkPreview, PollBubble, UnreadDivider, SelectionBar, ChatSearchBar, Highlight, ContactPicker, CallRow, StatusAvatar, LoginQR, VirtualList, BottomNav, Tooltip, plural };
+export { patternColor, Wallpaper, nudgeWallpaper, buildPattern, DOODLES, PATTERN_SETS, FloatShell, SideResizer, SidebarCard, SidebarHeader, FolderTabs, FolderRail, Fab, GlassBar, WindowList, AsidePanel, SideFrame, SlideStack, Menu, ReactionPicker, AttachMenu, MentionList, DropOverlay, LinkPreview, PollBubble, UnreadDivider, SelectionBar, ChatSearchBar, Highlight, ContactPicker, CallRow, StatusAvatar, LoginQR, VirtualList, BottomNav, Tooltip, plural };

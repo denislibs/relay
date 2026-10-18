@@ -16,7 +16,7 @@ export interface ChatFolder {
   excludeRead: boolean;   // кроме прочитанных
 }
 
-export const FOLDER_LIMITS = { folders: 10, chats: 200, title: 12, emoji: 16 } as const;
+export const FOLDER_LIMITS = { folders: 10, chats: 200, title: 16, emoji: 16 } as const;
 /** id своих папок начинаются с 2: 0 — «Все чаты», 1 зарезервирован (архив). */
 export const FOLDER_MIN_ID = 2;
 export const FOLDER_MAX_ID = 1_000_000;

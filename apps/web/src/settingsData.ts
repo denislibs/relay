@@ -6,7 +6,7 @@ import { releaseMediaCache } from './storageInfo';
 import { connectEngine, Mirror, type EngineClient } from '@relay/sync-engine/src/client';
 import type { Action, Item, Patch, Query } from '@relay/sync-engine/src/types';
 import { useEffect, useState } from 'preact/hooks';
-import type { PrivacyKey, PrivacyMode, SessionInfo } from '@relay/protocol';
+import type { ChatFolder, PrivacyKey, PrivacyMode, SessionInfo } from '@relay/protocol';
 import { isSessionOp, sessionsView } from '@relay/sync-engine/src/sessions';
 import { reducedMotion } from '@relay/ui';
 import { engineConfig } from './engineConfig';
@@ -46,6 +46,11 @@ const FAIL_TEXT: Record<string, string> = {
   name_invalid: 'Укажите имя',
   note_too_long: 'Слишком длинная заметка',
   not_found: 'Пользователь не найден в Relay',
+  folder_title: 'Укажите название папки (до 16 символов)',
+  folder_empty: 'Добавьте в папку хотя бы один чат или тип чатов',
+  folder_too_many_chats: 'В папке может быть не больше 200 чатов',
+  folder_emoji: 'Иконка папки — один эмодзи',
+  folders_limit: 'Можно создать не больше 10 папок',
 };
 export const failText = (code: string): string => FAIL_TEXT[code] ?? 'Не удалось сохранить изменения';
 
@@ -89,7 +94,7 @@ export function startSettingsData(me: Me): void {
   engine.watch({ kind: 'settings' }, (p) => {
     settingsM.apply(p);
     const it = settingsM.list()[0];
-    if (it) setGlobal({ settings: { notify: it.notify, sessionsTtlDays: it.sessionsTtlDays, privacy: it.privacy, loaded: !!it.loaded, pending: !!it.pending } as AccountSettings });
+    if (it) setGlobal({ settings: { notify: it.notify, sessionsTtlDays: it.sessionsTtlDays, folders: (it.folders ?? []) as ChatFolder[], privacy: it.privacy, loaded: !!it.loaded, pending: !!it.pending } as AccountSettings });
   });
 
   // чёрный список: страница «Заблокированные» и плашка вместо поля ввода в личном чате
@@ -192,6 +197,10 @@ export const setUsername = (username: string | null): Promise<unknown> => call({
 export type UsernameCheck = { ok: true } | { ok: false; reason: 'invalid' | 'taken' | 'reserved' } | { offline: true };
 export const checkUsername = (username: string): Promise<UsernameCheck> =>
   call<UsernameCheck>({ type: 'checkUsername', username }).catch(() => ({ offline: true as const }));
+
+export const saveFolder = (folder: ChatFolder): Promise<unknown> => call({ type: 'saveFolder', folder });
+export const deleteFolder = (id: number): Promise<unknown> => call({ type: 'deleteFolder', id });
+export const reorderFolders = (ids: number[]): Promise<unknown> => call({ type: 'reorderFolders', ids });
 
 export const refreshSettings = (): Promise<unknown> => call({ type: 'refreshSettings' }).catch(() => null);
 export const setNotifyDefault = (notifyType: 'direct' | 'group', patch: { muted?: boolean; preview?: boolean }): Promise<unknown> =>

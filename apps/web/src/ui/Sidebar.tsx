@@ -12,8 +12,10 @@ import { isDark } from '../theme';
 import { chatTime, chatTone, snippet } from './format';
 import { applyTheme as setTheme } from '../theme';
 import { previewBody, previewText, previewThumb, type LastMessage } from './preview';
+import { ALL, inFolder } from '../folders';
+import { selectFolder, useFolderCtx, useFolderGuard, useFolderItems, useFolderMenu, useFolderPlace } from './folderNav';
+import { Button } from '@relay/ui';
 
-const FOLDERS = ['all', 'unread'];
 
 /** Фрагмент вокруг совпадения: превью узкое, а совпадение может быть в конце длинного сообщения. */
 /** «Загружаем ещё чаты» внизу списка: крутится, только пока виден — вне экрана бесконечная анимация зря будит стили каждый кадр. */
@@ -85,7 +87,24 @@ export function Sidebar() {
   const view = useGlobal((s) => s.sidebarView);
   const me = useGlobal((s) => s.me)!;
   const chats = useGlobal((s) => s.chats);
-  const counters = useGlobal((s) => s.counters);
+  const folders = useGlobal((s) => s.settings.folders);
+  const place = useFolderPlace();
+  const items = useFolderItems();
+  const folderMenu = useFolderMenu();
+  const ctx = useFolderCtx();
+  useFolderGuard();
+  // Ctrl+Shift+1…9 — папка по номеру (как в Telegram Web A)
+  useEffect(() => {
+    if (place === 'none') return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.ctrlKey && e.shiftKey && /^Digit[1-9]$/.test(e.code)) {
+        const t = items[Number(e.code.slice(5)) - 1];
+        if (t) { e.preventDefault(); selectFolder(t.id); }
+      }
+    };
+    addEventListener('keydown', onKey);
+    return () => removeEventListener('keydown', onKey);
+  }, [place, items]);
   const status = useGlobal((s) => s.status);
   const folder = useGlobal((s) => s.folder);
   const search = useGlobal((s) => s.search);
@@ -102,14 +121,24 @@ export function Sidebar() {
   // «Все» — только непрерывно загруженный диапазон (как в Telegram): старые непрочитанные из-за курсора
   // покажутся, когда до них дойдёт подгрузка, а не висят внизу, над которыми потом вставляются страницы
   const loadedFrom = status.chatsComplete || !status.chatsCursorAt ? 0 : status.chatsCursorAt;
-  const listOf = (f: string) => chats.filter((c) =>
-    (f === 'all' ? Date.parse(c.lastAt as string) >= loadedFrom : (c.unread as number) > 0) &&
-    (!q || String(c.title ?? '').toLowerCase().includes(q)));
+  // своя папка — фильтр того же загруженного диапазона (у папок нет своей выдачи на сервере: у края
+  // списка догружаем общие диалоги, как в Telegram Web K)
+  const listOf = (id: number) => {
+    const f = id === ALL ? null : folders.find((x) => x.id === id) ?? null;
+    return chats.filter((c) =>
+      Date.parse(c.lastAt as string) >= loadedFrom &&
+      (!f || inFolder(f, c as never, ctx)) &&
+      (!q || String(c.title ?? '').toLowerCase().includes(q)));
+  };
+  // вкладки показываются, только когда есть свои папки; иначе (и при вкладках слева) — одна страница «Все»
+  const shown = place === 'none' ? ALL : folder;
+  const order = place === 'none' ? [String(ALL)] : items.map((t) => String(t.id));
 
   // одна папка: свой список и своя прокрутка (страница SlideStack)
-  const renderFolder = (f: string) => {
+  const renderFolder = (key: string) => {
+    const f = Number(key);
     const list = listOf(f);
-    const results = f === 'all' && hits && hits.q === q.trim() ? hits : null;
+    const results = f === shown && hits && hits.q === q.trim() ? hits : null;
     return (
       <>
       <div class="app-listwrap">
@@ -123,20 +152,27 @@ export function Sidebar() {
           <WindowList
             role="list"
             items={list}
-            onNearEnd={f === 'all' && !status.chatsComplete ? loadMoreChats : undefined}
+            onNearEnd={!status.chatsComplete ? loadMoreChats : undefined}
             rowHeight={ROW}
             getKey={(c: Item) => 'c' + c.id}
             render={(c: Item) => <SideRow c={c} meId={me.userId} active={c.id === openId} showDraft={!!c.draft && c.id !== openId} muted={mutedIds.includes(c.id as number)} />}
           />
-          {f === 'all' && !q && !status.chatsComplete ? (
+          {!q && !status.chatsComplete ? (
             <MoreLoader />
           ) : null}
           </>
+        ) : f !== ALL && !q && !status.chatsComplete ? (
+          <><MoreLoader />{status.hydrated ? <span class="app-more-pull" ref={(el) => { if (el) loadMoreChats(); }} /> : null}</>
+        ) : f !== ALL && !q ? (
+          <div class="app-folder-empty">
+            <EmptyState kind="chats" title="В папке нет чатов" text="Сюда попадут чаты, подходящие под правила папки." />
+            <Button variant="primary" onClick={() => void go('settings/folders/' + f)}>Изменить папку</Button>
+          </div>
         ) : (
           <EmptyState
             kind={q ? 'search' : 'chats'}
-            title={q ? 'Ничего не найдено' : !status.hydrated ? 'Нет сети' : f === 'unread' ? 'Всё прочитано' : 'Пока нет чатов'}
-            text={q ? 'Поиск идёт по чатам на устройстве.' : !status.hydrated ? 'Чаты загрузятся, когда появится подключение.' : f === 'unread' ? '' : 'Нажмите карандаш, чтобы начать переписку.'}
+            title={q ? 'Ничего не найдено' : !status.hydrated ? 'Нет сети' : 'Пока нет чатов'}
+            text={q ? 'Поиск идёт по чатам на устройстве.' : !status.hydrated ? 'Чаты загрузятся, когда появится подключение.' : 'Нажмите карандаш, чтобы начать переписку.'}
           />
         )}
         </div>
@@ -164,10 +200,7 @@ export function Sidebar() {
       paged
       header={<SidebarHeader onMenu={() => setMenu(true)} status={searchStatus ?? undefined} me={me.name} meTone={peerTone(me.userId)} searchId="side-search" value={search} placeholder="Поиск" onSearch={(e: Event) => setGlobal({ search: (e.target as HTMLInputElement).value })} />}
       top={!search.trim() ? <ChatBanner /> : null}
-      tabs={<FolderTabs class="app-folders" active={folder} onChange={(id: 'all' | 'unread') => setGlobal({ folder: id })} items={[
-        { id: 'all', label: 'Все' },
-        { id: 'unread', label: 'Непрочитанные', count: counters.unreadChats },
-      ]} />}
+      tabs={place === 'top' ? <FolderTabs class="app-folders" active={folder} onChange={selectFolder} onItemMenu={folderMenu.open} items={items.map((t, i) => (i === 0 ? { ...t, label: 'Все' } : t))} /> : null}
       banner={
         <>
           {menu ? <div class="rl-msgmenu-scrim" onClick={() => setMenu(false)} /> : null}
@@ -200,7 +233,8 @@ export function Sidebar() {
       fab={<Fab label="Новый чат" onClick={() => setGlobal({ newChatOpen: true })} />}
       overlay={<UpdatePill />}
     >
-      <SlideStack variant="tabs" order={FOLDERS} active={folder} render={(f: string) => <div class="rl-page-scroll">{renderFolder(f)}</div>} />
+      <SlideStack variant="tabs" order={order} active={String(shown)} render={(f: string) => <div class="rl-page-scroll">{renderFolder(f)}</div>} />
+      {folderMenu.node}
     </SidebarCard>
   );
 }

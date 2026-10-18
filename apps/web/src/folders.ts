@@ -1,0 +1,92 @@
+// Папки с чатами: чистые правила — кто в папке, счётчик вкладки, иконка, подпись, рекомендуемые.
+// Без DOM и глобального состояния, чтобы проверять юнит-тестами. Модель папки — @relay/protocol (folders.ts).
+import type { ChatFolder } from '@relay/protocol';
+
+/** Чат, как его видит фильтр (поля элемента подписки chatList). */
+export interface FolderChat { id: number; kind: 'direct' | 'group'; peerId: number | null; unread: number }
+
+/** Что фильтр знает о мире: контакты (id людей) и заглушён ли чат на этом устройстве. */
+export interface FolderCtx { contacts: ReadonlySet<number>; isMuted(c: FolderChat): boolean }
+
+/** «Все чаты» — id 0: встроенная, первая, не хранится. */
+export const ALL = 0;
+
+/**
+ * Попадает ли чат в папку. Порядок проверок как в Telegram: явное исключение сильнее всего,
+ * явное включение сильнее флагов исключения, дальше «кроме прочитанных / заглушённых», дальше типы.
+ */
+export function inFolder(f: ChatFolder, c: FolderChat, ctx: FolderCtx): boolean {
+  if (f.exclude.includes(c.id)) return false;
+  if (f.include.includes(c.id)) return true;
+  if (f.excludeRead && c.unread <= 0) return false;
+  if (f.excludeMuted && ctx.isMuted(c)) return false;
+  if (c.kind === 'group') return f.groups;
+  const contact = c.peerId !== null && ctx.contacts.has(c.peerId);
+  return contact ? f.contacts : f.nonContacts;
+}
+
+/** Чаты папки в порядке основного списка (null / ALL — все). */
+export function folderChats<T extends FolderChat>(f: ChatFolder | null, chats: readonly T[], ctx: FolderCtx): T[] {
+  return f ? chats.filter((c) => inFolder(f, c, ctx)) : chats.slice();
+}
+
+/**
+ * Счётчик вкладки — непрочитанные чаты (не сообщения). muted — все непрочитанные заглушены: бейдж серый.
+ * Для «Все» заглушённые не считаются вовсе (как в Telegram Web K) — иначе бейдж «Все» всегда горит.
+ */
+export function folderBadge(f: ChatFolder | null, chats: readonly FolderChat[], ctx: FolderCtx): { count: number; muted: boolean } {
+  let count = 0, loud = 0;
+  for (const c of chats) {
+    if (c.unread <= 0 || (f && !inFolder(f, c, ctx))) continue;
+    const m = ctx.isMuted(c);
+    if (!f && m) continue;
+    count++;
+    if (!m) loud++;
+  }
+  return { count, muted: count > 0 && loud === 0 };
+}
+
+/** Иконка папки для вкладок слева: эмодзи папки, иначе по единственному типу, иначе общая папка. */
+export function folderIcon(f: ChatFolder | null): { emoji: string } | { icon: string } {
+  if (!f) return { icon: 'chats' };
+  if (f.emoji) return { emoji: f.emoji };
+  const only = onlyType(f);
+  return { icon: only === 'groups' ? 'community' : only === 'contacts' || only === 'nonContacts' ? 'contact' : 'folder' };
+}
+
+type TypeFlag = 'contacts' | 'nonContacts' | 'groups';
+const TYPE_LABEL: Record<TypeFlag, string> = { contacts: 'Все контакты', nonContacts: 'Все не контакты', groups: 'Все группы' };
+
+/** Единственный тип без явных чатов — папка «про тип» (подпись «Все группы»). */
+function onlyType(f: ChatFolder): TypeFlag | null {
+  if (f.include.length || f.exclude.length) return null;
+  const on = (['contacts', 'nonContacts', 'groups'] as const).filter((k) => f[k]);
+  return on.length === 1 ? on[0] : null;
+}
+
+export const chatsWord = (n: number): string => {
+  const d = n % 10, h = n % 100;
+  return `${n} ${d === 1 && h !== 11 ? 'чат' : d >= 2 && d <= 4 && (h < 12 || h > 14) ? 'чата' : 'чатов'}`;
+};
+
+/** Подпись строки в настройках: «Все группы» для папки одного типа, иначе «N чатов» (сколько сейчас в ней). */
+export function folderSubtitle(f: ChatFolder, count: number): string {
+  const only = onlyType(f);
+  return only && !f.excludeRead && !f.excludeMuted ? TYPE_LABEL[only] : chatsWord(count);
+}
+
+/** Рекомендуемые папки: правила без id. «Непрочитанные» — бывшая зашитая вкладка. */
+export interface Recommended { key: string; folder: Omit<ChatFolder, 'id'>; description: string }
+const empty = { emoji: null, include: [], exclude: [], contacts: false, nonContacts: false, groups: false, excludeMuted: false, excludeRead: false };
+export const RECOMMENDED: readonly Recommended[] = [
+  { key: 'unread', folder: { ...empty, title: 'Непрочитанные', emoji: '✅', contacts: true, nonContacts: true, groups: true, excludeRead: true }, description: 'Новые сообщения из всех чатов' },
+  { key: 'personal', folder: { ...empty, title: 'Личные', emoji: '👤', contacts: true, nonContacts: true }, description: 'Только личные переписки' },
+  { key: 'groups', folder: { ...empty, title: 'Группы', emoji: '👥', groups: true }, description: 'Только групповые чаты' },
+];
+
+/** Те же правила (без названия и иконки) — рекомендация уже добавлена. */
+const sameRules = (a: Omit<ChatFolder, 'id'>, b: Omit<ChatFolder, 'id'>) =>
+  a.contacts === b.contacts && a.nonContacts === b.nonContacts && a.groups === b.groups && a.excludeMuted === b.excludeMuted && a.excludeRead === b.excludeRead
+  && !a.include.length && !b.include.length && !a.exclude.length && !b.exclude.length;
+
+export const recommendedFor = (folders: readonly ChatFolder[]): Recommended[] => RECOMMENDED.filter((r) => !folders.some((f) => sameRules(f, r.folder)));
