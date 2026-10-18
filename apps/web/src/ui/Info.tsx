@@ -89,14 +89,8 @@ export function Info() {
           <div class={'rl-profile-sub' + (myPeer?.online ? ' app-online' : '')}>{subtitle || ' '}</div>
         </div>
         <div class="rl-aside-group">
-          <InfoRow tile="orange" icon={group ? 'community' : 'contact'} title={title} subtitle={group ? 'Название группы' : 'Имя'} />
+          {/* как в Telegram: имя уже в шапке — строками только то, чего там нет, и только если поле заполнено */}
           <Expand show={!group && !!user}>{!group && user ? <PeerRows user={user} /> : null}</Expand>
-          <Expand show={!!contact?.note}>{contact?.note ? (
-            <div class="rl-inforow rl-inforow-static">
-              <SettingsIcon icon="pencil" color="gray" />
-              <span class="rl-inforow-text"><span class="rl-bio app-info-bio"><RichText text={String(contact.note)} /></span><small>Заметки</small></span>
-            </div>
-          ) : null}</Expand>
           <InfoRow
             tile="red"
             icon={muted.includes(chatId) ? 'bellOff' : 'bell'}
@@ -104,6 +98,12 @@ export function Info() {
             subtitle={muted.includes(chatId) ? 'Выключены на этом устройстве' : 'Включены'}
             trailing={<Switch id="info-notify" label="Уведомления" checked={!muted.includes(chatId)} onChange={() => toggleMuted(chatId, muted)} />}
           />
+          <Expand show={!!contact?.note}>{contact?.note ? (
+            <div class="rl-inforow rl-inforow-static">
+              <SettingsIcon icon="pencil" color="gray" />
+              <span class="rl-inforow-text"><span class="rl-bio app-info-bio"><RichText text={String(contact.note)} /></span><small>Заметки</small></span>
+            </div>
+          ) : null}</Expand>
         </div>
         <div class="rl-aside-tabs">
           <FolderTabs label="Вложения чата" active={tab} onChange={setTab} items={[
@@ -151,7 +151,7 @@ export function Info() {
 
 const copy = (text: string) => { navigator.clipboard?.writeText(text).then(() => showToast('Скопировано')).catch(() => { /* буфер недоступен */ }); };
 
-/** @username, «О себе», «День рождения», «Телефон» — каждая строка, только если поле видно. */
+/** @username, «Телефон», «О себе», «День рождения» — каждая строка, только если поле видно. */
 function PeerRows({ user }: { user: Item }) {
   const username = user.username ? '@' + String(user.username) : null;
   const bio = (user.bio as string | null)?.trim() || null;
@@ -160,6 +160,7 @@ function PeerRows({ user }: { user: Item }) {
   return (
     <>
       {username ? <InfoRow tile="blue" icon="at" title={username} subtitle="Имя пользователя" onClick={() => copy(username)} /> : null}
+      {phone ? <InfoRow tile="green" icon="phone" title={phone} subtitle="Телефон" onClick={() => copy(phone)} /> : null}
       {bio ? (
         <div class="rl-inforow rl-inforow-static">
           <SettingsIcon icon="info" color="gray" />
@@ -167,7 +168,6 @@ function PeerRows({ user }: { user: Item }) {
         </div>
       ) : null}
       {birthday ? <InfoRow tile="purple" icon="cake" title={birthday} subtitle="День рождения" /> : null}
-      {phone ? <InfoRow tile="green" icon="phone" title={phone} subtitle="Телефон" onClick={() => copy(phone)} /> : null}
     </>
   );
 }

@@ -929,8 +929,18 @@ function SettingsIcon(props) {
   return h('span', { class: cx('rl-sicon', 'rl-sicon-' + (props.color || 'blue')), 'aria-hidden': 'true' }, h(Icon, { name: props.icon, size: 20, strokeWidth: 1.8 }));
 }
 function InfoRow(props) {
-  var Tag = props.trailing && props.trailing.type === Switch ? 'div' : 'button';
-  return h(Tag, { type: Tag === 'button' ? 'button' : undefined, class: cx('rl-inforow', props.danger && 'rl-inforow-danger'), onPointerDown: Tag === 'button' ? ripple : undefined, onClick: props.onClick },
+  var withSwitch = !!(props.trailing && props.trailing.type === Switch);
+  var Tag = withSwitch ? 'div' : 'button';
+  var off = withSwitch && props.trailing.props.disabled;
+  // строка с переключателем (как в Telegram): клик в любом месте строки — это клик по переключателю;
+  // сам переключатель — label, его клик доходит сюда всплытием, второй раз не жмём
+  function onSwitchRow(e) {
+    if (e.target.closest && e.target.closest('.rl-switch')) return;
+    if (props.onClick) { props.onClick(e); return; }
+    var input = e.currentTarget.querySelector('.rl-switch input');
+    if (input && !input.disabled) input.click();
+  }
+  return h(Tag, { type: Tag === 'button' ? 'button' : undefined, class: cx('rl-inforow', withSwitch && 'rl-inforow-switch', off && 'rl-inforow-off', props.danger && 'rl-inforow-danger'), onPointerDown: off ? undefined : ripple, onClick: withSwitch ? onSwitchRow : props.onClick },
     props.tile ? h(SettingsIcon, { icon: props.icon, color: props.tile })
       : h('span', { class: 'rl-inforow-icon' }, h(Icon, { name: props.icon, size: 24 })),
     h('span', { class: 'rl-inforow-text' }, h('span', null, props.title), props.subtitle ? h('small', null, props.subtitle) : null),
