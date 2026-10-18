@@ -27,12 +27,12 @@ const READ_EVERY = 150;   // отправка «вижу до id» не чаще
 const FIRST_PAINT = 24;   // при открытии внизу первым кадром — столько последних сообщений, остальное следующим кадром
 
 type Quote = { id: number; sort: number; body: string; senderId: number };
-type Att = { id: string; kind: 'photo' | 'file' | 'voice' | 'round' | 'audio'; mime: string; name: string; size: number; w: number | null; h: number | null; thumb?: string | null; duration?: number | null; waveform?: string | null };
+type Att = { id: string; kind: 'photo' | 'file' | 'voice' | 'round' | 'audio'; title?: string | null; performer?: string | null; mime: string; name: string; size: number; w: number | null; h: number | null; thumb?: string | null; duration?: number | null; waveform?: string | null };
 const fileUrl = (a: Att, download = false) => `/files/${a.id}${download ? '?download=1' : ''}`;
-type RowProps = { chatId: number; voiceTitle: string; author?: string; onAuthor?: (m: Item) => void; onOpen: (m: Item) => void; hl?: string; m: Item; meId: number; out: boolean; start: boolean; end: boolean; quoted?: Quote | null; quoteAuthor?: string; quoteTone?: number; appear: boolean; flash: boolean; onReact: (m: Item, emoji: string) => void };
+type RowProps = { chatId: number; voiceTitle: string; author?: string; onAuthor?: (m: Item) => void; onOpen: (m: Item) => void; hl?: string; m: Item; meId: number; out: boolean; start: boolean; end: boolean; pos?: 'single' | 'first' | 'middle' | 'last'; quoted?: Quote | null; quoteAuthor?: string; quoteTone?: number; appear: boolean; flash: boolean; onReact: (m: Item, emoji: string) => void };
 
 /** Строка ленты: перерисовывается только если изменилось её сообщение или место в группе. */
-const Row = memo(function Row({ chatId, voiceTitle, author, onAuthor, onOpen, hl, m, meId, out, start, end, quoted, quoteAuthor, quoteTone, appear, flash, onReact }: RowProps) {
+const Row = memo(function Row({ chatId, voiceTitle, author, onAuthor, onOpen, hl, m, meId, out, start, end, pos, quoted, quoteAuthor, quoteTone, appear, flash, onReact }: RowProps) {
   // реакции: по эмодзи — сколько и есть ли моя
   const list = (m.reactions as { userId: number; emoji: string }[] | undefined) ?? [];
   const chips: { emoji: string; count: number; mine: boolean }[] = [];
@@ -98,8 +98,10 @@ const Row = memo(function Row({ chatId, voiceTitle, author, onAuthor, onOpen, hl
     return (
       <div class={flash ? 'app-msg app-msg-flash' : 'app-msg'} data-key={m.key} data-sort={m.sort as number}>
         <MusicBubble
-          from={out ? 'out' : 'in'} tail={end} groupStart={start}
-          trackKey={m.key as string} title={trackTitle(att.name)} duration={att.duration ?? 0} size={fileSize(att.size)}
+          from={out ? 'out' : 'in'} tail={end} groupStart={start} pos={pos}
+          trackKey={m.key as string} title={att.title || trackTitle(att.name)} performer={att.performer ?? undefined} cover={att.thumb ?? undefined}
+          duration={att.duration ?? 0} size={fileSize(att.size)}
+          onDownload={att.id ? () => { const a = document.createElement('a'); a.href = fileUrl(att, true); a.download = att.name; a.click(); } : undefined}
           uploading={pending} progress={m.progress as number}
           time={clock(m.createdAt as string)} status={out ? m.status : undefined}
           onToggle={() => {
@@ -493,8 +495,13 @@ export function Feed({ frameKey, active, chatId, meId, peerName, group, onAuthor
     const start = prevSender !== m.senderId || day !== prevDay;
     const end = !next || next.senderId !== m.senderId || dayKey(next.createdAt as string) !== day;
     const quoted = m.reply as Quote | null;
+    // файлы, отправленные вместе (groupId), — одним пузырём: позиция строки внутри группы
+    const prevM = shown[i - 1];
+    const same = (x: Item | undefined) => !!x && !!m.groupId && x.groupId === m.groupId && x.senderId === m.senderId && !x.deleted;
+    const pos = !m.groupId || m.deleted ? 'single' : same(prevM) && same(next) ? 'middle' : same(prevM) ? 'last' : same(next) ? 'first' : 'single';
     out.push(
       <Row
+        pos={pos}
         key={m.key}
         author={group && !mine && start && !m.deleted ? names[m.senderId as number] ?? '' : undefined}
         onAuthor={onAuthorRow}

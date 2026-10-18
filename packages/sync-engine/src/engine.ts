@@ -357,7 +357,7 @@ export class Engine {
    *  3) POST /uploads/:id/confirm — сервер сверяет размер и тип по HEAD, только после этого вложение можно отправить.
    * Сеть и истёкшая ссылка — повтор позже с начала; отказ сервера (не тот размер/тип, too_long) — сообщение failed.
    */
-  private async upload(clientId: string, blob: Blob, a: { name: string; mime: string; w: number | null; h: number | null; kind?: string; duration?: number | null; waveform?: string | null }): Promise<{ id: string }> {
+  private async upload(clientId: string, blob: Blob, a: { name: string; mime: string; w: number | null; h: number | null; kind?: string; duration?: number | null; waveform?: string | null; title?: string | null; performer?: string | null }): Promise<{ id: string }> {
     const offline: ReqError = { code: 'offline', retry: true };
     const api = async <T>(path: string, body?: unknown): Promise<T> => {
       const r = await this.dev.fetch(this.cfg.httpBase + path, {
@@ -374,6 +374,7 @@ export class Engine {
     const meta: Record<string, unknown> = { name: a.name, mime: a.mime, size: blob.size };
     if (a.w && a.h) { meta.w = a.w; meta.h = a.h; }
     if (a.kind === 'voice' || a.kind === 'round' || a.kind === 'audio') { meta.kind = a.kind; if (a.duration) meta.duration = a.duration; if (a.waveform) meta.waveform = a.waveform; }
+    if (a.kind === 'audio') { if (a.title) meta.title = a.title; if (a.performer) meta.performer = a.performer; }
     const intent = await api<{ id: string; url: string; mime: string }>('/uploads', meta);
     await this.put(clientId, intent.url, blob, intent.mime);
     return api<{ id: string }>(`/uploads/${intent.id}/confirm`);
@@ -703,8 +704,10 @@ export class Engine {
         const photo = !a.kind && /^image\//.test(a.mime) && !!a.w && !!a.h;
         const sized = photo || a.kind === 'round';
         this.store.addPending({ clientId, chatId: a.chatId, body: a.body, replyToId: a.replyToId ?? null, createdAt: this.lastCreated, failed: false,
+          ...(a.groupId ? { groupId: a.groupId } : {}),
           attachment: { id: '', kind: a.kind ?? (photo ? 'photo' : 'file'), mime: a.mime, name: a.name, size: a.file.size, w: sized ? a.w ?? null : null, h: sized ? a.h ?? null : null, thumb: a.thumb ?? null,
-            ...(a.kind ? { duration: a.duration ?? null, waveform: a.waveform ?? null } : {}) } });
+            ...(a.kind ? { duration: a.duration ?? null, waveform: a.waveform ?? null } : {}),
+            ...(a.kind === 'audio' ? { title: a.title ?? null, performer: a.performer ?? null } : {}) } });
         this.store.setDraft(a.chatId, '');
         await this.store.flush();
         this.changed();
@@ -1181,7 +1184,7 @@ export class Engine {
               this.changed();
             }
             const att = next.attachment ? { id: next.attachment.id, thumb: next.attachment.thumb ?? null } : null;
-            const r = await this.request({ op: 'send', reqId: '', clientId: next.clientId, chatId: next.chatId, body: next.body, entities: next.entities ?? [], replyToId: next.replyToId, attachment: att });
+            const r = await this.request({ op: 'send', reqId: '', clientId: next.clientId, chatId: next.chatId, body: next.body, entities: next.entities ?? [], replyToId: next.replyToId, attachment: att, ...(next.groupId ? { groupId: next.groupId } : {}) });
             this.store.ack(next.clientId, r.id as number, r.createdAt as string);
             this.outboxAttempt = 0;
             if (att) delBlob(this.db, next.clientId).catch(() => {});

@@ -17,6 +17,7 @@ export interface LocalMessage {
   deleted?: boolean;
   reactions?: { userId: number; emoji: string }[];
   kind?: 'text' | 'photo' | 'file' | 'voice' | 'round' | 'audio';
+  groupId?: string | null;
   attachment?: LocalAttachment | null;
   entities?: Entity[];    // оформление текста
   listened?: boolean;     // голосовое/кружок прослушан получателем
@@ -27,6 +28,7 @@ export interface LocalMessage {
 
 /** Вложение сообщения; у неотправленного id пустой, пока файл не загружен. */
 export interface LocalAttachment {
+  title?: string | null; performer?: string | null;
   id: string; kind: 'photo' | 'file' | 'voice' | 'round' | 'audio'; mime: string; name: string; size: number; w: number | null; h: number | null; thumb?: string | null;
   duration?: number | null; waveform?: string | null;   // голосовое и кружок
 }
@@ -59,6 +61,7 @@ export interface OutboxEntry {
   attachment?: LocalAttachment | null;   // id появляется после загрузки файла
   entities?: Entity[];
   error?: string;         // код отказа сервера (failed)
+  groupId?: string | null;   // отправлены вместе — один пузырь
 }
 
 export type Query =
@@ -150,7 +153,7 @@ export type Action =
   /** раздел «Для разработчиков»: имитатор сети и служебные команды (devlog.ts) */
   | DevAction
   | { type: 'sendFile'; chatId: number; body: string; file: Blob; name: string; mime: string; w?: number | null; h?: number | null; thumb?: string | null; replyToId?: number | null;
-      kind?: 'voice' | 'round' | 'audio'; duration?: number; waveform?: string | null }
+      kind?: 'voice' | 'round' | 'audio'; duration?: number; waveform?: string | null; title?: string | null; performer?: string | null; groupId?: string | null }
   | { type: 'listened'; chatId: number; id: number };
 
 /** Медленная сеть: задержка (мс, туда-обратно; на каждое направление — половина), джиттер (мс), потери кадров (%), полоса (Кбит/с, 0 — без ограничения). */

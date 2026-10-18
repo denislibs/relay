@@ -64,3 +64,17 @@ test('an audio file with a duration is music; without one, or a voice-kind reque
   const notAudio = await createUpload(a, { mime: 'application/pdf', name: 'x.pdf', size: 1000, kind: 'audio', duration: 10 });
   expect((await kindOf(notAudio.id)).kind).toBe('file');
 });
+
+test('music tags and a send group travel with the message', async () => {
+  const a = await makeUser('Анна'), b = await makeUser('Борис');
+  const chat = await makeChat([a, b]);
+  const { createUpload } = await import('../src/domain/files');
+  const { sendMessage } = await import('../src/domain/messages');
+  const up = await createUpload(a, { mime: 'audio/mpeg', name: 'x.mp3', size: 10, kind: 'audio', duration: 100, title: '  Мы Сверхновая\u0000 ', performer: 'denis1488' });
+  await sql`update attachments set status = 'ready' where id = ${up.id}`;
+  const group = crypto.randomUUID();
+  const { message } = await sendMessage(a, { chatId: chat, clientId: crypto.randomUUID(), body: '', attachment: { id: up.id }, groupId: group });
+  expect(message).toMatchObject({ kind: 'audio', groupId: group, attachment: { title: 'Мы Сверхновая', performer: 'denis1488', duration: 100 } });
+  const { message: text } = await sendMessage(a, { chatId: chat, clientId: crypto.randomUUID(), body: 'hi', groupId: group });
+  expect(text.groupId).toBeUndefined();   // у текста группы не бывает
+});

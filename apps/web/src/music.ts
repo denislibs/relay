@@ -6,7 +6,7 @@ import { showToast } from './settingsData';
 // Музыка: один трек на сообщение, где бы его ни включили (лента, «Общие медиа», плейлист, профиль) —
 // ключ = ключ сообщения, поэтому кнопки везде показывают одно и то же состояние.
 
-type Att = { id: string; name: string; duration?: number | null };
+type Att = { id: string; name: string; duration?: number | null; title?: string | null; performer?: string | null; thumb?: string | null };
 export type MusicMsg = { key?: string; clientId?: string; id?: number | null; chatId?: number; senderId?: number; attachment?: Att | null };
 export type Track = { key: string; kind: 'music' | 'voice'; src: string; duration: number; title: string; performer?: string; subtitle?: string; chatId?: number; msgId?: number | null; attId?: string };
 
@@ -22,8 +22,8 @@ function senderName(senderId: number | undefined): string {
 export function musicTrack(m: MusicMsg, chatId: number): Track {
   const key = (m.key ?? m.clientId) as string;
   const a = m.attachment!;
-  return { key, kind: 'music', src: localPreview(key) ?? `/files/${a.id}`, duration: a.duration ?? 0, title: trackTitle(a.name),
-    performer: senderName(m.senderId), chatId: m.chatId ?? chatId, msgId: m.id ?? null, attId: a.id };
+  return { key, kind: 'music', src: localPreview(key) ?? `/files/${a.id}`, duration: a.duration ?? 0, title: a.title || trackTitle(a.name),
+    performer: a.performer || senderName(m.senderId), chatId: m.chatId ?? chatId, msgId: m.id ?? null, attId: a.id };
 }
 
 /** Играть (или пауза) трек; плейлист — переданный список (новые сверху: «дальше» — старее, как в Telegram). */

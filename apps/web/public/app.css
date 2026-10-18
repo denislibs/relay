@@ -659,3 +659,4 @@ html[data-anim="0"] .app-chatcol, html[data-anim="0"] .app-chatcol-below, html[d
 .app-pins .rl-iconbtn { flex: none; color: var(--ink-muted); }
 .app-pins-list { position: absolute; right: 0; top: calc(100% + 6px); z-index: 30; }
 .app-pins-list .rl-menu { position: relative; transform-origin: top right; max-width: 320px; }
+.app-send-files { display: flex; flex-direction: column; gap: 6px; max-height: 40vh; overflow-y: auto; }

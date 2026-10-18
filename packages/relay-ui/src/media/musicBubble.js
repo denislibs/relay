@@ -1,5 +1,6 @@
-// Музыка в ленте — как в Telegram Web A: круглая кнопка 48 px (play ↔ pause), название, под ним
-// «длительность • размер»; пока играет — «прошло / всего» и полоса, по которой можно перематывать.
+// Музыка в ленте — как в Telegram: круглая кнопка 54 px (обложка из тегов файла, поверх — play/pause),
+// в углу — значок «скачать»; справа название и «2:50 • исполнитель». Пока играет — «прошло / всего» и полоса перемотки.
+// Файлы, отправленные вместе, — один пузырь: pos first/middle/last склеивает строки, время — только у последней.
 import { h } from 'preact';
 import { useEffect, useRef, useState } from 'preact/hooks';
 import { cx, Icon, MessageStatus, ProgressRing } from '../kit.js';
@@ -9,6 +10,7 @@ function fmt(sec) { sec = Math.max(0, Math.floor(sec || 0)); return Math.floor(s
 
 export function MusicBubble(props) {
   var out = props.from === 'out';
+  var pos = props.pos || 'single';
   var st = useState(player.playerState()), s = st[0];
   var bar = useRef(null), clock = useRef(null);
   var mine = s.key === props.trackKey;
@@ -22,24 +24,29 @@ export function MusicBubble(props) {
     return function () { off(); offTick(); };
   }, [props.trackKey]);
   var playing = mine && s.playing;
+  var last = pos === 'single' || pos === 'last';
   function seekAt(e) {
     var r = e.currentTarget.getBoundingClientRect();
     if (r.width) player.seek(props.trackKey, (e.clientX - r.left) / r.width);
   }
-  return h('div', { class: cx('rl-msgline', out && 'rl-msgline-out', props.groupStart && 'rl-msgline-gap') },
-    h('div', { class: cx('rl-bubble', out ? 'rl-bubble-out' : 'rl-bubble-in', props.tail && 'rl-bubble-tail', 'rl-music') },
+  return h('div', { class: cx('rl-msgline', out && 'rl-msgline-out', props.groupStart && pos !== 'middle' && pos !== 'last' && 'rl-msgline-gap', 'rl-music-line', 'rl-music-' + pos) },
+    h('div', { class: cx('rl-bubble', out ? 'rl-bubble-out' : 'rl-bubble-in', props.tail && last && 'rl-bubble-tail', 'rl-music') },
       h('div', { class: 'rl-music-row' },
-        props.uploading
-          ? h(ProgressRing, { size: 48, progress: props.progress, onMedia: false, onCancel: props.onCancel, label: 'Отправка' })
-          : h('button', { type: 'button', class: cx('rl-music-play', playing && 'rl-vb-playing'), 'aria-label': playing ? 'Пауза' : 'Слушать',
-              onClick: function (e) { e.stopPropagation(); if (props.onToggle) props.onToggle(); } },
-            h(Icon, { name: 'play', size: 24, class: 'rl-vb-play' }), h(Icon, { name: 'pause', size: 24, class: 'rl-vb-pause' })),
+        h('div', { class: 'rl-music-btnwrap' },
+          props.uploading
+            ? h(ProgressRing, { size: 54, progress: props.progress, onMedia: true, onCancel: props.onCancel, label: 'Отправка' })
+            : h('button', { type: 'button', class: cx('rl-music-play', playing && 'rl-vb-playing', props.cover && 'rl-music-cover'),
+                style: props.cover ? { backgroundImage: 'url(' + props.cover + ')' } : undefined,
+                'aria-label': playing ? 'Пауза' : 'Слушать', onClick: function (e) { e.stopPropagation(); if (props.onToggle) props.onToggle(); } },
+              h(Icon, { name: 'play', size: 26, class: 'rl-vb-play' }), h(Icon, { name: 'pause', size: 26, class: 'rl-vb-pause' })),
+          !props.uploading && props.onDownload ? h('button', { type: 'button', class: 'rl-music-dl', 'aria-label': 'Скачать',
+            onClick: function (e) { e.stopPropagation(); props.onDownload(); } }, h(Icon, { name: 'download', size: 13 })) : null),
         h('div', { class: 'rl-music-text' },
           h('b', { title: props.title }, props.title),
           mine
             ? h('div', { class: 'rl-music-live' },
-              h('span', null, h('span', { ref: clock }, fmt(s.time)), ' / ', fmt(props.duration)),
+              h('span', { class: 'rl-music-sub' }, h('span', { ref: clock }, fmt(s.time)), ' / ', fmt(props.duration)),
               h('div', { class: 'rl-music-seek', onClick: seekAt }, h('i', { ref: bar })))
-            : h('span', null, fmt(props.duration), props.performer ? ' • ' + props.performer : props.size ? ' • ' + props.size : ''))),
-      h('span', { class: 'rl-music-meta' }, props.time, out ? h(MessageStatus, { status: props.status || 'sent' }) : null)));
+            : h('span', { class: 'rl-music-sub' }, fmt(props.duration), props.performer ? ' • ' + props.performer : props.size ? ' • ' + props.size : ''))),
+      last ? h('span', { class: 'rl-music-meta' }, props.time, out ? h(MessageStatus, { status: props.status || 'sent' }) : null) : null));
 }

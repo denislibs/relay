@@ -34,6 +34,7 @@ export function toMessage(r: Record<string, unknown>): Message {
     ...((r.kind === 'voice' || r.kind === 'round') && !r.deleted ? { listened: !!r.listened } : {}),
     // из jsonb — в каноническом виде (порядок ключей у jsonb свой)
     ...(r.service_type ? { service: { type: r.service_type as ServiceType } } : {}),
+    ...(r.group_id ? { groupId: r.group_id as string } : {}),
     ...(!r.deleted && Array.isArray(r.entities) && r.entities.length ? { entities: normalizeEntities(r.body as string, r.entities) } : {}),
   };
 }

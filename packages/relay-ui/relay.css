@@ -1546,21 +1546,34 @@ html[data-blur="0"] .rl-menu, html[data-blur="0"] .rl-attach { -webkit-backdrop-
 .rl-round-dl { display: inline-flex; align-items: center; justify-content: center; width: 54px; height: 54px; border-radius: 50%; background: var(--media-scrim); color: var(--on-media); }
 .rl-round-center .rl-ring-spin > svg, .rl-round-center .rl-ring > svg { animation: rl-ring-rotate 2s linear infinite; }   /* дуга и с известным прогрессом вращается — как в Telegram */
 
-/* Музыка в ленте (musicBubble.js) */
-.rl-music { min-width: 260px; max-width: 340px; padding: 8px 10px 6px 8px; }
-.rl-music-row { display: flex; align-items: center; gap: 12px; }
-.rl-music-play { position: relative; flex: none; width: 48px; height: 48px; border: 0; border-radius: 50%; background: var(--brand-strong); color: #fff; cursor: pointer; }
-.rl-bubble-out .rl-music-play { background: var(--bubble-out-accent, var(--brand-strong)); }
-.rl-music-play > .rl-icon { position: absolute; top: 50%; left: 50%; margin: -12px 0 0 -12px; transition: opacity .4s var(--ease-out), transform .6s cubic-bezier(.34, 1.56, .64, 1); }
+/* Музыка в ленте (musicBubble.js) — как в Telegram; цвета — как у голосового (зелёный в исходящем) */
+.rl-music { min-width: 280px; max-width: 360px; padding: 8px 12px 6px 8px; --music-accent: var(--voice-btn, var(--brand-strong)); }
+.rl-bubble-out.rl-music { --music-accent: #4fae4e; --music-sub: #4fae4e; }
+.rl-music-row { display: flex; align-items: center; gap: 14px; }
+.rl-music-btnwrap { position: relative; flex: none; width: 54px; height: 54px; }
+.rl-music-play { position: relative; width: 54px; height: 54px; border: 0; border-radius: 50%; background: var(--music-accent); background-size: cover; background-position: center; color: #fff; cursor: pointer; }
+.rl-music-cover { box-shadow: inset 0 0 0 100px rgba(0, 0, 0, .18); }
+.rl-music-play > .rl-icon { position: absolute; top: 50%; left: 50%; margin: -13px 0 0 -13px; filter: drop-shadow(0 1px 2px rgba(0,0,0,.25)); transition: opacity .4s var(--ease-out), transform .6s cubic-bezier(.34, 1.56, .64, 1); }
+.rl-music-dl { position: absolute; right: -3px; bottom: -3px; width: 22px; height: 22px; display: grid; place-items: center; padding: 0; border: 2px solid var(--bubble-in); border-radius: 50%; background: var(--music-accent); color: #fff; cursor: pointer; }
+.rl-bubble-out .rl-music-dl { border-color: var(--bubble-out); }
 .rl-music-text { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
-.rl-music-text b { font: 500 15px/20px var(--font-sans); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.rl-music-text > span, .rl-music-live > span { font: 400 13px/18px var(--font-sans); color: var(--meta, var(--ink-muted)); font-variant-numeric: tabular-nums; }
+.rl-music-text b { font: 500 15.5px/21px var(--font-sans); color: var(--ink); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.rl-music-sub { font: 400 14.5px/20px var(--font-sans); color: var(--music-sub, var(--meta, var(--ink-muted))); font-variant-numeric: tabular-nums; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .rl-music-live { display: flex; flex-direction: column; gap: 4px; }
 .rl-music-seek { position: relative; height: 10px; cursor: pointer; }
 .rl-music-seek::before, .rl-music-seek > i { content: ''; position: absolute; left: 0; right: 0; top: 4px; height: 2px; border-radius: 1px; }
-.rl-music-seek::before { background: color-mix(in srgb, currentColor 22%, transparent); }
-.rl-music-seek > i { background: var(--brand-strong); transform: scaleX(0); transform-origin: left; }
-.rl-music-meta { display: flex; justify-content: flex-end; align-items: center; gap: 3px; font: 400 12px/14px var(--font-sans); color: var(--meta, var(--ink-muted)); margin-top: 2px; }
+.rl-music-seek::before { background: color-mix(in srgb, var(--music-accent) 25%, transparent); }
+.rl-music-seek > i { background: var(--music-accent); transform: scaleX(0); transform-origin: left; }
+.rl-music-meta { display: flex; justify-content: flex-end; align-items: center; gap: 3px; font: 400 12px/14px var(--font-sans); color: var(--music-sub, var(--meta, var(--ink-muted))); margin-top: -2px; }
+/* группа (отправлены вместе): строки — части одного пузыря */
+.rl-music-line.rl-music-middle, .rl-music-line.rl-music-last { margin-top: 0 !important; }
+.app-msg:has(> .rl-music-middle), .app-msg:has(> .rl-music-last) { margin-top: 0 !important; }
+.rl-music-first .rl-music, .rl-music-middle .rl-music { border-bottom-left-radius: 0 !important; border-bottom-right-radius: 0 !important; padding-bottom: 6px; box-shadow: none; }
+.rl-music-middle .rl-music, .rl-music-last .rl-music { border-top-left-radius: 0 !important; border-top-right-radius: 0 !important; padding-top: 6px; }
 
 /* плеер и закреплённое — такие же острова, как шапка: непрозрачный фон и тень Telegram */
 .rl-shell .rl-playerbar { border-radius: 24px; background: var(--raised); box-shadow: var(--tg-shadow-header); -webkit-backdrop-filter: none; backdrop-filter: none; }
+:root[data-theme="dark"] .rl-bubble-out.rl-music { --music-accent: #fff; --music-sub: rgba(255,255,255,.7); }
+:root[data-theme="dark"] .rl-bubble-out .rl-music-play:not(.rl-music-cover), :root[data-theme="dark"] .rl-bubble-out .rl-music-dl { color: var(--bubble-out); }
+@media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) .rl-bubble-out.rl-music { --music-accent: #fff; --music-sub: rgba(255,255,255,.7); }
+  :root:not([data-theme="light"]) .rl-bubble-out .rl-music-play:not(.rl-music-cover), :root:not([data-theme="light"]) .rl-bubble-out .rl-music-dl { color: var(--bubble-out); } }
