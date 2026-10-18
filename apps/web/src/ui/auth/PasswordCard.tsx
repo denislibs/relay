@@ -89,7 +89,16 @@ export function RecoverCard(props: { card: Extract<Card, { name: 'recover' }> })
 
   useEffect(() => {
     if (!flow.dev) return;
-    void fetch('/dev/codes').then((r) => r.json()).then((d: { items: { code: string; kind: string }[] }) => setDevCode(d.items.find((i) => i.kind === 'recovery')?.code ?? null)).catch(() => {});
+    // письмо отправляет воркер после коммита: ждём свежее (не раньше открытия карточки), старый код из прошлой попытки не годится
+    const since = Date.now() - 2000;
+    let tries = 0, stop = false;
+    const poll = () => void fetch('/dev/codes').then((r) => r.json()).then((d: { items: { at: string; code: string; kind: string }[] }) => {
+      const mail = d.items.find((i) => i.kind === 'recovery' && Date.parse(i.at) >= since);
+      if (mail) setDevCode(mail.code);
+      else if (!stop && ++tries < 20) setTimeout(poll, 500);
+    }).catch(() => {});
+    poll();
+    return () => { stop = true; };
   }, [flow.dev]);
 
   async function submit(v: string) {

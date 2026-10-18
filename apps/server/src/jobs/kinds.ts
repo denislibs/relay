@@ -1,5 +1,6 @@
 // Регистрация доменных обработчиков задач. Импортируется процессом-воркером и тестами.
 import { sql } from '../db';
+import { deliver } from '../domain/devOutbox';
 import { deliverPush, planPush, type PushMessage, type PushPayload } from '../domain/push';
 import { register } from './handlers';
 import { enqueue } from './queue';
@@ -15,4 +16,9 @@ register('push.message', async (p: { message: PushMessage }) => {
 
 register('push.deliver', async (p: { endpoint: string; push: PushPayload }) => {
   await deliverPush(p.endpoint, p.push);
+});
+
+// письмо восстановления пароля: код лежит в payload.secret до выполнения задачи
+register('mail.recovery', async (p: { to: string; secret: { code: string } }) => {
+  await deliver({ to: p.to, kind: 'recovery', code: p.secret.code });
 });

@@ -48,7 +48,7 @@ export async function publicAuthRoute(req: Request, url: URL, server: Server): P
   if (post && !signInRequestOk(req)) return Response.json({ code: 'bad_frame' }, { status: 400 });
 
   if (req.method === 'GET' && p === '/auth/config') return Response.json({ dev: process.env.DEV_LOGIN === '1' });
-  if (req.method === 'GET' && p === '/dev/codes' && process.env.DEV_LOGIN === '1') return Response.json({ items: devOutbox() });
+  if (req.method === 'GET' && p === '/dev/codes' && process.env.DEV_LOGIN === '1') return Response.json({ items: await devOutbox() });
 
   if (post && p === '/auth/code') {
     const { login } = await body(req);

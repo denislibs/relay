@@ -102,6 +102,8 @@ test('push respects the recipient defaults: muted kind sends nothing, no preview
   await drainJobs();
   expect(got.length).toBe(3);
   expect(await br.decrypt(got[0])).toMatchObject({ title: 'Анна', body: 'лично' });
-  expect(await br.decrypt(got[1])).toMatchObject({ title: 'Анна', body: 'Новое сообщение' });   // заголовок — отправитель, текст скрыт
-  expect(await br.decrypt(got[2])).toMatchObject({ title: 'Группа', body: 'Новое сообщение' });
+  // две задачи из одного drainJobs выполняются параллельно — порядок доставки не задан
+  const rest = (await Promise.all(got.slice(1).map((g) => br.decrypt(g)))).sort((x, y) => x.title.localeCompare(y.title));
+  expect(rest[0]).toMatchObject({ title: 'Анна', body: 'Новое сообщение' });   // заголовок — отправитель, текст скрыт
+  expect(rest[1]).toMatchObject({ title: 'Группа', body: 'Новое сообщение' });
 });

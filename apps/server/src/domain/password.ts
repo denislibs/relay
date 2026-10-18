@@ -1,7 +1,7 @@
 import { createHash, randomInt } from 'node:crypto';
 import { serverChallenge, serverVerify } from '@relay/protocol/src/srp';
 import { sql } from '../db';
-import { deliver } from './devOutbox';
+import { enqueue } from '../jobs/queue';
 import { DomainError } from './errors';
 
 /**
@@ -119,9 +119,12 @@ export async function startRecovery(pendingId: unknown): Promise<{ emailPattern:
   const [pw] = await sql`select email from user_passwords where user_id = ${p.user_id}`;
   if (!pw?.email) throw new DomainError('recovery_unavailable');
   const code = String(randomInt(0, 1e6)).padStart(6, '0');
-  await sql`insert into password_recovery (pending_id, code_hash, expires_at) values (${p.id}, ${hashCode(code)}, now() + ${RECOVERY_MIN + ' minutes'}::interval)
-            on conflict (pending_id) do update set code_hash = excluded.code_hash, tries = 0, expires_at = excluded.expires_at`;
-  deliver({ to: pw.email as string, kind: 'recovery', code });
+  await sql.begin(async (tx) => {
+    await tx`insert into password_recovery (pending_id, code_hash, expires_at) values (${p.id}, ${hashCode(code)}, now() + ${RECOVERY_MIN + ' minutes'}::interval)
+              on conflict (pending_id) do update set code_hash = excluded.code_hash, tries = 0, expires_at = excluded.expires_at`;
+    // код — под secret: в jobs_dead не копируется; письмо, не ушедшее за срок жизни кода, бесполезно
+    await enqueue(tx, 'mail.recovery', { to: pw.email as string, secret: { code } }, { maxAttempts: 5 });
+  });
   return { emailPattern: maskEmail(pw.email as string) };
 }
 

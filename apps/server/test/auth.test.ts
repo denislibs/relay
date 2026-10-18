@@ -3,13 +3,15 @@ import { clientProof, makeVerifier } from '@relay/protocol/src/srp';
 import { sql } from '../src/db';
 import { createServer } from '../src/http';
 import { clearOutbox, devOutbox } from '../src/domain/devOutbox';
+import '../src/jobs/kinds';
+import { drainJobs } from '../src/jobs/worker';
 import { resetDb } from './helpers';
 
 process.env.DEV_LOGIN = '1';
 const server = createServer({ port: 0 });
 const base = `http://localhost:${server.port}`;
 afterAll(() => server.stop(true));
-beforeEach(async () => { await resetDb(); clearOutbox(); });
+beforeEach(async () => { await resetDb(); await clearOutbox(); });
 
 type Res = { status: number; json: Record<string, any>; cookie: string | null };
 async function call(path: string, data?: unknown, cookie?: string | null, method = 'POST'): Promise<Res> {
@@ -91,12 +93,16 @@ test('forgot password: code to the recovery email removes the password and signs
   const code = await call('/auth/code', { login: '+79990000020' });
   const step = await call('/auth/signin', { attemptId: code.json.attemptId, code: code.json.devCode });
   expect((await call('/auth/password/recover', { pendingId: step.json.pendingId })).json).toEqual({ emailPattern: 'b••••@example.com' });
-  const mail = devOutbox()[0];
+  expect(await devOutbox()).toEqual([]);              // в запросе письмо не отправляется — только задача
+  await drainJobs();
+  const mail = (await devOutbox())[0];
   expect(mail).toMatchObject({ to: 'boris@example.com', kind: 'recovery' });
   expect((await call('/auth/password/recover/check', { pendingId: step.json.pendingId, code: '000000' })).json.code).toBe('code_invalid');
   const ok = await call('/auth/password/recover/check', { pendingId: step.json.pendingId, code: mail.code });
   expect(ok.json).toEqual({ userId });
   expect((await sql`select count(*)::int as n from user_passwords`)[0].n).toBe(0);
+  // код не остаётся в очереди: выполненная задача удалена, а в jobs_dead секрет не копируется
+  expect((await sql`select count(*)::int as n from jobs where kind = 'mail.recovery'`)[0].n).toBe(0);
 });
 
 test('QR: waits, a confirmed session accepts, the new device gets a session once; fresh sessions cannot accept', async () => {
