@@ -61,6 +61,8 @@ export interface GlobalState {
   prefs: Prefs;       // настройки устройства, см. prefs.ts
   updateReady: boolean;   // на сервере новая сборка — предлагаем обновиться (update.ts)
   playlistOpen: boolean;  // окно плейлиста музыки (music.ts)
+  fwdPick: ForwardPick | null;               // открыто окно «Переслать в…» (forward.ts)
+  fwdDraft: Record<number, ForwardDraft>;    // пересылка, ждущая в поле ввода чата (панель над полем)
   myMusic: string[];      // id вложений, добавленных в мой профиль
   notify: NotifyState;   // уведомления на этом устройстве
   pushReady: boolean;    // подписка Web Push принята сервером: уведомит и без открытой вкладки
@@ -84,6 +86,12 @@ export type DevTab = 'overview' | 'log' | 'network' | 'data' | 'errors';
 export interface DevSimFlags { offline: boolean; profile: { latency: number; jitter: number; lossPct: number; kbps: number } | null; dropNextUpdates: boolean; forceTooLong: boolean; persist: boolean }
 
 /** Настройки аккаунта (общие для устройств). loaded — снимок с сервера уже был; pending — есть неподтверждённые правки. */
+/** Что пересылаем: сообщения fromChatId по порядку. */
+export interface ForwardPick { fromChatId: number; ids: number[]; preview: ForwardPreview }
+/** Для панели в поле ввода: авторы, текст первого, сколько и есть ли подписи у медиа. */
+export interface ForwardPreview { senders: { id: number; name: string }[]; text: string; count: number; captions: boolean }
+/** Пересылка в поле ввода: с опциями «скрыть отправителя / подписи». */
+export interface ForwardDraft extends ForwardPick { hideSender: boolean; hideCaption: boolean }
 export interface AccountSettings { notify: Record<'direct' | 'group', { muted: boolean; preview: boolean }>; sessionsTtlDays: number; folders: ChatFolder[]; privacy: PrivacyRules; loaded: boolean; pending: boolean }
 export const defaultAccountSettings = (): AccountSettings => ({ notify: { direct: { muted: false, preview: true }, group: { muted: false, preview: true } }, sessionsTtlDays: 180, folders: [], privacy: defaultPrivacy(), loaded: false, pending: false });
 
@@ -119,6 +127,8 @@ let state: GlobalState = {
   prefs: getPrefs(),
   updateReady: false,
   playlistOpen: false,
+  fwdPick: null,
+  fwdDraft: {},
   myMusic: [],
   notify: 'unsupported',
   pushReady: false,

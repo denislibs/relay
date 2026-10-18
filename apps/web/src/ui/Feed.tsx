@@ -45,7 +45,7 @@ const Row = memo(function Row({ chatId, voiceTitle, author, onAuthor, onOpen, hl
   const att = m.attachment as Att | null | undefined;
   // пересланное: «Переслано от» с аватаром и именем автора; клик — чат с ним (себя не открываем)
   const ff = !m.deleted ? m.fwdFrom as { userId: number; name: string } | null | undefined : null;
-  const fwd = ff ? { name: ff.userId === meId ? 'Вы' : ff.name, tone: peerTone(ff.userId), avatar: senderAvatar(ff.userId),
+  const fwd = ff ? { name: ff.name, tone: peerTone(ff.userId), avatar: senderAvatar(ff.userId),
     onClick: ff.userId !== meId && onUser ? () => onUser(ff.userId) : undefined } : undefined;
   const pending = m.status === 'pending' && typeof m.progress === 'number' && (m.progress as number) < 1;
   const mark = m.id != null ? <i class="app-mark" data-mid={m.id as number} aria-hidden="true" /> : null;

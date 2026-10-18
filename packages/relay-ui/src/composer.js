@@ -190,7 +190,8 @@ function Composer(props) {
     if (recNow.current) { endRecording(false); return; }
     if (!el || sending.current) return;
     var v = trimValue(readDom(el));
-    if (!v.text) { if (recordMode && !latest.current.editing) startRecording(recordMode); return; }
+    // пусто: обычно — запись голосового; но пересылку можно отправить и без комментария
+    if (!v.text && !latest.current.sendEmpty) { if (recordMode && !latest.current.editing) startRecording(recordMode); return; }
     var res = latest.current.onSend ? latest.current.onSend(v) : undefined;
     if (res === false) return;   // вызывающий сам решил, что останется в поле (например, конец правки)
     sending.current = true;
@@ -412,7 +413,7 @@ function Composer(props) {
   }, [props.captureTyping]);
 
   /* ---------- кнопка: микрофон / отправить / готово ---------- */
-  var mode = rec[0] ? 'send' : props.editing ? 'edit' : st.hasText ? 'send' : recordMode === 'round' ? 'round' : recordMode ? 'mic' : 'send';
+  var mode = rec[0] ? 'send' : props.editing ? 'edit' : st.hasText || props.sendEmpty ? 'send' : recordMode === 'round' ? 'round' : recordMode ? 'mic' : 'send';
   var canSwitch = modes.length > 1 && (mode === 'mic' || mode === 'round');
   var pressTimer = useRef(null);
   var ready = useRef(false);
@@ -458,11 +459,12 @@ function Composer(props) {
       // ответ/редактирование — первой строкой внутри поля, как в Telegram: значок (стрелка или карандаш) цветом автора,
       // цитата, крестик; поле плавно раздвигается по высоте
       h(Presence, { show: !!props.replyTo, exitMs: 180 }, (function () {
-        var r = reply.current || {}, n = r.tone != null ? r.tone : 5, edit = r.icon === 'pencil';
-        return h('div', { class: 'rl-composer-reply', style: { '--quote-tone': 'var(--peer-' + n + ')' } },
-          h('span', { class: 'rl-composer-reply-icon', 'aria-hidden': 'true' }, h(Icon, { name: edit ? 'pencil' : 'reply', size: 22 })),
+        // icon: 'pencil' — правка, 'forward' — пересылка (клик по цитате — её опции), иначе ответ
+        var r = reply.current || {}, n = r.tone != null ? r.tone : 5, edit = r.icon === 'pencil', fwd = r.icon === 'forward';
+        return h('div', { class: cx('rl-composer-reply', fwd && 'rl-composer-reply-fwd'), style: { '--quote-tone': 'var(--peer-' + n + ')' } },
+          h('span', { class: 'rl-composer-reply-icon', 'aria-hidden': 'true' }, h(Icon, { name: edit ? 'pencil' : fwd ? 'forward' : 'reply', size: 22 })),
           h(ReplyQuote, Object.assign({}, r, { icon: undefined, onCancel: undefined })),
-          h(IconButton, { icon: 'close', label: edit ? 'Отменить редактирование' : 'Отменить ответ', onClick: props.onCancelReply, class: 'rl-composer-reply-x' }));
+          h(IconButton, { icon: 'close', label: edit ? 'Отменить редактирование' : fwd ? 'Отменить пересылку' : 'Отменить ответ', onClick: props.onCancelReply, class: 'rl-composer-reply-x' }));
       })()),
       roundView[0] ? h(RoundRecorderView, { key: 'round', session: roundView[0].session, closing: roundView[0].closing }) : null,
       rec[0] ? h(RecordBar, { key: 'rec', session: rec[0].session, limitReached: rec[0].limit, forcePaused: rec[0].limit, onDelete: function () { endRecording(true); }, onPaused: props.onRecordPaused }) : null,

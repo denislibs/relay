@@ -2,7 +2,7 @@ import { PinnedBar } from './PinnedBar';
 import { membersStatus, useMembers } from '../members';
 import { Playlist } from './Playlist';
 import { inProfile, toggleProfileMusic, type Track } from '../music';
-import { Avatar, Button, Icon, MediaPolicy, peerTone, ChatSearchBar, Highlight, ripple, useMinVisible, requestMeasure, Composer, DropOverlay, GlassBar, IconButton, Menu, Modal, ConfirmDialog, Presence, ReactionPicker, requestMutation, applyMarkdown, emptyValue, sameValue, voiceSupported, PlayerBar, roundSupported, startRound, Verified } from '@relay/ui';
+import { Avatar, Button, Icon, MediaPolicy, peerTone, ChatSearchBar, Highlight, ripple, useMinVisible, requestMeasure, Composer, DropOverlay, GlassBar, IconButton, Menu, Modal, ConfirmDialog, Presence, ReactionPicker, plural, requestMutation, applyMarkdown, emptyValue, sameValue, voiceSupported, PlayerBar, roundSupported, startRound, Verified } from '@relay/ui';
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'preact/hooks';
 import { closeChat, deleteMessage, editMessage, ensureNames, focusMessage, openChat, openUserChat, pinMessage, unpinMessage, sendFile, sendFiles, sendRound, sendVoice, react, saveDraft, searchMessages, send, typing, typingDone } from '../data';
 import type { Item, SearchHit } from '@relay/sync-engine/src/types';
@@ -17,6 +17,7 @@ import { chatKindFor, mediaPolicy } from '../autoload';
 import { chatTime, chatTone, fileSize, isSystemChat, lastSeenText, shownBody, snippet } from './format';
 import type { ProfilePhoto } from '@relay/protocol';
 import { avatarPhoto } from '../profilePhoto';
+import { cancelForwardDraft, forwardElsewhere, patchForwardDraft, sendForwardDraft, startForward } from '../forward';
 
 
 const NO_MESSAGES: Item[] = [];
@@ -39,6 +40,7 @@ export function Chat({ chatId, frameKey, active }: { chatId: number; frameKey: s
   const shell = useRef<HTMLSpanElement>(null);
   const stick = useRef(true);              // лента прижата к низу (Feed ведёт, отправка выставляет)
   const [menu, setMenu] = useState<{ x: number; y: number; key: string } | null>(null);
+  const [fwdMenu, setFwdMenu] = useState<{ x: number; y: number } | null>(null);   // опции пересылки в поле ввода
   const [replyKey, setReplyKey] = useState<string | null>(null);
   const [editing, setEditing] = useState<{ id: number; original: Value; draft: Value } | null>(null);   // правка своего сообщения
   const api = useRef<ComposerApi | null>(null);
@@ -241,6 +243,18 @@ export function Chat({ chatId, frameKey, active }: { chatId: number; frameKey: s
   const replyTo = replyKey ? messages.find((m) => m.key === replyKey) : undefined;
   const authorOf = (senderId: unknown) => (senderId === me.userId ? 'Вы' : title);
   const menuMsg = menu ? messages.find((m) => m.key === menu.key) : undefined;
+  // пересылка, ждущая в поле ввода: «От: …» (или «Имена отправителей скрыты») и что пересылаем
+  const fwd = useGlobal((s) => s.fwdDraft[chatId]) ?? null;
+  const fwdQuote = fwd && !editing ? {
+    icon: 'forward',
+    author: fwd.hideSender ? 'Имена отправителей скрыты' : 'От: ' + fwd.preview.senders.map((s) => (s.id === me.userId ? me.name : s.name)).join(', '),
+    text: fwd.preview.count > 1 ? `${fwd.preview.count} ${plural(fwd.preview.count, 'пересланное сообщение', 'пересланных сообщения', 'пересланных сообщений')}` : fwd.preview.text,
+    tone: fwd.hideSender || !fwd.preview.senders.length ? peerTone(me.userId) : peerTone(fwd.preview.senders[0].id),
+    onClick: (e: MouseEvent) => { const r = (e.currentTarget as HTMLElement).getBoundingClientRect(); setFwdMenu({ x: r.left + 16, y: r.top }); },
+  } : null;
+  const nameOf = (id: number) => (id === me.userId ? me.name : names[id] ?? (chat?.kind === 'direct' ? title : ''));
+  // «Переслать» из меню: у альбома — весь альбом
+  const forwardMenuMsg = (m: Item) => startForward(chatId, m.groupId ? messages.filter((x) => x.groupId === m.groupId && x.senderId === m.senderId) : [m], nameOf);
 
   return (
     <>
@@ -323,9 +337,11 @@ export function Chat({ chatId, frameKey, active }: { chatId: number; frameKey: s
         sendKey={sendKey}
         placeholder="Сообщение"
         editing={!!editing}
-        replyTo={editing ? { author: 'Редактирование', text: editing.original.text, tone: peerTone(me.userId), icon: 'pencil' } : replyTo ? { author: authorOf(replyTo.senderId), text: replyTo.body, tone: peerTone(replyTo.senderId) } : null}
+        sendEmpty={!!fwdQuote}
+        replyTo={editing ? { author: 'Редактирование', text: editing.original.text, tone: peerTone(me.userId), icon: 'pencil' } : fwdQuote ? fwdQuote : replyTo ? { author: authorOf(replyTo.senderId), text: replyTo.body, tone: peerTone(replyTo.senderId) } : null}
         onCancelReply={() => {
           if (editing) { endEdit(editing.draft); return; } // правку отменили — вернуть черновик
+          if (fwd) { cancelForwardDraft(chatId); return; }
           setReplyKey(null);
         }}
         onChange={onType}
@@ -354,6 +370,7 @@ export function Chat({ chatId, frameKey, active }: { chatId: number; frameKey: s
           saved.current = latest.current = emptyValue();   // черновик очищает сам движок вместе с отправкой
           typingDone(chatId);
           const out = applyMarkdown(v);   // **жирный**, `код`, [текст](ссылка)… — в оформление
+          if (fwd) return sendForwardDraft(chatId, out.text, out.entities);   // комментарий первым, затем пересланное
           const sent = send(chatId, out.text, (replyTo?.id as number) ?? null, out.entities);
           setReplyKey(null);
           return sent;   // поле очистится, когда сообщение встанет в ленту
@@ -374,6 +391,7 @@ export function Chat({ chatId, frameKey, active }: { chatId: number; frameKey: s
                 onClose={() => setMenu(null)}
                 items={[
                   ...(menuMsg.id != null && !menuMsg.deleted && !system ? [{ icon: 'reply', label: 'Ответить', onClick: () => { if (editing) endEdit(editing.draft); setReplyKey(menuMsg.key as string); api.current?.focus({ end: true }); } }] : []),
+                  ...(menuMsg.id != null && !menuMsg.deleted && !menuMsg.service ? [{ icon: 'forward', label: 'Переслать', onClick: () => forwardMenuMsg(menuMsg) }] : []),
                   ...(own && !system ? [{ icon: 'pencil', label: 'Изменить', onClick: () => startEdit(menuMsg) }] : []),
                   ...(menuMsg.id != null && !menuMsg.deleted && !system && !menuMsg.service ? [((chat?.pinned as number[] | undefined) ?? []).includes(menuMsg.id as number)
                     ? { icon: 'pin', label: 'Открепить', onClick: () => void unpinMessage(chatId, menuMsg.id as number) }
@@ -386,6 +404,26 @@ export function Chat({ chatId, frameKey, active }: { chatId: number; frameKey: s
           </>
         );
       })() : null}
+      {fwdMenu && fwd ? (
+        <>
+          <div class="rl-msgmenu-scrim" onClick={() => setFwdMenu(null)} />
+          <div class="rl-msgmenu app-fwdmenu" style={{ left: Math.min(fwdMenu.x, innerWidth - 260), bottom: innerHeight - fwdMenu.y + 6 }}>
+            <Menu
+              label="Параметры пересылки"
+              onClose={() => setFwdMenu(null)}
+              items={[
+                fwd.hideSender
+                  ? { icon: 'eye', label: 'Показать отправителя', onClick: () => patchForwardDraft(chatId, { hideSender: false }) }
+                  : { icon: 'eyeOff', label: 'Скрыть отправителя', onClick: () => patchForwardDraft(chatId, { hideSender: true }) },
+                ...(fwd.preview.captions ? [fwd.hideCaption
+                  ? { icon: 'eye', label: 'Показать подписи', onClick: () => patchForwardDraft(chatId, { hideCaption: false }) }
+                  : { icon: 'eyeOff', label: 'Скрыть подписи', onClick: () => patchForwardDraft(chatId, { hideCaption: true }) }] : []),
+                { icon: 'forward', label: 'Другой чат…', onClick: () => forwardElsewhere(chatId) },
+              ]}
+            />
+          </div>
+        </>
+      ) : null}
       <input ref={picker} type="file" multiple hidden onChange={(e) => offer((e.target as HTMLInputElement).files)} />
       <Presence show={dragging} exitMs={160}><div class="app-drop"><DropOverlay title="Отпустите, чтобы отправить" text="Фото и документы до 50 МБ" /></div></Presence>
       {pending ? (
