@@ -797,20 +797,30 @@ function SidebarHeader(props) {
 function FolderTabs(props) {
   var host = useRef(null), track = useRef(null), top = useRef(null), first = useRef(true);
   var items = props.items || [];
-  useLayoutEffect(function () {
+  // instant: без анимации — первый показ и смена ширины полосы (таблетка не «тянется», а сразу на месте)
+  function place(instant) {
     requestMeasure(function () {
       var tr = track.current, el = tr && tr.querySelector('.rl-tab[aria-selected="true"]');
-      if (!el) return;
+      if (!el || !host.current) return;
       var x = el.offsetLeft, w = el.offsetWidth, tw = tr.offsetWidth, sl = host.current.scrollLeft, cw = host.current.clientWidth;
       requestMutation(function () {
         var s = top.current.style;
-        if (first.current || reducedMotion()) { s.transition = 'none'; first.current = false; } else { s.transition = ''; beginHeavyAnimation(300); }
+        if (instant || first.current || reducedMotion()) { s.transition = 'none'; first.current = false; } else { s.transition = ''; beginHeavyAnimation(300); }
         s.clipPath = 'inset(0 ' + (tw - x - w) + 'px 0 ' + x + 'px round 18px)';
         // активный таб — в зоне видимости полосы
-        if (x < sl || x + w > sl + cw) host.current.scrollTo({ left: x - 24, behavior: reducedMotion() ? 'auto' : 'smooth' });
+        if (!instant && (x < sl || x + w > sl + cw)) host.current.scrollTo({ left: x - 24, behavior: reducedMotion() ? 'auto' : 'smooth' });
       });
     });
-  }, [props.active, items.map(function (t) { return t.id + ':' + (t.count || 0); }).join(',')]);
+  }
+  useLayoutEffect(function () { place(false); }, [props.active, items.map(function (t) { return t.id + ':' + (t.count || 0); }).join(',')]);
+  // ширина полосы меняется (панель тянут за край, окно) — таблетка следует за вкладкой сразу
+  useLayoutEffect(function () {
+    if (typeof ResizeObserver !== 'function' || !track.current) return;
+    var seen = false;
+    var ro = new ResizeObserver(function () { if (seen) place(true); seen = true; });
+    ro.observe(track.current);
+    return function () { ro.disconnect(); };
+  }, []);
   function onKey(e) {
     var i = items.findIndex(function (t) { return t.id === props.active; });
     if (e.key === 'ArrowRight' && i < items.length - 1) props.onChange(items[i + 1].id);
