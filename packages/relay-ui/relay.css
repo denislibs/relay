@@ -1508,9 +1508,13 @@ html[data-blur="0"] .rl-menu, html[data-blur="0"] .rl-attach { -webkit-backdrop-
 .rl-music-text { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
 .rl-music-text b { font: 500 15.5px/21px var(--font-sans); color: var(--ink); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .rl-music-sub { font: 400 14.5px/20px var(--font-sans); color: var(--music-sub, var(--meta, var(--ink-muted))); font-variant-numeric: tabular-nums; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.rl-music-live { display: flex; flex-direction: column; gap: 4px; }
-.rl-music-seek { position: relative; height: 10px; cursor: pointer; }
-.rl-music-seek::before, .rl-music-seek > i { content: ''; position: absolute; left: 0; right: 0; top: 4px; height: 2px; border-radius: 1px; }
+.rl-music-live { display: flex; align-items: center; gap: 10px; height: 20px; }
+.rl-music-live .rl-music-sub { flex: none; }
+.rl-music-seek { position: relative; flex: 1; height: 20px; cursor: pointer; }
+.rl-music-seek::before, .rl-music-seek > i { content: ''; position: absolute; left: 0; right: 0; top: 9px; height: 2px; border-radius: 1px; }
+/* бегунок: обёртка во всю ширину сдвигается на долю своей ширины, точка 12px — у её левого края */
+.rl-music-knob { position: absolute; inset: 0; pointer-events: none; }
+.rl-music-knob > b { position: absolute; left: -6px; top: 4px; width: 12px; height: 12px; border-radius: 50%; background: var(--music-accent); }
 .rl-music-seek::before { background: color-mix(in srgb, var(--music-accent) 25%, transparent); }
 .rl-music-seek > i { background: var(--music-accent); transform: scaleX(0); transform-origin: left; }
 .rl-music-meta { display: flex; justify-content: flex-end; align-items: center; gap: 3px; font: 400 12px/14px var(--font-sans); color: var(--music-sub, var(--meta, var(--ink-muted))); margin-top: -2px; }

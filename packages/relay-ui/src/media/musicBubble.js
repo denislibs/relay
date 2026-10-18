@@ -16,13 +16,15 @@ export function MusicBubble(props) {
   var out = props.from === 'out';
   var pos = props.pos || 'single';
   var st = useState(player.playerState()), s = st[0];
-  var bar = useRef(null), clock = useRef(null);
+  var bar = useRef(null), knob = useRef(null), clock = useRef(null);
   var mine = s.key === props.trackKey;
   useEffect(function () {
     var off = player.subscribe(function (n) { st[1](n); });
     var offTick = player.onTick(function (k, t, d) {
       if (k !== props.trackKey) return;
-      if (bar.current) bar.current.style.transform = 'scaleX(' + (d ? Math.min(1, t / d) : 0) + ')';
+      var f = d ? Math.min(1, t / d) : 0;
+      if (bar.current) bar.current.style.transform = 'scaleX(' + f + ')';
+      if (knob.current) knob.current.style.transform = 'translateX(' + (f * 100) + '%)';
       if (clock.current) { var x = fmt(t); if (clock.current.textContent !== x) clock.current.textContent = x; }
     });
     return function () { off(); offTick(); };
@@ -51,9 +53,10 @@ export function MusicBubble(props) {
         h('div', { class: 'rl-music-text' },
           h('b', { title: props.title }, props.title),
           mine
+            // как в Telegram: при воспроизведении вторая строка — время и полоса с бегунком, той же высоты, что «длительность • исполнитель»
             ? h('div', { class: 'rl-music-live' },
-              h('span', { class: 'rl-music-sub' }, h('span', { ref: clock }, fmt(s.time)), ' / ', fmt(props.duration)),
-              h('div', { class: 'rl-music-seek', onClick: seekAt }, h('i', { ref: bar })))
+              h('span', { class: 'rl-music-sub', ref: clock }, fmt(s.time)),
+              h('div', { class: 'rl-music-seek', onClick: seekAt }, h('i', { ref: bar }), h('span', { class: 'rl-music-knob', ref: knob }, h('b', null))))
             : h('span', { class: 'rl-music-sub' }, fmt(props.duration), props.performer ? ' • ' + props.performer : props.size ? ' • ' + props.size : ''))),
       last ? h('span', { class: 'rl-music-meta' }, props.time, out ? h(MessageStatus, { status: props.status || 'sent' }) : null) : null));
 }
