@@ -3,6 +3,7 @@ import { sql } from '../src/db';
 import { createServer } from '../src/http';
 import { NO_PREVIEW } from '@relay/protocol';
 import { sendMessage } from '../src/domain/messages';
+import { postService, pushService } from '../src/domain/service';
 import { makeChat, makeUser, resetDb } from './helpers';
 
 const server = createServer({ port: 0 });
@@ -229,4 +230,23 @@ test('hideText subscription gets «Relay» / «Новое сообщение»; 
   await sendAndCollect(b, chat);
   expect(await br2.decrypt(got[0].body)).toMatchObject({ title: 'Борис', body: 'секрет' });
   expect((await call(a, 'POST', '/push/subscription', { endpoint: endpoint(32), keys: br2.keys, hideText: 'yes' })).status).toBe(400);
+});
+
+test('service push: login_code is masked, new_login keeps its text', async () => {
+  const a = await makeUser('Анна');
+  const br = await browser();
+  const { subscribe } = await import('../src/domain/push');
+  await subscribe(a, { endpoint: endpoint(1), keys: br.keys }, await sessionFor(a));
+
+  const code = await sql.begin((tx) => postService(tx, a, { type: 'login_code', body: 'Код: 12345' }));
+  pushService(code);
+  await waitFor(1); await Bun.sleep(100);
+  expect(got.length).toBe(1);
+  expect((await br.decrypt(got[0].body)).body).toBe('Код для входа в Relay');
+
+  const login = await sql.begin((tx) => postService(tx, a, { type: 'new_login', body: 'Новый вход' }));
+  pushService(login);
+  await waitFor(2); await Bun.sleep(100);
+  expect(got.length).toBe(2);
+  expect((await br.decrypt(got[1].body)).body).toBe('Новый вход');
 });

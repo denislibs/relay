@@ -2,7 +2,7 @@ import { beforeEach, expect, test } from 'bun:test';
 import { sql } from '../src/db';
 import { isServiceChat, postService, serviceChatId, systemUserId } from '../src/domain/service';
 import { sendMessage } from '../src/domain/messages';
-import { reactMessage } from '../src/domain/messageOps';
+import { editMessage, reactMessage } from '../src/domain/messageOps';
 import { makeUser, resetDb } from './helpers';
 
 beforeEach(resetDb);
@@ -29,5 +29,6 @@ test('service message lands in the journal; the user cannot write or react there
   expect(u.payload.message.service).toEqual({ type: 'new_login' });
 
   await expect(sendMessage(a, { chatId: m.chatId, clientId: crypto.randomUUID(), body: 'ответ' })).rejects.toMatchObject({ code: 'forbidden' });
+  await expect(editMessage(a, m.chatId, m.id, 'правка')).rejects.toMatchObject({ code: 'forbidden' });
   await expect(reactMessage(a, m.chatId, m.id, '👍')).rejects.toMatchObject({ code: 'forbidden' });
 });

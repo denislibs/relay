@@ -7,6 +7,8 @@ export async function resetDb(): Promise<void> {
   await sql`truncate sessions, chats, chat_members, messages, user_seq, updates restart identity cascade`;
   // системного пользователя «Relay» (миграция 108) не трогаем
   await sql`delete from users where not system`;
+  // engine-тесты делают truncate users на общей базе и стирают строку миграции 108 — вернуть, если пропала
+  await sql`insert into users (name, system) select 'Relay', true where not exists (select 1 from users where system)`;
 }
 
 export async function makeUser(name = 'user'): Promise<number> {
