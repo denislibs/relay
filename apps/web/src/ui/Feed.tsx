@@ -224,13 +224,18 @@ export function Feed({ frameKey, active, chatId, meId, peerName, group, onAuthor
       if (max) seen(chatId, max);
     };
     const schedule = () => { if (!readTimer.current) readTimer.current = setTimeout(flush, READ_EVERY); };
+    // низ зоны — верх композера: лента уходит под него на свой нижний отступ (--bottom-zone + 8 px), а он
+    // меняется вместе с высотой композера. Число здесь отрезало последнее сообщение, и оно не читалось никогда.
+    // Чтение стиля до отрисовки — осознанное исключение, как у якоря прокрутки
+    let underComposer = 0;
+    forceMeasure(() => { if (el.current) underComposer = Math.max(0, parseFloat(getComputedStyle(el.current).paddingBottom) - 8); });
     marks.current = new IntersectionObserver((entries) => {
       for (const e of entries) {
         const id = Number((e.target as HTMLElement).dataset.mid);
         if (e.isIntersecting) visible.current.add(id); else visible.current.delete(id);
       }
       schedule();
-    }, { root: el.current, rootMargin: `-${TOP_ZONE}px 0px -80px 0px` });
+    }, { root: el.current, rootMargin: `-${TOP_ZONE}px 0px -${underComposer}px 0px` });
     addEventListener('focus', schedule);
     document.addEventListener('visibilitychange', schedule);
     scheduleRead.current = schedule;
