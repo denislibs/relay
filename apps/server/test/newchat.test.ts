@@ -52,3 +52,16 @@ test('direct: opening twice returns the same chat; self and unknown are rejected
   expect((await post('/chats/direct', a.token, { userId: a.userId })).status).toBe(400);
   expect((await post('/chats/direct', a.token, { userId: 999999 })).status).toBe(404);
 });
+
+test('members: everyone with names, owner is the creator, strangers refused', async () => {
+  const a = await login('Анна'), b = await login('Борис'), c = await login('Вера'), x = await login('Чужой');
+  const { id } = (await (await post('/chats', a.token, { title: 'Дача', memberIds: [b.userId, c.userId] })).json()) as { id: number };
+  const res = await fetch(`${base}/chats/${id}/members`, { headers: as(b.token) });
+  expect(res.status).toBe(200);
+  const body = (await res.json()) as { ownerId: number; members: { userId: number; name: string; online: boolean | null }[] };
+  expect(body.ownerId).toBe(a.userId);
+  expect(body.members.map((m) => m.userId).sort((p, q) => p - q)).toEqual([a.userId, b.userId, c.userId].sort((p, q) => p - q));
+  expect(body.members[0].userId).toBe(b.userId);   // сам зритель «в сети» — сверху
+  expect(body.members.find((m) => m.userId === c.userId)?.name).toBe('Вера');
+  expect((await fetch(`${base}/chats/${id}/members`, { headers: as(x.token) })).status).toBe(403);
+});

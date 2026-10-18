@@ -1,6 +1,7 @@
 import type { ProfileLink } from '@relay/protocol';
 import { ProfileLinks } from './links/ProfileLinks';
 import { SharedMedia } from './SharedMedia';
+import { membersStatus, useMembers } from '../members';
 import { loadProfileMusic, playProfile, type ProfileTrack } from '../music';
 import { Avatar, Icon, InfoRow, PanelHeader, RichText, SettingsIcon, SlideStack, Switch, Verified } from '@relay/ui';
 import type { Item } from '@relay/sync-engine/src/types';
@@ -52,8 +53,9 @@ export function Info() {
 
   const title = (chat?.title as string) || 'Чат №' + chatId;
   const group = chat?.kind === 'group';
+  const members = useMembers(chatId, group);
   const myPeer = peer && chat?.peerId === peer.userId && peer.known ? peer : null;
-  const subtitle = system ? 'служебные уведомления' : group ? 'группа' : myPeer ? lastSeenText(!!myPeer.online, myPeer.lastSeen as string | null) : '';
+  const subtitle = system ? 'служебные уведомления' : group ? (members ? membersStatus(members, false) : 'группа') : myPeer ? lastSeenText(!!myPeer.online, myPeer.lastSeen as string | null) : '';
 
   const addContact = () => setGlobal({ newContact: {
     // запрос — то, что видно человеку: @имя или телефон; нет ни того, ни другого — поле пустое, добавим по id
@@ -70,7 +72,7 @@ export function Info() {
       <EditContactPanel userId={peerId} onDone={() => setPage('info')} />
     ) : (
     <div class="rl-sidepage">
-      <PanelHeader icon="close" closeLabel="Закрыть" title="Информация" onClose={close} action={action} />
+      <PanelHeader icon="close" closeLabel="Закрыть" title={group ? 'Информация о группе' : 'Информация'} onClose={close} action={action} />
       <div class="rl-aside-body">
         <div class="rl-profile">
           <div class="app-prof-ava">
@@ -98,7 +100,7 @@ export function Info() {
             </div>
           ) : null}</Expand>
         </div>
-        <SharedMedia chatId={chatId} />
+        <SharedMedia chatId={chatId} group={group} />
       </div>
     </div>
     )} />

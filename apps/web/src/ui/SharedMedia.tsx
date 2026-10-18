@@ -1,10 +1,12 @@
-import { EmptyState, FolderTabs, Icon, LazyImage, player, SlideStack } from '@relay/ui';
+import { Avatar, EmptyState, FolderTabs, Icon, LazyImage, peerTone, player, SlideStack } from '@relay/ui';
 import type { Item } from '@relay/sync-engine/src/types';
 import { useEffect, useRef, useState } from 'preact/hooks';
 import { chatMedia, chatMediaCounts, focusMessage, type MediaTab } from '../data';
 import { getGlobal, useGlobal } from '../global';
 import { toggleMusic, trackTitle } from '../music';
-import { clock, dayLabel, fileSize } from './format';
+import { clock, dayLabel, fileSize, lastSeenText } from './format';
+import { startDirectChat } from '../data';
+import { useMembers, type Member } from '../members';
 
 // «Общие медиа» в правой панели — как в Telegram: Медиа, Файлы, Ссылки, Музыка, Голосовые.
 // Пустые вкладки не показываем (счётчики с сервера); каждая вкладка — страницами по 40, новые сверху.
@@ -28,9 +30,13 @@ function extTone(ext: string): string {
   return 'blue';
 }
 
-export function SharedMedia({ chatId }: { chatId: number }) {
+type Tab = MediaTab | 'members';
+
+/** group — в группе первая вкладка «Участники» (как в Telegram): панель не бывает пустой. */
+export function SharedMedia({ chatId, group = false }: { chatId: number; group?: boolean }) {
   const [counts, setCounts] = useState<Record<MediaTab, number> | null>(null);
-  const [tab, setTab] = useState<MediaTab | null>(null);
+  const [tab, setTab] = useState<Tab | null>(null);
+  const members = useMembers(chatId, group);
   // счётчики — при открытии и когда в чате появилось новое сообщение
   const lastId = useGlobal((s) => ((s.chats.find((c) => c.id === chatId)?.last as { id?: number } | null)?.id ?? 0));
   useEffect(() => {
@@ -39,10 +45,10 @@ export function SharedMedia({ chatId }: { chatId: number }) {
     return () => { live = false; };
   }, [chatId, lastId]);
   useEffect(() => { setTab(null); }, [chatId]);
-  const tabs = counts ? ORDER.filter((t) => counts[t] > 0) : [];
+  const tabs: Tab[] = [...(group ? ['members' as const] : []), ...(counts ? ORDER.filter((t) => counts[t] > 0) : [])];
   const active = tab && tabs.includes(tab) ? tab : tabs[0] ?? null;
 
-  if (!counts) return <div class="app-sm-loading" aria-busy="true" />;
+  if (!counts && !group) return <div class="app-sm-loading" aria-busy="true" />;
   if (!tabs.length) return (
     <div class="rl-aside-pages app-sm-empty">
       <EmptyState kind="media" title="Здесь пока пусто" text="Фото, файлы, ссылки, музыка и голосовые из этого чата появятся здесь." />
@@ -53,11 +59,11 @@ export function SharedMedia({ chatId }: { chatId: number }) {
       {/* одна непустая вкладка — переключать нечего: вместо одинокой плашки заголовок раздела */}
       {tabs.length > 1 ? (
         <div class="rl-aside-tabs">
-          <FolderTabs label="Общие медиа" active={active} onChange={(id: MediaTab) => setTab(id)} items={tabs.map((t) => ({ id: t, label: LABEL[t] }))} />
+          <FolderTabs label="Общие медиа" active={active} onChange={(id: Tab) => setTab(id)} items={tabs.map((t) => ({ id: t, label: t === 'members' ? 'Участники' : LABEL[t] }))} />
         </div>
-      ) : <h3 class="app-sm-heading">{LABEL[tabs[0]]}</h3>}
+      ) : <h3 class="app-sm-heading">{tabs[0] === 'members' ? 'Участники' : LABEL[tabs[0]]}</h3>}
       <div class="rl-aside-pages">
-        <SlideStack variant="tabs" order={tabs} active={active} render={(k: string) => <TabList key={chatId + k} chatId={chatId} tab={k as MediaTab} />} />
+        <SlideStack variant="tabs" order={tabs} active={active} render={(k: string) => k === 'members' ? <MembersList key={chatId + k} data={members} /> : <TabList key={chatId + k} chatId={chatId} tab={k as MediaTab} />} />
       </div>
     </>
   );
@@ -209,4 +215,27 @@ function senderTitle(senderId: number, me: number | undefined, chat: Item | unde
   const name = senderId === me ? 'Вы' : g.names[senderId] ?? chatTitle;
   if (senderId === me) return `Вы → ${chatTitle}`;
   return chat?.kind === 'group' ? `${name} → ${chatTitle}` : name;
+}
+
+/** Участники группы — как в Telegram: аватар, имя, статус (в сети — цветом), «владелец» справа; клик — личный чат. */
+function MembersList({ data }: { data: { ownerId: number | null; members: Member[] } | null }) {
+  const me = useGlobal((s) => s.me?.userId);
+  if (!data) return <div class="app-sm-loading" aria-busy="true" />;
+  return (
+    <div class="app-members" role="list" aria-label="Участники">
+      {data.members.map((m) => {
+        const self = m.userId === me;
+        const status = self ? 'в сети' : lastSeenText(!!m.online, m.lastSeen);
+        return (
+          <button key={m.userId} type="button" role="listitem" class="rl-row app-member" disabled={self} onClick={() => void startDirectChat(m.userId)}>
+            <Avatar name={m.name} tone={peerTone(m.userId)} size={44} online={!!m.online && !self} />
+            <span class="rl-row-main">
+              <span class="app-member-top"><span class="rl-row-name">{self ? m.name + ' (вы)' : m.name}</span>{m.userId === data.ownerId ? <span class="app-member-badge">владелец</span> : null}</span>
+              <span class={'rl-row-preview' + (m.online || self ? ' app-online' : '')}>{status}</span>
+            </span>
+          </button>
+        );
+      })}
+    </div>
+  );
 }

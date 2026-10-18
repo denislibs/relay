@@ -663,9 +663,17 @@ html[data-anim="0"] .app-chatcol, html[data-anim="0"] .app-chatcol-below, html[d
 .app-newchat-open .app-newchat-close { opacity: 1; transform: none; }
 
 /* ---------- Новая группа ---------- */
-.app-newgroup-head { display: flex; flex-direction: column; align-items: center; gap: var(--space-5, 20px); padding: var(--space-4) var(--space-5, 20px) var(--space-3); }
+.app-newgroup-head { display: flex; justify-content: center; padding: var(--space-4) 0 var(--space-5, 20px); }
 .app-newgroup-photo { display: grid; place-items: center; width: 7.5rem; height: 7.5rem; border-radius: 50%; background: var(--button); color: #fff; }
-.app-newgroup-name { align-self: stretch; }
-.app-newgroup-count { padding: var(--space-3) var(--space-5, 20px) var(--space-1, 4px); }
+.app-newgroup-name { padding: var(--space-2) var(--space-3) 0; }
 .app-newgroup-row { cursor: default; }
 .app-newgroup-busy { display: inline-grid; place-items: center; }
+
+/* участники группы в «Информации» — как в Telegram: аватар 44, имя и «владелец» справа, статус (в сети — цветом) */
+.app-members { display: flex; flex-direction: column; padding: .5rem; }
+.app-member { width: 100%; border: 0; background: none; text-align: left; cursor: pointer; }
+.app-member:disabled { cursor: default; }
+.app-member-top { display: flex; align-items: center; justify-content: space-between; gap: 8px; min-width: 0; }
+.app-member-badge { flex: none; font: 400 13px/18px var(--font-sans); color: var(--peer-2, var(--brand-text)); }
+/* пустая вкладка/панель без медиа — текст под вкладками, по центру по горизонтали (не по вертикали) */
+.app-sm-empty { display: flex; justify-content: center; align-items: flex-start; padding-top: 3rem; text-align: center; }

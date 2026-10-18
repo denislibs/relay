@@ -1,4 +1,4 @@
-import { Avatar, ContactPicker, EmptyState, Fab, Icon, PanelHeader, Presence, ProgressRing, TextField, peerTone } from '@relay/ui';
+import { Avatar, ContactPicker, EmptyState, Fab, Icon, PanelHeader, Presence, ProgressRing, Section, TextField, peerTone } from '@relay/ui';
 import { useEffect, useState } from 'preact/hooks';
 import { createGroup, openChat } from '../../data';
 import { getGlobal, setGlobal, useGlobal } from '../../global';
@@ -89,23 +89,27 @@ export function NewGroupName() {
   return (
     <div class="rl-sidepage" aria-label="Новая группа">
       <PanelHeader icon="arrowLeft" closeLabel="Назад" title="Новая группа" onClose={() => void back()} />
-      <div class="rl-page-scroll app-newgroup">
+      {/* как страницы настроек: серый фон, белые карточки; фото — по центру, поле названия — на всю ширину карточки */}
+      <div class="rl-settings app-newgroup">
         <div class="app-newgroup-head">
           <span class="app-newgroup-photo" aria-hidden="true"><Icon name="community" size={44} /></span>
+        </div>
+        <Section>
           <form class="app-newgroup-name" onSubmit={(e) => { e.preventDefault(); void create(); }}>
             <TextField label="Название группы" value={title} maxLength={GROUP_TITLE_MAX} autoFocus error={err ?? undefined}
               onInput={(v: string) => setTitle(v)} />
           </form>
-        </div>
-        <div class="rl-settings-caption app-newgroup-count">{members.length + 1} {plural(members.length + 1)}</div>
-        <div role="list" class="app-newgroup-list">
-          {members.map((m) => (
-            <div key={m.id} role="listitem" class="rl-row app-newgroup-row">
-              <Avatar name={m.name} tone={peerTone(m.id)} size={42} />
-              <span class="rl-row-main"><span class="rl-row-name">{m.name}</span><span class="rl-row-preview">{m.about}</span></span>
-            </div>
-          ))}
-        </div>
+        </Section>
+        <Section title={`${members.length + 1} ${plural(members.length + 1)}`}>
+          <div role="list">
+            {members.map((m) => (
+              <div key={m.id} role="listitem" class="rl-row app-newgroup-row">
+                <Avatar name={m.name} tone={peerTone(m.id)} size={42} />
+                <span class="rl-row-main"><span class="rl-row-name">{m.name}</span><span class="rl-row-preview">{m.about}</span></span>
+              </div>
+            ))}
+          </div>
+        </Section>
       </div>
       <Presence show={!!title.trim()} exitMs={200}>
         <div class="rl-fab-slot">

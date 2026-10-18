@@ -10,7 +10,7 @@ import { createChat, createGroup, openDirect, messageAtDate, getChatMedia, getCh
 import { sql } from './db';
 import { DomainError } from './domain/errors';
 import { processAlive } from './domain/liveRegistry';
-import { connected, disconnected, listPresence, type Publish } from './domain/presence';
+import { chatMembers, connected, disconnected, listPresence, type Publish } from './domain/presence';
 import { searchMessages } from './domain/search';
 import { confirmUpload, createUpload, downloadTtl, fileFor, signedDownload } from './domain/files';
 import { handleFrame } from './ws';
@@ -298,6 +298,8 @@ export function createServer(opts: { port: number }): Server {
             unreadOnly: url.searchParams.get('unread') === '1',
           }));
         }
+        const mem = /^\/chats\/(\d+)\/members$/.exec(url.pathname);
+        if (req.method === 'GET' && mem) return Response.json(await chatMembers(userId, Number(mem[1])));
         const hist = /^\/chats\/(\d+)\/messages$/.exec(url.pathname);
         if (req.method === 'GET' && hist) {
           const from = url.searchParams.get('from');   // «Перейти к дате»
