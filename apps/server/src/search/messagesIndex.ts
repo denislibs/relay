@@ -67,3 +67,50 @@ export async function searchReady(): Promise<boolean> {
   const [r] = await sql`select v from server_meta where k = 'search_index'`;
   return r?.v === String(SEARCH_INDEX_VERSION);
 }
+
+/** Удалить индекс, если он есть: для несуществующего Meilisearch отвечает 202, а падает уже сама задача. */
+async function dropIndex(uid: string): Promise<void> {
+  try {
+    await waitTask((await meili<{ taskUid: number }>(`/indexes/${uid}`, { method: 'DELETE' })).taskUid);
+  } catch (e) {
+    if (!(e instanceof MeiliError && e.code === 'index_not_found')) throw e;
+  }
+}
+
+/**
+ * Полная перестройка: новый индекс рядом с живым, пока старый отвечает на запросы. На время копирования
+ * search.sync пишет в оба (server_meta.search_building), поэтому изменения во время копирования не теряются.
+ * Затем swap и удаление старого. Редкий случай: правка, пришедшая между чтением страницы и её записью,
+ * может быть перезаписана старым текстом — исправится следующим изменением сообщения или перестройкой.
+ */
+export async function reindexAll(batch = 1000): Promise<number> {
+  const live = liveIndex(), next = live + '_next';
+  await dropIndex(next);
+  await ensureIndex(live);                       // для swap нужны оба
+  await ensureIndex(next);
+  await sql`insert into server_meta (k, v) values ('search_building', ${next}) on conflict (k) do update set v = excluded.v`;
+  let count = 0;
+  try {
+    for (let after = 0; ;) {
+      const rows = await sql`select id, chat_id, body, deleted, service_type, attachment from messages where id > ${after} order by id limit ${batch}`;
+      if (!rows.length) break;
+      after = Number(rows[rows.length - 1].id);
+      const docs = rows.map(docOf).filter((d): d is Doc => d !== null);
+      if (docs.length) await waitTask((await meili<{ taskUid: number }>(`/indexes/${next}/documents`, { method: 'POST', body: docs })).taskUid, 120_000);
+      count += docs.length;
+    }
+    await waitTask((await meili<{ taskUid: number }>('/swap-indexes', { method: 'POST', body: [{ indexes: [live, next] }] })).taskUid);
+    await dropIndex(next);
+    await sql`insert into server_meta (k, v) values ('search_index', ${String(SEARCH_INDEX_VERSION)}) on conflict (k) do update set v = excluded.v`;
+  } finally {
+    await sql`delete from server_meta where k = 'search_building'`;
+  }
+  return count;
+}
+
+/** Воркер при старте: индекс не той версии (или его нет) — одна задача перестройки на систему. */
+export async function scheduleReindexIfStale(): Promise<void> {
+  if (await searchReady()) return;
+  const { enqueue } = await import('../jobs/queue');
+  await enqueue(sql, 'search.reindex', {}, { dedupeKey: 'search.reindex', maxAttempts: 5 });
+}

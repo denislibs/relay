@@ -3,7 +3,7 @@ import { sql } from '../src/db';
 import { sendMessage } from '../src/domain/messages';
 import { deleteMessage, editMessage } from '../src/domain/messageOps';
 import { indexName, meili, MeiliError, waitTask } from '../src/search/meili';
-import { ensureIndex, liveIndex, searchIds, syncMessage } from '../src/search/messagesIndex';
+import { ensureIndex, liveIndex, reindexAll, searchIds, searchReady, syncMessage } from '../src/search/messagesIndex';
 import { makeChat, makeUser, resetDb } from './helpers';
 
 const say = (u: number, chatId: number, body: string) => sendMessage(u, { chatId, clientId: crypto.randomUUID(), body }).then((r) => r.message);
@@ -62,4 +62,19 @@ test('login codes are never indexed; file names are', async () => {
   await syncMessage(Number(file.id));
   expect(await searchIds('482913', [ab], { limit: 10 })).toEqual([]);
   expect(await searchIds('отчёт', [ab], { limit: 10 })).toEqual([Number(file.id)]);
+});
+
+test('reindex builds a fresh index beside the live one, swaps it in and marks the index ready', async () => {
+  const a = await makeUser('a'), b = await makeUser('b');
+  const ab = await makeChat([a, b]);
+  const m1 = await say(a, ab, 'старая встреча');
+  const gone = await say(a, ab, 'встреча удалена');
+  await deleteMessage(a, ab, gone.id);
+  expect(await searchReady()).toBe(false);
+  expect(await reindexAll(1)).toBe(1);                 // батч из одного — проверяем постраничное копирование
+  expect(await searchReady()).toBe(true);
+  expect(await searchIds('встреч', [ab], { limit: 10 })).toEqual([m1.id]);
+  const indexes = await meili<{ results: { uid: string }[] }>('/indexes?limit=100');
+  expect(indexes.results.map((i) => i.uid).filter((u) => u.startsWith('relay_test_messages'))).toEqual(['relay_test_messages']);
+  expect((await sql`select count(*)::int as n from server_meta where k = 'search_building'`)[0].n).toBe(0);
 });
