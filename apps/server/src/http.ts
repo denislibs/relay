@@ -1,4 +1,5 @@
 import { MEDIA_TABS, parseClientFrame, type MediaTab } from '@relay/protocol';
+import { searchMedia, searchPeople, topPeers } from './domain/globalSearch';
 import { createBus } from './bus';
 import { clientIp } from './device';
 import type { Server } from 'bun';
@@ -284,6 +285,15 @@ export function createServer(opts: { port: number }): Server {
           }
           return Response.json({ ok: true });
         }
+        // глобальный поиск: вкладки медиа по всем чатам, люди, частые собеседники
+        if (req.method === 'GET' && url.pathname === '/search/media') {
+          const kind = url.searchParams.get('kind') as MediaTab;
+          if (!MEDIA_TABS.includes(kind)) return fail('bad_frame');
+          const before = Number(url.searchParams.get('before'));
+          return Response.json(await searchMedia(userId, kind, { q: url.searchParams.get('q') ?? '', before: Number.isInteger(before) && before > 0 ? before : undefined }));
+        }
+        if (req.method === 'GET' && url.pathname === '/search/people') return Response.json(await searchPeople(userId, url.searchParams.get('q') ?? ''));
+        if (req.method === 'GET' && url.pathname === '/search/top') return Response.json(await topPeers(userId));
         if (req.method === 'GET' && url.pathname === '/search') {
           // ?q=текст[&chatId=N][&beforeId=M][&limit=K]
           const num = (k: string) => { const v = Number(url.searchParams.get(k)); return Number.isInteger(v) && v > 0 ? v : undefined; };

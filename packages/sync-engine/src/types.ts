@@ -193,5 +193,7 @@ export interface EngineConfig {
 export const PENDING_BASE = 2 ** 52;
 
 /** Результат поиска: сообщение и где оно (для перехода). source — откуда ответ (без сети ищем локально). */
-export interface SearchHit { chatId: number; chatTitle: string | null; id: number; sort: number; senderId: number; body: string; createdAt: string; service?: { type: ServiceType } }
+export interface SearchHit { chatId: number; chatTitle: string | null; id: number; sort: number; senderId: number; body: string; createdAt: string; service?: { type: ServiceType };
+  /** для строки результата: миниатюра/тип вложения и форматирование (спойлеры не раскрываем) */
+  kind?: string; attachment?: LocalAttachment | null; entities?: Entity[] | null }
 export interface SearchResult { hits: SearchHit[]; hasMore: boolean; source: 'server' | 'local' }

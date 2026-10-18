@@ -456,7 +456,7 @@ export class Engine {
         if (a.beforeId) qs.set('beforeId', String(a.beforeId));
         const res = await this.http<{ hits: { message: Message; chatTitle: string | null }[]; hasMore: boolean }>(`/search?${qs}`);
         return {
-          hits: res.hits.map(({ message: m, chatTitle }) => ({ chatId: m.chatId, chatTitle: chatTitle ?? this.store.chats.get(m.chatId)?.title ?? null, id: m.id, sort: m.id, senderId: m.senderId, body: m.body, createdAt: m.createdAt, ...(m.service ? { service: m.service } : {}) })),
+          hits: res.hits.map(({ message: m, chatTitle }) => ({ chatId: m.chatId, chatTitle: chatTitle ?? this.store.chats.get(m.chatId)?.title ?? null, id: m.id, sort: m.id, senderId: m.senderId, body: m.body, createdAt: m.createdAt, kind: m.kind, attachment: m.attachment ?? null, entities: m.entities ?? null, ...(m.service ? { service: m.service } : {}) })),
           hasMore: res.hasMore, source: 'server',
         };
       } catch { /* сеть пропала посреди запроса — ищем локально */ }
@@ -467,7 +467,7 @@ export class Engine {
       .filter((m) => m.id != null && !m.deleted && (!a.beforeId || m.id < a.beforeId) && m.body.toLowerCase().includes(needle))
       .sort((x, y) => y.sort - x.sort);
     return {
-      hits: found.slice(0, limit).map((m) => ({ chatId: m.chatId, chatTitle: this.store.chats.get(m.chatId)?.title ?? null, id: m.id!, sort: m.sort, senderId: m.senderId, body: m.body, createdAt: m.createdAt, ...(m.service ? { service: m.service } : {}) })),
+      hits: found.slice(0, limit).map((m) => ({ chatId: m.chatId, chatTitle: this.store.chats.get(m.chatId)?.title ?? null, id: m.id!, sort: m.sort, senderId: m.senderId, body: m.body, createdAt: m.createdAt, kind: m.kind, attachment: (m.attachment as never) ?? null, entities: m.entities ?? null, ...(m.service ? { service: m.service } : {}) })),
       hasMore: found.length > limit, source: 'local',
     };
   }
