@@ -63,3 +63,23 @@ export async function pushBrowser() {
     },
   };
 }
+
+// ---- вложения: подписанный PUT прямо в S3 и подтверждение ----
+export type UploadMetaInput = { name: string; mime: string; size?: number; w?: number; h?: number; kind?: string; duration?: number; waveform?: string };
+
+/** Шаг 1 (выдача ссылки) — ответ как есть. */
+export const uploadIntent = (base: string, token: string, meta: UploadMetaInput) =>
+  fetch(`${base}/uploads`, { method: 'POST', headers: { cookie: `relay_session=${token}`, 'content-type': 'application/json' }, body: JSON.stringify(meta) });
+
+/** Полный путь клиента: ссылка → PUT в хранилище с выданным типом → подтверждение. Возвращает ответ подтверждения (вложение). */
+export async function uploadFile(base: string, token: string, meta: Omit<UploadMetaInput, 'size'>, body: Uint8Array | string): Promise<Record<string, unknown>> {
+  const bytes = typeof body === 'string' ? new TextEncoder().encode(body) : body;
+  const res = await uploadIntent(base, token, { ...meta, size: bytes.length });
+  if (!res.ok) throw new Error(`intent ${res.status} ${await res.text()}`);
+  const { id, url, mime } = (await res.json()) as { id: string; url: string; mime: string };
+  const put = await fetch(url, { method: 'PUT', body: bytes, headers: { 'content-type': mime } });
+  if (!put.ok) throw new Error(`put ${put.status}`);
+  const ok = await fetch(`${base}/uploads/${id}/confirm`, { method: 'POST', headers: { cookie: `relay_session=${token}` } });
+  if (!ok.ok) throw new Error(`confirm ${ok.status} ${await ok.text()}`);
+  return (await ok.json()) as Record<string, unknown>;
+}

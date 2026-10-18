@@ -1,0 +1,12 @@
+{
+  "identities": [
+    {
+      "name": "relay",
+      "credentials": [{ "accessKey": "relaydev", "secretKey": "relaydevsecret" }],
+      "actions": [
+        "Read:relay-files", "Write:relay-files", "List:relay-files", "Admin:relay-files",
+        "Read:relay-test", "Write:relay-test", "List:relay-test", "Admin:relay-test"
+      ]
+    }
+  ]
+}

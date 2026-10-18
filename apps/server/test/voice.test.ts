@@ -4,9 +4,8 @@ import { getUpdates } from '../src/domain/journal';
 import { getHistory } from '../src/domain/chats';
 import { markListened } from '../src/domain/messageOps';
 import { sendMessage } from '../src/domain/messages';
-import { resetDb } from './helpers';
+import { resetDb, uploadFile } from './helpers';
 
-process.env.FILES_DIR = '/tmp/relay-test-files';
 const server = createServer({ port: 0 });
 const base = `http://localhost:${server.port}`;
 afterAll(() => server.stop(true));
@@ -18,8 +17,12 @@ const wave = Buffer.from(Array.from({ length: 63 }, (_, i) => i * 4)).toString('
 async function chatOf(a: { userId: number; token: string }, b: { userId: number }) {
   return ((await (await fetch(`${base}/dev/chats`, { method: 'POST', headers: as(a.token), body: JSON.stringify({ kind: 'direct', title: null, memberIds: [a.userId, b.userId] }) })).json()) as { id: number }).id;
 }
-const upload = async (t: string, qs: string, mime: string, body: Uint8Array) =>
-  (await (await fetch(`${base}/upload?${qs}`, { method: 'POST', headers: { ...as(t), 'content-type': mime }, body })).json()) as Record<string, unknown>;
+/** qs — как прежние параметры /upload: name=…&kind=…&duration=…; тело уходит по подписанной ссылке */
+const upload = (t: string, qs: string, mime: string, body: Uint8Array) => {
+  const p = Object.fromEntries(new URLSearchParams(qs));
+  const n = (k: string) => (p[k] ? Number(p[k]) : undefined);
+  return uploadFile(base, t, { name: p.name, mime, kind: p.kind, waveform: p.waveform, duration: n('duration'), w: n('w'), h: n('h') }, body);
+};
 
 test('voice and round uploads keep duration and waveform; wrong types or durations fall back to a plain file', async () => {
   const a = await login('Анна');
@@ -52,7 +55,7 @@ test('a voice message is listened once by the recipient; everyone hears about it
   await expect(markListened(b.userId, chat, text.message.id)).rejects.toMatchObject({ code: 'bad_frame' });
 });
 
-test('media files are served in ranges (seeking in audio and video)', async () => {
+test('media files are served in ranges through the signed link (seeking in audio and video)', async () => {
   const a = await login('Анна');
   const body = new Uint8Array(1000).map((_, i) => i % 256);
   const up = await upload(a.token, 'name=video.mp4&kind=round&duration=3&w=400&h=400', 'video/mp4', body);

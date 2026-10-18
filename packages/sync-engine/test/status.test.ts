@@ -323,7 +323,6 @@ test('search: server when online, cached messages when offline', async () => {
 });
 
 test('sendFile: the blob waits in IndexedDB, uploads when online, the message carries the attachment', async () => {
-  process.env.FILES_DIR = '/tmp/relay-test-files';
   const a = await srv.login('a'), b = await srv.login('b');
   const chatId = await srv.chat(a.token, [a.userId, b.userId]);
   const ea = await open(srv.config(a)), eb = await open(srv.config(b));
