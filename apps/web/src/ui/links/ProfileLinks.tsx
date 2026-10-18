@@ -5,7 +5,7 @@ import { LINK_TITLE } from './LinkEdit';
 import { ServiceIcon } from './ServiceIcon';
 
 const STACK = 3;          // сколько значков видно в свёрнутой строке; всего — в счётчике рядом
-const FLY_MS = 420, STEP_MS = 70, CLOSE_TURN_MS = 150, SHIFT_MS = 220, EASE = 'cubic-bezier(.22, .9, .3, 1)';
+const FLY_MS = 420, STEP_MS = 70, CLOSE_TURN_MS = 70, CLOSE_FLY_MS = 300, SHIFT_MS = 160, EASE = 'cubic-bezier(.22, .9, .3, 1)';
 
 /** Одна ссылка — строка как @username: значок сервиса, адрес, название сервиса; клик открывает сайт. */
 function LinkRow({ link }: { link: ProfileLink }) {
@@ -21,7 +21,7 @@ function LinkRow({ link }: { link: ProfileLink }) {
  * Полёт значка между стопкой в заголовке и строкой списка: копия в body (список обрезан своей высотой,
  * копию это не касается), оригиналы на время полёта скрыты. Возвращает обещание конца полёта.
  */
-function fly(from: HTMLElement, to: HTMLElement, delay: number, fromRect?: DOMRect): Promise<void> {
+function fly(from: HTMLElement, to: HTMLElement, delay: number, fromRect?: DOMRect, opts: { duration?: number; fade?: boolean } = {}): Promise<void> {
   const a = fromRect ?? from.getBoundingClientRect(), b = to.getBoundingClientRect();
   const ghost = from.cloneNode(true) as HTMLElement;
   const radius = getComputedStyle(from).borderRadius, radiusTo = getComputedStyle(to).borderRadius;
@@ -29,9 +29,9 @@ function fly(from: HTMLElement, to: HTMLElement, delay: number, fromRect?: DOMRe
   document.body.appendChild(ghost);
   const k = b.width / a.width;
   const anim = ghost.animate([
-    { transform: 'translate(0, 0) scale(1)', borderRadius: radius },
-    { transform: `translate(${b.left - a.left}px, ${b.top - a.top}px) scale(${k})`, borderRadius: radiusTo },
-  ], { duration: FLY_MS, delay, easing: EASE, fill: 'both' });
+    { transform: 'translate(0, 0) scale(1)', borderRadius: radius, opacity: 1 },
+    { transform: `translate(${b.left - a.left}px, ${b.top - a.top}px) scale(${k})`, borderRadius: radiusTo, opacity: opts.fade ? 0 : 1 },   // fade — растворяется в стопке
+  ], { duration: opts.duration ?? FLY_MS, delay, easing: EASE, fill: 'both' });
   return anim.finished.then(() => ghost.remove(), () => ghost.remove());
 }
 
@@ -97,28 +97,26 @@ export function ProfileLinks({ links }: { links: ProfileLink[] }) {
       const at = i * CLOSE_TURN_MS;
       const ic = icon(r);
       anims.push(text(r).animate([{ opacity: 1 }, { opacity: 0 }], { duration: 140, delay: at, easing: 'ease', fill: 'forwards' }));
-      if (i < stack.length) {
-        flights.push(new Promise((done) => setTimeout(() => {
-          void fly(ic, stack[i], 0, first).then(() => { stack[i].style.visibility = 'visible'; done(); });
-          ic.style.visibility = 'hidden';
-        }, at)));
-      } else {
-        anims.push(ic.animate([{ opacity: 1, transform: 'none' }, { opacity: 0, transform: 'scale(.6)' }], { duration: 180, delay: at, easing: EASE, fill: 'forwards' }));
-      }
+      // не поместившиеся в стопку летят под последний её значок и растворяются там
+      const slot = Math.min(i, stack.length - 1), extra = i >= stack.length;
+      flights.push(new Promise((done) => setTimeout(() => {
+        void fly(ic, stack[slot], 0, first, { duration: CLOSE_FLY_MS, fade: extra }).then(() => { if (!extra) stack[slot].style.visibility = 'visible'; done(); });
+        ic.style.visibility = 'hidden';
+      }, at)));
       // строки ниже поднимаются на освободившееся место
       for (let j = i + 1; j < rows.length; j++) {
-        anims.push(rows[j].animate([{ transform: `translateY(${-rowH * i}px)` }, { transform: `translateY(${-rowH * (i + 1)}px)` }], { duration: SHIFT_MS, delay: at + 60, easing: EASE, fill: 'forwards' }));
+        anims.push(rows[j].animate([{ transform: `translateY(${-rowH * i}px)` }, { transform: `translateY(${-rowH * (i + 1)}px)` }], { duration: SHIFT_MS, delay: at + 30, easing: EASE, fill: 'forwards' }));
       }
     });
+    // список схлопывается, пока последний значок ещё в полёте (строки к этому времени уже уехали)
+    setTimeout(() => { rows.forEach((r) => { r.style.opacity = '0'; }); setOpen(false); }, (rows.length - 1) * CLOSE_TURN_MS + 60);
     void Promise.all(flights).then(() => {
-      rows.forEach((r) => { r.style.opacity = '0'; });
-      setOpen(false);
       setTimeout(() => {
         anims.forEach((a) => a.cancel());
         rows.forEach((r) => { r.style.opacity = ''; icon(r).style.visibility = ''; });
         stack.forEach((s) => { s.style.visibility = ''; });
         busy.current = false;
-      }, 380);
+      }, 200);
     });
   };
 
