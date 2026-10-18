@@ -4,7 +4,9 @@ import { ensurePeriodic } from './jobs/queue';
 import { startWorker } from './jobs/worker';
 import { scheduleReindexIfStale } from './search/messagesIndex';
 
-await ensurePeriodic('sessions.sweep');   // одна на всю систему, сколько бы воркеров ни было
+// одна на всю систему, сколько бы воркеров ни было
+await ensurePeriodic('sessions.sweep');
+await ensurePeriodic('uploads.sweep');
 // индекс поиска не той версии или ещё не построен — перестройка (до её конца поиск идёт по Postgres)
 await scheduleReindexIfStale().catch((e) => console.error('search: cannot schedule reindex:', e));
 
