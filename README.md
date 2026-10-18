@@ -7,7 +7,8 @@ docker compose up --build          # postgres + S3 (SeaweedFS, :8333) + мигр
 docker compose --profile test run --rm test        # серверные тесты на базе relay_test и бакете relay-test
 docker compose --profile test run --rm test-engine # тесты движка синхронизации (fake-indexeddb + настоящий сервер)
 docker compose --profile test run --rm test bun test test/e2e.test.ts   # один файл
-docker compose --profile tools run --rm migrate-files   # перенос вложений со старого тома /data/files в бакет (--dry-run — посчитать)
+docker compose --profile tools run --rm migrate-files   # перенос вложений со старого тома /data/files в бакет
+docker compose --profile tools run --rm migrate-files bun apps/server/src/migrateFiles.ts --dry-run   # только посчитать
 docker compose down -v             # остановить и удалить данные
 ```
 

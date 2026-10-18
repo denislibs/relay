@@ -1,6 +1,7 @@
 // Перенос вложений с прежнего тома (FILES_DIR/<id>) в бакет S3 (ключ = id).
 //   docker compose --profile tools run --rm migrate-files            перенести
-//   docker compose --profile tools run --rm migrate-files --dry-run  только посчитать
+//   docker compose --profile tools run --rm migrate-files bun apps/server/src/migrateFiles.ts --dry-run   только посчитать
+//   (аргументы после имени сервиса заменяют его команду целиком)
 // Идемпотентен: объект, который уже лежит в бакете с тем же размером, пропускается, поэтому прерванный перенос
 // можно запустить снова. Том не трогаем — удалить его (docker volume rm <project>_files) можно после проверки.
 import { existsSync, statSync } from 'node:fs';
