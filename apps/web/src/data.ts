@@ -5,6 +5,7 @@ import type { Entity } from '@relay/protocol';
 import { activeFrame, frameByKey, getGlobal, setGlobal, type ChatFrame, type FeedMeta, type Me, type Status } from './global';
 import { bindChatDepth, popChats, pushChat } from './nav';
 import { notifyIncoming, startNotify } from './notify';
+import { isSystemChat } from './ui/format';
 
 declare const __BUILD__: string;
 
@@ -38,11 +39,11 @@ export function startData(me: Me): void {
     seen = new Map(chats.list().map((c) => [c.id as number, ((c.last as { id?: number } | null)?.id ?? 0)]));
     // новое чужое сообщение в чате, который уже знали (первый снимок из IndexedDB — не новость)
     if (before) for (const c of chats.list()) {
-      const last = c.last as { id: number | null; senderId: number; body: string; kind?: string; attachment?: { name: string } | null; createdAt: string } | null;
+      const last = c.last as { id: number | null; senderId: number; body: string; kind?: string; attachment?: { name: string } | null; createdAt: string; service?: { type: string } } | null;
       if (!last?.id || last.senderId === me.userId || last.id <= (before.get(c.id as number) ?? 0)) continue;
       if (c.id === getGlobal().openChatId && document.visibilityState === 'visible') continue;
       notifyIncoming({ id: c.id as number, title: (c.title as string) || 'Чат №' + c.id, muted: getGlobal().muted.includes(c.id as number) },
-        { id: last.id, body: last.body, kind: last.kind, attachmentName: last.attachment?.name, createdAt: last.createdAt });
+        { id: last.id, body: last.body, kind: last.kind, attachmentName: last.attachment?.name, createdAt: last.createdAt, service: last.service });
     }
     // сразу, не дожидаясь конца анимаций: список виртуальный (≈20 строк), а отложенный подъём чата
     // после отправки выглядит как запоздалый рывок
@@ -100,7 +101,8 @@ function watchPeer(chatId: number | null): void {
   const chat = chatId ? getGlobal().chats.find((c) => c.id === chatId) : undefined;
   // чата ещё нет в списке (открыт по #chat= до загрузки списка) — решим, когда список придёт
   if (chat) peerFor = chatId;
-  const peerId = chat?.peerId as number | null | undefined;
+  // у служебного чата «Relay» присутствия нет — подзаголовок постоянный, подписка не нужна
+  const peerId = isSystemChat(chat) ? null : chat?.peerId as number | null | undefined;
   if (!peerId) { setGlobal({ peer: null }); return; }
   const m = new Mirror();
   peerWatch = engine.watch({ kind: 'presence', userId: peerId }, (p: Patch) => { m.apply(p); setGlobal({ peer: (m.list()[0] as Item) ?? null }); });

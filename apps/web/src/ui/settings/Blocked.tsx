@@ -5,6 +5,7 @@ import { useGlobal } from '../../global';
 import { back } from '../../nav';
 import { blockUser, registerPrefetch, unblockUser } from '../../settingsData';
 import { candidates } from './privacyLogic';
+import { isSystemChat } from '../format';
 
 // список живёт в движке (подписка blocked с запуска): предзагружать нечего
 registerPrefetch('settings/privacy/blocked', () => {});
@@ -25,7 +26,8 @@ export function Blocked() {
   const waiting = !loaded && !list.length && phase !== 'offline';
   const skeleton = useMinVisible(waiting, { delay: 150, min: 600 });
   const ids = new Set(list.map((b) => b.userId as number));
-  const people = candidates(contacts, chats, me).filter((p) => !ids.has(p.id));
+  // «Relay» (служебный чат) в кандидаты не попадает: системного пользователя не блокируют
+  const people = candidates(contacts, chats.filter((c) => !isSystemChat(c)), me).filter((p) => !ids.has(p.id));
 
   return (
     <div class="rl-sidepage" aria-label="Заблокированные">

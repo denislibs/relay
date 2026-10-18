@@ -123,3 +123,9 @@ export function chatTone(chat: Record<string, unknown> | null | undefined): numb
   const id = (chat?.peerId as number | null | undefined) ?? (chat?.id as number | undefined);
   return id == null ? undefined : peerTone(id);
 }
+
+/** Личный чат с системным пользователем «Relay». */
+export const isSystemChat = (chat: Record<string, unknown> | null | undefined): boolean => !!(chat?.peer as { system?: boolean } | null)?.system;
+
+/** Код входа в превью и уведомлениях: цифры кода — точками. */
+export const hideCode = (text: string): string => text.replace(/\d{5}/, '•••••');

@@ -5,6 +5,7 @@ import { memo } from 'preact/compat';
 import { useEffect, useLayoutEffect, useRef, useState } from 'preact/hooks';
 import { clearFocus, ensureNames, focusMessage, localPreview, moveWindow, react, savePosition, savedPosition, seen } from '../data';
 import { frameByKey, useGlobal } from '../global';
+import { showToast } from '../settingsData';
 import { clock, dayKey, dayLabel, fileSize } from './format';
 
 /*
@@ -337,14 +338,27 @@ export function Feed({ frameKey, active, chatId, meId, peerName, group, onAuthor
     return () => clearTimeout(t);
   }, [flashKey]);
 
-  // клик по цитате — к исходному сообщению
+  // клик по цитате — к исходному сообщению; по моноширинному фрагменту (код входа) — копировать его.
+  // Делегирование: один обработчик на ленту, а не на каждый бабл
   const onClick = (e: MouseEvent) => {
+    if (copyCode(e)) return;
     const quote = (e.target as Element).closest('.rl-quote');
     const row = quote?.closest<HTMLElement>('.app-msg');
     if (!row) return;
     const m = messages.find((x) => x.key === row.dataset.key);
     const r = m?.reply as Quote | null | undefined;
     if (r) focusMessage({ id: r.id, sort: r.sort });
+  };
+
+  // моноширинный фрагмент (не блок кода): клик копирует. Ссылку и скрытый спойлер не перехватываем —
+  // у них свой клик (переход, раскрытие); выделение текста мышью — тоже не клик по коду
+  const copyCode = (e: MouseEvent): boolean => {
+    const t = e.target as Element;
+    const code = t.closest('.rl-bubble code.rl-code');
+    if (!code || e.defaultPrevented || t.closest('a') || t.closest('.rl-spoiler:not(.rl-spoiler-open)')) return false;
+    if (getSelection()?.toString()) return false;
+    navigator.clipboard?.writeText(code.textContent ?? '').then(() => showToast('Код скопирован')).catch(() => { /* буфер недоступен */ });
+    return true;
   };
 
   // реакция под баблом: своя — снять, чужая — поставить такую же

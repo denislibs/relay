@@ -21,6 +21,7 @@ export interface LocalMessage {
   entities?: Entity[];    // оформление текста
   progress?: number;      // загрузка файла 0..1, пока сообщение в очереди
   error?: string;         // почему не отправлено (failed): 'blocked' — собеседник заблокировал отправителя
+  service?: { type: 'login_code' | 'new_login' };   // служебное сообщение от «Relay»
 }
 
 /** Вложение сообщения; у неотправленного id пустой, пока файл не загружен. */
@@ -36,6 +37,7 @@ export interface LocalChat {
   peerReadUpTo: number;   // до какого id собеседники прочитали мои сообщения
   historyComplete: boolean;
   peerId: number | null;  // собеседник личного чата
+  system?: true;          // собеседник — системный пользователь «Relay» (служебный чат)
   named: boolean;         // название пришло со снимка (иначе чат узнали из сообщения)
   last: LocalMessage | null;
   lastAt: string;

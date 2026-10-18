@@ -1,4 +1,5 @@
 import type { ComponentChildren } from 'preact';
+import { hideCode } from './format';
 
 /** Превью последнего сообщения в строке чата — по правилам Telegram:
  *  оформление снимается, спойлер скрыт (настоящий текст в DOM не попадает), переносы — пробелы, не длиннее 200 знаков. */
@@ -6,7 +7,7 @@ import type { ComponentChildren } from 'preact';
 type Ent = { type: string; offset: number; length: number };
 export type LastMessage = {
   senderId: number; body: string; deleted?: boolean; kind?: string; attachmentName?: string | null;
-  entities?: Ent[] | null; thumb?: string | null; mime?: string | null;
+  entities?: Ent[] | null; thumb?: string | null; mime?: string | null; service?: { type: string } | null;
 };
 
 const MAX = 200;
@@ -48,7 +49,11 @@ export function previewThumb(m: LastMessage): { src: string; video: boolean } | 
 /** Текст после имени: подпись к медиа, а без подписи — тип. С миниатюрой эмодзи типа не нужен. */
 export function previewBody(m: LastMessage, withThumb: boolean): ComponentChildren {
   if (m.deleted) return 'Сообщение удалено';
-  const caption = m.body ? previewText(m.body, m.entities) : null;
+  // код входа в списке не показываем: цифры — точками, оформление (code над цифрами) отбрасываем
+  const code = m.service?.type === 'login_code';
+  const text = code ? hideCode(m.body) : m.body;
+  const entities = code ? [] : m.entities;
+  const caption = text ? previewText(text, entities) : null;
   if (m.kind === 'photo') return caption ?? (withThumb ? 'Фото' : '🖼 Фото');
   if (m.kind === 'file') {
     if (withThumb) return caption ?? 'Видео';

@@ -21,7 +21,7 @@ export interface ChatSummary {
   lastReadId: number;
   unread: number;
   last: Message | null;
-  peer?: { id: number; name: string } | null;
+  peer?: { id: number; name: string; system?: true } | null;
   peerReadUpTo?: number;
 }
 
@@ -203,6 +203,7 @@ export class Store {
       chat.kind = s.kind;
       chat.title = s.title ?? s.peer?.name ?? null;
       chat.peerId = s.peer?.id ?? null;
+      if (s.peer?.system) chat.system = true; else delete chat.system;
       if (s.draft && (!chat.draft || s.draft.at > chat.draft.at) && !this.pendingDrafts.has(s.id)) chat.draft = s.draft;
       chat.named = true;
       if (s.peerReadUpTo && s.peerReadUpTo > chat.peerReadUpTo) this.applyPeerRead(s.id, s.peerReadUpTo);
@@ -236,6 +237,7 @@ export class Store {
       body: m.body, replyToId: m.replyToId, createdAt: m.createdAt, status, sort: m.id,
       editedAt: m.editedAt ?? null, deleted: !!m.deleted, reactions: m.reactions ?? prev?.reactions ?? [],
       kind: m.kind ?? 'text', attachment: m.attachment ?? null, entities: m.entities ?? [],
+      ...(m.service ? { service: m.service } : null),
     };
     if (countUnread && !mine && m.id > chat.lastReadId && m.id > chat.knownMaxId) chat.unread++;
     chat.knownMaxId = Math.max(chat.knownMaxId, m.id);

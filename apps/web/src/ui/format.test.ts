@@ -1,5 +1,5 @@
 import { expect, test } from 'bun:test';
-import { chatTime, clock, hm } from './format';
+import { chatTime, clock, hideCode, hm, isSystemChat } from './format';
 
 const at = (h: number, m: number) => new Date(2026, 9, 17, h, m).toISOString();
 
@@ -25,4 +25,16 @@ test('sessionTime: today with time, yesterday, older as a date; fullDateTime', a
   expect(sessionTime(new Date(2026, 9, 16, 23, 59).toISOString(), now, '24h')).toBe('вчера');
   expect(sessionTime(new Date(2026, 9, 3, 9, 0).toISOString(), now, '24h')).toBe('03.10.26');
   expect(fullDateTime(new Date(2026, 9, 17, 14, 5).toISOString(), '24h')).toBe('17 октября 2026 в 14:05');
+});
+
+test('hideCode masks the first five-digit run only', () => {
+  expect(hideCode('Код для входа в Relay: 48213\n\nНикому…')).toBe('Код для входа в Relay: •••••\n\nНикому…');
+  expect(hideCode('без кода')).toBe('без кода');
+});
+
+test('isSystemChat reads peer.system', () => {
+  expect(isSystemChat({ peer: { id: 1, name: 'Relay', system: true } })).toBe(true);
+  expect(isSystemChat({ peer: { id: 2, name: 'Bob' } })).toBe(false);
+  expect(isSystemChat({ peer: null })).toBe(false);
+  expect(isSystemChat(undefined)).toBe(false);
 });

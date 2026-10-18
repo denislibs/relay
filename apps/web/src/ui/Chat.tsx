@@ -1,4 +1,4 @@
-import { Avatar, Button, MediaPolicy, peerTone, ChatSearchBar, Highlight, ripple, useMinVisible, requestMeasure, Composer, DropOverlay, GlassBar, IconButton, Menu, Modal, Presence, ReactionPicker, requestMutation, applyMarkdown, emptyValue, sameValue } from '@relay/ui';
+import { Avatar, Button, Icon, MediaPolicy, peerTone, ChatSearchBar, Highlight, ripple, useMinVisible, requestMeasure, Composer, DropOverlay, GlassBar, IconButton, Menu, Modal, Presence, ReactionPicker, requestMutation, applyMarkdown, emptyValue, sameValue } from '@relay/ui';
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'preact/hooks';
 import { closeChat, deleteMessage, editMessage, ensureNames, focusMessage, openUserChat, sendFile, react, saveDraft, searchMessages, send, typing, typingDone } from '../data';
 import type { Item, SearchHit } from '@relay/sync-engine/src/types';
@@ -10,7 +10,7 @@ import { frameByKey, setGlobal, useGlobal } from '../global';
 import { unblockUser, useUser } from '../settingsData';
 import { Feed } from './Feed';
 import { chatKindFor, mediaPolicy } from '../autoload';
-import { chatTime, chatTone, fileSize, lastSeenText, snippet } from './format';
+import { chatTime, chatTone, fileSize, isSystemChat, lastSeenText, snippet } from './format';
 
 
 const NO_MESSAGES: Item[] = [];
@@ -22,6 +22,9 @@ export function Chat({ chatId, frameKey, active }: { chatId: number; frameKey: s
   const messages = useGlobal((s) => frameByKey(s, frameKey)?.messages ?? NO_MESSAGES);
   const depth = useGlobal((s) => s.chatStack.length);
   const activeRef = useRef(active); activeRef.current = active;
+  // служебный чат «Relay»: только чтение — без поля ввода, реакций, ответов и вложений
+  const system = isSystemChat(chat);
+  const systemRef = useRef(system); systemRef.current = system;
   // «Автозагрузка медиа» / автовоспроизведение для ленты этого чата (MediaBubble кита читает контекст)
   const isContact = useGlobal((s) => chat?.peerId != null && s.contacts.some((c) => c.userId === chat.peerId));
   const autoload = useGlobal((s) => s.prefs.autoload);
@@ -94,7 +97,7 @@ export function Chat({ chatId, frameKey, active }: { chatId: number; frameKey: s
   const [pending, setPending] = useState<{ file: File; url: string | null; caption: string } | null>(null);
   const [dragging, setDragging] = useState(false);
   const offer = (file: File | null | undefined) => {
-    if (!file) return;
+    if (!file || systemRef.current) return;   // в служебный чат ничего не отправить
     setPending({ file, url: /^image\//.test(file.type) ? URL.createObjectURL(file) : null, caption: latest.current.text });
   };
   const closePending = () => { if (pending?.url) URL.revokeObjectURL(pending.url); setPending(null); };
@@ -109,12 +112,12 @@ export function Chat({ chatId, frameKey, active }: { chatId: number; frameKey: s
   };
   useEffect(() => {
     let depth = 0;
-    const hasFiles = (e: DragEvent) => !!e.dataTransfer && [...e.dataTransfer.types].includes('Files');
+    const hasFiles = (e: DragEvent) => !systemRef.current && !!e.dataTransfer && [...e.dataTransfer.types].includes('Files');
     const enter = (e: DragEvent) => { if (!activeRef.current || !hasFiles(e)) return; depth++; setDragging(true); };
     const leave = () => { depth = Math.max(0, depth - 1); if (!depth) setDragging(false); };
     const over = (e: DragEvent) => { if (activeRef.current && hasFiles(e)) e.preventDefault(); };
     const drop = (e: DragEvent) => { if (!activeRef.current || !hasFiles(e)) return; e.preventDefault(); depth = 0; setDragging(false); offer(e.dataTransfer!.files[0]); };
-    const paste = (e: ClipboardEvent) => { if (!activeRef.current) return; const f = [...(e.clipboardData?.files ?? [])][0]; if (f) { e.preventDefault(); offer(f); } };
+    const paste = (e: ClipboardEvent) => { if (!activeRef.current || systemRef.current) return; const f = [...(e.clipboardData?.files ?? [])][0]; if (f) { e.preventDefault(); offer(f); } };
     addEventListener('dragenter', enter); addEventListener('dragleave', leave); addEventListener('dragover', over); addEventListener('drop', drop); addEventListener('paste', paste);
     return () => { removeEventListener('dragenter', enter); removeEventListener('dragleave', leave); removeEventListener('dragover', over); removeEventListener('drop', drop); removeEventListener('paste', paste); };
   }, []);
@@ -207,7 +210,7 @@ export function Chat({ chatId, frameKey, active }: { chatId: number; frameKey: s
     });
     ro.observe(wrap);
     return () => ro.disconnect();
-  }, [plate]);   // плашка вместо поля ввода — другой элемент
+  }, [plate, system]);   // плашка вместо поля ввода — другой элемент
 
   const title = (chat?.title as string) || 'Чат №' + chatId;
   // как в Telegram: в норме подзаголовок — тип чата, а пока идёт подключение или обновление — стадия
@@ -220,7 +223,7 @@ export function Chat({ chatId, frameKey, active }: { chatId: number; frameKey: s
   const myPeer = peer && chat?.peerId === peer.userId && peer.known ? peer : null;
   const online = !!myPeer?.online;
   const isTyping = !!chat?.typing;
-  const subtitle = isTyping ? 'печатает…' : chat?.kind === 'group' ? 'Группа' : myPeer ? lastSeenText(online, myPeer.lastSeen as string | null) : '';
+  const subtitle = system ? 'служебные уведомления' : isTyping ? 'печатает…' : chat?.kind === 'group' ? 'Группа' : myPeer ? lastSeenText(online, myPeer.lastSeen as string | null) : '';
   const replyTo = replyKey ? messages.find((m) => m.key === replyKey) : undefined;
   const authorOf = (senderId: unknown) => (senderId === me.userId ? 'Вы' : title);
   const menuMsg = menu ? messages.find((m) => m.key === menu.key) : undefined;
@@ -234,7 +237,7 @@ export function Chat({ chatId, frameKey, active }: { chatId: number; frameKey: s
         <button type="button" class="rl-glassbar-who" aria-label="Информация о чате" onClick={() => setGlobal({ infoOpen: !infoOpen })}>
           <Avatar name={title} tone={chatTone(chat)} size={40} />
           <span class="rl-glassbar-title">
-            <b>{title}</b>
+            <b>{title}{system ? <i class="app-verified" role="img" aria-label="Официальный аккаунт"><Icon name="check" size={14} /></i> : null}</b>
             <span key={phaseLabel ?? (isTyping ? 'typing' : online ? 'on' : 'off')} class={phaseLabel ? 'app-phase' : isTyping || online ? 'app-online' : undefined}>{phaseLabel ?? (subtitle || '\u00a0')}</span>
           </span>
         </button>
@@ -277,7 +280,12 @@ export function Chat({ chatId, frameKey, active }: { chatId: number; frameKey: s
       <MediaPolicy.Provider value={policy}>
         <Feed frameKey={frameKey} active={active} chatId={chatId} meId={me.userId} peerName={title} group={chat?.kind === 'group'} onAuthor={openUserChat} stick={stick} highlight={found?.q} onMenu={(key, x, y) => setMenu({ key, x, y })} />
       </MediaPolicy.Provider>
-      {plate ? (
+      {system ? (
+        // та же обёртка, что у композера: --composer-h меряется так же, лента не прыгает
+        <div class="rl-composer-wrap app-plate-wrap">
+          <div class="app-readonly-bar" role="note">Служебные уведомления Relay — ответить на них нельзя</div>
+        </div>
+      ) : plate ? (
         <div class="rl-composer-wrap app-plate-wrap">
           <div class="rl-composer app-plate" role="status" key={plate}>
             {plate === 'mine' ? (
@@ -329,15 +337,15 @@ export function Chat({ chatId, frameKey, active }: { chatId: number; frameKey: s
           <>
             <div class="rl-msgmenu-scrim" onClick={() => setMenu(null)} onContextMenu={(e) => { e.preventDefault(); setMenu(null); }} />
             <div class="rl-msgmenu" style={{ left: Math.min(menu.x, innerWidth - 300), top: Math.min(menu.y, innerHeight - 240) }}>
-              {menuMsg.id != null && !menuMsg.deleted ? (
+              {menuMsg.id != null && !menuMsg.deleted && !system ? (
                 <ReactionPicker selected={myReaction} onPick={(emoji: string) => { react(chatId, menuMsg.id as number, myReaction === emoji ? null : emoji); setMenu(null); }} />
               ) : null}
               <Menu
                 label="Действия с сообщением"
                 onClose={() => setMenu(null)}
                 items={[
-                  ...(menuMsg.id != null && !menuMsg.deleted ? [{ icon: 'reply', label: 'Ответить', onClick: () => { if (editing) endEdit(editing.draft); setReplyKey(menuMsg.key as string); api.current?.focus({ end: true }); } }] : []),
-                  ...(own ? [{ icon: 'pencil', label: 'Изменить', onClick: () => startEdit(menuMsg) }] : []),
+                  ...(menuMsg.id != null && !menuMsg.deleted && !system ? [{ icon: 'reply', label: 'Ответить', onClick: () => { if (editing) endEdit(editing.draft); setReplyKey(menuMsg.key as string); api.current?.focus({ end: true }); } }] : []),
+                  ...(own && !system ? [{ icon: 'pencil', label: 'Изменить', onClick: () => startEdit(menuMsg) }] : []),
                   ...(!menuMsg.deleted ? [{ icon: 'copy', label: 'Копировать', onClick: () => { navigator.clipboard?.writeText(menuMsg.body as string).catch(() => {}); } }] : []),
                   ...(own ? ['-' as const, { icon: 'trash', label: 'Удалить', danger: true, onClick: () => setConfirmDelete({ id: menuMsg.id as number }) }] : []),
                 ]}
