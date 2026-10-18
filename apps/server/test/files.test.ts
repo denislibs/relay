@@ -2,6 +2,9 @@ import { afterAll, afterEach, beforeEach, expect, test } from 'bun:test';
 import { createServer } from '../src/http';
 import { sql } from '../src/db';
 import { s3, setDownloadTtl, sweepPendingUploads } from '../src/domain/files';
+import { ensurePeriodic } from '../src/jobs/queue';
+import '../src/jobs/kinds';
+import { drainJobs } from '../src/jobs/worker';
 import { resetDb, uploadFile, uploadIntent } from './helpers';
 
 const server = createServer({ port: 0 });
@@ -158,6 +161,20 @@ test('abandoned pending uploads are swept with their objects', async () => {
   expect(await s3().file(p.id).exists()).toBe(false);
   expect((await sql`select id from attachments`).map((r) => r.id)).toEqual([ready.id]);
   expect(await s3().file(ready.id).exists()).toBe(true);
+});
+
+test('the periodic uploads sweep job removes abandoned uploads and reschedules itself in an hour', async () => {
+  const a = await login('Анна');
+  const old = await (await uploadIntent(base, a.token, { name: 'a.txt', mime: 'text/plain', size: 3 })).json() as { id: string; url: string };
+  await fetch(old.url, { method: 'PUT', body: 'abc', headers: { 'content-type': 'text/plain' } });
+  await sql`update attachments set created_at = now() - interval '2 days' where id = ${old.id}`;
+  const fresh = await (await uploadIntent(base, a.token, { name: 'b.txt', mime: 'text/plain', size: 3 })).json() as { id: string };
+  await ensurePeriodic('uploads.sweep');
+  await drainJobs();
+  expect((await sql`select id from attachments`).map((r) => r.id)).toEqual([fresh.id]);
+  expect(await s3().file(old.id).exists()).toBe(false);
+  const [job] = await sql`select attempts, run_at > now() + interval '59 minutes' as later from jobs where kind = 'uploads.sweep'`;
+  expect(job).toEqual({ attempts: 0, later: true });
 });
 
 test('migrateFiles copies files from the old volume into the bucket, once; missing files are reported', async () => {
