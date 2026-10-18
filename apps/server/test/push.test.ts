@@ -276,7 +276,7 @@ test('no worker yet: the push waits in jobs and is delivered once a worker runs'
   await sendMessage(a, { chatId: chat, clientId: crypto.randomUUID(), body: 'дождись' });
   await Bun.sleep(100);
   expect(got.length).toBe(0);                                         // в процессе сервера ничего не уходит
-  expect((await sql`select kind from jobs`).map((r) => r.kind)).toEqual(['push.message']);
+  expect((await sql`select kind from jobs where kind like 'push.%'`).map((r) => r.kind)).toEqual(['push.message']);
   await drainJobs();
   expect(got.length).toBe(1);
   expect(await br.decrypt(got[0].body)).toMatchObject({ body: 'дождись' });

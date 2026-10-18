@@ -53,6 +53,21 @@ services:
     depends_on:
       s3: { condition: service_healthy }
 
+  # поиск сообщений (MIT, Community Edition): только текст и id чата, права проверяет сервер; порт наружу не публикуется
+  search:
+    image: getmeili/meilisearch:v1.55.0
+    environment:
+      MEILI_MASTER_KEY: relay-dev-master-key-change-me
+      MEILI_NO_ANALYTICS: "true"
+      MEILI_ENV: development
+    volumes:
+      - meili:/meili_data
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:7700/health"]
+      interval: 2s
+      timeout: 3s
+      retries: 30
+
   migrate:
     build: { context: ., dockerfile: apps/server/Dockerfile }
     command: ["bun", "apps/server/src/migrate.ts"]
@@ -83,6 +98,8 @@ services:
       S3_SECRET_ACCESS_KEY: relaydevsecret
       S3_PUBLIC_ENDPOINT: http://localhost:8333    # для подписанных ссылок браузеру (подпись включает хост)
       VALKEY_URL: redis://valkey:6379
+      MEILI_URL: http://search:7700
+      MEILI_MASTER_KEY: relay-dev-master-key-change-me
     ports: ["3000:3000"]
     volumes:
       - ./apps:/app/apps
@@ -92,6 +109,7 @@ services:
       s3-init: { condition: service_completed_successfully }
       web: { condition: service_started }
       valkey: { condition: service_healthy }
+      search: { condition: service_healthy }
 
   worker:
     build: { context: ., dockerfile: apps/server/Dockerfile }
@@ -100,12 +118,15 @@ services:
       DATABASE_URL: postgres://relay:relay@postgres:5432/relay
       DEV_LOGIN: "1"
       VALKEY_URL: redis://valkey:6379
+      MEILI_URL: http://search:7700
+      MEILI_MASTER_KEY: relay-dev-master-key-change-me
     volumes:
       - ./apps:/app/apps
       - ./packages:/app/packages
     depends_on:
       migrate: { condition: service_completed_successfully }
       valkey: { condition: service_healthy }
+      search: { condition: service_healthy }
 
   s3-init-test:
     image: chrislusf/seaweedfs:4.48
@@ -153,6 +174,9 @@ services:
       S3_PUBLIC_ENDPOINT: http://s3:8333
       VALKEY_URL: redis://valkey:6379
       RELAY_BUS_PREFIX: relay_test
+      MEILI_URL: http://search:7700
+      MEILI_MASTER_KEY: relay-dev-master-key-change-me
+      SEARCH_INDEX_PREFIX: relay_test
     volumes:
       - ./apps:/app/apps
       - ./packages:/app/packages
@@ -160,6 +184,7 @@ services:
       postgres: { condition: service_healthy }
       s3-init-test: { condition: service_completed_successfully }
       valkey: { condition: service_healthy }
+      search: { condition: service_healthy }
 
   test-engine:
     build: { context: ., dockerfile: apps/server/Dockerfile }
@@ -176,6 +201,9 @@ services:
       S3_PUBLIC_ENDPOINT: http://s3:8333
       VALKEY_URL: redis://valkey:6379
       RELAY_BUS_PREFIX: relay_test
+      MEILI_URL: http://search:7700
+      MEILI_MASTER_KEY: relay-dev-master-key-change-me
+      SEARCH_INDEX_PREFIX: relay_test
     volumes:
       - ./apps:/app/apps
       - ./packages:/app/packages
@@ -183,8 +211,10 @@ services:
       postgres: { condition: service_healthy }
       s3-init-test: { condition: service_completed_successfully }
       valkey: { condition: service_healthy }
+      search: { condition: service_healthy }
 
 volumes:
   files:      # прежнее хранилище вложений: только для migrate-files
   pgdata: {}
   s3data: {}
+  meili: {}

@@ -1654,7 +1654,11 @@ html[data-blur="0"] .rl-menu, html[data-blur="0"] .rl-attach { -webkit-backdrop-
 .rl-media .rl-media-frame { border-radius: inherit; border-bottom-left-radius: 0; border-bottom-right-radius: 0; }
 .rl-media .rl-media-author + .rl-media-frame { border-top-left-radius: 0; border-top-right-radius: 0; }
 .rl-media-only { background: transparent; box-shadow: none; }
+/* хвостик картинки без рамки — цвета её нижнего угла (--tail-bg), появляется плавно, когда цвет посчитан */
+.rl-media-only.rl-bubble-tail::after { background: var(--tail-bg, #ccc); transition: background-color 500ms ease; }
 .rl-media-only .rl-media-frame { border-radius: inherit; }
+/* углы режет рамка (overflow hidden), у ячеек своих радиусов нет — иначе в прямом углу у хвостика виден фон */
+.rl-media .rl-media-cell { border-radius: 0; }
 .rl-media-only .rl-media-album { gap: 2px; }
 .rl-media-only .rl-media-album .rl-media-cell { border-radius: 0; }
 .rl-media .rl-media-caption { padding: 6px 8px 6px; font-size: var(--message-text-size, 16px); line-height: calc(var(--message-text-size, 16px) * 1.3125); }

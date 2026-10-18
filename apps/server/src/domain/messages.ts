@@ -52,6 +52,7 @@ export async function sendMessage(
     await fanOut(tx, members.map((m) => m.user_id as number), { type: 'newMessage', message });
     await clearDraftInTx(tx, userId, input.chatId); // отправили — черновик на всех устройствах больше не нужен
     await enqueue(tx, 'push.message', { message });  // уйдёт после коммита, воркером: ack не ждёт push-сервис
+    await enqueue(tx, 'search.sync', { id: message.id });   // в индекс поиска — тоже после коммита
     return { message, duplicate: false };
   });
   return res;
