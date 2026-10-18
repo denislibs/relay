@@ -861,9 +861,21 @@ function viewerRect(w, hgt) {
   var W = Math.round(w * k), H = Math.round(hgt * k);
   return { left: Math.round((innerWidth - W) / 2), top: Math.round(VIEWER_TOP + (ah - H) / 2), width: W, height: H };
 }
-function flipTo(from, to) {
-  return 'translate3d(' + (from.left - to.left) + 'px,' + (from.top - to.top) + 'px,0) scale(' + from.width / to.width + ',' + from.height / to.height + ')';
+/* Полёт коробки просмотра в плитку (f) и обратно: масштаб равномерный — фото не сплющивается, — коробка
+   накрывает плитку целиком (как object-fit: cover), лишнее срезает clip-path по краям плитки со скруглением r.
+   area — видимая часть ленты: что под шапкой/полем ввода, тоже срезаем. Всё в координатах коробки (до масштаба). */
+function flight(f, rect, r, area) {
+  var k = Math.max(f.width / rect.width, f.height / rect.height);
+  var left = f.left + (f.width - rect.width * k) / 2, top = f.top + (f.height - rect.height * k) / 2;
+  var cut = function (x) { return Math.max(0, x) / k + 'px'; };
+  var t = f.top - top + (area ? Math.max(0, area.top - f.top) : 0);
+  var b = top + rect.height * k - f.bottom + (area ? Math.max(0, f.bottom - area.bottom) : 0);
+  return {
+    transform: 'translate3d(' + (left - rect.left) + 'px,' + (top - rect.top) + 'px,0) scale(' + k + ')',
+    clip: 'inset(' + cut(t) + ' ' + cut(left + rect.width * k - f.right) + ' ' + cut(b) + ' ' + cut(f.left - left) + ' round ' + r / k + 'px)',
+  };
 }
+var CLIP_NONE = 'inset(0px 0px 0px 0px round 0px)';
 /* видимая область ленты: прокрутка минус стеклянные шапка и композер над ней */
 function visibleArea(el) {
   var sc = el.parentElement;
@@ -898,13 +910,14 @@ function MediaViewer(props) {
     var end = beginHeavyAnimation(VIEWER_MS);
     forceMeasure(function () {
       var f = from.getBoundingClientRect(), r = parseFloat(getComputedStyle(from).borderTopLeftRadius) || 0;
+      var fl = flight(f, rect, r, visibleArea(from));
       b.style.transition = 'none';
-      b.style.transform = flipTo(f, rect);
-      b.style.borderRadius = (r * rect.width / f.width) + 'px / ' + (r * rect.height / f.height) + 'px';
+      b.style.transform = fl.transform;
+      b.style.clipPath = fl.clip;
       hide(from);
     });
     var raf = requestAnimationFrame(function () { requestMutation(function () {
-      b.style.transition = ''; b.style.transform = ''; b.style.borderRadius = '';
+      b.style.transition = ''; b.style.transform = ''; b.style.clipPath = CLIP_NONE;
       el.classList.remove('rl-viewer-pre');
     }); });
     return function () { cancelAnimationFrame(raf); end(); };
@@ -930,21 +943,16 @@ function MediaViewer(props) {
     var end = beginHeavyAnimation(VIEWER_MS);
     requestMeasure(function () {
       var f = to && to.getBoundingClientRect(), area = to && visibleArea(to);
-      var fully = f && f.top >= area.top && f.bottom <= area.bottom;
       var partly = f && f.bottom > area.top && f.top < area.bottom;
       var r = to ? parseFloat(getComputedStyle(to).borderTopLeftRadius) || 0 : 0;
       requestMutation(function () {
         el.classList.add('rl-viewer-leaving');
-        if (rect && partly) {   // летим обратно в миниатюру; если её частично закрыли шапка/поле ввода — обрезаем по видимой части, без растворения
+        if (rect && partly) {   // летим обратно в миниатюру: срез по плитке, а если её частично закрыли шапка/поле ввода — и по видимой части
           hide(to);
-          b.style.transform = flipTo(f, rect);
-          b.style.borderRadius = (r * rect.width / f.width) + 'px / ' + (r * rect.height / f.height) + 'px';
-          if (!fully) {
-            var k = rect.height / f.height;
-            b.style.clipPath = 'inset(0px 0px 0px 0px)';
-            b.getBoundingClientRect();   // зафиксировать начальную точку перехода
-            b.style.clipPath = 'inset(' + Math.max(0, area.top - f.top) * k + 'px 0px ' + Math.max(0, f.bottom - area.bottom) * k + 'px 0px)';
-          }
+          if (!b.style.clipPath) { b.style.clipPath = CLIP_NONE; b.getBoundingClientRect(); }   // открылось без полёта — начальная точка перехода
+          var fl = flight(f, rect, r, area);
+          b.style.transform = fl.transform;
+          b.style.clipPath = fl.clip;
         } else {
           b.style.opacity = '0';
           if (rect) b.style.transform = 'translate3d(' + rect.width * 0.04 + 'px,' + rect.height * 0.04 + 'px,0) scale(0.92)';   // к центру: origin коробки — левый верх
