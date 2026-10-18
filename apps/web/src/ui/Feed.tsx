@@ -172,6 +172,14 @@ function voiceTrack(m: Item, att: Att, chatId: number, author: string, out: bool
 }
 
 /** Первый бабл, видимый ниже шапки, и его отступ от верха ленты (только в фазе замера). */
+const GROUP_GAP_MS = 10 * 60_000;
+/** Между a и b группа рвётся: пауза больше 10 минут или b — первое непрочитанное. */
+function breaksGroup(a: Item | undefined, b: Item, unreadFrom: number | null, meId: number): boolean {
+  if (!a) return true;
+  if (Date.parse(b.createdAt as string) - Date.parse(a.createdAt as string) > GROUP_GAP_MS) return true;
+  return unreadFrom != null && b.senderId !== meId && b.id != null && (b.id as number) > unreadFrom && (a.id == null || (a.id as number) <= unreadFrom || a.senderId === meId);
+}
+
 function firstVisible(root: HTMLElement): { key: string; sort: number; top: number } | null {
   const rootTop = root.getBoundingClientRect().top;
   for (const row of root.querySelectorAll<HTMLElement>('.app-msg')) {
@@ -538,8 +546,9 @@ export function Feed({ frameKey, active, chatId, meId, peerName, group, onAuthor
       out.push(<div class="app-unread-divider" key="unread" role="separator"><span>Непрочитанные сообщения</span></div>);
     }
     const next = shown[i + 1];
-    const start = prevSender !== m.senderId || day !== prevDay;
-    const end = !next || next.senderId !== m.senderId || dayKey(next.createdAt as string) !== day;
+    // группа — как в Telegram: тот же отправитель и день, пауза не больше 10 минут, не на границе «Непрочитанные»
+    const start = prevSender !== m.senderId || day !== prevDay || breaksGroup(shown[i - 1], m, unreadFrom, meId);
+    const end = !next || next.senderId !== m.senderId || dayKey(next.createdAt as string) !== day || breaksGroup(m, next, unreadFrom, meId);
     const quoted = m.reply as Quote | null;
     // файлы, отправленные вместе (groupId), — одним пузырём: позиция строки внутри группы
     const prevM = shown[i - 1];

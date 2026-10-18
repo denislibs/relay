@@ -719,17 +719,26 @@ function MediaBubble(props) {
 }
 
 /* ---------- FileBubble: documents ---------- */
+/** Цвет иконки файла по расширению (как в Telegram): pdf — красный, архивы и презентации — оранжевый, таблицы и apk — зелёный. */
+function fileKind(ext) {
+  ext = String(ext || '').toLowerCase();
+  if (ext === 'pdf') return 'red';
+  if (/^(zip|rar|7z|tar|gz|ppt|pptx|key)$/.test(ext)) return 'orange';
+  if (/^(xls|xlsx|csv|numbers|apk)$/.test(ext)) return 'green';
+  return 'blue';
+}
 function FileBubble(props) {
   var out = props.from === 'out';
   var ext = (props.ext || 'pdf').toUpperCase();
   return h('div', { class: cx('rl-msgline', out && 'rl-msgline-out', props.groupStart && 'rl-msgline-gap') },
     h('div', { class: cx('rl-bubble rl-file', out ? 'rl-bubble-out' : 'rl-bubble-in-side', props.tail && 'rl-bubble-tail') },
+      // как в Telegram: цветной квадрат с загнутым уголком и расширением; скачивание и загрузка — внутри квадрата
       h('div', { class: 'rl-file-card' },
-        h('span', { class: 'rl-file-icon', 'data-ext': ext }, h(Icon, { name: 'file', size: 26 }), h('b', null, ext)),
-        h('span', { class: 'rl-file-text' }, h('span', { class: 'rl-file-name' }, props.name), h('span', { class: 'rl-file-sub' }, props.meta)),
-        props.state === 'loading'
-          ? h(ProgressRing, { size: 36, progress: props.progress, onCancel: props.onCancel })
-          : props.state === 'remote' ? h(IconButton, { icon: 'download', label: 'Скачать файл', filled: true, onClick: props.onDownload }) : null),
+        props.state === 'remote'
+          ? h('button', { type: 'button', class: 'rl-file-icon rl-file-icon-btn', 'data-ext': ext, 'data-kind': fileKind(ext), 'aria-label': 'Скачать файл', onClick: props.onDownload }, h(Icon, { name: 'download', size: 24 }))
+          : h('span', { class: 'rl-file-icon', 'data-ext': ext, 'data-kind': fileKind(ext) },
+              props.state === 'loading' ? h(ProgressRing, { size: 40, progress: props.progress, onMedia: true, onCancel: props.onCancel }) : h('b', null, ext.length > 4 ? ext.slice(0, 4) : ext)),
+        h('span', { class: 'rl-file-text' }, h('span', { class: 'rl-file-name' }, props.name), h('span', { class: 'rl-file-sub' }, props.meta))),
       h('div', { class: 'rl-file-foot' }, h('span', { class: 'rl-bubble-meta' }, props.time, out ? h(MessageStatus, { status: props.status || 'read' }) : null))));
 }
 

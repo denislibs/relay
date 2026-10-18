@@ -2,8 +2,6 @@
 html, body, #app { height: 100%; margin: 0; }
 body { background: var(--bg); color: var(--ink); font-family: var(--font-sans); overflow: hidden; }
 #app > .rl-shell { height: 100%; box-sizing: border-box; }
-.app-msg + .app-msg .rl-msgline { margin-top: 2px; }
-.app-msg + .app-msg .rl-msgline-gap { margin-top: var(--space-2); }
 .app-center { display: flex; align-items: center; justify-content: center; height: 100%; padding: var(--space-4); box-sizing: border-box; }
 .app-login { width: min(100%, 440px); display: flex; flex-direction: column; gap: var(--space-4); }
 .app-login h1 { margin: 0; font: 500 28px/34px var(--font-sans); }

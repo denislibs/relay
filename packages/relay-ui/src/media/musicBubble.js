@@ -36,7 +36,7 @@ export function MusicBubble(props) {
     if (r.width) player.seek(props.trackKey, (e.clientX - r.left) / r.width);
   }
   return h('div', { class: cx('rl-msgline', out && 'rl-msgline-out', props.groupStart && pos !== 'middle' && pos !== 'last' && 'rl-msgline-gap', 'rl-music-line', 'rl-music-' + pos) },
-    h('div', { class: cx('rl-bubble', out ? 'rl-bubble-out' : 'rl-bubble-in', props.tail && last && 'rl-bubble-tail', 'rl-music') },
+    h('div', { class: cx('rl-bubble', out ? 'rl-bubble-out' : 'rl-bubble-in-side', props.tail && last && 'rl-bubble-tail', 'rl-music') },
       h('div', { class: 'rl-music-row' },
         h('div', { class: 'rl-music-btnwrap' },
           props.uploading

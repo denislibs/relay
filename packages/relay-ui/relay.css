@@ -91,16 +91,9 @@ body { margin: 0; font-family: var(--font-sans); color: var(--ink); background: 
 /* ---------- Bubble ---------- */
 .rl-msgline { display: flex; padding: 0 clamp(var(--space-2), 6%, var(--space-9)); }
 .rl-msgline-out { justify-content: flex-end; }
-.rl-msgline + .rl-msgline { margin-top: 2px; }
-.rl-msgline-gap { margin-top: var(--space-2) !important; }
 .rl-bubble { position: relative; max-width: min(65%, 560px); padding: 6px 8px 8px 10px; border-radius: var(--radius-bubble); background: var(--bubble-in); color: var(--ink); box-shadow: var(--shadow-bubble); font: 400 var(--message-text-size, 15px)/calc(var(--message-text-size, 15px) * 1.4) var(--font-sans); word-break: break-word; }
 .rl-bubble-out { background: var(--bubble-out); }
 .rl-bubble-failed { background: var(--danger-soft); }
-.rl-bubble-tail.rl-bubble-in-side { border-top-left-radius: 0; }
-.rl-bubble-tail.rl-bubble-out { border-top-right-radius: 0; }
-.rl-bubble-tail::before { content: ""; position: absolute; top: 0; width: 8px; height: 13px; background: inherit; }
-.rl-bubble-tail.rl-bubble-in-side::before { left: -8px; clip-path: polygon(100% 0, 0 0, 100% 100%); }
-.rl-bubble-tail.rl-bubble-out::before { right: -8px; clip-path: polygon(0 0, 100% 0, 0 100%); }
 .rl-bubble-author { display: block; margin-bottom: 2px; font: 600 13px/18px var(--font-sans); }
 .rl-bubble-author-link { padding: 0; border: 0; background: none; text-align: start; cursor: pointer; max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .rl-bubble-author-link:hover { text-decoration: underline; }
@@ -112,8 +105,6 @@ body { margin: 0; font-family: var(--font-sans); color: var(--ink); background: 
 :root[data-time12] .rl-bubble-in-side .rl-bubble-spacer { width: 72px; }
 :root[data-time12] .rl-bubble-spacer-edited { width: 124px; }
 .rl-bubble-meta { position: absolute; right: 8px; bottom: 4px; display: inline-flex; align-items: center; gap: 3px; font: 400 11px/15px var(--font-sans); color: var(--bubble-meta); font-variant-numeric: tabular-nums; }
-.rl-appear-out { animation: rl-bubble-out var(--dur-fast) var(--ease-out) both; transform-origin: 100% 100%; }
-.rl-appear-in { animation: rl-bubble-in var(--dur-fast) var(--ease-out) both; transform-origin: 0 100%; }
 
 /* ---------- MessageStatus ---------- */
 .rl-status { display: inline-flex; color: var(--bubble-meta); }
@@ -265,8 +256,6 @@ body { margin: 0; font-family: var(--font-sans); color: var(--ink); background: 
 .rl-link:hover { text-decoration-color: var(--brand-strong); }
 
 /* ---------- Keyframes ---------- */
-@keyframes rl-bubble-out { from { opacity: 0; transform: translateY(5px) scale(0.98); } to { opacity: 1; transform: none; } }
-@keyframes rl-bubble-in { from { opacity: 0; transform: translateY(5px) scale(0.98); } to { opacity: 1; transform: none; } }
 @keyframes rl-pop { 0% { transform: scale(0); } 50% { transform: scale(1.1); } 100% { transform: scale(1); } }
 @keyframes rl-draw { from { stroke-dashoffset: 20; } to { stroke-dashoffset: 0; } }
 @keyframes rl-spin { to { transform: rotate(360deg); } }
@@ -351,15 +340,7 @@ body { margin: 0; font-family: var(--font-sans); color: var(--ink); background: 
 .rl-media-caption { position: relative; padding: 6px 7px 8px; font: 400 15px/21px var(--font-sans); }
 
 /* ---------- FileBubble ---------- */
-.rl-file { padding: 4px; width: 330px; max-width: 100%; }
-.rl-file-card { display: flex; align-items: center; gap: var(--space-3); padding: 10px; border-radius: var(--radius-xs); background: var(--hover); }
-.rl-file-icon { position: relative; display: inline-flex; align-items: center; justify-content: center; width: 40px; height: 48px; flex-shrink: 0; color: var(--danger); }
-.rl-file-icon b { position: absolute; bottom: 9px; font: 700 8px/1 var(--font-sans); letter-spacing: 0.04em; }
-.rl-file-icon[data-ext="DOC"], .rl-file-icon[data-ext="DOCX"] { color: var(--author-1); }
-.rl-file-icon[data-ext="XLS"], .rl-file-icon[data-ext="XLSX"] { color: var(--author-4); }
 .rl-file-text { flex: 1; min-width: 0; display: flex; flex-direction: column; }
-.rl-file-name { font: 500 15px/20px var(--font-sans); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.rl-file-sub { font: 400 12px/16px var(--font-sans); color: var(--bubble-meta); }
 .rl-file-foot { position: relative; height: 18px; }
 
 /* ---------- MediaThumb ---------- */
@@ -927,18 +908,12 @@ button.rl-tab:hover { color: var(--ink); }
 .rl-shell .rl-csearch { background: var(--glass); -webkit-backdrop-filter: blur(20px) saturate(1.4); backdrop-filter: blur(20px) saturate(1.4); }
 .rl-shell .rl-date span, .rl-shell .rl-unread { -webkit-backdrop-filter: blur(12px); backdrop-filter: blur(12px); }
 .rl-shell .rl-date { position: sticky; top: 4px; z-index: 2; }
-.rl-shell .rl-date span { border-radius: var(--radius-pill); padding: 5px 14px; }
 .rl-shell .rl-attach { left: 0; }
 
 /* ---------- Right panel as a card ---------- */
 .rl-shell-aside { position: relative; z-index: 2; flex: 0 0 360px; min-width: 0; display: flex; }
 .rl-shell-aside > .rl-panel { flex: 1; border-radius: var(--radius-panel); background: var(--card); box-shadow: var(--shadow-panel); }
 
-/* ---------- Bubbles: a touch more modern ---------- */
-.rl-bubble { padding: 7px 10px 8px 11px; }
-.rl-bubble-tail.rl-bubble-in-side { border-top-left-radius: 4px; }
-.rl-bubble-tail.rl-bubble-out { border-top-right-radius: 4px; }
-.rl-bubble-tail::before { width: 9px; height: 14px; }
 
 /* ---------- Phone width: the card becomes the screen ---------- */
 @media (max-width: 720px) {
@@ -1038,18 +1013,7 @@ button.rl-tab:hover { color: var(--ink); }
 .rl-shell .rl-composer-field .rl-iconbtn { width: 40px; height: 40px; color: var(--ink-muted); }
 .rl-shell .rl-composer-send { width: 40px; height: 40px; box-shadow: none; }
 
-.rl-shell .rl-bubble { padding: 6px 8px 7px 9px; border-radius: var(--tg-radius-bubble); box-shadow: var(--tg-shadow-bubble); font-size: var(--message-text-size, 16px); line-height: calc(var(--message-text-size, 16px) * 1.3125); }
-.rl-shell .rl-msgline + .rl-msgline { margin-top: 3px; }
-.rl-shell .rl-msgline-gap { margin-top: var(--space-3) !important; }
-/* tail: on the last bubble of a run, bottom corner, concave curve */
-.rl-shell .rl-bubble-tail.rl-bubble-in-side { border-top-left-radius: var(--tg-radius-bubble); border-bottom-left-radius: 0; }
-.rl-shell .rl-bubble-tail.rl-bubble-out { border-top-right-radius: var(--tg-radius-bubble); border-bottom-right-radius: 0; }
-.rl-shell .rl-bubble-tail::before { top: auto; bottom: 0; width: 10px; height: 18px; clip-path: none; }
-.rl-shell .rl-bubble-tail.rl-bubble-in-side::before { left: -9px; -webkit-mask: radial-gradient(ellipse 100% 100% at 0 0, transparent 98%, #000 100%); mask: radial-gradient(ellipse 100% 100% at 0 0, transparent 98%, #000 100%); }
-.rl-shell .rl-bubble-tail.rl-bubble-out::before { right: -9px; -webkit-mask: radial-gradient(ellipse 100% 100% at 100% 0, transparent 98%, #000 100%); mask: radial-gradient(ellipse 100% 100% at 100% 0, transparent 98%, #000 100%); }
-.rl-shell .rl-bubble-meta { right: 10px; bottom: 5px; font-size: 12px; }
 .rl-shell .rl-bubble-menu { display: none; }
-.rl-shell .rl-date span { border-radius: var(--radius-pill); box-shadow: none; background: color-mix(in srgb, var(--raised) 70%, transparent); -webkit-backdrop-filter: blur(8px); backdrop-filter: blur(8px); }
 
 /* message context menu: reaction pill above a soft rounded list */
 .rl-shell .rl-msgmenu { position: fixed; z-index: 40; display: flex; flex-direction: column; align-items: flex-start; gap: 8px; }
@@ -1608,3 +1572,61 @@ html[data-blur="0"] .rl-menu, html[data-blur="0"] .rl-attach { -webkit-backdrop-
 .rl-mdl-btn-danger:hover, .rl-mdl-btn-danger:focus-visible { background: color-mix(in srgb, var(--danger) 10%, transparent); }
 @media (max-width: 450px) { .rl-mdl-dialog { max-width: calc(100vw - 3rem); } }
 @media (prefers-reduced-motion: reduce) { .rl-mdl-dialog, .rl-mdl-closing .rl-mdl-dialog { animation-name: rl-fade; } .rl-mdl-closing .rl-mdl-dialog { animation-name: rl-fade-out; } }
+
+/* ---------- Пузыри как в Telegram Web A (один источник: размеры, углы группы, хвостик, отступы, появление) ----------
+   Группа — подряд сообщения одного отправителя (≤10 мин, без смены дня/непрочитанных). Первое в группе — rl-msgline-gap,
+   последнее — rl-bubble-tail (с хвостиком). Внутри группы углы на стороне отправителя малые. */
+:root {
+  --bubble-r: 15px; --bubble-r-sm: 6px;
+  --action-bg: rgba(74, 142, 58, .55);   /* служебные плашки и даты: цвет от обоев, белый текст */
+  --tail-shape: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 9 18'%3E%3Cpath d='M9 0V18H1.6C0.6 18 0.2 16.9 1 16.3C5.4 13 8.8 8.6 9 0Z'/%3E%3C/svg%3E");
+}
+@media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) { --action-bg: rgba(72, 87, 97, .55); } }
+:root[data-theme="dark"] { --action-bg: rgba(72, 87, 97, .55); }
+
+.rl-bubble { max-width: min(29rem, calc(100% - 2.5rem)); padding: 5px 8px 6px; border-radius: var(--bubble-r); box-shadow: 0 1px 2px rgba(16, 35, 47, .15);
+  font-size: var(--message-text-size, 16px); line-height: calc(var(--message-text-size, 16px) * 1.3125); }
+.rl-bubble-out { max-width: min(30rem, calc(100% - 2.5rem)); }
+.rl-bubble-meta { right: 8px; bottom: 5px; font-size: 12px; }
+/* углы в группе: не первое — верхний угол со стороны отправителя малый, не последнее — нижний; у хвостика — 0 */
+.rl-msgline:not(.rl-msgline-gap) > .rl-bubble-in-side { border-top-left-radius: var(--bubble-r-sm); }
+.rl-msgline:not(.rl-msgline-gap) > .rl-bubble-out { border-top-right-radius: var(--bubble-r-sm); }
+.rl-bubble-in-side:not(.rl-bubble-tail) { border-bottom-left-radius: var(--bubble-r-sm); }
+.rl-bubble-out:not(.rl-bubble-tail) { border-bottom-right-radius: var(--bubble-r-sm); }
+.rl-bubble-tail.rl-bubble-in-side { border-bottom-left-radius: 0; }
+.rl-bubble-tail.rl-bubble-out { border-bottom-right-radius: 0; }
+/* хвостик: вогнутая фигура 9×18 у нижнего угла; ::before — тень (та же фигура на 1px ниже), ::after — заливка цветом пузыря */
+.rl-bubble-tail::before, .rl-bubble-tail::after { content: ""; position: absolute; bottom: 0; width: 9px; height: 18px; pointer-events: none;
+  -webkit-mask: var(--tail-shape) no-repeat 0 0 / 100% 100%; mask: var(--tail-shape) no-repeat 0 0 / 100% 100%; }
+.rl-bubble-tail::before { bottom: -1px; background: rgba(16, 35, 47, .15); }
+.rl-bubble-tail::after { background: inherit; }
+.rl-bubble-tail.rl-bubble-in-side::before, .rl-bubble-tail.rl-bubble-in-side::after { left: -8.5px; }
+.rl-bubble-tail.rl-bubble-out::before, .rl-bubble-tail.rl-bubble-out::after { right: -8.5px; transform: scaleX(-1); }
+/* отступы: внутри группы 6px, между группами 10px */
+.rl-msgline + .rl-msgline, .app-msg + .app-msg .rl-msgline { margin-top: 6px; }
+.rl-msgline.rl-msgline-gap, .app-msg + .app-msg .rl-msgline-gap { margin-top: 10px; }
+/* даты и служебные: плашка цвета обоев с белым текстом */
+.rl-date { padding: 1rem 0; }
+.rl-date span, .rl-shell .rl-date span { padding: 3px 8px; border-radius: 15px; background: var(--action-bg); color: #fff; box-shadow: none;
+  font: 500 calc(var(--message-text-size, 16px) - 1px)/1.25 var(--font-sans); -webkit-backdrop-filter: none; backdrop-filter: none; }
+.rl-round-badge, .rl-round-meta { background: var(--action-bg); }
+/* новое сообщение выезжает снизу и проявляется; своё — от правого нижнего угла */
+.rl-appear-out, .rl-appear-in { animation: rl-msg-in 200ms ease-out both; transform-origin: 0 100%; }
+.rl-appear-out { transform-origin: 100% 100%; }
+@keyframes rl-msg-in { from { opacity: 0; transform: translateY(2rem); } to { opacity: 1; transform: none; } }
+@media (prefers-reduced-motion: reduce) { .rl-appear-out, .rl-appear-in { animation-name: rl-fade; } }
+
+/* файл — как в Telegram: квадрат 54px с загнутым уголком, расширение белым, название 16/500, подпись 14 */
+.rl-file { min-width: 14rem; width: auto; max-width: min(24rem, calc(100% - 2.5rem)); padding: 6px 8px; }
+.rl-file-card { display: flex; align-items: center; gap: .75rem; padding-right: 4px; }
+.rl-file-icon { --file-c: #4fa3f7; position: relative; flex: 0 0 auto; display: grid; place-items: center; width: 54px; height: 54px; padding: 0; border: 0; border-radius: 6px;
+  background: var(--file-c); color: #fff; clip-path: polygon(0 0, calc(100% - 18px) 0, 100% 18px, 100% 100%, 0 100%); }
+.rl-file-icon::after { content: ""; position: absolute; top: 0; right: 0; width: 18px; height: 18px; border-bottom-left-radius: 4px; background: rgba(0, 0, 0, .25); }
+.rl-file-icon[data-kind="red"] { --file-c: #e5534b; }
+.rl-file-icon[data-kind="orange"] { --file-c: #f0a03c; }
+.rl-file-icon[data-kind="green"] { --file-c: #3fb950; }
+.rl-file-icon b { align-self: end; margin-bottom: 7px; font: 600 14px/1 var(--font-sans); letter-spacing: .01em; }
+.rl-file-icon-btn { cursor: pointer; }
+.rl-file-icon-btn:hover { filter: brightness(1.05); }
+.rl-file-name { font: 500 16px/1.5rem var(--font-sans); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.rl-file-sub { font: 400 14px/1.125rem var(--font-sans); color: var(--bubble-meta); }
