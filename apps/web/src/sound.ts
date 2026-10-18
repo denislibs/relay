@@ -1,5 +1,6 @@
-// Звук нового сообщения — файл /sounds/message.mp3 (выбран владельцем проекта), декодируется один раз и играет
-// через WebAudio с нужной громкостью. Файл не загрузился — запасной синтезированный «колокольчик» из двух нот.
+// Звуки сообщений — файлы, выбранные владельцем проекта: /sounds/message.mp3 (пришло) и /sounds/sent.mp3 (отправил сам).
+// Каждый декодируется один раз и играет через WebAudio с нужной громкостью. Файл не загрузился — у входящего
+// запасной синтезированный «колокольчик» из двух нот, у отправки — тишина.
 // Звучит, только если браузер разрешил аудио.
 let ctx: AudioContext | null = null;
 
@@ -30,13 +31,32 @@ function chime(c: AudioContext, out: AudioNode, hz: number, at: number, peak: nu
   }
 }
 
-const SOUND_URL = '/sounds/message.mp3';
-let buffer: Promise<AudioBuffer | null> | null = null;
-function messageBuffer(c: AudioContext): Promise<AudioBuffer | null> {
-  buffer ??= fetch(SOUND_URL).then((r) => (r.ok ? r.arrayBuffer() : Promise.reject(new Error(String(r.status)))))
-    .then((data) => c.decodeAudioData(data))
-    .catch(() => { buffer = null; return null; });   // в следующий раз попробуем снова
-  return buffer;
+const buffers = new Map<string, Promise<AudioBuffer | null>>();
+function load(c: AudioContext, url: string): Promise<AudioBuffer | null> {
+  let b = buffers.get(url);
+  if (!b) {
+    b = fetch(url).then((r) => (r.ok ? r.arrayBuffer() : Promise.reject(new Error(String(r.status)))))
+      .then((data) => c.decodeAudioData(data))
+      .catch(() => { buffers.delete(url); return null; });   // в следующий раз попробуем снова
+    buffers.set(url, b);
+  }
+  return b;
+}
+function playBuffer(c: AudioContext, buf: AudioBuffer, volume: number): void {
+  const src = c.createBufferSource(), gain = c.createGain();
+  src.buffer = buf;
+  gain.gain.value = Math.min(1, volume);
+  src.connect(gain).connect(c.destination);
+  src.start();
+}
+
+/** Своё сообщение ушло — короткий «щелчок». volume 0..1; 0 — ничего не играем. */
+export function playSentSound(volume: number): void {
+  if (!(volume > 0)) return;
+  try {
+    const c = audio();
+    if (c) void load(c, '/sounds/sent.mp3').then((buf) => { if (buf) playBuffer(c, buf, volume); });
+  } catch { /* аудио недоступно — не страшно */ }
 }
 
 /** Уведомление о новом сообщении. volume 0..1; 0 — ничего не играем. */
@@ -45,14 +65,7 @@ export function playNotifySound(volume: number): void {
   try {
     const c = audio();
     if (!c) return;
-    void messageBuffer(c).then((buf) => {
-      if (!buf) { playChime(c, volume); return; }
-      const src = c.createBufferSource(), gain = c.createGain();
-      src.buffer = buf;
-      gain.gain.value = Math.min(1, volume);
-      src.connect(gain).connect(c.destination);
-      src.start();
-    }, () => playChime(c, volume));
+    void load(c, '/sounds/message.mp3').then((buf) => { if (buf) playBuffer(c, buf, volume); else playChime(c, volume); });
   } catch { /* аудио недоступно — не страшно */ }
 }
 

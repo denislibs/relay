@@ -1,4 +1,6 @@
 import { coverThumb, readAudioTags } from './id3';
+import { getPrefs } from './prefs';
+import { playSentSound } from './sound';
 import { beginHeavyAnimation, nudgeWallpaper, toBase64 } from '@relay/ui';
 import { connectEngine, EngineClient, Mirror } from '@relay/sync-engine/src/client';
 import type { Item, Patch, Query, SearchResult } from '@relay/sync-engine/src/types';
@@ -346,7 +348,18 @@ function toLatestOf(chatId: number): void {
 /** Прежний вызов «ещё истории» — теперь сдвиг окна к старым. */
 export function loadOlder(): void { moveWindow('older'); }
 
+/** Звук своей отправки (как в мобильных мессенджерах): по настройке звуков; пачка файлов — один звук, а не по штуке. */
+let sentAt = 0;
+function sentSound(): void {
+  const now = Date.now();
+  if (now - sentAt < 400) return;
+  sentAt = now;
+  const p = getPrefs().notify;
+  if (p.sound) playSentSound(p.volume);
+}
+
 export async function send(chatId: number, body: string, replyToId: number | null = null, entities: Entity[] = []): Promise<void> {
+  sentSound();
   nudgeWallpaper();
   toLatestOf(chatId); // своё сообщение — внизу, как в Telegram
   await engine.call({ type: 'sendMessage', chatId, body, entities, replyToId });
@@ -391,6 +404,7 @@ async function describeImage(file: Blob): Promise<{ w: number; h: number; thumb:
 /** Отправить файл (фото — с размерами и превью). Офлайн — уйдёт, когда появится сеть. */
 /** Голосовое: Ogg/Opus, длительность в секундах и волна (63 байта). Локально играет сам записанный файл. */
 export async function sendVoice(chatId: number, rec: { blob: Blob; duration: number; waveform: Uint8Array }, replyToId: number | null = null): Promise<void> {
+  sentSound();
   nudgeWallpaper();
   toLatestOf(chatId);
   const res = (await engine.call({ type: 'sendFile', chatId, body: '', file: rec.blob, name: 'voice.ogg', mime: 'audio/ogg', kind: 'voice', duration: rec.duration, waveform: toBase64(rec.waveform), replyToId })) as { clientId: string };
@@ -399,6 +413,7 @@ export async function sendVoice(chatId: number, rec: { blob: Blob; duration: num
 
 /** Кружок: квадрат 400×400, до 60 с; превью — кадр из записи. */
 export async function sendRound(chatId: number, rec: { blob: Blob; duration: number; size: number; thumb: string | null }, replyToId: number | null = null): Promise<void> {
+  sentSound();
   nudgeWallpaper();
   toLatestOf(chatId);
   const res = (await engine.call({ type: 'sendFile', chatId, body: '', file: rec.blob, name: 'video.mp4', mime: rec.blob.type.split(';')[0] || 'video/mp4', kind: 'round', duration: rec.duration, w: rec.size, h: rec.size, thumb: rec.thumb, replyToId })) as { clientId: string };
@@ -409,6 +424,7 @@ export async function sendRound(chatId: number, rec: { blob: Blob; duration: num
 export function markListened(chatId: number, id: number): void { engine.call({ type: 'listened', chatId, id }).catch(() => {}); }
 
 export async function sendFile(chatId: number, file: File, caption: string, replyToId: number | null = null, groupId: string | null = null): Promise<void> {
+  sentSound();
   nudgeWallpaper();
   toLatestOf(chatId);
   const img = await describeImage(file);
@@ -424,6 +440,7 @@ export async function sendFile(chatId: number, file: File, caption: string, repl
 
 /** Несколько файлов разом — одной группой (в ленте один пузырь, как альбом в Telegram); подпись — у последнего. */
 export async function sendFiles(chatId: number, files: File[], caption: string, replyToId: number | null = null): Promise<void> {
+  sentSound();
   if (files.length === 1) return sendFile(chatId, files[0], caption, replyToId);
   const groupId = crypto.randomUUID();
   for (let i = 0; i < files.length; i++) await sendFile(chatId, files[i], i === files.length - 1 ? caption : '', i === 0 ? replyToId : null, groupId);
