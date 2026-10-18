@@ -1,4 +1,6 @@
 import { player } from '@relay/ui';
+import { useEffect, useState } from 'preact/hooks';
+import { MEDIA_CACHE } from './mediaCache';
 import { localPreview } from './data';
 import { getGlobal, setGlobal } from './global';
 import { showToast } from './settingsData';
@@ -26,6 +28,38 @@ export function musicTrack(m: MusicMsg, chatId: number): Track {
     performer: a.performer || senderName(m.senderId), chatId: m.chatId ?? chatId, msgId: m.id ?? null, attId: a.id };
 }
 
+/* ---------- файл трека в кэше ---------- */
+// Плеер берёт файл кусками (Range) — такие ответы кэш не хранит. Как в Telegram, включённый трек скачиваем целиком
+// в фоне: он попадает в кэш вложений (Service Worker), и значок «скачать» у пузыря больше не нужен.
+const cached = new Map<string, boolean>();
+const waiters = new Map<string, Set<(v: boolean) => void>>();
+function setCached(path: string, v: boolean) { cached.set(path, v); waiters.get(path)?.forEach((f) => f(v)); }
+
+async function checkCached(path: string): Promise<boolean> {
+  try { return !!(await (await caches.open(MEDIA_CACHE)).match(path)); } catch { return false; }
+}
+
+function warm(src: string) {
+  if (!/^\/files\/[0-9a-f-]{36}$/.test(src) || cached.get(src)) return;
+  void fetch(src).then((r) => r.blob()).then(() => checkCached(src)).then((v) => { if (v) setCached(src, true); }).catch(() => {});
+}
+
+/** Есть ли файл вложения в кэше (для значка «скачать»); пока неизвестно — false. */
+export function useFileCached(id: string | undefined): boolean {
+  const path = id ? `/files/${id}` : '';
+  const [v, setV] = useState(() => (path ? cached.get(path) ?? false : false));
+  useEffect(() => {
+    if (!path) return;
+    let set = waiters.get(path);
+    if (!set) waiters.set(path, (set = new Set()));
+    set.add(setV);
+    if (!cached.has(path)) void checkCached(path).then((x) => { if (!cached.get(path)) setCached(path, x); });
+    else setV(cached.get(path)!);
+    return () => { set!.delete(setV); };
+  }, [path]);
+  return v;
+}
+
 /** Играть (или пауза) трек; плейлист — переданный список (новые сверху: «дальше» — старее, как в Telegram). */
 export function toggleMusic(m: MusicMsg, list: MusicMsg[], chatId: number): void {
   const tracks = list.filter((x) => x.attachment).map((x) => musicTrack(x, chatId));
@@ -33,6 +67,7 @@ export function toggleMusic(m: MusicMsg, list: MusicMsg[], chatId: number): void
   const cur = player.playerState();
   if (cur.key !== t.key) player.setPlaylist(tracks);
   player.toggle(t);
+  warm(t.src);
 }
 
 /* ---------- музыка в профиле ---------- */
@@ -76,5 +111,6 @@ export function playProfile(userId: number, tracks: ProfileTrack[], i = 0): void
   if (!list.length) return;
   player.setPlaylist(list);
   player.play(list[i]);
+  warm(list[i].src);
   setGlobal({ playlistOpen: true });
 }

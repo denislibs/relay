@@ -5,7 +5,7 @@ import { memo } from 'preact/compat';
 import { useEffect, useLayoutEffect, useRef, useState } from 'preact/hooks';
 import { clearFocus, ensureNames, focusMessage, localPreview, markListened, moveWindow, react, savePosition, savedPosition, seen } from '../data';
 import { activeFrame, frameByKey, getGlobal, useGlobal } from '../global';
-import { toggleMusic, trackTitle } from '../music';
+import { toggleMusic, trackTitle, useFileCached } from '../music';
 import { showToast } from '../settingsData';
 import { clock, dayKey, dayLabel, fileSize } from './format';
 
@@ -97,8 +97,8 @@ const Row = memo(function Row({ chatId, voiceTitle, author, onAuthor, onOpen, hl
   if (att && !m.deleted && att.kind === 'audio') {
     return (
       <div class={flash ? 'app-msg app-msg-flash' : 'app-msg'} data-key={m.key} data-sort={m.sort as number}>
-        <MusicBubble
-          from={out ? 'out' : 'in'} tail={end} groupStart={start} pos={pos}
+        <CachedMusic
+          fileId={att.id ?? undefined} from={out ? 'out' : 'in'} tail={end} groupStart={start} pos={pos}
           trackKey={m.key as string} title={att.title || trackTitle(att.name)} performer={att.performer ?? undefined} cover={att.thumb ?? undefined}
           duration={att.duration ?? 0} size={fileSize(att.size)}
           onDownload={att.id ? () => { const a = document.createElement('a'); a.href = fileUrl(att, true); a.download = att.name; a.click(); } : undefined}
@@ -181,6 +181,12 @@ function firstVisible(root: HTMLElement): { key: string; sort: number; top: numb
 }
 
 const NO_MESSAGES: Item[] = [];
+
+/** Музыкальный пузырь + есть ли файл в кэше (значок «скачать» в углу — только пока файла нет). */
+function CachedMusic({ fileId, ...props }: { fileId?: string } & Record<string, unknown>) {
+  const downloaded = useFileCached(fileId);
+  return <MusicBubble {...props} downloaded={downloaded} />;
+}
 
 export function Feed({ frameKey, active, chatId, meId, peerName, group, onAuthor, stick, onMenu, highlight }: {
   frameKey: string; active: boolean;   // кадр стека чатов; active — на экране (только он отмечает прочитанное)
@@ -278,6 +284,24 @@ export function Feed({ frameKey, active, chatId, meId, peerName, group, onAuthor
       if (next !== null && Math.abs(next - top) > 0.5) { programmatic.current++; root.scrollTop = next; }
     });
   }, [messages, partial]);
+
+  // высота ленты меняется сверху (выезжает плеер) или снизу (растёт поле ввода) — держим низ на месте, как в Telegram:
+  // что было у нижнего края, там и остаётся. Колбэк ResizeObserver — после раскладки, до отрисовки, без лишнего кадра
+  useEffect(() => {
+    const root = el.current;
+    if (!root) return;
+    let last = root.clientHeight;
+    const ro = new ResizeObserver(() => {
+      const ch = root.clientHeight, d = last - ch;
+      last = ch;
+      if (!d || !placed.current) return;
+      const max = root.scrollHeight - ch;
+      const next = stick.current ? max : Math.max(0, Math.min(max, root.scrollTop + d));
+      if (Math.abs(next - root.scrollTop) > 0.5) { programmatic.current++; root.scrollTop = next; }
+    });
+    ro.observe(root);
+    return () => ro.disconnect();
+  }, []);
 
   // датчики у краёв окна: видны с запасом 750 px — сдвигаем окно; новые датчики (по ключу) срабатывают сразу
   const edges = useRef<IntersectionObserver | null>(null);
