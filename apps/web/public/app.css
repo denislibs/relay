@@ -696,7 +696,7 @@ html[data-anim="0"] .app-chatcol, html[data-anim="0"] .app-chatcol-below, html[d
 .app-plinks-stack .app-svc { will-change: auto; }
 
 /* ---------- Шапка профиля с фото (Info): квадрат во всю ширину, имя поверх, полоски, листание ---------- */
-.app-gallery { position: relative; flex-shrink: 0; width: 100%; aspect-ratio: 1; overflow: hidden; border-radius: var(--radius-lg, 16px); background: #111; touch-action: pan-y; user-select: none; cursor: pointer; margin-bottom: var(--space-3); }
+.app-gallery { position: relative; flex-shrink: 0; width: 100%; aspect-ratio: 1; overflow: hidden; border-radius: 0; background: #111; touch-action: pan-y;   /* углы — от самой панели, своё скругление лишнее */ user-select: none; cursor: pointer; margin-bottom: var(--space-3); }
 .app-gallery-track { position: absolute; inset: 0; transition: transform 320ms cubic-bezier(.22, .9, .3, 1); will-change: transform; }
 .app-gallery.is-dragging .app-gallery-track { transition: none; }
 .app-gallery-slide { position: absolute; top: 0; width: 100%; height: 100%; overflow: hidden; }
