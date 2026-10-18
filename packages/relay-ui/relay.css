@@ -1451,7 +1451,10 @@ html[data-blur="0"] .rl-shell .rl-msgmenu .rl-menu, html[data-blur="0"] .rl-shel
 @keyframes rl-pslot-in { from { grid-template-rows: 0fr; } }
 .rl-presence[data-state="closing"] .rl-playerslot { animation: rl-pslot-out 300ms cubic-bezier(.33, 1, .68, 1) forwards; }
 @keyframes rl-pslot-out { to { grid-template-rows: 0fr; } }
-.rl-playerclip { min-height: 0; overflow: hidden; padding-bottom: 8px; animation: rl-unclip 1ms 300ms forwards; }   /* после раскрытия — меню плеера не обрезаются */
+.rl-playerclip { min-height: 0; overflow: hidden; animation: rl-unclip 1ms 300ms forwards; }
+.rl-playerclip > .rl-playerbar { margin-bottom: 10px; }   /* до шапки 10px, как в Telegram */
+/* промежуток колонки (16px) гасим всегда — и пока остров раскрывается из нуля, и когда исчезает: шапка не прыгает */
+.rl-shell .rl-playerslot { margin-bottom: calc(-1 * var(--space-float)); }   /* после раскрытия — меню плеера не обрезаются */
 @keyframes rl-unclip { to { overflow: visible; } }
 .rl-presence[data-state="closing"] .rl-playerclip { animation: none; overflow: hidden; }
 .rl-playerbar { position: relative; z-index: 4; height: 3rem; box-sizing: border-box;
@@ -1558,3 +1561,6 @@ html[data-blur="0"] .rl-menu, html[data-blur="0"] .rl-attach { -webkit-backdrop-
 .rl-music-seek::before { background: color-mix(in srgb, currentColor 22%, transparent); }
 .rl-music-seek > i { background: var(--brand-strong); transform: scaleX(0); transform-origin: left; }
 .rl-music-meta { display: flex; justify-content: flex-end; align-items: center; gap: 3px; font: 400 12px/14px var(--font-sans); color: var(--meta, var(--ink-muted)); margin-top: 2px; }
+
+/* плеер и закреплённое — такие же острова, как шапка: непрозрачный фон и тень Telegram */
+.rl-shell .rl-playerbar { border-radius: 24px; background: var(--raised); box-shadow: var(--tg-shadow-header); -webkit-backdrop-filter: none; backdrop-filter: none; }

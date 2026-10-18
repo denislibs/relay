@@ -642,9 +642,9 @@ html[data-anim="0"] .app-chatcol, html[data-anim="0"] .app-chatcol-below, html[d
 .app-pl-profile:hover { filter: brightness(1.05); }
 
 /* Закреплённые под шапкой (PinnedBar.tsx) — отдельный остров, как в Telegram; лента получает место под ним */
-.rl-shell:has(.app-pins) .rl-feed { --top-zone: calc(var(--header-h) + var(--space-float) + 56px); }
-.app-pins { position: absolute; left: 0; right: 0; top: calc(100% + 8px); z-index: 2; display: flex; align-items: center; gap: 4px; height: 48px; padding: 0 6px 0 12px; border-radius: var(--radius-panel, 16px);
-  background: var(--glass, var(--raised)); box-shadow: var(--shadow-panel); -webkit-backdrop-filter: blur(20px) saturate(1.4); backdrop-filter: blur(20px) saturate(1.4); animation: rl-pbar-in 260ms cubic-bezier(.25, 1, .5, 1) both; }
+.rl-shell:has(.app-pins) .rl-feed { --top-zone: calc(var(--header-h) + var(--space-float) + 58px); }
+.app-pins { position: absolute; left: 0; right: 0; top: calc(100% + 10px); z-index: 2; display: flex; align-items: center; gap: 4px; height: 48px; padding: 0 6px 0 12px; border-radius: 24px;
+  background: var(--raised); box-shadow: var(--tg-shadow-header); animation: rl-pbar-in 260ms cubic-bezier(.25, 1, .5, 1) both; }
 .rl-presence[data-state="closing"] .app-pins { animation: rl-pbar-out 220ms cubic-bezier(.33, 1, .68, 1) forwards; }
 .app-pins-main { flex: 1; min-width: 0; display: flex; align-items: center; gap: 10px; height: 100%; padding: 0; border: 0; background: none; color: inherit; text-align: left; cursor: pointer; }
 .app-pins-track { flex: none; width: 2px; height: 36px; overflow: hidden; border-radius: 1px; }
