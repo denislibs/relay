@@ -1031,6 +1031,7 @@ function PanelHeader(props) {
   // как в Telegram: пока панель не прокручена, шапка сливается с фоном; содержимое уехало под неё —
   // шапка становится цвета карточки с линией снизу (слушаем прокрутку соседей внутри той же панели)
   var ref = useRef(null);
+  var scrolled = useState(false);   // в состоянии, а не classList: перерисовка (смена заголовка) класс не сотрёт
   useEffect(function () {
     var head = ref.current, host = head && head.parentElement;
     if (!host) return;
@@ -1039,14 +1040,15 @@ function PanelHeader(props) {
       var t = e.target;
       if (!t || t === document || !host.contains(t) || head.contains(t)) return;
       var next = t.scrollTop > 2;
-      if (next !== on) { on = next; head.classList.toggle('is-scrolled', on); }
+      if (next !== on) { on = next; scrolled[1](on); }
     };
     host.addEventListener('scroll', onScroll, true);
     return function () { host.removeEventListener('scroll', onScroll, true); };
   }, []);
-  return h('div', { ref: ref, class: 'rl-panel-head' },
-    h(IconButton, { icon: props.icon || 'close', label: props.closeLabel || 'Закрыть', onClick: props.onClose }),
-    h('h2', null, props.title),
+  return h('div', { ref: ref, class: cx('rl-panel-head', scrolled[0] && 'is-scrolled', props.class) },
+    h(IconButton, { key: props.icon || 'close', icon: props.icon || 'close', label: props.closeLabel || 'Закрыть', onClick: props.onClose, class: 'rl-panel-head-btn' }),
+    // смена заголовка (например «Информация» → «Общие медиа») — с мягким проявлением нового текста
+    h('h2', null, h('span', { key: String(props.title), class: 'rl-panel-head-title' }, props.title)),
     props.action ? h(IconButton, { icon: props.action.icon, label: props.action.label, onClick: props.action.onClick }) : null,
     props.actions ? props.actions.map(function (a, i) { return h(IconButton, { key: i, icon: a.icon, label: a.label, onClick: a.onClick, 'aria-haspopup': a.popup ? 'menu' : undefined }); }) : null);
 }

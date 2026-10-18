@@ -7,7 +7,7 @@ import { Avatar, Icon, InfoRow, PanelHeader, RichText, SettingsIcon, SlideStack,
 import type { Item } from '@relay/sync-engine/src/types';
 import { chatTone, isSystemChat } from './format';
 import type { ComponentChildren } from 'preact';
-import { useEffect, useState } from 'preact/hooks';
+import { useEffect, useRef, useState } from 'preact/hooks';
 import { syncMuted } from '../notify';
 import { activeFrame, setGlobal, useGlobal } from '../global';
 
@@ -63,6 +63,22 @@ export function Info() {
   const [slide, setSlide] = useState(0);
   const [viewer, setViewer] = useState<number | null>(null);
   useEffect(() => { setSlide(0); setViewer(null); }, [chatId]);
+  // как в Telegram: вкладки медиа доехали до верха и прилипли — шапка становится «Общие медиа» со стрелкой наверх
+  const body = useRef<HTMLDivElement>(null);
+  const [media, setMedia] = useState(false);
+  const measuring = useRef(false);
+  const onBodyScroll = () => {
+    if (measuring.current) return;
+    measuring.current = true;
+    requestAnimationFrame(() => {
+      measuring.current = false;
+      const el = body.current, tabs = el?.querySelector('.rl-aside-tabs, .app-sm-heading');
+      const stuck = !!el && !!tabs && el.scrollTop > 0 && tabs.getBoundingClientRect().top - el.getBoundingClientRect().top <= 1;
+      setMedia((m) => (m === stuck ? m : stuck));
+    });
+  };
+  const toTop = () => body.current?.scrollTo({ top: 0, behavior: 'smooth' });
+  useEffect(() => { setMedia(false); }, [chatId]);
   const subtitle = system ? 'служебные уведомления' : group ? (members ? membersStatus(members, false) : 'группа') : myPeer ? lastSeenText(!!myPeer.online, myPeer.lastSeen as string | null) : '';
 
   const addContact = () => setGlobal({ newContact: {
@@ -80,8 +96,9 @@ export function Info() {
       <EditContactPanel userId={peerId} onDone={() => setPage('info')} />
     ) : (
     <div class="rl-sidepage">
-      <PanelHeader icon="close" closeLabel="Закрыть" title={group ? 'Информация о группе' : 'Информация'} onClose={close} action={action} />
-      <div class="rl-aside-body">
+      <PanelHeader class={media ? 'is-media' : undefined} icon={media ? 'arrowLeft' : 'close'} closeLabel={media ? 'Наверх' : 'Закрыть'}
+        title={media ? 'Общие медиа' : group ? 'Информация о группе' : 'Информация'} onClose={media ? toTop : close} action={media ? undefined : action} />
+      <div class="rl-aside-body" ref={body} onScroll={onBodyScroll}>
         {gallery.length ? (
           <ProfileGallery photos={gallery} index={slide} onIndex={setSlide} onOpen={setViewer}
             name={<>{title}{system ? <Verified size={22} /> : null}</>}

@@ -399,6 +399,14 @@ body { margin: 0; font-family: var(--font-sans); color: var(--ink); background: 
 .rl-panel { display: flex; flex-direction: column; background: var(--bg); color: var(--ink); overflow-y: auto; }
 .rl-panel-head { position: relative; z-index: 2; display: flex; align-items: center; gap: var(--space-4); height: 60px; padding: 0 var(--space-3); flex-shrink: 0; transition: background-color 180ms ease, box-shadow 180ms ease; }
 .rl-panel-head.is-scrolled { background: var(--card); box-shadow: 0 1px 0 color-mix(in srgb, var(--ink) 10%, transparent); }
+/* вкладки медиа прилипли под шапку: шапка — того же цвета, что панель, без линии; ниже — размытая вуаль вкладок, тающая вниз */
+.rl-panel-head.is-media, .rl-panel-head.is-media.is-scrolled { background: var(--page); box-shadow: none; }
+.rl-panel-head-title { display: inline-block; }
+.rl-panel-head.is-media .rl-panel-head-title { animation: rl-head-title 220ms cubic-bezier(.2, .8, .2, 1) both; }
+@keyframes rl-head-title { from { opacity: 0; transform: translateY(4px); } }
+.rl-panel-head.is-media .rl-panel-head-btn .rl-icon { animation: rl-head-btn 220ms cubic-bezier(.2, .8, .2, 1) both; }
+@keyframes rl-head-btn { from { opacity: 0; transform: rotate(-45deg) scale(.7); } }
+@media (prefers-reduced-motion: reduce) { .rl-panel-head-title, .rl-panel-head-btn .rl-icon { animation: none; } }
 .rl-panel-head h2 { flex: 1; margin: 0; font: 400 16px/22px var(--font-sans); }
 .rl-profile { display: flex; flex-direction: column; align-items: center; gap: var(--space-1); padding: var(--space-4) var(--space-4) var(--space-6); text-align: center; }
 .rl-avatar-tone { background: linear-gradient(color-mix(in srgb, var(--avatar-tone), #fff 22%), var(--avatar-tone)); color: #fff; }
