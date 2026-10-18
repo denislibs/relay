@@ -58,7 +58,31 @@ export function newLoginMessage(device: string, ip: string | null, at: Date): { 
   return { body, entities: [{ type: 'bold', offset: 0, length: title.length }] };
 }
 
-const WELCOME_TITLE = 'Добро пожаловать в Relay';
+/**
+ * Приветствие нового пользователя: что такое Relay, с чего начать, что сюда приходит.
+ * Собирается кусками, чтобы смещения форматирования считались сами: [текст, стиль?].
+ */
+export function welcomeMessage(): { body: string; entities: Entity[] } {
+  const parts: [string, Entity['type']?][] = [
+    ['Добро пожаловать в Relay 👋', 'bold'],
+    ['\n\nRelay работает даже без сети: переписка хранится на устройстве, а сообщения уйдут сами, как только появится интернет.\n\n'],
+    ['С чего начать', 'bold'],
+    ['\n• '], ['Фото профиля', 'bold'], [' — Настройки → нажмите на свой кружок. Можно поставить и GIF или видео.'],
+    ['\n• '], ['Новый чат или группа', 'bold'], [' — круглая кнопка с карандашом внизу списка чатов.'],
+    ['\n• '], ['Ссылки', 'bold'], [' на GitHub, Instagram и другие профили — Настройки → Изменить профиль.'],
+    ['\n• '], ['Оформление текста', 'bold'], [': выделите слова и выберите стиль — '], ['жирный', 'bold'], [', '], ['курсив', 'italic'], [', '], ['зачёркнутый', 'strike'], [', '], ['спойлер', 'spoiler'], ['.'],
+    ['\n• '], ['Голосовые', 'bold'], [' — микрофон справа от поля ввода.'],
+    ['\n\nСюда будут приходить коды входа и предупреждения о новых входах в аккаунт. Писать сюда можно, но ответа не будет 🙂'],
+  ];
+  let body = '';
+  const entities: Entity[] = [];
+  for (const [text, type] of parts) {
+    if (type) entities.push({ type, offset: body.length, length: text.length });
+    body += text;
+  }
+  return { body, entities };
+}
+
 const ensured = new Set<number>();
 /**
  * Служебный чат «Relay» есть у каждого с первого входа (как «Telegram» в Telegram): нет — создаём с приветствием
@@ -68,8 +92,7 @@ export async function ensureServiceChat(userId: number): Promise<void> {
   if (ensured.has(userId)) return;
   const [has] = await sql`select 1 from service_chats where user_id = ${userId}`;
   if (!has) {
-    const body = `${WELCOME_TITLE}\n\nЗдесь будут служебные уведомления: коды входа и сообщения о новых входах в аккаунт. Писать сюда можно, но ответа не будет.`;
-    await sql.begin((tx) => postService(tx, userId, { type: 'welcome', body, entities: [{ type: 'bold', offset: 0, length: WELCOME_TITLE.length }] }, { push: false }));
+    await sql.begin((tx) => postService(tx, userId, { type: 'welcome', ...welcomeMessage() }, { push: false }));
   }
   ensured.add(userId);
 }

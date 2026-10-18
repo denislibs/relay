@@ -59,3 +59,13 @@ test('110_service.sql runs again harmlessly: one system user, pending code sign-
   const [d] = await sql`insert into sessions (token_hash, user_id, expires_at) values (${crypto.randomUUID()}, ${a}, now() + interval '1 day') returning confirmed_at`;
   expect(d.confirmed_at).not.toBeNull();
 });
+
+test('welcome text: formatting lands exactly on its words', async () => {
+  const { welcomeMessage } = await import('../src/domain/service');
+  const { body, entities } = welcomeMessage();
+  const cut = (t: string) => entities.filter((e) => e.type === t).map((e) => body.slice(e.offset, e.offset + e.length));
+  expect(cut('bold')).toContain('Добро пожаловать в Relay 👋');
+  expect(cut('italic')).toEqual(['курсив']);
+  expect(cut('strike')).toEqual(['зачёркнутый']);
+  expect(cut('spoiler')).toEqual(['спойлер']);
+});
