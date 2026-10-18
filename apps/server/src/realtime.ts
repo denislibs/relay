@@ -1,6 +1,6 @@
 import type { Server } from 'bun';
 import { sql } from './db';
-import { heartbeat } from './domain/liveRegistry';
+import { processAlive, processGone } from './domain/liveRegistry';
 import { closeLive, parseEnded, terminatedFrame, touchLive } from './domain/sessions';
 
 const POKE = JSON.stringify({ op: 'poke' });
@@ -26,6 +26,10 @@ export async function notifyLatency(timeoutMs = 2000): Promise<number | null> {
 
 /** Будит сокеты пользователей, чьи журналы изменились в любом процессе сервера. */
 export async function startRealtime(server: Server): Promise<() => Promise<void>> {
+  await processAlive();   // до первого сокета: иначе его счётчик не попадёт в сумму
+  // каждые 30 с: процесс жив (ключ на 90 с) — иначе его счётчики онлайна не учитываются
+  const alive = setInterval(() => { processAlive().catch((e) => console.error('live registry:', e)); }, 30_000);
+  alive.unref?.();
   const sub = await sql.listen('updates', (payload) => {
     let users: number[];
     try { users = JSON.parse(payload); } catch { return; }
@@ -40,8 +44,11 @@ export async function startRealtime(server: Server): Promise<() => Promise<void>
   // раз в минуту: активность всех открытых сокетов и страховка на потерянный NOTIFY (сеанс пропал — сокет закрываем)
   const timer = setInterval(() => {
     touchLive().catch((e) => console.error('sessions touch:', e));
-    heartbeat().catch((e) => console.error('live registry:', e));   // строки «онлайн» этого процесса живы
   }, 60_000);
   timer.unref?.();
-  return async () => { clearInterval(timer); await sub.unlisten(); await subSessions.unlisten(); };
+  return async () => {
+    clearInterval(timer); clearInterval(alive);
+    await sub.unlisten(); await subSessions.unlisten();
+    await processGone().catch(() => {});
+  };
 }

@@ -1,4 +1,5 @@
 import { MEDIA_TABS, parseClientFrame, type MediaTab } from '@relay/protocol';
+import { createBus } from './bus';
 import { clientIp } from './device';
 import type { Server } from 'bun';
 import { existsSync, statSync } from 'node:fs';
@@ -8,6 +9,7 @@ import { announceLogin, announceSessionsChanged, assertConfirmed, checkSocket, c
 import { createChat, getChatMedia, getChatMediaCounts, getHistory, getMessagesByIds, listChats, listChatsPage } from './domain/chats';
 import { sql } from './db';
 import { DomainError } from './domain/errors';
+import { processAlive } from './domain/liveRegistry';
 import { connected, disconnected, listPresence, type Publish } from './domain/presence';
 import { searchMessages } from './domain/search';
 import { confirmUpload, createUpload, downloadTtl, fileFor, signedDownload } from './domain/files';
@@ -27,7 +29,11 @@ const STATUS: Record<string, number> = { bad_frame: 400, too_long: 400, username
 const fail = (code: string) => Response.json({ code }, { status: STATUS[code] ?? 500 });
 
 /** checkedAt — когда сокет последний раз отмечал активность и проверял свой сеанс (domain/sessions.checkSocket). */
-export type WsData = { userId: number; sessionId: number; checkedAt: number };
+export type WsData = {
+  userId: number; sessionId: number; checkedAt: number;
+  /** open дошёл до конца (подписки в Valkey, «в сети»): close ждёт его, чтобы «ушёл» не обогнал «пришёл». */
+  opened?: Promise<void>;
+};
 
 /** /dev/stats: ответ на пользователя живёт devStatsMs (тесты ставят 0). */
 let devStatsMs = 1000;
@@ -73,7 +79,9 @@ function serveStatic(pathname: string): Response {
 }
 
 export function createServer(opts: { port: number }): Server {
-  const publish: Publish = (topic, msg) => { server.publish(topic, msg); };
+  // кадры мимо журнала — через Valkey, чтобы дошли до сокетов в любом процессе
+  const bus = createBus((topic, msg) => { server.publish(topic, msg); });
+  const publish: Publish = (topic, msg) => bus.publish(topic, msg);
   const server = Bun.serve<WsData>({
     port: opts.port,
     fetch: async (req, server) => withCookie(req, await (async () => {
@@ -298,16 +306,26 @@ export function createServer(opts: { port: number }): Server {
     })()),
     websocket: {
       open(ws) {
-        ws.subscribe(`user:${ws.data.userId}`);
-        ws.subscribe(`session:${ws.data.sessionId}`);
-        trackSocket(ws.data.sessionId, ws);
-        countSocket(ws.data.userId, 1);
-        connected(publish, ws.data.userId).catch((err) => console.error('presence:', err));
+        const { userId, sessionId } = ws.data;
+        ws.subscribe(`user:${userId}`);
+        ws.subscribe(`session:${sessionId}`);
+        trackSocket(sessionId, ws);
+        countSocket(userId, 1);
+        // подписка в Valkey — до объявления «в сети»: ответные кадры собеседников не должны потеряться
+        ws.data.opened = Promise.all([bus.listen(`user:${userId}`), bus.listen(`session:${sessionId}`)])
+          .catch((err) => console.error('bus:', err))
+          .then(() => connected(publish, userId))
+          .catch((err) => console.error('presence:', err));
       },
       close(ws) {
-        untrackSocket(ws.data.sessionId, ws);
-        countSocket(ws.data.userId, -1);
-        disconnected(publish, ws.data.userId);
+        const { userId, sessionId } = ws.data;
+        untrackSocket(sessionId, ws);
+        countSocket(userId, -1);
+        void (ws.data.opened ?? Promise.resolve()).then(() => {
+          disconnected(publish, userId);
+          void bus.unlisten(`user:${userId}`).catch((err) => console.error('bus:', err));
+          void bus.unlisten(`session:${sessionId}`).catch((err) => console.error('bus:', err));
+        });
       },
       async message(ws, raw) {
         const frame = parseClientFrame(typeof raw === 'string' ? raw : new TextDecoder().decode(raw));
@@ -322,5 +340,10 @@ export function createServer(opts: { port: number }): Server {
       },
     },
   });
+  // серверы без startRealtime (тесты) тоже считаются живыми для реестра онлайна
+  void processAlive().catch((e) => console.error('live registry:', e));
+  // остановка сервера закрывает и соединение-подписчик (иначе тесты и процесс не завершатся)
+  const stop = server.stop.bind(server);
+  server.stop = (async (force?: boolean) => { await bus.close(); return stop(force); }) as typeof server.stop;
   return server;
 }

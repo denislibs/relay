@@ -1,8 +1,12 @@
 import { sql } from '../src/db';
+import { processAlive } from '../src/domain/liveRegistry';
+import { flushOwn } from '../src/valkey';
 
 export async function resetDb(): Promise<void> {
+  await flushOwn();   // онлайн и прочее эфемерное прошлых тестов
+  await processAlive();   // ключ «процесс жив» стёрт вместе с остальным — серверы этого процесса снова в сумме онлайна
   await sql`truncate login_attempts, login_pending, srp_challenges, qr_logins, webauthn_challenges, sessions, chats, chat_members, messages, user_seq, updates,
-                     jobs, jobs_dead, live_conns, dev_mail restart identity cascade`;
+                     jobs, jobs_dead, dev_mail restart identity cascade`;
   // системного пользователя «Relay» (миграция 110_service) не трогаем
   await sql`delete from users where not system`;
   // engine-тесты делают truncate users на общей базе и стирают строку миграции 110_service — вернуть, если пропала
