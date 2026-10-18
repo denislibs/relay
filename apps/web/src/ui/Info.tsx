@@ -92,6 +92,7 @@ export function Info() {
           <div class="rl-profile-name">{title}</div>
           <div class={'rl-profile-sub' + (myPeer?.online ? ' app-online' : '')}>{subtitle || ' '}</div>
         </div>
+        <Expand show={!group && !!(user?.links as ProfileLink[] | undefined)?.length}>{!group && user ? <ProfileLinks links={(user.links as ProfileLink[] | undefined) ?? []} /> : null}</Expand>
         <div class="rl-aside-group">
           {/* как в Telegram: имя уже в шапке — строками только то, чего там нет, и только если поле заполнено */}
           <Expand show={!group && !!user}>{!group && user ? <PeerRows user={user} /> : null}</Expand>
@@ -172,7 +173,6 @@ function PeerRows({ user }: { user: Item }) {
         </div>
       ) : null}
       {birthday ? <InfoRow tile="purple" icon="cake" title={birthday} subtitle="День рождения" /> : null}
-      <ProfileLinks links={(user.links as ProfileLink[] | undefined) ?? []} />
     </>
   );
 }
