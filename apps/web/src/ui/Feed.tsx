@@ -54,7 +54,7 @@ const Row = memo(function Row({ chatId, voiceTitle, author, onAuthor, onOpen, hl
       <div class={flash ? 'app-msg app-msg-media app-msg-flash' : 'app-msg app-msg-media'} data-key={m.key} data-sort={m.sort as number}>
         <MediaBubble
           from={out ? 'out' : 'in'} tail={end} groupStart={start} appear={appear}
-          items={album.map((x) => { const a = x.attachment as Att; return { src: localPreview(x.key) ?? (a.id ? fileUrl(a) : undefined), thumb: a.thumb, alt: a.name, w: a.w, h: a.h }; })}
+          items={album.map((x) => { const a = x.attachment as Att; return { src: localPreview(x.key) ?? (a.id ? fileUrl(a) : undefined), thumb: a.thumb, alt: a.name, w: a.w, h: a.h, mkey: x.key }; })}
           state={busy ? 'loading' : 'ready'} progress={busy ? Math.min(...album.map((x) => (typeof x.progress === 'number' ? x.progress as number : 1))) : undefined}
           caption={cap ? <MessageText text={cap.body as string} entities={cap.entities as Entity[] | undefined} highlight={hl} /> : undefined}
           time={clock(last.createdAt as string)} status={out ? last.status : undefined}
@@ -566,7 +566,8 @@ export function Feed({ frameKey, active, chatId, meId, peerName, group, onAuthor
   const onOpen = useRef((m: Item) => { const k = keysRef.current.indexOf(m.key); if (k >= 0) setViewer(-1 - k); }).current;
   const originOf = useRef((k: number) => {
     const key = keysRef.current[k];
-    return key ? el.current?.querySelector<HTMLElement>(`[data-key="${CSS.escape(key)}"] .rl-media-cell`) ?? null : null;
+    // плитка альбома помечена ключом своего сообщения (data-mkey), одиночное фото — ключом строки
+    return key ? el.current?.querySelector<HTMLElement>(`[data-mkey="${CSS.escape(key)}"], [data-key="${CSS.escape(key)}"] .rl-media-cell`) ?? null : null;
   }).current;
 
   const authorRef = useRef(onAuthor); authorRef.current = onAuthor;
