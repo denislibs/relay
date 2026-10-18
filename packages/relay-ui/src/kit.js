@@ -1028,7 +1028,23 @@ function Switch(props) {
     h('span', { class: 'rl-switch-track', 'aria-hidden': 'true' }, h('span', { class: 'rl-switch-knob' })));
 }
 function PanelHeader(props) {
-  return h('div', { class: 'rl-panel-head' },
+  // как в Telegram: пока панель не прокручена, шапка сливается с фоном; содержимое уехало под неё —
+  // шапка становится цвета карточки с линией снизу (слушаем прокрутку соседей внутри той же панели)
+  var ref = useRef(null);
+  useEffect(function () {
+    var head = ref.current, host = head && head.parentElement;
+    if (!host) return;
+    var on = false;
+    var onScroll = function (e) {
+      var t = e.target;
+      if (!t || t === document || !host.contains(t) || head.contains(t)) return;
+      var next = t.scrollTop > 2;
+      if (next !== on) { on = next; head.classList.toggle('is-scrolled', on); }
+    };
+    host.addEventListener('scroll', onScroll, true);
+    return function () { host.removeEventListener('scroll', onScroll, true); };
+  }, []);
+  return h('div', { ref: ref, class: 'rl-panel-head' },
     h(IconButton, { icon: props.icon || 'close', label: props.closeLabel || 'Закрыть', onClick: props.onClose }),
     h('h2', null, props.title),
     props.action ? h(IconButton, { icon: props.action.icon, label: props.action.label, onClick: props.action.onClick }) : null,
