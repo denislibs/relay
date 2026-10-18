@@ -1,3 +1,5 @@
+import type { ProfileLink } from '@relay/protocol';
+import { ProfileLinks } from './links/ProfileLinks';
 import { Avatar, EmptyState, FolderTabs, InfoRow, LazyImage, PanelHeader, RichText, SettingsIcon, SlideStack, Switch } from '@relay/ui';
 import type { Item } from '@relay/sync-engine/src/types';
 import { chatMedia, focusMessage } from '../data';
@@ -170,6 +172,7 @@ function PeerRows({ user }: { user: Item }) {
         </div>
       ) : null}
       {birthday ? <InfoRow tile="purple" icon="cake" title={birthday} subtitle="День рождения" /> : null}
+      <ProfileLinks links={(user.links as ProfileLink[] | undefined) ?? []} />
     </>
   );
 }

@@ -1,4 +1,4 @@
-import type { Birthday, Me, PublicUser } from '@relay/protocol';
+import type { Birthday, Me, ProfileLink, PublicUser } from '@relay/protocol';
 import { getAll } from './idb';
 import { cleanName, cleanText } from './text';
 import type { PendingOp } from './ops';
@@ -8,6 +8,8 @@ import type { Item } from './types';
 /** Ключи операций профиля в очереди ops. */
 export const OP_PROFILE = 'profile';
 export const OP_USERNAME = 'username';
+/** ссылки — отдельной операцией: список целиком, новая правка заменяет неотправленную, не трогая правку имени */
+export const OP_LINKS = 'links';
 
 export interface ProfilePatch { firstName?: string; lastName?: string; bio?: string | null; birthday?: Birthday | null }
 
@@ -61,7 +63,7 @@ export class ProfileCache {
     if (u.id === this.userId) {
       // запись журнала не новее уже применённого ответа (своя же правка, эхо) — не откатываем
       if (seq !== undefined && this.me?.seq !== undefined && seq <= this.me.seq) return;
-      this.setMe({ userId: u.id, name: u.name, firstName: u.firstName, lastName: u.lastName, username: u.username, bio: u.bio, birthday: u.birthday, phone: u.phone ?? this.me?.phone ?? null, seq: seq ?? this.me?.seq });
+      this.setMe({ userId: u.id, name: u.name, firstName: u.firstName, lastName: u.lastName, username: u.username, bio: u.bio, birthday: u.birthday, links: u.links ?? [], phone: u.phone ?? this.me?.phone ?? null, seq: seq ?? this.me?.seq });
       return;
     }
     if (seq !== undefined) {
@@ -119,6 +121,8 @@ export function meView(base: Me | null, ops: readonly PendingOp[]): Me | null {
       if (b.bio !== undefined) me.bio = cleanBio(b.bio);
       if (b.birthday !== undefined) me.birthday = b.birthday;
       me.name = `${me.firstName} ${me.lastName}`.trim();
+    } else if (op.key === OP_LINKS) {
+      me = { ...me, links: (op.body as { links: ProfileLink[] }).links };
     } else if (op.key === OP_USERNAME) {
       me = { ...me, username: cleanUsername((op.body as { username: string | null }).username) };
     }
@@ -136,7 +140,7 @@ export function meItem(me: Me | null): Item[] {
 /** Элемент подписки user: свой — из meView (с оптимистичными правками), чужой — из кэша. */
 export function userItem(p: ProfileCache, me: Me | null, userId: number): Item[] {
   if (userId === p.userId) {
-    return me ? [{ key: 'u' + userId, id: me.userId, name: me.name, firstName: me.firstName, lastName: me.lastName, username: me.username, bio: me.bio, birthday: me.birthday, phone: me.phone }] : [];
+    return me ? [{ key: 'u' + userId, id: me.userId, name: me.name, firstName: me.firstName, lastName: me.lastName, username: me.username, bio: me.bio, birthday: me.birthday, phone: me.phone, links: me.links ?? [] }] : [];
   }
   const u = p.users.get(userId);
   return u ? [{ key: 'u' + userId, ...u }] : [];

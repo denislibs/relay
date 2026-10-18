@@ -1,3 +1,4 @@
+import { ProfileLinks } from '../links/ProfileLinks';
 import { releaseMediaCache } from '../../storageInfo';
 import { ConfirmDialog, InfoRow, SettingsIcon, Menu, PanelHeader, Presence, ProfileHeader, RichText, Section, Toast, peerTone } from '@relay/ui';
 import { useEffect, useRef, useState } from 'preact/hooks';
@@ -88,7 +89,8 @@ export function Main() {
   const username = me.username ? '@' + me.username.replace(/^@/, '') : null;
   const bio = me.bio?.trim() || null;
   const birthday = me.birthday ? birthdayText(me.birthday) : null;
-  const hasInfo = !!(phone || username || bio || birthday);
+  const links = me.links ?? [];
+  const hasInfo = !!(phone || username || bio || birthday || links.length);
 
   return (
     <div class="rl-sidepage" aria-label="Настройки">
@@ -124,6 +126,7 @@ export function Main() {
               </div>
             ) : null}
             {birthday ? <InfoRow tile="purple" icon="cake" title={birthday} subtitle="День рождения" onClick={() => copy(birthday)} /> : null}
+            <ProfileLinks links={links} />
           </Section>
         ) : null}
         <Section>

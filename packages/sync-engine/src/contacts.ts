@@ -132,7 +132,7 @@ export function contactsView(base: ReadonlyMap<number, ContactBase>, ops: readon
     const b = (op.body ?? {}) as { firstName?: string; lastName?: string; note?: string };
     if (op.method === 'DELETE') { view.delete(id); continue; }
     if (op.method === 'POST') {
-      const user = prev?.user ?? users.get(id) ?? { id, name: '', firstName: '', lastName: '', username: null, bio: null, birthday: null, phone: null };
+      const user = prev?.user ?? users.get(id) ?? { id, name: '', firstName: '', lastName: '', username: null, bio: null, birthday: null, phone: null, links: [] };
       view.set(id, {
         userId: id, firstName: cleanName(b.firstName ?? ''), lastName: cleanName(b.lastName ?? ''),
         note: b.note !== undefined ? cleanText(b.note) : prev?.note ?? '', user, presence: prev?.presence, pending: true,

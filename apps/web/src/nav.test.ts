@@ -2,7 +2,7 @@ import { beforeEach, expect, test } from 'bun:test';
 import { PAGES, back, bindChatDepth, bindForTest, go, onEscape, orderFor, pageIndex, parentOf, popChats, popForTest, pushChat, setLeaveGuard } from './nav';
 
 const concrete = [
-  'chats', 'settings', 'settings/profile', 'settings/general', 'settings/general/wallpaper', 'settings/notifications',
+  'chats', 'settings', 'settings/profile', 'settings/profile/links', 'settings/profile/links/new', 'settings/general', 'settings/general/wallpaper', 'settings/notifications',
   'settings/privacy', 'settings/privacy/rule/lastSeen', 'settings/privacy/rule/lastSeen/allow', 'settings/privacy/rule/phone/deny',
   'settings/privacy/blocked', 'settings/data', 'settings/data/autoload/photo', 'settings/performance', 'settings/sessions',
   'settings/dev', 'contacts', 'contacts/42/edit',
