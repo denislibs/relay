@@ -142,6 +142,7 @@ export class Engine {
         this.dev.stop();
         if (this.frameTimer) { clearTimeout(this.frameTimer); this.frameTimer = null; }
         if (this.readTimer) { clearTimeout(this.readTimer); this.readTimer = null; }
+        if (this.outboxTimer) { clearTimeout(this.outboxTimer); this.outboxTimer = null; }
         for (const t of this.typingTimers.values()) clearTimeout(t);
         this.typingTimers.clear();
         this.watchers.clear();
@@ -182,6 +183,7 @@ export class Engine {
     this.dev.stop();
     if (this.frameTimer) { clearTimeout(this.frameTimer); this.frameTimer = null; }
     if (this.readTimer) { clearTimeout(this.readTimer); this.readTimer = null; }
+    if (this.outboxTimer) { clearTimeout(this.outboxTimer); this.outboxTimer = null; }
     this.watchers.clear();
     this.onObsoleteCb();
   }
@@ -226,6 +228,7 @@ export class Engine {
     this.dev.stop();
     if (this.frameTimer) { clearTimeout(this.frameTimer); this.frameTimer = null; }
     if (this.readTimer) { clearTimeout(this.readTimer); this.readTimer = null; }
+    if (this.outboxTimer) { clearTimeout(this.outboxTimer); this.outboxTimer = null; }
     this.watchers.clear();
     await this.whenIdle(2000).catch((e) => console.warn(String(e)));
     await this.store.flush();
@@ -347,32 +350,57 @@ export class Engine {
     this.frameTimer = setTimeout(() => { this.frameTimer = null; this.emit(); }, this.cfg.frameMs ?? 16);
   }
 
-  /** Загрузка файла: XHR с прогрессом (есть в воркерах браузера), иначе fetch. Ошибка сети — повтор позже. */
-  private upload(clientId: string, blob: Blob, a: { name: string; mime: string; w: number | null; h: number | null; kind?: string; duration?: number | null; waveform?: string | null }): Promise<{ id: string }> {
-    const qs = new URLSearchParams({ name: a.name });
-    if (a.w && a.h) { qs.set('w', String(a.w)); qs.set('h', String(a.h)); }
-    if (a.kind === 'voice' || a.kind === 'round') { qs.set('kind', a.kind); if (a.duration) qs.set('duration', String(a.duration)); if (a.waveform) qs.set('waveform', a.waveform); }
-    const url = `${this.cfg.httpBase}/upload?${qs}`;
+  /**
+   * Загрузка файла в три шага, тело идёт мимо нашего сервера:
+   *  1) POST /uploads — запись pending и подписанный PUT (срок — минуты, поэтому ссылку не храним: повтор берёт новую);
+   *  2) PUT прямо в хранилище: XHR с прогрессом (есть в воркерах браузера), иначе fetch; без cookie и наших заголовков;
+   *  3) POST /uploads/:id/confirm — сервер сверяет размер и тип по HEAD, только после этого вложение можно отправить.
+   * Сеть и истёкшая ссылка — повтор позже с начала; отказ сервера (не тот размер/тип, too_long) — сообщение failed.
+   */
+  private async upload(clientId: string, blob: Blob, a: { name: string; mime: string; w: number | null; h: number | null; kind?: string; duration?: number | null; waveform?: string | null }): Promise<{ id: string }> {
     const offline: ReqError = { code: 'offline', retry: true };
-    if (typeof XMLHttpRequest === 'undefined') {
-      return this.dev.fetch(url, { method: 'POST', body: blob, headers: { 'content-type': a.mime, ...(this.cfg.headers ?? {}) }, credentials: 'include' })
-        .then(async (r) => { if (this.session.unauthorized(r.status)) throw offline; if (!r.ok) throw { code: 'upload', retry: r.status >= 500 } satisfies ReqError; return r.json() as Promise<{ id: string }>; }, () => { throw offline; });
-    }
+    const api = async <T>(path: string, body?: unknown): Promise<T> => {
+      const r = await this.dev.fetch(this.cfg.httpBase + path, {
+        method: 'POST', credentials: 'include', headers: { 'content-type': 'application/json', ...(this.cfg.headers ?? {}) }, body: body === undefined ? undefined : JSON.stringify(body),
+      }).catch(() => { throw offline; });
+      if (this.session.unauthorized(r.status)) throw offline;
+      if (!r.ok) {
+        const code = ((await r.json().catch(() => null)) as { code?: string } | null)?.code ?? 'upload';
+        // upload_missing: объект не дошёл (ссылка истекла посреди обрыва) — начнём заново
+        throw { code, retry: r.status >= 500 || code === 'upload_missing' } as ReqError;
+      }
+      return r.json() as Promise<T>;
+    };
+    const meta: Record<string, unknown> = { name: a.name, mime: a.mime, size: blob.size };
+    if (a.w && a.h) { meta.w = a.w; meta.h = a.h; }
+    if (a.kind === 'voice' || a.kind === 'round') { meta.kind = a.kind; if (a.duration) meta.duration = a.duration; if (a.waveform) meta.waveform = a.waveform; }
+    const intent = await api<{ id: string; url: string; mime: string }>('/uploads', meta);
+    await this.put(clientId, intent.url, blob, intent.mime);
+    return api<{ id: string }>(`/uploads/${intent.id}/confirm`);
+  }
+
+  /** PUT по подписанной ссылке. 403 — ссылка истекла (долго были офлайн между шагами): повтор возьмёт новую. */
+  private put(clientId: string, url: string, blob: Blob, mime: string): Promise<void> {
+    const offline: ReqError = { code: 'offline', retry: true };
+    const fail = (status: number): ReqError => ({ code: 'upload', retry: status >= 500 || status === 403 || status === 408 || status === 429 });
     if (this.dev.sim.offline) return Promise.reject(offline);   // dev: офлайн (задержку XHR имитатор не накладывает)
+    if (typeof XMLHttpRequest === 'undefined') {
+      return fetch(url, { method: 'PUT', body: blob, headers: { 'content-type': mime } })
+        .then((r) => { if (!r.ok) throw fail(r.status); }, () => { throw offline; });
+    }
     return new Promise((resolve, reject) => {
       const x = new XMLHttpRequest();
-      x.open('POST', url);
-      x.withCredentials = true;
-      x.setRequestHeader('content-type', a.mime);
-      for (const [k, v] of Object.entries(this.cfg.headers ?? {})) x.setRequestHeader(k, v);
+      x.open('PUT', url);
+      x.setRequestHeader('content-type', mime);
       let last = 0;
       x.upload.onprogress = (e) => {
         if (!e.lengthComputable || e.timeStamp - last < 100) return; // не чаще 10 раз в секунду
         last = e.timeStamp;
-        this.store.setProgress(clientId, e.loaded / e.total);
+        // последние проценты — подтверждение на сервере: кольцо не стоит на 100%, пока сообщение ещё не ушло
+        this.store.setProgress(clientId, 0.98 * e.loaded / e.total);
         this.changed();
       };
-      x.onload = () => (x.status < 300 ? resolve(JSON.parse(x.responseText)) : this.session.unauthorized(x.status) ? reject(offline) : reject({ code: 'upload', retry: x.status >= 500 } satisfies ReqError));
+      x.onload = () => (x.status < 300 ? resolve() : reject(fail(x.status)));
       x.onerror = () => reject(offline);
       x.send(blob);
     });
@@ -1116,6 +1144,15 @@ export class Engine {
   // Очередь отправки
   // =====================================================================
 
+  /** Повтор очереди при живой сети (5xx, истёкшая ссылка на загрузку): 1, 2, 5, 10, 30 с. Обрыв сети ждёт переподключения. */
+  private outboxTimer: ReturnType<typeof setTimeout> | null = null;
+  private outboxAttempt = 0;
+  private retryOutboxLater(): void {
+    if (this.outboxTimer || this.closed) return;
+    const ms = [1000, 2000, 5000, 10_000, 30_000][Math.min(this.outboxAttempt++, 4)];
+    this.outboxTimer = setTimeout(() => { this.outboxTimer = null; this.pumpOutbox(); }, ms);
+  }
+
   private pumpOutbox(): void {
     if (this.resetting || !this.online || !this.ready || this.pumping) return;
     this.pumping = true;
@@ -1136,11 +1173,12 @@ export class Engine {
             const att = next.attachment ? { id: next.attachment.id, thumb: next.attachment.thumb ?? null } : null;
             const r = await this.request({ op: 'send', reqId: '', clientId: next.clientId, chatId: next.chatId, body: next.body, entities: next.entities ?? [], replyToId: next.replyToId, attachment: att });
             this.store.ack(next.clientId, r.id as number, r.createdAt as string);
+            this.outboxAttempt = 0;
             if (att) delBlob(this.db, next.clientId).catch(() => {});
           } catch (e) {
             // отказ сервера: код остаётся у сообщения (blocked — интерфейс заменит поле ввода плашкой)
             if ((e as ReqError).retry === false) this.store.fail(next.clientId, (e as ReqError).code);
-            else break; // сеть — дождёмся переподключения, порядок сохранится
+            else { if ((e as ReqError).code !== 'offline') this.retryOutboxLater(); break; } // сеть — дождёмся переподключения, порядок сохранится
           }
           await this.store.flush();
           this.changed();

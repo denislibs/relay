@@ -28,6 +28,16 @@ export function isMediaRequest(req: Request, origin: string): boolean {
   return u.origin === origin && !u.search && /^\/files\/[0-9a-f-]{36}$/.test(u.pathname);
 }
 
+/**
+ * Сеть для вложения: /files/<id> отвечает 302 на подписанную ссылку хранилища (другой origin). Запрос <img> идёт
+ * в режиме no-cors, и после такого редиректа ответ непрозрачный — его нельзя ни измерить, ни сохранить. Поэтому
+ * спрашиваем сами в режиме cors (хранилище отдаёт CORS-заголовки), cookie — только нашему origin. Не вышло
+ * (хранилище без CORS) — исходный запрос как есть: картинка покажется, просто не попадёт в кэш.
+ */
+export function fetchMedia(req: Request, net: (r: Request) => Promise<Response> = fetch): Promise<Response> {
+  return net(new Request(req.url, { mode: 'cors', credentials: 'same-origin', redirect: 'follow' })).catch(() => net(req));
+}
+
 const stamp = (body: Blob, res: Response, saved: number, used: number): Response => {
   const h = new Headers(res.headers);
   h.set(SAVED, String(saved));

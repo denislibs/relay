@@ -10,7 +10,7 @@ import { sql } from './db';
 import { DomainError } from './domain/errors';
 import { connected, disconnected, listPresence, type Publish } from './domain/presence';
 import { searchMessages } from './domain/search';
-import { fileFor, MAX_FILE, storeUpload } from './domain/files';
+import { confirmUpload, createUpload, downloadTtl, fileFor, signedDownload } from './domain/files';
 import { handleFrame } from './ws';
 import { journalStats } from './domain/journal';
 import { notifyLatency } from './realtime';
@@ -21,7 +21,7 @@ import { deleteFolder, getSettings, reorderFolders, saveFolder, setNotify, setPr
 import { publicAuthRoute, privateAuthRoute } from './authRoutes';
 import { addContact, blockUser, listBlocked, listContacts, removeContact, resolveUser, unblockUser, updateContact } from './domain/contacts';
 
-const STATUS: Record<string, number> = { bad_frame: 400, too_long: 400, username_invalid: 400, username_reserved: 400, username_taken: 409, bio_too_long: 400, note_too_long: 400, name_invalid: 400, birthday_invalid: 400, links_invalid: 400, folder_title: 400, folder_empty: 400, folder_too_many_chats: 400, folder_emoji: 400, folders_limit: 400, unauthorized: 401, not_member: 403, blocked: 403, not_found: 404, code_invalid: 400, code_expired: 400, flood: 429, fresh_session: 403, password_invalid: 400, password_missing: 400, recovery_unavailable: 400, email_invalid: 400, qr_expired: 400, passkey_not_found: 404, passkey_invalid: 400, forbidden: 403 };
+const STATUS: Record<string, number> = { bad_frame: 400, too_long: 400, username_invalid: 400, username_reserved: 400, username_taken: 409, bio_too_long: 400, note_too_long: 400, name_invalid: 400, birthday_invalid: 400, links_invalid: 400, folder_title: 400, folder_empty: 400, folder_too_many_chats: 400, folder_emoji: 400, folders_limit: 400, unauthorized: 401, not_member: 403, blocked: 403, not_found: 404, code_invalid: 400, code_expired: 400, flood: 429, fresh_session: 403, password_invalid: 400, password_missing: 400, recovery_unavailable: 400, email_invalid: 400, qr_expired: 400, passkey_not_found: 404, passkey_invalid: 400, forbidden: 403, upload_missing: 409, upload_mismatch: 400, upload_pending: 409 };
 const fail = (code: string) => Response.json({ code }, { status: STATUS[code] ?? 500 });
 
 /** checkedAt — когда сокет последний раз отмечал активность и проверял свой сеанс (domain/sessions.checkSocket). */
@@ -49,7 +49,7 @@ function withCookie(req: Request, res: Response | undefined): Response | undefin
 
 const INLINE_MIME = /^(image\/(jpeg|png|webp|gif|avif)|video\/(mp4|webm|ogg|quicktime)|audio\/(mpeg|mp4|ogg|webm|wav|x-wav|aac|flac))$/;
 
-const API = /^\/(health|me|users|contacts|settings|privacy|blocks|chats|presence|search|upload|files|push|sessions|ws|dev|logout|auth)(\/|$)/;
+const API = /^\/(health|me|users|contacts|settings|privacy|blocks|chats|presence|search|uploads|files|push|sessions|ws|dev|logout|auth)(\/|$)/;
 
 /** Статика клиента из WEB_DIST. Путь не может выйти за папку; пути без расширения — SPA, отдаём index.html. */
 function serveStatic(pathname: string): Response {
@@ -193,29 +193,29 @@ export function createServer(opts: { port: number }): Server {
           if (devStatsCache.size > 1000) devStatsCache.clear();
           try { return Response.json(await body); } catch (e) { devStatsCache.delete(userId); throw e; }
         }
-        if (req.method === 'POST' && url.pathname === '/upload') {
-          // тело — сам файл; ?name=…&w=…&h=… (размеры фото считает клиент, он его уже декодировал)
-          const len = Number(req.headers.get('content-length') ?? 0);
-          if (len > MAX_FILE) return fail('too_long');
-          const n = (k: string) => { const v = Number(url.searchParams.get(k)); return Number.isFinite(v) && v > 0 ? v : undefined; };
-          // голосовое/кружок: ?kind=voice|round&duration=…&waveform=… (волну и длительность считает записывающий клиент)
-          return Response.json(await storeUpload(userId, await req.arrayBuffer(), { mime: req.headers.get('content-type') ?? '', name: url.searchParams.get('name') ?? 'file', w: n('w'), h: n('h'),
-            kind: url.searchParams.get('kind') ?? undefined, duration: n('duration'), waveform: url.searchParams.get('waveform') ?? undefined }));
+        if (req.method === 'POST' && url.pathname === '/uploads') {
+          // шаг 1: {name, mime, size, w?, h?, kind?, duration?, waveform?} → подписанный PUT; сам файл идёт мимо сервера
+          // (размеры фото считает клиент, он его уже декодировал; волну и длительность голосового — записывающий клиент)
+          const b = (await req.json().catch(() => null)) as Record<string, unknown> | null;
+          if (!b || typeof b !== 'object') return fail('bad_frame');
+          const num = (v: unknown) => (typeof v === 'number' && Number.isFinite(v) && v > 0 ? v : undefined);
+          const str = (v: unknown) => (typeof v === 'string' ? v : undefined);
+          return Response.json(await createUpload(userId, { mime: str(b.mime) ?? '', name: str(b.name) ?? 'file', size: typeof b.size === 'number' ? b.size : NaN,
+            w: num(b.w), h: num(b.h), kind: str(b.kind), duration: num(b.duration), waveform: str(b.waveform) }));
         }
+        const confirmUp = /^\/uploads\/([0-9a-f-]{36})\/confirm$/.exec(url.pathname);
+        if (req.method === 'POST' && confirmUp) return Response.json(await confirmUpload(userId, confirmUp[1]));
         const file = /^\/files\/([0-9a-f-]{36})$/.exec(url.pathname);
         if ((req.method === 'GET' || req.method === 'HEAD') && file) {
           const f = await fileFor(userId, file[1]);
           if (!f) return new Response('Not found', { status: 404 });
-          // inline — только то, что браузер покажет как медиа; HTML, SVG и прочее с нашего домена исполнять нельзя
-          const safe = INLINE_MIME.test(f.mime);
-          const download = url.searchParams.get('download') === '1' || !safe;
-          return new Response(Bun.file(f.path), { headers: {
-            'content-type': safe ? f.mime : 'application/octet-stream',
-            'content-security-policy': "default-src 'none'; sandbox",
-            // id — содержимое не меняется: кэшируем навсегда, но только в этом браузере
-            'cache-control': 'private, max-age=31536000, immutable',
-            'content-disposition': `${download ? 'attachment' : 'inline'}; filename*=UTF-8''${encodeURIComponent(f.name)}`,
-            'x-content-type-options': 'nosniff',
+          // inline — только то, что браузер покажет как медиа; HTML, SVG и прочее отдаём вложением как octet-stream
+          const inline = INLINE_MIME.test(f.mime) && url.searchParams.get('download') !== '1';
+          // ссылка живёт минуты: редирект кэшируем вдвое короче, чтобы браузер не пошёл по уже истёкшей
+          return new Response(null, { status: 302, headers: {
+            location: signedDownload(f, { inline }),
+            'cache-control': `private, max-age=${Math.floor(downloadTtl() / 2)}`,
+            'referrer-policy': 'no-referrer',
           } });
         }
         const media = /^\/chats\/(\d+)\/media$/.exec(url.pathname);

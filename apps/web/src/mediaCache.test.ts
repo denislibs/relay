@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test';
-import { DEFAULT_POLICY, isMediaRequest, loadPolicy, MAX_ITEM, savePolicy, serveMedia, sweepMedia } from './mediaCache';
+import { DEFAULT_POLICY, fetchMedia, isMediaRequest, loadPolicy, MAX_ITEM, savePolicy, serveMedia, sweepMedia } from './mediaCache';
 
 /** Cache Storage в памяти: ключ — путь. */
 function fakeCaches() {
@@ -30,6 +30,21 @@ describe('isMediaRequest', () => {
     expect(isMediaRequest(req(ID, { method: 'HEAD' }), 'http://app')).toBe(false);
     expect(isMediaRequest(req('/files/../me'), 'http://app')).toBe(false);
     expect(isMediaRequest(req(), 'http://other')).toBe(false);
+  });
+});
+
+describe('fetchMedia', () => {
+  test('asks in cors mode (the 302 to the storage stays readable); falls back to the original request', async () => {
+    const seen: Request[] = [];
+    const res = await fetchMedia(req(ID, { mode: 'no-cors' }), async (r) => { seen.push(r); return ok(3); });
+    expect(res.status).toBe(200);
+    // credentials: 'same-origin' Bun не хранит в Request (всегда include) — проверяем режим и редирект
+    expect(seen.map((r) => [new URL(r.url).pathname, r.mode, r.redirect])).toEqual([[ID, 'cors', 'follow']]);
+    const tries: Request[] = [];
+    const orig = req(ID);
+    const back = await fetchMedia(orig, async (r) => { tries.push(r); if (tries.length === 1) throw new TypeError('CORS'); return ok(2); });
+    expect(back.status).toBe(200);
+    expect(tries[1]).toBe(orig);
   });
 });
 

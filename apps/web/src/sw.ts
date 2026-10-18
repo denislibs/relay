@@ -1,12 +1,12 @@
 /// <reference lib="webworker" />
-// Кэш оболочки приложения: холодный старт без сети. Вложения (/files/<id>) — свой кэш relay-media
-// (mediaCache.ts). Остальной API и WebSocket — только сеть.
-import { isMediaRequest, loadPolicy, savePolicy, serveMedia, sweepMedia, type MediaPolicy } from './mediaCache';
+// Кэш оболочки приложения: холодный старт без сети. Вложения (/files/<id> → 302 на подписанную ссылку хранилища) —
+// свой кэш relay-media (mediaCache.ts), ключ — /files/<id>, сама ссылка в кэш не попадает. Остальной API и WebSocket — только сеть.
+import { fetchMedia, isMediaRequest, loadPolicy, savePolicy, serveMedia, sweepMedia, type MediaPolicy } from './mediaCache';
 declare const __BUILD__: string;
 const sw = self as unknown as ServiceWorkerGlobalScope;
 const CACHE = 'relay-shell-' + __BUILD__;
 const SHELL = ['/', '/main.js', '/relay.css', '/tokens.css', '/app.css', '/shared.worker.js', '/dedicated.worker.js', '/spoiler.worker.js'];
-const API = /^\/(health|me|users|contacts|settings|privacy|blocks|chats|presence|search|upload|files|push|sessions|ws|dev|logout)(\/|$)/;
+const API = /^\/(health|me|users|contacts|settings|privacy|blocks|chats|presence|search|uploads|files|push|sessions|ws|dev|logout)(\/|$)/;
 
 sw.addEventListener('install', (e) => {
   e.waitUntil(caches.open(CACHE).then((c) => c.addAll(SHELL)).then(() => sw.skipWaiting()));
@@ -54,7 +54,7 @@ function networkFirst(req: Request, fallback: () => Promise<Response | undefined
 sw.addEventListener('fetch', (e) => {
   const url = new URL(e.request.url);
   if (isMediaRequest(e.request, location.origin) && e.request.mode !== 'navigate') {
-    e.respondWith(serveMedia(caches, e.request, (r) => fetch(r)).then(({ response, background, stored: put }) => {
+    e.respondWith(serveMedia(caches, e.request, (r) => fetchMedia(r)).then(({ response, background, stored: put }) => {
       if (background) e.waitUntil(background.then(() => { if (put && ++stored % SWEEP_EVERY === 0) return sweep(); }));
       return response;
     }));
