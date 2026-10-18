@@ -32,10 +32,10 @@ const FIRST_PAINT = 24;   // при открытии внизу первым к�
 type Quote = { id: number; sort: number; body: string; senderId: number };
 type Att = { id: string; kind: 'photo' | 'file' | 'voice' | 'round' | 'audio'; title?: string | null; performer?: string | null; mime: string; name: string; size: number; w: number | null; h: number | null; thumb?: string | null; duration?: number | null; waveform?: string | null };
 const fileUrl = (a: Att, download = false) => `/files/${a.id}${download ? '?download=1' : ''}`;
-type RowProps = { chatId: number; voiceTitle: string; author?: string; onAuthor?: (m: Item) => void; onOpen: (m: Item) => void; hl?: string; m: Item; meId: number; out: boolean; start: boolean; end: boolean; pos?: 'single' | 'first' | 'middle' | 'last'; quoted?: Quote | null; quoteAuthor?: string; quoteTone?: number; appear: boolean; flash: boolean; onReact: (m: Item, emoji: string) => void; album?: Item[]; onUser?: (userId: number) => void; sel?: boolean; onQuickForward?: (m: Item) => void; grp?: boolean; avaName?: string };
+type RowProps = { chatId: number; voiceTitle: string; author?: string; onAuthor?: (m: Item) => void; onOpen: (m: Item) => void; hl?: string; m: Item; meId: number; out: boolean; start: boolean; end: boolean; pos?: 'single' | 'first' | 'middle' | 'last'; quoted?: Quote | null; quoteAuthor?: string; quoteTone?: number; appear: boolean; flash: boolean; onReact: (m: Item, emoji: string) => void; album?: Item[]; onUser?: (userId: number) => void; sel?: boolean; onQuickForward?: (m: Item) => void; grp?: boolean };
 
 /** Строка ленты: перерисовывается только если изменилось её сообщение или место в группе. */
-const Row = memo(function Row({ chatId, voiceTitle, author, onAuthor, onOpen, hl, m, meId, out, start, end, pos, quoted, quoteAuthor, quoteTone, appear, flash, onReact, album, onUser, sel, onQuickForward, grp, avaName }: RowProps) {
+const Row = memo(function Row({ chatId, voiceTitle, author, onAuthor, onOpen, hl, m, meId, out, start, end, pos, quoted, quoteAuthor, quoteTone, appear, flash, onReact, album, onUser, sel, onQuickForward, grp }: RowProps) {
   // реакции: по эмодзи — сколько и есть ли моя
   const list = (m.reactions as { userId: number; emoji: string }[] | undefined) ?? [];
   const chips: { emoji: string; count: number; mine: boolean }[] = [];
@@ -53,13 +53,6 @@ const Row = memo(function Row({ chatId, voiceTitle, author, onAuthor, onOpen, hl
   // круглая стрелка «Переслать» у пузыря при наведении — у медиа и длинных сообщений (не в режиме выбора)
   const aside = sel === undefined && onQuickForward && m.id != null && !m.deleted && !m.service && (att || (m.body as string).length > 300)
     ? <button type="button" class="app-fwd-quick" aria-label="Переслать" onClick={(e) => { e.stopPropagation(); onQuickForward(album?.[0] ?? m); }}><Icon name="forward" size={20} /></button> : null;
-  // в группе у входящих — аватар автора у последнего сообщения пачки (как в Telegram); клик — чат с ним
-  const sid = m.senderId as number;
-  const ava = grp && avaName !== undefined ? (
-    <button type="button" class="app-msg-ava" aria-label={avaName || 'Автор'} tabIndex={-1} onClick={(e) => { e.stopPropagation(); onUser?.(sid); }}>
-      <Avatar name={avaName} tone={peerTone(sid)} size={34} {...senderAvatar(sid)} />
-    </button>
-  ) : null;
   const check = sel !== undefined ? <span class="app-msg-check" aria-hidden="true"><Icon name="check" size={14} strokeWidth={3} /></span> : null;
   const pending = m.status === 'pending' && typeof m.progress === 'number' && (m.progress as number) < 1;
   const mark = m.id != null ? <i class="app-mark" data-mid={m.id as number} aria-hidden="true" /> : null;
@@ -71,7 +64,7 @@ const Row = memo(function Row({ chatId, voiceTitle, author, onAuthor, onOpen, hl
     const busy = album.some((x) => x.status === 'pending' && typeof x.progress === 'number' && (x.progress as number) < 1);
     return (
       <div class={wrap('app-msg app-msg-media')} data-key={m.key} data-sort={m.sort as number}>
-        {check}{ava}
+        {check}
         <MediaBubble
           fwd={fwd}
           aside={aside}
@@ -91,7 +84,7 @@ const Row = memo(function Row({ chatId, voiceTitle, author, onAuthor, onOpen, hl
     const src = localPreview(m.key) ?? (att.id ? fileUrl(att) : undefined);
     return (
       <div class={wrap('app-msg app-msg-media')} data-key={m.key} data-sort={m.sort as number}>
-        {check}{ava}
+        {check}
         <MediaBubble
           fwd={fwd}
           aside={aside}
@@ -112,7 +105,7 @@ const Row = memo(function Row({ chatId, voiceTitle, author, onAuthor, onOpen, hl
     const unheard = m.id != null && !m.listened;
     return (
       <div class={wrap('app-msg')} data-key={m.key} data-sort={m.sort as number}>
-        {check}{ava}
+        {check}
         <VoiceBubble
           fwd={fwd}
           aside={aside}
@@ -131,7 +124,7 @@ const Row = memo(function Row({ chatId, voiceTitle, author, onAuthor, onOpen, hl
     const unseen = m.id != null && !m.listened;
     return (
       <div class={wrap('app-msg')} data-key={m.key} data-sort={m.sort as number}>
-        {check}{ava}
+        {check}
         <RoundBubble
           fwd={fwd}
           aside={aside}
@@ -149,7 +142,7 @@ const Row = memo(function Row({ chatId, voiceTitle, author, onAuthor, onOpen, hl
   if (att && !m.deleted && att.kind === 'audio') {
     return (
       <div class={wrap('app-msg')} data-key={m.key} data-sort={m.sort as number}>
-        {check}{ava}
+        {check}
         <CachedMusic
           fwd={fwd}
           aside={aside}
@@ -173,7 +166,7 @@ const Row = memo(function Row({ chatId, voiceTitle, author, onAuthor, onOpen, hl
     const ext = (att.name.split('.').pop() ?? 'file').slice(0, 4);
     return (
       <div class={wrap('app-msg')} data-key={m.key} data-sort={m.sort as number}>
-        {check}{ava}
+        {check}
         <FileBubble
           fwd={fwd}
           aside={aside}
@@ -189,7 +182,7 @@ const Row = memo(function Row({ chatId, voiceTitle, author, onAuthor, onOpen, hl
   }
   return (
     <div class={wrap('app-msg')} data-key={m.key} data-sort={m.sort as number}>
-      {check}{ava}
+      {check}
       <Bubble
         fwd={fwd}
         aside={aside}
@@ -658,18 +651,37 @@ export function Feed({ frameKey, active, chatId, meId, peerName, group, onAuthor
     while (run.length < 10) { const x = shown[i + run.length]; if (!isPhoto(x) || x.groupId !== m.groupId || x.senderId !== m.senderId) break; run.push(x); }
     if (run.length > 1) { albums.set(m.key, run); run.slice(1).forEach((x) => inAlbum.add(x.key)); }
   }
+  // в группе входящие одного автора — «пачка» в общей обёртке: аватар автора внизу пачки липкий (sticky), как в Telegram —
+  // при прокрутке длинной пачки он держится у низа экрана и уезжает вместе с её началом
+  let run: preact.VNode[] | null = null, runKey = '', runSender = 0;
+  const flushRun = () => {
+    if (!run) return;
+    const sid = runSender, who = names[sid] ?? '';
+    out.push(
+      <div class="app-run" key={'run' + runKey}>
+        {run}
+        <button type="button" class="app-run-ava" aria-label={who || 'Автор'} tabIndex={-1} onClick={(e) => { e.stopPropagation(); onUserRow(sid); }}>
+          <Avatar name={who} tone={peerTone(sid)} size={34} {...senderAvatar(sid)} />
+        </button>
+      </div>,
+    );
+    run = null;
+  };
   shown.forEach((m, i) => {
     if (inAlbum.has(m.key)) return;   // уже нарисовано в альбоме выше
     const day = dayKey(m.createdAt as string);
     const mine = m.senderId === meId;
+    if (day !== prevDay) flushRun();
     if (day !== prevDay) { const at = m.createdAt as string; out.push(<DateDivider key={'d' + day} onClick={() => setPickDate(new Date(at))}>{dayLabel(at)}</DateDivider>); }
     if (!unreadShown && unreadFrom != null && !mine && m.id != null && (m.id as number) > unreadFrom) {
       unreadShown = true;
+      flushRun();
       out.push(<div class="app-unread-divider" key="unread" role="separator"><span>Непрочитанные сообщения</span></div>);
     }
     // служебное «создал(а) группу» — плашкой по центру, как в Telegram (не пузырём)
     if ((m.service as { type?: string } | undefined)?.type === 'group_created') {
       const who = mine ? 'Вы создали' : `${names[m.senderId as number] ?? peerName} создал(а)`;
+      flushRun();
       out.push(<div class="rl-action" key={m.key} role="note"><span>{who} группу «{m.body as string}»</span></div>);
       prevDay = day; prevSender = null;
       return;
@@ -684,7 +696,7 @@ export function Feed({ frameKey, active, chatId, meId, peerName, group, onAuthor
     const prevM = shown[i - 1];
     const same = (x: Item | undefined) => !!x && !!m.groupId && x.groupId === m.groupId && x.senderId === m.senderId && !x.deleted;
     const pos = !m.groupId || m.deleted ? 'single' : same(prevM) && same(next) ? 'middle' : same(prevM) ? 'last' : same(next) ? 'first' : 'single';
-    out.push(
+    const row = (
       <Row
         pos={pos}
         key={m.key}
@@ -693,7 +705,6 @@ export function Feed({ frameKey, active, chatId, meId, peerName, group, onAuthor
         onUser={onUserRow}
         sel={selecting ? selecting.includes(m.key as string) : undefined}
         grp={group && !mine}
-        avaName={group && !mine && end ? names[m.senderId as number] ?? '' : undefined}
         onQuickForward={onQuickForward}
         hl={highlight && (m.body as string).toLowerCase().includes(highlight.toLowerCase()) ? highlight : undefined}
         m={m}
@@ -711,10 +722,20 @@ export function Feed({ frameKey, active, chatId, meId, peerName, group, onAuthor
         appear={initial.current !== null && !initial.current.has(m.key)}
         flash={flashKey === m.key || !!album?.some((x) => x.key === flashKey)}
         album={album}
-      />,
+      />
     );
+    if (group && !mine) {
+      if (run && (start || runSender !== m.senderId)) flushRun();
+      if (!run) { run = []; runKey = m.key as string; runSender = m.senderId as number; }
+      run.push(row);
+      if (end) flushRun();
+    } else {
+      flushRun();
+      out.push(row);
+    }
     prevDay = day; prevSender = m.senderId;
   });
+  flushRun();
   out.push(<div class="app-sentinel" data-dir="newer" key={'n' + (messages[messages.length - 1]?.key ?? '')} aria-hidden="true" />);
 
   return (

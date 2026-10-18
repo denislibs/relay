@@ -212,6 +212,8 @@ export function Chat({ chatId, frameKey, active }: { chatId: number; frameKey: s
   const theyBlocked = !!peerUser?.blocksMe;
   const plate = iBlocked ? 'mine' : theyBlocked ? 'theirs' : null;
 
+  // режим выбора сообщений (панель вместо поля ввода)
+  const selKeys = useGlobal((s) => (s.selecting?.chatId === chatId ? s.selecting.keys : null));
   // высота композера (растёт с цитатой ответа) → --composer-h: лента уходит под него ровно на эту высоту
   useLayoutEffect(() => {
     const main = shell.current?.closest<HTMLElement>('.app-chatcol');   // своя колонка стека
@@ -230,6 +232,7 @@ export function Chat({ chatId, frameKey, active }: { chatId: number; frameKey: s
     };
     const ro = new ResizeObserver(([e]) => {
       target = Math.round(e.borderBoxSize?.[0]?.blockSize ?? wrap.offsetHeight);
+      if (!target) return;   // поле убрали из дерева (замена панелью выбора) — ноль не настоящая высота
       if (!committed || !isHeavyAnimating()) { requestMutation(commit); return; }
       // сдвиг — сразу, в этом же кадре (наблюдатель срабатывает до отрисовки): лента идёт ровно вместе с полем
       if (feed && stick.current) feed.style.transform = target === committed ? '' : `translateY(${committed - target}px)`;
@@ -237,7 +240,7 @@ export function Chat({ chatId, frameKey, active }: { chatId: number; frameKey: s
     });
     ro.observe(wrap);
     return () => { ro.disconnect(); if (feed) feed.style.transform = ''; };
-  }, [plate, system]);   // плашка вместо поля ввода — другой элемент
+  }, [plate, system, !!selKeys]);   // плашка или панель выбора вместо поля ввода — другой элемент
 
   const title = (chat?.title as string) || 'Чат №' + chatId;
   // как в Telegram: в норме подзаголовок — тип чата, а пока идёт подключение или обновление — стадия
@@ -269,7 +272,6 @@ export function Chat({ chatId, frameKey, active }: { chatId: number; frameKey: s
   const groupOf = (m: Item) => (m.groupId ? messages.filter((x) => x.groupId === m.groupId && x.senderId === m.senderId) : [m]);
   const forwardMenuMsg = (m: Item) => startForward(chatId, groupOf(m), nameOf);
   // режим выбора: вместо поля ввода — панель «Выбрано: N» (Переслать / Копировать / Удалить, если все свои)
-  const selKeys = useGlobal((s) => (s.selecting?.chatId === chatId ? s.selecting.keys : null));
   const selected = selKeys ? messages.filter((m) => selKeys.includes(m.key as string)) : [];
   useEffect(() => endSelect, [chatId]);   // ушли из чата — выбор сбрасывается
   useEffect(() => {

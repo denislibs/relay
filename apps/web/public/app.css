@@ -805,7 +805,9 @@ html[data-anim="0"] .app-chatcol, html[data-anim="0"] .app-chatcol-below, html[d
 /* ---------- группа: аватар автора слева от пачки входящих, как в Telegram ---------- */
 .app-msg-grp .rl-msgline { padding-left: calc(10px + 42px); }
 .app-msg-sel.app-msg-grp { padding-left: 40px; }
-.app-msg-ava { position: absolute; left: 10px; bottom: 0; z-index: 1; display: block; padding: 0; border: 0; border-radius: 50%; background: none; cursor: pointer; animation: app-ava-in 180ms ease-out both; }
-.app-msg-sel .app-msg-ava { left: 50px; }
-@keyframes app-ava-in { from { opacity: 0; transform: scale(.8); } }
-@media (prefers-reduced-motion: reduce) { .app-msg-ava { animation: none; } }
+.app-run { position: relative; }
+/* аватар — последним в пачке, наложен на низ последнего пузыря; sticky: при прокрутке держится у низа видимой ленты
+   (над полем ввода, там же, где последнее сообщение) и не выходит за верх своей пачки */
+.app-run-ava { position: sticky; bottom: 0;   /* отсчёт — от нижнего отступа ленты: ровно там стоит последнее сообщение */
+  z-index: 1; display: block; width: 34px; height: 34px; margin: -34px 0 0 10px; padding: 0; border: 0; border-radius: 50%; background: none; cursor: pointer; }
+.app-feed-selecting .app-run-ava { margin-left: 50px; transition: margin-left 200ms cubic-bezier(.33, 1, .68, 1); }
