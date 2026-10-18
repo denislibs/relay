@@ -21,6 +21,7 @@ import { clock, dayKey, dayLabel, fileSize } from './format';
  */
 
 const EDGE = '750px';     // запас датчиков окна
+const EDGE_PX = 750;
 const TOP_ZONE = 72;      // шапка (48) + отступ (16) + воздух: выше — под шапкой, не «видно»
 const BOTTOM = 50;        // «у низа» — ближе 50 px
 const READ_EVERY = 150;   // отправка «вижу до id» не чаще
@@ -227,9 +228,14 @@ export function Feed({ frameKey, active, chatId, meId, peerName, group, onAuthor
   if (initial.current === null && messages.length) initial.current = new Set(messages.map((m) => m.key));
 
   /** Сдвиг окна: сначала замер якоря, потом — запрос нового окна. */
+  // направление последней прокрутки пользователя: окно двигаем только туда, куда листают. Иначе на коротких
+  // сообщениях окно качается — сдвиг к старым оставляет нижний датчик в зоне, он тянет к новым, и так по кругу
+  const scrollDir = useRef<-1 | 0 | 1>(0);
+  const lastTop = useRef(0);
   const shift = (dir: 'older' | 'newer') => {
     const root = el.current, m = metaRef.current;
     if (!root || !placed.current || !m || (dir === 'older' ? !m.hasOlder : !m.hasNewer)) return;
+    if (scrollDir.current === (dir === 'older' ? 1 : -1)) return;
     requestMeasure(() => {
       if (anchor.current) return; // предыдущий сдвиг ещё не применён
       const v = firstVisible(root);
@@ -399,9 +405,15 @@ export function Feed({ frameKey, active, chatId, meId, peerName, group, onAuthor
     // позицию — после любой прокрутки, в том числе нашей (после сдвига окна якорь тоже меняется)
     if (posTimer.current) clearTimeout(posTimer.current);
     posTimer.current = setTimeout(() => { posTimer.current = null; requestMeasure(() => storePosition(root)); }, 200);
+    const top = root.scrollTop, prev = lastTop.current;
+    lastTop.current = top;
     if (programmatic.current > 0) { programmatic.current--; return; } // наша прокрутка не меняет «прижата к низу»
+    if (top !== prev) scrollDir.current = top < prev ? -1 : 1;
     requestMeasure(() => {
       const fromBottom = root.scrollHeight - root.scrollTop - root.clientHeight;
+      // датчик края уже в зоне (его пропустили, пока листали в другую сторону) — сдвигаем по прокрутке
+      if (scrollDir.current < 0 && root.scrollTop < EDGE_PX) shift('older');
+      else if (scrollDir.current > 0 && fromBottom < EDGE_PX) shift('newer');
       const live = metaRef.current?.live ?? true;
       stick.current = fromBottom < BOTTOM && live;
       setAway(fromBottom > root.clientHeight || !live);
