@@ -46,9 +46,8 @@ export function CodeCard(props: { card: Extract<Card, { name: 'code' }> }) {
   // сова: фокус — смотрит на следующую клетку; нет фокуса или идёт проверка — отдыхает
   const tracking = focused && !busy;
   const gaze = Math.min(1, code.length / Math.max(1, card.length - 1));
-  const text = card.via === 'app'
-    ? 'Мы отправили код в чат «Relay» на устройствах, где вы уже вошли.'
-    : 'Сейчас вы нигде не вошли, поэтому код некуда отправить. Войдите по QR-коду или с паскеем.';
+  // ответ сервера одинаков для любого номера (существование аккаунта не раскрываем) — и текст один
+  const text = 'Код придёт в чат «Relay» на устройство, где вы уже вошли.';
 
   return (
     <div class="auth-form">
