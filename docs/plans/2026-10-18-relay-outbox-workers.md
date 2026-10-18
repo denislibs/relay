@@ -15,7 +15,7 @@
 - Без кода из telegram-tt и tweb (GPL): только своя реализация.
 - Тесты запускаются только в Docker: `docker compose --profile test run --rm test` (сервер) и `docker compose --profile test run --rm test-engine` (движок).
 - Комментарии в коде — по-русски, как во всём `apps/server`.
-- Номер миграции: на master последняя `112_folders.sql`, ветка `feat/s3-storage` (MinIO) уже заняла `113_s3_uploads.sql`. Этот план берёт **`114_jobs.sql`**; если к началу работы номер занят — следующий свободный, а в тексте плана заменить везде.
+- Номер миграции: на master последняя `116_music_meta.sql` (113–116 заняты S3, музыкой и закрепами). Этот план берёт **`117_jobs.sql`**; если к началу работы номер занят — следующий свободный, а в тексте плана заменить везде.
 - Секреты в payload задачи кладутся только под ключ `secret`; в `jobs_dead` он не копируется.
 - Работать в своей ветке (`feat/outbox-workers`), в master сливать только по слову пользователя.
 
@@ -35,7 +35,7 @@
 
 | Файл | Ответственность |
 |---|---|
-| `apps/server/migrations/114_jobs.sql` | таблицы `jobs`, `jobs_dead`, `live_conns`, `dev_mail` |
+| `apps/server/migrations/117_jobs.sql` | таблицы `jobs`, `jobs_dead`, `live_conns`, `dev_mail` |
 | `apps/server/src/jobs/queue.ts` | `enqueue`, `ensurePeriodic`, `claim`, `complete`, `fail`, `backoffMs` — только SQL очереди |
 | `apps/server/src/jobs/handlers.ts` | реестр обработчиков по `kind`, `PermanentError` |
 | `apps/server/src/jobs/worker.ts` | `runJob`, `drainJobs` (тесты), `startWorker` (цикл с LISTEN) |
@@ -60,7 +60,7 @@
 ### Task 1: Таблицы и очередь задач
 
 **Files:**
-- Create: `apps/server/migrations/114_jobs.sql`
+- Create: `apps/server/migrations/117_jobs.sql`
 - Create: `apps/server/src/jobs/queue.ts`
 - Modify: `apps/server/test/helpers.ts` (функция `resetDb`)
 - Test: `apps/server/test/jobs.test.ts`
@@ -78,7 +78,7 @@
 
 - [ ] **Step 1: Миграция**
 
-`apps/server/migrations/114_jobs.sql`:
+`apps/server/migrations/117_jobs.sql`:
 
 ```sql
 -- Очередь задач (transactional outbox): задача пишется в транзакции изменения, воркер забирает её после коммита.
@@ -327,7 +327,7 @@ Expected: 0 fail.
 - [ ] **Step 8: Commit**
 
 ```bash
-git add apps/server/migrations/114_jobs.sql apps/server/src/jobs/queue.ts apps/server/test/jobs.test.ts apps/server/test/helpers.ts
+git add apps/server/migrations/117_jobs.sql apps/server/src/jobs/queue.ts apps/server/test/jobs.test.ts apps/server/test/helpers.ts
 git commit -m "feat(server): transactional job queue in Postgres — enqueue in tx, skip-locked claim with lease, backoff, dead letters"
 ```
 
