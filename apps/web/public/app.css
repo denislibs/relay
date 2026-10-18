@@ -801,3 +801,11 @@ html[data-anim="0"] .app-chatcol, html[data-anim="0"] .app-chatcol-below, html[d
 .app-fwd-quick:hover { background: color-mix(in srgb, #000 34%, transparent); }
 @media (hover: none) { .app-fwd-quick { opacity: 1; transform: none; } }
 @media (prefers-reduced-motion: reduce) { .app-msg-sel, .app-msg-check, .app-msg-check .rl-icon, .app-fwd-quick { transition: none; animation: none; } }
+
+/* ---------- группа: аватар автора слева от пачки входящих, как в Telegram ---------- */
+.app-msg-grp .rl-msgline { padding-left: calc(10px + 42px); }
+.app-msg-sel.app-msg-grp { padding-left: 40px; }
+.app-msg-ava { position: absolute; left: 10px; bottom: 0; z-index: 1; display: block; padding: 0; border: 0; border-radius: 50%; background: none; cursor: pointer; animation: app-ava-in 180ms ease-out both; }
+.app-msg-sel .app-msg-ava { left: 50px; }
+@keyframes app-ava-in { from { opacity: 0; transform: scale(.8); } }
+@media (prefers-reduced-motion: reduce) { .app-msg-ava { animation: none; } }

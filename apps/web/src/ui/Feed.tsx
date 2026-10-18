@@ -1,7 +1,7 @@
 import type { Item } from '@relay/sync-engine/src/types';
 import { senderAvatar } from '../profilePhoto';
 import type { Entity } from '@relay/protocol';
-import { Bubble, Icon, peerTone, DateDivider, DatePicker, FileBubble, MediaBubble, MessageText, VoiceBubble, MusicBubble, RoundBubble, player, MediaViewer, ScrollToBottom, beginHeavyAnimation, forceMeasure, isHeavyAnimating, onHeavyAnimationEnd, requestMeasure, requestMutation } from '@relay/ui';
+import { Avatar, Bubble, Icon, peerTone, DateDivider, DatePicker, FileBubble, MediaBubble, MessageText, VoiceBubble, MusicBubble, RoundBubble, player, MediaViewer, ScrollToBottom, beginHeavyAnimation, forceMeasure, isHeavyAnimating, onHeavyAnimationEnd, requestMeasure, requestMutation } from '@relay/ui';
 import { memo } from 'preact/compat';
 import { useEffect, useLayoutEffect, useRef, useState } from 'preact/hooks';
 import { clearFocus, ensureNames, focusMessage, jumpToDate, localPreview, markListened, moveWindow, react, savePosition, savedPosition, seen } from '../data';
@@ -32,10 +32,10 @@ const FIRST_PAINT = 24;   // при открытии внизу первым к�
 type Quote = { id: number; sort: number; body: string; senderId: number };
 type Att = { id: string; kind: 'photo' | 'file' | 'voice' | 'round' | 'audio'; title?: string | null; performer?: string | null; mime: string; name: string; size: number; w: number | null; h: number | null; thumb?: string | null; duration?: number | null; waveform?: string | null };
 const fileUrl = (a: Att, download = false) => `/files/${a.id}${download ? '?download=1' : ''}`;
-type RowProps = { chatId: number; voiceTitle: string; author?: string; onAuthor?: (m: Item) => void; onOpen: (m: Item) => void; hl?: string; m: Item; meId: number; out: boolean; start: boolean; end: boolean; pos?: 'single' | 'first' | 'middle' | 'last'; quoted?: Quote | null; quoteAuthor?: string; quoteTone?: number; appear: boolean; flash: boolean; onReact: (m: Item, emoji: string) => void; album?: Item[]; onUser?: (userId: number) => void; sel?: boolean; onQuickForward?: (m: Item) => void };
+type RowProps = { chatId: number; voiceTitle: string; author?: string; onAuthor?: (m: Item) => void; onOpen: (m: Item) => void; hl?: string; m: Item; meId: number; out: boolean; start: boolean; end: boolean; pos?: 'single' | 'first' | 'middle' | 'last'; quoted?: Quote | null; quoteAuthor?: string; quoteTone?: number; appear: boolean; flash: boolean; onReact: (m: Item, emoji: string) => void; album?: Item[]; onUser?: (userId: number) => void; sel?: boolean; onQuickForward?: (m: Item) => void; grp?: boolean; avaName?: string };
 
 /** Строка ленты: перерисовывается только если изменилось её сообщение или место в группе. */
-const Row = memo(function Row({ chatId, voiceTitle, author, onAuthor, onOpen, hl, m, meId, out, start, end, pos, quoted, quoteAuthor, quoteTone, appear, flash, onReact, album, onUser, sel, onQuickForward }: RowProps) {
+const Row = memo(function Row({ chatId, voiceTitle, author, onAuthor, onOpen, hl, m, meId, out, start, end, pos, quoted, quoteAuthor, quoteTone, appear, flash, onReact, album, onUser, sel, onQuickForward, grp, avaName }: RowProps) {
   // реакции: по эмодзи — сколько и есть ли моя
   const list = (m.reactions as { userId: number; emoji: string }[] | undefined) ?? [];
   const chips: { emoji: string; count: number; mine: boolean }[] = [];
@@ -49,10 +49,17 @@ const Row = memo(function Row({ chatId, voiceTitle, author, onAuthor, onOpen, hl
   const fwd = ff ? { name: ff.name, tone: peerTone(ff.userId), avatar: senderAvatar(ff.userId),
     onClick: ff.userId !== meId && onUser ? () => onUser(ff.userId) : undefined } : undefined;
   // режим выбора: строка отмечается кликом (обработчик — у ленты), кружок-галочка слева
-  const wrap = (base: string) => base + (flash ? ' app-msg-flash' : '') + (sel !== undefined ? ' app-msg-sel' : '') + (sel ? ' app-msg-on' : '');
+  const wrap = (base: string) => base + (flash ? ' app-msg-flash' : '') + (sel !== undefined ? ' app-msg-sel' : '') + (sel ? ' app-msg-on' : '') + (grp ? ' app-msg-grp' : '');
   // круглая стрелка «Переслать» у пузыря при наведении — у медиа и длинных сообщений (не в режиме выбора)
   const aside = sel === undefined && onQuickForward && m.id != null && !m.deleted && !m.service && (att || (m.body as string).length > 300)
     ? <button type="button" class="app-fwd-quick" aria-label="Переслать" onClick={(e) => { e.stopPropagation(); onQuickForward(album?.[0] ?? m); }}><Icon name="forward" size={20} /></button> : null;
+  // в группе у входящих — аватар автора у последнего сообщения пачки (как в Telegram); клик — чат с ним
+  const sid = m.senderId as number;
+  const ava = grp && avaName !== undefined ? (
+    <button type="button" class="app-msg-ava" aria-label={avaName || 'Автор'} tabIndex={-1} onClick={(e) => { e.stopPropagation(); onUser?.(sid); }}>
+      <Avatar name={avaName} tone={peerTone(sid)} size={34} {...senderAvatar(sid)} />
+    </button>
+  ) : null;
   const check = sel !== undefined ? <span class="app-msg-check" aria-hidden="true"><Icon name="check" size={14} strokeWidth={3} /></span> : null;
   const pending = m.status === 'pending' && typeof m.progress === 'number' && (m.progress as number) < 1;
   const mark = m.id != null ? <i class="app-mark" data-mid={m.id as number} aria-hidden="true" /> : null;
@@ -64,7 +71,7 @@ const Row = memo(function Row({ chatId, voiceTitle, author, onAuthor, onOpen, hl
     const busy = album.some((x) => x.status === 'pending' && typeof x.progress === 'number' && (x.progress as number) < 1);
     return (
       <div class={wrap('app-msg app-msg-media')} data-key={m.key} data-sort={m.sort as number}>
-        {check}
+        {check}{ava}
         <MediaBubble
           fwd={fwd}
           aside={aside}
@@ -84,7 +91,7 @@ const Row = memo(function Row({ chatId, voiceTitle, author, onAuthor, onOpen, hl
     const src = localPreview(m.key) ?? (att.id ? fileUrl(att) : undefined);
     return (
       <div class={wrap('app-msg app-msg-media')} data-key={m.key} data-sort={m.sort as number}>
-        {check}
+        {check}{ava}
         <MediaBubble
           fwd={fwd}
           aside={aside}
@@ -105,7 +112,7 @@ const Row = memo(function Row({ chatId, voiceTitle, author, onAuthor, onOpen, hl
     const unheard = m.id != null && !m.listened;
     return (
       <div class={wrap('app-msg')} data-key={m.key} data-sort={m.sort as number}>
-        {check}
+        {check}{ava}
         <VoiceBubble
           fwd={fwd}
           aside={aside}
@@ -124,7 +131,7 @@ const Row = memo(function Row({ chatId, voiceTitle, author, onAuthor, onOpen, hl
     const unseen = m.id != null && !m.listened;
     return (
       <div class={wrap('app-msg')} data-key={m.key} data-sort={m.sort as number}>
-        {check}
+        {check}{ava}
         <RoundBubble
           fwd={fwd}
           aside={aside}
@@ -142,7 +149,7 @@ const Row = memo(function Row({ chatId, voiceTitle, author, onAuthor, onOpen, hl
   if (att && !m.deleted && att.kind === 'audio') {
     return (
       <div class={wrap('app-msg')} data-key={m.key} data-sort={m.sort as number}>
-        {check}
+        {check}{ava}
         <CachedMusic
           fwd={fwd}
           aside={aside}
@@ -166,7 +173,7 @@ const Row = memo(function Row({ chatId, voiceTitle, author, onAuthor, onOpen, hl
     const ext = (att.name.split('.').pop() ?? 'file').slice(0, 4);
     return (
       <div class={wrap('app-msg')} data-key={m.key} data-sort={m.sort as number}>
-        {check}
+        {check}{ava}
         <FileBubble
           fwd={fwd}
           aside={aside}
@@ -182,7 +189,7 @@ const Row = memo(function Row({ chatId, voiceTitle, author, onAuthor, onOpen, hl
   }
   return (
     <div class={wrap('app-msg')} data-key={m.key} data-sort={m.sort as number}>
-      {check}
+      {check}{ava}
       <Bubble
         fwd={fwd}
         aside={aside}
@@ -685,6 +692,8 @@ export function Feed({ frameKey, active, chatId, meId, peerName, group, onAuthor
         onAuthor={onAuthorRow}
         onUser={onUserRow}
         sel={selecting ? selecting.includes(m.key as string) : undefined}
+        grp={group && !mine}
+        avaName={group && !mine && end ? names[m.senderId as number] ?? '' : undefined}
         onQuickForward={onQuickForward}
         hl={highlight && (m.body as string).toLowerCase().includes(highlight.toLowerCase()) ? highlight : undefined}
         m={m}
@@ -697,7 +706,7 @@ export function Feed({ frameKey, active, chatId, meId, peerName, group, onAuthor
         start={start}
         end={end}
         quoted={quoted}
-        quoteAuthor={quoted ? (quoted.senderId === meId ? 'Вы' : peerName) : undefined}
+        quoteAuthor={quoted ? (quoted.senderId === meId ? 'Вы' : group ? names[quoted.senderId as number] ?? '' : peerName) : undefined}
         quoteTone={quoted ? peerTone(quoted.senderId as number) : undefined}
         appear={initial.current !== null && !initial.current.has(m.key)}
         flash={flashKey === m.key || !!album?.some((x) => x.key === flashKey)}
