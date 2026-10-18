@@ -357,7 +357,7 @@ export class Engine {
    *  3) POST /uploads/:id/confirm — сервер сверяет размер и тип по HEAD, только после этого вложение можно отправить.
    * Сеть и истёкшая ссылка — повтор позже с начала; отказ сервера (не тот размер/тип, too_long) — сообщение failed.
    */
-  private async upload(clientId: string, blob: Blob, a: { name: string; mime: string; w: number | null; h: number | null; kind?: string; duration?: number | null; waveform?: string | null }): Promise<{ id: string }> {
+  private async upload(clientId: string, blob: Blob, a: { name: string; mime: string; w: number | null; h: number | null; kind?: string; duration?: number | null; waveform?: string | null; title?: string | null; performer?: string | null }): Promise<{ id: string }> {
     const offline: ReqError = { code: 'offline', retry: true };
     const api = async <T>(path: string, body?: unknown): Promise<T> => {
       const r = await this.dev.fetch(this.cfg.httpBase + path, {
@@ -374,6 +374,7 @@ export class Engine {
     const meta: Record<string, unknown> = { name: a.name, mime: a.mime, size: blob.size };
     if (a.w && a.h) { meta.w = a.w; meta.h = a.h; }
     if (a.kind === 'voice' || a.kind === 'round' || a.kind === 'audio') { meta.kind = a.kind; if (a.duration) meta.duration = a.duration; if (a.waveform) meta.waveform = a.waveform; }
+    if (a.kind === 'audio') { if (a.title) meta.title = a.title; if (a.performer) meta.performer = a.performer; }
     const intent = await api<{ id: string; url: string; mime: string }>('/uploads', meta);
     await this.put(clientId, intent.url, blob, intent.mime);
     return api<{ id: string }>(`/uploads/${intent.id}/confirm`);
@@ -686,6 +687,15 @@ export class Engine {
       case 'search': return this.search(a);
       case 'chatMedia': return this.http<{ messages: Message[]; hasMore: boolean }>(`/chats/${a.chatId}/media?kind=${a.kind}${a.beforeId ? '&beforeId=' + a.beforeId : ''}`);
       case 'chatMediaCounts': return this.http<Record<string, number>>(`/chats/${a.chatId}/media/counts`);
+      // закрепление — сразу на сервер (без сети — ошибка, интерфейс скажет); список придёт и обновлением журнала
+      case 'pin': case 'unpin': {
+        const res = await this.http<{ ids: number[] }>(a.type === 'pin' ? `/chats/${a.chatId}/pins` : `/chats/${a.chatId}/pins${a.id != null ? '/' + a.id : ''}`,
+          a.type === 'pin' ? { method: 'POST', body: JSON.stringify({ messageId: a.id }) } : { method: 'DELETE' });
+        this.store.applyUpdate({ type: 'pins', chatId: a.chatId, ids: res.ids });
+        this.changed();
+        return res;
+      }
+      case 'messagesByIds': return this.http<{ messages: Message[] }>(`/chats/${a.chatId}/messages?ids=${a.ids.slice(0, 100).join(',')}`).then((r) => r.messages);
       case 'sendFile': {
         // файл — в IDB (переживёт офлайн и перезагрузку), сообщение — в очередь; загрузка и отправка — в pumpOutbox
         const clientId = crypto.randomUUID();
@@ -694,8 +704,10 @@ export class Engine {
         const photo = !a.kind && /^image\//.test(a.mime) && !!a.w && !!a.h;
         const sized = photo || a.kind === 'round';
         this.store.addPending({ clientId, chatId: a.chatId, body: a.body, replyToId: a.replyToId ?? null, createdAt: this.lastCreated, failed: false,
+          ...(a.groupId ? { groupId: a.groupId } : {}),
           attachment: { id: '', kind: a.kind ?? (photo ? 'photo' : 'file'), mime: a.mime, name: a.name, size: a.file.size, w: sized ? a.w ?? null : null, h: sized ? a.h ?? null : null, thumb: a.thumb ?? null,
-            ...(a.kind ? { duration: a.duration ?? null, waveform: a.waveform ?? null } : {}) } });
+            ...(a.kind ? { duration: a.duration ?? null, waveform: a.waveform ?? null } : {}),
+            ...(a.kind === 'audio' ? { title: a.title ?? null, performer: a.performer ?? null } : {}) } });
         this.store.setDraft(a.chatId, '');
         await this.store.flush();
         this.changed();
@@ -1172,7 +1184,7 @@ export class Engine {
               this.changed();
             }
             const att = next.attachment ? { id: next.attachment.id, thumb: next.attachment.thumb ?? null } : null;
-            const r = await this.request({ op: 'send', reqId: '', clientId: next.clientId, chatId: next.chatId, body: next.body, entities: next.entities ?? [], replyToId: next.replyToId, attachment: att });
+            const r = await this.request({ op: 'send', reqId: '', clientId: next.clientId, chatId: next.chatId, body: next.body, entities: next.entities ?? [], replyToId: next.replyToId, attachment: att, ...(next.groupId ? { groupId: next.groupId } : {}) });
             this.store.ack(next.clientId, r.id as number, r.createdAt as string);
             this.outboxAttempt = 0;
             if (att) delBlob(this.db, next.clientId).catch(() => {});
@@ -1268,8 +1280,9 @@ export class Engine {
   // Служебное
   // =====================================================================
 
-  private async http<T>(path: string): Promise<T> {
-    const res = await this.dev.fetch(this.cfg.httpBase + path, { headers: this.cfg.headers, credentials: 'include' });
+  private async http<T>(path: string, init?: { method: string; body?: string }): Promise<T> {
+    const headers = init?.body ? { ...this.cfg.headers, 'content-type': 'application/json' } : this.cfg.headers;
+    const res = await this.dev.fetch(this.cfg.httpBase + path, { headers, credentials: 'include', ...(init ?? {}) });
     if (this.session.unauthorized(res.status)) throw { code: 'offline', retry: false } satisfies ReqError;   // сеанс завершён — не ошибка движка
     if (!res.ok) throw new Error(`HTTP ${res.status} ${path}`);
     return (await res.json()) as T;

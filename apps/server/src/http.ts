@@ -12,6 +12,8 @@ import { connected, disconnected, listPresence, type Publish } from './domain/pr
 import { searchMessages } from './domain/search';
 import { confirmUpload, createUpload, downloadTtl, fileFor, signedDownload } from './domain/files';
 import { handleFrame } from './ws';
+import { pinMessage, unpinMessage } from './domain/pins';
+import { addProfileMusic, listProfileMusic, removeProfileMusic } from './domain/profileMusic';
 import { journalStats } from './domain/journal';
 import { notifyLatency } from './realtime';
 import { checkUsername, getMe, getUser, setUsername, updateProfile } from './domain/profile';
@@ -114,6 +116,15 @@ export function createServer(opts: { port: number }): Server {
           if (!body || !('username' in body)) return fail('bad_frame');
           return Response.json(await setUsername(userId, body.username));
         }
+        const music = /^\/users\/(\d{1,15})\/music$/.exec(url.pathname);
+        if (req.method === 'GET' && music) return Response.json({ tracks: await listProfileMusic(userId, Number(music[1])) });
+        if (req.method === 'POST' && url.pathname === '/me/music') {
+          const body = (await req.json().catch(() => null)) as { chatId?: unknown; messageId?: unknown } | null;
+          if (!Number.isSafeInteger(body?.chatId) || !Number.isSafeInteger(body?.messageId)) return fail('bad_frame');
+          return Response.json({ tracks: await addProfileMusic(userId, body!.chatId as number, body!.messageId as number) });
+        }
+        const myTrack = /^\/me\/music\/([0-9a-f-]{36})$/.exec(url.pathname);
+        if (req.method === 'DELETE' && myTrack) return Response.json({ tracks: await removeProfileMusic(userId, myTrack[1]) });
         if (req.method === 'GET' && url.pathname === '/users/check-username') {
           return Response.json(await checkUsername(userId, url.searchParams.get('u')));
         }
@@ -194,14 +205,14 @@ export function createServer(opts: { port: number }): Server {
           try { return Response.json(await body); } catch (e) { devStatsCache.delete(userId); throw e; }
         }
         if (req.method === 'POST' && url.pathname === '/uploads') {
-          // шаг 1: {name, mime, size, w?, h?, kind?, duration?, waveform?} → подписанный PUT; сам файл идёт мимо сервера
+          // шаг 1: {name, mime, size, w?, h?, kind?, duration?, waveform?, title?, performer?} → подписанный PUT; сам файл идёт мимо сервера
           // (размеры фото считает клиент, он его уже декодировал; волну и длительность голосового — записывающий клиент)
           const b = (await req.json().catch(() => null)) as Record<string, unknown> | null;
           if (!b || typeof b !== 'object') return fail('bad_frame');
           const num = (v: unknown) => (typeof v === 'number' && Number.isFinite(v) && v > 0 ? v : undefined);
           const str = (v: unknown) => (typeof v === 'string' ? v : undefined);
           return Response.json(await createUpload(userId, { mime: str(b.mime) ?? '', name: str(b.name) ?? 'file', size: typeof b.size === 'number' ? b.size : NaN,
-            w: num(b.w), h: num(b.h), kind: str(b.kind), duration: num(b.duration), waveform: str(b.waveform) }));
+            w: num(b.w), h: num(b.h), kind: str(b.kind), duration: num(b.duration), waveform: str(b.waveform), title: str(b.title), performer: str(b.performer) }));
         }
         const confirmUp = /^\/uploads\/([0-9a-f-]{36})\/confirm$/.exec(url.pathname);
         if (req.method === 'POST' && confirmUp) return Response.json(await confirmUpload(userId, confirmUp[1]));
@@ -225,6 +236,13 @@ export function createServer(opts: { port: number }): Server {
           const before = Number(url.searchParams.get('beforeId')) || null;
           return Response.json(await getChatMedia(userId, Number(media[1]), tab, before));
         }
+        const pins = /^\/chats\/(\d+)\/pins(?:\/(\d+))?$/.exec(url.pathname);
+        if (pins && req.method === 'POST' && !pins[2]) {
+          const body = (await req.json().catch(() => null)) as { messageId?: unknown } | null;
+          if (!Number.isSafeInteger(body?.messageId)) return fail('bad_frame');
+          return Response.json(await pinMessage(userId, Number(pins[1]), body!.messageId as number));
+        }
+        if (pins && req.method === 'DELETE') return Response.json(await unpinMessage(userId, Number(pins[1]), pins[2] ? Number(pins[2]) : null));
         const mediaCounts = /^\/chats\/(\d+)\/media\/counts$/.exec(url.pathname);
         if (req.method === 'GET' && mediaCounts) return Response.json(await getChatMediaCounts(userId, Number(mediaCounts[1])));
         if (url.pathname === '/push/subscription' && (req.method === 'POST' || req.method === 'DELETE')) {

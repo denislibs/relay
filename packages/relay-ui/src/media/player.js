@@ -7,7 +7,8 @@
 export var SPEEDS = [
   { label: '0.5X', rate: 0.66 }, { label: '0.75X', rate: 0.8 }, { label: '1X', rate: 1 }, { label: '1.5X', rate: 1.4 }, { label: '2X', rate: 1.8 },
 ];
-var RATE_KEY = 'relay.voiceRate', FAST_KEY = 'relay.voiceFast';
+var RATE_KEY = 'relay.voiceRate', FAST_KEY = 'relay.voiceFast', VOL_KEY = 'relay.volume', ORDER_KEY = 'relay.musicOrder';
+var ORDERS = ['all', 'one', 'shuffle', 'off'];   // музыка: по кругу, один трек, случайно, по порядку без повтора
 function load(k, d) { try { var v = parseFloat(localStorage.getItem(k)); return v > 0 ? v : d; } catch (e) { return d; } }
 function save(k, v) { try { localStorage.setItem(k, String(v)); } catch (e) { /* без хранилища — до перезагрузки */ } }
 
@@ -16,12 +17,15 @@ var cur = null;            // { key, src, duration, title, subtitle, kind, onLis
 var stopOther = null;      // кто играет вне плеера (кружок со звуком) — остановить, когда начнём своё
 var subs = [];
 var tickSubs = [];
-var queue = null;          // (key, dir: 1|-1) → трек или null
+var queue = null;          // (key, dir: 1|-1) → трек или null — голосовые ленты
+var playlist = null;       // музыка: [трек…] в порядке воспроизведения (как в Telegram — новые сверху, «дальше» — старее)
 var raf = 0;
-var state = { key: null, playing: false, time: 0, duration: 0, rate: load(RATE_KEY, 1), fast: load(FAST_KEY, 1.8) };
+var savedOrder = (function () { try { return localStorage.getItem(ORDER_KEY); } catch (e) { return null; } })();
+var state = { key: null, playing: false, time: 0, duration: 0, rate: load(RATE_KEY, 1), fast: load(FAST_KEY, 1.8),
+  volume: Math.min(1, load(VOL_KEY, 1)), muted: false, order: ORDERS.indexOf(savedOrder) >= 0 ? savedOrder : 'all' };
 
 function emit() { var s = snapshot(); for (var i = 0; i < subs.length; i++) subs[i](s); }
-function snapshot() { return { key: state.key, playing: state.playing, time: state.time, duration: state.duration, rate: state.rate, fast: state.fast, track: cur }; }
+function snapshot() { return { key: state.key, playing: state.playing, time: state.time, duration: state.duration, rate: state.rate, fast: state.fast, track: cur, volume: state.volume, muted: state.muted, order: state.order, playlist: playlist }; }
 
 function el() {
   if (audio) return audio;
@@ -32,9 +36,10 @@ function el() {
   audio.addEventListener('loadedmetadata', function () { if (isFinite(audio.duration)) state.duration = audio.duration; emit(); session(); });
   audio.addEventListener('ended', function () {
     state.playing = false; state.time = 0; tick(); emit();
-    // следующее голосовое того же чата — само (как в Telegram)
-    var next = queue && cur ? queue(cur.key, 1) : null;
-    if (next) play(next); else close();
+    if (isMusic() && state.order === 'one') { audio.currentTime = 0; play(cur); return; }
+    // дальше — следующий трек плейлиста / следующее голосовое того же чата (как в Telegram)
+    var next = neighbour(1, true);
+    if (next) play(next); else if (isMusic()) { audio.currentTime = 0; emit(); } else close();
   });
   audio.addEventListener('ratechange', session);
   audio.addEventListener('seeked', session);
@@ -64,7 +69,8 @@ export function play(track) {
     a.src = track.src;
     a.currentTime = 0;
   }
-  a.playbackRate = state.rate;
+  a.playbackRate = isMusic() ? 1 : state.rate;   // скорость — для голосовых
+  a.volume = state.volume; a.muted = state.muted;
   var p = a.play();
   if (p && p.catch) p.catch(function () { state.playing = false; emit(); });
   if (track.onListened && !track.listenedSent) { track.listenedSent = true; track.onListened(); }
@@ -90,13 +96,41 @@ export function close() {
 export function setRate(rate) {
   state.rate = rate; save(RATE_KEY, rate);
   if (rate !== 1) { state.fast = rate; save(FAST_KEY, rate); }
-  if (audio) audio.playbackRate = rate;
+  if (audio && !isMusic()) audio.playbackRate = rate;
   emit();
 }
 /** Кнопка скорости: 1× ↔ последняя быстрая (по умолчанию «2X» = 1.8). */
 export function toggleFast() { setRate(state.rate === 1 ? state.fast : 1); }
-export function step(dir) { var t = queue && cur ? queue(cur.key, dir) : null; if (t) play(t); }
-export function hasStep(dir) { return !!(queue && cur && queue(cur.key, dir)); }
+/** «Назад» дальше 5 с от начала — к началу трека (как в Telegram), иначе — предыдущий. */
+export function step(dir) {
+  if (dir < 0 && audio && audio.currentTime > 5) { seek(cur.key, 0); return; }
+  var t = neighbour(dir, false);
+  if (t) play(t);
+}
+export function hasStep(dir) { return !!neighbour(dir, false) || (dir < 0 && !!cur && isMusic()); }
+
+function isMusic() { return !!(cur && cur.kind === 'music'); }
+function inPlaylist() { if (!playlist || !cur) return -1; for (var i = 0; i < playlist.length; i++) if (playlist[i].key === cur.key) return i; return -1; }
+/** Соседний трек: в плейлисте — по режиму порядка (по кругу/случайно), иначе — из очереди ленты. */
+function neighbour(dir, auto) {
+  var i = inPlaylist();
+  if (i >= 0) {
+    var n = playlist.length;
+    if (state.order === 'shuffle' && n > 1) { var j = i; while (j === i) j = Math.floor(Math.random() * n); return playlist[j]; }
+    var k = i + dir;
+    if (k >= 0 && k < n) return playlist[k];
+    if (state.order === 'all' || (!auto && state.order === 'one')) return playlist[(k + n) % n];
+    return null;
+  }
+  return queue && cur ? queue(cur.key, dir) : null;
+}
+
+/** Плейлист музыки (вкладка «Музыка», лента чата, музыка профиля). null — снять. */
+export function setPlaylist(list) { playlist = list && list.length ? list : null; emit(); }
+/** Порядок: 'all' по кругу, 'one' повтор трека, 'shuffle' случайно, 'off' по порядку. */
+export function setOrder(order) { if (ORDERS.indexOf(order) < 0) return; state.order = order; try { localStorage.setItem(ORDER_KEY, order); } catch (e) { /* */ } emit(); }
+export function setVolume(v) { state.volume = Math.max(0, Math.min(1, v)); state.muted = state.volume === 0; save(VOL_KEY, state.volume || 1); if (audio) { audio.volume = state.volume; audio.muted = state.muted; } emit(); }
+export function toggleMute() { state.muted = !state.muted; if (audio) audio.muted = state.muted; emit(); }
 
 /** Источник соседних треков (лента чата). */
 export function setQueue(fn) { queue = fn; }
@@ -127,7 +161,7 @@ function session() {
     set('nexttrack', function () { step(1); });
   }
   if (!cur) { ms.metadata = null; ms.playbackState = 'none'; return; }
-  if (typeof MediaMetadata === 'function') ms.metadata = new MediaMetadata({ title: cur.title || 'Голосовое сообщение', artist: cur.subtitle || '', album: 'Relay' });
+  if (typeof MediaMetadata === 'function') ms.metadata = new MediaMetadata({ title: cur.title || 'Голосовое сообщение', artist: cur.performer || cur.subtitle || '', album: 'Relay' });
   ms.playbackState = state.playing ? 'playing' : 'paused';
   if (ms.setPositionState && audio && isFinite(audio.duration) && audio.duration > 0) {
     try { ms.setPositionState({ duration: audio.duration, playbackRate: audio.playbackRate, position: Math.min(audio.currentTime, audio.duration) }); } catch (e) { /* неверная позиция */ }

@@ -8,7 +8,7 @@ import { hideCode } from './format';
 
 type Ent = { type: string; offset: number; length: number };
 export type LastMessage = {
-  senderId: number; body: string; deleted?: boolean; kind?: string; attachmentName?: string | null;
+  senderId: number; body: string; deleted?: boolean; kind?: string; attachmentName?: string | null; attachmentTitle?: string | null;
   entities?: Ent[] | null; thumb?: string | null; mime?: string | null; service?: { type: string } | null;
 };
 
@@ -58,7 +58,7 @@ export function previewBody(m: LastMessage, withThumb: boolean): ComponentChildr
   if (m.kind === 'photo') return caption ?? (withThumb ? 'Фото' : '🖼 Фото');
   if (m.kind === 'voice') return 'Голосовое сообщение';
   if (m.kind === 'round') return 'Видеосообщение';
-  if (m.kind === 'audio') return ['🎵 ', caption ?? (m.attachmentName ?? 'Музыка').replace(/\.[^.]{1,5}$/, '')];
+  if (m.kind === 'audio') return ['🎵 ', caption ?? m.attachmentTitle ?? (m.attachmentName ?? 'Музыка').replace(/\.[^.]{1,5}$/, '')];
   if (m.kind === 'file') {
     if (withThumb) return caption ?? 'Видео';
     return ['📎 ', caption ?? m.attachmentName ?? 'Файл'];

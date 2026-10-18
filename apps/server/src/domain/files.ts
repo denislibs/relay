@@ -40,7 +40,7 @@ function cleanWaveform(raw: string | undefined): string | null {
 
 /** Метаданные будущего вложения: тело идёт мимо сервера (подписанный PUT в S3), размер обещан заранее и сверяется при подтверждении.
  *  Ширина и высота — от клиента (он уже декодировал картинку), только для раскладки. */
-export interface UploadMeta { mime: string; name: string; size: number; w?: number; h?: number; kind?: string; duration?: number; waveform?: string }
+export interface UploadMeta { mime: string; name: string; size: number; w?: number; h?: number; kind?: string; duration?: number; waveform?: string; title?: string; performer?: string }
 
 /**
  * Шаг 1: запись pending и подписанный PUT на ключ = id. Подписан только хост (Bun.s3 не подписывает Content-Type и длину),
@@ -64,8 +64,10 @@ export async function createUpload(userId: number, meta: UploadMeta): Promise<{ 
   const h = sized ? Math.min(Math.max(Math.round(meta.h!), 1), 20000) : null;
   const duration = voice || round || audio ? seconds : null;
   const waveform = voice ? cleanWaveform(meta.waveform) : null;
-  const [row] = await sql`insert into attachments (owner_id, mime, name, size, width, height, kind, duration, waveform, status)
-    values (${userId}, ${mime}, ${name}, ${meta.size}, ${w}, ${h}, ${kind}, ${duration}, ${waveform}, 'pending') returning id`;
+  // название и исполнитель — только у музыки, без управляющих символов и не длиннее 200
+  const tag = (v: unknown) => (audio && typeof v === 'string' ? v.replace(/[\u0000-\u001f]/g, ' ').trim().slice(0, 200) || null : null);
+  const [row] = await sql`insert into attachments (owner_id, mime, name, size, width, height, kind, duration, waveform, title, performer, status)
+    values (${userId}, ${mime}, ${name}, ${meta.size}, ${w}, ${h}, ${kind}, ${duration}, ${waveform}, ${tag(meta.title)}, ${tag(meta.performer)}, 'pending') returning id`;
   const id = row.id as string;
   return { id, url: publicS3().presign(id, { method: 'PUT', expiresIn: PUT_TTL }), mime, expiresIn: PUT_TTL };
 }
@@ -96,14 +98,15 @@ export async function attachmentForSend(tx: typeof sql | Parameters<Parameters<t
   const [a] = await tx`select * from attachments where id = ${ref.id}`;
   if (!a || a.owner_id !== userId) throw new DomainError('not_found', 'attachment');
   if (a.status !== 'ready') throw new DomainError('upload_pending');
-  const thumb = ref.thumb && ref.thumb.length <= 4096 && /^data:image\/(jpeg|png|webp);base64,[A-Za-z0-9+/=]+$/.test(ref.thumb) ? ref.thumb : null;
+  const thumb = ref.thumb && ref.thumb.length <= 8192 && /^data:image\/(jpeg|png|webp);base64,[A-Za-z0-9+/=]+$/.test(ref.thumb) ? ref.thumb : null;
   return attachmentOf(a, thumb);
 }
 
 function attachmentOf(a: Record<string, unknown>, thumb: string | null): Attachment {
   const kind = ((a.kind as AttachmentKind | null) ?? (a.width ? 'photo' : 'file'));
   return { id: a.id as string, kind, mime: a.mime as string, name: a.name as string, size: Number(a.size), w: (a.width as number) ?? null, h: (a.height as number) ?? null, thumb,
-    ...(a.duration ? { duration: a.duration as number } : {}), ...(a.waveform ? { waveform: a.waveform as string } : {}) };
+    ...(a.duration ? { duration: a.duration as number } : {}), ...(a.waveform ? { waveform: a.waveform as string } : {}),
+    ...(a.title ? { title: a.title as string } : {}), ...(a.performer ? { performer: a.performer as string } : {}) };
 }
 
 /** Файл для скачивания: владельцу и участникам чатов, где он отправлен. */
@@ -114,7 +117,10 @@ export async function fileFor(userId: number, id: string): Promise<{ id: string;
      where a.id = ${id} and a.status = 'ready'
        and (a.owner_id = ${userId} or exists (
          select 1 from messages m join chat_members cm on cm.chat_id = m.chat_id and cm.user_id = ${userId}
-          where m.attachment->>'id' = ${id} and not m.deleted))`;
+          where m.attachment->>'id' = ${id} and not m.deleted)
+       or exists (   -- трек в чьём-то профиле: его видят все, кого владелец не заблокировал
+         select 1 from profile_music p where p.attachment_id = a.id
+            and not exists (select 1 from blocks b where b.owner_id = p.user_id and b.user_id = ${userId})))`;
   return a ? { id, mime: a.mime as string, name: a.name as string } : null;
 }
 

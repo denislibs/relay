@@ -17,6 +17,7 @@ export interface LocalMessage {
   deleted?: boolean;
   reactions?: { userId: number; emoji: string }[];
   kind?: 'text' | 'photo' | 'file' | 'voice' | 'round' | 'audio';
+  groupId?: string | null;
   attachment?: LocalAttachment | null;
   entities?: Entity[];    // оформление текста
   listened?: boolean;     // голосовое/кружок прослушан получателем
@@ -27,6 +28,7 @@ export interface LocalMessage {
 
 /** Вложение сообщения; у неотправленного id пустой, пока файл не загружен. */
 export interface LocalAttachment {
+  title?: string | null; performer?: string | null;
   id: string; kind: 'photo' | 'file' | 'voice' | 'round' | 'audio'; mime: string; name: string; size: number; w: number | null; h: number | null; thumb?: string | null;
   duration?: number | null; waveform?: string | null;   // голосовое и кружок
 }
@@ -46,6 +48,7 @@ export interface LocalChat {
   last: LocalMessage | null;
   lastAt: string;
   draft?: { text: string; at: string; entities?: Entity[] } | null;   // неотправленный текст композера (общий для вкладок)
+  pinned?: number[];      // закреплённые сообщения (новые сверху)
 }
 
 export interface OutboxEntry {
@@ -58,6 +61,7 @@ export interface OutboxEntry {
   attachment?: LocalAttachment | null;   // id появляется после загрузки файла
   entities?: Entity[];
   error?: string;         // код отказа сервера (failed)
+  groupId?: string | null;   // отправлены вместе — один пузырь
 }
 
 export type Query =
@@ -108,6 +112,9 @@ export type Action =
   | { type: 'search'; q: string; chatId?: number; beforeId?: number; limit?: number }
   | { type: 'chatMedia'; chatId: number; kind: 'media' | 'file' | 'audio' | 'voice' | 'link'; beforeId?: number }
   | { type: 'chatMediaCounts'; chatId: number }
+  | { type: 'pin'; chatId: number; id: number }
+  | { type: 'unpin'; chatId: number; id: number | null }
+  | { type: 'messagesByIds'; chatId: number; ids: number[] }
   | { type: 'updateProfile'; firstName?: string; lastName?: string; bio?: string | null; birthday?: Birthday | null }
   | { type: 'setLinks'; links: ProfileLink[] }
   | { type: 'setUsername'; username: string | null }
@@ -146,7 +153,7 @@ export type Action =
   /** раздел «Для разработчиков»: имитатор сети и служебные команды (devlog.ts) */
   | DevAction
   | { type: 'sendFile'; chatId: number; body: string; file: Blob; name: string; mime: string; w?: number | null; h?: number | null; thumb?: string | null; replyToId?: number | null;
-      kind?: 'voice' | 'round' | 'audio'; duration?: number; waveform?: string | null }
+      kind?: 'voice' | 'round' | 'audio'; duration?: number; waveform?: string | null; title?: string | null; performer?: string | null; groupId?: string | null }
   | { type: 'listened'; chatId: number; id: number };
 
 /** Медленная сеть: задержка (мс, туда-обратно; на каждое направление — половина), джиттер (мс), потери кадров (%), полоса (Кбит/с, 0 — без ограничения). */

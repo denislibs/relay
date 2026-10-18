@@ -1,3 +1,4 @@
+import { refreshMyMusic } from './music';
 import { configureSpoilers, configureStickers, installSpoilers } from '@relay/ui';
 import { fetchBuild, onVisible, startUpdateCheck } from './update';
 import { claimMediaCache, sendMediaPolicy } from './storageInfo';
@@ -29,6 +30,7 @@ function start(me: Me): void {
   setGlobal({ me, boot: 'app' });
   startData(me);
   startSettingsData(me);
+  void refreshMyMusic();   // мои треки в профиле — для кнопки в плеере
 }
 
 async function boot(): Promise<void> {

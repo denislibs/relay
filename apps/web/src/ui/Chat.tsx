@@ -1,6 +1,9 @@
+import { PinnedBar } from './PinnedBar';
+import { Playlist } from './Playlist';
+import { inProfile, toggleProfileMusic, type Track } from '../music';
 import { Avatar, Button, Icon, MediaPolicy, peerTone, ChatSearchBar, Highlight, ripple, useMinVisible, requestMeasure, Composer, DropOverlay, GlassBar, IconButton, Menu, Modal, Presence, ReactionPicker, requestMutation, applyMarkdown, emptyValue, sameValue, voiceSupported, PlayerBar, roundSupported, startRound, Verified } from '@relay/ui';
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'preact/hooks';
-import { closeChat, deleteMessage, editMessage, ensureNames, focusMessage, openUserChat, sendFile, sendRound, sendVoice, react, saveDraft, searchMessages, send, typing, typingDone } from '../data';
+import { closeChat, deleteMessage, editMessage, ensureNames, focusMessage, openChat, openUserChat, pinMessage, unpinMessage, sendFile, sendFiles, sendRound, sendVoice, react, saveDraft, searchMessages, send, typing, typingDone } from '../data';
 import type { Item, SearchHit } from '@relay/sync-engine/src/types';
 import type { Entity } from '@relay/protocol';
 
@@ -98,18 +101,21 @@ export function Chat({ chatId, frameKey, active }: { chatId: number; frameKey: s
 
   // вложения: выбор файла (скрепка), перетаскивание, вставка; перед отправкой — окно с превью и подписью
   const picker = useRef<HTMLInputElement>(null);
-  const [pending, setPending] = useState<{ file: File; url: string | null; caption: string } | null>(null);
+  const [pending, setPending] = useState<{ file: File; files: File[]; url: string | null; caption: string } | null>(null);
   const [dragging, setDragging] = useState(false);
-  const offer = (file: File | null | undefined) => {
-    if (!file || systemRef.current) return;   // в служебный чат ничего не отправить
-    setPending({ file, url: /^image\//.test(file.type) ? URL.createObjectURL(file) : null, caption: latest.current.text });
+  // несколько файлов разом — одной группой (в ленте один пузырь); превью — только у одиночного фото
+  const offer = (list: File | FileList | File[] | null | undefined) => {
+    const files = !list ? [] : list instanceof File ? [list] : [...list];
+    if (!files.length || systemRef.current) return;   // в служебный чат ничего не отправить
+    const file = files[0];
+    setPending({ file, files, url: files.length === 1 && /^image\//.test(file.type) ? URL.createObjectURL(file) : null, caption: latest.current.text });
   };
   const closePending = () => { if (pending?.url) URL.revokeObjectURL(pending.url); setPending(null); };
   const sendPending = () => {
     if (!pending) return;
     stick.current = true;
     typingDone(chatId);
-    sendFile(chatId, pending.file, pending.caption.trim(), (replyTo?.id as number) ?? null).catch(() => {});
+    sendFiles(chatId, pending.files, pending.caption.trim(), (replyTo?.id as number) ?? null).catch(() => {});
     if (pending.caption === latest.current.text) { api.current?.setValue(emptyValue()); latest.current = saved.current = emptyValue(); }
     setReplyKey(null);
     closePending();
@@ -120,8 +126,8 @@ export function Chat({ chatId, frameKey, active }: { chatId: number; frameKey: s
     const enter = (e: DragEvent) => { if (!activeRef.current || !hasFiles(e)) return; depth++; setDragging(true); };
     const leave = () => { depth = Math.max(0, depth - 1); if (!depth) setDragging(false); };
     const over = (e: DragEvent) => { if (activeRef.current && hasFiles(e)) e.preventDefault(); };
-    const drop = (e: DragEvent) => { if (!activeRef.current || !hasFiles(e)) return; e.preventDefault(); depth = 0; setDragging(false); offer(e.dataTransfer!.files[0]); };
-    const paste = (e: ClipboardEvent) => { if (!activeRef.current || systemRef.current) return; const f = [...(e.clipboardData?.files ?? [])][0]; if (f) { e.preventDefault(); offer(f); } };
+    const drop = (e: DragEvent) => { if (!activeRef.current || !hasFiles(e)) return; e.preventDefault(); depth = 0; setDragging(false); offer(e.dataTransfer!.files); };
+    const paste = (e: ClipboardEvent) => { if (!activeRef.current || systemRef.current) return; const fs = [...(e.clipboardData?.files ?? [])]; if (fs.length) { e.preventDefault(); offer(fs); } };
     addEventListener('dragenter', enter); addEventListener('dragleave', leave); addEventListener('dragover', over); addEventListener('drop', drop); addEventListener('paste', paste);
     return () => { removeEventListener('dragenter', enter); removeEventListener('dragleave', leave); removeEventListener('dragover', over); removeEventListener('drop', drop); removeEventListener('paste', paste); };
   }, []);
@@ -235,6 +241,14 @@ export function Chat({ chatId, frameKey, active }: { chatId: number; frameKey: s
   return (
     <>
       <span ref={shell} hidden />
+      {/* плеер — остров над шапкой (как в Telegram): шапка плавно уезжает вниз, пока он открыт */}
+      <PlayerBar
+        onTitle={(t: Track) => { if (t.msgId != null && t.chatId) { if (t.chatId === chatId) focusMessage({ id: t.msgId, sort: t.msgId }); else openChat(t.chatId, { id: t.msgId, sort: t.msgId }); } }}
+        onPlaylist={() => setGlobal({ playlistOpen: true })}
+        inProfile={inProfile}
+        onToggleProfile={(t: Track) => { if (t.msgId != null || inProfile(t)) void toggleProfileMusic(t); else showToast('В профиль можно добавить трек из чата'); }}
+      />
+      <Playlist />
       <GlassBar class={finding ? 'app-finding' : ''}>
         {/* поверх другого чата — «Назад» к нему (и на широком экране), нижний — к списку на узком */}
         <IconButton class={depth > 1 ? 'app-back app-back-inner' : 'app-back'} icon="arrowLeft" label={depth > 1 ? 'Назад' : 'К списку чатов'} onClick={closeChat} />
@@ -247,7 +261,8 @@ export function Chat({ chatId, frameKey, active }: { chatId: number; frameKey: s
         </button>
         <IconButton icon="search" label="Поиск по чату" onClick={() => setFinding(true)} />
         <IconButton icon="more" label="Информация" onClick={() => setGlobal({ infoOpen: !infoOpen })} />
-        <PlayerBar />
+        {/* закреплённые — под шапкой, как в Telegram (плеер — над ней) */}
+        {!system ? <PinnedBar chatId={chatId} /> : null}
         {/* поиск по чату — карточка внутри шапки, как в Telegram: аватар и правая кнопка остаются видны */}
         {finding ? (
           <div class={'app-findcard' + (listOpen && found ? ' app-findcard-open' : '')}>
@@ -361,6 +376,9 @@ export function Chat({ chatId, frameKey, active }: { chatId: number; frameKey: s
                 items={[
                   ...(menuMsg.id != null && !menuMsg.deleted && !system ? [{ icon: 'reply', label: 'Ответить', onClick: () => { if (editing) endEdit(editing.draft); setReplyKey(menuMsg.key as string); api.current?.focus({ end: true }); } }] : []),
                   ...(own && !system ? [{ icon: 'pencil', label: 'Изменить', onClick: () => startEdit(menuMsg) }] : []),
+                  ...(menuMsg.id != null && !menuMsg.deleted && !system && !menuMsg.service ? [((chat?.pinned as number[] | undefined) ?? []).includes(menuMsg.id as number)
+                    ? { icon: 'pin', label: 'Открепить', onClick: () => void unpinMessage(chatId, menuMsg.id as number) }
+                    : { icon: 'pin', label: 'Закрепить', onClick: () => void pinMessage(chatId, menuMsg.id as number) }] : []),
                   ...(!menuMsg.deleted ? [{ icon: 'copy', label: 'Копировать', onClick: () => { navigator.clipboard?.writeText(menuMsg.body as string).catch(() => {}); } }] : []),
                   ...(own ? ['-' as const, { icon: 'trash', label: 'Удалить', danger: true, onClick: () => setConfirmDelete({ id: menuMsg.id as number }) }] : []),
                 ]}
@@ -369,15 +387,15 @@ export function Chat({ chatId, frameKey, active }: { chatId: number; frameKey: s
           </>
         );
       })() : null}
-      <input ref={picker} type="file" hidden onChange={(e) => offer((e.target as HTMLInputElement).files?.[0])} />
+      <input ref={picker} type="file" multiple hidden onChange={(e) => offer((e.target as HTMLInputElement).files)} />
       <Presence show={dragging} exitMs={160}><div class="app-drop"><DropOverlay title="Отпустите, чтобы отправить" text="Фото и документы до 50 МБ" /></div></Presence>
       {pending ? (
-        <Modal title={pending.url ? 'Отправить фото' : 'Отправить файл'} onClose={closePending} actions={[
+        <Modal title={pending.files.length > 1 ? `Отправить файлы: ${pending.files.length}` : pending.url ? 'Отправить фото' : 'Отправить файл'} onClose={closePending} actions={[
           <Button key="c" variant="ghost" onClick={closePending}>Отмена</Button>,
           <Button key="s" onClick={sendPending}>Отправить</Button>,
         ]}>
           {pending.url ? <img class="app-send-preview" src={pending.url} alt="" /> : (
-            <div class="app-send-file"><b>{pending.file.name}</b><span>{fileSize(pending.file.size)}</span></div>
+            <div class="app-send-files">{pending.files.map((f, i) => <div key={i} class="app-send-file"><b>{f.name}</b><span>{fileSize(f.size)}</span></div>)}</div>
           )}
           <input
             class="app-field app-send-caption"

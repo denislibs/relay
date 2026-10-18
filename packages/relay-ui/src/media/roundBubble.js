@@ -6,6 +6,7 @@ import { h } from 'preact';
 import { useEffect, useRef, useState } from 'preact/hooks';
 import { cx, Icon, MessageStatus, ProgressRing } from '../kit.js';
 import * as player from './player.js';
+import { isHeavyAnimating, onHeavyAnimationEnd } from '../schedule.js';
 
 var R = 114, C = 2 * Math.PI * R;   // viewBox 240: 120 − 6
 var active = null;                 // кружок, играющий со звуком (один на всё приложение)
@@ -38,11 +39,15 @@ export function RoundBubble(props) {
 
   useEffect(function () {
     var v = video.current;
+    var waiting = false, alive = true;
+    function start() { if (alive && me.current.visible && v && !(active === me.current && v.paused)) v.play().catch(function () {}); }
     var off = watch(box.current, function (vis) {
       me.current.visible = vis;
       if (!v) return;
-      if (vis && !(active === me.current && v.paused)) v.play().catch(function () {});
-      else if (!vis && active !== me.current) v.pause();
+      // во время прокрутки к сообщению и других тяжёлых анимаций — не запускаем: пролетающие кружки не декодируют видео
+      if (vis && isHeavyAnimating()) { if (!waiting) { waiting = true; onHeavyAnimationEnd(function () { waiting = false; start(); }); } return; }
+      if (vis) start();
+      else if (active !== me.current) v.pause();
     });
     function tick() {
       raf.current = requestAnimationFrame(tick);
@@ -52,7 +57,7 @@ export function RoundBubble(props) {
       if (badge.current) { var t = fmt(v.currentTime); if (badge.current.textContent !== t) badge.current.textContent = t; }
     }
     raf.current = requestAnimationFrame(tick);
-    return function () { off(); cancelAnimationFrame(raf.current); if (active === me.current) { active = null; player.release(me.current.stop); } };
+    return function () { alive = false; off(); cancelAnimationFrame(raf.current); if (active === me.current) { active = null; player.release(me.current.stop); } };
   }, []);
 
   function onTap(e) {

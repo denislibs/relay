@@ -1,3 +1,4 @@
+import { coverThumb, readAudioTags } from './id3';
 import { beginHeavyAnimation, nudgeWallpaper, toBase64 } from '@relay/ui';
 import { connectEngine, EngineClient, Mirror } from '@relay/sync-engine/src/client';
 import type { Item, Patch, Query, SearchResult } from '@relay/sync-engine/src/types';
@@ -390,14 +391,25 @@ export async function sendRound(chatId: number, rec: { blob: Blob; duration: num
 /** Голосовое или кружок прослушан (своё — нет). */
 export function markListened(chatId: number, id: number): void { engine.call({ type: 'listened', chatId, id }).catch(() => {}); }
 
-export async function sendFile(chatId: number, file: File, caption: string, replyToId: number | null = null): Promise<void> {
+export async function sendFile(chatId: number, file: File, caption: string, replyToId: number | null = null, groupId: string | null = null): Promise<void> {
   nudgeWallpaper();
   toLatestOf(chatId);
   const img = await describeImage(file);
   const seconds = img ? null : await audioDuration(file);
-  const res = (await engine.call({ type: 'sendFile', chatId, body: caption, file, name: file.name || 'file', mime: file.type || 'application/octet-stream', w: img?.w ?? null, h: img?.h ?? null, thumb: img?.thumb ?? null, replyToId,
-    ...(seconds ? { kind: 'audio' as const, duration: seconds } : {}) })) as { clientId: string };
+  // музыка: название, исполнитель и обложка из тегов (как в Telegram); обложка — превью 96 px
+  const tags = seconds ? await readAudioTags(file) : null;
+  const cover = tags?.cover ? await coverThumb(tags.cover) : null;
+  const res = (await engine.call({ type: 'sendFile', chatId, body: caption, file, name: file.name || 'file', mime: file.type || 'application/octet-stream', w: img?.w ?? null, h: img?.h ?? null, thumb: img?.thumb ?? cover ?? null, replyToId,
+    ...(seconds ? { kind: 'audio' as const, duration: seconds, title: tags?.title ?? null, performer: tags?.performer ?? null } : {}),
+    ...(groupId ? { groupId } : {}) })) as { clientId: string };
   if (img) localPreviews.set(res.clientId, URL.createObjectURL(file));
+}
+
+/** Несколько файлов разом — одной группой (в ленте один пузырь, как альбом в Telegram); подпись — у последнего. */
+export async function sendFiles(chatId: number, files: File[], caption: string, replyToId: number | null = null): Promise<void> {
+  if (files.length === 1) return sendFile(chatId, files[0], caption, replyToId);
+  const groupId = crypto.randomUUID();
+  for (let i = 0; i < files.length; i++) await sendFile(chatId, files[i], i === files.length - 1 ? caption : '', i === 0 ? replyToId : null, groupId);
 }
 
 /** Вкладка «Общих медиа» панели «Информация»: страница сообщений (новые сверху). */
@@ -482,3 +494,9 @@ function rememberNames(add: Record<number, string>): void {
   setGlobal({ names });
   try { localStorage.setItem('relay.names', JSON.stringify(names)); } catch { /* ok */ }
 }
+
+/* ---------- закреплённые сообщения ---------- */
+export const pinMessage = (chatId: number, id: number) => engine.call({ type: 'pin', chatId, id }).catch(() => { showToastLazy('Не удалось закрепить — нет сети?'); });
+export const unpinMessage = (chatId: number, id: number | null) => engine.call({ type: 'unpin', chatId, id }).catch(() => { showToastLazy('Не удалось открепить — нет сети?'); });
+export const messagesByIds = (chatId: number, ids: number[]) => engine.call({ type: 'messagesByIds', chatId, ids }) as Promise<Item[]>;
+function showToastLazy(text: string): void { void import('./settingsData').then((m) => m.showToast(text)); }

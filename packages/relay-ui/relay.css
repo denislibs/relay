@@ -1159,7 +1159,7 @@ button.rl-tab:hover { color: var(--ink); }
 .rl-asidecard { display: flex; flex-direction: column; min-height: 0; overflow: hidden; color: var(--ink); }
 .rl-asidecard .rl-panel-head h2 { flex: 1; font: 500 19px/24px var(--font-sans); margin: 0; }
 .rl-aside-body { flex: 1; min-height: 0; display: flex; flex-direction: column; overflow-y: auto; scrollbar-width: thin; }
-.rl-aside-group { margin: var(--space-2) var(--space-3) 0; padding: var(--space-1) 0; border-radius: var(--radius-lg); background: var(--raised); box-shadow: var(--tg-shadow-bubble, 0 1px 2px rgba(0,0,0,.1)); }
+.rl-aside-group { margin: var(--space-2) var(--space-3) 0; padding: var(--space-2); border-radius: var(--radius-lg); background: var(--raised); box-shadow: var(--tg-shadow-bubble, 0 1px 2px rgba(0,0,0,.1)); }
 .rl-aside-group .rl-inforow { border-radius: var(--radius-md); }
 .rl-aside-tabs { margin: var(--space-3) var(--space-3) 0; }
 .rl-aside-tabs .rl-tabs { box-shadow: 0 1px 4px rgba(0, 0, 0, .06); }
@@ -1448,7 +1448,18 @@ html[data-blur="0"] .rl-shell .rl-msgmenu .rl-menu, html[data-blur="0"] .rl-shel
 .rl-vb-dot { width: .5rem; height: .5rem; margin-inline-start: .375rem; border-radius: 50%; background: var(--voice-progress); }
 
 /* ---------- плеер под шапкой чата ---------- */
-.rl-playerbar { position: absolute; z-index: 4; left: 0; right: 0; top: calc(100% + 6px); height: 3rem; box-sizing: border-box;
+/* остров плеера над шапкой: раскрывается по высоте (шапка плавно уезжает вниз), пока раскрывается — обрезан */
+.rl-playerslot { display: grid; grid-template-rows: 1fr; width: 100%; max-width: var(--chat-max, none); margin-inline: auto; position: relative; z-index: 4; animation: rl-pslot-in 300ms cubic-bezier(.25, 1, .5, 1) both; }
+@keyframes rl-pslot-in { from { grid-template-rows: 0fr; } }
+.rl-presence[data-state="closing"] .rl-playerslot { animation: rl-pslot-out 300ms cubic-bezier(.33, 1, .68, 1) forwards; }
+@keyframes rl-pslot-out { to { grid-template-rows: 0fr; } }
+.rl-playerclip { min-height: 0; overflow: hidden; animation: rl-unclip 1ms 300ms forwards; }
+.rl-playerclip > .rl-playerbar { margin-bottom: 10px; }   /* до шапки 10px, как в Telegram */
+/* промежуток колонки (16px) гасим всегда — и пока остров раскрывается из нуля, и когда исчезает: шапка не прыгает */
+.rl-shell .rl-playerslot { margin-bottom: calc(-1 * var(--space-float)); }   /* после раскрытия — меню плеера не обрезаются */
+@keyframes rl-unclip { to { overflow: visible; } }
+.rl-presence[data-state="closing"] .rl-playerclip { animation: none; overflow: hidden; }
+.rl-playerbar { position: relative; z-index: 4; height: 3rem; box-sizing: border-box;
   display: flex; align-items: center; gap: 2px; padding: 0 6px; border-radius: var(--radius-panel, 16px); background: var(--glass, var(--raised)); box-shadow: var(--shadow-panel, var(--shadow-float));
   -webkit-backdrop-filter: blur(20px) saturate(1.4); backdrop-filter: blur(20px) saturate(1.4); overflow: hidden;
   animation: rl-pbar-in 300ms cubic-bezier(.25, 1, .5, 1) both; }
@@ -1459,7 +1470,7 @@ html[data-blur="0"] .rl-shell .rl-msgmenu .rl-menu, html[data-blur="0"] .rl-shel
 .rl-playerbar-off { opacity: .35; pointer-events: none; }
 .rl-playerbar-play { position: relative; flex-shrink: 0; width: 2rem; height: 2rem; padding: 0; border: 0; border-radius: 50%; cursor: pointer; background: transparent; color: var(--brand-text, var(--brand)); }
 .rl-playerbar-play > .rl-icon { position: absolute; top: 50%; left: 50%; margin: -10px 0 0 -10px; transition: opacity .4s var(--ease-out), transform .6s cubic-bezier(.34, 1.56, .64, 1); }
-.rl-playerbar-text { flex: 1; min-width: 0; display: flex; flex-direction: column; margin-left: 6px; font: 400 13px/17px var(--font-sans); color: var(--ink-muted); }
+.rl-playerbar-text { flex: 1; min-width: 0; display: flex; flex-direction: column; align-items: flex-start; margin-left: 6px; padding: 0; border: 0; background: none; text-align: left; cursor: pointer; font: 400 13px/17px var(--font-sans); color: var(--ink-muted); }
 .rl-playerbar-text b { font-weight: 500; font-size: 14px; color: var(--ink); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .rl-playerbar-text > span { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; font-variant-numeric: tabular-nums; }
 .rl-playerbar-speed-wrap { position: relative; }
@@ -1467,7 +1478,12 @@ html[data-blur="0"] .rl-shell .rl-msgmenu .rl-menu, html[data-blur="0"] .rl-shel
   font: 600 11px/1 var(--font-sans); color: var(--ink-muted); }
 .rl-playerbar-speed-on { color: var(--brand-text, var(--brand)); }
 .rl-playerbar-menu { position: absolute; right: 0; top: calc(100% + 6px); z-index: 30; }
-.rl-playerbar-line { position: absolute; left: 0; right: 0; bottom: 0; height: 2px; background: var(--brand); transform: scaleX(0); transform-origin: left; }
+.rl-playerbar-seek { position: absolute; left: 0; right: 0; bottom: 0; height: 6px; cursor: pointer; }
+.rl-playerbar-line { position: absolute; left: 0; right: 0; bottom: 0; height: 2px; background: var(--brand-strong); transform: scaleX(0); transform-origin: left; pointer-events: none; }
+.rl-playerbar-seek:hover .rl-playerbar-line { height: 4px; }
+.rl-playerbar-vol { position: relative; }
+.rl-playerbar-volpop { position: absolute; left: 50%; top: calc(100% - 2px); z-index: 30; transform: translateX(-50%); padding: 12px 8px; border-radius: 14px; background: var(--menu-bg); box-shadow: var(--menu-shadow); -webkit-backdrop-filter: blur(24px); backdrop-filter: blur(24px); }
+.rl-playerbar-volpop input { writing-mode: vertical-lr; direction: rtl; width: 20px; height: 96px; accent-color: var(--brand-strong); }
 
 /* ---------- круг записи кружка ---------- */
 .rl-roundrec { position: fixed; z-index: 60; left: 50%; top: 50%; width: min(22.5rem, 70vmin); aspect-ratio: 1; border-radius: 50%; overflow: hidden;
@@ -1531,6 +1547,43 @@ html[data-blur="0"] .rl-menu, html[data-blur="0"] .rl-attach { -webkit-backdrop-
 
 .rl-round-dl { display: inline-flex; align-items: center; justify-content: center; width: 54px; height: 54px; border-radius: 50%; background: var(--media-scrim); color: var(--on-media); }
 .rl-round-center .rl-ring-spin > svg, .rl-round-center .rl-ring > svg { animation: rl-ring-rotate 2s linear infinite; }   /* дуга и с известным прогрессом вращается — как в Telegram */
+
+/* Музыка в ленте (musicBubble.js) — как в Telegram; цвета — как у голосового (зелёный в исходящем) */
+.rl-music { min-width: 280px; max-width: 360px; padding: 8px 12px 6px 8px; --music-accent: var(--voice-btn, var(--brand-strong)); }
+.rl-bubble-out.rl-music { --music-accent: #4fae4e; --music-sub: #4fae4e; }
+.rl-music-row { display: flex; align-items: center; gap: 14px; }
+.rl-music-btnwrap { position: relative; flex: none; width: 54px; height: 54px; }
+.rl-music-play { position: relative; width: 54px; height: 54px; border: 0; border-radius: 50%; background: var(--music-accent); background-size: cover; background-position: center; color: #fff; cursor: pointer; }
+.rl-music-cover { box-shadow: inset 0 0 0 100px rgba(0, 0, 0, .18); }
+.rl-music-play > .rl-icon { position: absolute; top: 50%; left: 50%; margin: -13px 0 0 -13px; filter: drop-shadow(0 1px 2px rgba(0,0,0,.25)); transition: opacity .4s var(--ease-out), transform .6s cubic-bezier(.34, 1.56, .64, 1); }
+.rl-music-dl { position: absolute; right: -3px; bottom: -3px; width: 22px; height: 22px; display: grid; place-items: center; padding: 0; border: 2px solid var(--bubble-in); border-radius: 50%; background: var(--music-accent); color: #fff; cursor: pointer; }
+.rl-bubble-out .rl-music-dl { border-color: var(--bubble-out); }
+.rl-music-text { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
+.rl-music-text b { font: 500 15.5px/21px var(--font-sans); color: var(--ink); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.rl-music-sub { font: 400 14.5px/20px var(--font-sans); color: var(--music-sub, var(--meta, var(--ink-muted))); font-variant-numeric: tabular-nums; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.rl-music-live { display: flex; flex-direction: column; gap: 4px; }
+.rl-music-seek { position: relative; height: 10px; cursor: pointer; }
+.rl-music-seek::before, .rl-music-seek > i { content: ''; position: absolute; left: 0; right: 0; top: 4px; height: 2px; border-radius: 1px; }
+.rl-music-seek::before { background: color-mix(in srgb, var(--music-accent) 25%, transparent); }
+.rl-music-seek > i { background: var(--music-accent); transform: scaleX(0); transform-origin: left; }
+.rl-music-meta { display: flex; justify-content: flex-end; align-items: center; gap: 3px; font: 400 12px/14px var(--font-sans); color: var(--music-sub, var(--meta, var(--ink-muted))); margin-top: -2px; }
+/* группа (отправлены вместе): строки — части одного пузыря */
+.rl-music-line.rl-music-middle, .rl-music-line.rl-music-last { margin-top: 0 !important; }
+.app-msg:has(> .rl-music-middle), .app-msg:has(> .rl-music-last) { margin-top: 0 !important; }
+.rl-music-first .rl-music, .rl-music-middle .rl-music { border-bottom-left-radius: 0 !important; border-bottom-right-radius: 0 !important; padding-bottom: 6px; box-shadow: none; }
+.rl-music-middle .rl-music, .rl-music-last .rl-music { border-top-left-radius: 0 !important; border-top-right-radius: 0 !important; padding-top: 6px; }
+
+/* плеер и закреплённое — такие же острова, как шапка: непрозрачный фон и тень Telegram */
+.rl-shell .rl-playerbar { border-radius: 24px; background: var(--raised); box-shadow: var(--tg-shadow-header); -webkit-backdrop-filter: none; backdrop-filter: none; }
+:root[data-theme="dark"] .rl-bubble-out.rl-music { --music-accent: #fff; --music-sub: rgba(255,255,255,.7); }
+:root[data-theme="dark"] .rl-bubble-out .rl-music-play:not(.rl-music-cover), :root[data-theme="dark"] .rl-bubble-out .rl-music-dl { color: var(--bubble-out); }
+@media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) .rl-bubble-out.rl-music { --music-accent: #fff; --music-sub: rgba(255,255,255,.7); }
+  :root:not([data-theme="light"]) .rl-bubble-out .rl-music-play:not(.rl-music-cover), :root:not([data-theme="light"]) .rl-bubble-out .rl-music-dl { color: var(--bubble-out); } }
+
+/* «Информация» — в одной гамме с настройками: серый фон страницы, белые карточки групп и списков */
+.rl-asidecard, .rl-asidecard .rl-slide:has(> .rl-sidepage > .rl-aside-body), .rl-sidepage:has(> .rl-aside-body) { background: var(--page); }
+.rl-asidecard .rl-aside-pages .rl-slide { background: transparent; }
+.rl-aside-tabs::before { background: color-mix(in srgb, var(--page) 72%, transparent); }
 
 /* Анимированный стикер (TGS): место занято сразу, canvas проявляется, когда воркер нарисовал первый кадр */
 .rl-sticker { position: relative; display: inline-block; flex: 0 0 auto; }

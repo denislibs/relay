@@ -1,10 +1,11 @@
 import type { Item } from '@relay/sync-engine/src/types';
 import type { Entity } from '@relay/protocol';
-import { Bubble, peerTone, DateDivider, FileBubble, MediaBubble, MessageText, VoiceBubble, RoundBubble, player, MediaViewer, ScrollToBottom, forceMeasure, isHeavyAnimating, onHeavyAnimationEnd, requestMeasure, requestMutation } from '@relay/ui';
+import { Bubble, peerTone, DateDivider, FileBubble, MediaBubble, MessageText, VoiceBubble, MusicBubble, RoundBubble, player, MediaViewer, ScrollToBottom, beginHeavyAnimation, forceMeasure, isHeavyAnimating, onHeavyAnimationEnd, requestMeasure, requestMutation } from '@relay/ui';
 import { memo } from 'preact/compat';
 import { useEffect, useLayoutEffect, useRef, useState } from 'preact/hooks';
 import { clearFocus, ensureNames, focusMessage, localPreview, markListened, moveWindow, react, savePosition, savedPosition, seen } from '../data';
-import { frameByKey, getGlobal, useGlobal } from '../global';
+import { activeFrame, frameByKey, getGlobal, useGlobal } from '../global';
+import { toggleMusic, trackTitle } from '../music';
 import { showToast } from '../settingsData';
 import { clock, dayKey, dayLabel, fileSize } from './format';
 
@@ -26,12 +27,12 @@ const READ_EVERY = 150;   // отправка «вижу до id» не чаще
 const FIRST_PAINT = 24;   // при открытии внизу первым кадром — столько последних сообщений, остальное следующим кадром
 
 type Quote = { id: number; sort: number; body: string; senderId: number };
-type Att = { id: string; kind: 'photo' | 'file' | 'voice' | 'round' | 'audio'; mime: string; name: string; size: number; w: number | null; h: number | null; thumb?: string | null; duration?: number | null; waveform?: string | null };
+type Att = { id: string; kind: 'photo' | 'file' | 'voice' | 'round' | 'audio'; title?: string | null; performer?: string | null; mime: string; name: string; size: number; w: number | null; h: number | null; thumb?: string | null; duration?: number | null; waveform?: string | null };
 const fileUrl = (a: Att, download = false) => `/files/${a.id}${download ? '?download=1' : ''}`;
-type RowProps = { chatId: number; voiceTitle: string; author?: string; onAuthor?: (m: Item) => void; onOpen: (m: Item) => void; hl?: string; m: Item; meId: number; out: boolean; start: boolean; end: boolean; quoted?: Quote | null; quoteAuthor?: string; quoteTone?: number; appear: boolean; flash: boolean; onReact: (m: Item, emoji: string) => void };
+type RowProps = { chatId: number; voiceTitle: string; author?: string; onAuthor?: (m: Item) => void; onOpen: (m: Item) => void; hl?: string; m: Item; meId: number; out: boolean; start: boolean; end: boolean; pos?: 'single' | 'first' | 'middle' | 'last'; quoted?: Quote | null; quoteAuthor?: string; quoteTone?: number; appear: boolean; flash: boolean; onReact: (m: Item, emoji: string) => void };
 
 /** Строка ленты: перерисовывается только если изменилось её сообщение или место в группе. */
-const Row = memo(function Row({ chatId, voiceTitle, author, onAuthor, onOpen, hl, m, meId, out, start, end, quoted, quoteAuthor, quoteTone, appear, flash, onReact }: RowProps) {
+const Row = memo(function Row({ chatId, voiceTitle, author, onAuthor, onOpen, hl, m, meId, out, start, end, pos, quoted, quoteAuthor, quoteTone, appear, flash, onReact }: RowProps) {
   // реакции: по эмодзи — сколько и есть ли моя
   const list = (m.reactions as { userId: number; emoji: string }[] | undefined) ?? [];
   const chips: { emoji: string; count: number; mine: boolean }[] = [];
@@ -93,7 +94,27 @@ const Row = memo(function Row({ chatId, voiceTitle, author, onAuthor, onOpen, hl
       </div>
     );
   }
-  if (att && !m.deleted && att.id !== undefined && (att.kind === 'file' || att.kind === 'audio')) {
+  if (att && !m.deleted && att.kind === 'audio') {
+    return (
+      <div class={flash ? 'app-msg app-msg-flash' : 'app-msg'} data-key={m.key} data-sort={m.sort as number}>
+        <MusicBubble
+          from={out ? 'out' : 'in'} tail={end} groupStart={start} pos={pos}
+          trackKey={m.key as string} title={att.title || trackTitle(att.name)} performer={att.performer ?? undefined} cover={att.thumb ?? undefined}
+          duration={att.duration ?? 0} size={fileSize(att.size)}
+          onDownload={att.id ? () => { const a = document.createElement('a'); a.href = fileUrl(att, true); a.download = att.name; a.click(); } : undefined}
+          uploading={pending} progress={m.progress as number}
+          time={clock(m.createdAt as string)} status={out ? m.status : undefined}
+          onToggle={() => {
+            // плейлист — музыка загруженного окна ленты, новые сверху
+            const list = (activeFrame(getGlobal())?.messages ?? []).filter((x) => !x.deleted && (x.attachment as Att | null)?.kind === 'audio' && x.id != null).reverse();
+            toggleMusic(m as never, list as never, chatId);
+          }}
+        />
+        {mark}
+      </div>
+    );
+  }
+  if (att && !m.deleted && att.id !== undefined && att.kind === 'file') {
     const ext = (att.name.split('.').pop() ?? 'file').slice(0, 4);
     return (
       <div class={flash ? 'app-msg app-msg-flash' : 'app-msg'} data-key={m.key} data-sort={m.sort as number}>
@@ -139,10 +160,12 @@ const noop = () => {}; // цитата — кнопка; сам клик лов�
 function voiceTrack(m: Item, att: Att, chatId: number, author: string, out: boolean) {
   return {
     key: m.key as string,
+    kind: 'voice' as const,
     src: localPreview(m.key as string) ?? fileUrl(att),
     duration: att.duration ?? 0,
     title: author,
     subtitle: 'Голосовое сообщение',
+    chatId, msgId: (m.id as number | null) ?? null,
     onListened: !out && m.id != null && !m.listened ? () => markListened(chatId, m.id as number) : undefined,
   };
 }
@@ -387,7 +410,17 @@ export function Feed({ frameKey, active, chatId, meId, peerName, group, onAuthor
     } else {
       requestMeasure(() => {
         const top = Math.max(0, row.offsetTop - (root.clientHeight - row.offsetHeight) / 2);
-        requestMutation(() => root.scrollTo({ top, behavior: 'smooth' }));
+        const from = root.scrollTop, h = root.clientHeight;
+        requestMutation(() => {
+          // как в Telegram: далеко — сначала прыжок почти к цели, плавно — только последний экран
+          // (иначе прокрутка пролетает десятки пузырей и кружков, каждый из которых просыпается — кадры проседают)
+          if (Math.abs(top - from) > h * 2) { programmatic.current++; root.scrollTop = top + (top > from ? -h : h); }
+          // пока едем — тяжёлая анимация: кружки не запускают видео, отложенная работа ждёт
+          const end = beginHeavyAnimation(1200);
+          const done = () => { root.removeEventListener('scrollend', done); end(); };
+          root.addEventListener('scrollend', done);
+          root.scrollTo({ top, behavior: 'smooth' });
+        });
       });
     }
   }, [focus, messages]);
@@ -472,8 +505,13 @@ export function Feed({ frameKey, active, chatId, meId, peerName, group, onAuthor
     const start = prevSender !== m.senderId || day !== prevDay;
     const end = !next || next.senderId !== m.senderId || dayKey(next.createdAt as string) !== day;
     const quoted = m.reply as Quote | null;
+    // файлы, отправленные вместе (groupId), — одним пузырём: позиция строки внутри группы
+    const prevM = shown[i - 1];
+    const same = (x: Item | undefined) => !!x && !!m.groupId && x.groupId === m.groupId && x.senderId === m.senderId && !x.deleted;
+    const pos = !m.groupId || m.deleted ? 'single' : same(prevM) && same(next) ? 'middle' : same(prevM) ? 'last' : same(next) ? 'first' : 'single';
     out.push(
       <Row
+        pos={pos}
         key={m.key}
         author={group && !mine && start && !m.deleted ? names[m.senderId as number] ?? '' : undefined}
         onAuthor={onAuthorRow}

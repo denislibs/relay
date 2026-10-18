@@ -1,3 +1,4 @@
+import { unpinDeleted } from './pins';
 import { normalizeEntities, trimFormatted, type Entity, type Reaction } from '@relay/protocol';
 import { sql } from '../db';
 import { assertMember } from './chats';
@@ -45,6 +46,7 @@ export async function deleteMessage(userId: number, chatId: number, id: number):
     await tx`update messages set body = '', entities = null, deleted = true where chat_id = ${chatId} and id = ${id}`;
     await tx`delete from reactions where chat_id = ${chatId} and message_id = ${id}`;
     await fanOut(tx, await membersOf(tx, chatId), { type: 'messageDeleted', chatId, id });
+    await unpinDeleted(tx, chatId, id);
     return { ok: true };
   });
 }

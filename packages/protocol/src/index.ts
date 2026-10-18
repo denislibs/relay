@@ -14,6 +14,7 @@ export interface Message {
   senderId: Id;
   clientId: string;
   kind: 'text' | 'photo' | 'file' | 'voice' | 'round' | 'audio';
+  groupId?: string | null;   // отправлены вместе (несколько файлов) — в ленте одним пузырём
   body: string;
   replyToId: Id | null;
   createdAt: string; // ISO
@@ -84,6 +85,8 @@ export interface Attachment {
   id: string; kind: AttachmentKind; mime: string; name: string; size: number; w: number | null; h: number | null; thumb?: string | null;
   duration?: number | null;   // голосовое, кружок и музыка: целые секунды
   waveform?: string | null;   // голосовое: 63 байта (100 значений по 5 бит, младшие биты первыми) в base64
+  title?: string | null;      // музыка: из тегов файла
+  performer?: string | null;
 }
 export type AttachmentKind = 'photo' | 'file' | 'voice' | 'round' | 'audio';
 /** Вкладки «Общих медиа» (как в Telegram): медиа — фото и видео, файлы, музыка, голосовые и кружки, ссылки. */
@@ -115,7 +118,8 @@ export type Update =
   | { type: 'privacyChanged'; rules: PrivacyRules }
   // чёрный список: человек заблокирован (blocked) или разблокирован (unblocked); только владельцу
   | { type: 'blocksChanged'; blocked?: BlockedUser; unblocked?: Id }
-  | { type: 'sessionsChanged' };   // список сеансов изменился: новый вход, подтверждение, завершение
+  | { type: 'sessionsChanged' }
+  | { type: 'pins'; chatId: Id; ids: Id[] };   // закреплённые сообщения чата целиком (новые сверху)   // список сеансов изменился: новый вход, подтверждение, завершение
 
 /** Тело уведомления/push без предпросмотра: текст сообщения не раскрываем. */
 export const NO_PREVIEW = 'Новое сообщение';
@@ -196,7 +200,7 @@ export type ErrorCode = 'bad_frame' | 'unauthorized' | 'not_member' | 'not_found
 export type ClientFrame =
   | { op: 'hello'; lastSeq: number }
   | { op: 'sync'; since: number }
-  | { op: 'send'; reqId: string; clientId: string; chatId: Id; body: string; entities?: Entity[]; replyToId?: Id | null; attachment?: { id: string; thumb?: string | null } | null }
+  | { op: 'send'; reqId: string; clientId: string; chatId: Id; body: string; entities?: Entity[]; replyToId?: Id | null; attachment?: { id: string; thumb?: string | null } | null; groupId?: string | null }
   | { op: 'read'; reqId: string; chatId: Id; upToId: Id }
   | { op: 'typing'; chatId: Id }   // «печатаю» — без ответа, сервер пересылает остальным участникам
   | { op: 'draft'; reqId: string; chatId: Id; text: string; entities?: Entity[] }
@@ -247,7 +251,8 @@ export function parseClientFrame(raw: string): ClientFrame | null {
       if (!str(f.reqId, 64) || !str(f.clientId, 36) || !UUID.test(f.clientId) || !int(f.chatId) || typeof f.body !== 'string') return null;
       if (f.replyToId != null && !int(f.replyToId)) return null;
       if (f.attachment != null && (typeof f.attachment !== 'object' || !str((f.attachment as { id: unknown }).id, 36))) return null;
-      return { op: 'send', reqId: f.reqId, clientId: f.clientId, chatId: f.chatId, body: f.body, entities: normalizeEntities(f.body, f.entities), replyToId: (f.replyToId as number | null) ?? null, attachment: (f.attachment as { id: string; thumb?: string | null } | null) ?? null };
+      if (f.groupId != null && !(typeof f.groupId === 'string' && UUID.test(f.groupId))) return null;
+      return { op: 'send', reqId: f.reqId, clientId: f.clientId, chatId: f.chatId, body: f.body, entities: normalizeEntities(f.body, f.entities), replyToId: (f.replyToId as number | null) ?? null, attachment: (f.attachment as { id: string; thumb?: string | null } | null) ?? null, groupId: (f.groupId as string | null) ?? null };
     case 'read':
       return str(f.reqId, 64) && int(f.chatId) && int(f.upToId) ? { op: 'read', reqId: f.reqId, chatId: f.chatId, upToId: f.upToId } : null;
     default: return null;
