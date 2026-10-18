@@ -1,27 +1,55 @@
-// Короткий сигнал уведомления, сгенерированный WebAudio (без файлов). Звучит, только если браузер разрешил аудио.
+// Звук уведомления — свой, синтезированный WebAudio (без файлов и без чужих записей): мягкий «колокольчик»
+// из двух нот, как у мессенджеров — короткий удар молоточка, тёплый основной тон, затухающий хвост и лёгкое эхо.
+// Звучит, только если браузер разрешил аудио.
 let ctx: AudioContext | null = null;
 
-/** Два тона по 120 мс. volume 0..1; 0 — ничего не играем. */
+function audio(): AudioContext | null {
+  const Ctor: typeof AudioContext | undefined = typeof AudioContext !== 'undefined' ? AudioContext : (globalThis as { webkitAudioContext?: typeof AudioContext }).webkitAudioContext;
+  if (!Ctor) return null;
+  ctx ??= new Ctor();
+  if (ctx.state === 'suspended') void ctx.resume().catch(() => {});
+  return ctx;
+}
+
+/**
+ * Одна нота «колокольчика»: основной тон + октава + «стеклянный» обертон (×2.76, как у металлофона), у обертонов
+ * хвост короче — удар звонкий, а остаётся мягкий тон. Огибающая без щелчков (атака 4 мс).
+ */
+function chime(c: AudioContext, out: AudioNode, hz: number, at: number, peak: number, length: number): void {
+  const partials: [ratio: number, level: number, decay: number][] = [[1, 1, length], [2, 0.32, length * 0.55], [2.76, 0.16, length * 0.3], [5.4, 0.05, 0.06]];
+  for (const [ratio, level, decay] of partials) {
+    const osc = c.createOscillator(), gain = c.createGain();
+    osc.type = 'sine';
+    osc.frequency.value = hz * ratio;
+    gain.gain.setValueAtTime(0.0001, at);
+    gain.gain.exponentialRampToValueAtTime(Math.max(0.0001, peak * level), at + 0.004);
+    gain.gain.exponentialRampToValueAtTime(0.0001, at + decay);
+    osc.connect(gain).connect(out);
+    osc.start(at);
+    osc.stop(at + decay + 0.02);
+  }
+}
+
+/** Уведомление о новом сообщении: две ноты вверх (си → ми), ~0.6 с. volume 0..1; 0 — ничего не играем. */
 export function playNotifySound(volume: number): void {
   if (!(volume > 0)) return;
   try {
-    const Ctor: typeof AudioContext | undefined = typeof AudioContext !== 'undefined' ? AudioContext : (globalThis as { webkitAudioContext?: typeof AudioContext }).webkitAudioContext;
-    if (!Ctor) return;
-    ctx ??= new Ctor();
-    if (ctx.state === 'suspended') void ctx.resume().catch(() => {});
-    const t = ctx.currentTime;
-    for (const [i, hz] of [880, 1318.5].entries()) {
-      const osc = ctx.createOscillator(), gain = ctx.createGain();
-      osc.type = 'sine';
-      osc.frequency.value = hz;
-      const at = t + i * 0.12;
-      // огибающая без щелчков; потолок 0.4 — полная громкость не бьёт по ушам
-      gain.gain.setValueAtTime(0.0001, at);
-      gain.gain.exponentialRampToValueAtTime(Math.max(0.0001, volume * 0.4), at + 0.01);
-      gain.gain.exponentialRampToValueAtTime(0.0001, at + 0.12);
-      osc.connect(gain).connect(ctx.destination);
-      osc.start(at);
-      osc.stop(at + 0.13);
-    }
+    const c = audio();
+    if (!c) return;
+    const t = c.currentTime + 0.01;
+    // общий выход: мягкий срез верхов (без «писка») и тихое эхо — звук не сухой
+    const master = c.createGain();
+    master.gain.value = Math.min(1, volume) * 0.32;   // полная громкость не бьёт по ушам
+    const tone = c.createBiquadFilter();
+    tone.type = 'lowpass';
+    tone.frequency.value = 5200;
+    const echo = c.createDelay(0.5), echoGain = c.createGain();
+    echo.delayTime.value = 0.11;
+    echoGain.gain.value = 0.18;
+    tone.connect(master);
+    tone.connect(echo).connect(echoGain).connect(master);
+    master.connect(c.destination);
+    chime(c, tone, 987.77, t, 0.9, 0.42);          // си второй октавы
+    chime(c, tone, 1318.51, t + 0.085, 1, 0.55);   // ми третьей — чуть громче и длиннее, «точка»
   } catch { /* аудио недоступно — не страшно */ }
 }
