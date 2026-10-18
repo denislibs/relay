@@ -43,10 +43,11 @@ body { background: var(--bg); color: var(--ink); font-family: var(--font-sans); 
 .app-sentinel { flex: 0 0 1px; height: 1px; margin: -1px 0 0; pointer-events: none; }
 .app-mark { position: absolute; left: 0; right: 0; bottom: 0; height: 1px; pointer-events: none; }
 .app-unread-divider { display: flex; justify-content: center; margin: var(--space-3) 0; padding: 6px 0; background: color-mix(in srgb, var(--raised) 72%, transparent); color: var(--brand-text); font: 500 13.5px/18px var(--font-sans); animation: app-fade 300ms var(--ease-out) both; }
-/* sticky top считается от края с учётом padding-top ленты (он уже равен шапке + отступу) — поэтому только 8px */
-.rl-shell .rl-feed .rl-date { position: sticky; top: 8px; z-index: 2; pointer-events: none; }
+/* sticky top считается от края с учётом padding-top ленты (он уже равен шапке + отступу) */
+.rl-shell .rl-feed .rl-date { position: sticky; top: -32px; z-index: 2; pointer-events: none; }   /* у строки даты отступ 1rem, у ленты — 16px до шапки: плашка встаёт в 8px под шапкой */
 .rl-shell .rl-feed .rl-date span { pointer-events: auto; transition: opacity 300ms var(--ease-out); }
 .rl-shell .rl-feed .rl-date.stuck span { opacity: 0; }
+.rl-shell .rl-feed .rl-date.covered span { opacity: 0; transition: none; }
 /* поиск: раздел «Сообщения» в списке слева и строка поиска по чату на месте шапки */
 .app-results { padding: var(--space-2) 0 var(--space-4); }
 .app-results-head { padding: var(--space-2) var(--space-3); color: var(--ink-muted); font: 500 13px/18px var(--font-sans); }
@@ -631,7 +632,8 @@ html[data-anim="0"] .app-chatcol, html[data-anim="0"] .app-chatcol-below, html[d
 .app-pl-profile:hover { filter: brightness(1.05); }
 
 /* Закреплённые под шапкой (PinnedBar.tsx) — отдельный остров, как в Telegram; лента получает место под ним */
-.rl-shell:has(.app-pins) .rl-feed { --top-zone: calc(var(--header-h) + var(--space-float) + 58px); }
+/* плашка закреплённого — под шапкой: лента начинается ниже на её высоту (отрицательный отступ ленты не меняем, иначе сдвиги взаимно гасятся) */
+.rl-shell:has(.app-pins) .rl-feed { padding-top: calc(var(--top-zone) + 8px + 58px); }
 .app-pins { position: absolute; left: 0; right: 0; top: calc(100% + 10px); z-index: 2; display: flex; align-items: center; gap: 4px; height: 48px; padding: 0 6px 0 12px; border-radius: 24px;
   background: var(--raised); box-shadow: var(--tg-shadow-header); animation: rl-pbar-in 260ms cubic-bezier(.25, 1, .5, 1) both; }
 .rl-presence[data-state="closing"] .app-pins { animation: rl-pbar-out 220ms cubic-bezier(.33, 1, .68, 1) forwards; }

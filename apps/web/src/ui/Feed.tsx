@@ -172,6 +172,9 @@ function voiceTrack(m: Item, att: Att, chatId: number, author: string, out: bool
 }
 
 /** Первый бабл, видимый ниже шапки, и его отступ от верха ленты (только в фазе замера). */
+/** top у липкой даты (зависит от плашки закреплённого): от него считаем, где дата «прилипла». */
+function dateTop(root: HTMLElement): number { const d = root.querySelector('.rl-date'); return d ? parseFloat(getComputedStyle(d).top) || 0 : 0; }
+
 const GROUP_GAP_MS = 10 * 60_000;
 /** Между a и b группа рвётся: пауза больше 10 минут или b — первое непрочитанное. */
 function breaksGroup(a: Item | undefined, b: Item, unreadFrom: number | null, meId: number): boolean {
@@ -379,16 +382,40 @@ export function Feed({ frameKey, active, chatId, meId, peerName, group, onAuthor
   // «липкие» даты: пока листают — видны; через секунду тишины прилипшие гаснут
   const quiet = useRef<ReturnType<typeof setTimeout> | null>(null);
   const scrolling = useRef(false);
+  // как в Telegram: наверху видна только дата текущего дня; прилипшие раньше прячутся (иначе лежат стопкой),
+  // а подъезжающая следующая дата выталкивает текущую вверх
+  const pushing = useRef(false);
+  const pushDates = (root: HTMLElement) => {
+    if (pushing.current) return;
+    pushing.current = true;
+    requestMeasure(() => {
+      pushing.current = false;
+      const stickAt = root.getBoundingClientRect().top + parseFloat(getComputedStyle(root).paddingTop) + dateTop(root);
+      const dates = [...root.querySelectorAll<HTMLElement>('.rl-date')];
+      const tops = dates.map((d) => d.getBoundingClientRect().top);
+      let cur = -1;
+      tops.forEach((t, i) => { if (t <= stickAt + 2) cur = i; });
+      const h = cur >= 0 ? dates[cur].offsetHeight : 0;
+      const gap = cur >= 0 && cur + 1 < dates.length ? tops[cur + 1] - stickAt : Infinity;
+      const shift = gap < h ? gap - h : 0;
+      requestMutation(() => dates.forEach((d, i) => {
+        d.classList.toggle('covered', i < cur);
+        d.style.transform = i === cur && shift ? `translateY(${shift}px)` : '';
+      }));
+    });
+  };
+
   const onScrollDates = (root: HTMLElement) => {
     if (!scrolling.current) {
       scrolling.current = true;
       requestMutation(() => root.querySelectorAll('.rl-date.stuck').forEach((d) => d.classList.remove('stuck')));
     }
+    pushDates(root);
     if (quiet.current) clearTimeout(quiet.current);
     quiet.current = setTimeout(() => {
       scrolling.current = false;
       requestMeasure(() => {
-        const stickAt = root.getBoundingClientRect().top + parseFloat(getComputedStyle(root).paddingTop) + 8; // padding ленты + top: 8px у .rl-date
+        const stickAt = root.getBoundingClientRect().top + parseFloat(getComputedStyle(root).paddingTop) + dateTop(root); // padding ленты + top у .rl-date
         const stuck = [...root.querySelectorAll<HTMLElement>('.rl-date')].filter((d) => Math.abs(d.getBoundingClientRect().top - stickAt) < 3);
         requestMutation(() => stuck.forEach((d) => d.classList.add('stuck')));
       });

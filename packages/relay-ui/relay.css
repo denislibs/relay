@@ -906,7 +906,7 @@ button.rl-tab:hover { color: var(--ink); }
 .rl-shell .rl-recorder .rl-rec-body { box-shadow: var(--shadow-float); border-radius: var(--radius-panel); }
 .rl-shell .rl-selbar, .rl-shell .rl-csearch { border-radius: var(--radius-panel); box-shadow: var(--shadow-float); }
 .rl-shell .rl-csearch { background: var(--glass); -webkit-backdrop-filter: blur(20px) saturate(1.4); backdrop-filter: blur(20px) saturate(1.4); }
-.rl-shell .rl-date span, .rl-shell .rl-unread { -webkit-backdrop-filter: blur(12px); backdrop-filter: blur(12px); }
+.rl-shell .rl-unread { -webkit-backdrop-filter: blur(12px); backdrop-filter: blur(12px); }
 .rl-shell .rl-date { position: sticky; top: 4px; z-index: 2; }
 .rl-shell .rl-attach { left: 0; }
 
@@ -1263,13 +1263,11 @@ html[data-anim="0"] :is([class*="rl-"], [class*="app-"], [class*="rl-"] *, [clas
 html[data-blur="0"] .rl-drop,
 html[data-blur="0"] .rl-glassbar,
 html[data-blur="0"] .rl-shell .rl-csearch,
-html[data-blur="0"] .rl-shell .rl-date span,
 html[data-blur="0"] .rl-shell .rl-unread,
 html[data-blur="0"] .rl-shell .rl-msgmenu .rl-menu,
 html[data-blur="0"] .rl-shell .rl-rpick { -webkit-backdrop-filter: none; backdrop-filter: none; }
 html[data-blur="0"] .rl-glassbar, html[data-blur="0"] .rl-shell .rl-csearch { background: color-mix(in srgb, var(--raised) 96%, transparent); }
 html[data-blur="0"] .rl-shell .rl-glassbar { background: var(--raised); }
-html[data-blur="0"] .rl-shell .rl-date span { background: color-mix(in srgb, var(--raised) 96%, transparent); }
 html[data-blur="0"] .rl-shell .rl-msgmenu .rl-menu, html[data-blur="0"] .rl-shell .rl-rpick { background: color-mix(in srgb, var(--raised) 96%, transparent); }
 
 /* ---------- Приватность экрана: html[data-screen-blur] размывает список, ленту и правую панель; шапки и обои остаются чёткими ---------- */
