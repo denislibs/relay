@@ -421,8 +421,6 @@ function Composer(props) {
   var id = props.id || 'rl-composer';
   var b = bar[0];
   return h('div', { class: cx('rl-composer-wrap', props.className || props.class), ref: wrapRef },
-    h(Presence, { show: !!props.replyTo, exitMs: 160 },
-      h('div', { class: 'rl-composer-reply' }, h(ReplyQuote, Object.assign({}, reply.current || {}, { onCancel: props.onCancelReply })))),
     h(Presence, { show: !!(mentionList && mentionList.length), exitMs: 120 },
       h(MentionList, { items: mentionList || [], onPick: pickMention })),
     h(Presence, { show: attach[0], exitMs: 160 },
@@ -456,7 +454,16 @@ function Composer(props) {
           { icon: 'mic', label: 'Голосовое сообщение', onClick: function () { modeMenu[1](false); if (props.onRecordModeChange) props.onRecordModeChange('voice'); } },
           { icon: 'roundVideo', label: 'Видеосообщение', onClick: function () { modeMenu[1](false); if (props.onRecordModeChange) props.onRecordModeChange('round'); } },
         ] }))),
-    h('div', { class: cx('rl-composer', rec[0] && 'rl-composer-recording') },
+    h('div', { class: cx('rl-composer', rec[0] && 'rl-composer-recording', props.replyTo && 'has-reply') },
+      // ответ/редактирование — первой строкой внутри поля, как в Telegram: значок (стрелка или карандаш) цветом автора,
+      // цитата, крестик; поле плавно раздвигается по высоте
+      h(Presence, { show: !!props.replyTo, exitMs: 180 }, (function () {
+        var r = reply.current || {}, n = r.tone != null ? r.tone : 5, edit = r.icon === 'pencil';
+        return h('div', { class: 'rl-composer-reply', style: { '--quote-tone': 'var(--peer-' + n + ')' } },
+          h('span', { class: 'rl-composer-reply-icon', 'aria-hidden': 'true' }, h(Icon, { name: edit ? 'pencil' : 'reply', size: 22 })),
+          h(ReplyQuote, Object.assign({}, r, { icon: undefined, onCancel: undefined })),
+          h(IconButton, { icon: 'close', label: edit ? 'Отменить редактирование' : 'Отменить ответ', onClick: props.onCancelReply, class: 'rl-composer-reply-x' }));
+      })()),
       roundView[0] ? h(RoundRecorderView, { key: 'round', session: roundView[0].session, closing: roundView[0].closing }) : null,
       rec[0] ? h(RecordBar, { key: 'rec', session: rec[0].session, limitReached: rec[0].limit, forcePaused: rec[0].limit, onDelete: function () { endRecording(true); }, onPaused: props.onRecordPaused }) : null,
       h('div', { class: cx('rl-composer-field', st.empty && 'rl-composer-empty'), hidden: !!rec[0] },

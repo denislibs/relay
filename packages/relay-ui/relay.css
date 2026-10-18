@@ -697,9 +697,6 @@ button.rl-quote:active { background: var(--quote-bg-active, var(--pressed)); }
 
 /* ---------- Composer wrap: reply bar, attach menu, mentions ---------- */
 .rl-composer-wrap { position: relative; background: var(--tray); }
-.rl-composer-reply { overflow: clip; overflow-clip-margin: 16px; padding: 8px 12px 0 64px; animation: rl-reply-in var(--dur-base) var(--ease-out) both; }
-.rl-presence[data-state="closing"] .rl-composer-reply { animation: rl-reply-out var(--dur-fast) var(--ease-in) forwards; }
-.rl-composer-reply .rl-quote { background: var(--composer); }
 @keyframes rl-reply-in { from { opacity: 0; max-height: 0; transform: translateY(8px); } to { opacity: 1; max-height: 96px; transform: none; } }
 @keyframes rl-reply-out { from { max-height: 96px; } to { opacity: 0; max-height: 0; transform: translateY(8px); } }
 .rl-attach-toggle .rl-icon { transition: color 120ms var(--ease-standard); }
@@ -927,8 +924,17 @@ button.rl-tab:hover { color: var(--ink); }
 .rl-shell .rl-composer { padding: 0; background: transparent; gap: var(--space-2); }
 .rl-shell .rl-composer-field { min-height: 52px; padding: 6px 8px; border-radius: var(--radius-panel); box-shadow: var(--shadow-float); }
 .rl-shell .rl-composer-send { width: 52px; height: 52px; box-shadow: var(--shadow-float); }
-.rl-shell .rl-composer-reply { padding: 0 0 var(--space-2); }
-.rl-shell .rl-composer-reply .rl-quote { box-shadow: var(--shadow-float); border-radius: var(--radius-lg); }
+/* ответ/редактирование внутри поля ввода (Telegram): первая строка на всю ширину, поле плавно раздвигается */
+.rl-composer { flex-wrap: wrap; }
+.rl-composer > .rl-presence > .rl-composer-reply { flex: 0 0 100%; min-width: 0; box-sizing: border-box; }   /* обёртка Presence — display: contents */
+.rl-composer-reply { display: flex; align-items: center; gap: 2px; padding: 2px 2px 0 0; overflow: hidden; animation: rl-reply-grow 220ms cubic-bezier(.2, .8, .2, 1) both; }
+.rl-presence[data-state="closing"] .rl-composer-reply { animation: rl-reply-shrink 180ms cubic-bezier(.4, 0, 1, 1) forwards; }
+@keyframes rl-reply-grow { from { max-height: 0; opacity: 0; padding-top: 0; } to { max-height: 72px; opacity: 1; } }
+@keyframes rl-reply-shrink { from { max-height: 72px; opacity: 1; } to { max-height: 0; opacity: 0; padding-top: 0; } }
+.rl-composer-reply-icon { display: grid; place-items: center; flex-shrink: 0; width: 40px; height: 40px; color: var(--quote-tone); }
+.rl-composer-reply .rl-quote { flex: 1; min-width: 0; margin: 2px 0; border-radius: 10px; box-shadow: none; }
+.rl-composer-reply-x { flex-shrink: 0; color: var(--quote-tone); }
+@media (prefers-reduced-motion: reduce) { .rl-composer-reply { animation: none !important; } }
 .rl-shell .rl-recorder { min-height: 52px; }
 .rl-shell .rl-recorder .rl-rec-body { box-shadow: var(--shadow-float); border-radius: var(--radius-panel); }
 .rl-shell .rl-selbar, .rl-shell .rl-csearch { border-radius: var(--radius-panel); box-shadow: var(--shadow-float); }
@@ -1797,3 +1803,4 @@ html[data-blur="0"] .rl-menu, html[data-blur="0"] .rl-attach { -webkit-backdrop-
 .rl-burger.is-back i:nth-child(1) { top: 6px; width: 11px; transform: rotate(-45deg); }
 .rl-burger.is-back i:nth-child(3) { top: 6px; width: 11px; transform: rotate(45deg); }
 @media (prefers-reduced-motion: reduce) { .rl-burger, .rl-burger i { transition: none; } }
+.rl-composer.has-reply > .rl-composer-field { min-width: 120px; }   /* не умещается рядом с панелью — уходит на вторую строку */
