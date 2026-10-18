@@ -1,4 +1,4 @@
-import { Avatar, EmptyState, FolderTabs, Icon, LazyImage, peerTone, player, SlideStack } from '@relay/ui';
+import { Avatar, EmptyState, FolderTabs, Icon, LazyImage, MediaViewer, peerTone, player, SlideStack } from '@relay/ui';
 import type { Item } from '@relay/sync-engine/src/types';
 import { useEffect, useRef, useState } from 'preact/hooks';
 import { chatMedia, chatMediaCounts, focusMessage, type MediaTab } from '../data';
@@ -14,7 +14,7 @@ import { useMembers, type Member } from '../members';
 const ORDER: MediaTab[] = ['media', 'file', 'link', 'audio', 'voice'];
 const LABEL: Record<MediaTab, string> = { media: 'Медиа', file: 'Файлы', link: 'Ссылки', audio: 'Музыка', voice: 'Голосовые' };
 
-type Att = { id: string; kind: string; mime: string; name: string; size: number; thumb?: string | null; duration?: number | null };
+type Att = { id: string; kind: string; mime: string; name: string; size: number; thumb?: string | null; duration?: number | null; w?: number | null; h?: number | null };
 type Msg = Item & { id: number; clientId: string; senderId: number; createdAt: string; body: string; attachment?: Att | null; entities?: { type: string; offset: number; length: number; url?: string }[] | null };
 
 const when = (iso: string) => `${dayLabel(iso)}, ${clock(iso)}`;
@@ -92,25 +92,40 @@ function TabList({ chatId, tab }: { chatId: number; tab: MediaTab }) {
     return () => io.disconnect();
   }, [more, items]);
 
+  // «Медиа»: фото открываются просмотрщиком (листать — по всем фото вкладки), видео — в ленте, где есть плеер
+  const [viewer, setViewer] = useState<number | null>(null);
+  const grid = useRef<HTMLDivElement>(null);
+  const names = useGlobal((s) => s.names);
+  const meId = useGlobal((s) => s.me?.userId);
   if (!items) return <div class="app-sm-loading" aria-busy="true" />;
+  const photos = tab === 'media' ? items.filter((m) => !m.attachment!.mime.startsWith('video/')) : [];
+  const open = (m: Msg) => { const k = photos.indexOf(m); if (k >= 0) setViewer(k); else show(m); };
   const list = tab === 'media' ? (
-    <div class="app-media-grid">{items.map((m) => <MediaCell key={m.id} m={m} />)}</div>
+    <div class="app-media-grid" ref={grid}>{items.map((m) => <MediaCell key={m.id} m={m} onOpen={open} />)}</div>
   ) : (
     <div class="app-sm-list">
       {items.map((m) => tab === 'file' ? <FileRow key={m.id} m={m} /> : tab === 'link' ? <LinkRow key={m.id} m={m} /> : <TrackRow key={m.id} m={m} chatId={chatId} items={items} />)}
     </div>
   );
-  return <>{list}{more ? <div ref={end} class="app-sm-more" /> : null}</>;
+  return <>{list}{more ? <div ref={end} class="app-sm-more" /> : null}
+    {viewer !== null && photos[viewer] ? (
+      <MediaViewer index={viewer}
+        items={photos.map((m) => { const a = m.attachment!; return { src: fileUrl(a), thumb: a.thumb, w: a.w, h: a.h, name: a.name, download: fileUrl(a) + '?download=1', caption: m.body,
+          date: when(m.createdAt), sender: m.senderId === meId ? 'Вы' : names[m.senderId] ?? '' }; })}
+        origin={(k: number) => grid.current?.querySelector<HTMLElement>(`[data-mid="${photos[k]?.id}"]`) ?? null}
+        onClose={() => setViewer(null)} />
+    ) : null}
+  </>;
 }
 
-function MediaCell({ m }: { m: Msg }) {
+function MediaCell({ m, onOpen }: { m: Msg; onOpen: (m: Msg) => void }) {
   const a = m.attachment!;
   const video = a.mime.startsWith('video/');
   // видео без кадра-превью: первый кадр и длительность — из метаданных самого файла (как в Telegram)
   const [len, setLen] = useState(a.duration ?? 0);
   const [frame, setFrame] = useState(false);
   return (
-    <button type="button" class="app-media-cell" aria-label={a.name} onClick={() => show(m)}>
+    <button type="button" class="app-media-cell" data-mid={m.id} aria-label={a.name} onClick={() => onOpen(m)}>
       {a.thumb || !video ? <LazyImage src={video ? '' : fileUrl(a)} thumb={a.thumb ?? undefined} alt={a.name} /> : (
         <span class="app-media-video">
           <video class={'app-media-frame' + (frame ? ' app-media-frame-in' : '')} src={fileUrl(a) + '#t=0.1'} preload="metadata" muted playsInline tabIndex={-1} aria-hidden="true"
