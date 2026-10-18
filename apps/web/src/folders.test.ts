@@ -45,3 +45,14 @@ test('icon, subtitle, plural, recommendations hide once added', () => {
   expect(recommendedFor([]).map((r) => r.key)).toEqual(['unread', 'personal', 'groups']);
   expect(recommendedFor([{ ...RECOMMENDED[2].folder, id: 5, title: 'Мои группы' }]).map((r) => r.key)).toEqual(['unread', 'personal']);
 });
+
+test('toggle a chat in a folder: add to include; remove — from include, and exclude when the type still matches', async () => {
+  const { toggleChatInFolder } = await import('./folders');
+  const f = F({ include: [], groups: true });
+  const added = toggleChatInFolder(F({ exclude: [1] }), friend, ctx);
+  expect([added.include, added.exclude]).toEqual([[1], []]);
+  const removedByType = toggleChatInFolder(f, group, ctx);
+  expect([removedByType.include, removedByType.exclude]).toEqual([[], [3]]);
+  const removedExplicit = toggleChatInFolder(F({ include: [1] }), friend, ctx);
+  expect([removedExplicit.include, removedExplicit.exclude]).toEqual([[], []]);
+});

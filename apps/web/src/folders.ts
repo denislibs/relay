@@ -99,3 +99,15 @@ export function moveItem<T>(list: readonly T[], from: number, to: number): T[] {
   out.splice(Math.max(0, Math.min(out.length, to)), 0, x);
   return out;
 }
+
+/**
+ * Чат в папку / из папки (меню чата). Добавить — во включённые (и из исключённых). Убрать — из включённых,
+ * а если чат всё равно попадает по типу — в исключённые (как в Telegram Web K), иначе галочка не снялась бы.
+ */
+export function toggleChatInFolder(f: ChatFolder, c: FolderChat, ctx: FolderCtx): ChatFolder {
+  if (inFolder(f, c, ctx)) {
+    const next = { ...f, include: f.include.filter((x) => x !== c.id) };
+    return inFolder(next, c, ctx) ? { ...next, exclude: [...next.exclude, c.id] } : next;
+  }
+  return { ...f, include: [...f.include, c.id], exclude: f.exclude.filter((x) => x !== c.id) };
+}

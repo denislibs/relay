@@ -12,7 +12,9 @@ import { isDark } from '../theme';
 import { chatTime, chatTone, snippet } from './format';
 import { applyTheme as setTheme } from '../theme';
 import { previewBody, previewText, previewThumb, type LastMessage } from './preview';
-import { ALL, inFolder } from '../folders';
+import { ALL, inFolder, toggleChatInFolder } from '../folders';
+import { saveFolder, showToast } from '../settingsData';
+import { useCallback } from 'preact/hooks';
 import { selectFolder, useFolderCtx, useFolderGuard, useFolderItems, useFolderMenu, useFolderPlace } from './folderNav';
 import { Button } from '@relay/ui';
 
@@ -37,7 +39,7 @@ function MoreLoader() {
 }
 
 /** Строка списка чатов. memo: чат не изменился (тот же объект из Mirror) — строку не трогаем при сдвиге окна. */
-const SideRow = memo(function SideRow({ c, meId, active, showDraft, muted }: { c: Item; meId: number; active: boolean; showDraft: boolean; muted: boolean }) {
+const SideRow = memo(function SideRow({ c, meId, active, showDraft, muted, onMenu }: { c: Item; meId: number; active: boolean; showDraft: boolean; muted: boolean; onMenu?: (id: number, e: MouseEvent) => void }) {
   const last = c.last as (LastMessage & { status: string }) | null;
   const thumb = last ? previewThumb(last) : null;
   // имя автора — только в группах (в личке и так ясно, кто пишет); своё — «Вы», чужое — первое слово имени
@@ -61,6 +63,7 @@ const SideRow = memo(function SideRow({ c, meId, active, showDraft, muted }: { c
       status={!draft && last && last.senderId === meId ? last.status : null}
       active={active}
       onClick={() => openChat(c.id as number)}
+      onContextMenu={onMenu ? (e: MouseEvent) => { e.preventDefault(); onMenu(c.id as number, e); } : undefined}
     />
   );
 });
@@ -93,6 +96,22 @@ export function Sidebar() {
   const folderMenu = useFolderMenu();
   const ctx = useFolderCtx();
   useFolderGuard();
+  // меню чата (правая кнопка): «Добавить в папку» — подменю папок с галочками; внутри своей папки — «Убрать из папки»
+  const [chatMenu, setChatMenu] = useState<{ x: number; y: number; id: number } | null>(null);
+  const onRowMenu = useCallback((id: number, e: MouseEvent) => setChatMenu({ x: e.clientX, y: e.clientY, id }), []);
+  const menuChat = chatMenu ? chats.find((c) => c.id === chatMenu.id) : undefined;
+  const toggleIn = (fid: number) => {
+    const f = folders.find((x) => x.id === fid);
+    if (!f || !menuChat) return;
+    setChatMenu(null);
+    saveFolder(toggleChatInFolder(f, menuChat as never, ctx)).catch(() => showToast('Не удалось изменить папку'));
+  };
+  const activeFolder = useGlobal((s) => s.folder);
+  const current = folders.find((x) => x.id === activeFolder);
+  const chatMenuItems = menuChat ? [
+    { icon: 'folder', label: 'Добавить в папку', submenu: folders.map((f) => ({ icon: inFolder(f, menuChat as never, ctx) ? 'check' : 'folder', label: f.title, onClick: () => toggleIn(f.id) })) },
+    ...(current && inFolder(current, menuChat as never, ctx) ? [{ icon: 'close', label: 'Убрать из папки', onClick: () => toggleIn(current.id) }] : []),
+  ] : [];
   // Ctrl+Shift+1…9 — папка по номеру (как в Telegram Web A)
   useEffect(() => {
     if (place === 'none') return;
@@ -155,7 +174,7 @@ export function Sidebar() {
             onNearEnd={!status.chatsComplete ? loadMoreChats : undefined}
             rowHeight={ROW}
             getKey={(c: Item) => 'c' + c.id}
-            render={(c: Item) => <SideRow c={c} meId={me.userId} active={c.id === openId} showDraft={!!c.draft && c.id !== openId} muted={mutedIds.includes(c.id as number)} />}
+            render={(c: Item) => <SideRow c={c} meId={me.userId} active={c.id === openId} showDraft={!!c.draft && c.id !== openId} muted={mutedIds.includes(c.id as number)} onMenu={folders.length ? onRowMenu : undefined} />}
           />
           {!q && !status.chatsComplete ? (
             <MoreLoader />
@@ -235,6 +254,14 @@ export function Sidebar() {
     >
       <SlideStack variant="tabs" order={order} active={String(shown)} render={(f: string) => <div class="rl-page-scroll">{renderFolder(f)}</div>} />
       {folderMenu.node}
+      {chatMenu && menuChat ? (
+        <>
+          <div class="rl-msgmenu-scrim" onClick={() => setChatMenu(null)} onContextMenu={(e) => { e.preventDefault(); setChatMenu(null); }} />
+          <div class="rl-msgmenu" style={{ left: Math.min(chatMenu.x, innerWidth - 260), top: Math.min(chatMenu.y, innerHeight - 320) }}>
+            <Menu label={(menuChat.title as string) || 'Чат'} onClose={() => setChatMenu(null)} items={chatMenuItems} />
+          </div>
+        </>
+      ) : null}
     </SidebarCard>
   );
 }
