@@ -1,23 +1,11 @@
 // Текст сообщения с оформлением — для пузырей, цитат и подписей. Строит элементы из сегментов
 // (тех же, что и HTML поля ввода), без innerHTML. Подсветка поиска — внутри каждого куска.
 import { Fragment, h } from 'preact';
-import { useState } from 'preact/hooks';
-import { cx } from './kit.js';
 import { Highlight } from './more.js';
 import { safeUrl, segments } from './richtext.js';
+import { Spoiler } from './spoiler.js';
 
 var ORDER = ['link', 'pre', 'code', 'spoiler', 'bold', 'italic', 'underline', 'strike'];
-
-function Spoiler(props) {
-  var open = useState(false);
-  // скрытое открывается по клику и остаётся открытым; клик не уходит дальше (лента не реагирует)
-  return h('span', {
-    class: cx('rl-spoiler', open[0] && 'rl-spoiler-open'), role: open[0] ? undefined : 'button', tabIndex: open[0] ? undefined : 0,
-    'aria-label': open[0] ? undefined : 'Скрытый текст, нажмите, чтобы показать',
-    onClick: function (e) { if (!open[0]) { e.preventDefault(); e.stopPropagation(); open[1](true); } },
-    onKeyDown: function (e) { if (!open[0] && (e.key === 'Enter' || e.key === ' ')) { e.preventDefault(); open[1](true); } },
-  }, h('span', { class: 'rl-spoiler-text', 'aria-hidden': open[0] ? undefined : 'true' }, props.children));
-}
 
 function wrap(type, value, child) {
   switch (type) {

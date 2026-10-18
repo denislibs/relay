@@ -1,7 +1,7 @@
 import { beginHeavyAnimation, nudgeWallpaper, toBase64 } from '@relay/ui';
 import { connectEngine, EngineClient, Mirror } from '@relay/sync-engine/src/client';
 import type { Item, Patch, Query, SearchResult } from '@relay/sync-engine/src/types';
-import type { Entity } from '@relay/protocol';
+import { hideSpoilers, type Entity } from '@relay/protocol';
 import { activeFrame, frameByKey, getGlobal, setGlobal, type ChatFrame, type FeedMeta, type Me, type Status } from './global';
 import { bindChatDepth, popChats, pushChat } from './nav';
 import { notifyIncoming, startNotify } from './notify';
@@ -43,7 +43,7 @@ export function startData(me: Me): void {
       if (!last?.id || last.senderId === me.userId || last.id <= (before.get(c.id as number) ?? 0)) continue;
       if (c.id === getGlobal().openChatId && document.visibilityState === 'visible') continue;
       notifyIncoming({ id: c.id as number, title: (c.title as string) || 'Чат №' + c.id, muted: getGlobal().muted.includes(c.id as number) },
-        { id: last.id, body: last.body, kind: last.kind, attachmentName: last.attachment?.name, createdAt: last.createdAt, service: last.service });
+        { id: last.id, body: hideSpoilers(last.body, (last as { entities?: Entity[] }).entities), kind: last.kind, attachmentName: last.attachment?.name, createdAt: last.createdAt, service: last.service });
     }
     // сразу, не дожидаясь конца анимаций: список виртуальный (≈20 строк), а отложенный подъём чата
     // после отправки выглядит как запоздалый рывок

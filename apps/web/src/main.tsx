@@ -1,3 +1,4 @@
+import { configureSpoilers, installSpoilers } from '@relay/ui';
 import { fetchBuild, onVisible, startUpdateCheck } from './update';
 import { claimMediaCache, sendMediaPolicy } from './storageInfo';
 import { getPrefs, subscribePrefs, type Prefs } from './prefs';
@@ -88,6 +89,9 @@ if (__DEV__) void import('./devtools/session').then((s) => import('./devtools/me
   (window as unknown as { __dev: object }).__dev = { snapshot: s.devSnapshot, running: () => s.devRunning() || m.metricsRunning() };
 }));
 startTitle();
+// спойлеры: частицы рисует воркер (как в Telegram Web K); без него — CSS-точки
+configureSpoilers({ workerUrl: '/spoiler.worker.js' });
+installSpoilers();
 startUpdateCheck({ current: __BUILD__, fetchBuild, onUpdate: () => setGlobal({ updateReady: true }), onVisible });
 startScreenBlur();
 render(<App />, document.getElementById('app')!);

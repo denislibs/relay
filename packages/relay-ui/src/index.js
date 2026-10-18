@@ -9,6 +9,7 @@ export { enableStrictDom } from './strict.js';
 export * from './composer.js';
 export * from './richtext.js';
 export * from './richview.js';
+export * from './spoiler.js';
 export * from './media/waveform.js';
 export * from './media/voiceRecorder.js';
 export * from './media/recording.js';

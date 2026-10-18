@@ -1,4 +1,4 @@
-import { NO_PREVIEW } from '@relay/protocol';
+import { hideSpoilers, NO_PREVIEW } from '@relay/protocol';
 import { sql } from '../db';
 import { nameForSql } from './profile';
 import { isOnline } from './presence';
@@ -113,7 +113,8 @@ export type PushPayload = { chatId: number; id: number; title: string; body: str
 
 /** Новое сообщение → push участникам без соединения, кроме отправителя и тех, у кого чат заглушён.
  *  Только подпискам живых сеансов: истёкший или неактивный дольше срока, но ещё не убранный sweepInactive — молчит. */
-export async function pushNewMessage(m: { chatId: number; id: number; senderId: number; body: string; kind?: string; attachment?: { name?: string } | null; service?: { type: string } }): Promise<void> {
+export async function pushNewMessage(m: { chatId: number; id: number; senderId: number; body: string; entities?: { type: string; offset: number; length: number }[]; kind?: string; attachment?: { name?: string } | null; service?: { type: string } }): Promise<void> {
+  m = { ...m, body: hideSpoilers(m.body, m.entities) };   // скрытый текст в уведомление не уходит
   // код входа не уходит в push-сервис и на экран блокировки
   if (m.service?.type === 'login_code') m = { ...m, body: 'Код для входа в Relay' };
   // имя отправителя — глазами получателя (контактное, если он его задал)

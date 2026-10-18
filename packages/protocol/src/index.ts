@@ -246,3 +246,21 @@ export function parseClientFrame(raw: string): ClientFrame | null {
     default: return null;
   }
 }
+
+/** Знаки-заглушки вместо скрытого текста (Брайль: похоже на «шум», ширина близка к буквам). */
+export const SPOILER_FILL = '⠺⠵⠞⠟⠽⠾⠷⠯';
+
+/**
+ * Текст, где спойлеры заменены заглушкой (пробелы и переводы строк сохраняются): для уведомлений,
+ * push и превью — туда, где спойлер не раскрыть, настоящий текст не попадает.
+ */
+export function hideSpoilers(text: string, entities?: readonly { type: string; offset: number; length: number }[] | null): string {
+  if (!entities?.length) return text;
+  let out: string[] | null = null;
+  for (const e of entities) {
+    if (e.type !== 'spoiler') continue;
+    out ??= text.split('');   // смещения — в единицах UTF-16, как и у сущностей
+    for (let i = e.offset; i < Math.min(text.length, e.offset + e.length); i++) if (!/\s/.test(text[i])) out[i] = SPOILER_FILL[i % SPOILER_FILL.length];
+  }
+  return out ? out.join('') : text;
+}
