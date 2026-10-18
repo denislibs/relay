@@ -15,12 +15,13 @@ export async function createUser(name: string): Promise<number> {
  * Новый сеанс — единственный путь входа (любой будущий вход идёт через него): сначала чистка неактивных сеансов
  * этого человека, затем строка с устройством (грубо по User-Agent) и IP входа.
  */
-export async function createSession(userId: number, from?: { req: Request; server: IpSource }): Promise<string> {
+export async function createSession(userId: number, from?: { req: Request; server: IpSource }, opts: { confirmed?: boolean } = {}): Promise<string> {
   await sweepInactive(userId).catch((e) => console.error('sessions sweep:', e));
   const device = from ? parseDevice(from.req.headers.get('user-agent')) : null;
   const ip = from ? clientIp(from.req, from.server) : null;
   const token = randomBytes(32).toString('base64url');
-  await sql`insert into sessions (token_hash, user_id, expires_at, device, ip) values (${hash(token)}, ${userId}, now() + ${SESSION_DAYS + ' days'}::interval, ${device}, ${ip})`;
+  await sql`insert into sessions (token_hash, user_id, expires_at, device, ip, confirmed_at)
+            values (${hash(token)}, ${userId}, now() + ${SESSION_DAYS + ' days'}::interval, ${device}, ${ip}, ${opts.confirmed === false ? null : sql`now()`})`;
   return token;
 }
 

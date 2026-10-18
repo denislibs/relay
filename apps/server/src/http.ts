@@ -17,9 +17,10 @@ import { checkUsername, getMe, getUser, setUsername, updateProfile } from './dom
 import { usersByIds } from './domain/users';
 import { subscribe, unsubscribe, vapidKeys, type SubscriptionInput } from './domain/push';
 import { getSettings, setNotify, setPrivacy, setSessionsTtl } from './domain/settings';
+import { requestCode, signIn } from './domain/login';
 import { addContact, blockUser, listBlocked, listContacts, removeContact, resolveUser, unblockUser, updateContact } from './domain/contacts';
 
-const STATUS: Record<string, number> = { bad_frame: 400, too_long: 400, username_invalid: 400, username_reserved: 400, username_taken: 409, bio_too_long: 400, note_too_long: 400, name_invalid: 400, birthday_invalid: 400, unauthorized: 401, not_member: 403, blocked: 403, not_found: 404 };
+const STATUS: Record<string, number> = { bad_frame: 400, too_long: 400, username_invalid: 400, username_reserved: 400, username_taken: 409, bio_too_long: 400, note_too_long: 400, name_invalid: 400, birthday_invalid: 400, unauthorized: 401, not_member: 403, blocked: 403, not_found: 404, code_invalid: 400, code_expired: 400, flood: 429, fresh_session: 403 };
 const fail = (code: string) => Response.json({ code }, { status: STATUS[code] ?? 500 });
 
 /** checkedAt — когда сокет последний раз отмечал активность и проверял свой сеанс (domain/sessions.checkSocket). */
@@ -47,7 +48,7 @@ function withCookie(req: Request, res: Response | undefined): Response | undefin
 
 const INLINE_MIME = /^(image\/(jpeg|png|webp|gif|avif)|video\/(mp4|webm|ogg|quicktime)|audio\/(mpeg|mp4|ogg|webm|wav|x-wav|aac|flac))$/;
 
-const API = /^\/(health|me|users|contacts|settings|privacy|blocks|chats|presence|search|upload|files|push|sessions|ws|dev|logout)(\/|$)/;
+const API = /^\/(health|me|users|contacts|settings|privacy|blocks|chats|presence|search|upload|files|push|sessions|ws|dev|logout|auth)(\/|$)/;
 
 /** Статика клиента из WEB_DIST. Путь не может выйти за папку; пути без расширения — SPA, отдаём index.html. */
 function serveStatic(pathname: string): Response {
@@ -92,6 +93,18 @@ export function createServer(opts: { port: number }): Server {
 
         // публичный ключ VAPID — не секрет
         if (req.method === 'GET' && url.pathname === '/push/key') return Response.json({ key: (await vapidKeys()).publicKey });
+        if (req.method === 'POST' && url.pathname === '/auth/code') {
+          const { login } = ((await req.json().catch(() => null)) ?? {}) as { login?: unknown };
+          if (typeof login !== 'string' || !login.trim() || login.length > 64) return fail('bad_frame');
+          return Response.json(await requestCode(login));
+        }
+        if (req.method === 'POST' && url.pathname === '/auth/signin') {
+          const { attemptId, code } = ((await req.json().catch(() => null)) ?? {}) as { attemptId?: unknown; code?: unknown };
+          if (typeof attemptId !== 'string' || typeof code !== 'string') return fail('bad_frame');
+          const { userId } = await signIn(attemptId, code);
+          const token = await createSession(userId, { req, server }, { confirmed: false });
+          return Response.json({ userId }, { headers: { 'set-cookie': sessionCookie(token) } });
+        }
         const auth = await sessionFromToken(readSessionToken(req));
         if (!auth) return fail('unauthorized');
         const { userId, sessionId } = auth;

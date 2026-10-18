@@ -8,6 +8,7 @@ import { fanOut } from './journal';
 import { blockedInDirect } from './privacy';
 import { pushInBackground } from './push';
 import { isServiceChat } from './service';
+import { burnCodes } from './login';
 
 export const MAX_BODY = 4096;
 
@@ -45,6 +46,7 @@ export async function sendMessage(
       return { message: toMessage(existing), duplicate: true };
     }
     const message = toMessage(inserted[0]);
+    await burnCodes(tx, userId, body);
     const members = await tx`select user_id from chat_members where chat_id = ${input.chatId}`;
     await fanOut(tx, members.map((m) => m.user_id as number), { type: 'newMessage', message });
     await clearDraftInTx(tx, userId, input.chatId); // отправили — черновик на всех устройствах больше не нужен
