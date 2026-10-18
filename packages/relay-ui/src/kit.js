@@ -314,7 +314,7 @@ function SearchField(props) {
       h(Icon, { name: 'search', size: 18 }),
       h('svg', { class: 'rl-search-spin', width: 18, height: 18, viewBox: '0 0 18 18', fill: 'none' },
         h('circle', { cx: 9, cy: 9, r: 7, stroke: 'currentColor', 'stroke-width': 2, 'stroke-linecap': 'round', 'stroke-dasharray': '30 44' }))),
-    h('input', { id: id, type: 'search', placeholder: busy ? props.status : (props.placeholder || 'Поиск или новый чат'), value: props.value, onInput: props.onInput || props.onChange, autocomplete: 'off' }),
+    h('input', { id: id, type: 'search', placeholder: busy ? props.status : (props.placeholder || 'Поиск или новый чат'), value: props.value, onInput: props.onInput || props.onChange, onFocus: props.onFocus, onKeyDown: props.onKeyDown, autocomplete: 'off' }),
     busy ? h('span', { class: 'rl-sr', role: 'status' }, props.status) : null);
 }
 

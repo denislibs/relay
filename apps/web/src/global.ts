@@ -51,6 +51,8 @@ export interface GlobalState {
   folder: number;      // активная папка: 0 — «Все чаты», иначе id своей папки
   folderDraft: FolderDraft | null;   // редактор папки: общий для страницы правки и выбора чатов
   search: string;
+  searchOpen: boolean;   // левая колонка в режиме глобального поиска (вкладки, недавние)
+  searchTab: string;     // вкладка поиска: chats | media | link | file | audio | voice
   newChatOpen: boolean;
   sidebarView: string;   // путь страницы боковой панели, см. nav.ts
   infoOpen: boolean;   // правая панель «Информация»
@@ -107,6 +109,8 @@ let state: GlobalState = {
   folder: 0,
   folderDraft: null,
   search: '',
+  searchOpen: false,
+  searchTab: 'chats',
   newChatOpen: false,
   sidebarView: 'chats',
   infoOpen: false,

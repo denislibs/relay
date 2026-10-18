@@ -814,7 +814,7 @@ function SidebarHeader(props) {
     props.back
       ? h(IconButton, { icon: 'arrowLeft', label: 'Назад', onClick: props.onBack, class: 'rl-sidehead-back' })
       : h(IconButton, { icon: 'menu', label: 'Меню', onClick: props.onMenu }),
-    h(SearchField, { id: props.searchId || 'rl-side-search', placeholder: props.placeholder || 'Поиск', status: props.status, value: props.value, onInput: props.onSearch, class: 'rl-sidehead-search' }),
+    h(SearchField, { id: props.searchId || 'rl-side-search', placeholder: props.placeholder || 'Поиск', status: props.status, value: props.value, onInput: props.onSearch, onFocus: props.onSearchFocus, onKeyDown: props.onSearchKey, class: 'rl-sidehead-search' }),
     props.trailing !== undefined ? props.trailing : props.me ? h('button', { type: 'button', class: 'rl-sidehead-me', 'aria-label': 'Профиль', onClick: props.onMe }, h(Avatar, { name: props.me, tone: props.meTone, size: 36 })) : null);
 }
 

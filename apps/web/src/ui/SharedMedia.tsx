@@ -14,16 +14,16 @@ import { useMembers, type Member } from '../members';
 const ORDER: MediaTab[] = ['media', 'file', 'link', 'audio', 'voice'];
 const LABEL: Record<MediaTab, string> = { media: 'Медиа', file: 'Файлы', link: 'Ссылки', audio: 'Музыка', voice: 'Голосовые' };
 
-type Att = { id: string; kind: string; mime: string; name: string; size: number; thumb?: string | null; duration?: number | null; w?: number | null; h?: number | null };
-type Msg = Item & { id: number; clientId: string; senderId: number; createdAt: string; body: string; attachment?: Att | null; entities?: { type: string; offset: number; length: number; url?: string }[] | null };
+export type Att = { id: string; kind: string; mime: string; name: string; size: number; thumb?: string | null; duration?: number | null; w?: number | null; h?: number | null };
+export type Msg = Item & { id: number; clientId: string; senderId: number; createdAt: string; body: string; attachment?: Att | null; entities?: { type: string; offset: number; length: number; url?: string }[] | null };
 
-const when = (iso: string) => `${dayLabel(iso)}, ${clock(iso)}`;
-const dur = (s?: number | null) => { s = Math.max(0, Math.round(s ?? 0)); return Math.floor(s / 60) + ':' + String(s % 60).padStart(2, '0'); };
-const fileUrl = (a: Att) => `/files/${a.id}`;
+export const when = (iso: string) => `${dayLabel(iso)}, ${clock(iso)}`;
+export const dur = (s?: number | null) => { s = Math.max(0, Math.round(s ?? 0)); return Math.floor(s / 60) + ':' + String(s % 60).padStart(2, '0'); };
+export const fileUrl = (a: Att) => `/files/${a.id}`;
 const show = (m: Msg) => focusMessage({ id: m.id, sort: m.id });
 
 /** Цвет плитки по расширению (как в Telegram): таблицы и apk — зелёный, архивы и презентации — оранжевый, pdf — красный. */
-function extTone(ext: string): string {
+export function extTone(ext: string): string {
   if (/^(apk|xls|xlsx|ods|csv)$/.test(ext)) return 'green';
   if (/^(zip|rar|7z|tar|gz|bz2|xz|zst|ppt|pptx|odp)$/.test(ext)) return 'orange';
   if (/^(pdf|xps)$/.test(ext)) return 'red';
@@ -118,7 +118,7 @@ function TabList({ chatId, tab }: { chatId: number; tab: MediaTab }) {
   </>;
 }
 
-function MediaCell({ m, onOpen }: { m: Msg; onOpen: (m: Msg) => void }) {
+export function MediaCell({ m, onOpen }: { m: Msg; onOpen: (m: Msg) => void }) {
   const a = m.attachment!;
   const video = a.mime.startsWith('video/');
   // видео без кадра-превью: первый кадр и длительность — из метаданных самого файла (как в Telegram)

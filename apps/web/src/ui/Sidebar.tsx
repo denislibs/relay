@@ -2,11 +2,12 @@ import { ChatBanner } from './ChatBanner';
 import { UpdatePill } from './UpdatePill';
 import { Avatar, ChatRow, Highlight, Icon, Menu, Presence, SlideStack, ChatRowSkeleton, useMinVisible, EmptyState, WindowList, FolderTabs, SidebarCard, SidebarHeader, peerTone, ripple } from '@relay/ui';
 import type { Item } from '@relay/sync-engine/src/types';
-import { ensureNames, loadMoreChats, openChat, openInner, searchMessages } from '../data';
+import { ensureNames, loadMoreChats, openChat } from '../data';
+import { closeSearch, openSearch } from '../search';
+import { GlobalSearch } from './search/GlobalSearch';
 import { setGlobal, useGlobal } from '../global';
 import { useEffect, useRef, useState } from 'preact/hooks';
 import { memo } from 'preact/compat';
-import type { SearchHit } from '@relay/sync-engine/src/types';
 import { go } from '../nav';
 import { isDark } from '../theme';
 import { chatTime, chatTone, isSystemChat, shownBody, snippet } from './format';
@@ -92,17 +93,8 @@ export function Sidebar() {
   // контекстное меню строки чата (правая кнопка): как в Telegram — у курсора
   const [rowMenu, setRowMenu] = useState<{ id: number; x: number; y: number } | null>(null);
   const onRowMenu = useRef((id: number, x: number, y: number) => setRowMenu({ id, x, y })).current;
-  // поиск сообщений (сервер, без сети — кэш): через 300 мс после последнего нажатия, от двух символов
-  const [hits, setHits] = useState<{ q: string; list: SearchHit[]; source: string } | null>(null);
-  const searchQ = useGlobal((s) => s.search).trim();
-  useEffect(() => {
-    if (searchQ.length < 2) { setHits(null); return; }
-    let live = true;
-    const t = setTimeout(() => {
-      searchMessages(searchQ).then((r) => { if (live) setHits({ q: searchQ, list: r.hits, source: r.source }); }).catch(() => {});
-    }, 300);
-    return () => { live = false; clearTimeout(t); };
-  }, [searchQ]);
+  // глобальный поиск — свой режим колонки (search/GlobalSearch): вкладки, недавние, выдача по всем чатам
+  const searchOpen = useGlobal((s) => s.searchOpen);
   const theme = useGlobal((s) => s.theme);
   useGlobal((s) => s.prefs.timeFormat);   // смена формата времени перерисовывает время в списке
   const dark = isDark(theme);
@@ -160,7 +152,6 @@ export function Sidebar() {
   const renderFolder = (key: string) => {
     const f = Number(key);
     const list = listOf(f);
-    const results = f === shown && hits && hits.q === q.trim() ? hits : null;
     return (
       <>
       <div class="app-listwrap">
@@ -198,20 +189,7 @@ export function Sidebar() {
           />
         )}
         </div>
-      {results ? (
-        <div class="app-results" aria-label="Найденные сообщения">
-          <div class="app-results-head">Сообщения{results.source === 'local' ? ' · на устройстве' : ''}</div>
-          {results.list.length ? results.list.map((h) => (
-            <ChatRow
-              key={'m' + h.id}
-              name={h.chatTitle ?? 'Чат №' + h.chatId}
-              preview={<Highlight text={snippet(shownBody(h), results.q)} query={results.q} />}
-              time={chatTime(h.createdAt)}
-              onClick={() => openInner(h.chatId, { id: h.id, sort: h.sort })}   // найденное — поверх открытого чата, «Назад» вернёт к нему
-            />
-          )) : <div class="app-results-empty">Сообщений не найдено</div>}
-        </div>
-      ) : null}
+
       </>
     );
   };
@@ -220,9 +198,11 @@ export function Sidebar() {
     <SidebarCard
       embedded
       paged
-      header={<SidebarHeader onMenu={() => setMenu(true)} status={searchStatus ?? undefined} searchId="side-search" value={search} placeholder="Поиск" onSearch={(e: Event) => setGlobal({ search: (e.target as HTMLInputElement).value })} />}
-      top={!search.trim() ? <ChatBanner /> : null}
-      tabs={place === 'top' ? <FolderTabs class="app-folders" active={folder} onChange={selectFolder} onItemMenu={folderMenu.open} items={items.map((t, i) => (i === 0 ? { ...t, label: 'Все' } : t))} /> : null}
+      header={<SidebarHeader onMenu={() => setMenu(true)} back={searchOpen} onBack={closeSearch} status={searchStatus ?? undefined} searchId="side-search" value={search} placeholder="Поиск"
+        onSearchFocus={openSearch} onSearchKey={(e: KeyboardEvent) => { if (e.key === 'Escape') { e.preventDefault(); closeSearch(); } }}
+        onSearch={(e: Event) => setGlobal({ search: (e.target as HTMLInputElement).value, searchOpen: true })} />}
+      top={!searchOpen ? <ChatBanner /> : null}
+      tabs={place === 'top' && !searchOpen ? <FolderTabs class="app-folders" active={folder} onChange={selectFolder} onItemMenu={folderMenu.open} items={items.map((t, i) => (i === 0 ? { ...t, label: 'Все' } : t))} /> : null}
       banner={
         <>
           <RowMenu at={rowMenu} onClose={() => setRowMenu(null)} />
@@ -252,10 +232,10 @@ export function Sidebar() {
           </Presence> : null}
         </>
       }
-      fab={<NewChatFab />}
+      fab={searchOpen ? undefined : <NewChatFab />}
       overlay={<UpdatePill />}
     >
-      <SlideStack variant="tabs" order={order} active={String(shown)} render={(f: string) => <div class="rl-page-scroll">{renderFolder(f)}</div>} />
+      {searchOpen ? <GlobalSearch /> : <SlideStack variant="tabs" order={order} active={String(shown)} render={(f: string) => <div class="rl-page-scroll">{renderFolder(f)}</div>} />}
       {folderMenu.node}
     </SidebarCard>
   );
