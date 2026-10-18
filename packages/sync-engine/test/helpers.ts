@@ -1,4 +1,5 @@
 import { sql } from '../../../apps/server/src/db';
+import { flushOwn } from '../../../apps/server/src/valkey';
 import { resetPresence } from '../../../apps/server/src/domain/presence';
 import { createServer } from '../../../apps/server/src/http';
 import { startRealtime } from '../../../apps/server/src/realtime';
@@ -7,6 +8,7 @@ import type { EngineConfig, Patch, Query, Item } from '../src/types';
 export { msg } from './fixtures';
 
 export async function resetDb(): Promise<void> {
+  await flushOwn();   // онлайн и прочее эфемерное прошлых тестов
   // как resetDb сервера: системного пользователя «Relay» (миграция 110_service) не трогаем — база общая с тестами сервера
   await sql`truncate login_attempts, sessions, chats, chat_members, messages, user_seq, updates, jobs, jobs_dead restart identity cascade`;
   await sql`delete from users where not system`;

@@ -15,6 +15,17 @@ services:
       timeout: 3s
       retries: 30
 
+  # эфемерное состояние (онлайн, рассылка кадров между процессами сервера): без записи на диск
+  valkey:
+    image: valkey/valkey:8.1-alpine
+    command: ["valkey-server", "--save", "", "--appendonly", "no"]
+    ports: ["6380:6379"]
+    healthcheck:
+      test: ["CMD", "valkey-cli", "ping"]
+      interval: 2s
+      timeout: 3s
+      retries: 30
+
   # S3-хранилище вложений: SeaweedFS (Apache-2.0). MinIO community больше не выпускает образы (см. docs/plans/2026-10-18-s3-storage.md).
   # Один процесс: master + volume + filer + S3-шлюз. -ip=s3 — адрес, который мастер раздаёт другим контейнерам (s3-init).
   s3:
@@ -71,6 +82,7 @@ services:
       S3_ACCESS_KEY_ID: relaydev
       S3_SECRET_ACCESS_KEY: relaydevsecret
       S3_PUBLIC_ENDPOINT: http://localhost:8333    # для подписанных ссылок браузеру (подпись включает хост)
+      VALKEY_URL: redis://valkey:6379
     ports: ["3000:3000"]
     volumes:
       - ./apps:/app/apps
@@ -79,6 +91,7 @@ services:
       migrate: { condition: service_completed_successfully }
       s3-init: { condition: service_completed_successfully }
       web: { condition: service_started }
+      valkey: { condition: service_healthy }
 
   worker:
     build: { context: ., dockerfile: apps/server/Dockerfile }
@@ -86,11 +99,13 @@ services:
     environment:
       DATABASE_URL: postgres://relay:relay@postgres:5432/relay
       DEV_LOGIN: "1"
+      VALKEY_URL: redis://valkey:6379
     volumes:
       - ./apps:/app/apps
       - ./packages:/app/packages
     depends_on:
       migrate: { condition: service_completed_successfully }
+      valkey: { condition: service_healthy }
 
   s3-init-test:
     image: chrislusf/seaweedfs:4.48
@@ -136,12 +151,15 @@ services:
       S3_ACCESS_KEY_ID: relaydev
       S3_SECRET_ACCESS_KEY: relaydevsecret
       S3_PUBLIC_ENDPOINT: http://s3:8333
+      VALKEY_URL: redis://valkey:6379
+      RELAY_BUS_PREFIX: relay_test
     volumes:
       - ./apps:/app/apps
       - ./packages:/app/packages
     depends_on:
       postgres: { condition: service_healthy }
       s3-init-test: { condition: service_completed_successfully }
+      valkey: { condition: service_healthy }
 
   test-engine:
     build: { context: ., dockerfile: apps/server/Dockerfile }
@@ -156,12 +174,15 @@ services:
       S3_ACCESS_KEY_ID: relaydev
       S3_SECRET_ACCESS_KEY: relaydevsecret
       S3_PUBLIC_ENDPOINT: http://s3:8333
+      VALKEY_URL: redis://valkey:6379
+      RELAY_BUS_PREFIX: relay_test
     volumes:
       - ./apps:/app/apps
       - ./packages:/app/packages
     depends_on:
       postgres: { condition: service_healthy }
       s3-init-test: { condition: service_completed_successfully }
+      valkey: { condition: service_healthy }
 
 volumes:
   files:      # прежнее хранилище вложений: только для migrate-files

@@ -1,6 +1,8 @@
 import { sql } from '../src/db';
+import { flushOwn } from '../src/valkey';
 
 export async function resetDb(): Promise<void> {
+  await flushOwn();   // онлайн и прочее эфемерное прошлых тестов
   await sql`truncate login_attempts, login_pending, srp_challenges, qr_logins, webauthn_challenges, sessions, chats, chat_members, messages, user_seq, updates,
                      jobs, jobs_dead, live_conns, dev_mail restart identity cascade`;
   // системного пользователя «Relay» (миграция 110_service) не трогаем
