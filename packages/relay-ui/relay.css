@@ -927,13 +927,15 @@ button.rl-tab:hover { color: var(--ink); }
 /* ответ/редактирование внутри поля ввода (Telegram): первая строка на всю ширину, поле плавно раздвигается */
 .rl-composer { flex-wrap: wrap; }
 .rl-composer > .rl-presence > .rl-composer-reply { flex: 0 0 100%; min-width: 0; box-sizing: border-box; }   /* обёртка Presence — display: contents */
-.rl-composer-reply { display: flex; align-items: center; gap: 2px; padding: 2px 2px 0 0; overflow: hidden; animation: rl-reply-grow 220ms cubic-bezier(.2, .8, .2, 1) both; }
-.rl-presence[data-state="closing"] .rl-composer-reply { animation: rl-reply-shrink 180ms cubic-bezier(.4, 0, 1, 1) forwards; }
-@keyframes rl-reply-grow { from { max-height: 0; opacity: 0; padding-top: 0; } to { max-height: 72px; opacity: 1; } }
-@keyframes rl-reply-shrink { from { max-height: 72px; opacity: 1; } to { max-height: 0; opacity: 0; padding-top: 0; } }
-.rl-composer-reply-icon { display: grid; place-items: center; flex-shrink: 0; width: 40px; height: 40px; color: var(--quote-tone); }
+.rl-composer-reply { display: flex; align-items: flex-end; gap: 2px; height: 54px; padding: 2px 2px 0 0; overflow: hidden; animation: rl-reply-grow 200ms cubic-bezier(.33, 1, .68, 1) both; }
+.rl-presence[data-state="closing"] .rl-composer-reply { animation: rl-reply-shrink 170ms cubic-bezier(.32, 0, .67, 0) forwards; }
+/* как в Telegram: панель растёт от нуля до своей точной высоты (max-height с запасом давал «зависание» в конце),
+   содержимое при этом не сжимается — оно прижато к низу и проявляется */
+@keyframes rl-reply-grow { from { height: 0; opacity: 0; } to { height: 54px; opacity: 1; } }
+@keyframes rl-reply-shrink { from { height: 54px; opacity: 1; } to { height: 0; opacity: 0; } }
+.rl-composer-reply-icon { display: grid; place-items: center; flex-shrink: 0; width: 40px; height: 40px; margin-bottom: 6px; color: var(--quote-tone); }
 .rl-composer-reply .rl-quote { flex: 1; min-width: 0; margin: 2px 0; border-radius: 10px; box-shadow: none; }
-.rl-composer-reply-x { flex-shrink: 0; color: var(--quote-tone); }
+.rl-composer-reply-x { flex-shrink: 0; margin-bottom: 6px; color: var(--quote-tone); }
 @media (prefers-reduced-motion: reduce) { .rl-composer-reply { animation: none !important; } }
 .rl-shell .rl-recorder { min-height: 52px; }
 .rl-shell .rl-recorder .rl-rec-body { box-shadow: var(--shadow-float); border-radius: var(--radius-panel); }
@@ -1078,6 +1080,11 @@ button.rl-tab:hover { color: var(--ink); }
 .rl-shell { --space-float: 16px; --chat-max: 696px; --header-h: 48px; }
 /* the feed runs under the header and composer pills and fades out towards them instead of being cut */
 .rl-shell .rl-glassbar, .rl-shell .rl-composer-wrap { position: relative; z-index: 3; }
+/* в потоке поле ввода всегда одной высоты: когда оно растёт (панель ответа, несколько строк), то растёт вверх,
+   поверх ленты, а лента не меняет размер и не перестраивается каждый кадр. Её нижний отступ (--composer-h)
+   выставляет Chat.tsx — один раз, когда анимация закончилась */
+.rl-shell .rl-composer-wrap { flex-shrink: 0; height: 48px; display: flex; flex-direction: column; justify-content: flex-end; }
+.rl-shell .rl-composer-wrap > .rl-composer { flex-shrink: 0; }
 /* под полем ввода сообщения не видны резко, как в Telegram: от середины поля до края окна — размытая вуаль,
    к верху сходящая на нет (лента под ней по-прежнему тянется до края окна) */
 .rl-shell .rl-composer-wrap::before { content: ''; position: absolute; z-index: -1; left: -12px; right: -12px; top: 30%; bottom: calc(-1 * var(--space-float) - 4px); pointer-events: none;
@@ -1090,7 +1097,7 @@ html[data-blur="0"] .rl-shell .rl-composer-wrap::before { -webkit-backdrop-filte
   /* снизу лента уходит под поле ввода и дальше до края окна (поверх отступа оболочки), как в Telegram */
   /* по бокам лента заходит в зазор у сайдбара и в поле окна (столько же отступа внутри — сообщения на месте):
      полосы «Непрочитанные» и подсветка перехода тянутся от края до края области чата */
-  margin: calc(-1 * var(--top-zone)) calc(-1 * var(--space-float)) calc(-1 * (var(--bottom-zone) + var(--space-float)));
+  margin: calc(-1 * var(--top-zone)) calc(-1 * var(--space-float)) calc(-1 * (48px + 2 * var(--space-float)));   /* 48 — высота поля в потоке */
   padding: calc(var(--top-zone) + 8px) var(--space-float) calc(var(--bottom-zone) + var(--space-float) - 6px);   /* последнее сообщение ≈10px над полем ввода, как в Telegram */
   /* низ ленты не растворяется: как в Telegram, сообщения видны под полем ввода и вокруг него до края окна */
   -webkit-mask-image: linear-gradient(to bottom, transparent 0, transparent calc(var(--top-zone) * 0.35), #000 calc(var(--top-zone) + 4px), #000 100%);
@@ -1805,4 +1812,4 @@ html[data-blur="0"] .rl-menu, html[data-blur="0"] .rl-attach { -webkit-backdrop-
 .rl-burger.is-back i:nth-child(1) { top: 6px; width: 11px; transform: rotate(-45deg); }
 .rl-burger.is-back i:nth-child(3) { top: 6px; width: 11px; transform: rotate(45deg); }
 @media (prefers-reduced-motion: reduce) { .rl-burger, .rl-burger i { transition: none; } }
-.rl-composer.has-reply > .rl-composer-field { min-width: 120px; }   /* не умещается рядом с панелью — уходит на вторую строку */
+.rl-composer.has-reply > .rl-composer-field, .rl-composer:has(> .rl-presence > .rl-composer-reply) > .rl-composer-field { min-width: 120px; }   /* и пока панель уезжает */   /* не умещается рядом с панелью — уходит на вторую строку */

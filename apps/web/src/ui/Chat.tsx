@@ -2,7 +2,7 @@ import { PinnedBar } from './PinnedBar';
 import { membersStatus, useMembers } from '../members';
 import { Playlist } from './Playlist';
 import { inProfile, toggleProfileMusic, type Track } from '../music';
-import { Avatar, Button, Icon, MediaPolicy, peerTone, ChatSearchBar, Highlight, ripple, useMinVisible, requestMeasure, Composer, DropOverlay, GlassBar, IconButton, Menu, Modal, ConfirmDialog, Presence, ReactionPicker, requestMutation, applyMarkdown, emptyValue, sameValue, voiceSupported, PlayerBar, roundSupported, startRound, Verified } from '@relay/ui';
+import { Avatar, Button, Icon, MediaPolicy, peerTone, ChatSearchBar, Highlight, ripple, useMinVisible, requestMeasure, Composer, DropOverlay, GlassBar, IconButton, Menu, Modal, ConfirmDialog, Presence, ReactionPicker, requestMutation, isHeavyAnimating, onHeavyAnimationEnd, applyMarkdown, emptyValue, sameValue, voiceSupported, PlayerBar, roundSupported, startRound, Verified } from '@relay/ui';
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'preact/hooks';
 import { closeChat, deleteMessage, editMessage, ensureNames, focusMessage, openChat, openUserChat, pinMessage, unpinMessage, sendFile, sendFiles, sendRound, sendVoice, react, saveDraft, searchMessages, send, typing, typingDone } from '../data';
 import type { Item, SearchHit } from '@relay/sync-engine/src/types';
@@ -213,16 +213,28 @@ export function Chat({ chatId, frameKey, active }: { chatId: number; frameKey: s
   // высота композера (растёт с цитатой ответа) → --composer-h: лента уходит под него ровно на эту высоту
   useLayoutEffect(() => {
     const main = shell.current?.closest<HTMLElement>('.app-chatcol');   // своя колонка стека
-    const wrap = main?.querySelector<HTMLElement>('.rl-composer-wrap');
+    const wrap = main?.querySelector<HTMLElement>('.rl-composer-wrap > .rl-composer');   // в потоке обёртка фиксированной высоты — меряем само поле
     if (!main || !wrap || typeof ResizeObserver !== 'function') return;
     const feed = main.querySelector<HTMLElement>('.rl-feed');
-    // композер растёт или сжимается (каждый кадр анимации) — лента, прижатая к низу, остаётся прижатой
+    // композер растёт или сжимается. Во время анимации (панель ответа/правки) отступ ленты не трогаем — иначе
+    // каждый кадр перестраивается вся лента: прижатую к низу ленту только сдвигаем transform'ом (композитор),
+    // а настоящий отступ ставим один раз, когда анимация кончилась (сдвиг снимаем в том же кадре — без скачка)
+    let committed = parseFloat(main.style.getPropertyValue('--composer-h')) || 0, target = 0, waiting = false;
+    const commit = () => {
+      waiting = false;
+      committed = target;
+      main.style.setProperty('--composer-h', target + 'px');
+      if (feed) { feed.style.transform = ''; if (stick.current) feed.scrollTop = 1e9; }
+    };
     const ro = new ResizeObserver(([e]) => {
-      const h = Math.round(e.borderBoxSize?.[0]?.blockSize ?? wrap.offsetHeight);
-      requestMutation(() => { main.style.setProperty('--composer-h', h + 'px'); if (stick.current && feed) feed.scrollTop = 1e9; });
+      target = Math.round(e.borderBoxSize?.[0]?.blockSize ?? wrap.offsetHeight);
+      if (!committed || !isHeavyAnimating()) { requestMutation(commit); return; }
+      // сдвиг — сразу, в этом же кадре (наблюдатель срабатывает до отрисовки): лента идёт ровно вместе с полем
+      if (feed && stick.current) feed.style.transform = target === committed ? '' : `translateY(${committed - target}px)`;
+      if (!waiting) { waiting = true; onHeavyAnimationEnd(() => requestMutation(commit)); }
     });
     ro.observe(wrap);
-    return () => ro.disconnect();
+    return () => { ro.disconnect(); if (feed) feed.style.transform = ''; };
   }, [plate, system]);   // плашка вместо поля ввода — другой элемент
 
   const title = (chat?.title as string) || 'Чат №' + chatId;
