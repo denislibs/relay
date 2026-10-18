@@ -5,3 +5,6 @@ export * from './more.js';
 export * from './settings.js';
 export * from './schedule.js';
 export { enableStrictDom } from './strict.js';
+export * from './composer.js';
+export * from './richtext.js';
+export * from './richview.js';

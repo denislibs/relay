@@ -1,7 +1,10 @@
-import { Avatar, Button, MediaPolicy, peerTone, ChatSearchBar, Highlight, ripple, useMinVisible, requestMeasure, Composer, DropOverlay, GlassBar, IconButton, Menu, Modal, Presence, ReactionPicker, requestMutation } from '@relay/ui';
+import { Avatar, Button, MediaPolicy, peerTone, ChatSearchBar, Highlight, ripple, useMinVisible, requestMeasure, Composer, DropOverlay, GlassBar, IconButton, Menu, Modal, Presence, ReactionPicker, requestMutation, emptyValue, sameValue } from '@relay/ui';
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'preact/hooks';
 import { deleteMessage, editMessage, ensureNames, focusMessage, sendFile, openChat, react, saveDraft, searchMessages, send, typing, typingDone } from '../data';
-import type { SearchHit } from '@relay/sync-engine/src/types';
+import type { Item, SearchHit } from '@relay/sync-engine/src/types';
+
+type Value = { text: string; entities: { type: string; offset: number; length: number; url?: string }[] };
+type ComposerApi = { getValue(): Value; setValue(v: Value, opts?: { focus?: boolean; instant?: boolean }): void; focus(opts?: { end?: boolean }): void };
 import { setGlobal, useGlobal } from '../global';
 import { unblockUser, useUser } from '../settingsData';
 import { Feed } from './Feed';
@@ -22,7 +25,8 @@ export function Chat({ chatId }: { chatId: number }) {
   const stick = useRef(true);              // лента прижата к низу (Feed ведёт, отправка выставляет)
   const [menu, setMenu] = useState<{ x: number; y: number; key: string } | null>(null);
   const [replyKey, setReplyKey] = useState<string | null>(null);
-  const [editing, setEditing] = useState<{ id: number; original: string; draft: string } | null>(null);   // правка своего сообщения
+  const [editing, setEditing] = useState<{ id: number; original: Value; draft: Value } | null>(null);   // правка своего сообщения
+  const api = useRef<ComposerApi | null>(null);
   const [confirmDelete, setConfirmDelete] = useState<{ id: number } | null>(null);
   // поиск по чату: строка вместо шапки, совпадения новые → старые, Enter — к более старому
   const [finding, setFinding] = useState(false);
@@ -85,7 +89,7 @@ export function Chat({ chatId }: { chatId: number }) {
   const [dragging, setDragging] = useState(false);
   const offer = (file: File | null | undefined) => {
     if (!file) return;
-    setPending({ file, url: /^image\//.test(file.type) ? URL.createObjectURL(file) : null, caption: latest.current });
+    setPending({ file, url: /^image\//.test(file.type) ? URL.createObjectURL(file) : null, caption: latest.current.text });
   };
   const closePending = () => { if (pending?.url) URL.revokeObjectURL(pending.url); setPending(null); };
   const sendPending = () => {
@@ -93,7 +97,7 @@ export function Chat({ chatId }: { chatId: number }) {
     stick.current = true;
     typingDone(chatId);
     sendFile(chatId, pending.file, pending.caption.trim(), (replyTo?.id as number) ?? null).catch(() => {});
-    if (pending.caption === latest.current) { setText(''); latest.current = saved.current = ''; }
+    if (pending.caption === latest.current.text) { api.current?.setValue(emptyValue()); latest.current = saved.current = emptyValue(); }
     setReplyKey(null);
     closePending();
   };
@@ -113,34 +117,67 @@ export function Chat({ chatId }: { chatId: number }) {
 
   // черновик (как в Telegram): восстановить при открытии, сохранять через 2.5 с после ввода,
   // сразу — при уходе из чата и закрытии вкладки; после отправки движок сам его очищает
-  const [text, setText] = useState(() => (chat?.draft as string) ?? '');
-  const saved = useRef(text);
+  const initial = useMemo<Value>(() => ({ text: (chat?.draft as string) ?? '', entities: [] }), []);
+  const saved = useRef<Value>(initial);
+  const latest = useRef<Value>(initial);
   const draftTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const flushDraft = () => {
     if (draftTimer.current) { clearTimeout(draftTimer.current); draftTimer.current = null; }
-    if (latest.current !== saved.current) { saved.current = latest.current; saveDraft(chatId, latest.current); }
+    if (editing) return;   // в поле — правка сообщения, а не черновик
+    if (!sameValue(latest.current, saved.current)) { saved.current = latest.current; saveDraft(chatId, latest.current.text); }
   };
-  const latest = useRef(text);
-  const onType = (v: string) => {
-    if (v.trim() && v.length > latest.current.length) typing(chatId); // набирают (а не стирают) — «печатает…» у собеседника
-    setText(v);
+  const onType = (v: Value) => {
+    if (v.text.trim() && v.text.length > latest.current.text.length && !editing) typing(chatId); // набирают (а не стирают) — «печатает…» у собеседника
     latest.current = v;
     if (draftTimer.current) clearTimeout(draftTimer.current);
-    draftTimer.current = setTimeout(flushDraft, 2500);
+    if (!editing) draftTimer.current = setTimeout(flushDraft, 2500);
   };
   // черновик поменяли на другом устройстве (или стёрли отправкой там): здесь ничего не набирали — подхватываем
   const remoteDraft = (chat?.draft as string | null | undefined) ?? '';
   useEffect(() => {
-    if (draftTimer.current || latest.current !== saved.current || remoteDraft === latest.current) return;
-    saved.current = latest.current = remoteDraft;
-    setText(remoteDraft);
+    if (editing || draftTimer.current || !sameValue(latest.current, saved.current) || remoteDraft === latest.current.text) return;
+    saved.current = latest.current = { text: remoteDraft, entities: [] };
+    api.current?.setValue(latest.current, { instant: true });
   }, [remoteDraft]);
   useEffect(() => {
-    const input = document.getElementById('composer') as HTMLInputElement | null;
-    if (input && text) input.setSelectionRange(text.length, text.length); // курсор — в конец текста
+    if (latest.current.text) api.current?.focus({ end: true }); // курсор — в конец черновика
     addEventListener('pagehide', flushDraft);
-    return () => { removeEventListener('pagehide', flushDraft); flushDraft(); };
+    const hidden = () => { if (document.visibilityState === 'hidden') flushDraft(); };   // вкладку увели в фон — тоже сохранить
+    document.addEventListener('visibilitychange', hidden);
+    return () => { removeEventListener('pagehide', flushDraft); document.removeEventListener('visibilitychange', hidden); flushDraft(); };
   }, []);
+
+  // правка: в поле — текст сообщения, черновик откладываем и возвращаем после
+  const startEdit = (m: Item) => {
+    flushDraft();
+    setReplyKey(null);
+    const original: Value = { text: m.body as string, entities: [] };
+    setEditing({ id: m.id as number, original, draft: latest.current });
+    api.current?.setValue(original, { focus: true });
+  };
+  const endEdit = (draft: Value) => {
+    setEditing(null);
+    latest.current = draft;
+    api.current?.setValue(draft, { focus: true });
+  };
+  // ↑ в пустом поле — последнее своё сообщение, которое можно править
+  const editLast = () => {
+    for (let i = messages.length - 1; i >= 0; i--) {
+      const m = messages[i];
+      if (m.senderId === me.userId && m.id != null && !m.deleted && (m.kind ?? 'text') === 'text') { startEdit(m); return; }
+    }
+  };
+  // ⌘↑ / ⌘↓ в пустом поле — выбрать сообщение для ответа (дальше конца — отменить ответ)
+  const replyNav = (dir: 'older' | 'newer') => {
+    const list = messages.filter((m) => m.id != null && !m.deleted);
+    if (!list.length) return;
+    const at = replyKey ? list.findIndex((m) => m.key === replyKey) : list.length;
+    const next = dir === 'older' ? Math.max(0, at - 1) : at + 1;
+    if (next >= list.length) { setReplyKey(null); return; }
+    setEditing(null);
+    setReplyKey(list[next].key as string);
+    focusMessage({ id: list[next].id as number, sort: list[next].sort as number });
+  };
 
   // личный чат и чёрный список: я заблокировал собеседника или он меня (флаг blocksMe считает сервер) — вместо поля ввода плашка
   const iBlocked = useGlobal((s) => chat?.kind === 'direct' && chat.peerId != null && s.blocked.some((b) => b.userId === chat.peerId));
@@ -153,7 +190,12 @@ export function Chat({ chatId }: { chatId: number }) {
     const main = shell.current?.closest<HTMLElement>('.rl-shell-main');
     const wrap = main?.querySelector<HTMLElement>('.rl-composer-wrap');
     if (!main || !wrap || typeof ResizeObserver !== 'function') return;
-    const ro = new ResizeObserver(([e]) => { const h = Math.round(e.borderBoxSize?.[0]?.blockSize ?? wrap.offsetHeight); requestMutation(() => main.style.setProperty('--composer-h', h + 'px')); });
+    const feed = main.querySelector<HTMLElement>('.rl-feed');
+    // композер растёт или сжимается (каждый кадр анимации) — лента, прижатая к низу, остаётся прижатой
+    const ro = new ResizeObserver(([e]) => {
+      const h = Math.round(e.borderBoxSize?.[0]?.blockSize ?? wrap.offsetHeight);
+      requestMutation(() => { main.style.setProperty('--composer-h', h + 'px'); if (stick.current && feed) feed.scrollTop = 1e9; });
+    });
     ro.observe(wrap);
     return () => ro.disconnect();
   }, [plate]);   // плашка вместо поля ввода — другой элемент
@@ -238,29 +280,34 @@ export function Chat({ chatId }: { chatId: number }) {
         </div>
       ) : <Composer
         id="composer"
+        apiRef={api}
+        initialValue={initial}
+        captureTyping
         sendKey={sendKey}
         placeholder="Сообщение"
-        replyTo={editing ? { author: 'Редактирование', text: editing.original, tone: peerTone(me.userId), icon: 'pencil' } : replyTo ? { author: authorOf(replyTo.senderId), text: replyTo.body, tone: peerTone(replyTo.senderId) } : null}
+        editing={!!editing}
+        replyTo={editing ? { author: 'Редактирование', text: editing.original.text, tone: peerTone(me.userId), icon: 'pencil' } : replyTo ? { author: authorOf(replyTo.senderId), text: replyTo.body, tone: peerTone(replyTo.senderId) } : null}
         onCancelReply={() => {
-          if (editing) { setText(editing.draft); latest.current = saved.current = editing.draft; setEditing(null); return; } // правку отменили — вернуть черновик
+          if (editing) { endEdit(editing.draft); return; } // правку отменили — вернуть черновик
           setReplyKey(null);
         }}
-        value={text}
         onChange={onType}
+        onEditLast={editLast}
+        onReplyNav={replyNav}
         onAttach={(k: string) => { const el = picker.current!; el.accept = k === 'media' || k === 'camera' ? 'image/*,video/*' : ''; el.value = ''; el.click(); }}
-        onSend={(body: string) => {
+        onSend={(v: Value) => {
           if (editing) {
-            if (body !== editing.original) editMessage(chatId, editing.id, body).catch(() => {});
-            setText(editing.draft); latest.current = saved.current = editing.draft; setEditing(null);
-            return;
+            if (!sameValue(v, editing.original)) editMessage(chatId, editing.id, v.text).catch(() => {});
+            endEdit(editing.draft);
+            return false;   // в поле уже черновик — композер его не трогает
           }
           stick.current = true;
           if (draftTimer.current) { clearTimeout(draftTimer.current); draftTimer.current = null; }
-          saved.current = latest.current = '';   // черновик очищает сам движок вместе с отправкой
-          setText('');
+          saved.current = latest.current = emptyValue();   // черновик очищает сам движок вместе с отправкой
           typingDone(chatId);
-          send(chatId, body, (replyTo?.id as number) ?? null);
+          const sent = send(chatId, v.text, (replyTo?.id as number) ?? null);
           setReplyKey(null);
+          return sent;   // поле очистится, когда сообщение встанет в ленту
         }}
       />}
       {menu && menuMsg ? (() => {
@@ -277,13 +324,8 @@ export function Chat({ chatId }: { chatId: number }) {
                 label="Действия с сообщением"
                 onClose={() => setMenu(null)}
                 items={[
-                  ...(menuMsg.id != null && !menuMsg.deleted ? [{ icon: 'reply', label: 'Ответить', onClick: () => { setEditing(null); setReplyKey(menuMsg.key as string); document.getElementById('composer')?.focus(); } }] : []),
-                  ...(own ? [{ icon: 'pencil', label: 'Изменить', onClick: () => {
-                    setReplyKey(null);
-                    setEditing({ id: menuMsg.id as number, original: menuMsg.body as string, draft: latest.current });
-                    setText(menuMsg.body as string); latest.current = saved.current = menuMsg.body as string;
-                    document.getElementById('composer')?.focus();
-                  } }] : []),
+                  ...(menuMsg.id != null && !menuMsg.deleted ? [{ icon: 'reply', label: 'Ответить', onClick: () => { if (editing) endEdit(editing.draft); setReplyKey(menuMsg.key as string); api.current?.focus({ end: true }); } }] : []),
+                  ...(own ? [{ icon: 'pencil', label: 'Изменить', onClick: () => startEdit(menuMsg) }] : []),
                   ...(!menuMsg.deleted ? [{ icon: 'copy', label: 'Копировать', onClick: () => { navigator.clipboard?.writeText(menuMsg.body as string).catch(() => {}); } }] : []),
                   ...(own ? ['-' as const, { icon: 'trash', label: 'Удалить', danger: true, onClick: () => setConfirmDelete({ id: menuMsg.id as number }) }] : []),
                 ]}

@@ -129,13 +129,62 @@ body { margin: 0; font-family: var(--font-sans); color: var(--ink); background: 
 .rl-composer { display: flex; align-items: flex-end; gap: var(--space-1); padding: 8px 12px; background: var(--tray); }
 .rl-composer-field { flex: 1; min-width: 0; display: flex; align-items: flex-end; gap: 4px; min-height: 48px; padding: 4px 6px; border-radius: var(--radius-xl); background: var(--composer); }
 .rl-composer-field :is(input, textarea) { flex: 1; min-width: 0; height: 40px; border: 0; background: transparent; outline: none; font: 400 var(--message-text-size, 15px)/calc(var(--message-text-size, 15px) * 1.333) var(--font-sans); color: var(--ink); padding: 0 6px; }
-.rl-composer-field textarea { box-sizing: border-box; display: block; resize: none; height: auto; min-height: calc(var(--message-text-size, 15px) * 1.333 + 18px); max-height: 144px; padding-block: 9px; overflow-y: auto; }
 .rl-composer-field :is(input, textarea)::placeholder { color: var(--ink-muted); }
+/* поле ввода: коробка с анимированной высотой, внутри — редактор естественной высоты */
+.rl-composer-input { --line: calc(var(--message-text-size, 15px) * 1.3125); position: relative; flex: 1; min-width: 0; box-sizing: border-box;
+  height: calc(var(--line) + 19px); min-height: calc(var(--line) + 19px); max-height: min(240px, 40vh); overflow: hidden;
+  transition: height 120ms var(--ease-out); }
+.rl-composer-input-over { overflow-y: auto; overscroll-behavior: contain; scrollbar-width: thin; }
+.rl-composer-editable { box-sizing: border-box; min-height: 100%; padding: 9.5px 6px; outline: none; color: var(--ink); caret-color: var(--brand);
+  font: 400 var(--message-text-size, 15px)/var(--line) var(--font-sans); white-space: pre-wrap; overflow-wrap: anywhere; word-break: break-word; cursor: text; }
+.rl-composer-editable :is(b, strong) { font-weight: 600; }
+.rl-composer-editable code { font-family: var(--font-mono, ui-monospace, SFMono-Regular, Menlo, monospace); font-size: .92em; color: var(--brand-text, var(--brand)); }
+.rl-composer-editable a { color: var(--brand-text, var(--brand)); text-decoration: underline; text-underline-offset: 2px; }
+.rl-composer-editable .rl-spoiler-edit { border-radius: 4px; background: color-mix(in srgb, var(--ink) 14%, transparent); }
+/* плейсхолдер — отдельный слой: при вводе уезжает вперёд и гаснет, при очистке возвращается */
+.rl-composer-ph { position: absolute; left: 6px; right: 6px; top: 9.5px; color: var(--ink-muted); font: 400 var(--message-text-size, 15px)/var(--line) var(--font-sans);
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis; pointer-events: none; opacity: 0; transform: translateX(16px);
+  transition: opacity 180ms var(--ease-out), transform 200ms var(--ease-out); }
+.rl-composer-empty .rl-composer-ph { opacity: 1; transform: none; }
 .rl-composer-send { position: relative; width: 48px; height: 48px; border: 0; border-radius: 50%; background: var(--brand); color: var(--on-brand); cursor: pointer; flex-shrink: 0; transition: transform var(--dur-instant) var(--ease-out), background-color var(--dur-instant) var(--ease-out); }
 .rl-composer-send:hover { background: var(--brand-strong); }
 .rl-composer-send:active { transform: scale(var(--press-lg)); }
 .rl-composer-send .rl-icon { position: absolute; top: 50%; left: 50%; margin: -11px 0 0 -11px; transition: transform var(--dur-fast) var(--ease-out), opacity var(--dur-instant) var(--ease-out); }
 .rl-composer-send .rl-swap-off { opacity: 0; transform: scale(0.4) rotate(-45deg); }
+/* кнопка — одна, иконки сменяются: новая вырастает с лёгким перелётом, старая сжимается и гаснет */
+.rl-composer-send .rl-sendicon { opacity: 0; transform: scale(.5); }
+.rl-composer-send .rl-sendicon-on { opacity: 1; transform: none; }
+.rl-composer-send[data-ready] .rl-sendicon { animation: rl-icon-hide 260ms var(--ease-out) forwards; transition: none; }
+.rl-composer-send[data-ready] .rl-sendicon-on { animation: rl-icon-grow 360ms var(--ease-out) forwards; }
+@keyframes rl-icon-grow { 0% { opacity: 0; transform: scale(.5); } 55% { opacity: 1; transform: scale(1.1); } 100% { opacity: 1; transform: scale(1); } }
+@keyframes rl-icon-hide { from { opacity: 1; transform: scale(1); } to { opacity: 0; transform: scale(.5); } }
+/* панель оформления над выделением */
+.rl-fmtbar { position: absolute; z-index: 30; display: flex; align-items: center; gap: 2px; padding: 4px; border-radius: 12px; background: var(--raised); box-shadow: var(--shadow-pop);
+  transform: translateX(-50%); animation: rl-fmt-in 140ms var(--ease-out) both; white-space: nowrap; }
+.rl-presence[data-state="closing"] .rl-fmtbar { animation: rl-fmt-out 120ms var(--ease-in) forwards; }
+@keyframes rl-fmt-in { from { opacity: 0; transform: translate(-50%, 4px) scale(.96); } to { opacity: 1; transform: translateX(-50%); } }
+@keyframes rl-fmt-out { to { opacity: 0; transform: translate(-50%, 4px) scale(.96); } }
+.rl-fmtbtn { display: grid; place-items: center; width: 36px; height: 36px; border: 0; border-radius: 8px; background: transparent; color: var(--ink-muted); cursor: pointer;
+  transition: background-color var(--dur-instant) var(--ease-out), color var(--dur-instant) var(--ease-out); }
+.rl-fmtbtn:hover { background: var(--hover); color: var(--ink); }
+.rl-fmtbtn-on, .rl-fmtbtn-on:hover { color: var(--brand-text, var(--brand)); background: color-mix(in srgb, var(--brand) 14%, transparent); }
+.rl-fmtbar-sep { width: 1px; height: 20px; margin: 0 4px; background: var(--line, color-mix(in srgb, var(--ink) 12%, transparent)); }
+.rl-fmtbar-url { width: 220px; height: 32px; padding: 0 8px; border: 0; border-radius: 8px; outline: none; background: var(--hover); color: var(--ink); font: 400 14px/20px var(--font-sans); }
+.rl-fmtbar-bad[data-shake="1"] { animation: rl-fmt-shake 300ms var(--ease-out); }
+.rl-fmtbar-bad[data-shake="0"] { animation: rl-fmt-shake2 300ms var(--ease-out); }
+.rl-fmtbar-bad .rl-fmtbar-url { box-shadow: inset 0 0 0 1.5px var(--danger, #e53935); }
+@keyframes rl-fmt-shake { 0%, 100% { transform: translateX(-50%); } 25% { transform: translateX(calc(-50% - 6px)); } 75% { transform: translateX(calc(-50% + 6px)); } }
+@keyframes rl-fmt-shake2 { 0%, 100% { transform: translateX(-50%); } 25% { transform: translateX(calc(-50% - 6px)); } 75% { transform: translateX(calc(-50% + 6px)); } }
+/* оформление в пузырях */
+.rl-code { font-family: var(--font-mono, ui-monospace, SFMono-Regular, Menlo, monospace); font-size: .92em; padding: 0 .2em; border-radius: 4px; background: color-mix(in srgb, currentColor 9%, transparent); }
+.rl-pre { display: block; margin: 2px 0; padding: 6px 8px; border-radius: 8px; font-family: var(--font-mono, ui-monospace, SFMono-Regular, Menlo, monospace); font-size: .9em; white-space: pre-wrap; background: color-mix(in srgb, currentColor 8%, transparent); }
+.rl-link { color: var(--brand-text, var(--brand)); text-decoration: underline; text-underline-offset: 2px; }
+.rl-msgline-out .rl-link { color: inherit; }
+.rl-spoiler { position: relative; border-radius: 4px; cursor: pointer; background: color-mix(in srgb, currentColor 22%, transparent);
+  -webkit-box-decoration-break: clone; box-decoration-break: clone; transition: background-color 300ms var(--ease-out); }
+.rl-spoiler .rl-spoiler-text { opacity: 0; filter: blur(4px); transition: opacity 300ms var(--ease-out), filter 300ms var(--ease-out); }
+.rl-spoiler-open { cursor: auto; background: transparent; }
+.rl-spoiler-open .rl-spoiler-text { opacity: 1; filter: none; }
 
 /* ---------- Banner ---------- */
 .rl-banner { display: flex; align-items: center; gap: var(--space-3); padding: var(--space-3) var(--space-4); border-radius: var(--radius-lg); background: var(--positive-soft); color: var(--ink); font: 400 14px/20px var(--font-sans); animation: rl-slide-down var(--dur-base) var(--ease-out) both; }
@@ -614,11 +663,11 @@ button.rl-quote:active { background: var(--quote-bg-active, var(--pressed)); }
 
 /* ---------- Composer wrap: reply bar, attach menu, mentions ---------- */
 .rl-composer-wrap { position: relative; background: var(--tray); }
-.rl-composer-reply { padding: 8px 12px 0 64px; animation: rl-reply-in var(--dur-base) var(--ease-out) both; }
+.rl-composer-reply { overflow: clip; overflow-clip-margin: 16px; padding: 8px 12px 0 64px; animation: rl-reply-in var(--dur-base) var(--ease-out) both; }
 .rl-presence[data-state="closing"] .rl-composer-reply { animation: rl-reply-out var(--dur-fast) var(--ease-in) forwards; }
 .rl-composer-reply .rl-quote { background: var(--composer); }
-@keyframes rl-reply-in { from { opacity: 0; transform: translateY(12px); } to { opacity: 1; transform: none; } }
-@keyframes rl-reply-out { to { opacity: 0; transform: translateY(12px); } }
+@keyframes rl-reply-in { from { opacity: 0; max-height: 0; transform: translateY(8px); } to { opacity: 1; max-height: 96px; transform: none; } }
+@keyframes rl-reply-out { from { max-height: 96px; } to { opacity: 0; max-height: 0; transform: translateY(8px); } }
 .rl-attach-toggle .rl-icon { transition: transform var(--dur-base) var(--ease-out); }
 .rl-attach-toggle[aria-pressed="true"] .rl-icon { transform: rotate(90deg); }
 .rl-attach { position: absolute; left: 16px; bottom: calc(100% + 8px); z-index: 20; display: flex; flex-direction: column; padding: 8px; border-radius: var(--radius-lg); background: var(--raised); box-shadow: var(--shadow-pop); transform-origin: bottom left; animation: rl-menu-in var(--dur-base) var(--ease-out) both; }
@@ -934,9 +983,10 @@ button.rl-tab:hover { color: var(--ink); }
 
 /* composer: one pill; attach, field, emoji and the round send/mic button all sit inside it */
 .rl-shell .rl-composer { align-items: flex-end; gap: 0; min-height: 48px; padding: 4px; border-radius: 24px; background: var(--raised); box-shadow: var(--tg-shadow-composer); }
-.rl-shell .rl-composer-field { align-items: center; min-height: 40px; padding: 0; border-radius: 0; background: transparent; box-shadow: none; }
+.rl-shell .rl-composer-field { align-items: flex-end; min-height: 40px; padding: 0; border-radius: 0; background: transparent; box-shadow: none; }
 .rl-shell .rl-composer-field :is(input, textarea) { font-size: var(--message-text-size, 16px); line-height: calc(var(--message-text-size, 16px) * 1.3125); padding-inline: 4px; }
-.rl-shell .rl-composer-field textarea { padding-block: 9.5px; min-height: max(40px, calc(var(--message-text-size, 16px) * 1.3125 + 19px)); }
+.rl-shell .rl-composer-input { --line: calc(var(--message-text-size, 16px) * 1.3125); }
+.rl-shell .rl-composer-editable, .rl-shell .rl-composer-ph { padding-inline: 4px; left: 4px; }
 .rl-shell .rl-composer-field .rl-iconbtn { width: 40px; height: 40px; color: var(--ink-muted); }
 .rl-shell .rl-composer-send { width: 40px; height: 40px; box-shadow: none; }
 

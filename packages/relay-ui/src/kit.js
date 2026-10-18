@@ -142,7 +142,14 @@ var ICONS = {
   cake: ['M4 12h16v8H4z', 'M4 15.5c2 1.5 3 1.5 4 0s2-1.5 4 0 3 1.5 4 0 2-1.5 4 0', 'M12 12V8', 'M12 3.5c1 1 1.5 1.8 0 3-1.5-1.2-1-2 0-3'],
   block: [C(12, 12, 9), 'M5.6 5.6l12.8 12.8'],
   moon: ['M20.5 14.2A8.5 8.5 0 1 1 9.8 3.5a7 7 0 0 0 10.7 10.7z'],
-  sun: [C(12, 12, 4), 'M12 2.5v2', 'M12 19.5v2', 'M2.5 12h2', 'M19.5 12h2', 'M5.3 5.3l1.4 1.4', 'M17.3 17.3l1.4 1.4', 'M5.3 18.7l1.4-1.4', 'M17.3 6.7l1.4-1.4']
+  sun: [C(12, 12, 4), 'M12 2.5v2', 'M12 19.5v2', 'M2.5 12h2', 'M19.5 12h2', 'M5.3 5.3l1.4 1.4', 'M17.3 17.3l1.4 1.4', 'M5.3 18.7l1.4-1.4', 'M17.3 6.7l1.4-1.4'],
+  // оформление текста (панель над выделением)
+  bold: ['M7 5h6a3.5 3.5 0 0 1 0 7H7z', 'M7 12h7a3.5 3.5 0 0 1 0 7H7z'],
+  italic: ['M10 5h8', 'M6 19h8', 'M14.5 5l-5 14'],
+  underline: ['M7 4v7a5 5 0 0 0 10 0V4', 'M5 20h14'],
+  strike: ['M4.5 12h15', 'M16.5 7.5c-.6-1.6-2.3-2.5-4.5-2.5-2.6 0-4.4 1.3-4.4 3.2 0 1.2.7 2.2 2.4 2.8', 'M8 16.4c.7 1.6 2.4 2.6 4.6 2.6 2.7 0 4.5-1.4 4.5-3.4 0-.6-.1-1.1-.4-1.6'],
+  mono: ['M8.5 7.5L4 12l4.5 4.5', 'M15.5 7.5L20 12l-4.5 4.5', 'M13.5 5.5l-3 13'],
+  spoiler: ['M2.5 12s3.5-6.5 9.5-6.5S21.5 12 21.5 12 18 18.5 12 18.5 2.5 12 2.5 12z', 'M9.5 12a2.5 2.5 0 0 0 5 0', 'M4 4l16 16']
 };
 var HEAVY = { more: 1, 'M12 16h.01': 1, pause: 1 };
 var FILLED = { play: 1, stop: 1 };
@@ -377,72 +384,6 @@ function ReactionChips(props) {
 /* ---------- DateDivider ---------- */
 function DateDivider(props) {
   return h('div', { class: 'rl-date', role: 'separator' }, h('span', null, props.children));
-}
-
-/* ---------- Composer ---------- */
-function Composer(props) {
-  var internal = useState('');
-  var attach = useState(false);
-  var caret = useState(-1);
-  var value = props.value !== undefined ? props.value : internal[0];
-  var setValue = function (v) { if (props.onChange) props.onChange(v); if (props.value === undefined) internal[1](v); };
-  var hasText = value.trim().length > 0;
-  // @mention: the word under the caret that starts with @
-  var m = /(^|\s)@([^\s@]*)$/.exec(value.slice(0, caret[0] < 0 ? value.length : caret[0]));
-  var mentionList = m && props.members ? props.members.filter(function (x) { return x.name.toLowerCase().indexOf(m[2].toLowerCase()) >= 0; }).slice(0, 5) : null;
-  var inputRef = useRef(null);
-  function send() {
-    // текст — из самого поля: рендер идёт раз в кадр, и Enter сразу после ввода видел бы прошлое значение
-    var current = inputRef.current ? inputRef.current.value : value;
-    if (!current.trim()) { if (props.onRecord) props.onRecord(); return; }
-    if (props.onSend) props.onSend(current.trim());
-    setValue('');
-  }
-  function pickMention(x) {
-    var before = value.slice(0, caret[0] < 0 ? value.length : caret[0]).replace(/@([^\s@]*)$/, '@' + x.name + ' ');
-    setValue(before + value.slice(caret[0] < 0 ? value.length : caret[0]));
-    caret[1](-1);
-  }
-  // поле растёт вместе с текстом (до max-height в CSS) и сжимается после отправки;
-  // сброс высоты и чтение scrollHeight — в одном кадре (иначе поле прыгает): осознанное исключение
-  useLayoutEffect(function () {
-    var el = inputRef.current;
-    if (!el) return;
-    forceMeasure(function () {
-      el.style.height = 'auto';
-      el.style.height = el.scrollHeight + 'px';
-    });
-  }, [value]);
-  var id = props.id || 'rl-composer';
-  return h('div', { class: cx('rl-composer-wrap', (props.className || props.class)) },
-    h(Presence, { show: !!props.replyTo, exitMs: 160 },
-      h('div', { class: 'rl-composer-reply' }, h(ReplyQuote, Object.assign({}, props.replyTo || {}, { onCancel: props.onCancelReply })))),
-    h(Presence, { show: !!(mentionList && mentionList.length), exitMs: 120 },
-      h(MentionList, { items: mentionList || [], onPick: pickMention })),
-    h(Presence, { show: attach[0], exitMs: 160 },
-      h(AttachMenu, { onPick: function (k) { attach[1](false); if (props.onAttach) props.onAttach(k); } })),
-    h('div', { class: 'rl-composer' },
-      h('div', { class: 'rl-composer-field' },
-        h(IconButton, { icon: attach[0] ? 'close' : 'attach', label: attach[0] ? 'Закрыть вложения' : 'Прикрепить', active: attach[0], class: 'rl-attach-toggle', onClick: function () { attach[1](!attach[0]); } }),
-        h('label', { for: id, class: 'rl-sr' }, 'Сообщение'),
-        h('textarea', {
-          id: id, ref: inputRef, rows: 1, value: value, placeholder: props.placeholder || 'Введите сообщение', autocomplete: 'off',
-          onInput: function (e) { setValue(e.target.value); caret[1](e.target.selectionStart); },
-          onKeyDown: function (e) {
-            if (e.key === 'Enter' && (e.isComposing || e.keyCode === 229)) return;   // IME подтверждает ввод — не трогаем
-            if (e.key === 'Enter' && mentionList && mentionList.length) { e.preventDefault(); pickMention(mentionList[0]); return; }
-            if (e.key === 'Enter') {
-              // sendKey 'ctrlEnter': Enter — новая строка, Ctrl/⌘+Enter — отправка; иначе Enter отправляет, Shift+Enter — новая строка
-              var mod = e.ctrlKey || e.metaKey;
-              if (props.sendKey === 'ctrlEnter' ? mod : !e.shiftKey) { e.preventDefault(); send(); }   // иначе textarea сама вставит перенос
-            }
-            if (e.key === 'Escape' && props.replyTo && props.onCancelReply) props.onCancelReply();
-          }
-        }),
-        h(IconButton, { icon: 'smile', label: 'Эмодзи', class: 'rl-emoji-toggle' })),
-      h('button', { type: 'button', onPointerDown: ripple, class: 'rl-composer-send', 'aria-label': hasText ? 'Отправить' : 'Записать голосовое', onClick: send },
-        h(Icon, { name: 'send', size: 22, class: hasText ? '' : 'rl-swap-off' }),
-        h(Icon, { name: 'mic', size: 22, class: hasText ? 'rl-swap-off' : '' }))));
 }
 
 /* ---------- Banner ---------- */
@@ -1148,4 +1089,4 @@ function ScrollToBottom(props) {
 }
 
 
-export { peerTone, ArchivedRow, ReplyQuote, ReactionChips, cx, chain, ripple, reducedMotion, omit, fmtTime, makeWave, ICONS, Icon, Button, IconButton, Avatar, Badge, Chip, SearchField, ChatRow, ChatRowSkeleton, Bubble, MessageStatus, TypingIndicator, DateDivider, Composer, Banner, Modal, NavRail, Checkbox, Toast, Card, Steps, MediaArt, ProgressRing, Waveform, VoiceMessage, VoiceRecorder, MediaBubble, MediaPolicy, mediaHeld, FileBubble, MediaThumb, MediaViewer, Switch, PanelHeader, ProfileHeader, ActionTile, InfoRow, SettingsIcon, ReadMore, Presence, useMinVisible, LazyImage, FlipList, SyncIndicator, LinearProgress, EmptyState, ScrollToBottom };
+export { peerTone, ArchivedRow, ReplyQuote, ReactionChips, cx, chain, ripple, reducedMotion, omit, fmtTime, makeWave, ICONS, Icon, Button, IconButton, Avatar, Badge, Chip, SearchField, ChatRow, ChatRowSkeleton, Bubble, MessageStatus, TypingIndicator, DateDivider, Banner, Modal, NavRail, Checkbox, Toast, Card, Steps, MediaArt, ProgressRing, Waveform, VoiceMessage, VoiceRecorder, MediaBubble, MediaPolicy, mediaHeld, FileBubble, MediaThumb, MediaViewer, Switch, PanelHeader, ProfileHeader, ActionTile, InfoRow, SettingsIcon, ReadMore, Presence, useMinVisible, LazyImage, FlipList, SyncIndicator, LinearProgress, EmptyState, ScrollToBottom };
