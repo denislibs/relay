@@ -19,6 +19,10 @@ export const PAGES = [
   'settings/data/autoload/:type',
   'settings/performance',
   'settings/sessions',
+  'settings/folders',
+  'settings/folders/:id',          // new или id папки
+  'settings/folders/:id/include',  // выбор чатов и типов для включённых
+  'settings/folders/:id/exclude',  // и для исключённых
   'settings/dev',   // вкладка раздела — devTab в global, не путь
   'contacts',
   'contacts/:userId/edit',

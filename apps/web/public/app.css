@@ -404,3 +404,52 @@ html[data-anim="0"] .app-chatcol, html[data-anim="0"] .app-chatcol-below, html[d
 .app-plink-row { display: flex; align-items: center; gap: var(--space-4); min-height: 52px; padding: var(--space-2) var(--space-3); border-radius: calc(var(--radius-lg) - var(--space-2)); color: var(--ink); text-decoration: none; transition: background-color var(--dur-instant) var(--ease-standard); }
 .app-plink-row:hover { background: var(--hover); }
 .app-plink-row small { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+/* ---------- Папки с чатами ---------- */
+.app-folder-glyph { display: inline-flex; align-items: center; justify-content: center; flex: 0 0 34px; width: 34px; height: 34px; color: var(--brand-text); line-height: 1; }
+.app-folders-intro { display: flex; flex-direction: column; align-items: center; padding: var(--space-5, 20px) var(--space-6) var(--space-4); text-align: center; }
+.app-folders-intro > p { margin: 0 0 var(--space-4); font: 400 15px/21px var(--font-sans); color: var(--ink-muted); }
+.app-folders-intro .rl-btn { display: inline-flex; align-items: center; gap: 6px; }
+.app-folders-none { padding: var(--space-2) var(--space-4) var(--space-3); font: 400 14px/20px var(--font-sans); color: var(--ink-muted); }
+.app-folder-rec { display: flex; align-items: center; gap: var(--space-4); min-height: 56px; padding: var(--space-2) var(--space-3); }
+.app-folder-rec .rl-inforow-text { flex: 1; min-width: 0; }
+.app-folder-add { flex: 0 0 auto; height: 32px; padding: 0 14px; border-radius: var(--radius-pill); font-size: 14px; }
+.app-folder-hero { display: flex; justify-content: center; padding: var(--space-4) 0 var(--space-2); }
+.app-folder-hero .app-folder-glyph { flex-basis: 88px; width: 88px; height: 88px; border-radius: 50%; background: color-mix(in srgb, var(--brand-text) 12%, transparent); animation: rl-pop var(--dur-slow) var(--ease-out) both; }
+.app-folder-emoji { display: grid; grid-template-columns: repeat(auto-fill, minmax(40px, 1fr)); gap: 4px; padding: var(--space-2) var(--space-2) var(--space-3); }
+.app-folder-emoji-btn { display: inline-flex; align-items: center; justify-content: center; height: 40px; border: 0; border-radius: 12px; background: transparent; color: var(--ink-muted); font-size: 22px; cursor: pointer; transition: background-color var(--dur-fast) var(--ease-standard), transform var(--dur-fast) var(--ease-standard); }
+.app-folder-emoji-btn:hover { background: var(--hover); }
+.app-folder-emoji-btn[aria-checked="true"] { background: var(--accent-soft); color: var(--brand-text); box-shadow: inset 0 0 0 2px var(--brand-strong); }
+.app-folder-emoji-btn:active { transform: scale(0.92); }
+.app-folder-chat { display: flex; align-items: center; gap: var(--space-4); min-height: 56px; padding: var(--space-1) var(--space-2) var(--space-1) var(--space-3); }
+.app-folder-chat .rl-inforow-text { flex: 1; min-width: 0; }
+.app-folder-chat .rl-iconbtn { color: var(--ink-muted); }
+.app-folder-type { display: inline-flex; align-items: center; justify-content: center; flex: 0 0 40px; width: 40px; height: 40px; border-radius: 50%; background: color-mix(in srgb, var(--brand-text) 14%, transparent); color: var(--brand-text); }
+.app-folder-err { margin: 0 var(--space-4) var(--space-3); padding: var(--space-2) var(--space-3); border-radius: var(--radius-md); background: color-mix(in srgb, var(--danger, #e53935) 12%, transparent); color: var(--danger, #e53935); font: 500 14px/20px var(--font-sans); animation: rl-fade var(--dur-base) var(--ease-out); }
+.app-folder-empty { display: flex; flex-direction: column; align-items: center; gap: var(--space-3); padding-bottom: var(--space-6); animation: rl-fade var(--dur-base) var(--ease-out); }
+.app-more-pull { display: block; height: 1px; }
+
+/* выбор чатов для папки: одна сетка строк (отступ 16 px), круглая галочка справа у всех строк, поиск с чипами сверху */
+.app-fpick-top { position: relative; z-index: 1; padding: 4px 12px 10px; background: var(--card); box-shadow: 0 1px 0 var(--line); }
+.app-fpick-field { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; min-height: 44px; max-height: 128px; padding: 6px 12px; border-radius: 22px; background: var(--hover); overflow-y: auto; }
+.app-fpick-field input { flex: 1; min-width: 96px; height: 30px; border: 0; background: transparent; color: var(--ink); font: 400 15px/20px var(--font-sans); outline: none; }
+.app-fpick-chip { display: inline-flex; align-items: center; gap: 4px; max-width: 100%; height: 30px; padding: 0 8px 0 12px; border: 0; border-radius: var(--radius-pill); background: var(--accent-soft); color: var(--brand-text); font: 500 14px/1 var(--font-sans); cursor: pointer; animation: rl-pop var(--dur-base) var(--ease-out) both; transition: background-color var(--dur-fast) var(--ease-standard); }
+.app-fpick-chip span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.app-fpick-chip:hover { background: color-mix(in srgb, var(--danger) 14%, transparent); color: var(--danger); }
+.app-fpick { padding: 0 8px 24px; }
+.app-fpick-caption { padding: 16px 12px 6px; font: 600 14px/20px var(--font-sans); color: var(--brand-text); }
+.app-fpick-row { position: relative; display: flex; align-items: center; gap: 14px; width: 100%; min-height: 56px; padding: 6px 12px; border: 0; border-radius: var(--radius-md); background: transparent; color: var(--ink); font: inherit; text-align: left; cursor: pointer; overflow: hidden; transition: background-color var(--dur-fast) var(--ease-standard); }
+.app-fpick-row:hover { background: var(--hover); }
+.app-fpick-row:focus-visible { outline-offset: -2px; }
+.app-fpick-text { flex: 1; min-width: 0; display: flex; flex-direction: column; }
+.app-fpick-text > span { overflow: hidden; font: 500 16px/22px var(--font-sans); text-overflow: ellipsis; white-space: nowrap; }
+.app-fpick-text > small { font: 400 14px/18px var(--font-sans); color: var(--ink-muted); }
+.app-fpick-tile { display: inline-flex; align-items: center; justify-content: center; flex: 0 0 42px; width: 42px; height: 42px; border-radius: 50%; color: #fff; }
+.app-fpick-tile-blue { background: var(--tile-blue); } .app-fpick-tile-orange { background: var(--tile-orange); } .app-fpick-tile-green { background: var(--tile-green); }
+.app-fpick-tile-gray { background: var(--tile-gray); } .app-fpick-tile-purple { background: var(--tile-purple); }
+.app-fpick-check { display: inline-flex; align-items: center; justify-content: center; flex: 0 0 22px; width: 22px; height: 22px; border: 2px solid color-mix(in srgb, var(--ink-muted) 60%, transparent); border-radius: 50%; color: var(--on-brand); transition: background-color var(--dur-instant) var(--ease-standard), border-color var(--dur-instant) var(--ease-standard), transform var(--dur-fast) var(--ease-out); }
+.app-fpick-check .rl-icon { opacity: 0; }
+.app-fpick-on .app-fpick-check { background: var(--brand-strong); border-color: var(--brand-strong); transform: scale(1.08); }
+.app-fpick-on .app-fpick-check .rl-icon { opacity: 1; }
+.app-fpick-on .app-fpick-check path { stroke-dasharray: 20; animation: rl-draw var(--dur-fast) var(--ease-out) both; }
+.app-fpick-empty { padding: 24px 12px; font: 400 14px/20px var(--font-sans); color: var(--ink-muted); text-align: center; }

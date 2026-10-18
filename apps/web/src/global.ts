@@ -49,6 +49,7 @@ export interface GlobalState {
   chatStack: ChatFrame[];        // стек чатов, снизу вверх
   chatLeaving: ChatFrame[];      // снятые со стека: доигрывают уход и исчезают
   folder: number;      // активная папка: 0 — «Все чаты», иначе id своей папки
+  folderDraft: FolderDraft | null;   // редактор папки: общий для страницы правки и выбора чатов
   search: string;
   newChatOpen: boolean;
   sidebarView: string;   // путь страницы боковой панели, см. nav.ts
@@ -81,6 +82,9 @@ export interface DevSimFlags { offline: boolean; profile: { latency: number; jit
 export interface AccountSettings { notify: Record<'direct' | 'group', { muted: boolean; preview: boolean }>; sessionsTtlDays: number; folders: ChatFolder[]; privacy: PrivacyRules; loaded: boolean; pending: boolean }
 export const defaultAccountSettings = (): AccountSettings => ({ notify: { direct: { muted: false, preview: true }, group: { muted: false, preview: true } }, sessionsTtlDays: 180, folders: [], privacy: defaultPrivacy(), loaded: false, pending: false });
 
+/** Черновик папки: id (новая — ещё не на сервере), правки и исходное значение для «есть ли изменения». */
+export interface FolderDraft { id: number; isNew: boolean; folder: ChatFolder; original: ChatFolder }
+
 /** Чем заполнить «Новый контакт»: из «Информации» — человек уже известен (userId), запрос лишь для вида. */
 export interface NewContactDraft { query?: string; firstName?: string; lastName?: string; userId?: number }
 
@@ -98,6 +102,7 @@ let state: GlobalState = {
   chatStack: [],
   chatLeaving: [],
   folder: 0,
+  folderDraft: null,
   search: '',
   newChatOpen: false,
   sidebarView: 'chats',

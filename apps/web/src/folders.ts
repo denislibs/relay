@@ -90,3 +90,12 @@ const sameRules = (a: Omit<ChatFolder, 'id'>, b: Omit<ChatFolder, 'id'>) =>
   && !a.include.length && !b.include.length && !a.exclude.length && !b.exclude.length;
 
 export const recommendedFor = (folders: readonly ChatFolder[]): Recommended[] => RECOMMENDED.filter((r) => !folders.some((f) => sameRules(f, r.folder)));
+
+/** Переставить элемент списка (порядок папок при перетаскивании). */
+export function moveItem<T>(list: readonly T[], from: number, to: number): T[] {
+  if (from === to || from < 0 || from >= list.length) return list.slice();
+  const out = list.slice();
+  const [x] = out.splice(from, 1);
+  out.splice(Math.max(0, Math.min(out.length, to)), 0, x);
+  return out;
+}
