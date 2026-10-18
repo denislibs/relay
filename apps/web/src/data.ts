@@ -482,3 +482,9 @@ function rememberNames(add: Record<number, string>): void {
   setGlobal({ names });
   try { localStorage.setItem('relay.names', JSON.stringify(names)); } catch { /* ok */ }
 }
+
+/* ---------- закреплённые сообщения ---------- */
+export const pinMessage = (chatId: number, id: number) => engine.call({ type: 'pin', chatId, id }).catch(() => { showToastLazy('Не удалось закрепить — нет сети?'); });
+export const unpinMessage = (chatId: number, id: number | null) => engine.call({ type: 'unpin', chatId, id }).catch(() => { showToastLazy('Не удалось открепить — нет сети?'); });
+export const messagesByIds = (chatId: number, ids: number[]) => engine.call({ type: 'messagesByIds', chatId, ids }) as Promise<Item[]>;
+function showToastLazy(text: string): void { void import('./settingsData').then((m) => m.showToast(text)); }

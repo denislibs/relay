@@ -14,6 +14,7 @@ function sameDraft(a: { text: string; entities?: Entity[] } | null | undefined, 
 
 export interface ChatSummary {
   draft?: { text: string; at: string } | null;
+  pinned?: number[];
   sortAt?: string;
   id: number;
   kind: 'direct' | 'group';
@@ -185,6 +186,7 @@ export class Store {
       case 'privacyChanged': this.settings.applyPrivacy(u.rules, seq); return;
       case 'blocksChanged': return applyBlocksChanged(this, u, seq);
       case 'sessionsChanged': this.sessionsRev++; return;
+      case 'pins': { const chat = this.chats.get(u.chatId); if (chat) { chat.pinned = u.ids; this.markChat(chat); } return; }
     }
   }
 
@@ -206,6 +208,7 @@ export class Store {
       chat.peerId = s.peer?.id ?? null;
       if (s.peer?.system) chat.system = true; else delete chat.system;
       if (s.draft && (!chat.draft || s.draft.at > chat.draft.at) && !this.pendingDrafts.has(s.id)) chat.draft = s.draft;
+      if (s.pinned) chat.pinned = s.pinned;
       chat.named = true;
       if (s.peerReadUpTo && s.peerReadUpTo > chat.peerReadUpTo) this.applyPeerRead(s.id, s.peerReadUpTo);
       chat.lastReadId = Math.max(chat.lastReadId, s.lastReadId);

@@ -640,3 +640,22 @@ html[data-anim="0"] .app-chatcol, html[data-anim="0"] .app-chatcol-below, html[d
 .app-pl-gap { width: 40px; }
 .app-pl-profile { display: flex; align-items: center; justify-content: center; gap: 8px; height: 48px; border: 0; border-radius: 24px; background: var(--brand-strong); color: #fff; font: 500 16px/1 var(--font-sans); cursor: pointer; }
 .app-pl-profile:hover { filter: brightness(1.05); }
+
+/* Закреплённые под шапкой (PinnedBar.tsx) — отдельный остров, как в Telegram; лента получает место под ним */
+.rl-shell:has(.app-pins) .rl-feed { --top-zone: calc(var(--header-h) + var(--space-float) + 56px); }
+.app-pins { position: absolute; left: 0; right: 0; top: calc(100% + 8px); z-index: 2; display: flex; align-items: center; gap: 4px; height: 48px; padding: 0 6px 0 12px; border-radius: var(--radius-panel, 16px);
+  background: var(--glass, var(--raised)); box-shadow: var(--shadow-panel); -webkit-backdrop-filter: blur(20px) saturate(1.4); backdrop-filter: blur(20px) saturate(1.4); animation: rl-pbar-in 260ms cubic-bezier(.25, 1, .5, 1) both; }
+.rl-presence[data-state="closing"] .app-pins { animation: rl-pbar-out 220ms cubic-bezier(.33, 1, .68, 1) forwards; }
+.app-pins-main { flex: 1; min-width: 0; display: flex; align-items: center; gap: 10px; height: 100%; padding: 0; border: 0; background: none; color: inherit; text-align: left; cursor: pointer; }
+.app-pins-track { flex: none; width: 2px; height: 36px; overflow: hidden; border-radius: 1px; }
+.app-pins-segs { display: flex; flex-direction: column; gap: 2px; transition: transform 240ms var(--ease-out); }
+.app-pins-segs i { display: block; width: 2px; border-radius: 1px; background: color-mix(in srgb, var(--brand-strong) 35%, transparent); transition: background-color 200ms var(--ease-standard); }
+.app-pins-segs i.app-pins-on { background: var(--brand-strong); }
+.app-pins-thumb { flex: none; width: 36px; height: 36px; border-radius: 4px; object-fit: cover; }
+.app-pins-text { flex: 1; min-width: 0; display: flex; flex-direction: column; font: 400 14px/18px var(--font-sans); }
+.app-pins-text b { font-weight: 500; color: var(--brand-text, var(--brand-strong)); }
+.app-pins-text > span { color: var(--ink); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; animation: app-pins-swap 220ms var(--ease-out) both; }
+@keyframes app-pins-swap { from { opacity: 0; transform: translateY(6px); } }
+.app-pins .rl-iconbtn { flex: none; color: var(--ink-muted); }
+.app-pins-list { position: absolute; right: 0; top: calc(100% + 6px); z-index: 30; }
+.app-pins-list .rl-menu { position: relative; transform-origin: top right; max-width: 320px; }

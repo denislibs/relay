@@ -46,6 +46,7 @@ export interface LocalChat {
   last: LocalMessage | null;
   lastAt: string;
   draft?: { text: string; at: string; entities?: Entity[] } | null;   // неотправленный текст композера (общий для вкладок)
+  pinned?: number[];      // закреплённые сообщения (новые сверху)
 }
 
 export interface OutboxEntry {
@@ -108,6 +109,9 @@ export type Action =
   | { type: 'search'; q: string; chatId?: number; beforeId?: number; limit?: number }
   | { type: 'chatMedia'; chatId: number; kind: 'media' | 'file' | 'audio' | 'voice' | 'link'; beforeId?: number }
   | { type: 'chatMediaCounts'; chatId: number }
+  | { type: 'pin'; chatId: number; id: number }
+  | { type: 'unpin'; chatId: number; id: number | null }
+  | { type: 'messagesByIds'; chatId: number; ids: number[] }
   | { type: 'updateProfile'; firstName?: string; lastName?: string; bio?: string | null; birthday?: Birthday | null }
   | { type: 'setLinks'; links: ProfileLink[] }
   | { type: 'setUsername'; username: string | null }

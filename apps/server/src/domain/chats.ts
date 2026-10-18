@@ -67,6 +67,7 @@ export type ChatSummary = {
   peerReadUpTo: number; // до какого id мои сообщения прочитаны всеми остальными участниками
   draft?: { text: string; at: string; entities?: Entity[] } | null; // черновик этого пользователя (синхронизируется между устройствами)
   sortAt?: string; // ключ сортировки списка (последнее сообщение или создание чата) — из него курсор страницы
+  pinned?: number[]; // закреплённые сообщения (новые сверху)
 };
 
 /** Курсор страницы диалогов: время последнего сообщения (или создания чата) и id — как offset_date/offset_peer в Telegram. */
@@ -95,7 +96,8 @@ export async function listChats(userId: number, opts: ListOpts = {}): Promise<Ch
              where c.kind = 'direct' and pm.chat_id = c.id and pm.user_id <> ${userId} limit 1) as peer,
            (select coalesce(min(om.last_read_id), 0) from chat_members om where om.chat_id = c.id and om.user_id <> ${userId}) as peer_read_up_to,
            date_trunc('milliseconds', coalesce(lm.created_at, c.created_at)) as sort_at,
-           (select json_build_object('text', d.text, 'at', d.updated_at, 'entities', d.entities) from drafts d where d.user_id = ${userId} and d.chat_id = c.id) as draft
+           (select json_build_object('text', d.text, 'at', d.updated_at, 'entities', d.entities) from drafts d where d.user_id = ${userId} and d.chat_id = c.id) as draft,
+           (select coalesce(json_agg(p.message_id order by p.message_id desc), '[]') from (select message_id from pinned_messages where chat_id = c.id order by message_id desc limit 100) p) as pinned
       from chat_members cm
       join chats c on c.id = cm.chat_id
       left join lateral (
@@ -116,6 +118,7 @@ export async function listChats(userId: number, opts: ListOpts = {}): Promise<Ch
     peer: r.peer ? { id: (r.peer as { id: number }).id, name: (r.peer as { name: string }).name, ...((r.peer as { system?: boolean }).system ? { system: true as const } : {}) } : null,
     peerReadUpTo: (r.peer_read_up_to as number) ?? 0,
     sortAt: new Date(r.sort_at as string).toISOString(),
+    pinned: ((r.pinned as number[] | null) ?? []).map(Number),
     draft: r.draft ? { text: (r.draft as { text: string }).text, at: new Date((r.draft as { at: string }).at).toISOString(), ...((r.draft as { entities?: Entity[] | null }).entities?.length ? { entities: normalizeEntities((r.draft as { text: string }).text, (r.draft as { entities: Entity[] }).entities) } : {}) } : null,
     last: r.m_id == null ? null : toMessage({
       id: r.m_id, chat_id: r.m_chat_id, sender_id: r.m_sender_id, client_id: r.m_client_id,

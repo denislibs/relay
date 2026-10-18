@@ -12,6 +12,7 @@ import { connected, disconnected, listPresence, type Publish } from './domain/pr
 import { searchMessages } from './domain/search';
 import { confirmUpload, createUpload, downloadTtl, fileFor, signedDownload } from './domain/files';
 import { handleFrame } from './ws';
+import { pinMessage, unpinMessage } from './domain/pins';
 import { addProfileMusic, listProfileMusic, removeProfileMusic } from './domain/profileMusic';
 import { journalStats } from './domain/journal';
 import { notifyLatency } from './realtime';
@@ -235,6 +236,13 @@ export function createServer(opts: { port: number }): Server {
           const before = Number(url.searchParams.get('beforeId')) || null;
           return Response.json(await getChatMedia(userId, Number(media[1]), tab, before));
         }
+        const pins = /^\/chats\/(\d+)\/pins(?:\/(\d+))?$/.exec(url.pathname);
+        if (pins && req.method === 'POST' && !pins[2]) {
+          const body = (await req.json().catch(() => null)) as { messageId?: unknown } | null;
+          if (!Number.isSafeInteger(body?.messageId)) return fail('bad_frame');
+          return Response.json(await pinMessage(userId, Number(pins[1]), body!.messageId as number));
+        }
+        if (pins && req.method === 'DELETE') return Response.json(await unpinMessage(userId, Number(pins[1]), pins[2] ? Number(pins[2]) : null));
         const mediaCounts = /^\/chats\/(\d+)\/media\/counts$/.exec(url.pathname);
         if (req.method === 'GET' && mediaCounts) return Response.json(await getChatMediaCounts(userId, Number(mediaCounts[1])));
         if (url.pathname === '/push/subscription' && (req.method === 'POST' || req.method === 'DELETE')) {

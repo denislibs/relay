@@ -1,8 +1,9 @@
+import { PinnedBar } from './PinnedBar';
 import { Playlist } from './Playlist';
 import { inProfile, toggleProfileMusic, type Track } from '../music';
 import { Avatar, Button, Icon, MediaPolicy, peerTone, ChatSearchBar, Highlight, ripple, useMinVisible, requestMeasure, Composer, DropOverlay, GlassBar, IconButton, Menu, Modal, Presence, ReactionPicker, requestMutation, applyMarkdown, emptyValue, sameValue, voiceSupported, PlayerBar, roundSupported, startRound, Verified } from '@relay/ui';
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'preact/hooks';
-import { closeChat, deleteMessage, editMessage, ensureNames, focusMessage, openChat, openUserChat, sendFile, sendRound, sendVoice, react, saveDraft, searchMessages, send, typing, typingDone } from '../data';
+import { closeChat, deleteMessage, editMessage, ensureNames, focusMessage, openChat, openUserChat, pinMessage, unpinMessage, sendFile, sendRound, sendVoice, react, saveDraft, searchMessages, send, typing, typingDone } from '../data';
 import type { Item, SearchHit } from '@relay/sync-engine/src/types';
 import type { Entity } from '@relay/protocol';
 
@@ -257,6 +258,8 @@ export function Chat({ chatId, frameKey, active }: { chatId: number; frameKey: s
         </button>
         <IconButton icon="search" label="Поиск по чату" onClick={() => setFinding(true)} />
         <IconButton icon="more" label="Информация" onClick={() => setGlobal({ infoOpen: !infoOpen })} />
+        {/* закреплённые — под шапкой, как в Telegram (плеер — над ней) */}
+        {!system ? <PinnedBar chatId={chatId} /> : null}
         {/* поиск по чату — карточка внутри шапки, как в Telegram: аватар и правая кнопка остаются видны */}
         {finding ? (
           <div class={'app-findcard' + (listOpen && found ? ' app-findcard-open' : '')}>
@@ -370,6 +373,9 @@ export function Chat({ chatId, frameKey, active }: { chatId: number; frameKey: s
                 items={[
                   ...(menuMsg.id != null && !menuMsg.deleted && !system ? [{ icon: 'reply', label: 'Ответить', onClick: () => { if (editing) endEdit(editing.draft); setReplyKey(menuMsg.key as string); api.current?.focus({ end: true }); } }] : []),
                   ...(own && !system ? [{ icon: 'pencil', label: 'Изменить', onClick: () => startEdit(menuMsg) }] : []),
+                  ...(menuMsg.id != null && !menuMsg.deleted && !system && !menuMsg.service ? [((chat?.pinned as number[] | undefined) ?? []).includes(menuMsg.id as number)
+                    ? { icon: 'pin', label: 'Открепить', onClick: () => void unpinMessage(chatId, menuMsg.id as number) }
+                    : { icon: 'pin', label: 'Закрепить', onClick: () => void pinMessage(chatId, menuMsg.id as number) }] : []),
                   ...(!menuMsg.deleted ? [{ icon: 'copy', label: 'Копировать', onClick: () => { navigator.clipboard?.writeText(menuMsg.body as string).catch(() => {}); } }] : []),
                   ...(own ? ['-' as const, { icon: 'trash', label: 'Удалить', danger: true, onClick: () => setConfirmDelete({ id: menuMsg.id as number }) }] : []),
                 ]}

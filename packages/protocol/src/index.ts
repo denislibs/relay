@@ -115,7 +115,8 @@ export type Update =
   | { type: 'privacyChanged'; rules: PrivacyRules }
   // чёрный список: человек заблокирован (blocked) или разблокирован (unblocked); только владельцу
   | { type: 'blocksChanged'; blocked?: BlockedUser; unblocked?: Id }
-  | { type: 'sessionsChanged' };   // список сеансов изменился: новый вход, подтверждение, завершение
+  | { type: 'sessionsChanged' }
+  | { type: 'pins'; chatId: Id; ids: Id[] };   // закреплённые сообщения чата целиком (новые сверху)   // список сеансов изменился: новый вход, подтверждение, завершение
 
 /** Тело уведомления/push без предпросмотра: текст сообщения не раскрываем. */
 export const NO_PREVIEW = 'Новое сообщение';

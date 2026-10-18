@@ -686,6 +686,15 @@ export class Engine {
       case 'search': return this.search(a);
       case 'chatMedia': return this.http<{ messages: Message[]; hasMore: boolean }>(`/chats/${a.chatId}/media?kind=${a.kind}${a.beforeId ? '&beforeId=' + a.beforeId : ''}`);
       case 'chatMediaCounts': return this.http<Record<string, number>>(`/chats/${a.chatId}/media/counts`);
+      // закрепление — сразу на сервер (без сети — ошибка, интерфейс скажет); список придёт и обновлением журнала
+      case 'pin': case 'unpin': {
+        const res = await this.http<{ ids: number[] }>(a.type === 'pin' ? `/chats/${a.chatId}/pins` : `/chats/${a.chatId}/pins${a.id != null ? '/' + a.id : ''}`,
+          a.type === 'pin' ? { method: 'POST', body: JSON.stringify({ messageId: a.id }) } : { method: 'DELETE' });
+        this.store.applyUpdate({ type: 'pins', chatId: a.chatId, ids: res.ids });
+        this.changed();
+        return res;
+      }
+      case 'messagesByIds': return this.http<{ messages: Message[] }>(`/chats/${a.chatId}/messages?ids=${a.ids.slice(0, 100).join(',')}`).then((r) => r.messages);
       case 'sendFile': {
         // файл — в IDB (переживёт офлайн и перезагрузку), сообщение — в очередь; загрузка и отправка — в pumpOutbox
         const clientId = crypto.randomUUID();
@@ -1268,8 +1277,9 @@ export class Engine {
   // Служебное
   // =====================================================================
 
-  private async http<T>(path: string): Promise<T> {
-    const res = await this.dev.fetch(this.cfg.httpBase + path, { headers: this.cfg.headers, credentials: 'include' });
+  private async http<T>(path: string, init?: { method: string; body?: string }): Promise<T> {
+    const headers = init?.body ? { ...this.cfg.headers, 'content-type': 'application/json' } : this.cfg.headers;
+    const res = await this.dev.fetch(this.cfg.httpBase + path, { headers, credentials: 'include', ...(init ?? {}) });
     if (this.session.unauthorized(res.status)) throw { code: 'offline', retry: false } satisfies ReqError;   // сеанс завершён — не ошибка движка
     if (!res.ok) throw new Error(`HTTP ${res.status} ${path}`);
     return (await res.json()) as T;
