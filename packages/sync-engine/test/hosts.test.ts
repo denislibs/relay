@@ -81,6 +81,30 @@ test('HostCore: two tabs, one engine, each gets only its own subscriptions', asy
   await core.close();
 });
 
+test('HostCore: a tab swept as idle (background timers throttled) comes back on its next message', async () => {
+  const a = await srv.login('a'), b = await srv.login('b');
+  const chatId = await srv.chat(a.token, [a.userId, b.userId]);
+  const core = new HostCore({ build: 'v1', open: (cfg) => Engine.open(cfg) });
+  const t = tab();
+  core.attach(t.host);
+  const c = new EngineClient(t.client, 'v1', srv.config(b), { pingMs: 60_000 });
+  await c.ready;
+  const feed = mirrorOf(c, { kind: 'messages', chatId, limit: 50 });
+  await feed.until(() => feed.patches.length > 0);
+
+  core.sweep(30_000, Date.now() + 60_000);                 // пульса не было: вкладку сочли закрытой
+  expect(core.size).toBe(0);
+
+  // вкладка жива: ответ на вызов приходит (раньше — никогда, «Проверяем…» навсегда), подписка снова живая
+  const r = await Promise.race([c.call({ type: 'checkUsername', username: 'swept_tab' }), Bun.sleep(2000).then(() => 'hung')]);
+  expect(r).not.toBe('hung');
+  expect(core.size).toBe(1);
+  await sendMessage(a.userId, { chatId, clientId: crypto.randomUUID(), body: 'после сна' });
+  await feed.until((l) => l.some((m) => m.body === 'после сна'));
+  c.close();
+  await core.close();
+});
+
 test('HostCore: a different build is told to reload', async () => {
   const b = await srv.login('b');
   const core = new HostCore({ build: 'v2', open: (cfg) => Engine.open(cfg) });
