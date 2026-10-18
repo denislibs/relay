@@ -1,6 +1,9 @@
 import type { SessionInfo } from '@relay/protocol';
 import { sql, type Tx } from '../db';
+import { hashToken } from '../auth';
 import { DomainError } from './errors';
+import { appendUpdates } from './journal';
+import { newLoginMessage, postService, pushService } from './service';
 
 export const DEFAULT_TTL_DAYS = 180;
 /** предельный срок cookie и строки (скользит от последней активности); настоящий предел — неактивность (sessions_ttl_days, не больше года) */
@@ -100,12 +103,23 @@ export async function touchLive(): Promise<number[]> {
 
 // ---- список и завершение ----
 
-type Row = { id: number; device: string | null; ip: string | null; created_at: Date; last_active_at: Date };
+/** Сеанс не подтверждён: вход по коду без «Да, это я» и моложе недели. */
+const UNCONFIRMED = sql`(confirmed_at is null and created_at > now() - interval '7 days')`;
+
+/** Неподтверждённый (свежий) сеанс не может завершать и подтверждать другие. */
+async function assertConfirmed(db: Tx | typeof sql, sessionId: number): Promise<void> {
+  const [r] = await db`select ${UNCONFIRMED} as u from sessions where id = ${sessionId}`;
+  if (r?.u) throw new DomainError('fresh_session');
+}
+
+const changed = (db: Tx, userId: number) => appendUpdates(db, [{ userId, update: { type: 'sessionsChanged' } }]);
+
+type Row = { id: number; device: string | null; ip: string | null; created_at: Date; last_active_at: Date; unconfirmed: boolean };
 
 /** Сеансы пользователя: текущий первым, дальше — по последней активности. */
 export async function listSessions(userId: number, currentId: number): Promise<SessionInfo[]> {
   const rows = await sql<Row[]>`
-    select id, device, ip, created_at, last_active_at from sessions
+    select id, device, ip, created_at, last_active_at, ${UNCONFIRMED} as unconfirmed from sessions
      where user_id = ${userId} and expires_at > now()
      order by (id = ${currentId}) desc, last_active_at desc, id desc`;
   const now = Date.now();
@@ -117,6 +131,7 @@ export async function listSessions(userId: number, currentId: number): Promise<S
     lastActiveAt: new Date(r.last_active_at).toISOString(),
     current: Number(r.id) === currentId,
     online: Number(r.id) === currentId || isLive(Number(r.id)) || now - new Date(r.last_active_at).getTime() < ONLINE_MS,
+    unconfirmed: !!r.unconfirmed,
   }));
 }
 
@@ -124,19 +139,47 @@ export async function listSessions(userId: number, currentId: number): Promise<S
 export async function terminateSession(userId: number, currentId: number, id: number): Promise<{ ok: true; id: number }> {
   if (id === currentId) throw new DomainError('bad_frame');
   await sql.begin(async (tx) => {
+    await assertConfirmed(tx, currentId);
     const rows = await tx`delete from sessions where id = ${id} and user_id = ${userId} returning id`;
     if (!rows.length) throw new DomainError('not_found');
+    await changed(tx, userId);
     await notifyTerminated(tx, [id]);
   });
   return { ok: true, id };
 }
 
+/** «Да, это я» с другого устройства. Неподтверждённый сеанс подтверждать не может, себя — тоже. */
+export async function confirmSession(userId: number, currentId: number, id: number): Promise<{ ok: true }> {
+  if (id === currentId) throw new DomainError('bad_frame');
+  await sql.begin(async (tx) => {
+    await assertConfirmed(tx, currentId);
+    const rows = await tx`update sessions set confirmed_at = now() where id = ${id} and user_id = ${userId} returning id`;
+    if (!rows.length) throw new DomainError('not_found');
+    await changed(tx, userId);
+  });
+  return { ok: true };
+}
+
+/** После входа по коду: служебное «Новый вход» и sessionsChanged — плашка «Это вы?» на остальных устройствах. */
+export async function announceLogin(userId: number, token: string): Promise<void> {
+  const [s] = await sql`select device, ip, created_at from sessions where token_hash = ${hashToken(token)}`;
+  if (!s) return;
+  const message = await sql.begin(async (tx) => {
+    const m = await postService(tx, userId, { type: 'new_login', ...newLoginMessage(s.device || 'Браузер', s.ip, new Date(s.created_at)) });
+    await changed(tx, userId);
+    return m;
+  });
+  pushService(message);
+}
+
 /** Завершить все сеансы, кроме текущего. */
 export async function terminateOthers(userId: number, currentId: number): Promise<{ ok: true; ids: number[] }> {
   const ids = await sql.begin(async (tx) => {
+    await assertConfirmed(tx, currentId);
     const rows = await tx`delete from sessions where user_id = ${userId} and id <> ${currentId} returning id`;
     const ids = rows.map((r) => Number(r.id));
     // подписки Web Push завершённых сеансов уходят каскадом (session_id)
+    if (ids.length) await changed(tx, userId);
     await notifyTerminated(tx, ids);
     return ids;
   }) as number[];

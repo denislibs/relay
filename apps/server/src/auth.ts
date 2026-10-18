@@ -4,7 +4,7 @@ import { clientIp, parseDevice, type IpSource } from './device';
 import { SESSION_DAYS, sweepInactive } from './domain/sessions';
 
 const DEFAULT_TTL_DAYS = 180;
-const hash = (token: string) => createHash('sha256').update(token).digest('hex');
+export const hashToken = (token: string) => createHash('sha256').update(token).digest('hex');
 
 export async function createUser(name: string): Promise<number> {
   const [row] = await sql`insert into users (name) values (${name.slice(0, 64) || 'user'}) returning id`;
@@ -21,7 +21,7 @@ export async function createSession(userId: number, from?: { req: Request; serve
   const ip = from ? clientIp(from.req, from.server) : null;
   const token = randomBytes(32).toString('base64url');
   await sql`insert into sessions (token_hash, user_id, expires_at, device, ip, confirmed_at)
-            values (${hash(token)}, ${userId}, now() + ${SESSION_DAYS + ' days'}::interval, ${device}, ${ip}, ${opts.confirmed === false ? null : sql`now()`})`;
+            values (${hashToken(token)}, ${userId}, now() + ${SESSION_DAYS + ' days'}::interval, ${device}, ${ip}, ${opts.confirmed === false ? null : sql`now()`})`;
   return token;
 }
 
@@ -39,7 +39,7 @@ export async function sessionFromToken(token: string | null): Promise<SessionRef
     select s.id, s.user_id, s.last_active_at < now() - interval '1 minute' as stale,
            s.expires_at < now() + ${SESSION_DAYS - 1 + ' days'}::interval as slide
       from sessions s left join user_settings us on us.user_id = s.user_id
-     where s.token_hash = ${hash(token)} and s.expires_at > now()
+     where s.token_hash = ${hashToken(token)} and s.expires_at > now()
        and s.last_active_at > now() - make_interval(days => coalesce(us.sessions_ttl_days, ${DEFAULT_TTL_DAYS}))`;
   if (!row) return null;
   if (row.stale || row.slide) {
@@ -67,7 +67,7 @@ export function sessionCookie(token: string): string {
 
 /** Выход: удаляем строку текущего сеанса; id — чтобы закрыть сокеты этого сеанса в других вкладках. */
 export async function deleteSession(token: string): Promise<number | null> {
-  const [row] = await sql`delete from sessions where token_hash = ${hash(token)} returning id`;
+  const [row] = await sql`delete from sessions where token_hash = ${hashToken(token)} returning id`;
   return row ? Number(row.id) : null;
 }
 

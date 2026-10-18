@@ -4,10 +4,11 @@ import { sql } from '../src/db';
 import { clientIp, parseDevice } from '../src/device';
 import { getUpdates } from '../src/domain/journal';
 import { resetPresence } from '../src/domain/presence';
-import { setLiveCheckMs, sweepInactive, touchLive } from '../src/domain/sessions';
+import { announceLogin, confirmSession, listSessions, setLiveCheckMs, sweepInactive, terminateOthers, terminateSession, touchLive } from '../src/domain/sessions';
+import { createSession, sessionFromToken } from '../src/auth';
 import { createServer } from '../src/http';
 import { startRealtime } from '../src/realtime';
-import { nextFrame, resetDb } from './helpers';
+import { makeUser, nextFrame, resetDb } from './helpers';
 
 const server = createServer({ port: 0 });
 const stopRealtime = await startRealtime(server);
@@ -58,7 +59,7 @@ test('list shows every own session, the current one first, with device and ip', 
   await login('Борис');
   const l = await list(a2);
   expect(l.length).toBe(2);
-  expect(l[0]).toMatchObject({ current: true, device: 'Safari 18, iOS', online: true });
+  expect(l[0]).toMatchObject({ current: true, device: 'Safari 18, iOS', online: true, unconfirmed: false });
   expect(l[1]).toMatchObject({ current: false, device: 'Chrome 141, macOS' });
   expect(typeof l[0].ip).toBe('string');
   expect(Date.parse(l[0].createdAt)).toBeGreaterThan(0);
@@ -263,4 +264,35 @@ test('DELETE /sessions without others=1 → 400', async () => {
   const a1 = await login('Анна'); await login('Анна');
   expect((await call(a1, 'DELETE', '/sessions')).status).toBe(400);
   expect((await list(a1)).length).toBe(2);
+});
+
+test('new code login: unconfirmed, announced in the service chat, cannot terminate others until confirmed', async () => {
+  const a = await makeUser('Анна');
+  const old = (await sessionFromToken(await createSession(a)))!.sessionId;
+  const newToken = await createSession(a, undefined, { confirmed: false });
+  const fresh = (await sessionFromToken(newToken))!.sessionId;
+  await announceLogin(a, newToken);
+
+  const list = await listSessions(a, old);
+  expect(list.find((s) => s.id === fresh)).toMatchObject({ unconfirmed: true });
+  const [msg] = await sql`select body from messages where service_type = 'new_login' order by id desc limit 1`;
+  expect(msg.body).toContain('Новый вход');
+  const types = (await sql`select type from updates where user_id = ${a} order by seq`).map((r) => r.type);
+  expect(types).toContain('sessionsChanged');
+
+  await expect(terminateSession(a, fresh, old)).rejects.toMatchObject({ code: 'fresh_session' });
+  await expect(terminateOthers(a, fresh)).rejects.toMatchObject({ code: 'fresh_session' });
+  await expect(confirmSession(a, fresh, old)).rejects.toMatchObject({ code: 'fresh_session' });
+  await expect(confirmSession(a, fresh, fresh)).rejects.toMatchObject({ code: 'bad_frame' });   // себя не подтверждают
+  await confirmSession(a, old, fresh);
+  expect((await listSessions(a, old)).find((s) => s.id === fresh)).toMatchObject({ unconfirmed: false });
+  await terminateOthers(a, fresh);   // подтверждённый сеанс снова может завершать другие
+});
+
+test('a week-old unconfirmed session counts as confirmed', async () => {
+  const a = await makeUser('Борис');
+  const t = await createSession(a, undefined, { confirmed: false });
+  const id = (await sessionFromToken(t))!.sessionId;
+  await sql`update sessions set created_at = now() - interval '8 days' where id = ${id}`;
+  expect((await listSessions(a, id))[0]).toMatchObject({ unconfirmed: false });
 });

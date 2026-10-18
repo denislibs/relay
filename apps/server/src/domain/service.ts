@@ -53,3 +53,11 @@ export async function postService(tx: Tx, userId: number, msg: { type: ServiceTy
 export function pushService(message: Message): void {
   pushInBackground(message);
 }
+
+/** «Новый вход»: устройство, IP и время, совет, что делать, если это не вы; заголовок жирным. */
+export function newLoginMessage(device: string, ip: string | null, at: Date): { body: string; entities: Entity[] } {
+  const when = at.toLocaleString('ru-RU', { day: 'numeric', month: 'long', hour: '2-digit', minute: '2-digit', timeZone: 'UTC' }) + ' UTC';
+  const title = 'Новый вход в аккаунт';
+  const body = `${title}\n\nУстройство: ${device}\nIP: ${ip ?? 'неизвестен'}\nВремя: ${when}\n\nЕсли это были не вы, откройте Настройки → Активные сеансы и завершите этот сеанс.`;
+  return { body, entities: [{ type: 'bold', offset: 0, length: title.length }] };
+}

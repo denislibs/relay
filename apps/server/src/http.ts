@@ -4,7 +4,7 @@ import type { Server } from 'bun';
 import { existsSync, statSync } from 'node:fs';
 import { extname, join, resolve, sep } from 'node:path';
 import { clearSessionCookie, createSession, createUser, deleteSession, readSessionToken, sessionCookie, sessionFromToken } from './auth';
-import { checkSocket, listSessions, sessionEnded, sweepInactive, terminateOthers, terminateSession, trackSocket, untrackSocket } from './domain/sessions';
+import { announceLogin, checkSocket, confirmSession, listSessions, sessionEnded, sweepInactive, terminateOthers, terminateSession, trackSocket, untrackSocket } from './domain/sessions';
 import { createChat, getChatMedia, getHistory, getMessagesByIds, listChats, listChatsPage } from './domain/chats';
 import { sql } from './db';
 import { DomainError } from './domain/errors';
@@ -104,6 +104,7 @@ export function createServer(opts: { port: number }): Server {
           if (typeof attemptId !== 'string' || typeof code !== 'string') return fail('bad_frame');
           const { userId } = await signIn(attemptId, code);
           const token = await createSession(userId, { req, server }, { confirmed: false });
+          await announceLogin(userId, token);
           return Response.json({ userId }, { headers: { 'set-cookie': sessionCookie(token) } });
         }
         const auth = await sessionFromToken(readSessionToken(req));
@@ -155,6 +156,8 @@ export function createServer(opts: { port: number }): Server {
         }
         const sess = /^\/sessions\/(\d{1,15})$/.exec(url.pathname);
         if (sess && req.method === 'DELETE') return Response.json(await terminateSession(userId, sessionId, Number(sess[1])));
+        const confirm = /^\/sessions\/(\d{1,15})\/confirm$/.exec(url.pathname);
+        if (confirm && req.method === 'POST') return Response.json(await confirmSession(userId, sessionId, Number(confirm[1])));
         if (req.method === 'GET' && url.pathname === '/blocks') return Response.json(await listBlocked(userId));
         const block = /^\/blocks\/(\d{1,15})$/.exec(url.pathname);
         if (block && (req.method === 'PUT' || req.method === 'DELETE')) {

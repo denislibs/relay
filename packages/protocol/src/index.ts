@@ -95,7 +95,8 @@ export type Update =
   // правила конфиденциальности изменились: приходят целиком, только владельцу
   | { type: 'privacyChanged'; rules: PrivacyRules }
   // чёрный список: человек заблокирован (blocked) или разблокирован (unblocked); только владельцу
-  | { type: 'blocksChanged'; blocked?: BlockedUser; unblocked?: Id };
+  | { type: 'blocksChanged'; blocked?: BlockedUser; unblocked?: Id }
+  | { type: 'sessionsChanged' };   // список сеансов изменился: новый вход, подтверждение, завершение
 
 /** Тело уведомления/push без предпросмотра: текст сообщения не раскрываем. */
 export const NO_PREVIEW = 'Новое сообщение';
@@ -110,7 +111,7 @@ export interface SettingsSnapshot extends UserSettings { privacy?: PrivacyRules;
 export const SESSION_TTLS: readonly number[] = [7, 30, 90, 180, 365];
 
 /** Сеанс (GET /sessions): устройство — грубо по User-Agent («Chrome 141, macOS»), IP входа; current — этот запрос. */
-export interface SessionInfo { id: Id; device: string; ip: string | null; createdAt: string; lastActiveAt: string; current: boolean; online: boolean }
+export interface SessionInfo { id: Id; device: string; ip: string | null; createdAt: string; lastActiveAt: string; current: boolean; online: boolean; unconfirmed: boolean }
 
 /** Правила конфиденциальности. phoneDiscovery — «Кто найдёт меня по номеру» (только everyone | contacts). */
 export type PrivacyKey = 'phone' | 'phoneDiscovery' | 'lastSeen' | 'bio' | 'birthday';
