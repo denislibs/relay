@@ -213,8 +213,32 @@ function nameTone(name) {
   for (var i = 0; i < name.length; i++) x = (x * 31 + name.charCodeAt(i)) | 0;
   return Math.abs(x) % PEER_COLORS;
 }
+/* ---------- Знак Relay и значок «официальный» ---------- */
+// Свой рисунок: облачко сообщения с двумя встречными стрелками — «передача» (relay). Белым по фирменному градиенту.
+var LOGO_PATHS = ['M6 7.5A3.5 3.5 0 0 1 9.5 4h5A3.5 3.5 0 0 1 18 7.5v4a3.5 3.5 0 0 1-3.5 3.5H11l-3.6 3v-3.2A3.5 3.5 0 0 1 6 11.5z', 'M9.6 8.4h4.6l-1.4-1.3', 'M14.4 11h-4.6l1.4 1.3'];
+function RelayLogo(props) {
+  var size = props.size || 24;
+  return h('svg', { class: 'rl-logo-mark', width: size, height: size, viewBox: '0 0 24 24', fill: 'none', 'aria-hidden': 'true' },
+    LOGO_PATHS.map(function (d, i) {
+      return h('path', { key: i, d: d, fill: i === 0 ? '#fff' : 'none', stroke: i === 0 ? 'none' : 'var(--logo-ink)', 'stroke-width': 1.6, 'stroke-linecap': 'round', 'stroke-linejoin': 'round' });
+    }));
+}
+/** Значок подтверждённого (официального) аккаунта рядом с именем. size — px. */
+function Verified(props) {
+  var size = props.size || 16;
+  return h('span', { class: cx('rl-verified', props.class), role: 'img', 'aria-label': props.label || 'Официальный аккаунт', title: props.label || 'Официальный аккаунт', style: { width: size, height: size } },
+    h('svg', { width: size, height: size, viewBox: '0 0 16 16', 'aria-hidden': 'true' },
+      h('circle', { cx: 8, cy: 8, r: 8, fill: 'var(--verified)' }),
+      h('path', { d: 'M4.6 8.3l2.2 2.2 4.6-4.8', fill: 'none', stroke: '#fff', 'stroke-width': 1.9, 'stroke-linecap': 'round', 'stroke-linejoin': 'round' })));
+}
+
 function Avatar(props) {
   var size = props.size || 48;
+  if (props.logo) {
+    // официальный аккаунт: знак вместо инициалов
+    return h('span', { class: cx('rl-avatar', 'rl-avatar-logo', (props.className || props.class)), style: { width: size, height: size }, role: 'img', 'aria-label': props.name || 'Relay' },
+      h(RelayLogo, { size: Math.round(size * 0.62) }));
+  }
   var tone = props.tone != null ? props.tone : props.name ? nameTone(String(props.name)) : null;
   return h('span', {
     class: cx('rl-avatar', tone != null && !props.src && 'rl-avatar-tone', (props.className || props.class)),
@@ -291,7 +315,7 @@ function TypingIndicator(props) {
 /* ---------- ChatRow ---------- */
 function ChatRow(props) {
   var unread = props.unread || 0;
-  var rest = omit(props, ['name', 'preview', 'time', 'unread', 'muted', 'status', 'active', 'typing', 'online', 'avatar', 'author', 'thumb', 'pinned', 'draft', 'mentioned', 'className', 'class']);
+  var rest = omit(props, ['verified', 'logo', 'name', 'preview', 'time', 'unread', 'muted', 'status', 'active', 'typing', 'online', 'avatar', 'author', 'thumb', 'pinned', 'draft', 'mentioned', 'className', 'class']);
   // как в Telegram: «печатает» важнее черновика, черновик важнее сообщения;
   // строка сообщения — «Автор:», миниатюра 20 px (у видео — play), текст
   var thumb = props.thumb;
@@ -307,10 +331,12 @@ function ChatRow(props) {
   return h('button', Object.assign({ type: 'button' }, rest, { onPointerDown: chain(rest.onPointerDown, ripple),
     class: cx('rl-row', (props.className || props.class)), 'aria-current': props.active ? 'true' : undefined
   }),
-    h(Avatar, { name: props.avatar === undefined ? props.name : props.avatar, tone: props.avatarTone, online: props.online }),
+    h(Avatar, { name: props.avatar === undefined ? props.name : props.avatar, tone: props.avatarTone, online: props.online, logo: props.logo }),
     h('span', { class: 'rl-row-main' },
       h('span', { class: 'rl-row-top' },
-        h('span', { class: 'rl-row-name' }, props.name),
+        props.verified
+          ? h('span', { class: 'rl-row-name rl-row-name-verified' }, h('span', { class: 'rl-row-name-text' }, props.name), h(Verified, { size: 16 }))
+          : h('span', { class: 'rl-row-name' }, props.name),
         props.status ? h(MessageStatus, { status: props.status, size: 16 }) : null,
         h('span', { class: cx('rl-row-time', unread > 0 && !props.muted && 'rl-row-time-unread') }, props.time)),
       h('span', { class: 'rl-row-bottom' }, bottom,
@@ -1100,4 +1126,4 @@ function ScrollToBottom(props) {
 }
 
 
-export { peerTone, ArchivedRow, ReplyQuote, ReactionChips, cx, chain, ripple, reducedMotion, omit, fmtTime, makeWave, ICONS, Icon, Button, IconButton, Avatar, Badge, Chip, SearchField, ChatRow, ChatRowSkeleton, Bubble, MessageStatus, TypingIndicator, DateDivider, Banner, Modal, NavRail, Checkbox, Toast, Card, Steps, MediaArt, ProgressRing, Waveform, VoiceMessage, VoiceRecorder, MediaBubble, MediaPolicy, mediaHeld, FileBubble, MediaThumb, MediaViewer, Switch, PanelHeader, ProfileHeader, ActionTile, InfoRow, SettingsIcon, ReadMore, Presence, useMinVisible, LazyImage, FlipList, SyncIndicator, LinearProgress, EmptyState, ScrollToBottom };
+export { peerTone, RelayLogo, Verified, ArchivedRow, ReplyQuote, ReactionChips, cx, chain, ripple, reducedMotion, omit, fmtTime, makeWave, ICONS, Icon, Button, IconButton, Avatar, Badge, Chip, SearchField, ChatRow, ChatRowSkeleton, Bubble, MessageStatus, TypingIndicator, DateDivider, Banner, Modal, NavRail, Checkbox, Toast, Card, Steps, MediaArt, ProgressRing, Waveform, VoiceMessage, VoiceRecorder, MediaBubble, MediaPolicy, mediaHeld, FileBubble, MediaThumb, MediaViewer, Switch, PanelHeader, ProfileHeader, ActionTile, InfoRow, SettingsIcon, ReadMore, Presence, useMinVisible, LazyImage, FlipList, SyncIndicator, LinearProgress, EmptyState, ScrollToBottom };

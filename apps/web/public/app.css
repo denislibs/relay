@@ -359,8 +359,7 @@ html[data-anim="0"] .app-chatcol, html[data-anim="0"] .app-chatcol-below, html[d
 /* «Назад» поверх другого чата — и на широком экране */
 .app-back.app-back-inner { display: inline-flex; }
 
-/* служебный чат «Relay»: галочка у имени, плашка вместо поля ввода (высота — как у композера, 48 px: лента не прыгает), код копируется кликом */
-.app-verified { display: inline-grid; place-items: center; width: 16px; height: 16px; margin-left: 4px; border-radius: 50%; background: var(--brand-strong); color: var(--bg); vertical-align: -2px; }
+/* служебный чат «Relay»: плашка вместо поля ввода (высота — как у композера, 48 px: лента не прыгает), код копируется кликом */
 .app-readonly-bar { display: flex; align-items: center; justify-content: center; min-height: 48px; padding: 4px 16px; text-align: center; border-radius: var(--radius-panel); background: var(--glass); box-shadow: var(--shadow-panel); color: var(--ink-muted); font: 400 14px/20px var(--font-sans); }
 .rl-bubble code.rl-code { cursor: pointer; }   /* блок кода (rl-pre) кликом не копируется */
 

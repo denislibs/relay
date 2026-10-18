@@ -109,7 +109,8 @@ export async function settlePushes(): Promise<void> {
   while (pending.size) await Promise.allSettled([...pending]);
 }
 
-export type PushPayload = { chatId: number; id: number; title: string; body: string };
+/** system — служебное сообщение Relay: SW ставит знак Relay иконкой. */
+export type PushPayload = { chatId: number; id: number; title: string; body: string; system?: true };
 
 /** Новое сообщение → push участникам без соединения, кроме отправителя и тех, у кого чат заглушён.
  *  Только подпискам живых сеансов: истёкший или неактивный дольше срока, но ещё не убранный sweepInactive — молчит. */
@@ -147,6 +148,7 @@ export async function pushNewMessage(m: { chatId: number; id: number; senderId: 
       : kind === 'group'
       ? { chatId: m.chatId, id: m.id, title: (info.title as string) ?? 'Группа', body: shown ? `${name}: ${preview}` : NO_PREVIEW }
       : { chatId: m.chatId, id: m.id, title: name, body: shown ? preview : NO_PREVIEW };
+    if (m.service) payload.system = true;
     const plain = enc.encode(JSON.stringify(payload).slice(0, 3000));
     try {
       const res = await fetch(s.endpoint as string, {

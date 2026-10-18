@@ -1,6 +1,6 @@
 import type { ProfileLink } from '@relay/protocol';
 import { ProfileLinks } from './links/ProfileLinks';
-import { Avatar, EmptyState, Icon, FolderTabs, InfoRow, LazyImage, PanelHeader, RichText, SettingsIcon, SlideStack, Switch } from '@relay/ui';
+import { Avatar, EmptyState, Icon, FolderTabs, InfoRow, LazyImage, PanelHeader, RichText, SettingsIcon, SlideStack, Switch, Verified } from '@relay/ui';
 import type { Item } from '@relay/sync-engine/src/types';
 import { chatMedia, focusMessage } from '../data';
 import { chatTone, fileSize, isSystemChat } from './format';
@@ -90,8 +90,8 @@ export function Info() {
       <PanelHeader icon="close" closeLabel="Закрыть" title="Информация" onClose={close} action={action} />
       <div class="rl-aside-body">
         <div class="rl-profile">
-          <Avatar name={title} tone={chatTone(chat)} size={120} />
-          <div class="rl-profile-name">{title}{system ? <i class="app-verified" role="img" aria-label="Официальный аккаунт"><Icon name="check" size={14} /></i> : null}</div>
+          <Avatar name={title} tone={chatTone(chat)} size={120} logo={system} />
+          <div class="rl-profile-name">{title}{system ? <Verified size={22} /> : null}</div>
           <div class={'rl-profile-sub' + (myPeer?.online ? ' app-online' : '')}>{subtitle || ' '}</div>
         </div>
         <Expand show={!group && !!(user?.links as ProfileLink[] | undefined)?.length}>{!group && user ? <ProfileLinks links={(user.links as ProfileLink[] | undefined) ?? []} /> : null}</Expand>
