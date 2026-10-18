@@ -5,7 +5,7 @@ import { fetchMedia, isMediaRequest, loadPolicy, savePolicy, serveMedia, sweepMe
 declare const __BUILD__: string;
 const sw = self as unknown as ServiceWorkerGlobalScope;
 const CACHE = 'relay-shell-' + __BUILD__;
-const SHELL = ['/', '/main.js', '/relay.css', '/tokens.css', '/app.css', '/shared.worker.js', '/dedicated.worker.js', '/spoiler.worker.js', '/dotlottie-player.wasm'];
+const SHELL = ['/', '/main.js', '/relay.css', '/tokens.css', '/app.css', '/shared.worker.js', '/dedicated.worker.js', '/spoiler.worker.js', '/dotlottie-player.wasm', '/sounds/message.mp3'];   // звук сообщения — и без сети
 const API = /^\/(health|me|users|contacts|settings|privacy|blocks|chats|presence|search|uploads|files|push|sessions|ws|dev|logout)(\/|$)/;
 
 sw.addEventListener('install', (e) => {

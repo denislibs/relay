@@ -1,5 +1,5 @@
-// Звук уведомления — свой, синтезированный WebAudio (без файлов и без чужих записей): мягкий «колокольчик»
-// из двух нот, как у мессенджеров — короткий удар молоточка, тёплый основной тон, затухающий хвост и лёгкое эхо.
+// Звук нового сообщения — файл /sounds/message.mp3 (выбран владельцем проекта), декодируется один раз и играет
+// через WebAudio с нужной громкостью. Файл не загрузился — запасной синтезированный «колокольчик» из двух нот.
 // Звучит, только если браузер разрешил аудио.
 let ctx: AudioContext | null = null;
 
@@ -30,12 +30,35 @@ function chime(c: AudioContext, out: AudioNode, hz: number, at: number, peak: nu
   }
 }
 
-/** Уведомление о новом сообщении: две ноты вверх (си → ми), ~0.6 с. volume 0..1; 0 — ничего не играем. */
+const SOUND_URL = '/sounds/message.mp3';
+let buffer: Promise<AudioBuffer | null> | null = null;
+function messageBuffer(c: AudioContext): Promise<AudioBuffer | null> {
+  buffer ??= fetch(SOUND_URL).then((r) => (r.ok ? r.arrayBuffer() : Promise.reject(new Error(String(r.status)))))
+    .then((data) => c.decodeAudioData(data))
+    .catch(() => { buffer = null; return null; });   // в следующий раз попробуем снова
+  return buffer;
+}
+
+/** Уведомление о новом сообщении. volume 0..1; 0 — ничего не играем. */
 export function playNotifySound(volume: number): void {
   if (!(volume > 0)) return;
   try {
     const c = audio();
     if (!c) return;
+    void messageBuffer(c).then((buf) => {
+      if (!buf) { playChime(c, volume); return; }
+      const src = c.createBufferSource(), gain = c.createGain();
+      src.buffer = buf;
+      gain.gain.value = Math.min(1, volume);
+      src.connect(gain).connect(c.destination);
+      src.start();
+    }, () => playChime(c, volume));
+  } catch { /* аудио недоступно — не страшно */ }
+}
+
+/** Запасной звук без файла: две ноты вверх (си → ми), ~0.5 с. */
+function playChime(c: AudioContext, volume: number): void {
+  try {
     const t = c.currentTime + 0.01;
     // общий выход: мягкий срез верхов (без «писка») и тихое эхо — звук не сухой
     const master = c.createGain();
