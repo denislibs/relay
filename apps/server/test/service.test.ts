@@ -32,3 +32,27 @@ test('service message lands in the journal; the user cannot write or react there
   await expect(editMessage(a, m.chatId, m.id, 'правка')).rejects.toMatchObject({ code: 'forbidden' });
   await expect(reactMessage(a, m.chatId, m.id, '👍')).rejects.toMatchObject({ code: 'forbidden' });
 });
+
+test('the system user cannot be blocked or added as a contact (forbidden)', async () => {
+  const { addContact, blockUser } = await import('../src/domain/contacts');
+  const sys = await systemUserId();
+  const a = await makeUser('Анна');
+  await sql.begin((tx) => postService(tx, a, { type: 'new_login', body: 'Новый вход' }));   // общий чат — «Relay» виден
+  await expect(blockUser(a, sys)).rejects.toMatchObject({ code: 'forbidden' });
+  await expect(addContact(a, { userId: sys, firstName: 'Relay' })).rejects.toMatchObject({ code: 'forbidden' });
+  expect((await sql`select count(*)::int as n from blocks where owner_id = ${a}`)[0].n).toBe(0);
+  expect((await sql`select count(*)::int as n from contacts where owner_id = ${a}`)[0].n).toBe(0);
+});
+
+test('109_service.sql runs again harmlessly: one system user, pending code sign-ins stay unconfirmed, new sessions default to confirmed', async () => {
+  const { createSession } = await import('../src/auth');
+  const a = await makeUser('Анна');
+  await createSession(a, undefined, { confirmed: false });
+  const text = await Bun.file(new URL('../migrations/109_service.sql', import.meta.url)).text();
+  await sql.begin((tx) => tx.unsafe(text));
+  await sql.begin((tx) => tx.unsafe(text));
+  expect((await sql`select count(*)::int as n from users where system`)[0].n).toBe(1);
+  expect((await sql`select confirmed_at from sessions where user_id = ${a}`)[0].confirmed_at).toBeNull();
+  const [d] = await sql`insert into sessions (token_hash, user_id, expires_at) values (${crypto.randomUUID()}, ${a}, now() + interval '1 day') returning confirmed_at`;
+  expect(d.confirmed_at).not.toBeNull();
+});

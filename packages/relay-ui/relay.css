@@ -1360,3 +1360,112 @@ html[data-blur="0"] .rl-shell .rl-msgmenu .rl-menu, html[data-blur="0"] .rl-shel
 @media (prefers-reduced-motion: reduce) {
   .rl-owl * { animation: none !important; transition-duration: 1ms !important; }
 }
+
+/* ---------- запись голосового / кружка: панель на месте поля ввода ---------- */
+.rl-composer-recording .rl-composer-field[hidden] { display: none; }
+.rl-recbar { flex: 1; min-width: 0; display: flex; align-items: center; gap: .25rem; min-height: 40px; animation: rl-recbar-in 200ms var(--ease-out) both; }
+@keyframes rl-recbar-in { from { opacity: 0; } to { opacity: 1; } }
+.rl-recbar .rl-iconbtn { width: 2.5rem; height: 2.5rem; flex-shrink: 0; }
+.rl-recbar-del { color: var(--danger, #e53935); }
+.rl-recbar-pill { flex: 1; min-width: 0; height: 2.5rem; display: flex; align-items: center; gap: .625rem; padding-inline: .5rem .75rem; box-sizing: border-box;
+  border-radius: 1.25rem; background: color-mix(in srgb, var(--brand) 10%, transparent); }
+.rl-recbar-ctl { width: 1.5rem; height: 1.5rem; flex-shrink: 0; display: grid; place-items: center; }
+.rl-recbar-dot { width: 10px; height: 10px; border-radius: 50%; background: var(--danger, #e53935);
+  animation: rl-rec-grow 200ms var(--ease-out), rl-rec-pulse 1s ease-in-out 200ms infinite alternate; }
+@keyframes rl-rec-grow { 0% { transform: scale(.5); } 60% { transform: scale(1.1); } 100% { transform: scale(1); } }
+@keyframes rl-rec-pulse { from { opacity: 1; } to { opacity: .4; } }
+.rl-recbar-play { width: 1.5rem; height: 1.5rem; padding: 0; border: 0; border-radius: 50%; display: grid; place-items: center; cursor: pointer;
+  background: var(--brand); color: #fff; animation: rl-rec-grow 200ms var(--ease-out); }
+.rl-recbar-wave { flex: 1; min-width: 0; height: 1.5rem; color: var(--brand); }
+.rl-recbar-wave-seek { cursor: pointer; }
+.rl-recbar-time { flex-shrink: 0; min-width: 3.75rem; text-align: right; font: 400 .875rem/1.375rem var(--font-sans); font-variant-numeric: tabular-nums; color: var(--ink); }
+.rl-recbar-pause .rl-icon { animation: rl-rec-grow 200ms var(--ease-out); }
+.rl-recbar-pause-off { opacity: .4; pointer-events: none; }
+/* выбор «голосовое / кружок» над кнопкой */
+.rl-recmode { position: absolute; right: 0; bottom: calc(100% + 6px); z-index: 30; }
+.rl-recmode-scrim { position: fixed; inset: 0; }
+.rl-recmode .rl-menu { position: relative; transform-origin: bottom right; }
+
+/* ---------- голосовое в ленте (как в Telegram Web A) ---------- */
+.rl-vb { --voice-progress: var(--brand); --voice-fill: color-mix(in srgb, var(--brand) 38%, var(--bubble-in)); --voice-btn: var(--brand); --voice-btn-ink: #fff;
+  padding: 6px 8px 6px 6px; min-width: 0; }
+.rl-vb.rl-bubble-out { --voice-progress: #4fae4e; --voice-fill: #aedfa4; --voice-btn: #4fae4e; --voice-btn-ink: #fff; }
+:root[data-theme="dark"] .rl-vb.rl-bubble-out { --voice-progress: #fff; --voice-fill: color-mix(in srgb, #fff 45%, var(--bubble-out)); --voice-btn: #fff; --voice-btn-ink: var(--bubble-out); }
+@media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) .rl-vb.rl-bubble-out { --voice-progress: #fff; --voice-fill: color-mix(in srgb, #fff 45%, var(--bubble-out)); --voice-btn: #fff; --voice-btn-ink: var(--bubble-out); } }
+.rl-vb-row { display: flex; align-items: center; padding-right: 52px; }
+.rl-vb-btn { position: relative; flex-shrink: 0; width: 3rem; height: 3rem; margin-inline-end: .75rem; padding: 0; border: 0; border-radius: 50%; cursor: pointer;
+  background: var(--voice-btn); color: var(--voice-btn-ink); }
+.rl-vb-btn > .rl-icon { position: absolute; top: 50%; left: 50%; margin: -13px 0 0 -13px;
+  transition: opacity .4s var(--ease-out), transform .6s cubic-bezier(.34, 1.56, .64, 1); }
+.rl-vb-play { margin-left: -11px !important; }
+.rl-vb-pause { opacity: 0; transform: scale(.5) rotate(-90deg); }
+.rl-vb-playing .rl-vb-play { opacity: 0; transform: scale(.5) rotate(90deg); }
+.rl-vb-playing .rl-vb-pause { opacity: 1; transform: none; }
+.rl-vb-loading > .rl-icon { opacity: 0; transform: scale(.5); }
+.rl-vb-ring { position: absolute; inset: 0; display: grid; place-items: center; }
+.rl-vb-ring .rl-ring { position: absolute; inset: 0; }
+.rl-vb-cancel { position: relative; }
+.rl-vb-body { min-width: 0; display: flex; flex-direction: column; }
+.rl-vb-wave { display: block; touch-action: none; cursor: pointer; color: var(--voice-fill); outline: 0 solid var(--voice-progress); }
+.rl-vb-foot { display: flex; align-items: center; margin-top: .25rem; }
+.rl-vb-time { font: 400 .875rem/1 var(--font-sans); font-variant-numeric: tabular-nums; color: var(--bubble-meta); }
+.rl-vb-dot { width: .5rem; height: .5rem; margin-inline-start: .375rem; border-radius: 50%; background: var(--voice-progress); }
+
+/* ---------- плеер под шапкой чата ---------- */
+.rl-playerbar { position: absolute; z-index: 4; left: 0; right: 0; top: calc(100% + 6px); height: 3rem; box-sizing: border-box;
+  display: flex; align-items: center; gap: 2px; padding: 0 6px; border-radius: var(--radius-panel, 16px); background: var(--glass, var(--raised)); box-shadow: var(--shadow-panel, var(--shadow-float));
+  -webkit-backdrop-filter: blur(20px) saturate(1.4); backdrop-filter: blur(20px) saturate(1.4); overflow: hidden;
+  animation: rl-pbar-in 300ms cubic-bezier(.25, 1, .5, 1) both; }
+.rl-presence[data-state="closing"] .rl-playerbar { animation: rl-pbar-out 300ms cubic-bezier(.33, 1, .68, 1) forwards; }
+@keyframes rl-pbar-in { from { opacity: 0; transform: translateY(-12px); } to { opacity: 1; transform: none; } }
+@keyframes rl-pbar-out { to { opacity: 0; transform: translateY(-12px); } }
+.rl-playerbar .rl-iconbtn { width: 2.25rem; height: 2.25rem; flex-shrink: 0; color: var(--ink-muted); }
+.rl-playerbar-off { opacity: .35; pointer-events: none; }
+.rl-playerbar-play { position: relative; flex-shrink: 0; width: 2rem; height: 2rem; padding: 0; border: 0; border-radius: 50%; cursor: pointer; background: transparent; color: var(--brand-text, var(--brand)); }
+.rl-playerbar-play > .rl-icon { position: absolute; top: 50%; left: 50%; margin: -10px 0 0 -10px; transition: opacity .4s var(--ease-out), transform .6s cubic-bezier(.34, 1.56, .64, 1); }
+.rl-playerbar-text { flex: 1; min-width: 0; display: flex; flex-direction: column; margin-left: 6px; font: 400 13px/17px var(--font-sans); color: var(--ink-muted); }
+.rl-playerbar-text b { font-weight: 500; font-size: 14px; color: var(--ink); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.rl-playerbar-text > span { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; font-variant-numeric: tabular-nums; }
+.rl-playerbar-speed-wrap { position: relative; }
+.rl-playerbar-speed { min-width: 2.5rem; height: 1.5rem; padding: 0 6px; border: 1.5px solid currentColor; border-radius: 6px; background: transparent; cursor: pointer;
+  font: 600 11px/1 var(--font-sans); color: var(--ink-muted); }
+.rl-playerbar-speed-on { color: var(--brand-text, var(--brand)); }
+.rl-playerbar-menu { position: absolute; right: 0; top: calc(100% + 6px); z-index: 30; }
+.rl-playerbar-line { position: absolute; left: 0; right: 0; bottom: 0; height: 2px; background: var(--brand); transform: scaleX(0); transform-origin: left; }
+
+/* ---------- круг записи кружка ---------- */
+.rl-roundrec { position: fixed; z-index: 60; left: 50%; top: 50%; width: min(22.5rem, 70vmin); aspect-ratio: 1; border-radius: 50%; overflow: hidden;
+  background: #000; box-shadow: 0 .5rem 2.5rem rgba(0, 0, 0, .6); pointer-events: none;
+  transform: translate(-50%, -50%); animation: rl-roundrec-in 350ms ease-in-out both; transition: background-color 300ms ease; }
+@keyframes rl-roundrec-in { from { transform: translate(-50%, calc(50vh + 100%)) scale(.25); } to { transform: translate(-50%, -50%) scale(1); } }
+.rl-roundrec-out { animation: rl-roundrec-leave 300ms ease-in forwards; }
+@keyframes rl-roundrec-leave { to { transform: translate(-50%, calc(50vh + 100%)) scale(.25); opacity: 0; } }
+.rl-roundrec-media, .rl-roundrec-media video { position: absolute; inset: 0; width: 100%; height: 100%; }
+.rl-roundrec-video { object-fit: cover; }
+.rl-roundrec-mirror { transform: scaleX(-1); }
+.rl-roundrec-wait { position: absolute; inset: 0; background: linear-gradient(135deg, rgba(255,255,255,.35), rgba(0,0,0,.35));
+  -webkit-backdrop-filter: blur(1.25rem); backdrop-filter: blur(1.25rem); transition: opacity 300ms ease; }
+.rl-roundrec-wait::after { content: ''; position: absolute; inset: 0; background: linear-gradient(110deg, transparent 30%, rgba(255,255,255,.25) 50%, transparent 70%);
+  background-size: 250% 100%; animation: rl-roundrec-shimmer 1.4s linear infinite; }
+@keyframes rl-roundrec-shimmer { from { background-position: 120% 0; } to { background-position: -120% 0; } }
+.rl-roundrec-ready .rl-roundrec-wait { opacity: 0; }
+.rl-roundrec-ring { position: absolute; inset: 0; transform: rotate(-90deg); }
+.rl-roundrec-ring circle { fill: none; stroke: rgba(255, 255, 255, .9); stroke-width: 2.5; stroke-linecap: round; }
+
+/* ---------- кружок в ленте ---------- */
+.rl-round { position: relative; width: 15rem; height: 15rem; flex-shrink: 0; cursor: pointer; isolation: isolate; }
+.rl-round::before { content: ''; position: absolute; inset: 0; border-radius: 50%; background: #000; }
+.rl-round-thumb, .rl-round-video { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; border-radius: 50%; }
+.rl-round-thumb { filter: blur(10px); clip-path: circle(50%); transition: opacity 300ms var(--ease-out); }
+.rl-round-loaded .rl-round-thumb { opacity: 0; }
+.rl-round-video { opacity: 0; transition: opacity 300ms var(--ease-out); }
+.rl-round-loaded .rl-round-video { opacity: 1; }
+.rl-round-ring { position: absolute; inset: 0; transform: rotate(-90deg); pointer-events: none; }
+.rl-round-ring circle { fill: none; stroke: rgba(255, 255, 255, .35); stroke-width: 4; stroke-linecap: round; }
+.rl-round-center { position: absolute; inset: 0; display: grid; place-items: center; }
+.rl-round-badge { position: absolute; top: .1875rem; left: .1875rem; display: inline-flex; align-items: center; gap: .375rem;
+  padding: 0 .375rem; border-radius: .75rem; background: rgba(0, 0, 0, .25); color: #fff; font: 400 .75rem/1.125rem var(--font-sans); font-variant-numeric: tabular-nums; }
+.rl-round-dot { width: .5rem; height: .5rem; border-radius: 50%; background: currentColor; }
+.rl-round-meta { position: absolute; right: .5rem; bottom: .5rem; display: inline-flex; align-items: center; gap: 3px; padding: 0 .375rem; border-radius: .75rem;
+  background: rgba(0, 0, 0, .25); color: #fff; font: 400 .75rem/1.125rem var(--font-sans); }
+.rl-round-meta .rl-status { color: #fff; }

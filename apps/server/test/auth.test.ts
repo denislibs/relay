@@ -202,3 +202,26 @@ test('passkeys: register in settings, sign in without a phone, delete; unknown k
 
   expect((await call(`/settings/passkeys/${auth.id}`, undefined, cookie, 'DELETE')).json.passkeys).toHaveLength(0);
 });
+
+test('login CSRF: every POST /auth/* wants JSON from our own origin', async () => {
+  for (const path of ['/auth/qr', '/auth/passkey/options', '/auth/password/challenge', '/auth/signup']) {
+    const foreign = await fetch(base + path, { method: 'POST', headers: { 'content-type': 'application/json', origin: 'https://evil.example' }, body: '{}' });
+    expect(foreign.status).toBe(400);
+    const form = await fetch(base + path, { method: 'POST', headers: { 'content-type': 'application/x-www-form-urlencoded', origin: base }, body: 'a=1' });
+    expect(form.status).toBe(400);
+  }
+});
+
+test('a login finished with the cloud password posts «new login» to the service chat; sign-up does not', async () => {
+  const { userId, cookie } = await signUp('+79990000050');
+  const notices = async () => (await sql`select count(*)::int as n from messages m join service_chats s on s.chat_id = m.chat_id where s.user_id = ${userId} and m.service_type = 'new_login'`)[0].n as number;
+  expect(await notices()).toBe(0);
+  await call('/settings/password', { next: await makeVerifier('pw') }, cookie, 'PUT');
+  const code = await call('/auth/code', { login: '+79990000050' });
+  const step = await call('/auth/signin', { attemptId: code.json.attemptId, code: code.json.devCode });
+  const ch = (await call('/auth/password/challenge', { pendingId: step.json.pendingId })).json;
+  await call('/auth/password/check', { pendingId: step.json.pendingId, srpId: ch.srpId, ...(await clientProof('pw', ch.salt, ch.B)) });
+  expect(await notices()).toBe(1);
+  const [s] = await sql`select confirmed_at from sessions where user_id = ${userId} order by id desc limit 1`;
+  expect(s.confirmed_at).toBeNull();   // вход по коду (+ пароль) — «Это вы?» на других устройствах
+});

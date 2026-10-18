@@ -7,7 +7,7 @@ import { pushInBackground } from './push';
 type Db = Tx | typeof sql;
 let systemId: Promise<number> | null = null;
 
-/** Системный пользователь «Relay» (строка из миграции 108). Кэшируется на процесс. */
+/** Системный пользователь «Relay» (строка из миграции 109_service). Кэшируется на процесс. */
 export function systemUserId(): Promise<number> {
   return systemId ??= sql`select id from users where system limit 1`.then(([r]) => {
     if (!r) throw new Error('system user missing: run migrations');
@@ -52,4 +52,12 @@ export async function postService(tx: Tx, userId: number, msg: { type: ServiceTy
 /** Web Push служебного сообщения — только после коммита транзакции, в которой был postService. */
 export function pushService(message: Message): void {
   pushInBackground(message);
+}
+
+/** «Новый вход»: устройство, IP и время, совет, что делать, если это не вы; заголовок жирным. */
+export function newLoginMessage(device: string, ip: string | null, at: Date): { body: string; entities: Entity[] } {
+  const when = at.toLocaleString('ru-RU', { day: 'numeric', month: 'long', hour: '2-digit', minute: '2-digit', timeZone: 'UTC' }) + ' UTC';
+  const title = 'Новый вход в аккаунт';
+  const body = `${title}\n\nУстройство: ${device}\nIP: ${ip ?? 'неизвестен'}\nВремя: ${when}\n\nЕсли это были не вы, откройте Настройки → Активные сеансы и завершите этот сеанс.`;
+  return { body, entities: [{ type: 'bold', offset: 0, length: title.length }] };
 }

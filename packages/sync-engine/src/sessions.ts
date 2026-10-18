@@ -8,6 +8,8 @@ import type { Action } from './types';
  */
 export const OP_SESSION = 'session:';
 export const sessionKey = (id: number) => OP_SESSION + id;
+/** Подтверждение («Это вы?») — свой префикс: сеанс в списке не скрывается, просто теряет unconfirmed после sessionsChanged. */
+export const sessionConfirmKey = (id: number) => 'sessionConfirm:' + id;
 export const OP_SESSIONS_OTHERS = 'sessions:others';
 /** Срок автозавершения — в настройках аккаунта (settings.ts), правки схлопываются. */
 export const OP_SESSIONS_TTL = 'sessionsTtl';
@@ -22,7 +24,7 @@ export function sessionsView(list: readonly SessionInfo[], keys: readonly string
   return list.filter((s) => s.current || (!others && !set.has(sessionKey(s.id))));
 }
 
-export type SessionsAction = Extract<Action, { type: 'listSessions' | 'terminateSession' | 'terminateOtherSessions' }>;
+export type SessionsAction = Extract<Action, { type: 'listSessions' | 'terminateSession' | 'confirmSession' | 'terminateOtherSessions' }>;
 export type SessionsList = { sessions: SessionInfo[] } | { offline: true };
 
 export interface SessionsHost {
@@ -45,6 +47,9 @@ export class Sessions {
       }
       case 'terminateSession':
         await this.h.ops.enqueue({ key: sessionKey(a.id), method: 'DELETE', path: `/sessions/${a.id}` });
+        return null;
+      case 'confirmSession':
+        await this.h.ops.enqueue({ key: sessionConfirmKey(a.id), method: 'POST', path: `/sessions/${a.id}/confirm` });
         return null;
       case 'terminateOtherSessions':
         await this.h.ops.enqueue({ key: OP_SESSIONS_OTHERS, method: 'DELETE', path: '/sessions?others=1' });

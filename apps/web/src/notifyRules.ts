@@ -2,6 +2,7 @@
 import { NO_PREVIEW } from '@relay/protocol';
 import type { NotifyState } from './notify';
 import type { Prefs } from './prefs';
+import { shownBody } from './ui/format';
 
 export interface NotifyPref { muted: boolean; preview: boolean }
 
@@ -39,4 +40,13 @@ export const volumePct = (v: number): number => Math.round(v * 100);
 export function notifyText(msg: { title: string; text: string }, o: { preview: boolean; hideText: boolean }): { title: string; body: string } {
   if (o.hideText) return { title: 'Relay', body: NO_PREVIEW };
   return { title: msg.title, body: o.preview ? msg.text : NO_PREVIEW };
+}
+
+export interface IncomingMessage { body: string; kind?: string; attachmentName?: string | null; service?: { type: string } | null }
+
+/** Текст уведомления о входящем: вид вложения и подпись; код входа виден только в самом служебном чате. */
+export function incomingText(m: IncomingMessage): string {
+  const body = shownBody(m);
+  return m.kind === 'voice' ? '🎤 Голосовое сообщение' : m.kind === 'round' ? 'Видеосообщение'
+    : m.kind === 'photo' ? (body ? '🖼 ' + body : 'Фотография') : m.kind === 'file' ? '📎 ' + (body || m.attachmentName || 'Файл') : body;
 }

@@ -6,7 +6,8 @@ import { connectEngine, Mirror, type EngineClient } from '@relay/sync-engine/src
 import type { Action, Item, Patch, Query } from '@relay/sync-engine/src/types';
 import { useEffect, useState } from 'preact/hooks';
 import type { PrivacyKey, PrivacyMode, SessionInfo } from '@relay/protocol';
-import { isSessionOp, sessionsView } from '@relay/sync-engine/src/sessions';
+import { isSessionOp, sessionConfirmKey } from '@relay/sync-engine/src/sessions';
+import { sessionsAfterOps } from './banners';
 import { reducedMotion } from '@relay/ui';
 import { engineConfig } from './engineConfig';
 import { getGlobal, setGlobal, type AccountSettings, type DevSimFlags, type Me } from './global';
@@ -45,8 +46,13 @@ const FAIL_TEXT: Record<string, string> = {
   name_invalid: 'Укажите имя',
   note_too_long: 'Слишком длинная заметка',
   not_found: 'Пользователь не найден в Relay',
+  fresh_session: 'Сначала подтвердите этот вход на другом устройстве',
 };
 export const failText = (code: string): string => FAIL_TEXT[code] ?? 'Не удалось сохранить изменения';
+
+/** Операция над сеансом: завершение (isSessionOp) или подтверждение «Это вы?». */
+const CONFIRM_PREFIX = sessionConfirmKey(0).slice(0, -1);   // 'sessionConfirm:'
+const isSessionKey = (k: string): boolean => isSessionOp(k) || k.startsWith(CONFIRM_PREFIX);
 
 let toastSeq = 0;
 let toastTimer: ReturnType<typeof setTimeout> | null = null;
@@ -106,9 +112,11 @@ export function startSettingsData(me: Me): void {
     opsPending = (opsM.list()[0]?.pending as number | undefined) ?? 0;
     const failures = (opsM.list()[0]?.failures ?? []) as { id: number; key: string; code: string }[];
     const max = failures.reduce((m, f) => Math.max(m, f.id), 0);
+    // операции с сеансами, отклонённые сервером не по not_found: их вид («подтверждён»/«завершён») откатываем сразу
+    const failed = new Set(seen >= 0 ? failures.filter((f) => f.id > seen && isSessionKey(f.key) && f.code !== 'not_found').map((f) => f.key) : []);
     if (seen >= 0) {
-      // сеанс уже завершён (404) — то, чего и хотели: не ошибка
-      const fresh = failures.filter((f) => f.id > seen && !(isSessionOp(f.key) && f.code === 'not_found'));
+      // сеанс уже завершён (404) — то, чего и хотели (или подтверждать уже нечего): не ошибка
+      const fresh = failures.filter((f) => f.id > seen && !(isSessionKey(f.key) && f.code === 'not_found'));
       if (fresh.length) showToast(failText(fresh[fresh.length - 1].code));
     }
     seen = Math.max(seen, max);
@@ -117,18 +125,28 @@ export function startSettingsData(me: Me): void {
     const prev = getGlobal().opsKeys;
     if (keys.join('\n') !== prev.join('\n')) {
       // ушедшее завершение применяем к уже загруженному списку тем же кадром — иначе строка вернулась бы до ответа
-      const gone = prev.filter((k) => isSessionOp(k) && !keys.includes(k));
+      // так же подтверждение («Да, это я»): иначе плашка «Это вы?» вернулась бы на время перезагрузки списка
+      // отказ (кроме not_found) — не применяем: плашка «Это вы?» и строка сеанса возвращаются тем же кадром, без ожидания перезагрузки
+      const gone = prev.filter((k) => isSessionKey(k) && !keys.includes(k));
       const list = getGlobal().sessions;
-      setGlobal({ opsKeys: keys, sessions: gone.length && list ? sessionsView(list, gone) : list });
+      setGlobal({ opsKeys: keys, sessions: gone.length && list ? sessionsAfterOps(list, gone, failed) : list });
       if (gone.length) void loadSessions(true);
     }
   });
 
   // сеанс завершён (с другого устройства или автозавершением): движок уже стёр данные — уходим на вход
   const statusM = new Mirror();
+  let sessionsRev: number | undefined;   // последний виденный sessionsRev; на первом статусе только запоминаем
+  let sessionsPreloaded = false;
   engine.watch({ kind: 'status' }, (p) => {
     statusM.apply(p);
     const st = statusM.list()[0];
+    if (st) {
+      const rev = st.sessionsRev as number | undefined;
+      if (rev !== sessionsRev) { const first = sessionsRev === undefined; sessionsRev = rev; if (!first) void loadSessions(true); }   // журнал: sessionsChanged
+      // плашке «Это вы?» нужен список с первого экрана: грузим, как только появилась сеть (до этого движок ответил бы offline)
+      if (st.online && !sessionsPreloaded) { sessionsPreloaded = true; void loadSessions(true); }
+    }
     // флаги имитатора сети (раздел «Для разработчиков»): плашка во всех вкладках; ссылка не меняется, пока флаги те же
     const sim = (st?.devSim ?? null) as DevSimFlags | null;
     if (JSON.stringify(sim) !== JSON.stringify(getGlobal().devSim)) setGlobal({ devSim: sim });
@@ -154,6 +172,7 @@ export function loadSessions(force = false): Promise<void> {
     .catch(() => { if (gen === sessionsGen) setGlobal({ sessionsOffline: true }); });
 }
 export const terminateSession = (id: number): Promise<unknown> => call({ type: 'terminateSession', id });
+export const confirmSession = (id: number): Promise<unknown> => call({ type: 'confirmSession', id });
 export const terminateOtherSessions = (): Promise<unknown> => call({ type: 'terminateOtherSessions' });
 export const setSessionsTtl = (days: number): Promise<unknown> => call({ type: 'setSessionsTtl', days });
 

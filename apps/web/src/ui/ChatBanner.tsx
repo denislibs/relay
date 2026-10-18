@@ -1,10 +1,10 @@
-import { Avatar, IconButton, Presence, peerTone, plural, ripple } from '@relay/ui';
+import { Avatar, Button, IconButton, Presence, peerTone, plural, ripple } from '@relay/ui';
 import { useEffect, useMemo, useRef, useState } from 'preact/hooks';
-import { dismiss, loadDismissed, pickBanner, saveDismissed, type Banner } from '../banners';
+import { dismiss, loadDismissed, pickBanner, saveDismissed, sessionsSeen, type Banner } from '../banners';
 import { getGlobal, useGlobal } from '../global';
 import { go } from '../nav';
 import { setNotify } from '../notify';
-import { showToast } from '../settingsData';
+import { confirmSession, showToast, terminateSession } from '../settingsData';
 import { openDirect } from './contacts/Contacts';
 
 type Contact = { userId: number; name?: string; birthday?: { day: number; month: number } | null };
@@ -20,6 +20,10 @@ export function ChatBanner() {
   const me = useGlobal((s) => s.me);
   const contacts = useGlobal((s) => s.contacts) as unknown as Contact[];
   const loaded = useGlobal((s) => s.contactsLoaded);
+  // «Это вы?»: ответ уходит в очередь — плашка уходит сразу, не дожидаясь перезагрузки списка (sessionsSeen)
+  const rawSessions = useGlobal((s) => s.sessions);
+  const opsKeys = useGlobal((s) => s.opsKeys);
+  const sessions = useMemo(() => (rawSessions ? sessionsSeen(rawSessions, opsKeys) : null), [rawSessions, opsKeys]);
   const [dismissed, setDismissed] = useState(loadDismissed);
   const [day, setDay] = useState(() => new Date().toDateString());
   // полночь: дни рождения сменились — пересчитываем
@@ -36,8 +40,9 @@ export function ChatBanner() {
     // контакты ещё не пришли — про дни рождения молчим, а не мигаем другой подсказкой
     contacts: contacts.map((c) => ({ userId: c.userId, name: c.name || 'Контакт', birthday: c.birthday ?? null })),
     today: new Date(),
-  }), [notify, dismissed, me, contacts, day]);
-  const ready = loaded || notify === 'default';
+    sessions,
+  }), [notify, dismissed, me, contacts, day, sessions]);
+  const ready = loaded || notify === 'default' || banner?.kind === 'unconfirmed';
   const want = ready ? banner : null;
   // Смена подсказки: прежняя сворачивается, новая раскрывается — текст не меняется посреди анимации
   const [cur, setCur] = useState<Banner | null>(want);
@@ -65,6 +70,7 @@ export function ChatBanner() {
     if (x.kind === 'notify') showToast('Уведомления можно включить в настройках');
   };
   const open = (x: Banner) => {
+    if (x.kind === 'unconfirmed') return;   // только кнопками ответа
     if (x.kind === 'notify') void setNotify(true).then(() => { if (getGlobal().notify !== 'default') close(x); });
     else if (x.kind === 'setBirthday') void go('settings/profile');
     else if (x.people.length === 1) void openDirect(x.people[0].userId);
@@ -76,24 +82,38 @@ export function ChatBanner() {
       {b ? (
         <div class="app-banner-slot">
           <div class="app-banner-clip">
-            <div class="app-banner" role="button" tabIndex={0} onPointerDown={ripple} onClick={() => open(b)} onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); open(b); } }}>
-              {b.kind === 'birthdays' ? (
-                <>
-                  <div class="app-banner-text">
-                    <b>🎉 {b.people.length === 1 ? `Сегодня день рождения у ${b.people[0].name}` : `Сегодня ${b.people.length} ${plural(b.people.length, 'контакт празднует', 'контакта празднуют', 'контактов празднуют')} день рождения`}</b>
-                    <span>{b.people.length === 1 ? 'Напишите поздравление.' : 'Выберите, кого поздравить.'}</span>
-                  </div>
-                  <div class="app-banner-faces" aria-hidden="true">
-                    {b.people.slice(0, 3).map((p) => <Avatar key={p.userId} name={p.name} tone={peerTone(p.userId)} size={28} />)}
-                  </div>
-                </>
-              ) : (
-                <div class="app-banner-text"><b>{TEXT[b.kind].title}</b><span>{TEXT[b.kind].text}</span></div>
-              )}
-              <span class="app-banner-x" onClick={(e) => e.stopPropagation()} onPointerDown={(e) => e.stopPropagation()}>
-                <IconButton icon="close" label="Скрыть" size={18} onClick={() => close(b)} />
-              </span>
-            </div>
+            {b.kind === 'unconfirmed' ? (
+              // без крестика и без клика по всей плашке: закрывается только ответом
+              <div class="app-banner app-banner-alert" role="alert">
+                <div class="app-banner-text">
+                  <b>Кто-то вошёл в ваш аккаунт</b>
+                  <span>{b.session.device}{b.session.ip ? `, IP ${b.session.ip}` : ''}. Это вы?</span>
+                </div>
+                <div class="app-banner-actions">
+                  <Button size="sm" onClick={() => void confirmSession(b.session.id)}>Да, это я</Button>
+                  <Button size="sm" variant="danger" onClick={() => void terminateSession(b.session.id)}>Нет, завершить</Button>
+                </div>
+              </div>
+            ) : (
+              <div class="app-banner" role="button" tabIndex={0} onPointerDown={ripple} onClick={() => open(b)} onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); open(b); } }}>
+                {b.kind === 'birthdays' ? (
+                  <>
+                    <div class="app-banner-text">
+                      <b>🎉 {b.people.length === 1 ? `Сегодня день рождения у ${b.people[0].name}` : `Сегодня ${b.people.length} ${plural(b.people.length, 'контакт празднует', 'контакта празднуют', 'контактов празднуют')} день рождения`}</b>
+                      <span>{b.people.length === 1 ? 'Напишите поздравление.' : 'Выберите, кого поздравить.'}</span>
+                    </div>
+                    <div class="app-banner-faces" aria-hidden="true">
+                      {b.people.slice(0, 3).map((p) => <Avatar key={p.userId} name={p.name} tone={peerTone(p.userId)} size={28} />)}
+                    </div>
+                  </>
+                ) : (
+                  <div class="app-banner-text"><b>{TEXT[b.kind].title}</b><span>{TEXT[b.kind].text}</span></div>
+                )}
+                <span class="app-banner-x" onClick={(e) => e.stopPropagation()} onPointerDown={(e) => e.stopPropagation()}>
+                  <IconButton icon="close" label="Скрыть" size={18} onClick={() => close(b)} />
+                </span>
+              </div>
+            )}
           </div>
         </div>
       ) : null}

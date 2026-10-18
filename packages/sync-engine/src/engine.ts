@@ -295,6 +295,7 @@ export class Engine {
       outbox: [...this.store.outbox.values()].filter((o) => !o.failed).length,
       failed: [...this.store.outbox.values()].filter((o) => o.failed).length,
       ...this.session.status(),
+      sessionsRev: this.store.sessionsRev,   // растёт на sessionsChanged из журнала, переподключении и снимке: интерфейс перечитывает сеансы
       devSim: simFlags(this.dev.sim),   // имитатор сети включён — плашка «Режим разработчика» во всех вкладках
     };
   }
@@ -338,9 +339,10 @@ export class Engine {
   }
 
   /** Загрузка файла: XHR с прогрессом (есть в воркерах браузера), иначе fetch. Ошибка сети — повтор позже. */
-  private upload(clientId: string, blob: Blob, a: { name: string; mime: string; w: number | null; h: number | null }): Promise<{ id: string }> {
+  private upload(clientId: string, blob: Blob, a: { name: string; mime: string; w: number | null; h: number | null; kind?: string; duration?: number | null; waveform?: string | null }): Promise<{ id: string }> {
     const qs = new URLSearchParams({ name: a.name });
     if (a.w && a.h) { qs.set('w', String(a.w)); qs.set('h', String(a.h)); }
+    if (a.kind === 'voice' || a.kind === 'round') { qs.set('kind', a.kind); if (a.duration) qs.set('duration', String(a.duration)); if (a.waveform) qs.set('waveform', a.waveform); }
     const url = `${this.cfg.httpBase}/upload?${qs}`;
     const offline: ReqError = { code: 'offline', retry: true };
     if (typeof XMLHttpRequest === 'undefined') {
@@ -371,6 +373,8 @@ export class Engine {
    *  Пока идёт очистка, `resetting` не даёт стартовать hello/синхронизации/отправке/операциям; идущую работу ждём и при таймауте отказываем. */
   private resetting = false;
   /** hello/poke, пришедшие во время очистки: при отказе проигрываем их, иначе синхронизация встанет до переподключения */
+  /** сколько hello пришло этому экземпляру движка: со второго — переподключение (sessionsRev) */
+  private hellos = 0;
   private skipped: { hello: Extract<ServerFrame, { op: 'hello' }> | null; poke: boolean } = { hello: null, poke: false };
   private async resetLocal(keepOutbox: boolean): Promise<void> {
     if (this.resetting) throw new Error('reset_busy');
@@ -414,7 +418,7 @@ export class Engine {
         if (a.beforeId) qs.set('beforeId', String(a.beforeId));
         const res = await this.http<{ hits: { message: Message; chatTitle: string | null }[]; hasMore: boolean }>(`/search?${qs}`);
         return {
-          hits: res.hits.map(({ message: m, chatTitle }) => ({ chatId: m.chatId, chatTitle: chatTitle ?? this.store.chats.get(m.chatId)?.title ?? null, id: m.id, sort: m.id, senderId: m.senderId, body: m.body, createdAt: m.createdAt })),
+          hits: res.hits.map(({ message: m, chatTitle }) => ({ chatId: m.chatId, chatTitle: chatTitle ?? this.store.chats.get(m.chatId)?.title ?? null, id: m.id, sort: m.id, senderId: m.senderId, body: m.body, createdAt: m.createdAt, ...(m.service ? { service: m.service } : {}) })),
           hasMore: res.hasMore, source: 'server',
         };
       } catch { /* сеть пропала посреди запроса — ищем локально */ }
@@ -425,7 +429,7 @@ export class Engine {
       .filter((m) => m.id != null && !m.deleted && (!a.beforeId || m.id < a.beforeId) && m.body.toLowerCase().includes(needle))
       .sort((x, y) => y.sort - x.sort);
     return {
-      hits: found.slice(0, limit).map((m) => ({ chatId: m.chatId, chatTitle: this.store.chats.get(m.chatId)?.title ?? null, id: m.id!, sort: m.sort, senderId: m.senderId, body: m.body, createdAt: m.createdAt })),
+      hits: found.slice(0, limit).map((m) => ({ chatId: m.chatId, chatTitle: this.store.chats.get(m.chatId)?.title ?? null, id: m.id!, sort: m.sort, senderId: m.senderId, body: m.body, createdAt: m.createdAt, ...(m.service ? { service: m.service } : {}) })),
       hasMore: found.length > limit, source: 'local',
     };
   }
@@ -613,6 +617,13 @@ export class Engine {
         await this.request({ op: 'edit', reqId: '', chatId: a.chatId, id: a.id, body: a.body, entities: a.entities ?? [] });
         return null;
       }
+      case 'listened': {
+        // у себя — сразу (точка гаснет), сервер разнесёт остальным; без сети — повторим при следующем прослушивании
+        this.store.patchMessage(a.chatId, a.id, { listened: true });
+        this.changed();
+        if (this.online) this.run(async () => { await this.request({ op: 'listened', reqId: '', chatId: a.chatId, id: a.id }); });
+        return null;
+      }
       case 'deleteMessage': {
         if (!this.online) throw new Error('offline');
         await this.request({ op: 'delete', reqId: '', chatId: a.chatId, id: a.id });
@@ -642,9 +653,11 @@ export class Engine {
         const clientId = crypto.randomUUID();
         this.lastCreated = Math.max(Date.now(), this.lastCreated + 1);
         await putBlob(this.db, clientId, a.file);
-        const photo = /^image\//.test(a.mime) && !!a.w && !!a.h;
+        const photo = !a.kind && /^image\//.test(a.mime) && !!a.w && !!a.h;
+        const sized = photo || a.kind === 'round';
         this.store.addPending({ clientId, chatId: a.chatId, body: a.body, replyToId: a.replyToId ?? null, createdAt: this.lastCreated, failed: false,
-          attachment: { id: '', kind: photo ? 'photo' : 'file', mime: a.mime, name: a.name, size: a.file.size, w: photo ? a.w! : null, h: photo ? a.h! : null, thumb: a.thumb ?? null } });
+          attachment: { id: '', kind: a.kind ?? (photo ? 'photo' : 'file'), mime: a.mime, name: a.name, size: a.file.size, w: sized ? a.w ?? null : null, h: sized ? a.h ?? null : null, thumb: a.thumb ?? null,
+            ...(a.kind ? { duration: a.duration ?? null, waveform: a.waveform ?? null } : {}) } });
         this.store.setDraft(a.chatId, '');
         await this.store.flush();
         this.changed();
@@ -686,6 +699,7 @@ export class Engine {
       case 'listSessions':
       case 'terminateSession':
       case 'terminateOtherSessions':
+      case 'confirmSession':
         return this.sessions.act(a);
       case 'setSessionsTtl':
         await this.ops.enqueue({ key: OP_SESSIONS_TTL, method: 'PUT', path: '/settings/sessions-ttl', body: { days: a.days } });
@@ -749,6 +763,9 @@ export class Engine {
         if (this.resetting) { this.skipped.hello = f; return; }   // resetLocal пошлёт свой hello сама, а при отказе проиграет этот
         this.dev.counters.serverSeq = f.seq;
         this.holding = true;
+        // переподключение: пока связи не было, sessionsChanged мог уйти мимо (снимок его не несёт) — интерфейс
+        // перечитывает сеансы (плашка «Это вы?»); первое подключение не считаем — там интерфейс грузит список сам
+        if (this.hellos++ > 0) { this.store.sessionsRev++; this.changed(); }
         this.run(async () => {
           // другое поколение базы (сервер пересоздан): старый кэш недействителен целиком
           if (this.store.epoch && f.epoch && this.store.epoch !== f.epoch) { this.dev.log.record('engine', 'epochWipe', { from: this.store.epoch, to: f.epoch }); await this.store.wipe(f.epoch); this.ops.forget(); this.changed(); }
@@ -849,6 +866,7 @@ export class Engine {
             this.contacts.fetch();
             this.blocks.fetch();
             this.fetchSettings();
+            this.store.sessionsRev++;   // снимок пропустил записи журнала, в т.ч. sessionsChanged — список сеансов заново
             await this.loadFirstDialogs();
             this.store.lastSeq = f.op === 'tooLong' ? f.seq : f.to;
             await this.store.flush();

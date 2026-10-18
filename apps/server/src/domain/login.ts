@@ -27,16 +27,21 @@ export function codeMessage(code: string): { body: string; entities: { type: 'co
 /** Нормализованный логин — ключ лимитов: телефон как есть (после trim), имя без «@» и в нижнем регистре. */
 const normalize = (login: string) => { const s = login.trim(); return s.startsWith('+') ? s : s.replace(/^@/, '').toLowerCase(); };
 const MAX_WRONG_PER_HOUR = 15, MAX_PER_IP_HOUR = 30;
+/** burnCodes: серии длиннее — не код, а мусор; окон на сообщение не больше BURN_MAX_WINDOWS (работа ограничена). */
+const BURN_MAX_RUN = 64, BURN_MAX_WINDOWS = 256;
 
 /**
  * Попытка входа: код уходит в служебный чат на устройства, где аккаунт уже открыт.
  * Неизвестный логин отвечает так же: попытка записывается на системного пользователя со случайным хэшем,
  * её код не совпадёт никогда — по ответам нельзя понять, есть ли такой аккаунт (лимит тоже по строке логина).
- * via 'none' — открытых сеансов нет, код доставить некуда (SMS в Relay нет), хэш неугадываемый (кроме DEV_LOGIN).
+ * via всегда 'app': нет открытых сеансов — отвечаем так же, но код никому не доставляется и хэш неугадываемый
+ * (кроме DEV_LOGIN: там реальный хэш и devCode) — иначе ответ выдавал бы, есть ли аккаунт и открыт ли он.
  * Попытки не удаляются при использовании (dead_at) — иначе «запрос → 5 неверных → запрос» обходил бы часовой лимит.
+ * Лимит в час — по строке логина (для любого, в т.ч. неизвестного) и, если логин найден, ещё и по аккаунту:
+ * телефон и @имя одного человека — разные строки, но коды одного аккаунта.
  * ip — адрес запроса; null (вызов изнутри процесса) — без лимита по адресу.
  */
-export async function requestCode(login: string, ip: string | null = null): Promise<{ attemptId: string; via: 'app' | 'none'; length: 5; devCode?: string }> {
+export async function requestCode(login: string, ip: string | null = null): Promise<{ attemptId: string; via: 'app'; length: 5; devCode?: string }> {
   const attemptId = crypto.randomUUID();
   const key = normalize(login);
   const userId = await findUser(login);
@@ -44,7 +49,7 @@ export async function requestCode(login: string, ip: string | null = null): Prom
   const dev = process.env.DEV_LOGIN === '1';
   // запись без привязки к человеку: неавторизованный вызов не должен копить строки бесконечно (час нужен лимитам)
   await sql`delete from login_attempts where created_at < now() - interval '1 day'`;
-  let posted: Message | null = null, code = '', via: 'app' | 'none' = 'app';
+  let posted: Message | null = null, code = '';
   await sql.begin(async (tx) => {
     // замок на логин (и адрес): подсчёт и вставка в одной транзакции, параллельные запросы не обгонят лимит
     await tx`select pg_advisory_xact_lock(hashtext(${'login:' + key}))`;
@@ -55,6 +60,12 @@ export async function requestCode(login: string, ip: string | null = null): Prom
     }
     const [{ n }] = await tx`select count(*)::int as n from login_attempts where login = ${key} and created_at > now() - interval '1 hour'`;
     if (n >= MAX_PER_HOUR) throw new DomainError('flood');
+    if (userId != null) {
+      // порядок замков везде один (логин → адрес → аккаунт) — взаимной блокировки нет
+      await tx`select pg_advisory_xact_lock(hashtext(${'user:' + userId}))`;
+      const [{ n: own }] = await tx`select count(*)::int as n from login_attempts where user_id = ${userId} and created_at > now() - interval '1 hour'`;
+      if (own >= MAX_PER_HOUR) throw new DomainError('flood');
+    }
     const expires = tx`now() + ${CODE_TTL_MIN + ' minutes'}::interval`;
     if (userId == null) {
       // новый номер: регистрация возможна, только если код есть куда доставить — без SMS это лишь dev (devCode)
@@ -64,7 +75,6 @@ export async function requestCode(login: string, ip: string | null = null): Prom
       return;
     }
     const [{ live }] = await tx`select count(*)::int as live from sessions where user_id = ${userId} and expires_at > now()`;
-    via = live ? 'app' : 'none';
     code = String(randomInt(0, 10 ** CODE_LENGTH)).padStart(CODE_LENGTH, '0');
     // некому получить код — реальный хэш хранится только в dev (devCode), иначе его мог бы лишь угадать злоумышленник
     const stored = live || dev ? hash(code) : hash(crypto.randomUUID());
@@ -72,7 +82,7 @@ export async function requestCode(login: string, ip: string | null = null): Prom
     if (live) posted = await postService(tx, userId, { type: 'login_code', ...codeMessage(code) });
   });
   if (posted) pushService(posted);   // push только после коммита
-  return { attemptId, via, length: CODE_LENGTH, ...(dev && code ? { devCode: code } : {}) };
+  return { attemptId, via: 'app', length: CODE_LENGTH, ...(dev && code ? { devCode: code } : {}) };
 }
 
 /**
@@ -108,13 +118,20 @@ export async function signIn(attemptId: string, code: string): Promise<{ userId:
 /**
  * Код появился в исходящем тексте — гасим все такие попытки владельца (защита от «пришлите код из Relay»).
  * Цифры, разбитые пробелами/точками/дефисами, склеиваем; каждое пятизначное окно в серии цифр — кандидат.
+ * Серии длиннее BURN_MAX_RUN цифр пропускаем, кандидатов не больше BURN_MAX_WINDOWS — длинный текст не нагружает сервер.
  */
 export async function burnCodes(tx: Tx, userId: number, text: string): Promise<void> {
   const codes = new Set<string>();
-  for (const run of text.match(/\d(?:[\s.\-]*\d)*/g) ?? []) {
+  const windows = new Set<string>();
+  scan: for (const run of text.match(/\d(?:[\s.\-]*\d)*/g) ?? []) {
     const d = run.replace(/\D/g, '');
-    for (let i = 0; i + CODE_LENGTH <= d.length; i++) codes.add(hash(d.slice(i, i + CODE_LENGTH)));
+    if (d.length > BURN_MAX_RUN) continue;
+    for (let i = 0; i + CODE_LENGTH <= d.length; i++) {
+      windows.add(d.slice(i, i + CODE_LENGTH));
+      if (windows.size >= BURN_MAX_WINDOWS) break scan;
+    }
   }
+  for (const w of windows) codes.add(hash(w));
   if (!codes.size) return;
   await tx`update login_attempts set dead_at = now() where user_id = ${userId} and dead_at is null and code_hash = any(${[...codes]})`;
 }

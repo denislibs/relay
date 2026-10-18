@@ -21,7 +21,7 @@ export interface ChatSummary {
   lastReadId: number;
   unread: number;
   last: Message | null;
-  peer?: { id: number; name: string } | null;
+  peer?: { id: number; name: string; system?: true } | null;
   peerReadUpTo?: number;
 }
 
@@ -32,6 +32,8 @@ export interface ChatSummary {
  * у остальных чатов в памяти лишь последнее сообщение (`chat.last`).
  */
 export class Store {
+  /** счётчик sessionsChanged из журнала (не хранится): по нему интерфейс перечитывает сеансы */
+  sessionsRev = 0;
   chats = new Map<number, LocalChat>();
   outbox = new Map<string, OutboxEntry>();
   pendingReads = new Map<number, number>();
@@ -176,11 +178,13 @@ export class Store {
       case 'messageEdited': return this.patchMessage(u.chatId, u.id, { body: u.body, editedAt: u.editedAt, entities: u.entities ?? [] });
       case 'messageDeleted': return this.patchMessage(u.chatId, u.id, { body: '', deleted: true, reactions: [] });
       case 'reactions': return this.patchMessage(u.chatId, u.id, { reactions: u.reactions });
+      case 'mediaListened': return this.patchMessage(u.chatId, u.id, { listened: true });
       case 'userUpdated': return applyUserUpdated(this, u.user, seq);
       case 'contactsChanged': return applyContactsChanged(this, u, seq);
       case 'settingsChanged': this.settings.apply(u.settings, seq); return;
       case 'privacyChanged': this.settings.applyPrivacy(u.rules, seq); return;
       case 'blocksChanged': return applyBlocksChanged(this, u, seq);
+      case 'sessionsChanged': this.sessionsRev++; return;
     }
   }
 
@@ -200,6 +204,7 @@ export class Store {
       chat.kind = s.kind;
       chat.title = s.title ?? s.peer?.name ?? null;
       chat.peerId = s.peer?.id ?? null;
+      if (s.peer?.system) chat.system = true; else delete chat.system;
       if (s.draft && (!chat.draft || s.draft.at > chat.draft.at) && !this.pendingDrafts.has(s.id)) chat.draft = s.draft;
       chat.named = true;
       if (s.peerReadUpTo && s.peerReadUpTo > chat.peerReadUpTo) this.applyPeerRead(s.id, s.peerReadUpTo);
@@ -232,7 +237,8 @@ export class Store {
       key: m.clientId, clientId: m.clientId, id: m.id, chatId: m.chatId, senderId: m.senderId,
       body: m.body, replyToId: m.replyToId, createdAt: m.createdAt, status, sort: m.id,
       editedAt: m.editedAt ?? null, deleted: !!m.deleted, reactions: m.reactions ?? prev?.reactions ?? [],
-      kind: m.kind ?? 'text', attachment: m.attachment ?? null, entities: m.entities ?? [],
+      kind: m.kind ?? 'text', attachment: m.attachment ?? null, entities: m.entities ?? [], ...(m.listened != null ? { listened: m.listened } : {}),
+      ...(m.service ? { service: m.service } : null),
     };
     if (countUnread && !mine && m.id > chat.lastReadId && m.id > chat.knownMaxId) chat.unread++;
     chat.knownMaxId = Math.max(chat.knownMaxId, m.id);

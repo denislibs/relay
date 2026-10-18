@@ -10,8 +10,25 @@ import {
   challengeFor, type LoginStep,
 } from './domain/password';
 import { acceptQr, createQr, pollQr, qrInfo } from './domain/qrLogin';
+import { announceLogin } from './domain/sessions';
 
 /** Маршруты входа. null — путь не наш. До сеанса — /auth/*, с сеансом — /settings/password|passkeys и подтверждение QR. */
+
+/**
+ * Вход без сеанса ставит cookie — защита от login CSRF: только JSON (простая кросс-сайтовая форма
+ * так не умеет, а fetch с таким типом требует preflight, который мы не разрешаем) и Origin, если он есть, — наш хост.
+ */
+export function signInRequestOk(req: Request): boolean {
+  const type = (req.headers.get('content-type') ?? '').split(';')[0].trim().toLowerCase();
+  if (type !== 'application/json') return false;
+  const origin = req.headers.get('origin');
+  if (origin == null) return true;
+  let host: string;
+  try { host = new URL(origin).host; } catch { return false; }
+  // за доверенным прокси (TRUST_PROXY=1, как у clientIp) Host мог быть переписан — исходный в X-Forwarded-Host
+  const fwd = process.env.TRUST_PROXY === '1' ? req.headers.get('x-forwarded-host')?.split(',')[0].trim() : undefined;
+  return host === (req.headers.get('host') ?? new URL(req.url).host) || (!!fwd && host === fwd);
+}
 
 const body = async (req: Request) => ((await req.json().catch(() => null)) ?? {}) as Record<string, unknown>;
 
@@ -20,12 +37,15 @@ async function reply(step: LoginStep, req: Request, server: Server): Promise<Res
   if (!('session' in step)) return Response.json(step);
   const { userId, confirmed } = step.session;
   const token = await createSession(userId, { req, server }, { confirmed });
+  // «Новый вход» в служебный чат и sessionsChanged (плашка «Это вы?» для неподтверждённых) — для любого входа, кроме регистрации
+  if (!step.session.fresh) await announceLogin(userId, token);
   return Response.json({ userId }, { headers: { 'set-cookie': sessionCookie(token) } });
 }
 
 export async function publicAuthRoute(req: Request, url: URL, server: Server): Promise<Response | null> {
   const p = url.pathname, post = req.method === 'POST';
   if (!p.startsWith('/auth/') && p !== '/dev/codes') return null;
+  if (post && !signInRequestOk(req)) return Response.json({ code: 'bad_frame' }, { status: 400 });
 
   if (req.method === 'GET' && p === '/auth/config') return Response.json({ dev: process.env.DEV_LOGIN === '1' });
   if (req.method === 'GET' && p === '/dev/codes' && process.env.DEV_LOGIN === '1') return Response.json({ items: devOutbox() });
@@ -44,7 +64,7 @@ export async function publicAuthRoute(req: Request, url: URL, server: Server): P
   }
   if (post && p === '/auth/signup') {
     const b = await body(req);
-    return reply({ session: await finishSignup(b.pendingId, b.firstName, b.lastName) }, req, server);
+    return reply({ session: { ...(await finishSignup(b.pendingId, b.firstName, b.lastName)), fresh: true } }, req, server);
   }
   if (post && p === '/auth/password/challenge') return Response.json(await pendingChallenge((await body(req)).pendingId));
   if (post && p === '/auth/password/check') {

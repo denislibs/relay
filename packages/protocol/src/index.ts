@@ -8,7 +8,7 @@ export interface Message {
   chatId: Id;
   senderId: Id;
   clientId: string;
-  kind: 'text' | 'photo' | 'file';
+  kind: 'text' | 'photo' | 'file' | 'voice' | 'round';
   body: string;
   replyToId: Id | null;
   createdAt: string; // ISO
@@ -18,6 +18,7 @@ export interface Message {
   attachment?: Attachment | null;
   service?: { type: ServiceType };   // есть только у служебных сообщений
   entities?: Entity[];   // оформление текста; нет или пусто — простой текст
+  listened?: boolean;    // голосовое/кружок прослушан получателем
 }
 
 /** Оформление куска текста: смещения в единицах UTF-16 (как String.length). Один тип сам с собой не перекрывается. */
@@ -74,7 +75,16 @@ export function trimFormatted(body: string, entities: Entity[]): { text: string;
 }
 
 /** Вложение: фото (знает размеры заранее — лента не прыгает) или файл. thumb — крошечное размытое превью. */
-export interface Attachment { id: string; kind: 'photo' | 'file'; mime: string; name: string; size: number; w: number | null; h: number | null; thumb?: string | null }
+export interface Attachment {
+  id: string; kind: AttachmentKind; mime: string; name: string; size: number; w: number | null; h: number | null; thumb?: string | null;
+  duration?: number | null;   // голосовое и кружок: целые секунды
+  waveform?: string | null;   // голосовое: 63 байта (100 значений по 5 бит, младшие биты первыми) в base64
+}
+export type AttachmentKind = 'photo' | 'file' | 'voice' | 'round';
+/** Кружок: сторона квадрата и предел длительности (как в Telegram). */
+export const ROUND_SIZE = 400;
+export const ROUND_MAX_SECONDS = 60;
+export const WAVEFORM_BYTES = 63;
 
 /** Реакция: кто и какой эмодзи (одна от пользователя на сообщение). */
 export interface Reaction { userId: Id; emoji: string }
@@ -87,6 +97,7 @@ export type Update =
   | { type: 'messageEdited'; chatId: Id; id: Id; body: string; editedAt: string; entities?: Entity[] }
   | { type: 'messageDeleted'; chatId: Id; id: Id }
   | { type: 'reactions'; chatId: Id; id: Id; reactions: Reaction[] }
+  | { type: 'mediaListened'; chatId: Id; id: Id }   // голосовое/кружок прослушали
   | { type: 'userUpdated'; user: PublicUser }   // профиль изменился: себе и всем, кто видит пользователя
   // контакт добавлен/изменён (contact) или удалён (removed + user — как его видно без контакта); только владельцу
   | { type: 'contactsChanged'; contact?: Contact; removed?: Id; user?: PublicUser | null }
@@ -95,7 +106,8 @@ export type Update =
   // правила конфиденциальности изменились: приходят целиком, только владельцу
   | { type: 'privacyChanged'; rules: PrivacyRules }
   // чёрный список: человек заблокирован (blocked) или разблокирован (unblocked); только владельцу
-  | { type: 'blocksChanged'; blocked?: BlockedUser; unblocked?: Id };
+  | { type: 'blocksChanged'; blocked?: BlockedUser; unblocked?: Id }
+  | { type: 'sessionsChanged' };   // список сеансов изменился: новый вход, подтверждение, завершение
 
 /** Тело уведомления/push без предпросмотра: текст сообщения не раскрываем. */
 export const NO_PREVIEW = 'Новое сообщение';
@@ -110,7 +122,7 @@ export interface SettingsSnapshot extends UserSettings { privacy?: PrivacyRules;
 export const SESSION_TTLS: readonly number[] = [7, 30, 90, 180, 365];
 
 /** Сеанс (GET /sessions): устройство — грубо по User-Agent («Chrome 141, macOS»), IP входа; current — этот запрос. */
-export interface SessionInfo { id: Id; device: string; ip: string | null; createdAt: string; lastActiveAt: string; current: boolean; online: boolean }
+export interface SessionInfo { id: Id; device: string; ip: string | null; createdAt: string; lastActiveAt: string; current: boolean; online: boolean; unconfirmed: boolean }
 
 /** Правила конфиденциальности. phoneDiscovery — «Кто найдёт меня по номеру» (только everyone | contacts). */
 export type PrivacyKey = 'phone' | 'phoneDiscovery' | 'lastSeen' | 'bio' | 'birthday';
@@ -179,6 +191,7 @@ export type ClientFrame =
   | { op: 'edit'; reqId: string; chatId: Id; id: Id; body: string; entities?: Entity[] }
   | { op: 'delete'; reqId: string; chatId: Id; id: Id }
   | { op: 'react'; reqId: string; chatId: Id; id: Id; emoji: string | null }
+  | { op: 'listened'; reqId: string; chatId: Id; id: Id }
   | { op: 'ping' };
 
 /** Присутствие собеседника: в сети сейчас или когда был последний раз (ISO).
@@ -215,6 +228,7 @@ export function parseClientFrame(raw: string): ClientFrame | null {
     case 'typing': return int(f.chatId) ? { op: 'typing', chatId: f.chatId } : null;
     case 'edit': return str(f.reqId, 64) && int(f.chatId) && int(f.id) && typeof f.body === 'string' ? { op: 'edit', reqId: f.reqId, chatId: f.chatId, id: f.id, body: f.body, entities: normalizeEntities(f.body, f.entities) } : null;
     case 'delete': return str(f.reqId, 64) && int(f.chatId) && int(f.id) ? { op: 'delete', reqId: f.reqId, chatId: f.chatId, id: f.id } : null;
+    case 'listened': return str(f.reqId, 64) && int(f.chatId) && int(f.id) ? { op: 'listened', reqId: f.reqId, chatId: f.chatId, id: f.id } : null;
     case 'react': return str(f.reqId, 64) && int(f.chatId) && int(f.id) && (f.emoji === null || str(f.emoji, 16)) ? { op: 'react', reqId: f.reqId, chatId: f.chatId, id: f.id, emoji: f.emoji as string | null } : null;
     case 'draft': return str(f.reqId, 64) && int(f.chatId) && typeof f.text === 'string' ? { op: 'draft', reqId: f.reqId, chatId: f.chatId, text: f.text, entities: normalizeEntities(f.text, f.entities) } : null;
     case 'send':

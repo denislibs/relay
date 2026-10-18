@@ -163,6 +163,15 @@ html[data-blur="0"] .app-empty-main .rl-empty, html[data-blur="0"] .app-sidemenu
 .app-session-info { display: grid; grid-template-columns: auto 1fr; gap: 10px 16px; margin: 0; font: 400 15px/20px var(--font-sans); }
 .app-session-info dt { color: var(--ink-muted); }
 .app-session-info dd { margin: 0; text-align: right; overflow-wrap: anywhere; }
+.app-session-new { color: var(--danger); }
+.app-session-note { margin: var(--space-4) 0 0; text-align: center; font: 400 14px/20px var(--font-sans); color: var(--ink-muted); }
+/* недоступно, пока этот вход не подтвердили на другом устройстве; разблокировка — плавно */
+.app-row-lock { transition: opacity 180ms var(--ease-standard); }
+.app-row-off { opacity: .5; pointer-events: none; }
+.app-lock-hint { display: grid; grid-template-rows: 1fr; transition: grid-template-rows 220ms var(--ease-standard), opacity 180ms var(--ease-standard); }
+.app-lock-hint > span { min-height: 0; overflow: hidden; }
+.app-lock-hint-off { grid-template-rows: 0fr; opacity: 0; }
+@media (prefers-reduced-motion: reduce) { .app-row-lock, .app-lock-hint { transition: none; } }
 .rl-settings .rl-inforow-value { animation: app-fade 200ms var(--ease-out) both; }
 /* переход к сообщению — как в Telegram: полоса на всю ширину чата за строкой, проявляется и тает */
 .rl-shell .rl-feed { container-type: inline-size; }   /* 100cqw у полосы = ширина ленты, без горизонтальной прокрутки */
@@ -322,6 +331,12 @@ html[data-blur="0"] .app-empty-main .rl-empty, html[data-blur="0"] .app-sidemenu
 .app-banner-faces > * { margin-left: -8px; box-shadow: 0 0 0 2px var(--field); border-radius: 50%; }
 .app-banner-x { position: absolute; top: 4px; right: 4px; }
 .app-banner-x .rl-iconbtn { width: 32px; height: 32px; color: var(--ink-muted); }
+/* «Это вы?»: не кликается целиком и не закрывается — только кнопки ответа */
+.app-banner-alert { flex-direction: column; align-items: stretch; gap: 8px; padding: 10px 14px 12px; cursor: default; border-left: 3px solid var(--danger); }
+.app-banner-alert:hover { background: var(--field); }
+.app-banner-alert .app-banner-text b { white-space: normal; }
+.app-banner-actions { display: flex; gap: 8px; }
+.app-banner-actions .rl-btn { flex: 1; height: 32px; padding: 0 12px; font-size: 13px; }
 @media (prefers-reduced-motion: reduce) { .app-banner-slot { animation: none; transition: none; } }
 
 /* Стек чатов (как в Telegram Web): колонки лежат друг на друге, на экране — верхняя готовая.
@@ -443,3 +458,8 @@ html[data-anim="0"] .app-chatcol, html[data-anim="0"] .app-chatcol-below, html[d
 .app-qr-frame { position: absolute; inset: 40px; border: 3px solid rgba(255, 255, 255, .85); border-radius: 18px; box-shadow: 0 0 0 999px rgba(0, 0, 0, .35); }
 .app-pw-head h3 { margin: 0; font: 700 20px/26px var(--font-sans); color: var(--ink); }
 .app-passkey-art { display: flex; align-items: center; justify-content: center; width: 104px; height: 104px; border-radius: 50%; background: color-mix(in srgb, var(--brand) 14%, transparent); color: var(--brand-text); animation: auth-grow .4s var(--ease-out); }
+
+/* служебный чат «Relay»: галочка у имени, плашка вместо поля ввода (высота — как у композера, 48 px: лента не прыгает), код копируется кликом */
+.app-verified { display: inline-grid; place-items: center; width: 16px; height: 16px; margin-left: 4px; border-radius: 50%; background: var(--brand-strong); color: var(--bg); vertical-align: -2px; }
+.app-readonly-bar { display: flex; align-items: center; justify-content: center; min-height: 48px; padding: 4px 16px; text-align: center; border-radius: var(--radius-panel); background: var(--glass); box-shadow: var(--shadow-panel); color: var(--ink-muted); font: 400 14px/20px var(--font-sans); }
+.rl-bubble code.rl-code { cursor: pointer; }   /* блок кода (rl-pre) кликом не копируется */

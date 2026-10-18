@@ -9,7 +9,7 @@ import { memo } from 'preact/compat';
 import type { SearchHit } from '@relay/sync-engine/src/types';
 import { go } from '../nav';
 import { isDark } from '../theme';
-import { chatTime, chatTone, snippet } from './format';
+import { chatTime, chatTone, shownBody, snippet } from './format';
 import { applyTheme as setTheme } from '../theme';
 import { previewBody, previewText, previewThumb, type LastMessage } from './preview';
 
@@ -147,7 +147,7 @@ export function Sidebar() {
             <ChatRow
               key={'m' + h.id}
               name={h.chatTitle ?? 'Чат №' + h.chatId}
-              preview={<Highlight text={snippet(h.body, results.q)} query={results.q} />}
+              preview={<Highlight text={snippet(shownBody(h), results.q)} query={results.q} />}
               time={chatTime(h.createdAt)}
               onClick={() => openInner(h.chatId, { id: h.id, sort: h.sort })}   // найденное — поверх открытого чата, «Назад» вернёт к нему
             />

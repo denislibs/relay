@@ -1,4 +1,4 @@
-import type { Birthday, Entity, PrivacyKey, PrivacyMode } from '@relay/protocol';
+import type { Birthday, Entity, PrivacyKey, PrivacyMode, ServiceType } from '@relay/protocol';
 
 export type Status = 'pending' | 'sent' | 'read' | 'failed';
 
@@ -16,15 +16,20 @@ export interface LocalMessage {
   editedAt?: string | null;
   deleted?: boolean;
   reactions?: { userId: number; emoji: string }[];
-  kind?: 'text' | 'photo' | 'file';
+  kind?: 'text' | 'photo' | 'file' | 'voice' | 'round';
   attachment?: LocalAttachment | null;
   entities?: Entity[];    // оформление текста
+  listened?: boolean;     // голосовое/кружок прослушан получателем
   progress?: number;      // загрузка файла 0..1, пока сообщение в очереди
   error?: string;         // почему не отправлено (failed): 'blocked' — собеседник заблокировал отправителя
+  service?: { type: ServiceType };   // служебное сообщение от «Relay»
 }
 
 /** Вложение сообщения; у неотправленного id пустой, пока файл не загружен. */
-export interface LocalAttachment { id: string; kind: 'photo' | 'file'; mime: string; name: string; size: number; w: number | null; h: number | null; thumb?: string | null }
+export interface LocalAttachment {
+  id: string; kind: 'photo' | 'file' | 'voice' | 'round'; mime: string; name: string; size: number; w: number | null; h: number | null; thumb?: string | null;
+  duration?: number | null; waveform?: string | null;   // голосовое и кружок
+}
 
 export interface LocalChat {
   id: number;
@@ -36,6 +41,7 @@ export interface LocalChat {
   peerReadUpTo: number;   // до какого id собеседники прочитали мои сообщения
   historyComplete: boolean;
   peerId: number | null;  // собеседник личного чата
+  system?: true;          // собеседник — системный пользователь «Relay» (служебный чат)
   named: boolean;         // название пришло со снимка (иначе чат узнали из сообщения)
   last: LocalMessage | null;
   lastAt: string;
@@ -125,13 +131,17 @@ export type Action =
   /** завершить сеанс / все другие — через очередь операций */
   | { type: 'terminateSession'; id: number }
   | { type: 'terminateOtherSessions' }
+  /** подтвердить новый вход («Это вы?») — через очередь операций, без оптимистичного вида (список перезагрузит sessionsChanged) */
+  | { type: 'confirmSession'; id: number }
   /** срок автозавершения неактивных сеансов, дней (7 | 30 | 90 | 180 | 365) — через очередь операций */
   | { type: 'setSessionsTtl'; days: number }
   /** стереть локальные данные и взять снимок заново; keepOutbox — не трогать неотправленное */
   | { type: 'resetLocal'; keepOutbox?: boolean }
   /** раздел «Для разработчиков»: имитатор сети и служебные команды (devlog.ts) */
   | DevAction
-  | { type: 'sendFile'; chatId: number; body: string; file: Blob; name: string; mime: string; w?: number | null; h?: number | null; thumb?: string | null; replyToId?: number | null };
+  | { type: 'sendFile'; chatId: number; body: string; file: Blob; name: string; mime: string; w?: number | null; h?: number | null; thumb?: string | null; replyToId?: number | null;
+      kind?: 'voice' | 'round'; duration?: number; waveform?: string | null }
+  | { type: 'listened'; chatId: number; id: number };
 
 /** Медленная сеть: задержка (мс, туда-обратно; на каждое направление — половина), джиттер (мс), потери кадров (%), полоса (Кбит/с, 0 — без ограничения). */
 export interface NetProfile { latency: number; jitter: number; lossPct: number; kbps: number }
@@ -169,5 +179,5 @@ export interface EngineConfig {
 export const PENDING_BASE = 2 ** 52;
 
 /** Результат поиска: сообщение и где оно (для перехода). source — откуда ответ (без сети ищем локально). */
-export interface SearchHit { chatId: number; chatTitle: string | null; id: number; sort: number; senderId: number; body: string; createdAt: string }
+export interface SearchHit { chatId: number; chatTitle: string | null; id: number; sort: number; senderId: number; body: string; createdAt: string; service?: { type: ServiceType } }
 export interface SearchResult { hits: SearchHit[]; hasMore: boolean; source: 'server' | 'local' }

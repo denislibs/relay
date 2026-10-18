@@ -4,10 +4,11 @@ import { sql } from '../src/db';
 import { clientIp, parseDevice } from '../src/device';
 import { getUpdates } from '../src/domain/journal';
 import { resetPresence } from '../src/domain/presence';
-import { setLiveCheckMs, sweepInactive, touchLive } from '../src/domain/sessions';
+import { announceLogin, confirmSession, listSessions, setLiveCheckMs, sweepInactive, terminateOthers, terminateSession, touchLive } from '../src/domain/sessions';
+import { createSession, sessionFromToken } from '../src/auth';
 import { createServer } from '../src/http';
 import { startRealtime } from '../src/realtime';
-import { nextFrame, resetDb } from './helpers';
+import { makeUser, nextFrame, resetDb } from './helpers';
 
 const server = createServer({ port: 0 });
 const stopRealtime = await startRealtime(server);
@@ -58,7 +59,7 @@ test('list shows every own session, the current one first, with device and ip', 
   await login('Борис');
   const l = await list(a2);
   expect(l.length).toBe(2);
-  expect(l[0]).toMatchObject({ current: true, device: 'Safari 18, iOS', online: true });
+  expect(l[0]).toMatchObject({ current: true, device: 'Safari 18, iOS', online: true, unconfirmed: false });
   expect(l[1]).toMatchObject({ current: false, device: 'Chrome 141, macOS' });
   expect(typeof l[0].ip).toBe('string');
   expect(Date.parse(l[0].createdAt)).toBeGreaterThan(0);
@@ -137,12 +138,13 @@ test('TTL: inactive sessions stop working at once and the sweep deletes them; th
   expect(await r.json()).toMatchObject({ sessionsTtlDays: 7, seq: 1 });
   expect((await getUpdates(a1.userId, 0)).items.map((i) => i.update)).toEqual([
     { type: 'settingsChanged', settings: { notify: { direct: { muted: false, preview: true }, group: { muted: false, preview: true } }, sessionsTtlDays: 7 } },
+    { type: 'sessionsChanged' },   // sweep завершил неактивный сеанс
   ]);
   // смена срока сразу завершила неактивный сеанс
   expect((await list(a1)).map((s) => s.id)).toEqual([cur.id]);
   expect((await call(a2, 'GET', '/me')).status).toBe(401);
   // повтор того же значения журнал не трогает
-  expect(await (await call(a1, 'PUT', '/settings/sessions-ttl', { days: 7 })).json()).toMatchObject({ seq: 1 });
+  expect(await (await call(a1, 'PUT', '/settings/sessions-ttl', { days: 7 })).json()).toMatchObject({ seq: 2 });
 
   // неактивный дольше срока не действует ещё до чистки; чистка удаляет его строку
   const a3 = await login('Анна');
@@ -263,4 +265,73 @@ test('DELETE /sessions without others=1 → 400', async () => {
   const a1 = await login('Анна'); await login('Анна');
   expect((await call(a1, 'DELETE', '/sessions')).status).toBe(400);
   expect((await list(a1)).length).toBe(2);
+});
+
+test('new code login: unconfirmed, announced in the service chat, cannot terminate others until confirmed', async () => {
+  const a = await makeUser('Анна');
+  const old = (await sessionFromToken(await createSession(a)))!.sessionId;
+  const newToken = await createSession(a, undefined, { confirmed: false });
+  const fresh = (await sessionFromToken(newToken))!.sessionId;
+  await announceLogin(a, newToken);
+
+  const list = await listSessions(a, old);
+  expect(list.find((s) => s.id === fresh)).toMatchObject({ unconfirmed: true });
+  const [msg] = await sql`select body from messages where service_type = 'new_login' order by id desc limit 1`;
+  expect(msg.body).toContain('Новый вход');
+  const types = (await sql`select type from updates where user_id = ${a} order by seq`).map((r) => r.type);
+  expect(types).toContain('sessionsChanged');
+
+  await expect(terminateSession(a, fresh, old)).rejects.toMatchObject({ code: 'fresh_session' });
+  await expect(terminateOthers(a, fresh)).rejects.toMatchObject({ code: 'fresh_session' });
+  await expect(confirmSession(a, fresh, old)).rejects.toMatchObject({ code: 'fresh_session' });
+  await expect(confirmSession(a, fresh, fresh)).rejects.toMatchObject({ code: 'bad_frame' });   // себя не подтверждают
+  await confirmSession(a, old, fresh);
+  expect((await listSessions(a, old)).find((s) => s.id === fresh)).toMatchObject({ unconfirmed: false });
+  await terminateOthers(a, fresh);   // подтверждённый сеанс снова может завершать другие
+});
+
+test('a week-old unconfirmed session counts as confirmed', async () => {
+  const a = await makeUser('Борис');
+  const t = await createSession(a, undefined, { confirmed: false });
+  const id = (await sessionFromToken(t))!.sessionId;
+  await sql`update sessions set created_at = now() - interval '8 days' where id = ${id}`;
+  expect((await listSessions(a, id))[0]).toMatchObject({ unconfirmed: false });
+});
+
+test('fail closed: the caller session row is gone -> terminate/confirm are rejected', async () => {
+  const a = await makeUser('Вера');
+  const mine = (await sessionFromToken(await createSession(a)))!.sessionId;
+  const other = (await sessionFromToken(await createSession(a)))!.sessionId;
+  await sql`delete from sessions where id = ${mine}`;
+  await expect(terminateOthers(a, mine)).rejects.toMatchObject({ code: 'unauthorized' });
+  await expect(terminateSession(a, mine, other)).rejects.toMatchObject({ code: 'unauthorized' });
+  await expect(confirmSession(a, mine, other)).rejects.toMatchObject({ code: 'unauthorized' });
+  expect((await sql`select 1 from sessions where id = ${other}`).length).toBe(1);
+});
+
+test('unconfirmed session cannot change sessions-ttl (which sweeps others)', async () => {
+  const a = await makeUser('Глеб');
+  const token = await createSession(a, undefined, { confirmed: false });
+  const res = await call({ userId: a, token }, 'PUT', '/settings/sessions-ttl', { days: 7 });
+  expect(res.status).toBe(403);
+  expect((await sql`select 1 from user_settings where user_id = ${a} and sessions_ttl_days = 7`).length).toBe(0);
+});
+
+test('confirming another user\'s session is not_found', async () => {
+  const a = await makeUser('Дана'), b = await makeUser('Егор');
+  const as = (await sessionFromToken(await createSession(a)))!.sessionId;
+  const bs = (await sessionFromToken(await createSession(b)))!.sessionId;
+  await expect(confirmSession(b, bs, as)).rejects.toMatchObject({ code: 'not_found' });
+});
+
+test('sweepInactive and logout emit sessionsChanged', async () => {
+  const a = await makeUser('Жанна');
+  const keep = await createSession(a);
+  const old = (await sessionFromToken(await createSession(a)))!.sessionId;
+  await sql`update sessions set last_active_at = now() - interval '400 days' where id = ${old}`;
+  await sweepInactive(a);
+  const count = async () => (await sql`select count(*)::int as n from updates where user_id = ${a} and type = 'sessionsChanged'`)[0].n as number;
+  expect(await count()).toBe(1);
+  await call({ userId: a, token: keep }, 'POST', '/logout');
+  expect(await count()).toBe(2);
 });

@@ -15,7 +15,8 @@ const RECOVERY_MIN = 10, RECOVERY_TRIES = 5;
 const MAX_HINT = 64, MAX_EMAIL = 254;
 const hashCode = (code: string) => createHash('sha256').update('relay-recovery:' + code).digest('hex');
 
-export type FirstFactor = { userId: number; confirmed: boolean };
+/** fresh — аккаунт только что создан: сообщать о «новом входе» некому. */
+export type FirstFactor = { userId: number; confirmed: boolean; fresh?: boolean };
 export type LoginStep =
   | { session: FirstFactor }
   | { passwordNeeded: true; pendingId: string; hint: string }

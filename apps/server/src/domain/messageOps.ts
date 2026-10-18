@@ -70,3 +70,17 @@ export async function reactMessage(userId: number, chatId: number, id: number, e
     return { reactions };
   });
 }
+
+/** Получатель прослушал голосовое или посмотрел кружок: отметка всем участникам (у отправителя гаснет точка). Повтор — без записи. */
+export async function markListened(userId: number, chatId: number, id: number): Promise<{ changed: boolean }> {
+  return sql.begin(async (tx) => {
+    await assertMember(tx, chatId, userId);
+    const [m] = await tx`select sender_id, kind, deleted, listened from messages where chat_id = ${chatId} and id = ${id} for update`;
+    if (!m || m.deleted) throw new DomainError('not_found', 'message');
+    if (m.kind !== 'voice' && m.kind !== 'round') throw new DomainError('bad_frame', 'not a voice message');
+    if (m.sender_id === userId || m.listened) return { changed: false };   // своё не «прослушивается»
+    await tx`update messages set listened = true where chat_id = ${chatId} and id = ${id}`;
+    await fanOut(tx, await membersOf(tx, chatId), { type: 'mediaListened', chatId, id });
+    return { changed: true };
+  });
+}

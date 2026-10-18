@@ -1,10 +1,10 @@
 import { Button, ChatRowSkeleton, ConfirmDialog, EmptyState, InfoRow, Menu, Modal, PanelHeader, Presence, SelectRow, Section, reducedMotion, useMinVisible } from '@relay/ui';
 import type { SessionInfo } from '@relay/protocol';
-import { sessionsView } from '@relay/sync-engine/src/sessions';
-import { useEffect, useState } from 'preact/hooks';
+import { useEffect, useRef, useState } from 'preact/hooks';
+import { sessionsSeen } from '../../banners';
 import { useGlobal } from '../../global';
 import { back } from '../../nav';
-import { loadSessions, registerPrefetch, setSessionsTtl, terminateOtherSessions, terminateSession } from '../../settingsData';
+import { confirmSession, loadSessions, registerPrefetch, setSessionsTtl, terminateOtherSessions, terminateSession } from '../../settingsData';
 import { fullDateTime, sessionTime } from '../format';
 import { useLeaving } from '../useLeaving';
 import { QrScanner } from '../QrLogin';
@@ -27,6 +27,10 @@ function deviceLook(device: string): { icon: string; tile: Tile } {
   const tile: Tile = /^Chrome/.test(device) ? 'green' : /^(Safari|Edge)/.test(device) ? 'blue' : /^Firefox/.test(device) ? 'orange' : /^(Opera|Яндекс)/.test(device) ? 'red' : 'gray';
   return { icon, tile };
 }
+
+const NEW_LOGIN = <span class="app-session-new">Новый вход — не подтверждён</span>;
+/** Неподтверждённый сеанс не может завершать другие (сервер ответит fresh_session) — не предлагаем. */
+const LOCKED_HINT = 'Доступно после подтверждения входа на другом устройстве';
 
 /** «Активные сеансы»: это устройство, другие сеансы (меню строки и детали), автозавершение неактивных. */
 export function Sessions() {
@@ -51,11 +55,18 @@ export function Sessions() {
     return () => removeEventListener('keydown', onKey, true);
   }, [details]);
 
-  const list = raw ? sessionsView(raw, keys) : null;
+  // подтверждение в очереди — пометка «новый вход» уже снята (как и плашка «Это вы?»)
+  const list = raw ? sessionsSeen(raw, keys) : null;
   const waiting = list == null && !offline;
   const skeleton = useMinVisible(waiting, { delay: 150, min: 600 });
   const current = list?.find((s) => s.current) ?? null;
   const others = list?.filter((s) => !s.current) ?? [];
+  const locked = !!current?.unconfirmed;
+  // подсказку, раз показав, не выдёргиваем: после подтверждения она сворачивается по высоте — строка не прыгает
+  const lockSeen = useRef(false);
+  if (locked) lockSeen.current = true;
+  // детали — по id из живого списка: «Это я» снимает пометку прямо в открытой модалке
+  const shown = details ? list?.find((s) => s.id === details.id) ?? details : null;
   const ms = reducedMotion() ? 0 : 220;
   const rows = useLeaving(others, (s) => String(s.id), ms);
   const allRow = useLeaving(others.length ? ['all'] : [], (k) => k, ms);
@@ -82,10 +93,12 @@ export function Sessions() {
             <div>
               {current ? (
                 <Section title="Это устройство">
-                  <InfoRow {...deviceLook(current.device)} title={current.device} subtitle={(current.ip ? current.ip + ' · ' : '') + 'в сети'} onClick={() => setDetails(current)} />
+                  <InfoRow {...deviceLook(current.device)} title={current.device} subtitle={current.unconfirmed ? NEW_LOGIN : (current.ip ? current.ip + ' · ' : '') + 'в сети'} onClick={() => setDetails(current)} />
                   {allRow.map((r) => (
                     <div key={r.key} class={'app-collapse' + (r.leaving ? ' app-collapse-out' : '')}>
-                      <div><InfoRow icon="logout" danger title="Завершить все другие сеансы" onClick={() => setAskAll(true)} /></div>
+                      <div class={'app-row-lock' + (locked ? ' app-row-off' : '')} aria-disabled={locked ? 'true' : undefined}>
+                        <InfoRow icon="logout" danger title="Завершить все другие сеансы" subtitle={lockSeen.current ? <span class={'app-lock-hint' + (locked ? '' : ' app-lock-hint-off')} aria-hidden={locked ? undefined : 'true'}><span>{LOCKED_HINT}</span></span> : undefined} onClick={locked ? undefined : () => setAskAll(true)} />
+                      </div>
                     </div>
                   ))}
                 </Section>
@@ -95,9 +108,9 @@ export function Sessions() {
                   <div role="list">
                     {rows.map(({ item: s, key, leaving }) => (
                       <div key={key} role="listitem" class={'app-collapse' + (leaving ? ' app-collapse-out' : '')}
-                        onContextMenu={(e) => { e.preventDefault(); if (!leaving) setMenu({ x: e.clientX, y: e.clientY, id: s.id }); }}>
+                        onContextMenu={(e) => { e.preventDefault(); if (!leaving && !locked) setMenu({ x: e.clientX, y: e.clientY, id: s.id }); }}>
                         <div>
-                          <InfoRow {...deviceLook(s.device)} title={s.device} subtitle={s.ip ?? ''} value={s.online ? 'в сети' : sessionTime(s.lastActiveAt)} onClick={() => { if (!leaving) setDetails(s); }} />
+                          <InfoRow {...deviceLook(s.device)} title={s.device} subtitle={s.unconfirmed ? NEW_LOGIN : s.ip ?? ''} value={s.online ? 'в сети' : sessionTime(s.lastActiveAt)} onClick={() => { if (!leaving) setDetails(s); }} />
                         </div>
                       </div>
                     ))}
@@ -105,7 +118,7 @@ export function Sessions() {
                 </Section>
               ) : null}
               <Section title="Автоматически завершать сеансы">
-                <SelectRow label="Если не активен" value={ttl} options={TTL_OPTIONS} onChange={(v: number) => { if (Number(v) !== ttl) void setSessionsTtl(Number(v)); }} />
+                <SelectRow label="Если не активен" value={ttl} options={TTL_OPTIONS} disabled={locked} onChange={(v: number) => { if (Number(v) !== ttl) void setSessionsTtl(Number(v)); }} />
               </Section>
             </div>
           )}
@@ -119,16 +132,21 @@ export function Sessions() {
           </div>
         </>
       ) : null}
-      {details ? (
-        <Modal title={details.device} onClose={() => setDetails(null)} actions={details.current ? null : (
-          <Button variant="danger" onClick={() => end(details.id)}>Завершить сеанс</Button>
+      {shown ? (
+        <Modal title={shown.device} onClose={() => setDetails(null)} actions={shown.current ? null : (
+          <>
+            {shown.unconfirmed ? <Button disabled={locked} onClick={() => void confirmSession(shown.id)}>Это я</Button> : null}
+            <Button variant="danger" disabled={locked} onClick={() => end(shown.id)}>Завершить сеанс</Button>
+          </>
         )}>
           <dl class="app-session-info">
-            <dt>Устройство</dt><dd>{details.device}</dd>
-            <dt>IP</dt><dd>{details.ip ?? '—'}</dd>
-            <dt>Вход</dt><dd>{fullDateTime(details.createdAt)}</dd>
-            <dt>Последняя активность</dt><dd>{details.online ? 'в сети' : fullDateTime(details.lastActiveAt)}</dd>
+            <dt>Устройство</dt><dd>{shown.device}</dd>
+            <dt>IP</dt><dd>{shown.ip ?? '—'}</dd>
+            <dt>Вход</dt><dd>{fullDateTime(shown.createdAt)}</dd>
+            <dt>Последняя активность</dt><dd>{shown.online ? 'в сети' : fullDateTime(shown.lastActiveAt)}</dd>
           </dl>
+          {shown.unconfirmed ? <p class="app-session-note">{NEW_LOGIN}</p> : null}
+          {locked && !shown.current ? <p class="app-session-note">{LOCKED_HINT}</p> : null}
         </Modal>
       ) : null}
       {scan ? <QrScanner onClose={() => setScan(false)} /> : null}
