@@ -158,7 +158,9 @@ export interface Birthday { day: number; month: number; year?: number }
 
 /** Профиль глазами зрителя (скрытые правилами приватности поля сервер не отдаёт). */
 /** Фото профиля: id — 640×640, small — 160×160 (оба — файлы /files/:id), thumb — крошечное размытое превью (data:URL), at — когда поставлено (мс). */
-export interface ProfilePhoto { id: string; small: string; thumb: string; at: number }
+export interface ProfilePhoto { id: string; small: string; thumb: string; at: number; pid?: number; video?: string }
+/** Фото из истории профиля (GET /users/:id/photos): pid — номер в истории; video — видео-аватарка (зацикленная, без звука). */
+export interface UserPhoto { pid: number; id: string; small: string; thumb: string; video?: string; at: number }
 
 export interface PublicUser {
   /** системный пользователь «Relay»: служебные уведомления, ответить нельзя */

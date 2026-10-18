@@ -19,7 +19,7 @@ import { pinMessage, unpinMessage } from './domain/pins';
 import { addProfileMusic, listProfileMusic, removeProfileMusic } from './domain/profileMusic';
 import { journalStats } from './domain/journal';
 import { notifyLatency } from './realtime';
-import { checkUsername, getMe, getUser, setUsername, updateProfile, setPhoto, deletePhoto } from './domain/profile';
+import { checkUsername, getMe, getUser, setUsername, updateProfile, setPhoto, deletePhoto, setMainPhoto, listPhotos } from './domain/profile';
 import { usersByIds } from './domain/users';
 import { subscribe, unsubscribe, vapidKeys, type SubscriptionInput } from './domain/push';
 import { deleteFolder, getSettings, reorderFolders, saveFolder, setNotify, setPrivacy, setSessionsTtl } from './domain/settings';
@@ -130,6 +130,11 @@ export function createServer(opts: { port: number }): Server {
           if (req.method === 'PUT') return Response.json(await setPhoto(userId, await req.json().catch(() => null)));
           if (req.method === 'DELETE') return Response.json(await deletePhoto(userId));
         }
+        const myPhoto = /^\/me\/photos\/(\d{1,15})(\/main)?$/.exec(url.pathname);
+        if (myPhoto && req.method === 'DELETE' && !myPhoto[2]) return Response.json(await deletePhoto(userId, Number(myPhoto[1])));
+        if (myPhoto && req.method === 'PUT' && myPhoto[2]) return Response.json(await setMainPhoto(userId, Number(myPhoto[1])));
+        const photos = /^\/users\/(\d{1,15})\/photos$/.exec(url.pathname);
+        if (photos && req.method === 'GET') return Response.json(await listPhotos(userId, Number(photos[1]), Number(url.searchParams.get('offset') ?? 0) || 0, Number(url.searchParams.get('limit') ?? 50) || 50));
         const music = /^\/users\/(\d{1,15})\/music$/.exec(url.pathname);
         if (req.method === 'GET' && music) return Response.json({ tracks: await listProfileMusic(userId, Number(music[1])) });
         if (req.method === 'POST' && url.pathname === '/me/music') {

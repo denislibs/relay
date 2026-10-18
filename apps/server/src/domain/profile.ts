@@ -1,4 +1,4 @@
-import { normalizeLinks, type Birthday, type Me, type ProfileLink, type ProfilePhoto, type PublicUser } from '@relay/protocol';
+import { normalizeLinks, type Birthday, type Me, type ProfileLink, type ProfilePhoto, type PublicUser, type UserPhoto } from '@relay/protocol';
 import { sql, type Tx } from '../db';
 import { DomainError } from './errors';
 import { appendUpdates } from './journal';
@@ -254,25 +254,76 @@ const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
 /** превью — несколько сотен байт: размытая 16×16; больше — уже не превью, а способ раздуть профиль */
 const THUMB = /^data:image\/(jpeg|webp|png);base64,[A-Za-z0-9+/]{16,4000}={0,2}$/;
 
+type PhotoRow = { pid: number; big: string; small: string; thumb: string; video: string | null; at: Date };
+const photoOf = (r: PhotoRow): ProfilePhoto => ({ id: r.big, small: r.small, thumb: r.thumb, at: new Date(r.at).getTime(), pid: Number(r.pid), ...(r.video ? { video: r.video } : {}) });
+const PHOTO_COLS = sql`id as pid, big::text, small::text, thumb, video::text, created_at as at`;
+
+/** Главное фото после удаления/смены — новейшее из оставшихся (или никакого). */
+async function syncMain(tx: Tx, userId: number, pid?: number): Promise<void> {
+  const [r] = pid
+    ? await tx<PhotoRow[]>`select ${PHOTO_COLS} from user_photos where user_id = ${userId} and id = ${pid}`
+    : await tx<PhotoRow[]>`select ${PHOTO_COLS} from user_photos where user_id = ${userId} order by id desc limit 1`;
+  await tx`update users set photo = ${r ? tx.json(photoOf(r) as never) : null} where id = ${userId}`;
+}
+
 /**
  * Поставить фото: клиент сам обрезал и ужал его до 640 и 160 и загрузил обычной загрузкой (/uploads).
  * Проверяем, что это свои готовые квадратные картинки разумного размера — чужой файл «в профиль» не подсунуть.
+ * video — видео-аватарка (квадратное видео до 1280 и 15 с), тогда big/small — её кадр. Фото попадает в историю и становится главным.
  */
 export async function setPhoto(userId: number, body: unknown): Promise<Me> {
   const bad = () => new DomainError('photo_invalid');
   if (!body || typeof body !== 'object') throw bad();
-  const { id, small, thumb } = body as Record<string, unknown>;
+  const { id, small, thumb, video } = body as Record<string, unknown>;
   if (typeof id !== 'string' || typeof small !== 'string' || id === small || !UUID.test(id) || !UUID.test(small)) throw bad();
   if (typeof thumb !== 'string' || !THUMB.test(thumb)) throw bad();
-  const rows = await sql`select id, width, height from attachments
-    where id = any(${[id, small]}::uuid[]) and owner_id = ${userId} and status = 'ready' and mime like 'image/%'`;
-  const side = (x: string) => { const r = rows.find((a) => a.id === x); return r && r.width === r.height ? Number(r.width) : 0; };
+  if (video !== undefined && (typeof video !== 'string' || !UUID.test(video) || video === id || video === small)) throw bad();
+  const ids = video ? [id, small, video as string] : [id, small];
+  const rows = await sql`select id, width, height, mime, duration from attachments
+    where id = any(${ids}::uuid[]) and owner_id = ${userId} and status = 'ready'`;
+  const row = (x: string) => rows.find((a) => a.id === x);
+  const side = (x: string) => { const r = row(x); return r && /^image\//.test(r.mime as string) && r.width === r.height ? Number(r.width) : 0; };
   const b = side(id), s = side(small);
   if (b < 160 || b > 1280 || s < 48 || s > 320) throw bad();
-  const photo: ProfilePhoto = { id, small, thumb, at: Date.now() };
-  return save(userId, async (tx) => { await tx`update users set photo = ${tx.json(photo as never)} where id = ${userId}`; });
+  if (video) {
+    const v = row(video as string);
+    if (!v || !/^video\/(mp4|webm)/.test(v.mime as string) || !v.width || v.width !== v.height || Number(v.width) > 1280 || Number(v.duration ?? 0) > 15) throw bad();
+  }
+  return save(userId, async (tx) => {
+    const [r] = await tx<PhotoRow[]>`insert into user_photos (user_id, big, small, thumb, video)
+      values (${userId}, ${id}, ${small}, ${thumb}, ${(video as string | undefined) ?? null}) returning ${PHOTO_COLS}`;
+    await tx`update users set photo = ${tx.json(photoOf(r) as never)} where id = ${userId}`;
+  });
 }
 
-export async function deletePhoto(userId: number): Promise<Me> {
-  return save(userId, async (tx) => { await tx`update users set photo = null where id = ${userId}`; });
+/** Удалить фото из истории (без pid — главное). Было главным — главным становится следующее. */
+export async function deletePhoto(userId: number, pid?: number): Promise<Me> {
+  return save(userId, async (tx, cur) => {
+    const target = pid ?? cur.photo?.pid;
+    if (target) await tx`delete from user_photos where user_id = ${userId} and id = ${target}`;
+    else await tx`update users set photo = null where id = ${userId}`;   // фото без истории (до миграции) — просто снять
+    if (target && (!cur.photo || cur.photo.pid === target)) await syncMain(tx, userId);
+  });
+}
+
+/** Сделать фото из истории главным. */
+export async function setMainPhoto(userId: number, pid: number): Promise<Me> {
+  return save(userId, async (tx) => {
+    const [r] = await tx`select 1 from user_photos where user_id = ${userId} and id = ${pid}`;
+    if (!r) throw new DomainError('not_found');
+    await syncMain(tx, userId, pid);
+  });
+}
+
+/** История фото профиля для зрителя: главное первым, дальше новые сверху. Заблокированному и без доступа к профилю — пусто/404. */
+export async function listPhotos(viewer: number, userId: number, offset = 0, limit = 50): Promise<{ photos: UserPhoto[]; total: number }> {
+  if (!(await canView(sql, viewer, userId))) throw new DomainError('not_found');
+  const [blk] = await sql`select 1 from blocks where owner_id = ${userId} and user_id = ${viewer}`;
+  if (blk) return { photos: [], total: 0 };
+  const [u] = await sql`select (photo->>'pid')::bigint as main from users where id = ${userId}`;
+  const main = u?.main != null ? Number(u.main) : 0;
+  const rows = await sql<PhotoRow[]>`select ${PHOTO_COLS} from user_photos where user_id = ${userId}
+    order by (id = ${main}) desc, id desc offset ${Math.max(0, offset)} limit ${Math.min(100, Math.max(1, limit))}`;
+  const [c] = await sql`select count(*)::int as n from user_photos where user_id = ${userId}`;
+  return { photos: rows.map((r) => { const p = photoOf(r); return { pid: p.pid!, id: p.id, small: p.small, thumb: p.thumb, at: p.at, ...(p.video ? { video: p.video } : {}) }; }), total: c.n as number };
 }
