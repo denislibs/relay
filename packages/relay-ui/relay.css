@@ -1224,23 +1224,26 @@ button.rl-tab:hover { color: var(--ink); }
 
 .rl-tf { padding: var(--space-2) var(--space-6) 0; }
 .rl-tf-box { position: relative; }
-.rl-tf-input { display: block; width: 100%; box-sizing: border-box; min-height: 54px; padding: 15px 40px 15px 15px; border: 1px solid var(--outline); border-radius: var(--radius-md); background: transparent; color: var(--ink); font: 400 16px/22px var(--font-sans); outline: 0; resize: none; transition: border-color var(--dur-fast) var(--ease-out), box-shadow var(--dur-fast) var(--ease-out); }
+.rl-tf { --tf-line: color-mix(in srgb, var(--ink) 14%, transparent); }
+.rl-tf-input { display: block; width: 100%; box-sizing: border-box; min-height: 54px; padding: 15px 40px 15px 16px; border: 1px solid var(--tf-line); border-radius: 16px; background: transparent; color: var(--ink); font: 400 16px/22px var(--font-sans); outline: 0; resize: none; transition: border-color var(--dur-fast) var(--ease-out), box-shadow var(--dur-fast) var(--ease-out); }
 /* поле как в Telegram Web: подпись внутри, при фокусе или с текстом уезжает на рамку и «разрывает» её
    (под подписью — фон того, на чём лежит поле: --tf-bg); фокус — рамка толще и фирменного цвета, без свечения */
-.rl-tf-input:hover:not(:focus):not(:disabled) { border-color: color-mix(in srgb, var(--ink) 38%, transparent); }
-.rl-tf-input:focus { border-color: var(--brand-strong); box-shadow: inset 0 0 0 1px var(--brand-strong); }
-.rl-tf-label { position: absolute; left: 11px; top: 16px; max-width: calc(100% - 60px); padding: 0 4px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font: 400 16px/22px var(--font-sans); color: var(--ink-muted); background: var(--tf-bg, var(--card)); border-radius: 4px; pointer-events: none; transform-origin: left center; transition: transform var(--dur-base) cubic-bezier(.2, .8, .2, 1), color var(--dur-fast) var(--ease-out); }
+.rl-tf-input:hover:not(:focus):not(:disabled) { border-color: color-mix(in srgb, var(--ink) 28%, transparent); }
+.rl-tf-input:focus { border-color: var(--brand-strong); box-shadow: inset 0 0 0 .5px var(--brand-strong); }
+.rl-tf-label { position: absolute; left: 12px; top: 16px; max-width: calc(100% - 60px); padding: 0 4px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font: 400 16px/22px var(--font-sans); color: var(--ink-muted); background: var(--tf-bg, var(--card)); border-radius: 4px; pointer-events: none; transform-origin: left center; transition: transform var(--dur-base) cubic-bezier(.2, .8, .2, 1), color var(--dur-fast) var(--ease-out); }
 .rl-tf-input:focus + .rl-tf-label, .rl-tf-input:not(:placeholder-shown) + .rl-tf-label { transform: translateY(-27px) scale(.8); }
 .rl-tf-input:focus + .rl-tf-label { color: var(--brand-text); }
 .rl-tf-count { position: absolute; right: 12px; top: 17px; font: 400 14px/20px var(--font-sans); color: var(--ink-muted); font-variant-numeric: tabular-nums; pointer-events: none; }
 .rl-tf-count-low { color: var(--danger); }
-.rl-tf-error .rl-tf-input, .rl-tf-error .rl-tf-input:hover { border-color: var(--danger); box-shadow: inset 0 0 0 1px var(--danger); }
+.rl-tf-error .rl-tf-input, .rl-tf-error .rl-tf-input:hover { border-color: var(--danger); box-shadow: inset 0 0 0 .5px var(--danger); }
 .rl-tf-error .rl-tf-box { animation: rl-tf-shake 320ms cubic-bezier(.36, .07, .19, .97); }   /* ошибка появилась — поле вздрагивает */
 @keyframes rl-tf-shake { 20%, 60% { transform: translateX(-5px); } 40%, 80% { transform: translateX(5px); } }
 .rl-tf-error .rl-tf-label, .rl-tf-error .rl-tf-input:focus + .rl-tf-label { color: var(--danger); }
 .rl-tf-msg { min-height: 20px; padding: 2px 14px 0; font: 400 13px/18px var(--font-sans); color: var(--ink-muted); }
 .rl-tf-error .rl-tf-msg { color: var(--danger); }
-.rl-tf-multi .rl-tf-input { padding-top: 15px; }
+.rl-tf-multi .rl-tf-input { padding-top: 15px; padding-right: 16px; }
+/* счётчик многострочного поля — на нижней рамке справа, как в Telegram */
+.rl-tf-multi .rl-tf-count { top: auto; bottom: -10px; right: 14px; padding: 0 4px; font-size: 13px; line-height: 18px; background: var(--tf-bg, var(--card)); }
 /* фон под подписью на рамке — фон того, на чём лежит поле */
 .rl-sect-card { --tf-bg: var(--card); }
 .rl-mdl-dialog { --tf-bg: var(--raised); }
@@ -1746,3 +1749,4 @@ html[data-blur="0"] .rl-menu, html[data-blur="0"] .rl-attach { -webkit-backdrop-
 .rl-viewer-box .rl-viewer-loop { object-fit: cover; }
 .rl-viewer-top .rl-viewer-danger:hover { color: #ff6b6b; }
 .rl-sr-only { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
+.rl-tf-multi .rl-tf-msg { padding-top: 8px; }   /* под счётчиком на рамке */
