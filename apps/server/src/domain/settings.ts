@@ -1,4 +1,4 @@
-import { SESSION_TTLS, type NotifyPref, type NotifyType, type SettingsSnapshot, type UserSettings } from '@relay/protocol';
+import { folderError, normalizeFolder, normalizeFolders, FOLDER_LIMITS, SESSION_TTLS, type ChatFolder, type NotifyPref, type NotifyType, type SettingsSnapshot, type UserSettings } from '@relay/protocol';
 import { sql, type Tx } from '../db';
 import { DomainError } from './errors';
 import { appendUpdates } from './journal';
@@ -10,7 +10,7 @@ export const NOTIFY_TYPES: readonly NotifyType[] = ['direct', 'group'];
 const DEFAULT_TTL = 180;
 export const defaultNotify = (): Record<NotifyType, NotifyPref> => ({ direct: { muted: false, preview: true }, group: { muted: false, preview: true } });
 
-type Row = { notify: Partial<Record<NotifyType, Partial<NotifyPref>>> | null; sessions_ttl_days: number };
+type Row = { notify: Partial<Record<NotifyType, Partial<NotifyPref>>> | null; sessions_ttl_days: number; folders?: unknown };
 
 /** Из строки (или её отсутствия) — полные настройки: недостающее добирается умолчаниями. */
 function shape(r?: Row): UserSettings {
@@ -20,12 +20,12 @@ function shape(r?: Row): UserSettings {
     if (typeof v?.muted === 'boolean') n[t].muted = v.muted;
     if (typeof v?.preview === 'boolean') n[t].preview = v.preview;
   }
-  return { notify: n, sessionsTtlDays: r?.sessions_ttl_days ?? DEFAULT_TTL };
+  return { notify: n, sessionsTtlDays: r?.sessions_ttl_days ?? DEFAULT_TTL, folders: normalizeFolders(r?.folders) };
 }
 
 /** Полный снимок настроек (с правилами приватности) в транзакции: любой ответ — состояние «на seq» целиком. */
 async function snapshot(tx: Tx, userId: number): Promise<SettingsSnapshot> {
-  const [r] = await tx<Row[]>`select notify, sessions_ttl_days from user_settings where user_id = ${userId}`;
+  const [r] = await tx<Row[]>`select notify, sessions_ttl_days, folders from user_settings where user_id = ${userId}`;
   return { ...shape(r), privacy: await getRules(tx, userId), seq: await selfSeq(tx, userId) };
 }
 
@@ -85,7 +85,7 @@ export async function setNotify(userId: number, type: unknown, patch: unknown): 
   const t = type as NotifyType;
   return sql.begin(async (tx) => {
     await tx`insert into user_settings (user_id) values (${userId}) on conflict (user_id) do nothing`;
-    const [cur] = await tx<Row[]>`select notify, sessions_ttl_days from user_settings where user_id = ${userId} for update`;
+    const [cur] = await tx<Row[]>`select notify, sessions_ttl_days, folders from user_settings where user_id = ${userId} for update`;
     const settings = shape(cur);
     const before = JSON.stringify(settings);
     if (muted !== undefined) settings.notify[t].muted = muted;
@@ -104,7 +104,7 @@ export async function setSessionsTtl(userId: number, body: unknown): Promise<Set
   if (typeof days !== 'number' || !SESSION_TTLS.includes(days)) throw new DomainError('bad_frame');
   return sql.begin(async (tx) => {
     await tx`insert into user_settings (user_id) values (${userId}) on conflict (user_id) do nothing`;
-    const [cur] = await tx<Row[]>`select notify, sessions_ttl_days from user_settings where user_id = ${userId} for update`;
+    const [cur] = await tx<Row[]>`select notify, sessions_ttl_days, folders from user_settings where user_id = ${userId} for update`;
     const settings = shape(cur);
     if (settings.sessionsTtlDays !== days) {
       settings.sessionsTtlDays = days;
@@ -113,4 +113,57 @@ export async function setSessionsTtl(userId: number, body: unknown): Promise<Set
     }
     return snapshot(tx, userId);
   }) as Promise<SettingsSnapshot>;
+}
+
+/**
+ * Правка списка папок одной транзакцией: строка под замком, новое значение из прежнего, settingsChanged себе
+ * только если правда изменилось. Ответ — снимок (база для оптимистичного вида движка).
+ */
+async function editFolders(userId: number, fn: (folders: ChatFolder[]) => ChatFolder[]): Promise<SettingsSnapshot> {
+  return sql.begin(async (tx) => {
+    await tx`insert into user_settings (user_id) values (${userId}) on conflict (user_id) do nothing`;
+    const [cur] = await tx<Row[]>`select notify, sessions_ttl_days, folders from user_settings where user_id = ${userId} for update`;
+    const settings = shape(cur);
+    const next = fn(settings.folders);
+    if (JSON.stringify(next) !== JSON.stringify(settings.folders)) {
+      settings.folders = next;
+      await tx`update user_settings set folders = ${tx.json(next as never)}, updated_at = now() where user_id = ${userId}`;
+      await appendUpdates(tx, [{ userId, update: { type: 'settingsChanged', settings } }]);
+    }
+    return snapshot(tx, userId);
+  }) as Promise<SettingsSnapshot>;
+}
+
+/** Создать или изменить папку (PUT /settings/folders/:id). Новая встаёт в конец; больше лимита — folders_limit. */
+export async function saveFolder(userId: number, id: number, body: unknown): Promise<SettingsSnapshot> {
+  const f = normalizeFolder({ ...(body && typeof body === 'object' ? body : {}), id });
+  if (!f) throw new DomainError('bad_frame');
+  const err = folderError(f);
+  if (err) throw new DomainError(err);
+  return editFolders(userId, (folders) => {
+    const i = folders.findIndex((x) => x.id === id);
+    if (i >= 0) return folders.map((x, k) => (k === i ? f : x));
+    if (folders.length >= FOLDER_LIMITS.folders) throw new DomainError('folders_limit');
+    return [...folders, f];
+  });
+}
+
+/** Удалить папку (DELETE /settings/folders/:id). Нет такой — ничего не меняется (повтор удаления не ошибка). */
+export function deleteFolder(userId: number, id: number): Promise<SettingsSnapshot> {
+  return editFolders(userId, (folders) => folders.filter((x) => x.id !== id));
+}
+
+/**
+ * Порядок папок (PUT /settings/folders/order { ids }). Неизвестные id отбрасываются, забытые встают в конец
+ * в прежнем порядке — порядок с устройства, не знавшего о новой папке, её не теряет.
+ */
+export function reorderFolders(userId: number, body: unknown): Promise<SettingsSnapshot> {
+  const raw = (body as { ids?: unknown } | null)?.ids;
+  if (!Array.isArray(raw)) throw new DomainError('bad_frame');
+  return editFolders(userId, (folders) => {
+    const byId = new Map(folders.map((f) => [f.id, f]));
+    const out: ChatFolder[] = [];
+    for (const x of raw) { const f = typeof x === 'number' ? byId.get(x) : undefined; if (f) { out.push(f); byId.delete(x as number); } }
+    return [...out, ...folders.filter((f) => byId.has(f.id))];
+  });
 }

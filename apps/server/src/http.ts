@@ -17,11 +17,11 @@ import { notifyLatency } from './realtime';
 import { checkUsername, getMe, getUser, setUsername, updateProfile } from './domain/profile';
 import { usersByIds } from './domain/users';
 import { subscribe, unsubscribe, vapidKeys, type SubscriptionInput } from './domain/push';
-import { getSettings, setNotify, setPrivacy, setSessionsTtl } from './domain/settings';
+import { deleteFolder, getSettings, reorderFolders, saveFolder, setNotify, setPrivacy, setSessionsTtl } from './domain/settings';
 import { publicAuthRoute, privateAuthRoute } from './authRoutes';
 import { addContact, blockUser, listBlocked, listContacts, removeContact, resolveUser, unblockUser, updateContact } from './domain/contacts';
 
-const STATUS: Record<string, number> = { bad_frame: 400, too_long: 400, username_invalid: 400, username_reserved: 400, username_taken: 409, bio_too_long: 400, note_too_long: 400, name_invalid: 400, birthday_invalid: 400, links_invalid: 400, unauthorized: 401, not_member: 403, blocked: 403, not_found: 404, code_invalid: 400, code_expired: 400, flood: 429, fresh_session: 403, password_invalid: 400, password_missing: 400, recovery_unavailable: 400, email_invalid: 400, qr_expired: 400, passkey_not_found: 404, passkey_invalid: 400, forbidden: 403 };
+const STATUS: Record<string, number> = { bad_frame: 400, too_long: 400, username_invalid: 400, username_reserved: 400, username_taken: 409, bio_too_long: 400, note_too_long: 400, name_invalid: 400, birthday_invalid: 400, links_invalid: 400, folder_title: 400, folder_empty: 400, folder_too_many_chats: 400, folder_emoji: 400, folders_limit: 400, unauthorized: 401, not_member: 403, blocked: 403, not_found: 404, code_invalid: 400, code_expired: 400, flood: 429, fresh_session: 403, password_invalid: 400, password_missing: 400, recovery_unavailable: 400, email_invalid: 400, qr_expired: 400, passkey_not_found: 404, passkey_invalid: 400, forbidden: 403 };
 const fail = (code: string) => Response.json({ code }, { status: STATUS[code] ?? 500 });
 
 /** checkedAt — когда сокет последний раз отмечал активность и проверял свой сеанс (domain/sessions.checkSocket). */
@@ -130,6 +130,10 @@ export function createServer(opts: { port: number }): Server {
         if (contact && req.method === 'PATCH') return Response.json(await updateContact(userId, Number(contact[1]), await req.json().catch(() => null)));
         if (contact && req.method === 'DELETE') return Response.json(await removeContact(userId, Number(contact[1]), publish));
         if (req.method === 'GET' && url.pathname === '/settings') return Response.json(await getSettings(userId));
+        if (req.method === 'PUT' && url.pathname === '/settings/folders/order') return Response.json(await reorderFolders(userId, await req.json().catch(() => null)));
+        const folder = /^\/settings\/folders\/(\d{1,7})$/.exec(url.pathname);
+        if (folder && req.method === 'PUT') return Response.json(await saveFolder(userId, Number(folder[1]), await req.json().catch(() => null)));
+        if (folder && req.method === 'DELETE') return Response.json(await deleteFolder(userId, Number(folder[1])));
         const notifyType = /^\/settings\/notify\/([a-z]{1,16})$/.exec(url.pathname);
         if (req.method === 'PUT' && notifyType) return Response.json(await setNotify(userId, notifyType[1], await req.json().catch(() => null)));
         const privacyKey = /^\/privacy\/([a-zA-Z]{1,16})$/.exec(url.pathname);

@@ -7,7 +7,7 @@ import type { Item } from './types';
 import { Store, type ChatSummary } from './store';
 import { WsTransport } from './transport';
 import { loadOps, Ops, type PendingOp } from './ops';
-import { isNotifyOp, normalizeRule, notifyKey, privacyKey, settingsItem, settingsView } from './settings';
+import { folderKey, isNotifyOp, normalizeRule, notifyKey, OP_FOLDERS_ORDER, privacyKey, settingsItem, settingsView } from './settings';
 import { applyUserUpdated, meItem, meView, OP_LINKS, OP_PROFILE, OP_USERNAME, userItem } from './profile';
 import { OP_SESSIONS_TTL, Sessions } from './sessions';
 import { SessionEnd } from './session';
@@ -523,7 +523,7 @@ export class Engine {
     if (isNotifyOp(op)) {
       // ответ — новая база: иначе между уходом операции из очереди и записью журнала переключатель мигнул бы
       const v = value as (SettingsSnapshot) | null;
-      if (v?.notify && this.store.settings.apply({ notify: v.notify, sessionsTtlDays: v.sessionsTtlDays, privacy: v.privacy }, v.seq)) this.run(() => this.store.flush());
+      if (v?.notify && this.store.settings.apply({ notify: v.notify, sessionsTtlDays: v.sessionsTtlDays, folders: v.folders, privacy: v.privacy }, v.seq)) this.run(() => this.store.flush());
       return;
     }
     if ((op.key === OP_PROFILE || op.key === OP_USERNAME || op.key === OP_LINKS) && value && typeof value === 'object' && (value as Me).userId === this.cfg.userId) {
@@ -535,7 +535,7 @@ export class Engine {
   private fetchSettings(): void {
     this.run(async () => {
       const r = await this.http<SettingsSnapshot>('/settings');
-      if (!this.store.settings.apply({ notify: r.notify, sessionsTtlDays: r.sessionsTtlDays, privacy: r.privacy }, r.seq)) return;
+      if (!this.store.settings.apply({ notify: r.notify, sessionsTtlDays: r.sessionsTtlDays, folders: r.folders, privacy: r.privacy }, r.seq)) return;
       await this.store.flush();
       this.changed();
     });
@@ -715,6 +715,17 @@ export class Engine {
         return this.sessions.act(a);
       case 'setSessionsTtl':
         await this.ops.enqueue({ key: OP_SESSIONS_TTL, method: 'PUT', path: '/settings/sessions-ttl', body: { days: a.days } });
+        return null;
+      case 'saveFolder': {
+        const { id, ...body } = a.folder;
+        await this.ops.enqueue({ key: folderKey(id), method: 'PUT', path: `/settings/folders/${id}`, body });
+        return null;
+      }
+      case 'deleteFolder':
+        await this.ops.enqueue({ key: folderKey(a.id), method: 'DELETE', path: `/settings/folders/${a.id}` });
+        return null;
+      case 'reorderFolders':
+        await this.ops.enqueue({ key: OP_FOLDERS_ORDER, method: 'PUT', path: '/settings/folders/order', body: { ids: a.ids } });
         return null;
       case 'addContact':
       case 'updateContact':

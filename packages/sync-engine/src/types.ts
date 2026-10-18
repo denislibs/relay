@@ -1,4 +1,4 @@
-import type { Birthday, Entity, PrivacyKey, PrivacyMode, ProfileLink, ServiceType } from '@relay/protocol';
+import type { Birthday, ChatFolder, Entity, PrivacyKey, PrivacyMode, ProfileLink, ServiceType } from '@relay/protocol';
 
 export type Status = 'pending' | 'sent' | 'read' | 'failed';
 
@@ -136,6 +136,10 @@ export type Action =
   | { type: 'confirmSession'; id: number }
   /** срок автозавершения неактивных сеансов, дней (7 | 30 | 90 | 180 | 365) — через очередь операций */
   | { type: 'setSessionsTtl'; days: number }
+  /** папки с чатами: создать/изменить (folder без id — берётся из id), удалить, порядок; оптимистично через очередь */
+  | { type: 'saveFolder'; folder: ChatFolder }
+  | { type: 'deleteFolder'; id: number }
+  | { type: 'reorderFolders'; ids: number[] }
   /** стереть локальные данные и взять снимок заново; keepOutbox — не трогать неотправленное */
   | { type: 'resetLocal'; keepOutbox?: boolean }
   /** раздел «Для разработчиков»: имитатор сети и служебные команды (devlog.ts) */

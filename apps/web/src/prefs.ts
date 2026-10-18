@@ -25,6 +25,7 @@ export interface Prefs {
   screen: { blur: boolean; blurDelay: number; hideChatInTitle: boolean; hideUnreadInTitle: boolean; hideNotifyText: boolean };
   media: { keepDays: number; maxMb: number };   // кэш вложений: 0 — без срока / без лимита
   dev: { enabled: boolean };
+  folders: { position: 'top' | 'left' };   // вкладки папок: полосой над списком или колонкой слева
 }
 
 export interface KV { getItem(k: string): string | null; setItem(k: string, v: string): void; removeItem(k: string): void }
@@ -50,6 +51,7 @@ export function defaultPrefs(reduced = false): Prefs {
     screen: { blur: false, blurDelay: 0, hideChatInTitle: false, hideUnreadInTitle: false, hideNotifyText: false },
     media: { keepDays: 30, maxMb: 0 },
     dev: { enabled: false },
+    folders: { position: 'top' },
   };
 }
 
@@ -94,6 +96,7 @@ function sanitize(src: Prefs, d: Prefs): Prefs {
   if (!THEMES.includes(p.theme)) p.theme = d.theme;
   if (!ACCENT_IDS.includes(p.accent)) p.accent = d.accent;
   if (p.sendKey !== 'enter' && p.sendKey !== 'ctrlEnter') p.sendKey = d.sendKey;
+  if (p.folders.position !== 'top' && p.folders.position !== 'left') p.folders.position = d.folders.position;
   if (p.timeFormat !== '12h' && p.timeFormat !== '24h') p.timeFormat = null;
   if (![0, 1, 2].includes(p.anim.level)) p.anim.level = d.anim.level;
   p.textSize = Math.min(20, Math.max(12, Math.round(num(p.textSize, d.textSize))));

@@ -1,5 +1,7 @@
 import type { ProfileLink } from './links';
 export * from './links';
+export * from './folders';
+import type { ChatFolder } from './folders';
 
 export type Id = number;
 
@@ -119,7 +121,7 @@ export const NO_PREVIEW = 'Новое сообщение';
 export type NotifyType = 'direct' | 'group';
 export interface NotifyPref { muted: boolean; preview: boolean }
 /** Настройки аккаунта (GET /settings добавляет seq своей записи журнала на момент снимка). */
-export interface UserSettings { notify: Record<NotifyType, NotifyPref>; sessionsTtlDays: number }
+export interface UserSettings { notify: Record<NotifyType, NotifyPref>; sessionsTtlDays: number; folders: ChatFolder[] }   // folders — свои папки по порядку вкладок
 export interface SettingsSnapshot extends UserSettings { privacy?: PrivacyRules; seq?: number }
 /** Сроки автозавершения неактивных сеансов, дней (PUT /settings/sessions-ttl). */
 export const SESSION_TTLS: readonly number[] = [7, 30, 90, 180, 365];
@@ -184,7 +186,8 @@ export interface JournalEntry { seq: number; update: Update }
 export type ErrorCode = 'bad_frame' | 'unauthorized' | 'not_member' | 'not_found' | 'too_long' | 'forbidden' | 'internal'
   | 'username_invalid' | 'username_taken' | 'username_reserved' | 'bio_too_long' | 'name_invalid' | 'birthday_invalid' | 'links_invalid' | 'note_too_long'
   | 'blocked' | 'code_invalid' | 'code_expired' | 'flood' | 'fresh_session'
-  | 'password_invalid' | 'password_missing' | 'recovery_unavailable' | 'email_invalid' | 'qr_expired' | 'passkey_not_found' | 'passkey_invalid';
+  | 'password_invalid' | 'password_missing' | 'recovery_unavailable' | 'email_invalid' | 'qr_expired' | 'passkey_not_found' | 'passkey_invalid'
+  | 'folder_title' | 'folder_empty' | 'folder_too_many_chats' | 'folder_emoji' | 'folders_limit';
 
 export type ClientFrame =
   | { op: 'hello'; lastSeq: number }

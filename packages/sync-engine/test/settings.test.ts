@@ -86,3 +86,55 @@ test('partial settings from an old cache are completed per kind and never crash 
   expect(normalizeSettings({} as never).sessionsTtlDays).toBe(180);
   expect(normalizeSettings({ notify: { direct: null } } as never).notify.direct.muted).toBe(false);
 });
+
+const FOLDER = { title: 'Работа', emoji: '💼', include: [10], exclude: [], contacts: false, nonContacts: false, groups: true, excludeMuted: false, excludeRead: false };
+type F = { id: number; title: string };
+const ids = (l: Record<string, unknown>[]) => ((l[0]?.folders ?? []) as F[]).map((f) => f.id);
+
+test('settingsView: folder upsert, delete and order replay over the base in queue order', () => {
+  const baseF = { ...DEF, folders: [{ id: 2, ...FOLDER }, { id: 3, ...FOLDER, title: 'Семья' }] };
+  const del = { id: 3, key: 'folder:3', method: 'DELETE' as const, path: '/x', at: 0 };
+  const v = settingsView(baseF, [op('folder:4', { ...FOLDER, title: 'Новая' }), op('folders:order', { ids: [4, 2] }), op('folder:2', { ...FOLDER, title: 'Офис' }), del]);
+  expect(v.folders.map((f) => [f.id, f.title])).toEqual([[4, 'Новая'], [2, 'Офис']]);
+  expect(baseF.folders.length).toBe(2);   // база не тронута
+});
+
+test('folders: offline edits show at once, survive a restart, reach the server and the second device without flicker', async () => {
+  const a = await srv.login('Анна');
+  const cfg = srv.config(a);
+  const e = await open(cfg);
+  e.connect();
+  await e.whenIdle();
+  const w = watchInto(e, { kind: 'settings' });
+  await w.until((l) => l[0]?.loaded === true);
+
+  e.disconnect();
+  await e.call({ type: 'saveFolder', folder: { id: 2, ...FOLDER } });
+  await e.call({ type: 'saveFolder', folder: { id: 3, ...FOLDER, title: 'Семья' } });
+  await e.call({ type: 'reorderFolders', ids: [3, 2] });
+  await e.call({ type: 'saveFolder', folder: { id: 2, ...FOLDER, title: 'Офис' } });
+  const s = await w.until((l) => ids(l).join() === '3,2' && (l[0].folders as F[])[1].title === 'Офис');
+  expect(s[0].pending).toBe(true);
+
+  await e.close(); engines.splice(engines.indexOf(e), 1);
+  const cold = await open(cfg);
+  const w2 = watchInto(cold, { kind: 'settings' });
+  await w2.until((l) => ids(l).join() === '3,2');
+  cold.connect();
+  await cold.whenIdle();
+  const server = await (await api(a.token, 'GET', '/settings')).json();
+  expect(server.folders.map((f: F) => [f.id, f.title])).toEqual([[3, 'Семья'], [2, 'Офис']]);
+  await w2.until((l) => l[0]?.pending === false);
+  // порядок ни разу не откатывался после того, как стал 3,2
+  const orders = w2.patches.flatMap((p) => (p.op === 'snapshot' ? p.items : p.upsert)).map((it) => ((it.folders ?? []) as F[]).map((f) => f.id).join());
+  expect(orders.slice(orders.indexOf('3,2')).every((o) => o === '3,2')).toBe(true);
+
+  // второе устройство: удаление приходит журналом
+  const other = await open(srv.config(a));
+  other.connect();
+  await other.whenIdle();
+  const w3 = watchInto(other, { kind: 'settings' });
+  await w3.until((l) => ids(l).join() === '3,2');
+  await cold.call({ type: 'deleteFolder', id: 3 });
+  await w3.until((l) => ids(l).join() === '2');
+});

@@ -6,7 +6,7 @@ import { requestMutation } from '@relay/ui';
 import { loadTheme, type ThemePref } from './theme';
 import { getPrefs, subscribePrefs, listenStorage, applyPrefs, type Prefs } from './prefs';
 import type { Item } from '@relay/sync-engine/src/types';
-import { defaultPrivacy, type PrivacyRules, type SessionInfo } from '@relay/protocol';
+import { defaultPrivacy, type ChatFolder, type PrivacyRules, type SessionInfo } from '@relay/protocol';
 
 /** Края окна ленты: есть ли сообщения раньше/позже, окно ли это живого хвоста. */
 export interface FeedMeta { hasOlder: boolean; hasNewer: boolean; live: boolean }
@@ -48,7 +48,8 @@ export interface GlobalState {
   peer: Item | null;   // присутствие собеседника открытого личного чата {userId, known, online, lastSeen}
   chatStack: ChatFrame[];        // стек чатов, снизу вверх
   chatLeaving: ChatFrame[];      // снятые со стека: доигрывают уход и исчезают
-  folder: 'all' | 'unread';
+  folder: number;      // активная папка: 0 — «Все чаты», иначе id своей папки
+  folderDraft: FolderDraft | null;   // редактор папки: общий для страницы правки и выбора чатов
   search: string;
   newChatOpen: boolean;
   sidebarView: string;   // путь страницы боковой панели, см. nav.ts
@@ -78,8 +79,11 @@ export type DevTab = 'overview' | 'log' | 'network' | 'data' | 'errors';
 export interface DevSimFlags { offline: boolean; profile: { latency: number; jitter: number; lossPct: number; kbps: number } | null; dropNextUpdates: boolean; forceTooLong: boolean; persist: boolean }
 
 /** Настройки аккаунта (общие для устройств). loaded — снимок с сервера уже был; pending — есть неподтверждённые правки. */
-export interface AccountSettings { notify: Record<'direct' | 'group', { muted: boolean; preview: boolean }>; sessionsTtlDays: number; privacy: PrivacyRules; loaded: boolean; pending: boolean }
-export const defaultAccountSettings = (): AccountSettings => ({ notify: { direct: { muted: false, preview: true }, group: { muted: false, preview: true } }, sessionsTtlDays: 180, privacy: defaultPrivacy(), loaded: false, pending: false });
+export interface AccountSettings { notify: Record<'direct' | 'group', { muted: boolean; preview: boolean }>; sessionsTtlDays: number; folders: ChatFolder[]; privacy: PrivacyRules; loaded: boolean; pending: boolean }
+export const defaultAccountSettings = (): AccountSettings => ({ notify: { direct: { muted: false, preview: true }, group: { muted: false, preview: true } }, sessionsTtlDays: 180, folders: [], privacy: defaultPrivacy(), loaded: false, pending: false });
+
+/** Черновик папки: id (новая — ещё не на сервере), правки и исходное значение для «есть ли изменения». */
+export interface FolderDraft { id: number; isNew: boolean; folder: ChatFolder; original: ChatFolder }
 
 /** Чем заполнить «Новый контакт»: из «Информации» — человек уже известен (userId), запрос лишь для вида. */
 export interface NewContactDraft { query?: string; firstName?: string; lastName?: string; userId?: number }
@@ -97,7 +101,8 @@ let state: GlobalState = {
   peer: null,
   chatStack: [],
   chatLeaving: [],
-  folder: 'all',
+  folder: 0,
+  folderDraft: null,
   search: '',
   newChatOpen: false,
   sidebarView: 'chats',

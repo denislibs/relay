@@ -12,11 +12,14 @@ import { isDark } from '../theme';
 import { chatTime, chatTone, isSystemChat, shownBody, snippet } from './format';
 import { applyTheme as setTheme } from '../theme';
 import { previewBody, previewText, previewThumb, type LastMessage } from './preview';
+import { ALL, inFolder, toggleChatInFolder } from '../folders';
+import { saveFolder, showToast } from '../settingsData';
+import { selectFolder, useFolderCtx, useFolderGuard, useFolderItems, useFolderMenu, useFolderPlace } from './folderNav';
+import { Button } from '@relay/ui';
 import { toggleMuted } from './Info';
 import { seen } from '../data';
 import { getGlobal } from '../global';
 
-const FOLDERS = ['all', 'unread'];
 
 /** Фрагмент вокруг совпадения: превью узкое, а совпадение может быть в конце длинного сообщения. */
 /** «Загружаем ещё чаты» внизу списка: крутится, только пока виден — вне экрана бесконечная анимация зря будит стили каждый кадр. */
@@ -94,7 +97,24 @@ export function Sidebar() {
   const view = useGlobal((s) => s.sidebarView);
   const me = useGlobal((s) => s.me)!;
   const chats = useGlobal((s) => s.chats);
-  const counters = useGlobal((s) => s.counters);
+  const folders = useGlobal((s) => s.settings.folders);
+  const place = useFolderPlace();
+  const items = useFolderItems();
+  const folderMenu = useFolderMenu();
+  const ctx = useFolderCtx();
+  useFolderGuard();
+  // Ctrl+Shift+1…9 — папка по номеру (как в Telegram Web A)
+  useEffect(() => {
+    if (place === 'none') return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.ctrlKey && e.shiftKey && /^Digit[1-9]$/.test(e.code)) {
+        const t = items[Number(e.code.slice(5)) - 1];
+        if (t) { e.preventDefault(); selectFolder(t.id); }
+      }
+    };
+    addEventListener('keydown', onKey);
+    return () => removeEventListener('keydown', onKey);
+  }, [place, items]);
   const status = useGlobal((s) => s.status);
   const folder = useGlobal((s) => s.folder);
   const search = useGlobal((s) => s.search);
@@ -111,14 +131,24 @@ export function Sidebar() {
   // «Все» — только непрерывно загруженный диапазон (как в Telegram): старые непрочитанные из-за курсора
   // покажутся, когда до них дойдёт подгрузка, а не висят внизу, над которыми потом вставляются страницы
   const loadedFrom = status.chatsComplete || !status.chatsCursorAt ? 0 : status.chatsCursorAt;
-  const listOf = (f: string) => chats.filter((c) =>
-    (f === 'all' ? Date.parse(c.lastAt as string) >= loadedFrom : (c.unread as number) > 0) &&
-    (!q || String(c.title ?? '').toLowerCase().includes(q)));
+  // своя папка — фильтр того же загруженного диапазона (у папок нет своей выдачи на сервере: у края
+  // списка догружаем общие диалоги, как в Telegram Web K)
+  const listOf = (id: number) => {
+    const f = id === ALL ? null : folders.find((x) => x.id === id) ?? null;
+    return chats.filter((c) =>
+      Date.parse(c.lastAt as string) >= loadedFrom &&
+      (!f || inFolder(f, c as never, ctx)) &&
+      (!q || String(c.title ?? '').toLowerCase().includes(q)));
+  };
+  // вкладки показываются, только когда есть свои папки; иначе (и при вкладках слева) — одна страница «Все»
+  const shown = place === 'none' ? ALL : folder;
+  const order = place === 'none' ? [String(ALL)] : items.map((t) => String(t.id));
 
   // одна папка: свой список и своя прокрутка (страница SlideStack)
-  const renderFolder = (f: string) => {
+  const renderFolder = (key: string) => {
+    const f = Number(key);
     const list = listOf(f);
-    const results = f === 'all' && hits && hits.q === q.trim() ? hits : null;
+    const results = f === shown && hits && hits.q === q.trim() ? hits : null;
     return (
       <>
       <div class="app-listwrap">
@@ -132,20 +162,27 @@ export function Sidebar() {
           <WindowList
             role="list"
             items={list}
-            onNearEnd={f === 'all' && !status.chatsComplete ? loadMoreChats : undefined}
+            onNearEnd={!status.chatsComplete ? loadMoreChats : undefined}
             rowHeight={ROW}
             getKey={(c: Item) => 'c' + c.id}
             render={(c: Item) => <SideRow c={c} meId={me.userId} active={c.id === openId} showDraft={!!c.draft && c.id !== openId} muted={mutedIds.includes(c.id as number)} onMenu={onRowMenu} />}
           />
-          {f === 'all' && !q && !status.chatsComplete ? (
+          {!q && !status.chatsComplete ? (
             <MoreLoader />
           ) : null}
           </>
+        ) : f !== ALL && !q && !status.chatsComplete ? (
+          <><MoreLoader />{status.hydrated ? <span class="app-more-pull" ref={(el) => { if (el) loadMoreChats(); }} /> : null}</>
+        ) : f !== ALL && !q ? (
+          <div class="app-folder-empty">
+            <EmptyState kind="chats" title="В папке нет чатов" text="Сюда попадут чаты, подходящие под правила папки." />
+            <Button variant="primary" onClick={() => void go('settings/folders/' + f)}>Изменить папку</Button>
+          </div>
         ) : (
           <EmptyState
             kind={q ? 'search' : 'chats'}
-            title={q ? 'Ничего не найдено' : !status.hydrated ? 'Нет сети' : f === 'unread' ? 'Всё прочитано' : 'Пока нет чатов'}
-            text={q ? 'Поиск идёт по чатам на устройстве.' : !status.hydrated ? 'Чаты загрузятся, когда появится подключение.' : f === 'unread' ? '' : 'Нажмите карандаш, чтобы начать переписку.'}
+            title={q ? 'Ничего не найдено' : !status.hydrated ? 'Нет сети' : 'Пока нет чатов'}
+            text={q ? 'Поиск идёт по чатам на устройстве.' : !status.hydrated ? 'Чаты загрузятся, когда появится подключение.' : 'Нажмите карандаш, чтобы начать переписку.'}
           />
         )}
         </div>
@@ -173,10 +210,7 @@ export function Sidebar() {
       paged
       header={<SidebarHeader onMenu={() => setMenu(true)} status={searchStatus ?? undefined} me={me.name} meTone={peerTone(me.userId)} searchId="side-search" value={search} placeholder="Поиск" onSearch={(e: Event) => setGlobal({ search: (e.target as HTMLInputElement).value })} />}
       top={!search.trim() ? <ChatBanner /> : null}
-      tabs={<FolderTabs class="app-folders" active={folder} onChange={(id: 'all' | 'unread') => setGlobal({ folder: id })} items={[
-        { id: 'all', label: 'Все' },
-        { id: 'unread', label: 'Непрочитанные', count: counters.unreadChats },
-      ]} />}
+      tabs={place === 'top' ? <FolderTabs class="app-folders" active={folder} onChange={selectFolder} onItemMenu={folderMenu.open} items={items.map((t, i) => (i === 0 ? { ...t, label: 'Все' } : t))} /> : null}
       banner={
         <>
           <RowMenu at={rowMenu} onClose={() => setRowMenu(null)} />
@@ -210,7 +244,8 @@ export function Sidebar() {
       fab={<Fab label="Новый чат" onClick={() => setGlobal({ newChatOpen: true })} />}
       overlay={<UpdatePill />}
     >
-      <SlideStack variant="tabs" order={FOLDERS} active={folder} render={(f: string) => <div class="rl-page-scroll">{renderFolder(f)}</div>} />
+      <SlideStack variant="tabs" order={order} active={String(shown)} render={(f: string) => <div class="rl-page-scroll">{renderFolder(f)}</div>} />
+      {folderMenu.node}
     </SidebarCard>
   );
 }
@@ -223,6 +258,21 @@ function RowMenu({ at, onClose }: { at: { id: number; x: number; y: number } | n
   if (at) last.current = at;
   const p = at ?? last.current;
   const id = p?.id ?? 0;
+  const folders = useGlobal((s) => s.settings.folders);
+  const activeFolder = useGlobal((s) => s.folder);
+  const ctx = useFolderCtx();
+  // папки: «Добавить в папку» — подменю с галочками; внутри своей папки — ещё и «Убрать из папки»
+  const toggleIn = (fid: number) => {
+    const f = getGlobal().settings.folders.find((x) => x.id === fid);
+    if (!f || !chat) return;
+    onClose();
+    saveFolder(toggleChatInFolder(f, chat as never, ctx)).catch(() => showToast('Не удалось изменить папку'));
+  };
+  const current = folders.find((x) => x.id === activeFolder);
+  const folderItems = !chat || !folders.length ? [] : [
+    { icon: 'folder', label: 'Добавить в папку', submenu: folders.map((f) => ({ icon: inFolder(f, chat as never, ctx) ? 'check' : 'folder', label: f.title, onClick: () => toggleIn(f.id) })) },
+    ...(current && inFolder(current, chat as never, ctx) ? [{ icon: 'close', label: 'Убрать из папки', onClick: () => toggleIn(current.id) }] : []),
+  ];
   const unread = (chat?.unread as number) > 0;
   const lastId = ((chat?.last as { id?: number | null } | null)?.id ?? 0) || (chat?.knownMaxId as number) || 0;
   return (
@@ -238,6 +288,7 @@ function RowMenu({ at, onClose }: { at: { id: number; x: number; y: number } | n
                 { icon: 'newTab', label: 'Открыть в новой вкладке', onClick: () => { onClose(); window.open(location.pathname + '#chat=' + id, '_blank', 'noopener'); } },
                 ...(unread && lastId ? [{ icon: 'markRead', label: 'Отметить как прочитанное', onClick: () => { onClose(); seen(id, lastId); } }] : []),
                 { icon: muted ? 'bell' : 'bellOff', label: muted ? 'Включить уведомления' : 'Выключить уведомления', onClick: () => { onClose(); toggleMuted(id, getGlobal().muted); } },
+                ...folderItems,
                 { icon: 'info', label: 'Информация', onClick: () => { onClose(); openChat(id); setGlobal({ infoOpen: true }); } },
               ]}
             />

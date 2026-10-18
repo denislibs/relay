@@ -16,12 +16,13 @@ declare const __BUILD__: string;
 type Tile = 'blue' | 'orange' | 'red' | 'gray' | 'green' | 'purple';
 interface SectionRow { path: string; icon: string; tile: Tile; title: string; subtitle: string }
 
-// «Папки», «Стикеры», «Язык» — позже, здесь не показываем
+// «Стикеры», «Язык» — позже, здесь не показываем
 const SECTIONS: SectionRow[] = [
   { path: 'settings/profile', icon: 'account', tile: 'blue', title: 'Аккаунт', subtitle: 'Имя пользователя, о себе, день рождения' },
   { path: 'settings/general', icon: 'general', tile: 'orange', title: 'Общие настройки', subtitle: 'Обои, тема, клавиатура' },
   { path: 'settings/notifications', icon: 'bell', tile: 'red', title: 'Уведомления', subtitle: 'Звуки, типы чатов' },
   { path: 'settings/privacy', icon: 'lock', tile: 'gray', title: 'Конфиденциальность', subtitle: 'Последний визит, блокировка' },
+  { path: 'settings/folders', icon: 'folder', tile: 'blue', title: 'Папки с чатами', subtitle: 'Сортировка чатов по папкам' },
   { path: 'settings/data', icon: 'storage', tile: 'green', title: 'Данные и память', subtitle: 'Автозагрузка, кэш' },
   { path: 'settings/performance', icon: 'rocket', tile: 'purple', title: 'Анимации и производительность', subtitle: 'Анимации, переходы, автовоспроизведение' },
   { path: 'settings/sessions', icon: 'devices', tile: 'blue', title: 'Активные сеансы', subtitle: 'Сеансы, автозавершение' },
