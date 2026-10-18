@@ -1,12 +1,14 @@
 import { RECENTLY, type PresenceItem } from '@relay/protocol';
 import { sql } from '../db';
+import { markOffline, markOnline } from './liveRegistry';
 import { canSeeLastSeen, privacyCtx, type PrivacyCtx } from './privacy';
 
 /**
  * Кто в сети: число открытых WebSocket пользователя в этом процессе.
  * «Не в сети» объявляем не сразу, а через GRACE_MS: перезагрузка вкладки или короткий обрыв не мигают
  * у собеседников. Изменения рассылаются собеседникам по личным чатам сразу, мимо журнала — это не данные,
- * а состояние момента. (Один процесс сервера; для нескольких понадобится общий реестр, например через NOTIFY.)
+ * а состояние момента. Счётчик в памяти — для рассылки собеседникам из этого процесса; общий для процессов
+ * вид «кто онлайн» (воркер решает, слать ли push) — liveRegistry.ts.
  *
  * Правило «Последний визит» (privacy.ts, с взаимностью): кому не положено — {online: null, lastSeen: 'recently'};
  * таким собеседникам о входе и выходе не сообщаем вовсе — иначе само время кадра выдало бы, когда человек в сети.
@@ -16,6 +18,14 @@ const leaving = new Map<number, ReturnType<typeof setTimeout>>();
 const graceMs = () => Number(process.env.RELAY_PRESENCE_GRACE_MS ?? 4000);
 /** Публикация в топик пользователя на том сервере, где живёт соединение. */
 export type Publish = (topic: string, msg: string) => void;
+
+// записи в реестр по одному пользователю — по очереди: быстрые «ушёл → вернулся» не должны прийти в базу наоборот
+const registry = new Map<number, Promise<void>>();
+function toRegistry(userId: number, write: () => Promise<void>): Promise<void> {
+  const next = (registry.get(userId) ?? Promise.resolve()).then(write).catch((e) => console.error('live registry:', e));
+  registry.set(userId, next);
+  return next.finally(() => { if (registry.get(userId) === next) registry.delete(userId); });
+}
 
 export function isOnline(userId: number): boolean {
   return (conns.get(userId) ?? 0) > 0 || leaving.has(userId);
@@ -91,6 +101,7 @@ export async function reannounce(publish: Publish, userId: number): Promise<void
 export async function connected(publish: Publish, userId: number): Promise<void> {
   const n = (conns.get(userId) ?? 0) + 1;
   conns.set(userId, n);
+  if (n === 1) await toRegistry(userId, () => markOnline(userId, n));
   const pending = leaving.get(userId);
   if (pending) { clearTimeout(pending); leaving.delete(userId); return; } // вернулся до конца паузы — для собеседников он и не уходил
   if (n === 1) await announce(publish, { userId, online: true, lastSeen: null });
@@ -100,6 +111,7 @@ export function disconnected(publish: Publish, userId: number): void {
   const n = Math.max(0, (conns.get(userId) ?? 0) - 1);
   if (n > 0) { conns.set(userId, n); return; }
   conns.delete(userId);
+  void toRegistry(userId, () => markOffline(userId));   // пауза — в onlineUsers по left_at
   leaving.set(userId, setTimeout(async () => {
     leaving.delete(userId);
     if ((conns.get(userId) ?? 0) > 0) return;
