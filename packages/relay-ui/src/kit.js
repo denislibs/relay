@@ -397,6 +397,17 @@ function ChatRowSkeleton() {
       h('i', { style: { width: '80%', height: 10 } })));
 }
 
+/* ---------- ForwardTitle: «Переслано от» над содержимым пузыря ----------
+   fwd = { name, tone, avatar?: пропсы Avatar (фото), onClick? }. Две строки цветом автора: стрелка + «Переслано от»,
+   затем маленький аватар и имя (клик — открыть чат с автором). */
+function ForwardTitle(props) {
+  var f = props.fwd, tone = 'var(--peer-' + (f.tone != null ? f.tone : 5) + ')';
+  return h(f.onClick ? 'button' : 'span', { type: f.onClick ? 'button' : undefined, class: cx('rl-fwd', f.onClick && 'rl-fwd-link', props.class), style: { '--fwd-tone': tone },
+      onClick: f.onClick ? function (e) { e.stopPropagation(); f.onClick(); } : undefined, 'aria-label': 'Переслано от ' + f.name },
+    h('span', { class: 'rl-fwd-label', 'aria-hidden': 'true' }, h(Icon, { name: 'forward', size: 14 }), 'Переслано от'),
+    h('span', { class: 'rl-fwd-who', 'aria-hidden': 'true' }, h(Avatar, Object.assign({ name: f.name, tone: f.tone, size: 20 }, f.avatar || {})), h('b', null, f.name)));
+}
+
 /* ---------- Bubble ---------- */
 function Bubble(props) {
   var out = props.from === 'out';
@@ -409,8 +420,8 @@ function Bubble(props) {
       onContextMenu: props.onContextMenu, onDblClick: props.onDoubleClick
     },
       !deleted && !props.selectable ? h('button', { type: 'button', class: 'rl-bubble-menu', 'aria-label': 'Меню сообщения', onClick: props.onMenu }, h(Icon, { name: 'chevronDown', size: 18 })) : null,
-      props.forwarded ? h('span', { class: 'rl-bubble-fwd' }, h(Icon, { name: 'forward', size: 14 }), 'Переслано') : null,
-      props.author && !deleted ? h(props.onAuthorClick ? 'button' : 'span', { type: props.onAuthorClick ? 'button' : undefined, class: cx('rl-bubble-author', props.onAuthorClick && 'rl-bubble-author-link'), onClick: props.onAuthorClick, style: { color: 'var(--peer-' + (props.authorTone != null ? props.authorTone : 5) + ')' } }, props.author) : null,
+      props.fwd && !deleted ? h(ForwardTitle, { fwd: props.fwd }) : null,
+      props.author && !deleted && !props.fwd ? h(props.onAuthorClick ? 'button' : 'span', { type: props.onAuthorClick ? 'button' : undefined, class: cx('rl-bubble-author', props.onAuthorClick && 'rl-bubble-author-link'), onClick: props.onAuthorClick, style: { color: 'var(--peer-' + (props.authorTone != null ? props.authorTone : 5) + ')' } }, props.author) : null,
       props.reply && !deleted ? h(ReplyQuote, Object.assign({ inBubble: true }, props.reply)) : null,
       deleted
         ? h('span', { class: 'rl-bubble-text rl-bubble-deleted-text' }, h(Icon, { name: 'ban', size: 16 }), out ? 'Вы удалили это сообщение' : 'Сообщение удалено')
@@ -790,7 +801,7 @@ function MediaBubble(props) {
   // у всех фото альбома известны размеры — мозаикой, как в Telegram (иначе — старая сетка 2×2)
   var mosaic = album && items.every(function (it) { return it.w && it.h; }) ? albumLayout(items.map(function (it) { return it.w / it.h; }), 330, 2) : null;
   if (mosaic) extra = 0;
-  var mediaOnly = !props.caption && !props.author;
+  var mediaOnly = !props.caption && !props.author && !props.fwd;
   // у одиночного фото без рамки хвостик красится в цвет нижнего угла картинки (как в Telegram); у альбома — последней ячейки
   var cornerOf = items[album ? Math.min(items.length, 4) - 1 : 0] || {};
   var tailColor = useTailColor(mediaOnly && props.tail ? cornerOf.src : null, mediaOnly && props.tail ? cornerOf.thumb : null, out);
@@ -807,7 +818,8 @@ function MediaBubble(props) {
     // хвостик остаётся, а его цвет берётся из нижнего угла картинки (см. useTailColor)
     h('div', { class: cx('rl-bubble rl-media', mediaOnly && 'rl-media-only', out ? 'rl-bubble-out' : 'rl-bubble-in-side', props.tail && 'rl-bubble-tail', props.appear && (out ? 'rl-appear-out' : 'rl-appear-in')),
       style: tailColor ? { '--tail-bg': tailColor } : undefined },
-      props.author ? h('span', { class: 'rl-bubble-author rl-media-author', style: { color: 'var(--peer-' + (props.authorTone != null ? props.authorTone : 5) + ')' } }, props.author) : null,
+      props.fwd ? h(ForwardTitle, { fwd: props.fwd, class: 'rl-media-author' }) : null,
+      props.author && !props.fwd ? h('span', { class: 'rl-bubble-author rl-media-author', style: { color: 'var(--peer-' + (props.authorTone != null ? props.authorTone : 5) + ')' } }, props.author) : null,
       h('div', { class: cx('rl-media-frame', album && (mosaic ? 'rl-media-mosaic' : 'rl-media-album')), style: mosaic ? { aspectRatio: String(mosaic.ratio) } : album ? null : { aspectRatio: props.ratio || '4 / 3' } },
         mosaic ? items.map(function (it, i) {
           var c = mosaic.cells[i];
@@ -833,6 +845,7 @@ function FileBubble(props) {
   var ext = (props.ext || 'pdf').toUpperCase();
   return h('div', { class: cx('rl-msgline', out && 'rl-msgline-out', props.groupStart && 'rl-msgline-gap') },
     h('div', { class: cx('rl-bubble rl-file', out ? 'rl-bubble-out' : 'rl-bubble-in-side', props.tail && 'rl-bubble-tail') },
+      props.fwd ? h(ForwardTitle, { fwd: props.fwd }) : null,
       // как в Telegram: цветной квадрат с загнутым уголком и расширением; скачивание и загрузка — внутри квадрата
       h('div', { class: 'rl-file-card' },
         props.state === 'remote'
@@ -1292,4 +1305,4 @@ function ScrollToBottom(props) {
 }
 
 
-export { peerTone, RelayLogo, Verified, ArchivedRow, ReplyQuote, ReactionChips, cx, chain, ripple, reducedMotion, omit, fmtTime, makeWave, ICONS, Icon, Button, IconButton, Avatar, Badge, Chip, SearchField, ChatRow, ChatRowSkeleton, Bubble, MessageStatus, TypingIndicator, DateDivider, Banner, NavRail, Checkbox, Toast, Card, Steps, MediaArt, ProgressRing, Waveform, VoiceMessage, VoiceRecorder, MediaBubble, MediaPolicy, mediaHeld, FileBubble, MediaThumb, MediaViewer, Switch, PanelHeader, ProfileHeader, ActionTile, InfoRow, SettingsIcon, ReadMore, Presence, useMinVisible, LazyImage, FlipList, SyncIndicator, LinearProgress, EmptyState, ScrollToBottom };
+export { ForwardTitle, peerTone, RelayLogo, Verified, ArchivedRow, ReplyQuote, ReactionChips, cx, chain, ripple, reducedMotion, omit, fmtTime, makeWave, ICONS, Icon, Button, IconButton, Avatar, Badge, Chip, SearchField, ChatRow, ChatRowSkeleton, Bubble, MessageStatus, TypingIndicator, DateDivider, Banner, NavRail, Checkbox, Toast, Card, Steps, MediaArt, ProgressRing, Waveform, VoiceMessage, VoiceRecorder, MediaBubble, MediaPolicy, mediaHeld, FileBubble, MediaThumb, MediaViewer, Switch, PanelHeader, ProfileHeader, ActionTile, InfoRow, SettingsIcon, ReadMore, Presence, useMinVisible, LazyImage, FlipList, SyncIndicator, LinearProgress, EmptyState, ScrollToBottom };

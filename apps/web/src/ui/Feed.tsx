@@ -31,10 +31,10 @@ const FIRST_PAINT = 24;   // при открытии внизу первым к�
 type Quote = { id: number; sort: number; body: string; senderId: number };
 type Att = { id: string; kind: 'photo' | 'file' | 'voice' | 'round' | 'audio'; title?: string | null; performer?: string | null; mime: string; name: string; size: number; w: number | null; h: number | null; thumb?: string | null; duration?: number | null; waveform?: string | null };
 const fileUrl = (a: Att, download = false) => `/files/${a.id}${download ? '?download=1' : ''}`;
-type RowProps = { chatId: number; voiceTitle: string; author?: string; onAuthor?: (m: Item) => void; onOpen: (m: Item) => void; hl?: string; m: Item; meId: number; out: boolean; start: boolean; end: boolean; pos?: 'single' | 'first' | 'middle' | 'last'; quoted?: Quote | null; quoteAuthor?: string; quoteTone?: number; appear: boolean; flash: boolean; onReact: (m: Item, emoji: string) => void; album?: Item[] };
+type RowProps = { chatId: number; voiceTitle: string; author?: string; onAuthor?: (m: Item) => void; onOpen: (m: Item) => void; hl?: string; m: Item; meId: number; out: boolean; start: boolean; end: boolean; pos?: 'single' | 'first' | 'middle' | 'last'; quoted?: Quote | null; quoteAuthor?: string; quoteTone?: number; appear: boolean; flash: boolean; onReact: (m: Item, emoji: string) => void; album?: Item[]; onUser?: (userId: number) => void };
 
 /** Строка ленты: перерисовывается только если изменилось её сообщение или место в группе. */
-const Row = memo(function Row({ chatId, voiceTitle, author, onAuthor, onOpen, hl, m, meId, out, start, end, pos, quoted, quoteAuthor, quoteTone, appear, flash, onReact, album }: RowProps) {
+const Row = memo(function Row({ chatId, voiceTitle, author, onAuthor, onOpen, hl, m, meId, out, start, end, pos, quoted, quoteAuthor, quoteTone, appear, flash, onReact, album, onUser }: RowProps) {
   // реакции: по эмодзи — сколько и есть ли моя
   const list = (m.reactions as { userId: number; emoji: string }[] | undefined) ?? [];
   const chips: { emoji: string; count: number; mine: boolean }[] = [];
@@ -43,6 +43,10 @@ const Row = memo(function Row({ chatId, voiceTitle, author, onAuthor, onOpen, hl
     if (c) { c.count++; c.mine ||= r.userId === meId; } else chips.push({ emoji: r.emoji, count: 1, mine: r.userId === meId });
   }
   const att = m.attachment as Att | null | undefined;
+  // пересланное: «Переслано от» с аватаром и именем автора; клик — чат с ним (себя не открываем)
+  const ff = !m.deleted ? m.fwdFrom as { userId: number; name: string } | null | undefined : null;
+  const fwd = ff ? { name: ff.userId === meId ? 'Вы' : ff.name, tone: peerTone(ff.userId), avatar: senderAvatar(ff.userId),
+    onClick: ff.userId !== meId && onUser ? () => onUser(ff.userId) : undefined } : undefined;
   const pending = m.status === 'pending' && typeof m.progress === 'number' && (m.progress as number) < 1;
   const mark = m.id != null ? <i class="app-mark" data-mid={m.id as number} aria-hidden="true" /> : null;
   if (album && album.length > 1) {
@@ -54,6 +58,7 @@ const Row = memo(function Row({ chatId, voiceTitle, author, onAuthor, onOpen, hl
     return (
       <div class={flash ? 'app-msg app-msg-media app-msg-flash' : 'app-msg app-msg-media'} data-key={m.key} data-sort={m.sort as number}>
         <MediaBubble
+          fwd={fwd}
           from={out ? 'out' : 'in'} tail={end} groupStart={start} appear={appear}
           items={album.map((x) => { const a = x.attachment as Att; return { src: localPreview(x.key) ?? (a.id ? fileUrl(a) : undefined), thumb: a.thumb, alt: a.name, w: a.w, h: a.h, mkey: x.key }; })}
           state={busy ? 'loading' : 'ready'} progress={busy ? Math.min(...album.map((x) => (typeof x.progress === 'number' ? x.progress as number : 1))) : undefined}
@@ -71,6 +76,7 @@ const Row = memo(function Row({ chatId, voiceTitle, author, onAuthor, onOpen, hl
     return (
       <div class={flash ? 'app-msg app-msg-media app-msg-flash' : 'app-msg app-msg-media'} data-key={m.key} data-sort={m.sort as number}>
         <MediaBubble
+          fwd={fwd}
           from={out ? 'out' : 'in'} tail={end} groupStart={start} appear={appear}
           items={[{ src, thumb: att.thumb, alt: att.name }]}
           ratio={`${att.w} / ${att.h}`}
@@ -89,6 +95,7 @@ const Row = memo(function Row({ chatId, voiceTitle, author, onAuthor, onOpen, hl
     return (
       <div class={flash ? 'app-msg app-msg-flash' : 'app-msg'} data-key={m.key} data-sort={m.sort as number}>
         <VoiceBubble
+          fwd={fwd}
           from={out ? 'out' : 'in'} tail={end} groupStart={start} appear={appear}
           trackKey={m.key as string} duration={att.duration ?? 0} waveform={att.waveform ?? null}
           unread={unheard} unreadIncoming={unheard && !out}
@@ -105,6 +112,7 @@ const Row = memo(function Row({ chatId, voiceTitle, author, onAuthor, onOpen, hl
     return (
       <div class={flash ? 'app-msg app-msg-flash' : 'app-msg'} data-key={m.key} data-sort={m.sort as number}>
         <RoundBubble
+          fwd={fwd}
           from={out ? 'out' : 'in'} groupStart={start} appear={appear}
           src={localPreview(m.key as string) ?? (att.id ? fileUrl(att) : undefined)} thumb={att.thumb ?? null}
           duration={att.duration ?? 0} unread={unseen}
@@ -120,6 +128,7 @@ const Row = memo(function Row({ chatId, voiceTitle, author, onAuthor, onOpen, hl
     return (
       <div class={flash ? 'app-msg app-msg-flash' : 'app-msg'} data-key={m.key} data-sort={m.sort as number}>
         <CachedMusic
+          fwd={fwd}
           fileId={att.id ?? undefined} from={out ? 'out' : 'in'} tail={end} groupStart={start} pos={pos}
           trackKey={m.key as string} title={att.title || trackTitle(att.name)} performer={att.performer ?? undefined} cover={att.thumb ?? undefined}
           duration={att.duration ?? 0} size={fileSize(att.size)}
@@ -141,6 +150,7 @@ const Row = memo(function Row({ chatId, voiceTitle, author, onAuthor, onOpen, hl
     return (
       <div class={flash ? 'app-msg app-msg-flash' : 'app-msg'} data-key={m.key} data-sort={m.sort as number}>
         <FileBubble
+          fwd={fwd}
           from={out ? 'out' : 'in'} tail={end} groupStart={start}
           name={att.name} ext={ext} meta={fileSize(att.size)}
           state={pending ? 'loading' : att.id ? 'remote' : 'loading'} progress={m.progress as number}
@@ -154,6 +164,7 @@ const Row = memo(function Row({ chatId, voiceTitle, author, onAuthor, onOpen, hl
   return (
     <div class={flash ? 'app-msg app-msg-flash' : 'app-msg'} data-key={m.key} data-sort={m.sort as number}>
       <Bubble
+        fwd={fwd}
         from={out ? 'out' : 'in'}
         tail={end}
         groupStart={start}
@@ -573,6 +584,7 @@ export function Feed({ frameKey, active, chatId, meId, peerName, group, onAuthor
 
   const authorRef = useRef(onAuthor); authorRef.current = onAuthor;
   const onAuthorRow = useRef((m: Item) => authorRef.current(m.senderId as number)).current;
+  const onUserRow = useRef((userId: number) => authorRef.current(userId)).current;
   useEffect(() => { if (group) ensureNames([...new Set(messages.filter((m) => m.senderId !== meId).map((m) => m.senderId as number))]); }, [group, messages]);
 
   // контекстное меню — одно на ленту, а не на каждый бабл (иначе обработчик ломал бы мемоизацию строк)
@@ -629,6 +641,7 @@ export function Feed({ frameKey, active, chatId, meId, peerName, group, onAuthor
         key={m.key}
         author={group && !mine && start && !m.deleted ? names[m.senderId as number] ?? '' : undefined}
         onAuthor={onAuthorRow}
+        onUser={onUserRow}
         hl={highlight && (m.body as string).toLowerCase().includes(highlight.toLowerCase()) ? highlight : undefined}
         m={m}
         meId={meId}

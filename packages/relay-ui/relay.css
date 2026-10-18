@@ -618,7 +618,19 @@ body { margin: 0; font-family: var(--font-sans); color: var(--ink); background: 
 .rl-row-archived .rl-row-name { font-weight: 400; }
 
 /* ---------- Bubble extras ---------- */
-.rl-bubble-fwd { display: flex; align-items: center; gap: 4px; margin-bottom: 2px; font: italic 400 13px/18px var(--font-sans); color: var(--bubble-meta); }
+.rl-fwd { display: flex; flex-direction: column; align-items: flex-start; gap: 2px; max-width: 100%; margin: 0 0 4px; padding: 0; border: 0; background: none; color: var(--fwd-tone); text-align: start; font: 400 13px/18px var(--font-sans); }
+.rl-fwd-link { cursor: pointer; }
+.rl-fwd-link:hover .rl-fwd-who b { text-decoration: underline; }
+.rl-fwd-link:focus-visible { outline: 2px solid currentColor; outline-offset: 2px; border-radius: 6px; }
+.rl-fwd-label { display: inline-flex; align-items: center; gap: 4px; }
+.rl-fwd-who { display: inline-flex; align-items: center; gap: 6px; max-width: 100%; min-width: 0; }
+.rl-fwd-who b { font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.rl-fwd-who .rl-avatar { flex-shrink: 0; font-size: 9px; }
+.rl-file > .rl-fwd, .rl-vb > .rl-fwd, .rl-music > .rl-fwd { margin-bottom: 6px; }
+/* кружок без пузыря: подпись — на полупрозрачной плашке, читается на любом фоне */
+.rl-round-line-fwd { flex-direction: column; align-items: flex-start; }
+.rl-msgline-out.rl-round-line-fwd { align-items: flex-end; }
+.rl-fwd-plate { padding: 4px 10px; border-radius: 12px; background: var(--raised); box-shadow: var(--shadow-float, none); }
 .rl-bubble-edited { margin-right: 2px; font-style: italic; }
 .rl-bubble-spacer-edited { width: 96px; }
 .rl-bubble-in-side .rl-bubble-spacer-edited { width: 72px; }   /* входящее: без галочек, но с «изм.» */

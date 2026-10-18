@@ -4,7 +4,7 @@
 // Слева сверху — плашка: длительность (при игре — сколько прошло), «без звука», точка «не просмотрено».
 import { h } from 'preact';
 import { useEffect, useRef, useState } from 'preact/hooks';
-import { cx, Icon, MessageStatus, ProgressRing } from '../kit.js';
+import { cx, ForwardTitle, Icon, MessageStatus, ProgressRing } from '../kit.js';
 import * as player from './player.js';
 import { isHeavyAnimating, onHeavyAnimationEnd } from '../schedule.js';
 
@@ -81,7 +81,9 @@ export function RoundBubble(props) {
   }
 
   var dur = props.duration || 0;
-  return h('div', { class: cx('rl-msgline', out && 'rl-msgline-out', props.groupStart && 'rl-msgline-gap') },
+  return h('div', { class: cx('rl-msgline', out && 'rl-msgline-out', props.groupStart && 'rl-msgline-gap', props.fwd && 'rl-round-line-fwd') },
+    // у кружка нет пузыря — «Переслано от» плашкой над ним, как подпись к стикеру
+    props.fwd ? h(ForwardTitle, { fwd: props.fwd, class: 'rl-fwd-plate' }) : null,
     h('div', { ref: box, class: cx('rl-round', props.appear && (out ? 'rl-appear-out' : 'rl-appear-in'), s.loaded && 'rl-round-loaded', s.on && 'rl-round-on'), onClick: onTap,
       role: 'button', 'aria-label': s.on && s.playing ? 'Пауза' : 'Воспроизвести видеосообщение' },
       props.thumb ? h('img', { class: 'rl-round-thumb', src: props.thumb, alt: '', 'aria-hidden': 'true' }) : null,
