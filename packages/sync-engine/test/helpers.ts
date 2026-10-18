@@ -7,7 +7,7 @@ import type { EngineConfig, Patch, Query, Item } from '../src/types';
 export { msg } from './fixtures';
 
 export async function resetDb(): Promise<void> {
-  // как resetDb сервера: системного пользователя «Relay» (миграция 109_service) не трогаем — база общая с тестами сервера
+  // как resetDb сервера: системного пользователя «Relay» (миграция 110_service) не трогаем — база общая с тестами сервера
   await sql`truncate login_attempts, sessions, chats, chat_members, messages, user_seq, updates restart identity cascade`;
   await sql`delete from users where not system`;
   await sql`insert into users (name, system) select 'Relay', true where not exists (select 1 from users where system)`;

@@ -1,3 +1,4 @@
+import type { ProfileLink } from '@relay/protocol';
 import { releaseMediaCache } from './storageInfo';
 // Данные разделов настроек. Предзагрузка: на главной странице и при наведении на строку раздела —
 // слайд приезжает уже заполненным. Подписки настроек (me, ops, user) живут здесь, а не в data.ts.
@@ -205,6 +206,7 @@ const call = <T>(a: Action): Promise<T> => (engine ? engine.call<T>(a) : Promise
 
 export interface ProfilePatch { firstName?: string; lastName?: string; bio?: string | null; birthday?: { day: number; month: number; year?: number } | null }
 export const updateProfile = (patch: ProfilePatch): Promise<unknown> => call({ type: 'updateProfile', ...patch });
+export const setLinks = (links: ProfileLink[]): Promise<unknown> => call({ type: 'setLinks', links });
 export const setUsername = (username: string | null): Promise<unknown> => call({ type: 'setUsername', username });
 export type UsernameCheck = { ok: true } | { ok: false; reason: 'invalid' | 'taken' | 'reserved' } | { offline: true };
 export const checkUsername = (username: string): Promise<UsernameCheck> =>

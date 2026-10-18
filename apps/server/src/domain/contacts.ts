@@ -58,7 +58,7 @@ export async function listContacts(owner: number): Promise<{ contacts: Contact[]
   return sql.begin(async (tx) => {
     await tx`set transaction isolation level repeatable read`;
     const rows = await tx`
-      select ${sql`u.id, u.name, u.first_name, u.last_name, u.username, u.bio, u.birthday, u.phone`}, u.last_seen_at,
+      select ${sql`u.id, u.name, u.first_name, u.last_name, u.username, u.bio, u.birthday, u.phone, u.links`}, u.last_seen_at,
              c.first_name as c_first, c.last_name as c_last, c.note as c_note
         from contacts c join users u on u.id = c.user_id
        where c.owner_id = ${owner}
@@ -163,7 +163,7 @@ export async function removeContact(owner: number, userId: number, publish?: Pub
 // ---------- чёрный список ----------
 
 type BlockRow = Row & { created_at: Date; c_first: string | null; c_last: string | null };
-const blockCols = sql`u.id, u.name, u.first_name, u.last_name, u.username, u.bio, u.birthday, u.phone, b.created_at, c.first_name as c_first, c.last_name as c_last`;
+const blockCols = sql`u.id, u.name, u.first_name, u.last_name, u.username, u.bio, u.birthday, u.phone, u.links, b.created_at, c.first_name as c_first, c.last_name as c_last`;
 
 function blockedOf(owner: number, r: BlockRow, ctx: PrivacyCtx): BlockedUser {
   const c = r.c_first !== null ? { first_name: r.c_first, last_name: r.c_last ?? '' } : null;

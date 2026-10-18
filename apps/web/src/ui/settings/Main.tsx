@@ -1,3 +1,4 @@
+import { ProfileLinks } from '../links/ProfileLinks';
 import { releaseMediaCache } from '../../storageInfo';
 import { ConfirmDialog, InfoRow, SettingsIcon, Menu, PanelHeader, Presence, ProfileHeader, RichText, Section, Toast, peerTone } from '@relay/ui';
 import { useEffect, useRef, useState } from 'preact/hooks';
@@ -88,6 +89,7 @@ export function Main() {
   const username = me.username ? '@' + me.username.replace(/^@/, '') : null;
   const bio = me.bio?.trim() || null;
   const birthday = me.birthday ? birthdayText(me.birthday) : null;
+  const links = me.links ?? [];
   const hasInfo = !!(phone || username || bio || birthday);
 
   return (
@@ -109,6 +111,7 @@ export function Main() {
       </Presence>
       <div class="rl-settings" ref={scroll.ref} onScroll={scroll.onScroll}>
         <ProfileHeader name={me.name} tone={peerTone(me.userId)} subtitle={status.phase === 'offline' ? 'нет сети' : 'в сети'} size={96} />
+        <ProfileLinks links={links} />
         {hasInfo ? (
           <Section>
             {phone ? <InfoRow tile="green" icon="phone" title={phone} subtitle="Телефон" onClick={() => copy(phone)} /> : null}
