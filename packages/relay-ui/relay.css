@@ -296,7 +296,7 @@ body { margin: 0; font-family: var(--font-sans); color: var(--ink); background: 
 .rl-ring-track { fill: none; stroke: var(--line); stroke-width: 3; }
 .rl-ring-arc { fill: none; stroke: currentColor; stroke-width: 3; stroke-linecap: round; transition: stroke-dashoffset var(--dur-base) linear; }
 .rl-ring-spin > svg { animation: rl-ring-rotate 1.4s linear infinite; }
-.rl-ring-spin .rl-ring-arc { animation: rl-ring-dash 1.4s var(--ease-standard) infinite; }
+/* без известного прогресса дуга постоянной длины только вращается: «дышащая» дуга сжималась быстрее, чем крутилась, — казалось, что едет назад */
 .rl-ring-onmedia { color: var(--on-media); border-radius: 50%; background: var(--media-scrim); }
 .rl-ring-onmedia .rl-ring-track { stroke: transparent; }
 .rl-ring-cancel { position: relative; display: inline-flex; align-items: center; justify-content: center; width: 100%; height: 100%; border: 0; border-radius: 50%; background: transparent; color: inherit; cursor: pointer; }
@@ -454,7 +454,6 @@ body { margin: 0; font-family: var(--font-sans); color: var(--ink); background: 
 
 /* ---------- Media keyframes (sourced from WDS keyframes, see README) ---------- */
 @keyframes rl-ring-rotate { to { transform: rotate(270deg); } }
-@keyframes rl-ring-dash { 0% { stroke-dashoffset: 120; } 50% { stroke-dashoffset: 40; } 100% { stroke-dashoffset: 120; } }
 @keyframes rl-blink { 0%, 100% { opacity: 0.5; } 50% { opacity: 1; } }
 @keyframes rl-bar-in { from { transform: scaleY(0.2); opacity: 0; } to { transform: none; opacity: 1; } }
 @keyframes rl-ring-pulse { from { transform: scale(1); opacity: 0.6; } to { transform: scale(1.35); opacity: 0; } }

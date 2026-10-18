@@ -84,7 +84,13 @@ export function RoundBubble(props) {
         onLoadedData: function () { setS({ loaded: true }); },
         onProgress: function (e) {
           var v = e.currentTarget;
-          if (v.duration > 0 && v.buffered.length) setS({ got: Math.min(1, v.buffered.end(v.buffered.length - 1) / v.duration) });
+          if (v.duration > 0 && v.buffered.length) {
+            // доля — по самому дальнему скачанному куску и только вперёд: конец последнего куска бывает меньше прежнего, дуга отползала назад
+            var end = 0;
+            for (var i = 0; i < v.buffered.length; i++) end = Math.max(end, v.buffered.end(i));
+            var got = Math.min(1, end / v.duration);
+            st[1](function (o) { return o.got != null && o.got >= got ? o : Object.assign({}, o, { got: got }); });
+          }
         },
         onEnded: function () { if (active === me.current) { video.current.currentTime = 0; idle(); } },
       }) : null,
@@ -94,7 +100,7 @@ export function RoundBubble(props) {
       // как в Telegram: пока видео не пришло — размытое превью и кольцо с крестиком (отменить скачивание)
       !props.uploading && props.src && !s.loaded ? h('div', { class: 'rl-round-center' }, s.stopped
         ? h('span', { class: 'rl-round-dl', 'aria-label': 'Скачать' }, h(Icon, { name: 'download', size: 24 }))
-        : h(ProgressRing, { size: 54, progress: s.got == null ? undefined : Math.max(0.04, s.got), onMedia: true, label: 'Загрузка видеосообщения',
+        : h(ProgressRing, { size: 54, progress: s.got == null ? undefined : s.got, onMedia: true, label: 'Загрузка видеосообщения',
             onCancel: function (e) { e.stopPropagation(); var v = video.current; if (v) { v.removeAttribute('src'); v.load(); } setS({ stopped: true }); } })) : null,
       h('span', { class: 'rl-round-badge' },
         h('span', { ref: badge }, fmt(dur)),

@@ -525,6 +525,7 @@ function MediaArt(props) {
 }
 
 /* ---------- ProgressRing: upload / download, determinate or spinning ---------- */
+var RING_IDLE_ARC = 0.25;   // длина дуги без известного прогресса; известный прогресс стартует с неё же — без скачка
 function ProgressRing(props) {
   var size = props.size || 48, r = (size - 6) / 2, c = 2 * Math.PI * r;
   var p = props.progress;
@@ -532,7 +533,7 @@ function ProgressRing(props) {
   return h('div', { class: cx('rl-ring', !det && 'rl-ring-spin', props.onMedia && 'rl-ring-onmedia'), style: { width: size, height: size }, role: 'progressbar', 'aria-valuenow': det ? Math.round(p * 100) : undefined, 'aria-label': props.label || 'Загрузка' },
     h('svg', { width: size, height: size, viewBox: '0 0 ' + size + ' ' + size, 'aria-hidden': 'true' },
       h('circle', { class: 'rl-ring-track', cx: size / 2, cy: size / 2, r: r }),
-      h('circle', { class: 'rl-ring-arc', cx: size / 2, cy: size / 2, r: r, style: { strokeDasharray: c, strokeDashoffset: det ? c * (1 - p) : c * 0.7 } })),
+      h('circle', { class: 'rl-ring-arc', cx: size / 2, cy: size / 2, r: r, style: { strokeDasharray: c, strokeDashoffset: c * (1 - (det ? Math.max(RING_IDLE_ARC, Math.min(1, p)) : RING_IDLE_ARC)) } })),
     props.onCancel ? h('button', { type: 'button', class: 'rl-ring-cancel', 'aria-label': 'Отменить', onClick: props.onCancel }, h(Icon, { name: 'close', size: 18 })) : null);
 }
 
