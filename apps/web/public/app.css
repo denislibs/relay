@@ -680,8 +680,6 @@ html[data-anim="0"] .app-chatcol, html[data-anim="0"] .app-chatcol-below, html[d
 .app-plinks-stack .app-svc + .app-svc { margin-left: -8px; }
 .app-plinks-chev { display: inline-flex; color: var(--ink-muted); transition: transform var(--dur-base) var(--ease-out); }
 .app-plinks.is-open .app-plinks-chev { transform: rotate(180deg); }
-.app-plinks.is-open .app-plinks-stack { opacity: 0; transition: opacity var(--dur-fast) var(--ease-out); }
-.app-plinks-stack { transition: opacity var(--dur-fast) var(--ease-out); }
 .app-plink-row { text-decoration: none; color: var(--ink); }
 .app-plink-row .app-svc { border-radius: 10px; box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--ink) 10%, transparent); }   /* как плитки-значки соседних строк; тёмный значок не тонет в тёмной карточке */
 .app-plinks .app-plink-row { padding-left: var(--space-6); }
@@ -691,9 +689,8 @@ html[data-anim="0"] .app-chatcol, html[data-anim="0"] .app-chatcol-below, html[d
 /* раскрытие списка ссылок: высота — мягко, строки выезжают лесенкой; сворачивание — быстрее и разом */
 .app-plinks > .app-expand { transition: grid-template-rows 340ms cubic-bezier(.22, .9, .3, 1); }
 .app-plinks > .app-expand > .app-expand-inner { opacity: 1; transition: none; }
-.app-plinks-item { opacity: 0; transform: translateY(-8px) scale(.98); transform-origin: 50% 0; transition: opacity 160ms ease, transform 200ms cubic-bezier(.4, 0, 1, 1); }
-.app-plinks.is-open .app-plinks-item { opacity: 1; transform: none; transition: opacity 260ms ease calc(60ms + var(--i) * 45ms), transform 340ms cubic-bezier(.22, .9, .3, 1) calc(60ms + var(--i) * 45ms); }
 .app-plinks-chev { transition: transform 340ms cubic-bezier(.22, .9, .3, 1); }
-.app-plinks-stack { transition: opacity 200ms ease, transform 300ms cubic-bezier(.22, .9, .3, 1); }
-.app-plinks.is-open .app-plinks-stack { opacity: 0; transform: translateX(8px); }
-@media (prefers-reduced-motion: reduce) { .app-plinks-item, .app-plinks > .app-expand { transition: none !important; } }
+
+/* открыт: стопки в заголовке нет — её значки сейчас в строках (во время полёта их прячет скрипт) */
+.app-plinks.is-open .app-plinks-stack { visibility: hidden; }
+.app-plinks-stack .app-svc { will-change: auto; }
