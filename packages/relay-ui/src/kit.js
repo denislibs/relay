@@ -397,6 +397,9 @@ function ChatRowSkeleton() {
       h('i', { style: { width: '80%', height: 10 } })));
 }
 
+/* строка сообщения: пузырь и (необязательно) кнопка сбоку — например, круглая «Переслать» при наведении */
+function MsgLine(p) { return h('div', { class: p.class, onClick: p.onClick }, p.children, p.aside || null); }
+
 /* ---------- ForwardTitle: «Переслано от» над содержимым пузыря ----------
    fwd = { name, tone, avatar?: пропсы Avatar (фото), onClick? }. Две строки цветом автора: стрелка + «Переслано от»,
    затем маленький аватар и имя (клик — открыть чат с автором). */
@@ -432,7 +435,8 @@ function Bubble(props) {
         props.time,
         out && !deleted ? h(MessageStatus, { status: props.status || 'sent' }) : null),
       props.reactions && props.reactions.length ? h(ReactionChips, { items: props.reactions, out: out, onClick: props.onReactionClick }) : null);
-  return h('div', {
+  return h(MsgLine, {
+    aside: props.aside,
     class: cx('rl-msgline', out && 'rl-msgline-out', props.groupStart && 'rl-msgline-gap', props.selectable && 'rl-msgline-select', props.selected && 'rl-msgline-selected'),
     onClick: props.selectable ? props.onSelect : undefined
   },
@@ -616,7 +620,7 @@ function VoiceMessage(props) {
   function cycleSpeed() { st[1]({ playing: s.playing, played: s.played, speed: (s.speed + 1) % SPEEDS.length }); }
 
   var thumbColor = !s.played ? (out ? 'var(--voice-new-out)' : 'var(--voice-new)') : 'var(--tick-read)';
-  return h('div', { class: cx('rl-msgline', out && 'rl-msgline-out', props.groupStart && 'rl-msgline-gap') },
+  return h(MsgLine, { aside: props.aside, class: cx('rl-msgline', out && 'rl-msgline-out', props.groupStart && 'rl-msgline-gap') },
     h('div', { class: cx('rl-bubble rl-voice', out ? 'rl-bubble-out' : 'rl-bubble-in-side', props.tail && 'rl-bubble-tail', props.appear && (out ? 'rl-appear-out' : 'rl-appear-in')) },
       h('div', { class: 'rl-voice-row' },
         h('button', { type: 'button', class: 'rl-voice-play', onPointerDown: ripple, 'aria-label': s.playing ? 'Пауза' : 'Воспроизвести', onClick: toggle },
@@ -813,7 +817,7 @@ function MediaBubble(props) {
       last ? h('span', { class: 'rl-media-more' }, '+' + (extra + 1)) : null,
       !album ? h(MediaOverlay, { state: state, kind: it.kind, progress: props.progress, size: props.size, onDownload: props.onDownload, onCancel: props.onCancel }) : null);
   }
-  return h('div', { class: cx('rl-msgline', out && 'rl-msgline-out', props.groupStart && 'rl-msgline-gap') },
+  return h(MsgLine, { aside: props.aside, class: cx('rl-msgline', out && 'rl-msgline-out', props.groupStart && 'rl-msgline-gap') },
     // без подписи и автора — как в Telegram: картинка без рамки пузыря (без фона и отступов), углы — от пузыря;
     // хвостик остаётся, а его цвет берётся из нижнего угла картинки (см. useTailColor)
     h('div', { class: cx('rl-bubble rl-media', mediaOnly && 'rl-media-only', out ? 'rl-bubble-out' : 'rl-bubble-in-side', props.tail && 'rl-bubble-tail', props.appear && (out ? 'rl-appear-out' : 'rl-appear-in')),
@@ -843,7 +847,7 @@ function fileKind(ext) {
 function FileBubble(props) {
   var out = props.from === 'out';
   var ext = (props.ext || 'pdf').toUpperCase();
-  return h('div', { class: cx('rl-msgline', out && 'rl-msgline-out', props.groupStart && 'rl-msgline-gap') },
+  return h(MsgLine, { aside: props.aside, class: cx('rl-msgline', out && 'rl-msgline-out', props.groupStart && 'rl-msgline-gap') },
     h('div', { class: cx('rl-bubble rl-file', out ? 'rl-bubble-out' : 'rl-bubble-in-side', props.tail && 'rl-bubble-tail') },
       props.fwd ? h(ForwardTitle, { fwd: props.fwd }) : null,
       // как в Telegram: цветной квадрат с загнутым уголком и расширением; скачивание и загрузка — внутри квадрата
@@ -1305,4 +1309,4 @@ function ScrollToBottom(props) {
 }
 
 
-export { ForwardTitle, peerTone, RelayLogo, Verified, ArchivedRow, ReplyQuote, ReactionChips, cx, chain, ripple, reducedMotion, omit, fmtTime, makeWave, ICONS, Icon, Button, IconButton, Avatar, Badge, Chip, SearchField, ChatRow, ChatRowSkeleton, Bubble, MessageStatus, TypingIndicator, DateDivider, Banner, NavRail, Checkbox, Toast, Card, Steps, MediaArt, ProgressRing, Waveform, VoiceMessage, VoiceRecorder, MediaBubble, MediaPolicy, mediaHeld, FileBubble, MediaThumb, MediaViewer, Switch, PanelHeader, ProfileHeader, ActionTile, InfoRow, SettingsIcon, ReadMore, Presence, useMinVisible, LazyImage, FlipList, SyncIndicator, LinearProgress, EmptyState, ScrollToBottom };
+export { MsgLine, ForwardTitle, peerTone, RelayLogo, Verified, ArchivedRow, ReplyQuote, ReactionChips, cx, chain, ripple, reducedMotion, omit, fmtTime, makeWave, ICONS, Icon, Button, IconButton, Avatar, Badge, Chip, SearchField, ChatRow, ChatRowSkeleton, Bubble, MessageStatus, TypingIndicator, DateDivider, Banner, NavRail, Checkbox, Toast, Card, Steps, MediaArt, ProgressRing, Waveform, VoiceMessage, VoiceRecorder, MediaBubble, MediaPolicy, mediaHeld, FileBubble, MediaThumb, MediaViewer, Switch, PanelHeader, ProfileHeader, ActionTile, InfoRow, SettingsIcon, ReadMore, Presence, useMinVisible, LazyImage, FlipList, SyncIndicator, LinearProgress, EmptyState, ScrollToBottom };

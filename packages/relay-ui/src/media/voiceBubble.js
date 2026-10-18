@@ -6,7 +6,7 @@
 // Перемотка перетаскиванием: пока тянем — пауза и предпросмотр, отпустили — переход и продолжение.
 import { h } from 'preact';
 import { useEffect, useRef } from 'preact/hooks';
-import { cx, ForwardTitle, Icon, MessageStatus, ProgressRing } from '../kit.js';
+import { cx, ForwardTitle, MsgLine, Icon, MessageStatus, ProgressRing } from '../kit.js';
 import { requestMeasure, requestMutation } from '../schedule.js';
 import { fromBase64, unpack, waveBars } from './waveform.js';
 import * as player from './player.js';
@@ -127,7 +127,7 @@ export function VoiceBubble(props) {
   }
 
   var unreadDot = props.unread;
-  return h('div', { class: cx('rl-msgline', out && 'rl-msgline-out', props.groupStart && 'rl-msgline-gap') },
+  return h(MsgLine, { aside: props.aside, class: cx('rl-msgline', out && 'rl-msgline-out', props.groupStart && 'rl-msgline-gap') },
     h('div', { class: cx('rl-bubble rl-vb', out ? 'rl-bubble-out' : 'rl-bubble-in-side', props.tail && 'rl-bubble-tail', props.appear && (out ? 'rl-appear-out' : 'rl-appear-in')) },
       props.fwd ? h(ForwardTitle, { fwd: props.fwd }) : null,
       h('div', { class: 'rl-vb-row' },

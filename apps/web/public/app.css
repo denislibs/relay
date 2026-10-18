@@ -775,3 +775,29 @@ html[data-anim="0"] .app-chatcol, html[data-anim="0"] .app-chatcol-below, html[d
 :root { --gsearch-bg: #f4f4f5; }
 :root[data-theme="dark"] { --gsearch-bg: var(--page); }
 @media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) { --gsearch-bg: var(--page); } }
+
+/* ---------- пересылка: выбор сообщений и круглая стрелка ---------- */
+/* режим выбора: слева кружок-галочка, строка сдвигается под него; отмеченная — подсветка от края до края */
+.app-feed-selecting .app-msg { cursor: pointer; }
+.app-msg-sel { isolation: isolate; padding-left: 40px; transition: padding-left 200ms cubic-bezier(.33, 1, .68, 1); }
+.app-msg-check { position: absolute; left: 4px; bottom: 6px; z-index: 1; display: grid; place-items: center; width: 24px; height: 24px; border: 2px solid #fff; border-radius: 50%;
+  background: rgba(0, 0, 0, .18); color: #fff; box-shadow: 0 1px 3px rgba(0, 0, 0, .2); animation: app-check-in 180ms cubic-bezier(.34, 1.56, .64, 1) both; }
+.app-msg-check .rl-icon { opacity: 0; transform: scale(.5); transition: opacity 120ms ease, transform 160ms cubic-bezier(.34, 1.56, .64, 1); }
+.app-msg-on .app-msg-check { background: var(--button, #3390ec); border-color: #fff; }
+.app-msg-on .app-msg-check .rl-icon { opacity: 1; transform: none; }
+@keyframes app-check-in { from { opacity: 0; transform: scale(.4); } }
+.app-msg-on::before { content: ''; position: absolute; z-index: -1; top: -2px; bottom: -2px; left: 50%; width: calc(100cqw + 2 * var(--space-float, 16px)); transform: translateX(-50%);
+  background: color-mix(in srgb, var(--button, #3390ec) 18%, transparent); pointer-events: none; }
+/* поле ввода → панель «Выбрано: N» */
+.app-selwrap { padding: 0; background: transparent; box-shadow: none; }
+.app-selwrap .rl-selbar { flex: 1; height: 48px; padding: 0 6px; border-radius: 24px; background: var(--raised); box-shadow: var(--tg-shadow-composer, var(--shadow-float)); }
+
+/* круглая «Переслать» у пузыря: проявляется при наведении (на сенсорных — видна всегда); у своих — слева, у входящих — справа */
+.app-fwd-quick { align-self: flex-end; flex: none; display: grid; place-items: center; width: 34px; height: 34px; margin: 0 8px 2px; padding: 0; border: 0; border-radius: 50%;
+  background: color-mix(in srgb, #000 22%, transparent); color: #fff; cursor: pointer; opacity: 0; transform: scale(.85);
+  transition: opacity 150ms ease, transform 150ms ease, background-color 150ms ease; -webkit-backdrop-filter: blur(8px); backdrop-filter: blur(8px); }
+.rl-msgline-out > .app-fwd-quick { order: -1; }
+.app-msg:hover .app-fwd-quick, .app-fwd-quick:focus-visible { opacity: 1; transform: none; }
+.app-fwd-quick:hover { background: color-mix(in srgb, #000 34%, transparent); }
+@media (hover: none) { .app-fwd-quick { opacity: 1; transform: none; } }
+@media (prefers-reduced-motion: reduce) { .app-msg-sel, .app-msg-check, .app-msg-check .rl-icon, .app-fwd-quick { transition: none; animation: none; } }

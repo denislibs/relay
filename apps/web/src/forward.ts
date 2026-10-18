@@ -77,3 +77,14 @@ export async function sendForwardDraft(chatId: number, body: string, entities: E
   await forwardMessages({ fromChatId: d.fromChatId, ids: d.ids, toChatIds: [chatId], hideSender: d.hideSender, hideCaption: d.hideCaption,
     comment: body.trim() ? { body, entities } : null });
 }
+
+/** Режим выбора: начать с сообщения (у альбома — все его ключи), отметить/снять, выйти. */
+export function startSelect(chatId: number, keys: string[]): void { setGlobal({ selecting: { chatId, keys: [...new Set(keys)] } }); }
+export function toggleSelect(chatId: number, keys: string[]): void {
+  const cur = getGlobal().selecting;
+  if (!cur || cur.chatId !== chatId) return;
+  const on = keys.every((k) => cur.keys.includes(k));
+  const next = on ? cur.keys.filter((k) => !keys.includes(k)) : [...cur.keys, ...keys.filter((k) => !cur.keys.includes(k))];
+  setGlobal({ selecting: next.length ? { chatId, keys: next } : null });   // сняли последнее — режим выбора закрывается, как в Telegram
+}
+export function endSelect(): void { if (getGlobal().selecting) setGlobal({ selecting: null }); }

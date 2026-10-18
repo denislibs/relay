@@ -2,7 +2,7 @@ import { PinnedBar } from './PinnedBar';
 import { membersStatus, useMembers } from '../members';
 import { Playlist } from './Playlist';
 import { inProfile, toggleProfileMusic, type Track } from '../music';
-import { Avatar, Button, Icon, MediaPolicy, peerTone, ChatSearchBar, Highlight, ripple, useMinVisible, requestMeasure, Composer, DropOverlay, GlassBar, IconButton, Menu, Modal, ConfirmDialog, Presence, ReactionPicker, plural, requestMutation, applyMarkdown, emptyValue, sameValue, voiceSupported, PlayerBar, roundSupported, startRound, Verified } from '@relay/ui';
+import { Avatar, Button, Icon, MediaPolicy, peerTone, ChatSearchBar, Highlight, ripple, useMinVisible, requestMeasure, Composer, DropOverlay, GlassBar, IconButton, Menu, Modal, ConfirmDialog, Presence, ReactionPicker, plural, requestMutation, SelectionBar, applyMarkdown, emptyValue, sameValue, voiceSupported, PlayerBar, roundSupported, startRound, Verified } from '@relay/ui';
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'preact/hooks';
 import { closeChat, deleteMessage, editMessage, ensureNames, focusMessage, openChat, openUserChat, pinMessage, unpinMessage, sendFile, sendFiles, sendRound, sendVoice, react, saveDraft, searchMessages, send, typing, typingDone } from '../data';
 import type { Item, SearchHit } from '@relay/sync-engine/src/types';
@@ -17,7 +17,7 @@ import { chatKindFor, mediaPolicy } from '../autoload';
 import { chatTime, chatTone, fileSize, isSystemChat, lastSeenText, shownBody, snippet } from './format';
 import type { ProfilePhoto } from '@relay/protocol';
 import { avatarPhoto } from '../profilePhoto';
-import { cancelForwardDraft, forwardElsewhere, patchForwardDraft, sendForwardDraft, startForward } from '../forward';
+import { cancelForwardDraft, endSelect, forwardElsewhere, patchForwardDraft, sendForwardDraft, startForward, startSelect } from '../forward';
 
 
 const NO_MESSAGES: Item[] = [];
@@ -48,7 +48,7 @@ export function Chat({ chatId, frameKey, active }: { chatId: number; frameKey: s
   const [recordModes, setRecordModes] = useState<string[]>([]);
   useEffect(() => { let live = true; voiceSupported().then((ok: boolean) => { if (live) setRecordModes([...(ok ? ['voice'] : []), ...(roundSupported() ? ['round'] : [])]); }); return () => { live = false; }; }, []);
   const [recordMode, setRecordMode] = useState<string>(() => { try { return localStorage.getItem('relay.recordMode') || 'voice'; } catch { return 'voice'; } });
-  const [confirmDelete, setConfirmDelete] = useState<{ id: number } | null>(null);
+  const [confirmDelete, setConfirmDelete] = useState<{ ids: number[] } | null>(null);
   // поиск по чату: строка вместо шапки, совпадения новые → старые, Enter — к более старому
   const [finding, setFinding] = useState(false);
   const [findQ, setFindQ] = useState('');
@@ -254,7 +254,18 @@ export function Chat({ chatId, frameKey, active }: { chatId: number; frameKey: s
   } : null;
   const nameOf = (id: number) => (id === me.userId ? me.name : names[id] ?? (chat?.kind === 'direct' ? title : ''));
   // «Переслать» из меню: у альбома — весь альбом
-  const forwardMenuMsg = (m: Item) => startForward(chatId, m.groupId ? messages.filter((x) => x.groupId === m.groupId && x.senderId === m.senderId) : [m], nameOf);
+  const groupOf = (m: Item) => (m.groupId ? messages.filter((x) => x.groupId === m.groupId && x.senderId === m.senderId) : [m]);
+  const forwardMenuMsg = (m: Item) => startForward(chatId, groupOf(m), nameOf);
+  // режим выбора: вместо поля ввода — панель «Выбрано: N» (Переслать / Копировать / Удалить, если все свои)
+  const selKeys = useGlobal((s) => (s.selecting?.chatId === chatId ? s.selecting.keys : null));
+  const selected = selKeys ? messages.filter((m) => selKeys.includes(m.key as string)) : [];
+  useEffect(() => endSelect, [chatId]);   // ушли из чата — выбор сбрасывается
+  useEffect(() => {
+    if (!selKeys) return;
+    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape' && !e.defaultPrevented) { e.preventDefault(); endSelect(); } };
+    addEventListener('keydown', onKey);
+    return () => removeEventListener('keydown', onKey);
+  }, [!!selKeys]);
 
   return (
     <>
@@ -329,6 +340,15 @@ export function Chat({ chatId, frameKey, active }: { chatId: number; frameKey: s
             ) : <span>Вы не можете отправлять сообщения этому пользователю</span>}
           </div>
         </div>
+      ) : selKeys ? (
+        <div class="rl-composer-wrap app-plate-wrap">
+          <div class="rl-composer app-selwrap">
+            <SelectionBar count={selected.length} onCancel={endSelect}
+              onForward={() => { const list = selected; endSelect(); startForward(chatId, list, nameOf); }}
+              onCopy={() => { navigator.clipboard?.writeText(selected.filter((m) => m.body).map((m) => m.body as string).join('\n\n')).catch(() => {}); showToast('Скопировано'); endSelect(); }}
+              onDelete={selected.length && selected.every((m) => m.senderId === me.userId) ? () => setConfirmDelete({ ids: selected.map((m) => m.id as number) }) : undefined} />
+          </div>
+        </div>
       ) : <Composer
         id="composer"
         apiRef={api}
@@ -392,12 +412,13 @@ export function Chat({ chatId, frameKey, active }: { chatId: number; frameKey: s
                 items={[
                   ...(menuMsg.id != null && !menuMsg.deleted && !system ? [{ icon: 'reply', label: 'Ответить', onClick: () => { if (editing) endEdit(editing.draft); setReplyKey(menuMsg.key as string); api.current?.focus({ end: true }); } }] : []),
                   ...(menuMsg.id != null && !menuMsg.deleted && !menuMsg.service ? [{ icon: 'forward', label: 'Переслать', onClick: () => forwardMenuMsg(menuMsg) }] : []),
+                  ...(menuMsg.id != null && !menuMsg.deleted && !menuMsg.service ? [{ icon: 'checkCircle', label: 'Выбрать', onClick: () => startSelect(chatId, groupOf(menuMsg).map((x) => x.key as string)) }] : []),
                   ...(own && !system ? [{ icon: 'pencil', label: 'Изменить', onClick: () => startEdit(menuMsg) }] : []),
                   ...(menuMsg.id != null && !menuMsg.deleted && !system && !menuMsg.service ? [((chat?.pinned as number[] | undefined) ?? []).includes(menuMsg.id as number)
                     ? { icon: 'pin', label: 'Открепить', onClick: () => void unpinMessage(chatId, menuMsg.id as number) }
                     : { icon: 'pin', label: 'Закрепить', onClick: () => void pinMessage(chatId, menuMsg.id as number) }] : []),
                   ...(!menuMsg.deleted ? [{ icon: 'copy', label: 'Копировать', onClick: () => { navigator.clipboard?.writeText(menuMsg.body as string).catch(() => {}); } }] : []),
-                  ...(own ? ['-' as const, { icon: 'trash', label: 'Удалить', danger: true, onClick: () => setConfirmDelete({ id: menuMsg.id as number }) }] : []),
+                  ...(own ? ['-' as const, { icon: 'trash', label: 'Удалить', danger: true, onClick: () => setConfirmDelete({ ids: [menuMsg.id as number] }) }] : []),
                 ]}
               />
             </div>
@@ -444,8 +465,9 @@ export function Chat({ chatId, frameKey, active }: { chatId: number; frameKey: s
           />
         </Modal>
       ) : null}
-      <ConfirmDialog open={!!confirmDelete} danger title="Удалить сообщение?" text="Сообщение исчезнет у всех участников чата." confirm="Удалить у всех"
-        onCancel={() => setConfirmDelete(null)} onConfirm={() => { if (confirmDelete) deleteMessage(chatId, confirmDelete.id).catch(() => {}); setConfirmDelete(null); }} />
+      <ConfirmDialog open={!!confirmDelete} danger title={confirmDelete && confirmDelete.ids.length > 1 ? `Удалить ${confirmDelete.ids.length} ${plural(confirmDelete.ids.length, 'сообщение', 'сообщения', 'сообщений')}?` : 'Удалить сообщение?'}
+        text={confirmDelete && confirmDelete.ids.length > 1 ? 'Сообщения исчезнут у всех участников чата.' : 'Сообщение исчезнет у всех участников чата.'} confirm="Удалить у всех"
+        onCancel={() => setConfirmDelete(null)} onConfirm={() => { if (confirmDelete) for (const id of confirmDelete.ids) deleteMessage(chatId, id).catch(() => {}); setConfirmDelete(null); endSelect(); }} />
     </>
   );
 }

@@ -3,7 +3,7 @@
 // Файлы, отправленные вместе, — один пузырь: pos first/middle/last склеивает строки, время — только у последней.
 import { h } from 'preact';
 import { useEffect, useRef, useState } from 'preact/hooks';
-import { cx, ForwardTitle, Icon, MessageStatus, ProgressRing } from '../kit.js';
+import { cx, ForwardTitle, MsgLine, Icon, MessageStatus, ProgressRing } from '../kit.js';
 import * as player from './player.js';
 
 // треки, которые включали в этой вкладке: файл уже качается в кэш — значок «скачать» в углу не нужен (как в Telegram).
@@ -37,7 +37,7 @@ export function MusicBubble(props) {
     var r = e.currentTarget.getBoundingClientRect();
     if (r.width) player.seek(props.trackKey, (e.clientX - r.left) / r.width);
   }
-  return h('div', { class: cx('rl-msgline', out && 'rl-msgline-out', props.groupStart && pos !== 'middle' && pos !== 'last' && 'rl-msgline-gap', 'rl-music-line', 'rl-music-' + pos) },
+  return h(MsgLine, { aside: props.aside, class: cx('rl-msgline', out && 'rl-msgline-out', props.groupStart && pos !== 'middle' && pos !== 'last' && 'rl-msgline-gap', 'rl-music-line', 'rl-music-' + pos) },
     h('div', { class: cx('rl-bubble', out ? 'rl-bubble-out' : 'rl-bubble-in-side', props.tail && last && 'rl-bubble-tail', 'rl-music') },
       props.fwd ? h(ForwardTitle, { fwd: props.fwd }) : null,
       h('div', { class: 'rl-music-row' },

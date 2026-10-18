@@ -1846,3 +1846,4 @@ html[data-blur="0"] .rl-menu, html[data-blur="0"] .rl-attach { -webkit-backdrop-
 @media (prefers-reduced-motion: reduce) { .rl-chatpick-send { animation: none; } }
 .rl-chatpick-head .rl-picker-search input { width: 100%; height: 32px; border: 0; outline: none; background: transparent; color: var(--ink); font: 400 15px/20px var(--font-sans); }
 .rl-chatpick-head .rl-picker-search input::-webkit-search-cancel-button { display: none; }
+.rl-chatpick .rl-chatpick-head .rl-picker-search, .rl-chatpick .rl-chatpick-head .rl-picker-search:focus-within { border: 0; box-shadow: none; background: transparent; }

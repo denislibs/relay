@@ -1,13 +1,14 @@
 import type { Item } from '@relay/sync-engine/src/types';
 import { senderAvatar } from '../profilePhoto';
 import type { Entity } from '@relay/protocol';
-import { Bubble, peerTone, DateDivider, DatePicker, FileBubble, MediaBubble, MessageText, VoiceBubble, MusicBubble, RoundBubble, player, MediaViewer, ScrollToBottom, beginHeavyAnimation, forceMeasure, isHeavyAnimating, onHeavyAnimationEnd, requestMeasure, requestMutation } from '@relay/ui';
+import { Bubble, Icon, peerTone, DateDivider, DatePicker, FileBubble, MediaBubble, MessageText, VoiceBubble, MusicBubble, RoundBubble, player, MediaViewer, ScrollToBottom, beginHeavyAnimation, forceMeasure, isHeavyAnimating, onHeavyAnimationEnd, requestMeasure, requestMutation } from '@relay/ui';
 import { memo } from 'preact/compat';
 import { useEffect, useLayoutEffect, useRef, useState } from 'preact/hooks';
 import { clearFocus, ensureNames, focusMessage, jumpToDate, localPreview, markListened, moveWindow, react, savePosition, savedPosition, seen } from '../data';
 import { activeFrame, frameByKey, getGlobal, useGlobal } from '../global';
 import { toggleMusic, trackTitle, useFileCached } from '../music';
 import { showToast } from '../settingsData';
+import { startForward, toggleSelect } from '../forward';
 import { clock, dayKey, dayLabel, fileSize } from './format';
 
 /*
@@ -31,10 +32,10 @@ const FIRST_PAINT = 24;   // при открытии внизу первым к�
 type Quote = { id: number; sort: number; body: string; senderId: number };
 type Att = { id: string; kind: 'photo' | 'file' | 'voice' | 'round' | 'audio'; title?: string | null; performer?: string | null; mime: string; name: string; size: number; w: number | null; h: number | null; thumb?: string | null; duration?: number | null; waveform?: string | null };
 const fileUrl = (a: Att, download = false) => `/files/${a.id}${download ? '?download=1' : ''}`;
-type RowProps = { chatId: number; voiceTitle: string; author?: string; onAuthor?: (m: Item) => void; onOpen: (m: Item) => void; hl?: string; m: Item; meId: number; out: boolean; start: boolean; end: boolean; pos?: 'single' | 'first' | 'middle' | 'last'; quoted?: Quote | null; quoteAuthor?: string; quoteTone?: number; appear: boolean; flash: boolean; onReact: (m: Item, emoji: string) => void; album?: Item[]; onUser?: (userId: number) => void };
+type RowProps = { chatId: number; voiceTitle: string; author?: string; onAuthor?: (m: Item) => void; onOpen: (m: Item) => void; hl?: string; m: Item; meId: number; out: boolean; start: boolean; end: boolean; pos?: 'single' | 'first' | 'middle' | 'last'; quoted?: Quote | null; quoteAuthor?: string; quoteTone?: number; appear: boolean; flash: boolean; onReact: (m: Item, emoji: string) => void; album?: Item[]; onUser?: (userId: number) => void; sel?: boolean; onQuickForward?: (m: Item) => void };
 
 /** Строка ленты: перерисовывается только если изменилось её сообщение или место в группе. */
-const Row = memo(function Row({ chatId, voiceTitle, author, onAuthor, onOpen, hl, m, meId, out, start, end, pos, quoted, quoteAuthor, quoteTone, appear, flash, onReact, album, onUser }: RowProps) {
+const Row = memo(function Row({ chatId, voiceTitle, author, onAuthor, onOpen, hl, m, meId, out, start, end, pos, quoted, quoteAuthor, quoteTone, appear, flash, onReact, album, onUser, sel, onQuickForward }: RowProps) {
   // реакции: по эмодзи — сколько и есть ли моя
   const list = (m.reactions as { userId: number; emoji: string }[] | undefined) ?? [];
   const chips: { emoji: string; count: number; mine: boolean }[] = [];
@@ -47,6 +48,12 @@ const Row = memo(function Row({ chatId, voiceTitle, author, onAuthor, onOpen, hl
   const ff = !m.deleted ? m.fwdFrom as { userId: number; name: string } | null | undefined : null;
   const fwd = ff ? { name: ff.name, tone: peerTone(ff.userId), avatar: senderAvatar(ff.userId),
     onClick: ff.userId !== meId && onUser ? () => onUser(ff.userId) : undefined } : undefined;
+  // режим выбора: строка отмечается кликом (обработчик — у ленты), кружок-галочка слева
+  const wrap = (base: string) => base + (flash ? ' app-msg-flash' : '') + (sel !== undefined ? ' app-msg-sel' : '') + (sel ? ' app-msg-on' : '');
+  // круглая стрелка «Переслать» у пузыря при наведении — у медиа и длинных сообщений (не в режиме выбора)
+  const aside = sel === undefined && onQuickForward && m.id != null && !m.deleted && !m.service && (att || (m.body as string).length > 300)
+    ? <button type="button" class="app-fwd-quick" aria-label="Переслать" onClick={(e) => { e.stopPropagation(); onQuickForward(album?.[0] ?? m); }}><Icon name="forward" size={20} /></button> : null;
+  const check = sel !== undefined ? <span class="app-msg-check" aria-hidden="true"><Icon name="check" size={14} strokeWidth={3} /></span> : null;
   const pending = m.status === 'pending' && typeof m.progress === 'number' && (m.progress as number) < 1;
   const mark = m.id != null ? <i class="app-mark" data-mid={m.id as number} aria-hidden="true" /> : null;
   if (album && album.length > 1) {
@@ -56,9 +63,11 @@ const Row = memo(function Row({ chatId, voiceTitle, author, onAuthor, onOpen, hl
     const cap = album.find((x) => x.body);
     const busy = album.some((x) => x.status === 'pending' && typeof x.progress === 'number' && (x.progress as number) < 1);
     return (
-      <div class={flash ? 'app-msg app-msg-media app-msg-flash' : 'app-msg app-msg-media'} data-key={m.key} data-sort={m.sort as number}>
+      <div class={wrap('app-msg app-msg-media')} data-key={m.key} data-sort={m.sort as number}>
+        {check}
         <MediaBubble
           fwd={fwd}
+          aside={aside}
           from={out ? 'out' : 'in'} tail={end} groupStart={start} appear={appear}
           items={album.map((x) => { const a = x.attachment as Att; return { src: localPreview(x.key) ?? (a.id ? fileUrl(a) : undefined), thumb: a.thumb, alt: a.name, w: a.w, h: a.h, mkey: x.key }; })}
           state={busy ? 'loading' : 'ready'} progress={busy ? Math.min(...album.map((x) => (typeof x.progress === 'number' ? x.progress as number : 1))) : undefined}
@@ -74,9 +83,11 @@ const Row = memo(function Row({ chatId, voiceTitle, author, onAuthor, onOpen, hl
     // фото знает размеры заранее: рамка нужной высоты сразу, размытое превью, полная картинка — лениво
     const src = localPreview(m.key) ?? (att.id ? fileUrl(att) : undefined);
     return (
-      <div class={flash ? 'app-msg app-msg-media app-msg-flash' : 'app-msg app-msg-media'} data-key={m.key} data-sort={m.sort as number}>
+      <div class={wrap('app-msg app-msg-media')} data-key={m.key} data-sort={m.sort as number}>
+        {check}
         <MediaBubble
           fwd={fwd}
+          aside={aside}
           from={out ? 'out' : 'in'} tail={end} groupStart={start} appear={appear}
           items={[{ src, thumb: att.thumb, alt: att.name }]}
           ratio={`${att.w} / ${att.h}`}
@@ -93,9 +104,11 @@ const Row = memo(function Row({ chatId, voiceTitle, author, onAuthor, onOpen, hl
     // голосовое: точка «не прослушано» — пока получатель не включил (у отправителя тоже, как в Telegram)
     const unheard = m.id != null && !m.listened;
     return (
-      <div class={flash ? 'app-msg app-msg-flash' : 'app-msg'} data-key={m.key} data-sort={m.sort as number}>
+      <div class={wrap('app-msg')} data-key={m.key} data-sort={m.sort as number}>
+        {check}
         <VoiceBubble
           fwd={fwd}
+          aside={aside}
           from={out ? 'out' : 'in'} tail={end} groupStart={start} appear={appear}
           trackKey={m.key as string} duration={att.duration ?? 0} waveform={att.waveform ?? null}
           unread={unheard} unreadIncoming={unheard && !out}
@@ -110,9 +123,11 @@ const Row = memo(function Row({ chatId, voiceTitle, author, onAuthor, onOpen, hl
   if (att && !m.deleted && att.kind === 'round') {
     const unseen = m.id != null && !m.listened;
     return (
-      <div class={flash ? 'app-msg app-msg-flash' : 'app-msg'} data-key={m.key} data-sort={m.sort as number}>
+      <div class={wrap('app-msg')} data-key={m.key} data-sort={m.sort as number}>
+        {check}
         <RoundBubble
           fwd={fwd}
+          aside={aside}
           from={out ? 'out' : 'in'} groupStart={start} appear={appear}
           src={localPreview(m.key as string) ?? (att.id ? fileUrl(att) : undefined)} thumb={att.thumb ?? null}
           duration={att.duration ?? 0} unread={unseen}
@@ -126,9 +141,11 @@ const Row = memo(function Row({ chatId, voiceTitle, author, onAuthor, onOpen, hl
   }
   if (att && !m.deleted && att.kind === 'audio') {
     return (
-      <div class={flash ? 'app-msg app-msg-flash' : 'app-msg'} data-key={m.key} data-sort={m.sort as number}>
+      <div class={wrap('app-msg')} data-key={m.key} data-sort={m.sort as number}>
+        {check}
         <CachedMusic
           fwd={fwd}
+          aside={aside}
           fileId={att.id ?? undefined} from={out ? 'out' : 'in'} tail={end} groupStart={start} pos={pos}
           trackKey={m.key as string} title={att.title || trackTitle(att.name)} performer={att.performer ?? undefined} cover={att.thumb ?? undefined}
           duration={att.duration ?? 0} size={fileSize(att.size)}
@@ -148,9 +165,11 @@ const Row = memo(function Row({ chatId, voiceTitle, author, onAuthor, onOpen, hl
   if (att && !m.deleted && att.id !== undefined && att.kind === 'file') {
     const ext = (att.name.split('.').pop() ?? 'file').slice(0, 4);
     return (
-      <div class={flash ? 'app-msg app-msg-flash' : 'app-msg'} data-key={m.key} data-sort={m.sort as number}>
+      <div class={wrap('app-msg')} data-key={m.key} data-sort={m.sort as number}>
+        {check}
         <FileBubble
           fwd={fwd}
+          aside={aside}
           from={out ? 'out' : 'in'} tail={end} groupStart={start}
           name={att.name} ext={ext} meta={fileSize(att.size)}
           state={pending ? 'loading' : att.id ? 'remote' : 'loading'} progress={m.progress as number}
@@ -162,9 +181,11 @@ const Row = memo(function Row({ chatId, voiceTitle, author, onAuthor, onOpen, hl
     );
   }
   return (
-    <div class={flash ? 'app-msg app-msg-flash' : 'app-msg'} data-key={m.key} data-sort={m.sort as number}>
+    <div class={wrap('app-msg')} data-key={m.key} data-sort={m.sort as number}>
+      {check}
       <Bubble
         fwd={fwd}
+        aside={aside}
         from={out ? 'out' : 'in'}
         tail={end}
         groupStart={start}
@@ -537,6 +558,16 @@ export function Feed({ frameKey, active, chatId, meId, peerName, group, onAuthor
 
   // клик по цитате — к исходному сообщению; по моноширинному фрагменту (код входа) — копировать его.
   // Делегирование: один обработчик на ленту, а не на каждый бабл
+  // режим выбора: клик по строке отмечает её (у альбома — все фото); ловим на погружении — ссылки, фото
+  // и кнопки внутри пузыря не срабатывают
+  const onSelectClick = (e: MouseEvent) => {
+    const row = (e.target as Element).closest<HTMLElement>('.app-msg');
+    const m = row ? messages.find((x) => x.key === row.dataset.key) : undefined;
+    if (!m) return;
+    e.preventDefault(); e.stopPropagation();
+    if (m.id == null || m.deleted || m.service) return;
+    toggleSelect(chatId, (m.groupId ? messages.filter((x) => x.groupId === m.groupId && x.senderId === m.senderId) : [m]).map((x) => x.key as string));
+  };
   const onClick = (e: MouseEvent) => {
     if (copyCode(e)) return;
     const quote = (e.target as Element).closest('.rl-quote');
@@ -585,6 +616,17 @@ export function Feed({ frameKey, active, chatId, meId, peerName, group, onAuthor
   const authorRef = useRef(onAuthor); authorRef.current = onAuthor;
   const onAuthorRow = useRef((m: Item) => authorRef.current(m.senderId as number)).current;
   const onUserRow = useRef((userId: number) => authorRef.current(userId)).current;
+  const selecting = useGlobal((s) => (s.selecting?.chatId === chatId ? s.selecting.keys : null));
+  const me = useGlobal((s) => s.me);
+  const nameOf = (id: number) => (id === meId ? me?.name ?? '' : names[id] ?? peerName);
+  const nameRef = useRef(nameOf); nameRef.current = nameOf;
+  const msgsRef = useRef<Item[]>([]);
+  msgsRef.current = messages;
+  // круглая стрелка у пузыря: альбом — целиком
+  const onQuickForward = useRef((m: Item) => {
+    const all = msgsRef.current;
+    startForward(chatId, m.groupId ? all.filter((x) => x.groupId === m.groupId && x.senderId === m.senderId) : [m], nameRef.current);
+  }).current;
   useEffect(() => { if (group) ensureNames([...new Set(messages.filter((m) => m.senderId !== meId).map((m) => m.senderId as number))]); }, [group, messages]);
 
   // контекстное меню — одно на ленту, а не на каждый бабл (иначе обработчик ломал бы мемоизацию строк)
@@ -642,6 +684,8 @@ export function Feed({ frameKey, active, chatId, meId, peerName, group, onAuthor
         author={group && !mine && start && !m.deleted ? names[m.senderId as number] ?? '' : undefined}
         onAuthor={onAuthorRow}
         onUser={onUserRow}
+        sel={selecting ? selecting.includes(m.key as string) : undefined}
+        onQuickForward={onQuickForward}
         hl={highlight && (m.body as string).toLowerCase().includes(highlight.toLowerCase()) ? highlight : undefined}
         m={m}
         meId={meId}
@@ -666,7 +710,7 @@ export function Feed({ frameKey, active, chatId, meId, peerName, group, onAuthor
 
   return (
     <>
-      <div class="rl-feed" ref={el} onScroll={onScroll} onClick={onClick} onContextMenu={onContextMenu} aria-live="polite">{out}</div>
+      <div class={selecting ? 'rl-feed app-feed-selecting' : 'rl-feed'} ref={el} onScroll={onScroll} onClick={onClick} onClickCapture={selecting ? onSelectClick : undefined} onContextMenu={onContextMenu} aria-live="polite">{out}</div>
       {openIndex !== null && photos[openIndex] ? (
         <MediaViewer
           index={openIndex}
@@ -674,6 +718,7 @@ export function Feed({ frameKey, active, chatId, meId, peerName, group, onAuthor
           items={photos.map((m) => { const a = m.attachment as Att; return { sender: names[m.senderId as number] ?? '', avatar: senderAvatar(m.senderId as number),   // не название группы: пока имени нет — пусто, оно подгружается заранее
  src: localPreview(m.key) ?? fileUrl(a), thumb: a.thumb, w: a.w, h: a.h, name: a.name, download: fileUrl(a, true), caption: m.body, date: clock(m.createdAt as string) }; })}
           origin={originOf}
+          actions={(_it: unknown, i: number) => [{ icon: 'forward', label: 'Переслать', onClick: () => { const p = photos[i]; setViewer(null); if (p) startForward(chatId, [p], nameOf); } }]}
           onClose={() => setViewer(null)}
         />
       ) : null}

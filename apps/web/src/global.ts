@@ -63,6 +63,7 @@ export interface GlobalState {
   playlistOpen: boolean;  // окно плейлиста музыки (music.ts)
   fwdPick: ForwardPick | null;               // открыто окно «Переслать в…» (forward.ts)
   fwdDraft: Record<number, ForwardDraft>;    // пересылка, ждущая в поле ввода чата (панель над полем)
+  selecting: { chatId: number; keys: string[] } | null;   // режим выбора сообщений в ленте (ключи по порядку отметки)
   myMusic: string[];      // id вложений, добавленных в мой профиль
   notify: NotifyState;   // уведомления на этом устройстве
   pushReady: boolean;    // подписка Web Push принята сервером: уведомит и без открытой вкладки
@@ -129,6 +130,7 @@ let state: GlobalState = {
   playlistOpen: false,
   fwdPick: null,
   fwdDraft: {},
+  selecting: null,
   myMusic: [],
   notify: 'unsupported',
   pushReady: false,

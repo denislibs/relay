@@ -165,10 +165,10 @@ function SelectionBar(props) {
   return h('div', { class: 'rl-selbar', role: 'toolbar', 'aria-label': 'Действия с выбранными' },
     h(IconButton, { icon: 'close', label: 'Отменить выбор', onClick: props.onCancel }),
     h('span', { class: 'rl-selbar-count', key: n }, 'Выбрано: ' + n),
-    h(IconButton, { icon: 'star', label: 'В избранное', disabled: !n, onClick: props.onStar }),
+    props.onStar ? h(IconButton, { icon: 'star', label: 'В избранное', disabled: !n, onClick: props.onStar }) : null,
     h(IconButton, { icon: 'copy', label: 'Копировать', disabled: !n, onClick: props.onCopy }),
     h(IconButton, { icon: 'forward', label: 'Переслать', disabled: !n, onClick: props.onForward }),
-    h(IconButton, { icon: 'trash', label: 'Удалить', disabled: !n, onClick: props.onDelete }));
+    props.onDelete !== null ? h(IconButton, { icon: 'trash', label: 'Удалить', disabled: !n || !props.onDelete, onClick: props.onDelete }) : null);
 }
 
 /* ---------- ChatSearchBar + Highlight ---------- */
