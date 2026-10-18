@@ -1,4 +1,4 @@
-import type { Birthday, ChatFolder, Entity, PrivacyKey, PrivacyMode, ProfileLink, ProfilePhoto, ServiceType } from '@relay/protocol';
+import type { Birthday, ChatFolder, Entity, ForwardInfo, ForwardRef, PrivacyKey, PrivacyMode, ProfileLink, ProfilePhoto, ServiceType } from '@relay/protocol';
 
 export type Status = 'pending' | 'sent' | 'read' | 'failed';
 
@@ -24,6 +24,7 @@ export interface LocalMessage {
   progress?: number;      // загрузка файла 0..1, пока сообщение в очереди
   error?: string;         // почему не отправлено (failed): 'blocked' — собеседник заблокировал отправителя
   service?: { type: ServiceType };   // служебное сообщение от «Relay»
+  fwdFrom?: ForwardInfo | null;      // пересланное: исходный автор, откуда и когда
 }
 
 /** Вложение сообщения; у неотправленного id пустой, пока файл не загружен. */
@@ -63,6 +64,8 @@ export interface OutboxEntry {
   entities?: Entity[];
   error?: string;         // код отказа сервера (failed)
   groupId?: string | null;   // отправлены вместе — один пузырь
+  forward?: ForwardRef | null;      // пересылка: сервер копирует оригинал (вложение не загружается заново)
+  fwdFrom?: ForwardInfo | null;     // как показать до подтверждения
 }
 
 export type Query =
@@ -155,7 +158,9 @@ export type Action =
   | DevAction
   | { type: 'sendFile'; chatId: number; body: string; file: Blob; name: string; mime: string; w?: number | null; h?: number | null; thumb?: string | null; replyToId?: number | null;
       kind?: 'voice' | 'round' | 'audio'; duration?: number; waveform?: string | null; title?: string | null; performer?: string | null; groupId?: string | null }
-  | { type: 'listened'; chatId: number; id: number };
+  | { type: 'listened'; chatId: number; id: number }
+  /** Переслать сообщения ids (по порядку) из fromChatId в каждый из toChatIds; comment — отдельным сообщением перед ними. */
+  | { type: 'forwardMessages'; fromChatId: number; ids: number[]; toChatIds: number[]; hideSender?: boolean; hideCaption?: boolean; comment?: { body: string; entities?: Entity[] } | null };
 
 /** Медленная сеть: задержка (мс, туда-обратно; на каждое направление — половина), джиттер (мс), потери кадров (%), полоса (Кбит/с, 0 — без ограничения). */
 export interface NetProfile { latency: number; jitter: number; lossPct: number; kbps: number }

@@ -244,6 +244,7 @@ export class Store {
       kind: m.kind ?? 'text', attachment: m.attachment ?? null, entities: m.entities ?? [], ...(m.listened != null ? { listened: m.listened } : {}),
       ...(m.service ? { service: m.service } : null),
       ...(m.groupId ? { groupId: m.groupId } : null),
+      ...(m.fwdFrom ? { fwdFrom: m.fwdFrom } : null),
     };
     if (countUnread && !mine && m.id > chat.lastReadId && m.id > chat.knownMaxId) chat.unread++;
     chat.knownMaxId = Math.max(chat.knownMaxId, m.id);
@@ -298,6 +299,7 @@ export class Store {
       kind: o.attachment ? o.attachment.kind : 'text', attachment: o.attachment ?? null, progress: o.attachment && !o.attachment.id ? 0 : undefined,
       ...(o.failed && o.error ? { error: o.error } : {}),
       ...(o.groupId ? { groupId: o.groupId } : {}),
+      ...(o.fwdFrom ? { fwdFrom: o.fwdFrom } : {}),
     });
   }
 
