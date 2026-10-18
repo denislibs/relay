@@ -1,5 +1,7 @@
 import { coverThumb, readAudioTags } from './id3';
 import { getPrefs } from './prefs';
+import { rememberPhotos } from './profilePhoto';
+import type { ProfilePhoto } from '@relay/protocol';
 import { playSentSound } from './sound';
 import { beginHeavyAnimation, nudgeWallpaper, toBase64 } from '@relay/ui';
 import { connectEngine, EngineClient, Mirror } from '@relay/sync-engine/src/client';
@@ -531,8 +533,8 @@ export async function startDirectChat(peerId: number): Promise<void> {
 const askedNames = new Set<number>();
 let namesQueue: number[] = [];
 export function ensureNames(ids: number[]): void {
-  const known = getGlobal().names;
-  for (const id of ids) if (id && !known[id] && !askedNames.has(id)) { askedNames.add(id); namesQueue.push(id); }
+  const { names: known, photos } = getGlobal();   // имя есть, а фото ещё не спрашивали — тоже спросить (имена переживают перезагрузку, фото нет)
+  for (const id of ids) if (id && (!known[id] || !(id in photos)) && !askedNames.has(id)) { askedNames.add(id); namesQueue.push(id); }
   if (!namesQueue.length) return;
   queueMicrotask(flushNames);
 }
@@ -540,7 +542,8 @@ async function flushNames(): Promise<void> {
   const ids = namesQueue; namesQueue = [];
   if (!ids.length) return;
   try {
-    const { users } = await (await fetch('/users?ids=' + ids.join(','))).json() as { users: { id: number; name: string }[] };
+    const { users } = await (await fetch('/users?ids=' + ids.join(','))).json() as { users: { id: number; name: string; photo?: ProfilePhoto | null }[] };
+    rememberPhotos(Object.fromEntries(users.map((u) => [u.id, u.photo ?? null])));   // сначала фото: кто перерисуется по именам, увидит и их
     rememberNames(Object.fromEntries(users.map((u) => [u.id, u.name])));
   } catch { for (const id of ids) askedNames.delete(id); }   // без сети — спросим в следующий раз
 }

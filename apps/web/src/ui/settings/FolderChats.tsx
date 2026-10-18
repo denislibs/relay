@@ -1,10 +1,12 @@
 import { FOLDER_LIMITS, type ChatFolder } from '@relay/protocol';
+import type { ProfilePhoto } from '@relay/protocol';
+import { avatarPhoto } from '../../profilePhoto';
 import { Avatar, Icon, PanelHeader, ripple } from '@relay/ui';
 import { useState } from 'preact/hooks';
 import { useGlobal } from '../../global';
 import { back } from '../../nav';
 import { showToast } from '../../settingsData';
-import { chatTone } from '../format';
+import { chatTone, isSystemChat } from '../format';
 import { editDraft, EXCLUDE_TYPES, INCLUDE_TYPES, useDraft } from './FolderEdit';
 
 /** Цвет круглого значка типа (как цветные иконки типов в Telegram). */
@@ -82,7 +84,7 @@ export function FolderChats({ path }: { path: string }) {
         <div class="app-fpick-caption">Чаты</div>
         {list.length ? list.map((c) => (
           <PickRow key={c.id as number} on={picked.has(c.id as number)} onToggle={() => toggleChat(c.id as number)} title={nameOf(c)} sub={c.kind === 'group' ? 'группа' : 'личный чат'}
-            lead={<Avatar name={nameOf(c)} tone={chatTone(c)} size={42} />} />
+            lead={<Avatar name={nameOf(c)} tone={chatTone(c)} size={42} logo={isSystemChat(c)} {...avatarPhoto(c.photo as ProfilePhoto | null | undefined)} />} />
         )) : <div class="app-fpick-empty">{needle ? `Нет чатов по запросу «${q.trim()}»` : 'Чаты появятся здесь, когда загрузятся.'}</div>}
       </div>
     </div>

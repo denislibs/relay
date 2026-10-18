@@ -1,4 +1,5 @@
 import { Avatar, EmptyState, FolderTabs, Icon, LazyImage, MediaViewer, peerTone, player, SlideStack } from '@relay/ui';
+import { avatarPhoto, userPhoto } from '../profilePhoto';
 import { senderAvatar } from '../profilePhoto';
 import type { Item } from '@relay/sync-engine/src/types';
 import { useEffect, useRef, useState } from 'preact/hooks';
@@ -244,7 +245,7 @@ function MembersList({ data }: { data: { ownerId: number | null; members: Member
         const status = self ? 'в сети' : lastSeenText(!!m.online, m.lastSeen);
         return (
           <button key={m.userId} type="button" role="listitem" class="rl-row app-member" disabled={self} onClick={() => void startDirectChat(m.userId)}>
-            <Avatar name={m.name} tone={peerTone(m.userId)} size={44} online={!!m.online && !self} />
+            <Avatar name={m.name} tone={peerTone(m.userId)} size={44} online={!!m.online && !self} {...(self ? senderAvatar(m.userId) : avatarPhoto(m.photo ?? userPhoto(m.userId)))} />
             <span class="rl-row-main">
               <span class="app-member-top"><span class="rl-row-name">{self ? m.name + ' (вы)' : m.name}</span>{m.userId === data.ownerId ? <span class="app-member-badge">владелец</span> : null}</span>
               <span class={'rl-row-preview' + (m.online || self ? ' app-online' : '')}>{status}</span>

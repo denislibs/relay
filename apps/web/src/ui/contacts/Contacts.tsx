@@ -1,4 +1,6 @@
 import { ChatRow, ChatRowSkeleton, EmptyState, Fab, IconButton, Presence, SearchField, peerTone, useMinVisible, WindowList } from '@relay/ui';
+import type { ProfilePhoto } from '@relay/protocol';
+import { rowAvatar } from '../../profilePhoto';
 import type { Item } from '@relay/sync-engine/src/types';
 import { useEffect, useState } from 'preact/hooks';
 import { openChat, startDirectChat } from '../../data';
@@ -31,6 +33,7 @@ function ContactRow({ c }: { c: Item }) {
     <ChatRow
       name={String(c.name)}
       avatarTone={peerTone(c.userId as number)}
+      {...rowAvatar(c.photo as ProfilePhoto | null | undefined)}
       online={online}
       preview={<span class={online ? 'app-online' : undefined}>{sub}</span>}
       onClick={() => void openDirect(c.userId as number)}

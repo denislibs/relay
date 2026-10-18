@@ -228,7 +228,7 @@ function ContactPicker(props) {
       multi ? sel[0].map(function (k) {
         var name = byKey[k] ? byKey[k].name : String(k);
         return h('button', { key: k, type: 'button', class: 'rl-picker-chip', onClick: function () { toggle(k); }, 'aria-label': 'Убрать ' + name },
-          h('span', { class: 'rl-picker-chip-av' }, h(Avatar, { name: name, tone: byKey[k] ? byKey[k].tone : undefined, size: 32 }), h('i', { 'aria-hidden': 'true' }, h(Icon, { name: 'close', size: 18 }))),
+          h('span', { class: 'rl-picker-chip-av' }, h(Avatar, Object.assign({ name: name, tone: byKey[k] ? byKey[k].tone : undefined, size: 32 }, byKey[k] && byKey[k].avatar || {})), h('i', { 'aria-hidden': 'true' }, h(Icon, { name: 'close', size: 18 }))),
           h('span', { class: 'rl-picker-chip-name' }, name));
       }) : null,
       h('div', { class: 'rl-search rl-picker-search' },
@@ -239,7 +239,7 @@ function ContactPicker(props) {
       list.length ? list.map(function (c) {
         var k = keyOf(c), on = sel[0].indexOf(k) >= 0;
         return h('button', { key: k, type: 'button', class: cx('rl-row rl-picker-row', on && 'rl-picker-on'), onPointerDown: ripple, onClick: function () { toggle(k); }, role: multi ? 'checkbox' : undefined, 'aria-checked': multi ? String(on) : undefined },
-          h(Avatar, { name: c.name, tone: c.tone, online: c.online }),
+          h(Avatar, Object.assign({ name: c.name, tone: c.tone, online: c.online }, c.avatar || {})),   // avatar — пропсы фото (src, thumb)
           h('span', { class: 'rl-row-main' }, h('span', { class: 'rl-row-name' }, c.name), h('span', { class: 'rl-row-preview' }, c.about || '')),
           multi ? h('span', { class: 'rl-picker-check', 'aria-hidden': 'true' }, h(Icon, { name: 'check', size: 14, strokeWidth: 3 })) : null);
       }) : h('div', { class: 'rl-picker-empty' }, needle || !props.empty ? 'Никого не нашли по запросу «' + q[0] + '»' : props.empty)));

@@ -145,7 +145,7 @@ export class Blocks {
     const users = this.h.store.profile.users;
     const list: Item[] = this.view().map((b) => {
       const u = users.get(b.userId) ?? b.user;
-      return { key: 'b' + b.userId, userId: b.userId, name: u.name || u.publicName || this.chatName(b.userId), username: u.username, phone: u.phone, at: b.at, pending: b.pending };
+      return { key: 'b' + b.userId, userId: b.userId, name: u.name || u.publicName || this.chatName(b.userId), username: u.username, phone: u.phone, at: b.at, pending: b.pending, photo: u.photo ?? null };
     });
     list.push({ key: '~blocked', loaded: this.cache.loaded });
     return list;

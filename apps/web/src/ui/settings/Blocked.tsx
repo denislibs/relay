@@ -1,4 +1,7 @@
 import { ChatRow, ChatRowSkeleton, ContactPicker, EmptyState, Fab, Menu, Modal, PanelHeader, Presence, Section, peerTone, useMinVisible } from '@relay/ui';
+import type { ProfilePhoto } from '@relay/protocol';
+import { rowAvatar } from '../../profilePhoto';
+import { senderAvatar } from '../../profilePhoto';
 import type { Item } from '@relay/sync-engine/src/types';
 import { useState } from 'preact/hooks';
 import { useGlobal } from '../../global';
@@ -47,6 +50,7 @@ export function Blocked() {
                     <ChatRow
                       name={String(b.name || 'Пользователь')}
                       avatarTone={peerTone(b.userId as number)}
+                      {...rowAvatar(b.photo as ProfilePhoto | null | undefined)}
                       preview={about(b)}
                       aria-haspopup="menu"
                       onClick={(e: MouseEvent) => setMenu({ x: e.clientX, y: e.clientY, userId: b.userId as number })}
@@ -77,7 +81,7 @@ export function Blocked() {
         <Modal title="Заблокировать пользователя" size="slim" onClose={() => setPicking(false)}>
           <div class="app-block-pick">
             <ContactPicker
-              contacts={people.map((p) => ({ ...p, tone: peerTone(p.id) }))} searchLabel="Поиск людей" placeholder="Имя или @имя пользователя"
+              contacts={people.map((p) => ({ ...p, tone: peerTone(p.id), avatar: senderAvatar(p.id) }))} searchLabel="Поиск людей" placeholder="Имя или @имя пользователя"
               empty="Заблокировать можно собеседника или человека из контактов."
               onPick={(p: { id: number }) => { setPicking(false); void blockUser(p.id); }}
             />

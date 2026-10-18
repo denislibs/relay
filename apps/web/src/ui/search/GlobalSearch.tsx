@@ -394,7 +394,7 @@ function TrackHit({ h, who, hits, music }: { h: Hit; who: string; hits: Hit[]; m
         </button>
       ) : (
         <button type="button" class="app-gsearch-voice" aria-label={playing ? 'Пауза' : 'Слушать'} onClick={toggle}>
-          <Avatar name={senderName} tone={peerTone(m.senderId)} size={48} />
+          <Avatar name={senderName} tone={peerTone(m.senderId)} size={48} {...senderAvatar(m.senderId)} />
           <span class="app-gsearch-voice-icon"><Icon name={playing ? 'pause' : 'play'} size={20} /></span>
         </button>
       )}

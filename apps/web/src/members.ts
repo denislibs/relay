@@ -1,7 +1,9 @@
 import { useEffect, useState } from 'preact/hooks';
+import type { ProfilePhoto } from '@relay/protocol';
+import { rememberPhotos } from './profilePhoto';
 
 /** Участник группы, как его отдаёт сервер: имя (как видит зритель), @имя и присутствие с учётом приватности. */
-export type Member = { userId: number; name: string; username: string | null; online: boolean | null; lastSeen: string | null };
+export type Member = { userId: number; name: string; username: string | null; online: boolean | null; lastSeen: string | null; photo?: ProfilePhoto | null };
 export type Members = { ownerId: number | null; members: Member[] };
 
 const cache = new Map<number, Members>();
@@ -13,7 +15,7 @@ export function loadMembers(chatId: number): Promise<Members> {
   p = fetch(`/chats/${chatId}/members`).then((r) => {
     if (!r.ok) throw new Error('members ' + r.status);
     return r.json() as Promise<Members>;
-  }).then((m) => { cache.set(chatId, m); return m; }).finally(() => inflight.delete(chatId));
+  }).then((m) => { cache.set(chatId, m); rememberPhotos(Object.fromEntries(m.members.map((x) => [x.userId, x.photo ?? null]))); return m; }).finally(() => inflight.delete(chatId));
   inflight.set(chatId, p);
   return p;
 }

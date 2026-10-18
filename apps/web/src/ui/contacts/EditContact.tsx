@@ -1,4 +1,5 @@
 import { CheckRow, ConfirmDialog, Fab, InfoRow, PanelHeader, Presence, ProfileHeader, Section, TextField, peerTone } from '@relay/ui';
+import { avatarPhoto, userPhoto } from '../../profilePhoto';
 import type { Item } from '@relay/sync-engine/src/types';
 import { useEffect, useRef, useState } from 'preact/hooks';
 import { useGlobal } from '../../global';
@@ -109,7 +110,7 @@ function EditForm({ contact, leave, onBack, navGuard }: { contact: Item; leave: 
     <>
       <PanelHeader icon="arrowLeft" closeLabel="Назад" title="Изменить контакт" onClose={tryBack} />
       <div class="rl-settings app-profile-form">
-        <ProfileHeader name={name} tone={peerTone(userId)} size={96} subtitle={publicName && publicName !== name ? `Имя в Relay: ${publicName}` : undefined} />
+        <ProfileHeader name={name} tone={peerTone(userId)} size={96} {...avatarPhoto(userPhoto(userId), true)} subtitle={publicName && publicName !== name ? `Имя в Relay: ${publicName}` : undefined} />
         <Section footer="Имя и фамилия видны только вам">
           <TextField label="Имя" value={form.firstName} maxLength={NAME_MAX} measure={cpLen} error={form.firstName.trim() ? undefined : 'Укажите имя'} onInput={limited('firstName', NAME_MAX)} autoComplete="off" />
           <TextField label="Фамилия" value={form.lastName} maxLength={NAME_MAX} measure={cpLen} onInput={limited('lastName', NAME_MAX)} autoComplete="off" />

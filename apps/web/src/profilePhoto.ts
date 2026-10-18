@@ -2,20 +2,36 @@
 // чужие — откуда брать картинку для Avatar. Файлы — обычные /files/<id>: их кэширует service worker (relay-media).
 import type { ProfilePhoto, UserPhoto } from '@relay/protocol';
 import { useEffect, useState } from 'preact/hooks';
-import { getGlobal, type Me } from './global';
+import { getGlobal, setGlobal, type Me } from './global';
 
 /** Пропсы Avatar для фото: маленькое — для списков, большое (big) — для профиля. Нет фото — пусто (инициалы). */
 export function avatarPhoto(p: ProfilePhoto | null | undefined, big = false): { src?: string; thumb?: string } {
   return p ? { src: `/files/${big ? p.id : p.small}`, thumb: p.thumb } : {};
 }
 
-/** Фото человека для аватарки по id: своё — из профиля, собеседника — из личного чата с ним (там оно всегда свежее). */
-export function senderAvatar(userId: number | null | undefined): { src?: string; thumb?: string } {
-  if (userId == null) return {};
+/** Фото человека для аватарки по id — единое место для всех аватарок людей. Откуда (сначала самое свежее):
+ *  своё — из профиля; собеседник — из личного чата с ним; контакт — из списка контактов; остальные (авторы в группах,
+ *  участники) — из кэша photos, который пополняют запросы имён (ensureNames) и списки участников. */
+export function userPhoto(userId: number | null | undefined): ProfilePhoto | null {
+  if (userId == null) return null;
   const g = getGlobal();
-  if (g.me?.userId === userId) return avatarPhoto(g.me.photo ?? null);
+  if (g.me?.userId === userId) return g.me.photo ?? null;
   const chat = g.chats.find((c) => c.kind === 'direct' && c.peerId === userId);
-  return avatarPhoto((chat?.photo as ProfilePhoto | null | undefined) ?? null);
+  if (chat && chat.photo !== undefined) return (chat.photo as ProfilePhoto | null) ?? null;
+  const contact = g.contacts.find((c) => c.userId === userId);
+  if (contact && contact.photo !== undefined) return (contact.photo as ProfilePhoto | null) ?? null;
+  return g.photos[userId] ?? null;
+}
+/** То же для ChatRow (у него пропсы avatarSrc/avatarThumb). */
+export function rowAvatar(p: ProfilePhoto | null | undefined): { avatarSrc?: string; avatarThumb?: string } { const a = avatarPhoto(p); return { avatarSrc: a.src, avatarThumb: a.thumb }; }
+export function senderAvatar(userId: number | null | undefined): { src?: string; thumb?: string } {
+  return avatarPhoto(userPhoto(userId));
+}
+/** Запомнить фото людей (ответы /users?ids, участники группы): аватарки перерисуются. */
+export function rememberPhotos(add: Record<number, ProfilePhoto | null>): void {
+  const cur = getGlobal().photos;
+  if (Object.entries(add).every(([id, p]) => Number(id) in cur && (cur[Number(id)]?.id ?? null) === (p?.id ?? null))) return;
+  setGlobal({ photos: { ...cur, ...add } });
 }
 
 async function post<T>(path: string, body?: unknown): Promise<T> {

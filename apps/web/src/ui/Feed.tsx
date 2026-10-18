@@ -274,6 +274,7 @@ export function Feed({ frameKey, active, chatId, meId, peerName, group, onAuthor
 }) {
   const messages = useGlobal((s) => frameByKey(s, frameKey)?.messages ?? NO_MESSAGES);
   const names = useGlobal((s) => s.names);
+  useGlobal((s) => s.photos);   // фото авторов пришли — аватарки пачек перерисовываются
   // следующее/предыдущее голосовое этого чата — для автоперехода и кнопок плеера
   useEffect(() => {
     if (!active) return;

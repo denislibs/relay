@@ -1,4 +1,5 @@
 import { Avatar, Button, IconButton, Presence, peerTone, plural, ripple } from '@relay/ui';
+import { senderAvatar } from '../profilePhoto';
 import { useEffect, useMemo, useRef, useState } from 'preact/hooks';
 import { dismiss, loadDismissed, pickBanner, saveDismissed, sessionsSeen, type Banner } from '../banners';
 import { getGlobal, useGlobal } from '../global';
@@ -112,7 +113,7 @@ export function ChatBanner() {
                       <span>{b.people.length === 1 ? 'Напишите поздравление.' : 'Выберите, кого поздравить.'}</span>
                     </div>
                     <div class="app-banner-faces" aria-hidden="true">
-                      {b.people.slice(0, 3).map((p) => <Avatar key={p.userId} name={p.name} tone={peerTone(p.userId)} size={28} />)}
+                      {b.people.slice(0, 3).map((p) => <Avatar key={p.userId} name={p.name} tone={peerTone(p.userId)} size={28} {...senderAvatar(p.userId)} />)}
                     </div>
                   </>
                 ) : (

@@ -1,4 +1,5 @@
 import { Avatar, Icon, Modal, Presence, TextField, peerTone } from '@relay/ui';
+import { senderAvatar } from '../../profilePhoto';
 import { useEffect, useRef, useState } from 'preact/hooks';
 import { setGlobal, useGlobal, type NewContactDraft } from '../../global';
 import { addContact, resolveUser, showToast } from '../../settingsData';
@@ -69,7 +70,7 @@ function NewContactForm({ draft }: { draft: NewContactDraft }) {
         <form class="app-newcontact" onSubmit={(e) => void done(e)}>
           <div class="app-newcontact-avatar" aria-hidden="true">
             {initials
-              ? <span key={initials} class="app-pop"><Avatar name={`${first} ${lastName}`.trim()} tone={known ? peerTone(known) : undefined} size={72} /></span>
+              ? <span key={initials} class="app-pop"><Avatar name={`${first} ${lastName}`.trim()} tone={known ? peerTone(known) : undefined} size={72} {...(known ? senderAvatar(known) : {})} /></span>
               : <span class="rl-avatar app-newcontact-empty" style={{ width: 72, height: 72 }}><Icon name="contact" size={32} /></span>}
           </div>
           <div class="app-newcontact-fields">

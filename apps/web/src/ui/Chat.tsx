@@ -1,4 +1,5 @@
 import { PinnedBar } from './PinnedBar';
+import { senderAvatar } from '../profilePhoto';
 import { membersStatus, useMembers } from '../members';
 import { Playlist } from './Playlist';
 import { inProfile, toggleProfileMusic, type Track } from '../music';
@@ -327,7 +328,7 @@ export function Chat({ chatId, frameKey, active }: { chatId: number; frameKey: s
                   const who = names[x.senderId] ?? (x.senderId === me.userId ? me.name : chat?.kind === 'direct' ? title : '');
                   return (
                     <button type="button" role="option" aria-selected={k === found.at} key={x.id} class={'app-findrow' + (k === found.at ? ' app-findrow-on' : '')} onPointerDown={ripple} onClick={() => pick(k)}>
-                      <Avatar name={who} tone={peerTone(x.senderId)} size={40} />
+                      <Avatar name={who} tone={peerTone(x.senderId)} size={40} {...senderAvatar(x.senderId)} />
                       <span class="app-findrow-text">
                         <span class="app-findrow-top"><b>{who}</b><time>{chatTime(x.createdAt)}</time></span>
                         <span class="app-findrow-body"><Highlight text={snippet(shownBody(x), found.q)} query={found.q} /></span>

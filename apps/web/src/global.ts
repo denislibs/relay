@@ -79,6 +79,7 @@ export interface GlobalState {
   sessionsOffline: boolean;         // последний запрос списка не дошёл (нет сети)
   opsKeys: string[];                // ключи операций настроек в очереди: оптимистичный вид сеансов
   names: Record<number, string>;   // имена людей по id (авторы сообщений); кэш переживает перезагрузку
+  photos: Record<number, ProfilePhoto | null>;   // фото людей по id (авторы, участники групп); нет ключа — ещё не спрашивали
   devSim: DevSimFlags | null;      // имитатор сети движка включён (status.devSim): плашка «Режим разработчика»
   devTab: DevTab;                  // вкладка раздела «Для разработчиков»
 }
@@ -145,6 +146,7 @@ let state: GlobalState = {
   sessions: null,
   sessionsOffline: false,
   opsKeys: [],
+  photos: {},
   names: (() => { try { return JSON.parse(localStorage.getItem('relay.names') ?? '{}'); } catch { return {}; } })(),
   devSim: null,
   devTab: 'overview',

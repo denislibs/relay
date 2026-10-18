@@ -1,10 +1,12 @@
 import { FOLDER_LIMITS, folderError, graphemes, nextFolderId, normalizeFolder, type ChatFolder } from '@relay/protocol';
+import type { ProfilePhoto } from '@relay/protocol';
+import { avatarPhoto } from '../../profilePhoto';
 import { Avatar, ConfirmDialog, Fab, Icon, IconButton, InfoRow, PanelHeader, Presence, Section, Sticker, TextField } from '@relay/ui';
 import { useEffect, useRef, useState } from 'preact/hooks';
 import { getGlobal, setGlobal, useGlobal, type FolderDraft } from '../../global';
 import { back, go, setLeaveGuard } from '../../nav';
 import { deleteFolder, failText, saveFolder, showToast } from '../../settingsData';
-import { chatTone } from '../format';
+import { chatTone, isSystemChat } from '../format';
 import { FOLDER_EMOJI, FOLDER_ICONS } from '../../folders';
 
 /** Иконки на выбор (как набор иконок папок в Telegram, плюс «без иконки» — по типу). */
@@ -80,7 +82,7 @@ export function FolderEdit({ path }: { path: string }) {
     const name = (c?.title as string) || 'Чат №' + id;
     return (
       <div key={list + id} class="app-folder-chat">
-        <Avatar name={name} tone={chatTone(c ?? { id })} size={40} />
+        <Avatar name={name} tone={chatTone(c ?? { id })} size={40} logo={isSystemChat(c)} {...avatarPhoto(c?.photo as ProfilePhoto | null | undefined)} />
         <span class="rl-inforow-text"><span>{name}</span><small>{c?.kind === 'group' ? 'группа' : 'личный чат'}</small></span>
         <IconButton icon="close" label={'Убрать ' + name} onClick={() => editDraft({ [list]: f[list].filter((x) => x !== id) })} />
       </div>

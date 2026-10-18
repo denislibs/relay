@@ -1,4 +1,5 @@
 import { Avatar, ContactPicker, EmptyState, Fab, Icon, PanelHeader, Presence, ProgressRing, Section, TextField, peerTone } from '@relay/ui';
+import { senderAvatar } from '../../profilePhoto';
 import { useEffect, useState } from 'preact/hooks';
 import { createGroup, openChat } from '../../data';
 import { getGlobal, setGlobal, useGlobal } from '../../global';
@@ -45,7 +46,7 @@ export function NewGroupMembers() {
       <PanelHeader icon="arrowLeft" closeLabel="Назад" title="Добавить участников" onClose={leave} />
       <div class="rl-page-scroll app-newgroup">
         {people.length ? (
-          <ContactPicker multi selected={ids} contacts={people.map((p) => ({ ...p, tone: peerTone(p.id) }))}
+          <ContactPicker multi selected={ids} contacts={people.map((p) => ({ ...p, tone: peerTone(p.id), avatar: senderAvatar(p.id) }))}
             searchLabel="Поиск людей" placeholder="Кого добавить?" onChange={(next: number[]) => setIds(next)} />
         ) : (
           <EmptyState kind="contacts" title="Некого добавить" text="Добавьте людей в контакты или начните с ними переписку — они появятся здесь." />
@@ -104,7 +105,7 @@ export function NewGroupName() {
           <div role="list">
             {members.map((m) => (
               <div key={m.id} role="listitem" class="rl-row app-newgroup-row">
-                <Avatar name={m.name} tone={peerTone(m.id)} size={42} />
+                <Avatar name={m.name} tone={peerTone(m.id)} size={42} {...senderAvatar(m.id)} />
                 <span class="rl-row-main"><span class="rl-row-name">{m.name}</span><span class="rl-row-preview">{m.about}</span></span>
               </div>
             ))}
