@@ -107,9 +107,11 @@ export async function touchLive(): Promise<number[]> {
 const UNCONFIRMED = sql`(confirmed_at is null and created_at > now() - interval '7 days')`;
 
 /** Неподтверждённый (свежий) сеанс не может завершать и подтверждать другие. */
-async function assertConfirmed(db: Tx | typeof sql, sessionId: number): Promise<void> {
-  const [r] = await db`select ${UNCONFIRMED} as u from sessions where id = ${sessionId}`;
-  if (r?.u) throw new DomainError('fresh_session');
+export async function assertConfirmed(db: Tx | typeof sql, sessionId: number): Promise<void> {
+  // for update: строка вызывающего сеанса держится до конца транзакции, параллельное завершение дождётся
+  const [r] = await db`select ${UNCONFIRMED} as u from sessions where id = ${sessionId} for update`;
+  if (!r) throw new DomainError('unauthorized');   // сеанса уже нет — закрыто, а не открыто
+  if (r.u) throw new DomainError('fresh_session');
 }
 
 const changed = (db: Tx, userId: number) => appendUpdates(db, [{ userId, update: { type: 'sessionsChanged' } }]);
@@ -186,6 +188,11 @@ export async function terminateOthers(userId: number, currentId: number): Promis
   return { ok: true, ids };
 }
 
+/** Список сеансов пользователя изменился (выход): остальные устройства обновят его. */
+export function announceSessionsChanged(userId: number): Promise<void> {
+  return sql.begin((tx) => changed(tx, userId)) as Promise<void>;
+}
+
 /** Выход (POST /logout) удалил строку: закрыть сокеты этого сеанса в других вкладках. */
 export function sessionEnded(id: number): Promise<void> {
   return notifyTerminated(sql, [id], 'logout');
@@ -202,8 +209,9 @@ export async function sweepInactive(userId?: number): Promise<number[]> {
        where ${userId == null ? tx`true` : tx`s.user_id = ${userId}`}
          and (s.expires_at <= now()
               or s.last_active_at < now() - make_interval(days => coalesce((select us.sessions_ttl_days from user_settings us where us.user_id = s.user_id), ${DEFAULT_TTL_DAYS})))
-       returning s.id`;
+       returning s.id, s.user_id`;
     const ids = rows.map((r) => Number(r.id));
+    for (const u of new Set(rows.map((r) => Number(r.user_id)))) await changed(tx, u);
     await notifyTerminated(tx, ids);
     return ids;
   }) as Promise<number[]>;

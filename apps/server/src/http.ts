@@ -4,7 +4,7 @@ import type { Server } from 'bun';
 import { existsSync, statSync } from 'node:fs';
 import { extname, join, resolve, sep } from 'node:path';
 import { clearSessionCookie, createSession, createUser, deleteSession, readSessionToken, sessionCookie, sessionFromToken } from './auth';
-import { announceLogin, checkSocket, confirmSession, listSessions, sessionEnded, sweepInactive, terminateOthers, terminateSession, trackSocket, untrackSocket } from './domain/sessions';
+import { announceLogin, announceSessionsChanged, assertConfirmed, checkSocket, confirmSession, listSessions, sessionEnded, sweepInactive, terminateOthers, terminateSession, trackSocket, untrackSocket } from './domain/sessions';
 import { createChat, getChatMedia, getHistory, getMessagesByIds, listChats, listChatsPage } from './domain/chats';
 import { sql } from './db';
 import { DomainError } from './domain/errors';
@@ -146,6 +146,7 @@ export function createServer(opts: { port: number }): Server {
           return Response.json(await setPrivacy(userId, privacyKey[1], await req.json().catch(() => null), publish));
         }
         if (req.method === 'PUT' && url.pathname === '/settings/sessions-ttl') {
+          await assertConfirmed(sql, sessionId);   // новый срок сразу завершает сеансы: свежий сеанс этого не может
           const res = await setSessionsTtl(userId, await req.json().catch(() => null));
           await sweepInactive(userId).catch((e) => console.error('sessions sweep:', e));   // новый срок короче — старые сеансы уходят сразу
           return Response.json(res);
@@ -171,7 +172,10 @@ export function createServer(opts: { port: number }): Server {
           const ended = token ? await deleteSession(token) : null;
           // подписка Web Push сеанса ушла каскадом
           // сокеты этого же сеанса в других вкладках закрываются (sessionTerminated)
-          if (ended != null) await sessionEnded(ended).catch((e) => console.error('sessions:', e));
+          if (ended != null) {
+            await sessionEnded(ended).catch((e) => console.error('sessions:', e));
+            await announceSessionsChanged(userId).catch((e) => console.error('sessions:', e));
+          }
           return Response.json({ ok: true }, { headers: { 'set-cookie': clearSessionCookie() } });
         }
         if (url.pathname === '/ws') {

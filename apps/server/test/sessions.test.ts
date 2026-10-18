@@ -138,12 +138,13 @@ test('TTL: inactive sessions stop working at once and the sweep deletes them; th
   expect(await r.json()).toMatchObject({ sessionsTtlDays: 7, seq: 1 });
   expect((await getUpdates(a1.userId, 0)).items.map((i) => i.update)).toEqual([
     { type: 'settingsChanged', settings: { notify: { direct: { muted: false, preview: true }, group: { muted: false, preview: true } }, sessionsTtlDays: 7 } },
+    { type: 'sessionsChanged' },   // sweep завершил неактивный сеанс
   ]);
   // смена срока сразу завершила неактивный сеанс
   expect((await list(a1)).map((s) => s.id)).toEqual([cur.id]);
   expect((await call(a2, 'GET', '/me')).status).toBe(401);
   // повтор того же значения журнал не трогает
-  expect(await (await call(a1, 'PUT', '/settings/sessions-ttl', { days: 7 })).json()).toMatchObject({ seq: 1 });
+  expect(await (await call(a1, 'PUT', '/settings/sessions-ttl', { days: 7 })).json()).toMatchObject({ seq: 2 });
 
   // неактивный дольше срока не действует ещё до чистки; чистка удаляет его строку
   const a3 = await login('Анна');
@@ -295,4 +296,42 @@ test('a week-old unconfirmed session counts as confirmed', async () => {
   const id = (await sessionFromToken(t))!.sessionId;
   await sql`update sessions set created_at = now() - interval '8 days' where id = ${id}`;
   expect((await listSessions(a, id))[0]).toMatchObject({ unconfirmed: false });
+});
+
+test('fail closed: the caller session row is gone -> terminate/confirm are rejected', async () => {
+  const a = await makeUser('Вера');
+  const mine = (await sessionFromToken(await createSession(a)))!.sessionId;
+  const other = (await sessionFromToken(await createSession(a)))!.sessionId;
+  await sql`delete from sessions where id = ${mine}`;
+  await expect(terminateOthers(a, mine)).rejects.toMatchObject({ code: 'unauthorized' });
+  await expect(terminateSession(a, mine, other)).rejects.toMatchObject({ code: 'unauthorized' });
+  await expect(confirmSession(a, mine, other)).rejects.toMatchObject({ code: 'unauthorized' });
+  expect((await sql`select 1 from sessions where id = ${other}`).length).toBe(1);
+});
+
+test('unconfirmed session cannot change sessions-ttl (which sweeps others)', async () => {
+  const a = await makeUser('Глеб');
+  const token = await createSession(a, undefined, { confirmed: false });
+  const res = await call({ userId: a, token }, 'PUT', '/settings/sessions-ttl', { days: 7 });
+  expect(res.status).toBe(403);
+  expect((await sql`select 1 from user_settings where user_id = ${a} and sessions_ttl_days = 7`).length).toBe(0);
+});
+
+test('confirming another user\'s session is not_found', async () => {
+  const a = await makeUser('Дана'), b = await makeUser('Егор');
+  const as = (await sessionFromToken(await createSession(a)))!.sessionId;
+  const bs = (await sessionFromToken(await createSession(b)))!.sessionId;
+  await expect(confirmSession(b, bs, as)).rejects.toMatchObject({ code: 'not_found' });
+});
+
+test('sweepInactive and logout emit sessionsChanged', async () => {
+  const a = await makeUser('Жанна');
+  const keep = await createSession(a);
+  const old = (await sessionFromToken(await createSession(a)))!.sessionId;
+  await sql`update sessions set last_active_at = now() - interval '400 days' where id = ${old}`;
+  await sweepInactive(a);
+  const count = async () => (await sql`select count(*)::int as n from updates where user_id = ${a} and type = 'sessionsChanged'`)[0].n as number;
+  expect(await count()).toBe(1);
+  await call({ userId: a, token: keep }, 'POST', '/logout');
+  expect(await count()).toBe(2);
 });
