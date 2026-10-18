@@ -67,13 +67,14 @@ test('checkUsername passes through to the server; offline answers offline', asyn
 });
 
 test('meView applies queued patches in order', () => {
-  const base = { userId: 1, name: 'А Б', firstName: 'А', lastName: 'Б', username: null, bio: null, birthday: null, phone: '+7' };
+  const base = { userId: 1, name: 'А Б', firstName: 'А', lastName: 'Б', username: null, bio: null, birthday: null, phone: '+7', links: [] };
   const v = meView(base, [
     { id: 1, key: 'profile', method: 'PATCH', path: '/me', body: { firstName: '  Вера  ', bio: '  hi ' }, at: 0 },
     { id: 2, key: 'username', method: 'PUT', path: '/me/username', body: { username: '@Vera_X' }, at: 0 },
     { id: 3, key: 'profile', method: 'PATCH', path: '/me', body: { lastName: '', birthday: { day: 1, month: 2 } }, at: 0 },
+    { id: 4, key: 'links', method: 'PATCH', path: '/me', body: { links: [{ service: 'github', handle: 'vera' }] }, at: 0 },
   ]);
-  expect(v).toEqual({ userId: 1, name: 'Вера', firstName: 'Вера', lastName: '', username: 'vera_x', bio: 'hi', birthday: { day: 1, month: 2 }, phone: '+7' });
+  expect(v).toEqual({ userId: 1, name: 'Вера', firstName: 'Вера', lastName: '', username: 'vera_x', bio: 'hi', birthday: { day: 1, month: 2 }, phone: '+7', links: [{ service: 'github', handle: 'vera' }] });
   expect(meView(null, [])).toBeNull();
 });
 

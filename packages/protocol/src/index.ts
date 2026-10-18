@@ -1,3 +1,6 @@
+import type { ProfileLink } from './links';
+export * from './links';
+
 export type Id = number;
 
 export interface Message {
@@ -143,6 +146,7 @@ export interface Birthday { day: number; month: number; year?: number }
 export interface PublicUser {
   id: Id; name: string; firstName: string; lastName: string;
   username: string | null; bio: string | null; birthday: Birthday | null; phone: string | null;
+  links: ProfileLink[];   // ссылки на профили в других сервисах, в порядке владельца; видны всем
   /** собственное имя пользователя; name/firstName/lastName у владельца контакта — контактные */
   publicName?: string;
   /** этот человек заблокировал зрителя: писать ему в личный чат нельзя (плашка вместо поля ввода) */
@@ -164,13 +168,14 @@ export interface Contact {
 export interface Me {
   userId: Id; name: string; firstName: string; lastName: string;
   username: string | null; bio: string | null; birthday: Birthday | null; phone: string | null;
+  links: ProfileLink[];
   seq?: number;
 }
 
 export interface JournalEntry { seq: number; update: Update }
 
 export type ErrorCode = 'bad_frame' | 'unauthorized' | 'not_member' | 'not_found' | 'too_long' | 'forbidden' | 'internal'
-  | 'username_invalid' | 'username_taken' | 'username_reserved' | 'bio_too_long' | 'name_invalid' | 'birthday_invalid' | 'note_too_long'
+  | 'username_invalid' | 'username_taken' | 'username_reserved' | 'bio_too_long' | 'name_invalid' | 'birthday_invalid' | 'links_invalid' | 'note_too_long'
   | 'blocked';
 
 export type ClientFrame =

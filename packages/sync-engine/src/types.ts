@@ -1,4 +1,4 @@
-import type { Birthday, Entity, PrivacyKey, PrivacyMode } from '@relay/protocol';
+import type { Birthday, Entity, PrivacyKey, PrivacyMode, ProfileLink } from '@relay/protocol';
 
 export type Status = 'pending' | 'sent' | 'read' | 'failed';
 
@@ -106,6 +106,7 @@ export type Action =
   | { type: 'search'; q: string; chatId?: number; beforeId?: number; limit?: number }
   | { type: 'chatMedia'; chatId: number; kind: 'photo' | 'file' }
   | { type: 'updateProfile'; firstName?: string; lastName?: string; bio?: string | null; birthday?: Birthday | null }
+  | { type: 'setLinks'; links: ProfileLink[] }
   | { type: 'setUsername'; username: string | null }
   /** проверка имени пользователя мимо очереди: {ok} | {ok:false, reason} | {offline:true} */
   | { type: 'checkUsername'; username: string }
