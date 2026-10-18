@@ -42,7 +42,7 @@ body { background: var(--bg); color: var(--ink); font-family: var(--font-sans); 
 .app-mark { position: absolute; left: 0; right: 0; bottom: 0; height: 1px; pointer-events: none; }
 .app-unread-divider { position: relative; isolation: isolate; display: flex; justify-content: center; margin: var(--space-3) 0; padding: 6px 0; color: var(--brand-text); font: 500 13.5px/18px var(--font-sans); animation: app-fade 300ms var(--ease-out) both; }
 /* полоса — от края до края ленты (как подсветка перехода к сообщению), а не по ширине колонки сообщений */
-.app-unread-divider::before { content: ''; position: absolute; z-index: -1; top: 0; bottom: 0; left: 50%; width: 100cqw; transform: translateX(-50%); background: color-mix(in srgb, var(--raised) 72%, transparent); pointer-events: none; }
+.app-unread-divider::before { content: ''; position: absolute; z-index: -1; top: 0; bottom: 0; left: 50%; width: calc(100cqw + 2 * var(--space-float, 16px)); transform: translateX(-50%); background: color-mix(in srgb, var(--raised) 72%, transparent); pointer-events: none; }
 /* sticky top считается от края с учётом padding-top ленты (он уже равен шапке + отступу) */
 .rl-shell .rl-feed .rl-date { position: sticky; top: -32px; z-index: 2; pointer-events: none; }   /* у строки даты отступ 1rem, у ленты — 16px до шапки: плашка встаёт в 8px под шапкой */
 .rl-shell .rl-feed .rl-date :is(span, .rl-date-btn) { pointer-events: auto; transition: opacity 300ms var(--ease-out); }
@@ -190,7 +190,7 @@ html[data-blur="0"] .app-sidemenu .rl-menu, html[data-blur="0"] .app-pagemenu .r
 /* переход к сообщению — как в Telegram: полоса на всю ширину чата за строкой, проявляется и тает */
 .rl-shell .rl-feed { container-type: inline-size; }   /* 100cqw у полосы = ширина ленты, без горизонтальной прокрутки */
 .app-msg-flash { isolation: isolate; }
-.app-msg-flash::before { content: ''; position: absolute; z-index: -1; top: -2px; bottom: -2px; left: 50%; width: 100cqw; transform: translateX(-50%);
+.app-msg-flash::before { content: ''; position: absolute; z-index: -1; top: -2px; bottom: -2px; left: 50%; width: calc(100cqw + 2 * var(--space-float, 16px)); transform: translateX(-50%);
   background: var(--msg-highlight, rgba(0, 0, 0, .1)); pointer-events: none; animation: app-msg-band 1.6s ease-out both; }
 :root[data-theme="dark"] .app-msg-flash::before { --msg-highlight: rgba(255, 255, 255, .08); }
 @media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) .app-msg-flash::before { --msg-highlight: rgba(255, 255, 255, .08); } }
