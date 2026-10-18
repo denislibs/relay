@@ -308,6 +308,23 @@ export function moveWindow(dir: 'older' | 'newer' | 'latest', frameKey?: string)
 }
 
 /** Перейти к сообщению чата на экране (цитата, поиск): в окне — прокрутка, нет — окно вокруг него. */
+/** «Перейти к дате»: первое сообщение с полуночи выбранного дня (по местному времени). Без сети — по уже загруженной ленте. */
+export async function jumpToDate(chatId: number, day: Date): Promise<boolean> {
+  const from = new Date(day.getFullYear(), day.getMonth(), day.getDate());
+  try {
+    const res = await fetch(`/chats/${chatId}/messages?from=${encodeURIComponent(from.toISOString())}`);
+    if (res.ok) {
+      const { id } = (await res.json()) as { id: number | null };
+      if (id != null) { focusMessage({ id, sort: id }); return true; }
+      return false;
+    }
+  } catch { /* нет сети — ищем в загруженном */ }
+  const f = topReady();
+  const hit = f?.messages.find((m) => m.id != null && Date.parse(m.createdAt as string) >= from.getTime());
+  if (hit) { focusMessage({ id: hit.id as number, sort: hit.sort as number }); return true; }
+  return false;
+}
+
 export function focusMessage(target: { id: number; sort: number }): void {
   const f = topReady();
   const s = f && sessions.get(f.key);

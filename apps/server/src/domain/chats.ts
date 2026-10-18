@@ -221,6 +221,17 @@ export async function getChatMediaCounts(userId: number, chatId: number): Promis
   return { media: r.media, file: r.file, audio: r.audio, voice: r.voice, link: r.link };
 }
 
+/** «Перейти к дате»: первое сообщение не раньше from (полночь выбранного дня у клиента); позже нет — последнее. */
+export async function messageAtDate(userId: number, chatId: number, from: string): Promise<{ id: number | null }> {
+  const at = new Date(from);
+  if (Number.isNaN(at.getTime())) throw new DomainError('bad_frame', 'from');
+  await assertMember(sql, chatId, userId);
+  const [first] = await sql`select id from messages where chat_id = ${chatId} and created_at >= ${at} order by created_at, id limit 1`;
+  if (first) return { id: Number(first.id) };
+  const [last] = await sql`select id from messages where chat_id = ${chatId} order by id desc limit 1`;
+  return { id: last ? Number(last.id) : null };
+}
+
 export async function getMessagesByIds(userId: number, chatId: number, ids: number[]): Promise<Message[]> {
   await assertMember(sql, chatId, userId);
   if (!ids.length) return [];

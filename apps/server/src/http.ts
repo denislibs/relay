@@ -6,7 +6,7 @@ import { existsSync, statSync } from 'node:fs';
 import { extname, join, resolve, sep } from 'node:path';
 import { clearSessionCookie, createSession, createUser, deleteSession, readSessionToken, sessionCookie, sessionFromToken } from './auth';
 import { announceLogin, announceSessionsChanged, assertConfirmed, checkSocket, confirmSession, listSessions, sessionEnded, sweepInactive, terminateOthers, terminateSession, trackSocket, untrackSocket } from './domain/sessions';
-import { createChat, createGroup, openDirect, getChatMedia, getChatMediaCounts, getHistory, getMessagesByIds, listChats, listChatsPage } from './domain/chats';
+import { createChat, createGroup, openDirect, messageAtDate, getChatMedia, getChatMediaCounts, getHistory, getMessagesByIds, listChats, listChatsPage } from './domain/chats';
 import { sql } from './db';
 import { DomainError } from './domain/errors';
 import { processAlive } from './domain/liveRegistry';
@@ -300,6 +300,8 @@ export function createServer(opts: { port: number }): Server {
         }
         const hist = /^\/chats\/(\d+)\/messages$/.exec(url.pathname);
         if (req.method === 'GET' && hist) {
+          const from = url.searchParams.get('from');   // «Перейти к дате»
+          if (from) return Response.json(await messageAtDate(userId, Number(hist[1]), from));
           const ids = url.searchParams.get('ids');
           if (ids) return Response.json({ messages: await getMessagesByIds(userId, Number(hist[1]), ids.split(',').map(Number).filter((n) => Number.isInteger(n) && n > 0).slice(0, 100)) });
           const before = url.searchParams.get('before');

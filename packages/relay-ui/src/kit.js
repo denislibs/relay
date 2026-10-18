@@ -448,7 +448,10 @@ function ReactionChips(props) {
 
 /* ---------- DateDivider ---------- */
 function DateDivider(props) {
-  return h('div', { class: 'rl-date', role: 'separator' }, h('span', null, props.children));
+  // с onClick плашка — кнопка (как в Telegram: открывает «Перейти к дате»)
+  return h('div', { class: 'rl-date', role: 'separator' }, props.onClick
+    ? h('button', { type: 'button', class: 'rl-date-btn', onClick: props.onClick, 'aria-label': 'Перейти к дате, сейчас: ' + props.children }, props.children)
+    : h('span', null, props.children));
 }
 
 /* ---------- Banner ---------- */

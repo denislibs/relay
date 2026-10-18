@@ -1,9 +1,9 @@
 import type { Item } from '@relay/sync-engine/src/types';
 import type { Entity } from '@relay/protocol';
-import { Bubble, peerTone, DateDivider, FileBubble, MediaBubble, MessageText, VoiceBubble, MusicBubble, RoundBubble, player, MediaViewer, ScrollToBottom, beginHeavyAnimation, forceMeasure, isHeavyAnimating, onHeavyAnimationEnd, requestMeasure, requestMutation } from '@relay/ui';
+import { Bubble, peerTone, DateDivider, DatePicker, FileBubble, MediaBubble, MessageText, VoiceBubble, MusicBubble, RoundBubble, player, MediaViewer, ScrollToBottom, beginHeavyAnimation, forceMeasure, isHeavyAnimating, onHeavyAnimationEnd, requestMeasure, requestMutation } from '@relay/ui';
 import { memo } from 'preact/compat';
 import { useEffect, useLayoutEffect, useRef, useState } from 'preact/hooks';
-import { clearFocus, ensureNames, focusMessage, localPreview, markListened, moveWindow, react, savePosition, savedPosition, seen } from '../data';
+import { clearFocus, ensureNames, focusMessage, jumpToDate, localPreview, markListened, moveWindow, react, savePosition, savedPosition, seen } from '../data';
 import { activeFrame, frameByKey, getGlobal, useGlobal } from '../global';
 import { toggleMusic, trackTitle, useFileCached } from '../music';
 import { showToast } from '../settingsData';
@@ -225,6 +225,7 @@ export function Feed({ frameKey, active, chatId, meId, peerName, group, onAuthor
   const activeRef = useRef(active); activeRef.current = active;
   const [flashKey, setFlashKey] = useState<string | null>(null);
   const [viewer, setViewer] = useState<number | null>(null);   // индекс фото в просмотрщике
+  const [pickDate, setPickDate] = useState<Date | null>(null);   // «Перейти к дате» по клику на плашку даты
   const unread = useGlobal((s) => (s.chats.find((c) => c.id === chatId)?.unread as number) ?? 0);
   const el = useRef<HTMLDivElement>(null);
   const metaRef = useRef(meta); metaRef.current = meta;
@@ -567,7 +568,7 @@ export function Feed({ frameKey, active, chatId, meId, peerName, group, onAuthor
   shown.forEach((m, i) => {
     const day = dayKey(m.createdAt as string);
     const mine = m.senderId === meId;
-    if (day !== prevDay) out.push(<DateDivider key={'d' + day}>{dayLabel(m.createdAt as string)}</DateDivider>);
+    if (day !== prevDay) { const at = m.createdAt as string; out.push(<DateDivider key={'d' + day} onClick={() => setPickDate(new Date(at))}>{dayLabel(at)}</DateDivider>); }
     if (!unreadShown && unreadFrom != null && !mine && m.id != null && (m.id as number) > unreadFrom) {
       unreadShown = true;
       out.push(<div class="app-unread-divider" key="unread" role="separator"><span>Непрочитанные сообщения</span></div>);
@@ -628,6 +629,8 @@ export function Feed({ frameKey, active, chatId, meId, peerName, group, onAuthor
           onClose={() => setViewer(null)}
         />
       ) : null}
+      <DatePicker open={!!pickDate} value={pickDate ?? undefined} onClose={() => setPickDate(null)}
+        onPick={(d: Date) => { setPickDate(null); void jumpToDate(chatId, d).then((ok) => { if (!ok) showToast('В этот день сообщений нет'); }); }} />
       <div class="rl-scrolldown-slot">
         <ScrollToBottom show={away || (meta ? !meta.live : false)} unread={unread} onClick={toLatest} />
       </div>

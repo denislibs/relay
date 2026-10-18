@@ -45,9 +45,9 @@ body { background: var(--bg); color: var(--ink); font-family: var(--font-sans); 
 .app-unread-divider { display: flex; justify-content: center; margin: var(--space-3) 0; padding: 6px 0; background: color-mix(in srgb, var(--raised) 72%, transparent); color: var(--brand-text); font: 500 13.5px/18px var(--font-sans); animation: app-fade 300ms var(--ease-out) both; }
 /* sticky top считается от края с учётом padding-top ленты (он уже равен шапке + отступу) */
 .rl-shell .rl-feed .rl-date { position: sticky; top: -32px; z-index: 2; pointer-events: none; }   /* у строки даты отступ 1rem, у ленты — 16px до шапки: плашка встаёт в 8px под шапкой */
-.rl-shell .rl-feed .rl-date span { pointer-events: auto; transition: opacity 300ms var(--ease-out); }
-.rl-shell .rl-feed .rl-date.stuck span { opacity: 0; }
-.rl-shell .rl-feed .rl-date.covered span { opacity: 0; transition: none; }
+.rl-shell .rl-feed .rl-date :is(span, .rl-date-btn) { pointer-events: auto; transition: opacity 300ms var(--ease-out); }
+.rl-shell .rl-feed .rl-date.stuck :is(span, .rl-date-btn) { opacity: 0; pointer-events: none; }
+.rl-shell .rl-feed .rl-date.covered :is(span, .rl-date-btn) { opacity: 0; transition: none; pointer-events: none; }
 /* поиск: раздел «Сообщения» в списке слева и строка поиска по чату на месте шапки */
 .app-results { padding: var(--space-2) 0 var(--space-4); }
 .app-results-head { padding: var(--space-2) var(--space-3); color: var(--ink-muted); font: 500 13px/18px var(--font-sans); }
@@ -663,7 +663,6 @@ html[data-anim="0"] .app-chatcol, html[data-anim="0"] .app-chatcol-below, html[d
 .app-newchat-open .app-newchat-close { opacity: 1; transform: none; }
 
 /* ---------- Новая группа ---------- */
-.app-newgroup .rl-picker-search { margin: 0 var(--space-3); }
 .app-newgroup-head { display: flex; flex-direction: column; align-items: center; gap: var(--space-5, 20px); padding: var(--space-4) var(--space-5, 20px) var(--space-3); }
 .app-newgroup-photo { display: grid; place-items: center; width: 7.5rem; height: 7.5rem; border-radius: 50%; background: var(--button); color: #fff; }
 .app-newgroup-name { align-self: stretch; }

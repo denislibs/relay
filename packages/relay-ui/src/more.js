@@ -218,16 +218,23 @@ function ContactPicker(props) {
     var next = has ? sel[0].filter(function (n) { return n !== k; }) : sel[0].concat([k]);
     sel[1](next); if (props.onChange) props.onChange(next);
   }
+  function onSearchKey(e) {
+    // как в полях с «чипами»: Backspace в пустом поиске убирает последнего выбранного
+    if (multi && e.key === 'Backspace' && !q[0] && sel[0].length) { e.preventDefault(); toggle(sel[0][sel[0].length - 1]); }
+  }
   return h('div', { class: 'rl-picker' },
-    multi && sel[0].length ? h('div', { class: 'rl-picker-chips' }, sel[0].map(function (k) {
-      var name = byKey[k] ? byKey[k].name : String(k);
-      return h('button', { key: k, type: 'button', class: 'rl-picker-chip', onClick: function () { toggle(k); }, 'aria-label': 'Убрать ' + name },
-        h(Avatar, { name: name, tone: byKey[k] ? byKey[k].tone : undefined, size: 24 }), name, h(Icon, { name: 'close', size: 14 }));
-    })) : null,
-    h('div', { class: 'rl-search rl-picker-search' },
-      h('label', { for: 'rl-picker-q', class: 'rl-sr' }, props.searchLabel || 'Поиск контактов'),
-      h(Icon, { name: 'search', size: 18 }),
-      h('input', { id: 'rl-picker-q', type: 'search', placeholder: props.placeholder || 'Имя или номер', autocomplete: 'off', value: q[0], onInput: function (e) { q[1](e.target.value); } })),
+    // как в Telegram: выбранные «чипами» и поле поиска — в одной строке с переносом, под ними черта
+    h('div', { class: cx('rl-picker-head', multi && 'rl-picker-head-multi') },
+      multi ? sel[0].map(function (k) {
+        var name = byKey[k] ? byKey[k].name : String(k);
+        return h('button', { key: k, type: 'button', class: 'rl-picker-chip', onClick: function () { toggle(k); }, 'aria-label': 'Убрать ' + name },
+          h('span', { class: 'rl-picker-chip-av' }, h(Avatar, { name: name, tone: byKey[k] ? byKey[k].tone : undefined, size: 32 }), h('i', { 'aria-hidden': 'true' }, h(Icon, { name: 'close', size: 18 }))),
+          h('span', { class: 'rl-picker-chip-name' }, name));
+      }) : null,
+      h('div', { class: 'rl-search rl-picker-search' },
+        h('label', { for: 'rl-picker-q', class: 'rl-sr' }, props.searchLabel || 'Поиск контактов'),
+        multi ? null : h(Icon, { name: 'search', size: 18 }),
+        h('input', { id: 'rl-picker-q', type: 'search', placeholder: multi && sel[0].length ? '' : (props.placeholder || 'Имя или номер'), autocomplete: 'off', value: q[0], onKeyDown: onSearchKey, onInput: function (e) { q[1](e.target.value); } }))),
     h('div', { class: 'rl-picker-list', role: multi ? 'group' : 'list' },
       list.length ? list.map(function (c) {
         var k = keyOf(c), on = sel[0].indexOf(k) >= 0;

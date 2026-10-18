@@ -17,7 +17,11 @@ function usePeople(): Person[] {
   const me = useGlobal((s) => s.me!.userId);
   const contacts = useGlobal((s) => s.contacts);
   const chats = useGlobal((s) => s.chats);
-  return candidates(contacts, chats.filter((c) => !isSystemChat(c)), me);
+  // как в Telegram: сначала те, с кем переписывались недавно (порядок списка чатов), потом остальные контакты по алфавиту
+  const recent = new Map<number, number>();
+  chats.forEach((c, i) => { if (c.kind === 'direct' && typeof c.peerId === 'number' && !recent.has(c.peerId)) recent.set(c.peerId, i); });
+  return candidates(contacts, chats.filter((c) => !isSystemChat(c)), me)
+    .sort((a, b) => (recent.get(a.id) ?? Infinity) - (recent.get(b.id) ?? Infinity) || a.name.localeCompare(b.name, 'ru'));
 }
 
 /** «Анна, Борис и Вера» — имена (первое слово) создателя и до трёх участников; больше — без подсказки. */

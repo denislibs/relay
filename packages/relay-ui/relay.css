@@ -762,9 +762,6 @@ button.rl-quote:active { background: var(--quote-bg-active, var(--pressed)); }
 
 /* ---------- ContactPicker ---------- */
 .rl-picker { display: flex; flex-direction: column; gap: var(--space-2); min-height: 0; }
-.rl-picker-chips { display: flex; flex-wrap: wrap; gap: 6px; padding: 0 var(--space-4); }
-.rl-picker-chip { display: inline-flex; align-items: center; gap: 6px; height: 32px; padding: 0 8px 0 4px; border: 0; border-radius: var(--radius-pill); background: var(--field); color: var(--ink); font: 400 14px/1 var(--font-sans); cursor: pointer; animation: rl-react-in var(--dur-base) var(--ease-out); }
-.rl-picker-chip:hover { background: var(--danger-soft); }
 .rl-picker-search { margin: 0 var(--space-3); }
 .rl-picker-list { overflow-y: auto; padding: 0 var(--space-2); }
 .rl-picker-row { height: 64px; }
@@ -1664,3 +1661,37 @@ html[data-blur="0"] .rl-menu, html[data-blur="0"] .rl-attach { -webkit-backdrop-
 .rl-media .rl-media-caption { padding: 6px 8px 6px; font-size: var(--message-text-size, 16px); line-height: calc(var(--message-text-size, 16px) * 1.3125); }
 .rl-media .rl-media-author { padding: 5px 8px 4px; }
 .rl-media-chip-meta { right: 4px; bottom: 4px; padding: 0 6px; height: 18px; border-radius: 10px; background: rgba(0, 0, 0, .2); font-size: 12px; }
+
+/* плашка даты — кнопка «Перейти к дате» */
+.rl-date .rl-date-btn { all: unset; box-sizing: border-box; display: inline-block; padding: 3px 8px; border-radius: 15px; background: var(--action-bg); color: #fff; cursor: pointer;
+  font: 500 calc(var(--message-text-size, 16px) - 1px)/1.25 var(--font-sans); transition: filter 150ms ease; }
+.rl-date .rl-date-btn:hover { filter: brightness(1.08); }
+.rl-date .rl-date-btn:focus-visible { outline: 2px solid #fff; outline-offset: 2px; }
+
+/* календарь «Перейти к дате» — как в Telegram */
+.rl-cal .rl-mdl-body { padding: .5rem 1rem 1rem; }
+.rl-cal-head .rl-mdl-title { margin-right: auto; }
+.rl-cal-head .rl-iconbtn:disabled { opacity: .35; cursor: default; }
+.rl-cal-grid { display: grid; grid-template-columns: repeat(7, 1fr); row-gap: 4px; justify-items: center; margin-bottom: 1.25rem; }
+.rl-cal-wd { padding: .5rem 0; font: 500 15px/20px var(--font-sans); color: var(--ink); }
+.rl-cal-day { width: 2.5rem; height: 2.5rem; padding: 0; border: 0; border-radius: 50%; background: transparent; color: var(--ink); font: 400 16px/1 var(--font-sans);
+  cursor: pointer; transition: background-color 150ms ease, color 150ms ease; }
+.rl-cal-day:hover:not(:disabled) { background: var(--hover); }
+.rl-cal-off { color: var(--ink-muted); opacity: .7; cursor: default; }
+.rl-cal-on, .rl-cal-on:hover:not(:disabled) { background: var(--button); color: var(--on-button); }
+.rl-cal-go { width: 100%; }
+
+/* выбор людей — как в Telegram: «чипы» и поиск в одной строке; «чип» — аватар во всю высоту, при наведении — красный крестик */
+.rl-picker-head-multi { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 6px; max-height: 20rem; overflow-y: auto; padding: 4px 16px 10px; border-bottom: 1px solid var(--line); }
+.rl-picker-head-multi .rl-picker-search { flex: 1 1 8rem; min-width: 8rem; height: 32px; margin: 0; padding: 0 4px; border-radius: 0; background: transparent; box-shadow: none; }
+.rl-picker-head-multi .rl-picker-search input { padding: 0; }
+.rl-picker-chip { position: relative; display: inline-flex; align-items: center; max-width: calc(50% - .5rem); height: 32px; padding: 0 12px 0 0; border: 0; border-radius: 16px;
+  background: var(--hover); color: var(--ink); font: 400 15px/1 var(--font-sans); cursor: pointer; transition: background-color 150ms ease; }
+.rl-picker-chip-av { position: relative; flex: none; display: inline-flex; }
+.rl-picker-chip-av > i { position: absolute; inset: 0; display: grid; place-items: center; border-radius: 50%; background: var(--danger); color: #fff; opacity: 0; transition: opacity 150ms ease; }
+.rl-picker-chip-name { margin-left: 8px; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.rl-picker-chip:hover, .rl-picker-chip:focus-visible { background: color-mix(in srgb, var(--danger) 16%, transparent); outline: none; }
+.rl-picker-chip:hover .rl-picker-chip-av > i, .rl-picker-chip:focus-visible .rl-picker-chip-av > i { opacity: 1; }
+/* отметка — белая галочка на цвете кнопок */
+.rl-picker-check { color: #fff; border-color: color-mix(in srgb, var(--ink) 35%, transparent); }
+.rl-picker-on .rl-picker-check { background: var(--button); border-color: var(--button); }
