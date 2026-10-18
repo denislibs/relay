@@ -50,6 +50,8 @@ export function previewBody(m: LastMessage, withThumb: boolean): ComponentChildr
   if (m.deleted) return 'Сообщение удалено';
   const caption = m.body ? previewText(m.body, m.entities) : null;
   if (m.kind === 'photo') return caption ?? (withThumb ? 'Фото' : '🖼 Фото');
+  if (m.kind === 'voice') return 'Голосовое сообщение';
+  if (m.kind === 'round') return 'Видеосообщение';
   if (m.kind === 'file') {
     if (withThumb) return caption ?? 'Видео';
     return ['📎 ', caption ?? m.attachmentName ?? 'Файл'];
