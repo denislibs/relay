@@ -22,10 +22,15 @@ import { getGlobal } from '../global';
 
 
 /** Фрагмент вокруг совпадения: превью узкое, а совпадение может быть в конце длинного сообщения. */
-/** «Загружаем ещё чаты» внизу списка: крутится, только пока виден — вне экрана бесконечная анимация зря будит стили каждый кадр. */
+/**
+ * «Загружаем ещё чаты» внизу списка: крутится, только пока виден — вне экрана бесконечная анимация зря будит стили каждый кадр.
+ * Пока виден — сам догружает страницу за страницей (как в Telegram Web K): в своей папке новая страница диалогов
+ * может не добавить ни одной строки, и без этого спиннер висел бы вечно — список больше не просил продолжения.
+ */
 function MoreLoader() {
   const ref = useRef<HTMLDivElement>(null);
   const [on, setOn] = useState(false);
+  const cursor = useGlobal((s) => s.status.chatsCursorAt);
   useEffect(() => {
     const el = ref.current;
     if (!el) return;
@@ -33,6 +38,8 @@ function MoreLoader() {
     io.observe(el);
     return () => io.disconnect();
   }, []);
+  // виден — следующая страница; пришла (курсор сдвинулся), а он всё ещё виден — ещё одна (движок не пустит два запроса сразу)
+  useEffect(() => { if (on) loadMoreChats(); }, [on, cursor]);
   return (
     <div ref={ref} class={on ? 'app-more app-more-on' : 'app-more'} role="status" aria-label="Загружаем ещё чаты">
       <svg width="22" height="22" viewBox="0 0 18 18" fill="none" aria-hidden="true"><circle cx="9" cy="9" r="7" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-dasharray="30 44" /></svg>
@@ -172,7 +179,7 @@ export function Sidebar() {
           ) : null}
           </>
         ) : f !== ALL && !q && !status.chatsComplete ? (
-          <><MoreLoader />{status.hydrated ? <span class="app-more-pull" ref={(el) => { if (el) loadMoreChats(); }} /> : null}</>
+          <MoreLoader />
         ) : f !== ALL && !q ? (
           <div class="app-folder-empty">
             <EmptyState kind="chats" title="В папке нет чатов" text="Сюда попадут чаты, подходящие под правила папки." />
