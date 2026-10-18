@@ -166,7 +166,8 @@ export interface JournalEntry { seq: number; update: Update }
 
 export type ErrorCode = 'bad_frame' | 'unauthorized' | 'not_member' | 'not_found' | 'too_long' | 'forbidden' | 'internal'
   | 'username_invalid' | 'username_taken' | 'username_reserved' | 'bio_too_long' | 'name_invalid' | 'birthday_invalid' | 'note_too_long'
-  | 'blocked' | 'code_invalid' | 'code_expired' | 'flood' | 'fresh_session';
+  | 'blocked' | 'code_invalid' | 'code_expired' | 'flood' | 'fresh_session'
+  | 'password_invalid' | 'password_missing' | 'recovery_unavailable' | 'email_invalid' | 'qr_expired' | 'passkey_not_found' | 'passkey_invalid';
 
 export type ClientFrame =
   | { op: 'hello'; lastSeq: number }

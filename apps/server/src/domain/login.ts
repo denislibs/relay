@@ -57,7 +57,10 @@ export async function requestCode(login: string, ip: string | null = null): Prom
     if (n >= MAX_PER_HOUR) throw new DomainError('flood');
     const expires = tx`now() + ${CODE_TTL_MIN + ' minutes'}::interval`;
     if (userId == null) {
-      await tx`insert into login_attempts (id, user_id, code_hash, expires_at, login, ip) values (${attemptId}, ${sys}, ${hash(crypto.randomUUID())}, ${expires}, ${key}, ${ip})`;
+      // новый номер: регистрация возможна, только если код есть куда доставить — без SMS это лишь dev (devCode)
+      const signup = dev && /^\+[0-9]{7,15}$/.test(key);
+      if (signup) code = String(randomInt(0, 10 ** CODE_LENGTH)).padStart(CODE_LENGTH, '0');
+      await tx`insert into login_attempts (id, user_id, code_hash, expires_at, login, ip) values (${attemptId}, ${sys}, ${hash(signup ? code : crypto.randomUUID())}, ${expires}, ${key}, ${ip})`;
       return;
     }
     const [{ live }] = await tx`select count(*)::int as live from sessions where user_id = ${userId} and expires_at > now()`;
@@ -77,22 +80,25 @@ export async function requestCode(login: string, ip: string | null = null): Prom
  * Неверный код — code_invalid; пятая ошибка убивает попытку. Верный — попытка гасится (код одноразовый).
  * 15 неверных кодов за час по одной цели (аккаунту или строке логина) — flood.
  */
-export async function signIn(attemptId: string, code: string): Promise<{ userId: number }> {
+/** signupPhone — код верный, но аккаунта с этим номером нет: дальше регистрация. */
+export async function signIn(attemptId: string, code: string): Promise<{ userId: number } | { signupPhone: string }> {
   if (!/^[0-9a-f-]{36}$/.test(attemptId)) throw new DomainError('code_invalid');
   const sys = await systemUserId();
   // исход возвращаем из транзакции, а бросаем после коммита: throw внутри sql.begin откатил бы счётчик попыток
-  const outcome = await sql.begin(async (tx): Promise<{ userId: number } | 'code_invalid' | 'code_expired' | 'flood'> => {
+  const outcome = await sql.begin(async (tx): Promise<{ userId: number } | { signupPhone: string } | 'code_invalid' | 'code_expired' | 'flood'> => {
     const [a] = await tx`select user_id, login, code_hash, tries, (expires_at < now()) as expired from login_attempts where id = ${attemptId} and dead_at is null for update`;
     if (!a || a.expired) return 'code_expired';
     const [{ wrong }] = await tx`
       select coalesce(sum(tries), 0)::int as wrong from login_attempts
        where created_at > now() - interval '1 hour' and (login = ${a.login} or (user_id = ${a.user_id} and user_id <> ${sys}))`;
     if (wrong >= MAX_WRONG_PER_HOUR) return 'flood';
-    if (a.code_hash !== hash(code.trim()) || Number(a.user_id) === sys) {
+    if (a.code_hash !== hash(code.trim())) {
       await tx`update login_attempts set tries = tries + 1, dead_at = case when tries + 1 >= ${MAX_TRIES} then now() end where id = ${attemptId}`;
       return 'code_invalid';
     }
     await tx`update login_attempts set dead_at = now() where id = ${attemptId}`;
+    // попытка на системного пользователя с верным кодом — только регистрация нового номера (см. requestCode)
+    if (Number(a.user_id) === sys) return /^\+[0-9]{7,15}$/.test(a.login as string) ? { signupPhone: a.login as string } : 'code_invalid';
     return { userId: Number(a.user_id) };
   });
   if (typeof outcome === 'string') throw new DomainError(outcome);
