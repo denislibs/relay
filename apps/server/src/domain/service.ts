@@ -36,7 +36,7 @@ export async function isServiceChat(db: Db, chatId: number): Promise<boolean> {
 }
 
 /** Служебное сообщение пользователю: строка messages, newMessage в журнал и задача push — всё в транзакции вызывающего. */
-export async function postService(tx: Tx, userId: number, msg: { type: ServiceType; body: string; entities?: Entity[] }): Promise<Message> {
+export async function postService(tx: Tx, userId: number, msg: { type: ServiceType; body: string; entities?: Entity[] }, opts: { push?: boolean } = {}): Promise<Message> {
   const chatId = await serviceChatId(tx, userId);
   const sys = await systemUserId();
   const [row] = await tx`
@@ -45,7 +45,7 @@ export async function postService(tx: Tx, userId: number, msg: { type: ServiceTy
     returning *`;
   const message = toMessage(row);
   await fanOut(tx, [userId], { type: 'newMessage', message });
-  await enqueue(tx, 'push.message', { message });
+  if (opts.push !== false) await enqueue(tx, 'push.message', { message });
   await enqueue(tx, 'search.sync', { id: message.id });   // коды входа обработчик сам не проиндексирует
   return message;
 }
@@ -56,4 +56,20 @@ export function newLoginMessage(device: string, ip: string | null, at: Date): { 
   const title = 'Новый вход в аккаунт';
   const body = `${title}\n\nУстройство: ${device}\nIP: ${ip ?? 'неизвестен'}\nВремя: ${when}\n\nЕсли это были не вы, откройте Настройки → Активные сеансы и завершите этот сеанс.`;
   return { body, entities: [{ type: 'bold', offset: 0, length: title.length }] };
+}
+
+const WELCOME_TITLE = 'Добро пожаловать в Relay';
+const ensured = new Set<number>();
+/**
+ * Служебный чат «Relay» есть у каждого с первого входа (как «Telegram» в Telegram): нет — создаём с приветствием
+ * (без push). Вызывается на GET /me; проверка в базе — один раз на процесс для пользователя.
+ */
+export async function ensureServiceChat(userId: number): Promise<void> {
+  if (ensured.has(userId)) return;
+  const [has] = await sql`select 1 from service_chats where user_id = ${userId}`;
+  if (!has) {
+    const body = `${WELCOME_TITLE}\n\nЗдесь будут служебные уведомления: коды входа и сообщения о новых входах в аккаунт. Отвечать сюда не нужно.`;
+    await sql.begin((tx) => postService(tx, userId, { type: 'welcome', body, entities: [{ type: 'bold', offset: 0, length: WELCOME_TITLE.length }] }, { push: false }));
+  }
+  ensured.add(userId);
 }

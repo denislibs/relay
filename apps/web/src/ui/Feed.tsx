@@ -30,10 +30,10 @@ const FIRST_PAINT = 24;   // при открытии внизу первым к�
 type Quote = { id: number; sort: number; body: string; senderId: number };
 type Att = { id: string; kind: 'photo' | 'file' | 'voice' | 'round' | 'audio'; title?: string | null; performer?: string | null; mime: string; name: string; size: number; w: number | null; h: number | null; thumb?: string | null; duration?: number | null; waveform?: string | null };
 const fileUrl = (a: Att, download = false) => `/files/${a.id}${download ? '?download=1' : ''}`;
-type RowProps = { chatId: number; voiceTitle: string; author?: string; onAuthor?: (m: Item) => void; onOpen: (m: Item) => void; hl?: string; m: Item; meId: number; out: boolean; start: boolean; end: boolean; pos?: 'single' | 'first' | 'middle' | 'last'; quoted?: Quote | null; quoteAuthor?: string; quoteTone?: number; appear: boolean; flash: boolean; onReact: (m: Item, emoji: string) => void };
+type RowProps = { chatId: number; voiceTitle: string; author?: string; onAuthor?: (m: Item) => void; onOpen: (m: Item) => void; hl?: string; m: Item; meId: number; out: boolean; start: boolean; end: boolean; pos?: 'single' | 'first' | 'middle' | 'last'; quoted?: Quote | null; quoteAuthor?: string; quoteTone?: number; appear: boolean; flash: boolean; onReact: (m: Item, emoji: string) => void; album?: Item[] };
 
 /** Строка ленты: перерисовывается только если изменилось её сообщение или место в группе. */
-const Row = memo(function Row({ chatId, voiceTitle, author, onAuthor, onOpen, hl, m, meId, out, start, end, pos, quoted, quoteAuthor, quoteTone, appear, flash, onReact }: RowProps) {
+const Row = memo(function Row({ chatId, voiceTitle, author, onAuthor, onOpen, hl, m, meId, out, start, end, pos, quoted, quoteAuthor, quoteTone, appear, flash, onReact, album }: RowProps) {
   // реакции: по эмодзи — сколько и есть ли моя
   const list = (m.reactions as { userId: number; emoji: string }[] | undefined) ?? [];
   const chips: { emoji: string; count: number; mine: boolean }[] = [];
@@ -44,6 +44,26 @@ const Row = memo(function Row({ chatId, voiceTitle, author, onAuthor, onOpen, hl
   const att = m.attachment as Att | null | undefined;
   const pending = m.status === 'pending' && typeof m.progress === 'number' && (m.progress as number) < 1;
   const mark = m.id != null ? <i class="app-mark" data-mid={m.id as number} aria-hidden="true" /> : null;
+  if (album && album.length > 1) {
+    // альбом — фото, отправленные вместе (один groupId): один пузырь с мозаикой, как в Telegram;
+    // время и статус — у последнего, подпись — у первого, где она есть
+    const last = album[album.length - 1];
+    const cap = album.find((x) => x.body);
+    const busy = album.some((x) => x.status === 'pending' && typeof x.progress === 'number' && (x.progress as number) < 1);
+    return (
+      <div class={flash ? 'app-msg app-msg-media app-msg-flash' : 'app-msg app-msg-media'} data-key={m.key} data-sort={m.sort as number}>
+        <MediaBubble
+          from={out ? 'out' : 'in'} tail={end} groupStart={start} appear={appear}
+          items={album.map((x) => { const a = x.attachment as Att; return { src: localPreview(x.key) ?? (a.id ? fileUrl(a) : undefined), thumb: a.thumb, alt: a.name, w: a.w, h: a.h }; })}
+          state={busy ? 'loading' : 'ready'} progress={busy ? Math.min(...album.map((x) => (typeof x.progress === 'number' ? x.progress as number : 1))) : undefined}
+          caption={cap ? <MessageText text={cap.body as string} entities={cap.entities as Entity[] | undefined} highlight={hl} /> : undefined}
+          time={clock(last.createdAt as string)} status={out ? last.status : undefined}
+          onOpen={(i: number) => onOpen(album[i] ?? m)}
+        />
+        {album.map((x) => (x.id != null ? <i key={x.key} class="app-mark" data-mid={x.id as number} aria-hidden="true" /> : null))}
+      </div>
+    );
+  }
   if (att && !m.deleted && att.kind === 'photo' && att.w && att.h) {
     // фото знает размеры заранее: рамка нужной высоты сразу, размытое превью, полная картинка — лениво
     const src = localPreview(m.key) ?? (att.id ? fileUrl(att) : undefined);
@@ -565,7 +585,18 @@ export function Feed({ frameKey, active, chatId, meId, peerName, group, onAuthor
   let prevDay = '', prevSender: unknown = null, unreadShown = false;
   if (!partial) out.push(<div class="app-sentinel" data-dir="older" key={'o' + (messages[0]?.key ?? '')} aria-hidden="true" />);
   const shown = partial && messages.length > FIRST_PAINT ? messages.slice(messages.length - FIRST_PAINT) : messages;
+  // альбомы: подряд идущие фото одного отправителя с общим groupId (до 10) — одной строкой с мозаикой
+  const isPhoto = (x: Item | undefined) => !!x && !x.deleted && (x.attachment as Att | null)?.kind === 'photo' && !!(x.attachment as Att).w && !!(x.attachment as Att).h;
+  const albums = new Map<string, Item[]>(), inAlbum = new Set<string>();
+  for (let i = 0; i < shown.length; i++) {
+    const m = shown[i];
+    if (!m.groupId || !isPhoto(m) || inAlbum.has(m.key)) continue;
+    const run = [m];
+    while (run.length < 10) { const x = shown[i + run.length]; if (!isPhoto(x) || x.groupId !== m.groupId || x.senderId !== m.senderId) break; run.push(x); }
+    if (run.length > 1) { albums.set(m.key, run); run.slice(1).forEach((x) => inAlbum.add(x.key)); }
+  }
   shown.forEach((m, i) => {
+    if (inAlbum.has(m.key)) return;   // уже нарисовано в альбоме выше
     const day = dayKey(m.createdAt as string);
     const mine = m.senderId === meId;
     if (day !== prevDay) { const at = m.createdAt as string; out.push(<DateDivider key={'d' + day} onClick={() => setPickDate(new Date(at))}>{dayLabel(at)}</DateDivider>); }
@@ -580,7 +611,8 @@ export function Feed({ frameKey, active, chatId, meId, peerName, group, onAuthor
       prevDay = day; prevSender = null;
       return;
     }
-    const next = shown[i + 1];
+    const album = albums.get(m.key);
+    const next = shown[i + (album ? album.length : 1)];
     // группа — как в Telegram: тот же отправитель и день, пауза не больше 10 минут, не на границе «Непрочитанные»
     const start = prevSender !== m.senderId || day !== prevDay || breaksGroup(shown[i - 1], m, unreadFrom, meId);
     const end = !next || next.senderId !== m.senderId || dayKey(next.createdAt as string) !== day || breaksGroup(m, next, unreadFrom, meId);
@@ -609,7 +641,8 @@ export function Feed({ frameKey, active, chatId, meId, peerName, group, onAuthor
         quoteAuthor={quoted ? (quoted.senderId === meId ? 'Вы' : peerName) : undefined}
         quoteTone={quoted ? peerTone(quoted.senderId as number) : undefined}
         appear={initial.current !== null && !initial.current.has(m.key)}
-        flash={flashKey === m.key}
+        flash={flashKey === m.key || !!album?.some((x) => x.key === flashKey)}
+        album={album}
       />,
     );
     prevDay = day; prevSender = m.senderId;

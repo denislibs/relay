@@ -9,6 +9,7 @@ import { announceLogin, announceSessionsChanged, assertConfirmed, checkSocket, c
 import { createChat, createGroup, openDirect, messageAtDate, getChatMedia, getChatMediaCounts, getHistory, getMessagesByIds, listChats, listChatsPage } from './domain/chats';
 import { sql } from './db';
 import { DomainError } from './domain/errors';
+import { ensureServiceChat } from './domain/service';
 import { processAlive } from './domain/liveRegistry';
 import { chatMembers, connected, disconnected, listPresence, type Publish } from './domain/presence';
 import { searchMessages } from './domain/search';
@@ -114,6 +115,7 @@ export function createServer(opts: { port: number }): Server {
         if (auth.refresh) { const t = readSessionToken(req); if (t && req.headers.get('cookie')?.includes('relay_session=')) refreshed.set(req, t); }
 
         if (req.method === 'GET' && url.pathname === '/me') {
+          await ensureServiceChat(userId).catch((e) => console.warn('service chat', String(e)));   // «Relay» в списке у всех
           return Response.json(await getMe(userId));
         }
         if (req.method === 'PATCH' && url.pathname === '/me') {

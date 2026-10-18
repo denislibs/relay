@@ -6,7 +6,7 @@ import type { ChatFolder } from './folders';
 export type Id = number;
 
 /** Служебное сообщение от системного пользователя: машинный тип для отрисовки и склейки повторов. */
-export type ServiceType = 'login_code' | 'new_login' | 'group_created';   // group_created: тело — название группы, автор — создатель
+export type ServiceType = 'login_code' | 'new_login' | 'group_created' | 'welcome';   // group_created: тело — название группы, автор — создатель
 
 export interface Message {
   id: Id;

@@ -728,6 +728,44 @@ function useTailColor(full, thumb, out) {
   return key ? st[0] || '#ccc' : null;
 }
 
+/* Мозаика альбома (своя раскладка, по смыслу — как в Telegram): фото по порядку раскладываются в 1–4 строки,
+   в строке высота общая, ширины — по пропорциям. Из всех разбиений берём то, где высота альбома ближе к целевой,
+   а строки не слишком низкие. Возвращает клетки в долях ширины W: { x, y, w, h } и общую высоту. */
+export function albumLayout(ratios, W, gap) {
+  var n = ratios.length, best = null, target = W * (n === 2 ? 0.75 : 1.05), minRow = W * 0.24;
+  W = W || 330; gap = gap == null ? 2 : gap;
+  function rowsOf(cuts) { var rows = [], s = 0; cuts.concat([n]).forEach(function (c) { rows.push(ratios.slice(s, c)); s = c; }); return rows; }
+  function score(rows) {
+    var H = 0, bad = 0;
+    rows.forEach(function (r) {
+      var h = (W - gap * (r.length - 1)) / r.reduce(function (a, b) { return a + b; }, 0);
+      if (h < minRow) bad += (minRow - h) * 3;
+      if (h > W * 1.1) bad += h - W * 1.1;
+      H += h;
+    });
+    H += gap * (rows.length - 1);
+    return Math.abs(H - target) + bad;
+  }
+  // все разрезы на ≤ 4 строки (n ≤ 10 — перебор небольшой)
+  (function walk(from, cuts) {
+    if (cuts.length <= 3) {
+      var rows = rowsOf(cuts), sc = score(rows);
+      if (!best || sc < best.sc) best = { sc: sc, rows: rows };
+    }
+    if (cuts.length === 3) return;
+    for (var c = from + 1; c < n; c++) walk(c, cuts.concat([c]));
+  })(0, []);
+  var cells = [], y = 0;
+  best.rows.forEach(function (r) {
+    var h = (W - gap * (r.length - 1)) / r.reduce(function (a, b) { return a + b; }, 0), x = 0;
+    r.forEach(function (ar) { var w = h * ar; cells.push({ x: x / W, y: y, w: w / W, h: h }); x += w + gap; });
+    y += h + gap;
+  });
+  var H = y - gap;
+  cells.forEach(function (c) { c.y = c.y / H; c.h = c.h / H; });
+  return { cells: cells, ratio: W / H };
+}
+
 function MediaBubble(props) {
   var out = props.from === 'out';
   var items = props.items || [{ seed: props.seed || 0, kind: props.kind || 'image', duration: props.duration }];
@@ -743,6 +781,9 @@ function MediaBubble(props) {
     } });
   }
   var extra = items.length - 4;
+  // у всех фото альбома известны размеры — мозаикой, как в Telegram (иначе — старая сетка 2×2)
+  var mosaic = album && items.every(function (it) { return it.w && it.h; }) ? albumLayout(items.map(function (it) { return it.w / it.h; }), 330, 2) : null;
+  if (mosaic) extra = 0;
   var mediaOnly = !props.caption && !props.author;
   // у одиночного фото без рамки хвостик красится в цвет нижнего угла картинки (как в Telegram); у альбома — последней ячейки
   var cornerOf = items[album ? Math.min(items.length, 4) - 1 : 0] || {};
@@ -761,8 +802,11 @@ function MediaBubble(props) {
     h('div', { class: cx('rl-bubble rl-media', mediaOnly && 'rl-media-only', out ? 'rl-bubble-out' : 'rl-bubble-in-side', props.tail && 'rl-bubble-tail', props.appear && (out ? 'rl-appear-out' : 'rl-appear-in')),
       style: tailColor ? { '--tail-bg': tailColor } : undefined },
       props.author ? h('span', { class: 'rl-bubble-author rl-media-author', style: { color: 'var(--peer-' + (props.authorTone != null ? props.authorTone : 5) + ')' } }, props.author) : null,
-      h('div', { class: cx('rl-media-frame', album && 'rl-media-album'), style: album ? null : { aspectRatio: props.ratio || '4 / 3' } },
-        (album ? items.slice(0, 4) : items).map(cell),
+      h('div', { class: cx('rl-media-frame', album && (mosaic ? 'rl-media-mosaic' : 'rl-media-album')), style: mosaic ? { aspectRatio: String(mosaic.ratio) } : album ? null : { aspectRatio: props.ratio || '4 / 3' } },
+        mosaic ? items.map(function (it, i) {
+          var c = mosaic.cells[i];
+          return h('div', { key: i, class: 'rl-media-tile', style: { left: c.x * 100 + '%', top: c.y * 100 + '%', width: c.w * 100 + '%', height: c.h * 100 + '%' } }, cell(it, i));
+        }) : (album ? items.slice(0, 4) : items).map(cell),
         album && state !== 'ready' ? h(MediaOverlay, { state: state, progress: props.progress, size: props.size, onDownload: props.onDownload, onCancel: props.onCancel }) : null,
         !props.caption ? h('span', { class: 'rl-media-chip rl-media-chip-meta' }, props.time, out ? h(MessageStatus, { status: props.status || 'read' }) : null) : null),
       props.caption ? h('div', { class: 'rl-media-caption' }, props.caption, h('span', { class: 'rl-bubble-spacer', 'aria-hidden': 'true' }),

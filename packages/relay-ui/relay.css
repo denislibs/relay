@@ -1695,3 +1695,8 @@ html[data-blur="0"] .rl-menu, html[data-blur="0"] .rl-attach { -webkit-backdrop-
 /* отметка — белая галочка на цвете кнопок */
 .rl-picker-check { color: #fff; border-color: color-mix(in srgb, var(--ink) 35%, transparent); }
 .rl-picker-on .rl-picker-check { background: var(--button); border-color: var(--button); }
+
+/* альбом мозаикой: клетки по долям ширины (раскладка albumLayout), зазор считан в раскладке */
+.rl-media-mosaic { position: relative; }
+.rl-media-tile { position: absolute; overflow: hidden; }
+.rl-media-tile > .rl-media-cell { position: absolute; inset: 0; border-radius: 0; }
