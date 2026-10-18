@@ -22,7 +22,9 @@ local function total(h, prefix)
   return t
 end`;
 
+// процесс, открывший сокет, жив: отметка и здесь — перезапущенный Valkey пуст до следующей отметки по таймеру
 const CONNECT = `${SUM}
+redis.call('SET', ARGV[1] .. 'proc:' .. ARGV[2], '1', 'EX', ARGV[3])
 redis.call('HINCRBY', KEYS[1], ARGV[2], 1)
 local returning = redis.call('DEL', KEYS[2])
 return { total(KEYS[1], ARGV[1]), returning }`;
@@ -67,7 +69,7 @@ export async function processGone(pid = PROCESS_ID): Promise<void> {
 
 /** Сокет открыт: total — соединений пользователя во всех живых процессах; returning — вернулся в паузе после ухода. */
 export async function connect(userId: number, pid = PROCESS_ID): Promise<{ total: number; returning: boolean }> {
-  const [total, returning] = (await run(CONNECT, [key(`presence:${userId}`), key(`left:${userId}`)], [PREFIX, pid])) as [number, number];
+  const [total, returning] = (await run(CONNECT, [key(`presence:${userId}`), key(`left:${userId}`)], [PREFIX, pid, ALIVE_SEC])) as [number, number];
   return { total: Number(total), returning: Number(returning) === 1 };
 }
 

@@ -11,7 +11,10 @@ export function valkey(): RedisClient {
   if (!client) {
     const url = process.env.VALKEY_URL;
     if (!url) throw new Error('VALKEY_URL is not set');
-    client = new RedisClient(url);
+    const c = new RedisClient(url);
+    // Bun переподключается сам, но после ~10 с без Valkey закрывает клиент насовсем — следующий вызов заведёт новый
+    c.onclose = () => { if (client === c) client = null; };
+    client = c;
   }
   return client;
 }

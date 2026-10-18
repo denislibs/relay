@@ -2,6 +2,8 @@ import type { ServerFrame } from '@relay/protocol';
 import { afterAll, beforeEach, expect, test } from 'bun:test';
 import { resetPresence } from '../src/domain/presence';
 import { createServer } from '../src/http';
+import { connect as registryConnect, connectionCount, processGone, PROCESS_ID } from '../src/domain/liveRegistry';
+import { valkey } from '../src/valkey';
 import { nextFrame, resetDb } from './helpers';
 
 // у каждого сервера своя шина и своё подключение-подписчик — как у двух процессов
@@ -45,4 +47,24 @@ test('a closed socket stops receiving: the topic is unsubscribed when the last s
   wa.send(JSON.stringify({ op: 'typing', chatId }));
   expect(await got).toMatchObject({ op: 'typing', userId: a.userId });
   wa.close(); wb2.close();
+});
+
+test('subscriptions come back after the subscriber connection drops (Bun reconnects but does not resubscribe)', async () => {
+  const a = await login('Анна'), b = await login('Борис');
+  const chatId = await directChat(a, b);
+  const wa = await connect(s1, a.token), wb = await connect(s2, b.token);
+  await Bun.sleep(50);
+  // обрыв соединений-подписчиков (как перезапуск Valkey); заодно рвутся и подписчики dev-стека на этом Valkey — они так же восстановятся
+  await valkey().send('CLIENT', ['KILL', 'TYPE', 'pubsub']);
+  const got = nextFrame(wb, (f) => f.op === 'typing', 5000);
+  const tick = setInterval(() => wa.send(JSON.stringify({ op: 'typing', chatId })), 200);
+  try { expect(await got).toMatchObject({ op: 'typing', userId: a.userId }); } finally { clearInterval(tick); }
+  wa.close(); wb.close();
+});
+
+test('a socket opened after Valkey lost the process key still counts (Valkey restart)', async () => {
+  await processGone(PROCESS_ID);   // перезапущенный Valkey пуст: ключа «процесс жив» нет до следующей отметки
+  const { userId } = await login('Анна');
+  expect(await registryConnect(userId)).toEqual({ total: 1, returning: false });
+  expect(await connectionCount(userId)).toBe(1);
 });
