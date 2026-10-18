@@ -1,6 +1,6 @@
 import type { Item } from '@relay/sync-engine/src/types';
 import type { Entity } from '@relay/protocol';
-import { Bubble, peerTone, DateDivider, FileBubble, MediaBubble, MessageText, VoiceBubble, MusicBubble, RoundBubble, player, MediaViewer, ScrollToBottom, forceMeasure, isHeavyAnimating, onHeavyAnimationEnd, requestMeasure, requestMutation } from '@relay/ui';
+import { Bubble, peerTone, DateDivider, FileBubble, MediaBubble, MessageText, VoiceBubble, MusicBubble, RoundBubble, player, MediaViewer, ScrollToBottom, beginHeavyAnimation, forceMeasure, isHeavyAnimating, onHeavyAnimationEnd, requestMeasure, requestMutation } from '@relay/ui';
 import { memo } from 'preact/compat';
 import { useEffect, useLayoutEffect, useRef, useState } from 'preact/hooks';
 import { clearFocus, ensureNames, focusMessage, localPreview, markListened, moveWindow, react, savePosition, savedPosition, seen } from '../data';
@@ -410,7 +410,17 @@ export function Feed({ frameKey, active, chatId, meId, peerName, group, onAuthor
     } else {
       requestMeasure(() => {
         const top = Math.max(0, row.offsetTop - (root.clientHeight - row.offsetHeight) / 2);
-        requestMutation(() => root.scrollTo({ top, behavior: 'smooth' }));
+        const from = root.scrollTop, h = root.clientHeight;
+        requestMutation(() => {
+          // как в Telegram: далеко — сначала прыжок почти к цели, плавно — только последний экран
+          // (иначе прокрутка пролетает десятки пузырей и кружков, каждый из которых просыпается — кадры проседают)
+          if (Math.abs(top - from) > h * 2) { programmatic.current++; root.scrollTop = top + (top > from ? -h : h); }
+          // пока едем — тяжёлая анимация: кружки не запускают видео, отложенная работа ждёт
+          const end = beginHeavyAnimation(1200);
+          const done = () => { root.removeEventListener('scrollend', done); end(); };
+          root.addEventListener('scrollend', done);
+          root.scrollTo({ top, behavior: 'smooth' });
+        });
       });
     }
   }, [focus, messages]);

@@ -1577,3 +1577,8 @@ html[data-blur="0"] .rl-menu, html[data-blur="0"] .rl-attach { -webkit-backdrop-
 :root[data-theme="dark"] .rl-bubble-out .rl-music-play:not(.rl-music-cover), :root[data-theme="dark"] .rl-bubble-out .rl-music-dl { color: var(--bubble-out); }
 @media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) .rl-bubble-out.rl-music { --music-accent: #fff; --music-sub: rgba(255,255,255,.7); }
   :root:not([data-theme="light"]) .rl-bubble-out .rl-music-play:not(.rl-music-cover), :root:not([data-theme="light"]) .rl-bubble-out .rl-music-dl { color: var(--bubble-out); } }
+
+/* «Информация» — в одной гамме с настройками: серый фон страницы, белые карточки групп и списков */
+.rl-asidecard, .rl-asidecard .rl-slide:has(> .rl-sidepage > .rl-aside-body), .rl-sidepage:has(> .rl-aside-body) { background: var(--page); }
+.rl-asidecard .rl-aside-pages .rl-slide { background: transparent; }
+.rl-aside-tabs::before { background: color-mix(in srgb, var(--page) 72%, transparent); }
