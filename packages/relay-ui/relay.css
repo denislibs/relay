@@ -1780,3 +1780,14 @@ html[data-blur="0"] .rl-menu, html[data-blur="0"] .rl-attach { -webkit-backdrop-
 .rl-select-check { display: inline-flex; width: 18px; justify-content: center; color: var(--brand-text); }
 @media (prefers-reduced-motion: reduce) { .rl-select-pop, .rl-select-chev { animation: none; transition: none; } }
 .rl-select-btn:focus-visible { outline: none; box-shadow: inset 0 0 0 1px var(--brand-strong), 0 0 0 3px color-mix(in srgb, var(--brand-strong) 30%, transparent); border-color: var(--brand-strong); }   /* фокус с клавиатуры — заметное кольцо вокруг рамки */
+
+/* «≡» ↔ «←» в шапке списка: три черты, верхняя и нижняя поворачиваются к левому краю и укорачиваются (как в Telegram) */
+.rl-burger { position: relative; display: block; width: 18px; height: 14px; transition: transform 250ms cubic-bezier(.4, 0, .2, 1); }
+.rl-burger i { position: absolute; left: 0; width: 18px; height: 2px; border-radius: 1px; background: currentColor; transform-origin: 1px 50%;
+  transition: transform 250ms cubic-bezier(.4, 0, .2, 1), top 250ms cubic-bezier(.4, 0, .2, 1), width 250ms cubic-bezier(.4, 0, .2, 1); }
+.rl-burger i:nth-child(1) { top: 0; }
+.rl-burger i:nth-child(2) { top: 6px; }
+.rl-burger i:nth-child(3) { top: 12px; }
+.rl-burger.is-back i:nth-child(1) { top: 6px; width: 11px; transform: rotate(-45deg); }
+.rl-burger.is-back i:nth-child(3) { top: 6px; width: 11px; transform: rotate(45deg); }
+@media (prefers-reduced-motion: reduce) { .rl-burger, .rl-burger i { transition: none; } }

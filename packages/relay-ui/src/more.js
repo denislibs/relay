@@ -811,9 +811,9 @@ function SidebarCard(props) {
 /* ---------- SidebarHeader: menu, search pill, avatar ---------- */
 function SidebarHeader(props) {
   return h('div', { class: 'rl-sidehead' },
-    props.back
-      ? h(IconButton, { icon: 'arrowLeft', label: 'Назад', onClick: props.onBack, class: 'rl-sidehead-back' })
-      : h(IconButton, { icon: 'menu', label: 'Меню', onClick: props.onMenu }),
+    // одна кнопка: «≡» складывается в «←» (верхняя и нижняя черты поворачиваются и укорачиваются), как в Telegram
+    h('button', { type: 'button', class: cx('rl-iconbtn rl-sidehead-menu', props.back && 'rl-sidehead-back'), 'aria-label': props.back ? 'Назад' : 'Меню', onPointerDown: ripple, onClick: props.back ? props.onBack : props.onMenu },
+      h('span', { class: cx('rl-burger', props.back && 'is-back'), 'aria-hidden': 'true' }, h('i'), h('i'), h('i'))),
     h(SearchField, { id: props.searchId || 'rl-side-search', placeholder: props.placeholder || 'Поиск', status: props.status, value: props.value, onInput: props.onSearch, onFocus: props.onSearchFocus, onKeyDown: props.onSearchKey, class: 'rl-sidehead-search' }),
     props.trailing !== undefined ? props.trailing : props.me ? h('button', { type: 'button', class: 'rl-sidehead-me', 'aria-label': 'Профиль', onClick: props.onMe }, h(Avatar, { name: props.me, tone: props.meTone, size: 36 })) : null);
 }

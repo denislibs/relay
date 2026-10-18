@@ -95,6 +95,13 @@ export function Sidebar() {
   const onRowMenu = useRef((id: number, x: number, y: number) => setRowMenu({ id, x, y })).current;
   // глобальный поиск — свой режим колонки (search/GlobalSearch): вкладки, недавние, выдача по всем чатам
   const searchOpen = useGlobal((s) => s.searchOpen);
+  // список возвращается из поиска — с мягким проявлением (только в этот момент, не при загрузке страницы)
+  const [fromSearch, setFromSearch] = useState(false);
+  const wasSearch = useRef(searchOpen);
+  useEffect(() => {
+    if (wasSearch.current && !searchOpen) { setFromSearch(true); const t = setTimeout(() => setFromSearch(false), 300); wasSearch.current = searchOpen; return () => clearTimeout(t); }
+    wasSearch.current = searchOpen;
+  }, [searchOpen]);
   const theme = useGlobal((s) => s.theme);
   useGlobal((s) => s.prefs.timeFormat);   // смена формата времени перерисовывает время в списке
   const dark = isDark(theme);
@@ -196,6 +203,7 @@ export function Sidebar() {
 
   return (
     <SidebarCard
+      class={fromSearch ? 'app-from-search' : undefined}
       embedded
       paged
       header={<SidebarHeader onMenu={() => setMenu(true)} back={searchOpen} onBack={closeSearch} status={searchStatus ?? undefined} searchId="side-search" value={search} placeholder="Поиск"

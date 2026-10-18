@@ -733,7 +733,12 @@ html[data-anim="0"] .app-chatcol, html[data-anim="0"] .app-chatcol-below, html[d
 
 /* ---------- Глобальный поиск (левая колонка), как в Telegram Web ---------- */
 .app-gsearch { display: flex; flex-direction: column; flex: 1; min-height: 0; min-width: 0; width: 100%; background: var(--gsearch-bg);   /* как в Telegram: серая подложка, разделы — белыми карточками */
-   animation: app-fade 180ms var(--ease-out) both; }
+   animation: app-gsearch-in 160ms ease both; transform-origin: 50% 0; }
+/* вход в поиск — проявление с лёгким «наездом» (110% → 100%), выход — список возвращается из 95% (как zoomFade в Telegram) */
+@keyframes app-gsearch-in { from { opacity: 0; transform: scale(1.06); } }
+.app-from-search .rl-sidecard-body > .rl-slides { animation: app-list-back 160ms ease both; transform-origin: 50% 0; }
+@keyframes app-list-back { from { opacity: 0; transform: scale(.97); } }
+@media (prefers-reduced-motion: reduce) { .app-gsearch, .rl-sidecard-body > .rl-slides { animation: none !important; } }
 .app-gsearch-tabs { padding: 8px 12px 10px; }
 .app-gsearch-pages { position: relative; flex: 1; min-height: 0; min-width: 0; display: flex; overflow: hidden; }
 .app-gsearch-pages > * { flex: 1; min-width: 0; }
