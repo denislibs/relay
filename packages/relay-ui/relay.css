@@ -1097,12 +1097,35 @@ html[data-blur="0"] .rl-shell .rl-composer-wrap::before { -webkit-backdrop-filte
   /* снизу лента уходит под поле ввода и дальше до края окна (поверх отступа оболочки), как в Telegram */
   /* по бокам лента заходит в зазор у сайдбара и в поле окна (столько же отступа внутри — сообщения на месте):
      полосы «Непрочитанные» и подсветка перехода тянутся от края до края области чата */
-  margin: calc(-1 * var(--top-zone)) calc(-1 * var(--space-float)) calc(-1 * (48px + 2 * var(--space-float)));   /* 48 — высота поля в потоке */
-  padding: calc(var(--top-zone) + 8px) var(--space-float) calc(var(--bottom-zone) + var(--space-float) - 6px);   /* последнее сообщение ≈10px над полем ввода, как в Telegram */
+  /* сверху лента тоже до края окна (и над плеером): под шапкой и плеером сообщения видны приглушённо, без обрыва.
+     --player-h идёт ровно вместе с раскрытием плеера: шапка уезжает вниз, а лента остаётся на месте и не перестраивается */
+  margin: calc(-1 * (var(--top-zone) + var(--space-float) + var(--player-h))) calc(-1 * var(--space-float)) calc(-1 * (48px + 2 * var(--space-float)));   /* 48 — высота поля в потоке */
+  padding: calc(var(--top-zone) + var(--space-float) + 8px) var(--space-float) calc(var(--bottom-zone) + var(--space-float) - 6px);   /* последнее сообщение ≈10px над полем ввода, как в Telegram */
   /* низ ленты не растворяется: как в Telegram, сообщения видны под полем ввода и вокруг него до края окна */
-  -webkit-mask-image: linear-gradient(to bottom, transparent 0, transparent calc(var(--top-zone) * 0.35), #000 calc(var(--top-zone) + 4px), #000 100%);
-  mask-image: linear-gradient(to bottom, transparent 0, transparent calc(var(--top-zone) * 0.35), #000 calc(var(--top-zone) + 4px), #000 100%);
+  /* как в Telegram: под шапкой, закрепом, плеером и под полем ввода сообщения не пропадают, а приглушены до 24%;
+     к краю этой зоны — мягкий спад (кривая ease-in-out по пяти точкам). Верх зоны — низ шапки (+ плеер, + закреп),
+     низ — поле ввода с отступом до края окна */
+  --fade-top: calc(var(--top-zone) + var(--player-h) + var(--panes-h));   /* низ шапки от верха окна */
+  --fade-ramp: 24px;
+  --fade-bottom: calc(var(--bottom-zone) + var(--space-float));
+  -webkit-mask-image: var(--feed-mask); mask-image: var(--feed-mask);
+  --feed-mask: linear-gradient(to bottom,
+    rgba(0,0,0,.24) 0, rgba(0,0,0,.24) calc(var(--fade-top) - var(--fade-ramp)),
+    rgba(0,0,0,.264) calc(var(--fade-top) - var(--fade-ramp) * .8), rgba(0,0,0,.435) calc(var(--fade-top) - var(--fade-ramp) * .6),
+    rgba(0,0,0,.805) calc(var(--fade-top) - var(--fade-ramp) * .4), rgba(0,0,0,.976) calc(var(--fade-top) - var(--fade-ramp) * .2),
+    #000 var(--fade-top), #000 calc(100% - var(--fade-bottom)),
+    rgba(0,0,0,.976) calc(100% - var(--fade-bottom) * .8), rgba(0,0,0,.805) calc(100% - var(--fade-bottom) * .6),
+    rgba(0,0,0,.435) calc(100% - var(--fade-bottom) * .4), rgba(0,0,0,.264) calc(100% - var(--fade-bottom) * .2),
+    rgba(0,0,0,.24) 100%);
+  transition: filter 150ms ease, opacity 150ms ease, --player-h 300ms cubic-bezier(.33, 1, .68, 1), --panes-h 220ms cubic-bezier(.33, 1, .68, 1);   /* закрытие — как у плеера/закрепа */
 }
+/* высоты зон — анимируемые числа: маска и отступ меняются плавно, синхронно с плеером (раскрытие 300 мс) и закрепом */
+@property --player-h { syntax: '<length>'; inherits: false; initial-value: 0px; }
+@property --panes-h { syntax: '<length>'; inherits: false; initial-value: 0px; }
+.app-chatcol:has(.rl-presence[data-state="open"] > .rl-playerslot) .rl-feed { --player-h: 58px; }   /* 48 плеер + 10 до шапки */
+.app-chatcol:has(.rl-presence[data-state="open"] > .app-pins) .rl-feed { --panes-h: 50px; }         /* спад кончается чуть выше низа закрепа */
+.app-chatcol:has(.rl-presence[data-state="open"] > .rl-playerslot) .rl-feed,
+.app-chatcol:has(.rl-presence[data-state="open"] > .app-pins) .rl-feed { transition: filter 150ms ease, opacity 150ms ease, --player-h 300ms cubic-bezier(.25, 1, .5, 1), --panes-h 220ms cubic-bezier(.25, 1, .5, 1); }
 .rl-shell .rl-scrolldown-slot { bottom: calc(var(--composer-h, 48px) + var(--space-float) - 8px); }   /* 8px над полем ввода */
 /* как в Telegram: круг размером с кнопку отправки, стрелка ↓, прямо над ней */
 .rl-shell .rl-fab-down { width: var(--composer-h-min, 48px); height: var(--composer-h-min, 48px); }
