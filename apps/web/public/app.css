@@ -61,7 +61,12 @@ body { background: var(--bg); color: var(--ink); font-family: var(--font-sans); 
 .app-send-file span { color: var(--ink-muted); font-size: 13px; }
 .app-send-caption { width: 100%; margin-bottom: var(--space-3); }
 .app-drop { position: fixed; inset: 0; z-index: 50; }
-.app-media-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 1px; margin: 0 var(--space-3) var(--space-4); border-radius: 14px; overflow: hidden; align-content: start; }   /* как в Telegram: квадраты через 1px, скруглены только внешние углы */
+.app-media-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 1px; margin: 0 var(--space-3) var(--space-4); align-content: start; }   /* как в Telegram: квадраты через 1px, скруглены только внешние углы */
+/* углы — у самих плиток: сетка из 1–2 плиток не оставляет «квадратного» края */
+.app-media-grid > :first-child { border-top-left-radius: 14px; }
+.app-media-grid > :nth-child(3), .app-media-grid > :last-child:nth-child(-n+2) { border-top-right-radius: 14px; }
+.app-media-grid > :nth-child(3n+1):nth-last-child(-n+3) { border-bottom-left-radius: 14px; }
+.app-media-grid > :last-child, .app-media-grid > :nth-child(3n):nth-last-child(-n+3) { border-bottom-right-radius: 14px; }
 .app-media-cell { position: relative; aspect-ratio: 1; padding: 0; border: 0; overflow: hidden; cursor: pointer; background: var(--field); }
 
 /* страница настроек: меню ⋮ и тост «Скопировано» */
@@ -594,6 +599,10 @@ html[data-anim="0"] .app-chatcol, html[data-anim="0"] .app-chatcol-below, html[d
 /* медиа: у видео — длительность в углу */
 .app-media-cell .app-media-dur { position: absolute; top: 5px; left: 5px; padding: 1px 6px; border-radius: 6px; background: rgba(0,0,0,.35); color: #fff; font: 500 12px/18px var(--font-sans); }
 .app-media-video { position: absolute; inset: 0; display: grid; place-items: center; background: #2b2f33; color: #fff; }
+.app-media-video > .rl-icon { position: relative; filter: drop-shadow(0 1px 3px rgb(0 0 0 / .45)); }
+.app-media-frame { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; opacity: 0; transition: opacity var(--dur-base) var(--ease-standard); pointer-events: none; }
+.app-media-frame-in { opacity: 1; }
+.app-sm-heading { margin: var(--space-3) var(--space-3) var(--space-2); padding: 0 var(--space-3); font: 500 15px/20px var(--font-sans); color: var(--brand-text, var(--brand-strong)); }
 .app-sm-more { height: 1px; }
 
 /* Музыка профиля: плашка поверх низа аватара */
@@ -640,6 +649,7 @@ html[data-anim="0"] .app-chatcol, html[data-anim="0"] .app-chatcol-below, html[d
 .app-pins-segs i { display: block; width: 2px; border-radius: 1px; background: color-mix(in srgb, var(--brand-strong) 35%, transparent); transition: background-color 200ms var(--ease-standard); }
 .app-pins-segs i.app-pins-on { background: var(--brand-strong); }
 .app-pins-thumb { flex: none; width: 36px; height: 36px; border-radius: 4px; object-fit: cover; }
+.app-pins-thumb-round { border-radius: 50%; }
 .app-pins-text { flex: 1; min-width: 0; display: flex; flex-direction: column; font: 400 14px/18px var(--font-sans); }
 .app-pins-text b { font-weight: 500; color: var(--brand-text, var(--brand-strong)); }
 .app-pins-text > span { color: var(--ink); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; animation: app-pins-swap 220ms var(--ease-out) both; }

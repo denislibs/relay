@@ -25,6 +25,10 @@ export function PlayerBar(props) {
   var st = useState(player.playerState()), s = st[0];
   var last = useRef(s.track);
   if (s.track) last.current = s.track;   // уезжая, полоса показывает последний трек
+  // смонтировались с уже играющим треком (сменили чат) — плеер уже был на экране: без анимации выезда.
+  // Как только трек закрыли, следующее появление снова выезжает
+  var still = useRef(!!s.track);
+  if (!s.track) still.current = false;
   var menu = useState(null);             // 'speed' | 'order' | null
   var vol = useState(false);
   var line = useRef(null), clock = useRef(null);
@@ -46,7 +50,7 @@ export function PlayerBar(props) {
   var volIcon = s.muted || s.volume === 0 ? 'soundOff' : s.volume < 0.5 ? 'volumeLow' : 'volume';
   var inProfile = music && props.inProfile ? props.inProfile(t) : false;
   return h(Presence, { show: !!s.track, exitMs: 300 },
-    t ? h('div', { class: 'rl-playerslot' }, h('div', { class: 'rl-playerclip' }, h('div', { class: 'rl-playerbar', role: 'region', 'aria-label': 'Плеер' },
+    t ? h('div', { class: cx('rl-playerslot', still.current && 'rl-playerslot-still') }, h('div', { class: 'rl-playerclip' }, h('div', { class: 'rl-playerbar', role: 'region', 'aria-label': 'Плеер' },
       h(IconButton, { icon: 'skipPrev', label: 'Предыдущее', size: 22, class: cx(!player.hasStep(-1) && 'rl-playerbar-off'), onClick: function () { player.step(-1); } }),
       h('button', { type: 'button', class: cx('rl-playerbar-play', s.playing && 'rl-vb-playing'), 'aria-label': s.playing ? 'Пауза' : 'Воспроизвести', onClick: function () { if (s.playing) player.pause(); else player.play(t); } },
         h(Icon, { name: 'play', size: 22, class: 'rl-vb-play' }), h(Icon, { name: 'pause', size: 22, class: 'rl-vb-pause' })),
@@ -83,5 +87,6 @@ export function PlayerBar(props) {
               return { icon: x.rate === s.rate ? 'check' : undefined, label: x.label, onClick: function () { closeMenu(); player.setRate(x.rate); } };
             }) })) : null),
       h(IconButton, { icon: 'close', label: 'Закрыть плеер', size: 22, onClick: function () { player.close(); } }),
-      h('div', { class: 'rl-playerbar-seek', onClick: seekAt, 'aria-hidden': 'true' }, h('i', { ref: line, class: 'rl-playerbar-line' }))))) : null);
+      // полоска обрезается по скруглению острова в своём слое: сам остров не обрезает меню и громкость
+      h('div', { class: 'rl-playerbar-clip', 'aria-hidden': 'true' }, h('div', { class: 'rl-playerbar-seek', onClick: seekAt }, h('i', { ref: line, class: 'rl-playerbar-line' })))))) : null);
 }

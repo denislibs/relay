@@ -1,10 +1,14 @@
-// Музыка в ленте — как в Telegram: круглая кнопка 54 px (обложка из тегов файла, поверх — play/pause),
+// Музыка в ленте — как в Telegram: круглая кнопка 48 px (обложка из тегов файла, поверх — play/pause),
 // в углу — значок «скачать»; справа название и «2:50 • исполнитель». Пока играет — «прошло / всего» и полоса перемотки.
 // Файлы, отправленные вместе, — один пузырь: pos first/middle/last склеивает строки, время — только у последней.
 import { h } from 'preact';
 import { useEffect, useRef, useState } from 'preact/hooks';
 import { cx, Icon, MessageStatus, ProgressRing } from '../kit.js';
 import * as player from './player.js';
+
+// треки, которые включали в этой вкладке: файл уже качается в кэш — значок «скачать» в углу не нужен (как в Telegram).
+// После перезагрузки то же скажет props.downloaded (файл есть в кэше)
+var heard = new Set();
 
 function fmt(sec) { sec = Math.max(0, Math.floor(sec || 0)); return Math.floor(sec / 60) + ':' + (sec % 60 < 10 ? '0' : '') + (sec % 60); }
 
@@ -24,6 +28,8 @@ export function MusicBubble(props) {
     return function () { off(); offTick(); };
   }, [props.trackKey]);
   var playing = mine && s.playing;
+  if (mine) heard.add(props.trackKey);
+  var showDl = !props.uploading && !!props.onDownload && !props.downloaded && !heard.has(props.trackKey);
   var last = pos === 'single' || pos === 'last';
   function seekAt(e) {
     var r = e.currentTarget.getBoundingClientRect();
@@ -34,13 +40,14 @@ export function MusicBubble(props) {
       h('div', { class: 'rl-music-row' },
         h('div', { class: 'rl-music-btnwrap' },
           props.uploading
-            ? h(ProgressRing, { size: 54, progress: props.progress, onMedia: true, onCancel: props.onCancel, label: 'Отправка' })
+            ? h(ProgressRing, { size: 48, progress: props.progress, onMedia: true, onCancel: props.onCancel, label: 'Отправка' })
             : h('button', { type: 'button', class: cx('rl-music-play', playing && 'rl-vb-playing', props.cover && 'rl-music-cover'),
                 style: props.cover ? { backgroundImage: 'url(' + props.cover + ')' } : undefined,
                 'aria-label': playing ? 'Пауза' : 'Слушать', onClick: function (e) { e.stopPropagation(); if (props.onToggle) props.onToggle(); } },
-              h(Icon, { name: 'play', size: 26, class: 'rl-vb-play' }), h(Icon, { name: 'pause', size: 26, class: 'rl-vb-pause' })),
-          !props.uploading && props.onDownload ? h('button', { type: 'button', class: 'rl-music-dl', 'aria-label': 'Скачать',
-            onClick: function (e) { e.stopPropagation(); props.onDownload(); } }, h(Icon, { name: 'download', size: 13 })) : null),
+              h(Icon, { name: 'play', size: 24, class: 'rl-vb-play' }), h(Icon, { name: 'pause', size: 24, class: 'rl-vb-pause' })),
+          !props.uploading && props.onDownload ? h('button', { type: 'button', class: cx('rl-music-dl', !showDl && 'rl-music-dl-gone'), 'aria-label': 'Скачать',
+            tabIndex: showDl ? undefined : -1, 'aria-hidden': showDl ? undefined : 'true',
+            onClick: function (e) { e.stopPropagation(); props.onDownload(); } }, h(Icon, { name: 'download', size: 12 })) : null),
         h('div', { class: 'rl-music-text' },
           h('b', { title: props.title }, props.title),
           mine

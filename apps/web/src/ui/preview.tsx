@@ -8,7 +8,7 @@ import { hideCode } from './format';
 
 type Ent = { type: string; offset: number; length: number };
 export type LastMessage = {
-  senderId: number; body: string; deleted?: boolean; kind?: string; attachmentName?: string | null; attachmentTitle?: string | null;
+  senderId: number; body: string; deleted?: boolean; kind?: string; attachmentName?: string | null; attachmentTitle?: string | null; attachmentPerformer?: string | null;
   entities?: Ent[] | null; thumb?: string | null; mime?: string | null; service?: { type: string } | null;
 };
 
@@ -39,11 +39,13 @@ export function previewText(text: string, entities?: Ent[] | null): ComponentChi
   return out;
 }
 
-/** Миниатюра 20 px: у фото — встроенный thumb; у видео сверху значок play. */
-export function previewThumb(m: LastMessage): { src: string; video: boolean } | null {
+/** Миниатюра 20 px из встроенного thumb (без загрузки файла): фото, видео (со значком play),
+ *  обложка музыки, кружок видеосообщения — как в Telegram. */
+export function previewThumb(m: LastMessage): { src: string; video: boolean; round?: boolean } | null {
   if (m.deleted || !m.thumb) return null;
+  if (m.kind === 'round') return { src: m.thumb, video: false, round: true };
   const video = !!m.mime?.startsWith('video/');
-  if (m.kind !== 'photo' && !video) return null;
+  if (m.kind !== 'photo' && m.kind !== 'audio' && !video) return null;
   return { src: m.thumb, video };
 }
 
@@ -56,11 +58,16 @@ export function previewBody(m: LastMessage, withThumb: boolean): ComponentChildr
   const entities = code ? [] : m.entities;
   const caption = text ? previewText(text, entities) : null;
   if (m.kind === 'photo') return caption ?? (withThumb ? 'Фото' : '🖼 Фото');
-  if (m.kind === 'voice') return 'Голосовое сообщение';
-  if (m.kind === 'round') return 'Видеосообщение';
-  if (m.kind === 'audio') return ['🎵 ', caption ?? m.attachmentTitle ?? (m.attachmentName ?? 'Музыка').replace(/\.[^.]{1,5}$/, '')];
+  if (m.kind === 'voice') return caption ?? '🎤 Голосовое сообщение';
+  if (m.kind === 'round') return withThumb ? 'Видеосообщение' : '📹 Видеосообщение';
+  if (m.kind === 'audio') {
+    // «Название — исполнитель»; с обложкой эмодзи не нужен
+    const name = m.attachmentTitle || (m.attachmentName ?? 'Музыка').replace(/\.[^.]{1,5}$/, '');
+    const track = m.attachmentPerformer ? name + ' — ' + m.attachmentPerformer : name;
+    return withThumb ? caption ?? track : ['🎧 ', caption ?? track];
+  }
   if (m.kind === 'file') {
-    if (withThumb) return caption ?? 'Видео';
+    if (m.mime?.startsWith('video/')) return withThumb ? caption ?? 'Видео' : ['📹 ', caption ?? 'Видео'];
     return ['📎 ', caption ?? m.attachmentName ?? 'Файл'];
   }
   return caption ?? '';
