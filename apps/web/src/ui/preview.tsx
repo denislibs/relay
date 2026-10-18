@@ -58,6 +58,7 @@ export function previewBody(m: LastMessage, withThumb: boolean): ComponentChildr
   if (m.kind === 'photo') return caption ?? (withThumb ? 'Фото' : '🖼 Фото');
   if (m.kind === 'voice') return 'Голосовое сообщение';
   if (m.kind === 'round') return 'Видеосообщение';
+  if (m.kind === 'audio') return ['🎵 ', caption ?? (m.attachmentName ?? 'Музыка').replace(/\.[^.]{1,5}$/, '')];
   if (m.kind === 'file') {
     if (withThumb) return caption ?? 'Видео';
     return ['📎 ', caption ?? m.attachmentName ?? 'Файл'];

@@ -56,11 +56,13 @@ export async function createUpload(userId: number, meta: UploadMeta): Promise<{ 
   const voice = meta.kind === 'voice' && VOICE_MIME.test(mime) && seconds >= 1 && seconds <= MAX_VOICE_SECONDS;
   const round = meta.kind === 'round' && ROUND_MIME.test(mime) && seconds >= 1 && seconds <= ROUND_MAX_SECONDS + 1 && !!meta.w && meta.w === meta.h;
   const isPhoto = !voice && !round && /^image\/(jpeg|png|webp|gif|avif)$/.test(mime) && !!meta.w && !!meta.h;
-  const kind: AttachmentKind = voice ? 'voice' : round ? 'round' : isPhoto ? 'photo' : 'file';
+  // музыка: аудиофайл с длительностью (клиент её узнал, проиграв метаданные); голосовым он от этого не становится
+  const audio = !voice && meta.kind === 'audio' && /^audio\//.test(mime) && seconds >= 1 && seconds <= 24 * 3600;
+  const kind: AttachmentKind = voice ? 'voice' : round ? 'round' : isPhoto ? 'photo' : audio ? 'audio' : 'file';
   const sized = isPhoto || round;
   const w = sized ? Math.min(Math.max(Math.round(meta.w!), 1), 20000) : null;
   const h = sized ? Math.min(Math.max(Math.round(meta.h!), 1), 20000) : null;
-  const duration = voice || round ? seconds : null;
+  const duration = voice || round || audio ? seconds : null;
   const waveform = voice ? cleanWaveform(meta.waveform) : null;
   const [row] = await sql`insert into attachments (owner_id, mime, name, size, width, height, kind, duration, waveform, status)
     values (${userId}, ${mime}, ${name}, ${meta.size}, ${w}, ${h}, ${kind}, ${duration}, ${waveform}, 'pending') returning id`;

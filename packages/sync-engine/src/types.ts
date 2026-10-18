@@ -16,7 +16,7 @@ export interface LocalMessage {
   editedAt?: string | null;
   deleted?: boolean;
   reactions?: { userId: number; emoji: string }[];
-  kind?: 'text' | 'photo' | 'file' | 'voice' | 'round';
+  kind?: 'text' | 'photo' | 'file' | 'voice' | 'round' | 'audio';
   attachment?: LocalAttachment | null;
   entities?: Entity[];    // оформление текста
   listened?: boolean;     // голосовое/кружок прослушан получателем
@@ -27,7 +27,7 @@ export interface LocalMessage {
 
 /** Вложение сообщения; у неотправленного id пустой, пока файл не загружен. */
 export interface LocalAttachment {
-  id: string; kind: 'photo' | 'file' | 'voice' | 'round'; mime: string; name: string; size: number; w: number | null; h: number | null; thumb?: string | null;
+  id: string; kind: 'photo' | 'file' | 'voice' | 'round' | 'audio'; mime: string; name: string; size: number; w: number | null; h: number | null; thumb?: string | null;
   duration?: number | null; waveform?: string | null;   // голосовое и кружок
 }
 
@@ -106,7 +106,8 @@ export type Action =
   | { type: 'deleteMessage'; chatId: number; id: number }
   | { type: 'react'; chatId: number; id: number; emoji: string | null }
   | { type: 'search'; q: string; chatId?: number; beforeId?: number; limit?: number }
-  | { type: 'chatMedia'; chatId: number; kind: 'photo' | 'file' }
+  | { type: 'chatMedia'; chatId: number; kind: 'media' | 'file' | 'audio' | 'voice' | 'link'; beforeId?: number }
+  | { type: 'chatMediaCounts'; chatId: number }
   | { type: 'updateProfile'; firstName?: string; lastName?: string; bio?: string | null; birthday?: Birthday | null }
   | { type: 'setLinks'; links: ProfileLink[] }
   | { type: 'setUsername'; username: string | null }
@@ -145,7 +146,7 @@ export type Action =
   /** раздел «Для разработчиков»: имитатор сети и служебные команды (devlog.ts) */
   | DevAction
   | { type: 'sendFile'; chatId: number; body: string; file: Blob; name: string; mime: string; w?: number | null; h?: number | null; thumb?: string | null; replyToId?: number | null;
-      kind?: 'voice' | 'round'; duration?: number; waveform?: string | null }
+      kind?: 'voice' | 'round' | 'audio'; duration?: number; waveform?: string | null }
   | { type: 'listened'; chatId: number; id: number };
 
 /** Медленная сеть: задержка (мс, туда-обратно; на каждое направление — половина), джиттер (мс), потери кадров (%), полоса (Кбит/с, 0 — без ограничения). */

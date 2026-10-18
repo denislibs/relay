@@ -1,22 +1,19 @@
 import type { ProfileLink } from '@relay/protocol';
 import { ProfileLinks } from './links/ProfileLinks';
-import { Avatar, EmptyState, Icon, FolderTabs, InfoRow, LazyImage, PanelHeader, RichText, SettingsIcon, SlideStack, Switch, Verified } from '@relay/ui';
+import { SharedMedia } from './SharedMedia';
+import { Avatar, Icon, InfoRow, PanelHeader, RichText, SettingsIcon, SlideStack, Switch, Verified } from '@relay/ui';
 import type { Item } from '@relay/sync-engine/src/types';
-import { chatMedia, focusMessage } from '../data';
-import { chatTone, fileSize, isSystemChat } from './format';
+import { chatTone, isSystemChat } from './format';
 import type { ComponentChildren } from 'preact';
 import { useEffect, useState } from 'preact/hooks';
 import { syncMuted } from '../notify';
 import { activeFrame, setGlobal, useGlobal } from '../global';
 
-const NO_MESSAGES: Item[] = [];
-import { birthdayText, clock, dayLabel, lastSeenText, type Birthday } from './format';
+import { birthdayText, lastSeenText, type Birthday } from './format';
 import { showToast, useUser } from '../settingsData';
 import { EditContactPanel } from './contacts/EditContact';
 
-const TABS = ['media', 'files', 'links'];
 const PAGES = ['info', 'edit'];   // «Изменить контакт» выезжает внутри панели справа налево
-const URL_RE = /https?:\/\/[^\s<>"']+/g;
 const close = () => setGlobal({ infoOpen: false });
 
 // уведомления выключаются только на этом устройстве (как «Без звука» локально): список chatId в localStorage
@@ -34,9 +31,7 @@ export function Info() {
   const chatId = useGlobal((s) => s.openChatId)!;
   const chat = useGlobal((s) => s.chats.find((c) => c.id === s.openChatId));
   const peer = useGlobal((s) => s.peer);
-  const messages = useGlobal((s) => activeFrame(s)?.messages ?? NO_MESSAGES);
   const muted = useGlobal((s) => s.muted);
-  const [tab, setTab] = useState('media');
   const [page, setPage] = useState('info');
   useEffect(() => setPage('info'), [chatId]);   // другой чат — снова профиль
   // профиль собеседника личного чата: только то, что сервер разрешил показать
@@ -47,16 +42,6 @@ export function Info() {
   // контакт: ✎ в шапке ведёт в «Изменить»; не контакт — «Добавить в контакты»
   const contact = useGlobal((s) => (peerId ? s.contacts.find((c) => c.userId === peerId) ?? null : null));
   const contactsLoaded = useGlobal((s) => s.contactsLoaded);
-  // медиа и файлы чата — с сервера (вся история), при открытии вкладки
-  const [media, setMedia] = useState<{ photo?: Item[]; file?: Item[] }>({});
-  useEffect(() => {
-    if (tab === 'links') return;
-    const kind = tab === 'media' ? 'photo' : 'file';
-    let live = true;
-    chatMedia(chatId, kind).then((list) => { if (live) setMedia((m) => ({ ...m, [kind]: list })); }).catch(() => {});
-    return () => { live = false; };
-  }, [tab, chatId]);
-
   useEffect(() => {
     if (page !== 'info') return;   // на правке Esc — «Назад», его ловит форма
     const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape' && !e.defaultPrevented) { e.preventDefault(); close(); } };
@@ -68,9 +53,6 @@ export function Info() {
   const group = chat?.kind === 'group';
   const myPeer = peer && chat?.peerId === peer.userId && peer.known ? peer : null;
   const subtitle = system ? 'служебные уведомления' : group ? 'группа' : myPeer ? lastSeenText(!!myPeer.online, myPeer.lastSeen as string | null) : '';
-  const links = messages
-    .flatMap((m) => ((m.body as string).match(URL_RE) ?? []).map((url) => ({ url, at: m.createdAt as string, key: m.key + url })))
-    .reverse();
 
   const addContact = () => setGlobal({ newContact: {
     // запрос — то, что видно человеку: @имя или телефон; нет ни того, ни другого — поле пустое, добавим по id
@@ -112,44 +94,7 @@ export function Info() {
             </div>
           ) : null}</Expand>
         </div>
-        <div class="rl-aside-tabs">
-          <FolderTabs label="Вложения чата" active={tab} onChange={setTab} items={[
-            { id: 'media', label: 'Медиа' },
-            { id: 'files', label: 'Файлы' },
-            { id: 'links', label: 'Ссылки', count: links.length || undefined },
-          ]} />
-        </div>
-        <div class="rl-aside-pages">
-          <SlideStack variant="tabs" order={TABS} active={tab} render={(k: string) =>
-            k === 'media' && media.photo?.length ? (
-              <div class="app-media-grid">
-                {media.photo.map((m) => { const a = m.attachment as { id: string; thumb?: string; name: string }; return (
-                  <button key={m.key} type="button" class="app-media-cell" aria-label={a.name} onClick={() => focusMessage({ id: m.id as number, sort: m.id as number })}>
-                    <LazyImage src={`/files/${a.id}`} thumb={a.thumb} alt={a.name} />
-                  </button>
-                ); })}
-              </div>
-            ) : k === 'files' && media.file?.length ? (
-              <ul class="rl-aside-links">
-                {media.file.map((m) => { const a = m.attachment as { id: string; name: string; size: number }; return (
-                  <li key={m.key}><a href={`/files/${a.id}?download=1`} download={a.name}><b>{a.name}</b><small>{fileSize(a.size)} · {dayLabel(m.createdAt as string)}</small></a></li>
-                ); })}
-              </ul>
-            ) : k === 'links' && links.length ? (
-              <ul class="rl-aside-links">
-                {links.map((l) => (
-                  <li key={l.key}><a href={l.url} target="_blank" rel="noopener noreferrer"><b>{l.url}</b><small>{dayLabel(l.at)}, {clock(l.at)}</small></a></li>
-                ))}
-              </ul>
-            ) : (
-              <EmptyState
-                kind={k}
-                title={k === 'media' ? 'Здесь пока пусто' : k === 'files' ? 'Файлов пока нет' : 'Ссылок пока нет'}
-                text={k === 'media' ? 'Фото и видео из этого чата появятся здесь.' : k === 'files' ? 'Документы и архивы из переписки соберутся здесь.' : 'Ссылки из сообщений этого чата появятся здесь.'}
-              />
-            )
-          } />
-        </div>
+        <SharedMedia chatId={chatId} />
       </div>
     </div>
     )} />

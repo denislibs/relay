@@ -1,4 +1,4 @@
-import { normalizeEntities, type Entity, type Message, type ServiceType } from '@relay/protocol';
+import { normalizeEntities, type Entity, type MediaTab, type Message, type ServiceType } from '@relay/protocol';
 import { sql, type Tx } from '../db';
 import { DomainError } from './errors';
 import { nameForSql } from './profile';
@@ -125,15 +125,39 @@ export async function listChats(userId: number, opts: ListOpts = {}): Promise<Ch
 }
 
 /** Конкретные сообщения чата по id (исходники цитат, которых нет в загруженной истории). */
-/** Медиа и файлы чата для вкладок панели «Информация»: новые сверху, страницами. */
-export async function getChatMedia(userId: number, chatId: number, kind: 'photo' | 'file', beforeId: number | null, limit = 60): Promise<{ messages: Message[]; hasMore: boolean }> {
+/** Условие вкладки «Общих медиа» (как в Telegram): видео, присланное файлом, — тоже медиа; ссылки — по тексту и сущностям. */
+function tabWhere(tab: MediaTab) {
+  switch (tab) {
+    case 'media': return sql`(kind = 'photo' or (kind = 'file' and attachment->>'mime' like 'video/%'))`;
+    case 'file': return sql`(kind = 'file' and coalesce(attachment->>'mime', '') not like 'video/%')`;
+    case 'audio': return sql`kind = 'audio'`;
+    case 'voice': return sql`kind in ('voice', 'round')`;
+    case 'link': return sql`(service_type is null and (body ~* '(https?://|www\\.)[^\\s]' or coalesce(entities, '[]'::jsonb) @> '[{"type":"link"}]'))`;
+  }
+}
+
+/** Вкладка «Общих медиа»: новые сверху, страницами по id. */
+export async function getChatMedia(userId: number, chatId: number, tab: MediaTab, beforeId: number | null, limit = 40): Promise<{ messages: Message[]; hasMore: boolean }> {
   await assertMember(sql, chatId, userId);
   const rows = await sql`
     select * from messages
-     where chat_id = ${chatId} and not deleted and kind = ${kind}
+     where chat_id = ${chatId} and not deleted and ${tabWhere(tab)}
        ${beforeId ? sql`and id < ${beforeId}` : sql``}
      order by id desc limit ${limit + 1}`;
   return { messages: rows.slice(0, limit).map(toMessage), hasMore: rows.length > limit };
+}
+
+/** Сколько всего в каждой вкладке — пустые вкладки панель не показывает (как в Telegram Web K). */
+export async function getChatMediaCounts(userId: number, chatId: number): Promise<Record<MediaTab, number>> {
+  await assertMember(sql, chatId, userId);
+  const [r] = await sql`
+    select count(*) filter (where ${tabWhere('media')})::int as media,
+           count(*) filter (where ${tabWhere('file')})::int as file,
+           count(*) filter (where ${tabWhere('audio')})::int as audio,
+           count(*) filter (where ${tabWhere('voice')})::int as voice,
+           count(*) filter (where ${tabWhere('link')})::int as link
+      from messages where chat_id = ${chatId} and not deleted`;
+  return { media: r.media, file: r.file, audio: r.audio, voice: r.voice, link: r.link };
 }
 
 export async function getMessagesByIds(userId: number, chatId: number, ids: number[]): Promise<Message[]> {

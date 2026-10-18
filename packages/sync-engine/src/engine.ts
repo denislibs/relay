@@ -373,7 +373,7 @@ export class Engine {
     };
     const meta: Record<string, unknown> = { name: a.name, mime: a.mime, size: blob.size };
     if (a.w && a.h) { meta.w = a.w; meta.h = a.h; }
-    if (a.kind === 'voice' || a.kind === 'round') { meta.kind = a.kind; if (a.duration) meta.duration = a.duration; if (a.waveform) meta.waveform = a.waveform; }
+    if (a.kind === 'voice' || a.kind === 'round' || a.kind === 'audio') { meta.kind = a.kind; if (a.duration) meta.duration = a.duration; if (a.waveform) meta.waveform = a.waveform; }
     const intent = await api<{ id: string; url: string; mime: string }>('/uploads', meta);
     await this.put(clientId, intent.url, blob, intent.mime);
     return api<{ id: string }>(`/uploads/${intent.id}/confirm`);
@@ -684,7 +684,8 @@ export class Engine {
       case 'resetLocal': return this.resetLocal(a.keepOutbox !== false);
       case 'dev': return this.dev.command(a).finally(() => this.pushStatus());   // флаги имитатора — в status сразу
       case 'search': return this.search(a);
-      case 'chatMedia': return this.http<{ messages: Message[] }>(`/chats/${a.chatId}/media?kind=${a.kind}`).then((r) => r.messages);
+      case 'chatMedia': return this.http<{ messages: Message[]; hasMore: boolean }>(`/chats/${a.chatId}/media?kind=${a.kind}${a.beforeId ? '&beforeId=' + a.beforeId : ''}`);
+      case 'chatMediaCounts': return this.http<Record<string, number>>(`/chats/${a.chatId}/media/counts`);
       case 'sendFile': {
         // файл — в IDB (переживёт офлайн и перезагрузку), сообщение — в очередь; загрузка и отправка — в pumpOutbox
         const clientId = crypto.randomUUID();

@@ -13,7 +13,7 @@ export interface Message {
   chatId: Id;
   senderId: Id;
   clientId: string;
-  kind: 'text' | 'photo' | 'file' | 'voice' | 'round';
+  kind: 'text' | 'photo' | 'file' | 'voice' | 'round' | 'audio';
   body: string;
   replyToId: Id | null;
   createdAt: string; // ISO
@@ -82,10 +82,13 @@ export function trimFormatted(body: string, entities: Entity[]): { text: string;
 /** Вложение: фото (знает размеры заранее — лента не прыгает) или файл. thumb — крошечное размытое превью. */
 export interface Attachment {
   id: string; kind: AttachmentKind; mime: string; name: string; size: number; w: number | null; h: number | null; thumb?: string | null;
-  duration?: number | null;   // голосовое и кружок: целые секунды
+  duration?: number | null;   // голосовое, кружок и музыка: целые секунды
   waveform?: string | null;   // голосовое: 63 байта (100 значений по 5 бит, младшие биты первыми) в base64
 }
-export type AttachmentKind = 'photo' | 'file' | 'voice' | 'round';
+export type AttachmentKind = 'photo' | 'file' | 'voice' | 'round' | 'audio';
+/** Вкладки «Общих медиа» (как в Telegram): медиа — фото и видео, файлы, музыка, голосовые и кружки, ссылки. */
+export type MediaTab = 'media' | 'file' | 'audio' | 'voice' | 'link';
+export const MEDIA_TABS: readonly MediaTab[] = ['media', 'file', 'link', 'audio', 'voice'];
 /** Кружок: сторона квадрата и предел длительности (как в Telegram). */
 export const ROUND_SIZE = 400;
 export const ROUND_MAX_SECONDS = 60;

@@ -394,13 +394,34 @@ export async function sendFile(chatId: number, file: File, caption: string, repl
   nudgeWallpaper();
   toLatestOf(chatId);
   const img = await describeImage(file);
-  const res = (await engine.call({ type: 'sendFile', chatId, body: caption, file, name: file.name || 'file', mime: file.type || 'application/octet-stream', w: img?.w ?? null, h: img?.h ?? null, thumb: img?.thumb ?? null, replyToId })) as { clientId: string };
+  const seconds = img ? null : await audioDuration(file);
+  const res = (await engine.call({ type: 'sendFile', chatId, body: caption, file, name: file.name || 'file', mime: file.type || 'application/octet-stream', w: img?.w ?? null, h: img?.h ?? null, thumb: img?.thumb ?? null, replyToId,
+    ...(seconds ? { kind: 'audio' as const, duration: seconds } : {}) })) as { clientId: string };
   if (img) localPreviews.set(res.clientId, URL.createObjectURL(file));
 }
 
-/** Медиа или файлы чата (вкладки панели «Информация»). */
-export function chatMedia(chatId: number, kind: 'photo' | 'file'): Promise<Item[]> {
-  return engine.call({ type: 'chatMedia', chatId, kind }) as Promise<Item[]>;
+/** Вкладка «Общих медиа» панели «Информация»: страница сообщений (новые сверху). */
+export type MediaTab = 'media' | 'file' | 'audio' | 'voice' | 'link';
+export function chatMedia(chatId: number, kind: MediaTab, beforeId?: number): Promise<{ messages: Item[]; hasMore: boolean }> {
+  return engine.call({ type: 'chatMedia', chatId, kind, beforeId }) as Promise<{ messages: Item[]; hasMore: boolean }>;
+}
+/** Сколько в каждой вкладке (пустые не показываем). */
+export function chatMediaCounts(chatId: number): Promise<Record<MediaTab, number>> {
+  return engine.call({ type: 'chatMediaCounts', chatId }) as Promise<Record<MediaTab, number>>;
+}
+
+/** Длительность аудиофайла по метаданным (без проигрывания): музыка в ленте и во вкладке «Музыка». */
+function audioDuration(file: File): Promise<number | null> {
+  if (!/^audio\//.test(file.type)) return Promise.resolve(null);
+  return new Promise((resolve) => {
+    const url = URL.createObjectURL(file), a = new Audio();
+    const done = (v: number | null) => { URL.revokeObjectURL(url); a.removeAttribute('src'); resolve(v); };
+    const t = setTimeout(() => done(null), 5000);
+    a.preload = 'metadata';
+    a.onloadedmetadata = () => { clearTimeout(t); done(Number.isFinite(a.duration) && a.duration >= 1 ? a.duration : null); };
+    a.onerror = () => { clearTimeout(t); done(null); };
+    a.src = url;
+  });
 }
 
 /** Правка своего сообщения (онлайн). */

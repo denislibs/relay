@@ -1,11 +1,11 @@
-import { parseClientFrame } from '@relay/protocol';
+import { MEDIA_TABS, parseClientFrame, type MediaTab } from '@relay/protocol';
 import { clientIp } from './device';
 import type { Server } from 'bun';
 import { existsSync, statSync } from 'node:fs';
 import { extname, join, resolve, sep } from 'node:path';
 import { clearSessionCookie, createSession, createUser, deleteSession, readSessionToken, sessionCookie, sessionFromToken } from './auth';
 import { announceLogin, announceSessionsChanged, assertConfirmed, checkSocket, confirmSession, listSessions, sessionEnded, sweepInactive, terminateOthers, terminateSession, trackSocket, untrackSocket } from './domain/sessions';
-import { createChat, getChatMedia, getHistory, getMessagesByIds, listChats, listChatsPage } from './domain/chats';
+import { createChat, getChatMedia, getChatMediaCounts, getHistory, getMessagesByIds, listChats, listChatsPage } from './domain/chats';
 import { sql } from './db';
 import { DomainError } from './domain/errors';
 import { connected, disconnected, listPresence, type Publish } from './domain/presence';
@@ -220,10 +220,13 @@ export function createServer(opts: { port: number }): Server {
         }
         const media = /^\/chats\/(\d+)\/media$/.exec(url.pathname);
         if (req.method === 'GET' && media) {
-          const kind = url.searchParams.get('kind') === 'file' ? 'file' : 'photo';
+          const raw = url.searchParams.get('kind');
+          const tab: MediaTab = raw === 'photo' ? 'media' : (MEDIA_TABS as readonly string[]).includes(raw ?? '') ? raw as MediaTab : 'media';   // photo — прежнее имя вкладки
           const before = Number(url.searchParams.get('beforeId')) || null;
-          return Response.json(await getChatMedia(userId, Number(media[1]), kind, before));
+          return Response.json(await getChatMedia(userId, Number(media[1]), tab, before));
         }
+        const mediaCounts = /^\/chats\/(\d+)\/media\/counts$/.exec(url.pathname);
+        if (req.method === 'GET' && mediaCounts) return Response.json(await getChatMediaCounts(userId, Number(mediaCounts[1])));
         if (url.pathname === '/push/subscription' && (req.method === 'POST' || req.method === 'DELETE')) {
           const body = (await req.json().catch(() => null)) as SubscriptionInput | null;
           if (typeof body?.endpoint !== 'string') return fail('bad_frame');
