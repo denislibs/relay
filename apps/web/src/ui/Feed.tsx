@@ -1,10 +1,10 @@
 import type { Item } from '@relay/sync-engine/src/types';
 import type { Entity } from '@relay/protocol';
-import { Bubble, peerTone, DateDivider, FileBubble, MediaBubble, MessageText, MediaViewer, ScrollToBottom, forceMeasure, isHeavyAnimating, onHeavyAnimationEnd, requestMeasure, requestMutation } from '@relay/ui';
+import { Bubble, peerTone, DateDivider, FileBubble, MediaBubble, MessageText, VoiceBubble, player, MediaViewer, ScrollToBottom, forceMeasure, isHeavyAnimating, onHeavyAnimationEnd, requestMeasure, requestMutation } from '@relay/ui';
 import { memo } from 'preact/compat';
 import { useEffect, useLayoutEffect, useRef, useState } from 'preact/hooks';
-import { ensureNames, focusMessage, localPreview, moveWindow, react, savePosition, savedPosition, seen } from '../data';
-import { setGlobal, useGlobal } from '../global';
+import { ensureNames, focusMessage, localPreview, markListened, moveWindow, react, savePosition, savedPosition, seen } from '../data';
+import { getGlobal, setGlobal, useGlobal } from '../global';
 import { clock, dayKey, dayLabel, fileSize } from './format';
 
 /*
@@ -25,12 +25,12 @@ const READ_EVERY = 150;   // отправка «вижу до id» не чаще
 const FIRST_PAINT = 24;   // при открытии внизу первым кадром — столько последних сообщений, остальное следующим кадром
 
 type Quote = { id: number; sort: number; body: string; senderId: number };
-type Att = { id: string; kind: 'photo' | 'file'; mime: string; name: string; size: number; w: number | null; h: number | null; thumb?: string | null };
+type Att = { id: string; kind: 'photo' | 'file' | 'voice' | 'round'; mime: string; name: string; size: number; w: number | null; h: number | null; thumb?: string | null; duration?: number | null; waveform?: string | null };
 const fileUrl = (a: Att, download = false) => `/files/${a.id}${download ? '?download=1' : ''}`;
-type RowProps = { onOpen: (m: Item) => void; hl?: string; m: Item; meId: number; out: boolean; start: boolean; end: boolean; quoted?: Quote | null; quoteAuthor?: string; quoteTone?: number; appear: boolean; flash: boolean; onReact: (m: Item, emoji: string) => void };
+type RowProps = { onOpen: (m: Item) => void; hl?: string; m: Item; meId: number; chatId: number; author: string; out: boolean; start: boolean; end: boolean; quoted?: Quote | null; quoteAuthor?: string; quoteTone?: number; appear: boolean; flash: boolean; onReact: (m: Item, emoji: string) => void };
 
 /** Строка ленты: перерисовывается только если изменилось её сообщение или место в группе. */
-const Row = memo(function Row({ onOpen, hl, m, meId, out, start, end, quoted, quoteAuthor, quoteTone, appear, flash, onReact }: RowProps) {
+const Row = memo(function Row({ onOpen, hl, m, meId, chatId, author, out, start, end, quoted, quoteAuthor, quoteTone, appear, flash, onReact }: RowProps) {
   // реакции: по эмодзи — сколько и есть ли моя
   const list = (m.reactions as { userId: number; emoji: string }[] | undefined) ?? [];
   const chips: { emoji: string; count: number; mine: boolean }[] = [];
@@ -54,6 +54,23 @@ const Row = memo(function Row({ onOpen, hl, m, meId, out, start, end, quoted, qu
           caption={m.body ? <MessageText text={m.body as string} entities={m.entities as Entity[] | undefined} highlight={hl} /> : undefined}
           time={clock(m.createdAt as string)} status={out ? m.status : undefined}
           onOpen={() => onOpen(m)}
+        />
+        {mark}
+      </div>
+    );
+  }
+  if (att && !m.deleted && att.kind === 'voice') {
+    // голосовое: точка «не прослушано» — пока получатель не включил (у отправителя тоже, как в Telegram)
+    const unheard = m.id != null && !m.listened;
+    return (
+      <div class={flash ? 'app-msg app-msg-flash' : 'app-msg'} data-key={m.key} data-sort={m.sort as number}>
+        <VoiceBubble
+          from={out ? 'out' : 'in'} tail={end} groupStart={start} appear={appear}
+          trackKey={m.key as string} duration={att.duration ?? 0} waveform={att.waveform ?? null}
+          unread={unheard} unreadIncoming={unheard && !out}
+          uploading={pending} progress={m.progress as number}
+          time={clock(m.createdAt as string)} status={out ? m.status : undefined}
+          track={() => voiceTrack(m, att, chatId, author, out)}
         />
         {mark}
       </div>
@@ -98,6 +115,18 @@ const Row = memo(function Row({ onOpen, hl, m, meId, out, start, end, quoted, qu
 
 const noop = () => {}; // цитата — кнопка; сам клик ловит лента (один обработчик на всех)
 
+/** Трек общего плеера для голосового: свой файл до загрузки — локальная копия. Прослушал входящее — отметка. */
+function voiceTrack(m: Item, att: Att, chatId: number, author: string, out: boolean) {
+  return {
+    key: m.key as string,
+    src: localPreview(m.key as string) ?? fileUrl(att),
+    duration: att.duration ?? 0,
+    title: author,
+    subtitle: 'Голосовое сообщение',
+    onListened: !out && m.id != null && !m.listened ? () => markListened(chatId, m.id as number) : undefined,
+  };
+}
+
 /** Первый бабл, видимый ниже шапки, и его отступ от верха ленты (только в фазе замера). */
 function firstVisible(root: HTMLElement): { key: string; sort: number; top: number } | null {
   const rootTop = root.getBoundingClientRect().top;
@@ -115,6 +144,15 @@ export function Feed({ chatId, meId, peerName, stick, onMenu, highlight }: {
 }) {
   const messages = useGlobal((s) => s.messages);
   const names = useGlobal((s) => s.names);
+  // следующее/предыдущее голосовое этого чата — для автоперехода и кнопок плеера
+  useEffect(() => {
+    player.setQueue((key: string, dir: number) => {
+      const list = getGlobal().messages.filter((x) => !x.deleted && (x.attachment as Att | null)?.kind === 'voice' && x.id != null);
+      const i = list.findIndex((x) => x.key === key);
+      const n = i < 0 ? null : list[i + dir];
+      return n ? voiceTrack(n, n.attachment as Att, chatId, n.senderId === meId ? 'Вы' : peerName, n.senderId === meId) : null;
+    });
+  }, [chatId, peerName]);
   const meta = useGlobal((s) => s.feedMeta);
   const unreadFrom = useGlobal((s) => s.unreadFrom);
   const focus = useGlobal((s) => s.focus);
@@ -388,6 +426,8 @@ export function Feed({ chatId, meId, peerName, stick, onMenu, highlight }: {
         hl={highlight && (m.body as string).toLowerCase().includes(highlight.toLowerCase()) ? highlight : undefined}
         m={m}
         meId={meId}
+        chatId={chatId}
+        author={mine ? 'Вы' : peerName}
         onReact={onReact}
         onOpen={onOpen}
         out={mine}

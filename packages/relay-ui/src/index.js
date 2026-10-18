@@ -11,3 +11,6 @@ export * from './richview.js';
 export * from './media/waveform.js';
 export * from './media/voiceRecorder.js';
 export * from './media/recording.js';
+export * as player from './media/player.js';
+export * from './media/voiceBubble.js';
+export * from './media/playerBar.js';
