@@ -10,7 +10,7 @@ import { frameByKey, setGlobal, useGlobal } from '../global';
 import { showToast, unblockUser, useUser } from '../settingsData';
 import { Feed } from './Feed';
 import { chatKindFor, mediaPolicy } from '../autoload';
-import { chatTime, chatTone, fileSize, isSystemChat, lastSeenText, snippet } from './format';
+import { chatTime, chatTone, fileSize, isSystemChat, lastSeenText, shownBody, snippet } from './format';
 
 
 const NO_MESSAGES: Item[] = [];
@@ -272,7 +272,7 @@ export function Chat({ chatId, frameKey, active }: { chatId: number; frameKey: s
                       <Avatar name={who} tone={peerTone(x.senderId)} size={40} />
                       <span class="app-findrow-text">
                         <span class="app-findrow-top"><b>{who}</b><time>{chatTime(x.createdAt)}</time></span>
-                        <span class="app-findrow-body"><Highlight text={snippet(x.body, found.q)} query={found.q} /></span>
+                        <span class="app-findrow-body"><Highlight text={snippet(shownBody(x), found.q)} query={found.q} /></span>
                       </span>
                     </button>
                   );

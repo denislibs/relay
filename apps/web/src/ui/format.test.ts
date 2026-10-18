@@ -1,5 +1,5 @@
 import { expect, test } from 'bun:test';
-import { chatTime, clock, hideCode, hm, isSystemChat } from './format';
+import { chatTime, clock, hideCode, hm, isSystemChat, shownBody, snippet } from './format';
 
 const at = (h: number, m: number) => new Date(2026, 9, 17, h, m).toISOString();
 
@@ -37,4 +37,12 @@ test('isSystemChat reads peer.system', () => {
   expect(isSystemChat({ peer: { id: 2, name: 'Bob' } })).toBe(false);
   expect(isSystemChat({ peer: null })).toBe(false);
   expect(isSystemChat(undefined)).toBe(false);
+});
+
+test('search hits: a login_code hit shows the code as dots in the snippet', () => {
+  const hit = { body: 'Код для входа в Relay: 48213\n\nНикому не сообщайте этот код', service: { type: 'login_code' } };
+  expect(snippet(shownBody(hit), 'код')).not.toContain('48213');
+  expect(snippet(shownBody(hit), '48213')).not.toContain('48213');
+  expect(shownBody({ body: 'встреча 48213' })).toBe('встреча 48213');
+  expect(shownBody({ body: 'встреча 48213', service: { type: 'new_login' } })).toBe('встреча 48213');
 });

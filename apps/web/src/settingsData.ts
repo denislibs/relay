@@ -7,7 +7,7 @@ import type { Action, Item, Patch, Query } from '@relay/sync-engine/src/types';
 import { useEffect, useState } from 'preact/hooks';
 import type { PrivacyKey, PrivacyMode, SessionInfo } from '@relay/protocol';
 import { isSessionOp, sessionConfirmKey } from '@relay/sync-engine/src/sessions';
-import { sessionsSeen } from './banners';
+import { sessionsAfterOps } from './banners';
 import { reducedMotion } from '@relay/ui';
 import { engineConfig } from './engineConfig';
 import { getGlobal, setGlobal, type AccountSettings, type DevSimFlags, type Me } from './global';
@@ -112,6 +112,8 @@ export function startSettingsData(me: Me): void {
     opsPending = (opsM.list()[0]?.pending as number | undefined) ?? 0;
     const failures = (opsM.list()[0]?.failures ?? []) as { id: number; key: string; code: string }[];
     const max = failures.reduce((m, f) => Math.max(m, f.id), 0);
+    // операции с сеансами, отклонённые сервером не по not_found: их вид («подтверждён»/«завершён») откатываем сразу
+    const failed = new Set(seen >= 0 ? failures.filter((f) => f.id > seen && isSessionKey(f.key) && f.code !== 'not_found').map((f) => f.key) : []);
     if (seen >= 0) {
       // сеанс уже завершён (404) — то, чего и хотели (или подтверждать уже нечего): не ошибка
       const fresh = failures.filter((f) => f.id > seen && !(isSessionKey(f.key) && f.code === 'not_found'));
@@ -124,9 +126,10 @@ export function startSettingsData(me: Me): void {
     if (keys.join('\n') !== prev.join('\n')) {
       // ушедшее завершение применяем к уже загруженному списку тем же кадром — иначе строка вернулась бы до ответа
       // так же подтверждение («Да, это я»): иначе плашка «Это вы?» вернулась бы на время перезагрузки списка
+      // отказ (кроме not_found) — не применяем: плашка «Это вы?» и строка сеанса возвращаются тем же кадром, без ожидания перезагрузки
       const gone = prev.filter((k) => isSessionKey(k) && !keys.includes(k));
       const list = getGlobal().sessions;
-      setGlobal({ opsKeys: keys, sessions: gone.length && list ? sessionsSeen(list, gone) : list });
+      setGlobal({ opsKeys: keys, sessions: gone.length && list ? sessionsAfterOps(list, gone, failed) : list });
       if (gone.length) void loadSessions(true);
     }
   });

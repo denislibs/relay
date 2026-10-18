@@ -129,3 +129,7 @@ export const isSystemChat = (chat: Record<string, unknown> | null | undefined): 
 
 /** Код входа в превью и уведомлениях: цифры кода — точками. */
 export const hideCode = (text: string): string => text.replace(/\d{5}/, '•••••');
+
+/** Текст сообщения для строк поиска и уведомлений: у кода входа (login_code) код скрыт. */
+export const shownBody = (m: { body: string; service?: { type: string } | null }): string =>
+  m.service?.type === 'login_code' ? hideCode(m.body) : m.body;

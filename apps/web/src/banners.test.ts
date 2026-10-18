@@ -1,6 +1,6 @@
 import { expect, test } from 'bun:test';
 import type { SessionInfo } from '@relay/protocol';
-import { dayKey, dismiss, pickBanner, sessionsSeen, type BannerInput } from './banners';
+import { dayKey, dismiss, pickBanner, sessionsAfterOps, sessionsSeen, type BannerInput } from './banners';
 
 const today = new Date(2026, 9, 18, 12);   // 18 октября
 const base: BannerInput = { notify: 'on', dismissed: {}, me: { birthday: { day: 1, month: 1 } }, contacts: [], today };
@@ -53,4 +53,16 @@ test('sessions as the UI sees them: pending end hides the row, pending or just-s
   // ответили «Да» — плашки нет, пока подтверждение в очереди
   const both = [s({ id: 1, current: true }), s({ id: 2, unconfirmed: true })];
   expect(pickBanner({ notify: 'on', dismissed: {}, me: null, contacts: [], today, sessions: sessionsSeen(both, ['sessionConfirm:2']) })).toBeNull();
+});
+
+test('a confirm or end rejected by the server (not not_found) brings the banner and the row back at once', () => {
+  const list = [s({ id: 1, current: true }), s({ id: 2, unconfirmed: true }), s({ id: 3 })];
+  const gone = ['sessionConfirm:2', 'session:3'];
+  // удачно — применяем тем же кадром
+  const ok = sessionsAfterOps(list, gone, new Set());
+  expect(ok.map((x) => [x.id, x.unconfirmed])).toEqual([[1, false], [2, false]]);
+  // отказ (например fresh_session) — список как с сервера: плашка «Это вы?» снова видна
+  const back = sessionsAfterOps(list, gone, new Set(gone));
+  expect(back.map((x) => [x.id, x.unconfirmed])).toEqual([[1, false], [2, true], [3, false]]);
+  expect(pickBanner({ notify: 'on', dismissed: {}, me: null, contacts: [], today, sessions: back })).toMatchObject({ kind: 'unconfirmed', session: { id: 2 } });
 });

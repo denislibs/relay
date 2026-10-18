@@ -55,6 +55,15 @@ export function sessionsSeen(list: readonly SessionInfo[], keys: readonly string
   return view.map((x) => (x.unconfirmed && set.has(sessionConfirmKey(x.id)) ? { ...x, unconfirmed: false } : x));
 }
 
+/**
+ * Операции с сеансами ушли из очереди (prev → keys): удачные применяем к загруженному списку тем же кадром,
+ * отклонённые сервером (failed; not_found сюда не входит — «уже сделано») — нет: плашка и строка возвращаются сразу.
+ */
+export function sessionsAfterOps(list: readonly SessionInfo[], gone: readonly string[], failed: ReadonlySet<string>): SessionInfo[] {
+  const done = gone.filter((k) => !failed.has(k));
+  return done.length ? sessionsSeen(list, done) : [...list];
+}
+
 export function loadDismissed(): Dismissed {
   try { const v = JSON.parse(localStorage.getItem(DISMISS_KEY) ?? '{}'); return v && typeof v === 'object' ? v as Dismissed : {}; } catch { return {}; }
 }
