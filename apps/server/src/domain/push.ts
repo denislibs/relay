@@ -1,7 +1,8 @@
 import { hideSpoilers, NO_PREVIEW } from '@relay/protocol';
 import { sql } from '../db';
 import { nameForSql } from './profile';
-import { isOnline } from './presence';
+import { onlineUsers } from './liveRegistry';
+import { PermanentError } from '../jobs/handlers';
 import { DEFAULT_TTL_DAYS } from './sessions';
 import { notifyDefaults } from './settings';
 
@@ -98,29 +99,21 @@ export async function unsubscribe(userId: number, endpoint: string): Promise<voi
   await sql`delete from push_subscriptions where endpoint = ${endpoint} and user_id = ${userId}`;
 }
 
-// ---- отправка в фоне: ack не ждёт push-сервис; тесты дожидаются хвоста (settlePushes) перед очисткой базы ----
-const pending = new Set<Promise<void>>();
-export function pushInBackground(m: Parameters<typeof pushNewMessage>[0]): void {
-  const p = pushNewMessage(m).catch((e) => console.warn('push', String(e))).finally(() => pending.delete(p));
-  pending.add(p);
-}
-/** Дождаться всех отправок в фоне (в т.ч. начатых, пока ждём). */
-export async function settlePushes(): Promise<void> {
-  while (pending.size) await Promise.allSettled([...pending]);
-}
-
 /** system — служебное сообщение Relay: SW ставит знак Relay иконкой. */
 export type PushPayload = { chatId: number; id: number; title: string; body: string; system?: true };
 
-/** Новое сообщение → push участникам без соединения, кроме отправителя и тех, у кого чат заглушён.
+export type PushMessage = { chatId: number; id: number; senderId: number; body: string; entities?: { type: string; offset: number; length: number }[]; kind?: string; attachment?: { name?: string } | null; service?: { type: string } };
+
+/** Новое сообщение → кому и что слать (задача push.message): подписки участников без соединения в любом процессе,
+ *  кроме отправителя, заглушивших чат и заблокировавших отправителя.
  *  Только подпискам живых сеансов: истёкший или неактивный дольше срока, но ещё не убранный sweepInactive — молчит. */
-export async function pushNewMessage(m: { chatId: number; id: number; senderId: number; body: string; entities?: { type: string; offset: number; length: number }[]; kind?: string; attachment?: { name?: string } | null; service?: { type: string } }): Promise<void> {
+export async function planPush(m: PushMessage): Promise<{ endpoint: string; push: PushPayload }[]> {
   m = { ...m, body: hideSpoilers(m.body, m.entities) };   // скрытый текст в уведомление не уходит
   // код входа не уходит в push-сервис и на экран блокировки
   if (m.service?.type === 'login_code') m = { ...m, body: 'Код для входа в Relay' };
   // имя отправителя — глазами получателя (контактное, если он его задал)
   const subs = await sql`
-    select s.endpoint, s.user_id, s.p256dh, s.auth, s.hide_text,
+    select s.endpoint, s.user_id, s.hide_text,
            (select ${nameForSql(sql`s.user_id`)} from users u where u.id = ${m.senderId}) as sender_name
       from push_subscriptions s
     join chat_members cm on cm.user_id = s.user_id and cm.chat_id = ${m.chatId}
@@ -130,35 +123,47 @@ export async function pushNewMessage(m: { chatId: number; id: number; senderId: 
       and se.expires_at > now()
       and se.last_active_at > now() - make_interval(days => coalesce(us.sessions_ttl_days, ${DEFAULT_TTL_DAYS}))
       and not exists (select 1 from blocks b where b.owner_id = s.user_id and b.user_id = ${m.senderId})   -- от заблокированного — никогда`;
-  const offline = subs.filter((s) => !isOnline(s.user_id as number));
-  if (!offline.length) return;
+  const online = await onlineUsers([...new Set(subs.map((s) => Number(s.user_id)))]);
+  const offline = subs.filter((s) => !online.has(Number(s.user_id)));
+  if (!offline.length) return [];
   const [info] = await sql`select kind, title from chats where id = ${m.chatId}`;
+  if (!info) return [];   // чат удалили, пока задача ждала
   // умолчания получателя для этого вида чата: выключено — не шлём; без предпросмотра — текст не отдаём
   const defaults = await notifyDefaults(sql, [...new Set(offline.map((s) => s.user_id as number))]);
   const kind = info.kind === 'group' ? 'group' : 'direct';
   const prefOf = (userId: number) => defaults.get(userId)?.[kind] ?? { muted: false, preview: true };
-  const targets = offline.filter((s) => !prefOf(s.user_id as number).muted);
-  if (!targets.length) return;
   const preview = m.kind === 'voice' ? '🎤 Голосовое сообщение' : m.kind === 'round' ? 'Видеосообщение' : m.kind === 'photo' ? (m.body ? '🖼 ' + m.body : 'Фотография') : m.kind === 'file' ? '📎 ' + (m.body || m.attachment?.name || 'Файл') : m.kind === 'audio' ? '🎵 ' + (m.body || (m.attachment as { title?: string } | null | undefined)?.title || (m.attachment?.name ?? 'Музыка').replace(/\.[^.]{1,5}$/, '')) : m.body;
-  await Promise.all(targets.map(async (s) => {
+  return offline.filter((s) => !prefOf(s.user_id as number).muted).map((s) => {
     const name = s.sender_name as string;
     const shown = prefOf(s.user_id as number).preview;
     // «Скрывать текст в уведомлениях» на этом устройстве — ни имени, ни текста (как и локальное уведомление)
-    const payload: PushPayload = s.hide_text === true
+    const push: PushPayload = s.hide_text === true
       ? { chatId: m.chatId, id: m.id, title: 'Relay', body: NO_PREVIEW }
       : kind === 'group'
       ? { chatId: m.chatId, id: m.id, title: (info.title as string) ?? 'Группа', body: shown ? `${name}: ${preview}` : NO_PREVIEW }
       : { chatId: m.chatId, id: m.id, title: name, body: shown ? preview : NO_PREVIEW };
-    if (m.service) payload.system = true;
-    const plain = enc.encode(JSON.stringify(payload).slice(0, 3000));
-    try {
-      const res = await fetch(s.endpoint as string, {
-        method: 'POST',
-        headers: { authorization: await vapidHeader(s.endpoint as string), 'content-encoding': 'aes128gcm', 'content-type': 'application/octet-stream', ttl: '86400', urgency: 'high' },
-        body: await encryptPayload(s.p256dh as string, s.auth as string, plain),
-      });
-      // подписка отозвана браузером — забываем
-      if (res.status === 404 || res.status === 410) await sql`delete from push_subscriptions where endpoint = ${s.endpoint}`;
-    } catch (e) { console.warn('push failed', String(e)); }
-  }));
+    if (m.service) push.system = true;
+    return { endpoint: s.endpoint as string, push };
+  });
+}
+
+const PUSH_TIMEOUT_MS = 10_000;
+
+/**
+ * Одна доставка (задача push.deliver). Ключи подписки читаются сейчас: подписку могли удалить или обновить после постановки.
+ * 404/410 — подписка отозвана, забываем; 429/5xx/сеть — Error (повтор); прочие 4xx — PermanentError.
+ */
+export async function deliverPush(endpoint: string, push: PushPayload): Promise<void> {
+  const [s] = await sql`select p256dh, auth from push_subscriptions where endpoint = ${endpoint}`;
+  if (!s) return;
+  const plain = enc.encode(JSON.stringify(push).slice(0, 3000));
+  const res = await fetch(endpoint, {
+    method: 'POST',
+    headers: { authorization: await vapidHeader(endpoint), 'content-encoding': 'aes128gcm', 'content-type': 'application/octet-stream', ttl: '86400', urgency: 'high' },
+    body: await encryptPayload(s.p256dh as string, s.auth as string, plain),
+    signal: AbortSignal.timeout(PUSH_TIMEOUT_MS),
+  });
+  if (res.status === 404 || res.status === 410) { await sql`delete from push_subscriptions where endpoint = ${endpoint}`; return; }
+  if (res.status === 429 || res.status >= 500) throw new Error(`push service ${res.status}`);
+  if (!res.ok) throw new PermanentError(`push service ${res.status}`);
 }

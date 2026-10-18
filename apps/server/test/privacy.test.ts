@@ -1,6 +1,8 @@
 import { afterAll, beforeEach, expect, test } from 'bun:test';
 import { defaultPrivacy, type PrivacyRule, type ServerFrame, type Update } from '@relay/protocol';
 import { sql } from '../src/db';
+import '../src/jobs/kinds';
+import { drainJobs } from '../src/jobs/worker';
 import { getUpdates } from '../src/domain/journal';
 import { sendMessage } from '../src/domain/messages';
 import { canFindByPhone, canSee, canSeeLastSeen, type PrivacyCtx } from '../src/domain/privacy';
@@ -391,7 +393,6 @@ test('no presence frames for no-op changes: repeated block/unblock, unchanged la
 // ---------- push ----------
 const got: Uint8Array[] = [];
 const push = Bun.serve({ port: 0, async fetch(req) { got.push(new Uint8Array(await req.arrayBuffer())); return new Response(null, { status: 201 }); } });
-const waitFor = async (n: number) => { for (let i = 0; i < 50 && got.length < n; i++) await Bun.sleep(20); await Bun.sleep(60); };
 
 test('no push from a blocked sender (group message)', async () => {
   const a = await login('Анна'), b = await makeUser('Борис'), v = await makeUser('Вера');
@@ -402,7 +403,7 @@ test('no push from a blocked sender (group message)', async () => {
   await call(a, 'PUT', `/blocks/${b}`);
   await sendMessage(b, { chatId: group, clientId: crypto.randomUUID(), body: 'от заблокированного' });
   await sendMessage(v, { chatId: group, clientId: crypto.randomUUID(), body: 'от Веры' });
-  await waitFor(2);
+  await drainJobs();
   // по содержимому, а не по счёту: запоздалый push прошлого файла тестов (id чатов начались заново) не мешает
   const bodies = await Promise.all(got.map(async (g) => (await br.decrypt(g)).body as string));
   expect(bodies).toContain('Вера: от Веры');

@@ -6,9 +6,9 @@ import { assertMember, toMessage } from './chats';
 import { DomainError } from './errors';
 import { fanOut } from './journal';
 import { blockedInDirect } from './privacy';
-import { pushInBackground } from './push';
 import { isServiceChat } from './service';
 import { burnCodes } from './login';
+import { enqueue } from '../jobs/queue';
 
 export const MAX_BODY = 4096;
 
@@ -51,9 +51,8 @@ export async function sendMessage(
     const members = await tx`select user_id from chat_members where chat_id = ${input.chatId}`;
     await fanOut(tx, members.map((m) => m.user_id as number), { type: 'newMessage', message });
     await clearDraftInTx(tx, userId, input.chatId); // отправили — черновик на всех устройствах больше не нужен
+    await enqueue(tx, 'push.message', { message });  // уйдёт после коммита, воркером: ack не ждёт push-сервис
     return { message, duplicate: false };
   });
-  // после коммита и не дожидаясь: доставка в push-сервис не должна тормозить ack
-  if (!res.duplicate) pushInBackground(res.message);
   return res;
 }

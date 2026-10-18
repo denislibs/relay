@@ -3,7 +3,9 @@ import { sql } from '../src/db';
 import { createServer } from '../src/http';
 import { NO_PREVIEW } from '@relay/protocol';
 import { sendMessage } from '../src/domain/messages';
-import { postService, pushService } from '../src/domain/service';
+import { postService } from '../src/domain/service';
+import '../src/jobs/kinds';
+import { drainJobs } from '../src/jobs/worker';
 import { makeChat, makeUser, resetDb } from './helpers';
 
 const server = createServer({ port: 0 });
@@ -50,7 +52,6 @@ async function browser() {
   };
 }
 
-const waitFor = async (n: number) => { for (let i = 0; i < 50 && got.length < n; i++) await Bun.sleep(20); };
 /** сеанс пользователя (как после входа) — подписка без него невозможна */
 async function sessionFor(userId: number): Promise<number> {
   const [r] = await sql`insert into sessions (token_hash, user_id, expires_at) values (${crypto.randomUUID()}, ${userId}, now() + interval '30 days') returning id`;
@@ -67,7 +68,7 @@ test('offline member gets an encrypted push signed with the VAPID key; sender an
 
   const { message } = await sendMessage(a, { chatId: chat, clientId: crypto.randomUUID(), body: 'привет' });
   await sendMessage(a, { chatId: other, clientId: crypto.randomUUID(), body: 'в заглушённый' });
-  await waitFor(1); await Bun.sleep(100);
+  await drainJobs();
   expect(got.length).toBe(1);
   expect(got[0].encoding).toBe('aes128gcm');
   expect(await br.decrypt(got[0].body)).toEqual({ chatId: chat, id: message.id, title: 'Анна', body: 'привет' });
@@ -88,7 +89,7 @@ test('gone subscription is forgotten; HTTP subscribe needs a session', async () 
   await subscribe(b, { endpoint: endpoint(3), keys: (await browser()).keys }, await sessionFor(b));
   status = 410;
   await sendMessage(a, { chatId: chat, clientId: crypto.randomUUID(), body: 'x' });
-  await waitFor(1); await Bun.sleep(100);
+  await drainJobs();
   expect((await sql`select count(*)::int as n from push_subscriptions`)[0].n).toBe(0);
   expect((await fetch(`${base}/push/subscription`, { method: 'POST', body: JSON.stringify({ endpoint: endpoint(4), keys: { p256dh: 'x', auth: 'y' } }) })).status).toBe(401);
 });
@@ -101,10 +102,10 @@ test('direct push is titled with the recipient\'s contact name for the sender; g
   const { subscribe } = await import('../src/domain/push');
   await subscribe(b, { endpoint: endpoint(5), keys: br.keys }, await sessionFor(b));
   await sendMessage(a, { chatId: chat, clientId: crypto.randomUUID(), body: 'привет' });
-  await waitFor(1); await Bun.sleep(50);
+  await drainJobs();
   expect(await br.decrypt(got[0].body)).toMatchObject({ title: 'Аня С', body: 'привет' });
   await sendMessage(a, { chatId: group, clientId: crypto.randomUUID(), body: 'всем' });
-  await waitFor(2); await Bun.sleep(50);
+  await drainJobs();
   expect(await br.decrypt(got[1].body)).toMatchObject({ title: 'Группа', body: 'Аня С: всем' });
 });
 
@@ -115,12 +116,11 @@ const login = async (name: string): Promise<U> =>
 const call = (u: U, method: string, path: string, body?: unknown) =>
   fetch(`${base}${path}`, { method, headers: { cookie: `relay_session=${u.token}` }, body: body === undefined ? undefined : JSON.stringify(body) });
 const sessionIdOf = async (u: U) => ((await (await call(u, 'GET', '/sessions')).json()) as { id: number; current: boolean }[]).find((s) => s.current)!.id;
-const { settlePushes } = await import('../src/domain/push');
 /** отправить и дождаться всех push; вернуть пути endpoint'ов, куда ушло */
 async function sendAndCollect(from: number, chatId: number): Promise<string[]> {
   got.length = 0;
   await sendMessage(from, { chatId, clientId: crypto.randomUUID(), body: 'секрет' });
-  await settlePushes();
+  await drainJobs();
   return got.map((g) => g.path).sort();
 }
 
@@ -239,16 +239,14 @@ test('service push: login_code is masked, new_login keeps its text', async () =>
   await subscribe(a, { endpoint: endpoint(1), keys: br.keys }, await sessionFor(a));
 
   const code = await sql.begin((tx) => postService(tx, a, { type: 'login_code', body: 'Код: 12345' }));
-  pushService(code);
-  await waitFor(1); await Bun.sleep(100);
+  await drainJobs();
   expect(got.length).toBe(1);
   const first = await br.decrypt(got[0].body);
   expect(first.body).toBe('Код для входа в Relay');
   expect(first.system).toBe(true);   // SW покажет знак Relay иконкой
 
   const login = await sql.begin((tx) => postService(tx, a, { type: 'new_login', body: 'Новый вход' }));
-  pushService(login);
-  await waitFor(2); await Bun.sleep(100);
+  await drainJobs();
   expect(got.length).toBe(2);
   expect((await br.decrypt(got[1].body)).body).toBe('Новый вход');
 });
@@ -260,9 +258,82 @@ test('spoiler text never reaches a push: it is replaced with filler, the rest st
   const { subscribe } = await import('../src/domain/push');
   await subscribe(b, { endpoint: endpoint(7), keys: br.keys }, await sessionFor(b));
   await sendMessage(a, { chatId: chat, clientId: crypto.randomUUID(), body: 'пароль: tiger42', entities: [{ type: 'spoiler', offset: 8, length: 7 }] });
-  await waitFor(1); await Bun.sleep(100);
+  await drainJobs();
   const p = await br.decrypt(got[0].body) as { body: string };
   expect(p.body.startsWith('пароль: ')).toBe(true);
   expect(p.body).not.toContain('tiger42');
   expect(p.body.length).toBe('пароль: tiger42'.length);
+});
+
+test('no worker yet: the push waits in jobs and is delivered once a worker runs', async () => {
+  const a = await makeUser('Анна'), b = await makeUser('Борис');
+  const chat = await makeChat([a, b]);
+  const br = await browser();
+  const { subscribe } = await import('../src/domain/push');
+  await subscribe(b, { endpoint: endpoint(20), keys: br.keys }, await sessionFor(b));
+  got.length = 0;
+  await sendMessage(a, { chatId: chat, clientId: crypto.randomUUID(), body: 'дождись' });
+  await Bun.sleep(100);
+  expect(got.length).toBe(0);                                         // в процессе сервера ничего не уходит
+  expect((await sql`select kind from jobs`).map((r) => r.kind)).toEqual(['push.message']);
+  await drainJobs();
+  expect(got.length).toBe(1);
+  expect(await br.decrypt(got[0].body)).toMatchObject({ body: 'дождись' });
+});
+
+test('push service 503 is retried; 400 is dropped to jobs_dead; 410 forgets the subscription', async () => {
+  const a = await makeUser('Анна'), b = await makeUser('Борис');
+  const chat = await makeChat([a, b]);
+  const { subscribe } = await import('../src/domain/push');
+  await subscribe(b, { endpoint: endpoint(21), keys: (await browser()).keys }, await sessionFor(b));
+  got.length = 0;
+
+  status = 503;
+  await sendMessage(a, { chatId: chat, clientId: crypto.randomUUID(), body: 'раз' });
+  await drainJobs();
+  expect(got.length).toBe(1);
+  expect((await sql`select kind from jobs`).map((r) => r.kind)).toEqual(['push.deliver']);   // ждёт повтора
+  status = 201;
+  await sql`update jobs set run_at = now()`;
+  await drainJobs();
+  expect(got.length).toBe(2);
+  expect((await sql`select count(*)::int as n from jobs`)[0].n).toBe(0);
+
+  status = 400;
+  await sendMessage(a, { chatId: chat, clientId: crypto.randomUUID(), body: 'два' });
+  await drainJobs();
+  expect((await sql`select kind from jobs_dead`).map((r) => r.kind)).toEqual(['push.deliver']);
+
+  status = 410;
+  await sendMessage(a, { chatId: chat, clientId: crypto.randomUUID(), body: 'три' });
+  await drainJobs();
+  expect((await sql`select count(*)::int as n from push_subscriptions`)[0].n).toBe(0);
+  status = 201;
+});
+
+test('a subscription removed before delivery is skipped quietly', async () => {
+  const a = await makeUser('Анна'), b = await makeUser('Борис');
+  const chat = await makeChat([a, b]);
+  const { subscribe, unsubscribe } = await import('../src/domain/push');
+  await subscribe(b, { endpoint: endpoint(22), keys: (await browser()).keys }, await sessionFor(b));
+  got.length = 0;
+  await sendMessage(a, { chatId: chat, clientId: crypto.randomUUID(), body: 'x' });
+  const [job] = await (await import('../src/jobs/queue')).claim(1);   // push.message
+  await (await import('../src/jobs/worker')).runJob(job);             // поставил push.deliver
+  await unsubscribe(b, endpoint(22));
+  await drainJobs();
+  expect(got.length).toBe(0);
+  expect((await sql`select count(*)::int as n from jobs_dead`)[0].n).toBe(0);
+});
+
+test('an online recipient (any process) gets no push', async () => {
+  const a = await makeUser('Анна'), b = await makeUser('Борис');
+  const chat = await makeChat([a, b]);
+  const { subscribe } = await import('../src/domain/push');
+  await subscribe(b, { endpoint: endpoint(23), keys: (await browser()).keys }, await sessionFor(b));
+  await sql`insert into live_conns (process_id, user_id, conns, seen_at) values (${crypto.randomUUID()}, ${b}, 1, now())`;
+  got.length = 0;
+  await sendMessage(a, { chatId: chat, clientId: crypto.randomUUID(), body: 'вижу сам' });
+  await drainJobs();
+  expect(got.length).toBe(0);
 });

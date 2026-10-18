@@ -3,7 +3,7 @@ import { sql, type Tx } from '../db';
 import { hashToken } from '../auth';
 import { DomainError } from './errors';
 import { appendUpdates } from './journal';
-import { newLoginMessage, postService, pushService } from './service';
+import { newLoginMessage, postService } from './service';
 
 export const DEFAULT_TTL_DAYS = 180;
 /** предельный срок cookie и строки (скользит от последней активности); настоящий предел — неактивность (sessions_ttl_days, не больше года) */
@@ -166,12 +166,10 @@ export async function confirmSession(userId: number, currentId: number, id: numb
 export async function announceLogin(userId: number, token: string): Promise<void> {
   const [s] = await sql`select device, ip, created_at from sessions where token_hash = ${hashToken(token)}`;
   if (!s) return;
-  const message = await sql.begin(async (tx) => {
-    const m = await postService(tx, userId, { type: 'new_login', ...newLoginMessage(s.device || 'Браузер', s.ip, new Date(s.created_at)) });
+  await sql.begin(async (tx) => {
+    await postService(tx, userId, { type: 'new_login', ...newLoginMessage(s.device || 'Браузер', s.ip, new Date(s.created_at)) });
     await changed(tx, userId);
-    return m;
   });
-  pushService(message);
 }
 
 /** Завершить все сеансы, кроме текущего. */

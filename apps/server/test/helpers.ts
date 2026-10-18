@@ -1,9 +1,6 @@
 import { sql } from '../src/db';
-import { settlePushes } from '../src/domain/push';
 
 export async function resetDb(): Promise<void> {
-  // push в фоне из прошлого теста не должен столкнуться с truncate (deadlock)
-  await settlePushes();
   await sql`truncate login_attempts, login_pending, srp_challenges, qr_logins, webauthn_challenges, sessions, chats, chat_members, messages, user_seq, updates,
                      jobs, jobs_dead, live_conns, dev_mail restart identity cascade`;
   // системного пользователя «Relay» (миграция 110_service) не трогаем

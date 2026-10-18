@@ -1,8 +1,7 @@
 import { createHash, randomInt } from 'node:crypto';
 import { sql, type Tx } from '../db';
 import { DomainError } from './errors';
-import { postService, pushService, systemUserId } from './service';
-import type { Message } from '@relay/protocol';
+import { postService, systemUserId } from './service';
 
 export const CODE_LENGTH = 5;
 const CODE_TTL_MIN = 5, MAX_TRIES = 5, MAX_PER_HOUR = 5;
@@ -49,7 +48,7 @@ export async function requestCode(login: string, ip: string | null = null): Prom
   const dev = process.env.DEV_LOGIN === '1';
   // запись без привязки к человеку: неавторизованный вызов не должен копить строки бесконечно (час нужен лимитам)
   await sql`delete from login_attempts where created_at < now() - interval '1 day'`;
-  let posted: Message | null = null, code = '';
+  let code = '';
   await sql.begin(async (tx) => {
     // замок на логин (и адрес): подсчёт и вставка в одной транзакции, параллельные запросы не обгонят лимит
     await tx`select pg_advisory_xact_lock(hashtext(${'login:' + key}))`;
@@ -79,9 +78,8 @@ export async function requestCode(login: string, ip: string | null = null): Prom
     // некому получить код — реальный хэш хранится только в dev (devCode), иначе его мог бы лишь угадать злоумышленник
     const stored = live || dev ? hash(code) : hash(crypto.randomUUID());
     await tx`insert into login_attempts (id, user_id, code_hash, expires_at, login, ip) values (${attemptId}, ${userId}, ${stored}, ${expires}, ${key}, ${ip})`;
-    if (live) posted = await postService(tx, userId, { type: 'login_code', ...codeMessage(code) });
+    if (live) await postService(tx, userId, { type: 'login_code', ...codeMessage(code) });
   });
-  if (posted) pushService(posted);   // push только после коммита
   return { attemptId, via: 'app', length: CODE_LENGTH, ...(dev && code ? { devCode: code } : {}) };
 }
 

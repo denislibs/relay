@@ -2,7 +2,7 @@ import type { Entity, Message, ServiceType } from '@relay/protocol';
 import { sql, type Tx } from '../db';
 import { toMessage } from './chats';
 import { fanOut } from './journal';
-import { pushInBackground } from './push';
+import { enqueue } from '../jobs/queue';
 
 type Db = Tx | typeof sql;
 let systemId: Promise<number> | null = null;
@@ -35,8 +35,7 @@ export async function isServiceChat(db: Db, chatId: number): Promise<boolean> {
   return !!r;
 }
 
-/** Служебное сообщение пользователю: обычная строка messages + newMessage в журнал (синхронизация как у всех).
- *  Push здесь не уходит: вызывающий после коммита своей транзакции зовёт pushService(message). */
+/** Служебное сообщение пользователю: строка messages, newMessage в журнал и задача push — всё в транзакции вызывающего. */
 export async function postService(tx: Tx, userId: number, msg: { type: ServiceType; body: string; entities?: Entity[] }): Promise<Message> {
   const chatId = await serviceChatId(tx, userId);
   const sys = await systemUserId();
@@ -46,12 +45,8 @@ export async function postService(tx: Tx, userId: number, msg: { type: ServiceTy
     returning *`;
   const message = toMessage(row);
   await fanOut(tx, [userId], { type: 'newMessage', message });
+  await enqueue(tx, 'push.message', { message });
   return message;
-}
-
-/** Web Push служебного сообщения — только после коммита транзакции, в которой был postService. */
-export function pushService(message: Message): void {
-  pushInBackground(message);
 }
 
 /** «Новый вход»: устройство, IP и время, совет, что делать, если это не вы; заголовок жирным. */

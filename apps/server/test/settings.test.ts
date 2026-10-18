@@ -1,6 +1,8 @@
 import { afterAll, beforeEach, expect, test } from 'bun:test';
 import { defaultPrivacy, type ServerFrame } from '@relay/protocol';
 import { sql } from '../src/db';
+import '../src/jobs/kinds';
+import { drainJobs } from '../src/jobs/worker';
 import { getUpdates } from '../src/domain/journal';
 import { sendMessage } from '../src/domain/messages';
 import { resetPresence } from '../src/domain/presence';
@@ -77,7 +79,6 @@ test('invalid type, body or field type → 400; needs a session', async () => {
 const got: Uint8Array[] = [];
 const push = Bun.serve({ port: 0, async fetch(req) { got.push(new Uint8Array(await req.arrayBuffer())); return new Response(null, { status: 201 }); } });
 const endpoint = (n: number) => `http://localhost:${push.port}/ep/${n}`;
-const waitFor = async (n: number) => { for (let i = 0; i < 50 && got.length < n; i++) await Bun.sleep(20); await Bun.sleep(60); };
 
 test('push respects the recipient defaults: muted kind sends nothing, no preview hides the text', async () => {
   const a = await makeUser('Анна');
@@ -88,17 +89,17 @@ test('push respects the recipient defaults: muted kind sends nothing, no preview
 
   await call(b, 'PUT', '/settings/notify/group', { muted: true });
   await sendMessage(a, { chatId: group, clientId: crypto.randomUUID(), body: 'в группу' });
-  await waitFor(1);
+  await drainJobs();
   expect(got.length).toBe(0);                       // группы выключены
   await sendMessage(a, { chatId: direct, clientId: crypto.randomUUID(), body: 'лично' });
-  await waitFor(1);
+  await drainJobs();
   expect(got.length).toBe(1);                       // личные — как раньше
 
   await call(b, 'PUT', '/settings/notify/direct', { preview: false });
   await call(b, 'PUT', '/settings/notify/group', { muted: false, preview: false });
   await sendMessage(a, { chatId: direct, clientId: crypto.randomUUID(), body: 'секрет' });
   await sendMessage(a, { chatId: group, clientId: crypto.randomUUID(), body: 'тоже секрет' });
-  await waitFor(3);
+  await drainJobs();
   expect(got.length).toBe(3);
   expect(await br.decrypt(got[0])).toMatchObject({ title: 'Анна', body: 'лично' });
   expect(await br.decrypt(got[1])).toMatchObject({ title: 'Анна', body: 'Новое сообщение' });   // заголовок — отправитель, текст скрыт
