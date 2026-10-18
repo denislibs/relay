@@ -1,4 +1,5 @@
 import { parseClientFrame } from '@relay/protocol';
+import { clientIp } from './device';
 import type { Server } from 'bun';
 import { existsSync, statSync } from 'node:fs';
 import { extname, join, resolve, sep } from 'node:path';
@@ -96,7 +97,7 @@ export function createServer(opts: { port: number }): Server {
         if (req.method === 'POST' && url.pathname === '/auth/code') {
           const { login } = ((await req.json().catch(() => null)) ?? {}) as { login?: unknown };
           if (typeof login !== 'string' || !login.trim() || login.length > 64) return fail('bad_frame');
-          return Response.json(await requestCode(login));
+          return Response.json(await requestCode(login, clientIp(req, server)));
         }
         if (req.method === 'POST' && url.pathname === '/auth/signin') {
           const { attemptId, code } = ((await req.json().catch(() => null)) ?? {}) as { attemptId?: unknown; code?: unknown };

@@ -5,6 +5,7 @@ import { DomainError } from './errors';
 import { fanOut } from './journal';
 import { blockedInDirect } from './privacy';
 import { isServiceChat } from './service';
+import { burnCodes } from './login';
 
 const MAX_BODY = 4096;
 const EMOJI = /^\p{Extended_Pictographic}(️|‍\p{Extended_Pictographic})*$/u;
@@ -28,6 +29,7 @@ export async function editMessage(userId: number, chatId: number, id: number, bo
     await ownMessage(tx, userId, chatId, id);
     // заблокированный не правит сообщения в личном чате с тем, кто его заблокировал
     if (await blockedInDirect(tx, chatId, userId)) throw new DomainError('blocked');
+    await burnCodes(tx, userId, text);
     const [row] = await tx`update messages set body = ${text}, entities = ${entities.length ? sql.json(entities as never) : null}, edited_at = now() where chat_id = ${chatId} and id = ${id} returning edited_at`;
     const editedAt = new Date(row.edited_at as string).toISOString();
     await fanOut(tx, await membersOf(tx, chatId), { type: 'messageEdited', chatId, id, body: text, editedAt, entities });
