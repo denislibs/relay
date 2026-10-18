@@ -83,11 +83,11 @@ export function Info() {
           </div>
           <div class="rl-profile-name">{title}{system ? <Verified size={22} /> : null}</div>
           <div class={'rl-profile-sub' + (myPeer?.online ? ' app-online' : '')}>{subtitle || ' '}</div>
-          <Expand unclip show={!group && !!(user?.links as ProfileLink[] | undefined)?.length}>{!group && user ? <ProfileLinks links={(user.links as ProfileLink[] | undefined) ?? []} /> : null}</Expand>
         </div>
         <div class="rl-aside-group">
           {/* как в Telegram: имя уже в шапке — строками только то, чего там нет, и только если поле заполнено */}
           <Expand show={!group && !!user}>{!group && user ? <PeerRows user={user} /> : null}</Expand>
+          <Expand show={!group && !!(user?.links as ProfileLink[] | undefined)?.length}>{!group && user ? <ProfileLinks links={(user.links as ProfileLink[] | undefined) ?? []} /> : null}</Expand>
           <InfoRow
             tile="red"
             icon={muted.includes(chatId) ? 'bellOff' : 'bell'}

@@ -93,7 +93,7 @@ export function Main() {
   const bio = me.bio?.trim() || null;
   const birthday = me.birthday ? birthdayText(me.birthday) : null;
   const links = me.links ?? [];
-  const hasInfo = !!(phone || username || bio || birthday);
+  const hasInfo = !!(phone || username || bio || birthday || links.length);
 
   return (
     <div class="rl-sidepage" aria-label="Настройки">
@@ -115,7 +115,6 @@ export function Main() {
       <div class="rl-settings" ref={scroll.ref} onScroll={scroll.onScroll}>
         <ProfileHeader name={me.name} tone={peerTone(me.userId)} subtitle={status.phase === 'offline' ? 'нет сети' : 'в сети'} size={96} {...photo.avatar} />
         {photo.ui}
-        <ProfileLinks links={links} />
         {hasInfo ? (
           <Section>
             {phone ? <InfoRow tile="green" icon="phone" title={phone} subtitle="Телефон" onClick={() => copy(phone)} /> : null}
@@ -131,6 +130,7 @@ export function Main() {
               </div>
             ) : null}
             {birthday ? <InfoRow tile="purple" icon="cake" title={birthday} subtitle="День рождения" onClick={() => copy(birthday)} /> : null}
+            <ProfileLinks links={links} />
           </Section>
         ) : null}
         <Section>

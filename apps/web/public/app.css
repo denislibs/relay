@@ -502,14 +502,6 @@ html[data-anim="0"] .app-chatcol, html[data-anim="0"] .app-chatcol-below, html[d
 .app-link-service .rl-check-mark { animation: rl-pop var(--dur-base) var(--ease-out); }
 .app-svc-mono { background: color-mix(in srgb, var(--ink) 12%, var(--plinks-bg)); color: color-mix(in srgb, var(--ink) 72%, transparent); }
 /* ссылки профиля — ряд круглых кнопок сервисов под именем; адрес всплывает при наведении */
-.app-plinks { display: flex; flex-wrap: wrap; justify-content: center; gap: var(--space-2); margin-top: var(--space-3); }
-.app-plink { position: relative; display: inline-flex; border-radius: 50%; transition: transform var(--dur-fast) var(--ease-out); }
-.app-plink .app-svc { border-radius: 50%; }
-.app-plink:hover, .app-plink:focus-visible { transform: translateY(-2px); }
-.app-plink:active { transform: scale(.94); }
-.app-plink:focus-visible { outline: 2px solid var(--brand-strong); outline-offset: 2px; }
-.app-plink-tip { position: absolute; bottom: calc(100% + 6px); left: 50%; z-index: 5; max-width: 220px; padding: 4px 10px; border-radius: var(--radius-pill, 999px); background: var(--ink); color: var(--page); font: 500 13px/18px var(--font-sans); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; pointer-events: none; opacity: 0; transform: translate(-50%, 4px); transition: opacity var(--dur-fast) var(--ease-standard), transform var(--dur-fast) var(--ease-out); }
-.app-plink:hover .app-plink-tip, .app-plink:focus-visible .app-plink-tip { opacity: 1; transform: translate(-50%, 0); transition-delay: 120ms; }
 
 /* ---------- Папки с чатами ---------- */
 .app-folder-glyph { display: inline-flex; align-items: center; justify-content: center; flex: 0 0 34px; width: 34px; height: 34px; color: var(--brand-text); line-height: 1; }
@@ -681,3 +673,17 @@ html[data-anim="0"] .app-chatcol, html[data-anim="0"] .app-chatcol-below, html[d
 .app-member-badge { flex: none; font: 400 13px/18px var(--font-sans); color: var(--peer-2, var(--brand-text)); }
 /* пустая вкладка/панель без медиа — текст под вкладками, по центру по горизонтали (не по вертикали) */
 .app-sm-empty { display: flex; justify-content: center; align-items: flex-start; padding-top: 3rem; text-align: center; }
+
+/* Ссылки профиля: одна строка «Ссылки» со значками и счётчиком, по клику — список строк с адресами */
+.app-plinks-stack { display: inline-flex; align-items: center; }
+.app-plinks-stack .app-svc { border-radius: 50%; box-shadow: 0 0 0 2px var(--surface, var(--page)); }
+.app-plinks-stack .app-svc + .app-svc { margin-left: -8px; }
+.app-plinks-chev { display: inline-flex; color: var(--ink-muted); transition: transform var(--dur-base) var(--ease-out); }
+.app-plinks.is-open .app-plinks-chev { transform: rotate(180deg); }
+.app-plinks.is-open .app-plinks-stack { opacity: 0; transition: opacity var(--dur-fast) var(--ease-out); }
+.app-plinks-stack { transition: opacity var(--dur-fast) var(--ease-out); }
+.app-plink-row { text-decoration: none; color: var(--ink); }
+.app-plink-row .app-svc { border-radius: 50%; margin: 0 4px; }
+.app-plinks .app-plink-row { padding-left: var(--space-6); }
+.app-plink-addr { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--brand-text); }
+.app-plinks-head .rl-inforow-text small { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
