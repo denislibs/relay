@@ -79,8 +79,8 @@ export function Info() {
           </div>
           <div class="rl-profile-name">{title}{system ? <Verified size={22} /> : null}</div>
           <div class={'rl-profile-sub' + (myPeer?.online ? ' app-online' : '')}>{subtitle || ' '}</div>
+          <Expand unclip show={!group && !!(user?.links as ProfileLink[] | undefined)?.length}>{!group && user ? <ProfileLinks links={(user.links as ProfileLink[] | undefined) ?? []} /> : null}</Expand>
         </div>
-        <Expand show={!group && !!(user?.links as ProfileLink[] | undefined)?.length}>{!group && user ? <ProfileLinks links={(user.links as ProfileLink[] | undefined) ?? []} /> : null}</Expand>
         <div class="rl-aside-group">
           {/* как в Telegram: имя уже в шапке — строками только то, чего там нет, и только если поле заполнено */}
           <Expand show={!group && !!user}>{!group && user ? <PeerRows user={user} /> : null}</Expand>
@@ -132,7 +132,8 @@ function PeerRows({ user }: { user: Item }) {
  * Строки, пришедшие позже панели, раскрываются по высоте, а не толкают вкладки рывком.
  * Были с самого начала (кэш) — показываем сразу, без анимации.
  */
-function Expand({ show, children }: { show: boolean; children: ComponentChildren }) {
+/** unclip — после раскрытия не обрезать содержимое (подсказки над кнопками). */
+function Expand({ show, unclip, children }: { show: boolean; unclip?: boolean; children: ComponentChildren }) {
   const [state, setState] = useState<'instant' | 'closed' | 'open'>(show ? 'instant' : 'closed');
   useEffect(() => {
     if (!show) { setState('closed'); return; }
@@ -140,7 +141,7 @@ function Expand({ show, children }: { show: boolean; children: ComponentChildren
     const id = requestAnimationFrame(() => setState('open'));
     return () => cancelAnimationFrame(id);
   }, [show]);
-  return <div class="app-expand" data-state={show ? state : 'closed'}><div class="app-expand-inner">{children}</div></div>;
+  return <div class={'app-expand' + (unclip ? ' app-expand-unclip' : '')} data-state={show ? state : 'closed'}><div class="app-expand-inner">{children}</div></div>;
 }
 
 /** Музыка профиля — плашка поверх низа аватара (как в Telegram): «♪ трек ›», клик — играть и открыть плейлист. */

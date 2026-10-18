@@ -92,6 +92,9 @@ body { background: var(--bg); color: var(--ink); font-family: var(--font-sans); 
 .app-expand:is([data-state="open"], [data-state="instant"]) { grid-template-rows: 1fr; }
 .app-expand:is([data-state="open"], [data-state="instant"]) > .app-expand-inner { opacity: 1; }
 .app-expand[data-state="instant"], .app-expand[data-state="instant"] > .app-expand-inner { transition: none; }
+.app-expand-unclip[data-state="open"] > .app-expand-inner { animation: app-unclip 0s linear var(--dur-base) forwards; }
+.app-expand-unclip[data-state="instant"] > .app-expand-inner { overflow: visible; }
+@keyframes app-unclip { to { overflow: visible; } }
 @media (prefers-reduced-motion: reduce) { .app-expand, .app-expand-inner { transition: none; } }
 
 /* ---------- контакты ---------- */
@@ -499,28 +502,15 @@ html[data-anim="0"] .app-chatcol, html[data-anim="0"] .app-chatcol-below, html[d
 .app-link-service:focus-visible { outline-offset: -2px; }
 .app-link-service .rl-check-mark { animation: rl-pop var(--dur-base) var(--ease-out); }
 .app-svc-mono { background: color-mix(in srgb, var(--ink) 12%, var(--plinks-bg)); color: color-mix(in srgb, var(--ink) 72%, transparent); }
-.app-plinks { --plinks-bg: var(--card); margin: 0 var(--space-4) var(--space-3); border-radius: 28px; background: var(--plinks-bg); overflow: hidden; transition: border-radius var(--dur-base) var(--ease-standard); }
-.app-plinks-open { border-radius: var(--radius-lg); }
-.rl-aside-body .app-plinks { --plinks-bg: var(--raised); margin: 0 var(--space-3) var(--space-2); box-shadow: var(--tg-shadow-bubble, 0 1px 2px rgba(0,0,0,.1)); }
-.app-plinks-bar { display: flex; align-items: center; gap: var(--space-2); min-height: 56px; padding: 0 var(--space-2) 0 var(--space-3); }
-.app-plinks-stack { flex: 1; min-width: 0; display: flex; align-items: center; padding: 4px 0; }
-/* значки внахлёст: каждый следующий заходит под предыдущий, кольцо цвета полоски отделяет их */
-.app-plink-dot { position: relative; display: inline-flex; flex-shrink: 0; border-radius: 50%; box-shadow: 0 0 0 3px var(--plinks-bg); transition: transform var(--dur-fast) var(--ease-out); }
-.app-plink-dot + .app-plink-dot { margin-left: -8px; }
-.app-plink-dot .app-svc { border-radius: 50%; }
-.app-plink-dot:hover, .app-plink-dot:focus-visible { z-index: 50 !important; transform: translateY(-2px) scale(1.08); }
-.app-plink-dot:hover .app-svc-mono, .app-plink-dot:focus-visible .app-svc-mono { color: var(--ink); }
-.app-plink-dot:focus-visible { outline: 2px solid var(--brand-strong); outline-offset: 2px; }
-.app-plinks-more { display: inline-flex; align-items: center; justify-content: center; flex-shrink: 0; width: 40px; height: 40px; border: 0; border-radius: 50%; background: transparent; color: var(--brand-text); cursor: pointer; transition: background-color var(--dur-instant) var(--ease-standard), transform var(--dur-base) var(--ease-out); }
-.app-plinks-more:hover { background: var(--hover); }
-.app-plinks-open .app-plinks-more { transform: rotate(-45deg); }
-.app-plinks-list { display: grid; grid-template-rows: 0fr; transition: grid-template-rows var(--dur-base) var(--ease-standard); }
-.app-plinks-open .app-plinks-list { grid-template-rows: 1fr; }
-.app-plinks-list > div { min-height: 0; overflow: hidden; padding: 0 var(--space-2); }
-.app-plinks-open .app-plinks-list > div { padding-bottom: var(--space-2); }
-.app-plink-row { display: flex; align-items: center; gap: var(--space-4); min-height: 52px; padding: var(--space-2) var(--space-3); border-radius: calc(var(--radius-lg) - var(--space-2)); color: var(--ink); text-decoration: none; transition: background-color var(--dur-instant) var(--ease-standard); }
-.app-plink-row:hover { background: var(--hover); }
-.app-plink-row small { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+/* ссылки профиля — ряд круглых кнопок сервисов под именем; адрес всплывает при наведении */
+.app-plinks { display: flex; flex-wrap: wrap; justify-content: center; gap: var(--space-2); margin-top: var(--space-3); }
+.app-plink { position: relative; display: inline-flex; border-radius: 50%; transition: transform var(--dur-fast) var(--ease-out); }
+.app-plink .app-svc { border-radius: 50%; }
+.app-plink:hover, .app-plink:focus-visible { transform: translateY(-2px); }
+.app-plink:active { transform: scale(.94); }
+.app-plink:focus-visible { outline: 2px solid var(--brand-strong); outline-offset: 2px; }
+.app-plink-tip { position: absolute; bottom: calc(100% + 6px); left: 50%; z-index: 5; max-width: 220px; padding: 4px 10px; border-radius: var(--radius-pill, 999px); background: var(--ink); color: var(--page); font: 500 13px/18px var(--font-sans); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; pointer-events: none; opacity: 0; transform: translate(-50%, 4px); transition: opacity var(--dur-fast) var(--ease-standard), transform var(--dur-fast) var(--ease-out); }
+.app-plink:hover .app-plink-tip, .app-plink:focus-visible .app-plink-tip { opacity: 1; transform: translate(-50%, 0); transition-delay: 120ms; }
 
 /* ---------- Папки с чатами ---------- */
 .app-folder-glyph { display: inline-flex; align-items: center; justify-content: center; flex: 0 0 34px; width: 34px; height: 34px; color: var(--brand-text); line-height: 1; }
