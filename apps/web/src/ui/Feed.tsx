@@ -4,7 +4,7 @@ import type { Entity } from '@relay/protocol';
 import { Avatar, Bubble, Icon, peerTone, DateDivider, DatePicker, FileBubble, MediaBubble, MessageText, VoiceBubble, MusicBubble, RoundBubble, player, MediaViewer, ScrollToBottom, beginHeavyAnimation, forceMeasure, isHeavyAnimating, onHeavyAnimationEnd, requestMeasure, requestMutation } from '@relay/ui';
 import { memo } from 'preact/compat';
 import { useEffect, useLayoutEffect, useRef, useState } from 'preact/hooks';
-import { clearFocus, ensureNames, focusMessage, openChat, jumpToDate, localPreview, markListened, moveWindow, react, savePosition, savedPosition, seen } from '../data';
+import { clearFocus, ensureNames, focusMessage, openInner, jumpToDate, localPreview, markListened, moveWindow, react, savePosition, savedPosition, seen } from '../data';
 import { activeFrame, frameByKey, getGlobal, useGlobal } from '../global';
 import { toggleMusic, trackTitle, useFileCached } from '../music';
 import { showToast } from '../settingsData';
@@ -213,10 +213,11 @@ const Row = memo(function Row({ chatId, voiceTitle, author, onAuthor, onOpen, hl
   );
 });
 
-/** «→» у пересланного: открыть исходный чат на оригинале (тот же чат — просто прокрутить к нему). */
+/** «→» у пересланного, как «Focus message» в Telegram: исходный чат открывается поверх текущего (стрелка «Назад»
+ *  вернёт обратно); он уже ниже в стеке — возвращаемся к нему; тот же чат — просто прокрутка к оригиналу. */
 function goToOriginal(chatId: number, id: number): void {
   const target = { id, sort: id };
-  if (activeFrame(getGlobal())?.chatId === chatId) focusMessage(target); else openChat(chatId, target);
+  if (activeFrame(getGlobal())?.chatId === chatId) focusMessage(target); else openInner(chatId, target);
 }
 
 const noop = () => {}; // цитата — кнопка; сам клик ловит лента (один обработчик на всех)
