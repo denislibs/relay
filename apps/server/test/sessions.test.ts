@@ -136,7 +136,7 @@ test('TTL: inactive sessions stop working at once and the sweep deletes them; th
   expect(r.status).toBe(200);
   expect(await r.json()).toMatchObject({ sessionsTtlDays: 7, seq: 1 });
   expect((await getUpdates(a1.userId, 0)).items.map((i) => i.update)).toEqual([
-    { type: 'settingsChanged', settings: { notify: { direct: { muted: false, preview: true }, group: { muted: false, preview: true } }, sessionsTtlDays: 7 } },
+    { type: 'settingsChanged', settings: { notify: { direct: { muted: false, preview: true }, group: { muted: false, preview: true } }, sessionsTtlDays: 7, folders: [] } },
   ]);
   // смена срока сразу завершила неактивный сеанс
   expect((await list(a1)).map((s) => s.id)).toEqual([cur.id]);

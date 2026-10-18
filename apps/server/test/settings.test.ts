@@ -23,7 +23,7 @@ const DEFAULTS = { direct: { muted: false, preview: true }, group: { muted: fals
 
 test('defaults without a row; PUT upserts, keeps the other fields and writes settingsChanged', async () => {
   const a = await login('Анна');
-  expect(await (await call(a, 'GET', '/settings')).json()).toEqual({ notify: DEFAULTS, sessionsTtlDays: 180, privacy: defaultPrivacy(), seq: 0 });
+  expect(await (await call(a, 'GET', '/settings')).json()).toEqual({ notify: DEFAULTS, sessionsTtlDays: 180, folders: [], privacy: defaultPrivacy(), seq: 0 });
   expect((await sql`select count(*)::int as n from user_settings`)[0].n).toBe(0);
 
   const r = await call(a, 'PUT', '/settings/notify/group', { muted: true });
@@ -39,7 +39,7 @@ test('defaults without a row; PUT upserts, keeps the other fields and writes set
   expect(same.seq).toBe(2);
   const items = (await getUpdates(a.userId, 0)).items;
   expect(items.map((i) => i.update.type)).toEqual(['settingsChanged', 'settingsChanged']);
-  expect(items[1].update).toEqual({ type: 'settingsChanged', settings: { notify: { direct: DEFAULTS.direct, group: { muted: true, preview: false } }, sessionsTtlDays: 180 } });
+  expect(items[1].update).toEqual({ type: 'settingsChanged', settings: { notify: { direct: DEFAULTS.direct, group: { muted: true, preview: false } }, sessionsTtlDays: 180, folders: [] } });
 });
 
 test('settingsChanged reaches a second session of the same user, not another user', async () => {
@@ -57,7 +57,7 @@ test('settingsChanged reaches a second session of the same user, not another use
   await poke;
   w2.send(JSON.stringify({ op: 'sync', since: 0 }));
   const f = await nextFrame(w2, (f) => f.op === 'updates') as Extract<ServerFrame, { op: 'updates' }>;
-  expect(f.items.map((i) => i.update)).toEqual([{ type: 'settingsChanged', settings: { notify: { direct: { muted: true, preview: true }, group: DEFAULTS.group }, sessionsTtlDays: 180 } }]);
+  expect(f.items.map((i) => i.update)).toEqual([{ type: 'settingsChanged', settings: { notify: { direct: { muted: true, preview: true }, group: DEFAULTS.group }, sessionsTtlDays: 180, folders: [] } }]);
   await Bun.sleep(100);
   expect(seen.some((x) => x.op === 'poke')).toBe(false);
   w1.close(); w2.close(); wb.close();
