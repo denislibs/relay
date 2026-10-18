@@ -1,3 +1,5 @@
+import { SPOILER_FILL } from '@relay/protocol';
+import { SpoilerText } from '@relay/ui';
 import type { ComponentChildren } from 'preact';
 import { hideCode } from './format';
 
@@ -11,7 +13,6 @@ export type LastMessage = {
 };
 
 const MAX = 200;
-const BRAILLE = '⠺⠵⠞⠟⠽⠾⠷⠯';
 
 /** Текст с оформлением → куски для строки: обычный текст и спрятанные спойлеры. */
 export function previewText(text: string, entities?: Ent[] | null): ComponentChildren {
@@ -29,8 +30,8 @@ export function previewText(text: string, entities?: Ent[] | null): ComponentChi
     if (left <= 0) break;
     const n = Math.min(e.length, left);
     let hidden = '';
-    for (let i = 0; i < n; i++) hidden += text[e.offset + i] === ' ' ? ' ' : BRAILLE[(e.offset + i) % BRAILLE.length];
-    out.push(<span key={e.offset} class="rl-row-spoiler" aria-label="скрытый текст">{hidden}</span>);
+    for (let i = 0; i < n; i++) hidden += text[e.offset + i] === ' ' ? ' ' : SPOILER_FILL[(e.offset + i) % SPOILER_FILL.length];
+    out.push(<SpoilerText key={e.offset}>{hidden}</SpoilerText>);   // те же частицы, что в ленте; внутри — заглушка
     left -= n;
     at = Math.max(at, e.offset + e.length);
   }

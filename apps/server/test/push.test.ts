@@ -252,3 +252,17 @@ test('service push: login_code is masked, new_login keeps its text', async () =>
   expect(got.length).toBe(2);
   expect((await br.decrypt(got[1].body)).body).toBe('Новый вход');
 });
+
+test('spoiler text never reaches a push: it is replaced with filler, the rest stays', async () => {
+  const a = await makeUser('Анна'), b = await makeUser('Борис');
+  const chat = await makeChat([a, b]);
+  const br = await browser();
+  const { subscribe } = await import('../src/domain/push');
+  await subscribe(b, { endpoint: endpoint(7), keys: br.keys }, await sessionFor(b));
+  await sendMessage(a, { chatId: chat, clientId: crypto.randomUUID(), body: 'пароль: tiger42', entities: [{ type: 'spoiler', offset: 8, length: 7 }] });
+  await waitFor(1); await Bun.sleep(100);
+  const p = await br.decrypt(got[0].body) as { body: string };
+  expect(p.body.startsWith('пароль: ')).toBe(true);
+  expect(p.body).not.toContain('tiger42');
+  expect(p.body.length).toBe('пароль: tiger42'.length);
+});

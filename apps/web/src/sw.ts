@@ -5,7 +5,7 @@ import { isMediaRequest, loadPolicy, savePolicy, serveMedia, sweepMedia, type Me
 declare const __BUILD__: string;
 const sw = self as unknown as ServiceWorkerGlobalScope;
 const CACHE = 'relay-shell-' + __BUILD__;
-const SHELL = ['/', '/main.js', '/relay.css', '/tokens.css', '/app.css', '/shared.worker.js', '/dedicated.worker.js'];
+const SHELL = ['/', '/main.js', '/relay.css', '/tokens.css', '/app.css', '/shared.worker.js', '/dedicated.worker.js', '/spoiler.worker.js'];
 const API = /^\/(health|me|users|contacts|settings|privacy|blocks|chats|presence|search|upload|files|push|sessions|ws|dev|logout)(\/|$)/;
 
 sw.addEventListener('install', (e) => {

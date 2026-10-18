@@ -80,7 +80,7 @@ body { margin: 0; font-family: var(--font-sans); color: var(--ink); background: 
 .rl-row-thumb { position: relative; display: inline-block; width: 20px; height: 20px; margin-right: 6px; vertical-align: -5px; }
 .rl-row-thumb img { width: 100%; height: 100%; border-radius: 4px; object-fit: cover; display: block; }
 .rl-row-thumb .rl-icon { position: absolute; inset: 0; margin: auto; color: #fff; filter: drop-shadow(0 0 2px rgb(0 0 0 / 0.5)); }
-.rl-row-spoiler { letter-spacing: 1px; opacity: 0.6; }
+.rl-row-spoiler { letter-spacing: 1px; }
 .rl-row-top .rl-status { flex: none; color: var(--brand-text); }
 .rl-row-top .rl-status-failed { color: var(--danger); }
 .rl-row-meta { display: inline-flex; align-items: center; gap: 6px; color: var(--ink-muted); }
@@ -152,7 +152,8 @@ body { margin: 0; font-family: var(--font-sans); color: var(--ink); background: 
 .rl-composer-editable :is(b, strong) { font-weight: 600; }
 .rl-composer-editable code { font-family: var(--font-mono, ui-monospace, SFMono-Regular, Menlo, monospace); font-size: .92em; color: var(--brand-text, var(--brand)); }
 .rl-composer-editable a { color: var(--brand-text, var(--brand)); text-decoration: underline; text-underline-offset: 2px; }
-.rl-composer-editable .rl-spoiler-edit { border-radius: 4px; background: color-mix(in srgb, var(--ink) 14%, transparent); }
+.rl-composer-editable .rl-spoiler-edit { border-radius: 4px; background: var(--rl-spoiler-dots-gray) 0 0 / 60px 20px, color-mix(in srgb, var(--ink) 10%, transparent); animation: rl-spoiler-dots-bg 7s linear infinite; }   /* в поле ввода текст виден, поверх бледные точки */
+@keyframes rl-spoiler-dots-bg { to { background-position: 60px 20px, 0 0; } }
 /* плейсхолдер — отдельный слой: при вводе уезжает вперёд и гаснет, при очистке возвращается */
 .rl-composer-ph { position: absolute; left: 6px; right: 6px; top: 9.5px; color: var(--ink-muted); font: 400 var(--message-text-size, 15px)/var(--line) var(--font-sans);
   white-space: nowrap; overflow: hidden; text-overflow: ellipsis; pointer-events: none; opacity: 0; transform: translateX(16px);
@@ -192,11 +193,28 @@ body { margin: 0; font-family: var(--font-sans); color: var(--ink); background: 
 .rl-pre { display: block; margin: 2px 0; padding: 6px 8px; border-radius: 8px; font-family: var(--font-mono, ui-monospace, SFMono-Regular, Menlo, monospace); font-size: .9em; white-space: pre-wrap; background: color-mix(in srgb, currentColor 8%, transparent); }
 .rl-link { color: var(--brand-text, var(--brand)); text-decoration: underline; text-underline-offset: 2px; }
 .rl-msgline-out .rl-link { color: inherit; }
-.rl-spoiler { position: relative; border-radius: 4px; cursor: pointer; background: color-mix(in srgb, currentColor 22%, transparent);
-  -webkit-box-decoration-break: clone; box-decoration-break: clone; transition: background-color 300ms var(--ease-out); }
-.rl-spoiler .rl-spoiler-text { opacity: 0; filter: blur(4px); transition: opacity 300ms var(--ease-out), filter 300ms var(--ease-out); }
-.rl-spoiler-open { cursor: auto; background: transparent; }
-.rl-spoiler-open .rl-spoiler-text { opacity: 1; filter: none; }
+/* Спойлер (spoiler.js): закрытый — это сами точки цвета текста (фон currentColor под маской из точек,
+   два слоя плывут навстречу — мерцание); текст под ними невидим, но держит место.
+   Раскрытие — круг от места клика (--sx/--sy, радиус --sr): внутри круга маска сплошная, фона нет. */
+@property --rl-sr { syntax: '<length>'; inherits: false; initial-value: 0px; }
+.rl-spoiler { position: relative; border-radius: 4px; -webkit-box-decoration-break: clone; box-decoration-break: clone; }
+.rl-spoiler:not(.rl-spoiler-open) { cursor: pointer; user-select: none; -webkit-user-select: none;
+  background: currentColor;
+  -webkit-mask-image: var(--rl-spoiler-dots), var(--rl-spoiler-dots); mask-image: var(--rl-spoiler-dots), var(--rl-spoiler-dots);
+  -webkit-mask-size: 60px 20px, 78px 26px; mask-size: 60px 20px, 78px 26px;
+  animation: rl-spoiler-drift 7s linear infinite; }
+.rl-spoiler:not(.rl-spoiler-open) .rl-spoiler-text { opacity: 0; }
+@keyframes rl-spoiler-drift { from { -webkit-mask-position: 0 0, 0 0; mask-position: 0 0, 0 0; } to { -webkit-mask-position: 60px 20px, -78px 26px; mask-position: 60px 20px, -78px 26px; } }
+.rl-spoiler.rl-spoiler-revealing:not(.rl-spoiler-open) { animation: rl-spoiler-reveal 500ms ease-in forwards; background: radial-gradient(circle at var(--sx) var(--sy), transparent var(--rl-sr), currentColor calc(var(--rl-sr) + 1px));
+  -webkit-mask-image: radial-gradient(circle at var(--sx) var(--sy), #000 var(--rl-sr), transparent calc(var(--rl-sr) + 10px)), var(--rl-spoiler-dots);
+  mask-image: radial-gradient(circle at var(--sx) var(--sy), #000 var(--rl-sr), transparent calc(var(--rl-sr) + 10px)), var(--rl-spoiler-dots);
+  -webkit-mask-size: auto, 60px 20px; mask-size: auto, 60px 20px; }
+.rl-spoiler.rl-spoiler-revealing .rl-spoiler-text { opacity: 1 !important; }
+@keyframes rl-spoiler-reveal { from { --rl-sr: 0px; } to { --rl-sr: var(--sr); } }
+.rl-spoiler-open { cursor: auto; }
+/* в строке чата и в цитате — не раскрывается, только мерцает */
+.rl-spoiler-static { cursor: inherit !important; }
+@media (prefers-reduced-motion: reduce) { .rl-spoiler, .rl-spoiler-revealing { animation: none !important; } }
 
 /* ---------- Banner ---------- */
 .rl-banner { display: flex; align-items: center; gap: var(--space-3); padding: var(--space-3) var(--space-4); border-radius: var(--radius-lg); background: var(--positive-soft); color: var(--ink); font: 400 14px/20px var(--font-sans); animation: rl-slide-down var(--dur-base) var(--ease-out) both; }
@@ -1470,6 +1488,14 @@ html[data-blur="0"] .rl-shell .rl-msgmenu .rl-menu, html[data-blur="0"] .rl-shel
 .rl-round-meta { position: absolute; right: .5rem; bottom: .5rem; display: inline-flex; align-items: center; gap: 3px; padding: 0 .375rem; border-radius: .75rem;
   background: rgba(0, 0, 0, .25); color: #fff; font: 400 .75rem/1.125rem var(--font-sans); }
 .rl-round-meta .rl-status { color: #fff; }
+
+/* Частицы из воркера (spoiler.js): наложение-canvas поверх сообщения; как только оно нарисовало
+   первый кадр (data-spoiler-live), CSS-точки уступают ему место, текст остаётся невидимым */
+.rl-spoiler-canvas { position: absolute; inset: 0; width: 100%; height: 100%; pointer-events: none; z-index: 1; }
+[data-spoiler-live] .rl-spoiler:not(.rl-spoiler-open) { background: none; -webkit-mask-image: none; mask-image: none; animation: none; }
+[data-spoiler-live] .rl-spoiler.rl-spoiler-revealing:not(.rl-spoiler-open) { animation: rl-spoiler-reveal 500ms ease-in forwards; background: none;
+  -webkit-mask-image: radial-gradient(circle at var(--sx) var(--sy), #000 var(--rl-sr), transparent calc(var(--rl-sr) + 10px));
+  mask-image: radial-gradient(circle at var(--sx) var(--sy), #000 var(--rl-sr), transparent calc(var(--rl-sr) + 10px)); -webkit-mask-size: auto; mask-size: auto; }
 
 /* ---------- Официальный аккаунт: значок у имени ---------- */
 :root { --verified: #2f8fe6; }
