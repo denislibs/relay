@@ -30,7 +30,7 @@ const chatItem = (c: LocalChat, title: string | null): Item => ({
 // элемент сообщения переиспользуется, пока сообщение не изменилось: дешёвая подпись вместо JSON.stringify
 // цитата — короткая копия исходного сообщения, если оно есть в кэше (видна, даже когда оригинал вне окна)
 type Quote = { id: number; sort: number; body: string; senderId: number } | null;
-const msgSig = (m: LocalMessage, q: Quote): string => `${m.id}|${m.status}|${m.sort}|${m.replyToId}|${m.body}|${m.editedAt ?? ''}|${m.deleted ? 1 : 0}|${m.reactions?.map((r) => r.userId + r.emoji).join(',') ?? ''}|${m.attachment ? m.attachment.id + ':' + (m.progress ?? '') : ''}|${q ? q.id + ':' + q.body : ''}|${m.error ?? ''}`;
+const msgSig = (m: LocalMessage, q: Quote): string => `${m.id}|${m.status}|${m.sort}|${m.replyToId}|${m.body}|${m.editedAt ?? ''}|${m.deleted ? 1 : 0}|${m.reactions?.map((r) => r.userId + r.emoji).join(',') ?? ''}|${m.attachment ? m.attachment.id + ':' + (m.progress ?? '') : ''}|${q ? q.id + ':' + q.body : ''}|${m.error ?? ''}|${m.listened ? 1 : 0}|${m.entities?.map((e) => e.type + e.offset + ':' + e.length + (e.url ?? '')).join(',') ?? ''}`;
 const msgCache = new WeakMap<LocalMessage, { sig: string; item: Item }>();
 const messageItem = (m: LocalMessage, q: Quote): { item: Item; sig: string } => {
   const sig = msgSig(m, q);

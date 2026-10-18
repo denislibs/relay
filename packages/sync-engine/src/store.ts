@@ -178,6 +178,7 @@ export class Store {
       case 'messageEdited': return this.patchMessage(u.chatId, u.id, { body: u.body, editedAt: u.editedAt, entities: u.entities ?? [] });
       case 'messageDeleted': return this.patchMessage(u.chatId, u.id, { body: '', deleted: true, reactions: [] });
       case 'reactions': return this.patchMessage(u.chatId, u.id, { reactions: u.reactions });
+      case 'mediaListened': return this.patchMessage(u.chatId, u.id, { listened: true });
       case 'userUpdated': return applyUserUpdated(this, u.user, seq);
       case 'contactsChanged': return applyContactsChanged(this, u, seq);
       case 'settingsChanged': this.settings.apply(u.settings, seq); return;
@@ -236,7 +237,7 @@ export class Store {
       key: m.clientId, clientId: m.clientId, id: m.id, chatId: m.chatId, senderId: m.senderId,
       body: m.body, replyToId: m.replyToId, createdAt: m.createdAt, status, sort: m.id,
       editedAt: m.editedAt ?? null, deleted: !!m.deleted, reactions: m.reactions ?? prev?.reactions ?? [],
-      kind: m.kind ?? 'text', attachment: m.attachment ?? null, entities: m.entities ?? [],
+      kind: m.kind ?? 'text', attachment: m.attachment ?? null, entities: m.entities ?? [], ...(m.listened != null ? { listened: m.listened } : {}),
       ...(m.service ? { service: m.service } : null),
     };
     if (countUnread && !mine && m.id > chat.lastReadId && m.id > chat.knownMaxId) chat.unread++;

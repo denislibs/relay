@@ -339,9 +339,10 @@ export class Engine {
   }
 
   /** Загрузка файла: XHR с прогрессом (есть в воркерах браузера), иначе fetch. Ошибка сети — повтор позже. */
-  private upload(clientId: string, blob: Blob, a: { name: string; mime: string; w: number | null; h: number | null }): Promise<{ id: string }> {
+  private upload(clientId: string, blob: Blob, a: { name: string; mime: string; w: number | null; h: number | null; kind?: string; duration?: number | null; waveform?: string | null }): Promise<{ id: string }> {
     const qs = new URLSearchParams({ name: a.name });
     if (a.w && a.h) { qs.set('w', String(a.w)); qs.set('h', String(a.h)); }
+    if (a.kind === 'voice' || a.kind === 'round') { qs.set('kind', a.kind); if (a.duration) qs.set('duration', String(a.duration)); if (a.waveform) qs.set('waveform', a.waveform); }
     const url = `${this.cfg.httpBase}/upload?${qs}`;
     const offline: ReqError = { code: 'offline', retry: true };
     if (typeof XMLHttpRequest === 'undefined') {
@@ -614,6 +615,13 @@ export class Engine {
         await this.request({ op: 'edit', reqId: '', chatId: a.chatId, id: a.id, body: a.body, entities: a.entities ?? [] });
         return null;
       }
+      case 'listened': {
+        // у себя — сразу (точка гаснет), сервер разнесёт остальным; без сети — повторим при следующем прослушивании
+        this.store.patchMessage(a.chatId, a.id, { listened: true });
+        this.changed();
+        if (this.online) this.run(async () => { await this.request({ op: 'listened', reqId: '', chatId: a.chatId, id: a.id }); });
+        return null;
+      }
       case 'deleteMessage': {
         if (!this.online) throw new Error('offline');
         await this.request({ op: 'delete', reqId: '', chatId: a.chatId, id: a.id });
@@ -643,9 +651,11 @@ export class Engine {
         const clientId = crypto.randomUUID();
         this.lastCreated = Math.max(Date.now(), this.lastCreated + 1);
         await putBlob(this.db, clientId, a.file);
-        const photo = /^image\//.test(a.mime) && !!a.w && !!a.h;
+        const photo = !a.kind && /^image\//.test(a.mime) && !!a.w && !!a.h;
+        const sized = photo || a.kind === 'round';
         this.store.addPending({ clientId, chatId: a.chatId, body: a.body, replyToId: a.replyToId ?? null, createdAt: this.lastCreated, failed: false,
-          attachment: { id: '', kind: photo ? 'photo' : 'file', mime: a.mime, name: a.name, size: a.file.size, w: photo ? a.w! : null, h: photo ? a.h! : null, thumb: a.thumb ?? null } });
+          attachment: { id: '', kind: a.kind ?? (photo ? 'photo' : 'file'), mime: a.mime, name: a.name, size: a.file.size, w: sized ? a.w ?? null : null, h: sized ? a.h ?? null : null, thumb: a.thumb ?? null,
+            ...(a.kind ? { duration: a.duration ?? null, waveform: a.waveform ?? null } : {}) } });
         this.store.setDraft(a.chatId, '');
         await this.store.flush();
         this.changed();

@@ -1,10 +1,10 @@
 import type { Item } from '@relay/sync-engine/src/types';
 import type { Entity } from '@relay/protocol';
-import { Bubble, peerTone, DateDivider, FileBubble, MediaBubble, MessageText, MediaViewer, ScrollToBottom, forceMeasure, isHeavyAnimating, onHeavyAnimationEnd, requestMeasure, requestMutation } from '@relay/ui';
+import { Bubble, peerTone, DateDivider, FileBubble, MediaBubble, MessageText, VoiceBubble, RoundBubble, player, MediaViewer, ScrollToBottom, forceMeasure, isHeavyAnimating, onHeavyAnimationEnd, requestMeasure, requestMutation } from '@relay/ui';
 import { memo } from 'preact/compat';
 import { useEffect, useLayoutEffect, useRef, useState } from 'preact/hooks';
-import { clearFocus, ensureNames, focusMessage, localPreview, moveWindow, react, savePosition, savedPosition, seen } from '../data';
-import { frameByKey, useGlobal } from '../global';
+import { clearFocus, ensureNames, focusMessage, localPreview, markListened, moveWindow, react, savePosition, savedPosition, seen } from '../data';
+import { frameByKey, getGlobal, useGlobal } from '../global';
 import { showToast } from '../settingsData';
 import { clock, dayKey, dayLabel, fileSize } from './format';
 
@@ -26,12 +26,12 @@ const READ_EVERY = 150;   // отправка «вижу до id» не чаще
 const FIRST_PAINT = 24;   // при открытии внизу первым кадром — столько последних сообщений, остальное следующим кадром
 
 type Quote = { id: number; sort: number; body: string; senderId: number };
-type Att = { id: string; kind: 'photo' | 'file'; mime: string; name: string; size: number; w: number | null; h: number | null; thumb?: string | null };
+type Att = { id: string; kind: 'photo' | 'file' | 'voice' | 'round'; mime: string; name: string; size: number; w: number | null; h: number | null; thumb?: string | null; duration?: number | null; waveform?: string | null };
 const fileUrl = (a: Att, download = false) => `/files/${a.id}${download ? '?download=1' : ''}`;
-type RowProps = { author?: string; onAuthor?: (m: Item) => void; onOpen: (m: Item) => void; hl?: string; m: Item; meId: number; out: boolean; start: boolean; end: boolean; quoted?: Quote | null; quoteAuthor?: string; quoteTone?: number; appear: boolean; flash: boolean; onReact: (m: Item, emoji: string) => void };
+type RowProps = { chatId: number; voiceTitle: string; author?: string; onAuthor?: (m: Item) => void; onOpen: (m: Item) => void; hl?: string; m: Item; meId: number; out: boolean; start: boolean; end: boolean; quoted?: Quote | null; quoteAuthor?: string; quoteTone?: number; appear: boolean; flash: boolean; onReact: (m: Item, emoji: string) => void };
 
 /** Строка ленты: перерисовывается только если изменилось её сообщение или место в группе. */
-const Row = memo(function Row({ author, onAuthor, onOpen, hl, m, meId, out, start, end, quoted, quoteAuthor, quoteTone, appear, flash, onReact }: RowProps) {
+const Row = memo(function Row({ chatId, voiceTitle, author, onAuthor, onOpen, hl, m, meId, out, start, end, quoted, quoteAuthor, quoteTone, appear, flash, onReact }: RowProps) {
   // реакции: по эмодзи — сколько и есть ли моя
   const list = (m.reactions as { userId: number; emoji: string }[] | undefined) ?? [];
   const chips: { emoji: string; count: number; mine: boolean }[] = [];
@@ -55,6 +55,39 @@ const Row = memo(function Row({ author, onAuthor, onOpen, hl, m, meId, out, star
           caption={m.body ? <MessageText text={m.body as string} entities={m.entities as Entity[] | undefined} highlight={hl} /> : undefined}
           time={clock(m.createdAt as string)} status={out ? m.status : undefined}
           onOpen={() => onOpen(m)}
+        />
+        {mark}
+      </div>
+    );
+  }
+  if (att && !m.deleted && att.kind === 'voice') {
+    // голосовое: точка «не прослушано» — пока получатель не включил (у отправителя тоже, как в Telegram)
+    const unheard = m.id != null && !m.listened;
+    return (
+      <div class={flash ? 'app-msg app-msg-flash' : 'app-msg'} data-key={m.key} data-sort={m.sort as number}>
+        <VoiceBubble
+          from={out ? 'out' : 'in'} tail={end} groupStart={start} appear={appear}
+          trackKey={m.key as string} duration={att.duration ?? 0} waveform={att.waveform ?? null}
+          unread={unheard} unreadIncoming={unheard && !out}
+          uploading={pending} progress={m.progress as number}
+          time={clock(m.createdAt as string)} status={out ? m.status : undefined}
+          track={() => voiceTrack(m, att, chatId, voiceTitle, out)}
+        />
+        {mark}
+      </div>
+    );
+  }
+  if (att && !m.deleted && att.kind === 'round') {
+    const unseen = m.id != null && !m.listened;
+    return (
+      <div class={flash ? 'app-msg app-msg-flash' : 'app-msg'} data-key={m.key} data-sort={m.sort as number}>
+        <RoundBubble
+          from={out ? 'out' : 'in'} groupStart={start} appear={appear}
+          src={localPreview(m.key as string) ?? (att.id ? fileUrl(att) : undefined)} thumb={att.thumb ?? null}
+          duration={att.duration ?? 0} unread={unseen}
+          uploading={pending} progress={m.progress as number}
+          time={clock(m.createdAt as string)} status={out ? m.status : undefined}
+          onListened={!out && unseen ? () => markListened(chatId, m.id as number) : undefined}
         />
         {mark}
       </div>
@@ -102,6 +135,18 @@ const Row = memo(function Row({ author, onAuthor, onOpen, hl, m, meId, out, star
 
 const noop = () => {}; // цитата — кнопка; сам клик ловит лента (один обработчик на всех)
 
+/** Трек общего плеера для голосового: свой файл до загрузки — локальная копия. Прослушал входящее — отметка. */
+function voiceTrack(m: Item, att: Att, chatId: number, author: string, out: boolean) {
+  return {
+    key: m.key as string,
+    src: localPreview(m.key as string) ?? fileUrl(att),
+    duration: att.duration ?? 0,
+    title: author,
+    subtitle: 'Голосовое сообщение',
+    onListened: !out && m.id != null && !m.listened ? () => markListened(chatId, m.id as number) : undefined,
+  };
+}
+
 /** Первый бабл, видимый ниже шапки, и его отступ от верха ленты (только в фазе замера). */
 function firstVisible(root: HTMLElement): { key: string; sort: number; top: number } | null {
   const rootTop = root.getBoundingClientRect().top;
@@ -123,6 +168,16 @@ export function Feed({ frameKey, active, chatId, meId, peerName, group, onAuthor
 }) {
   const messages = useGlobal((s) => frameByKey(s, frameKey)?.messages ?? NO_MESSAGES);
   const names = useGlobal((s) => s.names);
+  // следующее/предыдущее голосовое этого чата — для автоперехода и кнопок плеера
+  useEffect(() => {
+    if (!active) return;
+    player.setQueue((key: string, dir: number) => {
+      const list = (frameByKey(getGlobal(), frameKey)?.messages ?? []).filter((x) => !x.deleted && (x.attachment as Att | null)?.kind === 'voice' && x.id != null);
+      const i = list.findIndex((x) => x.key === key);
+      const n = i < 0 ? null : list[i + dir];
+      return n ? voiceTrack(n, n.attachment as Att, chatId, n.senderId === meId ? 'Вы' : peerName, n.senderId === meId) : null;
+    });
+  }, [chatId, peerName, active]);
   const meta = useGlobal((s) => frameByKey(s, frameKey)?.feedMeta ?? null);
   const unreadFrom = useGlobal((s) => frameByKey(s, frameKey)?.unreadFrom ?? null);
   const focus = useGlobal((s) => frameByKey(s, frameKey)?.focus ?? null);
@@ -225,13 +280,18 @@ export function Feed({ frameKey, active, chatId, meId, peerName, group, onAuthor
       if (max) seen(chatId, max);
     };
     const schedule = () => { if (!readTimer.current) readTimer.current = setTimeout(flush, READ_EVERY); };
+    // низ зоны — верх композера: лента уходит под него на свой нижний отступ (--bottom-zone + 8 px), а он
+    // меняется вместе с высотой композера. Число здесь отрезало последнее сообщение, и оно не читалось никогда.
+    // Чтение стиля до отрисовки — осознанное исключение, как у якоря прокрутки
+    let underComposer = 0;
+    forceMeasure(() => { if (el.current) underComposer = Math.max(0, parseFloat(getComputedStyle(el.current).paddingBottom) - 8); });
     marks.current = new IntersectionObserver((entries) => {
       for (const e of entries) {
         const id = Number((e.target as HTMLElement).dataset.mid);
         if (e.isIntersecting) visible.current.add(id); else visible.current.delete(id);
       }
       schedule();
-    }, { root: el.current, rootMargin: `-${TOP_ZONE}px 0px -80px 0px` });
+    }, { root: el.current, rootMargin: `-${TOP_ZONE}px 0px -${underComposer}px 0px` });
     addEventListener('focus', schedule);
     document.addEventListener('visibilitychange', schedule);
     scheduleRead.current = schedule;
@@ -420,6 +480,8 @@ export function Feed({ frameKey, active, chatId, meId, peerName, group, onAuthor
         hl={highlight && (m.body as string).toLowerCase().includes(highlight.toLowerCase()) ? highlight : undefined}
         m={m}
         meId={meId}
+        chatId={chatId}
+        voiceTitle={mine ? 'Вы' : (group ? names[m.senderId as number] ?? peerName : peerName)}
         onReact={onReact}
         onOpen={onOpen}
         out={mine}

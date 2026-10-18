@@ -203,7 +203,9 @@ export function createServer(opts: { port: number }): Server {
           const len = Number(req.headers.get('content-length') ?? 0);
           if (len > MAX_FILE) return fail('too_long');
           const n = (k: string) => { const v = Number(url.searchParams.get(k)); return Number.isFinite(v) && v > 0 ? v : undefined; };
-          return Response.json(await storeUpload(userId, await req.arrayBuffer(), { mime: req.headers.get('content-type') ?? '', name: url.searchParams.get('name') ?? 'file', w: n('w'), h: n('h') }));
+          // голосовое/кружок: ?kind=voice|round&duration=…&waveform=… (волну и длительность считает записывающий клиент)
+          return Response.json(await storeUpload(userId, await req.arrayBuffer(), { mime: req.headers.get('content-type') ?? '', name: url.searchParams.get('name') ?? 'file', w: n('w'), h: n('h'),
+            kind: url.searchParams.get('kind') ?? undefined, duration: n('duration'), waveform: url.searchParams.get('waveform') ?? undefined }));
         }
         const file = /^\/files\/([0-9a-f-]{36})$/.exec(url.pathname);
         if ((req.method === 'GET' || req.method === 'HEAD') && file) {

@@ -55,6 +55,8 @@ export function previewBody(m: LastMessage, withThumb: boolean): ComponentChildr
   const entities = code ? [] : m.entities;
   const caption = text ? previewText(text, entities) : null;
   if (m.kind === 'photo') return caption ?? (withThumb ? 'Фото' : '🖼 Фото');
+  if (m.kind === 'voice') return 'Голосовое сообщение';
+  if (m.kind === 'round') return 'Видеосообщение';
   if (m.kind === 'file') {
     if (withThumb) return caption ?? 'Видео';
     return ['📎 ', caption ?? m.attachmentName ?? 'Файл'];

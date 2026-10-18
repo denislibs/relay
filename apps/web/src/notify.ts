@@ -119,7 +119,7 @@ export function notifyIncoming(chat: { id: number; title: string; muted: boolean
   const plan = planIncoming({ state: g.notify, device: getPrefs().notify, chatMuted: chat.muted, pref: g.settings.notify[kind], hasFocus: document.hasFocus() });
   if (!plan.show) return;
   const body = m.service?.type === 'login_code' ? hideCode(m.body) : m.body;   // код входа виден только в самом служебном чате
-  const text = m.kind === 'photo' ? (body ? '🖼 ' + body : 'Фотография') : m.kind === 'file' ? '📎 ' + (body || m.attachmentName || 'Файл') : body;
+  const text = m.kind === 'voice' ? '🎤 Голосовое сообщение' : m.kind === 'round' ? 'Видеосообщение' : m.kind === 'photo' ? (body ? '🖼 ' + body : 'Фотография') : m.kind === 'file' ? '📎 ' + (body || m.attachmentName || 'Файл') : body;
   const t = notifyText({ title: chat.title, text }, { preview: plan.preview, hideText: getPrefs().screen.hideNotifyText });
   quietly(navigator.serviceWorker.ready.then((reg) => reg.showNotification(t.title, { body: t.body, tag: 'chat-' + chat.id, data: { chatId: chat.id } })));
   playNotifySound(plan.volume);

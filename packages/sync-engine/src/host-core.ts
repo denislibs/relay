@@ -76,6 +76,9 @@ export class HostCore {
 
   private async onMessage(c: Client, m: ToHost): Promise<void> {
     c.lastSeen = Date.now();
+    // вкладку сочли закрытой (фоновые таймеры придушены, пульс опоздал), а она жива: вернуть её и её подписки,
+    // иначе её вызовы молча пропадают и ждут ответа вечно
+    if (!this.clients.has(c) && m.t !== 'bye') await this.revive(c);
     switch (m.t) {
       case 'hello': {
         if (m.build !== this.opts.build) { c.port.post({ t: 'reload' }); return; }
@@ -169,6 +172,15 @@ export class HostCore {
       c.buf = [];
       if (this.clients.has(c) && items.length) c.port.post({ t: 'patches', items });
     });
+  }
+
+  private async revive(c: Client): Promise<void> {
+    this.clients.add(c);
+    if (!this.engine) return;
+    const e = await this.engine;
+    if (!this.clients.has(c)) return;
+    // первый патч новой подписки — снимок: зеркало вкладки заменяется целиком, пропущенное за время сна не теряется
+    for (const [sub, q] of c.queries) { c.subs.get(sub)?.close(); c.subs.set(sub, e.watch(q, (patch) => this.queue(c, sub, patch))); }
   }
 
   private detach(c: Client): void {
