@@ -32,10 +32,10 @@ const FIRST_PAINT = 24;   // при открытии внизу первым к�
 type Quote = { id: number; sort: number; body: string; senderId: number };
 type Att = { id: string; kind: 'photo' | 'file' | 'voice' | 'round' | 'audio'; title?: string | null; performer?: string | null; mime: string; name: string; size: number; w: number | null; h: number | null; thumb?: string | null; duration?: number | null; waveform?: string | null };
 const fileUrl = (a: Att, download = false) => `/files/${a.id}${download ? '?download=1' : ''}`;
-type RowProps = { chatId: number; voiceTitle: string; author?: string; onAuthor?: (m: Item) => void; onOpen: (m: Item) => void; hl?: string; m: Item; meId: number; out: boolean; start: boolean; end: boolean; pos?: 'single' | 'first' | 'middle' | 'last'; quoted?: Quote | null; quoteAuthor?: string; quoteTone?: number; appear: boolean; flash: boolean; onReact: (m: Item, emoji: string) => void; album?: Item[]; onUser?: (userId: number) => void; sel?: boolean; onQuickForward?: (m: Item) => void; grp?: boolean };
+type RowProps = { chatId: number; voiceTitle: string; author?: string; onAuthor?: (m: Item) => void; onOpen: (m: Item) => void; hl?: string; m: Item; meId: number; out: boolean; start: boolean; end: boolean; pos?: 'single' | 'first' | 'middle' | 'last'; quoted?: Quote | null; quoteAuthor?: string; quoteTone?: number; appear: boolean; flash: boolean; onReact: (m: Item, emoji: string) => void; album?: Item[]; onUser?: (userId: number) => void; sel?: boolean; selIn?: string; onQuickForward?: (m: Item) => void; grp?: boolean };
 
 /** Строка ленты: перерисовывается только если изменилось её сообщение или место в группе. */
-const Row = memo(function Row({ chatId, voiceTitle, author, onAuthor, onOpen, hl, m, meId, out, start, end, pos, quoted, quoteAuthor, quoteTone, appear, flash, onReact, album, onUser, sel, onQuickForward, grp }: RowProps) {
+const Row = memo(function Row({ chatId, voiceTitle, author, onAuthor, onOpen, hl, m, meId, out, start, end, pos, quoted, quoteAuthor, quoteTone, appear, flash, onReact, album, onUser, sel, selIn, onQuickForward, grp }: RowProps) {
   // реакции: по эмодзи — сколько и есть ли моя
   const list = (m.reactions as { userId: number; emoji: string }[] | undefined) ?? [];
   const chips: { emoji: string; count: number; mine: boolean }[] = [];
@@ -69,7 +69,8 @@ const Row = memo(function Row({ chatId, voiceTitle, author, onAuthor, onOpen, hl
           fwd={fwd}
           aside={aside}
           from={out ? 'out' : 'in'} tail={end} groupStart={start} appear={appear}
-          items={album.map((x) => { const a = x.attachment as Att; return { src: localPreview(x.key) ?? (a.id ? fileUrl(a) : undefined), thumb: a.thumb, alt: a.name, w: a.w, h: a.h, mkey: x.key }; })}
+          items={album.map((x) => { const a = x.attachment as Att; return { src: localPreview(x.key) ?? (a.id ? fileUrl(a) : undefined), thumb: a.thumb, alt: a.name, w: a.w, h: a.h, mkey: x.key,
+            sel: selIn !== undefined ? selIn.split(',').includes(x.key as string) : undefined }; })}
           state={busy ? 'loading' : 'ready'} progress={busy ? Math.min(...album.map((x) => (typeof x.progress === 'number' ? x.progress as number : 1))) : undefined}
           caption={cap ? <MessageText text={cap.body as string} entities={cap.entities as Entity[] | undefined} highlight={hl} /> : undefined}
           time={clock(last.createdAt as string)} status={out ? last.status : undefined}
@@ -565,6 +566,9 @@ export function Feed({ frameKey, active, chatId, meId, peerName, group, onAuthor
     const m = row ? messages.find((x) => x.key === row.dataset.key) : undefined;
     if (!m) return;
     e.preventDefault(); e.stopPropagation();
+    // фото альбома — отмечается по отдельности (как в Telegram); кружок слева и подпись — весь альбом
+    const cell = (e.target as Element).closest<HTMLElement>('.rl-media-mosaic [data-mkey], .rl-media-album [data-mkey]');
+    if (cell?.dataset.mkey) { toggleSelect(chatId, [cell.dataset.mkey]); return; }
     if (m.id == null || m.deleted || m.service) return;
     toggleSelect(chatId, (m.groupId ? messages.filter((x) => x.groupId === m.groupId && x.senderId === m.senderId) : [m]).map((x) => x.key as string));
   };
@@ -720,7 +724,8 @@ export function Feed({ frameKey, active, chatId, meId, peerName, group, onAuthor
         author={group && !mine && start && !m.deleted ? names[m.senderId as number] ?? '' : undefined}
         onAuthor={onAuthorRow}
         onUser={onUserRow}
-        sel={selShown ? selShown.includes(m.key as string) : undefined}
+        sel={selShown ? (album ?? [m]).every((x) => selShown.includes(x.key as string)) : undefined}
+        selIn={selShown && album ? album.filter((x) => selShown.includes(x.key as string)).map((x) => x.key).join(',') : undefined}
         grp={group && !mine}
         onQuickForward={onQuickForward}
         hl={highlight && (m.body as string).toLowerCase().includes(highlight.toLowerCase()) ? highlight : undefined}

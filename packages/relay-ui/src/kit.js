@@ -811,10 +811,12 @@ function MediaBubble(props) {
   var tailColor = useTailColor(mediaOnly && props.tail ? cornerOf.src : null, mediaOnly && props.tail ? cornerOf.thumb : null, out);
   function cell(it, i) {
     var last = album && i === 3 && extra > 0;
-    return h('button', { key: i, type: 'button', class: 'rl-media-cell', 'data-mkey': it.mkey, onClick: function () { if (props.onOpen && state === 'ready') props.onOpen(i); }, 'aria-label': it.kind === 'video' ? 'Открыть видео' : 'Открыть фото' },
+    // режим выбора (it.sel задан): у каждой ячейки альбома свой кружок справа сверху, отмеченное фото чуть уменьшается
+    return h('button', { key: i, type: 'button', class: cx('rl-media-cell', it.sel !== undefined && 'rl-media-cell-sel', it.sel && 'rl-media-cell-on'), 'data-mkey': it.mkey, onClick: function () { if (props.onOpen && state === 'ready') props.onOpen(i); }, 'aria-label': it.kind === 'video' ? 'Открыть видео' : 'Открыть фото' },
       it.src || it.thumb ? h(LazyImage, { src: it.src, thumb: it.thumb, alt: it.alt }) : h(MediaArt, { seed: it.seed, blur: state === 'remote' }),
       it.kind === 'video' && it.duration ? h('span', { class: 'rl-media-chip rl-media-chip-dur' }, h(Icon, { name: 'video', size: 14 }), fmtTime(it.duration)) : null,
       last ? h('span', { class: 'rl-media-more' }, '+' + (extra + 1)) : null,
+      it.sel !== undefined ? h('span', { class: 'rl-media-check', 'aria-hidden': 'true' }, h(Icon, { name: 'check', size: 12, strokeWidth: 3 })) : null,
       !album ? h(MediaOverlay, { state: state, kind: it.kind, progress: props.progress, size: props.size, onDownload: props.onDownload, onCancel: props.onCancel }) : null);
   }
   return h(MsgLine, { aside: props.aside, class: cx('rl-msgline', out && 'rl-msgline-out', props.groupStart && 'rl-msgline-gap') },

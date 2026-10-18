@@ -819,3 +819,15 @@ html[data-anim="0"] .app-chatcol, html[data-anim="0"] .app-chatcol-below, html[d
    (над полем ввода, там же, где последнее сообщение) и не выходит за верх своей пачки */
 .app-run-ava { position: sticky; bottom: 0;   /* отсчёт — от нижнего отступа ленты: ровно там стоит последнее сообщение */
   z-index: 1; display: block; width: 34px; height: 34px; margin: -34px 0 0 10px; padding: 0; border: 0; border-radius: 50%; background: none; cursor: pointer; }
+
+/* выбор фото в альбоме: кружок у каждой ячейки справа сверху, отмеченное фото уменьшается внутри своей ячейки */
+.rl-media-cell-sel > :not(.rl-media-check) { transition: transform 200ms ease-out, border-radius 200ms ease-out; }
+.app-feed-sel-on .rl-media-cell-on > :not(.rl-media-check) { transform: scale(.88); border-radius: 10px; }
+.rl-media-cell-sel { background: var(--bubble-in, var(--raised)); }
+.rl-media-check { position: absolute; top: 6px; right: 6px; z-index: 2; display: grid; place-items: center; width: 22px; height: 22px; border: 2px solid #fff; border-radius: 50%;
+  background: rgba(0, 0, 0, .25); color: #fff; box-shadow: 0 1px 3px rgba(0, 0, 0, .25); opacity: 0; transition: opacity 200ms ease-out, background-color 150ms ease; }
+.app-feed-sel-on .rl-media-check { opacity: 1; }
+.rl-media-check .rl-icon { opacity: 0; transform: scale(.5); transition: opacity 120ms ease, transform 160ms cubic-bezier(.34, 1.56, .64, 1); }
+.rl-media-cell-on .rl-media-check { background: var(--button, #3390ec); }
+.rl-media-cell-on .rl-media-check .rl-icon { opacity: 1; transform: none; }
+.rl-bubble-out .rl-media-cell-sel { background: var(--bubble-out); }
