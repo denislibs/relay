@@ -1,4 +1,7 @@
+import type { Entity, Message, ServiceType } from '@relay/protocol';
 import { sql, type Tx } from '../db';
+import { toMessage } from './chats';
+import { fanOut } from './journal';
 
 type Db = Tx | typeof sql;
 let systemId: Promise<number> | null = null;
@@ -29,4 +32,17 @@ export async function serviceChatId(db: Db, userId: number): Promise<number> {
 export async function isServiceChat(db: Db, chatId: number): Promise<boolean> {
   const [r] = await db`select 1 from service_chats where chat_id = ${chatId}`;
   return !!r;
+}
+
+/** Служебное сообщение пользователю: обычная строка messages + newMessage в журнал (синхронизация и пуши как у всех). */
+export async function postService(tx: Tx, userId: number, msg: { type: ServiceType; body: string; entities?: Entity[] }): Promise<Message> {
+  const chatId = await serviceChatId(tx, userId);
+  const sys = await systemUserId();
+  const [row] = await tx`
+    insert into messages (chat_id, sender_id, client_id, kind, body, entities, service_type)
+    values (${chatId}, ${sys}, ${crypto.randomUUID()}, 'text', ${msg.body}, ${msg.entities?.length ? tx.json(msg.entities as never) : null}, ${msg.type})
+    returning *`;
+  const message = toMessage(row);
+  await fanOut(tx, [userId], { type: 'newMessage', message });
+  return message;
 }

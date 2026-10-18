@@ -1,5 +1,8 @@
 export type Id = number;
 
+/** Служебное сообщение от системного пользователя: машинный тип для отрисовки и склейки повторов. */
+export type ServiceType = 'login_code' | 'new_login';
+
 export interface Message {
   id: Id;
   chatId: Id;
@@ -13,6 +16,7 @@ export interface Message {
   deleted?: boolean;
   reactions?: Reaction[];
   attachment?: Attachment | null;
+  service?: { type: ServiceType };   // есть только у служебных сообщений
   entities?: Entity[];   // оформление текста; нет или пусто — простой текст
 }
 
@@ -130,6 +134,8 @@ export interface Birthday { day: number; month: number; year?: number }
 
 /** Профиль глазами зрителя (скрытые правилами приватности поля сервер не отдаёт). */
 export interface PublicUser {
+  /** системный пользователь «Relay»: служебные уведомления, ответить нельзя */
+  system?: true;
   id: Id; name: string; firstName: string; lastName: string;
   username: string | null; bio: string | null; birthday: Birthday | null; phone: string | null;
   /** собственное имя пользователя; name/firstName/lastName у владельца контакта — контактные */

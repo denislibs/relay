@@ -7,6 +7,7 @@ import { DomainError } from './errors';
 import { fanOut } from './journal';
 import { blockedInDirect } from './privacy';
 import { pushInBackground } from './push';
+import { isServiceChat } from './service';
 
 export const MAX_BODY = 4096;
 
@@ -21,6 +22,7 @@ export async function sendMessage(
 
   const res = await sql.begin(async (tx) => {
     await assertMember(tx, input.chatId, userId);
+    if (await isServiceChat(tx, input.chatId)) throw new DomainError('forbidden');   // служебный чат только для чтения
     // личный чат, а собеседник заблокировал отправителя: не пишем ничего (повтор уже принятого — по-прежнему ack)
     if (await blockedInDirect(tx, input.chatId, userId)) {
       const [existing] = await tx`select * from messages where sender_id = ${userId} and client_id = ${input.clientId}`;

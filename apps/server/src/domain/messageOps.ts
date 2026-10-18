@@ -4,6 +4,7 @@ import { assertMember } from './chats';
 import { DomainError } from './errors';
 import { fanOut } from './journal';
 import { blockedInDirect } from './privacy';
+import { isServiceChat } from './service';
 
 const MAX_BODY = 4096;
 const EMOJI = /^\p{Extended_Pictographic}(️|‍\p{Extended_Pictographic})*$/u;
@@ -23,6 +24,7 @@ export async function editMessage(userId: number, chatId: number, id: number, bo
   if (text.length > MAX_BODY) throw new DomainError('too_long');
   return sql.begin(async (tx) => {
     await assertMember(tx, chatId, userId);
+    if (await isServiceChat(tx, chatId)) throw new DomainError('forbidden');   // служебный чат только для чтения
     await ownMessage(tx, userId, chatId, id);
     // заблокированный не правит сообщения в личном чате с тем, кто его заблокировал
     if (await blockedInDirect(tx, chatId, userId)) throw new DomainError('blocked');
@@ -50,6 +52,7 @@ export async function reactMessage(userId: number, chatId: number, id: number, e
   if (emoji !== null && !EMOJI.test(emoji)) throw new DomainError('bad_frame', 'emoji');
   return sql.begin(async (tx) => {
     await assertMember(tx, chatId, userId);
+    if (await isServiceChat(tx, chatId)) throw new DomainError('forbidden');   // служебный чат только для чтения
     const [m] = await tx`select deleted from messages where chat_id = ${chatId} and id = ${id}`;
     if (!m || m.deleted) throw new DomainError('not_found', 'message');
     if (await blockedInDirect(tx, chatId, userId)) throw new DomainError('blocked');

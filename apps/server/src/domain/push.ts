@@ -113,7 +113,9 @@ export type PushPayload = { chatId: number; id: number; title: string; body: str
 
 /** Новое сообщение → push участникам без соединения, кроме отправителя и тех, у кого чат заглушён.
  *  Только подпискам живых сеансов: истёкший или неактивный дольше срока, но ещё не убранный sweepInactive — молчит. */
-export async function pushNewMessage(m: { chatId: number; id: number; senderId: number; body: string; kind?: string; attachment?: { name?: string } | null }): Promise<void> {
+export async function pushNewMessage(m: { chatId: number; id: number; senderId: number; body: string; kind?: string; attachment?: { name?: string } | null; service?: { type: string } }): Promise<void> {
+  // код входа не уходит в push-сервис и на экран блокировки
+  if (m.service?.type === 'login_code') m = { ...m, body: 'Код для входа в Relay' };
   // имя отправителя — глазами получателя (контактное, если он его задал)
   const subs = await sql`
     select s.endpoint, s.user_id, s.p256dh, s.auth, s.hide_text,
