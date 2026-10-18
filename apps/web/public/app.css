@@ -382,7 +382,7 @@ html[data-anim="0"] .app-chatcol, html[data-anim="0"] .app-chatcol-below, html[d
 .auth-submit { width: 100%; height: 52px; border-radius: 16px; text-transform: uppercase; font-weight: 700; letter-spacing: .02em; gap: 10px; }
 .auth-spin { width: 20px; height: 20px; animation: rl-spin .9s linear infinite; }
 .auth-spin circle { fill: none; stroke: currentColor; stroke-width: 2.6; stroke-dasharray: 40 60; stroke-linecap: round; }
-.auth-links { display: flex; flex-direction: column; align-items: center; gap: 2px; margin-top: 12px; }
+.auth-links { display: flex; flex-direction: column; align-items: center; gap: 2px; margin-top: 40px; }   /* другие способы входа — отдельным блоком, не вплотную к шагам */
 .auth-link { padding: 10px 12px; border: 0; border-radius: 12px; background: none; color: var(--brand-text); font: 400 15px/20px var(--font-sans); cursor: pointer; transition: background-color var(--dur-instant), opacity var(--dur-fast); }
 .auth-link:hover:not(:disabled) { background: color-mix(in srgb, var(--brand) 10%, transparent); }
 .auth-link:disabled { opacity: .5; cursor: default; }
