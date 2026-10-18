@@ -708,7 +708,8 @@ function MediaBubble(props) {
       !album ? h(MediaOverlay, { state: state, kind: it.kind, progress: props.progress, size: props.size, onDownload: props.onDownload, onCancel: props.onCancel }) : null);
   }
   return h('div', { class: cx('rl-msgline', out && 'rl-msgline-out', props.groupStart && 'rl-msgline-gap') },
-    h('div', { class: cx('rl-bubble rl-media', out ? 'rl-bubble-out' : 'rl-bubble-in-side', props.tail && 'rl-bubble-tail', props.appear && (out ? 'rl-appear-out' : 'rl-appear-in')) },
+    // без подписи и автора — как в Telegram: картинка без рамки пузыря (без фона, отступов и хвостика), углы — от пузыря
+    h('div', { class: cx('rl-bubble rl-media', !props.caption && !props.author && 'rl-media-only', out ? 'rl-bubble-out' : 'rl-bubble-in-side', props.tail && (props.caption || props.author) && 'rl-bubble-tail', props.appear && (out ? 'rl-appear-out' : 'rl-appear-in')) },
       props.author ? h('span', { class: 'rl-bubble-author rl-media-author', style: { color: 'var(--peer-' + (props.authorTone != null ? props.authorTone : 5) + ')' } }, props.author) : null,
       h('div', { class: cx('rl-media-frame', album && 'rl-media-album'), style: album ? null : { aspectRatio: props.ratio || '4 / 3' } },
         (album ? items.slice(0, 4) : items).map(cell),

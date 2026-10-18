@@ -12,6 +12,17 @@ export type LastMessage = {
   entities?: Ent[] | null; thumb?: string | null; mime?: string | null; service?: { type: string } | null;
 };
 
+/** Сообщение ленты (вложение — объектом) → формат превью списка чатов (поля вложения — плоско). */
+export function asLast(m: Record<string, unknown>): LastMessage {
+  const a = (m.attachment ?? null) as { name?: string; title?: string | null; performer?: string | null; thumb?: string | null; mime?: string } | null;
+  return {
+    senderId: m.senderId as number, body: String(m.body ?? ''), deleted: !!m.deleted, kind: (m.kind as string) ?? 'text',
+    attachmentName: a?.name ?? null, attachmentTitle: a?.title ?? null, attachmentPerformer: a?.performer ?? null,
+    entities: (m.entities as LastMessage['entities']) ?? null, thumb: a?.thumb ?? null, mime: a?.mime ?? null,
+    service: (m.service as LastMessage['service']) ?? null,
+  };
+}
+
 const MAX = 200;
 
 /** Текст с оформлением → куски для строки: обычный текст и спрятанные спойлеры. */

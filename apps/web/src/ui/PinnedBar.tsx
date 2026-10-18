@@ -4,13 +4,15 @@ import type { Item } from '@relay/sync-engine/src/types';
 import { useEffect, useState } from 'preact/hooks';
 import { focusMessage, messagesByIds, unpinMessage } from '../data';
 import { activeFrame, useGlobal } from '../global';
-import { previewBody, previewThumb, type LastMessage } from './preview';
+import { asLast, previewBody, previewThumb } from './preview';
 
 // Закреплённые сообщения под шапкой — как в Telegram: слева полоска из сегментов (по числу закреплённых),
 // «Закреплённое сообщение #N» и строка текста; клик — к сообщению и следующий клик — к более старому (по кругу).
 // Одно закреплённое — крестик «открепить»; несколько — список всех и «Открепить все».
 
 const KIND: Record<string, string> = { photo: 'Фото', file: 'Файл', audio: 'Музыка', voice: 'Голосовое сообщение', round: 'Видеосообщение' };
+/** Музыка в списке закреплённых: «название — исполнитель», как в превью. */
+const trackOf = (m: Item) => { const a = m.attachment as { title?: string | null; performer?: string | null; name?: string } | null; if (m.kind !== 'audio' || !a) return ''; const t = a.title || (a.name ?? '').replace(/\.[^.]{1,5}$/, ''); return a.performer ? t + ' — ' + a.performer : t; };
 const cache = new Map<string, Item>();          // chatId:id → сообщение (если его нет в загруженной ленте)
 const position = new Map<number, number>();     // чат → какой из закреплённых показан
 
@@ -44,7 +46,8 @@ export function PinnedBar({ chatId }: { chatId: number }) {
   const n = pinned.length;
   const seg = n <= 1 ? 36 : n === 2 ? 17 : n === 3 ? 11 : 7.5;   // высоты сегментов, как в Telegram
   const shift = n > 4 ? Math.max(0, Math.min(i - 1, n - 4)) * (seg + 2) : 0;
-  const thumb = msg ? previewThumb(msg as unknown as LastMessage) : null;
+  const last = msg ? asLast(msg) : null;   // вложение у сообщения ленты — объектом, превью ждёт плоские поля
+  const thumb = last ? previewThumb(last) : null;
   return (
     <Presence show={n > 0} exitMs={220}>
       <div class="app-pins" role="region" aria-label="Закреплённые сообщения">
@@ -57,7 +60,7 @@ export function PinnedBar({ chatId }: { chatId: number }) {
           {thumb ? <img class={'app-pins-thumb' + (thumb.round ? ' app-pins-thumb-round' : '')} src={thumb.src} alt="" /> : null}
           <span class="app-pins-text">
             <b>{n > 1 ? `Закреплённое сообщение #${n - i}` : 'Закреплённое сообщение'}</b>
-            <span key={id}>{msg ? previewBody(msg as unknown as LastMessage, !!thumb) : '…'}</span>
+            <span key={id}>{last ? previewBody(last, !!thumb) : '…'}</span>
           </span>
         </button>
         {n > 1
@@ -69,7 +72,7 @@ export function PinnedBar({ chatId }: { chatId: number }) {
             <Menu label="Закреплённые сообщения" onClose={() => setList(false)} items={[
               ...pinned.map((p, k) => {
                 const m = find(p);
-                const text = m ? (hideSpoilers(String(m.body ?? ''), m.entities as never).replace(/\s+/g, ' ').trim() || KIND[String(m.kind)] || 'Сообщение').slice(0, 60) : 'Сообщение';
+                const text = m ? (hideSpoilers(String(m.body ?? ''), m.entities as never).replace(/\s+/g, ' ').trim() || trackOf(m) || KIND[String(m.kind)] || 'Сообщение').slice(0, 60) : 'Сообщение';
                 return { icon: 'pin', label: text, onClick: () => { setList(false); position.set(chatId, k); setIdx(k); focusMessage({ id: p, sort: p }); } };
               }),
               '-' as const,
