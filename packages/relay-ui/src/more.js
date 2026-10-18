@@ -341,7 +341,8 @@ function anchorX(aside) {
   var shell = aside ? aside.closest('.rl-shell') : document.querySelector('.rl-shell');
   var main = shell && shell.querySelector(':scope > .rl-shell-main');
   if (!main) return null;
-  return forceMeasure(function () { return (main.querySelector('.rl-glassbar') || main).getBoundingClientRect().left; });
+  // стек чатов: шапка колонки на экране ([data-current]), остальные сдвинуты
+  return forceMeasure(function () { return (main.querySelector('[data-current] .rl-glassbar') || main.querySelector('.rl-glassbar') || main).getBoundingClientRect().left; });
 }
 function AsidePanel(props) {
   var ref = useRef(null), was = useRef(!!props.open), before = useRef(null);

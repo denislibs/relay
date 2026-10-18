@@ -90,6 +90,9 @@ body { margin: 0; font-family: var(--font-sans); color: var(--ink); background: 
 .rl-bubble-tail.rl-bubble-in-side::before { left: -8px; clip-path: polygon(100% 0, 0 0, 100% 100%); }
 .rl-bubble-tail.rl-bubble-out::before { right: -8px; clip-path: polygon(0 0, 100% 0, 0 100%); }
 .rl-bubble-author { display: block; margin-bottom: 2px; font: 600 13px/18px var(--font-sans); }
+.rl-bubble-author-link { padding: 0; border: 0; background: none; text-align: start; cursor: pointer; max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.rl-bubble-author-link:hover { text-decoration: underline; }
+.rl-bubble-author-link:focus-visible { outline: 2px solid currentColor; outline-offset: 2px; border-radius: 4px; }
 .rl-bubble-text { white-space: pre-wrap; }
 .rl-bubble-spacer { display: inline-block; width: 68px; height: 1px; }
 .rl-bubble-in-side .rl-bubble-spacer { width: 44px; }

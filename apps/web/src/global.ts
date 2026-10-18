@@ -10,6 +10,24 @@ import { defaultPrivacy, type PrivacyRules, type SessionInfo } from '@relay/prot
 /** Края окна ленты: есть ли сообщения раньше/позже, окно ли это живого хвоста. */
 export interface FeedMeta { hasOlder: boolean; hasNewer: boolean; live: boolean }
 
+export type Focus = { id: number; sort: number; nonce: number; replaced: boolean };
+
+/**
+ * Чат в стеке (как Chat в стеке Telegram Web): у каждого своя лента и своя колонка в DOM.
+ * Нижний — открытый из списка; выше — открытые изнутри чата. Пока ready=false, колонка уже
+ * в DOM (лента раскладывается и встаёт на позицию), но на экране — предыдущий чат.
+ */
+export interface ChatFrame {
+  key: string;
+  chatId: number;
+  ready: boolean;
+  instant?: boolean;          // встал на место без анимации (смена нижнего чата)
+  messages: Item[];
+  feedMeta: FeedMeta | null;
+  unreadFrom: number | null;  // lastReadId на момент открытия: разделитель «Непрочитанные» (заморожен)
+  focus: Focus | null;        // перейти к сообщению и подсветить
+}
+
 /** Свой профиль (GET /me, дальше — подписка me движка). Поля опциональны: старый кэш relay.me их не знает. */
 export interface Me { userId: number; name: string; firstName?: string; lastName?: string; username?: string | null; bio?: string | null; birthday?: { day: number; month: number; year?: number } | null; phone?: string | null }
 export type Phase = 'connecting' | 'offline' | 'loading' | 'updating' | 'ready';
@@ -24,13 +42,11 @@ export interface GlobalState {
   counters: { unreadChats: number; unreadMessages: number };
   status: Status;
   syncLabel: string | null;   // стадия для поля поиска; каждая держится не меньше 600 мс
-  openChatId: number | null;
-  pendingChatId: number | null;
-  peer: Item | null;   // присутствие собеседника открытого личного чата {userId, known, online, lastSeen}   // выбран, но лента ещё не готова: на экране прежний чат, строка уже подсвечена
-  messages: Item[];
-  feedMeta: FeedMeta | null;
-  unreadFrom: number | null;
-  focus: { id: number; sort: number; nonce: number; replaced: boolean } | null;   // перейти к сообщению и подсветить   // lastReadId на момент открытия: разделитель «Непрочитанные» (заморожен)
+  openChatId: number | null;     // чат на экране (верхний готовый в стеке)
+  pendingChatId: number | null;  // выбран, но лента ещё не готова: на экране прежний чат, строка уже подсвечена
+  peer: Item | null;   // присутствие собеседника открытого личного чата {userId, known, online, lastSeen}
+  chatStack: ChatFrame[];        // стек чатов, снизу вверх
+  chatLeaving: ChatFrame[];      // снятые со стека: доигрывают уход и исчезают
   folder: 'all' | 'unread';
   search: string;
   newChatOpen: boolean;
@@ -78,10 +94,8 @@ let state: GlobalState = {
   openChatId: null,
   pendingChatId: null,
   peer: null,
-  messages: [],
-  feedMeta: null,
-  unreadFrom: null,
-  focus: null,
+  chatStack: [],
+  chatLeaving: [],
   folder: 'all',
   search: '',
   newChatOpen: false,
@@ -151,3 +165,11 @@ export function useGlobal<T>(select: (s: GlobalState) => T): T {
   }, []);
   return value;
 }
+
+/** Чат на экране: верхний готовый кадр стека. */
+export function activeFrame(s: GlobalState): ChatFrame | undefined {
+  for (let i = s.chatStack.length - 1; i >= 0; i--) if (s.chatStack[i].ready) return s.chatStack[i];
+  return undefined;
+}
+export const frameByKey = (s: GlobalState, key: string): ChatFrame | undefined =>
+  s.chatStack.find((f) => f.key === key) ?? s.chatLeaving.find((f) => f.key === key);
