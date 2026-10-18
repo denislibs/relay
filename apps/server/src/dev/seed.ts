@@ -146,8 +146,9 @@ async function main() {
       ) x
      where cm.chat_id = x.chat_id and cm.user_id = x.user_id`;
 
-  // индекс поиска перестроит воркер; до конца перестройки поиск идёт по Postgres
-  await sql`delete from server_meta where k = 'search_index'`;
+  // индекс поиска перестроит воркер с нуля (после --reset id начинаются заново — старый курсор не годится);
+  // до конца перестройки поиск идёт по Postgres
+  await sql`delete from server_meta where k in ('search_index', 'search_building', 'search_reindex_after')`;
   await enqueue(sql, 'search.reindex', {}, { dedupeKey: 'search.reindex' });
 
   console.log(`chats: ${chatCount}, messages: ${msgCount}, ${((Date.now() - t0) / 1000).toFixed(1)}s`);

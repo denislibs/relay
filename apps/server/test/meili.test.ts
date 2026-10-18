@@ -6,7 +6,8 @@ import '../src/jobs/kinds';
 import { drainJobs } from '../src/jobs/worker';
 import { deleteMessage, editMessage } from '../src/domain/messageOps';
 import { indexName, meili, MeiliError, waitTask } from '../src/search/meili';
-import { ensureIndex, liveIndex, reindexAll, searchIds, searchReady, syncMessage } from '../src/search/messagesIndex';
+import { ensureIndex, liveIndex, reindexAll, reindexStep, searchIds, searchReady, syncMessage } from '../src/search/messagesIndex';
+import { enqueue } from '../src/jobs/queue';
 import { makeChat, makeUser, resetDb } from './helpers';
 
 const say = (u: number, chatId: number, body: string) => sendMessage(u, { chatId, clientId: crypto.randomUUID(), body }).then((r) => r.message);
@@ -138,4 +139,75 @@ test('sync before the index exists: removal is a no-op, an upsert creates the in
   await syncMessage(m2.id);                                  // индекс создаётся сам, первичный ключ — id
   // настроек у него нет, искать по нему нельзя — до перестройки поиск всё равно идёт по Postgres
   expect(await meili(`/indexes/${liveIndex()}/documents/${m2.id}`)).toMatchObject({ id: m2.id, chatId: ab, body: 'встреча снова' });
+});
+
+const meta = async (k: string) => (await sql`select v from server_meta where k = ${k}`)[0]?.v as string | undefined;
+const docIds = async (uid: string) =>
+  (await meili<{ results: { id: number }[] }>(`/indexes/${uid}/documents?limit=1000&fields=id`)).results.map((d) => Number(d.id)).sort((x, y) => x - y);
+const docCount = async (uid: string) => (await meili<{ numberOfDocuments: number }>(`/indexes/${uid}/stats`)).numberOfDocuments;
+
+test('reindex is resumable: a run cut off after a few batches continues from the cursor, nothing lost or duplicated', async () => {
+  const a = await makeUser('a'), b = await makeUser('b');
+  const ab = await makeChat([a, b]);
+  const ms = [];
+  for (let i = 0; i < 7; i++) ms.push(await say(a, ab, `встреча номер ${i}`));
+  const next = liveIndex() + '_next';
+
+  // первая порция: две пачки по одному — индекс строится рядом, курсор сохранён, готовности нет
+  expect(await reindexStep({ batch: 1, maxBatches: 2 })).toEqual({ done: false, copied: 2 });
+  expect(await meta('search_building')).toBe(next);
+  expect(await meta('search_reindex_after')).toBe(String(ms[1].id));
+  expect(await searchReady()).toBe(false);
+
+  // повторный запуск не стирает построенное: продолжает с курсора
+  expect(await reindexStep({ batch: 1, maxBatches: 1 })).toEqual({ done: false, copied: 1 });
+  expect(await docIds(next)).toEqual(ms.slice(0, 3).map((m) => m.id));
+
+  // пока идёт перестройка — изменения пишутся в оба индекса (и в уже скопированную часть)
+  await editMessage(a, ab, ms[0].id, 'совещание номер 0');
+  await deleteMessage(a, ab, ms[1].id);
+  const late = await say(a, ab, 'встреча поздняя');
+  for (const id of [ms[0].id, ms[1].id, late.id]) await syncMessage(id);
+
+  // «обрыв» после записи пачки, но до сохранения курсора: курсор позади — пачка запишется ещё раз, без дублей
+  await sql`update server_meta set v = ${String(ms[0].id)} where k = 'search_reindex_after'`;
+  await reindexAll(2);
+
+  const expected = [ms[0], ...ms.slice(2), late].map((m) => m.id).sort((x, y) => x - y);
+  expect(await searchReady()).toBe(true);
+  expect(await docIds(liveIndex())).toEqual(expected);
+  expect(await docCount(liveIndex())).toBe(expected.length);
+  expect(await searchIds('совещ', [ab], { limit: 10 })).toEqual([ms[0].id]);
+  expect(await meta('search_building')).toBeUndefined();
+  expect(await meta('search_reindex_after')).toBeUndefined();
+  const indexes = await meili<{ results: { uid: string }[] }>('/indexes?limit=100');
+  expect(indexes.results.map((i) => i.uid).filter((u) => u.startsWith('relay_test_messages'))).toEqual(['relay_test_messages']);
+});
+
+test('a build left by an older run without a cursor, or a cursor without its index, starts over cleanly', async () => {
+  const a = await makeUser('a'), b = await makeUser('b');
+  const ab = await makeChat([a, b]);
+  const m = await say(a, ab, 'встреча');
+  const next = liveIndex() + '_next';
+  await ensureIndex(next);
+  await meili(`/indexes/${next}/documents?primaryKey=id`, { method: 'POST', body: [{ id: 999_999, chatId: ab, body: 'мусор', attachmentName: null }] }).then((t: any) => waitTask(t.taskUid));
+  await sql`insert into server_meta (k, v) values ('search_building', ${next})`;   // курсора нет — прежняя версия оборвалась
+  expect(await reindexAll()).toBe(1);
+  expect(await docIds(liveIndex())).toEqual([m.id]);
+
+  await sql`insert into server_meta (k, v) values ('search_building', ${next}), ('search_reindex_after', '0')`;   // индекса _next нет
+  expect(await reindexAll()).toBe(1);
+  expect(await docIds(liveIndex())).toEqual([m.id]);
+});
+
+test('search.reindex job runs in short steps and requeues itself until the swap', async () => {
+  const a = await makeUser('a'), b = await makeUser('b');
+  const ab = await makeChat([a, b]);
+  for (let i = 0; i < 5; i++) await say(a, ab, `встреча ${i}`);
+  await sql`delete from jobs`;
+  await enqueue(sql, 'search.reindex', { batch: 1, maxBatches: 2 }, { dedupeKey: 'search.reindex' });
+  expect(await drainJobs()).toBeGreaterThanOrEqual(3);      // 5 пачек по 2 за шаг + финальный swap
+  expect(await searchReady()).toBe(true);
+  expect(await docCount(liveIndex())).toBe(5);
+  expect((await sql`select count(*)::int as n from jobs`)[0].n).toBe(0);
 });
