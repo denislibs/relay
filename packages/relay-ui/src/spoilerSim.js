@@ -55,7 +55,8 @@ export function drawOverlay(ctx, tile, o, dpr) {
   ctx.globalCompositeOperation = 'source-over';
   ctx.clearRect(0, 0, w, hgt);
   if (!o.rects.length) return;
-  if (!o.pattern || o.patternTile !== tile) { o.pattern = ctx.createPattern(tile, 'repeat'); o.patternTile = tile; }
+  // узор — снимок плитки на момент createPattern: кэшировать нельзя, иначе частицы застывают на первом кадре
+  o.pattern = ctx.createPattern(tile, 'repeat');
   if (o.pattern && o.pattern.setTransform && typeof DOMMatrix !== 'undefined') o.pattern.setTransform(new DOMMatrix().translateSelf(o.ox, o.oy));
   ctx.save();
   ctx.beginPath();
