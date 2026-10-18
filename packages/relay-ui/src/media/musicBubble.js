@@ -6,6 +6,9 @@ import { useEffect, useRef, useState } from 'preact/hooks';
 import { cx, Icon, MessageStatus, ProgressRing } from '../kit.js';
 import * as player from './player.js';
 
+// треки, которые уже включали: файл в кэше — значок «скачать» в углу больше не нужен (как в Telegram)
+var heard = new Set();
+
 function fmt(sec) { sec = Math.max(0, Math.floor(sec || 0)); return Math.floor(sec / 60) + ':' + (sec % 60 < 10 ? '0' : '') + (sec % 60); }
 
 export function MusicBubble(props) {
@@ -24,6 +27,8 @@ export function MusicBubble(props) {
     return function () { off(); offTick(); };
   }, [props.trackKey]);
   var playing = mine && s.playing;
+  if (mine) heard.add(props.trackKey);
+  var showDl = !props.uploading && !!props.onDownload && !heard.has(props.trackKey);
   var last = pos === 'single' || pos === 'last';
   function seekAt(e) {
     var r = e.currentTarget.getBoundingClientRect();
@@ -39,7 +44,8 @@ export function MusicBubble(props) {
                 style: props.cover ? { backgroundImage: 'url(' + props.cover + ')' } : undefined,
                 'aria-label': playing ? 'Пауза' : 'Слушать', onClick: function (e) { e.stopPropagation(); if (props.onToggle) props.onToggle(); } },
               h(Icon, { name: 'play', size: 26, class: 'rl-vb-play' }), h(Icon, { name: 'pause', size: 26, class: 'rl-vb-pause' })),
-          !props.uploading && props.onDownload ? h('button', { type: 'button', class: 'rl-music-dl', 'aria-label': 'Скачать',
+          !props.uploading && props.onDownload ? h('button', { type: 'button', class: cx('rl-music-dl', !showDl && 'rl-music-dl-gone'), 'aria-label': 'Скачать',
+            tabIndex: showDl ? undefined : -1, 'aria-hidden': showDl ? undefined : 'true',
             onClick: function (e) { e.stopPropagation(); props.onDownload(); } }, h(Icon, { name: 'download', size: 13 })) : null),
         h('div', { class: 'rl-music-text' },
           h('b', { title: props.title }, props.title),

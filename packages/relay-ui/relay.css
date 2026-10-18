@@ -1559,6 +1559,8 @@ html[data-blur="0"] .rl-menu, html[data-blur="0"] .rl-attach { -webkit-backdrop-
 .rl-music-play > .rl-icon { position: absolute; top: 50%; left: 50%; margin: -13px 0 0 -13px; filter: drop-shadow(0 1px 2px rgba(0,0,0,.25)); transition: opacity .4s var(--ease-out), transform .6s cubic-bezier(.34, 1.56, .64, 1); }
 .rl-music-dl { position: absolute; right: -3px; bottom: -3px; width: 22px; height: 22px; display: grid; place-items: center; padding: 0; border: 2px solid var(--bubble-in); border-radius: 50%; background: var(--music-accent); color: #fff; cursor: pointer; }
 .rl-bubble-out .rl-music-dl { border-color: var(--bubble-out); }
+.rl-music-dl { transition: transform var(--dur-fast) var(--ease-out), opacity var(--dur-fast) var(--ease-standard); }
+.rl-music-dl-gone { transform: scale(0); opacity: 0; pointer-events: none; }
 .rl-music-text { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
 .rl-music-text b { font: 500 15.5px/21px var(--font-sans); color: var(--ink); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .rl-music-sub { font: 400 14.5px/20px var(--font-sans); color: var(--music-sub, var(--meta, var(--ink-muted))); font-variant-numeric: tabular-nums; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
