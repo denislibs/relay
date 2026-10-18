@@ -15,7 +15,9 @@ import { birthdayText, lastSeenText, type Birthday } from './format';
 import { showToast, useUser } from '../settingsData';
 import { EditContactPanel } from './contacts/EditContact';
 import type { ProfilePhoto } from '@relay/protocol';
-import { avatarPhoto } from '../profilePhoto';
+import { avatarPhoto, useProfilePhotos } from '../profilePhoto';
+import { ProfileGallery } from './ProfileGallery';
+import { PhotoViewer } from './PhotoViewer';
 
 const PAGES = ['info', 'edit'];   // «Изменить контакт» выезжает внутри панели справа налево
 const close = () => setGlobal({ infoOpen: false });
@@ -57,6 +59,10 @@ export function Info() {
   const group = chat?.kind === 'group';
   const members = useMembers(chatId, group);
   const myPeer = peer && chat?.peerId === peer.userId && peer.known ? peer : null;
+  const gallery = useProfilePhotos(group || system ? null : peerId, chat?.photo as ProfilePhoto | null);
+  const [slide, setSlide] = useState(0);
+  const [viewer, setViewer] = useState<number | null>(null);
+  useEffect(() => { setSlide(0); setViewer(null); }, [chatId]);
   const subtitle = system ? 'служебные уведомления' : group ? (members ? membersStatus(members, false) : 'группа') : myPeer ? lastSeenText(!!myPeer.online, myPeer.lastSeen as string | null) : '';
 
   const addContact = () => setGlobal({ newContact: {
@@ -76,6 +82,12 @@ export function Info() {
     <div class="rl-sidepage">
       <PanelHeader icon="close" closeLabel="Закрыть" title={group ? 'Информация о группе' : 'Информация'} onClose={close} action={action} />
       <div class="rl-aside-body">
+        {gallery.length ? (
+          <ProfileGallery photos={gallery} index={slide} onIndex={setSlide} onOpen={setViewer}
+            name={<>{title}{system ? <Verified size={22} /> : null}</>}
+            sub={<span class={myPeer?.online ? 'app-online' : ''}>{subtitle || ' '}</span>}
+            extra={peerId ? <ProfileMusicPill userId={peerId} /> : null} />
+        ) : (
         <div class="rl-profile">
           <div class="app-prof-ava">
             <Avatar name={title} tone={chatTone(chat)} size={120} logo={system} {...avatarPhoto(chat?.photo as ProfilePhoto | null, true)} />
@@ -84,6 +96,7 @@ export function Info() {
           <div class="rl-profile-name">{title}{system ? <Verified size={22} /> : null}</div>
           <div class={'rl-profile-sub' + (myPeer?.online ? ' app-online' : '')}>{subtitle || ' '}</div>
         </div>
+        )}
         <div class="rl-aside-group">
           {/* как в Telegram: имя уже в шапке — строками только то, чего там нет, и только если поле заполнено */}
           <Expand show={!group && !!user}>{!group && user ? <PeerRows user={user} /> : null}</Expand>
@@ -103,6 +116,10 @@ export function Info() {
           ) : null}</Expand>
         </div>
         <SharedMedia chatId={chatId} group={group} />
+        {viewer != null && gallery.length ? (
+          <PhotoViewer photos={gallery} index={viewer} name={title} onIndex={setSlide} onClose={() => setViewer(null)}
+            origin={(k) => (k === slide ? document.querySelector<HTMLElement>(`.app-gallery [data-gallery-slide="${k}"]`) : null)} />
+        ) : null}
       </div>
     </div>
     )} />

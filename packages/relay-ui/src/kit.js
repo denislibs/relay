@@ -1039,7 +1039,7 @@ function ProfileHeader(props) {
     props.onAvatar
       ? h('button', { type: 'button', class: cx('rl-profile-ava', props.busy && 'is-busy'), 'aria-label': props.avatarLabel || 'Изменить фото', onClick: props.onAvatar },
           h(Avatar, { name: props.name, src: props.src, thumb: props.thumb, tone: props.tone, size: props.size || 120 }),
-          h('span', { class: 'rl-profile-ava-cam', 'aria-hidden': 'true' }, h(Icon, { name: 'camera', size: Math.round((props.size || 120) * 0.3) })),
+          props.camera === false ? null : h('span', { class: 'rl-profile-ava-cam', 'aria-hidden': 'true' }, h(Icon, { name: 'camera', size: Math.round((props.size || 120) * 0.3) })),
           props.busy ? h('svg', { class: 'rl-profile-ava-ring', viewBox: '0 0 100 100', 'aria-hidden': 'true' }, h('circle', { cx: 50, cy: 50, r: 48 })) : null)
       : h(Avatar, { name: props.name, src: props.src, thumb: props.thumb, tone: props.tone, size: props.size || 120 }),
     h('div', { class: 'rl-profile-name' }, props.name),

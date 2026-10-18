@@ -11,6 +11,8 @@ import { dropSubscription } from '../../notify';
 import { birthdayText } from '../format';
 import { useScrollMemory } from '../useScrollMemory';
 import { usePhotoPicker } from './usePhotoPicker';
+import { avatarPhoto, useProfilePhotos } from '../../profilePhoto';
+import { PhotoViewer } from '../PhotoViewer';
 
 declare const __BUILD__: string;
 
@@ -50,6 +52,8 @@ async function logout(): Promise<boolean> {
 export function Main() {
   const me = useGlobal((s) => s.me)!;
   const photo = usePhotoPicker(me.photo);
+  const myPhotos = useProfilePhotos(me.userId, me.photo);
+  const [viewer, setViewer] = useState<number | null>(null);
   const status = useGlobal((s) => s.status);
   // число сеансов справа на строке «Активные сеансы»: появляется, только когда список уже известен (предзагрузка)
   const sessionCount = useGlobal((s) => (s.sessions ? sessionsView(s.sessions, s.opsKeys).length : null));
@@ -113,8 +117,13 @@ export function Main() {
         </div>
       </Presence>
       <div class="rl-settings" ref={scroll.ref} onScroll={scroll.onScroll}>
-        <ProfileHeader name={me.name} tone={peerTone(me.userId)} subtitle={status.phase === 'offline' ? 'нет сети' : 'в сети'} size={96} {...photo.avatar} />
+        <ProfileHeader name={me.name} tone={peerTone(me.userId)} subtitle={status.phase === 'offline' ? 'нет сети' : 'в сети'} size={96}
+          {...(me.photo && !photo.busy ? { ...avatarPhoto(me.photo, true), camera: false, avatarLabel: 'Открыть фото', onAvatar: () => setViewer(0) } : photo.avatar)} />
         {photo.ui}
+        {viewer != null && myPhotos.length ? (
+          <PhotoViewer own photos={myPhotos} index={viewer} name={me.name} onClose={() => setViewer(null)}
+            origin={(k) => (k === 0 ? document.querySelector<HTMLElement>('.rl-settings .rl-profile-ava .rl-avatar') : null)} />
+        ) : null}
         {hasInfo ? (
           <Section>
             {phone ? <InfoRow tile="green" icon="phone" title={phone} subtitle="Телефон" onClick={() => copy(phone)} /> : null}
