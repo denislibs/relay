@@ -28,8 +28,11 @@ test('service message lands in the journal; the user cannot write or react there
   expect(u.type).toBe('newMessage');
   expect(u.payload.message.service).toEqual({ type: 'new_login' });
 
-  await expect(sendMessage(a, { chatId: m.chatId, clientId: crypto.randomUUID(), body: 'ответ' })).rejects.toMatchObject({ code: 'forbidden' });
-  await expect(editMessage(a, m.chatId, m.id, 'правка')).rejects.toMatchObject({ code: 'forbidden' });
+  // писать в «Relay» можно (как в Telegram — ответа просто не будет), править — только свои
+  const mine = await sendMessage(a, { chatId: m.chatId, clientId: crypto.randomUUID(), body: 'заметка себе' });
+  expect(mine.message.body).toBe('заметка себе');
+  await editMessage(a, m.chatId, mine.message.id, 'заметка себе (правка)');
+  await expect(editMessage(a, m.chatId, m.id, 'правка')).rejects.toBeDefined();
   await expect(reactMessage(a, m.chatId, m.id, '👍')).rejects.toMatchObject({ code: 'forbidden' });
 });
 

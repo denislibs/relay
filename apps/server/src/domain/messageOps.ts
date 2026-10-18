@@ -27,8 +27,7 @@ export async function editMessage(userId: number, chatId: number, id: number, bo
   if (text.length > MAX_BODY) throw new DomainError('too_long');
   return sql.begin(async (tx) => {
     await assertMember(tx, chatId, userId);
-    if (await isServiceChat(tx, chatId)) throw new DomainError('forbidden');   // служебный чат только для чтения
-    await ownMessage(tx, userId, chatId, id);
+    await ownMessage(tx, userId, chatId, id);   // в служебном чате — тоже только свои (сообщения Relay не правятся)
     // заблокированный не правит сообщения в личном чате с тем, кто его заблокировал
     if (await blockedInDirect(tx, chatId, userId)) throw new DomainError('blocked');
     await burnCodes(tx, userId, text);

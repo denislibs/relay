@@ -107,7 +107,7 @@ export function Chat({ chatId, frameKey, active }: { chatId: number; frameKey: s
   // несколько файлов разом — одной группой (в ленте один пузырь); превью — только у одиночного фото
   const offer = (list: File | FileList | File[] | null | undefined) => {
     const files = !list ? [] : list instanceof File ? [list] : [...list];
-    if (!files.length || systemRef.current) return;   // в служебный чат ничего не отправить
+    if (!files.length) return;
     const file = files[0];
     setPending({ file, files, url: files.length === 1 && /^image\//.test(file.type) ? URL.createObjectURL(file) : null, caption: latest.current.text });
   };
@@ -123,12 +123,12 @@ export function Chat({ chatId, frameKey, active }: { chatId: number; frameKey: s
   };
   useEffect(() => {
     let depth = 0;
-    const hasFiles = (e: DragEvent) => !systemRef.current && !!e.dataTransfer && [...e.dataTransfer.types].includes('Files');
+    const hasFiles = (e: DragEvent) => !!e.dataTransfer && [...e.dataTransfer.types].includes('Files');
     const enter = (e: DragEvent) => { if (!activeRef.current || !hasFiles(e)) return; depth++; setDragging(true); };
     const leave = () => { depth = Math.max(0, depth - 1); if (!depth) setDragging(false); };
     const over = (e: DragEvent) => { if (activeRef.current && hasFiles(e)) e.preventDefault(); };
     const drop = (e: DragEvent) => { if (!activeRef.current || !hasFiles(e)) return; e.preventDefault(); depth = 0; setDragging(false); offer(e.dataTransfer!.files); };
-    const paste = (e: ClipboardEvent) => { if (!activeRef.current || systemRef.current) return; const fs = [...(e.clipboardData?.files ?? [])]; if (fs.length) { e.preventDefault(); offer(fs); } };
+    const paste = (e: ClipboardEvent) => { if (!activeRef.current) return; const fs = [...(e.clipboardData?.files ?? [])]; if (fs.length) { e.preventDefault(); offer(fs); } };
     addEventListener('dragenter', enter); addEventListener('dragleave', leave); addEventListener('dragover', over); addEventListener('drop', drop); addEventListener('paste', paste);
     return () => { removeEventListener('dragenter', enter); removeEventListener('dragleave', leave); removeEventListener('dragover', over); removeEventListener('drop', drop); removeEventListener('paste', paste); };
   }, []);
@@ -302,12 +302,7 @@ export function Chat({ chatId, frameKey, active }: { chatId: number; frameKey: s
       <MediaPolicy.Provider value={policy}>
         <Feed frameKey={frameKey} active={active} chatId={chatId} meId={me.userId} peerName={title} group={chat?.kind === 'group'} onAuthor={openUserChat} stick={stick} highlight={found?.q} onMenu={(key, x, y) => setMenu({ key, x, y })} />
       </MediaPolicy.Provider>
-      {system ? (
-        // та же обёртка, что у композера: --composer-h меряется так же, лента не прыгает
-        <div class="rl-composer-wrap app-plate-wrap">
-          <div class="app-readonly-bar" role="note">Служебные уведомления Relay — ответить на них нельзя</div>
-        </div>
-      ) : plate ? (
+      {plate ? (
         <div class="rl-composer-wrap app-plate-wrap">
           <div class="rl-composer app-plate" role="status" key={plate}>
             {plate === 'mine' ? (

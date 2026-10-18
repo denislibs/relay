@@ -68,7 +68,7 @@ export async function ensureServiceChat(userId: number): Promise<void> {
   if (ensured.has(userId)) return;
   const [has] = await sql`select 1 from service_chats where user_id = ${userId}`;
   if (!has) {
-    const body = `${WELCOME_TITLE}\n\nЗдесь будут служебные уведомления: коды входа и сообщения о новых входах в аккаунт. Отвечать сюда не нужно.`;
+    const body = `${WELCOME_TITLE}\n\nЗдесь будут служебные уведомления: коды входа и сообщения о новых входах в аккаунт. Писать сюда можно, но ответа не будет.`;
     await sql.begin((tx) => postService(tx, userId, { type: 'welcome', body, entities: [{ type: 'bold', offset: 0, length: WELCOME_TITLE.length }] }, { push: false }));
   }
   ensured.add(userId);
