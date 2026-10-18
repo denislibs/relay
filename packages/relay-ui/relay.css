@@ -1037,7 +1037,7 @@ button.rl-tab:hover { color: var(--ink); }
 .rl-shell .rl-composer-wrap { padding: 0; }
 .rl-shell .rl-feed > * { width: 100%; max-width: var(--chat-max); margin-inline: auto; }
 .rl-shell .rl-msgline { padding: 0 10px; }
-.rl-shell .rl-scrolldown-slot { position: absolute; z-index: 3; bottom: 76px; right: max(16px, calc((100% - var(--chat-max)) / 2 - 64px)); }
+.rl-shell .rl-scrolldown-slot { position: absolute; z-index: 3; bottom: 76px; right: max(0px, calc((100% - var(--chat-max)) / 2)); }   /* над правым краем поля ввода, как в Telegram Web A */
 .rl-shell .rl-bubble { max-width: min(85%, 580px); }
 
 /* under the wallpaper canvas while it fades in: a static gradient in the same colours, so the first paint already matches */
