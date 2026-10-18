@@ -3,7 +3,8 @@ import { key, PREFIX, valkey } from '../valkey';
 /**
  * Кто онлайн — по всей системе. presence:<user> — хэш «процесс → число сокетов»; proc:<pid> — процесс жив
  * (ставится каждые 30 с на 90 с); left:<user> — пауза после ухода последнего сокета (перезагрузка вкладки
- * не «уход»). Скрипты меняют счётчик и считают сумму атомарно; счётчики умерших процессов стираются по пути.
+ * не «уход»); в ней — метка паузы: «ушёл» объявляет только таймер с этой меткой (leave), так что таймер давней
+ * паузы в другом процессе не объявит уход раньше срока и не оставит чужую паузу висеть. Скрипты меняют счётчик и считают сумму атомарно; счётчики умерших процессов стираются по пути.
  * Одиночный узел Valkey: скрипты обращаются к ключам proc:*, вычисленным внутри.
  */
 export const PROCESS_ID = crypto.randomUUID();
@@ -29,8 +30,16 @@ return { total(KEYS[1], ARGV[1]), returning }`;
 const DISCONNECT = `${SUM}
 if redis.call('HINCRBY', KEYS[1], ARGV[2], -1) <= 0 then redis.call('HDEL', KEYS[1], ARGV[2]) end
 local t = total(KEYS[1], ARGV[1])
-if t == 0 then redis.call('SET', KEYS[2], '1', 'PX', ARGV[3]) end
+if t == 0 then redis.call('SET', KEYS[2], ARGV[4], 'PX', ARGV[3]) end
 return t`;
+
+// пауза ещё та же (метка совпала) и сокетов нет — пауза снята, уход объявляет вызвавший
+const LEAVE = `${SUM}
+if redis.call('GET', KEYS[2]) == ARGV[2] and total(KEYS[1], ARGV[1]) == 0 then
+  redis.call('DEL', KEYS[2])
+  return 1
+end
+return 0`;
 
 const COUNT = `${SUM}
 return total(KEYS[1], ARGV[1])`;
@@ -62,9 +71,17 @@ export async function connect(userId: number, pid = PROCESS_ID): Promise<{ total
   return { total: Number(total), returning: Number(returning) === 1 };
 }
 
-/** Сокет закрыт: сколько осталось во всей системе; при 0 начинается пауза. */
-export async function disconnect(userId: number, pid = PROCESS_ID): Promise<number> {
-  return Number(await run(DISCONNECT, [key(`presence:${userId}`), key(`left:${userId}`)], [PREFIX, pid, graceMs()]));
+/**
+ * Сокет закрыт: сколько осталось во всей системе; при 0 начинается пауза с меткой token. Ключ паузы живёт
+ * вдвое дольше неё: его снимает таймер (leave), а срок — страховка на случай, если процесс с таймером упал.
+ */
+export async function disconnect(userId: number, pid = PROCESS_ID, token: string = crypto.randomUUID()): Promise<number> {
+  return Number(await run(DISCONNECT, [key(`presence:${userId}`), key(`left:${userId}`)], [PREFIX, pid, graceMs() * 2, token]));
+}
+
+/** Пауза token кончилась: true — она всё ещё последняя и сокетов нет (пауза снята, пора объявить «ушёл»). */
+export async function leave(userId: number, token: string): Promise<boolean> {
+  return Number(await run(LEAVE, [key(`presence:${userId}`), key(`left:${userId}`)], [PREFIX, token])) === 1;
 }
 
 /** Открытых сокетов пользователя во всех живых процессах (паузу не учитывает). */

@@ -1,6 +1,6 @@
 import { RECENTLY, type PresenceItem } from '@relay/protocol';
 import { sql } from '../db';
-import { connect, connectionCount, disconnect, onlineUsers } from './liveRegistry';
+import { connect, connectionCount, disconnect, leave, onlineUsers, PROCESS_ID } from './liveRegistry';
 import { canSeeLastSeen, privacyCtx, type PrivacyCtx } from './privacy';
 
 /**
@@ -104,13 +104,19 @@ export async function connected(publish: Publish, userId: number): Promise<void>
 }
 
 export function disconnected(publish: Publish, userId: number): void {
-  void serial(userId, () => disconnect(userId)).then((total) => {
+  const token = crypto.randomUUID();
+  void serial(userId, () => disconnect(userId, PROCESS_ID, token)).then((total) => {
     if (total > 0) return;                         // ещё есть сокеты — здесь или в другом процессе
-    leaving.set(userId, setTimeout(async () => {
+    leaving.set(userId, setTimeout(() => {
       leaving.delete(userId);
-      if ((await connectionCount(userId)) > 0) return;   // вернулся за паузу, в любом процессе
-      const [row] = await sql`update users set last_seen_at = now() where id = ${userId} returning last_seen_at`;
-      await announce(publish, { userId, online: false, lastSeen: row ? iso(row.last_seen_at) : null });
+      void (async () => {
+        // вернулся за паузу (в любом процессе) или пауза уже чужая, более поздняя, — уход объявит её таймер
+        if (!(await leave(userId, token))) return;
+        const [row] = await sql`update users set last_seen_at = now() where id = ${userId} returning last_seen_at`;
+        await announce(publish, { userId, online: false, lastSeen: row ? iso(row.last_seen_at) : null });
+        // вернулся, пока объявляли уход: его «в сети» могло обогнать наш кадр — повторить, чтобы последним было верное
+        if ((await connectionCount(userId)) > 0) await announce(publish, { userId, online: true, lastSeen: null });
+      })().catch((e) => console.error('presence:', e));
     }, graceMs()));
   }).catch((e) => console.error('presence:', e));
 }

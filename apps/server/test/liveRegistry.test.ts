@@ -1,5 +1,5 @@
 import { beforeEach, expect, test } from 'bun:test';
-import { connect, connectionCount, disconnect, onlineUsers, processAlive, processGone } from '../src/domain/liveRegistry';
+import { connect, connectionCount, disconnect, leave, onlineUsers, processAlive, processGone } from '../src/domain/liveRegistry';
 import { resetDb } from './helpers';
 
 process.env.RELAY_PRESENCE_GRACE_MS = '300';
@@ -23,8 +23,23 @@ test('last socket gone: online during the pause, then offline; coming back in th
   expect(await connectionCount(7)).toBe(0);
   expect(await connect(7, P2)).toEqual({ total: 1, returning: true });
   await disconnect(7, P2);
-  await Bun.sleep(400);
+  await Bun.sleep(700);                                           // ключ паузы — вдвое дольше неё (страховка без таймера)
   expect(await onlineUsers([7])).toEqual(new Set());
+});
+
+test('only the latest pause may announce leaving; afterwards a new socket is not "returning"', async () => {
+  await connect(7, P1);
+  await disconnect(7, P1, 'early');
+  await connect(7, P2);                                          // перезагрузка на другой процесс
+  await disconnect(7, P2, 'late');
+  expect(await leave(7, 'early')).toBe(false);                   // таймер давней паузы — не его дело
+  expect(await onlineUsers([7])).toEqual(new Set([7]));
+  expect(await leave(7, 'late')).toBe(true);
+  expect(await onlineUsers([7])).toEqual(new Set());
+  expect(await connect(7, P1)).toEqual({ total: 1, returning: false });
+  await disconnect(7, P1, 'again');
+  await connect(7, P2);
+  expect(await leave(7, 'again')).toBe(false);                   // вернулся за паузу
 });
 
 test('a dead process does not count, and its stale counts are dropped', async () => {
