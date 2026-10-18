@@ -86,11 +86,16 @@ services:
     environment:
       DATABASE_URL: postgres://relay:relay@postgres:5432/relay
       DEV_LOGIN: "1"
+      S3_ENDPOINT: http://s3:8333    # uploads.sweep удаляет объекты брошенных загрузок
+      S3_BUCKET: relay-files
+      S3_ACCESS_KEY_ID: relaydev
+      S3_SECRET_ACCESS_KEY: relaydevsecret
     volumes:
       - ./apps:/app/apps
       - ./packages:/app/packages
     depends_on:
       migrate: { condition: service_completed_successfully }
+      s3-init: { condition: service_completed_successfully }
 
   s3-init-test:
     image: chrislusf/seaweedfs:4.48

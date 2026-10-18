@@ -1,6 +1,7 @@
 // Регистрация доменных обработчиков задач. Импортируется процессом-воркером и тестами.
 import { sql } from '../db';
 import { deliver } from '../domain/devOutbox';
+import { sweepPendingUploads } from '../domain/files';
 import { sweepInactive } from '../domain/sessions';
 import { deliverPush, planPush, type PushMessage, type PushPayload } from '../domain/push';
 import { register } from './handlers';
@@ -29,5 +30,11 @@ export const SWEEP_EVERY_SEC = 3600;
 // автозавершение истёкших и неактивных сеансов; NOTIFY sessions закроет их сокеты в процессах сервера
 register('sessions.sweep', async () => {
   await sweepInactive();
+  return { again: { inSec: SWEEP_EVERY_SEC } };
+});
+
+// брошенные загрузки (pending старше суток): запись и объект в S3
+register('uploads.sweep', async () => {
+  await sweepPendingUploads();
   return { again: { inSec: SWEEP_EVERY_SEC } };
 });
