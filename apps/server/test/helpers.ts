@@ -6,7 +6,8 @@ export async function resetDb(): Promise<void> {
   await flushOwn();   // онлайн и прочее эфемерное прошлых тестов
   await processAlive();   // ключ «процесс жив» стёрт вместе с остальным — серверы этого процесса снова в сумме онлайна
   await sql`truncate login_attempts, login_pending, srp_challenges, qr_logins, webauthn_challenges, sessions, chats, chat_members, messages, user_seq, updates,
-                     jobs, jobs_dead, dev_mail restart identity cascade`;
+                     jobs, jobs_dead, dev_mail, link_previews restart identity cascade`;
+  await sql`delete from attachments`;   // и картинки превью ссылок — они у системного пользователя, его строку не стираем
   // системного пользователя «Relay» (миграция 110_service) не трогаем
   await sql`delete from users where not system`;
   // поиск — по Postgres, пока тест сам не построит индекс (meili.test.ts)

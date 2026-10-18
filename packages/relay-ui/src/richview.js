@@ -26,8 +26,22 @@ function wrap(type, value, child) {
 }
 
 /** { text, entities, highlight? } → элементы. Без сущностей — просто текст (дешёвый путь). */
+/* Адреса в тексте — ссылками, как в Telegram (http(s)://… и www.…): если их не покрывает оформление ссылкой или кодом */
+var URL_RE = /\b(?:https?:\/\/|www\.)[^\s<>"'«»]+/gi;
+function autoLinks(text, list) {
+  if (text.indexOf('http') < 0 && text.indexOf('www.') < 0) return list;
+  var out = list ? list.slice() : [], m;
+  URL_RE.lastIndex = 0;
+  while ((m = URL_RE.exec(text))) {
+    var raw = m[0].replace(/[.,!?:;)\]}»"']+$/, ''), from = m.index, to = from + raw.length;
+    var taken = out.some(function (e) { return (e.type === 'link' || e.type === 'code' || e.type === 'pre') && e.offset < to && e.offset + e.length > from; });
+    if (!taken && raw) out.push({ type: 'link', offset: from, length: raw.length, url: /^www\./i.test(raw) ? 'https://' + raw : raw });
+  }
+  return out;
+}
+
 function MessageText(props) {
-  var text = props.text || '', list = props.entities;
+  var text = props.text || '', list = autoLinks(text, props.entities);
   if (!list || !list.length) return props.highlight ? h(Highlight, { text: text, query: props.highlight }) : text;
   return segments(text, list).map(function (sg, i) {
     var node = props.highlight ? h(Highlight, { text: sg.text, query: props.highlight }) : sg.text;

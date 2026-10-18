@@ -747,7 +747,7 @@ button.rl-quote:active { background: var(--quote-bg-active, var(--pressed)); }
 .rl-link-body b { font: 600 14px/19px var(--font-sans); }
 .rl-link-body span { color: var(--bubble-meta); display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
 .rl-link-body small { color: var(--bubble-meta); font-size: 12px; }
-.rl-bubble a:not(.rl-link-card) { color: var(--tick-read); }
+.rl-bubble a:not(.rl-link-card):not(.rl-webpage) { color: var(--tick-read); }
 
 /* ---------- PollBubble ---------- */
 .rl-poll { width: 340px; max-width: 100%; padding: 8px 10px 6px; }
@@ -1872,3 +1872,25 @@ html[data-blur="0"] .rl-menu, html[data-blur="0"] .rl-attach { -webkit-backdrop-
 .rl-chatpick-head .rl-picker-search input { width: 100%; height: 32px; border: 0; outline: none; background: transparent; color: var(--ink); font: 400 15px/20px var(--font-sans); }
 .rl-chatpick-head .rl-picker-search input::-webkit-search-cancel-button { display: none; }
 .rl-chatpick .rl-chatpick-head .rl-picker-search, .rl-chatpick .rl-chatpick-head .rl-picker-search:focus-within { border: 0; box-shadow: none; background: transparent; }
+
+/* ---------- превью ссылки в пузыре ---------- */
+.rl-webpage { position: relative; display: flow-root; max-width: 29rem; margin: 6px 0 2px; padding: 5px 8px 7px 12px; border-radius: 6px; overflow: hidden;
+  background: color-mix(in srgb, var(--lp-tone) 10%, transparent); color: var(--ink); text-decoration: none; font: 400 14px/19px var(--font-sans);
+  animation: rl-webpage-in 220ms ease-out both; transition: background-color 150ms ease; }
+.rl-webpage:hover { background: color-mix(in srgb, var(--lp-tone) 16%, transparent); }
+.rl-webpage::before { content: ''; position: absolute; left: 0; top: 0; bottom: 0; width: 3px; background: var(--lp-tone); }
+.rl-webpage-site { display: block; color: var(--lp-tone); font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.rl-webpage-title { display: block; font-weight: 600; }
+.rl-webpage-desc { display: -webkit-box; -webkit-line-clamp: 6; -webkit-box-orient: vertical; overflow: hidden; }
+.rl-webpage-thumb { float: right; width: 56px; height: 56px; margin: 3px 0 4px 10px; border-radius: 6px; object-fit: cover; }
+.rl-webpage-photo { display: block; width: 100%; height: auto; margin-top: 6px; border-radius: 6px; object-fit: contain; background: color-mix(in srgb, var(--lp-tone) 8%, transparent); }
+.rl-webpage:focus-visible { outline: 2px solid var(--lp-tone); outline-offset: 2px; }
+@keyframes rl-webpage-in { from { opacity: 0; } }
+@media (prefers-reduced-motion: reduce) { .rl-webpage { animation: none; } }
+.rl-quote-thumb-img { width: 40px; height: 40px; align-self: center; margin-left: 6px; border-radius: 6px; overflow: hidden; flex-shrink: 0; }
+.rl-quote-thumb-img img { width: 100%; height: 100%; object-fit: cover; display: block; }
+.rl-quote-thumb-img + .rl-quote-body { padding-left: 8px; }
+/* ссылка в тексте сообщения — как в Telegram: обычный вес, цвет ссылки, подчёркивание только при наведении
+   (общий .rl-link — для экранов входа: жирный с толстой чертой) */
+.rl-bubble .rl-link, .rl-msgline-out .rl-bubble .rl-link { color: var(--tick-read); font-weight: inherit; text-decoration: none; }
+.rl-bubble .rl-link:hover { text-decoration: underline; text-decoration-thickness: 1px; text-underline-offset: 2px; }

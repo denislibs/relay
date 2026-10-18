@@ -1,4 +1,4 @@
-import type { Birthday, ChatFolder, Entity, ForwardInfo, ForwardRef, PrivacyKey, PrivacyMode, ProfileLink, ProfilePhoto, ServiceType } from '@relay/protocol';
+import type { Birthday, ChatFolder, Entity, ForwardInfo, ForwardRef, LinkPreview, PrivacyKey, PrivacyMode, ProfileLink, ProfilePhoto, ServiceType } from '@relay/protocol';
 
 export type Status = 'pending' | 'sent' | 'read' | 'failed';
 
@@ -25,6 +25,7 @@ export interface LocalMessage {
   error?: string;         // почему не отправлено (failed): 'blocked' — собеседник заблокировал отправителя
   service?: { type: ServiceType };   // служебное сообщение от «Relay»
   fwdFrom?: ForwardInfo | null;      // пересланное: исходный автор, откуда и когда
+  link?: LinkPreview | null;         // превью ссылки (pending — сервер ещё загружает)
 }
 
 /** Вложение сообщения; у неотправленного id пустой, пока файл не загружен. */
@@ -66,6 +67,8 @@ export interface OutboxEntry {
   groupId?: string | null;   // отправлены вместе — один пузырь
   forward?: ForwardRef | null;      // пересылка: сервер копирует оригинал (вложение не загружается заново)
   fwdFrom?: ForwardInfo | null;     // как показать до подтверждения
+  noLinkPreview?: boolean;          // превью ссылки убрали в поле ввода
+  link?: LinkPreview | null;        // превью, уже показанное в поле ввода, — в ленте сразу, до ответа сервера
 }
 
 export type Query =
@@ -102,7 +105,7 @@ export type Patch =
       append?: boolean };
 
 export type Action =
-  | { type: 'sendMessage'; chatId: number; body: string; entities?: Entity[]; replyToId?: number | null }
+  | { type: 'sendMessage'; chatId: number; body: string; entities?: Entity[]; replyToId?: number | null; noLinkPreview?: boolean; link?: LinkPreview | null }
   | { type: 'seen'; chatId: number; upToId: number }
   | { type: 'loadOlder'; chatId: number }
   | { type: 'retry'; clientId: string }

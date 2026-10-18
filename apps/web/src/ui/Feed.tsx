@@ -200,6 +200,8 @@ const Row = memo(function Row({ chatId, voiceTitle, author, onAuthor, onOpen, hl
         reply={quoted ? { author: quoteAuthor, text: quoted.body, tone: quoteTone, onClick: noop } : undefined}
         edited={!!m.editedAt && !m.deleted}
         deleted={!!m.deleted}
+        link={webLink(m)}
+        linkTone={out ? undefined : `var(--peer-${peerTone(m.senderId as number)})`}
         reactions={chips.length ? chips : undefined}
         onReactionClick={(emoji: string) => onReact(m, emoji)}
         time={clock(m.createdAt as string)}
@@ -218,6 +220,13 @@ const Row = memo(function Row({ chatId, voiceTitle, author, onAuthor, onOpen, hl
 function goToOriginal(chatId: number, id: number): void {
   const target = { id, sort: id };
   if (activeFrame(getGlobal())?.chatId === chatId) focusMessage(target); else openInner(chatId, target);
+}
+
+/** Превью ссылки для пузыря: готовое (не «грузится»), картинка — наш файл. */
+function webLink(m: Item) {
+  const l = m.link as { url: string; pending?: boolean; siteName?: string | null; title?: string | null; description?: string | null; photo?: { id: string; w: number; h: number } | null } | null | undefined;
+  if (!l || l.pending || m.deleted) return undefined;
+  return { url: l.url, siteName: l.siteName, title: l.title, description: l.description, photo: l.photo ? { src: `/files/${l.photo.id}`, w: l.photo.w, h: l.photo.h } : null };
 }
 
 const noop = () => {}; // цитата — кнопка; сам клик ловит лента (один обработчик на всех)

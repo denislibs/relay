@@ -1,7 +1,7 @@
 import { coverThumb, readAudioTags } from './id3';
 import { getPrefs } from './prefs';
 import { rememberPhotos } from './profilePhoto';
-import type { ProfilePhoto } from '@relay/protocol';
+import type { LinkPreview, ProfilePhoto } from '@relay/protocol';
 import { playSentSound } from './sound';
 import { beginHeavyAnimation, nudgeWallpaper, toBase64 } from '@relay/ui';
 import { connectEngine, EngineClient, Mirror } from '@relay/sync-engine/src/client';
@@ -360,11 +360,11 @@ export function sentSound(): void {
   if (p.sound) playSentSound(p.volume);
 }
 
-export async function send(chatId: number, body: string, replyToId: number | null = null, entities: Entity[] = []): Promise<void> {
+export async function send(chatId: number, body: string, replyToId: number | null = null, entities: Entity[] = [], opts: { noLinkPreview?: boolean; link?: LinkPreview | null } = {}): Promise<void> {
   sentSound();
   nudgeWallpaper();
   toLatestOf(chatId); // своё сообщение — внизу, как в Telegram
-  await engine.call({ type: 'sendMessage', chatId, body, entities, replyToId });
+  await engine.call({ type: 'sendMessage', chatId, body, entities, replyToId, ...opts });
 }
 
 /** Пересылка (forward.ts): копии сразу в ленте целевых чатов; в открытом чате — к низу, как своё сообщение. */

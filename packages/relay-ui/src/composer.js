@@ -460,11 +460,11 @@ function Composer(props) {
       // цитата, крестик; поле плавно раздвигается по высоте
       h(Presence, { show: !!props.replyTo, exitMs: 180 }, (function () {
         // icon: 'pencil' — правка, 'forward' — пересылка (клик по цитате — её опции), иначе ответ
-        var r = reply.current || {}, n = r.tone != null ? r.tone : 5, edit = r.icon === 'pencil', fwd = r.icon === 'forward';
+        var r = reply.current || {}, n = r.tone != null ? r.tone : 5, edit = r.icon === 'pencil', fwd = r.icon === 'forward', link = r.icon === 'link';
         return h('div', { class: cx('rl-composer-reply', fwd && 'rl-composer-reply-fwd'), style: { '--quote-tone': 'var(--peer-' + n + ')' } },
-          h('span', { class: 'rl-composer-reply-icon', 'aria-hidden': 'true' }, h(Icon, { name: edit ? 'pencil' : fwd ? 'forward' : 'reply', size: 22 })),
+          h('span', { class: 'rl-composer-reply-icon', 'aria-hidden': 'true' }, h(Icon, { name: edit ? 'pencil' : fwd ? 'forward' : link ? 'link' : 'reply', size: 22 })),
           h(ReplyQuote, Object.assign({}, r, { icon: undefined, onCancel: undefined })),
-          h(IconButton, { icon: 'close', label: edit ? 'Отменить редактирование' : fwd ? 'Отменить пересылку' : 'Отменить ответ', onClick: props.onCancelReply, class: 'rl-composer-reply-x' }));
+          h(IconButton, { icon: 'close', label: edit ? 'Отменить редактирование' : fwd ? 'Отменить пересылку' : link ? 'Без превью ссылки' : 'Отменить ответ', onClick: props.onCancelReply, class: 'rl-composer-reply-x' }));
       })()),
       roundView[0] ? h(RoundRecorderView, { key: 'round', session: roundView[0].session, closing: roundView[0].closing }) : null,
       rec[0] ? h(RecordBar, { key: 'rec', session: rec[0].session, limitReached: rec[0].limit, forcePaused: rec[0].limit, onDelete: function () { endRecording(true); }, onPaused: props.onRecordPaused }) : null,

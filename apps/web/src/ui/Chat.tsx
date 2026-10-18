@@ -1,5 +1,7 @@
 import { PinnedBar } from './PinnedBar';
 import { senderAvatar } from '../profilePhoto';
+import { firstUrl, loadPreview } from '../linkUrl';
+import type { LinkPreview } from '@relay/protocol';
 import { membersStatus, useMembers } from '../members';
 import { Playlist } from './Playlist';
 import { inProfile, toggleProfileMusic, type Track } from '../music';
@@ -153,7 +155,21 @@ export function Chat({ chatId, frameKey, active }: { chatId: number; frameKey: s
     if (editing) return;   // в поле — правка сообщения, а не черновик
     if (!sameValue(latest.current, saved.current)) { saved.current = latest.current; saveDraft(chatId, latest.current.text, latest.current.entities); }
   };
+  // превью ссылки в поле ввода, как в Telegram: первая ссылка текста → через 400 мс спросить сервер; крестик — отправить без превью
+  const [lp, setLp] = useState<{ url: string; link: LinkPreview | null; off: boolean } | null>(null);
+  const lpTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const lpUrl = useRef<string | null>(null);
+  const watchLink = (v: Value) => {
+    const url = firstUrl(v.text, v.entities as Entity[] | undefined);
+    if (url === lpUrl.current) return;
+    lpUrl.current = url;
+    if (lpTimer.current) clearTimeout(lpTimer.current);
+    if (!url) { setLp(null); return; }
+    lpTimer.current = setTimeout(() => { void loadPreview(url).then((link) => { if (lpUrl.current === url) setLp((cur) => ({ url, link, off: cur?.url === url ? cur.off : false })); }); }, 400);
+  };
+  useEffect(() => { lpUrl.current = null; setLp(null); }, [chatId]);
   const onType = (v: Value) => {
+    if (!editing) watchLink(v);
     if (v.text.trim() && v.text.length > latest.current.text.length && !editing) typing(chatId); // набирают (а не стирают) — «печатает…» у собеседника
     latest.current = v;
     if (draftTimer.current) clearTimeout(draftTimer.current);
@@ -364,10 +380,14 @@ export function Chat({ chatId, frameKey, active }: { chatId: number; frameKey: s
         placeholder="Сообщение"
         editing={!!editing}
         sendEmpty={!!fwdQuote}
-        replyTo={editing ? { author: 'Редактирование', text: editing.original.text, tone: peerTone(me.userId), icon: 'pencil' } : fwdQuote ? fwdQuote : replyTo ? { author: authorOf(replyTo.senderId), text: replyTo.body, tone: peerTone(replyTo.senderId) } : null}
+        replyTo={editing ? { author: 'Редактирование', text: editing.original.text, tone: peerTone(me.userId), icon: 'pencil' } : fwdQuote ? fwdQuote : !replyTo && lp?.link && !lp.off ? {
+          icon: 'link', author: lp.link.siteName || lp.link.title || lp.url, text: lp.link.description || lp.link.title || lp.url, tone: 5,
+          thumbSrc: lp.link.photo ? `/files/${lp.link.photo.id}` : undefined,
+        } : replyTo ? { author: authorOf(replyTo.senderId), text: replyTo.body, tone: peerTone(replyTo.senderId) } : null}
         onCancelReply={() => {
           if (editing) { endEdit(editing.draft); return; } // правку отменили — вернуть черновик
           if (fwd) { cancelForwardDraft(chatId); return; }
+          if (!replyTo && lp?.link && !lp.off) { setLp({ ...lp, off: true }); api.current?.focus({ end: true }); return; }   // крестик у превью — отправить без него; фокус — обратно в поле
           setReplyKey(null);
         }}
         onChange={onType}
@@ -397,7 +417,11 @@ export function Chat({ chatId, frameKey, active }: { chatId: number; frameKey: s
           typingDone(chatId);
           const out = applyMarkdown(v);   // **жирный**, `код`, [текст](ссылка)… — в оформление
           if (fwd) return sendForwardDraft(chatId, out.text, out.entities);   // комментарий первым, затем пересланное
-          const sent = send(chatId, out.text, (replyTo?.id as number) ?? null, out.entities);
+          // превью: убрали крестиком — без него; уже загружено для этой ссылки — сразу в ленте, до ответа сервера
+          const url = firstUrl(out.text, out.entities);
+          const pv = lp && url === lp.url ? (lp.off ? { noLinkPreview: true } : { link: lp.link }) : {};
+          lpUrl.current = null; setLp(null);
+          const sent = send(chatId, out.text, (replyTo?.id as number) ?? null, out.entities, pv);
           setReplyKey(null);
           return sent;   // поле очистится, когда сообщение встанет в ленту
         }}
