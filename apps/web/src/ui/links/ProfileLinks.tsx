@@ -5,7 +5,7 @@ import { LINK_TITLE } from './LinkEdit';
 import { ServiceIcon } from './ServiceIcon';
 
 const STACK = 3;          // сколько значков видно в свёрнутой строке; всего — в счётчике рядом
-const FLY_MS = 420, STEP_MS = 70, EASE = 'cubic-bezier(.22, .9, .3, 1)';
+const FLY_MS = 420, STEP_MS = 70, TURN_MS = 230, SHIFT_MS = 200, EASE = 'cubic-bezier(.22, .9, .3, 1)';
 
 /** Одна ссылка — строка как @username: значок сервиса, адрес, название сервиса; клик открывает сайт. */
 function LinkRow({ link }: { link: ProfileLink }) {
@@ -21,8 +21,8 @@ function LinkRow({ link }: { link: ProfileLink }) {
  * Полёт значка между стопкой в заголовке и строкой списка: копия в body (список обрезан своей высотой,
  * копию это не касается), оригиналы на время полёта скрыты. Возвращает обещание конца полёта.
  */
-function fly(from: HTMLElement, to: HTMLElement, delay: number): Promise<void> {
-  const a = from.getBoundingClientRect(), b = to.getBoundingClientRect();
+function fly(from: HTMLElement, to: HTMLElement, delay: number, fromRect?: DOMRect): Promise<void> {
+  const a = fromRect ?? from.getBoundingClientRect(), b = to.getBoundingClientRect();
   const ghost = from.cloneNode(true) as HTMLElement;
   const radius = getComputedStyle(from).borderRadius, radiusTo = getComputedStyle(to).borderRadius;
   Object.assign(ghost.style, { visibility: 'visible', position: 'fixed', left: a.left + 'px', top: a.top + 'px', width: a.width + 'px', height: a.height + 'px', margin: '0', zIndex: '1000', pointerEvents: 'none', transformOrigin: '0 0' });
@@ -58,19 +58,29 @@ export function ProfileLinks({ links }: { links: ProfileLink[] }) {
     busy.current = true;
     const flights: Promise<void>[] = [];
     if (dir === 'open') {
-      stack.forEach((s) => { s.style.visibility = 'hidden'; });
+      // по очереди с первого места стопки: улетел первый — остальные съезжают на шаг влево, следующий летит оттуда же
+      const slot0 = stack[0].getBoundingClientRect();
+      const step = stack.length > 1 ? stack[1].getBoundingClientRect().left - slot0.left : 0;
+      const shifts: Animation[] = [];
+      stack.forEach((s) => { s.style.visibility = 'visible'; });   // контейнер стопки уже скрыт (is-open) — значки показываем сами
       rows.forEach((r, i) => {
-        const delay = i * STEP_MS;
+        const delay = i * TURN_MS;
         const ic = icon(r), tx = text(r);
         if (i < stack.length) {
           ic.style.visibility = 'hidden';
-          flights.push(fly(stack[i], ic, delay).then(() => { ic.style.visibility = ''; }));
+          setTimeout(() => {
+            stack[i].style.visibility = 'hidden';
+            for (let j = i + 1; j < stack.length; j++) {
+              shifts.push(stack[j].animate([{ transform: `translateX(${-step * i}px)` }, { transform: `translateX(${-step * (i + 1)}px)` }], { duration: SHIFT_MS, easing: EASE, fill: 'forwards' }));
+            }
+          }, delay);
+          flights.push(fly(stack[i], ic, delay, slot0).then(() => { ic.style.visibility = ''; }));
         } else {
           ic.animate([{ opacity: 0, transform: 'scale(.6)' }, { opacity: 1, transform: 'none' }], { duration: 260, delay: delay + FLY_MS * 0.5, easing: EASE, fill: 'backwards' });
         }
         tx.animate([{ opacity: 0, transform: 'translateX(-10px)' }, { opacity: 1, transform: 'none' }], { duration: 280, delay: delay + FLY_MS * 0.6, easing: EASE, fill: 'backwards' });
       });
-      void Promise.all(flights).then(() => { stack.forEach((s) => { s.style.visibility = ''; }); busy.current = false; });
+      void Promise.all(flights).then(() => { shifts.forEach((a) => a.cancel()); stack.forEach((s) => { s.style.visibility = ''; }); busy.current = false; });
     } else {
       stack.forEach((s) => { s.style.visibility = 'hidden'; });
       const back = rows.slice(0, stack.length).reverse();

@@ -1067,11 +1067,12 @@ button.rl-tab:hover { color: var(--ink); }
 .rl-shell .rl-feed {
   --top-zone: calc(var(--header-h) + var(--space-float));
   --bottom-zone: calc(var(--composer-h, 48px) + var(--space-float));
-  margin: calc(-1 * var(--top-zone)) 0 calc(-1 * var(--bottom-zone));
-  padding: calc(var(--top-zone) + 8px) 0 calc(var(--bottom-zone) - 6px);   /* последнее сообщение ≈10px над полем ввода, как в Telegram */
-  /* низ ленты — по низу поля ввода: растворение начинается у его верхнего края, а не на 16px выше (задевало последний пузырь) */
-  -webkit-mask-image: linear-gradient(to bottom, transparent 0, transparent calc(var(--top-zone) * 0.35), #000 calc(var(--top-zone) + 4px), #000 calc(100% - var(--composer-h, 48px)), transparent calc(100% - var(--composer-h, 48px) * 0.4), transparent 100%);
-  mask-image: linear-gradient(to bottom, transparent 0, transparent calc(var(--top-zone) * 0.35), #000 calc(var(--top-zone) + 4px), #000 calc(100% - var(--composer-h, 48px)), transparent calc(100% - var(--composer-h, 48px) * 0.4), transparent 100%);
+  /* снизу лента уходит под поле ввода и дальше до края окна (поверх отступа оболочки), как в Telegram */
+  margin: calc(-1 * var(--top-zone)) 0 calc(-1 * (var(--bottom-zone) + var(--space-float)));
+  padding: calc(var(--top-zone) + 8px) 0 calc(var(--bottom-zone) + var(--space-float) - 6px);   /* последнее сообщение ≈10px над полем ввода, как в Telegram */
+  /* низ ленты не растворяется: как в Telegram, сообщения видны под полем ввода и вокруг него до края окна */
+  -webkit-mask-image: linear-gradient(to bottom, transparent 0, transparent calc(var(--top-zone) * 0.35), #000 calc(var(--top-zone) + 4px), #000 100%);
+  mask-image: linear-gradient(to bottom, transparent 0, transparent calc(var(--top-zone) * 0.35), #000 calc(var(--top-zone) + 4px), #000 100%);
 }
 .rl-shell .rl-scrolldown-slot { bottom: calc(var(--composer-h, 48px) + var(--space-float) - 8px); }   /* 8px над полем ввода */
 /* как в Telegram: круг размером с кнопку отправки, стрелка ↓, прямо над ней */
