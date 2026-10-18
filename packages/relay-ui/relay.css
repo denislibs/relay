@@ -141,7 +141,8 @@ body { margin: 0; font-family: var(--font-sans); color: var(--ink); background: 
   height: calc(var(--line) + 19px); min-height: calc(var(--line) + 19px); max-height: min(240px, 40vh); overflow: hidden;
   transition: height 120ms var(--ease-out); }
 .rl-composer-input-over { overflow-y: auto; overscroll-behavior: contain; scrollbar-width: thin; }
-.rl-composer-editable { box-sizing: border-box; min-height: 100%; padding: 9.5px 6px; outline: none; color: var(--ink); caret-color: var(--brand);
+.rl-composer-editable { box-sizing: border-box; min-height: calc(var(--line) + 19px);   /* не 100%: иначе пустое поле меряется высотой прежнего текста и не сжимается */
+   padding: 9.5px 6px; outline: none; color: var(--ink); caret-color: var(--brand);
   font: 400 var(--message-text-size, 15px)/var(--line) var(--font-sans); white-space: pre-wrap; overflow-wrap: anywhere; word-break: break-word; cursor: text; }
 .rl-composer-editable :is(b, strong) { font-weight: 600; }
 .rl-composer-editable code { font-family: var(--font-mono, ui-monospace, SFMono-Regular, Menlo, monospace); font-size: .92em; color: var(--brand-text, var(--brand)); }
