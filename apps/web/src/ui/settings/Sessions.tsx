@@ -7,6 +7,7 @@ import { back } from '../../nav';
 import { confirmSession, loadSessions, registerPrefetch, setSessionsTtl, terminateOtherSessions, terminateSession } from '../../settingsData';
 import { fullDateTime, sessionTime } from '../format';
 import { useLeaving } from '../useLeaving';
+import { QrScanner } from '../QrLogin';
 
 // список берётся с сервера по запросу: на главной странице настроек и при наведении на строку раздела
 registerPrefetch('settings/sessions', () => { void loadSessions(); });
@@ -41,6 +42,7 @@ export function Sessions() {
   const [menu, setMenu] = useState<{ x: number; y: number; id: number } | null>(null);
   const [details, setDetails] = useState<SessionInfo | null>(null);
   const [askAll, setAskAll] = useState(false);
+  const [scan, setScan] = useState(false);
 
   // при каждом открытии — свежий список («в сети», последняя активность); пока он идёт, на экране прежний
   useEffect(() => { void loadSessions(true); }, []);
@@ -75,6 +77,9 @@ export function Sessions() {
     <div class="rl-sidepage" aria-label="Активные сеансы">
       <PanelHeader icon="arrowLeft" closeLabel="Назад" title="Активные сеансы" onClose={() => void back()} />
       <div class="rl-settings">
+        <Section footer="Отсканируйте QR-код на экране входа другого устройства, чтобы войти там без кода.">
+          <InfoRow tile="green" icon="qr" title="Подключить устройство" onClick={() => setScan(true)} />
+        </Section>
         <div class="app-listwrap">
           <Presence show={skeleton} exitMs={280}>
             <div class="app-skel" aria-busy="true" aria-label="Загрузка сеансов">
@@ -144,6 +149,7 @@ export function Sessions() {
           {locked && !shown.current ? <p class="app-session-note">{LOCKED_HINT}</p> : null}
         </Modal>
       ) : null}
+      {scan ? <QrScanner onClose={() => setScan(false)} /> : null}
       <ConfirmDialog open={askAll} danger title="Завершить все другие сеансы?" text="Relay выйдет из аккаунта на всех устройствах, кроме этого." confirm="Завершить" cancel="Отмена"
         onCancel={() => setAskAll(false)} onConfirm={() => { setAskAll(false); void terminateOtherSessions(); }} />
     </div>

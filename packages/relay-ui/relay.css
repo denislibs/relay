@@ -1322,6 +1322,46 @@ html[data-blur="0"] .rl-shell .rl-msgmenu .rl-menu, html[data-blur="0"] .rl-shel
 .rl-aside-pages .rl-slide:not(.rl-slide-parked):not(.rl-slide-out-push):not(.rl-slide-out-pop) { position: relative; inset: auto; width: 100%; }
 .rl-aside-pages .rl-aside-links { overflow: visible; }
 
+/* ---------- Owl: персонаж экрана входа ---------- */
+.rl-owl { --owl-body: #8b6a50; --owl-dark: #6d5240; --owl-belly: #ecdcc8; --owl-face: #f5e9da; --owl-eye: #fff; --owl-pupil: #2b2118; --owl-beak: #f2a33a; display: block; overflow: visible; }
+:root[data-theme="dark"] .rl-owl { --owl-body: #7d614b; --owl-dark: #5d4535; --owl-belly: #d9c6af; --owl-face: #e9d9c5; }
+@media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) .rl-owl { --owl-body: #7d614b; --owl-dark: #5d4535; --owl-belly: #d9c6af; --owl-face: #e9d9c5; } }
+.rl-owl-shadow { fill: var(--ink); opacity: .1; }
+.rl-owl-feet { fill: var(--owl-beak); }
+.rl-owl-body { fill: var(--owl-body); }
+.rl-owl-tuft, .rl-owl-wing { fill: var(--owl-dark); }
+.rl-owl-belly { fill: var(--owl-belly); }
+.rl-owl-marks { fill: none; stroke: var(--owl-dark); stroke-width: 1.6; stroke-linecap: round; stroke-linejoin: round; opacity: .55; }
+.rl-owl-face { fill: var(--owl-face); }
+.rl-owl-eye { fill: var(--owl-eye); }
+.rl-owl-pupil { fill: var(--owl-pupil); transition: transform .38s cubic-bezier(.3, .8, .4, 1); }
+.rl-owl-glint { fill: #fff; }
+.rl-owl-beak { fill: var(--owl-beak); }
+.rl-owl-lid { fill: var(--owl-face); transform-box: fill-box; transform-origin: 50% 0; transform: scaleY(0); }
+.rl-owl-head { transform-box: view-box; transform-origin: 60px 104px; transition: transform .5s cubic-bezier(.3, .8, .4, 1); }
+/* назад к «ожиданию» — быстро, как у оригинала */
+.rl-owl--idle .rl-owl-pupil, .rl-owl--idle .rl-owl-head { transition-duration: .18s; }
+.rl-owl--idle .rl-owl-breath { transform-box: view-box; transform-origin: 60px 110px; animation: rl-owl-breath 2.8s ease-in-out infinite; }
+.rl-owl--idle .rl-owl-lid, .rl-owl--track .rl-owl-lid { animation: rl-owl-blink 4.6s infinite; }
+@keyframes rl-owl-breath { 0%, 100% { transform: none; } 50% { transform: scale(1.018, 1.03); } }
+@keyframes rl-owl-blink { 0%, 93%, 100% { transform: scaleY(0); } 96% { transform: scaleY(1); } }
+/* крылья: в покое — по бокам; пароль — поднимаются к глазам */
+.rl-owl-wing { transform-box: fill-box; transition: transform .3s cubic-bezier(.3, .8, .4, 1), opacity .2s; }
+.rl-owl-wing-l { transform-origin: 30% 0; }
+.rl-owl-wing-r { transform-origin: 70% 0; }
+.rl-owl-cover { fill: var(--owl-dark); transform-box: view-box; transform-origin: var(--x) 60px; opacity: 0; transform: translateY(40px) rotate(-28deg) scale(.5); transition: transform .34s cubic-bezier(.3, .9, .35, 1.08), opacity .16s; }
+.rl-owl-cover-r { transform: translateY(40px) rotate(28deg) scale(.5); }
+.rl-owl-cover path { stroke: var(--owl-body); stroke-width: 1.2; stroke-linejoin: round; }
+.rl-owl--cover .rl-owl-wing { opacity: 0; transform: scaleY(.4); }
+.rl-owl--cover .rl-owl-cover { opacity: 1; transform: none; }
+.rl-owl--cover .rl-owl-lid { transform: scaleY(1); animation: none; }
+/* подглядывает: правое крыло опускается и чуть отходит, глаз открыт */
+.rl-owl--cover.rl-owl--peek .rl-owl-cover-r { transform: translate(5px, 12px) rotate(16deg); }
+.rl-owl--cover.rl-owl--peek .rl-owl-lid { transform: scaleY(0); }
+@media (prefers-reduced-motion: reduce) {
+  .rl-owl * { animation: none !important; transition-duration: 1ms !important; }
+}
+
 /* ---------- запись голосового / кружка: панель на месте поля ввода ---------- */
 .rl-composer-recording .rl-composer-field[hidden] { display: none; }
 .rl-recbar { flex: 1; min-width: 0; display: flex; align-items: center; gap: .25rem; min-height: 40px; animation: rl-recbar-in 200ms var(--ease-out) both; }
