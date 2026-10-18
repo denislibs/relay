@@ -5,7 +5,7 @@ import { LINK_TITLE } from './LinkEdit';
 import { ServiceIcon } from './ServiceIcon';
 
 const STACK = 3;          // сколько значков видно в свёрнутой строке; всего — в счётчике рядом
-const FLY_MS = 420, STEP_MS = 70, TURN_MS = 230, SHIFT_MS = 200, EASE = 'cubic-bezier(.22, .9, .3, 1)';
+const FLY_MS = 420, STEP_MS = 70, CLOSE_TURN_MS = 150, SHIFT_MS = 220, EASE = 'cubic-bezier(.22, .9, .3, 1)';
 
 /** Одна ссылка — строка как @username: значок сервиса, адрес, название сервиса; клик открывает сайт. */
 function LinkRow({ link }: { link: ProfileLink }) {
@@ -37,8 +37,8 @@ function fly(from: HTMLElement, to: HTMLElement, delay: number, fromRect?: DOMRe
 
 /**
  * Ссылки профиля в карточке информации. Одна — сразу строкой с адресом. Несколько — одна строка «Ссылки»
- * со счётчиком и стопкой значков; по клику значки по очереди спускаются каждый в свою строку,
- * за ним проявляется адрес. Сворачивание — тот же путь обратно.
+ * со счётчиком и стопкой значков; по клику значки слетают каждый в свою строку, за ним проявляется адрес.
+ * Сворачивание — по одному сверху: значок улетает в стопку, строки ниже поднимаются на его место.
  */
 export function ProfileLinks({ links }: { links: ProfileLink[] }) {
   const [open, setOpen] = useState(false);
@@ -50,66 +50,84 @@ export function ProfileLinks({ links }: { links: ProfileLink[] }) {
   useLayoutEffect(() => {
     const dir = pending.current, el = root.current;
     pending.current = null;
-    if (!dir || !el) return;
+    if (dir !== 'open' || !el) return;
     const stack = [...el.querySelectorAll<HTMLElement>('.app-plinks-stack .app-svc')];
     const rows = [...el.querySelectorAll<HTMLElement>('.app-plinks-item')];
     const icon = (r: HTMLElement) => r.querySelector<HTMLElement>('.app-svc')!;
     const text = (r: HTMLElement) => r.querySelector<HTMLElement>('.app-plink-text')!;
     busy.current = true;
     const flights: Promise<void>[] = [];
-    if (dir === 'open') {
-      // по очереди с первого места стопки: улетел первый — остальные съезжают на шаг влево, следующий летит оттуда же
-      const slot0 = stack[0].getBoundingClientRect();
-      const step = stack.length > 1 ? stack[1].getBoundingClientRect().left - slot0.left : 0;
-      const shifts: Animation[] = [];
-      stack.forEach((s) => { s.style.visibility = 'visible'; });   // контейнер стопки уже скрыт (is-open) — значки показываем сами
-      rows.forEach((r, i) => {
-        const delay = i * TURN_MS;
-        const ic = icon(r), tx = text(r);
-        if (i < stack.length) {
-          ic.style.visibility = 'hidden';
-          setTimeout(() => {
-            stack[i].style.visibility = 'hidden';
-            for (let j = i + 1; j < stack.length; j++) {
-              shifts.push(stack[j].animate([{ transform: `translateX(${-step * i}px)` }, { transform: `translateX(${-step * (i + 1)}px)` }], { duration: SHIFT_MS, easing: EASE, fill: 'forwards' }));
-            }
-          }, delay);
-          flights.push(fly(stack[i], ic, delay, slot0).then(() => { ic.style.visibility = ''; }));
-        } else {
-          ic.animate([{ opacity: 0, transform: 'scale(.6)' }, { opacity: 1, transform: 'none' }], { duration: 260, delay: delay + FLY_MS * 0.5, easing: EASE, fill: 'backwards' });
-        }
-        tx.animate([{ opacity: 0, transform: 'translateX(-10px)' }, { opacity: 1, transform: 'none' }], { duration: 280, delay: delay + FLY_MS * 0.6, easing: EASE, fill: 'backwards' });
-      });
-      void Promise.all(flights).then(() => { shifts.forEach((a) => a.cancel()); stack.forEach((s) => { s.style.visibility = ''; }); busy.current = false; });
-    } else {
-      stack.forEach((s) => { s.style.visibility = 'hidden'; });
-      const back = rows.slice(0, stack.length).reverse();
-      back.forEach((r, j) => {
-        const i = rows.indexOf(r);
-        const ic = icon(r);
-        flights.push(fly(ic, stack[i], j * STEP_MS).then(() => { stack[i].style.visibility = ''; }));
+    // открытие: значки разом (с лёгкой лесенкой) слетают из стопки каждый в свою строку, за ним — адрес
+    stack.forEach((s) => { s.style.visibility = 'hidden'; });
+    rows.forEach((r, i) => {
+      const delay = i * STEP_MS;
+      const ic = icon(r), tx = text(r);
+      if (i < stack.length) {
         ic.style.visibility = 'hidden';
-      });
-      void Promise.all(flights).then(() => { rows.forEach((r) => { icon(r).style.visibility = ''; }); busy.current = false; });
-    }
+        flights.push(fly(stack[i], ic, delay).then(() => { ic.style.visibility = ''; }));
+      } else {
+        ic.animate([{ opacity: 0, transform: 'scale(.6)' }, { opacity: 1, transform: 'none' }], { duration: 260, delay: delay + FLY_MS * 0.5, easing: EASE, fill: 'backwards' });
+      }
+      tx.animate([{ opacity: 0, transform: 'translateX(-10px)' }, { opacity: 1, transform: 'none' }], { duration: 280, delay: delay + FLY_MS * 0.6, easing: EASE, fill: 'backwards' });
+    });
+    void Promise.all(flights).then(() => { stack.forEach((s) => { s.style.visibility = ''; }); busy.current = false; });
   }, [open]);
 
   if (!links.length) return null;
   if (links.length === 1) return <LinkRow link={links[0]} />;
 
+  /**
+   * Сворачивание по очереди сверху: улетает в стопку первый значок (его адрес тает), строки ниже
+   * поднимаются на его место, улетает следующий — и так до конца; потом список схлопывается.
+   */
+  const close = () => {
+    const el = root.current;
+    if (!el) { setOpen(false); return; }
+    const stack = [...el.querySelectorAll<HTMLElement>('.app-plinks-stack .app-svc')];
+    const rows = [...el.querySelectorAll<HTMLElement>('.app-plinks-item')];
+    const icon = (r: HTMLElement) => r.querySelector<HTMLElement>('.app-svc')!;
+    const text = (r: HTMLElement) => r.querySelector<HTMLElement>('.app-plink-text')!;
+    const rowH = rows.length > 1 ? rows[1].getBoundingClientRect().top - rows[0].getBoundingClientRect().top : 0;
+    const first = icon(rows[0]).getBoundingClientRect();
+    const anims: Animation[] = [];
+    const flights: Promise<void>[] = [];
+    busy.current = true;
+    stack.forEach((s) => { s.style.visibility = 'hidden'; });
+    rows.forEach((r, i) => {
+      const at = i * CLOSE_TURN_MS;
+      const ic = icon(r);
+      anims.push(text(r).animate([{ opacity: 1 }, { opacity: 0 }], { duration: 140, delay: at, easing: 'ease', fill: 'forwards' }));
+      if (i < stack.length) {
+        flights.push(new Promise((done) => setTimeout(() => {
+          void fly(ic, stack[i], 0, first).then(() => { stack[i].style.visibility = 'visible'; done(); });
+          ic.style.visibility = 'hidden';
+        }, at)));
+      } else {
+        anims.push(ic.animate([{ opacity: 1, transform: 'none' }, { opacity: 0, transform: 'scale(.6)' }], { duration: 180, delay: at, easing: EASE, fill: 'forwards' }));
+      }
+      // строки ниже поднимаются на освободившееся место
+      for (let j = i + 1; j < rows.length; j++) {
+        anims.push(rows[j].animate([{ transform: `translateY(${-rowH * i}px)` }, { transform: `translateY(${-rowH * (i + 1)}px)` }], { duration: SHIFT_MS, delay: at + 60, easing: EASE, fill: 'forwards' }));
+      }
+    });
+    void Promise.all(flights).then(() => {
+      rows.forEach((r) => { r.style.opacity = '0'; });
+      setOpen(false);
+      setTimeout(() => {
+        anims.forEach((a) => a.cancel());
+        rows.forEach((r) => { r.style.opacity = ''; icon(r).style.visibility = ''; });
+        stack.forEach((s) => { s.style.visibility = ''; });
+        busy.current = false;
+      }, 380);
+    });
+  };
+
   const toggle = () => {
     if (busy.current) return;
     if (reducedMotion()) { setOpen((v) => !v); return; }
-    if (open) {
-      // сначала тают адреса, потом значки летят обратно и список сворачивается
-      const texts = [...(root.current?.querySelectorAll<HTMLElement>('.app-plink-text') ?? [])];
-      texts.forEach((t) => t.animate([{ opacity: 1 }, { opacity: 0 }], { duration: 120, fill: 'forwards' }).finished.then(() => setTimeout(() => t.getAnimations().forEach((a) => a.cancel()), FLY_MS + 400)));
-      pending.current = 'close';
-      setTimeout(() => setOpen(false), 90);
-    } else {
-      pending.current = 'open';
-      setOpen(true);
-    }
+    if (open) { close(); return; }
+    pending.current = 'open';
+    setOpen(true);
   };
 
   return (
