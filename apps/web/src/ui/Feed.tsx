@@ -1,6 +1,6 @@
 import type { Item } from '@relay/sync-engine/src/types';
 import type { Entity } from '@relay/protocol';
-import { Bubble, peerTone, DateDivider, FileBubble, MediaBubble, MessageText, VoiceBubble, player, MediaViewer, ScrollToBottom, forceMeasure, isHeavyAnimating, onHeavyAnimationEnd, requestMeasure, requestMutation } from '@relay/ui';
+import { Bubble, peerTone, DateDivider, FileBubble, MediaBubble, MessageText, VoiceBubble, RoundBubble, player, MediaViewer, ScrollToBottom, forceMeasure, isHeavyAnimating, onHeavyAnimationEnd, requestMeasure, requestMutation } from '@relay/ui';
 import { memo } from 'preact/compat';
 import { useEffect, useLayoutEffect, useRef, useState } from 'preact/hooks';
 import { ensureNames, focusMessage, localPreview, markListened, moveWindow, react, savePosition, savedPosition, seen } from '../data';
@@ -71,6 +71,22 @@ const Row = memo(function Row({ onOpen, hl, m, meId, chatId, author, out, start,
           uploading={pending} progress={m.progress as number}
           time={clock(m.createdAt as string)} status={out ? m.status : undefined}
           track={() => voiceTrack(m, att, chatId, author, out)}
+        />
+        {mark}
+      </div>
+    );
+  }
+  if (att && !m.deleted && att.kind === 'round') {
+    const unseen = m.id != null && !m.listened;
+    return (
+      <div class={flash ? 'app-msg app-msg-flash' : 'app-msg'} data-key={m.key} data-sort={m.sort as number}>
+        <RoundBubble
+          from={out ? 'out' : 'in'} groupStart={start} appear={appear}
+          src={localPreview(m.key as string) ?? (att.id ? fileUrl(att) : undefined)} thumb={att.thumb ?? null}
+          duration={att.duration ?? 0} unread={unseen}
+          uploading={pending} progress={m.progress as number}
+          time={clock(m.createdAt as string)} status={out ? m.status : undefined}
+          onListened={!out && unseen ? () => markListened(chatId, m.id as number) : undefined}
         />
         {mark}
       </div>

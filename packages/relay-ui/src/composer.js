@@ -12,6 +12,7 @@ import { cx, Icon, IconButton, Presence, ReplyQuote, reducedMotion, ripple } fro
 import { AttachMenu, MentionList, Menu } from './more.js';
 import { peakHub, RecordBar, voiceSession } from './media/recording.js';
 import { startVoice } from './media/voiceRecorder.js';
+import { RoundRecorderView } from './media/roundView.js';
 import { requestMeasure, requestMutation } from './schedule.js';
 import { covers, emptyValue, readDom, replaceContent, safeUrl, setSelection, splice, toggleFormat, toHtml, trimValue, valueFromClipboard } from './richtext.js';
 
@@ -58,6 +59,7 @@ function Composer(props) {
   recNow.current = rec[0];
   var recToken = useRef(0);
   var modeMenu = useState(false);
+  var roundView = useState(null);   // { session, closing } — круг живёт чуть дольше записи, чтобы уехать
   var modes = props.recordModes || [];
   var recordMode = modes.indexOf(props.recordMode) >= 0 ? props.recordMode : modes[0] || null;
 
@@ -145,6 +147,7 @@ function Composer(props) {
       // пока ждали разрешения, запись отменили или начали другую — выключаем микрофон/камеру
       if (token !== recToken.current) { session.stop(true); return; }
       rec[1]({ mode: mode, session: session, limit: false });
+      if (session.kind === 'round') roundView[1]({ session: session, closing: false });
       if (session.onLimit) session.onLimit(function () { if (recNow.current && recNow.current.session === session) rec[1](Object.assign({}, recNow.current, { limit: true })); });
       if (latest.current.onRecording) latest.current.onRecording(mode);
     }, function (err) {
@@ -158,6 +161,7 @@ function Composer(props) {
     if (!r) return;
     rec[1](null);
     if (latest.current.onRecording) latest.current.onRecording(null);
+    if (r.session.kind === 'round') { roundView[1]({ session: r.session, closing: true }); setTimeout(function () { roundView[1](function (v) { return v && v.session === r.session ? null : v; }); }, 300); }
     r.session.stop(cancel).then(function (res) {
       if (cancel || !res) return;
       var cb = r.mode === 'round' ? latest.current.onSendRound : latest.current.onSendVoice;
@@ -440,6 +444,7 @@ function Composer(props) {
           { icon: 'roundVideo', label: 'Видеосообщение', onClick: function () { modeMenu[1](false); if (props.onRecordModeChange) props.onRecordModeChange('round'); } },
         ] }))),
     h('div', { class: cx('rl-composer', rec[0] && 'rl-composer-recording') },
+      roundView[0] ? h(RoundRecorderView, { key: 'round', session: roundView[0].session, closing: roundView[0].closing }) : null,
       rec[0] ? h(RecordBar, { key: 'rec', session: rec[0].session, limitReached: rec[0].limit, forcePaused: rec[0].limit, onDelete: function () { endRecording(true); }, onPaused: props.onRecordPaused }) : null,
       h('div', { class: cx('rl-composer-field', st.empty && 'rl-composer-empty'), hidden: !!rec[0] },
         h(IconButton, { icon: attach[0] ? 'close' : 'attach', label: attach[0] ? 'Закрыть вложения' : 'Прикрепить', active: attach[0], class: 'rl-attach-toggle', onClick: function () { attach[1](!attach[0]); } }),

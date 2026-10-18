@@ -1,4 +1,4 @@
-import { Avatar, Button, MediaPolicy, peerTone, ChatSearchBar, Highlight, ripple, useMinVisible, requestMeasure, Composer, DropOverlay, GlassBar, IconButton, Menu, Modal, Presence, ReactionPicker, requestMutation, applyMarkdown, emptyValue, sameValue, voiceSupported, PlayerBar } from '@relay/ui';
+import { Avatar, Button, MediaPolicy, peerTone, ChatSearchBar, Highlight, ripple, useMinVisible, requestMeasure, Composer, DropOverlay, GlassBar, IconButton, Menu, Modal, Presence, ReactionPicker, requestMutation, applyMarkdown, emptyValue, sameValue, voiceSupported, PlayerBar, roundSupported, startRound } from '@relay/ui';
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'preact/hooks';
 import { sendVoice, sendRound, deleteMessage, editMessage, ensureNames, focusMessage, sendFile, openChat, react, saveDraft, searchMessages, send, typing, typingDone } from '../data';
 import type { Item, SearchHit } from '@relay/sync-engine/src/types';
@@ -28,9 +28,9 @@ export function Chat({ chatId }: { chatId: number }) {
   const [replyKey, setReplyKey] = useState<string | null>(null);
   const [editing, setEditing] = useState<{ id: number; original: Value; draft: Value } | null>(null);   // правка своего сообщения
   const api = useRef<ComposerApi | null>(null);
-  // запись: голосовое есть, если браузер умеет Opus через WebCodecs; кружок — позже (свой модуль)
+  // запись: голосовое — если браузер умеет Opus через WebCodecs, кружок — если умеет MP4 из canvas (не Safari)
   const [recordModes, setRecordModes] = useState<string[]>([]);
-  useEffect(() => { let live = true; voiceSupported().then((ok: boolean) => { if (live) setRecordModes(ok ? ['voice'] : []); }); return () => { live = false; }; }, []);
+  useEffect(() => { let live = true; voiceSupported().then((ok: boolean) => { if (live) setRecordModes([...(ok ? ['voice'] : []), ...(roundSupported() ? ['round'] : [])]); }); return () => { live = false; }; }, []);
   const [recordMode, setRecordMode] = useState<string>(() => { try { return localStorage.getItem('relay.recordMode') || 'voice'; } catch { return 'voice'; } });
   const [confirmDelete, setConfirmDelete] = useState<{ id: number } | null>(null);
   // поиск по чату: строка вместо шапки, совпадения новые → старые, Enter — к более старому
@@ -305,6 +305,7 @@ export function Chat({ chatId }: { chatId: number }) {
         onReplyNav={replyNav}
         chatKey={chatId}
         recordModes={recordModes}
+        startRound={startRound}
         recordMode={recordMode}
         onRecordModeChange={(m: string) => { setRecordMode(m); try { localStorage.setItem('relay.recordMode', m); } catch { /* без хранилища — до перезагрузки */ } }}
         onRecordError={(err: { name?: string }, mode: string) => showToast(err?.name === 'NotAllowedError' || err?.name === 'NotFoundError'

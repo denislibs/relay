@@ -14,3 +14,6 @@ export * from './media/recording.js';
 export * as player from './media/player.js';
 export * from './media/voiceBubble.js';
 export * from './media/playerBar.js';
+export * from './media/roundRecorder.js';
+export * from './media/roundView.js';
+export * from './media/roundBubble.js';
