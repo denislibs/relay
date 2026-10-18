@@ -319,8 +319,9 @@ html[data-blur="0"] .app-sidemenu .rl-menu, html[data-blur="0"] .app-pagemenu .r
 .app-banner-slot { display: grid; grid-template-rows: 1fr; opacity: 1; transition: grid-template-rows 220ms var(--ease-standard), opacity 180ms var(--ease-standard); animation: app-banner-in 240ms var(--ease-out) backwards; }
 .rl-presence[data-state="closing"] .app-banner-slot { grid-template-rows: 0fr; opacity: 0; }
 @keyframes app-banner-in { from { grid-template-rows: 0fr; opacity: 0; } }
+.app-banner-instant { animation: none; }
 .app-banner-clip { min-height: 0; overflow: hidden; }
-.app-banner { position: relative; display: flex; align-items: center; gap: var(--space-3); margin: 6px 12px 2px; padding: 10px 40px 10px 14px; border-radius: 16px; background: var(--field); color: var(--ink); cursor: pointer; overflow: hidden; transition: background-color var(--dur-instant) var(--ease-standard); }
+.app-banner { position: relative; display: flex; align-items: center; gap: var(--space-3); margin: 6px 12px 8px; padding: 10px 40px 10px 14px; border-radius: 16px; background: var(--field); color: var(--ink); cursor: pointer; overflow: hidden; transition: background-color var(--dur-instant) var(--ease-standard); }
 .app-banner:hover { background: var(--hover); }
 .app-banner:focus-visible { outline: 2px solid var(--brand-text); outline-offset: -2px; }
 .app-banner-text { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px; }

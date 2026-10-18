@@ -3,7 +3,7 @@ import { useEffect, useMemo, useRef, useState } from 'preact/hooks';
 import { dismiss, loadDismissed, pickBanner, saveDismissed, sessionsSeen, type Banner } from '../banners';
 import { getGlobal, useGlobal } from '../global';
 import { go } from '../nav';
-import { setNotify } from '../notify';
+import { notifyState, setNotify } from '../notify';
 import { confirmSession, showToast, terminateSession } from '../settingsData';
 import { openDirect } from './contacts/Contacts';
 
@@ -15,8 +15,14 @@ const TEXT = {
 } as const;
 
 /** Подсказка над вкладками: одна, первая подходящая; раскрывается по высоте и так же сворачивается. */
+// подсказка, пришедшая вместе с первой загрузкой страницы, стоит на месте сразу — не раздвигает список на глазах
+const BOOT_MS = 2500;
+const bootAt = typeof performance !== 'undefined' ? performance.now() : 0;
+
 export function ChatBanner() {
-  const notify = useGlobal((s) => s.notify);
+  const stored = useGlobal((s) => s.notify);
+  // до startNotify в global ещё заглушка — спрашиваем браузер сами, чтобы подсказка встала вместе со списком, а не следом
+  const notify = stored === 'unsupported' ? notifyState() : stored;
   const me = useGlobal((s) => s.me);
   const contacts = useGlobal((s) => s.contacts) as unknown as Contact[];
   const loaded = useGlobal((s) => s.contactsLoaded);
@@ -62,6 +68,9 @@ export function ChatBanner() {
   const last = useRef<Banner | null>(null);
   if (cur) last.current = cur;
   const b = cur ?? last.current;
+  const instant = useRef<boolean | null>(null);
+  if (shown && instant.current == null) instant.current = performance.now() - bootAt < BOOT_MS;
+  else if (!shown && instant.current) instant.current = false;   // следующие подсказки уже раскрываются плавно
 
   const close = (x: Banner) => {
     const d = dismiss(dismissed, x, new Date());
@@ -80,7 +89,7 @@ export function ChatBanner() {
   return (
     <Presence show={!!shown} exitMs={220}>
       {b ? (
-        <div class="app-banner-slot">
+        <div class={'app-banner-slot' + (instant.current ? ' app-banner-instant' : '')}>
           <div class="app-banner-clip">
             {b.kind === 'unconfirmed' ? (
               // без крестика и без клика по всей плашке: закрывается только ответом
