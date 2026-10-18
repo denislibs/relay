@@ -1,6 +1,7 @@
 // Фото профиля: свои — загрузка (обрезанное в AvatarCropper 640 + 160 + превью) и удаление;
 // чужие — откуда брать картинку для Avatar. Файлы — обычные /files/<id>: их кэширует service worker (relay-media).
-import type { ProfilePhoto } from '@relay/protocol';
+import type { ProfilePhoto, UserPhoto } from '@relay/protocol';
+import { useEffect, useState } from 'preact/hooks';
 import type { Me } from './global';
 
 /** Пропсы Avatar для фото: маленькое — для списков, большое (big) — для профиля. Нет фото — пусто (инициалы). */
@@ -14,9 +15,13 @@ async function post<T>(path: string, body?: unknown): Promise<T> {
   return r.json() as Promise<T>;
 }
 
-/** Три шага загрузки, как у вложений: заявка → PUT прямо в хранилище → подтверждение. */
-async function upload(blob: Blob, side: number): Promise<string> {
-  const intent = await post<{ id: string; url: string; mime: string }>('/uploads', { name: 'photo.jpg', mime: 'image/jpeg', size: blob.size, w: side, h: side });
+/** Три шага загрузки, как у вложений: заявка → PUT прямо в хранилище → подтверждение.
+ *  Видео-аватарка идёт как квадратное видео (kind round): сервер запомнит сторону и длительность. */
+async function upload(blob: Blob, side: number, video?: { duration: number }): Promise<string> {
+  const meta = video
+    ? { name: 'avatar.' + (blob.type.includes('mp4') ? 'mp4' : 'webm'), mime: blob.type.split(';')[0], size: blob.size, w: side, h: side, kind: 'round', duration: Math.max(1, Math.round(video.duration)) }
+    : { name: 'photo.jpg', mime: 'image/jpeg', size: blob.size, w: side, h: side };
+  const intent = await post<{ id: string; url: string; mime: string }>('/uploads', meta);
   const put = await fetch(intent.url, { method: 'PUT', body: blob, headers: { 'content-type': intent.mime } });
   if (!put.ok) throw new Error('upload');
   return (await post<{ id: string }>(`/uploads/${intent.id}/confirm`)).id;
@@ -28,11 +33,61 @@ async function json(r: Response): Promise<Me> {
 }
 
 /** Поставить фото. Собеседники получат его через журнал (userUpdated), свой профиль — тоже. */
-export async function setProfilePhoto(c: { big: Blob; small: Blob; thumb: string }): Promise<Me> {
-  const [id, small] = await Promise.all([upload(c.big, 640), upload(c.small, 160)]);
-  return json(await fetch('/me/photo', { method: 'PUT', credentials: 'include', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ id, small, thumb: c.thumb }) }));
+export async function setProfilePhoto(c: { big: Blob; small: Blob; thumb: string; video?: { blob: Blob; side: number; duration: number } }): Promise<Me> {
+  const [id, small, video] = await Promise.all([upload(c.big, 640), upload(c.small, 160), c.video ? upload(c.video.blob, c.video.side, c.video) : undefined]);
+  const me = await json(await fetch('/me/photo', { method: 'PUT', credentials: 'include', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ id, small, thumb: c.thumb, ...(video ? { video } : {}) }) }));
+  invalidatePhotos(me.userId);
+  return me;
 }
 
-export async function removeProfilePhoto(): Promise<Me> {
-  return json(await fetch('/me/photo', { method: 'DELETE', credentials: 'include' }));
+/** Удалить фото: без pid — главное, с pid — любое из истории. */
+export async function removeProfilePhoto(pid?: number): Promise<Me> {
+  const me = await json(await fetch(pid ? `/me/photos/${pid}` : '/me/photo', { method: 'DELETE', credentials: 'include' }));
+  invalidatePhotos(me.userId);
+  return me;
+}
+
+export async function setMainPhoto(pid: number): Promise<Me> {
+  const me = await json(await fetch(`/me/photos/${pid}/main`, { method: 'PUT', credentials: 'include' }));
+  invalidatePhotos(me.userId);
+  return me;
+}
+
+// ---------- история фото: кэш на сессию вкладки ----------
+// Ключ — человек + его главное фото: сменилось главное (userUpdated) — история перечитается сама.
+const cache = new Map<string, Promise<UserPhoto[]>>();
+const listeners = new Set<() => void>();
+function invalidatePhotos(userId: number): void {
+  for (const k of [...cache.keys()]) if (k.startsWith(userId + ':')) cache.delete(k);
+  for (const f of listeners) f();
+}
+function load(userId: number, key: string): Promise<UserPhoto[]> {
+  let p = cache.get(key);
+  if (!p) {
+    p = fetch(`/users/${userId}/photos?limit=100`, { credentials: 'include' })
+      .then((r) => (r.ok ? r.json() : { photos: [] }))
+      .then((j: { photos: UserPhoto[] }) => j.photos, () => { cache.delete(key); return []; });
+    cache.set(key, p);
+  }
+  return p;
+}
+
+/**
+ * История фото профиля (главное первым). Пока не загрузилась — одно главное фото из профиля,
+ * чтобы шапка не мигала; без фото — пусто.
+ */
+export function useProfilePhotos(userId: number | null | undefined, main: ProfilePhoto | null | undefined): UserPhoto[] {
+  const key = userId ? `${userId}:${main?.pid ?? main?.id ?? 'none'}` : '';
+  const fallback: UserPhoto[] = main ? [{ pid: main.pid ?? 0, id: main.id, small: main.small, thumb: main.thumb, at: main.at, ...(main.video ? { video: main.video } : {}) }] : [];
+  const [list, setList] = useState<{ key: string; photos: UserPhoto[] } | null>(null);
+  const [rev, setRev] = useState(0);
+  useEffect(() => { const f = () => setRev((x) => x + 1); listeners.add(f); return () => { listeners.delete(f); }; }, []);
+  useEffect(() => {
+    if (!userId || !main) { setList(null); return; }
+    let live = true;
+    void load(userId, key).then((photos) => { if (live) setList({ key, photos }); });
+    return () => { live = false; };
+  }, [key, rev]);
+  if (!main) return [];
+  return list && list.key === key && list.photos.length ? list.photos : fallback;
 }

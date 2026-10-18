@@ -894,8 +894,11 @@ function visibleArea(el) {
 }
 function MediaViewer(props) {
   var idx = useState(props.index || 0);
-  var i = idx[0], items = props.items || [];
+  var items = props.items || [];
+  var i = Math.min(idx[0], Math.max(0, items.length - 1));   // список мог укоротиться (фото удалили)
   var it = items[i] || {};
+  useEffect(function () { if (props.onIndex) props.onIndex(i); }, [i]);
+  useEffect(function () { if (!items.length && props.onClose) props.onClose(); }, [items.length]);
   var closing = useState(false);
   var tick = useState(0);
   var root = useRef(null), box = useRef(null), hidden = useRef(null), closeRef = useRef(null);
@@ -982,7 +985,9 @@ function MediaViewer(props) {
   var media = real
     ? h('div', { class: 'rl-viewer-box', ref: box, style: rect ? { left: rect.left + 'px', top: rect.top + 'px', width: rect.width + 'px', height: rect.height + 'px' } : null },
         it.thumb ? h('img', { class: 'rl-viewer-thumb', src: it.thumb, alt: '', 'aria-hidden': 'true' }) : null,
-        h('img', { class: 'rl-viewer-img', src: it.src, alt: it.caption || '', decoding: 'async' }))
+        h('img', { class: 'rl-viewer-img', src: it.src, alt: it.caption || '', decoding: 'async' }),
+        // видео-аватарка и т.п.: зацикленное видео без звука поверх кадра-обложки
+        it.video ? h('video', { key: it.video, class: 'rl-viewer-img rl-viewer-loop', src: it.video, autoPlay: true, loop: true, muted: true, playsInline: true, disablePictureInPicture: true }) : null)
     : h('figure', { key: i, class: 'rl-viewer-media' },
         h(MediaArt, { seed: it.seed }),
         it.kind === 'video' ? h('span', { class: 'rl-media-center' }, h('span', { class: 'rl-media-play rl-media-play-lg' }, h(Icon, { name: 'play', size: 34 }))) : null,
@@ -992,10 +997,12 @@ function MediaViewer(props) {
       ref: function (n) { root.current = n; if (n && document.activeElement === document.body) n.focus(); } },
     h('div', { class: 'rl-viewer-backdrop', onClick: real ? close : undefined }),
     h('div', { class: 'rl-viewer-top' },
-      h(Avatar, { name: it.sender != null ? it.sender : props.sender, size: 40 }),   // автор этого фото, а не собеседник
+      h(Avatar, Object.assign({ name: it.sender != null ? it.sender : props.sender, size: 40 }, it.avatar || props.avatar)),   // автор этого фото, а не собеседник
       h('div', { class: 'rl-viewer-who' }, h('b', null, it.sender != null ? it.sender : props.sender), h('span', null, it.date || props.date)),
-      h(IconButton, { icon: 'zoomIn', label: 'Увеличить' }),
-      h(IconButton, { icon: 'reply', label: 'Ответить' }),
+      // свои действия (фото профиля: «сделать главным», «удалить») вместо действий над сообщением
+      props.actions ? props.actions(it, i).map(function (a) {
+        return h(IconButton, { key: a.label, icon: a.icon, label: a.label, class: a.danger ? 'rl-viewer-danger' : undefined, onClick: a.onClick });
+      }) : [h(IconButton, { key: 'z', icon: 'zoomIn', label: 'Увеличить' }), h(IconButton, { key: 'r', icon: 'reply', label: 'Ответить' })],
       real ? h('a', { class: 'rl-iconbtn', href: it.download || it.src, download: it.name || '', 'aria-label': 'Скачать', title: 'Скачать' }, h(Icon, { name: 'download', size: 24 })) : h(IconButton, { icon: 'download', label: 'Скачать' }),
       h(IconButton, { icon: 'close', label: 'Закрыть', onClick: close })),
     real ? media : null,

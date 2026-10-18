@@ -12,10 +12,10 @@ import { showToast } from '../../settingsData';
  */
 export function usePhotoPicker(photo: ProfilePhoto | null | undefined) {
   const input = useRef<HTMLInputElement>(null);
-  const [crop, setCrop] = useState<string | null>(null);
+  const [crop, setCrop] = useState<{ src: string; kind: 'image' | 'video' | 'gif' } | null>(null);
   const [local, setLocal] = useState<{ src: string; thumb: string } | null>(null);
   const [busy, setBusy] = useState(false);
-  useEffect(() => () => { if (crop) URL.revokeObjectURL(crop); }, [crop]);
+  useEffect(() => () => { if (crop) URL.revokeObjectURL(crop.src); }, [crop]);
   // сервер подтвердил и фото пришло в профиль — своё превью больше не нужно
   useEffect(() => { if (!busy && local) { const s = local.src; setLocal(null); setTimeout(() => URL.revokeObjectURL(s), 2000); } }, [photo?.id]);
 
@@ -23,10 +23,11 @@ export function usePhotoPicker(photo: ProfilePhoto | null | undefined) {
     const el = e.currentTarget as HTMLInputElement, f = el.files?.[0];
     el.value = '';   // тот же файл ещё раз — снова change
     if (!f) return;
-    if (!/^image\//.test(f.type)) { showToast('Это не картинка'); return; }
-    setCrop(URL.createObjectURL(f));
+    const kind = f.type === 'image/gif' ? 'gif' : /^video\//.test(f.type) ? 'video' : /^image\//.test(f.type) ? 'image' : null;
+    if (!kind) { showToast('Нужна картинка, GIF или видео'); return; }
+    setCrop({ src: URL.createObjectURL(f), kind });
   };
-  const cropped = (c: { big: Blob; small: Blob; thumb: string }) => {
+  const cropped = (c: { big: Blob; small: Blob; thumb: string; video?: { blob: Blob; side: number; duration: number } }) => {
     setCrop(null);
     const src = URL.createObjectURL(c.big);
     setLocal({ src, thumb: c.thumb });
@@ -40,8 +41,8 @@ export function usePhotoPicker(photo: ProfilePhoto | null | undefined) {
 
   const ui: JSX.Element = (
     <>
-      <input ref={input} type="file" accept="image/jpeg,image/png,image/webp,image/gif,image/heic" hidden onChange={chosen} />
-      {crop ? <AvatarCropper src={crop} onClose={() => setCrop(null)} onDone={cropped} onError={() => { setCrop(null); showToast('Не получилось обработать фото'); }} /> : null}
+      <input ref={input} type="file" accept="image/jpeg,image/png,image/webp,image/gif,image/heic,video/mp4,video/webm,video/quicktime" hidden onChange={chosen} />
+      {crop ? <AvatarCropper src={crop.src} kind={crop.kind} onClose={() => setCrop(null)} onDone={cropped} onError={() => { setCrop(null); showToast('Не получилось обработать фото'); }} /> : null}
     </>
   );
   return {

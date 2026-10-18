@@ -1726,9 +1726,13 @@ html[data-blur="0"] .rl-menu, html[data-blur="0"] .rl-attach { -webkit-backdrop-
 .rl-crop-modal .rl-mdl-body { display: flex; flex-direction: column; align-items: center; gap: 14px; }
 .rl-crop { position: relative; overflow: hidden; border-radius: 12px; background: #111; touch-action: none; cursor: grab; user-select: none; }
 .rl-crop:active { cursor: grabbing; }
-.rl-crop img { position: absolute; left: 0; top: 0; max-width: none; transform-origin: 0 0; will-change: transform; pointer-events: none; }
-.rl-crop.is-loading img { opacity: 0; }
+.rl-crop :is(img, video) { position: absolute; left: 0; top: 0; max-width: none; transform-origin: 0 0; will-change: transform; pointer-events: none; }
+.rl-crop.is-loading :is(img, video) { opacity: 0; }
 /* всё вне круга притемнено; тонкая светлая окружность — граница будущей аватарки */
 .rl-crop-mask { position: absolute; inset: 0; pointer-events: none; border-radius: 50%; box-shadow: 0 0 0 9999px rgba(0, 0, 0, .55), inset 0 0 0 1.5px rgba(255, 255, 255, .7); }
 .rl-crop-zoom { width: min(100%, 280px); accent-color: var(--brand); }
 .rl-crop-hint { margin: 0; color: var(--ink-2, var(--muted)); font-size: 13px; text-align: center; }
+
+/* просмотр: зацикленное видео поверх обложки; опасное действие — красным при наведении */
+.rl-viewer-box .rl-viewer-loop { object-fit: cover; }
+.rl-viewer-top .rl-viewer-danger:hover { color: #ff6b6b; }

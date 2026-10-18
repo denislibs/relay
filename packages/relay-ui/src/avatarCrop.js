@@ -8,6 +8,52 @@ import { Button, cx } from './kit.js';
 import { Modal } from './modal.js';
 
 var MAX_ZOOM = 3;
+var VIDEO_SIDE = 480, VIDEO_MAX_S = 10, GIF_S = 4;
+
+/** Размер кадра источника: картинка или видео. */
+function dims(el) { return el.tagName === 'VIDEO' ? { w: el.videoWidth, h: el.videoHeight } : { w: el.naturalWidth, h: el.naturalHeight }; }
+
+function recorderType() {
+  var types = ['video/webm;codecs=vp9', 'video/webm;codecs=vp8', 'video/webm', 'video/mp4;codecs=avc1', 'video/mp4'];
+  for (var i = 0; i < types.length; i++) if (typeof MediaRecorder !== 'undefined' && MediaRecorder.isTypeSupported(types[i])) return types[i];
+  return null;
+}
+
+/**
+ * Видео-аватарка: вырезанный квадрат источника (видео или анимированный GIF) перерисовывается на холст
+ * и записывается MediaRecorder'ом — первые VIDEO_MAX_S секунд видео или GIF_S секунд GIF (он и так зациклен).
+ * onProgress(0..1) — для подписи на кнопке. Звук не пишем: аватарка всегда без звука.
+ */
+export function recordAvatar(el, sx, sy, side, onProgress) {
+  var type = recorderType();
+  if (!type || !HTMLCanvasElement.prototype.captureStream) return Promise.reject(new Error('recorder'));
+  var c = canvasOf(VIDEO_SIDE), g = c.getContext('2d');
+  var isVideo = el.tagName === 'VIDEO';
+  var seconds = isVideo ? Math.min(VIDEO_MAX_S, el.duration || VIDEO_MAX_S) : GIF_S;
+  var stream = c.captureStream(30);
+  var rec = new MediaRecorder(stream, { mimeType: type, videoBitsPerSecond: 1800000 });
+  var chunks = [];
+  rec.ondataavailable = function (e) { if (e.data && e.data.size) chunks.push(e.data); };
+  return new Promise(function (ok, no) {
+    var raf = 0, t0 = 0;
+    function draw() {
+      g.fillStyle = '#fff'; g.fillRect(0, 0, VIDEO_SIDE, VIDEO_SIDE);
+      g.drawImage(el, sx, sy, side, side, 0, 0, VIDEO_SIDE, VIDEO_SIDE);
+      var t = (performance.now() - t0) / 1000;
+      if (onProgress) onProgress(Math.min(1, t / seconds));
+      if (t >= seconds) { cancelAnimationFrame(raf); rec.stop(); return; }
+      raf = requestAnimationFrame(draw);
+    }
+    rec.onstop = function () {
+      stream.getTracks().forEach(function (tr) { tr.stop(); });
+      ok({ blob: new Blob(chunks, { type: type.split(';')[0] }), side: VIDEO_SIDE, duration: seconds });
+    };
+    rec.onerror = function (e) { cancelAnimationFrame(raf); no(e.error || new Error('recorder')); };
+    var start = function () { t0 = performance.now(); rec.start(250); draw(); };
+    if (isVideo) { el.pause(); el.currentTime = 0; el.onseeked = function () { el.onseeked = null; el.play().then(start, no); }; }
+    else start();
+  });
+}
 
 function canvasOf(size) { var c = document.createElement('canvas'); c.width = c.height = size; return c; }
 function toBlob(c, q) { return new Promise(function (ok, no) { c.toBlob(function (b) { if (b) ok(b); else no(new Error('toBlob')); }, 'image/jpeg', q); }); }
@@ -26,11 +72,16 @@ export async function cropAvatar(img, sx, sy, side) {
   return { big: await toBlob(big, 0.9), small: await toBlob(small, 0.88), thumb: tiny.toDataURL('image/jpeg', 0.6) };
 }
 
+/**
+ * props.src — объектная ссылка на файл; props.kind — 'image' | 'video' | 'gif' (последние два дают видео-аватарку).
+ * onDone({ big, small, thumb, video? }) — video: { blob, side, duration }.
+ */
 export function AvatarCropper(props) {
+  var moving = props.kind === 'video' || props.kind === 'gif';
   var stage = Math.max(220, Math.min(360, (typeof innerWidth === 'number' ? innerWidth : 400) - 64));
   var img = useRef(null), st = useRef(null), ptrs = useRef(new Map()), pinch = useRef(null);
   var view = useState(null);   // { x, y, scale, base } — левый верх фото в рамке и масштаб
-  var zoom = useState(1), busy = useState(false);
+  var zoom = useState(1), busy = useState(false), progress = useState(0);
   var v = view[0];
 
   function clamp(x, y, scale, iw, ih) {
@@ -45,17 +96,18 @@ export function AvatarCropper(props) {
     var px = cx0 == null ? stage / 2 : cx0, py = cy0 == null ? stage / 2 : cy0;
     // точка под пальцем/центром остаётся на месте
     var ix = (px - cur.x) / cur.scale, iy = (py - cur.y) / cur.scale;
-    var p = clamp(px - ix * scale, py - iy * scale, scale, el.naturalWidth, el.naturalHeight);
+    var d = dims(el), p = clamp(px - ix * scale, py - iy * scale, scale, d.w, d.h);
     st.current = { x: p.x, y: p.y, scale: scale, base: cur.base };
     zoom[1](z); view[1](st.current);
   }
   function onLoad() {
-    var el = img.current, iw = el.naturalWidth, ih = el.naturalHeight;
+    var el = img.current, d = dims(el), iw = d.w, ih = d.h;
+    if (!iw || !ih) return;
     var base = Math.max(stage / iw, stage / ih);
     st.current = { x: (stage - iw * base) / 2, y: (stage - ih * base) / 2, scale: base, base: base };
     view[1](st.current);
   }
-  useLayoutEffect(function () { var el = img.current; if (el && el.complete && el.naturalWidth) onLoad(); }, [props.src]);
+  useLayoutEffect(function () { var el = img.current; if (el && (el.tagName === 'VIDEO' ? el.readyState >= 1 : el.complete && el.naturalWidth)) onLoad(); }, [props.src]);
 
   function down(e) {
     if (!st.current) return;
@@ -72,7 +124,7 @@ export function AvatarCropper(props) {
       setZoom(pinch.current.z * Math.hypot(a[0].x - a[1].x, a[0].y - a[1].y) / pinch.current.d, (a[0].x + a[1].x) / 2 - r.left, (a[0].y + a[1].y) / 2 - r.top);
       return;
     }
-    var p = clamp(cur.x + e.clientX - prev.x, cur.y + e.clientY - prev.y, cur.scale, el.naturalWidth, el.naturalHeight);
+    var d = dims(el), p = clamp(cur.x + e.clientX - prev.x, cur.y + e.clientY - prev.y, cur.scale, d.w, d.h);
     st.current = { x: p.x, y: p.y, scale: cur.scale, base: cur.base };
     view[1](st.current);
   }
@@ -95,20 +147,29 @@ export function AvatarCropper(props) {
     var cur = st.current, el = img.current;
     if (!cur || !el || busy[0]) return;
     busy[1](true);
-    try { props.onDone(await cropAvatar(el, -cur.x / cur.scale, -cur.y / cur.scale, stage / cur.scale)); }
+    var sx = -cur.x / cur.scale, sy = -cur.y / cur.scale, side = stage / cur.scale;
+    try {
+      if (!moving) { props.onDone(await cropAvatar(el, sx, sy, side)); return; }
+      // видео: сначала запись (идёт в реальном времени), потом кадр-обложка из начала
+      var video = await recordAvatar(el, sx, sy, side, function (p) { progress[1](p); });
+      if (el.tagName === 'VIDEO') { el.pause(); el.currentTime = 0; await new Promise(function (r) { el.onseeked = function () { el.onseeked = null; r(); }; }); }
+      var still = await cropAvatar(el, sx, sy, side);
+      props.onDone(Object.assign(still, { video: video }));
+    }
     catch (err) { busy[1](false); if (props.onError) props.onError(err); }
   }
 
   return h(Modal, { open: true, title: props.title || 'Фото профиля', size: 'slim', onClose: props.onClose, className: 'rl-crop-modal',
     actions: [
       h(Button, { key: 'c', variant: 'ghost', onClick: props.onClose }, 'Отмена'),
-      h(Button, { key: 'd', disabled: !v || busy[0], onClick: done }, busy[0] ? 'Готовлю…' : 'Готово'),
+      h(Button, { key: 'd', disabled: !v || busy[0], onClick: done }, busy[0] ? (moving ? 'Готовлю видео… ' + Math.round(progress[0] * 100) + '%' : 'Готовлю…') : 'Готово'),
     ] },
     h('div', { ref: frame, class: cx('rl-crop', !v && 'is-loading'), style: { width: stage, height: stage }, onPointerDown: down, onPointerMove: move, onPointerUp: up, onPointerCancel: up },
-      h('img', { ref: img, src: props.src, alt: '', draggable: false, onLoad: onLoad,
-        style: v ? { transform: 'translate3d(' + v.x + 'px,' + v.y + 'px,0) scale(' + v.scale + ')' } : null }),
+      h(props.kind === 'video' ? 'video' : 'img', Object.assign({ ref: img, src: props.src, draggable: false,
+        style: v ? { transform: 'translate3d(' + v.x + 'px,' + v.y + 'px,0) scale(' + v.scale + ')' } : null },
+        props.kind === 'video' ? { muted: true, loop: true, autoPlay: true, playsInline: true, onLoadedMetadata: onLoad } : { alt: '', onLoad: onLoad })),
       h('div', { class: 'rl-crop-mask', 'aria-hidden': 'true' })),
     h('input', { class: 'rl-crop-zoom', type: 'range', min: 1, max: MAX_ZOOM, step: 0.01, value: zoom[0], 'aria-label': 'Масштаб',
       onInput: function (e) { setZoom(Number(e.currentTarget.value)); } }),
-    h('p', { class: 'rl-crop-hint' }, 'Перетащите фото, чтобы выбрать, что попадёт в круг'));
+    h('p', { class: 'rl-crop-hint' }, moving ? 'Видео-аватарка: первые ' + (props.kind === 'gif' ? GIF_S : VIDEO_MAX_S) + ' с, без звука' : 'Перетащите фото, чтобы выбрать, что попадёт в круг'));
 }
