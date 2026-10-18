@@ -1,4 +1,5 @@
 import { h } from 'preact';
+import { createPortal } from 'preact/compat';
 import { useState, useRef, useEffect, useLayoutEffect } from 'preact/hooks';
 import { requestMeasure, requestMutation, onHeavyAnimationEnd, beginHeavyAnimation, forceMeasure } from './schedule.js';
 import { TWallpaper } from 'twallpaper';
@@ -8,39 +9,63 @@ import { cx, ripple, reducedMotion, Presence, Icon, IconButton, Avatar, Badge, B
 
 /* ---------- Menu: popover list (message menu, chat context menu, header menu) ---------- */
 function Menu(props) {
-  var ref = useRef(null);
-  var sub = useState(null);   // открытый второй уровень: { label, items } (пункт с submenu)
-  var level = sub[0];
-  var items = level ? [{ icon: 'chevronLeft', label: 'Назад', back: true }, '-'].concat(level.items) : (props.items || []);
+  // Подменю — как в Telegram: отдельная карточка сбоку от пункта (основное меню остаётся), по наведению, клику или →.
+  var ref = useRef(null), timer = useRef(0);
+  var sub = useState(null), open = sub[0];   // { index, top } пункта с подменю
+  var items = props.items || [];
   useEffect(function () {
-    var first = ref.current && ref.current.querySelector('[role="menuitem"]');
-    if (first) first.focus();
-  }, [!!level]);
+    var first = ref.current && ref.current.querySelector(':scope > [role="menuitem"]');
+    if (first && !props.noFocus) first.focus({ preventScroll: true });
+    return function () { clearTimeout(timer.current); };
+  }, []);
+  function openSub(i, el, now) {
+    clearTimeout(timer.current);
+    var go = function () { var r = el.getBoundingClientRect(); sub[1]({ index: i, left: r.right - 24, top: r.top - 4 }); };
+    if (now) go(); else timer.current = setTimeout(go, 120);
+  }
+  function closeSub(now) {
+    clearTimeout(timer.current);
+    if (now) sub[1](null); else timer.current = setTimeout(function () { sub[1](null); }, 200);
+  }
   function onKey(e) {
-    var list = Array.prototype.slice.call(ref.current.querySelectorAll('[role="menuitem"]'));
+    if (!ref.current.contains(e.target)) return;   // клавиши из подменю (портал всплывает сюда через дерево) — его дело
+    var list = Array.prototype.slice.call(ref.current.querySelectorAll(':scope > [role^="menuitem"]'));
     var i = list.indexOf(document.activeElement);
+    var di = document.activeElement && document.activeElement.dataset ? Number(document.activeElement.dataset.i) : NaN;
+    var it = isNaN(di) ? null : items[di];
     if (e.key === 'ArrowDown') { e.preventDefault(); list[(i + 1) % list.length].focus(); }
     else if (e.key === 'ArrowUp') { e.preventDefault(); list[(i - 1 + list.length) % list.length].focus(); }
-    else if (e.key === 'Escape') {
-      if (level) { e.stopPropagation(); sub[1](null); } else if (props.onClose) props.onClose();
-    }
+    else if (e.key === 'ArrowRight' && it && it.submenu) { e.preventDefault(); openSub(di, document.activeElement, true); }
+    else if (e.key === 'ArrowLeft' && props.onBack) { e.preventDefault(); e.stopPropagation(); props.onBack(); }
+    else if (e.key === 'Escape') { if (props.onClose) props.onClose(); }
   }
   var style = props.x !== undefined ? { left: props.x, top: props.y } : null;
-  return h('div', { ref: ref, class: cx('rl-menu', props.origin && 'rl-menu-' + props.origin), style: style, role: 'menu', 'aria-label': level ? level.label : (props.label || 'Меню'), onKeyDown: onKey },
-    level ? null : (props.header || null),
+  var opened = open && items[open.index];
+  return h('div', { ref: ref, class: cx('rl-menu', props.origin && 'rl-menu-' + props.origin, props.class), style: style, role: 'menu', 'aria-label': props.label || 'Меню', onKeyDown: onKey },
+    props.header || null,
     items.map(function (it, i) {
       if (it === '-') return h('hr', { key: 'sep' + i, class: 'rl-menu-sep' });
-      return h('button', { key: (level ? 's' : '') + it.label, type: 'button', role: 'menuitem', 'aria-haspopup': it.submenu ? 'menu' : undefined, class: cx('rl-menu-item', it.danger && 'rl-menu-danger'), style: { '--i': i }, onPointerDown: ripple,
-        onClick: function () {
-          if (it.back) { sub[1](null); return; }
-          if (it.submenu) { sub[1]({ label: it.label, items: it.submenu }); return; }
+      var toggle = typeof it.checked === 'boolean';
+      return h('button', { key: it.label, type: 'button', 'data-i': i, role: toggle ? 'menuitemcheckbox' : 'menuitem', 'aria-checked': toggle ? String(it.checked) : undefined,
+        'aria-haspopup': it.submenu ? 'menu' : undefined, 'aria-expanded': it.submenu ? String(!!(open && open.index === i)) : undefined,
+        class: cx('rl-menu-item', it.danger && 'rl-menu-danger', open && open.index === i && 'rl-menu-item-open'),
+        onPointerEnter: function (e) { if (it.submenu) openSub(i, e.currentTarget); else if (open) closeSub(); },
+        onPointerLeave: function () { if (it.submenu) closeSub(); },
+        onClick: function (e) {
+          if (it.submenu) { if (open && open.index === i) closeSub(true); else openSub(i, e.currentTarget, true); return; }
           if (it.onClick) it.onClick();
-          if (props.onClose) props.onClose();
+          if (!it.keepOpen && props.onClose) props.onClose();
         } },
         it.icon ? h(Icon, { name: it.icon, size: 20 }) : null, h('span', null, it.label),
+        toggle ? h('i', { class: cx('rl-menu-switch', it.checked && 'rl-menu-switch-on'), 'aria-hidden': 'true' }) : null,
         it.submenu ? h(Icon, { name: 'chevronRight', size: 18 }) : null,
         it.hint ? h('kbd', null, it.hint) : null);
-    }));
+    }),
+    // подменю — порталом в body с координатами пункта: панель вокруг меню его не обрежет
+    opened ? createPortal(h('div', { class: 'rl rl-submenu', style: { left: Math.min(open.left, window.innerWidth - 260) + 'px', top: open.top + 'px' },
+      onPointerEnter: function () { clearTimeout(timer.current); }, onPointerLeave: function () { closeSub(); } },
+      h(Menu, { items: opened.submenu, label: opened.label, noFocus: true, onClose: props.onClose,
+        onBack: function () { closeSub(true); var b = ref.current && ref.current.querySelector('.rl-menu-item-open'); if (b) b.focus(); } })), document.body) : null);
 }
 
 /* ---------- ReactionPicker: quick reactions row (emoji are content, not UI icons) ---------- */

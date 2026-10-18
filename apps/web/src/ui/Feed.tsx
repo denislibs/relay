@@ -572,6 +572,13 @@ export function Feed({ frameKey, active, chatId, meId, peerName, group, onAuthor
       unreadShown = true;
       out.push(<div class="app-unread-divider" key="unread" role="separator"><span>Непрочитанные сообщения</span></div>);
     }
+    // служебное «создал(а) группу» — плашкой по центру, как в Telegram (не пузырём)
+    if ((m.service as { type?: string } | undefined)?.type === 'group_created') {
+      const who = mine ? 'Вы создали' : `${names[m.senderId as number] ?? peerName} создал(а)`;
+      out.push(<div class="rl-action" key={m.key} role="note"><span>{who} группу «{m.body as string}»</span></div>);
+      prevDay = day; prevSender = null;
+      return;
+    }
     const next = shown[i + 1];
     // группа — как в Telegram: тот же отправитель и день, пауза не больше 10 минут, не на границе «Непрочитанные»
     const start = prevSender !== m.senderId || day !== prevDay || breaksGroup(shown[i - 1], m, unreadFrom, meId);

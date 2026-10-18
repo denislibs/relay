@@ -1,6 +1,7 @@
-import { normalizeEntities, type Entity, type MediaTab, type Message, type ServiceType } from '@relay/protocol';
+import { graphemes, normalizeEntities, type Entity, type MediaTab, type Message, type ServiceType } from '@relay/protocol';
 import { sql, type Tx } from '../db';
 import { DomainError } from './errors';
+import { fanOut } from './journal';
 import { nameForSql } from './profile';
 
 export async function createChat(kind: 'direct' | 'group', title: string | null, memberIds: number[]): Promise<number> {
@@ -10,6 +11,62 @@ export async function createChat(kind: 'direct' | 'group', title: string | null,
       await tx`insert into chat_members (chat_id, user_id) values (${chat.id}, ${userId})`;
     }
     return chat.id as number;
+  });
+}
+
+export const GROUP_TITLE_MAX = 128;
+export const GROUP_MEMBERS_MAX = 200;   // вместе с создателем
+
+/**
+ * Новая группа: создатель и участники, первое сообщение — служебное «создал(а) группу» (его newMessage
+ * всем участникам и приносит чат в их списки). Нельзя добавить несуществующего, системного или того,
+ * с кем есть блокировка в любую сторону.
+ */
+export async function createGroup(creatorId: number, input: { title?: unknown; memberIds?: unknown }): Promise<{ chatId: number; message: Message }> {
+  const title = typeof input.title === 'string' ? input.title.replace(/\s+/g, ' ').trim() : '';
+  if (!title) throw new DomainError('bad_frame', 'title');
+  if (graphemes(title) > GROUP_TITLE_MAX) throw new DomainError('too_long', 'title');
+  if (!Array.isArray(input.memberIds)) throw new DomainError('bad_frame', 'members');
+  const ids = [...new Set(input.memberIds.map(Number).filter((n) => Number.isInteger(n) && n > 0 && n !== creatorId))];
+  if (!ids.length) throw new DomainError('bad_frame', 'members');
+  if (ids.length + 1 > GROUP_MEMBERS_MAX) throw new DomainError('too_long', 'members');
+  return sql.begin(async (tx) => {
+    const found = await tx`select id from users where id = any(${ids}::bigint[]) and not system`;
+    if (found.length !== ids.length) throw new DomainError('not_found', 'member');
+    const [blocked] = await tx`select 1 from blocks where (owner_id = ${creatorId} and user_id = any(${ids}::bigint[])) or (user_id = ${creatorId} and owner_id = any(${ids}::bigint[])) limit 1`;
+    if (blocked) throw new DomainError('blocked');
+    const [chat] = await tx`insert into chats (kind, title) values ('group', ${title}) returning id`;
+    const members = [creatorId, ...ids];
+    await tx`insert into chat_members (chat_id, user_id) select ${chat.id}, unnest(${members}::bigint[])`;
+    const [row] = await tx`
+      insert into messages (chat_id, sender_id, client_id, kind, body, service_type)
+      values (${chat.id}, ${creatorId}, ${crypto.randomUUID()}, 'text', ${title}, 'group_created') returning *`;
+    const message = toMessage(row);
+    await fanOut(tx, members, { type: 'newMessage', message });
+    return { chatId: Number(chat.id), message };
+  });
+}
+
+/** Личный чат с peer: существующий (не служебный) или новый. Собеседник увидит его с первым сообщением. */
+export async function openDirect(userId: number, peerId: unknown): Promise<number> {
+  const peer = Number(peerId);
+  if (!Number.isInteger(peer) || peer <= 0 || peer === userId) throw new DomainError('bad_frame', 'peer');
+  return sql.begin(async (tx) => {
+    const [u] = await tx`select id from users where id = ${peer} and not system`;
+    if (!u) throw new DomainError('not_found', 'peer');
+    // одна личная переписка на пару: берём замок по паре, чтобы два одновременных запроса не создали две
+    await tx`select pg_advisory_xact_lock(hashtextextended(${Math.min(userId, peer) + ':' + Math.max(userId, peer)}, 0))`;
+    const [found] = await tx`
+      select c.id from chats c
+      join chat_members a on a.chat_id = c.id and a.user_id = ${userId}
+      join chat_members b on b.chat_id = c.id and b.user_id = ${peer}
+      where c.kind = 'direct' and not exists (select 1 from service_chats s where s.chat_id = c.id)
+        and (select count(*) from chat_members m where m.chat_id = c.id) = 2
+      order by c.id limit 1`;
+    if (found) return Number(found.id);
+    const [chat] = await tx`insert into chats (kind, title) values ('direct', null) returning id`;
+    await tx`insert into chat_members (chat_id, user_id) values (${chat.id}, ${userId}), (${chat.id}, ${peer})`;
+    return Number(chat.id);
   });
 }
 

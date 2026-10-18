@@ -103,6 +103,7 @@ var ICONS = {
   chevronRight: ['M9 6l6 6-6 6'],
   logout: ['M10 4H5v16h5', 'M15 8l4 4-4 4', 'M19 12H9'],
   arrowLeft: ['M19 12H5', 'M11 6l-6 6 6 6'],
+  arrowRight: ['M5 12h14', 'M13 6l6 6-6 6'],
   external: ['M8 16L16 8', 'M9 8h7v7'],
   video: ['M3 7h12v10H3z', 'M15 10.5l6-3.5v10l-6-3.5'],
   mail: ['M3 6h18v12H3z', 'M3 7l9 6 9-6'],

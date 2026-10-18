@@ -28,6 +28,8 @@ export const PAGES = [
   'settings/dev',   // вкладка раздела — devTab в global, не путь
   'contacts',
   'contacts/:userId/edit',
+  'newGroup',        // новая группа: выбор участников
+  'newGroup/name',   // и название
 ];
 
 const ROOT = 'chats';
@@ -164,8 +166,30 @@ export async function back(): Promise<void> {
 
 let skipGuard = false;
 
+/** Сразу к списку чатов (например, после создания группы): к ближайшей записи истории со списком, иначе подменяем текущую. */
+export async function home(): Promise<void> {
+  if (!bind || current() === ROOT) return;
+  let j = idx;
+  while (j > 0 && !(stack[j] === ROOT && layers[j] === layers[idx])) j -= 1;
+  if (j < idx && stack[j] === ROOT && hist?.go) {
+    skipGuard = true;
+    const done = new Promise<void>((r) => { popWaiter = r; setTimeout(r, 500); });   // запасной выход, если popstate не придёт
+    hist.go(j - idx);   // popstate выставит страницу
+    await done;
+    return;
+  }
+  stack[idx] = ROOT;
+  hist?.replaceState(stamp(ROOT, idx), '');
+  bind.set(ROOT);
+}
+
 /** Кнопка «Назад» браузера (или программный history.back()). */
+// home() ждёт, пока popstate будет обработан: иначе открытый сразу после него чат закроет запоздавшая запись истории
+let popWaiter: (() => void) | null = null;
 async function onPop(state: unknown): Promise<void> {
+  try { await onPopInner(state); } finally { const w = popWaiter; popWaiter = null; w?.(); }
+}
+async function onPopInner(state: unknown): Promise<void> {
   if (!bind) return;
   const s = state as { nav?: string; i?: number } | null;
   // запись без нашей отметки (data.ts openChat делает replaceState(null) под #chat=…): остаёмся где были

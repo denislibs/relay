@@ -63,6 +63,7 @@ export function previewThumb(m: LastMessage): { src: string; video: boolean; rou
 /** Текст после имени: подпись к медиа, а без подписи — тип. С миниатюрой эмодзи типа не нужен. */
 export function previewBody(m: LastMessage, withThumb: boolean): ComponentChildren {
   if (m.deleted) return 'Сообщение удалено';
+  if (m.service?.type === 'group_created') return `Создана группа «${m.body}»`;
   // код входа в списке не показываем: цифры — точками, оформление (code над цифрами) отбрасываем
   const code = m.service?.type === 'login_code';
   const text = code ? hideCode(m.body) : m.body;

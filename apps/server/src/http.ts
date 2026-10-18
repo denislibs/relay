@@ -6,7 +6,7 @@ import { existsSync, statSync } from 'node:fs';
 import { extname, join, resolve, sep } from 'node:path';
 import { clearSessionCookie, createSession, createUser, deleteSession, readSessionToken, sessionCookie, sessionFromToken } from './auth';
 import { announceLogin, announceSessionsChanged, assertConfirmed, checkSocket, confirmSession, listSessions, sessionEnded, sweepInactive, terminateOthers, terminateSession, trackSocket, untrackSocket } from './domain/sessions';
-import { createChat, getChatMedia, getChatMediaCounts, getHistory, getMessagesByIds, listChats, listChatsPage } from './domain/chats';
+import { createChat, createGroup, openDirect, getChatMedia, getChatMediaCounts, getHistory, getMessagesByIds, listChats, listChatsPage } from './domain/chats';
 import { sql } from './db';
 import { DomainError } from './domain/errors';
 import { processAlive } from './domain/liveRegistry';
@@ -194,6 +194,15 @@ export function createServer(opts: { port: number }): Server {
         }
         if (url.pathname === '/ws') {
           return server.upgrade(req, { data: { userId, sessionId, checkedAt: Date.now() } }) ? undefined : fail('bad_frame');
+        }
+        // новая группа (создатель — текущий пользователь) и личный чат с человеком (существующий или новый)
+        if (req.method === 'POST' && url.pathname === '/chats') {
+          const { chatId } = await createGroup(userId, (await req.json().catch(() => ({}))) as { title?: unknown; memberIds?: unknown });
+          return Response.json({ id: chatId });
+        }
+        if (req.method === 'POST' && url.pathname === '/chats/direct') {
+          const body = (await req.json().catch(() => ({}))) as { userId?: unknown };
+          return Response.json({ id: await openDirect(userId, body.userId) });
         }
         if (process.env.DEV_LOGIN === '1' && req.method === 'POST' && url.pathname === '/dev/chats') {
           const { kind, title, memberIds } = (await req.json()) as { kind: 'direct' | 'group'; title: string | null; memberIds: number[] };

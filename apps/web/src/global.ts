@@ -66,7 +66,8 @@ export interface GlobalState {
   contacts: Item[];          // подписка contacts движка (с неподтверждёнными правками)
   contactsLoaded: boolean;   // список с сервера уже был (иначе пусто — значит «грузим»)
   settings: AccountSettings;   // настройки аккаунта (подписка settings движка): умолчания уведомлений
-  newContact: NewContactDraft | null;   // открытая модалка «Новый контакт» и чем её заполнить
+  newContact: NewContactDraft | null;
+  newGroup: { ids: number[]; title: string; edited: boolean } | null;   // черновик «Новой группы»: участники и название (живёт между шагами)   // открытая модалка «Новый контакт» и чем её заполнить
   blocked: Item[];          // подписка blocked движка: чёрный список (с неподтверждёнными правками)
   blockedLoaded: boolean;   // список с сервера уже был
   sessions: SessionInfo[] | null;   // активные сеансы с сервера (null — ещё не знаем); вид — sessionsView(sessions, opsKeys)
@@ -122,6 +123,7 @@ let state: GlobalState = {
   contactsLoaded: false,
   settings: defaultAccountSettings(),
   newContact: null,
+  newGroup: null,
   blocked: [],
   blockedLoaded: false,
   sessions: null,

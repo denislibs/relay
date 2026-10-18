@@ -1,6 +1,6 @@
 import { ChatBanner } from './ChatBanner';
 import { UpdatePill } from './UpdatePill';
-import { Avatar, ChatRow, Highlight, Menu, Presence, SlideStack, ChatRowSkeleton, useMinVisible, EmptyState, Fab, WindowList, FolderTabs, SidebarCard, SidebarHeader, peerTone } from '@relay/ui';
+import { Avatar, ChatRow, Highlight, Icon, Menu, Presence, SlideStack, ChatRowSkeleton, useMinVisible, EmptyState, WindowList, FolderTabs, SidebarCard, SidebarHeader, peerTone, ripple } from '@relay/ui';
 import type { Item } from '@relay/sync-engine/src/types';
 import { ensureNames, loadMoreChats, openChat, openInner, searchMessages } from '../data';
 import { setGlobal, useGlobal } from '../global';
@@ -239,8 +239,7 @@ export function Sidebar() {
                   { icon: 'settings', label: 'Настройки', onClick: () => { setMenu(false); void go('settings'); } },
                   '-',
                   { icon: 'more', label: 'Ещё', submenu: [
-                    { icon: dark ? 'sun' : 'moon', label: dark ? 'Дневной режим' : 'Ночной режим', onClick: () => setTheme(dark ? 'light' : 'dark') },
-                    { icon: 'pencil', label: 'Новый чат', onClick: () => setGlobal({ newChatOpen: true }) },
+                    { icon: 'moon', label: 'Ночной режим', checked: dark, keepOpen: true, onClick: () => setTheme(dark ? 'light' : 'dark') },
                   ] },
                 ]}
               />
@@ -248,7 +247,7 @@ export function Sidebar() {
           </Presence> : null}
         </>
       }
-      fab={<Fab label="Новый чат" onClick={() => setGlobal({ newChatOpen: true })} />}
+      fab={<NewChatFab />}
       overlay={<UpdatePill />}
     >
       <SlideStack variant="tabs" order={order} active={String(shown)} render={(f: string) => <div class="rl-page-scroll">{renderFolder(f)}</div>} />
@@ -303,5 +302,29 @@ function RowMenu({ at, onClose }: { at: { id: number; x: number; y: number } | n
         </>
       ) : null}
     </Presence>
+  );
+}
+
+/** Карандаш внизу списка — как в Telegram: меню «Новая группа / Новое сообщение» над кнопкой, сама кнопка становится крестиком. */
+function NewChatFab() {
+  const [open, setOpen] = useState(false);
+  const pick = (path: string) => { setOpen(false); void go(path); };
+  return (
+    <div class="app-newchat-fab">
+      <Presence show={open} exitMs={160}>
+        <div class="app-newchat-menu">
+          <div class="rl-recmode-scrim" onClick={() => setOpen(false)} />
+          <Menu label="Создать" onClose={() => setOpen(false)} items={[
+            { icon: 'community', label: 'Новая группа', onClick: () => { setGlobal({ newGroup: null }); pick('newGroup'); } },
+            { icon: 'contact', label: 'Новое сообщение', onClick: () => pick('contacts') },
+          ]} />
+        </div>
+      </Presence>
+      <button type="button" class={'rl-fab-main app-newchat-btn' + (open ? ' app-newchat-open' : '')} aria-label={open ? 'Закрыть' : 'Новый чат'}
+        aria-expanded={open} aria-haspopup="menu" onPointerDown={ripple} onClick={() => setOpen(!open)}>
+        <Icon name="pencil" size={24} class="app-newchat-pencil" />
+        <Icon name="close" size={24} class="app-newchat-close" />
+      </button>
+    </div>
   );
 }

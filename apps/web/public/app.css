@@ -652,3 +652,21 @@ html[data-anim="0"] .app-chatcol, html[data-anim="0"] .app-chatcol-below, html[d
 .app-pins-list { position: absolute; right: 0; top: calc(100% + 6px); z-index: 30; }
 .app-pins-list .rl-menu { position: relative; transform-origin: top right; max-width: 320px; }
 .app-send-files { display: flex; flex-direction: column; gap: 6px; max-height: 40vh; overflow-y: auto; }
+
+/* ---------- Карандаш «Новый чат»: меню над кнопкой (справа), карандаш ↔ крестик — как в Telegram ---------- */
+.app-newchat-fab { position: relative; }
+.app-newchat-menu { position: absolute; right: 0; bottom: calc(100% + 8px); z-index: 5; }
+.app-newchat-menu .rl-menu { position: relative; min-width: 13.5rem; transform-origin: bottom right; }
+.app-newchat-btn > .rl-icon { position: absolute; top: 50%; left: 50%; margin: -12px 0 0 -12px; transition: transform 400ms cubic-bezier(.34, 1.56, .64, 1), opacity 250ms var(--ease-standard); }
+.app-newchat-close { opacity: 0; transform: rotate(-90deg) scale(.5); }
+.app-newchat-open .app-newchat-pencil { opacity: 0; transform: rotate(90deg) scale(.5); }
+.app-newchat-open .app-newchat-close { opacity: 1; transform: none; }
+
+/* ---------- Новая группа ---------- */
+.app-newgroup .rl-picker-search { margin: 0 var(--space-3); }
+.app-newgroup-head { display: flex; flex-direction: column; align-items: center; gap: var(--space-5, 20px); padding: var(--space-4) var(--space-5, 20px) var(--space-3); }
+.app-newgroup-photo { display: grid; place-items: center; width: 7.5rem; height: 7.5rem; border-radius: 50%; background: var(--button); color: #fff; }
+.app-newgroup-name { align-self: stretch; }
+.app-newgroup-count { padding: var(--space-3) var(--space-5, 20px) var(--space-1, 4px); }
+.app-newgroup-row { cursor: default; }
+.app-newgroup-busy { display: inline-grid; place-items: center; }

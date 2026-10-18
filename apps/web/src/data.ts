@@ -458,8 +458,24 @@ export function seen(chatId: number, upToId: number): void {
 }
 
 async function createDirectChat(peerId: number): Promise<number> {
-  const res = await fetch('/dev/chats', { method: 'POST', body: JSON.stringify({ kind: 'direct', title: null, memberIds: [peerId] }) });
+  // существующая личная переписка или новая (сервер не создаёт вторую на ту же пару)
+  const res = await fetch('/chats/direct', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ userId: peerId }) });
   if (!res.ok) throw new Error(res.status === 401 ? 'Сессия истекла' : 'Не удалось создать чат');
+  const { id } = (await res.json()) as { id: number };
+  await engine.call({ type: 'refreshChats' });
+  return id;
+}
+
+/** Новая группа: сервер создаёт чат и служебное «создал(а) группу» — по нему чат появится у всех участников. */
+export async function createGroup(title: string, memberIds: number[]): Promise<number> {
+  const res = await fetch('/chats', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ title, memberIds }) });
+  if (!res.ok) {
+    const code = ((await res.json().catch(() => ({}))) as { code?: string }).code;
+    throw new Error(code === 'blocked' ? 'Кого-то из выбранных нельзя добавить в группу'
+      : code === 'too_long' ? 'Слишком длинное название или слишком много участников'
+      : code === 'not_found' ? 'Кого-то из выбранных больше нет в Relay'
+      : res.status === 401 ? 'Сессия истекла' : 'Не удалось создать группу');
+  }
   const { id } = (await res.json()) as { id: number };
   await engine.call({ type: 'refreshChats' });
   return id;
