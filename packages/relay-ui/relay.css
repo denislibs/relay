@@ -1157,7 +1157,7 @@ button.rl-tab:hover { color: var(--ink); }
 .rl-asidecard { display: flex; flex-direction: column; min-height: 0; overflow: hidden; color: var(--ink); }
 .rl-asidecard .rl-panel-head h2 { flex: 1; font: 500 19px/24px var(--font-sans); margin: 0; }
 .rl-aside-body { flex: 1; min-height: 0; display: flex; flex-direction: column; overflow-y: auto; scrollbar-width: thin; }
-.rl-aside-group { margin: var(--space-2) var(--space-3) 0; padding: var(--space-1) 0; border-radius: var(--radius-lg); background: var(--raised); box-shadow: var(--tg-shadow-bubble, 0 1px 2px rgba(0,0,0,.1)); }
+.rl-aside-group { margin: var(--space-2) var(--space-3) 0; padding: var(--space-2); border-radius: var(--radius-lg); background: var(--raised); box-shadow: var(--tg-shadow-bubble, 0 1px 2px rgba(0,0,0,.1)); }
 .rl-aside-group .rl-inforow { border-radius: var(--radius-md); }
 .rl-aside-tabs { margin: var(--space-3) var(--space-3) 0; }
 .rl-aside-tabs .rl-tabs { box-shadow: 0 1px 4px rgba(0, 0, 0, .06); }
