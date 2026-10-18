@@ -670,7 +670,11 @@ html[data-anim="0"] .app-chatcol, html[data-anim="0"] .app-chatcol-below, html[d
 .app-newgroup-busy { display: inline-grid; place-items: center; }
 
 /* участники группы в «Информации» — как в Telegram: аватар 44, имя и «владелец» справа, статус (в сети — цветом) */
-.app-members { display: flex; flex-direction: column; padding: .5rem; }
+/* как блок «Уведомления» выше: белая карточка со скруглением и лёгкой тенью */
+.app-members { display: flex; flex-direction: column; margin: var(--space-2) var(--space-3) var(--space-3); padding: var(--space-2); border-radius: var(--radius-lg); background: var(--raised); box-shadow: var(--tg-shadow-bubble, 0 1px 2px rgba(0,0,0,.1)); }
+.app-members .rl-row { border-radius: var(--radius-md); }
+.app-member:disabled:hover { background: transparent; }   /* своя строка не кликается — без подсветки */
+.rl-row-preview.app-online { color: var(--brand-text); }
 .app-member { width: 100%; border: 0; background: none; text-align: left; cursor: pointer; }
 .app-member:disabled { cursor: default; }
 .app-member-top { display: flex; align-items: center; justify-content: space-between; gap: 8px; min-width: 0; }
