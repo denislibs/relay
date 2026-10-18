@@ -1,3 +1,5 @@
+import { claimMediaCache, sendMediaPolicy } from './storageInfo';
+import { getPrefs, subscribePrefs, type Prefs } from './prefs';
 import { enableStrictDom } from '@relay/ui';
 import { render } from 'preact';
 import { startData } from './data';
@@ -20,6 +22,7 @@ installErrorCapture();
 const ME_KEY = 'relay.me';
 
 function start(me: Me): void {
+  void claimMediaCache(me.userId);
   setGlobal({ me, boot: 'app' });
   startData(me);
   startSettingsData(me);
@@ -27,6 +30,11 @@ function start(me: Me): void {
 
 async function boot(): Promise<void> {
   if ('serviceWorker' in navigator) navigator.serviceWorker.register('/sw.js').catch(() => {});
+  // политика кэша вложений — SW при каждом старте и при каждой смене настройки
+  let policy = '';
+  const pushPolicy = (p: Prefs) => { const k = JSON.stringify(p.media); if (k !== policy) { policy = k; sendMediaPolicy(p.media); } };
+  pushPolicy(getPrefs());
+  subscribePrefs(pushPolicy);
   // Уже входили на этом устройстве — стартуем сразу из локальных данных, как Telegram: первый кадр —
   // готовый список и открытый чат, а не пустое окно на время запроса. Сеанс сверяем в фоне.
   let cached: Me | null = null;

@@ -1,3 +1,4 @@
+import { releaseMediaCache } from './storageInfo';
 // Данные разделов настроек. Предзагрузка: на главной странице и при наведении на строку раздела —
 // слайд приезжает уже заполненным. Подписки настроек (me, ops, user) живут здесь, а не в data.ts.
 
@@ -167,6 +168,7 @@ function onTerminated(reason: 'logout' | 'terminated'): void {
   // сервер удалил подписку вместе с сеансом; отписываем и браузер (best effort, не ждём)
   void dropSubscription().catch(() => {});
   try { localStorage.removeItem(ME_KEY); localStorage.removeItem('relay.names'); } catch { /* приватный режим */ }
+  void releaseMediaCache();
   // IndexedDB стирает движок (он же её и держит); здесь — плавный уход на экран входа и тост
   const root = document.getElementById('app');
   const ms = reducedMotion() ? 0 : 220;

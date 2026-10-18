@@ -1,3 +1,4 @@
+import { releaseMediaCache } from '../../storageInfo';
 import { ConfirmDialog, InfoRow, SettingsIcon, Menu, PanelHeader, Presence, ProfileHeader, RichText, Section, Toast, peerTone } from '@relay/ui';
 import { useEffect, useRef, useState } from 'preact/hooks';
 import { getGlobal, setGlobal, useGlobal } from '../../global';
@@ -37,6 +38,7 @@ async function logout(): Promise<boolean> {
   const uid = getGlobal().me?.userId;
   try { localStorage.removeItem('relay.me'); localStorage.removeItem('relay.names'); } catch { /* приватный режим */ }
   if (uid != null) try { indexedDB.deleteDatabase('relay-' + uid); } catch { /* */ }
+  await releaseMediaCache();   // вложения — как и база: на устройстве после выхода не остаются
   setGlobal({ boot: 'login' });
   location.reload();   // воркеры отпускают IndexedDB, база удаляется до конца
   return true;

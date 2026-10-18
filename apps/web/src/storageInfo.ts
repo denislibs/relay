@@ -22,11 +22,8 @@ const idle = (): Promise<void> => new Promise((r) => {
   if (ric) ric(() => r()); else setTimeout(r, 0);
 });
 
-let cached: { bytes: number; unknown: number } | null = null;
-
-/** Размер медиа-кэшей по content-length; тела не читаем. Записи без длины считаем неизвестными. Результат живёт, пока открыта страница. */
+/** Размер медиа-кэшей по content-length; тела не читаем. Записи без длины считаем неизвестными. */
 export async function mediaCacheSize(): Promise<{ bytes: number; unknown: number }> {
-  if (cached) return cached;
   let bytes = 0, unknown = 0, n = 0;
   for (const c of await mediaCaches()) {
     for (const req of await c.keys()) {
@@ -37,11 +34,10 @@ export async function mediaCacheSize(): Promise<{ bytes: number; unknown: number
       if (++n % 50 === 0) await idle();   // пачками, в простое
     }
   }
-  return (cached = { bytes, unknown });
+  return { bytes, unknown };
 }
 
 export async function clearMediaCaches(): Promise<void> {
-  cached = null;
   if (typeof caches === 'undefined') return;
   await Promise.all((await caches.keys()).filter((k) => MEDIA_CACHE.test(k)).map((k) => caches.delete(k)));
 }
@@ -56,4 +52,27 @@ export async function readStorage(): Promise<StorageInfo> {
     db = e.usageDetails?.indexedDB ?? Math.max(0, used - (e.usageDetails?.caches ?? m.bytes));
   } catch { /* оценка недоступна */ }
   return { used: Math.max(used, m.bytes), quota, db, media: m.bytes, exact, approx: m.unknown > 0 };
+}
+
+const OWNER_KEY = 'relay.mediaOwner';
+
+/** Кэш вложений принадлежит одному пользователю: вошёл другой — прежний кэш стираем. */
+export async function claimMediaCache(userId: number): Promise<void> {
+  let owner: string | null = null;
+  try { owner = localStorage.getItem(OWNER_KEY); } catch { /* приватный режим */ }
+  if (owner === String(userId)) return;
+  await clearMediaCaches().catch(() => {});
+  try { localStorage.setItem(OWNER_KEY, String(userId)); } catch { /* */ }
+}
+
+/** Выход: кэш вложений больше никому не принадлежит. */
+export async function releaseMediaCache(): Promise<void> {
+  try { localStorage.removeItem(OWNER_KEY); } catch { /* */ }
+  await clearMediaCaches().catch(() => {});
+}
+
+/** Срок хранения и лимит — Service Worker'у: localStorage ему недоступен, он хранит их у себя. */
+export function sendMediaPolicy(p: { keepDays: number; maxMb: number }): void {
+  if (!('serviceWorker' in navigator)) return;
+  void navigator.serviceWorker.ready.then((r) => r.active?.postMessage({ type: 'mediaPolicy', keepDays: p.keepDays, maxMb: p.maxMb })).catch(() => {});
 }

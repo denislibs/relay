@@ -23,6 +23,7 @@ export interface Prefs {
     fileMaxMb: number;
   };
   screen: { blur: boolean; blurDelay: number; hideChatInTitle: boolean; hideUnreadInTitle: boolean; hideNotifyText: boolean };
+  media: { keepDays: number; maxMb: number };   // кэш вложений: 0 — без срока / без лимита
   dev: { enabled: boolean };
 }
 
@@ -47,6 +48,7 @@ export function defaultPrefs(reduced = false): Prefs {
     notify: { web: true, sound: true, volume: 0.5 },
     autoload: { enabled: true, photo: all(true), video: all(true), file: all(false), fileMaxMb: 10 },
     screen: { blur: false, blurDelay: 0, hideChatInTitle: false, hideUnreadInTitle: false, hideNotifyText: false },
+    media: { keepDays: 30, maxMb: 0 },
     dev: { enabled: false },
   };
 }
@@ -69,6 +71,8 @@ function merge(def: unknown, src: unknown): unknown {
 const THEMES = ['system', 'light', 'dark'];
 const FILE_MB = [1, 5, 10, 50, 100];
 const BLUR_DELAY = [0, 5, 30];
+export const KEEP_DAYS = [1, 7, 30, 0];
+export const CACHE_MB = [500, 1000, 2000, 5000, 0];
 const nearest = (steps: number[], v: number): number => steps.reduce((a, b) => (Math.abs(b - v) < Math.abs(a - v) ? b : a));
 const num = (v: unknown, d: number): number => (typeof v === 'number' && Number.isFinite(v) ? v : d);
 
@@ -96,6 +100,8 @@ function sanitize(src: Prefs, d: Prefs): Prefs {
   p.notify.volume = Math.min(1, Math.max(0, num(p.notify.volume, d.notify.volume)));
   p.autoload.fileMaxMb = nearest(FILE_MB, num(p.autoload.fileMaxMb, d.autoload.fileMaxMb));
   p.screen.blurDelay = nearest(BLUR_DELAY, num(p.screen.blurDelay, 0));
+  if (!KEEP_DAYS.includes(p.media.keepDays)) p.media.keepDays = d.media.keepDays;
+  if (!CACHE_MB.includes(p.media.maxMb)) p.media.maxMb = d.media.maxMb;
   for (const t of ['light', 'dark'] as const) {
     const w = p.wallpaper[t];
     const c = w.colors as unknown;

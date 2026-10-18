@@ -36,3 +36,18 @@ test('upload a photo, send it, members can download it, strangers cannot; media 
   const doc = await (await fetch(`${base}/upload?name=report.pdf`, { method: 'POST', headers: { ...as(a.token), 'content-type': 'application/pdf' }, body: 'pdf' })).json() as { kind: string };
   expect(doc.kind).toBe('file');
 });
+
+test('HTML, SVG and other active types are never served inline from our origin', async () => {
+  const a = await login('Анна');
+  for (const [mime, name] of [['text/html', 'x.html'], ['image/svg+xml', 'x.svg'], ['application/xhtml+xml', 'x.xhtml'], ['application/pdf', 'x.pdf']]) {
+    const up = await (await fetch(`${base}/upload?name=${name}`, { method: 'POST', headers: { ...as(a.token), 'content-type': mime }, body: '<script>alert(1)</script>' })).json() as { id: string };
+    const res = await fetch(`${base}/files/${up.id}`, { headers: as(a.token) });
+    expect(res.headers.get('content-type')).toBe('application/octet-stream');
+    expect(res.headers.get('content-disposition')).toStartWith('attachment');
+    expect(res.headers.get('content-security-policy')).toContain('sandbox');
+  }
+  const img = await (await fetch(`${base}/upload?name=p.png&w=2&h=2`, { method: 'POST', headers: { ...as(a.token), 'content-type': 'image/png' }, body: new Uint8Array([137, 80]) })).json() as { id: string };
+  const res = await fetch(`${base}/files/${img.id}`, { headers: as(a.token) });
+  expect(res.headers.get('content-type')).toBe('image/png');
+  expect(res.headers.get('content-disposition')).toStartWith('inline');
+});

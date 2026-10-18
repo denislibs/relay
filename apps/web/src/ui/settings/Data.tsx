@@ -1,13 +1,17 @@
-import { ChatRowSkeleton, ConfirmDialog, InfoRow, PanelHeader, Presence, ProgressRing, Section, Switch, useMinVisible } from '@relay/ui';
+import { ChatRowSkeleton, ConfirmDialog, InfoRow, PanelHeader, Presence, ProgressRing, RangeRow, Section, Switch, useMinVisible } from '@relay/ui';
 import { useEffect, useRef, useState } from 'preact/hooks';
 import { autoloadSubtitle, isDefaultAutoload, type MediaKind } from '../../autoload';
 import { useGlobal } from '../../global';
 import { back, go } from '../../nav';
-import { defaultPrefs, setPrefs } from '../../prefs';
+import { CACHE_MB, defaultPrefs, KEEP_DAYS, setPref, setPrefs } from '../../prefs';
 import { getPendingOps, resetLocal, showToast } from '../../settingsData';
 import { clearMediaCaches, formatBytes, readStorage, type StorageInfo } from '../../storageInfo';
 import { useScrollMemory } from '../useScrollMemory';
 import { clearLocalDialog } from './clearLocal';
+
+const KEEP_LABEL: Record<number, string> = { 1: '1 день', 7: '1 неделя', 30: '1 месяц', 0: 'Всегда' };
+const KEEP_MARK: Record<number, string> = { 1: '1 д', 7: '1 нед', 30: '1 мес', 0: '∞' };
+const mbLabel = (mb: number) => (mb === 0 ? 'Без лимита' : mb >= 1000 ? `${mb / 1000} ГБ` : `${mb} МБ`);
 
 const KINDS: [MediaKind, string, string, 'blue' | 'orange' | 'purple'][] = [
   ['photo', 'Фото', 'image', 'blue'], ['video', 'Видео', 'video', 'purple'], ['file', 'Файлы', 'file', 'orange'],
@@ -16,6 +20,7 @@ const KINDS: [MediaKind, string, string, 'blue' | 'orange' | 'purple'][] = [
 /** «Данные и память»: автозагрузка медиа (на устройстве), занятое место, очистка кэша и локальных данных. */
 export function Data() {
   const al = useGlobal((s) => s.prefs.autoload);
+  const media = useGlobal((s) => s.prefs.media);
   const chats = useGlobal((s) => s.chats.length);
   const status = useGlobal((s) => s.status);
   const scroll = useScrollMemory('settings/data');
@@ -32,6 +37,10 @@ export function Data() {
 
   const recompute = () => { void readStorage().then((i) => { if (alive.current) setInfo(i); }).catch(() => { if (alive.current) setInfo({ used: 0, quota: 0, db: 0, media: 0, exact: false, approx: false }); }); };
   useEffect(recompute, []);
+  // после смены срока или лимита SW чистит кэш сам — пересчитываем занятое, когда он закончит
+  const settleTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const settle = () => { if (settleTimer.current) clearTimeout(settleTimer.current); settleTimer.current = setTimeout(recompute, 1200); };
+  useEffect(() => () => { if (settleTimer.current) clearTimeout(settleTimer.current); }, []);
   const open = (k: 'cache' | 'local' | 'autoload') => { if (k === 'local') setUnsent(status.outbox + status.failed + getPendingOps()); setLastAsk(k); setAsk(k); };
 
   const clearCache = async () => {
@@ -97,6 +106,20 @@ export function Data() {
           </div>
           <InfoRow icon="cloud" title="Чаты на устройстве" subtitle={`${chats} — доступны без сети`} />
           <InfoRow icon="history" title="Синхронизация" subtitle={status.phase === 'ready' ? (status.outbox ? `В очереди: ${status.outbox}` : 'Всё сохранено на сервере') : status.phase === 'offline' ? 'Ждём сеть' : 'Идёт обновление'} />
+        </Section>
+        <Section title="Кэш медиа" footer="Фото и файлы, к которым давно не обращались, удаляются с устройства сами. При необходимости они скачаются снова.">
+          <RangeRow
+            label="Хранить медиа" min={0} max={KEEP_DAYS.length - 1} step={1} value={Math.max(0, KEEP_DAYS.indexOf(media.keepDays))}
+            format={(i: number) => KEEP_LABEL[KEEP_DAYS[i]]}
+            marks={KEEP_DAYS.map((d, i) => ({ value: i, label: KEEP_MARK[d] }))}
+            onChange={(i: number) => { setPref('media.keepDays', KEEP_DAYS[i]); settle(); }}
+          />
+          <RangeRow
+            label="Максимальный размер кэша" min={0} max={CACHE_MB.length - 1} step={1} value={Math.max(0, CACHE_MB.indexOf(media.maxMb))}
+            format={(i: number) => mbLabel(CACHE_MB[i])}
+            marks={CACHE_MB.map((m, i) => ({ value: i, label: m === 0 ? '∞' : mbLabel(m).replace(' ', '\u00a0') }))}
+            onChange={(i: number) => { setPref('media.maxMb', CACHE_MB[i]); settle(); }}
+          />
         </Section>
         <Section footer="Очистка локальных данных не удаляет ничего на сервере.">
           <InfoRow icon="trash" title="Очистить кэш медиа" onClick={() => open('cache')} />

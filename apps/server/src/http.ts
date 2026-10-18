@@ -45,6 +45,8 @@ function withCookie(req: Request, res: Response | undefined): Response | undefin
   return res;
 }
 
+const INLINE_MIME = /^(image\/(jpeg|png|webp|gif|avif)|video\/(mp4|webm|ogg|quicktime)|audio\/(mpeg|mp4|ogg|webm|wav|x-wav|aac|flac))$/;
+
 const API = /^\/(health|me|users|contacts|settings|privacy|blocks|chats|presence|search|upload|files|push|sessions|ws|dev|logout)(\/|$)/;
 
 /** Статика клиента из WEB_DIST. Путь не может выйти за папку; пути без расширения — SPA, отдаём index.html. */
@@ -186,9 +188,12 @@ export function createServer(opts: { port: number }): Server {
         if ((req.method === 'GET' || req.method === 'HEAD') && file) {
           const f = await fileFor(userId, file[1]);
           if (!f) return new Response('Not found', { status: 404 });
-          const download = url.searchParams.get('download') === '1';
+          // inline — только то, что браузер покажет как медиа; HTML, SVG и прочее с нашего домена исполнять нельзя
+          const safe = INLINE_MIME.test(f.mime);
+          const download = url.searchParams.get('download') === '1' || !safe;
           return new Response(Bun.file(f.path), { headers: {
-            'content-type': f.mime,
+            'content-type': safe ? f.mime : 'application/octet-stream',
+            'content-security-policy': "default-src 'none'; sandbox",
             // id — содержимое не меняется: кэшируем навсегда, но только в этом браузере
             'cache-control': 'private, max-age=31536000, immutable',
             'content-disposition': `${download ? 'attachment' : 'inline'}; filename*=UTF-8''${encodeURIComponent(f.name)}`,
