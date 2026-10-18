@@ -1,4 +1,6 @@
 import { CheckRow, ChatRowSkeleton, InfoRow, PanelHeader, Presence, Section, SelectRow, useMinVisible } from '@relay/ui';
+import { useEffect, useState } from 'preact/hooks';
+import { getPassword, listPasskeys } from '../../authSettings';
 import { useGlobal } from '../../global';
 import { back, go } from '../../nav';
 import { setPref } from '../../prefs';
@@ -25,11 +27,22 @@ export function Privacy() {
   const skeleton = useMinVisible(waiting, { delay: 150, min: 600 });
   const screen = useGlobal((s) => s.prefs.screen);
   const scroll = useScrollMemory('settings/privacy');
+  // вход: облачный пароль и паскеи — с сервера при каждом заходе (меняются редко, но могли смениться на другом устройстве)
+  const [pw, setPw] = useState<boolean | null>(null);
+  const [keys, setKeys] = useState<number | null>(null);
+  useEffect(() => {
+    void getPassword().then((r) => { if (r.ok) setPw(r.data.enabled); });
+    void listPasskeys().then((r) => { if (r.ok) setKeys(r.data.passkeys.length); });
+  }, []);
 
   return (
     <div class="rl-sidepage" aria-label="Конфиденциальность">
       <PanelHeader icon="arrowLeft" closeLabel="Назад" title="Конфиденциальность" onClose={() => void back()} />
       <div class="rl-settings" ref={scroll.ref} onScroll={scroll.onScroll}>
+        <Section title="Вход">
+          <InfoRow tile="green" icon="lock" title="Облачный пароль" value={pw == null ? undefined : pw ? 'Вкл.' : 'Выкл.'} onClick={() => void go('settings/privacy/password')} />
+          <InfoRow tile="blue" icon="key" title="Паскеи" value={keys ? keys : undefined} onClick={() => void go('settings/privacy/passkeys')} />
+        </Section>
         <Section>
           <div onPointerEnter={() => prefetch('settings/privacy/blocked')}>
             <InfoRow tile="red" icon="block" title="Заблокированные" value={blocked || undefined} onClick={() => void go('settings/privacy/blocked')} />

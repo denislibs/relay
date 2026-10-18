@@ -71,6 +71,16 @@ async function boot(): Promise<void> {
   start(me);
 }
 
+// вход завершён (ui/auth): сеанс уже в cookie — узнаём, кто мы, и запускаем приложение без перезагрузки
+window.addEventListener('relay:signed-in', () => {
+  void fetch('/me').then(async (res) => {
+    if (!res.ok) { location.reload(); return; }
+    const me = (await res.json()) as Me;
+    localStorage.setItem(ME_KEY, JSON.stringify(me));
+    start(me);
+  }).catch(() => location.reload());
+});
+
 nav.installNav({ get: () => getGlobal().sidebarView, set: (p) => setGlobal({ sidebarView: p }), escBusy: () => getGlobal().infoOpen && !!getGlobal().openChatId });
 if (__DEV__) (window as unknown as { __nav: typeof nav }).__nav = nav;   // для ручной проверки навигации
 // dev: раздел «Для разработчиков» для проверок — что сейчас в журнале и что ничего не работает при закрытом разделе

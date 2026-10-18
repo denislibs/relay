@@ -18,10 +18,10 @@ import { checkUsername, getMe, getUser, setUsername, updateProfile } from './dom
 import { usersByIds } from './domain/users';
 import { subscribe, unsubscribe, vapidKeys, type SubscriptionInput } from './domain/push';
 import { getSettings, setNotify, setPrivacy, setSessionsTtl } from './domain/settings';
-import { requestCode, signIn } from './domain/login';
+import { publicAuthRoute, privateAuthRoute } from './authRoutes';
 import { addContact, blockUser, listBlocked, listContacts, removeContact, resolveUser, unblockUser, updateContact } from './domain/contacts';
 
-const STATUS: Record<string, number> = { bad_frame: 400, too_long: 400, username_invalid: 400, username_reserved: 400, username_taken: 409, bio_too_long: 400, note_too_long: 400, name_invalid: 400, birthday_invalid: 400, links_invalid: 400, unauthorized: 401, not_member: 403, blocked: 403, not_found: 404, code_invalid: 400, code_expired: 400, flood: 429, fresh_session: 403, forbidden: 403 };
+const STATUS: Record<string, number> = { bad_frame: 400, too_long: 400, username_invalid: 400, username_reserved: 400, username_taken: 409, bio_too_long: 400, note_too_long: 400, name_invalid: 400, birthday_invalid: 400, links_invalid: 400, unauthorized: 401, not_member: 403, blocked: 403, not_found: 404, code_invalid: 400, code_expired: 400, flood: 429, fresh_session: 403, password_invalid: 400, password_missing: 400, recovery_unavailable: 400, email_invalid: 400, qr_expired: 400, passkey_not_found: 404, passkey_invalid: 400, forbidden: 403 };
 const fail = (code: string) => Response.json({ code }, { status: STATUS[code] ?? 500 });
 
 /** checkedAt — когда сокет последний раз отмечал активность и проверял свой сеанс (domain/sessions.checkSocket). */
@@ -45,22 +45,6 @@ function withCookie(req: Request, res: Response | undefined): Response | undefin
   const token = refreshed.get(req);
   if (token && res && !res.headers.has('set-cookie')) { try { res.headers.set('set-cookie', sessionCookie(token)); } catch { /* неизменяемые заголовки */ } }
   return res;
-}
-
-/**
- * Вход без сеанса ставит cookie — защита от login CSRF: только JSON (простая кросс-сайтовая форма
- * так не умеет, а fetch с таким типом требует preflight, который мы не разрешаем) и Origin, если он есть, — наш хост.
- */
-function signInRequestOk(req: Request): boolean {
-  const type = (req.headers.get('content-type') ?? '').split(';')[0].trim().toLowerCase();
-  if (type !== 'application/json') return false;
-  const origin = req.headers.get('origin');
-  if (origin == null) return true;
-  let host: string;
-  try { host = new URL(origin).host; } catch { return false; }
-  // за доверенным прокси (TRUST_PROXY=1, как у clientIp) Host мог быть переписан — исходный в X-Forwarded-Host
-  const fwd = process.env.TRUST_PROXY === '1' ? req.headers.get('x-forwarded-host')?.split(',')[0].trim() : undefined;
-  return host === (req.headers.get('host') ?? new URL(req.url).host) || (!!fwd && host === fwd);
 }
 
 const INLINE_MIME = /^(image\/(jpeg|png|webp|gif|avif)|video\/(mp4|webm|ogg|quicktime)|audio\/(mpeg|mp4|ogg|webm|wav|x-wav|aac|flac))$/;
@@ -110,23 +94,13 @@ export function createServer(opts: { port: number }): Server {
 
         // публичный ключ VAPID — не секрет
         if (req.method === 'GET' && url.pathname === '/push/key') return Response.json({ key: (await vapidKeys()).publicKey });
-        if (req.method === 'POST' && (url.pathname === '/auth/code' || url.pathname === '/auth/signin') && !signInRequestOk(req)) return fail('bad_frame');
-        if (req.method === 'POST' && url.pathname === '/auth/code') {
-          const { login } = ((await req.json().catch(() => null)) ?? {}) as { login?: unknown };
-          if (typeof login !== 'string' || !login.trim() || login.length > 64) return fail('bad_frame');
-          return Response.json(await requestCode(login, clientIp(req, server)));
-        }
-        if (req.method === 'POST' && url.pathname === '/auth/signin') {
-          const { attemptId, code } = ((await req.json().catch(() => null)) ?? {}) as { attemptId?: unknown; code?: unknown };
-          if (typeof attemptId !== 'string' || typeof code !== 'string') return fail('bad_frame');
-          const { userId } = await signIn(attemptId, code);
-          const token = await createSession(userId, { req, server }, { confirmed: false });
-          await announceLogin(userId, token);
-          return Response.json({ userId }, { headers: { 'set-cookie': sessionCookie(token) } });
-        }
+        const pub = await publicAuthRoute(req, url, server);
+        if (pub) return pub;
         const auth = await sessionFromToken(readSessionToken(req));
         if (!auth) return fail('unauthorized');
         const { userId, sessionId } = auth;
+        const priv = await privateAuthRoute(req, url, auth);
+        if (priv) return priv;
         if (auth.refresh) { const t = readSessionToken(req); if (t && req.headers.get('cookie')?.includes('relay_session=')) refreshed.set(req, t); }
 
         if (req.method === 'GET' && url.pathname === '/me') {

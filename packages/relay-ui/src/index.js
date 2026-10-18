@@ -3,6 +3,7 @@
 export * from './kit.js';
 export * from './more.js';
 export * from './settings.js';
+export * from './owl.js';
 export * from './schedule.js';
 export { enableStrictDom } from './strict.js';
 export * from './composer.js';

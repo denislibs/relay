@@ -4,7 +4,7 @@ import { settlePushes } from '../src/domain/push';
 export async function resetDb(): Promise<void> {
   // push в фоне из прошлого теста не должен столкнуться с truncate (deadlock)
   await settlePushes();
-  await sql`truncate login_attempts, sessions, chats, chat_members, messages, user_seq, updates restart identity cascade`;
+  await sql`truncate login_attempts, login_pending, srp_challenges, qr_logins, webauthn_challenges, sessions, chats, chat_members, messages, user_seq, updates restart identity cascade`;
   // системного пользователя «Relay» (миграция 110_service) не трогаем
   await sql`delete from users where not system`;
   // engine-тесты делают truncate users на общей базе и стирают строку миграции 110_service — вернуть, если пропала

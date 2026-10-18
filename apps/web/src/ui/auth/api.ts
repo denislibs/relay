@@ -1,0 +1,43 @@
+/** Вызовы /auth/*: ответ — данные или код ошибки сервера ('offline' — нет сети). */
+
+export type Step =
+  | { userId: number }
+  | { passwordNeeded: true; pendingId: string; hint: string }
+  | { signupRequired: true; pendingId: string };
+
+export type Result<T> = { ok: true; data: T } | { ok: false; code: string };
+
+export async function call<T>(path: string, body?: unknown): Promise<Result<T>> {
+  try {
+    const res = await fetch(path, {
+      method: body === undefined && path.startsWith('/auth/config') ? 'GET' : 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: body === undefined ? undefined : JSON.stringify(body),
+    });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) return { ok: false, code: (data as { code?: string }).code ?? 'internal' };
+    return { ok: true, data: data as T };
+  } catch {
+    return { ok: false, code: 'offline' };
+  }
+}
+
+export const ERRORS: Record<string, string> = {
+  offline: 'Нет соединения с сервером',
+  flood: 'Слишком много попыток. Попробуйте позже',
+  code_invalid: 'Неверный код',
+  code_expired: 'Код устарел — запросите новый',
+  password_invalid: 'Неверный пароль',
+  name_invalid: 'Введите имя',
+  recovery_unavailable: 'Почта для восстановления не задана',
+  passkey_not_found: 'Этот паскей не привязан к аккаунту',
+  passkey_invalid: 'Не удалось войти с паскеем',
+  bad_frame: 'Проверьте введённые данные',
+  internal: 'Что-то пошло не так',
+};
+export const errorText = (code: string) => ERRORS[code] ?? ERRORS.internal;
+
+/** Вход завершён: сеанс в cookie. main.tsx слушает и запускает приложение. */
+export function signedIn(): void {
+  window.dispatchEvent(new CustomEvent('relay:signed-in'));
+}

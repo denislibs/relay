@@ -15,6 +15,8 @@ export const PAGES = [
   'settings/privacy/rule/:key/allow',
   'settings/privacy/rule/:key/deny',
   'settings/privacy/blocked',
+  'settings/privacy/password',
+  'settings/privacy/passkeys',
   'settings/data',
   'settings/data/autoload/:type',
   'settings/performance',
