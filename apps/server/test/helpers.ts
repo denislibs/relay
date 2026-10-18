@@ -9,6 +9,8 @@ export async function resetDb(): Promise<void> {
                      jobs, jobs_dead, dev_mail restart identity cascade`;
   // системного пользователя «Relay» (миграция 110_service) не трогаем
   await sql`delete from users where not system`;
+  // поиск — по Postgres, пока тест сам не построит индекс (meili.test.ts)
+  await sql`delete from server_meta where k in ('search_index', 'search_building')`;
   // engine-тесты делают truncate users на общей базе и стирают строку миграции 110_service — вернуть, если пропала
   await sql`insert into users (name, system) select 'Relay', true where not exists (select 1 from users where system)`;
 }

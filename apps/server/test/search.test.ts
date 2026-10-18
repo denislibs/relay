@@ -1,7 +1,7 @@
 import { beforeEach, expect, test } from 'bun:test';
 import { deleteMessage } from '../src/domain/messageOps';
 import { sendMessage } from '../src/domain/messages';
-import { searchMessages } from '../src/domain/search';
+import { searchPostgres } from '../src/domain/search';
 import { makeChat, makeUser, resetDb } from './helpers';
 
 beforeEach(resetDb);
@@ -17,16 +17,16 @@ test('search: case-insensitive substring, newest first, own chats only, per chat
   await deleteMessage(a, ab, gone.id);
   await say(a, ab, '100% готово');
 
-  const all = await searchMessages(a, 'ВСТРЕЧ');
+  const all = await searchPostgres(a, 'ВСТРЕЧ');
   expect(all.hits.map((h) => h.message.body)).toEqual(['перенесли встречу', 'Встреча в Пятницу']);
   expect(all.hits[0].chatTitle).toBe('b');
-  const p1 = await searchMessages(a, 'встреч', { limit: 1 });
+  const p1 = await searchPostgres(a, 'встреч', { limit: 1 });
   expect(p1.hasMore).toBe(true);
-  const p2 = await searchMessages(a, 'встреч', { limit: 1, beforeId: p1.hits[0].message.id });
+  const p2 = await searchPostgres(a, 'встреч', { limit: 1, beforeId: p1.hits[0].message.id });
   expect(p2.hits[0].message.body).toBe('Встреча в Пятницу');
-  expect((await searchMessages(b, 'встреч', { chatId: bc })).hits.map((h) => h.message.body)).toEqual(['встреча без a']);
-  expect((await searchMessages(a, '0%')).hits.map((h) => h.message.body)).toEqual(['100% готово']);
-  expect((await searchMessages(a, 'ес', { chatId: ab })).hits.some((h) => h.message.id === m2.id)).toBe(true);
-  await expect(searchMessages(a, 'я')).rejects.toMatchObject({ code: 'bad_frame' });
-  await expect(searchMessages(a, 'встреч', { chatId: bc })).rejects.toBeTruthy();
+  expect((await searchPostgres(b, 'встреч', { chatId: bc })).hits.map((h) => h.message.body)).toEqual(['встреча без a']);
+  expect((await searchPostgres(a, '0%')).hits.map((h) => h.message.body)).toEqual(['100% готово']);
+  expect((await searchPostgres(a, 'ес', { chatId: ab })).hits.some((h) => h.message.id === m2.id)).toBe(true);
+  await expect(searchPostgres(a, 'я')).rejects.toMatchObject({ code: 'bad_frame' });
+  await expect(searchPostgres(a, 'встреч', { chatId: bc })).rejects.toBeTruthy();
 });

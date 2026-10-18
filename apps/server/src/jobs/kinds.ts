@@ -3,6 +3,7 @@ import { sql } from '../db';
 import { deliver } from '../domain/devOutbox';
 import { sweepInactive } from '../domain/sessions';
 import { deliverPush, planPush, type PushMessage, type PushPayload } from '../domain/push';
+import { reindexAll, syncMessage } from '../search/messagesIndex';
 import { register } from './handlers';
 import { enqueue } from './queue';
 
@@ -30,4 +31,15 @@ export const SWEEP_EVERY_SEC = 3600;
 register('sessions.sweep', async () => {
   await sweepInactive();
   return { again: { inSec: SWEEP_EVERY_SEC } };
+});
+
+// сообщение создано, изменено или удалено: привести индекс к текущей строке (идемпотентно)
+register('search.sync', async (p: { id: number }) => {
+  await syncMessage(p.id);
+});
+
+// полная перестройка индекса поиска рядом с живым (воркер при старте, dev-seed)
+register('search.reindex', async () => {
+  const n = await reindexAll();
+  console.log(`search: reindexed ${n} messages`);
 });

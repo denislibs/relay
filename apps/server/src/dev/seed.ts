@@ -5,6 +5,7 @@
 // Журнал изменений не пишется: клиент заберёт всё снимком (/chats) при первом входе.
 import { sql } from '../db';
 import { bumpEpoch } from '../domain/epoch';
+import { enqueue } from '../jobs/queue';
 
 const arg = (name: string, def: number) => { const i = process.argv.indexOf('--' + name); return i > 0 ? Number(process.argv[i + 1]) : def; };
 const OWNERS = arg('owners', 31), CHATS = arg('chats', 500), GROUPS = arg('groups', 20);
@@ -144,6 +145,10 @@ async function main() {
          group by m.chat_id, cm2.user_id
       ) x
      where cm.chat_id = x.chat_id and cm.user_id = x.user_id`;
+
+  // индекс поиска перестроит воркер; до конца перестройки поиск идёт по Postgres
+  await sql`delete from server_meta where k = 'search_index'`;
+  await enqueue(sql, 'search.reindex', {}, { dedupeKey: 'search.reindex' });
 
   console.log(`chats: ${chatCount}, messages: ${msgCount}, ${((Date.now() - t0) / 1000).toFixed(1)}s`);
   console.log(`вход: имя «${ownerNames[0]}» (или любое из ${ownerNames.slice(1, 4).map((n) => `«${n}»`).join(', ')}…)`);

@@ -7,6 +7,7 @@ import { fanOut } from './journal';
 import { blockedInDirect } from './privacy';
 import { isServiceChat } from './service';
 import { burnCodes } from './login';
+import { enqueue } from '../jobs/queue';
 
 const MAX_BODY = 4096;
 const EMOJI = /^\p{Extended_Pictographic}(️|‍\p{Extended_Pictographic})*$/u;
@@ -34,6 +35,7 @@ export async function editMessage(userId: number, chatId: number, id: number, bo
     const [row] = await tx`update messages set body = ${text}, entities = ${entities.length ? sql.json(entities as never) : null}, edited_at = now() where chat_id = ${chatId} and id = ${id} returning edited_at`;
     const editedAt = new Date(row.edited_at as string).toISOString();
     await fanOut(tx, await membersOf(tx, chatId), { type: 'messageEdited', chatId, id, body: text, editedAt, entities });
+    await enqueue(tx, 'search.sync', { id });
     return { editedAt };
   });
 }
@@ -46,6 +48,7 @@ export async function deleteMessage(userId: number, chatId: number, id: number):
     await tx`update messages set body = '', entities = null, deleted = true where chat_id = ${chatId} and id = ${id}`;
     await tx`delete from reactions where chat_id = ${chatId} and message_id = ${id}`;
     await fanOut(tx, await membersOf(tx, chatId), { type: 'messageDeleted', chatId, id });
+    await enqueue(tx, 'search.sync', { id });   // убрать из индекса
     await unpinDeleted(tx, chatId, id);
     return { ok: true };
   });
