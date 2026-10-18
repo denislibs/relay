@@ -86,18 +86,22 @@ export function SelectField(props) {
           onPointerDown: function (e) { e.preventDefault(); },   // фокус остаётся на поле
           onPointerMove: function () { if (actRef.current !== i) setAct(i); },
           onClick: function () { pick(i); } },
-          h('span', { class: 'rl-select-check', 'aria-hidden': 'true' }, sel ? h(Icon, { name: 'check', size: 18 }) : null),
+          h('span', { class: 'rl-select-check', 'aria-hidden': 'true' }, sel ? h(Icon, { name: 'check', size: 18 }) : null),   // «выбран» читается из aria-selected
           h('span', null, o.label));
       })), document.body) : null;
 
   return h('div', { class: cx('rl-tf rl-tf-filled rl-tf-select', open && 'is-open', props.class || props.className) },
-    h('div', { class: 'rl-tf-box' },
-      h('button', { ref: btn, id: id, type: 'button', class: 'rl-tf-input rl-select-btn', disabled: props.disabled,
-        'aria-haspopup': 'listbox', 'aria-expanded': open ? 'true' : 'false', 'aria-controls': open ? id + '-list' : undefined,
-        'aria-activedescendant': open && active >= 0 ? id + '-o' + active : undefined, 'aria-labelledby': id + '-label ' + id,
+    // список рисуется порталом в body; aria-owns переносит его в дереве доступности сюда — внутрь окна с aria-modal,
+    // иначе VoiceOver считает всё вне модалки скрытым и пункты не читает
+    h('div', { class: 'rl-tf-box', 'aria-owns': open ? id + '-list' : undefined },
+      h('button', { ref: btn, id: id, type: 'button', role: 'combobox', class: 'rl-tf-input rl-select-btn', disabled: props.disabled,
+        'aria-haspopup': 'listbox', 'aria-expanded': open ? 'true' : 'false', 'aria-controls': id + '-list',
+        'aria-activedescendant': open && active >= 0 ? id + '-o' + active : undefined, 'aria-labelledby': id + '-label',
+        'aria-describedby': props.hint ? id + '-hint' : undefined,
         onClick: function () { openRef.current ? hide() : show(); }, onKeyDown: onKey, onBlur: function () { setTimeout(function () { if (document.activeElement !== btn.current) hide(); }, 0); } },
         h('span', { class: 'rl-select-value' }, opts[cur] ? opts[cur].label : ''),
         h('span', { class: 'rl-select-chev', 'aria-hidden': 'true' }, h(Icon, { name: 'chevronDown', size: 20 }))),
       h('label', { id: id + '-label', class: 'rl-tf-label', for: id }, props.label)),
+    props.hint ? h('div', { id: id + '-hint', class: 'rl-tf-msg' }, props.hint) : null,
     popover);
 }

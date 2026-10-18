@@ -47,7 +47,11 @@ function BirthdayModal({ value, onSave, onClose }: { value: Birthday | null; onS
   const future = !yearBad && y !== undefined && new Date(y, month - 1, day).getTime() > Date.now();
   const max = daysIn(month, yearBad ? undefined : y);
   const d = Math.min(day, max);
-  const err = yearBad ? `1900–${nowYear}` : future ? 'Ещё не наступил' : undefined;
+  // пока год набирают, не ругаемся: ошибка — когда введены все 4 цифры или поле покинули
+  const [yearLeft, setYearLeft] = useState(false);
+  const typed = year.trim().length === 4 || yearLeft;
+  const err = !typed ? undefined : yearBad ? 'Неверный год' : future ? 'Ещё впереди' : undefined;
+  const incomplete = year.trim().length > 0 && year.trim().length < 4;
   const privacy = () => { onClose(); void go('settings/privacy/rule/birthday'); };
   return (
     <Modal size="slim" onClose={onClose} label="Дата рождения" className="app-bday-modal"
@@ -58,11 +62,11 @@ function BirthdayModal({ value, onSave, onClose }: { value: Birthday | null; onS
         <div class="app-bday-row">
           <SelectField label="День" value={d} onChange={setDay} options={Array.from({ length: max }, (_, i) => ({ value: i + 1, label: String(i + 1) }))} />
           <SelectField label="Месяц" class="app-bday-month" value={month} onChange={setMonth} options={MONTHS.map((m, i) => ({ value: i + 1, label: m }))} />
-          <TextField label="Год" value={year} inputMode="numeric" maxLength={4} error={err} onInput={(v: string) => setYear(v.replace(/\D/g, ''))} />
+          <TextField label="Год" value={year} inputMode="numeric" maxLength={4} error={err} onInput={(v: string) => { setYear(v.replace(/\D/g, '')); setYearLeft(false); }} onBlur={() => setYearLeft(true)} />
         </div>
         <p class="app-bday-note">Кто видит дату рождения — в <button type="button" class="app-bday-link" onClick={privacy}>Настройках ›</button></p>
         {value ? <button type="button" class="app-bday-remove" onClick={() => onSave(null)}>Удалить из профиля</button> : null}
-        <Button size="lg" class="app-bday-save" disabled={!!err} onClick={() => onSave(y === undefined ? { day: d, month } : { day: d, month, year: y })}>Сохранить</Button>
+        <Button size="lg" class="app-bday-save" disabled={!!err || incomplete || yearBad || future} onClick={() => onSave(y === undefined ? { day: d, month } : { day: d, month, year: y })}>Сохранить</Button>
       </div>
     </Modal>
   );

@@ -1770,4 +1770,4 @@ html[data-blur="0"] .rl-menu, html[data-blur="0"] .rl-attach { -webkit-backdrop-
 .rl-select-opt.is-selected { color: var(--brand-text); font-weight: 500; }
 .rl-select-check { display: inline-flex; width: 18px; justify-content: center; color: var(--brand-text); }
 @media (prefers-reduced-motion: reduce) { .rl-select-pop, .rl-select-chev { animation: none; transition: none; } }
-.rl-select-btn:focus-visible { outline: none; }   /* фокус показывает сама рамка поля */
+.rl-select-btn:focus-visible { outline: none; box-shadow: inset 0 0 0 1px var(--brand-strong), 0 0 0 3px color-mix(in srgb, var(--brand-strong) 30%, transparent); border-color: var(--brand-strong); }   /* фокус с клавиатуры — заметное кольцо вокруг рамки */
