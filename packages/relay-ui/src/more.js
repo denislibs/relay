@@ -56,19 +56,16 @@ function ReactionPicker(props) {
 }
 
 /* ---------- AttachMenu: what to attach, items pop in one after another ---------- */
+// только то, что работает (как в Telegram: сначала медиа, потом файл); остальное приложение передаёт само через items
 var ATTACH = [
-  { key: 'doc', icon: 'file', label: 'Документ', tone: 'var(--author-3)' },
-  { key: 'media', icon: 'image', label: 'Фото и видео', tone: 'var(--author-1)' },
-  { key: 'camera', icon: 'camera', label: 'Камера', tone: 'var(--author-2)' },
-  { key: 'contact', icon: 'contact', label: 'Контакт', tone: 'var(--tick-read)' },
-  { key: 'poll', icon: 'poll', label: 'Опрос', tone: 'var(--favorite)' },
-  { key: 'sticker', icon: 'sticker', label: 'Новый стикер', tone: 'var(--author-4)' }
+  { key: 'media', icon: 'image', label: 'Фото или видео' },
+  { key: 'doc', icon: 'file', label: 'Файл' }
 ];
 function AttachMenu(props) {
-  return h('div', { class: 'rl-attach', role: 'menu', 'aria-label': 'Прикрепить' },
-    (props.items || ATTACH).map(function (it, i) {
-      return h('button', { key: it.key, type: 'button', role: 'menuitem', class: 'rl-attach-item', style: { '--i': i, '--tone': it.tone }, onPointerDown: ripple, onClick: function () { if (props.onPick) props.onPick(it.key); } },
-        h('span', { class: 'rl-attach-icon' }, h(Icon, { name: it.icon, size: 20 })), it.label);
+  return h('div', { class: 'rl-attach', role: 'menu', 'aria-label': 'Прикрепить', onMouseEnter: props.onMouseEnter, onMouseLeave: props.onMouseLeave },
+    (props.items || ATTACH).map(function (it) {
+      return h('button', { key: it.key, type: 'button', role: 'menuitem', class: 'rl-attach-item', onPointerDown: ripple, onClick: function () { if (props.onPick) props.onPick(it.key); } },
+        h('span', { class: 'rl-attach-icon' }, h(Icon, { name: it.icon, size: 22 })), it.label);
     }));
 }
 

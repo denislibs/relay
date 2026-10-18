@@ -158,8 +158,8 @@ body { margin: 0; font-family: var(--font-sans); color: var(--ink); background: 
   white-space: nowrap; overflow: hidden; text-overflow: ellipsis; pointer-events: none; opacity: 0; transform: translateX(16px);
   transition: opacity 180ms var(--ease-out), transform 200ms var(--ease-out); }
 .rl-composer-empty .rl-composer-ph { opacity: 1; transform: none; }
-.rl-composer-send { position: relative; width: 48px; height: 48px; border: 0; border-radius: 50%; background: var(--brand); color: var(--on-brand); cursor: pointer; flex-shrink: 0; transition: transform var(--dur-instant) var(--ease-out), background-color var(--dur-instant) var(--ease-out); }
-.rl-composer-send:hover { background: var(--brand-strong); }
+.rl-composer-send { position: relative; width: 48px; height: 48px; border: 0; border-radius: 50%; background: var(--brand-strong); color: var(--on-brand); cursor: pointer; flex-shrink: 0; transition: transform var(--dur-instant) var(--ease-out), background-color var(--dur-instant) var(--ease-out); }
+.rl-composer-send:hover { background: color-mix(in srgb, var(--brand-strong) 90%, #000); }
 .rl-composer-send:active { transform: scale(var(--press-lg)); }
 .rl-composer-send .rl-icon { position: absolute; top: 50%; left: 50%; margin: -11px 0 0 -11px; transition: transform var(--dur-fast) var(--ease-out), opacity var(--dur-instant) var(--ease-out); }
 .rl-composer-send .rl-swap-off { opacity: 0; transform: scale(0.4) rotate(-45deg); }
@@ -678,16 +678,16 @@ button.rl-quote:active { background: var(--quote-bg-active, var(--pressed)); }
 @keyframes rl-rpick-pop { 0% { transform: scale(0) translateY(10px); opacity: 0; } 70% { transform: scale(1.15); opacity: 1; } 100% { transform: none; } }
 
 /* ---------- Menu ---------- */
-.rl-menu { position: absolute; z-index: 20; min-width: 220px; padding: 8px 0; border-radius: var(--radius-lg); background: var(--raised); color: var(--ink); box-shadow: var(--shadow-pop); transform-origin: top left; animation: rl-menu-in var(--dur-base) var(--ease-out) both; }
+.rl-menu { position: absolute; z-index: 20; min-width: 200px; padding: 4px; border-radius: 14px; background: var(--menu-bg); color: var(--ink); box-shadow: var(--menu-shadow); -webkit-backdrop-filter: blur(24px) saturate(1.8); backdrop-filter: blur(24px) saturate(1.8); transform-origin: top left; animation: rl-menu-in 160ms var(--ease-out) both; }
 .rl-menu-top-right { transform-origin: top right; }
 .rl-menu-bottom-left { transform-origin: bottom left; }
-.rl-menu-item { display: flex; align-items: center; gap: var(--space-4); width: 100%; height: 40px; padding: 0 var(--space-6) 0 var(--space-4); border: 0; background: transparent; color: inherit; font: 400 15px/20px var(--font-sans); text-align: left; cursor: pointer; animation: rl-menu-item 240ms var(--ease-out) both; animation-delay: calc(var(--i) * 18ms); transition: background-color var(--dur-instant) var(--ease-standard); }
+.rl-menu-item { display: flex; align-items: center; gap: 16px; width: 100%; height: 36px; padding: 0 18px 0 12px; border: 0; border-radius: 9px; background: transparent; color: inherit; font: 500 14.5px/20px var(--font-sans); text-align: left; cursor: pointer; transition: background-color 120ms var(--ease-standard); }
 .rl-menu-item:hover, .rl-menu-item:focus-visible { background: var(--hover); outline: none; }
-.rl-menu-item .rl-icon { color: var(--ink-muted); }
+.rl-menu-item .rl-icon { color: var(--ink); opacity: .9; }   /* как в Telegram: иконки одним цветом с текстом */
 .rl-menu-item span { flex: 1; }
 .rl-menu-item kbd { font: 400 12px/1 var(--font-sans); color: var(--ink-muted); }
 .rl-menu-danger, .rl-menu-danger .rl-icon { color: var(--danger); }
-.rl-menu-sep { height: 1px; margin: 6px 0; border: 0; background: var(--line); }
+.rl-menu-sep { height: 1px; margin: 4px 10px; border: 0; background: var(--line); }
 .rl-presence[data-state="closing"] .rl-menu, .rl-presence[data-state="closing"] .rl-rpick, .rl-presence[data-state="closing"] .rl-attach, .rl-presence[data-state="closing"] .rl-mentions { animation: rl-pop-out var(--dur-fast) var(--ease-in) forwards; }
 @keyframes rl-menu-in { from { opacity: 0; transform: scale(0.92); } to { opacity: 1; transform: none; } }
 @keyframes rl-menu-item { from { opacity: 0; transform: translateY(-4px); } to { opacity: 1; transform: none; } }
@@ -699,13 +699,12 @@ button.rl-quote:active { background: var(--quote-bg-active, var(--pressed)); }
 .rl-composer-reply .rl-quote { background: var(--composer); }
 @keyframes rl-reply-in { from { opacity: 0; max-height: 0; transform: translateY(8px); } to { opacity: 1; max-height: 96px; transform: none; } }
 @keyframes rl-reply-out { from { max-height: 96px; } to { opacity: 0; max-height: 0; transform: translateY(8px); } }
-.rl-attach-toggle .rl-icon { transition: transform var(--dur-base) var(--ease-out); }
-.rl-attach-toggle[aria-pressed="true"] .rl-icon { transform: rotate(90deg); }
-.rl-attach { position: absolute; left: 16px; bottom: calc(100% + 8px); z-index: 20; display: flex; flex-direction: column; padding: 8px; border-radius: var(--radius-lg); background: var(--raised); box-shadow: var(--shadow-pop); transform-origin: bottom left; animation: rl-menu-in var(--dur-base) var(--ease-out) both; }
-.rl-attach-item { display: flex; align-items: center; gap: var(--space-3); height: 44px; padding: 0 var(--space-4) 0 var(--space-2); border: 0; border-radius: var(--radius-md); background: transparent; color: var(--ink); font: 400 15px/20px var(--font-sans); text-align: left; cursor: pointer; animation: rl-attach-item 300ms var(--ease-out) both; animation-delay: calc(var(--i) * 28ms); }
+.rl-attach-toggle .rl-icon { transition: color 120ms var(--ease-standard); }
+.rl-attach-toggle[aria-pressed="true"] { color: var(--brand-text, var(--brand-strong)); background: transparent; }
+.rl-attach { position: absolute; left: 4px; bottom: calc(100% + 8px); z-index: 20; display: flex; flex-direction: column; min-width: 200px; padding: 4px; border-radius: 14px; background: var(--menu-bg); box-shadow: var(--menu-shadow); -webkit-backdrop-filter: blur(24px) saturate(1.8); backdrop-filter: blur(24px) saturate(1.8); transform-origin: bottom left; animation: rl-menu-in 160ms var(--ease-out) both; }
+.rl-attach-item { display: flex; align-items: center; gap: 16px; height: 36px; padding: 0 18px 0 12px; border: 0; border-radius: 9px; background: transparent; color: var(--ink); font: 500 14.5px/20px var(--font-sans); text-align: left; cursor: pointer; transition: background-color 120ms var(--ease-standard); }
 .rl-attach-item:hover { background: var(--hover); }
-.rl-attach-icon { display: inline-flex; align-items: center; justify-content: center; width: 32px; height: 32px; border-radius: 50%; color: var(--tone); transition: transform var(--dur-fast) var(--ease-out); }
-.rl-attach-item:hover .rl-attach-icon { transform: scale(1.15) rotate(-8deg); }
+.rl-attach-icon { display: inline-flex; align-items: center; justify-content: center; width: 24px; height: 24px; color: var(--ink); opacity: .9; }
 @keyframes rl-attach-item { from { opacity: 0; transform: translateY(10px) scale(0.9); } to { opacity: 1; transform: none; } }
 .rl-mentions { position: absolute; left: 64px; right: 76px; bottom: calc(100% + 4px); z-index: 20; max-height: 240px; overflow-y: auto; padding: 6px 0; border-radius: var(--radius-lg); background: var(--raised); box-shadow: var(--shadow-pop); transform-origin: bottom center; animation: rl-menu-in var(--dur-fast) var(--ease-out) both; }
 .rl-mention { display: flex; align-items: center; gap: var(--space-3); width: 100%; padding: 6px var(--space-4); border: 0; background: transparent; color: var(--ink); text-align: left; cursor: pointer; }
@@ -1041,9 +1040,7 @@ button.rl-tab:hover { color: var(--ink); }
 
 /* message context menu: reaction pill above a soft rounded list */
 .rl-shell .rl-msgmenu { position: fixed; z-index: 40; display: flex; flex-direction: column; align-items: flex-start; gap: 8px; }
-.rl-shell .rl-msgmenu .rl-menu { position: relative; min-width: 200px; padding: 6px; border-radius: 16px; background: color-mix(in srgb, var(--raised) 88%, transparent); -webkit-backdrop-filter: blur(18px) saturate(1.6); backdrop-filter: blur(18px) saturate(1.6); }
-.rl-shell .rl-msgmenu .rl-menu-item { height: 40px; border-radius: 10px; padding: 0 var(--space-4) 0 var(--space-3); font-weight: 500; }
-.rl-shell .rl-msgmenu .rl-menu-item .rl-icon { color: var(--ink); }
+.rl-shell .rl-msgmenu .rl-menu { position: relative; }   /* вид — общий у всех меню (.rl-menu) */
 .rl-shell .rl-rpick { padding: 4px 6px; background: color-mix(in srgb, var(--raised) 92%, transparent); -webkit-backdrop-filter: blur(18px); backdrop-filter: blur(18px); }
 .rl-shell .rl-rpick-btn { width: 38px; height: 38px; font-size: 26px; }
 .rl-msgmenu-scrim { position: fixed; inset: 0; z-index: 39; }
@@ -1075,7 +1072,7 @@ button.rl-tab:hover { color: var(--ink); }
   --top-zone: calc(var(--header-h) + var(--space-float));
   --bottom-zone: calc(var(--composer-h, 48px) + var(--space-float));
   margin: calc(-1 * var(--top-zone)) 0 calc(-1 * var(--bottom-zone));
-  padding: calc(var(--top-zone) + 8px) 0 calc(var(--bottom-zone) + 8px);
+  padding: calc(var(--top-zone) + 8px) 0 calc(var(--bottom-zone) - 6px);   /* последнее сообщение ≈10px над полем ввода, как в Telegram */
   -webkit-mask-image: linear-gradient(to bottom, transparent 0, transparent calc(var(--top-zone) * 0.35), #000 calc(var(--top-zone) + 4px), #000 calc(100% - var(--bottom-zone) - 4px), transparent calc(100% - var(--bottom-zone) * 0.35), transparent 100%);
   mask-image: linear-gradient(to bottom, transparent 0, transparent calc(var(--top-zone) * 0.35), #000 calc(var(--top-zone) + 4px), #000 calc(100% - var(--bottom-zone) - 4px), transparent calc(100% - var(--bottom-zone) * 0.35), transparent 100%);
 }
@@ -1495,3 +1492,11 @@ html[data-blur="0"] .rl-shell .rl-msgmenu .rl-menu, html[data-blur="0"] .rl-shel
 [data-spoiler-live] .rl-spoiler.rl-spoiler-revealing:not(.rl-spoiler-open) { animation: rl-spoiler-reveal 500ms ease-in forwards; background: none;
   -webkit-mask-image: radial-gradient(circle at var(--sx) var(--sy), #000 var(--rl-sr), transparent calc(var(--rl-sr) + 10px));
   mask-image: radial-gradient(circle at var(--sx) var(--sy), #000 var(--rl-sr), transparent calc(var(--rl-sr) + 10px)); -webkit-mask-size: auto; mask-size: auto; }
+
+/* Меню (главное, контекстное, вложения): одна поверхность — полупрозрачная с размытием, как в Telegram */
+:root { --menu-bg: color-mix(in srgb, var(--raised) 84%, transparent); --menu-shadow: 0 0 0 .5px rgba(0, 0, 0, .06), 0 6px 28px rgba(0, 0, 0, .16); }
+html[data-blur="0"] { --menu-bg: color-mix(in srgb, var(--raised) 97%, transparent); }
+html[data-blur="0"] .rl-menu, html[data-blur="0"] .rl-attach { -webkit-backdrop-filter: none; backdrop-filter: none; }
+/* тёмная тема: меню на тон светлее панели и с тенью — иначе сливается с карточкой */
+:root[data-theme="dark"] { --menu-bg: color-mix(in srgb, #2a2d2e 86%, transparent); --menu-shadow: 0 0 0 .5px rgba(255, 255, 255, .07), 0 8px 30px rgba(0, 0, 0, .5); }
+@media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) { --menu-bg: color-mix(in srgb, #2a2d2e 86%, transparent); --menu-shadow: 0 0 0 .5px rgba(255, 255, 255, .07), 0 8px 30px rgba(0, 0, 0, .5); } }

@@ -12,6 +12,9 @@ import { isDark } from '../theme';
 import { chatTime, chatTone, shownBody, snippet } from './format';
 import { applyTheme as setTheme } from '../theme';
 import { previewBody, previewText, previewThumb, type LastMessage } from './preview';
+import { toggleMuted } from './Info';
+import { seen } from '../data';
+import { getGlobal } from '../global';
 
 const FOLDERS = ['all', 'unread'];
 
@@ -35,7 +38,7 @@ function MoreLoader() {
 }
 
 /** Строка списка чатов. memo: чат не изменился (тот же объект из Mirror) — строку не трогаем при сдвиге окна. */
-const SideRow = memo(function SideRow({ c, meId, active, showDraft, muted }: { c: Item; meId: number; active: boolean; showDraft: boolean; muted: boolean }) {
+const SideRow = memo(function SideRow({ c, meId, active, showDraft, muted, onMenu }: { c: Item; meId: number; active: boolean; showDraft: boolean; muted: boolean; onMenu: (id: number, x: number, y: number) => void }) {
   const last = c.last as (LastMessage & { status: string }) | null;
   const thumb = last ? previewThumb(last) : null;
   // имя автора — только в группах (в личке и так ясно, кто пишет); своё — «Вы», чужое — первое слово имени
@@ -59,6 +62,7 @@ const SideRow = memo(function SideRow({ c, meId, active, showDraft, muted }: { c
       status={!draft && last && last.senderId === meId ? last.status : null}
       active={active}
       onClick={() => openChat(c.id as number)}
+      onContextMenu={(e: MouseEvent) => { e.preventDefault(); onMenu(c.id as number, e.clientX, e.clientY); }}
     />
   );
 });
@@ -68,6 +72,9 @@ const ROW = 72; // высота строки чата (--size-row) — спис�
 
 export function Sidebar() {
   const [menu, setMenu] = useState(false);
+  // контекстное меню строки чата (правая кнопка): как в Telegram — у курсора
+  const [rowMenu, setRowMenu] = useState<{ id: number; x: number; y: number } | null>(null);
+  const onRowMenu = useRef((id: number, x: number, y: number) => setRowMenu({ id, x, y })).current;
   // поиск сообщений (сервер, без сети — кэш): через 300 мс после последнего нажатия, от двух символов
   const [hits, setHits] = useState<{ q: string; list: SearchHit[]; source: string } | null>(null);
   const searchQ = useGlobal((s) => s.search).trim();
@@ -126,7 +133,7 @@ export function Sidebar() {
             onNearEnd={f === 'all' && !status.chatsComplete ? loadMoreChats : undefined}
             rowHeight={ROW}
             getKey={(c: Item) => 'c' + c.id}
-            render={(c: Item) => <SideRow c={c} meId={me.userId} active={c.id === openId} showDraft={!!c.draft && c.id !== openId} muted={mutedIds.includes(c.id as number)} />}
+            render={(c: Item) => <SideRow c={c} meId={me.userId} active={c.id === openId} showDraft={!!c.draft && c.id !== openId} muted={mutedIds.includes(c.id as number)} onMenu={onRowMenu} />}
           />
           {f === 'all' && !q && !status.chatsComplete ? (
             <MoreLoader />
@@ -170,6 +177,7 @@ export function Sidebar() {
       ]} />}
       banner={
         <>
+          <RowMenu at={rowMenu} onClose={() => setRowMenu(null)} />
           {menu ? <div class="rl-msgmenu-scrim" onClick={() => setMenu(false)} /> : null}
           {/* при переходе на другой экран меню снимаем сразу, без анимации исчезания поверх слайда */}
           {view === 'chats' ? <Presence show={menu} exitMs={160}>
@@ -202,5 +210,38 @@ export function Sidebar() {
     >
       <SlideStack variant="tabs" order={FOLDERS} active={folder} render={(f: string) => <div class="rl-page-scroll">{renderFolder(f)}</div>} />
     </SidebarCard>
+  );
+}
+
+/** Действия с чатом по правой кнопке: только то, что умеет сервер (удаления/закрепления/архива пока нет). */
+function RowMenu({ at, onClose }: { at: { id: number; x: number; y: number } | null; onClose: () => void }) {
+  const chat = useGlobal((s) => (at ? s.chats.find((c) => c.id === at.id) : undefined));
+  const muted = useGlobal((s) => (at ? s.muted.includes(at.id) : false));
+  const last = useRef(at);
+  if (at) last.current = at;
+  const p = at ?? last.current;
+  const id = p?.id ?? 0;
+  const unread = (chat?.unread as number) > 0;
+  const lastId = ((chat?.last as { id?: number | null } | null)?.id ?? 0) || (chat?.knownMaxId as number) || 0;
+  return (
+    <Presence show={!!at && !!chat} exitMs={140}>
+      {p ? (
+        <>
+          <div class="rl-msgmenu-scrim" onClick={onClose} onContextMenu={(e) => { e.preventDefault(); onClose(); }} />
+          <div class="rl-msgmenu" style={{ left: Math.min(p.x, innerWidth - 240), top: Math.min(p.y, innerHeight - 200) }}>
+            <Menu
+              label="Действия с чатом"
+              onClose={onClose}
+              items={[
+                { icon: 'newTab', label: 'Открыть в новой вкладке', onClick: () => { onClose(); window.open(location.pathname + '#chat=' + id, '_blank', 'noopener'); } },
+                ...(unread && lastId ? [{ icon: 'markRead', label: 'Отметить как прочитанное', onClick: () => { onClose(); seen(id, lastId); } }] : []),
+                { icon: muted ? 'bell' : 'bellOff', label: muted ? 'Включить уведомления' : 'Выключить уведомления', onClick: () => { onClose(); toggleMuted(id, getGlobal().muted); } },
+                { icon: 'info', label: 'Информация', onClick: () => { onClose(); openChat(id); setGlobal({ infoOpen: true }); } },
+              ]}
+            />
+          </div>
+        </>
+      ) : null}
+    </Presence>
   );
 }
