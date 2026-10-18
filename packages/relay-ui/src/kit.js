@@ -365,7 +365,7 @@ function ChatRow(props) {
   return h('button', Object.assign({ type: 'button' }, rest, { onPointerDown: chain(rest.onPointerDown, ripple),
     class: cx('rl-row', (props.className || props.class)), 'aria-current': props.active ? 'true' : undefined
   }),
-    h(Avatar, { name: props.avatar === undefined ? props.name : props.avatar, tone: props.avatarTone, online: props.online, logo: props.logo, src: props.avatarSrc, thumb: props.avatarThumb }),
+    h(Avatar, { name: props.avatar === undefined ? props.name : props.avatar, tone: props.avatarTone, online: props.online, logo: props.logo, src: props.avatarSrc, thumb: props.avatarThumb, size: 54 }),   // как в Telegram: 54 в строке 72
     h('span', { class: 'rl-row-main' },
       h('span', { class: 'rl-row-top' },
         props.verified
@@ -391,7 +391,7 @@ function ArchivedRow(props) {
 
 function ChatRowSkeleton() {
   return h('div', { class: 'rl-skel', 'aria-hidden': 'true' },
-    h('i', { style: { width: 48, height: 48 } }),
+    h('i', { style: { width: 54, height: 54 } }),
     h('span', { style: { flex: 1, display: 'flex', flexDirection: 'column', gap: 8 } },
       h('i', { style: { width: '55%', height: 12 } }),
       h('i', { style: { width: '80%', height: 10 } })));
