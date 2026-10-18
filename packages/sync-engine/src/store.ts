@@ -32,6 +32,8 @@ export interface ChatSummary {
  * у остальных чатов в памяти лишь последнее сообщение (`chat.last`).
  */
 export class Store {
+  /** счётчик sessionsChanged из журнала (не хранится): по нему интерфейс перечитывает сеансы */
+  sessionsRev = 0;
   chats = new Map<number, LocalChat>();
   outbox = new Map<string, OutboxEntry>();
   pendingReads = new Map<number, number>();
@@ -181,6 +183,7 @@ export class Store {
       case 'settingsChanged': this.settings.apply(u.settings, seq); return;
       case 'privacyChanged': this.settings.applyPrivacy(u.rules, seq); return;
       case 'blocksChanged': return applyBlocksChanged(this, u, seq);
+      case 'sessionsChanged': this.sessionsRev++; return;
     }
   }
 

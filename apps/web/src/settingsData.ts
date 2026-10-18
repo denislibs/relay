@@ -126,9 +126,17 @@ export function startSettingsData(me: Me): void {
 
   // сеанс завершён (с другого устройства или автозавершением): движок уже стёр данные — уходим на вход
   const statusM = new Mirror();
+  let sessionsRev: number | undefined;   // последний виденный sessionsRev; на первом статусе только запоминаем
+  let sessionsPreloaded = false;
   engine.watch({ kind: 'status' }, (p) => {
     statusM.apply(p);
     const st = statusM.list()[0];
+    if (st) {
+      const rev = st.sessionsRev as number | undefined;
+      if (rev !== sessionsRev) { const first = sessionsRev === undefined; sessionsRev = rev; if (!first) void loadSessions(true); }   // журнал: sessionsChanged
+      // плашке «Это вы?» нужен список с первого экрана: грузим, как только появилась сеть (до этого движок ответил бы offline)
+      if (st.online && !sessionsPreloaded) { sessionsPreloaded = true; void loadSessions(true); }
+    }
     // флаги имитатора сети (раздел «Для разработчиков»): плашка во всех вкладках; ссылка не меняется, пока флаги те же
     const sim = (st?.devSim ?? null) as DevSimFlags | null;
     if (JSON.stringify(sim) !== JSON.stringify(getGlobal().devSim)) setGlobal({ devSim: sim });
@@ -154,6 +162,7 @@ export function loadSessions(force = false): Promise<void> {
     .catch(() => { if (gen === sessionsGen) setGlobal({ sessionsOffline: true }); });
 }
 export const terminateSession = (id: number): Promise<unknown> => call({ type: 'terminateSession', id });
+export const confirmSession = (id: number): Promise<unknown> => call({ type: 'confirmSession', id });
 export const terminateOtherSessions = (): Promise<unknown> => call({ type: 'terminateOtherSessions' });
 export const setSessionsTtl = (days: number): Promise<unknown> => call({ type: 'setSessionsTtl', days });
 

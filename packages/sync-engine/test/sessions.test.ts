@@ -107,3 +107,34 @@ test('upload answered 401 (session row gone, socket still open) → terminal sta
   await e.call({ type: 'sendFile', chatId, body: '', file: new Blob(['x']), name: 'a.txt', mime: 'text/plain' });
   await st.until((l) => l[0]?.terminated === true);
 });
+
+test('sessionsChanged from the journal bumps sessionsRev in status; no bump on a quiet connect', async () => {
+  const a1 = await srv.login('Анна'), a2 = await srv.login('Анна'), _a3 = await srv.login('Анна');
+  const e = await open(srv.config(a1));
+  expect(e.status().sessionsRev).toBe(0);
+  const st = watchInto(e, { kind: 'status' });
+  e.connect();
+  await e.whenIdle();
+  const before = e.status().sessionsRev as number;
+  expect(before).toBe(0);   // тихое подключение счётчик не трогает
+  const list = (await (await call(a2.token, 'GET', '/sessions')).json()) as SessionInfo[];
+  const third = list.filter((x) => !x.current).sort((x, y) => y.id - x.id)[0]!;   // a3 (id по возрастанию); a1 — движок, a2 — текущий
+  expect((await call(a2.token, 'DELETE', `/sessions/${third.id}`)).status).toBe(200);   // завершение пишет sessionsChanged
+  await st.until((l) => (l[0]?.sessionsRev as number) > before);
+  expect(e.status().sessionsRev).toBe(before + 1);
+});
+
+test('confirmSession goes through ops under its own key and does not hide the session in the view', async () => {
+  const a1 = await srv.login('Анна'), a2 = await srv.login('Анна');
+  const e = await open(srv.config(a1));
+  e.connect();
+  await e.whenIdle();
+  const r = (await e.call({ type: 'listSessions' })) as { sessions: SessionInfo[] };
+  const other = r.sessions.find((s) => !s.current)!;
+  e.disconnect();
+  expect(await e.call({ type: 'confirmSession', id: other.id })).toBeNull();
+  expect(e.ops.list.map((o) => o.key)).toEqual(['sessionConfirm:' + other.id]);
+  expect(e.ops.list[0]).toMatchObject({ method: 'POST', path: `/sessions/${other.id}/confirm` });
+  expect(sessionsView(r.sessions, e.ops.list.map((o) => o.key)).length).toBe(2);
+  void a2;
+});

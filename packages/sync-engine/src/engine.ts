@@ -295,6 +295,7 @@ export class Engine {
       outbox: [...this.store.outbox.values()].filter((o) => !o.failed).length,
       failed: [...this.store.outbox.values()].filter((o) => o.failed).length,
       ...this.session.status(),
+      sessionsRev: this.store.sessionsRev,   // растёт на sessionsChanged из журнала: интерфейс перечитывает список сеансов
       devSim: simFlags(this.dev.sim),   // имитатор сети включён — плашка «Режим разработчика» во всех вкладках
     };
   }
@@ -686,6 +687,7 @@ export class Engine {
       case 'listSessions':
       case 'terminateSession':
       case 'terminateOtherSessions':
+      case 'confirmSession':
         return this.sessions.act(a);
       case 'setSessionsTtl':
         await this.ops.enqueue({ key: OP_SESSIONS_TTL, method: 'PUT', path: '/settings/sessions-ttl', body: { days: a.days } });
