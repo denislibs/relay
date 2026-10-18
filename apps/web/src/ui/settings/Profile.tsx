@@ -1,4 +1,4 @@
-import { Button, ConfirmDialog, Fab, InfoRow, Modal, PanelHeader, Presence, ProfileHeader, Section, SelectRow, TextField, peerTone } from '@relay/ui';
+import { Button, ConfirmDialog, Fab, IconButton, InfoRow, Modal, PanelHeader, Presence, ProfileHeader, Section, Sticker, TextField, peerTone } from '@relay/ui';
 import { usePhotoPicker } from './usePhotoPicker';
 import { useEffect, useRef, useState } from 'preact/hooks';
 import { useGlobal, type Me } from '../../global';
@@ -36,6 +36,21 @@ function useUsernameStatus(me: Me, value: string): UsernameStatus {
   return status;
 }
 
+/** Поле-список в стиле полей ввода: подпись на рамке, значение внутри, стрелка справа. */
+function SelectField({ label, value, options, onChange, class: cls }: { label: string; value: number; options: { value: number; label: string }[]; onChange: (v: number) => void; class?: string }) {
+  return (
+    <div class={'rl-tf rl-tf-filled app-bday-field ' + (cls ?? '')}>
+      <div class="rl-tf-box">
+        <select class="rl-tf-input app-bday-select" value={value} onChange={(e) => onChange(Number(e.currentTarget.value))}>
+          {options.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
+        </select>
+        <label class="rl-tf-label">{label}</label>
+      </div>
+    </div>
+  );
+}
+
+/** День рождения как в Telegram: торт, «Дата рождения», день · месяц · год в ряд, кто видит — в настройках. */
 function BirthdayModal({ value, onSave, onClose }: { value: Birthday | null; onSave: (b: Birthday | null) => void; onClose: () => void }) {
   const [day, setDay] = useState(value?.day ?? 1);
   const [month, setMonth] = useState(value?.month ?? 1);
@@ -46,17 +61,22 @@ function BirthdayModal({ value, onSave, onClose }: { value: Birthday | null; onS
   const future = !yearBad && y !== undefined && new Date(y, month - 1, day).getTime() > Date.now();
   const max = daysIn(month, yearBad ? undefined : y);
   const d = Math.min(day, max);
-  const err = yearBad ? `Год от 1900 до ${nowYear}` : future ? 'Эта дата ещё не наступила' : undefined;
+  const err = yearBad ? `1900–${nowYear}` : future ? 'Ещё не наступил' : undefined;
+  const privacy = () => { onClose(); void go('settings/privacy/rule/birthday'); };
   return (
-    <Modal title="День рождения" size="slim" onClose={onClose} actions={<>
-      {value ? <Button variant="danger" onClick={() => onSave(null)}>Удалить</Button> : null}
-      <Button variant="ghost" onClick={onClose}>Отмена</Button>
-      <Button disabled={!!err} onClick={() => onSave(y === undefined ? { day: d, month } : { day: d, month, year: y })}>Сохранить</Button>
-    </>}>
+    <Modal size="slim" onClose={onClose} label="Дата рождения" className="app-bday-modal"
+      header={<div class="app-bday-head"><IconButton icon="close" label="Закрыть" onClick={onClose} /></div>}>
       <div class="app-bday">
-        <SelectRow label="День" value={d} onChange={(v: number) => setDay(Number(v))} options={Array.from({ length: max }, (_, i) => ({ value: i + 1, label: String(i + 1) }))} />
-        <SelectRow label="Месяц" value={month} onChange={(v: number) => setMonth(Number(v))} options={MONTHS.map((m, i) => ({ value: i + 1, label: m }))} />
-        <TextField label="Год (необязательно)" value={year} inputMode="numeric" maxLength={4} error={err} onInput={(v: string) => setYear(v.replace(/\D/g, ''))} />
+        <Sticker name="cake" size={150} replay="click" />
+        <h2 class="app-bday-title">Дата рождения</h2>
+        <div class="app-bday-row">
+          <SelectField label="День" value={d} onChange={setDay} options={Array.from({ length: max }, (_, i) => ({ value: i + 1, label: String(i + 1) }))} />
+          <SelectField label="Месяц" class="app-bday-month" value={month} onChange={setMonth} options={MONTHS.map((m, i) => ({ value: i + 1, label: m }))} />
+          <TextField label="Год" value={year} inputMode="numeric" maxLength={4} error={err} onInput={(v: string) => setYear(v.replace(/\D/g, ''))} />
+        </div>
+        <p class="app-bday-note">Кто видит дату рождения — в <button type="button" class="app-bday-link" onClick={privacy}>Настройках ›</button></p>
+        {value ? <button type="button" class="app-bday-remove" onClick={() => onSave(null)}>Удалить из профиля</button> : null}
+        <Button size="lg" class="app-bday-save" disabled={!!err} onClick={() => onSave(y === undefined ? { day: d, month } : { day: d, month, year: y })}>Сохранить</Button>
       </div>
     </Modal>
   );
@@ -133,8 +153,10 @@ export function Profile() {
             </button>
           ) : null}
         </Section>
-        <Section>
+        <Section footer={<>Кто видит дату рождения — в <button type="button" class="app-bday-link" onClick={() => void go('settings/privacy/rule/birthday')}>Настройках ›</button></>}>
           <InfoRow tile="purple" icon="cake" title={form.birthday ? birthdayText(form.birthday) : 'Не указан'} subtitle="День рождения" onClick={() => setBday(true)} />
+        </Section>
+        <Section>
           <InfoRow tile="blue" icon="link" title="Ссылки" subtitle={linksText(me.links?.length ?? 0)} onClick={() => void go('settings/profile/links')} />
         </Section>
         <Section>
