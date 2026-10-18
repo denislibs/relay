@@ -1,4 +1,4 @@
-import type { Birthday, Entity, PrivacyKey, PrivacyMode } from '@relay/protocol';
+import type { Birthday, Entity, PrivacyKey, PrivacyMode, ServiceType } from '@relay/protocol';
 
 export type Status = 'pending' | 'sent' | 'read' | 'failed';
 
@@ -22,7 +22,7 @@ export interface LocalMessage {
   listened?: boolean;     // голосовое/кружок прослушан получателем
   progress?: number;      // загрузка файла 0..1, пока сообщение в очереди
   error?: string;         // почему не отправлено (failed): 'blocked' — собеседник заблокировал отправителя
-  service?: { type: 'login_code' | 'new_login' };   // служебное сообщение от «Relay»
+  service?: { type: ServiceType };   // служебное сообщение от «Relay»
 }
 
 /** Вложение сообщения; у неотправленного id пустой, пока файл не загружен. */
@@ -179,5 +179,5 @@ export interface EngineConfig {
 export const PENDING_BASE = 2 ** 52;
 
 /** Результат поиска: сообщение и где оно (для перехода). source — откуда ответ (без сети ищем локально). */
-export interface SearchHit { chatId: number; chatTitle: string | null; id: number; sort: number; senderId: number; body: string; createdAt: string }
+export interface SearchHit { chatId: number; chatTitle: string | null; id: number; sort: number; senderId: number; body: string; createdAt: string; service?: { type: ServiceType } }
 export interface SearchResult { hits: SearchHit[]; hasMore: boolean; source: 'server' | 'local' }

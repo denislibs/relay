@@ -11,7 +11,8 @@ import { readStore } from './devdata';
  * - журнал — кольцевой буфер на LOG_CAP событий: record() пишет всегда (одна запись в массив, без копий),
  *   а наружу события уходят, только пока есть подписка devLog — пачкой раз в 250 мс;
  * - тела сообщений обрезаются до BODY_MAX символов, у адресов отрезается query, data:-адреса (превью) — только длина:
- *   снимок журнала можно показать, не показывая переписку.
+ *   снимок журнала можно показать, не показывая переписку; у служебного сообщения с кодом входа (login_code)
+ *   цифры заменяются точками — код не попадает ни в журнал, ни в просмотр хранилища.
  */
 export type DevKind = 'ws-in' | 'ws-out' | 'engine' | 'error';
 /** ep — эпоха журнала: случайный id экземпляра движка. После «Перезапустить воркер» id событий снова с 1,
@@ -31,11 +32,15 @@ export function cutUrl(s: string): string {
   return cut(s.replace(/data:[^\s"']*/g, (d) => `data:…(${d.length})`).replace(/\?[^\s"']*/g, '?…'), MSG_MAX);
 }
 
+/** Код входа — точками, как в превью и уведомлениях клиента (hideCode); здесь прячем все цифры. */
+export const hideDigits = (s: string): string => s.replace(/\d/g, '•');
+const isLoginCode = (o: Record<string, unknown>) => (o.service as { type?: unknown } | null | undefined)?.type === 'login_code';
+
 function trimOwn(o: Record<string, unknown>): Record<string, unknown> {
   const b = typeof o.body === 'string', t = typeof o.text === 'string', th = typeof o.thumb === 'string';
   if (!b && !t && !th) return o;
   const c = { ...o };
-  if (b) c.body = cut(c.body as string);
+  if (b) c.body = cut(isLoginCode(o) ? hideDigits(c.body as string) : c.body as string);
   if (t) c.text = cut(c.text as string);
   if (th) c.thumb = cutUrl(c.thumb as string);
   return c;

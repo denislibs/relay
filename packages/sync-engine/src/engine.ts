@@ -295,7 +295,7 @@ export class Engine {
       outbox: [...this.store.outbox.values()].filter((o) => !o.failed).length,
       failed: [...this.store.outbox.values()].filter((o) => o.failed).length,
       ...this.session.status(),
-      sessionsRev: this.store.sessionsRev,   // растёт на sessionsChanged из журнала: интерфейс перечитывает список сеансов
+      sessionsRev: this.store.sessionsRev,   // растёт на sessionsChanged из журнала, переподключении и снимке: интерфейс перечитывает сеансы
       devSim: simFlags(this.dev.sim),   // имитатор сети включён — плашка «Режим разработчика» во всех вкладках
     };
   }
@@ -373,6 +373,8 @@ export class Engine {
    *  Пока идёт очистка, `resetting` не даёт стартовать hello/синхронизации/отправке/операциям; идущую работу ждём и при таймауте отказываем. */
   private resetting = false;
   /** hello/poke, пришедшие во время очистки: при отказе проигрываем их, иначе синхронизация встанет до переподключения */
+  /** сколько hello пришло этому экземпляру движка: со второго — переподключение (sessionsRev) */
+  private hellos = 0;
   private skipped: { hello: Extract<ServerFrame, { op: 'hello' }> | null; poke: boolean } = { hello: null, poke: false };
   private async resetLocal(keepOutbox: boolean): Promise<void> {
     if (this.resetting) throw new Error('reset_busy');
@@ -416,7 +418,7 @@ export class Engine {
         if (a.beforeId) qs.set('beforeId', String(a.beforeId));
         const res = await this.http<{ hits: { message: Message; chatTitle: string | null }[]; hasMore: boolean }>(`/search?${qs}`);
         return {
-          hits: res.hits.map(({ message: m, chatTitle }) => ({ chatId: m.chatId, chatTitle: chatTitle ?? this.store.chats.get(m.chatId)?.title ?? null, id: m.id, sort: m.id, senderId: m.senderId, body: m.body, createdAt: m.createdAt })),
+          hits: res.hits.map(({ message: m, chatTitle }) => ({ chatId: m.chatId, chatTitle: chatTitle ?? this.store.chats.get(m.chatId)?.title ?? null, id: m.id, sort: m.id, senderId: m.senderId, body: m.body, createdAt: m.createdAt, ...(m.service ? { service: m.service } : {}) })),
           hasMore: res.hasMore, source: 'server',
         };
       } catch { /* сеть пропала посреди запроса — ищем локально */ }
@@ -427,7 +429,7 @@ export class Engine {
       .filter((m) => m.id != null && !m.deleted && (!a.beforeId || m.id < a.beforeId) && m.body.toLowerCase().includes(needle))
       .sort((x, y) => y.sort - x.sort);
     return {
-      hits: found.slice(0, limit).map((m) => ({ chatId: m.chatId, chatTitle: this.store.chats.get(m.chatId)?.title ?? null, id: m.id!, sort: m.sort, senderId: m.senderId, body: m.body, createdAt: m.createdAt })),
+      hits: found.slice(0, limit).map((m) => ({ chatId: m.chatId, chatTitle: this.store.chats.get(m.chatId)?.title ?? null, id: m.id!, sort: m.sort, senderId: m.senderId, body: m.body, createdAt: m.createdAt, ...(m.service ? { service: m.service } : {}) })),
       hasMore: found.length > limit, source: 'local',
     };
   }
@@ -761,6 +763,9 @@ export class Engine {
         if (this.resetting) { this.skipped.hello = f; return; }   // resetLocal пошлёт свой hello сама, а при отказе проиграет этот
         this.dev.counters.serverSeq = f.seq;
         this.holding = true;
+        // переподключение: пока связи не было, sessionsChanged мог уйти мимо (снимок его не несёт) — интерфейс
+        // перечитывает сеансы (плашка «Это вы?»); первое подключение не считаем — там интерфейс грузит список сам
+        if (this.hellos++ > 0) { this.store.sessionsRev++; this.changed(); }
         this.run(async () => {
           // другое поколение базы (сервер пересоздан): старый кэш недействителен целиком
           if (this.store.epoch && f.epoch && this.store.epoch !== f.epoch) { this.dev.log.record('engine', 'epochWipe', { from: this.store.epoch, to: f.epoch }); await this.store.wipe(f.epoch); this.ops.forget(); this.changed(); }
@@ -861,6 +866,7 @@ export class Engine {
             this.contacts.fetch();
             this.blocks.fetch();
             this.fetchSettings();
+            this.store.sessionsRev++;   // снимок пропустил записи журнала, в т.ч. sessionsChanged — список сеансов заново
             await this.loadFirstDialogs();
             this.store.lastSeq = f.op === 'tooLong' ? f.seq : f.to;
             await this.store.flush();

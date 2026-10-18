@@ -138,3 +138,22 @@ test('confirmSession goes through ops under its own key and does not hide the se
   expect(sessionsView(r.sessions, e.ops.list.map((o) => o.key)).length).toBe(2);
   void a2;
 });
+
+test('reconnect and a tooLong snapshot bump sessionsRev once each (a sessionsChanged missed by the snapshot is not lost)', async () => {
+  const a1 = await srv.login('Анна');
+  const e = await open(srv.config(a1));
+  e.connect();
+  await e.whenIdle();
+  expect(e.status().sessionsRev).toBe(0);   // первое подключение — без лишней перезагрузки
+  e.disconnect();
+  e.connect();
+  const end = Date.now() + 3000;
+  while (e.status().sessionsRev === 0 && Date.now() < end) await Bun.sleep(10);
+  await e.whenIdle();
+  expect(e.status().sessionsRev).toBe(1);   // одно переподключение — одна перезагрузка
+  await e.call({ type: 'dev', cmd: 'forceTooLong' } as never);
+  const end2 = Date.now() + 3000;
+  while (e.dev.counters.tooLongCount === 0 && Date.now() < end2) await Bun.sleep(10);
+  await e.whenIdle();
+  expect(e.status().sessionsRev).toBe(2);
+});
