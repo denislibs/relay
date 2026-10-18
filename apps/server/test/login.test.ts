@@ -125,3 +125,36 @@ test('codes split by separators or glued to digits are burned; editing burns too
   await editMessage(a, chat, message.id, 'код 99-887');
   await expect(signIn(three, '99887')).rejects.toMatchObject({ code: 'code_expired' });
 });
+
+test('hourly limit is per account too: 3 codes by phone + 3 by username → the sixth is flood', async () => {
+  const a = await userWithSession('Ира', 'ira_x');
+  await sql`update users set phone = '+79005550101' where id = ${a}`;
+  for (let i = 0; i < 3; i++) await requestCode('+79005550101');
+  for (let i = 0; i < 2; i++) await requestCode('@ira_x');
+  await expect(requestCode('@ira_x')).rejects.toMatchObject({ code: 'flood' });
+  await expect(requestCode('+79005550101')).rejects.toMatchObject({ code: 'flood' });
+  // по строке логина неизвестный логин считается как раньше и аккаунт не задевает
+  await requestCode('@nobody_ira');
+});
+
+test('burnCodes bounds its work: digit runs over 64 are ignored, candidates are capped', async () => {
+  const a = await userWithSession('Костя', 'kostya_x');
+  const b = await makeUser('Чужой');
+  const chat = await makeChat([a, b]);
+  const forged = async (code: string) => {
+    const r = await requestCode('@kostya_x');
+    await sql`update login_attempts set code_hash = ${new Bun.CryptoHasher('sha256').update('relay-login:' + code).digest('hex')} where id = ${r.attemptId}`;
+    return r.attemptId;
+  };
+  // длинная серия цифр — не код: попытка жива
+  const long = await forged('24680');
+  await sendMessage(a, { chatId: chat, clientId: crypto.randomUUID(), body: '24680' + '1'.repeat(60) });
+  expect((await sql`select dead_at from login_attempts where id = ${long}`)[0].dead_at).toBeNull();
+  // кандидатов не больше 256: код в начале сгорает, за пределом — нет
+  const first = await forged('13579');
+  const late = await forged('97531');
+  const filler = Array.from({ length: 300 }, (_, i) => String(10000 + i)).join(' x ');
+  await sendMessage(a, { chatId: chat, clientId: crypto.randomUUID(), body: `13579 x ${filler} x 97531` });
+  expect((await sql`select dead_at from login_attempts where id = ${first}`)[0].dead_at).not.toBeNull();
+  expect((await sql`select dead_at from login_attempts where id = ${late}`)[0].dead_at).toBeNull();
+});

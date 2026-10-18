@@ -27,6 +27,8 @@ export function codeMessage(code: string): { body: string; entities: { type: 'co
 /** Нормализованный логин — ключ лимитов: телефон как есть (после trim), имя без «@» и в нижнем регистре. */
 const normalize = (login: string) => { const s = login.trim(); return s.startsWith('+') ? s : s.replace(/^@/, '').toLowerCase(); };
 const MAX_WRONG_PER_HOUR = 15, MAX_PER_IP_HOUR = 30;
+/** burnCodes: серии длиннее — не код, а мусор; окон на сообщение не больше BURN_MAX_WINDOWS (работа ограничена). */
+const BURN_MAX_RUN = 64, BURN_MAX_WINDOWS = 256;
 
 /**
  * Попытка входа: код уходит в служебный чат на устройства, где аккаунт уже открыт.
@@ -35,6 +37,8 @@ const MAX_WRONG_PER_HOUR = 15, MAX_PER_IP_HOUR = 30;
  * via всегда 'app': нет открытых сеансов — отвечаем так же, но код никому не доставляется и хэш неугадываемый
  * (кроме DEV_LOGIN: там реальный хэш и devCode) — иначе ответ выдавал бы, есть ли аккаунт и открыт ли он.
  * Попытки не удаляются при использовании (dead_at) — иначе «запрос → 5 неверных → запрос» обходил бы часовой лимит.
+ * Лимит в час — по строке логина (для любого, в т.ч. неизвестного) и, если логин найден, ещё и по аккаунту:
+ * телефон и @имя одного человека — разные строки, но коды одного аккаунта.
  * ip — адрес запроса; null (вызов изнутри процесса) — без лимита по адресу.
  */
 export async function requestCode(login: string, ip: string | null = null): Promise<{ attemptId: string; via: 'app'; length: 5; devCode?: string }> {
@@ -56,6 +60,12 @@ export async function requestCode(login: string, ip: string | null = null): Prom
     }
     const [{ n }] = await tx`select count(*)::int as n from login_attempts where login = ${key} and created_at > now() - interval '1 hour'`;
     if (n >= MAX_PER_HOUR) throw new DomainError('flood');
+    if (userId != null) {
+      // порядок замков везде один (логин → адрес → аккаунт) — взаимной блокировки нет
+      await tx`select pg_advisory_xact_lock(hashtext(${'user:' + userId}))`;
+      const [{ n: own }] = await tx`select count(*)::int as n from login_attempts where user_id = ${userId} and created_at > now() - interval '1 hour'`;
+      if (own >= MAX_PER_HOUR) throw new DomainError('flood');
+    }
     const expires = tx`now() + ${CODE_TTL_MIN + ' minutes'}::interval`;
     if (userId == null) {
       await tx`insert into login_attempts (id, user_id, code_hash, expires_at, login, ip) values (${attemptId}, ${sys}, ${hash(crypto.randomUUID())}, ${expires}, ${key}, ${ip})`;
@@ -102,13 +112,20 @@ export async function signIn(attemptId: string, code: string): Promise<{ userId:
 /**
  * Код появился в исходящем тексте — гасим все такие попытки владельца (защита от «пришлите код из Relay»).
  * Цифры, разбитые пробелами/точками/дефисами, склеиваем; каждое пятизначное окно в серии цифр — кандидат.
+ * Серии длиннее BURN_MAX_RUN цифр пропускаем, кандидатов не больше BURN_MAX_WINDOWS — длинный текст не нагружает сервер.
  */
 export async function burnCodes(tx: Tx, userId: number, text: string): Promise<void> {
   const codes = new Set<string>();
-  for (const run of text.match(/\d(?:[\s.\-]*\d)*/g) ?? []) {
+  const windows = new Set<string>();
+  scan: for (const run of text.match(/\d(?:[\s.\-]*\d)*/g) ?? []) {
     const d = run.replace(/\D/g, '');
-    for (let i = 0; i + CODE_LENGTH <= d.length; i++) codes.add(hash(d.slice(i, i + CODE_LENGTH)));
+    if (d.length > BURN_MAX_RUN) continue;
+    for (let i = 0; i + CODE_LENGTH <= d.length; i++) {
+      windows.add(d.slice(i, i + CODE_LENGTH));
+      if (windows.size >= BURN_MAX_WINDOWS) break scan;
+    }
   }
+  for (const w of windows) codes.add(hash(w));
   if (!codes.size) return;
   await tx`update login_attempts set dead_at = now() where user_id = ${userId} and dead_at is null and code_hash = any(${[...codes]})`;
 }
