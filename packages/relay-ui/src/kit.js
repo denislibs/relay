@@ -285,15 +285,19 @@ function TypingIndicator(props) {
 /* ---------- ChatRow ---------- */
 function ChatRow(props) {
   var unread = props.unread || 0;
-  var rest = omit(props, ['name', 'preview', 'time', 'unread', 'muted', 'status', 'active', 'typing', 'online', 'avatar', 'author', 'pinned', 'draft', 'mentioned', 'className', 'class']);
+  var rest = omit(props, ['name', 'preview', 'time', 'unread', 'muted', 'status', 'active', 'typing', 'online', 'avatar', 'author', 'thumb', 'pinned', 'draft', 'mentioned', 'className', 'class']);
+  // как в Telegram: «печатает» важнее черновика, черновик важнее сообщения;
+  // строка сообщения — «Автор:», миниатюра 20 px (у видео — play), текст
+  var thumb = props.thumb;
   var bottom = props.typing
     ? h('span', { class: 'rl-row-preview rl-row-typing' }, h(TypingIndicator, { inline: true }), 'печатает…')
     : props.draft
       ? h('span', { class: 'rl-row-preview' }, h('b', { class: 'rl-row-draft' }, 'Черновик: '), props.draft)
-      : [
-        props.status ? h(MessageStatus, { key: 's', status: props.status, size: 15 }) : null,
-        h('span', { key: 'p', class: 'rl-row-preview' }, props.author ? props.author + ': ' : '', props.preview)
-      ];
+      : h('span', { class: 'rl-row-preview' },
+        props.author ? h('span', { class: 'rl-row-author' }, props.author + ': ') : null,
+        thumb ? h('span', { class: 'rl-row-thumb' }, h('img', { src: thumb.src, alt: '', draggable: false }),
+          thumb.video ? h(Icon, { name: 'play', size: 12 }) : null) : null,
+        props.preview);
   return h('button', Object.assign({ type: 'button' }, rest, { onPointerDown: chain(rest.onPointerDown, ripple),
     class: cx('rl-row', (props.className || props.class)), 'aria-current': props.active ? 'true' : undefined
   }),
@@ -301,6 +305,7 @@ function ChatRow(props) {
     h('span', { class: 'rl-row-main' },
       h('span', { class: 'rl-row-top' },
         h('span', { class: 'rl-row-name' }, props.name),
+        props.status ? h(MessageStatus, { status: props.status, size: 16 }) : null,
         h('span', { class: cx('rl-row-time', unread > 0 && !props.muted && 'rl-row-time-unread') }, props.time)),
       h('span', { class: 'rl-row-bottom' }, bottom,
         h('span', { class: 'rl-row-meta' },

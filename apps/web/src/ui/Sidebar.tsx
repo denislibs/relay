@@ -2,7 +2,7 @@ import { ChatBanner } from './ChatBanner';
 import { UpdatePill } from './UpdatePill';
 import { Avatar, ChatRow, Highlight, Menu, Presence, SlideStack, ChatRowSkeleton, useMinVisible, EmptyState, Fab, WindowList, FolderTabs, SidebarCard, SidebarHeader, peerTone } from '@relay/ui';
 import type { Item } from '@relay/sync-engine/src/types';
-import { loadMoreChats, openChat, searchMessages } from '../data';
+import { ensureNames, loadMoreChats, openChat, searchMessages } from '../data';
 import { setGlobal, useGlobal } from '../global';
 import { useEffect, useRef, useState } from 'preact/hooks';
 import { memo } from 'preact/compat';
@@ -11,16 +11,9 @@ import { go } from '../nav';
 import { isDark } from '../theme';
 import { chatTime, chatTone, snippet } from './format';
 import { applyTheme as setTheme } from '../theme';
+import { previewBody, previewText, previewThumb, type LastMessage } from './preview';
 
 const FOLDERS = ['all', 'unread'];
-
-/** Превью последнего сообщения в строке чата. */
-function previewOf(m: { deleted?: boolean; kind?: string; body: string; attachmentName?: string | null }): string {
-  if (m.deleted) return 'Сообщение удалено';
-  if (m.kind === 'photo') return '📷 ' + (m.body || 'Фото');
-  if (m.kind === 'file') return '📎 ' + (m.body || m.attachmentName || 'Файл');
-  return m.body;
-}
 
 /** Фрагмент вокруг совпадения: превью узкое, а совпадение может быть в конце длинного сообщения. */
 /** «Загружаем ещё чаты» внизу списка: крутится, только пока виден — вне экрана бесконечная анимация зря будит стили каждый кадр. */
@@ -43,18 +36,27 @@ function MoreLoader() {
 
 /** Строка списка чатов. memo: чат не изменился (тот же объект из Mirror) — строку не трогаем при сдвиге окна. */
 const SideRow = memo(function SideRow({ c, meId, active, showDraft, muted }: { c: Item; meId: number; active: boolean; showDraft: boolean; muted: boolean }) {
-  const last = c.last as { body: string; senderId: number; status: string } | null;
+  const last = c.last as (LastMessage & { status: string }) | null;
+  const thumb = last ? previewThumb(last) : null;
+  // имя автора — только в группах (в личке и так ясно, кто пишет); своё — «Вы», чужое — первое слово имени
+  const group = c.kind === 'group' && last && !last.deleted;
+  const name = useGlobal((s) => (group && last.senderId !== meId ? s.names[last.senderId] : undefined));
+  useEffect(() => { if (group && last.senderId !== meId) ensureNames([last.senderId]); }, [group, last?.senderId]);
+  const author = !group ? undefined : last.senderId === meId ? 'Вы' : name ? name.split(' ')[0] : undefined;
+  const draft = showDraft ? c.draft as string : '';
   return (
     <ChatRow
       name={(c.title as string) || 'Чат №' + c.id}
       avatarTone={chatTone(c)}
-      preview={last ? previewOf(last as { deleted?: boolean; kind?: string; body: string; attachmentName?: string | null }) : 'Нет сообщений'}
-      draft={showDraft ? (c.draft as string) : undefined}
+      author={author}
+      thumb={thumb}
+      preview={last ? previewBody(last, !!thumb) : 'Нет сообщений'}
+      draft={draft ? previewText(draft, c.draftEntities as LastMessage['entities']) : undefined}
       muted={muted}
       typing={!!c.typing}
       time={chatTime((c.sortAt ?? c.lastAt) as string)}
       unread={c.unread as number}
-      status={last && last.senderId === meId ? last.status : null}
+      status={!draft && last && last.senderId === meId ? last.status : null}
       active={active}
       onClick={() => openChat(c.id as number)}
     />
