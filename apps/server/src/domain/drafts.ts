@@ -1,4 +1,4 @@
-import type { Update } from '@relay/protocol';
+import { normalizeEntities, type Entity, type Update } from '@relay/protocol';
 import { sql, type Tx } from '../db';
 import { assertMember } from './chats';
 import { DomainError } from './errors';
@@ -7,24 +7,25 @@ import { appendUpdates } from './journal';
 const MAX_DRAFT = 4096;
 
 /** Сохранить черновик (пустой — удалить) и сообщить своим устройствам через журнал. Одинаковый текст — ничего не пишем. */
-export async function saveDraft(userId: number, chatId: number, text: string): Promise<{ at: string | null; changed: boolean }> {
+export async function saveDraft(userId: number, chatId: number, text: string, rawEntities?: Entity[]): Promise<{ at: string | null; changed: boolean }> {
   if (text.length > MAX_DRAFT) throw new DomainError('too_long');
   return sql.begin(async (tx) => {
     await assertMember(tx, chatId, userId);
-    const [prev] = await tx`select text from drafts where user_id = ${userId} and chat_id = ${chatId}`;
+    const [prev] = await tx`select text, entities from drafts where user_id = ${userId} and chat_id = ${chatId}`;
     const next = text.trim() ? text : '';
-    if ((prev?.text ?? '') === next) return { at: null, changed: false };
+    const entities = next ? normalizeEntities(next, rawEntities) : [];
+    if ((prev?.text ?? '') === next && JSON.stringify(normalizeEntities(next, prev?.entities)) === JSON.stringify(entities)) return { at: null, changed: false };
     let at: string | null = null;
     if (next) {
       const [row] = await tx`
-        insert into drafts (user_id, chat_id, text) values (${userId}, ${chatId}, ${next})
-        on conflict (user_id, chat_id) do update set text = excluded.text, updated_at = now()
+        insert into drafts (user_id, chat_id, text, entities) values (${userId}, ${chatId}, ${next}, ${entities.length ? sql.json(entities as never) : null})
+        on conflict (user_id, chat_id) do update set text = excluded.text, entities = excluded.entities, updated_at = now()
         returning updated_at`;
       at = new Date(row.updated_at as string).toISOString();
     } else {
       await tx`delete from drafts where user_id = ${userId} and chat_id = ${chatId}`;
     }
-    await appendUpdates(tx, [{ userId, update: { type: 'draft', chatId, text: next, at: at ?? new Date().toISOString() } satisfies Update }]);
+    await appendUpdates(tx, [{ userId, update: { type: 'draft', chatId, text: next, at: at ?? new Date().toISOString(), ...(entities.length ? { entities } : {}) } satisfies Update }]);
     return { at, changed: true };
   });
 }

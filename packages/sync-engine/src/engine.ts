@@ -434,11 +434,12 @@ export class Engine {
   private pushDrafts(): void {
     if (!this.online || !this.ready) return;
     for (const chatId of [...this.store.pendingDrafts]) {
-      const text = this.store.chats.get(chatId)?.draft?.text ?? '';
+      const draft = this.store.chats.get(chatId)?.draft ?? null;
+      const text = draft?.text ?? '';
       this.run(async () => {
-        await this.request({ op: 'draft', reqId: '', chatId, text });
-        // за время запроса текст могли поменять — тогда он уйдёт следующим вызовом
-        if ((this.store.chats.get(chatId)?.draft?.text ?? '') === text) this.store.pendingDrafts.delete(chatId);
+        await this.request({ op: 'draft', reqId: '', chatId, text, entities: draft?.entities ?? [] });
+        // за время запроса черновик могли поменять — тогда он уйдёт следующим вызовом
+        if ((this.store.chats.get(chatId)?.draft ?? null) === draft) this.store.pendingDrafts.delete(chatId);
       });
     }
   }
@@ -570,7 +571,7 @@ export class Engine {
       case 'sendMessage': {
         const clientId = crypto.randomUUID();
         this.lastCreated = Math.max(Date.now(), this.lastCreated + 1); // порядок черновиков внутри одной миллисекунды
-        this.store.addPending({ clientId, chatId: a.chatId, body: a.body, replyToId: a.replyToId ?? null, createdAt: this.lastCreated, failed: false });
+        this.store.addPending({ clientId, chatId: a.chatId, body: a.body, entities: a.entities ?? [], replyToId: a.replyToId ?? null, createdAt: this.lastCreated, failed: false });
         this.store.setDraft(a.chatId, '');   // отправили — черновик больше не нужен
         await this.store.flush();
         this.changed();
@@ -596,7 +597,7 @@ export class Engine {
         return null;
       }
       case 'setDraft': {
-        if (this.store.setDraft(a.chatId, a.text)) {
+        if (this.store.setDraft(a.chatId, a.text, a.entities)) {
           this.store.pendingDrafts.add(a.chatId);
           await this.store.flush();
           this.changed();
@@ -609,7 +610,7 @@ export class Engine {
         return null;
       case 'editMessage': {
         if (!this.online) throw new Error('offline');
-        await this.request({ op: 'edit', reqId: '', chatId: a.chatId, id: a.id, body: a.body });
+        await this.request({ op: 'edit', reqId: '', chatId: a.chatId, id: a.id, body: a.body, entities: a.entities ?? [] });
         return null;
       }
       case 'deleteMessage': {
@@ -1089,7 +1090,7 @@ export class Engine {
               this.changed();
             }
             const att = next.attachment ? { id: next.attachment.id, thumb: next.attachment.thumb ?? null } : null;
-            const r = await this.request({ op: 'send', reqId: '', clientId: next.clientId, chatId: next.chatId, body: next.body, replyToId: next.replyToId, attachment: att });
+            const r = await this.request({ op: 'send', reqId: '', clientId: next.clientId, chatId: next.chatId, body: next.body, entities: next.entities ?? [], replyToId: next.replyToId, attachment: att });
             this.store.ack(next.clientId, r.id as number, r.createdAt as string);
             if (att) delBlob(this.db, next.clientId).catch(() => {});
           } catch (e) {

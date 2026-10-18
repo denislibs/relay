@@ -13,6 +13,60 @@ export interface Message {
   deleted?: boolean;
   reactions?: Reaction[];
   attachment?: Attachment | null;
+  entities?: Entity[];   // оформление текста; нет или пусто — простой текст
+}
+
+/** Оформление куска текста: смещения в единицах UTF-16 (как String.length). Один тип сам с собой не перекрывается. */
+export type EntityType = 'bold' | 'italic' | 'underline' | 'strike' | 'spoiler' | 'code' | 'pre' | 'link';
+export interface Entity { type: EntityType; offset: number; length: number; url?: string }
+export const ENTITY_TYPES: readonly EntityType[] = ['bold', 'italic', 'underline', 'strike', 'spoiler', 'code', 'pre', 'link'];
+export const MAX_ENTITIES = 100;
+
+/** Адрес ссылки, который можно показать: http(s) или mailto, без пробелов, до 2048 символов. */
+export function entityUrl(raw: unknown): string | null {
+  if (typeof raw !== 'string') return null;
+  const s = raw.trim();
+  if (!s || s.length > 2048 || /\s/.test(s)) return null;
+  return /^(https?:\/\/[^/?#\s]+|mailto:[^@\s]+@)/i.test(s) ? s : null;
+}
+
+/**
+ * Проверка оформления от клиента: только известные типы и целые смещения в пределах текста, ссылки — безопасные,
+ * один тип склеивается сам с собой, не больше MAX_ENTITIES. Мусор отбрасывается, а не превращается в ошибку.
+ */
+export function normalizeEntities(text: string, raw: unknown): Entity[] {
+  if (!Array.isArray(raw)) return [];
+  const by = new Map<string, Entity[]>();
+  for (const e of raw.slice(0, MAX_ENTITIES * 2)) {
+    if (!e || typeof e !== 'object') continue;
+    const { type, offset, length } = e as Record<string, unknown>;
+    if (!ENTITY_TYPES.includes(type as EntityType) || !Number.isSafeInteger(offset) || !Number.isSafeInteger(length)) continue;
+    const s = Math.max(0, offset as number), end = Math.min(text.length, (offset as number) + (length as number));
+    if (end <= s) continue;
+    const url = type === 'link' ? entityUrl((e as { url?: unknown }).url) : undefined;
+    if (type === 'link' && !url) continue;
+    const key = type === 'link' ? 'link ' + url : (type as string);
+    const list = by.get(key) ?? [];
+    list.push(url ? { type: 'link', offset: s, length: end - s, url } : { type: type as EntityType, offset: s, length: end - s });
+    by.set(key, list);
+  }
+  const out: Entity[] = [];
+  for (const list of by.values()) {
+    list.sort((a, b) => a.offset - b.offset);
+    let cur: Entity | null = null;
+    for (const e of list) {
+      if (cur && e.offset <= cur.offset + cur.length) cur.length = Math.max(cur.length, e.offset + e.length - cur.offset);
+      else { cur = { ...e }; out.push(cur); }
+    }
+  }
+  return out.sort((a, b) => a.offset - b.offset || b.length - a.length).slice(0, MAX_ENTITIES);
+}
+
+/** Обрезать пробелы по краям текста и сдвинуть оформление вместе с ним. */
+export function trimFormatted(body: string, entities: Entity[]): { text: string; entities: Entity[] } {
+  const lead = body.length - body.trimStart().length;
+  const text = body.trim();
+  return { text, entities: normalizeEntities(text, entities.map((e) => ({ ...e, offset: e.offset - lead }))) };
 }
 
 /** Вложение: фото (знает размеры заранее — лента не прыгает) или файл. thumb — крошечное размытое превью. */
@@ -25,8 +79,8 @@ export type Update =
   | { type: 'newMessage'; message: Message }
   | { type: 'readOwn'; chatId: Id; upToId: Id }
   | { type: 'readBy'; chatId: Id; userId: Id; upToId: Id }
-  | { type: 'draft'; chatId: Id; text: string; at: string }   // черновик своих устройств; пустой текст — удалён
-  | { type: 'messageEdited'; chatId: Id; id: Id; body: string; editedAt: string }
+  | { type: 'draft'; chatId: Id; text: string; at: string; entities?: Entity[] }   // черновик своих устройств; пустой текст — удалён
+  | { type: 'messageEdited'; chatId: Id; id: Id; body: string; editedAt: string; entities?: Entity[] }
   | { type: 'messageDeleted'; chatId: Id; id: Id }
   | { type: 'reactions'; chatId: Id; id: Id; reactions: Reaction[] }
   | { type: 'userUpdated'; user: PublicUser }   // профиль изменился: себе и всем, кто видит пользователя
@@ -111,11 +165,11 @@ export type ErrorCode = 'bad_frame' | 'unauthorized' | 'not_member' | 'not_found
 export type ClientFrame =
   | { op: 'hello'; lastSeq: number }
   | { op: 'sync'; since: number }
-  | { op: 'send'; reqId: string; clientId: string; chatId: Id; body: string; replyToId?: Id | null; attachment?: { id: string; thumb?: string | null } | null }
+  | { op: 'send'; reqId: string; clientId: string; chatId: Id; body: string; entities?: Entity[]; replyToId?: Id | null; attachment?: { id: string; thumb?: string | null } | null }
   | { op: 'read'; reqId: string; chatId: Id; upToId: Id }
   | { op: 'typing'; chatId: Id }   // «печатаю» — без ответа, сервер пересылает остальным участникам
-  | { op: 'draft'; reqId: string; chatId: Id; text: string }
-  | { op: 'edit'; reqId: string; chatId: Id; id: Id; body: string }
+  | { op: 'draft'; reqId: string; chatId: Id; text: string; entities?: Entity[] }
+  | { op: 'edit'; reqId: string; chatId: Id; id: Id; body: string; entities?: Entity[] }
   | { op: 'delete'; reqId: string; chatId: Id; id: Id }
   | { op: 'react'; reqId: string; chatId: Id; id: Id; emoji: string | null }
   | { op: 'ping' };
@@ -152,15 +206,15 @@ export function parseClientFrame(raw: string): ClientFrame | null {
     case 'sync': return int(f.since) ? { op: 'sync', since: f.since } : null;
     case 'ping': return { op: 'ping' };
     case 'typing': return int(f.chatId) ? { op: 'typing', chatId: f.chatId } : null;
-    case 'edit': return str(f.reqId, 64) && int(f.chatId) && int(f.id) && typeof f.body === 'string' ? { op: 'edit', reqId: f.reqId, chatId: f.chatId, id: f.id, body: f.body } : null;
+    case 'edit': return str(f.reqId, 64) && int(f.chatId) && int(f.id) && typeof f.body === 'string' ? { op: 'edit', reqId: f.reqId, chatId: f.chatId, id: f.id, body: f.body, entities: normalizeEntities(f.body, f.entities) } : null;
     case 'delete': return str(f.reqId, 64) && int(f.chatId) && int(f.id) ? { op: 'delete', reqId: f.reqId, chatId: f.chatId, id: f.id } : null;
     case 'react': return str(f.reqId, 64) && int(f.chatId) && int(f.id) && (f.emoji === null || str(f.emoji, 16)) ? { op: 'react', reqId: f.reqId, chatId: f.chatId, id: f.id, emoji: f.emoji as string | null } : null;
-    case 'draft': return str(f.reqId, 64) && int(f.chatId) && typeof f.text === 'string' ? { op: 'draft', reqId: f.reqId, chatId: f.chatId, text: f.text } : null;
+    case 'draft': return str(f.reqId, 64) && int(f.chatId) && typeof f.text === 'string' ? { op: 'draft', reqId: f.reqId, chatId: f.chatId, text: f.text, entities: normalizeEntities(f.text, f.entities) } : null;
     case 'send':
       if (!str(f.reqId, 64) || !str(f.clientId, 36) || !UUID.test(f.clientId) || !int(f.chatId) || typeof f.body !== 'string') return null;
       if (f.replyToId != null && !int(f.replyToId)) return null;
       if (f.attachment != null && (typeof f.attachment !== 'object' || !str((f.attachment as { id: unknown }).id, 36))) return null;
-      return { op: 'send', reqId: f.reqId, clientId: f.clientId, chatId: f.chatId, body: f.body, replyToId: (f.replyToId as number | null) ?? null, attachment: (f.attachment as { id: string; thumb?: string | null } | null) ?? null };
+      return { op: 'send', reqId: f.reqId, clientId: f.clientId, chatId: f.chatId, body: f.body, entities: normalizeEntities(f.body, f.entities), replyToId: (f.replyToId as number | null) ?? null, attachment: (f.attachment as { id: string; thumb?: string | null } | null) ?? null };
     case 'read':
       return str(f.reqId, 64) && int(f.chatId) && int(f.upToId) ? { op: 'read', reqId: f.reqId, chatId: f.chatId, upToId: f.upToId } : null;
     default: return null;

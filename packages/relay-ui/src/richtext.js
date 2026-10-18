@@ -276,9 +276,13 @@ export function trimValue(value) {
   return { text: text, entities: clean(text, list) };
 }
 
+function entityKey(list) {
+  return (list || []).map(function (e) { return [e.type, e.offset, e.length, e.url || ''].join(':'); }).sort().join('|');
+}
+/** Одно и то же значение (порядок сущностей и ключей в них не важен). */
 export function sameValue(x, y) {
   if (!x || !y) return x === y;
-  return x.text === y.text && JSON.stringify(x.entities) === JSON.stringify(y.entities);
+  return x.text === y.text && entityKey(x.entities) === entityKey(y.entities);
 }
 
 /* ---------- разметка при отправке: **жирный**, __курсив__, ~~зачёркнутый~~, ||скрытый||, `код`, ```блок```, [текст](ссылка) ---------- */

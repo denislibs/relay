@@ -600,6 +600,8 @@ body { margin: 0; font-family: var(--font-sans); color: var(--ink); background: 
 .rl-bubble-fwd { display: flex; align-items: center; gap: 4px; margin-bottom: 2px; font: italic 400 13px/18px var(--font-sans); color: var(--bubble-meta); }
 .rl-bubble-edited { margin-right: 2px; font-style: italic; }
 .rl-bubble-spacer-edited { width: 96px; }
+.rl-bubble-in-side .rl-bubble-spacer-edited { width: 72px; }   /* входящее: без галочек, но с «изм.» */
+:root[data-time12] .rl-bubble-in-side .rl-bubble-spacer-edited { width: 100px; }
 .rl-bubble-deleted .rl-bubble-deleted-text { display: inline-flex; align-items: center; gap: 6px; font-style: italic; color: var(--bubble-meta); }
 .rl-bubble-has-react { margin-bottom: 18px; }
 .rl-bubble-flash { animation: rl-flash 1.2s var(--ease-out); }

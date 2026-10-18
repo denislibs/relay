@@ -1,4 +1,4 @@
-import type { Birthday, PrivacyKey, PrivacyMode } from '@relay/protocol';
+import type { Birthday, Entity, PrivacyKey, PrivacyMode } from '@relay/protocol';
 
 export type Status = 'pending' | 'sent' | 'read' | 'failed';
 
@@ -18,6 +18,7 @@ export interface LocalMessage {
   reactions?: { userId: number; emoji: string }[];
   kind?: 'text' | 'photo' | 'file';
   attachment?: LocalAttachment | null;
+  entities?: Entity[];    // оформление текста
   progress?: number;      // загрузка файла 0..1, пока сообщение в очереди
   error?: string;         // почему не отправлено (failed): 'blocked' — собеседник заблокировал отправителя
 }
@@ -38,7 +39,7 @@ export interface LocalChat {
   named: boolean;         // название пришло со снимка (иначе чат узнали из сообщения)
   last: LocalMessage | null;
   lastAt: string;
-  draft?: { text: string; at: string } | null;   // неотправленный текст композера (общий для вкладок)
+  draft?: { text: string; at: string; entities?: Entity[] } | null;   // неотправленный текст композера (общий для вкладок)
 }
 
 export interface OutboxEntry {
@@ -49,6 +50,7 @@ export interface OutboxEntry {
   createdAt: number;
   failed: boolean;
   attachment?: LocalAttachment | null;   // id появляется после загрузки файла
+  entities?: Entity[];
   error?: string;         // код отказа сервера (failed)
 }
 
@@ -86,15 +88,15 @@ export type Patch =
       append?: boolean };
 
 export type Action =
-  | { type: 'sendMessage'; chatId: number; body: string; replyToId?: number | null }
+  | { type: 'sendMessage'; chatId: number; body: string; entities?: Entity[]; replyToId?: number | null }
   | { type: 'seen'; chatId: number; upToId: number }
   | { type: 'loadOlder'; chatId: number }
   | { type: 'retry'; clientId: string }
   | { type: 'refreshChats' }
   | { type: 'loadMoreChats' }
-  | { type: 'setDraft'; chatId: number; text: string }
+  | { type: 'setDraft'; chatId: number; text: string; entities?: Entity[] }
   | { type: 'typing'; chatId: number }
-  | { type: 'editMessage'; chatId: number; id: number; body: string }
+  | { type: 'editMessage'; chatId: number; id: number; body: string; entities?: Entity[] }
   | { type: 'deleteMessage'; chatId: number; id: number }
   | { type: 'react'; chatId: number; id: number; emoji: string | null }
   | { type: 'search'; q: string; chatId?: number; beforeId?: number; limit?: number }

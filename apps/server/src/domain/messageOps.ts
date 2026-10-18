@@ -1,4 +1,4 @@
-import type { Reaction } from '@relay/protocol';
+import { normalizeEntities, trimFormatted, type Entity, type Reaction } from '@relay/protocol';
 import { sql } from '../db';
 import { assertMember } from './chats';
 import { DomainError } from './errors';
@@ -17,8 +17,8 @@ const membersOf = async (tx: Parameters<typeof assertMember>[0], chatId: number)
   (await tx`select user_id from chat_members where chat_id = ${chatId}`).map((r) => r.user_id as number);
 
 /** Правка своего сообщения: новое тело и отметка «изм.» — всем участникам через журнал. */
-export async function editMessage(userId: number, chatId: number, id: number, body: string): Promise<{ editedAt: string }> {
-  const text = body.trim();
+export async function editMessage(userId: number, chatId: number, id: number, body: string, rawEntities?: Entity[]): Promise<{ editedAt: string }> {
+  const { text, entities } = trimFormatted(body, normalizeEntities(body, rawEntities));
   if (!text) throw new DomainError('bad_frame', 'empty body');
   if (text.length > MAX_BODY) throw new DomainError('too_long');
   return sql.begin(async (tx) => {
@@ -26,9 +26,9 @@ export async function editMessage(userId: number, chatId: number, id: number, bo
     await ownMessage(tx, userId, chatId, id);
     // заблокированный не правит сообщения в личном чате с тем, кто его заблокировал
     if (await blockedInDirect(tx, chatId, userId)) throw new DomainError('blocked');
-    const [row] = await tx`update messages set body = ${text}, edited_at = now() where chat_id = ${chatId} and id = ${id} returning edited_at`;
+    const [row] = await tx`update messages set body = ${text}, entities = ${entities.length ? sql.json(entities as never) : null}, edited_at = now() where chat_id = ${chatId} and id = ${id} returning edited_at`;
     const editedAt = new Date(row.edited_at as string).toISOString();
-    await fanOut(tx, await membersOf(tx, chatId), { type: 'messageEdited', chatId, id, body: text, editedAt });
+    await fanOut(tx, await membersOf(tx, chatId), { type: 'messageEdited', chatId, id, body: text, editedAt, entities });
     return { editedAt };
   });
 }
@@ -38,7 +38,7 @@ export async function deleteMessage(userId: number, chatId: number, id: number):
   return sql.begin(async (tx) => {
     await assertMember(tx, chatId, userId);
     await ownMessage(tx, userId, chatId, id);
-    await tx`update messages set body = '', deleted = true where chat_id = ${chatId} and id = ${id}`;
+    await tx`update messages set body = '', entities = null, deleted = true where chat_id = ${chatId} and id = ${id}`;
     await tx`delete from reactions where chat_id = ${chatId} and message_id = ${id}`;
     await fanOut(tx, await membersOf(tx, chatId), { type: 'messageDeleted', chatId, id });
     return { ok: true };

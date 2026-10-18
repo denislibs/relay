@@ -1,6 +1,7 @@
 import { nudgeWallpaper } from '@relay/ui';
 import { connectEngine, EngineClient, Mirror } from '@relay/sync-engine/src/client';
 import type { Item, Patch, Query, SearchResult } from '@relay/sync-engine/src/types';
+import type { Entity } from '@relay/protocol';
 import { getGlobal, setGlobal, type FeedMeta, type Me, type Status } from './global';
 import { notifyIncoming, startNotify } from './notify';
 
@@ -196,10 +197,10 @@ export function focusMessage(target: { id: number; sort: number }): void {
 /** Прежний вызов «ещё истории» — теперь сдвиг окна к старым. */
 export function loadOlder(): void { moveWindow('older'); }
 
-export async function send(chatId: number, body: string, replyToId: number | null = null): Promise<void> {
+export async function send(chatId: number, body: string, replyToId: number | null = null, entities: Entity[] = []): Promise<void> {
   nudgeWallpaper();
   if (feedAnchor && getGlobal().openChatId === chatId) moveWindow('latest'); // своё сообщение — внизу, как в Telegram
-  await engine.call({ type: 'sendMessage', chatId, body, replyToId });
+  await engine.call({ type: 'sendMessage', chatId, body, entities, replyToId });
 }
 
 const typingSent = new Map<number, number>();
@@ -253,15 +254,15 @@ export function chatMedia(chatId: number, kind: 'photo' | 'file'): Promise<Item[
 }
 
 /** Правка своего сообщения (онлайн). */
-export function editMessage(chatId: number, id: number, body: string): Promise<unknown> { return engine.call({ type: 'editMessage', chatId, id, body }); }
+export function editMessage(chatId: number, id: number, body: string, entities: Entity[] = []): Promise<unknown> { return engine.call({ type: 'editMessage', chatId, id, body, entities }); }
 /** Удаление своего сообщения у всех (онлайн). */
 export function deleteMessage(chatId: number, id: number): Promise<unknown> { return engine.call({ type: 'deleteMessage', chatId, id }); }
 /** Реакция (null — снять). У себя применяется сразу. */
 export function react(chatId: number, id: number, emoji: string | null): void { engine.call({ type: 'react', chatId, id, emoji }).catch(() => {}); }
 
 /** Черновик чата (пустой — удалить). Хранится в движке: общий для вкладок, переживает перезагрузку. */
-export function saveDraft(chatId: number, text: string): void {
-  engine.call({ type: 'setDraft', chatId, text }).catch(() => {});
+export function saveDraft(chatId: number, text: string, entities: Entity[] = []): void {
+  engine.call({ type: 'setDraft', chatId, text, entities }).catch(() => {});
 }
 
 /** Следующая страница диалогов; движок сам не пустит второй запрос, пока идёт первый. */

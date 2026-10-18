@@ -1,10 +1,16 @@
-import type { Message, Update } from '@relay/protocol';
+import type { Entity, Message, Update } from '@relay/protocol';
 import { getAll, getByChat, write, type WriteBatch } from './idb';
 import { applyUserUpdated, ProfileCache } from './profile';
 import { applyContactsChanged, ContactsCache } from './contacts';
 import { SettingsCache } from './settings';
 import { applyBlocksChanged, BlocksCache } from './blocks';
 import { PENDING_BASE, type LocalChat, type LocalMessage, type OutboxEntry } from './types';
+
+/** Тот же черновик: текст и оформление (порядок ключей в сущностях не важен). */
+function sameDraft(a: { text: string; entities?: Entity[] } | null | undefined, b: { text: string; entities?: Entity[] } | null | undefined): boolean {
+  const key = (d: typeof a) => d ? d.text + '\u0000' + (d.entities ?? []).map((e) => [e.type, e.offset, e.length, e.url ?? ''].join(':')).sort().join('|') : '';
+  return key(a) === key(b);
+}
 
 export interface ChatSummary {
   draft?: { text: string; at: string } | null;
@@ -166,8 +172,8 @@ export class Store {
         return this.applyMessage(u.message, true);
       case 'readOwn': return this.applyOwnRead(u.chatId, u.upToId);
       case 'readBy': return this.applyPeerRead(u.chatId, u.upToId);
-      case 'draft': return this.applyRemoteDraft(u.chatId, u.text, u.at);
-      case 'messageEdited': return this.patchMessage(u.chatId, u.id, { body: u.body, editedAt: u.editedAt });
+      case 'draft': return this.applyRemoteDraft(u.chatId, u.text, u.at, u.entities);
+      case 'messageEdited': return this.patchMessage(u.chatId, u.id, { body: u.body, editedAt: u.editedAt, entities: u.entities ?? [] });
       case 'messageDeleted': return this.patchMessage(u.chatId, u.id, { body: '', deleted: true, reactions: [] });
       case 'reactions': return this.patchMessage(u.chatId, u.id, { reactions: u.reactions });
       case 'userUpdated': return applyUserUpdated(this, u.user, seq);
@@ -226,7 +232,7 @@ export class Store {
       key: m.clientId, clientId: m.clientId, id: m.id, chatId: m.chatId, senderId: m.senderId,
       body: m.body, replyToId: m.replyToId, createdAt: m.createdAt, status, sort: m.id,
       editedAt: m.editedAt ?? null, deleted: !!m.deleted, reactions: m.reactions ?? prev?.reactions ?? [],
-      kind: m.kind ?? 'text', attachment: m.attachment ?? null,
+      kind: m.kind ?? 'text', attachment: m.attachment ?? null, entities: m.entities ?? [],
     };
     if (countUnread && !mine && m.id > chat.lastReadId && m.id > chat.knownMaxId) chat.unread++;
     chat.knownMaxId = Math.max(chat.knownMaxId, m.id);
@@ -276,7 +282,7 @@ export class Store {
     this.loaded.add(o.chatId);
     this.putMessage({
       key: o.clientId, clientId: o.clientId, id: null, chatId: o.chatId, senderId: this.userId,
-      body: o.body, replyToId: o.replyToId, createdAt: new Date(o.createdAt).toISOString(),
+      body: o.body, entities: o.entities ?? [], replyToId: o.replyToId, createdAt: new Date(o.createdAt).toISOString(),
       status: o.failed ? 'failed' : 'pending', sort: PENDING_BASE + o.createdAt,
       kind: o.attachment ? o.attachment.kind : 'text', attachment: o.attachment ?? null, progress: o.attachment && !o.attachment.id ? 0 : undefined,
       ...(o.failed && o.error ? { error: o.error } : {}),
@@ -366,22 +372,22 @@ export class Store {
   pendingDrafts = new Set<number>();
 
   /** Черновик с другого устройства (журнал) или из снимка: локальный неотправленный и более новый — главнее. */
-  applyRemoteDraft(chatId: number, text: string, at: string): void {
+  applyRemoteDraft(chatId: number, text: string, at: string, entities?: Entity[]): void {
     const chat = this.chats.get(chatId);
     if (!chat) return;
     if (this.pendingDrafts.has(chatId) && chat.draft && chat.draft.at > at) return;
-    const next = text ? { text, at } : null;
-    if ((chat.draft?.text ?? null) === (next?.text ?? null)) return;
+    const next = text ? { text, at, ...(entities?.length ? { entities } : {}) } : null;
+    if (sameDraft(chat.draft, next)) return;
     chat.draft = next;
     this.markChat(chat);
   }
 
   /** Черновик чата: пустой текст — удалить. false — ничего не изменилось (тот же текст). */
-  setDraft(chatId: number, text: string): boolean {
+  setDraft(chatId: number, text: string, entities?: Entity[]): boolean {
     const chat = this.chats.get(chatId);
     if (!chat) return false;
-    const next = text.trim() ? { text, at: new Date().toISOString() } : null;
-    if ((chat.draft?.text ?? null) === (next?.text ?? null)) return false;
+    const next = text.trim() ? { text, at: new Date().toISOString(), ...(entities?.length ? { entities } : {}) } : null;
+    if (sameDraft(chat.draft, next)) return false;
     chat.draft = next;
     this.markChat(chat);
     return true;

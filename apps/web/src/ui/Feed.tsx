@@ -1,5 +1,6 @@
 import type { Item } from '@relay/sync-engine/src/types';
-import { Bubble, peerTone, DateDivider, FileBubble, Highlight, MediaBubble, MediaViewer, ScrollToBottom, forceMeasure, isHeavyAnimating, onHeavyAnimationEnd, requestMeasure, requestMutation } from '@relay/ui';
+import type { Entity } from '@relay/protocol';
+import { Bubble, peerTone, DateDivider, FileBubble, MediaBubble, MessageText, MediaViewer, ScrollToBottom, forceMeasure, isHeavyAnimating, onHeavyAnimationEnd, requestMeasure, requestMutation } from '@relay/ui';
 import { memo } from 'preact/compat';
 import { useEffect, useLayoutEffect, useRef, useState } from 'preact/hooks';
 import { ensureNames, focusMessage, localPreview, moveWindow, react, savePosition, savedPosition, seen } from '../data';
@@ -50,7 +51,7 @@ const Row = memo(function Row({ onOpen, hl, m, meId, out, start, end, quoted, qu
           items={[{ src, thumb: att.thumb, alt: att.name }]}
           ratio={`${att.w} / ${att.h}`}
           state={pending ? 'loading' : 'ready'} progress={m.progress as number}
-          caption={m.body ? (hl ? <Highlight text={m.body as string} query={hl} /> : m.body) : undefined}
+          caption={m.body ? <MessageText text={m.body as string} entities={m.entities as Entity[] | undefined} highlight={hl} /> : undefined}
           time={clock(m.createdAt as string)} status={out ? m.status : undefined}
           onOpen={() => onOpen(m)}
         />
@@ -88,7 +89,7 @@ const Row = memo(function Row({ onOpen, hl, m, meId, out, start, end, quoted, qu
         status={out ? m.status : undefined}
         appear={appear}
       >
-        {hl ? <Highlight text={m.body as string} query={hl} /> : m.body}
+        <MessageText text={m.body as string} entities={m.entities as Entity[] | undefined} highlight={hl} />
       </Bubble>
       {m.id != null ? <i class="app-mark" data-mid={m.id as number} aria-hidden="true" /> : null}
     </div>

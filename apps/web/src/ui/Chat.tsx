@@ -1,9 +1,10 @@
-import { Avatar, Button, MediaPolicy, peerTone, ChatSearchBar, Highlight, ripple, useMinVisible, requestMeasure, Composer, DropOverlay, GlassBar, IconButton, Menu, Modal, Presence, ReactionPicker, requestMutation, emptyValue, sameValue } from '@relay/ui';
+import { Avatar, Button, MediaPolicy, peerTone, ChatSearchBar, Highlight, ripple, useMinVisible, requestMeasure, Composer, DropOverlay, GlassBar, IconButton, Menu, Modal, Presence, ReactionPicker, requestMutation, applyMarkdown, emptyValue, sameValue } from '@relay/ui';
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'preact/hooks';
 import { deleteMessage, editMessage, ensureNames, focusMessage, sendFile, openChat, react, saveDraft, searchMessages, send, typing, typingDone } from '../data';
 import type { Item, SearchHit } from '@relay/sync-engine/src/types';
+import type { Entity } from '@relay/protocol';
 
-type Value = { text: string; entities: { type: string; offset: number; length: number; url?: string }[] };
+type Value = { text: string; entities: Entity[] };
 type ComposerApi = { getValue(): Value; setValue(v: Value, opts?: { focus?: boolean; instant?: boolean }): void; focus(opts?: { end?: boolean }): void };
 import { setGlobal, useGlobal } from '../global';
 import { unblockUser, useUser } from '../settingsData';
@@ -117,14 +118,16 @@ export function Chat({ chatId }: { chatId: number }) {
 
   // черновик (как в Telegram): восстановить при открытии, сохранять через 2.5 с после ввода,
   // сразу — при уходе из чата и закрытии вкладки; после отправки движок сам его очищает
-  const initial = useMemo<Value>(() => ({ text: (chat?.draft as string) ?? '', entities: [] }), []);
+  // в элементе списка черновик — строка, оформление рядом
+  const draftOf = (c: Item | undefined): Value => ({ text: (c?.draft as string | null) ?? '', entities: (c?.draftEntities as Entity[] | null) ?? [] });
+  const initial = useMemo<Value>(() => draftOf(chat), []);
   const saved = useRef<Value>(initial);
   const latest = useRef<Value>(initial);
   const draftTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const flushDraft = () => {
     if (draftTimer.current) { clearTimeout(draftTimer.current); draftTimer.current = null; }
     if (editing) return;   // в поле — правка сообщения, а не черновик
-    if (!sameValue(latest.current, saved.current)) { saved.current = latest.current; saveDraft(chatId, latest.current.text); }
+    if (!sameValue(latest.current, saved.current)) { saved.current = latest.current; saveDraft(chatId, latest.current.text, latest.current.entities); }
   };
   const onType = (v: Value) => {
     if (v.text.trim() && v.text.length > latest.current.text.length && !editing) typing(chatId); // набирают (а не стирают) — «печатает…» у собеседника
@@ -133,12 +136,13 @@ export function Chat({ chatId }: { chatId: number }) {
     if (!editing) draftTimer.current = setTimeout(flushDraft, 2500);
   };
   // черновик поменяли на другом устройстве (или стёрли отправкой там): здесь ничего не набирали — подхватываем
-  const remoteDraft = (chat?.draft as string | null | undefined) ?? '';
+  const remoteDraft = draftOf(chat);
+  const remoteKey = JSON.stringify(remoteDraft);
   useEffect(() => {
-    if (editing || draftTimer.current || !sameValue(latest.current, saved.current) || remoteDraft === latest.current.text) return;
-    saved.current = latest.current = { text: remoteDraft, entities: [] };
+    if (editing || draftTimer.current || !sameValue(latest.current, saved.current) || sameValue(remoteDraft, latest.current)) return;
+    saved.current = latest.current = remoteDraft;
     api.current?.setValue(latest.current, { instant: true });
-  }, [remoteDraft]);
+  }, [remoteKey]);
   useEffect(() => {
     if (latest.current.text) api.current?.focus({ end: true }); // курсор — в конец черновика
     addEventListener('pagehide', flushDraft);
@@ -151,7 +155,7 @@ export function Chat({ chatId }: { chatId: number }) {
   const startEdit = (m: Item) => {
     flushDraft();
     setReplyKey(null);
-    const original: Value = { text: m.body as string, entities: [] };
+    const original: Value = { text: m.body as string, entities: (m.entities as Entity[] | undefined) ?? [] };
     setEditing({ id: m.id as number, original, draft: latest.current });
     api.current?.setValue(original, { focus: true });
   };
@@ -297,7 +301,8 @@ export function Chat({ chatId }: { chatId: number }) {
         onAttach={(k: string) => { const el = picker.current!; el.accept = k === 'media' || k === 'camera' ? 'image/*,video/*' : ''; el.value = ''; el.click(); }}
         onSend={(v: Value) => {
           if (editing) {
-            if (!sameValue(v, editing.original)) editMessage(chatId, editing.id, v.text).catch(() => {});
+            const next = applyMarkdown(v);
+            if (!sameValue(next, editing.original)) editMessage(chatId, editing.id, next.text, next.entities).catch(() => {});
             endEdit(editing.draft);
             return false;   // в поле уже черновик — композер его не трогает
           }
@@ -305,7 +310,8 @@ export function Chat({ chatId }: { chatId: number }) {
           if (draftTimer.current) { clearTimeout(draftTimer.current); draftTimer.current = null; }
           saved.current = latest.current = emptyValue();   // черновик очищает сам движок вместе с отправкой
           typingDone(chatId);
-          const sent = send(chatId, v.text, (replyTo?.id as number) ?? null);
+          const out = applyMarkdown(v);   // **жирный**, `код`, [текст](ссылка)… — в оформление
+          const sent = send(chatId, out.text, (replyTo?.id as number) ?? null, out.entities);
           setReplyKey(null);
           return sent;   // поле очистится, когда сообщение встанет в ленту
         }}

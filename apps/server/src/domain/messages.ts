@@ -1,6 +1,6 @@
 import { attachmentForSend } from './files';
 import { clearDraftInTx } from './drafts';
-import type { Message } from '@relay/protocol';
+import { normalizeEntities, trimFormatted, type Entity, type Message } from '@relay/protocol';
 import { sql } from '../db';
 import { assertMember, toMessage } from './chats';
 import { DomainError } from './errors';
@@ -12,9 +12,10 @@ export const MAX_BODY = 4096;
 
 export async function sendMessage(
   userId: number,
-  input: { chatId: number; clientId: string; body: string; replyToId?: number | null; attachment?: { id: string; thumb?: string | null } | null },
+  input: { chatId: number; clientId: string; body: string; entities?: Entity[]; replyToId?: number | null; attachment?: { id: string; thumb?: string | null } | null },
 ): Promise<{ message: Message; duplicate: boolean }> {
-  const body = input.body.trim();
+  // пробелы по краям срезаем вместе с оформлением; оформление — только проверенное
+  const { text: body, entities } = trimFormatted(input.body, normalizeEntities(input.body, input.entities));
   if (!body && !input.attachment) throw new DomainError('bad_frame', 'empty body'); // у вложения подпись необязательна
   if (body.length > MAX_BODY) throw new DomainError('too_long');
 
@@ -33,8 +34,8 @@ export async function sendMessage(
     const attachment = input.attachment ? await attachmentForSend(tx, userId, input.attachment) : null;
     const kind = attachment ? attachment.kind : 'text';
     const inserted = await tx`
-      insert into messages (chat_id, sender_id, client_id, kind, body, reply_to_id, attachment)
-      values (${input.chatId}, ${userId}, ${input.clientId}, ${kind}, ${body}, ${input.replyToId ?? null}, ${attachment ? sql.json(attachment as never) : null})
+      insert into messages (chat_id, sender_id, client_id, kind, body, entities, reply_to_id, attachment)
+      values (${input.chatId}, ${userId}, ${input.clientId}, ${kind}, ${body}, ${entities.length ? sql.json(entities as never) : null}, ${input.replyToId ?? null}, ${attachment ? sql.json(attachment as never) : null})
       on conflict (sender_id, client_id) do nothing
       returning *`;
     if (inserted.length === 0) {
