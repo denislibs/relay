@@ -25,7 +25,13 @@ export interface Message {
   service?: { type: ServiceType };   // есть только у служебных сообщений
   entities?: Entity[];   // оформление текста; нет или пусто — простой текст
   listened?: boolean;    // голосовое/кружок прослушан получателем
+  fwdFrom?: ForwardInfo | null;   // переслано: откуда (нет — своё или отправитель скрыт)
 }
+
+/** Откуда пересланное: исходный автор (имя — на момент пересылки), чат и сообщение оригинала, когда оно написано. */
+export interface ForwardInfo { userId: Id; name: string; chatId: Id; messageId: Id; at: string }
+/** Ссылка на пересылаемое в кадре send: сервер сам берёт текст, оформление и вложение оригинала. */
+export interface ForwardRef { chatId: Id; id: Id; hideSender?: boolean; hideCaption?: boolean }
 
 /** Оформление куска текста: смещения в единицах UTF-16 (как String.length). Один тип сам с собой не перекрывается. */
 export type EntityType = 'bold' | 'italic' | 'underline' | 'strike' | 'spoiler' | 'code' | 'pre' | 'link';
@@ -208,7 +214,7 @@ export type ErrorCode = 'bad_frame' | 'unauthorized' | 'not_member' | 'not_found
 export type ClientFrame =
   | { op: 'hello'; lastSeq: number }
   | { op: 'sync'; since: number }
-  | { op: 'send'; reqId: string; clientId: string; chatId: Id; body: string; entities?: Entity[]; replyToId?: Id | null; attachment?: { id: string; thumb?: string | null } | null; groupId?: string | null }
+  | { op: 'send'; reqId: string; clientId: string; chatId: Id; body: string; entities?: Entity[]; replyToId?: Id | null; attachment?: { id: string; thumb?: string | null } | null; groupId?: string | null; forward?: ForwardRef | null }
   | { op: 'read'; reqId: string; chatId: Id; upToId: Id }
   | { op: 'typing'; chatId: Id }   // «печатаю» — без ответа, сервер пересылает остальным участникам
   | { op: 'draft'; reqId: string; chatId: Id; text: string; entities?: Entity[] }
@@ -260,7 +266,13 @@ export function parseClientFrame(raw: string): ClientFrame | null {
       if (f.replyToId != null && !int(f.replyToId)) return null;
       if (f.attachment != null && (typeof f.attachment !== 'object' || !str((f.attachment as { id: unknown }).id, 36))) return null;
       if (f.groupId != null && !(typeof f.groupId === 'string' && UUID.test(f.groupId))) return null;
-      return { op: 'send', reqId: f.reqId, clientId: f.clientId, chatId: f.chatId, body: f.body, entities: normalizeEntities(f.body, f.entities), replyToId: (f.replyToId as number | null) ?? null, attachment: (f.attachment as { id: string; thumb?: string | null } | null) ?? null, groupId: (f.groupId as string | null) ?? null };
+      let forward: ForwardRef | null = null;
+      if (f.forward != null) {
+        const w = f.forward as Record<string, unknown>;
+        if (typeof w !== 'object' || !int(w.chatId) || !int(w.id)) return null;
+        forward = { chatId: w.chatId as number, id: w.id as number, hideSender: w.hideSender === true, hideCaption: w.hideCaption === true };
+      }
+      return { op: 'send', reqId: f.reqId, clientId: f.clientId, chatId: f.chatId, body: f.body, entities: normalizeEntities(f.body, f.entities), replyToId: (f.replyToId as number | null) ?? null, attachment: (f.attachment as { id: string; thumb?: string | null } | null) ?? null, groupId: (f.groupId as string | null) ?? null, forward };
     case 'read':
       return str(f.reqId, 64) && int(f.chatId) && int(f.upToId) ? { op: 'read', reqId: f.reqId, chatId: f.chatId, upToId: f.upToId } : null;
     default: return null;

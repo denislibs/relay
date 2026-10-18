@@ -52,3 +52,25 @@ test('a non-retryable error marks the message failed; retry sends it after a fix
   await ea.call({ type: 'retry', clientId });
   await feed.until((l) => l.find((m) => m.key === clientId)?.status === 'failed');
 });
+
+test('forward: copies appear at once in each target chat, an album stays one group, the original author is shown', async () => {
+  const a = await srv.login('Анна'), b = await srv.login('Борис'), c = await srv.login('Вера');
+  const ab = await srv.chat(a.token, [a.userId, b.userId]), bc = await srv.chat(b.token, [b.userId, c.userId]);
+  const ea = await open(srv.config(a));
+  ea.connect(); await ea.whenIdle();
+  await ea.call({ type: 'sendMessage', chatId: ab, body: 'первое' });
+  await ea.call({ type: 'sendMessage', chatId: ab, body: 'второе' });
+  await ea.whenIdle();
+  const eb = await open(srv.config(b));
+  eb.connect(); await eb.whenIdle();
+  const src = await watchInto(eb, { kind: 'messages', chatId: ab, limit: 50 }).until((l) => l.length === 2 && l.every((m) => m.id != null));
+  const feed = watchInto(eb, { kind: 'messages', chatId: bc, limit: 50 });
+  await eb.call({ type: 'forwardMessages', fromChatId: ab, ids: src.map((m) => m.id!), toChatIds: [bc], comment: { body: 'смотри' } });
+  const sent = await feed.until((l) => l.length === 3 && l.every((m) => m.status === 'sent'));
+  expect(sent.map((m) => m.body)).toEqual(['смотри', 'первое', 'второе']);
+  expect(sent[0].fwdFrom ?? null).toBeNull();
+  expect(sent[1].fwdFrom).toMatchObject({ userId: a.userId, chatId: ab, messageId: src[0].id });
+  const rows = await sql`select body, fwd_from from messages where chat_id = ${bc} order by id`;
+  expect(rows.map((r) => r.body)).toEqual(['смотри', 'первое', 'второе']);
+  expect(rows[2].fwd_from).toMatchObject({ userId: a.userId, name: 'Анна' });
+});

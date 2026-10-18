@@ -2,7 +2,7 @@ import { PinnedBar } from './PinnedBar';
 import { membersStatus, useMembers } from '../members';
 import { Playlist } from './Playlist';
 import { inProfile, toggleProfileMusic, type Track } from '../music';
-import { Avatar, Button, Icon, MediaPolicy, peerTone, ChatSearchBar, Highlight, ripple, useMinVisible, requestMeasure, Composer, DropOverlay, GlassBar, IconButton, Menu, Modal, ConfirmDialog, Presence, ReactionPicker, requestMutation, isHeavyAnimating, onHeavyAnimationEnd, applyMarkdown, emptyValue, sameValue, voiceSupported, PlayerBar, roundSupported, startRound, Verified } from '@relay/ui';
+import { Avatar, Button, Icon, MediaPolicy, peerTone, ChatSearchBar, Highlight, ripple, useMinVisible, requestMeasure, Composer, DropOverlay, GlassBar, IconButton, Menu, Modal, ConfirmDialog, Presence, ReactionPicker, plural, requestMutation, SelectionBar, isHeavyAnimating, onHeavyAnimationEnd, applyMarkdown, emptyValue, sameValue, voiceSupported, PlayerBar, roundSupported, startRound, Verified } from '@relay/ui';
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'preact/hooks';
 import { closeChat, deleteMessage, editMessage, ensureNames, focusMessage, openChat, openUserChat, pinMessage, unpinMessage, sendFile, sendFiles, sendRound, sendVoice, react, saveDraft, searchMessages, send, typing, typingDone } from '../data';
 import type { Item, SearchHit } from '@relay/sync-engine/src/types';
@@ -17,6 +17,7 @@ import { chatKindFor, mediaPolicy } from '../autoload';
 import { chatTime, chatTone, fileSize, isSystemChat, lastSeenText, shownBody, snippet } from './format';
 import type { ProfilePhoto } from '@relay/protocol';
 import { avatarPhoto } from '../profilePhoto';
+import { cancelForwardDraft, endSelect, forwardElsewhere, patchForwardDraft, sendForwardDraft, startForward, startSelect } from '../forward';
 
 
 const NO_MESSAGES: Item[] = [];
@@ -39,6 +40,7 @@ export function Chat({ chatId, frameKey, active }: { chatId: number; frameKey: s
   const shell = useRef<HTMLSpanElement>(null);
   const stick = useRef(true);              // лента прижата к низу (Feed ведёт, отправка выставляет)
   const [menu, setMenu] = useState<{ x: number; y: number; key: string } | null>(null);
+  const [fwdMenu, setFwdMenu] = useState<{ x: number; y: number } | null>(null);   // опции пересылки в поле ввода
   const [replyKey, setReplyKey] = useState<string | null>(null);
   const [editing, setEditing] = useState<{ id: number; original: Value; draft: Value } | null>(null);   // правка своего сообщения
   const api = useRef<ComposerApi | null>(null);
@@ -46,7 +48,7 @@ export function Chat({ chatId, frameKey, active }: { chatId: number; frameKey: s
   const [recordModes, setRecordModes] = useState<string[]>([]);
   useEffect(() => { let live = true; voiceSupported().then((ok: boolean) => { if (live) setRecordModes([...(ok ? ['voice'] : []), ...(roundSupported() ? ['round'] : [])]); }); return () => { live = false; }; }, []);
   const [recordMode, setRecordMode] = useState<string>(() => { try { return localStorage.getItem('relay.recordMode') || 'voice'; } catch { return 'voice'; } });
-  const [confirmDelete, setConfirmDelete] = useState<{ id: number } | null>(null);
+  const [confirmDelete, setConfirmDelete] = useState<{ ids: number[] } | null>(null);
   // поиск по чату: строка вместо шапки, совпадения новые → старые, Enter — к более старому
   const [finding, setFinding] = useState(false);
   const [findQ, setFindQ] = useState('');
@@ -253,6 +255,29 @@ export function Chat({ chatId, frameKey, active }: { chatId: number; frameKey: s
   const replyTo = replyKey ? messages.find((m) => m.key === replyKey) : undefined;
   const authorOf = (senderId: unknown) => (senderId === me.userId ? 'Вы' : title);
   const menuMsg = menu ? messages.find((m) => m.key === menu.key) : undefined;
+  // пересылка, ждущая в поле ввода: «От: …» (или «Имена отправителей скрыты») и что пересылаем
+  const fwd = useGlobal((s) => s.fwdDraft[chatId]) ?? null;
+  const fwdQuote = fwd && !editing ? {
+    icon: 'forward',
+    author: fwd.hideSender ? 'Имена отправителей скрыты' : 'От: ' + fwd.preview.senders.map((s) => (s.id === me.userId ? me.name : s.name)).join(', '),
+    text: fwd.preview.count > 1 ? `${fwd.preview.count} ${plural(fwd.preview.count, 'пересланное сообщение', 'пересланных сообщения', 'пересланных сообщений')}` : fwd.preview.text,
+    tone: fwd.hideSender || !fwd.preview.senders.length ? peerTone(me.userId) : peerTone(fwd.preview.senders[0].id),
+    onClick: (e: MouseEvent) => { const r = (e.currentTarget as HTMLElement).getBoundingClientRect(); setFwdMenu({ x: r.left + 16, y: r.top }); },
+  } : null;
+  const nameOf = (id: number) => (id === me.userId ? me.name : names[id] ?? (chat?.kind === 'direct' ? title : ''));
+  // «Переслать» из меню: у альбома — весь альбом
+  const groupOf = (m: Item) => (m.groupId ? messages.filter((x) => x.groupId === m.groupId && x.senderId === m.senderId) : [m]);
+  const forwardMenuMsg = (m: Item) => startForward(chatId, groupOf(m), nameOf);
+  // режим выбора: вместо поля ввода — панель «Выбрано: N» (Переслать / Копировать / Удалить, если все свои)
+  const selKeys = useGlobal((s) => (s.selecting?.chatId === chatId ? s.selecting.keys : null));
+  const selected = selKeys ? messages.filter((m) => selKeys.includes(m.key as string)) : [];
+  useEffect(() => endSelect, [chatId]);   // ушли из чата — выбор сбрасывается
+  useEffect(() => {
+    if (!selKeys) return;
+    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape' && !e.defaultPrevented) { e.preventDefault(); endSelect(); } };
+    addEventListener('keydown', onKey);
+    return () => removeEventListener('keydown', onKey);
+  }, [!!selKeys]);
 
   return (
     <>
@@ -327,6 +352,15 @@ export function Chat({ chatId, frameKey, active }: { chatId: number; frameKey: s
             ) : <span>Вы не можете отправлять сообщения этому пользователю</span>}
           </div>
         </div>
+      ) : selKeys ? (
+        <div class="rl-composer-wrap app-plate-wrap">
+          <div class="rl-composer app-selwrap">
+            <SelectionBar count={selected.length} onCancel={endSelect}
+              onForward={() => { const list = selected; endSelect(); startForward(chatId, list, nameOf); }}
+              onCopy={() => { navigator.clipboard?.writeText(selected.filter((m) => m.body).map((m) => m.body as string).join('\n\n')).catch(() => {}); showToast('Скопировано'); endSelect(); }}
+              onDelete={selected.length && selected.every((m) => m.senderId === me.userId) ? () => setConfirmDelete({ ids: selected.map((m) => m.id as number) }) : undefined} />
+          </div>
+        </div>
       ) : <Composer
         id="composer"
         apiRef={api}
@@ -335,9 +369,11 @@ export function Chat({ chatId, frameKey, active }: { chatId: number; frameKey: s
         sendKey={sendKey}
         placeholder="Сообщение"
         editing={!!editing}
-        replyTo={editing ? { author: 'Редактирование', text: editing.original.text, tone: peerTone(me.userId), icon: 'pencil' } : replyTo ? { author: authorOf(replyTo.senderId), text: replyTo.body, tone: peerTone(replyTo.senderId) } : null}
+        sendEmpty={!!fwdQuote}
+        replyTo={editing ? { author: 'Редактирование', text: editing.original.text, tone: peerTone(me.userId), icon: 'pencil' } : fwdQuote ? fwdQuote : replyTo ? { author: authorOf(replyTo.senderId), text: replyTo.body, tone: peerTone(replyTo.senderId) } : null}
         onCancelReply={() => {
           if (editing) { endEdit(editing.draft); return; } // правку отменили — вернуть черновик
+          if (fwd) { cancelForwardDraft(chatId); return; }
           setReplyKey(null);
         }}
         onChange={onType}
@@ -366,6 +402,7 @@ export function Chat({ chatId, frameKey, active }: { chatId: number; frameKey: s
           saved.current = latest.current = emptyValue();   // черновик очищает сам движок вместе с отправкой
           typingDone(chatId);
           const out = applyMarkdown(v);   // **жирный**, `код`, [текст](ссылка)… — в оформление
+          if (fwd) return sendForwardDraft(chatId, out.text, out.entities);   // комментарий первым, затем пересланное
           const sent = send(chatId, out.text, (replyTo?.id as number) ?? null, out.entities);
           setReplyKey(null);
           return sent;   // поле очистится, когда сообщение встанет в ленту
@@ -386,18 +423,40 @@ export function Chat({ chatId, frameKey, active }: { chatId: number; frameKey: s
                 onClose={() => setMenu(null)}
                 items={[
                   ...(menuMsg.id != null && !menuMsg.deleted && !system ? [{ icon: 'reply', label: 'Ответить', onClick: () => { if (editing) endEdit(editing.draft); setReplyKey(menuMsg.key as string); api.current?.focus({ end: true }); } }] : []),
+                  ...(menuMsg.id != null && !menuMsg.deleted && !menuMsg.service ? [{ icon: 'forward', label: 'Переслать', onClick: () => forwardMenuMsg(menuMsg) }] : []),
+                  ...(menuMsg.id != null && !menuMsg.deleted && !menuMsg.service ? [{ icon: 'checkCircle', label: 'Выбрать', onClick: () => startSelect(chatId, groupOf(menuMsg).map((x) => x.key as string)) }] : []),
                   ...(own && !system ? [{ icon: 'pencil', label: 'Изменить', onClick: () => startEdit(menuMsg) }] : []),
                   ...(menuMsg.id != null && !menuMsg.deleted && !system && !menuMsg.service ? [((chat?.pinned as number[] | undefined) ?? []).includes(menuMsg.id as number)
                     ? { icon: 'pin', label: 'Открепить', onClick: () => void unpinMessage(chatId, menuMsg.id as number) }
                     : { icon: 'pin', label: 'Закрепить', onClick: () => void pinMessage(chatId, menuMsg.id as number) }] : []),
                   ...(!menuMsg.deleted ? [{ icon: 'copy', label: 'Копировать', onClick: () => { navigator.clipboard?.writeText(menuMsg.body as string).catch(() => {}); } }] : []),
-                  ...(own ? ['-' as const, { icon: 'trash', label: 'Удалить', danger: true, onClick: () => setConfirmDelete({ id: menuMsg.id as number }) }] : []),
+                  ...(own ? ['-' as const, { icon: 'trash', label: 'Удалить', danger: true, onClick: () => setConfirmDelete({ ids: [menuMsg.id as number] }) }] : []),
                 ]}
               />
             </div>
           </>
         );
       })() : null}
+      {fwdMenu && fwd ? (
+        <>
+          <div class="rl-msgmenu-scrim" onClick={() => setFwdMenu(null)} />
+          <div class="rl-msgmenu app-fwdmenu" style={{ left: Math.min(fwdMenu.x, innerWidth - 260), bottom: innerHeight - fwdMenu.y + 6 }}>
+            <Menu
+              label="Параметры пересылки"
+              onClose={() => setFwdMenu(null)}
+              items={[
+                fwd.hideSender
+                  ? { icon: 'eye', label: 'Показать отправителя', onClick: () => patchForwardDraft(chatId, { hideSender: false }) }
+                  : { icon: 'eyeOff', label: 'Скрыть отправителя', onClick: () => patchForwardDraft(chatId, { hideSender: true }) },
+                ...(fwd.preview.captions ? [fwd.hideCaption
+                  ? { icon: 'eye', label: 'Показать подписи', onClick: () => patchForwardDraft(chatId, { hideCaption: false }) }
+                  : { icon: 'eyeOff', label: 'Скрыть подписи', onClick: () => patchForwardDraft(chatId, { hideCaption: true }) }] : []),
+                { icon: 'forward', label: 'Другой чат…', onClick: () => forwardElsewhere(chatId) },
+              ]}
+            />
+          </div>
+        </>
+      ) : null}
       <input ref={picker} type="file" multiple hidden onChange={(e) => offer((e.target as HTMLInputElement).files)} />
       <Presence show={dragging} exitMs={160}><div class="app-drop"><DropOverlay title="Отпустите, чтобы отправить" text="Фото и документы до 50 МБ" /></div></Presence>
       {pending ? (
@@ -418,8 +477,9 @@ export function Chat({ chatId, frameKey, active }: { chatId: number; frameKey: s
           />
         </Modal>
       ) : null}
-      <ConfirmDialog open={!!confirmDelete} danger title="Удалить сообщение?" text="Сообщение исчезнет у всех участников чата." confirm="Удалить у всех"
-        onCancel={() => setConfirmDelete(null)} onConfirm={() => { if (confirmDelete) deleteMessage(chatId, confirmDelete.id).catch(() => {}); setConfirmDelete(null); }} />
+      <ConfirmDialog open={!!confirmDelete} danger title={confirmDelete && confirmDelete.ids.length > 1 ? `Удалить ${confirmDelete.ids.length} ${plural(confirmDelete.ids.length, 'сообщение', 'сообщения', 'сообщений')}?` : 'Удалить сообщение?'}
+        text={confirmDelete && confirmDelete.ids.length > 1 ? 'Сообщения исчезнут у всех участников чата.' : 'Сообщение исчезнет у всех участников чата.'} confirm="Удалить у всех"
+        onCancel={() => setConfirmDelete(null)} onConfirm={() => { if (confirmDelete) for (const id of confirmDelete.ids) deleteMessage(chatId, id).catch(() => {}); setConfirmDelete(null); endSelect(); }} />
     </>
   );
 }

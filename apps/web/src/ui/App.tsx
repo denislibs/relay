@@ -1,4 +1,5 @@
 import { LinkEdit } from './links/LinkEdit';
+import { ForwardPicker } from './ForwardPicker';
 import { Links } from './links/Links';
 import { FolderColumn, useFolderPlace } from './folderNav';
 import { AsidePanel, FloatShell, ModalRoot, Presence, SideFrame, SlideStack, Toast } from '@relay/ui';
@@ -60,6 +61,7 @@ export function App() {
       </FloatShell>
       <NewChat />
       <ModalRoot />
+      <ForwardPicker />
       <NewContact />
       <DevPlate />
       <AppToast />

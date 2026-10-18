@@ -618,7 +618,19 @@ body { margin: 0; font-family: var(--font-sans); color: var(--ink); background: 
 .rl-row-archived .rl-row-name { font-weight: 400; }
 
 /* ---------- Bubble extras ---------- */
-.rl-bubble-fwd { display: flex; align-items: center; gap: 4px; margin-bottom: 2px; font: italic 400 13px/18px var(--font-sans); color: var(--bubble-meta); }
+.rl-fwd { display: flex; flex-direction: column; align-items: flex-start; gap: 2px; max-width: 100%; margin: 0 0 4px; padding: 0; border: 0; background: none; color: var(--fwd-tone); text-align: start; font: 400 13px/18px var(--font-sans); }
+.rl-fwd-link { cursor: pointer; }
+.rl-fwd-link:hover .rl-fwd-who b { text-decoration: underline; }
+.rl-fwd-link:focus-visible { outline: 2px solid currentColor; outline-offset: 2px; border-radius: 6px; }
+.rl-fwd-label { display: inline-flex; align-items: center; gap: 4px; }
+.rl-fwd-who { display: inline-flex; align-items: center; gap: 6px; max-width: 100%; min-width: 0; }
+.rl-fwd-who b { font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.rl-fwd-who .rl-avatar { flex-shrink: 0; font-size: 9px; }
+.rl-file > .rl-fwd, .rl-vb > .rl-fwd, .rl-music > .rl-fwd { margin-bottom: 6px; }
+/* кружок без пузыря: подпись — на полупрозрачной плашке, читается на любом фоне */
+.rl-round-line-fwd { flex-direction: column; align-items: flex-start; }
+.rl-msgline-out.rl-round-line-fwd { align-items: flex-end; }
+.rl-fwd-plate { padding: 4px 10px; border-radius: 12px; background: var(--raised); box-shadow: var(--shadow-float, none); }
 .rl-bubble-edited { margin-right: 2px; font-style: italic; }
 .rl-bubble-spacer-edited { width: 96px; }
 .rl-bubble-in-side .rl-bubble-spacer-edited { width: 72px; }   /* входящее: без галочек, но с «изм.» */
@@ -1831,3 +1843,32 @@ html[data-blur="0"] .rl-menu, html[data-blur="0"] .rl-attach { -webkit-backdrop-
 .rl-burger.is-back i:nth-child(3) { top: 6px; width: 11px; transform: rotate(45deg); }
 @media (prefers-reduced-motion: reduce) { .rl-burger, .rl-burger i { transition: none; } }
 .rl-composer.has-reply > .rl-composer-field, .rl-composer:has(> .rl-presence > .rl-composer-reply) > .rl-composer-field { min-width: 120px; }   /* и пока панель уезжает */   /* не умещается рядом с панелью — уходит на вторую строку */
+
+/* ---------- ChatPicker: «Переслать в…» ---------- */
+.rl-chatpick { height: min(92vh, 36rem); }
+.rl-chatpick .rl-mdl-body.rl-chatpick-body { display: flex; flex-direction: column; padding: 0; overflow: hidden; }
+.rl-chatpick-head { flex-shrink: 0; }
+.rl-chatpick-top { flex-shrink: 0; display: flex; gap: 4px; overflow-x: auto; padding: 10px 12px 6px; scrollbar-width: none; }
+.rl-chatpick-top::-webkit-scrollbar { display: none; }
+.rl-chatpick-topitem { flex: none; display: flex; flex-direction: column; align-items: center; gap: 4px; width: 64px; padding: 4px 0; border: 0; border-radius: 12px; background: none; color: var(--ink); cursor: pointer; font: 400 12px/16px var(--font-sans); }
+.rl-chatpick-topitem:hover { background: var(--hover); }
+.rl-chatpick-topav { position: relative; display: inline-flex; }
+.rl-chatpick-topcheck { position: absolute; right: -2px; bottom: -2px; width: 20px; height: 20px; border-color: var(--raised); background: var(--button); transform: scale(0); }
+.rl-chatpick-topitem.rl-picker-on .rl-chatpick-topcheck { transform: scale(1); }
+.rl-chatpick-topname { max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.rl-chatpick-folders { flex-shrink: 0; margin: 2px 8px 0; }
+.rl-chatpick-list { flex: 1 1 auto; min-height: 0; padding: 4px 8px; }
+.rl-chatpick-row { cursor: pointer; }
+.rl-chatpick-row .rl-row-main { min-width: 0; }
+.rl-chatpick-active { background: var(--hover); }
+.rl-chatpick-foot { flex-shrink: 0; display: flex; align-items: center; gap: 8px; padding: 10px 16px 14px; border-top: 1px solid var(--line); }
+.rl-chatpick-btn { flex: 1; height: 44px; border: 0; border-radius: 12px; background: var(--button); color: #fff; font: 500 15px/1 var(--font-sans); cursor: pointer; transition: opacity 150ms ease, background-color 150ms ease; }
+.rl-chatpick-btn:disabled { opacity: .45; cursor: default; }
+.rl-chatpick-note { flex: 1; min-width: 0; height: 44px; padding: 0 14px; border: 1px solid var(--line); border-radius: 22px; background: var(--raised); color: var(--ink); font: 400 15px/1 var(--font-sans); outline: none; transition: border-color 150ms ease; }
+.rl-chatpick-note:focus { border-color: var(--button); }
+.rl-chatpick-send { flex: none; display: grid; place-items: center; width: 44px; height: 44px; border: 0; border-radius: 50%; background: var(--button); color: #fff; cursor: pointer; animation: rl-pop-in 180ms cubic-bezier(.34, 1.56, .64, 1) both; }
+@keyframes rl-pop-in { from { transform: scale(.4); opacity: 0; } }
+@media (prefers-reduced-motion: reduce) { .rl-chatpick-send { animation: none; } }
+.rl-chatpick-head .rl-picker-search input { width: 100%; height: 32px; border: 0; outline: none; background: transparent; color: var(--ink); font: 400 15px/20px var(--font-sans); }
+.rl-chatpick-head .rl-picker-search input::-webkit-search-cancel-button { display: none; }
+.rl-chatpick .rl-chatpick-head .rl-picker-search, .rl-chatpick .rl-chatpick-head .rl-picker-search:focus-within { border: 0; box-shadow: none; background: transparent; }

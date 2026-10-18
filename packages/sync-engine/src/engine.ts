@@ -13,7 +13,7 @@ import { OP_SESSIONS_TTL, Sessions } from './sessions';
 import { SessionEnd } from './session';
 import { DevTools, loadSim, type SimState, type SubStat } from './devlog';
 import { simFlags, watchLoss } from './devsim';
-import type { Action, EngineConfig, LocalMessage, Patch, Query, SearchResult } from './types';
+import type { Action, EngineConfig, LocalMessage, OutboxEntry, Patch, Query, SearchResult } from './types';
 
 export interface WatchHandle { update(q: Query): void; close(): void }
 
@@ -544,6 +544,14 @@ export class Engine {
 
   /** Свой профиль для интерфейса: база + очередь. */
   private meNow(): Me | null { return meView(this.store.profile.me, this.ops.list); }
+  /** Имя автора для «Переслано от» до ответа сервера: я, известный профиль, собеседник личного чата. */
+  private nameOf(userId: number, chatId: number): string {
+    if (userId === this.cfg.userId) return this.meNow()?.name ?? '';
+    const u = this.store.profile.users.get(userId);
+    if (u?.name) return u.name;
+    const c = this.store.chats.get(chatId);
+    return c?.kind === 'direct' && c.peerId === userId ? c.title ?? '' : '';
+  }
 
   /** Операция подтверждена: ответ профиля — новая база (журнал принесёт то же самое ещё раз — не страшно). */
   private opDone(op: PendingOp, value: unknown): void {
@@ -713,6 +721,36 @@ export class Engine {
         this.changed();
         this.pumpOutbox();
         return { clientId };
+      }
+      case 'forwardMessages': {
+        // в каждый чат: подпись (если есть), затем копии по порядку — сразу в ленте «отправляется», дальше как send;
+        // альбом остаётся альбомом: у копий одной группы — общий новый groupId (свой в каждом чате)
+        const srcs = a.ids.map((id) => this.store.messageById(a.fromChatId, id)).filter((m): m is LocalMessage => !!m && m.id != null && !m.deleted && !m.service);
+        const clientIds: string[] = [];
+        const queue = (o: Omit<OutboxEntry, 'clientId' | 'createdAt' | 'failed'>) => {
+          const clientId = crypto.randomUUID();
+          this.lastCreated = Math.max(Date.now(), this.lastCreated + 1);
+          this.store.addPending({ ...o, clientId, createdAt: this.lastCreated, failed: false });
+          clientIds.push(clientId);
+        };
+        for (const chatId of a.toChatIds) {
+          const comment = a.comment?.body.trim() ? a.comment : null;
+          if (comment) queue({ chatId, body: comment.body, entities: comment.entities ?? [], replyToId: null });
+          const groups = new Map<string, string>();
+          for (const m of srcs) {
+            const dropCaption = !!a.hideCaption && !!m.attachment;
+            const fwdFrom = a.hideSender ? null : m.fwdFrom ?? { userId: m.senderId, name: this.nameOf(m.senderId, a.fromChatId), chatId: a.fromChatId, messageId: m.id!, at: m.createdAt };
+            let groupId: string | null = null;
+            if (m.groupId && m.attachment) { groupId = groups.get(m.groupId) ?? crypto.randomUUID(); groups.set(m.groupId, groupId); }
+            queue({ chatId, body: dropCaption ? '' : m.body, entities: dropCaption ? [] : m.entities ?? [], replyToId: null, attachment: m.attachment ?? null,
+              ...(groupId ? { groupId } : {}), forward: { chatId: a.fromChatId, id: m.id!, ...(a.hideSender ? { hideSender: true } : {}), ...(a.hideCaption ? { hideCaption: true } : {}) }, fwdFrom });
+          }
+          if (comment) this.store.setDraft(chatId, '');
+        }
+        await this.store.flush();
+        this.changed();
+        this.pumpOutbox();
+        return { clientIds };
       }
       case 'loadMoreChats':
         await this.loadMoreChats();
@@ -1184,7 +1222,7 @@ export class Engine {
               this.changed();
             }
             const att = next.attachment ? { id: next.attachment.id, thumb: next.attachment.thumb ?? null } : null;
-            const r = await this.request({ op: 'send', reqId: '', clientId: next.clientId, chatId: next.chatId, body: next.body, entities: next.entities ?? [], replyToId: next.replyToId, attachment: att, ...(next.groupId ? { groupId: next.groupId } : {}) });
+            const r = await this.request({ op: 'send', reqId: '', clientId: next.clientId, chatId: next.chatId, body: next.body, entities: next.entities ?? [], replyToId: next.replyToId, attachment: next.forward ? null : att, ...(next.groupId ? { groupId: next.groupId } : {}), ...(next.forward ? { forward: next.forward } : {}) });
             this.store.ack(next.clientId, r.id as number, r.createdAt as string);
             this.outboxAttempt = 0;
             if (att) delBlob(this.db, next.clientId).catch(() => {});

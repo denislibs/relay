@@ -350,7 +350,7 @@ export function loadOlder(): void { moveWindow('older'); }
 
 /** Звук своей отправки (как в мобильных мессенджерах): по настройке звуков; пачка файлов — один звук, а не по штуке. */
 let sentAt = 0;
-function sentSound(): void {
+export function sentSound(): void {
   const now = Date.now();
   if (now - sentAt < 400) return;
   sentAt = now;
@@ -363,6 +363,13 @@ export async function send(chatId: number, body: string, replyToId: number | nul
   nudgeWallpaper();
   toLatestOf(chatId); // своё сообщение — внизу, как в Telegram
   await engine.call({ type: 'sendMessage', chatId, body, entities, replyToId });
+}
+
+/** Пересылка (forward.ts): копии сразу в ленте целевых чатов; в открытом чате — к низу, как своё сообщение. */
+export async function forwardMessages(a: { fromChatId: number; ids: number[]; toChatIds: number[]; hideSender?: boolean; hideCaption?: boolean; comment?: { body: string; entities?: Entity[] } | null }): Promise<void> {
+  nudgeWallpaper();
+  for (const id of a.toChatIds) toLatestOf(id);
+  await engine.call({ type: 'forwardMessages', ...a });
 }
 
 const typingSent = new Map<number, number>();
