@@ -4,7 +4,7 @@ import type { Entity } from '@relay/protocol';
 import { Avatar, Bubble, Icon, peerTone, DateDivider, DatePicker, FileBubble, MediaBubble, MessageText, VoiceBubble, MusicBubble, RoundBubble, player, MediaViewer, ScrollToBottom, beginHeavyAnimation, forceMeasure, isHeavyAnimating, onHeavyAnimationEnd, requestMeasure, requestMutation } from '@relay/ui';
 import { memo } from 'preact/compat';
 import { useEffect, useLayoutEffect, useRef, useState } from 'preact/hooks';
-import { clearFocus, ensureNames, focusMessage, jumpToDate, localPreview, markListened, moveWindow, react, savePosition, savedPosition, seen } from '../data';
+import { clearFocus, ensureNames, focusMessage, openChat, jumpToDate, localPreview, markListened, moveWindow, react, savePosition, savedPosition, seen } from '../data';
 import { activeFrame, frameByKey, getGlobal, useGlobal } from '../global';
 import { toggleMusic, trackTitle, useFileCached } from '../music';
 import { showToast } from '../settingsData';
@@ -45,14 +45,18 @@ const Row = memo(function Row({ chatId, voiceTitle, author, onAuthor, onOpen, hl
   }
   const att = m.attachment as Att | null | undefined;
   // пересланное: «Переслано от» с аватаром и именем автора; клик — чат с ним (себя не открываем)
-  const ff = !m.deleted ? m.fwdFrom as { userId: number; name: string } | null | undefined : null;
+  const ff = !m.deleted ? m.fwdFrom as { userId: number; name: string; chatId: number; messageId: number } | null | undefined : null;
   const fwd = ff ? { name: ff.name, tone: peerTone(ff.userId), avatar: senderAvatar(ff.userId),
     onClick: ff.userId !== meId && onUser ? () => onUser(ff.userId) : undefined } : undefined;
   // режим выбора: строка отмечается кликом (обработчик — у ленты), кружок-галочка слева
   const wrap = (base: string) => base + (flash ? ' app-msg-flash' : '') + (sel !== undefined ? ' app-msg-sel' : '') + (sel ? ' app-msg-on' : '') + (grp ? ' app-msg-grp' : '');
   // круглая стрелка «Переслать» у пузыря при наведении — у медиа и длинных сообщений (не в режиме выбора)
-  const aside = sel === undefined && onQuickForward && m.id != null && !m.deleted && !m.service && (att || (m.body as string).length > 300)
-    ? <button type="button" class="app-fwd-quick" aria-label="Переслать" onClick={(e) => { e.stopPropagation(); onQuickForward(album?.[0] ?? m); }}><Icon name="forward" size={20} /></button> : null;
+  // у пересланного, чей исходный чат мне доступен, вместо неё — «→ к оригиналу» (как в Telegram)
+  const src = ff && ff.chatId != null && getGlobal().chats.some((c) => c.id === ff.chatId) ? ff : null;
+  const aside = sel !== undefined || m.id == null || m.deleted || m.service ? null
+    : src ? <button type="button" class="app-fwd-quick" aria-label="Перейти к сообщению" title="Перейти к сообщению" onClick={(e) => { e.stopPropagation(); goToOriginal(src.chatId, src.messageId); }}><Icon name="arrowRight" size={20} /></button>
+    : onQuickForward && (att || (m.body as string).length > 300)
+      ? <button type="button" class="app-fwd-quick" aria-label="Переслать" title="Переслать" onClick={(e) => { e.stopPropagation(); onQuickForward(album?.[0] ?? m); }}><Icon name="forward" size={20} /></button> : null;
   const check = sel !== undefined ? <span class="app-msg-check" aria-hidden="true"><Icon name="check" size={14} strokeWidth={3} /></span> : null;
   const pending = m.status === 'pending' && typeof m.progress === 'number' && (m.progress as number) < 1;
   const mark = m.id != null ? <i class="app-mark" data-mid={m.id as number} aria-hidden="true" /> : null;
@@ -208,6 +212,12 @@ const Row = memo(function Row({ chatId, voiceTitle, author, onAuthor, onOpen, hl
     </div>
   );
 });
+
+/** «→» у пересланного: открыть исходный чат на оригинале (тот же чат — просто прокрутить к нему). */
+function goToOriginal(chatId: number, id: number): void {
+  const target = { id, sort: id };
+  if (activeFrame(getGlobal())?.chatId === chatId) focusMessage(target); else openChat(chatId, target);
+}
 
 const noop = () => {}; // цитата — кнопка; сам клик ловит лента (один обработчик на всех)
 
