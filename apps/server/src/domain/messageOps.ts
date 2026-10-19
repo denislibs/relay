@@ -31,6 +31,9 @@ export async function editMessage(userId: number, chatId: number, id: number, bo
     await ownMessage(tx, userId, chatId, id);   // в служебном чате — тоже только свои (сообщения Relay не правятся)
     // заблокированный не правит сообщения в личном чате с тем, кто его заблокировал
     if (await blockedInDirect(tx, chatId, userId)) throw new DomainError('blocked');
+    // статью обычной правкой текста не меняем (иначе пропадут блоки)
+    const [art] = await tx`select 1 from messages where chat_id = ${chatId} and id = ${id} and blocks is not null`;
+    if (art) throw new DomainError('bad_frame', 'article edit');
     await burnCodes(tx, userId, text);
     const [row] = await tx`update messages set body = ${text}, entities = ${entities.length ? sql.json(entities as never) : null}, edited_at = now() where chat_id = ${chatId} and id = ${id} returning edited_at`;
     const editedAt = new Date(row.edited_at as string).toISOString();

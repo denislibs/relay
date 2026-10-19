@@ -1,4 +1,4 @@
-import { graphemes, normalizeEntities, type Entity, type ForwardInfo, type LinkPreview, type MediaTab, type Message, type ProfilePhoto, type ServiceData, type ServiceType } from '@relay/protocol';
+import { graphemes, normalizeEntities, type Entity, type Block, type ForwardInfo, type LinkPreview, type MediaTab, type Message, type ProfilePhoto, type ServiceData, type ServiceType } from '@relay/protocol';
 import { sql, type Tx } from '../db';
 import { DomainError } from './errors';
 import { fanOut } from './journal';
@@ -103,6 +103,7 @@ export function toMessage(r: Record<string, unknown>): Message {
     ...(r.group_id ? { groupId: r.group_id as string } : {}),
     ...(r.fwd_from ? { fwdFrom: r.fwd_from as ForwardInfo } : {}),
     ...(r.link ? { link: r.link as LinkPreview } : {}),
+    ...(r.blocks ? { blocks: r.blocks as Block[] } : {}),
     ...(!r.deleted && Array.isArray(r.entities) && r.entities.length ? { entities: normalizeEntities(r.body as string, r.entities) } : {}),
   };
 }
