@@ -86,8 +86,11 @@ export async function toggleProfileMusic(t: Track): Promise<void> {
     // движок ставит операцию в очередь и сразу показывает результат в подписке; отказ сервера откатит строку,
     // а тост об отказе покажет наблюдатель очереди (settingsData)
     if (had) await removeProfileMusic(t.attId);
-    else if (t.chatId != null && t.msgId != null) await addProfileMusic(t.chatId, t.msgId);
-    else return;
+    else if (t.chatId != null && t.msgId != null) {
+      // сообщения нет в кэше движка — строки пока нет: «добавлено» не обещаем (список обновит ответ сервера)
+      const r = (await addProfileMusic(t.chatId, t.msgId)) as { optimistic?: boolean } | null;
+      if (r?.optimistic === false) return;
+    } else return;
     showToast(had ? 'Трек убран из профиля' : 'Трек добавлен в профиль');
   } catch {
     showToast('Не удалось изменить музыку профиля');
@@ -114,13 +117,15 @@ export function playProfileTop(userId: number, top: Pick<ProfileTrack, 'id' | 't
   const key = profileTrack(userId, top).key;
   const m = new Mirror();
   let done = false;
+  const stop = () => { done = true; w.close(); clearTimeout(timer); };
+  const timer = setTimeout(stop, 15_000);   // без связи ответа нет — подписку не копим
   const w = watchQuery({ kind: 'profileMusic', userId }, (p) => {
     if (done) return;
     m.apply(p);
     const v = musicOf(m);
     if (!v || (!v.loaded && !v.tracks.length)) return;
-    done = true;
     if (v.tracks.length > 1 && player.playerState().key === key) player.setPlaylist(v.tracks.map((x) => profileTrack(userId, x)));
-    queueMicrotask(() => w.close());
+    done = true;
+    queueMicrotask(stop);
   });
 }

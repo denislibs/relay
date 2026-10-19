@@ -1,5 +1,6 @@
 import type { ProfileLink } from '@relay/protocol';
 import { releaseMediaCache } from './storageInfo';
+import { stopOwnMusic } from './profileLists';
 // Данные разделов настроек. Предзагрузка: на главной странице и при наведении на строку раздела —
 // слайд приезжает уже заполненным. Подписки настроек (me, ops, user) живут здесь, а не в data.ts.
 
@@ -191,7 +192,9 @@ export function markSelfLogout(on: boolean): void { selfLogout = on; }
 
 let terminating = false;
 function onTerminated(reason: 'logout' | 'terminated'): void {
-  if (terminating || selfLogout) return;
+  if (terminating) return;
+  stopOwnMusic();   // подписка на свою музыку не переживает выход
+  if (selfLogout) return;
   terminating = true;
   // сервер удалил подписку вместе с сеансом; отписываем и браузер (best effort, не ждём)
   void dropSubscription().catch(() => {});
@@ -224,6 +227,8 @@ export const saveFolder = (folder: ChatFolder): Promise<unknown> => call({ type:
 export const deleteFolder = (id: number): Promise<unknown> => call({ type: 'deleteFolder', id });
 export const reorderFolders = (ids: number[]): Promise<unknown> => call({ type: 'reorderFolders', ids });
 
+/** Свои фото изменились (удаление, загрузка, смена главного): движок перечитает список; без связи — не страшно. */
+export const refreshProfilePhotos = (): Promise<unknown> => call({ type: 'refreshProfilePhotos' }).catch(() => null);
 export const refreshSettings = (): Promise<unknown> => call({ type: 'refreshSettings' }).catch(() => null);
 export const setNotifyDefault = (notifyType: 'direct' | 'group', patch: { muted?: boolean; preview?: boolean }): Promise<unknown> =>
   call({ type: 'setNotify', notifyType, ...patch });

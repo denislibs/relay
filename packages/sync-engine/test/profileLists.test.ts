@@ -192,3 +192,22 @@ test('profilePhotos: main first then newest, survives a restart; a new main phot
     expect(reqs.photos).toBe(2);
   } finally { reqs.restore(); }
 });
+
+test('profilePhotos: deleting a non-main own photo + refreshProfilePhotos drops it from the open list', async () => {
+  const a = await srv.login('Анна');
+  const photo = async () => {
+    const [r] = await sql`insert into user_photos (user_id, big, small, thumb) values (${a.userId}, ${crypto.randomUUID()}, ${crypto.randomUUID()}, 'data:image/jpeg;base64,AAAA') returning id`;
+    return Number(r.id);
+  };
+  const p1 = await photo(), p2 = await photo();
+  await api(a.token, 'PUT', `/me/photos/${p2}/main`);
+  const ea = await open(srv.config(a));
+  ea.connect();
+  await ea.whenIdle();
+  const w = watchInto(ea, { kind: 'profilePhotos', userId: a.userId });
+  await w.until((x) => x.length === 2);
+  await api(a.token, 'DELETE', `/me/photos/${p1}`);
+  await ea.call({ type: 'refreshProfilePhotos' });
+  const l = await w.until((x) => x.length === 1);
+  expect(l.map((x) => x.pid)).toEqual([p2]);
+});

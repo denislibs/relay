@@ -51,6 +51,13 @@ export function startOwnMusic(userId: number, watch: Watch = watchQuery): void {
 /** Файл уже в моём профиле (синхронно, по подписке). */
 export const inOwnMusic = (attId: string | undefined): boolean => !!attId && own.has(attId);
 
+/** Закрыть подписку на свою музыку (выход из аккаунта). */
+export function stopOwnMusic(): void {
+  ownWatch?.close();
+  ownWatch = null;
+  resetProfileLists();
+}
+
 /** Перерисовка при любом изменении своей музыки. */
 export function useOwnMusic(): void {
   const [, setRev] = useState(0);
@@ -60,7 +67,7 @@ export function useOwnMusic(): void {
 /* ---------- кэш отрисовки ---------- */
 // Последний вид — только чтобы повторное открытие рисовалось сразу, без мигания; правда — в движке.
 const musicLast = new Map<number, MusicView>();
-const photosLast = new Map<string, PhotosView>();
+const photosLast = new Map<number, PhotosView>();
 
 /** Сброс кэшей отрисовки и своей музыки (смена пользователя без перезагрузки). */
 export function resetProfileLists(): void {
@@ -89,25 +96,21 @@ export function useProfileMusic(userId: number | null | undefined): MusicView | 
   return v;
 }
 
-/** Ключ кэша фото: человек + его главное фото (сменилось — показ начинается с главного, пока не пришёл новый список). */
-const photosKey = (userId: number, main: { pid?: number; id: string } | null | undefined) => userId + ':' + (main?.pid ?? main?.id ?? 'none');
-
-/** История фото профиля (главное первым) из подписки движка; null — ещё нет. */
-export function useProfilePhotoList(userId: number | null | undefined, mainKeyOf: { pid?: number; id: string } | null | undefined): UserPhoto[] | null {
-  const key = userId ? photosKey(userId, mainKeyOf) : '';
-  const [v, setV] = useState<PhotosView | null>(() => photosLast.get(key) ?? null);
+/** История фото профиля (главное первым) из подписки движка; null — ещё нет. Кэш отрисовки — по человеку: смена главного не схлопывает галерею. */
+export function useProfilePhotoList(userId: number | null | undefined): UserPhoto[] | null {
+  const [v, setV] = useState<PhotosView | null>(() => (userId ? photosLast.get(userId) ?? null : null));
   useEffect(() => {
-    setV(photosLast.get(key) ?? null);
+    setV(userId ? photosLast.get(userId) ?? null : null);
     if (!userId) return;
     const m = new Mirror();
     const w = watchQuery({ kind: 'profilePhotos', userId }, (p) => {
       m.apply(p);
       const x = photosOf(m);
       if (!x) return;
-      if (x.photos.length || x.loaded) photosLast.set(key, x);
+      if (x.photos.length || x.loaded) photosLast.set(userId, x);
       setV(x);
     });
     return () => w.close();
-  }, [key]);
+  }, [userId]);
   return v && v.photos.length ? v.photos : null;
 }

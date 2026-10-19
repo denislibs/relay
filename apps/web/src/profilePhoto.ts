@@ -3,6 +3,7 @@
 import type { ProfilePhoto, UserPhoto } from '@relay/protocol';
 import { getGlobal, type Me } from './global';
 import { useProfilePhotoList } from './profileLists';
+import { refreshProfilePhotos } from './settingsData';
 
 /** Пропсы Avatar для фото: маленькое — для списков, большое (big) — для профиля. Нет фото — пусто (инициалы). */
 export function avatarPhoto(p: ProfilePhoto | null | undefined, big = false): { src?: string; thumb?: string } {
@@ -54,29 +55,32 @@ async function json(r: Response): Promise<Me> {
 export async function setProfilePhoto(c: { big: Blob; small: Blob; thumb: string; video?: { blob: Blob; side: number; duration: number } }): Promise<Me> {
   const [id, small, video] = await Promise.all([upload(c.big, 640), upload(c.small, 160), c.video ? upload(c.video.blob, c.video.side, c.video) : undefined]);
   const me = await json(await fetch('/me/photo', { method: 'PUT', credentials: 'include', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ id, small, thumb: c.thumb, ...(video ? { video } : {}) }) }));
+  void refreshProfilePhotos();   // сводка видит только главное; список — перечитать
   return me;
 }
 
 /** Удалить фото: без pid — главное, с pid — любое из истории. */
 export async function removeProfilePhoto(pid?: number): Promise<Me> {
   const me = await json(await fetch(pid ? `/me/photos/${pid}` : '/me/photo', { method: 'DELETE', credentials: 'include' }));
+  void refreshProfilePhotos();   // удалили не главное — сводка не изменилась, список перечитать
   return me;
 }
 
 export async function setMainPhoto(pid: number): Promise<Me> {
   const me = await json(await fetch(`/me/photos/${pid}/main`, { method: 'PUT', credentials: 'include' }));
+  void refreshProfilePhotos();
   return me;
 }
 
 // ---------- история фото ----------
-// Список — подписка движка (profileLists.ts): сменилось главное фото (userUpdated) — движок перечитает его сам.
+// Список — подписка движка (profileLists.ts): чужое — по журналу (userUpdated), своё — после правки зовём refreshProfilePhotos.
 
 /**
  * История фото профиля (главное первым). Пока не загрузилась — одно главное фото из профиля,
  * чтобы шапка не мигала; без фото — пусто.
  */
 export function useProfilePhotos(userId: number | null | undefined, main: ProfilePhoto | null | undefined): UserPhoto[] {
-  const list = useProfilePhotoList(main ? userId : null, main);
+  const list = useProfilePhotoList(main ? userId : null);
   if (!main) return [];
   return list ?? [{ pid: main.pid ?? 0, id: main.id, small: main.small, thumb: main.thumb, at: main.at, ...(main.video ? { video: main.video } : {}) }];
 }

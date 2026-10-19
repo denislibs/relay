@@ -1044,6 +1044,9 @@ export class Engine {
       case 'setUsername':
         await this.ops.enqueue({ key: OP_USERNAME, method: 'PUT', path: '/me/username', body: { username: a.username } });
         return null;
+      case 'refreshProfilePhotos':
+        this.lists.refreshPhotos(this.cfg.userId);
+        return null;
       case 'refreshSettings':
         if (this.online && this.ready) this.fetchSettings();
         return null;
@@ -1073,7 +1076,7 @@ export class Engine {
         const track = trackOf(this.store, a.chatId, a.messageId);
         const key = track ? musicKey(track.id) : musicKey(`m${a.chatId}:${a.messageId}`);
         await this.ops.enqueue({ key, method: 'POST', path: '/me/music', body: { chatId: a.chatId, messageId: a.messageId, ...(track ? { track } : {}) } });
-        return null;
+        return { optimistic: !!track };   // нет трека в кэше — строки пока нет, интерфейс не обещает «добавлено»
       }
       case 'removeProfileMusic':
         await this.ops.enqueue({ key: musicKey(a.attId), method: 'DELETE', path: `/me/music/${encodeURIComponent(a.attId)}` });

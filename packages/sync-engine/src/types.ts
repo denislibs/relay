@@ -178,6 +178,8 @@ export type Action =
   /** умолчания уведомлений для вида чата — через очередь операций (видно сразу, в том числе без сети) */
   /** перезапросить настройки с сервера (предзагрузка раздела) */
   | { type: 'refreshSettings' }
+  /** свои фото изменились HTTP-запросом мимо очереди (удалили, загрузили, сменили главное): перечитать список */
+  | { type: 'refreshProfilePhotos' }
   | { type: 'setMute'; chatId: number; muteUntil: number | null }
   | { type: 'setNotify'; notifyType: 'direct' | 'group'; muted?: boolean; preview?: boolean }
   /** правило конфиденциальности целиком — через очередь операций */

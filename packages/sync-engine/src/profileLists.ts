@@ -119,6 +119,9 @@ export class ProfileLists {
     this.based('p:' + userId, sig);
   }
 
+  /** Список заведомо устарел (своя правка фото, сводка её не видит): следующее want перечитает. */
+  invalidate(tag: string): void { if (this.marks.has(tag)) this.marks.set(tag, '\0stale'); }
+
   /** Сводка человека сменилась (userUpdated): список пересчитать, движок перечитает его, если на него подписаны. */
   noteSummary(kind: Kind, userId: number): void { this.touched.add(kind + ':' + userId); }
 
@@ -190,6 +193,8 @@ const kindOf = (q: ListQuery): Kind => (q.kind === 'profileMusic' ? 'm' : 'p');
  */
 export class ProfileListsLoader {
   private asked = new Set<string>();
+  /** правка пришла, пока список грузился: после ответа перечитать ещё раз */
+  private redo = new Set<string>();
 
   constructor(private store: Store, private deps: {
     online: () => boolean;
@@ -199,6 +204,15 @@ export class ProfileListsLoader {
   }) {}
 
   loading(q: ListQuery): boolean { return this.store.profileLists.loading.has(kindOf(q) + ':' + q.userId); }
+
+  /** Своя правка фото (удалили не главное, загрузили, сменили главное): список перечитать, не дожидаясь сводки. */
+  refreshPhotos(userId: number): void {
+    const tag = 'p:' + userId;
+    this.store.profileLists.invalidate(tag);
+    for (const k of [...this.asked]) if (k.startsWith(tag + '|')) this.asked.delete(k);
+    if (this.store.profileLists.loading.has(tag)) { this.redo.add(tag); return; }
+    this.want({ kind: 'profilePhotos', userId });
+  }
 
   /** Новое подключение: прошлые запросы и отказы — спросим снова, если понадобится. */
   reconnect(): void { this.asked.clear(); }
@@ -230,6 +244,7 @@ export class ProfileListsLoader {
         lists.loading.delete(tag);
         lists.touched.add(tag);
         this.deps.changed();
+        if (this.redo.delete(tag)) this.refreshPhotos(userId);
       }
     });
   }
