@@ -22,23 +22,29 @@ type Range = [number, number];
 /**
  * Сообщение журнала (или подтверждение отправки) продлевает живой (последний) отрезок: всё новее него приходит
  * подряд. Внутри отрезка — ничего; старее начала живого и вне отрезков — не продлевает (непрерывность не доказана —
- * это сделает страница истории). own — своё отправленное: id мог оказаться ниже начала живого отрезка (отрезок начат
- * снимком, пока сообщение отправлялось) — тогда начало опускается до него, если не залезает на предыдущий отрезок.
+ * это сделает страница истории). own — своё отправленное: отрезок начат снимком (seed), пока сообщение
+ * отправлялось, и его id ниже начала — начало опускается до него (не залезая на предыдущий отрезок); сообщения
+ * между ним и seed догрузит страница истории перед seed (движок, ensureHistory), seed остаётся до неё.
  */
-function extendLive(ranges: Range[], sort: number, own = false): void {
-  const n = ranges.length, last = ranges[n - 1];
+function extendLive(chat: LocalChat, sort: number, own = false): void {
+  const ranges = chat.ranges, n = ranges.length, last = ranges[n - 1];
   if (!last) ranges.push([sort, sort]);
   else if (sort > last[1]) last[1] = sort;
-  else if (own && sort < last[0] && (n < 2 || sort > ranges[n - 2][1])) last[0] = sort;
+  else if (own && chat.seed != null && sort < last[0] && (n < 2 || sort > ranges[n - 2][1])) last[0] = sort;
+  if (chat.snapLast != null && ranges[ranges.length - 1][1] >= chat.snapLast) delete chat.snapLast;   // журнал его доставил
 }
 
 /**
- * Последнее сообщение чата из снимка или страницы диалогов: не доказано, что оно подряд с живым отрезком
- * (между ними могли быть сообщения), поэтому новее живого — начинает новый живой отрезок; старый остаётся.
+ * Последнее сообщение чата из снимка или страницы диалогов. Отрезков нет (первый вход, tooLong, новый чат) —
+ * с него начинается живой отрезок. Новее живого — не доказано, что подряд: страница диалогов обычно обгоняет
+ * журнал, который его вот-вот доставит. Запоминаем (snapLast); не доставит до конца догонки — дыра (settleSnapshots).
  */
-function snapshotLive(ranges: Range[], sort: number): void {
-  const last = ranges[ranges.length - 1];
-  if (!last || sort > last[1]) ranges.push([sort, sort]);   // уже внутри отрезка или старее живого — ничего
+function snapshotLive(chat: LocalChat, sort: number): boolean {
+  const last = chat.ranges[chat.ranges.length - 1];
+  if (!last) { chat.ranges.push([sort, sort]); chat.seed = sort; return true; }
+  if (sort <= last[1]) return true;
+  if (sort > (chat.snapLast ?? 0)) chat.snapLast = sort;
+  return false;   // ждёт журнала
 }
 
 /**
@@ -341,9 +347,38 @@ export class Store {
     for (const m of list) chat.knownMaxId = Math.max(chat.knownMaxId, m.id);
     let lo: number | null = null, hi: number | null = null;
     for (const m of list) { if (lo == null || m.id < lo) lo = m.id; if (hi == null || m.id > hi) hi = m.id; }
+    // страница перед seed проверяет живой отрезок вниз: не дотянулась до его начала (своё ниже seed) — проверка дальше
+    const verifyFrom = dir === 'older' && at != null && at === chat.seed ? chat.ranges[chat.ranges.length - 1]?.[0] : undefined;
     chat.ranges = addPage(chat.ranges, lo, hi, at, dir, !hasMore);
     if (!hasMore && dir === 'older') chat.historyStart = true;
+    if (verifyFrom !== undefined) { if (hasMore && lo != null && lo > verifyFrom) chat.seed = lo; else delete chat.seed; }
+    if (chat.snapLast != null && chat.ranges.some((r) => r[0] <= chat.snapLast! && chat.snapLast! <= r[1])) delete chat.snapLast;
     this.markChat(chat);
+  }
+
+  /** Чаты, где последнее из снимка ждёт журнала (snapLast), — движок берёт их в начале догонки. */
+  pendingSnapshots(): Map<number, number> {
+    const out = new Map<number, number>();
+    for (const c of this.chats.values()) if (c.snapLast != null) out.set(c.id, c.snapLast);
+    return out;
+  }
+
+  /**
+   * Догонка журнала закончилась: последнее из снимка, известное до её начала (pending), журнал так и не доставил —
+   * между живым отрезком и ним дыра (например, вернулись в группу). Оно начинает свой живой отрезок, старый остаётся.
+   */
+  settleSnapshots(pending: Map<number, number>): void {
+    for (const [id, sort] of pending) {
+      const c = this.chats.get(id);
+      if (!c || c.snapLast !== sort) continue;
+      delete c.snapLast;
+      const last = c.ranges[c.ranges.length - 1];
+      if (!last || sort > last[1]) {
+        c.ranges.push([sort, sort]); c.seed = sort;
+        if (c.last?.id === sort && !this.messages.get(id)?.has(c.last.key)) this.putMessage(c.last);   // лежало только в превью
+      }
+      this.markChat(c);
+    }
   }
 
   /** Сообщения не подряд с историей (страницы вкладок «Медиа» и т. п.): в кэш, но отрезки не трогают — лента их не покажет. */
@@ -373,8 +408,12 @@ export class Store {
     };
     unreadOnArrival(this, chat, m, countUnread);
     chat.knownMaxId = Math.max(chat.knownMaxId, m.id);
-    if (range === 'journal') extendLive(chat.ranges, m.id);
-    else if (range === 'snapshot') snapshotLive(chat.ranges, m.id);
+    if (range === 'journal') extendLive(chat, m.id);
+    else if (range === 'snapshot' && !snapshotLive(chat, m.id) && !prev) {
+      // ждёт журнала: в ленту (за живым отрезком) не кладём — только в превью чата; доставит журнал или settleSnapshots
+      onMessage(this, chat, local, 'added');
+      return;
+    }
     if (!prev || JSON.stringify(prev) !== JSON.stringify(local)) this.putMessage(local);
     this.markChat(chat);
   }
@@ -442,7 +481,7 @@ export class Store {
     const m = this.messages.get(chatId)?.get(clientId);
     if (m) this.putMessage({ ...m, id, createdAt, sort: id, status: m.status === 'read' || id <= chat.peerReadUpTo ? 'read' : 'sent' });
     chat.knownMaxId = Math.max(chat.knownMaxId, id);
-    extendLive(chat.ranges, id, true);   // неотправленные — часть живого отрезка
+    extendLive(chat, id, true);   // неотправленные — часть живого отрезка
     this.markChat(chat);
   }
 
@@ -604,7 +643,7 @@ export class Store {
       const map = this.messages.get(chatId);
       if (map) for (const [k, m] of map) if (m.id != null) { map.delete(k); }
       const c = this.chats.get(chatId)!;
-      c.unread = 0; c.knownMaxId = 0; c.ranges = []; delete c.historyStart; c.last = null;
+      c.unread = 0; c.knownMaxId = 0; c.ranges = []; delete c.historyStart; delete c.snapLast; delete c.seed; c.last = null;
       this.markChat(c);
     }
     this.lastSeq = 0;

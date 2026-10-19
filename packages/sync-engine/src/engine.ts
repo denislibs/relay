@@ -1227,6 +1227,9 @@ export class Engine {
     if (this.resetting) return;
     if (this.syncing) { this.syncAgain = true; return; }
     this.syncing = true;
+    // последнее из снимка, известное до догонки: журнал обязан его доставить, иначе — дыра (settleSnapshots)
+    const snaps = this.store.pendingSnapshots();
+    let caughtUp = false;
     try {
       do {
         this.syncAgain = false;
@@ -1264,9 +1267,11 @@ export class Engine {
           more = f.more;
         }
       } while (this.syncAgain && this.online);
+      caughtUp = this.online;
     } finally {
       this.syncing = false;
     }
+    if (caughtUp && snaps.size) { this.store.settleSnapshots(snaps); await this.store.flush(); }
     if (this.online) {
       this.ready = true;
       this.dev.counters.lastSyncAt = Date.now();
@@ -1509,6 +1514,9 @@ export class Engine {
             const att = next.attachment ? { id: next.attachment.id, thumb: next.attachment.thumb ?? null, ...(next.attachment.spoiler ? { spoiler: true } : {}) } : null;
             const r = await this.request({ op: 'send', reqId: '', clientId: next.clientId, chatId: next.chatId, body: next.body, entities: next.entities ?? [], replyToId: next.replyToId, attachment: next.forward ? null : att, ...(next.groupId ? { groupId: next.groupId } : {}), ...(next.forward ? { forward: next.forward } : {}), ...(next.noLinkPreview ? { noLinkPreview: true } : {}), ...(next.blocks ? { blocks: next.blocks } : {}), ...(next.todo ? { todo: { title: next.todo.title, items: next.todo.items.map((x) => ({ title: x.title })), othersCanAppend: next.todo.othersCanAppend, othersCanComplete: next.todo.othersCanComplete } } : {}) });
             this.store.ack(next.clientId, r.id as number, r.createdAt as string);
+            // своё опустило начало живого отрезка ниже seed — сообщения между ними догрузить (страница перед seed)
+            const c = this.store.chats.get(next.chatId), live = c?.ranges[c.ranges.length - 1];
+            if (c?.seed != null && live && live[0] < c.seed) { const id = next.chatId; this.run(() => this.ensureHistory(id, undefined, 0)); }
             this.outboxAttempt = 0;
             if (att) { this.memBlobs.delete(next.clientId); delBlob(this.db, next.clientId).catch(() => {}); }
           } catch (e) {
@@ -1634,8 +1642,11 @@ export class Engine {
       const chat = this.store.chats.get(chatId);
       if (!chat) return null;
       const span = feedSpan(chat, this.store.chatMessages(chatId), sort);
-      if (span.hi - span.lo >= limit || span.start) return null;
-      return { before: span.i >= 0 ? chat.ranges[span.i][0] : null };
+      // живой отрезок начат снимком, а своё отправленное опустило его начало ниже seed: страница перед seed
+      // догрузит сообщения между ними, сколько бы их уже ни было в окне
+      const verify = span.live && span.i >= 0 && chat.seed != null && chat.ranges[span.i][0] < chat.seed;
+      if (!verify && (span.hi - span.lo >= limit || span.start)) return null;
+      return { before: verify ? chat.seed! : span.i >= 0 ? chat.ranges[span.i][0] : null };
     });
   }
 
