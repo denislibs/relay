@@ -495,7 +495,10 @@ function ReplyQuote(props) {
       '--quote-bg': accent ? 'color-mix(in srgb, var(--brand-text) 12%, transparent)' : 'var(--peer-' + n + '-bg)',
       '--quote-bg-active': accent ? 'color-mix(in srgb, var(--brand-text) 20%, transparent)' : 'var(--peer-' + n + '-bg-active)' }, onClick: props.onClick },
     // thumbSrc — настоящая картинка (превью ссылки): слева, как в Telegram
-    props.thumbSrc ? h('span', { class: 'rl-quote-thumb rl-quote-thumb-img' }, h('img', { src: props.thumbSrc, alt: '' })) : null,
+    // thumbBg — встроенная миниатюра подложкой (размытая, видна сразу), поверх проявляется настоящее изображение
+    props.thumbSrc ? h('span', { class: 'rl-quote-thumb rl-quote-thumb-img', style: props.thumbBg ? { backgroundImage: 'url("' + String(props.thumbBg).replace(/"/g, '') + '")' } : undefined },
+      h('img', { src: props.thumbSrc, alt: '', decoding: 'async', class: props.thumbBg ? 'rl-quote-loading' : undefined,
+        onLoad: function (e) { e.currentTarget.classList.remove('rl-quote-loading'); } })) : null,
     h('span', { class: 'rl-quote-body' },
       h('b', { style: { color: 'var(--quote-tone)' } }, props.author),
       h('span', { class: 'rl-quote-text' }, props.icon ? h(Icon, { name: props.icon, size: 14 }) : null, props.text)),

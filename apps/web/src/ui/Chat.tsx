@@ -1,6 +1,7 @@
 import { hasMedia, rightForKind, type GroupInfo, type MemberRight, type MyMembership } from '@relay/protocol';
 import { MEMBER_RIGHT_TEXT } from '../groups';
 import { PinnedBar } from './PinnedBar';
+import { quoteContent } from './preview';
 import { ChatMenu } from './ChatMenu';
 import { senderAvatar } from '../profilePhoto';
 import { firstUrl, loadPreview } from '../linkUrl';
@@ -480,7 +481,7 @@ export function Chat({ chatId, frameKey, active }: { chatId: number; frameKey: s
         replyTo={editing ? { author: 'Редактирование', text: editing.original.text, tone: 'accent', icon: 'pencil' } : fwdQuote ? fwdQuote : artQuote ? artQuote : !replyTo && lp?.link && !lp.off ? {
           icon: 'link', author: lp.link.siteName || lp.link.title || lp.url, text: lp.link.description || lp.link.title || lp.url, tone: 5,
           thumbSrc: lp.link.photo ? `/files/${lp.link.photo.id}` : undefined,
-        } : replyTo ? { author: authorOf(replyTo.senderId), text: replyTo.body, tone: replyTo.senderId === me.userId ? 'accent' : peerTone(replyTo.senderId) } : null}
+        } : replyTo ? { author: authorOf(replyTo.senderId), ...quoteContent(replyTo), tone: replyTo.senderId === me.userId ? 'accent' : peerTone(replyTo.senderId) } : null}
         onCancelReply={() => {
           if (editing) { endEdit(editing.draft); return; } // правку отменили — вернуть черновик
           if (fwd) { cancelForwardDraft(chatId); return; }

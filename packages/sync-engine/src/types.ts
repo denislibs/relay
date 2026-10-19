@@ -219,3 +219,24 @@ export interface SearchHit { chatId: number; chatTitle: string | null; id: numbe
   /** для строки результата: миниатюра/тип вложения и форматирование (спойлеры не раскрываем) */
   kind?: string; attachment?: LocalAttachment | null; entities?: Entity[] | null }
 export interface SearchResult { hits: SearchHit[]; hasMore: boolean; source: 'server' | 'local' }
+
+/** Цитата в ленте: короткая копия исходного сообщения — сколько нужно, чтобы показать, что в нём
+ *  (текст с оформлением, тип, вложение для миниатюры и подписи, удалено ли, служебное, чек-лист, статья). */
+export type QuoteMsg = {
+  id: number; sort: number; body: string; senderId: number;
+  kind?: LocalMessage['kind']; deleted?: boolean; entities?: LocalMessage['entities'];
+  attachment?: Pick<LocalAttachment, 'id' | 'kind' | 'mime' | 'name' | 'thumb' | 'title' | 'performer' | 'duration'> | null;
+  service?: LocalMessage['service']; todo?: { title?: string } | null; article?: boolean;
+};
+/** Сообщение (локальное или с сервера) → цитата. */
+export function toQuote(m: { id: number | null; sort?: number; body: string; senderId: number; kind?: string; deleted?: boolean; entities?: unknown;
+  attachment?: { id: string; kind: string; mime: string; name: string; thumb?: string | null; title?: string | null; performer?: string | null; duration?: number | null } | null;
+  service?: unknown; todo?: { title?: string } | null; blocks?: unknown[] | null }): QuoteMsg {
+  const a = m.attachment;
+  return {
+    id: m.id!, sort: m.sort ?? m.id!, body: m.body, senderId: m.senderId, kind: (m.kind as QuoteMsg['kind']) ?? 'text', deleted: !!m.deleted,
+    entities: (m.entities as QuoteMsg['entities']) ?? undefined,
+    attachment: a ? { id: a.id, kind: a.kind as LocalAttachment['kind'], mime: a.mime, name: a.name, thumb: a.thumb ?? null, title: a.title ?? null, performer: a.performer ?? null, duration: a.duration ?? null } : null,
+    service: (m.service as QuoteMsg['service']) ?? undefined, todo: m.todo ? { title: m.todo.title } : null, article: !!m.blocks?.length,
+  };
+}

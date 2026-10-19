@@ -91,3 +91,24 @@ export function previewBody(m: LastMessage, withThumb: boolean): ComponentChildr
   }
   return caption ?? '';
 }
+
+/** Цитата (в пузыре и над полем ввода) для сообщения любого типа: что в нём — текстом, а у медиа — миниатюра,
+ *  как в Telegram («Фото», «Видео», «🎧 Название — исполнитель», «📎 файл.pdf», голосовое с длительностью…). */
+export function quoteContent(m: Record<string, unknown>): { text: ComponentChildren; thumbSrc?: string; thumbBg?: string } {
+  const last = asLast(m);
+  const thumb = previewThumb(last);
+  const a = (m.attachment ?? null) as { duration?: number | null } | null;
+  const len = a?.duration ? ` · ${Math.floor(a.duration / 60)}:${String(Math.round(a.duration % 60)).padStart(2, '0')}` : '';
+  let text: ComponentChildren;
+  if (last.deleted) text = 'Сообщение удалено';
+  else if (last.kind === 'voice' && !last.body) text = '🎤 Голосовое сообщение' + len;
+  else if (last.kind === 'round' && !last.body) text = 'Видеосообщение' + len;
+  else if (last.kind === 'todo') text = ['☑️ ', ((m.todo ?? null) as { title?: string } | null)?.title || last.body || 'Чек-лист'];
+  else if ((m.article || (Array.isArray(m.blocks) && m.blocks.length)) && !last.body) text = '📰 Статья';
+  else text = previewBody(last, !!thumb) || 'Сообщение';
+  if (!thumb) return { text };
+  // фото — настоящий файл (уменьшит браузер), встроенная миниатюра лишь подложкой: 24 px на 36 px выглядят мылом
+  const id = (m.attachment as { id?: string } | null)?.id;
+  if (last.kind === 'photo' && id) return { text, thumbSrc: `/files/${id}`, thumbBg: thumb.src };
+  return { text, thumbSrc: thumb.src };
+}

@@ -5,7 +5,7 @@ import { applyUserUpdated, ProfileCache } from './profile';
 import { applyContactsChanged, ContactsCache } from './contacts';
 import { SettingsCache } from './settings';
 import { applyBlocksChanged, BlocksCache } from './blocks';
-import { PENDING_BASE, type LocalChat, type LocalMessage, type OutboxEntry } from './types';
+import { PENDING_BASE, toQuote, type LocalChat, type LocalMessage, type OutboxEntry, type QuoteMsg } from './types';
 
 /** Тот же черновик: текст и оформление (порядок ключей в сущностях не важен). */
 function sameDraft(a: { text: string; entities?: Entity[] } | null | undefined, b: { text: string; entities?: Entity[] } | null | undefined): boolean {
@@ -128,7 +128,7 @@ export class Store {
   private sorted = new Map<number, LocalMessage[]>();
   private ids = new Map<number, Map<number, LocalMessage>>();
   /** Исходники цитат вне загруженной истории — отдельно, чтобы не рвать непрерывность ленты. Только в памяти. */
-  quotes = new Map<string, { id: number; sort: number; body: string; senderId: number }>();
+  quotes = new Map<string, QuoteMsg>();
   quoteFor(chatId: number, id: number) { return this.quotes.get(chatId + ':' + id); }
   /** Кто сейчас печатает: chatId → userId. Только в памяти — это состояние момента. */
   typing = new Map<number, Set<number>>();
@@ -153,7 +153,7 @@ export class Store {
     }
   }
   addQuotes(chatId: number, list: Message[]): void {
-    for (const m of list) this.quotes.set(chatId + ':' + m.id, { id: m.id, sort: m.id, body: m.body, senderId: m.senderId });
+    for (const m of list) this.quotes.set(chatId + ':' + m.id, toQuote(m as Parameters<typeof toQuote>[0]));
     this.touch(chatId);
   }
   /** Сообщение чата по серверному id (для цитат); индекс строится вместе с отсортированным кэшем. */

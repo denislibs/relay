@@ -665,8 +665,10 @@ button.rl-quote:active { background: var(--quote-bg-active, var(--pressed)); }
 .rl-quote::before { content: ""; flex-shrink: 0; width: 4px; background: var(--quote-tone); }
 .rl-quote-in { margin: 2px 0 6px; min-width: 200px; }
 .rl-quote-body { flex: 1; min-width: 0; display: flex; flex-direction: column; padding: 6px 8px 6px 0; }
-.rl-quote-body b { font: 600 13px/18px var(--font-sans); }
-.rl-quote-text { display: flex; align-items: center; gap: 4px; font: 400 13px/18px var(--font-sans); color: var(--bubble-meta); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.rl-quote-body b { font: 600 13px/18px var(--font-sans); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+/* блочный, не flex: у flex-контейнера многоточие на голом тексте не работает — значок встаёт в строку */
+.rl-quote-text { display: block; font: 400 13px/18px var(--font-sans); color: var(--bubble-meta); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.rl-quote-text > svg { display: inline-block; vertical-align: -2px; margin-right: 4px; }
 .rl-quote-thumb { width: 52px; flex-shrink: 0; }
 .rl-quote .rl-iconbtn { align-self: center; width: 32px; height: 32px; margin-right: 4px; }
 
@@ -1910,9 +1912,10 @@ html[data-blur="0"] .rl-menu { -webkit-backdrop-filter: none; backdrop-filter: n
 .rl-webpage:focus-visible { outline: 2px solid var(--lp-tone); outline-offset: 2px; }
 @keyframes rl-webpage-in { from { opacity: 0; } }
 @media (prefers-reduced-motion: reduce) { .rl-webpage { animation: none; } }
-.rl-quote-thumb-img { width: 40px; height: 40px; align-self: center; margin-left: 6px; border-radius: 6px; overflow: hidden; flex-shrink: 0; }
-.rl-quote-thumb-img img { width: 100%; height: 100%; object-fit: cover; display: block; }
-.rl-quote-thumb-img + .rl-quote-body { padding-left: 8px; }
+.rl-quote-thumb-img { width: 36px; height: 36px; align-self: center; margin-left: 2px; border-radius: 6px; overflow: hidden; flex-shrink: 0; background: center / cover no-repeat var(--hover); }
+.rl-quote-thumb-img img { width: 100%; height: 100%; object-fit: cover; display: block; transition: opacity 160ms var(--ease-out); }
+.rl-quote-thumb-img img.rl-quote-loading { opacity: 0; }
+.rl-quote-thumb-img + .rl-quote-body { padding-left: 0; }   /* хватает gap цитаты */
 /* ссылка в тексте сообщения — как в Telegram: обычный вес, цвет ссылки, подчёркивание только при наведении
    (общий .rl-link — для экранов входа: жирный с толстой чертой) */
 .rl-bubble .rl-link, .rl-msgline-out .rl-bubble .rl-link { color: var(--tick-read); font-weight: inherit; text-decoration: none; }

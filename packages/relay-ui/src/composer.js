@@ -487,12 +487,12 @@ function Composer(props) {
       { icon: 'roundVideo', label: 'Видеосообщение', onClick: function () { if (props.onRecordModeChange) props.onRecordModeChange('round'); } },
     ] }),
     h('div', { class: cx('rl-composer', rec[0] && 'rl-composer-recording', props.replyTo && 'has-reply') },
-      // ответ/редактирование — первой строкой внутри поля, как в Telegram: значок (стрелка или карандаш) цветом автора,
-      // цитата, крестик; поле плавно раздвигается по высоте
+      // ответ/редактирование — первой строкой внутри поля, как в Telegram: значок (стрелка или карандаш) и крестик — цветом
+      // акцента темы, цитата — цветом автора (или акцентом, если своё); поле плавно раздвигается по высоте
       h(Presence, { show: !!props.replyTo, exitMs: 180 }, (function () {
         // icon: 'pencil' — правка, 'forward' — пересылка (клик по цитате — её опции), иначе ответ
-        var r = reply.current || {}, n = r.tone != null ? r.tone : 5, edit = r.icon === 'pencil', fwd = r.icon === 'forward', link = r.icon === 'link';
-        return h('div', { class: cx('rl-composer-reply', fwd && 'rl-composer-reply-fwd'), style: { '--quote-tone': 'var(--peer-' + n + ')' } },
+        var r = reply.current || {}, edit = r.icon === 'pencil', fwd = r.icon === 'forward', link = r.icon === 'link';
+        return h('div', { class: cx('rl-composer-reply', fwd && 'rl-composer-reply-fwd'), style: { '--quote-tone': 'var(--brand-text)' } },
           h('span', { class: 'rl-composer-reply-icon', 'aria-hidden': 'true' }, h(Icon, { name: edit ? 'pencil' : fwd ? 'forward' : link ? 'link' : 'reply', size: 22 })),
           h(ReplyQuote, Object.assign({}, r, { icon: undefined, onCancel: undefined })),
           h(IconButton, { icon: 'close', label: edit ? 'Отменить редактирование' : fwd ? 'Отменить пересылку' : link ? 'Без превью ссылки' : 'Отменить ответ', onClick: props.onCancelReply, class: 'rl-composer-reply-x' }));

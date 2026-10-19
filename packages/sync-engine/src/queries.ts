@@ -1,5 +1,5 @@
 import type { Store } from './store';
-import type { Item, LocalChat, LocalMessage, Patch, Query } from './types';
+import { toQuote, type Item, type LocalChat, type LocalMessage, type Patch, type Query, type QuoteMsg } from './types';
 
 export interface Result {
   items: Map<string, Item>;
@@ -29,8 +29,8 @@ const chatItem = (c: LocalChat, title: string | null): Item => ({
 });
 // элемент сообщения переиспользуется, пока сообщение не изменилось: дешёвая подпись вместо JSON.stringify
 // цитата — короткая копия исходного сообщения, если оно есть в кэше (видна, даже когда оригинал вне окна)
-type Quote = { id: number; sort: number; body: string; senderId: number } | null;
-const msgSig = (m: LocalMessage, q: Quote): string => `${m.id}|${m.status}|${m.sort}|${m.replyToId}|${m.body}|${m.editedAt ?? ''}|${m.deleted ? 1 : 0}|${m.reactions?.map((r) => r.userId + r.emoji).join(',') ?? ''}|${m.attachment ? m.attachment.id + ':' + (m.progress ?? '') : ''}|${q ? q.id + ':' + q.body : ''}|${m.error ?? ''}|${m.listened ? 1 : 0}|${m.entities?.map((e) => e.type + e.offset + ':' + e.length + (e.url ?? '')).join(',') ?? ''}|${m.todo ? JSON.stringify(m.todo) : ''}|${m.service?.data ? JSON.stringify(m.service.data) : ''}`;
+type Quote = QuoteMsg | null;
+const msgSig = (m: LocalMessage, q: Quote): string => `${m.id}|${m.status}|${m.sort}|${m.replyToId}|${m.body}|${m.editedAt ?? ''}|${m.deleted ? 1 : 0}|${m.reactions?.map((r) => r.userId + r.emoji).join(',') ?? ''}|${m.attachment ? m.attachment.id + ':' + (m.progress ?? '') : ''}|${q ? q.id + ':' + q.body + ':' + (q.deleted ? 1 : 0) + ':' + (q.attachment?.thumb?.length ?? 0) + ':' + (q.entities?.length ?? 0) : ''}|${m.error ?? ''}|${m.listened ? 1 : 0}|${m.entities?.map((e) => e.type + e.offset + ':' + e.length + (e.url ?? '')).join(',') ?? ''}|${m.todo ? JSON.stringify(m.todo) : ''}|${m.service?.data ? JSON.stringify(m.service.data) : ''}`;
 const msgCache = new WeakMap<LocalMessage, { sig: string; item: Item }>();
 const messageItem = (m: LocalMessage, q: Quote): { item: Item; sig: string } => {
   const sig = msgSig(m, q);
@@ -77,7 +77,7 @@ export function computeQuery(store: Store, q: Query): Result {
         let quote: Quote = null;
         if (m.replyToId != null) {
           const r = store.messageById(q.chatId, m.replyToId);
-          quote = r ? { id: r.id!, sort: r.sort, body: r.body, senderId: r.senderId } : store.quoteFor(q.chatId, m.replyToId) ?? null;
+          quote = r ? toQuote(r) : store.quoteFor(q.chatId, m.replyToId) ?? null;
           if (!quote) missingQuotes.add(m.replyToId);
         }
         const { item, sig: g } = messageItem(m, quote);
