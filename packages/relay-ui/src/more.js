@@ -3,7 +3,8 @@ import { createPortal } from 'preact/compat';
 import { useState, useRef, useEffect, useLayoutEffect } from 'preact/hooks';
 import { requestMeasure, requestMutation, onHeavyAnimationEnd, beginHeavyAnimation, forceMeasure } from './schedule.js';
 import { TWallpaper } from 'twallpaper';
-import { cx, ripple, reducedMotion, Presence, Icon, IconButton, Avatar, Badge, Button, Checkbox, MediaArt, MessageStatus, SearchField, ICONS } from './kit.js';
+import { cx, ripple, reducedMotion, Presence, Icon, IconButton, Avatar, Badge, Button, Checkbox, MediaArt, MessageStatus, ICONS } from './kit.js';
+import { SearchInput } from './searchInput.js';
 
 /* Relay UI kit — components added in the Preact version. */
 
@@ -161,14 +162,10 @@ function SelectionBar(props) {
 function ChatSearchBar(props) {
   var total = props.total || 0;
   // busy: идёт поиск — лупа сменяется лоадером (тот же, что в поиске сайдбара)
-  return h('div', { class: cx('rl-csearch', props.busy && 'rl-search-busy'), role: 'search' },
-    h('span', { class: 'rl-search-icon rl-csearch-icon', 'aria-hidden': 'true' },
-      h(Icon, { name: 'search', size: 22 }),
-      h('svg', { class: 'rl-search-spin', width: 22, height: 22, viewBox: '0 0 18 18', fill: 'none' },
-        h('circle', { cx: 9, cy: 9, r: 7, stroke: 'currentColor', 'stroke-width': 1.8, 'stroke-linecap': 'round', 'stroke-dasharray': '30 44' }))),
-    h('label', { for: props.id || 'rl-csearch', class: 'rl-sr' }, 'Поиск по чату'),
-    h('input', { id: props.id || 'rl-csearch', type: 'search', placeholder: 'Поиск', value: props.value, autocomplete: 'off', autoFocus: true,
-      onInput: function (e) { if (props.onQuery) props.onQuery(e.target.value); },
+  return h('div', { class: 'rl-csearch', role: 'search' },
+    h(SearchInput, { id: props.id || 'rl-csearch', class: 'rl-csearch-field', variant: props.variant, iconSize: props.variant === 'plain' ? 22 : undefined,
+      label: 'Поиск по чату', placeholder: 'Поиск', value: props.value, busy: props.busy, autoFocus: true, clearable: false,
+      onChange: function (v) { if (props.onQuery) props.onQuery(v); },
       onFocus: props.onFocus,
       onKeyDown: function (e) {
         if (e.key === 'Enter') { e.preventDefault(); var f = e.shiftKey ? props.onPrev : props.onNext; if (f) f(); }
@@ -217,10 +214,8 @@ function ContactPicker(props) {
           h('span', { class: 'rl-picker-chip-av' }, h(Avatar, Object.assign({ name: name, tone: byKey[k] ? byKey[k].tone : undefined, size: 32 }, byKey[k] && byKey[k].avatar || {})), h('i', { 'aria-hidden': 'true' }, h(Icon, { name: 'close', size: 18 }))),
           h('span', { class: 'rl-picker-chip-name' }, name));
       }) : null,
-      h('div', { class: 'rl-search rl-picker-search' },
-        h('label', { for: 'rl-picker-q', class: 'rl-sr' }, props.searchLabel || 'Поиск контактов'),
-        multi ? null : h(Icon, { name: 'search', size: 18 }),
-        h('input', { id: 'rl-picker-q', type: 'search', placeholder: multi && sel[0].length ? '' : (props.placeholder || 'Имя или номер'), autocomplete: 'off', value: q[0], onKeyDown: onSearchKey, onInput: function (e) { q[1](e.target.value); } }))),
+      h(SearchInput, { id: 'rl-picker-q', class: 'rl-picker-search', variant: multi ? 'plain' : undefined, icon: !multi, label: props.searchLabel || 'Поиск контактов',
+        placeholder: multi && sel[0].length ? '' : (props.placeholder || 'Имя или номер'), value: q[0], autoFocus: props.autoFocus, onKeyDown: onSearchKey, onChange: q[1] })),
     h('div', { class: 'rl-picker-list', role: multi ? 'group' : 'list' },
       list.length ? list.map(function (c) {
         var k = keyOf(c), on = sel[0].indexOf(k) >= 0;
@@ -605,11 +600,11 @@ function buildPattern(set, stroke) {
   patternCache[cacheKey] = '"data:image/svg+xml;charset=utf-8,' + encodeURIComponent(svg) + '"';
   return patternCache[cacheKey];
 }
-/* Интенсивность узора 0…100 → прозрачность линий: светлая тема — альфа цвета (50 → 0.4), тёмная — маска (50 → 0.25:
+/* Интенсивность узора 0…100 → прозрачность линий: светлая тема — альфа цвета (50 → 0.4), тёмная — маска (50 → 0.38:
    градиент лишь проступает сквозь линии, как у Telegram; ярче — режет глаз на чёрном). */
 function intensityAlpha(intensity, dark) {
   var k = typeof intensity === 'number' && isFinite(intensity) ? Math.max(0, Math.min(100, intensity)) / 100 : 0.5;
-  return dark ? Math.min(1, k * 0.5) : Math.min(1, k * 0.8);
+  return dark ? Math.min(1, k * 0.76) : Math.min(1, k * 0.8);
 }
 var wallpapers = [];
 /* Shift every mounted wallpaper's gradient one step — call on send / receive, like Telegram. */
@@ -879,7 +874,7 @@ function SidebarHeader(props) {
     // одна кнопка: «≡» складывается в «←» (верхняя и нижняя черты поворачиваются и укорачиваются), как в Telegram
     h('button', { type: 'button', class: cx('rl-iconbtn rl-sidehead-menu', props.back && 'rl-sidehead-back'), 'aria-label': props.back ? 'Назад' : 'Меню', onPointerDown: ripple, onClick: props.back ? props.onBack : props.onMenu },
       h('span', { class: cx('rl-burger', props.back && 'is-back'), 'aria-hidden': 'true' }, h('i'), h('i'), h('i'))),
-    h(SearchField, { id: props.searchId || 'rl-side-search', placeholder: props.placeholder || 'Поиск', status: props.status, value: props.value, onInput: props.onSearch, onFocus: props.onSearchFocus, onKeyDown: props.onSearchKey, class: 'rl-sidehead-search' }),
+    h(SearchInput, { id: props.searchId || 'rl-side-search', placeholder: props.placeholder || 'Поиск', status: props.status, busy: props.searchBusy, value: props.value, onInput: props.onSearch, onFocus: props.onSearchFocus, onBlur: props.onSearchBlur, onKeyDown: props.onSearchKey, class: 'rl-sidehead-search' }),
     props.trailing !== undefined ? props.trailing : props.me ? h('button', { type: 'button', class: 'rl-sidehead-me', 'aria-label': 'Профиль', onClick: props.onMe }, h(Avatar, { name: props.me, tone: props.meTone, size: 36 })) : null);
 }
 

@@ -424,6 +424,7 @@ export function Chat({ chatId, frameKey, active }: { chatId: number; frameKey: s
           <div class={'app-findcard' + (listOpen && found ? ' app-findcard-open' : '') + (findClosing ? ' app-findcard-closing' : '')}>
             <ChatSearchBar
               id="chat-find"
+              variant="plain"
               value={findQ}
               total={found?.hits.length ?? 0}
               index={found?.at ?? 0}
@@ -477,10 +478,10 @@ export function Chat({ chatId, frameKey, active }: { chatId: number; frameKey: s
         placeholder="Сообщение"
         editing={!!editing}
         sendEmpty={!!fwdQuote || !!artQuote}
-        replyTo={editing ? { author: 'Редактирование', text: editing.original.text, tone: peerTone(me.userId), icon: 'pencil' } : fwdQuote ? fwdQuote : artQuote ? artQuote : !replyTo && lp?.link && !lp.off ? {
+        replyTo={editing ? { author: 'Редактирование', text: editing.original.text, tone: 'accent', icon: 'pencil' } : fwdQuote ? fwdQuote : artQuote ? artQuote : !replyTo && lp?.link && !lp.off ? {
           icon: 'link', author: lp.link.siteName || lp.link.title || lp.url, text: lp.link.description || lp.link.title || lp.url, tone: 5,
           thumbSrc: lp.link.photo ? `/files/${lp.link.photo.id}` : undefined,
-        } : replyTo ? { author: authorOf(replyTo.senderId), text: replyTo.body, tone: peerTone(replyTo.senderId) } : null}
+        } : replyTo ? { author: authorOf(replyTo.senderId), text: replyTo.body, tone: replyTo.senderId === me.userId ? 'accent' : peerTone(replyTo.senderId) } : null}
         onCancelReply={() => {
           if (editing) { endEdit(editing.draft); return; } // правку отменили — вернуть черновик
           if (fwd) { cancelForwardDraft(chatId); return; }

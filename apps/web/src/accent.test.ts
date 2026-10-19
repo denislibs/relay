@@ -39,6 +39,9 @@ test('peer colors are not accent; text on the accent button stays readable', () 
   expect(t['tile-green']).toBeUndefined();
   expect(['#ffffff', '#0a0a0a']).toContain(t['on-brand']);
   expect(accentTokens('violet', 'light')['on-brand']).toBe('#ffffff');   // фиолетовый тёмный — белый текст
+
+  // тёмная тема: на любом акценте текст и значок белые (как в Telegram)
+  for (const id of ['blue', 'violet', 'cyan', 'orange', 'pink', 'red']) { const d = accentTokens(id, 'dark'); expect(d['on-brand']).toBe('#ffffff'); expect(d['on-fab']).toBe('#ffffff'); }
 });
 
 test('css mirrors tokens.css selectors', () => {

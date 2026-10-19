@@ -37,7 +37,7 @@ const FIRST_PAINT = 24;   // при открытии внизу первым к�
 type Quote = { id: number; sort: number; body: string; senderId: number };
 type Att = { id: string; kind: 'photo' | 'file' | 'voice' | 'round' | 'audio'; title?: string | null; performer?: string | null; mime: string; name: string; size: number; w: number | null; h: number | null; thumb?: string | null; duration?: number | null; waveform?: string | null };
 const fileUrl = (a: Att, download = false) => `/files/${a.id}${download ? '?download=1' : ''}`;
-type RowProps = { chatId: number; voiceTitle: string; author?: string; onAuthor?: (m: Item) => void; onOpen: (m: Item) => void; hl?: string; m: Item; meId: number; out: boolean; start: boolean; end: boolean; pos?: 'single' | 'first' | 'middle' | 'last'; quoted?: Quote | null; quoteAuthor?: string; quoteTone?: number; appear: boolean; flash: boolean; onReact: (m: Item, emoji: string) => void; album?: Item[]; onUser?: (userId: number) => void; sel?: boolean; selIn?: string; onQuickForward?: (m: Item) => void; grp?: boolean };
+type RowProps = { chatId: number; voiceTitle: string; author?: string; onAuthor?: (m: Item) => void; onOpen: (m: Item) => void; hl?: string; m: Item; meId: number; out: boolean; start: boolean; end: boolean; pos?: 'single' | 'first' | 'middle' | 'last'; quoted?: Quote | null; quoteAuthor?: string; quoteTone?: number | 'accent'; appear: boolean; flash: boolean; onReact: (m: Item, emoji: string) => void; album?: Item[]; onUser?: (userId: number) => void; sel?: boolean; selIn?: string; onQuickForward?: (m: Item) => void; grp?: boolean };
 
 /** Строка ленты: перерисовывается только если изменилось её сообщение или место в группе. */
 const Row = memo(function Row({ chatId, voiceTitle, author, onAuthor, onOpen, hl, m, meId, out, start, end, pos, quoted, quoteAuthor, quoteTone, appear, flash, onReact, album, onUser, sel, selIn, onQuickForward, grp }: RowProps) {
@@ -871,7 +871,7 @@ export function Feed({ frameKey, active, chatId, meId, peerName, group, onAuthor
         end={end}
         quoted={quoted}
         quoteAuthor={quoted ? (quoted.senderId === meId ? 'Вы' : group ? names[quoted.senderId as number] ?? '' : peerName) : undefined}
-        quoteTone={quoted ? peerTone(quoted.senderId as number) : undefined}
+        quoteTone={quoted ? (quoted.senderId === meId ? 'accent' : peerTone(quoted.senderId as number)) : undefined}
         appear={initial.current !== null && !initial.current.has(m.key)}
         flash={flashKey === m.key || !!album?.some((x) => x.key === flashKey)}
         album={album}

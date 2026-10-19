@@ -116,13 +116,14 @@ export function accentTokens(id: string, theme: 'light' | 'dark'): Record<string
     const rgb = hexToRgb(valueOf(name, theme) ?? '');
     if (rgb) out[name] = rgbToHex(tintColor(rgb, base, acc, theme === 'dark'));
   }
-  // текст на акцентной кнопке: белый, если читается (контраст ≥ 3 — крупный текст и значки), иначе тёмный
+  // текст на акценте (бейджи, кнопки): в тёмной теме всегда белый, как в Telegram (чёрное на акценте там читается дырой);
+  // в светлой — белый, если читается (контраст ≥ 3 — крупный текст и значки), иначе тёмный
   const brand = hexToRgb(out.brand ?? valueOf('brand', theme) ?? '');
-  if (brand) out['on-brand'] = contrast(brand, [255, 255, 255]) >= 3 ? '#ffffff' : '#0a0a0a';
-  // то же для круглой кнопки «Новый чат»: в тёмной теме у зелёной значок тёмный (как у WhatsApp), у синей — белый
+  if (brand) out['on-brand'] = theme === 'dark' || contrast(brand, [255, 255, 255]) >= 3 ? '#ffffff' : '#0a0a0a';
+  // то же для круглой кнопки «Новый чат»: в тёмной теме значок белый
   const fab = hexToRgb(out.fab ?? valueOf('fab', theme) ?? '');
   // значок крупный (не текст) — порог мягче: белый на всех наборах, кроме ярко-зелёного по умолчанию
-  if (fab) out['on-fab'] = contrast(fab, [255, 255, 255]) >= 2.3 ? '#ffffff' : '#0a0a0a';
+  if (fab) out['on-fab'] = theme === 'dark' || contrast(fab, [255, 255, 255]) >= 2.3 ? '#ffffff' : '#0a0a0a';
   return out;
 }
 
