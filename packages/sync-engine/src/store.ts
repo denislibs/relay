@@ -1,7 +1,6 @@
 import type { GroupInfo, MyMembership } from '@relay/protocol';
-import { searchTerms } from '@relay/protocol';
 import type { Entity, Message, ProfilePhoto, Update } from '@relay/protocol';
-import { getAll, getByChat, write, type WriteBatch } from './idb';
+import { getAll, getByChat, termsOf, write, type RowPatch, type WriteBatch } from './idb';
 import { CACHE_STORES, STORES } from './schema';
 import { applyUserUpdated, ProfileCache } from './profile';
 import { applyContactsChanged, ContactsCache } from './contacts';
@@ -133,6 +132,8 @@ export class Store {
   private dirtyChats = new Set<number>();
   private dirtyMessages = new Map<string, LocalMessage>();
   private dirtyOutbox = new Set<string>();
+  /** правки строк незагруженных сообщений (удаление/правка с сервера) — применяются к IDB при записи */
+  private rowPatches: RowPatch[] = [];
   /** строки указателя слов, которые правка/ack/удаление сделали лишними (ключ IDB), до ближайшей записи */
   private staleTerms = new Map<string, [string, number, number]>();
   private dirtyReads = new Set<number>();
@@ -590,6 +591,7 @@ export class Store {
   patchMessage(chatId: number, id: number, patch: Partial<LocalMessage>): void {
     const m = this.messageById(chatId, id);
     if (m) { this.putMessage({ ...m, ...patch }); return; }
+    this.rowPatches.push({ chatId, id, patch });   // в IDB строка могла остаться — поправим при записи (с её словами)
     const chat0 = this.chats.get(chatId);
     if (chat0?.snapLast?.id === id) { chat0.snapLast = { ...chat0.snapLast, ...patch }; this.markChat(chat0); }   // ждёт журнала — правка не теряется
     // сообщение не загружено — правится только превью последнего
@@ -688,7 +690,8 @@ export class Store {
 
   async flush(): Promise<void> {
     const t0 = Date.now();
-    const batch: WriteBatch = { put: {}, del: {} };
+    const batch: WriteBatch = { put: {}, del: {}, rowPatches: this.rowPatches };
+    this.rowPatches = [];
     if (this.clearPersistedMessages) {
       // сообщения удаляются отдельной транзакцией до записи новых
       const t = (this.db as IDBDatabase).transaction(['messages', 'terms'], 'readwrite');
@@ -800,7 +803,4 @@ export class Store {
     return null;
   }
 }
-
-/** Слова сообщения для указателя: только подтверждённые и не удалённые */
-function termsOf(m: LocalMessage): string[] { return m.id != null && !m.deleted ? searchTerms(m.body) : []; }
 const termKey = (term: string, chatId: number, sort: number) => `${term}\0${chatId}\0${sort}`;

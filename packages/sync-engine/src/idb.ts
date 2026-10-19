@@ -1,4 +1,5 @@
 import { searchTerms } from '@relay/protocol';
+import { tabsOf } from './derive';
 import type { LocalMessage } from './types';
 
 import { SCHEMA_VERSION, STORES, upgrade, type StoreName } from './schema';
@@ -40,7 +41,14 @@ export function getByChat(db: IDBDatabase, chatId: number): Promise<LocalMessage
   return req(index.getAll(IDBKeyRange.bound([chatId, -Infinity], [chatId, Infinity]))) as Promise<LocalMessage[]>;
 }
 
+/** Слова сообщения для указателя: только подтверждённые и не удалённые */
+export function termsOf(m: LocalMessage): string[] { return m.id != null && !m.deleted ? searchTerms(m.body) : []; }
+
+/** Правка сохранённой строки сообщения, которого нет в памяти (sort подтверждённого = id) */
+export interface RowPatch { chatId: number; id: number; patch: Partial<LocalMessage> }
+
 export interface WriteBatch {
+  rowPatches?: RowPatch[];
   put: Partial<Record<StoreName, unknown[]>>;
   del: Partial<Record<StoreName, IDBValidKey[]>>;
 }
@@ -48,7 +56,7 @@ export interface WriteBatch {
 /** Одна транзакция на всю пачку: данные и lastSeq записываются атомарно. */
 export function write(db: IDBDatabase, batch: WriteBatch): Promise<void> {
   const dropChats = batch.del.chats ?? [];
-  const names = STORES.filter((s) => (batch.put[s]?.length ?? 0) > 0 || (batch.del[s]?.length ?? 0) > 0 || ((s === 'messages' || s === 'terms') && dropChats.length > 0));
+  const names = STORES.filter((s) => (batch.put[s]?.length ?? 0) > 0 || (batch.del[s]?.length ?? 0) > 0 || ((s === 'messages' || s === 'terms') && (dropChats.length > 0 || (batch.rowPatches?.length ?? 0) > 0)));
   if (!names.length) return Promise.resolve();
   const t = db.transaction(names, 'readwrite');
   for (const s of names) {
@@ -69,6 +77,22 @@ export function write(db: IDBDatabase, batch: WriteBatch): Promise<void> {
         c.delete(); c.continue();
       };
     }
+  }
+  // правка незагруженного сообщения: строка и её слова — вместе, той же транзакцией (иначе удалённый текст остался бы в кэше и поиске)
+  for (const { chatId, id, patch } of batch.rowPatches ?? []) {
+    const cur = t.objectStore('messages').index('byChat').openCursor(IDBKeyRange.only([chatId, id]));
+    cur.onsuccess = () => {
+      const c = cur.result;
+      if (!c) return;
+      const old = c.value as LocalMessage & { tab?: string };
+      const next = { ...old, ...patch } as LocalMessage & { tab?: string };
+      const terms = t.objectStore('terms');
+      for (const term of termsOf(old)) terms.delete([term, old.chatId, old.sort]);
+      for (const term of termsOf(next)) terms.put({ term, chatId: next.chatId, sort: next.sort, key: next.key });
+      const tab = tabsOf(next)[0];
+      if (tab) next.tab = tab; else delete next.tab;
+      c.update(next);
+    };
   }
   return new Promise((resolve, reject) => {
     t.oncomplete = () => resolve();
