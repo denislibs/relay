@@ -88,6 +88,9 @@ async function verifyProof(userId: number, proof: unknown): Promise<boolean> {
   return serverVerify(pw.verifier as string, c.b as string, c.big_b as string, proof.A, proof.M1);
 }
 
+/** Подтверждение опасного действия паролем 2FA (передача прав на группу). */
+export const checkPassword = verifyProof;
+
 async function wrongLastHour(userId: number): Promise<number> {
   const [{ n }] = await sql`select coalesce(sum(tries), 0)::int as n from login_pending where user_id = ${userId} and kind = 'password' and created_at > now() - interval '1 hour'`;
   return n;

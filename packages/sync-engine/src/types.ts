@@ -1,3 +1,4 @@
+import type { GroupInfo, MyMembership } from '@relay/protocol';
 import type { Birthday, ChatFolder, Entity, ForwardInfo, ForwardRef, LinkPreview, PrivacyKey, PrivacyMode, ProfileLink, ProfilePhoto, ServiceType } from '@relay/protocol';
 
 export type Status = 'pending' | 'sent' | 'read' | 'failed';
@@ -52,6 +53,9 @@ export interface LocalChat {
   draft?: { text: string; at: string; entities?: Entity[] } | null;   // неотправленный текст композера (общий для вкладок)
   pinned?: number[];      // закреплённые сообщения (новые сверху)
   photo?: ProfilePhoto | null;   // фото собеседника личного чата (из снимка списка и userUpdated)
+  group?: GroupInfo;      // группа: информация и настройки
+  me?: MyMembership;      // группа: моя роль и права
+  membersRev?: number;    // растёт, когда состав/роли меняются — интерфейс перечитывает участников
 }
 
 export interface OutboxEntry {
@@ -105,6 +109,8 @@ export type Patch =
       append?: boolean };
 
 export type Action =
+  /** управление группой и вступление по ссылке: HTTP мимо очереди ({ok, data} | {ok:false, code}) */
+  | { type: 'group'; method: 'GET' | 'POST' | 'PUT' | 'PATCH' | 'DELETE'; path: string; body?: unknown }
   | { type: 'sendMessage'; chatId: number; body: string; entities?: Entity[]; replyToId?: number | null; noLinkPreview?: boolean; link?: LinkPreview | null }
   | { type: 'seen'; chatId: number; upToId: number }
   | { type: 'loadOlder'; chatId: number }

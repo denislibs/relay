@@ -3,6 +3,7 @@ import { assertMember } from './chats';
 import { DomainError } from './errors';
 import { fanOut } from './journal';
 import { isServiceChat } from './service';
+import { canPin, groupCtx } from './groupRights';
 
 // Закреплённые сообщения: любой участник закрепляет и открепляет; всем участникам уходит новый список (новые сверху).
 export const PINS_MAX = 100;
@@ -21,7 +22,7 @@ async function broadcast(tx: Tx, chatId: number): Promise<number[]> {
 
 export async function pinMessage(userId: number, chatId: number, id: number): Promise<{ ids: number[] }> {
   return sql.begin(async (tx) => {
-    await assertMember(tx, chatId, userId);
+    if (!canPin(await groupCtx(tx, chatId, userId))) throw new DomainError('forbidden', 'pin');
     if (await isServiceChat(tx, chatId)) throw new DomainError('forbidden');
     const [m] = await tx`select 1 from messages where chat_id = ${chatId} and id = ${id} and not deleted and service_type is null`;
     if (!m) throw new DomainError('not_found', 'message');
@@ -35,7 +36,7 @@ export async function pinMessage(userId: number, chatId: number, id: number): Pr
 /** id = null — открепить все. */
 export async function unpinMessage(userId: number, chatId: number, id: number | null): Promise<{ ids: number[] }> {
   return sql.begin(async (tx) => {
-    await assertMember(tx, chatId, userId);
+    if (!canPin(await groupCtx(tx, chatId, userId))) throw new DomainError('forbidden', 'pin');
     const del = id == null
       ? await tx`delete from pinned_messages where chat_id = ${chatId} returning 1`
       : await tx`delete from pinned_messages where chat_id = ${chatId} and message_id = ${id} returning 1`;

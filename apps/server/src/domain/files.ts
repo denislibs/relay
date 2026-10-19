@@ -122,6 +122,7 @@ export async function fileFor(userId: number, id: string): Promise<{ id: string;
        or exists (   -- трек в чьём-то профиле: его видят все, кого владелец не заблокировал
          select 1 from profile_music p where p.attachment_id = a.id
             and not exists (select 1 from blocks b where b.owner_id = p.user_id and b.user_id = ${userId}))
+       or exists (select 1 from chat_photos cp where cp.big = a.id or cp.small = a.id)   -- фото группы: видно и в приглашении
        or exists (   -- фото профиля: как и сам профиль — всем, кого владелец не заблокировал
          select 1 from user_photos p where (p.big = a.id or p.small = a.id or p.video = a.id)
             and not exists (select 1 from blocks b where b.owner_id = p.user_id and b.user_id = ${userId})))`;

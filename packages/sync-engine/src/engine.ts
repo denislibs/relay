@@ -697,6 +697,24 @@ export class Engine {
       case 'chatMedia': return this.http<{ messages: Message[]; hasMore: boolean }>(`/chats/${a.chatId}/media?kind=${a.kind}${a.beforeId ? '&beforeId=' + a.beforeId : ''}`);
       case 'chatMediaCounts': return this.http<Record<string, number>>(`/chats/${a.chatId}/media/counts`);
       // закрепление — сразу на сервер (без сети — ошибка, интерфейс скажет); список придёт и обновлением журнала
+      case 'group': {
+        // управление группой: только /groups/... и /join/...; ответ — данные или код ошибки сервера (для текста в интерфейсе)
+        if (!/^\/(groups|join)\//.test(a.path)) return { ok: false, code: 'bad_frame' };
+        let res: Response;
+        try {
+          res = await this.dev.fetch(this.cfg.httpBase + a.path, {
+            method: a.method, credentials: 'include',
+            headers: a.body !== undefined ? { ...this.cfg.headers, 'content-type': 'application/json' } : this.cfg.headers,
+            ...(a.body !== undefined ? { body: JSON.stringify(a.body) } : {}),
+          });
+        } catch { return { ok: false, code: 'offline' }; }
+        if (this.session.unauthorized(res.status)) return { ok: false, code: 'offline' };
+        const data = await res.json().catch(() => null) as { code?: string } | null;
+        if (!res.ok) return { ok: false, code: data?.code ?? 'internal', status: res.status };
+        // изменения придут журналом; подтолкнуть синхронизацию, чтобы интерфейс увидел их сразу
+        if (a.method !== 'GET' && !this.resetting) this.runSync();
+        return { ok: true, data };
+      }
       case 'pin': case 'unpin': {
         const res = await this.http<{ ids: number[] }>(a.type === 'pin' ? `/chats/${a.chatId}/pins` : `/chats/${a.chatId}/pins${a.id != null ? '/' + a.id : ''}`,
           a.type === 'pin' ? { method: 'POST', body: JSON.stringify({ messageId: a.id }) } : { method: 'DELETE' });
