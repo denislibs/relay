@@ -1,3 +1,4 @@
+import { Wallpaper } from '@relay/ui';
 import { createContext } from 'preact';
 import { useContext, useEffect, useRef, useState } from 'preact/hooks';
 import { call, signedIn, type Step } from './api';
@@ -7,6 +8,8 @@ import { PasswordCard, RecoverCard } from './PasswordCard';
 import { PhoneCard } from './PhoneCard';
 import { QrCard } from './QrCard';
 import { SignUpCard } from './SignUpCard';
+import { useWallpaper } from '../../wallpapers';
+import { useWallpaperImage } from '../../wallpaperImage';
 
 /**
  * Вход — карточки, сменяющие друг друга (out-in: старая уходит влево и гаснет, новая приходит справа).
@@ -43,6 +46,9 @@ export function AuthFlow() {
   const [leaving, setLeaving] = useState(false);
   const [dev, setDev] = useState(false);
   const timer = useRef<ReturnType<typeof setTimeout>>();
+  // обои — как в приложении (узор и цвета этого устройства): после входа тот же фон, без смены картинки
+  const { wp, dark, key: wpKey } = useWallpaper();
+  const wpImage = useWallpaperImage(wpKey, wp.image);
 
   useEffect(() => { void call<{ dev: boolean }>('/auth/config').then((r) => { if (r.ok) setDev(r.data.dev); }); }, []);
   useEffect(() => { try { sessionStorage.setItem(KEY, JSON.stringify(card)); } catch { /* ok */ } }, [card]);
@@ -68,7 +74,10 @@ export function AuthFlow() {
 
   return (
     <FlowCtx.Provider value={flow}>
-      <div class={'auth rl-wallpaper' + (leaving ? ' auth-leaving' : '')}>
+      <div class="auth-bg" aria-hidden="true">
+        <Wallpaper pattern={wp.pattern} colors={wp.colors} blur={wp.blur} dark={dark} intensity={wp.intensity} image={wpImage} />
+      </div>
+      <div class={'auth' + (leaving ? ' auth-leaving' : '')}>
         <div class="auth-spacer" />
         <div
           key={card.name + ('attemptId' in card ? card.attemptId : '')}

@@ -384,7 +384,9 @@ html[data-anim="0"] .app-chatcol, html[data-anim="0"] .app-chatcol-below, html[d
 .app-back.app-back-inner { display: inline-flex; }
 
 /* ---------- Вход (ui/auth) ---------- */
-.auth { position: fixed; inset: 0; display: flex; flex-direction: column; align-items: center; overflow-y: auto; padding: 0 16px; background: var(--canvas); transition: opacity .26s var(--ease-out); }
+/* обои за карточками входа — отдельным слоем: карточка прокручивается, фон стоит; при входе гаснет только карточка */
+.auth-bg { position: fixed; inset: 0; z-index: 0; overflow: hidden; background: var(--canvas); }
+.auth { position: fixed; inset: 0; z-index: 1; display: flex; flex-direction: column; align-items: center; overflow-y: auto; padding: 0 16px; transition: opacity .26s var(--ease-out); }
 .auth-leaving { opacity: 0; pointer-events: none; }
 .auth-spacer { flex: 1 0 24px; }
 .auth-card { --tf-bg: var(--panel); width: 452px; max-width: 100%; box-sizing: border-box; padding: 24px 20px 20px; border-radius: 32px; background: var(--panel); box-shadow: var(--shadow-panel); }
