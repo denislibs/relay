@@ -32,7 +32,7 @@ function countUpTo(store: IDBObjectStore, range: IDBKeyRange, cap: number): Prom
  * (интерфейс дочитает с сервера или по уточнённому запросу). loaded — сообщение из памяти (оно новее строки в IDB).
  */
 export async function searchLocal(
-  db: IDBDatabase, q: string, o: { chatId?: number; beforeId?: number; limit: number },
+  db: IDBDatabase, q: string, o: { chatId?: number; beforeId?: number; limit: number; cap?: number },
   loaded: (chatId: number, key: string) => LocalMessage | undefined,
 ): Promise<{ list: LocalMessage[]; hasMore: boolean }> {
   const words = searchTerms(q);
