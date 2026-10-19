@@ -20,8 +20,10 @@ body { background: var(--bg); color: var(--ink); font-family: var(--font-sans); 
 .app-listwrap { position: relative; }
 .app-skel > div { animation: app-rise 320ms var(--ease-out) both; animation-delay: calc(var(--i) * 35ms); }
 .app-listwrap > .rl-presence[data-state="closing"] { position: absolute; inset: 0 0 auto 0; z-index: 1; pointer-events: none; }
-.app-listwrap > .rl-presence[data-state="closing"] .app-skel { animation: app-fade-out 280ms var(--ease-in) both; }
+.app-listwrap > .rl-presence[data-state="closing"] .app-skel { animation: app-fade-out 200ms var(--ease-in) both; }
 .app-listwrap > :not(.rl-presence) { animation: app-fade 320ms var(--ease-out) both; }
+/* после скелетона — с задержкой: сначала гаснет он, потом проявляется список (без наложения строк) */
+.app-listwrap.is-late > :not(.rl-presence) { animation-delay: 200ms; }
 @keyframes app-rise { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: none; } }
 @keyframes app-fade-out { to { opacity: 0; } }
 @media (prefers-reduced-motion: reduce) { .app-skel > div, .app-listwrap > * { animation-duration: 1ms !important; animation-delay: 0ms !important; } }
