@@ -80,11 +80,13 @@ export function ChatPicker(props) {
           h('span', { class: 'rl-picker-chip-name' }, c.title));
       }),
       h('div', { class: 'rl-search rl-picker-search' },
+        picked.length ? null : h(Icon, { name: 'search', size: 22, class: 'rl-chatpick-q-icon' }),
         h('label', { for: 'rl-chatpick-q', class: 'rl-sr' }, 'Поиск чатов'),
         h('input', { id: 'rl-chatpick-q', ref: searchRef, type: 'search', 'data-autofocus': '', placeholder: picked.length ? '' : 'Поиск', autocomplete: 'off', value: q[0],
           role: 'combobox', 'aria-expanded': 'true', 'aria-controls': 'rl-chatpick-list', 'aria-activedescendant': activeId,
           onKeyDown: onSearchKey, onInput: function (e) { q[1](e.target.value); } }))),
-    !needle && top.length ? h('div', { class: 'rl-chatpick-top', role: 'group', 'aria-label': 'Частые' },
+    h('div', { class: 'rl-chatpick-scroll', ref: listRef },
+    !needle && top.length ? h('div', { class: 'rl-chatpick-top rl-chatpick-island', role: 'group', 'aria-label': 'Частые' },
       top.map(function (c) {
         var on = picked.indexOf(c.id) >= 0;
         return h('button', { key: c.id, type: 'button', class: cx('rl-chatpick-topitem', on && 'rl-picker-on'), 'aria-pressed': String(on), onClick: function () { toggle(c.id); } },
@@ -92,9 +94,9 @@ export function ChatPicker(props) {
             h('span', { class: 'rl-picker-check rl-chatpick-topcheck', 'aria-hidden': 'true' }, h(Icon, { name: 'check', size: 12, strokeWidth: 3 }))),
           h('span', { class: 'rl-chatpick-topname' }, String(c.title || '').split(' ')[0]));
       })) : null,
-    folders.length > 1 ? h(FolderTabs, { class: 'rl-chatpick-folders', active: folder[0] == null ? folders[0].id : folder[0], items: folders,
-      onChange: function (id) { folder[1](id === folders[0].id ? null : id); } }) : null,
-    h('div', { class: 'rl-picker-list rl-chatpick-list', id: 'rl-chatpick-list', ref: listRef, role: 'listbox', 'aria-multiselectable': 'true', 'aria-label': 'Чаты' },
+    folders.length > 1 ? h('div', { class: 'rl-chatpick-island rl-chatpick-folders' }, h(FolderTabs, { active: folder[0] == null ? folders[0].id : folder[0], items: folders,
+      onChange: function (id) { folder[1](id === folders[0].id ? null : id); } })) : null,
+    h('div', { class: 'rl-picker-list rl-chatpick-list rl-chatpick-island', id: 'rl-chatpick-list', role: 'listbox', 'aria-multiselectable': 'true', 'aria-label': 'Чаты' },
       list.length ? list.map(function (c, i) {
         var on = picked.indexOf(c.id) >= 0;
         return h('div', { key: c.id, id: 'rl-chatpick-' + c.id, class: cx('rl-row rl-picker-row rl-chatpick-row', on && 'rl-picker-on', i === act[0] && 'rl-chatpick-active'),
@@ -102,7 +104,7 @@ export function ChatPicker(props) {
           h(Avatar, Object.assign({ name: c.title, tone: c.tone, size: 48, logo: c.logo }, c.avatar || {})),
           h('span', { class: 'rl-row-main' }, h('span', { class: 'rl-row-name' }, c.title), c.subtitle ? h('span', { class: 'rl-row-preview' }, c.subtitle) : null),
           h('span', { class: 'rl-picker-check', 'aria-hidden': 'true' }, h(Icon, { name: 'check', size: 14, strokeWidth: 3 })));
-      }) : h('div', { class: 'rl-picker-empty' }, needle ? 'Ничего не нашли по запросу «' + q[0] + '»' : 'Здесь пока нет чатов')),
+      }) : h('div', { class: 'rl-picker-empty' }, needle ? 'Ничего не нашли по запросу «' + q[0] + '»' : 'Здесь пока нет чатов'))),
     foot);
 }
 

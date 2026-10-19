@@ -2011,3 +2011,32 @@ html[data-blur="0"] .rl-menu, html[data-blur="0"] .rl-attach { -webkit-backdrop-
 .rl-composer-field { position: relative; }
 .rl-composer-expand { position: absolute; top: 2px; right: 2px; z-index: 1; width: 30px; height: 30px; opacity: 0; pointer-events: none; transform: scale(.8); transition: opacity 150ms ease, transform 150ms ease; color: var(--ink-muted); }
 .rl-composer-expand-on { opacity: 1; pointer-events: auto; transform: none; }
+
+/* ---------- «Переслать в…» как в Telegram: серая подложка, поиск-«таблетка», белые острова, кнопка поверх затухания ---------- */
+.rl-chatpick.rl-mdl-dialog { background: var(--gsearch-bg, var(--page)); }
+.rl-chatpick .rl-chatpick-head { flex-shrink: 0; margin: 2px 16px 12px; padding: 4px 6px; min-height: 48px; max-height: 9rem; border: 0; border-radius: 24px; background: var(--raised); box-shadow: 0 1px 2px rgba(0, 0, 0, .06); }
+.rl-chatpick .rl-chatpick-head .rl-picker-search { display: flex; align-items: center; gap: 10px; height: 40px; padding: 0 10px; }
+.rl-chatpick-q-icon { flex: none; color: var(--ink-muted); }
+.rl-chatpick .rl-picker-chip { height: 32px; }
+.rl-chatpick-scroll { flex: 1 1 auto; min-height: 0; overflow-y: auto; padding: 0 16px 76px; overscroll-behavior: contain;
+  /* список уходит под кнопку плавно, как в Telegram */
+  -webkit-mask-image: linear-gradient(to bottom, #000 calc(100% - 92px), transparent calc(100% - 20px)); mask-image: linear-gradient(to bottom, #000 calc(100% - 92px), transparent calc(100% - 20px)); }
+.rl-chatpick-island { margin-bottom: 12px; border-radius: 20px; background: var(--raised); box-shadow: 0 1px 2px rgba(0, 0, 0, .06); }
+.rl-chatpick .rl-chatpick-top { padding: 14px 10px 10px; gap: 2px; }
+.rl-chatpick .rl-chatpick-topitem { width: 72px; font-size: 13px; }
+.rl-chatpick .rl-chatpick-folders { margin: 0 0 12px; padding: 4px; }
+.rl-chatpick .rl-chatpick-folders .rl-folders { margin: 0; }
+.rl-chatpick .rl-chatpick-list { flex: none; overflow: visible; min-height: 0; padding: 6px; }
+.rl-chatpick .rl-chatpick-row { height: 64px; border-radius: 14px; }
+.rl-chatpick .rl-picker-empty { padding: 32px 16px; text-align: center; color: var(--ink-muted); }
+.rl-chatpick .rl-chatpick-foot { position: absolute; left: 0; right: 0; bottom: 0; padding: 0 16px 16px; border: 0; background: none; pointer-events: none; }
+.rl-chatpick .rl-chatpick-foot > * { pointer-events: auto; }
+.rl-chatpick .rl-chatpick-btn { height: 52px; border-radius: 26px; font: 600 15px/1 var(--font-sans); box-shadow: 0 2px 6px rgba(0, 0, 0, .12); }
+.rl-chatpick .rl-chatpick-btn:disabled { opacity: 1; background: color-mix(in srgb, var(--button) 45%, var(--raised)); }
+.rl-chatpick .rl-chatpick-note { height: 52px; border-radius: 26px; border: 0; padding: 0 18px; box-shadow: 0 2px 6px rgba(0, 0, 0, .12); }
+.rl-chatpick .rl-chatpick-send { width: 52px; height: 52px; box-shadow: 0 2px 6px rgba(0, 0, 0, .12); }
+.rl-chatpick .rl-mdl-body.rl-chatpick-body { position: relative; }
+/* чипы выбранных и поле — одной строкой, пока помещаются (поле сжимается до 4rem), без пустого ряда под ними */
+.rl-chatpick .rl-picker-head-multi { align-items: center; gap: 6px; padding: 4px 6px; }
+.rl-chatpick .rl-picker-head-multi .rl-picker-search { flex: 1 1 4rem; min-width: 4rem; height: 40px; }
+.rl-chatpick .rl-picker-head-multi .rl-picker-chip { margin: 0; }
