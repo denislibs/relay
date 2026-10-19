@@ -6,6 +6,8 @@ import { applyUserUpdated, ProfileCache } from './profile';
 import { applyContactsChanged, ContactsCache } from './contacts';
 import { SettingsCache } from './settings';
 import { applyBlocksChanged, BlocksCache } from './blocks';
+import { onMessage, recomputeLast, unreadAfterRead, unreadOnArrival } from './derive';
+import { nextV } from './rows';
 import { PENDING_BASE, toQuote, type LocalChat, type LocalMessage, type OutboxEntry, type QuoteMsg } from './types';
 
 /** Тот же черновик: текст и оформление (порядок ключей в сущностях не важен). */
@@ -209,7 +211,7 @@ export class Store {
   /** Чат больше не мой (вышел, удалили, группу удалили): из памяти, очереди и IndexedDB вместе с сообщениями. */
   removeChat(id: number): void {
     if (!this.chats.has(id)) return;
-    this.chats.delete(id); this.messages.delete(id); this.loaded.delete(id);
+    this.chats.delete(id); this.chatV.delete(id); this.messages.delete(id); this.loaded.delete(id);
     for (const [k, o] of this.outbox) if (o.chatId === id) { this.outbox.delete(k); this.dirtyOutbox.add(k); }
     if (this.pendingReads.delete(id)) this.dirtyReads.add(id);
     this.dirtyChats.add(id); this.touch(id);
@@ -219,7 +221,7 @@ export class Store {
   applySnapshot(list: ChatSummary[]): void {
     const keep = new Set(list.map((c) => c.id));
     for (const c of this.outbox.values()) keep.add(c.chatId);
-    for (const id of [...this.chats.keys()]) if (!keep.has(id)) { this.chats.delete(id); this.messages.delete(id); this.loaded.delete(id); this.dirtyChats.add(id); this.touch(id); } // dirty → удалится и из IDB
+    for (const id of [...this.chats.keys()]) if (!keep.has(id)) { this.chats.delete(id); this.chatV.delete(id); this.messages.delete(id); this.loaded.delete(id); this.dirtyChats.add(id); this.touch(id); } // dirty → удалится и из IDB
     this.applyChats(list);
   }
 
@@ -275,7 +277,7 @@ export class Store {
       // сервер ещё грузит превью, а у нас оно уже есть (показано в поле ввода) — не прятать его до загрузки
       ...(m.link ? { link: m.link.pending && prev?.link && !prev.link.pending && prev.link.url === m.link.url ? prev.link : m.link } : null),
     };
-    if (countUnread && !mine && m.id > chat.lastReadId && m.id > chat.knownMaxId) chat.unread++;
+    unreadOnArrival(this, chat, m, countUnread);
     chat.knownMaxId = Math.max(chat.knownMaxId, m.id);
     if (!prev || JSON.stringify(prev) !== JSON.stringify(local)) this.putMessage(local);
     this.markChat(chat);
@@ -284,7 +286,7 @@ export class Store {
   private applyOwnRead(chatId: number, upToId: number): void {
     const chat = this.ensureChat(chatId);
     if (upToId <= chat.lastReadId) return;
-    chat.unread = this.unreadAfterRead(chat, chat.lastReadId, upToId);
+    chat.unread = unreadAfterRead(this, chat, chat.lastReadId, upToId);
     chat.lastReadId = upToId;
     this.markChat(chat);
   }
@@ -296,7 +298,8 @@ export class Store {
     for (const m of this.messages.get(chatId)?.values() ?? []) {
       if (m.senderId === this.userId && m.id != null && m.id <= upToId && m.status !== 'read') this.putMessage({ ...m, status: 'read' });
     }
-    if (chat.last && chat.last.senderId === this.userId && chat.last.id != null && chat.last.id <= upToId) chat.last = { ...chat.last, status: 'read' };
+    // сообщения не загружены — прочитанность видна по chat.last
+    if (chat.last && chat.last.senderId === this.userId && chat.last.id != null && chat.last.id <= upToId && chat.last.status !== 'read') onMessage(this, chat, { ...chat.last, status: 'read' }, 'edited');
     this.markChat(chat);
   }
 
@@ -383,15 +386,11 @@ export class Store {
       this.outbox.delete(o.clientId);
       this.dirtyOutbox.add(o.clientId);
       this.dirtyMessages.delete(o.clientId);
-      const map = this.messages.get(o.chatId);
-      map?.delete(o.clientId);
+      this.messages.get(o.chatId)?.delete(o.clientId);
+      this.touch(o.chatId);
       const chat = this.chats.get(o.chatId);
-      if (chat?.last?.key === o.clientId) {
-        let last: LocalMessage | null = null;
-        for (const m of map?.values() ?? []) if (!last || m.sort > last.sort) last = m;
-        chat.last = last;
-      }
-      if (chat) this.markChat(chat); else this.touch(o.chatId);
+      if (chat?.last?.key === o.clientId) recomputeLast(this, chat);
+      if (chat) this.markChat(chat);
     }
     return ids;
   }
@@ -427,9 +426,10 @@ export class Store {
   /** Правка/удаление/реакции загруженного сообщения (и превью последнего сообщения чата). Незагруженное — придёт с историей. */
   patchMessage(chatId: number, id: number, patch: Partial<LocalMessage>): void {
     const m = this.messageById(chatId, id);
-    if (m) this.putMessage({ ...m, ...patch });
+    if (m) { this.putMessage({ ...m, ...patch }); return; }
+    // сообщение не загружено — правится только превью последнего
     const chat = this.chats.get(chatId);
-    if (chat?.last && chat.last.id === id) { chat.last = { ...chat.last, ...patch }; this.markChat(chat); }
+    if (chat?.last && chat.last.id === id) onMessage(this, chat, { ...chat.last, ...patch }, patch.deleted && !chat.last.deleted ? 'deleted' : 'edited');
   }
 
   /** Черновики, ещё не отправленные на сервер (правки этого устройства). */
@@ -462,7 +462,7 @@ export class Store {
     // «оставить неотправленное»: очередь отправки, её файлы и очередь операций переживают очистку
     const saved = keep.outbox ? [...this.outbox.values()] : [];
     for (const id of this.chats.keys()) this.touch(id);
-    this.chats.clear(); this.messages.clear(); this.loaded.clear(); this.sorted.clear(); this.ids.clear();
+    this.chats.clear(); this.chatV.clear(); this.messages.clear(); this.loaded.clear(); this.sorted.clear(); this.ids.clear();
     this.outbox.clear(); this.pendingReads.clear(); this.profile.reset(); this.contacts.reset(); this.settings.reset(); this.blocks.reset();
     this.dirtyChats.clear(); this.dirtyMessages.clear(); this.dirtyOutbox.clear(); this.dirtyReads.clear();
     this.lastSeq = this.seqAtFlush = 0;
@@ -493,7 +493,7 @@ export class Store {
   /** Страницы диалогов — заново (tooLong): чаты без неотправленного забываем, курсор в начало. */
   resetDialogs(): void {
     const keep = new Set([...this.outbox.values()].map((o) => o.chatId));
-    for (const id of [...this.chats.keys()]) if (!keep.has(id)) { this.chats.delete(id); this.messages.delete(id); this.loaded.delete(id); this.dirtyChats.add(id); this.touch(id); } // dirty → удалится и из IDB
+    for (const id of [...this.chats.keys()]) if (!keep.has(id)) { this.chats.delete(id); this.chatV.delete(id); this.messages.delete(id); this.loaded.delete(id); this.dirtyChats.add(id); this.touch(id); } // dirty → удалится и из IDB
     this.dialogsAt = 0; this.dialogsId = 0; this.dialogsDone = false;
     this.dirtyMeta = true;
     this.clearPersistedMessages = true;
@@ -580,34 +580,31 @@ export class Store {
   }
 
   private putMessage(m: LocalMessage): void {
-    this.map(m.chatId).set(m.key, m);
+    const map = this.map(m.chatId), prev = map.get(m.key);
+    map.set(m.key, m);
     this.dirtyMessages.set(m.key, m);
     const chat = this.ensureChat(m.chatId);
-    if (!chat.last || chat.last.key === m.key || m.sort >= chat.last.sort) {
-      chat.last = m;
-      if (m.createdAt > chat.lastAt) chat.lastAt = m.createdAt;
-    }
-    this.markChat(chat);
+    this.touch(m.chatId);   // отсортированная лента устарела — derive может её читать
+    onMessage(this, chat, m, !prev ? 'added' : m.deleted && !prev.deleted ? 'deleted' : 'edited');
+  }
+
+  /** Версии строк чатов (только в памяти, общий счётчик rows.nextV): подпись строки списка. */
+  private chatV = new Map<number, number>();
+  chatVersion(id: number): number {
+    let v = this.chatV.get(id);
+    if (v == null) { v = nextV(); this.chatV.set(id, v); }   // чат из IDB, ещё не менялся
+    return v;
   }
 
   markChat(c: LocalChat): void {
     this.dirtyChats.add(c.id);
+    this.chatV.set(c.id, nextV());
     this.touch(c.id);
   }
 
   /** Строка чата в подписках пересчитается (название зависит не только от самого чата). */
   retouch(chatId: number): void { this.touch(chatId); }
   private touch(chatId: number): void { this.touched.add(chatId); this.sorted.delete(chatId); this.ids.delete(chatId); }
-
-  /** Дочитали до конца — 0; иначе вычитаем известные чужие сообщения из прочитанного диапазона (from, to]. */
-  private unreadAfterRead(chat: LocalChat, from: number, to: number): number {
-    if (to >= chat.knownMaxId) return 0;
-    let n = 0;
-    for (const m of this.messages.get(chat.id)?.values() ?? []) {
-      if (m.senderId !== this.userId && m.id != null && m.id > from && m.id <= to) n++;
-    }
-    return Math.max(0, chat.unread - n);
-  }
 
   private findChatOf(clientId: string): number | null {
     for (const [chatId, map] of this.messages) if (map.has(clientId)) return chatId;

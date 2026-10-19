@@ -138,3 +138,42 @@ test('group title and photo come from chat.group', async () => {
   s.applyUpdate({ type: 'groupUpdated', chatId: 70, group: { ...(group as object), title: 'Дача 2' } as never });
   expect(computeQuery(s, { kind: 'chatList', limit: 50 }).items.get('c70')).toMatchObject({ title: 'Дача 2' });
 });
+
+test('1000 chats: one changed chat gives exactly one upsert; an unchanged base reuses every item', async () => {
+  const s = await fresh();
+  const list = Array.from({ length: 1000 }, (_, i) => ({
+    id: 1000 + i, kind: 'direct' as const, title: null, lastReadId: 0, unread: 0,
+    last: msg({ id: i + 1, chatId: 1000 + i, senderId: 3000 + i }), peer: { id: 3000 + i, name: 'U' + i },
+  }));
+  s.applySnapshot(list);
+  const q = { kind: 'chatList' as const, limit: 2000 };
+  const r1 = computeQuery(s, q);
+  expect(r1.order).toHaveLength(1000);
+  // неизменная база: ни одного нового элемента и ни одной сериализации — только подписи из версий строк
+  let best = Infinity, r2 = r1;
+  for (let k = 0; k < 3; k++) { const t0 = performance.now(); r2 = computeQuery(s, q); best = Math.min(best, performance.now() - t0); }
+  expect(diffResults(r1, r2)).toBeNull();
+  for (const k of r1.order) expect(r2.items.get(k)).toBe(r1.items.get(k)!);
+  expect(best).toBeLessThan(2);
+
+  s.applyUpdate({ type: 'readOwn', chatId: 1500, upToId: 501 });   // порядок тот же
+  s.applyUpdate({ type: 'newMessage', message: msg({ id: 5000, chatId: 1200, senderId: 3200 }) });   // c1200 наверх
+  const p = diffResults(r2, computeQuery(s, q))!;
+  expect(p.op === 'diff' && p.upsert.map((i) => i.key).sort()).toEqual(['c1200', 'c1500']);
+  const r3 = computeQuery(s, q);
+  s.setTyping(1300, 3300, true);
+  const p2 = diffResults(r3, computeQuery(s, q))!;
+  expect(p2.op === 'diff' && p2.upsert.map((i) => i.key)).toEqual(['c1300']);
+  expect(p2.op === 'diff' && p2.upsert[0].typing).toBe(true);
+});
+
+test('chat row signature: a removed and re-created chat never repeats an old signature', async () => {
+  const s = await fresh();
+  s.applyUpdate({ type: 'newMessage', message: msg({ id: 1, chatId: 10, senderId: PEER }) });
+  const r1 = computeQuery(s, { kind: 'chatList', limit: 50 });
+  s.removeChat(10);
+  s.applyUpdate({ type: 'newMessage', message: msg({ id: 1, chatId: 10, senderId: PEER, body: 'другое' }) });
+  const r2 = computeQuery(s, { kind: 'chatList', limit: 50 });
+  expect(r2.sig.get('c10')).not.toBe(r1.sig.get('c10'));
+  expect(diffResults(r1, r2)).toMatchObject({ op: 'diff', upsert: [{ key: 'c10' }] });
+});

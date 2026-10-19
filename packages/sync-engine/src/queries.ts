@@ -5,10 +5,11 @@ import { toQuote, type Item, type LocalChat, type LocalMessage, type Patch, type
 export interface Result {
   items: Map<string, Item>;
   order: string[];
-  /** стабильная сериализация каждого элемента — для дешёвого сравнения */
+  /** подпись каждого элемента — для дешёвого сравнения (строки — из версий, мелкие элементы — сериализация) */
   sig: Map<string, string>;
 }
 
+/** Мелкие служебные элементы (очередь загрузок, счётчики): подпись — сериализация, их единицы. */
 function result(list: Item[]): Result {
   const items = new Map<string, Item>(), sig = new Map<string, string>();
   for (const it of list) { items.set(it.key, it); sig.set(it.key, JSON.stringify(it)); }
@@ -19,10 +20,7 @@ function result(list: Item[]): Result {
 const sortAt = (c: LocalChat): string => (c.draft && c.draft.at > c.lastAt ? c.draft.at : c.lastAt);
 
 /** Строка списка: название и фото личного чата — из people (personView), группы — из chat.group. */
-const chatItem = (store: Store, c: LocalChat): Item => {
-  const person = !c.group && c.peerId != null ? personView(store, c.peerId) : null;
-  // профиля собеседника нет (чат узнали из сообщения, строку people вытеснили) — движок его спросит
-  if (person && c.peerId != null && !store.users.get(c.peerId)) store.wantUser(c.peerId);
+const chatItem = (store: Store, c: LocalChat, person: ReturnType<typeof personView> | null): Item => {
   const title = chatTitle(store, c);
   return {
   key: 'c' + c.id, id: c.id, kind: c.kind, title, peerId: c.peerId,
@@ -35,6 +33,20 @@ const chatItem = (store: Store, c: LocalChat): Item => {
     ...(c.last.service ? { service: c.last.service } : null) } : null,
   };
 };
+// строка списка переиспользуется, пока не изменились её входы: версия чата (всё из строки чата, включая last и
+// черновик), вид собеседника (профиль, контакт, операция в очереди) и «печатает»; JSON.stringify не нужен
+const chatCache = new WeakMap<LocalChat, { sig: string; item: Item }>();
+function chatListItem(store: Store, c: LocalChat): { item: Item; sig: string } {
+  const person = !c.group && c.peerId != null ? personView(store, c.peerId) : null;
+  // профиля собеседника нет (чат узнали из сообщения, строку people вытеснили) — движок его спросит
+  if (person && c.peerId != null && !store.users.get(c.peerId)) store.wantUser(c.peerId);
+  const typing = store.typing.has(c.id);
+  const sig = `${store.chatVersion(c.id)}|${person?.sig ?? ''}|${typing}`;
+  let hit = chatCache.get(c);
+  if (!hit || hit.sig !== sig) { hit = { sig, item: { ...chatItem(store, c, person), typing } }; chatCache.set(c, hit); }
+  return hit;
+}
+
 // элемент сообщения переиспользуется, пока сообщение не изменилось: дешёвая подпись вместо JSON.stringify
 // цитата — короткая копия исходного сообщения, если оно есть в кэше (видна, даже когда оригинал вне окна)
 type Quote = QuoteMsg | null;
@@ -71,7 +83,12 @@ export function computeQuery(store: Store, q: Query): Result {
   switch (q.kind) {
     case 'chatList': {
       const chats = [...store.chats.values()].sort((a, b) => { const x = sortAt(a), y = sortAt(b); return x < y ? 1 : x > y ? -1 : b.id - a.id; });
-      return result(chats.slice(0, q.limit).map((c) => ({ ...chatItem(store, c), typing: store.typing.has(c.id) })));
+      const items = new Map<string, Item>(), sig = new Map<string, string>(), order: string[] = [];
+      for (const c of chats.slice(0, q.limit)) {
+        const { item, sig: g } = chatListItem(store, c);
+        items.set(item.key, item); sig.set(item.key, g); order.push(item.key);
+      }
+      return { items, sig, order };
     }
     case 'messages': {
       // только окно: бинарный поиск по отсортированному кэшу, подписи — без сериализации

@@ -1,6 +1,11 @@
 /** Строка таблицы в памяти воркера: seq — номер записи журнала, на момент которой она верна (0 — неизвестно);
- *  v — счётчик изменений в этой вкладке воркера (для подписи элементов запросов, не хранится на диске). */
+ *  v — версия из общего счётчика воркера (для подписи элементов запросов, не хранится на диске). */
 export type Row<T> = T & { seq: number; v: number };
+
+// один счётчик на весь воркер: после удаления и возврата строки, load() и между таблицами v не повторяется
+let clock = 0;
+/** Следующая версия строки (таблицы, чаты): строго растёт, подписи запросов не совпадают случайно. */
+export const nextV = (): number => ++clock;
 
 /** Содержимое без seq и v: примитивы по ===, вложенные объекты/массивы по JSON. */
 function sameContent(a: object, b: object): boolean {
@@ -35,7 +40,7 @@ export class Table<K, T> {
       prev.seq = seq; // содержимое то же — только поднимаем seq, без v и flush
       return false;
     }
-    this.rows.set(k, { ...value, seq, v: (prev?.v ?? 0) + 1 });
+    this.rows.set(k, { ...value, seq, v: nextV() });
     this.dirty.add(k);
     this.removed.delete(k);
     return true;
@@ -71,6 +76,6 @@ export class Table<K, T> {
   }
 
   load(list: (T & { seq?: number })[], key: (x: T) => K): void {
-    for (const item of list) this.rows.set(key(item), { ...item, seq: item.seq ?? 0, v: 1 } as Row<T>);
+    for (const item of list) this.rows.set(key(item), { ...item, seq: item.seq ?? 0, v: nextV() } as Row<T>);
   }
 }
