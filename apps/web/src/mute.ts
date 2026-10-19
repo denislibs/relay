@@ -18,15 +18,17 @@ type Mutable = object | null | undefined;   // чат списка (Item) или
 const until = (c: Mutable): unknown => (c as { muteUntil?: unknown } | null | undefined)?.muteUntil;
 type SetMute = (chatId: number, muteUntil: number | null) => Promise<unknown>;
 
-/** Выключены ли уведомления чата сейчас. */
+/** Выключены ли уведомления чата сейчас (пока идёт перенос — и по прежнему списку устройства, чтобы значок не мигал). */
 export function isMuted(chat: Mutable, now = Date.now()): boolean {
   const u = until(chat);
-  return typeof u === 'number' && (u === 0 || u > now);
+  if (typeof u === 'number' && (u === 0 || u > now)) return true;
+  const id = (chat as { id?: unknown } | null | undefined)?.id;
+  return legacy.size > 0 && typeof id === 'number' && alive(legacy.get(id), now);
 }
 
 /** То же по id: чат ищем в списке. */
 export function isChatMuted(chatId: number, s = getGlobal()): boolean {
-  return isMuted(s.chats.find((c) => c.id === chatId));
+  return isMuted(s.chats.find((c) => c.id === chatId) ?? { id: chatId });
 }
 
 /** Ближайший будущий срок (навсегда и истёкшие не в счёт); null — ждать нечего. */
@@ -36,6 +38,7 @@ export function nextExpiry(chats: readonly Mutable[], now = Date.now()): number 
     const u = until(c);
     if (typeof u === 'number' && u > now && (min === null || u < min)) min = u;
   }
+  for (const t of legacy.values()) if (t > now && (min === null || t < min)) min = t;
   return min;
 }
 
@@ -45,8 +48,9 @@ export function bindMute(fn: SetMute): void { setMute = fn; }
 const send = (chatId: number, muteUntil: number | null) => { setMute(chatId, muteUntil).catch((e) => console.warn('mute:', String(e))); };
 
 /** Выключить на seconds секунд (null — навсегда). */
-export function muteChat(chatId: number, seconds: number | null): void { send(chatId, seconds ? Date.now() + seconds * 1000 : 0); }
-export function unmuteChat(chatId: number): void { send(chatId, null); }
+// явный выбор пользователя важнее прежнего списка: его запись больше не переносим
+export function muteChat(chatId: number, seconds: number | null): void { dropLegacy(chatId); send(chatId, seconds ? Date.now() + seconds * 1000 : 0); }
+export function unmuteChat(chatId: number): void { dropLegacy(chatId); send(chatId, null); }
 /** Переключатель: выключенный — включить, иначе выключить навсегда. */
 export function toggleMute(chatId: number): void { if (isChatMuted(chatId)) unmuteChat(chatId); else muteChat(chatId, null); }
 
@@ -71,27 +75,73 @@ export function startMuteTimers(): void {
 
 const MUTED_KEY = 'relay.muted', UNTIL_KEY = 'relay.mutedUntil';
 const parse = (kv: KV, k: string): unknown => { try { return JSON.parse(kv.getItem(k) ?? 'null'); } catch { return null; } };
+const alive = (t: number | undefined, now: number) => t !== undefined && (t === 0 || t > now);
 
-/**
- * Разовый перенос: раньше выключенные чаты жили в localStorage этого устройства (relay.muted + сроки relay.mutedUntil).
- * Каждый — в setMute (срок в будущем — он, без срока — навсегда, истёкшие — пропускаем), потом ключи удаляем.
- * Отказ движка — ключи остаются до следующего старта (повтор того же setMute безвреден).
- */
-export async function migrateLocalMutes(set: SetMute = setMute, store?: KV, now = Date.now()): Promise<void> {
+// Прежний список устройства (relay.muted + сроки relay.mutedUntil): id → до (0 — навсегда). Живёт, пока не перенесён.
+let legacy = new Map<number, number>();
+let legacyKv: KV | null = null;
+
+/** Прочитать прежние ключи (до первого кадра — значки сразу верные). Истёкшие не берём. */
+export function loadLegacyMutes(store?: KV, now = Date.now()): void {
+  legacy = new Map(); legacyKv = null;
   let kv: KV, ids: unknown, at: unknown;
   try {
     kv = store ?? localStorage;
     if (kv.getItem(MUTED_KEY) === null && kv.getItem(UNTIL_KEY) === null) return;
     ids = parse(kv, MUTED_KEY); at = parse(kv, UNTIL_KEY);
   } catch { return; }   // приватный режим
+  legacyKv = kv;
   const u = at && typeof at === 'object' && !Array.isArray(at) ? at as Record<string, unknown> : {};
-  const todo: [number, number][] = [];
   for (const id of Array.isArray(ids) ? ids : []) {
     if (!Number.isInteger(id)) continue;
     const t = u[id];
-    if (typeof t === 'number' && t > 0) { if (t > now) todo.push([id, t]); }
-    else todo.push([id, 0]);
+    if (typeof t === 'number' && t > 0) { if (t > now) legacy.set(id, t); }
+    else legacy.set(id, 0);
   }
-  try { await Promise.all(todo.map(([id, t]) => set(id, t))); } catch (e) { console.warn('mute migration:', String(e)); return; }
-  try { kv.removeItem(MUTED_KEY); kv.removeItem(UNTIL_KEY); } catch { /* ok */ }
+}
+
+function dropLegacy(chatId: number): void { if (legacy.delete(chatId)) saveLegacy(); }
+
+/** Остаток — обратно в ключи; пусто — ключи удаляем, перенос окончен. */
+function saveLegacy(): void {
+  if (!legacyKv) return;
+  try {
+    if (!legacy.size) { legacyKv.removeItem(MUTED_KEY); legacyKv.removeItem(UNTIL_KEY); legacyKv = null; return; }
+    legacyKv.setItem(MUTED_KEY, JSON.stringify([...legacy.keys()]));
+    legacyKv.setItem(UNTIL_KEY, JSON.stringify(Object.fromEntries([...legacy].filter(([, t]) => t > 0))));
+  } catch { /* ok */ }
+}
+
+/**
+ * Шаг разового переноса в setMute. Ждём первой синхронизации: тогда список чатов — этого аккаунта
+ * (ключи были общими для устройства, чужие id сервер отверг бы тостом). Шлём только чаты из списка;
+ * которых нет — ждут, пока список не догрузится целиком (chatsComplete), тогда они чужие — молча выбрасываем.
+ * Ждать полный список для всех нельзя: страницы диалогов грузятся докруткой, а старые выключенные чаты обычно глубоко.
+ * Отказ движка — запись остаётся до следующей попытки (повтор того же setMute безвреден). true — перенос окончен.
+ */
+export async function migrateLegacyMutes(s = getGlobal(), set: SetMute = setMute, now = Date.now()): Promise<boolean> {
+  if (!legacyKv) return true;
+  if (!s.chatsLoaded || !s.status.synced) return false;
+  const known = new Set(s.chats.map((c) => c.id));
+  const todo = [...legacy].filter(([id, t]) => known.has(id) && alive(t, now));
+  try { await Promise.all(todo.map(([id, t]) => set(id, t))); } catch (e) { console.warn('mute migration:', String(e)); return false; }
+  for (const [id] of todo) legacy.delete(id);
+  for (const [id, t] of [...legacy]) if (!alive(t, now) || s.status.chatsComplete) legacy.delete(id);
+  saveLegacy();
+  return !legacyKv;
+}
+
+/** Старт: прочитать прежние ключи и переносить по мере готовности списка чатов. */
+export function startMuteMigration(): void {
+  loadLegacyMutes();
+  if (!legacyKv) return;
+  let busy = false, last: unknown[] = [];
+  const step = () => {
+    const g = getGlobal(), key = [g.chats, g.chatsLoaded, g.status.synced, g.status.chatsComplete];
+    if (busy || key.every((v, i) => v === last[i])) return;
+    busy = true; last = key;
+    void migrateLegacyMutes().then((done) => { busy = false; if (done) off(); else step(); });
+  };
+  const off = subscribeGlobal(step);
+  step();
 }

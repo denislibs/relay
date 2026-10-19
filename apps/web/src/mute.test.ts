@@ -1,6 +1,6 @@
 import { expect, test } from 'bun:test';
 import { getGlobal, setGlobal } from './global';
-import { bindMute, isMuted, migrateLocalMutes, muteChat, nextExpiry, startMuteTimers, unmuteChat } from './mute';
+import { bindMute, isMuted, loadLegacyMutes, migrateLegacyMutes, muteChat, nextExpiry, startMuteTimers, unmuteChat } from './mute';
 import type { KV } from './prefs';
 
 const fake = (init: Record<string, string> = {}): KV & { m: Record<string, string> } => {
@@ -24,26 +24,68 @@ test('nextExpiry: nearest future deadline; forever and expired do not count', ()
   expect(nextExpiry([{ muteUntil: NOW + 50 }, { muteUntil: 0 }, { muteUntil: NOW + 10 }], NOW)).toBe(NOW + 10);
 });
 
-test('migration: old keys become setMute calls (forever / future until), expired skipped, keys removed', async () => {
-  const kv = fake({ 'relay.muted': JSON.stringify([1, 2, 3]), 'relay.mutedUntil': JSON.stringify({ 2: NOW + 3600_000, 3: NOW - 1 }) });
-  const calls: [number, number | null][] = [];
-  await migrateLocalMutes(async (id, until) => { calls.push([id, until]); }, kv, NOW);
-  expect(calls).toEqual([[1, 0], [2, NOW + 3600_000]]);
+type S = ReturnType<typeof getGlobal>;
+const state = (ids: number[], status: Partial<S['status']> = {}): S => ({ ...getGlobal(), chatsLoaded: true, chats: ids.map((id) => ({ key: 'c' + id, id })), status: { ...getGlobal().status, synced: true, ...status } });
+const rec = () => { const calls: [number, number | null][] = []; return { calls, set: async (id: number, until: number | null) => { calls.push([id, until]); } }; };
+
+test('migration waits for the first sync and the chat list', async () => {
+  const kv = fake({ 'relay.muted': '[1]' });
+  loadLegacyMutes(kv, NOW);
+  const r = rec();
+  expect(await migrateLegacyMutes({ ...state([1]), chatsLoaded: false }, r.set, NOW)).toBe(false);
+  expect(await migrateLegacyMutes(state([1], { synced: false }), r.set, NOW)).toBe(false);
+  expect(r.calls).toEqual([]);
+  expect(kv.m['relay.muted']).toBe('[1]');
+  expect(await migrateLegacyMutes(state([1]), r.set, NOW)).toBe(true);
+  expect(r.calls).toEqual([[1, 0]]);
   expect(kv.m).toEqual({});
-  // повтор — ничего не шлёт
-  await migrateLocalMutes(async (id, until) => { calls.push([id, until]); }, kv, NOW);
-  expect(calls.length).toBe(2);
 });
 
-test('migration: a failed call keeps the keys for the next start; broken JSON is just dropped', async () => {
+test('migration: only this account\'s chats are sent (forever / future until), expired skipped; foreign ids dropped once the list is complete', async () => {
+  const kv = fake({ 'relay.muted': JSON.stringify([1, 2, 3, 99]), 'relay.mutedUntil': JSON.stringify({ 2: NOW + 3600_000, 3: NOW - 1 }) });
+  loadLegacyMutes(kv, NOW);
+  const r = rec();
+  // список не полный: 99 может быть глубже — не шлём, но и не выбрасываем
+  expect(await migrateLegacyMutes(state([1, 2, 3]), r.set, NOW)).toBe(false);
+  expect(r.calls).toEqual([[1, 0], [2, NOW + 3600_000]]);
+  expect(JSON.parse(kv.m['relay.muted'])).toEqual([99]);
+  // список полный — 99 чужой: молча выбрасываем, ключи удалены
+  expect(await migrateLegacyMutes(state([1, 2, 3], { chatsComplete: true }), r.set, NOW)).toBe(true);
+  expect(r.calls.length).toBe(2);
+  expect(kv.m).toEqual({});
+  // повтор — ничего не шлёт
+  expect(await migrateLegacyMutes(state([1, 2, 3, 99], { chatsComplete: true }), r.set, NOW)).toBe(true);
+  expect(r.calls.length).toBe(2);
+});
+
+test('migration: a failed call keeps the keys; broken JSON is just dropped', async () => {
   const kv = fake({ 'relay.muted': JSON.stringify([7]) });
-  await migrateLocalMutes(async () => { throw new Error('engine down'); }, kv, NOW);
+  loadLegacyMutes(kv, NOW);
+  expect(await migrateLegacyMutes(state([7]), async () => { throw new Error('engine down'); }, NOW)).toBe(false);
   expect(kv.m['relay.muted']).toBe('[7]');
   const bad = fake({ 'relay.muted': '{oops', 'relay.mutedUntil': '[' });
-  const calls: number[] = [];
-  await migrateLocalMutes(async (id) => { calls.push(id); }, bad, NOW);
-  expect(calls).toEqual([]);
+  loadLegacyMutes(bad, NOW);
+  const r = rec();
+  expect(await migrateLegacyMutes(state([7], { chatsComplete: true }), r.set, NOW)).toBe(true);
+  expect(r.calls).toEqual([]);
   expect(bad.m).toEqual({});
+});
+
+test('until migrated, the old device list keeps the bell muted (no flicker); a user choice overrides it', () => {
+  const kv = fake({ 'relay.muted': JSON.stringify([4, 5, 6]), 'relay.mutedUntil': JSON.stringify({ 5: NOW + 10, 6: NOW - 10 }) });
+  loadLegacyMutes(kv, NOW);
+  expect(isMuted({ id: 4, muteUntil: null }, NOW)).toBe(true);
+  expect(isMuted({ id: 5 }, NOW)).toBe(true);
+  expect(isMuted({ id: 5 }, NOW + 11)).toBe(false);
+  expect(isMuted({ id: 6 }, NOW)).toBe(false);
+  expect(isMuted({ id: 8 }, NOW)).toBe(false);
+  expect(nextExpiry([], NOW)).toBe(NOW + 10);
+  bindMute(async () => {});
+  unmuteChat(4);
+  expect(isMuted({ id: 4 }, NOW)).toBe(false);
+  expect(JSON.parse(kv.m['relay.muted'])).toEqual([5]);
+  loadLegacyMutes(fake(), NOW);   // убрать прежний список для следующих тестов
+  expect(isMuted({ id: 5 }, NOW)).toBe(false);
 });
 
 test('muteChat / unmuteChat go to setMute', () => {

@@ -10,7 +10,7 @@ import { hideSpoilers, MAX_FILE_BYTES, type Entity } from '@relay/protocol';
 import { activeFrame, frameByKey, getGlobal, setGlobal, type ChatFrame, type FeedMeta, type Me, type Status, type UploadItem } from './global';
 import { bindChatDepth, popChats, pushChat } from './nav';
 import { notifyIncoming, startNotify } from './notify';
-import { bindMute, isMuted, migrateLocalMutes } from './mute';
+import { bindMute, isMuted, startMuteMigration } from './mute';
 import { startPeople, wantPeople } from './people';
 import { isSystemChat } from './ui/format';
 import { asset } from './assets';
@@ -43,7 +43,7 @@ export function startData(me: Me): void {
   engine.onReload(() => location.reload());
   startPeople(engine);
   bindMute((chatId, muteUntil) => engine.call({ type: 'setMute', chatId, muteUntil }));
-  void engine.ready.then(() => migrateLocalMutes());   // прежние relay.muted / relay.mutedUntil — на сервер, один раз
+  startMuteMigration();   // прежние relay.muted / relay.mutedUntil — на сервер, один раз (до первого снимка: значки не мигают)
   try { localStorage.removeItem('relay.names'); } catch { /* приватный режим */ }   // прежний кэш имён — теперь их держит движок
 
   const chats = new Mirror();

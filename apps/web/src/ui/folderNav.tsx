@@ -34,7 +34,7 @@ export function useFolderPlace(): 'none' | 'top' | 'left' {
   return n === 0 ? 'none' : pos === 'left' && wide ? 'left' : 'top';
 }
 
-/** Контекст фильтра: контакты и заглушённые (на устройстве или умолчанием аккаунта для вида чата). */
+/** Контекст фильтра: контакты и заглушённые (muteUntil чата на аккаунте или умолчание аккаунта для вида чата). */
 export function useFolderCtx(): FolderCtx {
   const contacts = useGlobal((s) => s.contacts);
   const tick = useGlobal((s) => s.muteTick);   // истёк срок — пересчитать
