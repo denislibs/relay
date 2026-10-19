@@ -68,6 +68,30 @@ test('login codes are never indexed; file names are', async () => {
   expect(await searchIds('отчёт', [ab], { limit: 10 })).toEqual([Number(file.id)]);
 });
 
+test('attachments: track title and performer are indexed beside the file name; reindex and searchMessages find them', async () => {
+  const a = await makeUser('a'), b = await makeUser('b');
+  const ab = await makeChat([a, b]);
+  const file = async (meta: { name: string; mime: string; kind: string; title?: string; performer?: string }) => {
+    const [att] = await sql`insert into attachments (owner_id, mime, name, size, kind, title, performer, status)
+      values (${b}, ${meta.mime}, ${meta.name}, 1, ${meta.kind}, ${meta.title ?? null}, ${meta.performer ?? null}, 'ready') returning id`;
+    return (await sendMessage(b, { chatId: ab, clientId: crypto.randomUUID(), body: '', attachment: { id: att.id as string } })).message;
+  };
+  const song = await file({ name: 'track01.mp3', mime: 'audio/mpeg', kind: 'audio', title: 'Офисный планктон', performer: 'Ария' });
+  const pdf = await file({ name: 'договор аренды.pdf', mime: 'application/pdf', kind: 'file' });
+  await syncMessage(song.id);
+  await syncMessage(pdf.id);
+  expect(await searchIds('планктон', [ab], { limit: 10 })).toEqual([song.id]);
+  expect(await searchIds('ария', [ab], { limit: 10 })).toEqual([song.id]);
+  expect(await searchIds('track01', [ab], { limit: 10 })).toEqual([song.id]);
+  expect(await searchIds('договор', [ab], { limit: 10 })).toEqual([pdf.id]);
+
+  await reindexAll();                                       // перестройка тоже переносит теги
+  expect(await searchReady()).toBe(true);
+  expect((await searchMessages(a, 'планктон')).hits.map((h) => h.message.id)).toEqual([song.id]);
+  expect((await searchMessages(a, 'планктон', { chatId: ab })).hits.map((h) => h.message.id)).toEqual([song.id]);
+  expect((await searchMessages(a, 'аренды', { chatId: ab })).hits.map((h) => h.message.id)).toEqual([pdf.id]);
+});
+
 test('reindex builds a fresh index beside the live one, swaps it in and marks the index ready', async () => {
   const a = await makeUser('a'), b = await makeUser('b');
   const ab = await makeChat([a, b]);

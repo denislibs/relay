@@ -14,6 +14,7 @@ import {
   subscribeRecent, topChats, type MediaHit, type PersonHit, type SearchTab,
 } from '../../search';
 import { chatTime, chatTone, fileSize, isSystemChat, shownBody, snippet } from '../format';
+import { attachmentHit } from '../../searchHit';
 import { dur, extTone, fileUrl, MediaCell, type Msg, when } from '../SharedMedia';
 
 // Глобальный поиск — содержимое левой колонки в режиме поиска (как в Telegram Web): вкладки сверху,
@@ -229,7 +230,7 @@ function MessageResults({ q, empty }: { q: string; empty: boolean }) {
             <Avatar name={title} tone={chat ? chatTone(chat) : peerTone(h.chatId)} size={48} logo={chat ? isSystemChat(chat) : false} {...(chat ? chatPhoto(chat) : {})} />
             <span class="rl-row-main">
               <span class="app-gsearch-line"><span class="rl-row-name">{title}</span><span class="rl-row-time">{chatTime(h.createdAt)}</span></span>
-              <span class="rl-row-preview">{who ? <span class="rl-row-author">{who}: </span> : null}<Highlight text={snippet(shownBody(h), q)} query={q} /></span>
+              <span class="rl-row-preview">{who ? <span class="rl-row-author">{who}: </span> : null}<Highlight text={attachmentHit(shownBody(h), h.attachment, q) ?? snippet(shownBody(h), q)} query={q} /></span>
             </span>
           </button>
         );

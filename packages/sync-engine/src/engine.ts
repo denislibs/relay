@@ -13,7 +13,7 @@ import { OP_SESSIONS_TTL, Sessions } from './sessions';
 import { SessionEnd } from './session';
 import { DevTools, loadSim, type SimState, type SubStat } from './devlog';
 import { simFlags, watchLoss } from './devsim';
-import type { Action, EngineConfig, LocalMessage, OutboxEntry, Patch, Query, SearchResult } from './types';
+import type { Action, EngineConfig, LocalAttachment, LocalMessage, OutboxEntry, Patch, Query, SearchResult } from './types';
 
 export interface WatchHandle { update(q: Query): void; close(): void }
 
@@ -34,6 +34,12 @@ function patchedChats(items: JournalEntry[], after: number): Set<number> {
     if (seq > after && (u.type === 'messageEdited' || u.type === 'messageDeleted' || u.type === 'reactions' || u.type === 'mediaListened')) out.add(u.chatId);
   }
   return out;
+}
+
+/** Вложение подходит под запрос поиска: имя файла, название или исполнитель трека — как на сервере. needle — в нижнем регистре. */
+function attachmentHas(a: LocalAttachment | null | undefined, needle: string): boolean {
+  const has = (v: string | null | undefined) => !!v && v.toLowerCase().includes(needle);
+  return !!a && (has(a.name) || has(a.title) || has(a.performer));
 }
 
 export class Engine {
@@ -464,7 +470,7 @@ export class Engine {
     const needle = a.q.trim().toLowerCase();
     const all = a.chatId ? await getByChat(this.db, a.chatId) : await getAll<LocalMessage>(this.db, 'messages');
     const found = all
-      .filter((m) => m.id != null && !m.deleted && (!a.beforeId || m.id < a.beforeId) && m.body.toLowerCase().includes(needle))
+      .filter((m) => m.id != null && !m.deleted && (!a.beforeId || m.id < a.beforeId) && (m.body.toLowerCase().includes(needle) || attachmentHas(m.attachment, needle)))
       .sort((x, y) => y.sort - x.sort);
     return {
       hits: found.slice(0, limit).map((m) => ({ chatId: m.chatId, chatTitle: this.store.chats.get(m.chatId)?.title ?? null, id: m.id!, sort: m.sort, senderId: m.senderId, body: m.body, createdAt: m.createdAt, kind: m.kind, attachment: (m.attachment as never) ?? null, entities: m.entities ?? null, ...(m.service ? { service: m.service } : {}) })),
