@@ -41,7 +41,7 @@ function place(el, p) {
   top = Math.max(MARGIN + hh, Math.min(top, vh - ht - MARGIN));
   el.style.left = Math.round(left) + 'px';
   el.style.top = Math.round(top) + 'px';
-  el.style.transformOrigin = ox + ' ' + oy;
+  card.style.transformOrigin = ox + ' ' + oy;   // анимация — на карточке (см. relay.css)
 }
 
 /**

@@ -233,6 +233,7 @@ export function Sidebar() {
                   </button>
                 }
                 items={[
+                  '-',   // под профилем — разделитель, как в Telegram
                   { icon: 'account', label: 'Мой профиль', onClick: () => { setMenu(null); void go('settings'); } },
                   { icon: 'contact', label: 'Контакты', onClick: () => { setMenu(null); void go('contacts'); } },
                   { icon: 'settings', label: 'Настройки', onClick: () => { setMenu(null); void go('settings'); } },

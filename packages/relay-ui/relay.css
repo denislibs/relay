@@ -1063,10 +1063,13 @@ button.rl-tab:hover { color: var(--ink); }
    исчезание 200 мс ease-in обратно в тот же угол (как в Telegram Web A) */
 .rl-pop-root { display: contents; }
 .rl-pop-scrim { position: fixed; inset: 0; z-index: 1500; }
-.rl-pop { position: fixed; z-index: 1501; left: 0; top: 0; transform-origin: top left; animation: rl-menu-in 150ms cubic-bezier(.2, 0, .2, 1) both; }
-.rl-pop[data-state="closing"] { animation: rl-menu-out 200ms ease-in forwards; pointer-events: none; }
+.rl-pop { position: fixed; z-index: 1501; left: 0; top: 0; }
+.rl-pop[data-state="closing"] { pointer-events: none; }
+/* анимация — на самой карточке, не на обёртке: в Chrome предок с анимацией прозрачности отрезает backdrop-filter
+   у потомков (размытие пропадает, список просвечивает) */
+.rl-pop > .rl-menu { position: relative; min-width: 13.5rem; animation: rl-menu-in 150ms cubic-bezier(.2, 0, .2, 1) both; }
+.rl-pop[data-state="closing"] > .rl-menu, .rl-pop[data-state="closing"] > .rl-pop-header { animation: rl-menu-out 200ms ease-in forwards; }
 @keyframes rl-menu-out { from { opacity: 1; transform: none; } to { opacity: 0; transform: scale(0.85); } }
-.rl-pop > .rl-menu { position: relative; animation: none; min-width: 13.5rem; }
 .rl-pop-header { position: absolute; left: 0; bottom: calc(100% + 8px); }
 .rl-pop .rl-rpick { padding: 4px 6px; background: color-mix(in srgb, var(--raised) 92%, transparent); -webkit-backdrop-filter: blur(18px); backdrop-filter: blur(18px); }
 .rl-pop .rl-rpick-btn { width: 38px; height: 38px; font-size: 26px; }
