@@ -179,6 +179,8 @@ export function computeQuery(store: Store, q: Query, mute: Map<number, number | 
     case 'blocked':
     case 'members':
     case 'media':
+    case 'profileMusic':
+    case 'profilePhotos':
     case 'devStats':
     case 'devLog':
       throw new Error(q.kind + ' is computed by the engine');
@@ -188,7 +190,7 @@ export function computeQuery(store: Store, q: Query, mute: Map<number, number | 
 /** Задевает ли изменение этих чатов результат подписки. */
 export function affects(q: Query, touched: Set<number>): boolean {
   if (!touched.size) return false;
-  if (q.kind === 'status' || q.kind === 'me' || q.kind === 'user' || q.kind === 'people' || q.kind === 'ops' || q.kind === 'contacts' || q.kind === 'settings' || q.kind === 'blocked' || q.kind === 'members' || q.kind === 'devStats' || q.kind === 'devLog') return false;   // у них свои флаги в движке
+  if (q.kind === 'status' || q.kind === 'me' || q.kind === 'user' || q.kind === 'people' || q.kind === 'ops' || q.kind === 'contacts' || q.kind === 'settings' || q.kind === 'blocked' || q.kind === 'members' || q.kind === 'profileMusic' || q.kind === 'profilePhotos' || q.kind === 'devStats' || q.kind === 'devLog') return false;   // у них свои флаги в движке
   return q.kind === 'messages' || q.kind === 'media' ? touched.has(q.chatId) : true;
 }
 

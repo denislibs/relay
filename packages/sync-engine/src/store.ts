@@ -7,6 +7,7 @@ import { applyContactsChanged, ContactsCache } from './contacts';
 import { SettingsCache } from './settings';
 import { applyBlocksChanged, BlocksCache } from './blocks';
 import { applyMembersUpdate, MembersCache } from './members';
+import { ProfileLists } from './profileLists';
 import { onMessage, recomputeLast, tabsOf, unreadAfterRead, unreadOnArrival } from './derive';
 import { nextV } from './rows';
 import { PENDING_BASE, toQuote, type LocalChat, type LocalMessage, type OutboxEntry, type QuoteMsg } from './types';
@@ -119,6 +120,8 @@ export class Store {
   blocks!: BlocksCache;
   /** участники групп (members.ts) */
   members!: MembersCache;
+  /** музыка и фото профиля (profileLists.ts) */
+  profileLists!: ProfileLists;
   /** строке списка нужен профиль собеседника, которого нет в people; движок спросит GET /users/:id */
   wantUser: (userId: number) => void = () => {};
   /** контакт зрителя с учётом очереди операций (names.ts); движок подставляет вид с очередью */
@@ -160,6 +163,7 @@ export class Store {
     s.settings = SettingsCache.load(meta as { k: string; v: unknown }[]);
     s.blocks = await BlocksCache.load(db, meta as { k: string; v: unknown }[]);
     s.members = await MembersCache.load(db);
+    s.profileLists = await ProfileLists.load(db, meta as { k: string; v: unknown }[]);
     // чаты с неотправленным — сразу в память, чтобы черновики были видны
     for (const chatId of new Set(outbox.map((o) => o.chatId))) await s.loadChatMessages(chatId);
     return s;
@@ -624,7 +628,7 @@ export class Store {
     this.resetGen++;
     for (const id of this.chats.keys()) this.touch(id);
     this.chats.clear(); this.chatV.clear(); this.messages.clear(); this.loaded.clear(); this.sorted.clear(); this.ids.clear();
-    this.outbox.clear(); this.pendingReads.clear(); this.profile.reset(); this.contacts.reset(); this.settings.reset(); this.blocks.reset(); this.members.reset();
+    this.outbox.clear(); this.pendingReads.clear(); this.profile.reset(); this.contacts.reset(); this.settings.reset(); this.blocks.reset(); this.members.reset(); this.profileLists.reset();
     this.dirtyChats.clear(); this.dirtyMessages.clear(); this.dirtyOutbox.clear(); this.dirtyReads.clear();
     this.lastSeq = this.seqAtFlush = 0;
     this.hydrated = false;
@@ -716,6 +720,12 @@ export class Store {
     const members = this.members.collect();
     batch.put.members = members.put;
     batch.del.members = members.del;
+    const lists = this.profileLists.collect();
+    batch.put.profileMusic = lists.music.put;
+    batch.del.profileMusic = lists.music.del;
+    batch.put.profilePhotos = lists.photos.put;
+    batch.del.profilePhotos = lists.photos.del;
+    if (lists.meta) batch.put.meta = [...(batch.put.meta ?? []), lists.meta];
     this.dirtyChats.clear(); this.dirtyMessages.clear(); this.dirtyOutbox.clear(); this.dirtyReads.clear(); this.dirtyMeta = false;
     const seq = this.lastSeq;
     await write(this.db, batch);

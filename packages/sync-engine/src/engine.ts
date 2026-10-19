@@ -18,6 +18,7 @@ import { simFlags, watchLoss } from './devsim';
 import { chatTitle, displayName, peopleResult, PeerSigs } from './names';
 import { applyMembersReply, membersResult, type MembersReply } from './members';
 import { MediaLoader, mediaResult } from './media';
+import { musicKey, profileMusicResult, profilePhotosResult, ProfileListsLoader, trackOf } from './profileLists';
 import type { Action, EngineConfig, LocalAttachment, LocalMessage, OutboxEntry, Patch, Query, SearchResult } from './types';
 
 export interface WatchHandle { update(q: Query): void; close(): void }
@@ -111,6 +112,8 @@ export class Engine {
   private membersAsked = new Set<number>();
   /** «Общие медиа»: загрузка вкладок и счётчиков для подписок media (media.ts) */
   private readonly media: MediaLoader;
+  /** музыка и фото профиля: загрузка для подписок (profileLists.ts) */
+  private readonly lists: ProfileListsLoader;
   /** раздел «Для разработчиков»: журнал, снимок состояния, имитатор сети (devlog.ts) */
   readonly dev: DevTools;
 
@@ -156,6 +159,7 @@ export class Engine {
     });
     this.blocks = new Blocks({ store, ops: this.ops, http: (path) => this.http(path), run: (fn) => this.run(fn), changed: () => this.changed() });
     this.media = new MediaLoader(store, { online: () => this.online && this.ready, http: (path) => this.http(path), run: (fn) => this.run(fn), changed: () => this.changed() });
+    this.lists = new ProfileListsLoader(store, { online: () => this.online && this.ready, http: (path) => this.http(path), run: (fn) => this.run(fn), changed: () => this.changed() });
     this.sessions = new Sessions({ ops: this.ops, online: () => this.online, http: (path) => this.http(path) });
     this.session = new SessionEnd({
       httpBase: cfg.httpBase, headers: cfg.headers, fetch: this.dev.fetch,
@@ -289,6 +293,8 @@ export class Engine {
     if (w.q.kind === 'members') { this.membersWants.add(w.q.chatId); this.fetchMembers(); return; }
     // вкладка медиа: из памяти и IndexedDB сразу; с сервера — счётчики раз и страницы, когда не хватает
     if (w.q.kind === 'media') { this.media.want(w.q); return; }
+    // музыка и фото профиля: из IndexedDB сразу; с сервера — если не загружали или сводка в профиле сменилась
+    if (w.q.kind === 'profileMusic' || w.q.kind === 'profilePhotos') { this.lists.want(w.q); return; }
     if (w.q.kind !== 'messages') return;
     const { chatId, limit } = w.q;
     const q = w.q;
@@ -373,6 +379,8 @@ export class Engine {
     }
     if (q.kind === 'members') return membersResult(this.store, q.chatId, this.presence, this.meNow());
     if (q.kind === 'media') return mediaResult(this.store, q, this.media.loading(q.chatId, q.tab));
+    if (q.kind === 'profileMusic') return profileMusicResult(this.store, q.userId, this.ops.list, this.lists.loading(q));
+    if (q.kind === 'profilePhotos') return profilePhotosResult(this.store, q.userId, this.meNow(), this.lists.loading(q));
     if (q.kind === 'people') return peopleResult(this.store, q.ids, q.ids.includes(this.cfg.userId) ? this.meNow() : null);
     if (q.kind === 'devStats' || q.kind === 'devLog') {
       const it = q.kind === 'devStats' ? this.dev.stats() : { key: 'devLog' };   // devLog идёт мимо compute (dev.pushLog)
@@ -648,6 +656,8 @@ export class Engine {
     const peopleDirty = this.store.contacts.dirty || profileDirty;   // имя — из профиля, контакта и очереди
     const membersTouched = new Set(this.store.members.touched);
     this.store.members.touched.clear();
+    const listsTouched = new Set(this.store.profileLists.touched);
+    this.store.profileLists.touched.clear();
     this.store.contacts.dirty = false;
     const settingsDirty = this.store.settings.dirty || opsDirty;
     this.store.settings.dirty = false;
@@ -659,9 +669,11 @@ export class Engine {
     this.statusSig = sig;
     for (const w of this.watchers.values()) {
       if (w.q.kind === 'devLog') { this.dev.pushLog(w); continue; }   // журнал: только новые события, пачкой раз в 250 мс
-      const own = (w.q.kind === 'devStats' && devDirty) || (w.q.kind === 'status' && statusChanged) || (w.q.kind === 'presence' && presenceDirty) || (w.q.kind === 'ops' && opsDirty) || ((w.q.kind === 'me' || w.q.kind === 'user') && profileDirty) || (w.q.kind === 'people' && peopleDirty) || (w.q.kind === 'contacts' && contactsDirty) || (w.q.kind === 'settings' && settingsDirty) || (w.q.kind === 'blocked' && blocksDirty) || (w.q.kind === 'members' && (membersTouched.has(w.q.chatId) || peopleDirty || presenceDirty));
+      const own = (w.q.kind === 'devStats' && devDirty) || (w.q.kind === 'status' && statusChanged) || (w.q.kind === 'presence' && presenceDirty) || (w.q.kind === 'ops' && opsDirty) || ((w.q.kind === 'me' || w.q.kind === 'user') && profileDirty) || (w.q.kind === 'people' && peopleDirty) || (w.q.kind === 'contacts' && contactsDirty) || (w.q.kind === 'settings' && settingsDirty) || (w.q.kind === 'blocked' && blocksDirty) || (w.q.kind === 'members' && (membersTouched.has(w.q.chatId) || peopleDirty || presenceDirty))
+        || (w.q.kind === 'profileMusic' && (listsTouched.has('m:' + w.q.userId) || (opsDirty && w.q.userId === this.cfg.userId)))
+        || (w.q.kind === 'profilePhotos' && (listsTouched.has('p:' + w.q.userId) || profileDirty));
       if (!w.force && !affects(w.q, touched) && !own) continue;
-      if (hold && !w.force && w.q.kind !== 'status' && w.q.kind !== 'presence' && w.q.kind !== 'ops' && w.q.kind !== 'contacts' && w.q.kind !== 'people' && w.q.kind !== 'settings' && w.q.kind !== 'blocked' && w.q.kind !== 'members' && w.q.kind !== 'devStats') continue;
+      if (hold && !w.force && w.q.kind !== 'status' && w.q.kind !== 'presence' && w.q.kind !== 'ops' && w.q.kind !== 'contacts' && w.q.kind !== 'people' && w.q.kind !== 'settings' && w.q.kind !== 'blocked' && w.q.kind !== 'members' && w.q.kind !== 'profileMusic' && w.q.kind !== 'profilePhotos' && w.q.kind !== 'devStats') continue;
       if (w.gated) continue;
       w.force = false;
       const next = this.compute(w.q);
@@ -677,7 +689,10 @@ export class Engine {
     this.fetchQuotes();
     this.fetchUsers();
     this.fetchMembers();
-    for (const w of this.watchers.values()) if (w.q.kind === 'media') this.media.want(w.q);
+    for (const w of this.watchers.values()) {
+      if (w.q.kind === 'media') this.media.want(w.q);
+      else if (w.q.kind === 'profileMusic' || w.q.kind === 'profilePhotos') this.lists.want(w.q);   // устарел (сводка сменилась) — перечитать
+    }
   }
 
   /** Присутствие из ответа сервера, если живого ещё нет (без связи — не знаем). */
@@ -730,6 +745,7 @@ export class Engine {
   private opDone(op: PendingOp, value: unknown): void {
     if (this.contacts.opDone(op, value)) return;
     if (this.blocks.opDone(op, value)) return;
+    if (this.lists.opDone(op, value)) return;
     if (op.key.startsWith('mute:')) {
       // ответ — новая база: между уходом операции и записью журнала строка не откатится
       const v = value as { muteUntil?: number | null } | null;
@@ -1051,6 +1067,17 @@ export class Engine {
       case 'block':
       case 'unblock':
         return this.blocks.act(a);
+      case 'addProfileMusic': {
+        // трек известен по сообщению в кэше — строка видна сразу (ключ по файлу: добавление и удаление схлопываются);
+        // нет — просто в очередь, список обновит ответ
+        const track = trackOf(this.store, a.chatId, a.messageId);
+        const key = track ? musicKey(track.id) : musicKey(`m${a.chatId}:${a.messageId}`);
+        await this.ops.enqueue({ key, method: 'POST', path: '/me/music', body: { chatId: a.chatId, messageId: a.messageId, ...(track ? { track } : {}) } });
+        return null;
+      }
+      case 'removeProfileMusic':
+        await this.ops.enqueue({ key: musicKey(a.attId), method: 'DELETE', path: `/me/music/${encodeURIComponent(a.attId)}` });
+        return null;
       case 'listSessions':
       case 'terminateSession':
       case 'terminateOtherSessions':
@@ -1130,6 +1157,7 @@ export class Engine {
     this.membersAsked.clear();
     for (const w of this.watchers.values()) if (w.q.kind === 'members') this.membersWants.add(w.q.chatId);
     this.media.reconnect();
+    this.lists.reconnect();
     if (this.wantOnline) this.failures++;
     this.ready = false;
     this.changed();

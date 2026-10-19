@@ -122,6 +122,11 @@ export type Query =
   /** вкладка «Общих медиа» (media.ts): сообщения вкладки, новые сверху, до limit; служебный ~media {done, loading, counts} —
    *  done: больше нет ни в памяти, ни на сервере; counts — сколько во всех вкладках (null — ещё не знаем) */
   | { kind: 'media'; chatId: number; tab: MediaTab; limit: number }
+  /** музыка профиля (profileLists.ts): треки новые сверху, до 100; свои — с ещё не подтверждёнными правками (pending);
+   *  служебный ~profileMusic {loaded, loading} */
+  | { kind: 'profileMusic'; userId: number }
+  /** фото профиля (profileLists.ts): главное первым, дальше новые сверху, до 100; служебный ~profilePhotos {loaded, loading, total} */
+  | { kind: 'profilePhotos'; userId: number }
   /** раздел «Для разработчиков»: один элемент devStats — снимок состояния движка, не чаще раза в секунду */
   | { kind: 'devStats' }
   /** журнал движка (devlog.ts): снимок — события новее since, дальше — только новые, пачкой раз в 250 мс */
@@ -180,6 +185,9 @@ export type Action =
   /** чёрный список — через очередь операций */
   | { type: 'block'; userId: number }
   | { type: 'unblock'; userId: number }
+  /** музыка профиля — через очередь операций (трек из сообщения в кэше виден сразу) */
+  | { type: 'addProfileMusic'; chatId: number; messageId: number }
+  | { type: 'removeProfileMusic'; attId: string }
   /** активные сеансы с сервера мимо кэша: {sessions} (без тех, чьё завершение ещё в очереди) | {offline:true} */
   | { type: 'listSessions' }
   /** завершить сеанс / все другие — через очередь операций */

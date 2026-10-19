@@ -4,6 +4,7 @@ import { cleanName, cleanText } from './text';
 import type { PendingOp } from './ops';
 import type { Store } from './store';
 import { Table } from './rows';
+import { noteSummaries, summarySig } from './profileLists';
 import type { Item } from './types';
 
 /** Ключи операций профиля в очереди ops. */
@@ -103,9 +104,14 @@ export class ProfileCache {
   }
 }
 
-/** userUpdated: кэш профилей. Строки личных чатов с этим человеком пересчитает PeerSigs (names.ts) — сами чаты не трогаем. */
+/**
+ * userUpdated: кэш профилей. Строки личных чатов с этим человеком пересчитает PeerSigs (names.ts) — сами чаты не трогаем.
+ * Сменилась сводка музыки или главное фото — его списки устарели (profileLists.ts: перечитаем, если на них подписаны).
+ */
 export function applyUserUpdated(store: Store, u: PublicUser, seq?: number): void {
+  const before: [string | undefined, string | undefined] = [summarySig(store, 'm', u.id), summarySig(store, 'p', u.id)];
   store.profile.applyUser(u, seq);
+  noteSummaries(store, u.id, before);
 }
 
 const cleanBio = (s: string | null) => (s == null ? null : cleanText(s) || null);
