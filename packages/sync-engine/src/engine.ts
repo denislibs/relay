@@ -128,6 +128,7 @@ export class Engine {
     this.dev.restore(sim);
     if (this.dev.sim.offline) this.netDown = true;
     store.onFlush = (keys, ms) => this.dev.log.record('engine', 'flush', { keys }, undefined, ms);
+    this.muteShown = muteOverlay(ops);   // операции, восстановленные из IndexedDB: их отказ после перезапуска тоже пересчитает строку
     this.ops = new Ops(db, ops, { base: cfg.httpBase, headers: cfg.headers, backoffMs: cfg.backoffMs, fetch: this.dev.fetch }, {
       canSend: () => this.online && this.ready && !this.closed && !this.resetting,
       done: (op, value) => this.opDone(op, value),
