@@ -68,7 +68,9 @@ export function startData(me: Me): void {
       showToast('Чат больше недоступен');
     }
     // собеседники личных чатов — в people сразу (их имена и фото нужны ленте, медиа, поиску)
-    wantPeople(chats.list().flatMap((c) => (c.kind === 'direct' && c.peerId ? [c.peerId as number] : [])));
+    // и авторы последних в группах («Имя:» в списке) — просим сразу с данными, а не из эффектов отрисовки
+    wantPeople(chats.list().flatMap((c) => (c.kind === 'direct' ? (c.peerId ? [c.peerId as number] : [])
+      : ((c.last as { senderId?: number } | null)?.senderId ? [(c.last as { senderId: number }).senderId] : []))));
     // открытый чат появился в списке — теперь известен собеседник: подписываемся на его статус
     const g = getGlobal(), current = g.pendingChatId ?? g.openChatId;
     if (current && peerFor !== current) watchPeer(current);
@@ -193,6 +195,8 @@ function startFeed(frame: ChatFrame, anchor: Anchor | undefined, onFirst: (patch
   // лента — срочная: свои сообщения должны появляться в тот же кадр
   s.watch = engine.watch({ kind: 'messages', chatId: frame.chatId, limit: WINDOW, anchor }, (p: Patch) => {
     s.mirror.apply(p);
+    // авторы пришедших сообщений — в people сразу, до отрисовки (повторы wantPeople отбрасывает сам)
+    wantPeople((p.op === 'snapshot' ? p.items : p.upsert).flatMap((m) => (typeof m.senderId === 'number' ? [m.senderId] : [])));
     s.moving = false;
     const meta = (s.mirror.meta('~window') as unknown as FeedMeta) ?? null;
     const patch = { messages: s.mirror.list() as Item[], feedMeta: meta };

@@ -52,3 +52,30 @@ test('people stay on screen while the subscription is recreated', async () => {
   subs[1].push({ op: 'diff', upsert: [person(2, 'Борис Б.')], remove: [] });
   expect(personName(2)).toBe('Борис Б.');
 });
+
+test('a new engine (sign-in as another user without reload) starts from scratch', async () => {
+  const a = subs.filter((s) => !s.closed);
+  expect(a.length).toBeGreaterThan(0);
+  const b: Sub[] = [];
+  startPeople({
+    watch(q: Query, onPatch: (p: Patch) => void) {
+      const s: Sub = { ids: (q as { ids: number[] }).ids, push: onPatch, closed: false };
+      b.push(s);
+      return { update() {}, close() { s.closed = true; } };
+    },
+  });
+  expect(a.every((s) => s.closed)).toBe(true);
+  expect(getGlobal().people).toEqual({});
+  expect(personName(1)).toBe('');
+  await tick();
+  expect(b.length).toBe(0);   // прежний набор забыт — подписываться не на кого
+  wantPeople([7]);
+  await tick();
+  expect(b.length).toBe(1);
+  expect(b[0].ids).toEqual([7]);
+  // поздний патч прежнего движка не попадает в новые данные
+  a[0].push({ op: 'snapshot', items: [person(1, 'Анна')], order: ['1'] });
+  expect(personName(1)).toBe('');
+  b[0].push({ op: 'snapshot', items: [person(7, 'Ева')], order: ['7'] });
+  expect(personName(7)).toBe('Ева');
+});

@@ -15,7 +15,16 @@ let scheduled = false;
 let subs: { n: number; w: { close(): void } }[] = [];
 let seq = 0, live = 0;
 
+/** Движок страницы. Смена движка (вход другим пользователем без перезагрузки) сбрасывает подписки, набор и людей;
+ *  при первом запуске набор сохраняется — его могли попросить до старта. */
 export function startPeople(e: Engine): void {
+  if (engine) {
+    for (const s of subs) s.w.close();
+    subs = [];
+    wanted.clear();
+    live = ++seq;   // номера не переиспользуем: поздние патчи прежних подписок старше live и отбрасываются
+    setGlobal({ people: {} });
+  }
   engine = e;
   if (wanted.size) schedule();
 }
@@ -37,7 +46,7 @@ function schedule(): void {
 // новая подписка на весь набор; прежняя закрывается, только когда новая прислала первый патч — люди не мигают
 function resubscribe(): void {
   scheduled = false;
-  if (!engine) return;
+  if (!engine || !wanted.size) return;
   const n = ++seq, m = new Mirror();
   const w = engine.watch({ kind: 'people', ids: [...wanted] }, (p) => {
     if (n < live) return;   // запоздалый патч уже сменённой подписки
