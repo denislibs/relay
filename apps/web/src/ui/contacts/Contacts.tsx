@@ -1,4 +1,4 @@
-import { ChatRow, ChatRowSkeleton, EmptyState, Fab, IconButton, Presence, SearchField, peerTone, useMinVisible, WindowList } from '@relay/ui';
+import { ChatRow, ChatRowSkeleton, EmptyState, Fab, IconButton, Presence, SearchInput, peerTone, useMinVisible, WindowList } from '@relay/ui';
 import type { ProfilePhoto } from '@relay/protocol';
 import { rowAvatar } from '../../profilePhoto';
 import type { Item } from '@relay/sync-engine/src/types';
@@ -59,7 +59,7 @@ export function Contacts() {
     <div class="rl-sidepage" aria-label="Контакты">
       <div class="rl-panel-head app-contacts-head">
         <IconButton icon="arrowLeft" label="Назад" onClick={() => void back()} />
-        <SearchField id="contacts-search" label="Поиск контактов" placeholder="Поиск контактов" value={q} onInput={(e: Event) => setQ((e.target as HTMLInputElement).value)} />
+        <SearchInput id="contacts-search" label="Поиск контактов" placeholder="Поиск контактов" value={q} onInput={(e: Event) => setQ((e.target as HTMLInputElement).value)} />
       </div>
       <div class="rl-page-scroll app-contacts">
         <div class="app-listwrap">

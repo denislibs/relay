@@ -1,4 +1,4 @@
-import { ContactPicker, Modal, SearchField, peerTone } from '@relay/ui';
+import { ContactPicker, Modal, SearchInput, peerTone } from '@relay/ui';
 import type { GroupInvite, GroupMember } from '@relay/protocol';
 import { useState } from 'preact/hooks';
 import { createDirectChat, engineSend, startDirectChat } from '../../data';
@@ -33,7 +33,7 @@ export function ManageMembers({ nav }: { nav: Nav }) {
   const remove = async (m: GroupMember) => { setMenu(null); await act('DELETE', `/groups/${chatId}/members/${m.userId}`, undefined, `${m.name} удалён(а) из группы`); };
   return (
     <GPage title="Участники" onBack={nav.back} fab={canInvite(me) ? { show: true, icon: 'userPlus', label: 'Добавить участников', onClick: () => nav.go('gAddMembers') } : undefined}>
-      <div class="app-gm-search"><SearchField value={q} placeholder="Поиск участников" onInput={(e: Event) => setQ((e.currentTarget as HTMLInputElement).value)} /></div>
+      <div class="app-gm-search"><SearchInput id="gm-members-search" label="Поиск участников" value={q} placeholder="Поиск участников" onInput={(e: Event) => setQ((e.currentTarget as HTMLInputElement).value)} /></div>
       <p class="app-gm-note">{n ? `${n} ${plural(n, 'участник', 'участника', 'участников')}` : ''}</p>
       <div class="app-members" role="list">
         {all.data ? list.length ? list.map((m) => (

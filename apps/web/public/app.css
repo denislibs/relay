@@ -215,11 +215,9 @@ html[data-blur="0"] .app-sidemenu .rl-menu { -webkit-backdrop-filter: none; back
 .app-findcard-closing { animation: app-findcard-out 150ms var(--ease-in, ease-in) forwards; pointer-events: none; }
 @keyframes app-findcard-out { to { opacity: 0; transform: scaleX(.96); } }
 .app-findcard .rl-csearch { height: 40px; padding: 0 4px 0 10px; gap: 2px; background: transparent; box-shadow: none; border-radius: 0; animation: none; -webkit-backdrop-filter: none; backdrop-filter: none; }
-.app-findcard .rl-csearch input { flex: 1; min-width: 0; height: 40px; padding: 0 8px; border: 0; background: transparent; outline: none; font: 400 16px/21px var(--font-sans); color: var(--ink); }
-.app-findcard .rl-csearch input::-webkit-search-cancel-button { -webkit-appearance: none; appearance: none; }
+.app-findcard .rl-csearch-field { padding: 0; gap: 8px; }
+.app-findcard .rl-csearch-field input { padding: 0 2px; font: 400 16px/21px var(--font-sans); }
 .app-findcard .rl-csearch .rl-iconbtn { width: 36px; height: 36px; }
-.app-findcard .rl-csearch-icon { width: 22px; height: 22px; color: var(--ink-muted); transition: color var(--dur-instant) var(--ease-standard); }
-.app-findcard .rl-csearch:focus-within .rl-csearch-icon { color: var(--brand-text); }
 .app-findlist { position: relative; height: 0; max-height: min(360px, 55vh); overflow-y: auto; overscroll-behavior: contain; transition: height 220ms cubic-bezier(.2, 0, .2, 1), opacity 160ms ease; }
 .app-findlist-in { padding: 7px 8px 8px; }
 .app-findlist::before { content: ''; position: sticky; z-index: 1; display: block; top: 0; margin: 0 16px; height: 1px; background: color-mix(in srgb, var(--ink) 12%, transparent); }
@@ -553,8 +551,8 @@ html[data-anim="0"] .app-chatcol, html[data-anim="0"] .app-chatcol-below, html[d
 
 /* выбор чатов для папки: одна сетка строк (отступ 16 px), круглая галочка справа у всех строк, поиск с чипами сверху */
 .app-fpick-top { position: relative; z-index: 1; padding: 4px 12px 10px; background: var(--card); box-shadow: 0 1px 0 var(--line); }
-.app-fpick-field { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; min-height: 44px; max-height: 128px; padding: 6px 12px; border-radius: 22px; background: var(--hover); overflow-y: auto; }
-.app-fpick-field input { flex: 1; min-width: 96px; height: 30px; border: 0; background: transparent; color: var(--ink); font: 400 15px/20px var(--font-sans); outline: none; }
+.app-fpick-field { --rl-search-h: 44px; gap: 6px; max-height: 128px; padding: 5px 6px 5px 12px; border-radius: 22px; overflow-y: auto; }
+.app-fpick-field input { height: 30px; }
 .app-fpick-chip { display: inline-flex; align-items: center; gap: 4px; max-width: 100%; height: 30px; padding: 0 8px 0 12px; border: 0; border-radius: var(--radius-pill); background: var(--accent-soft); color: var(--brand-text); font: 500 14px/1 var(--font-sans); cursor: pointer; animation: rl-pop var(--dur-base) var(--ease-out) both; transition: background-color var(--dur-fast) var(--ease-standard); }
 .app-fpick-chip span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .app-fpick-chip:hover { background: color-mix(in srgb, var(--danger) 14%, transparent); color: var(--danger); }

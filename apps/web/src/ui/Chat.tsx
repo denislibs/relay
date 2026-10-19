@@ -425,6 +425,7 @@ export function Chat({ chatId, frameKey, active }: { chatId: number; frameKey: s
           <div class={'app-findcard' + (listOpen && found ? ' app-findcard-open' : '') + (findClosing ? ' app-findcard-closing' : '')}>
             <ChatSearchBar
               id="chat-find"
+              variant="plain"
               value={findQ}
               total={found?.hits.length ?? 0}
               index={found?.at ?? 0}

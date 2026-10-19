@@ -35,6 +35,8 @@ function onKey(e) {
   if (!top) return;
   if (e.key === 'Escape') {
     if (e.defaultPrevented) return;   // Esc уже съело что-то внутри окна (меню, поле с подсказками)
+    var t = e.target;   // поле поиска с текстом: первый Esc стирает текст (SearchInput), второй закрывает окно
+    if (t && t.value && t.matches && t.matches('.rl-search input')) return;
     if (document.querySelector('[data-esc-layer]')) return;   // открыт выпадающий список поверх окна — Esc сначала ему
     e.preventDefault(); e.stopPropagation();
     if (top.ref.current.closeOnEsc !== false && top.ref.current.onClose) top.ref.current.onClose();

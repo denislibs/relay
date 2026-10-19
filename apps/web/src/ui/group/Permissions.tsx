@@ -1,4 +1,4 @@
-import { CheckRow, ConfirmDialog, Icon, InfoRow, RangeRow, SearchField, Section } from '@relay/ui';
+import { CheckRow, ConfirmDialog, Icon, InfoRow, RangeRow, SearchInput, Section } from '@relay/ui';
 import { MEDIA_RIGHTS, SLOW_MODES, type BannedMember, type GroupMember, type MemberRight, type MemberRights } from '@relay/protocol';
 import { useState } from 'preact/hooks';
 import { useGlobal } from '../../global';
@@ -140,7 +140,7 @@ export function MemberPick({ nav, mode }: { nav: Nav; mode: 'exception' | 'ban' 
   const ban = async () => { const m = ask!; setAsk(null); if (await act('DELETE', `/groups/${chatId}/members/${m.userId}`, undefined, `${m.name} удалён(а) из группы`)) nav.back(); };
   return (
     <GPage title={title} onBack={nav.back}>
-      <div class="app-gm-search"><SearchField value={q} placeholder="Поиск участников" onInput={(e: Event) => setQ((e.currentTarget as HTMLInputElement).value)} /></div>
+      <div class="app-gm-search"><SearchInput id="gm-perm-search" label="Поиск участников" value={q} placeholder="Поиск участников" onInput={(e: Event) => setQ((e.currentTarget as HTMLInputElement).value)} /></div>
       <div class="app-members" role="list">
         {all.data ? list.length ? list.map((m) => (
           <PersonRow key={m.userId} id={m.userId} name={m.name} photo={m.photo} online={!!m.online} subtitle={lastSeenText(!!m.online, m.lastSeen)} onClick={() => pick(m)} />

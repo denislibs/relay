@@ -1,7 +1,7 @@
 import { FOLDER_LIMITS, type ChatFolder } from '@relay/protocol';
 import type { ProfilePhoto } from '@relay/protocol';
 import { avatarPhoto } from '../../profilePhoto';
-import { Avatar, Icon, PanelHeader, ripple } from '@relay/ui';
+import { Avatar, Icon, PanelHeader, SearchInput, ripple } from '@relay/ui';
 import { useState } from 'preact/hooks';
 import { useGlobal } from '../../global';
 import { back } from '../../nav';
@@ -62,14 +62,14 @@ export function FolderChats({ path }: { path: string }) {
     <div class="rl-sidepage" aria-label={title}>
       <PanelHeader icon="arrowLeft" closeLabel="Готово" title={count ? `${title} · ${count}` : title} onClose={() => void back()} />
       <div class="app-fpick-top">
-        <div class="app-fpick-field">
+        <SearchInput id="app-fpick-q" class="app-fpick-field" label="Поиск чатов" icon={!count} value={q} onChange={setQ} placeholder={count ? '' : 'Поиск чатов'}
+          onKeyDown={(e: KeyboardEvent) => { if (e.key === 'Backspace' && !q && chips.length) { e.preventDefault(); chips[chips.length - 1].onRemove(); } }}>
           {chips.map((c) => (
             <button key={c.key} type="button" class="app-fpick-chip" onClick={c.onRemove} aria-label={'Убрать ' + c.label}>
               <span>{c.label}</span><Icon name="close" size={14} />
             </button>
           ))}
-          <input type="search" value={q} onInput={(e) => setQ((e.currentTarget as HTMLInputElement).value)} placeholder={count ? '' : 'Поиск чатов'} aria-label="Поиск чатов" autoComplete="off" />
-        </div>
+        </SearchInput>
       </div>
       <div class="rl-page-scroll app-fpick">
         {shownTypes.length ? (

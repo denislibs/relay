@@ -7,6 +7,7 @@ import { useEffect, useRef, useState } from 'preact/hooks';
 import { cx, ripple, Avatar, Icon, IconButton } from './kit.js';
 import { FolderTabs } from './more.js';
 import { Modal } from './modal.js';
+import { SearchInput } from './searchInput.js';
 
 /**
  * props: open, onClose, title ('Переслать в…'),
@@ -79,12 +80,9 @@ export function ChatPicker(props) {
           h('span', { class: 'rl-picker-chip-av' }, h(Avatar, Object.assign({ name: c.title, tone: c.tone, size: 32, logo: c.logo }, c.avatar || {})), h('i', { 'aria-hidden': 'true' }, h(Icon, { name: 'close', size: 18 }))),
           h('span', { class: 'rl-picker-chip-name' }, c.title));
       }),
-      h('div', { class: 'rl-search rl-picker-search' },
-        picked.length ? null : h(Icon, { name: 'search', size: 22, class: 'rl-chatpick-q-icon' }),
-        h('label', { for: 'rl-chatpick-q', class: 'rl-sr' }, 'Поиск чатов'),
-        h('input', { id: 'rl-chatpick-q', ref: searchRef, type: 'search', 'data-autofocus': '', placeholder: picked.length ? '' : 'Поиск', autocomplete: 'off', value: q[0],
-          role: 'combobox', 'aria-expanded': 'true', 'aria-controls': 'rl-chatpick-list', 'aria-activedescendant': activeId,
-          onKeyDown: onSearchKey, onInput: function (e) { q[1](e.target.value); } }))),
+      h(SearchInput, { id: 'rl-chatpick-q', class: 'rl-picker-search', variant: 'plain', icon: !picked.length, iconSize: 22, inputRef: searchRef, label: 'Поиск чатов',
+        placeholder: picked.length ? '' : 'Поиск', value: q[0], onKeyDown: onSearchKey, onChange: q[1],
+        inputProps: { 'data-autofocus': '', role: 'combobox', 'aria-expanded': 'true', 'aria-controls': 'rl-chatpick-list', 'aria-activedescendant': activeId } })),
     h('div', { class: 'rl-chatpick-scroll', ref: listRef },
     !needle && top.length ? h('div', { class: 'rl-chatpick-top rl-chatpick-island', role: 'group', 'aria-label': 'Частые' },
       top.map(function (c) {

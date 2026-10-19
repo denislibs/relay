@@ -1,4 +1,4 @@
-import { ConfirmDialog, InfoRow, Section, SearchField, WindowList } from '@relay/ui';
+import { ConfirmDialog, InfoRow, Section, SearchInput, WindowList } from '@relay/ui';
 import { useEffect, useRef, useState } from 'preact/hooks';
 import { diagnosticsFile, downloadText } from '../../devtools/diagnostics';
 import { getErrors } from '../../devtools/metrics';
@@ -40,7 +40,7 @@ function Messages(props: { chatId: number }) {
   const cur = open ? rows.find((r) => r.key === open) : null;
   return (
     <>
-      <SearchField id="dev-msg-search" label="Поиск по ключу" placeholder="Ключ сообщения" value={q} onInput={(e: Event) => { const v = (e.currentTarget as HTMLInputElement).value; setQ(v); load(true, v); }} />
+      <SearchInput id="dev-msg-search" label="Поиск по ключу" placeholder="Ключ сообщения" value={q} onInput={(e: Event) => { const v = (e.currentTarget as HTMLInputElement).value; setQ(v); load(true, v); }} />
       <div class="app-dev-idb" role="list" aria-label="Сообщения в IDB">
         {rows.length ? (
           <WindowList items={rows} rowHeight={MSG_ROW} getKey={(r: Row) => r.key} onNearEnd={more ? () => load(false) : undefined} render={(r: Row) => (

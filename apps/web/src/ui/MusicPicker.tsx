@@ -1,7 +1,7 @@
 // «Музыка» из меню вложений, как в Telegram Web: поиск, «Выбрать из файлов», музыка профиля и музыка из чатов.
 // Клик по строке — отправить трек (тот же файл, без новой загрузки); клик по кругу — послушать (кольцо вокруг обложки
 // пляшет под звук). Поиск — с 3 символов, через 300 мс; ответы на устаревший запрос отбрасываются.
-import { Icon, Modal, PlayingRing, SearchField, player } from '@relay/ui';
+import { Icon, Modal, PlayingRing, SearchInput, player } from '@relay/ui';
 import type { Message } from '@relay/protocol';
 import { useEffect, useRef, useState } from 'preact/hooks';
 import { forwardMessages, sendFiles, sendTrack, sentSound } from '../data';
@@ -132,7 +132,7 @@ export function MusicPicker({ chatId, open, onClose }: { chatId: number; open: b
   return (
     <Modal open={open} onClose={close} title="Музыка" size="slim" class="app-mp" bodyClass="app-mp-body">
       <div class="app-mp-search">
-        <SearchField id="app-mp-q" label="Поиск музыки" placeholder="Поиск музыки" value={q} status={searching ? 'Поиск…' : undefined}
+        <SearchInput id="app-mp-q" label="Поиск музыки" placeholder="Поиск музыки" value={q} busy={searching}
           onInput={(e: Event) => setQ((e.target as HTMLInputElement).value)} />
       </div>
       <div class="app-mp-island">

@@ -1,4 +1,4 @@
-import { Button, Chip, IconButton, Presence, SearchField, WindowList, requestMeasure, requestMutation } from '@relay/ui';
+import { Button, Chip, IconButton, Presence, SearchInput, WindowList, requestMeasure, requestMutation } from '@relay/ui';
 import type { Item } from '@relay/sync-engine/src/types';
 import { useLayoutEffect, useMemo, useRef, useState } from 'preact/hooks';
 import { useDevLog } from '../../devtools/session';
@@ -84,7 +84,7 @@ export function DevLog() {
   return (
     <div class="app-dev-log">
       <div class="app-dev-logtools">
-        <SearchField id="dev-log-search" label="Поиск по журналу" placeholder="Поиск: тип или данные" value={query} onInput={(e: Event) => setQuery((e.currentTarget as HTMLInputElement).value)} />
+        <SearchInput id="dev-log-search" label="Поиск по журналу" placeholder="Поиск: тип или данные" value={query} onInput={(e: Event) => setQuery((e.currentTarget as HTMLInputElement).value)} />
         <div class="rl-chips app-dev-chips" role="group" aria-label="Тип события">
           {KINDS.map(([k, label]) => <Chip key={k} active={kind === k} onClick={() => setKind(k)}>{label}</Chip>)}
         </div>
