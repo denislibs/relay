@@ -132,6 +132,27 @@ export type AttachmentKind = 'photo' | 'video' | 'file' | 'voice' | 'round' | 'a
 /** Вкладки «Общих медиа» (как в Telegram): медиа — фото и видео, файлы, музыка, голосовые и кружки, ссылки. */
 export type MediaTab = 'media' | 'file' | 'audio' | 'voice' | 'link';
 export const MEDIA_TABS: readonly MediaTab[] = ['media', 'file', 'link', 'audio', 'voice'];
+
+type TabFields = Pick<Message, 'kind' | 'attachment' | 'body' | 'entities'> & Partial<Pick<Message, 'service'>>;
+/**
+ * Во всех вкладках «Общих медиа», где лежит сообщение, — зеркало SQL `tabWhere` на сервере (apps/server/src/domain/chats.ts).
+ * Вкладки пересекаются: ссылка в подписи фото или файла — и медиа/файл, и ссылка (сервер так же считает счётчики).
+ * Служебные сообщения (service) в «ссылках» не участвуют.
+ */
+export function mediaTabs(m: TabFields): MediaTab[] {
+  const video = m.attachment?.mime?.startsWith('video/') ?? false;
+  const tabs: MediaTab[] = [];
+  if (m.kind === 'photo' || m.kind === 'video' || (m.kind === 'file' && video)) tabs.push('media');
+  if (m.kind === 'file' && !video) tabs.push('file');
+  if (m.kind === 'audio') tabs.push('audio');
+  if (m.kind === 'voice' || m.kind === 'round') tabs.push('voice');
+  if (!m.service && (/(https?:\/\/|www\.)\S/i.test(m.body) || (m.entities?.some((e) => e.type === 'link') ?? false))) tabs.push('link');
+  return tabs;
+}
+/** Основная вкладка сообщения (по файлу, если он есть; иначе «ссылки»); null — в общих медиа не попадает. Полный состав — mediaTabs. */
+export function mediaTab(m: TabFields): MediaTab | null {
+  return mediaTabs(m)[0] ?? null;
+}
 /** Кружок: сторона квадрата и предел длительности (как в Telegram). */
 export const ROUND_SIZE = 400;
 export const ROUND_MAX_SECONDS = 60;
