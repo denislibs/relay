@@ -1,10 +1,12 @@
 import {
   allAdminRights, allRights, normalizeAdminRights, normalizeRights, narrowRights,
-  type AdminRight, type AdminRights, type GroupInfo, type GroupReactions, type GroupRole, type MemberRight, type MemberRights, type MyMembership, type ProfilePhoto,
+  type AdminRight, type AdminRights, type GroupInfo, type GroupReactions, type GroupRole, type MemberRight, type MemberRow, type MemberRights, type MyMembership, type ProfilePhoto,
 } from '@relay/protocol';
 import { sql, type Tx } from '../db';
 import { DomainError } from './errors';
 import { appendUpdates } from './journal';
+import { privacyCtx } from './privacy';
+import { COLS, publicUser, type ContactName, type Row } from './profile';
 
 type Db = Tx | typeof sql;
 
@@ -139,10 +141,41 @@ export async function membersOf(db: Db, chatId: number): Promise<number[]> {
   return (await db`select user_id from chat_members where chat_id = ${chatId}`).map((r) => Number(r.user_id));
 }
 
-/** Состав или роли изменились — всем участникам перечитать список. */
-export async function broadcastMembers(tx: Tx, chatId: number): Promise<void> {
-  const ids = await membersOf(tx, chatId);
-  await appendUpdates(tx, ids.map((userId) => ({ userId, update: { type: 'membersChanged', chatId } })));
+/** Что изменилось в составе: upsert — у кого строка (роль/звание/исключение) новая или другая; remove — вышли или удалены; joined — новички. */
+export interface MembersDelta { upsert?: number[]; remove?: number[]; joined?: number[] }
+
+/**
+ * Состав или роли изменились — запись `members` всем участникам (и вышедшим, чтобы их список сбросился).
+ * Новички (joined): с теми, кого они раньше не видели, обмен профилями — userUpdated каждому в его представлении;
+ * людей берём пачкой, не больше 1000 (как список участников).
+ */
+export async function broadcastMembers(tx: Tx, chatId: number, delta: MembersDelta): Promise<void> {
+  const upsertIds = [...new Set(delta.upsert ?? [])], remove = [...new Set(delta.remove ?? [])];
+  const rows = upsertIds.length ? await tx`select user_id, role, rank from chat_members where chat_id = ${chatId} and user_id = any(${upsertIds}::bigint[])` : [];
+  const upsert: MemberRow[] = rows.map((r) => ({ userId: Number(r.user_id), role: ((r.role as string) ?? 'member') as MemberRow['role'], rank: (r.rank as string | null) ?? null }));
+  const members = await membersOf(tx, chatId);
+  const to = [...new Set([...members, ...remove])];
+  await appendUpdates(tx, to.map((userId) => ({ userId, update: { type: 'members', chatId, upsert, remove } })));
+  const joined = [...new Set(delta.joined ?? [])].filter((id) => members.includes(id));
+  if (joined.length) await exchangeProfiles(tx, members.slice(0, 1000), joined);
+}
+
+/** Новички и участники группы становятся друг другу видимыми: каждому — профиль другого глазами получателя. */
+async function exchangeProfiles(tx: Tx, members: number[], joined: number[]): Promise<void> {
+  const ids = [...new Set([...members, ...joined])];
+  const users = await tx<Row[]>`select ${COLS} from users where id = any(${ids}::bigint[])`;
+  const byId = new Map(users.map((u) => [u.id, u]));
+  const pairs: [number, number][] = [];   // [получатель, чей профиль]
+  for (const n of joined) for (const m of members) if (m !== n) { pairs.push([m, n]); if (!joined.includes(m)) pairs.push([n, m]); }
+  if (!pairs.length) return;
+  const ctx = await privacyCtx(tx, pairs);
+  const names = new Map<string, ContactName>();
+  const contacts = await tx`select owner_id, user_id, first_name, last_name from contacts where (owner_id, user_id) in (select * from unnest(${pairs.map((p) => p[0])}::bigint[], ${pairs.map((p) => p[1])}::bigint[]))`;
+  for (const c of contacts) names.set(`${c.owner_id}:${c.user_id}`, { first_name: c.first_name as string, last_name: c.last_name as string });
+  await appendUpdates(tx, pairs.flatMap(([viewer, id]) => {
+    const r = byId.get(id);
+    return r ? [{ userId: viewer, update: { type: 'userUpdated' as const, user: publicUser(viewer, r, names.get(`${viewer}:${id}`), ctx) } }] : [];
+  }));
 }
 
 /** Сводка для списка чатов из одной строки запроса (без лишних запросов на каждую группу). */

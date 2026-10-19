@@ -247,3 +247,40 @@ test('adding members: invite right, banned only by someone who can ban, blocked 
   expect(r).toEqual({ added: [c.userId], failed: [d.userId] });
   expect(await services(id)).toEqual(['group_created', 'members_added']);
 });
+
+const updatesOf = async (u: U, type: string) => (await sql`select payload from updates where user_id = ${u.userId} and payload->>'type' = ${type} order by seq`).map((r) => r.payload as any);
+
+test('members delta: adding two people gives everyone a members record with two upserts and profile exchange', async () => {
+  const a = await login('Анна'), b = await login('Борис'), c = await login('Вера'), d = await login('Глеб');
+  const id = await group(a, [b]);
+  const before = (await updatesOf(a, 'members')).length;
+  await ok(a, 'POST', `/groups/${id}/members`, { userIds: [c.userId, d.userId] });
+  for (const u of [a, b, c, d]) {
+    const m = (await updatesOf(u, 'members')).at(-1);
+    expect(m).toMatchObject({ type: 'members', chatId: id, remove: [] });
+    expect(m.upsert.map((r: any) => r.userId).sort()).toEqual([c.userId, d.userId].sort());
+    expect(m.upsert[0]).toMatchObject({ role: 'member', rank: null });
+  }
+  expect((await updatesOf(a, 'members')).length).toBe(before + 1);
+  // Борис не знал Веру и Глеба — получил их профили; Вера получила профили Бориса и Анны
+  const bSees = (await updatesOf(b, 'userUpdated')).map((x) => x.user.id);
+  expect(bSees).toContain(c.userId);
+  expect(bSees).toContain(d.userId);
+  const cSees = (await updatesOf(c, 'userUpdated')).map((x) => x.user.id);
+  expect(cSees).toEqual(expect.arrayContaining([a.userId, b.userId, d.userId]));
+  expect(cSees).not.toContain(c.userId);
+});
+
+test('members delta: admin and rank changes give an upsert with the role; removal gives remove (also to the removed)', async () => {
+  const a = await login('Анна'), b = await login('Борис'), c = await login('Вера');
+  const id = await group(a, [b, c]);
+  await ok(a, 'PUT', `/groups/${id}/admins/${b.userId}`, { rights: { pin: true }, rank: 'Завхоз' });
+  const m = await lastUpdate(c, 'members');
+  expect(m.upsert).toEqual([{ userId: b.userId, role: 'admin', rank: 'Завхоз' }]);
+  expect(m.remove).toEqual([]);
+  await ok(a, 'PUT', `/groups/${id}/members/${c.userId}/restrict`, { rights: { text: false } });
+  expect((await lastUpdate(b, 'members')).upsert).toEqual([{ userId: c.userId, role: 'member', rank: null }]);
+  await ok(a, 'DELETE', `/groups/${id}/members/${c.userId}`);
+  for (const u of [a, b, c]) expect(await lastUpdate(u, 'members')).toMatchObject({ upsert: [], remove: [c.userId] });
+  expect(await lastUpdate(c, 'chatRemoved')).toMatchObject({ chatId: id });
+});

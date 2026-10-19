@@ -277,7 +277,7 @@ export async function acceptMember(tx: Tx, chatId: number, userId: number, actor
   await serviceMessage(tx, chatId, userId, type, { users: await names(tx, [userId]) });
   await sendMembership(tx, chatId, userId);
   await broadcastGroup(tx, chatId);
-  await broadcastMembers(tx, chatId);
+  await broadcastMembers(tx, chatId, { upsert: [userId], joined: [userId] });
   return true;
 }
 
@@ -315,7 +315,7 @@ export async function addGroupMembers(userId: number, chatId: number, rawIds: un
       await serviceMessage(tx, chatId, userId, 'members_added', { users: await names(tx, added) });
       for (const id of added) await sendMembership(tx, chatId, id);
       await broadcastGroup(tx, chatId);
-      await broadcastMembers(tx, chatId);
+      await broadcastMembers(tx, chatId, { upsert: added, joined: added });
     }
     return { added, failed };
   });
@@ -328,7 +328,7 @@ async function dropMember(tx: Tx, chatId: number, target: number, actor: number,
   await tx`delete from drafts where chat_id = ${chatId} and user_id = ${target}`;
   await appendUpdates(tx, [{ userId: target, update: { type: 'chatRemoved', chatId } }]);
   await broadcastGroup(tx, chatId);
-  await broadcastMembers(tx, chatId);
+  await broadcastMembers(tx, chatId, { remove: [target] });
 }
 
 /** Может ли актор управлять этим админом: владелец — любым, админ с правом назначать — только назначенными им. */
@@ -387,7 +387,7 @@ export async function restrictGroupMember(userId: number, chatId: number, target
     const same = value && Object.keys(value).every((k) => value[k as keyof MemberRights] === ctx.defaults[k as keyof MemberRights]);
     await tx`update chat_members set restricted = ${value && !same ? tx.json(value as never) : null} where chat_id = ${chatId} and user_id = ${target}`;
     await sendMembership(tx, chatId, target);
-    await broadcastMembers(tx, chatId);
+    await broadcastMembers(tx, chatId, { upsert: [target] });
     return { ok: true };
   });
 }
@@ -413,7 +413,7 @@ export async function setGroupAdmin(userId: number, chatId: number, target: numb
     }
     await sendMembership(tx, chatId, target);
     await broadcastGroup(tx, chatId);   // список тех, кто видит заявки, мог поменяться
-    await broadcastMembers(tx, chatId);
+    await broadcastMembers(tx, chatId, { upsert: [target] });
     return { ok: true };
   });
 }
@@ -431,7 +431,7 @@ export async function setGroupRank(userId: number, chatId: number, target: numbe
     if (!own && !(ctx.role === 'owner' || canManageAdmin(ctx, t as never))) throw new DomainError('forbidden', 'rank');
     await tx`update chat_members set rank = ${rank} where chat_id = ${chatId} and user_id = ${target}`;
     await sendMembership(tx, chatId, target);
-    await broadcastMembers(tx, chatId);
+    await broadcastMembers(tx, chatId, { upsert: [target] });
     return { ok: true };
   });
 }
@@ -445,7 +445,7 @@ async function makeOwner(tx: Tx, chatId: number, target: number, prev: number): 
   await sendMembership(tx, chatId, target);
   await sendMembership(tx, chatId, prev).catch(() => {});   // прежний мог уже выйти
   await broadcastGroup(tx, chatId);
-  await broadcastMembers(tx, chatId);
+  await broadcastMembers(tx, chatId, { upsert: [target, prev] });
 }
 
 /** Передать права на группу: только владелец и только с паролем 2FA (как в Telegram). */

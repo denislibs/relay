@@ -169,11 +169,14 @@ export type Update =
   | { type: 'groupUpdated'; chatId: Id; group: GroupInfo }
   // моё место в группе (роль, права, исключение, звание) — только мне
   | { type: 'membership'; chatId: Id; me: MyMembership }
-  // состав или роли участников изменились — перечитать список
-  | { type: 'membersChanged'; chatId: Id }
+  // состав изменился: у кого строка новая или другая (upsert), кто вышел или удалён (remove)
+  | { type: 'members'; chatId: Id; upsert: MemberRow[]; remove: Id[] }
   // чат больше не мой: вышел, удалили, группу удалили
   | { type: 'chatNotify'; chatId: Id; muteUntil: number | null }   // уведомления чата: мс эпохи — выключены до, 0 — навсегда, null — включены
   | { type: 'chatRemoved'; chatId: Id };   // превью ссылки сообщения загрузилось (null — превью нет)   // закреплённые сообщения чата целиком (новые сверху)   // список сеансов изменился: новый вход, подтверждение, завершение
+
+/** Строка участника группы в журнале (имя и присутствие — из профиля и присутствия). */
+export interface MemberRow { userId: Id; role: 'owner' | 'admin' | 'member'; rank: string | null }
 
 /** Тело уведомления/push без предпросмотра: текст сообщения не раскрываем. */
 export const NO_PREVIEW = 'Новое сообщение';

@@ -205,7 +205,7 @@ export class Store {
       case 'chatNotify': return this.setMute(u.chatId, u.muteUntil);
       case 'groupUpdated': { const chat = this.chats.get(u.chatId); if (chat) { chat.group = u.group; this.markChat(chat); } return; }
       case 'membership': { const chat = this.chats.get(u.chatId); if (chat) { chat.me = u.me; this.markChat(chat); } return; }
-      case 'membersChanged': { const chat = this.chats.get(u.chatId); if (chat) { chat.membersRev = (chat.membersRev ?? 0) + 1; this.markChat(chat); } return; }
+      case 'members': { const chat = this.chats.get(u.chatId); if (chat) { chat.membersRev = (chat.membersRev ?? 0) + 1; this.markChat(chat); } return; }   // временно: счётчик для старого интерфейса (задача 14 заменит)
       case 'chatRemoved': return this.removeChat(u.chatId);
     }
   }

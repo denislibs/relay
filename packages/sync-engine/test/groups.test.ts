@@ -16,8 +16,8 @@ test('group updates: info and title, my membership, members revision — and the
   s.applyUpdate({ type: 'newMessage', message: msg({ id: 1, chatId: 9, senderId: PEER }) });
   s.applyUpdate({ type: 'groupUpdated', chatId: 9, group: info({ title: 'Дача 2', about: 'шашлыки', slowMode: 30 }) });
   s.applyUpdate({ type: 'membership', chatId: 9, me: { role: 'admin', admin: { ...allAdminRights(), addAdmins: false }, rank: 'Повар', rights: allRights(), restricted: false } });
-  s.applyUpdate({ type: 'membersChanged', chatId: 9 });
-  s.applyUpdate({ type: 'membersChanged', chatId: 9 });
+  s.applyUpdate({ type: 'members', chatId: 9, upsert: [], remove: [] });
+  s.applyUpdate({ type: 'members', chatId: 9, upsert: [], remove: [] });
   await s.flush();
   const again = await Store.open(await openDb(name), ME);
   const chat = again.chats.get(9)!;
