@@ -299,7 +299,7 @@ export function createServer(opts: { port: number }): Server {
           return Response.json(await searchMessages(userId, url.searchParams.get('q') ?? '', { chatId: num('chatId'), beforeId: num('beforeId'), limit: num('limit') }));
         }
         if (req.method === 'GET' && url.pathname === '/users') {
-          return Response.json({ users: await usersByIds(userId, (url.searchParams.get('ids') ?? '').split(',').map(Number)) });
+          return Response.json(await usersByIds(userId, (url.searchParams.get('ids') ?? '').split(',').map(Number)));
         }
         if (req.method === 'GET' && url.pathname === '/link-preview') {
           // превью ссылки для поля ввода (до отправки): тот же кэш, что и у сообщений; нет превью — { link: null }

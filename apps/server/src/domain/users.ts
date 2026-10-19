@@ -1,17 +1,28 @@
+import type { PublicUser } from '@relay/protocol';
 import { sql } from '../db';
-import { nameForSql } from './profile';
+import { COLS, publicUser, selfSeq, type ContactName, type Row } from './profile';
+import { privacyCtx } from './privacy';
 
-/** Имена и фото людей по id — только тех, с кем у спрашивающего есть общий чат (и его самого); контактное имя, если задано.
- *  Фото — как в профиле: тому, кого человек заблокировал, не отдаётся. */
-export async function usersByIds(userId: number, ids: number[]): Promise<{ id: number; name: string; photo: unknown }[]> {
+/** Профили людей по id — как GET /users/:id (PublicUser, правила приватности и контактные имена зрителя) + seq зрителя.
+ *  Видны те же, что в getUser: общий чат, контакт зрителя и он сам; остальные молча пропускаются. Не больше 200 id.
+ *  Строки и seq — из одной транзакции (repeatable read): профили «на момент seq», как у Me.seq. */
+export async function usersByIds(viewer: number, ids: number[]): Promise<{ users: PublicUser[]; seq: number }> {
   const want = [...new Set(ids.filter((n) => Number.isInteger(n) && n > 0))].slice(0, 200);
-  if (!want.length) return [];
-  const rows = await sql`
-    select u.id, ${nameForSql(userId)} as name,
-           case when exists (select 1 from blocks b where b.owner_id = u.id and b.user_id = ${userId}) then null else u.photo end as photo
-      from users u
-    where u.id in ${sql(want)} and (u.id = ${userId} or exists (
-      select 1 from chat_members m join chat_members o on o.chat_id = m.chat_id
-      where m.user_id = ${userId} and o.user_id = u.id))`;
-  return rows.map((r) => ({ id: r.id as number, name: r.name as string, photo: r.photo ?? null }));
+  return sql.begin(async (tx) => {
+    await tx`set transaction isolation level repeatable read`;
+    const seq = await selfSeq(tx, viewer);
+    if (!want.length) return { users: [], seq };
+    const rows = await tx<Row[]>`
+      select ${COLS} from users
+       where id = any(${want}::bigint[]) and (id = ${viewer}
+         or exists (select 1 from chat_members m join chat_members o on o.chat_id = m.chat_id where m.user_id = ${viewer} and o.user_id = users.id)
+         or exists (select 1 from contacts c where c.owner_id = ${viewer} and c.user_id = users.id))`;
+    if (!rows.length) return { users: [], seq };
+    const found = rows.map((r) => r.id);
+    const names = new Map<number, ContactName>(
+      (await tx`select user_id, first_name, last_name from contacts where owner_id = ${viewer} and user_id = any(${found}::bigint[])`)
+        .map((c) => [Number(c.user_id), { first_name: c.first_name as string, last_name: c.last_name as string }]));
+    const ctx = await privacyCtx(tx, found.map((id) => [viewer, id]));
+    return { users: rows.map((r) => publicUser(viewer, r, names.get(r.id), ctx)), seq };
+  }) as Promise<{ users: PublicUser[]; seq: number }>;
 }
