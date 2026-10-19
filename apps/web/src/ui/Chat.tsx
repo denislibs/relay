@@ -1,6 +1,9 @@
 import { hasMedia, rightForKind, type GroupInfo, type MemberRight, type MyMembership } from '@relay/protocol';
 import { MEMBER_RIGHT_TEXT } from '../groups';
 import { PinnedBar } from './PinnedBar';
+import { UploadBar } from './UploadBar';
+import { videoCompressSupported, type VideoQuality } from '../media/compressVideo';
+import { entriesOf, filesFromEntries } from '../media/dropFiles';
 import { quoteContent } from './preview';
 import { ChatMenu } from './ChatMenu';
 import { senderAvatar } from '../profilePhoto';
@@ -26,7 +29,7 @@ import type { LinkPreview } from '@relay/protocol';
 import { membersStatus, useMembers } from '../members';
 import { Playlist } from './Playlist';
 import { inProfile, toggleProfileMusic, type Track } from '../music';
-import { Avatar, Button, Icon, MediaPolicy, peerTone, ChatSearchBar, Highlight, ripple, useMinVisible, requestMeasure, Composer, DropOverlay, GlassBar, IconButton, MenuPopover, Modal, ConfirmDialog, Presence, ReactionPicker, reducedMotion, plural, requestMutation, SelectionBar, isHeavyAnimating, onHeavyAnimationEnd, applyMarkdown, emptyValue, sameValue, voiceSupported, PlayerBar, roundSupported, startRound, Verified, canCopyImage, clipboardHtml, copyImage, copyRich, downloadUrl, TodoModal, TODO_ITEMS_MAX, DateModal, setDateCopiedToast } from '@relay/ui';
+import { Avatar, Button, Chip, Icon, MediaPolicy, peerTone, ChatSearchBar, Highlight, ripple, useMinVisible, requestMeasure, Composer, DropOverlay, GlassBar, IconButton, MenuPopover, Modal, ConfirmDialog, Presence, ReactionPicker, reducedMotion, plural, requestMutation, SelectionBar, isHeavyAnimating, onHeavyAnimationEnd, applyMarkdown, emptyValue, sameValue, voiceSupported, PlayerBar, roundSupported, startRound, Verified, canCopyImage, clipboardHtml, copyImage, copyRich, downloadUrl, TodoModal, TODO_ITEMS_MAX, DateModal, setDateCopiedToast } from '@relay/ui';
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'preact/hooks';
 import { sendTodo, appendTodo, editTodo, closeChat, deleteMessage, editMessage, ensureNames, focusMessage, openChat, openUserChat, pinMessage, unpinMessage, sendFile, sendFiles, sendRound, sendVoice, react, rejectTooBig, PLAYABLE_VIDEO, retrySend, discardUnsent, saveDraft, searchMessages, send, typing, typingDone } from '../data';
 import type { Item, SearchHit } from '@relay/sync-engine/src/types';
@@ -53,6 +56,34 @@ setDateCopiedToast(() => showToast('Дата скопирована'));
 /** Имя файла для «Скачать»: исходное, иначе по виду (как в Telegram: voice — .ogg, кружок — .mp4, фото — .jpg). */
 /** Длительность видео в окне отправки: 0:07, 17:32, 1:02:03. */
 const clockDur = (sec: number) => { const h = Math.floor(sec / 3600), m = Math.floor(sec / 60) % 60, x = String(sec % 60).padStart(2, '0'); return h ? `${h}:${String(m).padStart(2, '0')}:${x}` : `${m}:${x}`; };
+
+/** Ячейка сетки превью проявляется, когда картинка декодирована (большие фото — не серые квадраты, а плавное появление). */
+const readyCell = (e: Event) => (e.currentTarget as HTMLElement).classList.add('is-ready');
+/** Сколько файлов за раз в окне отправки (уйдут альбомами по 10, как в Telegram). */
+const MAX_SEND_FILES = 100;
+/** У вставленного скриншота имя «image.png» — даём понятное, с датой, как Telegram Desktop. */
+function namePasted(f: File): File {
+  if (f.name && f.name !== 'image.png' && f.name !== 'image.jpeg') return f;
+  const d = new Date(), p = (n: number) => String(n).padStart(2, '0');
+  const ext = f.type === 'image/jpeg' ? 'jpg' : (f.type.split('/')[1] || 'png');
+  return new File([f], `Снимок ${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())} ${p(d.getHours())}.${p(d.getMinutes())}.${p(d.getSeconds())}.${ext}`, { type: f.type, lastModified: f.lastModified });
+}
+/** «Качество» видео в окне отправки — как в Telegram: по умолчанию 720p (сжимает браузер, WebCodecs), выбор помнится на устройстве. */
+const QUALITIES: [VideoQuality, string][] = [['720', '720p'], ['1080', '1080p'], ['original', 'Оригинал']];
+const QUALITY_KEY = 'relay.videoQuality';
+function savedQuality(): VideoQuality {
+  try { const v = localStorage.getItem(QUALITY_KEY); if (v === '720' || v === '1080' || v === 'original') return v; } catch { /* приватный режим */ }
+  return '720';
+}
+function saveQuality(q: VideoQuality): void { try { localStorage.setItem(QUALITY_KEY, q); } catch { /* приватный режим */ } }
+/** Умеет ли браузер сжимать видео: проверка — с загрузки модуля, к открытию окна ответ уже есть (строка не «выпрыгивает»). */
+let compressKnown: boolean | null = null;
+const compressCheck = videoCompressSupported().then((v) => (compressKnown = v));
+function useVideoCompress(): boolean {
+  const [v, setV] = useState(compressKnown ?? false);
+  useEffect(() => { if (compressKnown == null) void compressCheck.then(setV); }, []);
+  return v;
+}
 
 function downloadName(a: { id?: string; kind?: string; name?: string; mime?: string }): string {
   if (a.name && a.name !== 'file') return a.name;
@@ -159,7 +190,10 @@ export function Chat({ chatId, frameKey, active }: { chatId: number; frameKey: s
   const [art, setArt] = useState<{ open: boolean; blocks: Block[]; closing?: boolean } | null>(null);
   useEffect(() => setArt(null), [chatId]);
   // окно отправки файлов: asFile — «Отправить как файл» (без превью и сжатия), spoiler — медиа размыто до нажатия
-  const [pending, setPending] = useState<{ file: File; files: File[]; url: string | null; caption: string; asFile?: boolean; spoiler?: boolean } | null>(null);
+  const [pending, setPending] = useState<{ file: File; files: File[]; url: string | null; thumbs?: (string | null)[]; caption: string; asFile?: boolean; spoiler?: boolean; quality?: VideoQuality } | null>(null);
+  const pendingRef = useRef(pending);
+  pendingRef.current = pending;
+  const canCompress = useVideoCompress();
   const [sendMenu, setSendMenu] = useState<HTMLElement | null>(null);
   const adding = useRef(false);   // «Добавить» в окне отправки: выбранные файлы дописываются к уже выбранным
   const [pendingDur, setPendingDur] = useState(0);
@@ -169,22 +203,30 @@ export function Chat({ chatId, frameKey, active }: { chatId: number; frameKey: s
     // больше 2 ГБ — сразу тост, как в Telegram: такой файл не попадёт ни в окно отправки, ни в очередь
     let files = rejectTooBig(!list ? [] : list instanceof File ? [list] : [...list]);
     if (!files.length) return;
-    const prev = adding.current ? pending : null;
+    // «Добавить», вставка или перетаскивание при открытом окне — дописываем к уже выбранным (как в Telegram)
+    const prev = pendingRef.current;
     adding.current = false;
-    if (prev) { if (prev.url) URL.revokeObjectURL(prev.url); files = [...prev.files, ...files].slice(0, 10); }   // как в Telegram: до 10 в одном альбоме
+    if (prev) { revokePending(prev); files = [...prev.files, ...files].slice(0, MAX_SEND_FILES); }
     const file = files[0];
-    const media = files.length === 1 && (/^image\//.test(file.type) || PLAYABLE_VIDEO.test(file.type));
+    const isMedia = (f: File) => /^image\//.test(f.type) || PLAYABLE_VIDEO.test(f.type);
+    const media = files.length === 1 && isMedia(file);
+    // несколько — сетка превью (до 12), остальные — числом
+    const thumbs = files.length > 1 ? files.slice(0, 12).map((f) => (isMedia(f) ? URL.createObjectURL(f) : null)) : undefined;
     setPendingDur(0);
-    setPending({ file, files, url: media ? URL.createObjectURL(file) : null, caption: prev?.caption ?? latest.current.text, asFile: prev?.asFile, spoiler: prev?.spoiler });
+    setPending({ file, files, url: media ? URL.createObjectURL(file) : null, thumbs, caption: prev?.caption ?? latest.current.text, asFile: prev?.asFile, spoiler: prev?.spoiler, quality: prev?.quality });
   };
-  const closePending = () => { if (pending?.url) URL.revokeObjectURL(pending.url); setPending(null); };
+  const offerRef = useRef(offer);
+  offerRef.current = offer;
+  // ссылки на превью — после ухода окна: оно ещё гаснет с картинками (раньше — «битые» превью и ERR_FILE_NOT_FOUND)
+  const revokePending = (p: NonNullable<typeof pending>) => { const urls = [p.url, ...(p.thumbs ?? [])].filter((u): u is string => !!u); setTimeout(() => { for (const u of urls) URL.revokeObjectURL(u); }, 1000); };
+  const closePending = () => { if (pending) revokePending(pending); setPending(null); };
   const sendPending = () => {
     if (!pending) return;
     if (pending.caption.trim() && !allowed('text')) return;
     for (const f of pending.files) if (!allowed(rightForKind(/^image\//.test(f.type) && !/gif/.test(f.type) ? 'photo' : /^audio\//.test(f.type) ? 'audio' : 'file', f.type))) return;
     stick.current = true;
     typingDone(chatId);
-    sendFiles(chatId, pending.files, pending.caption.trim(), (replyTo?.id as number) ?? null, { asFile: pending.asFile, spoiler: pending.spoiler && !pending.asFile }).catch(() => {});
+    sendFiles(chatId, pending.files, pending.caption.trim(), (replyTo?.id as number) ?? null, { asFile: pending.asFile, spoiler: pending.spoiler && !pending.asFile, quality: canCompress ? pending.quality ?? savedQuality() : 'original' }).catch(() => {});
     if (pending.caption === latest.current.text) { api.current?.setValue(emptyValue()); latest.current = saved.current = emptyValue(); }
     setReplyKey(null);
     closePending();
@@ -195,8 +237,16 @@ export function Chat({ chatId, frameKey, active }: { chatId: number; frameKey: s
     const enter = (e: DragEvent) => { if (!activeRef.current || !hasFiles(e)) return; depth++; setDragging(true); };
     const leave = () => { depth = Math.max(0, depth - 1); if (!depth) setDragging(false); };
     const over = (e: DragEvent) => { if (activeRef.current && hasFiles(e)) e.preventDefault(); };
-    const drop = (e: DragEvent) => { if (!activeRef.current || !hasFiles(e)) return; e.preventDefault(); depth = 0; setDragging(false); offer(e.dataTransfer!.files); };
-    const paste = (e: ClipboardEvent) => { if (!activeRef.current) return; const fs = [...(e.clipboardData?.files ?? [])]; if (fs.length) { e.preventDefault(); offer(fs); } };
+    const drop = (e: DragEvent) => {
+      if (!activeRef.current || !hasFiles(e)) return;
+      e.preventDefault(); depth = 0; setDragging(false);
+      // папки — записи снимаются только здесь, синхронно; содержимое читаем потом
+      const ents = entriesOf(e.dataTransfer!);
+      if (ents) void filesFromEntries(ents).then((fs) => offerRef.current(fs));
+      else offerRef.current(e.dataTransfer!.files);
+    };
+    // скриншот из буфера (⌘⇧4 → ⌘V) — сразу в окно отправки с превью; при открытом окне — добавится к выбранным
+    const paste = (e: ClipboardEvent) => { if (!activeRef.current) return; const fs = [...(e.clipboardData?.files ?? [])]; if (fs.length) { e.preventDefault(); offerRef.current(fs.map(namePasted)); } };
     addEventListener('dragenter', enter); addEventListener('dragleave', leave); addEventListener('dragover', over); addEventListener('drop', drop); addEventListener('paste', paste);
     return () => { removeEventListener('dragenter', enter); removeEventListener('dragleave', leave); removeEventListener('dragover', over); removeEventListener('drop', drop); removeEventListener('paste', paste); };
   }, []);
@@ -431,6 +481,7 @@ export function Chat({ chatId, frameKey, active }: { chatId: number; frameKey: s
         <ChatMenu chatId={chatId} title={title} />
         {/* закреплённые — под шапкой, как в Telegram (плеер — над ней) */}
         {!system ? <PinnedBar chatId={chatId} /> : null}
+        {!system ? <UploadBar chatId={chatId} /> : null}
         {gInfo && gInfo.requests > 0 ? (
           <button type="button" class="app-requests-bar" onClick={() => setGlobal({ infoOpen: true, infoGo: 'gRequests' })}>
             <Icon name="userPlus" size={18} /><span>{gInfo.requests} {plural(gInfo.requests, 'заявка', 'заявки', 'заявок')} на вступление</span><Icon name="chevronRight" size={18} />
@@ -664,8 +715,30 @@ export function Chat({ chatId, frameKey, active }: { chatId: number; frameKey: s
               {pendingDur ? <span class="app-send-dur">{clockDur(pendingDur)}</span> : null}
             </div>
           ) : pending.url && !asFile ? <div class={'app-send-media' + (pending.spoiler ? ' app-send-spoiler' : '')}><img class="app-send-preview" src={pending.url} alt="" /></div> : (
-            <div class="app-send-files">{pending.files.map((f, i) => <div key={i} class="app-send-file"><b>{f.name}</b><span>{fileSize(f.size)}</span></div>)}</div>
+            pending.thumbs && !asFile && pending.thumbs.some(Boolean) ? (
+              <div class={'app-send-grid' + (pending.spoiler ? ' app-send-spoiler' : '')}>
+                {pending.thumbs.map((u, i) => {
+                  const f = pending.files[i];
+                  const more = i === pending.thumbs!.length - 1 && pending.files.length > pending.thumbs!.length ? pending.files.length - pending.thumbs!.length : 0;
+                  return (
+                    <div key={i} class="app-send-cell">
+                      {u && isVideo(f) ? <video src={u} muted playsInline preload="metadata" onLoadedData={readyCell} /> : u ? <img src={u} alt="" decoding="async" onLoad={readyCell} /> : <span class="app-send-cell-file"><Icon name="file" size={22} />{f.name}</span>}
+                      {more ? <span class="app-send-more">+{more}</span> : null}
+                    </div>
+                  );
+                })}
+              </div>
+            ) : <div class="app-send-files">{pending.files.map((f, i) => <div key={i} class="app-send-file"><b>{f.name}</b><span>{fileSize(f.size)}</span></div>)}</div>
           )}
+          {canCompress && !asFile && pending.files.some(isVideo) ? (
+            <div class="app-send-quality" role="radiogroup" aria-label="Качество видео">
+              <span>Качество</span>
+              {QUALITIES.map(([q, l]) => (
+                <Chip key={q} role="radio" aria-checked={(pending.quality ?? savedQuality()) === q} active={(pending.quality ?? savedQuality()) === q}
+                  onClick={() => { saveQuality(q); setPending({ ...pending, quality: q }); }}>{l}</Chip>
+              ))}
+            </div>
+          ) : null}
           <input
             class="app-field app-send-caption"
             placeholder="Подпись"

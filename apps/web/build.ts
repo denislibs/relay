@@ -43,7 +43,7 @@ async function build(): Promise<void> {
   await mkdir(tmp, { recursive: true });
   const define = { __BUILD__: JSON.stringify(BUILD), __DEV__: JSON.stringify(isWatch) };
   const res = await Bun.build({
-    entrypoints: [join(root, 'src', 'main.tsx'), join(engineHosts, 'shared.worker.ts'), join(engineHosts, 'dedicated.worker.ts'), join(ui, 'src', 'spoiler.worker.js'), join(ui, 'src', 'articleEditor.js')],   // articleEditor — Tiptap, грузится при первом развороте
+    entrypoints: [join(root, 'src', 'main.tsx'), join(engineHosts, 'shared.worker.ts'), join(engineHosts, 'dedicated.worker.ts'), join(ui, 'src', 'spoiler.worker.js'), join(ui, 'src', 'articleEditor.js'), join(root, 'src', 'media', 'videoTranscode.ts')],   // articleEditor — Tiptap, грузится при первом развороте; videoTranscode — Mediabunny, при первом сжатии видео
     outdir: tmp,
     target: 'browser',
     naming: { entry: '[name]-[hash].[ext]', chunk: '[name]-[hash].[ext]', asset: '[name]-[hash].[ext]' },

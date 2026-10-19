@@ -84,7 +84,12 @@ export interface GlobalState {
   photos: Record<number, ProfilePhoto | null>;   // фото людей по id (авторы, участники групп); нет ключа — ещё не спрашивали
   devSim: DevSimFlags | null;      // имитатор сети движка включён (status.devSim): плашка «Режим разработчика»
   devTab: DevTab;                  // вкладка раздела «Для разработчиков»
+  uploads: UploadItem[];           // неотправленные файлы во всех чатах (подписка uploads движка): индикатор «Отправка N файлов»
+  preparing: UploadItem[];         // видео, которые эта вкладка сжимает перед отправкой (ещё не в очереди движка)
 }
+
+/** Файл в очереди отправки: progress 0…1; uploaded — загружен и ждёт отправки (соседа по альбому); compressing — ещё сжимается (progress — сжатия). */
+export interface UploadItem { key: string; chatId: number; name: string; size: number; kind: string; mime: string; uploaded: boolean; progress: number; compressing?: boolean }
 
 export type DevTab = 'overview' | 'log' | 'network' | 'data' | 'errors';
 export interface DevSimFlags { offline: boolean; profile: { latency: number; jitter: number; lossPct: number; kbps: number } | null; dropNextUpdates: boolean; forceTooLong: boolean; persist: boolean }
@@ -111,6 +116,8 @@ let state: GlobalState = {
   chats: [],
   chatsLoaded: false,
   counters: { unreadChats: 0, unreadMessages: 0 },
+  uploads: [],
+  preparing: [],
   status: { phase: 'connecting', hydrated: false, online: false, synced: false, syncing: false, outbox: 0, failed: 0 },
   syncLabel: null,
   openChatId: null,

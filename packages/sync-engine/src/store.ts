@@ -407,6 +407,11 @@ export class Store {
     if (up) o.upload = up; else delete o.upload;
     this.dirtyOutbox.add(clientId);
   }
+  /** Прогресс загрузки неотправленного файла (0…1; нет сообщения — 0). */
+  progressOf(clientId: string): number {
+    const chatId = this.outbox.get(clientId)?.chatId;
+    return (chatId != null ? this.messages.get(chatId)?.get(clientId)?.progress : undefined) ?? 0;
+  }
   /** Прогресс загрузки файла неотправленного сообщения (в ленте — кольцо). */
   setProgress(clientId: string, p: number): void {
     const chatId = this.outbox.get(clientId)?.chatId;

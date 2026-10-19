@@ -66,6 +66,17 @@ body { background: var(--bg); color: var(--ink); font-family: var(--font-sans); 
 .app-send-file { display: flex; flex-direction: column; gap: 2px; margin-bottom: var(--space-3); padding: var(--space-3); border-radius: var(--radius-md); background: var(--field); }
 .app-send-file span { color: var(--ink-muted); font-size: 13px; }
 .app-send-caption { width: 100%; margin-bottom: var(--space-3); }
+/* «Качество» видео: 720p / 1080p / Оригинал (сжатие в браузере) */
+.app-send-quality { display: flex; align-items: center; gap: var(--space-2); flex-wrap: wrap; margin: 0 0 var(--space-3); color: var(--ink-muted); font: 400 14px/20px var(--font-sans); }
+.app-send-quality > span { margin-right: auto; }
+/* несколько медиа — сетка превью (вставка, перетаскивание, «Добавить»); последняя ячейка — «+N» */
+.app-send-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(96px, 1fr)); gap: 4px; max-height: 50vh; overflow-y: auto; margin: 0 0 var(--space-3); border-radius: var(--radius-md); }
+.app-send-cell { position: relative; aspect-ratio: 1; overflow: hidden; background: var(--field); animation: rl-fade var(--dur-base) var(--ease-out); }
+.app-send-cell img, .app-send-cell video { display: block; width: 100%; height: 100%; object-fit: cover; opacity: 0; transition: filter var(--dur-base, 200ms) var(--ease-out, ease), opacity var(--dur-base, 200ms) var(--ease-out, ease); }
+.app-send-cell .is-ready { opacity: 1; }
+.app-send-spoiler .app-send-cell img, .app-send-spoiler .app-send-cell video { filter: blur(14px) saturate(1.2); }
+.app-send-cell-file { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 4px; height: 100%; padding: 6px; color: var(--ink-muted); font: 400 11px/14px var(--font-sans); text-align: center; word-break: break-all; overflow: hidden; }
+.app-send-more { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; background: rgba(0, 0, 0, .45); color: #fff; font: 600 20px/24px var(--font-sans); }
 .app-drop { position: fixed; inset: 0; z-index: 50; }
 .app-media-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 1px; margin: 0 var(--space-3) var(--space-4); align-content: start; }   /* как в Telegram: квадраты через 1px, скруглены только внешние углы */
 /* углы — у самих плиток: сетка из 1–2 плиток не оставляет «квадратного» края */
@@ -915,6 +926,23 @@ html[data-anim="0"] .app-chatcol, html[data-anim="0"] .app-chatcol-below, html[d
 /* плашка заявок под шапкой чата */
 .app-requests-bar { display: flex; align-items: center; gap: var(--space-2); width: calc(100% - 2 * var(--space-3)); margin: var(--space-2) auto 0; padding: 8px 12px; border: 0; border-radius: var(--radius-lg); background: var(--glass); color: var(--brand-text); font: 500 14px/20px var(--font-sans); box-shadow: var(--shadow-panel); cursor: pointer; animation: rl-fade var(--dur-base) var(--ease-out); -webkit-backdrop-filter: blur(20px) saturate(1.4); backdrop-filter: blur(20px) saturate(1.4); }
 .app-requests-bar span { flex: 1; text-align: left; }
+
+/* очередь отправки файлов под шапкой: «Отправка N файлов · 45%», полоска общего прогресса, список с × (UploadBar) */
+.app-upload-bar { position: absolute; left: 0; right: 0; top: calc(100% + 10px); z-index: 2; border-radius: 24px; background: var(--raised); box-shadow: var(--tg-shadow-header); overflow: hidden; animation: rl-pbar-in 260ms cubic-bezier(.25, 1, .5, 1) both; }
+/* под закреплёнными, если они есть (та же «островная» плашка под шапкой) */
+.rl-presence:has(.app-pins) ~ .rl-presence > .app-upload-bar { top: calc(100% + 66px); }
+.rl-presence[data-state="closing"] > .app-upload-bar { animation: rl-pbar-out 220ms cubic-bezier(.33, 1, .68, 1) forwards; }
+.app-upload-head { position: relative; display: flex; align-items: center; gap: var(--space-2); width: 100%; height: 48px; padding: 0 16px 2px; border: 0; background: none; color: var(--brand-text); font: 500 14px/20px var(--font-sans); cursor: pointer; }
+.app-upload-label { flex: 1; min-width: 0; text-align: left; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.app-upload-pct { font-variant-numeric: tabular-nums; }
+.app-upload-track { position: absolute; left: 16px; right: 16px; bottom: 6px; height: 2px; border-radius: 1px; background: color-mix(in srgb, var(--brand) 18%, transparent); overflow: hidden; }
+.app-upload-fill { display: block; height: 100%; background: var(--brand); transform-origin: left; transition: transform 240ms var(--ease-out); }
+.app-upload-list { margin: 0; padding: 0 4px 6px; list-style: none; max-height: 240px; overflow-y: auto; animation: rl-fade var(--dur-base) var(--ease-out); }
+.rl-presence[data-state="closing"] > .app-upload-list { animation: rl-fade-out 140ms var(--ease-in) forwards; }
+.app-upload-row { display: flex; align-items: center; gap: var(--space-2); padding: 2px 0 2px 8px; color: var(--ink-muted); font: 400 13px/18px var(--font-sans); }
+.app-upload-name { flex: 1; min-width: 0; color: var(--ink); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.app-upload-size { font-variant-numeric: tabular-nums; white-space: nowrap; }
+@media (prefers-reduced-motion: reduce) { .app-upload-fill { transition: none; } }
 
 /* карточка приглашения */
 .app-join { display: flex; flex-direction: column; align-items: center; gap: var(--space-2); padding: var(--space-2) 0 0; text-align: center; }

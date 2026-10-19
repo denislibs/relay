@@ -89,6 +89,7 @@ export type Query =
   | { kind: 'messages'; chatId: number; limit: number; anchor?: { sort: number; side: 'end' | 'start' | 'center' } }
   | { kind: 'counters' }
   | { kind: 'status' }
+  | { kind: 'uploads' }   // неотправленные файлы во всех чатах: имя, размер, прогресс
   | { kind: 'presence'; userId: number }
   /** свой профиль (с ещё не подтверждёнными правками) */
   | { kind: 'me' }

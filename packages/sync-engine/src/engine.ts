@@ -28,6 +28,8 @@ type SyncReply = Extract<ServerFrame, { op: 'updates' | 'tooLong' }>;
  * отправляет очередь, схлопывает прочтение и раздаёт подпискам патчи раз в кадр.
  */
 const HISTORY_GATE_MS = 400;
+/** Сколько файлов грузится одновременно (как в Telegram — несколько, но не все разом: канал делится, а первый файл не ждёт последнего). */
+const UPLOAD_SLOTS = 3;
 
 /** Чаты, где пачка журнала правит уже существующие сообщения (правка, удаление, реакции, «прослушано», обработанное видео). */
 function patchedChats(items: JournalEntry[], after: number): Set<number> {
@@ -990,6 +992,7 @@ export class Engine {
         this.memBlobs.delete(a.clientId);
         delBlob(this.db, a.clientId).catch(() => {});
         this.changed();
+        this.pumpOutbox();   // загруженные файлы этого чата, ждавшие отменённый, теперь могут уйти
         return null;
       }
     }
@@ -1372,17 +1375,17 @@ export class Engine {
     this.outboxTimer = setTimeout(() => { this.outboxTimer = null; this.pumpOutbox(); }, ms);
   }
 
-  /** Файл, который сейчас грузится в фоне (по одному, в порядке очереди). */
-  private uploading: string | null = null;
+  /** Файлы, которые сейчас грузятся в фоне: до UPLOAD_SLOTS сразу, берутся в порядке очереди. */
+  private uploading = new Set<string>();
   /** Отменённые из ленты: их прерванный PUT — отказ без повтора, а не обрыв сети. */
   private cancelled = new Set<string>();
   /** Ещё не загруженное вложение: сообщение ждёт загрузчика, остальная очередь идёт мимо. */
   private static needsUpload(o: OutboxEntry): boolean { return !!o.attachment && !o.attachment.id && !o.forward; }
 
   /**
-   * Очередь отправки. Как в Telegram, текст не ждёт видео на 500 МБ: файлы грузятся в фоне по одному (startUpload),
-   * а готовые к отправке сообщения уходят по порядку, обходя те, чей файл ещё грузится. Файлы между собой порядок
-   * сохраняют — следующий начинает грузиться, только когда предыдущий загружен.
+   * Очередь отправки. Как в Telegram, текст не ждёт видео на 500 МБ: файлы грузятся в фоне по несколько (startUpload),
+   * а готовые к отправке сообщения уходят по порядку, обходя те, чей файл ещё грузится. Файлы одного чата между собой
+   * порядок сохраняют: загруженный раньше соседа ждёт, пока догрузятся файлы, поставленные в этот чат до него (альбом не перемешается).
    */
   private pumpOutbox(): void {
     if (this.resetting || !this.online || !this.ready) return;
@@ -1392,7 +1395,7 @@ export class Engine {
     this.run(async () => {
       try {
         for (;;) {
-          const next = [...this.store.outbox.values()].find((o) => !o.failed && !Engine.needsUpload(o));
+          const next = this.nextToSend();
           if (!next || !this.online) break;
           try {
             const att = next.attachment ? { id: next.attachment.id, thumb: next.attachment.thumb ?? null, ...(next.attachment.spoiler ? { spoiler: true } : {}) } : null;
@@ -1414,13 +1417,30 @@ export class Engine {
     });
   }
 
-  /** Фоновая загрузка первого незагруженного файла очереди; по готовности — снова очередь (отправит его и начнёт следующий). */
+  /** Первое готовое к отправке: текст и пересылки — сразу; файл — когда в его чате нет недогруженных файлов, поставленных раньше. */
+  private nextToSend(): OutboxEntry | undefined {
+    const waiting = new Set<number>();   // чаты, где выше по очереди ещё грузится файл
+    for (const o of this.store.outbox.values()) {
+      if (o.failed) continue;
+      if (Engine.needsUpload(o)) { waiting.add(o.chatId); continue; }
+      if (o.attachment && !o.forward && waiting.has(o.chatId)) continue;
+      return o;
+    }
+    return undefined;
+  }
+
+  /** Фоновая загрузка: занимает свободные места первыми незагруженными файлами очереди; по готовности каждого — снова очередь. */
   private startUpload(): void {
-    if (this.uploading || this.resetting || !this.online || !this.ready) return;
-    const next = [...this.store.outbox.values()].find((o) => !o.failed && Engine.needsUpload(o));
-    if (!next) return;
+    while (this.uploading.size < UPLOAD_SLOTS && !this.resetting && this.online && this.ready) {
+      const next = [...this.store.outbox.values()].find((o) => !o.failed && Engine.needsUpload(o) && !this.uploading.has(o.clientId));
+      if (!next) return;
+      this.uploadOne(next);
+    }
+  }
+
+  private uploadOne(next: OutboxEntry): void {
     const clientId = next.clientId;
-    this.uploading = clientId;
+    this.uploading.add(clientId);
     let again = true;
     this.run(async () => {
       try {
@@ -1432,7 +1452,7 @@ export class Engine {
         if ((e as ReqError).retry === false) this.store.fail(clientId, (e as ReqError).code);
         else { again = false; if ((e as ReqError).code !== 'offline') this.retryOutboxLater(); }   // сеть — дождёмся переподключения
       } finally {
-        this.uploading = null;
+        this.uploading.delete(clientId);
         this.cancelled.delete(clientId);
         await this.store.flush();
         this.changed();

@@ -89,6 +89,16 @@ export function computeQuery(store: Store, q: Query): Result {
       if (missingQuotes.size) store.wantQuotes(q.chatId, [...missingQuotes]);
       return { items, sig, order };
     }
+    case 'uploads': {
+      // очередь отправки файлов во всех чатах (индикатор «Отправка N файлов» и предупреждение при закрытии вкладки)
+      const list: Item[] = [];
+      for (const o of store.outbox.values()) {
+        if (o.failed || !o.attachment || o.forward) continue;
+        list.push({ key: o.clientId, chatId: o.chatId, name: o.attachment.name, size: o.attachment.size, kind: o.attachment.kind, mime: o.attachment.mime,
+          uploaded: !!o.attachment.id, progress: o.attachment.id ? 1 : Math.round(store.progressOf(o.clientId) * 100) / 100 });
+      }
+      return result(list);
+    }
     case 'counters': {
       let unreadChats = 0, unreadMessages = 0;
       for (const c of store.chats.values()) if (c.unread > 0) { unreadChats++; unreadMessages += c.unread; }

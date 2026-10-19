@@ -8,13 +8,16 @@ import { beginHeavyAnimation, nudgeWallpaper, toBase64 } from '@relay/ui';
 import { connectEngine, EngineClient, Mirror } from '@relay/sync-engine/src/client';
 import type { Item, Patch, Query, SearchResult } from '@relay/sync-engine/src/types';
 import { hideSpoilers, MAX_FILE_BYTES, type Entity } from '@relay/protocol';
-import { activeFrame, frameByKey, getGlobal, setGlobal, type ChatFrame, type FeedMeta, type Me, type Status } from './global';
+import { activeFrame, frameByKey, getGlobal, setGlobal, type ChatFrame, type FeedMeta, type Me, type Status, type UploadItem } from './global';
 import { bindChatDepth, popChats, pushChat } from './nav';
 import { notifyIncoming, startNotify } from './notify';
 import { isSystemChat } from './ui/format';
 import { asset } from './assets';
+import { compressPhoto } from './media/compressPhoto';
+import { compressVideo, type VideoQuality } from './media/compressVideo';
 
 declare const __BUILD__: string;
+declare const __DEV__: boolean;
 
 let engine: EngineClient;
 // порция ленты — два экрана сообщений (строка-бабл ≈ 40 px), не меньше 30: как и страница диалогов, от высоты окна
@@ -73,6 +76,10 @@ export function startData(me: Me): void {
   engine.watch({ kind: 'counters' }, (p) => { counters.apply(p); const c = counters.list()[0]; if (c) setGlobal({ counters: { unreadChats: c.unreadChats as number, unreadMessages: c.unreadMessages as number } }); });
   const status = new Mirror();
   engine.watch({ kind: 'status' }, (p) => { status.apply(p); const s = status.list()[0] as unknown as Status | undefined; if (s) { setGlobal({ status: s }); showPhase(s); } });
+  const uploads = new Mirror();
+  engine.watch({ kind: 'uploads' }, (p) => { uploads.apply(p); setGlobal({ uploads: uploads.list() as unknown as UploadItem[] }); });
+  // закрытие вкладки, пока файл грузится: как в Telegram, спросим (очередь переживёт перезагрузку, но незагруженное придётся догружать)
+  addEventListener('beforeunload', (e) => { const g = getGlobal(); if (g.preparing.length || g.uploads.some((u) => !u.uploaded)) { e.preventDefault(); e.returnValue = true; } });
 
   bindChatDepth(onChatDepth);
   startNotify((id) => { focus(); openChat(id); });
@@ -458,8 +465,37 @@ export function describeVideo(file: Blob): Promise<{ w: number; h: number; durat
   });
 }
 
-/** Как отправить: asFile — документом (без сжатия и превью, как «Отправить как файл» в Telegram); spoiler — фото/видео размыто. */
-export interface SendOpts { asFile?: boolean; spoiler?: boolean }
+/** Как отправить: asFile — документом (без сжатия и превью, как «Отправить как файл» в Telegram); spoiler — фото/видео размыто;
+ *  quality — видео: '720'/'1080' — пережать в браузере (WebCodecs, где есть), 'original' — как есть. */
+export interface SendOpts { asFile?: boolean; spoiler?: boolean; quality?: VideoQuality }
+
+/** Видео, которые сейчас сжимаются (ещё не в очереди движка): отмена из плашки «Сжатие видео». */
+const preparing = new Map<string, AbortController>();
+export function cancelPreparing(key: string): void { preparing.get(key)?.abort(); }
+function setPrep(key: string, it: UploadItem | null): void {
+  const rest = getGlobal().preparing.filter((x) => x.key !== key);
+  setGlobal({ preparing: it ? [...rest, it] : rest });
+}
+
+/** Сжатие перед отправкой: фото — всегда (compressPhoto), видео — если выбрано качество и браузер умеет. Ошибка — оригинал; отмена — AbortError. */
+async function shrinkForSend(chatId: number, file: File, quality: VideoQuality): Promise<File> {
+  const t0 = performance.now();
+  let out = file;
+  if (/^image\//.test(file.type)) out = (await compressPhoto(file).catch(() => null))?.file ?? file;
+  else if (quality !== 'original' && PLAYABLE_VIDEO.test(file.type)) {
+    const key = 'prep-' + crypto.randomUUID(), ac = new AbortController();
+    preparing.set(key, ac);
+    const item: UploadItem = { key, chatId, name: file.name || 'video.mp4', size: file.size, kind: 'video', mime: file.type, uploaded: false, progress: 0, compressing: true };
+    setPrep(key, item);
+    let last = 0;
+    try {
+      out = await compressVideo(file, quality, (p) => { const now = performance.now(); if (now - last < 100) return; last = now; setPrep(key, { ...item, progress: p }); }, ac.signal)
+        .catch((err) => { if (ac.signal.aborted) throw err; console.warn('video compress failed', err); return file; });
+    } finally { preparing.delete(key); setPrep(key, null); }
+  }
+  if (__DEV__ && out !== file) console.info(`[send] ${file.type} ${file.size} → ${out.type} ${out.size} B (${Math.round(performance.now() - t0)} ms)`);
+  return out;
+}
 
 /** Отправить файл (фото — с размерами и превью). Офлайн — уйдёт, когда появится сеть. */
 /** Голосовое: Ogg/Opus, длительность в секундах и волна (63 байта). Локально играет сам записанный файл. */
@@ -493,6 +529,8 @@ export async function sendFile(chatId: number, file: File, caption: string, repl
   sentSound();
   nudgeWallpaper();
   toLatestOf(chatId);
+  // фото — как в Telegram: до 2560 px и перекодировано (оригинал — только «как файл»); видео — по выбору «Качество»
+  if (!opts.asFile) file = await shrinkForSend(chatId, file, opts.quality ?? 'original');
   const img = opts.asFile ? null : await describeImage(file);
   const vid = opts.asFile || img ? null : await describeVideo(file);
   if (vid) {
@@ -527,14 +565,22 @@ export function discardUnsent(clientId: string): void {
   engine.call({ type: 'discard', clientId }).catch(() => {});
 }
 
+/** Файлов в одном альбоме (пузыре), как в Telegram. */
+const ALBUM_MAX = 10;
 /** Несколько файлов разом — одной группой (в ленте один пузырь, как альбом в Telegram); подпись — у последнего. */
 export async function sendFiles(chatId: number, files: File[], caption: string, replyToId: number | null = null, opts: SendOpts = {}): Promise<void> {
   files = rejectTooBig(files);
   if (!files.length) return;
   sentSound();
   if (files.length === 1) return sendFile(chatId, files[0], caption, replyToId, null, opts);
-  const groupId = crypto.randomUUID();
-  for (let i = 0; i < files.length; i++) await sendFile(chatId, files[i], i === files.length - 1 ? caption : '', i === 0 ? replyToId : null, groupId, opts);
+  // отменённое сжатие одного видео (× в плашке) не отменяет остальные файлы альбома
+  const skipCancelled = (e: unknown) => { if ((e as Error)?.name !== 'AbortError') throw e; };
+  // как в Telegram: альбомы по 10; подпись — у последнего файла последнего альбома
+  let groupId = '';
+  for (let i = 0; i < files.length; i++) {
+    if (i % ALBUM_MAX === 0) groupId = files.length - i > 1 ? crypto.randomUUID() : '';
+    await sendFile(chatId, files[i], i === files.length - 1 ? caption : '', i === 0 ? replyToId : null, groupId || null, opts).catch(skipCancelled);
+  }
 }
 
 /** Уже загруженный трек (из музыки профиля) — в чат без новой загрузки: тот же файл по id. */
