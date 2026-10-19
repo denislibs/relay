@@ -3,3 +3,4 @@ node_modules
 apps/web/dist
 packages/relay-ui/tokens.css
 storybook-static
+docker/nginx/certs

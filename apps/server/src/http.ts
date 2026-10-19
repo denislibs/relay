@@ -4,8 +4,6 @@ import { searchMedia, searchPeople, topPeers } from './domain/globalSearch';
 import { createBus } from './bus';
 import { clientIp } from './device';
 import type { Server } from 'bun';
-import { existsSync, statSync } from 'node:fs';
-import { extname, join, resolve, sep } from 'node:path';
 import { clearSessionCookie, createSession, createUser, deleteSession, readSessionToken, sessionCookie, sessionFromToken } from './auth';
 import { announceLogin, announceSessionsChanged, assertConfirmed, checkSocket, confirmSession, listSessions, sessionEnded, sweepInactive, terminateOthers, terminateSession, trackSocket, untrackSocket } from './domain/sessions';
 import { deleteDirectChat, createChat, createGroup, openDirect, messageAtDate, getChatMedia, getChatMediaCounts, getHistory, getMessagesByIds, listChats, listChatsPage } from './domain/chats';
@@ -63,40 +61,6 @@ const INLINE_MIME = /^(image\/(jpeg|png|webp|gif|avif)|video\/(mp4|webm|ogg|quic
 
 const API = /^\/(health|me|users|contacts|settings|privacy|blocks|chats|presence|search|uploads|files|push|sessions|ws|dev|logout|auth|link-preview|groups|join)(\/|$)/;
 
-/**
- * Файл с ETag (размер + время изменения): no-cache без валидатора значит «качай целиком при каждой загрузке»,
- * с ним перепроверка — это 304 без тела. Сжатая копия — свой тег, иначе кэш смешает варианты.
- */
-function fileResponse(path: string, type: string, ifNoneMatch: string, cacheControl: string, zipped: boolean): Response {
-  const st = statSync(path);
-  const etag = `W/"${st.size.toString(36)}-${Math.floor(st.mtimeMs).toString(36)}${zipped ? '-gz' : ''}"`;
-  const headers: Record<string, string> = { 'content-type': type, vary: 'accept-encoding', etag, 'cache-control': cacheControl };
-  if (zipped) headers['content-encoding'] = 'gzip';
-  const tags = ifNoneMatch.split(',').map((t) => t.trim());
-  if (tags.includes(etag) || tags.includes('*')) return new Response(null, { status: 304, headers });
-  return new Response(Bun.file(path), { headers });
-}
-
-/** Статика клиента из WEB_DIST. Путь не может выйти за папку; пути без расширения — SPA, отдаём index.html. */
-function serveStatic(pathname: string, acceptEncoding = '', ifNoneMatch = ''): Response {
-  const dist = resolve(process.env.WEB_DIST ?? join(import.meta.dir, '..', '..', 'web', 'dist'));
-  let decoded: string;
-  try { decoded = decodeURIComponent(pathname); } catch { return new Response('Bad request', { status: 400 }); }
-  const file = resolve(dist, '.' + (decoded === '/' ? '/index.html' : decoded));
-  const inside = file === dist || file.startsWith(dist + sep);
-  if (inside && existsSync(file) && statSync(file).isFile()) {
-    // рядом лежит сжатая копия (узоры обоев: .svg.gz) и браузер принимает gzip — отдаём её, тип — от исходного файла
-    const gz = file + '.gz';
-    const zipped = /\bgzip\b/.test(acceptEncoding) && existsSync(gz);
-    // узоры не меняются между сборками (новый узор — новое имя); остальное без хэша в имени: браузер обязан перепроверять
-    return fileResponse(zipped ? gz : file, Bun.file(file).type, ifNoneMatch, decoded.startsWith('/patterns/') ? 'public, max-age=604800' : 'no-cache', zipped);
-  }
-  if (!extname(decoded) && existsSync(join(dist, 'index.html'))) {
-    return fileResponse(join(dist, 'index.html'), 'text/html;charset=utf-8', ifNoneMatch, 'no-cache', false);
-  }
-  return new Response('Not found', { status: 404 });
-}
-
 export function createServer(opts: { port: number }): Server {
   // кадры мимо журнала — через Valkey, чтобы дошли до сокетов в любом процессе
   const bus = createBus((topic, msg) => { server.publish(topic, msg); });
@@ -107,7 +71,8 @@ export function createServer(opts: { port: number }): Server {
       const url = new URL(req.url);
       try {
         if (url.pathname === '/health') return Response.json({ ok: true });
-        if ((req.method === 'GET' || req.method === 'HEAD') && !API.test(url.pathname)) return serveStatic(url.pathname, req.headers.get('accept-encoding') ?? '', req.headers.get('if-none-match') ?? '');
+        // только API: статику клиента раздаёт nginx (docker/nginx), сюда доходит лишь то, чего нет в сборке
+        if (!API.test(url.pathname)) return fail('not_found');
 
         if (process.env.DEV_LOGIN === '1' && req.method === 'POST' && url.pathname === '/dev/login') {
           const { name, phone } = (await req.json()) as { name: string; phone?: string };
