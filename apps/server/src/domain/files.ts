@@ -4,6 +4,7 @@ import { abortMultipart, completeMultipart, createMultipart, listMultipart, list
 import { sql } from '../db';
 import { enqueue } from '../jobs/queue';
 import { DomainError } from './errors';
+import { checkUploadAllowed } from './uploadLimits';
 
 export const MAX_FILE = MAX_FILE_BYTES;
 /** Срок подписанного PUT: проверяется в начале запроса, поэтому и многоминутной загрузке 2 ГБ хватает. Короткий — чтобы
@@ -93,6 +94,8 @@ export async function createUpload(userId: number, meta: UploadMeta): Promise<{ 
   const waveform = voice ? cleanWaveform(meta.waveform) : null;
   // название и исполнитель — только у музыки, без управляющих символов и не длиннее 200
   const tag = (v: unknown) => (audio && typeof v === 'string' ? v.replace(/[\u0000-\u001f]/g, ' ').trim().slice(0, 200) || null : null);
+  // пределы на пользователя (число идущих загрузок, байты за час и сутки, flood) — после проверки заявки: кривая квоту не тратит
+  await checkUploadAllowed(userId, meta.size);
   const [row] = await sql`insert into attachments (owner_id, mime, name, size, width, height, kind, duration, waveform, title, performer, status)
     values (${userId}, ${mime}, ${name}, ${meta.size}, ${w}, ${h}, ${kind}, ${duration}, ${waveform}, ${tag(meta.title)}, ${tag(meta.performer)}, 'pending') returning id`;
   const id = row.id as string;

@@ -166,6 +166,24 @@ function closeSession(key: string): void {
   sessions.delete(key);
 }
 
+/** Отказ сервера в загрузке по пределам (apps/server/src/domain/uploadLimits.ts): сообщение — «не отправлено», причина — тостом. */
+const UPLOAD_REFUSAL: Record<string, string> = {
+  upload_limit: 'Слишком много файлов загружается одновременно. Дождитесь окончания загрузки',
+  upload_quota: 'Достигнут лимит загрузки файлов. Пожалуйста, повторите попытку позже',
+  flood: 'Слишком много попыток. Пожалуйста, повторите попытку позже',
+};
+const refusalToasted = new Set<string>();
+function toastUploadRefusals(items: Item[]): void {
+  for (const m of items) {
+    const code = m.error as string | undefined, att = m.attachment as { id?: string } | null | undefined;
+    if (m.status !== 'failed' || !code || !UPLOAD_REFUSAL[code] || !att || att.id) continue;
+    const key = m.key as string;
+    if (refusalToasted.has(key)) continue;
+    refusalToasted.add(key);
+    showToast(UPLOAD_REFUSAL[code], 4000);
+  }
+}
+
 /** Окно ленты кадра; onFirst — первый снимок (или 700 мс без него: не держим пользователя на прежнем чате). */
 function startFeed(frame: ChatFrame, anchor: Anchor | undefined, onFirst: (patch: Partial<ChatFrame>) => void): void {
   const s: Session = { chatId: frame.chatId, mirror: new Mirror(), anchor, moving: true, first: true, timer: null, watch: null as never };
@@ -177,6 +195,7 @@ function startFeed(frame: ChatFrame, anchor: Anchor | undefined, onFirst: (patch
     s.moving = false;
     const meta = (s.mirror.meta('~window') as unknown as FeedMeta) ?? null;
     const patch = { messages: s.mirror.list() as Item[], feedMeta: meta };
+    toastUploadRefusals(patch.messages);
     if (s.first) first(patch); else patchFrame(frame.key, patch);
     // окно дошло до последних сообщений — снова живой хвост (новые сообщения появятся сами)
     if (s.anchor && meta?.live && !meta.hasNewer) { s.anchor = undefined; s.watch.update({ kind: 'messages', chatId: frame.chatId, limit: WINDOW }); }
@@ -558,7 +577,7 @@ export function rejectTooBig(files: File[]): File[] {
 }
 
 /** Неотправленное сообщение: отправить ещё раз (после отказа) или убрать совсем (идущая загрузка прервётся). */
-export function retrySend(clientId: string): void { engine.call({ type: 'retry', clientId }).catch(() => {}); }
+export function retrySend(clientId: string): void { refusalToasted.delete(clientId); engine.call({ type: 'retry', clientId }).catch(() => {}); }
 export function discardUnsent(clientId: string): void {
   const url = localPreviews.get(clientId);
   if (url) { URL.revokeObjectURL(url); localPreviews.delete(clientId); }

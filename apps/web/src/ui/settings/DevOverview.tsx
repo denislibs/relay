@@ -120,6 +120,15 @@ export function DevOverview(props: { onHide: () => void }) {
         <KV label="NOTIFY → poke" value={s?.notifyMs == null ? '—' : `${s.notifyMs.toFixed(1)} мс`} />
       </Section>
 
+      <Section title="Файлы на сервере" footer="Квота загрузок — окно с первой загрузки в нём; пределы задают UPLOAD_* в окружении сервера.">
+        <KV label="Файлов" value={num(s?.storage?.files)} />
+        <KV label="Объём" value={s?.storage ? bytes(s.storage.bytes + s.storage.variantsBytes) : '—'} title={s?.storage ? `оригиналы ${bytes(s.storage.bytes)}, копии видео ${bytes(s.storage.variantsBytes)}` : undefined} />
+        <KV label="Загружается" value={s?.storage ? `${s.storage.pending} / ${s.storage.quota.maxPending}` : '—'} warn={!!s?.storage && s.storage.pending >= s.storage.quota.maxPending} />
+        <KV label="За час" value={s?.storage ? `${bytes(s.storage.quota.hourBytes)} / ${bytes(s.storage.quota.bytesPerHour)}` : '—'} />
+        <KV label="За сутки" value={s?.storage ? `${bytes(s.storage.quota.dayBytes)} / ${bytes(s.storage.quota.bytesPerDay)}` : '—'} />
+        <KV label="Загрузок за минуту" value={s?.storage ? `${s.storage.quota.minuteUploads} / ${s.storage.quota.perMinute}` : '—'} />
+      </Section>
+
       <Section title="Очереди">
         <KV label="Outbox: в очереди" value={num(q.outbox.pending)} />
         <KV label="Outbox: с ошибкой" value={num(q.outbox.failed)} warn={q.outbox.failed > 0} />

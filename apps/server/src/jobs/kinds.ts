@@ -2,6 +2,7 @@
 import { sql } from '../db';
 import { deliver } from '../domain/devOutbox';
 import { sweepPendingUploads } from '../domain/files';
+import { collectGarbage, purgeObjects } from '../domain/storageGc';
 import { sweepInactive } from '../domain/sessions';
 import { deliverPush, planPush, type PushMessage, type PushPayload } from '../domain/push';
 import { reindexStep, syncMessage } from '../search/messagesIndex';
@@ -65,6 +66,18 @@ register('video.process', async (p: { id: string }) => {
 // объект хранилища, на который больше никто не ссылается (старый оригинал после перепаковки)
 register('storage.delete', async (p: { key: string }) => {
   await s3().delete(p.key);
+});
+
+// мусор в хранилище (domain/storageGc.ts): несколько пачек за запуск; не дошли до конца — продолжить сразу
+register('storage.gc', async () => {
+  const r = await collectGarbage();
+  if (r.deleted) console.log(`storage gc: -${r.deleted} of ${r.scanned}`);
+  return { again: { inSec: r.done ? SWEEP_EVERY_SEC : 0 } };
+});
+
+// объекты удалённого сборкой мусора вложения: оригинал, перепакованный оригинал, копии видео (удаление идемпотентно)
+register('attachment.purge', async (p: { keys: string[] }) => {
+  await purgeObjects(p.keys);
 });
 
 register('link.preview', async (p: { chatId: number; id: number; url: string }) => {

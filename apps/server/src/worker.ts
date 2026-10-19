@@ -7,6 +7,7 @@ import { scheduleReindexIfStale } from './search/messagesIndex';
 // одна на всю систему, сколько бы воркеров ни было
 await ensurePeriodic('sessions.sweep');
 await ensurePeriodic('uploads.sweep');
+await ensurePeriodic('storage.gc');
 // индекс поиска не той версии или ещё не построен — перестройка (до её конца поиск идёт по Postgres)
 await scheduleReindexIfStale().catch((e) => console.error('search: cannot schedule reindex:', e));
 

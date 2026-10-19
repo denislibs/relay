@@ -7,7 +7,12 @@ import { useEffect, useState } from 'preact/hooks';
 import { watchDev } from '../settingsData';
 import { ingestLogErrors, startMetrics, type MainMetrics } from './metrics';
 
-export interface ServerStats { at: number; userId: number; seq: number; sockets: number; journal: { size: number; minSeq: number | null }; notifyMs: number | null }
+export interface ServerStats { at: number; userId: number; seq: number; sockets: number; journal: { size: number; minSeq: number | null }; notifyMs: number | null; storage?: StorageStats }
+/** Хранилище пользователя и израсходованная квота загрузок (apps/server/src/domain/uploadLimits.ts storageUsage). */
+export interface StorageStats {
+  files: number; bytes: number; pending: number; variantsBytes: number;
+  quota: { hourBytes: number; dayBytes: number; minuteUploads: number; maxPending: number; perMinute: number; bytesPerHour: number; bytesPerDay: number };
+}
 export type ServerState = { stats: ServerStats | null; error: 'unavailable' | 'offline' | null };
 
 const SERVER_MS = 2000;

@@ -9,6 +9,7 @@ import { announceLogin, announceSessionsChanged, assertConfirmed, checkSocket, c
 import { deleteDirectChat, createChat, createGroup, openDirect, messageAtDate, getChatMedia, getChatMediaCounts, getHistory, getMessagesByIds, listChats, listChatsPage } from './domain/chats';
 import { sql } from './db';
 import { DomainError } from './domain/errors';
+import { storageUsage } from './domain/uploadLimits';
 import { ensureServiceChat } from './domain/service';
 import { processAlive } from './domain/liveRegistry';
 import { chatMembers, connected, disconnected, listPresence, type Publish } from './domain/presence';
@@ -27,8 +28,10 @@ import { publicAuthRoute, privateAuthRoute } from './authRoutes';
 import { groupRoute } from './groupRoutes';
 import { addContact, blockUser, listBlocked, listContacts, removeContact, resolveUser, unblockUser, updateContact } from './domain/contacts';
 
-const STATUS: Record<string, number> = { bad_frame: 400, too_long: 400, file_too_big: 413, username_invalid: 400, username_reserved: 400, username_taken: 409, bio_too_long: 400, note_too_long: 400, name_invalid: 400, birthday_invalid: 400, links_invalid: 400, folder_title: 400, folder_empty: 400, folder_too_many_chats: 400, folder_emoji: 400, folders_limit: 400, unauthorized: 401, not_member: 403, blocked: 403, not_found: 404, code_invalid: 400, code_expired: 400, flood: 429, fresh_session: 403, password_invalid: 400, password_missing: 400, recovery_unavailable: 400, email_invalid: 400, qr_expired: 400, passkey_not_found: 404, passkey_invalid: 400, forbidden: 403, upload_missing: 409, upload_mismatch: 400, upload_pending: 409, upload_incomplete: 409, photo_invalid: 400 };
-const fail = (code: string) => Response.json({ code }, { status: STATUS[code] ?? 500 });
+const STATUS: Record<string, number> = { bad_frame: 400, too_long: 400, file_too_big: 413, username_invalid: 400, username_reserved: 400, username_taken: 409, bio_too_long: 400, note_too_long: 400, name_invalid: 400, birthday_invalid: 400, links_invalid: 400, folder_title: 400, folder_empty: 400, folder_too_many_chats: 400, folder_emoji: 400, folders_limit: 400, unauthorized: 401, not_member: 403, blocked: 403, not_found: 404, code_invalid: 400, code_expired: 400, flood: 429, fresh_session: 403, password_invalid: 400, password_missing: 400, recovery_unavailable: 400, email_invalid: 400, qr_expired: 400, passkey_not_found: 404, passkey_invalid: 400, forbidden: 403, upload_missing: 409, upload_mismatch: 400, upload_pending: 409, upload_incomplete: 409, upload_limit: 429, upload_quota: 429, photo_invalid: 400 };
+const fail = (code: string, retryAfter?: number) => retryAfter
+  ? Response.json({ code, retryAfter }, { status: STATUS[code] ?? 500, headers: { 'retry-after': String(retryAfter) } })
+  : Response.json({ code }, { status: STATUS[code] ?? 500 });
 
 /** checkedAt — когда сокет последний раз отмечал активность и проверял свой сеанс (domain/sessions.checkSocket). */
 export type WsData = {
@@ -210,8 +213,8 @@ export function createServer(opts: { port: number }): Server {
           const hit = devStatsCache.get(userId);
           if (hit && Date.now() - hit.at < devStatsMs) return Response.json(await hit.body);
           const body = (async () => {
-            const [j, notifyMs] = await Promise.all([journalStats(userId), notifyLatency().catch(() => null)]);
-            return { at: Date.now(), userId, seq: j.seq, sockets: userSockets.get(userId) ?? 0, journal: { size: j.size, minSeq: j.minSeq }, notifyMs };
+            const [j, notifyMs, storage] = await Promise.all([journalStats(userId), notifyLatency().catch(() => null), storageUsage(userId)]);
+            return { at: Date.now(), userId, seq: j.seq, sockets: userSockets.get(userId) ?? 0, journal: { size: j.size, minSeq: j.minSeq }, notifyMs, storage };
           })();
           devStatsCache.set(userId, { at: Date.now(), body });
           if (devStatsCache.size > 1000) devStatsCache.clear();
@@ -334,7 +337,7 @@ export function createServer(opts: { port: number }): Server {
         }
         return new Response('Not found', { status: 404 });
       } catch (err) {
-        if (err instanceof DomainError) return fail(err.code);
+        if (err instanceof DomainError) return fail(err.code, err.retryAfter);
         console.error(err);
         return fail('internal');
       }

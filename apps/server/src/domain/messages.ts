@@ -68,6 +68,8 @@ export async function sendMessage(
         where m.chat_id = ${f.chatId} and m.id = ${f.id} and m.id >= ${from.historyFrom} and not m.deleted and m.service_type is null`;
       if (!src) throw new DomainError('not_found', 'forward source');
       attachment = (src.attachment as Record<string, unknown> | null) ?? null;
+      // строка вложения — for share до конца транзакции: сборка мусора (storageGc.ts) не удалит его посреди пересылки
+      if (attachment && !(await tx`select 1 from attachments where id = ${attachment.id as string} for share`).length) throw new DomainError('not_found', 'forward attachment');
       kind = src.kind as string;
       fwdTodo = (src.todo as Todo | null) ?? null;   // пересланный чек-лист — копия, только для чтения
       const dropCaption = !!f.hideCaption && !!attachment;
