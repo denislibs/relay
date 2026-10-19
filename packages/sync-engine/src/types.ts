@@ -1,4 +1,4 @@
-import type { GroupInfo, MyMembership } from '@relay/protocol';
+import type { GroupInfo, MediaTab, MyMembership } from '@relay/protocol';
 import type { Birthday, Block, ChatFolder, Entity, ForwardInfo, ForwardRef, LinkPreview, PrivacyKey, PrivacyMode, ProfileLink, ServiceType, Todo, TodoInput, TodoServiceData, VideoVariant } from '@relay/protocol';
 
 export type Status = 'pending' | 'sent' | 'read' | 'failed';
@@ -66,6 +66,11 @@ export interface LocalChat {
   group?: GroupInfo;      // группа: информация и настройки (название и фото — отсюда)
   me?: MyMembership;      // группа: моя роль и права
   membersDone?: boolean;  // группа: участники загружены (true — целиком, false — первые 200 большой группы; нет — не загружали)
+  /** «Общие медиа» (media.ts): сколько во вкладках — снимок сервера, дальше ведёт onMessage; нет — не спрашивали или сбросили */
+  mediaCounts?: Record<MediaTab, number>;
+  mediaCountsAt?: number; // до какого id сообщения уже учтены в mediaCounts (новее — прибавляются по приходу)
+  /** вкладка известна подряд от новых: true — целиком, число — с этого id (страницы старше просим с него) */
+  mediaDone?: Partial<Record<MediaTab, number | true>>;
 }
 
 export interface OutboxEntry {
@@ -114,6 +119,9 @@ export type Query =
   | { kind: 'blocked' }
   /** участники группы (members.ts): роль, должность, имя, фото, присутствие; по порядку; служебный ~members {loaded, complete} */
   | { kind: 'members'; chatId: number }
+  /** вкладка «Общих медиа» (media.ts): сообщения вкладки, новые сверху, до limit; служебный ~media {done, loading, counts} —
+   *  done: больше нет ни в памяти, ни на сервере; counts — сколько во всех вкладках (null — ещё не знаем) */
+  | { kind: 'media'; chatId: number; tab: MediaTab; limit: number }
   /** раздел «Для разработчиков»: один элемент devStats — снимок состояния движка, не чаще раза в секунду */
   | { kind: 'devStats' }
   /** журнал движка (devlog.ts): снимок — события новее since, дальше — только новые, пачкой раз в 250 мс */

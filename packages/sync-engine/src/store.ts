@@ -7,7 +7,7 @@ import { applyContactsChanged, ContactsCache } from './contacts';
 import { SettingsCache } from './settings';
 import { applyBlocksChanged, BlocksCache } from './blocks';
 import { applyMembersUpdate, MembersCache } from './members';
-import { onMessage, recomputeLast, unreadAfterRead, unreadOnArrival } from './derive';
+import { onMessage, recomputeLast, tabsOf, unreadAfterRead, unreadOnArrival } from './derive';
 import { nextV } from './rows';
 import { PENDING_BASE, toQuote, type LocalChat, type LocalMessage, type OutboxEntry, type QuoteMsg } from './types';
 
@@ -177,7 +177,10 @@ export class Store {
     if (this.loaded.has(chatId)) return;
     const rows = await getByChat(this.db, chatId);
     const map = this.map(chatId);
-    for (const m of rows) if (!map.has(m.key)) map.set(m.key, m); // не затираем то, что пришло, пока читали
+    for (const m of rows) {
+      delete (m as LocalMessage & { tab?: string }).tab;   // поле индекса byTab — только в IndexedDB
+      if (!map.has(m.key)) map.set(m.key, m); // не затираем то, что пришло, пока читали
+    }
     this.loaded.add(chatId);
     this.touch(chatId);
     const chat = this.chats.get(chatId);
@@ -365,6 +368,7 @@ export class Store {
     const snap = chat.snapLast?.sort, last = chat.ranges[chat.ranges.length - 1];
     if (snap == null || sort <= snap || (last && snap <= last[1])) { extendLive(chat, sort, own); return; }
     chat.ranges.push([snap, sort]); chat.seed = snap;
+    delete chat.mediaDone;   // над известным во вкладках теперь дыра — их заново от нового края
     this.placeSnapLast(chat);
   }
 
@@ -391,7 +395,7 @@ export class Store {
       const c = this.chats.get(id);
       if (!c || c.snapLast?.sort !== sort) continue;
       const last = c.ranges[c.ranges.length - 1];
-      if (!last || sort > last[1]) { c.ranges.push([sort, sort]); c.seed = sort; }
+      if (!last || sort > last[1]) { c.ranges.push([sort, sort]); c.seed = sort; delete c.mediaDone; }
       this.placeSnapLast(c);
       this.markChat(c);
     }
@@ -450,7 +454,7 @@ export class Store {
       if (m.senderId === this.userId && m.id != null && m.id <= upToId && m.status !== 'read') this.putMessage({ ...m, status: 'read' });
     }
     // сообщения не загружены — прочитанность видна по chat.last
-    if (chat.last && chat.last.senderId === this.userId && chat.last.id != null && chat.last.id <= upToId && chat.last.status !== 'read') onMessage(this, chat, { ...chat.last, status: 'read' }, 'edited');
+    if (chat.last && chat.last.senderId === this.userId && chat.last.id != null && chat.last.id <= upToId && chat.last.status !== 'read') onMessage(this, chat, { ...chat.last, status: 'read' }, 'edited', chat.last);
     this.markChat(chat);
   }
 
@@ -583,7 +587,9 @@ export class Store {
     if (chat0?.snapLast?.id === id) { chat0.snapLast = { ...chat0.snapLast, ...patch }; this.markChat(chat0); }   // ждёт журнала — правка не теряется
     // сообщение не загружено — правится только превью последнего
     const chat = this.chats.get(chatId);
-    if (chat?.last && chat.last.id === id) onMessage(this, chat, { ...chat.last, ...patch }, patch.deleted && !chat.last.deleted ? 'deleted' : 'edited');
+    if (chat?.last && chat.last.id === id) { onMessage(this, chat, { ...chat.last, ...patch }, patch.deleted && !chat.last.deleted ? 'deleted' : 'edited', chat.last); return; }
+    // правка или удаление неизвестного: могло быть во вкладке — счётчики спросим заново
+    if (chat?.mediaCounts && id <= (chat.mediaCountsAt ?? 0) && ('body' in patch || 'deleted' in patch)) { delete chat.mediaCounts; delete chat.mediaCountsAt; this.markChat(chat); }
   }
 
   /** Черновики, ещё не отправленные на сервер (правки этого устройства). */
@@ -662,6 +668,7 @@ export class Store {
       if (map) for (const [k, m] of map) if (m.id != null) { map.delete(k); }
       const c = this.chats.get(chatId)!;
       c.unread = 0; c.knownMaxId = 0; c.ranges = []; delete c.historyStart; delete c.snapLast; delete c.seed; c.last = null;
+      delete c.mediaCounts; delete c.mediaCountsAt; delete c.mediaDone;
       this.markChat(c);
     }
     this.lastSeq = 0;
@@ -685,7 +692,8 @@ export class Store {
     }
     batch.put.chats = [...this.dirtyChats].map((id) => this.chats.get(id)).filter(Boolean) as LocalChat[];
     batch.del.chats = [...this.dirtyChats].filter((id) => !this.chats.has(id));
-    batch.put.messages = [...this.dirtyMessages.values()];
+    // основная вкладка «Общих медиа» (mediaTab, первая из tabsOf) — поле индекса byTab; в памяти его нет
+    batch.put.messages = [...this.dirtyMessages.values()].map((m) => { const tab = tabsOf(m)[0]; return tab ? { ...m, tab } : m; });
     batch.put.outbox = [...this.dirtyOutbox].map((k) => this.outbox.get(k)).filter(Boolean) as OutboxEntry[];
     batch.del.outbox = [...this.dirtyOutbox].filter((k) => !this.outbox.has(k));
     batch.put.pendingReads = [...this.dirtyReads].filter((c) => this.pendingReads.has(c)).map((c) => ({ chatId: c, upToId: this.pendingReads.get(c) }));
@@ -744,7 +752,7 @@ export class Store {
     this.dirtyMessages.set(m.key, m);
     const chat = this.ensureChat(m.chatId);
     this.touch(m.chatId);   // отсортированная лента устарела — derive может её читать
-    onMessage(this, chat, m, !prev ? 'added' : m.deleted && !prev.deleted ? 'deleted' : 'edited');
+    onMessage(this, chat, m, !prev ? 'added' : m.deleted && !prev.deleted ? 'deleted' : 'edited', prev);
   }
 
   /** Версии строк чатов (только в памяти, общий счётчик rows.nextV): подпись строки списка. */

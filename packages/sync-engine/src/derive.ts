@@ -1,4 +1,4 @@
-import type { Message } from '@relay/protocol';
+import { mediaTabs, type MediaTab, type Message } from '@relay/protocol';
 import type { Store } from './store';
 import type { LocalChat, LocalMessage } from './types';
 
@@ -8,11 +8,13 @@ import type { LocalChat, LocalMessage } from './types';
  */
 
 /**
- * Сообщение чата добавлено, изменено или удалено (m — уже новое состояние; при отмене неотправленного — убранное).
+ * Сообщение чата добавлено, изменено или удалено (m — уже новое состояние; при отмене неотправленного — убранное;
+ * prev — прежнее, если было известно).
  * Новое или правка последнего — становится last; удалили последнее — last и lastAt = предыдущего не удалённого
  * из памяти (чат опускается к дате нового верхнего сообщения, как в Telegram); не удалённых нет — lastAt прежний.
  */
-export function onMessage(store: Store, chat: LocalChat, m: LocalMessage, kind: 'added' | 'edited' | 'deleted'): void {
+export function onMessage(store: Store, chat: LocalChat, m: LocalMessage, kind: 'added' | 'edited' | 'deleted', prev?: LocalMessage): void {
+  countMedia(chat, m, prev);
   const last = chat.last;
   if (kind === 'deleted') {
     if (last?.key === m.key) {
@@ -56,4 +58,29 @@ export function unreadAfterRead(store: Store, chat: LocalChat, from: number, to:
     if (m.senderId !== store.userId && m.id != null && m.id > from && m.id <= to) n++;
   }
   return Math.max(0, chat.unread - n);
+}
+
+/** Вкладки «Общих медиа», где лежит сообщение: удалённое и неотправленное — ни в одной. */
+export function tabsOf(m: LocalMessage): MediaTab[] {
+  if (m.deleted || m.id == null) return [];
+  return mediaTabs({ kind: m.kind ?? 'text', attachment: m.attachment as Message['attachment'], body: m.body, entities: m.entities, service: m.service as Message['service'] });
+}
+
+/**
+ * Счётчики вкладок (chat.mediaCounts), пока они есть. Новее учтённого (mediaCountsAt) — прибавляется и сдвигает
+ * границу: повторный приход того же (снимок, перезапуск, страница) не считается дважды. Уже учтённое — разница
+ * вкладок до и после (правка добавила или убрала ссылку, удаление — минус); прежнее неизвестно — не трогаем.
+ */
+function countMedia(chat: LocalChat, m: LocalMessage, prev: LocalMessage | undefined): void {
+  const counts = chat.mediaCounts;
+  if (!counts || m.id == null) return;
+  if (m.id > (chat.mediaCountsAt ?? 0)) {
+    chat.mediaCountsAt = m.id;
+    for (const t of tabsOf(m)) counts[t]++;
+    return;
+  }
+  if (prev?.id == null) return;
+  const before = tabsOf(prev), after = tabsOf(m);
+  for (const t of before) if (!after.includes(t)) counts[t] = Math.max(0, counts[t] - 1);
+  for (const t of after) if (!before.includes(t)) counts[t]++;
 }

@@ -63,7 +63,7 @@ function chatListItem(store: Store, c: LocalChat, mute: Map<number, number | nul
 type Quote = QuoteMsg | null;
 const msgSig = (m: LocalMessage, q: Quote): string => `${m.id}|${m.status}|${m.sort}|${m.replyToId}|${m.body}|${m.editedAt ?? ''}|${m.deleted ? 1 : 0}|${m.reactions?.map((r) => r.userId + r.emoji).join(',') ?? ''}|${m.attachment ? m.attachment.id + ':' + (m.progress ?? '') + ':' + m.attachment.size + (m.attachment.preview ? ':p' : '') + ':' + (m.attachment.variants?.length ?? 0) : ''}|${q ? q.id + ':' + q.body + ':' + (q.deleted ? 1 : 0) + ':' + (q.attachment?.thumb?.length ?? 0) + ':' + (q.entities?.length ?? 0) : ''}|${m.error ?? ''}|${m.listened ? 1 : 0}|${m.entities?.map((e) => e.type + e.offset + ':' + e.length + (e.url ?? '')).join(',') ?? ''}|${m.todo ? JSON.stringify(m.todo) : ''}|${m.service?.data ? JSON.stringify(m.service.data) : ''}`;
 const msgCache = new WeakMap<LocalMessage, { sig: string; item: Item }>();
-const messageItem = (m: LocalMessage, q: Quote): { item: Item; sig: string } => {
+export const messageItem = (m: LocalMessage, q: Quote): { item: Item; sig: string } => {
   const sig = msgSig(m, q);
   let c = msgCache.get(m);
   if (!c || c.sig !== sig) { c = { sig, item: { ...m, reply: q } }; msgCache.set(m, c); }
@@ -178,6 +178,7 @@ export function computeQuery(store: Store, q: Query, mute: Map<number, number | 
     case 'settings':
     case 'blocked':
     case 'members':
+    case 'media':
     case 'devStats':
     case 'devLog':
       throw new Error(q.kind + ' is computed by the engine');
@@ -188,7 +189,7 @@ export function computeQuery(store: Store, q: Query, mute: Map<number, number | 
 export function affects(q: Query, touched: Set<number>): boolean {
   if (!touched.size) return false;
   if (q.kind === 'status' || q.kind === 'me' || q.kind === 'user' || q.kind === 'people' || q.kind === 'ops' || q.kind === 'contacts' || q.kind === 'settings' || q.kind === 'blocked' || q.kind === 'members' || q.kind === 'devStats' || q.kind === 'devLog') return false;   // у них свои флаги в движке
-  return q.kind === 'messages' ? touched.has(q.chatId) : true;
+  return q.kind === 'messages' || q.kind === 'media' ? touched.has(q.chatId) : true;
 }
 
 export function diffResults(prev: Result | null, next: Result): Patch | null {

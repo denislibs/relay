@@ -17,6 +17,7 @@ import { DevTools, loadSim, type SimState, type SubStat } from './devlog';
 import { simFlags, watchLoss } from './devsim';
 import { chatTitle, displayName, peopleResult, PeerSigs } from './names';
 import { applyMembersReply, membersResult, type MembersReply } from './members';
+import { MediaLoader, mediaResult } from './media';
 import type { Action, EngineConfig, LocalAttachment, LocalMessage, OutboxEntry, Patch, Query, SearchResult } from './types';
 
 export interface WatchHandle { update(q: Query): void; close(): void }
@@ -108,6 +109,8 @@ export class Engine {
   /** участники групп, о которых спросил интерфейс; asked — уже загружали за это подключение */
   private membersWants = new Set<number>();
   private membersAsked = new Set<number>();
+  /** «Общие медиа»: загрузка вкладок и счётчиков для подписок media (media.ts) */
+  private readonly media: MediaLoader;
   /** раздел «Для разработчиков»: журнал, снимок состояния, имитатор сети (devlog.ts) */
   readonly dev: DevTools;
 
@@ -152,6 +155,7 @@ export class Engine {
       changed: () => this.changed(),
     });
     this.blocks = new Blocks({ store, ops: this.ops, http: (path) => this.http(path), run: (fn) => this.run(fn), changed: () => this.changed() });
+    this.media = new MediaLoader(store, { online: () => this.online && this.ready, http: (path) => this.http(path), run: (fn) => this.run(fn), changed: () => this.changed() });
     this.sessions = new Sessions({ ops: this.ops, online: () => this.online, http: (path) => this.http(path) });
     this.session = new SessionEnd({
       httpBase: cfg.httpBase, headers: cfg.headers, fetch: this.dev.fetch,
@@ -283,6 +287,8 @@ export class Engine {
     if (w.q.kind === 'user' && w.q.userId !== this.cfg.userId) { this.usersAsked.delete(w.q.userId); this.userWants.add(w.q.userId); return; }
     // участники: из IndexedDB сразу, с сервера — раз за подключение (дальше свежими держит журнал)
     if (w.q.kind === 'members') { this.membersWants.add(w.q.chatId); this.fetchMembers(); return; }
+    // вкладка медиа: из памяти и IndexedDB сразу; с сервера — счётчики раз и страницы, когда не хватает
+    if (w.q.kind === 'media') { this.media.want(w.q); return; }
     if (w.q.kind !== 'messages') return;
     const { chatId, limit } = w.q;
     const q = w.q;
@@ -366,6 +372,7 @@ export class Engine {
       return { items: new Map(list.map((it) => [it.key, it])), order: list.map((it) => it.key), sig: new Map(list.map((it) => [it.key, JSON.stringify(it)])) };
     }
     if (q.kind === 'members') return membersResult(this.store, q.chatId, this.presence, this.meNow());
+    if (q.kind === 'media') return mediaResult(this.store, q, this.media.loading(q.chatId, q.tab));
     if (q.kind === 'people') return peopleResult(this.store, q.ids, q.ids.includes(this.cfg.userId) ? this.meNow() : null);
     if (q.kind === 'devStats' || q.kind === 'devLog') {
       const it = q.kind === 'devStats' ? this.dev.stats() : { key: 'devLog' };   // devLog идёт мимо compute (dev.pushLog)
@@ -670,6 +677,7 @@ export class Engine {
     this.fetchQuotes();
     this.fetchUsers();
     this.fetchMembers();
+    for (const w of this.watchers.values()) if (w.q.kind === 'media') this.media.want(w.q);
   }
 
   /** Присутствие из ответа сервера, если живого ещё нет (без связи — не знаем). */
@@ -1123,6 +1131,7 @@ export class Engine {
     // новое подключение — участников открытых подписок спросим заново (журнал мог потеряться: tooLong)
     this.membersAsked.clear();
     for (const w of this.watchers.values()) if (w.q.kind === 'members') this.membersWants.add(w.q.chatId);
+    this.media.reconnect();
     if (this.wantOnline) this.failures++;
     this.ready = false;
     this.changed();
