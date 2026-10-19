@@ -6,18 +6,19 @@ import { indexName, meili, MeiliError, waitTask } from './meili';
  * сервер (фильтр по чатам пользователя и перепроверка найденного в Postgres). Документ строится из текущей
  * строки messages, поэтому синхронизация идемпотентна и не зависит от порядка задач.
  */
-export const SEARCH_INDEX_VERSION = 1;
+// 2: вложения ищутся и по тегам трека (название, исполнитель) — смена версии перестраивает индекс
+export const SEARCH_INDEX_VERSION = 2;
 export const liveIndex = (): string => indexName('messages');
 
 const SETTINGS = {
-  searchableAttributes: ['body', 'attachmentName'],
+  searchableAttributes: ['body', 'attachmentName', 'attachmentTitle', 'attachmentPerformer'],
   filterableAttributes: ['chatId', 'id'],
   sortableAttributes: ['id'],
   // новые сверху, как в Telegram: сортировка раньше релевантности; совпадение по словам и опечаткам остаётся
   rankingRules: ['sort', 'words', 'typo', 'proximity', 'attribute', 'exactness'],
 };
 
-type Doc = { id: number; chatId: number; body: string; attachmentName: string | null };
+type Doc = { id: number; chatId: number; body: string; attachmentName: string | null; attachmentTitle: string | null; attachmentPerformer: string | null };
 
 export async function ensureIndex(uid: string): Promise<void> {
   try {
@@ -30,9 +31,10 @@ export async function ensureIndex(uid: string): Promise<void> {
 
 function docOf(r: Record<string, unknown>): Doc | null {
   if (r.deleted || r.service_type === 'login_code') return null;   // удалённые и коды входа не ищутся
-  const attachmentName = (r.attachment as { name?: string } | null)?.name ?? null;
-  if (!r.body && !attachmentName) return null;
-  return { id: Number(r.id), chatId: Number(r.chat_id), body: String(r.body ?? ''), attachmentName };
+  const a = r.attachment as { name?: string; title?: string; performer?: string } | null;
+  const attachmentName = a?.name || null, attachmentTitle = a?.title || null, attachmentPerformer = a?.performer || null;
+  if (!r.body && !attachmentName && !attachmentTitle && !attachmentPerformer) return null;
+  return { id: Number(r.id), chatId: Number(r.chat_id), body: String(r.body ?? ''), attachmentName, attachmentTitle, attachmentPerformer };
 }
 
 /** Индексы, в которые пишем: живой и, пока идёт перестройка, строящийся. */

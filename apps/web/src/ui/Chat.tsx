@@ -38,6 +38,7 @@ import { showToast, unblockUser, useUser } from '../settingsData';
 import { Feed, type MenuExtra } from './Feed';
 import { chatKindFor, mediaPolicy } from '../autoload';
 import { chatTime, chatTone, fileSize, isSystemChat, lastSeenText, shownBody, snippet } from './format';
+import { attachmentHit } from '../searchHit';
 import type { ProfilePhoto } from '@relay/protocol';
 import { avatarPhoto } from '../profilePhoto';
 import { cancelForwardDraft, endSelect, forwardElsewhere, patchForwardDraft, sendForwardDraft, startForward, startSelect } from '../forward';
@@ -442,7 +443,7 @@ export function Chat({ chatId, frameKey, active }: { chatId: number; frameKey: s
                       <Avatar name={who} tone={peerTone(x.senderId)} size={40} {...senderAvatar(x.senderId)} />
                       <span class="app-findrow-text">
                         <span class="app-findrow-top"><b>{who}</b><time>{chatTime(x.createdAt)}</time></span>
-                        <span class="app-findrow-body"><Highlight text={snippet(shownBody(x), found.q)} query={found.q} /></span>
+                        <span class="app-findrow-body"><Highlight text={attachmentHit(shownBody(x), x.attachment, found.q) ?? snippet(shownBody(x), found.q)} query={found.q} /></span>
                       </span>
                     </button>
                   );

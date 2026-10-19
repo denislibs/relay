@@ -48,6 +48,7 @@ export async function searchMessages(userId: number, q: string, opts: { chatId?:
 
 /**
  * Запасной поиск: подстрока без учёта регистра (индекс pg_trgm), новые сверху, страницами по beforeId.
+ * Ищет в тексте и во вложении: имя файла, название и исполнитель трека (как индекс Meilisearch).
  * chatId — внутри одного чата; без него — по всем чатам пользователя. Удалённые не ищутся.
  */
 export async function searchPostgres(userId: number, q: string, opts: { chatId?: number; beforeId?: number; limit?: number } = {}): Promise<{ hits: SearchHit[]; hasMore: boolean }> {
@@ -65,7 +66,10 @@ export async function searchPostgres(userId: number, q: string, opts: { chatId?:
       from messages m
       join chat_members cm on cm.chat_id = m.chat_id and cm.user_id = ${userId}
       join chats c on c.id = m.chat_id
-     where not m.deleted and m.body ilike ${pattern}
+     where not m.deleted
+       and (m.body ilike ${pattern}
+            or (m.attachment is not null   -- то же выражение, что в индексе messages_attachment_trgm
+                and (coalesce(m.attachment->>'name', '') || E'\n' || coalesce(m.attachment->>'title', '') || E'\n' || coalesce(m.attachment->>'performer', '')) ilike ${pattern}))
        ${opts.chatId ? sql`and m.chat_id = ${opts.chatId}` : sql``}
        ${opts.beforeId ? sql`and m.id < ${opts.beforeId}` : sql``}
      order by m.id desc

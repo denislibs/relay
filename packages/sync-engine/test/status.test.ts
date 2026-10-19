@@ -322,6 +322,38 @@ test('search: server when online, cached messages when offline', async () => {
   expect(offline.hits.map((h) => h.body)).toEqual(['про отпуск позже', 'обсудим отпуск']);
 });
 
+test('search: attachments by file name and track tags, on the server and offline', async () => {
+  const a = await srv.login('a'), b = await srv.login('b');
+  const chatId = await srv.chat(a.token, [a.userId, b.userId]);
+  const file = async (meta: { name: string; mime: string; kind: string; title?: string; performer?: string }) => {
+    const [att] = await sql`insert into attachments (owner_id, mime, name, size, kind, title, performer, status)
+      values (${b.userId}, ${meta.mime}, ${meta.name}, 1, ${meta.kind}, ${meta.title ?? null}, ${meta.performer ?? null}, 'ready') returning id`;
+    await sendMessage(b.userId, { chatId, clientId: crypto.randomUUID(), body: '', attachment: { id: att.id as string } });
+  };
+  await file({ name: 'track01.mp3', mime: 'audio/mpeg', kind: 'audio', title: 'Офисный планктон', performer: 'Ария' });
+  await file({ name: 'Отчёт за май.pdf', mime: 'application/pdf', kind: 'file' });
+  await sendMessage(b.userId, { chatId, clientId: crypto.randomUUID(), body: 'ничего' });
+  const ea = await open(srv.config(a));
+  ea.connect();
+  await ea.whenIdle();
+  type Res = { hits: { attachment: { name: string } | null }[]; source: string };
+  const names = (r: Res) => r.hits.map((h) => h.attachment?.name);
+  const online = (await ea.call({ type: 'search', q: 'планктон' })) as Res;
+  expect(online.source).toBe('server');
+  expect(names(online)).toEqual(['track01.mp3']);
+  expect(names((await ea.call({ type: 'search', q: 'отчёт', chatId })) as Res)).toEqual(['Отчёт за май.pdf']);
+  const feed = watchInto(ea, { kind: 'messages', chatId, limit: 10 });   // сообщения попадают в кэш
+  await feed.until((l) => l.length === 3);
+  await ea.whenIdle();
+  ea.disconnect();
+  for (const [q, want] of [['ПЛАНКТОН', 'track01.mp3'], ['ария', 'track01.mp3'], ['track01', 'track01.mp3'], ['за май', 'Отчёт за май.pdf']] as const) {
+    const off = (await ea.call({ type: 'search', q })) as Res;
+    expect(off.source).toBe('local');
+    expect(names(off)).toEqual([want]);
+    expect(names((await ea.call({ type: 'search', q, chatId })) as Res)).toEqual([want]);
+  }
+});
+
 test('sendFile: the blob waits in IndexedDB, uploads when online, the message carries the attachment', async () => {
   const a = await srv.login('a'), b = await srv.login('b');
   const chatId = await srv.chat(a.token, [a.userId, b.userId]);
