@@ -79,6 +79,7 @@ export interface OutboxEntry {
   noLinkPreview?: boolean;          // превью ссылки убрали в поле ввода
   link?: LinkPreview | null;        // превью, уже показанное в поле ввода, — в ленте сразу, до ответа сервера
   blocks?: Block[] | null;          // «статья»
+  upload?: { id: string; partSize: number; parts: number; done: number[] };   // большой файл частями: что уже принято (докачка)
 }
 
 export type Query =

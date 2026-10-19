@@ -13,7 +13,7 @@ import { ensureServiceChat } from './domain/service';
 import { processAlive } from './domain/liveRegistry';
 import { chatMembers, connected, disconnected, listPresence, type Publish } from './domain/presence';
 import { searchMessages } from './domain/search';
-import { confirmUpload, createUpload, downloadTtl, fileFor, signedDownload } from './domain/files';
+import { abortUpload, confirmUpload, createUpload, uploadParts, uploadStatus, downloadTtl, fileFor, signedDownload } from './domain/files';
 import { handleFrame } from './ws';
 import { pinMessage, unpinMessage } from './domain/pins';
 import { addProfileMusic, listProfileMusic, removeProfileMusic } from './domain/profileMusic';
@@ -27,7 +27,7 @@ import { publicAuthRoute, privateAuthRoute } from './authRoutes';
 import { groupRoute } from './groupRoutes';
 import { addContact, blockUser, listBlocked, listContacts, removeContact, resolveUser, unblockUser, updateContact } from './domain/contacts';
 
-const STATUS: Record<string, number> = { bad_frame: 400, too_long: 400, file_too_big: 413, username_invalid: 400, username_reserved: 400, username_taken: 409, bio_too_long: 400, note_too_long: 400, name_invalid: 400, birthday_invalid: 400, links_invalid: 400, folder_title: 400, folder_empty: 400, folder_too_many_chats: 400, folder_emoji: 400, folders_limit: 400, unauthorized: 401, not_member: 403, blocked: 403, not_found: 404, code_invalid: 400, code_expired: 400, flood: 429, fresh_session: 403, password_invalid: 400, password_missing: 400, recovery_unavailable: 400, email_invalid: 400, qr_expired: 400, passkey_not_found: 404, passkey_invalid: 400, forbidden: 403, upload_missing: 409, upload_mismatch: 400, upload_pending: 409, photo_invalid: 400 };
+const STATUS: Record<string, number> = { bad_frame: 400, too_long: 400, file_too_big: 413, username_invalid: 400, username_reserved: 400, username_taken: 409, bio_too_long: 400, note_too_long: 400, name_invalid: 400, birthday_invalid: 400, links_invalid: 400, folder_title: 400, folder_empty: 400, folder_too_many_chats: 400, folder_emoji: 400, folders_limit: 400, unauthorized: 401, not_member: 403, blocked: 403, not_found: 404, code_invalid: 400, code_expired: 400, flood: 429, fresh_session: 403, password_invalid: 400, password_missing: 400, recovery_unavailable: 400, email_invalid: 400, qr_expired: 400, passkey_not_found: 404, passkey_invalid: 400, forbidden: 403, upload_missing: 409, upload_mismatch: 400, upload_pending: 409, upload_incomplete: 409, photo_invalid: 400 };
 const fail = (code: string) => Response.json({ code }, { status: STATUS[code] ?? 500 });
 
 /** checkedAt — когда сокет последний раз отмечал активность и проверял свой сеанс (domain/sessions.checkSocket). */
@@ -227,6 +227,12 @@ export function createServer(opts: { port: number }): Server {
           return Response.json(await createUpload(userId, { mime: str(b.mime) ?? '', name: str(b.name) ?? 'file', size: typeof b.size === 'number' ? b.size : NaN,
             w: num(b.w), h: num(b.h), kind: str(b.kind), duration: num(b.duration), waveform: str(b.waveform), title: str(b.title), performer: str(b.performer) }));
         }
+        // большой файл частями: {parts:[n…]} → подписанные PUT на части; GET — какие части уже приняты; DELETE — отмена
+        const parts = /^\/uploads\/([0-9a-f-]{36})\/parts$/.exec(url.pathname);
+        if (req.method === 'POST' && parts) return Response.json(await uploadParts(userId, parts[1], ((await req.json().catch(() => null)) as { parts?: unknown } | null)?.parts));
+        if (req.method === 'GET' && parts) return Response.json(await uploadStatus(userId, parts[1]));
+        const upload = /^\/uploads\/([0-9a-f-]{36})$/.exec(url.pathname);
+        if (req.method === 'DELETE' && upload) { await abortUpload(userId, upload[1]); return new Response(null, { status: 204 }); }
         const confirmUp = /^\/uploads\/([0-9a-f-]{36})\/confirm$/.exec(url.pathname);
         if (req.method === 'POST' && confirmUp) return Response.json(await confirmUpload(userId, confirmUp[1]));
         const file = /^\/files\/([0-9a-f-]{36})(?:\/(preview|720))?$/.exec(url.pathname);

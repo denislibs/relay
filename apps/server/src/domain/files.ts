@@ -1,5 +1,6 @@
 import { MAX_FILE_BYTES, ROUND_MAX_SECONDS, WAVEFORM_BYTES, type Attachment, type AttachmentKind, type VideoVariant } from '@relay/protocol';
 import { S3Client } from 'bun';
+import { abortMultipart, completeMultipart, createMultipart, listMultipart, listParts, presignPart, type S3Conf } from './s3multipart';
 import { sql } from '../db';
 import { enqueue } from '../jobs/queue';
 import { DomainError } from './errors';
@@ -24,6 +25,27 @@ const s3opts = (endpoint: string | undefined) => ({
 });
 export const s3 = () => (internal ??= new S3Client(s3opts(process.env.S3_ENDPOINT)));
 const publicS3 = () => (external ??= new S3Client(s3opts(process.env.S3_PUBLIC_ENDPOINT ?? process.env.S3_ENDPOINT)));
+/** То же для multipart (s3multipart.ts): у Bun.S3Client этих вызовов нет. */
+const s3conf = (endpoint: string | undefined): S3Conf => {
+  const o = s3opts(endpoint);
+  return { endpoint: o.endpoint ?? `https://s3.${o.region}.amazonaws.com`, bucket: o.bucket, region: o.region, accessKeyId: o.accessKeyId ?? '', secretAccessKey: o.secretAccessKey ?? '' };
+};
+const mpInternal = () => s3conf(process.env.S3_ENDPOINT);
+const mpPublic = () => s3conf(process.env.S3_PUBLIC_ENDPOINT ?? process.env.S3_ENDPOINT);
+
+/**
+ * Большой файл (от 32 МБ) грузится частями, как в Telegram: обрыв посреди 2 ГБ теряет только недогруженные части.
+ * Части 8 МБ (больше 512 МБ — 16 МБ): кусок, который не жалко перегрузить, и не больше 10 000 частей (предел S3).
+ * Тесты уменьшают пороги (S3 требует от части не меньше 5 МБ, кроме последней).
+ */
+let multipartFrom = 32 * 1024 * 1024;
+let partOverride: number | null = null;
+const partBytes = (size: number) => partOverride ?? (size > 512 * 1024 * 1024 ? 16 : 8) * 1024 * 1024;
+export function setMultipart(from: number, part: number | null): void { multipartFrom = from; partOverride = part; }
+/** Срок ссылки на часть: проверяется в начале запроса; клиент берёт ссылки пачками перед самой загрузкой, истёкшую — заново. */
+const PART_TTL = 30 * 60;
+/** Сколько ссылок на части за один запрос. */
+const PARTS_PER_REQUEST = 64;
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
 
 const VOICE_MIME = /^audio\/(ogg|webm|mp4|mpeg|wav)$/;
@@ -49,7 +71,7 @@ export interface UploadMeta { mime: string; name: string; size: number; w?: numb
  * Шаг 1: запись pending и подписанный PUT на ключ = id. Подписан только хост (Bun.s3 не подписывает Content-Type и длину),
  * поэтому всё, что важно, проверяет confirmUpload по HEAD. mime в ответе — тот, с которым клиент обязан положить объект.
  */
-export async function createUpload(userId: number, meta: UploadMeta): Promise<{ id: string; url: string; mime: string; expiresIn: number }> {
+export async function createUpload(userId: number, meta: UploadMeta): Promise<{ id: string; url?: string; mime: string; expiresIn: number; multipart?: { partSize: number; parts: number } }> {
   if (!Number.isSafeInteger(meta.size) || meta.size <= 0) throw new DomainError('bad_frame', 'file size');
   if (meta.size > MAX_FILE) throw new DomainError('file_too_big');
   const mime = /^[\w.+-]+\/[\w.+-]+$/.test(meta.mime) ? meta.mime.toLowerCase() : 'application/octet-stream';
@@ -74,7 +96,69 @@ export async function createUpload(userId: number, meta: UploadMeta): Promise<{ 
   const [row] = await sql`insert into attachments (owner_id, mime, name, size, width, height, kind, duration, waveform, title, performer, status)
     values (${userId}, ${mime}, ${name}, ${meta.size}, ${w}, ${h}, ${kind}, ${duration}, ${waveform}, ${tag(meta.title)}, ${tag(meta.performer)}, 'pending') returning id`;
   const id = row.id as string;
-  return { id, url: publicS3().presign(id, { method: 'PUT', expiresIn: PUT_TTL }), mime, expiresIn: PUT_TTL };
+  if (meta.size < multipartFrom) return { id, url: publicS3().presign(id, { method: 'PUT', expiresIn: PUT_TTL }), mime, expiresIn: PUT_TTL };
+  // большой: загрузка частями — тип объекта задаётся здесь, ссылки на части клиент берёт в uploadParts
+  let uploadId: string;
+  try { uploadId = await createMultipart(mpInternal(), id, mime); }
+  catch (e) { await sql`delete from attachments where id = ${id}`; throw e; }
+  await sql`update attachments set upload_id = ${uploadId} where id = ${id}`;
+  const partSize = partBytes(meta.size);
+  return { id, mime, expiresIn: PART_TTL, multipart: { partSize, parts: Math.ceil(meta.size / partSize) } };
+}
+
+/** Pending-загрузка частями этого пользователя: строка и разбивка на части (размер части выводится из размера файла). */
+async function multipartOf(userId: number, id: string) {
+  if (!UUID.test(id)) throw new DomainError('not_found', 'attachment');
+  const [a] = await sql`select id, size, upload_id from attachments where id = ${id} and owner_id = ${userId} and status = 'pending'`;
+  if (!a?.upload_id) throw new DomainError('not_found', 'attachment');
+  const size = Number(a.size), partSize = partBytes(size);
+  return { id, uploadId: a.upload_id as string, size, partSize, parts: Math.ceil(size / partSize) };
+}
+
+/** Подписанные PUT на части (номера с 1). Повтор того же номера перезаписывает часть — так клиент перегружает оборванную. */
+export async function uploadParts(userId: number, id: string, numbers: unknown): Promise<{ urls: Record<number, string>; expiresIn: number }> {
+  const m = await multipartOf(userId, id);
+  if (!Array.isArray(numbers) || numbers.length === 0 || numbers.length > PARTS_PER_REQUEST
+    || !numbers.every((n) => Number.isInteger(n) && n >= 1 && n <= m.parts)) throw new DomainError('bad_frame', 'parts');
+  const pub = mpPublic(), urls: Record<number, string> = {};
+  for (const n of numbers as number[]) urls[n] = presignPart(pub, id, m.uploadId, n, PART_TTL);
+  return { urls, expiresIn: PART_TTL };
+}
+
+/** Какие части хранилище уже приняло (правильного размера): клиент сверяется, если его список разошёлся с сервером. */
+export async function uploadStatus(userId: number, id: string): Promise<{ partSize: number; parts: number; done: number[] }> {
+  const m = await multipartOf(userId, id);
+  return { partSize: m.partSize, parts: m.parts, done: (await goodParts(m)).map((p) => p.n) };
+}
+async function goodParts(m: { id: string; uploadId: string; size: number; partSize: number; parts: number }) {
+  const all = await listParts(mpInternal(), m.id, m.uploadId);
+  const want = (n: number) => (n < m.parts ? m.partSize : m.size - m.partSize * (m.parts - 1));
+  return all.filter((p) => p.n >= 1 && p.n <= m.parts && p.size === want(p.n));
+}
+
+/** confirm для загрузки частями: все части на месте → CompleteMultipartUpload; дальше обычная проверка объекта по HEAD. */
+async function completeUpload(a: Record<string, unknown>): Promise<void> {
+  const id = a.id as string, size = Number(a.size), partSize = partBytes(size);
+  const m = { id, uploadId: a.upload_id as string, size, partSize, parts: Math.ceil(size / partSize) };
+  let parts: { n: number; etag: string }[];
+  try { parts = await goodParts(m); }
+  catch (e) {
+    // уже собран (прошлый confirm оборвался после Complete): загрузки нет, а объект есть — проверит HEAD
+    if ((e as { s3Code?: string }).s3Code === 'NoSuchUpload') { await sql`update attachments set upload_id = null where id = ${id}`; return; }
+    throw e;
+  }
+  if (parts.length !== m.parts) throw new DomainError('upload_incomplete', `${parts.length}/${m.parts} parts`);
+  await completeMultipart(mpInternal(), id, m.uploadId, parts);
+  await sql`update attachments set upload_id = null where id = ${id}`;
+}
+
+/** Отмена загрузки владельцем (сообщение удалили из очереди): части и запись — сразу, а не через сутки. Готовое не трогаем. */
+export async function abortUpload(userId: number, id: string): Promise<void> {
+  if (!UUID.test(id)) return;
+  const [a] = await sql`delete from attachments where id = ${id} and owner_id = ${userId} and status = 'pending' returning id, upload_id`;
+  if (!a) return;
+  if (a.upload_id) await abortMultipart(mpInternal(), id, a.upload_id as string).catch(() => {});
+  await s3().delete(id).catch(() => {});
 }
 
 /**
@@ -86,6 +170,7 @@ export async function confirmUpload(userId: number, id: string): Promise<Attachm
   const [a] = await sql`select * from attachments where id = ${id} and owner_id = ${userId}`;
   if (!a) throw new DomainError('not_found', 'attachment');
   if (a.status === 'ready') return attachmentOf(a, null, await variantsOf(sql, id));
+  if (a.upload_id) await completeUpload(a);
   let stat: { size: number; type: string };
   try { stat = await s3().file(id).stat(); } catch { throw new DomainError('upload_missing'); }
   const type = stat.type.split(';')[0].trim().toLowerCase();
@@ -176,7 +261,14 @@ export function signedDownload(f: { key: string; mime: string; name: string }, o
 
 /** pending старше суток — брошенные загрузки: запись и объект (если клиент успел его положить) удаляем. */
 export async function sweepPendingUploads(olderThanMs = 24 * 3600_000): Promise<number> {
-  const rows = await sql`delete from attachments where status = 'pending' and created_at < now() - ${olderThanMs / 1000} * interval '1 second' returning id`;
-  for (const r of rows) await s3().delete(r.id as string).catch(() => {});
+  const rows = await sql`delete from attachments where status = 'pending' and created_at < now() - ${olderThanMs / 1000} * interval '1 second' returning id, upload_id`;
+  for (const r of rows) {
+    if (r.upload_id) await abortMultipart(mpInternal(), r.id as string, r.upload_id as string).catch(() => {});
+    await s3().delete(r.id as string).catch(() => {});
+  }
+  // части без записи (запись удалили, а отмена в хранилище не дошла) — тоже, если начаты раньше срока
+  const cutoff = Date.now() - olderThanMs;
+  const stale = await listMultipart(mpInternal()).catch(() => []);
+  for (const u of stale) if (u.initiated.getTime() < cutoff) await abortMultipart(mpInternal(), u.key, u.uploadId).catch(() => {});
   return rows.length;
 }

@@ -256,7 +256,7 @@ export type ErrorCode = 'bad_frame' | 'unauthorized' | 'not_member' | 'not_found
   | 'blocked' | 'code_invalid' | 'code_expired' | 'flood' | 'fresh_session'
   | 'password_invalid' | 'password_missing' | 'recovery_unavailable' | 'email_invalid' | 'qr_expired' | 'passkey_not_found' | 'passkey_invalid'
   | 'folder_title' | 'folder_empty' | 'folder_too_many_chats' | 'folder_emoji' | 'folders_limit'
-  | 'upload_missing' | 'upload_mismatch' | 'upload_pending' | 'photo_invalid' | 'file_too_big';
+  | 'upload_missing' | 'upload_mismatch' | 'upload_pending' | 'upload_incomplete' | 'photo_invalid' | 'file_too_big';
 
 export type ClientFrame =
   | { op: 'hello'; lastSeq: number }

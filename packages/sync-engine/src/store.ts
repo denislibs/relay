@@ -396,8 +396,16 @@ export class Store {
     const o = this.outbox.get(clientId);
     if (!o?.attachment) return;
     o.attachment = { ...o.attachment, id };
+    delete o.upload;
     this.dirtyOutbox.add(clientId);
     this.setProgress(clientId, 1);
+  }
+  /** Загрузка частями: какие части уже приняты (null — начать заново). */
+  setUploadState(clientId: string, up: OutboxEntry['upload']): void {
+    const o = this.outbox.get(clientId);
+    if (!o) return;
+    if (up) o.upload = up; else delete o.upload;
+    this.dirtyOutbox.add(clientId);
   }
   /** Прогресс загрузки файла неотправленного сообщения (в ленте — кольцо). */
   setProgress(clientId: string, p: number): void {

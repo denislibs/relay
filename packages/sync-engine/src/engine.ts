@@ -6,6 +6,7 @@ import { delBlob, getAll, getBlob, getByChat, openDb, putBlob, write } from './i
 import { affects, computeQuery, diffResults, messageWindow, type Result } from './queries';
 import type { Item } from './types';
 import { Store, type ChatSummary } from './store';
+import { uploadParts, type MultipartState } from './multipart';
 import { WsTransport } from './transport';
 import { loadOps, Ops, type PendingOp } from './ops';
 import { folderKey, isNotifyOp, normalizeRule, notifyKey, OP_FOLDERS_ORDER, privacyKey, settingsItem, settingsView } from './settings';
@@ -367,12 +368,13 @@ export class Engine {
    *  2) PUT прямо в хранилище: XHR с прогрессом (есть в воркерах браузера), иначе fetch; без cookie и наших заголовков;
    *  3) POST /uploads/:id/confirm — сервер сверяет размер и тип по HEAD, только после этого вложение можно отправить.
    * Сеть и истёкшая ссылка — повтор позже с начала; отказ сервера (не тот размер/тип, too_long) — сообщение failed.
+   * Большой файл (сервер ответил multipart) — частями, см. multipart.ts: принятые части лежат в outbox, повтор их не грузит.
    */
   private async upload(clientId: string, blob: Blob, a: { name: string; mime: string; w: number | null; h: number | null; kind?: string; duration?: number | null; waveform?: string | null; title?: string | null; performer?: string | null }): Promise<{ id: string }> {
     const offline: ReqError = { code: 'offline', retry: true };
-    const api = async <T>(path: string, body?: unknown): Promise<T> => {
+    const api = async <T>(path: string, body?: unknown, method = 'POST'): Promise<T> => {
       const r = await this.dev.fetch(this.cfg.httpBase + path, {
-        method: 'POST', credentials: 'include', headers: { 'content-type': 'application/json', ...(this.cfg.headers ?? {}) }, body: body === undefined ? undefined : JSON.stringify(body),
+        method, credentials: 'include', headers: { 'content-type': 'application/json', ...(this.cfg.headers ?? {}) }, body: body === undefined ? undefined : JSON.stringify(body),
       }).catch(() => { throw offline; });
       if (this.session.unauthorized(r.status)) throw offline;
       if (!r.ok) {
@@ -386,9 +388,76 @@ export class Engine {
     if (a.w && a.h) { meta.w = a.w; meta.h = a.h; }
     if (a.kind === 'voice' || a.kind === 'round' || a.kind === 'audio' || a.kind === 'video') { meta.kind = a.kind; if (a.duration) meta.duration = a.duration; if (a.waveform) meta.waveform = a.waveform; }
     if (a.kind === 'audio') { if (a.title) meta.title = a.title; if (a.performer) meta.performer = a.performer; }
-    const intent = await api<{ id: string; url: string; mime: string }>('/uploads', meta);
-    await this.put(clientId, intent.url, blob, intent.mime);
-    return api<{ id: string }>(`/uploads/${intent.id}/confirm`);
+    let mp = this.store.outbox.get(clientId)?.upload ?? null;
+    if (!mp) {
+      const intent = await api<{ id: string; url?: string; mime: string; multipart?: { partSize: number; parts: number } }>('/uploads', meta);
+      if (!intent.multipart) {
+        await this.put(clientId, intent.url!, blob, intent.mime);
+        return api<{ id: string }>(`/uploads/${intent.id}/confirm`);
+      }
+      mp = { id: intent.id, ...intent.multipart, done: [] };
+      await this.saveUpload(clientId, mp);
+    }
+    return this.uploadMultipart(clientId, blob, mp, api);
+  }
+
+  /** Части, затем confirm (сервер собирает объект). Разошлись с сервером (upload_incomplete) — сверяемся и догружаем;
+   *  загрузки на сервере больше нет (сутки офлайн — убрана) — забываем её, повтор начнёт заново. */
+  private async uploadMultipart(clientId: string, blob: Blob, mp: MultipartState, api: <T>(path: string, body?: unknown, method?: string) => Promise<T>): Promise<{ id: string }> {
+    let last = 0, pending: ReturnType<typeof setTimeout> | null = null, latest = 0;
+    const show = () => {
+      pending = null; last = Date.now();
+      // последние проценты — сборка и подтверждение на сервере: кольцо не стоит на 100%, пока сообщение ещё не ушло
+      this.store.setProgress(clientId, 0.98 * latest);
+      this.changed();
+    };
+    const io = {
+      urls: async (parts: number[]) => (await api<{ urls: Record<number, string> }>(`/uploads/${mp.id}/parts`, { parts })).urls,
+      saved: (done: number[]) => this.saveUpload(clientId, { ...mp, done }),
+      // не чаще 10 раз в секунду на все части вместе; последнее значение не теряется (покажется чуть позже)
+      progress: (p: number) => {
+        latest = p;
+        if (pending) return;
+        const wait = 100 - (Date.now() - last);
+        if (wait <= 0) show(); else pending = setTimeout(show, wait);
+      },
+      register: (ctl: { abort(): void }) => this.uploads.set(clientId, ctl),
+      cancelled: () => this.cancelled.has(clientId) || !this.store.outbox.has(clientId),
+      offline: () => this.dev.sim.offline,
+    };
+    try {
+      for (let round = 0; ; round++) {
+        if (io.cancelled()) throw { code: 'cancelled', retry: false } satisfies ReqError;
+        await uploadParts(blob, mp, io);
+        try { return await api<{ id: string }>(`/uploads/${mp.id}/confirm`); }
+        catch (e) {
+          if ((e as ReqError).code !== 'upload_incomplete' || round > 0) throw e;
+          const st = await api<{ done: number[] }>(`/uploads/${mp.id}/parts`, undefined, 'GET');
+          mp = { ...mp, done: st.done };
+          await this.saveUpload(clientId, mp);
+        }
+      }
+    } catch (e) {
+      const code = (e as ReqError).code;
+      if (code === 'not_found' || code === 'upload_mismatch') {
+        await this.saveUpload(clientId, null);
+        if (code === 'not_found') throw { code, retry: true } satisfies ReqError;
+      }
+      if (code === 'upload_incomplete') throw { code, retry: true } satisfies ReqError;   // сверились и снова не сошлось — позже
+      // хранилище недоступно, а сокет жив: переподключения, которое запустит очередь, не будет — повтор с паузой
+      if (code === 'offline' && this.online && !this.netDown) throw { code: 'upload', retry: true } satisfies ReqError;
+      throw e;
+    } finally {
+      if (pending) { clearTimeout(pending); show(); }
+      this.uploads.delete(clientId);
+    }
+  }
+
+  /** Состояние загрузки частями — в outbox (IndexedDB), чтобы пережить перезагрузку вкладки. */
+  private async saveUpload(clientId: string, mp: MultipartState | null): Promise<void> {
+    if (!this.store.outbox.has(clientId)) return;
+    this.store.setUploadState(clientId, mp);
+    await this.store.flush();
   }
 
   /** PUT по подписанной ссылке. 403 — ссылка истекла (долго были офлайн между шагами): повтор возьмёт новую. */
@@ -912,6 +981,9 @@ export class Engine {
       }
       case 'discard': {
         if (this.uploads.has(a.clientId)) { this.cancelled.add(a.clientId); this.uploads.get(a.clientId)!.abort(); }
+        // загрузка частями: части на сервере выбросить сразу, а не через сутки
+        const up = this.store.outbox.get(a.clientId)?.upload;
+        if (up) this.dev.fetch(`${this.cfg.httpBase}/uploads/${up.id}`, { method: 'DELETE', credentials: 'include', headers: { ...(this.cfg.headers ?? {}) } }).catch(() => {});
         const ids = this.store.discard([a.clientId]);
         await this.store.flush();
         if (ids.length) await write(this.db, { put: {}, del: { messages: ids } }).catch(() => {});
