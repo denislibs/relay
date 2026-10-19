@@ -1,6 +1,7 @@
 import type { DevLog } from './devlog';
 import { LOG_CAP } from './devlog';
 import { simActive, type SimState } from './devsim';
+import { STORES } from './schema';
 import type { Item, OutboxEntry, Patch, Query } from './types';
 
 /** Снимок состояния движка для раздела «Для разработчиков» (подписка devStats). */
@@ -105,7 +106,6 @@ export function buildStats(v: EngineView, o: { db: IDBDatabase; log: DevLog; sim
   };
 }
 
-const STORES = ['chats', 'messages', 'outbox', 'pendingReads', 'meta', 'users', 'ops', 'blobs'];
 
 /** Число записей по сторам IDB (count() — дёшево, без чтения записей). */
 export function countStores(db: IDBDatabase): Promise<Record<string, number>> {

@@ -1,10 +1,11 @@
 import { trimBodies } from './devlog';
+import { STORES as ALL_STORES, type StoreName } from './schema';
 
 /**
  * Раздел «Для разработчиков» → «Данные»: просмотр сторов IDB постранично, только чтение.
  * Тела сообщений и превью обрезаются так же, как в журнале (trimBodies): экран можно показать, не показывая переписку.
  */
-export type DevStore = 'chats' | 'messages' | 'meta' | 'outbox' | 'pendingReads' | 'users' | 'ops';
+export type DevStore = Exclude<StoreName, 'blobs'>;
 export interface IdbReadArgs {
   store: DevStore;
   /** messages: сообщения одного чата (индекс byChat, по sort) */
@@ -16,7 +17,7 @@ export interface IdbReadArgs {
 }
 export interface IdbReadResult { rows: { key: string; value: object }[]; offset: number; more: boolean }
 
-const STORES: DevStore[] = ['chats', 'messages', 'meta', 'outbox', 'pendingReads', 'users', 'ops'];
+const STORES = ALL_STORES.filter((s): s is DevStore => s !== 'blobs');
 const MAX = 200;
 
 export function readStore(db: IDBDatabase, a: IdbReadArgs): Promise<IdbReadResult> {

@@ -1,8 +1,8 @@
 import type { LocalMessage } from './types';
 
-export type StoreName = 'chats' | 'messages' | 'outbox' | 'pendingReads' | 'meta' | 'users' | 'ops';
-const STORES: StoreName[] = ['chats', 'messages', 'outbox', 'pendingReads', 'meta', 'users', 'ops'];
-const VERSION = 3; // 2: blobs — файлы, ждущие отправки; 3: users — кэш профилей, ops — очередь операций настроек
+import { SCHEMA_VERSION, STORES, upgrade, type StoreName } from './schema';
+
+export type { StoreName };
 
 /**
  * onVersionChange: другая вкладка (новая сборка) открывает базу более новой версии. Соединение закрываем сразу,
@@ -10,21 +10,10 @@ const VERSION = 3; // 2: blobs — файлы, ждущие отправки; 3:
  */
 export function openDb(name: string, opts: { onVersionChange?: () => void; version?: number } = {}): Promise<IDBDatabase> {
   return new Promise((resolve, reject) => {
-    const r = indexedDB.open(name, opts.version ?? VERSION);
+    const r = indexedDB.open(name, opts.version ?? SCHEMA_VERSION);
     // старую версию держит открытой вкладка прежней сборки: ждём, пока она закроется (её onversionchange)
-    r.onblocked = () => console.warn(`idb ${name}: upgrade to v${opts.version ?? VERSION} is waiting for other tabs to close the old version`);
-    r.onupgradeneeded = (e) => {
-      const db = r.result;
-      if (e.oldVersion < 1) {
-        db.createObjectStore('chats', { keyPath: 'id' });
-        db.createObjectStore('messages', { keyPath: 'key' }).createIndex('byChat', ['chatId', 'sort']);
-        db.createObjectStore('outbox', { keyPath: 'clientId' });
-        db.createObjectStore('pendingReads', { keyPath: 'chatId' });
-        db.createObjectStore('meta', { keyPath: 'k' });
-      }
-      if (e.oldVersion < 2) db.createObjectStore('blobs', { keyPath: 'clientId' });
-      if (e.oldVersion < 3) { db.createObjectStore('users', { keyPath: 'id' }); db.createObjectStore('ops', { keyPath: 'id' }); }
-    };
+    r.onblocked = () => console.warn(`idb ${name}: upgrade to v${opts.version ?? SCHEMA_VERSION} is waiting for other tabs to close the old version`);
+    r.onupgradeneeded = (e) => upgrade(r.result, e.oldVersion, r.transaction!);
     r.onsuccess = () => {
       const db = r.result;
       db.onversionchange = () => { db.close(); opts.onVersionChange?.(); };

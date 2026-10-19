@@ -1,6 +1,7 @@
 import type { GroupInfo, MyMembership } from '@relay/protocol';
 import type { Entity, Message, ProfilePhoto, Update } from '@relay/protocol';
 import { getAll, getByChat, write, type WriteBatch } from './idb';
+import { CACHE_STORES, STORES } from './schema';
 import { applyUserUpdated, ProfileCache } from './profile';
 import { applyContactsChanged, ContactsCache } from './contacts';
 import { SettingsCache } from './settings';
@@ -466,7 +467,7 @@ export class Store {
     this.pendingDrafts.clear();   // черновики жили в стёртых чатах: пустой текст на сервер не отправляем
     this.epoch = epoch;
     const db = this.db as IDBDatabase;
-    const names = keep.outbox ? ['chats', 'messages', 'outbox', 'pendingReads', 'meta', 'users'] : ['chats', 'messages', 'outbox', 'pendingReads', 'meta', 'users', 'ops', 'blobs'];
+    const names = keep.outbox ? [...CACHE_STORES, 'outbox', 'pendingReads'] : STORES;
     const t = db.transaction(names, 'readwrite');
     for (const n of names) t.objectStore(n).clear();
     await new Promise<void>((res, rej) => { t.oncomplete = () => res(); t.onerror = () => rej(t.error); });

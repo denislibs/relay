@@ -2,7 +2,8 @@ import { afterAll, beforeEach, expect, test } from 'bun:test';
 import { EngineClient } from '../src/client';
 import { Engine } from '../src/engine';
 import { fromMessagePort, HostCore, type FromHost, type ToHost } from '../src/host-core';
-import { openDb } from '../src/idb';
+import { getAll, openDb, write } from '../src/idb';
+import { STORES } from '../src/schema';
 import { resetDb, startTestServer } from './helpers';
 
 const srv = await startTestServer();
@@ -43,4 +44,28 @@ test('the host asks every tab to reload when its engine database is upgraded els
   tab.close();
   await core.close();
   ch.port1.close(); ch.port2.close();
+});
+
+test('schema v4: every store and index exists', async () => {
+  const db = await openDb('schema-fresh-' + crypto.randomUUID());
+  for (const s of STORES) expect(db.objectStoreNames.contains(s)).toBe(true);
+  const tx = db.transaction(['messages', 'members'], 'readonly');
+  expect([...tx.objectStore('messages').indexNames].sort()).toEqual(['byChat', 'byTab']);
+  expect([...tx.objectStore('members').indexNames]).toEqual(['byChat']);
+  db.close();
+});
+
+test('upgrade 3 → 4 keeps unsent work and drops the cache', async () => {
+  const name = 'schema-up-' + crypto.randomUUID();
+  const v3 = await openDb(name, { version: 3 });
+  await write(v3, { put: { outbox: [{ clientId: 'c1', chatId: 1, body: 'hi', createdAt: 1 }], blobs: [{ clientId: 'c1' }], ops: [{ id: 'o1' }], pendingReads: [{ chatId: 1 }], chats: [{ id: 1 }], meta: [{ k: 'lastSeq', v: 7 }] }, del: {} });
+  v3.close();
+  const v4 = await openDb(name);
+  expect(await getAll(v4, 'outbox')).toHaveLength(1);
+  expect(await getAll(v4, 'blobs')).toHaveLength(1);
+  expect(await getAll(v4, 'ops')).toHaveLength(1);
+  expect(await getAll(v4, 'pendingReads')).toHaveLength(1);
+  expect(await getAll(v4, 'chats')).toHaveLength(0);
+  expect(await getAll(v4, 'meta')).toHaveLength(0);
+  v4.close();
 });
