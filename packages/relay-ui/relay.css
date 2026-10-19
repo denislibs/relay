@@ -1516,6 +1516,8 @@ html[data-blur="0"] .rl-shell .rl-msgmenu .rl-menu, html[data-blur="0"] .rl-shel
   font: 600 11px/1 var(--font-sans); color: var(--ink-muted); }
 .rl-playerbar-speed-on { color: var(--brand-text, var(--brand)); }
 .rl-playerbar-menu { position: absolute; right: 0; top: calc(100% + 6px); z-index: 30; white-space: nowrap; }
+/* меню — в потоке обёртки, а обёртка прижата к правому краю кнопки: раскрывается влево, внутрь колонки чата (не под «Информацию») */
+.rl-playerbar-menu > .rl-menu { position: relative; transform-origin: top right; }
 .rl-playerbar-clip { position: absolute; inset: 0; border-radius: inherit; overflow: hidden; pointer-events: none; }
 .rl-playerbar-clip > .rl-playerbar-seek { pointer-events: auto; }
 .rl-playerbar-seek { position: absolute; left: 0; right: 0; bottom: 0; height: 6px; cursor: pointer; }
