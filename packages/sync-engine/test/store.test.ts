@@ -64,3 +64,60 @@ test('pending message sorts after real ones and keeps its key through ack', asyn
   expect(s.chatMessages(2).map((m) => [m.key, m.id, m.status])).toEqual([[expect.any(String), 20, 'sent'], [clientId, 21, 'sent']]);
   expect(s.outbox.has(clientId)).toBe(false);
 });
+
+const user = (id: number, bio: string) => ({ id, name: 'Б' + id, firstName: 'Б', lastName: '', username: null, bio, birthday: null, phone: null, links: [] });
+const contact = (id: number, firstName: string, seq: number) => ({ userId: id, firstName, lastName: '', note: '', user: user(id, ''), seq });
+
+test('a person at seq 12 survives a stale snapshot at seq 11 and a restart', async () => {
+  const name = 'store-' + crypto.randomUUID();
+  const s = await Store.open(await openDb(name), ME);
+  s.applyUpdate({ type: 'userUpdated', user: user(2, 'свежее') }, 12);
+  s.profile.applyUser(user(2, 'старое'), 11);   // ответ GET /users/:id со снимком seq 11
+  expect(s.users.get(2)?.bio).toBe('свежее');
+  await s.flush();
+  const again = await Store.open(await openDb(name), ME);
+  expect(again.users.get(2)).toMatchObject({ bio: 'свежее', seq: 12 });
+  again.profile.applyUser(user(2, 'старое'), 11);   // после перезапуска — то же правило
+  expect(again.users.get(2)?.bio).toBe('свежее');
+  again.profile.applyUser(user(2, 'новее'), 13);
+  expect(again.users.get(2)?.bio).toBe('новее');
+});
+
+test('editing one of 1000 contacts writes one contacts row', async () => {
+  const s = await Store.open(await openDb('store-' + crypto.randomUUID()), ME);
+  s.contacts.applySnapshot(Array.from({ length: 1000 }, (_, i) => contact(100 + i, 'К' + i, 5)), 5);
+  await s.flush();
+  expect(s.contacts.table.rows.size).toBe(1000);
+  const counts: number[] = [];
+  s.onFlush = (keys) => counts.push(keys);
+  s.contacts.applyContact(contact(500, 'Правка', 6));
+  await s.flush();
+  expect(counts).toEqual([1]);
+  // ещё один снимок без перемен ничего, кроме общего пола, не пишет
+  s.contacts.applySnapshot(Array.from({ length: 1000 }, (_, i) => (i === 400 ? contact(500, 'Правка', 7) : contact(100 + i, 'К' + i, 7))), 7);
+  await s.flush();
+  expect(counts.slice(1).every((n) => n <= 2)).toBe(true);
+});
+
+test('contacts and the block list survive a restart; removals are deleted from the stores', async () => {
+  const name = 'store-' + crypto.randomUUID();
+  const s = await Store.open(await openDb(name), ME);
+  s.contacts.applySnapshot([contact(2, 'Боря', 3), contact(3, 'Вася', 3)], 3);
+  s.blocks.applySnapshot([], 3);
+  s.blocks.applyBlocked({ userId: 2, user: user(2, ''), at: '2026-01-01T00:00:00.000Z', seq: 4 });
+  s.blocks.applyBlocked({ userId: 3, user: user(3, ''), at: '2026-01-02T00:00:00.000Z', seq: 4 });
+  s.contacts.applyRemoved(3, 5);
+  await s.flush();
+  let again = await Store.open(await openDb(name), ME);
+  expect([...again.contacts.table.rows.keys()]).toEqual([2]);
+  expect(again.contacts.loaded).toBe(true);
+  expect([...again.blocks.table.rows.keys()].sort()).toEqual([2, 3]);
+  expect(again.blocks.loaded).toBe(true);
+  // старая запись журнала после перезапуска не воскрешает и не откатывает
+  expect(again.contacts.applyContact(contact(2, 'Старое', 3))).toBe(false);
+  again.blocks.applyUnblocked(2, 6);
+  expect(again.blocks.applyBlocked({ userId: 2, user: user(2, ''), at: 'x', seq: 5 })).toBe(false);   // запоздавшая блокировка
+  await again.flush();
+  again = await Store.open(await openDb(name), ME);
+  expect([...again.blocks.table.rows.keys()]).toEqual([3]);
+});

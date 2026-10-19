@@ -63,6 +63,13 @@ export class Table<K, T> {
     return { put, del };
   }
 
+  /** Забыть всё (в IDB стирает вызывающий: wipe чистит хранилища целиком). */
+  clear(): void {
+    this.rows.clear();
+    this.dirty.clear();
+    this.removed.clear();
+  }
+
   load(list: (T & { seq?: number })[], key: (x: T) => K): void {
     for (const item of list) this.rows.set(key(item), { ...item, seq: item.seq ?? 0, v: 1 } as Row<T>);
   }

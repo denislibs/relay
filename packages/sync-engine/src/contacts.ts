@@ -1,6 +1,8 @@
 import type { Contact, PublicUser, Update } from '@relay/protocol';
 import type { Ops, PendingOp } from './ops';
+import { getAll } from './idb';
 import type { Store } from './store';
+import { Table } from './rows';
 import { cleanName, cleanText } from './text';
 import type { Action, Item, LocalChat } from './types';
 
@@ -22,12 +24,12 @@ function baseOf(c: Contact): ContactBase {
 
 /**
  * Контакты: база — последнее, что сказал сервер (GET /contacts, ответ операции, contactsChanged).
- * Источники приходят вразнобой — упорядочивает seq журнала владельца: у каждого контакта свой seq,
- * снимок списка поднимает общий пол (всё, что не новее снимка, уже в нём учтено).
- * Хранится в IDB в meta.contacts и пишется вместе с lastSeq в Store.flush.
+ * Источники приходят вразнобой — упорядочивает seq журнала владельца: у каждого контакта свой seq (в строке хранилища
+ * contacts), снимок списка поднимает общий пол (всё, что не новее снимка, уже в нём учтено).
+ * Пол и «снимок был» — в meta (contactsFloor, contactsLoaded); строки пишутся в Store.flush только изменённые.
  */
 export class ContactsCache {
-  base = new Map<number, ContactBase>();
+  readonly table = new Table<number, ContactBase>();
   /** снимок с сервера уже был (иначе пустой список — это «ещё не знаем») */
   loaded = false;
   /** изменилось с последнего прохода подписок */
@@ -36,45 +38,43 @@ export class ContactsCache {
   version = 0;
   /** у кого контакт появился/пропал/переименован с последнего прохода: id → запись до изменения */
   private retitles = new Map<number, ContactBase | undefined>();
-  private seqs = new Map<number, number>();
+  /** seq удаления (только в памяти): запоздавшая запись о контакте не воскрешает удалённого */
+  private gone = new Map<number, number>();
   private floor = 0;
   private persist = false;
 
-  static load(meta: { k: string; v: unknown }[]): ContactsCache {
+  static async load(db: IDBDatabase, meta: { k: string; v: unknown }[]): Promise<ContactsCache> {
     const c = new ContactsCache();
-    const v = meta.find((m) => m.k === 'contacts')?.v as { list: ContactBase[]; seqs: [number, number][]; floor: number; loaded?: boolean } | undefined;
-    if (v) {
-      for (const x of v.list) c.base.set(x.userId, x);
-      c.seqs = new Map(v.seqs);
-      c.floor = v.floor;
-      c.loaded = v.loaded ?? true;
-    }
+    c.table.load(await getAll<ContactBase & { seq: number }>(db, 'contacts'), (x) => x.userId);
+    c.floor = (meta.find((m) => m.k === 'contactsFloor')?.v as number | undefined) ?? 0;
+    c.loaded = !!meta.find((m) => m.k === 'contactsLoaded')?.v;
     return c;
   }
 
-  private seqOf(id: number): number { return Math.max(this.seqs.get(id) ?? 0, this.floor); }
-  private touch(): void { this.dirty = true; this.persist = true; this.version++; }
-  private before(id: number): void { if (!this.retitles.has(id)) this.retitles.set(id, this.base.get(id)); }
+  private seqOf(id: number): number { return Math.max(this.table.get(id)?.seq ?? this.gone.get(id) ?? 0, this.floor); }
+  private touch(): void { this.dirty = true; this.version++; }
+  private before(id: number, prev: ContactBase | undefined): void { if (!this.retitles.has(id)) this.retitles.set(id, prev); }
 
   /** Контакт добавлен/изменён. seq — номер записи журнала (или ответа); не новее известного — не трогаем. */
   applyContact(c: Contact, seq = c.seq): boolean {
     if (seq !== undefined && seq <= this.seqOf(c.userId)) return false;
-    const next = baseOf(c), prev = this.base.get(c.userId);
-    if (seq !== undefined) this.seqs.set(c.userId, seq);
-    // то же самое (эхо своей правки): seq запоминаем, подписки не трогаем
-    if (prev && JSON.stringify(prev) === JSON.stringify(next)) { this.persist = true; return true; }
-    this.before(c.userId);
-    this.base.set(c.userId, next);
-    this.touch();
+    const prev = this.table.get(c.userId);
+    this.gone.delete(c.userId);
+    // то же самое (эхо своей правки): seq запоминается в таблице, подписки не трогаем
+    if (this.table.put(c.userId, baseOf(c), seq ?? prev?.seq ?? 0)) {
+      this.before(c.userId, prev);
+      this.touch();
+    }
     return true;
   }
 
   applyRemoved(userId: number, seq?: number): boolean {
     if (seq !== undefined && seq <= this.seqOf(userId)) return false;
-    if (seq !== undefined) this.seqs.set(userId, seq);
-    if (!this.base.has(userId)) { this.persist = true; return true; }   // и так нет — подписки не трогаем
-    this.before(userId);
-    this.base.delete(userId);
+    if (seq !== undefined) this.gone.set(userId, seq);
+    const prev = this.table.get(userId);
+    if (!prev) return true;   // и так нет — подписки не трогаем
+    this.before(userId, prev);
+    this.table.delete(userId);
     this.touch();
     return true;
   }
@@ -84,16 +84,19 @@ export class ContactsCache {
     const ids = new Set(list.map((c) => c.userId));
     let changed = !this.loaded;
     for (const c of list) if (seq >= this.seqOf(c.userId)) {
-      const prev = this.base.get(c.userId), next = baseOf(c);
-      if (!prev || contactName(prev) !== contactName(c)) this.before(c.userId);
-      if (!prev || JSON.stringify(prev) !== JSON.stringify(next)) changed = true;
-      this.base.set(c.userId, next); this.seqs.set(c.userId, seq);
+      const prev = this.table.get(c.userId);
+      this.gone.delete(c.userId);
+      if (this.table.put(c.userId, baseOf(c), seq)) {
+        if (!prev || contactName(prev) !== contactName(c)) this.before(c.userId, prev);
+        changed = true;
+      }
     }
-    for (const id of [...this.base.keys()]) if (!ids.has(id) && seq >= this.seqOf(id)) { this.before(id); this.base.delete(id); this.seqs.set(id, seq); changed = true; }
+    for (const [id, prev] of [...this.table.rows]) if (!ids.has(id) && seq >= this.seqOf(id)) { this.before(id, prev); this.table.delete(id); this.gone.set(id, seq); changed = true; }
     this.floor = Math.max(this.floor, seq);
     this.loaded = true;
-    // снимок без перемен (после каждого hello) — подписки не трогаем, только запоминаем seq
-    if (changed) this.touch(); else this.persist = true;
+    this.persist = true;
+    // снимок без перемен (после каждого hello) — подписки не трогаем, только запоминаем пол
+    if (changed) this.touch();
   }
 
   /** Чьи контакты изменились в базе (и какими были до того) — забрать для переименования чатов. */
@@ -103,20 +106,22 @@ export class ContactsCache {
     return r;
   }
 
-  /** Что дописать в meta в транзакции flush. */
-  collect(): { k: string; v: unknown } | null {
-    if (!this.persist) return null;
+  /** Что дописать в транзакцию flush: изменённые строки, удалённые ключи, meta (пол и «загружено»). */
+  collect(): { put: unknown[]; del: number[]; meta: { k: string; v: unknown }[] } {
+    const { put, del } = this.table.collect();
+    const meta = this.persist ? [{ k: 'contactsFloor', v: this.floor }, { k: 'contactsLoaded', v: this.loaded ? 1 : 0 }] : [];
     this.persist = false;
-    return { k: 'contacts', v: { list: [...this.base.values()], seqs: [...this.seqs], floor: this.floor, loaded: this.loaded } };
+    return { put, del, meta };
   }
 
   /** База сервера пересоздана: всё забыть; «загружено» — только после настоящего GET /contacts. */
   reset(): void {
-    this.base.clear();
-    this.seqs.clear();
+    this.table.clear();
+    this.gone.clear();
     this.retitles.clear();
     this.floor = 0;
     this.loaded = false;
+    this.persist = true;
     this.touch();
   }
 }
@@ -223,7 +228,7 @@ export class Contacts {
   view(): Map<number, ContactView> {
     const m = this.memo, c = this.cache, ops = this.h.ops.list;
     if (m && m.version === c.version && m.ops === ops) return m.view;
-    const view = contactsView(c.base, ops, this.h.store.profile.users);
+    const view = contactsView(c.table.rows, ops, this.h.store.profile.users.rows);
     this.memo = { version: c.version, ops, view };
     return view;
   }
@@ -233,7 +238,7 @@ export class Contacts {
     if (c.kind !== 'direct' || !c.peerId) return c.title;
     const v = this.view().get(c.peerId);
     if (v) return contactName(v) || c.title;
-    const was = this.cache.base.get(c.peerId);
+    const was = this.cache.table.get(c.peerId);
     if (was) return this.publicName(c.peerId, was) ?? c.title;
     return c.title;
   }
@@ -245,7 +250,7 @@ export class Contacts {
   /** Результат подписки contacts. */
   items(): Item[] {
     const c = this.cache;
-    const list = c.loaded || this.h.ops.list.some((o) => contactIdOf(o.key)) ? contactItems(this.view(), this.h.store.profile.users, this.h.presence()) : [];
+    const list = c.loaded || this.h.ops.list.some((o) => contactIdOf(o.key)) ? contactItems(this.view(), this.h.store.profile.users.rows, this.h.presence()) : [];
     // служебный элемент: снимок с сервера уже был (иначе пустой список — «ещё грузим», а не «нет контактов»)
     list.push({ key: '~contacts', loaded: c.loaded });
     return list;
@@ -261,7 +266,7 @@ export class Contacts {
     const base = this.cache.takeRetitles();
     const by = base.size ? directByPeer(store) : null;
     for (const [id, was] of base) {
-      const now = this.cache.base.get(id);
+      const now = this.cache.table.get(id);
       if (now) { retitleChats(store, by!.get(id), contactName(now) || now.user.name); continue; }
       const pub = this.publicName(id, was);
       if (pub) retitleChats(store, by!.get(id), pub);
@@ -297,7 +302,7 @@ export class Contacts {
     this.h.run(async () => {
       const r = await this.h.http<{ contacts: Contact[]; seq: number }>('/contacts');
       this.cache.applySnapshot(r.contacts, r.seq);
-      for (const c of r.contacts) if (this.cache.base.has(c.userId)) this.take(c);
+      for (const c of r.contacts) if (this.cache.table.get(c.userId)) this.take(c);
       this.retitle();
       await this.h.store.flush();
       this.h.changed();

@@ -1,6 +1,7 @@
 import { afterAll, afterEach, beforeEach, expect, test } from 'bun:test';
 import { ContactsCache, contactsView } from '../src/contacts';
 import { Engine } from '../src/engine';
+import { openDb } from '../src/idb';
 import { resetDb, startTestServer, watchInto } from './helpers';
 
 const srv = await startTestServer();
@@ -187,10 +188,11 @@ test('removal of a contact without a shared chat (server sends user: null) drops
   await user.until((l) => l[0]?.name === 'Борис' && l[0]?.firstName === 'Борис');
 });
 
-test('after reset (epoch wipe) contacts are not «loaded» until a real snapshot', () => {
+test('after reset (epoch wipe) contacts are not «loaded» until a real snapshot', async () => {
+  const db = await openDb('contacts-' + crypto.randomUUID());
   const c = new ContactsCache();
   c.applySnapshot([], 5);
-  expect(ContactsCache.load([c.collect()!]).loaded).toBe(true);
+  expect((await ContactsCache.load(db, c.collect().meta)).loaded).toBe(true);
   c.reset();
-  expect(ContactsCache.load([c.collect()!]).loaded).toBe(false);
+  expect((await ContactsCache.load(db, c.collect().meta)).loaded).toBe(false);
 });

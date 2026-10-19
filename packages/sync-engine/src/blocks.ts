@@ -1,6 +1,8 @@
 import type { BlockedUser, PublicUser, Update } from '@relay/protocol';
 import type { Ops, PendingOp } from './ops';
+import { getAll } from './idb';
 import type { Store } from './store';
+import { Table } from './rows';
 import type { Action, Item } from './types';
 
 /** Ключ операций чёрного списка в очереди ops: блокировка и разблокировка одного человека схлопываются. */
@@ -16,48 +18,42 @@ function baseOf(b: BlockedUser): BlockBase {
 
 /**
  * Чёрный список: база — последнее, что сказал сервер (GET /blocks, ответ операции, blocksChanged).
- * Порядок источников — по seq журнала владельца, как у контактов: у каждого человека свой seq,
- * снимок поднимает общий пол. Хранится в IDB в meta.blocks и пишется вместе с lastSeq в Store.flush.
+ * Порядок источников — по seq журнала владельца, как у контактов: у каждого человека свой seq (в строке хранилища
+ * blocked), снимок поднимает общий пол (meta blocksFloor). Строки пишутся в Store.flush только изменённые.
  */
 export class BlocksCache {
-  base = new Map<number, BlockBase>();
+  readonly table = new Table<number, BlockBase>();
   loaded = false;
   dirty = false;
-  private seqs = new Map<number, number>();
+  /** seq разблокировки (только в памяти): запоздавшая запись о блокировке не возвращает человека в список */
+  private gone = new Map<number, number>();
   private floor = 0;
   private persist = false;
 
-  static load(meta: { k: string; v: unknown }[]): BlocksCache {
+  static async load(db: IDBDatabase, meta: { k: string; v: unknown }[]): Promise<BlocksCache> {
     const c = new BlocksCache();
-    const v = meta.find((m) => m.k === 'blocks')?.v as { list: BlockBase[]; seqs: [number, number][]; floor: number } | undefined;
-    if (v) {
-      for (const x of v.list) c.base.set(x.userId, x);
-      c.seqs = new Map(v.seqs);
-      c.floor = v.floor;
-      c.loaded = true;
-    }
+    c.table.load(await getAll<BlockBase & { seq: number }>(db, 'blocked'), (x) => x.userId);
+    const floor = meta.find((m) => m.k === 'blocksFloor')?.v as number | undefined;
+    c.floor = floor ?? 0;
+    c.loaded = floor !== undefined;   // пол пишется вместе с каждым снимком
     return c;
   }
 
-  private seqOf(id: number): number { return Math.max(this.seqs.get(id) ?? 0, this.floor); }
-  private touch(): void { this.dirty = true; this.persist = true; }
+  private seqOf(id: number): number { return Math.max(this.table.get(id)?.seq ?? this.gone.get(id) ?? 0, this.floor); }
 
   applyBlocked(b: BlockedUser, seq = b.seq): boolean {
     if (seq !== undefined && seq <= this.seqOf(b.userId)) return false;
-    const next = baseOf(b), prev = this.base.get(b.userId);
-    if (seq !== undefined) this.seqs.set(b.userId, seq);
-    if (prev && JSON.stringify(prev) === JSON.stringify(next)) { this.persist = true; return true; }   // эхо — подписки не трогаем
-    this.base.set(b.userId, next);
-    this.touch();
+    const prev = this.table.get(b.userId);
+    this.gone.delete(b.userId);
+    if (this.table.put(b.userId, baseOf(b), seq ?? prev?.seq ?? 0)) this.dirty = true;   // эхо — подписки не трогаем
     return true;
   }
 
   applyUnblocked(userId: number, seq?: number): boolean {
     if (seq !== undefined && seq <= this.seqOf(userId)) return false;
-    if (seq !== undefined) this.seqs.set(userId, seq);
-    if (!this.base.has(userId)) { this.persist = true; return true; }   // и так нет — подписки не трогаем
-    this.base.delete(userId);
-    this.touch();
+    if (seq !== undefined) this.gone.set(userId, seq);
+    if (!this.table.delete(userId)) return true;   // и так нет — подписки не трогаем
+    this.dirty = true;
     return true;
   }
 
@@ -65,29 +61,31 @@ export class BlocksCache {
     const ids = new Set(list.map((b) => b.userId));
     let changed = !this.loaded;
     for (const b of list) if (seq >= this.seqOf(b.userId)) {
-      const prev = this.base.get(b.userId), next = baseOf(b);
-      if (!prev || JSON.stringify(prev) !== JSON.stringify(next)) changed = true;
-      this.base.set(b.userId, next); this.seqs.set(b.userId, seq);
+      this.gone.delete(b.userId);
+      if (this.table.put(b.userId, baseOf(b), seq)) changed = true;
     }
-    for (const id of [...this.base.keys()]) if (!ids.has(id) && seq >= this.seqOf(id)) { this.base.delete(id); this.seqs.set(id, seq); changed = true; }
+    for (const id of [...this.table.rows.keys()]) if (!ids.has(id) && seq >= this.seqOf(id)) { this.table.delete(id); this.gone.set(id, seq); changed = true; }
     this.floor = Math.max(this.floor, seq);
     this.loaded = true;
-    // снимок без перемен — подписки не трогаем, только запоминаем seq
-    if (changed) this.touch(); else this.persist = true;
+    this.persist = true;
+    // снимок без перемен — подписки не трогаем, только запоминаем пол
+    if (changed) this.dirty = true;
   }
 
-  collect(): { k: string; v: unknown } | null {
-    if (!this.persist) return null;
+  /** Что дописать в транзакцию flush: изменённые строки, удалённые ключи, meta (пол). */
+  collect(): { put: unknown[]; del: number[]; meta: { k: string; v: unknown }[] } {
+    const { put, del } = this.table.collect();
+    const meta = this.persist ? [{ k: 'blocksFloor', v: this.floor }] : [];
     this.persist = false;
-    return { k: 'blocks', v: { list: [...this.base.values()], seqs: [...this.seqs], floor: this.floor } };
+    return { put, del, meta };
   }
 
   reset(): void {
-    this.base.clear();
-    this.seqs.clear();
+    this.table.clear();
+    this.gone.clear();
     this.floor = 0;
     this.loaded = false;
-    this.touch();
+    this.dirty = true;
     this.persist = false;
   }
 }
@@ -132,7 +130,7 @@ export class Blocks {
 
   private get cache(): BlocksCache { return this.h.store.blocks; }
 
-  view(): BlockView[] { return blocksView(this.cache.base, this.h.ops.list, this.h.store.profile.users); }
+  view(): BlockView[] { return blocksView(this.cache.table.rows, this.h.ops.list, this.h.store.profile.users.rows); }
 
   /** Имя, пока сервер не ответил и профиля в кэше нет: название личного чата с человеком. */
   private chatName(id: number): string {
@@ -142,7 +140,7 @@ export class Blocks {
   }
 
   items(): Item[] {
-    const users = this.h.store.profile.users;
+    const users = this.h.store.profile.users.rows;
     const list: Item[] = this.view().map((b) => {
       const u = users.get(b.userId) ?? b.user;
       return { key: 'b' + b.userId, userId: b.userId, name: u.name || u.publicName || this.chatName(b.userId), username: u.username, phone: u.phone, at: b.at, pending: b.pending, photo: u.photo ?? null };
@@ -157,7 +155,7 @@ export class Blocks {
       const r = await this.h.http<{ blocked: BlockedUser[]; seq: number }>('/blocks');
       this.cache.applySnapshot(r.blocked, r.seq);
       // профиль из снимка — с его seq: более свежий userUpdated он не перетрёт
-      for (const b of r.blocked) if (this.cache.base.has(b.userId)) this.h.store.profile.applyUser(b.user, r.seq);
+      for (const b of r.blocked) if (this.cache.table.get(b.userId)) this.h.store.profile.applyUser(b.user, r.seq);
       await this.h.store.flush();
       this.h.changed();
     });

@@ -55,6 +55,8 @@ export class Store {
   touched = new Set<number>();
   /** свой профиль и кэш чужих (profile.ts) */
   profile!: ProfileCache;
+  /** чужие профили (таблица внутри profile) */
+  get users() { return this.profile.users; }
   /** контакты (contacts.ts) */
   contacts!: ContactsCache;
   /** настройки аккаунта (settings.ts) */
@@ -92,9 +94,9 @@ export class Store {
     s.dialogsId = meta.find((m) => m.k === 'dialogsId')?.v ?? 0;
     s.dialogsDone = !!meta.find((m) => m.k === 'dialogsDone')?.v;
     s.profile = await ProfileCache.load(db, userId, meta as { k: string; v: unknown }[]);
-    s.contacts = ContactsCache.load(meta as { k: string; v: unknown }[]);
+    s.contacts = await ContactsCache.load(db, meta as { k: string; v: unknown }[]);
     s.settings = SettingsCache.load(meta as { k: string; v: unknown }[]);
-    s.blocks = BlocksCache.load(meta as { k: string; v: unknown }[]);
+    s.blocks = await BlocksCache.load(db, meta as { k: string; v: unknown }[]);
     // чаты с неотправленным — сразу в память, чтобы черновики были видны
     for (const chatId of new Set(outbox.map((o) => o.chatId))) await s.loadChatMessages(chatId);
     return s;
@@ -533,13 +535,18 @@ export class Store {
     if (this.dirtyMeta || this.lastSeq !== this.seqAtFlush) batch.put.meta = [{ k: 'lastSeq', v: this.lastSeq }, { k: 'hydrated', v: this.hydrated ? 1 : 0 }, { k: 'dialogsAt', v: this.dialogsAt }, { k: 'dialogsId', v: this.dialogsId }, { k: 'dialogsDone', v: this.dialogsDone ? 1 : 0 }, ...(this.epoch ? [{ k: 'epoch', v: this.epoch as unknown as number }] : [])];
     const prof = this.profile.collect();
     if (prof.me) batch.put.meta = [...(batch.put.meta ?? []), prof.me];
-    if (prof.users.length) batch.put.users = prof.users;
+    batch.put.users = prof.users;
+    batch.del.users = prof.del;
     const contacts = this.contacts.collect();
-    if (contacts) batch.put.meta = [...(batch.put.meta ?? []), contacts];
+    batch.put.contacts = contacts.put;
+    batch.del.contacts = contacts.del;
+    if (contacts.meta.length) batch.put.meta = [...(batch.put.meta ?? []), ...contacts.meta];
     const settings = this.settings.collect();
     if (settings) batch.put.meta = [...(batch.put.meta ?? []), settings];
     const blocks = this.blocks.collect();
-    if (blocks) batch.put.meta = [...(batch.put.meta ?? []), blocks];
+    batch.put.blocked = blocks.put;
+    batch.del.blocked = blocks.del;
+    if (blocks.meta.length) batch.put.meta = [...(batch.put.meta ?? []), ...blocks.meta];
     this.dirtyChats.clear(); this.dirtyMessages.clear(); this.dirtyOutbox.clear(); this.dirtyReads.clear(); this.dirtyMeta = false;
     const seq = this.lastSeq;
     await write(this.db, batch);
