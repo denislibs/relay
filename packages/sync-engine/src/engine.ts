@@ -738,8 +738,8 @@ export class Engine {
       case 'chatMediaCounts': return this.http<Record<string, number>>(`/chats/${a.chatId}/media/counts`);
       // закрепление — сразу на сервер (без сети — ошибка, интерфейс скажет); список придёт и обновлением журнала
       case 'group': {
-        // управление группой: только /groups/... и /join/...; ответ — данные или код ошибки сервера (для текста в интерфейсе)
-        if (!/^\/(groups|join)\//.test(a.path)) return { ok: false, code: 'bad_frame' };
+        // управление группой: только /groups/... и /join/... (и удаление личного чата); ответ — данные или код ошибки сервера (для текста в интерфейсе)
+        if (!/^\/(groups|join)\//.test(a.path) && !/^\/chats\/\d+\/delete$/.test(a.path)) return { ok: false, code: 'bad_frame' };
         let res: Response;
         try {
           res = await this.dev.fetch(this.cfg.httpBase + a.path, {

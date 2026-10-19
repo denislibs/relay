@@ -8,7 +8,7 @@ import { existsSync, statSync } from 'node:fs';
 import { extname, join, resolve, sep } from 'node:path';
 import { clearSessionCookie, createSession, createUser, deleteSession, readSessionToken, sessionCookie, sessionFromToken } from './auth';
 import { announceLogin, announceSessionsChanged, assertConfirmed, checkSocket, confirmSession, listSessions, sessionEnded, sweepInactive, terminateOthers, terminateSession, trackSocket, untrackSocket } from './domain/sessions';
-import { createChat, createGroup, openDirect, messageAtDate, getChatMedia, getChatMediaCounts, getHistory, getMessagesByIds, listChats, listChatsPage } from './domain/chats';
+import { deleteDirectChat, createChat, createGroup, openDirect, messageAtDate, getChatMedia, getChatMediaCounts, getHistory, getMessagesByIds, listChats, listChatsPage } from './domain/chats';
 import { sql } from './db';
 import { DomainError } from './domain/errors';
 import { ensureServiceChat } from './domain/service';
@@ -268,6 +268,11 @@ export function createServer(opts: { port: number }): Server {
           const tab: MediaTab = raw === 'photo' ? 'media' : (MEDIA_TABS as readonly string[]).includes(raw ?? '') ? raw as MediaTab : 'media';   // photo — прежнее имя вкладки
           const before = Number(url.searchParams.get('beforeId')) || null;
           return Response.json(await getChatMedia(userId, Number(media[1]), tab, before));
+        }
+        const del = /^\/chats\/(\d+)\/delete$/.exec(url.pathname);
+        if (del && req.method === 'POST') {
+          const body = await req.json().catch(() => null) as { forAll?: unknown } | null;
+          return Response.json(await deleteDirectChat(userId, Number(del[1]), body?.forAll === true));
         }
         const pins = /^\/chats\/(\d+)\/pins(?:\/(\d+))?$/.exec(url.pathname);
         if (pins && req.method === 'POST' && !pins[2]) {

@@ -1068,6 +1068,13 @@ button.rl-tab:hover { color: var(--ink); }
 .rl-shell .rl-rpick { padding: 4px 6px; background: color-mix(in srgb, var(--raised) 92%, transparent); -webkit-backdrop-filter: blur(18px); backdrop-filter: blur(18px); }
 .rl-shell .rl-rpick-btn { width: 38px; height: 38px; font-size: 26px; }
 .rl-msgmenu-scrim { position: fixed; inset: 0; z-index: 39; }
+/* меню «⋮» в шапке чата: у кнопки, растёт из правого верхнего угла */
+.app-chatmenu { position: fixed; z-index: 40; }
+.app-chatmenu .rl-menu { position: relative; transform-origin: top right; min-width: 220px; }
+.app-chatmenu-scrim { z-index: 39; }
+.app-chatmenu-btn { display: contents; }
+.app-mute-list { display: flex; flex-direction: column; padding: 0 0.5rem; }
+.app-delchat-actions { display: flex; flex-direction: column; align-items: flex-end; gap: 2px; padding: 0 1rem 1rem; }
 
 /* chat column: header, feed and composer share one centred width, wallpaper stays full-bleed */
 .rl-shell { --chat-max: 688px; }

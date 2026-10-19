@@ -53,7 +53,11 @@ export function Info() {
   };
   // переход снаружи (плашка заявок в шапке чата) — сразу на нужный экран
   const infoGo = useGlobal((s) => s.infoGo);
-  useEffect(() => { if (infoGo && isGroupPage(infoGo)) { setGlobal({ infoGo: null }); nav.go(infoGo); } }, [infoGo]);
+  useEffect(() => {
+    if (!infoGo) return;
+    if (isGroupPage(infoGo)) { setGlobal({ infoGo: null }); nav.go(infoGo); }
+    else if (infoGo === 'edit') { setGlobal({ infoGo: null }); setPage('edit'); }   // «Изменить» из меню шапки
+  }, [infoGo]);
   // группа удалена или меня убрали — панель управления закрывается сама
   useEffect(() => { if (!chat && page !== 'info') setPage('info'); }, [!chat]);
   // профиль собеседника личного чата: только то, что сервер разрешил показать

@@ -182,6 +182,8 @@ export async function listChats(userId: number, opts: ListOpts = {}): Promise<Ch
         select * from messages where chat_id = c.id and id >= cm.history_from order by id desc limit 1
       ) lm on true
      where cm.user_id = ${userId}
+       -- личный чат, который удалили (история сдвинута) и в котором с тех пор ничего нет, — не в списке
+       and not (c.kind = 'direct' and cm.history_from > 0 and lm.id is null)
        ${opts.before ? sql`and (date_trunc('milliseconds', coalesce(lm.created_at, c.created_at)), c.id) < (${opts.before.at}::timestamptz, ${opts.before.id})` : sql``}
        ${opts.ids ? sql`and c.id = any(${opts.ids}::bigint[])` : sql``}
        ${opts.unreadOnly ? sql`and exists (select 1 from messages m where m.chat_id = c.id and m.id > cm.last_read_id and m.sender_id <> ${userId})` : sql``}
@@ -271,4 +273,24 @@ export async function getHistory(userId: number, chatId: number, before: number 
      limit ${take + 1}`;
   const hasMore = rows.length > take;
   return { messages: await withReactions(rows.slice(0, take).reverse().map(toMessage)), hasMore };
+}
+
+/**
+ * «Удалить чат» в личной переписке (как в Telegram): история исчезает у меня или у обоих — первое видимое сообщение
+ * сдвигается за последнее (history_from), чат уходит из списка этих людей и вернётся с новым сообщением.
+ */
+export async function deleteDirectChat(userId: number, chatId: number, forAll: boolean): Promise<{ ok: true }> {
+  return sql.begin(async (tx) => {
+    await assertMember(tx, chatId, userId);
+    const [c] = await tx`select kind from chats where id = ${chatId}`;
+    if (c?.kind !== 'direct') throw new DomainError('bad_frame', 'not a direct chat');
+    const [m] = await tx`select coalesce(max(id), 0)::bigint as max from messages where chat_id = ${chatId}`;
+    const from = Number(m.max) + 1;
+    const who = forAll
+      ? (await tx`select user_id from chat_members where chat_id = ${chatId}`).map((r) => Number(r.user_id))
+      : [userId];
+    await tx`update chat_members set history_from = ${from}, last_read_id = greatest(last_read_id, ${from - 1}) where chat_id = ${chatId} and user_id = any(${who}::bigint[])`;
+    await fanOut(tx, who, { type: 'chatRemoved', chatId });
+    return { ok: true };
+  });
 }

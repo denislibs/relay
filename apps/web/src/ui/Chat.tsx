@@ -1,6 +1,7 @@
 import { hasMedia, rightForKind, type GroupInfo, type MemberRight, type MyMembership } from '@relay/protocol';
 import { MEMBER_RIGHT_TEXT } from '../groups';
 import { PinnedBar } from './PinnedBar';
+import { ChatMenu } from './ChatMenu';
 import { senderAvatar } from '../profilePhoto';
 import { firstUrl, loadPreview } from '../linkUrl';
 import { MusicPicker } from './MusicPicker';
@@ -413,7 +414,7 @@ export function Chat({ chatId, frameKey, active }: { chatId: number; frameKey: s
           </span>
         </button>
         <IconButton icon="search" label="Поиск по чату" onClick={() => setFinding(true)} />
-        <IconButton icon="more" label="Информация" onClick={() => setGlobal({ infoOpen: !infoOpen })} />
+        <ChatMenu chatId={chatId} title={title} />
         {/* закреплённые — под шапкой, как в Telegram (плеер — над ней) */}
         {!system ? <PinnedBar chatId={chatId} /> : null}
         {gInfo && gInfo.requests > 0 ? (
