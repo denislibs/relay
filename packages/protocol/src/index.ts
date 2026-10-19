@@ -1,13 +1,19 @@
+import type { Block } from './blocks';
 import type { ProfileLink } from './links';
 export * from './links';
 export * from './folders';
 import type { ChatFolder } from './folders';
+import type { GroupInfo, MyMembership } from './groups';
 
 export type Id = number;
 
 /** Служебное сообщение от системного пользователя: машинный тип для отрисовки и склейки повторов. */
-export type ServiceType = 'login_code' | 'new_login' | 'group_created' | 'welcome' | 'todo_done' | 'todo_append';   // group_created: тело — название группы, автор — создатель;
-// todo_done / todo_append: автор отметил задачи / добавил задачи в чек-лист replyToId (номера задач — в service.data)
+export type ServiceType = 'login_code' | 'new_login' | 'group_created' | 'welcome'
+  | 'title_changed' | 'photo_changed' | 'photo_removed' | 'members_added' | 'member_left' | 'member_removed'
+  | 'joined_by_link' | 'joined_by_request' | 'owner_changed' | 'protected_on' | 'protected_off'
+  | 'todo_done' | 'todo_append';   // чек-лист: автор отметил / добавил задачи в список replyToId (номера — в data)
+/** Участники служебного события (имена на момент события) и новое название. */
+export interface ServiceData { users?: { id: Id; name: string }[]; title?: string; completed?: number[]; incompleted?: number[]; items?: number[] }   // group_created: тело — название группы, автор — создатель
 
 export interface Message {
   id: Id;
@@ -23,12 +29,13 @@ export interface Message {
   deleted?: boolean;
   reactions?: Reaction[];
   attachment?: Attachment | null;
-  service?: { type: ServiceType; data?: TodoServiceData };   // есть только у служебных сообщений
+  service?: { type: ServiceType; data?: ServiceData };   // есть только у служебных сообщений
   todo?: Todo;           // чек-лист (kind 'todo'): задачи и кто что отметил
   entities?: Entity[];   // оформление текста; нет или пусто — простой текст
   listened?: boolean;    // голосовое/кружок прослушан получателем
   fwdFrom?: ForwardInfo | null;   // переслано: откуда (нет — своё или отправитель скрыт)
   link?: LinkPreview | null;      // превью первой ссылки в тексте (pending — сервер ещё загружает страницу)
+  blocks?: Block[] | null;        // «статья»: блоки (body — её простой текст)
 }
 
 /** Превью ссылки: сайт, заголовок, описание и картинка (уже в нашем хранилище: /files/<id>). */
@@ -146,7 +153,15 @@ export type Update =
   | { type: 'blocksChanged'; blocked?: BlockedUser; unblocked?: Id }
   | { type: 'sessionsChanged' }
   | { type: 'pins'; chatId: Id; ids: Id[] }
-  | { type: 'linkPreview'; chatId: Id; id: Id; link: LinkPreview | null };   // превью ссылки сообщения загрузилось (null — превью нет)   // закреплённые сообщения чата целиком (новые сверху)   // список сеансов изменился: новый вход, подтверждение, завершение
+  | { type: 'linkPreview'; chatId: Id; id: Id; link: LinkPreview | null }
+  // группа: информация и настройки целиком — всем участникам
+  | { type: 'groupUpdated'; chatId: Id; group: GroupInfo }
+  // моё место в группе (роль, права, исключение, звание) — только мне
+  | { type: 'membership'; chatId: Id; me: MyMembership }
+  // состав или роли участников изменились — перечитать список
+  | { type: 'membersChanged'; chatId: Id }
+  // чат больше не мой: вышел, удалили, группу удалили
+  | { type: 'chatRemoved'; chatId: Id };   // превью ссылки сообщения загрузилось (null — превью нет)   // закреплённые сообщения чата целиком (новые сверху)   // список сеансов изменился: новый вход, подтверждение, завершение
 
 /** Тело уведомления/push без предпросмотра: текст сообщения не раскрываем. */
 export const NO_PREVIEW = 'Новое сообщение';
@@ -235,7 +250,7 @@ export type ErrorCode = 'bad_frame' | 'unauthorized' | 'not_member' | 'not_found
 export type ClientFrame =
   | { op: 'hello'; lastSeq: number }
   | { op: 'sync'; since: number }
-  | { op: 'send'; reqId: string; clientId: string; chatId: Id; body: string; entities?: Entity[]; replyToId?: Id | null; attachment?: { id: string; thumb?: string | null } | null; groupId?: string | null; forward?: ForwardRef | null; noLinkPreview?: boolean; todo?: TodoInput }
+  | { op: 'send'; reqId: string; clientId: string; chatId: Id; body: string; entities?: Entity[]; replyToId?: Id | null; attachment?: { id: string; thumb?: string | null } | null; groupId?: string | null; forward?: ForwardRef | null; noLinkPreview?: boolean; blocks?: Block[] | null; todo?: TodoInput }
   | { op: 'read'; reqId: string; chatId: Id; upToId: Id }
   | { op: 'typing'; chatId: Id }   // «печатаю» — без ответа, сервер пересылает остальным участникам
   | { op: 'draft'; reqId: string; chatId: Id; text: string; entities?: Entity[] }
@@ -305,7 +320,7 @@ export function parseClientFrame(raw: string): ClientFrame | null {
         forward = { chatId: w.chatId as number, id: w.id as number, hideSender: w.hideSender === true, hideCaption: w.hideCaption === true };
       }
       if (f.todo != null && !normalizeTodo(f.todo)) return null;
-      return { op: 'send', ...(f.todo != null ? { todo: normalizeTodo(f.todo)! } : {}), reqId: f.reqId, clientId: f.clientId, chatId: f.chatId, body: f.body, entities: normalizeEntities(f.body, f.entities), replyToId: (f.replyToId as number | null) ?? null, attachment: (f.attachment as { id: string; thumb?: string | null } | null) ?? null, groupId: (f.groupId as string | null) ?? null, forward, ...(f.noLinkPreview === true ? { noLinkPreview: true } : {}) };
+      return { op: 'send', ...(f.todo != null ? { todo: normalizeTodo(f.todo)! } : {}), reqId: f.reqId, clientId: f.clientId, chatId: f.chatId, body: f.body, entities: normalizeEntities(f.body, f.entities), replyToId: (f.replyToId as number | null) ?? null, attachment: (f.attachment as { id: string; thumb?: string | null } | null) ?? null, groupId: (f.groupId as string | null) ?? null, forward, ...(f.noLinkPreview === true ? { noLinkPreview: true } : {}), ...(Array.isArray(f.blocks) ? { blocks: f.blocks as Block[] } : {}) };
     case 'read':
       return str(f.reqId, 64) && int(f.chatId) && int(f.upToId) ? { op: 'read', reqId: f.reqId, chatId: f.chatId, upToId: f.upToId } : null;
     default: return null;
@@ -340,7 +355,7 @@ export interface Todo { title: string; items: TodoItem[]; othersCanAppend: boole
 /** Что присылает клиент при создании и правке: задачи без номера получают их на сервере. */
 export interface TodoInput { title: string; items: { id?: number; title: string }[]; othersCanAppend: boolean; othersCanComplete: boolean }
 /** Данные служебной строки чек-листа: какие задачи отметили / сняли / добавили. */
-export interface TodoServiceData { completed?: number[]; incompleted?: number[]; items?: number[] }
+export type TodoServiceData = ServiceData;
 
 /** Пределы как у Telegram (todo_items_max / todo_title_length_max / todo_item_length_max по умолчанию). */
 export const TODO_ITEMS_MAX = 30;
@@ -368,3 +383,6 @@ export function normalizeTodo(raw: unknown): TodoInput | null {
   if (!items.length || items.length > TODO_ITEMS_MAX) return null;
   return { title, items, othersCanAppend: r.othersCanAppend === true, othersCanComplete: r.othersCanComplete === true };
 }
+
+export * from './groups';
+export * from './blocks';

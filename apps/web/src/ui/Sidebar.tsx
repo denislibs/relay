@@ -57,7 +57,7 @@ const SideRow = memo(function SideRow({ c, meId, active, showDraft, muted, onMen
   const last = c.last as (LastMessage & { status: string }) | null;
   const thumb = last ? previewThumb(last) : null;
   // имя автора — только в группах (в личке и так ясно, кто пишет); своё — «Вы», чужое — первое слово имени
-  const group = c.kind === 'group' && last && !last.deleted;
+  const group = c.kind === 'group' && last && !last.deleted && !last.service;   // служебное событие — без «Имя:», текст сам называет автора
   const name = useGlobal((s) => (group && last.senderId !== meId ? s.names[last.senderId] : undefined));
   useEffect(() => { if (group && last.senderId !== meId) ensureNames([last.senderId]); }, [group, last?.senderId]);
   const author = !group ? undefined : last.senderId === meId ? 'Вы' : name ? name.split(' ')[0] : undefined;
@@ -137,6 +137,14 @@ export function Sidebar() {
   // данных ещё нет: ждём снимок из кэша или первую загрузку с сервера
   const waiting = !loaded || (!chats.length && !status.hydrated && status.phase !== 'offline');
   const skeleton = useMinVisible(waiting, { delay: 150, min: 600 });
+  // скелетон уходит — список проявляется чуть позже, когда скелетон почти погас (не поверх него: строки
+  // скелетона и настоящие диалоги не должны быть видны одновременно). Считаем в том же рендере, где список
+  // появляется: класс, добавленный позже, сдвинул бы уже идущую анимацию
+  const prevSkeleton = useRef(skeleton);
+  const lateUntil = useRef(0);
+  if (prevSkeleton.current && !skeleton) lateUntil.current = performance.now() + 700;
+  prevSkeleton.current = skeleton;
+  const late = performance.now() < lateUntil.current;
 
   const q = search.trim().toLowerCase();
   // «Все» — только непрерывно загруженный диапазон (как в Telegram): старые непрочитанные из-за курсора
@@ -161,8 +169,8 @@ export function Sidebar() {
     const list = listOf(f);
     return (
       <>
-      <div class="app-listwrap">
-        <Presence show={skeleton} exitMs={280}>
+      <div class={'app-listwrap' + (late ? ' is-late' : '')}>
+        <Presence show={skeleton} exitMs={200}>
           <div class="app-skel" aria-busy="true" aria-label="Загрузка чатов">
             {Array.from({ length: 9 }, (_, i) => <div key={i} style={{ '--i': i }}><ChatRowSkeleton /></div>)}
           </div>

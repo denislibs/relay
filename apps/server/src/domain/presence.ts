@@ -154,18 +154,18 @@ export async function chatMembers(viewer: number, chatId: number): Promise<{ own
   const [me] = await sql`select 1 from chat_members where chat_id = ${chatId} and user_id = ${viewer}`;
   if (!me) throw new DomainError('not_member');
   const rows = await sql`
-    select u.id, ${nameForSql(viewer)} as name, u.username, u.last_seen_at,
+    select u.id, ${nameForSql(viewer)} as name, u.username, u.last_seen_at, m.role, m.rank,
            case when exists (select 1 from blocks b where b.owner_id = u.id and b.user_id = ${viewer}) then null else u.photo end as photo
       from chat_members m join users u on u.id = m.user_id
      where m.chat_id = ${chatId} and not u.system limit 1000`;
-  const [owner] = await sql`select sender_id from messages where chat_id = ${chatId} and service_type = 'group_created' order by id limit 1`;
+  const [owner] = await sql`select owner_id as sender_id from chats where id = ${chatId} and owner_id is not null`;
   const ids = rows.map((r) => Number(r.id));
   const ctx = await privacyCtx(sql, ids.filter((id) => id !== viewer).map((id) => [viewer, id] as [number, number]));
   const online = await onlineUsers(ids);
   const members = rows.map((r) => {
     const id = Number(r.id);
     const p = id === viewer ? { userId: id, online: true, lastSeen: null } : presenceFor(viewer, id, r.last_seen_at, ctx, online.has(id));
-    return { ...p, name: r.name as string, username: (r.username as string | null) ?? null, photo: r.photo ?? null };
+    return { ...p, name: r.name as string, username: (r.username as string | null) ?? null, photo: r.photo ?? null, role: (r.role as string) ?? 'member', rank: (r.rank as string | null) ?? null };
   });
   const seen = (m: { lastSeen: string | null }) => (m.lastSeen && m.lastSeen !== RECENTLY ? Date.parse(m.lastSeen) || 0 : 0);
   members.sort((a, b) => Number(!!b.online) - Number(!!a.online) || seen(b) - seen(a) || a.name.localeCompare(b.name, 'ru'));

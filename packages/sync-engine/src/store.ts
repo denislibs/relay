@@ -1,3 +1,4 @@
+import type { GroupInfo, MyMembership } from '@relay/protocol';
 import type { Entity, Message, ProfilePhoto, Update } from '@relay/protocol';
 import { getAll, getByChat, write, type WriteBatch } from './idb';
 import { applyUserUpdated, ProfileCache } from './profile';
@@ -24,6 +25,8 @@ export interface ChatSummary {
   last: Message | null;
   peer?: { id: number; name: string; system?: true; photo?: ProfilePhoto | null } | null;
   peerReadUpTo?: number;
+  group?: GroupInfo;
+  me?: MyMembership;
 }
 
 /**
@@ -189,7 +192,20 @@ export class Store {
       case 'blocksChanged': return applyBlocksChanged(this, u, seq);
       case 'sessionsChanged': this.sessionsRev++; return;
       case 'pins': { const chat = this.chats.get(u.chatId); if (chat) { chat.pinned = u.ids; this.markChat(chat); } return; }
+      case 'groupUpdated': { const chat = this.chats.get(u.chatId); if (chat) { chat.group = u.group; chat.title = u.group.title; this.markChat(chat); } return; }
+      case 'membership': { const chat = this.chats.get(u.chatId); if (chat) { chat.me = u.me; this.markChat(chat); } return; }
+      case 'membersChanged': { const chat = this.chats.get(u.chatId); if (chat) { chat.membersRev = (chat.membersRev ?? 0) + 1; this.markChat(chat); } return; }
+      case 'chatRemoved': return this.removeChat(u.chatId);
     }
+  }
+
+  /** Чат больше не мой (вышел, удалили, группу удалили): из памяти, очереди и IndexedDB вместе с сообщениями. */
+  removeChat(id: number): void {
+    if (!this.chats.has(id)) return;
+    this.chats.delete(id); this.messages.delete(id); this.loaded.delete(id);
+    for (const [k, o] of this.outbox) if (o.chatId === id) { this.outbox.delete(k); this.dirtyOutbox.add(k); }
+    if (this.pendingReads.delete(id)) this.dirtyReads.add(id);
+    this.dirtyChats.add(id); this.touch(id);
   }
 
   /** Снимок списка чатов (первый вход или tooLong). */
@@ -212,6 +228,7 @@ export class Store {
       if (s.peer?.system) chat.system = true; else delete chat.system;
       if (s.draft && (!chat.draft || s.draft.at > chat.draft.at) && !this.pendingDrafts.has(s.id)) chat.draft = s.draft;
       if (s.pinned) chat.pinned = s.pinned;
+      if (s.group) { chat.group = s.group; chat.me = s.me; }
       chat.named = true;
       if (s.peerReadUpTo && s.peerReadUpTo > chat.peerReadUpTo) this.applyPeerRead(s.id, s.peerReadUpTo);
       chat.lastReadId = Math.max(chat.lastReadId, s.lastReadId);
@@ -248,6 +265,7 @@ export class Store {
       ...(m.todo ? { todo: m.todo } : null),
       ...(m.groupId ? { groupId: m.groupId } : null),
       ...(m.fwdFrom ? { fwdFrom: m.fwdFrom } : null),
+      ...(m.blocks ? { blocks: m.blocks } : null),
       // сервер ещё грузит превью, а у нас оно уже есть (показано в поле ввода) — не прятать его до загрузки
       ...(m.link ? { link: m.link.pending && prev?.link && !prev.link.pending && prev.link.url === m.link.url ? prev.link : m.link } : null),
     };
@@ -306,6 +324,7 @@ export class Store {
       ...(o.groupId ? { groupId: o.groupId } : {}),
       ...(o.fwdFrom ? { fwdFrom: o.fwdFrom } : {}),
       ...(o.link ? { link: o.link } : {}),
+      ...(o.blocks ? { blocks: o.blocks } : {}),
     });
   }
 

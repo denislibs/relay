@@ -1,7 +1,11 @@
+import { hasMedia, rightForKind, type GroupInfo, type MemberRight, type MyMembership } from '@relay/protocol';
+import { MEMBER_RIGHT_TEXT } from '../groups';
 import { PinnedBar } from './PinnedBar';
 import { senderAvatar } from '../profilePhoto';
 import { firstUrl, loadPreview } from '../linkUrl';
 import { MusicPicker } from './MusicPicker';
+import { ArticleComposer, preloadArticleEditor } from './ArticleComposer';
+import { blocksText, blocksToText, textToBlocks, type Block } from '@relay/protocol';
 
 /** Меню скрепки, как в Telegram: фото/видео, файл, музыка. */
 const ATTACH_ITEMS = [
@@ -10,6 +14,7 @@ const ATTACH_ITEMS = [
   { key: 'music', icon: 'music', label: 'Музыка' },
   { key: 'todo', icon: 'checkCircle', label: 'Чек-лист' },
   { key: 'date', icon: 'calendar', label: 'Дата' },
+  { key: 'article', icon: 'article', label: 'Статья' },
 ];
 
 /** Дата из окна → значение для вставки: текст по умолчанию, вся строка — одна сущность даты с выбранным форматом. */
@@ -26,8 +31,8 @@ import type { Item, SearchHit } from '@relay/sync-engine/src/types';
 import type { Entity, Todo, TodoInput } from '@relay/protocol';
 
 type Value = { text: string; entities: Entity[] };
-type ComposerApi = { getValue(): Value; setValue(v: Value, opts?: { focus?: boolean; instant?: boolean }): void; focus(opts?: { end?: boolean }): void ; insert(v: Value, range?: { start: number; end: number }): void };
-import { frameByKey, setGlobal, useGlobal } from '../global';
+type ComposerApi = { getValue(): Value; setValue(v: Value, opts?: { focus?: boolean; instant?: boolean }): void; focus(opts?: { end?: boolean }): void; insert(v: Value, range?: { start: number; end: number }): void };
+import { frameByKey, setGlobal, useGlobal, getGlobal } from '../global';
 import { showToast, unblockUser, useUser } from '../settingsData';
 import { Feed, type MenuExtra } from './Feed';
 import { chatKindFor, mediaPolicy } from '../autoload';
@@ -137,6 +142,9 @@ export function Chat({ chatId, frameKey, active }: { chatId: number; frameKey: s
   const [todoOpen, setTodoOpen] = useState<{ mode: 'create' | 'edit' | 'append'; msg?: Item } | null>(null);
   // дата: окно формата (вставка из меню вложений, правка «плашки») или выбор даты для выделенного текста (⌘D)
   const [dateOpen, setDateOpen] = useState<{ mode: 'format' | 'mark'; initial?: { date: number; format: string }; done: (r: { date: number; format: string; label: string } | null) => void } | null>(null);
+  // «статья» (развёрнутый редактор): open — редактор на экране; свёрнутая «богатая» — строкой над полем ввода
+  const [art, setArt] = useState<{ open: boolean; blocks: Block[] } | null>(null);
+  useEffect(() => setArt(null), [chatId]);
   const [pending, setPending] = useState<{ file: File; files: File[]; url: string | null; caption: string } | null>(null);
   const [dragging, setDragging] = useState(false);
   // несколько файлов разом — одной группой (в ленте один пузырь); превью — только у одиночного фото
@@ -149,6 +157,8 @@ export function Chat({ chatId, frameKey, active }: { chatId: number; frameKey: s
   const closePending = () => { if (pending?.url) URL.revokeObjectURL(pending.url); setPending(null); };
   const sendPending = () => {
     if (!pending) return;
+    if (pending.caption.trim() && !allowed('text')) return;
+    for (const f of pending.files) if (!allowed(rightForKind(/^image\//.test(f.type) && !/gif/.test(f.type) ? 'photo' : /^audio\//.test(f.type) ? 'audio' : 'file', f.type))) return;
     stick.current = true;
     typingDone(chatId);
     sendFiles(chatId, pending.files, pending.caption.trim(), (replyTo?.id as number) ?? null).catch(() => {});
@@ -255,7 +265,21 @@ export function Chat({ chatId, frameKey, active }: { chatId: number; frameKey: s
   const iBlocked = useGlobal((s) => chat?.kind === 'direct' && chat.peerId != null && s.blocked.some((b) => b.userId === chat.peerId));
   const peerUser = useUser(chat?.kind === 'direct' ? (chat.peerId as number | null) : null);
   const theyBlocked = !!peerUser?.blocksMe;
-  const plate = iBlocked ? 'mine' : theyBlocked ? 'theirs' : null;
+  // группа: мои права участника (у админов — все), медленный режим, запрет копирования
+  const gMe = chat?.kind === 'group' ? (chat?.me as MyMembership | null) ?? null : null;
+  const gInfo = chat?.kind === 'group' ? (chat?.group as GroupInfo | null) ?? null : null;
+  const gRights = gMe && !gMe.admin ? gMe.rights : null;
+  const plate = iBlocked ? 'mine' : theyBlocked ? 'theirs' : gRights && !gRights.text && !hasMedia(gRights) ? 'group' : null;
+  /** Можно ли отправить сейчас (вид сообщения и медленный режим); нельзя — тост и false. */
+  const allowed = (right: MemberRight): boolean => {
+    if (gRights && !gRights[right]) { showToast(right === 'text' ? 'В этой группе нельзя отправлять текст' : `В этой группе нельзя отправлять: ${MEMBER_RIGHT_TEXT[right].toLowerCase()}`); return false; }
+    if (gInfo?.slowMode && gRights) {
+      const last = messages.filter((m) => m.senderId === me.userId && !m.service && m.id != null).pop();
+      const left = last ? Math.ceil(gInfo.slowMode - (Date.now() - Date.parse(last.createdAt as string)) / 1000) : 0;
+      if (left > 0) { showToast(`Медленный режим: следующее сообщение — через ${left} с`); return false; }
+    }
+    return true;
+  };
 
   // режим выбора сообщений (панель вместо поля ввода)
   const selKeys = useGlobal((s) => (s.selecting?.chatId === chatId ? s.selecting.keys : null));
@@ -298,7 +322,7 @@ export function Chat({ chatId, frameKey, active }: { chatId: number; frameKey: s
   const myPeer = peer && chat?.peerId === peer.userId && peer.known ? peer : null;
   const online = !!myPeer?.online;
   const isTyping = !!chat?.typing;
-  const members = useMembers(chatId, chat?.kind === 'group');
+  const members = useMembers(chatId, chat?.kind === 'group', (chat?.membersRev as number) ?? 0);
   const subtitle = system ? 'служебные уведомления' : isTyping ? 'печатает…' : chat?.kind === 'group' ? (members ? membersStatus(members, true) : 'Группа') : myPeer ? lastSeenText(online, myPeer.lastSeen as string | null) : '';
   const replyTo = replyKey ? messages.find((m) => m.key === replyKey) : undefined;
   const authorOf = (senderId: unknown) => (senderId === me.userId ? 'Вы' : title);
@@ -324,6 +348,36 @@ export function Chat({ chatId, frameKey, active }: { chatId: number; frameKey: s
     onClick: (e: MouseEvent) => { const r = (e.currentTarget as HTMLElement).getBoundingClientRect(); setFwdMenu({ x: r.left + 16, y: r.top }); },
   } : null;
   const nameOf = (id: number) => (id === me.userId ? me.name : names[id] ?? (chat?.kind === 'direct' ? title : ''));
+  // «статья»: развернуть (текст поля ввода — в редактор), свернуть (простое — обратно в поле), отправить
+  const openArticle = () => {
+    preloadArticleEditor();
+    const v = applyMarkdown(api.current?.getValue() ?? emptyValue());
+    const blocks = art?.blocks ?? (v.text.trim() ? textToBlocks(v.text, v.entities) : []);
+    if (!art && v.text) { api.current?.setValue(emptyValue(), { instant: true }); latest.current = saved.current = emptyValue(); }
+    setArt({ open: true, blocks });
+  };
+  const collapseArticle = (blocks: Block[]) => {
+    const simple = blocks.length ? blocksToText(blocks) : { text: '', entities: [] };
+    if (simple) {
+      setArt(null);
+      if (simple.text) { const v = { text: simple.text, entities: simple.entities }; api.current?.setValue(v, { instant: true }); latest.current = v; }
+      setTimeout(() => api.current?.focus({ end: true }), 0);
+      return;
+    }
+    setArt({ open: false, blocks });   // заголовки, списки… обычным текстом не записать — остаётся статьёй
+  };
+  const sendArticle = (blocks: Block[]) => {
+    setArt(null);
+    stick.current = true;
+    const simple = blocksToText(blocks);
+    if (simple) { if (simple.text.trim()) void send(chatId, simple.text, null, simple.entities); return; }
+    void send(chatId, blocksText(blocks), null, [], { blocks });
+  };
+  const artQuote = art && !art.open && art.blocks.length && !editing ? {
+    icon: 'article', author: 'Статья', text: blocksText(art.blocks).split('\n')[0] || 'Без текста', tone: 5,
+    onClick: () => setArt({ ...art, open: true }),
+  } : null;
+
   // «Переслать» из меню: у альбома — весь альбом
   const groupOf = (m: Item) => (m.groupId ? messages.filter((x) => x.groupId === m.groupId && x.senderId === m.senderId) : [m]);
   const forwardMenuMsg = (m: Item) => startForward(chatId, groupOf(m), nameOf);
@@ -362,6 +416,11 @@ export function Chat({ chatId, frameKey, active }: { chatId: number; frameKey: s
         <IconButton icon="more" label="Информация" onClick={() => setGlobal({ infoOpen: !infoOpen })} />
         {/* закреплённые — под шапкой, как в Telegram (плеер — над ней) */}
         {!system ? <PinnedBar chatId={chatId} /> : null}
+        {gInfo && gInfo.requests > 0 ? (
+          <button type="button" class="app-requests-bar" onClick={() => setGlobal({ infoOpen: true, infoGo: 'gRequests' })}>
+            <Icon name="userPlus" size={18} /><span>{gInfo.requests} {plural(gInfo.requests, 'заявка', 'заявки', 'заявок')} на вступление</span><Icon name="chevronRight" size={18} />
+          </button>
+        ) : null}
         {/* поиск по чату — карточка внутри шапки, как в Telegram: аватар и правая кнопка остаются видны */}
         {finding ? (
           <div class={'app-findcard' + (listOpen && found ? ' app-findcard-open' : '')}>
@@ -407,10 +466,11 @@ export function Chat({ chatId, frameKey, active }: { chatId: number; frameKey: s
                 <span>Вы заблокировали этого пользователя</span>
                 <Button variant="ghost" onClick={() => { if (chat?.peerId != null) void unblockUser(chat.peerId as number); }}>Разблокировать</Button>
               </>
-            ) : <span>Вы не можете отправлять сообщения этому пользователю</span>}
+            ) : plate === 'group' ? <span>Администраторы запретили писать в этой группе</span>
+              : <span>Вы не можете отправлять сообщения этому пользователю</span>}
           </div>
         </div>
-      ) : <div class={'app-composer-host' + (selKeys ? ' is-selecting' : '')}><Composer
+      ) : <div class={'app-composer-host' + (selKeys ? ' is-selecting' : '') + (art?.open ? ' is-article' : '')}><Composer
         id="composer"
         apiRef={api}
         initialValue={initial}
@@ -418,14 +478,15 @@ export function Chat({ chatId, frameKey, active }: { chatId: number; frameKey: s
         sendKey={sendKey}
         placeholder="Сообщение"
         editing={!!editing}
-        sendEmpty={!!fwdQuote}
-        replyTo={editing ? { author: 'Редактирование', text: editing.original.text, tone: peerTone(me.userId), icon: 'pencil' } : fwdQuote ? fwdQuote : !replyTo && lp?.link && !lp.off ? {
+        sendEmpty={!!fwdQuote || !!artQuote}
+        replyTo={editing ? { author: 'Редактирование', text: editing.original.text, tone: peerTone(me.userId), icon: 'pencil' } : fwdQuote ? fwdQuote : artQuote ? artQuote : !replyTo && lp?.link && !lp.off ? {
           icon: 'link', author: lp.link.siteName || lp.link.title || lp.url, text: lp.link.description || lp.link.title || lp.url, tone: 5,
           thumbSrc: lp.link.photo ? `/files/${lp.link.photo.id}` : undefined,
         } : replyTo ? { author: authorOf(replyTo.senderId), text: replyTo.body, tone: peerTone(replyTo.senderId) } : null}
         onCancelReply={() => {
           if (editing) { endEdit(editing.draft); return; } // правку отменили — вернуть черновик
           if (fwd) { cancelForwardDraft(chatId); return; }
+          if (artQuote) { setArt(null); return; }   // свёрнутую статью — выбросить
           if (!replyTo && lp?.link && !lp.off) { setLp({ ...lp, off: true }); api.current?.focus({ end: true }); return; }   // крестик у превью — отправить без него; фокус — обратно в поле
           setReplyKey(null);
         }}
@@ -435,17 +496,18 @@ export function Chat({ chatId, frameKey, active }: { chatId: number; frameKey: s
         onEditLast={editLast}
         onReplyNav={replyNav}
         chatKey={chatId}
-        recordModes={recordModes}
+        recordModes={recordModes.filter((m) => !gRights || gRights[m === 'round' ? 'round' : 'voice'])}
         startRound={startRound}
         recordMode={recordMode}
         onRecordModeChange={(m: string) => { setRecordMode(m); try { localStorage.setItem('relay.recordMode', m); } catch { /* без хранилища — до перезагрузки */ } }}
         onRecordError={(err: { name?: string }, mode: string) => showToast(err?.name === 'NotAllowedError' || err?.name === 'NotFoundError'
           ? (mode === 'round' ? 'Разрешите доступ к камере и микрофону, чтобы записывать видеосообщения' : 'Разрешите доступ к микрофону, чтобы записывать голосовые')
           : mode === 'round' ? 'Не удалось записать видеосообщение' : 'Не удалось записать голосовое')}
-        onSendVoice={(r: { blob: Blob; duration: number; waveform: Uint8Array }) => { stick.current = true; sendVoice(chatId, r, (replyTo?.id as number) ?? null).catch(() => {}); setReplyKey(null); }}
-        onSendRound={(r: { blob: Blob; duration: number; size: number; thumb: string | null }) => { stick.current = true; sendRound(chatId, r, (replyTo?.id as number) ?? null).catch(() => {}); setReplyKey(null); }}
+        onSendVoice={(r: { blob: Blob; duration: number; waveform: Uint8Array }) => { if (!allowed('voice')) return; stick.current = true; sendVoice(chatId, r, (replyTo?.id as number) ?? null).catch(() => {}); setReplyKey(null); }}
+        onSendRound={(r: { blob: Blob; duration: number; size: number; thumb: string | null }) => { if (!allowed('round')) return; stick.current = true; sendRound(chatId, r, (replyTo?.id as number) ?? null).catch(() => {}); setReplyKey(null); }}
         attachItems={ATTACH_ITEMS}
-        onAttach={(k: string) => { if (k === 'music') { setMusicOpen(true); return; } if (k === 'todo') { setTodoOpen({ mode: 'create' }); return; } if (k === 'date') { setDateOpen({ mode: 'format', done: (r) => { if (r) api.current?.insert(dateValue(r)); } }); return; } const el = picker.current!; el.accept = k === 'media' || k === 'camera' ? 'image/*,video/*' : ''; el.value = ''; el.click(); }}
+        onExpand={() => openArticle()}
+        onAttach={(k: string) => { if (k === 'music') { if (allowed('music')) setMusicOpen(true); return; } if (k === 'article') { openArticle(); return; } if (k === 'todo') { setTodoOpen({ mode: 'create' }); return; } if (k === 'date') { setDateOpen({ mode: 'format', done: (r) => { if (r) api.current?.insert(dateValue(r)); } }); return; } const el = picker.current!; el.accept = k === 'media' || k === 'camera' ? 'image/*,video/*' : ''; el.value = ''; el.click(); }}
         onSend={(v: Value) => {
           if (editing) {
             const next = applyMarkdown(v);
@@ -453,12 +515,14 @@ export function Chat({ chatId, frameKey, active }: { chatId: number; frameKey: s
             endEdit(editing.draft);
             return false;   // в поле уже черновик — композер его не трогает
           }
+          if (!allowed('text')) return false;
           stick.current = true;
           if (draftTimer.current) { clearTimeout(draftTimer.current); draftTimer.current = null; }
           saved.current = latest.current = emptyValue();   // черновик очищает сам движок вместе с отправкой
           typingDone(chatId);
           const out = applyMarkdown(v);   // **жирный**, `код`, [текст](ссылка)… — в оформление
           if (fwd) return sendForwardDraft(chatId, out.text, out.entities);   // комментарий первым, затем пересланное
+          if (art) { sendArticle(art.blocks); return false; }
           // превью: убрали крестиком — без него; уже загружено для этой ссылки — сразу в ленте, до ответа сервера
           const url = firstUrl(out.text, out.entities);
           const pv = lp && url === lp.url ? (lp.off ? { noLinkPreview: true } : { link: lp.link }) : {};
@@ -468,13 +532,14 @@ export function Chat({ chatId, frameKey, active }: { chatId: number; frameKey: s
           return sent;   // поле очистится, когда сообщение встанет в ленту
         }}
       />
+        {art?.open ? <ArticleComposer key={chatId} blocks={art.blocks} onCollapse={collapseArticle} onSend={sendArticle} /> : null}
         {/* режим выбора: панель «Выбрано: N» проявляется поверх поля ввода (поле остаётся на месте и гаснет), как в Telegram */}
         <Presence show={!!selKeys} exitMs={200}>
           <div class="app-selbar-layer">
             <SelectionBar count={selected.length} onCancel={endSelect}
               onForward={() => { const list = selected; endSelect(); startForward(chatId, list, nameOf); }}
               onCopy={() => { navigator.clipboard?.writeText(selected.filter((m) => m.body).map((m) => m.body as string).join('\n\n')).catch(() => {}); showToast('Скопировано'); endSelect(); }}
-              onDelete={selected.length && selected.every((m) => m.senderId === me.userId) ? () => setConfirmDelete({ ids: selected.map((m) => m.id as number) }) : undefined} />
+ onDelete={selected.length && (gMe?.admin?.delete || selected.every((m) => m.senderId === me.userId)) ? () => setConfirmDelete({ ids: selected.map((m) => m.id as number) }) : undefined} />
           </div>
         </Presence>
       </div>}
@@ -486,36 +551,36 @@ export function Chat({ chatId, frameKey, active }: { chatId: number; frameKey: s
           <>
             <div class="rl-msgmenu-scrim" onClick={() => setMenu(null)} onContextMenu={(e) => { e.preventDefault(); setMenu(null); }} />
             <div class="rl-msgmenu" ref={menuBox} style={{ left: Math.min(menu.x, innerWidth - 300), top: menu.y }}>
-              {menuMsg.id != null && !menuMsg.deleted && !system ? (
-                <ReactionPicker selected={myReaction} onPick={(emoji: string) => { react(chatId, menuMsg.id as number, myReaction === emoji ? null : emoji); setMenu(null); }} />
+              {menuMsg.id != null && !menuMsg.deleted && !system && (!gRights || gRights.react) && gInfo?.reactions.mode !== 'none' ? (
+                <ReactionPicker emoji={gInfo?.reactions.mode === 'some' ? gInfo.reactions.allowed.slice(0, 7) : undefined} selected={myReaction} onPick={(emoji: string) => { react(chatId, menuMsg.id as number, myReaction === emoji ? null : emoji); setMenu(null); }} />
               ) : null}
               <Menu
                 label="Действия с сообщением"
                 onClose={() => setMenu(null)}
                 items={[
                   ...(menuMsg.id != null && !menuMsg.deleted && !system ? [{ icon: 'reply', label: 'Ответить', onClick: () => { if (editing) endEdit(editing.draft); setReplyKey(menuMsg.key as string); api.current?.focus({ end: true }); } }] : []),
-                  ...(own && !system ? [{ icon: 'pencil', label: 'Изменить', onClick: () => { if (menuMsg.kind === 'todo') { if (!menuMsg.fwdFrom) setTodoOpen({ mode: 'edit', msg: menuMsg }); } else startEdit(menuMsg); } }] : []),
+                  ...(own && !system && !menuMsg.blocks ? [{ icon: 'pencil', label: 'Изменить', onClick: () => { if (menuMsg.kind === 'todo') { if (!menuMsg.fwdFrom) setTodoOpen({ mode: 'edit', msg: menuMsg }); } else startEdit(menuMsg); } }] : []),
                   // чек-лист: добавить задачу — автору или всем, если автор разрешил; не больше 30
                   ...(menuMsg.kind === 'todo' && menuMsg.todo && !menuMsg.fwdFrom && menuMsg.id != null && (own || (menuMsg.todo as Todo).othersCanAppend) && (menuMsg.todo as Todo).items.length < TODO_ITEMS_MAX
                     ? [{ icon: 'plus', label: 'Добавить задачу', onClick: () => setTodoOpen({ mode: 'append', msg: menuMsg }) }] : []),
                   // как в Telegram Web A: картинка — только фото и только где буфер принимает PNG
-                  ...(!menuMsg.deleted && att?.kind === 'photo' && att.id && canCopyImage() ? [{ icon: 'copyMedia', label: 'Копировать изображение', onClick: () => {
+                  ...(!menuMsg.deleted && !gInfo?.protected && att?.kind === 'photo' && att.id && canCopyImage() ? [{ icon: 'copyMedia', label: 'Копировать изображение', onClick: () => {
                     copyImage(`/files/${att.id}`).then(() => showToast('Изображение скопировано'), () => showToast('Не удалось скопировать изображение'));
                   } }] : []),
                   // по ссылке — «Копировать ссылку» вместо текста; есть выделение в этом сообщении — копируем только его
-                  ...(!menuMsg.deleted && !menuMsg.service && menu.extra?.link ? [{ icon: 'link', label: 'Копировать ссылку', onClick: () => {
+                  ...(gInfo?.protected ? [] : !menuMsg.deleted && !menuMsg.service && menu.extra?.link ? [{ icon: 'link', label: 'Копировать ссылку', onClick: () => {
                     copyRich(menu.extra!.link!).then(() => showToast('Ссылка скопирована'));
                   } }] : !menuMsg.deleted && !menuMsg.service && (menuMsg.body as string) ? [{ icon: 'copy', label: menu.extra?.selection ? 'Копировать выделенное' : 'Копировать текст', onClick: () => {
                     const v = menu.extra?.selection ?? { text: menuMsg.body as string, entities: (menuMsg.entities as Entity[] | undefined) ?? [] };
                     copyRich(v.text, clipboardHtml(v.text, v.entities)).then((ok: boolean) => showToast(ok ? 'Текст скопирован' : 'Не удалось скопировать'));
                   } }] : []),
-                  ...(menuMsg.id != null && !menuMsg.deleted && !system && !menuMsg.service ? [((chat?.pinned as number[] | undefined) ?? []).includes(menuMsg.id as number)
+                  ...(menuMsg.id != null && !menuMsg.deleted && !system && !menuMsg.service && (!gMe || gMe.admin?.pin || gMe.rights.pin) ? [((chat?.pinned as number[] | undefined) ?? []).includes(menuMsg.id as number)
                     ? { icon: 'pin', label: 'Открепить', onClick: () => void unpinMessage(chatId, menuMsg.id as number) }
                     : { icon: 'pin', label: 'Закрепить', onClick: () => void pinMessage(chatId, menuMsg.id as number) }] : []),
-                  ...(!menuMsg.deleted && att?.id ? [{ icon: 'download', label: 'Скачать', onClick: () => downloadUrl(`/files/${att.id}?download=1`, downloadName(att)) }] : []),
-                  ...(menuMsg.id != null && !menuMsg.deleted && !menuMsg.service ? [{ icon: 'forward', label: 'Переслать', onClick: () => forwardMenuMsg(menuMsg) }] : []),
-                  ...(menuMsg.id != null && !menuMsg.deleted && !menuMsg.service ? [{ icon: 'checkCircle', label: 'Выбрать', onClick: () => startSelect(chatId, groupOf(menuMsg).map((x) => x.key as string)) }] : []),
-                  ...(own ? ['-' as const, { icon: 'trash', label: 'Удалить', danger: true, onClick: () => setConfirmDelete({ ids: [menuMsg.id as number] }) }] : []),
+                  ...(!menuMsg.deleted && !gInfo?.protected && att?.id ? [{ icon: 'download', label: 'Скачать', onClick: () => downloadUrl(`/files/${att.id}?download=1`, downloadName(att)) }] : []),
+                  ...(menuMsg.id != null && !menuMsg.deleted && !menuMsg.service && !gInfo?.protected ? [{ icon: 'forward', label: 'Переслать', onClick: () => forwardMenuMsg(menuMsg) }] : []),
+                  ...(menuMsg.id != null && !menuMsg.deleted && !menuMsg.service && !gInfo?.protected ? [{ icon: 'checkCircle', label: 'Выбрать', onClick: () => startSelect(chatId, groupOf(menuMsg).map((x) => x.key as string)) }] : []),
+                  ...(own || (gMe?.admin?.delete && !menuMsg.deleted && menuMsg.id != null && !menuMsg.service) ? ['-' as const, { icon: 'trash', label: 'Удалить', danger: true, onClick: () => setConfirmDelete({ ids: [menuMsg.id as number] }) }] : []),
                 ]}
               />
             </div>

@@ -1,3 +1,4 @@
+import { JoinLink } from './group/JoinLink';
 import { LinkEdit } from './links/LinkEdit';
 import { ForwardPicker } from './ForwardPicker';
 import { Links } from './links/Links';
@@ -62,6 +63,7 @@ export function App() {
       <NewChat />
       <ModalRoot />
       <ForwardPicker />
+      <JoinLink />
       <NewContact />
       <DevPlate />
       <AppToast />

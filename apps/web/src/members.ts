@@ -3,15 +3,15 @@ import type { ProfilePhoto } from '@relay/protocol';
 import { rememberPhotos } from './profilePhoto';
 
 /** Участник группы, как его отдаёт сервер: имя (как видит зритель), @имя и присутствие с учётом приватности. */
-export type Member = { userId: number; name: string; username: string | null; online: boolean | null; lastSeen: string | null; photo?: ProfilePhoto | null };
+export type Member = { userId: number; name: string; username: string | null; online: boolean | null; lastSeen: string | null; photo?: ProfilePhoto | null; role?: 'owner' | 'admin' | 'member'; rank?: string | null };
 export type Members = { ownerId: number | null; members: Member[] };
 
 const cache = new Map<number, Members>();
 const inflight = new Map<number, Promise<Members>>();
 
-export function loadMembers(chatId: number): Promise<Members> {
+export function loadMembers(chatId: number, fresh = false): Promise<Members> {
   let p = inflight.get(chatId);
-  if (p) return p;
+  if (p && !fresh) return p;
   p = fetch(`/chats/${chatId}/members`).then((r) => {
     if (!r.ok) throw new Error('members ' + r.status);
     return r.json() as Promise<Members>;
@@ -20,16 +20,17 @@ export function loadMembers(chatId: number): Promise<Members> {
   return p;
 }
 
-/** Участники группы: сразу из кэша (без мигания при повторном открытии), потом свежие с сервера. Не группа — null. */
-export function useMembers(chatId: number, group: boolean): Members | null {
+/** Участники группы: сразу из кэша (без мигания при повторном открытии), потом свежие с сервера. Не группа — null.
+ *  rev — номер изменения состава из журнала (membersChanged): сменился — перечитать. */
+export function useMembers(chatId: number, group: boolean, rev = 0): Members | null {
   const [m, setM] = useState<Members | null>(() => (group ? cache.get(chatId) ?? null : null));
   useEffect(() => {
     if (!group) { setM(null); return; }
     setM(cache.get(chatId) ?? null);
     let live = true;
-    loadMembers(chatId).then((x) => { if (live) setM(x); }).catch(() => { /* без сети — что в кэше */ });
+    loadMembers(chatId, rev > 0).then((x) => { if (live) setM(x); }).catch(() => { /* без сети — что в кэше */ });
     return () => { live = false; };
-  }, [chatId, group]);
+  }, [chatId, group, rev]);
   return m;
 }
 

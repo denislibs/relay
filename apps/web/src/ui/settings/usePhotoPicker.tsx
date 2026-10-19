@@ -10,7 +10,10 @@ import { showToast } from '../../settingsData';
  * обрезанное (а не старое фото и не инициалы); ошибка — тост и возврат как было.
  * avatar — пропсы для ProfileHeader/Avatar, ui — скрытый input и окно обрезки (вставить в разметку).
  */
-export function usePhotoPicker(photo: ProfilePhoto | null | undefined) {
+type PhotoActions = { set: (c: { big: Blob; small: Blob; thumb: string; video?: { blob: Blob; side: number; duration: number } }) => Promise<unknown>; remove: () => Promise<unknown> };
+
+/** actions — куда ставить фото (по умолчанию — свой профиль; у группы — фото группы). */
+export function usePhotoPicker(photo: ProfilePhoto | null | undefined, actions: PhotoActions = { set: setProfilePhoto, remove: () => removeProfilePhoto() }) {
   const input = useRef<HTMLInputElement>(null);
   const [crop, setCrop] = useState<{ src: string; kind: 'image' | 'video' | 'gif' } | null>(null);
   const [local, setLocal] = useState<{ src: string; thumb: string } | null>(null);
@@ -32,11 +35,11 @@ export function usePhotoPicker(photo: ProfilePhoto | null | undefined) {
     const src = URL.createObjectURL(c.big);
     setLocal({ src, thumb: c.thumb });
     setBusy(true);
-    setProfilePhoto(c).then(() => setBusy(false), () => { setBusy(false); setLocal(null); URL.revokeObjectURL(src); showToast('Не удалось загрузить фото'); });
+    actions.set(c).then(() => setBusy(false), () => { setBusy(false); setLocal(null); URL.revokeObjectURL(src); showToast('Не удалось загрузить фото'); });
   };
   const remove = () => {
     setLocal(null); setBusy(true);
-    removeProfilePhoto().then(() => setBusy(false), () => { setBusy(false); showToast('Не удалось удалить фото'); });
+    actions.remove().then(() => setBusy(false), () => { setBusy(false); showToast('Не удалось удалить фото'); });
   };
 
   const ui: JSX.Element = (

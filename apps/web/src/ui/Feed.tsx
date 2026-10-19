@@ -1,7 +1,9 @@
+import { isGroupService, serviceText } from './serviceText';
+import type { ServiceData, ServiceType } from '@relay/protocol';
 import type { Item } from '@relay/sync-engine/src/types';
 import { senderAvatar } from '../profilePhoto';
 import type { Entity, Todo } from '@relay/protocol';
-import { Avatar, Bubble, Icon, peerTone, DateDivider, DatePicker, FileBubble, MediaBubble, MessageText, VoiceBubble, MusicBubble, RoundBubble, player, MediaViewer, ScrollToBottom, beginHeavyAnimation, forceMeasure, isHeavyAnimating, onHeavyAnimationEnd, requestMeasure, requestMutation, selectionValue, TodoBubble } from '@relay/ui';
+import { ArticleBlocks, Avatar, Bubble, Icon, peerTone, DateDivider, DatePicker, FileBubble, MediaBubble, MessageText, VoiceBubble, MusicBubble, RoundBubble, player, MediaViewer, ScrollToBottom, beginHeavyAnimation, forceMeasure, isHeavyAnimating, onHeavyAnimationEnd, requestMeasure, requestMutation, selectionValue, TodoBubble } from '@relay/ui';
 import { memo } from 'preact/compat';
 import { useEffect, useLayoutEffect, useRef, useState } from 'preact/hooks';
 import { toggleTodo, clearFocus, ensureNames, focusMessage, openInner, jumpToDate, localPreview, markListened, moveWindow, react, savePosition, savedPosition, seen } from '../data';
@@ -230,7 +232,9 @@ const Row = memo(function Row({ chatId, voiceTitle, author, onAuthor, onOpen, hl
         status={out ? m.status : undefined}
         appear={appear}
       >
-        <MessageText text={m.body as string} entities={m.entities as Entity[] | undefined} highlight={hl} />
+        {m.blocks && !m.deleted
+          ? <ArticleBlocks blocks={m.blocks} highlight={hl} />
+          : <MessageText text={m.body as string} entities={m.entities as Entity[] | undefined} highlight={hl} />}
       </Bubble>
       {m.id != null ? <i class="app-mark" data-mid={m.id as number} aria-hidden="true" /> : null}
     </div>
@@ -748,8 +752,9 @@ export function Feed({ frameKey, active, chatId, meId, peerName, group, onAuthor
       flushRun();
       out.push(<div class="app-unread-divider" key="unread" role="separator"><span>Непрочитанные сообщения</span></div>);
     }
-    // чек-лист: «X отметил(а) «задача» выполненным» / «добавил(а) задачу» — плашкой, названия — из самого списка
-    const svc = m.service as { type?: string; data?: { completed?: number[]; incompleted?: number[]; items?: number[] } } | undefined;
+    // служебные события группы — плашкой по центру, как в Telegram (не пузырём)
+    const svc = m.service as { type?: string; data?: ServiceData } | undefined;
+    // чек-лист: «X отметил(а) «задача» как выполненную» / «добавил(а) задачу» — плашкой, названия — из самого списка
     if (svc?.type === 'todo_done' || svc?.type === 'todo_append') {
       flushRun();
       const list = messages.find((x) => x.id === m.replyToId)?.todo as { title: string; items: { id: number; title: string }[] } | undefined;
@@ -757,11 +762,10 @@ export function Feed({ frameKey, active, chatId, meId, peerName, group, onAuthor
       prevDay = day; prevSender = null;
       return;
     }
-    // служебное «создал(а) группу» — плашкой по центру, как в Telegram (не пузырём)
-    if ((m.service as { type?: string } | undefined)?.type === 'group_created') {
-      const who = mine ? 'Вы создали' : `${names[m.senderId as number] ?? peerName} создал(а)`;
+    if (isGroupService(svc?.type)) {
+      const text = serviceText(svc!.type as ServiceType, { data: svc!.data, body: m.body as string, mine, sender: names[m.senderId as number] ?? peerName, meId });
       flushRun();
-      out.push(<div class="rl-action" key={m.key} role="note"><span>{who} группу «{m.body as string}»</span></div>);
+      out.push(<div class="rl-action" key={m.key} role="note"><span>{text}</span></div>);
       prevDay = day; prevSender = null;
       return;
     }

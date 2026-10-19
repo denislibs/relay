@@ -1,6 +1,7 @@
 // Текст сообщения с оформлением — для пузырей, цитат и подписей. Строит элементы из сегментов
 // (тех же, что и HTML поля ввода), без innerHTML. Подсветка поиска — внутри каждого куска.
 import { Fragment, h } from 'preact';
+import { useLayoutEffect, useRef, useState } from 'preact/hooks';
 import { Highlight } from './more.js';
 import { safeUrl, segments } from './richtext.js';
 import { Spoiler } from './spoiler.js';
@@ -59,4 +60,39 @@ function MessageText(props) {
   });
 }
 
-export { MessageText };
+/* ---------- ArticleBlocks: «статья» в пузыре ----------
+   Блоки: абзац, заголовок 1–3, маркированный/нумерованный список (вложенные), цитата, код (с языком), разделитель.
+   Текст блоков — тот же MessageText (ссылки, спойлеры, код в строке). Длинная статья свёрнута с затуханием и
+   кнопкой «Показать полностью», как в Telegram. */
+var ARTICLE_FOLD = 520;   // выше этого (px) — сворачиваем
+function blockNodes(list, hl, depth) {
+  return list.map(function (b, i) {
+    switch (b.type) {
+      case 'p': return h('p', { key: i, class: 'rl-art-p' }, b.text ? h(MessageText, { text: b.text, entities: b.entities, highlight: hl }) : h('br'));
+      case 'h': return h('h' + (b.level + 2), { key: i, class: 'rl-art-h rl-art-h' + b.level }, h(MessageText, { text: b.text, entities: b.entities, highlight: hl }));
+      case 'ul': return h('ul', { key: i, class: 'rl-art-list' }, b.items.map(function (it, k) { return h('li', { key: k }, blockNodes(it, hl, depth + 1)); }));
+      case 'ol': return h('ol', { key: i, class: 'rl-art-list', start: b.start || undefined }, b.items.map(function (it, k) { return h('li', { key: k }, blockNodes(it, hl, depth + 1)); }));
+      case 'quote': return h('blockquote', { key: i, class: 'rl-art-quote' }, blockNodes(b.blocks, hl, depth + 1));
+      case 'code': return h('div', { key: i, class: 'rl-art-code' },
+        b.lang ? h('span', { class: 'rl-art-code-lang' }, b.lang) : null,
+        h('pre', null, h('code', null, b.text)));
+      case 'hr': return h('hr', { key: i, class: 'rl-art-hr' });
+    }
+    return null;
+  });
+}
+function ArticleBlocks(props) {
+  var box = useRef(null);
+  var st = useState(false), open = st[0];
+  var tall = useState(false);
+  useLayoutEffect(function () {
+    var el = box.current;
+    if (el && !open) tall[1](el.scrollHeight > ARTICLE_FOLD + 80);
+  }, [props.blocks]);
+  var folded = tall[0] && !open;
+  return h('div', { class: 'rl-art' + (folded ? ' rl-art-folded' : '') },
+    h('div', { class: 'rl-art-body', ref: box, style: folded ? { maxHeight: ARTICLE_FOLD + 'px' } : undefined }, blockNodes(props.blocks || [], props.highlight, 0)),
+    folded ? h('button', { type: 'button', class: 'rl-art-more', onClick: function (e) { e.stopPropagation(); st[1](true); } }, 'Показать полностью') : null);
+}
+
+export { MessageText, ArticleBlocks };

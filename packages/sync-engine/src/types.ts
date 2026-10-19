@@ -1,4 +1,5 @@
-import type { Birthday, ChatFolder, Entity, ForwardInfo, ForwardRef, LinkPreview, PrivacyKey, PrivacyMode, ProfileLink, ProfilePhoto, ServiceType, Todo, TodoInput, TodoServiceData } from '@relay/protocol';
+import type { GroupInfo, MyMembership } from '@relay/protocol';
+import type { Birthday, Block, ChatFolder, Entity, ForwardInfo, ForwardRef, LinkPreview, PrivacyKey, PrivacyMode, ProfileLink, ProfilePhoto, ServiceType, Todo, TodoInput, TodoServiceData } from '@relay/protocol';
 
 export type Status = 'pending' | 'sent' | 'read' | 'failed';
 
@@ -27,6 +28,7 @@ export interface LocalMessage {
   todo?: Todo;            // чек-лист
   fwdFrom?: ForwardInfo | null;      // пересланное: исходный автор, откуда и когда
   link?: LinkPreview | null;         // превью ссылки (pending — сервер ещё загружает)
+  blocks?: Block[] | null;           // «статья»
 }
 
 /** Вложение сообщения; у неотправленного id пустой, пока файл не загружен. */
@@ -53,6 +55,9 @@ export interface LocalChat {
   draft?: { text: string; at: string; entities?: Entity[] } | null;   // неотправленный текст композера (общий для вкладок)
   pinned?: number[];      // закреплённые сообщения (новые сверху)
   photo?: ProfilePhoto | null;   // фото собеседника личного чата (из снимка списка и userUpdated)
+  group?: GroupInfo;      // группа: информация и настройки
+  me?: MyMembership;      // группа: моя роль и права
+  membersRev?: number;    // растёт, когда состав/роли меняются — интерфейс перечитывает участников
 }
 
 export interface OutboxEntry {
@@ -71,6 +76,7 @@ export interface OutboxEntry {
   fwdFrom?: ForwardInfo | null;     // как показать до подтверждения
   noLinkPreview?: boolean;          // превью ссылки убрали в поле ввода
   link?: LinkPreview | null;        // превью, уже показанное в поле ввода, — в ленте сразу, до ответа сервера
+  blocks?: Block[] | null;          // «статья»
 }
 
 export type Query =
@@ -107,7 +113,9 @@ export type Patch =
       append?: boolean };
 
 export type Action =
-  | { type: 'sendMessage'; chatId: number; body: string; entities?: Entity[]; replyToId?: number | null; noLinkPreview?: boolean; link?: LinkPreview | null; attachment?: LocalAttachment | null }   // attachment — уже загруженный файл (id), например трек из музыки профиля
+  /** управление группой и вступление по ссылке: HTTP мимо очереди ({ok, data} | {ok:false, code}) */
+  | { type: 'group'; method: 'GET' | 'POST' | 'PUT' | 'PATCH' | 'DELETE'; path: string; body?: unknown }
+  | { type: 'sendMessage'; chatId: number; body: string; entities?: Entity[]; replyToId?: number | null; noLinkPreview?: boolean; link?: LinkPreview | null; attachment?: LocalAttachment | null; blocks?: Block[] | null }   // blocks — «статья»; attachment — уже загруженный файл (id), например трек из музыки профиля
   | { type: 'seen'; chatId: number; upToId: number }
   | { type: 'loadOlder'; chatId: number }
   | { type: 'retry'; clientId: string }
