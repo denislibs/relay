@@ -433,9 +433,14 @@ export function typing(chatId: number): void {
 /** Отправили — следующий набор снова сразу сообщит «печатаю». */
 export function typingDone(chatId: number): void { typingSent.delete(chatId); }
 
-/** Поиск сообщений (сервер; без сети — по кэшу на устройстве). */
-export function searchMessages(q: string, chatId?: number, beforeId?: number): Promise<SearchResult> {
-  return engine.call({ type: 'search', q, chatId, beforeId }) as Promise<SearchResult>;
+/**
+ * Поиск сообщений: по словам на устройстве, с сетью — вместе с сервером (вся история).
+ * onLocal — найденное на устройстве, сразу (если полный ответ ещё не пришёл); потом промис — полный ответ.
+ */
+export function searchMessages(q: string, chatId?: number, beforeId?: number, onLocal?: (r: SearchResult) => void): Promise<SearchResult> {
+  let done = false;
+  if (onLocal) (engine.call({ type: 'search', q, chatId, beforeId, local: true }) as Promise<SearchResult>).then((r) => { if (!done) onLocal(r); }, () => {});
+  return (engine.call({ type: 'search', q, chatId, beforeId }) as Promise<SearchResult>).finally(() => { done = true; });
 }
 
 /** Локальные копии своих файлов (objectURL) до и сразу после отправки — показываем без загрузки с сервера. */

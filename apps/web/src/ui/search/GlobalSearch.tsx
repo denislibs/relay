@@ -2,7 +2,7 @@ import type { MediaTab, ProfilePhoto } from '@relay/protocol';
 import { LinkTile, linkInfo } from '../linkTile';
 import { senderAvatar } from '../../profilePhoto';
 import { Avatar, EmptyState, FolderTabs, Highlight, Icon, MediaViewer, peerTone, player, SlideStack } from '@relay/ui';
-import type { Item, SearchHit } from '@relay/sync-engine/src/types';
+import type { Item, SearchHit, SearchResult } from '@relay/sync-engine/src/types';
 import type { ComponentChildren } from 'preact';
 import { useEffect, useMemo, useRef, useState } from 'preact/hooks';
 import { openChat, searchMessages } from '../../data';
@@ -191,7 +191,7 @@ function PersonRow({ p, q }: { p: PersonHit; q: string }) {
 
 /** «Сообщения» по всем чатам: страницами, следующая — когда низ близко. */
 function MessageResults({ q, empty }: { q: string; empty: boolean }) {
-  const [state, setState] = useState<{ q: string; list: SearchHit[]; more: boolean; source: string } | null>(null);
+  const [state, setState] = useState<{ q: string; list: SearchHit[]; more: boolean; source: string; early?: true } | null>(null);
   const busy = useRef(false);
   const end = useRef<HTMLDivElement>(null);
   const people = useGlobal((s) => s.people);
@@ -199,7 +199,13 @@ function MessageResults({ q, empty }: { q: string; empty: boolean }) {
   const load = (before?: number) => {
     if (busy.current) return;
     busy.current = true;
-    searchMessages(q, undefined, before).then((r) => {
+    // первая страница: найденное на устройстве — сразу, без отметки «на устройстве» (полный ответ его заменит); пусто — ждём полного, без «Ничего не найдено»
+    const early = before ? undefined : (r: SearchResult) => {
+      if (!r.hits.length || getGlobal().search.trim() !== q) return;   // запрос уже сменили — не затираем новый ответ
+      setState((cur) => (cur?.q === q && !cur.early ? cur : { q, list: r.hits, more: false, source: 'server', early: true }));
+      wantPeople(r.hits.map((h) => h.senderId));
+    };
+    searchMessages(q, undefined, before, early).then((r) => {
       setState((cur) => ({ q, list: [...(before && cur?.q === q ? cur.list : []), ...r.hits], more: r.hasMore, source: r.source }));
       wantPeople(r.hits.map((h) => h.senderId));
     }).catch(() => setState((cur) => cur ?? { q, list: [], more: false, source: 'server' })).finally(() => { busy.current = false; });

@@ -34,7 +34,7 @@ import { Avatar, Button, Chip, Icon, MediaPolicy, peerTone, ChatSearchBar, Highl
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'preact/hooks';
 import { sendTodo, appendTodo, editTodo, closeChat, deleteMessage, editMessage, focusMessage, openChat, openUserChat, pinMessage, unpinMessage, sendFile, sendFiles, sendRound, sendVoice, react, rejectTooBig, PLAYABLE_VIDEO, retrySend, discardUnsent, saveDraft, searchMessages, send, typing, typingDone } from '../data';
 import { wantPeople } from '../people';
-import type { Item, SearchHit } from '@relay/sync-engine/src/types';
+import type { Item, SearchHit, SearchResult } from '@relay/sync-engine/src/types';
 import type { Entity, Todo, TodoInput } from '@relay/protocol';
 
 type Value = { text: string; entities: Entity[] };
@@ -131,11 +131,16 @@ export function Chat({ chatId, frameKey, active }: { chatId: number; frameKey: s
     const q = findQ.trim();
     if (!finding || q.length < 2) { setFound(null); return; }
     let live = true;
-    const t = setTimeout(() => searchMessages(q, chatId).then((r) => {
-      if (!live) return;
-      setFound({ q, hits: r.hits, at: 0 });
+    // найденное на устройстве — сразу; полный ответ (с сервером) заменит, выбранное совпадение остаётся выбранным
+    const show = (r: SearchResult, early: boolean) => {
+      if (!live || (early && !r.hits.length)) return;
+      setFound((f) => {
+        const was = f?.q === q && f.at > 0 ? f.hits[f.at]?.id : undefined;   // не выбирали — снова с самого нового
+        return { q, hits: r.hits, at: Math.max(0, was == null ? 0 : r.hits.findIndex((h) => h.id === was)) };
+      });
       wantPeople(r.hits.map((x) => x.senderId));
-    }).catch(() => {}), 300);
+    };
+    const t = setTimeout(() => searchMessages(q, chatId, undefined, (r) => show(r, true)).then((r) => show(r, false)).catch(() => {}), 300);
     return () => { live = false; clearTimeout(t); };
   }, [findQ, finding]);
   const pick = (at: number) => setFound((f) => {

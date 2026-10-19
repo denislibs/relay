@@ -2,7 +2,7 @@ import { MAX_FILE_BYTES } from '@relay/protocol';
 import type { ClientFrame, JournalEntry, Me, SettingsSnapshot, Message, PublicUser, ServerFrame } from '@relay/protocol';
 import { Blocks } from './blocks';
 import { Contacts } from './contacts';
-import { delBlob, getAll, getBlob, getByChat, openDb, putBlob, write } from './idb';
+import { delBlob, getBlob, openDb, putBlob, write } from './idb';
 import { affects, computeQuery, diffResults, feedSpan, messageWindow, muteKey, rangeAt, muteOverlay, type Result } from './queries';
 import type { Item } from './types';
 import { Store, type ChatSummary } from './store';
@@ -19,7 +19,8 @@ import { chatTitle, displayName, peopleResult, PeerSigs } from './names';
 import { applyMembersReply, membersResult, type MembersReply } from './members';
 import { MediaLoader, mediaResult } from './media';
 import { musicKey, profileMusicResult, profilePhotosResult, ProfileListsLoader, trackOf } from './profileLists';
-import type { Action, EngineConfig, LocalAttachment, LocalMessage, OutboxEntry, Patch, Query, SearchResult } from './types';
+import type { Action, EngineConfig, LocalMessage, OutboxEntry, Patch, Query, SearchHit, SearchResult } from './types';
+import { searchLocal } from './search';
 
 export interface WatchHandle { update(q: Query): void; close(): void }
 
@@ -44,12 +45,6 @@ function patchedChats(items: JournalEntry[], after: number): Set<number> {
     if (seq > after && (u.type === 'messageEdited' || u.type === 'messageDeleted' || u.type === 'reactions' || u.type === 'mediaListened' || u.type === 'attachmentUpdated')) out.add(u.chatId);
   }
   return out;
-}
-
-/** Вложение подходит под запрос поиска: имя файла, название или исполнитель трека — как на сервере. needle — в нижнем регистре. */
-function attachmentHas(a: LocalAttachment | null | undefined, needle: string): boolean {
-  const has = (v: string | null | undefined) => !!v && v.toLowerCase().includes(needle);
-  return !!a && (has(a.name) || has(a.title) || has(a.performer));
 }
 
 export class Engine {
@@ -569,29 +564,39 @@ export class Engine {
     this.transport.send({ op: 'hello', lastSeq: 0 });
   }
 
-  /** Поиск: с сетью — на сервере (вся история), без сети — по сообщениям, сохранённым на устройстве. */
+  /**
+   * Поиск: сначала по указателю слов на устройстве (без сети — только он), с сетью — к нему дописываются
+   * результаты сервера (вся история); повторы по chatId:id убираются, совпадение с устройства остаётся.
+   * Список — новые первыми, обрезан до limit: следующая страница по beforeId не повторит и не потеряет ни одного.
+   * local: true — только локальные, сразу (интерфейс показывает их, пока ждёт полный ответ).
+   */
   private async search(a: Extract<Action, { type: 'search' }>): Promise<SearchResult> {
     const limit = a.limit ?? 30;
-    if (this.online) {
-      try {
-        const qs = new URLSearchParams({ q: a.q, limit: String(limit) });
-        if (a.chatId) qs.set('chatId', String(a.chatId));
-        if (a.beforeId) qs.set('beforeId', String(a.beforeId));
-        const res = await this.http<{ hits: { message: Message; chatTitle: string | null }[]; hasMore: boolean }>(`/search?${qs}`);
-        return {
-          hits: res.hits.map(({ message: m, chatTitle }) => ({ chatId: m.chatId, chatTitle: this.titleOfChat(m.chatId) ?? chatTitle ?? null, id: m.id, sort: m.id, senderId: m.senderId, body: m.body, createdAt: m.createdAt, kind: m.kind, attachment: m.attachment ?? null, entities: m.entities ?? null, ...(m.service ? { service: m.service } : {}) })),
-          hasMore: res.hasMore, source: 'server',
-        };
-      } catch { /* сеть пропала посреди запроса — ищем локально */ }
-    }
-    const needle = a.q.trim().toLowerCase();
-    const all = a.chatId ? await getByChat(this.db, a.chatId) : await getAll<LocalMessage>(this.db, 'messages');
-    const found = all
-      .filter((m) => m.id != null && !m.deleted && (!a.beforeId || m.id < a.beforeId) && (m.body.toLowerCase().includes(needle) || attachmentHas(m.attachment, needle)))
-      .sort((x, y) => y.sort - x.sort);
+    const local = this.searchLocal(a, limit);
+    local.catch(() => {});   // ошибку увидит тот, кто дождётся local
+    if (a.local || !this.online) return local;
+    let res: { hits: { message: Message; chatTitle: string | null }[]; hasMore: boolean };
+    try {
+      const qs = new URLSearchParams({ q: a.q, limit: String(limit) });
+      if (a.chatId) qs.set('chatId', String(a.chatId));
+      if (a.beforeId) qs.set('beforeId', String(a.beforeId));
+      res = await this.http(`/search?${qs}`);
+    } catch { return local; }   // сеть пропала посреди запроса — только локальные
+    const mine = await local;
+    const seen = new Set(mine.hits.map((h) => h.chatId + ':' + h.id));
+    const server: SearchHit[] = res.hits.filter(({ message: m }) => !seen.has(m.chatId + ':' + m.id)).map(({ message: m, chatTitle }) => (
+      { chatId: m.chatId, chatTitle: this.titleOfChat(m.chatId) ?? chatTitle ?? null, id: m.id, sort: m.id, senderId: m.senderId, body: m.body, createdAt: m.createdAt, kind: m.kind, attachment: m.attachment ?? null, entities: m.entities ?? null, ...(m.service ? { service: m.service } : {}), source: 'server' }));
+    const all = [...mine.hits, ...server].sort((x, y) => y.id - x.id);
+    return { hits: all.slice(0, limit), hasMore: all.length > limit || res.hasMore || mine.hasMore, source: 'server' };
+  }
+
+  /** Локальная часть поиска: указатель записан (flush), затем searchLocal по нему. */
+  private async searchLocal(a: Extract<Action, { type: 'search' }>, limit: number): Promise<SearchResult> {
+    await this.store.flush();   // слова последних сообщений — в указатель
+    const { list, hasMore } = await searchLocal(this.db, a.q, { chatId: a.chatId, beforeId: a.beforeId, limit }, (c, k) => this.store.loadedMessage(c, k));
     return {
-      hits: found.slice(0, limit).map((m) => ({ chatId: m.chatId, chatTitle: this.titleOfChat(m.chatId), id: m.id!, sort: m.sort, senderId: m.senderId, body: m.body, createdAt: m.createdAt, kind: m.kind, attachment: (m.attachment as never) ?? null, entities: m.entities ?? null, ...(m.service ? { service: m.service } : {}) })),
-      hasMore: found.length > limit, source: 'local',
+      hits: list.map((m) => ({ chatId: m.chatId, chatTitle: this.titleOfChat(m.chatId), id: m.id!, sort: m.sort, senderId: m.senderId, body: m.body, createdAt: m.createdAt, kind: m.kind, attachment: (m.attachment as never) ?? null, entities: m.entities ?? null, ...(m.service ? { service: m.service } : {}), source: 'local' as const })),
+      hasMore, source: 'local',
     };
   }
 

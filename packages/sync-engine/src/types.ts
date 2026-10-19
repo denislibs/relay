@@ -160,7 +160,8 @@ export type Action =
   | { type: 'todoToggle'; chatId: number; id: number; itemId: number; done: boolean }
   | { type: 'todoAppend'; chatId: number; id: number; items: string[] }
   | { type: 'todoEdit'; chatId: number; id: number; todo: TodoInput }
-  | { type: 'search'; q: string; chatId?: number; beforeId?: number; limit?: number }
+  /** local: только с устройства, без сети (быстрый первый ответ; полный — тем же вызовом без local) */
+  | { type: 'search'; q: string; chatId?: number; beforeId?: number; limit?: number; local?: boolean }
   | { type: 'pin'; chatId: number; id: number }
   | { type: 'unpin'; chatId: number; id: number | null }
   | { type: 'messagesByIds'; chatId: number; ids: number[] }
@@ -252,7 +253,9 @@ export const PENDING_BASE = 2 ** 52;
 /** Результат поиска: сообщение и где оно (для перехода). source — откуда ответ (без сети ищем локально). */
 export interface SearchHit { chatId: number; chatTitle: string | null; id: number; sort: number; senderId: number; body: string; createdAt: string; service?: { type: ServiceType };
   /** для строки результата: миниатюра/тип вложения и форматирование (спойлеры не раскрываем) */
-  kind?: string; attachment?: LocalAttachment | null; entities?: Entity[] | null }
+  kind?: string; attachment?: LocalAttachment | null; entities?: Entity[] | null;
+  /** откуда совпадение: с устройства или только с сервера */
+  source?: 'local' | 'server' }
 export interface SearchResult { hits: SearchHit[]; hasMore: boolean; source: 'server' | 'local' }
 
 /** Цитата в ленте: короткая копия исходного сообщения — сколько нужно, чтобы показать, что в нём

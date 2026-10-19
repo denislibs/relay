@@ -265,6 +265,9 @@ export class Store {
     return idx.get(id);
   }
 
+  /** Сообщение из памяти по ключу строки (новее сохранённой в IDB); нет в памяти — undefined. */
+  loadedMessage(chatId: number, key: string): LocalMessage | undefined { return this.messages.get(chatId)?.get(key); }
+
   // ---------- изменения с сервера ----------
 
   /** seq — номер записи журнала (нужен профилю, чтобы старая запись не откатила свежий ответ). */

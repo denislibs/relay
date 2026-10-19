@@ -322,6 +322,33 @@ test('search: server when online, cached messages when offline', async () => {
   expect(offline.hits.map((h) => h.body)).toEqual(['про отпуск позже', 'обсудим отпуск']);
 });
 
+test('search online: local hits come first (local: true), then the merged result without duplicates', async () => {
+  const a = await srv.login('a'), b = await srv.login('b');
+  const chatId = await srv.chat(a.token, [a.userId, b.userId]);
+  for (const body of ['прив, старое', 'прив, ещё старое', 'прив вст тут']) await sendMessage(b.userId, { chatId, clientId: crypto.randomUUID(), body });
+  const ea = await open(srv.config(a));
+  ea.connect();
+  await ea.whenIdle();
+  await sendMessage(b.userId, { chatId, clientId: crypto.randomUUID(), body: 'Привет, встречаемся?' });   // приходит журналом — в кэш
+  const feed = watchInto(ea, { kind: 'chatList', limit: 5 });
+  await feed.until((l) => (l[0]?.last as { body: string } | null)?.body === 'Привет, встречаемся?');
+  await ea.whenIdle();
+  type Res = { hits: { id: number; body: string; source?: string }[]; source: string; hasMore: boolean };
+  const order: string[] = [];
+  const local = ea.call({ type: 'search', q: 'прив', local: true }).then((r) => { order.push('local'); return r as Res; });
+  const merged = ea.call({ type: 'search', q: 'прив' }).then((r) => { order.push('merged'); return r as Res; });
+  const [l, m] = await Promise.all([local, merged]);
+  expect(order).toEqual(['local', 'merged']);
+  expect(l.source).toBe('local');
+  expect(l.hits.map((h) => h.body)).toContain('Привет, встречаемся?');
+  expect(l.hits.length).toBeLessThan(4);   // старые сообщения на устройство не попали
+  expect(m.source).toBe('server');
+  expect(m.hits.map((h) => h.body)).toEqual(['Привет, встречаемся?', 'прив вст тут', 'прив, ещё старое', 'прив, старое']);
+  expect(new Set(m.hits.map((h) => h.id)).size).toBe(4);   // без повторов
+  for (const h of m.hits) expect(h.source).toBe(l.hits.some((x) => x.id === h.id) ? 'local' : 'server');
+  expect(((await ea.call({ type: 'search', q: 'прив вст' })) as Res).hits.map((h) => h.body)).toEqual(['Привет, встречаемся?', 'прив вст тут']);
+});
+
 test('search: attachments by file name and track tags, on the server and offline', async () => {
   const a = await srv.login('a'), b = await srv.login('b');
   const chatId = await srv.chat(a.token, [a.userId, b.userId]);

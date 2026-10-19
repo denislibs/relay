@@ -41,8 +41,12 @@ export function getByChat(db: IDBDatabase, chatId: number): Promise<LocalMessage
   return req(index.getAll(IDBKeyRange.bound([chatId, -Infinity], [chatId, Infinity]))) as Promise<LocalMessage[]>;
 }
 
-/** Слова сообщения для указателя: только подтверждённые и не удалённые */
-export function termsOf(m: LocalMessage): string[] { return m.id != null && !m.deleted ? searchTerms(m.body) : []; }
+/** Слова сообщения для указателя: только подтверждённые и не удалённые; имя файла и теги трека вложения (первыми — предел 64 слова), потом текст */
+export function termsOf(m: LocalMessage): string[] {
+  if (m.id == null || m.deleted) return [];
+  const a = m.attachment;
+  return searchTerms(a ? [a.name, a.title, a.performer, m.body].filter(Boolean).join(' ') : m.body);
+}
 
 /** Правка сохранённой строки сообщения, которого нет в памяти (sort подтверждённого = id) */
 export interface RowPatch { chatId: number; id: number; patch: Partial<LocalMessage> }
@@ -73,7 +77,7 @@ export function write(db: IDBDatabase, batch: WriteBatch): Promise<void> {
         const c = cur.result;
         if (!c) return;
         const m = c.value as LocalMessage;
-        if (m.id != null && !m.deleted) for (const term of searchTerms(m.body)) t.objectStore('terms').delete([term, m.chatId, m.sort]);   // слова удалённого чата
+        for (const term of termsOf(m)) t.objectStore('terms').delete([term, m.chatId, m.sort]);   // слова удалённого чата
         c.delete(); c.continue();
       };
     }
