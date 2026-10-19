@@ -332,7 +332,7 @@ function FileHit({ h, who }: { h: Hit; who: string }) {
   const download = () => { const el = document.createElement('a'); el.href = fileUrl(a) + '?download=1'; el.download = a.name; el.click(); };
   return (
     <div class="app-sm-row app-gsearch-hit">
-      <button type="button" class={'app-sm-ext app-sm-ext-' + extTone(ext) + (image ? ' app-gsearch-thumb' : '')} style={image ? { backgroundImage: `url(${a.thumb})` } : undefined} aria-label={'Скачать ' + a.name} onClick={download}>
+      <button type="button" class={'app-sm-ext app-sm-ext-' + extTone(ext) + (image ? ' app-gsearch-thumb' : '')} style={image ? { backgroundImage: a.id ? `url(${fileUrl(a)}), url(${a.thumb})` : `url(${a.thumb})` } : undefined} aria-label={'Скачать ' + a.name} onClick={download}>
         {image ? null : <span class="app-sm-ext-label">{ext.length <= 4 ? ext : ''}</span>}
         <span class="app-sm-ext-dl"><Icon name="download" size={22} /></span>
       </button>

@@ -4,7 +4,7 @@ import type { Item } from '@relay/sync-engine/src/types';
 import { useEffect, useState } from 'preact/hooks';
 import { focusMessage, messagesByIds, unpinMessage } from '../data';
 import { activeFrame, useGlobal } from '../global';
-import { asLast, previewBody, previewThumb } from './preview';
+import { asLast, previewBody, previewThumb, thumbUnder } from './preview';
 
 // Закреплённые сообщения под шапкой — как в Telegram: слева полоска из сегментов (по числу закреплённых),
 // «Закреплённое сообщение #N» и строка текста; клик — к сообщению и следующий клик — к более старому (по кругу).
@@ -57,7 +57,7 @@ export function PinnedBar({ chatId }: { chatId: number }) {
               {pinned.map((p, k) => <i key={p} class={k === i ? 'app-pins-on' : ''} style={{ height: seg + 'px' }} />)}
             </span>
           </span>
-          {thumb ? <img class={'app-pins-thumb' + (thumb.round ? ' app-pins-thumb-round' : '')} src={thumb.src} alt="" /> : null}
+          {thumb ? <img class={'app-pins-thumb' + (thumb.round ? ' app-pins-thumb-round' : '')} src={thumb.full ?? thumb.src} style={thumb.full ? thumbUnder(thumb.src) : undefined} decoding="async" alt="" /> : null}
           <span class="app-pins-text">
             <b>{n > 1 ? `Закреплённое сообщение #${n - i}` : 'Закреплённое сообщение'}</b>
             <span key={id}>{last ? previewBody(last, !!thumb) : '…'}</span>

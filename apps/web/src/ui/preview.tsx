@@ -11,16 +11,16 @@ import { hideCode } from './format';
 
 type Ent = { type: string; offset: number; length: number };
 export type LastMessage = {
-  senderId: number; body: string; deleted?: boolean; kind?: string; attachmentName?: string | null; attachmentTitle?: string | null; attachmentPerformer?: string | null;
+  senderId: number; body: string; deleted?: boolean; kind?: string; attachmentId?: string | null; attachmentName?: string | null; attachmentTitle?: string | null; attachmentPerformer?: string | null;
   entities?: Ent[] | null; thumb?: string | null; mime?: string | null; service?: { type: string } | null;
 };
 
 /** Сообщение ленты (вложение — объектом) → формат превью списка чатов (поля вложения — плоско). */
 export function asLast(m: Record<string, unknown>): LastMessage {
-  const a = (m.attachment ?? null) as { name?: string; title?: string | null; performer?: string | null; thumb?: string | null; mime?: string } | null;
+  const a = (m.attachment ?? null) as { id?: string; name?: string; title?: string | null; performer?: string | null; thumb?: string | null; mime?: string } | null;
   return {
     senderId: m.senderId as number, body: String(m.body ?? ''), deleted: !!m.deleted, kind: (m.kind as string) ?? 'text',
-    attachmentName: a?.name ?? null, attachmentTitle: a?.title ?? null, attachmentPerformer: a?.performer ?? null,
+    attachmentId: a?.id || null, attachmentName: a?.name ?? null, attachmentTitle: a?.title ?? null, attachmentPerformer: a?.performer ?? null,
     entities: (m.entities as LastMessage['entities']) ?? null, thumb: a?.thumb ?? null, mime: a?.mime ?? null,
     service: (m.service as LastMessage['service']) ?? null,
   };
@@ -53,15 +53,19 @@ export function previewText(text: string, entities?: Ent[] | null): ComponentChi
   return out;
 }
 
-/** Миниатюра 20 px из встроенного thumb (без загрузки файла): фото, видео (со значком play),
- *  обложка музыки, кружок видеосообщения — как в Telegram. */
-export function previewThumb(m: LastMessage): { src: string; video: boolean; round?: boolean } | null {
+/** Миниатюра из встроенного thumb (без загрузки файла): фото, видео (со значком play),
+ *  обложка музыки, кружок видеосообщения — как в Telegram. full — настоящий файл фото: где миниатюра крупнее
+ *  строки списка (закреп, цитата, поиск), показываем его, а встроенный thumb — подложкой, пока грузится. */
+export function previewThumb(m: LastMessage): { src: string; video: boolean; round?: boolean; full?: string } | null {
   if (m.deleted || !m.thumb) return null;
   if (m.kind === 'round') return { src: m.thumb, video: false, round: true };
   const video = !!m.mime?.startsWith('video/');
   if (m.kind !== 'photo' && m.kind !== 'audio' && !video) return null;
-  return { src: m.thumb, video };
+  return m.kind === 'photo' && m.attachmentId ? { src: m.thumb, video, full: `/files/${m.attachmentId}` } : { src: m.thumb, video };
 }
+
+/** Фон-подложка для <img> с настоящим файлом: размытая встроенная миниатюра видна, пока файл не загрузился. */
+export const thumbUnder = (src: string) => ({ background: `center / cover no-repeat url("${src.replace(/"/g, '')}")` });
 
 /** Текст после имени: подпись к медиа, а без подписи — тип. С миниатюрой эмодзи типа не нужен. */
 export function previewBody(m: LastMessage, withThumb: boolean): ComponentChildren {
@@ -108,7 +112,6 @@ export function quoteContent(m: Record<string, unknown>): { text: ComponentChild
   else text = previewBody(last, !!thumb) || 'Сообщение';
   if (!thumb) return { text };
   // фото — настоящий файл (уменьшит браузер), встроенная миниатюра лишь подложкой: 24 px на 36 px выглядят мылом
-  const id = (m.attachment as { id?: string } | null)?.id;
-  if (last.kind === 'photo' && id) return { text, thumbSrc: `/files/${id}`, thumbBg: thumb.src };
+  if (thumb.full) return { text, thumbSrc: thumb.full, thumbBg: thumb.src };
   return { text, thumbSrc: thumb.src };
 }
