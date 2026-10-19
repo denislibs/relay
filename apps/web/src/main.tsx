@@ -1,3 +1,4 @@
+import { installJoinLinks } from './ui/group/JoinLink';
 import { refreshMyMusic } from './music';
 import { configureSpoilers, configureStickers, installSpoilers } from '@relay/ui';
 import { fetchBuild, onVisible, startUpdateCheck } from './update';
@@ -30,6 +31,7 @@ function start(me: Me): void {
   setGlobal({ me, boot: 'app' });
   startData(me);
   startSettingsData(me);
+  installJoinLinks();
   void refreshMyMusic();   // мои треки в профиле — для кнопки в плеере
 }
 

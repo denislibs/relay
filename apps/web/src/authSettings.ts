@@ -18,7 +18,7 @@ async function req<T>(method: string, path: string, body?: unknown): Promise<R<T
 export const getPassword = () => req<PasswordState>('GET', '/settings/password');
 
 /** Доказательство текущего пароля (для смены и снятия). */
-async function proofOf(current: string): Promise<R<{ srpId: string; A: string; M1: string }>> {
+export async function proofOf(current: string): Promise<R<{ srpId: string; A: string; M1: string }>> {
   const ch = await req<{ srpId: string; salt: string; B: string }>('POST', '/settings/password/challenge', {});
   if (!ch.ok) return ch;
   return { ok: true, data: { srpId: ch.data.srpId, ...(await clientProof(current, ch.data.salt, ch.data.B)) } };

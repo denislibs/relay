@@ -72,6 +72,8 @@ export interface GlobalState {
   contactsLoaded: boolean;   // список с сервера уже был (иначе пусто — значит «грузим»)
   settings: AccountSettings;   // настройки аккаунта (подписка settings движка): умолчания уведомлений
   newContact: NewContactDraft | null;
+  joinLink: string | null;
+  infoGo: string | null;     // открыть правую панель сразу на экране управления группой (например, заявки)   // открытая ссылка-приглашение: '+токен' или '@имя'
   newGroup: { ids: number[]; title: string; edited: boolean } | null;   // черновик «Новой группы»: участники и название (живёт между шагами)   // открытая модалка «Новый контакт» и чем её заполнить
   blocked: Item[];          // подписка blocked движка: чёрный список (с неподтверждёнными правками)
   blockedLoaded: boolean;   // список с сервера уже был
@@ -140,6 +142,8 @@ let state: GlobalState = {
   contactsLoaded: false,
   settings: defaultAccountSettings(),
   newContact: null,
+  joinLink: null,
+  infoGo: null,
   newGroup: null,
   blocked: [],
   blockedLoaded: false,

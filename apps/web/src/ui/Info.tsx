@@ -18,8 +18,11 @@ import type { ProfilePhoto } from '@relay/protocol';
 import { avatarPhoto, useProfilePhotos } from '../profilePhoto';
 import { ProfileGallery } from './ProfileGallery';
 import { PhotoViewer } from './PhotoViewer';
+import { GROUP_PAGES, GroupScreen, isGroupPage, parentOf, type GroupPage, type Params } from './group/Manage';
+import { canManage, copyText, publicUrl } from '../groups';
+import type { GroupInfo, MyMembership } from '@relay/protocol';
 
-const PAGES = ['info', 'edit'];   // «Изменить контакт» выезжает внутри панели справа налево
+const PAGES = ['info', 'edit', ...GROUP_PAGES];   // «Изменить контакт» и управление группой выезжают внутри панели справа налево
 const close = () => setGlobal({ infoOpen: false });
 
 // уведомления выключаются только на этом устройстве (как «Без звука» локально): список chatId в localStorage
@@ -39,7 +42,20 @@ export function Info() {
   const peer = useGlobal((s) => s.peer);
   const muted = useGlobal((s) => s.muted);
   const [page, setPage] = useState('info');
+  const [params, setParams] = useState<Params>({});
   useEffect(() => setPage('info'), [chatId]);   // другой чат — снова профиль
+  // управление группой: стек экранов, у каждого свой родитель; «Назад» — к родителю
+  const nav = {
+    chatId, params,
+    go: (p: GroupPage, ps: Params = {}) => { setParams(ps); setPage(p); },
+    back: () => setPage(isGroupPage(page) ? parentOf(page) : 'info'),
+    close: () => { setPage('info'); close(); },
+  };
+  // переход снаружи (плашка заявок в шапке чата) — сразу на нужный экран
+  const infoGo = useGlobal((s) => s.infoGo);
+  useEffect(() => { if (infoGo && isGroupPage(infoGo)) { setGlobal({ infoGo: null }); nav.go(infoGo); } }, [infoGo]);
+  // группа удалена или меня убрали — панель управления закрывается сама
+  useEffect(() => { if (!chat && page !== 'info') setPage('info'); }, [!chat]);
   // профиль собеседника личного чата: только то, что сервер разрешил показать
   // служебный чат «Relay»: без контакта, телефона и @имени — только уведомления
   const system = isSystemChat(chat);
@@ -49,6 +65,11 @@ export function Info() {
   const contact = useGlobal((s) => (peerId ? s.contacts.find((c) => c.userId === peerId) ?? null : null));
   const contactsLoaded = useGlobal((s) => s.contactsLoaded);
   useEffect(() => {
+    if (isGroupPage(page)) {   // в управлении группой Esc — шаг назад
+      const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape' && !e.defaultPrevented && !document.querySelector('.rl-mdl')) { e.preventDefault(); nav.back(); } };
+      addEventListener('keydown', onKey);
+      return () => removeEventListener('keydown', onKey);
+    }
     if (page !== 'info') return;   // на правке Esc — «Назад», его ловит форма
     const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape' && !e.defaultPrevented) { e.preventDefault(); close(); } };
     addEventListener('keydown', onKey);
@@ -57,7 +78,7 @@ export function Info() {
 
   const title = (chat?.title as string) || 'Чат №' + chatId;
   const group = chat?.kind === 'group';
-  const members = useMembers(chatId, group);
+  const members = useMembers(chatId, group, useGlobal((s) => (s.chats.find((c) => c.id === chatId)?.membersRev as number) ?? 0));
   const myPeer = peer && chat?.peerId === peer.userId && peer.known ? peer : null;
   const gallery = useProfilePhotos(group || system ? null : peerId, chat?.photo as ProfilePhoto | null);
   const [slide, setSlide] = useState(0);
@@ -87,12 +108,16 @@ export function Info() {
     firstName: String(user?.firstName ?? title.split(' ')[0] ?? ''), lastName: String(user?.lastName ?? ''),
   } });
   // шапка справа: контакт — ✎ «Изменить», не контакт — «Добавить в контакты» (как в Telegram)
-  const action = !peerId || !contactsLoaded ? undefined
+  const gInfo = (chat?.group as GroupInfo | null) ?? null, gMe = (chat?.me as MyMembership | null) ?? null;
+  const action = group ? (canManage(gMe) ? { icon: 'pencil', label: 'Изменить группу', onClick: () => nav.go('gEdit') } : undefined)
+    : !peerId || !contactsLoaded ? undefined
     : contact ? { icon: 'pencil', label: 'Изменить контакт', onClick: () => setPage('edit') }
     : { icon: 'userPlus', label: 'Добавить в контакты', onClick: addContact };
 
   return (
-    <SlideStack order={PAGES} active={page} render={(k: string) => k === 'edit' && peerId ? (
+    <SlideStack order={PAGES} active={page} render={(k: string) => isGroupPage(k) ? (
+      group && chat ? <GroupScreen page={k} nav={nav} /> : null
+    ) : k === 'edit' && peerId ? (
       <EditContactPanel userId={peerId} onDone={() => setPage('info')} />
     ) : (
     <div class="rl-sidepage">
@@ -117,6 +142,15 @@ export function Info() {
         <div class="rl-aside-group">
           {/* как в Telegram: имя уже в шапке — строками только то, чего там нет, и только если поле заполнено */}
           <Expand show={!group && !!user}>{!group && user ? <PeerRows user={user} /> : null}</Expand>
+          <Expand show={group && !!gInfo?.about}>{group && gInfo?.about ? (
+            <div class="rl-inforow rl-inforow-static">
+              <SettingsIcon icon="info" color="gray" />
+              <span class="rl-inforow-text"><span class="rl-bio app-info-bio"><RichText text={gInfo.about} /></span><small>Описание</small></span>
+            </div>
+          ) : null}</Expand>
+          <Expand show={group && !!gInfo?.username}>{group && gInfo?.username ? (
+            <InfoRow tile="blue" icon="link" title={publicUrl(gInfo.username).replace(/^https?:\/\//, '')} subtitle="Ссылка" onClick={() => copyText(publicUrl(gInfo.username!))} />
+          ) : null}</Expand>
           <Expand show={!group && !!(user?.links as ProfileLink[] | undefined)?.length}>{!group && user ? <ProfileLinks links={(user.links as ProfileLink[] | undefined) ?? []} /> : null}</Expand>
           <InfoRow
             tile="red"
