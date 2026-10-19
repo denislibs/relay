@@ -620,6 +620,13 @@ body { margin: 0; font-family: var(--font-sans); color: var(--ink); background: 
 /* ---------- Bubble extras ---------- */
 .rl-fwd { display: flex; flex-direction: column; align-items: flex-start; gap: 2px; max-width: 100%; margin: 0 0 4px; padding: 0; border: 0; background: none; color: var(--fwd-tone); text-align: start; font: 400 13px/18px var(--font-sans); }
 .rl-fwd-link { cursor: pointer; }
+/* в своих пузырях — не цвет автора, а свой акцент (как в Telegram: на своём фоне чужие цвета выглядят случайными).
+   Цвет приходит inline-переменной, поэтому переопределение — с !important */
+.rl-bubble-out { --out-ink: var(--brand-text); }
+:root[data-theme="dark"] .rl-bubble-out { --out-ink: color-mix(in srgb, var(--brand-text) 35%, #fff); }
+@media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) .rl-bubble-out { --out-ink: color-mix(in srgb, var(--brand-text) 35%, #fff); } }
+.rl-bubble-out .rl-fwd { --fwd-tone: var(--out-ink) !important; }
+.rl-bubble-out .rl-quote { --quote-tone: var(--out-ink) !important; --quote-bg: color-mix(in srgb, var(--out-ink) 12%, transparent) !important; --quote-bg-active: color-mix(in srgb, var(--out-ink) 20%, transparent) !important; }
 .rl-fwd-link:hover .rl-fwd-who b { text-decoration: underline; }
 .rl-fwd-link:focus-visible { outline: 2px solid currentColor; outline-offset: 2px; border-radius: 6px; }
 .rl-fwd-label { display: inline-flex; align-items: center; gap: 4px; }

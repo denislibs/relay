@@ -47,3 +47,7 @@ test('css mirrors tokens.css selectors', () => {
   expect(css).toContain('html:root[data-theme="dark"]');
   expect(css).toContain('prefers-color-scheme: dark');
 });
+
+test('the new-chat button keeps a white icon on every accent except the bright default green', () => {
+  for (const id of ['blue', 'violet', 'cyan', 'orange', 'pink', 'red']) for (const theme of ['light', 'dark'] as const) expect(accentTokens(id, theme)['on-fab']).toBe('#ffffff');
+});

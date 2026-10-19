@@ -493,7 +493,7 @@ function ReplyQuote(props) {
     // thumbSrc — настоящая картинка (превью ссылки): слева, как в Telegram
     props.thumbSrc ? h('span', { class: 'rl-quote-thumb rl-quote-thumb-img' }, h('img', { src: props.thumbSrc, alt: '' })) : null,
     h('span', { class: 'rl-quote-body' },
-      h('b', { style: { color: tone } }, props.author),
+      h('b', { style: { color: 'var(--quote-tone)' } }, props.author),
       h('span', { class: 'rl-quote-text' }, props.icon ? h(Icon, { name: props.icon, size: 14 }) : null, props.text)),
     props.thumb !== undefined ? h('span', { class: 'rl-quote-thumb' }, h(MediaArt, { seed: props.thumb })) : null,
     props.onCancel ? h(IconButton, { icon: 'close', label: 'Отменить ответ', onClick: props.onCancel, size: 18 }) : null);
