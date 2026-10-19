@@ -36,6 +36,8 @@ export const PATTERN_NAMES: Record<string, string> = {
   cuteMix: 'Всё милое', spaceCats: 'Космокоты', loveLetters: 'Письма с любовью', catCafe: 'Котокафе', sweetTooth: 'Сладкоежка',
   nightDreams: 'Ночные сны', garden: 'Сад', party: 'Праздник', secretChat: 'Секретный чат', postOffice: 'Почта',
   musicCats: 'Музыкальные коты', travel: 'Путешествия', rainyDay: 'Дождливый день', ocean: 'Океан', online: 'В сети',
+  tattoo: 'Олдскул-тату', space: 'Космос', underwater: 'Подводный мир', spooky: 'Хэллоуин', winter: 'Зима',
+  food: 'Вкусняшки', rock: 'Рок', games: 'Игры', plants: 'Растения',
   catsAndDogs: 'Коты и собаки', doodles: 'Значки',
 };
 

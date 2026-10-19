@@ -42,8 +42,11 @@ def optimize(src, dst_dir, stroke=2.6, precision=1):
     return os.path.getsize(src), len(data), os.path.getsize(os.path.join(dst_dir, name + ".tgv")), len(strokes) + len(fills) + len(dashes)
 
 if __name__ == "__main__":
+    # python optimize.py SRC DST [name=stroke ...] — своя толщина линий для отдельных узоров (тату — жирнее)
     src_dir, dst_dir = sys.argv[1], sys.argv[2]
+    strokes = dict((k, float(v)) for k, v in (a.split("=") for a in sys.argv[3:]))
     os.makedirs(dst_dir, exist_ok=True)
     for f in sorted(glob.glob(os.path.join(src_dir, "*.svg"))):
-        raw, opt, gz, n = optimize(f, dst_dir)
+        name = os.path.splitext(os.path.basename(f))[0]
+        raw, opt, gz, n = optimize(f, dst_dir, **({"stroke": strokes[name]} if name in strokes else {}))
         print(f"{os.path.basename(f):22} raw {raw/1024:6.1f}KB -> svg {opt/1024:5.1f}KB -> tgv(gzip) {gz/1024:5.1f}KB  ({n} shapes -> 3 paths)")

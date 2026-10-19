@@ -14,3 +14,13 @@ python optimize.py out/v6/raw out/v6
 ```
 
 Готовые `out/v6/<имя>.svg` и `.tgv` копируются в `apps/web/public/patterns/<id>.svg` и `<id>.svg.gz`. Новый набор нужно ещё вписать в `PATTERN_FILES` (`packages/relay-ui/src/more.js`) и `PATTERN_NAMES` (`apps/web/src/wallpapers.ts`).
+
+## Тематические наборы
+
+`themes.py` — свои рисунки девяти тем: олдскул-тату, космос, подводный мир, Хэллоуин, зима, вкусняшки, рок, игры, растения. В нём же помощники: `tube` (лента или канат вдоль кривой), `ribbon`, `nautical_star`, `rays`, `waves`, `leaf`, `rose`, `snowflake`. Темы перечислены в `THEMES`: id → (рисунки, мелочь, толщина линии).
+
+```bash
+python gen_themes.py --sheet 16_tattoo    # лист со всеми рисунками темы — для проверки глазами
+python gen_themes.py                       # → out/themes/raw/*.svg
+python optimize.py out/themes/raw out/themes $(python gen_themes.py --strokes)
+```

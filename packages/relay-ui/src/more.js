@@ -517,7 +517,7 @@ var DOODLES = {
 };
 /* Нарисованные узоры: SVG 1200×1200 (чёрные линии на прозрачном, бесшовные) в /patterns/<имя>.svg.
    Лежат файлами, а не в коде: по 50–70 КБ, сервер отдаёт сжатыми. */
-var PATTERN_FILES = ['cuteMix', 'spaceCats', 'loveLetters', 'catCafe', 'sweetTooth', 'nightDreams', 'garden', 'party', 'secretChat', 'postOffice', 'musicCats', 'travel', 'rainyDay', 'ocean', 'online'];
+var PATTERN_FILES = ['cuteMix', 'tattoo', 'space', 'underwater', 'spooky', 'winter', 'food', 'rock', 'games', 'plants', 'spaceCats', 'loveLetters', 'catCafe', 'sweetTooth', 'nightDreams', 'garden', 'party', 'secretChat', 'postOffice', 'musicCats', 'travel', 'rainyDay', 'ocean', 'online'];
 var BUILT_PATTERNS = {
   catsAndDogs: ['catHead', 'paw', 'bone', 'dogHead', 'fish', 'yarn', 'catSit', 'doghouse', 'ball', 'dot', 'balloon', 'dogRun', 'heart', 'bowl', 'mouse', 'catSleep', 'swirl', 'bird', 'plane', 'feather', 'paw', 'cloudSmall', 'dot', 'heart'],
   doodles: ['chats', 'send', 'mic', 'check', 'clock', 'image', 'smile', 'phone', 'star', 'attach', 'camera', 'poll', 'lock', 'video', 'cloud', 'pin', 'bell', 'palette', 'contact', 'link']
