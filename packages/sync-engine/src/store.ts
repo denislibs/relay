@@ -133,7 +133,7 @@ export class Store {
   private dirtyMessages = new Map<string, LocalMessage>();
   private dirtyOutbox = new Set<string>();
   /** правки строк незагруженных сообщений (удаление/правка с сервера) — применяются к IDB при записи */
-  private rowPatches: RowPatch[] = [];
+  private rowPatches = new Map<string, RowPatch>();   // по chatId:id — правки одного сообщения слиты в одну
   /** строки указателя слов, которые правка/ack/удаление сделали лишними (ключ IDB), до ближайшей записи */
   private staleTerms = new Map<string, [string, number, number]>();
   private dirtyReads = new Set<number>();
@@ -188,6 +188,18 @@ export class Store {
     for (const m of rows) {
       delete (m as LocalMessage & { tab?: string }).tab;   // поле индекса byTab — только в IndexedDB
       if (!map.has(m.key)) map.set(m.key, m); // не затираем то, что пришло, пока читали
+    }
+    // правки, пришедшие, пока сообщения были не загружены, — на загруженные строки (в память; запись и слова — обычным путём)
+    for (const [rk, rp] of [...this.rowPatches]) {
+      if (rp.chatId !== chatId) continue;
+      this.rowPatches.delete(rk);
+      const old = rows.find((r) => r.id === rp.id);
+      if (!old || map.get(old.key) !== old) continue;   // строки нет или в памяти уже новее
+      const next = { ...old, ...rp.patch };
+      map.set(old.key, next);
+      this.dirtyMessages.set(old.key, next);
+      const now = new Set(termsOf(next));
+      for (const t of termsOf(old)) if (!now.has(t)) this.staleTerms.set(`${t}\0${old.chatId}\0${old.sort}`, [t, old.chatId, old.sort]);
     }
     this.loaded.add(chatId);
     this.touch(chatId);
@@ -297,6 +309,7 @@ export class Store {
   removeChat(id: number): void {
     if (!this.chats.has(id)) return;
     this.chats.delete(id); this.chatV.delete(id); this.messages.delete(id); this.loaded.delete(id); this.members.dropChat(id);
+    for (const [k, p] of this.rowPatches) if (p.chatId === id) this.rowPatches.delete(k);
     for (const [k, o] of this.outbox) if (o.chatId === id) { this.outbox.delete(k); this.dirtyOutbox.add(k); }
     if (this.pendingReads.delete(id)) this.dirtyReads.add(id);
     this.dirtyChats.add(id); this.touch(id);
@@ -591,7 +604,8 @@ export class Store {
   patchMessage(chatId: number, id: number, patch: Partial<LocalMessage>): void {
     const m = this.messageById(chatId, id);
     if (m) { this.putMessage({ ...m, ...patch }); return; }
-    this.rowPatches.push({ chatId, id, patch });   // в IDB строка могла остаться — поправим при записи (с её словами)
+    const rk = `${chatId}:${id}`, prevP = this.rowPatches.get(rk);
+    this.rowPatches.set(rk, { chatId, id, patch: { ...prevP?.patch, ...patch } });   // в IDB строка могла остаться — поправим при записи (с её словами)
     const chat0 = this.chats.get(chatId);
     if (chat0?.snapLast?.id === id) { chat0.snapLast = { ...chat0.snapLast, ...patch }; this.markChat(chat0); }   // ждёт журнала — правка не теряется
     // сообщение не загружено — правится только превью последнего
@@ -635,6 +649,7 @@ export class Store {
     this.chats.clear(); this.chatV.clear(); this.messages.clear(); this.loaded.clear(); this.sorted.clear(); this.ids.clear();
     this.outbox.clear(); this.pendingReads.clear(); this.profile.reset(); this.contacts.reset(); this.settings.reset(); this.blocks.reset(); this.members.reset(); this.profileLists.reset();
     this.dirtyChats.clear(); this.dirtyMessages.clear(); this.dirtyOutbox.clear(); this.dirtyReads.clear();
+    this.rowPatches.clear();
     this.lastSeq = this.seqAtFlush = 0;
     this.hydrated = false;
     this.dialogsAt = 0; this.dialogsId = 0; this.dialogsDone = false;
@@ -665,6 +680,7 @@ export class Store {
     const keep = new Set([...this.outbox.values()].map((o) => o.chatId));
     for (const id of [...this.chats.keys()]) if (!keep.has(id)) { this.chats.delete(id); this.chatV.delete(id); this.messages.delete(id); this.loaded.delete(id); this.members.dropChat(id); this.dirtyChats.add(id); this.touch(id); } // dirty → удалится и из IDB
     this.dialogsAt = 0; this.dialogsId = 0; this.dialogsDone = false;
+    this.rowPatches.clear();
     this.dirtyMeta = true;
     this.clearPersistedMessages = true;
   }
@@ -681,6 +697,7 @@ export class Store {
       this.markChat(c);
     }
     this.lastSeq = 0;
+    this.rowPatches.clear();
     this.dirtyMeta = true;
     this.clearPersistedMessages = true;
   }
@@ -690,8 +707,11 @@ export class Store {
 
   async flush(): Promise<void> {
     const t0 = Date.now();
-    const batch: WriteBatch = { put: {}, del: {}, rowPatches: this.rowPatches };
-    this.rowPatches = [];
+    // правка в памяти новее запоздавшей правки строки — её пропускаем
+    const live = new Set<string>();
+    for (const m of this.dirtyMessages.values()) if (m.id != null) live.add(`${m.chatId}:${m.id}`);
+    const batch: WriteBatch = { put: {}, del: {}, rowPatches: [...this.rowPatches].filter(([k]) => !live.has(k)).map(([, v]) => v) };
+    this.rowPatches.clear();
     if (this.clearPersistedMessages) {
       // сообщения удаляются отдельной транзакцией до записи новых
       const t = (this.db as IDBDatabase).transaction(['messages', 'terms'], 'readwrite');

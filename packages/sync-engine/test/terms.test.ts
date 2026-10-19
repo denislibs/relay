@@ -84,3 +84,41 @@ test('delete/edit of a cached but unloaded message repairs the stored row and it
   expect(await row(db, a.clientId)).toMatchObject({ deleted: true, body: '' });
   expect(await row(db, b.clientId)).toMatchObject({ body: 'new text' });
 });
+
+const reopened = async () => {
+  const { name, db, s } = await open();
+  const a = msg({ id: 10, chatId: 7, senderId: PEER, body: 'alpha beta' });
+  s.applyUpdate({ type: 'newMessage', message: a });
+  await s.flush();
+  return { db, a, again: await Store.open(await openDb(name), ME) };
+};
+const edit = (s: Store, body: string) => s.applyUpdate({ type: 'messageEdited', chatId: 7, id: 10, body, editedAt: new Date().toISOString() } as any);
+
+test('edit then delete of an unloaded message in one flush leaves nothing', async () => {
+  const { db, a, again } = await reopened();
+  edit(again, 'gamma');
+  again.applyUpdate({ type: 'messageDeleted', chatId: 7, id: 10 } as any);
+  await again.flush();
+  expect(await words(db)).toEqual([]);
+  expect(await row(db, a.clientId)).toMatchObject({ deleted: true });
+});
+
+test('two edits of an unloaded message: final body and only its terms', async () => {
+  const { db, a, again } = await reopened();
+  edit(again, 'gamma');
+  edit(again, 'delta');
+  await again.flush();
+  expect(await words(db)).toEqual(['delta']);
+  expect(await row(db, a.clientId)).toMatchObject({ body: 'delta' });
+});
+
+test('queued edit then load then a newer edit in memory: the newer one wins', async () => {
+  const { db, a, again } = await reopened();
+  edit(again, 'gamma');
+  await again.loadChatMessages(7);
+  expect(again.messageById(7, 10)!.body).toBe('gamma');
+  edit(again, 'delta');
+  await again.flush();
+  expect(await words(db)).toEqual(['delta']);
+  expect(await row(db, a.clientId)).toMatchObject({ body: 'delta' });
+});
