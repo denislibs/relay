@@ -455,6 +455,13 @@ export async function sendFiles(chatId: number, files: File[], caption: string, 
   for (let i = 0; i < files.length; i++) await sendFile(chatId, files[i], i === files.length - 1 ? caption : '', i === 0 ? replyToId : null, groupId);
 }
 
+/** Уже загруженный трек (из музыки профиля) — в чат без новой загрузки: тот же файл по id. */
+export async function sendTrack(chatId: number, attachment: { id: string; kind: 'audio'; mime: string; name: string; size: number; w: null; h: null; duration: number | null; title?: string | null }): Promise<void> {
+  sentSound();
+  toLatestOf(chatId);
+  await engine.call({ type: 'sendMessage', chatId, body: '', attachment });
+}
+
 /** Вкладка «Общих медиа» панели «Информация»: страница сообщений (новые сверху). */
 export type MediaTab = 'media' | 'file' | 'audio' | 'voice' | 'link';
 export function chatMedia(chatId: number, kind: MediaTab, beforeId?: number): Promise<{ messages: Item[]; hasMore: boolean }> {

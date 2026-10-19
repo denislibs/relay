@@ -3,6 +3,7 @@
 // Файлы, отправленные вместе, — один пузырь: pos first/middle/last склеивает строки, время — только у последней.
 import { h } from 'preact';
 import { useEffect, useRef, useState } from 'preact/hooks';
+import { PlayingRing } from './playingRing.js';
 import { cx, ForwardTitle, MsgLine, Icon, MessageStatus, ProgressRing } from '../kit.js';
 import * as player from './player.js';
 
@@ -48,6 +49,8 @@ export function MusicBubble(props) {
                 style: props.cover ? { backgroundImage: 'url(' + props.cover + ')' } : undefined,
                 'aria-label': playing ? 'Пауза' : 'Слушать', onClick: function (e) { e.stopPropagation(); if (props.onToggle) props.onToggle(); } },
               h(Icon, { name: 'play', size: 24, class: 'rl-vb-play' }), h(Icon, { name: 'pause', size: 24, class: 'rl-vb-pause' })),
+          // текущий трек — кольцо вокруг круга пляшет под звук (как в Telegram), на паузе опадает
+          mine && !props.uploading ? h(PlayingRing, { paused: !playing }) : null,
           !props.uploading && props.onDownload ? h('button', { type: 'button', class: cx('rl-music-dl', !showDl && 'rl-music-dl-gone'), 'aria-label': 'Скачать',
             tabIndex: showDl ? undefined : -1, 'aria-hidden': showDl ? undefined : 'true',
             onClick: function (e) { e.stopPropagation(); props.onDownload(); } }, h(Icon, { name: 'download', size: 12 })) : null),

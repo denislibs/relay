@@ -80,3 +80,13 @@ test('repeating a forward clientId returns the same copy', async () => {
   expect(again.duplicate).toBe(true);
   expect(again.message.id).toBe(first.message.id);
 });
+
+test('a track from my profile music can be sent by id even if someone else uploaded it; a stranger\'s file cannot', async () => {
+  const a = await makeUser(), b = await makeUser(), c = await makeUser();
+  const bc = await makeChat([b, c]);
+  const [att] = await sql`insert into attachments (owner_id, mime, name, size, status, kind, duration) values (${a}, 'audio/mpeg', 'song.mp3', 10, 'ready', 'audio', 120) returning id`;
+  await expect(sendMessage(b, { chatId: bc, clientId: cid(), body: '', attachment: { id: att.id as string } })).rejects.toMatchObject({ code: 'not_found' });
+  await sql`insert into profile_music (user_id, attachment_id, title, duration) values (${b}, ${att.id}, 'song', 120)`;
+  const { message } = await sendMessage(b, { chatId: bc, clientId: cid(), body: '', attachment: { id: att.id as string } });
+  expect(message).toMatchObject({ kind: 'audio', attachment: { id: att.id } });
+});

@@ -96,7 +96,9 @@ export async function confirmUpload(userId: number, id: string): Promise<Attachm
 export async function attachmentForSend(tx: typeof sql | Parameters<Parameters<typeof sql.begin>[0]>[0], userId: number, ref: { id: string; thumb?: string | null }): Promise<Attachment> {
   if (!UUID.test(ref.id)) throw new DomainError('bad_frame', 'attachment id');
   const [a] = await tx`select * from attachments where id = ${ref.id}`;
-  if (!a || a.owner_id !== userId) throw new DomainError('not_found', 'attachment');
+  // своё вложение — или трек из своей музыки профиля (его могли добавить из чужого сообщения): «Музыка» в скрепке
+  const mine = a && (a.owner_id === userId || (await tx`select 1 from profile_music where user_id = ${userId} and attachment_id = ${a.id}`).length > 0);
+  if (!a || !mine) throw new DomainError('not_found', 'attachment');
   if (a.status !== 'ready') throw new DomainError('upload_pending');
   const thumb = ref.thumb && ref.thumb.length <= 8192 && /^data:image\/(jpeg|png|webp);base64,[A-Za-z0-9+/=]+$/.test(ref.thumb) ? ref.thumb : null;
   return attachmentOf(a, thumb);
