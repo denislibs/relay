@@ -1,3 +1,4 @@
+import { searchTerms } from '@relay/protocol';
 import type { LocalMessage } from './types';
 
 import { SCHEMA_VERSION, STORES, upgrade, type StoreName } from './schema';
@@ -47,7 +48,7 @@ export interface WriteBatch {
 /** Одна транзакция на всю пачку: данные и lastSeq записываются атомарно. */
 export function write(db: IDBDatabase, batch: WriteBatch): Promise<void> {
   const dropChats = batch.del.chats ?? [];
-  const names = STORES.filter((s) => (batch.put[s]?.length ?? 0) > 0 || (batch.del[s]?.length ?? 0) > 0 || (s === 'messages' && dropChats.length > 0));
+  const names = STORES.filter((s) => (batch.put[s]?.length ?? 0) > 0 || (batch.del[s]?.length ?? 0) > 0 || ((s === 'messages' || s === 'terms') && dropChats.length > 0));
   if (!names.length) return Promise.resolve();
   const t = db.transaction(names, 'readwrite');
   for (const s of names) {
@@ -59,8 +60,14 @@ export function write(db: IDBDatabase, batch: WriteBatch): Promise<void> {
   if (dropChats.length) {
     const index = t.objectStore('messages').index('byChat');
     for (const id of dropChats) {
-      const cur = index.openKeyCursor(IDBKeyRange.bound([id, -Infinity], [id, Infinity]));
-      cur.onsuccess = () => { const c = cur.result; if (c) { t.objectStore('messages').delete(c.primaryKey); c.continue(); } };
+      const cur = index.openCursor(IDBKeyRange.bound([id, -Infinity], [id, Infinity]));
+      cur.onsuccess = () => {
+        const c = cur.result;
+        if (!c) return;
+        const m = c.value as LocalMessage;
+        if (m.id != null && !m.deleted) for (const term of searchTerms(m.body)) t.objectStore('terms').delete([term, m.chatId, m.sort]);   // слова удалённого чата
+        c.delete(); c.continue();
+      };
     }
   }
   return new Promise((resolve, reject) => {

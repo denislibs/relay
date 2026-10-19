@@ -1,4 +1,5 @@
 import type { GroupInfo, MyMembership } from '@relay/protocol';
+import { searchTerms } from '@relay/protocol';
 import type { Entity, Message, ProfilePhoto, Update } from '@relay/protocol';
 import { getAll, getByChat, write, type WriteBatch } from './idb';
 import { CACHE_STORES, STORES } from './schema';
@@ -132,6 +133,8 @@ export class Store {
   private dirtyChats = new Set<number>();
   private dirtyMessages = new Map<string, LocalMessage>();
   private dirtyOutbox = new Set<string>();
+  /** строки указателя слов, которые правка/ack/удаление сделали лишними (ключ IDB), до ближайшей записи */
+  private staleTerms = new Map<string, [string, number, number]>();
   private dirtyReads = new Set<number>();
   private dirtyMeta = false;
   private seqAtFlush = 0;
@@ -688,16 +691,24 @@ export class Store {
     const batch: WriteBatch = { put: {}, del: {} };
     if (this.clearPersistedMessages) {
       // сообщения удаляются отдельной транзакцией до записи новых
-      const t = (this.db as IDBDatabase).transaction('messages', 'readwrite');
-      t.objectStore('messages').clear();
+      const t = (this.db as IDBDatabase).transaction(['messages', 'terms'], 'readwrite');
+      t.objectStore('messages').clear(); t.objectStore('terms').clear();
       await new Promise<void>((res, rej) => { t.oncomplete = () => res(); t.onerror = () => rej(t.error); });
       this.clearPersistedMessages = false;
+      this.staleTerms.clear();
       for (const map of this.messages.values()) for (const m of map.values()) this.dirtyMessages.set(m.key, m);
     }
     batch.put.chats = [...this.dirtyChats].map((id) => this.chats.get(id)).filter(Boolean) as LocalChat[];
     batch.del.chats = [...this.dirtyChats].filter((id) => !this.chats.has(id));
     // основная вкладка «Общих медиа» (mediaTab, первая из tabsOf) — поле индекса byTab; в памяти его нет
     batch.put.messages = [...this.dirtyMessages.values()].map((m) => { const tab = tabsOf(m)[0]; return tab ? { ...m, tab } : m; });
+    // указатель слов — в той же транзакции; в IDB только подтверждённые сервером (у неотправленных sort меняется при ack)
+    const termRows: { term: string; chatId: number; sort: number; key: string }[] = [];
+    const fresh = new Set<string>();
+    for (const m of this.dirtyMessages.values()) for (const term of termsOf(m)) { termRows.push({ term, chatId: m.chatId, sort: m.sort, key: m.key }); fresh.add(termKey(term, m.chatId, m.sort)); }
+    batch.put.terms = termRows;
+    batch.del.terms = [...this.staleTerms].filter(([k]) => !fresh.has(k)).map(([, v]) => v);
+    this.staleTerms.clear();
     batch.put.outbox = [...this.dirtyOutbox].map((k) => this.outbox.get(k)).filter(Boolean) as OutboxEntry[];
     batch.del.outbox = [...this.dirtyOutbox].filter((k) => !this.outbox.has(k));
     batch.put.pendingReads = [...this.dirtyReads].filter((c) => this.pendingReads.has(c)).map((c) => ({ chatId: c, upToId: this.pendingReads.get(c) }));
@@ -760,6 +771,7 @@ export class Store {
     const map = this.map(m.chatId), prev = map.get(m.key);
     map.set(m.key, m);
     this.dirtyMessages.set(m.key, m);
+    if (prev) { const now = new Set(termsOf(m)); for (const t of termsOf(prev)) if (!now.has(t) || prev.sort !== m.sort) this.staleTerms.set(termKey(t, prev.chatId, prev.sort), [t, prev.chatId, prev.sort]); }
     const chat = this.ensureChat(m.chatId);
     this.touch(m.chatId);   // отсортированная лента устарела — derive может её читать
     onMessage(this, chat, m, !prev ? 'added' : m.deleted && !prev.deleted ? 'deleted' : 'edited', prev);
@@ -788,3 +800,7 @@ export class Store {
     return null;
   }
 }
+
+/** Слова сообщения для указателя: только подтверждённые и не удалённые */
+function termsOf(m: LocalMessage): string[] { return m.id != null && !m.deleted ? searchTerms(m.body) : []; }
+const termKey = (term: string, chatId: number, sort: number) => `${term}\0${chatId}\0${sort}`;

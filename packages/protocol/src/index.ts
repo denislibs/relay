@@ -426,5 +426,16 @@ export function normalizeTodo(raw: unknown): TodoInput | null {
   return { title, items, othersCanAppend: r.othersCanAppend === true, othersCanComplete: r.othersCanComplete === true };
 }
 
+/** Слова сообщения для офлайн-поиска: нижний регистр, ё → е, буквы и цифры, длина 2–32, без повторов, не больше 64. */
+export function searchTerms(text: string): string[] {
+  const out = new Set<string>();
+  for (const w of text.normalize('NFC').toLowerCase().replace(/ё/g, 'е').split(/[^\p{L}\p{N}]+/u)) {
+    if (w.length < 2 || w.length > 32) continue;
+    out.add(w);
+    if (out.size >= 64) break;
+  }
+  return [...out];
+}
+
 export * from './groups';
 export * from './blocks';
