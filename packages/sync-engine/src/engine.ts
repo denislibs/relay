@@ -3,7 +3,7 @@ import type { ClientFrame, JournalEntry, Me, SettingsSnapshot, Message, PublicUs
 import { Blocks } from './blocks';
 import { Contacts } from './contacts';
 import { delBlob, getAll, getBlob, getByChat, openDb, putBlob, write } from './idb';
-import { affects, computeQuery, diffResults, messageWindow, type Result } from './queries';
+import { affects, computeQuery, diffResults, messageWindow, muteKey, muteOverlay, type Result } from './queries';
 import type { Item } from './types';
 import { Store, type ChatSummary } from './store';
 import { uploadParts, type MultipartState } from './multipart';
@@ -101,6 +101,8 @@ export class Engine {
   private userWants = new Set<number>();
   /** подписи собеседников личных чатов, уже показанные в списке (names.ts) */
   private peerSigs = new PeerSigs();
+  /** какое значение «уведомлений» из очереди показано в строке чата: изменилось — строку пересчитать */
+  private muteShown = new Map<number, number | null>();
   private usersAsked = new Set<number>();
   /** раздел «Для разработчиков»: журнал, снимок состояния, имитатор сети (devlog.ts) */
   readonly dev: DevTools;
@@ -361,7 +363,7 @@ export class Engine {
       const it = q.kind === 'devStats' ? this.dev.stats() : { key: 'devLog' };   // devLog идёт мимо compute (dev.pushLog)
       return { items: new Map([[it.key, it]]), order: [it.key], sig: new Map([[it.key, JSON.stringify(it)]]) };
     }
-    if (q.kind !== 'status') return computeQuery(this.store, q);
+    if (q.kind !== 'status') return computeQuery(this.store, q, muteOverlay(this.ops.list));
     const it = this.statusItem();
     return { items: new Map([[it.key, it]]), order: [it.key], sig: new Map([[it.key, JSON.stringify(it)]]) };
   }
@@ -604,10 +606,19 @@ export class Engine {
     return c ? chatTitle(this.store, c) : null;
   }
 
+  /** Операция mute: поставлена, заменена или ушла из очереди — строку чата пересчитать (в IndexedDB ничего не пишется). */
+  private retouchMute(): void {
+    const now = muteOverlay(this.ops.list);
+    for (const [id, v] of now) if (!this.muteShown.has(id) || this.muteShown.get(id) !== v) this.store.retouch(id);
+    for (const id of this.muteShown.keys()) if (!now.has(id)) this.store.retouch(id);
+    this.muteShown = now;
+  }
+
   private emit(): void {
     this.contacts.repair();
     // собеседник выглядит иначе (профиль, контакт, очередь) — строки его личных чатов пересчитать
     if (this.store.profile.dirty || this.store.contacts.dirty || this.ops.dirty) this.peerSigs.retouch(this.store);
+    if (this.ops.dirty) this.retouchMute();
     const hold = this.holding && this.acting === 0;
     const touched = new Set(this.store.touched);
     if (!hold) this.store.touched.clear(); // при удержании изменения копятся до конца догонки
@@ -664,6 +675,12 @@ export class Engine {
   private opDone(op: PendingOp, value: unknown): void {
     if (this.contacts.opDone(op, value)) return;
     if (this.blocks.opDone(op, value)) return;
+    if (op.key.startsWith('mute:')) {
+      // ответ — новая база: между уходом операции и записью журнала строка не откатится
+      const v = value as { muteUntil?: number | null } | null;
+      if (v && v.muteUntil !== undefined) { this.store.setMute(Number(op.key.slice(5)), v.muteUntil); this.run(() => this.store.flush()); }
+      return;
+    }
     if (isNotifyOp(op)) {
       // ответ — новая база: иначе между уходом операции из очереди и записью журнала переключатель мигнул бы
       const v = value as (SettingsSnapshot) | null;
@@ -958,6 +975,9 @@ export class Engine {
         return null;
       case 'refreshSettings':
         if (this.online && this.ready) this.fetchSettings();
+        return null;
+      case 'setMute':
+        await this.ops.enqueue({ key: muteKey(a.chatId), method: 'PUT', path: `/chats/${a.chatId}/notify`, body: { muteUntil: a.muteUntil } });
         return null;
       case 'setNotify': {
         // в очередь уходит полное значение вида чата: слитые правки одного ключа не теряют соседнее поле

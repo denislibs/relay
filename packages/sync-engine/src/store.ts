@@ -19,6 +19,7 @@ function sameDraft(a: { text: string; entities?: Entity[] } | null | undefined, 
 export interface ChatSummary {
   draft?: { text: string; at: string } | null;
   pinned?: number[];
+  muteUntil?: number | null;
   sortAt?: string;
   id: number;
   kind: 'direct' | 'group';
@@ -201,11 +202,19 @@ export class Store {
       case 'blocksChanged': return applyBlocksChanged(this, u, seq);
       case 'sessionsChanged': this.sessionsRev++; return;
       case 'pins': { const chat = this.chats.get(u.chatId); if (chat) { chat.pinned = u.ids; this.markChat(chat); } return; }
+      case 'chatNotify': return this.setMute(u.chatId, u.muteUntil);
       case 'groupUpdated': { const chat = this.chats.get(u.chatId); if (chat) { chat.group = u.group; this.markChat(chat); } return; }
       case 'membership': { const chat = this.chats.get(u.chatId); if (chat) { chat.me = u.me; this.markChat(chat); } return; }
       case 'membersChanged': { const chat = this.chats.get(u.chatId); if (chat) { chat.membersRev = (chat.membersRev ?? 0) + 1; this.markChat(chat); } return; }
       case 'chatRemoved': return this.removeChat(u.chatId);
     }
+  }
+
+  /** Уведомления чата (журнал, снимок, ответ операции): значение сервера — база; чата в кэше нет — ждать нечего. */
+  setMute(chatId: number, muteUntil: number | null): void {
+    const chat = this.chats.get(chatId);
+    if (!chat || (chat.muteUntil ?? null) === muteUntil) return;
+    chat.muteUntil = muteUntil; this.markChat(chat);
   }
 
   /** Чат больше не мой (вышел, удалили, группу удалили): из памяти, очереди и IndexedDB вместе с сообщениями. */
@@ -237,6 +246,7 @@ export class Store {
       if (s.peer?.system) chat.system = true; else delete chat.system;
       if (s.draft && (!chat.draft || s.draft.at > chat.draft.at) && !this.pendingDrafts.has(s.id)) chat.draft = s.draft;
       if (s.pinned) chat.pinned = s.pinned;
+      if (s.muteUntil !== undefined) chat.muteUntil = s.muteUntil;
       if (s.group) { chat.group = s.group; chat.me = s.me; }
       if (s.peerReadUpTo && s.peerReadUpTo > chat.peerReadUpTo) this.applyPeerRead(s.id, s.peerReadUpTo);
       chat.lastReadId = Math.max(chat.lastReadId, s.lastReadId);

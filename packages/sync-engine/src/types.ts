@@ -54,6 +54,7 @@ export interface LocalChat {
   lastAt: string;
   draft?: { text: string; at: string; entities?: Entity[] } | null;   // неотправленный текст композера (общий для вкладок)
   pinned?: number[];      // закреплённые сообщения (новые сверху)
+  muteUntil?: number | null;   // уведомления чата выключены до (мс), 0 — навсегда, null/нет — включены
   group?: GroupInfo;      // группа: информация и настройки (название и фото — отсюда)
   me?: MyMembership;      // группа: моя роль и права
   membersRev?: number;    // растёт, когда состав/роли меняются — интерфейс перечитывает участников
@@ -156,6 +157,7 @@ export type Action =
   /** умолчания уведомлений для вида чата — через очередь операций (видно сразу, в том числе без сети) */
   /** перезапросить настройки с сервера (предзагрузка раздела) */
   | { type: 'refreshSettings' }
+  | { type: 'setMute'; chatId: number; muteUntil: number | null }
   | { type: 'setNotify'; notifyType: 'direct' | 'group'; muted?: boolean; preview?: boolean }
   /** правило конфиденциальности целиком — через очередь операций */
   | { type: 'setPrivacy'; key: PrivacyKey; mode: PrivacyMode; allow?: number[]; deny?: number[] }
