@@ -177,3 +177,95 @@ test('chat row signature: a removed and re-created chat never repeats an old sig
   expect(r2.sig.get('c10')).not.toBe(r1.sig.get('c10'));
   expect(diffResults(r1, r2)).toMatchObject({ op: 'diff', upsert: [{ key: 'c10' }] });
 });
+
+// ---------- отрезки истории: сообщения через дыру в ленту не попадают ----------
+
+const CH = 40;
+const ids = (from: number, to: number) => Array.from({ length: to - from + 1 }, (_, i) => from + i);
+// одно и то же сообщение с сервера — тот же clientId, сколько раз ни грузи
+const server = new Map<number, ReturnType<typeof msg>>();
+const page = (list: number[]) => list.map((id) => { let m = server.get(id); if (!m) server.set(id, m = msg({ id, chatId: CH, senderId: PEER })); return m; });
+const feedIds = (s: Store, q: { limit: number; anchor?: { sort: number; side: 'start' | 'end' | 'center' } }) =>
+  [...computeQuery(s, { kind: 'messages', chatId: CH, ...q }).items.values()].filter((i) => i.key !== '~window').map((i) => i.id);
+const feedMeta = (s: Store, q: { limit: number; anchor?: { sort: number; side: 'start' | 'end' | 'center' } }) =>
+  computeQuery(s, { kind: 'messages', chatId: CH, ...q }).items.get('~window');
+
+test('history ranges: loose old messages stay behind the gap until history reaches them', async () => {
+  const s = await fresh();
+  s.applyUpdate({ type: 'newMessage', message: msg({ id: 200, chatId: CH, senderId: PEER }) });
+  s.applyHistory(CH, page(ids(100, 199)), true, 200);
+  expect(s.chats.get(CH)!.ranges).toEqual([[100, 200]]);
+  s.addLoose(CH, page([10, 20]));   // медиа догрузили отдельно
+  expect(s.chats.get(CH)!.ranges).toEqual([[100, 200]]);
+
+  // лента у 100: старее есть, 10 и 20 не показаны
+  expect(feedIds(s, { limit: 500 })).toEqual(ids(100, 200));
+  expect(feedIds(s, { limit: 50, anchor: { sort: 100, side: 'end' } })).toEqual([100]);
+  expect(feedMeta(s, { limit: 50, anchor: { sort: 100, side: 'end' } })).toMatchObject({ hasOlder: true, hasNewer: true });
+
+  // история 21..99 — отрезки слились, 10 и 20 всё ещё за дырой
+  s.applyHistory(CH, page(ids(21, 99)), true, 100);
+  expect(s.chats.get(CH)!.ranges).toEqual([[21, 200]]);
+  expect(feedIds(s, { limit: 500 })).toEqual(ids(21, 200));
+  expect(feedMeta(s, { limit: 500 })).toMatchObject({ hasOlder: true, hasNewer: false, live: true });
+
+  // дошли до начала — 10 и 20 в ленте, старее нет
+  s.applyHistory(CH, page(ids(1, 20)), false, 21);
+  expect(s.chats.get(CH)!.ranges).toEqual([[1, 200]]);
+  expect(s.chats.get(CH)!.historyStart).toBe(true);
+  expect(feedIds(s, { limit: 500 })).toEqual(ids(1, 200));
+  expect(feedMeta(s, { limit: 500 })).toMatchObject({ hasOlder: false, hasNewer: false, live: true });
+});
+
+test('history ranges: window at the live end ignores a loose old message; new and pending messages join the live range', async () => {
+  const s = await fresh();
+  s.applyUpdate({ type: 'newMessage', message: msg({ id: 100, chatId: CH, senderId: PEER }) });
+  s.applyHistory(CH, page(ids(90, 99)), true, 100);
+  s.addLoose(CH, page([5]));
+  expect(feedIds(s, { limit: 50 })).toEqual(ids(90, 100));
+  expect(feedMeta(s, { limit: 50 })).toMatchObject({ hasOlder: true, hasNewer: false, live: true });
+  // окно у старого края живого отрезка — 5 не подтягивается
+  expect(feedIds(s, { limit: 3, anchor: { sort: 90, side: 'start' } })).toEqual([90, 91, 92]);
+  expect(feedIds(s, { limit: 3, anchor: { sort: 92, side: 'end' } })).toEqual([90, 91, 92]);
+
+  s.applyUpdate({ type: 'newMessage', message: msg({ id: 101, chatId: CH, senderId: PEER }) });
+  s.addPending({ clientId: 'p1', chatId: CH, body: 'hi', replyToId: null, createdAt: Date.now(), failed: false });
+  expect(s.chats.get(CH)!.ranges).toEqual([[90, 101]]);
+  const live = feedIds(s, { limit: 50 });
+  expect(live.slice(-2)).toEqual([101, null]);
+  expect(live).not.toContain(5);
+  s.ack('p1', 102, new Date().toISOString());
+  expect(s.chats.get(CH)!.ranges).toEqual([[90, 102]]);
+});
+
+test('history ranges: a page fetched from the newest end before any range starts the live range', async () => {
+  const s = await fresh();
+  s.addLoose(CH, page([3]));
+  expect(feedIds(s, { limit: 50 })).toEqual([]);
+  expect(feedMeta(s, { limit: 50 })).toMatchObject({ hasOlder: true });
+  s.applyHistory(CH, page(ids(40, 60)), true, null);
+  expect(s.chats.get(CH)!.ranges).toEqual([[40, 60]]);
+  expect(feedIds(s, { limit: 50 })).toEqual(ids(40, 60));
+});
+
+test('history ranges: kept with the chat across a restart; a cached chat from before ranges gets one range from its messages', async () => {
+  const db = await openDb('q-' + crypto.randomUUID());
+  const s = await Store.open(db, ME);
+  s.applyUpdate({ type: 'newMessage', message: msg({ id: 300, chatId: CH, senderId: PEER }) });
+  s.applyHistory(CH, page(ids(290, 299)), false, 300);
+  await s.flush();
+  const again = await Store.open(db, ME);
+  expect(again.chats.get(CH)!.ranges).toEqual([[290, 300]]);
+  expect(again.chats.get(CH)!.historyStart).toBe(true);
+
+  // строка чата без ranges (кэш до отрезков): при загрузке — один отрезок по сообщениям, historyComplete → historyStart
+  const t = db.transaction('chats', 'readwrite');
+  const { ranges: _r, historyStart: _h, ...old } = again.chats.get(CH)!;
+  t.objectStore('chats').put({ ...old, historyComplete: true });
+  await new Promise((r) => { t.oncomplete = r; });
+  const legacy = await Store.open(db, ME);
+  await legacy.loadChatMessages(CH);
+  expect(legacy.chats.get(CH)!.ranges).toEqual([[290, 300]]);
+  expect(legacy.chats.get(CH)!.historyStart).toBe(true);
+  expect(feedIds(legacy, { limit: 50 })).toEqual(ids(290, 300));
+});

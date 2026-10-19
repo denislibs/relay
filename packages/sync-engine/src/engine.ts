@@ -3,7 +3,7 @@ import type { ClientFrame, JournalEntry, Me, SettingsSnapshot, Message, PublicUs
 import { Blocks } from './blocks';
 import { Contacts } from './contacts';
 import { delBlob, getAll, getBlob, getByChat, openDb, putBlob, write } from './idb';
-import { affects, computeQuery, diffResults, messageWindow, muteKey, muteOverlay, type Result } from './queries';
+import { affects, computeQuery, diffResults, feedSpan, messageWindow, muteKey, rangeAt, muteOverlay, type Result } from './queries';
 import type { Item } from './types';
 import { Store, type ChatSummary } from './store';
 import { uploadParts, type MultipartState } from './multipart';
@@ -829,7 +829,9 @@ export class Engine {
       case 'loadOlder': {
         this.dev.log.record('engine', 'loadOlder', { chatId: a.chatId });
         await this.store.loadChatMessages(a.chatId);
-        await this.ensureHistory(a.chatId, this.store.chatMessages(a.chatId).length + (this.cfg.historyPage ?? 50));
+        const chat = this.store.chats.get(a.chatId);
+        const span = chat && feedSpan(chat, this.store.chatMessages(a.chatId));
+        if (span) await this.ensureHistory(a.chatId, undefined, span.hi - span.lo + (this.cfg.historyPage ?? 50));
         return null;
       }
       case 'refreshChats': {
@@ -1602,36 +1604,65 @@ export class Engine {
     const page = this.cfg.historyPage ?? 50;
     for (let guard = 0; guard < 200; guard++) {
       const chat = this.store.chats.get(q.chatId);
-      if (!chat || chat.historyComplete) return;
+      if (!chat) return;
+      // окно — внутри отрезка истории у якоря: считаем его сообщения, а не все загруженные (медиа за дырой не в счёт)
       const all = this.store.chatMessages(q.chatId);
-      const { from, to } = messageWindow(all, q);
+      const span = feedSpan(chat, all, q.anchor?.sort);
+      const { from, to } = messageWindow(all, q, span.lo, span.hi);
+      const have = span.hi - span.lo;
+      // старый отрезок, окно у его нового края — закрыть дыру до следующего отрезка, в фоне
+      if (!span.live && span.hi - to < page) this.run(() => this.fillGap(q.chatId, chat.ranges[span.i][1]));
+      if (span.start) return;
       let short: boolean;
-      if (!q.anchor) short = all.length < q.limit;
+      if (!q.anchor) short = have < q.limit;
       else {
-        const reached = all.length > 0 && all[0].sort <= q.anchor.sort;   // якорь уже среди загруженных
-        short = !reached || (q.anchor.side !== 'start' && from === 0 && to - from < q.limit);
+        const reached = have > 0 && all[span.lo].sort <= q.anchor.sort;   // якорь уже среди загруженных
+        short = !reached || (q.anchor.side !== 'start' && from === span.lo && to - from < q.limit);
       }
       // далеко в истории (переход к сообщению) — крупными страницами, а не десятками мелких запросов
-      const far = q.anchor && all.length > 0 && all[0].sort > q.anchor.sort;
-      if (short) { await this.ensureHistory(q.chatId, all.length + (far ? 200 : page), far ? 200 : undefined); continue; }
+      const far = q.anchor && have > 0 && all[span.lo].sort > q.anchor.sort;
+      if (short) { await this.ensureHistory(q.chatId, q.anchor?.sort, have + (far ? 200 : page), far ? 200 : undefined); continue; }
       // окно близко к старому краю — страница наперёд, в фоне, чтобы прокрутка вверх не упиралась
-      if (from < page) this.run(() => this.ensureHistory(q.chatId, all.length + page));
+      if (from - span.lo < page) this.run(() => this.ensureHistory(q.chatId, q.anchor?.sort, have + page));
       return;
     }
   }
 
-  private ensureHistory(chatId: number, limit: number, pageSize?: number): Promise<void> {
-    const have = this.store.chatMessages(chatId).length;
-    const chat = this.store.chats.get(chatId);
-    if (have >= limit || chat?.historyComplete) return Promise.resolve();
+  /** В отрезке у sort (нет — в живом) не меньше limit сообщений или он от начала истории: страницы перед его началом. */
+  private ensureHistory(chatId: number, sort: number | undefined, limit: number, pageSize?: number): Promise<void> {
+    return this.loadHistory(chatId, pageSize ?? this.cfg.historyPage ?? 50, () => {
+      const chat = this.store.chats.get(chatId);
+      if (!chat) return null;
+      const span = feedSpan(chat, this.store.chatMessages(chatId), sort);
+      if (span.hi - span.lo >= limit || span.start) return null;
+      return { before: span.i >= 0 ? chat.ranges[span.i][0] : null };
+    });
+  }
+
+  /** Старый отрезок, кончающийся на sort, и следующий за ним: история перед следующим, пока они не сольются. */
+  private fillGap(chatId: number, sort: number): Promise<void> {
+    const ranges = this.store.chats.get(chatId)?.ranges ?? [];
+    const target = ranges[rangeAt(ranges, sort) + 1]?.[1];
+    if (target == null) return Promise.resolve();
+    let pages = 0;
+    return this.loadHistory(chatId, 200, () => {
+      const rs = this.store.chats.get(chatId)?.ranges ?? [];
+      const i = rangeAt(rs, sort);
+      if (i < 0 || rs[i][1] >= target || !rs[i + 1] || ++pages > 50) return null;
+      return { before: rs[i + 1][0] };
+    });
+  }
+
+  /** Страницы истории одна за другой, пока next() говорит, перед чем грузить (null — с новейшего края). Одна загрузка на чат за раз. */
+  private loadHistory(chatId: number, page: number, next: () => { before: number | null } | null): Promise<void> {
     const running = this.historyLoads.get(chatId);
-    if (running) return running.then(() => this.ensureHistory(chatId, limit));
-    const page = pageSize ?? this.cfg.historyPage ?? 50;
+    if (running) return running.then(() => this.loadHistory(chatId, page, next));
+    if (!next()) return Promise.resolve();
     const p = (async () => {
-      while (this.store.chatMessages(chatId).length < limit && !this.store.chats.get(chatId)?.historyComplete) {
-        const before = this.store.oldestId(chatId);
+      for (let n = next(); n; n = next()) {
+        const { before } = n;
         const res = await this.http<{ messages: Message[]; hasMore: boolean }>(`/chats/${chatId}/messages?limit=${page}${before ? `&before=${before}` : ''}`);
-        this.store.applyHistory(chatId, res.messages, res.hasMore);
+        this.store.applyHistory(chatId, res.messages, res.hasMore, before);
         await this.store.flush();
         this.changed();
         if (!res.messages.length) break;

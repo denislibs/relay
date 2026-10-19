@@ -1,6 +1,6 @@
 import { chatTitle, personView } from './names';
 import type { Store } from './store';
-import { toQuote, type Item, type LocalChat, type LocalMessage, type Patch, type Query, type QuoteMsg } from './types';
+import { PENDING_BASE, toQuote, type Item, type LocalChat, type LocalMessage, type Patch, type Query, type QuoteMsg } from './types';
 
 export interface Result {
   items: Map<string, Item>;
@@ -70,23 +70,49 @@ const messageItem = (m: LocalMessage, q: Quote): { item: Item; sig: string } => 
   return c;
 };
 
-/** Первый индекс с sort >= s (массив отсортирован по sort). */
-function lowerBound(arr: LocalMessage[], s: number): number {
-  let lo = 0, hi = arr.length;
+/** Первый индекс в [lo, hi) с sort >= s (массив отсортирован по sort). */
+function lowerBound(arr: LocalMessage[], s: number, lo = 0, hi = arr.length): number {
   while (lo < hi) { const mid = (lo + hi) >> 1; if (arr[mid].sort < s) lo = mid + 1; else hi = mid; }
   return lo;
 }
+/** Первый индекс с sort > s. */
+function upperBound(arr: LocalMessage[], s: number): number {
+  let lo = 0, hi = arr.length;
+  while (lo < hi) { const mid = (lo + hi) >> 1; if (arr[mid].sort <= s) lo = mid + 1; else hi = mid; }
+  return lo;
+}
 
-/** Границы окна ленты [from, to) по запросу. */
-export function messageWindow(all: LocalMessage[], q: Extract<Query, { kind: 'messages' }>): { from: number; to: number } {
-  const n = all.length, limit = q.limit;
-  if (!q.anchor) return { from: Math.max(0, n - limit), to: n };
-  const i = lowerBound(all, q.anchor.sort);
-  if (q.anchor.side === 'end') { const to = Math.min(n, i < n && all[i].sort === q.anchor.sort ? i + 1 : i); return { from: Math.max(0, to - limit), to }; }
-  if (q.anchor.side === 'start') return { from: i, to: Math.min(n, i + limit) };
-  let from = Math.max(0, i - (limit >> 1));
-  const to = Math.min(n, from + limit);
-  from = Math.max(0, to - limit);
+/** Отрезок истории для ленты у sort: тот, где sort, иначе ближайший новее; без sort и новее всех — живой (последний). -1 — отрезков нет. */
+export function rangeAt(ranges: readonly [number, number][], sort?: number): number {
+  const n = ranges.length;
+  if (sort == null || n === 0 || sort > ranges[n - 1][1]) return n - 1;
+  let i = 0;
+  while (ranges[i][1] < sort) i++;
+  return i;
+}
+
+/**
+ * Где лента в отсортированных сообщениях чата: [lo, hi) — сообщения отрезка истории у sort (у живого — и всё,
+ * что после него: неотправленные). start — отрезок от начала истории; live — отрезок живой (за ним новее нет).
+ * Сообщения вне отрезка (догруженные отдельно, за дырой) в ленту не попадают.
+ */
+export function feedSpan(chat: LocalChat | undefined, all: LocalMessage[], sort?: number): { lo: number; hi: number; i: number; start: boolean; live: boolean } {
+  if (!chat) return { lo: 0, hi: all.length, i: -1, start: false, live: true };
+  const ranges = chat.ranges, i = rangeAt(ranges, sort), live = i === ranges.length - 1;
+  const lo = lowerBound(all, i < 0 ? PENDING_BASE : ranges[i][0]);
+  return { lo, hi: live ? all.length : upperBound(all, ranges[i][1]), i, start: i <= 0 && !!chat.historyStart, live };
+}
+
+/** Границы окна ленты [from, to) по запросу внутри [lo, hi) (отрезок истории, feedSpan). */
+export function messageWindow(all: LocalMessage[], q: Extract<Query, { kind: 'messages' }>, lo = 0, hi = all.length): { from: number; to: number } {
+  const limit = q.limit;
+  if (!q.anchor) return { from: Math.max(lo, hi - limit), to: hi };
+  const i = lowerBound(all, q.anchor.sort, lo, hi);
+  if (q.anchor.side === 'end') { const to = Math.min(hi, i < hi && all[i].sort === q.anchor.sort ? i + 1 : i); return { from: Math.max(lo, to - limit), to }; }
+  if (q.anchor.side === 'start') return { from: i, to: Math.min(hi, i + limit) };
+  let from = Math.max(lo, i - (limit >> 1));
+  const to = Math.min(hi, from + limit);
+  from = Math.max(lo, to - limit);
   return { from, to };
 }
 
@@ -104,8 +130,9 @@ export function computeQuery(store: Store, q: Query, mute: Map<number, number | 
     case 'messages': {
       // только окно: бинарный поиск по отсортированному кэшу, подписи — без сериализации
       const all = store.chatMessages(q.chatId);
-      const { from, to } = messageWindow(all, q);
       const chat = store.chats.get(q.chatId);
+      const span = feedSpan(chat, all, q.anchor?.sort);
+      const { from, to } = messageWindow(all, q, span.lo, span.hi);
       const items = new Map<string, Item>(), sig = new Map<string, string>(), order: string[] = [];
       const missingQuotes = new Set<number>();
       for (let k = from; k < to; k++) {
@@ -119,8 +146,9 @@ export function computeQuery(store: Store, q: Query, mute: Map<number, number | 
         const { item, sig: g } = messageItem(m, quote);
         items.set(item.key, item); sig.set(item.key, g); order.push(item.key);
       }
-      // служебный элемент: есть ли что-то за краями окна (интерфейс по нему решает, двигать ли окно)
-      const meta: Item = { key: '~window', hasOlder: from > 0 || !chat?.historyComplete, hasNewer: to < all.length, live: !q.anchor || to === all.length };
+      // служебный элемент: есть ли что-то за краями окна (интерфейс по нему решает, двигать ли окно);
+      // старее — и за началом отрезка, пока он не от начала истории; новее — и за концом не живого отрезка
+      const meta: Item = { key: '~window', hasOlder: from > span.lo || !span.start, hasNewer: to < span.hi || !span.live, live: !q.anchor || (span.live && to === span.hi) };
       items.set(meta.key, meta); sig.set(meta.key, `${meta.hasOlder}|${meta.hasNewer}|${meta.live}`); order.push(meta.key);
       if (missingQuotes.size) store.wantQuotes(q.chatId, [...missingQuotes]);
       return { items, sig, order };
