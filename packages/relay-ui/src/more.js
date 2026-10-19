@@ -605,10 +605,11 @@ function buildPattern(set, stroke) {
   patternCache[cacheKey] = '"data:image/svg+xml;charset=utf-8,' + encodeURIComponent(svg) + '"';
   return patternCache[cacheKey];
 }
-/* Интенсивность узора 0…100 → прозрачность линий: светлая тема — альфа цвета (50 → 0.4, как было), тёмная — маска (50 → 0.55). */
+/* Интенсивность узора 0…100 → прозрачность линий: светлая тема — альфа цвета (50 → 0.4), тёмная — маска (50 → 0.25:
+   градиент лишь проступает сквозь линии, как у Telegram; ярче — режет глаз на чёрном). */
 function intensityAlpha(intensity, dark) {
   var k = typeof intensity === 'number' && isFinite(intensity) ? Math.max(0, Math.min(100, intensity)) / 100 : 0.5;
-  return dark ? Math.min(1, k * 1.1) : Math.min(1, k * 0.8);
+  return dark ? Math.min(1, k * 0.5) : Math.min(1, k * 0.8);
 }
 var wallpapers = [];
 /* Shift every mounted wallpaper's gradient one step — call on send / receive, like Telegram. */

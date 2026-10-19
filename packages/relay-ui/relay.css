@@ -1040,7 +1040,9 @@ button.rl-tab:hover { color: var(--ink); }
 .rl-shell-tw { background-image: none; }
 .rl-shell > :not(.rl-tw, .rl-tw-photo) { position: relative; z-index: 1; }
 .rl-shell > .rl-shell-side { z-index: 2; }
-.rl-tw .tw-canvas { animation: rl-fade 600ms var(--ease-out) both; }
+/* проявление холста — только «from»: в конце остаётся его собственная прозрачность (маска узора в тёмной теме — --tw-opacity), а не 1 */
+@keyframes rl-tw-in { from { opacity: 0; } }
+.rl-tw .tw-canvas { animation: rl-tw-in 600ms var(--ease-out) backwards; }
 /* узор окрашен цветом из фона (patternColor) — без наложения overlay */
 .rl-tw .tw-pattern { mix-blend-mode: normal; }
 

@@ -144,7 +144,7 @@ body { background: var(--bg); color: var(--ink); font-family: var(--font-sans); 
 .app-swatches-patterns .app-swatch-pattern { transition: visibility 0s; }
 .app-swatches-patterns:not(.app-swatches-ready) .app-swatch-pattern { visibility: hidden; }
 .app-swatches-ready .app-swatch-pattern { animation: rl-fade var(--dur-base) var(--ease-out); }
-.app-swatch-dark .app-swatch-pattern { opacity: 0.8; }
+.app-swatch-dark .app-swatch-pattern { opacity: 0.32; }   /* как живые обои в тёмной теме: узор приглушён */
 .app-swatch-mini .app-swatch-pattern { -webkit-mask-size: calc(var(--swatch-tile, 150px) * 0.4) auto; mask-size: calc(var(--swatch-tile, 150px) * 0.4) auto; }
 @media (prefers-reduced-motion: reduce) { .app-swatch, .app-swatch-on::after { transition: none; animation: none; } }
 
