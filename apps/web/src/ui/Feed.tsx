@@ -616,7 +616,68 @@ export function Feed({ frameKey, active, chatId, meId, peerName, group, onAuthor
   // Делегирование: один обработчик на ленту, а не на каждый бабл
   // режим выбора: клик по строке отмечает её (у альбома — все фото); ловим на погружении — ссылки, фото
   // и кнопки внутри пузыря не срабатывают
+  // ключи строки для выбора: у альбома — все его фото
+  const rowKeys = (m: Item) => (m.groupId ? messages.filter((x) => x.groupId === m.groupId && x.senderId === m.senderId) : [m]).map((x) => x.key as string);
+  const selectable = (m: Item | undefined) => !!m && m.id != null && !m.deleted && !m.service;
+  // протягивание в режиме выбора (как в Telegram): зажали на сообщении и ведём — отмечается весь диапазон
+  // от первого до текущего; начали с отмеченного — диапазон снимается. У края ленты — автопрокрутка.
+  const drag = useRef<{ start: number; add: boolean; base: string[]; moved: boolean; x: number; y: number; scroll: number } | null>(null);
+  const dragged = useRef(false);
+  const onSelectDown = (e: PointerEvent) => {
+    if (e.button !== 0 || e.pointerType === 'touch') return;
+    const row = (e.target as Element).closest<HTMLElement>('.app-msg');
+    const start = row ? messages.findIndex((x) => x.key === row.dataset.key) : -1;
+    if (start < 0 || !selectable(messages[start])) return;
+    e.preventDefault();   // не выделять текст
+    const base = getGlobal().selecting?.keys ?? [];
+    drag.current = { start, add: !rowKeys(messages[start]).every((k) => base.includes(k)), base, moved: false, x: e.clientX, y: e.clientY, scroll: 0 };
+    const at = (y: number) => {
+      const feed = el.current!, r = feed.getBoundingClientRect();
+      const hit = document.elementFromPoint(r.left + r.width / 2, Math.max(r.top + 1, Math.min(r.bottom - 1, y)))?.closest<HTMLElement>('.app-msg');
+      return hit ? messages.findIndex((x) => x.key === hit.dataset.key) : -1;
+    };
+    const apply = (y: number) => {
+      const d = drag.current; if (!d) return;
+      const i = at(y); if (i < 0) return;
+      const [a, b] = d.start <= i ? [d.start, i] : [i, d.start];
+      const range = new Set(messages.slice(a, b + 1).filter(selectable).flatMap(rowKeys));
+      const keys = d.add ? [...new Set([...d.base, ...range])] : d.base.filter((k) => !range.has(k));
+      setGlobal({ selecting: { chatId, keys } });
+    };
+    const tick = () => {
+      const d = drag.current; if (!d || !d.moved) return;
+      const feed = el.current!, r = feed.getBoundingClientRect(), edge = 48;
+      const v = d.y < r.top + edge ? -Math.ceil((r.top + edge - d.y) / 4) : d.y > r.bottom - edge ? Math.ceil((d.y - (r.bottom - edge)) / 4) : 0;
+      if (v) { feed.scrollTop += v; apply(d.y); }
+      d.scroll = requestAnimationFrame(tick);
+    };
+    const startY = e.clientY;
+    const move = (ev: PointerEvent) => {
+      const d = drag.current; if (!d) return;
+      d.y = ev.clientY;
+      if (!d.moved) {
+        if (Math.hypot(ev.clientX - d.x, ev.clientY - startY) < 5) return;   // дрожание при клике — ещё не протягивание
+        d.moved = true;
+        d.scroll = requestAnimationFrame(tick);
+      }
+      apply(ev.clientY);
+    };
+    const up = () => {
+      const d = drag.current;
+      removeEventListener('pointermove', move); removeEventListener('pointerup', up); removeEventListener('pointercancel', up);
+      drag.current = null;
+      if (!d) return;
+      cancelAnimationFrame(d.scroll);
+      if (d.moved) {
+        dragged.current = true;   // следом придёт click — он не должен переключить строку ещё раз
+        setTimeout(() => { dragged.current = false; }, 0);
+        if (!getGlobal().selecting?.keys.length) setGlobal({ selecting: null });   // сняли всё — выход, как при кликах
+      }
+    };
+    addEventListener('pointermove', move); addEventListener('pointerup', up); addEventListener('pointercancel', up);
+  };
   const onSelectClick = (e: MouseEvent) => {
+    if (dragged.current) { e.preventDefault(); e.stopPropagation(); dragged.current = false; return; }
     const row = (e.target as Element).closest<HTMLElement>('.app-msg');
     const m = row ? messages.find((x) => x.key === row.dataset.key) : undefined;
     if (!m) return;
@@ -832,7 +893,7 @@ export function Feed({ frameKey, active, chatId, meId, peerName, group, onAuthor
 
   return (
     <>
-      <div class={'rl-feed' + (selVis ? ' app-feed-selecting' : '') + (selOn && selecting ? ' app-feed-sel-on' : '')} ref={el} onScroll={onScroll} onClick={onClick} onClickCapture={selecting ? onSelectClick : undefined} onContextMenu={onContextMenu} aria-live="polite">{out}</div>
+      <div class={'rl-feed' + (selVis ? ' app-feed-selecting' : '') + (selOn && selecting ? ' app-feed-sel-on' : '')} ref={el} onScroll={onScroll} onClick={onClick} onClickCapture={selecting ? onSelectClick : undefined} onPointerDownCapture={selecting ? onSelectDown : undefined} onContextMenu={onContextMenu} aria-live="polite">{out}</div>
       {openIndex !== null && photos[openIndex] ? (
         <MediaViewer
           index={openIndex}

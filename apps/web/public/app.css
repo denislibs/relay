@@ -780,6 +780,8 @@ html[data-anim="0"] .app-chatcol, html[data-anim="0"] .app-chatcol-below, html[d
 /* режим выбора, как в Telegram: кружки слева проявляются (0.2 с), входящие пузыри плавно уезжают вправо на 40px
    transform'ом — лента не перестраивается; свои остаются на месте. Выход — то же в обратную сторону */
 .app-feed-selecting .app-msg { cursor: pointer; }
+/* в режиме выбора протягивание отмечает сообщения — текст не выделяется */
+.app-feed-selecting { -webkit-user-select: none; user-select: none; }
 .app-msg { isolation: isolate; }
 .rl-feed .app-msg .rl-msgline, .rl-feed .app-run-ava { transition: transform 200ms ease-out; }
 .app-feed-sel-on .app-msg .rl-msgline:not(.rl-msgline-out), .app-feed-sel-on .app-run-ava { transform: translateX(40px); }
