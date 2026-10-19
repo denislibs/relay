@@ -45,9 +45,13 @@ export interface ForwardInfo { userId: Id; name: string; chatId: Id; messageId: 
 export interface ForwardRef { chatId: Id; id: Id; hideSender?: boolean; hideCaption?: boolean }
 
 /** Оформление куска текста: смещения в единицах UTF-16 (как String.length). Один тип сам с собой не перекрывается. */
-export type EntityType = 'bold' | 'italic' | 'underline' | 'strike' | 'spoiler' | 'code' | 'pre' | 'link';
-export interface Entity { type: EntityType; offset: number; length: number; url?: string }
-export const ENTITY_TYPES: readonly EntityType[] = ['bold', 'italic', 'underline', 'strike', 'spoiler', 'code', 'pre', 'link'];
+export type EntityType = 'bold' | 'italic' | 'underline' | 'strike' | 'spoiler' | 'code' | 'pre' | 'link' | 'date';
+/** date — дата и время (как messageEntityFormattedDate в Telegram): date — unix-секунды, format — как показывать:
+ *  'r' — относительно («завтра в 10:00»), иначе по порядку w (день недели), d / D (дата коротко / полностью),
+ *  t / T (время коротко / с секундами); пусто — показать текст сообщения как есть. */
+export interface Entity { type: EntityType; offset: number; length: number; url?: string; date?: number; format?: string }
+export const DATE_FORMAT = /^(r|w?[dD]?[tT]?)$/;
+export const ENTITY_TYPES: readonly EntityType[] = ['bold', 'italic', 'underline', 'strike', 'spoiler', 'code', 'pre', 'link', 'date'];
 export const MAX_ENTITIES = 100;
 
 /** Адрес ссылки, который можно показать: http(s) или mailto, без пробелов, до 2048 символов. */
@@ -73,9 +77,13 @@ export function normalizeEntities(text: string, raw: unknown): Entity[] {
     if (end <= s) continue;
     const url = type === 'link' ? entityUrl((e as { url?: unknown }).url) : undefined;
     if (type === 'link' && !url) continue;
-    const key = type === 'link' ? 'link ' + url : (type as string);
+    const date = type === 'date' ? (e as { date?: unknown }).date : undefined;
+    const format = type === 'date' ? ((e as { format?: unknown }).format ?? '') : undefined;
+    // дата: целые секунды с 1970 до 2100 года и формат из допустимых букв
+    if (type === 'date' && (!Number.isSafeInteger(date) || (date as number) < 0 || (date as number) > 4102444800 || typeof format !== 'string' || !DATE_FORMAT.test(format))) continue;
+    const key = type === 'link' ? 'link ' + url : type === 'date' ? 'date ' + date + ' ' + format : (type as string);
     const list = by.get(key) ?? [];
-    list.push(url ? { type: 'link', offset: s, length: end - s, url } : { type: type as EntityType, offset: s, length: end - s });
+    list.push(url ? { type: 'link', offset: s, length: end - s, url } : type === 'date' ? { type: 'date', offset: s, length: end - s, date: date as number, ...(format ? { format: format as string } : {}) } : { type: type as EntityType, offset: s, length: end - s });
     by.set(key, list);
   }
   const out: Entity[] = [];

@@ -9,19 +9,24 @@ const ATTACH_ITEMS = [
   { key: 'doc', icon: 'file', label: 'Файл' },
   { key: 'music', icon: 'music', label: 'Музыка' },
   { key: 'todo', icon: 'checkCircle', label: 'Чек-лист' },
+  { key: 'date', icon: 'calendar', label: 'Дата' },
 ];
+
+/** Дата из окна → значение для вставки: текст по умолчанию, вся строка — одна сущность даты с выбранным форматом. */
+// после даты — пробел вне неё (как в Telegram): дальше набирается обычный текст, а не продолжение даты
+const dateValue = (r: { date: number; format: string; label: string }) => ({ text: r.label + ' ', entities: [{ type: 'date' as const, offset: 0, length: r.label.length, date: r.date, ...(r.format ? { format: r.format } : {}) }] });
 import type { LinkPreview } from '@relay/protocol';
 import { membersStatus, useMembers } from '../members';
 import { Playlist } from './Playlist';
 import { inProfile, toggleProfileMusic, type Track } from '../music';
-import { Avatar, Button, Icon, MediaPolicy, peerTone, ChatSearchBar, Highlight, ripple, useMinVisible, requestMeasure, Composer, DropOverlay, GlassBar, IconButton, Menu, Modal, ConfirmDialog, Presence, ReactionPicker, plural, requestMutation, SelectionBar, isHeavyAnimating, onHeavyAnimationEnd, applyMarkdown, emptyValue, sameValue, voiceSupported, PlayerBar, roundSupported, startRound, Verified, canCopyImage, clipboardHtml, copyImage, copyRich, downloadUrl, TodoModal, TODO_ITEMS_MAX } from '@relay/ui';
+import { Avatar, Button, Icon, MediaPolicy, peerTone, ChatSearchBar, Highlight, ripple, useMinVisible, requestMeasure, Composer, DropOverlay, GlassBar, IconButton, Menu, Modal, ConfirmDialog, Presence, ReactionPicker, plural, requestMutation, SelectionBar, isHeavyAnimating, onHeavyAnimationEnd, applyMarkdown, emptyValue, sameValue, voiceSupported, PlayerBar, roundSupported, startRound, Verified, canCopyImage, clipboardHtml, copyImage, copyRich, downloadUrl, TodoModal, TODO_ITEMS_MAX, DateModal, setDateCopiedToast } from '@relay/ui';
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'preact/hooks';
 import { sendTodo, appendTodo, editTodo, closeChat, deleteMessage, editMessage, ensureNames, focusMessage, openChat, openUserChat, pinMessage, unpinMessage, sendFile, sendFiles, sendRound, sendVoice, react, saveDraft, searchMessages, send, typing, typingDone } from '../data';
 import type { Item, SearchHit } from '@relay/sync-engine/src/types';
 import type { Entity, Todo, TodoInput } from '@relay/protocol';
 
 type Value = { text: string; entities: Entity[] };
-type ComposerApi = { getValue(): Value; setValue(v: Value, opts?: { focus?: boolean; instant?: boolean }): void; focus(opts?: { end?: boolean }): void };
+type ComposerApi = { getValue(): Value; setValue(v: Value, opts?: { focus?: boolean; instant?: boolean }): void; focus(opts?: { end?: boolean }): void ; insert(v: Value, range?: { start: number; end: number }): void };
 import { frameByKey, setGlobal, useGlobal } from '../global';
 import { showToast, unblockUser, useUser } from '../settingsData';
 import { Feed, type MenuExtra } from './Feed';
@@ -35,6 +40,8 @@ import { cancelForwardDraft, endSelect, forwardElsewhere, patchForwardDraft, sen
 const NO_MESSAGES: Item[] = [];
 
 /** Чат в стеке. active — он на экране: только он ловит ввод, файлы и Esc; остальные живут тихо. */
+setDateCopiedToast(() => showToast('Дата скопирована'));
+
 /** Имя файла для «Скачать»: исходное, иначе по виду (как в Telegram: voice — .ogg, кружок — .mp4, фото — .jpg). */
 function downloadName(a: { id?: string; kind?: string; name?: string; mime?: string }): string {
   if (a.name && a.name !== 'file') return a.name;
@@ -128,6 +135,8 @@ export function Chat({ chatId, frameKey, active }: { chatId: number; frameKey: s
   const [musicOpen, setMusicOpen] = useState(false);   // «Музыка» из меню вложений
   // чек-лист: новый (меню вложений), правка или «Добавить задачу» (меню сообщения)
   const [todoOpen, setTodoOpen] = useState<{ mode: 'create' | 'edit' | 'append'; msg?: Item } | null>(null);
+  // дата: окно формата (вставка из меню вложений, правка «плашки») или выбор даты для выделенного текста (⌘D)
+  const [dateOpen, setDateOpen] = useState<{ mode: 'format' | 'mark'; initial?: { date: number; format: string }; done: (r: { date: number; format: string; label: string } | null) => void } | null>(null);
   const [pending, setPending] = useState<{ file: File; files: File[]; url: string | null; caption: string } | null>(null);
   const [dragging, setDragging] = useState(false);
   // несколько файлов разом — одной группой (в ленте один пузырь); превью — только у одиночного фото
@@ -421,6 +430,8 @@ export function Chat({ chatId, frameKey, active }: { chatId: number; frameKey: s
           setReplyKey(null);
         }}
         onChange={onType}
+        onPickDate={(apply: (r: { date: number; format: string } | null) => void) => setDateOpen({ mode: 'mark', done: (r) => { if (r) apply(r); } })}
+        onEditDate={(initial: { date: number; format: string }, range: { start: number; end: number }) => setDateOpen({ mode: 'format', initial, done: (r) => { if (r) api.current?.insert(dateValue(r), range); } })}
         onEditLast={editLast}
         onReplyNav={replyNav}
         chatKey={chatId}
@@ -434,7 +445,7 @@ export function Chat({ chatId, frameKey, active }: { chatId: number; frameKey: s
         onSendVoice={(r: { blob: Blob; duration: number; waveform: Uint8Array }) => { stick.current = true; sendVoice(chatId, r, (replyTo?.id as number) ?? null).catch(() => {}); setReplyKey(null); }}
         onSendRound={(r: { blob: Blob; duration: number; size: number; thumb: string | null }) => { stick.current = true; sendRound(chatId, r, (replyTo?.id as number) ?? null).catch(() => {}); setReplyKey(null); }}
         attachItems={ATTACH_ITEMS}
-        onAttach={(k: string) => { if (k === 'music') { setMusicOpen(true); return; } if (k === 'todo') { setTodoOpen({ mode: 'create' }); return; } const el = picker.current!; el.accept = k === 'media' || k === 'camera' ? 'image/*,video/*' : ''; el.value = ''; el.click(); }}
+        onAttach={(k: string) => { if (k === 'music') { setMusicOpen(true); return; } if (k === 'todo') { setTodoOpen({ mode: 'create' }); return; } if (k === 'date') { setDateOpen({ mode: 'format', done: (r) => { if (r) api.current?.insert(dateValue(r)); } }); return; } const el = picker.current!; el.accept = k === 'media' || k === 'camera' ? 'image/*,video/*' : ''; el.value = ''; el.click(); }}
         onSend={(v: Value) => {
           if (editing) {
             const next = applyMarkdown(v);
@@ -532,6 +543,13 @@ export function Chat({ chatId, frameKey, active }: { chatId: number; frameKey: s
         </>
       ) : null}
       <MusicPicker chatId={chatId} open={musicOpen} onClose={() => setMusicOpen(false)} />
+      {dateOpen ? (
+        <DateModal
+          mode={dateOpen.mode} initial={dateOpen.initial}
+          onClose={() => setDateOpen(null)}
+          onSubmit={(r: { date: number; format: string; label: string }) => { const d = dateOpen; setDateOpen(null); d.done(r); }}
+        />
+      ) : null}
       {todoOpen ? (
         <TodoModal
           mode={todoOpen.mode}

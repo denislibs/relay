@@ -58,3 +58,12 @@ test('drafts keep formatting; same text with other formatting is a change', asyn
   const last = (await getUpdates(a, 0)).items.at(-1)!.update;
   expect(last).toMatchObject({ type: 'draft', entities: [{ type: 'bold', offset: 0, length: 8 }] });
 });
+
+test('date entities: unix seconds and a known format are kept; bad ones are dropped', () => {
+  expect(normalizeEntities('завтра в 10', [
+    { type: 'date', offset: 0, length: 11, date: 1792400000, format: 'r' },
+    { type: 'date', offset: 0, length: 6, date: 1792400000, format: 'xyz' },
+    { type: 'date', offset: 0, length: 6, date: -5 },
+    { type: 'date', offset: 7, length: 4, date: 1792400000 },
+  ])).toEqual([{ type: 'date', offset: 0, length: 11, date: 1792400000, format: 'r' }, { type: 'date', offset: 7, length: 4, date: 1792400000 }]);
+});

@@ -56,6 +56,7 @@ function Composer(props) {
   useEffect(function () { return function () { if (hoverT.current) clearTimeout(hoverT.current); }; }, []);
   var bar = useState(null);          // панель оформления: { x, bottom, active, link, url, s, e, bad }
   var barNow = useRef(null);
+  var lastRange = useRef(null);   // где был курсор в последний раз: окна (дата) вставляют туда
   barNow.current = bar[0];           // свежее состояние панели для отложенных обработчиков
   var dismissed = useRef(null);      // упоминание, закрытое Esc, — пока не напечатают другое
   var height = useRef(0), maxH = useRef(0);
@@ -144,6 +145,16 @@ function Composer(props) {
       setValue: setValue,
       focus: function (opts) { if (opts && opts.end) focusEnd(); else if (editRef.current) editRef.current.focus({ preventScroll: true }); },
       element: function () { return editRef.current; },
+      /** Вставить значение (с оформлением) туда, где был курсор, — даже если фокус ушёл в окно. range — свой диапазон. */
+      insert: function (value, range) {
+        var el = editRef.current;
+        if (!el) return;
+        var cur = readDom(el), r = range || lastRange.current || { start: cur.text.length, end: cur.text.length };
+        var s0 = Math.min(r.start, cur.text.length), e0 = Math.min(r.end, cur.text.length);
+        el.focus({ preventScroll: true });
+        replaceContent(el, splice(cur, s0, e0, value), s0 + value.text.length);
+        sync(true);
+      },
     };
   });
 
@@ -251,6 +262,7 @@ function Composer(props) {
         var active = {};
         TOOLBAR.forEach(function (b) { active[b.type] = covers(v, b.type, v.start, v.end); });
         active.link = covers(v, 'link', v.start, v.end);
+        active.date = covers(v, 'date', v.start, v.end);
         var link = v.entities.filter(function (en) { return en.type === 'link' && en.offset <= v.start && en.offset + en.length >= v.end; })[0];
         bar[1]({ x: x, bottom: w.bottom - top + 8, active: active, link: false, url: link ? link.url : '', s: v.start, e: v.end });
       });
@@ -261,6 +273,7 @@ function Composer(props) {
       var el = editRef.current;
       if (!el || document.activeElement !== el) return;
       var sel = selIn(el);
+      if (sel) { var vv = readDom(el, sel); lastRange.current = { start: vv.start, end: vv.end }; }   // окно вставки (дата) знает, куда
       if (!sel || sel.isCollapsed) { if (barNow.current && !barNow.current.link) closeBar(); return; }
       refreshBar(false);
     }
@@ -310,6 +323,29 @@ function Composer(props) {
     setSelection(el, b.e);
   }
 
+  /* ---------- дата ---------- */
+  // ⌘D / кнопка на выделении: окно выбора даты; результат привязывается к выделенному тексту (без формата)
+  function pickDate() {
+    var el = editRef.current, v = readDom(el, selIn(el));
+    if (!latest.current.onPickDate || v.start === v.end) return;
+    var range = { start: v.start, end: v.end };
+    closeBar();
+    latest.current.onPickDate(function (res) {
+      el.focus({ preventScroll: true });
+      format('date', res ? { date: res.date, format: '' } : null, range);
+      setSelection(el, range.end);
+    });
+  }
+  // нажатие на «плашку» даты в поле — окно с её датой и форматом; сохранили — плашка заменяется
+  function onEditorClick(e) {
+    var chip = e.target.closest && e.target.closest('.rl-date-chip');
+    if (!chip || !latest.current.onEditDate) return;
+    var el = editRef.current, sel = el.ownerDocument.getSelection(), r = el.ownerDocument.createRange();
+    r.selectNode(chip); sel.removeAllRanges(); sel.addRange(r);
+    var v = readDom(el, sel);
+    latest.current.onEditDate({ date: +chip.getAttribute('data-date'), format: chip.getAttribute('data-format') || '' }, { start: v.start, end: v.end });
+  }
+
   /* ---------- упоминания ---------- */
   var mentionList = st.mention && props.members ? props.members.filter(function (x) { return x.name.toLowerCase().indexOf(st.mention.q.toLowerCase()) >= 0; }).slice(0, 5) : null;
   function pickMention(x) {
@@ -347,6 +383,7 @@ function Composer(props) {
       else if (!e.shiftKey && code === 'KeyI') type = 'italic';
       else if (!e.shiftKey && code === 'KeyU') type = 'underline';
       else if (!e.shiftKey && code === 'KeyK') type = 'link';
+      else if (!e.shiftKey && code === 'KeyD') type = 'date';
       else if (e.shiftKey && code === 'KeyX') type = 'strike';
       else if (e.shiftKey && code === 'KeyM') type = 'code';
       else if (e.shiftKey && code === 'KeyP') type = 'spoiler';
@@ -354,7 +391,7 @@ function Composer(props) {
         var sel = selIn(el);
         if (!sel || sel.isCollapsed) { if (type !== 'bold' && type !== 'italic' && type !== 'underline') e.preventDefault(); return; }   // B/I/U без выделения — браузер включит стиль для набора
         e.preventDefault();
-        if (type === 'link') openLink(); else format(type);
+        if (type === 'link') openLink(); else if (type === 'date') pickDate(); else format(type);
         return;
       }
     }
@@ -444,6 +481,8 @@ function Composer(props) {
       return h('button', { key: t.type, type: 'button', class: cx('rl-fmtbtn', b.active[t.type] && 'rl-fmtbtn-on'), 'aria-pressed': String(!!b.active[t.type]), 'aria-label': t.label, title: t.label + ' ' + t.keys,
         onClick: function () { format(t.type); } }, h(Icon, { name: t.icon, size: 20 }));
     }).concat([
+      // дата на выделении — между моноширинным и ссылкой, как в Telegram Web A
+      props.onPickDate ? h('button', { key: 'date', type: 'button', class: cx('rl-fmtbtn', b.active.date && 'rl-fmtbtn-on'), 'aria-label': 'Дата', title: 'Дата ⌘D', onClick: pickDate }, h(Icon, { name: 'calendar', size: 20 })) : null,
       h('span', { key: 'sep', class: 'rl-fmtbar-sep', 'aria-hidden': 'true' }),
       h('button', { key: 'link', type: 'button', class: cx('rl-fmtbtn', b.active.link && 'rl-fmtbtn-on'), 'aria-pressed': String(!!b.active.link), 'aria-label': b.active.link ? 'Убрать ссылку' : 'Ссылка', title: 'Ссылка ⌘K',
         onClick: function () { if (b.active.link) format('link', null); else openLink(); } }, h(Icon, { name: 'link', size: 20 })),
@@ -480,6 +519,7 @@ function Composer(props) {
             id: id, ref: editRef, class: 'rl-composer-editable', contentEditable: props.disabled ? 'false' : 'true',
             role: 'textbox', 'aria-multiline': 'true', 'aria-label': props.placeholder || 'Сообщение', dir: 'auto', translate: 'no', spellcheck: true,
             onInput: function () { sync(true); },
+            onClick: onEditorClick,
             onKeyDown: onKeyDown,
             onPaste: onPaste,
             onDrop: onDrop,

@@ -3,9 +3,10 @@
 // разные типы могут перекрываться, один тип — нет (соседние куски одного типа склеиваются).
 // Источник правды при вводе — DOM поля: значение читается из него одним обходом, когда нужно.
 
-export var FORMATS = ['bold', 'italic', 'underline', 'strike', 'spoiler', 'code', 'pre', 'link'];
+export var FORMATS = ['bold', 'italic', 'underline', 'strike', 'spoiler', 'code', 'pre', 'link', 'date'];
+var DATE_FORMAT = /^(r|w?[dD]?[tT]?)$/;
 // порядок обёрток снаружи внутрь: ссылка и моноширинный — внешние, остальное — внутри
-var ORDER = ['link', 'pre', 'code', 'spoiler', 'bold', 'italic', 'underline', 'strike'];
+var ORDER = ['link', 'date', 'pre', 'code', 'spoiler', 'bold', 'italic', 'underline', 'strike'];
 // моноширинный не сочетается с остальным оформлением (как в Telegram)
 var MONO = { code: 1, pre: 1 };
 var EMPTY = { text: '', entities: [] };
@@ -27,6 +28,12 @@ function marksOf(el, parent) {
   else if (tag === 'CODE' || tag === 'KBD' || tag === 'SAMP' || tag === 'TT') add(el.getAttribute('data-pre') != null || (el.classList && el.classList.contains('rl-pre')) || (el.parentNode && el.parentNode.nodeName === 'PRE') ? 'pre' : 'code');
   else if (tag === 'PRE') add('pre');
   else if (tag === 'A') { var href = el.getAttribute('href'); if (href && safeUrl(href)) add('link', safeUrl(href)); }
+  // дата: «плашка» в поле (data-date) или разметка Telegram при вставке (<tg-time unix format>)
+  var unix = el.getAttribute && (el.getAttribute('data-date') || (tag === 'TG-TIME' ? el.getAttribute('unix') : null));
+  if (unix && /^\d{1,10}$/.test(unix)) {
+    var fmt = el.getAttribute('data-format') || (tag === 'TG-TIME' ? el.getAttribute('format') : '') || '';
+    if (DATE_FORMAT.test(fmt)) add('date', unix + '|' + fmt);
+  }
   // скрытый текст: наш в поле ввода, наш в пузыре, и Bot-API-разметка Telegram при вставке
   if (el.getAttribute && (el.getAttribute('data-fmt') === 'spoiler' || tag === 'TG-SPOILER' || (el.classList && el.classList.contains('rl-spoiler')))) add('spoiler');
   // оформление стилями (вставка из Google Docs, Word): учитываем и «отмену» — <b style="font-weight:normal">
@@ -82,12 +89,17 @@ export function readDom(root, sel) {
     out += chunk;
     for (var t in open) {
       var e = open[t];
-      if (!marks[t] || (t === 'link' && e.url !== marks.link)) delete open[t];
+      if (!marks[t] || (t === 'link' && e.url !== marks.link) || (t === 'date' && e.date + '|' + (e.format || '') !== marks.date)) delete open[t];
     }
     for (var type in marks) {
       var cur = open[type];
       if (cur && cur.offset + cur.length === pos) cur.length += chunk.length;
-      else { cur = { type: type, offset: pos, length: chunk.length }; if (type === 'link') cur.url = marks.link; entities.push(cur); open[type] = cur; }
+      else {
+        cur = { type: type, offset: pos, length: chunk.length };
+        if (type === 'link') cur.url = marks.link;
+        if (type === 'date') { var dp = marks.date.split('|'); cur.date = +dp[0]; if (dp[1]) cur.format = dp[1]; }
+        entities.push(cur); open[type] = cur;
+      }
     }
   }
   function walk(node, marks) {
@@ -146,7 +158,7 @@ export function segments(text, entities) {
     var marks = {};
     for (var j = 0; j < list.length; j++) {
       var en = list[j];
-      if (en.offset <= s && en.offset + en.length >= e) marks[en.type] = en.type === 'link' ? en.url : true;
+      if (en.offset <= s && en.offset + en.length >= e) marks[en.type] = en.type === 'link' ? en.url : en.type === 'date' ? en.date + '|' + (en.format || '') : true;
     }
     out.push({ text: text.slice(s, e), marks: marks });
   }
@@ -159,8 +171,10 @@ var OPEN = {
   code: function () { return '<code>'; }, pre: function () { return '<code data-pre="1">'; },
   spoiler: function () { return '<span data-fmt="spoiler" class="rl-spoiler-edit">'; },
   link: function (url) { return '<a href="' + esc(url) + '" rel="noopener noreferrer" target="_blank">'; },
+  // дата в поле — неизменяемая «плашка»: нажатие открывает окно даты снова
+  date: function (v) { var p = v.split('|'); return '<span class="rl-date-chip" contenteditable="false" data-date="' + esc(p[0]) + '" data-format="' + esc(p[1] || '') + '">'; },
 };
-var CLOSE = { bold: '</b>', italic: '</i>', underline: '</u>', strike: '</s>', code: '</code>', pre: '</code>', spoiler: '</span>', link: '</a>' };
+var CLOSE = { bold: '</b>', italic: '</i>', underline: '</u>', strike: '</s>', code: '</code>', pre: '</code>', spoiler: '</span>', link: '</a>', date: '</span>' };
 
 /** HTML для поля ввода. Перевод строки — <br>; в конце текста — ещё один, иначе последняя пустая строка не видна. */
 export function toHtml(value) {
@@ -193,9 +207,10 @@ export function clean(text, entities) {
     // пробелы по краям в оформление не входят (кроме моноширинного — там пробелы значимы)
     if (!MONO[e.type]) { while (s < en && /\s/.test(text[s])) s++; while (en > s && /\s/.test(text[en - 1])) en--; }
     if (en <= s) return;
-    var key = e.type === 'link' ? 'link\u0000' + e.url : e.type;
+    var key = e.type === 'link' ? 'link\u0000' + e.url : e.type === 'date' ? 'date\u0000' + e.date + '|' + (e.format || '') : e.type;
     if (e.type === 'link' && !safeUrl(e.url)) return;
-    (by[key] = by[key] || []).push({ type: e.type, offset: s, length: en - s, url: e.url });
+    if (e.type === 'date' && (!(e.date >= 0 && e.date <= 4102444800 && e.date % 1 === 0) || !DATE_FORMAT.test(e.format || ''))) return;
+    (by[key] = by[key] || []).push({ type: e.type, offset: s, length: en - s, url: e.url, date: e.date, format: e.format });
   });
   var out = [];
   Object.keys(by).forEach(function (key) {
@@ -203,7 +218,12 @@ export function clean(text, entities) {
     var cur = null;
     list.forEach(function (e) {
       if (cur && e.offset <= cur.offset + cur.length) cur.length = Math.max(cur.length, e.offset + e.length - cur.offset);
-      else { cur = { type: e.type, offset: e.offset, length: e.length }; if (e.type === 'link') cur.url = safeUrl(e.url); out.push(cur); }
+      else {
+        cur = { type: e.type, offset: e.offset, length: e.length };
+        if (e.type === 'link') cur.url = safeUrl(e.url);
+        if (e.type === 'date') { cur.date = e.date; if (e.format) cur.format = e.format; }
+        out.push(cur);
+      }
     });
   });
   // разные ссылки не перекрываются: позже начавшаяся обрезает раннюю
@@ -239,6 +259,12 @@ export function covers(value, type, s, e) {
 /** Включить/выключить тип на [s, e). Ссылка: url — поставить, null — снять. */
 export function toggleFormat(value, type, s, e, url) {
   var list = value.entities.slice();
+  if (type === 'date') {
+    // дата на выделении (⌘D): url — { date, format } или null — снять
+    list = subtract(list, function (x) { return x.type === 'date'; }, s, e);
+    if (url) list.push({ type: 'date', offset: s, length: e - s, date: url.date, format: url.format || '' });
+    return { text: value.text, entities: clean(value.text, list) };
+  }
   if (type === 'link') {
     list = subtract(list, function (x) { return x.type === 'link'; }, s, e);
     if (url) { list = subtract(list, function (x) { return MONO[x.type]; }, s, e); list.push({ type: 'link', offset: s, length: e - s, url: url }); }
@@ -371,7 +397,12 @@ export function pointAt(root, target) {
       var c = kids[i];
       if (c.nodeType === 3) {
         var len = c.data.length;
-        if (target >= pos && target <= pos + len) { best = [c, target - pos]; if (target < pos + len) return true; }
+        // внутри неизменяемой «плашки» (дата) курсор не ставим: на её границе — сразу после неё, в обычный текст
+        var atom = c.parentNode && c.parentNode.closest ? c.parentNode.closest('[contenteditable="false"]') : null;
+        if (atom && root.contains(atom)) {
+          if (target === pos + len) best = [atom.parentNode, Array.prototype.indexOf.call(atom.parentNode.childNodes, atom) + 1];
+          else if (target > pos && target < pos + len) { best = [atom.parentNode, Array.prototype.indexOf.call(atom.parentNode.childNodes, atom) + 1]; return true; }
+        } else if (target >= pos && target <= pos + len) { best = [c, target - pos]; if (target < pos + len) return true; }
         pos += len;
         continue;
       }

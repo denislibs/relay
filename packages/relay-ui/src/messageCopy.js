@@ -5,14 +5,15 @@
 //  • картинка — в PNG через ClipboardItem с обещанием (запись начинается сразу, пока жест пользователя ещё «живой»).
 import { readDom, segments } from './richtext.js';
 
-var ORDER = ['link', 'pre', 'code', 'spoiler', 'bold', 'italic', 'underline', 'strike'];
+var ORDER = ['link', 'date', 'pre', 'code', 'spoiler', 'bold', 'italic', 'underline', 'strike'];
 function esc(s) { return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;'); }
 var OPEN = {
   bold: function () { return '<strong>'; }, italic: function () { return '<em>'; }, underline: function () { return '<u>'; }, strike: function () { return '<del>'; },
   code: function () { return '<code>'; }, pre: function () { return '<pre><code>'; }, spoiler: function () { return '<tg-spoiler>'; },
   link: function (url) { return '<a href="' + esc(url) + '">'; },
+  date: function (v) { var p = v.split('|'); return '<tg-time unix="' + esc(p[0]) + '"' + (p[1] ? ' format="' + esc(p[1]) + '"' : '') + '>'; },
 };
-var CLOSE = { bold: '</strong>', italic: '</em>', underline: '</u>', strike: '</del>', code: '</code>', pre: '</code></pre>', spoiler: '</tg-spoiler>', link: '</a>' };
+var CLOSE = { bold: '</strong>', italic: '</em>', underline: '</u>', strike: '</del>', code: '</code>', pre: '</code></pre>', spoiler: '</tg-spoiler>', link: '</a>', date: '</tg-time>' };
 
 /** Текст с оформлением → HTML для буфера (разметка Bot API, переводы строк — <br>). */
 export function clipboardHtml(text, entities) {
