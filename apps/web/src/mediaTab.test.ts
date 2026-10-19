@@ -24,3 +24,17 @@ test('items keep engine order (newest first) and service key is skipped', () => 
   expect(v.items.map((i) => i.id)).toEqual([9, 5]);
   expect(v).toMatchObject({ done: true, loading: false, counts });
 });
+
+test('limit 0 subscription: no items, counts only', () => {
+  const m = new Mirror();
+  m.apply({ op: 'snapshot', items: [{ key: '~media', done: false, loading: false, counts }], order: ['~media'] } as never);
+  expect(mediaOf(m)).toEqual({ items: [], done: false, loading: false, counts });
+});
+
+test('offline cold open: not loading and no counts stays null counts (UI treats as unknown, not forever-loading)', () => {
+  const m = new Mirror();
+  m.apply({ op: 'snapshot', items: [{ key: '~media', done: false, loading: false, counts: null }], order: ['~media'] } as never);
+  const v = mediaOf(m)!;
+  expect(v.counts).toBeNull();
+  expect(v.loading).toBe(false);
+});

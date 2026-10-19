@@ -41,7 +41,9 @@ export function SharedMedia({ chatId, group = false }: { chatId: number; group?:
   const [tab, setTab] = useState<Tab | null>(null);
   const members = useMembers(chatId, group);
   // счётчики приходят с любой подпиской media этого чата и обновляются журналом (новое сообщение — новый счётчик)
-  const { counts } = useMedia(chatId, 'media');
+  const { counts: known, loading: countsLoading } = useMedia(chatId, 'media', 0);
+  // офлайн на холодную: счётчиков нет и не ждём — как раньше, нули (пустое состояние), а не вечная заглушка
+  const counts = known ?? (countsLoading ? null : { media: 0, file: 0, link: 0, audio: 0, voice: 0 });
   useEffect(() => { setTab(null); }, [chatId]);
   const tabs: Tab[] = [...(group ? ['members' as const] : []), ...(counts ? ORDER.filter((t) => counts[t] > 0) : [])];
   const active = tab && tabs.includes(tab) ? tab : tabs[0] ?? null;

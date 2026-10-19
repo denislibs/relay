@@ -263,8 +263,8 @@ export function useUser(userId: number | null | undefined): Item | null {
 }
 
 /** Подписка на запрос движка (участники и т. п.); без движка — пустая. */
-export function watchQuery(q: Query, cb: (p: Patch) => void): { close(): void } {
-  return engine ? engine.watch(q, cb) : { close() {} };
+export function watchQuery(q: Query, cb: (p: Patch) => void): { update(q: Query): void; close(): void } {
+  return engine ? engine.watch(q, cb) : { update() {}, close() {} };
 }
 
 /** Очистка локальных данных: движок стирает кэш и берёт снимок заново; keepOutbox — не трогать неотправленное. */
