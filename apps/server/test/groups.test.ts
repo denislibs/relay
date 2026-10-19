@@ -2,7 +2,7 @@ import { afterAll, beforeEach, expect, test } from 'bun:test';
 import { sql } from '../src/db';
 import { createServer } from '../src/http';
 import { sendMessage } from '../src/domain/messages';
-import { resetDb } from './helpers';
+import { makeChat, resetDb } from './helpers';
 
 const server = createServer({ port: 0 });
 const base = `http://localhost:${server.port}`;
@@ -283,4 +283,18 @@ test('members delta: admin and rank changes give an upsert with the role; remova
   await ok(a, 'DELETE', `/groups/${id}/members/${c.userId}`);
   for (const u of [a, b, c]) expect(await lastUpdate(u, 'members')).toMatchObject({ upsert: [], remove: [c.userId] });
   expect(await lastUpdate(c, 'chatRemoved')).toMatchObject({ chatId: id });
+});
+
+test('members delta: profiles are exchanged only between people who did not see each other before', async () => {
+  const a = await login('Анна'), b = await login('Борис'), c = await login('Вера'), d = await login('Глеб');
+  const id = await group(a, [b]);
+  await makeChat([b.userId, c.userId]);   // Борис и Вера уже общаются лично
+  await ok(a, 'POST', `/groups/${id}/members`, { userIds: [c.userId, d.userId] });
+  const seen = async (u: U) => (await updatesOf(u, 'userUpdated')).map((x) => x.user.id);
+  expect(await seen(b)).not.toContain(c.userId);
+  expect(await seen(c)).not.toContain(b.userId);
+  expect(await seen(b)).toContain(d.userId);   // Борис с Глебом не знакомы
+  expect(await seen(d)).toContain(b.userId);
+  expect(await seen(a)).toEqual(expect.arrayContaining([c.userId, d.userId]));
+  expect(await seen(c)).toEqual(expect.arrayContaining([a.userId, d.userId]));
 });

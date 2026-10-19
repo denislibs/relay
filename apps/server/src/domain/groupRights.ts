@@ -146,8 +146,8 @@ export interface MembersDelta { upsert?: number[]; remove?: number[]; joined?: n
 
 /**
  * Состав или роли изменились — запись `members` всем участникам (и вышедшим, чтобы их список сбросился).
- * Новички (joined): с теми, кого они раньше не видели, обмен профилями — userUpdated каждому в его представлении;
- * людей берём пачкой, не больше 1000 (как список участников).
+ * Новички (joined): с теми, кого они раньше не видели (нет другого общего чата и контакта — правило viewersOf),
+ * обмен профилями — userUpdated каждому в его представлении; всё пачками, группа не больше GROUP_MEMBERS_MAX.
  */
 export async function broadcastMembers(tx: Tx, chatId: number, delta: MembersDelta): Promise<void> {
   const upsertIds = [...new Set(delta.upsert ?? [])], remove = [...new Set(delta.remove ?? [])];
@@ -156,17 +156,32 @@ export async function broadcastMembers(tx: Tx, chatId: number, delta: MembersDel
   const members = await membersOf(tx, chatId);
   const to = [...new Set([...members, ...remove])];
   await appendUpdates(tx, to.map((userId) => ({ userId, update: { type: 'members', chatId, upsert, remove } })));
-  const joined = [...new Set(delta.joined ?? [])].filter((id) => members.includes(id));
-  if (joined.length) await exchangeProfiles(tx, members.slice(0, 1000), joined);
+  const inGroup = new Set(members);
+  const joined = [...new Set(delta.joined ?? [])].filter((id) => inGroup.has(id));
+  if (joined.length) await exchangeProfiles(tx, chatId, members, joined);
 }
 
 /** Новички и участники группы становятся друг другу видимыми: каждому — профиль другого глазами получателя. */
-async function exchangeProfiles(tx: Tx, members: number[], joined: number[]): Promise<void> {
+async function exchangeProfiles(tx: Tx, chatId: number, members: number[], joined: number[]): Promise<void> {
   const ids = [...new Set([...members, ...joined])];
+  const isJoined = new Set(joined);
+  // кто уже видел друг друга: общий чат, кроме этой группы, или контакт (как viewersOf: видит тот, у кого человек в контактах)
+  const seen = new Set<string>();
+  for (const r of await tx`select distinct a.user_id as a, b.user_id as b from chat_members a join chat_members b on b.chat_id = a.chat_id and b.user_id <> a.user_id
+                            where a.chat_id <> ${chatId} and a.user_id = any(${joined}::bigint[]) and b.user_id = any(${members}::bigint[])`) {
+    seen.add(`${r.a}:${r.b}`); seen.add(`${r.b}:${r.a}`);
+  }
+  for (const r of await tx`select owner_id, user_id from contacts where (owner_id = any(${joined}::bigint[]) and user_id = any(${members}::bigint[])) or (user_id = any(${joined}::bigint[]) and owner_id = any(${members}::bigint[]))`) {
+    seen.add(`${r.owner_id}:${r.user_id}`);
+  }
   const users = await tx<Row[]>`select ${COLS} from users where id = any(${ids}::bigint[])`;
   const byId = new Map(users.map((u) => [u.id, u]));
   const pairs: [number, number][] = [];   // [получатель, чей профиль]
-  for (const n of joined) for (const m of members) if (m !== n) { pairs.push([m, n]); if (!joined.includes(m)) pairs.push([n, m]); }
+  for (const n of joined) for (const m of members) {
+    if (m === n) continue;
+    if (!seen.has(`${m}:${n}`)) pairs.push([m, n]);
+    if (!isJoined.has(m) && !seen.has(`${n}:${m}`)) pairs.push([n, m]);
+  }
   if (!pairs.length) return;
   const ctx = await privacyCtx(tx, pairs);
   const names = new Map<string, ContactName>();
