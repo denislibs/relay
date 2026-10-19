@@ -120,6 +120,7 @@ export async function planPush(m: PushMessage): Promise<{ endpoint: string; push
     join sessions se on se.id = s.session_id
     left join user_settings us on us.user_id = s.user_id
     where s.user_id <> ${m.senderId} and not (${m.chatId} = any(s.muted))
+      and (cm.mute_until is null or cm.mute_until <= now())   -- выключенный на аккаунте чат: мьют 'infinity' в будущем всегда
       and se.expires_at > now()
       and se.last_active_at > now() - make_interval(days => coalesce(us.sessions_ttl_days, ${DEFAULT_TTL_DAYS}))
       and not exists (select 1 from blocks b where b.owner_id = s.user_id and b.user_id = ${m.senderId})   -- от заблокированного — никогда`;

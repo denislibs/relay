@@ -9,6 +9,7 @@ import { announceLogin, announceSessionsChanged, assertConfirmed, checkSocket, c
 import { deleteDirectChat, createChat, createGroup, openDirect, messageAtDate, getChatMedia, getChatMediaCounts, getHistory, getMessagesByIds, listChats, listChatsPage } from './domain/chats';
 import { sql } from './db';
 import { DomainError } from './domain/errors';
+import { setChatNotify } from './domain/chatNotify';
 import { storageUsage } from './domain/uploadLimits';
 import { ensureServiceChat } from './domain/service';
 import { processAlive } from './domain/liveRegistry';
@@ -154,6 +155,8 @@ export function createServer(opts: { port: number }): Server {
         if (folder && req.method === 'DELETE') return Response.json(await deleteFolder(userId, Number(folder[1])));
         const notifyType = /^\/settings\/notify\/([a-z]{1,16})$/.exec(url.pathname);
         if (req.method === 'PUT' && notifyType) return Response.json(await setNotify(userId, notifyType[1], await req.json().catch(() => null)));
+        const chatNotify = /^\/chats\/(\d{1,15})\/notify$/.exec(url.pathname);
+        if (req.method === 'PUT' && chatNotify) return Response.json(await setChatNotify(userId, Number(chatNotify[1]), await req.json().catch(() => null)));
         const privacyKey = /^\/privacy\/([a-zA-Z]{1,16})$/.exec(url.pathname);
         if (req.method === 'PUT' && privacyKey) {
           return Response.json(await setPrivacy(userId, privacyKey[1], await req.json().catch(() => null), publish));
