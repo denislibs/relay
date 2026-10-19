@@ -1,4 +1,5 @@
 import { Avatar, EmptyState, FolderTabs, Icon, LazyImage, MediaViewer, peerTone, player, SlideStack } from '@relay/ui';
+import { LinkTile, linkInfo } from './linkTile';
 import { avatarPhoto, userPhoto } from '../profilePhoto';
 import { senderAvatar } from '../profilePhoto';
 import type { Item } from '@relay/sync-engine/src/types';
@@ -167,14 +168,14 @@ function LinkRow({ m }: { m: Msg }) {
   const href = /^https?:\/\//i.test(raw) ? raw : 'https://' + raw;
   let host = raw;
   try { host = new URL(href).hostname.replace(/^www\./, ''); } catch { /* как есть */ }
-  // описание — текст сообщения без самой ссылки (если там есть что-то ещё)
-  const rest = m.body.replace(raw, '').replace(/\s+/g, ' ').trim();
+  // превью страницы (картинка, заголовок, описание) — если загружено; иначе сайт и текст сообщения без ссылки
+  const info = linkInfo(m, raw, host);
   return (
     <div class="app-sm-row">
-      <span class="app-sm-letter" aria-hidden="true">{(host[0] ?? '?').toUpperCase()}</span>
+      <LinkTile photo={info.photo} host={host} />
       <div class="app-sm-text">
-        <button type="button" class="app-sm-title app-sm-plain" onClick={() => show(m)}>{host}</button>
-        {rest ? <button type="button" class="app-sm-desc app-sm-plain" onClick={() => show(m)}>{rest.slice(0, 170)}</button> : null}
+        <button type="button" class="app-sm-title app-sm-plain" onClick={() => show(m)}>{info.title}</button>
+        {info.desc ? <button type="button" class="app-sm-desc app-sm-plain" onClick={() => show(m)}>{info.desc}</button> : null}
         <a class="app-sm-url" href={href} target="_blank" rel="noopener noreferrer">{raw}</a>
       </div>
     </div>

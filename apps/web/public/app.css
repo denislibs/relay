@@ -966,3 +966,9 @@ html[data-anim="0"] .app-chatcol, html[data-anim="0"] .app-chatcol-below, html[d
 .app-art-closing .app-art-scroll { transition: opacity 140ms ease-in; opacity: 0; }
 /* поле ввода проявляется, когда карточка уже почти опустилась */
 .app-composer-host:not(.is-article) > .rl-composer-wrap { transition: opacity 200ms ease-out 60ms; }   /* под опускающейся карточкой, к её концу — уже на месте */
+/* плитка ссылки с картинкой превью страницы */
+.app-sm-thumb { overflow: hidden; background: color-mix(in srgb, var(--ink) 8%, transparent); }
+.app-sm-thumb img { width: 100%; height: 100%; object-fit: cover; display: block; }
+/* светлая картинка не сливается с фоном: тонкая внутренняя рамка держит форму плитки */
+.app-sm-thumb { position: relative; }
+.app-sm-thumb::after { content: ''; position: absolute; inset: 0; border-radius: inherit; box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--ink) 9%, transparent); pointer-events: none; }

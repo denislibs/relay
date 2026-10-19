@@ -1,4 +1,5 @@
 import type { MediaTab, ProfilePhoto } from '@relay/protocol';
+import { LinkTile, linkInfo } from '../linkTile';
 import { senderAvatar } from '../../profilePhoto';
 import { Avatar, EmptyState, FolderTabs, Highlight, Icon, MediaViewer, peerTone, player, SlideStack } from '@relay/ui';
 import type { Item, SearchHit } from '@relay/sync-engine/src/types';
@@ -351,13 +352,13 @@ function LinkHit({ h, who }: { h: Hit; who: string }) {
   const href = /^https?:\/\//i.test(raw) ? raw : 'https://' + raw;
   let host = raw;
   try { host = new URL(href).hostname.replace(/^www\./, ''); } catch { /* как есть */ }
-  const rest = m.body.replace(raw, '').replace(/\s+/g, ' ').trim();
+  const info = linkInfo(m, raw, host);
   return (
     <div class="app-sm-row app-gsearch-hit">
-      <span class="app-sm-letter" aria-hidden="true">{(host[0] ?? '?').toUpperCase()}</span>
+      <LinkTile photo={info.photo} host={host} />
       <div class="app-sm-text">
-        <span class="app-gsearch-line"><button type="button" class="app-sm-title app-sm-plain" onClick={() => showMessage(m.chatId as number, m.id)}>{host}</button><span class="app-gsearch-date">{chatTime(m.createdAt)}</span></span>
-        {rest ? <button type="button" class="app-sm-desc app-sm-plain" onClick={() => showMessage(m.chatId as number, m.id)}>{rest.slice(0, 170)}</button> : null}
+        <span class="app-gsearch-line"><button type="button" class="app-sm-title app-sm-plain" onClick={() => showMessage(m.chatId as number, m.id)}>{info.title}</button><span class="app-gsearch-date">{chatTime(m.createdAt)}</span></span>
+        {info.desc ? <button type="button" class="app-sm-desc app-sm-plain" onClick={() => showMessage(m.chatId as number, m.id)}>{info.desc}</button> : null}
         <a class="app-sm-url" href={href} target="_blank" rel="noopener noreferrer">{raw}</a>
         <small class="app-gsearch-sub">{who}</small>
       </div>
