@@ -31,7 +31,7 @@ function extendLive(chat: LocalChat, sort: number, own = false): void {
   if (!last) ranges.push([sort, sort]);
   else if (sort > last[1]) last[1] = sort;
   else if (own && chat.seed != null && sort < last[0] && (n < 2 || sort > ranges[n - 2][1])) last[0] = sort;
-  if (chat.snapLast != null && ranges[ranges.length - 1][1] >= chat.snapLast) delete chat.snapLast;   // журнал его доставил
+  if (sort === chat.snapLast?.sort) delete chat.snapLast;   // журнал доставил само это сообщение — до него всё подряд
 }
 
 /**
@@ -39,11 +39,11 @@ function extendLive(chat: LocalChat, sort: number, own = false): void {
  * с него начинается живой отрезок. Новее живого — не доказано, что подряд: страница диалогов обычно обгоняет
  * журнал, который его вот-вот доставит. Запоминаем (snapLast); не доставит до конца догонки — дыра (settleSnapshots).
  */
-function snapshotLive(chat: LocalChat, sort: number): boolean {
-  const last = chat.ranges[chat.ranges.length - 1];
+function snapshotLive(chat: LocalChat, m: LocalMessage): boolean {
+  const sort = m.sort, last = chat.ranges[chat.ranges.length - 1];
   if (!last) { chat.ranges.push([sort, sort]); chat.seed = sort; return true; }
   if (sort <= last[1]) return true;
-  if (sort > (chat.snapLast ?? 0)) chat.snapLast = sort;
+  if (sort >= (chat.snapLast?.sort ?? 0)) chat.snapLast = m;
   return false;   // ждёт журнала
 }
 
@@ -352,14 +352,33 @@ export class Store {
     chat.ranges = addPage(chat.ranges, lo, hi, at, dir, !hasMore);
     if (!hasMore && dir === 'older') chat.historyStart = true;
     if (verifyFrom !== undefined) { if (hasMore && lo != null && lo > verifyFrom) chat.seed = lo; else delete chat.seed; }
-    if (chat.snapLast != null && chat.ranges.some((r) => r[0] <= chat.snapLast! && chat.snapLast! <= r[1])) delete chat.snapLast;
+    const snap = chat.snapLast?.sort;
+    if (snap != null && chat.ranges.some((r) => r[0] <= snap && snap <= r[1])) delete chat.snapLast;
     this.markChat(chat);
+  }
+
+  /**
+   * Журнал или своё подтверждение новее ждущего snapLast: само оно так и не пришло — между живым отрезком и ним
+   * дыра. Новый живой отрезок — от snapLast до пришедшего (seed = snapLast), старый остаётся; иначе — extendLive.
+   */
+  private extendLive(chat: LocalChat, sort: number, own = false): void {
+    const snap = chat.snapLast?.sort, last = chat.ranges[chat.ranges.length - 1];
+    if (snap == null || sort <= snap || (last && snap <= last[1])) { extendLive(chat, sort, own); return; }
+    chat.ranges.push([snap, sort]); chat.seed = snap;
+    this.placeSnapLast(chat);
+  }
+
+  /** Последнее из снимка ждало журнала вне ленты — теперь у него отрезок: в ленту. */
+  private placeSnapLast(c: LocalChat): void {
+    const m = c.snapLast;
+    delete c.snapLast;
+    if (m && !this.messages.get(c.id)?.has(m.key)) this.putMessage(m);
   }
 
   /** Чаты, где последнее из снимка ждёт журнала (snapLast), — движок берёт их в начале догонки. */
   pendingSnapshots(): Map<number, number> {
     const out = new Map<number, number>();
-    for (const c of this.chats.values()) if (c.snapLast != null) out.set(c.id, c.snapLast);
+    for (const c of this.chats.values()) if (c.snapLast) out.set(c.id, c.snapLast.sort);
     return out;
   }
 
@@ -370,13 +389,10 @@ export class Store {
   settleSnapshots(pending: Map<number, number>): void {
     for (const [id, sort] of pending) {
       const c = this.chats.get(id);
-      if (!c || c.snapLast !== sort) continue;
-      delete c.snapLast;
+      if (!c || c.snapLast?.sort !== sort) continue;
       const last = c.ranges[c.ranges.length - 1];
-      if (!last || sort > last[1]) {
-        c.ranges.push([sort, sort]); c.seed = sort;
-        if (c.last?.id === sort && !this.messages.get(id)?.has(c.last.key)) this.putMessage(c.last);   // лежало только в превью
-      }
+      if (!last || sort > last[1]) { c.ranges.push([sort, sort]); c.seed = sort; }
+      this.placeSnapLast(c);
       this.markChat(c);
     }
   }
@@ -408,8 +424,8 @@ export class Store {
     };
     unreadOnArrival(this, chat, m, countUnread);
     chat.knownMaxId = Math.max(chat.knownMaxId, m.id);
-    if (range === 'journal') extendLive(chat, m.id);
-    else if (range === 'snapshot' && !snapshotLive(chat, m.id) && !prev) {
+    if (range === 'journal') this.extendLive(chat, m.id);
+    else if (range === 'snapshot' && !snapshotLive(chat, local) && !prev) {
       // ждёт журнала: в ленту (за живым отрезком) не кладём — только в превью чата; доставит журнал или settleSnapshots
       onMessage(this, chat, local, 'added');
       return;
@@ -481,7 +497,7 @@ export class Store {
     const m = this.messages.get(chatId)?.get(clientId);
     if (m) this.putMessage({ ...m, id, createdAt, sort: id, status: m.status === 'read' || id <= chat.peerReadUpTo ? 'read' : 'sent' });
     chat.knownMaxId = Math.max(chat.knownMaxId, id);
-    extendLive(chat, id, true);   // неотправленные — часть живого отрезка
+    this.extendLive(chat, id, true);   // неотправленные — часть живого отрезка
     this.markChat(chat);
   }
 
@@ -563,6 +579,8 @@ export class Store {
   patchMessage(chatId: number, id: number, patch: Partial<LocalMessage>): void {
     const m = this.messageById(chatId, id);
     if (m) { this.putMessage({ ...m, ...patch }); return; }
+    const chat0 = this.chats.get(chatId);
+    if (chat0?.snapLast?.id === id) { chat0.snapLast = { ...chat0.snapLast, ...patch }; this.markChat(chat0); }   // ждёт журнала — правка не теряется
     // сообщение не загружено — правится только превью последнего
     const chat = this.chats.get(chatId);
     if (chat?.last && chat.last.id === id) onMessage(this, chat, { ...chat.last, ...patch }, patch.deleted && !chat.last.deleted ? 'deleted' : 'edited');

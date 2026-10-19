@@ -282,7 +282,7 @@ test('history ranges: a snapshot last ahead of the journal waits for it — one 
   // страница диалогов обогнала журнал: 150 ещё не пришло журналом
   s.applyChats([summary(page([150])[0])]);
   expect(s.chats.get(CH)!.ranges).toEqual([[100, 110]]);
-  expect(s.chats.get(CH)!.snapLast).toBe(150);
+  expect(s.chats.get(CH)!.snapLast?.id).toBe(150);
   expect(feedIds(s, { limit: 50 })).toEqual(ids(100, 110));   // окно не схлопнулось до одного сообщения
   // журнал доставил — тот же живой отрезок продлился
   s.applyUpdate({ type: 'newMessage', message: page([150])[0] });
@@ -291,6 +291,43 @@ test('history ranges: a snapshot last ahead of the journal waits for it — one 
   expect(feedIds(s, { limit: 50 })).toEqual([...ids(100, 110), 150]);
   s.settleSnapshots(new Map([[CH, 150]]));   // конец догонки: ждать уже нечего
   expect(s.chats.get(CH)!.ranges).toEqual([[100, 150]]);
+  s.applyUpdate({ type: 'newMessage', message: page([151])[0] });   // и дальше подряд
+  expect(s.chats.get(CH)!.ranges).toEqual([[100, 151]]);
+  expect(feedIds(s, { limit: 50 })).toEqual([...ids(100, 110), 150, 151]);
+});
+
+/** Живой [100..110], снимок принёс 160, журнал его так и не доставил (вернулись в группу). */
+async function rejoinGap() {
+  const s = await fresh();
+  s.applyUpdate({ type: 'newMessage', message: page([110])[0] });
+  s.applyHistory(CH, page(ids(100, 109)), true, 110);
+  s.applyChats([summary(page([160])[0])]);
+  expect(s.chats.get(CH)!.snapLast?.id).toBe(160);
+  return s;
+}
+
+test('history ranges: a newer journal message while the snapshot last is still pending does not bridge the gap', async () => {
+  const s = await rejoinGap();
+  s.applyUpdate({ type: 'newMessage', message: page([170])[0] });
+  expect(s.chats.get(CH)!.ranges).toEqual([[100, 110], [160, 170]]);
+  expect(s.chats.get(CH)!.seed).toBe(160);
+  expect(s.chats.get(CH)!.snapLast).toBeUndefined();
+  expect(feedIds(s, { limit: 50 })).toEqual([160, 170]);
+  expect(feedMeta(s, { limit: 50 })).toMatchObject({ hasOlder: true, live: true });
+  expect(feedIds(s, { limit: 50, anchor: { sort: 105, side: 'center' } })).toEqual(ids(100, 110));
+});
+
+test('history ranges: an own message acked while the snapshot last is still pending does not bridge the gap', async () => {
+  const s = await rejoinGap();
+  s.addPending({ clientId: 'own', chatId: CH, body: 'моё', replyToId: null, createdAt: Date.now(), failed: false });
+  expect(feedIds(s, { limit: 50 })).toEqual([...ids(100, 110), null]);   // неотправленное — в живом отрезке
+  s.ack('own', 170, new Date().toISOString());
+  expect(s.chats.get(CH)!.ranges).toEqual([[100, 110], [160, 170]]);
+  expect(s.chats.get(CH)!.snapLast).toBeUndefined();
+  expect(feedIds(s, { limit: 50 })).toEqual([160, 170]);
+  // журнал присылает своё же 170 — ничего не меняется
+  s.applyUpdate({ type: 'newMessage', message: msg({ id: 170, chatId: CH, senderId: ME, clientId: 'own' }) });
+  expect(s.chats.get(CH)!.ranges).toEqual([[100, 110], [160, 170]]);
 });
 
 test('history ranges: a snapshot last the journal never delivers (rejoin gap) gets its own range after the catch-up', async () => {
@@ -302,7 +339,7 @@ test('history ranges: a snapshot last the journal never delivers (rejoin gap) ge
   s.applyChats([summary(page([160])[0])]);   // пришло во время догонки — ждёт следующей
   s.settleSnapshots(pending);
   expect(s.chats.get(CH)!.ranges).toEqual([[100, 110]]);
-  expect(s.chats.get(CH)!.snapLast).toBe(160);
+  expect(s.chats.get(CH)!.snapLast?.id).toBe(160);
   s.settleSnapshots(s.pendingSnapshots());   // и следующая догонка его не принесла
   expect(s.chats.get(CH)!.ranges).toEqual([[100, 110], [160, 160]]);
   expect(s.chats.get(CH)!.seed).toBe(160);
