@@ -47,7 +47,9 @@ export async function sendMessage(
       if (existing) return { message: toMessage(existing), duplicate: true };
       throw new DomainError('blocked');
     }
-    if (input.replyToId != null && !input.forward) {
+    // копия без «Переслано от» — новое сообщение и может быть ответом; настоящая пересылка — нет (как в Telegram)
+    const canReply = !input.forward || !!input.forward.hideSender;
+    if (input.replyToId != null && canReply) {
       const [target] = await tx`select 1 from messages where chat_id = ${input.chatId} and id = ${input.replyToId}`;
       if (!target) throw new DomainError('not_found', 'reply target');
     }
@@ -99,7 +101,7 @@ export async function sendMessage(
     }
     const inserted = await tx`
       insert into messages (chat_id, sender_id, client_id, kind, body, entities, reply_to_id, attachment, group_id, fwd_from, link, blocks, todo)
-      values (${input.chatId}, ${userId}, ${input.clientId}, ${kind}, ${body}, ${entities.length ? sql.json(entities as never) : null}, ${input.forward ? null : input.replyToId ?? null}, ${attachment ? sql.json(attachment as never) : null},
+      values (${input.chatId}, ${userId}, ${input.clientId}, ${kind}, ${body}, ${entities.length ? sql.json(entities as never) : null}, ${canReply ? input.replyToId ?? null : null}, ${attachment ? sql.json(attachment as never) : null},
               ${attachment && input.groupId && /^[0-9a-f-]{36}$/.test(input.groupId) ? input.groupId : null},   -- группа — только у вложений
               ${fwdFrom ? sql.json(fwdFrom as never) : null}, ${link ? sql.json(link as never) : null}, ${blocks ? sql.json(blocks as never) : null}, ${(todo ?? fwdTodo) ? sql.json((todo ?? fwdTodo) as never) : null})
       on conflict (sender_id, client_id) do nothing

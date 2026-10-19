@@ -177,7 +177,8 @@ export type Action =
       kind?: 'voice' | 'round' | 'audio'; duration?: number; waveform?: string | null; title?: string | null; performer?: string | null; groupId?: string | null }
   | { type: 'listened'; chatId: number; id: number }
   /** Переслать сообщения ids (по порядку) из fromChatId в каждый из toChatIds; comment — отдельным сообщением перед ними. */
-  | { type: 'forwardMessages'; fromChatId: number; ids: number[]; toChatIds: number[]; hideSender?: boolean; hideCaption?: boolean; comment?: { body: string; entities?: Entity[] } | null };
+  /** replyToId — только для копии (hideSender) в один чат: копия — новое сообщение и может быть ответом; пересылка с «Переслано от» — нет */
+  | { type: 'forwardMessages'; fromChatId: number; ids: number[]; toChatIds: number[]; hideSender?: boolean; hideCaption?: boolean; comment?: { body: string; entities?: Entity[] } | null; replyToId?: number | null };
 
 /** Медленная сеть: задержка (мс, туда-обратно; на каждое направление — половина), джиттер (мс), потери кадров (%), полоса (Кбит/с, 0 — без ограничения). */
 export interface NetProfile { latency: number; jitter: number; lossPct: number; kbps: number }

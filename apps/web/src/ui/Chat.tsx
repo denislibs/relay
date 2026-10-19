@@ -369,8 +369,11 @@ export function Chat({ chatId, frameKey, active }: { chatId: number; frameKey: s
     setArt(null);
     stick.current = true;
     const simple = blocksToText(blocks);
-    if (simple) { if (simple.text.trim()) void send(chatId, simple.text, null, simple.entities); return; }
-    void send(chatId, blocksText(blocks), null, [], { blocks });
+    // ответ, открытый в поле, уходит вместе со статьёй — как с любым сообщением
+    const reply = (replyTo?.id as number) ?? null;
+    setReplyKey(null);
+    if (simple) { if (simple.text.trim()) void send(chatId, simple.text, reply, simple.entities); return; }
+    void send(chatId, blocksText(blocks), reply, [], { blocks });
   };
   const artQuote = art && !art.open && art.blocks.length && !editing ? {
     icon: 'article', author: 'Статья', text: blocksText(art.blocks).split('\n')[0] || 'Без текста', tone: 5,
@@ -597,7 +600,7 @@ export function Chat({ chatId, frameKey, active }: { chatId: number; frameKey: s
                 { icon: 'forward', label: 'Другой чат…', onClick: () => forwardElsewhere(chatId) },
               ]}
       />
-      <MusicPicker chatId={chatId} open={musicOpen} onClose={() => setMusicOpen(false)} />
+      <MusicPicker chatId={chatId} open={musicOpen} onClose={() => setMusicOpen(false)} replyToId={(replyTo?.id as number) ?? null} onSent={() => setReplyKey(null)} />
       {dateOpen ? (
         <DateModal
           mode={dateOpen.mode} initial={dateOpen.initial}

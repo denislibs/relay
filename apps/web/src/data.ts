@@ -381,7 +381,7 @@ export async function engineSend(chatId: number, body: string): Promise<void> {
 }
 
 /** Пересылка (forward.ts): копии сразу в ленте целевых чатов; в открытом чате — к низу, как своё сообщение. */
-export async function forwardMessages(a: { fromChatId: number; ids: number[]; toChatIds: number[]; hideSender?: boolean; hideCaption?: boolean; comment?: { body: string; entities?: Entity[] } | null }): Promise<void> {
+export async function forwardMessages(a: { fromChatId: number; ids: number[]; toChatIds: number[]; hideSender?: boolean; hideCaption?: boolean; comment?: { body: string; entities?: Entity[] } | null; replyToId?: number | null }): Promise<void> {
   nudgeWallpaper();
   for (const id of a.toChatIds) toLatestOf(id);
   await engine.call({ type: 'forwardMessages', ...a });
@@ -475,10 +475,10 @@ export async function sendFiles(chatId: number, files: File[], caption: string, 
 }
 
 /** Уже загруженный трек (из музыки профиля) — в чат без новой загрузки: тот же файл по id. */
-export async function sendTrack(chatId: number, attachment: { id: string; kind: 'audio'; mime: string; name: string; size: number; w: null; h: null; duration: number | null; title?: string | null }): Promise<void> {
+export async function sendTrack(chatId: number, attachment: { id: string; kind: 'audio'; mime: string; name: string; size: number; w: null; h: null; duration: number | null; title?: string | null }, replyToId: number | null = null): Promise<void> {
   sentSound();
   toLatestOf(chatId);
-  await engine.call({ type: 'sendMessage', chatId, body: '', attachment });
+  await engine.call({ type: 'sendMessage', chatId, body: '', attachment, replyToId });
 }
 
 /** Вкладка «Общих медиа» панели «Информация»: страница сообщений (новые сверху). */

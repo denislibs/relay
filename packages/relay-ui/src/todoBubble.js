@@ -4,7 +4,7 @@
 //  под задачей — его имя; только для чтения (пересланный или чужой без права отмечать) — точка или галочка,
 //  выполненное зачёркнуто; внизу — «N из M выполнено» (число меняется с переходом).
 import { h } from 'preact';
-import { cx, Avatar, Icon, MessageStatus } from './kit.js';
+import { cx, Avatar, Icon, MessageStatus, ReplyQuote } from './kit.js';
 
 /**
  * props: todo, from ('in'|'out'), groupStart, tail, appear, time, status, edited, forwarded, authorName,
@@ -20,6 +20,7 @@ export function TodoBubble(props) {
   var interactive = !!props.canToggle;
   return h('div', { class: cx('rl-msgline', out && 'rl-msgline-out', props.groupStart && 'rl-msgline-gap') },
     h('div', { class: cx('rl-bubble rl-todo', out ? 'rl-bubble-out' : 'rl-bubble-in-side', props.tail && 'rl-bubble-tail', props.appear && (out ? 'rl-appear-out' : 'rl-appear-in')) },
+      props.reply ? h(ReplyQuote, Object.assign({ inBubble: true }, props.reply)) : null,
       h('div', { class: 'rl-todo-head' }, h('b', { class: 'rl-todo-name' }, t.title), h('span', { class: 'rl-todo-sub' }, subtitle)),
       h('div', { class: 'rl-todo-items', role: 'group', 'aria-label': t.title },
         t.items.map(function (it) {

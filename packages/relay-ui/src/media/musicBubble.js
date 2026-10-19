@@ -4,7 +4,7 @@
 import { h } from 'preact';
 import { useEffect, useRef, useState } from 'preact/hooks';
 import { PlayingRing } from './playingRing.js';
-import { cx, ForwardTitle, MsgLine, Icon, MessageStatus, ProgressRing } from '../kit.js';
+import { cx, ForwardTitle, ReplyQuote, MsgLine, Icon, MessageStatus, ProgressRing } from '../kit.js';
 import * as player from './player.js';
 
 // треки, которые включали в этой вкладке: файл уже качается в кэш — значок «скачать» в углу не нужен (как в Telegram).
@@ -41,6 +41,7 @@ export function MusicBubble(props) {
   return h(MsgLine, { aside: props.aside, class: cx('rl-msgline', out && 'rl-msgline-out', props.groupStart && pos !== 'middle' && pos !== 'last' && 'rl-msgline-gap', 'rl-music-line', 'rl-music-' + pos) },
     h('div', { class: cx('rl-bubble', out ? 'rl-bubble-out' : 'rl-bubble-in-side', props.tail && last && 'rl-bubble-tail', 'rl-music') },
       props.fwd ? h(ForwardTitle, { fwd: props.fwd }) : null,
+      props.reply ? h(ReplyQuote, Object.assign({ inBubble: true }, props.reply)) : null,
       h('div', { class: 'rl-music-row' },
         h('div', { class: 'rl-music-btnwrap' },
           props.uploading

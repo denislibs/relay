@@ -90,3 +90,25 @@ test('a track from my profile music can be sent by id even if someone else uploa
   const { message } = await sendMessage(b, { chatId: bc, clientId: cid(), body: '', attachment: { id: att.id as string } });
   expect(message).toMatchObject({ kind: 'audio', attachment: { id: att.id } });
 });
+
+test('a hidden-sender copy can be a reply (it is a new message); a real forward drops the reply', async () => {
+  const a = await makeUser('Анна'), b = await makeUser('Борис'), c = await makeUser('Вера');
+  const ab = await makeChat([a, b]), bc = await makeChat([b, c]);
+  const { message: src } = await sendMessage(a, { chatId: ab, clientId: cid(), body: 'трек' });
+  const { message: target } = await sendMessage(c, { chatId: bc, clientId: cid(), body: 'скинь музыку' });
+  const { message: copy } = await sendMessage(b, { chatId: bc, clientId: cid(), body: '', replyToId: target.id, forward: { chatId: ab, id: src.id, hideSender: true } });
+  expect(copy.replyToId).toBe(target.id);
+  expect(copy.fwdFrom ?? null).toBeNull();
+  const { message: fwd } = await sendMessage(b, { chatId: bc, clientId: cid(), body: '', replyToId: target.id, forward: { chatId: ab, id: src.id } });
+  expect(fwd.replyToId).toBeNull();
+});
+
+test('voice replies keep the link to the message they answer', async () => {
+  const a = await makeUser('Анна'), b = await makeUser('Борис');
+  const ab = await makeChat([a, b]);
+  const { message: q } = await sendMessage(a, { chatId: ab, clientId: cid(), body: 'как дела?' });
+  const [att] = await sql`insert into attachments (owner_id, mime, name, size, status, kind, duration, waveform)
+    values (${b}, 'audio/ogg', 'voice.ogg', 10, 'ready', 'voice', 7, 'AAAA') returning id`;
+  const { message } = await sendMessage(b, { chatId: ab, clientId: cid(), body: '', replyToId: q.id, attachment: { id: att.id as string } });
+  expect(message).toMatchObject({ kind: 'voice', replyToId: q.id });
+});

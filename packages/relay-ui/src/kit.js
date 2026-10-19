@@ -838,7 +838,7 @@ function MediaBubble(props) {
   // у всех фото альбома известны размеры — мозаикой, как в Telegram (иначе — старая сетка 2×2)
   var mosaic = album && items.every(function (it) { return it.w && it.h; }) ? albumLayout(items.map(function (it) { return it.w / it.h; }), 330, 2) : null;
   if (mosaic) extra = 0;
-  var mediaOnly = !props.caption && !props.author && !props.fwd;
+  var mediaOnly = !props.caption && !props.author && !props.fwd && !props.reply;
   // у одиночного фото без рамки хвостик красится в цвет нижнего угла картинки (как в Telegram); у альбома — последней ячейки
   var cornerOf = items[album ? Math.min(items.length, 4) - 1 : 0] || {};
   var tailColor = useTailColor(mediaOnly && props.tail ? cornerOf.src : null, mediaOnly && props.tail ? cornerOf.thumb : null, out);
@@ -859,6 +859,7 @@ function MediaBubble(props) {
       style: tailColor ? { '--tail-bg': tailColor } : undefined },
       props.fwd ? h(ForwardTitle, { fwd: props.fwd, class: 'rl-media-author' }) : null,
       props.author && !props.fwd ? h('span', { class: 'rl-bubble-author rl-media-author', style: { color: 'var(--peer-' + (props.authorTone != null ? props.authorTone : 5) + ')' } }, props.author) : null,
+      props.reply ? h('div', { class: 'rl-media-reply' }, h(ReplyQuote, Object.assign({ inBubble: true }, props.reply))) : null,
       h('div', { class: cx('rl-media-frame', album && (mosaic ? 'rl-media-mosaic' : 'rl-media-album')), style: mosaic ? { aspectRatio: String(mosaic.ratio) } : album ? null : { aspectRatio: props.ratio || '4 / 3' } },
         mosaic ? items.map(function (it, i) {
           var c = mosaic.cells[i];
@@ -885,6 +886,7 @@ function FileBubble(props) {
   return h(MsgLine, { aside: props.aside, class: cx('rl-msgline', out && 'rl-msgline-out', props.groupStart && 'rl-msgline-gap') },
     h('div', { class: cx('rl-bubble rl-file', out ? 'rl-bubble-out' : 'rl-bubble-in-side', props.tail && 'rl-bubble-tail') },
       props.fwd ? h(ForwardTitle, { fwd: props.fwd }) : null,
+      props.reply ? h(ReplyQuote, Object.assign({ inBubble: true }, props.reply)) : null,
       // как в Telegram: цветной квадрат с загнутым уголком и расширением; скачивание и загрузка — внутри квадрата
       h('div', { class: 'rl-file-card' },
         props.state === 'remote'

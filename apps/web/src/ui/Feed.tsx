@@ -63,6 +63,8 @@ const Row = memo(function Row({ chatId, voiceTitle, author, onAuthor, onOpen, hl
     onUser?.(ff.userId);
   } : undefined;
   const fwd = ff ? { name: ff.name, tone: peerTone(ff.userId), avatar: senderAvatar(ff.userId), onClick: openFwd } : undefined;
+  // ответ — у любого типа сообщения (как в Telegram); клик по цитате ловит лента (onClick ниже ищет .rl-quote)
+  const replyQ = quoted && !m.deleted ? { author: quoteAuthor, ...quoteContent(quoted as unknown as Record<string, unknown>), tone: quoteTone, onClick: noop } : undefined;
   // режим выбора: строка отмечается кликом (обработчик — у ленты), кружок-галочка слева
   const wrap = (base: string) => base + (flash ? ' app-msg-flash' : '') + (sel !== undefined ? ' app-msg-sel' : '') + (sel ? ' app-msg-on' : '') + (grp ? ' app-msg-grp' : '');
   // круглая стрелка «Переслать» у пузыря при наведении — у медиа и длинных сообщений (не в режиме выбора)
@@ -85,7 +87,7 @@ const Row = memo(function Row({ chatId, voiceTitle, author, onAuthor, onOpen, hl
       <div class={wrap('app-msg app-msg-media')} data-key={m.key} data-sort={m.sort as number}>
         {check}
         <MediaBubble
-          fwd={fwd}
+          fwd={fwd} reply={replyQ}
           aside={aside}
           from={out ? 'out' : 'in'} tail={end} groupStart={start} appear={appear}
           items={album.map((x) => { const a = x.attachment as Att; return { src: localPreview(x.key) ?? (a.id ? fileUrl(a) : undefined), thumb: a.thumb, alt: a.name, w: a.w, h: a.h, mkey: x.key,
@@ -106,7 +108,7 @@ const Row = memo(function Row({ chatId, voiceTitle, author, onAuthor, onOpen, hl
       <div class={wrap('app-msg app-msg-media')} data-key={m.key} data-sort={m.sort as number}>
         {check}
         <MediaBubble
-          fwd={fwd}
+          fwd={fwd} reply={replyQ}
           aside={aside}
           from={out ? 'out' : 'in'} tail={end} groupStart={start} appear={appear}
           items={[{ src, thumb: att.thumb, alt: att.name }]}
@@ -130,6 +132,7 @@ const Row = memo(function Row({ chatId, voiceTitle, author, onAuthor, onOpen, hl
           todo={todo} from={out ? 'out' : 'in'} tail={end} groupStart={start} appear={appear}
           forwarded={!!m.fwdFrom} authorName={out ? '' : voiceTitle}
           edited={!!m.editedAt} time={clock(m.createdAt as string)} status={out ? m.status : undefined}
+          reply={replyQ}
           canToggle={canToggle}
           onToggle={(itemId: number, done: boolean) => { void toggleTodo(chatId, m.id as number, itemId, done).then((ok: boolean) => { if (!ok) showToast('Не удалось отметить задачу'); }); }}
           onReadOnly={() => showToast(m.fwdFrom ? 'Пересланный чек-лист нельзя менять' : `${voiceTitle} не разрешил(а) другим отмечать задачи`)}
@@ -146,7 +149,7 @@ const Row = memo(function Row({ chatId, voiceTitle, author, onAuthor, onOpen, hl
       <div class={wrap('app-msg')} data-key={m.key} data-sort={m.sort as number}>
         {check}
         <VoiceBubble
-          fwd={fwd}
+          fwd={fwd} reply={replyQ}
           aside={aside}
           from={out ? 'out' : 'in'} tail={end} groupStart={start} appear={appear}
           trackKey={m.key as string} duration={att.duration ?? 0} waveform={att.waveform ?? null}
@@ -165,7 +168,7 @@ const Row = memo(function Row({ chatId, voiceTitle, author, onAuthor, onOpen, hl
       <div class={wrap('app-msg')} data-key={m.key} data-sort={m.sort as number}>
         {check}
         <RoundBubble
-          fwd={fwd}
+          fwd={fwd} reply={replyQ}
           aside={aside}
           from={out ? 'out' : 'in'} groupStart={start} appear={appear}
           src={localPreview(m.key as string) ?? (att.id ? fileUrl(att) : undefined)} thumb={att.thumb ?? null}
@@ -183,7 +186,7 @@ const Row = memo(function Row({ chatId, voiceTitle, author, onAuthor, onOpen, hl
       <div class={wrap('app-msg')} data-key={m.key} data-sort={m.sort as number}>
         {check}
         <CachedMusic
-          fwd={fwd}
+          fwd={fwd} reply={replyQ}
           aside={aside}
           fileId={att.id ?? undefined} from={out ? 'out' : 'in'} tail={end} groupStart={start} pos={pos}
           trackKey={m.key as string} title={att.title || trackTitle(att.name)} performer={att.performer ?? undefined} cover={att.thumb ?? undefined}
@@ -207,7 +210,7 @@ const Row = memo(function Row({ chatId, voiceTitle, author, onAuthor, onOpen, hl
       <div class={wrap('app-msg')} data-key={m.key} data-sort={m.sort as number}>
         {check}
         <FileBubble
-          fwd={fwd}
+          fwd={fwd} reply={replyQ}
           aside={aside}
           from={out ? 'out' : 'in'} tail={end} groupStart={start}
           name={att.name} ext={ext} meta={fileSize(att.size)}
@@ -231,7 +234,7 @@ const Row = memo(function Row({ chatId, voiceTitle, author, onAuthor, onOpen, hl
         author={author}
         authorTone={author ? peerTone(m.senderId as number) : undefined}
         onAuthorClick={author && onAuthor ? () => onAuthor(m) : undefined}
-        reply={quoted ? { author: quoteAuthor, ...quoteContent(quoted as unknown as Record<string, unknown>), tone: quoteTone, onClick: noop } : undefined}
+        reply={replyQ}
         edited={!!m.editedAt && !m.deleted}
         deleted={!!m.deleted}
         link={webLink(m)}

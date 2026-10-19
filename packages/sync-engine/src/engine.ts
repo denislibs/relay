@@ -800,14 +800,14 @@ export class Engine {
         };
         for (const chatId of a.toChatIds) {
           const comment = a.comment?.body.trim() ? a.comment : null;
-          if (comment) queue({ chatId, body: comment.body, entities: comment.entities ?? [], replyToId: null });
+          if (comment) queue({ chatId, body: comment.body, entities: comment.entities ?? [], replyToId: takeReply() });
           const groups = new Map<string, string>();
           for (const m of srcs) {
             const dropCaption = !!a.hideCaption && !!m.attachment;
             const fwdFrom = a.hideSender ? null : m.fwdFrom ?? { userId: m.senderId, name: this.nameOf(m.senderId, a.fromChatId), chatId: a.fromChatId, messageId: m.id!, at: m.createdAt };
             let groupId: string | null = null;
             if (m.groupId && m.attachment) { groupId = groups.get(m.groupId) ?? crypto.randomUUID(); groups.set(m.groupId, groupId); }
-            queue({ chatId, body: dropCaption ? '' : m.body, entities: dropCaption ? [] : m.entities ?? [], replyToId: null, attachment: m.attachment ?? null,
+            queue({ chatId, body: dropCaption ? '' : m.body, entities: dropCaption ? [] : m.entities ?? [], replyToId: takeReply(), attachment: m.attachment ?? null,
               ...(groupId ? { groupId } : {}), forward: { chatId: a.fromChatId, id: m.id!, ...(a.hideSender ? { hideSender: true } : {}), ...(a.hideCaption ? { hideCaption: true } : {}) }, fwdFrom });
           }
           if (comment) this.store.setDraft(chatId, '');
@@ -815,6 +815,9 @@ export class Engine {
         await this.store.flush();
         this.changed();
         this.pumpOutbox();
+        // ответ — у первого сообщения (подписи или первой копии), и только у копии в один чат
+        let reply = a.hideSender && a.toChatIds.length === 1 ? a.replyToId ?? null : null;
+        const takeReply = () => { const r = reply; reply = null; return r; };
         return { clientIds };
       }
       case 'loadMoreChats':

@@ -43,7 +43,8 @@ function TrackLine({ r }: { r: Row }) {
   );
 }
 
-export function MusicPicker({ chatId, open, onClose }: { chatId: number; open: boolean; onClose: () => void }) {
+/** replyToId — открытый в поле ответ: трек уходит ответом на него (как любое сообщение); onSent — ответ отработан, снять его. */
+export function MusicPicker({ chatId, open, onClose, replyToId = null, onSent }: { chatId: number; open: boolean; onClose: () => void; replyToId?: number | null; onSent?: () => void }) {
   const [q, setQ] = useState('');
   const [profile, setProfile] = useState<ProfileTrack[] | null>(null);
   const [shared, setShared] = useState<{ hits: MediaHit[]; more: boolean; loading: boolean }>({ hits: [], more: true, loading: false });
@@ -102,11 +103,13 @@ export function MusicPicker({ chatId, open, onClose }: { chatId: number; open: b
     close();
     sentSound();
     // трек из чата — его же файл, без «Переслано» и без подписи (как отправка музыки в Telegram)
-    void forwardMessages({ fromChatId: h.message.chatId, ids: [h.message.id], toChatIds: [chatId], hideSender: true, hideCaption: true });
+    void forwardMessages({ fromChatId: h.message.chatId, ids: [h.message.id], toChatIds: [chatId], hideSender: true, hideCaption: true, replyToId });
+    onSent?.();
   };
   const sendProfile = (t: ProfileTrack) => {
     close();
-    void sendTrack(chatId, { id: t.id, kind: 'audio', mime: t.mime, name: t.title, size: 0, w: null, h: null, duration: t.duration ?? null, title: t.title });
+    void sendTrack(chatId, { id: t.id, kind: 'audio', mime: t.mime, name: t.title, size: 0, w: null, h: null, duration: t.duration ?? null, title: t.title }, replyToId);
+    onSent?.();
   };
   const pickFile = () => file.current?.click();
   const onFile = (e: Event) => {
@@ -115,7 +118,8 @@ export function MusicPicker({ chatId, open, onClose }: { chatId: number; open: b
     if (!f) return;
     if (!/^audio\//.test(f.type)) { showToast('Это не аудиофайл — выберите музыку'); return; }
     close();
-    void sendFiles(chatId, [f], '');
+    void sendFiles(chatId, [f], '', replyToId);
+    onSent?.();
   };
 
   const hitRow = (h: MediaHit): Row => {
