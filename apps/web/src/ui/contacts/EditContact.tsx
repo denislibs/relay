@@ -5,7 +5,7 @@ import { useEffect, useRef, useState } from 'preact/hooks';
 import { useGlobal } from '../../global';
 import { back, setLeaveGuard } from '../../nav';
 import { removeContact, showToast, updateContact } from '../../settingsData';
-import { toggleMuted } from '../Info';
+import { isMuted, toggleMute } from '../../mute';
 import { clip, contactDirty, contactPatch, contactValid, cpLen, formFromContact, NAME_MAX, NOTE_MAX, type ContactForm } from './contactsLogic';
 
 /** «Изменить» контакт: имя и фамилия (видны только вам), заметки, уведомления этого чата, «Удалить контакт». */
@@ -50,7 +50,7 @@ export function EditContactPanel({ userId, onDone }: { userId: number; onDone: (
 function EditForm({ contact, leave, onBack, navGuard }: { contact: Item; leave: () => void; onBack: () => void; navGuard?: boolean }) {
   const userId = contact.userId as number;
   const chat = useGlobal((s) => s.chats.find((c) => c.kind === 'direct' && c.peerId === userId));
-  const muted = useGlobal((s) => s.muted);
+  useGlobal((s) => s.muteTick);   // истёк срок — перерисовать
   const [form, setForm] = useState<ContactForm>(() => formFromContact(contact));
   const [ask, setAsk] = useState<((ok: boolean) => void) | null>(null);
   const [confirmRemove, setConfirmRemove] = useState(false);
@@ -104,7 +104,7 @@ function EditForm({ contact, leave, onBack, navGuard }: { contact: Item; leave: 
   const name = `${form.firstName} ${form.lastName}`.trim() || String(contact.name);
   const publicName = contact.publicName ? String(contact.publicName) : null;
   const chatId = chat?.id as number | undefined;
-  const on = chatId == null || !muted.includes(chatId);
+  const on = chatId == null || !isMuted(chat);
 
   return (
     <>
@@ -120,7 +120,7 @@ function EditForm({ contact, leave, onBack, navGuard }: { contact: Item; leave: 
         </Section>
         <Section>
           <CheckRow label="Уведомления" subtitle={on ? 'Включены' : 'Выключены'} checked={on} disabled={chatId == null}
-            onChange={() => { if (chatId != null) toggleMuted(chatId, muted); }} />
+            onChange={() => { if (chatId != null) toggleMute(chatId); }} />
         </Section>
         <Section>
           <InfoRow icon="trash" danger title="Удалить контакт" onClick={() => setConfirmRemove(true)} />

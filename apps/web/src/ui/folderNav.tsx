@@ -6,6 +6,7 @@ import { useEffect, useMemo, useState } from 'preact/hooks';
 import { seen } from '../data';
 import { ALL, folderBadge, folderChats, folderIcon, type FolderChat, type FolderCtx } from '../folders';
 import { getGlobal, setGlobal, useGlobal } from '../global';
+import { isMuted } from '../mute';
 import { go } from '../nav';
 import { setPref } from '../prefs';
 import { deleteFolder, showToast } from '../settingsData';
@@ -36,14 +37,13 @@ export function useFolderPlace(): 'none' | 'top' | 'left' {
 /** Контекст фильтра: контакты и заглушённые (на устройстве или умолчанием аккаунта для вида чата). */
 export function useFolderCtx(): FolderCtx {
   const contacts = useGlobal((s) => s.contacts);
-  const muted = useGlobal((s) => s.muted);
+  const tick = useGlobal((s) => s.muteTick);   // истёк срок — пересчитать
   const notify = useGlobal((s) => s.settings.notify);
   return useMemo(() => {
     const ids = new Set<number>();
     for (const c of contacts) if (typeof c.userId === 'number') ids.add(c.userId);
-    const m = new Set(muted);
-    return { contacts: ids, isMuted: (c: FolderChat) => m.has(c.id) || !!notify[c.kind]?.muted };
-  }, [contacts, muted, notify]);
+    return { contacts: ids, isMuted: (c: FolderChat) => isMuted(c) || !!notify[c.kind]?.muted };
+  }, [contacts, tick, notify]);
 }
 
 export interface FolderItem { id: number; label: string; count: number; muted: boolean; emoji?: string; icon?: string }

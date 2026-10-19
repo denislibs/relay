@@ -32,7 +32,7 @@ function start(me: Me): void {
   void claimMediaCache(me.userId);
   setGlobal({ me, boot: 'app' });
   startData(me);
-  startMuteTimers();   // «Отключить звук» на время: вышедшие сроки — включить, остальным — таймеры
+  startMuteTimers();   // «Отключить звук» на время: таймер до ближайшего срока — перерисовать, когда чат включится
   startSettingsData(me);
   installJoinLinks();
   void refreshMyMusic();   // мои треки в профиле — для кнопки в плеере

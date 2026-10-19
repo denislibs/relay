@@ -3,7 +3,7 @@
 import type { ChatFolder } from '@relay/protocol';
 
 /** Чат, как его видит фильтр (поля элемента подписки chatList). */
-export interface FolderChat { id: number; kind: 'direct' | 'group'; peerId: number | null; unread: number }
+export interface FolderChat { id: number; kind: 'direct' | 'group'; peerId: number | null; unread: number; muteUntil?: number | null }
 
 /** Что фильтр знает о мире: контакты (id людей) и заглушён ли чат на этом устройстве. */
 export interface FolderCtx { contacts: ReadonlySet<number>; isMuted(c: FolderChat): boolean }

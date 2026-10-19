@@ -13,14 +13,14 @@ import { blockUser, showToast, unblockUser, useUser } from '../settingsData';
 import { act, canManage } from '../groups';
 import { isSystemChat } from './format';
 import { startSelect } from '../forward';
-import { MUTE_PRESETS, muteChat, unmuteChat } from '../mute';
+import { isMuted, MUTE_PRESETS, muteChat, unmuteChat } from '../mute';
 import { closeChat } from '../data';
 
 type Ask = null | 'mute' | 'delete' | 'leave';
 
 export function ChatMenu({ chatId, title }: { chatId: number; title: string }) {
   const chat = useGlobal((s) => s.chats.find((c) => c.id === chatId));
-  const muted = useGlobal((s) => s.muted.includes(chatId));
+  const muted = useGlobal((s) => isMuted(s.chats.find((c) => c.id === chatId)));
   const system = isSystemChat(chat);
   const peerId = chat?.kind === 'direct' && !system ? (chat.peerId as number | null) : null;
   const user = useUser(peerId);

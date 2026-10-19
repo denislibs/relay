@@ -8,8 +8,8 @@ import type { Item } from '@relay/sync-engine/src/types';
 import { chatTone, isSystemChat } from './format';
 import type { ComponentChildren } from 'preact';
 import { useEffect, useRef, useState } from 'preact/hooks';
-import { syncMuted } from '../notify';
 import { activeFrame, setGlobal, useGlobal } from '../global';
+import { isChatMuted, toggleMute } from '../mute';
 
 import { birthdayText, lastSeenText, type Birthday } from './format';
 import { showToast, useUser } from '../settingsData';
@@ -25,22 +25,12 @@ import type { GroupInfo, MyMembership } from '@relay/protocol';
 const PAGES = ['info', 'edit', ...GROUP_PAGES];   // «Изменить контакт» и управление группой выезжают внутри панели справа налево
 const close = () => setGlobal({ infoOpen: false });
 
-// уведомления выключаются только на этом устройстве (как «Без звука» локально): список chatId в localStorage
-const MUTED_KEY = 'relay.muted';
-export function loadMuted(): number[] { try { return JSON.parse(localStorage.getItem(MUTED_KEY) ?? '[]'); } catch { return []; } }
-export function toggleMuted(chatId: number, muted: number[]): void {
-  const next = muted.includes(chatId) ? muted.filter((x) => x !== chatId) : [...muted, chatId];
-  try { localStorage.setItem(MUTED_KEY, JSON.stringify(next)); } catch { /* приватный режим */ }
-  setGlobal({ muted: next });
-  syncMuted();
-}
-
 /** Правая панель «Информация» о собеседнике или группе — как User Info в Telegram. */
 export function Info() {
   const chatId = useGlobal((s) => s.openChatId)!;
   const chat = useGlobal((s) => s.chats.find((c) => c.id === s.openChatId));
   const peer = useGlobal((s) => s.peer);
-  const muted = useGlobal((s) => s.muted);
+  const muted = useGlobal((s) => isChatMuted(chatId, s));
   const [page, setPage] = useState('info');
   const [params, setParams] = useState<Params>({});
   useEffect(() => setPage('info'), [chatId]);   // другой чат — снова профиль
@@ -158,10 +148,10 @@ export function Info() {
           <Expand show={!group && !!(user?.links as ProfileLink[] | undefined)?.length}>{!group && user ? <ProfileLinks links={(user.links as ProfileLink[] | undefined) ?? []} /> : null}</Expand>
           <InfoRow
             tile="red"
-            icon={muted.includes(chatId) ? 'bellOff' : 'bell'}
+            icon={muted ? 'bellOff' : 'bell'}
             title="Уведомления"
-            subtitle={muted.includes(chatId) ? 'Выключены на этом устройстве' : 'Включены'}
-            trailing={<Switch id="info-notify" label="Уведомления" checked={!muted.includes(chatId)} onChange={() => toggleMuted(chatId, muted)} />}
+            subtitle={muted ? 'Выключены' : 'Включены'}
+            trailing={<Switch id="info-notify" label="Уведомления" checked={!muted} onChange={() => toggleMute(chatId)} />}
           />
           <Expand show={!!contact?.note}>{contact?.note ? (
             <div class="rl-inforow rl-inforow-static">

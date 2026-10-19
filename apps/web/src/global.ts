@@ -56,7 +56,7 @@ export interface GlobalState {
   newChatOpen: boolean;
   sidebarView: string;   // путь страницы боковой панели, см. nav.ts
   infoOpen: boolean;   // правая панель «Информация»
-  muted: number[];     // чаты с выключенными уведомлениями (на этом устройстве)
+  muteTick: number;    // истёк срок «Отключить звук» какого-то чата (mute.ts): повод перерисовать
   theme: ThemePref;   // зеркало prefs.theme для прежних читателей
   prefs: Prefs;       // настройки устройства, см. prefs.ts
   updateReady: boolean;   // на сервере новая сборка — предлагаем обновиться (update.ts)
@@ -135,7 +135,7 @@ let state: GlobalState = {
   newChatOpen: false,
   sidebarView: 'chats',
   infoOpen: false,
-  muted: (() => { try { return JSON.parse(localStorage.getItem('relay.muted') ?? '[]'); } catch { return []; } })(),
+  muteTick: 0,
   theme: loadTheme(),
   prefs: getPrefs(),
   updateReady: false,

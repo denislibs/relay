@@ -18,7 +18,7 @@ import { ALL, inFolder, toggleChatInFolder } from '../folders';
 import { saveFolder, showToast } from '../settingsData';
 import { selectFolder, useFolderCtx, useFolderGuard, useFolderItems, useFolderMenu, useFolderPlace } from './folderNav';
 import { Button } from '@relay/ui';
-import { toggleMuted } from './Info';
+import { isMuted, toggleMute } from '../mute';
 import { seen } from '../data';
 import { getGlobal } from '../global';
 import type { ProfilePhoto } from '@relay/protocol';
@@ -134,7 +134,7 @@ export function Sidebar() {
   const search = useGlobal((s) => s.search);
   const openId = useGlobal((s) => s.pendingChatId ?? s.openChatId);
   const loaded = useGlobal((s) => s.chatsLoaded);
-  const mutedIds = useGlobal((s) => s.muted);
+  useGlobal((s) => s.muteTick);   // истёк срок «Отключить звук» — строки перерисовать
   // стадия в плейсхолдере поиска: короткие (до 400 мс) не показываем, показанную держим не меньше 800 мс
   const searchStatus = useGlobal((s) => s.syncLabel);
   // данных ещё нет: ждём снимок из кэша или первую загрузку с сервера
@@ -186,7 +186,7 @@ export function Sidebar() {
             onNearEnd={!status.chatsComplete ? loadMoreChats : undefined}
             rowHeight={ROW}
             getKey={(c: Item) => 'c' + c.id}
-            render={(c: Item) => <SideRow c={c} meId={me.userId} active={c.id === openId} showDraft={!!c.draft && c.id !== openId} muted={mutedIds.includes(c.id as number)} onMenu={onRowMenu} />}
+            render={(c: Item) => <SideRow c={c} meId={me.userId} active={c.id === openId} showDraft={!!c.draft && c.id !== openId} muted={isMuted(c)} onMenu={onRowMenu} />}
           />
           {!q && !status.chatsComplete ? (
             <MoreLoader />
@@ -259,7 +259,7 @@ export function Sidebar() {
 /** Действия с чатом по правой кнопке: только то, что умеет сервер (удаления/закрепления/архива пока нет). */
 function RowMenu({ at, onClose }: { at: { id: number; x: number; y: number } | null; onClose: () => void }) {
   const chat = useGlobal((s) => (at ? s.chats.find((c) => c.id === at.id) : undefined));
-  const muted = useGlobal((s) => (at ? s.muted.includes(at.id) : false));
+  const muted = isMuted(chat);
   const last = useRef(at);
   if (at) last.current = at;
   const p = at ?? last.current;
@@ -289,7 +289,7 @@ function RowMenu({ at, onClose }: { at: { id: number; x: number; y: number } | n
               items={[
                 { icon: 'newTab', label: 'Открыть в новой вкладке', onClick: () => { onClose(); window.open(location.pathname + '#chat=' + id, '_blank', 'noopener'); } },
                 ...(unread && lastId ? [{ icon: 'markRead', label: 'Отметить как прочитанное', onClick: () => { onClose(); seen(id, lastId); } }] : []),
-                { icon: muted ? 'bell' : 'bellOff', label: muted ? 'Включить уведомления' : 'Выключить уведомления', onClick: () => { onClose(); toggleMuted(id, getGlobal().muted); } },
+                { icon: muted ? 'bell' : 'bellOff', label: muted ? 'Включить уведомления' : 'Выключить уведомления', onClick: () => { onClose(); toggleMute(id); } },
                 ...folderItems,
                 { icon: 'info', label: 'Информация', onClick: () => { onClose(); openChat(id); setGlobal({ infoOpen: true }); } },
               ]}

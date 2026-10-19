@@ -9,7 +9,7 @@ export interface NotifyPref { muted: boolean; preview: boolean }
 export interface IncomingInput {
   state: NotifyState;               // разрешение и включённость на этом устройстве
   device: Prefs['notify'];          // настройки устройства: web, звук, громкость
-  chatMuted: boolean;               // чат выключен на этом устройстве (relay.muted)
+  chatMuted: boolean;               // уведомления чата выключены (muteUntil чата)
   pref: NotifyPref;                 // умолчания аккаунта для вида чата
   hasFocus: boolean;
 }

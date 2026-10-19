@@ -10,6 +10,7 @@ import { hideSpoilers, MAX_FILE_BYTES, type Entity } from '@relay/protocol';
 import { activeFrame, frameByKey, getGlobal, setGlobal, type ChatFrame, type FeedMeta, type Me, type Status, type UploadItem } from './global';
 import { bindChatDepth, popChats, pushChat } from './nav';
 import { notifyIncoming, startNotify } from './notify';
+import { bindMute, isMuted, migrateLocalMutes } from './mute';
 import { startPeople, wantPeople } from './people';
 import { isSystemChat } from './ui/format';
 import { asset } from './assets';
@@ -41,6 +42,8 @@ export function startData(me: Me): void {
   });
   engine.onReload(() => location.reload());
   startPeople(engine);
+  bindMute((chatId, muteUntil) => engine.call({ type: 'setMute', chatId, muteUntil }));
+  void engine.ready.then(() => migrateLocalMutes());   // прежние relay.muted / relay.mutedUntil — на сервер, один раз
   try { localStorage.removeItem('relay.names'); } catch { /* приватный режим */ }   // прежний кэш имён — теперь их держит движок
 
   const chats = new Mirror();
@@ -54,7 +57,7 @@ export function startData(me: Me): void {
       const last = c.last as { id: number | null; senderId: number; body: string; kind?: string; attachment?: { name: string } | null; createdAt: string; service?: { type: string } } | null;
       if (!last?.id || last.senderId === me.userId || last.id <= (before.get(c.id as number) ?? 0)) continue;
       if (c.id === getGlobal().openChatId && document.visibilityState === 'visible') continue;
-      notifyIncoming({ id: c.id as number, title: (c.title as string) || 'Чат №' + c.id, muted: getGlobal().muted.includes(c.id as number), system: isSystemChat(c) },
+      notifyIncoming({ id: c.id as number, title: (c.title as string) || 'Чат №' + c.id, muted: isMuted(c), system: isSystemChat(c) },
         { id: last.id, body: hideSpoilers(last.body, (last as { entities?: Entity[] }).entities), kind: last.kind, attachmentName: last.attachment?.name, createdAt: last.createdAt, service: last.service });
     }
     // сразу, не дожидаясь конца анимаций: список виртуальный (≈20 строк), а отложенный подъём чата

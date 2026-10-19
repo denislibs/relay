@@ -8,7 +8,7 @@ import { playNotifySound } from './sound';
  * (повтор заменяет прежнее, а не копится):
  *  • вкладка открыта, но окно не в фокусе — показывает сама, по патчу списка чатов;
  *  • вкладок нет — сервер шлёт Web Push (только тем, у кого нет живого соединения).
- * Выключенные чаты (relay.muted) уходят на сервер вместе с подпиской: они «на этом устройстве».
+ * Выключенные чаты сервер знает сам (muteUntil чата на аккаунте) и push по ним не шлёт.
  */
 export type NotifyState = 'unsupported' | 'default' | 'denied' | 'off' | 'on';
 
@@ -30,7 +30,7 @@ export function bgWanted(): boolean {
 
 const toBytes = (b64u: string) => Uint8Array.from(atob(b64u.replace(/-/g, '+').replace(/_/g, '/')), (c) => c.charCodeAt(0));
 
-/** Подписка Web Push этого браузера → сервер (вместе с заглушёнными чатами). Без сети — молча, повторим при следующем старте. */
+/** Подписка Web Push этого браузера → сервер. Без сети — молча, повторим при следующем старте. */
 async function syncSubscription(): Promise<void> {
   const reg = await navigator.serviceWorker.ready;
   let sub = await reg.pushManager.getSubscription();
@@ -38,8 +38,10 @@ async function syncSubscription(): Promise<void> {
     const { key } = await (await fetch('/push/key')).json() as { key: string };
     sub = await reg.pushManager.subscribe({ userVisibleOnly: true, applicationServerKey: toBytes(key) });
   }
-  // hideText — «Скрывать текст в уведомлениях» этого устройства: push придёт без имени и текста
-  const res = await fetch('/push/subscription', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ ...sub.toJSON(), muted: getGlobal().muted, hideText: getPrefs().screen.hideNotifyText }) });
+  // hideText — «Скрывать текст в уведомлениях» этого устройства: push придёт без имени и текста.
+  // muted: [] — прежний список «выключено на этом устройстве» обнуляем: без поля сервер оставил бы старый,
+  // и чат, включённый на другом устройстве, здесь молчал бы и дальше. Теперь выключение — у чата на аккаунте
+  const res = await fetch('/push/subscription', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ ...sub.toJSON(), muted: [], hideText: getPrefs().screen.hideNotifyText }) });
   setGlobal({ pushReady: res.ok });
 }
 
@@ -64,7 +66,7 @@ export function startNotify(openChat: (id: number) => void): void {
   subscribePrefs((p) => {
     const n = notifyState(); if (n !== getGlobal().notify) setGlobal({ notify: n });   // «web» сменили в другой вкладке
     // «Скрывать текст» — свойство подписки на сервере: сменили — обновляем её
-    if (p.screen.hideNotifyText !== hideText) { hideText = p.screen.hideNotifyText; syncMuted(); }
+    if (p.screen.hideNotifyText !== hideText) { hideText = p.screen.hideNotifyText; resyncSubscription(); }
   });
   setGlobal({ notify: notifyState() });
   // подписка — каждый старт: сервер хранит её только за живым сеансом (106_push_session_required), так она привязывается к текущему.
@@ -103,8 +105,8 @@ export async function setBackground(on: boolean): Promise<void> {
   } catch (e) { console.warn('push:', String(e)); setGlobal({ pushReady: false }); }
 }
 
-/** Список заглушённых изменился — сервер должен знать, кому не слать push. */
-export function syncMuted(): void {
+/** Свойства подписки изменились (hideText) — отправить её заново. */
+function resyncSubscription(): void {
   if (getGlobal().notify === 'on' && bgWanted()) quietly(syncSubscription());
 }
 
