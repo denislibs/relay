@@ -1,6 +1,7 @@
 import type { BlockedUser, PublicUser, Update } from '@relay/protocol';
 import type { Ops, PendingOp } from './ops';
 import { getAll } from './idb';
+import { displayName } from './names';
 import type { Store } from './store';
 import { Table } from './rows';
 import type { Action, Item } from './types';
@@ -132,12 +133,8 @@ export class Blocks {
 
   view(): BlockView[] { return blocksView(this.cache.table.rows, this.h.ops.list, this.h.store.profile.users.rows); }
 
-  /** Имя, пока сервер не ответил и профиля в кэше нет: название личного чата с человеком. */
-  private chatName(id: number): string {
-    const store = this.h.store;
-    for (const c of store.chats.values()) if (c.kind === 'direct' && c.peerId === id) return store.titleOf(c) ?? '';
-    return '';
-  }
+  /** Имя, пока сервер не ответил и профиля в кэше нет: как зритель видит человека (контакт с учётом очереди). */
+  private chatName(id: number): string { return displayName(this.h.store, id); }
 
   items(): Item[] {
     const users = this.h.store.profile.users.rows;

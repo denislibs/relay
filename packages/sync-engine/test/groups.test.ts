@@ -21,7 +21,7 @@ test('group updates: info and title, my membership, members revision — and the
   await s.flush();
   const again = await Store.open(await openDb(name), ME);
   const chat = again.chats.get(9)!;
-  expect(chat.title).toBe('Дача 2');
+  expect(chat.group?.title).toBe('Дача 2');   // название группы — из group, своей копии у чата нет
   expect(chat.group).toMatchObject({ about: 'шашлыки', slowMode: 30 });
   expect(chat.me).toMatchObject({ role: 'admin', rank: 'Повар' });
   expect(chat.membersRev).toBe(2);

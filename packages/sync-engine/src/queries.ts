@@ -1,3 +1,4 @@
+import { chatTitle, personView } from './names';
 import type { Store } from './store';
 import { toQuote, type Item, type LocalChat, type LocalMessage, type Patch, type Query, type QuoteMsg } from './types';
 
@@ -17,16 +18,23 @@ function result(list: Item[]): Result {
 /** Место в списке — по более позднему из последнего сообщения и черновика (как в Telegram). */
 const sortAt = (c: LocalChat): string => (c.draft && c.draft.at > c.lastAt ? c.draft.at : c.lastAt);
 
-const chatItem = (c: LocalChat, title: string | null): Item => ({
+/** Строка списка: название и фото личного чата — из people (personView), группы — из chat.group. */
+const chatItem = (store: Store, c: LocalChat): Item => {
+  const person = !c.group && c.peerId != null ? personView(store, c.peerId) : null;
+  // профиля собеседника нет (чат узнали из сообщения, строку people вытеснили) — движок его спросит
+  if (person && c.peerId != null && !store.users.get(c.peerId)) store.wantUser(c.peerId);
+  const title = chatTitle(store, c);
+  return {
   key: 'c' + c.id, id: c.id, kind: c.kind, title, peerId: c.peerId,
   // собеседник личного чата; system — служебный чат «Relay» (только чтение)
   peer: c.peerId != null ? { id: c.peerId, name: title, ...(c.system ? { system: true } : null) } : null, unread: c.unread, lastReadId: c.lastReadId, lastAt: c.lastAt,
-  photo: c.photo ?? c.group?.photo ?? null, group: c.group ?? null, me: c.me ?? null, membersRev: c.membersRev ?? 0, sortAt: sortAt(c), draft: c.draft?.text ?? null, draftEntities: c.draft?.entities ?? null, pinned: c.pinned ?? [],
+  photo: person ? person.photo : c.group?.photo ?? null, group: c.group ?? null, me: c.me ?? null, membersRev: c.membersRev ?? 0, sortAt: sortAt(c), draft: c.draft?.text ?? null, draftEntities: c.draft?.entities ?? null, pinned: c.pinned ?? [],
   last: c.last ? { key: c.last.key, id: c.last.id, senderId: c.last.senderId, body: c.last.body, status: c.last.status, createdAt: c.last.createdAt, deleted: !!c.last.deleted, kind: c.last.kind ?? 'text', attachmentName: c.last.attachment?.name ?? null, attachmentTitle: c.last.attachment?.title ?? null, attachmentPerformer: c.last.attachment?.performer ?? null,
     // для превью в списке: спойлеры прячем, миниатюра 20 px — из встроенного thumb, без загрузки файла
     entities: c.last.entities ?? null, thumb: c.last.attachment?.thumb ?? null, mime: c.last.attachment?.mime ?? null,
     ...(c.last.service ? { service: c.last.service } : null) } : null,
-});
+  };
+};
 // элемент сообщения переиспользуется, пока сообщение не изменилось: дешёвая подпись вместо JSON.stringify
 // цитата — короткая копия исходного сообщения, если оно есть в кэше (видна, даже когда оригинал вне окна)
 type Quote = QuoteMsg | null;
@@ -63,7 +71,7 @@ export function computeQuery(store: Store, q: Query): Result {
   switch (q.kind) {
     case 'chatList': {
       const chats = [...store.chats.values()].sort((a, b) => { const x = sortAt(a), y = sortAt(b); return x < y ? 1 : x > y ? -1 : b.id - a.id; });
-      return result(chats.slice(0, q.limit).map((c) => ({ ...chatItem(c, store.titleOf(c)), typing: store.typing.has(c.id) })));
+      return result(chats.slice(0, q.limit).map((c) => ({ ...chatItem(store, c), typing: store.typing.has(c.id) })));
     }
     case 'messages': {
       // только окно: бинарный поиск по отсортированному кэшу, подписи — без сериализации

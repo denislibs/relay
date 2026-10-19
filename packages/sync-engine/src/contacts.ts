@@ -4,7 +4,7 @@ import { getAll } from './idb';
 import type { Store } from './store';
 import { Table } from './rows';
 import { cleanName, cleanText } from './text';
-import type { Action, Item, LocalChat } from './types';
+import type { Action, Item } from './types';
 
 /** Ключ операций контакта в очереди ops: добавление, правка и удаление одного человека схлопываются друг с другом. */
 export const OP_CONTACT = 'contact:';
@@ -37,7 +37,7 @@ export class ContactsCache {
   /** растёт при каждом изменении базы (мемо вида) */
   version = 0;
   /** у кого контакт появился/пропал/переименован с последнего прохода: id → запись до изменения */
-  private retitles = new Map<number, ContactBase | undefined>();
+  private changedIds = new Map<number, ContactBase | undefined>();
   /** seq удаления (только в памяти): запоздавшая запись о контакте не воскрешает удалённого */
   private gone = new Map<number, number>();
   private floor = 0;
@@ -53,7 +53,7 @@ export class ContactsCache {
 
   private seqOf(id: number): number { return Math.max(this.table.get(id)?.seq ?? this.gone.get(id) ?? 0, this.floor); }
   private touch(): void { this.dirty = true; this.version++; }
-  private before(id: number, prev: ContactBase | undefined): void { if (!this.retitles.has(id)) this.retitles.set(id, prev); }
+  private before(id: number, prev: ContactBase | undefined): void { if (!this.changedIds.has(id)) this.changedIds.set(id, prev); }
 
   /** Контакт добавлен/изменён. seq — номер записи журнала (или ответа); не новее известного — не трогаем. */
   applyContact(c: Contact, seq = c.seq): boolean {
@@ -99,10 +99,10 @@ export class ContactsCache {
     if (changed) this.touch();
   }
 
-  /** Чьи контакты изменились в базе (и какими были до того) — забрать для переименования чатов. */
-  takeRetitles(): Map<number, ContactBase | undefined> {
-    const r = this.retitles;
-    this.retitles = new Map();
+  /** Чьи контакты изменились в базе (и какими были до того) — забрать для починки кэша профиля. */
+  takeChanged(): Map<number, ContactBase | undefined> {
+    const r = this.changedIds;
+    this.changedIds = new Map();
     return r;
   }
 
@@ -118,7 +118,7 @@ export class ContactsCache {
   reset(): void {
     this.table.clear();
     this.gone.clear();
-    this.retitles.clear();
+    this.changedIds.clear();
     this.floor = 0;
     this.loaded = false;
     this.persist = true;
@@ -170,25 +170,13 @@ export function contactItems(view: Map<number, ContactView>, users: ReadonlyMap<
   return out;
 }
 
-/** contactsChanged из журнала: база контактов и профиль в кэше (названия чатов — Contacts.retitle на проходе подписок). */
+/** contactsChanged из журнала: база контактов и профиль в кэше (кэш профиля чинит Contacts.repair на проходе подписок). */
 export function applyContactsChanged(store: Store, u: Extract<Update, { type: 'contactsChanged' }>, seq?: number): void {
   if (u.contact) {
     if (store.contacts.applyContact(u.contact, seq)) store.profile.applyUser(u.contact.user);
   } else if (u.removed) {
     if (store.contacts.applyRemoved(u.removed, seq) && u.user) store.profile.applyUser(u.user);
   }
-}
-
-/** Как на сервере в listChats: у личного чата нет своего названия — имя собеседника (у владельца — контактное). */
-function retitleChats(store: Store, chats: LocalChat[] | undefined, title: string): void {
-  for (const c of chats ?? []) if (c.title !== title) { c.title = title; store.markChat(c); }
-}
-
-/** Личные чаты по собеседнику. */
-function directByPeer(store: Store): Map<number, LocalChat[]> {
-  const by = new Map<number, LocalChat[]>();
-  for (const c of store.chats.values()) if (c.kind === 'direct' && c.peerId) { const l = by.get(c.peerId); if (l) l.push(c); else by.set(c.peerId, [c]); }
-  return by;
 }
 
 /** Что движок даёт контактам. */
@@ -214,11 +202,9 @@ export type ContactAction = Extract<Action, { type: 'addContact' | 'updateContac
 export const isContactAction = (a: Action): a is ContactAction =>
   a.type === 'addContact' || a.type === 'updateContact' || a.type === 'removeContact' || a.type === 'resolveUser';
 
-/** Контакты в движке: вид (база + очередь), названия личных чатов, операции, снимок с сервера. */
+/** Контакты в движке: вид (база + очередь), операции, снимок с сервера. */
 export class Contacts {
   private memo: { version: number; ops: readonly PendingOp[]; view: Map<number, ContactView> } | null = null;
-  private shown = new Map<number, string>();
-  private shownKey: { version: number; ops: readonly PendingOp[] } | null = null;
 
   constructor(private h: ContactsHost) {}
 
@@ -247,20 +233,15 @@ export class Contacts {
   }
 
   /**
-   * Перед проходом подписок: (1) база изменилась (снимок, журнал, ответ — в любом порядке) — переписать chat.title,
-   * как его отдал бы сервер; (2) показанное имя изменилось (в том числе из-за очереди или отказа) — строки чатов пересчитать.
-   * Ни база, ни очередь не менялись — ничего не делаем.
+   * Перед проходом подписок: контакт пропал из базы (снимок, журнал, ответ — в любом порядке) — в кэше профиля
+   * могла остаться запись с контактным именем: исправить сразу и перезапросить с сервера. Названия чатов
+   * не переписываем — их считает names.ts, а строки списка пересчитывает PeerSigs.
    */
-  retitle(): void {
+  repair(): void {
     const store = this.h.store;
-    const base = this.cache.takeRetitles();
-    const by = base.size ? directByPeer(store) : null;
-    for (const [id, was] of base) {
-      const now = this.cache.table.get(id);
-      if (now) { retitleChats(store, by!.get(id), contactName(now) || now.user.name); continue; }
+    for (const [id, was] of this.cache.takeChanged()) {
+      if (this.cache.table.get(id)) continue;
       const pub = this.publicName(id, was);
-      if (pub) retitleChats(store, by!.get(id), pub);
-      // в кэше профиля могла остаться запись с контактным именем: исправить сразу и перезапросить с сервера
       const u = store.profile.users.get(id);
       if (u && pub && u.name !== pub) {
         const sp = pub.indexOf(' ');
@@ -268,17 +249,6 @@ export class Contacts {
       }
       this.h.refreshUser(id);
     }
-    const key = this.shownKey, version = this.cache.version, ops = this.h.ops.list;
-    if (key && key.version === version && key.ops === ops) return;
-    this.shownKey = { version, ops };
-    const now = new Map<number, string>();
-    for (const [id, v] of this.view()) now.set(id, contactName(v));
-    const changed = new Set<number>();
-    for (const [id, n] of now) if (this.shown.get(id) !== n) changed.add(id);
-    for (const id of this.shown.keys()) if (!now.has(id)) changed.add(id);
-    this.shown = now;
-    if (!changed.size) return;
-    for (const c of store.chats.values()) if (c.kind === 'direct' && c.peerId && changed.has(c.peerId)) store.retouch(c.id);
   }
 
   /** Контакт с сервера (снимок или ответ): профиль — в кэш, присутствие — если живого ещё нет. */
@@ -293,7 +263,7 @@ export class Contacts {
       const r = await this.h.http<{ contacts: Contact[]; seq: number }>('/contacts');
       this.cache.applySnapshot(r.contacts, r.seq);
       for (const c of r.contacts) if (this.cache.table.get(c.userId)) this.take(c);
-      this.retitle();
+      this.repair();
       await this.h.store.flush();
       this.h.changed();
     });
@@ -310,7 +280,7 @@ export class Contacts {
       } else if (v.userId === cid && this.cache.applyContact(v)) {
         this.take(v);
       }
-      this.retitle();
+      this.repair();
       this.h.run(() => this.h.store.flush());
     }
     return true;

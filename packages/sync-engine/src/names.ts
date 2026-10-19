@@ -1,6 +1,7 @@
 import type { ProfilePhoto } from '@relay/protocol';
 import { contactName } from './contacts';
 import type { Store } from './store';
+import type { LocalChat } from './types';
 
 /** Контакт зрителя с учётом ещё не подтверждённых операций (движок подставляет вид с очередью). */
 function contactOf(store: Store, userId: number): { name: string; v: number; pending: boolean } | null {
@@ -22,4 +23,29 @@ export function personView(store: Store, userId: number): { name: string; photo:
   const u = store.users.get(userId), c = contactOf(store, userId);
   const pend = c?.pending ? 'p' + c.name : '';
   return { name: displayName(store, userId), photo: u?.photo ?? null, sig: `${u?.v ?? 0}:${c?.v ?? 0}:${pend}` };
+}
+
+/** Название чата: группа — из group, личный — как зритель видит собеседника (null — ещё не знаем). */
+export function chatTitle(store: Store, c: LocalChat): string | null {
+  if (c.group) return c.group.title;
+  return c.peerId != null ? displayName(store, c.peerId) || null : null;
+}
+
+/**
+ * Строки личных чатов, чей собеседник выглядит иначе (профиль, контакт, операция в очереди или её отказ), —
+ * пересчитать на проходе подписок: сам чат не менялся и в IndexedDB не пишется.
+ */
+export class PeerSigs {
+  private shown = new Map<number, string>();
+
+  retouch(store: Store): void {
+    if (this.shown.size > store.chats.size * 2) this.shown.clear();   // удалённые чаты не копятся
+    for (const c of store.chats.values()) {
+      if (c.group || c.peerId == null) continue;
+      const sig = c.peerId + ':' + personView(store, c.peerId).sig;
+      if (this.shown.get(c.id) === sig) continue;
+      this.shown.set(c.id, sig);
+      store.retouch(c.id);
+    }
+  }
 }

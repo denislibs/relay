@@ -50,6 +50,21 @@ test('offline add is visible at once (contacts + chat title), survives a restart
   expect(lb.find((x: { id: number }) => x.id === chatId).peer.name).toBe('Анна');
 });
 
+test('offline rename of a contact shows in the chat list title at once; the chats row keeps no title', async () => {
+  const a = await srv.login('Анна'), b = await srv.login('Борис');
+  const chatId = await srv.chat(a.token, [a.userId, b.userId]);
+  await api(a.token, 'POST', '/contacts', { userId: b.userId, firstName: 'Боря' });
+  const ea = await open(srv.config(a));
+  ea.connect();
+  await ea.whenIdle();
+  const list = watchInto(ea, { kind: 'chatList', limit: 50 });
+  await list.until((l) => titleOf(chatId)(l) === 'Боря');
+  ea.disconnect();
+  await ea.call({ type: 'updateContact', userId: b.userId, firstName: 'Борис', lastName: 'Иванович' });
+  await list.until((l) => titleOf(chatId)(l) === 'Борис Иванович');   // операция в очереди, сервер её ещё не видел
+  expect(ea.store.chats.get(chatId)).not.toHaveProperty('title');
+});
+
 test('remove restores the public name at once; edit while the add is queued merges into the add', async () => {
   const a = await srv.login('Анна'), b = await srv.login('Борис');
   const chatId = await srv.chat(a.token, [a.userId, b.userId]);
@@ -150,7 +165,8 @@ test('race: a snapshot without the contact lands before the older journal remova
   ea.store.applyUpdate({ type: 'contactsChanged', removed: b.userId, user }, 999);
   watchInto(ea, { kind: 'counters' });   // проход подписок
   await list.until((l) => titleOf(chatId)(l) === 'Борис');
-  expect(ea.store.chats.get(chatId)!.title).toBe('Борис');   // и в базе (IDB) — не только на экране
+  expect(ea.store.chats.get(chatId)).not.toHaveProperty('title');   // название не копируется в строку чата
+  expect(ea.store.users.get(b.userId)?.name).toBe('Борис');   // кэш профиля без контактного имени
 });
 
 test('remote removal while closed: reopen shows the public name; cached profile loses the contact name', async () => {

@@ -63,8 +63,8 @@ export class Store {
   settings!: SettingsCache;
   /** чёрный список (blocks.ts) */
   blocks!: BlocksCache;
-  /** название чата для списка; движок подставляет контактное имя с учётом очереди операций */
-  titleOf: (c: LocalChat) => string | null = (c) => c.title;
+  /** строке списка нужен профиль собеседника, которого нет в people; движок спросит GET /users/:id */
+  wantUser: (userId: number) => void = () => {};
   /** контакт зрителя с учётом очереди операций (names.ts); движок подставляет вид с очередью */
   contactOf: (userId: number) => { firstName: string; lastName: string; pending?: boolean } | undefined = (id) => this.contacts.table.get(id);
 
@@ -104,8 +104,9 @@ export class Store {
     return s;
   }
 
-  /** чаты, известные только по сообщениям: им нужно название со снимка */
-  unnamed(): number[] { return [...this.chats.values()].filter((c) => !c.named).map((c) => c.id); }
+  /** Чат известен только по сообщениям: ни собеседника, ни группы — нужен снимок чата с сервера. */
+  static unnamed(c: LocalChat): boolean { return c.kind === 'direct' && c.peerId == null && !c.group; }
+  unnamed(): number[] { return [...this.chats.values()].filter(Store.unnamed).map((c) => c.id); }
 
   // ---------- чтение ----------
 
@@ -198,7 +199,7 @@ export class Store {
       case 'blocksChanged': return applyBlocksChanged(this, u, seq);
       case 'sessionsChanged': this.sessionsRev++; return;
       case 'pins': { const chat = this.chats.get(u.chatId); if (chat) { chat.pinned = u.ids; this.markChat(chat); } return; }
-      case 'groupUpdated': { const chat = this.chats.get(u.chatId); if (chat) { chat.group = u.group; chat.title = u.group.title; this.markChat(chat); } return; }
+      case 'groupUpdated': { const chat = this.chats.get(u.chatId); if (chat) { chat.group = u.group; this.markChat(chat); } return; }
       case 'membership': { const chat = this.chats.get(u.chatId); if (chat) { chat.me = u.me; this.markChat(chat); } return; }
       case 'membersChanged': { const chat = this.chats.get(u.chatId); if (chat) { chat.membersRev = (chat.membersRev ?? 0) + 1; this.markChat(chat); } return; }
       case 'chatRemoved': return this.removeChat(u.chatId);
@@ -228,14 +229,13 @@ export class Store {
     for (const s of list) {
       const chat = this.ensureChat(s.id);
       chat.kind = s.kind;
-      chat.title = s.title ?? s.peer?.name ?? null;
+      // личный чат хранит только peerId: имя и фото собеседника — в people
       chat.peerId = s.peer?.id ?? null;
-      if (s.peer) chat.photo = s.peer.photo ?? null;
+      if (s.peer) this.profile.applyPeer(s.peer);
       if (s.peer?.system) chat.system = true; else delete chat.system;
       if (s.draft && (!chat.draft || s.draft.at > chat.draft.at) && !this.pendingDrafts.has(s.id)) chat.draft = s.draft;
       if (s.pinned) chat.pinned = s.pinned;
       if (s.group) { chat.group = s.group; chat.me = s.me; }
-      chat.named = true;
       if (s.peerReadUpTo && s.peerReadUpTo > chat.peerReadUpTo) this.applyPeerRead(s.id, s.peerReadUpTo);
       chat.lastReadId = Math.max(chat.lastReadId, s.lastReadId);
       chat.unread = s.unread;
@@ -572,7 +572,7 @@ export class Store {
   private ensureChat(id: number): LocalChat {
     let c = this.chats.get(id);
     if (!c) {
-      c = { id, kind: 'direct', title: null, lastReadId: 0, unread: 0, knownMaxId: 0, peerReadUpTo: 0, historyComplete: false, peerId: null, named: false, last: null, lastAt: new Date(0).toISOString() };
+      c = { id, kind: 'direct', lastReadId: 0, unread: 0, knownMaxId: 0, peerReadUpTo: 0, historyComplete: false, peerId: null, last: null, lastAt: new Date(0).toISOString() };
       this.chats.set(id, c);
       this.markChat(c);
     }

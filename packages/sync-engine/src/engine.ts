@@ -15,7 +15,7 @@ import { OP_SESSIONS_TTL, Sessions } from './sessions';
 import { SessionEnd } from './session';
 import { DevTools, loadSim, type SimState, type SubStat } from './devlog';
 import { simFlags, watchLoss } from './devsim';
-import { displayName } from './names';
+import { chatTitle, displayName, PeerSigs } from './names';
 import type { Action, EngineConfig, LocalAttachment, LocalMessage, OutboxEntry, Patch, Query, SearchResult } from './types';
 
 export interface WatchHandle { update(q: Query): void; close(): void }
@@ -97,6 +97,8 @@ export class Engine {
   private readonly session: SessionEnd;
   /** чужие профили, которых нет в кэше: подгрузим, когда будет связь; asked — уже спрашивали за это подключение */
   private userWants = new Set<number>();
+  /** подписи собеседников личных чатов, уже показанные в списке (names.ts) */
+  private peerSigs = new PeerSigs();
   private usersAsked = new Set<number>();
   /** раздел «Для разработчиков»: журнал, снимок состояния, имитатор сети (devlog.ts) */
   readonly dev: DevTools;
@@ -170,7 +172,7 @@ export class Engine {
       },
     });
     store.contactOf = (id) => this.contacts.view().get(id);
-    store.titleOf = (c) => (c.kind === 'direct' && c.peerId ? displayName(store, c.peerId) || c.title : c.title);
+    store.wantUser = (id) => this.userWants.add(id);
     this.transport = new WsTransport(cfg.wsUrl, {
       onOpen: () => this.onOpen(),
       onFrame: (f) => this.onFrame(f),
@@ -549,7 +551,7 @@ export class Engine {
         if (a.beforeId) qs.set('beforeId', String(a.beforeId));
         const res = await this.http<{ hits: { message: Message; chatTitle: string | null }[]; hasMore: boolean }>(`/search?${qs}`);
         return {
-          hits: res.hits.map(({ message: m, chatTitle }) => ({ chatId: m.chatId, chatTitle: chatTitle ?? this.store.chats.get(m.chatId)?.title ?? null, id: m.id, sort: m.id, senderId: m.senderId, body: m.body, createdAt: m.createdAt, kind: m.kind, attachment: m.attachment ?? null, entities: m.entities ?? null, ...(m.service ? { service: m.service } : {}) })),
+          hits: res.hits.map(({ message: m, chatTitle }) => ({ chatId: m.chatId, chatTitle: this.titleOfChat(m.chatId) ?? chatTitle ?? null, id: m.id, sort: m.id, senderId: m.senderId, body: m.body, createdAt: m.createdAt, kind: m.kind, attachment: m.attachment ?? null, entities: m.entities ?? null, ...(m.service ? { service: m.service } : {}) })),
           hasMore: res.hasMore, source: 'server',
         };
       } catch { /* сеть пропала посреди запроса — ищем локально */ }
@@ -560,7 +562,7 @@ export class Engine {
       .filter((m) => m.id != null && !m.deleted && (!a.beforeId || m.id < a.beforeId) && (m.body.toLowerCase().includes(needle) || attachmentHas(m.attachment, needle)))
       .sort((x, y) => y.sort - x.sort);
     return {
-      hits: found.slice(0, limit).map((m) => ({ chatId: m.chatId, chatTitle: this.store.chats.get(m.chatId)?.title ?? null, id: m.id!, sort: m.sort, senderId: m.senderId, body: m.body, createdAt: m.createdAt, kind: m.kind, attachment: (m.attachment as never) ?? null, entities: m.entities ?? null, ...(m.service ? { service: m.service } : {}) })),
+      hits: found.slice(0, limit).map((m) => ({ chatId: m.chatId, chatTitle: this.titleOfChat(m.chatId), id: m.id!, sort: m.sort, senderId: m.senderId, body: m.body, createdAt: m.createdAt, kind: m.kind, attachment: (m.attachment as never) ?? null, entities: m.entities ?? null, ...(m.service ? { service: m.service } : {}) })),
       hasMore: found.length > limit, source: 'local',
     };
   }
@@ -593,8 +595,16 @@ export class Engine {
     }
   }
 
+  /** Название чата для поиска: известный чат — как в списке (личный — displayName), иначе — что сказал сервер. */
+  private titleOfChat(chatId: number): string | null {
+    const c = this.store.chats.get(chatId);
+    return c ? chatTitle(this.store, c) : null;
+  }
+
   private emit(): void {
-    this.contacts.retitle();
+    this.contacts.repair();
+    // собеседник выглядит иначе (профиль, контакт, очередь) — строки его личных чатов пересчитать
+    if (this.store.profile.dirty || this.store.contacts.dirty || this.ops.dirty) this.peerSigs.retouch(this.store);
     const hold = this.holding && this.acting === 0;
     const touched = new Set(this.store.touched);
     if (!hold) this.store.touched.clear(); // при удержании изменения копятся до конца догонки
@@ -637,13 +647,12 @@ export class Engine {
 
   /** Свой профиль для интерфейса: база + очередь. */
   private meNow(): Me | null { return meView(this.store.profile.me, this.ops.list); }
-  /** Имя автора для «Переслано от» до ответа сервера: я, известный профиль, собеседник личного чата. */
-  private nameOf(userId: number, chatId: number): string {
+  /** Имя автора для «Переслано от» до ответа сервера: я, известный профиль, как зритель видит человека. */
+  private nameOf(userId: number): string {
     if (userId === this.cfg.userId) return this.meNow()?.name ?? '';
     const u = this.store.profile.users.get(userId);
     if (u?.name) return u.name;
-    const c = this.store.chats.get(chatId);
-    return c?.kind === 'direct' && c.peerId === userId ? c.title ?? '' : '';
+    return displayName(this.store, userId);
   }
 
   /** Операция подтверждена: ответ профиля — новая база (журнал принесёт то же самое ещё раз — не страшно). */
@@ -898,7 +907,7 @@ export class Engine {
           const groups = new Map<string, string>();
           for (const m of srcs) {
             const dropCaption = !!a.hideCaption && !!m.attachment;
-            const fwdFrom = a.hideSender ? null : m.fwdFrom ?? { userId: m.senderId, name: this.nameOf(m.senderId, a.fromChatId), chatId: a.fromChatId, messageId: m.id!, at: m.createdAt };
+            const fwdFrom = a.hideSender ? null : m.fwdFrom ?? { userId: m.senderId, name: this.nameOf(m.senderId), chatId: a.fromChatId, messageId: m.id!, at: m.createdAt };
             let groupId: string | null = null;
             if (m.groupId && m.attachment) { groupId = groups.get(m.groupId) ?? crypto.randomUUID(); groups.set(m.groupId, groupId); }
             queue({ chatId, body: dropCaption ? '' : m.body, entities: dropCaption ? [] : m.entities ?? [], replyToId: takeReply(), attachment: m.attachment ?? null,
@@ -1228,7 +1237,8 @@ export class Engine {
    * только непрерывный диапазон до курсора страниц, а чат старше курсора.
    */
   private ensureOpenChat(chatId: number): Promise<void> {
-    if (this.store.chats.get(chatId)?.named || !this.store.hydrated || !this.online) return Promise.resolve();
+    const c = this.store.chats.get(chatId);
+    if ((c && !Store.unnamed(c)) || !this.store.hydrated || !this.online) return Promise.resolve();
     let p = this.chatLoads.get(chatId);
     if (!p) {
       p = (async () => {
@@ -1247,7 +1257,9 @@ export class Engine {
   private loadOpenChats(): void {
     for (const w of this.watchers.values()) {
       const q = w.q;
-      if (q.kind !== 'messages' || this.store.chats.get(q.chatId)?.named) continue;
+      if (q.kind !== 'messages') continue;
+      const c = this.store.chats.get(q.chatId);
+      if (c && !Store.unnamed(c)) continue;
       this.run(() => this.ensureOpenChat(q.chatId).then(() => this.ensureWindow(q)));
     }
   }

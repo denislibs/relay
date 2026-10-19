@@ -1,5 +1,5 @@
 import type { GroupInfo, MyMembership } from '@relay/protocol';
-import type { Birthday, Block, ChatFolder, Entity, ForwardInfo, ForwardRef, LinkPreview, PrivacyKey, PrivacyMode, ProfileLink, ProfilePhoto, ServiceType, Todo, TodoInput, TodoServiceData, VideoVariant } from '@relay/protocol';
+import type { Birthday, Block, ChatFolder, Entity, ForwardInfo, ForwardRef, LinkPreview, PrivacyKey, PrivacyMode, ProfileLink, ServiceType, Todo, TodoInput, TodoServiceData, VideoVariant } from '@relay/protocol';
 
 export type Status = 'pending' | 'sent' | 'read' | 'failed';
 
@@ -43,21 +43,18 @@ export interface LocalAttachment {
 export interface LocalChat {
   id: number;
   kind: 'direct' | 'group';
-  title: string | null;
   lastReadId: number;
   unread: number;
   knownMaxId: number;     // максимальный id сообщения, который уже учтён в unread
   peerReadUpTo: number;   // до какого id собеседники прочитали мои сообщения
   historyComplete: boolean;
-  peerId: number | null;  // собеседник личного чата
+  peerId: number | null;  // собеседник личного чата: имя и фото — из people (names.ts), копий в чате нет
   system?: true;          // собеседник — системный пользователь «Relay» (служебный чат)
-  named: boolean;         // название пришло со снимка (иначе чат узнали из сообщения)
   last: LocalMessage | null;
   lastAt: string;
   draft?: { text: string; at: string; entities?: Entity[] } | null;   // неотправленный текст композера (общий для вкладок)
   pinned?: number[];      // закреплённые сообщения (новые сверху)
-  photo?: ProfilePhoto | null;   // фото собеседника личного чата (из снимка списка и userUpdated)
-  group?: GroupInfo;      // группа: информация и настройки
+  group?: GroupInfo;      // группа: информация и настройки (название и фото — отсюда)
   me?: MyMembership;      // группа: моя роль и права
   membersRev?: number;    // растёт, когда состав/роли меняются — интерфейс перечитывает участников
 }

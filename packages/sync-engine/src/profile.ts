@@ -1,4 +1,4 @@
-import type { Birthday, Me, ProfileLink, PublicUser } from '@relay/protocol';
+import type { Birthday, Me, ProfileLink, ProfilePhoto, PublicUser } from '@relay/protocol';
 import { getAll } from './idb';
 import { cleanName, cleanText } from './text';
 import type { PendingOp } from './ops';
@@ -70,6 +70,21 @@ export class ProfileCache {
     if (this.users.put(u.id, u, seq ?? prev?.seq ?? 0)) this.dirty = true;
   }
 
+  /**
+   * Собеседник из снимка списка чатов (id, имя, фото) — поверх известного профиля. У снимка нет seq по человеку:
+   * пишем с seq 0, так что профиль из журнала (seq > 0) снимок не перетирает.
+   */
+  applyPeer(p: { id: number; name: string; system?: true; photo?: ProfilePhoto | null }): void {
+    if (p.id === this.userId) return;
+    const prev = this.users.get(p.id);
+    let base: PublicUser;
+    if (prev) { const { seq: _s, v: _v, ...rest } = prev; base = rest; }
+    else { const sp = p.name.indexOf(' '); base = { id: p.id, name: p.name, firstName: sp < 0 ? p.name : p.name.slice(0, sp), lastName: sp < 0 ? '' : p.name.slice(sp + 1), username: null, bio: null, birthday: null, phone: null, links: [] }; }
+    const next: PublicUser = { ...base, name: p.name, photo: p.photo ?? null };
+    if (p.system) next.system = true;
+    if (this.users.put(p.id, next, 0)) this.dirty = true;
+  }
+
   /** Что дописать в транзакцию flush. */
   collect(): { me: { k: string; v: unknown } | null; users: unknown[]; del: number[] } {
     const { put, del } = this.users.collect();
@@ -87,15 +102,9 @@ export class ProfileCache {
   }
 }
 
-/** userUpdated: кэш профилей + название личных чатов с этим человеком (строка списка переименуется сразу). */
+/** userUpdated: кэш профилей. Строки личных чатов с этим человеком пересчитает PeerSigs (names.ts) — сами чаты не трогаем. */
 export function applyUserUpdated(store: Store, u: PublicUser, seq?: number): void {
   store.profile.applyUser(u, seq);
-  // как на сервере в listChats: у личного чата нет своего названия, показываем имя собеседника
-  for (const c of store.chats.values()) {
-    if (c.kind !== 'direct' || c.peerId !== u.id) continue;
-    const photo = u.photo ?? null;
-    if (c.title !== u.name || JSON.stringify(c.photo ?? null) !== JSON.stringify(photo)) { c.title = u.name; c.photo = photo; store.markChat(c); }
-  }
 }
 
 const cleanBio = (s: string | null) => (s == null ? null : cleanText(s) || null);
