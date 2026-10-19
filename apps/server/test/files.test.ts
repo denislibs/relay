@@ -63,7 +63,10 @@ test('intent: a pending row and a short signed PUT keyed by the attachment id; s
   const [row] = await sql`select status, size from attachments where id = ${id}`;
   expect([row.status, Number(row.size)]).toEqual(['pending', 10]);
 
-  expect((await uploadIntent(base, a.token, { name: 'big.bin', mime: 'application/octet-stream', size: 50 * 1024 * 1024 + 1 })).status).toBe(400);
+  const big = await uploadIntent(base, a.token, { name: 'big.bin', mime: 'application/octet-stream', size: 2 * 1024 ** 3 + 1 });
+  expect([big.status, (await big.json() as { code: string }).code]).toEqual([413, 'file_too_big']);
+  // 516 МБ — как обычное видео: в пределах (раньше предел был 50 МБ)
+  expect((await uploadIntent(base, a.token, { name: 'film.mp4', mime: 'video/mp4', size: 516 * 1024 * 1024 })).status).toBe(200);
   expect((await uploadIntent(base, a.token, { name: 'zero.bin', mime: 'application/octet-stream', size: 0 })).status).toBe(400);
   expect((await uploadIntent(base, a.token, { name: 'x', mime: 'text/plain' })).status).toBe(400);
   // непонятный тип — octet-stream, и класть объект надо именно с ним

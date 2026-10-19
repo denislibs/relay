@@ -1,10 +1,10 @@
-import { ROUND_MAX_SECONDS, WAVEFORM_BYTES, type Attachment, type AttachmentKind } from '@relay/protocol';
+import { MAX_FILE_BYTES, ROUND_MAX_SECONDS, WAVEFORM_BYTES, type Attachment, type AttachmentKind } from '@relay/protocol';
 import { S3Client } from 'bun';
 import { sql } from '../db';
 import { DomainError } from './errors';
 
-export const MAX_FILE = 50 * 1024 * 1024;
-/** Срок подписанного PUT: проверяется в начале запроса, поэтому медленной загрузке 50 МБ хватает. Короткий — чтобы
+export const MAX_FILE = MAX_FILE_BYTES;
+/** Срок подписанного PUT: проверяется в начале запроса, поэтому и многоминутной загрузке 2 ГБ хватает. Короткий — чтобы
  *  после подтверждения объект нельзя было долго перезаписывать по той же ссылке. */
 const PUT_TTL = 5 * 60;
 /** Срок подписанного GET (с). Тесты ставят 1, чтобы проверить истёкшую ссылку. */
@@ -48,7 +48,7 @@ export interface UploadMeta { mime: string; name: string; size: number; w?: numb
  */
 export async function createUpload(userId: number, meta: UploadMeta): Promise<{ id: string; url: string; mime: string; expiresIn: number }> {
   if (!Number.isSafeInteger(meta.size) || meta.size <= 0) throw new DomainError('bad_frame', 'file size');
-  if (meta.size > MAX_FILE) throw new DomainError('too_long');
+  if (meta.size > MAX_FILE) throw new DomainError('file_too_big');
   const mime = /^[\w.+-]+\/[\w.+-]+$/.test(meta.mime) ? meta.mime.toLowerCase() : 'application/octet-stream';
   const name = (meta.name || 'file').replace(/[\\/\u0000-\u001f]/g, '_').slice(0, 200);
   // голосовое и кружок — только с подходящим типом файла и разумной длительностью; иначе это просто файл

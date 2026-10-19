@@ -119,6 +119,8 @@ export type Action =
   | { type: 'seen'; chatId: number; upToId: number }
   | { type: 'loadOlder'; chatId: number }
   | { type: 'retry'; clientId: string }
+  /** неотправленное — убрать из очереди и ленты; идущая загрузка файла прерывается */
+  | { type: 'discard'; clientId: string }
   | { type: 'refreshChats' }
   | { type: 'loadMoreChats' }
   | { type: 'setDraft'; chatId: number; text: string; entities?: Entity[] }

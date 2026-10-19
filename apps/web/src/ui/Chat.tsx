@@ -28,7 +28,7 @@ import { Playlist } from './Playlist';
 import { inProfile, toggleProfileMusic, type Track } from '../music';
 import { Avatar, Button, Icon, MediaPolicy, peerTone, ChatSearchBar, Highlight, ripple, useMinVisible, requestMeasure, Composer, DropOverlay, GlassBar, IconButton, MenuPopover, Modal, ConfirmDialog, Presence, ReactionPicker, reducedMotion, plural, requestMutation, SelectionBar, isHeavyAnimating, onHeavyAnimationEnd, applyMarkdown, emptyValue, sameValue, voiceSupported, PlayerBar, roundSupported, startRound, Verified, canCopyImage, clipboardHtml, copyImage, copyRich, downloadUrl, TodoModal, TODO_ITEMS_MAX, DateModal, setDateCopiedToast } from '@relay/ui';
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'preact/hooks';
-import { sendTodo, appendTodo, editTodo, closeChat, deleteMessage, editMessage, ensureNames, focusMessage, openChat, openUserChat, pinMessage, unpinMessage, sendFile, sendFiles, sendRound, sendVoice, react, saveDraft, searchMessages, send, typing, typingDone } from '../data';
+import { sendTodo, appendTodo, editTodo, closeChat, deleteMessage, editMessage, ensureNames, focusMessage, openChat, openUserChat, pinMessage, unpinMessage, sendFile, sendFiles, sendRound, sendVoice, react, rejectTooBig, retrySend, discardUnsent, saveDraft, searchMessages, send, typing, typingDone } from '../data';
 import type { Item, SearchHit } from '@relay/sync-engine/src/types';
 import type { Entity, Todo, TodoInput } from '@relay/protocol';
 
@@ -159,7 +159,8 @@ export function Chat({ chatId, frameKey, active }: { chatId: number; frameKey: s
   const [dragging, setDragging] = useState(false);
   // несколько файлов разом — одной группой (в ленте один пузырь); превью — только у одиночного фото
   const offer = (list: File | FileList | File[] | null | undefined) => {
-    const files = !list ? [] : list instanceof File ? [list] : [...list];
+    // больше 2 ГБ — сразу тост, как в Telegram: такой файл не попадёт ни в окно отправки, ни в очередь
+    const files = rejectTooBig(!list ? [] : list instanceof File ? [list] : [...list]);
     if (!files.length) return;
     const file = files[0];
     setPending({ file, files, url: files.length === 1 && /^image\//.test(file.type) ? URL.createObjectURL(file) : null, caption: latest.current.text });
@@ -583,6 +584,10 @@ export function Chat({ chatId, frameKey, active }: { chatId: number; frameKey: s
                   ...(menuMsg.id != null && !menuMsg.deleted && !menuMsg.service && !gInfo?.protected ? [{ icon: 'forward', label: 'Переслать', onClick: () => forwardMenuMsg(menuMsg) }] : []),
                   ...(menuMsg.id != null && !menuMsg.deleted && !menuMsg.service && !gInfo?.protected ? [{ icon: 'checkCircle', label: 'Выбрать', onClick: () => startSelect(chatId, groupOf(menuMsg).map((x) => x.key as string)) }] : []),
                   ...(own || (gMe?.admin?.delete && !menuMsg.deleted && menuMsg.id != null && !menuMsg.service) ? ['-' as const, { icon: 'trash', label: 'Удалить', danger: true, onClick: () => setConfirmDelete({ ids: [menuMsg.id as number] }) }] : []),
+                  // неотправленное (своё, без id): после отказа — «Повторить»; «Удалить» убирает его только у себя и прерывает загрузку
+                  ...(menuMsg.id == null && menuMsg.senderId === me.userId && !menuMsg.deleted ? [
+                    ...(menuMsg.status === 'failed' ? [{ icon: 'refresh', label: 'Повторить отправку', onClick: () => retrySend(menuMsg.key as string) }] : []),
+                    '-' as const, { icon: 'trash', label: menuMsg.status === 'failed' ? 'Удалить' : 'Отменить отправку', danger: true, onClick: () => discardUnsent(menuMsg.key as string) }] : []),
                 ]}
           />
         );
@@ -623,8 +628,8 @@ export function Chat({ chatId, frameKey, active }: { chatId: number; frameKey: s
           }}
         />
       ) : null}
-      <input ref={picker} type="file" multiple hidden onChange={(e) => offer((e.target as HTMLInputElement).files)} />
-      <Presence show={dragging} exitMs={160}><div class="app-drop"><DropOverlay title="Отпустите, чтобы отправить" text="Фото и документы до 50 МБ" /></div></Presence>
+      <input ref={picker} type="file" multiple hidden onChange={(e) => { const el = e.target as HTMLInputElement; offer(el.files); el.value = ''; }} />
+      <Presence show={dragging} exitMs={160}><div class="app-drop"><DropOverlay title="Отпустите, чтобы отправить" text="Фото, видео и документы до 2 ГБ" /></div></Presence>
       {pending ? (
         <Modal size="slim" title={pending.files.length > 1 ? `Отправить файлы: ${pending.files.length}` : pending.url ? 'Отправить фото' : 'Отправить файл'} onClose={closePending} actions={[
           <Button key="c" variant="ghost" onClick={closePending}>Отмена</Button>,

@@ -85,3 +85,33 @@ test('a size that does not match the promise is refused by the server → the me
   expect(m.error).toBe('upload_mismatch');
   expect((await sql`select count(*)::int as n from messages where chat_id = ${chatId}`)[0].n).toBe(0);
 });
+
+test('a slow upload does not hold back text; discarding the unsent file aborts it and nothing is sent', async () => {
+  const { chatId, ea } = await setup();
+  let release!: () => void;
+  const held = new Promise<void>((r) => { release = r; });
+  // PUT висит, пока его не прервут: как видео на 500 МБ на медленной сети
+  interceptPut((_url, init) => new Promise((resolve, reject) => {
+    init.signal?.addEventListener('abort', () => reject(new DOMException('aborted', 'AbortError')));
+    void held.then(() => resolve(new Response(null, { status: 500 })));
+  }));
+  const { clientId } = await ea.call({ type: 'sendFile', chatId, body: '', file: png(), name: 'p.png', mime: 'image/png', w: 4, h: 2, thumb: null }) as { clientId: string };
+  await ea.call({ type: 'sendMessage', chatId, body: 'текст не ждёт' });
+  const feed = watchInto(ea, { kind: 'messages', chatId, limit: 10 });
+  await feed.until((l) => l.some((m) => m.body === 'текст не ждёт' && m.status === 'sent'), 5000);
+  expect((await feed.until((l) => l.length === 2)).find((m) => m.key === clientId)?.status).toBe('pending');
+  await ea.call({ type: 'discard', clientId });
+  await feed.until((l) => l.length === 1 && l[0].body === 'текст не ждёт');
+  release();
+  await Bun.sleep(200);
+  expect((await sql`select body from messages where chat_id = ${chatId}`).map((r: { body: string }) => r.body)).toEqual(['текст не ждёт']);
+});
+
+test('a file over the 2 GB limit is refused before it is queued', async () => {
+  const { chatId, ea } = await setup();
+  const huge = { size: 2 * 1024 ** 3 + 1, type: 'video/mp4' } as Blob;   // размер — всё, что движок смотрит до очереди
+  await expect(ea.call({ type: 'sendFile', chatId, body: '', file: huge, name: 'big.mp4', mime: 'video/mp4', thumb: null })).rejects.toThrow();
+  const feed = watchInto(ea, { kind: 'messages', chatId, limit: 10 });
+  await Bun.sleep(100);
+  expect((await feed.until(() => true)).length).toBe(0);
+});

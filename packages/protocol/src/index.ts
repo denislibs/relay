@@ -128,6 +128,8 @@ export const MEDIA_TABS: readonly MediaTab[] = ['media', 'file', 'link', 'audio'
 export const ROUND_SIZE = 400;
 export const ROUND_MAX_SECONDS = 60;
 export const WAVEFORM_BYTES = 63;
+/** Предел одного файла — как у Telegram без Premium: 2 ГБ. Сервер отказывает (file_too_big), клиент проверяет до очереди. */
+export const MAX_FILE_BYTES = 2 * 1024 * 1024 * 1024;
 
 /** Реакция: кто и какой эмодзи (одна от пользователя на сообщение). */
 export interface Reaction { userId: Id; emoji: string }
@@ -245,7 +247,7 @@ export type ErrorCode = 'bad_frame' | 'unauthorized' | 'not_member' | 'not_found
   | 'blocked' | 'code_invalid' | 'code_expired' | 'flood' | 'fresh_session'
   | 'password_invalid' | 'password_missing' | 'recovery_unavailable' | 'email_invalid' | 'qr_expired' | 'passkey_not_found' | 'passkey_invalid'
   | 'folder_title' | 'folder_empty' | 'folder_too_many_chats' | 'folder_emoji' | 'folders_limit'
-  | 'upload_missing' | 'upload_mismatch' | 'upload_pending' | 'photo_invalid';
+  | 'upload_missing' | 'upload_mismatch' | 'upload_pending' | 'photo_invalid' | 'file_too_big';
 
 export type ClientFrame =
   | { op: 'hello'; lastSeq: number }

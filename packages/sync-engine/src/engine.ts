@@ -1,3 +1,4 @@
+import { MAX_FILE_BYTES } from '@relay/protocol';
 import type { ClientFrame, JournalEntry, Me, SettingsSnapshot, Message, PublicUser, ServerFrame } from '@relay/protocol';
 import { Blocks } from './blocks';
 import { Contacts } from './contacts';
@@ -67,6 +68,10 @@ export class Engine {
   private reqSeq = 0;
   private pending = new Map<string, { resolve(r: Record<string, unknown>): void; reject(e: ReqError): void }>();
   private pumping = false;
+  /** Идущие PUT файлов по clientId — «отмена» прерывает загрузку. */
+  private uploads = new Map<string, { abort(): void }>();
+  /** Файлы, которые IndexedDB не приняла (квота): живут до перезагрузки вкладки, отправка от этого не страдает. */
+  private memBlobs = new Map<string, Blob>();
   private busy = 0;
   private historyLoads = new Map<number, Promise<void>>();
   private chatLoads = new Map<number, Promise<void>>();   // точечная подгрузка открытого чата вне загруженных страниц
@@ -391,9 +396,13 @@ export class Engine {
     const offline: ReqError = { code: 'offline', retry: true };
     const fail = (status: number): ReqError => ({ code: 'upload', retry: status >= 500 || status === 403 || status === 408 || status === 429 });
     if (this.dev.sim.offline) return Promise.reject(offline);   // dev: офлайн (задержку XHR имитатор не накладывает)
+    if (!this.store.outbox.has(clientId)) return Promise.reject({ code: 'cancelled', retry: false } satisfies ReqError);   // отменили, пока брали ссылку
     if (typeof XMLHttpRequest === 'undefined') {
-      return fetch(url, { method: 'PUT', body: blob, headers: { 'content-type': mime } })
-        .then((r) => { if (!r.ok) throw fail(r.status); }, () => { throw offline; });
+      const ac = new AbortController();
+      this.uploads.set(clientId, ac);
+      return fetch(url, { method: 'PUT', body: blob, headers: { 'content-type': mime }, signal: ac.signal })
+        .then((r) => { if (!r.ok) throw fail(r.status); }, () => { throw this.cancelled.has(clientId) ? { code: 'cancelled', retry: false } satisfies ReqError : offline; })
+        .finally(() => { if (this.uploads.get(clientId) === ac) this.uploads.delete(clientId); });
     }
     return new Promise((resolve, reject) => {
       const x = new XMLHttpRequest();
@@ -407,8 +416,12 @@ export class Engine {
         this.store.setProgress(clientId, 0.98 * e.loaded / e.total);
         this.changed();
       };
-      x.onload = () => (x.status < 300 ? resolve() : reject(fail(x.status)));
-      x.onerror = () => reject(offline);
+      const done = () => { if (this.uploads.get(clientId) === x) this.uploads.delete(clientId); };
+      x.onload = () => { done(); if (x.status < 300) resolve(); else reject(fail(x.status)); };
+      x.onerror = () => { done(); reject(offline); };
+      // отмена из ленты: сообщения уже нет в очереди — отказ без повтора, pumpOutbox пойдёт дальше
+      x.onabort = () => { done(); reject(this.cancelled.has(clientId) ? { code: 'cancelled', retry: false } satisfies ReqError : offline); };
+      this.uploads.set(clientId, x);
       x.send(blob);
     });
   }
@@ -427,6 +440,7 @@ export class Engine {
     let ok = false;
     try {
       const end = Date.now() + (this.cfg.resetWaitMs ?? 8000);
+      for (const x of this.uploads.values()) x.abort();   // загрузка большого файла может идти минутами — прервём, после очистки начнётся заново
       while (this.syncing || this.pumping || this.ops.busy || this.busy > 0) {
         if (Date.now() > end) throw new Error('reset_busy');
         await new Promise((r) => setTimeout(r, 10));
@@ -771,9 +785,12 @@ export class Engine {
       case 'messagesByIds': return this.http<{ messages: Message[] }>(`/chats/${a.chatId}/messages?ids=${a.ids.slice(0, 100).join(',')}`).then((r) => r.messages);
       case 'sendFile': {
         // файл — в IDB (переживёт офлайн и перезагрузку), сообщение — в очередь; загрузка и отправка — в pumpOutbox
+        // больше предела — не ставим в очередь вовсе (интерфейс уже показал, почему): сервер всё равно откажет
+        if (a.file.size > MAX_FILE_BYTES) throw new Error('file_too_big');
         const clientId = crypto.randomUUID();
         this.lastCreated = Math.max(Date.now(), this.lastCreated + 1);
-        await putBlob(this.db, clientId, a.file);
+        // большой файл может не влезть в квоту IndexedDB — тогда держим его в памяти (не переживёт перезагрузку, но уйдёт)
+        await putBlob(this.db, clientId, a.file).catch((err) => { this.dev.log.error('putBlob', err); this.memBlobs.set(clientId, a.file); });
         const photo = !a.kind && /^image\//.test(a.mime) && !!a.w && !!a.h;
         const sized = photo || a.kind === 'round';
         this.store.addPending({ clientId, chatId: a.chatId, body: a.body, replyToId: a.replyToId ?? null, createdAt: this.lastCreated, failed: false,
@@ -890,6 +907,16 @@ export class Engine {
           this.changed();
           this.pumpOutbox();
         }
+        return null;
+      }
+      case 'discard': {
+        if (this.uploads.has(a.clientId)) { this.cancelled.add(a.clientId); this.uploads.get(a.clientId)!.abort(); }
+        const ids = this.store.discard([a.clientId]);
+        await this.store.flush();
+        if (ids.length) await write(this.db, { put: {}, del: { messages: ids } }).catch(() => {});
+        this.memBlobs.delete(a.clientId);
+        delBlob(this.db, a.clientId).catch(() => {});
+        this.changed();
         return null;
       }
     }
@@ -1254,7 +1281,7 @@ export class Engine {
     const ids = this.store.discardFailed();
     await this.store.flush();
     if (ids.length) await write(this.db, { put: {}, del: { messages: ids } }).catch(() => {});
-    for (const id of ids) delBlob(this.db, id).catch(() => {});
+    for (const id of ids) { this.memBlobs.delete(id); delBlob(this.db, id).catch(() => {}); }
     this.changed();
     return ids.length;
   }
@@ -1272,28 +1299,34 @@ export class Engine {
     this.outboxTimer = setTimeout(() => { this.outboxTimer = null; this.pumpOutbox(); }, ms);
   }
 
+  /** Файл, который сейчас грузится в фоне (по одному, в порядке очереди). */
+  private uploading: string | null = null;
+  /** Отменённые из ленты: их прерванный PUT — отказ без повтора, а не обрыв сети. */
+  private cancelled = new Set<string>();
+  /** Ещё не загруженное вложение: сообщение ждёт загрузчика, остальная очередь идёт мимо. */
+  private static needsUpload(o: OutboxEntry): boolean { return !!o.attachment && !o.attachment.id && !o.forward; }
+
+  /**
+   * Очередь отправки. Как в Telegram, текст не ждёт видео на 500 МБ: файлы грузятся в фоне по одному (startUpload),
+   * а готовые к отправке сообщения уходят по порядку, обходя те, чей файл ещё грузится. Файлы между собой порядок
+   * сохраняют — следующий начинает грузиться, только когда предыдущий загружен.
+   */
   private pumpOutbox(): void {
-    if (this.resetting || !this.online || !this.ready || this.pumping) return;
+    if (this.resetting || !this.online || !this.ready) return;
+    this.startUpload();
+    if (this.pumping) return;
     this.pumping = true;
     this.run(async () => {
       try {
         for (;;) {
-          const next = [...this.store.outbox.values()].find((o) => !o.failed);
+          const next = [...this.store.outbox.values()].find((o) => !o.failed && !Engine.needsUpload(o));
           if (!next || !this.online) break;
           try {
-            if (next.attachment && !next.attachment.id) {
-              const blob = await getBlob(this.db, next.clientId);
-              if (!blob) { this.store.fail(next.clientId); await this.store.flush(); this.changed(); continue; }
-              const up = await this.upload(next.clientId, blob, next.attachment);
-              this.store.setUploaded(next.clientId, up.id);
-              await this.store.flush();
-              this.changed();
-            }
             const att = next.attachment ? { id: next.attachment.id, thumb: next.attachment.thumb ?? null } : null;
             const r = await this.request({ op: 'send', reqId: '', clientId: next.clientId, chatId: next.chatId, body: next.body, entities: next.entities ?? [], replyToId: next.replyToId, attachment: next.forward ? null : att, ...(next.groupId ? { groupId: next.groupId } : {}), ...(next.forward ? { forward: next.forward } : {}), ...(next.noLinkPreview ? { noLinkPreview: true } : {}), ...(next.blocks ? { blocks: next.blocks } : {}), ...(next.todo ? { todo: { title: next.todo.title, items: next.todo.items.map((x) => ({ title: x.title })), othersCanAppend: next.todo.othersCanAppend, othersCanComplete: next.todo.othersCanComplete } } : {}) });
             this.store.ack(next.clientId, r.id as number, r.createdAt as string);
             this.outboxAttempt = 0;
-            if (att) delBlob(this.db, next.clientId).catch(() => {});
+            if (att) { this.memBlobs.delete(next.clientId); delBlob(this.db, next.clientId).catch(() => {}); }
           } catch (e) {
             // отказ сервера: код остаётся у сообщения (blocked — интерфейс заменит поле ввода плашкой)
             if ((e as ReqError).retry === false) this.store.fail(next.clientId, (e as ReqError).code);
@@ -1304,6 +1337,33 @@ export class Engine {
         }
       } finally {
         this.pumping = false;
+      }
+    });
+  }
+
+  /** Фоновая загрузка первого незагруженного файла очереди; по готовности — снова очередь (отправит его и начнёт следующий). */
+  private startUpload(): void {
+    if (this.uploading || this.resetting || !this.online || !this.ready) return;
+    const next = [...this.store.outbox.values()].find((o) => !o.failed && Engine.needsUpload(o));
+    if (!next) return;
+    const clientId = next.clientId;
+    this.uploading = clientId;
+    let again = true;
+    this.run(async () => {
+      try {
+        const blob = this.memBlobs.get(clientId) ?? await getBlob(this.db, clientId);
+        if (!blob) { this.store.fail(clientId); return; }
+        const up = await this.upload(clientId, blob, next.attachment!);
+        if (this.store.outbox.has(clientId)) this.store.setUploaded(clientId, up.id);   // иначе отменили, пока шёл confirm
+      } catch (e) {
+        if ((e as ReqError).retry === false) this.store.fail(clientId, (e as ReqError).code);
+        else { again = false; if ((e as ReqError).code !== 'offline') this.retryOutboxLater(); }   // сеть — дождёмся переподключения
+      } finally {
+        this.uploading = null;
+        this.cancelled.delete(clientId);
+        await this.store.flush();
+        this.changed();
+        if (again) this.pumpOutbox();
       }
     });
   }

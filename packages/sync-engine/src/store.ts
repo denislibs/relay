@@ -364,9 +364,15 @@ export class Store {
 
   /** dev «Отбросить failed»: неотправленные с отказом — из очереди и из ленты. Строки сообщений в IDB удаляет движок. */
   discardFailed(): string[] {
+    return this.discard([...this.outbox.values()].filter((o) => o.failed).map((o) => o.clientId));
+  }
+
+  /** Убрать неотправленные (отказ или отмена загрузки) из очереди и из ленты; вернёт те, что были в очереди. */
+  discard(clientIds: string[]): string[] {
     const ids: string[] = [];
-    for (const o of [...this.outbox.values()]) {
-      if (!o.failed) continue;
+    for (const clientId of clientIds) {
+      const o = this.outbox.get(clientId);
+      if (!o) continue;
       ids.push(o.clientId);
       this.outbox.delete(o.clientId);
       this.dirtyOutbox.add(o.clientId);

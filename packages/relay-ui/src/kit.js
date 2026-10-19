@@ -891,6 +891,9 @@ function FileBubble(props) {
       h('div', { class: 'rl-file-card' },
         props.state === 'remote'
           ? h('button', { type: 'button', class: 'rl-file-icon rl-file-icon-btn', 'data-ext': ext, 'data-kind': fileKind(ext), 'aria-label': 'Скачать файл', onClick: props.onDownload }, h(Icon, { name: 'download', size: 24 }))
+          // не отправлено (отказ): вместо застывшего кольца — «повторить», как в Telegram; удалить — из меню сообщения
+          : props.state === 'failed'
+          ? h('button', { type: 'button', class: 'rl-file-icon rl-file-icon-btn rl-file-icon-failed', 'data-ext': ext, 'data-kind': fileKind(ext), 'aria-label': 'Повторить отправку', onClick: props.onRetry }, h(Icon, { name: 'refresh', size: 24 }))
           : h('span', { class: 'rl-file-icon', 'data-ext': ext, 'data-kind': fileKind(ext) },
               props.state === 'loading' ? h(ProgressRing, { size: 40, progress: props.progress, onMedia: true, onCancel: props.onCancel }) : h('b', null, ext.length > 4 ? ext.slice(0, 4) : ext)),
         h('span', { class: 'rl-file-text' }, h('span', { class: 'rl-file-name' }, props.name), h('span', { class: 'rl-file-sub' }, props.meta))),

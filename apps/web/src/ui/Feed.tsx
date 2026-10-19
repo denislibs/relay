@@ -8,7 +8,7 @@ import type { QuoteMsg } from '@relay/sync-engine/src/types';
 import { quoteContent } from './preview';
 import { memo } from 'preact/compat';
 import { useEffect, useLayoutEffect, useRef, useState } from 'preact/hooks';
-import { toggleTodo, clearFocus, ensureNames, focusMessage, openInner, jumpToDate, localPreview, markListened, moveWindow, react, savePosition, savedPosition, seen } from '../data';
+import { toggleTodo, clearFocus, discardUnsent, retrySend, ensureNames, focusMessage, openInner, jumpToDate, localPreview, markListened, moveWindow, react, savePosition, savedPosition, seen } from '../data';
 import { activeFrame, frameByKey, getGlobal, setGlobal, useGlobal } from '../global';
 import { toggleMusic, trackTitle, useFileCached } from '../music';
 import { showToast } from '../settingsData';
@@ -114,6 +114,7 @@ const Row = memo(function Row({ chatId, voiceTitle, author, onAuthor, onOpen, hl
           items={[{ src, thumb: att.thumb, alt: att.name }]}
           ratio={`${att.w} / ${att.h}`}
           state={pending ? 'loading' : 'ready'} progress={m.progress as number}
+          onCancel={pending && out ? () => discardUnsent(m.key as string) : undefined}
           caption={m.body ? <MessageText text={m.body as string} entities={m.entities as Entity[] | undefined} highlight={hl} /> : undefined}
           time={clock(m.createdAt as string)} status={out ? m.status : undefined}
           onOpen={() => onOpen(m)}
@@ -214,7 +215,9 @@ const Row = memo(function Row({ chatId, voiceTitle, author, onAuthor, onOpen, hl
           aside={aside}
           from={out ? 'out' : 'in'} tail={end} groupStart={start}
           name={att.name} ext={ext} meta={fileSize(att.size)}
-          state={pending ? 'loading' : att.id ? 'remote' : 'loading'} progress={m.progress as number}
+          state={m.status === 'failed' && !att.id ? 'failed' : pending ? 'loading' : att.id ? 'remote' : 'loading'} progress={m.progress as number}
+          onCancel={m.id == null && out ? () => discardUnsent(m.key as string) : undefined}
+          onRetry={() => retrySend(m.key as string)}
           time={clock(m.createdAt as string)} status={out ? m.status : undefined}
           onDownload={() => { const a = document.createElement('a'); a.href = fileUrl(att, true); a.download = att.name; a.click(); }}
         />

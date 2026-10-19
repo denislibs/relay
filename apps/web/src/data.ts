@@ -7,7 +7,7 @@ import { playSentSound } from './sound';
 import { beginHeavyAnimation, nudgeWallpaper, toBase64 } from '@relay/ui';
 import { connectEngine, EngineClient, Mirror } from '@relay/sync-engine/src/client';
 import type { Item, Patch, Query, SearchResult } from '@relay/sync-engine/src/types';
-import { hideSpoilers, type Entity } from '@relay/protocol';
+import { hideSpoilers, MAX_FILE_BYTES, type Entity } from '@relay/protocol';
 import { activeFrame, frameByKey, getGlobal, setGlobal, type ChatFrame, type FeedMeta, type Me, type Status } from './global';
 import { bindChatDepth, popChats, pushChat } from './nav';
 import { notifyIncoming, startNotify } from './notify';
@@ -466,8 +466,25 @@ export async function sendFile(chatId: number, file: File, caption: string, repl
   if (img) localPreviews.set(res.clientId, URL.createObjectURL(file));
 }
 
+/** Файлы больше предела (2 ГБ, как в Telegram): их не ставим в очередь — сервер всё равно откажет. Тост — здесь. */
+export function rejectTooBig(files: File[]): File[] {
+  const ok = files.filter((f) => f.size <= MAX_FILE_BYTES);
+  if (ok.length < files.length) showToast(files.length === 1 ? 'Файл слишком большой — можно отправлять файлы до 2 ГБ' : 'Файлы больше 2 ГБ не отправить — остальные отправлены');
+  return ok;
+}
+
+/** Неотправленное сообщение: отправить ещё раз (после отказа) или убрать совсем (идущая загрузка прервётся). */
+export function retrySend(clientId: string): void { engine.call({ type: 'retry', clientId }).catch(() => {}); }
+export function discardUnsent(clientId: string): void {
+  const url = localPreviews.get(clientId);
+  if (url) { URL.revokeObjectURL(url); localPreviews.delete(clientId); }
+  engine.call({ type: 'discard', clientId }).catch(() => {});
+}
+
 /** Несколько файлов разом — одной группой (в ленте один пузырь, как альбом в Telegram); подпись — у последнего. */
 export async function sendFiles(chatId: number, files: File[], caption: string, replyToId: number | null = null): Promise<void> {
+  files = rejectTooBig(files);
+  if (!files.length) return;
   sentSound();
   if (files.length === 1) return sendFile(chatId, files[0], caption, replyToId);
   const groupId = crypto.randomUUID();
