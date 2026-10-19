@@ -262,6 +262,11 @@ export function useUser(userId: number | null | undefined): Item | null {
   return user;
 }
 
+/** Подписка на запрос движка (участники и т. п.); без движка — пустая. */
+export function watchQuery(q: Query, cb: (p: Patch) => void): { close(): void } {
+  return engine ? engine.watch(q, cb) : { close() {} };
+}
+
 /** Очистка локальных данных: движок стирает кэш и берёт снимок заново; keepOutbox — не трогать неотправленное. */
 export const resetLocal = (keepOutbox: boolean): Promise<unknown> => call({ type: 'resetLocal', keepOutbox });
 

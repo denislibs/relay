@@ -17,8 +17,8 @@ const clip = (s: string, max: number) => [...s].slice(0, max).join('');
 /** «Изменить группу» — фото, название, описание и разделы управления (что видно — зависит от прав). */
 export function EditGroup({ nav }: { nav: Nav }) {
   const { chatId } = nav;
-  const { group, me, membersRev, title: chatTitle } = useGroup(chatId);
-  const members = useMembers(chatId, true, membersRev);
+  const { group, me, title: chatTitle } = useGroup(chatId);
+  const members = useMembers(chatId, true);
   const myUserId = useGlobal((s) => s.me!.userId);
   const [title, setTitle] = useState(group?.title ?? chatTitle);
   const [about, setAbout] = useState(group?.about ?? '');

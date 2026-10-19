@@ -72,7 +72,7 @@ export function Info() {
 
   const title = (chat?.title as string) || 'Чат №' + chatId;
   const group = chat?.kind === 'group';
-  const members = useMembers(chatId, group, useGlobal((s) => (s.chats.find((c) => c.id === chatId)?.membersRev as number) ?? 0));
+  const members = useMembers(chatId, group);
   const myPeer = peer && chat?.peerId === peer.userId && peer.known ? peer : null;
   const gallery = useProfilePhotos(group || system ? null : peerId, chat?.photo as ProfilePhoto | null);
   const [slide, setSlide] = useState(0);

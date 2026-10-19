@@ -396,7 +396,7 @@ export function Chat({ chatId, frameKey, active }: { chatId: number; frameKey: s
   const myPeer = peer && chat?.peerId === peer.userId && peer.known ? peer : null;
   const online = !!myPeer?.online;
   const isTyping = !!chat?.typing;
-  const members = useMembers(chatId, chat?.kind === 'group', (chat?.membersRev as number) ?? 0);
+  const members = useMembers(chatId, chat?.kind === 'group');
   const subtitle = system ? 'служебные уведомления' : isTyping ? 'печатает…' : chat?.kind === 'group' ? (members ? membersStatus(members, true) : 'Группа') : myPeer ? lastSeenText(online, myPeer.lastSeen as string | null) : '';
   const replyTo = replyKey ? messages.find((m) => m.key === replyKey) : undefined;
   const authorOf = (senderId: unknown) => (senderId === me.userId ? 'Вы' : title);

@@ -1,35 +1,38 @@
 import { useEffect, useState } from 'preact/hooks';
 import type { ProfilePhoto } from '@relay/protocol';
+import { Mirror } from '@relay/sync-engine/src/client';
+import type { Patch } from '@relay/sync-engine/src/types';
+import { watchQuery } from './settingsData';
 
 /** Участник группы, как его отдаёт сервер: имя (как видит зритель), @имя и присутствие с учётом приватности. */
-export type Member = { userId: number; name: string; username: string | null; online: boolean | null; lastSeen: string | null; photo?: ProfilePhoto | null; role?: 'owner' | 'admin' | 'member'; rank?: string | null };
+export type Member = { userId: number; name: string; username?: string | null; online: boolean | null; lastSeen: string | null; photo?: ProfilePhoto | null; role?: 'owner' | 'admin' | 'member'; rank?: string | null };
 export type Members = { ownerId: number | null; members: Member[] };
 
-const cache = new Map<number, Members>();
-const inflight = new Map<number, Promise<Members>>();
+/** Последнее значение по чату — только кэш отрисовки подписки: повторное открытие панели рисуется сразу, без мигания. */
+const last = new Map<number, Members>();
 
-export function loadMembers(chatId: number, fresh = false): Promise<Members> {
-  let p = inflight.get(chatId);
-  if (p && !fresh) return p;
-  p = fetch(`/chats/${chatId}/members`).then((r) => {
-    if (!r.ok) throw new Error('members ' + r.status);
-    return r.json() as Promise<Members>;
-  }).then((m) => { cache.set(chatId, m); return m; }).finally(() => inflight.delete(chatId));
-  inflight.set(chatId, p);
-  return p;
+/** Список участников из зеркала подписки `members`; null — движок ещё ничего не отдал (нет ни элементов, ни ~members.loaded). */
+export function membersOf(m: Mirror): Members | null {
+  const items = m.list();
+  if (!items.length && !m.meta('~members')?.loaded) return null;
+  const members = items.map((i) => ({ userId: i.userId, name: i.name, online: i.online, lastSeen: i.lastSeen, photo: i.photo, role: i.role, rank: i.rank }) as Member);
+  return { ownerId: members.find((x) => x.role === 'owner')?.userId ?? null, members };
 }
 
-/** Участники группы: сразу из кэша (без мигания при повторном открытии), потом свежие с сервера. Не группа — null.
- *  rev — номер изменения состава из журнала (membersChanged): сменился — перечитать. */
-export function useMembers(chatId: number, group: boolean, rev = 0): Members | null {
-  const [m, setM] = useState<Members | null>(() => (group ? cache.get(chatId) ?? null : null));
+/** Участники группы — подписка движка (первый показ из IndexedDB, дальше журнал); без собственных запросов. Не группа — null. */
+export function useMembers(chatId: number, group: boolean): Members | null {
+  const [m, setM] = useState<Members | null>(() => (group ? last.get(chatId) ?? null : null));
   useEffect(() => {
     if (!group) { setM(null); return; }
-    setM(cache.get(chatId) ?? null);
-    let live = true;
-    loadMembers(chatId, rev > 0).then((x) => { if (live) setM(x); }).catch(() => { /* без сети — что в кэше */ });
-    return () => { live = false; };
-  }, [chatId, group, rev]);
+    setM(last.get(chatId) ?? null);
+    const mirror = new Mirror();
+    const w = watchQuery({ kind: 'members', chatId }, (p: Patch) => {
+      mirror.apply(p);
+      const x = membersOf(mirror);
+      if (x) { last.set(chatId, x); setM(x); }
+    });
+    return () => w.close();
+  }, [chatId, group]);
   return m;
 }
 

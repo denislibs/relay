@@ -39,7 +39,7 @@ type Tab = MediaTab | 'members';
 export function SharedMedia({ chatId, group = false }: { chatId: number; group?: boolean }) {
   const [counts, setCounts] = useState<Record<MediaTab, number> | null>(null);
   const [tab, setTab] = useState<Tab | null>(null);
-  const members = useMembers(chatId, group, useGlobal((s) => (s.chats.find((c) => c.id === chatId)?.membersRev as number) ?? 0));
+  const members = useMembers(chatId, group);
   // счётчики — при открытии и когда в чате появилось новое сообщение
   const lastId = useGlobal((s) => ((s.chats.find((c) => c.id === chatId)?.last as { id?: number } | null)?.id ?? 0));
   useEffect(() => {
