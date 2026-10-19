@@ -527,8 +527,8 @@ var PATTERN_SETS = {};
 PATTERN_FILES.forEach(function (name) { PATTERN_SETS[name] = 'file'; });
 Object.keys(BUILT_PATTERNS).forEach(function (name) { PATTERN_SETS[name] = BUILT_PATTERNS[name]; });
 var isFilePattern = function (set) { return Object.prototype.hasOwnProperty.call(PATTERN_SETS, set) && PATTERN_SETS[set] === 'file'; };
-/* Размер плитки на экране: нарисованные — 1200 px с запасом под ретину, показываем 640 (рисунки ≈ 35–130 px, «издалека», как у Telegram). */
-function patternSize(set) { return isFilePattern(set) ? 640 : 420; }
+/* Размер плитки на экране: нарисованные — 1200 px с запасом под ретину, показываем 500 (рисунки ≈ 25–100 px, «издалека», как у Telegram). */
+function patternSize(set) { return isFilePattern(set) ? 500 : 420; }
 var patternText = Object.create(null), patternLoads = Object.create(null);
 /* Загрузить узор один раз: дальше он в памяти, и плитка собирается синхронно (без вспышки при смене темы и цвета). */
 function loadPattern(set) {

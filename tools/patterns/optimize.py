@@ -12,7 +12,7 @@ NUM = re.compile(r"-?\d+\.\d+")
 def rnd(d, p=1):
     return NUM.sub(lambda m: (f"{float(m.group()):.{p}f}".rstrip("0").rstrip(".") or "0"), d)
 
-def optimize(src, dst_dir, stroke=2.1, precision=1):
+def optimize(src, dst_dir, stroke=2.6, precision=1):
     svg = SVG.parse(src, reify=True)
     W, H = int(svg.width), int(svg.height)
     strokes, fills, dashes = [], [], []

@@ -24,7 +24,7 @@ test('drawn patterns: a file link until loaded, then the lines in the requested 
   globalThis.fetch = async (url) => new Response(url === '/patterns/garden.svg' ? svg : '<html>oops</html>');
   try {
     expect(PATTERN_SETS.garden).toBe('file');
-    expect(patternSize('garden')).toBe(640);
+    expect(patternSize('garden')).toBe(500);
     expect(patternSize('catsAndDogs')).toBe(420);
     expect(buildPattern('garden', 'rgba(1,2,3,0.4)')).toBe('"/patterns/garden.svg"');
     await loadPattern('garden');
