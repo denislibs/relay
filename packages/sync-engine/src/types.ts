@@ -1,5 +1,5 @@
 import type { GroupInfo, MyMembership } from '@relay/protocol';
-import type { Birthday, ChatFolder, Entity, ForwardInfo, ForwardRef, LinkPreview, PrivacyKey, PrivacyMode, ProfileLink, ProfilePhoto, ServiceType } from '@relay/protocol';
+import type { Birthday, Block, ChatFolder, Entity, ForwardInfo, ForwardRef, LinkPreview, PrivacyKey, PrivacyMode, ProfileLink, ProfilePhoto, ServiceType } from '@relay/protocol';
 
 export type Status = 'pending' | 'sent' | 'read' | 'failed';
 
@@ -27,6 +27,7 @@ export interface LocalMessage {
   service?: { type: ServiceType };   // служебное сообщение от «Relay»
   fwdFrom?: ForwardInfo | null;      // пересланное: исходный автор, откуда и когда
   link?: LinkPreview | null;         // превью ссылки (pending — сервер ещё загружает)
+  blocks?: Block[] | null;           // «статья»
 }
 
 /** Вложение сообщения; у неотправленного id пустой, пока файл не загружен. */
@@ -73,6 +74,7 @@ export interface OutboxEntry {
   fwdFrom?: ForwardInfo | null;     // как показать до подтверждения
   noLinkPreview?: boolean;          // превью ссылки убрали в поле ввода
   link?: LinkPreview | null;        // превью, уже показанное в поле ввода, — в ленте сразу, до ответа сервера
+  blocks?: Block[] | null;          // «статья»
 }
 
 export type Query =
@@ -111,7 +113,7 @@ export type Patch =
 export type Action =
   /** управление группой и вступление по ссылке: HTTP мимо очереди ({ok, data} | {ok:false, code}) */
   | { type: 'group'; method: 'GET' | 'POST' | 'PUT' | 'PATCH' | 'DELETE'; path: string; body?: unknown }
-  | { type: 'sendMessage'; chatId: number; body: string; entities?: Entity[]; replyToId?: number | null; noLinkPreview?: boolean; link?: LinkPreview | null; attachment?: LocalAttachment | null }   // attachment — уже загруженный файл (id), например трек из музыки профиля
+  | { type: 'sendMessage'; chatId: number; body: string; entities?: Entity[]; replyToId?: number | null; noLinkPreview?: boolean; link?: LinkPreview | null; attachment?: LocalAttachment | null; blocks?: Block[] | null }   // blocks — «статья»; attachment — уже загруженный файл (id), например трек из музыки профиля
   | { type: 'seen'; chatId: number; upToId: number }
   | { type: 'loadOlder'; chatId: number }
   | { type: 'retry'; clientId: string }

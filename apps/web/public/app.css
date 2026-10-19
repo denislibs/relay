@@ -906,3 +906,47 @@ html[data-anim="0"] .app-chatcol, html[data-anim="0"] .app-chatcol-below, html[d
 .app-join-about { margin: var(--space-2) 0 0; font: 400 15px/21px var(--font-sans); color: var(--ink); white-space: pre-wrap; }
 .app-join-btn { margin-top: var(--space-3); min-width: 220px; }
 .app-join-note { margin: 0; font: 400 13px/18px var(--font-sans); color: var(--ink-muted); }
+
+/* ---------- «статья»: развёрнутое поле ввода ---------- */
+/* карточка растёт от поля ввода вверх до шапки (лента под ней); поле ввода под карточкой гаснет */
+.app-composer-host.is-article > .rl-composer-wrap { opacity: 0; pointer-events: none; }
+.app-art { position: absolute; left: 0; right: 0; bottom: 0; z-index: 5; display: flex; flex-direction: column;
+  height: calc(100dvh - var(--header-h, 48px) - 2 * var(--space-float, 16px) - 8px); border-radius: 24px; background: var(--raised);
+  box-shadow: var(--tg-shadow-composer, var(--shadow-float)); overflow: hidden; animation: app-art-grow 300ms cubic-bezier(.33, 1, .68, 1) both; }
+@keyframes app-art-grow { from { height: 48px; } }
+.app-art-top { flex: none; display: flex; align-items: center; gap: 2px; padding: 6px 8px 0; animation: app-art-top 220ms ease-out 80ms both; }
+@keyframes app-art-top { from { opacity: 0; transform: translateY(-60%); } }
+.app-art-top .rl-iconbtn { width: 36px; height: 36px; color: var(--ink-muted); }
+.app-art-grow { flex: 1; }
+.app-art-scroll { flex: 1; min-height: 0; overflow-y: auto; padding: 4px 18px 12px; cursor: text;
+  -webkit-mask-image: linear-gradient(to bottom, transparent 0, #000 12px, #000 calc(100% - 16px), transparent); mask-image: linear-gradient(to bottom, transparent 0, #000 12px, #000 calc(100% - 16px), transparent); }
+.app-art-bar { flex: none; display: flex; align-items: center; gap: 4px; padding: 4px 6px 6px; animation: app-art-bar 300ms cubic-bezier(.33, 1, .68, 1) both; }
+@keyframes app-art-bar { from { opacity: 0; transform: translateY(100%); } }
+.app-art-bar .rl-iconbtn { width: 40px; height: 40px; }
+.app-art-send { width: 44px; height: 44px; display: grid; place-items: center; border: 0; border-radius: 50%; background: var(--button, var(--brand-strong)); color: #fff; cursor: pointer; transition: opacity 150ms ease, transform 150ms ease; }
+.app-art-send:disabled { opacity: .45; cursor: default; }
+.app-art-send:not(:disabled):active { transform: scale(.94); }
+.app-art-menu { z-index: 30; }
+.app-art-fail { padding: 24px; color: var(--ink-muted); text-align: center; }
+.app-art-linkform { display: flex; flex-direction: column; gap: 14px; }
+@media (prefers-reduced-motion: reduce) { .app-art, .app-art-top, .app-art-bar { animation: none; } }
+
+/* содержимое редактора — как статья в пузыре */
+.rl-ed { min-height: 100%; outline: none; font: 400 16px/1.45 var(--font-sans); color: var(--ink); white-space: pre-wrap; word-wrap: break-word; }
+.rl-ed > :first-child { margin-top: 0; }
+.rl-ed p { margin: 0 0 .35em; }
+.rl-ed h3 { margin: .6em 0 .3em; font-size: 1.05em; font-weight: 600; line-height: 1.25; }
+.rl-ed h1 { margin: .6em 0 .3em; font-size: 1.375em; font-weight: 600; line-height: 1.25; }
+.rl-ed h2 { margin: .6em 0 .3em; font-size: 1.1875em; font-weight: 600; line-height: 1.25; }
+.rl-ed ul, .rl-ed ol { margin: .2em 0 .45em; padding-left: 1.4em; }
+.rl-ed li > p { margin: 0; }
+.rl-ed blockquote { margin: .4em 0; padding: 4px 8px 4px 11px; border-left: 3px solid var(--brand-strong); border-radius: 4px; background: color-mix(in srgb, var(--brand-strong) 10%, transparent); }
+.rl-ed blockquote > :last-child { margin-bottom: 0; }
+.rl-ed pre { margin: .4em 0; padding: 8px 10px; border-radius: 8px; background: color-mix(in srgb, currentColor 8%, transparent); font-family: var(--font-mono, ui-monospace, SFMono-Regular, Menlo, monospace); font-size: .9em; overflow-x: auto; }
+.rl-ed code { font-family: var(--font-mono, ui-monospace, SFMono-Regular, Menlo, monospace); font-size: .92em; }
+.rl-ed :not(pre) > code { padding: 0 .2em; border-radius: 4px; background: color-mix(in srgb, currentColor 9%, transparent); }
+.rl-ed hr { margin: .8em 0; border: 0; border-top: 1px solid color-mix(in srgb, currentColor 18%, transparent); }
+.rl-ed hr.ProseMirror-selectednode { border-top-color: var(--brand-strong); }
+.rl-ed a { color: var(--tick-read); text-decoration: none; }
+.rl-ed .rl-ed-spoiler { border-radius: 4px; background: color-mix(in srgb, currentColor 18%, transparent); }
+.rl-ed p.is-editor-empty:first-child::before { content: attr(data-placeholder); float: left; height: 0; color: var(--ink-muted); pointer-events: none; }

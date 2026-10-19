@@ -4,12 +4,15 @@ import { PinnedBar } from './PinnedBar';
 import { senderAvatar } from '../profilePhoto';
 import { firstUrl, loadPreview } from '../linkUrl';
 import { MusicPicker } from './MusicPicker';
+import { ArticleComposer, preloadArticleEditor } from './ArticleComposer';
+import { blocksText, blocksToText, textToBlocks, type Block } from '@relay/protocol';
 
 /** Меню скрепки, как в Telegram: фото/видео, файл, музыка. */
 const ATTACH_ITEMS = [
   { key: 'media', icon: 'image', label: 'Фото или видео' },
   { key: 'doc', icon: 'file', label: 'Файл' },
   { key: 'music', icon: 'music', label: 'Музыка' },
+  { key: 'article', icon: 'article', label: 'Статья' },
 ];
 import type { LinkPreview } from '@relay/protocol';
 import { membersStatus, useMembers } from '../members';
@@ -120,6 +123,9 @@ export function Chat({ chatId, frameKey, active }: { chatId: number; frameKey: s
   // вложения: выбор файла (скрепка), перетаскивание, вставка; перед отправкой — окно с превью и подписью
   const picker = useRef<HTMLInputElement>(null);
   const [musicOpen, setMusicOpen] = useState(false);   // «Музыка» из меню вложений
+  // «статья» (развёрнутый редактор): open — редактор на экране; свёрнутая «богатая» — строкой над полем ввода
+  const [art, setArt] = useState<{ open: boolean; blocks: Block[] } | null>(null);
+  useEffect(() => setArt(null), [chatId]);
   const [pending, setPending] = useState<{ file: File; files: File[]; url: string | null; caption: string } | null>(null);
   const [dragging, setDragging] = useState(false);
   // несколько файлов разом — одной группой (в ленте один пузырь); превью — только у одиночного фото
@@ -312,6 +318,36 @@ export function Chat({ chatId, frameKey, active }: { chatId: number; frameKey: s
     onClick: (e: MouseEvent) => { const r = (e.currentTarget as HTMLElement).getBoundingClientRect(); setFwdMenu({ x: r.left + 16, y: r.top }); },
   } : null;
   const nameOf = (id: number) => (id === me.userId ? me.name : names[id] ?? (chat?.kind === 'direct' ? title : ''));
+  // «статья»: развернуть (текст поля ввода — в редактор), свернуть (простое — обратно в поле), отправить
+  const openArticle = () => {
+    preloadArticleEditor();
+    const v = applyMarkdown(api.current?.getValue() ?? emptyValue());
+    const blocks = art?.blocks ?? (v.text.trim() ? textToBlocks(v.text, v.entities) : []);
+    if (!art && v.text) { api.current?.setValue(emptyValue(), { instant: true }); latest.current = saved.current = emptyValue(); }
+    setArt({ open: true, blocks });
+  };
+  const collapseArticle = (blocks: Block[]) => {
+    const simple = blocks.length ? blocksToText(blocks) : { text: '', entities: [] };
+    if (simple) {
+      setArt(null);
+      if (simple.text) { const v = { text: simple.text, entities: simple.entities }; api.current?.setValue(v, { instant: true }); latest.current = v; }
+      setTimeout(() => api.current?.focus({ end: true }), 0);
+      return;
+    }
+    setArt({ open: false, blocks });   // заголовки, списки… обычным текстом не записать — остаётся статьёй
+  };
+  const sendArticle = (blocks: Block[]) => {
+    setArt(null);
+    stick.current = true;
+    const simple = blocksToText(blocks);
+    if (simple) { if (simple.text.trim()) void send(chatId, simple.text, null, simple.entities); return; }
+    void send(chatId, blocksText(blocks), null, [], { blocks });
+  };
+  const artQuote = art && !art.open && art.blocks.length && !editing ? {
+    icon: 'article', author: 'Статья', text: blocksText(art.blocks).split('\n')[0] || 'Без текста', tone: 5,
+    onClick: () => setArt({ ...art, open: true }),
+  } : null;
+
   // «Переслать» из меню: у альбома — весь альбом
   const groupOf = (m: Item) => (m.groupId ? messages.filter((x) => x.groupId === m.groupId && x.senderId === m.senderId) : [m]);
   const forwardMenuMsg = (m: Item) => startForward(chatId, groupOf(m), nameOf);
@@ -404,7 +440,7 @@ export function Chat({ chatId, frameKey, active }: { chatId: number; frameKey: s
               : <span>Вы не можете отправлять сообщения этому пользователю</span>}
           </div>
         </div>
-      ) : <div class={'app-composer-host' + (selKeys ? ' is-selecting' : '')}><Composer
+      ) : <div class={'app-composer-host' + (selKeys ? ' is-selecting' : '') + (art?.open ? ' is-article' : '')}><Composer
         id="composer"
         apiRef={api}
         initialValue={initial}
@@ -412,14 +448,15 @@ export function Chat({ chatId, frameKey, active }: { chatId: number; frameKey: s
         sendKey={sendKey}
         placeholder="Сообщение"
         editing={!!editing}
-        sendEmpty={!!fwdQuote}
-        replyTo={editing ? { author: 'Редактирование', text: editing.original.text, tone: peerTone(me.userId), icon: 'pencil' } : fwdQuote ? fwdQuote : !replyTo && lp?.link && !lp.off ? {
+        sendEmpty={!!fwdQuote || !!artQuote}
+        replyTo={editing ? { author: 'Редактирование', text: editing.original.text, tone: peerTone(me.userId), icon: 'pencil' } : fwdQuote ? fwdQuote : artQuote ? artQuote : !replyTo && lp?.link && !lp.off ? {
           icon: 'link', author: lp.link.siteName || lp.link.title || lp.url, text: lp.link.description || lp.link.title || lp.url, tone: 5,
           thumbSrc: lp.link.photo ? `/files/${lp.link.photo.id}` : undefined,
         } : replyTo ? { author: authorOf(replyTo.senderId), text: replyTo.body, tone: peerTone(replyTo.senderId) } : null}
         onCancelReply={() => {
           if (editing) { endEdit(editing.draft); return; } // правку отменили — вернуть черновик
           if (fwd) { cancelForwardDraft(chatId); return; }
+          if (artQuote) { setArt(null); return; }   // свёрнутую статью — выбросить
           if (!replyTo && lp?.link && !lp.off) { setLp({ ...lp, off: true }); api.current?.focus({ end: true }); return; }   // крестик у превью — отправить без него; фокус — обратно в поле
           setReplyKey(null);
         }}
@@ -437,7 +474,8 @@ export function Chat({ chatId, frameKey, active }: { chatId: number; frameKey: s
         onSendVoice={(r: { blob: Blob; duration: number; waveform: Uint8Array }) => { if (!allowed('voice')) return; stick.current = true; sendVoice(chatId, r, (replyTo?.id as number) ?? null).catch(() => {}); setReplyKey(null); }}
         onSendRound={(r: { blob: Blob; duration: number; size: number; thumb: string | null }) => { if (!allowed('round')) return; stick.current = true; sendRound(chatId, r, (replyTo?.id as number) ?? null).catch(() => {}); setReplyKey(null); }}
         attachItems={ATTACH_ITEMS}
-        onAttach={(k: string) => { if (k === 'music') { if (allowed('music')) setMusicOpen(true); return; } const el = picker.current!; el.accept = k === 'media' || k === 'camera' ? 'image/*,video/*' : ''; el.value = ''; el.click(); }}
+        onExpand={() => openArticle()}
+        onAttach={(k: string) => { if (k === 'music') { if (allowed('music')) setMusicOpen(true); return; } if (k === 'article') { openArticle(); return; } const el = picker.current!; el.accept = k === 'media' || k === 'camera' ? 'image/*,video/*' : ''; el.value = ''; el.click(); }}
         onSend={(v: Value) => {
           if (editing) {
             const next = applyMarkdown(v);
@@ -452,6 +490,7 @@ export function Chat({ chatId, frameKey, active }: { chatId: number; frameKey: s
           typingDone(chatId);
           const out = applyMarkdown(v);   // **жирный**, `код`, [текст](ссылка)… — в оформление
           if (fwd) return sendForwardDraft(chatId, out.text, out.entities);   // комментарий первым, затем пересланное
+          if (art) { sendArticle(art.blocks); return false; }
           // превью: убрали крестиком — без него; уже загружено для этой ссылки — сразу в ленте, до ответа сервера
           const url = firstUrl(out.text, out.entities);
           const pv = lp && url === lp.url ? (lp.off ? { noLinkPreview: true } : { link: lp.link }) : {};
@@ -461,6 +500,7 @@ export function Chat({ chatId, frameKey, active }: { chatId: number; frameKey: s
           return sent;   // поле очистится, когда сообщение встанет в ленту
         }}
       />
+        {art?.open ? <ArticleComposer key={chatId} blocks={art.blocks} onCollapse={collapseArticle} onSend={sendArticle} /> : null}
         {/* режим выбора: панель «Выбрано: N» проявляется поверх поля ввода (поле остаётся на месте и гаснет), как в Telegram */}
         <Presence show={!!selKeys} exitMs={200}>
           <div class="app-selbar-layer">
@@ -488,7 +528,7 @@ export function Chat({ chatId, frameKey, active }: { chatId: number; frameKey: s
                   ...(menuMsg.id != null && !menuMsg.deleted && !system ? [{ icon: 'reply', label: 'Ответить', onClick: () => { if (editing) endEdit(editing.draft); setReplyKey(menuMsg.key as string); api.current?.focus({ end: true }); } }] : []),
                   ...(menuMsg.id != null && !menuMsg.deleted && !menuMsg.service && !gInfo?.protected ? [{ icon: 'forward', label: 'Переслать', onClick: () => forwardMenuMsg(menuMsg) }] : []),
                   ...(menuMsg.id != null && !menuMsg.deleted && !menuMsg.service && !gInfo?.protected ? [{ icon: 'checkCircle', label: 'Выбрать', onClick: () => startSelect(chatId, groupOf(menuMsg).map((x) => x.key as string)) }] : []),
-                  ...(own && !system ? [{ icon: 'pencil', label: 'Изменить', onClick: () => startEdit(menuMsg) }] : []),
+                  ...(own && !system && !menuMsg.blocks ? [{ icon: 'pencil', label: 'Изменить', onClick: () => startEdit(menuMsg) }] : []),
                   ...(menuMsg.id != null && !menuMsg.deleted && !system && !menuMsg.service && (!gMe || gMe.admin?.pin || gMe.rights.pin) ? [((chat?.pinned as number[] | undefined) ?? []).includes(menuMsg.id as number)
                     ? { icon: 'pin', label: 'Открепить', onClick: () => void unpinMessage(chatId, menuMsg.id as number) }
                     : { icon: 'pin', label: 'Закрепить', onClick: () => void pinMessage(chatId, menuMsg.id as number) }] : []),

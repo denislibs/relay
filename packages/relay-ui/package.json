@@ -6,6 +6,10 @@
   "main": "src/index.js",
   "dependencies": {
     "@lottiefiles/dotlottie-web": "0.80.0",
+    "@tiptap/core": "^3",
+    "@tiptap/extension-placeholder": "^3",
+    "@tiptap/pm": "^3",
+    "@tiptap/starter-kit": "^3",
     "preact": "10.29.8",
     "twallpaper": "2.1.2"
   }
