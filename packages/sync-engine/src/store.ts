@@ -65,6 +65,8 @@ export class Store {
   blocks!: BlocksCache;
   /** название чата для списка; движок подставляет контактное имя с учётом очереди операций */
   titleOf: (c: LocalChat) => string | null = (c) => c.title;
+  /** контакт зрителя с учётом очереди операций (names.ts); движок подставляет вид с очередью */
+  contactOf: (userId: number) => { firstName: string; lastName: string; pending?: boolean } | undefined = (id) => this.contacts.table.get(id);
 
   private messages = new Map<number, Map<string, LocalMessage>>();
   private loaded = new Set<number>();

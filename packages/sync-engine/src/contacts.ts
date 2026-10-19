@@ -233,16 +233,6 @@ export class Contacts {
     return view;
   }
 
-  /** Название личного чата: контактное (с учётом очереди); контакт удаляется, но сервер ещё не ответил — своё имя человека. */
-  titleOf(c: LocalChat): string | null {
-    if (c.kind !== 'direct' || !c.peerId) return c.title;
-    const v = this.view().get(c.peerId);
-    if (v) return contactName(v) || c.title;
-    const was = this.cache.table.get(c.peerId);
-    if (was) return this.publicName(c.peerId, was) ?? c.title;
-    return c.title;
-  }
-
   private publicName(id: number, was?: ContactBase): string | null {
     return this.h.store.profile.users.get(id)?.publicName ?? was?.user.publicName ?? null;
   }

@@ -15,6 +15,7 @@ import { OP_SESSIONS_TTL, Sessions } from './sessions';
 import { SessionEnd } from './session';
 import { DevTools, loadSim, type SimState, type SubStat } from './devlog';
 import { simFlags, watchLoss } from './devsim';
+import { displayName } from './names';
 import type { Action, EngineConfig, LocalAttachment, LocalMessage, OutboxEntry, Patch, Query, SearchResult } from './types';
 
 export interface WatchHandle { update(q: Query): void; close(): void }
@@ -168,7 +169,8 @@ export class Engine {
         try { indexedDB.deleteDatabase(cfg.dbName); } catch { /* */ }
       },
     });
-    store.titleOf = (c) => this.contacts.titleOf(c);
+    store.contactOf = (id) => this.contacts.view().get(id);
+    store.titleOf = (c) => (c.kind === 'direct' && c.peerId ? displayName(store, c.peerId) || c.title : c.title);
     this.transport = new WsTransport(cfg.wsUrl, {
       onOpen: () => this.onOpen(),
       onFrame: (f) => this.onFrame(f),
