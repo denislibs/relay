@@ -127,6 +127,10 @@ Figtree (Google Fonts) с откатом на Helvetica Neue/Arial; моноши
 - **Состояния:** Banner, SyncIndicator, LinearProgress, EmptyState, Presence, Modal.
 - **Витрины:** Showcase (офлайн, перестановка чатов), ChatPro (ответы, реакции, меню, выбор, поиск, вложения, @, перетаскивание), MediaChat, Screens (телефон, звонки, статусы, новая группа, вход), Motion.
 
+## Storybook
+
+`cd packages/relay-ui && bun run storybook` → http://localhost:6006 (сначала собирает `tokens.css`). Истории — в `stories/`: основы (цвета из `tokens.json`, иконки, шрифт), элементы, поиск, список чатов, сообщения, состояния, окна, настройки. Сверху — переключатели темы (светлая/тёмная/системная) и анимаций (`data-anim`). Статическая сборка: `bun run build-storybook` → `storybook-static/`.
+
 ## Доступность
 
 - Строки чатов, чипы, пункты рейки — настоящие `<button>`; иконки-кнопки всегда с `label`.

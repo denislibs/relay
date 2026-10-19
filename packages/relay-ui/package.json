@@ -4,6 +4,10 @@
   "private": true,
   "type": "module",
   "main": "src/index.js",
+  "scripts": {
+    "storybook": "bun build-tokens.ts && storybook dev -p 6006 --no-open",
+    "build-storybook": "bun build-tokens.ts && storybook build -o storybook-static"
+  },
   "dependencies": {
     "@lottiefiles/dotlottie-web": "0.80.0",
     "@tiptap/core": "^3",
@@ -12,5 +16,10 @@
     "@tiptap/starter-kit": "^3",
     "preact": "10.29.8",
     "twallpaper": "2.1.2"
+  },
+  "devDependencies": {
+    "@storybook/preact-vite": "10.6.1",
+    "storybook": "10.6.1",
+    "vite": "7.3.6"
   }
 }
