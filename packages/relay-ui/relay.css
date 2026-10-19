@@ -1387,7 +1387,7 @@ html[data-blur="0"] .rl-shell .rl-msgmenu .rl-menu, html[data-blur="0"] .rl-shel
 .rl-aside-tabs { position: sticky; top: 0; z-index: 3; margin: 0; padding: var(--space-3) var(--space-3) var(--space-3);   /* снизу как сбоку — сетка медиа не липнет к вкладкам */ }
 .rl-aside-tabs::before { content: ''; position: absolute; inset: 0 0 -12px; z-index: -1; pointer-events: none; background: color-mix(in srgb, var(--card) 72%, transparent); -webkit-backdrop-filter: blur(10px); backdrop-filter: blur(10px); -webkit-mask-image: linear-gradient(#000 65%, transparent); mask-image: linear-gradient(#000 65%, transparent); }
 .rl-aside-pages { margin-top: 0; flex: 1 0 auto; min-height: calc(100% - 64px); }   /* вкладки всегда можно довести до верха */
-.rl-aside-pages > .rl-slides { flex: 1 0 auto; }
+.rl-aside-pages > .rl-slides { flex: 1 0 auto; width: 100%; min-width: 0; max-width: 100%; }   /* по ширине панели: длинная строка (адрес ссылки) — многоточием, а не прокруткой вбок */
 /* текущая вкладка — в потоке (высота панели по содержимому), уходящая во время анимации — поверх */
 .rl-aside-pages .rl-slide:not(.rl-slide-parked):not(.rl-slide-out-push):not(.rl-slide-out-pop) { position: relative; inset: auto; width: 100%; }
 .rl-aside-pages .rl-aside-links { overflow: visible; }
