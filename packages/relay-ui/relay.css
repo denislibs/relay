@@ -1876,7 +1876,8 @@ html[data-blur="0"] .rl-menu, html[data-blur="0"] .rl-attach { -webkit-backdrop-
 .rl-chatpick .rl-chatpick-head .rl-picker-search, .rl-chatpick .rl-chatpick-head .rl-picker-search:focus-within { border: 0; box-shadow: none; background: transparent; }
 
 /* ---------- превью ссылки в пузыре ---------- */
-.rl-webpage { position: relative; display: flow-root; max-width: 29rem; margin: 6px 0 2px; padding: 5px 8px 7px 12px; border-radius: 6px; overflow: hidden;
+.rl-webpage { position: relative; display: flow-root; max-width: none;   /* во всю ширину пузыря, как в Telegram */
+  margin: 6px 0 2px; padding: 5px 8px 7px 12px; border-radius: 6px; overflow: hidden;
   background: color-mix(in srgb, var(--lp-tone) 10%, transparent); color: var(--ink); text-decoration: none; font: 400 14px/19px var(--font-sans);
   animation: rl-webpage-in 220ms ease-out both; transition: background-color 150ms ease; }
 .rl-webpage:hover { background: color-mix(in srgb, var(--lp-tone) 16%, transparent); }

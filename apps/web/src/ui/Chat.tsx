@@ -18,7 +18,7 @@ import type { LinkPreview } from '@relay/protocol';
 import { membersStatus, useMembers } from '../members';
 import { Playlist } from './Playlist';
 import { inProfile, toggleProfileMusic, type Track } from '../music';
-import { Avatar, Button, Icon, MediaPolicy, peerTone, ChatSearchBar, Highlight, ripple, useMinVisible, requestMeasure, Composer, DropOverlay, GlassBar, IconButton, Menu, Modal, ConfirmDialog, Presence, ReactionPicker, plural, requestMutation, SelectionBar, isHeavyAnimating, onHeavyAnimationEnd, applyMarkdown, emptyValue, sameValue, voiceSupported, PlayerBar, roundSupported, startRound, Verified } from '@relay/ui';
+import { Avatar, Button, Icon, MediaPolicy, peerTone, ChatSearchBar, Highlight, ripple, useMinVisible, requestMeasure, Composer, DropOverlay, GlassBar, IconButton, Menu, Modal, ConfirmDialog, Presence, ReactionPicker, reducedMotion, plural, requestMutation, SelectionBar, isHeavyAnimating, onHeavyAnimationEnd, applyMarkdown, emptyValue, sameValue, voiceSupported, PlayerBar, roundSupported, startRound, Verified } from '@relay/ui';
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'preact/hooks';
 import { closeChat, deleteMessage, editMessage, ensureNames, focusMessage, openChat, openUserChat, pinMessage, unpinMessage, sendFile, sendFiles, sendRound, sendVoice, react, saveDraft, searchMessages, send, typing, typingDone } from '../data';
 import type { Item, SearchHit } from '@relay/sync-engine/src/types';
@@ -97,7 +97,14 @@ export function Chat({ chatId, frameKey, active }: { chatId: number; frameKey: s
     focusMessage({ id: f.hits[at].id, sort: f.hits[at].sort });
     return { ...f, at };
   });
-  const closeFind = () => { setFinding(false); setFindQ(''); setFound(null); setListOpen(true); };
+  // закрытие поиска — с обратной анимацией (карточка гаснет и сжимается к правому краю), потом сброс
+  const [findClosing, setFindClosing] = useState(false);
+  const closeFind = () => {
+    if (findClosing) return;
+    if (reducedMotion()) { setFinding(false); setFindQ(''); setFound(null); setListOpen(true); return; }
+    setFindClosing(true);
+    setTimeout(() => { setFinding(false); setFindQ(''); setFound(null); setListOpen(true); setFindClosing(false); }, 150);
+  };
   // лоадер в строке поиска: запрос ушёл, ответа на эту строку ещё нет (с задержкой и минимумом — не мигает)
   const findWant = findQ.trim();
   const searching = useMinVisible(finding && findWant.length >= 2 && found?.q !== findWant, { delay: 120, min: 450 });
@@ -393,7 +400,7 @@ export function Chat({ chatId, frameKey, active }: { chatId: number; frameKey: s
         ) : null}
         {/* поиск по чату — карточка внутри шапки, как в Telegram: аватар и правая кнопка остаются видны */}
         {finding ? (
-          <div class={'app-findcard' + (listOpen && found ? ' app-findcard-open' : '')}>
+          <div class={'app-findcard' + (listOpen && found ? ' app-findcard-open' : '') + (findClosing ? ' app-findcard-closing' : '')}>
             <ChatSearchBar
               id="chat-find"
               value={findQ}

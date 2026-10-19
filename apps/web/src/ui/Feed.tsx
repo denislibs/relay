@@ -7,7 +7,7 @@ import { ArticleBlocks, Avatar, Bubble, Icon, peerTone, DateDivider, DatePicker,
 import { memo } from 'preact/compat';
 import { useEffect, useLayoutEffect, useRef, useState } from 'preact/hooks';
 import { clearFocus, ensureNames, focusMessage, openInner, jumpToDate, localPreview, markListened, moveWindow, react, savePosition, savedPosition, seen } from '../data';
-import { activeFrame, frameByKey, getGlobal, useGlobal } from '../global';
+import { activeFrame, frameByKey, getGlobal, setGlobal, useGlobal } from '../global';
 import { toggleMusic, trackTitle, useFileCached } from '../music';
 import { showToast } from '../settingsData';
 import { startForward, toggleSelect } from '../forward';
@@ -46,10 +46,18 @@ const Row = memo(function Row({ chatId, voiceTitle, author, onAuthor, onOpen, hl
     if (c) { c.count++; c.mine ||= r.userId === meId; } else chips.push({ emoji: r.emoji, count: 1, mine: r.userId === meId });
   }
   const att = m.attachment as Att | null | undefined;
-  // пересланное: «Переслано от» с аватаром и именем автора; клик — чат с ним (себя не открываем)
+  // пересланное: «Переслано от» с аватаром и именем автора. Клик (как в Telegram): оригинал доступен — к нему;
+  // иначе — чат с автором, а если мы уже в нём — его профиль (панель «Информация»)
   const ff = !m.deleted ? m.fwdFrom as { userId: number; name: string; chatId: number; messageId: number } | null | undefined : null;
-  const fwd = ff ? { name: ff.name, tone: peerTone(ff.userId), avatar: senderAvatar(ff.userId),
-    onClick: ff.userId !== meId && onUser ? () => onUser(ff.userId) : undefined } : undefined;
+  const openFwd = ff ? () => {
+    const g = getGlobal();
+    if (ff.chatId != null && g.chats.some((c) => c.id === ff.chatId)) { goToOriginal(ff.chatId, ff.messageId); return; }
+    if (ff.userId === meId) return;
+    const here = g.chats.find((c) => c.id === chatId);
+    if (here?.kind === 'direct' && here.peerId === ff.userId) { setGlobal({ infoOpen: true }); return; }
+    onUser?.(ff.userId);
+  } : undefined;
+  const fwd = ff ? { name: ff.name, tone: peerTone(ff.userId), avatar: senderAvatar(ff.userId), onClick: openFwd } : undefined;
   // режим выбора: строка отмечается кликом (обработчик — у ленты), кружок-галочка слева
   const wrap = (base: string) => base + (flash ? ' app-msg-flash' : '') + (sel !== undefined ? ' app-msg-sel' : '') + (sel ? ' app-msg-on' : '') + (grp ? ' app-msg-grp' : '');
   // круглая стрелка «Переслать» у пузыря при наведении — у медиа и длинных сообщений (не в режиме выбора)
