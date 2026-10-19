@@ -1,6 +1,6 @@
 import { ChatBanner } from './ChatBanner';
 import { UpdatePill } from './UpdatePill';
-import { Avatar, ChatRow, Highlight, Icon, Menu, Presence, SlideStack, ChatRowSkeleton, useMinVisible, EmptyState, WindowList, FolderTabs, SidebarCard, SidebarHeader, peerTone, ripple } from '@relay/ui';
+import { Avatar, ChatRow, Highlight, Icon, MenuPopover, Presence, SlideStack, ChatRowSkeleton, useMinVisible, EmptyState, WindowList, FolderTabs, SidebarCard, SidebarHeader, peerTone, ripple } from '@relay/ui';
 import type { Item } from '@relay/sync-engine/src/types';
 import { ensureNames, loadMoreChats, openChat } from '../data';
 import { closeSearch, openSearch } from '../search';
@@ -89,7 +89,7 @@ const ROW = 72; // высота строки чата (--size-row) — спис�
 
 
 export function Sidebar() {
-  const [menu, setMenu] = useState(false);
+  const [menu, setMenu] = useState<HTMLElement | null>(null);   // главное меню: у кнопки ☰
   // контекстное меню строки чата (правая кнопка): как в Telegram — у курсора
   const [rowMenu, setRowMenu] = useState<{ id: number; x: number; y: number } | null>(null);
   const onRowMenu = useRef((id: number, x: number, y: number) => setRowMenu({ id, x, y })).current;
@@ -106,6 +106,7 @@ export function Sidebar() {
   useGlobal((s) => s.prefs.timeFormat);   // смена формата времени перерисовывает время в списке
   const dark = isDark(theme);
   const view = useGlobal((s) => s.sidebarView);
+  useEffect(() => { if (view !== 'chats') setMenu(null); }, [view]);   // ушли на другой экран — меню закрыто
   const me = useGlobal((s) => s.me)!;
   const chats = useGlobal((s) => s.chats);
   const folders = useGlobal((s) => s.settings.folders);
@@ -214,7 +215,7 @@ export function Sidebar() {
       class={fromSearch ? 'app-from-search' : undefined}
       embedded
       paged
-      header={<SidebarHeader onMenu={() => setMenu(true)} back={searchOpen} onBack={closeSearch} status={searchStatus ?? undefined} searchId="side-search" value={search} placeholder="Поиск"
+      header={<SidebarHeader onMenu={(e: MouseEvent) => setMenu(e.currentTarget as HTMLElement)} back={searchOpen} onBack={closeSearch} status={searchStatus ?? undefined} searchId="side-search" value={search} placeholder="Поиск"
         onSearchFocus={openSearch} onSearchKey={(e: KeyboardEvent) => { if (e.key === 'Escape') { e.preventDefault(); closeSearch(); } }}
         onSearch={(e: Event) => setGlobal({ search: (e.target as HTMLInputElement).value, searchOpen: true })} />}
       top={!searchOpen ? <ChatBanner /> : null}
@@ -222,30 +223,25 @@ export function Sidebar() {
       banner={
         <>
           <RowMenu at={rowMenu} onClose={() => setRowMenu(null)} />
-          {menu ? <div class="rl-msgmenu-scrim" onClick={() => setMenu(false)} /> : null}
-          {/* при переходе на другой экран меню снимаем сразу, без анимации исчезания поверх слайда */}
-          {view === 'chats' ? <Presence show={menu} exitMs={160}>
-            <div class="app-sidemenu">
-              <Menu
+          <MenuPopover
+                open={!!menu && view === 'chats'} anchor={menu ?? undefined} placement="bottom-start" class="app-sidemenu"
                 label="Главное меню"
-                onClose={() => setMenu(false)}
-                header={
-                  <button type="button" role="menuitem" class="rl-menu-item app-menu-profile" onClick={() => { setMenu(false); void go('settings'); }}>
+                onClose={() => setMenu(null)}
+                menuHeader={
+                  <button type="button" role="menuitem" class="rl-menu-item app-menu-profile" onClick={() => { setMenu(null); void go('settings'); }}>
                     <Avatar name={me.name} tone={peerTone(me.userId)} size={32} {...avatarPhoto(me.photo)} /><span>{me.name}</span>
                   </button>
                 }
                 items={[
-                  { icon: 'account', label: 'Мой профиль', onClick: () => { setMenu(false); void go('settings'); } },
-                  { icon: 'contact', label: 'Контакты', onClick: () => { setMenu(false); void go('contacts'); } },
-                  { icon: 'settings', label: 'Настройки', onClick: () => { setMenu(false); void go('settings'); } },
+                  { icon: 'account', label: 'Мой профиль', onClick: () => { setMenu(null); void go('settings'); } },
+                  { icon: 'contact', label: 'Контакты', onClick: () => { setMenu(null); void go('contacts'); } },
+                  { icon: 'settings', label: 'Настройки', onClick: () => { setMenu(null); void go('settings'); } },
                   '-',
                   { icon: 'more', label: 'Ещё', submenu: [
                     { icon: 'moon', label: 'Ночной режим', checked: dark, keepOpen: true, onClick: () => setTheme(dark ? 'light' : 'dark') },
                   ] },
                 ]}
               />
-            </div>
-          </Presence> : null}
         </>
       }
       fab={searchOpen ? undefined : <NewChatFab />}
@@ -283,12 +279,8 @@ function RowMenu({ at, onClose }: { at: { id: number; x: number; y: number } | n
   const unread = (chat?.unread as number) > 0;
   const lastId = ((chat?.last as { id?: number | null } | null)?.id ?? 0) || (chat?.knownMaxId as number) || 0;
   return (
-    <Presence show={!!at && !!chat} exitMs={140}>
-      {p ? (
-        <>
-          <div class="rl-msgmenu-scrim" onClick={onClose} onContextMenu={(e) => { e.preventDefault(); onClose(); }} />
-          <div class="rl-msgmenu" style={{ left: Math.min(p.x, innerWidth - 240), top: Math.min(p.y, innerHeight - 200) }}>
-            <Menu
+            <MenuPopover
+              open={!!at && !!chat} anchor={p ?? undefined}
               label="Действия с чатом"
               onClose={onClose}
               items={[
@@ -299,29 +291,21 @@ function RowMenu({ at, onClose }: { at: { id: number; x: number; y: number } | n
                 { icon: 'info', label: 'Информация', onClick: () => { onClose(); openChat(id); setGlobal({ infoOpen: true }); } },
               ]}
             />
-          </div>
-        </>
-      ) : null}
-    </Presence>
   );
 }
 
 /** Карандаш внизу списка — как в Telegram: меню «Новая группа / Новое сообщение» над кнопкой, сама кнопка становится крестиком. */
 function NewChatFab() {
   const [open, setOpen] = useState(false);
+  const btn = useRef<HTMLButtonElement>(null);
   const pick = (path: string) => { setOpen(false); void go(path); };
   return (
     <div class="app-newchat-fab">
-      <Presence show={open} exitMs={160}>
-        <div class="app-newchat-menu">
-          <div class="rl-recmode-scrim" onClick={() => setOpen(false)} />
-          <Menu label="Создать" onClose={() => setOpen(false)} items={[
+      <MenuPopover open={open} anchor={btn.current ?? undefined} placement="top-end" label="Создать" onClose={() => setOpen(false)} items={[
             { icon: 'community', label: 'Новая группа', onClick: () => { setGlobal({ newGroup: null }); pick('newGroup'); } },
             { icon: 'contact', label: 'Новое сообщение', onClick: () => pick('contacts') },
           ]} />
-        </div>
-      </Presence>
-      <button type="button" class={'rl-fab-main app-newchat-btn' + (open ? ' app-newchat-open' : '')} aria-label={open ? 'Закрыть' : 'Новый чат'}
+      <button ref={btn} type="button" class={'rl-fab-main app-newchat-btn' + (open ? ' app-newchat-open' : '')} aria-label={open ? 'Закрыть' : 'Новый чат'}
         aria-expanded={open} aria-haspopup="menu" onPointerDown={ripple} onClick={() => setOpen(!open)}>
         <Icon name="pencil" size={24} class="app-newchat-pencil" />
         <Icon name="close" size={24} class="app-newchat-close" />

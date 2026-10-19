@@ -28,6 +28,7 @@ export * from './select.js';
 export * from './chatPicker.js';
 export * from './media/playingRing.js';
 export * from './messageCopy.js';
+export * from './popover.js';
 export * from './todoModal.js';
 export * from './todoBubble.js';
 export * from './formattedDate.js';

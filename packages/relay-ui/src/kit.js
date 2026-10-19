@@ -1,7 +1,7 @@
 import { h, Fragment, toChildArray, createContext } from 'preact';
 import { useState, useRef, useEffect, useLayoutEffect, useContext } from 'preact/hooks';
 import { createPortal } from 'preact/compat';
-import { MentionList, AttachMenu } from './more.js';
+import { MentionList } from './more.js';
 import { requestMeasure, requestMutation, beginHeavyAnimation, onHeavyAnimationEnd, isHeavyAnimating, forceMeasure } from './schedule.js';
 
 /* Relay UI kit — Preact. Ported 1:1 from the original kit; see index.js for the public surface. */

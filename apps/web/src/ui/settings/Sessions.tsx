@@ -1,4 +1,4 @@
-import { Button, ChatRowSkeleton, ConfirmDialog, EmptyState, InfoRow, Menu, Modal, PanelHeader, Presence, SelectRow, Section, reducedMotion, useMinVisible } from '@relay/ui';
+import { Button, ChatRowSkeleton, ConfirmDialog, EmptyState, InfoRow, MenuPopover, Modal, PanelHeader, Presence, SelectRow, Section, reducedMotion, useMinVisible } from '@relay/ui';
 import type { SessionInfo } from '@relay/protocol';
 import { useEffect, useRef, useState } from 'preact/hooks';
 import { sessionsSeen } from '../../banners';
@@ -124,14 +124,8 @@ export function Sessions() {
           )}
         </div>
       </div>
-      {menu ? (
-        <>
-          <div class="rl-msgmenu-scrim" onClick={() => setMenu(null)} onContextMenu={(e) => { e.preventDefault(); setMenu(null); }} />
-          <div class="rl-msgmenu" style={{ left: Math.min(menu.x, innerWidth - 240), top: Math.min(menu.y, innerHeight - 80) }}>
-            <Menu label="Действия" onClose={() => setMenu(null)} items={[{ icon: 'logout', label: 'Завершить', danger: true, onClick: () => end(menu.id) }]} />
-          </div>
-        </>
-      ) : null}
+      <MenuPopover open={!!menu} anchor={menu ?? undefined} label="Действия" onClose={() => setMenu(null)}
+        items={menu ? [{ icon: 'logout', label: 'Завершить', danger: true, onClick: () => end(menu.id) }] : []} />
       {shown ? (
         <Modal title={shown.device} size="slim" onClose={() => setDetails(null)} actions={shown.current ? null : (
           <>

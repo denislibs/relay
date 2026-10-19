@@ -80,20 +80,6 @@ function ReactionPicker(props) {
     h('button', { type: 'button', class: 'rl-rpick-btn rl-rpick-more', style: { '--i': list.length }, 'aria-label': 'Другие реакции', onClick: props.onMore }, h(Icon, { name: 'plus', size: 18 })));
 }
 
-/* ---------- AttachMenu: what to attach, items pop in one after another ---------- */
-// только то, что работает (как в Telegram: сначала медиа, потом файл); остальное приложение передаёт само через items
-var ATTACH = [
-  { key: 'media', icon: 'image', label: 'Фото или видео' },
-  { key: 'doc', icon: 'file', label: 'Файл' }
-];
-function AttachMenu(props) {
-  return h('div', { class: 'rl-attach', role: 'menu', 'aria-label': 'Прикрепить', onMouseEnter: props.onMouseEnter, onMouseLeave: props.onMouseLeave },
-    (props.items || ATTACH).map(function (it) {
-      return h('button', { key: it.key, type: 'button', role: 'menuitem', class: 'rl-attach-item', onPointerDown: ripple, onClick: function () { if (props.onPick) props.onPick(it.key); } },
-        h('span', { class: 'rl-attach-icon' }, h(Icon, { name: it.icon, size: 22 })), it.label);
-    }));
-}
-
 /* ---------- MentionList: @-autocomplete above the composer ---------- */
 function MentionList(props) {
   return h('div', { class: 'rl-mentions', role: 'listbox', 'aria-label': 'Участники' },
@@ -931,4 +917,4 @@ function GlassBar(props) {
   return h('header', { class: cx('rl-glassbar', props.class) }, props.children);
 }
 
-export { patternColor, Wallpaper, nudgeWallpaper, buildPattern, DOODLES, PATTERN_SETS, FloatShell, SideResizer, SidebarCard, SidebarHeader, FolderTabs, FolderRail, Fab, GlassBar, WindowList, AsidePanel, SideFrame, SlideStack, Menu, ReactionPicker, AttachMenu, MentionList, DropOverlay, LinkPreview, PollBubble, UnreadDivider, SelectionBar, ChatSearchBar, Highlight, ContactPicker, CallRow, StatusAvatar, LoginQR, VirtualList, BottomNav, Tooltip, plural };
+export { patternColor, Wallpaper, nudgeWallpaper, buildPattern, DOODLES, PATTERN_SETS, FloatShell, SideResizer, SidebarCard, SidebarHeader, FolderTabs, FolderRail, Fab, GlassBar, WindowList, AsidePanel, SideFrame, SlideStack, Menu, ReactionPicker, MentionList, DropOverlay, LinkPreview, PollBubble, UnreadDivider, SelectionBar, ChatSearchBar, Highlight, ContactPicker, CallRow, StatusAvatar, LoginQR, VirtualList, BottomNav, Tooltip, plural };

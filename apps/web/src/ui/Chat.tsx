@@ -25,7 +25,7 @@ import type { LinkPreview } from '@relay/protocol';
 import { membersStatus, useMembers } from '../members';
 import { Playlist } from './Playlist';
 import { inProfile, toggleProfileMusic, type Track } from '../music';
-import { Avatar, Button, Icon, MediaPolicy, peerTone, ChatSearchBar, Highlight, ripple, useMinVisible, requestMeasure, Composer, DropOverlay, GlassBar, IconButton, Menu, Modal, ConfirmDialog, Presence, ReactionPicker, reducedMotion, plural, requestMutation, SelectionBar, isHeavyAnimating, onHeavyAnimationEnd, applyMarkdown, emptyValue, sameValue, voiceSupported, PlayerBar, roundSupported, startRound, Verified, canCopyImage, clipboardHtml, copyImage, copyRich, downloadUrl, TodoModal, TODO_ITEMS_MAX, DateModal, setDateCopiedToast } from '@relay/ui';
+import { Avatar, Button, Icon, MediaPolicy, peerTone, ChatSearchBar, Highlight, ripple, useMinVisible, requestMeasure, Composer, DropOverlay, GlassBar, IconButton, MenuPopover, Modal, ConfirmDialog, Presence, ReactionPicker, reducedMotion, plural, requestMutation, SelectionBar, isHeavyAnimating, onHeavyAnimationEnd, applyMarkdown, emptyValue, sameValue, voiceSupported, PlayerBar, roundSupported, startRound, Verified, canCopyImage, clipboardHtml, copyImage, copyRich, downloadUrl, TodoModal, TODO_ITEMS_MAX, DateModal, setDateCopiedToast } from '@relay/ui';
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'preact/hooks';
 import { sendTodo, appendTodo, editTodo, closeChat, deleteMessage, editMessage, ensureNames, focusMessage, openChat, openUserChat, pinMessage, unpinMessage, sendFile, sendFiles, sendRound, sendVoice, react, saveDraft, searchMessages, send, typing, typingDone } from '../data';
 import type { Item, SearchHit } from '@relay/sync-engine/src/types';
@@ -72,7 +72,7 @@ export function Chat({ chatId, frameKey, active }: { chatId: number; frameKey: s
   const shell = useRef<HTMLSpanElement>(null);
   const stick = useRef(true);              // лента прижата к низу (Feed ведёт, отправка выставляет)
   const [menu, setMenu] = useState<{ x: number; y: number; key: string; extra?: MenuExtra } | null>(null);
-  const [fwdMenu, setFwdMenu] = useState<{ x: number; y: number } | null>(null);   // опции пересылки в поле ввода
+  const [fwdMenu, setFwdMenu] = useState<HTMLElement | null>(null);   // опции пересылки в поле ввода
   const [replyKey, setReplyKey] = useState<string | null>(null);
   const [editing, setEditing] = useState<{ id: number; original: Value; draft: Value } | null>(null);   // правка своего сообщения
   const api = useRef<ComposerApi | null>(null);
@@ -335,17 +335,6 @@ export function Chat({ chatId, frameKey, active }: { chatId: number; frameKey: s
   const replyTo = replyKey ? messages.find((m) => m.key === replyKey) : undefined;
   const authorOf = (senderId: unknown) => (senderId === me.userId ? 'Вы' : title);
   const menuMsg = menu ? messages.find((m) => m.key === menu.key) : undefined;
-  // меню разной длины: после отрисовки меряем и, если не влезает снизу, поднимаем (как в Telegram — целиком в окне)
-  const menuBox = useRef<HTMLDivElement>(null);
-  useLayoutEffect(() => {
-    const el = menuBox.current;
-    if (!el || !menu) return;
-    requestMeasure(() => {
-      const r = el.getBoundingClientRect();
-      const top = Math.max(8, Math.min(menu.y, innerHeight - r.height - 8));
-      if (Math.abs(top - r.top) > 0.5) requestMutation(() => { el.style.top = top + 'px'; });
-    });
-  }, [menu]);
   // пересылка, ждущая в поле ввода: «От: …» (или «Имена отправителей скрыты») и что пересылаем
   const fwd = useGlobal((s) => s.fwdDraft[chatId]) ?? null;
   const fwdQuote = fwd && !editing ? {
@@ -353,7 +342,7 @@ export function Chat({ chatId, frameKey, active }: { chatId: number; frameKey: s
     author: fwd.hideSender ? 'Имена отправителей скрыты' : 'От: ' + fwd.preview.senders.map((s) => (s.id === me.userId ? me.name : s.name)).join(', '),
     text: fwd.preview.count > 1 ? `${fwd.preview.count} ${plural(fwd.preview.count, 'пересланное сообщение', 'пересланных сообщения', 'пересланных сообщений')}` : fwd.preview.text,
     tone: fwd.hideSender || !fwd.preview.senders.length ? peerTone(me.userId) : peerTone(fwd.preview.senders[0].id),
-    onClick: (e: MouseEvent) => { const r = (e.currentTarget as HTMLElement).getBoundingClientRect(); setFwdMenu({ x: r.left + 16, y: r.top }); },
+    onClick: (e: MouseEvent) => setFwdMenu(e.currentTarget as HTMLElement),
   } : null;
   const nameOf = (id: number) => (id === me.userId ? me.name : names[id] ?? (chat?.kind === 'direct' ? title : ''));
   // «статья»: развернуть (текст поля ввода — в редактор), свернуть (простое — обратно в поле), отправить
@@ -551,18 +540,17 @@ export function Chat({ chatId, frameKey, active }: { chatId: number; frameKey: s
           </div>
         </Presence>
       </div>}
-      {menu && menuMsg ? (() => {
+      {/* меню сообщения: левый верхний угол — у курсора, реакции — над ним (как в Telegram) */}
+      {(() => {
+        if (!menu || !menuMsg) return <MenuPopover open={false} />;
         const own = menuMsg.senderId === me.userId && !menuMsg.deleted && menuMsg.id != null;
         const att = menuMsg.attachment as { id?: string; kind?: string; name?: string; mime?: string } | null | undefined;
         const myReaction = ((menuMsg.reactions as { userId: number; emoji: string }[] | undefined) ?? []).find((r) => r.userId === me.userId)?.emoji;
         return (
-          <>
-            <div class="rl-msgmenu-scrim" onClick={() => setMenu(null)} onContextMenu={(e) => { e.preventDefault(); setMenu(null); }} />
-            <div class="rl-msgmenu" ref={menuBox} style={{ left: Math.min(menu.x, innerWidth - 300), top: menu.y }}>
-              {menuMsg.id != null && !menuMsg.deleted && !system && (!gRights || gRights.react) && gInfo?.reactions.mode !== 'none' ? (
+          <MenuPopover open anchor={menu} class="app-msgmenu"
+            header={menuMsg.id != null && !menuMsg.deleted && !system && (!gRights || gRights.react) && gInfo?.reactions.mode !== 'none' ? (
                 <ReactionPicker emoji={gInfo?.reactions.mode === 'some' ? gInfo.reactions.allowed.slice(0, 7) : undefined} selected={myReaction} onPick={(emoji: string) => { react(chatId, menuMsg.id as number, myReaction === emoji ? null : emoji); setMenu(null); }} />
               ) : null}
-              <Menu
                 label="Действия с сообщением"
                 onClose={() => setMenu(null)}
                 items={[
@@ -590,19 +578,13 @@ export function Chat({ chatId, frameKey, active }: { chatId: number; frameKey: s
                   ...(menuMsg.id != null && !menuMsg.deleted && !menuMsg.service && !gInfo?.protected ? [{ icon: 'checkCircle', label: 'Выбрать', onClick: () => startSelect(chatId, groupOf(menuMsg).map((x) => x.key as string)) }] : []),
                   ...(own || (gMe?.admin?.delete && !menuMsg.deleted && menuMsg.id != null && !menuMsg.service) ? ['-' as const, { icon: 'trash', label: 'Удалить', danger: true, onClick: () => setConfirmDelete({ ids: [menuMsg.id as number] }) }] : []),
                 ]}
-              />
-            </div>
-          </>
+          />
         );
-      })() : null}
-      {fwdMenu && fwd ? (
-        <>
-          <div class="rl-msgmenu-scrim" onClick={() => setFwdMenu(null)} />
-          <div class="rl-msgmenu app-fwdmenu" style={{ left: Math.min(fwdMenu.x, innerWidth - 260), bottom: innerHeight - fwdMenu.y + 6 }}>
-            <Menu
+      })()}
+      <MenuPopover open={!!(fwdMenu && fwd)} anchor={fwdMenu ?? undefined} placement="top-start"
               label="Параметры пересылки"
               onClose={() => setFwdMenu(null)}
-              items={[
+              items={!fwd ? [] : [
                 fwd.hideSender
                   ? { icon: 'eye', label: 'Показать отправителя', onClick: () => patchForwardDraft(chatId, { hideSender: false }) }
                   : { icon: 'eyeOff', label: 'Скрыть отправителя', onClick: () => patchForwardDraft(chatId, { hideSender: true }) },
@@ -611,10 +593,7 @@ export function Chat({ chatId, frameKey, active }: { chatId: number; frameKey: s
                   : { icon: 'eyeOff', label: 'Скрыть подписи', onClick: () => patchForwardDraft(chatId, { hideCaption: true }) }] : []),
                 { icon: 'forward', label: 'Другой чат…', onClick: () => forwardElsewhere(chatId) },
               ]}
-            />
-          </div>
-        </>
-      ) : null}
+      />
       <MusicPicker chatId={chatId} open={musicOpen} onClose={() => setMusicOpen(false)} />
       {dateOpen ? (
         <DateModal

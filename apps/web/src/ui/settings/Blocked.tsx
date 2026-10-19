@@ -1,4 +1,4 @@
-import { ChatRow, ChatRowSkeleton, ContactPicker, EmptyState, Fab, Menu, Modal, PanelHeader, Presence, Section, peerTone, useMinVisible } from '@relay/ui';
+import { ChatRow, ChatRowSkeleton, ContactPicker, EmptyState, Fab, MenuPopover, Modal, PanelHeader, Presence, Section, peerTone, useMinVisible } from '@relay/ui';
 import type { ProfilePhoto } from '@relay/protocol';
 import { rowAvatar } from '../../profilePhoto';
 import { senderAvatar } from '../../profilePhoto';
@@ -68,14 +68,8 @@ export function Blocked() {
           )}
         </div>
       </div>
-      {menu ? (
-        <>
-          <div class="rl-msgmenu-scrim" onClick={() => setMenu(null)} onContextMenu={(e) => { e.preventDefault(); setMenu(null); }} />
-          <div class="rl-msgmenu" style={{ left: Math.min(menu.x, innerWidth - 240), top: Math.min(menu.y, innerHeight - 80) }}>
-            <Menu label="Действия" onClose={() => setMenu(null)} items={[{ icon: 'block', label: 'Разблокировать', onClick: () => { void unblockUser(menu.userId); setMenu(null); } }]} />
-          </div>
-        </>
-      ) : null}
+      <MenuPopover open={!!menu} anchor={menu ?? undefined} label="Действия" onClose={() => setMenu(null)}
+        items={menu ? [{ icon: 'block', label: 'Разблокировать', onClick: () => { void unblockUser(menu.userId); setMenu(null); } }] : []} />
       <div class="rl-fab-slot"><Fab icon="plus" label="Заблокировать пользователя" onClick={() => setPicking(true)} /></div>
       {picking ? (
         <Modal title="Заблокировать пользователя" size="slim" onClose={() => setPicking(false)}>

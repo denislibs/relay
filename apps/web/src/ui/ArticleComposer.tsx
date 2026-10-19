@@ -2,7 +2,7 @@
 // сверху — Отменить/Вернуть и «Свернуть», снизу — панель: «+» (заголовки, цитата, разделитель), списки, ссылка, код,
 // отправить. Ядро редактора (Tiptap) — отдельный бандл /articleEditor.js, грузится при первом развороте.
 // Ctrl/Cmd+Enter — отправить, Esc — свернуть.
-import { IconButton, Menu, Modal, Button, TextField, reducedMotion } from '@relay/ui';
+import { IconButton, MenuPopover, Modal, Button, TextField, reducedMotion } from '@relay/ui';
 
 const CLOSE_MS = 260;
 import type { Block } from '@relay/protocol';
@@ -28,7 +28,7 @@ export function ArticleComposer({ blocks, onCollapse, onSend, onClosing }: { blo
   const host = useRef<HTMLDivElement>(null);
   const ed = useRef<Ed | null>(null);
   const [st, setSt] = useState<EdState>({ canUndo: false, canRedo: false, empty: true, active: {} });
-  const [menu, setMenu] = useState<{ kind: 'insert' | 'lists'; x: number; y: number } | null>(null);
+  const [menu, setMenu] = useState<{ kind: 'insert' | 'lists'; el: HTMLElement } | null>(null);
   const [linkOpen, setLinkOpen] = useState(false);
   const [failed, setFailed] = useState(false);
   const cbs = useRef({ onCollapse, onSend }); cbs.current = { onCollapse, onSend };
@@ -66,7 +66,7 @@ export function ArticleComposer({ blocks, onCollapse, onSend, onClosing }: { blo
   };
   const collapse = () => { const b = ed.current?.getBlocks() ?? blocks; leave(() => cbs.current.onCollapse(b)); };
   const send = () => { const b = ed.current?.getBlocks() ?? []; if (b.length) leave(() => cbs.current.onSend(b)); };
-  const at = (e: MouseEvent, kind: 'insert' | 'lists') => { const r = (e.currentTarget as HTMLElement).getBoundingClientRect(); setMenu({ kind, x: r.left, y: r.top }); };
+  const at = (e: MouseEvent, kind: 'insert' | 'lists') => setMenu({ kind, el: e.currentTarget as HTMLElement });
   const a = st.active;
 
   return (
@@ -90,12 +90,8 @@ export function ArticleComposer({ blocks, onCollapse, onSend, onClosing }: { blo
           <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 12l16-8-6 16-3-7z" /><path d="M11 13l9-9" /></svg>
         </button>
       </div>
-      {menu ? (
-        <>
-          <div class="rl-msgmenu-scrim" onClick={() => setMenu(null)} />
-          <div class="rl-msgmenu app-art-menu" style={{ left: Math.min(menu.x, innerWidth - 240), bottom: innerHeight - menu.y + 6 }}>
-            <Menu label={menu.kind === 'insert' ? 'Вставить блок' : 'Списки'} onClose={() => setMenu(null)}
-              items={menu.kind === 'insert' ? [
+            <MenuPopover open={!!menu} anchor={menu?.el} placement="top-start" label={menu?.kind === 'insert' ? 'Вставить блок' : 'Списки'} onClose={() => setMenu(null)}
+              items={!menu ? [] : menu.kind === 'insert' ? [
                 { icon: 'heading', label: 'Заголовок', submenu: [1, 2, 3].map((l) => ({ label: `Заголовок ${l}`, checked: !!a['h' + l], onClick: () => { ed.current?.heading(l as 1 | 2 | 3); setMenu(null); } })) },
                 { icon: 'quote', label: 'Цитата', onClick: () => { ed.current?.quote(); setMenu(null); } },
                 { icon: 'divider', label: 'Разделитель', onClick: () => { ed.current?.divider(); setMenu(null); } },
@@ -104,9 +100,6 @@ export function ArticleComposer({ blocks, onCollapse, onSend, onClosing }: { blo
                 { icon: 'list', label: 'Маркированный список', onClick: () => { ed.current?.bulletList(); setMenu(null); } },
                 { icon: 'listOrdered', label: 'Нумерованный список', onClick: () => { ed.current?.orderedList(); setMenu(null); } },
               ]} />
-          </div>
-        </>
-      ) : null}
       <LinkDialog open={linkOpen} onClose={() => { setLinkOpen(false); ed.current?.focus(); }} onSave={(url, text) => { setLinkOpen(false); ed.current?.link(url, text); }} />
     </div>
   );

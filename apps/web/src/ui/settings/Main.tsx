@@ -1,6 +1,6 @@
 import { ProfileLinks } from '../links/ProfileLinks';
 import { releaseMediaCache } from '../../storageInfo';
-import { ConfirmDialog, InfoRow, SettingsIcon, Menu, PanelHeader, Presence, ProfileHeader, RichText, Section, Toast, peerTone } from '@relay/ui';
+import { ConfirmDialog, InfoRow, SettingsIcon, MenuPopover, PanelHeader, Presence, ProfileHeader, RichText, Section, Toast, peerTone } from '@relay/ui';
 import { useEffect, useRef, useState } from 'preact/hooks';
 import { getGlobal, setGlobal, useGlobal } from '../../global';
 import { back, go } from '../../nav';
@@ -58,7 +58,7 @@ export function Main() {
   // число сеансов справа на строке «Активные сеансы»: появляется, только когда список уже известен (предзагрузка)
   const sessionCount = useGlobal((s) => (s.sessions ? sessionsView(s.sessions, s.opsKeys).length : null));
   const scroll = useScrollMemory('settings');
-  const [menu, setMenu] = useState(false);
+  const [menu, setMenu] = useState<HTMLElement | null>(null);
   const [confirm, setConfirm] = useState(false);
   const [toast, setToast] = useState<string | null>(null);
   const lastToast = useRef('');
@@ -106,16 +106,12 @@ export function Main() {
         icon="arrowLeft" closeLabel="Назад" title="Настройки" onClose={() => void back()}
         actions={[
           { icon: 'pencil', label: 'Изменить профиль', onClick: () => void go('settings/profile') },
-          { icon: 'more', label: 'Ещё', popup: true, onClick: () => setMenu(true) },
+          { icon: 'more', label: 'Ещё', popup: true, onClick: (e: MouseEvent) => setMenu(e.currentTarget as HTMLElement) },
         ]}
       />
       </div>
-      {menu ? <div class="rl-msgmenu-scrim" onClick={() => setMenu(false)} /> : null}
-      <Presence show={menu} exitMs={160}>
-        <div class="app-pagemenu">
-          <Menu label="Меню настроек" onClose={() => setMenu(false)} items={[{ icon: 'logout', label: 'Выйти', danger: true, onClick: () => setConfirm(true) }]} />
-        </div>
-      </Presence>
+      <MenuPopover open={!!menu} anchor={menu ?? undefined} placement="bottom-end" label="Меню настроек" onClose={() => setMenu(null)}
+        items={[{ icon: 'logout', label: 'Выйти', danger: true, onClick: () => setConfirm(true) }]} />
       <div class="rl-settings" ref={scroll.ref} onScroll={scroll.onScroll}>
         <ProfileHeader name={me.name} tone={peerTone(me.userId)} subtitle={status.phase === 'offline' ? 'нет сети' : 'в сети'} size={96}
           {...(me.photo && !photo.busy ? { ...avatarPhoto(me.photo, true), camera: false, avatarLabel: 'Открыть фото', onAvatar: () => setViewer(0) } : photo.avatar)} />

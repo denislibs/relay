@@ -9,7 +9,10 @@
 import { h } from 'preact';
 import { useEffect, useLayoutEffect, useRef, useState } from 'preact/hooks';
 import { cx, Icon, IconButton, Presence, ReplyQuote, reducedMotion, ripple } from './kit.js';
-import { AttachMenu, MentionList, Menu } from './more.js';
+import { MentionList } from './more.js';
+import { MenuPopover, useHoverMenu } from './popover.js';
+// что прикрепить, если приложение не передало своё: только то, что работает (сначала медиа, потом файл)
+var ATTACH_ITEMS = [{ key: 'media', icon: 'image', label: 'Фото или видео' }, { key: 'doc', icon: 'file', label: 'Файл' }];
 import { peakHub, RecordBar, voiceSession } from './media/recording.js';
 import { startVoice } from './media/voiceRecorder.js';
 import { RoundRecorderView } from './media/roundView.js';
@@ -43,17 +46,7 @@ function Composer(props) {
   var attach = useState(false);
   // как в Telegram Web A: меню вложений открывается наведением на скрепку и закрывается, когда мышь ушла
   // и со скрепки, и с меню (с паузой — чтобы успеть перевести курсор); пальцем — по нажатию
-  var hoverT = useRef(null), openedAt = useRef(0);
-  function hoverIn(e) {
-    if (e && e.pointerType === 'touch') return;
-    if (hoverT.current) { clearTimeout(hoverT.current); hoverT.current = null; }
-    if (!attach[0]) hoverT.current = setTimeout(function () { hoverT.current = null; openedAt.current = performance.now(); attach[1](true); }, 120);
-  }
-  function hoverOut() {
-    if (hoverT.current) clearTimeout(hoverT.current);
-    hoverT.current = setTimeout(function () { hoverT.current = null; attach[1](false); }, 300);
-  }
-  useEffect(function () { return function () { if (hoverT.current) clearTimeout(hoverT.current); }; }, []);
+  var attachHover = useHoverMenu(attach[0], attach[1], { closeMs: 300 });
   var bar = useState(null);          // панель оформления: { x, bottom, active, link, url, s, e, bad }
   var barNow = useRef(null);
   var lastRange = useRef(null);   // где был курсор в последний раз: окна (дата) вставляют туда
@@ -440,7 +433,7 @@ function Composer(props) {
       if (isTextTarget(e.target) || isTextTarget(document.activeElement)) return;
       if (e.altKey || ((e.metaKey || e.ctrlKey) && !(e.code === 'KeyV' && !e.shiftKey))) return;
       if (!(e.metaKey || e.ctrlKey) && (e.key.length !== 1 || e.key === ' ' && document.activeElement && document.activeElement.nodeName === 'BUTTON')) return;
-      if (document.querySelector('.rl-scrim, [aria-modal="true"], .rl-msgmenu, .rl-viewer')) return;
+      if (document.querySelector('.rl-scrim, [aria-modal="true"], .rl-pop, .rl-viewer')) return;
       var s = document.getSelection();
       if (s && !s.isCollapsed && !(e.metaKey || e.ctrlKey)) return;   // выделяют текст в ленте — не мешаем
       // фокус переносим прямо в keydown: сам символ браузер вставит уже в поле
@@ -462,8 +455,9 @@ function Composer(props) {
   return h('div', { class: cx('rl-composer-wrap', props.className || props.class), ref: wrapRef },
     h(Presence, { show: !!(mentionList && mentionList.length), exitMs: 120 },
       h(MentionList, { items: mentionList || [], onPick: pickMention })),
-    h(Presence, { show: attach[0], exitMs: 160 },
-      h(AttachMenu, { items: props.attachItems, onPick: function (k) { attach[1](false); if (props.onAttach) props.onAttach(k); }, onMouseEnter: hoverIn, onMouseLeave: hoverOut })),
+    h(MenuPopover, { open: attach[0], hover: true, anchor: wrapRef.current ? wrapRef.current.querySelector('.rl-attach-toggle') : null, placement: 'top-start', label: 'Прикрепить',
+      onClose: function () { attach[1](false); }, onPointerEnter: attachHover.onPointerEnter, onPointerLeave: attachHover.onPointerLeave,
+      items: (props.attachItems || ATTACH_ITEMS).map(function (it) { return { icon: it.icon, label: it.label, onClick: function () { if (props.onAttach) props.onAttach(it.key); } }; }) }),
     h(Presence, { show: !!b, exitMs: 140 }, b ? h('div', {
       class: cx('rl-fmtbar', b.link && 'rl-fmtbar-link', b.bad && 'rl-fmtbar-bad'), 'data-shake': b.bad ? b.bad % 2 : undefined, role: 'toolbar', 'aria-label': 'Оформление',
       style: { left: b.x + 'px', bottom: b.bottom + 'px' },
@@ -488,13 +482,10 @@ function Composer(props) {
       h('button', { key: 'link', type: 'button', class: cx('rl-fmtbtn', b.active.link && 'rl-fmtbtn-on'), 'aria-pressed': String(!!b.active.link), 'aria-label': b.active.link ? 'Убрать ссылку' : 'Ссылка', title: 'Ссылка ⌘K',
         onClick: function () { if (b.active.link) format('link', null); else openLink(); } }, h(Icon, { name: 'link', size: 20 })),
     ])) : null),
-    h(Presence, { show: modeMenu[0], exitMs: 140 },
-      h('div', { class: 'rl-recmode' },
-        h('div', { class: 'rl-recmode-scrim', onClick: function () { modeMenu[1](false); } }),
-        h(Menu, { label: 'Тип сообщения', onClose: function () { modeMenu[1](false); }, items: [
-          { icon: 'mic', label: 'Голосовое сообщение', onClick: function () { modeMenu[1](false); if (props.onRecordModeChange) props.onRecordModeChange('voice'); } },
-          { icon: 'roundVideo', label: 'Видеосообщение', onClick: function () { modeMenu[1](false); if (props.onRecordModeChange) props.onRecordModeChange('round'); } },
-        ] }))),
+    h(MenuPopover, { open: modeMenu[0], anchor: sendRef.current, placement: 'top-end', label: 'Тип сообщения', onClose: function () { modeMenu[1](false); }, items: [
+      { icon: 'mic', label: 'Голосовое сообщение', onClick: function () { if (props.onRecordModeChange) props.onRecordModeChange('voice'); } },
+      { icon: 'roundVideo', label: 'Видеосообщение', onClick: function () { if (props.onRecordModeChange) props.onRecordModeChange('round'); } },
+    ] }),
     h('div', { class: cx('rl-composer', rec[0] && 'rl-composer-recording', props.replyTo && 'has-reply') },
       // ответ/редактирование — первой строкой внутри поля, как в Telegram: значок (стрелка или карандаш) цветом автора,
       // цитата, крестик; поле плавно раздвигается по высоте
@@ -509,12 +500,8 @@ function Composer(props) {
       roundView[0] ? h(RoundRecorderView, { key: 'round', session: roundView[0].session, closing: roundView[0].closing }) : null,
       rec[0] ? h(RecordBar, { key: 'rec', session: rec[0].session, limitReached: rec[0].limit, forcePaused: rec[0].limit, onDelete: function () { endRecording(true); }, onPaused: props.onRecordPaused }) : null,
       h('div', { class: cx('rl-composer-field', st.empty && 'rl-composer-empty'), hidden: !!rec[0] },
-        h(IconButton, { icon: 'attach', label: 'Прикрепить', active: attach[0], class: 'rl-attach-toggle', onClick: function () {
-          // наведение уже открыло меню — клик следом не закрывает его
-          if (hoverT.current) { clearTimeout(hoverT.current); hoverT.current = null; }
-          if (attach[0] && performance.now() - openedAt.current < 500) return;
-          openedAt.current = performance.now(); attach[1](!attach[0]);
-        }, onMouseEnter: hoverIn, onMouseLeave: hoverOut }),
+        h(IconButton, { icon: 'attach', label: 'Прикрепить', active: attach[0], class: 'rl-attach-toggle', 'aria-haspopup': 'menu',
+          onClick: attachHover.toggle, onPointerEnter: attachHover.onPointerEnter, onPointerLeave: attachHover.onPointerLeave }),
         props.onExpand ? h(IconButton, { icon: 'expand', label: 'Открыть полный редактор', size: 18, class: cx('rl-composer-expand', st.multi && 'rl-composer-expand-on'), onClick: props.onExpand, tabIndex: st.multi ? undefined : -1 }) : null,
         h('div', { class: 'rl-composer-input', ref: boxRef },
           h('div', {

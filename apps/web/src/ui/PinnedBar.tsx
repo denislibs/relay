@@ -1,5 +1,5 @@
 import { hideSpoilers } from '@relay/protocol';
-import { ConfirmDialog, Icon, IconButton, Menu, Presence } from '@relay/ui';
+import { ConfirmDialog, Icon, IconButton, MenuPopover, Presence } from '@relay/ui';
 import type { Item } from '@relay/sync-engine/src/types';
 import { useEffect, useState } from 'preact/hooks';
 import { focusMessage, messagesByIds, unpinMessage } from '../data';
@@ -21,9 +21,9 @@ export function PinnedBar({ chatId }: { chatId: number }) {
   const loaded = useGlobal((s) => activeFrame(s)?.messages);
   const [, rerender] = useState(0);
   const [idx, setIdx] = useState(() => position.get(chatId) ?? 0);
-  const [list, setList] = useState(false);
+  const [list, setList] = useState<HTMLElement | null>(null);
   const [ask, setAsk] = useState<number | 'all' | null>(null);
-  useEffect(() => { setIdx(position.get(chatId) ?? 0); setList(false); }, [chatId]);
+  useEffect(() => { setIdx(position.get(chatId) ?? 0); setList(null); }, [chatId]);
   const i = pinned.length ? Math.min(idx, pinned.length - 1) : 0;
   const id = pinned[i];
   const find = (mid: number) => loaded?.find((m) => m.id === mid) ?? cache.get(chatId + ':' + mid);
@@ -64,22 +64,17 @@ export function PinnedBar({ chatId }: { chatId: number }) {
           </span>
         </button>
         {n > 1
-          ? <IconButton icon="list" label="Все закреплённые" onClick={() => setList(!list)} />
+          ? <IconButton icon="list" label="Все закреплённые" onClick={(e: MouseEvent) => setList(list ? null : e.currentTarget as HTMLElement)} />
           : <IconButton icon="close" label="Открепить" onClick={() => setAsk(id)} />}
-        {list ? (
-          <div class="app-pins-list">
-            <div class="rl-recmode-scrim" onClick={() => setList(false)} />
-            <Menu label="Закреплённые сообщения" onClose={() => setList(false)} items={[
+        <MenuPopover open={!!list} anchor={list ?? undefined} placement="bottom-end" class="app-pins-list" label="Закреплённые сообщения" onClose={() => setList(null)} items={[
               ...pinned.map((p, k) => {
                 const m = find(p);
                 const text = m ? (hideSpoilers(String(m.body ?? ''), m.entities as never).replace(/\s+/g, ' ').trim() || trackOf(m) || KIND[String(m.kind)] || 'Сообщение').slice(0, 60) : 'Сообщение';
-                return { icon: 'pin', label: text, onClick: () => { setList(false); position.set(chatId, k); setIdx(k); focusMessage({ id: p, sort: p }); } };
+                return { icon: 'pin', label: text, onClick: () => { setList(null); position.set(chatId, k); setIdx(k); focusMessage({ id: p, sort: p }); } };
               }),
               '-' as const,
-              { icon: 'close', label: 'Открепить все', danger: true, onClick: () => { setList(false); setAsk('all'); } },
+              { icon: 'close', label: 'Открепить все', danger: true, onClick: () => { setList(null); setAsk('all'); } },
             ]} />
-          </div>
-        ) : null}
         <ConfirmDialog open={ask != null} danger title={ask === 'all' ? 'Открепить все сообщения?' : 'Открепить сообщение?'}
           text={ask === 'all' ? 'Все закреплённые сообщения этого чата будут откреплены у всех участников.' : 'Сообщение будет откреплено у всех участников чата.'}
           confirm="Открепить" cancel="Отмена" onCancel={() => setAsk(null)}

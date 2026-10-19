@@ -5,7 +5,7 @@
 import { h } from 'preact';
 import { useEffect, useRef, useState } from 'preact/hooks';
 import { cx, IconButton, Icon, Presence } from '../kit.js';
-import { Menu } from '../more.js';
+import { MenuPopover } from '../popover.js';
 import * as player from './player.js';
 
 function fmt(sec) { sec = Math.max(0, Math.floor(sec || 0)); return Math.floor(sec / 60) + ':' + (sec % 60 < 10 ? '0' : '') + (sec % 60); }
@@ -30,6 +30,7 @@ export function PlayerBar(props) {
   var still = useRef(!!s.track);
   if (!s.track) still.current = false;
   var menu = useState(null);             // 'speed' | 'order' | null
+  var menuAt = useRef(null);             // обёртка кнопки — к ней меню
   var vol = useState(false);
   var line = useRef(null), clock = useRef(null);
   useEffect(function () {
@@ -70,22 +71,18 @@ export function PlayerBar(props) {
           h('input', { type: 'range', min: 0, max: 1, step: 0.01, value: s.muted ? 0 : s.volume, 'aria-label': 'Громкость',
             onInput: function (e) { player.setVolume(Number(e.currentTarget.value)); } })) : null),
       music
-        ? h('div', { class: 'rl-playerbar-speed-wrap' },
+        ? h('div', { class: 'rl-playerbar-speed-wrap', ref: menuAt },
           h(IconButton, { icon: ORDER_INFO[s.order].icon, label: ORDER_INFO[s.order].label, size: 22, onClick: function () { menu[1](menu[0] === 'order' ? null : 'order'); } }),
-          menu[0] === 'order' ? h('div', { class: 'rl-playerbar-menu' },
-            h('div', { class: 'rl-recmode-scrim', onClick: closeMenu }),
-            h(Menu, { label: 'Порядок', onClose: closeMenu, items: ['shuffle', 'all', 'one', 'off'].map(function (k) {
-              return { icon: s.order === k ? 'check' : ORDER_INFO[k].icon, label: ORDER_INFO[k].label, onClick: function () { closeMenu(); player.setOrder(k); } };
-            }) })) : null)
-        : h('div', { class: 'rl-playerbar-speed-wrap' },
+          h(MenuPopover, { open: menu[0] === 'order', anchor: menuAt.current, placement: 'bottom-end', label: 'Порядок', onClose: closeMenu, items: ['shuffle', 'all', 'one', 'off'].map(function (k) {
+            return { icon: s.order === k ? 'check' : ORDER_INFO[k].icon, label: ORDER_INFO[k].label, onClick: function () { player.setOrder(k); } };
+          }) }))
+        : h('div', { class: 'rl-playerbar-speed-wrap', ref: menuAt },
           h('button', { type: 'button', class: cx('rl-playerbar-speed', s.rate !== 1 && 'rl-playerbar-speed-on'), 'aria-label': 'Скорость ' + labelOf(s.rate),
             onClick: function () { player.toggleFast(); },
             onContextMenu: function (e) { e.preventDefault(); menu[1]('speed'); } }, s.rate === 1 ? labelOf(s.fast) : labelOf(s.rate)),
-          menu[0] === 'speed' ? h('div', { class: 'rl-playerbar-menu' },
-            h('div', { class: 'rl-recmode-scrim', onClick: closeMenu }),
-            h(Menu, { label: 'Скорость', onClose: closeMenu, items: player.SPEEDS.map(function (x) {
-              return { icon: x.rate === s.rate ? 'check' : undefined, label: x.label, onClick: function () { closeMenu(); player.setRate(x.rate); } };
-            }) })) : null),
+          h(MenuPopover, { open: menu[0] === 'speed', anchor: menuAt.current, placement: 'bottom-end', label: 'Скорость', onClose: closeMenu, items: player.SPEEDS.map(function (x) {
+            return { icon: x.rate === s.rate ? 'check' : undefined, label: x.label, onClick: function () { player.setRate(x.rate); } };
+          }) })),
       h(IconButton, { icon: 'close', label: 'Закрыть плеер', size: 22, onClick: function () { player.close(); } }),
       // полоска обрезается по скруглению острова в своём слое: сам остров не обрезает меню и громкость
       h('div', { class: 'rl-playerbar-clip', 'aria-hidden': 'true' }, h('div', { class: 'rl-playerbar-seek', onClick: seekAt }, h('i', { ref: line, class: 'rl-playerbar-line' })))))) : null);

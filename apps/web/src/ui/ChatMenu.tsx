@@ -6,9 +6,8 @@
 //  • служебный «Relay»: только звук.
 // «Отключить звук…» — окно со сроками (без подменю), «Включить звук» — сразу.
 import { useEffect, useRef, useState } from 'preact/hooks';
-import { createPortal } from 'preact/compat';
 import type { GroupInfo, MyMembership } from '@relay/protocol';
-import { ConfirmDialog, IconButton, Menu, Modal, RadioRow } from '@relay/ui';
+import { ConfirmDialog, IconButton, MenuPopover, Modal, RadioRow, useHoverMenu } from '@relay/ui';
 import { getGlobal, setGlobal, useGlobal } from '../global';
 import { blockUser, showToast, unblockUser, useUser } from '../settingsData';
 import { act, canManage } from '../groups';
@@ -32,16 +31,13 @@ export function ChatMenu({ chatId, title }: { chatId: number; title: string }) {
   const gInfo = chat?.kind === 'group' ? (chat.group as GroupInfo | null) ?? null : null;
   const owner = gMe?.role === 'owner';
 
-  const [at, setAt] = useState<{ right: number; top: number } | null>(null);
+  const [open, setOpen] = useState(false);
+  const hover = useHoverMenu(open, setOpen);   // как в Telegram: наведение открывает, уход с кнопки и меню — закрывает
   const [ask, setAsk] = useState<Ask>(null);
   const [preset, setPreset] = useState(MUTE_PRESETS.length - 1);
   const btn = useRef<HTMLSpanElement>(null);
-  useEffect(() => { setAt(null); setAsk(null); }, [chatId]);
+  useEffect(() => { setOpen(false); setAsk(null); }, [chatId]);
 
-  const open = () => {
-    const r = btn.current?.firstElementChild?.getBoundingClientRect();   // обёртка — display: contents, у неё нет рамки
-    if (r) setAt({ right: Math.max(8, innerWidth - r.right), top: r.bottom + 4 });
-  };
   const addContact = () => setGlobal({ newContact: {
     query: user?.username ? '@' + String(user.username) : user?.phone ? String(user.phone) : '', userId: peerId!,
     firstName: String(user?.firstName ?? title.split(' ')[0] ?? ''), lastName: String(user?.lastName ?? ''),
@@ -77,17 +73,11 @@ export function ChatMenu({ chatId, title }: { chatId: number; title: string }) {
   return (
     <>
       <span ref={btn} class="app-chatmenu-btn">
-        <IconButton icon="more" label="Ещё" aria-haspopup="menu" aria-expanded={String(!!at)} onClick={() => (at ? setAt(null) : open())} />
+        <IconButton icon="more" label="Ещё" aria-haspopup="menu" aria-expanded={String(open)}
+          onPointerEnter={hover.onPointerEnter} onPointerLeave={hover.onPointerLeave} onClick={hover.toggle} />
       </span>
-      {/* меню — в body: в шапке ему тесно, а в .rl-shell (flex с gap) лишний ребёнок сдвигает колонки */}
-      {at ? createPortal(
-        <>
-          <div class="rl-msgmenu-scrim app-chatmenu-scrim" onClick={() => setAt(null)} onContextMenu={(e) => { e.preventDefault(); setAt(null); }} />
-          <div class="app-chatmenu" style={{ right: at.right, top: at.top }}>
-            <Menu label="Действия с чатом" origin="tr" onClose={() => setAt(null)} items={items} />
-          </div>
-        </>, document.body,
-      ) : null}
+      <MenuPopover open={open} hover anchor={btn.current?.firstElementChild ?? undefined} placement="bottom-end" label="Действия с чатом"
+        items={items} onClose={() => setOpen(false)} onPointerEnter={hover.onPointerEnter} onPointerLeave={hover.onPointerLeave} />
       <Modal open={ask === 'mute'} onClose={() => setAsk(null)} title="Отключить звук" size="confirm" closeButton={false}
         actions={[
           <button key="no" type="button" class="rl-mdl-btn" onClick={() => setAsk(null)}>Отмена</button>,

@@ -1,4 +1,4 @@
-import { Icon, IconButton, Menu, Modal, ORDER_INFO, player, PlayingRing } from '@relay/ui';
+import { Icon, IconButton, MenuPopover, Modal, ORDER_INFO, player, PlayingRing } from '@relay/ui';
 import { useEffect, useRef, useState } from 'preact/hooks';
 import { setGlobal, useGlobal } from '../global';
 import { inProfile, toggleProfileMusic, type Track } from '../music';
@@ -13,7 +13,7 @@ export function Playlist() {
   const open = useGlobal((s) => s.playlistOpen);
   useGlobal((s) => s.myMusic);   // кнопка «в профиль» перерисуется после правки
   const [st, setSt] = useState(() => player.playerState());
-  const [order, setOrder] = useState(false);
+  const [order, setOrder] = useState<HTMLElement | null>(null);
   const seek = useRef<HTMLInputElement>(null), now = useRef<HTMLSpanElement>(null);
   const listRef = useRef<HTMLDivElement>(null);
   useEffect(() => player.subscribe(setSt), []);
@@ -59,15 +59,10 @@ export function Playlist() {
           <div class="app-pl-times"><span ref={now}>{fmt(st.time)}</span><span>{fmt(st.duration || t.duration)}</span></div>
           <div class="app-pl-controls">
             <div class="app-pl-order">
-              <IconButton icon={ORDER_INFO[ord].icon} label={ORDER_INFO[ord].label} onClick={() => setOrder(!order)} />
-              {order ? (
-                <div class="app-pl-ordermenu">
-                  <div class="rl-recmode-scrim" onClick={() => setOrder(false)} />
-                  <Menu label="Порядок" onClose={() => setOrder(false)} items={(['shuffle', 'all', 'one', 'off'] as const).map((k) => ({
-                    icon: st.order === k ? 'check' : ORDER_INFO[k].icon, label: ORDER_INFO[k].label, onClick: () => { setOrder(false); player.setOrder(k); },
-                  }))} />
-                </div>
-              ) : null}
+              <IconButton icon={ORDER_INFO[ord].icon} label={ORDER_INFO[ord].label} onClick={(e: MouseEvent) => setOrder(order ? null : e.currentTarget as HTMLElement)} />
+              <MenuPopover open={!!order} anchor={order ?? undefined} placement="top-start" label="Порядок" onClose={() => setOrder(null)} items={(['shuffle', 'all', 'one', 'off'] as const).map((k) => ({
+                icon: st.order === k ? 'check' : ORDER_INFO[k].icon, label: ORDER_INFO[k].label, onClick: () => player.setOrder(k),
+              }))} />
             </div>
             <IconButton icon="skipPrev" label="Предыдущий" onClick={() => player.step(-1)} />
             <button type="button" class="app-pl-play" aria-label={st.playing ? 'Пауза' : 'Играть'} onClick={() => (st.playing ? player.pause() : player.play(t))}>

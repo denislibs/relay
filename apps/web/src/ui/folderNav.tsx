@@ -1,7 +1,7 @@
 // Папки в боковой панели: вкладки сверху (Sidebar) и колонка слева (App) читают одно и то же отсюда —
 // список с бейджами, выбор папки, контекстное меню папки и где сейчас показываются вкладки.
 import type { ChatFolder } from '@relay/protocol';
-import { ConfirmDialog, FolderRail, Menu } from '@relay/ui';
+import { ConfirmDialog, FolderRail, MenuPopover } from '@relay/ui';
 import { useEffect, useMemo, useState } from 'preact/hooks';
 import { seen } from '../data';
 import { ALL, folderBadge, folderChats, folderIcon, type FolderChat, type FolderCtx } from '../folders';
@@ -103,14 +103,7 @@ export function useFolderMenu(): { open(id: number, e: MouseEvent): void; node: 
   ] : [];
   const node = (
     <>
-      {at ? (
-        <>
-          <div class="rl-msgmenu-scrim" onClick={close} onContextMenu={(e) => { e.preventDefault(); close(); }} />
-          <div class="rl-msgmenu" style={{ left: Math.min(at.x, innerWidth - 240), top: Math.min(at.y, innerHeight - 200) }}>
-            <Menu label={f ? 'Папка «' + f.title + '»' : 'Все чаты'} onClose={close} items={menu} />
-          </div>
-        </>
-      ) : null}
+      <MenuPopover open={!!at} anchor={at ?? undefined} label={f ? 'Папка «' + f.title + '»' : 'Все чаты'} onClose={close} items={menu} />
       <ConfirmDialog
         open={!!ask}
         title="Удалить папку?"

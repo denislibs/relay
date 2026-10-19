@@ -2,9 +2,8 @@
 // (относительная перерисовывается сама: внутри минуты — каждую секунду, часа — каждую минуту, суток — каждый час);
 // без формата — текст сообщения. Нажатие — меню «Копировать дату».
 import { h } from 'preact';
-import { createPortal } from 'preact/compat';
 import { useEffect, useState } from 'preact/hooks';
-import { Icon } from './kit.js';
+import { MenuPopover } from './popover.js';
 import { formatDateEntity, fullDate, relativeRefreshMs } from './formattedDate.js';
 import { copyRich } from './messageCopy.js';
 
@@ -27,8 +26,7 @@ export function FormattedDate(props) {
     if (!menu[0]) return;
     function close() { menu[1](null); }
     openMenu = close;
-    var t = setTimeout(function () { document.addEventListener('pointerdown', close, { once: true }); }, 0);
-    return function () { clearTimeout(t); document.removeEventListener('pointerdown', close); if (openMenu === close) openMenu = null; };
+    return function () { if (openMenu === close) openMenu = null; };
   }, [menu[0]]);
   var text = format ? formatDateEntity(date, format) : null;
   var full = fullDate(date);
@@ -37,16 +35,10 @@ export function FormattedDate(props) {
     onClick: function (e) {
       e.preventDefault(); e.stopPropagation();
       if (openMenu) openMenu();
-      // у нижнего края (над полем ввода) — меню над датой, иначе под ней
-      var r = e.currentTarget.getBoundingClientRect(), below = r.bottom + 120 < innerHeight;
-      menu[1](below ? { x: r.left, top: r.bottom + 4 } : { x: r.left, bottom: innerHeight - r.top + 4 });
+      menu[1](e.currentTarget);   // меню — у даты (у нижнего края окна — над ней)
     },
   }, text != null ? text : props.children,
-    // меню — порталом в body: поверх ленты и поля ввода, а не внутри слоя ленты
-    menu[0] ? createPortal(h('span', { class: 'rl-fdate-menu', style: { left: Math.min(menu[0].x, innerWidth - 240) + 'px', top: menu[0].top != null ? menu[0].top + 'px' : undefined, bottom: menu[0].bottom != null ? menu[0].bottom + 'px' : undefined }, onPointerDown: function (e) { e.stopPropagation(); } },
-      h('span', { class: 'rl-fdate-menu-head' }, full),
-      h('button', { type: 'button', class: 'rl-fdate-menu-item', onClick: function (e) {
-        e.stopPropagation(); menu[1](null);
-        copyRich(full).then(function () { if (props.onCopied) props.onCopied(); });
-      } }, h(Icon, { name: 'copy', size: 18 }), 'Копировать дату')), document.body) : null);
+    h(MenuPopover, { open: !!menu[0], anchor: menu[0], placement: 'bottom-start', label: 'Дата', onClose: function () { menu[1](null); },
+      menuHeader: h('span', { class: 'rl-fdate-menu-head' }, full),
+      items: [{ icon: 'copy', label: 'Копировать дату', onClick: function () { copyRich(full).then(function () { if (props.onCopied) props.onCopied(); }); } }] }));
 }
