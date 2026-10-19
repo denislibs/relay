@@ -24,10 +24,11 @@ function marksOf(el, parent) {
   else if (tag === 'I' || tag === 'EM') add('italic');
   else if (tag === 'U' || tag === 'INS') add('underline');
   else if (tag === 'S' || tag === 'STRIKE' || tag === 'DEL') add('strike');
-  else if (tag === 'CODE' || tag === 'KBD' || tag === 'SAMP' || tag === 'TT') add(el.getAttribute('data-pre') != null || (el.parentNode && el.parentNode.nodeName === 'PRE') ? 'pre' : 'code');
+  else if (tag === 'CODE' || tag === 'KBD' || tag === 'SAMP' || tag === 'TT') add(el.getAttribute('data-pre') != null || (el.classList && el.classList.contains('rl-pre')) || (el.parentNode && el.parentNode.nodeName === 'PRE') ? 'pre' : 'code');
   else if (tag === 'PRE') add('pre');
   else if (tag === 'A') { var href = el.getAttribute('href'); if (href && safeUrl(href)) add('link', safeUrl(href)); }
-  if (el.getAttribute && el.getAttribute('data-fmt') === 'spoiler') add('spoiler');
+  // скрытый текст: наш в поле ввода, наш в пузыре, и Bot-API-разметка Telegram при вставке
+  if (el.getAttribute && (el.getAttribute('data-fmt') === 'spoiler' || tag === 'TG-SPOILER' || (el.classList && el.classList.contains('rl-spoiler')))) add('spoiler');
   // оформление стилями (вставка из Google Docs, Word): учитываем и «отмену» — <b style="font-weight:normal">
   var st = el.style;
   if (st) {

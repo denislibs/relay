@@ -1,7 +1,7 @@
 import type { Item } from '@relay/sync-engine/src/types';
 import { senderAvatar } from '../profilePhoto';
 import type { Entity } from '@relay/protocol';
-import { Avatar, Bubble, Icon, peerTone, DateDivider, DatePicker, FileBubble, MediaBubble, MessageText, VoiceBubble, MusicBubble, RoundBubble, player, MediaViewer, ScrollToBottom, beginHeavyAnimation, forceMeasure, isHeavyAnimating, onHeavyAnimationEnd, requestMeasure, requestMutation } from '@relay/ui';
+import { Avatar, Bubble, Icon, peerTone, DateDivider, DatePicker, FileBubble, MediaBubble, MessageText, VoiceBubble, MusicBubble, RoundBubble, player, MediaViewer, ScrollToBottom, beginHeavyAnimation, forceMeasure, isHeavyAnimating, onHeavyAnimationEnd, requestMeasure, requestMutation, selectionValue } from '@relay/ui';
 import { memo } from 'preact/compat';
 import { useEffect, useLayoutEffect, useRef, useState } from 'preact/hooks';
 import { clearFocus, ensureNames, focusMessage, openInner, jumpToDate, localPreview, markListened, moveWindow, react, savePosition, savedPosition, seen } from '../data';
@@ -21,6 +21,9 @@ import { clock, dayKey, dayLabel, fileSize } from './format';
  *  • прочтение — по меткам под баблами, раз в 150 мс, пауза на тяжёлых анимациях;
  *  • даты «липнут» к верху и гаснут через секунду после остановки прокрутки.
  */
+
+/** Что было под курсором при открытии меню: ссылка и выделенный кусок текста этого сообщения. */
+export type MenuExtra = { link: string | null; selection: { text: string; entities: Entity[] } | null };
 
 const EDGE = '750px';     // запас датчиков окна
 const EDGE_PX = 750;
@@ -279,7 +282,7 @@ export function Feed({ frameKey, active, chatId, meId, peerName, group, onAuthor
   chatId: number; meId: number; peerName: string; highlight?: string;
   group: boolean; onAuthor: (userId: number) => void;   // в группе — имя автора над пачкой; клик — личный чат поверх
   stick: { current: boolean };
-  onMenu: (key: string, x: number, y: number) => void;
+  onMenu: (key: string, x: number, y: number, extra: MenuExtra) => void;
 }) {
   const messages = useGlobal((s) => frameByKey(s, frameKey)?.messages ?? NO_MESSAGES);
   const names = useGlobal((s) => s.names);
@@ -676,7 +679,11 @@ export function Feed({ frameKey, active, chatId, meId, peerName, group, onAuthor
     const row = (e.target as Element).closest<HTMLElement>('.app-msg');
     if (!row) return;
     e.preventDefault();
-    onMenu(row.dataset.key!, e.clientX, e.clientY);
+    // что было под курсором и выделено — запоминаем сейчас: при открытии меню выделение может сброситься
+    const link = (e.target as Element).closest<HTMLAnchorElement>('a[href]');
+    let selection: { text: string; entities: Entity[] } | null = null;
+    for (const el of row.querySelectorAll<HTMLElement>('.rl-bubble-text, .rl-media-caption')) { selection = selectionValue(el) as typeof selection; if (selection) break; }
+    onMenu(row.dataset.key!, e.clientX, e.clientY, { link: link && row.contains(link) ? link.href : null, selection });
   };
 
   const out: unknown[] = [];

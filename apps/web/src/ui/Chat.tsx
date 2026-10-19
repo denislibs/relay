@@ -13,7 +13,7 @@ import type { LinkPreview } from '@relay/protocol';
 import { membersStatus, useMembers } from '../members';
 import { Playlist } from './Playlist';
 import { inProfile, toggleProfileMusic, type Track } from '../music';
-import { Avatar, Button, Icon, MediaPolicy, peerTone, ChatSearchBar, Highlight, ripple, useMinVisible, requestMeasure, Composer, DropOverlay, GlassBar, IconButton, Menu, Modal, ConfirmDialog, Presence, ReactionPicker, plural, requestMutation, SelectionBar, isHeavyAnimating, onHeavyAnimationEnd, applyMarkdown, emptyValue, sameValue, voiceSupported, PlayerBar, roundSupported, startRound, Verified } from '@relay/ui';
+import { Avatar, Button, Icon, MediaPolicy, peerTone, ChatSearchBar, Highlight, ripple, useMinVisible, requestMeasure, Composer, DropOverlay, GlassBar, IconButton, Menu, Modal, ConfirmDialog, Presence, ReactionPicker, plural, requestMutation, SelectionBar, isHeavyAnimating, onHeavyAnimationEnd, applyMarkdown, emptyValue, sameValue, voiceSupported, PlayerBar, roundSupported, startRound, Verified, canCopyImage, clipboardHtml, copyImage, copyRich, downloadUrl } from '@relay/ui';
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'preact/hooks';
 import { closeChat, deleteMessage, editMessage, ensureNames, focusMessage, openChat, openUserChat, pinMessage, unpinMessage, sendFile, sendFiles, sendRound, sendVoice, react, saveDraft, searchMessages, send, typing, typingDone } from '../data';
 import type { Item, SearchHit } from '@relay/sync-engine/src/types';
@@ -23,7 +23,7 @@ type Value = { text: string; entities: Entity[] };
 type ComposerApi = { getValue(): Value; setValue(v: Value, opts?: { focus?: boolean; instant?: boolean }): void; focus(opts?: { end?: boolean }): void };
 import { frameByKey, setGlobal, useGlobal } from '../global';
 import { showToast, unblockUser, useUser } from '../settingsData';
-import { Feed } from './Feed';
+import { Feed, type MenuExtra } from './Feed';
 import { chatKindFor, mediaPolicy } from '../autoload';
 import { chatTime, chatTone, fileSize, isSystemChat, lastSeenText, shownBody, snippet } from './format';
 import type { ProfilePhoto } from '@relay/protocol';
@@ -34,6 +34,13 @@ import { cancelForwardDraft, endSelect, forwardElsewhere, patchForwardDraft, sen
 const NO_MESSAGES: Item[] = [];
 
 /** Чат в стеке. active — он на экране: только он ловит ввод, файлы и Esc; остальные живут тихо. */
+/** Имя файла для «Скачать»: исходное, иначе по виду (как в Telegram: voice — .ogg, кружок — .mp4, фото — .jpg). */
+function downloadName(a: { id?: string; kind?: string; name?: string; mime?: string }): string {
+  if (a.name && a.name !== 'file') return a.name;
+  const ext = a.kind === 'voice' ? 'ogg' : a.kind === 'round' ? 'mp4' : a.kind === 'photo' ? 'jpg' : (a.mime?.split('/')[1] ?? 'bin');
+  return `${a.kind ?? 'file'}_${(a.id ?? '').slice(0, 8)}.${ext}`;
+}
+
 export function Chat({ chatId, frameKey, active }: { chatId: number; frameKey: string; active: boolean }) {
   const me = useGlobal((s) => s.me)!;
   const chat = useGlobal((s) => s.chats.find((c) => c.id === chatId));
@@ -50,7 +57,7 @@ export function Chat({ chatId, frameKey, active }: { chatId: number; frameKey: s
   const policy = useMemo(() => mediaPolicy({ autoload, anim }, chatKindFor(chat, new Set(isContact ? [chat!.peerId as number] : []))), [autoload, anim, chat?.kind, chat?.peerId, isContact]);
   const shell = useRef<HTMLSpanElement>(null);
   const stick = useRef(true);              // лента прижата к низу (Feed ведёт, отправка выставляет)
-  const [menu, setMenu] = useState<{ x: number; y: number; key: string } | null>(null);
+  const [menu, setMenu] = useState<{ x: number; y: number; key: string; extra?: MenuExtra } | null>(null);
   const [fwdMenu, setFwdMenu] = useState<{ x: number; y: number } | null>(null);   // опции пересылки в поле ввода
   const [replyKey, setReplyKey] = useState<string | null>(null);
   const [editing, setEditing] = useState<{ id: number; original: Value; draft: Value } | null>(null);   // правка своего сообщения
@@ -284,6 +291,17 @@ export function Chat({ chatId, frameKey, active }: { chatId: number; frameKey: s
   const replyTo = replyKey ? messages.find((m) => m.key === replyKey) : undefined;
   const authorOf = (senderId: unknown) => (senderId === me.userId ? 'Вы' : title);
   const menuMsg = menu ? messages.find((m) => m.key === menu.key) : undefined;
+  // меню разной длины: после отрисовки меряем и, если не влезает снизу, поднимаем (как в Telegram — целиком в окне)
+  const menuBox = useRef<HTMLDivElement>(null);
+  useLayoutEffect(() => {
+    const el = menuBox.current;
+    if (!el || !menu) return;
+    requestMeasure(() => {
+      const r = el.getBoundingClientRect();
+      const top = Math.max(8, Math.min(menu.y, innerHeight - r.height - 8));
+      if (Math.abs(top - r.top) > 0.5) requestMutation(() => { el.style.top = top + 'px'; });
+    });
+  }, [menu]);
   // пересылка, ждущая в поле ввода: «От: …» (или «Имена отправителей скрыты») и что пересылаем
   const fwd = useGlobal((s) => s.fwdDraft[chatId]) ?? null;
   const fwdQuote = fwd && !editing ? {
@@ -367,7 +385,7 @@ export function Chat({ chatId, frameKey, active }: { chatId: number; frameKey: s
         ) : null}
       </GlassBar>
       <MediaPolicy.Provider value={policy}>
-        <Feed frameKey={frameKey} active={active} chatId={chatId} meId={me.userId} peerName={title} group={chat?.kind === 'group'} onAuthor={openUserChat} stick={stick} highlight={found?.q} onMenu={(key, x, y) => setMenu({ key, x, y })} />
+        <Feed frameKey={frameKey} active={active} chatId={chatId} meId={me.userId} peerName={title} group={chat?.kind === 'group'} onAuthor={openUserChat} stick={stick} highlight={found?.q} onMenu={(key, x, y, extra) => setMenu({ key, x, y, extra })} />
       </MediaPolicy.Provider>
       {plate ? (
         <div class="rl-composer-wrap app-plate-wrap">
@@ -448,11 +466,12 @@ export function Chat({ chatId, frameKey, active }: { chatId: number; frameKey: s
       </div>}
       {menu && menuMsg ? (() => {
         const own = menuMsg.senderId === me.userId && !menuMsg.deleted && menuMsg.id != null;
+        const att = menuMsg.attachment as { id?: string; kind?: string; name?: string; mime?: string } | null | undefined;
         const myReaction = ((menuMsg.reactions as { userId: number; emoji: string }[] | undefined) ?? []).find((r) => r.userId === me.userId)?.emoji;
         return (
           <>
             <div class="rl-msgmenu-scrim" onClick={() => setMenu(null)} onContextMenu={(e) => { e.preventDefault(); setMenu(null); }} />
-            <div class="rl-msgmenu" style={{ left: Math.min(menu.x, innerWidth - 300), top: Math.min(menu.y, innerHeight - 240) }}>
+            <div class="rl-msgmenu" ref={menuBox} style={{ left: Math.min(menu.x, innerWidth - 300), top: menu.y }}>
               {menuMsg.id != null && !menuMsg.deleted && !system ? (
                 <ReactionPicker selected={myReaction} onPick={(emoji: string) => { react(chatId, menuMsg.id as number, myReaction === emoji ? null : emoji); setMenu(null); }} />
               ) : null}
@@ -461,13 +480,24 @@ export function Chat({ chatId, frameKey, active }: { chatId: number; frameKey: s
                 onClose={() => setMenu(null)}
                 items={[
                   ...(menuMsg.id != null && !menuMsg.deleted && !system ? [{ icon: 'reply', label: 'Ответить', onClick: () => { if (editing) endEdit(editing.draft); setReplyKey(menuMsg.key as string); api.current?.focus({ end: true }); } }] : []),
-                  ...(menuMsg.id != null && !menuMsg.deleted && !menuMsg.service ? [{ icon: 'forward', label: 'Переслать', onClick: () => forwardMenuMsg(menuMsg) }] : []),
-                  ...(menuMsg.id != null && !menuMsg.deleted && !menuMsg.service ? [{ icon: 'checkCircle', label: 'Выбрать', onClick: () => startSelect(chatId, groupOf(menuMsg).map((x) => x.key as string)) }] : []),
                   ...(own && !system ? [{ icon: 'pencil', label: 'Изменить', onClick: () => startEdit(menuMsg) }] : []),
+                  // как в Telegram Web A: картинка — только фото и только где буфер принимает PNG
+                  ...(!menuMsg.deleted && att?.kind === 'photo' && att.id && canCopyImage() ? [{ icon: 'copyMedia', label: 'Копировать изображение', onClick: () => {
+                    copyImage(`/files/${att.id}`).then(() => showToast('Изображение скопировано'), () => showToast('Не удалось скопировать изображение'));
+                  } }] : []),
+                  // по ссылке — «Копировать ссылку» вместо текста; есть выделение в этом сообщении — копируем только его
+                  ...(!menuMsg.deleted && !menuMsg.service && menu.extra?.link ? [{ icon: 'link', label: 'Копировать ссылку', onClick: () => {
+                    copyRich(menu.extra!.link!).then(() => showToast('Ссылка скопирована'));
+                  } }] : !menuMsg.deleted && !menuMsg.service && (menuMsg.body as string) ? [{ icon: 'copy', label: menu.extra?.selection ? 'Копировать выделенное' : 'Копировать текст', onClick: () => {
+                    const v = menu.extra?.selection ?? { text: menuMsg.body as string, entities: (menuMsg.entities as Entity[] | undefined) ?? [] };
+                    copyRich(v.text, clipboardHtml(v.text, v.entities)).then((ok: boolean) => showToast(ok ? 'Текст скопирован' : 'Не удалось скопировать'));
+                  } }] : []),
                   ...(menuMsg.id != null && !menuMsg.deleted && !system && !menuMsg.service ? [((chat?.pinned as number[] | undefined) ?? []).includes(menuMsg.id as number)
                     ? { icon: 'pin', label: 'Открепить', onClick: () => void unpinMessage(chatId, menuMsg.id as number) }
                     : { icon: 'pin', label: 'Закрепить', onClick: () => void pinMessage(chatId, menuMsg.id as number) }] : []),
-                  ...(!menuMsg.deleted ? [{ icon: 'copy', label: 'Копировать', onClick: () => { navigator.clipboard?.writeText(menuMsg.body as string).catch(() => {}); } }] : []),
+                  ...(!menuMsg.deleted && att?.id ? [{ icon: 'download', label: 'Скачать', onClick: () => downloadUrl(`/files/${att.id}?download=1`, downloadName(att)) }] : []),
+                  ...(menuMsg.id != null && !menuMsg.deleted && !menuMsg.service ? [{ icon: 'forward', label: 'Переслать', onClick: () => forwardMenuMsg(menuMsg) }] : []),
+                  ...(menuMsg.id != null && !menuMsg.deleted && !menuMsg.service ? [{ icon: 'checkCircle', label: 'Выбрать', onClick: () => startSelect(chatId, groupOf(menuMsg).map((x) => x.key as string)) }] : []),
                   ...(own ? ['-' as const, { icon: 'trash', label: 'Удалить', danger: true, onClick: () => setConfirmDelete({ ids: [menuMsg.id as number] }) }] : []),
                 ]}
               />

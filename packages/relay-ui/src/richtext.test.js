@@ -64,3 +64,11 @@ test('safeUrl accepts http(s)/mailto, adds https, rejects the rest', () => {
 test('segments split by every boundary', () => {
   expect(segments('abcd', [{ type: 'bold', offset: 1, length: 2 }])).toEqual([{ text: 'a', marks: {} }, { text: 'bc', marks: { bold: true } }, { text: 'd', marks: {} }]);
 });
+
+test('clipboardHtml: Bot API markup, escaped, spoiler kept, newlines as <br> outside pre', async () => {
+  const { clipboardHtml } = await import('./messageCopy.js');
+  expect(clipboardHtml('a <b>\nc', [{ type: 'bold', offset: 0, length: 1 }])).toBe('<strong>a</strong> &lt;b&gt;<br>c');
+  expect(clipboardHtml('ss tt', [{ type: 'spoiler', offset: 0, length: 2 }, { type: 'link', offset: 3, length: 2, url: 'https://x.io/?q="1"' }]))
+    .toBe('<tg-spoiler>ss</tg-spoiler> <a href="https://x.io/?q=&quot;1&quot;">tt</a>');
+  expect(clipboardHtml('x\ny', [{ type: 'pre', offset: 0, length: 3 }])).toBe('<pre><code>x\ny</code></pre>');
+});
