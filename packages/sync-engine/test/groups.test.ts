@@ -10,7 +10,7 @@ const info = (p: Partial<GroupInfo> = {}): GroupInfo => ({
   username: null, reactions: { mode: 'all', allowed: [] }, protected: false, members: 3, requests: 0, ...p,
 });
 
-test('group updates: info and title, my membership, members revision — and they survive a reopen', async () => {
+test('group updates: info and title, my membership survive a reopen; members revision lives in memory only', async () => {
   const name = 'groups-' + crypto.randomUUID();
   const s = await Store.open(await openDb(name), ME);
   s.applyUpdate({ type: 'newMessage', message: msg({ id: 1, chatId: 9, senderId: PEER }) });
@@ -18,13 +18,15 @@ test('group updates: info and title, my membership, members revision — and the
   s.applyUpdate({ type: 'membership', chatId: 9, me: { role: 'admin', admin: { ...allAdminRights(), addAdmins: false }, rank: 'Повар', rights: allRights(), restricted: false } });
   s.applyUpdate({ type: 'members', chatId: 9, upsert: [], remove: [] });
   s.applyUpdate({ type: 'members', chatId: 9, upsert: [], remove: [] });
+  expect(s.members.rev(9)).toBe(2);   // счётчик для старого интерфейса участников — только в памяти
   await s.flush();
   const again = await Store.open(await openDb(name), ME);
   const chat = again.chats.get(9)!;
   expect(chat.group?.title).toBe('Дача 2');   // название группы — из group, своей копии у чата нет
   expect(chat.group).toMatchObject({ about: 'шашлыки', slowMode: 30 });
   expect(chat.me).toMatchObject({ role: 'admin', rank: 'Повар' });
-  expect(chat.membersRev).toBe(2);
+  expect('membersRev' in chat).toBe(false);
+  expect(chat.membersDone).toBeUndefined();   // состав не загружали — запись журнала его не создаёт
 });
 
 test('chatRemoved drops the chat, its queued messages and its stored messages', async () => {

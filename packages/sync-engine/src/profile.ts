@@ -71,16 +71,17 @@ export class ProfileCache {
   }
 
   /**
-   * Собеседник из снимка списка чатов (id, имя, фото) — поверх известного профиля. У снимка нет seq по человеку:
+   * Собеседник из снимка списка чатов или участник группы (id, имя, фото, @имя) — поверх известного профиля. У снимка нет seq по человеку:
    * пишем с seq 0, так что профиль из журнала (seq > 0) снимок не перетирает.
    */
-  applyPeer(p: { id: number; name: string; system?: true; photo?: ProfilePhoto | null }): void {
+  applyPeer(p: { id: number; name: string; system?: true; photo?: ProfilePhoto | null; username?: string | null }): void {
     if (p.id === this.userId) return;
     const prev = this.users.get(p.id);
     let base: PublicUser;
     if (prev) { const { seq: _s, v: _v, ...rest } = prev; base = rest; }
     else { const sp = p.name.indexOf(' '); base = { id: p.id, name: p.name, firstName: sp < 0 ? p.name : p.name.slice(0, sp), lastName: sp < 0 ? '' : p.name.slice(sp + 1), username: null, bio: null, birthday: null, phone: null, links: [] }; }
     const next: PublicUser = { ...base, name: p.name, photo: p.photo ?? null };
+    if (p.username !== undefined) next.username = p.username;   // список участников знает и @имя
     if (p.system) next.system = true;
     if (this.users.put(p.id, next, 0)) this.dirty = true;
   }

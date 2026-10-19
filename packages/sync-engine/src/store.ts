@@ -6,6 +6,7 @@ import { applyUserUpdated, ProfileCache } from './profile';
 import { applyContactsChanged, ContactsCache } from './contacts';
 import { SettingsCache } from './settings';
 import { applyBlocksChanged, BlocksCache } from './blocks';
+import { applyMembersUpdate, MembersCache } from './members';
 import { onMessage, recomputeLast, unreadAfterRead, unreadOnArrival } from './derive';
 import { nextV } from './rows';
 import { PENDING_BASE, toQuote, type LocalChat, type LocalMessage, type OutboxEntry, type QuoteMsg } from './types';
@@ -66,6 +67,8 @@ export class Store {
   settings!: SettingsCache;
   /** чёрный список (blocks.ts) */
   blocks!: BlocksCache;
+  /** участники групп (members.ts) */
+  members!: MembersCache;
   /** строке списка нужен профиль собеседника, которого нет в people; движок спросит GET /users/:id */
   wantUser: (userId: number) => void = () => {};
   /** контакт зрителя с учётом очереди операций (names.ts); движок подставляет вид с очередью */
@@ -102,6 +105,7 @@ export class Store {
     s.contacts = await ContactsCache.load(db, meta as { k: string; v: unknown }[]);
     s.settings = SettingsCache.load(meta as { k: string; v: unknown }[]);
     s.blocks = await BlocksCache.load(db, meta as { k: string; v: unknown }[]);
+    s.members = await MembersCache.load(db);
     // чаты с неотправленным — сразу в память, чтобы черновики были видны
     for (const chatId of new Set(outbox.map((o) => o.chatId))) await s.loadChatMessages(chatId);
     return s;
@@ -205,7 +209,7 @@ export class Store {
       case 'chatNotify': return this.setMute(u.chatId, u.muteUntil);
       case 'groupUpdated': { const chat = this.chats.get(u.chatId); if (chat) { chat.group = u.group; this.markChat(chat); } return; }
       case 'membership': { const chat = this.chats.get(u.chatId); if (chat) { chat.me = u.me; this.markChat(chat); } return; }
-      case 'members': { const chat = this.chats.get(u.chatId); if (chat) { chat.membersRev = (chat.membersRev ?? 0) + 1; this.markChat(chat); } return; }   // временно: счётчик для старого интерфейса (задача 14 заменит)
+      case 'members': return applyMembersUpdate(this, u.chatId, u.upsert, u.remove, seq);
       case 'chatRemoved': return this.removeChat(u.chatId);
     }
   }
@@ -220,7 +224,7 @@ export class Store {
   /** Чат больше не мой (вышел, удалили, группу удалили): из памяти, очереди и IndexedDB вместе с сообщениями. */
   removeChat(id: number): void {
     if (!this.chats.has(id)) return;
-    this.chats.delete(id); this.chatV.delete(id); this.messages.delete(id); this.loaded.delete(id);
+    this.chats.delete(id); this.chatV.delete(id); this.messages.delete(id); this.loaded.delete(id); this.members.dropChat(id);
     for (const [k, o] of this.outbox) if (o.chatId === id) { this.outbox.delete(k); this.dirtyOutbox.add(k); }
     if (this.pendingReads.delete(id)) this.dirtyReads.add(id);
     this.dirtyChats.add(id); this.touch(id);
@@ -230,7 +234,7 @@ export class Store {
   applySnapshot(list: ChatSummary[]): void {
     const keep = new Set(list.map((c) => c.id));
     for (const c of this.outbox.values()) keep.add(c.chatId);
-    for (const id of [...this.chats.keys()]) if (!keep.has(id)) { this.chats.delete(id); this.chatV.delete(id); this.messages.delete(id); this.loaded.delete(id); this.dirtyChats.add(id); this.touch(id); } // dirty → удалится и из IDB
+    for (const id of [...this.chats.keys()]) if (!keep.has(id)) { this.chats.delete(id); this.chatV.delete(id); this.messages.delete(id); this.loaded.delete(id); this.members.dropChat(id); this.dirtyChats.add(id); this.touch(id); } // dirty → удалится и из IDB
     this.applyChats(list);
   }
 
@@ -473,7 +477,7 @@ export class Store {
     const saved = keep.outbox ? [...this.outbox.values()] : [];
     for (const id of this.chats.keys()) this.touch(id);
     this.chats.clear(); this.chatV.clear(); this.messages.clear(); this.loaded.clear(); this.sorted.clear(); this.ids.clear();
-    this.outbox.clear(); this.pendingReads.clear(); this.profile.reset(); this.contacts.reset(); this.settings.reset(); this.blocks.reset();
+    this.outbox.clear(); this.pendingReads.clear(); this.profile.reset(); this.contacts.reset(); this.settings.reset(); this.blocks.reset(); this.members.reset();
     this.dirtyChats.clear(); this.dirtyMessages.clear(); this.dirtyOutbox.clear(); this.dirtyReads.clear();
     this.lastSeq = this.seqAtFlush = 0;
     this.hydrated = false;
@@ -503,7 +507,7 @@ export class Store {
   /** Страницы диалогов — заново (tooLong): чаты без неотправленного забываем, курсор в начало. */
   resetDialogs(): void {
     const keep = new Set([...this.outbox.values()].map((o) => o.chatId));
-    for (const id of [...this.chats.keys()]) if (!keep.has(id)) { this.chats.delete(id); this.chatV.delete(id); this.messages.delete(id); this.loaded.delete(id); this.dirtyChats.add(id); this.touch(id); } // dirty → удалится и из IDB
+    for (const id of [...this.chats.keys()]) if (!keep.has(id)) { this.chats.delete(id); this.chatV.delete(id); this.messages.delete(id); this.loaded.delete(id); this.members.dropChat(id); this.dirtyChats.add(id); this.touch(id); } // dirty → удалится и из IDB
     this.dialogsAt = 0; this.dialogsId = 0; this.dialogsDone = false;
     this.dirtyMeta = true;
     this.clearPersistedMessages = true;
@@ -559,6 +563,9 @@ export class Store {
     batch.put.blocked = blocks.put;
     batch.del.blocked = blocks.del;
     if (blocks.meta.length) batch.put.meta = [...(batch.put.meta ?? []), ...blocks.meta];
+    const members = this.members.collect();
+    batch.put.members = members.put;
+    batch.del.members = members.del;
     this.dirtyChats.clear(); this.dirtyMessages.clear(); this.dirtyOutbox.clear(); this.dirtyReads.clear(); this.dirtyMeta = false;
     const seq = this.lastSeq;
     await write(this.db, batch);

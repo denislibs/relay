@@ -34,7 +34,7 @@ const chatItem = (store: Store, c: LocalChat, person: ReturnType<typeof personVi
   key: 'c' + c.id, id: c.id, kind: c.kind, title, peerId: c.peerId,
   // собеседник личного чата; system — служебный чат «Relay» (только чтение)
   peer: c.peerId != null ? { id: c.peerId, name: title, ...(c.system ? { system: true } : null) } : null, unread: c.unread, lastReadId: c.lastReadId, lastAt: c.lastAt,
-  photo: person ? person.photo : c.group?.photo ?? null, group: c.group ?? null, me: c.me ?? null, membersRev: c.membersRev ?? 0, sortAt: sortAt(c), draft: c.draft?.text ?? null, draftEntities: c.draft?.entities ?? null, pinned: c.pinned ?? [], muteUntil,
+  photo: person ? person.photo : c.group?.photo ?? null, group: c.group ?? null, me: c.me ?? null, membersRev: store.members.rev(c.id), sortAt: sortAt(c), draft: c.draft?.text ?? null, draftEntities: c.draft?.entities ?? null, pinned: c.pinned ?? [], muteUntil,
   last: c.last ? { key: c.last.key, id: c.last.id, senderId: c.last.senderId, body: c.last.body, status: c.last.status, createdAt: c.last.createdAt, deleted: !!c.last.deleted, kind: c.last.kind ?? 'text', attachmentName: c.last.attachment?.name ?? null, attachmentTitle: c.last.attachment?.title ?? null, attachmentPerformer: c.last.attachment?.performer ?? null,
     // для превью в списке: спойлеры прячем, миниатюра 20 px — из встроенного thumb, без загрузки файла
     entities: c.last.entities ?? null, thumb: c.last.attachment?.thumb ?? null, mime: c.last.attachment?.mime ?? null,
@@ -51,7 +51,8 @@ function chatListItem(store: Store, c: LocalChat, mute: Map<number, number | nul
   const typing = store.typing.has(c.id);
   // уведомления: значение неотправленной операции перекрывает значение чата
   const muteUntil = mute.has(c.id) ? mute.get(c.id)! : c.muteUntil ?? null;
-  const sig = `${store.chatVersion(c.id)}|${person?.sig ?? ''}|${typing}|${muteUntil}`;
+  // membersRev — счётчик изменений состава в памяти (members.ts) для старого интерфейса участников
+  const sig = `${store.chatVersion(c.id)}|${person?.sig ?? ''}|${typing}|${muteUntil}|${store.members.rev(c.id)}`;
   let hit = chatCache.get(c);
   if (!hit || hit.sig !== sig) { hit = { sig, item: { ...chatItem(store, c, person, muteUntil), typing } }; chatCache.set(c, hit); }
   return hit;
@@ -148,6 +149,7 @@ export function computeQuery(store: Store, q: Query, mute: Map<number, number | 
     case 'contacts':
     case 'settings':
     case 'blocked':
+    case 'members':
     case 'devStats':
     case 'devLog':
       throw new Error(q.kind + ' is computed by the engine');
@@ -157,7 +159,7 @@ export function computeQuery(store: Store, q: Query, mute: Map<number, number | 
 /** Задевает ли изменение этих чатов результат подписки. */
 export function affects(q: Query, touched: Set<number>): boolean {
   if (!touched.size) return false;
-  if (q.kind === 'status' || q.kind === 'me' || q.kind === 'user' || q.kind === 'people' || q.kind === 'ops' || q.kind === 'contacts' || q.kind === 'settings' || q.kind === 'blocked' || q.kind === 'devStats' || q.kind === 'devLog') return false;   // у них свои флаги в движке
+  if (q.kind === 'status' || q.kind === 'me' || q.kind === 'user' || q.kind === 'people' || q.kind === 'ops' || q.kind === 'contacts' || q.kind === 'settings' || q.kind === 'blocked' || q.kind === 'members' || q.kind === 'devStats' || q.kind === 'devLog') return false;   // у них свои флаги в движке
   return q.kind === 'messages' ? touched.has(q.chatId) : true;
 }
 

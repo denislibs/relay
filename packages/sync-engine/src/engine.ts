@@ -16,6 +16,7 @@ import { SessionEnd } from './session';
 import { DevTools, loadSim, type SimState, type SubStat } from './devlog';
 import { simFlags, watchLoss } from './devsim';
 import { chatTitle, displayName, peopleResult, PeerSigs } from './names';
+import { applyMembersReply, membersResult, type MembersReply } from './members';
 import type { Action, EngineConfig, LocalAttachment, LocalMessage, OutboxEntry, Patch, Query, SearchResult } from './types';
 
 export interface WatchHandle { update(q: Query): void; close(): void }
@@ -104,6 +105,9 @@ export class Engine {
   /** какое значение «уведомлений» из очереди показано в строке чата: изменилось — строку пересчитать */
   private muteShown = new Map<number, number | null>();
   private usersAsked = new Set<number>();
+  /** участники групп, о которых спросил интерфейс; asked — уже загружали за это подключение */
+  private membersWants = new Set<number>();
+  private membersAsked = new Set<number>();
   /** раздел «Для разработчиков»: журнал, снимок состояния, имитатор сети (devlog.ts) */
   readonly dev: DevTools;
 
@@ -141,7 +145,7 @@ export class Engine {
       store, ops: this.ops, httpBase: cfg.httpBase, headers: cfg.headers, fetch: this.dev.fetch,
       online: () => this.online,
       presence: () => this.presence,
-      seedPresence: (id, p) => { if (this.online && !this.presence.has(id)) { this.presence.set(id, p); this.presenceDirty = true; } },
+      seedPresence: (id, p) => this.seedPresence(id, p),
       refreshUser: (id) => { this.usersAsked.delete(id); this.userWants.add(id); },
       http: (path) => this.http(path),
       run: (fn) => this.run(fn),
@@ -277,6 +281,8 @@ export class Engine {
   private prepare(w: Watcher): void {
     // профиль человека: из кэша сразу, а с сервера — заново на каждую новую подписку (открыли «Информацию»)
     if (w.q.kind === 'user' && w.q.userId !== this.cfg.userId) { this.usersAsked.delete(w.q.userId); this.userWants.add(w.q.userId); return; }
+    // участники: из IndexedDB сразу, с сервера — раз за подключение (дальше свежими держит журнал)
+    if (w.q.kind === 'members') { this.membersWants.add(w.q.chatId); this.fetchMembers(); return; }
     if (w.q.kind !== 'messages') return;
     const { chatId, limit } = w.q;
     const q = w.q;
@@ -359,6 +365,7 @@ export class Engine {
       if (q.kind === 'user' && !list.length && q.userId !== this.cfg.userId) this.userWants.add(q.userId);
       return { items: new Map(list.map((it) => [it.key, it])), order: list.map((it) => it.key), sig: new Map(list.map((it) => [it.key, JSON.stringify(it)])) };
     }
+    if (q.kind === 'members') return membersResult(this.store, q.chatId, this.presence, this.meNow());
     if (q.kind === 'people') return peopleResult(this.store, q.ids, q.ids.includes(this.cfg.userId) ? this.meNow() : null);
     if (q.kind === 'devStats' || q.kind === 'devLog') {
       const it = q.kind === 'devStats' ? this.dev.stats() : { key: 'devLog' };   // devLog идёт мимо compute (dev.pushLog)
@@ -632,6 +639,8 @@ export class Engine {
     this.ops.dirty = false;
     const contactsDirty = this.store.contacts.dirty || opsDirty || presenceDirty || profileDirty;
     const peopleDirty = this.store.contacts.dirty || profileDirty;   // имя — из профиля, контакта и очереди
+    const membersTouched = new Set(this.store.members.touched);
+    this.store.members.touched.clear();
     this.store.contacts.dirty = false;
     const settingsDirty = this.store.settings.dirty || opsDirty;
     this.store.settings.dirty = false;
@@ -643,9 +652,9 @@ export class Engine {
     this.statusSig = sig;
     for (const w of this.watchers.values()) {
       if (w.q.kind === 'devLog') { this.dev.pushLog(w); continue; }   // журнал: только новые события, пачкой раз в 250 мс
-      const own = (w.q.kind === 'devStats' && devDirty) || (w.q.kind === 'status' && statusChanged) || (w.q.kind === 'presence' && presenceDirty) || (w.q.kind === 'ops' && opsDirty) || ((w.q.kind === 'me' || w.q.kind === 'user') && profileDirty) || (w.q.kind === 'people' && peopleDirty) || (w.q.kind === 'contacts' && contactsDirty) || (w.q.kind === 'settings' && settingsDirty) || (w.q.kind === 'blocked' && blocksDirty);
+      const own = (w.q.kind === 'devStats' && devDirty) || (w.q.kind === 'status' && statusChanged) || (w.q.kind === 'presence' && presenceDirty) || (w.q.kind === 'ops' && opsDirty) || ((w.q.kind === 'me' || w.q.kind === 'user') && profileDirty) || (w.q.kind === 'people' && peopleDirty) || (w.q.kind === 'contacts' && contactsDirty) || (w.q.kind === 'settings' && settingsDirty) || (w.q.kind === 'blocked' && blocksDirty) || (w.q.kind === 'members' && (membersTouched.has(w.q.chatId) || peopleDirty || presenceDirty));
       if (!w.force && !affects(w.q, touched) && !own) continue;
-      if (hold && !w.force && w.q.kind !== 'status' && w.q.kind !== 'presence' && w.q.kind !== 'ops' && w.q.kind !== 'contacts' && w.q.kind !== 'people' && w.q.kind !== 'settings' && w.q.kind !== 'blocked' && w.q.kind !== 'devStats') continue;
+      if (hold && !w.force && w.q.kind !== 'status' && w.q.kind !== 'presence' && w.q.kind !== 'ops' && w.q.kind !== 'contacts' && w.q.kind !== 'people' && w.q.kind !== 'settings' && w.q.kind !== 'blocked' && w.q.kind !== 'members' && w.q.kind !== 'devStats') continue;
       if (w.gated) continue;
       w.force = false;
       const next = this.compute(w.q);
@@ -660,6 +669,40 @@ export class Engine {
     this.dev.afterEmit();
     this.fetchQuotes();
     this.fetchUsers();
+    this.fetchMembers();
+  }
+
+  /** Присутствие из ответа сервера, если живого ещё нет (без связи — не знаем). */
+  private seedPresence(id: number, p: { online: boolean | null; lastSeen: string | null }): void {
+    if (this.online && !this.presence.has(id)) { this.presence.set(id, p); this.presenceDirty = true; }
+  }
+
+  /**
+   * Участники групп, о которых спросил интерфейс, — GET /chats/:id/members раз за подключение. Снимок кладётся
+   * с seq на момент запроса: записи журнала, пришедшие пока ждали, он не откатывает. Присутствие — только в память.
+   */
+  private fetchMembers(): void {
+    if (!this.online || !this.ready || !this.membersWants.size) return;
+    for (const chatId of [...this.membersWants]) {
+      const chat = this.store.chats.get(chatId);
+      if (!chat) continue;   // чат ещё не пришёл — спросим, когда появится
+      this.membersWants.delete(chatId);
+      if (!chat.group || this.membersAsked.has(chatId)) continue;
+      this.membersAsked.add(chatId);
+      const seq = this.store.lastSeq;
+      this.run(async () => {
+        let r: MembersReply;
+        try { r = await this.http<MembersReply>(`/chats/${chatId}/members`); }
+        catch (err) {
+          if (!this.online) { this.membersAsked.delete(chatId); this.membersWants.add(chatId); }   // спросим после переподключения
+          throw err;
+        }
+        applyMembersReply(this.store, chatId, r, seq);
+        for (const m of r.members) if (m.userId !== this.cfg.userId) this.seedPresence(m.userId, { online: m.online, lastSeen: m.lastSeen });
+        await this.store.flush();
+        this.changed();
+      });
+    }
   }
 
   /** Свой профиль для интерфейса: база + очередь. */
@@ -1072,6 +1115,9 @@ export class Engine {
     this.presenceDirty = true;
     this.presenceFetched = false;
     this.usersAsked.clear();
+    // новое подключение — участников открытых подписок спросим заново (журнал мог потеряться: tooLong)
+    this.membersAsked.clear();
+    for (const w of this.watchers.values()) if (w.q.kind === 'members') this.membersWants.add(w.q.chatId);
     if (this.wantOnline) this.failures++;
     this.ready = false;
     this.changed();
@@ -1229,6 +1275,7 @@ export class Engine {
       if (!this.presenceFetched) this.fetchPresence();
       this.ops.resume();
       this.fetchUsers();
+      this.fetchMembers();
     }
   }
 
