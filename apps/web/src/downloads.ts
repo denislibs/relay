@@ -4,7 +4,9 @@
 // и без сети (SW отдаёт оттуда и картинки, и части видео). Ядро (downloadChunks) не знает про браузер — тесты гоняют
 // его с подставным fetch.
 import { useEffect, useState } from 'preact/hooks';
-import { MEDIA_CACHE, mediaKey, storeMedia } from './mediaCache';
+import { ON_DEVICE_CHANNEL, type AttachmentBucket } from './attachmentsOnDevice';
+import { deviceStore, putAttachment, readAttachment } from './mediaCache';
+import { requestPersistentStorage } from './storageInfo';
 
 export const CHUNK = 8 * 1024 * 1024;
 const MAX_FAILS = 8;          // подряд без единого нового байта — сдаёмся (офлайн не считается: ждём сеть)
@@ -166,8 +168,9 @@ const IDLE: DownloadState = { status: 'idle', loaded: 0, total: 0 };
 const states = new Map<string, DownloadState>();
 const jobs = new Map<string, { ctrl: AbortController; promise: Promise<Blob | null> }>();
 const listeners = new Map<string, Set<() => void>>();
-let cachedIds: Set<string> | null = null;
-let cachedLoading: Promise<void> | null = null;
+/** Какие файлы лежат на устройстве и в каком ящике — из индекса; null — ещё не прочитали. */
+let onDevice: Map<string, AttachmentBucket> | null = null;
+let onDeviceLoading: Promise<void> | null = null;
 const anyListeners = new Set<() => void>();
 
 function set(id: string, s: DownloadState): void {
@@ -178,36 +181,40 @@ function set(id: string, s: DownloadState): void {
 export function getDownload(id: string): DownloadState {
   const s = states.get(id);
   if (s) return s;
-  return cachedIds?.has(id) ? { status: 'done', loaded: 0, total: 0, cached: true } : IDLE;
+  return onDevice?.has(id) ? { status: 'done', loaded: 0, total: 0, cached: true } : IDLE;
 }
 
-/** Какие файлы уже лежат в кэше целиком: один раз читаем ключи (тела не трогаем). */
-function loadCachedIds(): Promise<void> {
-  if (cachedIds || typeof caches === 'undefined') return Promise.resolve();
-  cachedLoading ??= (async () => {
-    const ids = new Set<string>();
-    try {
-      for (const req of await (await caches.open(MEDIA_CACHE)).keys()) {
-        const m = /\/files\/([0-9a-f-]{36})$/.exec(new URL(req.url).pathname);
-        if (m) ids.add(m[1]);
-      }
-    } catch { /* кэш недоступен — просто ничего не знаем */ }
-    cachedIds = ids;
-    anyListeners.forEach((f) => f());
-  })();
-  return cachedLoading;
+/** Список файлов на устройстве — из индекса (одна выборка, тела не трогаем). force — перечитать (сообщила другая вкладка или SW). */
+function loadOnDevice(force = false): Promise<void> {
+  if (typeof indexedDB === 'undefined') { onDevice ??= new Map(); return Promise.resolve(); }
+  if (onDevice && !force) return Promise.resolve();
+  if (!onDeviceLoading) {
+    onDeviceLoading = (async () => {
+      const map = new Map<string, AttachmentBucket>();
+      try { for (const r of await deviceStore().index.all()) map.set(r.fileId, r.bucket); } catch { /* индекс недоступен — ничего не знаем */ }
+      const was = onDevice;
+      onDevice = map;
+      // файла больше нет на устройстве — и «скачано» у пузыря тоже нет
+      if (was) for (const id of was.keys()) if (!map.has(id) && states.get(id)?.status === 'done') states.delete(id);
+      anyListeners.forEach((f) => f());
+    })().finally(() => { onDeviceLoading = null; });
+  }
+  return onDeviceLoading;
 }
 
-/** Лежит ли файл целиком на устройстве; null — ещё не знаем (ключи кэша читаются). */
+// другая вкладка или Service Worker положили/удалили файлы — перечитываем список
+try { new BroadcastChannel(ON_DEVICE_CHANNEL).onmessage = () => { if (onDevice) void loadOnDevice(true); }; } catch { /* нет BroadcastChannel */ }
+
+/** Лежит ли файл целиком на устройстве; null — ещё не знаем (индекс читается). */
 export function isCached(id: string): boolean | null {
-  return cachedIds ? cachedIds.has(id) : null;
+  return onDevice ? onDevice.has(id) : null;
 }
-/** Прочитать ключи кэша заранее (лента открылась): к нажатию на видео ответ уже готов. */
-export function warmCached(): Promise<void> { return loadCachedIds(); }
+/** Прочитать индекс заранее (лента открылась): к нажатию на видео ответ уже готов. */
+export function warmCached(): Promise<void> { return loadOnDevice(); }
 
-/** Кэш медиа очистили (Данные и память, выход): забываем, что там было. */
+/** Файлы вложений стёрли (Данные и память, выход): забываем, что там было. */
 export function forgetCached(): void {
-  cachedIds = new Set();
+  onDevice = new Map();
   for (const u of objectUrls.values()) URL.revokeObjectURL(u);
   objectUrls.clear();
   for (const [id, s] of states) if (s.status === 'done') states.delete(id);
@@ -216,20 +223,22 @@ export function forgetCached(): void {
 
 async function readCached(id: string): Promise<Blob | null> {
   if (typeof caches === 'undefined') return null;
-  try {
-    const hit = await (await caches.open(MEDIA_CACHE)).match(mediaKey(id));
-    return hit ? await hit.blob() : null;
-  } catch { return null; }
+  try { return await readAttachment(deviceStore(), id); } catch { return null; }
 }
 
-/** Хватит ли места положить файл в кэш: лимит из «Данные и память» (0 — без лимита) и свободное место браузера. */
-async function fits(size: number, maxMb: number): Promise<boolean> {
+/**
+ * Положить скачанный файл на устройство. Кнопкой «Скачать» — в saved-by-user (сам не удалится, браузер просим
+ * не стирать хранилище); молча (просмотренное видео, автозагрузка) — в auto-evictable, если укладывается в лимит.
+ */
+async function keepOnDevice(id: string, blob: Blob, bucket: AttachmentBucket, maxMb: number): Promise<boolean> {
   if (typeof caches === 'undefined') return false;
-  if (maxMb > 0 && size > maxMb * 1024 * 1024) return false;
+  if (bucket === 'auto-evictable' && maxMb > 0 && blob.size > maxMb * 1024 * 1024) return false;
+  if (bucket === 'saved-by-user') void requestPersistentStorage();
   try {
-    const e = await navigator.storage.estimate();
-    if (e.quota && e.usage != null) return e.quota - e.usage > size + 64 * 1024 * 1024;
-  } catch { /* оценки нет — пробуем: Cache API сам откажет при нехватке */ }
+    if (!(await putAttachment(deviceStore(), id, blob, bucket))) return false;
+  } catch { return false; }
+  onDevice?.set(id, bucket);
+  if (bucket === 'auto-evictable') void navigator.serviceWorker?.ready.then((r) => r.active?.postMessage({ type: 'attachments:sweep-auto' })).catch(() => {});
   return true;
 }
 
@@ -242,7 +251,7 @@ export function saveBlob(blob: Blob, name: string): void {
 }
 
 export interface StartOptions {
-  /** отдать пользователю, когда скачается (кнопка «Скачать»); false — молча в кэш (автозагрузка, просмотренное видео) */
+  /** отдать пользователю, когда скачается (кнопка «Скачать») — и в saved-by-user; false — молча в auto-evictable (автозагрузка, просмотренное видео) */
   save?: boolean;
   /** лимит кэша, МБ (prefs.media.maxMb) */
   maxMb?: number;
@@ -260,14 +269,16 @@ export function startDownload(f: DownloadFile, opts: StartOptions = {}): Promise
   }
   const ctrl = new AbortController();
   const promise = (async (): Promise<Blob | null> => {
-    await loadCachedIds();
-    const local = cachedIds?.has(f.id) ? await readCached(f.id) : null;
+    await loadOnDevice();
+    const local = onDevice?.has(f.id) ? await readCached(f.id) : null;
     if (local) {
       set(f.id, { status: 'done', loaded: local.size, total: local.size, cached: true });
+      // лежал в auto-evictable, а теперь его скачали кнопкой — переносим в saved-by-user
+      if (opts.save && onDevice?.get(f.id) === 'auto-evictable') void keepOnDevice(f.id, local, 'saved-by-user', 0);
       if (opts.save) saveBlob(local, f.name);
       return local;
     }
-    if (cachedIds?.has(f.id)) cachedIds.delete(f.id);   // ключ был, а файла уже нет (вытеснили)
+    if (onDevice?.has(f.id)) onDevice.delete(f.id);   // запись была, а файла уже нет (вытеснили)
     set(f.id, { status: 'loading', loaded: 0, total: f.size });
     let shown = 0;
     try {
@@ -282,15 +293,7 @@ export function startDownload(f: DownloadFile, opts: StartOptions = {}): Promise
         },
         onWaiting: (waiting) => { const s = states.get(f.id) ?? IDLE; set(f.id, { ...s, waiting }); },
       });
-      let cached = false;
-      if (await fits(blob.size, opts.maxMb ?? 0)) {
-        try {
-          await storeMedia(caches, f.id, blob);
-          cached = true;
-          cachedIds?.add(f.id);
-          void navigator.serviceWorker?.ready.then((r) => r.active?.postMessage({ type: 'mediaSweep' })).catch(() => {});
-        } catch { /* не влезло — просто не кэшируем */ }
-      }
+      const cached = await keepOnDevice(f.id, blob, opts.save ? 'saved-by-user' : 'auto-evictable', opts.maxMb ?? 0);
       set(f.id, { status: cached ? 'done' : 'idle', loaded: blob.size, total: blob.size, cached });
       if (opts.save) saveBlob(blob, f.name);
       return blob;
@@ -326,8 +329,8 @@ async function pump(maxMb: number): Promise<void> {
   try {
     while (background.length) {
       const f = background.shift()!;
-      await loadCachedIds();
-      if (!cachedIds?.has(f.id)) await startDownload(f, { maxMb });
+      await loadOnDevice();
+      if (!onDevice?.has(f.id)) await startDownload(f, { maxMb });
     }
   } finally { backgroundBusy = false; }
 }
@@ -343,7 +346,7 @@ const resolving = new Map<string, Promise<void>>();
 export function useOfflineUrl(id: string | undefined): string | undefined {
   const st = useDownload(id);
   const [, tick] = useState(0);
-  const want = !!id && (st.cached || (st.status === 'done' && cachedIds?.has(id) === true));
+  const want = !!id && (st.cached || (st.status === 'done' && onDevice?.has(id) === true));
   useEffect(() => {
     if (!id || !want || objectUrls.has(id)) return undefined;
     let alive = true;
@@ -363,7 +366,7 @@ export function useDownload(id: string | undefined): DownloadState {
     let set = listeners.get(id);
     if (!set) listeners.set(id, (set = new Set()));
     set.add(f); anyListeners.add(f);
-    if (!cachedIds) void loadCachedIds();
+    if (!onDevice) void loadOnDevice();
     return () => { set!.delete(f); anyListeners.delete(f); if (!set!.size) listeners.delete(id); };
   }, [id]);
   return id ? getDownload(id) : IDLE;
