@@ -111,3 +111,28 @@ export async function loadPolicy(caches: Caches): Promise<MediaPolicy> {
     return { keepDays: Number(p.keepDays) >= 0 ? Number(p.keepDays) : DEFAULT_POLICY.keepDays, maxMb: Number(p.maxMb) >= 0 ? Number(p.maxMb) : DEFAULT_POLICY.maxMb };
   } catch { return DEFAULT_POLICY; }
 }
+
+/** Ключ кэша для вложения: путь без параметров (подписанная ссылка в кэш не попадает). */
+export const mediaKey = (id: string): string => `/files/${id}`;
+
+/**
+ * Целый файл, скачанный менеджером загрузок (downloads.ts), — в тот же кэш, что и картинки из SW: он и есть
+ * «доступно без сети». Части (Range) сюда не кладём никогда — только полный файл с известной длиной.
+ */
+export async function storeMedia(caches: Caches, id: string, body: Blob, now = Date.now()): Promise<void> {
+  const cache = await withTimeout(caches.open(MEDIA_CACHE));
+  const res = new Response(body, { headers: { 'content-type': body.type || 'application/octet-stream' } });
+  await withTimeout(cache.put(mediaKey(id), stamp(body, res, now, now)), 120_000);
+}
+
+/**
+ * Запрос части вложения (видео, аудио): GET /files/<id> с Range. SW пропускает его в сеть как есть — каждый кусок
+ * снова идёт через /files/<id> и получает свежую подписанную ссылку (перемотка после истечения не ломается).
+ * Из кэша части НЕ отдаём: Chrome не умеет перематывать видео, ответы на которое SW берёт из Cache Storage
+ * (FFmpegDemuxer: data source error). Скачанное целиком видео страница играет по blob: (downloads.useOfflineUrl).
+ */
+export function isMediaRangeRequest(req: Request, origin: string): boolean {
+  if (req.method !== 'GET' || !req.headers.has('range')) return false;
+  const u = new URL(req.url);
+  return u.origin === origin && !u.search && /^\/files\/[0-9a-f-]{36}$/.test(u.pathname);
+}

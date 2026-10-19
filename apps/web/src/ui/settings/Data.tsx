@@ -11,6 +11,7 @@ import { clearLocalDialog } from './clearLocal';
 
 const KEEP_LABEL: Record<number, string> = { 1: '1 день', 7: '1 неделя', 30: '1 месяц', 0: 'Всегда' };
 const KEEP_MARK: Record<number, string> = { 1: '1 д', 7: '1 нед', 30: '1 мес', 0: '∞' };
+const filesLabel = (n: number) => `${n} ${n % 10 === 1 && n % 100 !== 11 ? 'файл' : n % 10 >= 2 && n % 10 <= 4 && (n % 100 < 12 || n % 100 > 14) ? 'файла' : 'файлов'}`;
 const mbLabel = (mb: number) => (mb === 0 ? 'Без лимита' : mb >= 1000 ? `${mb / 1000} ГБ` : `${mb} МБ`);
 
 const KINDS: [MediaKind, string, string, 'blue' | 'orange' | 'purple'][] = [
@@ -100,14 +101,14 @@ export function Data() {
             {info == null || skeleton ? null : (
               <>
                 <InfoRow icon="chats" title={info.exact ? 'Чаты и сообщения' : 'Данные приложения'} value={formatBytes(info.db)} />
-                <InfoRow icon="image" title="Медиа" value={(info.approx ? '≈ ' : '') + formatBytes(info.media)} />
+                <InfoRow icon="image" title="Медиа" subtitle={info.files ? `${filesLabel(info.files)} — открываются без сети` : undefined} value={(info.approx ? '≈ ' : '') + formatBytes(info.media)} />
               </>
             )}
           </div>
           <InfoRow icon="cloud" title="Чаты на устройстве" subtitle={`${chats} — доступны без сети`} />
           <InfoRow icon="history" title="Синхронизация" subtitle={status.phase === 'ready' ? (status.outbox ? `В очереди: ${status.outbox}` : 'Всё сохранено на сервере') : status.phase === 'offline' ? 'Ждём сеть' : 'Идёт обновление'} />
         </Section>
-        <Section title="Кэш медиа" footer="Фото и файлы, к которым давно не обращались, удаляются с устройства сами. При необходимости они скачаются снова.">
+        <Section title="Кэш медиа" footer="Фото, видео и файлы, к которым давно не обращались, удаляются с устройства сами. При необходимости они скачаются снова.">
           <RangeRow
             label="Хранить медиа" min={0} max={KEEP_DAYS.length - 1} step={1} value={Math.max(0, KEEP_DAYS.indexOf(media.keepDays))}
             format={(i: number) => KEEP_LABEL[KEEP_DAYS[i]]}

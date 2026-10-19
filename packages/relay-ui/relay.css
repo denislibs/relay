@@ -1783,6 +1783,12 @@ html[data-blur="0"] .rl-menu { -webkit-backdrop-filter: none; backdrop-filter: n
 .rl-file-icon-btn:hover { filter: brightness(1.05); }
 .rl-file-icon-failed > svg { animation: rl-file-failed-in .2s ease-out; }
 @keyframes rl-file-failed-in { from { opacity: 0; transform: scale(.6); } }
+/* смена вида квадрата (скачать → кольцо → расширение) — проявлением, без мигания */
+.rl-file-face { display: grid; place-items: center; animation: rl-fade .18s ease-out both; }
+.rl-file-icon b.rl-file-face { display: block; }
+@media (prefers-reduced-motion: reduce) { .rl-file-face { animation: none; } }
+/* снимок кадра поверх видео, пока плеер берёт свежую ссылку (useVideoRecovery) */
+.rl-video-cover { pointer-events: none; transition: opacity .18s ease-out; }
 
 /* ---------- Видео в ленте и спойлер на медиа ---------- */
 .rl-inline-video { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; pointer-events: none; }

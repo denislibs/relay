@@ -1,5 +1,7 @@
 // Память устройства: оценка браузера и кэши медиа (Cache Storage, имена `relay-media*`).
 // Оболочку приложения (`relay-shell-*`) не трогаем: без неё не откроется офлайн.
+import { forgetCached } from './downloads';
+
 export const MEDIA_CACHE = /^relay-media/;
 
 export function formatBytes(n: number): string {
@@ -10,7 +12,7 @@ export function formatBytes(n: number): string {
 }
 
 /** exact: браузер разделил IndexedDB и кэши (usageDetails); иначе db — «всё остальное». approx: у части записей кэша нет длины. */
-export interface StorageInfo { used: number; quota: number; db: number; media: number; exact: boolean; approx: boolean }
+export interface StorageInfo { used: number; quota: number; db: number; media: number; exact: boolean; approx: boolean; files?: number }
 
 async function mediaCaches(): Promise<Cache[]> {
   if (typeof caches === 'undefined') return [];
@@ -23,22 +25,24 @@ const idle = (): Promise<void> => new Promise((r) => {
 });
 
 /** Размер медиа-кэшей по content-length; тела не читаем. Записи без длины считаем неизвестными. */
-export async function mediaCacheSize(): Promise<{ bytes: number; unknown: number }> {
-  let bytes = 0, unknown = 0, n = 0;
+export async function mediaCacheSize(): Promise<{ bytes: number; unknown: number; files: number }> {
+  let bytes = 0, unknown = 0, n = 0, files = 0;
   for (const c of await mediaCaches()) {
     for (const req of await c.keys()) {
       const res = await c.match(req);
       if (!res) continue;
       const len = Number(res.headers.get('content-length'));
       if (len > 0) bytes += len; else unknown++;
+      files++;   // каждая запись — целый файл (части в кэш не попадают): всё это открывается без сети
       if (++n % 50 === 0) await idle();   // пачками, в простое
     }
   }
-  return { bytes, unknown };
+  return { bytes, unknown, files };
 }
 
 export async function clearMediaCaches(): Promise<void> {
   if (typeof caches === 'undefined') return;
+  forgetCached();   // менеджер загрузок больше не считает эти файлы скачанными
   await Promise.all((await caches.keys()).filter((k) => MEDIA_CACHE.test(k)).map((k) => caches.delete(k)));
 }
 
@@ -51,7 +55,7 @@ export async function readStorage(): Promise<StorageInfo> {
     exact = e.usageDetails?.indexedDB != null;
     db = e.usageDetails?.indexedDB ?? Math.max(0, used - (e.usageDetails?.caches ?? m.bytes));
   } catch { /* оценка недоступна */ }
-  return { used: Math.max(used, m.bytes), quota, db, media: m.bytes, exact, approx: m.unknown > 0 };
+  return { used: Math.max(used, m.bytes), quota, db, media: m.bytes, exact, approx: m.unknown > 0, files: m.files };
 }
 
 const OWNER_KEY = 'relay.mediaOwner';

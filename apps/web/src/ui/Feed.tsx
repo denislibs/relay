@@ -7,12 +7,15 @@ import { ArticleBlocks, Avatar, Bubble, Icon, peerTone, DateDivider, DatePicker,
 import type { QuoteMsg } from '@relay/sync-engine/src/types';
 import { quoteContent } from './preview';
 import { memo } from 'preact/compat';
-import { useEffect, useLayoutEffect, useRef, useState } from 'preact/hooks';
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'preact/hooks';
 import { toggleTodo, clearFocus, discardUnsent, retrySend, ensureNames, focusMessage, openInner, jumpToDate, localPreview, markListened, moveWindow, react, savePosition, savedPosition, seen } from '../data';
 import { activeFrame, frameByKey, getGlobal, setGlobal, useGlobal } from '../global';
 import { toggleMusic, trackTitle, useFileCached } from '../music';
 import { showToast } from '../settingsData';
 import { startForward, toggleSelect } from '../forward';
+import { FileMessage } from './FileMessage';
+import { isCached, keepOffline, useOfflineUrl, warmCached } from '../downloads';
+import { getPrefs } from '../prefs';
 import { clock, dayKey, dayLabel, fileSize } from './format';
 
 /*
@@ -218,16 +221,18 @@ const Row = memo(function Row({ chatId, voiceTitle, author, onAuthor, onOpen, hl
     return (
       <div class={wrap('app-msg')} data-key={m.key} data-sort={m.sort as number}>
         {check}
-        <FileBubble
+        {/* скачивание — менеджер загрузок (частями, с кольцом, продолжением и кэшем на устройстве) */}
+        <FileMessage
+          file={{ id: att.id, name: att.name, mime: att.mime, size: att.size }} out={out}
+          upload={m.status === 'failed' && !att.id ? 'failed' : pending || !att.id ? 'loading' : null} uploading={pending}
           fwd={fwd} reply={replyQ}
           aside={aside}
           from={out ? 'out' : 'in'} tail={end} groupStart={start}
           name={att.name} ext={ext} meta={fileSize(att.size)}
-          state={m.status === 'failed' && !att.id ? 'failed' : pending ? 'loading' : att.id ? 'remote' : 'loading'} progress={m.progress as number}
+          progress={m.progress as number}
           onCancel={m.id == null && out ? () => discardUnsent(m.key as string) : undefined}
           onRetry={() => retrySend(m.key as string)}
           time={clock(m.createdAt as string)} status={out ? m.status : undefined}
-          onDownload={() => { const a = document.createElement('a'); a.href = fileUrl(att, true); a.download = att.name; a.click(); }}
         />
         {mark}
       </div>
@@ -740,6 +745,16 @@ export function Feed({ frameKey, active, chatId, meId, peerName, group, onAuthor
   // авторы фото — во вьювере всегда имя отправителя; подгружаем заранее, пока вьювер закрыт
   const authorIds = [...new Set(photos.map((m) => m.senderId as number))].join(',');
   useEffect(() => { if (authorIds) ensureNames(authorIds.split(',').map(Number)); }, [authorIds]);
+  // открыли видео — тихо докачиваем его целиком на устройство: второй просмотр без сети и без ожидания
+  const openAtt = openIndex !== null ? photos[openIndex]?.attachment as Att | undefined : undefined;
+  useEffect(() => {
+    if (openAtt?.kind === 'video' && openAtt.id) keepOffline({ id: openAtt.id, name: openAtt.name, mime: openAtt.mime, size: openAtt.size }, getPrefs().media.maxMb);
+  }, [openAtt?.id]);
+  // уже на устройстве — играем оттуда (мгновенно, без сети, с перемоткой), без выбора качества. Решаем в момент
+  // открытия: докачалось во время просмотра — не переключаем (видео началось бы заново)
+  useEffect(() => { void warmCached(); }, []);
+  const offlineId = useMemo(() => (openAtt?.kind === 'video' && openAtt.id && isCached(openAtt.id) ? openAtt.id : undefined), [openAtt?.id]);
+  const openOffline = useOfflineUrl(offlineId);
   const keysRef = useRef(photoKeys); keysRef.current = photoKeys;
   // ключи — из ref: колбэк стабилен (строки мемоизированы), а список фото растёт с новыми сообщениями
   const onOpen = useRef((m: Item) => { const k = keysRef.current.indexOf(m.key); if (k >= 0) setViewer(-1 - k); }).current;
@@ -915,7 +930,7 @@ export function Feed({ frameKey, active, chatId, meId, peerName, group, onAuthor
           index={openIndex}
           sender={peerName}
           items={photos.map((m) => { const a = m.attachment as Att; return { sender: names[m.senderId as number] ?? '', avatar: senderAvatar(m.senderId as number),   // не название группы: пока имени нет — пусто, оно подгружается заранее
- src: localPreview(m.key) ?? fileUrl(a), qualities: localPreview(m.key) ? undefined : qualitiesOf(a), kind: a.kind === 'video' ? 'video' : 'image', thumb: a.thumb, w: a.w, h: a.h, name: a.name, download: fileUrl(a, true), caption: m.body, date: clock(m.createdAt as string) }; })}
+ src: localPreview(m.key) ?? (openOffline && a.id === openAtt?.id ? openOffline : fileUrl(a)), qualities: localPreview(m.key) || (openOffline && a.id === openAtt?.id) ? undefined : qualitiesOf(a), kind: a.kind === 'video' ? 'video' : 'image', thumb: a.thumb, w: a.w, h: a.h, name: a.name, download: fileUrl(a, true), caption: m.body, date: clock(m.createdAt as string) }; })}
           origin={originOf}
           actions={(_it: unknown, i: number) => [{ icon: 'forward', label: 'Переслать', onClick: () => { const p = photos[i]; setViewer(null); if (p) startForward(chatId, [p], nameOf); } }]}
           onClose={() => setViewer(null)}

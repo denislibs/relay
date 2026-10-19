@@ -40,9 +40,12 @@ export function chatKindFor(chat: Record<string, unknown> | undefined, contactId
   return typeof chat?.peerId === 'number' && contactIds.has(chat.peerId) ? 'contact' : 'private';
 }
 
-/** Политика для MediaPolicy кита (лента чата): что грузить само. Видео пока нет — флаг для будущего MediaBubble. */
-export function mediaPolicy(prefs: { autoload: Autoload; anim: Prefs['anim'] }, chat: ChatKind): { photo: boolean; video: boolean; autoplayVideo: boolean; autoplayGif: boolean } {
+/** Политика для MediaPolicy кита (лента чата): что грузить само. Видео пока нет — флаг для будущего MediaBubble.
+ *  file/fileMaxMb — автозагрузка документов менеджером загрузок (ui/FileMessage.tsx): до fileMaxMb МБ. */
+export function mediaPolicy(prefs: { autoload: Autoload; anim: Prefs['anim'] }, chat: ChatKind): { photo: boolean; video: boolean; file: boolean; fileMaxMb: number; autoplayVideo: boolean; autoplayGif: boolean } {
   return {
+    file: shouldAutoload(prefs, { kind: 'file', chat, size: 0 }),
+    fileMaxMb: prefs.autoload.fileMaxMb,
     photo: shouldAutoload(prefs, { kind: 'photo', chat, size: 0 }),
     video: shouldAutoload(prefs, { kind: 'video', chat, size: 0 }),
     autoplayVideo: canAutoplay('video', prefs),

@@ -1,7 +1,7 @@
 /// <reference lib="webworker" />
 // Кэш оболочки приложения: холодный старт без сети. Вложения (/files/<id> → 302 на подписанную ссылку хранилища) —
 // свой кэш relay-media (mediaCache.ts), ключ — /files/<id>, сама ссылка в кэш не попадает. Остальной API и WebSocket — только сеть.
-import { fetchMedia, isMediaRequest, loadPolicy, savePolicy, serveMedia, sweepMedia, type MediaPolicy } from './mediaCache';
+import { fetchMedia, isMediaRangeRequest, isMediaRequest, loadPolicy, savePolicy, serveMedia, sweepMedia, type MediaPolicy } from './mediaCache';
 declare const __BUILD__: string;
 const sw = self as unknown as ServiceWorkerGlobalScope;
 const CACHE = 'relay-shell-' + __BUILD__;
@@ -33,6 +33,8 @@ function sweep(policy?: MediaPolicy): Promise<unknown> {
 
 sw.addEventListener('message', (e) => {
   const d = e.data as { type?: string; keepDays?: number; maxMb?: number } | null;
+  // страница положила в кэш целый файл (менеджер загрузок) — проверить лимит
+  if (d?.type === 'mediaSweep') { e.waitUntil(sweep()); return; }
   if (d?.type !== 'mediaPolicy') return;
   const p: MediaPolicy = { keepDays: Math.max(0, Number(d.keepDays) || 0), maxMb: Math.max(0, Number(d.maxMb) || 0) };
   e.waitUntil(savePolicy(caches, p).then(() => sweep(p)).catch(() => {}));
@@ -60,6 +62,12 @@ sw.addEventListener('fetch', (e) => {
       if (background) e.waitUntil(background.then(() => { if (put && ++stored % SWEEP_EVERY === 0) return sweep(); }));
       return response;
     }));
+    return;
+  }
+  // часть видео/аудио — в сеть как есть, через /files/<id>: плеер не застрянет на истёкшей ссылке хранилища
+  // (без SW Chrome после перемотки идёт прямо по старой ссылке). Части не кэшируем: в кэше только целые файлы.
+  if (isMediaRangeRequest(e.request, location.origin)) {
+    e.respondWith(fetch(e.request));
     return;
   }
   if (e.request.method !== 'GET' || url.origin !== location.origin || API.test(url.pathname) || url.pathname === '/version.json' || url.pathname === '/sw.js') return;

@@ -725,8 +725,92 @@ function videoObserve(el, cb) {
   videoCbs.set(el, cb); videoIO.observe(el);
   return function () { videoCbs.delete(el); videoIO.unobserve(el); };
 }
+/* Истёкшая подписанная ссылка посреди просмотра (как в Telegram — незаметно): /files/<id> отдаёт 302 на ссылку
+   хранилища, плеер ходит за кусками уже по ней, и через срок ссылки следующий кусок получает 403 → MEDIA_ERR_NETWORK
+   (или SRC_NOT_SUPPORTED, если тело ошибки приняли за видео). Тогда: снимок текущего кадра поверх, тот же src заново
+   (браузер снова пройдёт через /files/<id> и получит свежую ссылку), то же место, игра/пауза как было; снимок
+   убираем, когда встал нужный кадр. Не больше 3 раз в минуту — иначе это не срок ссылки, а настоящая ошибка. */
+function useVideoRecovery(ref, src) {
+  useEffect(function () {
+    var v = ref.current;
+    if (!v || !src) return undefined;
+    var tries = 0, first = 0, cover = null, pending = null, waitSeek = false, stall = 0, loadedAt = Date.now();
+    // Chrome после перемотки идёт за куском по старой (истёкшей) ссылке; 403 с XML блокирует ORB, и плеер молча
+    // повторяет запрос ~30 с, не давая error. Поэтому и «ждёт данных дольше 2 с» на ссылке старше 15 с — тоже сюда.
+    function onWaiting() {
+      clearTimeout(stall);
+      if (pending || v.paused || Date.now() - loadedAt < 15000) return;
+      stall = setTimeout(function () { if (!v.paused && v.readyState < 3 && !pending) recover(); }, 2000);
+    }
+    function onProgressing() { clearTimeout(stall); }
+    function uncover() {
+      if (!cover) return;
+      var c = cover; cover = null;
+      c.style.opacity = '0';
+      setTimeout(function () { c.remove(); }, 180);
+    }
+    function onError() {
+      var err = v.error;
+      if (err && (err.code === 2 || err.code === 4)) recover();
+    }
+    function recover() {
+      clearTimeout(stall);
+      var now = Date.now();
+      if (now - first > 60000) { first = now; tries = 0; }
+      if (++tries > 3) return;
+      var t = pending ? pending.t : v.currentTime, play = pending ? pending.play : !v.paused;
+      if (!cover && v.videoWidth && v.parentNode) {
+        try {
+          var c = document.createElement('canvas');
+          c.width = v.videoWidth; c.height = v.videoHeight;
+          c.getContext('2d').drawImage(v, 0, 0, c.width, c.height);
+          c.className = v.className + ' rl-video-cover';
+          c.setAttribute('aria-hidden', 'true');
+          v.parentNode.insertBefore(c, v.nextSibling);
+          cover = c;
+        } catch (e) { /* кадр не снять — перезапуск будет виден на миг */ }
+      }
+      pending = { t: t, play: play };
+      loadedAt = now;
+      // тот же адрес: присваивание src заново запускает загрузку с начала (у Preact src тот же — он не вмешается)
+      v.src = src;
+      v.load();
+    }
+    function onMeta() {
+      var p = pending;
+      if (!p) return;
+      pending = null;
+      waitSeek = p.t > 0;
+      if (waitSeek) { try { v.currentTime = p.t; } catch (e) { waitSeek = false; } }
+      if (p.play) { var r = v.play(); if (r && r.catch) r.catch(function () {}); }
+    }
+    function onData() { if (!pending && !waitSeek) uncover(); }
+    function onSeeked() { if (!pending) { waitSeek = false; uncover(); } }
+    v.addEventListener('error', onError);
+    v.addEventListener('loadedmetadata', onMeta);
+    v.addEventListener('loadeddata', onData);
+    v.addEventListener('seeked', onSeeked);
+    v.addEventListener('waiting', onWaiting);
+    v.addEventListener('playing', onProgressing);
+    v.addEventListener('pause', onProgressing);
+    v.addEventListener('canplay', onProgressing);
+    return function () {
+      clearTimeout(stall);
+      v.removeEventListener('waiting', onWaiting);
+      v.removeEventListener('playing', onProgressing);
+      v.removeEventListener('pause', onProgressing);
+      v.removeEventListener('canplay', onProgressing);
+      v.removeEventListener('error', onError);
+      v.removeEventListener('loadedmetadata', onMeta);
+      v.removeEventListener('loadeddata', onData);
+      v.removeEventListener('seeked', onSeeked);
+      if (cover) cover.remove();
+    };
+  }, [src]);
+}
 function InlineVideo(props) {
   var ref = useRef(null), loaded = useState(false), left = useState(props.duration || 0);
+  useVideoRecovery(ref, props.src);
   useEffect(function () {
     var v = ref.current;
     if (!v || !props.autoplay) return undefined;
@@ -934,19 +1018,33 @@ function fileKind(ext) {
 function FileBubble(props) {
   var out = props.from === 'out';
   var ext = (props.ext || 'pdf').toUpperCase();
+  // кольцо — только если загрузка дольше 150 мс (из кэша — сразу готово, без мигания), и не короче 600 мс;
+  // пока кольца нет — прежний вид квадрата. Смена вида — плавная (rl-file-face, ключ по виду).
+  var ring = useMinVisible(props.state === 'loading', { delay: 150, min: 600 });
+  var last = useRef(props.state === 'loading' ? 'ready' : props.state);
+  if (props.state !== 'loading') last.current = props.state;
+  var face = ring ? 'loading' : props.state === 'loading' ? last.current : props.state;
+  var label = ext.length > 4 ? ext.slice(0, 4) : ext;
   return h(MsgLine, { aside: props.aside, class: cx('rl-msgline', out && 'rl-msgline-out', props.groupStart && 'rl-msgline-gap') },
     h('div', { class: cx('rl-bubble rl-file', out ? 'rl-bubble-out' : 'rl-bubble-in-side', props.tail && 'rl-bubble-tail') },
       props.fwd ? h(ForwardTitle, { fwd: props.fwd }) : null,
       props.reply ? h(ReplyQuote, Object.assign({ inBubble: true }, props.reply)) : null,
       // как в Telegram: цветной квадрат с загнутым уголком и расширением; скачивание и загрузка — внутри квадрата
       h('div', { class: 'rl-file-card' },
-        props.state === 'remote'
-          ? h('button', { type: 'button', class: 'rl-file-icon rl-file-icon-btn', 'data-ext': ext, 'data-kind': fileKind(ext), 'aria-label': 'Скачать файл', onClick: props.onDownload }, h(Icon, { name: 'download', size: 24 }))
+        face === 'remote'
+          ? h('button', { type: 'button', class: 'rl-file-icon rl-file-icon-btn', 'data-ext': ext, 'data-kind': fileKind(ext), 'aria-label': 'Скачать файл', onClick: props.state === 'loading' ? undefined : props.onDownload },
+              h('span', { key: 'dl', class: 'rl-file-face' }, h(Icon, { name: 'download', size: 24 })))
           // не отправлено (отказ): вместо застывшего кольца — «повторить», как в Telegram; удалить — из меню сообщения
-          : props.state === 'failed'
+          : face === 'failed'
           ? h('button', { type: 'button', class: 'rl-file-icon rl-file-icon-btn rl-file-icon-failed', 'data-ext': ext, 'data-kind': fileKind(ext), 'aria-label': 'Повторить отправку', onClick: props.onRetry }, h(Icon, { name: 'refresh', size: 24 }))
-          : h('span', { class: 'rl-file-icon', 'data-ext': ext, 'data-kind': fileKind(ext) },
-              props.state === 'loading' ? h(ProgressRing, { size: 40, progress: props.progress, onMedia: true, onCancel: props.onCancel }) : h('b', null, ext.length > 4 ? ext.slice(0, 4) : ext)),
+          : face === 'loading'
+          ? h('span', { class: 'rl-file-icon', 'data-ext': ext, 'data-kind': fileKind(ext) },
+              h('span', { key: 'ring', class: 'rl-file-face' }, h(ProgressRing, { size: 40, progress: props.state === 'loading' ? props.progress : 1, onMedia: true, onCancel: props.state === 'loading' ? props.onCancel : undefined })))
+          // скачан (лежит на устройстве): квадрат с расширением — нажатие открывает сразу, без сети
+          : props.onOpen
+          ? h('button', { type: 'button', class: 'rl-file-icon rl-file-icon-btn', 'data-ext': ext, 'data-kind': fileKind(ext), 'aria-label': 'Открыть файл', onClick: props.onOpen },
+              h('b', { key: 'ext', class: 'rl-file-face' }, label))
+          : h('span', { class: 'rl-file-icon', 'data-ext': ext, 'data-kind': fileKind(ext) }, h('b', { key: 'ext', class: 'rl-file-face' }, label)),
         h('span', { class: 'rl-file-text' }, h('span', { class: 'rl-file-name' }, props.name), h('span', { class: 'rl-file-sub' }, props.meta))),
       h('div', { class: 'rl-file-foot' }, h('span', { class: 'rl-bubble-meta' }, props.time, out ? h(MessageStatus, { status: props.status || 'read' }) : null))));
 }

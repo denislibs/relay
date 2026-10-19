@@ -47,7 +47,9 @@ test('chatKindFor + mediaPolicy: per-chat photo autoload and autoplay flags', ()
   expect(chatKindFor({ kind: 'direct', peerId: 8 }, contacts)).toBe('private');
   expect(chatKindFor(undefined, contacts)).toBe('private');
   const p = defaultPrefs();
-  expect(mediaPolicy(p, 'group')).toEqual({ photo: true, video: true, autoplayVideo: true, autoplayGif: true });
+  expect(mediaPolicy(p, 'group')).toEqual({ photo: true, video: true, file: false, fileMaxMb: 10, autoplayVideo: true, autoplayGif: true });
+  p.autoload.file.groups = true;
+  expect(mediaPolicy(p, 'group')).toMatchObject({ file: true, fileMaxMb: 10 });
   p.autoload.photo.groups = false; p.anim.autoplayGif = false;
   expect(mediaPolicy(p, 'group')).toMatchObject({ photo: false, autoplayGif: false });
   expect(mediaPolicy(p, 'contact').photo).toBe(true);
