@@ -135,6 +135,9 @@ body { background: var(--bg); color: var(--ink); font-family: var(--font-sans); 
 .app-swatch-on { outline-color: var(--brand); }
 .app-swatch-on::after { content: ""; position: absolute; right: 6px; bottom: 6px; width: 20px; height: 20px; border-radius: 50%; background: var(--brand) url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='white' stroke-width='3' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M6 12.5l4 4L18 8'/%3E%3C/svg%3E") center / 14px no-repeat; animation: app-pop 260ms cubic-bezier(0.3, 1.4, 0.5, 1) both; }
 .app-swatch-fill { position: absolute; inset: 0; display: block; }
+.app-swatch-photo { background: center / cover no-repeat; }
+.app-solids { grid-template-columns: repeat(4, 1fr); }
+.app-solids .app-swatch { aspect-ratio: 1; }
 .app-swatch-mini { position: relative; display: block; width: 36px; height: 36px; border-radius: var(--radius-sm); overflow: hidden; }
 .app-swatch-pattern { position: absolute; inset: 0; background: #000; opacity: 0.22; -webkit-mask: var(--swatch-pattern) center / var(--swatch-tile, 150px) auto repeat; mask: var(--swatch-pattern) center / var(--swatch-tile, 150px) auto repeat; }
 /* узоры грузятся файлами: до загрузки плитки — только градиент, затем узоры проявляются разом */

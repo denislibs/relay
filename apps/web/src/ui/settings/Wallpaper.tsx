@@ -1,11 +1,13 @@
-import { CheckRow, InfoRow, PanelHeader, PATTERN_SETS, buildPattern, loadPattern, patternColor, patternSize, Section } from '@relay/ui';
-import { useEffect, useState } from 'preact/hooks';
-import { setPref } from '../../prefs';
-import { back } from '../../nav';
+import { CheckRow, ColorPicker, InfoRow, PanelHeader, PATTERN_SETS, RangeRow, buildPattern, intensityAlpha, loadPattern, patternColor, patternSize, Section } from '@relay/ui';
+import { useEffect, useRef, useState } from 'preact/hooks';
+import { setPref, type WallpaperPref } from '../../prefs';
+import { showToast } from '../../settingsData';
+import { deleteImage, saveImage } from '../../wallpaperImage';
+import { back, go } from '../../nav';
 import { COLOR_PRESETS, DEFAULT_PATTERN, PATTERN_NAMES, sameColors, themeWallpaperColors, useWallpaper } from '../../wallpapers';
 import { useScrollMemory } from '../useScrollMemory';
 
-const DEFAULT_WP = { pattern: DEFAULT_PATTERN, colors: null, blur: false };
+const DEFAULT_WP: WallpaperPref = { pattern: DEFAULT_PATTERN, colors: null, blur: false, intensity: 50, image: null };
 
 const gradient = (colors: string[] | null): string => {
   const c = colors ?? [1, 2, 3, 4].map((i) => `var(--wallpaper-${i})`);
@@ -18,65 +20,150 @@ export function swatchBackground(colors: string[] | null, dark = false): string 
 }
 
 /** Плитка-превью. Светлая: градиент + узор цветом из фона (patternColor, как у живых обоев). Тёмная: как живой холст — узор залит градиентом поверх тёмной основы. */
-export function Swatch({ pattern, colors, dark, size }: { pattern: string; colors: string[] | null; dark: boolean; size?: number }) {
+export function Swatch({ pattern, colors, dark, size, intensity }: { pattern: string; colors: string[] | null; dark: boolean; size?: number; intensity?: number }) {
   // плитка в превью — в той же пропорции к живой (420 → 150 px), чтобы узоры читались в своём масштабе
   const tile = Math.round(patternSize(pattern) * 150 / 420);
   return (
     <span class={'app-swatch-fill' + (dark ? ' app-swatch-dark' : '')} style={{ background: swatchBackground(colors, dark), ...(size ? { width: size + 'px', height: size + 'px' } : null) }}>
-      <span class="app-swatch-pattern" style={{ '--swatch-pattern': `url(${buildPattern(pattern)})`, '--swatch-tile': tile + 'px', ...(dark ? { background: gradient(colors) } : { background: patternColor(colors ?? themeWallpaperColors(false)), opacity: 1 }) }} />
+      <span class="app-swatch-pattern" style={{ '--swatch-pattern': `url(${buildPattern(pattern)})`, '--swatch-tile': tile + 'px', ...(dark ? { background: gradient(colors), opacity: intensityAlpha(intensity, true) } : { background: patternColor(colors ?? themeWallpaperColors(false), intensityAlpha(intensity, false)), opacity: 1 }) }} />
     </span>
   );
 }
+
+/** Собственные однотонные цвета (не из Telegram): светлые — пастель, тёмные — глубокие. */
+export const SOLID_PRESETS: { light: string[]; dark: string[] } = {
+  light: ['#e6ebee', '#cfe0ea', '#a9cbe3', '#cde8d6', '#d9e8b4', '#9fcf98', '#f3e2b8', '#f6d2c0', '#efb59b', '#ecc8d4', '#d6cdea', '#c4c0b4'],
+  dark: ['#1d242b', '#13222e', '#0f2a3d', '#16261d', '#232a17', '#1b3324', '#2b2416', '#2e1d18', '#3a2219', '#2c1b25', '#221d33', '#1a1a1d'],
+};
+
+const solidOf = (wp: WallpaperPref): string | null => (wp.colors && wp.colors.every((c) => c.toLowerCase() === wp.colors![0].toLowerCase()) ? wp.colors[0] : null);
 
 export function Wallpaper() {
   const { dark, key, wp } = useWallpaper();
   const scroll = useScrollMemory('settings/general/wallpaper');
   const presets = COLOR_PRESETS[key];
-  const isDefault = wp.pattern === DEFAULT_WP.pattern && wp.colors === null && !wp.blur;
-  const choose = (pattern: string, colors: string[] | null) => setPref(`wallpaper.${key}`, { ...wp, pattern, colors });
+  const isDefault = wp.pattern === DEFAULT_WP.pattern && wp.colors === null && !wp.blur && wp.intensity === DEFAULT_WP.intensity && !wp.image;
+  // выбрали узор или цвет — своя картинка уступает место обоям
+  const choose = (pattern: string, colors: string[] | null) => { setPref(`wallpaper.${key}`, { ...wp, pattern, colors, image: null }); if (wp.image) void deleteImage(key); };
   const sets = Object.keys(PATTERN_SETS);
   const known = sets.includes(wp.pattern) ? wp.pattern : DEFAULT_PATTERN;
+  const image = !!wp.image;
   // нарисованные узоры: файлы грузятся один раз; превью показываем, когда загружены все (плитки появляются разом, без мигания по одной)
   const [loaded, setLoaded] = useState(() => sets.every((s) => buildPattern(s).startsWith('"data:')));
   useEffect(() => { if (!loaded) void Promise.allSettled(sets.map((s) => loadPattern(s))).then(() => setLoaded(true)); }, []);
+  const file = useRef<HTMLInputElement>(null);
+  const [busy, setBusy] = useState(false);
+  const upload = async (f: File | undefined) => {
+    if (!f) return;
+    setBusy(true);
+    try { setPref(`wallpaper.${key}`, { ...wp, image: await saveImage(key, f) }); }
+    catch { showToast('Не удалось открыть изображение'); }
+    finally { setBusy(false); }
+  };
+  const reset = () => { if (isDefault) return; setPref(`wallpaper.${key}`, DEFAULT_WP); if (wp.image) void deleteImage(key); };
+  // ползунок шлёт значение на каждом шаге: живое превью без записи настроек чаще 10 раз в секунду
+  const intensity = useThrottledPref(`wallpaper.${key}.intensity`, wp.intensity);
+  const solid = solidOf(wp);
 
   return (
     <div class="rl-sidepage" aria-label="Обои">
       <PanelHeader icon="arrowLeft" closeLabel="Назад" title="Обои" onClose={() => void back()} />
       <div class="rl-settings" ref={scroll.ref} onScroll={scroll.onScroll}>
+        <Section>
+          <input ref={file} type="file" accept="image/*" hidden onChange={(e) => { const f = e.currentTarget.files?.[0]; e.currentTarget.value = ''; void upload(f); }} />
+          <InfoRow icon="camera" title={busy ? 'Загружаем…' : 'Загрузить изображение'} onClick={() => { if (!busy) file.current?.click(); }} />
+          <InfoRow icon="palette" title="Выбрать цвет" subtitle={solid ? solid.toUpperCase() : undefined} onClick={() => void go('settings/general/wallpaper/color')} />
+          <InfoRow icon="history" title="Сбросить" subtitle="Вернуть обои по умолчанию" onClick={reset} />
+          <CheckRow label="Размытие" checked={image && wp.blur} disabled={!image} onChange={(v: boolean) => setPref(`wallpaper.${key}.blur`, v)} />
+          <RangeRow label="Интенсивность узора" min={0} max={100} step={1} value={intensity.value} disabled={image} onChange={intensity.set} onCommit={intensity.commit} />
+        </Section>
         <Section title="Узор" role="radiogroup">
           <div class={'app-swatches app-swatches-patterns' + (loaded ? ' app-swatches-ready' : '')}>
             {sets.map((set) => {
-              const on = wp.pattern === set;
+              const on = !image && wp.pattern === set;
               return (
                 <button
                   key={set} type="button" role="radio" aria-checked={on} aria-label={'Узор: ' + (PATTERN_NAMES[set] ?? set)} title={PATTERN_NAMES[set] ?? set}
                   class={'app-swatch' + (on ? ' app-swatch-on' : '')} onClick={() => choose(set, wp.colors)}
                 >
-                  <Swatch pattern={set} colors={wp.colors} dark={dark} />
+                  <Swatch pattern={set} colors={wp.colors} dark={dark} intensity={intensity.value} />
                 </button>
               );
             })}
           </div>
         </Section>
-        <Section title="Цвет" role="radiogroup">
+        <Section title="Цвета и градиенты" role="radiogroup" footer="Обои для светлой и тёмной темы выбираются отдельно. Своё изображение хранится только на этом устройстве.">
           <div class="app-swatches">
             {[{ id: 'theme', name: 'Как в теме', colors: null as string[] | null }, ...presets].map((p) => {
-              const on = sameColors(wp.colors, p.colors);
+              const on = !image && sameColors(wp.colors, p.colors);
               return (
                 <button
                   key={p.id} type="button" role="radio" aria-checked={on} aria-label={'Цвет: ' + p.name} title={p.name}
                   class={'app-swatch' + (on ? ' app-swatch-on' : '')} onClick={() => choose(known, p.colors)}
                 >
-                  <Swatch pattern={known} colors={p.colors} dark={dark} />
+                  <Swatch pattern={known} colors={p.colors} dark={dark} intensity={intensity.value} />
                 </button>
               );
             })}
           </div>
         </Section>
-        <Section footer="Размытие применяется к обоям чата. Обои для светлой и тёмной темы выбираются отдельно.">
-          <CheckRow label="Размытие" checked={wp.blur} onChange={(v: boolean) => setPref(`wallpaper.${key}.blur`, v)} />
-          <InfoRow icon="history" title="Сбросить" subtitle="Вернуть обои по умолчанию" onClick={() => { if (!isDefault) setPref(`wallpaper.${key}`, DEFAULT_WP); }} />
+      </div>
+    </div>
+  );
+}
+
+/** Значение настройки, которое меняют часто (ползунок, пипетка): на экране — сразу, в настройках — не чаще раза в 100 мс и обязательно последнее. */
+function useThrottledPref<T>(path: string, stored: T): { value: T; set: (v: T) => void; commit: (v: T) => void } {
+  const [draft, setDraft] = useState<T | null>(null);
+  const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const pending = useRef<T | null>(null);
+  const flush = () => { timer.current = null; if (pending.current !== null) { setPref(path, pending.current); pending.current = null; } };
+  useEffect(() => () => { if (timer.current) { clearTimeout(timer.current); flush(); } }, [path]);
+  // настройка догнала черновик — черновик больше не нужен
+  useEffect(() => { if (draft !== null && !timer.current && pending.current === null) setDraft(null); }, [stored]);
+  return {
+    value: draft ?? stored,
+    set: (v) => { setDraft(v); pending.current = v; if (!timer.current) timer.current = setTimeout(flush, 100); },
+    commit: (v) => { if (timer.current) clearTimeout(timer.current); pending.current = v; flush(); },
+  };
+}
+
+/** «Выбрать цвет»: однотонные обои (все четыре цвета градиента одинаковые), узор остаётся. */
+export function WallpaperColor() {
+  const { dark, key, wp } = useWallpaper();
+  const current = solidOf(wp) ?? (wp.colors ?? themeWallpaperColors(dark))[0];
+  const apply = (c: string) => { setPref(`wallpaper.${key}`, { ...wp, colors: [c, c, c, c], image: null }); if (wp.image) void deleteImage(key); };
+  const [shown, setShown] = useState(current);
+  const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const last = useRef(current);
+  // пипетку тянут — обои меняются вживую, но настройки пишем не чаще раза в 100 мс (последний цвет — всегда)
+  const pick = (c: string) => {
+    setShown(c); last.current = c;
+    if (!timer.current) timer.current = setTimeout(() => { timer.current = null; apply(last.current); }, 100);
+  };
+  useEffect(() => () => { if (timer.current) { clearTimeout(timer.current); apply(last.current); } }, []);
+  useEffect(() => { if (!timer.current) setShown(current); }, [current]);
+  const solid = solidOf(wp);
+
+  return (
+    <div class="rl-sidepage" aria-label="Выбрать цвет">
+      <PanelHeader icon="arrowLeft" closeLabel="Назад" title="Выбрать цвет" onClose={() => void back()} />
+      <div class="rl-settings">
+        <Section>
+          <ColorPicker value={shown} onChange={pick} label="Цвет обоев" />
+        </Section>
+        <Section title="Готовые цвета" role="radiogroup">
+          <div class="app-swatches app-solids">
+            {SOLID_PRESETS[key].map((c) => {
+              const on = !!solid && solid.toLowerCase() === c;
+              return (
+                <button key={c} type="button" role="radio" aria-checked={on} aria-label={'Цвет ' + c.toUpperCase()} title={c.toUpperCase()}
+                  class={'app-swatch' + (on ? ' app-swatch-on' : '')} onClick={() => { setShown(c); apply(c); }}>
+                  <span class="app-swatch-fill" style={{ background: c }} />
+                </button>
+              );
+            })}
+          </div>
         </Section>
       </div>
     </div>

@@ -9,6 +9,7 @@ export const PAGES = [
   'settings/profile/links/:item',   // new или номер ссылки
   'settings/general',
   'settings/general/wallpaper',
+  'settings/general/wallpaper/color',
   'settings/notifications',
   'settings/privacy',
   'settings/privacy/rule/:key',

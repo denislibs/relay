@@ -35,3 +35,13 @@ test('scheme is case-insensitive', () => {
   expect(parseRich('HTTPS://A.com/x')).toEqual([{ t: 'link', v: 'HTTPS://A.com/x', href: 'HTTPS://A.com/x' }]);
   expect(parseRich('WWW.a.com')[0].href).toBe('https://WWW.a.com');
 });
+
+test('colour picker maths: hex ⇄ rgb ⇄ hsv round-trips, bad input is refused', async () => {
+  const { hexToRgb, rgbToHex, rgbToHsv, hsvToRgb } = await import('./settings.js');
+  expect(hexToRgb('#fec496')).toEqual([254, 196, 150]);
+  expect(hexToRgb('abc')).toEqual([170, 187, 204]);
+  expect(hexToRgb('#12345')).toBeNull();
+  expect(hexToRgb('red')).toBeNull();
+  for (const hex of ['#000000', '#ffffff', '#fec496', '#0f2a3d', '#9fcf98', '#ff0000']) expect(rgbToHex(hsvToRgb(rgbToHsv(hexToRgb(hex))))).toBe(hex);
+  expect(rgbToHsv([255, 0, 0])).toEqual([0, 1, 1]);
+});

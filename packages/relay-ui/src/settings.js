@@ -1,5 +1,5 @@
 import { h } from 'preact';
-import { useEffect, useLayoutEffect, useRef } from 'preact/hooks';
+import { useEffect, useLayoutEffect, useRef, useState } from 'preact/hooks';
 import { Icon, SettingsIcon, cx, ripple } from './kit.js';
 import { Modal } from './modal.js';
 
@@ -183,4 +183,92 @@ function RichText(props) {
   }));
 }
 
-export { Section, RadioRow, CheckRow, RangeRow, TextField, SelectRow, ConfirmDialog, RichText, parseRich };
+/* ---------- ColorPicker: поле насыщенность × яркость, полоса оттенка, HEX и RGB ----------
+   value — '#rrggbb'; onChange(hex) зовётся на каждом шаге перетаскивания и при вводе корректного значения.
+   Оттенок хранится отдельно: на сером (s = 0) и чёрном (v = 0) он из hex не восстанавливается. */
+function clamp01(x) { return x < 0 ? 0 : x > 1 ? 1 : x; }
+function hexToRgb(hex) {
+  var m = /^#?([0-9a-f]{3}|[0-9a-f]{6})$/i.exec(String(hex || '').trim());
+  if (!m) return null;
+  var s = m[1].length === 3 ? m[1].replace(/./g, '$&$&') : m[1];
+  return [parseInt(s.slice(0, 2), 16), parseInt(s.slice(2, 4), 16), parseInt(s.slice(4, 6), 16)];
+}
+function rgbToHex(rgb) { return '#' + rgb.map(function (x) { return ('0' + Math.round(x).toString(16)).slice(-2); }).join(''); }
+function rgbToHsv(rgb) {
+  var r = rgb[0] / 255, g = rgb[1] / 255, b = rgb[2] / 255, max = Math.max(r, g, b), d = max - Math.min(r, g, b), hue = 0;
+  if (d) hue = max === r ? ((g - b) / d + 6) % 6 : max === g ? (b - r) / d + 2 : (r - g) / d + 4;
+  return [hue * 60, max ? d / max : 0, max];
+}
+function hsvToRgb(hsv) {
+  var f = function (k) { var x = (k + hsv[0] / 60) % 6; return 255 * (hsv[2] - hsv[2] * hsv[1] * Math.max(0, Math.min(x, 4 - x, 1))); };
+  return [f(5), f(3), f(1)];
+}
+function ColorPicker(props) {
+  var rgb = hexToRgb(props.value) || [0, 0, 0];
+  var st = useState(function () { return rgbToHsv(rgb); }), hsv = st[0], setHsv = st[1];
+  // значение пришло снаружи (выбрали готовый цвет) — подстраиваемся, сохраняя оттенок на сером
+  var last = useRef(props.value);
+  if (props.value !== last.current && rgbToHex(hsvToRgb(hsv)) !== String(props.value).toLowerCase()) {
+    var next = rgbToHsv(rgb);
+    if (next[1] === 0 || next[2] === 0) next[0] = hsv[0];
+    last.current = props.value;
+    setHsv(next);
+  }
+  var hexText = useState(null), rgbText = useState(null);   // черновик ввода; null — показываем текущее
+  function emit(n) { setHsv(n); var hex = rgbToHex(hsvToRgb(n)); last.current = hex; if (props.onChange) props.onChange(hex); }
+  function drag(kind) {
+    return function (e) {
+      if (e.button !== 0) return;
+      e.preventDefault();
+      var el = e.currentTarget, rect = el.getBoundingClientRect();
+      el.setPointerCapture(e.pointerId);
+      el.focus();
+      var cur = hsv;
+      function at(ev) {
+        var x = clamp01((ev.clientX - rect.left) / rect.width), y = clamp01((ev.clientY - rect.top) / rect.height);
+        cur = kind === 'hue' ? [Math.min(359.9, x * 360), cur[1], cur[2]] : [cur[0], x, 1 - y];
+        emit(cur);
+      }
+      at(e);
+      function up() { el.removeEventListener('pointermove', at); el.removeEventListener('pointerup', up); el.removeEventListener('pointercancel', up); }
+      el.addEventListener('pointermove', at);
+      el.addEventListener('pointerup', up);
+      el.addEventListener('pointercancel', up);
+    };
+  }
+  function keys(kind) {
+    return function (e) {
+      var step = e.shiftKey ? 0.1 : 0.01, n = hsv.slice(), k = e.key;
+      if (kind === 'hue') {
+        if (k === 'ArrowLeft' || k === 'ArrowDown') n[0] = Math.max(0, n[0] - step * 360); else if (k === 'ArrowRight' || k === 'ArrowUp') n[0] = Math.min(359.9, n[0] + step * 360); else return;
+      } else if (k === 'ArrowLeft') n[1] = clamp01(n[1] - step); else if (k === 'ArrowRight') n[1] = clamp01(n[1] + step);
+      else if (k === 'ArrowUp') n[2] = clamp01(n[2] + step); else if (k === 'ArrowDown') n[2] = clamp01(n[2] - step); else return;
+      e.preventDefault();
+      emit(n);
+    };
+  }
+  var cur = rgbToHex(hsvToRgb(hsv)), curRgb = hsvToRgb(hsv).map(Math.round);
+  var pure = 'hsl(' + Math.round(hsv[0]) + ', 100%, 50%)';
+  function field(label, draft, shown, parse) {
+    return h('label', { class: 'rl-cpick-field' },
+      h('span', null, label),
+      h('input', { type: 'text', inputMode: label === 'RGB' ? 'numeric' : 'text', spellcheck: false, autocomplete: 'off', value: draft[0] != null ? draft[0] : shown,
+        onInput: function (e) { var v = e.currentTarget.value; draft[1](v); var ok = parse(v); if (ok) emit(ok); },
+        onBlur: function () { draft[1](null); } }));
+  }
+  return h('div', { class: 'rl-cpick' },
+    h('div', { class: 'rl-cpick-area', style: { backgroundColor: pure }, role: 'slider', tabIndex: 0, 'aria-label': props.label || 'Насыщенность и яркость',
+      'aria-valuetext': 'насыщенность ' + Math.round(hsv[1] * 100) + '%, яркость ' + Math.round(hsv[2] * 100) + '%', onPointerDown: drag('area'), onKeyDown: keys('area') },
+      h('span', { class: 'rl-cpick-thumb', style: { left: hsv[1] * 100 + '%', top: (1 - hsv[2]) * 100 + '%', background: cur } })),
+    h('div', { class: 'rl-cpick-hue', role: 'slider', tabIndex: 0, 'aria-label': 'Оттенок', 'aria-valuemin': 0, 'aria-valuemax': 360, 'aria-valuenow': Math.round(hsv[0]),
+      onPointerDown: drag('hue'), onKeyDown: keys('hue') },
+      h('span', { class: 'rl-cpick-thumb', style: { left: hsv[0] / 360 * 100 + '%', background: pure } })),
+    h('div', { class: 'rl-cpick-fields' },
+      field('HEX', hexText, cur, function (v) { var x = hexToRgb(v); return x ? rgbToHsv(x) : null; }),
+      field('RGB', rgbText, curRgb.join(', '), function (v) {
+        var p = v.split(/[\s,;]+/).filter(Boolean).map(Number);
+        return p.length === 3 && p.every(function (x) { return Number.isInteger(x) && x >= 0 && x <= 255; }) ? rgbToHsv(p) : null;
+      })));
+}
+
+export { Section, RadioRow, CheckRow, RangeRow, TextField, SelectRow, ConfirmDialog, RichText, parseRich, ColorPicker, hexToRgb, rgbToHex, rgbToHsv, hsvToRgb };

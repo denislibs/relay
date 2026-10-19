@@ -4,7 +4,8 @@ import { switchAccent, switchTheme } from './themeSwitch';
 // ещё раз — в index.html до первой отрисовки. loadPrefs достраивает недостающее умолчаниями
 // и отбрасывает неизвестное.
 export type ThemePref = 'system' | 'light' | 'dark';
-export interface WallpaperPref { pattern: string; colors: string[] | null; blur: boolean }
+/** intensity — сила узора 0…100; image — id своей картинки (сама она в IndexedDB этого устройства), null — обои из узора. */
+export interface WallpaperPref { pattern: string; colors: string[] | null; blur: boolean; intensity: number; image: string | null }
 export interface Prefs {
   v: 1;
   theme: ThemePref;
@@ -32,7 +33,7 @@ export interface KV { getItem(k: string): string | null; setItem(k: string, v: s
 export const PREFS_KEY = 'relay.prefs';
 const OLD_THEME_KEY = 'relay.theme';
 
-const wp = (): WallpaperPref => ({ pattern: 'cuteMix', colors: null, blur: false });
+const wp = (): WallpaperPref => ({ pattern: 'cuteMix', colors: null, blur: false, intensity: 50, image: null });
 const all = (v: boolean) => ({ contacts: v, private: v, groups: v });
 /** @param reduced `prefers-reduced-motion` при первом запуске: уровень анимаций 0. */
 export function defaultPrefs(reduced = false): Prefs {
@@ -112,6 +113,8 @@ function sanitize(src: Prefs, d: Prefs): Prefs {
     if (c !== null && !(Array.isArray(c) && c.length === 4 && c.every((x) => typeof x === 'string' && /^#[0-9a-f]{3}([0-9a-f]{3})?$/i.test(x)))) w.colors = null;
     if (typeof w.pattern !== 'string' || !/^[A-Za-z0-9_-]{1,32}$/.test(w.pattern)) w.pattern = d.wallpaper[t].pattern;
     w.blur = w.blur === true;
+    w.intensity = Math.min(100, Math.max(0, Math.round(num(w.intensity, 50))));
+    if (typeof w.image !== 'string' || !/^[a-z0-9]{1,16}$/.test(w.image)) w.image = null;
   }
   return p;
 }

@@ -113,4 +113,13 @@ test('setPref wallpaper paths are sanitized', () => {
   expect(getPrefs().wallpaper.light.pattern).toBe('cuteMix');
   setPref('wallpaper.light.pattern', 'doodles');
   expect(getPrefs().wallpaper.light.pattern).toBe('doodles');
+  expect(getPrefs().wallpaper.light).toMatchObject({ intensity: 50, image: null });
+  setPref('wallpaper.light.intensity', 140);
+  expect(getPrefs().wallpaper.light.intensity).toBe(100);
+  setPref('wallpaper.light.intensity', 33.6);
+  expect(getPrefs().wallpaper.light.intensity).toBe(34);
+  setPref('wallpaper.dark.image', 'mv4k2x1');
+  expect(getPrefs().wallpaper.dark.image).toBe('mv4k2x1');
+  setPref('wallpaper.dark.image', '../x"');
+  expect(getPrefs().wallpaper.dark.image).toBeNull();
 });

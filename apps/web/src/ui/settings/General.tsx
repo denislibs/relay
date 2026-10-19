@@ -5,6 +5,7 @@ import { back, go } from '../../nav';
 import { ACCENTS } from '../../accent';
 import { setPref, type ThemePref } from '../../prefs';
 import { useWallpaper } from '../../wallpapers';
+import { useWallpaperImage } from '../../wallpaperImage';
 import { hm, localeTimeFormat } from '../format';
 import { useScrollMemory } from '../useScrollMemory';
 import { Swatch, swatchBackground } from './Wallpaper';
@@ -31,7 +32,8 @@ function useNow(): Date {
 
 export function General() {
   const prefs = useGlobal((s) => s.prefs);
-  const { dark, wp } = useWallpaper();
+  const { dark, wp, key } = useWallpaper();
+  const wpImage = useWallpaperImage(key, wp.image);
   const scroll = useScrollMemory('settings/general');
   const now = useNow();
   const fmt = prefs.timeFormat ?? localeTimeFormat();
@@ -41,14 +43,14 @@ export function General() {
       <PanelHeader icon="arrowLeft" closeLabel="Назад" title="Общие настройки" onClose={() => void back()} />
       <div class="rl-settings" ref={scroll.ref} onScroll={scroll.onScroll}>
         <Section title="Настройки">
-          <div class="app-textpreview" style={{ background: swatchBackground(wp.colors, dark) }} aria-hidden="true">
+          <div class="app-textpreview" style={wpImage ? { background: `center / cover no-repeat url("${wpImage}")` } : { background: swatchBackground(wp.colors, dark) }} aria-hidden="true">
             <Bubble from="in" tail time={hm(now)}>Привет! Так выглядит ваш текст.</Bubble>
             <Bubble from="out" tail time={hm(now)} status="read">Отлично, размер подходит.</Bubble>
           </div>
           <RangeRow label="Размер текста сообщений" min={12} max={20} step={1} value={prefs.textSize} onChange={(v: number) => setPref('textSize', v)} />
           <InfoRow
             icon="image" title="Обои чата" onClick={() => void go('settings/general/wallpaper')}
-            trailing={<span class="app-swatch-mini" aria-hidden="true"><Swatch pattern={wp.pattern} colors={wp.colors} dark={dark} /></span>}
+            trailing={<span class="app-swatch-mini" aria-hidden="true">{wpImage ? <span class="app-swatch-fill app-swatch-photo" style={{ backgroundImage: `url("${wpImage}")` }} /> : <Swatch pattern={wp.pattern} colors={wp.colors} dark={dark} intensity={wp.intensity} />}</span>}
           />
         </Section>
         <Section title="Тема" role="radiogroup">

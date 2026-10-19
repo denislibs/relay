@@ -1,4 +1,4 @@
-import { h } from 'preact';
+import { h, Fragment } from 'preact';
 import { createPortal } from 'preact/compat';
 import { useState, useRef, useEffect, useLayoutEffect } from 'preact/hooks';
 import { requestMeasure, requestMutation, onHeavyAnimationEnd, beginHeavyAnimation, forceMeasure } from './schedule.js';
@@ -550,10 +550,12 @@ function parseHex(c) {
   var m = /^#?([0-9a-f]{2})([0-9a-f]{2})([0-9a-f]{2})/i.exec(c.trim());
   return m ? [parseInt(m[1], 16), parseInt(m[2], 16), parseInt(m[3], 16)] : null;
 }
-function patternColor(colors) {
+/* alpha — сила узора (по умолчанию 0.4); ползунок «Интенсивность узора» передаёт свою. */
+function patternColor(colors, alpha) {
+  var a = typeof alpha === 'number' && alpha >= 0 && alpha <= 1 ? Math.round(alpha * 100) / 100 : 0.4;
   var rgb = [0, 0, 0], n = 0;
   colors.forEach(function (c) { var x = parseHex(c); if (x) { rgb[0] += x[0]; rgb[1] += x[1]; rgb[2] += x[2]; n++; } });
-  if (!n) return 'rgba(0,0,0,0.4)';
+  if (!n) return 'rgba(0,0,0,' + a + ')';
   var r = rgb[0] / n / 255, g = rgb[1] / n / 255, b = rgb[2] / n / 255;
   var max = Math.max(r, g, b), min = Math.min(r, g, b), d = max - min, hue = 0;
   if (d) hue = max === r ? ((g - b) / d) % 6 : max === g ? (b - r) / d + 2 : (r - g) / d + 4;
@@ -562,7 +564,7 @@ function patternColor(colors) {
   sat = Math.min(1, sat + 0.05 + 0.1 * (1 - sat));
   val = val > 0.5 ? val * 0.65 : Math.min(1, 1 - val * 0.65);
   var f = function (k) { var x = (k + hue / 60) % 6; return Math.round(255 * (val - val * sat * Math.max(0, Math.min(x, 4 - x, 1)))); };
-  return 'rgba(' + f(5) + ',' + f(3) + ',' + f(1) + ',0.4)';
+  return 'rgba(' + f(5) + ',' + f(3) + ',' + f(1) + ',' + a + ')';
 }
 var patternCache = Object.create(null);
 function buildPattern(set, stroke) {
@@ -602,6 +604,11 @@ function buildPattern(set, stroke) {
   // twallpaper wraps the value in url(…) itself, so pass a quoted data URI
   patternCache[cacheKey] = '"data:image/svg+xml;charset=utf-8,' + encodeURIComponent(svg) + '"';
   return patternCache[cacheKey];
+}
+/* Интенсивность узора 0…100 → прозрачность линий: светлая тема — альфа цвета (50 → 0.4, как было), тёмная — маска (50 → 0.55). */
+function intensityAlpha(intensity, dark) {
+  var k = typeof intensity === 'number' && isFinite(intensity) ? Math.max(0, Math.min(100, intensity)) / 100 : 0.5;
+  return dark ? Math.min(1, k * 1.1) : Math.min(1, k * 0.8);
 }
 var wallpapers = [];
 /* Shift every mounted wallpaper's gradient one step — call on send / receive, like Telegram. */
@@ -646,7 +653,7 @@ function Wallpaper(props) {
   latest.current = props;
   var rerun = useRef(null);
   useEffect(function () {
-    var el = host.current, wp = null, theme = null, lastKey = '';
+    var el = host.current, wp = null, theme = null, lastKey = '', lastChange = 0;
     function apply(animate) {
       requestMeasure(function () {
         var P = latest.current;
@@ -661,7 +668,7 @@ function Wallpaper(props) {
         // нарисованный узор ещё грузится: держим прежний (или градиент без узора), а когда придёт — проявится кроссфейдом
         var ready = P.pattern === false || patternReady(set);
         if (!ready) loadPattern(set).then(function () { if (rerun.current === apply) apply(true); }, function () {});
-        var key = [t.dark, colors.join(), P.pattern, ready].join('|');
+        var key = [t.dark, colors.join(), P.pattern, ready, P.intensity, !!P.image].join('|');
         if (theme && key === lastKey) return;
         var modeChanged = theme && t.dark !== theme.dark;
         var themeSwitch = !theme || modeChanged || (!custom && t.colors.join() !== theme.colors.join());
@@ -670,10 +677,12 @@ function Wallpaper(props) {
           // светлая ↔ тёмная: узор меняет режим (маска ↔ рисунок), а updatePattern режим маски не снимает — собираем заново
           if (wp && modeChanged) { wallpapers.splice(wallpapers.indexOf(wp), 1); wp.dispose(); wp = null; }
           var size = patternSize(set) + 'px';
-          var pattern = P.pattern === false || !ready ? undefined : t.dark
-            ? { image: buildPattern(set), mask: true, background: t.ink, size: size, opacity: P.maskOpacity || 0.55 }
+          // своя картинка вместо обоев: узора нет, градиент остаётся подложкой, пока картинка не проявилась
+          var none = P.pattern === false || !ready || !!P.image;
+          var pattern = none ? undefined : t.dark
+            ? { image: buildPattern(set), mask: true, background: t.ink, size: size, opacity: P.maskOpacity || intensityAlpha(P.intensity, true) }
             // светлая тема: узор нарисован цветом, выведенным из фона (прозрачность уже в цвете)
-            : { image: buildPattern(set, patternColor(colors)), mask: false, background: 'transparent', size: size, opacity: 1, blur: 0 };
+            : { image: buildPattern(set, patternColor(colors, intensityAlpha(P.intensity, false))), mask: false, background: 'transparent', size: size, opacity: 1, blur: 0 };
           // обои создавали без узора (файл ещё грузился): у twallpaper тогда нет слоя узора — пересоздаём под снимком
           if (wp && pattern && !wp.pattern) {
             if (animate && !reducedMotion()) crossfadeSnapshot(el);
@@ -684,7 +693,10 @@ function Wallpaper(props) {
             wp.init();
             wallpapers.push(wp);
           } else {
-            if (animate && ready && !themeSwitch && !reducedMotion()) crossfadeSnapshot(el);
+            // частые правки подряд (тянут ползунок или пипетку) — без снимка: кроссфейд на каждый шаг смазывал бы и грузил кадр
+            var now = performance.now(), burst = now - lastChange < 400;
+            lastChange = now;
+            if (animate && ready && !burst && !themeSwitch && !reducedMotion()) crossfadeSnapshot(el);
             wp.updateColors(colors);
             if (typeof wp.drawGradient === 'function') wp.drawGradient();
             if (pattern) wp.updatePattern(pattern);
@@ -708,8 +720,26 @@ function Wallpaper(props) {
     };
   }, []);
   var colorsKey = props.colors ? props.colors.join() : '';
-  useEffect(function () { if (rerun.current) rerun.current(true); }, [props.pattern, colorsKey, props.dark]);
-  return h('div', { ref: host, class: cx('rl-tw', props.blur && 'rl-tw-blur'), 'aria-hidden': 'true' });
+  useEffect(function () { if (rerun.current) rerun.current(true); }, [props.pattern, colorsKey, props.dark, props.intensity, !!props.image]);
+  // своя картинка — отдельным слоем над градиентом; проявляется, когда декодирована (без вспышки пустого фона)
+  // убрали картинку — слой не пропадает, а тает (под ним уже собраны обои)
+  var shown = useState(null), shownUrl = shown[0], setShownUrl = shown[1];
+  var leaving = useState(false), isLeaving = leaving[0], setLeaving = leaving[1];
+  useEffect(function () {
+    if (!props.image) {
+      if (!shownUrl) return;
+      setLeaving(true);
+      var t = setTimeout(function () { setShownUrl(null); setLeaving(false); }, 320);
+      return function () { clearTimeout(t); };
+    }
+    var alive = true, img = new Image();
+    img.src = props.image;
+    (img.decode ? img.decode() : Promise.resolve()).then(function () { if (alive) { setShownUrl(props.image); setLeaving(false); } }, function () {});
+    return function () { alive = false; };
+  }, [props.image]);
+  return h(Fragment, null,
+    h('div', { ref: host, class: cx('rl-tw', props.blur && !props.image && 'rl-tw-blur'), 'aria-hidden': 'true' }),
+    shownUrl ? h('div', { key: shownUrl, class: cx('rl-tw-photo', props.blur && 'rl-tw-photo-blur', isLeaving && 'rl-tw-photo-out'), style: { backgroundImage: 'url("' + shownUrl.replace(/"/g, '') + '")' }, 'aria-hidden': 'true' }) : null);
 }
 
 /* =====================================================================
@@ -778,7 +808,7 @@ function FloatShell(props) {
   // начальная ширина — один раз; дальше --side-w ведёт только ручка (иначе каждый рендер затирал бы перетаскивание)
   useLayoutEffect(function () { if (props.sideWidth && ref.current) ref.current.style.setProperty('--side-w', props.sideWidth + 'px'); }, []);
   return h('div', { ref: ref, class: cx('rl-shell rl-wallpaper', props.wallpaper !== false && 'rl-shell-tw', props.class), style: props.style },
-    props.wallpaper !== false ? h(Wallpaper, { pattern: props.pattern, colors: props.wallpaperColors, blur: props.wallpaperBlur, dark: props.wallpaperDark }) : null,
+    props.wallpaper !== false ? h(Wallpaper, { pattern: props.pattern, colors: props.wallpaperColors, blur: props.wallpaperBlur, dark: props.wallpaperDark, intensity: props.wallpaperIntensity, image: props.wallpaperImage }) : null,
     props.rail || null,
     props.sidebar ? h('div', { class: 'rl-shell-side' }, props.sidebar,
       props.onSideResize ? h(SideResizer, { min: props.sideMin, max: props.sideMax, onChange: props.onSideResize }) : null) : null,
@@ -958,4 +988,4 @@ function GlassBar(props) {
   return h('header', { class: cx('rl-glassbar', props.class) }, props.children);
 }
 
-export { patternColor, Wallpaper, nudgeWallpaper, buildPattern, loadPattern, patternSize, PATTERN_FILES, DOODLES, PATTERN_SETS, FloatShell, SideResizer, SidebarCard, SidebarHeader, FolderTabs, FolderRail, Fab, GlassBar, WindowList, AsidePanel, SideFrame, SlideStack, Menu, ReactionPicker, MentionList, DropOverlay, LinkPreview, PollBubble, UnreadDivider, SelectionBar, ChatSearchBar, Highlight, ContactPicker, CallRow, StatusAvatar, LoginQR, VirtualList, BottomNav, Tooltip, plural };
+export { patternColor, intensityAlpha, Wallpaper, nudgeWallpaper, buildPattern, loadPattern, patternSize, PATTERN_FILES, DOODLES, PATTERN_SETS, FloatShell, SideResizer, SidebarCard, SidebarHeader, FolderTabs, FolderRail, Fab, GlassBar, WindowList, AsidePanel, SideFrame, SlideStack, Menu, ReactionPicker, MentionList, DropOverlay, LinkPreview, PollBubble, UnreadDivider, SelectionBar, ChatSearchBar, Highlight, ContactPicker, CallRow, StatusAvatar, LoginQR, VirtualList, BottomNav, Tooltip, plural };
