@@ -106,11 +106,24 @@ export async function toggleProfileMusic(t: Track): Promise<void> {
 }
 
 /** Треки чьего-то профиля → плейлист; играть с i-го и открыть окно плейлиста. */
-export function playProfile(userId: number, tracks: ProfileTrack[], i = 0): void {
-  const list: Track[] = tracks.map((x) => ({ key: 'profile:' + userId + ':' + x.id, kind: 'music', src: `/files/${x.id}`, duration: x.duration ?? 0, title: x.title, performer: '', attId: x.id }));
+const profileTrack = (userId: number, x: Pick<ProfileTrack, 'id' | 'title' | 'duration'>): Track =>
+  ({ key: 'profile:' + userId + ':' + x.id, kind: 'music', src: `/files/${x.id}`, duration: x.duration ?? 0, title: x.title, performer: '', attId: x.id });
+
+export function playProfile(userId: number, tracks: Pick<ProfileTrack, 'id' | 'title' | 'duration'>[], i = 0): void {
+  const list: Track[] = tracks.map((x) => profileTrack(userId, x));
   if (!list.length) return;
   player.setPlaylist(list);
   player.play(list[i]);
   warm(list[i].src);
   setGlobal({ playlistOpen: true });
+}
+
+/** Плашка под аватаром знает только последний трек (PublicUser.music): он играет сразу, а весь список
+ *  профиля подгружается следом и становится плейлистом, если этот трек всё ещё играет. */
+export function playProfileTop(userId: number, top: Pick<ProfileTrack, 'id' | 'title' | 'duration'>): void {
+  playProfile(userId, [top]);
+  const key = profileTrack(userId, top).key;
+  loadProfileMusic(userId).then((all) => {
+    if (all.length > 1 && player.playerState().key === key) player.setPlaylist(all.map((x) => profileTrack(userId, x)));
+  }).catch(() => { /* без сети — один трек */ });
 }

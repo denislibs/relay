@@ -50,15 +50,9 @@ async function boot(): Promise<void> {
   let cached: Me | null = null;
   try { cached = JSON.parse(localStorage.getItem(ME_KEY) ?? 'null'); } catch { cached = null; }
   if (cached) {
+    // сеанс сверяет движок: он сам спрашивает /me после подключения (свежий профиль придёт подпиской 'me'),
+    // а 401 на любой его запрос — конец сеанса и экран входа (settingsData → onTerminated). Свой запрос здесь — дубль
     start(cached);
-    fetch('/me').then(async (res) => {
-      if (res.status === 401) { localStorage.removeItem(ME_KEY); location.reload(); return; }   // сеанс истёк — на вход
-      if (!res.ok) return;
-      const fresh = (await res.json()) as Me;
-      localStorage.setItem(ME_KEY, JSON.stringify(fresh));
-      if (fresh.userId !== cached.userId) location.reload();   // в другой вкладке вошли другим пользователем
-      else if (fresh.name !== cached.name) setGlobal({ me: fresh });
-    }).catch(() => { /* нет сети — работаем офлайн */ });
     return;
   }
   let me: Me | null = null;

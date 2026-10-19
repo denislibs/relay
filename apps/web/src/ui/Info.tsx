@@ -1,8 +1,8 @@
-import type { ProfileLink } from '@relay/protocol';
+import type { ProfileLink, ProfileMusicSummary } from '@relay/protocol';
 import { ProfileLinks } from './links/ProfileLinks';
 import { SharedMedia } from './SharedMedia';
 import { membersStatus, useMembers } from '../members';
-import { loadProfileMusic, playProfile, type ProfileTrack } from '../music';
+import { playProfileTop } from '../music';
 import { Avatar, Icon, InfoRow, PanelHeader, RichText, SettingsIcon, SlideStack, Switch, Verified } from '@relay/ui';
 import type { Item } from '@relay/sync-engine/src/types';
 import { chatTone, isSystemChat } from './format';
@@ -132,12 +132,12 @@ export function Info() {
           <ProfileGallery photos={gallery} index={slide} onIndex={setSlide} onOpen={setViewer}
             name={<>{title}{system ? <Verified size={22} /> : null}</>}
             sub={<span class={myPeer?.online ? 'app-online' : ''}>{subtitle || ' '}</span>}
-            extra={peerId ? <ProfileMusicPill userId={peerId} /> : null} />
+            extra={peerId ? <ProfileMusicPill userId={peerId} music={user?.music as ProfileMusicSummary | null | undefined} /> : null} />
         ) : (
         <div class="rl-profile">
           <div class="app-prof-ava">
             <Avatar name={title} tone={chatTone(chat)} size={120} logo={system} {...avatarPhoto(chat?.photo as ProfilePhoto | null, true)} />
-            {peerId ? <ProfileMusicPill userId={peerId} /> : null}
+            {peerId ? <ProfileMusicPill userId={peerId} music={user?.music as ProfileMusicSummary | null | undefined} /> : null}
           </div>
           <div class="rl-profile-name">{title}{system ? <Verified size={22} /> : null}</div>
           <div class={'rl-profile-sub' + (myPeer?.online ? ' app-online' : '')}>{subtitle || ' '}</div>
@@ -220,19 +220,14 @@ function Expand({ show, unclip, children }: { show: boolean; unclip?: boolean; c
   return <div class={'app-expand' + (unclip ? ' app-expand-unclip' : '')} data-state={show ? state : 'closed'}><div class="app-expand-inner">{children}</div></div>;
 }
 
-/** Музыка профиля — плашка поверх низа аватара (как в Telegram): «♪ трек ›», клик — играть и открыть плейлист. */
-function ProfileMusicPill({ userId }: { userId: number }) {
-  const [tracks, setTracks] = useState<ProfileTrack[]>([]);
-  useEffect(() => {
-    let live = true;
-    setTracks([]);
-    loadProfileMusic(userId).then((t) => { if (live) setTracks(t); }).catch(() => {});
-    return () => { live = false; };
-  }, [userId]);
-  if (!tracks.length) return null;
+/** Музыка профиля — плашка поверх низа аватара (как в Telegram): «♪ трек ›», клик — играть и открыть плейлист.
+ *  Сводка приходит в самом профиле (PublicUser.music) и обновляется по журналу (userUpdated) — без своего запроса. */
+function ProfileMusicPill({ userId, music }: { userId: number; music: ProfileMusicSummary | null | undefined }) {
+  if (!music?.top) return null;
   return (
-    <button type="button" class="app-prof-music" onClick={() => playProfile(userId, tracks)}>
-      <Icon name="music" size={14} /><span>{tracks[0].title}</span><Icon name="chevronRight" size={14} />
+    <button type="button" class="app-prof-music" onClick={() => playProfileTop(userId, music.top)}>
+      <Icon name="music" size={14} /><span>{music.top.title}</span><Icon name="chevronRight" size={14} />
     </button>
   );
 }
+

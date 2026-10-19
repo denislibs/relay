@@ -227,7 +227,11 @@ export interface PublicUser {
   publicName?: string;
   /** этот человек заблокировал зрителя: писать ему в личный чат нельзя (плашка вместо поля ввода) */
   blocksMe?: boolean;
+  /** музыка профиля: сколько треков и последний добавленный (плашка под аватаром); список — GET /users/:id/music */
+  music?: ProfileMusicSummary | null;
 }
+
+export interface ProfileMusicSummary { count: number; top: { id: string; title: string; duration: number | null } }
 
 /** Контакт: имя, которое дал владелец (видно только ему), заметка, профиль и присутствие.
  *  seq — номер записи журнала владельца, на момент которой снят ответ (порядок ответов и журнала). */
@@ -246,6 +250,7 @@ export interface Me {
   username: string | null; bio: string | null; birthday: Birthday | null; phone: string | null;
   links: ProfileLink[];
   photo?: ProfilePhoto | null;
+  music?: ProfileMusicSummary | null;
   seq?: number;
 }
 

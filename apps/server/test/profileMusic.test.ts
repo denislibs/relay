@@ -38,3 +38,25 @@ test('only music from a chat you are in', async () => {
   const [txt] = await sql`insert into messages (chat_id, sender_id, client_id, kind, body) values (${chat}, ${a}, ${crypto.randomUUID()}, 'text', 'hi') returning id`;
   await expect(addProfileMusic(a, chat, Number(txt.id))).rejects.toMatchObject({ code: 'not_found' });
 });
+
+test('profile music changes reach everyone who sees the user as userUpdated with the summary', async () => {
+  const a = await makeUser('Анна'), b = await makeUser('Борис'), c = await makeUser('Вера');
+  const chat = await makeChat([a, b]);
+  const t1 = await song(chat, b), t2 = await song(chat, b, 'Плачу в код.mp3');
+  const music = async (to: number) => {
+    const rows = await sql`select payload from updates where user_id = ${to} and type = 'userUpdated' order by seq`;
+    return rows.map((r) => (r.payload as { user: { id: number; music?: unknown } }).user).filter((u) => u.id === a).map((u) => u.music ?? null);
+  };
+  await addProfileMusic(a, chat, t1.msg);
+  await addProfileMusic(a, chat, t2.msg);
+  await addProfileMusic(a, chat, t2.msg);   // повтор ничего не меняет — записи нет
+  expect(await music(b)).toEqual([
+    { count: 1, top: { id: t1.att, title: 'Мы Сверхновая', duration: 170 } },
+    { count: 2, top: { id: t2.att, title: 'Плачу в код', duration: 170 } },
+  ]);
+  expect((await music(a)).length).toBe(2);   // себе — тоже (другие устройства)
+  expect(await music(c)).toEqual([]);        // общего чата нет — не зритель
+  await removeProfileMusic(a, t2.att);
+  await removeProfileMusic(a, t1.att);
+  expect((await music(b)).slice(2)).toEqual([{ count: 1, top: { id: t1.att, title: 'Мы Сверхновая', duration: 170 } }, null]);
+});

@@ -1,4 +1,4 @@
-import { normalizeLinks, type Birthday, type Me, type ProfileLink, type ProfilePhoto, type PublicUser, type UserPhoto } from '@relay/protocol';
+import { normalizeLinks, type Birthday, type Me, type ProfileLink, type ProfileMusicSummary, type ProfilePhoto, type PublicUser, type UserPhoto } from '@relay/protocol';
 import { sql, type Tx } from '../db';
 import { DomainError } from './errors';
 import { appendUpdates } from './journal';
@@ -8,8 +8,8 @@ const RESERVED = new Set(['admin', 'relay', 'support', 'settings', 'help', 'api'
 const USERNAME = /^[a-z][a-z0-9_]{4,31}$/;
 const len = (s: string) => [...s].length;
 
-export type Row = { id: number; name: string; first_name: string | null; last_name: string | null; username: string | null; bio: string | null; birthday: Birthday | null; phone: string | null; links: ProfileLink[]; photo: ProfilePhoto | null };
-export const COLS = sql`id, name, first_name, last_name, username, bio, birthday, phone, links, photo`;
+export type Row = { id: number; name: string; first_name: string | null; last_name: string | null; username: string | null; bio: string | null; birthday: Birthday | null; phone: string | null; links: ProfileLink[]; photo: ProfilePhoto | null; music: ProfileMusicSummary | null };
+export const COLS = sql`id, name, first_name, last_name, username, bio, birthday, phone, links, photo, music`;
 
 export const fullName = (first: string, last: string) => `${first} ${last}`.trim();
 
@@ -24,7 +24,7 @@ function shape(r: Row) {
   const [firstName, lastName] = parts(r);
   return {
     name: r.name, firstName, lastName,
-    username: r.username, bio: r.bio, birthday: r.birthday, phone: r.phone, links: r.links ?? [], photo: r.photo ?? null,
+    username: r.username, bio: r.bio, birthday: r.birthday, phone: r.phone, links: r.links ?? [], photo: r.photo ?? null, music: r.music ?? null,
   };
 }
 
@@ -64,6 +64,7 @@ export function publicUser(viewer: number, r: Row, contact: ContactName | null |
     phone: canSee(viewer, r.id, 'phone', ctx) ? s.phone : null,
     photo: blocksViewer(viewer, r.id, ctx) ? null : s.photo,   // заблокированному — как в Telegram, без фото
     blocksMe: blocksViewer(viewer, r.id, ctx),
+    music: blocksViewer(viewer, r.id, ctx) ? null : s.music,   // как listProfileMusic: заблокированному музыки не видно
   };
 }
 
@@ -193,8 +194,8 @@ export async function checkUsername(userId: number, raw: unknown): Promise<Usern
 
 // ---------- запись + журнал ----------
 
-/** Применить изменение профиля и записать userUpdated себе и зрителям — одной транзакцией. */
-async function save(userId: number, change: (tx: Tx, cur: Row) => Promise<void>): Promise<Me> {
+/** Применить изменение профиля и записать userUpdated себе и зрителям — одной транзакцией (и для музыки профиля). */
+export async function saveProfile(userId: number, change: (tx: Tx, cur: Row) => Promise<void>): Promise<Me> {
   return sql.begin(async (tx) => {
     const [cur] = await tx<Row[]>`select ${COLS} from users where id = ${userId} for no key update`;
     if (!cur) throw new DomainError('not_found');
@@ -218,7 +219,7 @@ export async function updateProfile(userId: number, patch: unknown): Promise<Me>
   const bio = 'bio' in p ? validBio(p.bio) : undefined;
   const birthday = 'birthday' in p ? validBirthday(p.birthday) : undefined;
   const links = 'links' in p ? normalizeLinks(p.links) ?? (() => { throw new DomainError('links_invalid'); })() : undefined;
-  return save(userId, async (tx, cur) => {
+  return saveProfile(userId, async (tx, cur) => {
     const [pf, pl] = parts(cur);
     const f = first ?? pf;
     const l = last ?? pl;
@@ -240,7 +241,7 @@ export async function setUsername(userId: number, raw: unknown): Promise<Me> {
     name = s.name;
   }
   try {
-    return await save(userId, async (tx) => { await tx`update users set username = ${name} where id = ${userId}`; });
+    return await saveProfile(userId, async (tx) => { await tx`update users set username = ${name} where id = ${userId}`; });
   } catch (e) {
     // гонку решает уникальный индекс, а не проверка «до»
     if ((e as { code?: string }).code === '23505') throw new DomainError('username_taken');
@@ -289,7 +290,7 @@ export async function setPhoto(userId: number, body: unknown): Promise<Me> {
     const v = row(video as string);
     if (!v || !/^video\/(mp4|webm)/.test(v.mime as string) || !v.width || v.width !== v.height || Number(v.width) > 1280 || Number(v.duration ?? 0) > 15) throw bad();
   }
-  return save(userId, async (tx) => {
+  return saveProfile(userId, async (tx) => {
     const [r] = await tx<PhotoRow[]>`insert into user_photos (user_id, big, small, thumb, video)
       values (${userId}, ${id}, ${small}, ${thumb}, ${(video as string | undefined) ?? null}) returning ${PHOTO_COLS}`;
     await tx`update users set photo = ${tx.json(photoOf(r) as never)} where id = ${userId}`;
@@ -298,7 +299,7 @@ export async function setPhoto(userId: number, body: unknown): Promise<Me> {
 
 /** Удалить фото из истории (без pid — главное). Было главным — главным становится следующее. */
 export async function deletePhoto(userId: number, pid?: number): Promise<Me> {
-  return save(userId, async (tx, cur) => {
+  return saveProfile(userId, async (tx, cur) => {
     const target = pid ?? cur.photo?.pid;
     if (target) await tx`delete from user_photos where user_id = ${userId} and id = ${target}`;
     else await tx`update users set photo = null where id = ${userId}`;   // фото без истории (до миграции) — просто снять
@@ -308,7 +309,7 @@ export async function deletePhoto(userId: number, pid?: number): Promise<Me> {
 
 /** Сделать фото из истории главным. */
 export async function setMainPhoto(userId: number, pid: number): Promise<Me> {
-  return save(userId, async (tx) => {
+  return saveProfile(userId, async (tx) => {
     const [r] = await tx`select 1 from user_photos where user_id = ${userId} and id = ${pid}`;
     if (!r) throw new DomainError('not_found');
     await syncMain(tx, userId, pid);

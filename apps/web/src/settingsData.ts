@@ -85,6 +85,8 @@ export function startSettingsData(me: Me): void {
     if (!it) return;
     const { key: _key, ...rest } = it;
     const next = rest as unknown as Me;
+    // в другой вкладке вошли другим пользователем (cookie общая) — эта вкладка запущена со старым: начать заново
+    if (next.userId !== me.userId) { try { localStorage.setItem(ME_KEY, JSON.stringify(next)); } catch { /* ok */ } location.reload(); return; }
     setGlobal({ me: next });
     try { localStorage.setItem(ME_KEY, JSON.stringify(next)); } catch { /* приватный режим */ }
   });
