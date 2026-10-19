@@ -263,6 +263,7 @@ export class Store {
       ...(m.service ? { service: m.service } : null),
       ...(m.groupId ? { groupId: m.groupId } : null),
       ...(m.fwdFrom ? { fwdFrom: m.fwdFrom } : null),
+      ...(m.blocks ? { blocks: m.blocks } : null),
       // сервер ещё грузит превью, а у нас оно уже есть (показано в поле ввода) — не прятать его до загрузки
       ...(m.link ? { link: m.link.pending && prev?.link && !prev.link.pending && prev.link.url === m.link.url ? prev.link : m.link } : null),
     };
@@ -321,6 +322,7 @@ export class Store {
       ...(o.groupId ? { groupId: o.groupId } : {}),
       ...(o.fwdFrom ? { fwdFrom: o.fwdFrom } : {}),
       ...(o.link ? { link: o.link } : {}),
+      ...(o.blocks ? { blocks: o.blocks } : {}),
     });
   }
 

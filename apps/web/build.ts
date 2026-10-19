@@ -18,7 +18,7 @@ async function build(): Promise<void> {
   await rm(tmp, { recursive: true, force: true });
   await mkdir(tmp, { recursive: true });
   const res = await Bun.build({
-    entrypoints: [join(root, 'src', 'main.tsx'), join(root, 'src', 'sw.ts'), join(engineHosts, 'shared.worker.ts'), join(engineHosts, 'dedicated.worker.ts'), join(ui, 'src', 'spoiler.worker.js')],
+    entrypoints: [join(root, 'src', 'main.tsx'), join(root, 'src', 'sw.ts'), join(engineHosts, 'shared.worker.ts'), join(engineHosts, 'dedicated.worker.ts'), join(ui, 'src', 'spoiler.worker.js'), join(ui, 'src', 'articleEditor.js')],   // articleEditor — Tiptap, грузится при первом развороте
     outdir: tmp,
     target: 'browser',
     naming: '[name].[ext]',

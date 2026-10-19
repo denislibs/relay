@@ -112,7 +112,8 @@ function Composer(props) {
     var m = sel && v.start === v.end ? /(^|\s)@([^\s@]*)$/.exec(before) : null;
     var mention = m ? { q: m[2], at: v.end - m[2].length - 1 } : null;
     if (mention && dismissed.current === mention.at) mention = null; else if (!mention) dismissed.current = null;
-    setSt({ empty: !v.text, hasText: !!v.text.trim(), mention: mention, caret: v.end || 0 });
+    // от трёх строк — кнопка «Открыть полный редактор» (как в Telegram)
+    setSt({ empty: !v.text, hasText: !!v.text.trim(), mention: mention, caret: v.end || 0, multi: el.scrollHeight > 64 });
     fit(animate);
     if (latest.current.onChange) latest.current.onChange({ text: v.text, entities: v.entities });
   }
@@ -475,6 +476,7 @@ function Composer(props) {
           if (attach[0] && performance.now() - openedAt.current < 500) return;
           openedAt.current = performance.now(); attach[1](!attach[0]);
         }, onMouseEnter: hoverIn, onMouseLeave: hoverOut }),
+        props.onExpand ? h(IconButton, { icon: 'expand', label: 'Открыть полный редактор', size: 18, class: cx('rl-composer-expand', st.multi && 'rl-composer-expand-on'), onClick: props.onExpand, tabIndex: st.multi ? undefined : -1 }) : null,
         h('div', { class: 'rl-composer-input', ref: boxRef },
           h('div', {
             id: id, ref: editRef, class: 'rl-composer-editable', contentEditable: props.disabled ? 'false' : 'true',

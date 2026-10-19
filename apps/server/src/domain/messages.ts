@@ -1,6 +1,6 @@
 import { attachmentForSend } from './files';
 import { clearDraftInTx } from './drafts';
-import { rightForKind, normalizeEntities, trimFormatted, type Entity, type ForwardInfo, type ForwardRef, type LinkPreview, type Message } from '@relay/protocol';
+import { rightForKind, normalizeEntities, trimFormatted, type Block, blocksText, normalizeBlocks, type Entity, type ForwardInfo, type ForwardRef, type LinkPreview, type Message } from '@relay/protocol';
 import { sql } from '../db';
 import { assertMember, toMessage } from './chats';
 import { DomainError } from './errors';
@@ -15,11 +15,19 @@ export const MAX_BODY = 4096;
 
 export async function sendMessage(
   userId: number,
-  input: { chatId: number; clientId: string; body: string; entities?: Entity[]; replyToId?: number | null; attachment?: { id: string; thumb?: string | null } | null; groupId?: string | null; forward?: ForwardRef | null; noLinkPreview?: boolean },
+  input: { chatId: number; clientId: string; body: string; entities?: Entity[]; replyToId?: number | null; attachment?: { id: string; thumb?: string | null } | null; groupId?: string | null; forward?: ForwardRef | null; noLinkPreview?: boolean; blocks?: unknown },
 ): Promise<{ message: Message; duplicate: boolean }> {
   // пробелы по краям срезаем вместе с оформлением; оформление — только проверенное
   let { text: body, entities } = trimFormatted(input.body, normalizeEntities(input.body, input.entities));
-  if (!input.forward) {
+  // «статья»: блоки проверяются и чистятся; body — их простой текст (сервер считает сам, клиенту не верим)
+  let blocks: Block[] | null = null;
+  if (input.blocks != null && !input.forward) {
+    if (input.attachment) throw new DomainError('bad_frame', 'article with attachment');
+    blocks = normalizeBlocks(input.blocks);
+    if (!blocks) throw new DomainError('bad_frame', 'blocks');
+    body = blocksText(blocks); entities = [];
+  }
+  if (!input.forward && !blocks) {
     if (!body && !input.attachment) throw new DomainError('bad_frame', 'empty body'); // у вложения подпись необязательна
     if (body.length > MAX_BODY) throw new DomainError('too_long');
   }
@@ -59,6 +67,7 @@ export async function sendMessage(
       entities = dropCaption || !Array.isArray(src.entities) ? [] : normalizeEntities(body, src.entities as Entity[]);
       // пересланное пересланного — исходный автор; «скрыть отправителя» — без заголовка, как своё
       // превью ссылки пересылается как есть (ещё грузится — копия получит его, когда оригинал загрузится, не раньше)
+      blocks = (src.blocks as Block[] | null) ?? null;   // статья пересылается целиком
       const sl = src.link as LinkPreview | null;
       if (sl && !sl.pending && !dropCaption) link = sl;
       fwdFrom = f.hideSender ? null : (src.fwd_from as ForwardInfo | null) ?? {
@@ -68,7 +77,7 @@ export async function sendMessage(
       attachment = input.attachment ? await attachmentForSend(tx, userId, input.attachment) as unknown as Record<string, unknown> : null;
       kind = attachment ? attachment.kind as string : 'text';
       // превью первой ссылки (как в Telegram): готовое в кэше — сразу, иначе «грузится» и задача link.preview
-      const url = !attachment && !input.noLinkPreview ? firstUrl(body, entities) : null;
+      const url = !attachment && !blocks && !input.noLinkPreview ? firstUrl(body, entities) : null;
       if (url) {
         const cached = await cachedPreview(url);
         if (cached === undefined) { link = { url, pending: true }; fetchLink = url; } else link = cached;
@@ -83,10 +92,10 @@ export async function sendMessage(
       if (last && !sameAlbum && Date.now() - new Date(last.created_at as string).getTime() < ctx.slowMode * 1000) throw new DomainError('flood', 'slow_mode');
     }
     const inserted = await tx`
-      insert into messages (chat_id, sender_id, client_id, kind, body, entities, reply_to_id, attachment, group_id, fwd_from, link)
+      insert into messages (chat_id, sender_id, client_id, kind, body, entities, reply_to_id, attachment, group_id, fwd_from, link, blocks)
       values (${input.chatId}, ${userId}, ${input.clientId}, ${kind}, ${body}, ${entities.length ? sql.json(entities as never) : null}, ${input.forward ? null : input.replyToId ?? null}, ${attachment ? sql.json(attachment as never) : null},
               ${attachment && input.groupId && /^[0-9a-f-]{36}$/.test(input.groupId) ? input.groupId : null},   -- группа — только у вложений
-              ${fwdFrom ? sql.json(fwdFrom as never) : null}, ${link ? sql.json(link as never) : null})
+              ${fwdFrom ? sql.json(fwdFrom as never) : null}, ${link ? sql.json(link as never) : null}, ${blocks ? sql.json(blocks as never) : null})
       on conflict (sender_id, client_id) do nothing
       returning *`;
     if (inserted.length === 0) {

@@ -2,7 +2,7 @@ import { showToast } from './settingsData';
 import { coverThumb, readAudioTags } from './id3';
 import { getPrefs } from './prefs';
 import { rememberPhotos } from './profilePhoto';
-import type { LinkPreview, ProfilePhoto } from '@relay/protocol';
+import type { Block, LinkPreview, ProfilePhoto } from '@relay/protocol';
 import { playSentSound } from './sound';
 import { beginHeavyAnimation, nudgeWallpaper, toBase64 } from '@relay/ui';
 import { connectEngine, EngineClient, Mirror } from '@relay/sync-engine/src/client';
@@ -368,7 +368,7 @@ export function sentSound(): void {
   if (p.sound) playSentSound(p.volume);
 }
 
-export async function send(chatId: number, body: string, replyToId: number | null = null, entities: Entity[] = [], opts: { noLinkPreview?: boolean; link?: LinkPreview | null } = {}): Promise<void> {
+export async function send(chatId: number, body: string, replyToId: number | null = null, entities: Entity[] = [], opts: { noLinkPreview?: boolean; link?: LinkPreview | null; blocks?: Block[] | null } = {}): Promise<void> {
   sentSound();
   nudgeWallpaper();
   toLatestOf(chatId); // своё сообщение — внизу, как в Telegram

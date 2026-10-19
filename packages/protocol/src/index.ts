@@ -1,3 +1,4 @@
+import type { Block } from './blocks';
 import type { ProfileLink } from './links';
 export * from './links';
 export * from './folders';
@@ -32,6 +33,7 @@ export interface Message {
   listened?: boolean;    // голосовое/кружок прослушан получателем
   fwdFrom?: ForwardInfo | null;   // переслано: откуда (нет — своё или отправитель скрыт)
   link?: LinkPreview | null;      // превью первой ссылки в тексте (pending — сервер ещё загружает страницу)
+  blocks?: Block[] | null;        // «статья»: блоки (body — её простой текст)
 }
 
 /** Превью ссылки: сайт, заголовок, описание и картинка (уже в нашем хранилище: /files/<id>). */
@@ -237,7 +239,7 @@ export type ErrorCode = 'bad_frame' | 'unauthorized' | 'not_member' | 'not_found
 export type ClientFrame =
   | { op: 'hello'; lastSeq: number }
   | { op: 'sync'; since: number }
-  | { op: 'send'; reqId: string; clientId: string; chatId: Id; body: string; entities?: Entity[]; replyToId?: Id | null; attachment?: { id: string; thumb?: string | null } | null; groupId?: string | null; forward?: ForwardRef | null; noLinkPreview?: boolean }
+  | { op: 'send'; reqId: string; clientId: string; chatId: Id; body: string; entities?: Entity[]; replyToId?: Id | null; attachment?: { id: string; thumb?: string | null } | null; groupId?: string | null; forward?: ForwardRef | null; noLinkPreview?: boolean; blocks?: Block[] | null }
   | { op: 'read'; reqId: string; chatId: Id; upToId: Id }
   | { op: 'typing'; chatId: Id }   // «печатаю» — без ответа, сервер пересылает остальным участникам
   | { op: 'draft'; reqId: string; chatId: Id; text: string; entities?: Entity[] }
@@ -295,7 +297,7 @@ export function parseClientFrame(raw: string): ClientFrame | null {
         if (typeof w !== 'object' || !int(w.chatId) || !int(w.id)) return null;
         forward = { chatId: w.chatId as number, id: w.id as number, hideSender: w.hideSender === true, hideCaption: w.hideCaption === true };
       }
-      return { op: 'send', reqId: f.reqId, clientId: f.clientId, chatId: f.chatId, body: f.body, entities: normalizeEntities(f.body, f.entities), replyToId: (f.replyToId as number | null) ?? null, attachment: (f.attachment as { id: string; thumb?: string | null } | null) ?? null, groupId: (f.groupId as string | null) ?? null, forward, ...(f.noLinkPreview === true ? { noLinkPreview: true } : {}) };
+      return { op: 'send', reqId: f.reqId, clientId: f.clientId, chatId: f.chatId, body: f.body, entities: normalizeEntities(f.body, f.entities), replyToId: (f.replyToId as number | null) ?? null, attachment: (f.attachment as { id: string; thumb?: string | null } | null) ?? null, groupId: (f.groupId as string | null) ?? null, forward, ...(f.noLinkPreview === true ? { noLinkPreview: true } : {}), ...(Array.isArray(f.blocks) ? { blocks: f.blocks as Block[] } : {}) };
     case 'read':
       return str(f.reqId, 64) && int(f.chatId) && int(f.upToId) ? { op: 'read', reqId: f.reqId, chatId: f.chatId, upToId: f.upToId } : null;
     default: return null;
@@ -321,3 +323,4 @@ export function hideSpoilers(text: string, entities?: readonly { type: string; o
 }
 
 export * from './groups';
+export * from './blocks';

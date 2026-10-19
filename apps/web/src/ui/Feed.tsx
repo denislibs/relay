@@ -3,7 +3,7 @@ import type { ServiceData, ServiceType } from '@relay/protocol';
 import type { Item } from '@relay/sync-engine/src/types';
 import { senderAvatar } from '../profilePhoto';
 import type { Entity } from '@relay/protocol';
-import { Avatar, Bubble, Icon, peerTone, DateDivider, DatePicker, FileBubble, MediaBubble, MessageText, VoiceBubble, MusicBubble, RoundBubble, player, MediaViewer, ScrollToBottom, beginHeavyAnimation, forceMeasure, isHeavyAnimating, onHeavyAnimationEnd, requestMeasure, requestMutation } from '@relay/ui';
+import { ArticleBlocks, Avatar, Bubble, Icon, peerTone, DateDivider, DatePicker, FileBubble, MediaBubble, MessageText, VoiceBubble, MusicBubble, RoundBubble, player, MediaViewer, ScrollToBottom, beginHeavyAnimation, forceMeasure, isHeavyAnimating, onHeavyAnimationEnd, requestMeasure, requestMutation } from '@relay/ui';
 import { memo } from 'preact/compat';
 import { useEffect, useLayoutEffect, useRef, useState } from 'preact/hooks';
 import { clearFocus, ensureNames, focusMessage, openInner, jumpToDate, localPreview, markListened, moveWindow, react, savePosition, savedPosition, seen } from '../data';
@@ -210,7 +210,9 @@ const Row = memo(function Row({ chatId, voiceTitle, author, onAuthor, onOpen, hl
         status={out ? m.status : undefined}
         appear={appear}
       >
-        <MessageText text={m.body as string} entities={m.entities as Entity[] | undefined} highlight={hl} />
+        {m.blocks && !m.deleted
+          ? <ArticleBlocks blocks={m.blocks} highlight={hl} />
+          : <MessageText text={m.body as string} entities={m.entities as Entity[] | undefined} highlight={hl} />}
       </Bubble>
       {m.id != null ? <i class="app-mark" data-mid={m.id as number} aria-hidden="true" /> : null}
     </div>

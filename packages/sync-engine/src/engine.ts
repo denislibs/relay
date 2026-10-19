@@ -623,7 +623,8 @@ export class Engine {
         this.lastCreated = Math.max(Date.now(), this.lastCreated + 1); // порядок черновиков внутри одной миллисекунды
         this.store.addPending({ clientId, chatId: a.chatId, body: a.body, entities: a.entities ?? [], replyToId: a.replyToId ?? null, createdAt: this.lastCreated, failed: false,
           ...(a.noLinkPreview ? { noLinkPreview: true } : a.link ? { link: a.link } : {}),
-          ...(a.attachment && a.attachment.id ? { attachment: a.attachment } : {}) });
+          ...(a.attachment && a.attachment.id ? { attachment: a.attachment } : {}),
+          ...(a.blocks && a.blocks.length ? { blocks: a.blocks } : {}) });
         this.store.setDraft(a.chatId, '');   // отправили — черновик больше не нужен
         await this.store.flush();
         this.changed();
@@ -1242,7 +1243,7 @@ export class Engine {
               this.changed();
             }
             const att = next.attachment ? { id: next.attachment.id, thumb: next.attachment.thumb ?? null } : null;
-            const r = await this.request({ op: 'send', reqId: '', clientId: next.clientId, chatId: next.chatId, body: next.body, entities: next.entities ?? [], replyToId: next.replyToId, attachment: next.forward ? null : att, ...(next.groupId ? { groupId: next.groupId } : {}), ...(next.forward ? { forward: next.forward } : {}), ...(next.noLinkPreview ? { noLinkPreview: true } : {}) });
+            const r = await this.request({ op: 'send', reqId: '', clientId: next.clientId, chatId: next.chatId, body: next.body, entities: next.entities ?? [], replyToId: next.replyToId, attachment: next.forward ? null : att, ...(next.groupId ? { groupId: next.groupId } : {}), ...(next.forward ? { forward: next.forward } : {}), ...(next.noLinkPreview ? { noLinkPreview: true } : {}), ...(next.blocks ? { blocks: next.blocks } : {}) });
             this.store.ack(next.clientId, r.id as number, r.createdAt as string);
             this.outboxAttempt = 0;
             if (att) delBlob(this.db, next.clientId).catch(() => {});
