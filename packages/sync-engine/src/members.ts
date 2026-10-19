@@ -32,6 +32,8 @@ export class MembersCache {
   private revs = new Map<number, number>();
   /** seq удаления (только в памяти): снимок, начатый до записи журнала, не воскрешает удалённого */
   private gone = new Map<string, number>();
+  /** чаты, чей первый снимок ещё в пути: записи журнала копятся в таблице, снимок их не откатит (seq) */
+  readonly loading = new Set<number>();
 
   static async load(db: IDBDatabase): Promise<MembersCache> {
     const c = new MembersCache();
@@ -81,8 +83,17 @@ export class MembersCache {
   applySnapshot(chatId: number, list: MemberRow[], seq: number): void {
     const ids = new Set(list.map((m) => m.userId));
     let changed = false;
-    list.forEach((m, i) => { if (this.put(chatId, m, i, seq)) changed = true; });
+    // строка новее снимка (запись журнала, пришедшая, пока он шёл) остаётся, но место берёт по снимку: свой seq — только порядок
+    const reorder = (k: string, order: number) => {
+      const r = this.table.get(k);
+      if (r && r.order !== order && this.table.put(k, { chatId, userId: r.userId, role: r.role, rank: r.rank, order }, r.seq)) changed = true;
+    };
+    list.forEach((m, i) => { if (this.put(chatId, m, i, seq)) changed = true; else reorder(keyOf(chatId, m.userId), i); });
     for (const r of this.list(chatId)) if (!ids.has(r.userId) && this.remove(chatId, r.userId, seq)) changed = true;
+    this.sorted.delete(chatId);
+    // новее снимка и не в нём (добавлены после) — в конец, в прежнем порядке
+    let tail = list.length;
+    for (const r of this.list(chatId)) if (!ids.has(r.userId)) reorder(keyOf(chatId, r.userId), tail++);
     if (changed) this.touch(chatId);
   }
 
@@ -115,12 +126,13 @@ export class MembersCache {
 
   reset(): void {
     for (const id of this.byChat.keys()) this.touched.add(id);
-    this.table.clear(); this.byChat.clear(); this.sorted.clear(); this.gone.clear();
+    this.table.clear(); this.byChat.clear(); this.sorted.clear(); this.gone.clear(); this.revs.clear(); this.loading.clear();
   }
 }
 
 /** Снимок участников с сервера (на момент seq): строки, профили в people (поверх известного), «загружено целиком». */
 export function applyMembersReply(store: Store, chatId: number, r: MembersReply, seq: number): void {
+  store.members.loading.delete(chatId);
   const chat = store.chats.get(chatId);
   if (!chat) return;
   // сервер отдаёт не больше MEMBERS_FULL: больше ли группа — видно по числу участников в group
@@ -137,8 +149,9 @@ export function applyMembersUpdate(store: Store, chatId: number, upsert: MemberR
   const chat = store.chats.get(chatId);
   store.members.bump(chatId);
   store.retouch(chatId);   // membersRev в строке чата
-  if (!chat || chat.membersDone === undefined) return;
+  if (!chat || (chat.membersDone === undefined && !store.members.loading.has(chatId))) return;
   if (remove.includes(store.userId)) {
+    store.members.loading.delete(chatId);
     store.members.dropChat(chatId);
     delete chat.membersDone;
     store.markChat(chat);

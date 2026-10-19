@@ -150,3 +150,19 @@ test('members limits: a group over 1000 keeps the first 200 (not complete); jour
   applyMembersReply(s, 8, { ownerId: 1, members: big.members.slice(0, 3) }, 2);
   expect(s.members.list(8).map((r) => r.userId)).toEqual([101, 102, 5]);
 });
+
+test('members first load: journal records that arrive while the first snapshot is in flight are kept (add stays, removed stays gone)', async () => {
+  const s = await Store.open(await openDb('members-' + crypto.randomUUID()), 1);
+  const group = { title: 'Дача', about: '', photo: null, ownerId: 1, rights: allRights(), slowMode: 0, historyHidden: false, joinApproval: false,
+    username: null, reactions: { mode: 'all' as const, allowed: [] }, protected: false, members: 3, requests: 0 };
+  s.applyChats([{ id: 8, kind: 'group', title: 'Дача', lastReadId: 0, unread: 0, last: null, group }]);
+  const row = (userId: number) => ({ userId, role: 'member' as const, rank: null, online: false, lastSeen: null, name: 'U' + userId, username: null });
+  s.members.loading.add(8);   // движок начал GET при lastSeq = 5
+  s.applyUpdate({ type: 'members', chatId: 8, upsert: [{ userId: 4, role: 'member', rank: null }], remove: [3] }, 6);
+  // сервер собрал ответ до записи 6: в нём ещё Вера (3) и нет Глеба (4)
+  applyMembersReply(s, 8, { ownerId: 1, members: [row(1), row(2), row(3)] }, 5);
+  expect(s.members.loading.has(8)).toBe(false);
+  expect(s.members.list(8).map((r) => r.userId)).toEqual([1, 2, 4]);
+  expect(s.members.list(8).map((r) => r.order)).toEqual([0, 1, 3]);
+  expect(s.chats.get(8)!.membersDone).toBe(true);
+});

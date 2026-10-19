@@ -685,15 +685,18 @@ export class Engine {
     if (!this.online || !this.ready || !this.membersWants.size) return;
     for (const chatId of [...this.membersWants]) {
       const chat = this.store.chats.get(chatId);
-      if (!chat) continue;   // чат ещё не пришёл — спросим, когда появится
+      if (!chat?.group) continue;   // чат или его группа ещё не пришли (знаем только по сообщению) — спросим, когда появятся
       this.membersWants.delete(chatId);
-      if (!chat.group || this.membersAsked.has(chatId)) continue;
+      if (this.membersAsked.has(chatId)) continue;
       this.membersAsked.add(chatId);
       const seq = this.store.lastSeq;
+      // записи журнала, пришедшие пока ждём снимок, применяются сразу (раньше снимка) — снимок их не откатит
+      if (chat.membersDone === undefined) this.store.members.loading.add(chatId);
       this.run(async () => {
         let r: MembersReply;
         try { r = await this.http<MembersReply>(`/chats/${chatId}/members`); }
         catch (err) {
+          this.store.members.loading.delete(chatId);
           if (!this.online) { this.membersAsked.delete(chatId); this.membersWants.add(chatId); }   // спросим после переподключения
           throw err;
         }
