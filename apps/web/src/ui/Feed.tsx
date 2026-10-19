@@ -132,8 +132,8 @@ const Row = memo(function Row({ chatId, voiceTitle, author, onAuthor, onOpen, hl
         <TodoBubble
           todo={todo} from={out ? 'out' : 'in'} tail={end} groupStart={start} appear={appear}
           forwarded={!!m.fwdFrom} authorName={out ? '' : voiceTitle}
-          edited={!!m.editedAt} time={clock(m.createdAt as string)} status={out ? m.status : undefined}
           reply={replyQ}
+          edited={!!m.editedAt} time={clock(m.createdAt as string)} status={out ? m.status : undefined}
           canToggle={canToggle}
           onToggle={(itemId: number, done: boolean) => { void toggleTodo(chatId, m.id as number, itemId, done).then((ok: boolean) => { if (!ok) showToast('Не удалось отметить задачу'); }); }}
           onReadOnly={() => showToast(m.fwdFrom ? 'Пересланный чек-лист нельзя менять' : `${voiceTitle} не разрешил(а) другим отмечать задачи`)}

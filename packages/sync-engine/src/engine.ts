@@ -815,6 +815,9 @@ export class Engine {
           this.store.addPending({ ...o, clientId, createdAt: this.lastCreated, failed: false });
           clientIds.push(clientId);
         };
+        // ответ — у первого сообщения (подписи или первой копии), и только у копии в один чат
+        let reply = a.hideSender && a.toChatIds.length === 1 ? a.replyToId ?? null : null;
+        const takeReply = () => { const r = reply; reply = null; return r; };
         for (const chatId of a.toChatIds) {
           const comment = a.comment?.body.trim() ? a.comment : null;
           if (comment) queue({ chatId, body: comment.body, entities: comment.entities ?? [], replyToId: takeReply() });
@@ -832,9 +835,6 @@ export class Engine {
         await this.store.flush();
         this.changed();
         this.pumpOutbox();
-        // ответ — у первого сообщения (подписи или первой копии), и только у копии в один чат
-        let reply = a.hideSender && a.toChatIds.length === 1 ? a.replyToId ?? null : null;
-        const takeReply = () => { const r = reply; reply = null; return r; };
         return { clientIds };
       }
       case 'loadMoreChats':
