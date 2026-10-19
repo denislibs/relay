@@ -1,4 +1,5 @@
 import { Avatar, EmptyState, FolderTabs, Icon, LazyImage, MediaViewer, peerTone, player, SlideStack } from '@relay/ui';
+import { offlineUrlNow } from '../downloads';
 import { LinkTile, linkInfo } from './linkTile';
 import { avatarPhoto, userPhoto } from '../profilePhoto';
 import { senderAvatar } from '../profilePhoto';
@@ -194,7 +195,7 @@ function TrackRow({ m, chatId, items }: { m: Msg; chatId: number; items: Msg[] }
   const g = getGlobal(), me = g.me?.userId;
   const chat = g.chats.find((c) => c.id === chatId);
   const title = music ? trackTitle(a.name) : senderTitle(m.senderId, me, chat);
-  const voiceTrack = (x: Msg) => ({ key: String(x.clientId), kind: 'voice' as const, src: fileUrl(x.attachment!), duration: x.attachment!.duration ?? 0,
+  const voiceTrack = (x: Msg) => ({ key: String(x.clientId), kind: 'voice' as const, src: offlineUrlNow(x.attachment!.id) ?? fileUrl(x.attachment!), duration: x.attachment!.duration ?? 0,
     title: senderTitle(x.senderId, me, chat), subtitle: x.attachment!.kind === 'round' ? 'Видеосообщение' : 'Голосовое сообщение', chatId, msgId: x.id });
   const toggle = () => {
     if (music) { toggleMusic(m as never, items as never, chatId); return; }

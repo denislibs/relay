@@ -3,7 +3,7 @@
 // Готовый файл отдаём пользователю (сохранить) и кладём целиком в кэш relay-media: второй раз «открыть» — мгновенно
 // и без сети (SW отдаёт оттуда и картинки, и части видео). Ядро (downloadChunks) не знает про браузер — тесты гоняют
 // его с подставным fetch.
-import { useEffect, useState } from 'preact/hooks';
+import { useEffect, useRef, useState } from 'preact/hooks';
 import { ON_DEVICE_CHANNEL, type AttachmentBucket } from './attachmentsOnDevice';
 import { deviceStore, putAttachment, readAttachment } from './mediaCache';
 import { requestPersistentStorage } from './storageInfo';
@@ -223,7 +223,11 @@ export function forgetCached(): void {
 
 async function readCached(id: string): Promise<Blob | null> {
   if (typeof caches === 'undefined') return null;
-  try { return await readAttachment(deviceStore(), id); } catch { return null; }
+  let blob: Blob | null = null;
+  try { blob = await readAttachment(deviceStore(), id); } catch { /* промах */ }
+  // в индексе был, а файла нет (вытеснил браузер) — больше не считаем его скачанным
+  if (!blob && onDevice?.delete(id)) { if (states.get(id)?.status === 'done') states.delete(id); anyListeners.forEach((f) => f()); }
+  return blob;
 }
 
 /**
@@ -335,12 +339,54 @@ async function pump(maxMb: number): Promise<void> {
   } finally { backgroundBusy = false; }
 }
 
+/* ---------- голосовые и кружки ----------
+   Как в Telegram: они маленькие и их переслушивают — держим файл на устройстве (auto-evictable) и играем оттуда.
+   Плеер и <video> просят файл кусками (Range), такие ответы кэш не хранит — поэтому файл докачивается целиком
+   отдельно, а играется по blob: (мгновенно, без сети, с перемоткой; см. useOfflineUrl ниже). */
+
+/** Своё только что отправленное: файл уже в памяти (локальная копия) — кладём его на устройство, второй раз не качаем. */
+async function keepLocalCopy(id: string, localUrl: string, maxMb: number): Promise<void> {
+  try { await keepOnDevice(id, await (await fetch(localUrl)).blob(), 'auto-evictable', maxMb); } catch { /* копия уже отозвана — скачается обычным путём */ }
+  anyListeners.forEach((f) => f());
+}
+const keepingLocal = new Set<string>();
+
+/**
+ * Источник для голосового или кружка.
+ *  - на устройстве — blob: этого файла;
+ *  - нет — сетевой адрес; lock — решение «сеть» не меняется, пока строка на экране (смена src перезапустила бы
+ *    идущее видео); без lock (голосовое: адрес берётся только в момент нажатия) — докачалось, и уже играем с устройства;
+ *  - local — своя локальная копия (только что отправили): она и играет, и она же ложится на устройство.
+ * prefetch — докачать заранее (настройки автозагрузки); keep() — докачать сейчас (начали слушать).
+ */
+export function useKeptMedia(f: DownloadFile | null, network: string | undefined, o: { prefetch: boolean; lock: boolean; local?: string; maxMb: number }): { src: string | undefined; keep: () => void } {
+  const id = f?.id || undefined;
+  useDownload(id);   // перерисовка, когда индекс прочитан или файл докачался
+  const onDev = id ? isCached(id) : false;
+  const decided = useRef<'device' | 'network' | null>(null);
+  if (decided.current === null && onDev !== null) decided.current = onDev ? 'device' : 'network';
+  if (decided.current === 'device' && onDev === false) decided.current = 'network';   // файл вытеснили
+  if (!o.lock && onDev) decided.current = 'device';
+  const offline = useOfflineUrl(decided.current === 'device' ? id : undefined);
+  useEffect(() => {
+    if (!id || onDev !== false) return;
+    if (o.local) { if (!keepingLocal.has(id)) { keepingLocal.add(id); void keepLocalCopy(id, o.local, o.maxMb).finally(() => keepingLocal.delete(id)); } return; }
+    if (o.prefetch) keepOffline(f!, o.maxMb);
+  }, [id, onDev, o.prefetch, o.local]);
+  const keep = () => { if (f?.id && isCached(f.id) === false && !o.local) keepOffline(f, o.maxMb); };
+  const src = o.local ?? (decided.current === 'device' ? offline : decided.current === 'network' ? network : undefined);
+  return { src, keep };
+}
+
 /* ---------- видео с устройства ----------
    Скачанное целиком видео играем по blob:-адресу файла из кэша: так оно открывается мгновенно, без сети и
    перематывается (отдавать его плееру из SW нельзя — Chrome не перематывает такие ответы, см. mediaCache.ts).
    Адрес держим до конца вкладки: blob из Cache Storage лежит на диске, память он не занимает. */
 const objectUrls = new Map<string, string>();
 const resolving = new Map<string, Promise<void>>();
+
+/** blob:-адрес файла, если его уже прочитали с устройства в этой вкладке (для очереди плеера: без ожидания). */
+export function offlineUrlNow(id: string | undefined): string | undefined { return id ? objectUrls.get(id) : undefined; }
 
 /** blob:-адрес скачанного файла; не скачан — undefined (играем по сети). */
 export function useOfflineUrl(id: string | undefined): string | undefined {
