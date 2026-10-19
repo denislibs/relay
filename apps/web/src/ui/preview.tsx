@@ -71,6 +71,7 @@ export function previewBody(m: LastMessage, withThumb: boolean): ComponentChildr
   const caption = text ? previewText(text, entities) : null;
   if (m.kind === 'photo') return caption ?? (withThumb ? 'Фото' : '🖼 Фото');
   if (m.kind === 'voice') return caption ?? '🎤 Голосовое сообщение';
+  if (m.kind === 'todo') return ['☑️ ', m.body];
   if (m.kind === 'round') return withThumb ? 'Видеосообщение' : '📹 Видеосообщение';
   if (m.kind === 'audio') {
     // «Название — исполнитель»; с обложкой эмодзи не нужен

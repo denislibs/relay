@@ -8,16 +8,17 @@ const ATTACH_ITEMS = [
   { key: 'media', icon: 'image', label: 'Фото или видео' },
   { key: 'doc', icon: 'file', label: 'Файл' },
   { key: 'music', icon: 'music', label: 'Музыка' },
+  { key: 'todo', icon: 'checkCircle', label: 'Чек-лист' },
 ];
 import type { LinkPreview } from '@relay/protocol';
 import { membersStatus, useMembers } from '../members';
 import { Playlist } from './Playlist';
 import { inProfile, toggleProfileMusic, type Track } from '../music';
-import { Avatar, Button, Icon, MediaPolicy, peerTone, ChatSearchBar, Highlight, ripple, useMinVisible, requestMeasure, Composer, DropOverlay, GlassBar, IconButton, Menu, Modal, ConfirmDialog, Presence, ReactionPicker, plural, requestMutation, SelectionBar, isHeavyAnimating, onHeavyAnimationEnd, applyMarkdown, emptyValue, sameValue, voiceSupported, PlayerBar, roundSupported, startRound, Verified, canCopyImage, clipboardHtml, copyImage, copyRich, downloadUrl } from '@relay/ui';
+import { Avatar, Button, Icon, MediaPolicy, peerTone, ChatSearchBar, Highlight, ripple, useMinVisible, requestMeasure, Composer, DropOverlay, GlassBar, IconButton, Menu, Modal, ConfirmDialog, Presence, ReactionPicker, plural, requestMutation, SelectionBar, isHeavyAnimating, onHeavyAnimationEnd, applyMarkdown, emptyValue, sameValue, voiceSupported, PlayerBar, roundSupported, startRound, Verified, canCopyImage, clipboardHtml, copyImage, copyRich, downloadUrl, TodoModal, TODO_ITEMS_MAX } from '@relay/ui';
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'preact/hooks';
-import { closeChat, deleteMessage, editMessage, ensureNames, focusMessage, openChat, openUserChat, pinMessage, unpinMessage, sendFile, sendFiles, sendRound, sendVoice, react, saveDraft, searchMessages, send, typing, typingDone } from '../data';
+import { sendTodo, appendTodo, editTodo, closeChat, deleteMessage, editMessage, ensureNames, focusMessage, openChat, openUserChat, pinMessage, unpinMessage, sendFile, sendFiles, sendRound, sendVoice, react, saveDraft, searchMessages, send, typing, typingDone } from '../data';
 import type { Item, SearchHit } from '@relay/sync-engine/src/types';
-import type { Entity } from '@relay/protocol';
+import type { Entity, Todo, TodoInput } from '@relay/protocol';
 
 type Value = { text: string; entities: Entity[] };
 type ComposerApi = { getValue(): Value; setValue(v: Value, opts?: { focus?: boolean; instant?: boolean }): void; focus(opts?: { end?: boolean }): void };
@@ -125,6 +126,8 @@ export function Chat({ chatId, frameKey, active }: { chatId: number; frameKey: s
   // вложения: выбор файла (скрепка), перетаскивание, вставка; перед отправкой — окно с превью и подписью
   const picker = useRef<HTMLInputElement>(null);
   const [musicOpen, setMusicOpen] = useState(false);   // «Музыка» из меню вложений
+  // чек-лист: новый (меню вложений), правка или «Добавить задачу» (меню сообщения)
+  const [todoOpen, setTodoOpen] = useState<{ mode: 'create' | 'edit' | 'append'; msg?: Item } | null>(null);
   const [pending, setPending] = useState<{ file: File; files: File[]; url: string | null; caption: string } | null>(null);
   const [dragging, setDragging] = useState(false);
   // несколько файлов разом — одной группой (в ленте один пузырь); превью — только у одиночного фото
@@ -431,7 +434,7 @@ export function Chat({ chatId, frameKey, active }: { chatId: number; frameKey: s
         onSendVoice={(r: { blob: Blob; duration: number; waveform: Uint8Array }) => { stick.current = true; sendVoice(chatId, r, (replyTo?.id as number) ?? null).catch(() => {}); setReplyKey(null); }}
         onSendRound={(r: { blob: Blob; duration: number; size: number; thumb: string | null }) => { stick.current = true; sendRound(chatId, r, (replyTo?.id as number) ?? null).catch(() => {}); setReplyKey(null); }}
         attachItems={ATTACH_ITEMS}
-        onAttach={(k: string) => { if (k === 'music') { setMusicOpen(true); return; } const el = picker.current!; el.accept = k === 'media' || k === 'camera' ? 'image/*,video/*' : ''; el.value = ''; el.click(); }}
+        onAttach={(k: string) => { if (k === 'music') { setMusicOpen(true); return; } if (k === 'todo') { setTodoOpen({ mode: 'create' }); return; } const el = picker.current!; el.accept = k === 'media' || k === 'camera' ? 'image/*,video/*' : ''; el.value = ''; el.click(); }}
         onSend={(v: Value) => {
           if (editing) {
             const next = applyMarkdown(v);
@@ -480,7 +483,10 @@ export function Chat({ chatId, frameKey, active }: { chatId: number; frameKey: s
                 onClose={() => setMenu(null)}
                 items={[
                   ...(menuMsg.id != null && !menuMsg.deleted && !system ? [{ icon: 'reply', label: 'Ответить', onClick: () => { if (editing) endEdit(editing.draft); setReplyKey(menuMsg.key as string); api.current?.focus({ end: true }); } }] : []),
-                  ...(own && !system ? [{ icon: 'pencil', label: 'Изменить', onClick: () => startEdit(menuMsg) }] : []),
+                  ...(own && !system ? [{ icon: 'pencil', label: 'Изменить', onClick: () => { if (menuMsg.kind === 'todo') { if (!menuMsg.fwdFrom) setTodoOpen({ mode: 'edit', msg: menuMsg }); } else startEdit(menuMsg); } }] : []),
+                  // чек-лист: добавить задачу — автору или всем, если автор разрешил; не больше 30
+                  ...(menuMsg.kind === 'todo' && menuMsg.todo && !menuMsg.fwdFrom && menuMsg.id != null && (own || (menuMsg.todo as Todo).othersCanAppend) && (menuMsg.todo as Todo).items.length < TODO_ITEMS_MAX
+                    ? [{ icon: 'plus', label: 'Добавить задачу', onClick: () => setTodoOpen({ mode: 'append', msg: menuMsg }) }] : []),
                   // как в Telegram Web A: картинка — только фото и только где буфер принимает PNG
                   ...(!menuMsg.deleted && att?.kind === 'photo' && att.id && canCopyImage() ? [{ icon: 'copyMedia', label: 'Копировать изображение', onClick: () => {
                     copyImage(`/files/${att.id}`).then(() => showToast('Изображение скопировано'), () => showToast('Не удалось скопировать изображение'));
@@ -526,6 +532,21 @@ export function Chat({ chatId, frameKey, active }: { chatId: number; frameKey: s
         </>
       ) : null}
       <MusicPicker chatId={chatId} open={musicOpen} onClose={() => setMusicOpen(false)} />
+      {todoOpen ? (
+        <TodoModal
+          mode={todoOpen.mode}
+          initial={todoOpen.msg?.todo as Todo | undefined}
+          onClose={() => setTodoOpen(null)}
+          onSubmit={(r: TodoInput & { items: { id?: number; title: string }[] | string[] }) => {
+            const t = todoOpen;
+            setTodoOpen(null);
+            if (t.mode === 'create') { stick.current = true; void sendTodo(chatId, r as TodoInput, (replyTo?.id as number) ?? null); setReplyKey(null); return; }
+            const id = t.msg!.id as number;
+            const done = t.mode === 'append' ? appendTodo(chatId, id, r.items as string[]) : editTodo(chatId, id, r as TodoInput);
+            done.catch(() => showToast(t.mode === 'append' ? 'Не удалось добавить задачи' : 'Не удалось изменить чек-лист'));
+          }}
+        />
+      ) : null}
       <input ref={picker} type="file" multiple hidden onChange={(e) => offer((e.target as HTMLInputElement).files)} />
       <Presence show={dragging} exitMs={160}><div class="app-drop"><DropOverlay title="Отпустите, чтобы отправить" text="Фото и документы до 50 МБ" /></div></Presence>
       {pending ? (

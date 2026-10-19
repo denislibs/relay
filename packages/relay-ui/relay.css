@@ -1904,3 +1904,56 @@ html[data-blur="0"] .rl-menu, html[data-blur="0"] .rl-attach { -webkit-backdrop-
 .rl-pring line { stroke: currentColor; stroke-width: 1.25; stroke-linecap: round; }
 @keyframes rl-pring-in { from { opacity: 0; } }
 @media (prefers-reduced-motion: reduce) { .rl-pring { animation: none; } }
+
+/* ---------- чек-лист: окно ---------- */
+.rl-todo-submit { height: 2rem; padding: 0 1rem; border: 0; border-radius: 1rem; background: var(--brand); color: #fff; font: 600 14px/1 var(--font-sans); cursor: pointer; transition: opacity 150ms ease; }
+.rl-todo-submit:disabled { opacity: .45; cursor: default; }
+.rl-todo-sec { margin: 14px 4px 6px; font: 600 14px/18px var(--font-sans); color: var(--brand-text, var(--brand)); }
+.rl-todo-sec:first-child { margin-top: 0; }
+.rl-todo-input { flex: 1; min-width: 0; height: 40px; box-sizing: border-box; padding: 0 10px; border: 0; border-radius: 10px; outline: none; background: transparent; color: var(--ink); font: 400 15px/20px var(--font-sans); }
+.rl-todo-titlein { width: 100%; background: var(--hover); }
+.rl-todo-input:disabled { color: var(--ink-muted); }
+.rl-todo-list { display: flex; flex-direction: column; }
+.rl-todo-row { display: flex; align-items: center; gap: 2px; min-height: 44px; border-bottom: 1px solid var(--line, color-mix(in srgb, var(--ink) 8%, transparent)); }
+.rl-todo-lead { width: 28px; display: grid; place-items: center; color: var(--ink-muted); flex-shrink: 0; }
+.rl-todo-ring { width: 18px; height: 18px; box-sizing: border-box; border: 2px solid currentColor; border-radius: 50%; opacity: .6; }
+.rl-todo-row-add .rl-todo-lead { color: var(--brand-text, var(--brand)); }
+.rl-todo-handle { display: grid; place-items: center; width: 28px; height: 28px; color: var(--ink-muted); cursor: grab; opacity: .7; }
+.rl-todo-remove { color: var(--ink-muted); }
+.rl-todo-hint { margin: 8px 4px 0; font: 400 13px/18px var(--font-sans); color: var(--ink-muted); }
+.rl-todo-opts { margin-top: 14px; display: flex; flex-direction: column; }
+.rl-todo-opt { display: flex; align-items: center; justify-content: space-between; gap: 12px; min-height: 48px; font: 400 15px/20px var(--font-sans); color: var(--ink); }
+
+/* ---------- чек-лист: пузырь ---------- */
+.rl-todo { min-width: 240px; max-width: 340px; padding: 8px 12px 6px; }
+.rl-todo-head { display: flex; flex-direction: column; margin-bottom: 6px; }
+.rl-todo-name { font: 600 15px/20px var(--font-sans); overflow-wrap: anywhere; }
+.rl-todo-sub { font: 400 13px/17px var(--font-sans); color: var(--bubble-meta); }
+.rl-todo-items { display: flex; flex-direction: column; margin: 0 -6px; }
+.rl-todo-item { display: flex; align-items: flex-start; gap: 10px; padding: 5px 6px; border-radius: 10px; cursor: pointer; outline: none; transition: background-color 150ms ease; }
+.rl-todo-item:hover, .rl-todo-item:focus-visible { background: color-mix(in srgb, currentColor 7%, transparent); }
+.rl-todo-ro { cursor: default; }
+.rl-todo-ro:hover { background: transparent; }
+.rl-todo-mark { position: relative; flex-shrink: 0; width: 22px; height: 22px; margin-top: 1px; }
+.rl-todo-box { position: relative; z-index: 1; display: grid; place-items: center; width: 22px; height: 22px; box-sizing: border-box; border: 2px solid color-mix(in srgb, var(--bubble-meta) 80%, transparent); border-radius: 50%;
+  color: #fff; transition: background-color 150ms ease, border-color 150ms ease; }
+.rl-todo-box .rl-icon { opacity: 0; transform: scale(.5); transition: opacity 150ms ease, transform 200ms cubic-bezier(.34, 1.56, .64, 1); }
+.rl-todo-done .rl-todo-box { background: var(--brand); border-color: var(--brand); }
+.rl-msgline-out .rl-todo-done .rl-todo-box { background: #4fae4e; border-color: #4fae4e; }
+.rl-todo-done .rl-todo-box .rl-icon { opacity: 1; transform: none; }
+/* аватар отметившего выезжает из-за флажка */
+.rl-todo-who { position: absolute; left: 0; top: 0; width: 22px; height: 22px; border-radius: 50%; box-shadow: 0 0 0 2px var(--bubble-in);
+  animation: rl-todo-who 200ms var(--ease-out) both; }
+.rl-msgline-out .rl-todo-who { box-shadow: 0 0 0 2px var(--bubble-out); }
+.rl-todo-done .rl-todo-mark:has(.rl-todo-who) { width: 36px; }
+@keyframes rl-todo-who { from { opacity: 0; transform: scale(.75); } to { opacity: 1; transform: translateX(14px); } }
+.rl-todo-who { transform: translateX(14px); }
+.rl-todo-ro-mark { display: grid; place-items: center; width: 22px; height: 22px; color: var(--brand-text, var(--brand)); }
+.rl-todo-ro-mark i { width: 6px; height: 6px; border-radius: 50%; background: currentColor; }
+.rl-todo-text { min-width: 0; display: flex; flex-direction: column; }
+.rl-todo-title { font: 400 15px/21px var(--font-sans); overflow-wrap: anywhere; transition: color 150ms ease; }
+.rl-todo-done .rl-todo-title { text-decoration: line-through; color: var(--bubble-meta); }
+.rl-todo-by { font: 400 12px/15px var(--font-sans); color: var(--bubble-meta); }
+.rl-todo-foot { margin: 6px 52px 0 0; text-align: center; font: 400 13px/17px var(--font-sans); color: var(--bubble-meta); }
+.rl-todo-count { display: inline-block; animation: rl-todo-count 250ms var(--ease-out); }
+@keyframes rl-todo-count { from { opacity: 0; transform: translateY(-6px); } to { opacity: 1; transform: none; } }

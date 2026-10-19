@@ -1,7 +1,7 @@
 import { coverThumb, readAudioTags } from './id3';
 import { getPrefs } from './prefs';
 import { rememberPhotos } from './profilePhoto';
-import type { LinkPreview, ProfilePhoto } from '@relay/protocol';
+import type { LinkPreview, ProfilePhoto, TodoInput } from '@relay/protocol';
 import { playSentSound } from './sound';
 import { beginHeavyAnimation, nudgeWallpaper, toBase64 } from '@relay/ui';
 import { connectEngine, EngineClient, Mirror } from '@relay/sync-engine/src/client';
@@ -492,6 +492,19 @@ export function editMessage(chatId: number, id: number, body: string, entities: 
 export function deleteMessage(chatId: number, id: number): Promise<unknown> { return engine.call({ type: 'deleteMessage', chatId, id }); }
 /** Реакция (null — снять). У себя применяется сразу. */
 export function react(chatId: number, id: number, emoji: string | null): void { engine.call({ type: 'react', chatId, id, emoji }).catch(() => {}); }
+
+/* ---------- чек-листы ---------- */
+export async function sendTodo(chatId: number, todo: TodoInput, replyToId: number | null = null): Promise<void> {
+  nudgeWallpaper();
+  toLatestOf(chatId);
+  await engine.call({ type: 'sendTodo', chatId, todo, replyToId });
+}
+/** Отметка у себя — сразу; ошибка (нет прав, нет сети) — откат и false. */
+export function toggleTodo(chatId: number, id: number, itemId: number, done: boolean): Promise<boolean> {
+  return engine.call({ type: 'todoToggle', chatId, id, itemId, done }).then(() => true, () => false);
+}
+export function appendTodo(chatId: number, id: number, items: string[]): Promise<unknown> { return engine.call({ type: 'todoAppend', chatId, id, items }); }
+export function editTodo(chatId: number, id: number, todo: TodoInput): Promise<unknown> { return engine.call({ type: 'todoEdit', chatId, id, todo }); }
 
 /** Черновик чата (пустой — удалить). Хранится в движке: общий для вкладок, переживает перезагрузку. */
 export function saveDraft(chatId: number, text: string, entities: Entity[] = []): void {

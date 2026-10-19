@@ -6,14 +6,15 @@ import type { ChatFolder } from './folders';
 export type Id = number;
 
 /** Служебное сообщение от системного пользователя: машинный тип для отрисовки и склейки повторов. */
-export type ServiceType = 'login_code' | 'new_login' | 'group_created' | 'welcome';   // group_created: тело — название группы, автор — создатель
+export type ServiceType = 'login_code' | 'new_login' | 'group_created' | 'welcome' | 'todo_done' | 'todo_append';   // group_created: тело — название группы, автор — создатель;
+// todo_done / todo_append: автор отметил задачи / добавил задачи в чек-лист replyToId (номера задач — в service.data)
 
 export interface Message {
   id: Id;
   chatId: Id;
   senderId: Id;
   clientId: string;
-  kind: 'text' | 'photo' | 'file' | 'voice' | 'round' | 'audio';
+  kind: 'text' | 'photo' | 'file' | 'voice' | 'round' | 'audio' | 'todo';
   groupId?: string | null;   // отправлены вместе (несколько файлов) — в ленте одним пузырём
   body: string;
   replyToId: Id | null;
@@ -22,7 +23,8 @@ export interface Message {
   deleted?: boolean;
   reactions?: Reaction[];
   attachment?: Attachment | null;
-  service?: { type: ServiceType };   // есть только у служебных сообщений
+  service?: { type: ServiceType; data?: TodoServiceData };   // есть только у служебных сообщений
+  todo?: Todo;           // чек-лист (kind 'todo'): задачи и кто что отметил
   entities?: Entity[];   // оформление текста; нет или пусто — простой текст
   listened?: boolean;    // голосовое/кружок прослушан получателем
   fwdFrom?: ForwardInfo | null;   // переслано: откуда (нет — своё или отправитель скрыт)
@@ -121,6 +123,7 @@ export type Update =
   | { type: 'readBy'; chatId: Id; userId: Id; upToId: Id }
   | { type: 'draft'; chatId: Id; text: string; at: string; entities?: Entity[] }   // черновик своих устройств; пустой текст — удалён
   | { type: 'messageEdited'; chatId: Id; id: Id; body: string; editedAt: string; entities?: Entity[] }
+  | { type: 'todoUpdated'; chatId: Id; id: Id; todo: Todo; editedAt?: string }   // чек-лист целиком: отметили, добавили или изменили
   | { type: 'messageDeleted'; chatId: Id; id: Id }
   | { type: 'reactions'; chatId: Id; id: Id; reactions: Reaction[] }
   | { type: 'mediaListened'; chatId: Id; id: Id }   // голосовое/кружок прослушали
@@ -224,13 +227,16 @@ export type ErrorCode = 'bad_frame' | 'unauthorized' | 'not_member' | 'not_found
 export type ClientFrame =
   | { op: 'hello'; lastSeq: number }
   | { op: 'sync'; since: number }
-  | { op: 'send'; reqId: string; clientId: string; chatId: Id; body: string; entities?: Entity[]; replyToId?: Id | null; attachment?: { id: string; thumb?: string | null } | null; groupId?: string | null; forward?: ForwardRef | null; noLinkPreview?: boolean }
+  | { op: 'send'; reqId: string; clientId: string; chatId: Id; body: string; entities?: Entity[]; replyToId?: Id | null; attachment?: { id: string; thumb?: string | null } | null; groupId?: string | null; forward?: ForwardRef | null; noLinkPreview?: boolean; todo?: TodoInput }
   | { op: 'read'; reqId: string; chatId: Id; upToId: Id }
   | { op: 'typing'; chatId: Id }   // «печатаю» — без ответа, сервер пересылает остальным участникам
   | { op: 'draft'; reqId: string; chatId: Id; text: string; entities?: Entity[] }
   | { op: 'edit'; reqId: string; chatId: Id; id: Id; body: string; entities?: Entity[] }
   | { op: 'delete'; reqId: string; chatId: Id; id: Id }
   | { op: 'react'; reqId: string; chatId: Id; id: Id; emoji: string | null }
+  | { op: 'todoToggle'; reqId: string; chatId: Id; id: Id; completed: number[]; incompleted: number[] }
+  | { op: 'todoAppend'; reqId: string; chatId: Id; id: Id; items: string[] }
+  | { op: 'todoEdit'; reqId: string; chatId: Id; id: Id; todo: TodoInput }
   | { op: 'listened'; reqId: string; chatId: Id; id: Id }
   | { op: 'ping' };
 
@@ -269,6 +275,14 @@ export function parseClientFrame(raw: string): ClientFrame | null {
     case 'edit': return str(f.reqId, 64) && int(f.chatId) && int(f.id) && typeof f.body === 'string' ? { op: 'edit', reqId: f.reqId, chatId: f.chatId, id: f.id, body: f.body, entities: normalizeEntities(f.body, f.entities) } : null;
     case 'delete': return str(f.reqId, 64) && int(f.chatId) && int(f.id) ? { op: 'delete', reqId: f.reqId, chatId: f.chatId, id: f.id } : null;
     case 'listened': return str(f.reqId, 64) && int(f.chatId) && int(f.id) ? { op: 'listened', reqId: f.reqId, chatId: f.chatId, id: f.id } : null;
+    case 'todoToggle': {
+      const ids = (v: unknown) => Array.isArray(v) && v.length <= TODO_ITEMS_MAX && v.every((x) => int(x)) ? v as number[] : null;
+      const done = ids(f.completed), undone = ids(f.incompleted);
+      return str(f.reqId, 64) && int(f.chatId) && int(f.id) && done && undone ? { op: 'todoToggle', reqId: f.reqId, chatId: f.chatId, id: f.id, completed: done, incompleted: undone } : null;
+    }
+    case 'todoAppend': return str(f.reqId, 64) && int(f.chatId) && int(f.id) && Array.isArray(f.items) && f.items.length >= 1 && f.items.length <= TODO_ITEMS_MAX && f.items.every((x) => typeof x === 'string')
+      ? { op: 'todoAppend', reqId: f.reqId, chatId: f.chatId, id: f.id, items: f.items as string[] } : null;
+    case 'todoEdit': { const t = normalizeTodo(f.todo); return str(f.reqId, 64) && int(f.chatId) && int(f.id) && t ? { op: 'todoEdit', reqId: f.reqId, chatId: f.chatId, id: f.id, todo: t } : null; }
     case 'react': return str(f.reqId, 64) && int(f.chatId) && int(f.id) && (f.emoji === null || str(f.emoji, 16)) ? { op: 'react', reqId: f.reqId, chatId: f.chatId, id: f.id, emoji: f.emoji as string | null } : null;
     case 'draft': return str(f.reqId, 64) && int(f.chatId) && typeof f.text === 'string' ? { op: 'draft', reqId: f.reqId, chatId: f.chatId, text: f.text, entities: normalizeEntities(f.text, f.entities) } : null;
     case 'send':
@@ -282,7 +296,8 @@ export function parseClientFrame(raw: string): ClientFrame | null {
         if (typeof w !== 'object' || !int(w.chatId) || !int(w.id)) return null;
         forward = { chatId: w.chatId as number, id: w.id as number, hideSender: w.hideSender === true, hideCaption: w.hideCaption === true };
       }
-      return { op: 'send', reqId: f.reqId, clientId: f.clientId, chatId: f.chatId, body: f.body, entities: normalizeEntities(f.body, f.entities), replyToId: (f.replyToId as number | null) ?? null, attachment: (f.attachment as { id: string; thumb?: string | null } | null) ?? null, groupId: (f.groupId as string | null) ?? null, forward, ...(f.noLinkPreview === true ? { noLinkPreview: true } : {}) };
+      if (f.todo != null && !normalizeTodo(f.todo)) return null;
+      return { op: 'send', ...(f.todo != null ? { todo: normalizeTodo(f.todo)! } : {}), reqId: f.reqId, clientId: f.clientId, chatId: f.chatId, body: f.body, entities: normalizeEntities(f.body, f.entities), replyToId: (f.replyToId as number | null) ?? null, attachment: (f.attachment as { id: string; thumb?: string | null } | null) ?? null, groupId: (f.groupId as string | null) ?? null, forward, ...(f.noLinkPreview === true ? { noLinkPreview: true } : {}) };
     case 'read':
       return str(f.reqId, 64) && int(f.chatId) && int(f.upToId) ? { op: 'read', reqId: f.reqId, chatId: f.chatId, upToId: f.upToId } : null;
     default: return null;
@@ -305,4 +320,43 @@ export function hideSpoilers(text: string, entities?: readonly { type: string; o
     for (let i = e.offset; i < Math.min(text.length, e.offset + e.length); i++) if (!/\s/.test(text[i])) out[i] = SPOILER_FILL[i % SPOILER_FILL.length];
   }
   return out ? out.join('') : text;
+}
+
+/* ---------- чек-листы (как в Telegram: todoList) ---------- */
+
+/** Задача: id — номер внутри списка (1..N при создании, новые — максимум + 1). */
+export interface TodoItem { id: number; title: string }
+/** Отметка «выполнено»: какая задача, кто и когда. */
+export interface TodoCompletion { id: number; by: Id; at: string }
+export interface Todo { title: string; items: TodoItem[]; othersCanAppend: boolean; othersCanComplete: boolean; completions: TodoCompletion[] }
+/** Что присылает клиент при создании и правке: задачи без номера получают их на сервере. */
+export interface TodoInput { title: string; items: { id?: number; title: string }[]; othersCanAppend: boolean; othersCanComplete: boolean }
+/** Данные служебной строки чек-листа: какие задачи отметили / сняли / добавили. */
+export interface TodoServiceData { completed?: number[]; incompleted?: number[]; items?: number[] }
+
+/** Пределы как у Telegram (todo_items_max / todo_title_length_max / todo_item_length_max по умолчанию). */
+export const TODO_ITEMS_MAX = 30;
+export const TODO_TITLE_MAX = 32;
+export const TODO_ITEM_MAX = 64;
+const glyphs = (s: string) => [...s].length;
+
+/** Проверка чек-листа от клиента: заголовок и задачи непустые и в пределах; переводы строк — пробелы. null — не чек-лист. */
+export function normalizeTodo(raw: unknown): TodoInput | null {
+  if (!raw || typeof raw !== 'object') return null;
+  const r = raw as Record<string, unknown>;
+  const line = (v: unknown) => typeof v === 'string' ? v.replace(/\s+/g, ' ').trim() : '';
+  const title = line(r.title);
+  if (!title || glyphs(title) > TODO_TITLE_MAX || !Array.isArray(r.items)) return null;
+  const items: { id?: number; title: string }[] = [];
+  const seen = new Set<number>();
+  for (const it of r.items) {
+    const t = line(it && typeof it === 'object' ? (it as Record<string, unknown>).title : it);
+    if (!t) continue;
+    if (glyphs(t) > TODO_ITEM_MAX) return null;
+    const id = it && typeof it === 'object' ? (it as Record<string, unknown>).id : undefined;
+    if (Number.isSafeInteger(id) && (id as number) > 0 && !seen.has(id as number)) { seen.add(id as number); items.push({ id: id as number, title: t }); }
+    else items.push({ title: t });
+  }
+  if (!items.length || items.length > TODO_ITEMS_MAX) return null;
+  return { title, items, othersCanAppend: r.othersCanAppend === true, othersCanComplete: r.othersCanComplete === true };
 }

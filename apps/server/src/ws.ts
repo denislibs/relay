@@ -7,6 +7,7 @@ import { sendMessage } from './domain/messages';
 import { markRead } from './domain/reads';
 import { saveDraft } from './domain/drafts';
 import { deleteMessage, editMessage, markListened, reactMessage } from './domain/messageOps';
+import { appendTodo, editTodo, toggleTodo } from './domain/todo';
 
 /** publish — разослать кадр в топик пользователя (для «печатает…»); у тестов без сокетов — no-op. */
 export async function handleFrame(userId: number, frame: ClientFrame, publish: (topic: string, msg: string) => void = () => {}): Promise<ServerFrame[]> {
@@ -44,6 +45,9 @@ export async function handleFrame(userId: number, frame: ClientFrame, publish: (
       case 'delete': return [{ op: 'ack', reqId: frame.reqId, result: await deleteMessage(userId, frame.chatId, frame.id) }];
       case 'listened': return [{ op: 'ack', reqId: frame.reqId, result: await markListened(userId, frame.chatId, frame.id) }];
       case 'react': return [{ op: 'ack', reqId: frame.reqId, result: await reactMessage(userId, frame.chatId, frame.id, frame.emoji) }];
+      case 'todoToggle': return [{ op: 'ack', reqId: frame.reqId, result: await toggleTodo(userId, frame.chatId, frame.id, frame.completed, frame.incompleted) }];
+      case 'todoAppend': return [{ op: 'ack', reqId: frame.reqId, result: await appendTodo(userId, frame.chatId, frame.id, frame.items) }];
+      case 'todoEdit': return [{ op: 'ack', reqId: frame.reqId, result: await editTodo(userId, frame.chatId, frame.id, frame.todo) }];
       case 'draft': {
         const res = await saveDraft(userId, frame.chatId, frame.text, frame.entities);
         return [{ op: 'ack', reqId: frame.reqId, result: res }];

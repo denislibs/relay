@@ -1,4 +1,4 @@
-import type { Birthday, ChatFolder, Entity, ForwardInfo, ForwardRef, LinkPreview, PrivacyKey, PrivacyMode, ProfileLink, ProfilePhoto, ServiceType } from '@relay/protocol';
+import type { Birthday, ChatFolder, Entity, ForwardInfo, ForwardRef, LinkPreview, PrivacyKey, PrivacyMode, ProfileLink, ProfilePhoto, ServiceType, Todo, TodoInput, TodoServiceData } from '@relay/protocol';
 
 export type Status = 'pending' | 'sent' | 'read' | 'failed';
 
@@ -16,14 +16,15 @@ export interface LocalMessage {
   editedAt?: string | null;
   deleted?: boolean;
   reactions?: { userId: number; emoji: string }[];
-  kind?: 'text' | 'photo' | 'file' | 'voice' | 'round' | 'audio';
+  kind?: 'text' | 'photo' | 'file' | 'voice' | 'round' | 'audio' | 'todo';
   groupId?: string | null;
   attachment?: LocalAttachment | null;
   entities?: Entity[];    // оформление текста
   listened?: boolean;     // голосовое/кружок прослушан получателем
   progress?: number;      // загрузка файла 0..1, пока сообщение в очереди
   error?: string;         // почему не отправлено (failed): 'blocked' — собеседник заблокировал отправителя
-  service?: { type: ServiceType };   // служебное сообщение от «Relay»
+  service?: { type: ServiceType; data?: TodoServiceData };   // служебное сообщение от «Relay» (и строки чек-листов)
+  todo?: Todo;            // чек-лист
   fwdFrom?: ForwardInfo | null;      // пересланное: исходный автор, откуда и когда
   link?: LinkPreview | null;         // превью ссылки (pending — сервер ещё загружает)
 }
@@ -63,6 +64,7 @@ export interface OutboxEntry {
   failed: boolean;
   attachment?: LocalAttachment | null;   // id появляется после загрузки файла
   entities?: Entity[];
+  todo?: Todo;            // чек-лист: уходит вместе с сообщением (задачи пронумерует сервер)
   error?: string;         // код отказа сервера (failed)
   groupId?: string | null;   // отправлены вместе — один пузырь
   forward?: ForwardRef | null;      // пересылка: сервер копирует оригинал (вложение не загружается заново)
@@ -116,6 +118,10 @@ export type Action =
   | { type: 'editMessage'; chatId: number; id: number; body: string; entities?: Entity[] }
   | { type: 'deleteMessage'; chatId: number; id: number }
   | { type: 'react'; chatId: number; id: number; emoji: string | null }
+  | { type: 'sendTodo'; chatId: number; todo: TodoInput; replyToId?: number | null }
+  | { type: 'todoToggle'; chatId: number; id: number; itemId: number; done: boolean }
+  | { type: 'todoAppend'; chatId: number; id: number; items: string[] }
+  | { type: 'todoEdit'; chatId: number; id: number; todo: TodoInput }
   | { type: 'search'; q: string; chatId?: number; beforeId?: number; limit?: number }
   | { type: 'chatMedia'; chatId: number; kind: 'media' | 'file' | 'audio' | 'voice' | 'link'; beforeId?: number }
   | { type: 'chatMediaCounts'; chatId: number }
