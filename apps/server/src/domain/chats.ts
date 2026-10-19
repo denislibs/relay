@@ -1,4 +1,4 @@
-import { graphemes, normalizeEntities, type Entity, type Block, type ForwardInfo, type LinkPreview, type MediaTab, type Message, type ProfilePhoto, type ServiceData, type ServiceType } from '@relay/protocol';
+import { graphemes, normalizeEntities, type Entity, type Block, type ForwardInfo, type LinkPreview, type MediaTab, type Message, type ProfilePhoto, type ServiceData, type ServiceType, type Todo } from '@relay/protocol';
 import { sql, type Tx } from '../db';
 import { DomainError } from './errors';
 import { fanOut } from './journal';
@@ -100,6 +100,7 @@ export function toMessage(r: Record<string, unknown>): Message {
     ...((r.kind === 'voice' || r.kind === 'round') && !r.deleted ? { listened: !!r.listened } : {}),
     // из jsonb — в каноническом виде (порядок ключей у jsonb свой)
     ...(r.service_type ? { service: { type: r.service_type as ServiceType, ...(r.service_data ? { data: r.service_data as ServiceData } : {}) } } : {}),
+    ...(r.kind === 'todo' && r.todo && !r.deleted ? { todo: r.todo as Todo } : {}),
     ...(r.group_id ? { groupId: r.group_id as string } : {}),
     ...(r.fwd_from ? { fwdFrom: r.fwd_from as ForwardInfo } : {}),
     ...(r.link ? { link: r.link as LinkPreview } : {}),
@@ -164,7 +165,7 @@ export async function listChats(userId: number, opts: ListOpts = {}): Promise<Ch
            case when c.kind = 'group' then (select count(*)::int from chat_members gm where gm.chat_id = c.id) end as g_members,
            case when c.kind = 'group' then (select count(*)::int from chat_join_requests jr where jr.chat_id = c.id) end as g_pending,
            lm.id as m_id, lm.chat_id as m_chat_id, lm.sender_id as m_sender_id, lm.client_id as m_client_id,
-           lm.body as m_body, lm.kind as m_kind, lm.attachment as m_attachment, lm.reply_to_id as m_reply_to_id, lm.created_at as m_created_at, lm.edited_at as m_edited_at, lm.deleted as m_deleted, lm.entities as m_entities, lm.service_type as m_service_type, lm.service_data as m_service_data, lm.fwd_from as m_fwd_from,
+           lm.body as m_body, lm.kind as m_kind, lm.attachment as m_attachment, lm.reply_to_id as m_reply_to_id, lm.created_at as m_created_at, lm.edited_at as m_edited_at, lm.deleted as m_deleted, lm.entities as m_entities, lm.service_type as m_service_type, lm.service_data as m_service_data, lm.todo as m_todo, lm.fwd_from as m_fwd_from,
            (select count(*) from messages m
              where m.chat_id = c.id and m.id > cm.last_read_id and m.id >= cm.history_from and m.sender_id <> ${userId})::int as unread,
            (select json_build_object('id', u.id, 'name', ${nameForSql(userId)}, 'system', u.system,   -- контактное имя — только владельцу
@@ -181,6 +182,8 @@ export async function listChats(userId: number, opts: ListOpts = {}): Promise<Ch
         select * from messages where chat_id = c.id and id >= cm.history_from order by id desc limit 1
       ) lm on true
      where cm.user_id = ${userId}
+       -- личный чат, который удалили (история сдвинута) и в котором с тех пор ничего нет, — не в списке
+       and not (c.kind = 'direct' and cm.history_from > 0 and lm.id is null)
        ${opts.before ? sql`and (date_trunc('milliseconds', coalesce(lm.created_at, c.created_at)), c.id) < (${opts.before.at}::timestamptz, ${opts.before.id})` : sql``}
        ${opts.ids ? sql`and c.id = any(${opts.ids}::bigint[])` : sql``}
        ${opts.unreadOnly ? sql`and exists (select 1 from messages m where m.chat_id = c.id and m.id > cm.last_read_id and m.sender_id <> ${userId})` : sql``}
@@ -200,7 +203,7 @@ export async function listChats(userId: number, opts: ListOpts = {}): Promise<Ch
     draft: r.draft ? { text: (r.draft as { text: string }).text, at: new Date((r.draft as { at: string }).at).toISOString(), ...((r.draft as { entities?: Entity[] | null }).entities?.length ? { entities: normalizeEntities((r.draft as { text: string }).text, (r.draft as { entities: Entity[] }).entities) } : {}) } : null,
     last: r.m_id == null ? null : toMessage({
       id: r.m_id, chat_id: r.m_chat_id, sender_id: r.m_sender_id, client_id: r.m_client_id,
-      body: r.m_body, kind: r.m_kind, attachment: r.m_attachment, reply_to_id: r.m_reply_to_id, created_at: r.m_created_at, edited_at: r.m_edited_at, deleted: r.m_deleted, entities: r.m_entities, service_type: r.m_service_type, service_data: r.m_service_data, fwd_from: r.m_fwd_from,
+      body: r.m_body, kind: r.m_kind, attachment: r.m_attachment, reply_to_id: r.m_reply_to_id, created_at: r.m_created_at, edited_at: r.m_edited_at, deleted: r.m_deleted, entities: r.m_entities, service_type: r.m_service_type, service_data: r.m_service_data, todo: r.m_todo, fwd_from: r.m_fwd_from,
     }),
   }));
 }
@@ -270,4 +273,24 @@ export async function getHistory(userId: number, chatId: number, before: number 
      limit ${take + 1}`;
   const hasMore = rows.length > take;
   return { messages: await withReactions(rows.slice(0, take).reverse().map(toMessage)), hasMore };
+}
+
+/**
+ * «Удалить чат» в личной переписке (как в Telegram): история исчезает у меня или у обоих — первое видимое сообщение
+ * сдвигается за последнее (history_from), чат уходит из списка этих людей и вернётся с новым сообщением.
+ */
+export async function deleteDirectChat(userId: number, chatId: number, forAll: boolean): Promise<{ ok: true }> {
+  return sql.begin(async (tx) => {
+    await assertMember(tx, chatId, userId);
+    const [c] = await tx`select kind from chats where id = ${chatId}`;
+    if (c?.kind !== 'direct') throw new DomainError('bad_frame', 'not a direct chat');
+    const [m] = await tx`select coalesce(max(id), 0)::bigint as max from messages where chat_id = ${chatId}`;
+    const from = Number(m.max) + 1;
+    const who = forAll
+      ? (await tx`select user_id from chat_members where chat_id = ${chatId}`).map((r) => Number(r.user_id))
+      : [userId];
+    await tx`update chat_members set history_from = ${from}, last_read_id = greatest(last_read_id, ${from - 1}) where chat_id = ${chatId} and user_id = any(${who}::bigint[])`;
+    await fanOut(tx, who, { type: 'chatRemoved', chatId });
+    return { ok: true };
+  });
 }

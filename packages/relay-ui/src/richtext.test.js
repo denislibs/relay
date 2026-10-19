@@ -64,3 +64,21 @@ test('safeUrl accepts http(s)/mailto, adds https, rejects the rest', () => {
 test('segments split by every boundary', () => {
   expect(segments('abcd', [{ type: 'bold', offset: 1, length: 2 }])).toEqual([{ text: 'a', marks: {} }, { text: 'bc', marks: { bold: true } }, { text: 'd', marks: {} }]);
 });
+
+test('clipboardHtml: Bot API markup, escaped, spoiler kept, newlines as <br> outside pre', async () => {
+  const { clipboardHtml } = await import('./messageCopy.js');
+  expect(clipboardHtml('a <b>\nc', [{ type: 'bold', offset: 0, length: 1 }])).toBe('<strong>a</strong> &lt;b&gt;<br>c');
+  expect(clipboardHtml('ss tt', [{ type: 'spoiler', offset: 0, length: 2 }, { type: 'link', offset: 3, length: 2, url: 'https://x.io/?q="1"' }]))
+    .toBe('<tg-spoiler>ss</tg-spoiler> <a href="https://x.io/?q=&quot;1&quot;">tt</a>');
+  expect(clipboardHtml('x\ny', [{ type: 'pre', offset: 0, length: 3 }])).toBe('<pre><code>x\ny</code></pre>');
+});
+
+test('date entities: kept with date and format, chip HTML, Telegram tg-time on copy, toggled on a selection', async () => {
+  const { clipboardHtml } = await import('./messageCopy.js');
+  const v0 = v('встреча завтра', [{ type: 'date', offset: 8, length: 6, date: 1792400000, format: 'r' }]);
+  expect(clean(v0.text, v0.entities)).toEqual([{ type: 'date', offset: 8, length: 6, date: 1792400000, format: 'r' }]);
+  expect(clean('x', [{ type: 'date', offset: 0, length: 1, date: 5, format: 'zz' }])).toEqual([]);
+  expect(toHtml(v0)).toBe('встреча <span class="rl-date-chip" contenteditable="false" data-date="1792400000" data-format="r">завтра</span>');
+  expect(clipboardHtml(v0.text, v0.entities)).toBe('встреча <tg-time unix="1792400000" format="r">завтра</tg-time>');
+  expect(toggleFormat(v('в 10 утра'), 'date', 2, 9, { date: 100, format: '' }).entities).toEqual([{ type: 'date', offset: 2, length: 7, date: 100 }]);
+});

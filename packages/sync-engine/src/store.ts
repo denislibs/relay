@@ -183,6 +183,7 @@ export class Store {
       case 'messageDeleted': return this.patchMessage(u.chatId, u.id, { body: '', deleted: true, reactions: [] });
       case 'reactions': return this.patchMessage(u.chatId, u.id, { reactions: u.reactions });
       case 'mediaListened': return this.patchMessage(u.chatId, u.id, { listened: true });
+      case 'todoUpdated': return this.patchMessage(u.chatId, u.id, { todo: u.todo, ...(u.editedAt ? { editedAt: u.editedAt } : {}) });
       case 'linkPreview': return this.patchMessage(u.chatId, u.id, { link: u.link });
       case 'userUpdated': return applyUserUpdated(this, u.user, seq);
       case 'contactsChanged': return applyContactsChanged(this, u, seq);
@@ -261,6 +262,7 @@ export class Store {
       editedAt: m.editedAt ?? null, deleted: !!m.deleted, reactions: m.reactions ?? prev?.reactions ?? [],
       kind: m.kind ?? 'text', attachment: m.attachment ?? null, entities: m.entities ?? [], ...(m.listened != null ? { listened: m.listened } : {}),
       ...(m.service ? { service: m.service } : null),
+      ...(m.todo ? { todo: m.todo } : null),
       ...(m.groupId ? { groupId: m.groupId } : null),
       ...(m.fwdFrom ? { fwdFrom: m.fwdFrom } : null),
       ...(m.blocks ? { blocks: m.blocks } : null),
@@ -317,7 +319,7 @@ export class Store {
       key: o.clientId, clientId: o.clientId, id: null, chatId: o.chatId, senderId: this.userId,
       body: o.body, entities: o.entities ?? [], replyToId: o.replyToId, createdAt: new Date(o.createdAt).toISOString(),
       status: o.failed ? 'failed' : 'pending', sort: PENDING_BASE + o.createdAt,
-      kind: o.attachment ? o.attachment.kind : 'text', attachment: o.attachment ?? null, progress: o.attachment && !o.attachment.id ? 0 : undefined,
+      kind: o.todo ? 'todo' : o.attachment ? o.attachment.kind : 'text', attachment: o.attachment ?? null, ...(o.todo ? { todo: o.todo } : {}), progress: o.attachment && !o.attachment.id ? 0 : undefined,
       ...(o.failed && o.error ? { error: o.error } : {}),
       ...(o.groupId ? { groupId: o.groupId } : {}),
       ...(o.fwdFrom ? { fwdFrom: o.fwdFrom } : {}),

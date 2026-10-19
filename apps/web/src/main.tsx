@@ -1,4 +1,5 @@
 import { installJoinLinks } from './ui/group/JoinLink';
+import { startMuteTimers } from './mute';
 import { refreshMyMusic } from './music';
 import { configureSpoilers, configureStickers, installSpoilers } from '@relay/ui';
 import { fetchBuild, onVisible, startUpdateCheck } from './update';
@@ -30,6 +31,7 @@ function start(me: Me): void {
   void claimMediaCache(me.userId);
   setGlobal({ me, boot: 'app' });
   startData(me);
+  startMuteTimers();   // «Отключить звук» на время: вышедшие сроки — включить, остальным — таймеры
   startSettingsData(me);
   installJoinLinks();
   void refreshMyMusic();   // мои треки в профиле — для кнопки в плеере

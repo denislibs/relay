@@ -1,6 +1,7 @@
 import { attachmentForSend } from './files';
 import { clearDraftInTx } from './drafts';
-import { rightForKind, normalizeEntities, trimFormatted, type Block, blocksText, normalizeBlocks, type Entity, type ForwardInfo, type ForwardRef, type LinkPreview, type Message } from '@relay/protocol';
+import { rightForKind, normalizeEntities, trimFormatted, type Block, blocksText, normalizeBlocks, type Entity, type ForwardInfo, type ForwardRef, type LinkPreview, type Message, type Todo, type TodoInput } from '@relay/protocol';
+import { newTodo } from './todo';
 import { sql } from '../db';
 import { assertMember, toMessage } from './chats';
 import { DomainError } from './errors';
@@ -15,7 +16,7 @@ export const MAX_BODY = 4096;
 
 export async function sendMessage(
   userId: number,
-  input: { chatId: number; clientId: string; body: string; entities?: Entity[]; replyToId?: number | null; attachment?: { id: string; thumb?: string | null } | null; groupId?: string | null; forward?: ForwardRef | null; noLinkPreview?: boolean; blocks?: unknown },
+  input: { chatId: number; clientId: string; body: string; entities?: Entity[]; replyToId?: number | null; attachment?: { id: string; thumb?: string | null } | null; groupId?: string | null; forward?: ForwardRef | null; noLinkPreview?: boolean; blocks?: unknown; todo?: TodoInput | null },
 ): Promise<{ message: Message; duplicate: boolean }> {
   // пробелы по краям срезаем вместе с оформлением; оформление — только проверенное
   let { text: body, entities } = trimFormatted(input.body, normalizeEntities(input.body, input.entities));
@@ -27,6 +28,9 @@ export async function sendMessage(
     if (!blocks) throw new DomainError('bad_frame', 'blocks');
     body = blocksText(blocks); entities = [];
   }
+  // чек-лист: тело — его заголовок (для превью и поиска), своего текста и вложения нет
+  const todo = input.todo && !input.forward && !input.attachment && !blocks ? newTodo(input.todo) : null;
+  if (todo) { body = todo.title; entities = []; }
   if (!input.forward && !blocks) {
     if (!body && !input.attachment) throw new DomainError('bad_frame', 'empty body'); // у вложения подпись необязательна
     if (body.length > MAX_BODY) throw new DomainError('too_long');
@@ -51,6 +55,7 @@ export async function sendMessage(
     let kind: string;
     let fwdFrom: ForwardInfo | null = null;
     let link: LinkPreview | null = null, fetchLink: string | null = null;
+    let fwdTodo: Todo | null = null;
     if (input.forward) {
       // пересылка: всё берём у оригинала — только из чата, где пересылающий состоит; вложение — тот же объект
       // (файл уже доступен получателям через fileFor: он лежит в сообщении их чата), заново не загружается
@@ -62,6 +67,7 @@ export async function sendMessage(
       if (!src) throw new DomainError('not_found', 'forward source');
       attachment = (src.attachment as Record<string, unknown> | null) ?? null;
       kind = src.kind as string;
+      fwdTodo = (src.todo as Todo | null) ?? null;   // пересланный чек-лист — копия, только для чтения
       const dropCaption = !!f.hideCaption && !!attachment;
       body = dropCaption ? '' : src.body as string;
       entities = dropCaption || !Array.isArray(src.entities) ? [] : normalizeEntities(body, src.entities as Entity[]);
@@ -75,9 +81,9 @@ export async function sendMessage(
       };
     } else {
       attachment = input.attachment ? await attachmentForSend(tx, userId, input.attachment) as unknown as Record<string, unknown> : null;
-      kind = attachment ? attachment.kind as string : 'text';
+      kind = todo ? 'todo' : attachment ? attachment.kind as string : 'text';
       // превью первой ссылки (как в Telegram): готовое в кэше — сразу, иначе «грузится» и задача link.preview
-      const url = !attachment && !blocks && !input.noLinkPreview ? firstUrl(body, entities) : null;
+      const url = !attachment && !blocks && !todo && !input.noLinkPreview ? firstUrl(body, entities) : null;
       if (url) {
         const cached = await cachedPreview(url);
         if (cached === undefined) { link = { url, pending: true }; fetchLink = url; } else link = cached;
@@ -92,10 +98,10 @@ export async function sendMessage(
       if (last && !sameAlbum && Date.now() - new Date(last.created_at as string).getTime() < ctx.slowMode * 1000) throw new DomainError('flood', 'slow_mode');
     }
     const inserted = await tx`
-      insert into messages (chat_id, sender_id, client_id, kind, body, entities, reply_to_id, attachment, group_id, fwd_from, link, blocks)
+      insert into messages (chat_id, sender_id, client_id, kind, body, entities, reply_to_id, attachment, group_id, fwd_from, link, blocks, todo)
       values (${input.chatId}, ${userId}, ${input.clientId}, ${kind}, ${body}, ${entities.length ? sql.json(entities as never) : null}, ${input.forward ? null : input.replyToId ?? null}, ${attachment ? sql.json(attachment as never) : null},
               ${attachment && input.groupId && /^[0-9a-f-]{36}$/.test(input.groupId) ? input.groupId : null},   -- группа — только у вложений
-              ${fwdFrom ? sql.json(fwdFrom as never) : null}, ${link ? sql.json(link as never) : null}, ${blocks ? sql.json(blocks as never) : null})
+              ${fwdFrom ? sql.json(fwdFrom as never) : null}, ${link ? sql.json(link as never) : null}, ${blocks ? sql.json(blocks as never) : null}, ${(todo ?? fwdTodo) ? sql.json((todo ?? fwdTodo) as never) : null})
       on conflict (sender_id, client_id) do nothing
       returning *`;
     if (inserted.length === 0) {

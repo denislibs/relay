@@ -2,11 +2,11 @@ import { isGroupService, serviceText } from './serviceText';
 import type { ServiceData, ServiceType } from '@relay/protocol';
 import type { Item } from '@relay/sync-engine/src/types';
 import { senderAvatar } from '../profilePhoto';
-import type { Entity } from '@relay/protocol';
-import { ArticleBlocks, Avatar, Bubble, Icon, peerTone, DateDivider, DatePicker, FileBubble, MediaBubble, MessageText, VoiceBubble, MusicBubble, RoundBubble, player, MediaViewer, ScrollToBottom, beginHeavyAnimation, forceMeasure, isHeavyAnimating, onHeavyAnimationEnd, requestMeasure, requestMutation } from '@relay/ui';
+import type { Entity, Todo } from '@relay/protocol';
+import { ArticleBlocks, Avatar, Bubble, Icon, peerTone, DateDivider, DatePicker, FileBubble, MediaBubble, MessageText, VoiceBubble, MusicBubble, RoundBubble, player, MediaViewer, ScrollToBottom, beginHeavyAnimation, forceMeasure, isHeavyAnimating, onHeavyAnimationEnd, requestMeasure, requestMutation, selectionValue, TodoBubble } from '@relay/ui';
 import { memo } from 'preact/compat';
 import { useEffect, useLayoutEffect, useRef, useState } from 'preact/hooks';
-import { clearFocus, ensureNames, focusMessage, openInner, jumpToDate, localPreview, markListened, moveWindow, react, savePosition, savedPosition, seen } from '../data';
+import { toggleTodo, clearFocus, ensureNames, focusMessage, openInner, jumpToDate, localPreview, markListened, moveWindow, react, savePosition, savedPosition, seen } from '../data';
 import { activeFrame, frameByKey, getGlobal, setGlobal, useGlobal } from '../global';
 import { toggleMusic, trackTitle, useFileCached } from '../music';
 import { showToast } from '../settingsData';
@@ -23,6 +23,9 @@ import { clock, dayKey, dayLabel, fileSize } from './format';
  *  • прочтение — по меткам под баблами, раз в 150 мс, пауза на тяжёлых анимациях;
  *  • даты «липнут» к верху и гаснут через секунду после остановки прокрутки.
  */
+
+/** Что было под курсором при открытии меню: ссылка и выделенный кусок текста этого сообщения. */
+export type MenuExtra = { link: string | null; selection: { text: string; entities: Entity[] } | null };
 
 const EDGE = '750px';     // запас датчиков окна
 const EDGE_PX = 750;
@@ -110,6 +113,25 @@ const Row = memo(function Row({ chatId, voiceTitle, author, onAuthor, onOpen, hl
           caption={m.body ? <MessageText text={m.body as string} entities={m.entities as Entity[] | undefined} highlight={hl} /> : undefined}
           time={clock(m.createdAt as string)} status={out ? m.status : undefined}
           onOpen={() => onOpen(m)}
+        />
+        {mark}
+      </div>
+    );
+  }
+  if (m.kind === 'todo' && m.todo && !m.deleted) {
+    const todo = m.todo as Todo;
+    // отмечать: автор — всегда, другие — если разрешено; пересланный — только для чтения
+    const canToggle = m.id != null && !m.fwdFrom && (out || todo.othersCanComplete);
+    return (
+      <div class={flash ? 'app-msg app-msg-flash' : 'app-msg'} data-key={m.key} data-sort={m.sort as number}>
+        <TodoBubble
+          todo={todo} from={out ? 'out' : 'in'} tail={end} groupStart={start} appear={appear}
+          forwarded={!!m.fwdFrom} authorName={out ? '' : voiceTitle}
+          edited={!!m.editedAt} time={clock(m.createdAt as string)} status={out ? m.status : undefined}
+          canToggle={canToggle}
+          onToggle={(itemId: number, done: boolean) => { void toggleTodo(chatId, m.id as number, itemId, done).then((ok: boolean) => { if (!ok) showToast('Не удалось отметить задачу'); }); }}
+          onReadOnly={() => showToast(m.fwdFrom ? 'Пересланный чек-лист нельзя менять' : `${voiceTitle} не разрешил(а) другим отмечать задачи`)}
+          person={(uid: number) => { const g = getGlobal(); const full = uid === meId ? g.me?.name ?? '' : g.names[uid] ?? ''; return { name: uid === meId ? 'Вы' : full, fullName: full, tone: peerTone(uid), avatar: senderAvatar(uid) }; }}
         />
         {mark}
       </div>
@@ -291,7 +313,7 @@ export function Feed({ frameKey, active, chatId, meId, peerName, group, onAuthor
   chatId: number; meId: number; peerName: string; highlight?: string;
   group: boolean; onAuthor: (userId: number) => void;   // в группе — имя автора над пачкой; клик — личный чат поверх
   stick: { current: boolean };
-  onMenu: (key: string, x: number, y: number) => void;
+  onMenu: (key: string, x: number, y: number, extra: MenuExtra) => void;
 }) {
   const messages = useGlobal((s) => frameByKey(s, frameKey)?.messages ?? NO_MESSAGES);
   const names = useGlobal((s) => s.names);
@@ -688,7 +710,11 @@ export function Feed({ frameKey, active, chatId, meId, peerName, group, onAuthor
     const row = (e.target as Element).closest<HTMLElement>('.app-msg');
     if (!row) return;
     e.preventDefault();
-    onMenu(row.dataset.key!, e.clientX, e.clientY);
+    // что было под курсором и выделено — запоминаем сейчас: при открытии меню выделение может сброситься
+    const link = (e.target as Element).closest<HTMLAnchorElement>('a[href]');
+    let selection: { text: string; entities: Entity[] } | null = null;
+    for (const el of row.querySelectorAll<HTMLElement>('.rl-bubble-text, .rl-media-caption')) { selection = selectionValue(el) as typeof selection; if (selection) break; }
+    onMenu(row.dataset.key!, e.clientX, e.clientY, { link: link && row.contains(link) ? link.href : null, selection });
   };
 
   const out: unknown[] = [];
@@ -736,6 +762,14 @@ export function Feed({ frameKey, active, chatId, meId, peerName, group, onAuthor
     }
     // служебные события группы — плашкой по центру, как в Telegram (не пузырём)
     const svc = m.service as { type?: string; data?: ServiceData } | undefined;
+    // чек-лист: «X отметил(а) «задача» как выполненную» / «добавил(а) задачу» — плашкой, названия — из самого списка
+    if (svc?.type === 'todo_done' || svc?.type === 'todo_append') {
+      flushRun();
+      const list = messages.find((x) => x.id === m.replyToId)?.todo as { title: string; items: { id: number; title: string }[] } | undefined;
+      out.push(<div class="rl-action" key={m.key} role="note"><span>{todoLine(svc.type, svc.data ?? {}, mine ? 'Вы' : names[m.senderId as number] ?? peerName, list)}</span></div>);
+      prevDay = day; prevSender = null;
+      return;
+    }
     if (isGroupService(svc?.type)) {
       const text = serviceText(svc!.type as ServiceType, { data: svc!.data, body: m.body as string, mine, sender: names[m.senderId as number] ?? peerName, meId });
       flushRun();
@@ -817,4 +851,23 @@ export function Feed({ frameKey, active, chatId, meId, peerName, group, onAuthor
       </div>
     </>
   );
+}
+
+/** Текст служебной строки чек-листа (как в Telegram): одна задача — по названию, несколько — числом. */
+function todoLine(type: string, d: { completed?: number[]; incompleted?: number[]; items?: number[] }, who: string, list?: { title: string; items: { id: number; title: string }[] }): string {
+  const you = who === 'Вы';
+  const name = (id: number) => list?.items.find((x) => x.id === id)?.title ?? 'задачу';
+  const many = (n: number) => `${n} ${n % 10 === 1 && n % 100 !== 11 ? 'задачу' : [2, 3, 4].includes(n % 10) && ![12, 13, 14].includes(n % 100) ? 'задачи' : 'задач'}`;
+  if (type === 'todo_append') {
+    const ids = d.items ?? [];
+    const what = ids.length === 1 ? `задачу «${name(ids[0])}»` : many(ids.length);
+    return `${who} ${you ? 'добавили' : 'добавил(а)'} ${what} в «${list?.title ?? 'чек-лист'}»`;
+  }
+  const done = d.completed ?? [], undone = d.incompleted ?? [];
+  const part = (ids: number[], ok: boolean) => ids.length === 1
+    ? `«${name(ids[0])}» как ${ok ? 'выполненную' : 'невыполненную'}`
+    : `${many(ids.length)} как ${ok ? 'выполненные' : 'невыполненные'}`;
+  const verb = you ? 'отметили' : 'отметил(а)';
+  if (done.length && undone.length) return `${who} ${verb} ${part(done, true)} и ${part(undone, false)}`;
+  return `${who} ${verb} ${done.length ? part(done, true) : part(undone, false)}`;
 }

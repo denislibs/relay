@@ -5,8 +5,13 @@ import { useLayoutEffect, useRef, useState } from 'preact/hooks';
 import { Highlight } from './more.js';
 import { safeUrl, segments } from './richtext.js';
 import { Spoiler } from './spoiler.js';
+import { FormattedDate } from './dateView.js';
 
-var ORDER = ['link', 'pre', 'code', 'spoiler', 'bold', 'italic', 'underline', 'strike'];
+/** Тост «Дата скопирована» — приложение подставляет свой показ (setDateCopiedToast). */
+var dateCopied = null;
+export function setDateCopiedToast(fn) { dateCopied = fn; }
+
+var ORDER = ['link', 'date', 'pre', 'code', 'spoiler', 'bold', 'italic', 'underline', 'strike'];
 
 function wrap(type, value, child) {
   switch (type) {
@@ -17,6 +22,7 @@ function wrap(type, value, child) {
     case 'code': return h('code', { class: 'rl-code' }, child);
     case 'pre': return h('code', { class: 'rl-pre' }, child);
     case 'spoiler': return h(Spoiler, null, child);
+    case 'date': return h(FormattedDate, { value: value, onCopied: dateCopied }, child);
     case 'link': {
       var url = safeUrl(value);
       if (!url) return child;

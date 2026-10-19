@@ -678,6 +678,44 @@ export class Engine {
         await this.request({ op: 'delete', reqId: '', chatId: a.chatId, id: a.id });
         return null;
       }
+      case 'sendTodo': {
+        // чек-лист — как сообщение: в очередь (переживёт офлайн), задачи до ответа сервера пронумерованы 1..N
+        const clientId = crypto.randomUUID();
+        this.lastCreated = Math.max(Date.now(), this.lastCreated + 1);
+        const todo = { title: a.todo.title, items: a.todo.items.map((it, i) => ({ id: i + 1, title: it.title })), othersCanAppend: a.todo.othersCanAppend, othersCanComplete: a.todo.othersCanComplete, completions: [] };
+        this.store.addPending({ clientId, chatId: a.chatId, body: a.todo.title, entities: [], replyToId: a.replyToId ?? null, createdAt: this.lastCreated, failed: false, todo });
+        await this.store.flush();
+        this.changed();
+        this.pumpOutbox();
+        return { clientId };
+      }
+      case 'todoToggle': {
+        if (!this.online) throw new Error('offline');
+        // отметка — сразу у себя (галочка отзывается мгновенно); ошибка — откат
+        const m = this.store.messageById(a.chatId, a.id);
+        const prev = m?.todo;
+        if (prev) {
+          const rest = prev.completions.filter((c) => c.id !== a.itemId);
+          const completions = a.done ? rest.concat([{ id: a.itemId, by: this.cfg.userId, at: new Date().toISOString() }]) : rest;
+          this.store.patchMessage(a.chatId, a.id, { todo: { ...prev, completions } });
+          this.changed();
+        }
+        try {
+          await this.request({ op: 'todoToggle', reqId: '', chatId: a.chatId, id: a.id, completed: a.done ? [a.itemId] : [], incompleted: a.done ? [] : [a.itemId] });
+        } catch (e) {
+          if (prev) { this.store.patchMessage(a.chatId, a.id, { todo: prev }); this.changed(); }
+          throw e;
+        }
+        return null;
+      }
+      case 'todoAppend': {
+        if (!this.online) throw new Error('offline');
+        return this.request({ op: 'todoAppend', reqId: '', chatId: a.chatId, id: a.id, items: a.items });
+      }
+      case 'todoEdit': {
+        if (!this.online) throw new Error('offline');
+        return this.request({ op: 'todoEdit', reqId: '', chatId: a.chatId, id: a.id, todo: a.todo });
+      }
       case 'react': {
         if (!this.online) throw new Error('offline');
         // сразу у себя (реакция должна отзываться мгновенно), подтверждение и чужие — через журнал
@@ -700,8 +738,8 @@ export class Engine {
       case 'chatMediaCounts': return this.http<Record<string, number>>(`/chats/${a.chatId}/media/counts`);
       // закрепление — сразу на сервер (без сети — ошибка, интерфейс скажет); список придёт и обновлением журнала
       case 'group': {
-        // управление группой: только /groups/... и /join/...; ответ — данные или код ошибки сервера (для текста в интерфейсе)
-        if (!/^\/(groups|join)\//.test(a.path)) return { ok: false, code: 'bad_frame' };
+        // управление группой: только /groups/... и /join/... (и удаление личного чата); ответ — данные или код ошибки сервера (для текста в интерфейсе)
+        if (!/^\/(groups|join)\//.test(a.path) && !/^\/chats\/\d+\/delete$/.test(a.path)) return { ok: false, code: 'bad_frame' };
         let res: Response;
         try {
           res = await this.dev.fetch(this.cfg.httpBase + a.path, {
@@ -1243,7 +1281,7 @@ export class Engine {
               this.changed();
             }
             const att = next.attachment ? { id: next.attachment.id, thumb: next.attachment.thumb ?? null } : null;
-            const r = await this.request({ op: 'send', reqId: '', clientId: next.clientId, chatId: next.chatId, body: next.body, entities: next.entities ?? [], replyToId: next.replyToId, attachment: next.forward ? null : att, ...(next.groupId ? { groupId: next.groupId } : {}), ...(next.forward ? { forward: next.forward } : {}), ...(next.noLinkPreview ? { noLinkPreview: true } : {}), ...(next.blocks ? { blocks: next.blocks } : {}) });
+            const r = await this.request({ op: 'send', reqId: '', clientId: next.clientId, chatId: next.chatId, body: next.body, entities: next.entities ?? [], replyToId: next.replyToId, attachment: next.forward ? null : att, ...(next.groupId ? { groupId: next.groupId } : {}), ...(next.forward ? { forward: next.forward } : {}), ...(next.noLinkPreview ? { noLinkPreview: true } : {}), ...(next.blocks ? { blocks: next.blocks } : {}), ...(next.todo ? { todo: { title: next.todo.title, items: next.todo.items.map((x) => ({ title: x.title })), othersCanAppend: next.todo.othersCanAppend, othersCanComplete: next.todo.othersCanComplete } } : {}) });
             this.store.ack(next.clientId, r.id as number, r.createdAt as string);
             this.outboxAttempt = 0;
             if (att) delBlob(this.db, next.clientId).catch(() => {});
