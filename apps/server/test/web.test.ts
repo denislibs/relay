@@ -57,3 +57,26 @@ test('a pattern is sent precompressed to browsers that accept gzip, plain to the
   expect(await plain.text()).toBe(SVG);
   expect((await fetch(`${base}/main.js`, { headers: { 'accept-encoding': 'gzip' } })).headers.get('cache-control')).toBe('no-cache');
 });
+
+test('static files carry an ETag: an unchanged file revalidates as 304 without a body, a changed one is sent again', async () => {
+  const first = await fetch(`${base}/main.js`);
+  const etag = first.headers.get('etag')!;
+  expect(etag).toMatch(/^W\/"/);
+  expect(await first.text()).toBe('console.log(1)');
+  const again = await fetch(`${base}/main.js`, { headers: { 'if-none-match': etag } });
+  expect(again.status).toBe(304);
+  expect(again.headers.get('etag')).toBe(etag);
+  expect(await again.text()).toBe('');
+  // SPA-фолбэк — тот же механизм
+  const spa = await fetch(`${base}/some/route`);
+  expect((await fetch(`${base}/some/route`, { headers: { 'if-none-match': spa.headers.get('etag')! } })).status).toBe(304);
+  // сжатая копия — свой тег
+  const gz = await fetch(`${base}/patterns/cuteMix.svg`, { headers: { 'accept-encoding': 'gzip' }, decompress: false } as RequestInit);
+  const raw = await fetch(`${base}/patterns/cuteMix.svg`, { headers: { 'accept-encoding': 'identity' } });
+  expect(gz.headers.get('etag')).not.toBe(raw.headers.get('etag'));
+  writeFileSync(join(dist, 'main.js'), 'console.log(22)');
+  const changed = await fetch(`${base}/main.js`, { headers: { 'if-none-match': etag } });
+  expect(changed.status).toBe(200);
+  expect(await changed.text()).toBe('console.log(22)');
+  writeFileSync(join(dist, 'main.js'), 'console.log(1)');
+});

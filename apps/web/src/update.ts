@@ -56,3 +56,21 @@ export function onVisible(fn: () => void): () => void {
   document.addEventListener('visibilitychange', h);
   return () => document.removeEventListener('visibilitychange', h);
 }
+
+/**
+ * «Обновить Relay». Оболочку SW отдаёт из кэша сборки, поэтому простая перезагрузка, пока новый SW не встал,
+ * вернула бы прежнюю версию. Сначала ставим новый SW (его activate удаляет кэш старой оболочки; медиа и
+ * переписка в IndexedDB остаются), ждём, когда он возьмёт страницу, — и только тогда перезагружаем.
+ */
+export async function applyUpdate(timeoutMs = 10_000): Promise<void> {
+  try {
+    const reg = await navigator.serviceWorker?.getRegistration();
+    if (reg) {
+      const taken = new Promise<void>((r) => navigator.serviceWorker.addEventListener('controllerchange', () => r(), { once: true }));
+      await reg.update();
+      // новый SW качается/ставится — ждём смены контроллера (skipWaiting + clients.claim), но не вечно
+      if (reg.installing || reg.waiting) await Promise.race([taken, new Promise((r) => setTimeout(r, timeoutMs))]);
+    }
+  } catch { /* без SW или без сети — просто перезагрузка */ }
+  location.reload();
+}

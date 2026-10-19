@@ -9,7 +9,8 @@ const SHELL = ['/', '/main.js', '/relay.css', '/tokens.css', '/app.css', '/share
 const API = /^\/(health|me|users|contacts|settings|privacy|blocks|chats|presence|search|uploads|files|push|sessions|ws|dev|logout|auth|link-preview|groups|join)(\/|$)/;
 
 sw.addEventListener('install', (e) => {
-  e.waitUntil(caches.open(CACHE).then((c) => c.addAll(SHELL)).then(() => sw.skipWaiting()));
+  // мимо HTTP-кэша браузера: новая сборка не должна положить к себе файл прежней
+  e.waitUntil(caches.open(CACHE).then((c) => c.addAll(SHELL.map((u) => new Request(u, { cache: 'no-cache' })))).then(() => sw.skipWaiting()));
 });
 
 sw.addEventListener('activate', (e) => {
@@ -60,18 +61,24 @@ sw.addEventListener('fetch', (e) => {
     }));
     return;
   }
-  if (e.request.method !== 'GET' || url.origin !== location.origin || API.test(url.pathname) || url.pathname === '/version.json') return;
+  if (e.request.method !== 'GET' || url.origin !== location.origin || API.test(url.pathname) || url.pathname === '/version.json' || url.pathname === '/sw.js') return;
   if (e.request.mode === 'navigate') {
     // свежая разметка, но плохая сеть не держит дольше 3 с — тогда оболочка из кэша
     e.respondWith(networkFirst(e.request, async () => caches.match('/')).catch(() => Response.error()));
     return;
   }
-  // имена файлов без хэша: сначала сеть (свежая сборка), кэш — когда сети нет
+  // Сначала кэш этой сборки. Он и есть версия: имя CACHE содержит __BUILD__, новая сборка меняет sw.js →
+  // ставится новый SW со своим кэшем, старый удаляется в activate. Поэтому в пределах сборки файл не меняется,
+  // и перекачивать его на каждой загрузке (как было при «сначала сеть») незачем. Чего нет в кэше — из сети и в кэш.
+  if (url.search) return;   // с параметрами — разовые адреса: только сеть, в кэш оболочки не копим
   e.respondWith(
-    fetch(e.request).then((res) => {
-      if (res.ok) { const copy = res.clone(); caches.open(CACHE).then((c) => c.put(e.request, copy)); }
+    caches.open(CACHE).then(async (c) => {
+      const hit = await c.match(e.request);
+      if (hit) return hit;
+      const res = await fetch(e.request);
+      if (res.ok && res.status === 200) e.waitUntil(c.put(e.request, res.clone()));
       return res;
-    }).catch(async () => (await caches.match(e.request)) ?? Response.error()),
+    }).catch(() => Response.error()),
   );
 });
 
