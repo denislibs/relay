@@ -617,15 +617,8 @@ export async function sendTrack(chatId: number, attachment: { id: string; kind: 
   await engine.call({ type: 'sendMessage', chatId, body: '', attachment, replyToId });
 }
 
-/** Вкладка «Общих медиа» панели «Информация»: страница сообщений (новые сверху). */
+/** Вкладка «Общих медиа» панели «Информация» (содержимое — подписка media, см. mediaTab.ts). */
 export type MediaTab = 'media' | 'file' | 'audio' | 'voice' | 'link';
-export function chatMedia(chatId: number, kind: MediaTab, beforeId?: number): Promise<{ messages: Item[]; hasMore: boolean }> {
-  return engine.call({ type: 'chatMedia', chatId, kind, beforeId }) as Promise<{ messages: Item[]; hasMore: boolean }>;
-}
-/** Сколько в каждой вкладке (пустые не показываем). */
-export function chatMediaCounts(chatId: number): Promise<Record<MediaTab, number>> {
-  return engine.call({ type: 'chatMediaCounts', chatId }) as Promise<Record<MediaTab, number>>;
-}
 
 /** Длительность аудиофайла по метаданным (без проигрывания): музыка в ленте и во вкладке «Музыка». */
 function audioDuration(file: File): Promise<number | null> {

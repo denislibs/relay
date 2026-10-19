@@ -931,8 +931,6 @@ export class Engine {
       case 'resetLocal': return this.resetLocal(a.keepOutbox !== false);
       case 'dev': return this.dev.command(a).finally(() => this.pushStatus());   // флаги имитатора — в status сразу
       case 'search': return this.search(a);
-      case 'chatMedia': return this.http<{ messages: Message[]; hasMore: boolean }>(`/chats/${a.chatId}/media?kind=${a.kind}${a.beforeId ? '&beforeId=' + a.beforeId : ''}`);
-      case 'chatMediaCounts': return this.http<Record<string, number>>(`/chats/${a.chatId}/media/counts`);
       // закрепление — сразу на сервер (без сети — ошибка, интерфейс скажет); список придёт и обновлением журнала
       case 'group': {
         // управление группой: только /groups/... и /join/... (и удаление личного чата); ответ — данные или код ошибки сервера (для текста в интерфейсе)

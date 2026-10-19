@@ -211,7 +211,7 @@ test('offline: messages pile up in the outbox and HTTP fails like no network; tu
   expect((await feed.until((l) => l.length === 2)).map((m) => m.status)).toEqual(['pending', 'pending']);
   expect(ea.status().outbox).toBe(2);
   expect((await sql`select count(*)::int as n from messages where chat_id = ${chatId}`)[0].n).toBe(0);
-  await expect(ea.call({ type: 'chatMedia', chatId, kind: 'photo' })).rejects.toThrow(/Failed to fetch/);
+  await expect(ea.call({ type: 'messagesByIds', chatId, ids: [1] })).rejects.toThrow(/Failed to fetch/);
 
   await dev(ea, 'offline', { on: false });
   await feed.until((l) => l.length === 2 && l.every((m) => m.status === 'sent'), 4000);
@@ -234,7 +234,7 @@ test('netProfile latency 300: an ack does not come back earlier than 300 ms', as
   expect(ack.ms!).toBeGreaterThanOrEqual(300);
   // HTTP движка тоже задержан
   const h0 = Date.now();
-  await ea.call({ type: 'chatMedia', chatId, kind: 'photo' });
+  await ea.call({ type: 'messagesByIds', chatId, ids: [1] });
   expect(Date.now() - h0).toBeGreaterThanOrEqual(300);
   await dev(ea, 'netProfile', { profile: null });
 });

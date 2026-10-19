@@ -156,8 +156,6 @@ export type Action =
   | { type: 'todoAppend'; chatId: number; id: number; items: string[] }
   | { type: 'todoEdit'; chatId: number; id: number; todo: TodoInput }
   | { type: 'search'; q: string; chatId?: number; beforeId?: number; limit?: number }
-  | { type: 'chatMedia'; chatId: number; kind: 'media' | 'file' | 'audio' | 'voice' | 'link'; beforeId?: number }
-  | { type: 'chatMediaCounts'; chatId: number }
   | { type: 'pin'; chatId: number; id: number }
   | { type: 'unpin'; chatId: number; id: number | null }
   | { type: 'messagesByIds'; chatId: number; ids: number[] }

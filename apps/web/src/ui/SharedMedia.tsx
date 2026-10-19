@@ -4,7 +4,8 @@ import { avatarPhoto, userPhoto } from '../profilePhoto';
 import { senderAvatar } from '../profilePhoto';
 import type { Item } from '@relay/sync-engine/src/types';
 import { useEffect, useRef, useState } from 'preact/hooks';
-import { chatMedia, chatMediaCounts, focusMessage, type MediaTab } from '../data';
+import { focusMessage, type MediaTab } from '../data';
+import { useMedia } from '../mediaTab';
 import { getGlobal, useGlobal } from '../global';
 import { toggleMusic, trackTitle } from '../music';
 import { clock, dayLabel, fileSize, lastSeenText } from './format';
@@ -12,7 +13,7 @@ import { startDirectChat } from '../data';
 import { useMembers, type Member } from '../members';
 
 // «Общие медиа» в правой панели — как в Telegram: Медиа, Файлы, Ссылки, Музыка, Голосовые.
-// Пустые вкладки не показываем (счётчики с сервера); каждая вкладка — страницами по 40, новые сверху.
+// Пустые вкладки не показываем (счётчики из подписки движка); каждая вкладка — страницами по 40, новые сверху.
 
 const ORDER: MediaTab[] = ['media', 'file', 'link', 'audio', 'voice'];
 const LABEL: Record<MediaTab, string> = { media: 'Медиа', file: 'Файлы', link: 'Ссылки', audio: 'Музыка', voice: 'Голосовые' };
@@ -37,16 +38,10 @@ type Tab = MediaTab | 'members';
 
 /** group — в группе первая вкладка «Участники» (как в Telegram): панель не бывает пустой. */
 export function SharedMedia({ chatId, group = false }: { chatId: number; group?: boolean }) {
-  const [counts, setCounts] = useState<Record<MediaTab, number> | null>(null);
   const [tab, setTab] = useState<Tab | null>(null);
   const members = useMembers(chatId, group);
-  // счётчики — при открытии и когда в чате появилось новое сообщение
-  const lastId = useGlobal((s) => ((s.chats.find((c) => c.id === chatId)?.last as { id?: number } | null)?.id ?? 0));
-  useEffect(() => {
-    let live = true;
-    chatMediaCounts(chatId).then((c) => { if (live) setCounts(c); }).catch(() => { if (live) setCounts((x) => x ?? { media: 0, file: 0, link: 0, audio: 0, voice: 0 }); });
-    return () => { live = false; };
-  }, [chatId, lastId]);
+  // счётчики приходят с любой подпиской media этого чата и обновляются журналом (новое сообщение — новый счётчик)
+  const { counts } = useMedia(chatId, 'media');
   useEffect(() => { setTab(null); }, [chatId]);
   const tabs: Tab[] = [...(group ? ['members' as const] : []), ...(counts ? ORDER.filter((t) => counts[t] > 0) : [])];
   const active = tab && tabs.includes(tab) ? tab : tabs[0] ?? null;
@@ -74,33 +69,23 @@ export function SharedMedia({ chatId, group = false }: { chatId: number; group?:
 
 /** Список вкладки: первая страница при открытии, следующие — когда низ списка близко. */
 function TabList({ chatId, tab }: { chatId: number; tab: MediaTab }) {
-  const [items, setItems] = useState<Msg[] | null>(null);
-  const [more, setMore] = useState(false);
-  const busy = useRef(false);
+  const { items: list0, done, loading, more } = useMedia(chatId, tab);
+  const items = list0 as Msg[];
   const end = useRef<HTMLDivElement>(null);
-  const load = (before?: number) => {
-    if (busy.current) return;
-    busy.current = true;
-    chatMedia(chatId, tab, before).then((r) => {
-      setItems((cur) => [...(before ? cur ?? [] : []), ...(r.messages as Msg[])]);
-      setMore(r.hasMore);
-    }).catch(() => setItems((cur) => cur ?? [])).finally(() => { busy.current = false; });
-  };
-  useEffect(() => { load(); }, [chatId, tab]);
   useEffect(() => {
     const el = end.current;
-    if (!el || !more || !items?.length) return;
-    const io = new IntersectionObserver((e) => { if (e[0].isIntersecting) load(items[items.length - 1].id); }, { rootMargin: '400px' });
+    if (!el || done || !items.length) return;
+    const io = new IntersectionObserver((e) => { if (e[0].isIntersecting) more(); }, { rootMargin: '400px' });
     io.observe(el);
     return () => io.disconnect();
-  }, [more, items]);
+  }, [done, items.length, loading]);
 
   // «Медиа»: фото открываются просмотрщиком (листать — по всем фото вкладки), видео — в ленте, где есть плеер
   const [viewer, setViewer] = useState<number | null>(null);
   const grid = useRef<HTMLDivElement>(null);
   const people = useGlobal((s) => s.people);
   const meId = useGlobal((s) => s.me?.userId);
-  if (!items) return <div class="app-sm-loading" aria-busy="true" />;
+  if (!items.length && loading) return <div class="app-sm-loading" aria-busy="true" />;
   const photos = tab === 'media' ? items.filter((m) => !m.attachment!.mime.startsWith('video/')) : [];
   const open = (m: Msg) => { const k = photos.indexOf(m); if (k >= 0) setViewer(k); else show(m); };
   const list = tab === 'media' ? (
@@ -110,7 +95,7 @@ function TabList({ chatId, tab }: { chatId: number; tab: MediaTab }) {
       {items.map((m) => tab === 'file' ? <FileRow key={m.id} m={m} /> : tab === 'link' ? <LinkRow key={m.id} m={m} /> : <TrackRow key={m.id} m={m} chatId={chatId} items={items} />)}
     </div>
   );
-  return <>{list}{more ? <div ref={end} class="app-sm-more" /> : null}
+  return <>{list}{!done ? <div ref={end} class="app-sm-more" /> : null}
     {viewer !== null && photos[viewer] ? (
       <MediaViewer index={viewer}
         items={photos.map((m) => { const a = m.attachment!; return { src: fileUrl(a), thumb: a.thumb, w: a.w, h: a.h, name: a.name, download: fileUrl(a) + '?download=1', caption: m.body,
