@@ -1,22 +1,36 @@
 import { expect, test } from 'bun:test';
 import { recomputeLast } from '../src/derive';
 import { openDb } from '../src/idb';
+import { computeQuery } from '../src/queries';
 import { Store } from '../src/store';
 import { msg } from './fixtures';
 
 const ME = 1, PEER = 2;
 const fresh = async () => Store.open(await openDb('d-' + crypto.randomUUID()), ME);
 
-test('deleting the last message makes the previous one last; lastAt keeps its place', async () => {
+test('deleting the last message makes the previous one last; lastAt follows it', async () => {
   const s = await fresh();
   s.applyUpdate({ type: 'newMessage', message: msg({ id: 1, chatId: 10, senderId: PEER }) });
   s.applyUpdate({ type: 'newMessage', message: msg({ id: 2, chatId: 10, senderId: PEER }) });
-  const at = s.chats.get(10)!.lastAt;
+  expect(s.chats.get(10)!.lastAt).toBe(msg({ id: 2, chatId: 10, senderId: PEER }).createdAt);
   s.applyUpdate({ type: 'messageDeleted', chatId: 10, id: 2 });
   const chat = s.chats.get(10)!;
   expect(chat.last).toMatchObject({ id: 1, body: 'text 1' });
   expect(chat.last?.deleted).toBeFalsy();
-  expect(chat.lastAt).toBe(at);   // место в списке не прыгает
+  expect(chat.lastAt).toBe(chat.last!.createdAt);   // чат опускается к дате нового верхнего сообщения
+});
+
+test('after deleting the last message the chat moves down in the list; a newer draft still lifts it', async () => {
+  const s = await fresh();
+  s.applyUpdate({ type: 'newMessage', message: msg({ id: 1, chatId: 10, senderId: PEER }) });
+  s.applyUpdate({ type: 'newMessage', message: msg({ id: 2, chatId: 20, senderId: PEER }) });
+  s.applyUpdate({ type: 'newMessage', message: msg({ id: 3, chatId: 10, senderId: PEER }) });
+  const order = () => computeQuery(s, { kind: 'chatList', limit: 50 }).order;
+  expect(order()).toEqual(['c10', 'c20']);
+  s.applyUpdate({ type: 'messageDeleted', chatId: 10, id: 3 });
+  expect(order()).toEqual(['c20', 'c10']);
+  s.setDraft(10, 'пишу');
+  expect(order()).toEqual(['c10', 'c20']);
 });
 
 test('deleting an older message leaves last alone', async () => {
@@ -31,15 +45,19 @@ test('nothing else known: the deleted last stays as a tombstone (preview «Со�
   const db = await openDb('d-' + crypto.randomUUID());
   const s = await Store.open(db, ME);
   s.applyUpdate({ type: 'newMessage', message: msg({ id: 5, chatId: 10, senderId: PEER }) });
+  const at = s.chats.get(10)!.lastAt;
   s.applyUpdate({ type: 'messageDeleted', chatId: 10, id: 5 });
   expect(s.chats.get(10)!.last).toMatchObject({ id: 5, deleted: true, body: '' });
+  expect(s.chats.get(10)!.lastAt).toBe(at);   // не удалённых нет — lastAt прежний
 
   // после перезапуска сообщений чата в памяти нет — только chat.last
   s.applyUpdate({ type: 'newMessage', message: msg({ id: 6, chatId: 10, senderId: PEER }) });
   await s.flush();
   const again = await Store.open(db, ME);
+  const at6 = again.chats.get(10)!.lastAt;
   again.applyUpdate({ type: 'messageDeleted', chatId: 10, id: 6 });
   expect(again.chats.get(10)!.last).toMatchObject({ id: 6, deleted: true });
+  expect(again.chats.get(10)!.lastAt).toBe(at6);
 });
 
 test('editing the last message updates last.body, loaded or not', async () => {
