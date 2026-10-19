@@ -323,6 +323,21 @@ function Chip(props) {
   }), props.children, props.count ? h('span', { class: 'rl-chip-count' }, props.count) : null);
 }
 
+/* ---------- SearchField ---------- */
+function SearchField(props) {
+  var id = props.id || 'rl-search';
+  // status: «Подключение…», «Обновление…» — лупа сменяется лоадером, текст встаёт на место плейсхолдера
+  var busy = !!props.status;
+  return h('div', { class: cx('rl-search', busy && 'rl-search-busy', (props.className || props.class)) },
+    h('label', { for: id, class: 'rl-sr' }, props.label || 'Поиск'),
+    h('span', { class: 'rl-search-icon', 'aria-hidden': 'true' },
+      h(Icon, { name: 'search', size: 18 }),
+      h('svg', { class: 'rl-search-spin', width: 18, height: 18, viewBox: '0 0 18 18', fill: 'none' },
+        h('circle', { cx: 9, cy: 9, r: 7, stroke: 'currentColor', 'stroke-width': 2, 'stroke-linecap': 'round', 'stroke-dasharray': '30 44' }))),
+    h('input', { id: id, type: 'search', placeholder: busy ? props.status : (props.placeholder || 'Поиск или новый чат'), value: props.value, onInput: props.onInput || props.onChange, onFocus: props.onFocus, onKeyDown: props.onKeyDown, autocomplete: 'off' }),
+    busy ? h('span', { class: 'rl-sr', role: 'status' }, props.status) : null);
+}
+
 /* ---------- MessageStatus ---------- */
 function MessageStatus(props) {
   var s = props.status || 'sent';
@@ -1341,4 +1356,4 @@ function ScrollToBottom(props) {
 }
 
 
-export { WebPage, MsgLine, ForwardTitle, peerTone, RelayLogo, Verified, ArchivedRow, ReplyQuote, ReactionChips, cx, chain, ripple, reducedMotion, omit, fmtTime, makeWave, ICONS, Icon, Button, IconButton, Avatar, Badge, Chip, ChatRow, ChatRowSkeleton, Bubble, MessageStatus, TypingIndicator, DateDivider, Banner, NavRail, Checkbox, Toast, Card, Steps, MediaArt, ProgressRing, Waveform, VoiceMessage, VoiceRecorder, MediaBubble, MediaPolicy, mediaHeld, FileBubble, MediaThumb, MediaViewer, Switch, PanelHeader, ProfileHeader, ActionTile, InfoRow, SettingsIcon, ReadMore, Presence, useMinVisible, LazyImage, FlipList, SyncIndicator, LinearProgress, EmptyState, ScrollToBottom };
+export { WebPage, MsgLine, ForwardTitle, peerTone, RelayLogo, Verified, ArchivedRow, ReplyQuote, ReactionChips, cx, chain, ripple, reducedMotion, omit, fmtTime, makeWave, ICONS, Icon, Button, IconButton, Avatar, Badge, Chip, SearchField, ChatRow, ChatRowSkeleton, Bubble, MessageStatus, TypingIndicator, DateDivider, Banner, NavRail, Checkbox, Toast, Card, Steps, MediaArt, ProgressRing, Waveform, VoiceMessage, VoiceRecorder, MediaBubble, MediaPolicy, mediaHeld, FileBubble, MediaThumb, MediaViewer, Switch, PanelHeader, ProfileHeader, ActionTile, InfoRow, SettingsIcon, ReadMore, Presence, useMinVisible, LazyImage, FlipList, SyncIndicator, LinearProgress, EmptyState, ScrollToBottom };
