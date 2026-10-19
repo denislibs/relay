@@ -7,6 +7,7 @@ import { IconButton, MenuPopover, Modal, Button, TextField, reducedMotion } from
 const CLOSE_MS = 260;
 import type { Block } from '@relay/protocol';
 import { useEffect, useRef, useState } from 'preact/hooks';
+import { asset } from '../assets';
 
 type EdState = { canUndo: boolean; canRedo: boolean; empty: boolean; active: Record<string, boolean> };
 type Ed = {
@@ -19,7 +20,7 @@ type Mod = { createArticleEditor(o: { element: HTMLElement; blocks?: Block[]; pl
 let modP: Promise<Mod> | null = null;
 /** Ядро редактора — лениво, один раз (адрес — не литерал: сборщик не втягивает его в основной бандл). */
 function loadEditor(): Promise<Mod> {
-  const url = '/articleEditor.js';
+  const url = asset('articleEditor.js');
   return (modP ??= (import(/* @vite-ignore */ url) as Promise<Mod>).catch((e) => { modP = null; throw e; }));
 }
 export const preloadArticleEditor = () => { void loadEditor().catch(() => {}); };

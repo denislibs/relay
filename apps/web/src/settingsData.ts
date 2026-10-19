@@ -13,6 +13,7 @@ import { reducedMotion } from '@relay/ui';
 import { engineConfig } from './engineConfig';
 import { getGlobal, setGlobal, type AccountSettings, type DevSimFlags, type Me } from './global';
 import { dropSubscription } from './notify';
+import { asset } from './assets';
 
 declare const __BUILD__: string;
 
@@ -73,7 +74,7 @@ export function showToast(text: string, ms = 2500): void {
 const ME_KEY = 'relay.me';
 
 export function startSettingsData(me: Me): void {
-  engine = connectEngine({ build: __BUILD__, config: engineConfig(me), sharedUrl: '/shared.worker.js', dedicatedUrl: '/dedicated.worker.js' });
+  engine = connectEngine({ build: __BUILD__, config: engineConfig(me), sharedUrl: asset('shared.worker.js'), dedicatedUrl: asset('dedicated.worker.js') });
   engine.onReload(() => location.reload());   // движок другой сборки или база обновлена новой вкладкой
 
   // свой профиль: база сервера + ещё не подтверждённые правки — правка видна сразу, в том числе без сети

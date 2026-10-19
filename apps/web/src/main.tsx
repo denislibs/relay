@@ -15,6 +15,7 @@ import { startScreenBlur } from './screenBlur';
 import { startSettingsData } from './settingsData';
 import { startTitle } from './title';
 import { App } from './ui/App';
+import { asset } from './assets';
 
 declare const __DEV__: boolean;
 declare const __BUILD__: string;
@@ -96,7 +97,7 @@ if (__DEV__) void import('./devtools/session').then((s) => import('./devtools/me
 }));
 startTitle();
 // спойлеры: частицы рисует воркер (как в Telegram Web K); без него — CSS-точки
-configureSpoilers({ workerUrl: '/spoiler.worker.js' });
+configureSpoilers({ workerUrl: asset('spoiler.worker.js') });
 configureStickers({ base: '/stickers/', wasmUrl: '/dotlottie-player.wasm' });
 installSpoilers();
 startUpdateCheck({ current: __BUILD__, fetchBuild, onUpdate: () => setGlobal({ updateReady: true }), onVisible });

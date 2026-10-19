@@ -12,6 +12,7 @@ import { activeFrame, frameByKey, getGlobal, setGlobal, type ChatFrame, type Fee
 import { bindChatDepth, popChats, pushChat } from './nav';
 import { notifyIncoming, startNotify } from './notify';
 import { isSystemChat } from './ui/format';
+import { asset } from './assets';
 
 declare const __BUILD__: string;
 
@@ -32,8 +33,8 @@ export function startData(me: Me): void {
       dialogsPage: Math.max(20, Math.ceil(innerHeight / 72) * 2),
       historyPage: FEED_PAGE,   // история с сервера — той же порцией
     },
-    sharedUrl: '/shared.worker.js',
-    dedicatedUrl: '/dedicated.worker.js',
+    sharedUrl: asset('shared.worker.js'),
+    dedicatedUrl: asset('dedicated.worker.js'),
   });
   engine.onReload(() => location.reload());
 
