@@ -230,6 +230,8 @@ export const setNotifyDefault = (notifyType: 'direct' | 'group', patch: { muted?
 
 export const setPrivacy = (key: PrivacyKey, rule: { mode: PrivacyMode; allow?: number[]; deny?: number[] }): Promise<unknown> =>
   call({ type: 'setPrivacy', key, ...rule });
+export const addProfileMusic = (chatId: number, messageId: number): Promise<unknown> => call({ type: 'addProfileMusic', chatId, messageId });
+export const removeProfileMusic = (attId: string): Promise<unknown> => call({ type: 'removeProfileMusic', attId });
 export const blockUser = (userId: number): Promise<unknown> => call({ type: 'block', userId });
 export const unblockUser = (userId: number): Promise<unknown> => call({ type: 'unblock', userId });
 

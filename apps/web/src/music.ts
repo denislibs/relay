@@ -3,7 +3,9 @@ import { useEffect, useState } from 'preact/hooks';
 import { MEDIA_CACHE } from './mediaCache';
 import { localPreview } from './data';
 import { getGlobal, setGlobal } from './global';
-import { showToast } from './settingsData';
+import { Mirror } from '@relay/sync-engine/src/client';
+import { addProfileMusic, removeProfileMusic, showToast, watchQuery } from './settingsData';
+import { inOwnMusic, musicOf, type ProfileTrack } from './profileLists';
 import { personName } from './people';
 
 // Музыка: один трек на сообщение, где бы его ни включили (лента, «Общие медиа», плейлист, профиль) —
@@ -72,36 +74,22 @@ export function toggleMusic(m: MusicMsg, list: MusicMsg[], chatId: number): void
 }
 
 /* ---------- музыка в профиле ---------- */
-export type ProfileTrack = { id: string; title: string; duration: number | null; mime: string };
+export type { ProfileTrack };
 
-export async function loadProfileMusic(userId: number): Promise<ProfileTrack[]> {
-  const r = await fetch(`/users/${userId}/music`);
-  if (!r.ok) throw new Error('music ' + r.status);
-  return ((await r.json()) as { tracks: ProfileTrack[] }).tracks;
-}
-
-/** Мои треки в профиле — для кнопки «Добавить/Убрать» в плеере (при старте и после каждой правки). */
-export async function refreshMyMusic(): Promise<void> {
-  const me = getGlobal().me?.userId;
-  if (!me) return;
-  try { setGlobal({ myMusic: (await loadProfileMusic(me)).map((t) => t.id) }); } catch { /* без сети — позже */ }
-}
-
-export const inProfile = (t: Track) => !!t.attId && getGlobal().myMusic.includes(t.attId);
+/** Файл трека уже в моём профиле — по подписке движка (profileLists.ts), синхронно. */
+export const inProfile = (t: Track) => inOwnMusic(t.attId);
 
 export async function toggleProfileMusic(t: Track): Promise<void> {
   if (!t.attId) return;
   const had = inProfile(t);
-  // сразу, как в Telegram; не вышло — откатываем
-  setGlobal((s) => ({ myMusic: had ? s.myMusic.filter((x) => x !== t.attId) : [t.attId!, ...s.myMusic] }));
   try {
-    const r = had ? await fetch(`/me/music/${t.attId}`, { method: 'DELETE' })
-      : await fetch('/me/music', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ chatId: t.chatId, messageId: t.msgId }) });
-    if (!r.ok) throw new Error(String(r.status));
-    setGlobal({ myMusic: ((await r.json()) as { tracks: ProfileTrack[] }).tracks.map((x) => x.id) });
+    // движок ставит операцию в очередь и сразу показывает результат в подписке; отказ сервера откатит строку,
+    // а тост об отказе покажет наблюдатель очереди (settingsData)
+    if (had) await removeProfileMusic(t.attId);
+    else if (t.chatId != null && t.msgId != null) await addProfileMusic(t.chatId, t.msgId);
+    else return;
     showToast(had ? 'Трек убран из профиля' : 'Трек добавлен в профиль');
   } catch {
-    setGlobal((s) => ({ myMusic: had ? [t.attId!, ...s.myMusic] : s.myMusic.filter((x) => x !== t.attId) }));
     showToast('Не удалось изменить музыку профиля');
   }
 }
@@ -120,11 +108,19 @@ export function playProfile(userId: number, tracks: Pick<ProfileTrack, 'id' | 't
 }
 
 /** Плашка под аватаром знает только последний трек (PublicUser.music): он играет сразу, а весь список
- *  профиля подгружается следом и становится плейлистом, если этот трек всё ещё играет. */
+ *  профиля приходит из подписки движка и становится плейлистом, если этот трек всё ещё играет. */
 export function playProfileTop(userId: number, top: Pick<ProfileTrack, 'id' | 'title' | 'duration'>): void {
   playProfile(userId, [top]);
   const key = profileTrack(userId, top).key;
-  loadProfileMusic(userId).then((all) => {
-    if (all.length > 1 && player.playerState().key === key) player.setPlaylist(all.map((x) => profileTrack(userId, x)));
-  }).catch(() => { /* без сети — один трек */ });
+  const m = new Mirror();
+  let done = false;
+  const w = watchQuery({ kind: 'profileMusic', userId }, (p) => {
+    if (done) return;
+    m.apply(p);
+    const v = musicOf(m);
+    if (!v || (!v.loaded && !v.tracks.length)) return;
+    done = true;
+    if (v.tracks.length > 1 && player.playerState().key === key) player.setPlaylist(v.tracks.map((x) => profileTrack(userId, x)));
+    queueMicrotask(() => w.close());
+  });
 }

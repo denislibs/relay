@@ -1,6 +1,7 @@
 import { Icon, IconButton, MenuPopover, Modal, ORDER_INFO, player, PlayingRing } from '@relay/ui';
 import { useEffect, useRef, useState } from 'preact/hooks';
 import { setGlobal, useGlobal } from '../global';
+import { useOwnMusic } from '../profileLists';
 import { inProfile, toggleProfileMusic, type Track } from '../music';
 
 // Окно плейлиста — как в Telegram Web A: список треков (текущий подсвечен и прокручен к середине),
@@ -11,7 +12,7 @@ const close = () => setGlobal({ playlistOpen: false });
 
 export function Playlist() {
   const open = useGlobal((s) => s.playlistOpen);
-  useGlobal((s) => s.myMusic);   // кнопка «в профиль» перерисуется после правки
+  useOwnMusic();   // кнопка «в профиль» перерисуется после правки
   const [st, setSt] = useState(() => player.playerState());
   const [order, setOrder] = useState<HTMLElement | null>(null);
   const seek = useRef<HTMLInputElement>(null), now = useRef<HTMLSpanElement>(null);

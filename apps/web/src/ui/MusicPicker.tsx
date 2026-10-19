@@ -6,7 +6,8 @@ import type { Message } from '@relay/protocol';
 import { useEffect, useRef, useState } from 'preact/hooks';
 import { forwardMessages, sendFiles, sendTrack, sentSound } from '../data';
 import { getGlobal } from '../global';
-import { loadProfileMusic, trackTitle, type ProfileTrack } from '../music';
+import { trackTitle } from '../music';
+import { useProfileMusic, type ProfileTrack } from '../profileLists';
 import { searchGlobalMedia, type MediaHit } from '../search';
 import { showToast } from '../settingsData';
 import { dur as fmtDur } from './SharedMedia';
@@ -46,7 +47,7 @@ function TrackLine({ r }: { r: Row }) {
 /** replyToId — открытый в поле ответ: трек уходит ответом на него (как любое сообщение); onSent — ответ отработан, снять его. */
 export function MusicPicker({ chatId, open, onClose, replyToId = null, onSent }: { chatId: number; open: boolean; onClose: () => void; replyToId?: number | null; onSent?: () => void }) {
   const [q, setQ] = useState('');
-  const [profile, setProfile] = useState<ProfileTrack[] | null>(null);
+  const profile: ProfileTrack[] | null = useProfileMusic(open ? getGlobal().me?.userId : null)?.tracks ?? null;
   const [shared, setShared] = useState<{ hits: MediaHit[]; more: boolean; loading: boolean }>({ hits: [], more: true, loading: false });
   const [found, setFound] = useState<{ q: string; hits: MediaHit[] } | null>(null);
   const [searching, setSearching] = useState(false);
@@ -60,8 +61,6 @@ export function MusicPicker({ chatId, open, onClose, replyToId = null, onSent }:
   useEffect(() => {
     if (!open) return;
     setQ(''); setFound(null);
-    const me = getGlobal().me?.userId;
-    if (me) loadProfileMusic(me).then(setProfile, () => setProfile([]));
     setShared({ hits: [], more: true, loading: false });
     void loadShared(true);
   }, [open]);

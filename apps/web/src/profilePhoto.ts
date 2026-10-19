@@ -1,8 +1,8 @@
 // Фото профиля: свои — загрузка (обрезанное в AvatarCropper 640 + 160 + превью) и удаление;
 // чужие — откуда брать картинку для Avatar. Файлы — обычные /files/<id>: их кэширует service worker (relay-media).
 import type { ProfilePhoto, UserPhoto } from '@relay/protocol';
-import { useEffect, useState } from 'preact/hooks';
 import { getGlobal, type Me } from './global';
+import { useProfilePhotoList } from './profileLists';
 
 /** Пропсы Avatar для фото: маленькое — для списков, большое (big) — для профиля. Нет фото — пусто (инициалы). */
 export function avatarPhoto(p: ProfilePhoto | null | undefined, big = false): { src?: string; thumb?: string } {
@@ -54,58 +54,29 @@ async function json(r: Response): Promise<Me> {
 export async function setProfilePhoto(c: { big: Blob; small: Blob; thumb: string; video?: { blob: Blob; side: number; duration: number } }): Promise<Me> {
   const [id, small, video] = await Promise.all([upload(c.big, 640), upload(c.small, 160), c.video ? upload(c.video.blob, c.video.side, c.video) : undefined]);
   const me = await json(await fetch('/me/photo', { method: 'PUT', credentials: 'include', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ id, small, thumb: c.thumb, ...(video ? { video } : {}) }) }));
-  invalidatePhotos(me.userId);
   return me;
 }
 
 /** Удалить фото: без pid — главное, с pid — любое из истории. */
 export async function removeProfilePhoto(pid?: number): Promise<Me> {
   const me = await json(await fetch(pid ? `/me/photos/${pid}` : '/me/photo', { method: 'DELETE', credentials: 'include' }));
-  invalidatePhotos(me.userId);
   return me;
 }
 
 export async function setMainPhoto(pid: number): Promise<Me> {
   const me = await json(await fetch(`/me/photos/${pid}/main`, { method: 'PUT', credentials: 'include' }));
-  invalidatePhotos(me.userId);
   return me;
 }
 
-// ---------- история фото: кэш на сессию вкладки ----------
-// Ключ — человек + его главное фото: сменилось главное (userUpdated) — история перечитается сама.
-const cache = new Map<string, Promise<UserPhoto[]>>();
-const listeners = new Set<() => void>();
-function invalidatePhotos(userId: number): void {
-  for (const k of [...cache.keys()]) if (k.startsWith(userId + ':')) cache.delete(k);
-  for (const f of listeners) f();
-}
-function load(userId: number, key: string): Promise<UserPhoto[]> {
-  let p = cache.get(key);
-  if (!p) {
-    p = fetch(`/users/${userId}/photos?limit=100`, { credentials: 'include' })
-      .then((r) => (r.ok ? r.json() : { photos: [] }))
-      .then((j: { photos: UserPhoto[] }) => j.photos, () => { cache.delete(key); return []; });
-    cache.set(key, p);
-  }
-  return p;
-}
+// ---------- история фото ----------
+// Список — подписка движка (profileLists.ts): сменилось главное фото (userUpdated) — движок перечитает его сам.
 
 /**
  * История фото профиля (главное первым). Пока не загрузилась — одно главное фото из профиля,
  * чтобы шапка не мигала; без фото — пусто.
  */
 export function useProfilePhotos(userId: number | null | undefined, main: ProfilePhoto | null | undefined): UserPhoto[] {
-  const key = userId ? `${userId}:${main?.pid ?? main?.id ?? 'none'}` : '';
-  const fallback: UserPhoto[] = main ? [{ pid: main.pid ?? 0, id: main.id, small: main.small, thumb: main.thumb, at: main.at, ...(main.video ? { video: main.video } : {}) }] : [];
-  const [list, setList] = useState<{ key: string; photos: UserPhoto[] } | null>(null);
-  const [rev, setRev] = useState(0);
-  useEffect(() => { const f = () => setRev((x) => x + 1); listeners.add(f); return () => { listeners.delete(f); }; }, []);
-  useEffect(() => {
-    if (!userId || !main) { setList(null); return; }
-    let live = true;
-    void load(userId, key).then((photos) => { if (live) setList({ key, photos }); });
-    return () => { live = false; };
-  }, [key, rev]);
+  const list = useProfilePhotoList(main ? userId : null, main);
   if (!main) return [];
-  return list && list.key === key && list.photos.length ? list.photos : fallback;
+  return list ?? [{ pid: main.pid ?? 0, id: main.id, small: main.small, thumb: main.thumb, at: main.at, ...(main.video ? { video: main.video } : {}) }];
 }

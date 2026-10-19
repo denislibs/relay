@@ -1,6 +1,6 @@
 import { installJoinLinks } from './ui/group/JoinLink';
 import { startMuteTimers } from './mute';
-import { refreshMyMusic } from './music';
+import { startOwnMusic } from './profileLists';
 import { configureSpoilers, configureStickers, installSpoilers, loadPattern } from '@relay/ui';
 import { fetchBuild, onVisible, startUpdateCheck } from './update';
 import { claimMediaCache, sendMediaPolicy } from './storageInfo';
@@ -35,7 +35,7 @@ function start(me: Me): void {
   startMuteTimers();   // «Отключить звук» на время: таймер до ближайшего срока — перерисовать, когда чат включится
   startSettingsData(me);
   installJoinLinks();
-  void refreshMyMusic();   // мои треки в профиле — для кнопки в плеере
+  startOwnMusic(me.userId);   // мои треки в профиле — для кнопки в плеере
 }
 
 async function boot(): Promise<void> {
