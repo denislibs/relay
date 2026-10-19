@@ -48,5 +48,5 @@ export interface IncomingMessage { body: string; kind?: string; attachmentName?:
 export function incomingText(m: IncomingMessage): string {
   const body = shownBody(m);
   return m.kind === 'voice' ? '🎤 Голосовое сообщение' : m.kind === 'round' ? 'Видеосообщение'
-    : m.kind === 'photo' ? (body ? '🖼 ' + body : 'Фотография') : m.kind === 'file' ? '📎 ' + (body || m.attachmentName || 'Файл') : body;
+    : m.kind === 'photo' ? (body ? '🖼 ' + body : 'Фотография') : m.kind === 'video' ? (body ? '📹 ' + body : 'Видео') : m.kind === 'file' ? '📎 ' + (body || m.attachmentName || 'Файл') : body;
 }

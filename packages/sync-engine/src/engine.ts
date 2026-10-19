@@ -384,7 +384,7 @@ export class Engine {
     };
     const meta: Record<string, unknown> = { name: a.name, mime: a.mime, size: blob.size };
     if (a.w && a.h) { meta.w = a.w; meta.h = a.h; }
-    if (a.kind === 'voice' || a.kind === 'round' || a.kind === 'audio') { meta.kind = a.kind; if (a.duration) meta.duration = a.duration; if (a.waveform) meta.waveform = a.waveform; }
+    if (a.kind === 'voice' || a.kind === 'round' || a.kind === 'audio' || a.kind === 'video') { meta.kind = a.kind; if (a.duration) meta.duration = a.duration; if (a.waveform) meta.waveform = a.waveform; }
     if (a.kind === 'audio') { if (a.title) meta.title = a.title; if (a.performer) meta.performer = a.performer; }
     const intent = await api<{ id: string; url: string; mime: string }>('/uploads', meta);
     await this.put(clientId, intent.url, blob, intent.mime);
@@ -792,12 +792,13 @@ export class Engine {
         // большой файл может не влезть в квоту IndexedDB — тогда держим его в памяти (не переживёт перезагрузку, но уйдёт)
         await putBlob(this.db, clientId, a.file).catch((err) => { this.dev.log.error('putBlob', err); this.memBlobs.set(clientId, a.file); });
         const photo = !a.kind && /^image\//.test(a.mime) && !!a.w && !!a.h;
-        const sized = photo || a.kind === 'round';
+        const sized = photo || a.kind === 'round' || a.kind === 'video';
         this.store.addPending({ clientId, chatId: a.chatId, body: a.body, replyToId: a.replyToId ?? null, createdAt: this.lastCreated, failed: false,
           ...(a.groupId ? { groupId: a.groupId } : {}),
           attachment: { id: '', kind: a.kind ?? (photo ? 'photo' : 'file'), mime: a.mime, name: a.name, size: a.file.size, w: sized ? a.w ?? null : null, h: sized ? a.h ?? null : null, thumb: a.thumb ?? null,
             ...(a.kind ? { duration: a.duration ?? null, waveform: a.waveform ?? null } : {}),
-            ...(a.kind === 'audio' ? { title: a.title ?? null, performer: a.performer ?? null } : {}) } });
+            ...(a.kind === 'audio' ? { title: a.title ?? null, performer: a.performer ?? null } : {}),
+            ...(a.spoiler && (photo || a.kind === 'video') ? { spoiler: true } : {}) } });
         this.store.setDraft(a.chatId, '');
         await this.store.flush();
         this.changed();
@@ -1322,7 +1323,7 @@ export class Engine {
           const next = [...this.store.outbox.values()].find((o) => !o.failed && !Engine.needsUpload(o));
           if (!next || !this.online) break;
           try {
-            const att = next.attachment ? { id: next.attachment.id, thumb: next.attachment.thumb ?? null } : null;
+            const att = next.attachment ? { id: next.attachment.id, thumb: next.attachment.thumb ?? null, ...(next.attachment.spoiler ? { spoiler: true } : {}) } : null;
             const r = await this.request({ op: 'send', reqId: '', clientId: next.clientId, chatId: next.chatId, body: next.body, entities: next.entities ?? [], replyToId: next.replyToId, attachment: next.forward ? null : att, ...(next.groupId ? { groupId: next.groupId } : {}), ...(next.forward ? { forward: next.forward } : {}), ...(next.noLinkPreview ? { noLinkPreview: true } : {}), ...(next.blocks ? { blocks: next.blocks } : {}), ...(next.todo ? { todo: { title: next.todo.title, items: next.todo.items.map((x) => ({ title: x.title })), othersCanAppend: next.todo.othersCanAppend, othersCanComplete: next.todo.othersCanComplete } } : {}) });
             this.store.ack(next.clientId, r.id as number, r.createdAt as string);
             this.outboxAttempt = 0;

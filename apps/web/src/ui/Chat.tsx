@@ -28,7 +28,7 @@ import { Playlist } from './Playlist';
 import { inProfile, toggleProfileMusic, type Track } from '../music';
 import { Avatar, Button, Icon, MediaPolicy, peerTone, ChatSearchBar, Highlight, ripple, useMinVisible, requestMeasure, Composer, DropOverlay, GlassBar, IconButton, MenuPopover, Modal, ConfirmDialog, Presence, ReactionPicker, reducedMotion, plural, requestMutation, SelectionBar, isHeavyAnimating, onHeavyAnimationEnd, applyMarkdown, emptyValue, sameValue, voiceSupported, PlayerBar, roundSupported, startRound, Verified, canCopyImage, clipboardHtml, copyImage, copyRich, downloadUrl, TodoModal, TODO_ITEMS_MAX, DateModal, setDateCopiedToast } from '@relay/ui';
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'preact/hooks';
-import { sendTodo, appendTodo, editTodo, closeChat, deleteMessage, editMessage, ensureNames, focusMessage, openChat, openUserChat, pinMessage, unpinMessage, sendFile, sendFiles, sendRound, sendVoice, react, rejectTooBig, retrySend, discardUnsent, saveDraft, searchMessages, send, typing, typingDone } from '../data';
+import { sendTodo, appendTodo, editTodo, closeChat, deleteMessage, editMessage, ensureNames, focusMessage, openChat, openUserChat, pinMessage, unpinMessage, sendFile, sendFiles, sendRound, sendVoice, react, rejectTooBig, PLAYABLE_VIDEO, retrySend, discardUnsent, saveDraft, searchMessages, send, typing, typingDone } from '../data';
 import type { Item, SearchHit } from '@relay/sync-engine/src/types';
 import type { Entity, Todo, TodoInput } from '@relay/protocol';
 
@@ -51,6 +51,9 @@ const NO_MESSAGES: Item[] = [];
 setDateCopiedToast(() => showToast('Дата скопирована'));
 
 /** Имя файла для «Скачать»: исходное, иначе по виду (как в Telegram: voice — .ogg, кружок — .mp4, фото — .jpg). */
+/** Длительность видео в окне отправки: 0:07, 17:32, 1:02:03. */
+const clockDur = (sec: number) => { const h = Math.floor(sec / 3600), m = Math.floor(sec / 60) % 60, x = String(sec % 60).padStart(2, '0'); return h ? `${h}:${String(m).padStart(2, '0')}:${x}` : `${m}:${x}`; };
+
 function downloadName(a: { id?: string; kind?: string; name?: string; mime?: string }): string {
   if (a.name && a.name !== 'file') return a.name;
   const ext = a.kind === 'voice' ? 'ogg' : a.kind === 'round' ? 'mp4' : a.kind === 'photo' ? 'jpg' : (a.mime?.split('/')[1] ?? 'bin');
@@ -155,15 +158,24 @@ export function Chat({ chatId, frameKey, active }: { chatId: number; frameKey: s
   // «статья» (развёрнутый редактор): open — редактор на экране; свёрнутая «богатая» — строкой над полем ввода
   const [art, setArt] = useState<{ open: boolean; blocks: Block[]; closing?: boolean } | null>(null);
   useEffect(() => setArt(null), [chatId]);
-  const [pending, setPending] = useState<{ file: File; files: File[]; url: string | null; caption: string } | null>(null);
+  // окно отправки файлов: asFile — «Отправить как файл» (без превью и сжатия), spoiler — медиа размыто до нажатия
+  const [pending, setPending] = useState<{ file: File; files: File[]; url: string | null; caption: string; asFile?: boolean; spoiler?: boolean } | null>(null);
+  const [sendMenu, setSendMenu] = useState<HTMLElement | null>(null);
+  const adding = useRef(false);   // «Добавить» в окне отправки: выбранные файлы дописываются к уже выбранным
+  const [pendingDur, setPendingDur] = useState(0);
   const [dragging, setDragging] = useState(false);
   // несколько файлов разом — одной группой (в ленте один пузырь); превью — только у одиночного фото
   const offer = (list: File | FileList | File[] | null | undefined) => {
     // больше 2 ГБ — сразу тост, как в Telegram: такой файл не попадёт ни в окно отправки, ни в очередь
-    const files = rejectTooBig(!list ? [] : list instanceof File ? [list] : [...list]);
+    let files = rejectTooBig(!list ? [] : list instanceof File ? [list] : [...list]);
     if (!files.length) return;
+    const prev = adding.current ? pending : null;
+    adding.current = false;
+    if (prev) { if (prev.url) URL.revokeObjectURL(prev.url); files = [...prev.files, ...files].slice(0, 10); }   // как в Telegram: до 10 в одном альбоме
     const file = files[0];
-    setPending({ file, files, url: files.length === 1 && /^image\//.test(file.type) ? URL.createObjectURL(file) : null, caption: latest.current.text });
+    const media = files.length === 1 && (/^image\//.test(file.type) || PLAYABLE_VIDEO.test(file.type));
+    setPendingDur(0);
+    setPending({ file, files, url: media ? URL.createObjectURL(file) : null, caption: prev?.caption ?? latest.current.text, asFile: prev?.asFile, spoiler: prev?.spoiler });
   };
   const closePending = () => { if (pending?.url) URL.revokeObjectURL(pending.url); setPending(null); };
   const sendPending = () => {
@@ -172,7 +184,7 @@ export function Chat({ chatId, frameKey, active }: { chatId: number; frameKey: s
     for (const f of pending.files) if (!allowed(rightForKind(/^image\//.test(f.type) && !/gif/.test(f.type) ? 'photo' : /^audio\//.test(f.type) ? 'audio' : 'file', f.type))) return;
     stick.current = true;
     typingDone(chatId);
-    sendFiles(chatId, pending.files, pending.caption.trim(), (replyTo?.id as number) ?? null).catch(() => {});
+    sendFiles(chatId, pending.files, pending.caption.trim(), (replyTo?.id as number) ?? null, { asFile: pending.asFile, spoiler: pending.spoiler && !pending.asFile }).catch(() => {});
     if (pending.caption === latest.current.text) { api.current?.setValue(emptyValue()); latest.current = saved.current = emptyValue(); }
     setReplyKey(null);
     closePending();
@@ -631,11 +643,27 @@ export function Chat({ chatId, frameKey, active }: { chatId: number; frameKey: s
       <input ref={picker} type="file" multiple hidden onChange={(e) => { const el = e.target as HTMLInputElement; offer(el.files); el.value = ''; }} />
       <Presence show={dragging} exitMs={160}><div class="app-drop"><DropOverlay title="Отпустите, чтобы отправить" text="Фото, видео и документы до 2 ГБ" /></div></Presence>
       {pending ? (
-        <Modal size="slim" title={pending.files.length > 1 ? `Отправить файлы: ${pending.files.length}` : pending.url ? 'Отправить фото' : 'Отправить файл'} onClose={closePending} actions={[
+        (() => {
+        const isVideo = (f: File) => PLAYABLE_VIDEO.test(f.type), isImage = (f: File) => /^image\//.test(f.type);
+        const anyMedia = pending.files.some((f) => isVideo(f) || isImage(f));
+        const asFile = !!pending.asFile || !anyMedia;
+        const n = pending.files.length;
+        // заголовок — как в Telegram: «Отправить видео/фото», несколько — числом, документом — «как файл»
+        const title = asFile ? (n > 1 ? `Отправить файлы: ${n}` : 'Отправить файл')
+          : n > 1 ? (pending.files.every(isImage) ? `Отправить фото: ${n}` : `Отправить медиа: ${n}`) : isVideo(pending.file) ? 'Отправить видео' : 'Отправить фото';
+        return (
+        <Modal size="slim" title={title} onClose={closePending}
+          headerActions={<IconButton icon="more" label="Параметры отправки" onClick={(e: MouseEvent) => setSendMenu(e.currentTarget as HTMLElement)} />}
+          actions={[
           <Button key="c" variant="ghost" onClick={closePending}>Отмена</Button>,
           <Button key="s" onClick={sendPending}>Отправить</Button>,
         ]}>
-          {pending.url ? <img class="app-send-preview" src={pending.url} alt="" /> : (
+          {pending.url && !asFile && isVideo(pending.file) ? (
+            <div class={'app-send-media' + (pending.spoiler ? ' app-send-spoiler' : '')}>
+              <video class="app-send-preview" src={pending.url} muted autoplay loop playsInline onLoadedMetadata={(e) => setPendingDur(Math.round((e.currentTarget as HTMLVideoElement).duration || 0))} />
+              {pendingDur ? <span class="app-send-dur">{clockDur(pendingDur)}</span> : null}
+            </div>
+          ) : pending.url && !asFile ? <div class={'app-send-media' + (pending.spoiler ? ' app-send-spoiler' : '')}><img class="app-send-preview" src={pending.url} alt="" /></div> : (
             <div class="app-send-files">{pending.files.map((f, i) => <div key={i} class="app-send-file"><b>{f.name}</b><span>{fileSize(f.size)}</span></div>)}</div>
           )}
           <input
@@ -646,7 +674,20 @@ export function Chat({ chatId, frameKey, active }: { chatId: number; frameKey: s
             onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); sendPending(); } }}
             autoFocus
           />
+          <MenuPopover open={!!sendMenu} anchor={sendMenu ?? undefined} placement="bottom-end" label="Параметры отправки" onClose={() => setSendMenu(null)}
+            items={[
+              { icon: 'plus', label: 'Добавить', onClick: () => { adding.current = true; const el = picker.current!; el.accept = ''; el.value = ''; el.click(); } },
+              ...(anyMedia ? [pending.asFile
+                ? { icon: 'image', label: n > 1 ? 'Отправить как медиа' : isVideo(pending.file) ? 'Отправить как видео' : 'Отправить как фото', onClick: () => setPending({ ...pending, asFile: false }) }
+                : { icon: 'file', label: n > 1 ? 'Отправить как файлы' : 'Отправить как файл', onClick: () => setPending({ ...pending, asFile: true }) }] : []),
+              ...(anyMedia && !asFile ? [pending.spoiler
+                ? { icon: 'eye', label: 'Убрать спойлер', onClick: () => setPending({ ...pending, spoiler: false }) }
+                : { icon: 'eyeOff', label: 'Скрыть под спойлер', onClick: () => setPending({ ...pending, spoiler: true }) }] : []),
+            ]}
+          />
         </Modal>
+        );
+        })()
       ) : null}
       <ConfirmDialog open={!!confirmDelete} danger title={confirmDelete && confirmDelete.ids.length > 1 ? `Удалить ${confirmDelete.ids.length} ${plural(confirmDelete.ids.length, 'сообщение', 'сообщения', 'сообщений')}?` : 'Удалить сообщение?'}
         text={confirmDelete && confirmDelete.ids.length > 1 ? 'Сообщения исчезнут у всех участников чата.' : 'Сообщение исчезнет у всех участников чата.'} confirm="Удалить у всех"

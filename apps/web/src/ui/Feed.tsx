@@ -37,7 +37,7 @@ const READ_EVERY = 150;   // отправка «вижу до id» не чаще
 const FIRST_PAINT = 24;   // при открытии внизу первым кадром — столько последних сообщений, остальное следующим кадром
 
 type Quote = QuoteMsg;
-type Att = { id: string; kind: 'photo' | 'file' | 'voice' | 'round' | 'audio'; title?: string | null; performer?: string | null; mime: string; name: string; size: number; w: number | null; h: number | null; thumb?: string | null; duration?: number | null; waveform?: string | null };
+type Att = { id: string; kind: 'photo' | 'video' | 'file' | 'voice' | 'round' | 'audio'; spoiler?: boolean; title?: string | null; performer?: string | null; mime: string; name: string; size: number; w: number | null; h: number | null; thumb?: string | null; duration?: number | null; waveform?: string | null };
 const fileUrl = (a: Att, download = false) => `/files/${a.id}${download ? '?download=1' : ''}`;
 type RowProps = { chatId: number; voiceTitle: string; author?: string; onAuthor?: (m: Item) => void; onOpen: (m: Item) => void; hl?: string; m: Item; meId: number; out: boolean; start: boolean; end: boolean; pos?: 'single' | 'first' | 'middle' | 'last'; quoted?: Quote | null; quoteAuthor?: string; quoteTone?: number | 'accent'; appear: boolean; flash: boolean; onReact: (m: Item, emoji: string) => void; album?: Item[]; onUser?: (userId: number) => void; sel?: boolean; selIn?: string; onQuickForward?: (m: Item) => void; grp?: boolean };
 
@@ -90,7 +90,7 @@ const Row = memo(function Row({ chatId, voiceTitle, author, onAuthor, onOpen, hl
           fwd={fwd} reply={replyQ}
           aside={aside}
           from={out ? 'out' : 'in'} tail={end} groupStart={start} appear={appear}
-          items={album.map((x) => { const a = x.attachment as Att; return { src: localPreview(x.key) ?? (a.id ? fileUrl(a) : undefined), thumb: a.thumb, alt: a.name, w: a.w, h: a.h, mkey: x.key,
+          items={album.map((x) => { const a = x.attachment as Att; return { src: localPreview(x.key) ?? (a.id ? fileUrl(a) : undefined), thumb: a.thumb, alt: a.name, w: a.w, h: a.h, mkey: x.key, skey: x.key, kind: a.kind === 'video' ? 'video' : 'image', duration: a.duration ?? 0, spoiler: !!a.spoiler,
             sel: selIn !== undefined ? selIn.split(',').includes(x.key as string) : undefined }; })}
           state={busy ? 'loading' : 'ready'} progress={busy ? Math.min(...album.map((x) => (typeof x.progress === 'number' ? x.progress as number : 1))) : undefined}
           caption={cap ? <MessageText text={cap.body as string} entities={cap.entities as Entity[] | undefined} highlight={hl} /> : undefined}
@@ -101,8 +101,9 @@ const Row = memo(function Row({ chatId, voiceTitle, author, onAuthor, onOpen, hl
       </div>
     );
   }
-  if (att && !m.deleted && att.kind === 'photo' && att.w && att.h) {
-    // фото знает размеры заранее: рамка нужной высоты сразу, размытое превью, полная картинка — лениво
+  if (att && !m.deleted && (att.kind === 'photo' || att.kind === 'video') && att.w && att.h) {
+    // фото и видео знают размеры заранее: рамка нужной высоты сразу, размытое превью, полная картинка — лениво;
+    // видео играет в ленте без звука (своё — прямо из файла, пока грузится), с процентом и × при отправке
     const src = localPreview(m.key) ?? (att.id ? fileUrl(att) : undefined);
     return (
       <div class={wrap('app-msg app-msg-media')} data-key={m.key} data-sort={m.sort as number}>
@@ -111,8 +112,8 @@ const Row = memo(function Row({ chatId, voiceTitle, author, onAuthor, onOpen, hl
           fwd={fwd} reply={replyQ}
           aside={aside}
           from={out ? 'out' : 'in'} tail={end} groupStart={start} appear={appear}
-          items={[{ src, thumb: att.thumb, alt: att.name }]}
-          ratio={`${att.w} / ${att.h}`}
+          items={[{ src, thumb: att.thumb, alt: att.name, skey: m.key, kind: att.kind === 'video' ? 'video' : 'image', duration: att.duration ?? 0, spoiler: !!att.spoiler }]}
+          ratio={`${att.w} / ${att.h}`} size={att.kind === 'video' ? fileSize(att.size) : undefined}
           state={pending ? 'loading' : 'ready'} progress={m.progress as number}
           onCancel={pending && out ? () => discardUnsent(m.key as string) : undefined}
           caption={m.body ? <MessageText text={m.body as string} entities={m.entities as Entity[] | undefined} highlight={hl} /> : undefined}
@@ -725,7 +726,7 @@ export function Feed({ frameKey, active, chatId, meId, peerName, group, onAuthor
   }).current;
 
   // просмотрщик: все фото текущего окна ленты
-  const photos = messages.filter((m) => !m.deleted && (m.attachment as Att | null)?.kind === 'photo' && (m.attachment as Att).w);
+  const photos = messages.filter((m) => !m.deleted && ['photo', 'video'].includes((m.attachment as Att | null)?.kind ?? '') && (m.attachment as Att).w);
   const openIndex = viewer === null ? null : viewer < 0 ? -1 - viewer : viewer;
   // миниатюра k-го фото в ленте: из неё вьювер вылетает и в неё же возвращается (нет в окне — просто тает)
   const photoKeys = photos.map((m) => m.key);
@@ -791,7 +792,7 @@ export function Feed({ frameKey, active, chatId, meId, peerName, group, onAuthor
   if (!partial) out.push(<div class="app-sentinel" data-dir="older" key={'o' + (messages[0]?.key ?? '')} aria-hidden="true" />);
   const shown = partial && messages.length > FIRST_PAINT ? messages.slice(messages.length - FIRST_PAINT) : messages;
   // альбомы: подряд идущие фото одного отправителя с общим groupId (до 10) — одной строкой с мозаикой
-  const isPhoto = (x: Item | undefined) => !!x && !x.deleted && (x.attachment as Att | null)?.kind === 'photo' && !!(x.attachment as Att).w && !!(x.attachment as Att).h;
+  const isPhoto = (x: Item | undefined) => !!x && !x.deleted && ['photo', 'video'].includes((x.attachment as Att | null)?.kind ?? '') && !!(x.attachment as Att).w && !!(x.attachment as Att).h;
   const albums = new Map<string, Item[]>(), inAlbum = new Set<string>();
   for (let i = 0; i < shown.length; i++) {
     const m = shown[i];
@@ -907,7 +908,7 @@ export function Feed({ frameKey, active, chatId, meId, peerName, group, onAuthor
           index={openIndex}
           sender={peerName}
           items={photos.map((m) => { const a = m.attachment as Att; return { sender: names[m.senderId as number] ?? '', avatar: senderAvatar(m.senderId as number),   // не название группы: пока имени нет — пусто, оно подгружается заранее
- src: localPreview(m.key) ?? fileUrl(a), thumb: a.thumb, w: a.w, h: a.h, name: a.name, download: fileUrl(a, true), caption: m.body, date: clock(m.createdAt as string) }; })}
+ src: localPreview(m.key) ?? fileUrl(a), kind: a.kind === 'video' ? 'video' : 'image', thumb: a.thumb, w: a.w, h: a.h, name: a.name, download: fileUrl(a, true), caption: m.body, date: clock(m.createdAt as string) }; })}
           origin={originOf}
           actions={(_it: unknown, i: number) => [{ icon: 'forward', label: 'Переслать', onClick: () => { const p = photos[i]; setViewer(null); if (p) startForward(chatId, [p], nameOf); } }]}
           onClose={() => setViewer(null)}

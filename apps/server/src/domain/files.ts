@@ -27,6 +27,8 @@ const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
 
 const VOICE_MIME = /^audio\/(ogg|webm|mp4|mpeg|wav)$/;
 const ROUND_MIME = /^video\/(mp4|webm)$/;
+/** Видео, которое браузеры играют сами: только оно идёт медиа (кадр, длительность, играет в ленте); прочее — файлом. */
+const VIDEO_MIME = /^video\/(mp4|webm|quicktime)$/;
 const MAX_VOICE_SECONDS = 4 * 3600;
 
 /** Волна голосового: ровно 63 байта в base64 (иначе — без волны, клиент нарисует ровную). */
@@ -55,14 +57,16 @@ export async function createUpload(userId: number, meta: UploadMeta): Promise<{ 
   const seconds = Number.isFinite(meta.duration) ? Math.round(meta.duration!) : 0;
   const voice = meta.kind === 'voice' && VOICE_MIME.test(mime) && seconds >= 1 && seconds <= MAX_VOICE_SECONDS;
   const round = meta.kind === 'round' && ROUND_MIME.test(mime) && seconds >= 1 && seconds <= ROUND_MAX_SECONDS + 1 && !!meta.w && meta.w === meta.h;
-  const isPhoto = !voice && !round && /^image\/(jpeg|png|webp|gif|avif)$/.test(mime) && !!meta.w && !!meta.h;
+  // видео как медиа: клиент знает размеры кадра и длительность (проиграл метаданные); «отправить как файл» — kind не передаёт
+  const video = !voice && !round && meta.kind === 'video' && VIDEO_MIME.test(mime) && !!meta.w && !!meta.h && seconds >= 0 && seconds <= 24 * 3600;
+  const isPhoto = !voice && !round && !video && /^image\/(jpeg|png|webp|gif|avif)$/.test(mime) && !!meta.w && !!meta.h;
   // музыка: аудиофайл с длительностью (клиент её узнал, проиграв метаданные); голосовым он от этого не становится
   const audio = !voice && meta.kind === 'audio' && /^audio\//.test(mime) && seconds >= 1 && seconds <= 24 * 3600;
-  const kind: AttachmentKind = voice ? 'voice' : round ? 'round' : isPhoto ? 'photo' : audio ? 'audio' : 'file';
-  const sized = isPhoto || round;
+  const kind: AttachmentKind = voice ? 'voice' : round ? 'round' : video ? 'video' : isPhoto ? 'photo' : audio ? 'audio' : 'file';
+  const sized = isPhoto || round || video;
   const w = sized ? Math.min(Math.max(Math.round(meta.w!), 1), 20000) : null;
   const h = sized ? Math.min(Math.max(Math.round(meta.h!), 1), 20000) : null;
-  const duration = voice || round || audio ? seconds : null;
+  const duration = voice || round || audio || video ? seconds : null;
   const waveform = voice ? cleanWaveform(meta.waveform) : null;
   // название и исполнитель — только у музыки, без управляющих символов и не длиннее 200
   const tag = (v: unknown) => (audio && typeof v === 'string' ? v.replace(/[\u0000-\u001f]/g, ' ').trim().slice(0, 200) || null : null);
@@ -93,7 +97,7 @@ export async function confirmUpload(userId: number, id: string): Promise<Attachm
 }
 
 /** Вложение для отправки: только своё и только существующее. thumb — крошечное превью (data:image, до 4 КБ). */
-export async function attachmentForSend(tx: typeof sql | Parameters<Parameters<typeof sql.begin>[0]>[0], userId: number, ref: { id: string; thumb?: string | null }): Promise<Attachment> {
+export async function attachmentForSend(tx: typeof sql | Parameters<Parameters<typeof sql.begin>[0]>[0], userId: number, ref: { id: string; thumb?: string | null; spoiler?: boolean }): Promise<Attachment> {
   if (!UUID.test(ref.id)) throw new DomainError('bad_frame', 'attachment id');
   const [a] = await tx`select * from attachments where id = ${ref.id}`;
   // своё вложение — или трек из своей музыки профиля (его могли добавить из чужого сообщения): «Музыка» в скрепке
@@ -101,7 +105,9 @@ export async function attachmentForSend(tx: typeof sql | Parameters<Parameters<t
   if (!a || !mine) throw new DomainError('not_found', 'attachment');
   if (a.status !== 'ready') throw new DomainError('upload_pending');
   const thumb = ref.thumb && ref.thumb.length <= 8192 && /^data:image\/(jpeg|png|webp);base64,[A-Za-z0-9+/=]+$/.test(ref.thumb) ? ref.thumb : null;
-  return attachmentOf(a, thumb);
+  const out = attachmentOf(a, thumb);
+  // спойлер — только у фото и видео (у файла и голосового его нечем показать)
+  return ref.spoiler === true && (out.kind === 'photo' || out.kind === 'video') ? { ...out, spoiler: true } : out;
 }
 
 function attachmentOf(a: Record<string, unknown>, thumb: string | null): Attachment {
@@ -136,9 +142,13 @@ export async function fileFor(userId: number, id: string): Promise<{ id: string;
  * за ссылкой каждый раз ходят в /files/:id. Тип и Content-Disposition задаёт подпись (response-*), а не то, что лежит
  * в объекте: HTML/SVG и прочее активное отдаётся как octet-stream вложением, даже если клиент положил его с другим типом.
  */
+/** Видео и музыка играют дольше ссылки: плеер ходит за кусками (Range) по одному и тому же адресу после редиректа —
+ *  на 10-минутной ссылке длинное видео встало бы посередине. Им — 3 часа (но не меньше общего срока: тесты ставят 1 с). */
+const STREAM_TTL = 3 * 3600;
 export function signedDownload(f: { id: string; mime: string; name: string }, opts: { inline: boolean }): string {
   const disposition = `${opts.inline ? 'inline' : 'attachment'}; filename*=UTF-8''${encodeURIComponent(f.name)}`;
-  return publicS3().presign(f.id, { method: 'GET', expiresIn: getTtl, type: opts.inline ? f.mime : 'application/octet-stream', contentDisposition: disposition });
+  const ttl = opts.inline && /^(video|audio)\//.test(f.mime) && getTtl >= 60 ? Math.max(getTtl, STREAM_TTL) : getTtl;
+  return publicS3().presign(f.id, { method: 'GET', expiresIn: ttl, type: opts.inline ? f.mime : 'application/octet-stream', contentDisposition: disposition });
 }
 
 /** pending старше суток — брошенные загрузки: запись и объект (если клиент успел его положить) удаляем. */

@@ -212,7 +212,7 @@ export async function listChats(userId: number, opts: ListOpts = {}): Promise<Ch
 /** Условие вкладки «Общих медиа» (как в Telegram): видео, присланное файлом, — тоже медиа; ссылки — по тексту и сущностям. */
 export function tabWhere(tab: MediaTab) {
   switch (tab) {
-    case 'media': return sql`(kind = 'photo' or (kind = 'file' and attachment->>'mime' like 'video/%'))`;
+    case 'media': return sql`(kind = 'photo' or kind = 'video' or (kind = 'file' and attachment->>'mime' like 'video/%'))`;
     case 'file': return sql`(kind = 'file' and coalesce(attachment->>'mime', '') not like 'video/%')`;
     case 'audio': return sql`kind = 'audio'`;
     case 'voice': return sql`kind in ('voice', 'round')`;

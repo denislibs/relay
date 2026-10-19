@@ -423,6 +423,43 @@ async function describeImage(file: Blob): Promise<{ w: number; h: number; thumb:
   } catch { return null; }
 }
 
+/** Видео, которое играет браузер (как VIDEO_MIME на сервере): медиа с кадром и длительностью; прочее — файлом. */
+export const PLAYABLE_VIDEO = /^video\/(mp4|webm|quicktime)$/;
+
+/**
+ * Размеры кадра, длительность и превью видео (первый кадр, 48 px) — по метаданным, файл целиком не читается.
+ * null — браузер не умеет это видео (кодек, повреждён): тогда оно уходит файлом, как в Telegram.
+ */
+export function describeVideo(file: Blob): Promise<{ w: number; h: number; duration: number; thumb: string | null } | null> {
+  if (!PLAYABLE_VIDEO.test(file.type)) return Promise.resolve(null);
+  return new Promise((resolve) => {
+    const url = URL.createObjectURL(file), v = document.createElement('video');
+    let meta: { w: number; h: number; duration: number } | null = null;
+    const done = (thumb: string | null) => { clearTimeout(t); URL.revokeObjectURL(url); v.removeAttribute('src'); v.load(); resolve(meta && { ...meta, thumb }); };
+    const t = setTimeout(() => done(null), 6000);
+    v.muted = true; v.preload = 'auto'; v.playsInline = true;
+    v.onloadedmetadata = () => {
+      if (!v.videoWidth || !v.videoHeight) { clearTimeout(t); URL.revokeObjectURL(url); resolve(null); return; }
+      meta = { w: v.videoWidth, h: v.videoHeight, duration: Number.isFinite(v.duration) ? Math.round(v.duration) : 0 };
+      v.currentTime = Math.min(0.1, (v.duration || 0) / 2);   // не нулевой кадр: у многих роликов он чёрный
+    };
+    v.onseeked = () => {
+      try {
+        const k = 48 / Math.max(v.videoWidth, v.videoHeight), c = document.createElement('canvas');
+        c.width = Math.max(1, Math.round(v.videoWidth * k)); c.height = Math.max(1, Math.round(v.videoHeight * k));
+        c.getContext('2d')!.drawImage(v, 0, 0, c.width, c.height);
+        const thumb = c.toDataURL('image/jpeg', 0.6);
+        done(thumb.length <= 8000 ? thumb : null);
+      } catch { done(null); }
+    };
+    v.onerror = () => { clearTimeout(t); URL.revokeObjectURL(url); resolve(null); };
+    v.src = url;
+  });
+}
+
+/** Как отправить: asFile — документом (без сжатия и превью, как «Отправить как файл» в Telegram); spoiler — фото/видео размыто. */
+export interface SendOpts { asFile?: boolean; spoiler?: boolean }
+
 /** Отправить файл (фото — с размерами и превью). Офлайн — уйдёт, когда появится сеть. */
 /** Голосовое: Ogg/Opus, длительность в секундах и волна (63 байта). Локально играет сам записанный файл. */
 export async function sendVoice(chatId: number, rec: { blob: Blob; duration: number; waveform: Uint8Array }, replyToId: number | null = null): Promise<void> {
@@ -451,18 +488,26 @@ export function groupCall<T = unknown>(method: 'GET' | 'POST' | 'PUT' | 'PATCH' 
 
 export function markListened(chatId: number, id: number): void { engine.call({ type: 'listened', chatId, id }).catch(() => {}); }
 
-export async function sendFile(chatId: number, file: File, caption: string, replyToId: number | null = null, groupId: string | null = null): Promise<void> {
+export async function sendFile(chatId: number, file: File, caption: string, replyToId: number | null = null, groupId: string | null = null, opts: SendOpts = {}): Promise<void> {
   sentSound();
   nudgeWallpaper();
   toLatestOf(chatId);
-  const img = await describeImage(file);
-  const seconds = img ? null : await audioDuration(file);
+  const img = opts.asFile ? null : await describeImage(file);
+  const vid = opts.asFile || img ? null : await describeVideo(file);
+  if (vid) {
+    const res = (await engine.call({ type: 'sendFile', chatId, body: caption, file, name: file.name || 'video.mp4', mime: file.type, kind: 'video', w: vid.w, h: vid.h, duration: vid.duration, thumb: vid.thumb, replyToId,
+      ...(opts.spoiler ? { spoiler: true } : {}), ...(groupId ? { groupId } : {}) })) as { clientId: string };
+    // своё видео играет из самого файла, пока грузится (как в Telegram) и сразу после
+    localPreviews.set(res.clientId, URL.createObjectURL(file));
+    return;
+  }
+  const seconds = img || opts.asFile ? null : await audioDuration(file);
   // музыка: название, исполнитель и обложка из тегов (как в Telegram); обложка — превью 96 px
   const tags = seconds ? await readAudioTags(file) : null;
   const cover = tags?.cover ? await coverThumb(tags.cover) : null;
   const res = (await engine.call({ type: 'sendFile', chatId, body: caption, file, name: file.name || 'file', mime: file.type || 'application/octet-stream', w: img?.w ?? null, h: img?.h ?? null, thumb: img?.thumb ?? cover ?? null, replyToId,
     ...(seconds ? { kind: 'audio' as const, duration: seconds, title: tags?.title ?? null, performer: tags?.performer ?? null } : {}),
-    ...(groupId ? { groupId } : {}) })) as { clientId: string };
+    ...(img && opts.spoiler ? { spoiler: true } : {}), ...(groupId ? { groupId } : {}) })) as { clientId: string };
   if (img) localPreviews.set(res.clientId, URL.createObjectURL(file));
 }
 
@@ -482,13 +527,13 @@ export function discardUnsent(clientId: string): void {
 }
 
 /** Несколько файлов разом — одной группой (в ленте один пузырь, как альбом в Telegram); подпись — у последнего. */
-export async function sendFiles(chatId: number, files: File[], caption: string, replyToId: number | null = null): Promise<void> {
+export async function sendFiles(chatId: number, files: File[], caption: string, replyToId: number | null = null, opts: SendOpts = {}): Promise<void> {
   files = rejectTooBig(files);
   if (!files.length) return;
   sentSound();
-  if (files.length === 1) return sendFile(chatId, files[0], caption, replyToId);
+  if (files.length === 1) return sendFile(chatId, files[0], caption, replyToId, null, opts);
   const groupId = crypto.randomUUID();
-  for (let i = 0; i < files.length; i++) await sendFile(chatId, files[i], i === files.length - 1 ? caption : '', i === 0 ? replyToId : null, groupId);
+  for (let i = 0; i < files.length; i++) await sendFile(chatId, files[i], i === files.length - 1 ? caption : '', i === 0 ? replyToId : null, groupId, opts);
 }
 
 /** Уже загруженный трек (из музыки профиля) — в чат без новой загрузки: тот же файл по id. */

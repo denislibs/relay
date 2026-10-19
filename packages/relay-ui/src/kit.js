@@ -87,6 +87,7 @@ var ICONS = {
   skipNext: ['M4.5 7l6 5-6 5z', 'M12.5 7l6 5-6 5z'],
   list: ['M9 6h11', 'M9 12h11', 'M9 18h11', 'M4.5 6h.01', 'M4.5 12h.01', 'M4.5 18h.01'],
   volume: ['M4 9.5h3.5L12 5.5v13l-4.5-4H4z', 'M15.5 9a4 4 0 0 1 0 6', 'M18 6.5a7.5 7.5 0 0 1 0 11'],
+  volumeOff: ['M4 9.5h3.5L12 5.5v13l-4.5-4H4z', 'M16 9.5l5 5', 'M21 9.5l-5 5'],
   volumeLow: ['M4 9.5h3.5L12 5.5v13l-4.5-4H4z', 'M15.5 9a4 4 0 0 1 0 6'],
   repeat: ['M17 3l3 3-3 3', 'M4 11V9a3 3 0 0 1 3-3h13', 'M7 21l-3-3 3-3', 'M20 13v2a3 3 0 0 1-3 3H4'],
   repeatOne: ['M17 3l3 3-3 3', 'M4 11V9a3 3 0 0 1 3-3h13', 'M7 21l-3-3 3-3', 'M20 13v2a3 3 0 0 1-3 3H4', 'M11 10.5l1.2-.7v4.6'],
@@ -706,8 +707,48 @@ function MediaOverlay(props) {
   // state: 'ready' | 'remote' (not downloaded) | 'loading' | 'uploading'
   if (props.state === 'remote') return h('button', { type: 'button', class: 'rl-media-dl', onClick: props.onDownload }, h(Icon, { name: 'download', size: 18 }), props.size || 'Скачать');
   if (props.state === 'loading' || props.state === 'uploading') return h('div', { class: 'rl-media-center' }, h(ProgressRing, { progress: props.progress, onMedia: true, onCancel: props.onCancel, label: props.state === 'uploading' ? 'Отправка' : 'Загрузка' }));
-  if (props.kind === 'video') return h('div', { class: 'rl-media-center' }, h('span', { class: 'rl-media-play' }, h(Icon, { name: 'play', size: 26 })));
+  if (props.kind === 'video' && !props.playing) return h('div', { class: 'rl-media-center' }, h('span', { class: 'rl-media-play' }, h(Icon, { name: 'play', size: 26 })));
   return null;
+}
+
+/* ---------- InlineVideo: видео в ленте, как в Telegram — без звука, по кругу, играет только пока на экране ----------
+   Одно общее IntersectionObserver: видно больше половины — play(), ушло — pause() (десятки роликов в истории не жрут CPU).
+   До первого кадра — размытая встроенная миниатюра; плашка слева сверху — сколько осталось. autoplay=false — стоит
+   на первом кадре (preload=metadata), включится в просмотрщике. */
+var videoIO = null, videoCbs = typeof WeakMap === 'function' ? new WeakMap() : null;
+function videoObserve(el, cb) {
+  if (typeof IntersectionObserver === 'undefined') { cb(true); return function () {}; }
+  if (!videoIO) videoIO = new IntersectionObserver(function (es) {
+    es.forEach(function (e) { var f = videoCbs.get(e.target); if (f) f(e.isIntersecting && e.intersectionRatio >= 0.5); });
+  }, { threshold: [0, 0.5] });
+  videoCbs.set(el, cb); videoIO.observe(el);
+  return function () { videoCbs.delete(el); videoIO.unobserve(el); };
+}
+function InlineVideo(props) {
+  var ref = useRef(null), loaded = useState(false), left = useState(props.duration || 0);
+  useEffect(function () {
+    var v = ref.current;
+    if (!v || !props.autoplay) return undefined;
+    return videoObserve(v, function (on) { if (on) { var p = v.play(); if (p && p.catch) p.catch(function () {}); } else v.pause(); });
+  }, [props.src, props.autoplay]);
+  return h('span', { class: cx('rl-lazy', loaded[0] && 'rl-lazy-loaded') },
+    props.thumb ? h('img', { class: 'rl-lazy-thumb', src: props.thumb, alt: '', 'aria-hidden': 'true' }) : null,
+    h('video', { ref: ref, class: 'rl-lazy-full rl-inline-video', src: props.src, muted: true, loop: true, playsInline: true, disablePictureInPicture: true,
+      preload: props.autoplay ? 'auto' : 'metadata', 'aria-hidden': 'true', tabIndex: -1,
+      onLoadedData: function () { loaded[1](true); },
+      onTimeUpdate: function (e) { var v = e.currentTarget, d = v.duration || props.duration || 0, r = Math.max(0, Math.ceil(d - v.currentTime)); if (r !== left[0]) left[1](r); } }),
+    props.chip !== false ? h('span', { class: 'rl-media-chip rl-media-chip-dur rl-media-chip-top' }, fmtTime(props.autoplay ? left[0] : props.duration || 0), h(Icon, { name: 'volumeOff', size: 12 })) : null);
+}
+
+/* Спойлер на фото/видео (как в Telegram): сильно размытая миниатюра и мерцающие точки, пока не нажмут.
+   Раскрытое помним до перезагрузки вкладки — прокрутка туда-обратно не прячет его снова. */
+var spoilersOpen = new Set();
+function MediaSpoiler(props) {
+  return h('span', { class: 'rl-media-spoiler', role: 'button', tabIndex: 0, 'aria-label': 'Показать скрытое медиа',
+    onClick: function (e) { e.stopPropagation(); props.onReveal(); },
+    onKeyDown: function (e) { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); e.stopPropagation(); props.onReveal(); } } },
+    props.thumb ? h('img', { class: 'rl-media-spoiler-img', src: props.thumb, alt: '', 'aria-hidden': 'true' }) : null,
+    h('span', { class: 'rl-media-spoiler-dots', 'aria-hidden': 'true' }));
 }
 /* ---------- LazyImage: blurred thumb at once, the full image only when it is within 500px of the viewport ----------
    One shared IntersectionObserver for all images. The box is sized by the parent (aspect ratio known up front),
@@ -842,15 +883,24 @@ function MediaBubble(props) {
   // у одиночного фото без рамки хвостик красится в цвет нижнего угла картинки (как в Telegram); у альбома — последней ячейки
   var cornerOf = items[album ? Math.min(items.length, 4) - 1 : 0] || {};
   var tailColor = useTailColor(mediaOnly && props.tail ? cornerOf.src : null, mediaOnly && props.tail ? cornerOf.thumb : null, out);
+  var autoplay = !policy || policy.autoplayVideo !== false;
+  var reveal = useState(0);
+  var busy = state === 'loading' || state === 'uploading';
   function cell(it, i) {
     var last = album && i === 3 && extra > 0;
+    var hidden = it.spoiler && !spoilersOpen.has(it.skey || it.src || it.thumb || i);
+    var vid = it.kind === 'video' && it.src && !hidden;
     // режим выбора (it.sel задан): у каждой ячейки альбома свой кружок справа сверху, отмеченное фото чуть уменьшается
     return h('button', { key: i, type: 'button', class: cx('rl-media-cell', it.sel !== undefined && 'rl-media-cell-sel', it.sel && 'rl-media-cell-on'), 'data-mkey': it.mkey, onClick: function () { if (props.onOpen && state === 'ready') props.onOpen(i); }, 'aria-label': it.kind === 'video' ? 'Открыть видео' : 'Открыть фото' },
-      it.src || it.thumb ? h(LazyImage, { src: it.src, thumb: it.thumb, alt: it.alt }) : h(MediaArt, { seed: it.seed, blur: state === 'remote' }),
-      it.kind === 'video' && it.duration ? h('span', { class: 'rl-media-chip rl-media-chip-dur' }, h(Icon, { name: 'video', size: 14 }), fmtTime(it.duration)) : null,
+      hidden ? h(MediaSpoiler, { thumb: it.thumb, onReveal: function () { spoilersOpen.add(it.skey || it.src || it.thumb || i); reveal[1](reveal[0] + 1); } })
+        : vid ? h(InlineVideo, { src: it.src, thumb: it.thumb, duration: it.duration, autoplay: autoplay && !(album && i > 3), chip: !busy })
+        : it.src || it.thumb ? h(LazyImage, { src: it.kind === 'video' ? undefined : it.src, thumb: it.thumb, alt: it.alt }) : h(MediaArt, { seed: it.seed, blur: state === 'remote' }),
+      it.kind === 'video' && !vid && !hidden && !busy ? h('span', { class: 'rl-media-chip rl-media-chip-dur rl-media-chip-top' }, h(Icon, { name: 'video', size: 14 }), fmtTime(it.duration || 0)) : null,
+      // загрузка: процент слева сверху (как в Telegram), кольцо с × — по центру
+      !album && busy && typeof props.progress === 'number' ? h('span', { class: 'rl-media-chip rl-media-chip-dur rl-media-chip-top' }, Math.round(Math.max(0, Math.min(1, props.progress)) * 100) + '%') : null,
       last ? h('span', { class: 'rl-media-more' }, '+' + (extra + 1)) : null,
       it.sel !== undefined ? h('span', { class: 'rl-media-check', 'aria-hidden': 'true' }, h(Icon, { name: 'check', size: 12, strokeWidth: 3 })) : null,
-      !album ? h(MediaOverlay, { state: state, kind: it.kind, progress: props.progress, size: props.size, onDownload: props.onDownload, onCancel: props.onCancel }) : null);
+      !album && !hidden ? h(MediaOverlay, { state: state, kind: it.kind, playing: vid && autoplay, progress: props.progress, size: props.size, onDownload: props.onDownload, onCancel: props.onCancel }) : null);
   }
   return h(MsgLine, { aside: props.aside, class: cx('rl-msgline', out && 'rl-msgline-out', props.groupStart && 'rl-msgline-gap') },
     // без подписи и автора — как в Telegram: картинка без рамки пузыря (без фона и отступов), углы — от пузыря;
@@ -1042,7 +1092,10 @@ function MediaViewer(props) {
   var media = real
     ? h('div', { class: 'rl-viewer-box', ref: box, style: rect ? { left: rect.left + 'px', top: rect.top + 'px', width: rect.width + 'px', height: rect.height + 'px' } : null },
         it.thumb ? h('img', { class: 'rl-viewer-thumb', src: it.thumb, alt: '', 'aria-hidden': 'true' }) : null,
-        h('img', { class: 'rl-viewer-img', src: it.src, alt: it.caption || '', decoding: 'async' }),
+        it.kind === 'video'
+          // видео из сообщения: играет со звуком и своими кнопками браузера (время, громкость, скорость, PiP, во весь экран)
+          ? h('video', { key: it.src, class: 'rl-viewer-img rl-viewer-video', src: it.src, poster: it.thumb || undefined, controls: true, autoPlay: true, playsInline: true })
+          : h('img', { class: 'rl-viewer-img', src: it.src, alt: it.caption || '', decoding: 'async' }),
         // видео-аватарка и т.п.: зацикленное видео без звука поверх кадра-обложки
         it.video ? h('video', { key: it.video, class: 'rl-viewer-img rl-viewer-loop', src: it.video, autoPlay: true, loop: true, muted: true, playsInline: true, disablePictureInPicture: true }) : null)
     : h('figure', { key: i, class: 'rl-viewer-media' },

@@ -94,7 +94,8 @@ export function MenuPopover(props) {
   var dismiss = function () { if (close.current) close.current(); };
   return createPortal(h('div', { class: 'rl rl-pop-root' },
     open && !p.hover ? h('div', { class: 'rl-pop-scrim', onClick: dismiss, onContextMenu: function (e) { e.preventDefault(); dismiss(); } }) : null,
-    h('div', { ref: box, class: cx('rl-pop', p.class), 'data-state': open ? 'open' : 'closing',
+    // data-esc-layer: меню поверх окна — Esc закрывает сначала меню, а не всё окно
+    h('div', { ref: box, class: cx('rl-pop', p.class), 'data-state': open ? 'open' : 'closing', 'data-esc-layer': open ? '' : undefined,
       onPointerEnter: p.onPointerEnter, onPointerLeave: p.onPointerLeave },
       p.header ? h('div', { class: 'rl-pop-header' }, p.header) : null,
       h(Menu, { label: p.label, items: p.items, noFocus: !!p.hover, onClose: dismiss, header: p.menuHeader }))), document.body);

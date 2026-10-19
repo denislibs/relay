@@ -80,6 +80,7 @@ export function previewBody(m: LastMessage, withThumb: boolean): ComponentChildr
   const entities = code ? [] : m.entities;
   const caption = text ? previewText(text, entities) : null;
   if (m.kind === 'photo') return caption ?? (withThumb ? 'Фото' : '🖼 Фото');
+  if (m.kind === 'video') return withThumb ? caption ?? 'Видео' : ['📹 ', caption ?? 'Видео'];
   if (m.kind === 'voice') return caption ?? '🎤 Голосовое сообщение';
   if (m.kind === 'todo') return ['☑️ ', m.body];
   if (m.kind === 'round') return withThumb ? 'Видеосообщение' : '📹 Видеосообщение';
@@ -107,6 +108,7 @@ export function quoteContent(m: Record<string, unknown>): { text: ComponentChild
   if (last.deleted) text = 'Сообщение удалено';
   else if (last.kind === 'voice' && !last.body) text = '🎤 Голосовое сообщение' + len;
   else if (last.kind === 'round' && !last.body) text = 'Видеосообщение' + len;
+  else if (last.kind === 'video' && !last.body) text = (thumb ? 'Видео' : '📹 Видео') + len;
   else if (last.kind === 'todo') text = ['☑️ ', ((m.todo ?? null) as { title?: string } | null)?.title || last.body || 'Чек-лист'];
   else if ((m.article || (Array.isArray(m.blocks) && m.blocks.length)) && !last.body) text = '📰 Статья';
   else text = previewBody(last, !!thumb) || 'Сообщение';

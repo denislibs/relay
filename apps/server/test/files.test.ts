@@ -197,3 +197,26 @@ test('migrateFiles copies files from the old volume into the bucket, once; missi
   const res = await fetch(`${base}/files/${ids[0]}`, { headers: as(a.token) });
   expect(new Uint8Array(await res.arrayBuffer())).toEqual(new Uint8Array([1, 2, 3, 4]));
 });
+
+test('video as media: kind video with frame size and duration, plays inline; as a file it stays a file; spoiler only on photo/video', async () => {
+  const a = await login('Анна'), b = await login('Борис');
+  const chatId = await chatOf(a, b);
+  const bytes = new Uint8Array(64);
+  const vid = await uploadFile(base, a.token, { name: 'clip.mp4', mime: 'video/mp4', w: 1280, h: 720, kind: 'video', duration: 25 }, bytes) as { id: string };
+  expect(vid).toMatchObject({ kind: 'video', w: 1280, h: 720, duration: 25 });
+  const asFile = await uploadFile(base, a.token, { name: 'clip.mp4', mime: 'video/mp4', w: 1280, h: 720 }, bytes) as { id: string };
+  expect(asFile).toMatchObject({ kind: 'file', w: null, h: null });
+  // что браузер не играет — файлом, даже если клиент назвал это видео
+  expect(await uploadFile(base, a.token, { name: 'x.avi', mime: 'video/x-msvideo', w: 10, h: 10, kind: 'video', duration: 3 }, bytes)).toMatchObject({ kind: 'file' });
+  const { sendMessage } = await import('../src/domain/messages');
+  const { message } = await sendMessage(a.userId, { chatId, clientId: crypto.randomUUID(), body: '', attachment: { id: vid.id, spoiler: true } });
+  expect(message).toMatchObject({ kind: 'video', attachment: { kind: 'video', spoiler: true } });
+  const { message: file } = await sendMessage(a.userId, { chatId, clientId: crypto.randomUUID(), body: '', attachment: { id: asFile.id, spoiler: true } });
+  expect((file.attachment as { spoiler?: boolean }).spoiler).toBeUndefined();
+  // видео — в «Медиа» общих медиа чата
+  const media = await (await fetch(`${base}/chats/${chatId}/media?tab=media`, { headers: as(a.token) })).json() as { messages: { id: number }[] };
+  expect(media.messages.map((m) => m.id)).toContain(message.id);
+  // ссылка на видео живёт часы, а не минуты: плеер ходит за кусками по ней же
+  const loc = (await fileRedirect(a.token, vid.id)).headers.get('location')!;
+  expect(Number(new URL(loc).searchParams.get('X-Amz-Expires'))).toBe(3 * 3600);
+});

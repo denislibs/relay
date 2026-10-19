@@ -17,7 +17,7 @@ export interface LocalMessage {
   editedAt?: string | null;
   deleted?: boolean;
   reactions?: { userId: number; emoji: string }[];
-  kind?: 'text' | 'photo' | 'file' | 'voice' | 'round' | 'audio' | 'todo';
+  kind?: 'text' | 'photo' | 'video' | 'file' | 'voice' | 'round' | 'audio' | 'todo';
   groupId?: string | null;
   attachment?: LocalAttachment | null;
   entities?: Entity[];    // оформление текста
@@ -34,8 +34,9 @@ export interface LocalMessage {
 /** Вложение сообщения; у неотправленного id пустой, пока файл не загружен. */
 export interface LocalAttachment {
   title?: string | null; performer?: string | null;
-  id: string; kind: 'photo' | 'file' | 'voice' | 'round' | 'audio'; mime: string; name: string; size: number; w: number | null; h: number | null; thumb?: string | null;
-  duration?: number | null; waveform?: string | null;   // голосовое и кружок
+  id: string; kind: 'photo' | 'video' | 'file' | 'voice' | 'round' | 'audio'; mime: string; name: string; size: number; w: number | null; h: number | null; thumb?: string | null;
+  duration?: number | null; waveform?: string | null;   // голосовое, кружок, видео
+  spoiler?: boolean;   // фото/видео под спойлером
 }
 
 export interface LocalChat {
@@ -176,7 +177,7 @@ export type Action =
   /** раздел «Для разработчиков»: имитатор сети и служебные команды (devlog.ts) */
   | DevAction
   | { type: 'sendFile'; chatId: number; body: string; file: Blob; name: string; mime: string; w?: number | null; h?: number | null; thumb?: string | null; replyToId?: number | null;
-      kind?: 'voice' | 'round' | 'audio'; duration?: number; waveform?: string | null; title?: string | null; performer?: string | null; groupId?: string | null }
+      kind?: 'voice' | 'round' | 'audio' | 'video'; duration?: number; waveform?: string | null; title?: string | null; performer?: string | null; groupId?: string | null; spoiler?: boolean }
   | { type: 'listened'; chatId: number; id: number }
   /** Переслать сообщения ids (по порядку) из fromChatId в каждый из toChatIds; comment — отдельным сообщением перед ними. */
   /** replyToId — только для копии (hideSender) в один чат: копия — новое сообщение и может быть ответом; пересылка с «Переслано от» — нет */

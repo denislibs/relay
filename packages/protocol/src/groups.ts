@@ -117,6 +117,7 @@ export const rightsCount = (r: MemberRights) => MEMBER_RIGHTS.filter((k) => r[k]
 export function rightForKind(kind: string, mime?: string | null): MemberRight {
   switch (kind) {
     case 'photo': return 'photos';
+    case 'video': return 'videos';
     case 'voice': return 'voice';
     case 'round': return 'round';
     case 'audio': return 'music';

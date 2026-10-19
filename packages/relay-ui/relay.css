@@ -1780,6 +1780,20 @@ html[data-blur="0"] .rl-menu { -webkit-backdrop-filter: none; backdrop-filter: n
 .rl-file-icon-btn:hover { filter: brightness(1.05); }
 .rl-file-icon-failed > svg { animation: rl-file-failed-in .2s ease-out; }
 @keyframes rl-file-failed-in { from { opacity: 0; transform: scale(.6); } }
+
+/* ---------- Видео в ленте и спойлер на медиа ---------- */
+.rl-inline-video { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; pointer-events: none; }
+.rl-media-chip-top { top: 6px; bottom: auto; left: 6px; }
+.rl-media-chip-top .rl-icon { opacity: .9; }
+.rl-media-spoiler { position: absolute; inset: 0; display: block; overflow: hidden; background: var(--field); cursor: pointer; }
+.rl-media-spoiler-img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; filter: blur(22px) saturate(1.2); transform: scale(1.25); }
+/* мерцающие точки поверх размытия: два слоя мелкого «шума» плывут навстречу */
+.rl-media-spoiler-dots { position: absolute; inset: -20%; opacity: .75;
+  background-image: radial-gradient(rgba(255,255,255,.9) .7px, transparent 1.2px), radial-gradient(rgba(255,255,255,.6) .6px, transparent 1.1px);
+  background-size: 9px 11px, 13px 7px; background-position: 0 0, 4px 3px; animation: rl-spoiler-drift 6s linear infinite; }
+@keyframes rl-spoiler-drift { to { background-position: 27px 33px, -22px 14px; } }
+@media (prefers-reduced-motion: reduce) { .rl-media-spoiler-dots { animation: none; } }
+.rl-viewer-box .rl-viewer-video { position: absolute; inset: 0; width: 100%; height: 100%; background: #000; object-fit: contain; display: block; }
 .rl-file-name { font: 500 16px/1.5rem var(--font-sans); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .rl-file-sub { font: 400 14px/1.125rem var(--font-sans); color: var(--bubble-meta); }
 

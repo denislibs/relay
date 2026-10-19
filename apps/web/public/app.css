@@ -58,6 +58,11 @@ body { background: var(--bg); color: var(--ink); font-family: var(--font-sans); 
 .rl-glassbar.app-hidden { display: none; }
 /* вложения: окно отправки и зона перетаскивания */
 .app-send-preview { display: block; max-width: 100%; max-height: 50vh; margin: 0 auto var(--space-3); border-radius: var(--radius-md); object-fit: contain; }
+.app-send-media { position: relative; width: fit-content; max-width: 100%; margin: 0 auto var(--space-3); border-radius: var(--radius-md); overflow: hidden; }
+.app-send-media .app-send-preview { margin: 0; border-radius: 0; transition: filter var(--dur-base, 200ms) var(--ease-out, ease); }
+.app-send-spoiler .app-send-preview { filter: blur(18px) saturate(1.2); }
+/* длительность — слева сверху, как в Telegram */
+.app-send-dur { position: absolute; top: 8px; left: 8px; padding: 2px 7px; border-radius: 999px; background: rgba(0, 0, 0, .45); color: #fff; font: 500 12px/16px var(--font-sans); font-variant-numeric: tabular-nums; }
 .app-send-file { display: flex; flex-direction: column; gap: 2px; margin-bottom: var(--space-3); padding: var(--space-3); border-radius: var(--radius-md); background: var(--field); }
 .app-send-file span { color: var(--ink-muted); font-size: 13px; }
 .app-send-caption { width: 100%; margin-bottom: var(--space-3); }
