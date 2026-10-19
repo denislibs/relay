@@ -24,12 +24,17 @@ export function ensurePeriodic(kind: string): Promise<void> {
   return enqueue(sql, kind, {}, { dedupeKey: kind });
 }
 
+/** Какие задачи берёт цикл: only — только эти kind, except — все, кроме этих (долгие видео идут своим циклом). */
+export interface KindFilter { only?: string[]; except?: string[] }
+
 /** Забрать до limit готовых задач: аренда на leaseSec, attempts + 1. Параллельные воркеры не берут одно и то же. */
-export async function claim(limit: number, leaseSec = LEASE_SEC): Promise<Job[]> {
+export async function claim(limit: number, leaseSec = LEASE_SEC, kinds: KindFilter = {}): Promise<Job[]> {
+  const only = kinds.only ?? null, except = kinds.except ?? [];
   const rows = await sql`
     with next as (
       select id from jobs
        where run_at <= now() and (locked_until is null or locked_until < now())
+         and (${only}::text[] is null or kind = any(${only}::text[])) and not (kind = any(${except}::text[]))
        order by run_at, id
        limit ${limit}
        for update skip locked)

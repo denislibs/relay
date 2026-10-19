@@ -1,5 +1,5 @@
 import type { GroupInfo, MyMembership } from '@relay/protocol';
-import type { Birthday, Block, ChatFolder, Entity, ForwardInfo, ForwardRef, LinkPreview, PrivacyKey, PrivacyMode, ProfileLink, ProfilePhoto, ServiceType, Todo, TodoInput, TodoServiceData } from '@relay/protocol';
+import type { Birthday, Block, ChatFolder, Entity, ForwardInfo, ForwardRef, LinkPreview, PrivacyKey, PrivacyMode, ProfileLink, ProfilePhoto, ServiceType, Todo, TodoInput, TodoServiceData, VideoVariant } from '@relay/protocol';
 
 export type Status = 'pending' | 'sent' | 'read' | 'failed';
 
@@ -37,6 +37,7 @@ export interface LocalAttachment {
   id: string; kind: 'photo' | 'video' | 'file' | 'voice' | 'round' | 'audio'; mime: string; name: string; size: number; w: number | null; h: number | null; thumb?: string | null;
   duration?: number | null; waveform?: string | null;   // голосовое, кружок, видео
   spoiler?: boolean;   // фото/видео под спойлером
+  preview?: VideoVariant | null; variants?: VideoVariant[];   // видео после обработки сервером (jobs/video.ts)
 }
 
 export interface LocalChat {

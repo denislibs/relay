@@ -1,6 +1,7 @@
-import { MAX_FILE_BYTES, ROUND_MAX_SECONDS, WAVEFORM_BYTES, type Attachment, type AttachmentKind } from '@relay/protocol';
+import { MAX_FILE_BYTES, ROUND_MAX_SECONDS, WAVEFORM_BYTES, type Attachment, type AttachmentKind, type VideoVariant } from '@relay/protocol';
 import { S3Client } from 'bun';
 import { sql } from '../db';
+import { enqueue } from '../jobs/queue';
 import { DomainError } from './errors';
 
 export const MAX_FILE = MAX_FILE_BYTES;
@@ -84,7 +85,7 @@ export async function confirmUpload(userId: number, id: string): Promise<Attachm
   if (!UUID.test(id)) throw new DomainError('not_found', 'attachment');
   const [a] = await sql`select * from attachments where id = ${id} and owner_id = ${userId}`;
   if (!a) throw new DomainError('not_found', 'attachment');
-  if (a.status === 'ready') return attachmentOf(a, null);
+  if (a.status === 'ready') return attachmentOf(a, null, await variantsOf(sql, id));
   let stat: { size: number; type: string };
   try { stat = await s3().file(id).stat(); } catch { throw new DomainError('upload_missing'); }
   const type = stat.type.split(';')[0].trim().toLowerCase();
@@ -92,33 +93,52 @@ export async function confirmUpload(userId: number, id: string): Promise<Attachm
     await s3().delete(id).catch(() => {});
     throw new DomainError('upload_mismatch', `size ${stat.size}/${a.size}, type ${type}/${a.mime}`);
   }
-  const [r] = await sql`update attachments set status = 'ready' where id = ${id} and status = 'pending' returning *`;
+  // видео-медиа: перепаковка (faststart), ролик для ленты и 720p — в воркере; до конца обработки играет оригинал
+  const r = await sql.begin(async (tx) => {
+    const [row] = await tx`update attachments set status = 'ready' where id = ${id} and status = 'pending' returning *`;
+    if (row?.kind === 'video') await enqueue(tx, 'video.process', { id }, { dedupeKey: `video.process:${id}`, maxAttempts: 3 });
+    return row;
+  });
   return attachmentOf(r ?? a, null);
 }
 
 /** Вложение для отправки: только своё и только существующее. thumb — крошечное превью (data:image, до 4 КБ). */
 export async function attachmentForSend(tx: typeof sql | Parameters<Parameters<typeof sql.begin>[0]>[0], userId: number, ref: { id: string; thumb?: string | null; spoiler?: boolean }): Promise<Attachment> {
   if (!UUID.test(ref.id)) throw new DomainError('bad_frame', 'attachment id');
-  const [a] = await tx`select * from attachments where id = ${ref.id}`;
+  // for share: обработка видео (jobs/video.ts) обновляет строку и снимки в сообщениях под for update — не разминуться с ней
+  const [a] = await tx`select * from attachments where id = ${ref.id} for share`;
   // своё вложение — или трек из своей музыки профиля (его могли добавить из чужого сообщения): «Музыка» в скрепке
   const mine = a && (a.owner_id === userId || (await tx`select 1 from profile_music where user_id = ${userId} and attachment_id = ${a.id}`).length > 0);
   if (!a || !mine) throw new DomainError('not_found', 'attachment');
   if (a.status !== 'ready') throw new DomainError('upload_pending');
   const thumb = ref.thumb && ref.thumb.length <= 8192 && /^data:image\/(jpeg|png|webp);base64,[A-Za-z0-9+/=]+$/.test(ref.thumb) ? ref.thumb : null;
-  const out = attachmentOf(a, thumb);
+  const out = attachmentOf(a, thumb, await variantsOf(tx, a.id as string));
   // спойлер — только у фото и видео (у файла и голосового его нечем показать)
   return ref.spoiler === true && (out.kind === 'photo' || out.kind === 'video') ? { ...out, spoiler: true } : out;
 }
 
-function attachmentOf(a: Record<string, unknown>, thumb: string | null): Attachment {
-  const kind = ((a.kind as AttachmentKind | null) ?? (a.width ? 'photo' : 'file'));
-  return { id: a.id as string, kind, mime: a.mime as string, name: a.name as string, size: Number(a.size), w: (a.width as number) ?? null, h: (a.height as number) ?? null, thumb,
-    ...(a.duration ? { duration: a.duration as number } : {}), ...(a.waveform ? { waveform: a.waveform as string } : {}),
-    ...(a.title ? { title: a.title as string } : {}), ...(a.performer ? { performer: a.performer as string } : {}) };
+type Db = typeof sql | Parameters<Parameters<typeof sql.begin>[0]>[0];
+
+/** Копии видео из attachment_variants (пусто — ещё не обработано или обрабатывать нечего). */
+export async function variantsOf(db: Db, id: string): Promise<VideoVariant[]> {
+  const rows = await db`select name, width, height, size from attachment_variants where attachment_id = ${id} order by name`;
+  return rows.map((v) => ({ name: v.name as VideoVariant['name'], w: v.width as number, h: v.height as number, size: Number(v.size) }));
 }
 
-/** Файл для скачивания: владельцу и участникам чатов, где он отправлен. */
-export async function fileFor(userId: number, id: string): Promise<{ id: string; mime: string; name: string } | null> {
+export function attachmentOf(a: Record<string, unknown>, thumb: string | null, variants: VideoVariant[] = []): Attachment {
+  const kind = ((a.kind as AttachmentKind | null) ?? (a.width ? 'photo' : 'file'));
+  const preview = variants.find((v) => v.name === 'preview');
+  const rest = variants.filter((v) => v.name !== 'preview');
+  return { id: a.id as string, kind, mime: a.mime as string, name: a.name as string, size: Number(a.size), w: (a.width as number) ?? null, h: (a.height as number) ?? null, thumb,
+    ...(a.duration ? { duration: a.duration as number } : {}), ...(a.waveform ? { waveform: a.waveform as string } : {}),
+    ...(a.title ? { title: a.title as string } : {}), ...(a.performer ? { performer: a.performer as string } : {}),
+    ...(preview ? { preview } : {}), ...(rest.length ? { variants: rest } : {}) };
+}
+
+/** Файл для скачивания: владельцу и участникам чатов, где он отправлен. key — объект в бакете (после перепаковки — не id);
+ *  variant — копия видео (preview, 720): права те же, что у оригинала. */
+export interface StoredFile { id: string; key: string; mime: string; name: string }
+export async function fileFor(userId: number, id: string, variant?: string): Promise<StoredFile | null> {
   if (!UUID.test(id)) return null;
   const [a] = await sql`
     select a.* from attachments a
@@ -134,7 +154,10 @@ export async function fileFor(userId: number, id: string): Promise<{ id: string;
        or exists (   -- фото профиля: как и сам профиль — всем, кого владелец не заблокировал
          select 1 from user_photos p where (p.big = a.id or p.small = a.id or p.video = a.id)
             and not exists (select 1 from blocks b where b.owner_id = p.user_id and b.user_id = ${userId})))`;
-  return a ? { id, mime: a.mime as string, name: a.name as string } : null;
+  if (!a) return null;
+  if (!variant) return { id, key: (a.storage_key as string | null) ?? id, mime: a.mime as string, name: a.name as string };
+  const [v] = await sql`select key, mime from attachment_variants where attachment_id = ${id} and name = ${variant}`;
+  return v ? { id, key: v.key as string, mime: v.mime as string, name: a.name as string } : null;
 }
 
 /**
@@ -145,10 +168,10 @@ export async function fileFor(userId: number, id: string): Promise<{ id: string;
 /** Видео и музыка играют дольше ссылки: плеер ходит за кусками (Range) по одному и тому же адресу после редиректа —
  *  на 10-минутной ссылке длинное видео встало бы посередине. Им — 3 часа (но не меньше общего срока: тесты ставят 1 с). */
 const STREAM_TTL = 3 * 3600;
-export function signedDownload(f: { id: string; mime: string; name: string }, opts: { inline: boolean }): string {
+export function signedDownload(f: { key: string; mime: string; name: string }, opts: { inline: boolean }): string {
   const disposition = `${opts.inline ? 'inline' : 'attachment'}; filename*=UTF-8''${encodeURIComponent(f.name)}`;
   const ttl = opts.inline && /^(video|audio)\//.test(f.mime) && getTtl >= 60 ? Math.max(getTtl, STREAM_TTL) : getTtl;
-  return publicS3().presign(f.id, { method: 'GET', expiresIn: ttl, type: opts.inline ? f.mime : 'application/octet-stream', contentDisposition: disposition });
+  return publicS3().presign(f.key, { method: 'GET', expiresIn: ttl, type: opts.inline ? f.mime : 'application/octet-stream', contentDisposition: disposition });
 }
 
 /** pending старше суток — брошенные загрузки: запись и объект (если клиент успел его положить) удаляем. */

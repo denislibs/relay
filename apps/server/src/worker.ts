@@ -11,7 +11,12 @@ await ensurePeriodic('uploads.sweep');
 await scheduleReindexIfStale().catch((e) => console.error('search: cannot schedule reindex:', e));
 
 // Процесс-воркер: выполняет задачи из jobs. Можно запускать несколько — skip locked делит работу.
-const worker = startWorker({ concurrency: Number(process.env.WORKER_CONCURRENCY ?? 10) });
+// Видео (ffmpeg, минуты на файл) — своим циклом: не задерживает пачку остальных задач, параллельно не больше
+// VIDEO_CONCURRENCY на процесс, аренда час (дольше одного запуска ffmpeg, см. jobs/video.ts).
+const LONG = ['video.process'];
+const main = startWorker({ concurrency: Number(process.env.WORKER_CONCURRENCY ?? 10), kinds: { except: LONG } });
+const video = startWorker({ concurrency: Number(process.env.VIDEO_CONCURRENCY ?? 1), leaseSec: 3600, kinds: { only: LONG } });
+const worker = { stop: () => Promise.all([main.stop(), video.stop()]) };
 console.log('relay worker started');
 
 for (const signal of ['SIGTERM', 'SIGINT'] as const) {

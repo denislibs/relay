@@ -28,11 +28,11 @@ type SyncReply = Extract<ServerFrame, { op: 'updates' | 'tooLong' }>;
  */
 const HISTORY_GATE_MS = 400;
 
-/** Чаты, где пачка журнала правит уже существующие сообщения (правка, удаление, реакции, «прослушано»). */
+/** Чаты, где пачка журнала правит уже существующие сообщения (правка, удаление, реакции, «прослушано», обработанное видео). */
 function patchedChats(items: JournalEntry[], after: number): Set<number> {
   const out = new Set<number>();
   for (const { seq, update: u } of items) {
-    if (seq > after && (u.type === 'messageEdited' || u.type === 'messageDeleted' || u.type === 'reactions' || u.type === 'mediaListened')) out.add(u.chatId);
+    if (seq > after && (u.type === 'messageEdited' || u.type === 'messageDeleted' || u.type === 'reactions' || u.type === 'mediaListened' || u.type === 'attachmentUpdated')) out.add(u.chatId);
   }
   return out;
 }

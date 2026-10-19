@@ -714,7 +714,8 @@ function MediaOverlay(props) {
 /* ---------- InlineVideo: видео в ленте, как в Telegram — без звука, по кругу, играет только пока на экране ----------
    Одно общее IntersectionObserver: видно больше половины — play(), ушло — pause() (десятки роликов в истории не жрут CPU).
    До первого кадра — размытая встроенная миниатюра; плашка слева сверху — сколько осталось. autoplay=false — стоит
-   на первом кадре (preload=metadata), включится в просмотрщике. */
+   на первом кадре (preload=metadata), включится в просмотрщике. preview — играет короткий немой ролик сервера (первые
+   секунды, 360p, до 1 МБ) вместо оригинала: плашка показывает длительность всего видео, а не ролика. */
 var videoIO = null, videoCbs = typeof WeakMap === 'function' ? new WeakMap() : null;
 function videoObserve(el, cb) {
   if (typeof IntersectionObserver === 'undefined') { cb(true); return function () {}; }
@@ -736,8 +737,8 @@ function InlineVideo(props) {
     h('video', { ref: ref, class: 'rl-lazy-full rl-inline-video', src: props.src, muted: true, loop: true, playsInline: true, disablePictureInPicture: true,
       preload: props.autoplay ? 'auto' : 'metadata', 'aria-hidden': 'true', tabIndex: -1,
       onLoadedData: function () { loaded[1](true); },
-      onTimeUpdate: function (e) { var v = e.currentTarget, d = v.duration || props.duration || 0, r = Math.max(0, Math.ceil(d - v.currentTime)); if (r !== left[0]) left[1](r); } }),
-    props.chip !== false ? h('span', { class: 'rl-media-chip rl-media-chip-dur rl-media-chip-top' }, fmtTime(props.autoplay ? left[0] : props.duration || 0), h(Icon, { name: 'volumeOff', size: 12 })) : null);
+      onTimeUpdate: props.preview ? undefined : function (e) { var v = e.currentTarget, d = v.duration || props.duration || 0, r = Math.max(0, Math.ceil(d - v.currentTime)); if (r !== left[0]) left[1](r); } }),
+    props.chip !== false ? h('span', { class: 'rl-media-chip rl-media-chip-dur rl-media-chip-top' }, fmtTime(props.autoplay && !props.preview ? left[0] : props.duration || 0), h(Icon, { name: 'volumeOff', size: 12 })) : null);
 }
 
 /* Спойлер на фото/видео (как в Telegram): сильно размытая миниатюра и мерцающие точки, пока не нажмут.
@@ -893,7 +894,7 @@ function MediaBubble(props) {
     // режим выбора (it.sel задан): у каждой ячейки альбома свой кружок справа сверху, отмеченное фото чуть уменьшается
     return h('button', { key: i, type: 'button', class: cx('rl-media-cell', it.sel !== undefined && 'rl-media-cell-sel', it.sel && 'rl-media-cell-on'), 'data-mkey': it.mkey, onClick: function () { if (props.onOpen && state === 'ready') props.onOpen(i); }, 'aria-label': it.kind === 'video' ? 'Открыть видео' : 'Открыть фото' },
       hidden ? h(MediaSpoiler, { thumb: it.thumb, onReveal: function () { spoilersOpen.add(it.skey || it.src || it.thumb || i); reveal[1](reveal[0] + 1); } })
-        : vid ? h(InlineVideo, { src: it.src, thumb: it.thumb, duration: it.duration, autoplay: autoplay && !(album && i > 3), chip: !busy })
+        : vid ? h(InlineVideo, { src: it.inline || it.src, preview: !!it.inline, thumb: it.thumb, duration: it.duration, autoplay: autoplay && !(album && i > 3), chip: !busy })
         : it.src || it.thumb ? h(LazyImage, { src: it.kind === 'video' ? undefined : it.src, thumb: it.thumb, alt: it.alt }) : h(MediaArt, { seed: it.seed, blur: state === 'remote' }),
       it.kind === 'video' && !vid && !hidden && !busy ? h('span', { class: 'rl-media-chip rl-media-chip-dur rl-media-chip-top' }, h(Icon, { name: 'video', size: 14 }), fmtTime(it.duration || 0)) : null,
       // загрузка: процент слева сверху (как в Telegram), кольцо с × — по центру
@@ -1011,6 +1012,18 @@ function MediaViewer(props) {
   var root = useRef(null), box = useRef(null), hidden = useRef(null), closeRef = useRef(null);
   var real = !!it.src;
   var rect = real && it.w && it.h ? viewerRect(it.w, it.h) : null;
+  // качество видео (как в Telegram): it.qualities — [{ label: '720p', src }, { label: 'Оригинал', src }], первое — по умолчанию.
+  // Выбор помним до закрытия просмотра; при переключении то же место и пауза/игра сохраняются.
+  var quality = useState(0), resume = useRef(null), videoEl = useRef(null);
+  var qs = it.kind === 'video' && it.qualities && it.qualities.length > 1 ? it.qualities : null;
+  var q = qs ? qs[Math.min(quality[0], qs.length - 1)] : null;
+  var videoSrc = q ? q.src : it.src;
+  useVideoRecovery(videoEl, real && it.kind === 'video' ? videoSrc : null);
+  function switchQuality() {
+    var v = videoEl.current;
+    resume.current = v ? { t: v.currentTime, paused: v.paused } : null;
+    quality[1](function (x) { return (x + 1) % qs.length; });
+  }
   function source(k) { return props.origin ? props.origin(k) : null; }
   function hide(el) {   // скрыть миниатюру под просмотром (прежнюю — вернуть); только в фазе записи
     if (hidden.current && hidden.current !== el) hidden.current.style.visibility = '';
@@ -1094,7 +1107,8 @@ function MediaViewer(props) {
         it.thumb ? h('img', { class: 'rl-viewer-thumb', src: it.thumb, alt: '', 'aria-hidden': 'true' }) : null,
         it.kind === 'video'
           // видео из сообщения: играет со звуком и своими кнопками браузера (время, громкость, скорость, PiP, во весь экран)
-          ? h('video', { key: it.src, class: 'rl-viewer-img rl-viewer-video', src: it.src, poster: it.thumb || undefined, controls: true, autoPlay: true, playsInline: true })
+          ? h('video', { key: videoSrc, ref: videoEl, class: 'rl-viewer-img rl-viewer-video', src: videoSrc, poster: it.thumb || undefined, controls: true, autoPlay: true, playsInline: true,
+              onLoadedMetadata: function (e) { var r = resume.current, v = e.currentTarget; resume.current = null; if (!r) return; v.currentTime = r.t; if (r.paused) v.pause(); } })
           : h('img', { class: 'rl-viewer-img', src: it.src, alt: it.caption || '', decoding: 'async' }),
         // видео-аватарка и т.п.: зацикленное видео без звука поверх кадра-обложки
         it.video ? h('video', { key: it.video, class: 'rl-viewer-img rl-viewer-loop', src: it.video, autoPlay: true, loop: true, muted: true, playsInline: true, disablePictureInPicture: true }) : null)
@@ -1113,6 +1127,7 @@ function MediaViewer(props) {
       props.actions ? props.actions(it, i).map(function (a) {
         return h(IconButton, { key: a.label, icon: a.icon, label: a.label, class: a.danger ? 'rl-viewer-danger' : undefined, onClick: a.onClick });
       }) : [h(IconButton, { key: 'z', icon: 'zoomIn', label: 'Увеличить' }), h(IconButton, { key: 'r', icon: 'reply', label: 'Ответить' })],
+      q ? h('button', { type: 'button', class: 'rl-viewer-quality', onClick: switchQuality, 'aria-label': 'Качество: ' + q.label, title: 'Качество видео' }, q.label) : null,
       real ? h('a', { class: 'rl-iconbtn', href: it.download || it.src, download: it.name || '', 'aria-label': 'Скачать', title: 'Скачать' }, h(Icon, { name: 'download', size: 24 })) : h(IconButton, { icon: 'download', label: 'Скачать' }),
       h(IconButton, { icon: 'close', label: 'Закрыть', onClick: close })),
     real ? media : null,

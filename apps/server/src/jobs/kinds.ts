@@ -7,6 +7,8 @@ import { deliverPush, planPush, type PushMessage, type PushPayload } from '../do
 import { reindexStep, syncMessage } from '../search/messagesIndex';
 import { register } from './handlers';
 import { applyLinkPreview } from '../domain/messages';
+import { s3 } from '../domain/files';
+import { processVideo } from './video';
 import { enqueue } from './queue';
 
 // новое сообщение → по задаче на подписку: повтор одной не шлёт остальным второй раз
@@ -55,6 +57,16 @@ register('uploads.sweep', async () => {
 });
 
 // превью ссылки: страница грузится вне отправки — сообщение уже в ленте, превью дорисуется
+// видео-медиа после загрузки: faststart, ролик для ленты, 720p (jobs/video.ts); отдельный цикл воркера с малым параллелизмом
+register('video.process', async (p: { id: string }) => {
+  await processVideo(p);
+});
+
+// объект хранилища, на который больше никто не ссылается (старый оригинал после перепаковки)
+register('storage.delete', async (p: { key: string }) => {
+  await s3().delete(p.key);
+});
+
 register('link.preview', async (p: { chatId: number; id: number; url: string }) => {
   await applyLinkPreview(p);
 });

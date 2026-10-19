@@ -120,7 +120,13 @@ export interface Attachment {
   title?: string | null;      // музыка: из тегов файла
   performer?: string | null;
   spoiler?: boolean;          // фото и видео «под спойлером»: размыто, пока не нажмут (как в Telegram)
+  /** Видео после обработки на сервере (до неё — нет): короткий немой ролик для ленты и облегчённые копии для просмотра.
+   *  Адрес — /files/<id>/<name>; оригинал остаётся /files/<id>. */
+  preview?: VideoVariant | null;
+  variants?: VideoVariant[];
 }
+/** Копия видео: preview — первые секунды без звука, 360p, до 1 МБ (лента); '720' — H.264 720p (просмотрщик по умолчанию). */
+export interface VideoVariant { name: 'preview' | '720'; w: number; h: number; size: number }
 /** video — видео как медиа (кадр, длительность, играет в ленте); видео «как файл» остаётся file с mime video/*. */
 export type AttachmentKind = 'photo' | 'video' | 'file' | 'voice' | 'round' | 'audio';
 /** Вкладки «Общих медиа» (как в Telegram): медиа — фото и видео, файлы, музыка, голосовые и кружки, ссылки. */
@@ -158,6 +164,7 @@ export type Update =
   | { type: 'sessionsChanged' }
   | { type: 'pins'; chatId: Id; ids: Id[] }
   | { type: 'linkPreview'; chatId: Id; id: Id; link: LinkPreview | null }
+  | { type: 'attachmentUpdated'; chatId: Id; id: Id; attachment: Attachment }   // видео обработано: копии и faststart-оригинал
   // группа: информация и настройки целиком — всем участникам
   | { type: 'groupUpdated'; chatId: Id; group: GroupInfo }
   // моё место в группе (роль, права, исключение, звание) — только мне

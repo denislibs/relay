@@ -1,6 +1,6 @@
 import { sql } from '../db';
 import { handlers, PermanentError } from './handlers';
-import { claim, complete, fail, type Job } from './queue';
+import { claim, complete, fail, LEASE_SEC, type Job, type KindFilter } from './queue';
 
 /** Выполнить одну задачу: успех — complete, ошибка — fail (PermanentError и неизвестный kind — без повтора). */
 export async function runJob(job: Job): Promise<void> {
@@ -30,8 +30,9 @@ export async function drainJobs(maxRounds = 50): Promise<number> {
  * Цикл процесса-воркера: забирает пачку, выполняет, повторяет; пусто — спит до NOTIFY jobs или pollMs
  * (poll нужен для отложенных задач: повторов и периодических, о них NOTIFY не приходит).
  */
-export function startWorker(opts: { concurrency?: number; pollMs?: number } = {}): { stop(): Promise<void> } {
+export function startWorker(opts: { concurrency?: number; pollMs?: number; leaseSec?: number; kinds?: KindFilter } = {}): { stop(): Promise<void> } {
   const concurrency = opts.concurrency ?? 10;
+  const leaseSec = opts.leaseSec ?? LEASE_SEC;
   const pollMs = opts.pollMs ?? 5000;
   let stopped = false;
   let poked = false;                 // NOTIFY пришёл, пока воркер был занят: не засыпать
@@ -46,7 +47,7 @@ export function startWorker(opts: { concurrency?: number; pollMs?: number } = {}
     await listening;
     while (!stopped) {
       poked = false;
-      const jobs = await claim(concurrency).catch((e) => { console.error('jobs claim:', e); return [] as Job[]; });
+      const jobs = await claim(concurrency, leaseSec, opts.kinds).catch((e) => { console.error('jobs claim:', e); return [] as Job[]; });
       if (jobs.length) { await Promise.all(jobs.map(runJob)); continue; }
       await nap();
     }
