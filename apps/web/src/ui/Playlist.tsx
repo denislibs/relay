@@ -1,4 +1,4 @@
-import { Icon, IconButton, Menu, Modal, ORDER_INFO, player } from '@relay/ui';
+import { Icon, IconButton, Menu, Modal, ORDER_INFO, player, PlayingRing } from '@relay/ui';
 import { useEffect, useRef, useState } from 'preact/hooks';
 import { setGlobal, useGlobal } from '../global';
 import { inProfile, toggleProfileMusic, type Track } from '../music';
@@ -42,7 +42,7 @@ export function Playlist() {
               return (
                 <button key={x.key} type="button" class={'app-pl-row' + (cur ? ' app-pl-cur' : '')} data-current={cur ? '' : undefined}
                   onClick={() => (cur ? player.toggle(x) : player.play(x))}>
-                  <span class="app-sm-play"><Icon name={cur && st.playing ? 'pause' : 'play'} size={22} /></span>
+                  <span class="app-pl-cover"><span class="app-sm-play"><Icon name={cur && st.playing ? 'pause' : 'play'} size={22} /></span>{cur ? <PlayingRing paused={!st.playing} /> : null}</span>
                   <span class="app-sm-text"><b class="app-sm-title">{x.title}</b><small>{fmt(x.duration)}{x.performer ? ' • ' + x.performer : ''}</small></span>
                 </button>
               );

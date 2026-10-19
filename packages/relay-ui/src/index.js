@@ -26,3 +26,4 @@ export * from './calendar.js';
 export * from './avatarCrop.js';
 export * from './select.js';
 export * from './chatPicker.js';
+export * from './media/playingRing.js';

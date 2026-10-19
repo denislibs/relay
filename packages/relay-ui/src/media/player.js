@@ -31,6 +31,8 @@ function el() {
   if (audio) return audio;
   audio = new Audio();
   audio.preload = 'auto';
+  // с CORS: звук можно разобрать анализатором (кольцо вокруг играющего трека); хранилище отвечает CORS для приложения
+  audio.crossOrigin = 'anonymous';
   audio.addEventListener('play', function () { state.playing = true; loop(); emit(); session(); });
   audio.addEventListener('pause', function () { state.playing = false; tick(); emit(); session(); });
   audio.addEventListener('loadedmetadata', function () { if (isFinite(audio.duration)) state.duration = audio.duration; emit(); session(); });
@@ -71,6 +73,7 @@ export function play(track) {
   }
   a.playbackRate = isMusic() ? 1 : state.rate;   // скорость — для голосовых
   a.volume = state.volume; a.muted = state.muted;
+  if (isMusic()) graph();   // анализатор — только для музыки и только по жесту пользователя (play — по клику)
   var p = a.play();
   if (p && p.catch) p.catch(function () { state.playing = false; emit(); });
   if (track.onListened && !track.listenedSent) { track.listenedSent = true; track.onListened(); }
@@ -166,4 +169,35 @@ function session() {
   if (ms.setPositionState && audio && isFinite(audio.duration) && audio.duration > 0) {
     try { ms.setPositionState({ duration: audio.duration, playbackRate: audio.playbackRate, position: Math.min(audio.currentTime, audio.duration) }); } catch (e) { /* неверная позиция */ }
   }
+}
+
+/* ---------- спектр для кольца вокруг играющего трека ----------
+   AudioContext и AnalyserNode на том же <audio>: звук идёт дальше в выход как обычно. Создаётся при первом play
+   музыки (жест пользователя — иначе браузер не даст). На iOS — нет (там MediaElementSource ломает фоновое
+   воспроизведение): кольцо рисует синтетическую волну. */
+var actx = null, analyserNode = null;
+var IS_IOS = typeof navigator !== 'undefined' && (/iP(hone|ad|od)/.test(navigator.userAgent) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1));
+function graph() {
+  if (IS_IOS || analyserNode === false) return;
+  try {
+    var Ctor = typeof AudioContext !== 'undefined' ? AudioContext : (typeof webkitAudioContext !== 'undefined' ? webkitAudioContext : null);
+    if (!Ctor) { analyserNode = false; return; }
+    if (!actx) {
+      actx = new Ctor();
+      actx.onstatechange = function () { if (actx.state === 'suspended' && state.playing) actx.resume().catch(function () {}); };
+    }
+    if (actx.state === 'suspended') actx.resume().catch(function () {});
+    if (!analyserNode) {
+      var source = actx.createMediaElementSource(el());
+      analyserNode = actx.createAnalyser();
+      analyserNode.fftSize = 2048;
+      analyserNode.smoothingTimeConstant = 0.85;
+      source.connect(analyserNode);
+      analyserNode.connect(actx.destination);
+    }
+  } catch (e) { analyserNode = false; }   // не вышло — без анализатора, звук как был
+}
+/** Анализатор текущего звука или null (нет, ещё не создан, контекст не запущен). */
+export function analyser() {
+  return analyserNode && actx && actx.state === 'running' ? analyserNode : null;
 }

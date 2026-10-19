@@ -622,7 +622,8 @@ export class Engine {
         const clientId = crypto.randomUUID();
         this.lastCreated = Math.max(Date.now(), this.lastCreated + 1); // порядок черновиков внутри одной миллисекунды
         this.store.addPending({ clientId, chatId: a.chatId, body: a.body, entities: a.entities ?? [], replyToId: a.replyToId ?? null, createdAt: this.lastCreated, failed: false,
-          ...(a.noLinkPreview ? { noLinkPreview: true } : a.link ? { link: a.link } : {}) });
+          ...(a.noLinkPreview ? { noLinkPreview: true } : a.link ? { link: a.link } : {}),
+          ...(a.attachment && a.attachment.id ? { attachment: a.attachment } : {}) });
         this.store.setDraft(a.chatId, '');   // отправили — черновик больше не нужен
         await this.store.flush();
         this.changed();
