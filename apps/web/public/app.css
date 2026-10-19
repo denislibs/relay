@@ -953,3 +953,13 @@ html[data-anim="0"] .app-chatcol, html[data-anim="0"] .app-chatcol-below, html[d
 .rl-ed a { color: var(--tick-read); text-decoration: none; }
 .rl-ed .rl-ed-spoiler { border-radius: 4px; background: color-mix(in srgb, currentColor 18%, transparent); }
 .rl-ed p.is-editor-empty:first-child::before { content: attr(data-placeholder); float: left; height: 0; color: var(--ink-muted); pointer-events: none; }
+/* закрытие «статьи»: обратно по высоте до поля ввода (тот же изгиб, чуть быстрее), панель вниз, шапка вверх, текст гаснет */
+.app-art-closing { animation: app-art-shrink 260ms cubic-bezier(.33, 1, .68, 1) forwards; pointer-events: none; }
+@keyframes app-art-shrink { to { height: 48px; } }
+.app-art-closing .app-art-top { animation: app-art-top-out 160ms ease-in forwards; }
+@keyframes app-art-top-out { to { opacity: 0; transform: translateY(-60%); } }
+.app-art-closing .app-art-bar { animation: app-art-bar-out 200ms cubic-bezier(.32, 0, .67, 0) forwards; }
+@keyframes app-art-bar-out { to { opacity: 0; transform: translateY(100%); } }
+.app-art-closing .app-art-scroll { transition: opacity 140ms ease-in; opacity: 0; }
+/* поле ввода проявляется, когда карточка уже почти опустилась */
+.app-composer-host:not(.is-article) > .rl-composer-wrap { transition: opacity 200ms ease-out 60ms; }   /* под опускающейся карточкой, к её концу — уже на месте */

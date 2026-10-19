@@ -124,7 +124,7 @@ export function Chat({ chatId, frameKey, active }: { chatId: number; frameKey: s
   const picker = useRef<HTMLInputElement>(null);
   const [musicOpen, setMusicOpen] = useState(false);   // «Музыка» из меню вложений
   // «статья» (развёрнутый редактор): open — редактор на экране; свёрнутая «богатая» — строкой над полем ввода
-  const [art, setArt] = useState<{ open: boolean; blocks: Block[] } | null>(null);
+  const [art, setArt] = useState<{ open: boolean; blocks: Block[]; closing?: boolean } | null>(null);
   useEffect(() => setArt(null), [chatId]);
   const [pending, setPending] = useState<{ file: File; files: File[]; url: string | null; caption: string } | null>(null);
   const [dragging, setDragging] = useState(false);
@@ -324,7 +324,7 @@ export function Chat({ chatId, frameKey, active }: { chatId: number; frameKey: s
     const v = applyMarkdown(api.current?.getValue() ?? emptyValue());
     const blocks = art?.blocks ?? (v.text.trim() ? textToBlocks(v.text, v.entities) : []);
     if (!art && v.text) { api.current?.setValue(emptyValue(), { instant: true }); latest.current = saved.current = emptyValue(); }
-    setArt({ open: true, blocks });
+    setArt({ open: true, blocks, closing: false });
   };
   const collapseArticle = (blocks: Block[]) => {
     const simple = blocks.length ? blocksToText(blocks) : { text: '', entities: [] };
@@ -345,7 +345,7 @@ export function Chat({ chatId, frameKey, active }: { chatId: number; frameKey: s
   };
   const artQuote = art && !art.open && art.blocks.length && !editing ? {
     icon: 'article', author: 'Статья', text: blocksText(art.blocks).split('\n')[0] || 'Без текста', tone: 5,
-    onClick: () => setArt({ ...art, open: true }),
+    onClick: () => setArt({ ...art, open: true, closing: false }),
   } : null;
 
   // «Переслать» из меню: у альбома — весь альбом
@@ -440,7 +440,7 @@ export function Chat({ chatId, frameKey, active }: { chatId: number; frameKey: s
               : <span>Вы не можете отправлять сообщения этому пользователю</span>}
           </div>
         </div>
-      ) : <div class={'app-composer-host' + (selKeys ? ' is-selecting' : '') + (art?.open ? ' is-article' : '')}><Composer
+      ) : <div class={'app-composer-host' + (selKeys ? ' is-selecting' : '') + (art?.open && !art.closing ? ' is-article' : '')}><Composer
         id="composer"
         apiRef={api}
         initialValue={initial}
@@ -500,7 +500,7 @@ export function Chat({ chatId, frameKey, active }: { chatId: number; frameKey: s
           return sent;   // поле очистится, когда сообщение встанет в ленту
         }}
       />
-        {art?.open ? <ArticleComposer key={chatId} blocks={art.blocks} onCollapse={collapseArticle} onSend={sendArticle} /> : null}
+        {art?.open ? <ArticleComposer key={chatId} blocks={art.blocks} onCollapse={collapseArticle} onSend={sendArticle} onClosing={() => setArt((a) => (a ? { ...a, closing: true } : a))} /> : null}
         {/* режим выбора: панель «Выбрано: N» проявляется поверх поля ввода (поле остаётся на месте и гаснет), как в Telegram */}
         <Presence show={!!selKeys} exitMs={200}>
           <div class="app-selbar-layer">

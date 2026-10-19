@@ -2,7 +2,9 @@
 // сверху — Отменить/Вернуть и «Свернуть», снизу — панель: «+» (заголовки, цитата, разделитель), списки, ссылка, код,
 // отправить. Ядро редактора (Tiptap) — отдельный бандл /articleEditor.js, грузится при первом развороте.
 // Ctrl/Cmd+Enter — отправить, Esc — свернуть.
-import { IconButton, Menu, Modal, Button, TextField } from '@relay/ui';
+import { IconButton, Menu, Modal, Button, TextField, reducedMotion } from '@relay/ui';
+
+const CLOSE_MS = 260;
 import type { Block } from '@relay/protocol';
 import { useEffect, useRef, useState } from 'preact/hooks';
 
@@ -22,7 +24,7 @@ function loadEditor(): Promise<Mod> {
 }
 export const preloadArticleEditor = () => { void loadEditor().catch(() => {}); };
 
-export function ArticleComposer({ blocks, onCollapse, onSend }: { blocks: Block[]; onCollapse: (b: Block[]) => void; onSend: (b: Block[]) => void }) {
+export function ArticleComposer({ blocks, onCollapse, onSend, onClosing }: { blocks: Block[]; onCollapse: (b: Block[]) => void; onSend: (b: Block[]) => void; onClosing?: () => void }) {
   const host = useRef<HTMLDivElement>(null);
   const ed = useRef<Ed | null>(null);
   const [st, setSt] = useState<EdState>({ canUndo: false, canRedo: false, empty: true, active: {} });
@@ -42,19 +44,33 @@ export function ArticleComposer({ blocks, onCollapse, onSend }: { blocks: Block[
         onSubmit: () => send(),
         onEscape: () => collapse(),
       });
-      // фокус — в редактор: поле ввода под карточкой (и меню скрепки) иначе забирают его обратно
-      requestAnimationFrame(() => setTimeout(() => { if (alive) ed.current?.focus(); }, 0));
+      // фокус — в редактор: поле ввода под карточкой (очистка черновика, меню скрепки) забирает его обратно
+      // в ближайшие кадры — несколько раз возвращаем, пока не устоится (только если фокус ушёл не в саму карточку)
+      const grab = () => { if (alive && host.current && !host.current.parentElement?.closest('.app-art')?.contains(document.activeElement)) ed.current?.focus(); };
+      for (const ms of [0, 60, 160, 320]) setTimeout(grab, ms);
     }, () => { if (alive) setFailed(true); });
     return () => { alive = false; ed.current?.destroy(); ed.current = null; };
   }, []);
 
-  const collapse = () => cbs.current.onCollapse(ed.current?.getBlocks() ?? blocks);
-  const send = () => { const b = ed.current?.getBlocks() ?? []; if (b.length) cbs.current.onSend(b); };
+  // закрытие — как открытие, только обратно: карточка опускается до высоты поля ввода, панель уезжает вниз,
+  // текст гаснет; когда анимация кончилась — поле ввода на месте (сворачивание или отправка)
+  const [closing, setClosing] = useState(false);
+  const closingRef = useRef(false);
+  const leave = (done: () => void) => {
+    if (closingRef.current) return;
+    closingRef.current = true;
+    if (reducedMotion()) { done(); return; }
+    setClosing(true);
+    onClosing?.();   // поле ввода начинает проявляться под опускающейся карточкой — подмена без провала
+    setTimeout(done, CLOSE_MS);
+  };
+  const collapse = () => { const b = ed.current?.getBlocks() ?? blocks; leave(() => cbs.current.onCollapse(b)); };
+  const send = () => { const b = ed.current?.getBlocks() ?? []; if (b.length) leave(() => cbs.current.onSend(b)); };
   const at = (e: MouseEvent, kind: 'insert' | 'lists') => { const r = (e.currentTarget as HTMLElement).getBoundingClientRect(); setMenu({ kind, x: r.left, y: r.top }); };
   const a = st.active;
 
   return (
-    <div class="app-art" role="group" aria-label="Статья">
+    <div class={'app-art' + (closing ? ' app-art-closing' : '')} role="group" aria-label="Статья">
       <div class="app-art-top">
         <IconButton icon="undo" label="Отменить" disabled={!st.canUndo} onClick={() => ed.current?.undo()} />
         <IconButton icon="redo" label="Вернуть" disabled={!st.canRedo} onClick={() => ed.current?.redo()} />
