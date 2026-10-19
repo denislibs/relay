@@ -1,3 +1,5 @@
+import { isGroupService, serviceText } from './serviceText';
+import type { ServiceData, ServiceType } from '@relay/protocol';
 import type { Item } from '@relay/sync-engine/src/types';
 import { senderAvatar } from '../profilePhoto';
 import type { Entity } from '@relay/protocol';
@@ -722,11 +724,12 @@ export function Feed({ frameKey, active, chatId, meId, peerName, group, onAuthor
       flushRun();
       out.push(<div class="app-unread-divider" key="unread" role="separator"><span>Непрочитанные сообщения</span></div>);
     }
-    // служебное «создал(а) группу» — плашкой по центру, как в Telegram (не пузырём)
-    if ((m.service as { type?: string } | undefined)?.type === 'group_created') {
-      const who = mine ? 'Вы создали' : `${names[m.senderId as number] ?? peerName} создал(а)`;
+    // служебные события группы — плашкой по центру, как в Telegram (не пузырём)
+    const svc = m.service as { type?: string; data?: ServiceData } | undefined;
+    if (isGroupService(svc?.type)) {
+      const text = serviceText(svc!.type as ServiceType, { data: svc!.data, body: m.body as string, mine, sender: names[m.senderId as number] ?? peerName, meId });
       flushRun();
-      out.push(<div class="rl-action" key={m.key} role="note"><span>{who} группу «{m.body as string}»</span></div>);
+      out.push(<div class="rl-action" key={m.key} role="note"><span>{text}</span></div>);
       prevDay = day; prevSender = null;
       return;
     }

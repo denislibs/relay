@@ -38,7 +38,7 @@ type Tab = MediaTab | 'members';
 export function SharedMedia({ chatId, group = false }: { chatId: number; group?: boolean }) {
   const [counts, setCounts] = useState<Record<MediaTab, number> | null>(null);
   const [tab, setTab] = useState<Tab | null>(null);
-  const members = useMembers(chatId, group);
+  const members = useMembers(chatId, group, useGlobal((s) => (s.chats.find((c) => c.id === chatId)?.membersRev as number) ?? 0));
   // счётчики — при открытии и когда в чате появилось новое сообщение
   const lastId = useGlobal((s) => ((s.chats.find((c) => c.id === chatId)?.last as { id?: number } | null)?.id ?? 0));
   useEffect(() => {
@@ -247,7 +247,7 @@ function MembersList({ data }: { data: { ownerId: number | null; members: Member
           <button key={m.userId} type="button" role="listitem" class="rl-row app-member" disabled={self} onClick={() => void startDirectChat(m.userId)}>
             <Avatar name={m.name} tone={peerTone(m.userId)} size={44} online={!!m.online && !self} {...(self ? senderAvatar(m.userId) : avatarPhoto(m.photo ?? userPhoto(m.userId)))} />
             <span class="rl-row-main">
-              <span class="app-member-top"><span class="rl-row-name">{self ? m.name + ' (вы)' : m.name}</span>{m.userId === data.ownerId ? <span class="app-member-badge">владелец</span> : null}</span>
+              <span class="app-member-top"><span class="rl-row-name">{self ? m.name + ' (вы)' : m.name}</span>{m.rank || m.userId === data.ownerId || m.role === 'admin' ? <span class="app-member-badge">{m.rank || (m.userId === data.ownerId ? 'владелец' : 'админ')}</span> : null}</span>
               <span class={'rl-row-preview' + (m.online || self ? ' app-online' : '')}>{status}</span>
             </span>
           </button>

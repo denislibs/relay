@@ -2,11 +2,16 @@ import type { ProfileLink } from './links';
 export * from './links';
 export * from './folders';
 import type { ChatFolder } from './folders';
+import type { GroupInfo, MyMembership } from './groups';
 
 export type Id = number;
 
 /** Служебное сообщение от системного пользователя: машинный тип для отрисовки и склейки повторов. */
-export type ServiceType = 'login_code' | 'new_login' | 'group_created' | 'welcome';   // group_created: тело — название группы, автор — создатель
+export type ServiceType = 'login_code' | 'new_login' | 'group_created' | 'welcome'
+  | 'title_changed' | 'photo_changed' | 'photo_removed' | 'members_added' | 'member_left' | 'member_removed'
+  | 'joined_by_link' | 'joined_by_request' | 'owner_changed' | 'protected_on' | 'protected_off';
+/** Участники служебного события (имена на момент события) и новое название. */
+export interface ServiceData { users?: { id: Id; name: string }[]; title?: string }   // group_created: тело — название группы, автор — создатель
 
 export interface Message {
   id: Id;
@@ -22,7 +27,7 @@ export interface Message {
   deleted?: boolean;
   reactions?: Reaction[];
   attachment?: Attachment | null;
-  service?: { type: ServiceType };   // есть только у служебных сообщений
+  service?: { type: ServiceType; data?: ServiceData };   // есть только у служебных сообщений
   entities?: Entity[];   // оформление текста; нет или пусто — простой текст
   listened?: boolean;    // голосовое/кружок прослушан получателем
   fwdFrom?: ForwardInfo | null;   // переслано: откуда (нет — своё или отправитель скрыт)
@@ -135,7 +140,15 @@ export type Update =
   | { type: 'blocksChanged'; blocked?: BlockedUser; unblocked?: Id }
   | { type: 'sessionsChanged' }
   | { type: 'pins'; chatId: Id; ids: Id[] }
-  | { type: 'linkPreview'; chatId: Id; id: Id; link: LinkPreview | null };   // превью ссылки сообщения загрузилось (null — превью нет)   // закреплённые сообщения чата целиком (новые сверху)   // список сеансов изменился: новый вход, подтверждение, завершение
+  | { type: 'linkPreview'; chatId: Id; id: Id; link: LinkPreview | null }
+  // группа: информация и настройки целиком — всем участникам
+  | { type: 'groupUpdated'; chatId: Id; group: GroupInfo }
+  // моё место в группе (роль, права, исключение, звание) — только мне
+  | { type: 'membership'; chatId: Id; me: MyMembership }
+  // состав или роли участников изменились — перечитать список
+  | { type: 'membersChanged'; chatId: Id }
+  // чат больше не мой: вышел, удалили, группу удалили
+  | { type: 'chatRemoved'; chatId: Id };   // превью ссылки сообщения загрузилось (null — превью нет)   // закреплённые сообщения чата целиком (новые сверху)   // список сеансов изменился: новый вход, подтверждение, завершение
 
 /** Тело уведомления/push без предпросмотра: текст сообщения не раскрываем. */
 export const NO_PREVIEW = 'Новое сообщение';
@@ -306,3 +319,5 @@ export function hideSpoilers(text: string, entities?: readonly { type: string; o
   }
   return out ? out.join('') : text;
 }
+
+export * from './groups';

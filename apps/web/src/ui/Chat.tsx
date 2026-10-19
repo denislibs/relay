@@ -1,3 +1,5 @@
+import { hasMedia, rightForKind, type GroupInfo, type MemberRight, type MyMembership } from '@relay/protocol';
+import { MEMBER_RIGHT_TEXT } from '../groups';
 import { PinnedBar } from './PinnedBar';
 import { senderAvatar } from '../profilePhoto';
 import { firstUrl, loadPreview } from '../linkUrl';
@@ -21,7 +23,7 @@ import type { Entity } from '@relay/protocol';
 
 type Value = { text: string; entities: Entity[] };
 type ComposerApi = { getValue(): Value; setValue(v: Value, opts?: { focus?: boolean; instant?: boolean }): void; focus(opts?: { end?: boolean }): void };
-import { frameByKey, setGlobal, useGlobal } from '../global';
+import { frameByKey, setGlobal, useGlobal, getGlobal } from '../global';
 import { showToast, unblockUser, useUser } from '../settingsData';
 import { Feed } from './Feed';
 import { chatKindFor, mediaPolicy } from '../autoload';
@@ -130,6 +132,8 @@ export function Chat({ chatId, frameKey, active }: { chatId: number; frameKey: s
   const closePending = () => { if (pending?.url) URL.revokeObjectURL(pending.url); setPending(null); };
   const sendPending = () => {
     if (!pending) return;
+    if (pending.caption.trim() && !allowed('text')) return;
+    for (const f of pending.files) if (!allowed(rightForKind(/^image\//.test(f.type) && !/gif/.test(f.type) ? 'photo' : /^audio\//.test(f.type) ? 'audio' : 'file', f.type))) return;
     stick.current = true;
     typingDone(chatId);
     sendFiles(chatId, pending.files, pending.caption.trim(), (replyTo?.id as number) ?? null).catch(() => {});
@@ -236,7 +240,21 @@ export function Chat({ chatId, frameKey, active }: { chatId: number; frameKey: s
   const iBlocked = useGlobal((s) => chat?.kind === 'direct' && chat.peerId != null && s.blocked.some((b) => b.userId === chat.peerId));
   const peerUser = useUser(chat?.kind === 'direct' ? (chat.peerId as number | null) : null);
   const theyBlocked = !!peerUser?.blocksMe;
-  const plate = iBlocked ? 'mine' : theyBlocked ? 'theirs' : null;
+  // группа: мои права участника (у админов — все), медленный режим, запрет копирования
+  const gMe = chat?.kind === 'group' ? (chat?.me as MyMembership | null) ?? null : null;
+  const gInfo = chat?.kind === 'group' ? (chat?.group as GroupInfo | null) ?? null : null;
+  const gRights = gMe && !gMe.admin ? gMe.rights : null;
+  const plate = iBlocked ? 'mine' : theyBlocked ? 'theirs' : gRights && !gRights.text && !hasMedia(gRights) ? 'group' : null;
+  /** Можно ли отправить сейчас (вид сообщения и медленный режим); нельзя — тост и false. */
+  const allowed = (right: MemberRight): boolean => {
+    if (gRights && !gRights[right]) { showToast(right === 'text' ? 'В этой группе нельзя отправлять текст' : `В этой группе нельзя отправлять: ${MEMBER_RIGHT_TEXT[right].toLowerCase()}`); return false; }
+    if (gInfo?.slowMode && gRights) {
+      const last = messages.filter((m) => m.senderId === me.userId && !m.service && m.id != null).pop();
+      const left = last ? Math.ceil(gInfo.slowMode - (Date.now() - Date.parse(last.createdAt as string)) / 1000) : 0;
+      if (left > 0) { showToast(`Медленный режим: следующее сообщение — через ${left} с`); return false; }
+    }
+    return true;
+  };
 
   // режим выбора сообщений (панель вместо поля ввода)
   const selKeys = useGlobal((s) => (s.selecting?.chatId === chatId ? s.selecting.keys : null));
@@ -279,7 +297,7 @@ export function Chat({ chatId, frameKey, active }: { chatId: number; frameKey: s
   const myPeer = peer && chat?.peerId === peer.userId && peer.known ? peer : null;
   const online = !!myPeer?.online;
   const isTyping = !!chat?.typing;
-  const members = useMembers(chatId, chat?.kind === 'group');
+  const members = useMembers(chatId, chat?.kind === 'group', (chat?.membersRev as number) ?? 0);
   const subtitle = system ? 'служебные уведомления' : isTyping ? 'печатает…' : chat?.kind === 'group' ? (members ? membersStatus(members, true) : 'Группа') : myPeer ? lastSeenText(online, myPeer.lastSeen as string | null) : '';
   const replyTo = replyKey ? messages.find((m) => m.key === replyKey) : undefined;
   const authorOf = (senderId: unknown) => (senderId === me.userId ? 'Вы' : title);
@@ -332,6 +350,11 @@ export function Chat({ chatId, frameKey, active }: { chatId: number; frameKey: s
         <IconButton icon="more" label="Информация" onClick={() => setGlobal({ infoOpen: !infoOpen })} />
         {/* закреплённые — под шапкой, как в Telegram (плеер — над ней) */}
         {!system ? <PinnedBar chatId={chatId} /> : null}
+        {gInfo && gInfo.requests > 0 ? (
+          <button type="button" class="app-requests-bar" onClick={() => setGlobal({ infoOpen: true, infoGo: 'gRequests' })}>
+            <Icon name="userPlus" size={18} /><span>{gInfo.requests} {plural(gInfo.requests, 'заявка', 'заявки', 'заявок')} на вступление</span><Icon name="chevronRight" size={18} />
+          </button>
+        ) : null}
         {/* поиск по чату — карточка внутри шапки, как в Telegram: аватар и правая кнопка остаются видны */}
         {finding ? (
           <div class={'app-findcard' + (listOpen && found ? ' app-findcard-open' : '')}>
@@ -377,7 +400,8 @@ export function Chat({ chatId, frameKey, active }: { chatId: number; frameKey: s
                 <span>Вы заблокировали этого пользователя</span>
                 <Button variant="ghost" onClick={() => { if (chat?.peerId != null) void unblockUser(chat.peerId as number); }}>Разблокировать</Button>
               </>
-            ) : <span>Вы не можете отправлять сообщения этому пользователю</span>}
+            ) : plate === 'group' ? <span>Администраторы запретили писать в этой группе</span>
+              : <span>Вы не можете отправлять сообщения этому пользователю</span>}
           </div>
         </div>
       ) : <div class={'app-composer-host' + (selKeys ? ' is-selecting' : '')}><Composer
@@ -403,17 +427,17 @@ export function Chat({ chatId, frameKey, active }: { chatId: number; frameKey: s
         onEditLast={editLast}
         onReplyNav={replyNav}
         chatKey={chatId}
-        recordModes={recordModes}
+        recordModes={recordModes.filter((m) => !gRights || gRights[m === 'round' ? 'round' : 'voice'])}
         startRound={startRound}
         recordMode={recordMode}
         onRecordModeChange={(m: string) => { setRecordMode(m); try { localStorage.setItem('relay.recordMode', m); } catch { /* без хранилища — до перезагрузки */ } }}
         onRecordError={(err: { name?: string }, mode: string) => showToast(err?.name === 'NotAllowedError' || err?.name === 'NotFoundError'
           ? (mode === 'round' ? 'Разрешите доступ к камере и микрофону, чтобы записывать видеосообщения' : 'Разрешите доступ к микрофону, чтобы записывать голосовые')
           : mode === 'round' ? 'Не удалось записать видеосообщение' : 'Не удалось записать голосовое')}
-        onSendVoice={(r: { blob: Blob; duration: number; waveform: Uint8Array }) => { stick.current = true; sendVoice(chatId, r, (replyTo?.id as number) ?? null).catch(() => {}); setReplyKey(null); }}
-        onSendRound={(r: { blob: Blob; duration: number; size: number; thumb: string | null }) => { stick.current = true; sendRound(chatId, r, (replyTo?.id as number) ?? null).catch(() => {}); setReplyKey(null); }}
+        onSendVoice={(r: { blob: Blob; duration: number; waveform: Uint8Array }) => { if (!allowed('voice')) return; stick.current = true; sendVoice(chatId, r, (replyTo?.id as number) ?? null).catch(() => {}); setReplyKey(null); }}
+        onSendRound={(r: { blob: Blob; duration: number; size: number; thumb: string | null }) => { if (!allowed('round')) return; stick.current = true; sendRound(chatId, r, (replyTo?.id as number) ?? null).catch(() => {}); setReplyKey(null); }}
         attachItems={ATTACH_ITEMS}
-        onAttach={(k: string) => { if (k === 'music') { setMusicOpen(true); return; } const el = picker.current!; el.accept = k === 'media' || k === 'camera' ? 'image/*,video/*' : ''; el.value = ''; el.click(); }}
+        onAttach={(k: string) => { if (k === 'music') { if (allowed('music')) setMusicOpen(true); return; } const el = picker.current!; el.accept = k === 'media' || k === 'camera' ? 'image/*,video/*' : ''; el.value = ''; el.click(); }}
         onSend={(v: Value) => {
           if (editing) {
             const next = applyMarkdown(v);
@@ -421,6 +445,7 @@ export function Chat({ chatId, frameKey, active }: { chatId: number; frameKey: s
             endEdit(editing.draft);
             return false;   // в поле уже черновик — композер его не трогает
           }
+          if (!allowed('text')) return false;
           stick.current = true;
           if (draftTimer.current) { clearTimeout(draftTimer.current); draftTimer.current = null; }
           saved.current = latest.current = emptyValue();   // черновик очищает сам движок вместе с отправкой
@@ -442,7 +467,7 @@ export function Chat({ chatId, frameKey, active }: { chatId: number; frameKey: s
             <SelectionBar count={selected.length} onCancel={endSelect}
               onForward={() => { const list = selected; endSelect(); startForward(chatId, list, nameOf); }}
               onCopy={() => { navigator.clipboard?.writeText(selected.filter((m) => m.body).map((m) => m.body as string).join('\n\n')).catch(() => {}); showToast('Скопировано'); endSelect(); }}
-              onDelete={selected.length && selected.every((m) => m.senderId === me.userId) ? () => setConfirmDelete({ ids: selected.map((m) => m.id as number) }) : undefined} />
+ onDelete={selected.length && (gMe?.admin?.delete || selected.every((m) => m.senderId === me.userId)) ? () => setConfirmDelete({ ids: selected.map((m) => m.id as number) }) : undefined} />
           </div>
         </Presence>
       </div>}
@@ -453,22 +478,22 @@ export function Chat({ chatId, frameKey, active }: { chatId: number; frameKey: s
           <>
             <div class="rl-msgmenu-scrim" onClick={() => setMenu(null)} onContextMenu={(e) => { e.preventDefault(); setMenu(null); }} />
             <div class="rl-msgmenu" style={{ left: Math.min(menu.x, innerWidth - 300), top: Math.min(menu.y, innerHeight - 240) }}>
-              {menuMsg.id != null && !menuMsg.deleted && !system ? (
-                <ReactionPicker selected={myReaction} onPick={(emoji: string) => { react(chatId, menuMsg.id as number, myReaction === emoji ? null : emoji); setMenu(null); }} />
+              {menuMsg.id != null && !menuMsg.deleted && !system && (!gRights || gRights.react) && gInfo?.reactions.mode !== 'none' ? (
+                <ReactionPicker emoji={gInfo?.reactions.mode === 'some' ? gInfo.reactions.allowed.slice(0, 7) : undefined} selected={myReaction} onPick={(emoji: string) => { react(chatId, menuMsg.id as number, myReaction === emoji ? null : emoji); setMenu(null); }} />
               ) : null}
               <Menu
                 label="Действия с сообщением"
                 onClose={() => setMenu(null)}
                 items={[
                   ...(menuMsg.id != null && !menuMsg.deleted && !system ? [{ icon: 'reply', label: 'Ответить', onClick: () => { if (editing) endEdit(editing.draft); setReplyKey(menuMsg.key as string); api.current?.focus({ end: true }); } }] : []),
-                  ...(menuMsg.id != null && !menuMsg.deleted && !menuMsg.service ? [{ icon: 'forward', label: 'Переслать', onClick: () => forwardMenuMsg(menuMsg) }] : []),
-                  ...(menuMsg.id != null && !menuMsg.deleted && !menuMsg.service ? [{ icon: 'checkCircle', label: 'Выбрать', onClick: () => startSelect(chatId, groupOf(menuMsg).map((x) => x.key as string)) }] : []),
+                  ...(menuMsg.id != null && !menuMsg.deleted && !menuMsg.service && !gInfo?.protected ? [{ icon: 'forward', label: 'Переслать', onClick: () => forwardMenuMsg(menuMsg) }] : []),
+                  ...(menuMsg.id != null && !menuMsg.deleted && !menuMsg.service && !gInfo?.protected ? [{ icon: 'checkCircle', label: 'Выбрать', onClick: () => startSelect(chatId, groupOf(menuMsg).map((x) => x.key as string)) }] : []),
                   ...(own && !system ? [{ icon: 'pencil', label: 'Изменить', onClick: () => startEdit(menuMsg) }] : []),
-                  ...(menuMsg.id != null && !menuMsg.deleted && !system && !menuMsg.service ? [((chat?.pinned as number[] | undefined) ?? []).includes(menuMsg.id as number)
+                  ...(menuMsg.id != null && !menuMsg.deleted && !system && !menuMsg.service && (!gMe || gMe.admin?.pin || gMe.rights.pin) ? [((chat?.pinned as number[] | undefined) ?? []).includes(menuMsg.id as number)
                     ? { icon: 'pin', label: 'Открепить', onClick: () => void unpinMessage(chatId, menuMsg.id as number) }
                     : { icon: 'pin', label: 'Закрепить', onClick: () => void pinMessage(chatId, menuMsg.id as number) }] : []),
                   ...(!menuMsg.deleted ? [{ icon: 'copy', label: 'Копировать', onClick: () => { navigator.clipboard?.writeText(menuMsg.body as string).catch(() => {}); } }] : []),
-                  ...(own ? ['-' as const, { icon: 'trash', label: 'Удалить', danger: true, onClick: () => setConfirmDelete({ ids: [menuMsg.id as number] }) }] : []),
+                  ...(own || (gMe?.admin?.delete && !menuMsg.deleted && menuMsg.id != null && !menuMsg.service) ? ['-' as const, { icon: 'trash', label: 'Удалить', danger: true, onClick: () => setConfirmDelete({ ids: [menuMsg.id as number] }) }] : []),
                 ]}
               />
             </div>

@@ -1,3 +1,6 @@
+import { isGroupService, serviceText } from './serviceText';
+import type { ServiceData, ServiceType } from '@relay/protocol';
+import { getGlobal } from '../global';
 import { SPOILER_FILL } from '@relay/protocol';
 import { SpoilerText } from '@relay/ui';
 import type { ComponentChildren } from 'preact';
@@ -63,7 +66,10 @@ export function previewThumb(m: LastMessage): { src: string; video: boolean; rou
 /** Текст после имени: подпись к медиа, а без подписи — тип. С миниатюрой эмодзи типа не нужен. */
 export function previewBody(m: LastMessage, withThumb: boolean): ComponentChildren {
   if (m.deleted) return 'Сообщение удалено';
-  if (m.service?.type === 'group_created') return `Создана группа «${m.body}»`;
+  if (isGroupService(m.service?.type)) {
+    const g = getGlobal();
+    return serviceText(m.service!.type as ServiceType, { data: (m.service as { data?: ServiceData }).data, body: m.body, mine: m.senderId === g.me?.userId, sender: g.names[m.senderId] ?? '', meId: g.me?.userId ?? 0 });
+  }
   // код входа в списке не показываем: цифры — точками, оформление (code над цифрами) отбрасываем
   const code = m.service?.type === 'login_code';
   const text = code ? hideCode(m.body) : m.body;

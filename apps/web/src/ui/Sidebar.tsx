@@ -57,7 +57,7 @@ const SideRow = memo(function SideRow({ c, meId, active, showDraft, muted, onMen
   const last = c.last as (LastMessage & { status: string }) | null;
   const thumb = last ? previewThumb(last) : null;
   // имя автора — только в группах (в личке и так ясно, кто пишет); своё — «Вы», чужое — первое слово имени
-  const group = c.kind === 'group' && last && !last.deleted;
+  const group = c.kind === 'group' && last && !last.deleted && !last.service;   // служебное событие — без «Имя:», текст сам называет автора
   const name = useGlobal((s) => (group && last.senderId !== meId ? s.names[last.senderId] : undefined));
   useEffect(() => { if (group && last.senderId !== meId) ensureNames([last.senderId]); }, [group, last?.senderId]);
   const author = !group ? undefined : last.senderId === meId ? 'Вы' : name ? name.split(' ')[0] : undefined;

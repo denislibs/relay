@@ -57,13 +57,22 @@ export interface WriteBatch {
 
 /** Одна транзакция на всю пачку: данные и lastSeq записываются атомарно. */
 export function write(db: IDBDatabase, batch: WriteBatch): Promise<void> {
-  const names = STORES.filter((s) => (batch.put[s]?.length ?? 0) > 0 || (batch.del[s]?.length ?? 0) > 0);
+  const dropChats = batch.del.chats ?? [];
+  const names = STORES.filter((s) => (batch.put[s]?.length ?? 0) > 0 || (batch.del[s]?.length ?? 0) > 0 || (s === 'messages' && dropChats.length > 0));
   if (!names.length) return Promise.resolve();
   const t = db.transaction(names, 'readwrite');
   for (const s of names) {
     const os = t.objectStore(s);
     for (const v of batch.put[s] ?? []) os.put(v);
     for (const k of batch.del[s] ?? []) os.delete(k);
+  }
+  // удалённый чат — и все его сообщения (по индексу byChat), той же транзакцией
+  if (dropChats.length) {
+    const index = t.objectStore('messages').index('byChat');
+    for (const id of dropChats) {
+      const cur = index.openKeyCursor(IDBKeyRange.bound([id, -Infinity], [id, Infinity]));
+      cur.onsuccess = () => { const c = cur.result; if (c) { t.objectStore('messages').delete(c.primaryKey); c.continue(); } };
+    }
   }
   return new Promise((resolve, reject) => {
     t.oncomplete = () => resolve();

@@ -42,7 +42,7 @@ async function post<T>(path: string, body?: unknown): Promise<T> {
 
 /** Три шага загрузки, как у вложений: заявка → PUT прямо в хранилище → подтверждение.
  *  Видео-аватарка идёт как квадратное видео (kind round): сервер запомнит сторону и длительность. */
-async function upload(blob: Blob, side: number, video?: { duration: number }): Promise<string> {
+export async function upload(blob: Blob, side: number, video?: { duration: number }): Promise<string> {
   const meta = video
     ? { name: 'avatar.' + (blob.type.includes('mp4') ? 'mp4' : 'webm'), mime: blob.type.split(';')[0], size: blob.size, w: side, h: side, kind: 'round', duration: Math.max(1, Math.round(video.duration)) }
     : { name: 'photo.jpg', mime: 'image/jpeg', size: blob.size, w: side, h: side };

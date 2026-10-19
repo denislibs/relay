@@ -1,3 +1,4 @@
+import { showToast } from './settingsData';
 import { coverThumb, readAudioTags } from './id3';
 import { getPrefs } from './prefs';
 import { rememberPhotos } from './profilePhoto';
@@ -53,6 +54,13 @@ export function startData(me: Me): void {
     // сразу, не дожидаясь конца анимаций: список виртуальный (≈20 строк), а отложенный подъём чата
     // после отправки выглядит как запоздалый рывок
     setGlobal({ chats: chats.list(), chatsLoaded: true });
+    // открытый чат исчез из списка (меня удалили из группы, я вышел, группу удалили) — закрыть его и правую панель
+    const open = getGlobal().openChatId;
+    if (p.op === 'diff' && open != null && p.remove.includes('c' + open)) {
+      setGlobal({ infoOpen: false });
+      openChat(null);
+      showToast('Чат больше недоступен');
+    }
     const seed: Record<number, string> = { [me.userId]: me.name };
     for (const c of chats.list()) if (c.kind === 'direct' && c.peerId && c.title) seed[c.peerId as number] = c.title as string;
     rememberNames(seed);
@@ -367,6 +375,11 @@ export async function send(chatId: number, body: string, replyToId: number | nul
   await engine.call({ type: 'sendMessage', chatId, body, entities, replyToId, ...opts });
 }
 
+/** Отправить текст без звука и прокрутки (приглашение в личку из управления группой). */
+export async function engineSend(chatId: number, body: string): Promise<void> {
+  await engine.call({ type: 'sendMessage', chatId, body, entities: [] });
+}
+
 /** Пересылка (forward.ts): копии сразу в ленте целевых чатов; в открытом чате — к низу, как своё сообщение. */
 export async function forwardMessages(a: { fromChatId: number; ids: number[]; toChatIds: number[]; hideSender?: boolean; hideCaption?: boolean; comment?: { body: string; entities?: Entity[] } | null }): Promise<void> {
   nudgeWallpaper();
@@ -430,6 +443,12 @@ export async function sendRound(chatId: number, rec: { blob: Blob; duration: num
 }
 
 /** Голосовое или кружок прослушан (своё — нет). */
+/** Управление группой и вступление по ссылке: {ok, data} или {ok:false, code} (код ошибки сервера или offline). */
+export type GroupResult<T = unknown> = { ok: true; data: T } | { ok: false; code: string; status?: number };
+export function groupCall<T = unknown>(method: 'GET' | 'POST' | 'PUT' | 'PATCH' | 'DELETE', path: string, body?: unknown): Promise<GroupResult<T>> {
+  return engine.call({ type: 'group', method, path, body }) as Promise<GroupResult<T>>;
+}
+
 export function markListened(chatId: number, id: number): void { engine.call({ type: 'listened', chatId, id }).catch(() => {}); }
 
 export async function sendFile(chatId: number, file: File, caption: string, replyToId: number | null = null, groupId: string | null = null): Promise<void> {
@@ -507,7 +526,7 @@ export function seen(chatId: number, upToId: number): void {
   engine.call({ type: 'seen', chatId, upToId }).catch(() => {});
 }
 
-async function createDirectChat(peerId: number): Promise<number> {
+export async function createDirectChat(peerId: number): Promise<number> {
   // существующая личная переписка или новая (сервер не создаёт вторую на ту же пару)
   const res = await fetch('/chats/direct', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ userId: peerId }) });
   if (!res.ok) throw new Error(res.status === 401 ? 'Сессия истекла' : 'Не удалось создать чат');
