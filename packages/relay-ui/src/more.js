@@ -683,6 +683,13 @@ function Wallpaper(props) {
             ? { image: buildPattern(set), mask: true, background: t.ink, size: size, opacity: P.maskOpacity || intensityAlpha(P.intensity, true) }
             // светлая тема: узор нарисован цветом, выведенным из фона (прозрачность уже в цвете)
             : { image: buildPattern(set, patternColor(colors, intensityAlpha(P.intensity, false))), mask: false, background: 'transparent', size: size, opacity: 1, blur: 0 };
+          // плашки дат и служебных сообщений — в тон обоям (как в Telegram): светлая тема — цвет узора, но плотнее;
+          // своя картинка — нейтральная тёмная; тёмная тема — из CSS (нейтральная серо-синяя)
+          var shell = el.parentElement;
+          if (shell) {
+            if (t.dark) shell.style.removeProperty('--action-bg');
+            else shell.style.setProperty('--action-bg', P.image ? 'rgba(0,0,0,0.32)' : patternColor(colors, 0.62));
+          }
           // обои создавали без узора (файл ещё грузился): у twallpaper тогда нет слоя узора — пересоздаём под снимком
           if (wp && pattern && !wp.pattern) {
             if (animate && !reducedMotion()) crossfadeSnapshot(el);

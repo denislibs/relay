@@ -55,11 +55,14 @@ const themeNow = (root: HTMLElement): Theme => {
  * Смешивание from → to. swap() — настоящее переключение (атрибут темы или стиль акцента): делается
  * в первом кадре, когда инлайн уже держит старые цвета, поэтому скачка нет. Новый вызов прерывает старый.
  */
+/** Палитра окончательно сменилась (тема или акцент). Кто рисует на canvas и запомнил цвета — перечитывает их. */
+function paletteChanged(): void { requestMutation(() => dispatchEvent(new Event('rl:palette'))); }
+
 function blend(root: HTMLElement, from: Map<string, Rgba>, to: Map<string, Rgba>, swap: () => void, animate: boolean): void {
   const run = ++running;
   const names = [...to.keys()].filter((n) => { const a = from.get(n), b = to.get(n)!; return a && a.some((x, i) => x !== b[i]); });
   if (!animate || reducedMotion() || !names.length) {
-    requestMutation(() => { if (run !== running) return; clear(root); swap(); });   // прерванное смешивание не оставляет переопределений
+    requestMutation(() => { if (run !== running) return; clear(root); swap(); paletteChanged(); });   // прерванное смешивание не оставляет переопределений
     return;
   }
   const end = beginHeavyAnimation(DURATION_MS + 100);   // цвета всей страницы меняются — тяжёлая анимация
@@ -67,7 +70,7 @@ function blend(root: HTMLElement, from: Map<string, Rgba>, to: Map<string, Rgba>
   const frame = () => requestMutation(() => {
     if (run !== running) { end(); return; }             // поверх началась новая смена
     const t = Math.min(1, (performance.now() - start) / DURATION_MS);
-    if (t >= 1) { clear(root); end(); return; }
+    if (t >= 1) { clear(root); end(); paletteChanged(); return; }
     const k = ease(t);
     for (const n of names) {
       const a = from.get(n)!, b = to.get(n)!;

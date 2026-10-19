@@ -19,7 +19,7 @@
     if (typeof a.wallpaper === 'boolean' ? !a.wallpaper : r) d.setAttribute('data-wpanim', '0');
     var ac = s.getItem('relay.accentCss'); if (ac) { var st = document.createElement('style'); st.id = 'rl-accent'; st.textContent = ac; document.head.appendChild(st); } } catch (e) {}</script>
   <style>
-    html { background: linear-gradient(135deg, #dbddbb, #88b884 45%, #6ba587 70%, #d5d88d) fixed; }
+    html { background: linear-gradient(135deg, var(--wallpaper-1, #dbddbb), var(--wallpaper-4, #88b884) 45%, var(--wallpaper-2, #6ba587) 70%, var(--wallpaper-3, #d5d88d)) fixed; }
     @media (prefers-color-scheme: dark) { html:not([data-theme="light"]) { background: #000; } }
     html[data-theme="dark"] { background: #000; }
   </style>

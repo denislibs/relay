@@ -76,12 +76,18 @@ export function VoiceBubble(props) {
   }
 
   useEffect(function () {
-    requestMeasure(function () {
-      // цвета — вычисленные (color у canvas — заливка, outline-color — прогресс): так работают и color-mix, и темы
-      var cs = getComputedStyle(canvas.current);
-      colors.current = { fill: cs.color, progress: cs.outlineColor, dpr: window.devicePixelRatio || 1 };
-      requestMutation(paint);
-    });
+    function readColors() {
+      requestMeasure(function () {
+        if (!canvas.current) return;
+        // цвета — вычисленные (color у canvas — заливка, outline-color — прогресс): так работают и color-mix, и темы
+        var cs = getComputedStyle(canvas.current);
+        colors.current = { fill: cs.color, progress: cs.outlineColor, dpr: window.devicePixelRatio || 1 };
+        requestMutation(paint);
+      });
+    }
+    readColors();
+    // сменили тему или акцент — canvas сам не перекрасится
+    addEventListener('rl:palette', readColors);
     var offTick = player.onTick(function (k, t, d) {
       if (k !== key) { if (progress.current && !drag.current) { progress.current = 0; requestMutation(function () { paint(); writeTime(0, false); }); } return; }
       if (drag.current) return;
@@ -95,7 +101,7 @@ export function VoiceBubble(props) {
     });
     var s0 = player.playerState();
     if (s0.key === key) { progress.current = s0.duration ? s0.time / s0.duration : 0; if (btn.current) btn.current.classList.toggle('rl-vb-playing', s0.playing); }
-    return function () { offTick(); off(); };
+    return function () { offTick(); off(); removeEventListener('rl:palette', readColors); };
   }, [key]);
   useEffect(function () { requestMutation(paint); }, [props.waveform, duration, filled]);
 

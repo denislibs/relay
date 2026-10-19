@@ -20,7 +20,7 @@ export const ACCENT_IDS = ACCENTS.map((a) => a.id);
 export const DEFAULT_ACCENT = 'green';
 
 // «Фирменные» токены. Цвета собеседников, зелёные плитки настроек и «успех» — не акцент, их нет в списке.
-const ACCENT_TOKENS = ['brand', 'brand-strong', 'brand-text', 'on-accent-soft', 'voice-new', 'fab'];
+const ACCENT_TOKENS = ['brand', 'brand-strong', 'brand-text', 'on-accent-soft', 'voice-new', 'fab', 'button', 'button-hover'];
 // Подложки и обои: бледные и разнооттеночные (обои — градиент от жёлто-зелёного до бирюзового), правило 30° их
 // бы пропустило. Их оттенок поворачивается целиком на ту же разницу, яркость сохраняется.
 const TINT_TOKENS = ['accent-soft', 'bubble-out', 'wallpaper-1', 'wallpaper-2', 'wallpaper-3', 'wallpaper-4', 'wallpaper-pattern'];
