@@ -76,3 +76,34 @@ test('deleted message is never found: in memory, only in IDB, or deleted after t
   s.applyUpdate({ type: 'messageDeleted', chatId: 7, id: 11 } as any);
   expect(await find(db, s, 'секрет')).toEqual([]);
 });
+
+test('a frequent 2-letter prefix: work is capped, result ≤ limit, hasMore = true', async () => {
+  const { db, s } = await open();
+  for (let id = 1; id <= 300; id++) put(s, id, 7 + (id % 3), `пр${id}слово прочее`);
+  await s.flush();
+  // строки, которые поиск прочёл из указателя: шаги курсора подсчёта и размер getAll
+  let steps = 0, read = 0;
+  const cont = IDBCursor.prototype.continue, getAll = IDBObjectStore.prototype.getAll;
+  IDBCursor.prototype.continue = function (this: IDBCursor, ...a: unknown[]) { steps++; return (cont as Function).apply(this, a); } as typeof cont;
+  IDBObjectStore.prototype.getAll = function (this: IDBObjectStore, ...a: unknown[]) {
+    const r = (getAll as Function).apply(this, a) as IDBRequest<unknown[]>;
+    if (this.name === 'terms') r.addEventListener('success', () => { read += r.result.length; });
+    return r;
+  } as typeof getAll;
+  try {
+    const r = await searchLocal(db, 'пр', { limit: 10, cap: 50 }, (c, k) => s.loadedMessage(c, k));
+    expect(r.list.length).toBe(10);
+    expect(r.hasMore).toBe(true);
+    expect(read).toBeLessThanOrEqual(50);
+    expect(steps).toBeLessThanOrEqual(50);
+    // редкое второе слово ведёт поиск: точный ответ, без ограничения
+    steps = 0; read = 0;
+    const exact = await searchLocal(db, 'пр пр17слово', { limit: 10, cap: 50 }, (c, k) => s.loadedMessage(c, k));
+    expect(exact.list.map((m) => m.id)).toEqual([17]);
+    expect(exact.hasMore).toBe(false);
+    expect(read).toBe(1);
+    expect(steps).toBeLessThanOrEqual(50 + 1);
+  } finally {
+    IDBCursor.prototype.continue = cont; IDBObjectStore.prototype.getAll = getAll;
+  }
+});

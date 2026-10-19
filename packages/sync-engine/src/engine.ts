@@ -47,6 +47,9 @@ function patchedChats(items: JournalEntry[], after: number): Set<number> {
   return out;
 }
 
+/** Сколько локальный результат поиска переиспользуется после готовности (пара local + полный вызов). */
+const SEARCH_MEMO_MS = 300;
+
 export class Engine {
   private transport: WsTransport;
   private watchers = new Map<number, Watcher>();
@@ -573,7 +576,6 @@ export class Engine {
   private async search(a: Extract<Action, { type: 'search' }>): Promise<SearchResult> {
     const limit = a.limit ?? 30;
     const local = this.searchLocal(a, limit);
-    local.catch(() => {});   // ошибку увидит тот, кто дождётся local
     if (a.local || !this.online) return local;
     let res: { hits: { message: Message; chatTitle: string | null }[]; hasMore: boolean };
     try {
@@ -582,7 +584,7 @@ export class Engine {
       if (a.beforeId) qs.set('beforeId', String(a.beforeId));
       res = await this.http(`/search?${qs}`);
     } catch { return local; }   // сеть пропала посреди запроса — только локальные
-    const mine = await local;
+    const mine = await local.catch((): SearchResult => ({ hits: [], hasMore: false, source: 'local' }));   // локальная часть упала — ответ сервера не теряем
     const seen = new Set(mine.hits.map((h) => h.chatId + ':' + h.id));
     const server: SearchHit[] = res.hits.filter(({ message: m }) => !seen.has(m.chatId + ':' + m.id)).map(({ message: m, chatTitle }) => (
       { chatId: m.chatId, chatTitle: this.titleOfChat(m.chatId) ?? chatTitle ?? null, id: m.id, sort: m.id, senderId: m.senderId, body: m.body, createdAt: m.createdAt, kind: m.kind, attachment: m.attachment ?? null, entities: m.entities ?? null, ...(m.service ? { service: m.service } : {}), source: 'server' }));
@@ -590,9 +592,26 @@ export class Engine {
     return { hits: all.slice(0, limit), hasMore: all.length > limit || res.hasMore || mine.hasMore, source: 'server' };
   }
 
-  /** Локальная часть поиска: указатель записан (flush), затем searchLocal по нему. */
-  private async searchLocal(a: Extract<Action, { type: 'search' }>, limit: number): Promise<SearchResult> {
-    await this.store.flush();   // слова последних сообщений — в указатель
+  /**
+   * Локальная часть поиска, одна на запрос: вызов с local: true и следующий за ним полный (интерфейс шлёт их подряд)
+   * делят один промис — пока он идёт и ещё SEARCH_MEMO_MS после (за это время кэш почти не меняется).
+   */
+  private searchLocal(a: Extract<Action, { type: 'search' }>, limit: number): Promise<SearchResult> {
+    const key = [a.q, a.chatId ?? '', a.beforeId ?? '', limit].join('\0');
+    let p = this.searchMemo.get(key);
+    if (!p) {
+      p = this.searchLocalNow(a, limit);
+      this.searchMemo.set(key, p);
+      const drop = () => setTimeout(() => { if (this.searchMemo.get(key) === p) this.searchMemo.delete(key); }, SEARCH_MEMO_MS);
+      p.then(drop, drop);
+    }
+    return p;
+  }
+  private searchMemo = new Map<string, Promise<SearchResult>>();
+
+  /** Указатель дописан (flush — только если он отстаёт от памяти), затем searchLocal по нему. */
+  private async searchLocalNow(a: Extract<Action, { type: 'search' }>, limit: number): Promise<SearchResult> {
+    if (this.store.termsDirty) await this.store.flush();   // слова последних сообщений — в указатель
     const { list, hasMore } = await searchLocal(this.db, a.q, { chatId: a.chatId, beforeId: a.beforeId, limit }, (c, k) => this.store.loadedMessage(c, k));
     return {
       hits: list.map((m) => ({ chatId: m.chatId, chatTitle: this.titleOfChat(m.chatId), id: m.id!, sort: m.sort, senderId: m.senderId, body: m.body, createdAt: m.createdAt, kind: m.kind, attachment: (m.attachment as never) ?? null, entities: m.entities ?? null, ...(m.service ? { service: m.service } : {}), source: 'local' as const })),

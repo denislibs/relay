@@ -1,24 +1,35 @@
 import { searchTerms } from '@relay/protocol';
-import { termsOf } from './idb';
+import { req, termsOf } from './idb';
 import type { LocalMessage } from './types';
 
 type TermRow = { term: string; chatId: number; sort: number; key: string };
 
-function req<T>(r: IDBRequest<T>): Promise<T> {
-  return new Promise((resolve, reject) => { r.onsuccess = () => resolve(r.result); r.onerror = () => reject(r.error); });
-}
-
 /** Все строки указателя, у которых слово начинается с w (ключ [term, chatId, sort]). */
-const prefix = (w: string) => IDBKeyRange.bound([w, -Infinity, -Infinity], [w + '￿', Infinity, Infinity]);
+const prefix = (w: string) => IDBKeyRange.bound([w, -Infinity, -Infinity], [w + '\uffff', Infinity, Infinity]);
 
 const CHUNK = 64;   // строк сообщений за одну транзакцию чтения
+/** Предел строк указателя на слово и на один поиск: «пр» на 50 000 сообщений не читается целиком. */
+export const TERMS_CAP = 2000;
+
+/** Сколько строк в диапазоне, но не больше cap: курсор по ключам останавливается на cap (count() прошёл бы весь диапазон). */
+function countUpTo(store: IDBObjectStore, range: IDBKeyRange, cap: number): Promise<number> {
+  return new Promise((resolve, reject) => {
+    let n = 0;
+    const cur = store.openKeyCursor(range);
+    cur.onsuccess = () => { if (!cur.result || ++n >= cap) resolve(n); else cur.result.continue(); };
+    cur.onerror = () => reject(cur.error);
+  });
+}
 
 /**
  * Поиск по указателю слов на устройстве (работает без сети). Каждое слово запроса — по началу слова (И для всех):
- * «прив вст» находит «Привет, встречаемся?». Сначала считаем строки указателя по каждому слову (count по диапазону)
- * и берём только самое редкое; кандидаты — новые первыми — проверяем по самой строке сообщения (все слова, не удалено),
- * пока не наберём limit + 1. Цена: одно чтение диапазона самого редкого слова + чтение строк до limit + 1 совпадений;
- * полного прохода по сообщениям нет. loaded — сообщение из памяти (оно новее строки в IDB).
+ * «прив вст» находит «Привет, встречаемся?». По каждому слову считаем строки указателя (не больше cap) и читаем
+ * диапазон только самого редкого (тоже не больше cap); кандидаты — новые первыми — проверяем по самой строке
+ * сообщения (все слова, не удалено), пока не наберём limit + 1. Полного прохода нет: не больше cap строк на слово
+ * при подсчёте, cap строк кандидатов и строки сообщений до limit + 1 совпадений.
+ * Если даже самое редкое слово упёрлось в cap (все слова частые, например «пр»), кандидаты — первые cap строк
+ * по ключу [term, chatId, sort], то есть не по времени: «новые первыми» — только среди них, hasMore = true
+ * (интерфейс дочитает с сервера или по уточнённому запросу). loaded — сообщение из памяти (оно новее строки в IDB).
  */
 export async function searchLocal(
   db: IDBDatabase, q: string, o: { chatId?: number; beforeId?: number; limit: number },
@@ -26,11 +37,14 @@ export async function searchLocal(
 ): Promise<{ list: LocalMessage[]; hasMore: boolean }> {
   const words = searchTerms(q);
   if (!words.length) return { list: [], hasMore: false };
+  const cap = o.cap ?? TERMS_CAP;
   const terms = db.transaction('terms').objectStore('terms');
-  const counts = await Promise.all(words.map((w) => req(terms.count(prefix(w)))));
+  const counts = await Promise.all(words.map((w) => countUpTo(terms, prefix(w), cap)));
   if (counts.some((n) => n === 0)) return { list: [], hasMore: false };
-  const rare = words[counts.indexOf(Math.min(...counts))];
-  const rows = (await req(db.transaction('terms').objectStore('terms').getAll(prefix(rare)))) as TermRow[];
+  const least = Math.min(...counts);
+  const rare = words[counts.indexOf(least)];
+  const capped = least >= cap;   // кандидаты неполные
+  const rows = (await req(db.transaction('terms').objectStore('terms').getAll(prefix(rare), cap))) as TermRow[];
   // одно сообщение может совпасть несколькими словами («прив» → «привет», «приветик»)
   const seen = new Set<string>();
   const cand: TermRow[] = [];
@@ -62,5 +76,5 @@ export async function searchLocal(
       if (fits(m)) list.push(m);
     }
   }
-  return { list: list.slice(0, o.limit), hasMore: list.length > o.limit };
+  return { list: list.slice(0, o.limit), hasMore: capped || list.length > o.limit };
 }

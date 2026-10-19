@@ -25,7 +25,7 @@ export function openDb(name: string, opts: { onVersionChange?: () => void; versi
   });
 }
 
-function req<T>(r: IDBRequest<T>): Promise<T> {
+export function req<T>(r: IDBRequest<T>): Promise<T> {
   return new Promise((resolve, reject) => {
     r.onsuccess = () => resolve(r.result);
     r.onerror = () => reject(r.error);

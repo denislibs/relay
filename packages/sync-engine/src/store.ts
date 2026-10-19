@@ -265,6 +265,8 @@ export class Store {
     return idx.get(id);
   }
 
+  /** Указатель слов отстаёт от памяти: есть незаписанные сообщения, лишние слова или правки строк. */
+  get termsDirty(): boolean { return this.dirtyMessages.size > 0 || this.staleTerms.size > 0 || this.rowPatches.size > 0 || this.clearPersistedMessages; }
   /** Сообщение из памяти по ключу строки (новее сохранённой в IDB); нет в памяти — undefined. */
   loadedMessage(chatId: number, key: string): LocalMessage | undefined { return this.messages.get(chatId)?.get(key); }
 
