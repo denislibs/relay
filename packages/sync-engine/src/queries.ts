@@ -133,6 +133,7 @@ export function computeQuery(store: Store, q: Query): Result {
     case 'presence':
     case 'me':
     case 'user':
+    case 'people':
     case 'ops':
     case 'contacts':
     case 'settings':
@@ -146,7 +147,7 @@ export function computeQuery(store: Store, q: Query): Result {
 /** Задевает ли изменение этих чатов результат подписки. */
 export function affects(q: Query, touched: Set<number>): boolean {
   if (!touched.size) return false;
-  if (q.kind === 'status' || q.kind === 'me' || q.kind === 'user' || q.kind === 'ops' || q.kind === 'contacts' || q.kind === 'settings' || q.kind === 'blocked' || q.kind === 'devStats' || q.kind === 'devLog') return false;   // у них свои флаги в движке
+  if (q.kind === 'status' || q.kind === 'me' || q.kind === 'user' || q.kind === 'people' || q.kind === 'ops' || q.kind === 'contacts' || q.kind === 'settings' || q.kind === 'blocked' || q.kind === 'devStats' || q.kind === 'devLog') return false;   // у них свои флаги в движке
   return q.kind === 'messages' ? touched.has(q.chatId) : true;
 }
 

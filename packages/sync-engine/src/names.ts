@@ -1,7 +1,7 @@
-import type { ProfilePhoto } from '@relay/protocol';
+import type { Me, ProfilePhoto } from '@relay/protocol';
 import { contactName } from './contacts';
 import type { Store } from './store';
-import type { LocalChat } from './types';
+import type { Item, LocalChat } from './types';
 
 /** Контакт зрителя с учётом ещё не подтверждённых операций (движок подставляет вид с очередью). */
 function contactOf(store: Store, userId: number): { name: string; v: number; pending: boolean } | null {
@@ -23,6 +23,30 @@ export function personView(store: Store, userId: number): { name: string; photo:
   const u = store.users.get(userId), c = contactOf(store, userId);
   const pend = c?.pending ? 'p' + c.name : '';
   return { name: displayName(store, userId), photo: u?.photo ?? null, sig: `${u?.v ?? 0}:${c?.v ?? 0}:${pend}` };
+}
+
+/**
+ * Подписка people: элемент на каждого, о ком что-то знаем (профиль или контакт), в порядке ids; себя — из me
+ * (с неподтверждёнными правками). Подпись — personView.sig: неизменившийся человек не попадает в diff.
+ */
+export function peopleResult(store: Store, ids: readonly number[], me: Me | null): { items: Map<string, Item>; order: string[]; sig: Map<string, string> } {
+  const items = new Map<string, Item>(), sig = new Map<string, string>(), order: string[] = [];
+  for (const id of ids) {
+    const key = String(id);
+    if (items.has(key)) continue;
+    let it: Item, g: string;
+    if (me && id === me.userId) {
+      it = { key, id, name: me.name, photo: me.photo ?? null };
+      g = 'me:' + JSON.stringify([me.name, me.photo ?? null]);
+    } else {
+      const p = personView(store, id);
+      if (!p.name && !store.users.get(id)) continue;   // ещё не знаем — интерфейс держит прежнее
+      it = { key, id, name: p.name, photo: p.photo };
+      g = p.sig;
+    }
+    items.set(key, it); sig.set(key, g); order.push(key);
+  }
+  return { items, order, sig };
 }
 
 /** Название чата: группа — из group, личный — как зритель видит собеседника (null — ещё не знаем). */

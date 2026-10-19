@@ -15,7 +15,7 @@ import { OP_SESSIONS_TTL, Sessions } from './sessions';
 import { SessionEnd } from './session';
 import { DevTools, loadSim, type SimState, type SubStat } from './devlog';
 import { simFlags, watchLoss } from './devsim';
-import { chatTitle, displayName, PeerSigs } from './names';
+import { chatTitle, displayName, peopleResult, PeerSigs } from './names';
 import type { Action, EngineConfig, LocalAttachment, LocalMessage, OutboxEntry, Patch, Query, SearchResult } from './types';
 
 export interface WatchHandle { update(q: Query): void; close(): void }
@@ -31,6 +31,8 @@ type SyncReply = Extract<ServerFrame, { op: 'updates' | 'tooLong' }>;
 const HISTORY_GATE_MS = 400;
 /** Сколько файлов грузится одновременно (как в Telegram — несколько, но не все разом: канал делится, а первый файл не ждёт последнего). */
 const UPLOAD_SLOTS = 3;
+/** сколько id в одном GET /users?ids= (предел сервера) */
+const USERS_BATCH = 200;
 
 /** Чаты, где пачка журнала правит уже существующие сообщения (правка, удаление, реакции, «прослушано», обработанное видео). */
 function patchedChats(items: JournalEntry[], after: number): Set<number> {
@@ -354,6 +356,7 @@ export class Engine {
       if (q.kind === 'user' && !list.length && q.userId !== this.cfg.userId) this.userWants.add(q.userId);
       return { items: new Map(list.map((it) => [it.key, it])), order: list.map((it) => it.key), sig: new Map(list.map((it) => [it.key, JSON.stringify(it)])) };
     }
+    if (q.kind === 'people') return peopleResult(this.store, q.ids, q.ids.includes(this.cfg.userId) ? this.meNow() : null);
     if (q.kind === 'devStats' || q.kind === 'devLog') {
       const it = q.kind === 'devStats' ? this.dev.stats() : { key: 'devLog' };   // devLog идёт мимо compute (dev.pushLog)
       return { items: new Map([[it.key, it]]), order: [it.key], sig: new Map([[it.key, JSON.stringify(it)]]) };
@@ -616,6 +619,7 @@ export class Engine {
     const opsDirty = this.ops.dirty, profileDirty = this.store.profile.dirty || opsDirty;
     this.ops.dirty = false;
     const contactsDirty = this.store.contacts.dirty || opsDirty || presenceDirty || profileDirty;
+    const peopleDirty = this.store.contacts.dirty || profileDirty;   // имя — из профиля, контакта и очереди
     this.store.contacts.dirty = false;
     const settingsDirty = this.store.settings.dirty || opsDirty;
     this.store.settings.dirty = false;
@@ -627,12 +631,13 @@ export class Engine {
     this.statusSig = sig;
     for (const w of this.watchers.values()) {
       if (w.q.kind === 'devLog') { this.dev.pushLog(w); continue; }   // журнал: только новые события, пачкой раз в 250 мс
-      const own = (w.q.kind === 'devStats' && devDirty) || (w.q.kind === 'status' && statusChanged) || (w.q.kind === 'presence' && presenceDirty) || (w.q.kind === 'ops' && opsDirty) || ((w.q.kind === 'me' || w.q.kind === 'user') && profileDirty) || (w.q.kind === 'contacts' && contactsDirty) || (w.q.kind === 'settings' && settingsDirty) || (w.q.kind === 'blocked' && blocksDirty);
+      const own = (w.q.kind === 'devStats' && devDirty) || (w.q.kind === 'status' && statusChanged) || (w.q.kind === 'presence' && presenceDirty) || (w.q.kind === 'ops' && opsDirty) || ((w.q.kind === 'me' || w.q.kind === 'user') && profileDirty) || (w.q.kind === 'people' && peopleDirty) || (w.q.kind === 'contacts' && contactsDirty) || (w.q.kind === 'settings' && settingsDirty) || (w.q.kind === 'blocked' && blocksDirty);
       if (!w.force && !affects(w.q, touched) && !own) continue;
-      if (hold && !w.force && w.q.kind !== 'status' && w.q.kind !== 'presence' && w.q.kind !== 'ops' && w.q.kind !== 'contacts' && w.q.kind !== 'settings' && w.q.kind !== 'blocked' && w.q.kind !== 'devStats') continue;
+      if (hold && !w.force && w.q.kind !== 'status' && w.q.kind !== 'presence' && w.q.kind !== 'ops' && w.q.kind !== 'contacts' && w.q.kind !== 'people' && w.q.kind !== 'settings' && w.q.kind !== 'blocked' && w.q.kind !== 'devStats') continue;
       if (w.gated) continue;
       w.force = false;
       const next = this.compute(w.q);
+      if (w.q.kind === 'people') this.wantPeople(w.q.ids);
       const patch = diffResults(w.prev, next);
       w.prev = next;
       if (patch) {
@@ -692,17 +697,33 @@ export class Engine {
     });
   }
 
-  /** Чужие профили, о которых спросил интерфейс, — по одному запросу на человека за подключение. */
+  /** Люди подписки people, которых нет в кэше: спросим пачкой (fetchUsers); у вкладок воркера общий набор — один запрос. */
+  private wantPeople(ids: readonly number[]): void {
+    for (const id of ids) if (id !== this.cfg.userId && !this.store.users.get(id) && !this.usersAsked.has(id)) this.userWants.add(id);
+  }
+
+  /**
+   * Чужие профили, о которых спросил интерфейс, — пачками GET /users?ids= (до USERS_BATCH) за подключение.
+   * Профиль кладётся с seq ответа: снимок старее уже применённой записи журнала не откатывает её. Кого сервер
+   * не вернул (не видим этого человека), остаётся в usersAsked — до переподключения не спрашиваем снова.
+   */
   private fetchUsers(): void {
     if (!this.online || !this.ready || !this.userWants.size) return;
     const ids = [...this.userWants].filter((id) => !this.usersAsked.has(id));
     this.userWants.clear();
-    for (const id of ids) {
-      this.usersAsked.add(id);
+    for (const id of ids) this.usersAsked.add(id);
+    for (let i = 0; i < ids.length; i += USERS_BATCH) {
+      const part = ids.slice(i, i + USERS_BATCH);
       this.run(async () => {
-        let u: PublicUser;
-        try { u = await this.http<PublicUser>(`/users/${id}`); } catch { return; }   // 404 — не видим этого человека
-        applyUserUpdated(this.store, u);
+        let r: { users: PublicUser[]; seq: number };
+        try { r = await this.http(`/users?ids=${part.join(',')}`); }
+        catch {
+          // связь пропала — спросим после переподключения; отказ сервера — не повторяем в цикле
+          if (!this.online) for (const id of part) { this.usersAsked.delete(id); this.userWants.add(id); }
+          return;
+        }
+        for (const u of r.users) applyUserUpdated(this.store, u, r.seq);
+        if (!r.users.length) return;
         await this.store.flush();
         this.changed();
       });

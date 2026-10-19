@@ -1,6 +1,7 @@
 import { afterAll, afterEach, beforeEach, expect, test } from 'bun:test';
 import { Engine } from '../src/engine';
 import { meView } from '../src/profile';
+import { sql } from '../../../apps/server/src/db';
 import { resetDb, startTestServer, watchInto } from './helpers';
 
 const srv = await startTestServer();
@@ -91,4 +92,92 @@ test('own profile is ordered by journal seq: a late older userUpdated does not r
   expect(p.setMe(me('ответ P1', 4))).toBe(false); // запоздавший ответ
   p.applyUser(pub('с другого устройства'), 6);
   expect(p.me).toMatchObject({ bio: 'с другого устройства', seq: 6 });
+});
+
+/** HTTP-запросы движка к /users (обёртка над fetch на время теста). */
+function countUsersFetches() {
+  const urls: string[] = [];
+  const real = globalThis.fetch;
+  globalThis.fetch = ((input: RequestInfo | URL, init?: RequestInit) => {
+    const u = String(input instanceof Request ? input.url : input);
+    if (/\/users(\?|\/\d)/.test(u)) urls.push(u);
+    return real(input as RequestInfo, init);
+  }) as typeof fetch;
+  return { urls, restore: () => { globalThis.fetch = real; } };
+}
+
+test('people: 50 unknown people come in one batch; strangers are not re-asked', async () => {
+  const a = await srv.login('Анна');
+  const others: { userId: number }[] = [];
+  for (let i = 0; i < 50; i++) others.push(await srv.login('Человек ' + i));
+  const stranger = await srv.login('Незнакомец');
+  await srv.chat(a.token, [a.userId, ...others.map((o) => o.userId)]);
+  const ea = await open(srv.config(a));
+  ea.connect();
+  await ea.whenIdle();
+  const ids = [...others.map((o) => o.userId), stranger.userId];
+  for (const id of ids) expect(ea.store.users.get(id)).toBeUndefined();   // группа не приносит профили участников
+  const f = countUsersFetches();
+  try {
+    const people = watchInto(ea, { kind: 'people', ids });
+    const l = await people.until((x) => x.length === 50);
+    expect(l[0]).toEqual({ key: String(others[0].userId), id: others[0].userId, name: 'Человек 0', photo: null });
+    expect(l.map((x) => x.id)).toEqual(others.map((o) => o.userId));   // порядок — как в запросе; незнакомца нет
+    // новая подписка и пересчёты не спрашивают незнакомца заново
+    const again = watchInto(ea, { kind: 'people', ids: [stranger.userId, others[1].userId] });
+    await again.until((x) => x.length === 1);
+    await ea.whenIdle();
+    await Bun.sleep(50);
+    expect(f.urls.length).toBe(1);
+    expect(f.urls[0]).toContain('/users?ids=');
+  } finally { f.restore(); }
+});
+
+test('people: two tabs of one worker asking the same ids make one request', async () => {
+  const a = await srv.login('Анна'), b = await srv.login('Борис'), c = await srv.login('Вера');
+  await srv.chat(a.token, [a.userId, b.userId, c.userId]);
+  const ea = await open(srv.config(a));
+  ea.connect();
+  await ea.whenIdle();
+  const f = countUsersFetches();
+  try {
+    const ids = [b.userId, c.userId];
+    const t1 = watchInto(ea, { kind: 'people', ids });
+    const t2 = watchInto(ea, { kind: 'people', ids: [c.userId, b.userId] });
+    await Bun.sleep(8);   // кадр прошёл, запрос уже в пути
+    const t3 = watchInto(ea, { kind: 'people', ids });
+    for (const t of [t1, t2, t3]) await t.until((x) => x.length === 2);
+    expect(t2.list().map((x) => x.name)).toEqual(['Вера', 'Борис']);
+    await ea.whenIdle();
+    expect(f.urls.length).toBe(1);
+  } finally { f.restore(); }
+});
+
+test('people: userUpdated changes only that person; offline restart shows names and photos from IndexedDB', async () => {
+  const a = await srv.login('Анна'), b = await srv.login('Борис'), c = await srv.login('Вера');
+  await srv.chat(a.token, [a.userId, b.userId, c.userId]);
+  const photo = { id: crypto.randomUUID(), small: crypto.randomUUID(), thumb: 'data:image/jpeg;base64,AAAA', at: 1 };
+  await sql`update users set photo = ${sql.json(photo as never)} where id = ${c.userId}`;
+  const cfgA = srv.config(a);
+  const ea = await open(cfgA), eb = await open(srv.config(b));
+  ea.connect(); eb.connect();
+  await Promise.all([ea.whenIdle(), eb.whenIdle()]);
+  const people = watchInto(ea, { kind: 'people', ids: [b.userId, c.userId] });
+  await people.until((x) => x.length === 2);
+  expect(people.list()[1]).toMatchObject({ name: 'Вера', photo });
+  const before = people.patches.length;
+
+  await eb.call({ type: 'updateProfile', firstName: 'Борис', lastName: 'Новый' });
+  await people.until((x) => x[0]?.name === 'Борис Новый');
+  const diffs = people.patches.slice(before).filter((p) => p.op === 'diff');
+  expect(diffs.flatMap((p) => (p.op === 'diff' ? p.upsert.map((u) => u.key) : []))).toEqual([String(b.userId)]);   // Веру не трогали
+
+  await ea.close(); engines.splice(engines.indexOf(ea), 1);
+  const cold = await open(cfgA);   // без connect: сети нет
+  const p2 = watchInto(cold, { kind: 'people', ids: [b.userId, c.userId] });
+  const l = await p2.until((x) => x.length === 2);
+  expect(l).toEqual([
+    { key: String(b.userId), id: b.userId, name: 'Борис Новый', photo: null },
+    { key: String(c.userId), id: c.userId, name: 'Вера', photo },
+  ]);
 });
