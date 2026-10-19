@@ -1,10 +1,10 @@
 import { installJoinLinks } from './ui/group/JoinLink';
 import { startMuteTimers } from './mute';
 import { refreshMyMusic } from './music';
-import { configureSpoilers, configureStickers, installSpoilers } from '@relay/ui';
+import { configureSpoilers, configureStickers, installSpoilers, loadPattern } from '@relay/ui';
 import { fetchBuild, onVisible, startUpdateCheck } from './update';
 import { claimMediaCache, sendMediaPolicy } from './storageInfo';
-import { getPrefs, subscribePrefs, type Prefs } from './prefs';
+import { getPrefs, isDark, subscribePrefs, type Prefs } from './prefs';
 import { enableStrictDom } from '@relay/ui';
 import { render } from 'preact';
 import { startData } from './data';
@@ -101,5 +101,7 @@ configureStickers({ base: '/stickers/', wasmUrl: '/dotlottie-player.wasm' });
 installSpoilers();
 startUpdateCheck({ current: __BUILD__, fetchBuild, onUpdate: () => setGlobal({ updateReady: true }), onVisible });
 startScreenBlur();
+// узор обоев — файлом: начинаем грузить до первого рендера, чтобы он проявился вместе с градиентом
+void loadPattern(getPrefs().wallpaper[isDark(getPrefs().theme) ? 'dark' : 'light'].pattern).catch(() => {});
 render(<App />, document.getElementById('app')!);
 boot();

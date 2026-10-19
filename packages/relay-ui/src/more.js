@@ -515,10 +515,34 @@ var DOODLES = {
   dot: [circ(12, 12, 1.4)],
   cloudSmall: ['M7 18h10a3.5 3.5 0 0 0 .5-7A5.5 5.5 0 0 0 7 10.3 3.9 3.9 0 0 0 7 18z']
 };
-var PATTERN_SETS = {
+/* Нарисованные узоры: SVG 1200×1200 (чёрные линии на прозрачном, бесшовные) в /patterns/<имя>.svg.
+   Лежат файлами, а не в коде: по 50–70 КБ, сервер отдаёт сжатыми. */
+var PATTERN_FILES = ['cuteMix', 'spaceCats', 'loveLetters', 'catCafe', 'sweetTooth', 'nightDreams', 'garden', 'party', 'secretChat', 'postOffice', 'musicCats', 'travel', 'rainyDay', 'ocean', 'online'];
+var BUILT_PATTERNS = {
   catsAndDogs: ['catHead', 'paw', 'bone', 'dogHead', 'fish', 'yarn', 'catSit', 'doghouse', 'ball', 'dot', 'balloon', 'dogRun', 'heart', 'bowl', 'mouse', 'catSleep', 'swirl', 'bird', 'plane', 'feather', 'paw', 'cloudSmall', 'dot', 'heart'],
   doodles: ['chats', 'send', 'mic', 'check', 'clock', 'image', 'smile', 'phone', 'star', 'attach', 'camera', 'poll', 'lock', 'video', 'cloud', 'pin', 'bell', 'palette', 'contact', 'link']
 };
+// порядок ключей = порядок в настройках: сначала нарисованные, потом собранные из значков
+var PATTERN_SETS = {};
+PATTERN_FILES.forEach(function (name) { PATTERN_SETS[name] = 'file'; });
+Object.keys(BUILT_PATTERNS).forEach(function (name) { PATTERN_SETS[name] = BUILT_PATTERNS[name]; });
+var isFilePattern = function (set) { return Object.prototype.hasOwnProperty.call(PATTERN_SETS, set) && PATTERN_SETS[set] === 'file'; };
+/* Размер плитки на экране: нарисованные — 1200 px с запасом под ретину, показываем 800 (значки ≈ 40–65 px). */
+function patternSize(set) { return isFilePattern(set) ? 800 : 420; }
+var patternText = Object.create(null), patternLoads = Object.create(null);
+/* Загрузить узор один раз: дальше он в памяти, и плитка собирается синхронно (без вспышки при смене темы и цвета). */
+function loadPattern(set) {
+  if (!isFilePattern(set)) return Promise.resolve();
+  if (patternText[set]) return Promise.resolve();
+  return patternLoads[set] || (patternLoads[set] = fetch('/patterns/' + set + '.svg').then(function (r) {
+    if (!r.ok) throw new Error('pattern ' + r.status);
+    return r.text();
+  }).then(function (t) {
+    if (!/^<svg[\s>]/.test(t.trim())) throw new Error('pattern: not svg');
+    patternText[set] = t;
+  }).catch(function (e) { delete patternLoads[set]; throw e; }));
+}
+function patternReady(set) { return !isFilePattern(set) || !!patternText[set]; }
 /* Цвет узора выводится из фона, а не хранится отдельно: насыщенность чуть выше,
    яркость ×0.65 на светлом фоне (на тёмном — наоборот, светлее), прозрачность 40%.
    Так любые обои сразу получают узор в своём тоне. */
@@ -548,6 +572,14 @@ function buildPattern(set, stroke) {
   // ключи — из localStorage пользователя: только собственные свойства (не __proto__ / constructor)
   if (Object.prototype.hasOwnProperty.call(patternCache, cacheKey)) return patternCache[cacheKey];
   if (!Object.prototype.hasOwnProperty.call(PATTERN_SETS, set)) set = 'catsAndDogs';
+  if (isFilePattern(set)) {
+    // ещё не загружен — ссылка на файл (превью-маске хватает её); загружен — линии цветом stroke, данными
+    if (!patternText[set]) return '"/patterns/' + set + '.svg"';
+    // линии — stroke="#000", мелкие детали (точки, сердечки, глаза) — путь без fill: красим и то, и другое (fill — на корне, наследуется)
+    var c = stroke.replace(/"/g, '');
+    var colored = patternText[set].replace(/stroke="#000"/g, 'stroke="' + c + '"').replace(/^\s*<svg /, '<svg fill="' + c + '" ');
+    return (patternCache[set + '|' + stroke] = '"data:image/svg+xml;charset=utf-8,' + encodeURIComponent(colored) + '"');
+  }
   var names = PATTERN_SETS[set];
   cacheKey = set + '|' + stroke;
   // deterministic scatter on a 420×420 tile (same tile size as the reference settings): 10×10 staggered, jittered cells
@@ -625,7 +657,11 @@ function Wallpaper(props) {
         if (typeof P.dark === 'boolean' && P.dark !== t.dark) return;
         var custom = P.colors && P.colors.length >= 4 ? P.colors.slice(0, 4) : null;
         var colors = custom || t.colors;
-        var key = [t.dark, colors.join(), P.pattern].join('|');
+        var set = typeof P.pattern === 'string' ? P.pattern : 'catsAndDogs';
+        // нарисованный узор ещё грузится: держим прежний (или градиент без узора), а когда придёт — проявится кроссфейдом
+        var ready = P.pattern === false || patternReady(set);
+        if (!ready) loadPattern(set).then(function () { if (rerun.current === apply) apply(true); }, function () {});
+        var key = [t.dark, colors.join(), P.pattern, ready].join('|');
         if (theme && key === lastKey) return;
         var modeChanged = theme && t.dark !== theme.dark;
         var themeSwitch = !theme || modeChanged || (!custom && t.colors.join() !== theme.colors.join());
@@ -633,17 +669,22 @@ function Wallpaper(props) {
         requestMutation(function () {
           // светлая ↔ тёмная: узор меняет режим (маска ↔ рисунок), а updatePattern режим маски не снимает — собираем заново
           if (wp && modeChanged) { wallpapers.splice(wallpapers.indexOf(wp), 1); wp.dispose(); wp = null; }
-          var set = typeof P.pattern === 'string' ? P.pattern : 'catsAndDogs';
-          var pattern = P.pattern === false ? undefined : t.dark
-            ? { image: buildPattern(set), mask: true, background: t.ink, size: '420px', opacity: P.maskOpacity || 0.55 }
+          var size = patternSize(set) + 'px';
+          var pattern = P.pattern === false || !ready ? undefined : t.dark
+            ? { image: buildPattern(set), mask: true, background: t.ink, size: size, opacity: P.maskOpacity || 0.55 }
             // светлая тема: узор нарисован цветом, выведенным из фона (прозрачность уже в цвете)
-            : { image: buildPattern(set, patternColor(colors)), mask: false, background: 'transparent', size: '420px', opacity: 1, blur: 0 };
+            : { image: buildPattern(set, patternColor(colors)), mask: false, background: 'transparent', size: size, opacity: 1, blur: 0 };
+          // обои создавали без узора (файл ещё грузился): у twallpaper тогда нет слоя узора — пересоздаём под снимком
+          if (wp && pattern && !wp.pattern) {
+            if (animate && !reducedMotion()) crossfadeSnapshot(el);
+            wallpapers.splice(wallpapers.indexOf(wp), 1); wp.dispose(); wp = null;
+          }
           if (!wp) {
             wp = new TWallpaper(el, { colors: colors, fps: 60, tails: 90, animate: !!P.animate && wpMotion(), scrollAnimate: !!P.scrollAnimate && wpMotion(), pattern: pattern });
             wp.init();
             wallpapers.push(wp);
           } else {
-            if (animate && !themeSwitch && !reducedMotion()) crossfadeSnapshot(el);
+            if (animate && ready && !themeSwitch && !reducedMotion()) crossfadeSnapshot(el);
             wp.updateColors(colors);
             if (typeof wp.drawGradient === 'function') wp.drawGradient();
             if (pattern) wp.updatePattern(pattern);
@@ -917,4 +958,4 @@ function GlassBar(props) {
   return h('header', { class: cx('rl-glassbar', props.class) }, props.children);
 }
 
-export { patternColor, Wallpaper, nudgeWallpaper, buildPattern, DOODLES, PATTERN_SETS, FloatShell, SideResizer, SidebarCard, SidebarHeader, FolderTabs, FolderRail, Fab, GlassBar, WindowList, AsidePanel, SideFrame, SlideStack, Menu, ReactionPicker, MentionList, DropOverlay, LinkPreview, PollBubble, UnreadDivider, SelectionBar, ChatSearchBar, Highlight, ContactPicker, CallRow, StatusAvatar, LoginQR, VirtualList, BottomNav, Tooltip, plural };
+export { patternColor, Wallpaper, nudgeWallpaper, buildPattern, loadPattern, patternSize, PATTERN_FILES, DOODLES, PATTERN_SETS, FloatShell, SideResizer, SidebarCard, SidebarHeader, FolderTabs, FolderRail, Fab, GlassBar, WindowList, AsidePanel, SideFrame, SlideStack, Menu, ReactionPicker, MentionList, DropOverlay, LinkPreview, PollBubble, UnreadDivider, SelectionBar, ChatSearchBar, Highlight, ContactPicker, CallRow, StatusAvatar, LoginQR, VirtualList, BottomNav, Tooltip, plural };

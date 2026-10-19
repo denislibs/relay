@@ -32,7 +32,15 @@ export function themeWallpaperColors(dark: boolean): string[] {
   });
 }
 
-export const PATTERN_NAMES: Record<string, string> = { catsAndDogs: 'Коты и собаки', doodles: 'Значки' };
+export const PATTERN_NAMES: Record<string, string> = {
+  cuteMix: 'Всё милое', spaceCats: 'Космокоты', loveLetters: 'Письма с любовью', catCafe: 'Котокафе', sweetTooth: 'Сладкоежка',
+  nightDreams: 'Ночные сны', garden: 'Сад', party: 'Праздник', secretChat: 'Секретный чат', postOffice: 'Почта',
+  musicCats: 'Музыкальные коты', travel: 'Путешествия', rainyDay: 'Дождливый день', ocean: 'Океан', online: 'В сети',
+  catsAndDogs: 'Коты и собаки', doodles: 'Значки',
+};
+
+/** Узор по умолчанию — первый нарисованный набор. */
+export const DEFAULT_PATTERN = 'cuteMix';
 
 export const sameColors = (a: string[] | null, b: string[] | null): boolean =>
   a === b || (!!a && !!b && a.length === b.length && a.every((c, i) => c === b[i]));

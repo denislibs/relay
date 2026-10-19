@@ -110,7 +110,7 @@ test('setPref wallpaper paths are sanitized', () => {
   setPref('wallpaper.dark.colors', ['#112233']);
   expect(getPrefs().wallpaper.dark.colors).toBeNull();
   setPref('wallpaper.light.pattern', '"); x');
-  expect(getPrefs().wallpaper.light.pattern).toBe('catsAndDogs');
+  expect(getPrefs().wallpaper.light.pattern).toBe('cuteMix');
   setPref('wallpaper.light.pattern', 'doodles');
   expect(getPrefs().wallpaper.light.pattern).toBe('doodles');
 });

@@ -16,3 +16,23 @@ test('buildPattern: unknown / prototype names fall back to the default set', () 
   for (const name of ['__proto__', 'constructor', 'toString', 'hasOwnProperty', 'nope']) expect(buildPattern(name, '#000')).toBe(def);
   expect(typeof def).toBe('string');
 });
+
+test('drawn patterns: a file link until loaded, then the lines in the requested colour; garbage is refused', async () => {
+  const { loadPattern, patternSize, PATTERN_SETS } = await import('./more.js');
+  const svg = '<svg xmlns="http://www.w3.org/2000/svg"><path fill="none" stroke="#000" d="M0 0h9"/><path d="M1 1h2v2z"/></svg>';
+  const real = globalThis.fetch;
+  globalThis.fetch = async (url) => new Response(url === '/patterns/garden.svg' ? svg : '<html>oops</html>');
+  try {
+    expect(PATTERN_SETS.garden).toBe('file');
+    expect(patternSize('garden')).toBe(800);
+    expect(patternSize('catsAndDogs')).toBe(420);
+    expect(buildPattern('garden', 'rgba(1,2,3,0.4)')).toBe('"/patterns/garden.svg"');
+    await loadPattern('garden');
+    const tinted = decodeURIComponent(buildPattern('garden', 'rgba(1,2,3,0.4)'));
+    expect(tinted).toContain('stroke="rgba(1,2,3,0.4)"');
+    expect(tinted).not.toContain('stroke="#000"');
+    expect(tinted).toContain('<svg fill="rgba(1,2,3,0.4)" ');   // детали без своего fill красятся тем же цветом
+    await expect(loadPattern('ocean')).rejects.toThrow();
+    expect(buildPattern('ocean', '#000')).toBe('"/patterns/ocean.svg"');
+  } finally { globalThis.fetch = real; }
+});

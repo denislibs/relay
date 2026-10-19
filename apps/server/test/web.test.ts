@@ -1,5 +1,5 @@
 import { afterAll, beforeEach, expect, test } from 'bun:test';
-import { mkdtempSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { createServer } from '../src/http';
@@ -8,6 +8,10 @@ import { resetDb } from './helpers';
 const dist = mkdtempSync(join(tmpdir(), 'relay-dist-'));
 writeFileSync(join(dist, 'index.html'), '<!doctype html><title>Relay</title>');
 writeFileSync(join(dist, 'main.js'), 'console.log(1)');
+const SVG = '<svg xmlns="http://www.w3.org/2000/svg"><path d="M0 0h1"/></svg>';
+mkdirSync(join(dist, 'patterns'));
+writeFileSync(join(dist, 'patterns', 'cuteMix.svg'), SVG);
+writeFileSync(join(dist, 'patterns', 'cuteMix.svg.gz'), Bun.gzipSync(SVG));
 process.env.WEB_DIST = dist;
 
 const server = createServer({ port: 0 });
@@ -40,4 +44,16 @@ test('static serving never leaves the dist folder and never shadows the API', as
   }
   expect((await fetch(`${base}/missing.js`)).status).toBe(404);
   expect((await fetch(`${base}/chats`)).status).toBe(401);
+});
+
+test('a pattern is sent precompressed to browsers that accept gzip, plain to the rest', async () => {
+  const zipped = await fetch(`${base}/patterns/cuteMix.svg`, { headers: { 'accept-encoding': 'gzip, br' }, decompress: false } as RequestInit);
+  expect(zipped.headers.get('content-encoding')).toBe('gzip');
+  expect(zipped.headers.get('content-type')).toContain('image/svg+xml');
+  expect(zipped.headers.get('cache-control')).toContain('max-age');
+  expect(new TextDecoder().decode(Bun.gunzipSync(new Uint8Array(await zipped.arrayBuffer())))).toBe(SVG);
+  const plain = await fetch(`${base}/patterns/cuteMix.svg`, { headers: { 'accept-encoding': 'identity' } });
+  expect(plain.headers.get('content-encoding')).toBeNull();
+  expect(await plain.text()).toBe(SVG);
+  expect((await fetch(`${base}/main.js`, { headers: { 'accept-encoding': 'gzip' } })).headers.get('cache-control')).toBe('no-cache');
 });

@@ -32,7 +32,7 @@ export interface KV { getItem(k: string): string | null; setItem(k: string, v: s
 export const PREFS_KEY = 'relay.prefs';
 const OLD_THEME_KEY = 'relay.theme';
 
-const wp = (): WallpaperPref => ({ pattern: 'catsAndDogs', colors: null, blur: false });
+const wp = (): WallpaperPref => ({ pattern: 'cuteMix', colors: null, blur: false });
 const all = (v: boolean) => ({ contacts: v, private: v, groups: v });
 /** @param reduced `prefers-reduced-motion` при первом запуске: уровень анимаций 0. */
 export function defaultPrefs(reduced = false): Prefs {

@@ -64,16 +64,20 @@ const INLINE_MIME = /^(image\/(jpeg|png|webp|gif|avif)|video\/(mp4|webm|ogg|quic
 const API = /^\/(health|me|users|contacts|settings|privacy|blocks|chats|presence|search|uploads|files|push|sessions|ws|dev|logout|auth|link-preview|groups|join)(\/|$)/;
 
 /** Статика клиента из WEB_DIST. Путь не может выйти за папку; пути без расширения — SPA, отдаём index.html. */
-function serveStatic(pathname: string): Response {
+function serveStatic(pathname: string, acceptEncoding = ''): Response {
   const dist = resolve(process.env.WEB_DIST ?? join(import.meta.dir, '..', '..', 'web', 'dist'));
   let decoded: string;
   try { decoded = decodeURIComponent(pathname); } catch { return new Response('Bad request', { status: 400 }); }
   const file = resolve(dist, '.' + (decoded === '/' ? '/index.html' : decoded));
   const inside = file === dist || file.startsWith(dist + sep);
   if (inside && existsSync(file) && statSync(file).isFile()) {
-    const res = new Response(Bun.file(file));
-    // имена файлов без хэша: браузер обязан перепроверять (ETag/Last-Modified), иначе после сборки держит старый CSS/JS
-    res.headers.set('cache-control', 'no-cache');
+    // рядом лежит сжатая копия (узоры обоев: .svg.gz) и браузер принимает gzip — отдаём её, тип — от исходного файла
+    const gz = file + '.gz';
+    const zipped = /\bgzip\b/.test(acceptEncoding) && existsSync(gz);
+    const res = new Response(Bun.file(zipped ? gz : file), { headers: { 'content-type': Bun.file(file).type, vary: 'accept-encoding' } });
+    if (zipped) res.headers.set('content-encoding', 'gzip');
+    // узоры не меняются между сборками (новый узор — новое имя); остальное без хэша в имени: браузер обязан перепроверять
+    res.headers.set('cache-control', decoded.startsWith('/patterns/') ? 'public, max-age=604800' : 'no-cache');
     return res;
   }
   if (!extname(decoded) && existsSync(join(dist, 'index.html'))) {
@@ -92,7 +96,7 @@ export function createServer(opts: { port: number }): Server {
       const url = new URL(req.url);
       try {
         if (url.pathname === '/health') return Response.json({ ok: true });
-        if ((req.method === 'GET' || req.method === 'HEAD') && !API.test(url.pathname)) return serveStatic(url.pathname);
+        if ((req.method === 'GET' || req.method === 'HEAD') && !API.test(url.pathname)) return serveStatic(url.pathname, req.headers.get('accept-encoding') ?? '');
 
         if (process.env.DEV_LOGIN === '1' && req.method === 'POST' && url.pathname === '/dev/login') {
           const { name, phone } = (await req.json()) as { name: string; phone?: string };
