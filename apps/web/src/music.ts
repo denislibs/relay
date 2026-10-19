@@ -4,6 +4,7 @@ import { MEDIA_CACHE } from './mediaCache';
 import { localPreview } from './data';
 import { getGlobal, setGlobal } from './global';
 import { showToast } from './settingsData';
+import { personName } from './people';
 
 // Музыка: один трек на сообщение, где бы его ни включили (лента, «Общие медиа», плейлист, профиль) —
 // ключ = ключ сообщения, поэтому кнопки везде показывают одно и то же состояние.
@@ -18,7 +19,7 @@ function senderName(senderId: number | undefined): string {
   const g = getGlobal();
   if (senderId == null) return '';
   if (senderId === g.me?.userId) return g.me?.name ?? 'Вы';
-  return g.names[senderId] ?? '';
+  return personName(senderId);
 }
 
 export function musicTrack(m: MusicMsg, chatId: number): Track {

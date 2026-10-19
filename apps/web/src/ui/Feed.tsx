@@ -8,7 +8,8 @@ import type { QuoteMsg } from '@relay/sync-engine/src/types';
 import { quoteContent } from './preview';
 import { memo } from 'preact/compat';
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'preact/hooks';
-import { toggleTodo, clearFocus, discardUnsent, retrySend, ensureNames, focusMessage, openInner, jumpToDate, localPreview, markListened, moveWindow, react, savePosition, savedPosition, seen } from '../data';
+import { toggleTodo, clearFocus, discardUnsent, retrySend, focusMessage, openInner, jumpToDate, localPreview, markListened, moveWindow, react, savePosition, savedPosition, seen } from '../data';
+import { wantPeople } from '../people';
 import { activeFrame, frameByKey, getGlobal, setGlobal, useGlobal } from '../global';
 import { toggleMusic, trackTitle, useFileCached } from '../music';
 import { showToast } from '../settingsData';
@@ -148,7 +149,7 @@ const Row = memo(function Row({ chatId, voiceTitle, author, onAuthor, onOpen, hl
           canToggle={canToggle}
           onToggle={(itemId: number, done: boolean) => { void toggleTodo(chatId, m.id as number, itemId, done).then((ok: boolean) => { if (!ok) showToast('Не удалось отметить задачу'); }); }}
           onReadOnly={() => showToast(m.fwdFrom ? 'Пересланный чек-лист нельзя менять' : `${voiceTitle} не разрешил(а) другим отмечать задачи`)}
-          person={(uid: number) => { const g = getGlobal(); const full = uid === meId ? g.me?.name ?? '' : g.names[uid] ?? ''; return { name: uid === meId ? 'Вы' : full, fullName: full, tone: peerTone(uid), avatar: senderAvatar(uid) }; }}
+          person={(uid: number) => { const g = getGlobal(); const full = uid === meId ? g.me?.name ?? '' : g.people[uid]?.name ?? ''; return { name: uid === meId ? 'Вы' : full, fullName: full, tone: peerTone(uid), avatar: senderAvatar(uid) }; }}
         />
         {mark}
       </div>
@@ -337,8 +338,7 @@ export function Feed({ frameKey, active, chatId, meId, peerName, group, onAuthor
   onMenu: (key: string, x: number, y: number, extra: MenuExtra) => void;
 }) {
   const messages = useGlobal((s) => frameByKey(s, frameKey)?.messages ?? NO_MESSAGES);
-  const names = useGlobal((s) => s.names);
-  useGlobal((s) => s.photos);   // фото авторов пришли — аватарки пачек перерисовываются
+  const people = useGlobal((s) => s.people);   // имена и фото авторов пришли — пачки перерисовываются
   // следующее/предыдущее голосовое этого чата — для автоперехода и кнопок плеера
   useEffect(() => {
     if (!active) return;
@@ -744,7 +744,7 @@ export function Feed({ frameKey, active, chatId, meId, peerName, group, onAuthor
   const photoKeys = photos.map((m) => m.key);
   // авторы фото — во вьювере всегда имя отправителя; подгружаем заранее, пока вьювер закрыт
   const authorIds = [...new Set(photos.map((m) => m.senderId as number))].join(',');
-  useEffect(() => { if (authorIds) ensureNames(authorIds.split(',').map(Number)); }, [authorIds]);
+  useEffect(() => { if (authorIds) wantPeople(authorIds.split(',').map(Number)); }, [authorIds]);
   // открыли видео — тихо докачиваем его целиком на устройство: второй просмотр без сети и без ожидания
   const openAtt = openIndex !== null ? photos[openIndex]?.attachment as Att | undefined : undefined;
   useEffect(() => {
@@ -786,7 +786,7 @@ export function Feed({ frameKey, active, chatId, meId, peerName, group, onAuthor
   }, [!!selecting]);
   const selShown = selecting ?? (selVis ? lastSel.current : null);
   const me = useGlobal((s) => s.me);
-  const nameOf = (id: number) => (id === meId ? me?.name ?? '' : names[id] ?? peerName);
+  const nameOf = (id: number) => (id === meId ? me?.name ?? '' : people[id]?.name ?? peerName);
   const nameRef = useRef(nameOf); nameRef.current = nameOf;
   const msgsRef = useRef<Item[]>([]);
   msgsRef.current = messages;
@@ -795,7 +795,7 @@ export function Feed({ frameKey, active, chatId, meId, peerName, group, onAuthor
     const all = msgsRef.current;
     startForward(chatId, m.groupId ? all.filter((x) => x.groupId === m.groupId && x.senderId === m.senderId) : [m], nameRef.current);
   }).current;
-  useEffect(() => { if (group) ensureNames([...new Set(messages.filter((m) => m.senderId !== meId).map((m) => m.senderId as number))]); }, [group, messages]);
+  useEffect(() => { if (group) wantPeople(messages.filter((m) => m.senderId !== meId).map((m) => m.senderId as number)); }, [group, messages]);
 
   // контекстное меню — одно на ленту, а не на каждый бабл (иначе обработчик ломал бы мемоизацию строк)
   const onContextMenu = (e: MouseEvent) => {
@@ -828,7 +828,7 @@ export function Feed({ frameKey, active, chatId, meId, peerName, group, onAuthor
   let run: preact.VNode[] | null = null, runKey = '', runSender = 0;
   const flushRun = () => {
     if (!run) return;
-    const sid = runSender, who = names[sid] ?? '';
+    const sid = runSender, who = people[sid]?.name ?? '';
     out.push(
       <div class="app-run" key={'run' + runKey}>
         {run}
@@ -858,12 +858,12 @@ export function Feed({ frameKey, active, chatId, meId, peerName, group, onAuthor
     if (svc?.type === 'todo_done' || svc?.type === 'todo_append') {
       flushRun();
       const list = messages.find((x) => x.id === m.replyToId)?.todo as { title: string; items: { id: number; title: string }[] } | undefined;
-      out.push(<div class="rl-action" key={m.key} role="note"><span>{todoLine(svc.type, svc.data ?? {}, mine ? 'Вы' : names[m.senderId as number] ?? peerName, list)}</span></div>);
+      out.push(<div class="rl-action" key={m.key} role="note"><span>{todoLine(svc.type, svc.data ?? {}, mine ? 'Вы' : people[m.senderId as number]?.name ?? peerName, list)}</span></div>);
       prevDay = day; prevSender = null;
       return;
     }
     if (isGroupService(svc?.type)) {
-      const text = serviceText(svc!.type as ServiceType, { data: svc!.data, body: m.body as string, mine, sender: names[m.senderId as number] ?? peerName, meId });
+      const text = serviceText(svc!.type as ServiceType, { data: svc!.data, body: m.body as string, mine, sender: people[m.senderId as number]?.name ?? peerName, meId });
       flushRun();
       out.push(<div class="rl-action" key={m.key} role="note"><span>{text}</span></div>);
       prevDay = day; prevSender = null;
@@ -883,7 +883,7 @@ export function Feed({ frameKey, active, chatId, meId, peerName, group, onAuthor
       <Row
         pos={pos}
         key={m.key}
-        author={group && !mine && start && !m.deleted ? names[m.senderId as number] ?? '' : undefined}
+        author={group && !mine && start && !m.deleted ? people[m.senderId as number]?.name ?? '' : undefined}
         onAuthor={onAuthorRow}
         onUser={onUserRow}
         sel={selShown ? (album ?? [m]).every((x) => selShown.includes(x.key as string)) : undefined}
@@ -894,14 +894,14 @@ export function Feed({ frameKey, active, chatId, meId, peerName, group, onAuthor
         m={m}
         meId={meId}
         chatId={chatId}
-        voiceTitle={mine ? 'Вы' : (group ? names[m.senderId as number] ?? peerName : peerName)}
+        voiceTitle={mine ? 'Вы' : (group ? people[m.senderId as number]?.name ?? peerName : peerName)}
         onReact={onReact}
         onOpen={onOpen}
         out={mine}
         start={start}
         end={end}
         quoted={quoted}
-        quoteAuthor={quoted ? (quoted.senderId === meId ? 'Вы' : group ? names[quoted.senderId as number] ?? '' : peerName) : undefined}
+        quoteAuthor={quoted ? (quoted.senderId === meId ? 'Вы' : group ? people[quoted.senderId as number]?.name ?? '' : peerName) : undefined}
         quoteTone={quoted ? (quoted.senderId === meId ? 'accent' : peerTone(quoted.senderId as number)) : undefined}
         appear={initial.current !== null && !initial.current.has(m.key)}
         flash={flashKey === m.key || !!album?.some((x) => x.key === flashKey)}
@@ -929,7 +929,7 @@ export function Feed({ frameKey, active, chatId, meId, peerName, group, onAuthor
         <MediaViewer
           index={openIndex}
           sender={peerName}
-          items={photos.map((m) => { const a = m.attachment as Att; return { sender: names[m.senderId as number] ?? '', avatar: senderAvatar(m.senderId as number),   // не название группы: пока имени нет — пусто, оно подгружается заранее
+          items={photos.map((m) => { const a = m.attachment as Att; return { sender: people[m.senderId as number]?.name ?? '', avatar: senderAvatar(m.senderId as number),   // не название группы: пока имени нет — пусто, оно подгружается заранее
  src: localPreview(m.key) ?? (openOffline && a.id === openAtt?.id ? openOffline : fileUrl(a)), qualities: localPreview(m.key) || (openOffline && a.id === openAtt?.id) ? undefined : qualitiesOf(a), kind: a.kind === 'video' ? 'video' : 'image', thumb: a.thumb, w: a.w, h: a.h, name: a.name, download: fileUrl(a, true), caption: m.body, date: clock(m.createdAt as string) }; })}
           origin={originOf}
           actions={(_it: unknown, i: number) => [{ icon: 'forward', label: 'Переслать', onClick: () => { const p = photos[i]; setViewer(null); if (p) startForward(chatId, [p], nameOf); } }]}

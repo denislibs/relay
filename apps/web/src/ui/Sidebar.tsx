@@ -2,7 +2,8 @@ import { ChatBanner } from './ChatBanner';
 import { UpdatePill } from './UpdatePill';
 import { Avatar, ChatRow, Highlight, Icon, MenuPopover, Presence, SlideStack, ChatRowSkeleton, useMinVisible, EmptyState, WindowList, FolderTabs, SidebarCard, SidebarHeader, peerTone, ripple } from '@relay/ui';
 import type { Item } from '@relay/sync-engine/src/types';
-import { ensureNames, loadMoreChats, openChat } from '../data';
+import { loadMoreChats, openChat } from '../data';
+import { usePerson } from '../people';
 import { closeSearch, openSearch } from '../search';
 import { GlobalSearch } from './search/GlobalSearch';
 import { setGlobal, useGlobal } from '../global';
@@ -58,8 +59,9 @@ const SideRow = memo(function SideRow({ c, meId, active, showDraft, muted, onMen
   const thumb = last ? previewThumb(last) : null;
   // имя автора — только в группах (в личке и так ясно, кто пишет); своё — «Вы», чужое — первое слово имени
   const group = c.kind === 'group' && last && !last.deleted && !last.service;   // служебное событие — без «Имя:», текст сам называет автора
-  const name = useGlobal((s) => (group && last.senderId !== meId ? s.names[last.senderId] : undefined));
-  useEffect(() => { if (group && last.senderId !== meId) ensureNames([last.senderId]); }, [group, last?.senderId]);
+  // чужой автор последнего в группе — и для «Имя:», и для текста служебного события (previewBody)
+  const sender = usePerson(c.kind === 'group' && last && !last.deleted && last.senderId !== meId ? last.senderId : null);
+  const name = group ? sender?.name : undefined;
   const author = !group ? undefined : last.senderId === meId ? 'Вы' : name ? name.split(' ')[0] : undefined;
   const draft = showDraft ? c.draft as string : '';
   return (

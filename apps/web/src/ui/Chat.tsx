@@ -31,7 +31,8 @@ import { Playlist } from './Playlist';
 import { inProfile, toggleProfileMusic, type Track } from '../music';
 import { Avatar, Button, Chip, Icon, MediaPolicy, peerTone, ChatSearchBar, Highlight, ripple, useMinVisible, requestMeasure, Composer, DropOverlay, GlassBar, IconButton, MenuPopover, Modal, ConfirmDialog, Presence, ReactionPicker, reducedMotion, plural, requestMutation, SelectionBar, isHeavyAnimating, onHeavyAnimationEnd, applyMarkdown, emptyValue, sameValue, voiceSupported, PlayerBar, roundSupported, startRound, Verified, canCopyImage, clipboardHtml, copyImage, copyRich, downloadUrl, TodoModal, TODO_ITEMS_MAX, DateModal, setDateCopiedToast } from '@relay/ui';
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'preact/hooks';
-import { sendTodo, appendTodo, editTodo, closeChat, deleteMessage, editMessage, ensureNames, focusMessage, openChat, openUserChat, pinMessage, unpinMessage, sendFile, sendFiles, sendRound, sendVoice, react, rejectTooBig, PLAYABLE_VIDEO, retrySend, discardUnsent, saveDraft, searchMessages, send, typing, typingDone } from '../data';
+import { sendTodo, appendTodo, editTodo, closeChat, deleteMessage, editMessage, focusMessage, openChat, openUserChat, pinMessage, unpinMessage, sendFile, sendFiles, sendRound, sendVoice, react, rejectTooBig, PLAYABLE_VIDEO, retrySend, discardUnsent, saveDraft, searchMessages, send, typing, typingDone } from '../data';
+import { wantPeople } from '../people';
 import type { Item, SearchHit } from '@relay/sync-engine/src/types';
 import type { Entity, Todo, TodoInput } from '@relay/protocol';
 
@@ -123,7 +124,7 @@ export function Chat({ chatId, frameKey, active }: { chatId: number; frameKey: s
   const [found, setFound] = useState<{ q: string; hits: SearchHit[]; at: number } | null>(null);
   // список совпадений под строкой поиска (как в Telegram): открыт, пока печатаем; выбор или ↑↓ — сворачивает
   const [listOpen, setListOpen] = useState(true);
-  const names = useGlobal((s) => s.names);
+  const people = useGlobal((s) => s.people);
   useEffect(() => {
     const q = findQ.trim();
     if (!finding || q.length < 2) { setFound(null); return; }
@@ -131,7 +132,7 @@ export function Chat({ chatId, frameKey, active }: { chatId: number; frameKey: s
     const t = setTimeout(() => searchMessages(q, chatId).then((r) => {
       if (!live) return;
       setFound({ q, hits: r.hits, at: 0 });
-      ensureNames([...new Set(r.hits.map((x) => x.senderId))]);
+      wantPeople(r.hits.map((x) => x.senderId));
     }).catch(() => {}), 300);
     return () => { live = false; clearTimeout(t); };
   }, [findQ, finding]);
@@ -170,7 +171,7 @@ export function Chat({ chatId, frameKey, active }: { chatId: number; frameKey: s
       const h = Math.min(inner.scrollHeight, 360, Math.round(innerHeight * 0.55));
       requestMutation(() => { box.style.height = h + 'px'; });
     });
-  }, [found, listOpen, names]);
+  }, [found, listOpen, people]);
   // Esc закрывает поиск, даже если фокус ушёл из поля (после выбора результата)
   useEffect(() => {
     if (!finding) return;
@@ -409,7 +410,7 @@ export function Chat({ chatId, frameKey, active }: { chatId: number; frameKey: s
     tone: fwd.hideSender || !fwd.preview.senders.length ? peerTone(me.userId) : peerTone(fwd.preview.senders[0].id),
     onClick: (e: MouseEvent) => setFwdMenu(e.currentTarget as HTMLElement),
   } : null;
-  const nameOf = (id: number) => (id === me.userId ? me.name : names[id] ?? (chat?.kind === 'direct' ? title : ''));
+  const nameOf = (id: number) => (id === me.userId ? me.name : people[id]?.name ?? (chat?.kind === 'direct' ? title : ''));
   // «статья»: развернуть (текст поля ввода — в редактор), свернуть (простое — обратно в поле), отправить
   const openArticle = () => {
     preloadArticleEditor();
@@ -506,7 +507,7 @@ export function Chat({ chatId, frameKey, active }: { chatId: number; frameKey: s
             <Presence show={listOpen && !!found} exitMs={140}>
               <div class="app-findlist" ref={listBox} role="listbox" aria-label="Найденные сообщения"><div class="app-findlist-in" ref={listInner}>
                 {found && found.hits.length ? found.hits.map((x, k) => {
-                  const who = names[x.senderId] ?? (x.senderId === me.userId ? me.name : chat?.kind === 'direct' ? title : '');
+                  const who = people[x.senderId]?.name ?? (x.senderId === me.userId ? me.name : chat?.kind === 'direct' ? title : '');
                   return (
                     <button type="button" role="option" aria-selected={k === found.at} key={x.id} class={'app-findrow' + (k === found.at ? ' app-findrow-on' : '')} onPointerDown={ripple} onClick={() => pick(k)}>
                       <Avatar name={who} tone={peerTone(x.senderId)} size={40} {...senderAvatar(x.senderId)} />

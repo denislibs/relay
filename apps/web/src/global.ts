@@ -80,13 +80,15 @@ export interface GlobalState {
   sessions: SessionInfo[] | null;   // активные сеансы с сервера (null — ещё не знаем); вид — sessionsView(sessions, opsKeys)
   sessionsOffline: boolean;         // последний запрос списка не дошёл (нет сети)
   opsKeys: string[];                // ключи операций настроек в очереди: оптимистичный вид сеансов
-  names: Record<number, string>;   // имена людей по id (авторы сообщений); кэш переживает перезагрузку
-  photos: Record<number, ProfilePhoto | null>;   // фото людей по id (авторы, участники групп); нет ключа — ещё не спрашивали
+  people: Record<number, Person>;   // люди по id (подписка people движка, см. people.ts); нет ключа — ещё не знаем
   devSim: DevSimFlags | null;      // имитатор сети движка включён (status.devSim): плашка «Режим разработчика»
   devTab: DevTab;                  // вкладка раздела «Для разработчиков»
   uploads: UploadItem[];           // неотправленные файлы во всех чатах (подписка uploads движка): индикатор «Отправка N файлов»
   preparing: UploadItem[];         // видео, которые эта вкладка сжимает перед отправкой (ещё не в очереди движка)
 }
+
+/** Человек из подписки people: имя — как его видит зритель (контакт — своим именем). */
+export type Person = Item & { id: number; name: string; photo: ProfilePhoto | null };
 
 /** Файл в очереди отправки: progress 0…1; uploaded — загружен и ждёт отправки (соседа по альбому); compressing — ещё сжимается (progress — сжатия). */
 export interface UploadItem { key: string; chatId: number; name: string; size: number; kind: string; mime: string; uploaded: boolean; progress: number; compressing?: boolean }
@@ -157,8 +159,7 @@ let state: GlobalState = {
   sessions: null,
   sessionsOffline: false,
   opsKeys: [],
-  photos: {},
-  names: (() => { try { return JSON.parse(localStorage.getItem('relay.names') ?? '{}'); } catch { return {}; } })(),
+  people: {},
   devSim: null,
   devTab: 'overview',
 };

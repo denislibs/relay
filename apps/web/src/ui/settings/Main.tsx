@@ -41,7 +41,7 @@ async function logout(): Promise<boolean> {
   // подписку сервер уже удалил вместе с сеансом; браузер тоже отписываем — новый вход подпишется заново
   await dropSubscription().catch(() => {});
   const uid = getGlobal().me?.userId;
-  try { localStorage.removeItem('relay.me'); localStorage.removeItem('relay.names'); } catch { /* приватный режим */ }
+  try { localStorage.removeItem('relay.me'); } catch { /* приватный режим */ }
   if (uid != null) try { indexedDB.deleteDatabase('relay-' + uid); } catch { /* */ }
   await releaseMediaCache();   // вложения — как и база: на устройстве после выхода не остаются
   setGlobal({ boot: 'login' });

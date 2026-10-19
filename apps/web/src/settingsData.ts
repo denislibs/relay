@@ -195,7 +195,7 @@ function onTerminated(reason: 'logout' | 'terminated'): void {
   terminating = true;
   // сервер удалил подписку вместе с сеансом; отписываем и браузер (best effort, не ждём)
   void dropSubscription().catch(() => {});
-  try { localStorage.removeItem(ME_KEY); localStorage.removeItem('relay.names'); } catch { /* приватный режим */ }
+  try { localStorage.removeItem(ME_KEY); } catch { /* приватный режим */ }
   void releaseMediaCache();
   // IndexedDB стирает движок (он же её и держит); здесь — плавный уход на экран входа и тост
   const root = document.getElementById('app');

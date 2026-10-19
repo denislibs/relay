@@ -5,8 +5,9 @@ import { Avatar, EmptyState, FolderTabs, Highlight, Icon, MediaViewer, peerTone,
 import type { Item, SearchHit } from '@relay/sync-engine/src/types';
 import type { ComponentChildren } from 'preact';
 import { useEffect, useMemo, useRef, useState } from 'preact/hooks';
-import { ensureNames, openChat, searchMessages } from '../../data';
-import { getGlobal, useGlobal } from '../../global';
+import { openChat, searchMessages } from '../../data';
+import { wantPeople } from '../../people';
+import { getGlobal, useGlobal, type Person } from '../../global';
 import { toggleMusic, trackTitle } from '../../music';
 import { avatarPhoto } from '../../profilePhoto';
 import {
@@ -193,14 +194,14 @@ function MessageResults({ q, empty }: { q: string; empty: boolean }) {
   const [state, setState] = useState<{ q: string; list: SearchHit[]; more: boolean; source: string } | null>(null);
   const busy = useRef(false);
   const end = useRef<HTMLDivElement>(null);
-  const names = useGlobal((s) => s.names);
+  const people = useGlobal((s) => s.people);
   const meId = useGlobal((s) => s.me?.userId);
   const load = (before?: number) => {
     if (busy.current) return;
     busy.current = true;
     searchMessages(q, undefined, before).then((r) => {
       setState((cur) => ({ q, list: [...(before && cur?.q === q ? cur.list : []), ...r.hits], more: r.hasMore, source: r.source }));
-      ensureNames([...new Set(r.hits.map((h) => h.senderId))]);
+      wantPeople(r.hits.map((h) => h.senderId));
     }).catch(() => setState((cur) => cur ?? { q, list: [], more: false, source: 'server' })).finally(() => { busy.current = false; });
   };
   useEffect(() => {
@@ -224,7 +225,7 @@ function MessageResults({ q, empty }: { q: string; empty: boolean }) {
       {list.map((h) => {
         const chat = chats.find((c) => c.id === h.chatId);
         const title = h.chatTitle ?? String(chat?.title ?? 'Чат');
-        const who = h.senderId === meId ? 'Вы' : chat?.kind === 'group' ? (names[h.senderId] ?? '').split(' ')[0] : '';
+        const who = h.senderId === meId ? 'Вы' : chat?.kind === 'group' ? (people[h.senderId]?.name ?? '').split(' ')[0] : '';
         return (
           <button key={h.chatId + ':' + h.id} type="button" class="rl-row app-gsearch-row app-gsearch-msg" onClick={() => showMessage(h.chatId, h.id)}>
             <Avatar name={title} tone={chat ? chatTone(chat) : peerTone(h.chatId)} size={48} logo={chat ? isSystemChat(chat) : false} {...(chat ? chatPhoto(chat) : {})} />
@@ -260,7 +261,7 @@ function MediaTab({ kind, q }: { kind: MediaTab; q: string }) {
     searchGlobalMedia(kind, query, before).then((r) => {
       if (getGlobal().search.trim() !== query) return;   // запрос уже сменили — ответ устарел
       setState((cur) => ({ q: query, hits: [...(before && cur?.q === query ? cur.hits : []), ...(r.hits as Hit[])], more: r.hasMore }));
-      ensureNames([...new Set(r.hits.map((h) => h.message.senderId))]);
+      wantPeople(r.hits.map((h) => h.message.senderId));
     }).catch(() => setState((cur) => cur ?? { q: query, hits: [], more: false })).finally(() => { busy.current = false; });
   };
   useEffect(() => { const t = setTimeout(() => load(), q ? 300 : 0); return () => clearTimeout(t); }, [kind, q]);
@@ -273,13 +274,13 @@ function MediaTab({ kind, q }: { kind: MediaTab; q: string }) {
   }, [state]);
   const [viewer, setViewer] = useState<number | null>(null);
   const grid = useRef<HTMLDivElement>(null);
-  const names = useGlobal((s) => s.names);
+  const people = useGlobal((s) => s.people);
   const meId = useGlobal((s) => s.me?.userId);
 
   if (!state || state.q !== q) return <div class="app-gsearch-scroll"><div class="app-sm-loading" aria-busy="true" /></div>;
   if (!state.hits.length) return <div class="app-gsearch-scroll"><EmptyState kind={q ? 'search' : 'media'} title={q ? 'Ничего не найдено' : 'Здесь пока пусто'} text={q ? 'Попробуйте другой запрос.' : EMPTY_TEXT[kind]} /></div>;
 
-  const who = (h: Hit) => senderLine(h, meId, names);
+  const who = (h: Hit) => senderLine(h, meId, people);
   if (kind === 'media') {
     const photos = state.hits.filter((h) => !h.message.attachment!.mime.startsWith('video/'));
     const open = (m: Msg) => {
@@ -319,10 +320,10 @@ function MediaTab({ kind, q }: { kind: MediaTab; q: string }) {
 }
 
 /** «Вы → чат» за свои, «Отправитель → группа» в группах, имя собеседника в личных (как в Telegram). */
-function senderLine(h: Hit, meId: number | undefined, names: Record<number, string>): string {
+function senderLine(h: Hit, meId: number | undefined, people: Record<number, Person>): string {
   const chat = h.chatTitle ?? 'Чат';
   if (h.message.senderId === meId) return `Вы → ${chat}`;
-  return h.chatKind === 'group' ? `${names[h.message.senderId] ?? '…'} → ${chat}` : chat;
+  return h.chatKind === 'group' ? `${people[h.message.senderId]?.name ?? '…'} → ${chat}` : chat;
 }
 
 function FileHit({ h, who }: { h: Hit; who: string }) {
@@ -374,10 +375,10 @@ function TrackHit({ h, who, hits, music }: { h: Hit; who: string; hits: Hit[]; m
   const [st, setSt] = useState(() => player.playerState());
   useEffect(() => player.subscribe(setSt), []);
   const playing = st.key === key && st.playing;
-  const names = getGlobal().names, meId = getGlobal().me?.userId;
-  const senderName = m.senderId === meId ? (getGlobal().me?.name ?? 'Вы') : names[m.senderId] ?? h.chatTitle ?? '';
+  const people = getGlobal().people, meId = getGlobal().me?.userId;
+  const senderName = m.senderId === meId ? (getGlobal().me?.name ?? 'Вы') : people[m.senderId]?.name ?? h.chatTitle ?? '';
   const voiceTrack = (x: Hit) => ({ key: String(x.message.clientId), kind: 'voice' as const, src: fileUrl(x.message.attachment!), duration: x.message.attachment!.duration ?? 0,
-    title: senderLine(x, meId, names), subtitle: x.message.attachment!.kind === 'round' ? 'Видеосообщение' : 'Голосовое сообщение', chatId: x.message.chatId as number, msgId: x.message.id });
+    title: senderLine(x, meId, people), subtitle: x.message.attachment!.kind === 'round' ? 'Видеосообщение' : 'Голосовое сообщение', chatId: x.message.chatId as number, msgId: x.message.id });
   const toggle = () => {
     if (music) { toggleMusic(m as never, hits.map((x) => x.message) as never, m.chatId as number); return; }
     player.setQueue((k: string, dir: 1 | -1) => {

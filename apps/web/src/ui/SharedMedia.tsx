@@ -98,7 +98,7 @@ function TabList({ chatId, tab }: { chatId: number; tab: MediaTab }) {
   // «Медиа»: фото открываются просмотрщиком (листать — по всем фото вкладки), видео — в ленте, где есть плеер
   const [viewer, setViewer] = useState<number | null>(null);
   const grid = useRef<HTMLDivElement>(null);
-  const names = useGlobal((s) => s.names);
+  const people = useGlobal((s) => s.people);
   const meId = useGlobal((s) => s.me?.userId);
   if (!items) return <div class="app-sm-loading" aria-busy="true" />;
   const photos = tab === 'media' ? items.filter((m) => !m.attachment!.mime.startsWith('video/')) : [];
@@ -114,7 +114,7 @@ function TabList({ chatId, tab }: { chatId: number; tab: MediaTab }) {
     {viewer !== null && photos[viewer] ? (
       <MediaViewer index={viewer}
         items={photos.map((m) => { const a = m.attachment!; return { src: fileUrl(a), thumb: a.thumb, w: a.w, h: a.h, name: a.name, download: fileUrl(a) + '?download=1', caption: m.body,
-          date: when(m.createdAt), sender: m.senderId === meId ? 'Вы' : names[m.senderId] ?? '', avatar: senderAvatar(m.senderId) }; })}
+          date: when(m.createdAt), sender: m.senderId === meId ? 'Вы' : people[m.senderId]?.name ?? '', avatar: senderAvatar(m.senderId) }; })}
         origin={(k: number) => grid.current?.querySelector<HTMLElement>(`[data-mid="${photos[k]?.id}"]`) ?? null}
         onClose={() => setViewer(null)} />
     ) : null}
@@ -230,7 +230,7 @@ const short = (iso: string) => (new Date(iso).toDateString() === new Date().toDa
 function senderTitle(senderId: number, me: number | undefined, chat: Item | undefined): string {
   const g = getGlobal();
   const chatTitle = String(chat?.title ?? '');
-  const name = senderId === me ? 'Вы' : g.names[senderId] ?? chatTitle;
+  const name = senderId === me ? 'Вы' : g.people[senderId]?.name ?? chatTitle;
   if (senderId === me) return `Вы → ${chatTitle}`;
   return chat?.kind === 'group' ? `${name} → ${chatTitle}` : name;
 }
