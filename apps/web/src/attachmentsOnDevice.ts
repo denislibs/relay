@@ -14,6 +14,8 @@ export interface AttachmentOnDevice {
   mimeType: string;
   storedAt: number;        // когда положили в кэш, мс
   lastOpenedAt: number;    // когда последний раз отдавали (не чаще раза в час), мс
+  /** Не файл целиком, а кусок начала видео (fileId = «<id>[/вариант]@<смещение>»): с какого байта и сколько весит весь файл. */
+  chunkOf?: { offset: number; fullSize: number };
 }
 
 /** Очистка ящика auto-evictable (сохранённое вами она не трогает). 0 — без ограничения. */

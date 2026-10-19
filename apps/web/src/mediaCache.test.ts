@@ -2,7 +2,7 @@ import { describe, expect, test } from 'bun:test';
 import { memoryAttachmentIndex } from './attachmentsOnDevice';
 import {
   CACHE_ATTACHMENTS_AUTO, CACHE_ATTACHMENTS_SAVED, clearAllAttachments, DEFAULT_POLICY, fetchMedia, findOnDevice, isMediaRequest,
-  loadPolicy, MAX_AUTO_FILE, migrateLegacyCaches, putAttachment, savePolicy, serveMedia, sweepAuto, type AttachmentStore,
+  loadPolicy, MAX_AUTO_FILE, migrateLegacyCaches, putAttachment, savePolicy, serveMedia, serveVideoRange, sweepAuto, type AttachmentStore,
 } from './mediaCache';
 
 /** Cache Storage в памяти: ключ — путь. */
@@ -41,6 +41,9 @@ const ok = (bytes: number, type = 'image/png') => new Response(new Uint8Array(by
 describe('isMediaRequest', () => {
   test('only plain GETs of /files/<uuid> on our origin', () => {
     expect(isMediaRequest(req(), 'http://app')).toBe(true);
+    expect(isMediaRequest(req(ID + '/preview'), 'http://app')).toBe(true);   // копии видео — тоже через SW
+    expect(isMediaRequest(req(ID + '/720'), 'http://app')).toBe(true);
+    expect(isMediaRequest(req(ID + '/1080'), 'http://app')).toBe(false);
     expect(isMediaRequest(req(ID + '?download=1'), 'http://app')).toBe(false);
     expect(isMediaRequest(req(ID, { headers: { range: 'bytes=0-1' } }), 'http://app')).toBe(false);
     expect(isMediaRequest(req(ID, { method: 'HEAD' }), 'http://app')).toBe(false);
@@ -235,4 +238,62 @@ test('legacy relay-media / relay-meta move into auto-evictable with their times 
   expect(keys(s, CACHE_ATTACHMENTS_AUTO)).toEqual([`/files/${fid(1)}`]);
   expect(s.index.rows.get(fid(1))).toEqual({ fileId: fid(1), bucket: 'auto-evictable', sizeBytes: 7, mimeType: 'image/jpeg', storedAt: 11, lastOpenedAt: 22 });
   expect(await loadPolicy(s)).toEqual({ keepAutoDays: 3, maxAutoMb: 200 });
+});
+
+describe('serveVideoRange — the start of a video in aligned chunks', () => {
+  const VID = '0b6f8c1e-3f2a-4c55-9d7e-1a2b3c4d5e6f';
+  const FULL = 5 * 1024 * 1024;
+  const K = 512 * 1024;
+  const file = new Uint8Array(FULL).map((_, i) => i % 251);
+  const rangeReq = (range: string, path = `/files/${VID}/720`) => new Request('http://app' + path, { headers: { range } });
+  /** Хранилище: отдаёт кусок по Range с Content-Range (как S3 за proxy, который открывает его по CORS). */
+  const storage = (opts: { hideSize?: boolean } = {}) => {
+    const asked: string[] = [];
+    const chunk = async (_url: string, range: string) => {
+      asked.push(range);
+      const [, a, b] = /bytes=(\d+)-(\d+)/.exec(range)!;
+      const end = Math.min(Number(b), FULL - 1);
+      return new Response(file.slice(Number(a), end + 1), { status: 206, headers: { 'content-type': 'video/mp4', ...(opts.hideSize ? {} : { 'content-range': `bytes ${a}-${end}/${FULL}` }) } });
+    };
+    return { asked, chunk };
+  };
+  const passed: string[] = [];
+  const pass = async (r: Request) => { passed.push(r.headers.get('range')!); return new Response('net', { status: 206 }); };
+
+  test('a range in the first 2 MB: one aligned chunk from the network, an honest 206 to the player, the chunk kept with the full size', async () => {
+    const s = fakeStore(), st = storage();
+    const out = await serveVideoRange(s, rangeReq('bytes=600000-'), pass, st.chunk, 7);
+    await out.background;
+    expect(st.asked).toEqual([`bytes=${K}-${2 * K - 1}`]);
+    expect(out.response.status).toBe(206);
+    expect(out.response.headers.get('content-range')).toBe(`bytes 600000-${2 * K - 1}/${FULL}`);
+    expect(new Uint8Array(await out.response.arrayBuffer())).toEqual(file.slice(600000, 2 * K));
+    expect(s.index.rows.get(`${VID}/720@${K}`)).toEqual({ fileId: `${VID}/720@${K}`, bucket: 'auto-evictable', sizeBytes: K, mimeType: 'video/mp4', storedAt: 7, lastOpenedAt: 7, chunkOf: { offset: K, fullSize: FULL } });
+  });
+
+  test('the same chunk again comes from the device — no network, also offline', async () => {
+    const s = fakeStore(), st = storage();
+    await (await serveVideoRange(s, rangeReq('bytes=0-'), pass, st.chunk, 1)).background;
+    const offline = async () => { throw new TypeError('offline'); };
+    const again = await serveVideoRange(s, rangeReq('bytes=100-199'), pass, offline, 2);
+    expect(again.response.headers.get('content-range')).toBe(`bytes 100-199/${FULL}`);
+    expect(new Uint8Array(await again.response.arrayBuffer())).toEqual(file.slice(100, 200));
+  });
+
+  test('beyond the first 2 MB, or when the storage hides the full size, the request goes to the network as is', async () => {
+    passed.length = 0;
+    const s = fakeStore();
+    await serveVideoRange(s, rangeReq(`bytes=${4 * K}-`), pass, storage().chunk);
+    await serveVideoRange(s, rangeReq('bytes=0-'), pass, storage({ hideSize: true }).chunk);
+    expect(passed).toEqual([`bytes=${4 * K}-`, 'bytes=0-']);
+    expect(s.index.rows.size).toBe(0);
+  });
+
+  test('chunks count towards the auto bucket and are swept like files; the original and variants are separate keys', async () => {
+    const s = fakeStore(), st = storage();
+    await (await serveVideoRange(s, rangeReq('bytes=0-', `/files/${VID}`), pass, st.chunk, 0)).background;
+    await (await serveVideoRange(s, rangeReq('bytes=0-', `/files/${VID}/preview`), pass, st.chunk, 0)).background;
+    expect([...s.index.rows.keys()].sort()).toEqual([`${VID}/preview@0`, `${VID}@0`]);
+    expect(await sweepAuto(s, { keepAutoDays: 1, maxAutoMb: 0 }, 2 * 24 * 3600_000)).toEqual({ removed: 2, autoBytes: 0 });
+  });
 });

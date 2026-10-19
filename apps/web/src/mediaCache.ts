@@ -49,10 +49,15 @@ export function deviceStore(): AttachmentStore {
 const withTimeout = <T>(p: Promise<T>, ms = OP_MS): Promise<T> =>
   Promise.race([p, new Promise<T>((_, rej) => setTimeout(() => rej(new Error('cache timeout')), ms))]);
 
-/** Ключ файла в кэше: путь без параметров. */
+/** Ключ файла в кэше: путь без параметров. fileId — «<uuid>», копия видео — «<uuid>/preview», «<uuid>/720»,
+ *  кусок начала видео — «…@<смещение>». */
 export const attachmentKey = (fileId: string): string => `/files/${fileId}`;
-const FILE_PATH = /^\/files\/([0-9a-f-]{36})$/;
+/** Адрес вложения, который просит страница: оригинал или копия видео. */
+const FILE_PATH = /^\/files\/([0-9a-f-]{36}(?:\/(?:preview|720))?)$/;
+/** Ключ в кэше: адрес вложения или кусок начала видео. */
+const KEY_PATH = /^\/files\/([0-9a-f-]{36}(?:\/(?:preview|720))?(?:@\d+)?)$/;
 const fileIdOf = (path: string): string | null => FILE_PATH.exec(path)?.[1] ?? null;
+const keyIdOf = (path: string): string | null => KEY_PATH.exec(path)?.[1] ?? null;
 
 /** Что кэшируем: GET вложения без параметров (download=1 — сохранение на диск) и без Range. */
 export function isMediaRequest(req: Request, origin: string): boolean {
@@ -62,10 +67,9 @@ export function isMediaRequest(req: Request, origin: string): boolean {
 }
 
 /**
- * Запрос части вложения (видео, аудио): GET /files/<id> с Range. SW пропускает его в сеть как есть — каждый кусок
- * снова идёт через /files/<id> и получает свежую подписанную ссылку (перемотка после истечения не ломается).
- * Из кэша части НЕ отдаём: Chrome не умеет перематывать видео, ответы на которое SW берёт из Cache Storage
- * (FFmpegDemuxer: data source error). Скачанное целиком видео страница играет по blob: (downloads.useOfflineUrl).
+ * Запрос части вложения (видео, аудио): GET /files/<id>[/вариант] с Range. Каждый кусок идёт через /files/… и
+ * получает свежую подписанную ссылку (перемотка после истечения не ломается). Начало видео SW отдаёт из своего
+ * кэша кусков (serveVideoRange), остальное — сеть как есть. Скачанное целиком играет по blob: (downloads.useOfflineUrl).
  */
 export function isMediaRangeRequest(req: Request, origin: string): boolean {
   if (req.method !== 'GET' || !req.headers.has('range')) return false;
@@ -125,6 +129,68 @@ export async function serveMedia(store: AttachmentStore, req: Request, net: (r: 
     .then((b) => (b.size <= MAX_AUTO_FILE ? putAttachment(store, fileId, b, 'auto-evictable', now) : false))
     .catch(() => false);
   return { response: res, background, stored: true };
+}
+
+/* ---------- начало видео: куски в кэше (как progressive у Telegram Web A) ----------
+   Плеер просит «с байта X и до конца». Если X в первых VIDEO_START_BYTES, SW качает кусок по сетке CHUNK
+   (с границы, кратной CHUNK), кладёт его в auto-evictable и отдаёт плееру 206 с честным Content-Range — плеер
+   прочитает кусок и попросит следующий. Повторное открытие стартует мгновенно и даже без сети; дальше — сеть
+   и обычная буферизация браузера (он грузит вперёд понемногу, не весь файл).
+   Ответ плееру собирается заново из байтов (не отдаём закэшированный Response как есть): так Chrome перематывает.
+   Хранилище обязано отдавать Content-Range по CORS (Access-Control-Expose-Headers) — иначе полный размер не
+   узнать, и SW просто пропускает запрос в сеть, как без кэша. */
+export const VIDEO_START_BYTES = 2 * 1024 * 1024;
+export const VIDEO_CHUNK = 512 * 1024;
+
+const RANGE = /^bytes=(\d+)-(\d*)$/;
+const partial = (body: ArrayBuffer, start: number, fullSize: number, mime: string): Response =>
+  new Response(body, { status: 206, statusText: 'Partial Content', headers: {
+    'content-type': mime, 'content-length': String(body.byteLength), 'accept-ranges': 'bytes',
+    'content-range': `bytes ${start}-${start + body.byteLength - 1}/${fullSize}`,
+  } });
+
+/**
+ * Ответ на Range-запрос видео. pass — запрос как есть в сеть (через /files/…: свежая ссылка). chunk — запрос куска
+ * в режиме cors, чтобы прочитать байты и Content-Range. background — запись куска в кэш или отметка «открывали».
+ */
+export async function serveVideoRange(store: AttachmentStore, req: Request, pass: (r: Request) => Promise<Response>, chunk: (url: string, range: string) => Promise<Response>, now = Date.now()):
+  Promise<{ response: Response; background: Promise<unknown> | null }> {
+  const fileId = fileIdOf(new URL(req.url).pathname);
+  const m = RANGE.exec(req.headers.get('range') ?? '');
+  const start = m ? Number(m[1]) : NaN;
+  if (!fileId || !m || !(start < VIDEO_START_BYTES)) return { response: await pass(req), background: null };
+  const want = m[2] ? Number(m[2]) : Infinity;
+  const offset = start - (start % VIDEO_CHUNK);
+  const chunkId = `${fileId}@${offset}`;
+  let bytes: ArrayBuffer, fullSize: number, mime: string, background: Promise<unknown> | null = null;
+  const hit = await findOnDevice(store, chunkId).catch(() => null);
+  if (hit?.rec.chunkOf) {
+    bytes = await hit.response.arrayBuffer();
+    fullSize = hit.rec.chunkOf.fullSize;
+    mime = hit.rec.mimeType;
+    background = touch(store, hit.rec, now);
+  } else {
+    let res: Response;
+    try { res = await chunk(req.url, `bytes=${offset}-${offset + VIDEO_CHUNK - 1}`); } catch { return { response: await pass(req), background: null }; }
+    fullSize = Number(/\/(\d+)$/.exec(res.headers.get('content-range') ?? '')?.[1]);
+    // не кусок (хранилище отдало файл целиком) или размер скрыт CORS — без кэша, как раньше
+    if (res.status !== 206 || !(fullSize > 0)) { void res.body?.cancel().catch(() => {}); return { response: await pass(req), background: null }; }
+    mime = res.headers.get('content-type') ?? 'video/mp4';
+    bytes = await res.arrayBuffer();
+    background = putChunk(store, chunkId, bytes, mime, offset, fullSize, now).catch(() => false);
+  }
+  const from = start - offset;
+  const to = Math.min(bytes.byteLength, want === Infinity ? bytes.byteLength : want - offset + 1);
+  if (from >= to) return { response: await pass(req), background };
+  return { response: partial(bytes.slice(from, to), start, fullSize, mime), background };
+}
+
+async function putChunk(store: AttachmentStore, chunkId: string, bytes: ArrayBuffer, mimeType: string, offset: number, fullSize: number, now: number): Promise<boolean> {
+  if (!(await makeRoom(store, bytes.byteLength))) return false;
+  const cache = await withTimeout(store.caches.open(CACHE_ATTACHMENTS_AUTO));
+  await withTimeout(cache.put(attachmentKey(chunkId), new Response(bytes, { headers: { 'content-type': mimeType, 'content-length': String(bytes.byteLength) } })), 30_000);
+  await store.index.put({ fileId: chunkId, bucket: 'auto-evictable', sizeBytes: bytes.byteLength, mimeType, storedAt: now, lastOpenedAt: now, chunkOf: { offset, fullSize } });
+  return true;
 }
 
 const isQuotaError = (e: unknown) => e instanceof DOMException && (e.name === 'QuotaExceededError' || e.code === 22);
@@ -198,10 +264,11 @@ async function reconcile(store: AttachmentStore, now: number): Promise<Attachmen
   for (const bucket of Object.keys(CACHE_OF) as AttachmentBucket[]) {
     const cache = await store.caches.open(CACHE_OF[bucket]);
     for (const key of await cache.keys()) {
-      const fileId = fileIdOf(new URL(key.url).pathname);
+      const fileId = keyIdOf(new URL(key.url).pathname);
       if (!fileId) continue;
       const row = rows.get(fileId);
       if (row && row.bucket === bucket) { seen.add(fileId); continue; }
+      if (fileId.includes('@') && !row) { await cache.delete(key); continue; }   // кусок без записи: размер файла не знаем — не нужен
       if (row?.bucket === 'saved-by-user') { await cache.delete(key); continue; }   // копия в auto при сохранённом — лишняя
       const res = await cache.match(key);
       const rec: AttachmentOnDevice = { fileId, bucket, sizeBytes: Number(res?.headers.get('content-length')) || 0, mimeType: res?.headers.get('content-type') ?? '', storedAt: now, lastOpenedAt: now };

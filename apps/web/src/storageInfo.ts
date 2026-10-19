@@ -26,8 +26,9 @@ export async function mediaCacheSize(): Promise<{ bytes: number; unknown: number
   if (typeof indexedDB === 'undefined') return { bytes, unknown, files, savedBytes, savedFiles };
   try {
     for (const r of await deviceStore().index.all()) {
-      files++;   // каждая запись — целый файл (части в кэш не попадают): всё это открывается без сети
       if (r.sizeBytes > 0) bytes += r.sizeBytes; else unknown++;
+      if (r.chunkOf) continue;   // кусок начала видео: место занимает, но отдельным файлом не считается
+      files++;   // целый файл: открывается без сети
       if (r.bucket === 'saved-by-user') { savedFiles++; savedBytes += r.sizeBytes; }
     }
   } catch { /* индекс недоступен */ }

@@ -8,7 +8,7 @@
 import type { AutoCleanupPolicy } from './attachmentsOnDevice';
 import {
   CACHE_APP_SHELL_PREFIX, deviceStore, fetchMedia, isMediaRangeRequest, isMediaRequest, LEGACY_CACHES,
-  loadPolicy, migrateLegacyCaches, savePolicy, serveMedia, sweepAuto,
+  loadPolicy, migrateLegacyCaches, savePolicy, serveMedia, serveVideoRange, sweepAuto,
 } from './mediaCache';
 declare const __BUILD__: string;
 const sw = self as unknown as ServiceWorkerGlobalScope;
@@ -52,6 +52,22 @@ sw.addEventListener('message', (e) => {
   e.waitUntil(savePolicy(store, p).then(() => sweep(p)).catch(() => {}));
 });
 
+/** Кусок вложения из сети в режиме cors: байты и Content-Range читаются (хранилище их открывает). */
+const corsRange = (url: string, range: string) => fetch(new Request(url, { mode: 'cors', credentials: 'same-origin', headers: { range } }));
+
+/**
+ * Часть видео из сети — тоже своим ответом (поток, не читаем в память): все части одного видео плеер получает
+ * одинаковыми, а не вперемешку «наш ответ» и «непрозрачный чужой» — Chrome такую смесь не играет.
+ * cors не прошёл (хранилище без CORS) — исходный запрос как есть, без кэша начала.
+ */
+async function rangeFromNetwork(req: Request): Promise<Response> {
+  let res: Response;
+  try { res = await corsRange(req.url, req.headers.get('range') ?? 'bytes=0-'); } catch { return fetch(req); }
+  const h = new Headers();
+  for (const k of ['content-type', 'content-length', 'content-range', 'accept-ranges']) { const v = res.headers.get(k); if (v) h.set(k, v); }
+  return new Response(res.body, { status: res.status, statusText: res.statusText, headers: h });
+}
+
 /** Сеть, но не дольше ms: потом — кэш, если он есть (иначе продолжаем ждать сеть). */
 function networkFirst(req: Request, fallback: () => Promise<Response | undefined>, ms = 3000): Promise<Response> {
   const net = fetch(req);
@@ -76,10 +92,12 @@ sw.addEventListener('fetch', (e) => {
     }));
     return;
   }
-  // часть видео/аудио — в сеть как есть, через /files/<id>: плеер не застрянет на истёкшей ссылке хранилища
-  // (без SW Chrome после перемотки идёт прямо по старой ссылке). Части не кэшируем: в кэше только целые файлы.
+  // часть видео/аудио — через /files/…: плеер не застрянет на истёкшей ссылке хранилища (без SW Chrome после
+  // перемотки идёт прямо по старой ссылке). Начало видео — из кэша кусков (serveVideoRange), остальное — сеть.
   if (isMediaRangeRequest(e.request, location.origin)) {
-    e.respondWith(fetch(e.request));
+    e.respondWith(serveVideoRange(store, e.request, rangeFromNetwork, (u, range) => corsRange(u, range))
+      .then(({ response, background }) => { if (background) e.waitUntil(background); return response; })
+      .catch(() => fetch(e.request)));
     return;
   }
   if (e.request.method !== 'GET' || url.origin !== location.origin || API.test(url.pathname) || url.pathname === '/version.json' || url.pathname === '/sw.js') return;
