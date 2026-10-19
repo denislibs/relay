@@ -815,10 +815,13 @@ html[data-anim="0"] .app-chatcol, html[data-anim="0"] .app-chatcol-below, html[d
 /* ---------- группа: аватар автора слева от пачки входящих, как в Telegram ---------- */
 .app-msg-grp .rl-msgline { padding-left: calc(10px + 42px); }
 .app-run { position: relative; }
-/* аватар — последним в пачке, наложен на низ последнего пузыря; sticky: при прокрутке держится у низа видимой ленты
-   (над полем ввода, там же, где последнее сообщение) и не выходит за верх своей пачки */
+/* аватар — внизу пачки, вровень с низом последнего пузыря; sticky: при прокрутке держится у низа видимой ленты
+   (над полем ввода, там же, где последнее сообщение). Липнет внутри колонки ровно высотой с пачку —
+   поэтому выше первого пузыря пачки не поднимается (раньше отрицательный отступ выпускал его на 34 px вверх) */
+/* top: 10px — отступ первой строки пачки (.rl-msgline-gap): колонка начинается ровно с первого пузыря */
+.app-run-col { position: absolute; z-index: 1; top: 10px; bottom: 0; left: 10px; width: 34px; display: flex; flex-direction: column; justify-content: flex-end; pointer-events: none; }
 .app-run-ava { position: sticky; bottom: 0;   /* отсчёт — от нижнего отступа ленты: ровно там стоит последнее сообщение */
-  z-index: 1; display: block; width: 34px; height: 34px; margin: -34px 0 0 10px; padding: 0; border: 0; border-radius: 50%; background: none; cursor: pointer; }
+  display: block; flex-shrink: 0; width: 34px; height: 34px; margin: 0; padding: 0; border: 0; border-radius: 50%; background: none; cursor: pointer; pointer-events: auto; }
 
 /* выбор фото в альбоме: кружок у каждой ячейки справа сверху, отмеченное фото уменьшается внутри своей ячейки */
 .rl-media-cell-sel > :not(.rl-media-check) { transition: transform 200ms ease-out, border-radius 200ms ease-out; }

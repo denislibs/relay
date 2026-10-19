@@ -702,9 +702,11 @@ export function Feed({ frameKey, active, chatId, meId, peerName, group, onAuthor
     out.push(
       <div class="app-run" key={'run' + runKey}>
         {run}
-        <button type="button" class="app-run-ava" aria-label={who || 'Автор'} tabIndex={-1} onClick={(e) => { e.stopPropagation(); onUserRow(sid); }}>
-          <Avatar name={who} tone={peerTone(sid)} size={34} {...senderAvatar(sid)} />
-        </button>
+        <div class="app-run-col">
+          <button type="button" class="app-run-ava" aria-label={who || 'Автор'} tabIndex={-1} onClick={(e) => { e.stopPropagation(); onUserRow(sid); }}>
+            <Avatar name={who} tone={peerTone(sid)} size={34} {...senderAvatar(sid)} />
+          </button>
+        </div>
       </div>,
     );
     run = null;
