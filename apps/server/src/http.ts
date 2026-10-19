@@ -334,9 +334,9 @@ export function createServer(opts: { port: number }): Server {
           if (from) return Response.json(await messageAtDate(userId, Number(hist[1]), from));
           const ids = url.searchParams.get('ids');
           if (ids) return Response.json({ messages: await getMessagesByIds(userId, Number(hist[1]), ids.split(',').map(Number).filter((n) => Number.isInteger(n) && n > 0).slice(0, 100)) });
-          const before = url.searchParams.get('before');
+          const before = url.searchParams.get('before'), after = Number(url.searchParams.get('after'));
           const limit = Number(url.searchParams.get('limit') ?? 50);
-          return Response.json(await getHistory(userId, Number(hist[1]), before ? Number(before) : null, limit));
+          return Response.json(await getHistory(userId, Number(hist[1]), before ? Number(before) : null, limit, Number.isInteger(after) && after > 0 ? after : null));
         }
         return new Response('Not found', { status: 404 });
       } catch (err) {

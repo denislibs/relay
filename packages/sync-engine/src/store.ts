@@ -20,28 +20,41 @@ function sameDraft(a: { text: string; entities?: Entity[] } | null | undefined, 
 type Range = [number, number];
 
 /**
- * Сообщение sort продлевает живой (последний) отрезок: журнал, снимок, подтверждение отправки — всё новее него
- * идёт подряд. Внутри отрезка — ничего; старее начала живого и вне отрезков — не продлевает (непрерывность не
- * доказана — это сделает страница истории).
+ * Сообщение журнала (или подтверждение отправки) продлевает живой (последний) отрезок: всё новее него приходит
+ * подряд. Внутри отрезка — ничего; старее начала живого и вне отрезков — не продлевает (непрерывность не доказана —
+ * это сделает страница истории). own — своё отправленное: id мог оказаться ниже начала живого отрезка (отрезок начат
+ * снимком, пока сообщение отправлялось) — тогда начало опускается до него, если не залезает на предыдущий отрезок.
  */
-function extendLive(ranges: Range[], sort: number): void {
-  const last = ranges[ranges.length - 1];
+function extendLive(ranges: Range[], sort: number, own = false): void {
+  const n = ranges.length, last = ranges[n - 1];
   if (!last) ranges.push([sort, sort]);
   else if (sort > last[1]) last[1] = sort;
+  else if (own && sort < last[0] && (n < 2 || sort > ranges[n - 2][1])) last[0] = sort;
 }
 
 /**
- * Страница истории: всё между lo и before (до начала, если start) — подряд. Сливается с отрезком, где before
- * (null — страница с новейшего края: сама по себе живой отрезок), и со всеми отрезками, которые задевает.
+ * Последнее сообщение чата из снимка или страницы диалогов: не доказано, что оно подряд с живым отрезком
+ * (между ними могли быть сообщения), поэтому новее живого — начинает новый живой отрезок; старый остаётся.
  */
-function addPage(ranges: Range[], lo: number | null, hi: number | null, before: number | null, start: boolean): Range[] {
-  const at = before == null ? -1 : ranges.findIndex((r) => r[0] <= before && before <= r[1]);
-  let span: Range | null = at >= 0 ? [ranges[at][0], ranges[at][1]] : null;
-  if (lo != null) span = span ? [Math.min(span[0], lo), span[1]] : [lo, hi!];
+function snapshotLive(ranges: Range[], sort: number): void {
+  const last = ranges[ranges.length - 1];
+  if (!last || sort > last[1]) ranges.push([sort, sort]);   // уже внутри отрезка или старее живого — ничего
+}
+
+/**
+ * Страница истории от at: older — всё между lo и at подряд (end — и до начала истории), newer — всё между at и hi
+ * (end — до самого нового). Сливается с отрезком, где at (null — страница с новейшего края: сама по себе живой
+ * отрезок), и со всеми отрезками, которые задевает.
+ */
+function addPage(ranges: Range[], lo: number | null, hi: number | null, at: number | null, dir: 'older' | 'newer', end: boolean): Range[] {
+  const i = at == null ? -1 : ranges.findIndex((r) => r[0] <= at && at <= r[1]);
+  let span: Range | null = i >= 0 ? [ranges[i][0], ranges[i][1]] : null;
+  if (lo != null) span = !span ? [lo, hi!] : dir === 'older' ? [Math.min(span[0], lo), span[1]] : [span[0], Math.max(span[1], hi!)];
   if (!span) return ranges;   // пустая страница вне отрезков
   const out: Range[] = [];
   for (const r of ranges) {
-    if ((r[1] < span[0] && !start) || r[0] > span[1]) out.push(r);
+    const below = r[1] < span[0] && !(end && dir === 'older'), above = r[0] > span[1] && !(end && dir === 'newer');
+    if (below || above) out.push(r);
     else span = [Math.min(span[0], r[0]), Math.max(span[1], r[1])];
   }
   out.push(span);
@@ -230,7 +243,7 @@ export class Store {
     switch (u.type) {
       case 'newMessage':
         this.setTyping(u.message.chatId, u.message.senderId, false); // написал — уже не «печатает»
-        return this.applyMessage(u.message, true, true);
+        return this.applyMessage(u.message, true, 'journal');
       case 'readOwn': return this.applyOwnRead(u.chatId, u.upToId);
       case 'readBy': return this.applyPeerRead(u.chatId, u.upToId);
       case 'draft': return this.applyRemoteDraft(u.chatId, u.text, u.at, u.entities);
@@ -299,7 +312,7 @@ export class Store {
       chat.unread = s.unread;
       if (s.last) {
         chat.knownMaxId = Math.max(chat.knownMaxId, s.last.id);
-        this.applyMessage(s.last, false, true);
+        this.applyMessage(s.last, false, 'snapshot');
       }
       this.markChat(chat);
     }
@@ -309,24 +322,37 @@ export class Store {
    * Страница истории (GET /chats/:id/messages?before): только данные, без влияния на unread. before — с чего
    * грузили (начало отрезка, null — с новейшего края); страница сливается с этим отрезком. !hasMore — дошли до начала.
    */
-  applyHistory(chatId: number, list: Message[], hasMore: boolean, before: number | null): void {
-    for (const m of list) this.applyMessage(m, false, false);
+  applyHistory(chatId: number, list: Message[], hasMore: boolean, before: number | null, gen?: number): void {
+    this.applyPage(chatId, list, hasMore, before, 'older', gen);
+  }
+
+  /** Страница истории новее after (?after): закрывает дыру над старым отрезком; !hasMore — дошли до самого нового. */
+  applyNewerHistory(chatId: number, list: Message[], hasMore: boolean, after: number, gen?: number): void {
+    this.applyPage(chatId, list, hasMore, after, 'newer', gen);
+  }
+
+  /** Сбросы серверного состояния (tooLong, смена базы): страница, запрошенная до сброса, отбрасывается. */
+  resetGen = 0;
+
+  private applyPage(chatId: number, list: Message[], hasMore: boolean, at: number | null, dir: 'older' | 'newer', gen?: number): void {
+    if (gen != null && gen !== this.resetGen) return;   // ответ пришёл после сброса — его отрезок устарел
+    for (const m of list) this.applyMessage(m, false, 'none');
     const chat = this.ensureChat(chatId);
     for (const m of list) chat.knownMaxId = Math.max(chat.knownMaxId, m.id);
     let lo: number | null = null, hi: number | null = null;
     for (const m of list) { if (lo == null || m.id < lo) lo = m.id; if (hi == null || m.id > hi) hi = m.id; }
-    chat.ranges = addPage(chat.ranges, lo, hi, before, !hasMore);
-    if (!hasMore) chat.historyStart = true;
+    chat.ranges = addPage(chat.ranges, lo, hi, at, dir, !hasMore);
+    if (!hasMore && dir === 'older') chat.historyStart = true;
     this.markChat(chat);
   }
 
   /** Сообщения не подряд с историей (страницы вкладок «Медиа» и т. п.): в кэш, но отрезки не трогают — лента их не покажет. */
   addLoose(chatId: number, list: Message[]): void {
-    for (const m of list) if (m.chatId === chatId) this.applyMessage(m, false, false);
+    for (const m of list) if (m.chatId === chatId) this.applyMessage(m, false, 'none');
   }
 
-  /** live — сообщение из журнала или снимка: продлевает живой отрезок истории. */
-  private applyMessage(m: Message, countUnread: boolean, live: boolean): void {
+  /** range: journal — продлевает живой отрезок, snapshot — последнее из снимка (snapshotLive), none — отрезки не трогает. */
+  private applyMessage(m: Message, countUnread: boolean, range: 'journal' | 'snapshot' | 'none'): void {
     const chat = this.ensureChat(m.chatId);
     const mine = m.senderId === this.userId;
     const map = this.map(m.chatId);
@@ -347,7 +373,8 @@ export class Store {
     };
     unreadOnArrival(this, chat, m, countUnread);
     chat.knownMaxId = Math.max(chat.knownMaxId, m.id);
-    if (live) extendLive(chat.ranges, m.id);
+    if (range === 'journal') extendLive(chat.ranges, m.id);
+    else if (range === 'snapshot') snapshotLive(chat.ranges, m.id);
     if (!prev || JSON.stringify(prev) !== JSON.stringify(local)) this.putMessage(local);
     this.markChat(chat);
   }
@@ -415,7 +442,7 @@ export class Store {
     const m = this.messages.get(chatId)?.get(clientId);
     if (m) this.putMessage({ ...m, id, createdAt, sort: id, status: m.status === 'read' || id <= chat.peerReadUpTo ? 'read' : 'sent' });
     chat.knownMaxId = Math.max(chat.knownMaxId, id);
-    extendLive(chat.ranges, id);   // неотправленные — часть живого отрезка
+    extendLive(chat.ranges, id, true);   // неотправленные — часть живого отрезка
     this.markChat(chat);
   }
 
@@ -531,6 +558,7 @@ export class Store {
   async wipe(epoch: string | null, keep: { outbox?: boolean } = {}): Promise<void> {
     // «оставить неотправленное»: очередь отправки, её файлы и очередь операций переживают очистку
     const saved = keep.outbox ? [...this.outbox.values()] : [];
+    this.resetGen++;
     for (const id of this.chats.keys()) this.touch(id);
     this.chats.clear(); this.chatV.clear(); this.messages.clear(); this.loaded.clear(); this.sorted.clear(); this.ids.clear();
     this.outbox.clear(); this.pendingReads.clear(); this.profile.reset(); this.contacts.reset(); this.settings.reset(); this.blocks.reset(); this.members.reset();
@@ -571,6 +599,7 @@ export class Store {
 
   /** tooLong: забыть всё серверное, оставив неотправленное. */
   resetForSnapshot(): void {
+    this.resetGen++;
     for (const chatId of [...this.chats.keys()]) {
       const map = this.messages.get(chatId);
       if (map) for (const [k, m] of map) if (m.id != null) { map.delete(k); }

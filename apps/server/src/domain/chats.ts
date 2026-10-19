@@ -266,9 +266,21 @@ export async function getMessagesByIds(userId: number, chatId: number, ids: numb
   return withReactions(rows.map(toMessage));
 }
 
-export async function getHistory(userId: number, chatId: number, before: number | null, limit: number): Promise<{ messages: Message[]; hasMore: boolean }> {
+/**
+ * Страница истории по возрастанию id: before — старее него (с конца), after — новее него (с after вверх; клиент
+ * догружает дыру между отрезками своей истории). hasMore — за страницей в ту же сторону есть ещё.
+ */
+export async function getHistory(userId: number, chatId: number, before: number | null, limit: number, after: number | null = null): Promise<{ messages: Message[]; hasMore: boolean }> {
   await assertMember(sql, chatId, userId);
   const take = Math.min(Math.max(limit, 1), 200);
+  if (after != null) {
+    const up = await sql`
+      select * from messages
+       where chat_id = ${chatId} and id > ${after} and id >= ${await historyFrom(chatId, userId)}
+       order by id
+       limit ${take + 1}`;
+    return { messages: await withReactions(up.slice(0, take).map(toMessage)), hasMore: up.length > take };
+  }
   const rows = await sql`
     select * from messages
      where chat_id = ${chatId} and (${before}::bigint is null or id < ${before}) and id >= ${await historyFrom(chatId, userId)}

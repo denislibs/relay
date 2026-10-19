@@ -1610,8 +1610,8 @@ export class Engine {
       const span = feedSpan(chat, all, q.anchor?.sort);
       const { from, to } = messageWindow(all, q, span.lo, span.hi);
       const have = span.hi - span.lo;
-      // старый отрезок, окно у его нового края — закрыть дыру до следующего отрезка, в фоне
-      if (!span.live && span.hi - to < page) this.run(() => this.fillGap(q.chatId, chat.ranges[span.i][1]));
+      // старый отрезок, окно у его нового края — страница новее него, в фоне (одна на сдвиг окна)
+      if (guard === 0 && !span.live && span.hi - to < page) this.run(() => this.loadNewer(q.chatId, chat.ranges[span.i][1]));
       if (span.start) return;
       let short: boolean;
       if (!q.anchor) short = have < q.limit;
@@ -1639,19 +1639,26 @@ export class Engine {
     });
   }
 
-  /** Старый отрезок, кончающийся на sort, и следующий за ним: история перед следующим, пока они не сольются. */
-  private fillGap(chatId: number, sort: number): Promise<void> {
+  /**
+   * Одна страница новее старого отрезка, кончающегося на sort (?after): дошла до следующего отрезка — сливаются.
+   * По чату — один такой запрос за раз; загрузку старых страниц (historyLoads) не держит.
+   */
+  private loadNewer(chatId: number, sort: number): Promise<void> {
+    if (this.newerLoads.has(chatId)) return this.newerLoads.get(chatId)!;
     const ranges = this.store.chats.get(chatId)?.ranges ?? [];
-    const target = ranges[rangeAt(ranges, sort) + 1]?.[1];
-    if (target == null) return Promise.resolve();
-    let pages = 0;
-    return this.loadHistory(chatId, 200, () => {
-      const rs = this.store.chats.get(chatId)?.ranges ?? [];
-      const i = rangeAt(rs, sort);
-      if (i < 0 || rs[i][1] >= target || !rs[i + 1] || ++pages > 50) return null;
-      return { before: rs[i + 1][0] };
-    });
+    const i = rangeAt(ranges, sort);
+    if (i < 0 || i === ranges.length - 1) return Promise.resolve();   // живой отрезок — новее ничего не нужно
+    const after = ranges[i][1], page = this.cfg.historyPage ?? 50, gen = this.store.resetGen;
+    const p = (async () => {
+      const res = await this.http<{ messages: Message[]; hasMore: boolean }>(`/chats/${chatId}/messages?limit=${page}&after=${after}`);
+      this.store.applyNewerHistory(chatId, res.messages, res.hasMore, after, gen);
+      await this.store.flush();
+      this.changed();
+    })().finally(() => this.newerLoads.delete(chatId));
+    this.newerLoads.set(chatId, p);
+    return p;
   }
+  private newerLoads = new Map<number, Promise<void>>();
 
   /** Страницы истории одна за другой, пока next() говорит, перед чем грузить (null — с новейшего края). Одна загрузка на чат за раз. */
   private loadHistory(chatId: number, page: number, next: () => { before: number | null } | null): Promise<void> {
@@ -1660,9 +1667,10 @@ export class Engine {
     if (!next()) return Promise.resolve();
     const p = (async () => {
       for (let n = next(); n; n = next()) {
-        const { before } = n;
+        const { before } = n, gen = this.store.resetGen;
         const res = await this.http<{ messages: Message[]; hasMore: boolean }>(`/chats/${chatId}/messages?limit=${page}${before ? `&before=${before}` : ''}`);
-        this.store.applyHistory(chatId, res.messages, res.hasMore, before);
+        if (gen !== this.store.resetGen) break;   // кэш сбросили, пока грузили, — страница к нему не относится
+        this.store.applyHistory(chatId, res.messages, res.hasMore, before, gen);
         await this.store.flush();
         this.changed();
         if (!res.messages.length) break;

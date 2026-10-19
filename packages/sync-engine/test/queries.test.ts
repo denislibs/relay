@@ -269,3 +269,61 @@ test('history ranges: kept with the chat across a restart; a cached chat from be
   expect(legacy.chats.get(CH)!.historyStart).toBe(true);
   expect(feedIds(legacy, { limit: 50 })).toEqual(ids(290, 300));
 });
+
+const summary = (last: ReturnType<typeof msg>) => ({ id: CH, kind: 'direct' as const, title: null, lastReadId: 0, unread: 0, last, peer: { id: PEER, name: 'b' } });
+
+test('history ranges: a snapshot last newer than the live range starts a new range instead of bridging the gap', async () => {
+  const s = await fresh();
+  s.applyUpdate({ type: 'newMessage', message: msg({ id: 110, chatId: CH, senderId: PEER }) });
+  s.applyHistory(CH, page(ids(100, 109)), true, 110);
+  s.applyChats([summary(page([110])[0])]);   // уже в отрезке — ничего
+  expect(s.chats.get(CH)!.ranges).toEqual([[100, 110]]);
+  s.applyChats([summary(page([150])[0])]);
+  expect(s.chats.get(CH)!.ranges).toEqual([[100, 110], [150, 150]]);
+  expect(feedIds(s, { limit: 50 })).toEqual([150]);
+  expect(feedMeta(s, { limit: 50 })).toMatchObject({ hasOlder: true, hasNewer: false, live: true });
+  // журнал продлевает новый живой отрезок; страница перед ним дотягивается до старого — слились
+  s.applyUpdate({ type: 'newMessage', message: page([151])[0] });
+  s.applyHistory(CH, page(ids(105, 149)), true, 150);
+  expect(s.chats.get(CH)!.ranges).toEqual([[100, 151]]);
+});
+
+test('history ranges: a history page answered after a reset is dropped', async () => {
+  const s = await fresh();
+  s.applyUpdate({ type: 'newMessage', message: msg({ id: 60, chatId: CH, senderId: PEER }) });
+  const gen = s.resetGen;
+  s.resetForSnapshot();
+  s.applyHistory(CH, page(ids(40, 59)), true, 60, gen);
+  expect(s.chats.get(CH)!.ranges).toEqual([]);
+  expect(feedIds(s, { limit: 50 })).toEqual([]);
+  expect(s.chatMessages(CH)).toHaveLength(0);
+});
+
+test('history ranges: own message acked below the live range start pulls the start down and stays in the feed', async () => {
+  const s = await fresh();
+  s.applyUpdate({ type: 'newMessage', message: msg({ id: 100, chatId: CH, senderId: PEER }) });
+  s.applyHistory(CH, page(ids(90, 99)), true, 100);
+  s.applyChats([summary(page([200])[0])]);
+  s.addPending({ clientId: 'own', chatId: CH, body: 'моё', replyToId: null, createdAt: Date.now(), failed: false });
+  s.ack('own', 150, new Date().toISOString());
+  expect(s.chats.get(CH)!.ranges).toEqual([[90, 100], [150, 200]]);
+  expect(feedIds(s, { limit: 50 })).toEqual([150, 200]);
+  // ниже конца предыдущего отрезка — не трогаем (отрезки не пересекаются)
+  s.addPending({ clientId: 'own2', chatId: CH, body: 'ещё', replyToId: null, createdAt: Date.now(), failed: false });
+  s.ack('own2', 95, new Date().toISOString());
+  expect(s.chats.get(CH)!.ranges).toEqual([[90, 100], [150, 200]]);
+});
+
+test('history ranges: a newer page from an old range merges with the next range when it reaches it', async () => {
+  const s = await fresh();
+  s.applyUpdate({ type: 'newMessage', message: page([300])[0] });
+  s.applyHistory(CH, page(ids(290, 299)), true, 300);
+  s.applyHistory(CH, page(ids(250, 255)), true, 256);   // старый отрезок сам по себе (как после вытеснения)
+  expect(s.chats.get(CH)!.ranges).toEqual([[250, 255], [290, 300]]);
+  expect(feedMeta(s, { limit: 50, anchor: { sort: 253, side: 'center' } })).toMatchObject({ hasNewer: true, live: false });
+  s.applyNewerHistory(CH, page(ids(256, 270)), true, 255);
+  expect(s.chats.get(CH)!.ranges).toEqual([[250, 270], [290, 300]]);
+  s.applyNewerHistory(CH, page(ids(271, 292)), true, 270);
+  expect(s.chats.get(CH)!.ranges).toEqual([[250, 300]]);
+  expect(feedMeta(s, { limit: 100, anchor: { sort: 253, side: 'center' } })).toMatchObject({ hasNewer: false, live: true });
+});

@@ -1,5 +1,5 @@
 import { beforeEach, expect, test } from 'bun:test';
-import { createChat, getHistory, listChats, listChatsPage } from '../src/domain/chats';
+import { createChat, deleteDirectChat, getHistory, listChats, listChatsPage } from '../src/domain/chats';
 import { sendMessage } from '../src/domain/messages';
 import { markRead } from '../src/domain/reads';
 import { makeChat, makeUser, resetDb } from './helpers';
@@ -39,6 +39,24 @@ test('history pages backwards and returns ascending ids', async () => {
   const page2 = await getHistory(b, ab, ids[3], 10);
   expect(page2.messages.map((m) => m.id)).toEqual([ids[0], ids[1], ids[2]]);
   expect(page2.hasMore).toBe(false);
+});
+
+test('history pages forward with after: ascending, hasMore, members only, hidden history stays hidden', async () => {
+  const a = await makeUser(), b = await makeUser(), c = await makeUser();
+  const ab = await makeChat([a, b]);
+  const ids: number[] = [];
+  for (let i = 1; i <= 5; i++) ids.push(await send(a, ab, String(i)));
+  const up1 = await getHistory(b, ab, null, 2, ids[0]);
+  expect(up1.messages.map((m) => m.id)).toEqual([ids[1], ids[2]]);
+  expect(up1.hasMore).toBe(true);
+  const up2 = await getHistory(b, ab, null, 10, ids[2]);
+  expect(up2.messages.map((m) => m.id)).toEqual([ids[3], ids[4]]);
+  expect(up2.hasMore).toBe(false);
+  await expect(getHistory(c, ab, null, 10, ids[0])).rejects.toMatchObject({ code: 'not_member' });
+  // «удалить чат у себя»: старое не возвращается и при листании вперёд
+  await deleteDirectChat(b, ab, false);
+  const fresh = await send(a, ab, 'после');
+  expect((await getHistory(b, ab, null, 10, 1)).messages.map((m) => m.id)).toEqual([fresh]);
 });
 
 test('history is members only', async () => {
