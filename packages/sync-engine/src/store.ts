@@ -600,7 +600,7 @@ export class Store {
     this.setProgress(clientId, 1);
   }
   /** Загрузка частями: какие части уже приняты (null — начать заново). */
-  setUploadState(clientId: string, up: OutboxEntry['upload']): void {
+  setUploadState(clientId: string, up: OutboxEntry['upload'] | null): void {   // null — загрузка закончена, состояние убрать
     const o = this.outbox.get(clientId);
     if (!o) return;
     if (up) o.upload = up; else delete o.upload;

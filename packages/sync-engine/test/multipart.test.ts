@@ -56,6 +56,7 @@ test('a big file goes in parts straight to the storage and arrives whole', async
   expect(seen.parts.sort()).toEqual([1, 2, 3]);
   const id = (m.attachment as { id: string }).id;
   const got = await download(id, a.token);
+  expect(got.length).toBe(file.size);
   expect(Bun.hash(got)).toBe(Bun.hash(new Uint8Array(await file.arrayBuffer())));
   expect((await sql`select upload_id from attachments where id = ${id}`)[0].upload_id).toBeNull();
 });

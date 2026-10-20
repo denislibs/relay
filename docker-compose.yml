@@ -220,6 +220,7 @@ services:
       S3_PUBLIC_ENDPOINT: http://s3:8333
       VALKEY_URL: redis://valkey:6379
       RELAY_BUS_PREFIX: relay_test
+      SERVICE_CHAT: "off"   # без приветственного чата «Relay»: тесты считают чаты пользователя точно
       MEILI_URL: http://search:7700
       MEILI_MASTER_KEY: relay-dev-master-key-change-me
       SEARCH_INDEX_PREFIX: relay_test

@@ -136,18 +136,20 @@ test('TTL: inactive sessions stop working at once and the sweep deletes them; th
   await sql`update sessions set last_active_at = now() - interval '10 days' where id = ${other.id}`;
 
   for (const body of [{ days: 8 }, { days: '30' }, null, {}]) expect((await call(a1, 'PUT', '/settings/sessions-ttl', body)).status).toBe(400);
+  // в журнале до смены уже может быть своё (служебный чат «Relay» с приветствием на первом GET /me) — считаем от этой точки
+  const before = (await getUpdates(a1.userId, 0)).seq;
   const r = await call(a1, 'PUT', '/settings/sessions-ttl', { days: 7 });
   expect(r.status).toBe(200);
-  expect(await r.json()).toMatchObject({ sessionsTtlDays: 7, seq: 1 });
-  expect((await getUpdates(a1.userId, 0)).items.map((i) => i.update)).toEqual([
-    { type: 'settingsChanged', settings: { notify: { direct: { muted: false, preview: true }, group: { muted: false, preview: true } }, sessionsTtlDays: 7, folders: [] } },
-    { type: 'sessionsChanged' },   // sweep завершил неактивный сеанс
-  ]);
+  expect(await r.json()).toMatchObject({ sessionsTtlDays: 7, seq: before + 1 });
+  const ups = (await getUpdates(a1.userId, before)).items.map((i) => i.update);
+  expect(ups).toHaveLength(2);
+  expect(ups[0]).toMatchObject({ type: 'settingsChanged', settings: { sessionsTtlDays: 7 } });
+  expect(ups[1]).toEqual({ type: 'sessionsChanged' });   // sweep завершил неактивный сеанс
   // смена срока сразу завершила неактивный сеанс
   expect((await list(a1)).map((s) => s.id)).toEqual([cur.id]);
   expect((await call(a2, 'GET', '/me')).status).toBe(401);
   // повтор того же значения журнал не трогает
-  expect(await (await call(a1, 'PUT', '/settings/sessions-ttl', { days: 7 })).json()).toMatchObject({ seq: 2 });
+  expect(await (await call(a1, 'PUT', '/settings/sessions-ttl', { days: 7 })).json()).toMatchObject({ seq: before + 2 });
 
   // неактивный дольше срока не действует ещё до чистки; чистка удаляет его строку
   const a3 = await login('Анна');

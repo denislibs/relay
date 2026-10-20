@@ -89,6 +89,8 @@ const ensured = new Set<number>();
  * (без push). Вызывается на GET /me; проверка в базе — один раз на процесс для пользователя.
  */
 export async function ensureServiceChat(userId: number): Promise<void> {
+  // тесты движка (SERVICE_CHAT=off) считают чаты пользователя точно — приветственный «Relay» им лишний
+  if (process.env.SERVICE_CHAT === 'off') return;
   if (ensured.has(userId)) return;
   const [has] = await sql`select 1 from service_chats where user_id = ${userId}`;
   if (!has) {

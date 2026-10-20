@@ -498,7 +498,7 @@ test('storageStats counts rows per store and survives resetLocal', async () => {
   await ea.whenIdle();
   const s = await ea.call({ type: 'storageStats' }) as { rows: Record<string, number>; bytes: number | null; exact: boolean };
   expect(s.rows.chats).toBeGreaterThanOrEqual(1);
-  expect(s.rows.messages).toBe(2);
+  expect(s.rows.messages).toBe(1);   // снимок хранит последнее сообщение чата («два»); историю — при открытии чата
   expect(s.rows.outbox).toBe(0);
   expect(Object.keys(s.rows)).toContain('profilePhotos');   // все таблицы схемы, даже пустые
   expect(s.bytes === null || s.bytes >= 0).toBe(true);
