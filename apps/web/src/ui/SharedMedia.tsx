@@ -11,7 +11,7 @@ import { animateScroll, gridCorners, tabLabel, tabScrollTarget, tileSrc, videoFr
 import { getGlobal, useGlobal } from '../global';
 import { toggleMusic, trackTitle } from '../music';
 import { clock, dayLabel, fileSize, lastSeenText } from './format';
-import { startDirectChat } from '../data';
+import { openUserChat } from '../data';
 import { useMembers, type Member } from '../members';
 import { wantPeople } from '../people';
 
@@ -41,7 +41,7 @@ type Tab = SharedTab;
 
 /** group — в группе первая вкладка «Участники» (как в Telegram): панель не бывает пустой.
  *  onTitle — название показанной вкладки: шапка панели пишет его, когда вкладки прилипли к верху.
- *  onMember — клик по участнику: панель выдвигает его профиль (без него — личный чат). */
+ *  onMember — клик по участнику (без него — переписка с ним поверх текущего чата, через стек). */
 export function SharedMedia({ chatId, group = false, onTitle, onMember }: { chatId: number; group?: boolean; onTitle?: (title: string) => void; onMember?: (userId: number) => void }) {
   const [tab, setTab] = useState<Tab | null>(null);
   const members = useMembers(chatId, group);
@@ -91,7 +91,7 @@ export function SharedMedia({ chatId, group = false, onTitle, onMember }: { chat
       <div class="rl-aside-pages" ref={pages}>
         {/* ленивые картинки и кадры видео меряют запас от прокрутки панели, а не от окна (её край их обрезает) */}
         <LazyRoot.Provider value={root}>
-          <SlideStack variant="tabs" order={tabs} active={active} render={(k: string) => k === 'members' ? <MembersList key={chatId + k} data={members} onOpen={onMember ?? ((id) => void startDirectChat(id))} /> : <TabList key={chatId + k} chatId={chatId} tab={k as MediaTab} />} />
+          <SlideStack variant="tabs" order={tabs} active={active} render={(k: string) => k === 'members' ? <MembersList key={chatId + k} data={members} onOpen={onMember ?? ((id) => void openUserChat(id))} /> : <TabList key={chatId + k} chatId={chatId} tab={k as MediaTab} />} />
         </LazyRoot.Provider>
       </div>
     </>
@@ -303,7 +303,7 @@ function senderTitle(senderId: number, me: number | undefined, chat: Item | unde
   return chat?.kind === 'group' ? `${name} → ${chatTitle}` : name;
 }
 
-/** Участники группы — как в Telegram: аватар, имя, статус (в сети — цветом), «владелец» справа; клик — его профиль.
+/** Участники группы — как в Telegram: аватар, имя, статус (в сети — цветом), «владелец» справа; клик — переписка с ним поверх группы.
  *  Список виртуальный: в большой группе в DOM только видимые строки. */
 function MembersList({ data, onOpen }: { data: { ownerId: number | null; members: Member[] } | null; onOpen: (userId: number) => void }) {
   const me = useGlobal((s) => s.me?.userId);
