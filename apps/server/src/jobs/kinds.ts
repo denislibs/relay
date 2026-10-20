@@ -12,6 +12,7 @@ import { s3 } from '../domain/files';
 import { processVideo } from './video';
 import { processPhoto } from './photo';
 import { encryptLegacyStep, loadOpen, openForChat, sealForChat } from '../domain/messageContent';
+import { rewrapStep } from '../crypto/kms';
 import { toMessage } from '../domain/chats';
 import { enqueue } from './queue';
 
@@ -71,6 +72,14 @@ register('crypto.encrypt', async (p: { after?: number; batch?: number }) => {
   const r = await encryptLegacyStep(p.after ?? 0, p.batch ?? 500);
   if (r.encrypted) console.log(`crypto: encrypted +${r.encrypted}${r.done ? ', done' : ''}`);
   if (!r.done) await enqueue(sql, 'crypto.encrypt', { after: r.next, batch: p.batch });
+});
+
+// смена главного ключа: ключи чатов перезаворачиваются новым (данные не перешифровываются); раз в сутки и при старте
+register('crypto.rewrap', async (p: { after?: [number, number] }) => {
+  const r = await rewrapStep(sql, p.after ?? [0, 0]);
+  if (r.rewrapped) console.log(`crypto: rewrapped ${r.rewrapped} chat keys`);
+  if (!r.done) { await enqueue(sql, 'crypto.rewrap', { after: r.next }); return; }
+  return { again: { inSec: 24 * 3600 } };
 });
 
 // брошенные загрузки (pending старше суток): запись и объект в S3

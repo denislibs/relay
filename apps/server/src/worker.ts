@@ -2,12 +2,14 @@ import { sql } from './db';
 import { SLOW_KINDS } from './jobs/kinds';
 import { enqueue, ensurePeriodic } from './jobs/queue';
 import { startWorker } from './jobs/worker';
+import { startKeyEvents } from './crypto/keyEvents';
 import { scheduleReindexIfStale } from './search/messagesIndex';
 
 // одна на всю систему, сколько бы воркеров ни было
 await ensurePeriodic('sessions.sweep');
 await ensurePeriodic('uploads.sweep');
 await ensurePeriodic('storage.gc');
+await ensurePeriodic('crypto.rewrap');
 // строки до шифрования (messageContent.ts): одна задача на запуск, дубль не встанет
 await enqueue(sql, 'crypto.encrypt', {}, { dedupeKey: 'crypto.encrypt' });
 // индекс поиска не той версии или ещё не построен — перестройка (до её конца поиск идёт по Postgres)
@@ -21,6 +23,7 @@ const main = startWorker({ concurrency: Number(process.env.WORKER_CONCURRENCY ??
 const video = startWorker({ concurrency: Number(process.env.VIDEO_CONCURRENCY ?? 1), leaseSec: 3600, kinds: { only: SLOW_KINDS.video } });
 const photo = startWorker({ concurrency: Number(process.env.PHOTO_CONCURRENCY ?? 2), kinds: { only: SLOW_KINDS.photo } });
 const worker = { stop: () => Promise.all([main.stop(), video.stop(), photo.stop()]) };
+await startKeyEvents();   // уничтоженный ключ чата забывается в памяти сразу
 console.log('relay worker started');
 
 for (const signal of ['SIGTERM', 'SIGINT'] as const) {

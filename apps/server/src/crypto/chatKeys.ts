@@ -4,7 +4,7 @@
 // которого нет в базе, иначе сообщения запечатаются ключом-призраком.
 import { sql, type Tx } from '../db';
 import { CryptoError, importAesKey, randomKey } from './aead';
-import { getKms } from './kms';
+import { getKms, kmsFor } from './kms';
 
 export interface ChatKey { version: number; key: CryptoKey }
 
@@ -32,8 +32,8 @@ function once<T>(id: string, fn: () => Promise<T>): Promise<T> {
   return p;
 }
 
-async function unwrapRow(chatId: number, version: number, wrapped: Uint8Array): Promise<CryptoKey> {
-  const key = await importAesKey(await getKms().unwrap(new Uint8Array(wrapped)));
+async function unwrapRow(chatId: number, version: number, wrapped: Uint8Array, kekId?: string): Promise<CryptoKey> {
+  const key = await importAesKey(await kmsFor(kekId).unwrap(new Uint8Array(wrapped)));
   remember(chatId, version, key);
   return key;
 }
@@ -46,14 +46,14 @@ export async function chatKey(chatId: number, version: number, tx?: Tx): Promise
   const hit = cached(chatId, version);
   if (hit) return hit;
   if (tx) {
-    const [row] = await tx`select wrapped_dek from keys.chat_keys where chat_id = ${chatId} and version = ${version}`;
+    const [row] = await tx`select wrapped_dek, kek_id from keys.chat_keys where chat_id = ${chatId} and version = ${version}`;
     if (!row) throw new CryptoError('no_key', `no key for chat ${chatId} v${version}`);
-    return importAesKey(await getKms().unwrap(new Uint8Array(row.wrapped_dek as Uint8Array)));
+    return importAesKey(await kmsFor(row.kek_id as string).unwrap(new Uint8Array(row.wrapped_dek as Uint8Array)));
   }
   return once(`k:${chatId}:${version}`, async () => {
-    const [row] = await sql`select wrapped_dek from keys.chat_keys where chat_id = ${chatId} and version = ${version}`;
+    const [row] = await sql`select wrapped_dek, kek_id from keys.chat_keys where chat_id = ${chatId} and version = ${version}`;
     if (!row) throw new CryptoError('no_key', `no key for chat ${chatId} v${version}`);
-    return unwrapRow(chatId, version, row.wrapped_dek as Uint8Array);
+    return unwrapRow(chatId, version, row.wrapped_dek as Uint8Array, row.kek_id as string);
   });
 }
 
@@ -69,42 +69,55 @@ export async function currentChatKey(chatId: number, tx?: Tx): Promise<ChatKey> 
     if (key) return { version: c.version, key };
   }
   if (tx) {
-    let [row] = await tx`select version, wrapped_dek from keys.chat_keys where chat_id = ${chatId} order by version desc limit 1`;
+    let [row] = await tx`select version, wrapped_dek, kek_id from keys.chat_keys where chat_id = ${chatId} order by version desc limit 1`;
     if (!row) {
       const kms = getKms();
       const wrapped = await kms.wrap(randomKey());
       [row] = await tx`insert into keys.chat_keys (chat_id, version, wrapped_dek, kek_id) values (${chatId}, 1, ${Buffer.from(wrapped)}, ${kms.id})
-        on conflict (chat_id, version) do update set chat_id = excluded.chat_id returning version, wrapped_dek`;
+        on conflict (chat_id, version) do update set chat_id = excluded.chat_id returning version, wrapped_dek, kek_id`;
     }
-    return { version: row.version as number, key: await importAesKey(await getKms().unwrap(new Uint8Array(row.wrapped_dek as Uint8Array))) };
+    return { version: row.version as number, key: await importAesKey(await kmsFor(row.kek_id as string).unwrap(new Uint8Array(row.wrapped_dek as Uint8Array))) };
   }
   return once(`c:${chatId}`, async () => {
-    let [row] = await sql`select version, wrapped_dek from keys.chat_keys where chat_id = ${chatId} order by version desc limit 1`;
+    let [row] = await sql`select version, wrapped_dek, kek_id from keys.chat_keys where chat_id = ${chatId} order by version desc limit 1`;
     if (!row) {
       const kms = getKms();
       const wrapped = await kms.wrap(randomKey());
       // параллельный процесс мог создать раньше — тогда берём его ключ
       await sql`insert into keys.chat_keys (chat_id, version, wrapped_dek, kek_id) values (${chatId}, 1, ${Buffer.from(wrapped)}, ${kms.id}) on conflict do nothing`;
-      [row] = await sql`select version, wrapped_dek from keys.chat_keys where chat_id = ${chatId} order by version desc limit 1`;
+      [row] = await sql`select version, wrapped_dek, kek_id from keys.chat_keys where chat_id = ${chatId} order by version desc limit 1`;
       if (!row) throw new CryptoError('no_key', `chat ${chatId} is gone`);
     }
     const version = row.version as number;
-    const key = cached(chatId, version) ?? await unwrapRow(chatId, version, row.wrapped_dek as Uint8Array);
+    const key = cached(chatId, version) ?? await unwrapRow(chatId, version, row.wrapped_dek as Uint8Array, row.kek_id as string);
     current.set(chatId, { version, at: Date.now() });
     return { version, key };
   });
 }
 
-/** Новая версия ключа чата: новые записи — им, старые читаются своими версиями. */
-export async function rotateChatKey(chatId: number): Promise<number> {
+/** Новая версия ключа чата: новые записи — им, старые читаются своими версиями. tx — в транзакции вызывающего. */
+export async function rotateChatKey(chatId: number, tx?: Tx): Promise<number> {
   const kms = getKms();
   const wrapped = await kms.wrap(randomKey());
-  const [row] = await sql`
+  const db = tx ?? sql;
+  const [row] = await db`
     insert into keys.chat_keys (chat_id, version, wrapped_dek, kek_id)
     select ${chatId}, coalesce(max(version), 0) + 1, ${Buffer.from(wrapped)}, ${kms.id} from keys.chat_keys where chat_id = ${chatId}
     returning version`;
   current.delete(chatId);
   return row.version as number;
+}
+
+/**
+ * Уничтожить прошлое чата (crypto-shredding): новая версия ключа для того, что будет дальше, все прежние версии
+ * удаляются — всё, что ими запечатано, не открыть больше нигде: ни в базе, ни в бэкапах данных (бэкапы ключей
+ * хранятся коротко). Другие процессы забывают ключи по NOTIFY chat_keys (keyEvents.ts).
+ */
+export async function shredChatHistory(tx: Tx, chatId: number): Promise<number> {
+  const version = await rotateChatKey(chatId, tx);
+  await tx`delete from keys.chat_keys where chat_id = ${chatId} and version < ${version}`;
+  forgetChat(chatId);
+  return version;
 }
 
 /** Забыть ключи чата в памяти этого процесса (чат удалён — ключ уничтожен). */

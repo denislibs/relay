@@ -4,6 +4,7 @@ import { muteFromDb } from './chatNotify';
 import { DomainError } from './errors';
 import { fanOut } from './journal';
 import { contentColumns, openDrafts, openRows } from './messageContent';
+import { shredChatHistory } from '../crypto/chatKeys';
 import { nameForSql } from './profile';
 import { summaryFromRow } from './groupRights';
 import type { GroupInfo, MyMembership } from '@relay/protocol';
@@ -341,6 +342,13 @@ export async function deleteDirectChat(userId: number, chatId: number, forAll: b
       ? (await tx`select user_id from chat_members where chat_id = ${chatId}`).map((r) => Number(r.user_id))
       : [userId];
     await tx`update chat_members set history_from = ${from}, last_read_id = greatest(last_read_id, ${from - 1}) where chat_id = ${chatId} and user_id = any(${who}::bigint[])`;
+    if (forAll) {
+      // «удалить у обоих»: прошлое уничтожается по-настоящему — старые версии ключа чата удаляются (не открыть ни
+      // в базе, ни в бэкапах после срока хранения ключей), строки до шифрования — стираются
+      await shredChatHistory(tx, chatId);
+      await tx`update messages set body = '', entities = null, todo = null, blocks = null, link = null, content = null
+                where chat_id = ${chatId} and id < ${from} and content is null and body <> ''`;
+    }
     await fanOut(tx, who, { type: 'chatRemoved', chatId });
     return { ok: true };
   });
