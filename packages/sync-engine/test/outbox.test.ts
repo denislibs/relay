@@ -1,7 +1,7 @@
 import { afterAll, afterEach, beforeEach, expect, test } from 'bun:test';
 import { sql } from '../../../apps/server/src/db';
 import { Engine } from '../src/engine';
-import { resetDb, startTestServer, watchInto } from './helpers';
+import { opened, resetDb, startTestServer, watchInto } from './helpers';
 
 const srv = await startTestServer();
 afterAll(() => srv.stop());
@@ -33,7 +33,7 @@ test('offline send shows pending at once, survives a restart, then goes out exac
   await again.whenIdle();
   const sent = await feed2.until((l) => l.length === 3 && l.every((m) => m.status === 'sent'));
   expect(sent.map((m) => m.body)).toEqual(['раз', 'два', 'три']);
-  const rows = await sql`select body from messages where chat_id = ${chatId} order by id`;
+  const rows = await opened(await sql`select * from messages where chat_id = ${chatId} order by id`);
   expect(rows.map((r) => r.body)).toEqual(['раз', 'два', 'три']);
 });
 
@@ -70,7 +70,7 @@ test('forward: copies appear at once in each target chat, an album stays one gro
   expect(sent.map((m) => m.body)).toEqual(['смотри', 'первое', 'второе']);
   expect(sent[0].fwdFrom ?? null).toBeNull();
   expect(sent[1].fwdFrom).toMatchObject({ userId: a.userId, chatId: ab, messageId: src[0].id });
-  const rows = await sql`select body, fwd_from from messages where chat_id = ${bc} order by id`;
+  const rows = await opened(await sql`select * from messages where chat_id = ${bc} order by id`);
   expect(rows.map((r) => r.body)).toEqual(['смотри', 'первое', 'второе']);
   expect(rows[2].fwd_from).toMatchObject({ userId: a.userId, name: 'Анна' });
 });

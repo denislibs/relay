@@ -174,6 +174,8 @@ export interface DevHooks {
   restart(): Promise<unknown>;
   retryFailed(): Promise<number>;
   discardFailed(): Promise<number>;
+  /** обёртка HTTP поверх имитатора (обновление доступа сеанса, привязанного к устройству — device.ts) */
+  wrapFetch?(f: (url: string, init?: RequestInit) => Promise<Response>): (url: string, init?: RequestInit) => Promise<Response>;
 }
 
 export class DevTools {
@@ -197,7 +199,8 @@ export class DevTools {
   private idb: { at: number; counts: Record<string, number> | null; loading: boolean } = { at: 0, counts: null, loading: false };
 
   constructor(private db: IDBDatabase, private hooks: DevHooks) {
-    this.fetch = simFetch(this.log, this.sim);
+    const sim = simFetch(this.log, this.sim);
+    this.fetch = hooks.wrapFetch ? hooks.wrapFetch(sim) : sim;
   }
 
   /** Сохранённый режим сети (persist) — при открытии движка. */

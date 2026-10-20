@@ -143,6 +143,9 @@ export interface Attachment {
    *  Адрес — /files/<id>/<name>; оригинал остаётся /files/<id>. */
   preview?: VideoVariant | null;
   variants?: VideoVariant[];
+  /** Зашифровано на клиенте (fileCrypto.ts): в хранилище шифр, key — ключ файла (base64; в сообщении он запечатан ключом чата). */
+  enc?: 1;
+  key?: string;
 }
 /** Копия видео: preview — первые секунды без звука, 360p, до 1 МБ (лента); '720' — H.264 720p (просмотрщик по умолчанию).
  *  У фото и картинки-файла preview — WebP, длинная сторона до 480 px (сетка «Медиа»). */
@@ -314,6 +317,7 @@ export type ErrorCode = 'bad_frame' | 'pin_limit' | 'unauthorized' | 'not_member
   | 'upload_missing' | 'upload_mismatch' | 'upload_pending' | 'upload_incomplete' | 'photo_invalid' | 'file_too_big';
 
 export type ClientFrame =
+  | { op: 'prove'; sig: string }   // ответ на challenge: подпись «relay-device|ws|<nonce>» ключом устройства
   | { op: 'hello'; lastSeq: number }
   | { op: 'sync'; since: number }
   | { op: 'send'; reqId: string; clientId: string; chatId: Id; body: string; entities?: Entity[]; replyToId?: Id | null; attachment?: { id: string; thumb?: string | null; spoiler?: boolean } | null; groupId?: string | null; forward?: ForwardRef | null; noLinkPreview?: boolean; blocks?: Block[] | null; todo?: TodoInput; sticker?: { id: Id } | null }
@@ -340,6 +344,7 @@ export const RECENTLY = 'recently';
 export interface PresenceItem { userId: number; online: boolean | null; lastSeen: string | null }
 
 export type ServerFrame =
+  | { op: 'challenge'; nonce: string }   // сеанс привязан к устройству: подпиши вызов (prove), иначе кадры не выполняются
   | { op: 'hello'; seq: number; epoch: string }   // epoch — поколение базы; сменилось — кэш клиента недействителен
   | { op: 'updates'; from: number; to: number; items: JournalEntry[]; more: boolean }
   | { op: 'tooLong'; seq: number }
@@ -470,3 +475,4 @@ export function searchTerms(text: string): string[] {
 
 export * from './groups';
 export * from './blocks';
+export * from './fileCrypto';

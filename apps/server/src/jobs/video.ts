@@ -1,3 +1,5 @@
+import { variantKey } from '@relay/protocol';
+import { decryptFile, encryptFile, fileKey } from '../crypto/fileKeys';
 // Обработка видео-медиа в воркере (задача video.process, ставится при подтверждении загрузки):
 //  1) faststart — mp4/mov с moov в конце перепаковывается без перекодирования (moov в начало): браузер начинает
 //     играть с первого же куска, без лишнего похода за хвостом файла;
@@ -131,7 +133,17 @@ export async function processVideo(payload: { id: string }): Promise<void> {
   try {
     const ext = mime === 'video/quicktime' ? 'mov' : mime === 'video/webm' ? 'webm' : 'mp4';
     const src = join(dir, `src.${ext}`);
-    await Bun.write(src, s3().file(key));
+    // зашифрованный на клиенте: шифр — во временный файл, расшифровка рядом; дальше всё как с открытым
+    const raw = Number(a.enc) === 1 ? await fileKey(id) : null;
+    if (Number(a.enc) === 1 && !raw) { await sql`update attachments set processed = 'skipped' where id = ${id}`; return; }
+    if (raw) { await Bun.write(src + '.enc', s3().file(key)); await decryptFile(src + '.enc', src, raw); await rm(src + '.enc', { force: true }); }
+    else await Bun.write(src, s3().file(key));
+    /** Выложить файл: зашифрованный — шифром (оригинал — ключом файла, копия — выведенным ключом). */
+    const put = async (objKey: string, path: string, type: string, variant?: string) => {
+      if (!raw) return s3().write(objKey, Bun.file(path), { type });
+      await encryptFile(path, path + '.enc', variant ? await variantKey(raw, variant) : raw);
+      return s3().write(objKey, Bun.file(path + '.enc'), { type: 'application/octet-stream' });
+    };
     const fmt = videoFormat(mime);
     const p = await probe(src, fmt);
     if (!p) {
@@ -147,7 +159,7 @@ export async function processVideo(payload: { id: string }): Promise<void> {
       if (await remuxFaststart(src, fs, fmt)) {
         newKey = `${id}.fs`;
         newSize = Bun.file(fs).size;
-        await s3().write(newKey, Bun.file(fs), { type: mime });
+        await put(newKey, fs, mime);
       }
     }
     // 2) ролик для ленты; маленький оригинал H.264 сам себе превью
@@ -160,7 +172,7 @@ export async function processVideo(payload: { id: string }): Promise<void> {
       const out = join(dir, '720.mp4');
       if (await encodeSd(src, out, p, fmt) && (Bun.file(out).size < Number(a.size) || p.codec !== 'h264')) made.push({ name: '720', key: `${id}.720`, path: out, ...(await dims(out)) });
     }
-    for (const v of made) await s3().write(v.key, Bun.file(v.path), { type: 'video/mp4' });
+    for (const v of made) await put(v.key, v.path, 'video/mp4', v.name);
     await sql.begin(async (tx) => {
       // строка вложения под замком: отправка того же видео (attachmentForSend, for share) ждёт — новое сообщение
       // получит копии сразу или окажется в списке ниже, а не между

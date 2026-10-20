@@ -2,6 +2,7 @@
 // relay-attachments-*). Оболочку приложения (relay-app-shell@*) не трогаем: без неё не откроется офлайн.
 import { forgetCached } from './downloads';
 import { clearAllAttachments, deviceStore } from './mediaCache';
+import { forgetKeys } from './fileKeys';
 
 export function formatBytes(n: number): string {
   if (!(n > 0)) return '0 Б';
@@ -56,6 +57,8 @@ export async function mediaCacheSize(): Promise<{ bytes: number; unknown: number
 export async function clearMediaCaches(): Promise<void> {
   if (typeof caches === 'undefined') return;
   forgetCached();   // менеджер загрузок больше не считает эти файлы скачанными
+  forgetKeys();     // ключи зашифрованных файлов — из памяти страницы и Service Worker'а (IndexedDB чистит clearAllAttachments)
+  void navigator.serviceWorker?.ready.then((r) => r.active?.postMessage({ type: 'attachments:forget-keys' })).catch(() => {});
   await clearAllAttachments(deviceStore());
 }
 

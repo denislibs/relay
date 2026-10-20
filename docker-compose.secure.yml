@@ -1,0 +1,73 @@
+# Продакшен-усиление поверх docker-compose.yml (план docs/plans/2026-10-21-relay-at-rest-encryption.md):
+#   docker compose -f docker-compose.yml -f docker-compose.secure.yml up -d
+# Секреты — только из окружения (без значений по умолчанию): compose не запустится, если их нет.
+#
+# TLS между сервисами (apps/server/src/tls.ts): server/worker/keys в production без него не стартуют.
+#   - Postgres: ssl=on + в pg_hba.conf только hostssl (иначе база всё ещё пускает без TLS); клиенты — DB_SSL=verify-full,
+#     DB_CA и клиентский сертификат DB_CERT/DB_KEY (mTLS: база пускает только наши процессы);
+#   - Valkey: только tls-port, VALKEY_URL=rediss://…, VALKEY_CA;
+#   - S3, Meilisearch, Vault, сервис ключей — https; общий внутренний CA — NODE_EXTRA_CA_CERTS;
+#   - все хосты в одной зашифрованной сети (WireGuard) — можно RELAY_PLAIN_INTERNAL=1 вместо всего этого.
+#
+# Индекс поиска хранит расшифрованный текст сообщений, поэтому:
+#   - Meilisearch в своей внутренней сети `search` — его видят только server и worker, остальные сервисы и наружу — нет;
+#   - server ходит с ключом «только поиск» (MEILI_API_KEY, выпуск: bun apps/server/src/dev/meiliKeys.ts),
+#     мастер-ключ — только у worker (он пишет в индекс);
+#   - том meili не бэкапится: индекс восстанавливается из базы задачей search.reindex.
+#
+# Главный ключ (KMS): учётные данные Vault — только у сервиса ключей (apps/server/src/keyService.ts) в своей
+# внутренней сети `keys`; server и worker просят его завернуть/развернуть ключ по своим токенам
+# (KEY_SERVICE_TOKENS), каждое обращение — в его журнале, массовая выгрузка упирается в предел и даёт тревогу.
+networks:
+  search:
+    internal: true
+  keys:
+    internal: true
+  # выход к Vault (может быть на другом хосте) — только у сервиса ключей
+  kms-egress: {}
+
+services:
+  search:
+    environment:
+      MEILI_MASTER_KEY: ${MEILI_MASTER_KEY:?set MEILI_MASTER_KEY}
+      MEILI_ENV: production
+    networks: [search]
+
+  keys:
+    build: { context: ., dockerfile: apps/server/Dockerfile }
+    command: ["bun", "apps/server/src/keyService.ts"]
+    environment:
+      KMS_PROVIDER: vault
+      VAULT_ADDR: ${VAULT_ADDR:?set VAULT_ADDR}
+      VAULT_TOKEN: ${VAULT_TOKEN:?set VAULT_TOKEN (the only holder of KMS credentials)}
+      VAULT_TRANSIT_KEY: relay-chat-keys
+      KEY_SERVICE_PORT: "7800"
+      KEY_SERVICE_TOKENS: server:${KEY_TOKEN_SERVER:?set KEY_TOKEN_SERVER},worker:${KEY_TOKEN_WORKER:?set KEY_TOKEN_WORKER}
+      KEY_SERVICE_UNWRAP_PER_MIN: "6000"
+      NODE_ENV: production
+    networks: [keys, kms-egress]
+    restart: unless-stopped
+
+  server:
+    environment:
+      DEV_LOGIN: "0"
+      DEV_MIGRATE: "0"
+      MEILI_MASTER_KEY: ""
+      MEILI_API_KEY: ${MEILI_SEARCH_KEY:?set MEILI_SEARCH_KEY (bun apps/server/src/dev/meiliKeys.ts)}
+      KMS_PROVIDER: service
+      KEY_SERVICE_URL: http://keys:7800
+      KEY_SERVICE_TOKEN: ${KEY_TOKEN_SERVER:?set KEY_TOKEN_SERVER}
+      NODE_ENV: production
+    networks: [default, search, keys]
+    depends_on: [keys]
+
+  worker:
+    environment:
+      DEV_LOGIN: "0"
+      MEILI_MASTER_KEY: ${MEILI_MASTER_KEY:?set MEILI_MASTER_KEY}
+      KMS_PROVIDER: service
+      KEY_SERVICE_URL: http://keys:7800
+      KEY_SERVICE_TOKEN: ${KEY_TOKEN_WORKER:?set KEY_TOKEN_WORKER}
+      NODE_ENV: production
+    networks: [default, search, keys]
+    depends_on: [keys]

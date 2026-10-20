@@ -1,7 +1,8 @@
+import { FILE_HEADER, FILE_TAG } from '@relay/protocol';
 import { sql } from '../../../apps/server/src/db';
 import { afterAll, afterEach, beforeEach, expect, test } from 'bun:test';
 import { Engine } from '../src/engine';
-import { resetDb, startTestServer, watchInto } from './helpers';
+import { opened, resetDb, startTestServer, watchInto } from './helpers';
 
 // Несколько файлов грузятся сразу (до трёх), а уходят в чат в том порядке, в каком их поставили: альбом не перемешается.
 const srv = await startTestServer();
@@ -17,7 +18,8 @@ function holdPuts() {
   let waiters: (() => void)[] = [];
   globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
     if (init?.method === 'PUT' && String(input).includes('X-Amz-Signature')) {
-      const size = (init.body as Blob).size;
+      // тело PUT — шифр (fileCrypto.ts): у маленького файла это исходный размер + заголовок + тег одного куска
+      const size = (init.body as Blob).size - FILE_HEADER - FILE_TAG;
       await new Promise<void>((r, reject) => {
         held.set(size, r); for (const w of waiters) w(); waiters = [];
         init.signal?.addEventListener('abort', () => { held.delete(size); reject(new DOMException('aborted', 'AbortError')); });
@@ -49,7 +51,7 @@ async function setup() {
 const file = (n: number) => new Blob([new Uint8Array(n).fill(7)], { type: 'image/png' });
 const send = (ea: Engine, chatId: number, n: number, groupId?: string) =>
   ea.call({ type: 'sendFile', chatId, body: 'f' + n, file: file(n), name: `p${n}.png`, mime: 'image/png', w: 4, h: 2, thumb: null, ...(groupId ? { groupId } : {}) });
-const bodies = async (chatId: number) => (await sql`select body from messages where chat_id = ${chatId} order by id`).map((r: { body: string }) => r.body);
+const bodies = async (chatId: number) => (await opened(await sql`select * from messages where chat_id = ${chatId} order by id`)).map((r: { body: string }) => r.body);
 
 test('three files upload at once; the fourth waits for a free slot', async () => {
   const { chatId, ea } = await setup();

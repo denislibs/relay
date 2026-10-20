@@ -1,3 +1,5 @@
+import { encryptedSize } from '@relay/protocol';
+import { fileKey, openAttachmentRows, sealMeta, storeFileKey } from '../crypto/fileKeys';
 import { MAX_FILE_BYTES, ROUND_MAX_SECONDS, WAVEFORM_BYTES, type Attachment, type AttachmentKind, type VideoVariant } from '@relay/protocol';
 import { S3Client } from 'bun';
 import { abortMultipart, completeMultipart, createMultipart, listMultipart, listParts, presignPart, type S3Conf } from './s3multipart';
@@ -67,7 +69,17 @@ function cleanWaveform(raw: string | undefined): string | null {
 
 /** Метаданные будущего вложения: тело идёт мимо сервера (подписанный PUT в S3), размер обещан заранее и сверяется при подтверждении.
  *  Ширина и высота — от клиента (он уже декодировал картинку), только для раскладки. */
-export interface UploadMeta { mime: string; name: string; size: number; w?: number; h?: number; kind?: string; duration?: number; waveform?: string; title?: string; performer?: string }
+export interface UploadMeta { mime: string; name: string; size: number; w?: number; h?: number; kind?: string; duration?: number; waveform?: string; title?: string; performer?: string;
+  /** 1 — клиент шифрует файл (fileCrypto.ts); key — ключ файла base64 (32 байта): сервер хранит его завёрнутым KMS */
+  enc?: number; key?: string }
+
+/** Объект в хранилище: у зашифрованного — больше исходного (заголовок и теги кусков) и всегда octet-stream. */
+const objectSize = (a: { size: unknown; enc?: unknown }) => (Number(a.enc) === 1 ? encryptedSize(Number(a.size)) : Number(a.size));
+const objectMime = (a: { mime: unknown; enc?: unknown }) => (Number(a.enc) === 1 ? 'application/octet-stream' : a.mime as string);
+function parseFileKey(meta: UploadMeta): Uint8Array | null {
+  if (meta.enc !== 1 || typeof meta.key !== 'string') return null;
+  try { const raw = new Uint8Array(Buffer.from(meta.key, 'base64')); return raw.length === 32 ? raw : null; } catch { return null; }
+}
 
 /**
  * Шаг 1: запись pending и подписанный PUT на ключ = id. Подписан только хост (Bun.s3 не подписывает Content-Type и длину),
@@ -97,25 +109,34 @@ export async function createUpload(userId: number, meta: UploadMeta): Promise<{ 
   const tag = (v: unknown) => (audio && typeof v === 'string' ? v.replace(/[\u0000-\u001f]/g, ' ').trim().slice(0, 200) || null : null);
   // пределы на пользователя (число идущих загрузок, байты за час и сутки, flood) — после проверки заявки: кривая квоту не тратит
   await checkUploadAllowed(userId, meta.size);
-  const [row] = await sql`insert into attachments (owner_id, mime, name, size, width, height, kind, duration, waveform, title, performer, status)
-    values (${userId}, ${mime}, ${name}, ${meta.size}, ${w}, ${h}, ${kind}, ${duration}, ${waveform}, ${tag(meta.title)}, ${tag(meta.performer)}, 'pending') returning id`;
-  const id = row.id as string;
-  if (meta.size < multipartFrom) return { id, url: publicS3().presign(id, { method: 'PUT', expiresIn: PUT_TTL }), mime, expiresIn: PUT_TTL };
+  // зашифрованный на клиенте: ключ файла — завёрнутым KMS в keys.attachment_keys, имя/название/исполнитель — шифром им же
+  const fileKeyRaw = parseFileKey(meta);
+  if (meta.enc === 1 && !fileKeyRaw) throw new DomainError('bad_frame', 'file key');
+  const id = crypto.randomUUID();
+  const enc = fileKeyRaw ? 1 : 0;
+  const sealedMeta = fileKeyRaw ? await sealMeta(id, fileKeyRaw, { name, title: tag(meta.title), performer: tag(meta.performer) }) : null;
+  await sql.begin(async (tx) => {
+    await tx`insert into attachments (id, owner_id, mime, name, size, width, height, kind, duration, waveform, title, performer, status, enc, meta)
+      values (${id}, ${userId}, ${mime}, ${fileKeyRaw ? '' : name}, ${meta.size}, ${w}, ${h}, ${kind}, ${duration}, ${waveform}, ${fileKeyRaw ? null : tag(meta.title)}, ${fileKeyRaw ? null : tag(meta.performer)}, 'pending', ${enc}, ${sealedMeta})`;
+    if (fileKeyRaw) await storeFileKey(tx, id, fileKeyRaw);
+  });
+  const size = objectSize({ size: meta.size, enc }), type = objectMime({ mime, enc });
+  if (size < multipartFrom) return { id, url: publicS3().presign(id, { method: 'PUT', expiresIn: PUT_TTL }), mime: type, expiresIn: PUT_TTL };
   // большой: загрузка частями — тип объекта задаётся здесь, ссылки на части клиент берёт в uploadParts
   let uploadId: string;
-  try { uploadId = await createMultipart(mpInternal(), id, mime); }
+  try { uploadId = await createMultipart(mpInternal(), id, type); }
   catch (e) { await sql`delete from attachments where id = ${id}`; throw e; }
   await sql`update attachments set upload_id = ${uploadId} where id = ${id}`;
-  const partSize = partBytes(meta.size);
-  return { id, mime, expiresIn: PART_TTL, multipart: { partSize, parts: Math.ceil(meta.size / partSize) } };
+  const partSize = partBytes(size);
+  return { id, mime: type, expiresIn: PART_TTL, multipart: { partSize, parts: Math.ceil(size / partSize) } };
 }
 
 /** Pending-загрузка частями этого пользователя: строка и разбивка на части (размер части выводится из размера файла). */
 async function multipartOf(userId: number, id: string) {
   if (!UUID.test(id)) throw new DomainError('not_found', 'attachment');
-  const [a] = await sql`select id, size, upload_id from attachments where id = ${id} and owner_id = ${userId} and status = 'pending'`;
+  const [a] = await sql`select id, size, enc, upload_id from attachments where id = ${id} and owner_id = ${userId} and status = 'pending'`;
   if (!a?.upload_id) throw new DomainError('not_found', 'attachment');
-  const size = Number(a.size), partSize = partBytes(size);
+  const size = objectSize(a), partSize = partBytes(size);
   return { id, uploadId: a.upload_id as string, size, partSize, parts: Math.ceil(size / partSize) };
 }
 
@@ -142,7 +163,7 @@ async function goodParts(m: { id: string; uploadId: string; size: number; partSi
 
 /** confirm для загрузки частями: все части на месте → CompleteMultipartUpload; дальше обычная проверка объекта по HEAD. */
 async function completeUpload(a: Record<string, unknown>): Promise<void> {
-  const id = a.id as string, size = Number(a.size), partSize = partBytes(size);
+  const id = a.id as string, size = objectSize(a), partSize = partBytes(size);
   const m = { id, uploadId: a.upload_id as string, size, partSize, parts: Math.ceil(size / partSize) };
   let parts: { n: number; etag: string }[];
   try { parts = await goodParts(m); }
@@ -173,14 +194,15 @@ export async function confirmUpload(userId: number, id: string): Promise<Attachm
   if (!UUID.test(id)) throw new DomainError('not_found', 'attachment');
   const [a] = await sql`select * from attachments where id = ${id} and owner_id = ${userId}`;
   if (!a) throw new DomainError('not_found', 'attachment');
+  await openAttachmentRows([a]);
   if (a.status === 'ready') return attachmentOf(a, null, await variantsOf(sql, id));
   if (a.upload_id) await completeUpload(a);
   let stat: { size: number; type: string };
   try { stat = await s3().file(id).stat(); } catch { throw new DomainError('upload_missing'); }
   const type = stat.type.split(';')[0].trim().toLowerCase();
-  if (stat.size !== Number(a.size) || stat.size > MAX_FILE || type !== a.mime) {
+  if (stat.size !== objectSize(a) || Number(a.size) > MAX_FILE || type !== objectMime(a)) {
     await s3().delete(id).catch(() => {});
-    throw new DomainError('upload_mismatch', `size ${stat.size}/${a.size}, type ${type}/${a.mime}`);
+    throw new DomainError('upload_mismatch', `size ${stat.size}/${objectSize(a)}, type ${type}/${objectMime(a)}`);
   }
   // видео-медиа: перепаковка (faststart), ролик для ленты и 720p — в воркере; до конца обработки играет оригинал.
   // фото и картинка-файл: уменьшенная копия для сетки — тоже в воркере; до неё плитка грузит оригинал
@@ -190,6 +212,7 @@ export async function confirmUpload(userId: number, id: string): Promise<Attachm
     else if (row && wantsPhotoPreview(row)) await enqueue(tx, 'photo.process', { id }, { dedupeKey: `photo.process:${id}`, maxAttempts: 3 });
     return row;
   });
+  if (r) await openAttachmentRows([r]);
   return attachmentOf(r ?? a, null);
 }
 
@@ -203,7 +226,10 @@ export async function attachmentForSend(tx: typeof sql | Parameters<Parameters<t
   if (!a || !mine) throw new DomainError('not_found', 'attachment');
   if (a.status !== 'ready') throw new DomainError('upload_pending');
   const thumb = ref.thumb && ref.thumb.length <= 8192 && /^data:image\/(jpeg|png|webp);base64,[A-Za-z0-9+/=]+$/.test(ref.thumb) ? ref.thumb : null;
+  await openAttachmentRows([a], tx);
   const out = attachmentOf(a, thumb, await variantsOf(tx, a.id as string));
+  // зашифрованный файл: ключ — в само вложение сообщения (запечатается ключом чата вместе с текстом)
+  if (Number(a.enc) === 1) { const raw = await fileKey(a.id as string, tx); if (raw) out.key = Buffer.from(raw).toString('base64'); }
   // спойлер — только у фото и видео (у файла и голосового его нечем показать)
   return ref.spoiler === true && (out.kind === 'photo' || out.kind === 'video') ? { ...out, spoiler: true } : out;
 }
@@ -223,7 +249,7 @@ export function attachmentOf(a: Record<string, unknown>, thumb: string | null, v
   return { id: a.id as string, kind, mime: a.mime as string, name: a.name as string, size: Number(a.size), w: (a.width as number) ?? null, h: (a.height as number) ?? null, thumb,
     ...(a.duration ? { duration: a.duration as number } : {}), ...(a.waveform ? { waveform: a.waveform as string } : {}),
     ...(a.title ? { title: a.title as string } : {}), ...(a.performer ? { performer: a.performer as string } : {}),
-    ...(preview ? { preview } : {}), ...(rest.length ? { variants: rest } : {}) };
+    ...(preview ? { preview } : {}), ...(rest.length ? { variants: rest } : {}), ...(Number(a.enc) === 1 ? { enc: 1 as const } : {}) };
 }
 
 /** Файл для скачивания: владельцу и участникам чатов, где он отправлен. key — объект в бакете (после перепаковки — не id);
@@ -246,9 +272,12 @@ export async function fileFor(userId: number, id: string, variant?: string): Pro
          select 1 from user_photos p where (p.big = a.id or p.small = a.id or p.video = a.id)
             and not exists (select 1 from blocks b where b.owner_id = p.user_id and b.user_id = ${userId})))`;
   if (!a) return null;
-  if (!variant) return { id, key: (a.storage_key as string | null) ?? id, mime: a.mime as string, name: a.name as string };
+  // зашифрованный: хранилище отдаёт шифр — тип octet-stream, имя не раскрываем (его знает клиент из сообщения)
+  const enc = Number(a.enc) === 1;
+  const name = enc ? 'file' : a.name as string;
+  if (!variant) return { id, key: (a.storage_key as string | null) ?? id, mime: enc ? 'application/octet-stream' : a.mime as string, name };
   const [v] = await sql`select key, mime from attachment_variants where attachment_id = ${id} and name = ${variant}`;
-  return v ? { id, key: v.key as string, mime: v.mime as string, name: a.name as string } : null;
+  return v ? { id, key: v.key as string, mime: enc ? 'application/octet-stream' : v.mime as string, name } : null;
 }
 
 /**

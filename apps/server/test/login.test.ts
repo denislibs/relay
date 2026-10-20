@@ -4,7 +4,7 @@ import { createSession } from '../src/auth';
 import { requestCode, signIn } from '../src/domain/login';
 import { sendMessage } from '../src/domain/messages';
 import { editMessage } from '../src/domain/messageOps';
-import { makeChat, makeUser, resetDb } from './helpers';
+import { makeChat, makeUser, opened, resetDb } from './helpers';
 
 beforeEach(resetDb);
 process.env.DEV_LOGIN = '1';   // devCode в ответе: SMS нет, код читаем как «второе устройство»
@@ -20,7 +20,7 @@ test('code goes to the service chat of a user with a session; right code signs i
   const a = await userWithSession('Анна', 'anna_x');
   const r = await requestCode('@anna_x');
   expect(r).toMatchObject({ via: 'app', length: 5 });
-  const [msg] = await sql`select body, service_type from messages where service_type = 'login_code' order by id desc limit 1`;
+  const [msg] = await opened(await sql`select * from messages where service_type = 'login_code' order by id desc limit 1`);
   expect(msg.body).toContain(r.devCode!);
   expect(await signIn(r.attemptId, r.devCode!)).toEqual({ userId: a });
   await expect(signIn(r.attemptId, r.devCode!)).rejects.toMatchObject({ code: 'code_expired' });   // одноразовый

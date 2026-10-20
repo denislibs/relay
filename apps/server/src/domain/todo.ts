@@ -3,6 +3,7 @@ import { sql, type Tx } from '../db';
 import { assertMember, toMessage } from './chats';
 import { DomainError } from './errors';
 import { fanOut } from './journal';
+import { lockOpen, updateContent } from './messageContent';
 import { blockedInDirect } from './privacy';
 
 /**
@@ -17,7 +18,7 @@ export function newTodo(input: TodoInput): Todo {
 }
 
 async function lockTodo(tx: Tx, chatId: number, id: number) {
-  const [m] = await tx`select sender_id, kind, deleted, todo, fwd_from from messages where chat_id = ${chatId} and id = ${id} for update`;
+  const m = await lockOpen(tx, chatId, id);   // список — в шифре: открыть под блокировкой
   if (!m || m.deleted || m.kind !== 'todo' || !m.todo) throw new DomainError('not_found', 'checklist');
   return { author: Number(m.sender_id), todo: m.todo as Todo, forwarded: !!m.fwd_from };
 }
@@ -52,7 +53,7 @@ export async function toggleTodo(userId: number, chatId: number, id: number, com
     if (!add.length && !remove.size) return { changed: false };
     const at = new Date().toISOString();
     const next: Todo = { ...todo, completions: todo.completions.filter((c) => !remove.has(c.id)).concat(add.map((x) => ({ id: x, by: userId, at }))) };
-    await tx`update messages set todo = ${sql.json(next as never)} where chat_id = ${chatId} and id = ${id}`;
+    await updateContent(tx, chatId, id, () => ({ todo: next }));
     const to = await members(tx, chatId);
     await publish(tx, chatId, id, next, to);
     await serviceLine(tx, chatId, userId, id, 'todo_done', { ...(add.length ? { completed: add } : {}), ...(remove.size ? { incompleted: [...remove] } : {}) }, to);
@@ -74,7 +75,7 @@ export async function appendTodo(userId: number, chatId: number, id: number, tit
     let max = todo.items.reduce((m, x) => Math.max(m, x.id), 0);
     const added = clean.map((title) => ({ id: ++max, title }));
     const next: Todo = { ...todo, items: todo.items.concat(added) };
-    await tx`update messages set todo = ${sql.json(next as never)} where chat_id = ${chatId} and id = ${id}`;
+    await updateContent(tx, chatId, id, () => ({ todo: next }));
     const to = await members(tx, chatId);
     await publish(tx, chatId, id, next, to);
     await serviceLine(tx, chatId, userId, id, 'todo_append', { items: added.map((x) => x.id) }, to);
@@ -96,7 +97,7 @@ export async function editTodo(userId: number, chatId: number, id: number, raw: 
     const items = input.items.map((it) => ({ id: it.id != null && old.has(it.id) ? it.id : ++max, title: it.title }));
     const keep = new Set(items.map((x) => x.id));
     const next: Todo = { title: input.title, items, othersCanAppend: input.othersCanAppend, othersCanComplete: input.othersCanComplete, completions: todo.completions.filter((c) => keep.has(c.id)) };
-    const [row] = await tx`update messages set todo = ${sql.json(next as never)}, body = ${next.title}, edited_at = now() where chat_id = ${chatId} and id = ${id} returning edited_at`;
+    const row = (await updateContent(tx, chatId, id, () => ({ todo: next, body: next.title }), () => ({ edited_at: sql`now()` })))!;
     const editedAt = new Date(row.edited_at as string).toISOString();
     await publish(tx, chatId, id, next, await members(tx, chatId), editedAt);
     return { editedAt };

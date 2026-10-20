@@ -1,7 +1,7 @@
 import { afterAll, beforeEach, expect, test } from 'bun:test';
 import { sql } from '../src/db';
 import { createServer } from '../src/http';
-import { resetDb } from './helpers';
+import { journalOf, opened, resetDb } from './helpers';
 
 const server = createServer({ port: 0 });
 const base = `http://localhost:${server.port}`;
@@ -20,13 +20,12 @@ test('group: creator and members, a "created the group" service message reaches 
   expect(chat).toMatchObject({ kind: 'group', title: 'Дача 2026' });
   const members = (await sql`select user_id from chat_members where chat_id = ${id} order by user_id`).map((r) => Number(r.user_id));
   expect(members).toEqual([a.userId, b.userId, c.userId].sort((x, y) => x - y));
-  const [msg] = await sql`select sender_id, body, service_type from messages where chat_id = ${id}`;
+  const [msg] = await opened(await sql`select * from messages where chat_id = ${id}`);
   expect(msg).toMatchObject({ body: 'Дача 2026', service_type: 'group_created' });
   expect(Number(msg.sender_id)).toBe(a.userId);
   // newMessage в журнале у каждого участника
   for (const u of [a, b, c]) {
-    const [j] = await sql`select count(*)::int n from updates where user_id = ${u.userId} and payload->>'type' = 'newMessage' and (payload->'message'->>'chatId')::bigint = ${id}`;
-    expect(j.n).toBe(1);
+    expect((await journalOf(u.userId, 'newMessage')).filter((x) => x.type === 'newMessage' && x.message.chatId === id).length).toBe(1);
   }
 });
 

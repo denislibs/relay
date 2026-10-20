@@ -10,7 +10,7 @@ import '../src/jobs/kinds';
 import { moovFirst, PREVIEW_MAX_BYTES, probe } from '../src/jobs/video';
 import { claim, enqueue } from '../src/jobs/queue';
 import { drainJobs } from '../src/jobs/worker';
-import { resetDb, uploadFile } from './helpers';
+import { journalOf, opened, resetDb, uploadFile } from './helpers';
 
 const server = createServer({ port: 0 });
 const base = `http://localhost:${server.port}`;
@@ -64,7 +64,7 @@ test('moov-at-end 1080p upload: faststart original, a ≤1 MB 360p preview and a
   const [del] = await sql`select payload, run_at > now() + interval '1 hour' as later from jobs where kind = 'storage.delete'`;
   expect(del).toMatchObject({ payload: { key: up.id }, later: true });
 
-  const [m] = await sql`select attachment from messages where id = ${message.id}`;
+  const [m] = await opened(await sql`select * from messages where id = ${message.id}`);
   const att = m.attachment as Attachment;
   expect(att.thumb).toBe('data:image/jpeg;base64,AAAA');
   expect(att.spoiler).toBe(true);
@@ -73,8 +73,8 @@ test('moov-at-end 1080p upload: faststart original, a ≤1 MB 360p preview and a
   expect(att.preview!.size).toBeLessThanOrEqual(PREVIEW_MAX_BYTES);
   expect(att.variants).toEqual([expect.objectContaining({ name: '720', w: 1280, h: 720 })]);
   // клиенты получают обновлённый снимок через журнал
-  const [u] = await sql`select payload from updates where user_id = ${b.userId} and type = 'attachmentUpdated'`;
-  expect(u.payload).toMatchObject({ chatId, id: message.id, attachment: { preview: { name: 'preview' } } });
+  const [u] = await journalOf(b.userId, 'attachmentUpdated');
+  expect(u).toMatchObject({ chatId, id: message.id, attachment: { preview: { name: 'preview' } } });
 
   // копии отдаются по тем же правам, что и оригинал; preview — первые секунды без звука
   const pv = await fetch(`${base}/files/${up.id}/preview`, { headers: as(b.token) });

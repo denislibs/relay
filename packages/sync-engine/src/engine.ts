@@ -1,3 +1,4 @@
+import { deviceFetch, signDevice } from './device';
 import { MAX_FILE_BYTES, MEDIA_TABS, type MediaTab } from '@relay/protocol';
 import type { ClientFrame, JournalEntry, Me, SettingsSnapshot, Message, PublicUser, ServerFrame } from '@relay/protocol';
 import { Blocks } from './blocks';
@@ -7,7 +8,8 @@ import { affects, computeQuery, diffResults, feedSpan, flagsKey, flagsOf, flagsO
 import type { Item } from './types';
 import { countStores } from './devstats';
 import { Store, type ChatSummary } from './store';
-import { uploadParts, type MultipartState } from './multipart';
+import { uploadParts, type MultipartState, type UploadSource } from './multipart';
+import { FILE_CHUNK, fromBase64, importFileKey, newFileKey, newNonceBase, sealedSource, toBase64 } from '@relay/protocol';
 import { WsTransport } from './transport';
 import { loadOps, Ops, type PendingOp } from './ops';
 import { folderKey, isNotifyOp, normalizeRule, notifyKey, OP_FOLDERS_ORDER, privacyKey, settingsItem, settingsView } from './settings';
@@ -139,6 +141,8 @@ export class Engine {
       restart: async () => { this.transport.stop(); if (this.wantOnline) this.transport.start(); return { restarted: 'reconnect' }; },
       retryFailed: () => this.retryFailed(),
       discardFailed: () => this.discardFailed(),
+      // 401 «обнови доступ» — не конец сеанса: подпись ключом устройства, новый короткий cookie, повтор
+      wrapFetch: (f) => deviceFetch(f, cfg.httpBase),
     });
     this.dev.restore(sim);
     if (this.dev.sim.offline) this.netDown = true;
@@ -432,25 +436,34 @@ export class Engine {
       return r.json() as Promise<T>;
     };
     const meta: Record<string, unknown> = { name: a.name, mime: a.mime, size: blob.size };
+    // файл шифруется здесь, до хранилища (fileCrypto.ts): ключ файла уходит серверу в заявке (он хранит его завёрнутым
+    // KMS и кладёт в сообщение под ключом чата), в хранилище — только шифр. Ключ и основа nonce загрузки частями —
+    // в outbox: после перезагрузки шифр тот же, принятые части не перегружаются.
+    const encrypt = this.cfg.encryptFiles !== false;
     if (a.w && a.h) { meta.w = a.w; meta.h = a.h; }
     if (a.kind === 'voice' || a.kind === 'round' || a.kind === 'audio' || a.kind === 'video') { meta.kind = a.kind; if (a.duration) meta.duration = a.duration; if (a.waveform) meta.waveform = a.waveform; }
     if (a.kind === 'audio') { if (a.title) meta.title = a.title; if (a.performer) meta.performer = a.performer; }
     let mp = this.store.outbox.get(clientId)?.upload ?? null;
+    if (mp && encrypt && !mp.key) { await this.saveUpload(clientId, null); mp = null; }   // начата без шифрования (старая версия) — заново
+    const keyRaw = mp?.key ? fromBase64(mp.key) : newFileKey();
+    const base = mp?.base ? fromBase64(mp.base) : newNonceBase();
+    const source: UploadSource = encrypt ? sealedSource(blob, await importFileKey(keyRaw), { chunk: FILE_CHUNK, size: blob.size, base }) : blob;
+    if (encrypt) { meta.enc = 1; meta.key = toBase64(keyRaw); }
     if (!mp) {
       const intent = await api<{ id: string; url?: string; mime: string; multipart?: { partSize: number; parts: number } }>('/uploads', meta);
       if (!intent.multipart) {
-        await this.put(clientId, intent.url!, blob, intent.mime);
+        await this.put(clientId, intent.url!, await source.slice(0, source.size), intent.mime);
         return api<{ id: string }>(`/uploads/${intent.id}/confirm`);
       }
-      mp = { id: intent.id, ...intent.multipart, done: [] };
+      mp = { id: intent.id, ...intent.multipart, done: [], ...(encrypt ? { key: toBase64(keyRaw), base: toBase64(base) } : {}) };
       await this.saveUpload(clientId, mp);
     }
-    return this.uploadMultipart(clientId, blob, mp, api);
+    return this.uploadMultipart(clientId, source, mp, api);
   }
 
   /** Части, затем confirm (сервер собирает объект). Разошлись с сервером (upload_incomplete) — сверяемся и догружаем;
    *  загрузки на сервере больше нет (сутки офлайн — убрана) — забываем её, повтор начнёт заново. */
-  private async uploadMultipart(clientId: string, blob: Blob, mp: MultipartState, api: <T>(path: string, body?: unknown, method?: string) => Promise<T>): Promise<{ id: string }> {
+  private async uploadMultipart(clientId: string, blob: UploadSource, mp: MultipartState, api: <T>(path: string, body?: unknown, method?: string) => Promise<T>): Promise<{ id: string }> {
     let last = 0, pending: ReturnType<typeof setTimeout> | null = null, latest = 0;
     const show = () => {
       pending = null; last = Date.now();
@@ -1376,6 +1389,10 @@ export class Engine {
         for (const p of f.items) this.presence.set(p.userId, { online: p.online, lastSeen: p.lastSeen });
         this.presenceDirty = true;
         this.changed();
+        return;
+      case 'challenge':
+        // сеанс привязан к устройству: сокет выполнит кадры (они ждут на сервере) после подписи вызова
+        void signDevice('ws', f.nonce).then((sig) => this.transport.send({ op: 'prove', sig }), () => this.transport.drop());
         return;
       case 'sessionTerminated':
         this.session.end(f.reason === 'logout' ? 'logout' : 'terminated');

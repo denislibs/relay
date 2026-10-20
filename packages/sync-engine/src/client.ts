@@ -9,6 +9,7 @@ export class EngineClient {
   private nextSub = 1;
   private nextCall = 1;
   private onReloadCb: () => void = () => {};
+  private onDataCb: ((v: unknown) => void) | null = null;
   private ping: ReturnType<typeof setInterval> | null = null;
   private markReady!: () => void;
 
@@ -38,6 +39,8 @@ export class EngineClient {
   }
 
   onReload(cb: () => void): void { this.onReloadCb = cb; }
+  /** Всё, что приходит от движка (патчи и ответы), — приложению до подписчиков (например, запомнить ключи файлов). */
+  onData(cb: (v: unknown) => void): void { this.onDataCb = cb; }
 
   close(): void {
     if (this.ping) clearInterval(this.ping);
@@ -47,11 +50,12 @@ export class EngineClient {
   private onMessage(m: FromHost): void {
     switch (m.t) {
       case 'ready': this.markReady(); return;
-      case 'patches': for (const { sub, patch } of m.items) this.subs.get(sub)?.(patch); return;
+      case 'patches': for (const { sub, patch } of m.items) { this.onDataCb?.(patch); this.subs.get(sub)?.(patch); } return;
       case 'result': {
         const c = this.calls.get(m.id);
         if (!c) return;
         this.calls.delete(m.id);
+        if (m.ok) this.onDataCb?.(m.value);
         if (m.ok) c.resolve(m.value); else c.reject(new Error(m.error));
         return;
       }

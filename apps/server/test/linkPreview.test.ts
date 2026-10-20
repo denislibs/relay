@@ -4,7 +4,7 @@ import { fileFor } from '../src/domain/files';
 import { getUpdates } from '../src/domain/journal';
 import { allowPrivateHostsForTests, firstUrl, getPreview, imageSize, isPublicIp, normalizeUrl } from '../src/domain/linkPreview';
 import { applyLinkPreview, sendMessage } from '../src/domain/messages';
-import { makeChat, makeUser, resetDb } from './helpers';
+import { makeChat, makeUser, opened, resetDb } from './helpers';
 
 beforeEach(resetDb);
 const cid = () => crypto.randomUUID();
@@ -53,7 +53,7 @@ test('send with a link: pending at once, the job fills the preview, members get 
   const { message } = await sendMessage(a, { chatId: chat, clientId: cid(), body: 'глянь ' + url });
   expect(message.link).toEqual({ url: url, pending: true });
   await applyLinkPreview({ chatId: chat, id: message.id, url: message.link!.url });
-  const [row] = await sql`select link from messages where id = ${message.id}`;
+  const [row] = await opened(await sql`select * from messages where id = ${message.id}`);
   expect(row.link).toMatchObject({ url, siteName: 'Тест Магазин', title: 'Телефон S25', description: 'Описание товара', photo: { w: 64, h: 48 } });
   const ups = (await getUpdates(b, 0)).items.map((i) => i.update);
   expect(ups.find((u) => u.type === 'linkPreview')).toMatchObject({ chatId: chat, id: message.id, link: { title: 'Телефон S25' } });

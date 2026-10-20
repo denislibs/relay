@@ -1,6 +1,8 @@
 /**
- * Минимальный клиент Meilisearch поверх fetch. Мастер-ключ — только у сервера и воркера.
- * Изменения в Meilisearch асинхронные: ответ — taskUid, готовность — waitTask.
+ * Минимальный клиент Meilisearch поверх fetch. Изменения в Meilisearch асинхронные: ответ — taskUid, готовность — waitTask.
+ * Индекс хранит расшифрованный текст сообщений, поэтому доступ к нему — по минимуму: процессу server в продакшене
+ * даётся ключ «только поиск» (MEILI_API_KEY, выпускает src/dev/meiliKeys.ts), мастер-ключ — только у worker
+ * (он пишет в индекс). Без MEILI_API_KEY — мастер-ключ, как в dev и тестах.
  */
 export class MeiliError extends Error {
   constructor(public status: number, public code: string | undefined, message: string) { super(message); }
@@ -11,7 +13,7 @@ const base = () => { const u = process.env.MEILI_URL; if (!u) throw new Error('M
 export async function meili<T = unknown>(path: string, init: { method?: string; body?: unknown } = {}): Promise<T> {
   const res = await fetch(base() + path, {
     method: init.method ?? 'GET',
-    headers: { authorization: `Bearer ${process.env.MEILI_MASTER_KEY ?? ''}`, 'content-type': 'application/json' },
+    headers: { authorization: `Bearer ${process.env.MEILI_API_KEY || process.env.MEILI_MASTER_KEY || ''}`, 'content-type': 'application/json' },
     body: init.body === undefined ? undefined : JSON.stringify(init.body),
     signal: AbortSignal.timeout(10_000),
   });

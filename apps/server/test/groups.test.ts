@@ -2,7 +2,7 @@ import { afterAll, beforeEach, expect, test } from 'bun:test';
 import { sql } from '../src/db';
 import { createServer } from '../src/http';
 import { sendMessage } from '../src/domain/messages';
-import { makeChat, resetDb } from './helpers';
+import { journalOf, makeChat, resetDb } from './helpers';
 
 const server = createServer({ port: 0 });
 const base = `http://localhost:${server.port}`;
@@ -20,7 +20,7 @@ const ok = async (u: U, method: string, path: string, body?: unknown) => {
 const group = async (owner: U, members: U[], title = 'Дача') => (await ok(owner, 'POST', '/chats', { title, memberIds: members.map((m) => m.userId) })).id as number;
 const send = (u: U, chatId: number, body = 'привет') => sendMessage(u.userId, { chatId, clientId: crypto.randomUUID(), body });
 const services = async (chatId: number) => (await sql`select service_type, service_data from messages where chat_id = ${chatId} and service_type is not null order by id`).map((r) => r.service_type);
-const lastUpdate = async (u: U, type: string) => (await sql`select payload from updates where user_id = ${u.userId} and payload->>'type' = ${type} order by seq desc limit 1`)[0]?.payload;
+const lastUpdate = async (u: U, type: string) => (await journalOf(u.userId, type as never)).at(-1) as any;
 
 test('owner and roles: creator is the owner; summary in the chat list carries group info and my membership', async () => {
   const a = await login('Анна'), b = await login('Борис');
@@ -248,7 +248,7 @@ test('adding members: invite right, banned only by someone who can ban, blocked 
   expect(await services(id)).toEqual(['group_created', 'members_added']);
 });
 
-const updatesOf = async (u: U, type: string) => (await sql`select payload from updates where user_id = ${u.userId} and payload->>'type' = ${type} order by seq`).map((r) => r.payload as any);
+const updatesOf = async (u: U, type: string) => (await journalOf(u.userId, type as never)) as any[];
 
 test('members delta: adding two people gives everyone a members record with two upserts and profile exchange', async () => {
   const a = await login('Анна'), b = await login('Борис'), c = await login('Вера'), d = await login('Глеб');

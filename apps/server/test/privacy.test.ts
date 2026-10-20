@@ -10,7 +10,7 @@ import { resetPresence } from '../src/domain/presence';
 import { createServer } from '../src/http';
 import { startRealtime } from '../src/realtime';
 import { handleFrame } from '../src/ws';
-import { makeChat, makeUser, nextFrame, pushBrowser, resetDb } from './helpers';
+import { makeChat, makeUser, nextFrame, opened, pushBrowser, resetDb } from './helpers';
 
 process.env.RELAY_PRESENCE_GRACE_MS = '60';
 const server = createServer({ port: 0 });
@@ -370,7 +370,7 @@ test('a blocked user cannot edit or react in the direct chat with the blocker (4
   expect(await handleFrame(b.userId, { op: 'edit', reqId: 'e', chatId: direct, id: mine.message.id, body: 'правка' })).toEqual([{ op: 'err', reqId: 'e', code: 'blocked', retry: false }]);
   expect(await handleFrame(b.userId, { op: 'react', reqId: 'r', chatId: direct, id: hers.message.id, emoji: '👍' })).toEqual([{ op: 'err', reqId: 'r', code: 'blocked', retry: false }]);
   expect((await journal(a.userId)).length).toBe(aLen);
-  expect((await sql`select body from messages where id = ${mine.message.id}`)[0].body).toBe('моё');
+  expect((await opened(await sql`select * from messages where id = ${mine.message.id}`))[0].body).toBe('моё');
   expect((await handleFrame(b.userId, { op: 'edit', reqId: 'g', chatId: group, id: inGroup.message.id, body: 'правка' }))[0].op).toBe('ack');
   expect((await handleFrame(b.userId, { op: 'delete', reqId: 'd', chatId: direct, id: mine.message.id }))[0].op).toBe('ack');
 });

@@ -53,6 +53,19 @@ services:
     depends_on:
       s3: { condition: service_healthy }
 
+  # KMS (OpenBao — открытый Vault, движок Transit): проверка настоящего пути главного ключа в тестах.
+  # dev-режим держит ключи в памяти — для dev-стека и тестов основного набора KMS_PROVIDER=fake (crypto/kms.ts)
+  kms:
+    image: openbao/openbao:2.2.0
+    profiles: ["test", "kms"]
+    command: ["server", "-dev", "-dev-root-token-id=relay-dev-root", "-dev-listen-address=0.0.0.0:8200"]
+    cap_add: [IPC_LOCK]
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:8200/v1/sys/health"]
+      interval: 2s
+      timeout: 3s
+      retries: 30
+
   # поиск сообщений (MIT, Community Edition): только текст и id чата, права проверяет сервер; порт наружу не публикуется
   search:
     image: getmeili/meilisearch:v1.55.0
@@ -185,6 +198,8 @@ services:
     working_dir: /app/apps/server
     command: ["bun", "test"]
     environment:
+      VAULT_TEST_ADDR: http://kms:8200
+      VAULT_TEST_TOKEN: relay-dev-root
       DATABASE_URL: postgres://relay:relay@postgres:5432/relay_test
       DEV_LOGIN: "1"
       S3_ENDPOINT: http://s3:8333

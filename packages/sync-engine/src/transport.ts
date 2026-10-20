@@ -122,7 +122,7 @@ export class WsTransport {
     if (dev) {
       const sim = dev.sim;
       // потери — любые кадры, кроме hello и sessionTerminated: без них сеанс не начать и не закончить, восстановиться нечем
-      if (f.op !== 'hello' && f.op !== 'sessionTerminated' && lost(sim.profile)) { sim.losses++; dev.log.frameIn(f, raw.length, 'lost'); return; }
+      if (f.op !== 'hello' && f.op !== 'challenge' && f.op !== 'sessionTerminated' && lost(sim.profile)) { sim.losses++; dev.log.frameIn(f, raw.length, 'lost'); return; }
       if (f.op === 'updates' && sim.dropNextUpdates) { sim.dropNextUpdates = false; sim.losses++; dev.log.frameIn(f, raw.length, 'dropped'); return; }
       if (f.op === 'updates' && sim.forceTooLong) { sim.forceTooLong = false; dev.log.frameIn(f, raw.length, 'asTooLong'); f = { op: 'tooLong', seq: f.to }; }
       dev.log.frameIn(f, raw.length);
