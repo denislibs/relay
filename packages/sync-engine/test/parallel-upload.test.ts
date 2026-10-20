@@ -1,3 +1,4 @@
+import { FILE_HEADER, FILE_TAG } from '@relay/protocol';
 import { sql } from '../../../apps/server/src/db';
 import { afterAll, afterEach, beforeEach, expect, test } from 'bun:test';
 import { Engine } from '../src/engine';
@@ -17,7 +18,8 @@ function holdPuts() {
   let waiters: (() => void)[] = [];
   globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
     if (init?.method === 'PUT' && String(input).includes('X-Amz-Signature')) {
-      const size = (init.body as Blob).size;
+      // тело PUT — шифр (fileCrypto.ts): у маленького файла это исходный размер + заголовок + тег одного куска
+      const size = (init.body as Blob).size - FILE_HEADER - FILE_TAG;
       await new Promise<void>((r, reject) => {
         held.set(size, r); for (const w of waiters) w(); waiters = [];
         init.signal?.addEventListener('abort', () => { held.delete(size); reject(new DOMException('aborted', 'AbortError')); });

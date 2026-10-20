@@ -1,3 +1,4 @@
+import { fromBase64, importFileKey, openFile } from '@relay/protocol';
 import { sql } from '../../../apps/server/src/db';
 import { setMultipart } from '../../../apps/server/src/domain/files';
 import { listMultipart } from '../../../apps/server/src/domain/s3multipart';
@@ -55,7 +56,11 @@ test('a big file goes in parts straight to the storage and arrives whole', async
   const [m] = await feed.until((l) => l[0]?.status === 'sent', 10_000);
   expect(seen.parts.sort()).toEqual([1, 2, 3]);
   const id = (m.attachment as { id: string }).id;
-  const got = await download(id, a.token);
+  // в хранилище — шифр; открыть его можно ключом из сообщения (как это делает клиент получателя)
+  const sealed = await download(id, a.token);
+  expect(new TextDecoder().decode(sealed.subarray(0, 4))).toBe('RLF1');
+  const key = (m.attachment as { key: string }).key;
+  const got = new Uint8Array(await (await openFile(new Blob([sealed]), await importFileKey(fromBase64(key)))).arrayBuffer());
   expect(got.length).toBe(file.size);
   expect(Bun.hash(got)).toBe(Bun.hash(new Uint8Array(await file.arrayBuffer())));
   expect((await sql`select upload_id from attachments where id = ${id}`)[0].upload_id).toBeNull();

@@ -98,7 +98,7 @@ export interface OutboxEntry {
   noLinkPreview?: boolean;          // превью ссылки убрали в поле ввода
   link?: LinkPreview | null;        // превью, уже показанное в поле ввода, — в ленте сразу, до ответа сервера
   blocks?: Block[] | null;          // «статья»
-  upload?: { id: string; partSize: number; parts: number; done: number[] };
+  upload?: { id: string; partSize: number; parts: number; done: number[]; key?: string; base?: string };
   sticker?: StickerRef | null;      // стикер: снимок для показа до ответа, на сервер уходит только id   // большой файл частями: что уже принято (докачка)
 }
 
@@ -269,6 +269,8 @@ export interface EngineConfig {
   readFlushMs?: number;
   backoffMs?: [number, number];
   historyPage?: number;
+  /** Шифровать вложения на клиенте (fileCrypto.ts). По умолчанию — да; false — только для отладки. */
+  encryptFiles?: boolean;
   dialogsPage?: number;
   /** dev, только под имитатором потерь: сколько ждать ответ на sync после потерянного кадра, прежде чем спросить ещё раз (по умолчанию 5000) */
   syncTimeoutMs?: number;

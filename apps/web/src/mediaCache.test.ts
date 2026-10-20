@@ -297,3 +297,70 @@ describe('serveVideoRange — the start of a video in aligned chunks', () => {
     expect(await sweepAuto(s, { keepAutoDays: 1, maxAutoMb: 0 }, 2 * 24 * 3600_000)).toEqual({ removed: 2, autoBytes: 0 });
   });
 });
+
+import { encryptedSize, FILE_CHUNK, importFileKey, newFileKey, sealFile, toBase64 } from '@relay/protocol';
+import { fileKeyOf, resetFileKeyCache, serveEncryptedRange } from './mediaCache';
+
+describe('encrypted attachments in the service worker', () => {
+  const VID = '0b6f8c1e-3f2a-4c55-9d7e-1a2b3c4d5e6f';
+  const plainOf = (n: number) => { const b = new Uint8Array(n); for (let i = 0; i < n; i++) b[i] = (i * 13 + 1) & 255; b.set([0x00, 0x00, 0x00, 0x18, 0x66, 0x74, 0x79, 0x70], 0); return b; };
+  async function sealed(n: number) {
+    const raw = newFileKey();
+    const bytes = new Uint8Array(await (await sealFile(new Blob([plainOf(n)]), await importFileKey(raw))).arrayBuffer());
+    const asked: string[] = [];
+    const chunk = async (_u: string, range: string) => {
+      asked.push(range);
+      const [, a, b] = /bytes=(\d+)-(\d+)/.exec(range)!;
+      return new Response(bytes.slice(Number(a), Number(b) + 1), { status: 206 });
+    };
+    return { raw, bytes, asked, chunk };
+  }
+  const rq = (range: string, path = `/files/${VID}`) => new Request('http://app' + path, { headers: { range } });
+
+  test('a whole encrypted file is served decrypted (with a sniffed type) and kept decrypted', async () => {
+    const s = fakeStore();
+    const { raw, bytes } = await sealed(3000);
+    const out = await serveMedia(s, req(ID), async () => new Response(bytes), 1, raw);
+    await out.background;
+    expect(out.response.headers.get('content-type')).toBe('video/mp4');
+    expect(new Uint8Array(await out.response.arrayBuffer())).toEqual(plainOf(3000));
+    const again = await serveMedia(s, req(ID), async () => { throw new Error('offline'); }, 2, raw);
+    expect(new Uint8Array(await again.response.arrayBuffer())).toEqual(plainOf(3000));
+  });
+
+  test('Range: plaintext bytes across chunk boundaries, honest Content-Range with the plain size, start chunks cached', async () => {
+    const s = fakeStore();
+    const n = 3 * FILE_CHUNK + 777;
+    const { raw, chunk, asked } = await sealed(n);
+    resetFileKeyCache();
+    const a = await serveEncryptedRange(s, rq(`bytes=${FILE_CHUNK - 10}-`), raw, chunk, 1);
+    await a.background;
+    expect(a.response.status).toBe(206);
+    const body = new Uint8Array(await a.response.arrayBuffer());
+    expect(a.response.headers.get('content-range')).toBe(`bytes ${FILE_CHUNK - 10}-${FILE_CHUNK - 10 + body.length - 1}/${n}`);
+    expect(body).toEqual(plainOf(n).slice(FILE_CHUNK - 10, FILE_CHUNK - 10 + body.length));
+    expect(asked[0]).toBe('bytes=0-23');   // заголовок — один раз
+    // тот же диапазон — из кэша кусков, без сети
+    asked.length = 0;
+    const b = await serveEncryptedRange(s, rq(`bytes=${FILE_CHUNK - 10}-${FILE_CHUNK + 5}`), raw, async () => { throw new Error('offline'); }, 2);
+    expect(new Uint8Array(await b.response.arrayBuffer())).toEqual(plainOf(n).slice(FILE_CHUNK - 10, FILE_CHUNK + 6));
+    // последний кусок и 416 за концом
+    const tail = await serveEncryptedRange(s, rq(`bytes=${n - 5}-`), raw, chunk, 3);
+    expect(new Uint8Array(await tail.response.arrayBuffer())).toEqual(plainOf(n).slice(n - 5));
+    expect((await serveEncryptedRange(s, rq(`bytes=${n}-`), raw, chunk, 4)).response.status).toBe(416);
+    expect(encryptedSize(n)).toBeGreaterThan(n);
+  });
+
+  test('file key lookup: IndexedDB first, then the tab; a file without a key is remembered as plain', async () => {
+    resetFileKeyCache();
+    const k = newFileKey();
+    let asks = 0;
+    const s = { ...fakeStore(), keys: { get: async (id: string) => (id === 'aaaa' ? toBase64(k) : undefined), clear: async () => {} }, askKey: async (id: string) => { asks++; return id === 'bbbb' ? toBase64(k) : null; } };
+    expect(await fileKeyOf(s, 'aaaa')).toEqual(k);
+    expect(await fileKeyOf(s, 'bbbb')).toEqual(k);
+    expect(await fileKeyOf(s, 'cccc')).toBeNull();
+    expect(await fileKeyOf(s, 'cccc')).toBeNull();
+    expect(asks).toBe(2);   // «ключа нет» запомнено — вкладку второй раз не спрашиваем
+    expect(await fileKeyOf(s, 'aaaa/preview')).not.toEqual(k);   // копия — выведенным ключом
+  });
+});

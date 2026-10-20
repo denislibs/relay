@@ -11,6 +11,7 @@ import { hideSpoilers, MAX_FILE_BYTES, type Entity } from '@relay/protocol';
 import { activeFrame, frameByKey, getGlobal, setGlobal, type ChatFrame, type FeedMeta, type Me, type Status, type UploadItem } from './global';
 import { bindChatDepth, popChats, pushChat } from './nav';
 import { notifyIncoming, startNotify } from './notify';
+import { rememberKeysIn, startFileKeyService } from './fileKeys';
 import { bindMute, isMuted, startMuteMigration } from './mute';
 import { bindChatFlags, clearUnreadMark } from './chatFlags';
 import { startPeople, wantPeople } from './people';
@@ -45,6 +46,9 @@ export function startData(me: Me): void {
     dedicatedUrl: asset('dedicated.worker.js'),
   });
   engine.onReload(() => location.reload());
+  // ключи зашифрованных вложений — запомнить до того, как ленты их отрисуют (Service Worker расшифровывает /files/<id>)
+  engine.onData(rememberKeysIn);
+  startFileKeyService();
   startPeople(engine);
   resetMembers(); resetMediaTabs();   // вход другим пользователем без перезагрузки: кэши отрисовки прежнего — прочь
   bindMute((chatId, muteUntil) => engine.call({ type: 'setMute', chatId, muteUntil }));

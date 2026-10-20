@@ -7,8 +7,9 @@
 // Чужой пользователь на этом устройстве файлы не увидит: при выходе и при входе другим пользователем всё стирается
 // (storageInfo.clearMediaCaches).
 
+import { FILE_CHUNK, FILE_HEADER, chunkCount, fromBase64, importFileKey, openChunk, openFile, readHeader, sealedRange, variantKey, type FileHeader } from '@relay/protocol';
 import {
-  announceOnDeviceChanged, idbAttachmentIndex,
+  announceOnDeviceChanged, fileKeysStore, idbAttachmentIndex,
   type AttachmentBucket, type AttachmentIndex, type AttachmentOnDevice, type AutoCleanupPolicy,
 } from './attachmentsOnDevice';
 
@@ -38,12 +39,15 @@ export interface AttachmentStore {
   index: AttachmentIndex;
   estimate?: Estimate;
   changed?: () => void;
+  /** Ключи зашифрованных файлов (IndexedDB) и вопрос вкладке, если там ещё нет (только в Service Worker). */
+  keys?: { get(id: string): Promise<string | undefined>; clear(): Promise<void> };
+  askKey?: (id: string) => Promise<string | null>;
 }
 
 /** Хранилище этого origin — одинаковое на странице и в Service Worker. */
 export function deviceStore(): AttachmentStore {
   const est = typeof navigator !== 'undefined' && navigator.storage?.estimate ? () => navigator.storage.estimate() : undefined;
-  return { caches, index: idbAttachmentIndex, estimate: est, changed: announceOnDeviceChanged };
+  return { caches, index: idbAttachmentIndex, estimate: est, changed: announceOnDeviceChanged, keys: fileKeysStore };
 }
 
 const withTimeout = <T>(p: Promise<T>, ms = OP_MS): Promise<T> =>
@@ -116,11 +120,13 @@ const touch = (store: AttachmentStore, rec: AttachmentOnDevice, now: number): Pr
  * Ответ на запрос вложения в SW. background — то, что SW должен дождаться (event.waitUntil): запись в кэш
  * или отметка «открывали». Любая ошибка кэша — промах, идём в сеть.
  */
-export async function serveMedia(store: AttachmentStore, req: Request, net: (r: Request) => Promise<Response>, now = Date.now()):
+export async function serveMedia(store: AttachmentStore, req: Request, net: (r: Request) => Promise<Response>, now = Date.now(), raw: Uint8Array | null = null):
   Promise<{ response: Response; background: Promise<unknown> | null; stored: boolean }> {
   const fileId = fileIdOf(new URL(req.url).pathname);
   const hit = fileId ? await findOnDevice(store, fileId).catch(() => null) : null;
   if (hit) return { response: hit.response, background: touch(store, hit.rec, now), stored: false };
+  // зашифрованный (ключ известен): шифр из сети → открытый текст; на устройстве — тоже открытый
+  if (raw && fileId) return serveEncrypted(store, req, raw, net, now);
   const res = await net(req);
   const len = Number(res.headers.get('content-length'));
   if (!fileId || res.status !== 200 || res.type === 'opaque' || !(len > 0) || len > MAX_AUTO_FILE) return { response: res, background: null, stored: false };
@@ -316,6 +322,7 @@ export const savePolicy = (store: AttachmentStore, p: AutoCleanupPolicy): Promis
 export async function clearAllAttachments(store: AttachmentStore): Promise<void> {
   await Promise.all([CACHE_ATTACHMENTS_AUTO, CACHE_ATTACHMENTS_SAVED, LEGACY_CACHES.media].map((n) => store.caches.delete(n).catch(() => false)));
   await store.index.clear().catch(() => {});
+  await store.keys?.clear().catch(() => {});   // и ключи зашифрованных файлов
   store.changed?.();
 }
 
@@ -352,4 +359,110 @@ export async function migrateLegacyCaches(store: AttachmentStore, now = Date.now
   await store.caches.delete(LEGACY_CACHES.media).catch(() => false);
   if (moved) store.changed?.();
   return moved;
+}
+
+
+/* ---------- зашифрованные вложения (packages/protocol/src/fileCrypto.ts) ----------
+   В хранилище — шифр; ключ файла знает клиент (из сообщения). SW расшифровывает: целый файл — для <img> и роликов,
+   куски — для Range плеера (перемотка). В кэш устройства кладётся открытый текст. Копия (preview, 720) — ключом,
+   выведенным из ключа файла. Ключа нет (публичный файл: аватар, музыка профиля) — файл открытый, как раньше. */
+
+const keyCache = new Map<string, Uint8Array | null>();   // «id файла» → сырой ключ; null — проверено: ключа нет
+
+/** Сырой ключ для пути /files/<id>[/вариант]: память → IndexedDB → вопрос вкладке. null — файл не зашифрован. */
+export async function fileKeyOf(store: AttachmentStore, fileId: string): Promise<Uint8Array | null> {
+  const [base, variant] = fileId.split('/');
+  let raw = keyCache.get(base);
+  if (raw === undefined) {
+    const b64 = (await store.keys?.get(base).catch(() => undefined)) ?? (await store.askKey?.(base).catch(() => null)) ?? null;
+    raw = b64 ? fromBase64(b64) : null;
+    keyCache.set(base, raw);
+    if (keyCache.size > 5000) keyCache.delete(keyCache.keys().next().value!);
+  }
+  if (!raw) return null;
+  return variant ? variantKey(raw, variant) : raw;
+}
+/** Тесты и выход: забыть ключи в памяти SW. */
+export function resetFileKeyCache(): void { keyCache.clear(); headers.clear(); }
+
+const MAGIC: [number[], string, number][] = [
+  [[0xff, 0xd8, 0xff], 'image/jpeg', 0], [[0x89, 0x50, 0x4e, 0x47], 'image/png', 0], [[0x47, 0x49, 0x46, 0x38], 'image/gif', 0],
+  [[0x57, 0x45, 0x42, 0x50], 'image/webp', 8], [[0x66, 0x74, 0x79, 0x70], 'video/mp4', 4], [[0x1a, 0x45, 0xdf, 0xa3], 'video/webm', 0],
+  [[0x4f, 0x67, 0x67, 0x53], 'audio/ogg', 0], [[0x49, 0x44, 0x33], 'audio/mpeg', 0],
+];
+/** Тип по первым байтам: объект в хранилище — octet-stream, а <img>/<video> нужен настоящий. */
+export function sniffMime(b: Uint8Array): string {
+  for (const [sig, type, at] of MAGIC) if (sig.every((x, i) => b[at + i] === x)) return type;
+  return 'application/octet-stream';
+}
+
+/** Целый зашифрованный файл: шифр из сети → открытый текст (ответ 200 и запись в кэш). */
+export async function serveEncrypted(store: AttachmentStore, req: Request, raw: Uint8Array, net: (r: Request) => Promise<Response>, now = Date.now()):
+  Promise<{ response: Response; background: Promise<unknown> | null; stored: boolean }> {
+  const fileId = fileIdOf(new URL(req.url).pathname)!;
+  const res = await net(req);
+  if (res.status !== 200 || res.type === 'opaque') return { response: res, background: null, stored: false };
+  const sealed = await res.blob();
+  const plainNoType = await openFile(sealed, await importFileKey(raw));
+  const type = sniffMime(new Uint8Array(await plainNoType.slice(0, 16).arrayBuffer()));
+  const plain = new Blob([plainNoType], { type });
+  const background = plain.size <= MAX_AUTO_FILE ? putAttachment(store, fileId, plain, 'auto-evictable', now).catch(() => false) : null;
+  return { response: new Response(plain, { status: 200, headers: { 'content-type': type, 'content-length': String(plain.size) } }), background, stored: !!background };
+}
+
+const headers = new Map<string, FileHeader>();   // путь → заголовок объекта (размер, сетка)
+const ENC_RANGE_MAX = 2 * FILE_CHUNK;            // за один ответ — не больше двух кусков: плеер попросит следующие
+
+/**
+ * Range зашифрованного файла: нужные куски шифра из сети (или открытые из кэша), расшифровка, ответ 206 с исходным
+ * размером. Начало (первые VIDEO_START_BYTES) кэшируется кусками, как у открытых файлов.
+ */
+export async function serveEncryptedRange(store: AttachmentStore, req: Request, raw: Uint8Array, chunk: (url: string, range: string) => Promise<Response>, now = Date.now()):
+  Promise<{ response: Response; background: Promise<unknown> | null }> {
+  const fileId = fileIdOf(new URL(req.url).pathname)!;
+  const m = /^bytes=(\d+)-(\d*)$/.exec(req.headers.get('range') ?? '');
+  const key = await importFileKey(raw);
+  let h = headers.get(fileId);
+  if (!h) {
+    const r = await chunk(req.url, `bytes=0-${FILE_HEADER - 1}`);
+    const got = readHeader(new Uint8Array(await r.arrayBuffer()));
+    if (!got) return { response: new Response(null, { status: 502, statusText: 'not an encrypted file' }), background: null };
+    h = got; headers.set(fileId, h);
+  }
+  const start = m ? Number(m[1]) : 0;
+  if (start >= h.size) return { response: new Response(null, { status: 416, headers: { 'content-range': `bytes */${h.size}` } }), background: null };
+  const want = m?.[2] ? Math.min(Number(m[2]), h.size - 1) : h.size - 1;
+  const end = Math.min(want, start - (start % h.chunk) + ENC_RANGE_MAX - 1);
+  const first = Math.floor(start / h.chunk), last = Math.min(chunkCount(h.size, h.chunk) - 1, Math.floor(end / h.chunk));
+  const pieces: Uint8Array[] = [];
+  const writes: Promise<unknown>[] = [];
+  let mime = '';
+  for (let i = first; i <= last; i++) {
+    const offset = i * h.chunk, chunkId = `${fileId}@${offset}`;
+    const hit = offset < VIDEO_START_BYTES ? await findOnDevice(store, chunkId).catch(() => null) : null;
+    let plain: Uint8Array;
+    if (hit?.rec.chunkOf) { plain = new Uint8Array(await hit.response.arrayBuffer()); mime = hit.rec.mimeType; }
+    else {
+      const [s, e] = sealedRange(h, i);
+      const r = await chunk(req.url, `bytes=${s}-${e - 1}`);
+      if (r.status !== 206 && r.status !== 200) return { response: new Response(null, { status: r.status }), background: null };
+      plain = await openChunk(key, h, i, new Uint8Array(await r.arrayBuffer()));
+      if (offset < VIDEO_START_BYTES) {
+        const type = i === 0 ? sniffMime(plain) : (mime || 'application/octet-stream');
+        writes.push(putChunk(store, chunkId, plain.slice().buffer as ArrayBuffer, type, offset, h.size, now).catch(() => false));
+      }
+    }
+    if (i === 0) mime = sniffMime(plain);
+    pieces.push(plain);
+  }
+  const joined = new Uint8Array(pieces.reduce((n, p) => n + p.length, 0));
+  let at = 0; for (const p of pieces) { joined.set(p, at); at += p.length; }
+  const body = joined.slice(start - first * h.chunk, end - first * h.chunk + 1);
+  return {
+    response: new Response(body, { status: 206, statusText: 'Partial Content', headers: {
+      'content-type': mime || 'application/octet-stream', 'content-length': String(body.length), 'accept-ranges': 'bytes',
+      'content-range': `bytes ${start}-${start + body.length - 1}/${h.size}`,
+    } }),
+    background: writes.length ? Promise.all(writes) : null,
+  };
 }

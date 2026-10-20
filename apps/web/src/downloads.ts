@@ -4,7 +4,9 @@
 // и без сети (SW отдаёт оттуда и картинки, и части видео). Ядро (downloadChunks) не знает про браузер — тесты гоняют
 // его с подставным fetch.
 import { useEffect, useRef, useState } from 'preact/hooks';
-import { ON_DEVICE_CHANNEL, type AttachmentBucket } from './attachmentsOnDevice';
+import { ON_DEVICE_CHANNEL, fileKeysStore, type AttachmentBucket } from './attachmentsOnDevice';
+import { encryptedSize, fromBase64, importFileKey, openFile } from '@relay/protocol';
+import { keyFor } from './fileKeys';
 import { deviceStore, putAttachment, readAttachment } from './mediaCache';
 import { requestPersistentStorage } from './storageInfo';
 
@@ -162,7 +164,8 @@ async function readBody(res: Response, parts: Blob[], progress: (n: number) => v
 
 export type DownloadStatus = 'idle' | 'loading' | 'done' | 'error';
 export interface DownloadState { status: DownloadStatus; loaded: number; total: number; waiting?: boolean; cached?: boolean; error?: string }
-export interface DownloadFile { id: string; name: string; mime: string; size: number }
+/** key — ключ зашифрованного файла (base64); нет — берётся из реестра ключей страницы (fileKeys.ts). */
+export interface DownloadFile { id: string; name: string; mime: string; size: number; key?: string }
 
 const IDLE: DownloadState = { status: 'idle', loaded: 0, total: 0 };
 const states = new Map<string, DownloadState>();
@@ -286,8 +289,10 @@ export function startDownload(f: DownloadFile, opts: StartOptions = {}): Promise
     set(f.id, { status: 'loading', loaded: 0, total: f.size });
     let shown = 0;
     try {
-      const blob = await downloadChunks({
-        url: `/files/${f.id}?download=1`, size: f.size, type: f.mime, signal: ctrl.signal,
+      // зашифрованный файл: качаем шифр (он больше на заголовок и теги кусков) и открываем ключом из сообщения
+      const keyB64 = f.key ?? keyFor(f.id) ?? await fileKeysStore.get(f.id).catch(() => undefined);
+      const sealed = await downloadChunks({
+        url: `/files/${f.id}?download=1`, size: keyB64 ? encryptedSize(f.size) : f.size, type: keyB64 ? 'application/octet-stream' : f.mime, signal: ctrl.signal,
         // кольцу хватает 10 раз в секунду: куски по 16–64 КБ иначе дали бы тысячи перерисовок
         onProgress: (loaded, total) => {
           const now = performance.now();
@@ -297,6 +302,7 @@ export function startDownload(f: DownloadFile, opts: StartOptions = {}): Promise
         },
         onWaiting: (waiting) => { const s = states.get(f.id) ?? IDLE; set(f.id, { ...s, waiting }); },
       });
+      const blob = keyB64 ? await openFile(sealed, await importFileKey(fromBase64(keyB64)), f.mime) : sealed;
       const cached = await keepOnDevice(f.id, blob, opts.save ? 'saved-by-user' : 'auto-evictable', opts.maxMb ?? 0);
       set(f.id, { status: cached ? 'done' : 'idle', loaded: blob.size, total: blob.size, cached });
       if (opts.save) saveBlob(blob, f.name);

@@ -9,12 +9,28 @@
 import type { AutoCleanupPolicy } from './attachmentsOnDevice';
 import {
   CACHE_APP_SHELL_PREFIX, deviceStore, fetchMedia, isMediaRangeRequest, isMediaRequest, LEGACY_CACHES,
-  loadPolicy, migrateLegacyCaches, savePolicy, serveMedia, serveVideoRange, sweepAuto,
+  fileKeyOf, loadPolicy, migrateLegacyCaches, savePolicy, serveEncryptedRange, serveMedia, serveVideoRange, sweepAuto,
 } from './mediaCache';
 declare const __BUILD__: string;
 const sw = self as unknown as ServiceWorkerGlobalScope;
 const CACHE = CACHE_APP_SHELL_PREFIX + __BUILD__;
 const store = deviceStore();
+// ключа файла ещё нет в IndexedDB (страница только что получила сообщение) — спросить открытую вкладку
+store.askKey = async (id: string) => {
+  const wins = await sw.clients.matchAll({ type: 'window' });
+  for (const w of wins) {
+    const ch = new MessageChannel();
+    const answer = new Promise<string | null>((resolve) => {
+      const t = setTimeout(() => resolve(null), 1000);
+      ch.port1.onmessage = (e) => { clearTimeout(t); resolve((e.data as { key?: string | null })?.key ?? null); };
+    });
+    w.postMessage({ type: 'attachments:need-key', id }, [ch.port2]);
+    const key = await answer;
+    if (key) return key;
+  }
+  return null;
+};
+const fileIdFrom = (url: string) => /^\/files\/([0-9a-f-]{36}(?:\/(?:preview|720))?)$/.exec(new URL(url).pathname)?.[1] ?? '';
 declare const __SHELL__: string[];   // код и стили этой сборки с хэшем в имени (build.ts)
 const SHELL = ['/', ...__SHELL__, '/sounds/message.mp3', '/sounds/sent.mp3'];   // звуки сообщений — и без сети
 const API = /^\/(health|me|users|contacts|settings|privacy|blocks|chats|presence|search|uploads|files|push|sessions|ws|dev|logout|auth|link-preview|groups|join|sticker-sets|my-stickers|stickers-by-emoji)(\/|$)/;
@@ -111,7 +127,7 @@ sw.addEventListener('fetch', (e) => {
     return;
   }
   if (isMediaRequest(e.request, location.origin) && e.request.mode !== 'navigate') {
-    e.respondWith(serveMedia(store, e.request, (r) => fetchMedia(r)).then(({ response, background, stored: put }) => {
+    e.respondWith(fileKeyOf(store, fileIdFrom(e.request.url)).catch(() => null).then((raw) => serveMedia(store, e.request, (r) => fetchMedia(r), Date.now(), raw)).then(({ response, background, stored: put }) => {
       if (background) e.waitUntil(background.then(() => { if (put && ++stored % SWEEP_EVERY === 0) return sweep(); }));
       return response;
     }));
@@ -120,7 +136,8 @@ sw.addEventListener('fetch', (e) => {
   // часть видео/аудио — через /files/…: плеер не застрянет на истёкшей ссылке хранилища (без SW Chrome после
   // перемотки идёт прямо по старой ссылке). Начало видео — из кэша кусков (serveVideoRange), остальное — сеть.
   if (isMediaRangeRequest(e.request, location.origin)) {
-    e.respondWith(serveVideoRange(store, e.request, rangeFromNetwork, (u, range) => corsRange(u, range))
+    e.respondWith(fileKeyOf(store, fileIdFrom(e.request.url)).catch(() => null)
+      .then((raw) => (raw ? serveEncryptedRange(store, e.request, raw, (u, range) => corsRange(u, range)) : serveVideoRange(store, e.request, rangeFromNetwork, (u, range) => corsRange(u, range))))
       .then(({ response, background }) => { if (background) e.waitUntil(background); return response; })
       .catch(() => fetch(e.request)));
     return;

@@ -34,15 +34,21 @@ export interface AttachmentIndex {
 export const ON_DEVICE_DB = 'relay-attachments-on-device';
 const STORE_ATTACHMENTS = 'attachments';
 const STORE_SETTINGS = 'settings';
+/** Ключи зашифрованных вложений (id файла → ключ base64): страница кладёт их, встретив вложение в данных,
+ *  Service Worker берёт, расшифровывая /files/<id>. Стираются вместе с файлами (выход, «Очистить кэш»). */
+const STORE_FILE_KEYS = 'file_keys';
 const POLICY_KEY = 'auto-cleanup-policy';
 
 let db: Promise<IDBDatabase> | null = null;
 function open(): Promise<IDBDatabase> {
   return db ??= new Promise<IDBDatabase>((resolve, reject) => {
-    const req = indexedDB.open(ON_DEVICE_DB, 1);
-    req.onupgradeneeded = () => {
-      req.result.createObjectStore(STORE_ATTACHMENTS, { keyPath: 'fileId' });
-      req.result.createObjectStore(STORE_SETTINGS);
+    const req = indexedDB.open(ON_DEVICE_DB, 2);
+    req.onupgradeneeded = (e) => {
+      if (e.oldVersion < 1) {
+        req.result.createObjectStore(STORE_ATTACHMENTS, { keyPath: 'fileId' });
+        req.result.createObjectStore(STORE_SETTINGS);
+      }
+      if (e.oldVersion < 2) req.result.createObjectStore(STORE_FILE_KEYS);
     };
     req.onsuccess = () => {
       // другая вкладка/SW удалили базу (очистка данных) — следующий вызов откроет заново
@@ -97,3 +103,11 @@ export const ON_DEVICE_CHANNEL = 'relay-attachments-on-device';
 export function announceOnDeviceChanged(): void {
   try { const c = new BroadcastChannel(ON_DEVICE_CHANNEL); c.postMessage({ type: 'changed' }); c.close(); } catch { /* нет BroadcastChannel */ }
 }
+
+/* ---------- ключи зашифрованных файлов ---------- */
+
+export const fileKeysStore = {
+  get: (fileId: string): Promise<string | undefined> => run(STORE_FILE_KEYS, 'readonly', (s) => s.get(fileId)),
+  putMany: (entries: [string, string][]): Promise<void> => (entries.length ? run(STORE_FILE_KEYS, 'readwrite', (s) => { for (const [id, k] of entries) s.put(k, id); }) : Promise.resolve()),
+  clear: (): Promise<void> => run(STORE_FILE_KEYS, 'readwrite', (s) => { s.clear(); }),
+};

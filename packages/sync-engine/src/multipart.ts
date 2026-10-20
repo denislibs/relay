@@ -4,8 +4,12 @@
  * поэтому обрыв связи или перезагрузка вкладки теряют только части, что были в пути.
  */
 
-/** Состояние загрузки частями в записи outbox: id вложения на сервере, разбивка и номера принятых частей. */
-export interface MultipartState { id: string; partSize: number; parts: number; done: number[] }
+/** Состояние загрузки частями в записи outbox: id вложения на сервере, разбивка и номера принятых частей.
+ *  key/base — ключ файла и основа nonce (base64): шифр должен быть тем же после перезагрузки — части уже в хранилище. */
+export interface MultipartState { id: string; partSize: number; parts: number; done: number[]; key?: string; base?: string }
+
+/** Что грузим: Blob или шифр поверх него (fileCrypto.sealedSource) — байты [a, b) без чтения файла целиком. */
+export interface UploadSource { size: number; slice(a: number, b: number): Blob | Promise<Blob> }
 
 type ReqError = { code: string; retry: boolean };
 
@@ -28,7 +32,7 @@ const URL_BATCH = 16;
 
 const partLen = (s: MultipartState, size: number, n: number) => Math.min(s.partSize, size - (n - 1) * s.partSize);
 
-export async function uploadParts(blob: Blob, s: MultipartState, io: PartsIo): Promise<void> {
+export async function uploadParts(blob: UploadSource, s: MultipartState, io: PartsIo): Promise<void> {
   const done = new Set(s.done);
   const queue: number[] = [];
   for (let n = 1; n <= s.parts; n++) if (!done.has(n)) queue.push(n);
@@ -65,7 +69,9 @@ export async function uploadParts(blob: Blob, s: MultipartState, io: PartsIo): P
       try {
         const url = await urlFor(n);
         if (failure) return;
-        await putPart(url, blob.slice((n - 1) * s.partSize, (n - 1) * s.partSize + partLen(s, blob.size, n)), xhrs, io, (loaded) => { inflight.set(n, loaded); report(); });
+        const body = await blob.slice((n - 1) * s.partSize, (n - 1) * s.partSize + partLen(s, blob.size, n));
+        if (failure) return;
+        await putPart(url, body, xhrs, io, (loaded) => { inflight.set(n, loaded); report(); });
         inflight.delete(n);
         done.add(n);
         doneBytes += partLen(s, blob.size, n);
