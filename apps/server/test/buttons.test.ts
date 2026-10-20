@@ -1,3 +1,4 @@
+import type { Update } from '@relay/protocol';
 import { beforeEach, expect, test } from 'bun:test';
 import { parseClientFrame, type Message, type MessageButton, type ServerFrame } from '@relay/protocol';
 import { sql } from '../src/db';
@@ -6,7 +7,7 @@ import { announceLogin, terminateSession } from '../src/domain/sessions';
 import { LOGIN_CONFIRMED, LOGIN_ENDED, LOGIN_GONE, LOGIN_OTHERS_ENDED, serviceChatId } from '../src/domain/service';
 import { toMessage } from '../src/domain/chats';
 import { handleFrame } from '../src/ws';
-import { makeChat, makeUser, resetDb } from './helpers';
+import { journalOf, makeChat, makeUser, resetDb } from './helpers';
 
 beforeEach(resetDb);
 
@@ -28,15 +29,15 @@ const answer = (out: ServerFrame[]) => (out[0] as Extract<ServerFrame, { op: 'ac
 const sessionIds = async (userId: number) => (await sql`select id from sessions where user_id = ${userId} order by id`).map((r) => Number(r.id));
 
 test('«Новый вход» comes with three callback buttons about the new session', async () => {
-  const { fresh, alert } = await setup();
+  const { userId, fresh, alert } = await setup();
   const m = await alert();
   expect(m.buttons).toEqual([
     [{ text: 'Это я', kind: 'callback', data: `login:ok:${fresh}` }, { text: 'Завершить этот сеанс', kind: 'callback', data: `login:end:${fresh}` }],
     [{ text: 'Завершить все остальные сеансы', kind: 'callback', data: `login:others:${fresh}` }],
   ] satisfies MessageButton[][]);
   // журнал несёт кнопки вместе с сообщением
-  const [u] = await sql`select payload from updates where type = 'newMessage' order by seq desc limit 1`;
-  expect(u.payload.message.buttons).toEqual(m.buttons);
+  const u = (await journalOf(userId, 'newMessage')).at(-1) as Extract<Update, { type: 'newMessage' }>;
+  expect(u.message.buttons).toEqual(m.buttons);
 });
 
 test('button frame parsing: data is required and short', () => {
@@ -71,8 +72,8 @@ test('«Это я» from the old device confirms the login and edits the message
   expect(m.body.endsWith('\n\n' + LOGIN_CONFIRMED)).toBe(true);
   expect(m.entities?.at(-1)).toEqual({ type: 'italic', offset: m.body.length - LOGIN_CONFIRMED.length, length: LOGIN_CONFIRMED.length });
   expect(m.editedAt).toBeNull();   // правка «бота» — без «изм.»
-  const [u] = await sql`select payload from updates where user_id = ${userId} and type = 'messageMarkup' order by seq desc limit 1`;
-  expect(u.payload).toEqual({ type: 'messageMarkup', chatId, id, body: m.body, entities: m.entities, buttons: null });
+  const u = (await journalOf(userId, 'messageMarkup')).at(-1);
+  expect(u).toEqual({ type: 'messageMarkup', chatId, id, body: m.body, entities: m.entities, buttons: null });
   // кнопок больше нет — второе нажатие не проходит
   expect((await press(userId, old, chatId, id, `login:ok:${fresh}`))[0]).toMatchObject({ op: 'err', code: 'not_found' });
 });

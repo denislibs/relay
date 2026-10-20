@@ -58,3 +58,59 @@ test('a fully trimmed journal is tooLong too, never an empty page with more', as
   expect(await getUpdates(a, 1)).toMatchObject({ tooLong: true, items: [] });
   expect((await getUpdates(a, 2)).tooLong).toBe(false); // догнал до конца — снимок не нужен
 });
+
+import { deleteMessage, editMessage } from '../src/domain/messageOps';
+import { sendMessage } from '../src/domain/messages';
+import { saveDraft } from '../src/domain/drafts';
+import { makeChat } from './helpers';
+
+const raw = async (userId: number) => (await sql`select type, payload from updates where user_id = ${userId} order by seq`).map((r) => r.payload as Record<string, unknown>);
+const SECRET = 'пароль от сейфа 4242';
+
+test('the journal keeps references, not texts: message, edit and draft are stored as ids only', async () => {
+  const a = await makeUser('a'), b = await makeUser('b'), c = await makeUser('c');
+  const chat = await makeChat([a, b, c]);
+  const { message } = await sendMessage(a, { chatId: chat, clientId: crypto.randomUUID(), body: SECRET });
+  await editMessage(a, chat, message.id, SECRET + ' (новый)');
+  await saveDraft(a, chat, SECRET + ' черновик');
+  for (const u of [a, b, c]) expect(JSON.stringify(await raw(u))).not.toContain('сейфа');
+  expect((await raw(b))[0]).toEqual({ type: 'newMessage', chatId: chat, id: message.id, ref: 1 });
+});
+
+test('sync gives the client the same events as before: full message, edit, draft — current state', async () => {
+  const a = await makeUser('a'), b = await makeUser('b');
+  const chat = await makeChat([a, b]);
+  const { message } = await sendMessage(a, { chatId: chat, clientId: crypto.randomUUID(), body: 'привет' });
+  const { editedAt } = await editMessage(a, chat, message.id, 'привет!');
+  const { at } = await saveDraft(a, chat, 'пишу…');
+  const ups = (await getUpdates(a, 0)).items.map((i) => i.update);
+  expect(ups[0]).toEqual({ type: 'newMessage', message: { ...message, body: 'привет!', editedAt } });
+  expect(ups[1]).toEqual({ type: 'messageEdited', chatId: chat, id: message.id, body: 'привет!', editedAt, entities: [] });
+  expect(ups.at(-1)).toEqual({ type: 'draft', chatId: chat, text: 'пишу…', at: at! });
+  await saveDraft(a, chat, '');
+  const cleared = (await getUpdates(a, 0)).items.map((i) => i.update).filter((u) => u.type === 'draft');
+  expect(cleared.map((u) => (u as { text: string }).text)).toEqual(['', '']);   // оба события черновика — текущее: черновика нет
+});
+
+test('a deleted message is not revealed by old journal entries; a vanished chat turns into messageDeleted', async () => {
+  const a = await makeUser('a'), b = await makeUser('b');
+  const chat = await makeChat([a, b]);
+  const { message } = await sendMessage(a, { chatId: chat, clientId: crypto.randomUUID(), body: SECRET });
+  await deleteMessage(a, chat, message.id);
+  const ups = (await getUpdates(b, 0)).items.map((i) => i.update);
+  expect(ups[0]).toMatchObject({ type: 'newMessage', message: { id: message.id, body: '', deleted: true } });
+  expect(JSON.stringify(ups)).not.toContain('сейфа');
+  await sql`delete from chats where id = ${chat}`;
+  const page = await getUpdates(b, 0);
+  expect(page.items[0].update).toEqual({ type: 'messageDeleted', chatId: chat, id: message.id });
+  expect(page.more).toBe(false);   // ни одна запись не пропала: номера подряд, клиент не зациклится
+  expect(page.items.map((i) => i.seq)).toEqual([1, 2]);
+});
+
+test('old entries with the full body (written before the change) are read as is', async () => {
+  const a = await makeUser('a');
+  const legacy = { type: 'newMessage', message: { id: 7, chatId: 1, senderId: a, clientId: 'x', kind: 'text', body: 'старое', replyToId: null, createdAt: new Date(0).toISOString() } };
+  await sql`insert into user_seq (user_id, seq) values (${a}, 1)`;
+  await sql`insert into updates (user_id, seq, type, payload) values (${a}, 1, 'newMessage', ${sql.json(legacy as never)})`;
+  expect((await getUpdates(a, 0)).items).toEqual([{ seq: 1, update: legacy as never }]);
+});

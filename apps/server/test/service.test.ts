@@ -3,7 +3,8 @@ import { sql } from '../src/db';
 import { isServiceChat, postService, serviceChatId, systemUserId } from '../src/domain/service';
 import { sendMessage } from '../src/domain/messages';
 import { editMessage, reactMessage } from '../src/domain/messageOps';
-import { makeUser, resetDb } from './helpers';
+import { journalOf, makeUser, resetDb } from './helpers';
+import type { Update } from '@relay/protocol';
 
 beforeEach(resetDb);
 
@@ -24,9 +25,9 @@ test('service message lands in the journal; the user cannot write or react there
   const a = await makeUser('Анна');
   const m = await sql.begin((tx) => postService(tx, a, { type: 'new_login', body: 'Новый вход' }));
   expect(m).toMatchObject({ senderId: await systemUserId(), body: 'Новый вход', service: { type: 'new_login' } });
-  const [u] = await sql`select type, payload from updates where user_id = ${a} order by seq desc limit 1`;
+  const u = (await journalOf(a)).at(-1) as Extract<Update, { type: 'newMessage' }>;
   expect(u.type).toBe('newMessage');
-  expect(u.payload.message.service).toEqual({ type: 'new_login' });
+  expect(u.message.service).toEqual({ type: 'new_login' });
 
   // писать в «Relay» можно (как в Telegram — ответа просто не будет), править — только свои
   const mine = await sendMessage(a, { chatId: m.chatId, clientId: crypto.randomUUID(), body: 'заметка себе' });

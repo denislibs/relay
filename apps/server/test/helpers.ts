@@ -88,3 +88,12 @@ export async function uploadFile(base: string, token: string, meta: Omit<UploadM
   if (!ok.ok) throw new Error(`confirm ${ok.status} ${await ok.text()}`);
   return (await ok.json()) as Record<string, unknown>;
 }
+
+import type { Update } from '@relay/protocol';
+import { getUpdates } from '../src/domain/journal';
+
+/** События журнала пользователя в том виде, в каком их получает клиент (sync): журнал хранит ссылки, тела подставляются при чтении. */
+export async function journalOf(userId: number, type?: Update['type']): Promise<Update[]> {
+  const { items } = await getUpdates(userId, 0, 100_000);
+  return items.map((i) => i.update).filter((u) => !type || u.type === type);
+}

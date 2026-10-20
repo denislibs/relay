@@ -11,7 +11,7 @@ import { PHOTO_PREVIEW_SIDE } from '../src/jobs/photo';
 import { SLOW_KINDS } from '../src/jobs/kinds';
 import { claim, enqueue } from '../src/jobs/queue';
 import { drainJobs } from '../src/jobs/worker';
-import { resetDb, uploadFile } from './helpers';
+import { journalOf, resetDb, uploadFile } from './helpers';
 
 const server = createServer({ port: 0 });
 const base = `http://localhost:${server.port}`;
@@ -55,8 +55,8 @@ test('a big photo gets a small preview (longer side 480): messages, clients and 
   const att = m.attachment as Attachment;
   expect(att.thumb).toBe('data:image/jpeg;base64,AAAA');
   expect(att.preview).toMatchObject({ name: 'preview', w: 480, h: 360 });
-  const [u] = await sql`select payload from updates where user_id = ${b.userId} and type = 'attachmentUpdated'`;
-  expect(u.payload).toMatchObject({ chatId, id: message.id, attachment: { preview: { name: 'preview', w: 480, h: 360 } } });
+  const [u] = await journalOf(b.userId, 'attachmentUpdated');
+  expect(u).toMatchObject({ chatId, id: message.id, attachment: { preview: { name: 'preview', w: 480, h: 360 } } });
 
   // копия — по тем же правам, что и оригинал, показывается inline как картинка
   const pv = await fetch(`${base}/files/${up.id}/preview`, { headers: as(b.token) });

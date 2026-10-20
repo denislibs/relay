@@ -1,7 +1,7 @@
 import { afterAll, beforeEach, expect, test } from 'bun:test';
 import { sql } from '../src/db';
 import { createServer } from '../src/http';
-import { resetDb } from './helpers';
+import { journalOf, resetDb } from './helpers';
 
 const server = createServer({ port: 0 });
 const base = `http://localhost:${server.port}`;
@@ -25,8 +25,7 @@ test('group: creator and members, a "created the group" service message reaches 
   expect(Number(msg.sender_id)).toBe(a.userId);
   // newMessage в журнале у каждого участника
   for (const u of [a, b, c]) {
-    const [j] = await sql`select count(*)::int n from updates where user_id = ${u.userId} and payload->>'type' = 'newMessage' and (payload->'message'->>'chatId')::bigint = ${id}`;
-    expect(j.n).toBe(1);
+    expect((await journalOf(u.userId, 'newMessage')).filter((x) => x.type === 'newMessage' && x.message.chatId === id).length).toBe(1);
   }
 });
 
