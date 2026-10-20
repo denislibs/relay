@@ -518,12 +518,12 @@ body { margin: 0; font-family: var(--font-sans); color: var(--ink); background: 
 .rl-icon path { transform-box: fill-box; transform-origin: center; transition: transform var(--dur-base) var(--ease-out), opacity var(--dur-instant) var(--ease-standard); }
 :is(.rl-iconbtn, .rl-btn):is(:hover, :focus-visible) [data-icon="close"] { transform: rotate(90deg); }
 :is(.rl-iconbtn, .rl-btn):is(:hover, :focus-visible) [data-icon="search"] path:first-child { transform: scale(1.1); }
-:is(.rl-iconbtn, .rl-btn, .rl-composer-send):is(:hover, :focus-visible) [data-icon="send"] { transform: translate(2px, -2px) rotate(-8deg); }
+:is(.rl-iconbtn, .rl-btn, .rl-composer-send):is(:hover, :focus-visible) :is([data-icon="send"], [data-icon="sendFilled"]) { transform: translate(2px, -2px) rotate(-8deg); }
 :is(.rl-iconbtn, .rl-btn, .rl-inforow):is(:hover, :focus-visible) [data-icon="download"] path:nth-child(-n+2) { animation: rl-arrow-drop 900ms var(--ease-out) infinite; }
 :is(.rl-iconbtn, .rl-btn, .rl-inforow):is(:hover, :focus-visible) [data-icon="upload"] path:nth-child(-n+2) { animation: rl-arrow-rise 900ms var(--ease-out) infinite; }
 :is(.rl-iconbtn, .rl-inforow, .rl-btn):is(:hover, :focus-visible) [data-icon="bell"], :is(.rl-iconbtn, .rl-inforow):is(:hover, :focus-visible) [data-icon="bellOff"] { transform-origin: 50% 10%; animation: rl-bell 700ms var(--ease-out); }
 :is(.rl-iconbtn, .rl-btn):is(:hover, :focus-visible) [data-icon="trash"] path:nth-child(-n+2) { transform: translateY(-2px) rotate(-12deg); transform-origin: 0% 100%; }
-:is(.rl-iconbtn, .rl-btn, .rl-inforow):is(:hover, :focus-visible) [data-icon="pencil"] { animation: rl-wiggle 500ms var(--ease-out); }
+:is(.rl-iconbtn, .rl-btn, .rl-inforow):is(:hover, :focus-visible) :is([data-icon="pencil"], [data-icon="pencilFilled"]) { animation: rl-wiggle 500ms var(--ease-out); }
 :is(.rl-iconbtn, .rl-btn):is(:hover, :focus-visible) [data-icon="more"] path { animation: rl-dot-hop 600ms var(--ease-out); }
 :is(.rl-iconbtn, .rl-btn):is(:hover, :focus-visible) [data-icon="more"] path:nth-child(2) { animation-delay: 60ms; }
 :is(.rl-iconbtn, .rl-btn):is(:hover, :focus-visible) [data-icon="more"] path:nth-child(3) { animation-delay: 120ms; }
@@ -531,6 +531,13 @@ body { margin: 0; font-family: var(--font-sans); color: var(--ink); background: 
 :is(.rl-iconbtn, .rl-btn):is(:hover, :focus-visible) [data-icon="chevronLeft"] { transform: translateX(-2px); }
 :is(.rl-iconbtn, .rl-btn, .rl-fab):is(:hover, :focus-visible) [data-icon="chevronDown"] { transform: translateY(2px); }
 :is(.rl-iconbtn, .rl-btn, .rl-composer-send):is(:hover, :focus-visible) [data-icon="mic"] path:first-child { animation: rl-breathe 900ms var(--ease-out) infinite; }
+/* залитый микрофон на кнопке записи: «говорят в него» — головка с дужкой покачивается вокруг основания стойки,
+   капсула чуть сжимается и вытягивается в сбивчивом ритме речи */
+:is(.rl-iconbtn, .rl-composer-send):is(:hover, :focus-visible) [data-icon="micFilled"] > :is(g, path:first-of-type) { transform-box: view-box; transform-origin: 12px 21px; animation: rl-mic-bob 1.3s ease-in-out infinite; }
+:is(.rl-iconbtn, .rl-composer-send):is(:hover, :focus-visible) [data-icon="micFilled"] > g > path { transform-box: fill-box; transform-origin: center bottom; animation: rl-mic-talk 650ms ease-in-out infinite; }
+@keyframes rl-mic-bob { 0%, 100% { transform: rotate(0); } 25% { transform: rotate(-5deg); } 50% { transform: rotate(2deg); } 75% { transform: rotate(-3deg); } }
+@keyframes rl-mic-talk { 0%, 100% { transform: scale(1); } 30% { transform: scale(1.07, .95); } 55% { transform: scale(.97, 1.04); } 80% { transform: scale(1.04, .97); } }
+@media (prefers-reduced-motion: reduce) { [data-icon="micFilled"] > *, [data-icon="micFilled"] > g > path { animation: none !important; } }
 :is(.rl-iconbtn, .rl-tile, .rl-btn):is(:hover, :focus-visible) [data-icon="userPlus"] path:nth-child(n+3) { transform: rotate(90deg); }
 :is(.rl-iconbtn, .rl-btn):is(:hover, :focus-visible) [data-icon="plus"] { transform: rotate(90deg); }
 :is(.rl-iconbtn, .rl-inforow):is(:hover, :focus-visible) [data-icon="star"] { transform: rotate(-12deg) scale(1.1); }
@@ -540,7 +547,7 @@ body { margin: 0; font-family: var(--font-sans); color: var(--ink); background: 
 :is(.rl-iconbtn, .rl-inforow):is(:hover, :focus-visible) [data-icon="palette"] { transform: rotate(-20deg); }
 :is(.rl-iconbtn, .rl-inforow):is(:hover, :focus-visible) [data-icon="timer"] path:nth-child(2) { transform: rotate(360deg); transition-duration: 900ms; }
 :is(.rl-iconbtn, .rl-btn):is(:hover, :focus-visible) [data-icon="zoomIn"] { transform: scale(1.12); }
-.rl-composer-send:active [data-icon="send"]:not(.rl-swap-off) { animation: rl-send-fly 360ms var(--ease-in); }
+.rl-composer-send:active :is([data-icon="send"], [data-icon="sendFilled"]):not(.rl-swap-off) { animation: rl-send-fly 360ms var(--ease-in); }
 
 @keyframes rl-arrow-drop { 0% { transform: translateY(-3px); opacity: 0; } 40% { opacity: 1; } 70% { transform: translateY(1px); } 100% { transform: translateY(0); } }
 @keyframes rl-arrow-rise { 0% { transform: translateY(3px); opacity: 0; } 40% { opacity: 1; } 100% { transform: translateY(0); } }
@@ -950,7 +957,7 @@ button.rl-tab:hover { color: var(--ink); }
 .rl-fab-main { position: relative; display: inline-flex; align-items: center; justify-content: center; width: 56px; height: 56px; border: 0; border-radius: 50%; background: var(--fab); color: var(--on-fab); cursor: pointer; transition: border-radius var(--dur-base) var(--ease-out), transform var(--dur-instant) var(--ease-standard); }
 .rl-fab-main:active { transform: scale(var(--press-lg)); }
 .rl-fab-main .rl-ripple-host { border-radius: inherit; }
-.rl-fab-main:is(:hover, :focus-visible) [data-icon="pencil"] { animation: rl-wiggle 500ms var(--ease-out); }
+.rl-fab-main:is(:hover, :focus-visible) :is([data-icon="pencil"], [data-icon="pencilFilled"]) { animation: rl-wiggle 500ms var(--ease-out); }
 @keyframes rl-fab-pop { 0% { transform: scale(0) rotate(-45deg); } 70% { transform: scale(1.08) rotate(4deg); } 100% { transform: none; } }
 
 /* ---------- GlassBar: floating chat header ---------- */

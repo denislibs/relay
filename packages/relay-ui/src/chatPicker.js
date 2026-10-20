@@ -68,7 +68,7 @@ export function ChatPicker(props) {
     ? h('div', { class: 'rl-chatpick-foot rl-chatpick-foot-multi' },
         h('input', { class: 'rl-chatpick-note', type: 'text', placeholder: 'Добавить подпись…', 'aria-label': 'Подпись', value: note[0],
           onInput: function (e) { note[1](e.target.value); }, onKeyDown: function (e) { if (e.key === 'Enter' && !e.isComposing) { e.preventDefault(); send(); } } }),
-        h('button', { type: 'button', class: 'rl-chatpick-send', 'aria-label': 'Переслать в ' + picked.length + ' чатов', onClick: send }, h(Icon, { name: 'send', size: 22 })))
+        h('button', { type: 'button', class: 'rl-chatpick-send', 'aria-label': 'Переслать в ' + picked.length + ' чатов', onClick: send }, h(Icon, { name: 'sendFilled', size: 22 })))
     : h('div', { class: 'rl-chatpick-foot' },
         h('button', { type: 'button', class: 'rl-chatpick-btn', disabled: !picked.length, onClick: send }, picked.length ? 'Переслать' : 'Выберите чаты'));
 
