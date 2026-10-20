@@ -7,6 +7,7 @@ import type { Item } from '@relay/sync-engine/src/types';
 import { useEffect, useRef, useState } from 'preact/hooks';
 import { focusMessage, type MediaTab } from '../data';
 import { useMedia } from '../mediaTab';
+import { tileSrc } from '../mediaGrid';
 import { getGlobal, useGlobal } from '../global';
 import { toggleMusic, trackTitle } from '../music';
 import { clock, dayLabel, fileSize, lastSeenText } from './format';
@@ -20,7 +21,8 @@ import { wantPeople } from '../people';
 const ORDER: MediaTab[] = ['media', 'file', 'link', 'audio', 'voice'];
 const LABEL: Record<MediaTab, string> = { media: 'Медиа', file: 'Файлы', link: 'Ссылки', audio: 'Музыка', voice: 'Голосовые' };
 
-export type Att = { id: string; kind: string; mime: string; name: string; size: number; thumb?: string | null; duration?: number | null; w?: number | null; h?: number | null };
+export type Att = { id: string; kind: string; mime: string; name: string; size: number; thumb?: string | null; duration?: number | null; w?: number | null; h?: number | null;
+  preview?: { name: string; w: number; h: number; size: number } | null };
 export type Msg = Item & { id: number; clientId: string; senderId: number; createdAt: string; body: string; attachment?: Att | null; entities?: { type: string; offset: number; length: number; url?: string }[] | null };
 
 export const when = (iso: string) => `${dayLabel(iso)}, ${clock(iso)}`;
@@ -121,7 +123,7 @@ export function MediaCell({ m, onOpen }: { m: Msg; onOpen: (m: Msg) => void }) {
   const [frame, setFrame] = useState(false);
   return (
     <button type="button" class="app-media-cell" data-mid={m.id} aria-label={a.name} onClick={() => onOpen(m)}>
-      {a.thumb || !video ? <LazyImage src={video ? '' : fileUrl(a)} thumb={a.thumb ?? undefined} alt={a.name} /> : (
+      {a.thumb || !video ? <LazyImage src={video ? '' : tileSrc(a)} thumb={a.thumb ?? undefined} alt={a.name} /> : (
         <span class="app-media-video">
           <video class={'app-media-frame' + (frame ? ' app-media-frame-in' : '')} src={fileUrl(a) + '#t=0.1'} preload="metadata" muted playsInline tabIndex={-1} aria-hidden="true"
             onLoadedMetadata={(e) => { const d = (e.currentTarget as HTMLVideoElement).duration; if (!len && Number.isFinite(d)) setLen(d); }}
