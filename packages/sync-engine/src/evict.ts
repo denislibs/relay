@@ -202,12 +202,17 @@ export async function evict(store: Store, db: IDBDatabase, keepNow: () => EvictK
       const prot: Prot = { keys: new Set(keep.windows.get(id) ?? []), ids: new Set(chat.pinned ?? []) };
       if (chat.last) prot.keys.add(chat.last.key);
       const gen = store.resetGen;
-      const r = await trimChunk(db, id, from, floor, chunk, prot, keptAll);
-      const now = store.chats.get(id);   // пока стирали, чат могли удалить, а кэш — сбросить (tooLong)
-      if (!now || gen !== store.resetGen) break;
-      keptAll.push(...r.kept);
-      // память — вслед за каждой порцией: от next и новее всё ещё на месте
-      applyTrim(store, now, r.next ?? floor, r.removed, keptAll);
+      // пока идёт порция, flush не пишет строку этого чата: его копия в памяти шире и легла бы поверх сжатой
+      store.trimming.add(id);
+      let r: Awaited<ReturnType<typeof trimChunk>>;
+      try {
+        r = await trimChunk(db, id, from, floor, chunk, prot, keptAll);
+        const now = store.chats.get(id);   // пока стирали, чат могли удалить, а кэш — сбросить (tooLong)
+        if (!now || gen !== store.resetGen) break;
+        keptAll.push(...r.kept);
+        // память — вслед за каждой порцией: от next и новее всё ещё на месте
+        applyTrim(store, now, r.next ?? floor, r.removed, keptAll);
+      } finally { store.trimming.delete(id); }
       stats.messages += r.removed.length;
       opts.onChunk?.(id, r.removed.length);
       await pause();

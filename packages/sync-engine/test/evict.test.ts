@@ -255,6 +255,31 @@ test('the chat row is narrowed in the same transaction as its rows: a reopened c
   expect(after.ranges).toEqual([[rows[0], rows[rows.length - 1]]]);
 });
 
+test('a flush issued while a chunk is being trimmed does not write the wider chat row over the narrowed one', async () => {
+  const name = 'evict-' + crypto.randomUUID();
+  const msgs = Array.from({ length: 30 }, (_, j) => row(3, j + 1));
+  const db = await seed(name, [{ chat: chatRow(3, msgs[29], { ranges: [[1, 30]] }), msgs }]);
+  const s = await Store.open(db, ME);
+  // вторая транзакция уборки: сразу за ней — flush (его транзакция встанет после неё)
+  const orig = db.transaction.bind(db);
+  let trims = 0, flushed: Promise<void> | null = null;
+  (db as { transaction: unknown }).transaction = (names: string | string[], mode?: IDBTransactionMode) => {
+    const t = orig(names as string[], mode);
+    if (Array.isArray(names) && names.includes('chats') && names.includes('terms') && ++trims === 2) flushed = s.flush();
+    return t;
+  };
+  let chunks = 0;
+  await evict(s, db, keepNone, { ...EVICT_LIMITS, perChat: 10 }, { chunk: 5, closed: () => chunks >= 2, onChunk: () => { chunks++; } });
+  await flushed;
+  (db as { transaction: unknown }).transaction = orig;
+  expect(flushed).not.toBeNull();
+  const stored = (await all<LocalChat>(db, 'chats')).find((c) => c.id === 3)!;
+  expect(stored.ranges).toEqual([[11, 30]]);
+  expect(s.chats.get(3)!.ranges).toEqual([[11, 30]]);
+  await s.flush();   // придержанная строка пишется следующим flush — уже сжатой
+  expect((await all<LocalChat>(db, 'chats')).find((c) => c.id === 3)!.ranges).toEqual([[11, 30]]);
+});
+
 test('a loading chat is skipped; a closed engine stops between chunks', async () => {
   const name = 'evict-' + crypto.randomUUID();
   const a = Array.from({ length: 30 }, (_, j) => row(1, 100 + j)), b = Array.from({ length: 30 }, (_, j) => row(2, 200 + j));

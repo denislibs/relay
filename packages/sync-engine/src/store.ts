@@ -740,7 +740,9 @@ export class Store {
       this.staleTerms.clear();
       for (const map of this.messages.values()) for (const m of map.values()) this.dirtyMessages.set(m.key, m);
     }
-    batch.put.chats = [...this.dirtyChats].map((id) => this.chats.get(id)).filter(Boolean) as LocalChat[];
+    // чат, который сейчас урезает уборка, ждёт: его строку пишет транзакция уборки, а в памяти отрезки ещё шире
+    const held = [...this.dirtyChats].filter((id) => this.trimming.has(id) && this.chats.has(id));
+    batch.put.chats = [...this.dirtyChats].filter((id) => !this.trimming.has(id)).map((id) => this.chats.get(id)).filter(Boolean) as LocalChat[];
     batch.del.chats = [...this.dirtyChats].filter((id) => !this.chats.has(id));
     // основная вкладка «Общих медиа» (mediaTab, первая из tabsOf) — поле индекса byTab; в памяти его нет
     batch.put.messages = [...this.dirtyMessages.values()].map((m) => { const tab = tabsOf(m)[0]; return tab ? { ...m, tab } : m; });
@@ -780,6 +782,7 @@ export class Store {
     batch.del.profilePhotos = lists.photos.del;
     if (lists.meta) batch.put.meta = [...(batch.put.meta ?? []), lists.meta];
     this.dirtyChats.clear(); this.dirtyMessages.clear(); this.dirtyOutbox.clear(); this.dirtyReads.clear(); this.dirtyMeta = false;
+    for (const id of held) this.dirtyChats.add(id);   // запишется следующим flush, уже сжатой
     const seq = this.lastSeq;
     await write(this.db, batch);
     this.seqAtFlush = seq;
@@ -848,6 +851,8 @@ export class Store {
     }
     if (list.length) { this.trims.set(chatId, this.trimGen(chatId) + 1); this.touch(chatId); }
   }
+  /** Чаты, порцию которых сейчас стирает уборка (evict.ts): flush не пишет их строку, пока память не сжата. */
+  trimming = new Set<number>();
   /** Сколько раз уборка стирала сообщения чата (только в памяти): страница, начатая до уборки, не пишет курсоры поверх стёртого. */
   trimGen(chatId: number): number { return this.trims.get(chatId) ?? 0; }
   private trims = new Map<number, number>();
