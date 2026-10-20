@@ -164,6 +164,10 @@ export type Action =
   | { type: 'todoEdit'; chatId: number; id: number; todo: TodoInput }
   /** local: только с устройства, без сети (быстрый первый ответ; полный — тем же вызовом без local) */
   | { type: 'search'; q: string; chatId?: number; beforeId?: number; limit?: number; local?: boolean }
+  /** глобальный поиск левой колонки: с сетью — сервер, без сети или при ошибке — с устройства (globalSearch.ts) */
+  | { type: 'searchPeople'; q: string }
+  | { type: 'searchMedia'; kind: MediaTab; q: string; before?: number }
+  | { type: 'topChats' }
   | { type: 'pin'; chatId: number; id: number }
   | { type: 'unpin'; chatId: number; id: number | null }
   | { type: 'messagesByIds'; chatId: number; ids: number[] }

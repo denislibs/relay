@@ -220,6 +220,8 @@ function onTerminated(reason: 'logout' | 'terminated'): void {
 }
 
 const call = <T>(a: Action): Promise<T> => (engine ? engine.call<T>(a) : Promise.reject(new Error('engine not started')));
+/** Действие движка для модулей без своего доступа к нему (поиск левой колонки). */
+export const callEngine = call;
 
 export interface ProfilePatch { firstName?: string; lastName?: string; bio?: string | null; birthday?: { day: number; month: number; year?: number } | null }
 export const updateProfile = (patch: ProfilePatch): Promise<unknown> => call({ type: 'updateProfile', ...patch });

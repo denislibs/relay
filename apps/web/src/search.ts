@@ -1,7 +1,9 @@
 // Глобальный поиск (левая колонка, как в Telegram Web): режим поиска, вкладки, недавние чаты и загрузка
 // результатов. Состояние режима — в global (searchOpen, searchTab, search); выдача — на вкладках.
-import type { MediaTab, Message, ProfilePhoto } from '@relay/protocol';
+import type { MediaTab } from '@relay/protocol';
+import type { MediaHit, PersonHit } from '@relay/sync-engine/src/globalSearch';
 import { getGlobal, setGlobal } from './global';
+import { callEngine } from './settingsData';
 
 export type SearchTab = 'chats' | MediaTab;
 export const SEARCH_TABS: { id: SearchTab; label: string }[] = [
@@ -31,26 +33,20 @@ export function subscribeRecent(f: () => void): () => void { recentSubs.add(f); 
 export function addRecent(chatId: number): void { saveRecent([chatId, ...recent.filter((x) => x !== chatId)].slice(0, 10)); }
 export function clearRecent(): void { saveRecent([]); }
 
-// ---------- запросы ----------
-async function get<T>(path: string): Promise<T> {
-  const r = await fetch(path, { credentials: 'include' });
-  if (!r.ok) throw new Error(String(r.status));
-  return r.json() as Promise<T>;
-}
+// ---------- запросы: через движок (с сетью — сервер, без сети — с устройства, см. sync-engine/src/globalSearch.ts) ----------
+export type { MediaHit, PersonHit } from '@relay/sync-engine/src/globalSearch';
 
-export interface MediaHit { message: Message; chatTitle: string | null; chatKind: 'direct' | 'group' }
 /** Вкладка медиа по всем чатам: страница новых сверху, before — id последнего показанного. */
 export const searchGlobalMedia = (kind: MediaTab, q: string, before?: number) =>
-  get<{ hits: MediaHit[]; hasMore: boolean }>(`/search/media?${new URLSearchParams({ kind, q, ...(before ? { before: String(before) } : {}) })}`);
+  callEngine<{ hits: MediaHit[]; hasMore: boolean }>({ type: 'searchMedia', kind, q, ...(before ? { before } : {}) });
 
-export interface PersonHit { id: number; name: string; username: string | null; photo: ProfilePhoto | null; chatId: number | null }
-export const searchPeople = (q: string) => get<{ people: PersonHit[] }>(`/search/people?${new URLSearchParams({ q })}`).then((r) => r.people);
+export const searchPeople = (q: string) => callEngine<PersonHit[]>({ type: 'searchPeople', q });
 
 /** «Частые собеседники» — личные чаты; ответ кэшируем на минуту (как Top people в Telegram). */
 let top: { at: number; ids: Promise<number[]> } | null = null;
 export function topChats(): Promise<number[]> {
   if (!top || Date.now() - top.at > 60_000) {
-    top = { at: Date.now(), ids: get<{ chatIds: number[] }>('/search/top').then((r) => r.chatIds, () => { top = null; return []; }) };
+    top = { at: Date.now(), ids: callEngine<number[]>({ type: 'topChats' }).catch(() => { top = null; return []; }) };
   }
   return top.ids;
 }

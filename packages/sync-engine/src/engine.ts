@@ -1,4 +1,4 @@
-import { MAX_FILE_BYTES } from '@relay/protocol';
+import { MAX_FILE_BYTES, MEDIA_TABS, type MediaTab } from '@relay/protocol';
 import type { ClientFrame, JournalEntry, Me, SettingsSnapshot, Message, PublicUser, ServerFrame } from '@relay/protocol';
 import { Blocks } from './blocks';
 import { Contacts } from './contacts';
@@ -17,6 +17,7 @@ import { SessionEnd } from './session';
 import { DevTools, loadSim, type SimState, type SubStat } from './devlog';
 import { simFlags, watchLoss } from './devsim';
 import { chatTitle, displayName, peopleResult, PeerSigs } from './names';
+import { localMedia, localPeople, localTop, type MediaHit, type PersonHit } from './globalSearch';
 import { applyMembersReply, membersResult, type MembersReply } from './members';
 import { MediaLoader, mediaResult, tabMessages } from './media';
 import { evict, EVICT_LIMITS, type EvictKeep, type EvictLimits, type EvictOpts, type EvictStats } from './evict';
@@ -609,6 +610,34 @@ export class Engine {
     return { hits: all.slice(0, limit), hasMore: all.length > limit || res.hasMore || mine.hasMore, source: 'server' };
   }
 
+  // ---------- глобальный поиск левой колонки: сервер, без сети или при ошибке — устройство (globalSearch.ts) ----------
+
+  private async searchPeople(q: string): Promise<PersonHit[]> {
+    if (this.online) {
+      try { return (await this.http<{ people: PersonHit[] }>(`/search/people?${new URLSearchParams({ q })}`)).people; }
+      catch { /* сеть пропала посреди запроса — ответим с устройства */ }
+    }
+    return localPeople(this.store, this.contacts.view(), this.cfg.userId, q);
+  }
+
+  private async searchMedia(kind: MediaTab, q: string, before?: number): Promise<{ hits: MediaHit[]; hasMore: boolean }> {
+    if (!MEDIA_TABS.includes(kind)) throw new Error('bad_frame');
+    if (this.online) {
+      try { return await this.http<{ hits: MediaHit[]; hasMore: boolean }>(`/search/media?${new URLSearchParams({ kind, q, ...(before ? { before: String(before) } : {}) })}`); }
+      catch { /* сеть пропала — с устройства */ }
+    }
+    if (this.store.termsDirty) await this.store.flush();   // последние сообщения — в IndexedDB (индекс byTab)
+    return localMedia(this.db, this.store, kind, q, before);
+  }
+
+  private async topChats(): Promise<number[]> {
+    if (this.online) {
+      try { return (await this.http<{ chatIds: number[] }>('/search/top')).chatIds; }
+      catch { /* без сети — по последним сообщениям */ }
+    }
+    return localTop(this.store);
+  }
+
   /**
    * Локальная часть поиска, одна на запрос: вызов с local: true и следующий за ним полный (интерфейс шлёт их подряд)
    * делят один промис — пока он идёт и ещё SEARCH_MEMO_MS после (за это время кэш почти не меняется).
@@ -990,6 +1019,9 @@ export class Engine {
       case 'storageStats': return this.storageStats();
       case 'dev': return this.dev.command(a).finally(() => this.pushStatus());   // флаги имитатора — в status сразу
       case 'search': return this.search(a);
+      case 'searchPeople': return this.searchPeople(a.q);
+      case 'searchMedia': return this.searchMedia(a.kind, a.q, a.before);
+      case 'topChats': return this.topChats();
       // закрепление — сразу на сервер (без сети — ошибка, интерфейс скажет); список придёт и обновлением журнала
       case 'group': {
         // управление группой: только /groups/... и /join/... (и удаление личного чата); ответ — данные или код ошибки сервера (для текста в интерфейсе)
