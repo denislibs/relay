@@ -11,17 +11,20 @@ export function avatarPhoto(p: ProfilePhoto | null | undefined, big = false): { 
 }
 
 /** Фото человека для аватарки по id — единое место для всех аватарок людей. Откуда (сначала самое свежее):
- *  своё — из профиля; собеседник — из личного чата с ним; контакт — из списка контактов; остальные (авторы в группах,
- *  участники) — из подписки people (см. people.ts: кто показывает человека, тот и просит его wantPeople). */
+ *  своё — из профиля; остальные — из подписки people (движок обновляет её по журналу userUpdated; если человек там есть,
+ *  берём его фото, даже пустое); пока people ещё не пришли — фото из личного чата с ним, затем из списка контактов.
+ *  Кто показывает человека, тот и просит его wantPeople (см. people.ts): собеседники, авторы, контакты — сразу с данными. */
 export function userPhoto(userId: number | null | undefined): ProfilePhoto | null {
   if (userId == null) return null;
   const g = getGlobal();
   if (g.me?.userId === userId) return g.me.photo ?? null;
+  const person = g.people[userId];
+  if (person) return person.photo ?? null;
   const chat = g.chats.find((c) => c.kind === 'direct' && c.peerId === userId);
   if (chat && chat.photo !== undefined) return (chat.photo as ProfilePhoto | null) ?? null;
   const contact = g.contacts.find((c) => c.userId === userId);
   if (contact && contact.photo !== undefined) return (contact.photo as ProfilePhoto | null) ?? null;
-  return g.people[userId]?.photo ?? null;
+  return null;
 }
 /** То же для ChatRow (у него пропсы avatarSrc/avatarThumb). */
 export function rowAvatar(p: ProfilePhoto | null | undefined): { avatarSrc?: string; avatarThumb?: string } { const a = avatarPhoto(p); return { avatarSrc: a.src, avatarThumb: a.thumb }; }

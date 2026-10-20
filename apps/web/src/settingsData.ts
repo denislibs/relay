@@ -17,6 +17,7 @@ import { engineConfig } from './engineConfig';
 import { getGlobal, setGlobal, type AccountSettings, type DevSimFlags, type Me } from './global';
 import { dropSubscription } from './notify';
 import { asset } from './assets';
+import { wantPeople } from './people';
 
 declare const __BUILD__: string;
 
@@ -99,6 +100,8 @@ export function startSettingsData(me: Me): void {
   engine.watch({ kind: 'contacts' }, (p) => {
     contactsM.apply(p);
     setGlobal({ contacts: contactsM.list(), contactsLoaded: !!contactsM.meta('~contacts')?.loaded });
+    // контакты — в people сразу: их аватарки (выбор людей, баннеры, карточки) берут фото из people
+    wantPeople(contactsM.list().flatMap((c) => (typeof c.userId === 'number' ? [c.userId] : [])));
   });
 
   // настройки аккаунта: умолчания уведомлений (страница «Уведомления» и локальные уведомления)

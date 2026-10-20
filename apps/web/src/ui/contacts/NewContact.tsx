@@ -1,5 +1,6 @@
 import { Avatar, Icon, Modal, Presence, TextField, peerTone } from '@relay/ui';
 import { senderAvatar } from '../../profilePhoto';
+import { wantPeople } from '../../people';
 import { useEffect, useRef, useState } from 'preact/hooks';
 import { setGlobal, useGlobal, type NewContactDraft } from '../../global';
 import { addContact, resolveUser, showToast } from '../../settingsData';
@@ -36,6 +37,7 @@ function NewContactForm({ draft }: { draft: NewContactDraft }) {
 
   // открыли из «Информации» и запрос не меняли — человек уже известен (поле может быть пустым: нет ни @имени, ни телефона)
   const known = draft.userId && query === (draft.query ?? '') ? draft.userId : null;
+  useEffect(() => { if (known) wantPeople([known]); }, [known]);   // аватарка известного человека — из people
   const ready = (!!query.trim() || !!known) && !!first.trim() && !busy;
   const limited = (set: (v: string) => void) => (v: string, e: Event) => {
     const c = clip(v, NAME_MAX);

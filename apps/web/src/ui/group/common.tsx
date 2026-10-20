@@ -1,7 +1,9 @@
 import { Avatar, Fab, PanelHeader, Presence, peerTone } from '@relay/ui';
 import type { ProfilePhoto } from '@relay/protocol';
 import type { ComponentChildren } from 'preact';
+import { useEffect } from 'preact/hooks';
 import { avatarPhoto, userPhoto } from '../../profilePhoto';
+import { wantPeople } from '../../people';
 
 /** Экран управления группой: шапка со стрелкой, прокрутка, круглая кнопка внизу (появляется плавно). */
 export function GPage({ title, onBack, children, fab, action }: {
@@ -27,6 +29,8 @@ export function PersonRow({ id, name, label, photo, subtitle, online, trailing, 
   id: number; name: string; label?: string; photo?: ProfilePhoto | null; subtitle?: ComponentChildren; online?: boolean; trailing?: ComponentChildren;
   onClick?: () => void; onContext?: (e: MouseEvent) => void; disabled?: boolean;
 }) {
+  // фото в строке нет — аватарка из userPhoto: просим человека в people
+  useEffect(() => { if (!photo) wantPeople([id]); }, [id, !photo]);
   return (
     <button type="button" role="listitem" class="rl-row app-member app-gm-person" disabled={disabled} onClick={onClick}
       onContextMenu={onContext ? (e) => { e.preventDefault(); onContext(e as unknown as MouseEvent); } : undefined}>

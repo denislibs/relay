@@ -12,6 +12,7 @@ import { toggleMusic, trackTitle } from '../music';
 import { clock, dayLabel, fileSize, lastSeenText } from './format';
 import { startDirectChat } from '../data';
 import { useMembers, type Member } from '../members';
+import { wantPeople } from '../people';
 
 // «Общие медиа» в правой панели — как в Telegram: Медиа, Файлы, Ссылки, Музыка, Голосовые.
 // Пустые вкладки не показываем (счётчики из подписки движка); каждая вкладка — страницами по 40, новые сверху.
@@ -88,6 +89,9 @@ function TabList({ chatId, tab }: { chatId: number; tab: MediaTab }) {
   const grid = useRef<HTMLDivElement>(null);
   const people = useGlobal((s) => s.people);
   const meId = useGlobal((s) => s.me?.userId);
+  // авторы в просмотрщике (имя и аватарка) — из people
+  const senders = [...new Set(items.map((m) => m.senderId as number))].join(',');
+  useEffect(() => { if (senders) wantPeople(senders.split(',').map(Number)); }, [senders]);
   if (!items.length && loading) return <div class="app-sm-loading" aria-busy="true" />;
   const photos = tab === 'media' ? items.filter((m) => !m.attachment!.mime.startsWith('video/')) : [];
   const open = (m: Msg) => { const k = photos.indexOf(m); if (k >= 0) setViewer(k); else show(m); };
@@ -226,6 +230,9 @@ function senderTitle(senderId: number, me: number | undefined, chat: Item | unde
 /** Участники группы — как в Telegram: аватар, имя, статус (в сети — цветом), «владелец» справа; клик — личный чат. */
 function MembersList({ data }: { data: { ownerId: number | null; members: Member[] } | null }) {
   const me = useGlobal((s) => s.me?.userId);
+  // у участника без фото в ответе аватарка — из userPhoto: просим его в people
+  const bare = data ? data.members.filter((m) => !m.photo).map((m) => m.userId).join(',') : '';
+  useEffect(() => { if (bare) wantPeople(bare.split(',').map(Number)); }, [bare]);
   if (!data) return <div class="app-sm-loading" aria-busy="true" />;
   return (
     <div class="app-members" role="list" aria-label="Участники">
