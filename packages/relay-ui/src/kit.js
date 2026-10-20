@@ -226,8 +226,9 @@ function Icon(props) {
     return h('svg', Object.assign(base, { fill: 'none', stroke: 'currentColor', 'stroke-width': sw0, 'stroke-linecap': 'round', 'stroke-linejoin': 'round' }),
       filled.cut ? h('defs', null, h('mask', { id: id.current, maskUnits: 'userSpaceOnUse', x: 0, y: 0, width: 24, height: 24 },
         h('rect', { width: 24, height: 24, fill: '#fff', stroke: 'none' }),
-        filled.cut.map(function (d, i) { return h('path', { key: i, d: d, stroke: '#000', 'stroke-width': sw0 + 0.4 }); }))) : null,
-      h('g', { mask: filled.cut ? 'url(#' + id.current + ')' : undefined, fill: 'currentColor' }, filled.fill.map(function (d, i) { return h('path', { key: i, d: d }); })),
+        filled.cut.map(function (d, i) { return h('path', { key: i, d: d, stroke: '#000', 'stroke-width': sw0 }); }))) : null,
+      // заливка — по контуру пака, обводка лишь чуть скругляет углы (с полной обводкой 1.8 фигуры раздувались — «жирные»)
+      h('g', { mask: filled.cut ? 'url(#' + id.current + ')' : undefined, fill: 'currentColor', 'stroke-width': 0.5 }, filled.fill.map(function (d, i) { return h('path', { key: i, d: d }); })),
       (filled.extra || []).map(function (d, i) { return h('path', { key: 'x' + i, d: d }); }));
   }
   // пак (Messenger icon pack v3): готовые внутренности SVG
@@ -1339,7 +1340,7 @@ function ActionTile(props) {
 function SettingsIcon(props) {
   // в цветной плитке значок залитый, как у Telegram; у значков из одних линий заливать нечего — контур потолще
   var filled = PACK_FILLED[props.icon + 'Filled'] ? props.icon + 'Filled' : null;
-  return h('span', { class: cx('rl-sicon', 'rl-sicon-' + (props.color || 'blue')), 'aria-hidden': 'true' }, h(Icon, { name: filled || props.icon, size: 20, strokeWidth: filled ? 1.8 : 2.2 }));
+  return h('span', { class: cx('rl-sicon', 'rl-sicon-' + (props.color || 'blue')), 'aria-hidden': 'true' }, h(Icon, { name: filled || props.icon, size: 18, strokeWidth: filled ? 1.8 : 2 }));
 }
 function InfoRow(props) {
   var withSwitch = !!(props.trailing && props.trailing.type === Switch);
