@@ -28,6 +28,7 @@ import { deleteFolder, getSettings, reorderFolders, saveFolder, setNotify, setPr
 import { publicAuthRoute, privateAuthRoute } from './authRoutes';
 import { groupRoute } from './groupRoutes';
 import { addContact, blockUser, listBlocked, listContacts, removeContact, resolveUser, unblockUser, updateContact } from './domain/contacts';
+import { serveStickerFile } from './stickers/files';
 
 const STATUS: Record<string, number> = { bad_frame: 400, too_long: 400, file_too_big: 413, username_invalid: 400, username_reserved: 400, username_taken: 409, bio_too_long: 400, note_too_long: 400, name_invalid: 400, birthday_invalid: 400, links_invalid: 400, folder_title: 400, folder_empty: 400, folder_too_many_chats: 400, folder_emoji: 400, folders_limit: 400, unauthorized: 401, not_member: 403, blocked: 403, not_found: 404, code_invalid: 400, code_expired: 400, flood: 429, fresh_session: 403, password_invalid: 400, password_missing: 400, recovery_unavailable: 400, email_invalid: 400, qr_expired: 400, passkey_not_found: 404, passkey_invalid: 400, forbidden: 403, upload_missing: 409, upload_mismatch: 400, upload_pending: 409, upload_incomplete: 409, upload_limit: 429, upload_quota: 429, photo_invalid: 400 };
 const fail = (code: string, retryAfter?: number) => retryAfter
@@ -75,6 +76,8 @@ export function createServer(opts: { port: number }): Server {
       const url = new URL(req.url);
       try {
         if (url.pathname === '/health') return Response.json({ ok: true });
+        // файлы стикеров публичные (без сессии); nginx отдаёт их сам, сюда доходят, если его нет
+        if (url.pathname.startsWith('/stk/')) return await serveStickerFile(url.pathname, req.method);
         // только API: статику клиента раздаёт nginx (docker/nginx), сюда доходит лишь то, чего нет в сборке
         if (!API.test(url.pathname)) return fail('not_found');
 
