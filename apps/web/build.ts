@@ -13,14 +13,14 @@ const engineHosts = join(root, '..', '..', 'packages', 'sync-engine', 'src', 'ho
 const dist = process.env.WEB_OUT ?? join(root, 'dist');   // WEB_OUT — собрать в другую папку (проверка продакшен-сборки)
 const isWatch = process.argv.includes('--watch');
 
-const HASHED = /-[a-z0-9]{8,}\.(js|css)(\.map|\.gz|\.br)?$/;   // имя с хэшем: кэшируется навсегда (docker/nginx)
+const HASHED = /-[a-z0-9]{8,}\.(js|css|wasm)(\.map|\.gz|\.br)?$/;   // имя с хэшем: кэшируется навсегда (docker/nginx)
 const LEGACY = ['main.js', 'main.js.map', 'shared.worker.js', 'shared.worker.js.map', 'dedicated.worker.js', 'dedicated.worker.js.map', 'spoiler.worker.js', 'spoiler.worker.js.map', 'articleEditor.js', 'articleEditor.js.map', 'relay.css', 'tokens.css', 'app.css'];
 const HISTORY = '.assets-history.json';   // файлы двух последних сборок: открытые вкладки прежней ещё догружают свои
 
 /** name.css → name-<хэш>.css; возвращает публичный адрес. */
 async function hashedCopy(src: string, dir: string, name: string): Promise<string> {
   const body = await Bun.file(src).bytes();
-  const file = name.replace(/\.css$/, '-' + Bun.hash(body).toString(36).padStart(8, '0').slice(0, 10) + '.css');
+  const file = name.replace(/\.(css|wasm)$/, (ext) => '-' + Bun.hash(body).toString(36).padStart(8, '0').slice(0, 10) + ext);
   await Bun.write(join(dir, file), body);
   return '/' + file;
 }
@@ -43,7 +43,7 @@ async function build(): Promise<void> {
   await mkdir(tmp, { recursive: true });
   const define = { __BUILD__: JSON.stringify(BUILD), __DEV__: JSON.stringify(isWatch) };
   const res = await Bun.build({
-    entrypoints: [join(root, 'src', 'main.tsx'), join(engineHosts, 'shared.worker.ts'), join(engineHosts, 'dedicated.worker.ts'), join(ui, 'src', 'spoiler.worker.js'), join(ui, 'src', 'articleEditor.js'), join(root, 'src', 'media', 'videoTranscode.ts')],   // articleEditor — Tiptap, грузится при первом развороте; videoTranscode — Mediabunny, при первом сжатии видео
+    entrypoints: [join(root, 'src', 'main.tsx'), join(engineHosts, 'shared.worker.ts'), join(engineHosts, 'dedicated.worker.ts'), join(ui, 'src', 'spoiler.worker.js'), join(ui, 'src', 'lottie', 'lottie.worker.js'), join(ui, 'src', 'articleEditor.js'), join(root, 'src', 'media', 'videoTranscode.ts')],   // articleEditor — Tiptap, грузится при первом развороте; videoTranscode — Mediabunny, при первом сжатии видео
     outdir: tmp,
     target: 'browser',
     naming: { entry: '[name]-[hash].[ext]', chunk: '[name]-[hash].[ext]', asset: '[name]-[hash].[ext]' },
@@ -64,6 +64,8 @@ async function build(): Promise<void> {
     assets[file.replace(/-[a-z0-9]{8,}(\.js)$/, '$1')] = '/' + file;
   }
   await cp(join(root, 'public'), tmp, { recursive: true });
+  // tlottie (MIT, собран из исходников — packages/relay-ui/vendor/tlottie/BUILD.md): имя с хэшем, кэш навсегда
+  for (const w of ['tlottie.wasm', 'tlottie-no-simd.wasm']) assets[w] = await hashedCopy(join(ui, 'vendor', 'tlottie', w), tmp, w);
   await rm(join(tmp, 'app.css'), { force: true });
   const css = {
     'tokens.css': await hashedCopy(join(ui, 'tokens.css'), tmp, 'tokens.css'),
@@ -77,7 +79,7 @@ async function build(): Promise<void> {
   if (!html.includes(assets['main.js'])) throw new Error('index.html: не нашёл <script src="/main.js">');
   await Bun.write(join(tmp, 'index.html'), html);
   // Service Worker — без хэша (адрес регистрации постоянный), со списком оболочки этой сборки
-  const shell = [assets['main.js'], ...Object.values(css), assets['shared.worker.js'], assets['dedicated.worker.js'], assets['spoiler.worker.js']];
+  const shell = [assets['main.js'], ...Object.values(css), assets['shared.worker.js'], assets['dedicated.worker.js'], assets['spoiler.worker.js'], assets['lottie.worker.js'], assets['tlottie.wasm']];
   const sw = await Bun.build({ entrypoints: [join(root, 'src', 'sw.ts')], outdir: tmp, target: 'browser', naming: '[name].[ext]', minify: !isWatch, sourcemap: 'linked', define: { ...define, __SHELL__: JSON.stringify(shell) } });
   if (!sw.success) {
     for (const log of sw.logs) console.error(log);

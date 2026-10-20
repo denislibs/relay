@@ -1,7 +1,7 @@
 import { installJoinLinks } from './ui/group/JoinLink';
 import { startMuteTimers } from './mute';
 import { startOwnMusic } from './profileLists';
-import { configureSpoilers, configureStickers, installSpoilers, loadPattern } from '@relay/ui';
+import { configureLottie, configureSpoilers, configureStickers, installSpoilers, loadPattern } from '@relay/ui';
 import { fetchBuild, onVisible, startUpdateCheck } from './update';
 import { claimMediaCache, sendMediaPolicy } from './storageInfo';
 import { getPrefs, isDark, subscribePrefs, type Prefs } from './prefs';
@@ -93,6 +93,8 @@ startTitle();
 // спойлеры: частицы рисует воркер (как в Telegram Web K); без него — CSS-точки
 configureSpoilers({ workerUrl: asset('spoiler.worker.js') });
 configureStickers({ base: '/stickers/', wasmUrl: '/dotlottie-player.wasm' });
+// анимированные стикеры: tlottie в пуле воркеров
+configureLottie({ workerUrl: asset('lottie.worker.js'), wasm: { simd: asset('tlottie.wasm'), noSimd: asset('tlottie-no-simd.wasm') } });
 installSpoilers();
 startUpdateCheck({ current: __BUILD__, fetchBuild, onUpdate: () => setGlobal({ updateReady: true }), onVisible });
 startScreenBlur();

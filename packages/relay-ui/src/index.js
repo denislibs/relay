@@ -37,3 +37,4 @@ export * from './inlineKeyboard.js';
 export * from './formattedDate.js';
 export * from './dateView.js';
 export * from './dateModal.js';
+export { configureLottie, openRenderer, liveRenderers } from './lottie/pool.js';
