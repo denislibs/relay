@@ -3,7 +3,7 @@ import { coverThumb, readAudioTags } from './id3';
 import { getPrefs } from './prefs';
 import type { Block, LinkPreview, TodoInput } from '@relay/protocol';
 import { playSentSound } from './sound';
-import { beginHeavyAnimation, nudgeWallpaper, toBase64 } from '@relay/ui';
+import { beginHeavyAnimation, nudgeWallpaper, requestMutation, toBase64 } from '@relay/ui';
 import { connectEngine, EngineClient, Mirror } from '@relay/sync-engine/src/client';
 import type { Item, Patch, Query, SearchResult } from '@relay/sync-engine/src/types';
 import { hideSpoilers, MAX_FILE_BYTES, type Entity } from '@relay/protocol';
@@ -317,13 +317,20 @@ export function openInner(chatId: number, target?: { id: number; sort: number })
   const { frame, anchor } = newFrame(chatId, target);
   // колонка сразу в DOM (скрыта): лента раскладывается и встаёт на позицию до показа
   setGlobal({ chatStack: [...st, frame], pendingChatId: chatId });
+  const alive = () => stack().some((f) => f.key === frame.key);
   startFeed(frame, anchor, (patch) => {
-    if (!stack().some((f) => f.key === frame.key)) return;
-    beginHeavyAnimation(LEAVE_MS + 50);
-    patchFrame(frame.key, { ...patch, ready: true });
-    setGlobal({ openChatId: chatId, pendingChatId: null });
-    pushChat(stack().length - 1);
-    syncShown();
+    if (!alive()) return;
+    // Как в Telegram Web: сначала лента рисуется и раскладывается в скрытой колонке, а переключение —
+    // отдельным кадром, только смена классов. Иначе тяжёлый рендер ленты и запуск перехода — в одном кадре.
+    patchFrame(frame.key, patch);
+    requestAnimationFrame(() => requestMutation(() => {
+      if (!alive()) return;
+      beginHeavyAnimation(LEAVE_MS + 50);
+      patchFrame(frame.key, { ready: true });
+      setGlobal({ openChatId: chatId, pendingChatId: null });
+      pushChat(stack().length - 1);
+      syncShown();
+    }));
   });
 }
 

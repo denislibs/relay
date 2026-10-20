@@ -159,11 +159,13 @@ export function subscribePrefs(fn: (p: Prefs) => void): () => void { listeners.a
 export function resetPrefsForTest(kv: KV | null, reduced = false): Prefs { storage = kv; appliedTheme = null; appliedAccent = null; current = loadPrefs(kv, reduced); return current; }
 
 /** Формат времени по умолчанию — из локали браузера (hourCycle h11/h12 = 12 часов). */
+let localeFmt: '12h' | '24h' | null = null;   // локаль за сеанс не меняется; без кэша — новый Intl.DateTimeFormat на каждое время в ленте
 export function localeTimeFormat(): '12h' | '24h' {
+  if (localeFmt) return localeFmt;
   try {
     const hc = new Intl.DateTimeFormat(undefined, { hour: 'numeric' }).resolvedOptions().hourCycle;
-    return hc === 'h11' || hc === 'h12' ? '12h' : '24h';
-  } catch { return '24h'; }
+    return (localeFmt = hc === 'h11' || hc === 'h12' ? '12h' : '24h');
+  } catch { return (localeFmt = '24h'); }
 }
 
 export function isDark(pref: ThemePref): boolean {

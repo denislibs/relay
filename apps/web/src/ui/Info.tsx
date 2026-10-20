@@ -4,7 +4,7 @@ import { SharedMedia } from './SharedMedia';
 import { membersStatus, useMembers } from '../members';
 import { openUserChat, startDirectChat } from '../data';
 import { playProfileTop } from '../music';
-import { Avatar, Icon, InfoRow, PanelHeader, RichText, SettingsIcon, SlideStack, Switch, Verified, peerTone } from '@relay/ui';
+import { Avatar, Icon, InfoRow, PanelHeader, RichText, SettingsIcon, SlideStack, Switch, Verified, onHeavyAnimationEnd, peerTone } from '@relay/ui';
 import type { Item } from '@relay/sync-engine/src/types';
 import { chatTone, isSystemChat } from './format';
 import type { ComponentChildren } from 'preact';
@@ -26,10 +26,24 @@ import type { GroupInfo, MyMembership } from '@relay/protocol';
 const PAGES = ['info', 'edit', ...GROUP_PAGES];   // «Изменить контакт» и управление группой выезжают внутри панели справа налево
 const close = () => setGlobal({ infoOpen: false });
 
+/** Значение, которое меняется только вне тяжёлой анимации: во время неё — после её конца. */
+function useSettled<T>(value: T): T {
+  const [settled, setSettled] = useState(value);
+  useEffect(() => {
+    if (value === settled) return;
+    let alive = true;
+    onHeavyAnimationEnd(() => { if (alive) setSettled(value); });
+    return () => { alive = false; };
+  }, [value]);
+  return settled;
+}
+
 /** Правая панель «Информация» о собеседнике или группе — как User Info в Telegram. */
 export function Info() {
-  const chatId = useGlobal((s) => s.openChatId)!;
-  const chat = useGlobal((s) => s.chats.find((c) => c.id === s.openChatId));
+  // чат панели догоняет открытый после анимации перехода стека: её перерисовка (профиль, медиа, участники)
+  // в первых кадрах перехода съедала бы их
+  const chatId = useSettled(useGlobal((s) => s.openChatId))!;
+  const chat = useGlobal((s) => s.chats.find((c) => c.id === chatId));
   const peer = useGlobal((s) => s.peer);
   const muted = useGlobal((s) => isChatMuted(chatId, s));
   const [page, setPage] = useState('info');

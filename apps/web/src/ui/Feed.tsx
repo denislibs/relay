@@ -380,6 +380,8 @@ export function Feed({ frameKey, active, chatId, meId, peerName, group, onAuthor
   const [flashKey, setFlashKey] = useState<string | null>(null);
   const [viewer, setViewer] = useState<number | null>(null);   // индекс фото в просмотрщике
   const [pickDate, setPickDate] = useState<Date | null>(null);   // «Перейти к дате» по клику на плашку даты
+  const [pickerUsed, setPickerUsed] = useState(false);   // календарь монтируется с первого открытия: закрытый строил сетку месяца в каждом чате
+  if (pickDate && !pickerUsed) setPickerUsed(true);
   const unread = useGlobal((s) => (s.chats.find((c) => c.id === chatId)?.unread as number) ?? 0);
   const el = useRef<HTMLDivElement>(null);
   const metaRef = useRef(meta); metaRef.current = meta;
@@ -430,10 +432,6 @@ export function Feed({ frameKey, active, chatId, meId, peerName, group, onAuthor
         target = Math.max(0, target);
         if (Math.abs(root.scrollTop - target) > 1) { programmatic.current++; root.scrollTop = target; }
       });
-      if (partial) {
-        // следующий кадр: якорь — первый видимый, дорисовать строки выше (якорь удержит позицию)
-        requestMeasure(() => { const v = firstVisible(root); if (v) anchor.current = { key: v.key, top: v.top }; requestMutation(() => setPartial(false)); });
-      }
       return;
     }
     const a = anchor.current, down = toBottom.current;
@@ -456,6 +454,22 @@ export function Feed({ frameKey, active, chatId, meId, peerName, group, onAuthor
       if (next !== null && Math.abs(next - top) > 0.5) { programmatic.current++; root.scrollTop = next; }
     });
   }, [messages, partial]);
+
+  // Строки выше первого экрана — когда колонка на экране и переход стека закончился: в скрытой колонке их не видно,
+  // а во время перехода их рендер (десятки строк) съедал бы кадры анимации. Якорь — первый видимый: позиция не прыгнет.
+  const hasMessages = messages.length > 0;
+  useEffect(() => {
+    if (!partial || !active || !hasMessages) return;
+    let alive = true;
+    onHeavyAnimationEnd(() => requestMeasure(() => {
+      const root = el.current;
+      if (!alive || !root) return;
+      const v = firstVisible(root);
+      if (v) anchor.current = { key: v.key, top: v.top };
+      requestMutation(() => { if (alive) setPartial(false); });
+    }));
+    return () => { alive = false; };
+  }, [partial, active, hasMessages]);
 
   // высота ленты меняется сверху (выезжает плеер) или снизу (растёт поле ввода) — держим низ на месте, как в Telegram:
   // что было у нижнего края, там и остаётся. Колбэк ResizeObserver — после раскладки, до отрисовки, без лишнего кадра
@@ -960,8 +974,8 @@ export function Feed({ frameKey, active, chatId, meId, peerName, group, onAuthor
           onClose={() => setViewer(null)}
         />
       ) : null}
-      <DatePicker open={!!pickDate} value={pickDate ?? undefined} onClose={() => setPickDate(null)}
-        onPick={(d: Date) => { setPickDate(null); void jumpToDate(chatId, d).then((ok) => { if (!ok) showToast('В этот день сообщений нет'); }); }} />
+      {pickerUsed ? <DatePicker open={!!pickDate} value={pickDate ?? undefined} onClose={() => setPickDate(null)}
+        onPick={(d: Date) => { setPickDate(null); void jumpToDate(chatId, d).then((ok) => { if (!ok) showToast('В этот день сообщений нет'); }); }} /> : null}
       <div class="rl-scrolldown-slot">
         <ScrollToBottom show={away || (meta ? !meta.live : false)} unread={unread} onClick={toLatest} />
       </div>
