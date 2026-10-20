@@ -624,6 +624,9 @@ export function Chat({ chatId, frameKey, active }: { chatId: number; frameKey: s
         const own = menuMsg.senderId === me.userId && !menuMsg.deleted && menuMsg.id != null;
         const att = menuMsg.attachment as { id?: string; kind?: string; name?: string; mime?: string } | null | undefined;
         const myReaction = ((menuMsg.reactions as { userId: number; emoji: string }[] | undefined) ?? []).find((r) => r.userId === me.userId)?.emoji;
+        // в служебном чате «Relay» уведомления — обычные пузыри с текстом: копировать и выбирать их можно (как у Telegram);
+        // служебные события групп («X вступил») — плашки, у них этих пунктов нет
+        const textual = !menuMsg.service || system;
         return (
           <MenuPopover open anchor={menu} class="app-msgmenu"
             header={menuMsg.id != null && !menuMsg.deleted && !system && (!gRights || gRights.react) && gInfo?.reactions.mode !== 'none' ? (
@@ -642,9 +645,9 @@ export function Chat({ chatId, frameKey, active }: { chatId: number; frameKey: s
                     copyImage(`/files/${att.id}`).then(() => showToast('Изображение скопировано'), () => showToast('Не удалось скопировать изображение'));
                   } }] : []),
                   // по ссылке — «Копировать ссылку» вместо текста; есть выделение в этом сообщении — копируем только его
-                  ...(gInfo?.protected ? [] : !menuMsg.deleted && !menuMsg.service && menu.extra?.link ? [{ icon: 'link', label: 'Копировать ссылку', onClick: () => {
+                  ...(gInfo?.protected ? [] : !menuMsg.deleted && textual && menu.extra?.link ? [{ icon: 'link', label: 'Копировать ссылку', onClick: () => {
                     copyRich(menu.extra!.link!).then(() => showToast('Ссылка скопирована'));
-                  } }] : !menuMsg.deleted && !menuMsg.service && (menuMsg.body as string) ? [{ icon: 'copy', label: menu.extra?.selection ? 'Копировать выделенное' : 'Копировать текст', onClick: () => {
+                  } }] : !menuMsg.deleted && textual && (menuMsg.body as string) ? [{ icon: 'copy', label: menu.extra?.selection ? 'Копировать выделенное' : 'Копировать текст', onClick: () => {
                     const v = menu.extra?.selection ?? { text: menuMsg.body as string, entities: (menuMsg.entities as Entity[] | undefined) ?? [] };
                     copyRich(v.text, clipboardHtml(v.text, v.entities)).then((ok: boolean) => showToast(ok ? 'Текст скопирован' : 'Не удалось скопировать'));
                   } }] : []),
@@ -653,7 +656,7 @@ export function Chat({ chatId, frameKey, active }: { chatId: number; frameKey: s
                     : { icon: 'pin', label: 'Закрепить', onClick: () => void pinMessage(chatId, menuMsg.id as number) }] : []),
                   ...(!menuMsg.deleted && !gInfo?.protected && att?.id ? [{ icon: 'download', label: 'Скачать', onClick: () => downloadUrl(`/files/${att.id}?download=1`, downloadName(att)) }] : []),
                   ...(menuMsg.id != null && !menuMsg.deleted && !menuMsg.service && !gInfo?.protected ? [{ icon: 'forward', label: 'Переслать', onClick: () => forwardMenuMsg(menuMsg) }] : []),
-                  ...(menuMsg.id != null && !menuMsg.deleted && !menuMsg.service && !gInfo?.protected ? [{ icon: 'checkCircle', label: 'Выбрать', onClick: () => startSelect(chatId, groupOf(menuMsg).map((x) => x.key as string)) }] : []),
+                  ...(menuMsg.id != null && !menuMsg.deleted && textual && !gInfo?.protected ? [{ icon: 'checkCircle', label: 'Выбрать', onClick: () => startSelect(chatId, groupOf(menuMsg).map((x) => x.key as string)) }] : []),
                   ...(own || (gMe?.admin?.delete && !menuMsg.deleted && menuMsg.id != null && !menuMsg.service) ? ['-' as const, { icon: 'trash', label: 'Удалить', danger: true, onClick: () => setConfirmDelete({ ids: [menuMsg.id as number] }) }] : []),
                   // неотправленное (своё, без id): после отказа — «Повторить»; «Удалить» убирает его только у себя и прерывает загрузку
                   ...(menuMsg.id == null && menuMsg.senderId === me.userId && !menuMsg.deleted ? [

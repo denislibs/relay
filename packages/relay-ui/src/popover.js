@@ -49,7 +49,9 @@ function place(el, p) {
  *        onPointerEnter / onPointerLeave (для меню по наведению — см. useHoverMenu).
  */
 export function MenuPopover(props) {
-  var open = !!props.open;
+  // пустое меню (все пункты отфильтрованы и нет шапки) не открываем — иначе на экране пустая полоска
+  var empty = !props.header && !(props.items || []).some(function (it) { return it && it !== '-'; });
+  var open = !!props.open && !empty;
   var last = useRef(props);
   if (open) last.current = props;
   var p = open ? props : last.current;
