@@ -2314,8 +2314,10 @@ html[data-blur="0"] .rl-menu { -webkit-backdrop-filter: none; backdrop-filter: n
 .rl-sticker-msg .rl-reacts { margin-top: 0; }
 
 /* ---------- Панель эмодзи и стикеров над полем ввода ---------- */
-.rl-symbols-pop { position: absolute; right: clamp(0px, 8%, 96px); bottom: calc(100% + 8px); z-index: 30; width: 420px; max-width: calc(100vw - 16px); height: min(420px, calc(100vh - 160px)); border-radius: 20px; background: var(--surface, var(--bg)); box-shadow: var(--shadow-panel); overflow: hidden; transform-origin: 100% 100%; animation: rl-menu-in 180ms var(--ease-out); }
-.rl-presence[data-state="closing"] .rl-symbols-pop { animation: rl-pop-out 160ms var(--ease-standard) forwards; }
 .rl-emoji-toggle-on { color: var(--brand-strong); }
 .rl-quote-thumb-node { width: 36px; height: 36px; align-self: center; margin-left: 2px; display: flex; align-items: center; justify-content: center; flex-shrink: 0; }
 .rl-row-thumb-node { background: none; border-radius: 0; overflow: visible; }
+.rl-symbols-pop { position: absolute; right: clamp(0px, 8%, 96px); bottom: calc(100% + 8px); z-index: 30; display: flex; flex-direction: column; width: 382px; max-width: calc(100% - 16px); height: 420px; max-height: calc(100vh - 140px); border-radius: 20px; background: var(--panel, var(--bg)); color: var(--ink); box-shadow: 0 5px 10px 5px rgba(16, 35, 47, .14); overflow: hidden;
+  opacity: 0; transform: scale(.85); transform-origin: 100% 100%; transition: transform 200ms cubic-bezier(.4, 0, .2, 1), opacity 200ms cubic-bezier(.4, 0, .2, 1); }
+.rl-symbols-pop.is-active { opacity: 1; transform: none; }
+html[data-anim="0"] .rl-symbols-pop { transition: none; }

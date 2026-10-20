@@ -554,8 +554,9 @@ export function Chat({ chatId, frameKey, active }: { chatId: number; frameKey: s
       ) : <div class={'app-composer-host' + (selKeys ? ' is-selecting' : '') + (art?.open && !art.closing ? ' is-article' : '')}><Composer
         id="composer"
         apiRef={api}
-        symbolMenu={editing ? undefined : (close: () => void) => (
+        symbolMenu={editing ? undefined : (close: () => void, open: boolean) => (
           <SymbolMenu
+            open={open}
             onEmoji={(e) => api.current?.insert({ text: e, entities: [] })}
             onBackspace={() => {
               const v = api.current?.getValue();

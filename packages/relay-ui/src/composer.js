@@ -11,6 +11,7 @@ import { useEffect, useLayoutEffect, useRef, useState } from 'preact/hooks';
 import { cx, Icon, IconButton, Presence, ReplyQuote, reducedMotion, ripple } from './kit.js';
 import { MentionList } from './more.js';
 import { MenuPopover, useHoverMenu } from './popover.js';
+import { beginHeavyAnimation } from './schedule.js';
 // что прикрепить, если приложение не передало своё: только то, что работает (сначала медиа, потом файл)
 var ATTACH_ITEMS = [{ key: 'media', icon: 'image', label: 'Фото или видео' }, { key: 'doc', icon: 'file', label: 'Файл' }];
 import { peakHub, RecordBar, voiceSession } from './media/recording.js';
@@ -49,8 +50,26 @@ function Composer(props) {
   var attachHover = useHoverMenu(attach[0], attach[1], { closeMs: 300 });
   // панель эмодзи и стикеров (props.symbolMenu(close) → содержимое): как вложения — наведением, нажатием закрепляется
   var symbols = useState(false);
-  var symbolsHover = useHoverMenu(symbols[0], symbols[1], { openMs: 200, closeMs: 350 });
+  var symbolsHover = useHoverMenu(symbols[0], symbols[1], { openMs: 200, closeMs: 200 });
   var popRef = useRef(null);
+  // как в Telegram Web K: строится при первом открытии и дальше живёт в DOM (display:none) — повторное открытие
+  // без перерисовки; показ — переходом прозрачности и масштаба 0.85 → 1 от правого нижнего угла за 200 мс
+  var symMounted = useRef(false);
+  if (symbols[0]) symMounted.current = true;
+  var symView = useState('hidden');   // hidden → shown (display, ещё без класса) → active (переход) → shown → hidden
+  useEffect(function () {
+    if (!symMounted.current) return;
+    if (symbols[0]) {
+      symView[1]('shown');
+      var end = beginHeavyAnimation(220);
+      var r1 = requestAnimationFrame(function () { r1 = requestAnimationFrame(function () { symView[1]('active'); }); });
+      return function () { cancelAnimationFrame(r1); end(); };
+    }
+    symView[1](function (v) { return v === 'hidden' ? v : 'shown'; });
+    var endC = beginHeavyAnimation(220);
+    var t = setTimeout(function () { symView[1]('hidden'); endC(); }, reducedMotion() ? 0 : 200);
+    return function () { clearTimeout(t); endC(); };
+  }, [symbols[0]]);
   useEffect(function () {
     if (!symbols[0]) return;
     function away(e) {
@@ -472,11 +491,11 @@ function Composer(props) {
   return h('div', { class: cx('rl-composer-wrap', props.className || props.class), ref: wrapRef },
     h(Presence, { show: !!(mentionList && mentionList.length), exitMs: 120 },
       h(MentionList, { items: mentionList || [], onPick: pickMention })),
-    props.symbolMenu ? h(Presence, { show: symbols[0], exitMs: 160 },
-      h('div', { class: 'rl-symbols-pop', ref: popRef, role: 'dialog', 'aria-label': 'Эмодзи и стикеры',
+    props.symbolMenu && symMounted.current ? h('div', { class: cx('rl-symbols-pop', symView[0] === 'active' && 'is-active'), ref: popRef, role: 'dialog', 'aria-label': 'Эмодзи и стикеры',
+        'aria-hidden': symbols[0] ? undefined : 'true', style: symView[0] === 'hidden' && !symbols[0] ? { display: 'none' } : undefined,
         onPointerEnter: symbolsHover.onPointerEnter, onPointerLeave: symbolsHover.onPointerLeave,
         onMouseDown: function (e) { if (e.target.nodeName !== 'INPUT') e.preventDefault(); } },
-        props.symbolMenu(function () { symbols[1](false); }))) : null,
+        props.symbolMenu(function () { symbols[1](false); }, symbols[0])) : null,
     h(MenuPopover, { open: attach[0], hover: true, anchor: wrapRef.current ? wrapRef.current.querySelector('.rl-attach-toggle') : null, placement: 'top-start', label: 'Прикрепить',
       onClose: function () { attach[1](false); }, onPointerEnter: attachHover.onPointerEnter, onPointerLeave: attachHover.onPointerLeave,
       items: (props.attachItems || ATTACH_ITEMS).map(function (it) { return { icon: it.icon, label: it.label, onClick: function () { if (props.onAttach) props.onAttach(it.key); } }; }) }),

@@ -33,5 +33,29 @@ export function pushRecentEmoji(e: string): void {
   try { localStorage.setItem(RECENT_KEY, JSON.stringify([e, ...recentEmoji().filter((x) => x !== e)].slice(0, 32))); } catch { /* приватный режим */ }
 }
 
-/** Быстрые фильтры поиска стикеров (как ряд эмодзи в Telegram). */
-export const QUICK = ['❤️', '👍', '👎', '🎉', '😀', '😢', '😡', '😴', '😂', '🔥'];
+/** Быстрые фильтры в строке поиска (контурные значки, как в Telegram): для стикеров — эмодзи, для эмодзи — группа. */
+export const QUICK: { icon: string; label: string; emoji: string; group: string[] }[] = [
+  { icon: 'heart', label: 'Любовь', emoji: '❤️', group: split('❤️🧡💛💚💙💜🖤🤍🤎💔❣️💕💞💓💗💖💘💝😍🥰😘😻💋🌹') },
+  { icon: 'like', label: 'Одобрение', emoji: '👍', group: split('👍👌🤙💪🙌👏✌️🤝🙏✅💯🔥⭐🆗🫡') },
+  { icon: 'dislike', label: 'Неодобрение', emoji: '👎', group: split('👎😒🙄😤😠😡🤬💩❌🚫😑🤦🤷') },
+  { icon: 'party', label: 'Праздник', emoji: '🎉', group: split('🎉🥳🎊🎈🎂🍾🥂🎁✨🎆🎇🪅🍰🍻') },
+  { icon: 'smile', label: 'Радость', emoji: '😀', group: split('😀😃😄😁😆😅🤣😂🙂😊😉😇🤗😋😎🤩') },
+  { icon: 'sad', label: 'Грусть', emoji: '😢', group: split('😢😭😞😔😟🙁☹️😿💔😥😪😓🥺😩') },
+];
+
+/** Поиск эмодзи по словам (имён в Unicode нет в браузере — небольшой словарь частых слов). */
+const WORDS: [string, string][] = [
+  ['сердце любовь люблю', '❤️🧡💛💚💙💜🖤🤍💕💖💘😍🥰😘'], ['смех смешно ржу', '😂🤣😆😹'], ['улыбка радость', '😀😃😄😁😊🙂'],
+  ['грусть плачу слёзы слезы', '😢😭😞😔🥺'], ['злость злой бесит', '😠😡🤬😤'], ['огонь круто', '🔥💯⚡'], ['лайк класс ок', '👍👌👏🙌'],
+  ['праздник поздравляю день рождения', '🎉🥳🎂🎁🎊🍾'], ['кот кошка', '🐱🐈😺😸😹😻'], ['собака пёс пес', '🐶🐕🦮🐩'],
+  ['еда есть', '🍕🍔🍟🍣🍜🥗'], ['кофе чай', '☕🍵🧋'], ['сон спать устал', '😴💤🛌🥱'], ['деньги', '💰💵💸🤑'],
+  ['цветы цветок', '🌸🌷🌹🌺🌻💐'], ['солнце жара', '☀️🌞🔥🥵'], ['звезда', '⭐🌟✨💫'], ['машина авто', '🚗🚕🚙🏎️'],
+  ['самолёт самолет', '✈️🛫🛬'], ['думаю хм', '🤔🧐'], ['спасибо пожалуйста', '🙏🤝'], ['привет пока', '👋🤗'], ['шок ого', '😱😮😲🤯'],
+];
+export function searchEmoji(q: string): string[] {
+  const t = q.trim().toLowerCase();
+  if (!t) return [];
+  const out = new Set<string>();
+  for (const [words, list] of WORDS) if (words.split(' ').some((w) => w.startsWith(t) || t.startsWith(w))) for (const e of split(list)) out.add(e);
+  return [...out];
+}

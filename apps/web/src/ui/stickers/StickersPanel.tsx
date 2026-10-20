@@ -1,6 +1,6 @@
 /** @jsxImportSource preact */
 import type { StickerRef, StickerSetInfo } from '@relay/protocol';
-import { IconButton, ProgressRing, StickerView, useMinVisible } from '@relay/ui';
+import { IconButton, ProgressRing, StickerView, onHeavyAnimationEnd, useMinVisible } from '@relay/ui';
 import { useEffect, useRef, useState } from 'preact/hooks';
 import { plural } from '../../groups';
 import { closeStickersPanel, featuredSets, installSet, loadStickerSet, openStickerSet, searchSets, sendStickerHere, useMyStickers } from '../../stickers';
@@ -15,6 +15,9 @@ export function StickersPanel() {
   const loading = useMinVisible(list === null, { delay: 200, min: 500 });
   const mine = useMyStickers();
   const busyMore = useRef(false);
+  // пока панель выезжает — заглушки строк; паки с анимациями рисуем после (данные грузятся параллельно)
+  const [settled, setSettled] = useState(false);
+  useEffect(() => { let live = true; onHeavyAnimationEnd(() => requestAnimationFrame(() => { if (live) setSettled(true); })); return () => { live = false; }; }, []);
   const bottom = useRef<HTMLDivElement>(null), scroller = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -56,8 +59,9 @@ export function StickersPanel() {
         </div>
       </div>
       <div class="app-stkpanel-list" ref={scroller}>
-        {loading ? <div class="app-stkpanel-load"><ProgressRing size={32} label="Загрузка паков" /></div> : null}
-        {list?.map((set) => <SetRow key={set.id} set={set} installed={mine.sets.some((s) => s.id === set.id)} root={scroller} />)}
+        {!settled ? Array.from({ length: 6 }, (_, i) => <div key={i} class="app-stkrow app-stkrow-skel" aria-hidden="true"><div class="app-stkrow-head"><div class="app-stkrow-title"><i /><i /></div></div><div class="app-stkrow-strip" /></div>) : null}
+        {settled && loading ? <div class="app-stkpanel-load"><ProgressRing size={32} label="Загрузка паков" /></div> : null}
+        {settled ? list?.map((set) => <SetRow key={set.id} set={set} installed={mine.sets.some((s) => s.id === set.id)} root={scroller} />) : null}
         {list && !list.length ? <p class="app-stkpanel-empty">Ничего не найдено</p> : null}
         <div ref={bottom} class="app-stkpanel-end" />
       </div>
