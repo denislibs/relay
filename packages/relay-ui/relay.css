@@ -2261,3 +2261,13 @@ html[data-blur="0"] .rl-menu { -webkit-backdrop-filter: none; backdrop-filter: n
 .rl-kb-leave { animation: rl-kb-leave 260ms var(--ease-standard) forwards; pointer-events: none; }
 @keyframes rl-kb-leave { from { grid-template-rows: 1fr; opacity: 1; } to { grid-template-rows: 0fr; opacity: 0; } }
 @media (prefers-reduced-motion: reduce) { .rl-kb-leave { animation: rl-fade-out 120ms linear forwards; } .rl-kb-spin { animation-duration: 1ms, 1.6s; } }
+
+/* ---------- Стикеры: силуэт → превью → анимация (StickerView) ---------- */
+.rl-sticker { position: relative; display: inline-block; flex: none; vertical-align: middle; user-select: none; -webkit-user-select: none; }
+.rl-sticker > * { position: absolute; inset: 0; width: 100%; height: 100%; }
+.rl-sticker-outline { fill: currentColor; color: var(--ink); opacity: .1; }
+.rl-sticker-preview, .rl-sticker-static { object-fit: contain; -webkit-user-drag: none; }
+.rl-sticker-canvas { opacity: 0; }
+.rl-sticker-ready .rl-sticker-canvas { opacity: 1; }
+.rl-sticker-fade .rl-sticker-canvas, .rl-sticker-fade .rl-sticker-static { animation: rl-fade var(--dur-base, 200ms) var(--ease-out, ease-out); }
+.rl-sticker[role="button"] { cursor: pointer; }

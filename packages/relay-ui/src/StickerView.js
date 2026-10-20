@@ -1,0 +1,105 @@
+// Стикер: силуэт → сохранённый первый кадр → анимация. Слои лежат друг на друге; нижние убираются,
+// только когда кадр анимации уже нарисован и прошло два кадра браузера — без мигания. Фейд — лишь если
+// под анимацией был один силуэт (с превью кадры совпадают, менять нечего).
+import { h } from 'preact';
+import { useEffect, useRef, useState } from 'preact/hooks';
+import { cx, lazyObserve, reducedMotion } from './kit.js';
+import { attachSticker } from './lottie/player.js';
+import { lottieAvailable } from './lottie/pool.js';
+import { decodeOutline } from './lottie/outline.js';
+import { getPreview } from './lottie/previews.js';
+import { requestMutation } from './schedule.js';
+
+// одно наблюдение «на экране ли» на все стикеры
+const seen = new Map();
+let io = null;
+function watchVisible(el, cb) {
+  if (typeof IntersectionObserver === 'undefined') { cb(true); return () => {}; }
+  io ??= new IntersectionObserver((entries) => { for (const e of entries) seen.get(e.target)?.(e.isIntersecting); });
+  seen.set(el, cb);
+  io.observe(el);
+  return () => { seen.delete(el); io.unobserve(el); };
+}
+
+/** Вписать w×h в квадрат size (CSS px). */
+export function stickerBox(w, h, size) {
+  const k = size / Math.max(w || 512, h || 512);
+  return { width: Math.round((w || 512) * k), height: Math.round((h || 512) * k) };
+}
+
+const outlines = new Map();
+function outlinePath(b64) {
+  if (!b64) return '';
+  let p = outlines.get(b64);
+  if (p === undefined) { p = decodeOutline(b64); if (outlines.size > 500) outlines.clear(); outlines.set(b64, p); }
+  return p;
+}
+
+/**
+ * props: src (адрес .tgs/.json/.webp), outline (base64 контур), w, h (размер документа, обычно 512),
+ * size (сторона рамки, CSS px), play (по умолчанию да), loop (undefined — как в настройках), group,
+ * class, onClick, title.
+ */
+export function StickerView(props) {
+  const { src, outline, size, group = 'feed', play = true, loop } = props;
+  const box = stickerBox(props.w, props.h, size);
+  const isStatic = /\.webp$/.test(src || '');
+  const px = Math.round(Math.max(box.width, box.height) * Math.min(2, Math.max(1, (typeof devicePixelRatio === 'number' && devicePixelRatio) || 1)));
+  const key = src + '|' + px;
+  const root = useRef(null), canvas = useRef(null), ctl = useRef(null);
+  const [preview, setPreview] = useState(null);
+  const [stage, setStage] = useState('outline');      // outline → ready (+ fade, если превью не было)
+  const hadPreview = useRef(false);
+
+  // превью с прошлого раза (для статичных стикеров сама картинка — превью)
+  useEffect(() => {
+    setStage('outline'); setPreview(null); hadPreview.current = false;
+    if (isStatic || !src) return;
+    let live = true;
+    getPreview(key).then((url) => {
+      if (!live || !url) return;
+      const img = new Image();
+      img.src = url;
+      img.decode().then(() => { if (live) { hadPreview.current = true; setPreview(url); } }, () => {});
+    });
+    return () => { live = false; };
+  }, [key]);
+
+  // анимация: подключаемся, когда стикер подъехал к экрану (500 px), играем — пока виден
+  useEffect(() => {
+    const el = root.current;
+    if (!el || !src || isStatic || !lottieAvailable()) return;
+    let offVisible = null;
+    const offLazy = lazyObserve(el, () => {
+      const c = attachSticker({
+        url: src, px, canvas: canvas.current, group, play: play && !reducedMotion(), loop,
+        onFirstFrame: () => requestAnimationFrame(() => requestAnimationFrame(() => requestMutation(() => setStage('ready')))),
+      });
+      ctl.current = c;
+      offVisible = watchVisible(el, (v) => c.setVisible(v));
+    });
+    return () => { offLazy?.(); offVisible?.(); ctl.current?.destroy(); ctl.current = null; };
+  }, [key, group]);
+
+  useEffect(() => { ctl.current?.setPlay(play && !reducedMotion()); }, [play]);
+  useEffect(() => { ctl.current?.setLoop(loop); }, [loop]);
+
+  const path = outlinePath(outline);
+  const ready = stage === 'ready';
+  return h('div', {
+    ref: root,
+    class: cx('rl-sticker', ready && 'rl-sticker-ready', ready && !hadPreview.current && 'rl-sticker-fade', props.class),
+    style: { width: box.width + 'px', height: box.height + 'px' },
+    onClick: props.onClick,
+    title: props.title,
+    role: props.onClick ? 'button' : 'img',
+    'aria-label': props.title || 'Стикер',
+  },
+    !ready && path ? h('svg', { class: 'rl-sticker-outline', viewBox: `0 0 ${props.w || 512} ${props.h || 512}`, 'aria-hidden': 'true' }, h('path', { d: path })) : null,
+    isStatic
+      ? h('img', { class: 'rl-sticker-static', src, alt: '', draggable: false, decoding: 'async', onLoad: () => setStage('ready') })
+      : [
+        !ready && preview ? h('img', { key: 'p', class: 'rl-sticker-preview', src: preview, alt: '', draggable: false }) : null,
+        h('canvas', { key: 'c', ref: canvas, class: 'rl-sticker-canvas', 'aria-hidden': 'true' }),
+      ]);
+}

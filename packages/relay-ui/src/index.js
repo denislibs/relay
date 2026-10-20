@@ -38,3 +38,6 @@ export * from './formattedDate.js';
 export * from './dateView.js';
 export * from './dateModal.js';
 export { configureLottie, openRenderer, liveRenderers } from './lottie/pool.js';
+export { StickerView, stickerBox } from './StickerView.js';
+export { setStickerPolicy, setStickerGroupExclusive, stickerStats } from './lottie/player.js';
+export { decodeOutline } from './lottie/outline.js';
