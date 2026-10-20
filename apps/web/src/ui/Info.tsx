@@ -152,7 +152,6 @@ export function Info() {
             tile="red"
             icon={muted ? 'bellOff' : 'bell'}
             title="Уведомления"
-            subtitle={muted ? 'Выключены' : 'Включены'}
             trailing={<Switch id="info-notify" label="Уведомления" checked={!muted} onChange={() => toggleMute(chatId)} />}
           />
           <Expand show={!!contact?.note}>{contact?.note ? (
