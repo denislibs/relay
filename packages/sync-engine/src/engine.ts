@@ -18,7 +18,7 @@ import { simFlags, watchLoss } from './devsim';
 import { chatTitle, displayName, peopleResult, PeerSigs } from './names';
 import { applyMembersReply, membersResult, type MembersReply } from './members';
 import { MediaLoader, mediaResult, tabMessages } from './media';
-import { evict, EVICT_LIMITS, type EvictKeep, type EvictLimits, type EvictStats } from './evict';
+import { evict, EVICT_LIMITS, type EvictKeep, type EvictLimits, type EvictOpts, type EvictStats } from './evict';
 import { musicKey, profileMusicResult, profilePhotosResult, ProfileListsLoader, trackOf } from './profileLists';
 import type { Action, EngineConfig, LocalMessage, OutboxEntry, Patch, Query, SearchHit, SearchResult } from './types';
 import { searchLocal } from './search';
@@ -279,11 +279,12 @@ export class Engine {
   watch(q: Query, cb: (p: Patch) => void): WatchHandle {
     const w: Watcher = { id: this.nextWatch++, q, cb, prev: null, force: true, gated: q.kind === 'messages' };
     this.watchers.set(w.id, w);
+    if (q.kind === 'messages') this.store.noteOpened(q.chatId);   // уборка урезает давно не открытые первыми
     if (q.kind === 'devStats' || q.kind === 'devLog') this.dev.track(this.watchers.values());
     this.prepare(w);
     this.schedule();
     return {
-      update: (q2) => { const chatChanged = q2.kind === 'messages' && (w.q.kind !== 'messages' || w.q.chatId !== q2.chatId); w.q = q2; w.force = true; if (chatChanged) w.gated = true; this.dev.track(this.watchers.values()); this.prepare(w); this.schedule(); },
+      update: (q2) => { const chatChanged = q2.kind === 'messages' && (w.q.kind !== 'messages' || w.q.chatId !== q2.chatId); if (chatChanged) this.store.noteOpened(q2.chatId); w.q = q2; w.force = true; if (chatChanged) w.gated = true; this.dev.track(this.watchers.values()); this.prepare(w); this.schedule(); },
       close: () => { this.watchers.delete(w.id); this.dev.track(this.watchers.values()); },
     };
   }
@@ -299,7 +300,6 @@ export class Engine {
     if (w.q.kind === 'profileMusic' || w.q.kind === 'profilePhotos') { this.lists.want(w.q); return; }
     if (w.q.kind !== 'messages') return;
     const { chatId, limit } = w.q;
-    this.store.noteOpened(chatId);   // уборка урезает давно не открытые первыми
     const q = w.q;
     // первый снимок ленты — уже готовый: кэш прочитан и, если сообщений меньше окна, история догружена
     // (сервер ждём не дольше HISTORY_GATE_MS, без сети — не ждём); иначе интерфейс покажет пусто → часть → всё
@@ -1779,11 +1779,11 @@ export class Engine {
   }
 
   /** Уборка сейчас (и для тестов): limits — пределы вместо согласованных. */
-  evict(limits: EvictLimits = EVICT_LIMITS): Promise<EvictStats> {
+  evict(limits: EvictLimits = EVICT_LIMITS, opts: EvictOpts = {}): Promise<EvictStats> {
     if (this.evicting) return this.evicting;
     this.lastEvict = Date.now();
     const t0 = Date.now();
-    const p = evict(this.store, this.db, this.evictKeep(), limits)
+    const p = evict(this.store, this.db, () => this.evictKeep(), limits, { closed: () => this.closed, ...opts })
       .then((st) => { this.dev.log.record('engine', 'evict', st, undefined, Date.now() - t0); this.changed(); return st; })
       .finally(() => { this.evicting = null; this.lastEvict = Date.now(); });
     this.evicting = p;
@@ -1792,11 +1792,16 @@ export class Engine {
 
   /** Что сейчас видит интерфейс: окна лент (то, что показано, и то, что посчитается сейчас) с исходниками цитат, вкладки медиа, люди подписок. */
   private evictKeep(): EvictKeep {
-    const keep: EvictKeep = { windows: new Map(), people: new Set(this.contacts.view().keys()), members: new Set() };
+    const keep: EvictKeep = { windows: new Map(), people: new Set(this.contacts.view().keys()), members: new Set(), busy: new Set() };
+    // грузятся: история, страница новее, точечная подгрузка, медиа
+    for (const id of [...this.historyLoads.keys(), ...this.newerLoads.keys(), ...this.chatLoads.keys()]) keep.busy.add(id);
+    for (const id of this.media.busyChats()) keep.busy.add(id);
     const win = (chatId: number) => { let s = keep.windows.get(chatId); if (!s) { s = new Set(); keep.windows.set(chatId, s); } return s; };
     for (const w of this.watchers.values()) {
       const q = w.q;
       if (q.kind === 'messages') {
+        // лента только открывается (сообщения ещё не прочитаны, первый снимок не готов) — окна ещё не знаем
+        if (w.gated || !this.store.isLoaded(q.chatId)) keep.busy.add(q.chatId);
         const set = win(q.chatId), all = this.store.chatMessages(q.chatId);
         const span = feedSpan(this.store.chats.get(q.chatId), all, q.anchor?.sort);
         const { from, to } = messageWindow(all, q, span.lo, span.hi);

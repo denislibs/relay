@@ -77,6 +77,13 @@ export class MediaLoader {
     changed: () => void;
   }) {}
 
+  /** Чаты, для которых идёт загрузка (сообщения из IDB, счётчики, страница вкладки): уборка их не трогает. */
+  busyChats(): Set<number> {
+    const out = new Set<number>();
+    for (const k of this.busy) out.add(Number(k.startsWith('load:') || k.startsWith('counts:') ? k.slice(k.indexOf(':') + 1) : k.slice(0, k.indexOf(':'))));
+    return out;
+  }
+
   loading(chatId: number, tab: MediaTab): boolean { return this.busy.has(chatId + ':' + tab) || this.busy.has('load:' + chatId); }
 
   /** Новое подключение: отказы прошлого — спросим снова. */
@@ -106,11 +113,13 @@ export class MediaLoader {
     if (v.floor === true || v.list.length >= q.limit) return;
     const floor = v.floor;
     this.task(chatId + ':' + tab, chatId, async () => {
-      const gen = this.store.resetGen;
+      const gen = this.store.resetGen, trims = this.store.trimGen(chatId);
       const r = await this.deps.http<Reply>(`/chats/${chatId}/media?kind=${tab}${Number.isFinite(floor) ? '&beforeId=' + floor : ''}`);
       const c = this.store.chats.get(chatId);
       if (!c || gen !== this.store.resetGen) return;   // ответ после сброса — устарел
       this.store.addLoose(chatId, r.messages);
+      // пока ждали, уборка стёрла часть вкладки над floor — страница уже не продолжает известное подряд
+      if (trims !== this.store.trimGen(chatId)) return;
       let lo = floor;
       for (const m of r.messages) if (m.id < lo) lo = m.id;
       c.mediaDone = { ...c.mediaDone, [tab]: r.hasMore && r.messages.length ? lo : true };

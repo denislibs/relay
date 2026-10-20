@@ -16,7 +16,7 @@ import { PENDING_BASE, type LocalChat, type LocalMessage } from './types';
 export const EVICT_LIMITS = { perChat: 500, total: 50_000, stale: 50, people: 5_000 };
 export type EvictLimits = typeof EVICT_LIMITS;
 
-/** Что сейчас видит интерфейс — не трогаем. */
+/** Что сейчас видит интерфейс — не трогаем. Считается заново перед каждой порцией: окно могли открыть посреди уборки. */
 export interface EvictKeep {
   /** открытые окна лент и вкладок медиа: ключи сообщений по чатам (с исходниками цитат) */
   windows: Map<number, Set<string>>;
@@ -24,11 +24,26 @@ export interface EvictKeep {
   people: Set<number>;
   /** чаты с открытым списком участников */
   members: Set<number>;
+  /** чаты, которые сейчас грузятся (история, страница медиа, открытие ленты): их не трогаем */
+  busy: Set<number>;
 }
 
 export interface EvictStats { messages: number; users: number; members: number; lists: number }
 
+export interface EvictOpts {
+  /** движок закрыт — бросить уборку (проверка между порциями) */
+  closed?: () => boolean;
+  /** строк в одной транзакции (по умолчанию EVICT_CHUNK) */
+  chunk?: number;
+  /** после каждой порции (тесты) */
+  onChunk?: (chatId: number, removed: number) => void;
+}
+
+/** Строк сообщений в одной транзакции уборки: запись и чтение остальных ждут её недолго. */
+export const EVICT_CHUNK = 300;
+
 type Removed = { key: string; id: number | null; sort: number; media: boolean };
+type Prot = { keys: Set<string>; ids: Set<number> };
 
 /** Подтверждённые сообщения чата (неотправленные — с PENDING_BASE, их не считаем и не трогаем). */
 const serverRange = (chatId: number) => IDBKeyRange.bound([chatId, -Infinity], [chatId, PENDING_BASE], false, true);
@@ -46,37 +61,45 @@ async function countAll(db: IDBDatabase, ids: number[]): Promise<Map<number, num
   return out;
 }
 
-/**
- * Оставить у чата keep новейших подтверждённых (и защищённые): старее floor (keep-е с конца) — стереть строку и её слова,
- * одной транзакцией. null — стирать нечего.
- */
-async function trimChat(db: IDBDatabase, chatId: number, keep: number, prot: { keys: Set<string>; ids: Set<number> }): Promise<{ floor: number; removed: Removed[]; kept: number[] } | null> {
-  const t = db.transaction(['messages', 'terms'], 'readwrite');
-  const ix = t.objectStore('messages').index('byChat'), terms = t.objectStore('terms');
-  const removed: Removed[] = [], kept: number[] = [];
+/** Пол чата: sort keep-го с конца среди подтверждённых (его и новее оставляем); null — их не больше keep. */
+async function floorOf(db: IDBDatabase, chatId: number, keep: number): Promise<number | null> {
+  const t = db.transaction('messages'), top = t.objectStore('messages').index('byChat').openCursor(serverRange(chatId), 'prev');
   let floor: number | null = null, skipped = keep <= 1;
-  const top = ix.openCursor(serverRange(chatId), 'prev');
   top.onsuccess = () => {
     const c = top.result;
-    if (!c) return;   // сообщений не больше keep
+    if (!c) return;
     if (!skipped) { skipped = true; c.advance(keep - 1); return; }
     floor = (c.value as LocalMessage).sort;
-    const below = ix.openCursor(IDBKeyRange.bound([chatId, -Infinity], [chatId, floor], false, true));
-    below.onsuccess = () => {
-      const d = below.result;
-      if (!d) return;
-      const m = d.value as LocalMessage & { tab?: string };
-      if (prot.keys.has(m.key) || (m.id != null && prot.ids.has(m.id))) kept.push(m.sort);
-      else {
-        for (const term of termsOf(m)) terms.delete([term, m.chatId, m.sort]);
-        removed.push({ key: m.key, id: m.id, sort: m.sort, media: !!m.tab || tabsOf(m).length > 0 });
-        d.delete();
-      }
-      d.continue();
-    };
   };
   await done(t);
-  return floor == null ? null : { floor, removed, kept };
+  return floor;
+}
+
+/**
+ * Порция: до chunk строк старее floor, начиная с from (null — с самой старой). Незащищённые — строка и её слова,
+ * одной транзакцией. next — sort первой непройденной строки (null — дошли до floor).
+ */
+async function trimChunk(db: IDBDatabase, chatId: number, from: number | null, floor: number, chunk: number, prot: Prot): Promise<{ removed: Removed[]; kept: number[]; next: number | null }> {
+  const t = db.transaction(['messages', 'terms'], 'readwrite');
+  const terms = t.objectStore('terms');
+  const removed: Removed[] = [], kept: number[] = [];
+  let next: number | null = null, seen = 0;
+  const cur = t.objectStore('messages').index('byChat').openCursor(IDBKeyRange.bound([chatId, from ?? -Infinity], [chatId, floor], false, true));
+  cur.onsuccess = () => {
+    const d = cur.result;
+    if (!d) return;
+    const m = d.value as LocalMessage & { tab?: string };
+    if (seen++ === chunk) { next = m.sort; return; }   // порция набрана — остальное следующей транзакцией
+    if (prot.keys.has(m.key) || (m.id != null && prot.ids.has(m.id))) kept.push(m.sort);
+    else {
+      for (const term of termsOf(m)) terms.delete([term, m.chatId, m.sort]);
+      removed.push({ key: m.key, id: m.id, sort: m.sort, media: !!m.tab || tabsOf(m).length > 0 });
+      d.delete();
+    }
+    d.continue();
+  };
+  await done(t);
+  return { removed, kept, next };
 }
 
 /**
@@ -104,6 +127,7 @@ export function trimRanges(ranges: readonly [number, number][], floor: number, r
 
 /** Применить стирание к чату в памяти: сообщения, отрезки, начало истории, seed, вкладки медиа. */
 function applyTrim(store: Store, chat: LocalChat, floor: number, removed: Removed[], kept: number[]): void {
+  if (!removed.length) return;
   store.dropMessages(chat.id, removed);
   const was = chat.ranges;
   const sorts = removed.map((r) => r.sort).sort((x, y) => x - y);
@@ -121,21 +145,24 @@ function applyTrim(store: Store, chat: LocalChat, floor: number, removed: Remove
 const pause = () => new Promise<void>((r) => setTimeout(r, 0));
 
 /**
- * Уборка. Сначала flush (память и IDB совпадают), потом по чату за раз с паузой между чатами — не держим воркер.
+ * Уборка. Сначала flush (память и IDB совпадают), потом по чату за раз, порциями по chunk строк с паузой между
+ * ними — запись и чтение остальных не ждут долго.
  * В конце flush: отрезки, люди, участники и списки — на диск.
  */
-export async function evict(store: Store, db: IDBDatabase, keep: EvictKeep, limits: EvictLimits = EVICT_LIMITS): Promise<EvictStats> {
+export async function evict(store: Store, db: IDBDatabase, keepNow: () => EvictKeep, limits: EvictLimits = EVICT_LIMITS, opts: EvictOpts = {}): Promise<EvictStats> {
   const stats: EvictStats = { messages: 0, users: 0, members: 0, lists: 0 };
+  const closed = opts.closed ?? (() => false), chunk = opts.chunk ?? EVICT_CHUNK;
   await store.flush();
 
   // ---------- сообщения ----------
   const counts = await countAll(db, [...store.chats.keys()]);
+  const start = keepNow();
   const target = new Map<number, number>();
   let total = 0;
   for (const [id, n] of counts) { const k = Math.min(n, limits.perChat); target.set(id, k); total += k; }
   if (total > limits.total) {
     // давно не открытые (никогда — первыми, потом по времени последнего сообщения) — до stale; открытые сейчас не трогаем
-    const stale = [...store.chats.values()].filter((c) => !keep.windows.has(c.id) && (target.get(c.id) ?? 0) > limits.stale)
+    const stale = [...store.chats.values()].filter((c) => !start.windows.has(c.id) && (target.get(c.id) ?? 0) > limits.stale)
       .sort((a, b) => (a.openedAt ?? 0) - (b.openedAt ?? 0) || (a.lastAt < b.lastAt ? -1 : a.lastAt > b.lastAt ? 1 : a.id - b.id));
     for (const c of stale) {
       if (total <= limits.total) break;
@@ -144,18 +171,35 @@ export async function evict(store: Store, db: IDBDatabase, keep: EvictKeep, limi
     }
   }
   for (const [id, n] of counts) {
+    if (closed()) return stats;
     const k = target.get(id)!;
-    if (n <= k) continue;
-    const chat = store.chats.get(id);
-    if (!chat) continue;
-    const prot = { keys: new Set(keep.windows.get(id) ?? []), ids: new Set(chat.pinned ?? []) };
-    if (chat.last) prot.keys.add(chat.last.key);
-    const gen = store.resetGen;
-    const r = await trimChat(db, id, k, prot);
-    const now = store.chats.get(id);   // пока стирали, чат могли удалить, а кэш — сбросить (tooLong)
-    if (r && now && gen === store.resetGen) { applyTrim(store, now, r.floor, r.removed, r.kept); stats.messages += r.removed.length; }
-    await pause();
+    if (n <= k || !store.chats.has(id)) continue;
+    const floor = await floorOf(db, id, k);
+    if (floor == null) continue;
+    const keptAll: number[] = [];
+    for (let from: number | null = null; ;) {
+      if (closed()) return stats;
+      // что видит интерфейс — сейчас: окно, открытое посреди уборки, защищено; грузящийся чат — не трогаем
+      const keep = keepNow(), chat = store.chats.get(id);
+      if (!chat || keep.busy.has(id) || (keep.windows.has(id) && k < Math.min(n, limits.perChat))) break;
+      const prot: Prot = { keys: new Set(keep.windows.get(id) ?? []), ids: new Set(chat.pinned ?? []) };
+      if (chat.last) prot.keys.add(chat.last.key);
+      const gen = store.resetGen;
+      const r = await trimChunk(db, id, from, floor, chunk, prot);
+      const now = store.chats.get(id);   // пока стирали, чат могли удалить, а кэш — сбросить (tooLong)
+      if (!now || gen !== store.resetGen) break;
+      keptAll.push(...r.kept);
+      // память — вслед за каждой порцией: от next и новее всё ещё на месте
+      applyTrim(store, now, r.next ?? floor, r.removed, keptAll);
+      stats.messages += r.removed.length;
+      opts.onChunk?.(id, r.removed.length);
+      await pause();
+      if (r.next == null) break;
+      from = r.next;
+    }
   }
+  if (closed()) return stats;
+  const keep = keepNow();
 
   // ---------- участники ----------
   for (const c of store.chats.values()) {
@@ -172,11 +216,13 @@ export async function evict(store: Store, db: IDBDatabase, keep: EvictKeep, limi
     await store.flush();   // сообщения, пришедшие за уборку, — в IDB: их авторов увидит обход ниже
     const refs = new Set<number>(keep.people);
     refs.add(store.userId);
-    const note = (m: Pick<LocalMessage, 'senderId' | 'fwdFrom' | 'reactions'> | null | undefined) => {
+    const note = (m: Pick<LocalMessage, 'senderId' | 'fwdFrom' | 'reactions' | 'service' | 'todo'> | null | undefined) => {
       if (!m) return;
       refs.add(m.senderId);
       if (m.fwdFrom) refs.add(m.fwdFrom.userId);
       for (const r of m.reactions ?? []) refs.add(r.userId);
+      for (const u of m.service?.data?.users ?? []) refs.add(u.id);   // участники служебного события
+      for (const c of m.todo?.completions ?? []) refs.add(c.by);      // кто отметил задачи
     };
     for (const c of store.chats.values()) { if (c.peerId != null) refs.add(c.peerId); note(c.last); note(c.snapLast); }
     for (const r of store.members.table.rows.values()) refs.add(r.userId);
@@ -197,6 +243,6 @@ export async function evict(store: Store, db: IDBDatabase, keep: EvictKeep, limi
   // ---------- музыка и фото профиля ----------
   stats.lists = store.profileLists.cap(PROFILE_LIST_MAX);
 
-  await store.flush();
+  if (!closed()) await store.flush();
   return stats;
 }

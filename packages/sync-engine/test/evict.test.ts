@@ -5,10 +5,11 @@ import { evict, EVICT_LIMITS, trimRanges, type EvictKeep } from '../src/evict';
 import { openDb, termsOf } from '../src/idb';
 import { Store } from '../src/store';
 import { PENDING_BASE, type LocalChat, type LocalMessage } from '../src/types';
-import { resetDb, startTestServer, watchInto } from './helpers';
+import { MediaLoader } from '../src/media';
+import { msg, resetDb, startTestServer, watchInto } from './helpers';
 
 const ME = 1;
-const keepNone = (): EvictKeep => ({ windows: new Map(), people: new Set(), members: new Set() });
+const keepNone = (): EvictKeep => ({ windows: new Map(), people: new Set(), members: new Set(), busy: new Set() });
 const all = <T>(db: IDBDatabase, store: string) => new Promise<T[]>((res, rej) => { const r = db.transaction(store).objectStore(store).getAll(); r.onsuccess = () => res(r.result as T[]); r.onerror = () => rej(r.error); });
 const count = (db: IDBDatabase, store: string) => new Promise<number>((res, rej) => { const r = db.transaction(store).objectStore(store).count(); r.onsuccess = () => res(r.result); r.onerror = () => rej(r.error); });
 
@@ -84,7 +85,7 @@ async function bigCase(k: number) {
   const keep = keepNone();
   keep.windows.set(7, new Set(Array.from({ length: 5 }, (_, j) => `k${7001 + j}`)));
   const t0 = Date.now();
-  const st = await evict(s, db, keep, limits);
+  const st = await evict(s, db, () => keep, limits);
   const msgs = await all<LocalMessage>(db, 'messages');
   expect(msgs.length).toBeLessThanOrEqual(T);
   expect(st.messages).toBe(before - msgs.length);
@@ -132,7 +133,7 @@ test('loaded chat: evicted messages leave memory too', async () => {
   s.applyUpdate({ type: 'messageDeleted', chatId: 5, id: 101 } as never);   // не загружен — правка строки в очереди
   await s.loadChatMessages(5);
   s.applyUpdate({ type: 'messageEdited', chatId: 5, id: 102, body: 'changed', editedAt: new Date().toISOString() } as never);
-  await evict(s, db, keepNone(), { ...EVICT_LIMITS, perChat: 10 });
+  await evict(s, db, keepNone, { ...EVICT_LIMITS, perChat: 10 });
   expect(s.chatMessages(5).map((m) => m.id)).toEqual(Array.from({ length: 10 }, (_, j) => 120 + j));
   expect(s.chats.get(5)!.ranges).toEqual([[120, 129]]);
   expect(s.termsDirty).toBe(false);
@@ -141,7 +142,8 @@ test('loaded chat: evicted messages leave memory too', async () => {
 
 test('people: over the limit, unreferenced are removed with their profile lists; referenced stay', async () => {
   const name = 'evict-' + crypto.randomUUID();
-  const msgs = [row(9, 10, { senderId: 50 }), row(9, 11, { senderId: 51, reactions: [{ userId: 52, emoji: '👍' }] })];
+  const msgs = [row(9, 10, { senderId: 50, service: { type: 'members_added', data: { users: [{ id: 54, name: 'x' }] } } }),
+    row(9, 11, { senderId: 51, reactions: [{ userId: 52, emoji: '👍' }], kind: 'todo', todo: { title: 't', items: [], othersCanAppend: false, othersCanComplete: true, completions: [{ id: 1, by: 55, at: '' }] } })];
   const db = await seed(name, [{ chat: chatRow(9, msgs[1], { ranges: [[10, 11]], kind: 'group', group: { members: 3 } as never }), msgs },
     { chat: chatRow(10, row(10, 20, { senderId: 60 }), { peerId: 60, ranges: [[20, 20]] }), msgs: [row(10, 20, { senderId: 60 })] }]);
   const s = await Store.open(db, ME);
@@ -155,17 +157,25 @@ test('people: over the limit, unreferenced are removed with their profile lists;
   await s.flush();
   const keep = keepNone();
   keep.people.add(74);   // интерфейс подписан на человека
-  const st = await evict(s, db, keep, { ...EVICT_LIMITS, people: 5 });
+  const st = await evict(s, db, () => keep, { ...EVICT_LIMITS, people: 5 });
   const left = new Set((await all<{ id: number }>(db, 'users')).map((u) => u.id));
-  for (const id of [50, 51, 52, 60, 70, 71, 72, 73, 74]) expect(left.has(id)).toBe(true);
+  for (const id of [50, 51, 52, 54, 55, 60, 70, 71, 72, 73, 74]) expect(left.has(id)).toBe(true);
   for (const id of [53, 61, 75, 80]) expect(left.has(id)).toBe(false);
-  expect(st.users).toBe(31 - 9);
+  expect(st.users).toBe(31 - 11);
   // списки удалённого — вместе с ним; подписанного — на месте
   const music = await all<{ userId: number }>(db, 'profileMusic');
-  expect(music.map((r) => r.userId)).toEqual([74]);
+  expect(music.filter((r) => r.userId !== 74)).toEqual([]);
   expect(s.profileLists.loaded('m:80')).toBe(false);
+  // больше 100 треков (в обход ответа сервера) — остаются 100 новых, подписка на список пересчитается
+  const tracks = Array.from({ length: 105 }, (_, i) => ({ userId: 74, attId: 'x' + i, title: 't', duration: 1, mime: 'audio/mpeg', addedAt: new Date(1_700_000_000_000 + i * 1000).toISOString() }));
+  s.profileLists.music.apply(74, tracks);
+  s.profileLists.touched.clear();
+  const st3 = await evict(s, db, () => keep, { ...EVICT_LIMITS, people: 5 });
+  expect(st3.lists).toBe(5);
+  expect(s.profileLists.touched.has('m:74')).toBe(true);
+  expect(s.profileLists.music.rows(74).map((r) => r.attId).sort()).toEqual(tracks.slice(5).map((t) => t.attId).sort());
   // под пределом — никого не трогаем
-  const st2 = await evict(s, db, keepNone(), { ...EVICT_LIMITS, people: 5_000 });
+  const st2 = await evict(s, db, keepNone, { ...EVICT_LIMITS, people: 5_000 });
   expect(st2.users).toBe(0);
 });
 
@@ -183,10 +193,81 @@ test('members: a big group keeps the first 200; an open members list is not touc
   await s.flush();
   const keep = keepNone();
   keep.members.add(4);
-  await evict(s, db, keep);
+  await evict(s, db, () => keep);
   expect(s.members.list(3).map((r) => r.userId)).toEqual(list.slice(0, 200).map((m) => m.userId));
   expect(s.members.list(4)).toHaveLength(260);
   expect((await all<{ chatId: number }>(db, 'members')).filter((r) => r.chatId === 3)).toHaveLength(200);
+});
+
+test('a big chat is trimmed in bounded transactions; a flush issued mid-eviction is not held until the end', async () => {
+  const name = 'evict-' + crypto.randomUUID();
+  const msgs = Array.from({ length: 1000 }, (_, j) => row(4, j + 1, { body: 'w' + j }));
+  const db = await seed(name, [{ chat: chatRow(4, msgs[999], { ranges: [[1, 1000]], historyStart: true }), msgs }]);
+  const s = await Store.open(db, ME);
+  const chunks: number[] = [], order: string[] = [];
+  await evict(s, db, keepNone, { ...EVICT_LIMITS, perChat: 10 }, {
+    chunk: 300,
+    onChunk: (_id, n) => {
+      chunks.push(n);
+      if (chunks.length > 1) return;
+      s.applyUpdate({ type: 'newMessage', message: msg({ id: 2000, chatId: 9, senderId: 2, body: 'mid' }) });
+      s.flush().then(() => order.push('flush'));
+    },
+  });
+  order.push('evict');
+  expect(chunks).toEqual([300, 300, 300, 90]);
+  expect(order).toEqual(['flush', 'evict']);
+  expect(s.chats.get(4)!.ranges).toEqual([[991, 1000]]);
+  expect(s.chats.get(4)!.historyStart).toBeUndefined();
+  expect(await count(db, 'messages')).toBe(11);
+  expect(await count(db, 'terms')).toBe(11);
+});
+
+test('a loading chat is skipped; a closed engine stops between chunks', async () => {
+  const name = 'evict-' + crypto.randomUUID();
+  const a = Array.from({ length: 30 }, (_, j) => row(1, 100 + j)), b = Array.from({ length: 30 }, (_, j) => row(2, 200 + j));
+  const db = await seed(name, [{ chat: chatRow(1, a[29], { ranges: [[100, 129]] }), msgs: a }, { chat: chatRow(2, b[29], { ranges: [[200, 229]] }), msgs: b }]);
+  const s = await Store.open(db, ME);
+  const keep = keepNone();
+  keep.busy.add(1);
+  await evict(s, db, () => keep, { ...EVICT_LIMITS, perChat: 10 });
+  expect(s.chats.get(1)!.ranges).toEqual([[100, 129]]);
+  expect(s.chats.get(2)!.ranges).toEqual([[220, 229]]);
+  keep.busy.clear();
+  let stop = false;
+  const st = await evict(s, db, () => keep, { ...EVICT_LIMITS, perChat: 10 }, { chunk: 5, closed: () => stop, onChunk: () => { stop = true; } });
+  expect(st.messages).toBe(5);
+  expect(s.chats.get(1)!.ranges).toEqual([[105, 129]]);
+});
+
+test('a media page in flight during eviction does not write a cursor over evicted rows', async () => {
+  const name = 'evict-' + crypto.randomUUID();
+  const photo = { id: 'a', kind: 'photo' as const, mime: 'image/jpeg', name: 'p.jpg', size: 1, w: 1, h: 1 };
+  const msgs = Array.from({ length: 60 }, (_, j) => row(6, 101 + j, { kind: 'photo', attachment: photo }));
+  const db = await seed(name, [{ chat: chatRow(6, msgs[59], { ranges: [[101, 160]] }), msgs }]);
+  const s = await Store.open(db, ME);
+  await s.loadChatMessages(6);
+  let release!: () => void;
+  const gate = new Promise<void>((r) => { release = r; });
+  const runs: Promise<unknown>[] = [];
+  const media = new MediaLoader(s, {
+    online: () => true,
+    http: async <T>(path: string): Promise<T> => {
+      if (path.includes('/counts')) return { media: 70, file: 0, audio: 0, voice: 0, link: 0 } as T;
+      await gate;   // страница старше 101 — в пути, пока идёт уборка
+      return { messages: Array.from({ length: 10 }, (_, j) => msg({ id: 91 + j, chatId: 6, senderId: 2, kind: 'photo', attachment: photo })), hasMore: true } as T;
+    },
+    run: (fn) => { runs.push(fn().catch(() => {})); },
+    changed: () => {},
+  });
+  media.want({ kind: 'media', chatId: 6, tab: 'media', limit: 100 });
+  await evict(s, db, keepNone, { ...EVICT_LIMITS, perChat: 10 });   // busy не передаём — проверяем сам ответ страницы
+  expect(s.chats.get(6)!.ranges).toEqual([[151, 160]]);
+  release();
+  await Promise.all(runs);
+  // ответ лёг вне ленты, но курсор «подряд от новых до 91» поверх стёртых 101..150 не записан
+  expect(s.chats.get(6)!.mediaDone?.media).toBeUndefined();
+  expect(s.messageById(6, 91)).toBeDefined();
 });
 
 // ---------- движок с сервером ----------
@@ -212,6 +293,12 @@ test('feed after eviction pages older history from the server again', async () =
   const chat = () => eb.store.chats.get(chatId)!;
   expect(chat().ranges).toEqual([[ids[0], ids[39]]]);
   expect(chat().historyStart).toBe(true);
+  // время открытия — при открытии ленты, не на каждом сдвиге окна
+  const opened = chat().openedAt!;
+  expect(opened).toBeGreaterThan(0);
+  await Bun.sleep(5);
+  feed.handle.update({ kind: 'messages', chatId, limit: 50 });
+  expect(chat().openedAt).toBe(opened);
   feed.handle.close();
 
   await eb.evict({ ...EVICT_LIMITS, perChat: 10 });
@@ -252,4 +339,43 @@ test('eviction runs on its own after a flush when idle, at most once per period'
   await Bun.sleep(100);
   await eb.whenIdle();
   expect(runs.length).toBe(1);   // не чаще раза в период
+});
+
+test('a window opened in the middle of eviction keeps its rows', async () => {
+  const a = await srv.login('a'), b = await srv.login('b'), c = await srv.login('c');
+  const chats = [await srv.chat(a.token, [a.userId, b.userId]), await srv.chat(c.token, [c.userId, b.userId])];
+  const ids = new Map<number, number[]>();
+  for (const [i, chatId] of chats.entries()) {
+    const list: number[] = [];
+    for (let k = 0; k < 40; k++) list.push((await sendMessage([a, c][i].userId, { chatId, clientId: crypto.randomUUID(), body: 'm' + k })).message.id);
+    ids.set(chatId, list);
+  }
+  const eb = await Engine.open({ ...srv.config(b), historyPage: 20 });
+  engines.push(eb);
+  eb.connect();
+  await eb.whenIdle();
+  for (const chatId of chats) {
+    const f = watchInto(eb, { kind: 'messages', chatId, limit: 60 });
+    await f.until((l) => l.length === 40);
+    await eb.whenIdle();
+    f.handle.close();
+  }
+  let fw: ReturnType<typeof watchInto> | null = null, other = 0;
+  await eb.evict({ ...EVICT_LIMITS, perChat: 10 }, {
+    chunk: 5,
+    onChunk: (id) => {
+      if (fw) return;
+      // после первой порции первого чата — открыть окно в старой истории другого
+      other = id === chats[0] ? chats[1] : chats[0];
+      fw = watchInto(eb, { kind: 'messages', chatId: other, limit: 5, anchor: { sort: ids.get(other)![2], side: 'start' } });
+    },
+  });
+  const want = ids.get(other)!.slice(2, 7);
+  await fw!.until((l) => l.length === 5);
+  for (const id of want) expect(eb.store.messageById(other, id)).toBeDefined();
+  expect(fw!.list().map((m) => m.id)).toEqual(want);
+  // окно ни разу не теряло своих строк
+  const keys = new Set(fw!.list().map((m) => m.key));
+  expect(fw!.patches.some((p) => p.op === 'diff' && p.remove.some((k) => keys.has(k)))).toBe(false);
+  fw!.handle.close();
 });

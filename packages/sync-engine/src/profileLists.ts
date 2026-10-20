@@ -153,8 +153,9 @@ export class ProfileLists {
   /** Уборка: не больше max строк в списке человека — новые остаются. */
   cap(max = PROFILE_LIST_MAX): number {
     let n = 0;
-    for (const id of this.music.users()) n += this.music.drop(id, max, (a, b) => (a.addedAt < b.addedAt ? 1 : a.addedAt > b.addedAt ? -1 : 0));
-    for (const id of this.photos.users()) n += this.photos.drop(id, max, (a, b) => b.at - a.at);
+    // урезанный список — пересчитать его подписки (touched)
+    for (const id of this.music.users()) { const k = this.music.drop(id, max, (a, b) => (a.addedAt < b.addedAt ? 1 : a.addedAt > b.addedAt ? -1 : 0)); if (k) { n += k; this.touched.add('m:' + id); } }
+    for (const id of this.photos.users()) { const k = this.photos.drop(id, max, (a, b) => b.at - a.at); if (k) { n += k; this.touched.add('p:' + id); } }
     return n;
   }
 

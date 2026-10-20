@@ -832,8 +832,11 @@ export class Store {
       if (id != null) this.rowPatches.delete(`${chatId}:${id}`);
       if (map && !this.dirtyMessages.has(key)) map.delete(key);
     }
-    if (list.length) this.touch(chatId);
+    if (list.length) { this.trims.set(chatId, this.trimGen(chatId) + 1); this.touch(chatId); }
   }
+  /** Сколько раз уборка стирала сообщения чата (только в памяти): страница, начатая до уборки, не пишет курсоры поверх стёртого. */
+  trimGen(chatId: number): number { return this.trims.get(chatId) ?? 0; }
+  private trims = new Map<number, number>();
 
   markChat(c: LocalChat): void {
     this.dirtyChats.add(c.id);
