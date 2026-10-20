@@ -5,6 +5,7 @@ import { EngineClient, Mirror } from '../src/client';
 import { measureRecording } from '../bench/devlog.bench';
 import { BODY_MAX, cutUrl, DevLog, LOG_CAP, trimBodies, type DevEvent } from '../src/devlog';
 import { Engine } from '../src/engine';
+import { SCHEMA_VERSION } from '../src/schema';
 import { fromMessagePort, HostCore, type FromHost, type ToHost } from '../src/host-core';
 import type { EngineConfig, Item } from '../src/types';
 import { msg, resetDb, startTestServer, watchInto } from './helpers';
@@ -165,7 +166,7 @@ test('devStats: one item with sync, socket, queues, subscriptions and IDB counts
   expect((s0.sync as Item).phase).toBe('ready');
   expect((s0.sync as Item).lastSeq).toBe(ea.store.lastSeq);
   expect((s0.socket as Item).state).toBe('open');
-  expect(s0.idbVersion).toBe(3);
+  expect(s0.idbVersion).toBe(SCHEMA_VERSION);
   const subs = s0.subscriptions as { kind: string; key: string }[];
   expect(subs.some((s) => s.key === 'messages:' + chatId)).toBe(true);
   // через тик: IDB посчитана, ping → pong дал RTT
