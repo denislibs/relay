@@ -2,7 +2,8 @@
 // Cache Storage этого приложения:
 //   relay-app-shell@<сборка>          — код, стили, воркеры, звуки: холодный старт без сети;
 //   relay-attachments-auto-evictable  — вложения, подгруженные сами (уходят по сроку, лимиту и при нехватке места);
-//   relay-attachments-saved-by-user   — вложения, скачанные кнопкой (сами не удаляются).
+//   relay-attachments-saved-by-user   — вложения, скачанные кнопкой (сами не удаляются);
+//   relay-stickers                    — файлы стикеров /stk/… (адрес с хэшем содержимого: неизменны, живут между сборками).
 // Сведения о вложениях — в IndexedDB relay-attachments-on-device (mediaCache.ts, attachmentsOnDevice.ts).
 // Остальной API и WebSocket — только сеть.
 import type { AutoCleanupPolicy } from './attachmentsOnDevice';
@@ -16,7 +17,7 @@ const CACHE = CACHE_APP_SHELL_PREFIX + __BUILD__;
 const store = deviceStore();
 declare const __SHELL__: string[];   // код и стили этой сборки с хэшем в имени (build.ts)
 const SHELL = ['/', ...__SHELL__, '/dotlottie-player.wasm', '/sounds/message.mp3', '/sounds/sent.mp3'];   // звуки сообщений — и без сети
-const API = /^\/(health|me|users|contacts|settings|privacy|blocks|chats|presence|search|uploads|files|push|sessions|ws|dev|logout|auth|link-preview|groups|join)(\/|$)/;
+const API = /^\/(health|me|users|contacts|settings|privacy|blocks|chats|presence|search|uploads|files|push|sessions|ws|dev|logout|auth|link-preview|groups|join|sticker-sets|my-stickers|stickers-by-emoji)(\/|$)/;
 
 sw.addEventListener('install', (e) => {
   // мимо HTTP-кэша браузера: новая сборка не должна положить к себе файл прежней
@@ -83,8 +84,32 @@ function networkFirst(req: Request, fallback: () => Promise<Response | undefined
   });
 }
 
+// Стикеры: сначала кэш (файл по адресу не меняется никогда), иначе сеть и в кэш. Предел — по числу файлов:
+// при переполнении уходят самые давно положенные (порядок ключей Cache Storage — порядок добавления).
+const STICKERS_CACHE = 'relay-stickers';
+const STICKERS_MAX = 6000;   // ≈ 60–120 МБ при 10–20 КБ на .tgs
+let stickerPuts = 0;
+async function serveSticker(req: Request): Promise<Response> {
+  const c = await caches.open(STICKERS_CACHE);
+  const hit = await c.match(req);
+  if (hit) return hit;
+  const res = await fetch(req);
+  if (res.ok && res.status === 200) {
+    await c.put(req, res.clone());
+    if (++stickerPuts % 100 === 0) {
+      const keys = await c.keys();
+      for (const k of keys.slice(0, Math.max(0, keys.length - STICKERS_MAX))) await c.delete(k);
+    }
+  }
+  return res;
+}
+
 sw.addEventListener('fetch', (e) => {
   const url = new URL(e.request.url);
+  if (e.request.method === 'GET' && url.origin === location.origin && url.pathname.startsWith('/stk/')) {
+    e.respondWith(serveSticker(e.request).catch(() => Response.error()));
+    return;
+  }
   if (isMediaRequest(e.request, location.origin) && e.request.mode !== 'navigate') {
     e.respondWith(serveMedia(store, e.request, (r) => fetchMedia(r)).then(({ response, background, stored: put }) => {
       if (background) e.waitUntil(background.then(() => { if (put && ++stored % SWEEP_EVERY === 0) return sweep(); }));
