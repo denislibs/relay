@@ -3,7 +3,7 @@
 // под анимацией был один силуэт (с превью кадры совпадают, менять нечего).
 import { h } from 'preact';
 import { useEffect, useRef, useState } from 'preact/hooks';
-import { cx, lazyObserve, reducedMotion } from './kit.js';
+import { cx, lazyObserve, reducedMotion, MsgLine, ForwardTitle, ReplyQuote, ReactionChips, MessageStatus } from './kit.js';
 import { attachSticker } from './lottie/player.js';
 import { lottieAvailable } from './lottie/pool.js';
 import { decodeOutline } from './lottie/outline.js';
@@ -102,4 +102,38 @@ export function StickerView(props) {
         !ready && preview ? h('img', { key: 'p', class: 'rl-sticker-preview', src: preview, alt: '', draggable: false }) : null,
         h('canvas', { key: 'c', ref: canvas, class: 'rl-sticker-canvas', 'aria-hidden': 'true' }),
       ]);
+}
+
+/** Сторона рамки стикера в ленте: 200 px, на узком экране 180 (как в Telegram Web). */
+export const stickerMsgSize = () => (typeof innerWidth === 'number' && innerWidth < 600 ? 180 : 200);
+
+/**
+ * Сообщение-стикер: без пузыря и тени. Время и статус — плашкой в правом нижнем углу; пересылка, автор и ответ —
+ * маленьким пузырём над стикером; реакции — под ним. Клик по стикеру — onOpen (модалка пака).
+ */
+export function StickerBubble(props) {
+  const out = props.from === 'out';
+  const s = props.sticker;
+  const head = props.fwd || props.author || props.reply;
+  return h(MsgLine, { aside: props.aside, class: cx('rl-msgline', out && 'rl-msgline-out', props.groupStart && 'rl-msgline-gap') },
+    h('div', { class: cx('rl-sticker-msg', out ? 'rl-sticker-msg-out' : 'rl-sticker-msg-in', props.appear && (out ? 'rl-appear-out' : 'rl-appear-in')) },
+      head ? h('div', { class: cx('rl-sticker-head', out && 'rl-sticker-head-out') },
+        props.fwd ? h(ForwardTitle, { fwd: props.fwd }) : null,
+        props.author && !props.fwd ? h('span', { class: 'rl-bubble-author', style: { color: 'var(--peer-' + (props.authorTone != null ? props.authorTone : 5) + ')' } }, props.author) : null,
+        props.reply ? h(ReplyQuote, Object.assign({ inBubble: true }, props.reply)) : null) : null,
+      h('div', { class: 'rl-sticker-box' },
+        h(StickerView, { src: s.url, outline: s.outline, w: s.w, h: s.h, size: props.size || stickerMsgSize(), group: 'feed',
+          title: s.emoji ? 'Стикер ' + s.emoji : 'Стикер', onClick: props.onOpen ? (e) => { e.stopPropagation(); props.onOpen(); } : undefined }),
+        h('span', { class: 'rl-media-chip rl-sticker-meta' }, props.time, out ? h(MessageStatus, { status: props.status || 'read' }) : null)),
+      props.reactions && props.reactions.length ? h(ReactionChips, { items: props.reactions, out, onClick: props.onReact }) : null));
+}
+
+/** Миниатюра стикера для цитаты и поиска: у картинки — сам файл, у анимации — силуэт (SVG data:), без загрузок. */
+export function stickerThumb(s) {
+  if (!s) return null;
+  if (s.format === 'webp') return s.url;
+  const path = outlinePath(s.outline);
+  if (!path) return null;
+  const svg = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${s.w || 512} ${s.h || 512}"><path fill="#8a8f94" fill-opacity=".55" d="${path}"/></svg>`;
+  return 'data:image/svg+xml;charset=utf-8,' + encodeURIComponent(svg);
 }

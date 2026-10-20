@@ -28,6 +28,7 @@ export function setStickerGroupExclusive(group) {
 }
 
 export const stickerPolicy = () => ({ ...policy });
+export const stickerGroupExclusive = () => exclusive;
 
 if (typeof window !== 'undefined') {
   const sync = () => {
@@ -126,7 +127,7 @@ class Player {
     }
     if (i !== this.index) this.show(i);
     const next = (i + r.step) % total;
-    r.frame(next).catch(() => {});                              // на шаг вперёд — к следующему тику готов
+    r.prefetch(next);                                          // на шаг вперёд — к следующему тику готов
   }
 
   show(i) {
@@ -136,10 +137,11 @@ class Player {
     r.frame(i).then((bmp) => {
       if (this.closed || this.wanted !== i || !bmp) return;
       requestMutation(() => {
-        if (this.closed || this.wanted !== i) return;
+        if (this.closed || this.wanted !== i || !bmp.width) { r.done(i, bmp); return; }   // ширина 0 — кадр уже освобождён
         this.index = i;
         for (const v of this.views) v.draw(bmp);
         if (!this.shownOnce && i === 0) { this.shownOnce = true; savePreview(this.key, bmp); }
+        r.done(i, bmp);
       });
     }, () => {});
   }
@@ -148,7 +150,7 @@ class Player {
     this.views.add(v);
     if (this.renderer) {
       const bmp = this.renderer.cache.get(this.index);
-      if (bmp) requestMutation(() => v.draw(bmp)); else this.show(this.index);
+      if (bmp) requestMutation(() => { if (bmp.width) v.draw(bmp); }); else this.show(this.index);
     }
     this.update();
   }

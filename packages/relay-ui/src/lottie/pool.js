@@ -56,6 +56,7 @@ class Renderer {
   constructor(key, url, px) {
     this.key = key; this.px = px; this.refs = 1; this.id = nextId++;
     this.cache = new Map();      // i → ImageBitmap
+    this.loose = new Map();      // некэшируемые кадры, отрисованные заранее: отдаются один раз (владелец закрывает)
     this.pending = new Map();    // i → Promise<ImageBitmap>
     this.slot = workerFor(key);
     let resolve, reject;
@@ -69,6 +70,8 @@ class Renderer {
   frame(i) {
     const hit = this.cache.get(i);
     if (hit) return Promise.resolve(hit);
+    const ahead = this.loose.get(i);
+    if (ahead) { this.loose.delete(i); return Promise.resolve(ahead); }
     const inflight = this.pending.get(i);
     if (inflight) return inflight;
     const slot = this.slot.waiting.get(this.id);
@@ -83,13 +86,35 @@ class Renderer {
     return p;
   }
 
+  /** Отрисовать заранее (следующий кадр): кэшируемый ляжет в кэш, остальной — в «заготовку» до первого запроса. */
+  prefetch(i) {
+    if (this.cache.has(i) || this.loose.has(i) || this.pending.has(i)) return;
+    this.frame(i).then((bmp) => {
+      if (!bmp || this.cache.get(i) === bmp) return;
+      if (this.refs <= 0) { bmp.close?.(); return; }
+      this.loose.set(i, bmp);
+      while (this.loose.size > 2) { const [k, b] = this.loose.entries().next().value; this.loose.delete(k); b.close?.(); }
+    }, () => {});
+  }
+
+  /** Владелец закончил с кадром: некэшированный — освободить. */
+  done(i, bmp) {
+    if (!bmp || this.cache.get(i) === bmp) return;
+    if (this.loose.get(i) === bmp) this.loose.delete(i);   // показали заготовку раньше, чем её взяли
+    bmp.close?.();
+  }
+
   /** Пауза: оставить в памяти только показанный кадр. */
   trim(keep) {
     for (const [i, bmp] of this.cache) if (i !== keep) { bmp.close?.(); this.cache.delete(i); }
   }
 
   /** Ушёл из вида: кадры больше не нужны. */
-  drop() { this.trim(-1); }
+  drop() {
+    this.trim(-1);
+    for (const b of this.loose.values()) b.close?.();
+    this.loose.clear();
+  }
 
   release() {
     if (--this.refs > 0) return;

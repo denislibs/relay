@@ -2305,3 +2305,11 @@ html[data-blur="0"] .rl-menu { -webkit-backdrop-filter: none; backdrop-filter: n
 .rl-sticker-ready .rl-sticker-canvas { opacity: 1; }
 .rl-sticker-fade .rl-sticker-canvas, .rl-sticker-fade .rl-sticker-static { animation: rl-fade var(--dur-base, 200ms) var(--ease-out, ease-out); }
 .rl-sticker[role="button"] { cursor: pointer; }
+.rl-sticker-msg { display: flex; flex-direction: column; align-items: flex-start; gap: 4px; max-width: min(80%, 420px); }
+.rl-sticker-msg-out { align-items: flex-end; }
+.rl-sticker-head { max-width: 100%; padding: 6px 8px; border-radius: var(--radius-bubble); background: var(--bubble-in); box-shadow: var(--shadow-bubble); font: 400 14px/18px var(--font-sans); }
+.rl-sticker-head-out { background: var(--bubble-out); }
+.rl-sticker-head .rl-quote-in { margin: 0; }
+.rl-sticker-box { position: relative; line-height: 0; }
+.rl-sticker-meta { right: 0; bottom: 0; }
+.rl-sticker-msg .rl-reacts { margin-top: 0; }

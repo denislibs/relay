@@ -1035,3 +1035,26 @@ html[data-anim="0"] .app-chatcol, html[data-anim="0"] .app-chatcol-below, html[d
 /* светлая картинка не сливается с фоном: тонкая внутренняя рамка держит форму плитки */
 .app-sm-thumb { position: relative; }
 .app-sm-thumb::after { content: ''; position: absolute; inset: 0; border-radius: inherit; box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--ink) 9%, transparent); pointer-events: none; }
+
+/* ---------- Модалка стикерпака ---------- */
+.app-stkset-body { padding: 0 !important; overflow: hidden !important; display: flex; }
+.app-stkset-wrap { position: relative; flex: 1; min-width: 0; display: flex; flex-direction: column; height: min(600px, calc(100vh - 160px)); }
+.app-stkset-grid { flex: 1; min-height: 0; align-content: start; }
+.app-stkset-head { display: flex; align-items: center; gap: 8px; padding: 8px 8px 8px 8px; }
+.app-stkset-head h2 { flex: 1; margin: 0 0 0 8px; font: 600 20px/26px var(--font-sans); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.app-stkset-gap { width: 40px; }
+.app-stkset-grid { display: grid; grid-template-columns: repeat(5, 1fr); gap: 4px; padding: 4px 12px 88px; overflow-y: auto; overscroll-behavior: contain; }
+.app-stkset-cell { display: flex; align-items: center; justify-content: center; aspect-ratio: 1; border-radius: 12px; }
+.app-stkset-cell:hover { background: var(--hover, rgba(127,127,127,.08)); }
+.app-stkset-pill { position: absolute; left: 16px; right: 16px; bottom: 16px; height: 50px; border: 0; border-radius: 25px; background: var(--brand-strong); color: #fff; font: 600 15px/1 var(--font-sans); letter-spacing: .02em; box-shadow: 0 4px 16px rgba(0,0,0,.18); cursor: pointer; transition: transform var(--dur-fast) var(--ease-out), opacity var(--dur-fast); }
+.app-stkset-pill:active { transform: scale(.98); }
+.app-stkset-pill:disabled { opacity: .6; cursor: default; }
+.app-stkset-pill-danger { background: var(--bg, #fff); color: var(--danger, #e53935); }
+.app-stkset-empty { display: flex; gap: 8px; align-items: center; padding: 24px; color: var(--ink-muted); }
+@media (max-width: 600px) { .app-stkset-grid { grid-template-columns: repeat(4, 1fr); } }
+
+/* ---------- Удержание: крупный просмотр стикера ---------- */
+.app-stkhold { display: contents; }
+.app-stkview { position: fixed; inset: 0; z-index: 2000; display: flex; align-items: center; justify-content: center; background: rgba(0,0,0,.25); -webkit-backdrop-filter: blur(6px); backdrop-filter: blur(6px); animation: rl-fade 200ms var(--ease-out); pointer-events: none; }
+.app-stkview-card { display: flex; flex-direction: column; align-items: center; gap: 12px; animation: rl-modal-in 200ms var(--ease-out); }
+.app-stkview-emoji { font-size: 32px; line-height: 1; }

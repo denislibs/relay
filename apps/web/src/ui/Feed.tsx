@@ -3,7 +3,9 @@ import type { ServiceData, ServiceType } from '@relay/protocol';
 import type { Item } from '@relay/sync-engine/src/types';
 import { senderAvatar } from '../profilePhoto';
 import type { Entity, MessageButton, Todo } from '@relay/protocol';
-import { MediaPolicy, ArticleBlocks, Avatar, Bubble, Icon, peerTone, DateDivider, DatePicker, FileBubble, MediaBubble, MessageText, VoiceBubble, MusicBubble, RoundBubble, player, MediaViewer, ScrollToBottom, beginHeavyAnimation, forceMeasure, isHeavyAnimating, onHeavyAnimationEnd, requestMeasure, requestMutation, selectionValue, TodoBubble, InlineKeyboard } from '@relay/ui';
+import { MediaPolicy, ArticleBlocks, Avatar, Bubble, Icon, peerTone, DateDivider, DatePicker, FileBubble, MediaBubble, MessageText, VoiceBubble, MusicBubble, RoundBubble, player, MediaViewer, ScrollToBottom, beginHeavyAnimation, forceMeasure, isHeavyAnimating, onHeavyAnimationEnd, requestMeasure, requestMutation, selectionValue, TodoBubble, InlineKeyboard, StickerBubble } from '@relay/ui';
+import { openStickerSet } from '../stickers';
+import type { StickerRef } from '@relay/protocol';
 import type { QuoteMsg } from '@relay/sync-engine/src/types';
 import { quoteContent } from './preview';
 import { memo } from 'preact/compat';
@@ -236,6 +238,23 @@ const Row = memo(function Row({ chatId, voiceTitle, author, onAuthor, onOpen, hl
           onCancel={m.id == null && out ? () => discardUnsent(m.key as string) : undefined}
           onRetry={() => retrySend(m.key as string)}
           time={clock(m.createdAt as string)} status={out ? m.status : undefined}
+        />
+        {mark}
+      </div>
+    );
+  }
+  if (m.kind === 'sticker' && m.sticker && !m.deleted) {
+    // стикер — без пузыря (как в Telegram): ответ и автор — маленьким пузырём над ним, клик — модалка пака
+    const st = m.sticker as StickerRef;
+    return (
+      <div class={wrap('app-msg app-msg-sticker')} data-key={m.key} data-sort={m.sort as number}>
+        {check}
+        <StickerBubble
+          from={out ? 'out' : 'in'} groupStart={start} appear={appear} aside={aside} fwd={fwd} reply={replyQ}
+          author={author} authorTone={author ? peerTone(m.senderId as number) : undefined}
+          sticker={st} time={clock(m.createdAt as string)} status={out ? m.status : undefined}
+          reactions={chips.length ? chips : undefined} onReact={(emoji: string) => onReact(m, emoji)}
+          onOpen={sel === undefined ? () => openStickerSet(st.setId) : undefined}
         />
         {mark}
       </div>

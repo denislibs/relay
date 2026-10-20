@@ -3,7 +3,7 @@ import type { ServiceData, ServiceType } from '@relay/protocol';
 import { getGlobal } from '../global';
 import { personName } from '../people';
 import { SPOILER_FILL } from '@relay/protocol';
-import { SpoilerText } from '@relay/ui';
+import { SpoilerText, stickerThumb } from '@relay/ui';
 import type { ComponentChildren } from 'preact';
 import { hideCode } from './format';
 
@@ -14,6 +14,7 @@ type Ent = { type: string; offset: number; length: number };
 export type LastMessage = {
   senderId: number; body: string; deleted?: boolean; kind?: string; attachmentId?: string | null; attachmentName?: string | null; attachmentTitle?: string | null; attachmentPerformer?: string | null;
   entities?: Ent[] | null; thumb?: string | null; mime?: string | null; service?: { type: string } | null;
+  stickerEmoji?: string | null;
 };
 
 /** Сообщение ленты (вложение — объектом) → формат превью списка чатов (поля вложения — плоско). */
@@ -24,6 +25,7 @@ export function asLast(m: Record<string, unknown>): LastMessage {
     attachmentId: a?.id || null, attachmentName: a?.name ?? null, attachmentTitle: a?.title ?? null, attachmentPerformer: a?.performer ?? null,
     entities: (m.entities as LastMessage['entities']) ?? null, thumb: a?.thumb ?? null, mime: a?.mime ?? null,
     service: (m.service as LastMessage['service']) ?? null,
+    stickerEmoji: (m.sticker as { emoji?: string } | null | undefined)?.emoji ?? null,
   };
 }
 
@@ -84,6 +86,7 @@ export function previewBody(m: LastMessage, withThumb: boolean): ComponentChildr
   if (m.kind === 'video') return withThumb ? caption ?? 'Видео' : ['📹 ', caption ?? 'Видео'];
   if (m.kind === 'voice') return caption ?? '🎤 Голосовое сообщение';
   if (m.kind === 'todo') return ['☑️ ', m.body];
+  if (m.kind === 'sticker') return (m.stickerEmoji ? m.stickerEmoji + ' ' : '') + 'Стикер';
   if (m.kind === 'round') return withThumb ? 'Видеосообщение' : '📹 Видеосообщение';
   if (m.kind === 'audio') {
     // «Название — исполнитель»; с обложкой эмодзи не нужен
@@ -110,6 +113,10 @@ export function quoteContent(m: Record<string, unknown>): { text: ComponentChild
   else if (last.kind === 'voice' && !last.body) text = '🎤 Голосовое сообщение' + len;
   else if (last.kind === 'round' && !last.body) text = 'Видеосообщение' + len;
   else if (last.kind === 'video' && !last.body) text = (thumb ? 'Видео' : '📹 Видео') + len;
+  else if (last.kind === 'sticker') {
+    const thumbSrc = stickerThumb(m.sticker as Parameters<typeof stickerThumb>[0]);
+    return { text: previewBody(last, false), ...(thumbSrc ? { thumbSrc } : {}) };
+  }
   else if (last.kind === 'todo') text = ['☑️ ', ((m.todo ?? null) as { title?: string } | null)?.title || last.body || 'Чек-лист'];
   else if ((m.article || (Array.isArray(m.blocks) && m.blocks.length)) && !last.body) text = '📰 Статья';
   else text = previewBody(last, !!thumb) || 'Сообщение';
