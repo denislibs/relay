@@ -1,5 +1,5 @@
 import { expect, test } from 'bun:test';
-import { dbRowsLabel, formatBytes, MEDIA_CACHE } from './storageInfo';
+import { dbRowsLabel, formatBytes, MEDIA_CACHE, within } from './storageInfo';
 
 test('formatBytes', () => {
   expect(formatBytes(0)).toBe('0 Б');
@@ -17,4 +17,10 @@ test('dbRowsLabel', () => {
   expect(dbRowsLabel({ messages: 1, chats: 1 })).toBe('1 сообщение в 1 чате');
   expect(dbRowsLabel({ messages: 3, chats: 12 })).toBe('3 сообщения в 12 чатах');
   expect(dbRowsLabel({ messages: 0, chats: 0 })).toBe('0 сообщений в 0 чатах');
+});
+
+test('within: the answer if in time, undefined on timeout or failure', async () => {
+  expect(await within(Promise.resolve(5), 50)).toBe(5);
+  expect(await within(new Promise(() => {}), 20)).toBeUndefined();
+  expect(await within(Promise.reject(new Error('x')), 50)).toBeUndefined();
 });

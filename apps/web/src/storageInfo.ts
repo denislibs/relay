@@ -21,6 +21,14 @@ export function dbRowsLabel(rows: Record<string, number> | null | undefined): st
 }
 
 /** exact: браузер разделил IndexedDB и кэши (usageDetails); иначе db — «всё остальное». approx: у части записей кэша нет длины. */
+/** Ответ не дольше ms: зависший воркер не задерживает строку размера (undefined — не дождались или отказ). */
+export function within<T>(p: Promise<T>, ms: number): Promise<T | undefined> {
+  return new Promise((res) => {
+    const t = setTimeout(() => res(undefined), ms);
+    p.then((v) => { clearTimeout(t); res(v); }, () => { clearTimeout(t); res(undefined); });
+  });
+}
+
 export interface StorageInfo { used: number; quota: number; db: number; media: number; exact: boolean; approx: boolean; files?: number; rows?: Record<string, number> }
 
 async function mediaCaches(): Promise<Cache[]> {

@@ -5,13 +5,15 @@ import { useGlobal } from '../../global';
 import { back, go } from '../../nav';
 import { CACHE_MB, defaultPrefs, KEEP_DAYS, setPref, setPrefs } from '../../prefs';
 import { getPendingOps, resetLocal, showToast, storageStats } from '../../settingsData';
-import { clearMediaCaches, dbRowsLabel, formatBytes, plural, readStorage, type StorageInfo } from '../../storageInfo';
+import { clearMediaCaches, dbRowsLabel, formatBytes, plural, readStorage, within, type StorageInfo } from '../../storageInfo';
 import { useScrollMemory } from '../useScrollMemory';
 import { clearLocalDialog } from './clearLocal';
 
 const KEEP_LABEL: Record<number, string> = { 1: '1 день', 7: '1 неделя', 30: '1 месяц', 0: 'Всегда' };
 const KEEP_MARK: Record<number, string> = { 1: '1 д', 7: '1 нед', 30: '1 мес', 0: '∞' };
 const filesLabel = (n: number) => `${n} ${plural(n, 'файл', 'файла', 'файлов')}`;
+/** Сколько ждём строки базы от воркера: дольше — строка размера без них (прежние строки остаются). */
+const ROWS_WAIT_MS = 600;
 const mbLabel = (mb: number) => (mb === 0 ? 'Без лимита' : mb >= 1000 ? `${mb / 1000} ГБ` : `${mb} МБ`);
 
 const KINDS: [MediaKind, string, string, 'blue' | 'orange' | 'purple'][] = [
@@ -38,7 +40,7 @@ export function Data() {
 
   // размер и строки базы приходят вместе — строка списка появляется сразу целой; прежние строки держим до нового ответа
   const recompute = () => {
-    void Promise.all([readStorage(), storageStats().then((s) => s.rows).catch(() => undefined)])
+    void Promise.all([readStorage(), within(storageStats().then((s) => s.rows), ROWS_WAIT_MS)])
       .then(([i, rows]) => { if (alive.current) setInfo((prev) => ({ ...i, rows: rows ?? prev?.rows })); })
       .catch(() => { if (alive.current) setInfo((prev) => ({ used: 0, quota: 0, db: 0, media: 0, exact: false, approx: false, rows: prev?.rows })); });
   };
