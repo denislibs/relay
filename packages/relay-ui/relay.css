@@ -2193,11 +2193,17 @@ html[data-blur="0"] .rl-menu { -webkit-backdrop-filter: none; backdrop-filter: n
 @supports (corner-shape: squircle) {
   :root { --sq: 1.6; }
   .rl-sect-card, .rl-settings-group, .rl-aside-group, .rl-banner, .rl-toast { corner-shape: squircle; border-radius: calc(var(--radius-lg) * var(--sq)); }
-  .rl-sidecard, .rl-frail, .rl-glassbar, .rl-shell-aside > .rl-panel, .rl-shell .rl-composer-field, .rl-shell .rl-selbar, .rl-shell .rl-csearch, .rl-shell .rl-recorder .rl-rec-body {
+  /* правая колонка: и карточка, и сам aside — на узком экране тень и радиус у него, форма должна совпадать */
+  .rl-sidecard, .rl-frail, .rl-glassbar, .rl-shell-aside, .rl-shell-aside > .rl-panel, .rl-shell .rl-composer-field, .rl-shell .rl-selbar, .rl-shell .rl-csearch, .rl-shell .rl-recorder .rl-rec-body {
     corner-shape: squircle; border-radius: calc(var(--radius-panel) * var(--sq)); }
   .rl-card { corner-shape: squircle; border-radius: calc(var(--radius-xxl) * var(--sq)); }
   .rl-tabs { corner-shape: squircle; border-radius: calc(24px * var(--sq)); }
   .rl-menu { corner-shape: squircle; border-radius: calc(14px * var(--sq)); }
-  /* строки внутри острова: подсветка повторяет форму угла */
-  .rl-sect-card :is(.rl-inforow, .rl-optrow, .rl-selrow), .rl-aside-group .rl-inforow { corner-shape: squircle; }
+  /* строки списков (как ListItem в Telegram): подсветка строки чата и строк настроек — той же формы */
+  .rl-row { corner-shape: squircle; border-radius: calc(var(--radius-lg) * var(--sq)); }
+  .rl-sidecard .rl-row { border-radius: calc(var(--radius-md) * var(--sq)); }
+  .rl-settings .rl-inforow, .rl-aside-group .rl-inforow { corner-shape: squircle; border-radius: calc(var(--radius-md) * var(--sq)); }
+  .rl-sect-card :is(.rl-inforow, .rl-optrow, .rl-selrow) { corner-shape: squircle; border-radius: calc((var(--radius-lg) - var(--space-2)) * var(--sq)); }
+  /* модальные окна: радиус и так большой — увеличиваем меньше */
+  .rl-mdl-dialog { corner-shape: squircle; border-radius: calc(2rem * 1.3); }
 }

@@ -704,6 +704,7 @@ html[data-anim="0"] .app-chatcol, html[data-anim="0"] .app-chatcol-below, html[d
 /* как блок «Уведомления» выше: белая карточка со скруглением и лёгкой тенью */
 .app-members { display: flex; flex-direction: column; margin: var(--space-2) var(--space-3) var(--space-3); padding: var(--space-2); border-radius: var(--radius-lg); background: var(--raised); box-shadow: var(--tg-shadow-bubble, 0 1px 2px rgba(0,0,0,.1)); }
 .app-members .rl-row { border-radius: var(--radius-md); }
+@supports (corner-shape: squircle) { .app-members .rl-row { border-radius: calc(var(--radius-md) * 1.6); } }
 .app-member:disabled:hover { background: transparent; }   /* своя строка не кликается — без подсветки */
 .rl-row-preview.app-online { color: var(--brand-text); }
 .app-member { width: 100%; border: 0; background: none; text-align: left; cursor: pointer; }
