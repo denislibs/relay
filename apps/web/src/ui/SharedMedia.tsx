@@ -1,13 +1,13 @@
-import { Avatar, EmptyState, FolderTabs, Icon, LazyImage, lazyObserve, MediaViewer, peerTone, player, reducedMotion, SlideStack } from '@relay/ui';
+import { Avatar, EmptyState, FolderTabs, Icon, LazyImage, lazyObserve, MediaViewer, peerTone, player, reducedMotion, SlideStack, WindowList } from '@relay/ui';
 import { offlineUrlNow } from '../downloads';
 import { LinkTile, linkInfo } from './linkTile';
 import { avatarPhoto, userPhoto } from '../profilePhoto';
 import { senderAvatar } from '../profilePhoto';
 import type { Item } from '@relay/sync-engine/src/types';
-import { useEffect, useRef, useState } from 'preact/hooks';
+import { useEffect, useLayoutEffect, useRef, useState } from 'preact/hooks';
 import { focusMessage, type MediaTab } from '../data';
 import { useMedia } from '../mediaTab';
-import { animateScroll, tabLabel, tabScrollTarget, tileSrc, videoFrameSrc, type SharedTab } from '../mediaGrid';
+import { animateScroll, gridCorners, gridMetrics, gridRows, GRID_COLS, tabLabel, tabScrollTarget, tileSrc, videoFrameSrc, type SharedTab } from '../mediaGrid';
 import { getGlobal, useGlobal } from '../global';
 import { toggleMusic, trackTitle } from '../music';
 import { clock, dayLabel, fileSize, lastSeenText } from './format';
@@ -115,11 +115,12 @@ function TabList({ chatId, tab }: { chatId: number; tab: MediaTab }) {
   if (!items.length && loading) return <div class="app-sm-loading" aria-busy="true" />;
   const photos = tab === 'media' ? items.filter((m) => !m.attachment!.mime.startsWith('video/')) : [];
   const open = (m: Msg) => { const k = photos.indexOf(m); if (k >= 0) setViewer(k); else show(m); };
-  const list = tab === 'media' ? (
-    <div class="app-media-grid" ref={grid}>{items.map((m) => <MediaCell key={m.id} m={m} onOpen={open} />)}</div>
-  ) : (
+  // длинные вкладки — виртуальные (WindowList ищет прокрутку панели): в DOM только видимые строки и запас;
+  // высота списка — все строки сразу, поэтому догрузка в конец не сдвигает прокрутку
+  const list = tab === 'media' ? <MediaGrid items={items} onOpen={open} host={grid} /> : (
     <div class="app-sm-list">
-      {items.map((m) => tab === 'file' ? <FileRow key={m.id} m={m} /> : tab === 'link' ? <LinkRow key={m.id} m={m} /> : <TrackRow key={m.id} m={m} chatId={chatId} items={items} />)}
+      <WindowList items={items} rowHeight={tab === 'link' ? LINK_ROW : SM_ROW} overscan={6} getKey={(m: Msg) => m.id}
+        render={(m: Msg) => tab === 'file' ? <FileRow m={m} /> : tab === 'link' ? <LinkRow m={m} /> : <TrackRow m={m} chatId={chatId} items={items} />} />
     </div>
   );
   return <>{list}{!done ? <div ref={end} class="app-sm-more" /> : null}
@@ -133,7 +134,42 @@ function TabList({ chatId, tab }: { chatId: number; tab: MediaTab }) {
   </>;
 }
 
-export function MediaCell({ m, onOpen }: { m: Msg; onOpen: (m: Msg) => void }) {
+/** Шаг строки списка вкладки (строка + зазор 4 px под ней): файлы, музыка, голосовые — 60, ссылки — 72 (описание в одну строку). */
+const SM_ROW = 64, LINK_ROW = 76;
+/** Строка участника — высота строки списка чатов (--size-row). */
+const MEMBER_ROW = 72;
+/** Ширина сетки с прошлого показа: повторное открытие вкладки рисует строки сразу, без пустого кадра. */
+let gridWidth = 0;
+
+/** «Медиа»: квадраты по 3 в ряд через 1 px; виртуальный список строк, высота строки — от ширины сетки. */
+function MediaGrid({ items, onOpen, host }: { items: Msg[]; onOpen: (m: Msg) => void; host: { current: HTMLDivElement | null } }) {
+  const [w, setW] = useState(gridWidth);
+  useLayoutEffect(() => {
+    const el = host.current;
+    if (!el) return;
+    const put = (x: number) => { if (x > 0) { gridWidth = x; setW((p) => (Math.abs(p - x) < 0.5 ? p : x)); } };
+    put(el.clientWidth);
+    if (typeof ResizeObserver !== 'function') return;
+    const ro = new ResizeObserver((e) => put(e[0].contentRect.width));
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, []);
+  const { cell, row } = gridMetrics(w);
+  const n = items.length;
+  return (
+    <div class="app-media-vgrid" ref={host}>
+      {row ? <WindowList items={gridRows(items, GRID_COLS)} rowHeight={row} overscan={4} getKey={(_r: Msg[], i: number) => i}
+        render={(r: Msg[], i: number) => (
+          <div class="app-media-row" style={{ height: cell + 'px' }}>
+            {r.map((m, j) => <MediaCell key={m.id} m={m} onOpen={onOpen} corners={gridCorners(i * GRID_COLS + j, n)} />)}
+          </div>
+        )} /> : null}
+    </div>
+  );
+}
+
+/** corners — какие углы скруглить (tl tr bl br): в виртуальной сетке :nth-child не знает соседей. */
+export function MediaCell({ m, onOpen, corners }: { m: Msg; onOpen: (m: Msg) => void; corners?: string }) {
   const a = m.attachment!;
   const video = a.mime.startsWith('video/');
   // видео без кадра-превью: первый кадр и длительность — из метаданных самого файла (как в Telegram)
@@ -146,7 +182,7 @@ export function MediaCell({ m, onOpen }: { m: Msg; onOpen: (m: Msg) => void }) {
   const bare = video && !a.thumb;
   useEffect(() => { if (!bare || near || !box.current) return; return lazyObserve(box.current, () => setNear(true)); }, [bare]);
   return (
-    <button type="button" class="app-media-cell" data-mid={m.id} aria-label={a.name} onClick={() => onOpen(m)}>
+    <button type="button" class={'app-media-cell' + (corners ? ' ' + corners.split(' ').map((c) => 'is-' + c).join(' ') : '')} data-mid={m.id} aria-label={a.name} onClick={() => onOpen(m)}>
       {!bare ? <LazyImage src={video ? '' : tileSrc(a)} thumb={a.thumb ?? undefined} alt={a.name} /> : (
         <span class="app-media-video" ref={box}>
           {near ? <video class={'app-media-frame' + (frame ? ' app-media-frame-in' : '')} src={videoFrameSrc(a)} preload="metadata" muted playsInline tabIndex={-1} aria-hidden="true"
@@ -189,7 +225,7 @@ function LinkRow({ m }: { m: Msg }) {
   // превью страницы (картинка, заголовок, описание) — если загружено; иначе сайт и текст сообщения без ссылки
   const info = linkInfo(m, raw, host);
   return (
-    <div class="app-sm-row">
+    <div class="app-sm-row app-sm-row-link">
       <LinkTile photo={info.photo} host={host} />
       <div class="app-sm-text">
         <button type="button" class="app-sm-title app-sm-plain" onClick={() => show(m)}>{info.title}</button>
@@ -253,7 +289,8 @@ function senderTitle(senderId: number, me: number | undefined, chat: Item | unde
   return chat?.kind === 'group' ? `${name} → ${chatTitle}` : name;
 }
 
-/** Участники группы — как в Telegram: аватар, имя, статус (в сети — цветом), «владелец» справа; клик — личный чат. */
+/** Участники группы — как в Telegram: аватар, имя, статус (в сети — цветом), «владелец» справа; клик — личный чат.
+ *  Список виртуальный: в большой группе в DOM только видимые строки. */
 function MembersList({ data }: { data: { ownerId: number | null; members: Member[] } | null }) {
   const me = useGlobal((s) => s.me?.userId);
   // у участника без фото в ответе аватарка — из userPhoto: просим его в people
@@ -261,12 +298,12 @@ function MembersList({ data }: { data: { ownerId: number | null; members: Member
   useEffect(() => { if (bare) wantPeople(bare.split(',').map(Number)); }, [bare]);
   if (!data) return <div class="app-sm-loading" aria-busy="true" />;
   return (
-    <div class="app-members" role="list" aria-label="Участники">
-      {data.members.map((m) => {
+    <div class="app-members">
+      <WindowList items={data.members} rowHeight={MEMBER_ROW} overscan={6} role="list" getKey={(m: Member) => m.userId} render={(m: Member) => {
         const self = m.userId === me;
         const status = self ? 'в сети' : lastSeenText(!!m.online, m.lastSeen);
         return (
-          <button key={m.userId} type="button" role="listitem" class="rl-row app-member" disabled={self} onClick={() => void startDirectChat(m.userId)}>
+          <button type="button" role="listitem" class="rl-row app-member" disabled={self} onClick={() => void startDirectChat(m.userId)}>
             <Avatar name={m.name} tone={peerTone(m.userId)} size={44} online={!!m.online && !self} {...(self ? senderAvatar(m.userId) : avatarPhoto(m.photo ?? userPhoto(m.userId)))} />
             <span class="rl-row-main">
               <span class="app-member-top"><span class="rl-row-name">{self ? m.name + ' (вы)' : m.name}</span>{m.rank || m.userId === data.ownerId || m.role === 'admin' ? <span class="app-member-badge">{m.rank || (m.userId === data.ownerId ? 'владелец' : 'админ')}</span> : null}</span>
@@ -274,7 +311,7 @@ function MembersList({ data }: { data: { ownerId: number | null; members: Member
             </span>
           </button>
         );
-      })}
+      }} />
     </div>
   );
 }

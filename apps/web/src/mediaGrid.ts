@@ -52,3 +52,30 @@ export function animateScroll(el: HTMLElement, top: number, ms: number, instant:
   raf = requestAnimationFrame(step);
   return stop;
 }
+
+/** Сетка «Медиа» в виртуальном списке: строки по cols плиток (последняя может быть короче). */
+export function gridRows<T>(items: T[], cols: number): T[][] {
+  const rows: T[][] = [];
+  for (let i = 0; i < items.length; i += cols) rows.push(items.slice(i, i + cols));
+  return rows;
+}
+
+export const GRID_COLS = 3, GRID_GAP = 1;
+/** Квадратная плитка по ширине сетки (3 в ряд через 1 px); row — шаг строки вместе с зазором под ней. */
+export function gridMetrics(width: number): { cell: number; row: number } {
+  if (width <= 0) return { cell: 0, row: 0 };
+  const cell = (width - GRID_GAP * (GRID_COLS - 1)) / GRID_COLS;
+  return { cell, row: cell + GRID_GAP };
+}
+
+/** Скруглённые углы плитки i из n — только внешние углы всей сетки (как в Telegram), как это делали
+ *  :nth-child у обычной CSS-сетки: tl, tr, bl, br через пробел. */
+export function gridCorners(i: number, n: number): string {
+  const last = i === n - 1, tail = i >= n - GRID_COLS, col = i % GRID_COLS;
+  const out: string[] = [];
+  if (i === 0) out.push('tl');
+  if (i === GRID_COLS - 1 || (last && i < GRID_COLS - 1)) out.push('tr');
+  if (col === 0 && tail) out.push('bl');
+  if (last || (col === GRID_COLS - 1 && tail)) out.push('br');
+  return out.join(' ');
+}

@@ -85,6 +85,16 @@ body { background: var(--bg); color: var(--ink); font-family: var(--font-sans); 
 .app-media-grid > :nth-child(3n+1):nth-last-child(-n+3) { border-bottom-left-radius: 14px; }
 .app-media-grid > :last-child, .app-media-grid > :nth-child(3n):nth-last-child(-n+3) { border-bottom-right-radius: 14px; }
 .app-media-cell { position: relative; aspect-ratio: 1; padding: 0; border: 0; overflow: hidden; cursor: pointer; background: var(--field); }
+/* «Медиа» в правой панели — виртуальная сетка (WindowList): строки по 3 плитки, в DOM только видимые.
+   Строки не «едут» (новые плитки сверху, смена ширины панели) — сдвиг мгновенный; углы — классами от позиции */
+.app-media-vgrid { margin: 0 var(--space-3) var(--space-4); }
+.app-media-vgrid .rl-wrow { transition: none; will-change: auto; }
+.app-media-row { display: grid; grid-template-columns: repeat(3, 1fr); gap: 1px; }
+.app-media-row .app-media-cell { aspect-ratio: auto; height: 100%; }
+.app-media-cell.is-tl { border-top-left-radius: 14px; }
+.app-media-cell.is-tr { border-top-right-radius: 14px; }
+.app-media-cell.is-bl { border-bottom-left-radius: 14px; }
+.app-media-cell.is-br { border-bottom-right-radius: 14px; }
 
 /* страница настроек: меню ⋮ и тост «Скопировано» */
 .app-toast { position: absolute; left: 0; right: 0; bottom: 16px; z-index: 41; display: flex; justify-content: center; pointer-events: none; }
@@ -635,6 +645,11 @@ html[data-anim="0"] .app-chatcol, html[data-anim="0"] .app-chatcol-below, html[d
 .app-media-frame-in { opacity: 1; }
 .app-sm-heading { margin: var(--space-3) var(--space-3) var(--space-2); padding: 0 var(--space-3); font: 500 15px/20px var(--font-sans); color: var(--brand-text, var(--brand-strong)); }
 .app-sm-more { height: 1px; }
+/* строки вкладок в виртуальном списке — фиксированной высоты (шаг строки в SharedMedia.tsx: высота + зазор 4 px) */
+.app-sm-list > .rl-wlist { margin-bottom: -4px; }   /* зазор под последней строкой — не лишний отступ карточки */
+.app-sm-list .rl-wrow > .app-sm-row { height: 60px; }
+.app-sm-list .rl-wrow > .app-sm-row-link { height: 72px; }
+.app-sm-row-link .app-sm-desc { -webkit-line-clamp: 1; }
 
 /* Музыка профиля: плашка поверх низа аватара */
 .app-prof-ava { position: relative; display: inline-flex; justify-content: center; }
