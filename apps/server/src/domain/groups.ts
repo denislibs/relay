@@ -98,7 +98,7 @@ export async function setGroupPhoto(userId: number, chatId: number, body: unknow
     const bad = () => new DomainError('photo_invalid');
     if (typeof id !== 'string' || typeof small !== 'string' || id === small || !UUID.test(id) || !UUID.test(small)) throw bad();
     if (typeof thumb !== 'string' || !THUMB.test(thumb)) throw bad();
-    const rows = await sql`select id, width, height, mime from attachments where id = any(${[id, small]}::uuid[]) and owner_id = ${userId} and status = 'ready'`;
+    const rows = await sql`select id, width, height, mime from attachments where enc = 0 and id = any(${[id, small]}::uuid[]) and owner_id = ${userId} and status = 'ready'`;
     const side = (x: string) => { const r = rows.find((a) => a.id === x); return r && /^image\//.test(r.mime as string) && r.width === r.height ? Number(r.width) : 0; };
     const b = side(id), s = side(small);
     if (b < 160 || b > 1280 || s < 48 || s > 320) throw bad();

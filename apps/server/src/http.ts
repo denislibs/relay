@@ -234,14 +234,16 @@ export function createServer(opts: { port: number }): Server {
           try { return Response.json(await body); } catch (e) { devStatsCache.delete(userId); throw e; }
         }
         if (req.method === 'POST' && url.pathname === '/uploads') {
-          // шаг 1: {name, mime, size, w?, h?, kind?, duration?, waveform?, title?, performer?} → подписанный PUT; сам файл идёт мимо сервера
+          // шаг 1: {name, mime, size, w?, h?, kind?, duration?, waveform?, title?, performer?, enc?, key?} → подписанный PUT; сам файл идёт мимо сервера
           // (размеры фото считает клиент, он его уже декодировал; волну и длительность голосового — записывающий клиент)
           const b = (await req.json().catch(() => null)) as Record<string, unknown> | null;
           if (!b || typeof b !== 'object') return fail('bad_frame');
           const num = (v: unknown) => (typeof v === 'number' && Number.isFinite(v) && v > 0 ? v : undefined);
           const str = (v: unknown) => (typeof v === 'string' ? v : undefined);
           return Response.json(await createUpload(userId, { mime: str(b.mime) ?? '', name: str(b.name) ?? 'file', size: typeof b.size === 'number' ? b.size : NaN,
-            w: num(b.w), h: num(b.h), kind: str(b.kind), duration: num(b.duration), waveform: str(b.waveform), title: str(b.title), performer: str(b.performer) }));
+            w: num(b.w), h: num(b.h), kind: str(b.kind), duration: num(b.duration), waveform: str(b.waveform), title: str(b.title), performer: str(b.performer),
+            // зашифрован на клиенте: enc 1 и ключ файла (base64) — сервер хранит его завёрнутым KMS
+            ...(b.enc === 1 ? { enc: 1, key: str(b.key) } : {}) }));
         }
         // большой файл частями: {parts:[n…]} → подписанные PUT на части; GET — какие части уже приняты; DELETE — отмена
         const parts = /^\/uploads\/([0-9a-f-]{36})\/parts$/.exec(url.pathname);

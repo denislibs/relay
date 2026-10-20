@@ -11,8 +11,8 @@ import { sql, type Tx } from '../db';
 import { CryptoError, keyVersionOf, open, seal } from '../crypto/aead';
 import { chatKey, currentChatKey } from '../crypto/chatKeys';
 
-/** Текстовые поля вложения — в шифр; остальное (id, kind, mime, size, w, h, duration…) — открыто. */
-const ATTACHMENT_TEXT = ['name', 'title', 'performer', 'thumb'] as const;
+/** Текстовые поля вложения и ключ файла — в шифр; остальное (id, kind, mime, size, w, h, duration, enc…) — открыто. */
+const ATTACHMENT_TEXT = ['name', 'title', 'performer', 'thumb', 'key'] as const;
 
 export interface Content {
   body: string;

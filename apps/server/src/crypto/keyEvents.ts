@@ -2,8 +2,10 @@
 // уничтоженный ключ не должен ещё 10 минут открывать сообщения из кэша.
 import { sql } from '../db';
 import { forgetChat } from './chatKeys';
+import { forgetFile } from './fileKeys';
 
 export async function startKeyEvents(): Promise<() => Promise<void>> {
   const sub = await sql.listen('chat_keys', (payload) => { const id = Number(payload); if (id) forgetChat(id); });
-  return () => sub.unlisten();
+  const files = await sql.listen('file_keys', (payload) => forgetFile(payload));
+  return async () => { await sub.unlisten(); await files.unlisten(); };
 }

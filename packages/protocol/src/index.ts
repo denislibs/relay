@@ -143,6 +143,9 @@ export interface Attachment {
    *  Адрес — /files/<id>/<name>; оригинал остаётся /files/<id>. */
   preview?: VideoVariant | null;
   variants?: VideoVariant[];
+  /** Зашифровано на клиенте (fileCrypto.ts): в хранилище шифр, key — ключ файла (base64; в сообщении он запечатан ключом чата). */
+  enc?: 1;
+  key?: string;
 }
 /** Копия видео: preview — первые секунды без звука, 360p, до 1 МБ (лента); '720' — H.264 720p (просмотрщик по умолчанию).
  *  У фото и картинки-файла preview — WebP, длинная сторона до 480 px (сетка «Медиа»). */
@@ -470,3 +473,4 @@ export function searchTerms(text: string): string[] {
 
 export * from './groups';
 export * from './blocks';
+export * from './fileCrypto';

@@ -280,8 +280,9 @@ export async function setPhoto(userId: number, body: unknown): Promise<Me> {
   if (typeof thumb !== 'string' || !THUMB.test(thumb)) throw bad();
   if (video !== undefined && (typeof video !== 'string' || !UUID.test(video) || video === id || video === small)) throw bad();
   const ids = video ? [id, small, video as string] : [id, small];
+  // фото профиля — только открытые файлы (enc = 0): их видят все, ключа у зрителей нет
   const rows = await sql`select id, width, height, mime, duration from attachments
-    where id = any(${ids}::uuid[]) and owner_id = ${userId} and status = 'ready'`;
+    where id = any(${ids}::uuid[]) and owner_id = ${userId} and status = 'ready' and enc = 0`;
   const row = (x: string) => rows.find((a) => a.id === x);
   const side = (x: string) => { const r = row(x); return r && /^image\//.test(r.mime as string) && r.width === r.height ? Number(r.width) : 0; };
   const b = side(id), s = side(small);

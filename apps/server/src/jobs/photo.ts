@@ -1,3 +1,5 @@
+import { variantKey } from '@relay/protocol';
+import { decryptFile, encryptFile, fileKey } from '../crypto/fileKeys';
 // Превью фото в воркере (задача photo.process, ставится при подтверждении загрузки фото и картинки-файла):
 // уменьшенная копия для сетки «Медиа» и плиток — длинная сторона не больше 480 px, пропорции те же, WebP ~80.
 // Плитке на 120 px не нужен оригинал на несколько мегабайт. Маленький и лёгкий оригинал сам себе превью;
@@ -41,7 +43,11 @@ export async function processPhoto(payload: { id: string }): Promise<void> {
   const dir = await mkdtemp(join(tmpdir(), 'relay-photo-'));
   try {
     const src = join(dir, 'src');
-    await Bun.write(src, s3().file(key));
+    // зашифрованный на клиенте: расшифровать во временный файл; превью — шифром выведенного ключа
+    const raw = Number(a.enc) === 1 ? await fileKey(id) : null;
+    if (Number(a.enc) === 1 && !raw) return await skip(id, 'has no file key');
+    if (raw) { await Bun.write(src + '.enc', s3().file(key)); await decryptFile(src + '.enc', src, raw); await rm(src + '.enc', { force: true }); }
+    else await Bun.write(src, s3().file(key));
     // ffprobe читает только заголовок: размеры известны до разжатия
     const p = await probe(src, fmt);
     if (!p) return await skip(id, 'cannot be decoded');
@@ -61,7 +67,10 @@ export async function processPhoto(payload: { id: string }): Promise<void> {
         if (d) made = { path: out, w: d.w, h: d.h, size };
       }
     }
-    if (made) await s3().write(`${id}.preview`, Bun.file(made.path), { type: 'image/webp' });
+    if (made && raw) {
+      await encryptFile(made.path, made.path + '.enc', await variantKey(raw, 'preview'));
+      await s3().write(`${id}.preview`, Bun.file(made.path + '.enc'), { type: 'application/octet-stream' });
+    } else if (made) await s3().write(`${id}.preview`, Bun.file(made.path), { type: 'image/webp' });
     await sql.begin(async (tx) => {
       // под замком строки вложения: отправка того же фото (attachmentForSend, for share) ждёт — как у видео
       const [row] = await tx`select * from attachments where id = ${id} for update`;
