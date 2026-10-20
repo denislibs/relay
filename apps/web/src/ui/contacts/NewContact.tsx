@@ -1,6 +1,6 @@
 import { Avatar, Icon, Modal, Presence, TextField, peerTone } from '@relay/ui';
 import { senderAvatar } from '../../profilePhoto';
-import { wantPeople } from '../../people';
+import { usePerson, wantPeople } from '../../people';
 import { useEffect, useRef, useState } from 'preact/hooks';
 import { setGlobal, useGlobal, type NewContactDraft } from '../../global';
 import { addContact, resolveUser, showToast } from '../../settingsData';
@@ -9,7 +9,7 @@ import { clip, cpLen, initialsOf, NAME_MAX } from './contactsLogic';
 const NOT_FOUND = 'Пользователь не найден в Relay';
 const close = () => setGlobal({ newContact: null });
 
-/** «Новый контакт»: кого (телефон или @имя) и как назвать. Кружок с инициалами растёт по мере ввода. */
+/** «Новый контакт»: кого (телефон или @имя) и как назвать; из «Информации» — только как назвать. Кружок с инициалами растёт по мере ввода. */
 export function NewContact() {
   const draft = useGlobal((s) => s.newContact);
   // форма живёт до конца анимации исчезания; каждое открытие — новая форма
@@ -63,23 +63,32 @@ function NewContactForm({ draft }: { draft: NewContactDraft }) {
   }
 
   const initials = initialsOf(first, lastName);
-  // как диалоги Telegram: заголовок слева, без ✕ (закрывают «Отмена», Esc и щелчок мимо)
+  const person = usePerson(known);
+  const shown = `${first} ${lastName}`.trim();
+  // как в Telegram: крупный аватар сверху по центру, под ним поля во всю ширину. Человек уже известен (из «Информации») —
+  // телефон не спрашиваем: под аватаром его имя и @имя, фокус сразу в «Имя»
   return (
-    <Modal title="Новый контакт" closeButton={false} size="confirm" onClose={close} class="app-newcontact-dialog" actions={[
+    <Modal title={known ? 'Добавить в контакты' : 'Новый контакт'} closeButton={false} size="confirm" onClose={close} class="app-newcontact-dialog" actions={[
       <button key="no" type="button" class="rl-mdl-btn" onClick={close}>Отмена</button>,
       <button key="ok" type="button" class="rl-mdl-btn" disabled={!ready} onClick={() => void done()}>Готово</button>,
     ]}>
         <form class="app-newcontact" onSubmit={(e) => void done(e)}>
-          <div class="app-newcontact-avatar" aria-hidden="true">
-            {initials
-              ? <span key={initials} class="app-pop"><Avatar name={`${first} ${lastName}`.trim()} tone={known ? peerTone(known) : undefined} size={72} {...(known ? senderAvatar(known) : {})} /></span>
-              : <span class="rl-avatar app-newcontact-empty" style={{ width: 72, height: 72 }}><Icon name="contact" size={32} /></span>}
+          <div class="app-newcontact-head" aria-hidden="true">
+            {known || initials
+              ? <span key={known ? 'k' : initials} class="app-pop"><Avatar name={shown || person?.name || ''} tone={known ? peerTone(known) : undefined} size={88} {...(known ? senderAvatar(known) : {})} /></span>
+              : <span class="rl-avatar app-newcontact-empty" style={{ width: 88, height: 88 }}><Icon name="contact" size={40} /></span>}
+            {known ? <>
+              <b class="app-newcontact-name">{shown || person?.name || ' '}</b>
+              {draft.query ? <span class="app-newcontact-sub">{draft.query}</span> : null}
+            </> : null}
           </div>
           <div class="app-newcontact-fields">
-            <TextField label="Телефон или @имя пользователя" value={query} error={error} autoFocus autoComplete="off"
-              onInput={(v: string) => { setQuery(v); setError(undefined); }} />
-            <TextField label="Имя (обязательно)" value={first} maxLength={NAME_MAX} measure={cpLen} autoComplete="given-name" onInput={limited(setFirst)} />
-            <TextField label="Фамилия" value={lastName} maxLength={NAME_MAX} measure={cpLen} autoComplete="family-name" onInput={limited(setLast)} />
+            {known ? null : (
+              <TextField label="Телефон или @имя" value={query} error={error} autoFocus autoComplete="off"
+                onInput={(v: string) => { setQuery(v); setError(undefined); }} />
+            )}
+            <TextField label="Имя" value={first} maxLength={NAME_MAX} measure={cpLen} autoFocus={!!known} autoComplete="given-name" onInput={limited(setFirst)} />
+            <TextField label="Фамилия (необязательно)" value={lastName} maxLength={NAME_MAX} measure={cpLen} autoComplete="family-name" onInput={limited(setLast)} />
           </div>
           <button type="submit" hidden />
         </form>

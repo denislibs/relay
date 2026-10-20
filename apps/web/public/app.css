@@ -143,10 +143,12 @@ body { background: var(--bg); color: var(--ink); font-family: var(--font-sans); 
 .app-contacts-head .rl-search { flex: 1; min-width: 0; }
 .app-contacts { padding-top: var(--space-1); }
 .rl-row-preview .app-online { color: var(--brand-text); }
-.app-newcontact { display: flex; gap: var(--space-4); align-items: flex-start; text-align: left; }
-.app-newcontact-avatar { flex-shrink: 0; width: 72px; height: 72px; padding-top: 4px; }
+.app-newcontact { display: flex; flex-direction: column; align-items: stretch; gap: var(--space-4); text-align: left; }
+.app-newcontact-head { display: flex; flex-direction: column; align-items: center; gap: 2px; min-height: 88px; }
+.app-newcontact-name { margin-top: var(--space-3); font: 500 17px/22px var(--font-sans); max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.app-newcontact-sub { font: 400 14px/18px var(--font-sans); color: var(--ink-muted); }
 .app-newcontact-empty { display: inline-flex; align-items: center; justify-content: center; background: var(--field); color: var(--ink-muted); }
-.app-newcontact-fields { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: var(--space-1); }
+.app-newcontact-fields { display: flex; flex-direction: column; gap: var(--space-1); }
 /* инициалы появляются и меняются с лёгким «прыжком» */
 .app-pop { display: inline-flex; animation: app-pop 260ms cubic-bezier(0.3, 1.4, 0.5, 1) both; }
 @keyframes app-pop { from { transform: scale(0.6); opacity: 0.4; } to { transform: none; opacity: 1; } }
