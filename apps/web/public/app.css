@@ -1089,3 +1089,25 @@ html[data-anim="0"] .app-chatcol, html[data-anim="0"] .app-chatcol-below, html[d
 .app-sym-tab { display: flex; align-items: center; justify-content: center; width: 40px; height: 40px; border: 0; border-radius: 50%; background: transparent; color: var(--ink-muted); cursor: pointer; transition: background-color var(--dur-fast), color var(--dur-fast); }
 .app-sym-tab.is-on { background: var(--hover-strong, rgba(127,127,127,.16)); color: var(--ink); }
 .app-sym-tab:disabled { opacity: .4; cursor: default; }
+
+/* ---------- Правая панель «Стикеры» ---------- */
+.app-stkpanel { display: flex; flex-direction: column; height: 100%; }
+.app-stkpanel-head { display: flex; align-items: center; gap: 8px; padding: 8px 12px 8px 8px; flex: none; }
+.app-stkpanel-search { flex: 1; display: flex; align-items: center; height: 44px; padding: 0 6px 0 16px; border-radius: 22px; border: 1px solid var(--line, rgba(127,127,127,.25)); }
+.app-stkpanel-search:focus-within { border-color: var(--brand-strong); }
+.app-stkpanel-search input { flex: 1; min-width: 0; border: 0; outline: 0; background: transparent; color: var(--ink); font: 400 16px/22px var(--font-sans); }
+.app-stkpanel-list { flex: 1; min-height: 0; overflow-y: auto; overscroll-behavior: contain; padding: 4px 8px 16px; }
+.app-stkpanel-load { display: flex; justify-content: center; padding: 32px; animation: rl-fade 200ms var(--ease-out); }
+.app-stkpanel-empty { padding: 32px 16px; text-align: center; color: var(--ink-muted); }
+.app-stkpanel-end { height: 1px; }
+.app-stkrow { padding: 10px 8px; border-radius: 14px; cursor: pointer; animation: rl-fade 200ms var(--ease-out); }
+.app-stkrow:hover { background: var(--hover, rgba(127,127,127,.06)); }
+.app-stkrow-head { display: flex; align-items: center; gap: 12px; }
+.app-stkrow-title { flex: 1; min-width: 0; display: flex; flex-direction: column; }
+.app-stkrow-title b { font: 600 16px/22px var(--font-sans); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.app-stkrow-title small { font: 400 14px/18px var(--font-sans); color: var(--ink-muted); }
+.app-stkrow-btn { flex: none; height: 34px; padding: 0 16px; border: 0; border-radius: 17px; background: var(--brand-strong); color: #fff; font: 600 14px/1 var(--font-sans); letter-spacing: .02em; cursor: pointer; transition: background-color var(--dur-fast), color var(--dur-fast); }
+.app-stkrow-btn.is-added { background: var(--hover-strong, rgba(127,127,127,.16)); color: var(--ink-muted); }
+.app-stkrow-btn:disabled { opacity: .7; }
+.app-stkrow-strip { display: grid; grid-template-columns: repeat(5, 1fr); height: 72px; margin-top: 6px; }
+.app-stkrow-cell { display: flex; align-items: center; justify-content: center; }

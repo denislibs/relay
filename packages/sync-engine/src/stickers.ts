@@ -24,6 +24,10 @@ const EMPTY: MyStickers = { sets: [], recent: [], faved: [] };
 export class Stickers {
   private mine: MyStickers | null = null;
   private sets = new Map<string, StickerSet>();   // id и short name → пак (то, что уже открывали)
+  // свои изменения, которые сервер ещё не подтвердил: накладываются на его ответ, иначе кнопка «мигает» назад
+  private installs = new Map<number, { on: boolean; info?: StickerSetInfo; at: number }>();
+  private faves = new Map<number, { on: boolean; sticker?: StickerRef; at: number }>();
+  private unrecent = new Map<number | 'all', number>();
 
   constructor(private h: StickersHost) {}
 
@@ -57,7 +61,7 @@ export class Stickers {
         const cached = await this.cachedMine();
         if (!this.h.online()) return { ...cached, offline: true };
         try {
-          const fresh = await this.h.http<MyStickers>('/my-stickers');
+          const fresh = this.overlay(await this.h.http<MyStickers>('/my-stickers'));
           this.setMine(fresh);
           return fresh;
         } catch { return { ...cached, offline: true }; }
@@ -74,6 +78,7 @@ export class Stickers {
         } catch { return hit ?? null; }
       }
       case 'installStickerSet': {
+        this.installs.set(a.setId, { on: a.on, info: a.info, at: Date.now() });
         const m = await this.cachedMine();
         if (!a.on) this.setMine({ ...m, sets: m.sets.filter((s) => s.id !== a.setId) });
         else if (a.info && !m.sets.some((s) => s.id === a.setId)) this.setMine({ ...m, sets: [a.info as StickerSetInfo, ...m.sets] });
@@ -82,6 +87,7 @@ export class Stickers {
         return null;
       }
       case 'faveSticker': {
+        this.faves.set(a.id, { on: a.on, sticker: a.sticker, at: Date.now() });
         const m = await this.cachedMine();
         const faved = a.on && a.sticker ? [a.sticker, ...m.faved.filter((x) => x.id !== a.id)].slice(0, FAVED_STICKERS_LIMIT) : m.faved.filter((x) => x.id !== a.id);
         this.setMine({ ...m, faved });
@@ -90,6 +96,7 @@ export class Stickers {
         return null;
       }
       case 'clearRecentStickers': {
+        this.unrecent.set(a.id ?? 'all', Date.now());
         const m = await this.cachedMine();
         this.setMine({ ...m, recent: a.id != null ? m.recent.filter((x) => x.id !== a.id) : [] });
         this.h.bump();
@@ -108,6 +115,28 @@ export class Stickers {
         return this.h.http<StickerRef[]>(`/stickers-by-emoji?e=${encodeURIComponent(a.emoji)}`).catch(local);
       }
     }
+  }
+
+  /** Ответ сервера + ещё не подтверждённые свои изменения. Подтверждённое (или старше минуты) забываем. */
+  private overlay(m: MyStickers): MyStickers {
+    const stale = Date.now() - 60_000;
+    let { sets, recent, faved } = m;
+    for (const [id, o] of this.installs) {
+      const has = sets.some((s) => s.id === id);
+      if (has === o.on || o.at < stale) { this.installs.delete(id); continue; }
+      sets = o.on ? (o.info ? [o.info, ...sets] : sets) : sets.filter((s) => s.id !== id);
+    }
+    for (const [id, o] of this.faves) {
+      const has = faved.some((s) => s.id === id);
+      if (has === o.on || o.at < stale) { this.faves.delete(id); continue; }
+      faved = o.on ? (o.sticker ? [o.sticker, ...faved].slice(0, FAVED_STICKERS_LIMIT) : faved) : faved.filter((s) => s.id !== id);
+    }
+    for (const [id, at] of this.unrecent) {
+      const left = id === 'all' ? recent.length > 0 : recent.some((s) => s.id === id);
+      if (!left || at < stale) { this.unrecent.delete(id); continue; }
+      recent = id === 'all' ? [] : recent.filter((s) => s.id !== id);
+    }
+    return { sets, recent, faved };
   }
 
   /** Без сети: по эмодзи из недавних и уже открытых паков. */
