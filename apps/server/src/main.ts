@@ -1,5 +1,9 @@
 import { createServer } from './http';
+import { watchMigrations } from './migrate';
 import { startRealtime } from './realtime';
+
+// dev: новые миграции применяются сами, до первого запроса (см. watchMigrations)
+if (process.env.DEV_MIGRATE === '1') await watchMigrations().ready;
 
 const server = createServer({ port: Number(process.env.PORT ?? 3000) });
 const stopRealtime = await startRealtime(server);

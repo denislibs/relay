@@ -341,7 +341,7 @@ export function createServer(opts: { port: number }): Server {
         return new Response('Not found', { status: 404 });
       } catch (err) {
         if (err instanceof DomainError) return fail(err.code, err.retryAfter);
-        console.error(err);
+        console.error(`${req.method} ${url.pathname}:`, err);   // неожиданная ошибка: клиенту — internal, причина — сюда
         return fail('internal');
       }
     })()),
