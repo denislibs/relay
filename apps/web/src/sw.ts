@@ -9,7 +9,7 @@
 import type { AutoCleanupPolicy } from './attachmentsOnDevice';
 import {
   CACHE_APP_SHELL_PREFIX, deviceStore, fetchMedia, isMediaRangeRequest, isMediaRequest, LEGACY_CACHES,
-  fileKeyOf, loadPolicy, migrateLegacyCaches, savePolicy, serveEncryptedRange, serveMedia, serveVideoRange, sweepAuto,
+  fileKeyOf, loadPolicy, migrateLegacyCaches, resetFileKeyCache, savePolicy, serveEncryptedRange, serveMedia, serveVideoRange, sweepAuto,
 } from './mediaCache';
 declare const __BUILD__: string;
 const sw = self as unknown as ServiceWorkerGlobalScope;
@@ -64,6 +64,7 @@ sw.addEventListener('message', (e) => {
   const d = e.data as { type?: string; keepAutoDays?: number; maxAutoMb?: number } | null;
   // страница положила файл в auto-evictable (менеджер загрузок) — проверить лимит
   if (d?.type === 'attachments:sweep-auto') { e.waitUntil(sweep()); return; }
+  if (d?.type === 'attachments:forget-keys') { resetFileKeyCache(); return; }   // выход: ключи файлов — из памяти тоже
   if (d?.type !== 'attachments:set-auto-cleanup-policy') return;
   const p: AutoCleanupPolicy = { keepAutoDays: Math.max(0, Number(d.keepAutoDays) || 0), maxAutoMb: Math.max(0, Number(d.maxAutoMb) || 0) };
   e.waitUntil(savePolicy(store, p).then(() => sweep(p)).catch(() => {}));
