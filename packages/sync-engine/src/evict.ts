@@ -37,6 +37,8 @@ export interface EvictOpts {
   chunk?: number;
   /** после каждой порции (тесты) */
   onChunk?: (chatId: number, removed: number) => void;
+  /** человек стёрт из кэша: движок забывает, что уже спрашивал о нём (иначе снова понадобится — не спросит) */
+  onUserEvicted?: (userId: number) => void;
 }
 
 /** Строк сообщений в одной транзакции уборки: запись и чтение остальных ждут её недолго. */
@@ -251,6 +253,7 @@ export async function evict(store: Store, db: IDBDatabase, keepNow: () => EvictK
       if (refs.has(id)) continue;
       store.users.delete(id);
       store.profileLists.dropUser(id);
+      opts.onUserEvicted?.(id);
       stats.users++;
     }
   }

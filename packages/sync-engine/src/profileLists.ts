@@ -241,6 +241,11 @@ export class ProfileListsLoader {
     this.want({ kind: 'profilePhotos', userId });
   }
 
+  /** Человека стёрла уборка: его списки спросим снова, когда понадобятся. */
+  forgetUser(userId: number): void {
+    for (const k of [...this.asked]) if (k.startsWith('m:' + userId + '|') || k.startsWith('p:' + userId + '|')) this.asked.delete(k);
+  }
+
   /** Новое подключение: прошлые запросы и отказы — спросим снова, если понадобится. */
   reconnect(): void { this.asked.clear(); }
 

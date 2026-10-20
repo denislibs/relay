@@ -1803,7 +1803,8 @@ export class Engine {
     if (this.evicting) return this.evicting;
     this.lastEvict = Date.now();
     const t0 = Date.now();
-    const p = evict(this.store, this.db, () => this.evictKeep(), limits, { closed: () => this.closed, ...opts })
+    const forget = (id: number) => { this.usersAsked.delete(id); this.lists.forgetUser(id); };
+    const p = evict(this.store, this.db, () => this.evictKeep(), limits, { closed: () => this.closed, onUserEvicted: forget, ...opts })
       .then((st) => { this.dev.log.record('engine', 'evict', st, undefined, Date.now() - t0); this.changed(); return st; })
       .finally(() => { this.evicting = null; this.lastEvict = Date.now(); });
     this.evicting = p;

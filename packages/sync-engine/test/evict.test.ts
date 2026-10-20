@@ -411,3 +411,26 @@ test('a window opened in the middle of eviction keeps its rows', async () => {
   expect(fw!.patches.some((p) => p.op === 'diff' && p.remove.some((k) => keys.has(k)))).toBe(false);
   fw!.handle.close();
 });
+
+test('an evicted person is asked again when a new message brings them back (no reconnect)', async () => {
+  const a = await srv.login('Анна'), b = await srv.login('Борис'), c = await srv.login('Вера');
+  const chatId = await srv.chat(a.token, [a.userId, b.userId, c.userId]);
+  await sendMessage(a.userId, { chatId, clientId: crypto.randomUUID(), body: 'привет' });
+  const eb = await Engine.open(srv.config(b));
+  engines.push(eb);
+  eb.connect();
+  await eb.whenIdle();
+  const p1 = watchInto(eb, { kind: 'people', ids: [c.userId] });
+  await p1.until((l) => l[0]?.name === 'Вера');
+  p1.handle.close();
+  await eb.whenIdle();
+  const st = await eb.evict({ ...EVICT_LIMITS, people: 0 });
+  expect(st.users).toBeGreaterThan(0);
+  expect(eb.store.users.get(c.userId)).toBeUndefined();
+  // Вера пишет снова: лента спрашивает автора — профиль приходит без переподключения
+  await sendMessage(c.userId, { chatId, clientId: crypto.randomUUID(), body: 'я тут' });
+  const feed = watchInto(eb, { kind: 'messages', chatId, limit: 10 });
+  await feed.until((l) => l.some((m) => m.body === 'я тут'));
+  const p2 = watchInto(eb, { kind: 'people', ids: [c.userId] });
+  expect((await p2.until((l) => l[0]?.name === 'Вера'))[0].id).toBe(c.userId);
+});
