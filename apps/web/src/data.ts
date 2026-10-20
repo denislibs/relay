@@ -197,7 +197,9 @@ function toastUploadRefusals(items: Item[]): void {
 function startFeed(frame: ChatFrame, anchor: Anchor | undefined, onFirst: (patch: Partial<ChatFrame>) => void): void {
   const s: Session = { chatId: frame.chatId, mirror: new Mirror(), anchor, moving: true, first: true, timer: null, watch: null as never };
   sessions.set(frame.key, s);
-  const first = (patch: Partial<ChatFrame>) => { s.first = false; if (s.timer) { clearTimeout(s.timer); s.timer = null; } onFirst(patch); };
+  const asked = performance.now();
+  // сколько лента ждала первый снимок от движка (SharedWorker → IndexedDB → сюда) — видно во вкладке Performance
+  const first = (patch: Partial<ChatFrame>) => { s.first = false; if (s.timer) { clearTimeout(s.timer); s.timer = null; } performance.measure('relay:feed-snapshot', { start: asked }); onFirst(patch); };
   // лента — срочная: свои сообщения должны появляться в тот же кадр
   s.watch = engine.watch({ kind: 'messages', chatId: frame.chatId, limit: WINDOW, anchor }, (p: Patch) => {
     s.mirror.apply(p);
@@ -246,17 +248,44 @@ function cancelPending(): void {
   if (getGlobal().pendingChatId != null) setGlobal({ pendingChatId: null });
 }
 
+/* Снятые со стека колонки не уничтожаются сразу: доиграв уход, ждут скрытыми (с живой подпиской на ленту) до
+ * PARK_MS, не больше PARK_MAX. Вернулись в тот же чат — колонка встаёт обратно без подготовки, на той же прокрутке. */
+const PARK_MS = 60_000;
+const PARK_MAX = 2;
+const parkTimers = new Map<string, ReturnType<typeof setTimeout>>();
+
+function dropParked(keys?: string[]): void {
+  const drop = getGlobal().chatLeaving.filter((f) => !keys || keys.includes(f.key));
+  if (!drop.length) return;
+  for (const f of drop) { closeSession(f.key); clearTimeout(parkTimers.get(f.key)); parkTimers.delete(f.key); }
+  setGlobal((s) => ({ chatLeaving: s.chatLeaving.filter((f) => !drop.includes(f)) }));
+}
+
 /** Снять со стека всё выше index (анимация ухода). */
 function popTo(index: number): void {
   const st = stack();
   const removed = st.slice(index + 1);
   if (!removed.length || index < 0) return;
-  removed.forEach((f) => closeSession(f.key));
+  const parked = removed.filter((f) => f.ready);
+  removed.filter((f) => !f.ready).forEach((f) => closeSession(f.key));
   beginHeavyAnimation(LEAVE_MS + 50);
-  setGlobal((s) => ({ chatStack: s.chatStack.slice(0, index + 1), chatLeaving: [...s.chatLeaving, ...removed], openChatId: s.chatStack[index].chatId, pendingChatId: null }));
-  setTimeout(() => setGlobal((s) => ({ chatLeaving: s.chatLeaving.filter((f) => !removed.includes(f)) })), LEAVE_MS);
+  setGlobal((s) => ({ chatStack: s.chatStack.slice(0, index + 1), chatLeaving: [...s.chatLeaving, ...parked], openChatId: s.chatStack[index].chatId, pendingChatId: null }));
+  for (const f of parked) parkTimers.set(f.key, setTimeout(() => dropParked([f.key]), PARK_MS));
+  // лишние (самые давние) — после ухода, чтобы не оборвать его анимацию
+  const extra = getGlobal().chatLeaving.slice(0, -PARK_MAX).map((f) => f.key);
+  if (extra.length) setTimeout(() => dropParked(extra), LEAVE_MS);
   popChats(index);
   syncShown();
+}
+
+/** Вернуть припаркованную колонку наверх стека: подготовка не нужна — только переход. */
+function revive(frame: ChatFrame, target?: { id: number; sort: number }): void {
+  clearTimeout(parkTimers.get(frame.key)); parkTimers.delete(frame.key);
+  beginHeavyAnimation(LEAVE_MS + 50);
+  setGlobal((s) => ({ chatStack: [...s.chatStack, frame], chatLeaving: s.chatLeaving.filter((f) => f.key !== frame.key), openChatId: frame.chatId, pendingChatId: null }));
+  pushChat(stack().length - 1);
+  syncShown();
+  if (target) focusMessage(target);
 }
 
 /** «Назад» браузера / Esc сменили глубину стека. */
@@ -267,7 +296,7 @@ function onChatDepth(depth: number): void {
 }
 
 /** Чат из списка (или из адреса, уведомления): нижний кадр, стек сбрасывается. */
-export function openChat(chatId: number | null, target?: { id: number; sort: number }): void {
+export function openChat(chatId: number | null, target?: { id: number; sort: number }, hold?: Hold): void {
   const g = getGlobal(), st = g.chatStack, top = topReady();
   if (chatId != null && (g.pendingChatId ?? top?.chatId) === chatId && (st.length <= 1 || top?.chatId === chatId)) {
     if (target) focusMessage(target);
@@ -276,6 +305,7 @@ export function openChat(chatId: number | null, target?: { id: number; sort: num
   cancelPending();
   if (!chatId) {
     for (const f of st) closeSession(f.key);
+    dropParked();
     popChats(0);
     setGlobal({ chatStack: [], chatLeaving: [], openChatId: null, pendingChatId: null });
     syncShown();
@@ -289,21 +319,25 @@ export function openChat(chatId: number | null, target?: { id: number; sort: num
   }
   const { frame, anchor } = newFrame(chatId, target);
   pendingBottom = { frame, target };
-  setGlobal({ pendingChatId: chatId });
+  if (hold) { hold.key = frame.key; hold.onCommit = () => setGlobal({ pendingChatId: chatId }); } else setGlobal({ pendingChatId: chatId });
   // пока лента нового чата не готова, на экране остаётся прежний; затем шапка и лента меняются одним кадром
   startFeed(frame, anchor, (patch) => {
     if (pendingBottom?.frame.key !== frame.key) return;
-    const ready: ChatFrame = { ...pendingBottom.frame, ...patch, ready: true, instant: true };
-    pendingBottom = null;
-    for (const f of stack()) closeSession(f.key);
-    popChats(0);
-    setGlobal({ chatStack: [ready], chatLeaving: [], openChatId: chatId, pendingChatId: null });
-    syncShown();
+    whenReleased(hold, () => {
+      if (pendingBottom?.frame.key !== frame.key) return;
+      const ready: ChatFrame = { ...pendingBottom.frame, ...patch, ready: true, instant: true };
+      pendingBottom = null;
+      for (const f of stack()) closeSession(f.key);
+      dropParked();
+      popChats(0);
+      setGlobal({ chatStack: [ready], chatLeaving: [], openChatId: chatId, pendingChatId: null });
+      syncShown();
+    });
   });
 }
 
 /** Чат изнутри другого (автор в группе, найденное сообщение): поверх стека, прежний остаётся живым. */
-export function openInner(chatId: number, target?: { id: number; sort: number }): void {
+export function openInner(chatId: number, target?: { id: number; sort: number }, hold?: Hold): void {
   const g = getGlobal();
   if (!topReady()) { openChat(chatId, target); return; }
   cancelPending();
@@ -314,24 +348,80 @@ export function openInner(chatId: number, target?: { id: number; sort: number })
     if (target) focusMessage(target);
     return;
   }
+  const parked = g.chatLeaving.find((f) => f.chatId === chatId);
+  if (parked) { hold ? whenReleased(hold, () => requestMutation(() => revive(parked, target))) : requestMutation(() => revive(parked, target)); return; }
   const { frame, anchor } = newFrame(chatId, target);
   // колонка сразу в DOM (скрыта): лента раскладывается и встаёт на позицию до показа
-  setGlobal({ chatStack: [...st, frame], pendingChatId: chatId });
+  setGlobal(hold ? { chatStack: [...st, frame] } : { chatStack: [...st, frame], pendingChatId: chatId });
+  if (hold) { hold.key = frame.key; hold.onCommit = () => setGlobal({ pendingChatId: chatId }); }
   const alive = () => stack().some((f) => f.key === frame.key);
   startFeed(frame, anchor, (patch) => {
     if (!alive()) return;
     // Как в Telegram Web: сначала лента рисуется и раскладывается в скрытой колонке, а переключение —
     // отдельным кадром, только смена классов. Иначе тяжёлый рендер ленты и запуск перехода — в одном кадре.
     patchFrame(frame.key, patch);
-    requestAnimationFrame(() => requestMutation(() => {
+    // колонка уже отрисована в прошлом кадре (заготовка по нажатию) — переключать в ближайшей фазе записи
+    let laidOut = false;
+    requestAnimationFrame(() => { laidOut = true; });
+    const show = () => {
       if (!alive()) return;
       beginHeavyAnimation(LEAVE_MS + 50);
       patchFrame(frame.key, { ready: true });
       setGlobal({ openChatId: chatId, pendingChatId: null });
       pushChat(stack().length - 1);
       syncShown();
-    }));
+    };
+    whenReleased(hold, () => (laidOut ? requestMutation(show) : requestAnimationFrame(() => requestMutation(show))));
   });
+}
+
+/* ---------- открытие по нажатию, как в Telegram Web ----------
+ * pointerdown: чат начинает готовиться — снимок ленты из движка и скрытая колонка; click: показать (часто
+ * колонка уже готова — переход стартует сразу). Клика не было (увели курсор) — заготовка выбрасывается. */
+export interface Hold { released: boolean; key: string | null; waiting: (() => void) | null; onCommit: (() => void) | null }
+export interface Prepared { commit(): void; cancel(): void }
+
+function whenReleased(hold: Hold | undefined, fn: () => void): void {
+  if (!hold || hold.released) fn(); else hold.waiting = fn;
+}
+
+function holdHandle(hold: Hold): Prepared {
+  return {
+    commit() {
+      if (hold.released) return;
+      hold.released = true;
+      hold.onCommit?.();
+      const w = hold.waiting; hold.waiting = null; w?.();
+    },
+    cancel() {
+      if (hold.released) return;
+      hold.released = true; hold.waiting = null;
+      const key = hold.key;
+      if (!key) return;
+      if (pendingBottom?.frame.key === key) { closeSession(key); pendingBottom = null; return; }
+      if (stack().some((f) => f.key === key && !f.ready)) { closeSession(key); setGlobal((s) => ({ chatStack: s.chatStack.filter((f) => f.key !== key) })); }
+    },
+  };
+}
+
+/** Заготовка нижнего чата (строка списка). Тот же чат или уже в стеке — заготавливать нечего: обычный клик. */
+export function prepareChat(chatId: number): Prepared | null {
+  const g = getGlobal(), st = g.chatStack, top = topReady();
+  if ((g.pendingChatId ?? top?.chatId) === chatId || st.some((f) => f.chatId === chatId)) return null;
+  const hold: Hold = { released: false, key: null, waiting: null, onCommit: null };
+  openChat(chatId, undefined, hold);
+  return holdHandle(hold);
+}
+
+/** Заготовка личного чата поверх текущего (участник группы). Чата ещё нет — его создаст обычный клик. */
+export function prepareUserChat(userId: number): Prepared | null {
+  const g = getGlobal();
+  if (!g.me || userId === g.me.userId || !topReady()) return null;
+  const found = g.chats.find((c) => c.kind === 'direct' && c.peerId === userId);
+  if (!found || g.chatStack.some((f) => f.chatId === found.id)) return null;
+  const hold: Hold = { released: false, key: null, waiting: null, onCommit: null };
+  openInner(found.id as number, undefined, hold);
+  return holdHandle(hold);
 }
 
 /** Стрелка «Назад» в шапке: снять верхний чат; нижний — к списку чатов. */

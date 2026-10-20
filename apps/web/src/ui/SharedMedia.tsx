@@ -11,7 +11,8 @@ import { animateScroll, gridCorners, tabLabel, tabScrollTarget, tileSrc, videoFr
 import { getGlobal, useGlobal } from '../global';
 import { toggleMusic, trackTitle } from '../music';
 import { clock, dayLabel, fileSize, lastSeenText } from './format';
-import { openUserChat } from '../data';
+import { openUserChat, prepareUserChat } from '../data';
+import { pressOpen } from './press';
 import { useMembers, type Member } from '../members';
 import { wantPeople } from '../people';
 
@@ -317,7 +318,7 @@ function MembersList({ data, onOpen }: { data: { ownerId: number | null; members
         const self = m.userId === me;
         const status = self ? 'в сети' : lastSeenText(!!m.online, m.lastSeen);
         return (
-          <button type="button" role="listitem" class="rl-row app-member" disabled={self} onClick={() => onOpen(m.userId)}>
+          <button type="button" role="listitem" class="rl-row app-member" disabled={self} {...pressOpen(() => prepareUserChat(m.userId), () => onOpen(m.userId))}>
             <Avatar name={m.name} tone={peerTone(m.userId)} size={44} online={!!m.online && !self} {...(self ? senderAvatar(m.userId) : avatarPhoto(m.photo ?? userPhoto(m.userId)))} />
             <span class="rl-row-main">
               <span class="app-member-top"><span class="rl-row-name">{self ? m.name + ' (вы)' : m.name}</span>{m.rank || m.userId === data.ownerId || m.role === 'admin' ? <span class="app-member-badge">{m.rank || (m.userId === data.ownerId ? 'владелец' : 'админ')}</span> : null}</span>

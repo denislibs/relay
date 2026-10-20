@@ -402,6 +402,7 @@ html[data-blur="0"] .app-sidemenu .rl-menu { -webkit-backdrop-filter: none; back
 .app-chatcol-above { transform: translate3d(200px, 0, 0); z-index: 1; }
 .app-chatcol-on { z-index: 1; }
 .app-chatcol-instant { transition: none; }
+.app-chatcol-moving { will-change: transform, opacity; }   /* слой заранее: готовящаяся колонка и время перехода (ChatStack) */
 @media (prefers-reduced-motion: reduce) { .app-chatcol, .app-chatcol-below, .app-chatcol-above { transition: none; } }
 html[data-anim="0"] .app-chatcol, html[data-anim="0"] .app-chatcol-below, html[data-anim="0"] .app-chatcol-above { transition: none; }
 /* «Назад» поверх другого чата — и на широком экране */

@@ -38,7 +38,8 @@ const EDGE_PX = 750;
 const TOP_ZONE = 72;      // шапка (48) + отступ (16) + воздух: выше — под шапкой, не «видно»
 const BOTTOM = 50;        // «у низа» — ближе 50 px
 const READ_EVERY = 150;   // отправка «вижу до id» не чаще
-const FIRST_PAINT = 24;   // при открытии внизу первым кадром — столько последних сообщений, остальное следующим кадром
+const FIRST_PAINT = 24;   // при открытии внизу первым кадром — столько последних сообщений, остальное порциями после
+const FILL_CHUNK = 16;    // дорисовка истории выше первого экрана — по столько строк за кадр
 
 type Quote = QuoteMsg;
 type Att = { id: string; kind: 'photo' | 'video' | 'file' | 'voice' | 'round' | 'audio'; spoiler?: boolean; title?: string | null; performer?: string | null; mime: string; name: string; size: number; w: number | null; h: number | null; thumb?: string | null; duration?: number | null; waveform?: string | null;
@@ -391,7 +392,9 @@ export function Feed({ frameKey, active, chatId, meId, peerName, group, onAuthor
   const placed = useRef(false);
   const [away, setAway] = useState(false);
   // дешёвый первый показ (как постепенный рендер в tt): открыли внизу — сначала хвост, выше экрана — следующим кадром
-  const [partial, setPartial] = useState(() => !unreadFrom && !savedPosition(chatId) && !focus);
+  // сколько последних сообщений показано (null — все): открыли внизу — сначала первый экран, остальное порциями
+  const [limit, setLimit] = useState<number | null>(() => (!unreadFrom && !savedPosition(chatId) && !focus ? FIRST_PAINT : null));
+  const partial = limit != null && messages.length > limit;
   const initial = useRef<Set<string> | null>(null);
   if (initial.current === null && messages.length) initial.current = new Set(messages.map((m) => m.key));
 
@@ -453,23 +456,26 @@ export function Feed({ frameKey, active, chatId, meId, peerName, group, onAuthor
       if (next !== null) next = Math.max(0, Math.min(next, max)); // за пределы браузер не прокрутит — и события не будет
       if (next !== null && Math.abs(next - top) > 0.5) { programmatic.current++; root.scrollTop = next; }
     });
-  }, [messages, partial]);
+  }, [messages, limit]);   // каждая порция дорисовки — восстановить якорь
 
   // Строки выше первого экрана — когда колонка на экране и переход стека закончился: в скрытой колонке их не видно,
-  // а во время перехода их рендер (десятки строк) съедал бы кадры анимации. Якорь — первый видимый: позиция не прыгнет.
+  // а во время перехода их рендер съедал бы кадры анимации. И порциями по FILL_CHUNK за кадр: одна большая задача
+  // сразу после перехода тормозила бы прокрутку и ввод. Якорь — первый видимый: позиция не прыгнет.
   const hasMessages = messages.length > 0;
   useEffect(() => {
-    if (!partial || !active || !hasMessages) return;
+    if (limit == null || !hasMessages) return;   // снимка ещё нет — ждём его
+    if (!partial) { setLimit(null); return; }
+    if (!active) return;
     let alive = true;
     onHeavyAnimationEnd(() => requestMeasure(() => {
       const root = el.current;
       if (!alive || !root) return;
       const v = firstVisible(root);
       if (v) anchor.current = { key: v.key, top: v.top };
-      requestMutation(() => { if (alive) setPartial(false); });
+      requestMutation(() => { if (alive) setLimit((l) => (l == null || l + FILL_CHUNK >= messages.length ? null : l + FILL_CHUNK)); });
     }));
     return () => { alive = false; };
-  }, [partial, active, hasMessages]);
+  }, [limit, partial, active, hasMessages]);
 
   // высота ленты меняется сверху (выезжает плеер) или снизу (растёт поле ввода) — держим низ на месте, как в Telegram:
   // что было у нижнего края, там и остаётся. Колбэк ResizeObserver — после раскладки, до отрисовки, без лишнего кадра
@@ -850,7 +856,7 @@ export function Feed({ frameKey, active, chatId, meId, peerName, group, onAuthor
   const out: unknown[] = [];
   let prevDay = '', prevSender: unknown = null, unreadShown = false;
   if (!partial) out.push(<div class="app-sentinel" data-dir="older" key={'o' + (messages[0]?.key ?? '')} aria-hidden="true" />);
-  const shown = partial && messages.length > FIRST_PAINT ? messages.slice(messages.length - FIRST_PAINT) : messages;
+  const shown = partial ? messages.slice(messages.length - limit!) : messages;
   // альбомы: подряд идущие фото одного отправителя с общим groupId (до 10) — одной строкой с мозаикой
   const isPhoto = (x: Item | undefined) => !!x && !x.deleted && ['photo', 'video'].includes((x.attachment as Att | null)?.kind ?? '') && !!(x.attachment as Att).w && !!(x.attachment as Att).h;
   const albums = new Map<string, Item[]>(), inAlbum = new Set<string>();

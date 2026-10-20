@@ -2,7 +2,8 @@ import { ChatBanner } from './ChatBanner';
 import { UpdatePill } from './UpdatePill';
 import { Avatar, ChatRow, Highlight, Icon, MenuPopover, Presence, SlideStack, ChatRowSkeleton, useMinVisible, EmptyState, WindowList, FolderTabs, SidebarCard, SidebarHeader, peerTone, ripple } from '@relay/ui';
 import type { Item } from '@relay/sync-engine/src/types';
-import { loadMoreChats, openChat } from '../data';
+import { loadMoreChats, openChat, prepareChat } from '../data';
+import { pressOpen } from './press';
 import { usePerson } from '../people';
 import { closeSearch, openSearch } from '../search';
 import { GlobalSearch } from './search/GlobalSearch';
@@ -81,7 +82,7 @@ const SideRow = memo(function SideRow({ c, meId, active, showDraft, muted, onMen
       unread={c.unread as number}
       status={!draft && last && last.senderId === meId ? last.status : null}
       active={active}
-      onClick={() => openChat(c.id as number)}
+      {...pressOpen(() => prepareChat(c.id as number), () => openChat(c.id as number))}
       onContextMenu={(e: MouseEvent) => { e.preventDefault(); onMenu(c.id as number, e.clientX, e.clientY); }}
     />
   );

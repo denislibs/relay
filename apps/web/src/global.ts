@@ -47,7 +47,7 @@ export interface GlobalState {
   pendingChatId: number | null;  // выбран, но лента ещё не готова: на экране прежний чат, строка уже подсвечена
   peer: Item | null;   // присутствие собеседника открытого личного чата {userId, known, online, lastSeen}
   chatStack: ChatFrame[];        // стек чатов, снизу вверх
-  chatLeaving: ChatFrame[];      // снятые со стека: доигрывают уход и исчезают
+  chatLeaving: ChatFrame[];      // снятые со стека: доигрывают уход и ждут скрытыми до минуты (повторное открытие — без подготовки)
   folder: number;      // активная папка: 0 — «Все чаты», иначе id своей папки
   folderDraft: FolderDraft | null;   // редактор папки: общий для страницы правки и выбора чатов
   search: string;
