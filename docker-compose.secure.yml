@@ -2,6 +2,13 @@
 #   docker compose -f docker-compose.yml -f docker-compose.secure.yml up -d
 # Секреты — только из окружения (без значений по умолчанию): compose не запустится, если их нет.
 #
+# TLS между сервисами (apps/server/src/tls.ts): server/worker/keys в production без него не стартуют.
+#   - Postgres: ssl=on + в pg_hba.conf только hostssl (иначе база всё ещё пускает без TLS); клиенты — DB_SSL=verify-full,
+#     DB_CA и клиентский сертификат DB_CERT/DB_KEY (mTLS: база пускает только наши процессы);
+#   - Valkey: только tls-port, VALKEY_URL=rediss://…, VALKEY_CA;
+#   - S3, Meilisearch, Vault, сервис ключей — https; общий внутренний CA — NODE_EXTRA_CA_CERTS;
+#   - все хосты в одной зашифрованной сети (WireGuard) — можно RELAY_PLAIN_INTERNAL=1 вместо всего этого.
+#
 # Индекс поиска хранит расшифрованный текст сообщений, поэтому:
 #   - Meilisearch в своей внутренней сети `search` — его видят только server и worker, остальные сервисы и наружу — нет;
 #   - server ходит с ключом «только поиск» (MEILI_API_KEY, выпуск: bun apps/server/src/dev/meiliKeys.ts),

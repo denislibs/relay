@@ -11,6 +11,7 @@
 // Байты — base64. Доступ — Bearer-токен клиента (KEY_SERVICE_TOKENS: «server:токен,worker:токен»); в продакшене —
 // ещё и внутренняя сеть + mTLS (docker-compose.secure.yml). Запуск: bun apps/server/src/keyService.ts
 import { getKms, kmsFor, type Kms } from './crypto/kms';
+import { assertTransportSecure } from './tls';
 
 export interface KeyServiceOptions {
   port: number;
@@ -54,8 +55,12 @@ export function createKeyService(o: KeyServiceOptions) {
     return false;
   }
 
+  // TLS сервиса ключей (production): сертификат из KEY_SERVICE_TLS_CERT/KEY; клиенты доверяют внутреннему CA
+  const tls = process.env.KEY_SERVICE_TLS_CERT && process.env.KEY_SERVICE_TLS_KEY
+    ? { cert: Bun.file(process.env.KEY_SERVICE_TLS_CERT), key: Bun.file(process.env.KEY_SERVICE_TLS_KEY) } : undefined;
   return Bun.serve({
     port: o.port,
+    ...(tls ? { tls } : {}),
     async fetch(req) {
       const url = new URL(req.url);
       const token = /^Bearer (.+)$/.exec(req.headers.get('authorization') ?? '')?.[1];
@@ -105,6 +110,7 @@ export function createKeyService(o: KeyServiceOptions) {
 }
 
 if (import.meta.main) {
+  assertTransportSecure();
   const tokens = parseTokens();
   if (!tokens.size) throw new Error('KEY_SERVICE_TOKENS is empty: set "server:<token>,worker:<token>"');
   const s = createKeyService({ port: Number(process.env.KEY_SERVICE_PORT ?? 7800), tokens, unwrapPerMinute: Number(process.env.KEY_SERVICE_UNWRAP_PER_MIN) || undefined });

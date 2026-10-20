@@ -1,4 +1,5 @@
 import { RedisClient } from 'bun';
+import { valkeyTls } from './tls';
 
 /**
  * Valkey — только эфемерное состояние (онлайн, «печатает…», рассылка кадров между процессами).
@@ -11,7 +12,8 @@ export function valkey(): RedisClient {
   if (!client) {
     const url = process.env.VALKEY_URL;
     if (!url) throw new Error('VALKEY_URL is not set');
-    const c = new RedisClient(url);
+    const tls = valkeyTls();   // rediss:// и свой CA (tls.ts)
+    const c = tls === undefined ? new RedisClient(url) : new RedisClient(url, { tls });
     // Bun переподключается сам, но после ~10 с без Valkey закрывает клиент насовсем — следующий вызов заведёт новый
     c.onclose = () => { if (client === c) client = null; };
     client = c;
