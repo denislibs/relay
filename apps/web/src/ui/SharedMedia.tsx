@@ -1,4 +1,4 @@
-import { Avatar, EmptyState, FolderTabs, Icon, LazyImage, lazyObserve, MediaViewer, peerTone, player, SlideStack } from '@relay/ui';
+import { Avatar, EmptyState, FolderTabs, Icon, LazyImage, lazyObserve, MediaViewer, peerTone, player, reducedMotion, SlideStack } from '@relay/ui';
 import { offlineUrlNow } from '../downloads';
 import { LinkTile, linkInfo } from './linkTile';
 import { avatarPhoto, userPhoto } from '../profilePhoto';
@@ -7,7 +7,7 @@ import type { Item } from '@relay/sync-engine/src/types';
 import { useEffect, useRef, useState } from 'preact/hooks';
 import { focusMessage, type MediaTab } from '../data';
 import { useMedia } from '../mediaTab';
-import { tabLabel, tileSrc, videoFrameSrc, type SharedTab } from '../mediaGrid';
+import { animateScroll, tabLabel, tabScrollTarget, tileSrc, videoFrameSrc, type SharedTab } from '../mediaGrid';
 import { getGlobal, useGlobal } from '../global';
 import { toggleMusic, trackTitle } from '../music';
 import { clock, dayLabel, fileSize, lastSeenText } from './format';
@@ -48,11 +48,27 @@ export function SharedMedia({ chatId, group = false, onTitle }: { chatId: number
   const { counts: known, loading: countsLoading } = useMedia(chatId, 'media', 0);
   // офлайн на холодную: счётчиков нет и не ждём — как раньше, нули (пустое состояние), а не вечная заглушка
   const counts = known ?? (countsLoading ? null : { media: 0, file: 0, link: 0, audio: 0, voice: 0 });
-  useEffect(() => { setTab(null); }, [chatId]);
+  // клик по вкладке, пока над ней виден профиль: панель за ~300 мс доезжает вкладками до верха, потом переключаем
+  // (содержимое не меняется посреди прокрутки); таблетка и шапка — сразу на новой вкладке
+  const [pending, setPending] = useState<Tab | null>(null);
+  const bar = useRef<HTMLDivElement>(null);
+  const cancel = useRef<(() => void) | null>(null);
+  useEffect(() => { setTab(null); setPending(null); }, [chatId]);
+  useEffect(() => () => cancel.current?.(), [chatId]);
   const tabs: Tab[] = [...(group ? ['members' as const] : []), ...(counts ? ORDER.filter((t) => counts[t] > 0) : [])];
   const active = tab && tabs.includes(tab) ? tab : tabs[0] ?? null;
-  const title = active ? tabLabel(active) : null;
+  const shown = pending && tabs.includes(pending) ? pending : active;
+  const title = shown ? tabLabel(shown) : null;
   useEffect(() => { if (title) onTitle?.(title); }, [title]);
+  const pick = (id: Tab) => {
+    cancel.current?.();
+    cancel.current = null;
+    const el = bar.current, body = el?.closest<HTMLElement>('.rl-aside-body');
+    const to = el && body ? tabScrollTarget({ scrollTop: body.scrollTop, offset: el.getBoundingClientRect().top - body.getBoundingClientRect().top, max: body.scrollHeight - body.clientHeight }) : null;
+    if (to == null || !body) { setPending(null); setTab(id); return; }
+    setPending(id);
+    cancel.current = animateScroll(body, to, 300, reducedMotion(), () => { cancel.current = null; setPending(null); setTab(id); });
+  };
 
   if (!counts && !group) return <div class="app-sm-loading" aria-busy="true" />;
   if (!tabs.length) return (
@@ -64,8 +80,8 @@ export function SharedMedia({ chatId, group = false, onTitle }: { chatId: number
     <>
       {/* одна непустая вкладка — переключать нечего: вместо одинокой плашки заголовок раздела */}
       {tabs.length > 1 ? (
-        <div class="rl-aside-tabs">
-          <FolderTabs label="Общие медиа" active={active} onChange={(id: Tab) => setTab(id)} items={tabs.map((t) => ({ id: t, label: tabLabel(t) }))} />
+        <div class="rl-aside-tabs" ref={bar}>
+          <FolderTabs label="Общие медиа" active={shown} onChange={pick} items={tabs.map((t) => ({ id: t, label: tabLabel(t) }))} />
         </div>
       ) : <h3 class="app-sm-heading">{tabLabel(tabs[0])}</h3>}
       <div class="rl-aside-pages">

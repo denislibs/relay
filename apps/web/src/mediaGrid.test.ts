@@ -1,5 +1,5 @@
 import { expect, test } from 'bun:test';
-import { tabLabel, tileSrc, videoFrameSrc } from './mediaGrid';
+import { scrollAt, tabLabel, tabScrollTarget, tileSrc, videoFrameSrc } from './mediaGrid';
 
 const photo = { id: 'p1', kind: 'photo', mime: 'image/jpeg' };
 
@@ -22,4 +22,27 @@ test('panel header names the current tab when the tabs are stuck', () => {
   expect(tabLabel('link')).toBe('Ссылки');
   expect(tabLabel('audio')).toBe('Музыка');
   expect(tabLabel('voice')).toBe('Голосовые');
+});
+
+test('tab click while the profile is visible: scroll so the tabs reach the top; already stuck — no scroll', () => {
+  // вкладки на 300 px ниже верха прокрутки, прокручено 40 — нужно 340
+  expect(tabScrollTarget({ scrollTop: 40, offset: 300, max: 2000 })).toBe(340);
+  // дальше конца прокрутки не уехать
+  expect(tabScrollTarget({ scrollTop: 40, offset: 300, max: 200 })).toBe(200);
+  // уже прилипли (или в пределах пикселя) — ничего не делаем
+  expect(tabScrollTarget({ scrollTop: 500, offset: 0, max: 2000 })).toBeNull();
+  expect(tabScrollTarget({ scrollTop: 500, offset: 0.6, max: 2000 })).toBeNull();
+  // уже у конца прокрутки — ехать некуда
+  expect(tabScrollTarget({ scrollTop: 200, offset: 50, max: 200 })).toBeNull();
+});
+
+test('scroll tween: ~300 ms ease from start to end, monotonic, ends exactly on the target', () => {
+  expect(scrollAt(100, 400, 300, 0)).toBe(100);
+  expect(scrollAt(100, 400, 300, 300)).toBe(400);
+  expect(scrollAt(100, 400, 300, 999)).toBe(400);
+  const mid = scrollAt(100, 400, 300, 150);
+  expect(mid).toBeGreaterThan(100);
+  expect(mid).toBeLessThan(400);
+  let prev = 100;
+  for (let t = 0; t <= 300; t += 10) { const y = scrollAt(100, 400, 300, t); expect(y).toBeGreaterThanOrEqual(prev); prev = y; }
 });
