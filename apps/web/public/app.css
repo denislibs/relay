@@ -85,12 +85,10 @@ body { background: var(--bg); color: var(--ink); font-family: var(--font-sans); 
 .app-media-grid > :nth-child(3n+1):nth-last-child(-n+3) { border-bottom-left-radius: 14px; }
 .app-media-grid > :last-child, .app-media-grid > :nth-child(3n):nth-last-child(-n+3) { border-bottom-right-radius: 14px; }
 .app-media-cell { position: relative; aspect-ratio: 1; padding: 0; border: 0; overflow: hidden; cursor: pointer; background: var(--field); }
-/* «Медиа» в правой панели — виртуальная сетка (WindowList): строки по 3 плитки, в DOM только видимые.
-   Строки не «едут» (новые плитки сверху, смена ширины панели) — сдвиг мгновенный; углы — классами от позиции */
+/* «Медиа» в правой панели — виртуальная сетка (WindowGrid): в DOM только видимые плитки, каждая на своём месте;
+   углы — классами от позиции (у :nth-child в виртуальной сетке нет соседей) */
 .app-media-vgrid { margin: 0 var(--space-3) var(--space-4); }
-.app-media-vgrid .rl-wrow { transition: none; will-change: auto; }
-.app-media-row { display: grid; grid-template-columns: repeat(3, 1fr); gap: 1px; }
-.app-media-row .app-media-cell { aspect-ratio: auto; height: 100%; }
+.app-media-vgrid .app-media-cell { display: block; aspect-ratio: auto; width: 100%; height: 100%; }
 .app-media-cell.is-tl { border-top-left-radius: 14px; }
 .app-media-cell.is-tr { border-top-right-radius: 14px; }
 .app-media-cell.is-bl { border-bottom-left-radius: 14px; }

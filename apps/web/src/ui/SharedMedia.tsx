@@ -1,13 +1,13 @@
-import { Avatar, EmptyState, FolderTabs, Icon, LazyImage, lazyObserve, MediaViewer, peerTone, player, reducedMotion, SlideStack, WindowList } from '@relay/ui';
+import { Avatar, EmptyState, FolderTabs, Icon, LazyImage, LazyRoot, lazyObserve, MediaViewer, peerTone, player, reducedMotion, SlideStack, WindowGrid, WindowList } from '@relay/ui';
 import { offlineUrlNow } from '../downloads';
 import { LinkTile, linkInfo } from './linkTile';
 import { avatarPhoto, userPhoto } from '../profilePhoto';
 import { senderAvatar } from '../profilePhoto';
 import type { Item } from '@relay/sync-engine/src/types';
-import { useEffect, useLayoutEffect, useRef, useState } from 'preact/hooks';
+import { useContext, useEffect, useLayoutEffect, useRef, useState } from 'preact/hooks';
 import { focusMessage, type MediaTab } from '../data';
 import { useMedia } from '../mediaTab';
-import { animateScroll, gridCorners, gridMetrics, gridRows, GRID_COLS, tabLabel, tabScrollTarget, tileSrc, videoFrameSrc, type SharedTab } from '../mediaGrid';
+import { animateScroll, gridCorners, tabLabel, tabScrollTarget, tileSrc, videoFrameSrc, type SharedTab } from '../mediaGrid';
 import { getGlobal, useGlobal } from '../global';
 import { toggleMusic, trackTitle } from '../music';
 import { clock, dayLabel, fileSize, lastSeenText } from './format';
@@ -51,6 +51,9 @@ export function SharedMedia({ chatId, group = false, onTitle }: { chatId: number
   // клик по вкладке, пока над ней виден профиль: панель за ~300 мс доезжает вкладками до верха, потом переключаем
   // (содержимое не меняется посреди прокрутки); таблетка и шапка — сразу на новой вкладке
   const [pending, setPending] = useState<Tab | null>(null);
+  const pages = useRef<HTMLDivElement>(null);
+  const [root, setRoot] = useState<Element | null>(null);
+  useLayoutEffect(() => { const r = pages.current?.closest('.rl-aside-body') ?? null; if (r !== root) setRoot(r); });
   const bar = useRef<HTMLDivElement>(null);
   const cancel = useRef<(() => void) | null>(null);
   useEffect(() => { setTab(null); setPending(null); }, [chatId]);
@@ -84,8 +87,11 @@ export function SharedMedia({ chatId, group = false, onTitle }: { chatId: number
           <FolderTabs label="Общие медиа" active={shown} onChange={pick} items={tabs.map((t) => ({ id: t, label: tabLabel(t) }))} />
         </div>
       ) : <h3 class="app-sm-heading">{tabLabel(tabs[0])}</h3>}
-      <div class="rl-aside-pages">
-        <SlideStack variant="tabs" order={tabs} active={active} render={(k: string) => k === 'members' ? <MembersList key={chatId + k} data={members} /> : <TabList key={chatId + k} chatId={chatId} tab={k as MediaTab} />} />
+      <div class="rl-aside-pages" ref={pages}>
+        {/* ленивые картинки и кадры видео меряют запас от прокрутки панели, а не от окна (её край их обрезает) */}
+        <LazyRoot.Provider value={root}>
+          <SlideStack variant="tabs" order={tabs} active={active} render={(k: string) => k === 'members' ? <MembersList key={chatId + k} data={members} /> : <TabList key={chatId + k} chatId={chatId} tab={k as MediaTab} />} />
+        </LazyRoot.Provider>
       </div>
     </>
   );
@@ -95,14 +101,10 @@ export function SharedMedia({ chatId, group = false, onTitle }: { chatId: number
 function TabList({ chatId, tab }: { chatId: number; tab: MediaTab }) {
   const { items: list0, done, loading, more } = useMedia(chatId, tab);
   const items = list0 as Msg[];
-  const end = useRef<HTMLDivElement>(null);
-  useEffect(() => {
-    const el = end.current;
-    if (!el || done || !items.length) return;
-    const io = new IntersectionObserver((e) => { if (e[0].isIntersecting) more(); }, { rootMargin: '400px' });
-    io.observe(el);
-    return () => io.disconnect();
-  }, [done, items.length, loading]);
+  // следующая страница — когда окно виртуального списка (видимое + запас) дошло до хвоста; страница догрузилась,
+  // а окно всё ещё у хвоста — проверка повторяется (nearEnd)
+  const nearEnd = done ? undefined : more;
+  const nearKey = `${loading}:${done}`;
 
   // «Медиа»: фото открываются просмотрщиком (листать — по всем фото вкладки), видео — в ленте, где есть плеер
   const [viewer, setViewer] = useState<number | null>(null);
@@ -117,13 +119,13 @@ function TabList({ chatId, tab }: { chatId: number; tab: MediaTab }) {
   const open = (m: Msg) => { const k = photos.indexOf(m); if (k >= 0) setViewer(k); else show(m); };
   // длинные вкладки — виртуальные (WindowList ищет прокрутку панели): в DOM только видимые строки и запас;
   // высота списка — все строки сразу, поэтому догрузка в конец не сдвигает прокрутку
-  const list = tab === 'media' ? <MediaGrid items={items} onOpen={open} host={grid} /> : (
+  const list = tab === 'media' ? <MediaGrid items={items} onOpen={open} host={grid} onNearEnd={nearEnd} nearKey={nearKey} /> : (
     <div class="app-sm-list">
-      <WindowList items={items} rowHeight={tab === 'link' ? LINK_ROW : SM_ROW} overscan={6} getKey={(m: Msg) => m.id}
+      <WindowList items={items} rowHeight={tab === 'link' ? LINK_ROW : SM_ROW} overscan={6} getKey={(m: Msg) => m.id} onNearEnd={nearEnd} nearEndKey={nearKey}
         render={(m: Msg) => tab === 'file' ? <FileRow m={m} /> : tab === 'link' ? <LinkRow m={m} /> : <TrackRow m={m} chatId={chatId} items={items} />} />
     </div>
   );
-  return <>{list}{!done ? <div ref={end} class="app-sm-more" /> : null}
+  return <>{list}
     {viewer !== null && photos[viewer] ? (
       <MediaViewer index={viewer}
         items={photos.map((m) => { const a = m.attachment!; return { src: fileUrl(a), thumb: a.thumb, w: a.w, h: a.h, name: a.name, download: fileUrl(a) + '?download=1', caption: m.body,
@@ -141,29 +143,15 @@ const MEMBER_ROW = 72;
 /** Ширина сетки с прошлого показа: повторное открытие вкладки рисует строки сразу, без пустого кадра. */
 let gridWidth = 0;
 
-/** «Медиа»: квадраты по 3 в ряд через 1 px; виртуальный список строк, высота строки — от ширины сетки. */
-function MediaGrid({ items, onOpen, host }: { items: Msg[]; onOpen: (m: Msg) => void; host: { current: HTMLDivElement | null } }) {
-  const [w, setW] = useState(gridWidth);
-  useLayoutEffect(() => {
-    const el = host.current;
-    if (!el) return;
-    const put = (x: number) => { if (x > 0) { gridWidth = x; setW((p) => (Math.abs(p - x) < 0.5 ? p : x)); } };
-    put(el.clientWidth);
-    if (typeof ResizeObserver !== 'function') return;
-    const ro = new ResizeObserver((e) => put(e[0].contentRect.width));
-    ro.observe(el);
-    return () => ro.disconnect();
-  }, []);
-  const { cell, row } = gridMetrics(w);
+/** «Медиа»: квадраты по 3 в ряд через 1 px — виртуальная сетка (WindowGrid): плитки одним слоем, ключ — сообщение,
+ *  поэтому новое фото сверху сдвигает плитки, а не пересоздаёт их (картинки не мигают). */
+function MediaGrid({ items, onOpen, host, onNearEnd, nearKey }: { items: Msg[]; onOpen: (m: Msg) => void; host: { current: HTMLDivElement | null }; onNearEnd?: () => void; nearKey: string }) {
   const n = items.length;
   return (
     <div class="app-media-vgrid" ref={host}>
-      {row ? <WindowList items={gridRows(items, GRID_COLS)} rowHeight={row} overscan={4} getKey={(_r: Msg[], i: number) => i}
-        render={(r: Msg[], i: number) => (
-          <div class="app-media-row" style={{ height: cell + 'px' }}>
-            {r.map((m, j) => <MediaCell key={m.id} m={m} onOpen={onOpen} corners={gridCorners(i * GRID_COLS + j, n)} />)}
-          </div>
-        )} /> : null}
+      <WindowGrid items={items} cols={3} gap={1} overscan={4} initialWidth={gridWidth} onWidth={(w: number) => { gridWidth = w; }}
+        getKey={(m: Msg) => m.id} onNearEnd={onNearEnd} nearEndKey={nearKey}
+        render={(m: Msg, i: number) => <MediaCell m={m} onOpen={onOpen} corners={gridCorners(i, n)} />} />
     </div>
   );
 }
@@ -180,7 +168,8 @@ export function MediaCell({ m, onOpen, corners }: { m: Msg; onOpen: (m: Msg) => 
   const box = useRef<HTMLSpanElement>(null);
   const [near, setNear] = useState(false);
   const bare = video && !a.thumb;
-  useEffect(() => { if (!bare || near || !box.current) return; return lazyObserve(box.current, () => setNear(true)); }, [bare]);
+  const root = useContext(LazyRoot);
+  useEffect(() => { if (!bare || near || !box.current) return; return lazyObserve(box.current, () => setNear(true), root); }, [bare, root]);
   return (
     <button type="button" class={'app-media-cell' + (corners ? ' ' + corners.split(' ').map((c) => 'is-' + c).join(' ') : '')} data-mid={m.id} aria-label={a.name} onClick={() => onOpen(m)}>
       {!bare ? <LazyImage src={video ? '' : tileSrc(a)} thumb={a.thumb ?? undefined} alt={a.name} /> : (

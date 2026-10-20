@@ -1,5 +1,5 @@
 import { expect, test } from 'bun:test';
-import { gridCorners, gridMetrics, gridRows, scrollAt, tabLabel, tabScrollTarget, tileSrc, videoFrameSrc } from './mediaGrid';
+import { gridCorners, scrollAt, tabLabel, tabScrollTarget, tileSrc, videoFrameSrc } from './mediaGrid';
 
 const photo = { id: 'p1', kind: 'photo', mime: 'image/jpeg' };
 
@@ -45,16 +45,6 @@ test('scroll tween: ~300 ms ease from start to end, monotonic, ends exactly on t
   expect(mid).toBeLessThan(400);
   let prev = 100;
   for (let t = 0; t <= 300; t += 10) { const y = scrollAt(100, 400, 300, t); expect(y).toBeGreaterThanOrEqual(prev); prev = y; }
-});
-
-test('virtual grid: items in rows of 3, the last row may be short', () => {
-  expect(gridRows([1, 2, 3, 4, 5, 6, 7], 3)).toEqual([[1, 2, 3], [4, 5, 6], [7]]);
-  expect(gridRows([], 3)).toEqual([]);
-});
-
-test('virtual grid: square cells across the width with 1px gaps; a row step includes the gap below', () => {
-  expect(gridMetrics(302)).toEqual({ cell: 100, row: 101 });
-  expect(gridMetrics(0)).toEqual({ cell: 0, row: 0 });
 });
 
 test('virtual grid corners: only the outer corners of the whole grid are rounded (as the CSS grid did)', () => {

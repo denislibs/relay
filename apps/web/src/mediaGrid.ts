@@ -33,12 +33,13 @@ export function scrollAt(from: number, to: number, ms: number, t: number): numbe
 }
 
 /** Плавная прокрутка el до top за ms (нативная smooth не задаёт длительность). Без анимации — сразу.
- *  Колесо или касание посреди пути — прокрутка отдаётся человеку, done сразу. Возвращает отмену (без done). */
+ *  Колесо, касание, нажатие или клавиша посреди пути — прокрутка отдаётся человеку, done сразу. Возвращает отмену (без done). */
 export function animateScroll(el: HTMLElement, top: number, ms: number, instant: boolean, done: () => void): () => void {
   if (instant) { el.scrollTop = top; done(); return () => {}; }
   const from = el.scrollTop;
   let start = 0, raf = 0;
-  const stop = () => { if (raf) cancelAnimationFrame(raf); raf = 0; el.removeEventListener('wheel', grab); el.removeEventListener('touchstart', grab); };
+  const GRAB = ['wheel', 'touchstart', 'pointerdown', 'keydown'] as const;
+  const stop = () => { if (raf) cancelAnimationFrame(raf); raf = 0; for (const t of GRAB) el.removeEventListener(t, grab); };
   const finish = () => { stop(); done(); };
   function grab() { finish(); }
   const step = (now: number) => {
@@ -47,26 +48,12 @@ export function animateScroll(el: HTMLElement, top: number, ms: number, instant:
     if (now - start >= ms) { finish(); return; }
     raf = requestAnimationFrame(step);
   };
-  el.addEventListener('wheel', grab, { passive: true });
-  el.addEventListener('touchstart', grab, { passive: true });
+  for (const t of GRAB) el.addEventListener(t, grab, { passive: true });
   raf = requestAnimationFrame(step);
   return stop;
 }
 
-/** Сетка «Медиа» в виртуальном списке: строки по cols плиток (последняя может быть короче). */
-export function gridRows<T>(items: T[], cols: number): T[][] {
-  const rows: T[][] = [];
-  for (let i = 0; i < items.length; i += cols) rows.push(items.slice(i, i + cols));
-  return rows;
-}
-
-export const GRID_COLS = 3, GRID_GAP = 1;
-/** Квадратная плитка по ширине сетки (3 в ряд через 1 px); row — шаг строки вместе с зазором под ней. */
-export function gridMetrics(width: number): { cell: number; row: number } {
-  if (width <= 0) return { cell: 0, row: 0 };
-  const cell = (width - GRID_GAP * (GRID_COLS - 1)) / GRID_COLS;
-  return { cell, row: cell + GRID_GAP };
-}
+export const GRID_COLS = 3;
 
 /** Скруглённые углы плитки i из n — только внешние углы всей сетки (как в Telegram), как это делали
  *  :nth-child у обычной CSS-сетки: tl, tr, bl, br через пробел. */

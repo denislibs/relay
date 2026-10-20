@@ -838,19 +838,32 @@ function MediaSpoiler(props) {
     h('span', { class: 'rl-media-spoiler-dots', 'aria-hidden': 'true' }));
 }
 /* ---------- LazyImage: blurred thumb at once, the full image only when it is within 500px of the viewport ----------
-   One shared IntersectionObserver for all images. The box is sized by the parent (aspect ratio known up front),
-   so loading never shifts the feed. */
-var lazyIO = null, lazyCbs = typeof WeakMap === 'function' ? new WeakMap() : null;
-function lazyObserve(el, cb) {
-  if (!lazyIO) lazyIO = new IntersectionObserver(function (es) {
-    es.forEach(function (e) { if (!e.isIntersecting) return; var f = lazyCbs.get(e.target); if (f) { lazyCbs.delete(e.target); lazyIO.unobserve(e.target); f(); } });
-  }, { rootMargin: '500px 0px' });
-  lazyCbs.set(el, cb); lazyIO.observe(el);
-  return function () { lazyCbs.delete(el); lazyIO.unobserve(el); };
+   One shared IntersectionObserver per scroll root. The box is sized by the parent (aspect ratio known up front),
+   so loading never shifts the feed. Внутри своей прокрутки (правая панель) корень наблюдателя — она сама:
+   с корнем-окном запас 500px обрезается краем панели и картинка грузится, только когда уже видна.
+   Корень задаёт LazyRoot.Provider (элемент прокрутки) или третий аргумент lazyObserve. */
+var LazyRoot = createContext(/** @type {Element | null} */ (null));
+var lazyIOs = typeof Map === 'function' ? new Map() : null, lazyCbs = typeof WeakMap === 'function' ? new WeakMap() : null;
+function lazyObserve(el, cb, root) {
+  root = root || null;
+  var io = lazyIOs.get(root);
+  if (!io) {
+    io = new IntersectionObserver(function (es) {
+      es.forEach(function (e) { if (!e.isIntersecting) return; var f = lazyCbs.get(e.target); if (f) { lazyCbs.delete(e.target); io.unobserve(e.target); f(); } });
+    }, { root: root, rootMargin: '500px 0px' });
+    lazyIOs.set(root, io);
+  }
+  lazyCbs.set(el, cb); io.observe(el);
+  return function () {
+    lazyCbs.delete(el); io.unobserve(el);
+    // корень ушёл из документа (панель закрыли) — его наблюдатель больше не нужен
+    if (root && !root.isConnected) { io.disconnect(); lazyIOs.delete(root); }
+  };
 }
 function LazyImage(props) {
   var ref = useRef(null), vis = useState(!!props.eager), loaded = useState(false);
-  useEffect(function () { if (vis[0] || !ref.current) return; return lazyObserve(ref.current, function () { vis[1](true); }); }, []);
+  var root = useContext(LazyRoot);
+  useEffect(function () { if (vis[0] || !ref.current) return; return lazyObserve(ref.current, function () { vis[1](true); }, root); }, [root]);
   return h('span', { ref: ref, class: cx('rl-lazy', loaded[0] && 'rl-lazy-loaded') },
     props.thumb ? h('img', { class: 'rl-lazy-thumb', src: props.thumb, alt: '', 'aria-hidden': 'true' }) : null,
     vis[0] && props.src ? h('img', { class: 'rl-lazy-full', src: props.src, alt: props.alt || '', decoding: 'async', draggable: false, onLoad: function () { loaded[1](true); if (props.onLoad) props.onLoad(); } }) : null);
@@ -1520,4 +1533,4 @@ function ScrollToBottom(props) {
 }
 
 
-export { WebPage, MsgLine, ForwardTitle, peerTone, RelayLogo, Verified, ArchivedRow, ReplyQuote, ReactionChips, cx, chain, ripple, reducedMotion, omit, fmtTime, makeWave, ICONS, Icon, Button, IconButton, Avatar, Badge, Chip, ChatRow, ChatRowSkeleton, Bubble, MessageStatus, TypingIndicator, DateDivider, Banner, NavRail, Checkbox, Toast, Card, Steps, MediaArt, ProgressRing, Waveform, VoiceMessage, VoiceRecorder, MediaBubble, MediaPolicy, mediaHeld, FileBubble, MediaThumb, MediaViewer, Switch, PanelHeader, ProfileHeader, ActionTile, InfoRow, SettingsIcon, ReadMore, Presence, useMinVisible, LazyImage, lazyObserve, FlipList, SyncIndicator, LinearProgress, EmptyState, ScrollToBottom };
+export { WebPage, MsgLine, ForwardTitle, peerTone, RelayLogo, Verified, ArchivedRow, ReplyQuote, ReactionChips, cx, chain, ripple, reducedMotion, omit, fmtTime, makeWave, ICONS, Icon, Button, IconButton, Avatar, Badge, Chip, ChatRow, ChatRowSkeleton, Bubble, MessageStatus, TypingIndicator, DateDivider, Banner, NavRail, Checkbox, Toast, Card, Steps, MediaArt, ProgressRing, Waveform, VoiceMessage, VoiceRecorder, MediaBubble, MediaPolicy, mediaHeld, FileBubble, MediaThumb, MediaViewer, Switch, PanelHeader, ProfileHeader, ActionTile, InfoRow, SettingsIcon, ReadMore, Presence, useMinVisible, LazyImage, LazyRoot, lazyObserve, FlipList, SyncIndicator, LinearProgress, EmptyState, ScrollToBottom };

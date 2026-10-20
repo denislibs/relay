@@ -5,6 +5,7 @@ import { requestMeasure, requestMutation, onHeavyAnimationEnd, beginHeavyAnimati
 import { TWallpaper } from 'twallpaper';
 import { cx, ripple, reducedMotion, Presence, Icon, IconButton, Avatar, Badge, Button, Checkbox, MediaArt, MessageStatus, ICONS } from './kit.js';
 import { SearchInput } from './searchInput.js';
+import { gridLayout } from './windowMath.js';
 
 /* Relay UI kit — components added in the Preact version. */
 
@@ -274,26 +275,24 @@ function LoginQR(props) {
 }
 
 /* ---------- VirtualList: windowed list with variable heights, measure → mutate ---------- */
-/* ---------- WindowList: fixed-height rows virtualised inside the nearest scrolling ancestor ----------
-   Only rows in view (+ overscan) are in the DOM. Rows are absolutely placed, so a reorder is a transform
-   change that CSS animates; scrolling never touches transforms, so it never animates. */
-function WindowList(props) {
-  var items = props.items || [], rh = props.rowHeight || 72, over = props.overscan == null ? 6 : props.overscan;
-  var host = useRef(null), range = useState([0, Math.min(items.length, 20)]);
-  var n = items.length;
+/* ---------- окно виртуального списка: какие строки [first, last) на экране (+ запас) ----------
+   Прокрутка — у ближайшего прокручиваемого предка. Место списка в нём меняется не только прокруткой:
+   содержимое над списком (профиль в панели, раскрывающиеся строки) растёт и сжимается — за ним следит
+   ResizeObserver (предки на пути до прокрутки и всё, что стоит перед ними). Спрятанный список (вкладка
+   SlideStack в стороне) не меряется: его раскладка ничего не значит; показали — мерим заново. */
+function useWindowRange(host, rh, over, n) {
+  var range = useState([0, Math.min(n, 20)]);
   var cur = useRef(range[0]); cur.current = range[0];
-  var nearEnd = useRef(props.onNearEnd); nearEnd.current = props.onNearEnd;
-  // окно (видимое + overscan) упёрлось в хвост — до конца меньше полуэкрана строк, пора подгружать следующую страницу
-  useEffect(function () {
-    if (nearEnd.current && n && range[0][1] >= n) nearEnd.current();
-  }, [range[0][1], n]);
+  var poke = useRef(null);
   useLayoutEffect(function () {
-    var el = host.current, sc = null, queued = false, ro = null, alive = true;
+    var el = host.current, sc = null, queued = false, ro = null, mo = null, alive = true;
     function measure() {
       queued = false;
+      if (!alive || !sc || !rh) return;
+      if (!el.getClientRects().length || el.closest('.rl-slide-parked')) return;
       var offset = el.getBoundingClientRect().top - sc.getBoundingClientRect().top + sc.scrollTop; // where the list starts in the scroller
       var top = sc.scrollTop - offset, bottom = top + sc.clientHeight;
-      var vTop = Math.max(0, Math.floor(top / rh)), vBot = Math.ceil(bottom / rh);
+      var vTop = Math.max(0, Math.floor(top / rh)), vBot = Math.max(0, Math.ceil(bottom / rh));
       // запас с гистерезисом: окно сдвигаем, только когда до его края осталось меньше двух строк,
       // и сразу с полным запасом — иначе перерисовка всего списка на каждые 72 px прокрутки
       var r = cur.current, edge = Math.min(2, over);
@@ -302,7 +301,8 @@ function WindowList(props) {
       if (covered && r[1] - r[0] <= next[1] - next[0] + over * 2) return;
       requestMutation(function () { range[1](function (r) { return r[0] === next[0] && r[1] === next[1] ? r : next; }); });
     }
-    function onScroll() { if (!queued) { queued = true; requestMeasure(measure); } }
+    function onScroll() { if (!queued && alive) { queued = true; requestMeasure(measure); } }
+    poke.current = onScroll;
     // прокручиваемого родителя ищем в фазе замера: getComputedStyle — это чтение стилей
     requestMeasure(function () {
       if (!alive) return;
@@ -310,35 +310,103 @@ function WindowList(props) {
       while (sc && sc !== document.body && !/(auto|scroll)/.test(getComputedStyle(sc).overflowY)) sc = sc.parentElement;
       if (!sc) return;
       sc.addEventListener('scroll', onScroll, { passive: true });
-      ro = typeof ResizeObserver === 'function' ? new ResizeObserver(onScroll) : null;
-      if (ro) ro.observe(sc);
+      if (typeof ResizeObserver === 'function') {
+        ro = new ResizeObserver(onScroll);
+        ro.observe(sc);
+        for (var p = el; p && p !== sc; p = p.parentElement) {
+          ro.observe(p);
+          for (var sib = p.previousElementSibling; sib; sib = sib.previousElementSibling) ro.observe(sib);
+        }
+      }
+      // вкладку SlideStack вернули из стороны (класс слайда сменился) — размеры могли и не поменяться
+      var slide = el.closest('.rl-slide');
+      if (slide && typeof MutationObserver === 'function') { mo = new MutationObserver(onScroll); mo.observe(slide, { attributes: true, attributeFilter: ['class'] }); }
       queued = true; measure();
     });
-    return function () { alive = false; if (sc) sc.removeEventListener('scroll', onScroll); if (ro) ro.disconnect(); };
+    return function () { alive = false; poke.current = null; if (sc) sc.removeEventListener('scroll', onScroll); if (ro) ro.disconnect(); if (mo) mo.disconnect(); };
   }, [rh, over]);
+  // строк стало больше или меньше — окно проверяется заново (высота списка и место под ним поменялись)
+  useLayoutEffect(function () { if (poke.current) poke.current(); }, [n]);
+  return range[0];
+}
+
+/* «Пора догружать»: окно (видимое + запас) упёрлось в хвост. retry — любое значение, при смене которого
+   проверка повторяется (страница догрузилась, а число строк ещё то же). */
+function useNearEnd(onNearEnd, last, n, retry) {
+  var nearEnd = useRef(onNearEnd); nearEnd.current = onNearEnd;
+  useEffect(function () {
+    if (nearEnd.current && n && last >= n) nearEnd.current();
+  }, [last, n, retry]);
+}
+
+/* ---------- WindowList: fixed-height rows virtualised inside the nearest scrolling ancestor ----------
+   Only rows in view (+ overscan) are in the DOM. Rows are absolutely placed, so a reorder is a transform
+   change that CSS animates; scrolling never touches transforms, so it never animates. */
+function WindowList(props) {
+  var items = props.items || [], rh = props.rowHeight || 72, over = props.overscan == null ? 6 : props.overscan;
+  var host = useRef(null);
+  var n = items.length;
+  var range = useWindowRange(host, rh, over, n);
+  useNearEnd(props.onNearEnd, range[1], n, props.nearEndKey);
   // строки переставились (чат поднялся наверх) — пока они едут, это тяжёлая анимация.
   // Позиции известны без чтения DOM: индекс × высота строки
   var lastIndex = useRef(null);
   var nowIndex = {};
-  for (var q = Math.min(range[0][0], n); q < Math.min(range[0][1], n); q++) nowIndex[props.getKey(items[q], q)] = q;
+  for (var q = Math.min(range[0], n); q < Math.min(range[1], n); q++) nowIndex[props.getKey(items[q], q)] = q;
   useLayoutEffect(function () {
     var prev = lastIndex.current, moved = false;
     if (prev) for (var k in nowIndex) if (prev[k] !== undefined && prev[k] !== nowIndex[k]) { moved = true; break; }
     lastIndex.current = nowIndex;
     if (moved && !reducedMotion()) beginHeavyAnimation(320);
   });
-  var first = Math.min(range[0][0], n), last = Math.min(range[0][1], n);
+  var first = Math.min(range[0], n), last = Math.min(range[1], n);
   var rows = [];
   for (var i = first; i < last; i++) {
     var key = props.getKey(items[i], i);
     // z: верхние строки поверх — строка, поднимающаяся наверх, едет над соседями, а не под ними
-    rows.push({ key: key, el: h('div', { key: key, class: 'rl-wrow', style: { transform: 'translateY(' + i * rh + 'px)', height: rh, zIndex: n - i } }, props.render(items[i], i)) });
+    rows.push({ key: key, el: h('div', { key: key, role: 'none', class: 'rl-wrow', style: { transform: 'translateY(' + i * rh + 'px)', height: rh, zIndex: n - i } }, props.render(items[i], i)) });
   }
   // DOM-порядок стабилен (по ключу), место — только transform: если Preact переставит узел в DOM,
   // CSS-переход у него сбросится и строка прыгнет вместо того, чтобы проехать
   rows.sort(function (a, b) { return a.key < b.key ? -1 : a.key > b.key ? 1 : 0; });
   rows = rows.map(function (r) { return r.el; });
   return h('div', { ref: host, class: cx('rl-wlist', props.class), role: props.role, style: { height: n * rh } }, rows);
+}
+
+/* ---------- WindowGrid: квадратные плитки cols в ряд, виртуально (как WindowList, но окно — по строкам) ----------
+   Плитки — один слой, каждая на своём месте (transform), ключ — у самой плитки: новая плитка сверху сдвигает
+   остальные, но не пересоздаёт их (картинки не мигают). Размеры — в целых пикселях (windowMath.gridLayout).
+   initialWidth — ширина с прошлого показа: первый кадр уже с плитками. */
+function WindowGrid(props) {
+  var items = props.items || [], cols = props.cols || 3, gap = props.gap == null ? 1 : props.gap, over = props.overscan == null ? 4 : props.overscan;
+  var host = useRef(null), wSt = useState(props.initialWidth || 0);
+  var onWidth = useRef(props.onWidth); onWidth.current = props.onWidth;
+  useLayoutEffect(function () {
+    var el = host.current;
+    if (!el) return;
+    function put(w) { w = Math.floor(w); if (w > 0) { wSt[1](w); if (onWidth.current) onWidth.current(w); } }
+    put(el.clientWidth);
+    if (typeof ResizeObserver !== 'function') return;
+    var ro = new ResizeObserver(function (es) { put(es[0].contentRect.width); });
+    ro.observe(el);
+    return function () { ro.disconnect(); };
+  }, []);
+  var L = gridLayout(wSt[0], cols, gap);
+  var n = items.length, rows = Math.ceil(n / cols);
+  var range = useWindowRange(host, L.step, over, rows);
+  useNearEnd(props.onNearEnd, range[1], rows, props.nearEndKey);
+  var cells = [];
+  if (L.step) {
+    var from = Math.min(range[0] * cols, n), to = Math.min(range[1] * cols, n);
+    for (var i = from; i < to; i++) {
+      var key = props.getKey(items[i], i), c = L.cols[i % cols];
+      cells.push({ key: key, el: h('div', { key: key, role: 'none', class: 'rl-wcell', style: { position: 'absolute', left: 0, top: 0, width: c.w, height: L.cell,
+        transform: 'translate(' + c.x + 'px,' + Math.floor(i / cols) * L.step + 'px)' } }, props.render(items[i], i)) });
+    }
+    cells.sort(function (a, b) { return a.key < b.key ? -1 : a.key > b.key ? 1 : 0; });
+  }
+  return h('div', { ref: host, class: cx('rl-wgrid', props.class), role: props.role, style: { position: 'relative', width: '100%', height: rows ? rows * L.step - gap : 0, contain: 'layout paint' } },
+    cells.map(function (x) { return x.el; }));
 }
 
 /* ---------- AsidePanel: right-hand floating card (user info, search…) that pushes the chat column ---------- */
@@ -991,4 +1059,4 @@ function GlassBar(props) {
   return h('header', { class: cx('rl-glassbar', props.class) }, props.children);
 }
 
-export { patternColor, intensityAlpha, Wallpaper, nudgeWallpaper, buildPattern, loadPattern, patternSize, PATTERN_FILES, DOODLES, PATTERN_SETS, FloatShell, SideResizer, SidebarCard, SidebarHeader, FolderTabs, FolderRail, Fab, GlassBar, WindowList, AsidePanel, SideFrame, SlideStack, Menu, ReactionPicker, MentionList, DropOverlay, LinkPreview, PollBubble, UnreadDivider, SelectionBar, ChatSearchBar, Highlight, ContactPicker, CallRow, StatusAvatar, LoginQR, VirtualList, BottomNav, Tooltip, plural };
+export { patternColor, intensityAlpha, Wallpaper, nudgeWallpaper, buildPattern, loadPattern, patternSize, PATTERN_FILES, DOODLES, PATTERN_SETS, FloatShell, SideResizer, SidebarCard, SidebarHeader, FolderTabs, FolderRail, Fab, GlassBar, WindowList, WindowGrid, gridLayout, AsidePanel, SideFrame, SlideStack, Menu, ReactionPicker, MentionList, DropOverlay, LinkPreview, PollBubble, UnreadDivider, SelectionBar, ChatSearchBar, Highlight, ContactPicker, CallRow, StatusAvatar, LoginQR, VirtualList, BottomNav, Tooltip, plural };
