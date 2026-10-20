@@ -21,7 +21,7 @@ export async function fileKey(attachmentId: string, db: Tx | typeof sql = sql): 
   if (e && Date.now() - e.at < TTL_MS) return e.raw;
   const [row] = await db`select wrapped, kek_id from keys.attachment_keys where attachment_id = ${attachmentId}`;
   if (!row) return null;
-  const raw = await kmsFor(row.kek_id as string).unwrap(new Uint8Array(row.wrapped as Uint8Array));
+  const raw = await kmsFor(row.kek_id as string).unwrap(new Uint8Array(row.wrapped as Uint8Array), row.kek_id as string);
   if (db === sql) { keys.set(attachmentId, { raw, at: Date.now() }); if (keys.size > MAX) keys.delete(keys.keys().next().value!); }
   return raw;
 }

@@ -8,7 +8,10 @@ export interface Kms {
   /** Идентификатор главного ключа (пишется рядом с завёрнутым ключом чата). */
   readonly id: string;
   wrap(dek: Uint8Array): Promise<Uint8Array>;
-  unwrap(wrapped: Uint8Array): Promise<Uint8Array>;
+  /** kekId — каким главным ключом завёрнуто (сервису ключей — чтобы выбрать прежний при смене) */
+  unwrap(wrapped: Uint8Array, kekId?: string | null): Promise<Uint8Array>;
+  /** Узнать id главного ключа заранее (сервис ключей), до первой записи. */
+  init?(): Promise<void>;
   /** Завёрнуто не последней версией главного ключа (Vault: ключ повернули) — пора перезавернуть. */
   stale?(wrapped: Uint8Array): Promise<boolean>;
   /** Перезавернуть последней версией, не раскрывая ключ чата (Vault Transit rewrap). */
@@ -74,11 +77,47 @@ export class VaultKms implements Kms {
   }
 }
 
+/**
+ * Сервис ключей (keyService.ts) — отдельный процесс, у которого одного есть доступ к KMS. server и worker в продакшене
+ * ходят к нему (KMS_PROVIDER=service): учётных данных KMS у них нет, каждое обращение видно в его журнале.
+ */
+export class RemoteKms implements Kms {
+  id = 'service:unknown';
+  constructor(private url = process.env.KEY_SERVICE_URL!, private token = process.env.KEY_SERVICE_TOKEN!) {
+    if (!url || !token) throw new Error('KEY_SERVICE_URL and KEY_SERVICE_TOKEN are required for KMS_PROVIDER=service');
+  }
+  private async call<T>(path: string, body?: unknown): Promise<T> {
+    const res = await fetch(this.url + path, {
+      method: body === undefined ? 'GET' : 'POST', headers: { authorization: `Bearer ${this.token}`, 'content-type': 'application/json' },
+      body: body === undefined ? undefined : JSON.stringify(body), signal: AbortSignal.timeout(10_000),
+    }).catch((e) => { throw new CryptoError('no_key', `key service unreachable: ${e}`); });
+    if (!res.ok) throw new CryptoError('no_key', `key service ${path}: ${res.status}`);
+    return res.json() as Promise<T>;
+  }
+  async init() { this.id = (await this.call<{ kekId: string }>('/info')).kekId; }
+  async wrap(dek: Uint8Array) {
+    const r = await this.call<{ wrapped: string; kekId: string }>('/wrap', { dek: Buffer.from(dek).toString('base64') });
+    this.id = r.kekId;
+    return new Uint8Array(Buffer.from(r.wrapped, 'base64'));
+  }
+  async unwrap(wrapped: Uint8Array, kekId?: string | null) {
+    const r = await this.call<{ dek: string }>('/unwrap', { wrapped: Buffer.from(wrapped).toString('base64'), kekId: kekId ?? null });
+    return new Uint8Array(Buffer.from(r.dek, 'base64'));
+  }
+  async stale(wrapped: Uint8Array) { return (await this.call<{ stale: boolean }>('/stale', { wrapped: Buffer.from(wrapped).toString('base64') })).stale; }
+  async rewrap(wrapped: Uint8Array) {
+    const r = await this.call<{ wrapped: string; kekId: string }>('/rewrap', { wrapped: Buffer.from(wrapped).toString('base64') });
+    this.id = r.kekId;
+    return new Uint8Array(Buffer.from(r.wrapped, 'base64'));
+  }
+}
+
 let kms: Kms | null = null;
 export function getKms(): Kms {
   if (kms) return kms;
   const provider = process.env.KMS_PROVIDER ?? 'fake';
   if (provider === 'vault') return (kms = new VaultKms());
+  if (provider === 'service') return (kms = new RemoteKms());
   if (process.env.NODE_ENV === 'production' && !process.env.RELAY_ALLOW_FAKE_KMS) throw new Error('KMS_PROVIDER=fake is not allowed in production');
   return (kms = new FakeKms());
 }
@@ -104,6 +143,7 @@ export function kmsFor(kekId?: string | null): Kms {
  */
 export async function rewrapStep(sql: import('postgres').Sql<{ bigint: number }>, after: [number, number] = [0, 0], batch = 200): Promise<{ rewrapped: number; next: [number, number]; done: boolean }> {
   const cur = getKms();
+  await cur.init?.();
   const rows = await sql`select chat_id, version, wrapped_dek, kek_id from keys.chat_keys
                           where (chat_id, version) > (${after[0]}, ${after[1]}) order by chat_id, version limit ${batch}`;
   let rewrapped = 0;
@@ -111,7 +151,7 @@ export async function rewrapStep(sql: import('postgres').Sql<{ bigint: number }>
     const wrapped = new Uint8Array(r.wrapped_dek as Uint8Array);
     const sameKek = r.kek_id === cur.id;
     if (sameKek && !(await cur.stale?.(wrapped))) continue;
-    const next = sameKek && cur.rewrap ? await cur.rewrap(wrapped) : await cur.wrap(await kmsFor(r.kek_id as string).unwrap(wrapped));
+    const next = sameKek && cur.rewrap ? await cur.rewrap(wrapped) : await cur.wrap(await kmsFor(r.kek_id as string).unwrap(wrapped, r.kek_id as string));
     await sql`update keys.chat_keys set wrapped_dek = ${Buffer.from(next)}, kek_id = ${cur.id}
                where chat_id = ${r.chat_id} and version = ${r.version} and wrapped_dek = ${Buffer.from(wrapped)}`;
     rewrapped++;

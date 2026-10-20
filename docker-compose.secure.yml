@@ -7,9 +7,17 @@
 #   - server ходит с ключом «только поиск» (MEILI_API_KEY, выпуск: bun apps/server/src/dev/meiliKeys.ts),
 #     мастер-ключ — только у worker (он пишет в индекс);
 #   - том meili не бэкапится: индекс восстанавливается из базы задачей search.reindex.
+#
+# Главный ключ (KMS): учётные данные Vault — только у сервиса ключей (apps/server/src/keyService.ts) в своей
+# внутренней сети `keys`; server и worker просят его завернуть/развернуть ключ по своим токенам
+# (KEY_SERVICE_TOKENS), каждое обращение — в его журнале, массовая выгрузка упирается в предел и даёт тревогу.
 networks:
   search:
     internal: true
+  keys:
+    internal: true
+  # выход к Vault (может быть на другом хосте) — только у сервиса ключей
+  kms-egress: {}
 
 services:
   search:
@@ -18,26 +26,41 @@ services:
       MEILI_ENV: production
     networks: [search]
 
+  keys:
+    build: { context: ., dockerfile: apps/server/Dockerfile }
+    command: ["bun", "apps/server/src/keyService.ts"]
+    environment:
+      KMS_PROVIDER: vault
+      VAULT_ADDR: ${VAULT_ADDR:?set VAULT_ADDR}
+      VAULT_TOKEN: ${VAULT_TOKEN:?set VAULT_TOKEN (the only holder of KMS credentials)}
+      VAULT_TRANSIT_KEY: relay-chat-keys
+      KEY_SERVICE_PORT: "7800"
+      KEY_SERVICE_TOKENS: server:${KEY_TOKEN_SERVER:?set KEY_TOKEN_SERVER},worker:${KEY_TOKEN_WORKER:?set KEY_TOKEN_WORKER}
+      KEY_SERVICE_UNWRAP_PER_MIN: "6000"
+      NODE_ENV: production
+    networks: [keys, kms-egress]
+    restart: unless-stopped
+
   server:
     environment:
       DEV_LOGIN: "0"
       DEV_MIGRATE: "0"
       MEILI_MASTER_KEY: ""
       MEILI_API_KEY: ${MEILI_SEARCH_KEY:?set MEILI_SEARCH_KEY (bun apps/server/src/dev/meiliKeys.ts)}
-      KMS_PROVIDER: vault
-      VAULT_ADDR: ${VAULT_ADDR:?set VAULT_ADDR}
-      VAULT_TOKEN: ${VAULT_TOKEN_SERVER:?set VAULT_TOKEN_SERVER}
-      VAULT_TRANSIT_KEY: relay-chat-keys
+      KMS_PROVIDER: service
+      KEY_SERVICE_URL: http://keys:7800
+      KEY_SERVICE_TOKEN: ${KEY_TOKEN_SERVER:?set KEY_TOKEN_SERVER}
       NODE_ENV: production
-    networks: [default, search]
+    networks: [default, search, keys]
+    depends_on: [keys]
 
   worker:
     environment:
       DEV_LOGIN: "0"
       MEILI_MASTER_KEY: ${MEILI_MASTER_KEY:?set MEILI_MASTER_KEY}
-      KMS_PROVIDER: vault
-      VAULT_ADDR: ${VAULT_ADDR:?set VAULT_ADDR}
-      VAULT_TOKEN: ${VAULT_TOKEN_WORKER:?set VAULT_TOKEN_WORKER}
-      VAULT_TRANSIT_KEY: relay-chat-keys
+      KMS_PROVIDER: service
+      KEY_SERVICE_URL: http://keys:7800
+      KEY_SERVICE_TOKEN: ${KEY_TOKEN_WORKER:?set KEY_TOKEN_WORKER}
       NODE_ENV: production
-    networks: [default, search]
+    networks: [default, search, keys]
+    depends_on: [keys]
