@@ -223,6 +223,38 @@ test('a big chat is trimmed in bounded transactions; a flush issued mid-eviction
   expect(await count(db, 'terms')).toBe(11);
 });
 
+test('the chat row is narrowed in the same transaction as its rows: a reopened cache and a later message never bridge evicted history', async () => {
+  const name = 'evict-' + crypto.randomUUID();
+  const msgs = Array.from({ length: 30 }, (_, j) => row(3, j + 1, { body: 'w' + j }));
+  const db = await seed(name, [{ chat: chatRow(3, msgs[29], { ranges: [[1, 30]], historyStart: true, seed: 3 }), msgs }]);
+  const s = await Store.open(db, ME);
+  await s.loadChatMessages(3);
+  let stop = false;
+  // первая порция — и «воркер закрылся»: память на диск не попала
+  await evict(s, db, keepNone, { ...EVICT_LIMITS, perChat: 10 }, { chunk: 5, closed: () => stop, onChunk: () => { stop = true; } });
+  const stored = (await all<LocalChat>(db, 'chats')).find((c) => c.id === 3)!;
+  expect(stored.ranges).toEqual([[6, 30]]);
+  expect(stored.historyStart).toBeUndefined();
+  expect(stored.seed).toBeUndefined();
+  const re = await Store.open(db, ME);
+  await re.loadChatMessages(3);
+  expect(re.chats.get(3)!.ranges).toEqual([[6, 30]]);
+  expect(re.chatMessages(3)[0].id).toBe(6);
+  // журнал после уборки продлевает живой отрезок, но не перекидывает его через стёртое
+  re.applyUpdate({ type: 'newMessage', message: msg({ id: 31, chatId: 3, senderId: 2, body: 'new' }) });
+  expect(re.chats.get(3)!.ranges).toEqual([[6, 31]]);
+  // сообщение журнала посреди уборки (ещё не записано): в памяти отрезок до него, на диске — только записанное
+  const s2 = await Store.open(db, ME);
+  await evict(s2, db, keepNone, { ...EVICT_LIMITS, perChat: 10 }, {
+    chunk: 5,
+    onChunk: (_id, n) => { if (n && !s2.messageById(3, 32)) s2.applyUpdate({ type: 'newMessage', message: msg({ id: 32, chatId: 3, senderId: 2, body: 'mid' }) }); },
+  });
+  expect(s2.chats.get(3)!.ranges).toEqual([[21, 32]]);
+  const after = (await all<LocalChat>(db, 'chats')).find((c) => c.id === 3)!;
+  const rows = (await all<LocalMessage>(db, 'messages')).filter((m) => m.chatId === 3).map((m) => m.sort).sort((x, y) => x - y);
+  expect(after.ranges).toEqual([[rows[0], rows[rows.length - 1]]]);
+});
+
 test('a loading chat is skipped; a closed engine stops between chunks', async () => {
   const name = 'evict-' + crypto.randomUUID();
   const a = Array.from({ length: 30 }, (_, j) => row(1, 100 + j)), b = Array.from({ length: 30 }, (_, j) => row(2, 200 + j));

@@ -77,19 +77,29 @@ async function floorOf(db: IDBDatabase, chatId: number, keep: number): Promise<n
 
 /**
  * Порция: до chunk строк старее floor, начиная с from (null — с самой старой). Незащищённые — строка и её слова,
- * одной транзакцией. next — sort первой непройденной строки (null — дошли до floor).
+ * одной транзакцией; в ней же — строка чата со сжатыми отрезками (narrow): на диске отрезки никогда не обещают
+ * стёртого, даже если воркер закроется до следующей записи. Сжимается строка из IDB (как и сообщения — то, что
+ * записано), не память: в памяти могут быть отрезки, продлённые ещё не записанными сообщениями.
+ * keptBefore — защищённые из прошлых порций. next — sort первой непройденной строки (null — дошли до floor).
  */
-async function trimChunk(db: IDBDatabase, chatId: number, from: number | null, floor: number, chunk: number, prot: Prot): Promise<{ removed: Removed[]; kept: number[]; next: number | null }> {
-  const t = db.transaction(['messages', 'terms'], 'readwrite');
-  const terms = t.objectStore('terms');
+async function trimChunk(db: IDBDatabase, chatId: number, from: number | null, floor: number, chunk: number, prot: Prot, keptBefore: number[]): Promise<{ removed: Removed[]; kept: number[]; next: number | null }> {
+  const t = db.transaction(['messages', 'terms', 'chats'], 'readwrite');
+  const terms = t.objectStore('terms'), chats = t.objectStore('chats');
   const removed: Removed[] = [], kept: number[] = [];
-  let next: number | null = null, seen = 0;
+  let next: number | null = null, seen = 0, row: LocalChat | undefined;
+  const get = chats.get(chatId);
+  get.onsuccess = () => { row = get.result as LocalChat | undefined; };
+  const finish = () => {
+    if (!removed.length || !row?.ranges) return;   // строка до отрезков — их выведут из оставшихся строк при загрузке
+    narrow(row, next ?? floor, removed, [...keptBefore, ...kept]);
+    chats.put(row);
+  };
   const cur = t.objectStore('messages').index('byChat').openCursor(IDBKeyRange.bound([chatId, from ?? -Infinity], [chatId, floor], false, true));
   cur.onsuccess = () => {
     const d = cur.result;
-    if (!d) return;
+    if (!d) { finish(); return; }
     const m = d.value as LocalMessage & { tab?: string };
-    if (seen++ === chunk) { next = m.sort; return; }   // порция набрана — остальное следующей транзакцией
+    if (seen++ === chunk) { next = m.sort; finish(); return; }   // порция набрана — остальное следующей транзакцией
     if (prot.keys.has(m.key) || (m.id != null && prot.ids.has(m.id))) kept.push(m.sort);
     else {
       for (const term of termsOf(m)) terms.delete([term, m.chatId, m.sort]);
@@ -125,10 +135,8 @@ export function trimRanges(ranges: readonly [number, number][], floor: number, r
   return out;
 }
 
-/** Применить стирание к чату в памяти: сообщения, отрезки, начало истории, seed, вкладки медиа. */
-function applyTrim(store: Store, chat: LocalChat, floor: number, removed: Removed[], kept: number[]): void {
-  if (!removed.length) return;
-  store.dropMessages(chat.id, removed);
+/** Сжать курсоры чата после стирания: отрезки, начало истории, seed, вкладки медиа (строка IDB и память — одинаково). */
+function narrow(chat: LocalChat, floor: number, removed: Removed[], kept: number[]): void {
   const was = chat.ranges;
   const sorts = removed.map((r) => r.sort).sort((x, y) => x - y);
   chat.ranges = trimRanges(was, floor, sorts, kept.slice().sort((x, y) => x - y));
@@ -139,6 +147,13 @@ function applyTrim(store: Store, chat: LocalChat, floor: number, removed: Remove
   if (chat.seed != null && (!live || live[0] > chat.seed)) delete chat.seed;
   // вкладки медиа знали страницы подряд — среди них стёртые: заново с сервера (счётчики верны)
   if (removed.some((r) => r.media)) delete chat.mediaDone;
+}
+
+/** Стирание порции — в память вслед за IDB: сообщения и курсоры чата. */
+function applyTrim(store: Store, chat: LocalChat, floor: number, removed: Removed[], kept: number[]): void {
+  if (!removed.length) return;
+  store.dropMessages(chat.id, removed);
+  narrow(chat, floor, removed, kept);
   store.saveChat(chat);
 }
 
@@ -185,7 +200,7 @@ export async function evict(store: Store, db: IDBDatabase, keepNow: () => EvictK
       const prot: Prot = { keys: new Set(keep.windows.get(id) ?? []), ids: new Set(chat.pinned ?? []) };
       if (chat.last) prot.keys.add(chat.last.key);
       const gen = store.resetGen;
-      const r = await trimChunk(db, id, from, floor, chunk, prot);
+      const r = await trimChunk(db, id, from, floor, chunk, prot, keptAll);
       const now = store.chats.get(id);   // пока стирали, чат могли удалить, а кэш — сбросить (tooLong)
       if (!now || gen !== store.resetGen) break;
       keptAll.push(...r.kept);

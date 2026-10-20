@@ -269,6 +269,7 @@ export class Engine {
     if (this.evictTimer) { clearTimeout(this.evictTimer); this.evictTimer = null; }
     this.watchers.clear();
     await this.whenIdle(2000).catch((e) => console.warn(String(e)));
+    await this.evicting?.catch(() => {});   // уборка остановится между порциями — её порция и курсоры дописаны до flush
     await this.store.flush();
     this.db.close();
   }
