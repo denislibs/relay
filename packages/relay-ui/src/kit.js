@@ -140,8 +140,8 @@ var ICONS = {
   chevronDown: ['M6 9l6 6 6-6'],
   menu: ['M4 7h16', 'M4 12h16', 'M4 17h16'],
   chevronUp: ['M6 15l6-6 6 6'],
-  pin: ['M9 4h6l-1 6 3 3H7l3-3z', 'M12 13v7'],
-  unpin: ['M9 4h6l-1 6 3 3H7l3-3z', 'M12 13v7', 'M4 4l16 16'],   // «Открепить»: булавка, перечёркнутая
+  pin: ['M8 3h8', 'M9.5 3v5.2L6.5 11.5v2h11v-2l-3-3.3V3', 'M12 13.5V21'],
+  unpin: ['M8 3h8', 'M9.5 3v5.2L6.5 11.5v2h11v-2l-3-3.3V3', 'M12 13.5V21', 'M4 4l16 16'],   // «Открепить»: булавка, перечёркнутая
   ban: [C(12, 12, 9), 'M5.6 5.6l12.8 12.8'],
   camera: ['M4 8h3l2-3h6l2 3h3v11H4z', C(12, 13, 3.5)],
   contact: [C(12, 9, 3.5), 'M5 20a7 7 0 0 1 14 0'],
@@ -451,7 +451,7 @@ function ChatRow(props) {
           props.mentioned ? h('span', { class: 'rl-row-at', 'aria-label': 'Вас упомянули' }, '@') : null,
           props.muted ? h(Icon, { name: 'bellOff', size: 16, title: 'Без звука' }) : null,
           // булавка — только без бейджа (как в Telegram: непрочитанное важнее)
-          props.pinned && !(unread > 0) && !props.unreadMark ? h(Icon, { name: 'pinFilled', size: 16, title: 'Закреплён', class: 'rl-row-pin' }) : null,   // pin-filled
+          props.pinned && !(unread > 0) && !props.unreadMark ? h(Icon, { name: 'pin', size: 22, title: 'Закреплён', class: 'rl-row-pin' }) : null,   // кнопка-булавка, контур (как в Telegram)
           h(RowBadge, { count: unread > 0 ? unread : props.unreadMark ? 1 : 0, blank: !(unread > 0) && !!props.unreadMark, muted: props.muted })))));
 }
 

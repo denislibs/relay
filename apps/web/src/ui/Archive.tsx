@@ -1,4 +1,4 @@
-import { EmptyState, IconButton, WindowList } from '@relay/ui';
+import { EmptyState, PanelHeader, WindowList } from '@relay/ui';
 import type { Item } from '@relay/sync-engine/src/types';
 import { useRef, useState } from 'preact/hooks';
 import { isArchived } from '../chatFlags';
@@ -23,10 +23,7 @@ export function Archive() {
   const onMenu = useRef((id: number, x: number, y: number) => setMenu({ id, x, y })).current;
   return (
     <div class="rl-sidepage" aria-label="Архив">
-      <div class="rl-panel-head">
-        <IconButton icon="arrowLeft" label="Назад" onClick={() => void back()} />
-        <h2>Архив</h2>
-      </div>
+      <PanelHeader icon="arrowLeft" closeLabel="Назад" title="Архив" onClose={() => void back()} />
       <div class="rl-page-scroll">
         <div class="app-listwrap">
           {list.length ? (

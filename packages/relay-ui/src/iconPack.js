@@ -55,7 +55,7 @@ export var PACK_ICONS = {
  "chevronDown": "<path d=\"M5 9l7 7 7-7\"/>",
  "menu": "<path d=\"M4 6h16M4 12h16M4 18h16\"/>",
  "chevronUp": "<path d=\"M5 15l7-7 7 7\"/>",
- "pin": "<path d=\"M9 3.5h6M10 3.5v6l-3 4h10l-3-4v-6\"/><path d=\"M12 13.5V20\"/>",
+ "pin": "<path d=\"M8 3h8\"/><path d=\"M9.5 3v5.2L6.5 11.5v2h11v-2l-3-3.3V3\"/><path d=\"M12 13.5V21\"/>",
  "ban": "<circle cx=\"12\" cy=\"12\" r=\"9\"/><path d=\"M5.6 5.6l12.8 12.8\"/>",
  "camera": "<path d=\"M3 9a3 3 0 0 1 3-3h1.5L9 4h6l1.5 2H18a3 3 0 0 1 3 3v8a3 3 0 0 1-3 3H6a3 3 0 0 1-3-3z\"/><circle cx=\"12\" cy=\"13\" r=\"3.5\"/>",
  "contact": "<circle cx=\"12\" cy=\"8\" r=\"3.5\"/><path d=\"M5 20c.8-3.6 3.5-5.5 7-5.5s6.2 1.9 7 5.5\"/>",
