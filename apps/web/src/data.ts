@@ -662,6 +662,13 @@ export function toggleTodo(chatId: number, id: number, itemId: number, done: boo
 export function appendTodo(chatId: number, id: number, items: string[]): Promise<unknown> { return engine.call({ type: 'todoAppend', chatId, id, items }); }
 export function editTodo(chatId: number, id: number, todo: TodoInput): Promise<unknown> { return engine.call({ type: 'todoEdit', chatId, id, todo }); }
 
+/** Нажатие кнопки под сообщением: ответ сервера — тост (если он есть); правка сообщения придёт журналом. */
+export function pressButton(chatId: number, id: number, data: string): Promise<void> {
+  return engine.call({ type: 'pressButton', chatId, id, data }).then(
+    (r) => { const toast = (r as { toast?: string } | null)?.toast; if (toast) showToast(toast); },
+    (e) => { showToast((e as Error)?.message === 'offline' ? 'Нет соединения — попробуйте, когда появится сеть' : 'Не получилось — попробуйте ещё раз'); });
+}
+
 /** Черновик чата (пустой — удалить). Хранится в движке: общий для вкладок, переживает перезагрузку. */
 export function saveDraft(chatId: number, text: string, entities: Entity[] = []): void {
   engine.call({ type: 'setDraft', chatId, text, entities }).catch(() => {});

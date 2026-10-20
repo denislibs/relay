@@ -36,7 +36,15 @@ export interface Message {
   fwdFrom?: ForwardInfo | null;   // переслано: откуда (нет — своё или отправитель скрыт)
   link?: LinkPreview | null;      // превью первой ссылки в тексте (pending — сервер ещё загружает страницу)
   blocks?: Block[] | null;        // «статья»: блоки (body — её простой текст)
+  buttons?: MessageButton[][] | null;   // кнопки под сообщением (как inline-клавиатура в Telegram): ряды слева направо
 }
+
+/**
+ * Кнопка под сообщением. callback — нажатие уходит на сервер (кадр button с data), ответ — тост и, может быть,
+ * правка сообщения (кнопки убираются, в текст — итог); url — открыть ссылку. Пока кнопки шлёт только «Relay».
+ */
+export interface MessageButton { text: string; kind: 'callback' | 'url'; data?: string; url?: string }
+export const BUTTON_DATA_MAX = 64;
 
 /** Превью ссылки: сайт, заголовок, описание и картинка (уже в нашем хранилище: /files/<id>). */
 export interface LinkPreview {
@@ -171,6 +179,8 @@ export type Update =
   | { type: 'draft'; chatId: Id; text: string; at: string; entities?: Entity[] }   // черновик своих устройств; пустой текст — удалён
   | { type: 'messageEdited'; chatId: Id; id: Id; body: string; editedAt: string; entities?: Entity[] }
   | { type: 'todoUpdated'; chatId: Id; id: Id; todo: Todo; editedAt?: string }   // чек-лист целиком: отметили, добавили или изменили
+  // ответ на нажатие кнопки: новый текст и кнопки (null — кнопок больше нет); «изм.» не ставится — как правка бота
+  | { type: 'messageMarkup'; chatId: Id; id: Id; body: string; entities?: Entity[]; buttons: MessageButton[][] | null }
   | { type: 'messageDeleted'; chatId: Id; id: Id }
   | { type: 'reactions'; chatId: Id; id: Id; reactions: Reaction[] }
   | { type: 'mediaListened'; chatId: Id; id: Id }   // голосовое/кружок прослушали
@@ -304,7 +314,12 @@ export type ClientFrame =
   | { op: 'todoAppend'; reqId: string; chatId: Id; id: Id; items: string[] }
   | { op: 'todoEdit'; reqId: string; chatId: Id; id: Id; todo: TodoInput }
   | { op: 'listened'; reqId: string; chatId: Id; id: Id }
+  // нажата callback-кнопка; ack.result — ButtonAnswer
+  | { op: 'button'; reqId: string; chatId: Id; id: Id; data: string }
   | { op: 'ping' };
+
+/** Ответ на нажатие кнопки: короткий тост (нет — молча). */
+export interface ButtonAnswer { toast?: string }
 
 /** Присутствие собеседника: в сети сейчас или когда был последний раз (ISO).
  *  Скрыто правилом «Последний визит» — {online: null, lastSeen: 'recently'} («был(а) недавно»). */
@@ -340,6 +355,7 @@ export function parseClientFrame(raw: string): ClientFrame | null {
     case 'typing': return int(f.chatId) ? { op: 'typing', chatId: f.chatId } : null;
     case 'edit': return str(f.reqId, 64) && int(f.chatId) && int(f.id) && typeof f.body === 'string' ? { op: 'edit', reqId: f.reqId, chatId: f.chatId, id: f.id, body: f.body, entities: normalizeEntities(f.body, f.entities) } : null;
     case 'delete': return str(f.reqId, 64) && int(f.chatId) && int(f.id) ? { op: 'delete', reqId: f.reqId, chatId: f.chatId, id: f.id } : null;
+    case 'button': return str(f.reqId, 64) && int(f.chatId) && int(f.id) && str(f.data, BUTTON_DATA_MAX) ? { op: 'button', reqId: f.reqId, chatId: f.chatId, id: f.id, data: f.data } : null;
     case 'listened': return str(f.reqId, 64) && int(f.chatId) && int(f.id) ? { op: 'listened', reqId: f.reqId, chatId: f.chatId, id: f.id } : null;
     case 'todoToggle': {
       const ids = (v: unknown) => Array.isArray(v) && v.length <= TODO_ITEMS_MAX && v.every((x) => int(x)) ? v as number[] : null;

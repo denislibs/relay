@@ -377,7 +377,7 @@ export function createServer(opts: { port: number }): Server {
         // любой кадр (и отправка, и прочтение): раз в минуту — отметка активности и проверка, что сеанс жив;
         // сеанс пропал (NOTIFY мог потеряться) — сокет закрыт, кадр не выполняем
         if (!(await checkSocket(ws.data.sessionId, ws.data).catch(() => true))) return;
-        for (const out of await handleFrame(ws.data.userId, frame, publish)) ws.send(JSON.stringify(out));
+        for (const out of await handleFrame(ws.data.userId, frame, publish, ws.data.sessionId)) ws.send(JSON.stringify(out));
       },
     },
   });

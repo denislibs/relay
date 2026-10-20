@@ -8,9 +8,11 @@ import { markRead } from './domain/reads';
 import { saveDraft } from './domain/drafts';
 import { deleteMessage, editMessage, markListened, reactMessage } from './domain/messageOps';
 import { appendTodo, editTodo, toggleTodo } from './domain/todo';
+import { pressButton } from './domain/buttons';
 
-/** publish — разослать кадр в топик пользователя (для «печатает…»); у тестов без сокетов — no-op. */
-export async function handleFrame(userId: number, frame: ClientFrame, publish: (topic: string, msg: string) => void = () => {}): Promise<ServerFrame[]> {
+/** publish — разослать кадр в топик пользователя (для «печатает…»); у тестов без сокетов — no-op.
+ *  sessionId — сеанс сокета (кнопки «Нового входа» отличают этот сеанс от остальных). */
+export async function handleFrame(userId: number, frame: ClientFrame, publish: (topic: string, msg: string) => void = () => {}, sessionId?: number): Promise<ServerFrame[]> {
   const reqId = 'reqId' in frame ? frame.reqId : undefined;
   try {
     switch (frame.op) {
@@ -47,6 +49,10 @@ export async function handleFrame(userId: number, frame: ClientFrame, publish: (
       case 'react': return [{ op: 'ack', reqId: frame.reqId, result: await reactMessage(userId, frame.chatId, frame.id, frame.emoji) }];
       case 'todoToggle': return [{ op: 'ack', reqId: frame.reqId, result: await toggleTodo(userId, frame.chatId, frame.id, frame.completed, frame.incompleted) }];
       case 'todoAppend': return [{ op: 'ack', reqId: frame.reqId, result: await appendTodo(userId, frame.chatId, frame.id, frame.items) }];
+      case 'button': {
+        if (sessionId == null) throw new DomainError('unauthorized');
+        return [{ op: 'ack', reqId: frame.reqId, result: { ...await pressButton(userId, sessionId, frame.chatId, frame.id, frame.data) } }];
+      }
       case 'todoEdit': return [{ op: 'ack', reqId: frame.reqId, result: await editTodo(userId, frame.chatId, frame.id, frame.todo) }];
       case 'draft': {
         const res = await saveDraft(userId, frame.chatId, frame.text, frame.entities);

@@ -3,7 +3,7 @@ import { sql, type Tx } from '../db';
 import { hashToken } from '../auth';
 import { DomainError } from './errors';
 import { appendUpdates } from './journal';
-import { newLoginMessage, postService } from './service';
+import { LOGIN_CONFIRMED, LOGIN_ENDED, newLoginMessage, postService, resolveLoginAlerts } from './service';
 
 export const DEFAULT_TTL_DAYS = 180;
 /** предельный срок cookie и строки (скользит от последней активности); настоящий предел — неактивность (sessions_ttl_days, не больше года) */
@@ -145,6 +145,7 @@ export async function terminateSession(userId: number, currentId: number, id: nu
     const rows = await tx`delete from sessions where id = ${id} and user_id = ${userId} returning id`;
     if (!rows.length) throw new DomainError('not_found');
     await changed(tx, userId);
+    await resolveLoginAlerts(tx, userId, [id], LOGIN_ENDED);   // кнопки под «Новым входом» о нём больше не нужны
     await notifyTerminated(tx, [id]);
   });
   return { ok: true, id };
@@ -158,16 +159,17 @@ export async function confirmSession(userId: number, currentId: number, id: numb
     const rows = await tx`update sessions set confirmed_at = now() where id = ${id} and user_id = ${userId} returning id`;
     if (!rows.length) throw new DomainError('not_found');
     await changed(tx, userId);
+    await resolveLoginAlerts(tx, userId, [id], LOGIN_CONFIRMED);
   });
   return { ok: true };
 }
 
 /** После входа по коду: служебное «Новый вход» и sessionsChanged — плашка «Это вы?» на остальных устройствах. */
 export async function announceLogin(userId: number, token: string): Promise<void> {
-  const [s] = await sql`select device, ip, created_at from sessions where token_hash = ${hashToken(token)}`;
+  const [s] = await sql`select id, device, ip, created_at from sessions where token_hash = ${hashToken(token)}`;
   if (!s) return;
   await sql.begin(async (tx) => {
-    await postService(tx, userId, { type: 'new_login', ...newLoginMessage(s.device || 'Браузер', s.ip, new Date(s.created_at)) });
+    await postService(tx, userId, { type: 'new_login', ...newLoginMessage(s.device || 'Браузер', s.ip, new Date(s.created_at), Number(s.id)) });
     await changed(tx, userId);
   });
 }
@@ -180,6 +182,7 @@ export async function terminateOthers(userId: number, currentId: number): Promis
     const ids = rows.map((r) => Number(r.id));
     // подписки Web Push завершённых сеансов уходят каскадом (session_id)
     if (ids.length) await changed(tx, userId);
+    await resolveLoginAlerts(tx, userId, ids, LOGIN_ENDED);
     await notifyTerminated(tx, ids);
     return ids;
   }) as number[];

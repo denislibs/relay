@@ -1,6 +1,6 @@
 import type { StoreName } from './schema';
 import type { GroupInfo, MediaTab, MyMembership } from '@relay/protocol';
-import type { Birthday, Block, ChatFolder, Entity, ForwardInfo, ForwardRef, LinkPreview, PrivacyKey, PrivacyMode, ProfileLink, ServiceType, Todo, TodoInput, TodoServiceData, VideoVariant } from '@relay/protocol';
+import type { Birthday, Block, ChatFolder, Entity, ForwardInfo, ForwardRef, LinkPreview, MessageButton, PrivacyKey, PrivacyMode, ProfileLink, ServiceType, Todo, TodoInput, TodoServiceData, VideoVariant } from '@relay/protocol';
 
 export type Status = 'pending' | 'sent' | 'read' | 'failed';
 
@@ -30,6 +30,7 @@ export interface LocalMessage {
   fwdFrom?: ForwardInfo | null;      // пересланное: исходный автор, откуда и когда
   link?: LinkPreview | null;         // превью ссылки (pending — сервер ещё загружает)
   blocks?: Block[] | null;           // «статья»
+  buttons?: MessageButton[][] | null; // кнопки под сообщением (inline-клавиатура)
 }
 
 /** Вложение сообщения; у неотправленного id пустой, пока файл не загружен. */
@@ -162,6 +163,8 @@ export type Action =
   | { type: 'todoToggle'; chatId: number; id: number; itemId: number; done: boolean }
   | { type: 'todoAppend'; chatId: number; id: number; items: string[] }
   | { type: 'todoEdit'; chatId: number; id: number; todo: TodoInput }
+  /** нажатие callback-кнопки под сообщением (онлайн): ответ — ButtonAnswer ({toast?}), правка придёт журналом */
+  | { type: 'pressButton'; chatId: number; id: number; data: string }
   /** local: только с устройства, без сети (быстрый первый ответ; полный — тем же вызовом без local) */
   | { type: 'search'; q: string; chatId?: number; beforeId?: number; limit?: number; local?: boolean }
   /** глобальный поиск левой колонки: с сетью — сервер, без сети или при ошибке — с устройства (globalSearch.ts) */

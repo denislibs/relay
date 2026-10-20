@@ -33,6 +33,7 @@ export * from './messageCopy.js';
 export * from './popover.js';
 export * from './todoModal.js';
 export * from './todoBubble.js';
+export * from './inlineKeyboard.js';
 export * from './formattedDate.js';
 export * from './dateView.js';
 export * from './dateModal.js';

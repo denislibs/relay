@@ -1,4 +1,4 @@
-import { graphemes, normalizeEntities, type Entity, type Block, type ForwardInfo, type LinkPreview, type MediaTab, type Message, type ProfilePhoto, type ServiceData, type ServiceType, type Todo } from '@relay/protocol';
+import { graphemes, normalizeEntities, type Entity, type Block, type ForwardInfo, type LinkPreview, type MediaTab, type Message, type MessageButton, type ProfilePhoto, type ServiceData, type ServiceType, type Todo } from '@relay/protocol';
 import { sql, type Tx } from '../db';
 import { muteFromDb } from './chatNotify';
 import { DomainError } from './errors';
@@ -106,6 +106,7 @@ export function toMessage(r: Record<string, unknown>): Message {
     ...(r.fwd_from ? { fwdFrom: r.fwd_from as ForwardInfo } : {}),
     ...(r.link ? { link: r.link as LinkPreview } : {}),
     ...(r.blocks ? { blocks: r.blocks as Block[] } : {}),
+    ...(Array.isArray(r.buttons) && r.buttons.length && !r.deleted ? { buttons: r.buttons as MessageButton[][] } : {}),
     ...(!r.deleted && Array.isArray(r.entities) && r.entities.length ? { entities: normalizeEntities(r.body as string, r.entities) } : {}),
   };
 }
@@ -167,7 +168,7 @@ export async function listChats(userId: number, opts: ListOpts = {}): Promise<Ch
            case when c.kind = 'group' then (select count(*)::int from chat_members gm where gm.chat_id = c.id) end as g_members,
            case when c.kind = 'group' then (select count(*)::int from chat_join_requests jr where jr.chat_id = c.id) end as g_pending,
            lm.id as m_id, lm.chat_id as m_chat_id, lm.sender_id as m_sender_id, lm.client_id as m_client_id,
-           lm.body as m_body, lm.kind as m_kind, lm.attachment as m_attachment, lm.reply_to_id as m_reply_to_id, lm.created_at as m_created_at, lm.edited_at as m_edited_at, lm.deleted as m_deleted, lm.entities as m_entities, lm.service_type as m_service_type, lm.service_data as m_service_data, lm.todo as m_todo, lm.fwd_from as m_fwd_from,
+           lm.body as m_body, lm.kind as m_kind, lm.attachment as m_attachment, lm.reply_to_id as m_reply_to_id, lm.created_at as m_created_at, lm.edited_at as m_edited_at, lm.deleted as m_deleted, lm.entities as m_entities, lm.service_type as m_service_type, lm.service_data as m_service_data, lm.todo as m_todo, lm.fwd_from as m_fwd_from, lm.buttons as m_buttons,
            (select count(*) from messages m
              where m.chat_id = c.id and m.id > cm.last_read_id and m.id >= cm.history_from and m.sender_id <> ${userId})::int as unread,
            (select json_build_object('id', u.id, 'name', ${nameForSql(userId)}, 'system', u.system,   -- контактное имя — только владельцу
@@ -206,7 +207,7 @@ export async function listChats(userId: number, opts: ListOpts = {}): Promise<Ch
     draft: r.draft ? { text: (r.draft as { text: string }).text, at: new Date((r.draft as { at: string }).at).toISOString(), ...((r.draft as { entities?: Entity[] | null }).entities?.length ? { entities: normalizeEntities((r.draft as { text: string }).text, (r.draft as { entities: Entity[] }).entities) } : {}) } : null,
     last: r.m_id == null ? null : toMessage({
       id: r.m_id, chat_id: r.m_chat_id, sender_id: r.m_sender_id, client_id: r.m_client_id,
-      body: r.m_body, kind: r.m_kind, attachment: r.m_attachment, reply_to_id: r.m_reply_to_id, created_at: r.m_created_at, edited_at: r.m_edited_at, deleted: r.m_deleted, entities: r.m_entities, service_type: r.m_service_type, service_data: r.m_service_data, todo: r.m_todo, fwd_from: r.m_fwd_from,
+      body: r.m_body, kind: r.m_kind, attachment: r.m_attachment, reply_to_id: r.m_reply_to_id, created_at: r.m_created_at, edited_at: r.m_edited_at, deleted: r.m_deleted, entities: r.m_entities, service_type: r.m_service_type, service_data: r.m_service_data, todo: r.m_todo, fwd_from: r.m_fwd_from, buttons: r.m_buttons,
     }),
   }));
 }

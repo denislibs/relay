@@ -1,5 +1,5 @@
 import { h } from 'preact';
-import { Bubble, DateDivider, MessageStatus, ReplyQuote, TypingIndicator, UnreadDivider, ReactionChips, SelectionBar, PollBubble } from '../src/index.js';
+import { Bubble, DateDivider, MessageStatus, ReplyQuote, TypingIndicator, UnreadDivider, ReactionChips, SelectionBar, PollBubble, InlineKeyboard } from '../src/index.js';
 
 export default { title: 'Сообщения', parameters: { surface: 'page' } };
 
@@ -55,3 +55,18 @@ export const Poll = {
 };
 
 export const Selection = { name: 'SelectionBar', render: function () { return h('div', { style: { maxWidth: 560 } }, h(SelectionBar, { count: 3, onCancel: function () {}, onCopy: function () {}, onForward: function () {}, onDelete: function () {}, onStar: function () {} })); } };
+
+export const Buttons = {
+  name: 'Кнопки под сообщением',
+  render: function () {
+    var rows = [
+      [{ text: 'Это я', kind: 'callback', data: 'ok' }, { text: 'Завершить этот сеанс', kind: 'callback', data: 'end' }],
+      [{ text: 'Завершить все остальные сеансы', kind: 'callback', data: 'others' }],
+      [{ text: 'Подробнее', kind: 'url', url: 'https://example.com' }],
+    ];
+    var wait = function () { return new Promise(function (r) { setTimeout(r, 1500); }); };
+    return h('div', { style: feed },
+      h(Bubble, { from: 'in', tail: true, groupStart: true, time: '08:33', below: h(InlineKeyboard, { rows: rows, onPress: wait }) },
+        'Новый вход в аккаунт\n\nУстройство: Chrome 155, macOS\nIP: 192.168.97.1'));
+  },
+};

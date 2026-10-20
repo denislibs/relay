@@ -1008,6 +1008,11 @@ export class Engine {
         if (!this.online) throw new Error('offline');
         return this.request({ op: 'todoEdit', reqId: '', chatId: a.chatId, id: a.id, todo: a.todo });
       }
+      case 'pressButton': {
+        // как callback_query: без сети не нажимается; правку сообщения (итог, без кнопок) сервер пришлёт журналом
+        if (!this.online) throw new Error('offline');
+        return this.request({ op: 'button', reqId: '', chatId: a.chatId, id: a.id, data: a.data });
+      }
       case 'react': {
         if (!this.online) throw new Error('offline');
         // сразу у себя (реакция должна отзываться мгновенно), подтверждение и чужие — через журнал

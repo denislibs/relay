@@ -2230,3 +2230,34 @@ html[data-blur="0"] .rl-menu { -webkit-backdrop-filter: none; backdrop-filter: n
 @media (min-width: 926px) { .rl-shell { --side-default: 33vw; } }
 @media (min-width: 1276px) { .rl-shell { --side-default: 25vw; } }
 @media (min-width: 1276px) and (max-width: 1920px) { .rl-shell { --aside-default: calc(25vw - 16px); } }
+
+/* ---------- Кнопки под сообщением (inline-клавиатура, как в Telegram) ----------
+   Ряды во всю ширину пузыря (пузырь растягивается до клавиатуры), зазоры 4px; плашка цвета обоев с белым текстом —
+   как даты и служебные строки (--action-bg), нижние углы крайних кнопок — как у пузыря. Нажатая — кружок в углу. */
+.rl-below-wrap { display: flex; flex-direction: column; min-width: 0; max-width: min(29rem, calc(100% - 2.5rem)); }
+.rl-below-wrap > .rl-bubble { max-width: none; }
+.rl-msgline:not(.rl-msgline-gap) > .rl-below-wrap > .rl-bubble-in-side { border-top-left-radius: var(--bubble-r-sm); }
+.rl-msgline:not(.rl-msgline-gap) > .rl-below-wrap > .rl-bubble-out { border-top-right-radius: var(--bubble-r-sm); }
+.rl-kb { display: grid; grid-template-rows: 1fr; min-width: 0; }
+.rl-kb-inner { display: flex; flex-direction: column; gap: 4px; min-height: 0; padding-top: 4px; overflow: hidden; }
+.rl-kb-row { display: flex; gap: 4px; min-width: 0; }
+.rl-kb-btn { position: relative; flex: 1 1 0; min-width: 0; display: flex; align-items: center; justify-content: center; min-height: 38px; padding: 6px 18px;
+  border: 0; border-radius: var(--bubble-r-sm); background: var(--action-bg); color: #fff; text-decoration: none; cursor: pointer;
+  font: 500 calc(var(--message-text-size, 16px) - 1px)/1.25 var(--font-sans); -webkit-tap-highlight-color: transparent;
+  transition: background-color var(--dur-fast) var(--ease-standard), opacity var(--dur-fast) var(--ease-standard), transform var(--dur-instant) var(--ease-standard); }
+.rl-kb-row:last-child > .rl-kb-btn:first-child { border-bottom-left-radius: var(--bubble-r); }
+.rl-kb-row:last-child > .rl-kb-btn:last-child { border-bottom-right-radius: var(--bubble-r); }
+.rl-kb-btn:hover, .rl-kb-btn:focus-visible { background: color-mix(in srgb, var(--action-bg), #fff 12%); outline: none; }
+.rl-kb-btn:active:not([aria-disabled="true"]) { transform: scale(.98); }
+.rl-kb-btn[aria-disabled="true"] { cursor: default; }
+.rl-kb-btn[aria-disabled="true"]:not([aria-busy="true"]) { opacity: .75; }
+.rl-kb-text { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.rl-kb-corner { position: absolute; top: 4px; right: 4px; display: flex; opacity: .9; }
+/* кружок загрузки в углу: проявляется (useMinVisible держит его без мигания) */
+.rl-kb-spin { position: absolute; top: 5px; right: 5px; width: 12px; height: 12px; border: 2px solid rgba(255, 255, 255, .35); border-top-color: #fff; border-radius: 50%;
+  animation: rl-kb-spin-in var(--dur-fast) var(--ease-out) both, rl-spin 800ms linear infinite; }
+@keyframes rl-kb-spin-in { from { opacity: 0; } to { opacity: 1; } }
+/* кнопки убрали (итог в тексте): клавиатура сворачивается и гаснет, а не пропадает рывком */
+.rl-kb-leave { animation: rl-kb-leave 260ms var(--ease-standard) forwards; pointer-events: none; }
+@keyframes rl-kb-leave { from { grid-template-rows: 1fr; opacity: 1; } to { grid-template-rows: 0fr; opacity: 0; } }
+@media (prefers-reduced-motion: reduce) { .rl-kb-leave { animation: rl-fade-out 120ms linear forwards; } .rl-kb-spin { animation-duration: 1ms, 1.6s; } }

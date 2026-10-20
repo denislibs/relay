@@ -480,6 +480,11 @@ function Bubble(props) {
         props.time,
         out && !deleted ? h(MessageStatus, { status: props.status || 'sent' }) : null),
       props.reactions && props.reactions.length ? h(ReactionChips, { items: props.reactions, out: out, onClick: props.onReactionClick }) : null);
+  // below — под пузырём во всю его ширину (кнопки сообщения); обёртка остаётся, пока строка жива, чтобы пузырь не
+  // пересоздавался, когда содержимое снизу уходит
+  var hadBelow = useRef(false);
+  if (props.below) hadBelow.current = true;
+  if (hadBelow.current) line = h('div', { class: 'rl-below-wrap' }, line, props.below || null);
   return h(MsgLine, {
     aside: props.aside,
     class: cx('rl-msgline', out && 'rl-msgline-out', props.groupStart && 'rl-msgline-gap', props.selectable && 'rl-msgline-select', props.selected && 'rl-msgline-selected'),

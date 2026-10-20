@@ -2,13 +2,13 @@ import { isGroupService, serviceText } from './serviceText';
 import type { ServiceData, ServiceType } from '@relay/protocol';
 import type { Item } from '@relay/sync-engine/src/types';
 import { senderAvatar } from '../profilePhoto';
-import type { Entity, Todo } from '@relay/protocol';
-import { MediaPolicy, ArticleBlocks, Avatar, Bubble, Icon, peerTone, DateDivider, DatePicker, FileBubble, MediaBubble, MessageText, VoiceBubble, MusicBubble, RoundBubble, player, MediaViewer, ScrollToBottom, beginHeavyAnimation, forceMeasure, isHeavyAnimating, onHeavyAnimationEnd, requestMeasure, requestMutation, selectionValue, TodoBubble } from '@relay/ui';
+import type { Entity, MessageButton, Todo } from '@relay/protocol';
+import { MediaPolicy, ArticleBlocks, Avatar, Bubble, Icon, peerTone, DateDivider, DatePicker, FileBubble, MediaBubble, MessageText, VoiceBubble, MusicBubble, RoundBubble, player, MediaViewer, ScrollToBottom, beginHeavyAnimation, forceMeasure, isHeavyAnimating, onHeavyAnimationEnd, requestMeasure, requestMutation, selectionValue, TodoBubble, InlineKeyboard } from '@relay/ui';
 import type { QuoteMsg } from '@relay/sync-engine/src/types';
 import { quoteContent } from './preview';
 import { memo } from 'preact/compat';
 import { useContext, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'preact/hooks';
-import { toggleTodo, clearFocus, discardUnsent, retrySend, focusMessage, openInner, jumpToDate, localPreview, markListened, moveWindow, react, savePosition, savedPosition, seen } from '../data';
+import { pressButton, toggleTodo, clearFocus, discardUnsent, retrySend, focusMessage, openInner, jumpToDate, localPreview, markListened, moveWindow, react, savePosition, savedPosition, seen } from '../data';
 import { wantPeople } from '../people';
 import { activeFrame, frameByKey, getGlobal, setGlobal, useGlobal } from '../global';
 import { toggleMusic, trackTitle, useFileCached } from '../music';
@@ -262,6 +262,10 @@ const Row = memo(function Row({ chatId, voiceTitle, author, onAuthor, onOpen, hl
         time={clock(m.createdAt as string)}
         status={out ? m.status : undefined}
         appear={appear}
+        below={m.buttons !== undefined && m.id != null
+          // в режиме выбора клик по кнопке выбирает сообщение (onPress нет — клик уходит ленте)
+          ? <InlineKeyboard rows={m.deleted ? null : m.buttons as MessageButton[][] | null} onPress={sel === undefined ? (b: MessageButton) => pressButton(chatId, m.id as number, b.data ?? '') : undefined} />
+          : undefined}
       >
         {m.blocks && !m.deleted
           ? <ArticleBlocks blocks={m.blocks} highlight={hl} />

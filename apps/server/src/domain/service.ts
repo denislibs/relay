@@ -1,4 +1,4 @@
-import type { Entity, Message, ServiceType } from '@relay/protocol';
+import type { Entity, Message, MessageButton, ServiceType } from '@relay/protocol';
 import { sql, type Tx } from '../db';
 import { toMessage } from './chats';
 import { fanOut } from './journal';
@@ -36,12 +36,13 @@ export async function isServiceChat(db: Db, chatId: number): Promise<boolean> {
 }
 
 /** Служебное сообщение пользователю: строка messages, newMessage в журнал и задача push — всё в транзакции вызывающего. */
-export async function postService(tx: Tx, userId: number, msg: { type: ServiceType; body: string; entities?: Entity[] }, opts: { push?: boolean } = {}): Promise<Message> {
+export async function postService(tx: Tx, userId: number, msg: { type: ServiceType; body: string; entities?: Entity[]; buttons?: MessageButton[][] }, opts: { push?: boolean } = {}): Promise<Message> {
   const chatId = await serviceChatId(tx, userId);
   const sys = await systemUserId();
   const [row] = await tx`
-    insert into messages (chat_id, sender_id, client_id, kind, body, entities, service_type)
-    values (${chatId}, ${sys}, ${crypto.randomUUID()}, 'text', ${msg.body}, ${msg.entities?.length ? tx.json(msg.entities as never) : null}, ${msg.type})
+    insert into messages (chat_id, sender_id, client_id, kind, body, entities, service_type, buttons)
+    values (${chatId}, ${sys}, ${crypto.randomUUID()}, 'text', ${msg.body}, ${msg.entities?.length ? tx.json(msg.entities as never) : null}, ${msg.type},
+            ${msg.buttons?.length ? tx.json(msg.buttons as never) : null})
     returning *`;
   const message = toMessage(row);
   await fanOut(tx, [userId], { type: 'newMessage', message });
@@ -50,12 +51,63 @@ export async function postService(tx: Tx, userId: number, msg: { type: ServiceTy
   return message;
 }
 
-/** «Новый вход»: устройство, IP и время, совет, что делать, если это не вы; заголовок жирным. */
-export function newLoginMessage(device: string, ip: string | null, at: Date): { body: string; entities: Entity[] } {
+/**
+ * «Новый вход»: устройство, IP и время, совет, что делать, если это не вы; заголовок жирным.
+ * sessionId — новый сеанс: под сообщением кнопки «Это я», «Завершить этот сеанс», «Завершить все остальные сеансы».
+ */
+export function newLoginMessage(device: string, ip: string | null, at: Date, sessionId?: number): { body: string; entities: Entity[]; buttons?: MessageButton[][] } {
   const when = at.toLocaleString('ru-RU', { day: 'numeric', month: 'long', hour: '2-digit', minute: '2-digit', timeZone: 'UTC' }) + ' UTC';
   const title = 'Новый вход в аккаунт';
-  const body = `${title}\n\nУстройство: ${device}\nIP: ${ip ?? 'неизвестен'}\nВремя: ${when}\n\nЕсли это были не вы, откройте Настройки → Активные сеансы и завершите этот сеанс.`;
-  return { body, entities: [{ type: 'bold', offset: 0, length: title.length }] };
+  const body = `${title}\n\nУстройство: ${device}\nIP: ${ip ?? 'неизвестен'}\nВремя: ${when}\n\nЕсли это были не вы, завершите этот сеанс — кнопкой ниже или в Настройках → Активные сеансы.`;
+  return { body, entities: [{ type: 'bold', offset: 0, length: title.length }], ...(sessionId != null ? { buttons: loginButtons(sessionId) } : {}) };
+}
+
+/** Кнопки «Нового входа»: data — login:<действие>:<id нового сеанса>. */
+export function loginButtons(sessionId: number): MessageButton[][] {
+  return [
+    [{ text: 'Это я', kind: 'callback', data: `login:ok:${sessionId}` }, { text: 'Завершить этот сеанс', kind: 'callback', data: `login:end:${sessionId}` }],
+    [{ text: 'Завершить все остальные сеансы', kind: 'callback', data: `login:others:${sessionId}` }],
+  ];
+}
+
+/** Сеанс, о котором «Новый вход» (по data его кнопок); null — кнопок нет или они чужие. */
+export function loginSessionOf(buttons: unknown): number | null {
+  if (!Array.isArray(buttons)) return null;
+  for (const row of buttons) for (const b of Array.isArray(row) ? row : []) {
+    const m = /^login:\w+:(\d{1,15})$/.exec((b as MessageButton)?.data ?? '');
+    if (m) return Number(m[1]);
+  }
+  return null;
+}
+
+/** Итоги под «Новым входом» после нажатия (или того же действия в Настройках). */
+export const LOGIN_CONFIRMED = 'Вы подтвердили этот вход.';
+export const LOGIN_ENDED = 'Сеанс завершён.';
+export const LOGIN_GONE = 'Этот сеанс уже завершён.';
+export const LOGIN_OTHERS_ENDED = 'Все остальные сеансы завершены.';
+
+/**
+ * Закрыть «Новый вход» о сеансах ids: кнопки убираются, в конец текста — итог курсивом (как бот правит своё сообщение
+ * после нажатия). Сообщения без кнопок не трогаем — итог пишется один раз.
+ */
+export async function resolveLoginAlerts(tx: Tx, userId: number, ids: number[], note: string): Promise<void> {
+  if (!ids.length) return;
+  const [svc] = await tx`select chat_id from service_chats where user_id = ${userId}`;
+  if (!svc) return;
+  const rows = await tx`
+    select id, body, entities, buttons from messages
+     where chat_id = ${svc.chat_id} and service_type = 'new_login' and buttons is not null and not deleted
+     for update`;
+  for (const r of rows) {
+    const sid = loginSessionOf(r.buttons);
+    if (sid == null || !ids.includes(sid)) continue;
+    const body = `${r.body as string}\n\n${note}`;
+    const entities: Entity[] = [...((r.entities as Entity[] | null) ?? []), { type: 'italic', offset: body.length - note.length, length: note.length }];
+    const id = Number(r.id);
+    await tx`update messages set body = ${body}, entities = ${tx.json(entities as never)}, buttons = null where chat_id = ${svc.chat_id} and id = ${id}`;
+    await fanOut(tx, [userId], { type: 'messageMarkup', chatId: Number(svc.chat_id), id, body, entities, buttons: null });
+    await enqueue(tx, 'search.sync', { id });
+  }
 }
 
 /**
