@@ -405,7 +405,7 @@ function WindowGrid(props) {
     }
     cells.sort(function (a, b) { return a.key < b.key ? -1 : a.key > b.key ? 1 : 0; });
   }
-  return h('div', { ref: host, class: cx('rl-wgrid', props.class), role: props.role, style: { position: 'relative', width: '100%', height: rows ? rows * L.step - gap : 0, contain: 'layout paint' } },
+  return h('div', { ref: host, class: cx('rl-wgrid', props.class), role: props.role, style: { position: 'relative', width: '100%', height: rows && L.step ? rows * L.step - gap : 0, contain: 'layout paint' } },
     cells.map(function (x) { return x.el; }));
 }
 

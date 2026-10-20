@@ -843,23 +843,32 @@ function MediaSpoiler(props) {
    с корнем-окном запас 500px обрезается краем панели и картинка грузится, только когда уже видна.
    Корень задаёт LazyRoot.Provider (элемент прокрутки) или третий аргумент lazyObserve. */
 var LazyRoot = createContext(/** @type {Element | null} */ (null));
-var lazyIOs = typeof Map === 'function' ? new Map() : null, lazyCbs = typeof WeakMap === 'function' ? new WeakMap() : null;
+/* Наблюдатель на корень живёт, пока за ним есть элементы: счётчик; последний ушёл (загрузился или размонтирован) —
+   disconnect и запись корня удаляется (закрытая панель не держит наблюдатель и своё отсоединённое дерево). */
+var lazyIOs = new Map(), lazyCbs = typeof WeakMap === 'function' ? new WeakMap() : null;
 function lazyObserve(el, cb, root) {
   root = root || null;
-  var io = lazyIOs.get(root);
-  if (!io) {
-    io = new IntersectionObserver(function (es) {
-      es.forEach(function (e) { if (!e.isIntersecting) return; var f = lazyCbs.get(e.target); if (f) { lazyCbs.delete(e.target); io.unobserve(e.target); f(); } });
+  var ent = lazyIOs.get(root);
+  if (!ent) {
+    ent = { io: null, n: 0 };
+    ent.io = new IntersectionObserver(function (es) {
+      es.forEach(function (e) { if (!e.isIntersecting) return; var x = lazyCbs.get(e.target); if (x) { x.release(); x.f(); } });
     }, { root: root, rootMargin: '500px 0px' });
-    lazyIOs.set(root, io);
+    lazyIOs.set(root, ent);
   }
-  lazyCbs.set(el, cb); io.observe(el);
-  return function () {
-    lazyCbs.delete(el); io.unobserve(el);
-    // корень ушёл из документа (панель закрыли) — его наблюдатель больше не нужен
-    if (root && !root.isConnected) { io.disconnect(); lazyIOs.delete(root); }
-  };
+  var done = false;
+  function release() {
+    if (done) return;
+    done = true;
+    lazyCbs.delete(el); ent.io.unobserve(el);
+    if (--ent.n === 0) { ent.io.disconnect(); if (lazyIOs.get(root) === ent) lazyIOs.delete(root); }
+  }
+  lazyCbs.set(el, { f: cb, release: release });
+  ent.n++; ent.io.observe(el);
+  return release;
 }
+/** Сколько корней сейчас наблюдается (для тестов: утечки наблюдателей). */
+function lazyRoots() { return lazyIOs.size; }
 function LazyImage(props) {
   var ref = useRef(null), vis = useState(!!props.eager), loaded = useState(false);
   var root = useContext(LazyRoot);
@@ -1533,4 +1542,4 @@ function ScrollToBottom(props) {
 }
 
 
-export { WebPage, MsgLine, ForwardTitle, peerTone, RelayLogo, Verified, ArchivedRow, ReplyQuote, ReactionChips, cx, chain, ripple, reducedMotion, omit, fmtTime, makeWave, ICONS, Icon, Button, IconButton, Avatar, Badge, Chip, ChatRow, ChatRowSkeleton, Bubble, MessageStatus, TypingIndicator, DateDivider, Banner, NavRail, Checkbox, Toast, Card, Steps, MediaArt, ProgressRing, Waveform, VoiceMessage, VoiceRecorder, MediaBubble, MediaPolicy, mediaHeld, FileBubble, MediaThumb, MediaViewer, Switch, PanelHeader, ProfileHeader, ActionTile, InfoRow, SettingsIcon, ReadMore, Presence, useMinVisible, LazyImage, LazyRoot, lazyObserve, FlipList, SyncIndicator, LinearProgress, EmptyState, ScrollToBottom };
+export { WebPage, MsgLine, ForwardTitle, peerTone, RelayLogo, Verified, ArchivedRow, ReplyQuote, ReactionChips, cx, chain, ripple, reducedMotion, omit, fmtTime, makeWave, ICONS, Icon, Button, IconButton, Avatar, Badge, Chip, ChatRow, ChatRowSkeleton, Bubble, MessageStatus, TypingIndicator, DateDivider, Banner, NavRail, Checkbox, Toast, Card, Steps, MediaArt, ProgressRing, Waveform, VoiceMessage, VoiceRecorder, MediaBubble, MediaPolicy, mediaHeld, FileBubble, MediaThumb, MediaViewer, Switch, PanelHeader, ProfileHeader, ActionTile, InfoRow, SettingsIcon, ReadMore, Presence, useMinVisible, LazyImage, LazyRoot, lazyObserve, lazyRoots, FlipList, SyncIndicator, LinearProgress, EmptyState, ScrollToBottom };
