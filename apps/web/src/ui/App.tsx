@@ -4,7 +4,7 @@ import { ForwardPicker } from './ForwardPicker';
 import { Links } from './links/Links';
 import { FolderColumn, useFolderPlace } from './folderNav';
 import { AsidePanel, FloatShell, ModalRoot, Presence, SideFrame, SlideStack, Toast } from '@relay/ui';
-import { useRef } from 'preact/hooks';
+import { useEffect, useRef, useState } from 'preact/hooks';
 import { useGlobal } from '../global';
 import { orderFor } from '../nav';
 import { useWallpaper } from '../wallpapers';
@@ -56,11 +56,20 @@ export function App() {
   const infoOpen = useGlobal((s) => s.infoOpen);
   const { wp, dark, key: wpKey } = useWallpaper();
   const wpImage = useWallpaperImage(wpKey, wp.image);
+  const enter = useGlobal((s) => s.enter);
+  // вошли: экран входа ещё 320 мс лежит сверху и гаснет, под ним выезжает приложение (как в Telegram Web K)
+  const [leaving, setLeaving] = useState(false);
+  const prevBoot = useRef(boot);
+  if (prevBoot.current === 'login' && boot === 'app' && !leaving) setLeaving(true);
+  prevBoot.current = boot;
+  useEffect(() => { if (!leaving) return; const t = setTimeout(() => setLeaving(false), 320); return () => clearTimeout(t); }, [leaving]);
   if (boot === 'loading') return null;
-  if (boot === 'login') return <><Login /><AppToast /></>;   // тост «Сеанс завершён…» переживает уход на вход
+  // один и тот же слой входа в обоих состояниях (ключ) — карточка не пересоздаётся, пока гаснет
+  const login = boot === 'login' || leaving ? <div key="login" class={'app-login-layer' + (boot === 'app' ? ' is-leaving' : '')}><Login /></div> : null;
+  if (boot === 'login') return <>{login}<AppToast key="toast" /></>;   // тост «Сеанс завершён…» переживает уход на вход
   return (
     <>
-      <FloatShell class={openChatId ? 'app-chat-open' : ''} rail={folderPlace === 'left' ? <FolderColumn /> : null} pattern={wp.pattern} wallpaperColors={wp.colors} wallpaperBlur={wp.blur} wallpaperDark={dark} wallpaperIntensity={wp.intensity} wallpaperImage={wpImage} sideWidth={savedSide} onSideResize={saveSide} aside={<AsidePanel open={infoOpen && !!openChatId} label="Информация"><Info /></AsidePanel>} sidebar={<SideFrame><SlideStack order={orderFor(view)} active={view} render={(k: string) => (k === 'chats' ? <Sidebar /> : k === 'settings' ? <Main /> : k === 'settings/profile' ? <Profile /> : k === 'settings/profile/links' ? <Links /> : /^settings\/profile\/links\/(new|\d+)$/.test(k) ? <LinkEdit key={k} path={k} /> : k === 'settings/general' ? <General /> : k === 'settings/general/wallpaper' ? <Wallpaper /> : k === 'settings/general/wallpaper/color' ? <WallpaperColor /> : k === 'settings/notifications' ? <Notifications /> : k === 'settings/privacy' ? <Privacy /> : k === 'settings/privacy/blocked' ? <Blocked /> : k === 'settings/privacy/password' ? <Password /> : k === 'settings/privacy/passkeys' ? <Passkeys /> : /^settings\/privacy\/rule\/[^/]+\/(allow|deny)$/.test(k) ? <PeoplePicker key={k} path={k} /> : /^settings\/privacy\/rule\/[^/]+$/.test(k) ? <PrivacyRule key={k} path={k} /> : k === 'archive' ? <Archive /> : k === 'contacts' ? <Contacts /> : k === 'newGroup' ? <NewGroupMembers /> : k === 'newGroup/name' ? <NewGroupName /> : /^contacts\/\d+\/edit$/.test(k) ? <EditContact key={k} path={k} active={k === view} /> : k === 'settings/performance' ? <Performance /> : k === 'settings/sessions' ? <Sessions /> : k === 'settings/folders' ? <Folders /> : /^settings\/folders\/(new|\d+)$/.test(k) ? <FolderEdit key={k} path={k} /> : /^settings\/folders\/(new|\d+)\/(include|exclude)$/.test(k) ? <FolderChats key={k} path={k} /> : k === 'settings/data' ? <Data /> : /^settings\/data\/autoload\/(photo|video|file)$/.test(k) ? <Autoload path={k} /> : k === 'settings/dev' ? <Dev /> : null)} /></SideFrame>}>
+      <FloatShell key="shell" class={(openChatId ? 'app-chat-open' : '') + (enter ? ' app-enter-' + enter : '')} rail={folderPlace === 'left' ? <FolderColumn /> : null} pattern={wp.pattern} wallpaperColors={wp.colors} wallpaperBlur={wp.blur} wallpaperDark={dark} wallpaperIntensity={wp.intensity} wallpaperImage={wpImage} sideWidth={savedSide} onSideResize={saveSide} aside={<AsidePanel open={infoOpen && !!openChatId} label="Информация"><Info /></AsidePanel>} sidebar={<SideFrame><SlideStack order={orderFor(view)} active={view} render={(k: string) => (k === 'chats' ? <Sidebar /> : k === 'settings' ? <Main /> : k === 'settings/profile' ? <Profile /> : k === 'settings/profile/links' ? <Links /> : /^settings\/profile\/links\/(new|\d+)$/.test(k) ? <LinkEdit key={k} path={k} /> : k === 'settings/general' ? <General /> : k === 'settings/general/wallpaper' ? <Wallpaper /> : k === 'settings/general/wallpaper/color' ? <WallpaperColor /> : k === 'settings/notifications' ? <Notifications /> : k === 'settings/privacy' ? <Privacy /> : k === 'settings/privacy/blocked' ? <Blocked /> : k === 'settings/privacy/password' ? <Password /> : k === 'settings/privacy/passkeys' ? <Passkeys /> : /^settings\/privacy\/rule\/[^/]+\/(allow|deny)$/.test(k) ? <PeoplePicker key={k} path={k} /> : /^settings\/privacy\/rule\/[^/]+$/.test(k) ? <PrivacyRule key={k} path={k} /> : k === 'archive' ? <Archive /> : k === 'contacts' ? <Contacts /> : k === 'newGroup' ? <NewGroupMembers /> : k === 'newGroup/name' ? <NewGroupName /> : /^contacts\/\d+\/edit$/.test(k) ? <EditContact key={k} path={k} active={k === view} /> : k === 'settings/performance' ? <Performance /> : k === 'settings/sessions' ? <Sessions /> : k === 'settings/folders' ? <Folders /> : /^settings\/folders\/(new|\d+)$/.test(k) ? <FolderEdit key={k} path={k} /> : /^settings\/folders\/(new|\d+)\/(include|exclude)$/.test(k) ? <FolderChats key={k} path={k} /> : k === 'settings/data' ? <Data /> : /^settings\/data\/autoload\/(photo|video|file)$/.test(k) ? <Autoload path={k} /> : k === 'settings/dev' ? <Dev /> : null)} /></SideFrame>}>
         {hasStack ? <ChatStack /> : null /* чат не выбран — как в Telegram Web, посередине только обои */}
       </FloatShell>
       <NewChat />
@@ -71,6 +80,7 @@ export function App() {
       <DevPlate />
       <AppToast />
       <QrConfirm />
+      {login}
     </>
   );
 }

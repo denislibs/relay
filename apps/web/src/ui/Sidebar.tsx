@@ -144,14 +144,12 @@ export function Sidebar() {
   // данных ещё нет: ждём снимок из кэша или первую загрузку с сервера
   const waiting = !loaded || (!chats.length && !status.hydrated && status.phase !== 'offline');
   const skeleton = useMinVisible(waiting, { delay: 150, min: 600 });
-  // скелетон уходит — список проявляется чуть позже, когда скелетон почти погас (не поверх него: строки
-  // скелетона и настоящие диалоги не должны быть видны одновременно). Считаем в том же рендере, где список
-  // появляется: класс, добавленный позже, сдвинул бы уже идущую анимацию
-  const prevSkeleton = useRef(skeleton);
-  const lateUntil = useRef(0);
-  if (prevSkeleton.current && !skeleton) lateUntil.current = performance.now() + 700;
-  prevSkeleton.current = skeleton;
-  const late = performance.now() < lateUntil.current;
+  // как в Telegram Web K: скелетон лежит слоем поверх списка; данные пришли — список уже под ним, а строки
+  // скелетона стираются по одной (150 мс, сдвиг 15 мс) и открывают готовые диалоги — без пустого кадра
+  // список, появившийся под скелетоном, своей анимации не получает и позже (снятие класса запустило бы её поверх стирания)
+  const covered = useRef(false);
+  if (waiting) covered.current = false;
+  if (skeleton) covered.current = true;
 
   const q = search.trim().toLowerCase();
   // «Все» — только непрерывно загруженный диапазон (как в Telegram): старые непрочитанные из-за курсора
@@ -183,16 +181,16 @@ export function Sidebar() {
     const list = listOf(f);
     return (
       <>
-      <div class={'app-listwrap' + (late ? ' is-late' : '')}>
-        <Presence show={skeleton} exitMs={200}>
+      <div class={'app-listwrap' + (covered.current ? ' is-covered' : '')}>
+        <Presence show={skeleton} exitMs={320}>
           <div class="app-skel" aria-busy="true" aria-label="Загрузка чатов">
             {Array.from({ length: 9 }, (_, i) => <div key={i} style={{ '--i': i }}><ChatRowSkeleton /></div>)}
           </div>
         </Presence>
-        {!waiting && !skeleton && f === ALL && !q && archived.length ? (
+        {!waiting && f === ALL && !q && archived.length ? (
           <ArchivedRow names={archiveNames} count={archiveUnread} onClick={() => void go('archive')} />
         ) : null}
-        {waiting || skeleton ? null : list.length ? (
+        {waiting ? null : list.length ? (
           <>
           <WindowList
             keepAlive   // как в Telegram Web K: ушедшие за край строки не пересоздаются, возвращаются готовыми

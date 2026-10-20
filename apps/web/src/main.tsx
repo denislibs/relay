@@ -28,9 +28,10 @@ installErrorCapture();
 
 const ME_KEY = 'relay.me';
 
-function start(me: Me): void {
+function start(me: Me, enter: 'login' | 'reload' = 'reload'): void {
   void claimMediaCache(me.userId);
-  setGlobal({ me, boot: 'app' });
+  setGlobal({ me, boot: 'app', enter });
+  setTimeout(() => setGlobal({ enter: null }), 1000);   // анимации входа доиграли
   startData(me);
   startMuteTimers();   // «Отключить звук» на время: таймер до ближайшего срока — перерисовать, когда чат включится
   startSettingsData(me);
@@ -79,7 +80,7 @@ window.addEventListener('relay:signed-in', () => {
     if (!res.ok) { location.reload(); return; }
     const me = (await res.json()) as Me;
     localStorage.setItem(ME_KEY, JSON.stringify(me));
-    start(me);
+    start(me, 'login');
   }).catch(() => location.reload());
 });
 

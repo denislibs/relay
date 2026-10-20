@@ -37,6 +37,7 @@ export interface Status { phase: Phase; hydrated: boolean; chatsComplete?: boole
 /** Один объект: зеркало видимых данных из воркера + состояние интерфейса этой вкладки. */
 export interface GlobalState {
   boot: 'loading' | 'login' | 'app';
+  enter: 'login' | 'reload' | null;   // как появилось приложение: после входа (колонка выезжает) или при запуске (проявление)
   me: Me | null;
   chats: Item[];
   chatsLoaded: boolean;   // первый снимок списка из воркера уже пришёл
@@ -113,6 +114,7 @@ export interface NewContactDraft { query?: string; firstName?: string; lastName?
 
 let state: GlobalState = {
   boot: 'loading',
+  enter: null,
   me: null,
   chats: [],
   chatsLoaded: false,

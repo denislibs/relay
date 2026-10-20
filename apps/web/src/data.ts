@@ -107,6 +107,10 @@ const PHASE_LABEL: Record<string, string> = {
   offline: 'Ожидание сети…',
 };
 const MIN_LABEL_MS = 600;
+// как в Telegram Web K: первые 2 с после старта стадию не показываем (подключение обычно успевает), а пока
+// надписи нет, новая появляется через 400 мс — короткие «Обновление…» не мигают
+const BOOT_QUIET_MS = 2000, SHOW_DELAY_MS = 400;
+const bootAt = performance.now();
 let labelSince = 0;
 let labelTimer: ReturnType<typeof setTimeout> | null = null;
 
@@ -120,7 +124,13 @@ function showPhase(s: Status): void {
   const shown = getGlobal().syncLabel;
   if (labelTimer) { clearTimeout(labelTimer); labelTimer = null; }
   if (want === shown) return;
-  if (want !== null) { labelSince = performance.now(); setGlobal({ syncLabel: want }); return; }
+  if (want !== null) {
+    const now = performance.now();
+    if (shown !== null) { labelSince = now; setGlobal({ syncLabel: want }); return; }   // уже видна — меняем сразу
+    labelTimer = setTimeout(() => { labelTimer = null; labelSince = performance.now(); setGlobal({ syncLabel: want }); },
+      Math.max(SHOW_DELAY_MS, bootAt + BOOT_QUIET_MS - now));
+    return;
+  }
   labelTimer = setTimeout(() => { labelTimer = null; setGlobal({ syncLabel: null }); }, Math.max(0, MIN_LABEL_MS - (performance.now() - labelSince)));
 }
 

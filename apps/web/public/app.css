@@ -19,11 +19,12 @@ body { background: var(--bg); color: var(--ink); font-family: var(--font-sans); 
 /* скелетон ↔ список: скелетон всплывает построчно, уходит поверх появляющегося списка (crossfade) */
 .app-listwrap { position: relative; }
 .app-skel > div { animation: app-rise 320ms var(--ease-out) both; animation-delay: calc(var(--i) * 35ms); }
-.app-listwrap > .rl-presence[data-state="closing"] { position: absolute; inset: 0 0 auto 0; z-index: 1; pointer-events: none; }
-.app-listwrap > .rl-presence[data-state="closing"] .app-skel { animation: app-fade-out 200ms var(--ease-in) both; }
-.app-listwrap > :not(.rl-presence) { animation: app-fade 320ms var(--ease-out) both; }
-/* после скелетона — с задержкой: сначала гаснет он, потом проявляется список (без наложения строк) */
-.app-listwrap.is-late > :not(.rl-presence) { animation-delay: 200ms; }
+.app-listwrap > .rl-presence { position: absolute; inset: 0 0 auto 0; z-index: 1; pointer-events: none; }
+.app-skel > div { background: var(--card); }   /* строки скелетона закрывают готовый список под собой */
+/* уход скелетона — стирание построчно сверху вниз (как в Telegram Web K: 150 мс, сдвиг 15 мс) */
+.app-listwrap > .rl-presence[data-state="closing"] .app-skel > div { animation: app-fade-out 150ms cubic-bezier(.37, 0, .63, 1) both; animation-delay: calc(var(--i) * 15ms); }
+/* список без скелетона над ним (данные были сразу) — проявляется; под скелетоном его открывает стирание */
+.app-listwrap:not(.is-covered) > :not(.rl-presence) { animation: app-fade 320ms var(--ease-out) both; }
 @keyframes app-rise { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: none; } }
 @keyframes app-fade-out { to { opacity: 0; } }
 @media (prefers-reduced-motion: reduce) { .app-skel > div, .app-listwrap > * { animation-duration: 1ms !important; animation-delay: 0ms !important; } }
@@ -1130,3 +1131,15 @@ html[data-anim="0"] .app-chatcol, html[data-anim="0"] .app-chatcol-below, html[d
 .app-stkrow-skel .app-stkrow-title i:first-child { width: 45%; margin: 4px 0 8px; }
 .app-stkrow-skel .app-stkrow-title i:last-child { width: 25%; }
 .app-stkrow-skel .app-stkrow-strip { border-radius: 12px; background: var(--hover, rgba(127,127,127,.06)); }
+
+/* ---------- Появление приложения (как в Telegram Web K) ---------- */
+/* запуск: колонки над уже видимыми обоями проявляются за 300 мс */
+.app-enter-reload :is(.rl-shell-side, .rl-shell-main, .rl-frail) { animation: app-fade 300ms cubic-bezier(.4, 0, .2, 1) both; }
+/* после входа: левая колонка выезжает слева, центр проявляется следом */
+.app-enter-login .rl-shell-side, .app-enter-login .rl-frail { animation: app-side-in 320ms cubic-bezier(.2, 0, 0, 1) both; }
+.app-enter-login .rl-shell-main { animation: app-fade 300ms cubic-bezier(.4, 0, .2, 1) 80ms both; }
+@keyframes app-side-in { from { transform: translateX(calc(-100% - var(--space-float, 12px))); opacity: .4; } to { transform: none; opacity: 1; } }
+/* экран входа поверх приложения, пока гаснет */
+.app-login-layer.is-leaving { position: fixed; inset: 0; z-index: 100; pointer-events: none; animation: app-login-out 220ms cubic-bezier(.4, 0, .2, 1) both; }
+@keyframes app-login-out { to { opacity: 0; transform: scale(1.025); } }
+html[data-anim="0"] :is(.app-enter-reload, .app-enter-login) :is(.rl-shell-side, .rl-shell-main, .rl-frail), html[data-anim="0"] .app-login-layer.is-leaving { animation-duration: 1ms; animation-delay: 0ms; }
