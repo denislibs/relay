@@ -72,19 +72,20 @@ export class ProfileCache {
   }
 
   /**
-   * Собеседник из снимка списка чатов или участник группы (id, имя, фото, @имя) — поверх известного профиля. У снимка нет seq по человеку:
-   * пишем с seq 0, так что профиль из журнала (seq > 0) снимок не перетирает.
+   * Собеседник из списка чатов или участник группы (id, имя, фото, @имя) — поверх известного профиля.
+   * seq — позиция журнала клиента до запроса: ответ не старее её, поэтому перетирает профиль, записанный раньше (в том числе
+   * снимок /users, если смену фото нам не прислали — общих чатов тогда не было), но не запись журнала новее. Без seq — 0.
    */
-  applyPeer(p: { id: number; name: string; system?: true; photo?: ProfilePhoto | null; username?: string | null }): void {
+  applyPeer(p: { id: number; name: string; system?: true; photo?: ProfilePhoto | null; username?: string | null }, seq = 0): void {
     if (p.id === this.userId) return;
     const prev = this.users.get(p.id);
     let base: PublicUser;
     if (prev) { const { seq: _s, v: _v, ...rest } = prev; base = rest; }
     else { const sp = p.name.indexOf(' '); base = { id: p.id, name: p.name, firstName: sp < 0 ? p.name : p.name.slice(0, sp), lastName: sp < 0 ? '' : p.name.slice(sp + 1), username: null, bio: null, birthday: null, phone: null, links: [] }; }
-    const next: PublicUser = { ...base, name: p.name, photo: p.photo ?? null };
+    const next: PublicUser = { ...base, name: p.name, photo: p.photo !== undefined ? p.photo : base.photo ?? null };   // нет поля — фото не знаем, не стираем
     if (p.username !== undefined) next.username = p.username;   // список участников знает и @имя
     if (p.system) next.system = true;
-    if (this.users.put(p.id, next, 0)) this.dirty = true;
+    if (this.users.put(p.id, next, seq)) this.dirty = true;
   }
 
   /** Что дописать в транзакцию flush. */

@@ -403,3 +403,16 @@ test('history ranges: a newer page from an old range merges with the next range 
   expect(s.chats.get(CH)!.ranges).toEqual([[250, 300]]);
   expect(feedMeta(s, { limit: 100, anchor: { sort: 253, side: 'center' } })).toMatchObject({ hasNewer: false, live: true });
 });
+
+test('a chat list newer than the cached profile brings the peer photo; an older one does not roll back the journal', async () => {
+  const s = await fresh();
+  const u = (photo: unknown) => ({ id: PEER, name: 'Клод', firstName: 'Клод', lastName: '', username: null, bio: null, birthday: null, phone: null, links: [], photo }) as never;
+  s.profile.applyUser(u(null), 5);   // профиль спросили раньше, фото тогда не было; смену фото нам не прислали
+  const photo = { id: 'p', small: 's', thumb: '', at: 1 };
+  const chat = (p: unknown) => ({ id: 20, kind: 'direct' as const, title: null, lastReadId: 0, unread: 0, last: null, peer: { id: PEER, name: 'Клод', photo: p } }) as never;
+  s.applyChats([chat(photo)], 7);    // список чатов запрошен позже (позиция журнала 7)
+  expect(computeQuery(s, { kind: 'chatList', limit: 50 }).items.get('c20')?.photo).toEqual(photo);
+  s.profile.applyUser(u(null), 9);   // журнал: фото убрали (seq 9)
+  s.applyChats([chat(photo)], 8);    // ответ, запрошенный до этого, журнал не откатывает
+  expect(computeQuery(s, { kind: 'chatList', limit: 50 }).items.get('c20')?.photo).toBeNull();
+});

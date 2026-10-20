@@ -507,3 +507,22 @@ test('storageStats counts rows per store and survives resetLocal', async () => {
   const z = await ea.call({ type: 'storageStats' }) as { rows: Record<string, number> };
   expect(z.rows.messages).toBe(0);
 });
+
+test('after a restart the chat list shows a peer photo we were never told about (no shared chat back then), without opening the chat', async () => {
+  const a = await srv.login('a'), b = await srv.login('b');
+  const chatId = await srv.chat(a.token, [a.userId, b.userId]);
+  await sendMessage(b.userId, { chatId, clientId: crypto.randomUUID(), body: 'привет' });
+  const cfg = srv.config(a);
+  const e1 = await open(cfg);
+  e1.connect();
+  await e1.whenIdle();
+  engines.splice(engines.indexOf(e1), 1);
+  await e1.close();
+  // фото поменялось мимо журнала a (как когда общих чатов ещё не было)
+  await sql`update users set photo = ${sql.json({ id: 'p1', small: 's1', thumb: '', at: 1 } as never)} where id = ${b.userId}`;
+  const e2 = await open(cfg);   // тот же IndexedDB: чаты и профиль b — из кэша
+  e2.connect();
+  const list = watchInto(e2, { kind: 'chatList', limit: 50 });
+  const l = await list.until((x) => (x.find((c) => c.id === chatId)?.photo as { id?: string } | null)?.id === 'p1', 5000);
+  expect(l.find((c) => c.id === chatId)?.photo).toMatchObject({ id: 'p1', small: 's1' });
+});

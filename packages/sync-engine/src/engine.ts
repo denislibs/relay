@@ -71,6 +71,7 @@ export class Engine {
   /** Присутствие собеседников: состояние момента, только в памяти; без связи — неизвестно. */
   private presence = new Map<number, { online: boolean | null; lastSeen: string | null }>();
   private presenceFetched = false;
+  private peersRefreshed = false;   // профили собеседников верхних чатов освежены в этой сессии движка
   private presenceDirty = false;   // присутствие не трогает чаты — свой флаг для подписок presence
   private acting = 0;       // действия пользователя в работе: их результат показываем сразу, даже во время догонки
   private syncAgain = false;
@@ -1411,9 +1412,24 @@ export class Engine {
       this.loadOpenChats();
       if (!this.presenceFetched) this.fetchPresence();
       this.ops.resume();
+      if (!this.peersRefreshed) this.refreshPeers();
       this.fetchUsers();
       this.fetchMembers();
     }
+  }
+
+  /**
+   * Раз за сессию — свежие профили собеседников верхних личных чатов, даже если они уже в кэше. Смену фото или имени
+   * присылают по журналу только тем, с кем есть общий чат в тот момент; кто познакомился позже, держал бы старое
+   * (фото появлялось лишь при открытии чата). Ответ /users несёт seq сервера — новее старого кэша, журнал не откатывает.
+   */
+  private refreshPeers(): void {
+    this.peersRefreshed = true;
+    const top = [...this.store.chats.values()]
+      .filter((c) => c.kind === 'direct' && c.peerId != null && !c.system && c.peerId !== this.cfg.userId)
+      .sort((a, b) => (a.lastAt < b.lastAt ? 1 : a.lastAt > b.lastAt ? -1 : 0))
+      .slice(0, this.cfg.dialogsPage ?? 100);
+    for (const c of top) if (!this.usersAsked.has(c.peerId!)) this.userWants.add(c.peerId!);
   }
 
   /** Снимок присутствия собеседников — раз на подключение; дальше приходят кадры presence. */
@@ -1430,11 +1446,12 @@ export class Engine {
 
   /** Первая страница диалогов и все чаты с непрочитанными (папка «Непрочитанные» и её счётчик — полные). */
   private async loadFirstDialogs(): Promise<void> {
+    const seq = this.store.lastSeq;   // ответы не старее этой позиции журнала — их собеседники перетирают профиль, записанный раньше
     const [page, unread] = await Promise.all([
       this.http<{ chats: ChatSummary[]; next: { at: string; id: number } | null }>(`/chats/page?limit=${this.cfg.dialogsPage ?? 100}`),
       this.http<ChatSummary[]>('/chats?unread=1'),
     ]);
-    this.store.applyChats([...page.chats, ...unread]);
+    this.store.applyChats([...page.chats, ...unread], seq);
     this.store.setDialogsCursor(page.next);
   }
 
@@ -1444,8 +1461,9 @@ export class Engine {
     this.moreChats ??= (async () => {
       try {
         const at = new Date(this.store.dialogsAt).toISOString();
+        const seq = this.store.lastSeq;
         const page = await this.http<{ chats: ChatSummary[]; next: { at: string; id: number } | null }>(`/chats/page?limit=${this.cfg.dialogsPage ?? 100}&beforeAt=${encodeURIComponent(at)}&beforeId=${this.store.dialogsId}`);
-        this.store.applyChats(page.chats);
+        this.store.applyChats(page.chats, seq);
         this.store.setDialogsCursor(page.next);
         await this.store.flush();
         this.changed();
@@ -1468,9 +1486,10 @@ export class Engine {
     let p = this.chatLoads.get(chatId);
     if (!p) {
       p = (async () => {
+        const seq = this.store.lastSeq;
         const list = await this.http<ChatSummary[]>(`/chats?ids=${chatId}`);
         if (!list.length) return;   // нет доступа или чата нет — шапка останется «Чат №N»
-        this.store.applyChats(list);
+        this.store.applyChats(list, seq);
         await this.store.flush();
         this.changed();
       })().finally(() => this.chatLoads.delete(chatId));
@@ -1498,10 +1517,11 @@ export class Engine {
       try {
         // чаты, известные только по сообщениям, — точечно по id; иначе (новый чат) — свежая первая страница
         const unnamed = this.store.unnamed();
+        const seq = this.store.lastSeq;
         const list = unnamed.length
           ? await this.http<ChatSummary[]>(`/chats?ids=${unnamed.slice(0, 500).join(',')}`)
           : (await this.http<{ chats: ChatSummary[] }>(`/chats/page?limit=${this.cfg.dialogsPage ?? 100}`)).chats;
-        this.store.applyChats(list);
+        this.store.applyChats(list, seq);
         await this.store.flush();
         this.changed();
       } finally {

@@ -333,22 +333,23 @@ export class Store {
   }
 
   /** Снимок списка чатов (первый вход или tooLong). */
-  applySnapshot(list: ChatSummary[]): void {
+  applySnapshot(list: ChatSummary[], seq = 0): void {
     const keep = new Set(list.map((c) => c.id));
     for (const c of this.outbox.values()) keep.add(c.chatId);
     for (const id of [...this.chats.keys()]) if (!keep.has(id)) { this.chats.delete(id); this.chatV.delete(id); this.messages.delete(id); this.loaded.delete(id); this.members.dropChat(id); this.dirtyChats.add(id); this.touch(id); } // dirty → удалится и из IDB
-    this.applyChats(list);
+    this.applyChats(list, seq);
   }
 
   /** Слить пришедшие чаты (страница, «непрочитанные», точечная подгрузка), ничего не удаляя. */
-  applyChats(list: ChatSummary[]): void {
+  /** seq — позиция журнала до запроса (см. ProfileCache.applyPeer): собеседники ответа не старее её. */
+  applyChats(list: ChatSummary[], seq = 0): void {
     if (!this.hydrated) { this.hydrated = true; this.dirtyMeta = true; }
     for (const s of list) {
       const chat = this.ensureChat(s.id);
       chat.kind = s.kind;
       // личный чат хранит только peerId: имя и фото собеседника — в people
       chat.peerId = s.peer?.id ?? null;
-      if (s.peer) this.profile.applyPeer(s.peer);
+      if (s.peer) this.profile.applyPeer(s.peer, seq);
       if (s.peer?.system) chat.system = true; else delete chat.system;
       if (s.draft && (!chat.draft || s.draft.at > chat.draft.at) && !this.pendingDrafts.has(s.id)) chat.draft = s.draft;
       if (s.pinned) chat.pinned = s.pinned;
