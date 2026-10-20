@@ -10,6 +10,7 @@ import { deleteDirectChat, createChat, createGroup, openDirect, messageAtDate, g
 import { sql } from './db';
 import { DomainError } from './domain/errors';
 import { setChatNotify } from './domain/chatNotify';
+import { setChatFlags } from './domain/chatFlags';
 import { storageUsage } from './domain/uploadLimits';
 import { ensureServiceChat } from './domain/service';
 import { processAlive } from './domain/liveRegistry';
@@ -31,7 +32,7 @@ import { addContact, blockUser, listBlocked, listContacts, removeContact, resolv
 import { serveStickerFile } from './stickers/files';
 import { stickerRoute } from './stickers/routes';
 
-const STATUS: Record<string, number> = { bad_frame: 400, too_long: 400, file_too_big: 413, username_invalid: 400, username_reserved: 400, username_taken: 409, bio_too_long: 400, note_too_long: 400, name_invalid: 400, birthday_invalid: 400, links_invalid: 400, folder_title: 400, folder_empty: 400, folder_too_many_chats: 400, folder_emoji: 400, folders_limit: 400, unauthorized: 401, not_member: 403, blocked: 403, not_found: 404, code_invalid: 400, code_expired: 400, flood: 429, fresh_session: 403, password_invalid: 400, password_missing: 400, recovery_unavailable: 400, email_invalid: 400, qr_expired: 400, passkey_not_found: 404, passkey_invalid: 400, forbidden: 403, upload_missing: 409, upload_mismatch: 400, upload_pending: 409, upload_incomplete: 409, upload_limit: 429, upload_quota: 429, photo_invalid: 400 };
+const STATUS: Record<string, number> = { bad_frame: 400, pin_limit: 409, too_long: 400, file_too_big: 413, username_invalid: 400, username_reserved: 400, username_taken: 409, bio_too_long: 400, note_too_long: 400, name_invalid: 400, birthday_invalid: 400, links_invalid: 400, folder_title: 400, folder_empty: 400, folder_too_many_chats: 400, folder_emoji: 400, folders_limit: 400, unauthorized: 401, not_member: 403, blocked: 403, not_found: 404, code_invalid: 400, code_expired: 400, flood: 429, fresh_session: 403, password_invalid: 400, password_missing: 400, recovery_unavailable: 400, email_invalid: 400, qr_expired: 400, passkey_not_found: 404, passkey_invalid: 400, forbidden: 403, upload_missing: 409, upload_mismatch: 400, upload_pending: 409, upload_incomplete: 409, upload_limit: 429, upload_quota: 429, photo_invalid: 400 };
 const fail = (code: string, retryAfter?: number) => retryAfter
   ? Response.json({ code, retryAfter }, { status: STATUS[code] ?? 500, headers: { 'retry-after': String(retryAfter) } })
   : Response.json({ code }, { status: STATUS[code] ?? 500 });
@@ -161,6 +162,9 @@ export function createServer(opts: { port: number }): Server {
         if (folder && req.method === 'DELETE') return Response.json(await deleteFolder(userId, Number(folder[1])));
         const notifyType = /^\/settings\/notify\/([a-z]{1,16})$/.exec(url.pathname);
         if (req.method === 'PUT' && notifyType) return Response.json(await setNotify(userId, notifyType[1], await req.json().catch(() => null)));
+        // закрепить / в архив / отметить непрочитанным: { pinned?, archived?, unreadMark? } → все три флага
+        const chatFlags = /^\/chats\/(\d{1,15})\/flags$/.exec(url.pathname);
+        if (req.method === 'PUT' && chatFlags) return Response.json(await setChatFlags(userId, Number(chatFlags[1]), await req.json().catch(() => null)));
         const chatNotify = /^\/chats\/(\d{1,15})\/notify$/.exec(url.pathname);
         if (req.method === 'PUT' && chatNotify) return Response.json(await setChatNotify(userId, Number(chatNotify[1]), await req.json().catch(() => null)));
         const privacyKey = /^\/privacy\/([a-zA-Z]{1,16})$/.exec(url.pathname);
@@ -326,11 +330,13 @@ export function createServer(opts: { port: number }): Server {
           return Response.json(await listChatsPage(userId, limit, at && id ? { at, id: Number(id) } : undefined));
         }
         if (req.method === 'GET' && url.pathname === '/chats') {
-          // ?ids=1,2,3 — конкретные чаты; ?unread=1 — все с непрочитанными; без параметров — весь список
+          // ?ids=1,2,3 — конкретные чаты; ?unread=1 — все с непрочитанными (и с пометкой); ?pinned=1 — закреплённые; ?archived=1 — архив; без параметров — весь список
           const ids = url.searchParams.get('ids');
           return Response.json(await listChats(userId, {
             ids: ids ? ids.split(',').map(Number).filter((n) => Number.isInteger(n) && n > 0).slice(0, 500) : undefined,
             unreadOnly: url.searchParams.get('unread') === '1',
+            pinnedOnly: url.searchParams.get('pinned') === '1',
+            archivedOnly: url.searchParams.get('archived') === '1',
           }));
         }
         const mem = /^\/chats\/(\d+)\/members$/.exec(url.pathname);

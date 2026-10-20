@@ -80,6 +80,9 @@ export interface ChatSummary {
   draft?: { text: string; at: string } | null;
   pinned?: number[];
   muteUntil?: number | null;
+  pinnedAt?: number | null;
+  archived?: boolean;
+  unreadMark?: boolean;
   sortAt?: string;
   id: number;
   kind: 'direct' | 'group';
@@ -313,11 +316,19 @@ export class Store {
       case 'myStickers': this.stickersRev++; return;
       case 'pins': { const chat = this.chats.get(u.chatId); if (chat) { chat.pinned = u.ids; this.markChat(chat); } return; }
       case 'chatNotify': return this.setMute(u.chatId, u.muteUntil);
+      case 'chatFlags': return this.setFlags(u.chatId, u);
       case 'groupUpdated': { const chat = this.chats.get(u.chatId); if (chat) { chat.group = u.group; this.markChat(chat); } return; }
       case 'membership': { const chat = this.chats.get(u.chatId); if (chat) { chat.me = u.me; this.markChat(chat); } return; }
       case 'members': return applyMembersUpdate(this, u.chatId, u.upsert, u.remove, seq);
       case 'chatRemoved': return this.removeChat(u.chatId);
     }
+  }
+
+  /** Закреплён / архив / пометка «непрочитанное» (журнал, ответ операции): значение сервера — база. */
+  setFlags(chatId: number, f: { pinnedAt: number | null; archived: boolean; unreadMark: boolean }): void {
+    const chat = this.chats.get(chatId);
+    if (!chat || ((chat.pinnedAt ?? null) === f.pinnedAt && !!chat.archived === f.archived && !!chat.unreadMark === f.unreadMark)) return;
+    chat.pinnedAt = f.pinnedAt; chat.archived = f.archived; chat.unreadMark = f.unreadMark; this.markChat(chat);
   }
 
   /** Уведомления чата (журнал, снимок, ответ операции): значение сервера — база; чата в кэше нет — ждать нечего. */
@@ -359,6 +370,7 @@ export class Store {
       if (s.draft && (!chat.draft || s.draft.at > chat.draft.at) && !this.pendingDrafts.has(s.id)) chat.draft = s.draft;
       if (s.pinned) chat.pinned = s.pinned;
       if (s.muteUntil !== undefined) chat.muteUntil = s.muteUntil;
+      if (s.archived !== undefined) { chat.pinnedAt = s.pinnedAt ?? null; chat.archived = s.archived; chat.unreadMark = !!s.unreadMark; }
       if (s.group) { chat.group = s.group; chat.me = s.me; }
       if (s.peerReadUpTo && s.peerReadUpTo > chat.peerReadUpTo) this.applyPeerRead(s.id, s.peerReadUpTo);
       chat.lastReadId = Math.max(chat.lastReadId, s.lastReadId);

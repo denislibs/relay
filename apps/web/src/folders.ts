@@ -3,7 +3,10 @@
 import type { ChatFolder } from '@relay/protocol';
 
 /** Чат, как его видит фильтр (поля элемента подписки chatList). */
-export interface FolderChat { id: number; kind: 'direct' | 'group'; peerId: number | null; unread: number; muteUntil?: number | null }
+export interface FolderChat { id: number; kind: 'direct' | 'group'; peerId: number | null; unread: number; muteUntil?: number | null; unreadMark?: boolean; archived?: boolean }
+
+/** Непрочитанный: есть непрочитанные сообщения или «Отметить как непрочитанное» (как в Telegram). */
+export const isUnread = (c: FolderChat): boolean => c.unread > 0 || !!c.unreadMark;
 
 /** Что фильтр знает о мире: контакты (id людей) и заглушён ли чат (muteUntil чата или умолчание аккаунта). */
 export interface FolderCtx { contacts: ReadonlySet<number>; isMuted(c: FolderChat): boolean }
@@ -18,7 +21,8 @@ export const ALL = 0;
 export function inFolder(f: ChatFolder, c: FolderChat, ctx: FolderCtx): boolean {
   if (f.exclude.includes(c.id)) return false;
   if (f.include.includes(c.id)) return true;
-  if (f.excludeRead && c.unread <= 0) return false;
+  if (c.archived) return false;   // архив — только под строкой «Архив» (явно добавленный в папку — виден, проверено выше)
+  if (f.excludeRead && !isUnread(c)) return false;
   if (f.excludeMuted && ctx.isMuted(c)) return false;
   if (c.kind === 'group') return f.groups;
   const contact = c.peerId !== null && ctx.contacts.has(c.peerId);
@@ -37,7 +41,7 @@ export function folderChats<T extends FolderChat>(f: ChatFolder | null, chats: r
 export function folderBadge(f: ChatFolder | null, chats: readonly FolderChat[], ctx: FolderCtx): { count: number; muted: boolean } {
   let count = 0, loud = 0;
   for (const c of chats) {
-    if (c.unread <= 0 || (f && !inFolder(f, c, ctx))) continue;
+    if (!isUnread(c) || (f ? !inFolder(f, c, ctx) : c.archived)) continue;   // архив в «Все» не считается — у него свой бейдж
     const m = ctx.isMuted(c);
     if (!f && m) continue;
     count++;

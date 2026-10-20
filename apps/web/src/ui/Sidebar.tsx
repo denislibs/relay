@@ -1,9 +1,10 @@
 import { ChatBanner } from './ChatBanner';
 import { UpdatePill } from './UpdatePill';
-import { Avatar, ChatRow, Highlight, Icon, MenuPopover, Presence, SlideStack, ChatRowSkeleton, useMinVisible, EmptyState, WindowList, FolderTabs, SidebarCard, SidebarHeader, peerTone, ripple } from '@relay/ui';
+import { ArchivedRow, Avatar, ChatRow, Highlight, Icon, MenuPopover, Presence, SlideStack, ChatRowSkeleton, useMinVisible, EmptyState, WindowList, FolderTabs, SidebarCard, SidebarHeader, peerTone, ripple } from '@relay/ui';
 import type { Item } from '@relay/sync-engine/src/types';
 import { loadMoreChats, openChat, prepareChat } from '../data';
 import { pressOpen } from './press';
+import { clearUnreadMark, hasUnreadMark, isArchived, isPinned, markUnread, toggleArchive, togglePin } from '../chatFlags';
 import { usePerson } from '../people';
 import { closeSearch, openSearch } from '../search';
 import { GlobalSearch } from './search/GlobalSearch';
@@ -55,7 +56,7 @@ function MoreLoader() {
 }
 
 /** Строка списка чатов. memo: чат не изменился (тот же объект из Mirror) — строку не трогаем при сдвиге окна. */
-const SideRow = memo(function SideRow({ c, meId, active, showDraft, muted, onMenu }: { c: Item; meId: number; active: boolean; showDraft: boolean; muted: boolean; onMenu: (id: number, x: number, y: number) => void }) {
+export const SideRow = memo(function SideRow({ c, meId, active, showDraft, muted, onMenu }: { c: Item; meId: number; active: boolean; showDraft: boolean; muted: boolean; onMenu: (id: number, x: number, y: number) => void }) {
   const last = c.last as (LastMessage & { status: string }) | null;
   const thumb = last ? previewThumb(last) : null;
   // имя автора — только в группах (в личке и так ясно, кто пишет); своё — «Вы», чужое — первое слово имени
@@ -80,6 +81,8 @@ const SideRow = memo(function SideRow({ c, meId, active, showDraft, muted, onMen
       typing={!!c.typing}
       time={chatTime((c.sortAt ?? c.lastAt) as string)}
       unread={c.unread as number}
+      unreadMark={hasUnreadMark(c)}
+      pinned={isPinned(c)}
       status={!draft && last && last.senderId === meId ? last.status : null}
       active={active}
       {...pressOpen(() => prepareChat(c.id as number), () => openChat(c.id as number))}
@@ -158,8 +161,11 @@ export function Sidebar() {
   // списка догружаем общие диалоги, как в Telegram Web K)
   const listOf = (id: number) => {
     const f = id === ALL ? null : folders.find((x) => x.id === id) ?? null;
+    // архив — не в списках (только под строкой «Архив»; явно добавленный в папку — проверяет inFolder);
+    // закреплённый — всегда, даже старше загруженного диапазона (движок грузит закреплённые сразу)
     return chats.filter((c) =>
-      Date.parse(c.lastAt as string) >= loadedFrom &&
+      (f ? true : !isArchived(c)) &&
+      (Date.parse(c.lastAt as string) >= loadedFrom || isPinned(c)) &&
       (!f || inFolder(f, c as never, ctx)) &&
       (!q || String(c.title ?? '').toLowerCase().includes(q)));
   };
@@ -168,6 +174,10 @@ export function Sidebar() {
   const order = place === 'none' ? [String(ALL)] : items.map((t) => String(t.id));
 
   // одна папка: свой список и своя прокрутка (страница SlideStack)
+  // строка «Архив» над «Все» (как в Telegram): имена первых архивных, непрочитанные — ярче; счётчик — чаты с непрочитанным
+  const archived = chats.filter(isArchived);
+  const archiveNames = archived.slice(0, 5).map((c) => ({ name: String(c.title || 'Чат №' + c.id), unread: (c.unread as number) > 0 || hasUnreadMark(c) }));
+  const archiveUnread = archived.filter((c) => (c.unread as number) > 0 || hasUnreadMark(c)).length;
   const renderFolder = (key: string) => {
     const f = Number(key);
     const list = listOf(f);
@@ -179,6 +189,9 @@ export function Sidebar() {
             {Array.from({ length: 9 }, (_, i) => <div key={i} style={{ '--i': i }}><ChatRowSkeleton /></div>)}
           </div>
         </Presence>
+        {!waiting && !skeleton && f === ALL && !q && archived.length ? (
+          <ArchivedRow names={archiveNames} count={archiveUnread} onClick={() => void go('archive')} />
+        ) : null}
         {waiting || skeleton ? null : list.length ? (
           <>
           <WindowList
@@ -264,7 +277,7 @@ export function Sidebar() {
 }
 
 /** Действия с чатом по правой кнопке: только то, что умеет сервер (удаления/закрепления/архива пока нет). */
-function RowMenu({ at, onClose }: { at: { id: number; x: number; y: number } | null; onClose: () => void }) {
+export function RowMenu({ at, onClose }: { at: { id: number; x: number; y: number } | null; onClose: () => void }) {
   const chat = useGlobal((s) => (at ? s.chats.find((c) => c.id === at.id) : undefined));
   const muted = isMuted(chat);
   const last = useRef(at);
@@ -287,7 +300,9 @@ function RowMenu({ at, onClose }: { at: { id: number; x: number; y: number } | n
     ...(current && inFolder(current, chat as never, ctx) ? [{ icon: 'close', label: 'Убрать из папки', onClick: () => toggleIn(current.id) }] : []),
   ];
   const unread = (chat?.unread as number) > 0;
+  const marked = hasUnreadMark(chat);
   const lastId = ((chat?.last as { id?: number | null } | null)?.id ?? 0) || (chat?.knownMaxId as number) || 0;
+  const pinned = isPinned(chat), archived = isArchived(chat);
   return (
             <MenuPopover
               open={!!at && !!chat} anchor={p ?? undefined}
@@ -295,9 +310,14 @@ function RowMenu({ at, onClose }: { at: { id: number; x: number; y: number } | n
               onClose={onClose}
               items={[
                 { icon: 'newTab', label: 'Открыть в новой вкладке', onClick: () => { onClose(); window.open(location.pathname + '#chat=' + id, '_blank', 'noopener'); } },
-                ...(unread && lastId ? [{ icon: 'markRead', label: 'Отметить как прочитанное', onClick: () => { onClose(); seen(id, lastId); } }] : []),
-                { icon: muted ? 'bell' : 'bellOff', label: muted ? 'Включить уведомления' : 'Выключить уведомления', onClick: () => { onClose(); toggleMute(id); } },
+                // порядок — как в Telegram: прочитанное, папка, закрепить, уведомления, архив
+                ...(unread || marked
+                  ? [{ icon: 'markRead', label: 'Отметить как прочитанное', onClick: () => { onClose(); if (unread && lastId) seen(id, lastId); clearUnreadMark(id); } }]
+                  : [{ icon: 'markUnread', label: 'Отметить как непрочитанное', onClick: () => { onClose(); markUnread(id); } }]),
                 ...folderItems,
+                { icon: pinned ? 'unpin' : 'pin', label: pinned ? 'Открепить' : 'Закрепить', onClick: () => { onClose(); togglePin(id); } },
+                { icon: muted ? 'bell' : 'bellOff', label: muted ? 'Включить уведомления' : 'Выключить уведомления', onClick: () => { onClose(); toggleMute(id); } },
+                ...(isSystemChat(chat as never) ? [] : [{ icon: archived ? 'unarchive' : 'archive', label: archived ? 'Вернуть из архива' : 'В архив', onClick: () => { onClose(); toggleArchive(id); } }]),
                 { icon: 'info', label: 'Информация', onClick: () => { onClose(); openChat(id); setGlobal({ infoOpen: true }); } },
               ]}
             />

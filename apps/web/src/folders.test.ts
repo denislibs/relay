@@ -57,3 +57,13 @@ test('toggle a chat in a folder: add to include; remove — from include, and ex
   const removedExplicit = toggleChatInFolder(F({ include: [1] }), friend, ctx);
   expect([removedExplicit.include, removedExplicit.exclude]).toEqual([[], []]);
 });
+
+test('«Отметить как непрочитанное» — непрочитанный чат; архив — не в папках и не в счётчике «Все», явно добавленный — виден', () => {
+  const marked: FolderChat = { id: 21, kind: 'direct', peerId: 100, unread: 0, unreadMark: true };
+  const archived: FolderChat = { id: 22, kind: 'direct', peerId: 100, unread: 3, archived: true };
+  const unreadOnly: ChatFolder = { ...RECOMMENDED.find((r) => r.key === 'unread')!.folder, id: 7, include: [], exclude: [] } as ChatFolder;
+  expect(inFolder(unreadOnly, marked, ctx)).toBe(true);
+  expect(inFolder(unreadOnly, archived, ctx)).toBe(false);
+  expect(inFolder({ ...unreadOnly, include: [22] }, archived, ctx)).toBe(true);
+  expect(folderBadge(null, [marked, archived], ctx)).toEqual({ count: 1, muted: false });
+});

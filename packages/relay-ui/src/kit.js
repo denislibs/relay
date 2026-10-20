@@ -77,6 +77,7 @@ var ICONS = {
   channels: ['M4 10v4', 'M10 7l9-3v16l-9-3H7V7z'],
   community: [C(9, 8, 3.5), 'M2 20a7 7 0 0 1 14 0', 'M16 4.5a3.5 3.5 0 0 1 0 7', 'M18 14a6 6 0 0 1 4 6'],
   archive: ['M3 5h18v4H3z', 'M5 9v10h14V9', 'M12 12v5', 'M9.5 14.5L12 17l2.5-2.5'],
+  unarchive: ['M3 5h18v4H3z', 'M5 9v10h14V9', 'M12 17v-5', 'M9.5 14.5L12 12l2.5 2.5'],   // «Вернуть из архива»: стрелка вверх
   send: ['M4 12l16-8-6 16-3-7z', 'M11 13l9-9'],
   mic: ['M12 3a3 3 0 0 0-3 3v6a3 3 0 0 0 6 0V6a3 3 0 0 0-3-3', 'M5 11a7 7 0 0 0 14 0', 'M12 18v3'],
   smile: [C(12, 12, 9), 'M8.5 14.5a4.5 4.5 0 0 0 7 0', 'M9 9.5h.01', 'M15 9.5h.01'],
@@ -111,6 +112,7 @@ var ICONS = {
   musicRemove: ['M9 18V6l9-2v6', 'M9 18a2.5 2.5 0 1 1-2.5-2.5H9', 'M15 17h6'],
   newTab: ['M8 4h9a3 3 0 0 1 3 3v9a3 3 0 0 1-3 3H8a3 3 0 0 1-3-3V7a3 3 0 0 1 3-3z', 'M12.5 8.5v7', 'M9 12h7'],
   markRead: ['M12 20a8 8 0 1 0-7.1-4.3L4 20l4.4-.9A8 8 0 0 0 12 20z', 'M8.5 12.2l2.4 2.4 4.6-4.9'],
+  markUnread: ['M12 20a8 8 0 1 0-7.1-4.3L4 20l4.4-.9A8 8 0 0 0 12 20z', 'M12 9v4', 'M12 16h.01'],   // «Отметить как непрочитанное»
   bellOff: ['M6.3 6.3A6 6 0 0 0 6 8v4l-2 4h12', 'M9 4a6 6 0 0 1 9 5v3l1 2', 'M10 20a2 2 0 0 0 4 0', 'M3 3l18 18'],
   lock: ['M6 11h12v10H6z', 'M8.5 11V8a3.5 3.5 0 0 1 7 0v3'],
   download: ['M12 4v11', 'M7.5 10.5L12 15l4.5-4.5', 'M5 20h14'],
@@ -139,6 +141,7 @@ var ICONS = {
   menu: ['M4 7h16', 'M4 12h16', 'M4 17h16'],
   chevronUp: ['M6 15l6-6 6 6'],
   pin: ['M9 4h6l-1 6 3 3H7l3-3z', 'M12 13v7'],
+  unpin: ['M9 4h6l-1 6 3 3H7l3-3z', 'M12 13v7', 'M4 4l16 16'],   // «Открепить»: булавка, перечёркнутая
   ban: [C(12, 12, 9), 'M5.6 5.6l12.8 12.8'],
   camera: ['M4 8h3l2-3h6l2 3h3v11H4z', C(12, 13, 3.5)],
   contact: [C(12, 9, 3.5), 'M5 20a7 7 0 0 1 14 0'],
@@ -372,10 +375,11 @@ function RowBadge(props) {
   }, [count > 0]);
   useEffect(function () { return function () { cancelAnimationFrame(raf.current); clearTimeout(timer.current); }; }, []);
   if (phase === 'off') return null;
-  var n = last.current, label = n > 999 ? '999+' : String(n);
+  // blank — «Отметить как непрочитанное» без непрочитанных сообщений: бейдж без числа, как в Telegram
+  var n = last.current, label = props.blank ? '' : n > 999 ? '999+' : String(n);
   return h('span', {
-    class: cx('rl-badge rl-badge-row', props.muted && 'rl-badge-muted', phase === 'on' && 'is-on', phase === 'leave' && 'is-leave'),
-    'aria-label': phase === 'leave' ? undefined : label + ' непрочитанных', 'aria-hidden': phase === 'leave' ? 'true' : undefined
+    class: cx('rl-badge rl-badge-row', props.muted && 'rl-badge-muted', props.blank && 'rl-badge-blank', phase === 'on' && 'is-on', phase === 'leave' && 'is-leave'),
+    'aria-label': phase === 'leave' ? undefined : props.blank ? 'отмечен как непрочитанный' : label + ' непрочитанных', 'aria-hidden': phase === 'leave' ? 'true' : undefined
   }, label);
 }
 
@@ -441,21 +445,30 @@ function ChatRow(props) {
           ? h('span', { class: 'rl-row-name rl-row-name-verified' }, h('span', { class: 'rl-row-name-text' }, props.name), h(Verified, { size: 16 }))
           : h('span', { class: 'rl-row-name' }, props.name),
         props.status ? h(MessageStatus, { status: props.status, size: 16 }) : null,
-        h('span', { class: cx('rl-row-time', unread > 0 && !props.muted && 'rl-row-time-unread') }, props.time)),
+        h('span', { class: cx('rl-row-time', (unread > 0 || props.unreadMark) && !props.muted && 'rl-row-time-unread') }, props.time)),
       h('span', { class: 'rl-row-bottom' }, bottom,
         h('span', { class: 'rl-row-meta' },
           props.mentioned ? h('span', { class: 'rl-row-at', 'aria-label': 'Вас упомянули' }, '@') : null,
           props.muted ? h(Icon, { name: 'bellOff', size: 16, title: 'Без звука' }) : null,
-          props.pinned ? h(Icon, { name: 'pinFilled', size: 16, title: 'Закреплён', class: 'rl-row-pin' }) : null,   // pin-filled
-          h(RowBadge, { count: unread, muted: props.muted })))));
+          // булавка — только без бейджа (как в Telegram: непрочитанное важнее)
+          props.pinned && !(unread > 0) && !props.unreadMark ? h(Icon, { name: 'pinFilled', size: 16, title: 'Закреплён', class: 'rl-row-pin' }) : null,   // pin-filled
+          h(RowBadge, { count: unread > 0 ? unread : props.unreadMark ? 1 : 0, blank: !(unread > 0) && !!props.unreadMark, muted: props.muted })))));
 }
 
-/* ---------- ArchivedRow ---------- */
+/* ---------- ArchivedRow ----------
+   Строка «Архив» над списком, как в Telegram: серый аватар с коробкой, под названием — имена первых архивных чатов
+   (непрочитанные — ярче), справа серый счётчик чатов с непрочитанным. names: [{ name, unread }]. */
 function ArchivedRow(props) {
-  return h('button', { type: 'button', class: 'rl-row rl-row-archived', onPointerDown: ripple, onClick: props.onClick },
-    h('span', { class: 'rl-row-archived-icon' }, h(Icon, { name: 'archiveFilled', size: 20 })),   // archive-filled
-    h('span', { class: 'rl-row-name' }, props.label || 'Архив'),
-    props.count ? h('span', { class: 'rl-row-time rl-row-time-unread' }, props.count) : null);
+  var names = props.names || [];
+  return h('button', Object.assign({ type: 'button' }, omit(props, ['names', 'count', 'label', 'class']), { class: cx('rl-row rl-row-archived', props.class), onPointerDown: chain(props.onPointerDown, ripple) }),
+    h('span', { class: 'rl-row-archived-avatar', 'aria-hidden': 'true' }, h(Icon, { name: 'archiveFilled', size: 26 })),   // archive-filled
+    h('span', { class: 'rl-row-main' },
+      h('span', { class: 'rl-row-top' }, h('span', { class: 'rl-row-name' }, props.label || 'Архив')),
+      h('span', { class: 'rl-row-bottom' },
+        h('span', { class: 'rl-row-preview' }, names.map(function (n, i) {
+          return h(Fragment, { key: i }, i ? ', ' : null, h('span', { class: n.unread ? 'rl-row-archived-unread' : undefined }, n.name));
+        })),
+        h('span', { class: 'rl-row-meta' }, h(RowBadge, { count: props.count || 0, muted: true })))));
 }
 
 function ChatRowSkeleton() {

@@ -6,6 +6,7 @@ import { sql } from '../db';
 import { assertMember, toMessage } from './chats';
 import { DomainError } from './errors';
 import { fanOut } from './journal';
+import { unarchiveOnMessage } from './chatFlags';
 import { blockedInDirect } from './privacy';
 import { burnCodes } from './login';
 import { enqueue } from '../jobs/queue';
@@ -123,6 +124,7 @@ export async function sendMessage(
     await burnCodes(tx, userId, body);
     const members = await tx`select user_id from chat_members where chat_id = ${input.chatId}`;
     await fanOut(tx, members.map((m) => m.user_id as number), { type: 'newMessage', message });
+    await unarchiveOnMessage(tx, input.chatId, userId);   // как в Telegram: новое сообщение возвращает чат из архива (если не заглушён)
     await clearDraftInTx(tx, userId, input.chatId); // отправили — черновик на всех устройствах больше не нужен
     await enqueue(tx, 'push.message', { message });  // уйдёт после коммита, воркером: ack не ждёт push-сервис
     await enqueue(tx, 'search.sync', { id: message.id });   // в индекс поиска — тоже после коммита

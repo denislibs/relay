@@ -11,6 +11,23 @@ export interface Result {
 
 /** Операция «выключить уведомления чата»: ключ mute:<chatId>, тело {muteUntil}. Её значение показывается сразу, до ответа сервера. */
 export const muteKey = (chatId: number) => 'mute:' + chatId;
+export const flagsKey = (chatId: number) => 'flags:' + chatId;
+
+/** Флаги чата, которые видит список: закреплён (мс), в архиве, пометка «непрочитанное». */
+export interface Flags { pinnedAt: number | null; archived: boolean; unreadMark: boolean }
+type FlagsOp = { pinned: boolean; archived: boolean; unreadMark: boolean; at: number };
+/** Неотправленные операции setChatFlags: их значение перекрывает значение чата (видно сразу, до ответа сервера). */
+export function flagsOverlay(ops: readonly { key: string; body?: unknown }[]): Map<number, FlagsOp> {
+  const m = new Map<number, FlagsOp>();
+  for (const o of ops) if (o.key.startsWith('flags:')) m.set(Number(o.key.slice(6)), o.body as FlagsOp);
+  return m;
+}
+/** Флаги чата с учётом операции в очереди: закреплённый раньше сохраняет своё место, только что закреплённый — время операции. */
+export function flagsOf(c: LocalChat, over?: FlagsOp): Flags {
+  if (!over) return { pinnedAt: c.pinnedAt ?? null, archived: !!c.archived, unreadMark: !!c.unreadMark };
+  const keep = c.pinnedAt != null && !!c.archived === over.archived;
+  return { pinnedAt: over.pinned ? (keep ? c.pinnedAt! : over.at) : null, archived: over.archived, unreadMark: over.unreadMark };
+}
 export function muteOverlay(ops: readonly { key: string; body?: unknown }[]): Map<number, number | null> {
   const m = new Map<number, number | null>();
   for (const o of ops) if (o.key.startsWith('mute:')) m.set(Number(o.key.slice(5)), (o.body as { muteUntil: number | null }).muteUntil);
@@ -28,13 +45,14 @@ function result(list: Item[]): Result {
 const sortAt = (c: LocalChat): string => (c.draft && c.draft.at > c.lastAt ? c.draft.at : c.lastAt);
 
 /** Строка списка: название и фото личного чата — из people (personView), группы — из chat.group. */
-const chatItem = (store: Store, c: LocalChat, person: ReturnType<typeof personView> | null, muteUntil: number | null): Item => {
+const chatItem = (store: Store, c: LocalChat, person: ReturnType<typeof personView> | null, muteUntil: number | null, f: Flags): Item => {
   const title = chatTitle(store, c);
   return {
   key: 'c' + c.id, id: c.id, kind: c.kind, title, peerId: c.peerId,
   // собеседник личного чата; system — служебный чат «Relay» (только чтение)
   peer: c.peerId != null ? { id: c.peerId, name: title, ...(c.system ? { system: true } : null) } : null, unread: c.unread, lastReadId: c.lastReadId, lastAt: c.lastAt,
   photo: person ? person.photo : c.group?.photo ?? null, group: c.group ?? null, me: c.me ?? null, membersRev: store.members.rev(c.id), sortAt: sortAt(c), draft: c.draft?.text ?? null, draftEntities: c.draft?.entities ?? null, pinned: c.pinned ?? [], muteUntil,
+  pinnedAt: f.pinnedAt, archived: f.archived, unreadMark: f.unreadMark,
   last: c.last ? { key: c.last.key, id: c.last.id, senderId: c.last.senderId, body: c.last.body, status: c.last.status, createdAt: c.last.createdAt, deleted: !!c.last.deleted, kind: c.last.kind ?? 'text', attachmentName: c.last.attachment?.name ?? null, attachmentTitle: c.last.attachment?.title ?? null, attachmentPerformer: c.last.attachment?.performer ?? null,
     // для превью в списке: спойлеры прячем, миниатюра 20 px — из встроенного thumb, без загрузки файла
     entities: c.last.entities ?? null, thumb: c.last.attachment?.thumb ?? null, mime: c.last.attachment?.mime ?? null,
@@ -45,7 +63,7 @@ const chatItem = (store: Store, c: LocalChat, person: ReturnType<typeof personVi
 // строка списка переиспользуется, пока не изменились её входы: версия чата (всё из строки чата, включая last и
 // черновик), вид собеседника (профиль, контакт, операция в очереди) и «печатает»; JSON.stringify не нужен
 const chatCache = new WeakMap<LocalChat, { sig: string; item: Item }>();
-function chatListItem(store: Store, c: LocalChat, mute: Map<number, number | null>): { item: Item; sig: string } {
+function chatListItem(store: Store, c: LocalChat, mute: Map<number, number | null>, flags: Map<number, FlagsOp>): { item: Item; sig: string } {
   const person = !c.group && c.peerId != null ? personView(store, c.peerId) : null;
   // профиля собеседника нет (чат узнали из сообщения, строку people вытеснили) — движок его спросит
   if (person && c.peerId != null && !store.users.get(c.peerId)) store.wantUser(c.peerId);
@@ -53,9 +71,10 @@ function chatListItem(store: Store, c: LocalChat, mute: Map<number, number | nul
   // уведомления: значение неотправленной операции перекрывает значение чата
   const muteUntil = mute.has(c.id) ? mute.get(c.id)! : c.muteUntil ?? null;
   // membersRev — счётчик изменений состава в памяти (members.ts) для старого интерфейса участников
-  const sig = `${store.chatVersion(c.id)}|${person?.sig ?? ''}|${typing}|${muteUntil}|${store.members.rev(c.id)}`;
+  const f = flagsOf(c, flags.get(c.id));
+  const sig = `${store.chatVersion(c.id)}|${person?.sig ?? ''}|${typing}|${muteUntil}|${store.members.rev(c.id)}|${f.pinnedAt}|${f.archived}|${f.unreadMark}`;
   let hit = chatCache.get(c);
-  if (!hit || hit.sig !== sig) { hit = { sig, item: { ...chatItem(store, c, person, muteUntil), typing } }; chatCache.set(c, hit); }
+  if (!hit || hit.sig !== sig) { hit = { sig, item: { ...chatItem(store, c, person, muteUntil, f), typing } }; chatCache.set(c, hit); }
   return hit;
 }
 
@@ -117,13 +136,19 @@ export function messageWindow(all: LocalMessage[], q: Extract<Query, { kind: 'me
   return { from, to };
 }
 
-export function computeQuery(store: Store, q: Query, mute: Map<number, number | null> = new Map()): Result {
+export function computeQuery(store: Store, q: Query, mute: Map<number, number | null> = new Map(), flags: Map<number, FlagsOp> = new Map()): Result {
   switch (q.kind) {
     case 'chatList': {
-      const chats = [...store.chats.values()].sort((a, b) => { const x = sortAt(a), y = sortAt(b); return x < y ? 1 : x > y ? -1 : b.id - a.id; });
+      // закреплённые — сверху, в порядке закрепления (позже — выше), новые сообщения их не двигают; дальше — по последнему
+      const pin = (c: LocalChat) => flagsOf(c, flags.get(c.id)).pinnedAt;
+      const chats = [...store.chats.values()].sort((a, b) => {
+        const pa = pin(a), pb = pin(b);
+        if (pa != null || pb != null) { if (pa == null) return 1; if (pb == null) return -1; if (pa !== pb) return pb - pa; }
+        const x = sortAt(a), y = sortAt(b); return x < y ? 1 : x > y ? -1 : b.id - a.id;
+      });
       const items = new Map<string, Item>(), sig = new Map<string, string>(), order: string[] = [];
       for (const c of chats.slice(0, q.limit)) {
-        const { item, sig: g } = chatListItem(store, c, mute);
+        const { item, sig: g } = chatListItem(store, c, mute, flags);
         items.set(item.key, item); sig.set(item.key, g); order.push(item.key);
       }
       return { items, sig, order };
@@ -165,9 +190,15 @@ export function computeQuery(store: Store, q: Query, mute: Map<number, number | 
       return result(list);
     }
     case 'counters': {
-      let unreadChats = 0, unreadMessages = 0;
-      for (const c of store.chats.values()) if (c.unread > 0) { unreadChats++; unreadMessages += c.unread; }
-      return result([{ key: 'counters', unreadChats, unreadMessages }]);
+      // архив — отдельно (бейдж строки «Архив»); пометка «непрочитанное» — непрочитанный чат без сообщений в счёте
+      let unreadChats = 0, unreadMessages = 0, archivedUnread = 0;
+      for (const c of store.chats.values()) {
+        const f = flagsOf(c, flags.get(c.id));
+        if (!(c.unread > 0 || f.unreadMark)) continue;
+        if (f.archived) { archivedUnread++; continue; }
+        unreadChats++; unreadMessages += c.unread;
+      }
+      return result([{ key: 'counters', unreadChats, unreadMessages, archivedUnread }]);
     }
     case 'status':
     case 'presence':

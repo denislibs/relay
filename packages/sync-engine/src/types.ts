@@ -67,6 +67,9 @@ export interface LocalChat {
   draft?: { text: string; at: string; entities?: Entity[] } | null;   // неотправленный текст композера (общий для вкладок)
   pinned?: number[];      // закреплённые сообщения (новые сверху)
   muteUntil?: number | null;   // уведомления чата выключены до (мс), 0 — навсегда, null/нет — включены
+  pinnedAt?: number | null;    // чат закреплён (мс; позже закреплённый — выше), null/нет — нет
+  archived?: boolean;          // в архиве: не в «Все» и папках, а под строкой «Архив»
+  unreadMark?: boolean;        // «Отметить как непрочитанное» (снимается при прочтении)
   group?: GroupInfo;      // группа: информация и настройки (название и фото — отсюда)
   me?: MyMembership;      // группа: моя роль и права
   membersDone?: boolean;  // группа: участники загружены (true — целиком, false — первые 200 большой группы; нет — не загружали)
@@ -204,6 +207,8 @@ export type Action =
   /** свои фото изменились HTTP-запросом мимо очереди (удалили, загрузили, сменили главное): перечитать список */
   | { type: 'refreshProfilePhotos' }
   | { type: 'setMute'; chatId: number; muteUntil: number | null }
+  /** Закрепить / в архив / отметить непрочитанным: что не задано — как сейчас. Сразу видно, уходит очередью. */
+  | { type: 'setChatFlags'; chatId: number; pinned?: boolean; archived?: boolean; unreadMark?: boolean }
   | { type: 'setNotify'; notifyType: 'direct' | 'group'; muted?: boolean; preview?: boolean }
   /** правило конфиденциальности целиком — через очередь операций */
   | { type: 'setPrivacy'; key: PrivacyKey; mode: PrivacyMode; allow?: number[]; deny?: number[] }

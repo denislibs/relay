@@ -27,6 +27,7 @@ export const PAGES = [
   'settings/folders/:id/include',  // выбор чатов и типов для включённых
   'settings/folders/:id/exclude',  // и для исключённых
   'settings/dev',   // вкладка раздела — devTab в global, не путь
+  'archive',   // архивные чаты (строка «Архив» над «Все»)
   'contacts',
   'contacts/:userId/edit',
   'newGroup',        // новая группа: выбор участников

@@ -3,7 +3,7 @@ import type { ClientFrame, JournalEntry, Me, SettingsSnapshot, Message, PublicUs
 import { Blocks } from './blocks';
 import { Contacts } from './contacts';
 import { delBlob, getBlob, openDb, putBlob, write } from './idb';
-import { affects, computeQuery, diffResults, feedSpan, messageWindow, muteKey, rangeAt, muteOverlay, type Result } from './queries';
+import { affects, computeQuery, diffResults, feedSpan, flagsKey, flagsOf, flagsOverlay, messageWindow, muteKey, rangeAt, muteOverlay, type Result } from './queries';
 import type { Item } from './types';
 import { countStores } from './devstats';
 import { Store, type ChatSummary } from './store';
@@ -110,6 +110,7 @@ export class Engine {
   private peerSigs = new PeerSigs();
   /** какое значение «уведомлений» из очереди показано в строке чата: изменилось — строку пересчитать */
   private muteShown = new Map<number, number | null>();
+  private flagsShown = new Map<number, string>();   // операции setChatFlags в очереди (подпись) — пересчёт строк при их смене
   private usersAsked = new Set<number>();
   /** участники групп, о которых спросил интерфейс; asked — уже загружали за это подключение */
   private membersWants = new Set<number>();
@@ -398,7 +399,7 @@ export class Engine {
       const it = q.kind === 'devStats' ? this.dev.stats() : { key: 'devLog' };   // devLog идёт мимо compute (dev.pushLog)
       return { items: new Map([[it.key, it]]), order: [it.key], sig: new Map([[it.key, JSON.stringify(it)]]) };
     }
-    if (q.kind !== 'status') return computeQuery(this.store, q, muteOverlay(this.ops.list));
+    if (q.kind !== 'status') return computeQuery(this.store, q, muteOverlay(this.ops.list), flagsOverlay(this.ops.list));
     const it = this.statusItem();
     return { items: new Map([[it.key, it]]), order: [it.key], sig: new Map([[it.key, JSON.stringify(it)]]) };
   }
@@ -713,6 +714,14 @@ export class Engine {
     return c ? chatTitle(this.store, c) : null;
   }
 
+  /** Операция setChatFlags: поставлена, заменена или ушла из очереди — строку пересчитать (место в списке, архив, бейдж). */
+  private retouchFlags(): void {
+    const now = new Map([...flagsOverlay(this.ops.list)].map(([id, v]) => [id, JSON.stringify(v)] as const));
+    for (const [id, v] of now) if (this.flagsShown.get(id) !== v) this.store.retouch(id);
+    for (const id of this.flagsShown.keys()) if (!now.has(id)) this.store.retouch(id);
+    this.flagsShown = now;
+  }
+
   /** Операция mute: поставлена, заменена или ушла из очереди — строку чата пересчитать (в IndexedDB ничего не пишется). */
   private retouchMute(): void {
     const now = muteOverlay(this.ops.list);
@@ -725,7 +734,7 @@ export class Engine {
     this.contacts.repair();
     // собеседник выглядит иначе (профиль, контакт, очередь) — строки его личных чатов пересчитать
     if (this.store.profile.dirty || this.store.contacts.dirty || this.ops.dirty) this.peerSigs.retouch(this.store);
-    if (this.ops.dirty) this.retouchMute();
+    if (this.ops.dirty) { this.retouchMute(); this.retouchFlags(); }
     const hold = this.holding && this.acting === 0;
     const touched = new Set(this.store.touched);
     if (!hold) this.store.touched.clear(); // при удержании изменения копятся до конца догонки
@@ -830,6 +839,12 @@ export class Engine {
     if (this.contacts.opDone(op, value)) return;
     if (this.blocks.opDone(op, value)) return;
     if (this.lists.opDone(op, value)) return;
+    if (op.key.startsWith('flags:')) {
+      // ответ — все три флага сервера: новая база (журнал принесёт то же самое ещё раз)
+      const v = value as { pinnedAt?: number | null; archived?: boolean; unreadMark?: boolean } | null;
+      if (v && typeof v.archived === 'boolean') { this.store.setFlags(Number(op.key.slice(6)), { pinnedAt: v.pinnedAt ?? null, archived: v.archived, unreadMark: !!v.unreadMark }); this.run(() => this.store.flush()); }
+      return;
+    }
     if (op.key.startsWith('mute:')) {
       // ответ — новая база: между уходом операции и записью журнала строка не откатится
       const v = value as { muteUntil?: number | null } | null;
@@ -1146,6 +1161,17 @@ export class Engine {
       case 'setMute':
         await this.ops.enqueue({ key: muteKey(a.chatId), method: 'PUT', path: `/chats/${a.chatId}/notify`, body: { muteUntil: a.muteUntil } });
         return null;
+      case 'setChatFlags': {
+        // в очередь — полное желаемое значение (слитые правки одного чата не теряют соседний флаг); at — время закрепления
+        // для места в списке до ответа сервера (сервер поле не читает)
+        const c = this.store.chats.get(a.chatId);
+        if (!c) return null;
+        const cur = flagsOf(c, flagsOverlay(this.ops.list).get(a.chatId));
+        const archived = a.archived ?? cur.archived;
+        const pinned = a.pinned ?? (archived === cur.archived && cur.pinnedAt != null);   // в другой список закрепление не переезжает
+        await this.ops.enqueue({ key: flagsKey(a.chatId), method: 'PUT', path: `/chats/${a.chatId}/flags`, body: { pinned, archived, unreadMark: a.unreadMark ?? cur.unreadMark, at: Date.now() } });
+        return null;
+      }
       case 'setNotify': {
         // в очередь уходит полное значение вида чата: слитые правки одного ключа не теряют соседнее поле
         const cur = settingsView(this.store.settings.base, this.ops.list).notify[a.notifyType];
@@ -1477,11 +1503,14 @@ export class Engine {
   /** Первая страница диалогов и все чаты с непрочитанными (папка «Непрочитанные» и её счётчик — полные). */
   private async loadFirstDialogs(): Promise<void> {
     const seq = this.store.lastSeq;   // ответы не старее этой позиции журнала — их собеседники перетирают профиль, записанный раньше
-    const [page, unread] = await Promise.all([
+    // закреплённые и архив — целиком сразу: закреплённый может быть старше курсора страниц, а строке «Архив» нужен весь архив
+    const [page, unread, pinned, archived] = await Promise.all([
       this.http<{ chats: ChatSummary[]; next: { at: string; id: number } | null; total?: number }>(`/chats/page?limit=${this.cfg.dialogsPage ?? 100}`),
       this.http<ChatSummary[]>('/chats?unread=1'),
+      this.http<ChatSummary[]>('/chats?pinned=1'),
+      this.http<ChatSummary[]>('/chats?archived=1'),
     ]);
-    this.store.applyChats([...page.chats, ...unread], seq);
+    this.store.applyChats([...page.chats, ...unread, ...pinned, ...archived], seq);
     this.store.setDialogsCursor(page.next, page.total);
   }
 

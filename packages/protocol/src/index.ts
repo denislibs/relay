@@ -215,6 +215,7 @@ export type Update =
   // состав изменился: у кого строка новая или другая (upsert), кто вышел или удалён (remove)
   | { type: 'members'; chatId: Id; upsert: MemberRow[]; remove: Id[] }
   // чат больше не мой: вышел, удалили, группу удалили
+  | { type: 'chatFlags'; chatId: Id; pinnedAt: number | null; archived: boolean; unreadMark: boolean }   // закреплён (мс; позже — выше), в архиве, «непрочитанное»
   | { type: 'chatNotify'; chatId: Id; muteUntil: number | null }   // уведомления чата: мс эпохи — выключены до, 0 — навсегда, null — включены
   | { type: 'chatRemoved'; chatId: Id }
   | { type: 'myStickers' };   // мои паки / недавние / избранные изменились — перечитать GET /my-stickers   // превью ссылки сообщения загрузилось (null — превью нет)   // закреплённые сообщения чата целиком (новые сверху)   // список сеансов изменился: новый вход, подтверждение, завершение
@@ -304,7 +305,7 @@ export interface Me {
 
 export interface JournalEntry { seq: number; update: Update }
 
-export type ErrorCode = 'bad_frame' | 'unauthorized' | 'not_member' | 'not_found' | 'too_long' | 'forbidden' | 'internal'
+export type ErrorCode = 'bad_frame' | 'pin_limit' | 'unauthorized' | 'not_member' | 'not_found' | 'too_long' | 'forbidden' | 'internal'
   | 'username_invalid' | 'username_taken' | 'username_reserved' | 'bio_too_long' | 'name_invalid' | 'birthday_invalid' | 'links_invalid' | 'note_too_long'
   | 'blocked' | 'code_invalid' | 'code_expired' | 'flood' | 'fresh_session'
   | 'password_invalid' | 'password_missing' | 'recovery_unavailable' | 'email_invalid' | 'qr_expired' | 'passkey_not_found' | 'passkey_invalid'

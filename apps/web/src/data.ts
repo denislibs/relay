@@ -12,6 +12,7 @@ import { activeFrame, frameByKey, getGlobal, setGlobal, type ChatFrame, type Fee
 import { bindChatDepth, popChats, pushChat } from './nav';
 import { notifyIncoming, startNotify } from './notify';
 import { bindMute, isMuted, startMuteMigration } from './mute';
+import { bindChatFlags, clearUnreadMark } from './chatFlags';
 import { startPeople, wantPeople } from './people';
 import { resetMembers } from './members';
 import { resetMediaTabs } from './mediaTab';
@@ -47,6 +48,7 @@ export function startData(me: Me): void {
   startPeople(engine);
   resetMembers(); resetMediaTabs();   // вход другим пользователем без перезагрузки: кэши отрисовки прежнего — прочь
   bindMute((chatId, muteUntil) => engine.call({ type: 'setMute', chatId, muteUntil }));
+  bindChatFlags((chatId, f) => engine.call({ type: 'setChatFlags', chatId, ...f }));
   bindStickers((a) => engine.call(a as never));
   startMuteMigration();   // прежние relay.muted / relay.mutedUntil — на сервер, один раз (до первого снимка: значки не мигают)
   try { localStorage.removeItem('relay.names'); } catch { /* приватный режим */ }   // прежний кэш имён — теперь их держит движок
@@ -237,6 +239,7 @@ function syncShown(): void {
   const top = topReady();
   history.replaceState(history.state, '', top ? '#chat=' + top.chatId : location.pathname);
   if ((top?.chatId ?? null) !== peerFor) watchPeer(top?.chatId ?? null);
+  if (top) clearUnreadMark(top.chatId);   // открыли чат, отмеченный непрочитанным, — пометка снята (как в Telegram)
 }
 
 /** Отменить ещё не показанный чат (новый нижний или поверх): его лента не дождалась. */

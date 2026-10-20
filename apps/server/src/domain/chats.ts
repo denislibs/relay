@@ -142,6 +142,9 @@ export type ChatSummary = {
   draft?: { text: string; at: string; entities?: Entity[] } | null; // черновик этого пользователя (синхронизируется между устройствами)
   sortAt?: string; // ключ сортировки списка (последнее сообщение или создание чата) — из него курсор страницы
   muteUntil?: number | null; // уведомления выключены: мс эпохи, 0 — навсегда, null — включены
+  pinnedAt?: number | null;  // чат закреплён (мс, порядок: позже — выше); null — нет
+  archived?: boolean;        // в архиве
+  unreadMark?: boolean;      // «Отметить как непрочитанное»
   pinned?: number[]; // закреплённые сообщения (новые сверху)
   group?: GroupInfo;    // только у групп: информация и настройки
   me?: MyMembership;    // только у групп: моя роль и права
@@ -149,7 +152,7 @@ export type ChatSummary = {
 
 /** Курсор страницы диалогов: время последнего сообщения (или создания чата) и id — как offset_date/offset_peer в Telegram. */
 export interface DialogCursor { at: string; id: number }
-export interface ListOpts { limit?: number; before?: DialogCursor; ids?: number[]; unreadOnly?: boolean }
+export interface ListOpts { limit?: number; before?: DialogCursor; ids?: number[]; unreadOnly?: boolean; pinnedOnly?: boolean; archivedOnly?: boolean }
 
 /** Страница диалогов, новые сверху, и курсор следующей (null — дальше пусто). */
 export async function listChatsPage(userId: number, limit: number, before?: DialogCursor): Promise<{ chats: ChatSummary[]; next: DialogCursor | null; total?: number }> {
@@ -161,11 +164,11 @@ export async function listChatsPage(userId: number, limit: number, before?: Dial
   return { chats: page, next: more && last ? { at: last.sortAt!, id: last.id } : null, ...(before ? {} : { total: await countChats(userId) }) };
 }
 
-/** Число диалогов списка — то же условие, что у listChats. */
+/** Число диалогов «Все» (без архива) — то же условие, что у listChats. */
 export async function countChats(userId: number): Promise<number> {
   const [r] = await sql`
     select count(*)::int as n from chat_members cm join chats c on c.id = cm.chat_id
-     where cm.user_id = ${userId}
+     where cm.user_id = ${userId} and not cm.archived   -- архив — не в «Все»
        and not (c.kind = 'direct' and cm.history_from > 0
                 and not exists (select 1 from messages m where m.chat_id = c.id and m.id >= cm.history_from))`;
   return r.n as number;
@@ -176,7 +179,7 @@ export async function listChats(userId: number, opts: ListOpts = {}): Promise<Ch
   const rows = await sql`
     select c.id, c.kind, c.title, c.created_at as chat_created_at, cm.last_read_id,
            c.about, c.photo as g_photo, c.owner_id, c.rights as chat_rights, c.slow_mode, c.history_hidden, c.join_approval, c.username, c.reactions, c.protected,
-           cm.mute_until, cm.mute_until = 'infinity' as mute_forever, cm.role, cm.admin_rights, cm.restricted, cm.history_from, cm.rank,
+           cm.mute_until, cm.mute_until = 'infinity' as mute_forever, cm.pinned_at, cm.archived, cm.unread_mark, cm.role, cm.admin_rights, cm.restricted, cm.history_from, cm.rank,
            case when c.kind = 'group' then (select count(*)::int from chat_members gm where gm.chat_id = c.id) end as g_members,
            case when c.kind = 'group' then (select count(*)::int from chat_join_requests jr where jr.chat_id = c.id) end as g_pending,
            lm.id as m_id, lm.chat_id as m_chat_id, lm.sender_id as m_sender_id, lm.client_id as m_client_id,
@@ -201,7 +204,9 @@ export async function listChats(userId: number, opts: ListOpts = {}): Promise<Ch
        and not (c.kind = 'direct' and cm.history_from > 0 and lm.id is null)
        ${opts.before ? sql`and (date_trunc('milliseconds', coalesce(lm.created_at, c.created_at)), c.id) < (${opts.before.at}::timestamptz, ${opts.before.id})` : sql``}
        ${opts.ids ? sql`and c.id = any(${opts.ids}::bigint[])` : sql``}
-       ${opts.unreadOnly ? sql`and exists (select 1 from messages m where m.chat_id = c.id and m.id > cm.last_read_id and m.sender_id <> ${userId})` : sql``}
+       ${opts.unreadOnly ? sql`and (cm.unread_mark or exists (select 1 from messages m where m.chat_id = c.id and m.id > cm.last_read_id and m.sender_id <> ${userId}))` : sql``}
+       ${opts.pinnedOnly ? sql`and cm.pinned_at is not null` : sql``}
+       ${opts.archivedOnly ? sql`and cm.archived` : sql``}
      order by date_trunc('milliseconds', coalesce(lm.created_at, c.created_at)) desc, c.id desc
      ${opts.limit ? sql`limit ${opts.limit}` : sql``}`;
   return rows.map((r) => ({
@@ -214,6 +219,9 @@ export async function listChats(userId: number, opts: ListOpts = {}): Promise<Ch
     peerReadUpTo: (r.peer_read_up_to as number) ?? 0,
     sortAt: new Date(r.sort_at as string).toISOString(),
     muteUntil: muteFromDb(r.mute_until as Date | null, r.mute_forever as boolean | null),
+    pinnedAt: r.pinned_at ? new Date(r.pinned_at as string).getTime() : null,
+    archived: !!r.archived,
+    unreadMark: !!r.unread_mark,
     pinned: ((r.pinned as number[] | null) ?? []).map(Number),
     ...(r.kind === 'group' ? summaryFromRow(Number(r.id), userId, r) : {}),
     draft: r.draft ? { text: (r.draft as { text: string }).text, at: new Date((r.draft as { at: string }).at).toISOString(), ...((r.draft as { entities?: Entity[] | null }).entities?.length ? { entities: normalizeEntities((r.draft as { text: string }).text, (r.draft as { entities: Entity[] }).entities) } : {}) } : null,
