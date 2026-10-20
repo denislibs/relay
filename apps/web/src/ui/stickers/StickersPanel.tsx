@@ -17,7 +17,10 @@ export function StickersPanel({ onBack }: { onBack(): void }) {
   const busyMore = useRef(false);
   // пока панель выезжает — заглушки строк; паки с анимациями рисуем после (данные грузятся параллельно)
   const [settled, setSettled] = useState(false);
-  useEffect(() => { let live = true; onHeavyAnimationEnd(() => requestAnimationFrame(() => { if (live) setSettled(true); })); return () => { live = false; }; }, []);
+  // фокус — только когда панель доехала и без прокрутки: autoFocus на ещё не выехавшем поле заставляет браузер
+  // прокрутить контейнер к нему — колонка прыгала, а выезд обрывался
+  const input = useRef<HTMLInputElement>(null);
+  useEffect(() => { let live = true; onHeavyAnimationEnd(() => requestAnimationFrame(() => { if (!live) return; setSettled(true); input.current?.focus({ preventScroll: true }); })); return () => { live = false; }; }, []);
   const bottom = useRef<HTMLDivElement>(null), scroller = useRef<HTMLDivElement>(null);
 
   // поиск — с паузой 250 мс после ввода; пусто — первая страница рекомендуемых
@@ -48,7 +51,7 @@ export function StickersPanel({ onBack }: { onBack(): void }) {
       <div class="app-stkpanel-head">
         <IconButton icon="arrowLeft" label="Назад" onClick={onBack} />
         <div class="app-stkpanel-search">
-          <input type="text" placeholder="Поиск стикеров" value={q} autoFocus onInput={(e) => setQ((e.target as HTMLInputElement).value)} aria-label="Поиск стикеров" />
+          <input ref={input} type="text" placeholder="Поиск стикеров" value={q} onInput={(e) => setQ((e.target as HTMLInputElement).value)} aria-label="Поиск стикеров" />
           {q ? <IconButton icon="close" label="Очистить" size={18} onClick={() => setQ('')} /> : null}
         </div>
       </div>

@@ -1067,7 +1067,7 @@ html[data-anim="0"] .app-chatcol, html[data-anim="0"] .app-chatcol-below, html[d
 @keyframes app-sym-in-r { from { transform: translateX(24px); opacity: 0; } }
 @keyframes app-sym-in-l { from { transform: translateX(-24px); opacity: 0; } }
 .app-sym-pane { display: flex; flex-direction: column; height: 100%; }
-.app-sym-strip { display: flex; align-items: center; flex: none; height: 49px; padding: 0 5px; overflow-x: auto; scrollbar-width: none; border-bottom: 1px solid transparent; transition: border-color 150ms; }
+.app-sym-strip { position: relative; display: flex; align-items: center; flex: none; height: 49px; padding: 0 5px; overflow-x: auto; scrollbar-width: none; border-bottom: 1px solid transparent; transition: border-color 150ms; }
 .app-sym-strip.has-border { border-bottom-color: var(--line); }
 .app-sym-strip::-webkit-scrollbar { display: none; }
 .app-sym-strip-btn { flex: none; display: flex; align-items: center; justify-content: center; width: 38px; height: 38px; margin: 0 1px; padding: 0; border: 0; border-radius: 50%; background: transparent; color: var(--ink-muted); cursor: pointer; transition: background-color 150ms, color 150ms; }

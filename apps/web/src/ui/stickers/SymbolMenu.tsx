@@ -81,10 +81,14 @@ function useSections(count: number) {
 
 function Strip({ items, active, go, border }: { items: ComponentChildren[]; active: number; go(i: number): void; border: boolean }) {
   const ref = useRef<HTMLDivElement>(null);
-  useEffect(() => {
-    const el = ref.current?.children[active] as HTMLElement | undefined;
-    if (el) requestMutation(() => el.scrollIntoView({ block: 'nearest', inline: 'center', behavior: 'smooth' }));
-  }, [active]);
+  // центрируем активную кнопку прокруткой только самой полосы: scrollIntoView прокрутил бы и всех предков —
+  // вплоть до корня приложения (он сдвигался вбок посреди выезда правой панели)
+  useEffect(() => requestMeasure(() => {
+    const strip = ref.current, el = strip?.children[active] as HTMLElement | undefined;
+    if (!strip || !el || !strip.clientWidth) return;
+    const left = Math.max(0, el.offsetLeft - (strip.clientWidth - el.offsetWidth) / 2);
+    if (Math.abs(strip.scrollLeft - left) > 1) requestMutation(() => strip.scrollTo({ left, behavior: 'smooth' }));
+  }), [active]);
   return (
     <div class={'app-sym-strip' + (border ? ' has-border' : '')} ref={ref} role="tablist">
       {items.map((it, i) => <button key={i} type="button" role="tab" aria-selected={i === active} class={'app-sym-strip-btn' + (i === active ? ' is-on' : '')} onClick={() => go(i)}>{it}</button>)}
