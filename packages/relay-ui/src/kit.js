@@ -718,7 +718,7 @@ function VoiceRecorder(props) {
       h('span', { class: cx('rl-rec-wave', s.paused && 'rl-rec-wave-paused') }, h(Waveform, { bars: s.levels }))),
     h(IconButton, { icon: s.paused ? 'mic' : 'pause', label: s.paused ? 'Продолжить запись' : 'Пауза', class: s.paused ? 'rl-rec-resume' : '', onClick: function () { st[1]({ paused: !s.paused, elapsed: s.elapsed, levels: s.levels }); } }),
     h('button', { type: 'button', class: cx('rl-composer-send', !s.paused && 'rl-rec-pulse'), 'aria-label': 'Отправить голосовое', onClick: function () { if (props.onSend) props.onSend({ duration: Math.round(s.elapsed), waveform: s.levels.slice(-42) }); } },
-      h(Icon, { name: 'send', size: 22 })));
+      h(Icon, { name: 'sendFilled', size: 22 })));
 }
 
 /* ---------- MediaBubble: photo, video, album ---------- */
@@ -1337,7 +1337,9 @@ function ActionTile(props) {
 }
 // Цветная плитка 32×32 с белой иконкой; color — blue|orange|red|gray|green|purple|pink
 function SettingsIcon(props) {
-  return h('span', { class: cx('rl-sicon', 'rl-sicon-' + (props.color || 'blue')), 'aria-hidden': 'true' }, h(Icon, { name: props.icon, size: 20, strokeWidth: 1.8 }));
+  // в цветной плитке значок залитый, как у Telegram; у значков из одних линий заливать нечего — контур потолще
+  var filled = PACK_FILLED[props.icon + 'Filled'] ? props.icon + 'Filled' : null;
+  return h('span', { class: cx('rl-sicon', 'rl-sicon-' + (props.color || 'blue')), 'aria-hidden': 'true' }, h(Icon, { name: filled || props.icon, size: 20, strokeWidth: filled ? 1.8 : 2.2 }));
 }
 function InfoRow(props) {
   var withSwitch = !!(props.trailing && props.trailing.type === Switch);

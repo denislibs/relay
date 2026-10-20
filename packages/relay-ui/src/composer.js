@@ -530,8 +530,9 @@ function Composer(props) {
         onContextMenu: function (e) { if (!canSwitch) return; e.preventDefault(); modeMenu[1](true); },
         onClick: function () { if (pressTimer.current === 'fired') { pressTimer.current = null; return; } send(); },
       },
-        h(Icon, { name: 'send', size: 22, class: cx('rl-sendicon', mode === 'send' && 'rl-sendicon-on') }),
-        h(Icon, { name: 'mic', size: 22, class: cx('rl-sendicon', mode === 'mic' && 'rl-sendicon-on') }),
+        // кнопка отправки — залитые значки, как у Telegram
+        h(Icon, { name: 'sendFilled', size: 22, class: cx('rl-sendicon', mode === 'send' && 'rl-sendicon-on') }),
+        h(Icon, { name: 'micFilled', size: 22, class: cx('rl-sendicon', mode === 'mic' && 'rl-sendicon-on') }),
         h(Icon, { name: 'roundVideo', size: 22, class: cx('rl-sendicon', mode === 'round' && 'rl-sendicon-on') }),
         h(Icon, { name: 'check', size: 22, class: cx('rl-sendicon', mode === 'edit' && 'rl-sendicon-on') }))));
 }
