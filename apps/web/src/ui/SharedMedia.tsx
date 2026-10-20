@@ -1,4 +1,4 @@
-import { Avatar, EmptyState, FolderTabs, Icon, LazyImage, LazyRoot, lazyObserve, MediaViewer, peerTone, player, Presence, reducedMotion, SlideStack, useMinVisible, WindowGrid, WindowList } from '@relay/ui';
+import { Avatar, FolderTabs, Icon, LazyImage, LazyRoot, lazyObserve, MediaViewer, peerTone, player, Presence, reducedMotion, SlideStack, useMinVisible, WindowGrid, WindowList } from '@relay/ui';
 import { offlineUrlNow } from '../downloads';
 import { LinkTile, linkInfo } from './linkTile';
 import { avatarPhoto, userPhoto } from '../profilePhoto';
@@ -76,11 +76,7 @@ export function SharedMedia({ chatId, group = false, onTitle, onMember }: { chat
   };
 
   if (!counts && !group) return <div class="app-sm-loading" aria-busy="true" />;
-  if (!tabs.length) return (
-    <div class="rl-aside-pages app-sm-empty">
-      <EmptyState kind="media" title="Здесь пока пусто" text="Фото, файлы, ссылки, музыка и голосовые из этого чата появятся здесь." />
-    </div>
-  );
+  if (!tabs.length) return null;   // медиа нет — как в Telegram: просто профиль, без вкладок и без заглушки
   return (
     <>
       {/* одна непустая вкладка — переключать нечего: вместо одинокой плашки заголовок раздела */}
