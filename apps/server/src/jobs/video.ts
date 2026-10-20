@@ -30,7 +30,7 @@ const FFMPEG_TIMEOUT_MS = 40 * 60_000;
 
 export interface Probe { codec: string; audio: string | null; w: number; h: number; duration: number; bitrate: number }
 
-async function run(cmd: string[], timeoutMs = FFMPEG_TIMEOUT_MS): Promise<{ code: number; out: string; err: string }> {
+export async function run(cmd: string[], timeoutMs = FFMPEG_TIMEOUT_MS): Promise<{ code: number; out: string; err: string }> {
   const p = Bun.spawn(cmd, { stdout: 'pipe', stderr: 'pipe', stdin: 'ignore' });
   const timer = setTimeout(() => p.kill('SIGKILL'), timeoutMs);
   try {
@@ -171,8 +171,9 @@ async function dims(path: string): Promise<{ w: number; h: number }> {
   return p ? { w: p.w, h: p.h } : { w: 0, h: 0 };
 }
 
-/** Снимок вложения в сообщениях (и пересланных копиях): размер, копии; миниатюра и спойлер сообщения остаются свои. */
-async function patchMessages(tx: Parameters<Parameters<typeof sql.begin>[0]>[0], fresh: Attachment): Promise<void> {
+/** Снимок вложения в сообщениях (и пересланных копиях): размер, копии; миниатюра и спойлер сообщения остаются свои.
+ *  Общий для видео и фото (jobs/photo.ts). */
+export async function patchMessages(tx: Parameters<Parameters<typeof sql.begin>[0]>[0], fresh: Attachment): Promise<void> {
   const msgs = await tx`select id, chat_id, attachment from messages where attachment->>'id' = ${fresh.id} and not deleted`;
   for (const m of msgs) {
     const old = m.attachment as Attachment;

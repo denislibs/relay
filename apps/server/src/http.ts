@@ -243,7 +243,7 @@ export function createServer(opts: { port: number }): Server {
         if (req.method === 'POST' && confirmUp) return Response.json(await confirmUpload(userId, confirmUp[1]));
         const file = /^\/files\/([0-9a-f-]{36})(?:\/(preview|720))?$/.exec(url.pathname);
         if ((req.method === 'GET' || req.method === 'HEAD') && file) {
-          // /files/<id>/preview, /files/<id>/720 — копии видео (jobs/video.ts); ещё нет — 404, клиент берёт оригинал
+          // /files/<id>/preview, /files/<id>/720 — копии видео (jobs/video.ts) и превью фото (jobs/photo.ts); ещё нет — 404, клиент берёт оригинал
           const f = await fileFor(userId, file[1], file[2]);
           if (!f) return new Response('Not found', { status: 404 });
           // inline — только то, что браузер покажет как медиа; HTML, SVG и прочее отдаём вложением как octet-stream

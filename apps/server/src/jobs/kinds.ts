@@ -10,6 +10,7 @@ import { register } from './handlers';
 import { applyLinkPreview } from '../domain/messages';
 import { s3 } from '../domain/files';
 import { processVideo } from './video';
+import { processPhoto } from './photo';
 import { enqueue } from './queue';
 
 // новое сообщение → по задаче на подписку: повтор одной не шлёт остальным второй раз
@@ -61,6 +62,11 @@ register('uploads.sweep', async () => {
 // видео-медиа после загрузки: faststart, ролик для ленты, 720p (jobs/video.ts); отдельный цикл воркера с малым параллелизмом
 register('video.process', async (p: { id: string }) => {
   await processVideo(p);
+});
+
+// фото и картинка-файл после загрузки: уменьшенная копия для сетки «Медиа» (jobs/photo.ts); секунды — в общем цикле
+register('photo.process', async (p: { id: string }) => {
+  await processPhoto(p);
 });
 
 // объект хранилища, на который больше никто не ссылается (старый оригинал после перепаковки)

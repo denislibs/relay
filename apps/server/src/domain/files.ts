@@ -3,6 +3,7 @@ import { S3Client } from 'bun';
 import { abortMultipart, completeMultipart, createMultipart, listMultipart, listParts, presignPart, type S3Conf } from './s3multipart';
 import { sql } from '../db';
 import { enqueue } from '../jobs/queue';
+import { wantsPhotoPreview } from '../jobs/photo';
 import { DomainError } from './errors';
 import { checkUploadAllowed } from './uploadLimits';
 
@@ -181,10 +182,12 @@ export async function confirmUpload(userId: number, id: string): Promise<Attachm
     await s3().delete(id).catch(() => {});
     throw new DomainError('upload_mismatch', `size ${stat.size}/${a.size}, type ${type}/${a.mime}`);
   }
-  // видео-медиа: перепаковка (faststart), ролик для ленты и 720p — в воркере; до конца обработки играет оригинал
+  // видео-медиа: перепаковка (faststart), ролик для ленты и 720p — в воркере; до конца обработки играет оригинал.
+  // фото и картинка-файл: уменьшенная копия для сетки — тоже в воркере; до неё плитка грузит оригинал
   const r = await sql.begin(async (tx) => {
     const [row] = await tx`update attachments set status = 'ready' where id = ${id} and status = 'pending' returning *`;
     if (row?.kind === 'video') await enqueue(tx, 'video.process', { id }, { dedupeKey: `video.process:${id}`, maxAttempts: 3 });
+    else if (row && wantsPhotoPreview(row)) await enqueue(tx, 'photo.process', { id }, { dedupeKey: `photo.process:${id}`, maxAttempts: 3 });
     return row;
   });
   return attachmentOf(r ?? a, null);
@@ -207,7 +210,7 @@ export async function attachmentForSend(tx: typeof sql | Parameters<Parameters<t
 
 type Db = typeof sql | Parameters<Parameters<typeof sql.begin>[0]>[0];
 
-/** Копии видео из attachment_variants (пусто — ещё не обработано или обрабатывать нечего). */
+/** Копии видео и превью фото из attachment_variants (пусто — ещё не обработано или обрабатывать нечего). */
 export async function variantsOf(db: Db, id: string): Promise<VideoVariant[]> {
   const rows = await db`select name, width, height, size from attachment_variants where attachment_id = ${id} order by name`;
   return rows.map((v) => ({ name: v.name as VideoVariant['name'], w: v.width as number, h: v.height as number, size: Number(v.size) }));
@@ -224,7 +227,7 @@ export function attachmentOf(a: Record<string, unknown>, thumb: string | null, v
 }
 
 /** Файл для скачивания: владельцу и участникам чатов, где он отправлен. key — объект в бакете (после перепаковки — не id);
- *  variant — копия видео (preview, 720): права те же, что у оригинала. */
+ *  variant — копия видео (preview, 720) или превью фото (preview): права те же, что у оригинала. */
 export interface StoredFile { id: string; key: string; mime: string; name: string }
 export async function fileFor(userId: number, id: string, variant?: string): Promise<StoredFile | null> {
   if (!UUID.test(id)) return null;

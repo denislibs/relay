@@ -125,7 +125,8 @@ export interface Attachment {
   preview?: VideoVariant | null;
   variants?: VideoVariant[];
 }
-/** Копия видео: preview — первые секунды без звука, 360p, до 1 МБ (лента); '720' — H.264 720p (просмотрщик по умолчанию). */
+/** Копия видео: preview — первые секунды без звука, 360p, до 1 МБ (лента); '720' — H.264 720p (просмотрщик по умолчанию).
+ *  У фото и картинки-файла preview — WebP, длинная сторона до 480 px (сетка «Медиа»). */
 export interface VideoVariant { name: 'preview' | '720'; w: number; h: number; size: number }
 /** video — видео как медиа (кадр, длительность, играет в ленте); видео «как файл» остаётся file с mime video/*. */
 export type AttachmentKind = 'photo' | 'video' | 'file' | 'voice' | 'round' | 'audio';
