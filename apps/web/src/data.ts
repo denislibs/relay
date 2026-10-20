@@ -12,6 +12,8 @@ import { bindChatDepth, popChats, pushChat } from './nav';
 import { notifyIncoming, startNotify } from './notify';
 import { bindMute, isMuted, startMuteMigration } from './mute';
 import { startPeople, wantPeople } from './people';
+import { resetMembers } from './members';
+import { resetMediaTabs } from './mediaTab';
 import { isSystemChat } from './ui/format';
 import { asset } from './assets';
 import { compressPhoto } from './media/compressPhoto';
@@ -42,6 +44,7 @@ export function startData(me: Me): void {
   });
   engine.onReload(() => location.reload());
   startPeople(engine);
+  resetMembers(); resetMediaTabs();   // вход другим пользователем без перезагрузки: кэши отрисовки прежнего — прочь
   bindMute((chatId, muteUntil) => engine.call({ type: 'setMute', chatId, muteUntil }));
   startMuteMigration();   // прежние relay.muted / relay.mutedUntil — на сервер, один раз (до первого снимка: значки не мигают)
   try { localStorage.removeItem('relay.names'); } catch { /* приватный режим */ }   // прежний кэш имён — теперь их держит движок

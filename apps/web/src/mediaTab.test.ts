@@ -1,6 +1,6 @@
 import { expect, test } from 'bun:test';
 import { Mirror } from '@relay/sync-engine/src/client';
-import { mediaOf } from './mediaTab';
+import { cachedMedia, MEDIA_PAGE, mediaOf, rememberMedia, resetMediaTabs } from './mediaTab';
 
 const msg = (id: number) => ({ key: String(id), id, body: 'm' + id });
 const counts = { media: 2, file: 0, link: 1, audio: 0, voice: 0 };
@@ -37,4 +37,13 @@ test('offline cold open: not loading and no counts stays null counts (UI treats 
   const v = mediaOf(m)!;
   expect(v.counts).toBeNull();
   expect(v.loading).toBe(false);
+});
+
+test('render cache is cleared on account switch / sign-out', () => {
+  rememberMedia(5, 'media', MEDIA_PAGE, { items: [msg(1)] as never, done: true, loading: false, counts });
+  rememberMedia(5, 'media', 0, { items: [], done: false, loading: false, counts });
+  expect(cachedMedia(5, 'media')).not.toBeNull();
+  resetMediaTabs();
+  expect(cachedMedia(5, 'media')).toBeNull();
+  expect(cachedMedia(5, 'media', 0)).toBeNull();
 });

@@ -1,6 +1,6 @@
 import { expect, test } from 'bun:test';
 import { Mirror } from '@relay/sync-engine/src/client';
-import { membersOf } from './members';
+import { cachedMembers, membersOf, rememberMembers, resetMembers } from './members';
 
 const item = (userId: number, role: string) => ({ key: String(userId), userId, role, rank: null, name: 'U' + userId, photo: null, online: false, lastSeen: null });
 
@@ -18,4 +18,11 @@ test('loaded empty list is an answer, not "nothing yet"', () => {
   const m = new Mirror();
   m.apply({ op: 'snapshot', items: [{ key: '~members', loaded: true, complete: true }], order: ['~members'] } as never);
   expect(membersOf(m)).toEqual({ ownerId: null, members: [] });
+});
+
+test('render cache is cleared on account switch / sign-out', () => {
+  rememberMembers(5, { ownerId: 1, members: [] });
+  expect(cachedMembers(5)).not.toBeNull();
+  resetMembers();
+  expect(cachedMembers(5)).toBeNull();
 });

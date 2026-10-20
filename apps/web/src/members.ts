@@ -10,6 +10,10 @@ export type Members = { ownerId: number | null; members: Member[] };
 
 /** Последнее значение по чату — только кэш отрисовки подписки: повторное открытие панели рисуется сразу, без мигания. */
 const last = new Map<number, Members>();
+export const cachedMembers = (chatId: number): Members | null => last.get(chatId) ?? null;
+export const rememberMembers = (chatId: number, m: Members): void => { last.set(chatId, m); };
+/** Выход и вход другим пользователем без перезагрузки: участники прежнего аккаунта не показываются. */
+export function resetMembers(): void { last.clear(); }
 
 /** Список участников из зеркала подписки `members`; null — движок ещё ничего не отдал (нет ни элементов, ни ~members.loaded). */
 export function membersOf(m: Mirror): Members | null {
@@ -21,15 +25,15 @@ export function membersOf(m: Mirror): Members | null {
 
 /** Участники группы — подписка движка (первый показ из IndexedDB, дальше журнал); без собственных запросов. Не группа — null. */
 export function useMembers(chatId: number, group: boolean): Members | null {
-  const [m, setM] = useState<Members | null>(() => (group ? last.get(chatId) ?? null : null));
+  const [m, setM] = useState<Members | null>(() => (group ? cachedMembers(chatId) : null));
   useEffect(() => {
     if (!group) { setM(null); return; }
-    setM(last.get(chatId) ?? null);
+    setM(cachedMembers(chatId));
     const mirror = new Mirror();
     const w = watchQuery({ kind: 'members', chatId }, (p: Patch) => {
       mirror.apply(p);
       const x = membersOf(mirror);
-      if (x) { last.set(chatId, x); setM(x); }
+      if (x) { rememberMembers(chatId, x); setM(x); }
     });
     return () => w.close();
   }, [chatId, group]);

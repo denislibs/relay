@@ -13,6 +13,10 @@ export const MEDIA_PAGE = 40;
 /** Последний вид по чату и вкладке — только кэш отрисовки: повторное открытие рисуется сразу, без мигания. */
 const last = new Map<string, MediaView>();
 const keyOf = (chatId: number, tab: MediaTab, page: number) => chatId + ':' + tab + (page ? '' : ':counts');   // счётчики-только не затирают кэш вкладки
+export const cachedMedia = (chatId: number, tab: MediaTab, page = MEDIA_PAGE): MediaView | null => last.get(keyOf(chatId, tab, page)) ?? null;
+export const rememberMedia = (chatId: number, tab: MediaTab, page: number, v: MediaView): void => { last.set(keyOf(chatId, tab, page), v); };
+/** Выход и вход другим пользователем без перезагрузки: медиа прежнего аккаунта не показываются. */
+export function resetMediaTabs(): void { last.clear(); }
 
 /** Вид вкладки из зеркала подписки `media`; null — движок ещё ничего не отдал (нет ~media). */
 export function mediaOf(m: Mirror): MediaView | null {
@@ -27,20 +31,20 @@ export function mediaOf(m: Mirror): MediaView | null {
  * more() поднимает limit на страницу — движок сам догружает старее; counts приходят с любой вкладки.
  */
 export function useMedia(chatId: number, tab: MediaTab, page = MEDIA_PAGE): MediaView & { more(): void } {
-  const [view, setView] = useState<MediaView | null>(() => last.get(keyOf(chatId, tab, page)) ?? null);
+  const [view, setView] = useState<MediaView | null>(() => cachedMedia(chatId, tab, page));
   const [limit, setLimit] = useState(page);
   const watch = useRef<ReturnType<typeof watchQuery> | null>(null);
   const cur = useRef({ view, limit });
   cur.current = { view, limit };
   useEffect(() => {
-    setView(last.get(keyOf(chatId, tab, page)) ?? null);
+    setView(cachedMedia(chatId, tab, page));
     setLimit(page);
     const mirror = new Mirror();
     const w = watchQuery({ kind: 'media', chatId, tab, limit: page }, (p: Patch) => {
       mirror.apply(p);
       const v = mediaOf(mirror);
       if (!v) return;
-      if (v.items.length || !v.loading) last.set(keyOf(chatId, tab, page), v);   // пустой «ещё грузится» не затирает показанное
+      if (v.items.length || !v.loading) rememberMedia(chatId, tab, page, v);   // пустой «ещё грузится» не затирает показанное
       setView(v);
     });
     watch.current = w;
