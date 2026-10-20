@@ -122,7 +122,7 @@ test('contacts and the block list survive a restart; removals are deleted from t
   expect([...again.blocks.table.rows.keys()]).toEqual([3]);
 });
 
-test('a deleted message keeps no content in memory or IndexedDB (loaded and unloaded paths); its quote and tabs go too', async () => {
+test('a deleted message keeps no content in memory or IndexedDB (loaded and unloaded paths); its quote is a deleted stub, tabs go', async () => {
   const name = 'store-' + crypto.randomUUID();
   const db = await openDb(name);
   const s = await Store.open(db, ME);
@@ -153,7 +153,10 @@ test('a deleted message keeps no content in memory or IndexedDB (loaded and unlo
   // загруженное: в памяти и после записи
   s.applyUpdate({ type: 'messageDeleted', chatId: 7, id: 10 });
   check(s.messageById(7, 10) as never);
-  expect(s.quoteFor(7, 10)).toBeUndefined();
+  // цитата остаётся — «Сообщение удалено», без текста и вложения
+  expect(s.quoteFor(7, 10)).toMatchObject({ id: 10, deleted: true, body: '', attachment: null, todo: null, article: false });
+  expect(s.quoteFor(7, 10)!.entities).toBeUndefined();
+  expect(JSON.stringify(s.quoteFor(7, 10))).not.toContain('тайна');
   await s.flush();
   check((await rows()).find((r) => r.id === 10));
   expect((await terms()).some((t) => t.sort === 10)).toBe(false);

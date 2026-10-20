@@ -616,7 +616,9 @@ export class Store {
 
   /** Правка/удаление/реакции загруженного сообщения (и превью последнего сообщения чата). Незагруженное — придёт с историей. */
   patchMessage(chatId: number, id: number, patch: Partial<LocalMessage>): void {
-    if (patch.deleted && this.quotes.delete(chatId + ':' + id)) this.touch(chatId);   // исходник цитаты удалён — его текст не держим
+    // исходник цитаты удалён: его текст не держим, а цитата показывает «Сообщение удалено»
+    const qk = chatId + ':' + id, q = patch.deleted ? this.quotes.get(qk) : undefined;
+    if (q) { this.quotes.set(qk, { ...q, body: '', entities: undefined, attachment: null, todo: null, article: false, deleted: true }); this.touch(chatId); }
     const m = this.messageById(chatId, id);
     if (m) { this.putMessage({ ...m, ...patch }); return; }
     const rk = `${chatId}:${id}`, prevP = this.rowPatches.get(rk);
