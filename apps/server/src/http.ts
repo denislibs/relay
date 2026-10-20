@@ -260,7 +260,8 @@ export function createServer(opts: { port: number }): Server {
           const raw = url.searchParams.get('kind');
           const tab: MediaTab = raw === 'photo' ? 'media' : (MEDIA_TABS as readonly string[]).includes(raw ?? '') ? raw as MediaTab : 'media';   // photo — прежнее имя вкладки
           const before = Number(url.searchParams.get('beforeId')) || null;
-          return Response.json(await getChatMedia(userId, Number(media[1]), tab, before));
+          const limit = url.searchParams.has('limit') ? Number(url.searchParams.get('limit')) : undefined;
+          return Response.json(await getChatMedia(userId, Number(media[1]), tab, before, limit));
         }
         const del = /^\/chats\/(\d+)\/delete$/.exec(url.pathname);
         if (del && req.method === 'POST') {

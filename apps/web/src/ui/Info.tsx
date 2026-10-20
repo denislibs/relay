@@ -1,9 +1,10 @@
 import type { ProfileLink, ProfileMusicSummary } from '@relay/protocol';
 import { ProfileLinks } from './links/ProfileLinks';
 import { SharedMedia } from './SharedMedia';
-import { membersStatus, useMembers } from '../members';
+import { membersStatus, useMembers, type Member } from '../members';
+import { startDirectChat } from '../data';
 import { playProfileTop } from '../music';
-import { Avatar, Icon, InfoRow, PanelHeader, RichText, SettingsIcon, SlideStack, Switch, Verified } from '@relay/ui';
+import { Avatar, Icon, InfoRow, PanelHeader, RichText, SettingsIcon, SlideStack, Switch, Verified, peerTone } from '@relay/ui';
 import type { Item } from '@relay/sync-engine/src/types';
 import { chatTone, isSystemChat } from './format';
 import type { ComponentChildren } from 'preact';
@@ -15,14 +16,14 @@ import { birthdayText, lastSeenText, type Birthday } from './format';
 import { showToast, useUser } from '../settingsData';
 import { EditContactPanel } from './contacts/EditContact';
 import type { ProfilePhoto } from '@relay/protocol';
-import { avatarPhoto, useProfilePhotos } from '../profilePhoto';
+import { avatarPhoto, useProfilePhotos, userPhoto } from '../profilePhoto';
 import { ProfileGallery } from './ProfileGallery';
 import { PhotoViewer } from './PhotoViewer';
 import { GROUP_PAGES, GroupScreen, isGroupPage, parentOf, type GroupPage, type Params } from './group/Manage';
 import { canManage, copyText, publicUrl } from '../groups';
 import type { GroupInfo, MyMembership } from '@relay/protocol';
 
-const PAGES = ['info', 'edit', ...GROUP_PAGES];   // «Изменить контакт» и управление группой выезжают внутри панели справа налево
+const PAGES = ['info', 'member', 'edit', ...GROUP_PAGES];   // профиль участника, «Изменить контакт» и управление группой выезжают внутри панели справа налево
 const close = () => setGlobal({ infoOpen: false });
 
 /** Правая панель «Информация» о собеседнике или группе — как User Info в Telegram. */
@@ -59,7 +60,7 @@ export function Info() {
   const contact = useGlobal((s) => (peerId ? s.contacts.find((c) => c.userId === peerId) ?? null : null));
   const contactsLoaded = useGlobal((s) => s.contactsLoaded);
   useEffect(() => {
-    if (isGroupPage(page)) {   // в управлении группой Esc — шаг назад
+    if (isGroupPage(page) || page === 'member') {   // в управлении группой и в профиле участника Esc — шаг назад
       const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape' && !e.defaultPrevented && !document.querySelector('.rl-mdl')) { e.preventDefault(); nav.back(); } };
       addEventListener('keydown', onKey);
       return () => removeEventListener('keydown', onKey);
@@ -110,9 +111,15 @@ export function Info() {
     : contact ? { icon: 'pencil', label: 'Изменить контакт', onClick: () => setPage('edit') }
     : { icon: 'userPlus', label: 'Добавить в контакты', onClick: addContact };
 
+  // участник из вкладки «Участники»: его профиль выезжает поверх группы; группа под ним остаётся смонтированной —
+  // «Назад» возвращает ту же вкладку на той же прокрутке
+  const openMember = (userId: number) => { setParams({ userId }); setPage('member'); };
+
   return (
     <SlideStack order={PAGES} active={page} render={(k: string) => isGroupPage(k) ? (
       group && chat ? <GroupScreen page={k} nav={nav} /> : null
+    ) : k === 'member' ? (
+      params.userId ? <MemberPage userId={params.userId} member={members?.members.find((m) => m.userId === params.userId) ?? null} onBack={() => setPage('info')} /> : null
     ) : k === 'edit' && peerId ? (
       <EditContactPanel userId={peerId} onDone={() => setPage('info')} />
     ) : (
@@ -161,7 +168,7 @@ export function Info() {
             </div>
           ) : null}</Expand>
         </div>
-        <SharedMedia chatId={chatId} group={group} onTitle={setMediaTitle} />
+        <SharedMedia chatId={chatId} group={group} onTitle={setMediaTitle} onMember={openMember} />
         {viewer != null && gallery.length ? (
           <PhotoViewer photos={gallery} index={viewer} name={title} onIndex={setSlide} onClose={() => setViewer(null)}
             origin={(k) => (k === slide ? document.querySelector<HTMLElement>(`.app-gallery [data-gallery-slide="${k}"]`) : null)} />
@@ -169,6 +176,49 @@ export function Info() {
       </div>
     </div>
     )} />
+  );
+}
+
+/** Профиль участника группы внутри панели: фото, имя, статус, поля профиля и «Написать» — личный чат с ним.
+ *  Имя, фото и статус — из списка участников (есть сразу), остальное подъезжает с профилем (Expand, без рывка). */
+function MemberPage({ userId, member, onBack }: { userId: number; member: Member | null; onBack: () => void }) {
+  const user = useUser(userId);
+  const name = String(user?.name ?? member?.name ?? '');
+  const photo = (user?.photo as ProfilePhoto | null | undefined) ?? member?.photo ?? userPhoto(userId) ?? null;
+  const gallery = useProfilePhotos(userId, photo);
+  const [slide, setSlide] = useState(0);
+  const [viewer, setViewer] = useState<number | null>(null);
+  const sub = member ? lastSeenText(!!member.online, member.lastSeen) : '';
+  const online = !!member?.online;
+  return (
+    <div class="rl-sidepage">
+      <PanelHeader icon="arrowLeft" closeLabel="Назад" title="Информация" onClose={onBack} />
+      <div class="rl-aside-body">
+        {gallery.length ? (
+          <ProfileGallery photos={gallery} index={slide} onIndex={setSlide} onOpen={setViewer} name={name}
+            sub={<span class={online ? 'app-online' : ''}>{sub || ' '}</span>}
+            extra={<ProfileMusicPill userId={userId} music={user?.music as ProfileMusicSummary | null | undefined} />} />
+        ) : (
+          <div class="rl-profile">
+            <div class="app-prof-ava">
+              <Avatar name={name} tone={peerTone(userId)} size={120} {...avatarPhoto(photo, true)} />
+              <ProfileMusicPill userId={userId} music={user?.music as ProfileMusicSummary | null | undefined} />
+            </div>
+            <div class="rl-profile-name">{name}</div>
+            <div class={'rl-profile-sub' + (online ? ' app-online' : '')}>{sub || ' '}</div>
+          </div>
+        )}
+        <div class="rl-aside-group">
+          <Expand show={!!user}>{user ? <PeerRows user={user} /> : null}</Expand>
+          <Expand show={!!(user?.links as ProfileLink[] | undefined)?.length}>{user ? <ProfileLinks links={(user.links as ProfileLink[] | undefined) ?? []} /> : null}</Expand>
+          <InfoRow tile="blue" icon="chats" title="Написать сообщение" onClick={() => void startDirectChat(userId)} />
+        </div>
+        {viewer != null && gallery.length ? (
+          <PhotoViewer photos={gallery} index={viewer} name={name} onIndex={setSlide} onClose={() => setViewer(null)}
+            origin={(k) => (k === slide ? document.querySelector<HTMLElement>(`.app-gallery [data-gallery-slide="${k}"]`) : null)} />
+        ) : null}
+      </div>
+    </div>
   );
 }
 

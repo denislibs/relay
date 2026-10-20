@@ -1,4 +1,4 @@
-import { Avatar, EmptyState, FolderTabs, Icon, LazyImage, LazyRoot, lazyObserve, MediaViewer, peerTone, player, reducedMotion, SlideStack, WindowGrid, WindowList } from '@relay/ui';
+import { Avatar, EmptyState, FolderTabs, Icon, LazyImage, LazyRoot, lazyObserve, MediaViewer, peerTone, player, Presence, reducedMotion, SlideStack, useMinVisible, WindowGrid, WindowList } from '@relay/ui';
 import { offlineUrlNow } from '../downloads';
 import { LinkTile, linkInfo } from './linkTile';
 import { avatarPhoto, userPhoto } from '../profilePhoto';
@@ -40,8 +40,9 @@ export function extTone(ext: string): string {
 type Tab = SharedTab;
 
 /** group — в группе первая вкладка «Участники» (как в Telegram): панель не бывает пустой.
- *  onTitle — название показанной вкладки: шапка панели пишет его, когда вкладки прилипли к верху. */
-export function SharedMedia({ chatId, group = false, onTitle }: { chatId: number; group?: boolean; onTitle?: (title: string) => void }) {
+ *  onTitle — название показанной вкладки: шапка панели пишет его, когда вкладки прилипли к верху.
+ *  onMember — клик по участнику: панель выдвигает его профиль (без него — личный чат). */
+export function SharedMedia({ chatId, group = false, onTitle, onMember }: { chatId: number; group?: boolean; onTitle?: (title: string) => void; onMember?: (userId: number) => void }) {
   const [tab, setTab] = useState<Tab | null>(null);
   const members = useMembers(chatId, group);
   // счётчики приходят с любой подпиской media этого чата и обновляются журналом (новое сообщение — новый счётчик)
@@ -90,7 +91,7 @@ export function SharedMedia({ chatId, group = false, onTitle }: { chatId: number
       <div class="rl-aside-pages" ref={pages}>
         {/* ленивые картинки и кадры видео меряют запас от прокрутки панели, а не от окна (её край их обрезает) */}
         <LazyRoot.Provider value={root}>
-          <SlideStack variant="tabs" order={tabs} active={active} render={(k: string) => k === 'members' ? <MembersList key={chatId + k} data={members} /> : <TabList key={chatId + k} chatId={chatId} tab={k as MediaTab} />} />
+          <SlideStack variant="tabs" order={tabs} active={active} render={(k: string) => k === 'members' ? <MembersList key={chatId + k} data={members} onOpen={onMember ?? ((id) => void startDirectChat(id))} /> : <TabList key={chatId + k} chatId={chatId} tab={k as MediaTab} />} />
         </LazyRoot.Provider>
       </div>
     </>
@@ -114,7 +115,18 @@ function TabList({ chatId, tab }: { chatId: number; tab: MediaTab }) {
   // авторы в просмотрщике (имя и аватарка) — из people
   const senders = [...new Set(items.map((m) => m.senderId as number))].join(',');
   useEffect(() => { if (senders) wantPeople(senders.split(',').map(Number)); }, [senders]);
-  if (!items.length && loading) return <div class="app-sm-loading" aria-busy="true" />;
+  // первая страница: кольцо — только если ждём дольше 150 мс (быстрый ответ — без мигания) и не короче 600 мс;
+  // потом оно гаснет, а страница проявляется поверх (crossfade). Была в кэше — рисуется сразу, без проявления.
+  const waiting = !items.length && loading;
+  const ring = useMinVisible(waiting, { delay: 150, min: 600 });
+  const [fade] = useState(waiting);
+  // следующая страница — маленькое кольцо в хвосте: место под него держится, пока есть что грузить (без скачка)
+  const tail = useMinVisible(!!items.length && loading && !done, { delay: 150, min: 500 });
+  if (waiting || ring) return (
+    <div class="app-sm-loading app-sm-wait" aria-busy="true" aria-label="Загрузка">
+      <Presence show={ring} exitMs={200}><Spin /></Presence>
+    </div>
+  );
   const photos = tab === 'media' ? items.filter((m) => !m.attachment!.mime.startsWith('video/')) : [];
   const open = (m: Msg) => { const k = photos.indexOf(m); if (k >= 0) setViewer(k); else show(m); };
   // длинные вкладки — виртуальные (WindowList ищет прокрутку панели): в DOM только видимые строки и запас;
@@ -125,7 +137,15 @@ function TabList({ chatId, tab }: { chatId: number; tab: MediaTab }) {
         render={(m: Msg) => tab === 'file' ? <FileRow m={m} /> : tab === 'link' ? <LinkRow m={m} /> : <TrackRow m={m} chatId={chatId} items={items} />} />
     </div>
   );
-  return <>{list}
+  return <>
+    <div class={'app-sm-page' + (fade ? ' app-sm-page-in' : '')}>
+      {list}
+      {done ? null : (
+        <div class="app-sm-more" role="status" aria-label={tail ? 'Загружаем ещё' : undefined}>
+          <Presence show={tail} exitMs={200}><Spin /></Presence>
+        </div>
+      )}
+    </div>
     {viewer !== null && photos[viewer] ? (
       <MediaViewer index={viewer}
         items={photos.map((m) => { const a = m.attachment!; return { src: fileUrl(a), thumb: a.thumb, w: a.w, h: a.h, name: a.name, download: fileUrl(a) + '?download=1', caption: m.body,
@@ -135,6 +155,11 @@ function TabList({ chatId, tab }: { chatId: number; tab: MediaTab }) {
     ) : null}
   </>;
 }
+
+/** Кольцо загрузки вкладки (как «Загружаем ещё чаты» в списке чатов): крутится сам svg — на композиторе. */
+const Spin = () => (
+  <svg class="app-sm-spin" width="22" height="22" viewBox="0 0 18 18" fill="none" aria-hidden="true"><circle cx="9" cy="9" r="7" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-dasharray="30 44" /></svg>
+);
 
 /** Шаг строки списка вкладки (строка + зазор 4 px под ней): файлы, музыка, голосовые — 60, ссылки — 72 (описание в одну строку). */
 const SM_ROW = 64, LINK_ROW = 76;
@@ -278,9 +303,9 @@ function senderTitle(senderId: number, me: number | undefined, chat: Item | unde
   return chat?.kind === 'group' ? `${name} → ${chatTitle}` : name;
 }
 
-/** Участники группы — как в Telegram: аватар, имя, статус (в сети — цветом), «владелец» справа; клик — личный чат.
+/** Участники группы — как в Telegram: аватар, имя, статус (в сети — цветом), «владелец» справа; клик — его профиль.
  *  Список виртуальный: в большой группе в DOM только видимые строки. */
-function MembersList({ data }: { data: { ownerId: number | null; members: Member[] } | null }) {
+function MembersList({ data, onOpen }: { data: { ownerId: number | null; members: Member[] } | null; onOpen: (userId: number) => void }) {
   const me = useGlobal((s) => s.me?.userId);
   // у участника без фото в ответе аватарка — из userPhoto: просим его в people
   const bare = data ? data.members.filter((m) => !m.photo).map((m) => m.userId).join(',') : '';
@@ -292,7 +317,7 @@ function MembersList({ data }: { data: { ownerId: number | null; members: Member
         const self = m.userId === me;
         const status = self ? 'в сети' : lastSeenText(!!m.online, m.lastSeen);
         return (
-          <button type="button" role="listitem" class="rl-row app-member" disabled={self} onClick={() => void startDirectChat(m.userId)}>
+          <button type="button" role="listitem" class="rl-row app-member" disabled={self} onClick={() => onOpen(m.userId)}>
             <Avatar name={m.name} tone={peerTone(m.userId)} size={44} online={!!m.online && !self} {...(self ? senderAvatar(m.userId) : avatarPhoto(m.photo ?? userPhoto(m.userId)))} />
             <span class="rl-row-main">
               <span class="app-member-top"><span class="rl-row-name">{self ? m.name + ' (вы)' : m.name}</span>{m.rank || m.userId === data.ownerId || m.role === 'admin' ? <span class="app-member-badge">{m.rank || (m.userId === data.ownerId ? 'владелец' : 'админ')}</span> : null}</span>

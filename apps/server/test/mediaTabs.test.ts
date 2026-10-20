@@ -53,6 +53,29 @@ test('pages go back by id', async () => {
   expect(p3.hasMore).toBe(false);
 });
 
+test('page size: limit is clamped to 1…100, junk falls back to 40; the cursor walks the whole tab without gaps', async () => {
+  const a = await makeUser('Анна'), b = await makeUser('Борис');
+  const chat = await makeChat([a, b]);
+  await sql`insert into messages (chat_id, sender_id, client_id, kind, body, attachment)
+    select ${chat}, ${a}, gen_random_uuid(), 'photo', '', jsonb_build_object('id', gen_random_uuid(), 'kind', 'photo', 'mime', 'image/png', 'name', 'p' || g, 'size', 1)
+      from generate_series(1, 130) g`;
+  expect((await getChatMedia(a, chat, 'media', null, 1000)).messages).toHaveLength(100);
+  expect((await getChatMedia(a, chat, 'media', null, NaN)).messages).toHaveLength(40);
+  expect((await getChatMedia(a, chat, 'media', null, 0)).messages).toHaveLength(40);
+  expect((await getChatMedia(a, chat, 'media', null, 2.7)).messages).toHaveLength(2);
+  const seen: number[] = [];
+  let before: number | null = null, more = true, pages = 0;
+  while (more) {
+    const p = await getChatMedia(b, chat, 'media', before, 50);
+    seen.push(...p.messages.map((m) => m.id));
+    before = p.messages.at(-1)!.id; more = p.hasMore; pages++;
+  }
+  expect(pages).toBe(3);
+  expect(seen).toHaveLength(130);
+  expect(seen).toEqual([...seen].sort((x, y) => y - x));
+  expect(new Set(seen).size).toBe(130);
+});
+
 test('an audio file with a duration is music; without one, or a voice-kind request, it is not', async () => {
   const a = await makeUser('Анна');
   const { createUpload } = await import('../src/domain/files');

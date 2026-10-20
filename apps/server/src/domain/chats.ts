@@ -224,8 +224,11 @@ export function tabWhere(tab: MediaTab) {
   }
 }
 
-/** Вкладка «Общих медиа»: новые сверху, страницами по id. */
-export async function getChatMedia(userId: number, chatId: number, tab: MediaTab, beforeId: number | null, limit = 40): Promise<{ messages: Message[]; hasMore: boolean }> {
+/** Вкладка «Общих медиа»: новые сверху, страницами по id (курсор beforeId — id последнего показанного).
+ *  limit — размер страницы, 1…MEDIA_PAGE_MAX; не число — MEDIA_PAGE. */
+export const MEDIA_PAGE = 40, MEDIA_PAGE_MAX = 100;
+export async function getChatMedia(userId: number, chatId: number, tab: MediaTab, beforeId: number | null, limit = MEDIA_PAGE): Promise<{ messages: Message[]; hasMore: boolean }> {
+  limit = Number.isFinite(limit) && limit >= 1 ? Math.min(MEDIA_PAGE_MAX, Math.floor(limit)) : MEDIA_PAGE;
   await assertMember(sql, chatId, userId);
   const rows = await sql`
     select * from messages
