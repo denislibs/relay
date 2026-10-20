@@ -156,6 +156,23 @@ test('local media: work per page stays within the budget on a large cache; empty
   expect(none).toMatchObject({ hits: [], hasMore: false, scanned: 0 });
 });
 
+test('local media: one chat with more than limit + 1 matches pages every match once, in order (no budget pressure)', async () => {
+  const { db, s } = await open();
+  const audio = (id: number) => ({ id: 'a' + id, kind: 'audio', mime: 'audio/mpeg', name: 't' + id + '.mp3', size: 1 });
+  for (let id = 1; id <= 100; id++) s.applyUpdate({ type: 'newMessage', message: msg({ id, chatId: 7, senderId: 2, kind: 'audio', body: '', attachment: audio(id) } as never) });
+  await s.flush();
+  const got: number[] = [];
+  let before: number | undefined;
+  for (let pages = 0; ; pages++) {
+    const r = await localMedia(db, s, 'audio', '', before);
+    got.push(...r.hits.map((h) => h.message.id));
+    if (!r.hasMore) break;
+    before = r.next;
+    if (pages > 10) throw new Error('paging does not end');
+  }
+  expect(got).toEqual(Array.from({ length: 100 }, (_, i) => 100 - i));
+});
+
 test('local top: direct chats by the last message, not the service chat', async () => {
   const { s } = await open();
   s.applyChats([direct(7, 2, 'Анна'), direct(8, 3, 'Борис'), { ...direct(9, 4, 'Relay'), peer: { id: 4, name: 'Relay', system: true } },
