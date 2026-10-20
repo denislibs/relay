@@ -347,6 +347,18 @@ function firstVisible(root: HTMLElement): { key: string; sort: number; top: numb
   return null;
 }
 
+/** Якорь для смены ширины: первое сообщение (или разделитель непрочитанных), начинающееся в видимой части. */
+function viewAnchorOf(root: HTMLElement): { key: string; top: number } | null {
+  const rootTop = root.getBoundingClientRect().top;
+  for (const row of root.querySelectorAll<HTMLElement>('.app-msg, .app-unread-divider')) {
+    const r = row.getBoundingClientRect();
+    if (r.top >= rootTop + TOP_ZONE - 1) return { key: row.dataset.key ?? 'unread', top: r.top - rootTop };
+  }
+  return null;
+}
+const anchorEl = (root: HTMLElement, key: string) =>
+  key === 'unread' ? root.querySelector<HTMLElement>('.app-unread-divider') : root.querySelector<HTMLElement>(`[data-key="${CSS.escape(key)}"]`);
+
 const NO_MESSAGES: Item[] = [];
 
 /** Музыкальный пузырь + есть ли файл в кэше (значок «скачать» в углу — только пока файла нет). */
@@ -421,6 +433,7 @@ export function Feed({ frameKey, active, chatId, meId, peerName, group, onAuthor
   // направление последней прокрутки пользователя: окно двигаем только туда, куда листают. Иначе на коротких
   // сообщениях окно качается — сдвиг к старым оставляет нижний датчик в зоне, он тянет к новым, и так по кругу
   const scrollDir = useRef<-1 | 0 | 1>(0);
+  const viewAnchor = useRef<{ key: string; top: number } | null>(null);   // что было вверху видимой части (для смены ширины)
   const lastTop = useRef(0);
   const shift = (dir: 'older' | 'newer') => {
     const root = el.current, m = metaRef.current;
@@ -453,6 +466,7 @@ export function Feed({ frameKey, active, chatId, meId, peerName, group, onAuthor
         stick.current = target >= bottom - BOTTOM && !!metaRef.current?.live;
         target = Math.max(0, target);
         if (Math.abs(root.scrollTop - target) > 1) { programmatic.current++; root.scrollTop = target; }
+        viewAnchor.current = viewAnchorOf(root);
       });
       return;
     }
@@ -497,17 +511,21 @@ export function Feed({ frameKey, active, chatId, meId, peerName, group, onAuthor
   }, [limit, partial, active, hasMessages]);
 
   // высота ленты меняется сверху (выезжает плеер) или снизу (растёт поле ввода) — держим низ на месте, как в Telegram:
-  // что было у нижнего края, там и остаётся. Колбэк ResizeObserver — после раскладки, до отрисовки, без лишнего кадра
+  // что было у нижнего края, там и остаётся. Ширина меняется (открыли «Информацию», тянут край сайдбара) — текст
+  // переносится иначе и всё выше съезжает: возвращаем на прежнее место то, что было вверху видимой части.
+  // Колбэк ResizeObserver — после раскладки, до отрисовки, без лишнего кадра
   useEffect(() => {
     const root = el.current;
     if (!root) return;
-    let last = root.clientHeight;
+    let last = root.clientHeight, lastW = root.clientWidth;
     const ro = new ResizeObserver(() => {
-      const ch = root.clientHeight, d = last - ch;
-      last = ch;
-      if (!d || !placed.current) return;
+      const ch = root.clientHeight, d = last - ch, cw = root.clientWidth, widened = cw !== lastW;
+      last = ch; lastW = cw;
+      if ((!d && !widened) || !placed.current) return;
       const max = root.scrollHeight - ch;
-      const next = stick.current ? max : Math.max(0, Math.min(max, root.scrollTop + d));
+      let next = stick.current ? max : Math.max(0, Math.min(max, root.scrollTop + d));
+      const a = viewAnchor.current, row = widened && !stick.current && a ? anchorEl(root, a.key) : null;
+      if (row) next = Math.max(0, Math.min(max, root.scrollTop + (row.getBoundingClientRect().top - root.getBoundingClientRect().top) - a!.top));
       if (Math.abs(next - root.scrollTop) > 0.5) { programmatic.current++; root.scrollTop = next; }
     });
     ro.observe(root);
@@ -631,6 +649,7 @@ export function Feed({ frameKey, active, chatId, meId, peerName, group, onAuthor
   function onScroll() {
     const root = el.current!;
     onScrollDates(root);
+    requestMeasure(() => { viewAnchor.current = viewAnchorOf(root); });   // после любой прокрутки, и нашей тоже
     // позицию — после любой прокрутки, в том числе нашей (после сдвига окна якорь тоже меняется)
     if (posTimer.current) clearTimeout(posTimer.current);
     posTimer.current = setTimeout(() => { posTimer.current = null; requestMeasure(() => storePosition(root)); }, 200);
