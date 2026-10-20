@@ -1,3 +1,4 @@
+import { deviceFetch, signDevice } from './device';
 import { MAX_FILE_BYTES, MEDIA_TABS, type MediaTab } from '@relay/protocol';
 import type { ClientFrame, JournalEntry, Me, SettingsSnapshot, Message, PublicUser, ServerFrame } from '@relay/protocol';
 import { Blocks } from './blocks';
@@ -140,6 +141,8 @@ export class Engine {
       restart: async () => { this.transport.stop(); if (this.wantOnline) this.transport.start(); return { restarted: 'reconnect' }; },
       retryFailed: () => this.retryFailed(),
       discardFailed: () => this.discardFailed(),
+      // 401 «обнови доступ» — не конец сеанса: подпись ключом устройства, новый короткий cookie, повтор
+      wrapFetch: (f) => deviceFetch(f, cfg.httpBase),
     });
     this.dev.restore(sim);
     if (this.dev.sim.offline) this.netDown = true;
@@ -1386,6 +1389,10 @@ export class Engine {
         for (const p of f.items) this.presence.set(p.userId, { online: p.online, lastSeen: p.lastSeen });
         this.presenceDirty = true;
         this.changed();
+        return;
+      case 'challenge':
+        // сеанс привязан к устройству: сокет выполнит кадры (они ждут на сервере) после подписи вызова
+        void signDevice('ws', f.nonce).then((sig) => this.transport.send({ op: 'prove', sig }), () => this.transport.drop());
         return;
       case 'sessionTerminated':
         this.session.end(f.reason === 'logout' ? 'logout' : 'terminated');

@@ -4,7 +4,8 @@ import { searchMedia, searchPeople, topPeers } from './domain/globalSearch';
 import { createBus } from './bus';
 import { clientIp } from './device';
 import type { Server } from 'bun';
-import { clearSessionCookie, createSession, createUser, deleteSession, readSessionToken, sessionCookie, sessionFromToken } from './auth';
+import { authenticate, clearSessionCookie, createSession, createUser, deleteSession, readSessionToken, sessionCookie, sessionFromToken } from './auth';
+import { accessCookie, ACCESS_SEC, clearAccessCookie, deviceKeyOf, newChallenge, refreshAccess, verifyDevice } from './deviceAuth';
 import { announceLogin, announceSessionsChanged, assertConfirmed, checkSocket, confirmSession, listSessions, sessionEnded, sweepInactive, terminateOthers, terminateSession, trackSocket, untrackSocket } from './domain/sessions';
 import { deleteDirectChat, createChat, createGroup, openDirect, messageAtDate, getChatMedia, getChatMediaCounts, getHistory, getMessagesByIds, listChats, listChatsPage } from './domain/chats';
 import { sql } from './db';
@@ -40,6 +41,8 @@ const fail = (code: string, retryAfter?: number) => retryAfter
 /** checkedAt — когда сокет последний раз отмечал активность и проверял свой сеанс (domain/sessions.checkSocket). */
 export type WsData = {
   userId: number; sessionId: number; checkedAt: number;
+  /** привязанный сеанс: вызов, доказано ли владение ключом, кадры до доказательства */
+  challenge?: string; proven?: boolean; queue?: string[]; proveTimer?: ReturnType<typeof setTimeout>;
   /** open дошёл до конца (подписки в Valkey, «в сети»): close ждёт его, чтобы «ушёл» не обогнал «пришёл». */
   opened?: Promise<void>;
 };
@@ -66,12 +69,24 @@ function withCookie(req: Request, res: Response | undefined): Response | undefin
 
 const INLINE_MIME = /^(image\/(jpeg|png|webp|gif|avif)|video\/(mp4|webm|ogg|quicktime)|audio\/(mpeg|mp4|ogg|webm|wav|x-wav|aac|flac))$/;
 
-const API = /^\/(health|me|users|contacts|settings|privacy|blocks|chats|presence|search|uploads|files|push|sessions|ws|dev|logout|auth|link-preview|groups|join|sticker-sets|my-stickers|stickers-by-emoji)(\/|$)/;
+const API = /^\/(health|me|users|contacts|settings|privacy|blocks|chats|presence|search|uploads|files|push|sessions|session|ws|dev|logout|auth|link-preview|groups|join|sticker-sets|my-stickers|stickers-by-emoji)(\/|$)/;
 
 export function createServer(opts: { port: number }): Server {
   // кадры мимо журнала — через Valkey, чтобы дошли до сокетов в любом процессе
   const bus = createBus((topic, msg) => { server.publish(topic, msg); });
   const publish: Publish = (topic, msg) => bus.publish(topic, msg);
+  /** Кадр WebSocket: разобрать, отметить активность сеанса, выполнить. */
+  const runFrame = async (ws: import('bun').ServerWebSocket<WsData>, text: string): Promise<void> => {
+    const frame = parseClientFrame(text);
+    if (!frame) {
+      ws.send(JSON.stringify({ op: 'err', code: 'bad_frame', retry: false }));
+      return;
+    }
+    // любой кадр (и отправка, и прочтение): раз в минуту — отметка активности и проверка, что сеанс жив;
+    // сеанс пропал (NOTIFY мог потеряться) — сокет закрыт, кадр не выполняем
+    if (!(await checkSocket(ws.data.sessionId, ws.data).catch(() => true))) return;
+    for (const out of await handleFrame(ws.data.userId, frame, publish, ws.data.sessionId)) ws.send(JSON.stringify(out));
+  };
   const server = Bun.serve<WsData>({
     port: opts.port,
     fetch: async (req, server) => withCookie(req, await (async () => {
@@ -99,7 +114,24 @@ export function createServer(opts: { port: number }): Server {
         if (req.method === 'GET' && url.pathname === '/push/key') return Response.json({ key: (await vapidKeys()).publicKey });
         const pub = await publicAuthRoute(req, url, server);
         if (pub) return pub;
-        const auth = await sessionFromToken(readSessionToken(req));
+        // сеанс, привязанный к устройству (deviceAuth.ts): вызов и обновление доступа — по долгому cookie
+        if (req.method === 'GET' && url.pathname === '/session/challenge') return Response.json({ nonce: await newChallenge() });
+        if (req.method === 'POST' && url.pathname === '/session/refresh') {
+          const s = await sessionFromToken(readSessionToken(req));
+          if (!s) return fail('unauthorized');
+          const token = await refreshAccess(s.sessionId, (await req.json().catch(() => ({}))) as Record<string, unknown>);
+          if (!token) return fail('unauthorized');
+          return Response.json({ ok: true, expiresIn: ACCESS_SEC }, { headers: { 'set-cookie': accessCookie(token) } });
+        }
+        const auth = await authenticate(req);
+        // привязанный сеанс без свежего доступа: не «сеанс завершён» — клиент обновит доступ и повторит
+        // сокет привязанного сеанса — и по одному долгому cookie: кадры всё равно ждут подписи вызова ключом устройства
+        if (auth === 'refresh' && url.pathname === '/ws') {
+          const s = await sessionFromToken(readSessionToken(req));
+          if (!s) return fail('unauthorized');
+          return server.upgrade(req, { data: { userId: s.userId, sessionId: s.sessionId, checkedAt: Date.now(), challenge: await newChallenge(), proven: false, queue: [] } }) ? undefined : fail('bad_frame');
+        }
+        if (auth === 'refresh') return Response.json({ code: 'access_expired' }, { status: 401, headers: { 'x-relay-auth': 'refresh' } });
         if (!auth) return fail('unauthorized');
         const { userId, sessionId } = auth;
         const priv = await privateAuthRoute(req, url, auth);
@@ -202,10 +234,14 @@ export function createServer(opts: { port: number }): Server {
             await sessionEnded(ended).catch((e) => console.error('sessions:', e));
             await announceSessionsChanged(userId).catch((e) => console.error('sessions:', e));
           }
-          return Response.json({ ok: true }, { headers: { 'set-cookie': clearSessionCookie() } });
+          const h = new Headers({ 'content-type': 'application/json' });
+          h.append('set-cookie', clearSessionCookie()); h.append('set-cookie', clearAccessCookie());
+          return new Response(JSON.stringify({ ok: true }), { headers: h });
         }
         if (url.pathname === '/ws') {
-          return server.upgrade(req, { data: { userId, sessionId, checkedAt: Date.now() } }) ? undefined : fail('bad_frame');
+          // привязанный сеанс: сокет выполняет кадры только после подписи вызова ключом устройства (prove)
+          const bound = (await deviceKeyOf(sessionId)) != null;
+          return server.upgrade(req, { data: { userId, sessionId, checkedAt: Date.now(), ...(bound ? { challenge: await newChallenge(), proven: false, queue: [] } : {}) } }) ? undefined : fail('bad_frame');
         }
         // новая группа (создатель — текущий пользователь) и личный чат с человеком (существующий или новый)
         if (req.method === 'POST' && url.pathname === '/chats') {
@@ -363,6 +399,10 @@ export function createServer(opts: { port: number }): Server {
     websocket: {
       open(ws) {
         const { userId, sessionId } = ws.data;
+        if (ws.data.challenge) {
+          ws.send(JSON.stringify({ op: 'challenge', nonce: ws.data.challenge }));
+          ws.data.proveTimer = setTimeout(() => { if (!ws.data.proven) ws.close(4401, 'device proof required'); }, 10_000);
+        }
         ws.subscribe(`user:${userId}`);
         ws.subscribe(`session:${sessionId}`);
         trackSocket(sessionId, ws);
@@ -375,6 +415,7 @@ export function createServer(opts: { port: number }): Server {
       },
       close(ws) {
         const { userId, sessionId } = ws.data;
+        if (ws.data.proveTimer) clearTimeout(ws.data.proveTimer);
         untrackSocket(sessionId, ws);
         countSocket(userId, -1);
         void (ws.data.opened ?? Promise.resolve()).then(() => {
@@ -384,15 +425,19 @@ export function createServer(opts: { port: number }): Server {
         });
       },
       async message(ws, raw) {
-        const frame = parseClientFrame(typeof raw === 'string' ? raw : new TextDecoder().decode(raw));
-        if (!frame) {
-          ws.send(JSON.stringify({ op: 'err', code: 'bad_frame', retry: false }));
+        const text = typeof raw === 'string' ? raw : new TextDecoder().decode(raw);
+        if (ws.data.challenge && !ws.data.proven) {
+          // до подписи ключом устройства выполняется только prove; остальное ждёт (не больше 100 кадров)
+          const f = (() => { try { return JSON.parse(text) as { op?: string; sig?: string }; } catch { return null; } })();
+          if (f?.op !== 'prove') { if ((ws.data.queue!.length) < 100) ws.data.queue!.push(text); return; }
+          const spki = await deviceKeyOf(ws.data.sessionId);
+          if (!spki || !(await verifyDevice(spki, 'ws', ws.data.challenge, f.sig))) { ws.close(4401, 'device proof failed'); return; }
+          ws.data.proven = true;
+          clearTimeout(ws.data.proveTimer);
+          for (const q of ws.data.queue!.splice(0)) await runFrame(ws, q);
           return;
         }
-        // любой кадр (и отправка, и прочтение): раз в минуту — отметка активности и проверка, что сеанс жив;
-        // сеанс пропал (NOTIFY мог потеряться) — сокет закрыт, кадр не выполняем
-        if (!(await checkSocket(ws.data.sessionId, ws.data).catch(() => true))) return;
-        for (const out of await handleFrame(ws.data.userId, frame, publish, ws.data.sessionId)) ws.send(JSON.stringify(out));
+        await runFrame(ws, text);
       },
     },
   });

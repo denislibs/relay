@@ -16,6 +16,10 @@ import { startSettingsData } from './settingsData';
 import { startTitle } from './title';
 import { App } from './ui/App';
 import { asset } from './assets';
+import { installDeviceFetch, startDeviceAuth } from './deviceAuth';
+
+// до первого запроса: 401 «обнови доступ» — подпись ключом устройства и повтор, а не экран входа
+installDeviceFetch();
 
 declare const __DEV__: boolean;
 declare const __BUILD__: string;
@@ -32,6 +36,7 @@ function start(me: Me, enter: 'login' | 'reload' = 'reload'): void {
   void claimMediaCache(me.userId);
   setGlobal({ me, boot: 'app', enter });
   setTimeout(() => setGlobal({ enter: null }), 1000);   // анимации входа доиграли
+  startDeviceAuth();   // привязать сеанс к ключу этого браузера и держать короткий доступ свежим
   startData(me);
   startMuteTimers();   // «Отключить звук» на время: таймер до ближайшего срока — перерисовать, когда чат включится
   startSettingsData(me);

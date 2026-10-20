@@ -11,8 +11,11 @@ import {
   CACHE_APP_SHELL_PREFIX, deviceStore, fetchMedia, isMediaRangeRequest, isMediaRequest, LEGACY_CACHES,
   fileKeyOf, loadPolicy, migrateLegacyCaches, resetFileKeyCache, savePolicy, serveEncryptedRange, serveMedia, serveVideoRange, sweepAuto,
 } from './mediaCache';
+import { installDeviceFetch } from './deviceAuth';
 declare const __BUILD__: string;
 const sw = self as unknown as ServiceWorkerGlobalScope;
+// файлы и API из SW: 401 «обнови доступ» (сеанс привязан к устройству) — подпись ключом устройства и повтор
+installDeviceFetch(sw as never);
 const CACHE = CACHE_APP_SHELL_PREFIX + __BUILD__;
 const store = deviceStore();
 // ключа файла ещё нет в IndexedDB (страница только что получила сообщение) — спросить открытую вкладку
@@ -33,7 +36,7 @@ store.askKey = async (id: string) => {
 const fileIdFrom = (url: string) => /^\/files\/([0-9a-f-]{36}(?:\/(?:preview|720))?)$/.exec(new URL(url).pathname)?.[1] ?? '';
 declare const __SHELL__: string[];   // код и стили этой сборки с хэшем в имени (build.ts)
 const SHELL = ['/', ...__SHELL__, '/sounds/message.mp3', '/sounds/sent.mp3'];   // звуки сообщений — и без сети
-const API = /^\/(health|me|users|contacts|settings|privacy|blocks|chats|presence|search|uploads|files|push|sessions|ws|dev|logout|auth|link-preview|groups|join|sticker-sets|my-stickers|stickers-by-emoji)(\/|$)/;
+const API = /^\/(health|me|users|contacts|settings|privacy|blocks|chats|presence|search|uploads|files|push|sessions|session|ws|dev|logout|auth|link-preview|groups|join|sticker-sets|my-stickers|stickers-by-emoji)(\/|$)/;
 
 sw.addEventListener('install', (e) => {
   // мимо HTTP-кэша браузера: новая сборка не должна положить к себе файл прежней

@@ -317,6 +317,7 @@ export type ErrorCode = 'bad_frame' | 'pin_limit' | 'unauthorized' | 'not_member
   | 'upload_missing' | 'upload_mismatch' | 'upload_pending' | 'upload_incomplete' | 'photo_invalid' | 'file_too_big';
 
 export type ClientFrame =
+  | { op: 'prove'; sig: string }   // ответ на challenge: подпись «relay-device|ws|<nonce>» ключом устройства
   | { op: 'hello'; lastSeq: number }
   | { op: 'sync'; since: number }
   | { op: 'send'; reqId: string; clientId: string; chatId: Id; body: string; entities?: Entity[]; replyToId?: Id | null; attachment?: { id: string; thumb?: string | null; spoiler?: boolean } | null; groupId?: string | null; forward?: ForwardRef | null; noLinkPreview?: boolean; blocks?: Block[] | null; todo?: TodoInput; sticker?: { id: Id } | null }
@@ -343,6 +344,7 @@ export const RECENTLY = 'recently';
 export interface PresenceItem { userId: number; online: boolean | null; lastSeen: string | null }
 
 export type ServerFrame =
+  | { op: 'challenge'; nonce: string }   // сеанс привязан к устройству: подпиши вызов (prove), иначе кадры не выполняются
   | { op: 'hello'; seq: number; epoch: string }   // epoch — поколение базы; сменилось — кэш клиента недействителен
   | { op: 'updates'; from: number; to: number; items: JournalEntry[]; more: boolean }
   | { op: 'tooLong'; seq: number }

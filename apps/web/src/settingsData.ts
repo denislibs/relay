@@ -1,3 +1,4 @@
+import { stopDeviceAuth } from './deviceAuth';
 import type { ProfileLink } from '@relay/protocol';
 import { releaseMediaCache } from './storageInfo';
 import { stopOwnMusic } from './profileLists';
@@ -200,6 +201,7 @@ function onTerminated(reason: 'logout' | 'terminated'): void {
   if (terminating) return;
   stopOwnMusic();   // подписка на свою музыку не переживает выход
   resetMembers(); resetMediaTabs();   // кэши отрисовки прежнего аккаунта — не показывать следующему
+  stopDeviceAuth();   // ключ устройства этого сеанса больше не нужен
   if (selfLogout) return;
   terminating = true;
   // сервер удалил подписку вместе с сеансом; отписываем и браузер (best effort, не ждём)
