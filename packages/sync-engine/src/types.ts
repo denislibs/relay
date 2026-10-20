@@ -207,6 +207,8 @@ export type Action =
   | { type: 'reorderFolders'; ids: number[] }
   /** стереть локальные данные и взять снимок заново; keepOutbox — не трогать неотправленное */
   | { type: 'resetLocal'; keepOutbox?: boolean }
+  /** «Данные и память»: строк по таблицам и занятое место (estimate() воркера; без usageDetails — usage всего источника) */
+  | { type: 'storageStats' }
   /** раздел «Для разработчиков»: имитатор сети и служебные команды (devlog.ts) */
   | DevAction
   | { type: 'sendFile'; chatId: number; body: string; file: Blob; name: string; mime: string; w?: number | null; h?: number | null; thumb?: string | null; replyToId?: number | null;
@@ -282,3 +284,6 @@ export function toQuote(m: { id: number | null; sort?: number; body: string; sen
     service: (m.service as QuoteMsg['service']) ?? undefined, todo: m.todo ? { title: m.todo.title } : null, article: !!m.blocks?.length,
   };
 }
+
+/** Ответ storageStats. bytes — usageDetails.indexedDB, если браузер его даёт (exact), иначе usage всего источника (с кэшами); null — оценки нет. */
+export interface StorageStats { rows: Record<import('./schema').StoreName, number>; bytes: number | null; exact: boolean }

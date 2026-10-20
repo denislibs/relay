@@ -11,6 +11,15 @@ export function formatBytes(n: number): string {
   return Math.round(n) + ' Б';
 }
 
+const plural = (n: number, a: string, b: string, c: string) => n % 10 === 1 && n % 100 !== 11 ? a : n % 10 >= 2 && n % 10 <= 4 && (n % 100 < 12 || n % 100 > 14) ? b : c;
+
+/** Подпись к размеру базы: «1 234 сообщения в 12 чатах». */
+export function dbRowsLabel(rows: Record<string, number> | null | undefined): string | undefined {
+  if (!rows) return undefined;
+  const m = rows.messages ?? 0, c = rows.chats ?? 0;
+  return `${m.toLocaleString('ru-RU')} ${plural(m, 'сообщение', 'сообщения', 'сообщений')} в ${c.toLocaleString('ru-RU')} ${plural(c, 'чате', 'чатах', 'чатах')}`;
+}
+
 /** exact: браузер разделил IndexedDB и кэши (usageDetails); иначе db — «всё остальное». approx: у части записей кэша нет длины. */
 export interface StorageInfo { used: number; quota: number; db: number; media: number; exact: boolean; approx: boolean; files?: number }
 

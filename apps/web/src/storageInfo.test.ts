@@ -1,5 +1,5 @@
 import { expect, test } from 'bun:test';
-import { formatBytes, MEDIA_CACHE } from './storageInfo';
+import { dbRowsLabel, formatBytes, MEDIA_CACHE } from './storageInfo';
 
 test('formatBytes', () => {
   expect(formatBytes(0)).toBe('0 Б');
@@ -11,4 +11,10 @@ test('formatBytes', () => {
 test('only media caches match', () => {
   expect(MEDIA_CACHE.test('relay-media-v1')).toBe(true);
   expect(MEDIA_CACHE.test('relay-shell-abc')).toBe(false);
+});
+test('dbRowsLabel', () => {
+  expect(dbRowsLabel(undefined)).toBeUndefined();
+  expect(dbRowsLabel({ messages: 1, chats: 1 })).toBe('1 сообщение в 1 чате');
+  expect(dbRowsLabel({ messages: 3, chats: 12 })).toBe('3 сообщения в 12 чатах');
+  expect(dbRowsLabel({ messages: 0, chats: 0 })).toBe('0 сообщений в 0 чатах');
 });

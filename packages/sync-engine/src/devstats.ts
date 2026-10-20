@@ -1,7 +1,7 @@
 import type { DevLog } from './devlog';
 import { LOG_CAP } from './devlog';
 import { simActive, type SimState } from './devsim';
-import { STORES } from './schema';
+import { STORES, type StoreName } from './schema';
 import type { Item, OutboxEntry, Patch, Query } from './types';
 
 /** Снимок состояния движка для раздела «Для разработчиков» (подписка devStats). */
@@ -108,11 +108,11 @@ export function buildStats(v: EngineView, o: { db: IDBDatabase; log: DevLog; sim
 
 
 /** Число записей по сторам IDB (count() — дёшево, без чтения записей). */
-export function countStores(db: IDBDatabase): Promise<Record<string, number>> {
+export function countStores(db: IDBDatabase): Promise<Record<StoreName, number>> {
   return new Promise((resolve, reject) => {
     const names = STORES.filter((s) => db.objectStoreNames.contains(s));
     const t = db.transaction(names);
-    const out: Record<string, number> = {};
+    const out = Object.fromEntries(STORES.map((s) => [s, 0])) as Record<StoreName, number>;
     for (const s of names) { const r = t.objectStore(s).count(); r.onsuccess = () => { out[s] = r.result; }; }
     t.oncomplete = () => resolve(out);
     t.onerror = () => reject(t.error);

@@ -277,6 +277,9 @@ export function watchQuery(q: Query, cb: (p: Patch) => void): { update(q: Query)
 /** Очистка локальных данных: движок стирает кэш и берёт снимок заново; keepOutbox — не трогать неотправленное. */
 export const resetLocal = (keepOutbox: boolean): Promise<unknown> => call({ type: 'resetLocal', keepOutbox });
 
+/** Строки локальной базы по таблицам (для «Данные и память»). */
+export const storageStats = (): Promise<{ rows: Record<string, number>; bytes: number | null; exact: boolean }> => call({ type: 'storageStats' });
+
 // ---------- раздел «Для разработчиков» ----------
 
 /** Подписка раздела (devStats, devLog): живёт, только пока открыт раздел. */

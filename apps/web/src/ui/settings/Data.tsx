@@ -4,8 +4,8 @@ import { autoloadSubtitle, isDefaultAutoload, type MediaKind } from '../../autol
 import { useGlobal } from '../../global';
 import { back, go } from '../../nav';
 import { CACHE_MB, defaultPrefs, KEEP_DAYS, setPref, setPrefs } from '../../prefs';
-import { getPendingOps, resetLocal, showToast } from '../../settingsData';
-import { clearMediaCaches, formatBytes, readStorage, type StorageInfo } from '../../storageInfo';
+import { getPendingOps, resetLocal, showToast, storageStats } from '../../settingsData';
+import { clearMediaCaches, dbRowsLabel, formatBytes, readStorage, type StorageInfo } from '../../storageInfo';
 import { useScrollMemory } from '../useScrollMemory';
 import { clearLocalDialog } from './clearLocal';
 
@@ -28,6 +28,7 @@ export function Data() {
   const [info, setInfo] = useState<StorageInfo | null>(null);
   const [ask, setAsk] = useState<'cache' | 'local' | 'autoload' | null>(null);
   const [lastAsk, setLastAsk] = useState<'cache' | 'local' | 'autoload'>('cache');   // текст диалога держится на время закрытия
+  const [rows, setRows] = useState<Record<string, number> | null>(null);
   const [busy, setBusy] = useState(false);
   const [unsent, setUnsent] = useState(0);   // сообщения (в очереди и с ошибкой) и правки, не дошедшие до сервера
   const alive = useRef(true);
@@ -38,6 +39,7 @@ export function Data() {
 
   const recompute = () => { void readStorage().then((i) => { if (alive.current) setInfo(i); }).catch(() => { if (alive.current) setInfo({ used: 0, quota: 0, db: 0, media: 0, exact: false, approx: false }); }); };
   useEffect(recompute, []);
+  useEffect(() => { void storageStats().then((s) => { if (alive.current) setRows(s.rows); }).catch(() => {}); }, [info]);   // строки базы — после каждого пересчёта (очистка, смена лимита)
   // после смены срока или лимита SW чистит кэш сам — пересчитываем занятое, когда он закончит
   const settleTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const settle = () => { if (settleTimer.current) clearTimeout(settleTimer.current); settleTimer.current = setTimeout(recompute, 1200); };
@@ -100,7 +102,7 @@ export function Data() {
             </Presence>
             {info == null || skeleton ? null : (
               <>
-                <InfoRow icon="chats" title={info.exact ? 'Чаты и сообщения' : 'Данные приложения'} value={formatBytes(info.db)} />
+                <InfoRow icon="chats" title={info.exact ? 'Чаты и сообщения' : 'Данные приложения'} subtitle={dbRowsLabel(rows)} value={formatBytes(info.db)} />
                 <InfoRow icon="image" title="Медиа" subtitle={info.files ? `${filesLabel(info.files)} — открываются без сети` : undefined} value={(info.approx ? '≈ ' : '') + formatBytes(info.media)} />
               </>
             )}

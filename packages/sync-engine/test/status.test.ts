@@ -487,3 +487,23 @@ test('resetLocal that times out replays the hello that arrived meanwhile, so syn
   (ea as unknown as { busy: number }).busy--;
   await list.until((l) => (l[0]?.last as { body: string } | null)?.body === 'пока ждали');
 });
+
+test('storageStats counts rows per store and survives resetLocal', async () => {
+  const a = await srv.login('a'), b = await srv.login('b');
+  const chatId = await srv.chat(a.token, [a.userId, b.userId]);
+  await sendMessage(b.userId, { chatId, clientId: crypto.randomUUID(), body: 'раз' });
+  await sendMessage(b.userId, { chatId, clientId: crypto.randomUUID(), body: 'два' });
+  const ea = await open(srv.config(a));
+  ea.connect();
+  await ea.whenIdle();
+  const s = await ea.call({ type: 'storageStats' }) as { rows: Record<string, number>; bytes: number | null; exact: boolean };
+  expect(s.rows.chats).toBeGreaterThanOrEqual(1);
+  expect(s.rows.messages).toBe(2);
+  expect(s.rows.outbox).toBe(0);
+  expect(Object.keys(s.rows)).toContain('profilePhotos');   // все таблицы схемы, даже пустые
+  expect(s.bytes === null || s.bytes >= 0).toBe(true);
+  ea.disconnect();
+  await ea.call({ type: 'resetLocal', keepOutbox: true });
+  const z = await ea.call({ type: 'storageStats' }) as { rows: Record<string, number> };
+  expect(z.rows.messages).toBe(0);
+});

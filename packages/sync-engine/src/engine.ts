@@ -5,6 +5,7 @@ import { Contacts } from './contacts';
 import { delBlob, getBlob, openDb, putBlob, write } from './idb';
 import { affects, computeQuery, diffResults, feedSpan, messageWindow, muteKey, rangeAt, muteOverlay, type Result } from './queries';
 import type { Item } from './types';
+import { countStores } from './devstats';
 import { Store, type ChatSummary } from './store';
 import { uploadParts, type MultipartState } from './multipart';
 import { WsTransport } from './transport';
@@ -20,7 +21,7 @@ import { applyMembersReply, membersResult, type MembersReply } from './members';
 import { MediaLoader, mediaResult, tabMessages } from './media';
 import { evict, EVICT_LIMITS, type EvictKeep, type EvictLimits, type EvictOpts, type EvictStats } from './evict';
 import { musicKey, profileMusicResult, profilePhotosResult, ProfileListsLoader, trackOf } from './profileLists';
-import type { Action, EngineConfig, LocalMessage, OutboxEntry, Patch, Query, SearchHit, SearchResult } from './types';
+import type { Action, StorageStats, EngineConfig, LocalMessage, OutboxEntry, Patch, Query, SearchHit, SearchResult } from './types';
 import { searchLocal } from './search';
 
 export interface WatchHandle { update(q: Query): void; close(): void }
@@ -539,6 +540,16 @@ export class Engine {
   /** сколько hello пришло этому экземпляру движка: со второго — переподключение (sessionsRev) */
   private hellos = 0;
   private skipped: { hello: Extract<ServerFrame, { op: 'hello' }> | null; poke: boolean } = { hello: null, poke: false };
+  private async storageStats(): Promise<StorageStats> {
+    const rows = await countStores(this.db);
+    let bytes: number | null = null, exact = false;
+    try {
+      const e = (await navigator.storage.estimate()) as StorageEstimate & { usageDetails?: { indexedDB?: number } };
+      exact = e.usageDetails?.indexedDB != null;
+      bytes = e.usageDetails?.indexedDB ?? e.usage ?? null;
+    } catch { /* оценки нет (старый браузер, тест) */ }
+    return { rows, bytes, exact };
+  }
   private async resetLocal(keepOutbox: boolean): Promise<void> {
     if (this.resetting) throw new Error('reset_busy');
     this.dev.log.record('engine', 'resetLocal', { keepOutbox });
@@ -974,6 +985,7 @@ export class Engine {
         return null;
       }
       case 'resetLocal': return this.resetLocal(a.keepOutbox !== false);
+      case 'storageStats': return this.storageStats();
       case 'dev': return this.dev.command(a).finally(() => this.pushStatus());   // флаги имитатора — в status сразу
       case 'search': return this.search(a);
       // закрепление — сразу на сервер (без сети — ошибка, интерфейс скажет); список придёт и обновлением журнала
