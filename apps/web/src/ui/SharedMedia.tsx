@@ -1,4 +1,4 @@
-import { Avatar, EmptyState, FolderTabs, Icon, LazyImage, MediaViewer, peerTone, player, SlideStack } from '@relay/ui';
+import { Avatar, EmptyState, FolderTabs, Icon, LazyImage, lazyObserve, MediaViewer, peerTone, player, SlideStack } from '@relay/ui';
 import { offlineUrlNow } from '../downloads';
 import { LinkTile, linkInfo } from './linkTile';
 import { avatarPhoto, userPhoto } from '../profilePhoto';
@@ -7,7 +7,7 @@ import type { Item } from '@relay/sync-engine/src/types';
 import { useEffect, useRef, useState } from 'preact/hooks';
 import { focusMessage, type MediaTab } from '../data';
 import { useMedia } from '../mediaTab';
-import { tileSrc } from '../mediaGrid';
+import { tileSrc, videoFrameSrc } from '../mediaGrid';
 import { getGlobal, useGlobal } from '../global';
 import { toggleMusic, trackTitle } from '../music';
 import { clock, dayLabel, fileSize, lastSeenText } from './format';
@@ -121,13 +121,19 @@ export function MediaCell({ m, onOpen }: { m: Msg; onOpen: (m: Msg) => void }) {
   // видео без кадра-превью: первый кадр и длительность — из метаданных самого файла (как в Telegram)
   const [len, setLen] = useState(a.duration ?? 0);
   const [frame, setFrame] = useState(false);
+  // <video> — только когда плитка подъехала к экрану (общий наблюдатель LazyImage): сотня роликов в сетке
+  // не тянет метаданные каждый, пока их не видно
+  const box = useRef<HTMLSpanElement>(null);
+  const [near, setNear] = useState(false);
+  const bare = video && !a.thumb;
+  useEffect(() => { if (!bare || near || !box.current) return; return lazyObserve(box.current, () => setNear(true)); }, [bare]);
   return (
     <button type="button" class="app-media-cell" data-mid={m.id} aria-label={a.name} onClick={() => onOpen(m)}>
-      {a.thumb || !video ? <LazyImage src={video ? '' : tileSrc(a)} thumb={a.thumb ?? undefined} alt={a.name} /> : (
-        <span class="app-media-video">
-          <video class={'app-media-frame' + (frame ? ' app-media-frame-in' : '')} src={fileUrl(a) + '#t=0.1'} preload="metadata" muted playsInline tabIndex={-1} aria-hidden="true"
-            onLoadedMetadata={(e) => { const d = (e.currentTarget as HTMLVideoElement).duration; if (!len && Number.isFinite(d)) setLen(d); }}
-            onLoadedData={() => setFrame(true)} />
+      {!bare ? <LazyImage src={video ? '' : tileSrc(a)} thumb={a.thumb ?? undefined} alt={a.name} /> : (
+        <span class="app-media-video" ref={box}>
+          {near ? <video class={'app-media-frame' + (frame ? ' app-media-frame-in' : '')} src={videoFrameSrc(a)} preload="metadata" muted playsInline tabIndex={-1} aria-hidden="true"
+            onLoadedMetadata={(e) => { const d = (e.currentTarget as HTMLVideoElement).duration; if (!len && !a.preview && Number.isFinite(d)) setLen(d); }}
+            onLoadedData={() => setFrame(true)} /> : null}
           <Icon name="play" size={28} />
         </span>
       )}
