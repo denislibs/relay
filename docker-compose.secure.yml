@@ -1,0 +1,43 @@
+# Продакшен-усиление поверх docker-compose.yml (план docs/plans/2026-10-21-relay-at-rest-encryption.md):
+#   docker compose -f docker-compose.yml -f docker-compose.secure.yml up -d
+# Секреты — только из окружения (без значений по умолчанию): compose не запустится, если их нет.
+#
+# Индекс поиска хранит расшифрованный текст сообщений, поэтому:
+#   - Meilisearch в своей внутренней сети `search` — его видят только server и worker, остальные сервисы и наружу — нет;
+#   - server ходит с ключом «только поиск» (MEILI_API_KEY, выпуск: bun apps/server/src/dev/meiliKeys.ts),
+#     мастер-ключ — только у worker (он пишет в индекс);
+#   - том meili не бэкапится: индекс восстанавливается из базы задачей search.reindex.
+networks:
+  search:
+    internal: true
+
+services:
+  search:
+    environment:
+      MEILI_MASTER_KEY: ${MEILI_MASTER_KEY:?set MEILI_MASTER_KEY}
+      MEILI_ENV: production
+    networks: [search]
+
+  server:
+    environment:
+      DEV_LOGIN: "0"
+      DEV_MIGRATE: "0"
+      MEILI_MASTER_KEY: ""
+      MEILI_API_KEY: ${MEILI_SEARCH_KEY:?set MEILI_SEARCH_KEY (bun apps/server/src/dev/meiliKeys.ts)}
+      KMS_PROVIDER: vault
+      VAULT_ADDR: ${VAULT_ADDR:?set VAULT_ADDR}
+      VAULT_TOKEN: ${VAULT_TOKEN_SERVER:?set VAULT_TOKEN_SERVER}
+      VAULT_TRANSIT_KEY: relay-chat-keys
+      NODE_ENV: production
+    networks: [default, search]
+
+  worker:
+    environment:
+      DEV_LOGIN: "0"
+      MEILI_MASTER_KEY: ${MEILI_MASTER_KEY:?set MEILI_MASTER_KEY}
+      KMS_PROVIDER: vault
+      VAULT_ADDR: ${VAULT_ADDR:?set VAULT_ADDR}
+      VAULT_TOKEN: ${VAULT_TOKEN_WORKER:?set VAULT_TOKEN_WORKER}
+      VAULT_TRANSIT_KEY: relay-chat-keys
+      NODE_ENV: production
+    networks: [default, search]
