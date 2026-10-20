@@ -21,6 +21,14 @@ function sameDraft(a: { text: string; entities?: Entity[] } | null | undefined, 
 type Range = [number, number];
 
 /**
+ * Удалённое сообщение: на устройстве от него остаётся только то, что нужно строке «Сообщение удалено» (автор, время,
+ * место в ленте); текст, оформление, вложение, превью, статья, чек-лист и пересылка — стираются (память и IDB).
+ */
+const DELETED: Partial<LocalMessage> = {
+  body: '', deleted: true, reactions: [], entities: [], attachment: null, link: null, blocks: null, fwdFrom: null, todo: undefined, listened: undefined,
+};
+
+/**
  * Сообщение журнала (или подтверждение отправки) продлевает живой (последний) отрезок: всё новее него приходит
  * подряд. Внутри отрезка — ничего; старее начала живого и вне отрезков — не продлевает (непрерывность не доказана —
  * это сделает страница истории). own — своё отправленное: отрезок начат снимком (seed), пока сообщение
@@ -282,7 +290,7 @@ export class Store {
       case 'readBy': return this.applyPeerRead(u.chatId, u.upToId);
       case 'draft': return this.applyRemoteDraft(u.chatId, u.text, u.at, u.entities);
       case 'messageEdited': return this.patchMessage(u.chatId, u.id, { body: u.body, editedAt: u.editedAt, entities: u.entities ?? [] });
-      case 'messageDeleted': return this.patchMessage(u.chatId, u.id, { body: '', deleted: true, reactions: [] });
+      case 'messageDeleted': return this.patchMessage(u.chatId, u.id, DELETED);
       case 'reactions': return this.patchMessage(u.chatId, u.id, { reactions: u.reactions });
       case 'mediaListened': return this.patchMessage(u.chatId, u.id, { listened: true });
       case 'todoUpdated': return this.patchMessage(u.chatId, u.id, { todo: u.todo, ...(u.editedAt ? { editedAt: u.editedAt } : {}) });
@@ -452,6 +460,7 @@ export class Store {
       // сервер ещё грузит превью, а у нас оно уже есть (показано в поле ввода) — не прятать его до загрузки
       ...(m.link ? { link: m.link.pending && prev?.link && !prev.link.pending && prev.link.url === m.link.url ? prev.link : m.link } : null),
     };
+    if (local.deleted) Object.assign(local, DELETED);   // сервер ещё отдаёт превью, статью и пересылку удалённого
     unreadOnArrival(this, chat, m, countUnread);
     chat.knownMaxId = Math.max(chat.knownMaxId, m.id);
     if (range === 'journal') this.extendLive(chat, m.id);
@@ -607,6 +616,7 @@ export class Store {
 
   /** Правка/удаление/реакции загруженного сообщения (и превью последнего сообщения чата). Незагруженное — придёт с историей. */
   patchMessage(chatId: number, id: number, patch: Partial<LocalMessage>): void {
+    if (patch.deleted && this.quotes.delete(chatId + ':' + id)) this.touch(chatId);   // исходник цитаты удалён — его текст не держим
     const m = this.messageById(chatId, id);
     if (m) { this.putMessage({ ...m, ...patch }); return; }
     const rk = `${chatId}:${id}`, prevP = this.rowPatches.get(rk);

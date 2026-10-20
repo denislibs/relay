@@ -121,3 +121,53 @@ test('contacts and the block list survive a restart; removals are deleted from t
   again = await Store.open(await openDb(name), ME);
   expect([...again.blocks.table.rows.keys()]).toEqual([3]);
 });
+
+test('a deleted message keeps no content in memory or IndexedDB (loaded and unloaded paths); its quote and tabs go too', async () => {
+  const name = 'store-' + crypto.randomUUID();
+  const db = await openDb(name);
+  const s = await Store.open(db, ME);
+  const photo = { id: 'f1', kind: 'photo' as const, mime: 'image/png', name: 'секрет.png', size: 1, w: 1, h: 1 };
+  const rich = (id: number) => msg({
+    id, chatId: 7, senderId: PEER, kind: 'photo', body: 'тайна https://x.y', attachment: photo,
+    entities: [{ type: 'bold', offset: 0, length: 5 }], link: { url: 'https://x.y', title: 'тайна' },
+    blocks: [{ type: 'p', text: 'тайна' }], fwdFrom: { userId: 9, name: 'Кто-то', chatId: 3, messageId: 4, at: new Date().toISOString() },
+  } as never);
+  s.applyUpdate({ type: 'newMessage', message: rich(10) });
+  s.applyUpdate({ type: 'newMessage', message: rich(11) });
+  s.applyUpdate({ type: 'newMessage', message: msg({ id: 12, chatId: 7, senderId: PEER, body: 'последнее' }) });
+  s.addQuotes(7, [rich(10) as never]);
+  await s.flush();
+  const check = (m: Record<string, unknown> | undefined) => {
+    expect(m).toBeDefined();
+    expect(m!.deleted).toBe(true);
+    expect(m!.body).toBe('');
+    for (const k of ['attachment', 'link', 'blocks', 'fwdFrom', 'todo']) expect(m![k] ?? null).toBeNull();
+    expect(m!.entities).toEqual([]);
+    expect(m!.tab).toBeUndefined();
+    expect(JSON.stringify(m)).not.toContain('тайна');
+    expect(JSON.stringify(m)).not.toContain('секрет');
+  };
+  const rows = async () => new Promise<Record<string, unknown>[]>((res) => { const r = db.transaction('messages').objectStore('messages').getAll(); r.onsuccess = () => res(r.result); });
+  const terms = async () => new Promise<{ term: string; sort: number }[]>((res) => { const r = db.transaction('terms').objectStore('terms').getAll(); r.onsuccess = () => res(r.result); });
+
+  // загруженное: в памяти и после записи
+  s.applyUpdate({ type: 'messageDeleted', chatId: 7, id: 10 });
+  check(s.messageById(7, 10) as never);
+  expect(s.quoteFor(7, 10)).toBeUndefined();
+  await s.flush();
+  check((await rows()).find((r) => r.id === 10));
+  expect((await terms()).some((t) => t.sort === 10)).toBe(false);
+
+  // незагруженное: правка строки в IDB
+  const cold = await Store.open(db, ME);
+  cold.applyUpdate({ type: 'messageDeleted', chatId: 7, id: 11 });
+  await cold.flush();
+  check((await rows()).find((r) => r.id === 11));
+  expect((await terms()).some((t) => t.sort === 11)).toBe(false);
+  await cold.loadChatMessages(7);
+  check(cold.messageById(7, 11) as never);
+
+  // удалённое, пришедшее с сервера (страница истории) — тоже без содержимого
+  cold.applyHistory(7, [{ ...rich(5), deleted: true, attachment: null } as never], true, 10);
+  check(cold.messageById(7, 5) as never);
+});
