@@ -107,7 +107,7 @@ body { margin: 0; font-family: var(--font-sans); color: var(--ink); background: 
 .rl-row-time { font: 400 13px/16px var(--font-sans); color: var(--ink-muted); font-variant-numeric: tabular-nums; }
 .rl-row-time-unread { color: var(--brand-text); font-weight: 600; }
 /* как в Telegram: превью того же кегля, что текст сообщений, высота строки ×1.5 (в пузыре — ×1.3125) */
-.rl-row-preview { flex: 1; min-width: 0; font: 400 var(--message-text-size, 16px)/calc(var(--message-text-size, 16px) * 1.5) var(--font-sans); color: var(--ink-muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.rl-row-preview { flex: 1; min-width: 0; font: 400 var(--message-text-size, 16px)/round(calc(var(--message-text-size, 16px) * 1.5), 1px) var(--font-sans); color: var(--ink-muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .rl-row-typing { color: var(--brand-text); }
 /* превью как в Telegram: «Автор:» цветом текста, миниатюра 20 px, спойлер — точки вместо букв */
 .rl-row-author { color: var(--ink); }
@@ -123,10 +123,10 @@ body { margin: 0; font-family: var(--font-sans); color: var(--ink); background: 
 /* ---------- Bubble ---------- */
 .rl-msgline { display: flex; padding: 0 clamp(var(--space-2), 6%, var(--space-9)); }
 .rl-msgline-out { justify-content: flex-end; }
-.rl-bubble { position: relative; max-width: min(65%, 560px); padding: 6px 8px 8px 10px; border-radius: var(--radius-bubble); background: var(--bubble-in); color: var(--ink); box-shadow: var(--shadow-bubble); font: 400 var(--message-text-size, 15px)/calc(var(--message-text-size, 15px) * 1.4) var(--font-sans); word-break: break-word; }
+.rl-bubble { position: relative; max-width: min(65%, 560px); padding: 6px 8px 8px 10px; border-radius: var(--radius-bubble); background: var(--bubble-in); color: var(--ink); box-shadow: var(--shadow-bubble); font: 400 var(--message-text-size, 15px)/round(calc(var(--message-text-size, 15px) * 1.4), 1px) var(--font-sans); word-break: break-word; }
 .rl-bubble-out { background: var(--bubble-out); }
 .rl-bubble-failed { background: var(--danger-soft); }
-.rl-bubble-author { display: block; margin-bottom: 2px; font: 600 calc(var(--message-text-size, 16px) - 2px)/1.25 var(--font-sans); }
+.rl-bubble-author { display: block; margin-bottom: 2px; font: 600 calc(var(--message-text-size, 16px) - 2px)/calc(var(--message-text-size, 16px) + 2px) var(--font-sans); }
 .rl-bubble-author-link { padding: 0; border: 0; background: none; text-align: start; cursor: pointer; max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .rl-bubble-author-link:hover { text-decoration: underline; }
 .rl-bubble-author-link:focus-visible { outline: 2px solid currentColor; outline-offset: 2px; border-radius: 4px; }
@@ -166,10 +166,10 @@ body { margin: 0; font-family: var(--font-sans); color: var(--ink); background: 
 /* ---------- Composer ---------- */
 .rl-composer { display: flex; align-items: flex-end; gap: var(--space-1); padding: 8px 12px; background: var(--tray); }
 .rl-composer-field { flex: 1; min-width: 0; display: flex; align-items: flex-end; gap: 4px; min-height: 48px; padding: 4px 6px; border-radius: var(--radius-xl); background: var(--composer); }
-.rl-composer-field :is(input, textarea) { flex: 1; min-width: 0; height: 40px; border: 0; background: transparent; outline: none; font: 400 var(--message-text-size, 15px)/calc(var(--message-text-size, 15px) * 1.333) var(--font-sans); color: var(--ink); padding: 0 6px; }
+.rl-composer-field :is(input, textarea) { flex: 1; min-width: 0; height: 40px; border: 0; background: transparent; outline: none; font: 400 var(--message-text-size, 15px)/round(calc(var(--message-text-size, 15px) * 1.333), 1px) var(--font-sans); color: var(--ink); padding: 0 6px; }
 .rl-composer-field :is(input, textarea)::placeholder { color: var(--ink-muted); }
 /* поле ввода: коробка с анимированной высотой, внутри — редактор естественной высоты */
-.rl-composer-input { --line: calc(var(--message-text-size, 15px) * 1.3125); position: relative; flex: 1; min-width: 0; box-sizing: border-box;
+.rl-composer-input { --line: round(calc(var(--message-text-size, 15px) * 1.3125), 1px); position: relative; flex: 1; min-width: 0; box-sizing: border-box;
   height: calc(var(--line) + 19px); min-height: calc(var(--line) + 19px); max-height: min(240px, 40vh); overflow: hidden;
   transition: height 120ms var(--ease-out); }
 .rl-composer-input-over { overflow-y: auto; overscroll-behavior: contain; scrollbar-width: thin; }
@@ -647,7 +647,7 @@ body { margin: 0; font-family: var(--font-sans); color: var(--ink); background: 
 .rl-row-archived .rl-row-name { font-weight: 400; }
 
 /* ---------- Bubble extras ---------- */
-.rl-fwd { display: flex; flex-direction: column; align-items: flex-start; gap: 2px; max-width: 100%; margin: 0 0 4px; padding: 0; border: 0; background: none; color: var(--fwd-tone); text-align: start; font: 400 calc(var(--message-text-size, 16px) - 2px)/1.3 var(--font-sans); }
+.rl-fwd { display: flex; flex-direction: column; align-items: flex-start; gap: 2px; max-width: 100%; margin: 0 0 4px; padding: 0; border: 0; background: none; color: var(--fwd-tone); text-align: start; font: 400 calc(var(--message-text-size, 16px) - 2px)/calc(var(--message-text-size, 16px) + 2px) var(--font-sans); }
 .rl-fwd-link { cursor: pointer; }
 /* в своих пузырях — не цвет автора, а свой акцент (как в Telegram: на своём фоне чужие цвета выглядят случайными).
    Цвет приходит inline-переменной, поэтому переопределение — с !important */
@@ -694,9 +694,9 @@ button.rl-quote:active { background: var(--quote-bg-active, var(--pressed)); }
 .rl-quote::before { content: ""; flex-shrink: 0; width: 4px; background: var(--quote-tone); }
 .rl-quote-in { margin: 2px 0 6px; min-width: 200px; }
 .rl-quote-body { flex: 1; min-width: 0; display: flex; flex-direction: column; padding: 6px 8px 6px 0; }
-.rl-quote-body b { font: 600 calc(var(--message-text-size, 16px) - 2px)/1.3 var(--font-sans); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.rl-quote-body b { font: 600 calc(var(--message-text-size, 16px) - 2px)/calc(var(--message-text-size, 16px) + 2px) var(--font-sans); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 /* блочный, не flex: у flex-контейнера многоточие на голом тексте не работает — значок встаёт в строку */
-.rl-quote-text { display: block; font: 400 calc(var(--message-text-size, 16px) - 2px)/1.3 var(--font-sans); color: var(--bubble-meta); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.rl-quote-text { display: block; font: 400 calc(var(--message-text-size, 16px) - 2px)/calc(var(--message-text-size, 16px) + 2px) var(--font-sans); color: var(--bubble-meta); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .rl-quote-text > svg { display: inline-block; vertical-align: -2px; margin-right: 4px; }
 .rl-quote-thumb { width: 52px; flex-shrink: 0; }
 .rl-quote .rl-iconbtn { align-self: center; width: 32px; height: 32px; margin-right: 4px; }
@@ -1092,8 +1092,8 @@ button.rl-tab:hover { color: var(--ink); }
 /* composer: one pill; attach, field, emoji and the round send/mic button all sit inside it */
 .rl-shell .rl-composer { align-items: flex-end; gap: 0; min-height: 48px; padding: 4px; border-radius: 24px; background: var(--raised); box-shadow: var(--tg-shadow-composer); }
 .rl-shell .rl-composer-field { align-items: flex-end; min-height: 40px; padding: 0; border-radius: 0; background: transparent; box-shadow: none; }
-.rl-shell .rl-composer-field :is(input, textarea) { font-size: var(--message-text-size, 16px); line-height: calc(var(--message-text-size, 16px) * 1.3125); padding-inline: 4px; }
-.rl-shell .rl-composer-input { --line: calc(var(--message-text-size, 16px) * 1.3125); }
+.rl-shell .rl-composer-field :is(input, textarea) { font-size: var(--message-text-size, 16px); line-height: round(calc(var(--message-text-size, 16px) * 1.3125), 1px); padding-inline: 4px; }
+.rl-shell .rl-composer-input { --line: round(calc(var(--message-text-size, 16px) * 1.3125), 1px); }
 .rl-shell .rl-composer-editable, .rl-shell .rl-composer-ph { padding-inline: 4px; left: 4px; }
 .rl-shell .rl-composer-field .rl-iconbtn { width: 40px; height: 40px; color: var(--ink-muted); }
 .rl-shell .rl-composer-send { width: 40px; height: 40px; box-shadow: none; }
@@ -1736,7 +1736,7 @@ html[data-blur="0"] .rl-menu { -webkit-backdrop-filter: none; backdrop-filter: n
 :root[data-theme="dark"] { --action-bg: rgba(72, 87, 97, .55); }
 
 .rl-bubble { max-width: min(29rem, calc(100% - 2.5rem)); padding: 5px 8px 6px; border-radius: var(--bubble-r); box-shadow: 0 1px 2px rgba(16, 35, 47, .15);
-  font-size: var(--message-text-size, 16px); line-height: calc(var(--message-text-size, 16px) * 1.3125); }
+  font-size: var(--message-text-size, 16px); line-height: round(calc(var(--message-text-size, 16px) * 1.3125), 1px); }
 .rl-bubble-out { max-width: min(30rem, calc(100% - 2.5rem)); }
 .rl-bubble-meta { right: 8px; bottom: 5px; font-size: 12px; }
 /* углы в группе: не первое — верхний угол со стороны отправителя малый, не последнее — нижний; у хвостика — 0 */
@@ -1821,7 +1821,7 @@ html[data-blur="0"] .rl-menu { -webkit-backdrop-filter: none; backdrop-filter: n
 .rl-media .rl-media-cell { border-radius: 0; }
 .rl-media-only .rl-media-album { gap: 2px; }
 .rl-media-only .rl-media-album .rl-media-cell { border-radius: 0; }
-.rl-media .rl-media-caption { padding: 6px 8px 6px; font-size: var(--message-text-size, 16px); line-height: calc(var(--message-text-size, 16px) * 1.3125); }
+.rl-media .rl-media-caption { padding: 6px 8px 6px; font-size: var(--message-text-size, 16px); line-height: round(calc(var(--message-text-size, 16px) * 1.3125), 1px); }
 .rl-media .rl-media-author { padding: 5px 8px 4px; }
 .rl-media-chip-meta { right: 4px; bottom: 4px; padding: 0 6px; height: 18px; border-radius: 10px; background: rgba(0, 0, 0, .2); font-size: 12px; }
 
