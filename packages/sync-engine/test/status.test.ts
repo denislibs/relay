@@ -2,7 +2,7 @@ import { sql } from '../../../apps/server/src/db';
 import { afterAll, afterEach, beforeEach, expect, test } from 'bun:test';
 import { sendMessage } from '../../../apps/server/src/domain/messages';
 import { Engine } from '../src/engine';
-import { resetDb, startTestServer, watchInto } from './helpers';
+import { opened, resetDb, startTestServer, watchInto } from './helpers';
 
 const srv = await startTestServer();
 afterAll(() => srv.stop());
@@ -416,7 +416,7 @@ test('resetLocal wipes the cache and takes a fresh snapshot; unsent messages sur
   ea.connect();
   await st.until((l) => l[0]?.hydrated === true && l[0].synced === true && l[0].outbox === 0);
   await list.until((l) => l.length === 1);
-  const rows = await sql`select body from messages where chat_id = ${chatId} order by id`;
+  const rows = await opened(await sql`select * from messages where chat_id = ${chatId} order by id`);
   expect(rows.map((r: { body: string }) => r.body)).toEqual(['старое', 'не ушло']);
 });
 
@@ -467,7 +467,7 @@ test('resetLocal right after a send: the message is delivered exactly once, outb
   await ea.call({ type: 'resetLocal', keepOutbox: true });
   await st.until((l) => l[0]?.hydrated === true && l[0].synced === true && l[0].outbox === 0);
   await ea.whenIdle();
-  const rows = await sql`select body from messages where chat_id = ${chatId}`;
+  const rows = await opened(await sql`select * from messages where chat_id = ${chatId}`);
   expect(rows.map((r: { body: string }) => r.body)).toEqual(['раз']);
 });
 

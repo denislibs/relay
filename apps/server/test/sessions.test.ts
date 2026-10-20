@@ -11,7 +11,7 @@ import { startRealtime } from '../src/realtime';
 import { ensurePeriodic } from '../src/jobs/queue';
 import '../src/jobs/kinds';
 import { drainJobs } from '../src/jobs/worker';
-import { makeUser, nextFrame, resetDb } from './helpers';
+import { makeUser, nextFrame, opened, resetDb } from './helpers';
 
 const server = createServer({ port: 0 });
 const stopRealtime = await startRealtime(server);
@@ -281,7 +281,7 @@ test('new code login: unconfirmed, announced in the service chat, cannot termina
 
   const list = await listSessions(a, old);
   expect(list.find((s) => s.id === fresh)).toMatchObject({ unconfirmed: true });
-  const [msg] = await sql`select body from messages where service_type = 'new_login' order by id desc limit 1`;
+  const [msg] = await opened(await sql`select * from messages where service_type = 'new_login' order by id desc limit 1`);
   expect(msg.body).toContain('Новый вход');
   const types = (await sql`select type from updates where user_id = ${a} order by seq`).map((r) => r.type);
   expect(types).toContain('sessionsChanged');

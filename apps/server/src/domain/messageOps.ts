@@ -4,6 +4,7 @@ import { sql } from '../db';
 import { assertMember } from './chats';
 import { DomainError } from './errors';
 import { fanOut } from './journal';
+import { updateContent } from './messageContent';
 import { blockedInDirect } from './privacy';
 import { isServiceChat } from './service';
 import { burnCodes } from './login';
@@ -31,11 +32,12 @@ export async function editMessage(userId: number, chatId: number, id: number, bo
     await ownMessage(tx, userId, chatId, id);   // в служебном чате — тоже только свои (сообщения Relay не правятся)
     // заблокированный не правит сообщения в личном чате с тем, кто его заблокировал
     if (await blockedInDirect(tx, chatId, userId)) throw new DomainError('blocked');
-    // статью обычной правкой текста не меняем (иначе пропадут блоки)
-    const [art] = await tx`select 1 from messages where chat_id = ${chatId} and id = ${id} and blocks is not null`;
-    if (art) throw new DomainError('bad_frame', 'article edit');
     await burnCodes(tx, userId, text);
-    const [row] = await tx`update messages set body = ${text}, entities = ${entities.length ? sql.json(entities as never) : null}, edited_at = now() where chat_id = ${chatId} and id = ${id} returning edited_at`;
+    const row = (await updateContent(tx, chatId, id, (c) => {
+      // статью обычной правкой текста не меняем (иначе пропадут блоки); блоки — в шифре, проверка после открытия
+      if (c.blocks) throw new DomainError('bad_frame', 'article edit');
+      return { body: text, entities: entities.length ? entities : null };
+    }, () => ({ edited_at: sql`now()` })))!;
     const editedAt = new Date(row.edited_at as string).toISOString();
     await fanOut(tx, await membersOf(tx, chatId), { type: 'messageEdited', chatId, id, body: text, editedAt, entities });
     await enqueue(tx, 'search.sync', { id });
@@ -52,7 +54,8 @@ export async function deleteMessage(userId: number, chatId: number, id: number):
       const [m] = await tx`select deleted, service_type from messages where chat_id = ${chatId} and id = ${id} for update`;
       if (!m || m.deleted || m.service_type) throw new DomainError('not_found', 'message');
     } else await ownMessage(tx, userId, chatId, id);
-    await tx`update messages set body = '', entities = null, deleted = true where chat_id = ${chatId} and id = ${id}`;
+    // текст и шифр стираются целиком: у удалённого не остаётся содержимого ни открыто, ни шифром
+    await tx`update messages set body = '', entities = null, todo = null, blocks = null, link = null, content = null, deleted = true where chat_id = ${chatId} and id = ${id}`;
     await tx`delete from reactions where chat_id = ${chatId} and message_id = ${id}`;
     await fanOut(tx, await membersOf(tx, chatId), { type: 'messageDeleted', chatId, id });
     await enqueue(tx, 'search.sync', { id });   // убрать из индекса

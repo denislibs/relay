@@ -1,3 +1,4 @@
+import { openRows } from '../domain/messageContent';
 import { sql } from '../db';
 import { indexName, meili, MeiliError, waitTask } from './meili';
 
@@ -44,7 +45,8 @@ async function targets(): Promise<string[]> {
 }
 
 export async function syncMessage(id: number): Promise<void> {
-  const [row] = await sql`select id, chat_id, body, deleted, service_type, attachment from messages where id = ${id}`;
+  const [row] = await sql`select id, chat_id, client_id, body, deleted, service_type, attachment, content from messages where id = ${id}`;
+  if (row) await openRows([row]);   // в индекс — расшифрованный текст (индекс изолирован, см. ARCHITECTURE)
   const doc = row ? docOf(row) : null;
   for (const uid of await targets()) {
     if (doc) {
@@ -130,7 +132,7 @@ export async function reindexStep(opts: { batch?: number; maxBatches?: number; m
   }
   let copied = 0;
   for (let n = 0; n < maxBatches && Date.now() < until; n++) {
-    const rows = await sql`select id, chat_id, body, deleted, service_type, attachment from messages where id > ${after} order by id limit ${batch}`;
+    const rows = await openRows(await sql`select id, chat_id, client_id, body, deleted, service_type, attachment, content from messages where id > ${after} order by id limit ${batch}`);
     if (!rows.length) {
       await waitTask((await meili<{ taskUid: number }>('/swap-indexes', { method: 'POST', body: [{ indexes: [live, next] }] })).taskUid);
       await dropIndex(next);

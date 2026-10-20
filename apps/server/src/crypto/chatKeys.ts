@@ -2,7 +2,7 @@
 // (LRU, 10 минут): открытие чата — один вызов KMS, дальше только AES. Одновременные запросы одного ключа — один вызов.
 // Создание ключа — вне транзакции вызывающего (autocommit): откат его транзакции не должен оставить в кэше ключ,
 // которого нет в базе, иначе сообщения запечатаются ключом-призраком.
-import { sql } from '../db';
+import { sql, type Tx } from '../db';
 import { CryptoError, importAesKey, randomKey } from './aead';
 import { getKms } from './kms';
 
@@ -38,21 +38,45 @@ async function unwrapRow(chatId: number, version: number, wrapped: Uint8Array): 
   return key;
 }
 
-/** Ключ для расшифровки: конкретная версия. Ключа нет — чат удалён (ключ уничтожен): CryptoError('no_key'). */
-export async function chatKey(chatId: number, version: number): Promise<CryptoKey> {
-  return cached(chatId, version) ?? once(`k:${chatId}:${version}`, async () => {
+/**
+ * Ключ для расшифровки: конкретная версия. Ключа нет — чат удалён (ключ уничтожен): CryptoError('no_key').
+ * tx — читать в транзакции вызывающего (ключ мог появиться в ней же); так прочитанный ключ в кэш не идёт.
+ */
+export async function chatKey(chatId: number, version: number, tx?: Tx): Promise<CryptoKey> {
+  const hit = cached(chatId, version);
+  if (hit) return hit;
+  if (tx) {
+    const [row] = await tx`select wrapped_dek from keys.chat_keys where chat_id = ${chatId} and version = ${version}`;
+    if (!row) throw new CryptoError('no_key', `no key for chat ${chatId} v${version}`);
+    return importAesKey(await getKms().unwrap(new Uint8Array(row.wrapped_dek as Uint8Array)));
+  }
+  return once(`k:${chatId}:${version}`, async () => {
     const [row] = await sql`select wrapped_dek from keys.chat_keys where chat_id = ${chatId} and version = ${version}`;
     if (!row) throw new CryptoError('no_key', `no key for chat ${chatId} v${version}`);
     return unwrapRow(chatId, version, row.wrapped_dek as Uint8Array);
   });
 }
 
-/** Ключ для шифрования: текущая (последняя) версия; у чата ещё нет ключа — создаём. */
-export async function currentChatKey(chatId: number): Promise<ChatKey> {
+/**
+ * Ключ для шифрования: текущая (последняя) версия; у чата ещё нет ключа — создаём.
+ * tx — транзакция вызывающего, если чат создан в ней же (ещё не виден снаружи): ключ создаётся в ней и в кэш не
+ * попадает — откат не оставит в памяти ключ, которого нет в базе. Уже закэшированный ключ берётся и так.
+ */
+export async function currentChatKey(chatId: number, tx?: Tx): Promise<ChatKey> {
   const c = current.get(chatId);
   if (c && Date.now() - c.at < TTL_MS) {
     const key = cached(chatId, c.version);
     if (key) return { version: c.version, key };
+  }
+  if (tx) {
+    let [row] = await tx`select version, wrapped_dek from keys.chat_keys where chat_id = ${chatId} order by version desc limit 1`;
+    if (!row) {
+      const kms = getKms();
+      const wrapped = await kms.wrap(randomKey());
+      [row] = await tx`insert into keys.chat_keys (chat_id, version, wrapped_dek, kek_id) values (${chatId}, 1, ${Buffer.from(wrapped)}, ${kms.id})
+        on conflict (chat_id, version) do update set chat_id = excluded.chat_id returning version, wrapped_dek`;
+    }
+    return { version: row.version as number, key: await importAesKey(await getKms().unwrap(new Uint8Array(row.wrapped_dek as Uint8Array))) };
   }
   return once(`c:${chatId}`, async () => {
     let [row] = await sql`select version, wrapped_dek from keys.chat_keys where chat_id = ${chatId} order by version desc limit 1`;

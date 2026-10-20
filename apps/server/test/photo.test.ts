@@ -11,7 +11,7 @@ import { PHOTO_PREVIEW_SIDE } from '../src/jobs/photo';
 import { SLOW_KINDS } from '../src/jobs/kinds';
 import { claim, enqueue } from '../src/jobs/queue';
 import { drainJobs } from '../src/jobs/worker';
-import { journalOf, resetDb, uploadFile } from './helpers';
+import { journalOf, opened, resetDb, uploadFile } from './helpers';
 
 const server = createServer({ port: 0 });
 const base = `http://localhost:${server.port}`;
@@ -51,7 +51,7 @@ test('a big photo gets a small preview (longer side 480): messages, clients and 
   expect(v).toMatchObject({ name: 'preview', mime: 'image/webp', width: PHOTO_PREVIEW_SIDE, height: 360 });
   expect(Number(v.size)).toBeLessThan(bytes.length);
 
-  const [m] = await sql`select attachment from messages where id = ${message.id}`;
+  const [m] = await opened(await sql`select * from messages where id = ${message.id}`);
   const att = m.attachment as Attachment;
   expect(att.thumb).toBe('data:image/jpeg;base64,AAAA');
   expect(att.preview).toMatchObject({ name: 'preview', w: 480, h: 360 });

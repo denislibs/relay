@@ -4,6 +4,7 @@ import {
 } from '@relay/protocol';
 import { sql, type Tx } from '../db';
 import { GROUP_MEMBERS_MAX, GROUP_TITLE_MAX, toMessage } from './chats';
+import { contentColumns, openRows } from './messageContent';
 import { DomainError } from './errors';
 import { appendUpdates, fanOut } from './journal';
 import { nameForSql } from './profile';
@@ -29,10 +30,12 @@ async function names(db: Db, ids: number[]): Promise<{ id: number; name: string 
 
 /** Служебное сообщение группы: в ленту всем участникам (и extra — тем, кого уже нет, чтобы увидели «вас удалили»). */
 export async function serviceMessage(tx: Tx, chatId: number, senderId: number, type: ServiceType, data: ServiceData = {}, body = ''): Promise<Message> {
+  const clientId = crypto.randomUUID();
+  const c = await contentColumns(chatId, clientId, { body, entities: null, todo: null, blocks: null, link: null, attachment: null }, tx);
   const [row] = await tx`
-    insert into messages (chat_id, sender_id, client_id, kind, body, service_type, service_data)
-    values (${chatId}, ${senderId}, ${crypto.randomUUID()}, 'text', ${body}, ${type}, ${Object.keys(data).length ? tx.json(data as never) : null}) returning *`;
-  const message = toMessage(row);
+    insert into messages (chat_id, sender_id, client_id, kind, body, service_type, service_data, content)
+    values (${chatId}, ${senderId}, ${clientId}, 'text', ${c.body}, ${type}, ${Object.keys(data).length ? tx.json(data as never) : null}, ${c.content}) returning *`;
+  const message = toMessage((await openRows([row], '', tx))[0]);
   await fanOut(tx, await membersOf(tx, chatId), { type: 'newMessage', message });
   return message;
 }

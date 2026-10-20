@@ -5,16 +5,18 @@ import { sql } from '../db';
 import { tabWhere, toMessage, withReactions } from './chats';
 import { DomainError } from './errors';
 import { nameForSql } from './profile';
+import { openRows, rowMatches, scanMatching, SCAN_BATCH } from './messageContent';
 
 export interface GlobalHit { message: Message; chatTitle: string | null; chatKind: 'direct' | 'group' }
 
 const like = (q: string) => '%' + q.replace(/[\\%_]/g, (c) => '\\' + c) + '%';
 
-/** Текстовый фильтр вкладки: у вложений — имя файла, название, исполнитель и подпись; у ссылок — текст сообщения. */
+/** Текстовый фильтр вкладки: у вложений — имя файла, название, исполнитель и подпись; у ссылок — текст сообщения.
+ *  Зашифрованные строки проходят в кандидаты — их фильтрует rowMatches после расшифровки. */
 function textWhere(tab: MediaTab, q: string) {
   const p = like(q);
-  if (tab === 'link') return sql`and body ilike ${p}`;
-  return sql`and (body ilike ${p} or attachment->>'name' ilike ${p} or attachment->>'title' ilike ${p} or attachment->>'performer' ilike ${p})`;
+  if (tab === 'link') return sql`and (content is not null or body ilike ${p})`;
+  return sql`and (content is not null or body ilike ${p} or attachment->>'name' ilike ${p} or attachment->>'title' ilike ${p} or attachment->>'performer' ilike ${p})`;
 }
 
 /**
@@ -25,7 +27,8 @@ export async function searchMedia(userId: number, tab: MediaTab, opts: { q?: str
   const q = (opts.q ?? '').trim();
   if (q.length > 100) throw new DomainError('too_long');
   const limit = Math.min(Math.max(opts.limit ?? 40, 1), 100);
-  const rows = await sql`
+  const take = q ? SCAN_BATCH : limit + 1;
+  const batch = (before: number | null) => sql`
     select m.*, c.kind as chat_kind,
            coalesce(c.title, (select ${nameForSql(userId)}
                                 from chat_members pm join users u on u.id = pm.user_id
@@ -34,15 +37,17 @@ export async function searchMedia(userId: number, tab: MediaTab, opts: { q?: str
              where chat_id in (select chat_id from chat_members where user_id = ${userId})
                and not deleted and ${tabWhere(tab)}
                ${q ? textWhere(tab, q) : sql``}
-               ${opts.before ? sql`and id < ${opts.before}` : sql``}
-             order by id desc limit ${limit + 1}) m
+               ${before ? sql`and id < ${before}` : sql``}
+             order by id desc limit ${take}) m
       join chats c on c.id = m.chat_id
      order by m.id desc`;
-  const page = rows.slice(0, limit);
+  let page: Record<string, unknown>[], hasMore: boolean;
+  if (q) ({ rows: page, more: hasMore } = await scanMatching(batch, (r) => rowMatches(r, q, tab === 'link'), limit, opts.before ?? null));
+  else { const rows = await batch(opts.before ?? null); page = await openRows(rows.slice(0, limit)); hasMore = rows.length > limit; }
   const messages = await withReactions(page.map(toMessage));
   return {
     hits: messages.map((message, i) => ({ message, chatTitle: (page[i].chat_title as string | null) ?? null, chatKind: page[i].chat_kind as 'direct' | 'group' })),
-    hasMore: rows.length > limit,
+    hasMore,
   };
 }
 

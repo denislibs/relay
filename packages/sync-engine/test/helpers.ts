@@ -1,3 +1,5 @@
+import { resetChatKeyCache } from '../../../apps/server/src/crypto/chatKeys';
+import { openRows } from '../../../apps/server/src/domain/messageContent';
 import { sql } from '../../../apps/server/src/db';
 import { processAlive } from '../../../apps/server/src/domain/liveRegistry';
 import { flushOwn } from '../../../apps/server/src/valkey';
@@ -9,6 +11,7 @@ import type { EngineConfig, Patch, Query, Item } from '../src/types';
 export { msg } from './fixtures';
 
 export async function resetDb(): Promise<void> {
+  resetChatKeyCache();   // номера чатов после truncate начинаются заново — старые ключи в памяти не к ним
   await flushOwn();   // онлайн и прочее эфемерное прошлых тестов
   await processAlive();   // ключ «процесс жив» стёрт вместе с остальным — серверы этого процесса снова в сумме онлайна
   // как resetDb сервера: системного пользователя «Relay» (миграция 110_service) не трогаем — база общая с тестами сервера
@@ -66,3 +69,6 @@ export function watchInto(engine: Engine, q: Query) {
     },
   };
 }
+
+/** Строки messages, как их видит сервер: содержимое — из шифра. */
+export const opened = <T extends Record<string, unknown>>(rows: T[]): Promise<T[]> => openRows(rows);

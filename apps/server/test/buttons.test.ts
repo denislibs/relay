@@ -7,7 +7,7 @@ import { announceLogin, terminateSession } from '../src/domain/sessions';
 import { LOGIN_CONFIRMED, LOGIN_ENDED, LOGIN_GONE, LOGIN_OTHERS_ENDED, serviceChatId } from '../src/domain/service';
 import { toMessage } from '../src/domain/chats';
 import { handleFrame } from '../src/ws';
-import { journalOf, makeChat, makeUser, resetDb } from './helpers';
+import { journalOf, makeChat, makeUser, opened, resetDb } from './helpers';
 
 beforeEach(resetDb);
 
@@ -19,7 +19,7 @@ async function setup() {
   const fresh = (await sessionFromToken(freshToken))!.sessionId;
   await announceLogin(userId, freshToken);
   const chatId = await serviceChatId(sql, userId);
-  const alert = async (): Promise<Message> => toMessage((await sql`select * from messages where chat_id = ${chatId} and service_type = 'new_login' order by id desc limit 1`)[0]);
+  const alert = async (): Promise<Message> => toMessage((await opened(await sql`select * from messages where chat_id = ${chatId} and service_type = 'new_login' order by id desc limit 1`))[0]);
   const m = await alert();
   return { userId, old, fresh, chatId, id: m.id, alert };
 }

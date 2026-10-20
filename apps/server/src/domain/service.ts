@@ -1,6 +1,7 @@
 import type { Entity, Message, MessageButton, ServiceType } from '@relay/protocol';
 import { sql, type Tx } from '../db';
 import { toMessage } from './chats';
+import { contentColumns, openRows, updateContent } from './messageContent';
 import { fanOut } from './journal';
 import { enqueue } from '../jobs/queue';
 
@@ -39,14 +40,17 @@ export async function isServiceChat(db: Db, chatId: number): Promise<boolean> {
 export async function postService(tx: Tx, userId: number, msg: { type: ServiceType; body: string; entities?: Entity[]; buttons?: MessageButton[][] }, opts: { push?: boolean } = {}): Promise<Message> {
   const chatId = await serviceChatId(tx, userId);
   const sys = await systemUserId();
+  const clientId = crypto.randomUUID();
+  // коды входа и прочий текст — шифром ключа служебного чата
+  const c = await contentColumns(chatId, clientId, { body: msg.body, entities: msg.entities?.length ? msg.entities : null, todo: null, blocks: null, link: null, attachment: null }, tx);
   const [row] = await tx`
-    insert into messages (chat_id, sender_id, client_id, kind, body, entities, service_type, buttons)
-    values (${chatId}, ${sys}, ${crypto.randomUUID()}, 'text', ${msg.body}, ${msg.entities?.length ? tx.json(msg.entities as never) : null}, ${msg.type},
-            ${msg.buttons?.length ? tx.json(msg.buttons as never) : null})
+    insert into messages (chat_id, sender_id, client_id, kind, body, entities, service_type, buttons, content)
+    values (${chatId}, ${sys}, ${clientId}, 'text', ${c.body}, ${c.entities?.length ? tx.json(c.entities as never) : null}, ${msg.type},
+            ${msg.buttons?.length ? tx.json(msg.buttons as never) : null}, ${c.content})
     returning *`;
-  const message = toMessage(row);
+  const message = toMessage((await openRows([row], '', tx))[0]);
   await fanOut(tx, [userId], { type: 'newMessage', message });
-  if (opts.push !== false) await enqueue(tx, 'push.message', { message });
+  if (opts.push !== false) await enqueue(tx, 'push.message', { chatId, id: message.id });
   await enqueue(tx, 'search.sync', { id: message.id });   // коды входа обработчик сам не проиндексирует
   return message;
 }
@@ -95,16 +99,19 @@ export async function resolveLoginAlerts(tx: Tx, userId: number, ids: number[], 
   const [svc] = await tx`select chat_id from service_chats where user_id = ${userId}`;
   if (!svc) return;
   const rows = await tx`
-    select id, body, entities, buttons from messages
+    select id, buttons from messages
      where chat_id = ${svc.chat_id} and service_type = 'new_login' and buttons is not null and not deleted
      for update`;
   for (const r of rows) {
     const sid = loginSessionOf(r.buttons);
     if (sid == null || !ids.includes(sid)) continue;
-    const body = `${r.body as string}\n\n${note}`;
-    const entities: Entity[] = [...((r.entities as Entity[] | null) ?? []), { type: 'italic', offset: body.length - note.length, length: note.length }];
     const id = Number(r.id);
-    await tx`update messages set body = ${body}, entities = ${tx.json(entities as never)}, buttons = null where chat_id = ${svc.chat_id} and id = ${id}`;
+    let body = '', entities: Entity[] = [];
+    await updateContent(tx, Number(svc.chat_id), id, (c) => {
+      body = `${c.body}\n\n${note}`;
+      entities = [...((c.entities as Entity[] | null) ?? []), { type: 'italic', offset: body.length - note.length, length: note.length }];
+      return { body, entities };
+    }, () => ({ buttons: null }));
     await fanOut(tx, [userId], { type: 'messageMarkup', chatId: Number(svc.chat_id), id, body, entities, buttons: null });
     await enqueue(tx, 'search.sync', { id });
   }

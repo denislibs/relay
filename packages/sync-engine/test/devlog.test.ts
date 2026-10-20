@@ -8,7 +8,7 @@ import { Engine } from '../src/engine';
 import { SCHEMA_VERSION } from '../src/schema';
 import { fromMessagePort, HostCore, type FromHost, type ToHost } from '../src/host-core';
 import type { EngineConfig, Item } from '../src/types';
-import { msg, resetDb, startTestServer, watchInto } from './helpers';
+import { msg, opened, resetDb, startTestServer, watchInto } from './helpers';
 
 const srv = await startTestServer();
 afterAll(() => srv.stop());
@@ -216,7 +216,7 @@ test('offline: messages pile up in the outbox and HTTP fails like no network; tu
 
   await dev(ea, 'offline', { on: false });
   await feed.until((l) => l.length === 2 && l.every((m) => m.status === 'sent'), 4000);
-  const rows = await sql`select body from messages where chat_id = ${chatId} order by id`;
+  const rows = await opened(await sql`select * from messages where chat_id = ${chatId} order by id`);
   expect(rows.map((r) => r.body)).toEqual(['раз', 'два']);
 });
 
@@ -427,7 +427,7 @@ test('offline turned on mid-request: the request that reached the server complet
   await feed.until((l) => l.find((m) => m.body === 'в полёте')?.status === 'sent', 3000);
   await until(() => ea.status().phase === 'offline', 3000);
   expect(feed.list().find((m) => m.body === 'после офлайна')?.status).toBe('pending');
-  const rows = await sql`select body from messages where chat_id = ${chatId} order by id`;
+  const rows = await opened(await sql`select * from messages where chat_id = ${chatId} order by id`);
   expect(rows.map((r) => r.body)).toEqual(['в полёте']);
   await dev(ea, 'netProfile', { profile: null });
   await dev(ea, 'offline', { on: false });

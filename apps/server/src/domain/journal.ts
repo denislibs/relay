@@ -1,6 +1,7 @@
 import { normalizeEntities, type Entity, type JournalEntry, type Update } from '@relay/protocol';
 import { sql, type Tx } from '../db';
 import { toMessage } from './chats';
+import { openDrafts, openRows } from './messageContent';
 
 export const MAX_BATCH = 500;
 
@@ -45,14 +46,14 @@ async function hydrate(userId: number, rows: { seq: number; payload: Stored }[])
   const drafts = rows.filter((r) => 'ref' in r.payload && r.payload.type === 'draft') as { payload: { chatId: number } }[];
   const byKey = new Map<string, Record<string, unknown>>();
   if (refs.length) {
-    const msgs = await sql`
+    const msgs = await openRows(await sql`
       select * from messages
-       where (chat_id, id) in (select * from unnest(${refs.map((r) => r.payload.chatId)}::bigint[], ${refs.map((r) => r.payload.id)}::bigint[]))`;
+       where (chat_id, id) in (select * from unnest(${refs.map((r) => r.payload.chatId)}::bigint[], ${refs.map((r) => r.payload.id)}::bigint[]))`);
     for (const m of msgs) byKey.set(m.chat_id + ':' + m.id, m);
   }
   const draftBy = new Map<number, Record<string, unknown>>();
   if (drafts.length) {
-    const ds = await sql`select chat_id, text, entities, updated_at from drafts where user_id = ${userId} and chat_id = any(${[...new Set(drafts.map((d) => d.payload.chatId))]}::bigint[])`;
+    const ds = await openDrafts(await sql`select user_id, chat_id, text, entities, content, updated_at from drafts where user_id = ${userId} and chat_id = any(${[...new Set(drafts.map((d) => d.payload.chatId))]}::bigint[])`);
     for (const d of ds) draftBy.set(Number(d.chat_id), d);
   }
   const out = rows.map(({ seq, payload: p }): JournalEntry => {

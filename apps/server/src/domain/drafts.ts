@@ -3,6 +3,7 @@ import { sql, type Tx } from '../db';
 import { assertMember } from './chats';
 import { DomainError } from './errors';
 import { appendUpdates } from './journal';
+import { openDrafts, sealDraft } from './messageContent';
 
 const MAX_DRAFT = 4096;
 
@@ -11,15 +12,17 @@ export async function saveDraft(userId: number, chatId: number, text: string, ra
   if (text.length > MAX_DRAFT) throw new DomainError('too_long');
   return sql.begin(async (tx) => {
     await assertMember(tx, chatId, userId);
-    const [prev] = await tx`select text, entities from drafts where user_id = ${userId} and chat_id = ${chatId}`;
+    const [prev] = await tx`select user_id, chat_id, text, entities, content from drafts where user_id = ${userId} and chat_id = ${chatId}`;
+    if (prev) await openDrafts([prev]);
     const next = text.trim() ? text : '';
     const entities = next ? normalizeEntities(next, rawEntities) : [];
     if ((prev?.text ?? '') === next && JSON.stringify(normalizeEntities(next, prev?.entities)) === JSON.stringify(entities)) return { at: null, changed: false };
     let at: string | null = null;
     if (next) {
+      const d = await sealDraft(userId, chatId, next, entities, tx);   // текст черновика — шифром ключа чата
       const [row] = await tx`
-        insert into drafts (user_id, chat_id, text, entities) values (${userId}, ${chatId}, ${next}, ${entities.length ? sql.json(entities as never) : null})
-        on conflict (user_id, chat_id) do update set text = excluded.text, entities = excluded.entities, updated_at = now()
+        insert into drafts (user_id, chat_id, text, entities, content) values (${userId}, ${chatId}, ${d.text}, ${d.entities ? sql.json(d.entities as never) : null}, ${d.content})
+        on conflict (user_id, chat_id) do update set text = excluded.text, entities = excluded.entities, content = excluded.content, updated_at = now()
         returning updated_at`;
       at = new Date(row.updated_at as string).toISOString();
     } else {

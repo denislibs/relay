@@ -4,6 +4,7 @@ import { nameForSql } from './profile';
 import { assertMember, toMessage, withReactions } from './chats';
 import { DomainError } from './errors';
 import { searchIds, searchReady } from '../search/messagesIndex';
+import { openRows, rowMatches, scanMatching, SCAN_BATCH } from './messageContent';
 
 export interface SearchHit { message: Message; chatTitle: string | null }
 
@@ -40,6 +41,7 @@ export async function searchMessages(userId: number, q: string, opts: { chatId?:
       join chat_members cm on cm.chat_id = m.chat_id and cm.user_id = ${userId}
       join chats c on c.id = m.chat_id
      where m.id = any(${page}::bigint[]) and not m.deleted`;
+  await openRows(rows);
   const byId = new Map(rows.map((r) => [Number(r.id), r]));
   const ordered = page.map((id) => byId.get(id)).filter((r): r is NonNullable<typeof r> => !!r);
   const messages = await withReactions(ordered.map(toMessage));
@@ -58,7 +60,8 @@ export async function searchPostgres(userId: number, q: string, opts: { chatId?:
   if (opts.chatId) await assertMember(sql, opts.chatId, userId);
   const limit = Math.min(Math.max(opts.limit ?? 30, 1), 100);
   const pattern = '%' + text.replace(/[\\%_]/g, (c) => '\\' + c) + '%';
-  const rows = await sql`
+  // текст в шифре: зашифрованные строки — кандидаты, фильтр после расшифровки; старые открытые — подстрокой в SQL
+  const { rows: page, more } = await scanMatching((before) => sql`
     select m.*,
            coalesce(c.title, (select ${nameForSql(userId)}
                                 from chat_members pm join users u on u.id = pm.user_id
@@ -67,15 +70,13 @@ export async function searchPostgres(userId: number, q: string, opts: { chatId?:
       join chat_members cm on cm.chat_id = m.chat_id and cm.user_id = ${userId}
       join chats c on c.id = m.chat_id
      where not m.deleted
-       and (m.body ilike ${pattern}
+       and (m.content is not null or m.body ilike ${pattern}
             or (m.attachment is not null   -- то же выражение, что в индексе messages_attachment_trgm
                 and (coalesce(m.attachment->>'name', '') || E'\n' || coalesce(m.attachment->>'title', '') || E'\n' || coalesce(m.attachment->>'performer', '')) ilike ${pattern}))
        ${opts.chatId ? sql`and m.chat_id = ${opts.chatId}` : sql``}
-       ${opts.beforeId ? sql`and m.id < ${opts.beforeId}` : sql``}
+       ${before ? sql`and m.id < ${before}` : sql``}
      order by m.id desc
-     limit ${limit + 1}`;
-  const more = rows.length > limit;
-  const page = rows.slice(0, limit);
+     limit ${SCAN_BATCH}`, (r) => rowMatches(r, text), limit, opts.beforeId ?? null);
   const messages = await withReactions(page.map(toMessage));
   return { hits: messages.map((message, i) => ({ message, chatTitle: (page[i].chat_title as string | null) ?? null })), hasMore: more };
 }

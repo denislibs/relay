@@ -10,7 +10,7 @@ import '../src/jobs/kinds';
 import { moovFirst, PREVIEW_MAX_BYTES, probe } from '../src/jobs/video';
 import { claim, enqueue } from '../src/jobs/queue';
 import { drainJobs } from '../src/jobs/worker';
-import { journalOf, resetDb, uploadFile } from './helpers';
+import { journalOf, opened, resetDb, uploadFile } from './helpers';
 
 const server = createServer({ port: 0 });
 const base = `http://localhost:${server.port}`;
@@ -64,7 +64,7 @@ test('moov-at-end 1080p upload: faststart original, a ≤1 MB 360p preview and a
   const [del] = await sql`select payload, run_at > now() + interval '1 hour' as later from jobs where kind = 'storage.delete'`;
   expect(del).toMatchObject({ payload: { key: up.id }, later: true });
 
-  const [m] = await sql`select attachment from messages where id = ${message.id}`;
+  const [m] = await opened(await sql`select * from messages where id = ${message.id}`);
   const att = m.attachment as Attachment;
   expect(att.thumb).toBe('data:image/jpeg;base64,AAAA');
   expect(att.spoiler).toBe(true);

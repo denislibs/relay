@@ -1,8 +1,10 @@
+import { resetChatKeyCache } from '../src/crypto/chatKeys';
 import { sql } from '../src/db';
 import { processAlive } from '../src/domain/liveRegistry';
 import { flushOwn } from '../src/valkey';
 
 export async function resetDb(): Promise<void> {
+  resetChatKeyCache();   // номера чатов после truncate начинаются заново — старые ключи в памяти не к ним
   await flushOwn();   // онлайн и прочее эфемерное прошлых тестов
   await processAlive();   // ключ «процесс жив» стёрт вместе с остальным — серверы этого процесса снова в сумме онлайна
   await sql`truncate login_attempts, login_pending, srp_challenges, qr_logins, webauthn_challenges, sessions, chats, chat_members, messages, user_seq, updates,
@@ -97,3 +99,7 @@ export async function journalOf(userId: number, type?: Update['type']): Promise<
   const { items } = await getUpdates(userId, 0, 100_000);
   return items.map((i) => i.update).filter((u) => !type || u.type === type);
 }
+
+import { openRows } from '../src/domain/messageContent';
+/** Строки messages, как их видит сервер: содержимое — из шифра (для проверок текста в тестах). */
+export const opened = <T extends Record<string, unknown>>(rows: T[]): Promise<T[]> => openRows(rows);

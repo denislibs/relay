@@ -1,6 +1,6 @@
 import { sql } from './db';
 import { SLOW_KINDS } from './jobs/kinds';
-import { ensurePeriodic } from './jobs/queue';
+import { enqueue, ensurePeriodic } from './jobs/queue';
 import { startWorker } from './jobs/worker';
 import { scheduleReindexIfStale } from './search/messagesIndex';
 
@@ -8,6 +8,8 @@ import { scheduleReindexIfStale } from './search/messagesIndex';
 await ensurePeriodic('sessions.sweep');
 await ensurePeriodic('uploads.sweep');
 await ensurePeriodic('storage.gc');
+// строки до шифрования (messageContent.ts): одна задача на запуск, дубль не встанет
+await enqueue(sql, 'crypto.encrypt', {}, { dedupeKey: 'crypto.encrypt' });
 // индекс поиска не той версии или ещё не построен — перестройка (до её конца поиск идёт по Postgres)
 await scheduleReindexIfStale().catch((e) => console.error('search: cannot schedule reindex:', e));
 

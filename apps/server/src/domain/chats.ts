@@ -3,6 +3,7 @@ import { sql, type Tx } from '../db';
 import { muteFromDb } from './chatNotify';
 import { DomainError } from './errors';
 import { fanOut } from './journal';
+import { contentColumns, openDrafts, openRows } from './messageContent';
 import { nameForSql } from './profile';
 import { summaryFromRow } from './groupRights';
 import type { GroupInfo, MyMembership } from '@relay/protocol';
@@ -42,10 +43,12 @@ export async function createGroup(creatorId: number, input: { title?: unknown; m
     const members = [creatorId, ...ids];
     await tx`insert into chat_members (chat_id, user_id, inviter_id) select ${chat.id}, unnest(${ids}::bigint[]), ${creatorId}`;
     await tx`insert into chat_members (chat_id, user_id, role) values (${chat.id}, ${creatorId}, 'owner')`;
+    const clientId = crypto.randomUUID();
+    const c = await contentColumns(Number(chat.id), clientId, { body: title, entities: null, todo: null, blocks: null, link: null, attachment: null }, tx);
     const [row] = await tx`
-      insert into messages (chat_id, sender_id, client_id, kind, body, service_type)
-      values (${chat.id}, ${creatorId}, ${crypto.randomUUID()}, 'text', ${title}, 'group_created') returning *`;
-    const message = toMessage(row);
+      insert into messages (chat_id, sender_id, client_id, kind, body, service_type, content)
+      values (${chat.id}, ${creatorId}, ${clientId}, 'text', ${c.body}, 'group_created', ${c.content}) returning *`;
+    const message = toMessage((await openRows([row], '', tx))[0]);
     await fanOut(tx, members, { type: 'newMessage', message });
     return { chatId: Number(chat.id), message };
   });
@@ -183,7 +186,7 @@ export async function listChats(userId: number, opts: ListOpts = {}): Promise<Ch
            case when c.kind = 'group' then (select count(*)::int from chat_members gm where gm.chat_id = c.id) end as g_members,
            case when c.kind = 'group' then (select count(*)::int from chat_join_requests jr where jr.chat_id = c.id) end as g_pending,
            lm.id as m_id, lm.chat_id as m_chat_id, lm.sender_id as m_sender_id, lm.client_id as m_client_id,
-           lm.body as m_body, lm.kind as m_kind, lm.attachment as m_attachment, lm.reply_to_id as m_reply_to_id, lm.created_at as m_created_at, lm.edited_at as m_edited_at, lm.deleted as m_deleted, lm.entities as m_entities, lm.service_type as m_service_type, lm.service_data as m_service_data, lm.todo as m_todo, lm.fwd_from as m_fwd_from, lm.buttons as m_buttons, lm.sticker as m_sticker,
+           lm.body as m_body, lm.kind as m_kind, lm.attachment as m_attachment, lm.reply_to_id as m_reply_to_id, lm.created_at as m_created_at, lm.edited_at as m_edited_at, lm.deleted as m_deleted, lm.entities as m_entities, lm.service_type as m_service_type, lm.service_data as m_service_data, lm.todo as m_todo, lm.fwd_from as m_fwd_from, lm.buttons as m_buttons, lm.sticker as m_sticker, lm.content as m_content,
            (select count(*) from messages m
              where m.chat_id = c.id and m.id > cm.last_read_id and m.id >= cm.history_from and m.sender_id <> ${userId})::int as unread,
            (select json_build_object('id', u.id, 'name', ${nameForSql(userId)}, 'system', u.system,   -- контактное имя — только владельцу
@@ -192,7 +195,7 @@ export async function listChats(userId: number, opts: ListOpts = {}): Promise<Ch
              where c.kind = 'direct' and pm.chat_id = c.id and pm.user_id <> ${userId} limit 1) as peer,
            (select coalesce(min(om.last_read_id), 0) from chat_members om where om.chat_id = c.id and om.user_id <> ${userId}) as peer_read_up_to,
            date_trunc('milliseconds', coalesce(lm.created_at, c.created_at)) as sort_at,
-           (select json_build_object('text', d.text, 'at', d.updated_at, 'entities', d.entities) from drafts d where d.user_id = ${userId} and d.chat_id = c.id) as draft,
+           (select json_build_object('text', d.text, 'at', d.updated_at, 'entities', d.entities, 'content', encode(d.content, 'base64')) from drafts d where d.user_id = ${userId} and d.chat_id = c.id) as draft,
            (select coalesce(json_agg(p.message_id order by p.message_id desc), '[]') from (select message_id from pinned_messages where chat_id = c.id order by message_id desc limit 100) p) as pinned
       from chat_members cm
       join chats c on c.id = cm.chat_id
@@ -209,6 +212,14 @@ export async function listChats(userId: number, opts: ListOpts = {}): Promise<Ch
        ${opts.archivedOnly ? sql`and cm.archived` : sql``}
      order by date_trunc('milliseconds', coalesce(lm.created_at, c.created_at)) desc, c.id desc
      ${opts.limit ? sql`limit ${opts.limit}` : sql``}`;
+  // последнее сообщение и черновик — из шифра
+  await openRows(rows, 'm_');
+  const drafts = rows.filter((r) => (r.draft as { content?: string | null } | null)?.content).map((r) => {
+    const d = r.draft as { text: string; entities: unknown; content: string };
+    return { user_id: userId, chat_id: r.id, text: d.text, entities: d.entities, content: Buffer.from(d.content, 'base64'), ref: d };
+  });
+  await openDrafts(drafts);
+  for (const d of drafts) { d.ref.text = d.text; d.ref.entities = d.entities; }
   return rows.map((r) => ({
     id: r.id as number,
     kind: r.kind as 'direct' | 'group',
@@ -240,7 +251,8 @@ export function tabWhere(tab: MediaTab) {
     case 'file': return sql`(kind = 'file' and coalesce(attachment->>'mime', '') not like 'video/%')`;
     case 'audio': return sql`kind = 'audio'`;
     case 'voice': return sql`kind in ('voice', 'round')`;
-    case 'link': return sql`(service_type is null and (body ~* '(https?://|www\\.)[^\\s]' or coalesce(entities, '[]'::jsonb) @> '[{"type":"link"}]'))`;
+    // текст — в шифре: признак has_link ставится при записи; строки до шифрования — прежней регуляркой
+    case 'link': return sql`(service_type is null and (has_link or (content is null and (body ~* '(https?://|www\\.)[^\\s]' or coalesce(entities, '[]'::jsonb) @> '[{"type":"link"}]'))))`;
   }
 }
 
@@ -255,7 +267,7 @@ export async function getChatMedia(userId: number, chatId: number, tab: MediaTab
      where chat_id = ${chatId} and not deleted and ${tabWhere(tab)} and id >= ${await historyFrom(chatId, userId)}
        ${beforeId ? sql`and id < ${beforeId}` : sql``}
      order by id desc limit ${limit + 1}`;
-  return { messages: rows.slice(0, limit).map(toMessage), hasMore: rows.length > limit };
+  return { messages: (await openRows(rows.slice(0, limit))).map(toMessage), hasMore: rows.length > limit };
 }
 
 /** Сколько всего в каждой вкладке — пустые вкладки панель не показывает (как в Telegram Web K). */
@@ -287,7 +299,7 @@ export async function getMessagesByIds(userId: number, chatId: number, ids: numb
   await assertMember(sql, chatId, userId);
   if (!ids.length) return [];
   const rows = await sql`select * from messages where chat_id = ${chatId} and id = any(${ids}::bigint[]) and id >= ${await historyFrom(chatId, userId)} order by id`;
-  return withReactions(rows.map(toMessage));
+  return withReactions((await openRows(rows)).map(toMessage));
 }
 
 /**
@@ -303,7 +315,7 @@ export async function getHistory(userId: number, chatId: number, before: number 
        where chat_id = ${chatId} and id > ${after} and id >= ${await historyFrom(chatId, userId)}
        order by id
        limit ${take + 1}`;
-    return { messages: await withReactions(up.slice(0, take).map(toMessage)), hasMore: up.length > take };
+    return { messages: await withReactions((await openRows(up.slice(0, take))).map(toMessage)), hasMore: up.length > take };
   }
   const rows = await sql`
     select * from messages
@@ -311,7 +323,7 @@ export async function getHistory(userId: number, chatId: number, before: number 
      order by id desc
      limit ${take + 1}`;
   const hasMore = rows.length > take;
-  return { messages: await withReactions(rows.slice(0, take).reverse().map(toMessage)), hasMore };
+  return { messages: await withReactions((await openRows(rows.slice(0, take).reverse())).map(toMessage)), hasMore };
 }
 
 /**

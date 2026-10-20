@@ -3,7 +3,7 @@ import { setMultipart } from '../../../apps/server/src/domain/files';
 import { listMultipart } from '../../../apps/server/src/domain/s3multipart';
 import { afterAll, afterEach, beforeEach, expect, test } from 'bun:test';
 import { Engine } from '../src/engine';
-import { resetDb, startTestServer, watchInto } from './helpers';
+import { opened, resetDb, startTestServer, watchInto } from './helpers';
 
 // Большой файл частями: 4 части параллельно, принятые — в outbox; обрыв и перезагрузка докачивают, отмена выбрасывает части.
 const MB = 1024 * 1024;
@@ -90,7 +90,7 @@ test('the connection drops mid-way: finished parts stay in the outbox; after a r
   const feed2 = watchInto(eb, { kind: 'messages', chatId, limit: 10 });
   await feed2.until((l) => l[0]?.status === 'sent', 10_000);
   expect(again.parts).toEqual([3]);
-  expect((await sql`select body from messages where chat_id = ${chatId}`).map((r: { body: string }) => r.body)).toEqual(['фильм']);
+  expect((await opened(await sql`select * from messages where chat_id = ${chatId}`)).map((r: { body: string }) => r.body)).toEqual(['фильм']);
 });
 
 test('the storage blips while the socket stays up: the upload resumes by itself, finished parts are not sent again', async () => {

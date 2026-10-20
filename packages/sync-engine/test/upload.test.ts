@@ -1,7 +1,7 @@
 import { sql } from '../../../apps/server/src/db';
 import { afterAll, afterEach, beforeEach, expect, test } from 'bun:test';
 import { Engine } from '../src/engine';
-import { resetDb, startTestServer, watchInto } from './helpers';
+import { opened, resetDb, startTestServer, watchInto } from './helpers';
 
 // Загрузка вложения: ссылка у нашего сервера → PUT прямо в хранилище → подтверждение. Подписанная ссылка нигде не остаётся.
 const srv = await startTestServer();
@@ -45,7 +45,7 @@ test('the file goes straight to the storage; the message and the local store kee
   expect(JSON.stringify(m)).not.toContain('X-Amz');
   const [row] = await sql`select status, size from attachments where id = ${id}`;
   expect([row.status, Number(row.size)]).toEqual(['ready', 8]);
-  const [msg] = await sql`select attachment from messages where chat_id = ${chatId}`;
+  const [msg] = await opened(await sql`select * from messages where chat_id = ${chatId}`);
   expect(JSON.stringify(msg.attachment)).not.toContain('X-Amz');
 });
 
@@ -58,7 +58,7 @@ test('the storage refuses (expired link) → the engine retries with a fresh lin
   await feed.until((l) => l[0]?.status === 'sent', 5000);
   expect(seen.calls).toHaveLength(2);
   expect(seen.calls[0]).not.toBe(seen.calls[1]);   // новая запись — новая ссылка
-  expect((await sql`select body from messages where chat_id = ${chatId}`).map((r: { body: string }) => r.body)).toEqual(['снова']);
+  expect((await opened(await sql`select * from messages where chat_id = ${chatId}`)).map((r: { body: string }) => r.body)).toEqual(['снова']);
 });
 
 test('the storage is unreachable → the message waits; it goes out once the storage answers again', async () => {
@@ -104,7 +104,7 @@ test('a slow upload does not hold back text; discarding the unsent file aborts i
   await feed.until((l) => l.length === 1 && l[0].body === 'текст не ждёт');
   release();
   await Bun.sleep(200);
-  expect((await sql`select body from messages where chat_id = ${chatId}`).map((r: { body: string }) => r.body)).toEqual(['текст не ждёт']);
+  expect((await opened(await sql`select * from messages where chat_id = ${chatId}`)).map((r: { body: string }) => r.body)).toEqual(['текст не ждёт']);
 });
 
 test('a file over the 2 GB limit is refused before it is queued', async () => {
