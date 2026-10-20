@@ -689,7 +689,7 @@ html[data-anim="0"] .app-chatcol, html[data-anim="0"] .app-chatcol-below, html[d
 
 /* Закреплённые под шапкой (PinnedBar.tsx) — отдельный остров, как в Telegram; лента получает место под ним */
 /* плашка закреплённого — под шапкой: лента начинается ниже на её высоту (отрицательный отступ ленты не меняем, иначе сдвиги взаимно гасятся) */
-.rl-shell:has(.app-pins) .rl-feed { padding-top: calc(var(--top-zone) + 8px + 58px); }
+.app-chatcol:has(.app-pins) .rl-feed { padding-top: calc(var(--top-zone) + 8px + 58px); }   /* своя колонка: в стеке закреп другого чата не сдвигает ленту (и липкую дату) */
 .app-pins { position: absolute; left: 0; right: 0; top: calc(100% + 10px); z-index: 2; display: flex; align-items: center; gap: 4px; height: 48px; padding: 0 6px 0 12px; border-radius: 24px;
   background: var(--raised); box-shadow: var(--tg-shadow-header); animation: rl-pbar-in 260ms cubic-bezier(.25, 1, .5, 1) both; }
 .rl-presence[data-state="closing"] .app-pins { animation: rl-pbar-out 220ms cubic-bezier(.33, 1, .68, 1) forwards; }
