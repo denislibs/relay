@@ -4,6 +4,7 @@ import type { Message } from '@relay/protocol';
 import { Engine } from '../src/engine';
 import { getAll, openDb } from '../src/idb';
 import { Store } from '../src/store';
+import { MediaLoader } from '../src/media';
 import { msg } from './fixtures';
 import { resetDb, startTestServer, watchInto } from './helpers';
 
@@ -15,6 +16,31 @@ const att = (kind: string, mime: string) => ({ id: crypto.randomUUID(), kind, mi
 const photo = (id: number, body = '') => msg({ id, chatId: CH, senderId: PEER, kind: 'photo', body, attachment: att('photo', 'image/png') });
 const fresh = async () => Store.open(await openDb('m-' + crypto.randomUUID()), ME);
 const counted = (s: Store) => { const c = s.chats.get(CH)!; c.mediaCounts = { media: 0, file: 0, audio: 0, voice: 0, link: 0 }; c.mediaCountsAt = c.knownMaxId; return c; };
+
+test('media: a failing IndexedDB read is not retried on every pass (backoff), and again after reconnect', async () => {
+  const s = await fresh();
+  let reads = 0;
+  s.loadChatMessages = async () => { reads++; throw new Error('idb broken'); };
+  const runs: Promise<unknown>[] = [];
+  let changes = 0;
+  const media = new MediaLoader(s, {
+    online: () => true, http: async () => { throw new Error('no http'); },
+    run: (fn) => { runs.push(fn().catch(() => {})); },
+    changed: () => { changes++; },
+  });
+  const q = { kind: 'media' as const, chatId: CH, tab: 'media' as const, limit: 30 };
+  media.want(q);
+  await Promise.all(runs);
+  expect(changes).toBe(1);
+  // emit → want после отказа: чтение не повторяется сразу
+  for (let i = 0; i < 5; i++) { media.want(q); await Promise.all(runs); }
+  expect(reads).toBe(1);
+  expect(media.loading(CH, 'media')).toBe(false);
+  media.reconnect();
+  media.want(q);
+  await Promise.all(runs);
+  expect(reads).toBe(2);
+});
 
 test('counts: a photo with a link in its caption counts in media and link; deletion takes it out of both', async () => {
   const s = await fresh();

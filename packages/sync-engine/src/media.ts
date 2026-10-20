@@ -62,13 +62,19 @@ export function mediaResult(store: Store, q: MediaQuery, loading: boolean): { it
   return { items, order, sig };
 }
 
+/** Пауза после отказа чтения из IndexedDB: без неё каждый проход подписок запускал бы его снова. */
+export const MEDIA_LOAD_RETRY_MS = 5000;
+
 /**
  * Загрузка для подписок media: сообщения чата из IndexedDB, счётчики (раз, пока их нет) и страница вкладки старше
- * известного, когда подписке не хватает (одна на чат и вкладку). Отказ — до переподключения не повторяем.
+ * известного, когда подписке не хватает (одна на чат и вкладку). Отказ сети — до переподключения не повторяем,
+ * отказ IndexedDB — не раньше MEDIA_LOAD_RETRY_MS.
  */
 export class MediaLoader {
   private busy = new Set<string>();
   private failed = new Set<string>();
+  /** отказ чтения из IndexedDB: ключ → когда можно снова */
+  private retryAt = new Map<string, number>();
 
   constructor(private store: Store, private deps: {
     online: () => boolean;
@@ -86,8 +92,8 @@ export class MediaLoader {
 
   loading(chatId: number, tab: MediaTab): boolean { return this.busy.has(chatId + ':' + tab) || this.busy.has('load:' + chatId); }
 
-  /** Новое подключение: отказы прошлого — спросим снова. */
-  reconnect(): void { this.failed.clear(); }
+  /** Новое подключение или сброс кэша: отказы прошлого — спросим снова. */
+  reconnect(): void { this.failed.clear(); this.retryAt.clear(); }
 
   want(q: MediaQuery): void {
     const { chatId, tab } = q;
@@ -128,12 +134,12 @@ export class MediaLoader {
   }
 
   private task(key: string, chatId: number, fn: () => Promise<void>, net = true): void {
-    if (this.busy.has(key) || this.failed.has(key)) return;
+    if (this.busy.has(key) || this.failed.has(key) || (this.retryAt.get(key) ?? 0) > Date.now()) return;
     this.busy.add(key);
     this.store.retouch(chatId);   // loading в ~media
     this.deps.run(async () => {
       try { await fn(); await this.store.flush(); }
-      catch (err) { if (net) this.failed.add(key); throw err; }
+      catch (err) { if (net) this.failed.add(key); else this.retryAt.set(key, Date.now() + MEDIA_LOAD_RETRY_MS); throw err; }
       finally { this.busy.delete(key); this.store.retouch(chatId); this.deps.changed(); }
     });
   }
