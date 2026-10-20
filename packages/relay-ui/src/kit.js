@@ -336,6 +336,38 @@ function Badge(props) {
   }, label);
 }
 
+/* ---------- RowBadge: счётчик строки чата, как в tweb ----------
+   Появление — из нуля с перелётом за размер, исчезновение — сжатие с затуханием, оба 250 мс; цвет (без звука ↔ обычный)
+   перетекает. Строка, смонтированная уже с непрочитанными (первая загрузка, прокрутка списка), показывает счётчик сразу,
+   без всплывания. Смена числа не анимируется. Уходящий счётчик держит последнее число, пока сжимается. */
+var ROW_BADGE_MS = 250;
+function RowBadge(props) {
+  var count = props.count || 0;
+  var st = useState(count > 0 ? 'on' : 'off'), phase = st[0], setPhase = st[1];
+  var last = useRef(count), timer = useRef(0), raf = useRef(0);
+  if (count > 0) last.current = count;
+  useLayoutEffect(function () {
+    cancelAnimationFrame(raf.current); clearTimeout(timer.current);
+    if (count > 0) {
+      if (phase === 'leave') setPhase('on');   // вернулся во время сжатия — переход развернётся с текущего места
+      else if (phase === 'off') {
+        setPhase('enter');   // кадр с scale(0), потом — к единице: иначе браузеру не из чего анимировать
+        raf.current = requestAnimationFrame(function () { raf.current = requestAnimationFrame(function () { setPhase('on'); }); });
+      }
+    } else if (phase === 'on' || phase === 'enter') {
+      setPhase('leave');
+      timer.current = setTimeout(function () { setPhase('off'); }, ROW_BADGE_MS);
+    }
+  }, [count > 0]);
+  useEffect(function () { return function () { cancelAnimationFrame(raf.current); clearTimeout(timer.current); }; }, []);
+  if (phase === 'off') return null;
+  var n = last.current, label = n > 999 ? '999+' : String(n);
+  return h('span', {
+    class: cx('rl-badge rl-badge-row', props.muted && 'rl-badge-muted', phase === 'on' && 'is-on', phase === 'leave' && 'is-leave'),
+    'aria-label': phase === 'leave' ? undefined : label + ' непрочитанных', 'aria-hidden': phase === 'leave' ? 'true' : undefined
+  }, label);
+}
+
 /* ---------- Chip ---------- */
 function Chip(props) {
   var rest = omit(props, ['active', 'count', 'children', 'className', 'class']);
@@ -404,7 +436,7 @@ function ChatRow(props) {
           props.mentioned ? h('span', { class: 'rl-row-at', 'aria-label': 'Вас упомянули' }, '@') : null,
           props.muted ? h(Icon, { name: 'bellOff', size: 16, title: 'Без звука' }) : null,
           props.pinned ? h(Icon, { name: 'pinFilled', size: 16, title: 'Закреплён', class: 'rl-row-pin' }) : null,   // pin-filled
-          unread > 0 ? h(Badge, { count: unread, muted: props.muted }) : null))));
+          h(RowBadge, { count: unread, muted: props.muted })))));
 }
 
 /* ---------- ArchivedRow ---------- */
@@ -1567,4 +1599,4 @@ function ScrollToBottom(props) {
 }
 
 
-export { WebPage, MsgLine, ForwardTitle, peerTone, RelayLogo, Verified, ArchivedRow, ReplyQuote, ReactionChips, cx, chain, ripple, reducedMotion, omit, fmtTime, makeWave, ICONS, Icon, Button, IconButton, Avatar, Badge, Chip, ChatRow, ChatRowSkeleton, Bubble, MessageStatus, TypingIndicator, DateDivider, Banner, NavRail, Checkbox, Toast, Card, Steps, MediaArt, ProgressRing, Waveform, VoiceMessage, VoiceRecorder, MediaBubble, MediaPolicy, mediaHeld, FileBubble, MediaThumb, MediaViewer, Switch, PanelHeader, ProfileHeader, ActionTile, InfoRow, SettingsIcon, ReadMore, Presence, useMinVisible, LazyImage, LazyRoot, lazyObserve, lazyRoots, FlipList, SyncIndicator, LinearProgress, EmptyState, ScrollToBottom };
+export { RowBadge, WebPage, MsgLine, ForwardTitle, peerTone, RelayLogo, Verified, ArchivedRow, ReplyQuote, ReactionChips, cx, chain, ripple, reducedMotion, omit, fmtTime, makeWave, ICONS, Icon, Button, IconButton, Avatar, Badge, Chip, ChatRow, ChatRowSkeleton, Bubble, MessageStatus, TypingIndicator, DateDivider, Banner, NavRail, Checkbox, Toast, Card, Steps, MediaArt, ProgressRing, Waveform, VoiceMessage, VoiceRecorder, MediaBubble, MediaPolicy, mediaHeld, FileBubble, MediaThumb, MediaViewer, Switch, PanelHeader, ProfileHeader, ActionTile, InfoRow, SettingsIcon, ReadMore, Presence, useMinVisible, LazyImage, LazyRoot, lazyObserve, lazyRoots, FlipList, SyncIndicator, LinearProgress, EmptyState, ScrollToBottom };
