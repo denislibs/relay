@@ -229,7 +229,7 @@ function Icon(props) {
         filled.cut.map(function (d, i) { return h('path', { key: i, d: d, stroke: '#000', 'stroke-width': sw0 }); }))) : null,
       // заливка — по контуру пака, обводка лишь чуть скругляет углы (с полной обводкой 1.8 фигуры раздувались — «жирные»)
       h('g', { mask: filled.cut ? 'url(#' + id.current + ')' : undefined, fill: 'currentColor', 'stroke-width': 0.5 }, filled.fill.map(function (d, i) { return h('path', { key: i, d: d }); })),
-      (filled.extra || []).map(function (d, i) { return h('path', { key: 'x' + i, d: d }); }));
+      (filled.extra || []).map(function (d, i) { return h('path', { key: 'x' + i, d: d, 'stroke-width': filled.extraWidth }); }));
   }
   // пак (Messenger icon pack v3): готовые внутренности SVG
   var pack = PACK_ICONS[name];
