@@ -58,13 +58,16 @@ register('uploads.sweep', async () => {
   return { again: { inSec: SWEEP_EVERY_SEC } };
 });
 
+/** Задачи с ffmpeg — каждая своим циклом воркера с малым параллелизмом (worker.ts): не задерживают push и поиск. */
+export const SLOW_KINDS = { video: ['video.process'], photo: ['photo.process'] };
+
 // превью ссылки: страница грузится вне отправки — сообщение уже в ленте, превью дорисуется
 // видео-медиа после загрузки: faststart, ролик для ленты, 720p (jobs/video.ts); отдельный цикл воркера с малым параллелизмом
 register('video.process', async (p: { id: string }) => {
   await processVideo(p);
 });
 
-// фото и картинка-файл после загрузки: уменьшенная копия для сетки «Медиа» (jobs/photo.ts); секунды — в общем цикле
+// фото и картинка-файл после загрузки: уменьшенная копия для сетки «Медиа» (jobs/photo.ts); свой цикл воркера
 register('photo.process', async (p: { id: string }) => {
   await processPhoto(p);
 });

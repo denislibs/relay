@@ -1,5 +1,5 @@
 import { sql } from './db';
-import './jobs/kinds';
+import { SLOW_KINDS } from './jobs/kinds';
 import { ensurePeriodic } from './jobs/queue';
 import { startWorker } from './jobs/worker';
 import { scheduleReindexIfStale } from './search/messagesIndex';
@@ -14,10 +14,11 @@ await scheduleReindexIfStale().catch((e) => console.error('search: cannot schedu
 // Процесс-воркер: выполняет задачи из jobs. Можно запускать несколько — skip locked делит работу.
 // Видео (ffmpeg, минуты на файл) — своим циклом: не задерживает пачку остальных задач, параллельно не больше
 // VIDEO_CONCURRENCY на процесс, аренда час (дольше одного запуска ffmpeg, см. jobs/video.ts).
-const LONG = ['video.process'];
-const main = startWorker({ concurrency: Number(process.env.WORKER_CONCURRENCY ?? 10), kinds: { except: LONG } });
-const video = startWorker({ concurrency: Number(process.env.VIDEO_CONCURRENCY ?? 1), leaseSec: 3600, kinds: { only: LONG } });
-const worker = { stop: () => Promise.all([main.stop(), video.stop()]) };
+// Превью фото (ffmpeg, секунды) — тоже своим циклом, по PHOTO_CONCURRENCY: поток загрузок фото не забивает общий.
+const main = startWorker({ concurrency: Number(process.env.WORKER_CONCURRENCY ?? 10), kinds: { except: [...SLOW_KINDS.video, ...SLOW_KINDS.photo] } });
+const video = startWorker({ concurrency: Number(process.env.VIDEO_CONCURRENCY ?? 1), leaseSec: 3600, kinds: { only: SLOW_KINDS.video } });
+const photo = startWorker({ concurrency: Number(process.env.PHOTO_CONCURRENCY ?? 2), kinds: { only: SLOW_KINDS.photo } });
+const worker = { stop: () => Promise.all([main.stop(), video.stop(), photo.stop()]) };
 console.log('relay worker started');
 
 for (const signal of ['SIGTERM', 'SIGINT'] as const) {
