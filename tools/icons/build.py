@@ -36,7 +36,7 @@ MAP = {
 }
 
 # Auto-filled variants that look worse than the outline (tiles then show the outline, a bit bolder)
-SKIP_FILLED = {'globeFilled', 'devicesFilled', 'expandFilled', 'collapseFilled'}
+SKIP_FILLED = {'globeFilled', 'devicesFilled', 'expandFilled', 'collapseFilled', 'atFilled'}   # @ — символ, его не заливают
 
 # Our own drawings where the pack's glyph looks rough (outline; the filled variant is built the same way as for the pack)
 OWN = {
