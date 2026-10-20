@@ -657,8 +657,10 @@ export class Store {
 
   /** Сервер пересоздал базу (другое поколение): выбросить всё — чаты, сообщения, очередь, указатели — и IDB тоже. */
   async wipe(epoch: string | null, keep: { outbox?: boolean } = {}): Promise<void> {
-    // «оставить неотправленное»: очередь отправки, её файлы и очередь операций переживают очистку
+    // «оставить неотправленное»: очередь отправки, её файлы, очередь операций и неотправленные прочтения
+    // (KEEP_STORES) переживают очистку
     const saved = keep.outbox ? [...this.outbox.values()] : [];
+    const reads = keep.outbox ? new Map(this.pendingReads) : new Map<number, number>();
     this.resetGen++;
     for (const id of this.chats.keys()) this.touch(id);
     this.chats.clear(); this.chatV.clear(); this.messages.clear(); this.loaded.clear(); this.sorted.clear(); this.ids.clear();
@@ -672,11 +674,12 @@ export class Store {
     this.pendingDrafts.clear();   // черновики жили в стёртых чатах: пустой текст на сервер не отправляем
     this.epoch = epoch;
     const db = this.db as IDBDatabase;
-    const names = keep.outbox ? [...CACHE_STORES, 'outbox', 'pendingReads'] : STORES;
+    const names = keep.outbox ? [...CACHE_STORES, 'outbox'] : STORES;   // outbox — заново из saved (с сообщениями ленты)
     const t = db.transaction(names, 'readwrite');
     for (const n of names) t.objectStore(n).clear();
     await new Promise<void>((res, rej) => { t.oncomplete = () => res(); t.onerror = () => rej(t.error); });
     for (const o of saved) this.addPending(o);
+    for (const [c, up] of reads) { this.pendingReads.set(c, up); this.dirtyReads.add(c); }
     this.dirtyMeta = true;
     await this.flush();
   }

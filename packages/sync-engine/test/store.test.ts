@@ -171,3 +171,21 @@ test('a deleted message keeps no content in memory or IndexedDB (loaded and unlo
   cold.applyHistory(7, [{ ...rich(5), deleted: true, attachment: null } as never], true, 10);
   check(cold.messageById(7, 5) as never);
 });
+
+test('wipe keeping unsent keeps unsent reads too (memory and IndexedDB); a full wipe drops them', async () => {
+  const name = 'store-' + crypto.randomUUID();
+  const db = await openDb(name);
+  const s = await Store.open(db, ME);
+  s.applyUpdate({ type: 'newMessage', message: msg({ id: 10, chatId: 7, senderId: PEER, body: 'a' }) });
+  s.applyUpdate({ type: 'newMessage', message: msg({ id: 20, chatId: 8, senderId: PEER, body: 'b' }) });
+  expect(s.localRead(7, 10)).toBe(true);
+  await s.flush();
+  expect(s.localRead(8, 20)).toBe(true);   // ещё не записано — переживает очистку тоже
+  await s.wipe(s.epoch, { outbox: true });
+  expect([...s.pendingReads]).toEqual([[7, 10], [8, 20]]);
+  const again = await Store.open(db, ME);
+  expect(new Map(again.pendingReads)).toEqual(new Map([[7, 10], [8, 20]]));
+  await again.wipe(null);
+  expect(again.pendingReads.size).toBe(0);
+  expect((await Store.open(db, ME)).pendingReads.size).toBe(0);
+});
