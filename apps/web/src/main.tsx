@@ -83,7 +83,7 @@ window.addEventListener('relay:signed-in', () => {
   }).catch(() => location.reload());
 });
 
-nav.installNav({ get: () => getGlobal().sidebarView, set: (p) => setGlobal({ sidebarView: p }), escBusy: () => (getGlobal().infoOpen || getGlobal().stickersOpen) && !!getGlobal().openChatId });
+nav.installNav({ get: () => getGlobal().sidebarView, set: (p) => setGlobal({ sidebarView: p }), escBusy: () => getGlobal().infoOpen && !!getGlobal().openChatId });
 if (__DEV__) (window as unknown as { __nav: typeof nav }).__nav = nav;   // для ручной проверки навигации
 // dev: раздел «Для разработчиков» для проверок — что сейчас в журнале и что ничего не работает при закрытом разделе
 if (__DEV__) void import('./devtools/session').then((s) => import('./devtools/metrics').then((m) => {

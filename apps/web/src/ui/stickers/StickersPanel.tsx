@@ -3,12 +3,12 @@ import type { StickerRef, StickerSetInfo } from '@relay/protocol';
 import { IconButton, ProgressRing, StickerView, onHeavyAnimationEnd, useMinVisible } from '@relay/ui';
 import { useEffect, useRef, useState } from 'preact/hooks';
 import { plural } from '../../groups';
-import { closeStickersPanel, featuredSets, installSet, loadStickerSet, openStickerSet, searchSets, sendStickerHere, useMyStickers } from '../../stickers';
+import { featuredSets, installSet, loadStickerSet, openStickerSet, searchSets, sendStickerHere, useMyStickers } from '../../stickers';
 import { StickerPreviewHold } from './StickerPreview';
 
 // Правая панель «Стикеры» (как в Telegram Web): поиск вместо заголовка; пусто — рекомендуемые паки страницами,
 // текст — поиск по названию. Строка пака: название, «N стикеров», ДОБАВИТЬ/ДОБАВЛЕНО и полоса из пяти стикеров.
-export function StickersPanel() {
+export function StickersPanel({ onBack }: { onBack(): void }) {
   const [q, setQ] = useState('');
   const [list, setList] = useState<StickerSetInfo[] | null>(null);
   const [more, setMore] = useState(true);
@@ -19,12 +19,6 @@ export function StickersPanel() {
   const [settled, setSettled] = useState(false);
   useEffect(() => { let live = true; onHeavyAnimationEnd(() => requestAnimationFrame(() => { if (live) setSettled(true); })); return () => { live = false; }; }, []);
   const bottom = useRef<HTMLDivElement>(null), scroller = useRef<HTMLDivElement>(null);
-
-  useEffect(() => {
-    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') { e.stopPropagation(); closeStickersPanel(); } };
-    addEventListener('keydown', onKey, true);
-    return () => removeEventListener('keydown', onKey, true);
-  }, []);
 
   // поиск — с паузой 250 мс после ввода; пусто — первая страница рекомендуемых
   useEffect(() => {
@@ -52,7 +46,7 @@ export function StickersPanel() {
   return (
     <div class="app-stkpanel" aria-label="Стикеры">
       <div class="app-stkpanel-head">
-        <IconButton icon="arrowLeft" label="Закрыть" onClick={closeStickersPanel} />
+        <IconButton icon="arrowLeft" label="Назад" onClick={onBack} />
         <div class="app-stkpanel-search">
           <input type="text" placeholder="Поиск стикеров" value={q} autoFocus onInput={(e) => setQ((e.target as HTMLInputElement).value)} aria-label="Поиск стикеров" />
           {q ? <IconButton icon="close" label="Очистить" size={18} onClick={() => setQ('')} /> : null}

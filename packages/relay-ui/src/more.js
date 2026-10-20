@@ -552,7 +552,8 @@ function SlideStack(props) {
     if (prev.current === active) return;
     var from = prev.current;
     prev.current = active;
-    if (reducedMotion()) { st[1](null); return; }
+    // instant — сменить страницу без слайда (панель ещё закрыта и сама выезжает уже на нужной странице)
+    if (reducedMotion() || props.instant) { st[1](null); return; }
     var dir = order.indexOf(active) > order.indexOf(from) ? 1 : -1;
     st[1]({ from: from, to: active, dir: dir });
     var end = beginHeavyAnimation(SLIDE_MS);

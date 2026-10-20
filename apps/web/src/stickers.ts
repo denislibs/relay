@@ -56,6 +56,5 @@ export function openStickerSet(idOrShort: number | string): void {
   void import('./ui/stickers/StickerSetModal').then((m) => m.showStickerSet(idOrShort));
 }
 
-/** Правая панель «Стикеры» (из поиска в панели эмодзи): вместо «Информации». */
-export function openStickersPanel(): void { setGlobal({ stickersOpen: true, infoOpen: false }); }
-export function closeStickersPanel(): void { setGlobal({ stickersOpen: false }); }
+/** «Стикеры» (из поиска в панели эмодзи) — страница правой панели «Информация», вторая вложенность. */
+export function openStickersPanel(): void { setGlobal({ infoOpen: true, infoGo: 'stickers' }); }

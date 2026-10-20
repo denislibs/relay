@@ -9,7 +9,7 @@ import type { Item } from '@relay/sync-engine/src/types';
 import { chatTone, isSystemChat } from './format';
 import type { ComponentChildren } from 'preact';
 import { useEffect, useRef, useState } from 'preact/hooks';
-import { activeFrame, setGlobal, useGlobal } from '../global';
+import { activeFrame, setGlobal, useGlobal, getGlobal } from '../global';
 import { isChatMuted, toggleMute } from '../mute';
 
 import { birthdayText, lastSeenText, type Birthday } from './format';
@@ -19,11 +19,12 @@ import type { ProfilePhoto } from '@relay/protocol';
 import { avatarPhoto, useProfilePhotos, userPhoto } from '../profilePhoto';
 import { ProfileGallery } from './ProfileGallery';
 import { PhotoViewer } from './PhotoViewer';
+import { StickersPanel } from './stickers/StickersPanel';
 import { GROUP_PAGES, GroupScreen, isGroupPage, parentOf, type GroupPage, type Params } from './group/Manage';
 import { canManage, copyText, publicUrl } from '../groups';
 import type { GroupInfo, MyMembership } from '@relay/protocol';
 
-const PAGES = ['info', 'edit', ...GROUP_PAGES];   // «Изменить контакт» и управление группой выезжают внутри панели справа налево
+const PAGES = ['info', 'stickers', 'edit', ...GROUP_PAGES];   // «Стикеры» — вторая вложенность (из поиска в панели стикеров)   // «Изменить контакт» и управление группой выезжают внутри панели справа налево
 const close = () => setGlobal({ infoOpen: false });
 
 /** Значение, которое меняется только вне тяжёлой анимации: во время неё — после её конца. */
@@ -46,9 +47,11 @@ export function Info() {
   const chat = useGlobal((s) => s.chats.find((c) => c.id === chatId));
   const peer = useGlobal((s) => s.peer);
   const muted = useGlobal((s) => isChatMuted(chatId, s));
-  const [page, setPage] = useState('info');
+  // панель открывают сразу на «Стикерах» (поиск в панели стикеров): она выезжает уже на этой странице
+  const [page, setPage] = useState(() => (getGlobal().infoGo === 'stickers' ? 'stickers' : 'info'));
   const [params, setParams] = useState<Params>({});
-  useEffect(() => setPage('info'), [chatId]);   // другой чат — снова профиль
+  const firstChat = useRef(true);
+  useEffect(() => { if (firstChat.current) { firstChat.current = false; return; } setPage('info'); }, [chatId]);   // другой чат — снова профиль
   // управление группой: стек экранов, у каждого свой родитель; «Назад» — к родителю
   const nav = {
     chatId, params,
@@ -58,11 +61,18 @@ export function Info() {
   };
   // переход снаружи (плашка заявок в шапке чата) — сразу на нужный экран
   const infoGo = useGlobal((s) => s.infoGo);
+  // открыта ли была панель до перехода: закрытая выезжает сразу на нужной странице, без слайда внутри
+  const infoOpen = useGlobal((s) => s.infoOpen);
+  const openBefore = useRef(infoOpen), instant = useRef(false);
   useEffect(() => {
     if (!infoGo) return;
+    if (infoGo === 'stickers') { setGlobal({ infoGo: null }); if (page !== 'stickers') { instant.current = !openBefore.current; setPage('stickers'); } return; }
     if (isGroupPage(infoGo)) { setGlobal({ infoGo: null }); nav.go(infoGo); }
     else if (infoGo === 'edit') { setGlobal({ infoGo: null }); setPage('edit'); }   // «Изменить» из меню шапки
   }, [infoGo]);
+  // после перехода по infoGo (порядок важен: тот читает, была ли панель открыта до этого рендера)
+  useEffect(() => { openBefore.current = infoOpen; if (!infoOpen && page === 'stickers') { instant.current = true; setPage('info'); } }, [infoOpen]);
+  useEffect(() => { instant.current = false; }, [page]);
   // группа удалена или меня убрали — панель управления закрывается сама
   useEffect(() => { if (!chat && page !== 'info') setPage('info'); }, [!chat]);
   // профиль собеседника личного чата: только то, что сервер разрешил показать
@@ -130,8 +140,10 @@ export function Info() {
   const openMember = (userId: number) => { void openUserChat(userId); };
 
   return (
-    <SlideStack order={PAGES} active={page} render={(k: string) => isGroupPage(k) ? (
+    <SlideStack order={PAGES} active={page} instant={instant.current} render={(k: string) => isGroupPage(k) ? (
       group && chat ? <GroupScreen page={k} nav={nav} /> : null
+    ) : k === 'stickers' ? (
+      <StickersPanel onBack={() => setPage('info')} />
     ) : k === 'edit' && peerId ? (
       <EditContactPanel userId={peerId} onDone={() => setPage('info')} />
     ) : (
