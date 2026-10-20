@@ -2,7 +2,7 @@
 // Движок отдаёт data.ts через bindStickers — здесь своя тонкая обёртка, чтобы стикеры не разрастались в data.ts.
 import type { MyStickers, StickerRef, StickerSet, StickerSetInfo } from '@relay/protocol';
 import { useEffect, useState } from 'preact/hooks';
-import { useGlobal } from './global';
+import { setGlobal, useGlobal } from './global';
 
 type Call = (a: Record<string, unknown> & { type: string }) => Promise<unknown>;
 let call: Call = () => Promise.reject(new Error('engine is not ready'));
@@ -55,3 +55,7 @@ export function sendStickerHere(s: StickerRef): boolean {
 export function openStickerSet(idOrShort: number | string): void {
   void import('./ui/stickers/StickerSetModal').then((m) => m.showStickerSet(idOrShort));
 }
+
+/** Правая панель «Стикеры» (из поиска в панели эмодзи): вместо «Информации». */
+export function openStickersPanel(): void { setGlobal({ stickersOpen: true, infoOpen: false }); }
+export function closeStickersPanel(): void { setGlobal({ stickersOpen: false }); }

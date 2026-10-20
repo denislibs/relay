@@ -1058,3 +1058,34 @@ html[data-anim="0"] .app-chatcol, html[data-anim="0"] .app-chatcol-below, html[d
 .app-stkview { position: fixed; inset: 0; z-index: 2000; display: flex; align-items: center; justify-content: center; background: rgba(0,0,0,.25); -webkit-backdrop-filter: blur(6px); backdrop-filter: blur(6px); animation: rl-fade 200ms var(--ease-out); pointer-events: none; }
 .app-stkview-card { display: flex; flex-direction: column; align-items: center; gap: 12px; animation: rl-modal-in 200ms var(--ease-out); }
 .app-stkview-emoji { font-size: 32px; line-height: 1; }
+
+/* ---------- Панель эмодзи и стикеров ---------- */
+.app-sym { display: flex; flex-direction: column; height: 100%; }
+.app-sym-body { flex: 1; min-height: 0; animation: rl-fade 160ms var(--ease-out); }
+.app-sym-pane { display: flex; flex-direction: column; height: 100%; }
+.app-sym-strip { display: flex; gap: 2px; padding: 6px 8px; overflow-x: auto; scrollbar-width: none; flex: none; border-bottom: 1px solid var(--line, rgba(127,127,127,.12)); }
+.app-sym-strip::-webkit-scrollbar { display: none; }
+.app-sym-strip-btn { flex: none; display: flex; align-items: center; justify-content: center; width: 40px; height: 40px; border: 0; border-radius: 12px; background: transparent; color: var(--ink-muted); cursor: pointer; transition: background-color var(--dur-fast), color var(--dur-fast); }
+.app-sym-strip-btn:hover { background: var(--hover, rgba(127,127,127,.08)); }
+.app-sym-strip-btn.is-on { background: var(--hover-strong, rgba(127,127,127,.16)); color: var(--ink); }
+.app-sym-search { display: flex; align-items: center; gap: 8px; margin: 8px 10px 4px; padding: 0 6px 0 12px; height: 40px; border-radius: 20px; background: var(--hover, rgba(127,127,127,.1)); color: var(--ink-muted); flex: none; }
+.app-sym-search input { flex: 0 1 140px; min-width: 60px; border: 0; outline: 0; background: transparent; color: var(--ink); font: 400 15px/20px var(--font-sans); }
+.app-sym-quick { display: flex; gap: 2px; overflow-x: auto; scrollbar-width: none; flex: 1; min-width: 0; }
+.app-sym-quick::-webkit-scrollbar { display: none; }
+.app-sym-quick button { flex: none; width: 30px; height: 30px; border: 0; border-radius: 50%; background: transparent; font-size: 18px; line-height: 1; cursor: pointer; filter: grayscale(.6); opacity: .8; transition: filter var(--dur-fast), opacity var(--dur-fast); }
+.app-sym-quick button:hover { filter: none; opacity: 1; }
+.app-sym-scroll { flex: 1; min-height: 0; overflow-y: auto; overscroll-behavior: contain; padding: 0 8px 8px; }
+.app-sym-sec h4 { display: flex; align-items: center; justify-content: space-between; margin: 10px 6px 6px; font: 500 13px/18px var(--font-sans); color: var(--ink-muted); }
+.app-sym-empty { padding: 24px; text-align: center; color: var(--ink-muted); }
+.app-emoji-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(42px, 1fr)); }
+.app-emoji { height: 42px; border: 0; border-radius: 10px; background: transparent; font-size: 28px; line-height: 1; cursor: pointer; }
+.app-emoji:hover { background: var(--hover, rgba(127,127,127,.1)); }
+.app-stk-grid { display: grid; grid-template-columns: repeat(5, 1fr); grid-auto-rows: 72px; gap: 4px; }
+.app-stk-cell { display: flex; align-items: center; justify-content: center; border: 0; border-radius: 12px; background: transparent; cursor: pointer; padding: 0; }
+.app-stk-cell:hover { background: var(--hover, rgba(127,127,127,.1)); }
+.app-sym-bar { display: flex; align-items: center; justify-content: space-between; height: 48px; padding: 0 6px; flex: none; border-top: 1px solid var(--line, rgba(127,127,127,.12)); }
+.app-sym-side { width: 40px; display: flex; justify-content: center; }
+.app-sym-tabs { display: flex; gap: 6px; }
+.app-sym-tab { display: flex; align-items: center; justify-content: center; width: 40px; height: 40px; border: 0; border-radius: 50%; background: transparent; color: var(--ink-muted); cursor: pointer; transition: background-color var(--dur-fast), color var(--dur-fast); }
+.app-sym-tab.is-on { background: var(--hover-strong, rgba(127,127,127,.16)); color: var(--ink); }
+.app-sym-tab:disabled { opacity: .4; cursor: default; }

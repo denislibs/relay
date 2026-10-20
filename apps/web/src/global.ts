@@ -56,6 +56,7 @@ export interface GlobalState {
   newChatOpen: boolean;
   sidebarView: string;   // путь страницы боковой панели, см. nav.ts
   infoOpen: boolean;   // правая панель «Информация»
+  stickersOpen: boolean;   // правая панель «Стикеры» (поиск и добавление паков); с «Информацией» не одновременно
   muteTick: number;    // истёк срок «Отключить звук» какого-то чата (mute.ts): повод перерисовать
   theme: ThemePref;   // зеркало prefs.theme для прежних читателей
   prefs: Prefs;       // настройки устройства, см. prefs.ts
@@ -134,6 +135,7 @@ let state: GlobalState = {
   newChatOpen: false,
   sidebarView: 'chats',
   infoOpen: false,
+  stickersOpen: false,
   muteTick: 0,
   theme: loadTheme(),
   prefs: getPrefs(),

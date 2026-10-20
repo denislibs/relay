@@ -47,6 +47,23 @@ function Composer(props) {
   // как в Telegram Web A: меню вложений открывается наведением на скрепку и закрывается, когда мышь ушла
   // и со скрепки, и с меню (с паузой — чтобы успеть перевести курсор); пальцем — по нажатию
   var attachHover = useHoverMenu(attach[0], attach[1], { closeMs: 300 });
+  // панель эмодзи и стикеров (props.symbolMenu(close) → содержимое): как вложения — наведением, нажатием закрепляется
+  var symbols = useState(false);
+  var symbolsHover = useHoverMenu(symbols[0], symbols[1], { openMs: 200, closeMs: 350 });
+  var popRef = useRef(null);
+  useEffect(function () {
+    if (!symbols[0]) return;
+    function away(e) {
+      var t = e.target;
+      if (popRef.current && popRef.current.contains(t)) return;
+      if (t.closest && (t.closest('.rl-emoji-toggle') || t.closest('.rl-mdl-layer') || t.closest('.app-stkview-host'))) return;
+      symbols[1](false);
+    }
+    function esc(e) { if (e.key === 'Escape') { e.stopPropagation(); symbols[1](false); } }
+    document.addEventListener('pointerdown', away, true);
+    document.addEventListener('keydown', esc, true);
+    return function () { document.removeEventListener('pointerdown', away, true); document.removeEventListener('keydown', esc, true); };
+  }, [symbols[0]]);
   var bar = useState(null);          // панель оформления: { x, bottom, active, link, url, s, e, bad }
   var barNow = useRef(null);
   var lastRange = useRef(null);   // где был курсор в последний раз: окна (дата) вставляют туда
@@ -455,6 +472,11 @@ function Composer(props) {
   return h('div', { class: cx('rl-composer-wrap', props.className || props.class), ref: wrapRef },
     h(Presence, { show: !!(mentionList && mentionList.length), exitMs: 120 },
       h(MentionList, { items: mentionList || [], onPick: pickMention })),
+    props.symbolMenu ? h(Presence, { show: symbols[0], exitMs: 160 },
+      h('div', { class: 'rl-symbols-pop', ref: popRef, role: 'dialog', 'aria-label': 'Эмодзи и стикеры',
+        onPointerEnter: symbolsHover.onPointerEnter, onPointerLeave: symbolsHover.onPointerLeave,
+        onMouseDown: function (e) { if (e.target.nodeName !== 'INPUT') e.preventDefault(); } },
+        props.symbolMenu(function () { symbols[1](false); }))) : null,
     h(MenuPopover, { open: attach[0], hover: true, anchor: wrapRef.current ? wrapRef.current.querySelector('.rl-attach-toggle') : null, placement: 'top-start', label: 'Прикрепить',
       onClose: function () { attach[1](false); }, onPointerEnter: attachHover.onPointerEnter, onPointerLeave: attachHover.onPointerLeave,
       items: (props.attachItems || ATTACH_ITEMS).map(function (it) { return { icon: it.icon, label: it.label, onClick: function () { if (props.onAttach) props.onAttach(it.key); } }; }) }),
@@ -517,7 +539,10 @@ function Composer(props) {
             onCompositionEnd: function () { composing.current = false; sync(true); },
           }),
           h('span', { class: 'rl-composer-ph', 'aria-hidden': 'true' }, props.placeholder || 'Сообщение')),
-        h(IconButton, { icon: 'smile', label: 'Эмодзи', class: 'rl-emoji-toggle' })),
+        h(IconButton, { icon: 'smile', label: 'Эмодзи и стикеры', class: cx('rl-emoji-toggle', symbols[0] && 'rl-emoji-toggle-on'), 'aria-expanded': props.symbolMenu ? symbols[0] : undefined,
+          onPointerEnter: props.symbolMenu ? symbolsHover.onPointerEnter : undefined, onPointerLeave: props.symbolMenu ? symbolsHover.onPointerLeave : undefined,
+          onMouseDown: function (e) { e.preventDefault(); },   // фокус остаётся в поле: эмодзи вставляются туда, где курсор
+          onClick: props.symbolMenu ? symbolsHover.toggle : undefined })),
       h('button', {
         type: 'button', ref: sendRef, class: cx('rl-composer-send', 'rl-send-' + mode), 'aria-label': mode === 'edit' ? 'Сохранить' : mode === 'send' ? 'Отправить' : mode === 'round' ? 'Записать видеосообщение' : 'Записать голосовое',
         onPointerDown: function (e) {

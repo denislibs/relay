@@ -47,6 +47,8 @@ import { chatTime, chatTone, fileSize, isSystemChat, lastSeenText, shownBody, sn
 import { attachmentHit } from '../searchHit';
 import type { ProfilePhoto } from '@relay/protocol';
 import { avatarPhoto } from '../profilePhoto';
+import { openStickersPanel, sendStickerHere, setStickerTarget } from '../stickers';
+import { SymbolMenu } from './stickers/SymbolMenu';
 import { cancelForwardDraft, endSelect, forwardElsewhere, patchForwardDraft, sendForwardDraft, startForward, startSelect } from '../forward';
 
 
@@ -406,6 +408,10 @@ export function Chat({ chatId, frameKey, active }: { chatId: number; frameKey: s
   const members = useMembers(chatId, chat?.kind === 'group');
   const subtitle = system ? 'служебные уведомления' : isTyping ? 'печатает…' : chat?.kind === 'group' ? (members ? membersStatus(members, true) : 'Группа') : myPeer ? lastSeenText(online, myPeer.lastSeen as string | null) : '';
   const replyTo = replyKey ? messages.find((m) => m.key === replyKey) : undefined;
+  // стикер из модалки пака или правой панели уходит сюда — с текущим ответом
+  const replyIdRef = useRef<number | null>(null);
+  replyIdRef.current = (replyTo?.id as number) ?? null;
+  useEffect(() => setStickerTarget({ chatId, replyId: () => replyIdRef.current, sent: () => setReplyKey(null) }), [chatId]);
   const authorOf = (senderId: unknown) => (senderId === me.userId ? 'Вы' : title);
   const menuMsg = menu ? messages.find((m) => m.key === menu.key) : undefined;
   // пересылка, ждущая в поле ввода: «От: …» (или «Имена отправителей скрыты») и что пересылаем
@@ -548,6 +554,20 @@ export function Chat({ chatId, frameKey, active }: { chatId: number; frameKey: s
       ) : <div class={'app-composer-host' + (selKeys ? ' is-selecting' : '') + (art?.open && !art.closing ? ' is-article' : '')}><Composer
         id="composer"
         apiRef={api}
+        symbolMenu={editing ? undefined : (close: () => void) => (
+          <SymbolMenu
+            onEmoji={(e) => api.current?.insert({ text: e, entities: [] })}
+            onBackspace={() => {
+              const v = api.current?.getValue();
+              if (!v?.text) return;
+              const segs = [...new Intl.Segmenter('ru', { granularity: 'grapheme' }).segment(v.text)];
+              const cut = segs[segs.length - 1].index;
+              api.current?.setValue({ text: v.text.slice(0, cut), entities: v.entities.filter((en) => en.offset + en.length <= cut) });
+            }}
+            onSticker={(s) => { sendStickerHere(s); close(); }}
+            onSearch={() => { close(); openStickersPanel(); }}
+          />
+        )}
         initialValue={initial}
         captureTyping={active}
         sendKey={sendKey}

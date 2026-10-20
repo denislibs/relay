@@ -2313,3 +2313,8 @@ html[data-blur="0"] .rl-menu { -webkit-backdrop-filter: none; backdrop-filter: n
 .rl-sticker-box { position: relative; line-height: 0; }
 .rl-sticker-meta { right: 0; bottom: 0; }
 .rl-sticker-msg .rl-reacts { margin-top: 0; }
+
+/* ---------- Панель эмодзи и стикеров над полем ввода ---------- */
+.rl-symbols-pop { position: absolute; right: clamp(0px, 8%, 96px); bottom: calc(100% + 8px); z-index: 30; width: 420px; max-width: calc(100vw - 16px); height: min(420px, calc(100vh - 160px)); border-radius: 20px; background: var(--surface, var(--bg)); box-shadow: var(--shadow-panel); overflow: hidden; transform-origin: 100% 100%; animation: rl-menu-in 180ms var(--ease-out); }
+.rl-presence[data-state="closing"] .rl-symbols-pop { animation: rl-pop-out 160ms var(--ease-standard) forwards; }
+.rl-emoji-toggle-on { color: var(--brand-strong); }
