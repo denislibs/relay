@@ -1,6 +1,6 @@
 import { player } from '@relay/ui';
 import { useEffect, useState } from 'preact/hooks';
-import { MEDIA_CACHE } from './mediaCache';
+import { deviceStore, findOnDevice } from './mediaCache';
 import { localPreview } from './data';
 import { getGlobal, setGlobal } from './global';
 import { Mirror } from '@relay/sync-engine/src/client';
@@ -39,7 +39,8 @@ const waiters = new Map<string, Set<(v: boolean) => void>>();
 function setCached(path: string, v: boolean) { cached.set(path, v); waiters.get(path)?.forEach((f) => f(v)); }
 
 async function checkCached(path: string): Promise<boolean> {
-  try { return !!(await (await caches.open(MEDIA_CACHE)).match(path)); } catch { return false; }
+  const id = /^\/files\/([0-9a-f-]{36})$/.exec(path)?.[1];
+  try { return !!id && !!(await findOnDevice(deviceStore(), id)); } catch { return false; }
 }
 
 function warm(src: string) {

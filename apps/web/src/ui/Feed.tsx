@@ -3,11 +3,11 @@ import type { ServiceData, ServiceType } from '@relay/protocol';
 import type { Item } from '@relay/sync-engine/src/types';
 import { senderAvatar } from '../profilePhoto';
 import type { Entity, Todo } from '@relay/protocol';
-import { ArticleBlocks, Avatar, Bubble, Icon, peerTone, DateDivider, DatePicker, FileBubble, MediaBubble, MessageText, VoiceBubble, MusicBubble, RoundBubble, player, MediaViewer, ScrollToBottom, beginHeavyAnimation, forceMeasure, isHeavyAnimating, onHeavyAnimationEnd, requestMeasure, requestMutation, selectionValue, TodoBubble } from '@relay/ui';
+import { MediaPolicy, ArticleBlocks, Avatar, Bubble, Icon, peerTone, DateDivider, DatePicker, FileBubble, MediaBubble, MessageText, VoiceBubble, MusicBubble, RoundBubble, player, MediaViewer, ScrollToBottom, beginHeavyAnimation, forceMeasure, isHeavyAnimating, onHeavyAnimationEnd, requestMeasure, requestMutation, selectionValue, TodoBubble } from '@relay/ui';
 import type { QuoteMsg } from '@relay/sync-engine/src/types';
 import { quoteContent } from './preview';
 import { memo } from 'preact/compat';
-import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'preact/hooks';
+import { useContext, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'preact/hooks';
 import { toggleTodo, clearFocus, discardUnsent, retrySend, focusMessage, openInner, jumpToDate, localPreview, markListened, moveWindow, react, savePosition, savedPosition, seen } from '../data';
 import { wantPeople } from '../people';
 import { activeFrame, frameByKey, getGlobal, setGlobal, useGlobal } from '../global';
@@ -15,7 +15,7 @@ import { toggleMusic, trackTitle, useFileCached } from '../music';
 import { showToast } from '../settingsData';
 import { startForward, toggleSelect } from '../forward';
 import { FileMessage } from './FileMessage';
-import { isCached, keepOffline, useOfflineUrl, warmCached } from '../downloads';
+import { isCached, keepOffline, offlineUrlNow, useKeptMedia, useOfflineUrl, warmCached } from '../downloads';
 import { getPrefs } from '../prefs';
 import { clock, dayKey, dayLabel, fileSize } from './format';
 
@@ -161,7 +161,8 @@ const Row = memo(function Row({ chatId, voiceTitle, author, onAuthor, onOpen, hl
     return (
       <div class={wrap('app-msg')} data-key={m.key} data-sort={m.sort as number}>
         {check}
-        <VoiceBubble
+        <KeptVoice
+          m={m} att={att} chatId={chatId} author={voiceTitle} out={out}
           fwd={fwd} reply={replyQ}
           aside={aside}
           from={out ? 'out' : 'in'} tail={end} groupStart={start} appear={appear}
@@ -169,7 +170,6 @@ const Row = memo(function Row({ chatId, voiceTitle, author, onAuthor, onOpen, hl
           unread={unheard} unreadIncoming={unheard && !out}
           uploading={pending} progress={m.progress as number}
           time={clock(m.createdAt as string)} status={out ? m.status : undefined}
-          track={() => voiceTrack(m, att, chatId, voiceTitle, out)}
         />
         {mark}
       </div>
@@ -180,11 +180,12 @@ const Row = memo(function Row({ chatId, voiceTitle, author, onAuthor, onOpen, hl
     return (
       <div class={wrap('app-msg')} data-key={m.key} data-sort={m.sort as number}>
         {check}
-        <RoundBubble
+        <KeptRound
+          m={m} att={att}
           fwd={fwd} reply={replyQ}
           aside={aside}
           from={out ? 'out' : 'in'} groupStart={start} appear={appear}
-          src={localPreview(m.key as string) ?? (att.id ? fileUrl(att) : undefined)} thumb={att.thumb ?? null}
+          thumb={att.thumb ?? null}
           duration={att.duration ?? 0} unread={unseen}
           uploading={pending} progress={m.progress as number}
           time={clock(m.createdAt as string)} status={out ? m.status : undefined}
@@ -287,12 +288,12 @@ function webLink(m: Item) {
 
 const noop = () => {}; // цитата — кнопка; сам клик ловит лента (один обработчик на всех)
 
-/** Трек общего плеера для голосового: свой файл до загрузки — локальная копия. Прослушал входящее — отметка. */
-function voiceTrack(m: Item, att: Att, chatId: number, author: string, out: boolean) {
+/** Трек общего плеера для голосового: своя локальная копия, иначе файл с устройства, иначе сеть. Прослушал входящее — отметка. */
+function voiceTrack(m: Item, att: Att, chatId: number, author: string, out: boolean, src?: string) {
   return {
     key: m.key as string,
     kind: 'voice' as const,
-    src: localPreview(m.key as string) ?? fileUrl(att),
+    src: src ?? localPreview(m.key as string) ?? offlineUrlNow(att.id || undefined) ?? fileUrl(att),
     duration: att.duration ?? 0,
     title: author,
     subtitle: 'Голосовое сообщение',
@@ -325,6 +326,25 @@ function firstVisible(root: HTMLElement): { key: string; sort: number; top: numb
 const NO_MESSAGES: Item[] = [];
 
 /** Музыкальный пузырь + есть ли файл в кэше (значок «скачать» в углу — только пока файла нет). */
+const asFile = (att: Att) => ({ id: att.id, name: att.name, mime: att.mime, size: att.size });
+
+/** Голосовое: файл держим на устройстве — качаем заранее (автозагрузка включена) или при первом прослушивании. */
+function KeptVoice({ m, att, chatId, author, out, ...props }: { m: Item; att: Att; chatId: number; author: string; out: boolean } & Record<string, unknown>) {
+  const prefs = getPrefs();
+  const { src, keep } = useKeptMedia(att.id ? asFile(att) : null, att.id ? fileUrl(att) : undefined,
+    { prefetch: prefs.autoload.enabled, lock: false, local: localPreview(m.key as string), maxMb: prefs.media.maxMb });
+  return <VoiceBubble {...props} track={() => { keep(); return voiceTrack(m, att, chatId, author, out, src); }} />;
+}
+
+/** Кружок: на устройстве — играет оттуда; нет — из сети и докачивается целиком (заранее при автозагрузке видео или когда начали смотреть), чтобы в следующий раз без сети. */
+function KeptRound({ m, att, ...props }: { m: Item; att: Att } & Record<string, unknown>) {
+  const policy = useContext(MediaPolicy) as { video?: boolean } | null;
+  const prefs = getPrefs();
+  const { src, keep } = useKeptMedia(att.id ? asFile(att) : null, att.id ? fileUrl(att) : undefined,
+    { prefetch: !!policy?.video, lock: true, local: localPreview(m.key as string), maxMb: prefs.media.maxMb });
+  return <RoundBubble {...props} src={src} onPlay={keep} />;
+}
+
 function CachedMusic({ fileId, ...props }: { fileId?: string } & Record<string, unknown>) {
   const downloaded = useFileCached(fileId);
   return <MusicBubble {...props} downloaded={downloaded} />;

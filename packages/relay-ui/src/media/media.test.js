@@ -57,3 +57,20 @@ test('ogg: pages are well formed — magic, BOS/EOS flags, sequence, CRC, granul
   expect(snap[5]).toBe(2);
   expect(snap[last + 5]).toBe(4);
 });
+
+import { bufferedParts, fmtTime, keyAction } from './videoPlayer.js';
+
+test('video player: time format', () => {
+  expect([0, 7, 65, 600, 3723, -3, NaN].map(fmtTime)).toEqual(['0:00', '0:07', '1:05', '10:00', '1:02:03', '0:00', '0:00']);
+});
+
+test('video player: buffered ranges as fractions, clamped; unknown duration gives none', () => {
+  const ranges = { length: 2, start: (i) => [0, 30][i], end: (i) => [10, 45][i] };
+  expect(bufferedParts(ranges, 40)).toEqual([[0, 0.25], [0.75, 1]]);
+  expect(bufferedParts(ranges, NaN)).toEqual([]);
+});
+
+test('video player: keys — Russian layout too; foreign keys are left alone', () => {
+  expect(['k', 'л', ' ', 'ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown', 'M', 'ь', 'f', 'а', 'Enter'].map(keyAction))
+    .toEqual(['toggle', 'toggle', 'toggle', 'back', 'forward', 'louder', 'quieter', 'mute', 'mute', 'fullscreen', 'fullscreen', null]);
+});

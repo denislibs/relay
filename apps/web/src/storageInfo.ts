@@ -1,8 +1,7 @@
-// Память устройства: оценка браузера и кэши медиа (Cache Storage, имена `relay-media*`).
-// Оболочку приложения (`relay-shell-*`) не трогаем: без неё не откроется офлайн.
+// Память устройства: оценка браузера и файлы вложений (индекс relay-attachments-on-device + ящики
+// relay-attachments-*). Оболочку приложения (relay-app-shell@*) не трогаем: без неё не откроется офлайн.
 import { forgetCached } from './downloads';
-
-export const MEDIA_CACHE = /^relay-media/;
+import { clearAllAttachments, deviceStore } from './mediaCache';
 
 export function formatBytes(n: number): string {
   if (!(n > 0)) return '0 Б';
@@ -20,7 +19,6 @@ export function dbRowsLabel(rows: Record<string, number> | null | undefined): st
   return `${m.toLocaleString('ru-RU')} ${plural(m, 'сообщение', 'сообщения', 'сообщений')} в ${c.toLocaleString('ru-RU')} ${plural(c, 'чате', 'чатах', 'чатах')}`;
 }
 
-/** exact: браузер разделил IndexedDB и кэши (usageDetails); иначе db — «всё остальное». approx: у части записей кэша нет длины. */
 /** Ответ не дольше ms: зависший воркер не задерживает строку размера (undefined — не дождались или отказ). */
 export function within<T>(p: Promise<T>, ms: number): Promise<T | undefined> {
   return new Promise((res) => {
@@ -29,42 +27,55 @@ export function within<T>(p: Promise<T>, ms: number): Promise<T | undefined> {
   });
 }
 
-export interface StorageInfo { used: number; quota: number; db: number; media: number; exact: boolean; approx: boolean; files?: number; rows?: Record<string, number> }
-
-async function mediaCaches(): Promise<Cache[]> {
-  if (typeof caches === 'undefined') return [];
-  try { return await Promise.all((await caches.keys()).filter((k) => MEDIA_CACHE.test(k)).map((k) => caches.open(k))); } catch { return []; }
+/**
+ * exact: браузер разделил IndexedDB и кэши (usageDetails); иначе db — «всё остальное». approx: у части файлов размер неизвестен.
+ * media/files — все вложения на устройстве; savedBytes/savedFiles — из них скачанные кнопкой (сами не удаляются).
+ * persisted: браузер обещал не стирать хранилище при нехватке места.
+ */
+export interface StorageInfo {
+  used: number; quota: number; db: number; media: number; exact: boolean; approx: boolean;
+  files?: number; savedBytes?: number; savedFiles?: number; persisted?: boolean; rows?: Record<string, number>;
 }
 
-const idle = (): Promise<void> => new Promise((r) => {
-  const ric = (globalThis as { requestIdleCallback?: (cb: () => void) => void }).requestIdleCallback;
-  if (ric) ric(() => r()); else setTimeout(r, 0);
-});
-
-/** Размер медиа-кэшей по content-length; тела не читаем. Записи без длины считаем неизвестными. */
-export async function mediaCacheSize(): Promise<{ bytes: number; unknown: number; files: number }> {
-  let bytes = 0, unknown = 0, n = 0, files = 0;
-  for (const c of await mediaCaches()) {
-    for (const req of await c.keys()) {
-      const res = await c.match(req);
-      if (!res) continue;
-      const len = Number(res.headers.get('content-length'));
-      if (len > 0) bytes += len; else unknown++;
-      files++;   // каждая запись — целый файл (части в кэш не попадают): всё это открывается без сети
-      if (++n % 50 === 0) await idle();   // пачками, в простое
+/** Размер вложений по индексу — без обхода кэша и без чтения файлов. */
+export async function mediaCacheSize(): Promise<{ bytes: number; unknown: number; files: number; savedBytes: number; savedFiles: number }> {
+  let bytes = 0, unknown = 0, files = 0, savedBytes = 0, savedFiles = 0;
+  if (typeof indexedDB === 'undefined') return { bytes, unknown, files, savedBytes, savedFiles };
+  try {
+    for (const r of await deviceStore().index.all()) {
+      if (r.sizeBytes > 0) bytes += r.sizeBytes; else unknown++;
+      if (r.chunkOf) continue;   // кусок начала видео: место занимает, но отдельным файлом не считается
+      files++;   // целый файл: открывается без сети
+      if (r.bucket === 'saved-by-user') { savedFiles++; savedBytes += r.sizeBytes; }
     }
-  }
-  return { bytes, unknown, files };
+  } catch { /* индекс недоступен */ }
+  return { bytes, unknown, files, savedBytes, savedFiles };
 }
 
+/** Стереть все файлы вложений — и само подгруженное, и скачанное кнопкой. */
 export async function clearMediaCaches(): Promise<void> {
   if (typeof caches === 'undefined') return;
   forgetCached();   // менеджер загрузок больше не считает эти файлы скачанными
-  await Promise.all((await caches.keys()).filter((k) => MEDIA_CACHE.test(k)).map((k) => caches.delete(k)));
+  await clearAllAttachments(deviceStore());
+}
+
+/**
+ * Попросить браузер не стирать хранилище при нехватке места (иначе он может удалить разом и переписку,
+ * и файлы). Chrome решает сам, без вопроса; Firefox спрашивает пользователя — поэтому при старте не просим
+ * в Firefox, только когда вы сами сохраняете файл.
+ */
+export async function requestPersistentStorage(atStartup = false): Promise<boolean> {
+  try {
+    if (!navigator.storage?.persist) return false;
+    if (await navigator.storage.persisted()) return true;
+    if (atStartup && /firefox/i.test(navigator.userAgent)) return false;
+    return await navigator.storage.persist();
+  } catch { return false; }
 }
 
 export async function readStorage(): Promise<StorageInfo> {
   const m = await mediaCacheSize();
+  const persisted = await navigator.storage?.persisted?.().catch(() => false) ?? false;
   let used = 0, quota = 0, db = 0, exact = false;
   try {
     const e = (await navigator.storage.estimate()) as StorageEstimate & { usageDetails?: { indexedDB?: number; caches?: number } };
@@ -72,7 +83,7 @@ export async function readStorage(): Promise<StorageInfo> {
     exact = e.usageDetails?.indexedDB != null;
     db = e.usageDetails?.indexedDB ?? Math.max(0, used - (e.usageDetails?.caches ?? m.bytes));
   } catch { /* оценка недоступна */ }
-  return { used: Math.max(used, m.bytes), quota, db, media: m.bytes, exact, approx: m.unknown > 0, files: m.files };
+  return { used: Math.max(used, m.bytes), quota, db, media: m.bytes, exact, approx: m.unknown > 0, files: m.files, savedBytes: m.savedBytes, savedFiles: m.savedFiles, persisted };
 }
 
 const OWNER_KEY = 'relay.mediaOwner';
@@ -81,6 +92,7 @@ const OWNER_KEY = 'relay.mediaOwner';
 export async function claimMediaCache(userId: number): Promise<void> {
   let owner: string | null = null;
   try { owner = localStorage.getItem(OWNER_KEY); } catch { /* приватный режим */ }
+  void requestPersistentStorage(true);
   if (owner === String(userId)) return;
   await clearMediaCaches().catch(() => {});
   try { localStorage.setItem(OWNER_KEY, String(userId)); } catch { /* */ }
@@ -92,8 +104,8 @@ export async function releaseMediaCache(): Promise<void> {
   await clearMediaCaches().catch(() => {});
 }
 
-/** Срок хранения и лимит — Service Worker'у: localStorage ему недоступен, он хранит их у себя. */
+/** Срок хранения и лимит для auto-evictable — Service Worker'у: он сохраняет их в индекс и сразу чистит по ним. */
 export function sendMediaPolicy(p: { keepDays: number; maxMb: number }): void {
   if (!('serviceWorker' in navigator)) return;
-  void navigator.serviceWorker.ready.then((r) => r.active?.postMessage({ type: 'mediaPolicy', keepDays: p.keepDays, maxMb: p.maxMb })).catch(() => {});
+  void navigator.serviceWorker.ready.then((r) => r.active?.postMessage({ type: 'attachments:set-auto-cleanup-policy', keepAutoDays: p.keepDays, maxAutoMb: p.maxMb })).catch(() => {});
 }

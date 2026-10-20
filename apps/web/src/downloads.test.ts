@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'bun:test';
 import { DownloadError, downloadChunks } from './downloads';
-import { isMediaRangeRequest, isMediaRequest, storeMedia } from './mediaCache';
+import { isMediaRangeRequest, isMediaRequest } from './mediaCache';
 
 const FILES = 'https://relay.test/files/f?download=1';
 const signed = (n: number) => `https://s3.test/obj?sig=${n}`;
@@ -139,17 +139,6 @@ describe('downloadChunks', () => {
 
 describe('кэш: только целые файлы', () => {
   const id = '0e0e0e0e-0000-4000-8000-000000000001';
-  test('storeMedia кладёт целый файл под /files/<id> с типом и длиной — его потом отдаёт SW и видит «Данные и память»', async () => {
-    const m = new Map<string, Response>();
-    const caches = { open: async () => ({ put: async (k: string, r: Response) => { m.set(k, r); } }) } as unknown as Pick<CacheStorage, 'open'>;
-    await storeMedia(caches, id, new Blob([bytes(1000)], { type: 'video/mp4' }), 1234);
-    const res = m.get(`/files/${id}`)!;
-    expect(res.headers.get('content-type')).toBe('video/mp4');
-    expect(res.headers.get('content-length')).toBe('1000');
-    expect(res.headers.get('x-relay-used')).toBe('1234');
-    expect(new Uint8Array(await res.arrayBuffer())).toEqual(bytes(1000));
-  });
-
   test('Range к /files/<id> — в сеть (не в кэш), целый GET — через кэш', () => {
     const o = 'https://relay.test';
     const range = new Request(`${o}/files/${id}`, { headers: { range: 'bytes=0-' } });

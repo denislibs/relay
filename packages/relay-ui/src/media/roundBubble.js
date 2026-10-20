@@ -77,6 +77,7 @@ export function RoundBubble(props) {
     v.muted = false; v.loop = false;
     v.play().catch(function () {});
     setS({ on: true, playing: true });
+    if (props.onPlay) props.onPlay();   // начали смотреть со звуком — приложение может докачать файл на устройство
     if (props.onListened) props.onListened();
   }
 

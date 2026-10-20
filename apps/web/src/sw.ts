@@ -1,10 +1,19 @@
 /// <reference lib="webworker" />
-// Кэш оболочки приложения: холодный старт без сети. Вложения (/files/<id> → 302 на подписанную ссылку хранилища) —
-// свой кэш relay-media (mediaCache.ts), ключ — /files/<id>, сама ссылка в кэш не попадает. Остальной API и WebSocket — только сеть.
-import { fetchMedia, isMediaRangeRequest, isMediaRequest, loadPolicy, savePolicy, serveMedia, sweepMedia, type MediaPolicy } from './mediaCache';
+// Cache Storage этого приложения:
+//   relay-app-shell@<сборка>          — код, стили, воркеры, звуки: холодный старт без сети;
+//   relay-attachments-auto-evictable  — вложения, подгруженные сами (уходят по сроку, лимиту и при нехватке места);
+//   relay-attachments-saved-by-user   — вложения, скачанные кнопкой (сами не удаляются).
+// Сведения о вложениях — в IndexedDB relay-attachments-on-device (mediaCache.ts, attachmentsOnDevice.ts).
+// Остальной API и WebSocket — только сеть.
+import type { AutoCleanupPolicy } from './attachmentsOnDevice';
+import {
+  CACHE_APP_SHELL_PREFIX, deviceStore, fetchMedia, isMediaRangeRequest, isMediaRequest, LEGACY_CACHES,
+  loadPolicy, migrateLegacyCaches, savePolicy, serveMedia, serveVideoRange, sweepAuto,
+} from './mediaCache';
 declare const __BUILD__: string;
 const sw = self as unknown as ServiceWorkerGlobalScope;
-const CACHE = 'relay-shell-' + __BUILD__;
+const CACHE = CACHE_APP_SHELL_PREFIX + __BUILD__;
+const store = deviceStore();
 declare const __SHELL__: string[];   // код и стили этой сборки с хэшем в имени (build.ts)
 const SHELL = ['/', ...__SHELL__, '/dotlottie-player.wasm', '/sounds/message.mp3', '/sounds/sent.mp3'];   // звуки сообщений — и без сети
 const API = /^\/(health|me|users|contacts|settings|privacy|blocks|chats|presence|search|uploads|files|push|sessions|ws|dev|logout|auth|link-preview|groups|join)(\/|$)/;
@@ -16,29 +25,48 @@ sw.addEventListener('install', (e) => {
 
 sw.addEventListener('activate', (e) => {
   e.waitUntil(
-    caches.keys().then((keys) => Promise.all(keys.filter((k) => k.startsWith('relay-shell-') && k !== CACHE).map((k) => caches.delete(k))))
+    caches.keys().then((keys) => Promise.all(keys
+      .filter((k) => (k.startsWith(CACHE_APP_SHELL_PREFIX) || k.startsWith(LEGACY_CACHES.shellPrefix)) && k !== CACHE)
+      .map((k) => caches.delete(k))))
       .then(() => sw.clients.claim())
+      .then(() => migrateLegacyCaches(store).catch(() => 0))
       .then(() => sweep()),
   );
 });
 
-// Очистка медиа: при старте SW, раз в SWEEP_EVERY новых записей и когда страница меняет политику.
+// Очистка auto-evictable: при старте SW, раз в SWEEP_EVERY новых файлов и когда страница меняет политику.
 const SWEEP_EVERY = 20;
 let stored = 0;
 let sweeping: Promise<unknown> | null = null;
-function sweep(policy?: MediaPolicy): Promise<unknown> {
-  sweeping ??= (async () => sweepMedia(caches, policy ?? await loadPolicy(caches)))().catch(() => {}).finally(() => { sweeping = null; });
+function sweep(policy?: AutoCleanupPolicy): Promise<unknown> {
+  sweeping ??= (async () => sweepAuto(store, policy ?? await loadPolicy(store)))().catch(() => {}).finally(() => { sweeping = null; });
   return sweeping;
 }
 
 sw.addEventListener('message', (e) => {
-  const d = e.data as { type?: string; keepDays?: number; maxMb?: number } | null;
-  // страница положила в кэш целый файл (менеджер загрузок) — проверить лимит
-  if (d?.type === 'mediaSweep') { e.waitUntil(sweep()); return; }
-  if (d?.type !== 'mediaPolicy') return;
-  const p: MediaPolicy = { keepDays: Math.max(0, Number(d.keepDays) || 0), maxMb: Math.max(0, Number(d.maxMb) || 0) };
-  e.waitUntil(savePolicy(caches, p).then(() => sweep(p)).catch(() => {}));
+  const d = e.data as { type?: string; keepAutoDays?: number; maxAutoMb?: number } | null;
+  // страница положила файл в auto-evictable (менеджер загрузок) — проверить лимит
+  if (d?.type === 'attachments:sweep-auto') { e.waitUntil(sweep()); return; }
+  if (d?.type !== 'attachments:set-auto-cleanup-policy') return;
+  const p: AutoCleanupPolicy = { keepAutoDays: Math.max(0, Number(d.keepAutoDays) || 0), maxAutoMb: Math.max(0, Number(d.maxAutoMb) || 0) };
+  e.waitUntil(savePolicy(store, p).then(() => sweep(p)).catch(() => {}));
 });
+
+/** Кусок вложения из сети в режиме cors: байты и Content-Range читаются (хранилище их открывает). */
+const corsRange = (url: string, range: string) => fetch(new Request(url, { mode: 'cors', credentials: 'same-origin', headers: { range } }));
+
+/**
+ * Часть видео из сети — тоже своим ответом (поток, не читаем в память): все части одного видео плеер получает
+ * одинаковыми, а не вперемешку «наш ответ» и «непрозрачный чужой» — Chrome такую смесь не играет.
+ * cors не прошёл (хранилище без CORS) — исходный запрос как есть, без кэша начала.
+ */
+async function rangeFromNetwork(req: Request): Promise<Response> {
+  let res: Response;
+  try { res = await corsRange(req.url, req.headers.get('range') ?? 'bytes=0-'); } catch { return fetch(req); }
+  const h = new Headers();
+  for (const k of ['content-type', 'content-length', 'content-range', 'accept-ranges']) { const v = res.headers.get(k); if (v) h.set(k, v); }
+  return new Response(res.body, { status: res.status, statusText: res.statusText, headers: h });
+}
 
 /** Сеть, но не дольше ms: потом — кэш, если он есть (иначе продолжаем ждать сеть). */
 function networkFirst(req: Request, fallback: () => Promise<Response | undefined>, ms = 3000): Promise<Response> {
@@ -58,22 +86,24 @@ function networkFirst(req: Request, fallback: () => Promise<Response | undefined
 sw.addEventListener('fetch', (e) => {
   const url = new URL(e.request.url);
   if (isMediaRequest(e.request, location.origin) && e.request.mode !== 'navigate') {
-    e.respondWith(serveMedia(caches, e.request, (r) => fetchMedia(r)).then(({ response, background, stored: put }) => {
+    e.respondWith(serveMedia(store, e.request, (r) => fetchMedia(r)).then(({ response, background, stored: put }) => {
       if (background) e.waitUntil(background.then(() => { if (put && ++stored % SWEEP_EVERY === 0) return sweep(); }));
       return response;
     }));
     return;
   }
-  // часть видео/аудио — в сеть как есть, через /files/<id>: плеер не застрянет на истёкшей ссылке хранилища
-  // (без SW Chrome после перемотки идёт прямо по старой ссылке). Части не кэшируем: в кэше только целые файлы.
+  // часть видео/аудио — через /files/…: плеер не застрянет на истёкшей ссылке хранилища (без SW Chrome после
+  // перемотки идёт прямо по старой ссылке). Начало видео — из кэша кусков (serveVideoRange), остальное — сеть.
   if (isMediaRangeRequest(e.request, location.origin)) {
-    e.respondWith(fetch(e.request));
+    e.respondWith(serveVideoRange(store, e.request, rangeFromNetwork, (u, range) => corsRange(u, range))
+      .then(({ response, background }) => { if (background) e.waitUntil(background); return response; })
+      .catch(() => fetch(e.request)));
     return;
   }
   if (e.request.method !== 'GET' || url.origin !== location.origin || API.test(url.pathname) || url.pathname === '/version.json' || url.pathname === '/sw.js') return;
   if (e.request.mode === 'navigate') {
     // свежая разметка, но плохая сеть не держит дольше 3 с — тогда оболочка из кэша
-    e.respondWith(networkFirst(e.request, async () => caches.match('/')).catch(() => Response.error()));
+    e.respondWith(networkFirst(e.request, async () => (await caches.open(CACHE)).match('/')).catch(() => Response.error()));
     return;
   }
   // Сначала кэш этой сборки. Он и есть версия: имя CACHE содержит __BUILD__, новая сборка меняет sw.js →

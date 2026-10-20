@@ -21,6 +21,7 @@ export * from './media/playerBar.js';
 export * from './media/roundRecorder.js';
 export * from './media/roundView.js';
 export * from './media/roundBubble.js';
+export * from './media/videoPlayer.js';
 export * from './sticker.js';
 export * from './modal.js';
 export * from './calendar.js';

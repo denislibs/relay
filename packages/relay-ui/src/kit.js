@@ -3,6 +3,7 @@ import { useState, useRef, useEffect, useLayoutEffect, useContext } from 'preact
 import { createPortal } from 'preact/compat';
 import { MentionList } from './more.js';
 import { requestMeasure, requestMutation, beginHeavyAnimation, onHeavyAnimationEnd, isHeavyAnimating, forceMeasure } from './schedule.js';
+import { VideoPlayer } from './media/videoPlayer.js';
 
 /* Relay UI kit — Preact. Ported 1:1 from the original kit; see index.js for the public surface. */
 
@@ -149,6 +150,7 @@ var ICONS = {
   divider: ['M4 12h16', 'M8 7h8', 'M8 17h8'],
   text: ['M5 6h14', 'M12 6v13', 'M9 19h6'],
   expand: ['M14 4h6v6', 'M20 4l-7 7', 'M10 20H4v-6', 'M4 20l7-7'],
+  pip: ['M4 6.5A1.5 1.5 0 0 1 5.5 5h13A1.5 1.5 0 0 1 20 6.5v11a1.5 1.5 0 0 1-1.5 1.5h-13A1.5 1.5 0 0 1 4 17.5z', 'M12.5 12h5v4.5h-5z'],
   collapse: ['M4 14h6v6', 'M4 20l6-6', 'M20 10h-6V4', 'M20 4l-6 6'],
   article: ['M6 3h9l4 4v14H6z', 'M14 3v5h5', 'M9 12h7', 'M9 16h7'],
   listOrdered: ['M10 6h10', 'M10 12h10', 'M10 18h10', 'M4 5l1.5-1v5', 'M4 15.5a1.5 1.5 0 0 1 3 0c0 1.5-3 2.5-3 3.5h3'],
@@ -1117,10 +1119,10 @@ function MediaViewer(props) {
   var q = qs ? qs[Math.min(quality[0], qs.length - 1)] : null;
   var videoSrc = q ? q.src : it.src;
   useVideoRecovery(videoEl, real && it.kind === 'video' ? videoSrc : null);
-  function switchQuality() {
+  function switchQuality(k) {
     var v = videoEl.current;
     resume.current = v ? { t: v.currentTime, paused: v.paused } : null;
-    quality[1](function (x) { return (x + 1) % qs.length; });
+    quality[1](function (x) { return typeof k === 'number' ? k : (x + 1) % qs.length; });
   }
   function source(k) { return props.origin ? props.origin(k) : null; }
   function hide(el) {   // скрыть миниатюру под просмотром (прежнюю — вернуть); только в фазе записи
@@ -1191,6 +1193,8 @@ function MediaViewer(props) {
   // клавиши — где бы ни был фокус
   useEffect(function () {
     var onKey = function (e) {
+      // в видео стрелки мотают (плеер), а не листают
+      if ((e.key === 'ArrowRight' || e.key === 'ArrowLeft') && real && it.kind === 'video') return;
       if (e.key === 'ArrowRight') go(1);
       else if (e.key === 'ArrowLeft') go(-1);
       else if (e.key === 'Escape') { e.stopPropagation(); close(); }
@@ -1204,8 +1208,9 @@ function MediaViewer(props) {
     ? h('div', { class: 'rl-viewer-box', ref: box, style: rect ? { left: rect.left + 'px', top: rect.top + 'px', width: rect.width + 'px', height: rect.height + 'px' } : null },
         it.thumb ? h('img', { class: 'rl-viewer-thumb', src: it.thumb, alt: '', 'aria-hidden': 'true' }) : null,
         it.kind === 'video'
-          // видео из сообщения: играет со звуком и своими кнопками браузера (время, громкость, скорость, PiP, во весь экран)
-          ? h('video', { key: videoSrc, ref: videoEl, class: 'rl-viewer-img rl-viewer-video', src: videoSrc, poster: it.thumb || undefined, controls: true, autoPlay: true, playsInline: true,
+          // видео из сообщения: свой плеер (полоса, громкость, скорость, качество, PiP, во весь экран, клавиши)
+          ? h(VideoPlayer, { src: videoSrc, videoRef: videoEl, poster: it.thumb || undefined,
+              qualities: qs, quality: qs ? Math.min(quality[0], qs.length - 1) : 0, onQuality: switchQuality,
               onLoadedMetadata: function (e) { var r = resume.current, v = e.currentTarget; resume.current = null; if (!r) return; v.currentTime = r.t; if (r.paused) v.pause(); } })
           : h('img', { class: 'rl-viewer-img', src: it.src, alt: it.caption || '', decoding: 'async' }),
         // видео-аватарка и т.п.: зацикленное видео без звука поверх кадра-обложки
@@ -1225,13 +1230,13 @@ function MediaViewer(props) {
       props.actions ? props.actions(it, i).map(function (a) {
         return h(IconButton, { key: a.label, icon: a.icon, label: a.label, class: a.danger ? 'rl-viewer-danger' : undefined, onClick: a.onClick });
       }) : [h(IconButton, { key: 'z', icon: 'zoomIn', label: 'Увеличить' }), h(IconButton, { key: 'r', icon: 'reply', label: 'Ответить' })],
-      q ? h('button', { type: 'button', class: 'rl-viewer-quality', onClick: switchQuality, 'aria-label': 'Качество: ' + q.label, title: 'Качество видео' }, q.label) : null,
       real ? h('a', { class: 'rl-iconbtn', href: it.download || it.src, download: it.name || '', 'aria-label': 'Скачать', title: 'Скачать' }, h(Icon, { name: 'download', size: 24 })) : h(IconButton, { icon: 'download', label: 'Скачать' }),
       h(IconButton, { icon: 'close', label: 'Закрыть', onClick: close })),
     real ? media : null,
     h('div', { class: 'rl-viewer-stage' },
       h(IconButton, { icon: 'chevronLeft', label: 'Предыдущее', filled: true, class: 'rl-viewer-nav', disabled: i === 0, onClick: function () { go(-1); } }),
-      real ? h('div', { class: 'rl-viewer-spacer', onClick: close }) : media,
+      // видео: середина пропускает клики к плееру (мимо видео закрывает фон под ним)
+      real ? h('div', { class: cx('rl-viewer-spacer', it.kind === 'video' && 'rl-viewer-spacer-pass'), onClick: close }) : media,
       h(IconButton, { icon: 'chevronRight', label: 'Следующее', filled: true, class: 'rl-viewer-nav', disabled: i === items.length - 1, onClick: function () { go(1); } })),
     real && it.caption ? h('div', { class: 'rl-viewer-caption' }, it.caption) : null,
     real ? null : h('div', { class: 'rl-viewer-strip' }, items.map(function (x, k) {

@@ -109,13 +109,15 @@ export function Data() {
               <>
                 <InfoRow icon="chats" title={info.exact ? 'Чаты и сообщения' : 'Данные приложения'} subtitle={dbRowsLabel(info.rows)} value={formatBytes(info.db)} />
                 <InfoRow icon="image" title="Медиа" subtitle={info.files ? `${filesLabel(info.files)} — открываются без сети` : undefined} value={(info.approx ? '≈ ' : '') + formatBytes(info.media)} />
+                {info.savedFiles ? <InfoRow icon="download" title="Скачано вами" subtitle={`${filesLabel(info.savedFiles)} — сами не удаляются`} value={formatBytes(info.savedBytes ?? 0)} /> : null}
+                {info.persisted === false ? <InfoRow icon="info" title="Хранилище не закреплено" subtitle="При нехватке места браузер может удалить данные Relay с устройства" /> : null}
               </>
             )}
           </div>
           <InfoRow icon="cloud" title="Чаты на устройстве" subtitle={`${chats} — доступны без сети`} />
           <InfoRow icon="history" title="Синхронизация" subtitle={status.phase === 'ready' ? (status.outbox ? `В очереди: ${status.outbox}` : 'Всё сохранено на сервере') : status.phase === 'offline' ? 'Ждём сеть' : 'Идёт обновление'} />
         </Section>
-        <Section title="Кэш медиа" footer="Фото, видео и файлы, к которым давно не обращались, удаляются с устройства сами. При необходимости они скачаются снова.">
+        <Section title="Кэш медиа" footer="Фото, видео и файлы, к которым давно не обращались, удаляются с устройства сами. При необходимости они скачаются снова. Скачанное кнопкой не удаляется — только очисткой ниже.">
           <RangeRow
             label="Хранить медиа" min={0} max={KEEP_DAYS.length - 1} step={1} value={Math.max(0, KEEP_DAYS.indexOf(media.keepDays))}
             format={(i: number) => KEEP_LABEL[KEEP_DAYS[i]]}
