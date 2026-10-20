@@ -2186,33 +2186,32 @@ html[data-blur="0"] .rl-menu { -webkit-backdrop-filter: none; backdrop-filter: n
 @media (max-width: 520px) { .rl-vp-time { display: none; } .rl-vp-vol:hover .rl-vp-range { width: 0; opacity: 0; margin: 0; } }
 @media (prefers-reduced-motion: reduce) { .rl-vp-bar, .rl-vp-center, .rl-vp-knob, .rl-vp-rail, .rl-vp-menu { transition: none; animation: none; } }
 
-/* ---------- Сквиркл: «острова» и плавающие карточки (как в Telegram) ----------
+/* ---------- Сквиркл — только там, где он у Telegram (telegram-tt и живой web.telegram.org) ----------
    corner-shape: squircle — плавная кривизна угла, как у значков iOS. При том же радиусе такой угол острее круга,
    поэтому радиус больше (×1.6): визуально угол того же размера, только мягче. Где свойство не поддерживается
-   (Safari, Firefox), блок целиком не применяется — остаются обычные скругления. Пузыри не трогаем: у них хвостики. */
+   (Safari, Firefox), блок целиком не применяется — остаются обычные скругления.
+   У Telegram: колонки (#LeftColumn, #RightColumn, папки), острова правой колонки, строки списков (.ListItem-button),
+   меню (.Menu .bubble), модальные окна (.modal-dialog). Шапка чата, поле ввода, полный редактор, вкладки, баннеры,
+   тосты, карточки входа — обычные скругления. */
 @supports (corner-shape: squircle) {
   :root { --sq: 1.6; }
-  .rl-sect-card, .rl-settings-group, .rl-aside-group, .rl-banner, .rl-toast { corner-shape: squircle; border-radius: calc(var(--radius-lg) * var(--sq)); }
-  /* правая колонка: и карточка, и сам aside — на узком экране тень и радиус у него, форма должна совпадать */
-  /* шапка чата, поле ввода, полосы выбора и поиска — у Telegram обычные «таблетки» без сквиркла, их не трогаем */
-  .rl-sidecard, .rl-frail, .rl-shell-aside, .rl-shell-aside > .rl-panel, .rl-shell .rl-recorder .rl-rec-body {
-    corner-shape: squircle; border-radius: calc(var(--radius-panel) * var(--sq)); }
-  .rl-card { corner-shape: squircle; border-radius: calc(var(--radius-xxl) * var(--sq)); }
-  /* полоса вкладок — как шапка, обычная круглая «таблетка» (у Telegram без сквиркла) */
-  .rl-menu { corner-shape: squircle; border-radius: calc(14px * var(--sq)); }
-  /* строки списков (как ListItem в Telegram): подсветка строки чата и строк настроек — той же формы */
+  /* колонки */
+  .rl-sidecard, .rl-frail, .rl-shell-aside, .rl-shell-aside > .rl-panel { corner-shape: squircle; border-radius: calc(var(--radius-panel) * var(--sq)); }
+  /* острова правой колонки («Информация») */
+  .rl-aside-group { corner-shape: squircle; border-radius: calc(var(--radius-lg) * var(--sq)); }
+  /* строки списков (ListItem): чаты, участники, «Информация», настройки — сами секции настроек без сквиркла */
   .rl-row { corner-shape: squircle; border-radius: calc(var(--radius-lg) * var(--sq)); }
   .rl-sidecard .rl-row { border-radius: calc(var(--radius-md) * var(--sq)); }
-  .rl-settings .rl-inforow, .rl-aside-group .rl-inforow { corner-shape: squircle; border-radius: calc(var(--radius-md) * var(--sq)); }
+  .rl-aside-group .rl-inforow, .rl-settings .rl-inforow { corner-shape: squircle; border-radius: calc(var(--radius-md) * var(--sq)); }
   .rl-sect-card :is(.rl-inforow, .rl-optrow, .rl-selrow) { corner-shape: squircle; border-radius: calc((var(--radius-lg) - var(--space-2)) * var(--sq)); }
-  /* модальные окна: радиус и так большой — увеличиваем меньше */
+  /* меню и модальные окна */
+  .rl-menu { corner-shape: squircle; border-radius: calc(14px * var(--sq)); }
   .rl-mdl-dialog { corner-shape: squircle; border-radius: calc(2rem * 1.3); }
 }
 
 /* ---------- «Информация»: острова и строки компактные, как в Telegram ----------
-   строка 48px, отступы 16px, у острова лёгкая тень; плитка значка со сквирклом и лёгким бликом */
+   строка 48px, отступы 16px, у острова лёгкая тень; плитка значка с лёгким бликом */
 .rl-aside-group { padding: var(--space-2); box-shadow: 0 1px 4px rgba(0, 0, 0, .05); }
 .rl-aside-group .rl-inforow { min-height: 48px; gap: var(--space-5); padding: 6px var(--space-4); }
 .rl-aside-group .rl-inforow-text small { font-size: 13px; line-height: 18px; }
 .rl-sicon { background-image: linear-gradient(180deg, rgba(255, 255, 255, .14), rgba(0, 0, 0, .06)); }
-@supports (corner-shape: squircle) { .rl-sicon { corner-shape: squircle; border-radius: 12px; } }
