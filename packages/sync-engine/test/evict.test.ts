@@ -1,0 +1,255 @@
+import { afterAll, afterEach, beforeEach, expect, test } from 'bun:test';
+import { sendMessage } from '../../../apps/server/src/domain/messages';
+import { Engine } from '../src/engine';
+import { evict, EVICT_LIMITS, trimRanges, type EvictKeep } from '../src/evict';
+import { openDb, termsOf } from '../src/idb';
+import { Store } from '../src/store';
+import { PENDING_BASE, type LocalChat, type LocalMessage } from '../src/types';
+import { resetDb, startTestServer, watchInto } from './helpers';
+
+const ME = 1;
+const keepNone = (): EvictKeep => ({ windows: new Map(), people: new Set(), members: new Set() });
+const all = <T>(db: IDBDatabase, store: string) => new Promise<T[]>((res, rej) => { const r = db.transaction(store).objectStore(store).getAll(); r.onsuccess = () => res(r.result as T[]); r.onerror = () => rej(r.error); });
+const count = (db: IDBDatabase, store: string) => new Promise<number>((res, rej) => { const r = db.transaction(store).objectStore(store).count(); r.onsuccess = () => res(r.result); r.onerror = () => rej(r.error); });
+
+const row = (chatId: number, id: number, p: Partial<LocalMessage> = {}): LocalMessage => ({
+  key: `k${id}`, clientId: `k${id}`, id, chatId, senderId: 2, body: '', replyToId: null, createdAt: new Date(1_700_000_000_000 + id).toISOString(),
+  status: 'sent', sort: id, kind: 'text', attachment: null, entities: [], reactions: [], ...p,
+});
+const chatRow = (id: number, last: LocalMessage, p: Partial<LocalChat> = {}): LocalChat => ({
+  id, kind: 'direct', lastReadId: 0, unread: 0, knownMaxId: last.id!, peerReadUpTo: 0, ranges: [], peerId: null, last, lastAt: last.createdAt, ...p,
+});
+
+/** Кэш прямо в IDB (как после прошлых запусков): чаты, сообщения и слова указателя. */
+async function seed(name: string, chats: { chat: LocalChat; msgs: LocalMessage[] }[]): Promise<IDBDatabase> {
+  const db = await openDb(name);
+  const t = db.transaction(['chats', 'messages', 'terms'], 'readwrite');
+  for (const { chat, msgs } of chats) {
+    t.objectStore('chats').put(chat);
+    for (const m of msgs) {
+      t.objectStore('messages').put(m);
+      for (const term of termsOf(m)) t.objectStore('terms').put({ term, chatId: m.chatId, sort: m.sort, key: m.key });
+    }
+  }
+  await new Promise<void>((res, rej) => { t.oncomplete = () => res(); t.onerror = () => rej(t.error); });
+  return db;
+}
+
+test('ranges shrink around evicted messages and never claim what is gone', () => {
+  // [1..1000] подряд, оставили от 501 и закреплённое 100: два отрезка
+  const removed = Array.from({ length: 500 }, (_, i) => i + 1).filter((s) => s !== 100);
+  expect(trimRanges([[1, 1000]], 501, removed, [100])).toEqual([[100, 100], [501, 1000]]);
+  // ничего не стёрто в отрезке — он прежний; отрезок целиком стёрт — пропал
+  const low = [1, 2, 3, 4, 5, 10, 11, 13, 14, 15, 16, 17, 18, 19, 20];
+  expect(trimRanges([[1, 5], [10, 20], [30, 40]], 30, low, [12])).toEqual([[12, 12], [30, 40]]);
+  expect(trimRanges([[10, 20], [30, 40]], 15, [10, 12], [])).toEqual([[15, 20], [30, 40]]);
+});
+
+/**
+ * Большой кэш: 120 чатов по P (чат 7 — P + 20), всего ≥ 120·P; пределы — согласованные, делённые на k.
+ * k = 1 — ровно 60 000 → ≤ 50 000. fake-indexeddb стирает строку за время, растущее с размером хранилища
+ * (~20 мс при 60 000), поэтому полный размер — по RELAY_SLOW_TESTS=1 (минуты), в обычном прогоне — k = 10.
+ */
+async function bigCase(k: number) {
+  const P = EVICT_LIMITS.perChat / k, T = EVICT_LIMITS.total / k, S = EVICT_LIMITS.stale / k;
+  const limits = { ...EVICT_LIMITS, perChat: P, total: T, stale: S };
+  const name = 'evict-' + crypto.randomUUID();
+  const chats: { chat: LocalChat; msgs: LocalMessage[] }[] = [];
+  for (let c = 1; c <= 120; c++) {
+    const n = c === 7 ? P + 20 : P, base = c * 1000;
+    const msgs = Array.from({ length: n }, (_, j) => row(c, base + j + 1));
+    if (c === 120) {
+      for (let j = 5; j < 15; j++) msgs[j].body = 'alpha bravo';                           // уйдут — их слова тоже
+      msgs[n - 1].body = 'omega';                                                         // последнее — останется
+      msgs[4] = { ...msgs[4], kind: 'photo', attachment: { id: 'a1', kind: 'photo', mime: 'image/jpeg', name: 'p.jpg', size: 1, w: 1, h: 1 } };
+    }
+    const last = msgs[n - 1];
+    chats.push({ chat: chatRow(c, last, {
+      ranges: [[base + 1, base + n]], historyStart: true,
+      ...(c <= 30 ? { openedAt: Date.now() - c * 1000 } : {}),   // недавно открытые — остаются по P
+      // 120 — самый давний (последнее сообщение старее всех): урезается первым
+      ...(c === 120 ? { pinned: [base + 3], mediaDone: { media: base + 1 }, lastAt: '2000-01-01T00:00:00.000Z' } : {}),
+    }), msgs });
+  }
+  const db = await seed(name, chats);
+  const s = await Store.open(db, ME);
+  const clientId = crypto.randomUUID();
+  s.addPending({ clientId, chatId: 60, body: 'unsent', createdAt: Date.now(), replyToId: null, failed: false });
+  await s.flush();
+  const before = 120 * P + 21;
+  expect(await count(db, 'messages')).toBe(before);
+  if (k === 1) expect(before).toBeGreaterThanOrEqual(60_000);
+
+  // в чате 7 открыто окно в старой истории: 7001..7005
+  const keep = keepNone();
+  keep.windows.set(7, new Set(Array.from({ length: 5 }, (_, j) => `k${7001 + j}`)));
+  const t0 = Date.now();
+  const st = await evict(s, db, keep, limits);
+  const msgs = await all<LocalMessage>(db, 'messages');
+  expect(msgs.length).toBeLessThanOrEqual(T);
+  expect(st.messages).toBe(before - msgs.length);
+  const keys = new Set(msgs.map((m) => m.key));
+  for (let c = 1; c <= 120; c++) expect(keys.has(s.chats.get(c)!.last!.key)).toBe(true);   // последнее каждого чата
+  expect(keys.has(clientId)).toBe(true);                                                   // неотправленное
+  expect(msgs.find((m) => m.key === clientId)!.sort).toBeGreaterThanOrEqual(PENDING_BASE);
+  expect(keys.has('k120003')).toBe(true);                                                  // закреплённое
+  for (let j = 0; j < 5; j++) expect(keys.has(`k${7001 + j}`)).toBe(true);                // открытое окно
+
+  // недавно открытые — последние P; чат 7 — P + окно; давно не открытый (120) — S
+  const per = (c: number) => msgs.filter((m) => m.chatId === c && m.id != null).length;
+  expect(per(1)).toBe(P);
+  expect(per(7)).toBe(P + 5);
+  expect(per(120)).toBe(S + 1);   // S + закреплённое
+
+  // отрезки: чат 7 — окно отдельно (оно от начала истории — начало остаётся), последние P подряд
+  expect(s.chats.get(7)!.ranges).toEqual([[7001, 7005], [7021, 7020 + P]]);
+  expect(s.chats.get(7)!.historyStart).toBe(true);
+  // чат 120: начало стёрто — история уже не от начала
+  expect(s.chats.get(120)!.ranges).toEqual([[120003, 120003], [120000 + P - S + 1, 120000 + P]]);
+  expect(s.chats.get(120)!.historyStart).toBeUndefined();
+  expect(s.chats.get(1)!.ranges).toEqual([[1001, 1000 + P]]);
+  expect(s.chats.get(1)!.historyStart).toBe(true);
+  // вкладка медиа потеряла сообщения — заново с сервера
+  expect(s.chats.get(120)!.mediaDone).toBeUndefined();
+  // слова стёртых сообщений — тоже; последнего — на месте
+  const terms = await all<{ term: string; chatId: number }>(db, 'terms');
+  expect(terms.filter((r) => r.term === 'alpha' || r.term === 'bravo')).toEqual([]);
+  expect(terms.filter((r) => r.term === 'omega')).toHaveLength(1);
+  // строки чатов на диске — с новыми отрезками (переживут перезапуск)
+  const again = await Store.open(await openDb(name), ME);
+  expect(again.chats.get(7)!.ranges).toEqual([[7001, 7005], [7021, 7020 + P]]);
+  console.log(`evict ${before} → ${msgs.length}: ${Date.now() - t0} ms`);
+}
+
+test('big cache (limits / 10): last, unsent, pinned and the open window intact; ranges and terms follow', () => bigCase(10), 60_000);
+test.if(!!process.env.RELAY_SLOW_TESTS)('60 000 messages → at most 50 000 left (full size, slow on fake-indexeddb)', () => bigCase(1), 900_000);
+
+test('loaded chat: evicted messages leave memory too', async () => {
+  const name = 'evict-' + crypto.randomUUID();
+  const msgs = Array.from({ length: 30 }, (_, j) => row(5, 100 + j, { body: 'w' + j }));
+  const db = await seed(name, [{ chat: chatRow(5, msgs[29], { ranges: [[100, 129]] }), msgs }]);
+  const s = await Store.open(db, ME);
+  s.applyUpdate({ type: 'messageDeleted', chatId: 5, id: 101 } as never);   // не загружен — правка строки в очереди
+  await s.loadChatMessages(5);
+  s.applyUpdate({ type: 'messageEdited', chatId: 5, id: 102, body: 'changed', editedAt: new Date().toISOString() } as never);
+  await evict(s, db, keepNone(), { ...EVICT_LIMITS, perChat: 10 });
+  expect(s.chatMessages(5).map((m) => m.id)).toEqual(Array.from({ length: 10 }, (_, j) => 120 + j));
+  expect(s.chats.get(5)!.ranges).toEqual([[120, 129]]);
+  expect(s.termsDirty).toBe(false);
+  expect((await all<LocalMessage>(db, 'messages')).length).toBe(10);
+});
+
+test('people: over the limit, unreferenced are removed with their profile lists; referenced stay', async () => {
+  const name = 'evict-' + crypto.randomUUID();
+  const msgs = [row(9, 10, { senderId: 50 }), row(9, 11, { senderId: 51, reactions: [{ userId: 52, emoji: '👍' }] })];
+  const db = await seed(name, [{ chat: chatRow(9, msgs[1], { ranges: [[10, 11]], kind: 'group', group: { members: 3 } as never }), msgs },
+    { chat: chatRow(10, row(10, 20, { senderId: 60 }), { peerId: 60, ranges: [[20, 20]] }), msgs: [row(10, 20, { senderId: 60 })] }]);
+  const s = await Store.open(db, ME);
+  for (let id = 50; id <= 80; id++) s.profile.applyPeer({ id, name: 'u' + id });
+  s.members.applySnapshot(9, [{ userId: 70, role: 'member', rank: null }], 0);
+  s.contacts.table.put(71, { userId: 71, firstName: 'c', lastName: '' } as never, 0);
+  s.blocks.table.put(72, { userId: 72 } as never, 0);
+  s.quotes.set('9:5', { id: 5, sort: 5, body: '', senderId: 73 });
+  s.profileLists.applyMusic(80, [{ id: 't1', title: 't', duration: 1, mime: 'audio/mpeg', addedAt: new Date().toISOString() }]);
+  s.profileLists.applyMusic(74, [{ id: 't2', title: 't', duration: 1, mime: 'audio/mpeg', addedAt: new Date().toISOString() }]);
+  await s.flush();
+  const keep = keepNone();
+  keep.people.add(74);   // интерфейс подписан на человека
+  const st = await evict(s, db, keep, { ...EVICT_LIMITS, people: 5 });
+  const left = new Set((await all<{ id: number }>(db, 'users')).map((u) => u.id));
+  for (const id of [50, 51, 52, 60, 70, 71, 72, 73, 74]) expect(left.has(id)).toBe(true);
+  for (const id of [53, 61, 75, 80]) expect(left.has(id)).toBe(false);
+  expect(st.users).toBe(31 - 9);
+  // списки удалённого — вместе с ним; подписанного — на месте
+  const music = await all<{ userId: number }>(db, 'profileMusic');
+  expect(music.map((r) => r.userId)).toEqual([74]);
+  expect(s.profileLists.loaded('m:80')).toBe(false);
+  // под пределом — никого не трогаем
+  const st2 = await evict(s, db, keepNone(), { ...EVICT_LIMITS, people: 5_000 });
+  expect(st2.users).toBe(0);
+});
+
+test('members: a big group keeps the first 200; an open members list is not touched', async () => {
+  const name = 'evict-' + crypto.randomUUID();
+  const m1 = row(3, 1), m2 = row(4, 2);
+  const db = await seed(name, [
+    { chat: chatRow(3, m1, { kind: 'group', group: { members: 1500 } as never, membersDone: false, ranges: [[1, 1]] }), msgs: [m1] },
+    { chat: chatRow(4, m2, { kind: 'group', group: { members: 1500 } as never, membersDone: false, ranges: [[2, 2]] }), msgs: [m2] },
+  ]);
+  const s = await Store.open(db, ME);
+  const list = Array.from({ length: 260 }, (_, i) => ({ userId: 100 + i, role: 'member' as const, rank: null }));
+  s.members.applySnapshot(3, list, 0);   // журнал дописал участников сверх 200
+  s.members.applySnapshot(4, list, 0);
+  await s.flush();
+  const keep = keepNone();
+  keep.members.add(4);
+  await evict(s, db, keep);
+  expect(s.members.list(3).map((r) => r.userId)).toEqual(list.slice(0, 200).map((m) => m.userId));
+  expect(s.members.list(4)).toHaveLength(260);
+  expect((await all<{ chatId: number }>(db, 'members')).filter((r) => r.chatId === 3)).toHaveLength(200);
+});
+
+// ---------- движок с сервером ----------
+
+const srv = await startTestServer();
+afterAll(() => srv.stop());
+const engines: Engine[] = [];
+beforeEach(resetDb);
+afterEach(async () => { for (const e of engines.splice(0)) await e.close(); });
+
+test('feed after eviction pages older history from the server again', async () => {
+  const a = await srv.login('a'), b = await srv.login('b');
+  const chatId = await srv.chat(a.token, [a.userId, b.userId]);
+  const ids: number[] = [];
+  for (let i = 0; i < 40; i++) ids.push((await sendMessage(a.userId, { chatId, clientId: crypto.randomUUID(), body: 'm' + i })).message.id);
+  const eb = await Engine.open({ ...srv.config(b), historyPage: 20 });
+  engines.push(eb);
+  eb.connect();
+  await eb.whenIdle();
+  const feed = watchInto(eb, { kind: 'messages', chatId, limit: 60 });
+  await feed.until((l) => l.length === 40);
+  await eb.whenIdle();
+  const chat = () => eb.store.chats.get(chatId)!;
+  expect(chat().ranges).toEqual([[ids[0], ids[39]]]);
+  expect(chat().historyStart).toBe(true);
+  feed.handle.close();
+
+  await eb.evict({ ...EVICT_LIMITS, perChat: 10 });
+  expect(chat().ranges).toEqual([[ids[30], ids[39]]]);
+  expect(chat().historyStart).toBeUndefined();
+  expect(eb.store.chatMessages(chatId).map((m) => m.id)).toEqual(ids.slice(30));
+
+  // окно на 10 — есть старее (история уже не от начала)
+  const small = watchInto(eb, { kind: 'messages', chatId, limit: 10 });
+  await small.until((l) => l.length === 10);
+  const meta = () => small.patches.flatMap((p) => (p.op === 'snapshot' ? p.items : p.upsert)).filter((i) => i.key === '~window').pop();
+  expect(meta()!.hasOlder).toBe(true);
+  small.handle.close();
+  // окно больше — догружает старое с сервера, отрезок снова от начала
+  const big = watchInto(eb, { kind: 'messages', chatId, limit: 40 });
+  await big.until((l) => l.length === 40);
+  await eb.whenIdle();
+  expect(big.list().map((m) => m.id)).toEqual(ids);
+  expect(chat().ranges).toEqual([[ids[0], ids[39]]]);
+  expect(chat().historyStart).toBe(true);
+});
+
+test('eviction runs on its own after a flush when idle, at most once per period', async () => {
+  const a = await srv.login('a'), b = await srv.login('b');
+  const chatId = await srv.chat(a.token, [a.userId, b.userId]);
+  for (let i = 0; i < 5; i++) await sendMessage(a.userId, { chatId, clientId: crypto.randomUUID(), body: 'm' + i });
+  const eb = await Engine.open({ ...srv.config(b), evictDelayMs: 20, evictEveryMs: 60_000 });
+  engines.push(eb);
+  const runs: unknown[] = [];
+  const orig = eb.evict.bind(eb);
+  eb.evict = (l) => { runs.push(l); return orig(l); };
+  eb.connect();
+  await eb.whenIdle();
+  await Bun.sleep(100);
+  await eb.whenIdle();
+  expect(runs.length).toBe(1);
+  await sendMessage(a.userId, { chatId, clientId: crypto.randomUUID(), body: 'more' });
+  await Bun.sleep(100);
+  await eb.whenIdle();
+  expect(runs.length).toBe(1);   // не чаще раза в период
+});

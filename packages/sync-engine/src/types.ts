@@ -71,6 +71,7 @@ export interface LocalChat {
   mediaCountsAt?: number; // до какого id сообщения уже учтены в mediaCounts (новее — прибавляются по приходу)
   /** вкладка известна подряд от новых: true — целиком, число — с этого id (страницы старше просим с него) */
   mediaDone?: Partial<Record<MediaTab, number | true>>;
+  openedAt?: number;      // когда ленту чата открывали в последний раз (мс): уборка урезает давно не открытые (evict.ts)
 }
 
 export interface OutboxEntry {
@@ -245,6 +246,9 @@ export interface EngineConfig {
   syncTimeoutMs?: number;
   /** dev, только под имитатором потерь: сколько ждать ack/err после потерянного кадра, прежде чем считать соединение мёртвым (по умолчанию 15000) */
   requestTimeoutMs?: number;
+  /** уборка кэша (evict.ts): через сколько после записи в IDB, мс (по умолчанию 5000), и не чаще чем (по умолчанию 10 минут) */
+  evictDelayMs?: number;
+  evictEveryMs?: number;
   typingMs?: number;      // сколько держать «печатает…» после последнего кадра (по умолчанию 6000)   // диалогов в странице (по умолчанию 100)
 }
 

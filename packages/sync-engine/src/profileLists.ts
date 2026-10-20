@@ -46,6 +46,16 @@ class PerUser<T extends { userId: number }> {
     return changed;
   }
 
+  /** Уборка: строки человека (все или сверх max — старше по order). Вернёт, сколько убрано. */
+  drop(userId: number, max = 0, newer?: (a: T, b: T) => number): number {
+    let list = this.rows(userId);
+    if (newer) list = list.sort(newer).slice(max);
+    for (const r of list) { const k = this.key(r); this.table.delete(k); this.byUser.get(userId)?.delete(k); }
+    if (!this.byUser.get(userId)?.size) this.byUser.delete(userId);
+    return list.length;
+  }
+  users(): number[] { return [...this.byUser.keys()]; }
+
   /** Ключи IndexedDB — [userId, id]. */
   collect(num: boolean): { put: unknown[]; del: [number, string | number][] } {
     const { put, del } = this.table.collect();
@@ -130,6 +140,22 @@ export class ProfileLists {
     const meta = this.persist ? { k: 'profileLists', v: { marks: [...this.marks], totals: [...this.totals] } } : null;
     this.persist = false;
     return { music: this.music.collect(false), photos: this.photos.collect(true), meta };
+  }
+
+  /** Уборка (evict.ts): человека больше нет в кэше — его списки и отметки о загрузке тоже. */
+  dropUser(userId: number): void {
+    const had = this.music.drop(userId) + this.photos.drop(userId);
+    for (const tag of ['m:' + userId, 'p:' + userId]) if (this.marks.delete(tag)) { this.persist = true; this.touched.add(tag); }
+    if (this.totals.delete(userId)) this.persist = true;
+    if (had) { this.touched.add('m:' + userId); this.touched.add('p:' + userId); }
+  }
+
+  /** Уборка: не больше max строк в списке человека — новые остаются. */
+  cap(max = PROFILE_LIST_MAX): number {
+    let n = 0;
+    for (const id of this.music.users()) n += this.music.drop(id, max, (a, b) => (a.addedAt < b.addedAt ? 1 : a.addedAt > b.addedAt ? -1 : 0));
+    for (const id of this.photos.users()) n += this.photos.drop(id, max, (a, b) => b.at - a.at);
+    return n;
   }
 
   reset(): void {

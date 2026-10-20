@@ -118,6 +118,14 @@ export class MembersCache {
     this.touch(chatId);
   }
 
+  /** Уборка (evict.ts): оставить первых n по порядку; вернёт, сколько строк убрано. */
+  trim(chatId: number, n: number): number {
+    const extra = this.list(chatId).slice(n);
+    for (const r of extra) { const k = keyOf(chatId, r.userId); this.byChat.get(chatId)?.delete(k); this.table.delete(k); }
+    if (extra.length) this.touch(chatId);
+    return extra.length;
+  }
+
   /** Что дописать в транзакцию flush: ключ IndexedDB — [chatId, userId]. */
   collect(): { put: unknown[]; del: [number, number][] } {
     const { put, del } = this.table.collect();

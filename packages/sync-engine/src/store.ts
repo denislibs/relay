@@ -813,6 +813,28 @@ export class Store {
     return v;
   }
 
+  /** Ленту чата открыли: для уборки (evict.ts) — давно не открытые урезаются первыми. Строку списка не трогает. */
+  noteOpened(chatId: number): void {
+    const c = this.chats.get(chatId);
+    if (c) { c.openedAt = Date.now(); this.dirtyChats.add(chatId); }
+  }
+
+  /** Строка чата изменилась вне строки списка (отрезки после уборки): в IDB и ленте, версия списка прежняя. */
+  saveChat(c: LocalChat): void { this.dirtyChats.add(c.id); this.touch(c.id); }
+
+  /**
+   * Уборка (evict.ts) уже стёрла эти строки и их слова в IDB: из памяти тоже, вместе с отложенными правками строк.
+   * Строку, изменившуюся в памяти после стирания (ждёт записи), не трогаем — flush запишет её заново.
+   */
+  dropMessages(chatId: number, list: { key: string; id: number | null }[]): void {
+    const map = this.messages.get(chatId);
+    for (const { key, id } of list) {
+      if (id != null) this.rowPatches.delete(`${chatId}:${id}`);
+      if (map && !this.dirtyMessages.has(key)) map.delete(key);
+    }
+    if (list.length) this.touch(chatId);
+  }
+
   markChat(c: LocalChat): void {
     this.dirtyChats.add(c.id);
     this.chatV.set(c.id, nextV());

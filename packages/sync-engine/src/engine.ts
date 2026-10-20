@@ -17,7 +17,8 @@ import { DevTools, loadSim, type SimState, type SubStat } from './devlog';
 import { simFlags, watchLoss } from './devsim';
 import { chatTitle, displayName, peopleResult, PeerSigs } from './names';
 import { applyMembersReply, membersResult, type MembersReply } from './members';
-import { MediaLoader, mediaResult } from './media';
+import { MediaLoader, mediaResult, tabMessages } from './media';
+import { evict, EVICT_LIMITS, type EvictKeep, type EvictLimits, type EvictStats } from './evict';
 import { musicKey, profileMusicResult, profilePhotosResult, ProfileListsLoader, trackOf } from './profileLists';
 import type { Action, EngineConfig, LocalMessage, OutboxEntry, Patch, Query, SearchHit, SearchResult } from './types';
 import { searchLocal } from './search';
@@ -135,7 +136,7 @@ export class Engine {
     });
     this.dev.restore(sim);
     if (this.dev.sim.offline) this.netDown = true;
-    store.onFlush = (keys, ms) => this.dev.log.record('engine', 'flush', { keys }, undefined, ms);
+    store.onFlush = (keys, ms) => { this.dev.log.record('engine', 'flush', { keys }, undefined, ms); this.scheduleEvict(); };
     this.muteShown = muteOverlay(ops);   // операции, восстановленные из IndexedDB: их отказ после перезапуска тоже пересчитает строку
     this.ops = new Ops(db, ops, { base: cfg.httpBase, headers: cfg.headers, backoffMs: cfg.backoffMs, fetch: this.dev.fetch }, {
       canSend: () => this.online && this.ready && !this.closed && !this.resetting,
@@ -175,6 +176,7 @@ export class Engine {
         if (this.frameTimer) { clearTimeout(this.frameTimer); this.frameTimer = null; }
         if (this.readTimer) { clearTimeout(this.readTimer); this.readTimer = null; }
         if (this.outboxTimer) { clearTimeout(this.outboxTimer); this.outboxTimer = null; }
+        if (this.evictTimer) { clearTimeout(this.evictTimer); this.evictTimer = null; }
         for (const t of this.typingTimers.values()) clearTimeout(t);
         this.typingTimers.clear();
         this.watchers.clear();
@@ -217,6 +219,7 @@ export class Engine {
     if (this.frameTimer) { clearTimeout(this.frameTimer); this.frameTimer = null; }
     if (this.readTimer) { clearTimeout(this.readTimer); this.readTimer = null; }
     if (this.outboxTimer) { clearTimeout(this.outboxTimer); this.outboxTimer = null; }
+    if (this.evictTimer) { clearTimeout(this.evictTimer); this.evictTimer = null; }
     this.watchers.clear();
     this.onObsoleteCb();
   }
@@ -262,6 +265,7 @@ export class Engine {
     if (this.frameTimer) { clearTimeout(this.frameTimer); this.frameTimer = null; }
     if (this.readTimer) { clearTimeout(this.readTimer); this.readTimer = null; }
     if (this.outboxTimer) { clearTimeout(this.outboxTimer); this.outboxTimer = null; }
+    if (this.evictTimer) { clearTimeout(this.evictTimer); this.evictTimer = null; }
     this.watchers.clear();
     await this.whenIdle(2000).catch((e) => console.warn(String(e)));
     await this.store.flush();
@@ -295,6 +299,7 @@ export class Engine {
     if (w.q.kind === 'profileMusic' || w.q.kind === 'profilePhotos') { this.lists.want(w.q); return; }
     if (w.q.kind !== 'messages') return;
     const { chatId, limit } = w.q;
+    this.store.noteOpened(chatId);   // уборка урезает давно не открытые первыми
     const q = w.q;
     // первый снимок ленты — уже готовый: кэш прочитан и, если сообщений меньше окна, история догружена
     // (сервер ждём не дольше HISTORY_GATE_MS, без сети — не ждём); иначе интерфейс покажет пусто → часть → всё
@@ -1751,6 +1756,65 @@ export class Engine {
     })().finally(() => this.historyLoads.delete(chatId));
     this.historyLoads.set(chatId, p);
     return p;
+  }
+
+  // =====================================================================
+  // Уборка кэша (evict.ts)
+  // =====================================================================
+
+  private evictTimer: ReturnType<typeof setTimeout> | null = null;
+  private evicting: Promise<EvictStats> | null = null;
+  private lastEvict = 0;
+
+  /** После записи в IDB: уборка в простое, не чаще раза в evictEveryMs (по умолчанию 10 минут). */
+  private scheduleEvict(): void {
+    if (this.closed || this.evictTimer || this.evicting || Date.now() - this.lastEvict < (this.cfg.evictEveryMs ?? 10 * 60_000)) return;
+    this.evictTimer = setTimeout(() => {
+      this.evictTimer = null;
+      if (this.closed) return;
+      // идёт догонка, запросы или загрузки — позже
+      if (this.syncing || this.holding || this.busy > 0 || this.pending.size > 0 || this.historyLoads.size > 0) { this.scheduleEvict(); return; }
+      this.run(() => this.evict());
+    }, this.cfg.evictDelayMs ?? 5000);
+  }
+
+  /** Уборка сейчас (и для тестов): limits — пределы вместо согласованных. */
+  evict(limits: EvictLimits = EVICT_LIMITS): Promise<EvictStats> {
+    if (this.evicting) return this.evicting;
+    this.lastEvict = Date.now();
+    const t0 = Date.now();
+    const p = evict(this.store, this.db, this.evictKeep(), limits)
+      .then((st) => { this.dev.log.record('engine', 'evict', st, undefined, Date.now() - t0); this.changed(); return st; })
+      .finally(() => { this.evicting = null; this.lastEvict = Date.now(); });
+    this.evicting = p;
+    return p;
+  }
+
+  /** Что сейчас видит интерфейс: окна лент (то, что показано, и то, что посчитается сейчас) с исходниками цитат, вкладки медиа, люди подписок. */
+  private evictKeep(): EvictKeep {
+    const keep: EvictKeep = { windows: new Map(), people: new Set(this.contacts.view().keys()), members: new Set() };
+    const win = (chatId: number) => { let s = keep.windows.get(chatId); if (!s) { s = new Set(); keep.windows.set(chatId, s); } return s; };
+    for (const w of this.watchers.values()) {
+      const q = w.q;
+      if (q.kind === 'messages') {
+        const set = win(q.chatId), all = this.store.chatMessages(q.chatId);
+        const span = feedSpan(this.store.chats.get(q.chatId), all, q.anchor?.sort);
+        const { from, to } = messageWindow(all, q, span.lo, span.hi);
+        const add = (m: LocalMessage) => {
+          set.add(m.key);
+          const r = m.replyToId != null ? this.store.messageById(q.chatId, m.replyToId) : undefined;
+          if (r) set.add(r.key);
+        };
+        for (let k = from; k < to; k++) add(all[k]);
+        for (const k of w.prev?.order ?? []) { const m = this.store.loadedMessage(q.chatId, k); if (m) add(m); }
+      } else if (q.kind === 'media') {
+        const set = win(q.chatId);
+        for (const m of tabMessages(this.store, q.chatId, q.tab).slice(-q.limit)) set.add(m.key);
+      } else if (q.kind === 'people') for (const id of q.ids) keep.people.add(id);
+      else if (q.kind === 'user' || q.kind === 'presence' || q.kind === 'profileMusic' || q.kind === 'profilePhotos') keep.people.add(q.userId);
+      else if (q.kind === 'members') keep.members.add(q.chatId);
+    }
+    return keep;
   }
 
   // =====================================================================
