@@ -5,7 +5,7 @@ import { stopOwnMusic } from './profileLists';
 // слайд приезжает уже заполненным. Подписки настроек (me, ops, user) живут здесь, а не в data.ts.
 
 import { connectEngine, Mirror, type EngineClient } from '@relay/sync-engine/src/client';
-import type { Action, Item, Patch, Query } from '@relay/sync-engine/src/types';
+import type { Action, Item, StorageStats, Patch, Query } from '@relay/sync-engine/src/types';
 import { useEffect, useState } from 'preact/hooks';
 import type { ChatFolder, PrivacyKey, PrivacyMode, SessionInfo } from '@relay/protocol';
 import { isSessionOp, sessionConfirmKey } from '@relay/sync-engine/src/sessions';
@@ -278,7 +278,7 @@ export function watchQuery(q: Query, cb: (p: Patch) => void): { update(q: Query)
 export const resetLocal = (keepOutbox: boolean): Promise<unknown> => call({ type: 'resetLocal', keepOutbox });
 
 /** Строки локальной базы по таблицам (для «Данные и память»). */
-export const storageStats = (): Promise<{ rows: Record<string, number>; bytes: number | null; exact: boolean }> => call({ type: 'storageStats' });
+export const storageStats = (): Promise<StorageStats> => call({ type: 'storageStats' });
 
 // ---------- раздел «Для разработчиков» ----------
 

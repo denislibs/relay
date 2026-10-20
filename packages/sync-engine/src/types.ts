@@ -1,3 +1,4 @@
+import type { StoreName } from './schema';
 import type { GroupInfo, MediaTab, MyMembership } from '@relay/protocol';
 import type { Birthday, Block, ChatFolder, Entity, ForwardInfo, ForwardRef, LinkPreview, PrivacyKey, PrivacyMode, ProfileLink, ServiceType, Todo, TodoInput, TodoServiceData, VideoVariant } from '@relay/protocol';
 
@@ -286,4 +287,4 @@ export function toQuote(m: { id: number | null; sort?: number; body: string; sen
 }
 
 /** Ответ storageStats. bytes — usageDetails.indexedDB, если браузер его даёт (exact), иначе usage всего источника (с кэшами); null — оценки нет. */
-export interface StorageStats { rows: Record<import('./schema').StoreName, number>; bytes: number | null; exact: boolean }
+export interface StorageStats { rows: Record<StoreName, number>; bytes: number | null; exact: boolean }

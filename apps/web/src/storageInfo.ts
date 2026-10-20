@@ -11,7 +11,7 @@ export function formatBytes(n: number): string {
   return Math.round(n) + ' Б';
 }
 
-const plural = (n: number, a: string, b: string, c: string) => n % 10 === 1 && n % 100 !== 11 ? a : n % 10 >= 2 && n % 10 <= 4 && (n % 100 < 12 || n % 100 > 14) ? b : c;
+export const plural = (n: number, a: string, b: string, c: string) => n % 10 === 1 && n % 100 !== 11 ? a : n % 10 >= 2 && n % 10 <= 4 && (n % 100 < 12 || n % 100 > 14) ? b : c;
 
 /** Подпись к размеру базы: «1 234 сообщения в 12 чатах». */
 export function dbRowsLabel(rows: Record<string, number> | null | undefined): string | undefined {
@@ -21,7 +21,7 @@ export function dbRowsLabel(rows: Record<string, number> | null | undefined): st
 }
 
 /** exact: браузер разделил IndexedDB и кэши (usageDetails); иначе db — «всё остальное». approx: у части записей кэша нет длины. */
-export interface StorageInfo { used: number; quota: number; db: number; media: number; exact: boolean; approx: boolean; files?: number }
+export interface StorageInfo { used: number; quota: number; db: number; media: number; exact: boolean; approx: boolean; files?: number; rows?: Record<string, number> }
 
 async function mediaCaches(): Promise<Cache[]> {
   if (typeof caches === 'undefined') return [];
