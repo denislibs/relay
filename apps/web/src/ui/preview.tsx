@@ -3,7 +3,8 @@ import type { ServiceData, ServiceType } from '@relay/protocol';
 import { getGlobal } from '../global';
 import { personName } from '../people';
 import { SPOILER_FILL } from '@relay/protocol';
-import { SpoilerText, stickerThumb } from '@relay/ui';
+import { SpoilerText, StickerView } from '@relay/ui';
+import type { StickerRef } from '@relay/protocol';
 import type { ComponentChildren } from 'preact';
 import { hideCode } from './format';
 
@@ -103,7 +104,7 @@ export function previewBody(m: LastMessage, withThumb: boolean): ComponentChildr
 
 /** Цитата (в пузыре и над полем ввода) для сообщения любого типа: что в нём — текстом, а у медиа — миниатюра,
  *  как в Telegram («Фото», «Видео», «🎧 Название — исполнитель», «📎 файл.pdf», голосовое с длительностью…). */
-export function quoteContent(m: Record<string, unknown>): { text: ComponentChildren; thumbSrc?: string; thumbBg?: string } {
+export function quoteContent(m: Record<string, unknown>): { text: ComponentChildren; thumbSrc?: string; thumbBg?: string; thumbNode?: ComponentChildren } {
   const last = asLast(m);
   const thumb = previewThumb(last);
   const a = (m.attachment ?? null) as { duration?: number | null } | null;
@@ -114,8 +115,10 @@ export function quoteContent(m: Record<string, unknown>): { text: ComponentChild
   else if (last.kind === 'round' && !last.body) text = 'Видеосообщение' + len;
   else if (last.kind === 'video' && !last.body) text = (thumb ? 'Видео' : '📹 Видео') + len;
   else if (last.kind === 'sticker') {
-    const thumbSrc = stickerThumb(m.sticker as Parameters<typeof stickerThumb>[0]);
-    return { text: previewBody(last, false), ...(thumbSrc ? { thumbSrc } : {}) };
+    // маленький стикер (первый кадр, без анимации), как в Telegram; без снимка — только текст
+    const s = m.sticker as StickerRef | null | undefined;
+    if (!s) return { text: 'Стикер' };
+    return { text: previewBody(last, false), thumbNode: <StickerView src={s.url} outline={s.outline} w={s.w} h={s.h} size={36} play={false} group="quote" /> };
   }
   else if (last.kind === 'todo') text = ['☑️ ', ((m.todo ?? null) as { title?: string } | null)?.title || last.body || 'Чек-лист'];
   else if ((m.article || (Array.isArray(m.blocks) && m.blocks.length)) && !last.body) text = '📰 Статья';

@@ -292,17 +292,19 @@ export type QuoteMsg = {
   kind?: LocalMessage['kind']; deleted?: boolean; entities?: LocalMessage['entities'];
   attachment?: Pick<LocalAttachment, 'id' | 'kind' | 'mime' | 'name' | 'thumb' | 'title' | 'performer' | 'duration'> | null;
   service?: LocalMessage['service']; todo?: { title?: string } | null; article?: boolean;
+  sticker?: StickerRef | null;   // ответ на стикер: в цитате — маленький стикер
 };
 /** Сообщение (локальное или с сервера) → цитата. */
 export function toQuote(m: { id: number | null; sort?: number; body: string; senderId: number; kind?: string; deleted?: boolean; entities?: unknown;
   attachment?: { id: string; kind: string; mime: string; name: string; thumb?: string | null; title?: string | null; performer?: string | null; duration?: number | null } | null;
-  service?: unknown; todo?: { title?: string } | null; blocks?: unknown[] | null }): QuoteMsg {
+  service?: unknown; todo?: { title?: string } | null; blocks?: unknown[] | null; sticker?: StickerRef | null }): QuoteMsg {
   const a = m.attachment;
   return {
     id: m.id!, sort: m.sort ?? m.id!, body: m.body, senderId: m.senderId, kind: (m.kind as QuoteMsg['kind']) ?? 'text', deleted: !!m.deleted,
     entities: (m.entities as QuoteMsg['entities']) ?? undefined,
     attachment: a ? { id: a.id, kind: a.kind as LocalAttachment['kind'], mime: a.mime, name: a.name, thumb: a.thumb ?? null, title: a.title ?? null, performer: a.performer ?? null, duration: a.duration ?? null } : null,
     service: (m.service as QuoteMsg['service']) ?? undefined, todo: m.todo ? { title: m.todo.title } : null, article: !!m.blocks?.length,
+    ...(m.sticker ? { sticker: m.sticker } : {}),
   };
 }
 

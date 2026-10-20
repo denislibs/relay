@@ -549,6 +549,8 @@ function ReplyQuote(props) {
     props.thumbSrc ? h('span', { class: 'rl-quote-thumb rl-quote-thumb-img', style: props.thumbBg ? { backgroundImage: 'url("' + String(props.thumbBg).replace(/"/g, '') + '")' } : undefined },
       h('img', { src: props.thumbSrc, alt: '', decoding: 'async', class: props.thumbBg ? 'rl-quote-loading' : undefined,
         onLoad: function (e) { e.currentTarget.classList.remove('rl-quote-loading'); } })) : null,
+    // thumbNode — свой узел миниатюры (маленький стикер)
+    props.thumbNode ? h('span', { class: 'rl-quote-thumb rl-quote-thumb-node' }, props.thumbNode) : null,
     h('span', { class: 'rl-quote-body' },
       h('b', { style: { color: 'var(--quote-tone)' } }, props.author),
       h('span', { class: 'rl-quote-text' }, props.icon ? h(Icon, { name: props.icon, size: 14 }) : null, props.text)),

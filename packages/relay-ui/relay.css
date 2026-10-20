@@ -1154,7 +1154,9 @@ html[data-blur="0"] .rl-pop .rl-menu, html[data-blur="0"] .rl-pop .rl-rpick { -w
 
 /* WindowList: absolutely placed rows; a reorder slides, a scroll does not */
 .rl-wlist { position: relative; contain: strict; width: 100%; }
-.rl-wrow { position: absolute; left: 0; right: 0; top: 0; transition: transform 320ms cubic-bezier(0.2, 0, 0, 1); will-change: transform; }
+.rl-wrow { position: absolute; left: 0; right: 0; top: 0; transition: transform 320ms cubic-bezier(0.2, 0, 0, 1); }
+/* will-change у строк нет нарочно: слой на каждую строку — лишняя память; на время перестановки браузер поднимет их сам */
+.rl-wlist-ph, .rl-wlist-rows { position: absolute; inset: 0; }   /* KeepList: слой скелетов и слой строк */
 @media (prefers-reduced-motion: reduce) { .rl-wrow { transition: none; } }
 
 /* Telegram K geometry: 16px around the floating cards, 696px chat column */
@@ -2315,3 +2317,4 @@ html[data-blur="0"] .rl-menu { -webkit-backdrop-filter: none; backdrop-filter: n
 .rl-symbols-pop { position: absolute; right: clamp(0px, 8%, 96px); bottom: calc(100% + 8px); z-index: 30; width: 420px; max-width: calc(100vw - 16px); height: min(420px, calc(100vh - 160px)); border-radius: 20px; background: var(--surface, var(--bg)); box-shadow: var(--shadow-panel); overflow: hidden; transform-origin: 100% 100%; animation: rl-menu-in 180ms var(--ease-out); }
 .rl-presence[data-state="closing"] .rl-symbols-pop { animation: rl-pop-out 160ms var(--ease-standard) forwards; }
 .rl-emoji-toggle-on { color: var(--brand-strong); }
+.rl-quote-thumb-node { width: 36px; height: 36px; align-self: center; margin-left: 2px; display: flex; align-items: center; justify-content: center; flex-shrink: 0; }
