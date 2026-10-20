@@ -81,9 +81,9 @@ test('setPref does not mutate previous state', () => {
 test('anim level applies preset; flags leave level; levelOf custom', () => {
   resetPrefsForTest(fake());
   setPref('anim.level', 0);
-  expect(getPrefs().anim).toEqual({ level: 0, ui: false, wallpaper: false, blur: false, autoplayGif: false, autoplayVideo: false });
+  expect(getPrefs().anim).toEqual({ level: 0, ui: false, wallpaper: false, blur: false, autoplayGif: false, autoplayVideo: false, autoplayStickers: false, loopStickers: false });
   setPref('anim.level', 1);
-  expect(getPrefs().anim).toEqual({ level: 1, ui: true, wallpaper: false, blur: false, autoplayGif: true, autoplayVideo: true });
+  expect(getPrefs().anim).toEqual({ level: 1, ui: true, wallpaper: false, blur: false, autoplayGif: true, autoplayVideo: true, autoplayStickers: true, loopStickers: true });
   expect(levelOf(getPrefs().anim)).toBe(1);
   setPref('anim.blur', true);
   expect(getPrefs().anim.level).toBe(1); expect(levelOf(getPrefs().anim)).toBe('custom');

@@ -1701,9 +1701,6 @@ html[data-blur="0"] .rl-menu { -webkit-backdrop-filter: none; backdrop-filter: n
 .rl-aside-tabs::before { background: color-mix(in srgb, var(--page) 72%, transparent); }
 
 /* Анимированный стикер (TGS): место занято сразу, canvas проявляется, когда воркер нарисовал первый кадр */
-.rl-sticker { position: relative; display: inline-block; flex: 0 0 auto; }
-.rl-sticker canvas { display: block; width: 100%; height: 100%; opacity: 0; transition: opacity var(--dur-base) var(--ease-out); }
-.rl-sticker-ready canvas { opacity: 1; }
 
 /* ---------- Модалки (modal.js): слой поверх всего приложения, размеры и движение — как в Telegram Web A ---------- */
 .rl-modal-layer { position: fixed; inset: 0; z-index: 1500; pointer-events: none; }

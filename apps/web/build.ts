@@ -4,7 +4,7 @@
 //   bun apps/web/build.ts --watch    — пересборка при изменениях (dev)
 import { watch as fsWatch } from 'node:fs';
 import { cp, mkdir, rm } from 'node:fs/promises';
-import { basename, dirname, join } from 'node:path';
+import { basename, join } from 'node:path';
 import { brotliCompressSync, constants as Z, gzipSync } from 'node:zlib';
 
 const root = import.meta.dir;
@@ -88,9 +88,8 @@ async function build(): Promise<void> {
   }
   // открытые вкладки сверяют свою сборку с этой (update.ts) и предлагают обновиться
   await Bun.write(join(tmp, 'version.json'), JSON.stringify({ build: BUILD }));
-  // стикеры: исходники на TS → .tgs; движок Lottie (ThorVG, WASM) — рядом, без CDN: работает и без сети
+  // стикеры-герои: исходники на TS → .tgs (рисует tlottie, WASM — в оболочке сборки)
   await Bun.$`bun ${join(ui, 'stickers', 'build.ts')} ${join(tmp, 'stickers')}`.quiet();
-  await cp(join(dirname(Bun.resolveSync('@lottiefiles/dotlottie-web', ui)), 'dotlottie-player.wasm'), join(tmp, 'dotlottie-player.wasm'));
   if (!isWatch) await precompress(tmp);   // в dev сжимает nginx на лету: пересборка остаётся быстрой
   // dev: сжатые копии прежней продакшен-сборки устарели бы (nginx отдал бы старый index.html.gz) — убираем;
   // свои .gz из public (узоры) cp ниже вернёт

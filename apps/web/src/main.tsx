@@ -92,7 +92,7 @@ if (__DEV__) void import('./devtools/session').then((s) => import('./devtools/me
 startTitle();
 // спойлеры: частицы рисует воркер (как в Telegram Web K); без него — CSS-точки
 configureSpoilers({ workerUrl: asset('spoiler.worker.js') });
-configureStickers({ base: '/stickers/', wasmUrl: '/dotlottie-player.wasm' });
+configureStickers({ base: '/stickers/' });
 // анимированные стикеры: tlottie в пуле воркеров
 configureLottie({ workerUrl: asset('lottie.worker.js'), wasm: { simd: asset('tlottie.wasm'), noSimd: asset('tlottie-no-simd.wasm') } });
 installSpoilers();

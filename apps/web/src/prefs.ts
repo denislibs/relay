@@ -1,3 +1,4 @@
+import { setStickerPolicy } from '@relay/ui';
 import { ACCENT_IDS, DEFAULT_ACCENT } from './accent';
 import { switchAccent, switchTheme } from './themeSwitch';
 // Настройки устройства: хранятся в localStorage (`relay.prefs`), применяются в apply() и
@@ -14,7 +15,7 @@ export interface Prefs {
   wallpaper: { light: WallpaperPref; dark: WallpaperPref };
   sendKey: 'enter' | 'ctrlEnter';
   timeFormat: '12h' | '24h' | null;   // null = из локали
-  anim: { level: 0 | 1 | 2; ui: boolean; wallpaper: boolean; blur: boolean; autoplayGif: boolean; autoplayVideo: boolean };
+  anim: { level: 0 | 1 | 2; ui: boolean; wallpaper: boolean; blur: boolean; autoplayGif: boolean; autoplayVideo: boolean; autoplayStickers: boolean; loopStickers: boolean };
   notify: { web: boolean; sound: boolean; volume: number };
   autoload: {
     enabled: boolean;
@@ -46,7 +47,7 @@ export function defaultPrefs(reduced = false): Prefs {
     wallpaper: { light: wp(), dark: wp() },
     sendKey: 'enter',
     timeFormat: null,
-    anim: { level: reduced ? 0 : 2, ui: on, wallpaper: on, blur: on, autoplayGif: on, autoplayVideo: on },
+    anim: { level: reduced ? 0 : 2, ui: on, wallpaper: on, blur: on, autoplayGif: on, autoplayVideo: on, autoplayStickers: on, loopStickers: on },
     notify: { web: true, sound: true, volume: 0.5 },
     autoload: { enabled: true, photo: all(true), video: all(true), file: all(false), fileMaxMb: 10 },
     screen: { blur: false, blurDelay: 0, hideChatInTitle: false, hideUnreadInTitle: false, hideNotifyText: false },
@@ -82,12 +83,12 @@ const num = (v: unknown, d: number): number => (typeof v === 'number' && Number.
 /** Пресеты флагов для уровня анимаций: 0 экономия, 1 быстро и красиво, 2 максимум. */
 export function animPreset(level: 0 | 1 | 2): Prefs['anim'] {
   const on = level !== 0;
-  return { level, ui: on, wallpaper: level === 2, blur: level === 2, autoplayGif: on, autoplayVideo: on };
+  return { level, ui: on, wallpaper: level === 2, blur: level === 2, autoplayGif: on, autoplayVideo: on, autoplayStickers: on, loopStickers: on };
 }
 /** Уровень по флагам: 'custom', если флаги не совпадают с пресетом уровня («Своё»). */
 export function levelOf(a: Prefs['anim']): 0 | 1 | 2 | 'custom' {
   const pr = animPreset(a.level);
-  return (['ui', 'wallpaper', 'blur', 'autoplayGif', 'autoplayVideo'] as const).every((k) => a[k] === pr[k]) ? a.level : 'custom';
+  return (['ui', 'wallpaper', 'blur', 'autoplayGif', 'autoplayVideo', 'autoplayStickers', 'loopStickers'] as const).every((k) => a[k] === pr[k]) ? a.level : 'custom';
 }
 
 /** Приводит значения к допустимым. Вход не меняет — работает с копией. */
@@ -183,6 +184,7 @@ export function applyPrefs(p: Prefs = current): void {
   if ((p.timeFormat ?? localeTimeFormat()) === '12h') root.setAttribute('data-time12', ''); else root.removeAttribute('data-time12'); // время в пузыре шире
   if (p.anim.blur) root.removeAttribute('data-blur'); else root.setAttribute('data-blur', '0');
   if (p.anim.wallpaper) root.removeAttribute('data-wpanim'); else root.setAttribute('data-wpanim', '0');
+  setStickerPolicy({ autoplay: p.anim.autoplayStickers, loop: p.anim.loopStickers });   // живые стикеры — сразу
 }
 
 function commit(next: Prefs, persist: boolean): void {

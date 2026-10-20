@@ -16,7 +16,7 @@ const sw = self as unknown as ServiceWorkerGlobalScope;
 const CACHE = CACHE_APP_SHELL_PREFIX + __BUILD__;
 const store = deviceStore();
 declare const __SHELL__: string[];   // код и стили этой сборки с хэшем в имени (build.ts)
-const SHELL = ['/', ...__SHELL__, '/dotlottie-player.wasm', '/sounds/message.mp3', '/sounds/sent.mp3'];   // звуки сообщений — и без сети
+const SHELL = ['/', ...__SHELL__, '/sounds/message.mp3', '/sounds/sent.mp3'];   // звуки сообщений — и без сети
 const API = /^\/(health|me|users|contacts|settings|privacy|blocks|chats|presence|search|uploads|files|push|sessions|ws|dev|logout|auth|link-preview|groups|join|sticker-sets|my-stickers|stickers-by-emoji)(\/|$)/;
 
 sw.addEventListener('install', (e) => {

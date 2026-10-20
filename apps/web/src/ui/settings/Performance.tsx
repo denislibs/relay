@@ -14,7 +14,7 @@ export function Performance() {
   const scroll = useScrollMemory('settings/performance');
   const lv = levelOf(a);
   const reduced = systemReduced();
-  const flag = (key: 'ui' | 'wallpaper' | 'blur' | 'autoplayGif' | 'autoplayVideo') => (v: boolean) => setPref('anim.' + key, v);
+  const flag = (key: 'ui' | 'wallpaper' | 'blur' | 'autoplayGif' | 'autoplayVideo' | 'autoplayStickers' | 'loopStickers') => (v: boolean) => setPref('anim.' + key, v);
   return (
     <div class="rl-sidepage" aria-label="Анимации и производительность">
       <PanelHeader icon="arrowLeft" closeLabel="Назад" title="Анимации и производительность" onClose={() => void back()} />
@@ -35,6 +35,10 @@ export function Performance() {
         <Section title="Автовоспроизведение">
           <CheckRow label="GIF" checked={a.autoplayGif} onChange={flag('autoplayGif')} />
           <CheckRow label="Видео" checked={a.autoplayVideo} onChange={flag('autoplayVideo')} />
+        </Section>
+        <Section title="Стикеры">
+          <CheckRow label="Анимированные стикеры" subtitle="Играют в чатах и в панели стикеров" checked={a.autoplayStickers} onChange={flag('autoplayStickers')} />
+          <CheckRow label="Зацикливать стикеры" subtitle="Иначе стикер в чате проигрывается один раз" checked={a.loopStickers} disabled={!a.autoplayStickers} onChange={flag('loopStickers')} />
         </Section>
       </div>
     </div>

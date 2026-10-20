@@ -155,6 +155,14 @@ class Player {
     this.update();
   }
 
+  /** Проиграть с начала (повтор по клику у героев настроек). */
+  restart() {
+    this.ended = false;
+    this.time = 0;
+    active.delete(this);
+    this.update();
+  }
+
   detach(v) {
     this.views.delete(v);
     if (this.views.size) { this.update(); return; }
@@ -190,6 +198,7 @@ export function attachSticker({ url, px, canvas, group = 'feed', play = true, lo
     setVisible(v) { if (view.visible !== v) { view.visible = v; pl.update(); } },
     setPlay(v) { if (view.play !== v) { view.play = v; pl.update(); } },
     setLoop(v) { view.loop = v; },
+    restart() { pl.restart(); },
     destroy() { pl.detach(view); },
   };
 }

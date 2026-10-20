@@ -83,6 +83,8 @@ export function StickerView(props) {
 
   useEffect(() => { ctl.current?.setPlay(play && !reducedMotion()); }, [play]);
   useEffect(() => { ctl.current?.setLoop(loop); }, [loop]);
+  // replay: новое значение — проиграть с начала
+  useEffect(() => { if (props.replay) ctl.current?.restart(); }, [props.replay]);
 
   const path = outlinePath(outline);
   const ready = stage === 'ready';
