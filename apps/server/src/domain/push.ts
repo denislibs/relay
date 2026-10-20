@@ -102,7 +102,7 @@ export async function unsubscribe(userId: number, endpoint: string): Promise<voi
 /** system — служебное сообщение Relay: SW ставит знак Relay иконкой. */
 export type PushPayload = { chatId: number; id: number; title: string; body: string; system?: true };
 
-export type PushMessage = { chatId: number; id: number; senderId: number; body: string; entities?: { type: string; offset: number; length: number }[]; kind?: string; attachment?: { name?: string } | null; service?: { type: string } };
+export type PushMessage = { chatId: number; id: number; senderId: number; body: string; entities?: { type: string; offset: number; length: number }[]; kind?: string; attachment?: { name?: string } | null; service?: { type: string }; sticker?: { emoji?: string } | null };
 
 /** Новое сообщение → кому и что слать (задача push.message): подписки участников без соединения в любом процессе,
  *  кроме отправителя, заглушивших чат и заблокировавших отправителя.
@@ -133,7 +133,7 @@ export async function planPush(m: PushMessage): Promise<{ endpoint: string; push
   const defaults = await notifyDefaults(sql, [...new Set(offline.map((s) => s.user_id as number))]);
   const kind = info.kind === 'group' ? 'group' : 'direct';
   const prefOf = (userId: number) => defaults.get(userId)?.[kind] ?? { muted: false, preview: true };
-  const preview = m.kind === 'voice' ? '🎤 Голосовое сообщение' : m.kind === 'todo' ? '☑️ ' + m.body : m.kind === 'round' ? 'Видеосообщение' : m.kind === 'photo' ? (m.body ? '🖼 ' + m.body : 'Фотография') : m.kind === 'video' ? (m.body ? '📹 ' + m.body : 'Видео') : m.kind === 'file' ? '📎 ' + (m.body || m.attachment?.name || 'Файл') : m.kind === 'audio' ? '🎵 ' + (m.body || (m.attachment as { title?: string } | null | undefined)?.title || (m.attachment?.name ?? 'Музыка').replace(/\.[^.]{1,5}$/, '')) : m.body;
+  const preview = m.kind === 'sticker' ? (m.sticker?.emoji ? m.sticker.emoji + ' Стикер' : 'Стикер') : m.kind === 'voice' ? '🎤 Голосовое сообщение' : m.kind === 'todo' ? '☑️ ' + m.body : m.kind === 'round' ? 'Видеосообщение' : m.kind === 'photo' ? (m.body ? '🖼 ' + m.body : 'Фотография') : m.kind === 'video' ? (m.body ? '📹 ' + m.body : 'Видео') : m.kind === 'file' ? '📎 ' + (m.body || m.attachment?.name || 'Файл') : m.kind === 'audio' ? '🎵 ' + (m.body || (m.attachment as { title?: string } | null | undefined)?.title || (m.attachment?.name ?? 'Музыка').replace(/\.[^.]{1,5}$/, '')) : m.body;
   return offline.filter((s) => !prefOf(s.user_id as number).muted).map((s) => {
     const name = s.sender_name as string;
     const shown = prefOf(s.user_id as number).preview;

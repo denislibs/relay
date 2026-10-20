@@ -20,7 +20,7 @@ export interface Message {
   chatId: Id;
   senderId: Id;
   clientId: string;
-  kind: 'text' | 'photo' | 'video' | 'file' | 'voice' | 'round' | 'audio' | 'todo';
+  kind: 'text' | 'photo' | 'video' | 'file' | 'voice' | 'round' | 'audio' | 'todo' | 'sticker';
   groupId?: string | null;   // отправлены вместе (несколько файлов) — в ленте одним пузырём
   body: string;
   replyToId: Id | null;
@@ -37,7 +37,18 @@ export interface Message {
   link?: LinkPreview | null;      // превью первой ссылки в тексте (pending — сервер ещё загружает страницу)
   blocks?: Block[] | null;        // «статья»: блоки (body — её простой текст)
   buttons?: MessageButton[][] | null;   // кнопки под сообщением (как inline-клавиатура в Telegram): ряды слева направо
+  sticker?: StickerRef | null;          // kind 'sticker': снимок стикера на момент отправки
 }
+
+/** Стикер: всё, чтобы нарисовать его без запросов (url — неизменяемый файл /stk/<пак>/<хэш>/<файл>). */
+export interface StickerRef { id: Id; setId: Id; emoji: string; w: number; h: number; format: 'tgs' | 'webp' | 'json'; url: string; outline: string | null }
+/** Пак без списка стикеров (строки списков, полоса обложек). */
+export interface StickerSetInfo { id: Id; shortName: string; title: string; kind: 'sticker' | 'emoji'; count: number; cover: StickerRef | null; hash: string }
+export interface StickerSet extends StickerSetInfo { stickers: StickerRef[] }
+/** Мои стикеры: установленные паки по порядку, недавние (до 20) и избранные (до 5), новые сверху. */
+export interface MyStickers { sets: StickerSetInfo[]; recent: StickerRef[]; faved: StickerRef[] }
+export const RECENT_STICKERS_LIMIT = 20;
+export const FAVED_STICKERS_LIMIT = 5;
 
 /**
  * Кнопка под сообщением. callback — нажатие уходит на сервер (кадр button с data), ответ — тост и, может быть,
@@ -205,7 +216,8 @@ export type Update =
   | { type: 'members'; chatId: Id; upsert: MemberRow[]; remove: Id[] }
   // чат больше не мой: вышел, удалили, группу удалили
   | { type: 'chatNotify'; chatId: Id; muteUntil: number | null }   // уведомления чата: мс эпохи — выключены до, 0 — навсегда, null — включены
-  | { type: 'chatRemoved'; chatId: Id };   // превью ссылки сообщения загрузилось (null — превью нет)   // закреплённые сообщения чата целиком (новые сверху)   // список сеансов изменился: новый вход, подтверждение, завершение
+  | { type: 'chatRemoved'; chatId: Id }
+  | { type: 'myStickers' };   // мои паки / недавние / избранные изменились — перечитать GET /my-stickers   // превью ссылки сообщения загрузилось (null — превью нет)   // закреплённые сообщения чата целиком (новые сверху)   // список сеансов изменился: новый вход, подтверждение, завершение
 
 /** Строка участника группы в журнале (имя и присутствие — из профиля и присутствия). */
 export interface MemberRow { userId: Id; role: 'owner' | 'admin' | 'member'; rank: string | null }
@@ -303,7 +315,7 @@ export type ErrorCode = 'bad_frame' | 'unauthorized' | 'not_member' | 'not_found
 export type ClientFrame =
   | { op: 'hello'; lastSeq: number }
   | { op: 'sync'; since: number }
-  | { op: 'send'; reqId: string; clientId: string; chatId: Id; body: string; entities?: Entity[]; replyToId?: Id | null; attachment?: { id: string; thumb?: string | null; spoiler?: boolean } | null; groupId?: string | null; forward?: ForwardRef | null; noLinkPreview?: boolean; blocks?: Block[] | null; todo?: TodoInput }
+  | { op: 'send'; reqId: string; clientId: string; chatId: Id; body: string; entities?: Entity[]; replyToId?: Id | null; attachment?: { id: string; thumb?: string | null; spoiler?: boolean } | null; groupId?: string | null; forward?: ForwardRef | null; noLinkPreview?: boolean; blocks?: Block[] | null; todo?: TodoInput; sticker?: { id: Id } | null }
   | { op: 'read'; reqId: string; chatId: Id; upToId: Id }
   | { op: 'typing'; chatId: Id }   // «печатаю» — без ответа, сервер пересылает остальным участникам
   | { op: 'draft'; reqId: string; chatId: Id; text: string; entities?: Entity[] }
@@ -379,7 +391,8 @@ export function parseClientFrame(raw: string): ClientFrame | null {
         forward = { chatId: w.chatId as number, id: w.id as number, hideSender: w.hideSender === true, hideCaption: w.hideCaption === true };
       }
       if (f.todo != null && !normalizeTodo(f.todo)) return null;
-      return { op: 'send', ...(f.todo != null ? { todo: normalizeTodo(f.todo)! } : {}), reqId: f.reqId, clientId: f.clientId, chatId: f.chatId, body: f.body, entities: normalizeEntities(f.body, f.entities), replyToId: (f.replyToId as number | null) ?? null, attachment: (f.attachment as { id: string; thumb?: string | null; spoiler?: boolean } | null) ?? null, groupId: (f.groupId as string | null) ?? null, forward, ...(f.noLinkPreview === true ? { noLinkPreview: true } : {}), ...(Array.isArray(f.blocks) ? { blocks: f.blocks as Block[] } : {}) };
+      if (f.sticker != null && (typeof f.sticker !== 'object' || !int((f.sticker as { id: unknown }).id))) return null;
+      return { op: 'send', ...(f.sticker != null ? { sticker: { id: (f.sticker as { id: number }).id } } : {}), ...(f.todo != null ? { todo: normalizeTodo(f.todo)! } : {}), reqId: f.reqId, clientId: f.clientId, chatId: f.chatId, body: f.body, entities: normalizeEntities(f.body, f.entities), replyToId: (f.replyToId as number | null) ?? null, attachment: (f.attachment as { id: string; thumb?: string | null; spoiler?: boolean } | null) ?? null, groupId: (f.groupId as string | null) ?? null, forward, ...(f.noLinkPreview === true ? { noLinkPreview: true } : {}), ...(Array.isArray(f.blocks) ? { blocks: f.blocks as Block[] } : {}) };
     case 'read':
       return str(f.reqId, 64) && int(f.chatId) && int(f.upToId) ? { op: 'read', reqId: f.reqId, chatId: f.chatId, upToId: f.upToId } : null;
     default: return null;

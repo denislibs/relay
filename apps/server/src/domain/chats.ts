@@ -1,4 +1,4 @@
-import { graphemes, normalizeEntities, type Entity, type Block, type ForwardInfo, type LinkPreview, type MediaTab, type Message, type MessageButton, type ProfilePhoto, type ServiceData, type ServiceType, type Todo } from '@relay/protocol';
+import { graphemes, normalizeEntities, type Entity, type Block, type ForwardInfo, type LinkPreview, type MediaTab, type Message, type MessageButton, type ProfilePhoto, type ServiceData, type ServiceType, type StickerRef, type Todo } from '@relay/protocol';
 import { sql, type Tx } from '../db';
 import { muteFromDb } from './chatNotify';
 import { DomainError } from './errors';
@@ -102,6 +102,7 @@ export function toMessage(r: Record<string, unknown>): Message {
     // из jsonb — в каноническом виде (порядок ключей у jsonb свой)
     ...(r.service_type ? { service: { type: r.service_type as ServiceType, ...(r.service_data ? { data: r.service_data as ServiceData } : {}) } } : {}),
     ...(r.kind === 'todo' && r.todo && !r.deleted ? { todo: r.todo as Todo } : {}),
+    ...(r.kind === 'sticker' && r.sticker && !r.deleted ? { sticker: r.sticker as StickerRef } : {}),
     ...(r.group_id ? { groupId: r.group_id as string } : {}),
     ...(r.fwd_from ? { fwdFrom: r.fwd_from as ForwardInfo } : {}),
     ...(r.link ? { link: r.link as LinkPreview } : {}),

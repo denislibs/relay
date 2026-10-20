@@ -4,10 +4,10 @@ import type { ProfilePhoto } from './index';
 type Id = number;
 
 /** Права участников (что разрешено). Медиа — производное: разрешено, если разрешён хоть один медиа-пункт. */
-export type MemberRight = 'text' | 'photos' | 'videos' | 'files' | 'music' | 'voice' | 'round' | 'links' | 'react' | 'invite' | 'pin' | 'info';
+export type MemberRight = 'text' | 'photos' | 'videos' | 'files' | 'music' | 'voice' | 'round' | 'stickers' | 'links' | 'react' | 'invite' | 'pin' | 'info';
 export type MemberRights = Record<MemberRight, boolean>;
-export const MEMBER_RIGHTS: readonly MemberRight[] = ['text', 'photos', 'videos', 'files', 'music', 'voice', 'round', 'links', 'react', 'invite', 'pin', 'info'];
-export const MEDIA_RIGHTS: readonly MemberRight[] = ['photos', 'videos', 'files', 'music', 'voice', 'round', 'links'];
+export const MEMBER_RIGHTS: readonly MemberRight[] = ['text', 'photos', 'videos', 'files', 'music', 'voice', 'round', 'stickers', 'links', 'react', 'invite', 'pin', 'info'];
+export const MEDIA_RIGHTS: readonly MemberRight[] = ['photos', 'videos', 'files', 'music', 'voice', 'round', 'stickers', 'links'];
 
 /** Права администратора. Владелец имеет все неявно. */
 export type AdminRight = 'info' | 'delete' | 'ban' | 'invite' | 'pin' | 'addAdmins';
@@ -121,6 +121,7 @@ export function rightForKind(kind: string, mime?: string | null): MemberRight {
     case 'voice': return 'voice';
     case 'round': return 'round';
     case 'audio': return 'music';
+    case 'sticker': return 'stickers';
     case 'file': return mime?.startsWith('video/') ? 'videos' : 'files';
     default: return 'text';
   }

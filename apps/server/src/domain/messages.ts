@@ -1,6 +1,6 @@
 import { attachmentForSend } from './files';
 import { clearDraftInTx } from './drafts';
-import { rightForKind, normalizeEntities, trimFormatted, type Block, blocksText, normalizeBlocks, type Entity, type ForwardInfo, type ForwardRef, type LinkPreview, type Message, type Todo, type TodoInput } from '@relay/protocol';
+import { rightForKind, normalizeEntities, trimFormatted, type Block, blocksText, normalizeBlocks, type Entity, type ForwardInfo, type ForwardRef, type LinkPreview, type Message, type StickerRef, type Todo, type TodoInput } from '@relay/protocol';
 import { newTodo } from './todo';
 import { sql } from '../db';
 import { assertMember, toMessage } from './chats';
@@ -10,13 +10,14 @@ import { blockedInDirect } from './privacy';
 import { burnCodes } from './login';
 import { enqueue } from '../jobs/queue';
 import { can, groupCtx, requireRight } from './groupRights';
+import { stickerForSend } from './stickers';
 import { cachedPreview, firstUrl, getPreview } from './linkPreview';
 
 export const MAX_BODY = 4096;
 
 export async function sendMessage(
   userId: number,
-  input: { chatId: number; clientId: string; body: string; entities?: Entity[]; replyToId?: number | null; attachment?: { id: string; thumb?: string | null } | null; groupId?: string | null; forward?: ForwardRef | null; noLinkPreview?: boolean; blocks?: unknown; todo?: TodoInput | null },
+  input: { chatId: number; clientId: string; body: string; entities?: Entity[]; replyToId?: number | null; attachment?: { id: string; thumb?: string | null } | null; groupId?: string | null; forward?: ForwardRef | null; noLinkPreview?: boolean; blocks?: unknown; todo?: TodoInput | null; sticker?: { id: number } | null },
 ): Promise<{ message: Message; duplicate: boolean }> {
   // пробелы по краям срезаем вместе с оформлением; оформление — только проверенное
   let { text: body, entities } = trimFormatted(input.body, normalizeEntities(input.body, input.entities));
@@ -31,7 +32,10 @@ export async function sendMessage(
   // чек-лист: тело — его заголовок (для превью и поиска), своего текста и вложения нет
   const todo = input.todo && !input.forward && !input.attachment && !blocks ? newTodo(input.todo) : null;
   if (todo) { body = todo.title; entities = []; }
-  if (!input.forward && !blocks) {
+  // стикер — без текста и вложения: тело пустое, всё в снимке стикера
+  const stickerId = input.sticker && !input.forward && !input.attachment && !blocks && !todo ? input.sticker.id : null;
+  if (stickerId != null) { body = ''; entities = []; }
+  if (!input.forward && !blocks && stickerId == null) {
     if (!body && !input.attachment) throw new DomainError('bad_frame', 'empty body'); // у вложения подпись необязательна
     if (body.length > MAX_BODY) throw new DomainError('too_long');
   }
@@ -58,6 +62,7 @@ export async function sendMessage(
     let fwdFrom: ForwardInfo | null = null;
     let link: LinkPreview | null = null, fetchLink: string | null = null;
     let fwdTodo: Todo | null = null;
+    let sticker: StickerRef | null = null;
     if (input.forward) {
       // пересылка: всё берём у оригинала — только из чата, где пересылающий состоит; вложение — тот же объект
       // (файл уже доступен получателям через fileFor: он лежит в сообщении их чата), заново не загружается
@@ -72,6 +77,7 @@ export async function sendMessage(
       if (attachment && !(await tx`select 1 from attachments where id = ${attachment.id as string} for share`).length) throw new DomainError('not_found', 'forward attachment');
       kind = src.kind as string;
       fwdTodo = (src.todo as Todo | null) ?? null;   // пересланный чек-лист — копия, только для чтения
+      sticker = (src.sticker as StickerRef | null) ?? null;   // стикер пересылается своим снимком
       const dropCaption = !!f.hideCaption && !!attachment;
       body = dropCaption ? '' : src.body as string;
       entities = dropCaption || !Array.isArray(src.entities) ? [] : normalizeEntities(body, src.entities as Entity[]);
@@ -85,9 +91,10 @@ export async function sendMessage(
       };
     } else {
       attachment = input.attachment ? await attachmentForSend(tx, userId, input.attachment) as unknown as Record<string, unknown> : null;
-      kind = todo ? 'todo' : attachment ? attachment.kind as string : 'text';
+      sticker = stickerId != null ? await stickerForSend(tx, userId, stickerId) : null;
+      kind = sticker ? 'sticker' : todo ? 'todo' : attachment ? attachment.kind as string : 'text';
       // превью первой ссылки (как в Telegram): готовое в кэше — сразу, иначе «грузится» и задача link.preview
-      const url = !attachment && !blocks && !todo && !input.noLinkPreview ? firstUrl(body, entities) : null;
+      const url = !attachment && !blocks && !todo && !sticker && !input.noLinkPreview ? firstUrl(body, entities) : null;
       if (url) {
         const cached = await cachedPreview(url);
         if (cached === undefined) { link = { url, pending: true }; fetchLink = url; } else link = cached;
@@ -102,10 +109,10 @@ export async function sendMessage(
       if (last && !sameAlbum && Date.now() - new Date(last.created_at as string).getTime() < ctx.slowMode * 1000) throw new DomainError('flood', 'slow_mode');
     }
     const inserted = await tx`
-      insert into messages (chat_id, sender_id, client_id, kind, body, entities, reply_to_id, attachment, group_id, fwd_from, link, blocks, todo)
+      insert into messages (chat_id, sender_id, client_id, kind, body, entities, reply_to_id, attachment, group_id, fwd_from, link, blocks, todo, sticker)
       values (${input.chatId}, ${userId}, ${input.clientId}, ${kind}, ${body}, ${entities.length ? sql.json(entities as never) : null}, ${canReply ? input.replyToId ?? null : null}, ${attachment ? sql.json(attachment as never) : null},
               ${attachment && input.groupId && /^[0-9a-f-]{36}$/.test(input.groupId) ? input.groupId : null},   -- группа — только у вложений
-              ${fwdFrom ? sql.json(fwdFrom as never) : null}, ${link ? sql.json(link as never) : null}, ${blocks ? sql.json(blocks as never) : null}, ${(todo ?? fwdTodo) ? sql.json((todo ?? fwdTodo) as never) : null})
+              ${fwdFrom ? sql.json(fwdFrom as never) : null}, ${link ? sql.json(link as never) : null}, ${blocks ? sql.json(blocks as never) : null}, ${(todo ?? fwdTodo) ? sql.json((todo ?? fwdTodo) as never) : null}, ${sticker ? sql.json(sticker as never) : null})
       on conflict (sender_id, client_id) do nothing
       returning *`;
     if (inserted.length === 0) {

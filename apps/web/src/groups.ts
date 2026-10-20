@@ -26,7 +26,7 @@ export const canChangeInfo = (me: MyMembership | null) => adminCan(me, 'info') |
 export const canInvite = (me: MyMembership | null) => adminCan(me, 'invite') || !!me?.rights.invite;
 
 export const MEMBER_RIGHT_TEXT: Record<MemberRight, string> = {
-  text: 'Отправка сообщений', photos: 'Фото', videos: 'Видео', files: 'Файлы', music: 'Музыка', voice: 'Голосовые сообщения',
+  text: 'Отправка сообщений', photos: 'Фото', videos: 'Видео', files: 'Файлы', music: 'Музыка', voice: 'Голосовые сообщения', stickers: 'Стикеры и GIF',
   round: 'Видеосообщения', links: 'Превью ссылок', react: 'Реакции', invite: 'Добавление участников', pin: 'Закрепление сообщений', info: 'Изменение профиля группы',
 };
 export const ADMIN_RIGHT_TEXT: Record<AdminRight, string> = {
