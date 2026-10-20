@@ -166,3 +166,23 @@ test('members first load: journal records that arrive while the first snapshot i
   expect(s.members.list(8).map((r) => r.order)).toEqual([0, 1, 3]);
   expect(s.chats.get(8)!.membersDone).toBe(true);
 });
+
+test('members: after resetLocal an open members subscription loads the list again (asked is forgotten)', async () => {
+  const a = await srv.login('Анна'), b = await srv.login('Борис');
+  const chatId = await group(a, [b.userId]);
+  const reqs = countMembersRequests();
+  try {
+    const ea = await open(srv.config(a));
+    ea.connect();
+    await ea.whenIdle();
+    const w = watchInto(ea, { kind: 'members', chatId });
+    await w.until((x) => x.length === 2);
+    await ea.whenIdle();
+    expect(reqs.n).toBe(1);
+    await ea.call({ type: 'resetLocal', keepOutbox: true });
+    await ea.whenIdle();
+    expect(reqs.n).toBe(2);
+    expect(ea.store.members.list(chatId).length).toBe(2);
+    expect((await w.until((x) => x.length === 2)).map((m) => m.userId).sort()).toEqual([a.userId, b.userId].sort());
+  } finally { reqs.restore(); }
+});

@@ -565,7 +565,7 @@ export class Engine {
       }
       await this.store.wipe(this.store.epoch, { outbox: keepOutbox });
       if (!keepOutbox) this.ops.forget();
-      this.usersAsked.clear();
+      this.forgetAsked();
       this.ready = false;
       this.holding = false;
       this.emit();   // подписки видят пустой кэш сразу: ответ на hello снова включит удержание до конца снимка
@@ -1197,12 +1197,7 @@ export class Engine {
     this.presence.clear();            // без связи не знаем, кто в сети
     this.presenceDirty = true;
     this.presenceFetched = false;
-    this.usersAsked.clear();
-    // новое подключение — участников открытых подписок спросим заново (журнал мог потеряться: tooLong)
-    this.membersAsked.clear();
-    for (const w of this.watchers.values()) if (w.q.kind === 'members') this.membersWants.add(w.q.chatId);
-    this.media.reconnect();
-    this.lists.reconnect();
+    this.forgetAsked();   // новое подключение — журнал мог потеряться (tooLong): спросим заново
     if (this.wantOnline) this.failures++;
     this.ready = false;
     this.changed();
@@ -1212,6 +1207,18 @@ export class Engine {
     for (const p of this.pending.values()) p.reject(offline);
     this.pending.clear();
     if (!wasOpen && this.wantOnline) this.session.probe();
+  }
+
+  /**
+   * «Уже спрашивали» — забыть (новое подключение, сброс кэша, смена поколения базы): люди, участники открытых
+   * подписок, вкладки медиа и списки профиля спросятся снова. Без этого после очистки кэша подписка осталась бы пустой.
+   */
+  private forgetAsked(): void {
+    this.usersAsked.clear();
+    this.membersAsked.clear();
+    for (const w of this.watchers.values()) if (w.q.kind === 'members') this.membersWants.add(w.q.chatId);
+    this.media.reconnect();
+    this.lists.reconnect();
   }
 
   private onFrame(f: ServerFrame): void {
@@ -1225,7 +1232,7 @@ export class Engine {
         if (this.hellos++ > 0) { this.store.sessionsRev++; this.changed(); }
         this.run(async () => {
           // другое поколение базы (сервер пересоздан): старый кэш недействителен целиком
-          if (this.store.epoch && f.epoch && this.store.epoch !== f.epoch) { this.dev.log.record('engine', 'epochWipe', { from: this.store.epoch, to: f.epoch }); await this.store.wipe(f.epoch); this.ops.forget(); this.changed(); }
+          if (this.store.epoch && f.epoch && this.store.epoch !== f.epoch) { this.dev.log.record('engine', 'epochWipe', { from: this.store.epoch, to: f.epoch }); await this.store.wipe(f.epoch); this.ops.forget(); this.forgetAsked(); this.changed(); }
           else if (!this.store.epoch && f.epoch) { this.store.epoch = f.epoch; this.store.markMeta(); }
           // снимок — только когда кэш пуст; lastSeq = 0 бывает и у заполненного кэша (журнал пользователя ещё пуст)
           this.fetchMe();
