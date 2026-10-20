@@ -7,7 +7,7 @@ import type { Item } from '@relay/sync-engine/src/types';
 import { useEffect, useRef, useState } from 'preact/hooks';
 import { focusMessage, type MediaTab } from '../data';
 import { useMedia } from '../mediaTab';
-import { tileSrc, videoFrameSrc } from '../mediaGrid';
+import { tabLabel, tileSrc, videoFrameSrc, type SharedTab } from '../mediaGrid';
 import { getGlobal, useGlobal } from '../global';
 import { toggleMusic, trackTitle } from '../music';
 import { clock, dayLabel, fileSize, lastSeenText } from './format';
@@ -19,7 +19,6 @@ import { wantPeople } from '../people';
 // Пустые вкладки не показываем (счётчики из подписки движка); каждая вкладка — страницами по 40, новые сверху.
 
 const ORDER: MediaTab[] = ['media', 'file', 'link', 'audio', 'voice'];
-const LABEL: Record<MediaTab, string> = { media: 'Медиа', file: 'Файлы', link: 'Ссылки', audio: 'Музыка', voice: 'Голосовые' };
 
 export type Att = { id: string; kind: string; mime: string; name: string; size: number; thumb?: string | null; duration?: number | null; w?: number | null; h?: number | null;
   preview?: { name: string; w: number; h: number; size: number } | null };
@@ -38,10 +37,11 @@ export function extTone(ext: string): string {
   return 'blue';
 }
 
-type Tab = MediaTab | 'members';
+type Tab = SharedTab;
 
-/** group — в группе первая вкладка «Участники» (как в Telegram): панель не бывает пустой. */
-export function SharedMedia({ chatId, group = false }: { chatId: number; group?: boolean }) {
+/** group — в группе первая вкладка «Участники» (как в Telegram): панель не бывает пустой.
+ *  onTitle — название показанной вкладки: шапка панели пишет его, когда вкладки прилипли к верху. */
+export function SharedMedia({ chatId, group = false, onTitle }: { chatId: number; group?: boolean; onTitle?: (title: string) => void }) {
   const [tab, setTab] = useState<Tab | null>(null);
   const members = useMembers(chatId, group);
   // счётчики приходят с любой подпиской media этого чата и обновляются журналом (новое сообщение — новый счётчик)
@@ -51,6 +51,8 @@ export function SharedMedia({ chatId, group = false }: { chatId: number; group?:
   useEffect(() => { setTab(null); }, [chatId]);
   const tabs: Tab[] = [...(group ? ['members' as const] : []), ...(counts ? ORDER.filter((t) => counts[t] > 0) : [])];
   const active = tab && tabs.includes(tab) ? tab : tabs[0] ?? null;
+  const title = active ? tabLabel(active) : null;
+  useEffect(() => { if (title) onTitle?.(title); }, [title]);
 
   if (!counts && !group) return <div class="app-sm-loading" aria-busy="true" />;
   if (!tabs.length) return (
@@ -63,9 +65,9 @@ export function SharedMedia({ chatId, group = false }: { chatId: number; group?:
       {/* одна непустая вкладка — переключать нечего: вместо одинокой плашки заголовок раздела */}
       {tabs.length > 1 ? (
         <div class="rl-aside-tabs">
-          <FolderTabs label="Общие медиа" active={active} onChange={(id: Tab) => setTab(id)} items={tabs.map((t) => ({ id: t, label: t === 'members' ? 'Участники' : LABEL[t] }))} />
+          <FolderTabs label="Общие медиа" active={active} onChange={(id: Tab) => setTab(id)} items={tabs.map((t) => ({ id: t, label: tabLabel(t) }))} />
         </div>
-      ) : <h3 class="app-sm-heading">{tabs[0] === 'members' ? 'Участники' : LABEL[tabs[0]]}</h3>}
+      ) : <h3 class="app-sm-heading">{tabLabel(tabs[0])}</h3>}
       <div class="rl-aside-pages">
         <SlideStack variant="tabs" order={tabs} active={active} render={(k: string) => k === 'members' ? <MembersList key={chatId + k} data={members} /> : <TabList key={chatId + k} chatId={chatId} tab={k as MediaTab} />} />
       </div>

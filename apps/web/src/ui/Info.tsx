@@ -78,9 +78,11 @@ export function Info() {
   const [slide, setSlide] = useState(0);
   const [viewer, setViewer] = useState<number | null>(null);
   useEffect(() => { setSlide(0); setViewer(null); }, [chatId]);
-  // как в Telegram: вкладки медиа доехали до верха и прилипли — шапка становится «Общие медиа» со стрелкой наверх
+  // как в Telegram: вкладки медиа доехали до верха и прилипли — шапка становится названием текущей вкладки
+  // («Участники», «Медиа», «Файлы»…) со стрелкой наверх; смена вкладки — то же мягкое проявление заголовка
   const body = useRef<HTMLDivElement>(null);
   const [media, setMedia] = useState(false);
+  const [mediaTitle, setMediaTitle] = useState('Общие медиа');
   const measuring = useRef(false);
   const onBodyScroll = () => {
     if (measuring.current) return;
@@ -116,7 +118,7 @@ export function Info() {
     ) : (
     <div class="rl-sidepage">
       <PanelHeader class={media ? 'is-media' : undefined} icon={media ? 'arrowLeft' : 'close'} closeLabel={media ? 'Наверх' : 'Закрыть'}
-        title={media ? 'Общие медиа' : group ? 'Информация о группе' : 'Информация'} onClose={media ? toTop : close} action={media ? undefined : action} />
+        title={media ? mediaTitle : group ? 'Информация о группе' : 'Информация'} onClose={media ? toTop : close} action={media ? undefined : action} />
       <div class="rl-aside-body" ref={body} onScroll={onBodyScroll}>
         {gallery.length ? (
           <ProfileGallery photos={gallery} index={slide} onIndex={setSlide} onOpen={setViewer}
@@ -160,7 +162,7 @@ export function Info() {
             </div>
           ) : null}</Expand>
         </div>
-        <SharedMedia chatId={chatId} group={group} />
+        <SharedMedia chatId={chatId} group={group} onTitle={setMediaTitle} />
         {viewer != null && gallery.length ? (
           <PhotoViewer photos={gallery} index={viewer} name={title} onIndex={setSlide} onClose={() => setViewer(null)}
             origin={(k) => (k === slide ? document.querySelector<HTMLElement>(`.app-gallery [data-gallery-slide="${k}"]`) : null)} />
