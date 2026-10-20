@@ -658,6 +658,7 @@ export class Engine {
     for (const [chatId, ids] of wants) {
       this.run(async () => {
         const res = await this.http<{ messages: Message[] }>(`/chats/${chatId}/messages?ids=${[...ids].join(',')}`);
+        await this.store.loadChatMessages(chatId);   // исходники ложатся строками чата: сначала — его сохранённые сообщения
         this.store.addQuotes(chatId, res.messages);
         this.changed();
       });

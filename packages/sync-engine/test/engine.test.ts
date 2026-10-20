@@ -107,3 +107,30 @@ test('edits and deletions of a chat not opened since start reach the cached copy
   expect(byId.get(ids[0])).toMatchObject({ deleted: true, body: '' });
   expect(byId.get(ids[1])).toMatchObject({ body: 'm2 правка' });
 });
+
+test('a quote fetched online survives an offline restart: its source is stored as a loose message', async () => {
+  const a = await srv.login('a'), b = await srv.login('b');
+  const chatId = await srv.chat(a.token, [a.userId, b.userId]);
+  const src = (await sendMessage(a.userId, { chatId, clientId: crypto.randomUUID(), body: 'исходник' })).message.id;
+  for (let i = 1; i <= 30; i++) await sendMessage(a.userId, { chatId, clientId: crypto.randomUUID(), body: 'f' + i });
+  await sendMessage(a.userId, { chatId, clientId: crypto.randomUUID(), body: 'ответ', replyToId: src });
+  const cfg = { ...srv.config(b), historyPage: 3 };
+  const eb = await open(cfg);
+  eb.connect();
+  await eb.whenIdle();
+  const feed = watchInto(eb, { kind: 'messages', chatId, limit: 3 });
+  // исходника нет в загруженной странице — цитата приходит отдельным запросом
+  const quoteOf = (l: { body?: unknown; reply?: unknown }[]) => (l.find((m) => m.body === 'ответ')?.reply as { body?: string } | null | undefined)?.body;
+  await feed.until((l) => quoteOf(l) === 'исходник');
+  expect(feed.list().map((m) => m.body)).toEqual(['f29', 'f30', 'ответ']);   // в ленту исходник не попал: отрезки не тронуты
+  await eb.whenIdle();
+  await eb.close(); engines.length = 0;
+
+  // перезапуск без сети на той же базе: цитата — из сохранённой строки
+  const cold = await open(cfg);
+  const feed2 = watchInto(cold, { kind: 'messages', chatId, limit: 3 });
+  const l = await feed2.until((x) => x.some((m) => m.body === 'ответ'));
+  await Bun.sleep(30);
+  expect(quoteOf(feed2.list())).toBe('исходник');
+  expect(l.map((m) => m.body)).toEqual(['f29', 'f30', 'ответ']);
+});

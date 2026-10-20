@@ -132,10 +132,11 @@ test('a deleted message keeps no content in memory or IndexedDB (loaded and unlo
     entities: [{ type: 'bold', offset: 0, length: 5 }], link: { url: 'https://x.y', title: 'тайна' },
     blocks: [{ type: 'p', text: 'тайна' }], fwdFrom: { userId: 9, name: 'Кто-то', chatId: 3, messageId: 4, at: new Date().toISOString() },
   } as never);
-  s.applyUpdate({ type: 'newMessage', message: rich(10) });
+  const m10 = rich(10);   // исходник цитаты — то же сообщение (тот же clientId), что и в истории
+  s.applyUpdate({ type: 'newMessage', message: m10 });
   s.applyUpdate({ type: 'newMessage', message: rich(11) });
   s.applyUpdate({ type: 'newMessage', message: msg({ id: 12, chatId: 7, senderId: PEER, body: 'последнее' }) });
-  s.addQuotes(7, [rich(10) as never]);
+  s.addQuotes(7, [m10 as never]);
   await s.flush();
   const check = (m: Record<string, unknown> | undefined) => {
     expect(m).toBeDefined();

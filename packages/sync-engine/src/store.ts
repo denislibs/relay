@@ -237,7 +237,8 @@ export class Store {
   }
   private sorted = new Map<number, LocalMessage[]>();
   private ids = new Map<number, Map<number, LocalMessage>>();
-  /** Исходники цитат вне загруженной истории — отдельно, чтобы не рвать непрерывность ленты. Только в памяти. */
+  /** Исходники цитат вне загруженной истории — отдельно, чтобы не рвать непрерывность ленты. В памяти — на случай,
+   *  пока строка не прочитана; сами сообщения ложатся и в IndexedDB как вне ленты (addQuotes → addLoose). */
   quotes = new Map<string, QuoteMsg>();
   quoteFor(chatId: number, id: number) { return this.quotes.get(chatId + ':' + id); }
   /** Кто сейчас печатает: chatId → userId. Только в памяти — это состояние момента. */
@@ -262,8 +263,11 @@ export class Store {
       set.add(id);
     }
   }
+  /** Пришедшие исходники цитат: в память и в кэш как сообщения вне ленты (отрезки истории не трогают) —
+   *  после перезапуска без сети цитата берётся из сохранённой строки (messageById). Чат уже загружен (см. fetchQuotes). */
   addQuotes(chatId: number, list: Message[]): void {
     for (const m of list) this.quotes.set(chatId + ':' + m.id, toQuote(m as Parameters<typeof toQuote>[0]));
+    this.addLoose(chatId, list);
     this.touch(chatId);
   }
   /** Сообщение чата по серверному id (для цитат); индекс строится вместе с отсортированным кэшем. */
