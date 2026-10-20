@@ -1438,7 +1438,7 @@ html[data-blur="0"] .rl-shell .rl-rpick { background: color-mix(in srgb, var(--r
 
 /* «Информация» прокручивается целиком (как в Telegram): вкладки медиа прилипают сверху и плавают над сеткой */
 .rl-aside-tabs { position: sticky; top: 0; z-index: 3; margin: 0; padding: var(--space-3) var(--space-3) var(--space-3);   /* снизу как сбоку — сетка медиа не липнет к вкладкам */ }
-.rl-aside-tabs::before { content: ''; position: absolute; inset: 0 0 -12px; z-index: -1; pointer-events: none; background: color-mix(in srgb, var(--card) 72%, transparent); -webkit-backdrop-filter: blur(10px); backdrop-filter: blur(10px); -webkit-mask-image: linear-gradient(#000 65%, transparent); mask-image: linear-gradient(#000 65%, transparent); }
+.rl-aside-tabs::before { content: ''; position: absolute; inset: 0;   /* не ниже вкладок: выступ накрывал верх первого острова со скруглением */ z-index: -1; pointer-events: none; background: color-mix(in srgb, var(--card) 72%, transparent); -webkit-backdrop-filter: blur(10px); backdrop-filter: blur(10px); -webkit-mask-image: linear-gradient(#000 65%, transparent); mask-image: linear-gradient(#000 65%, transparent); }
 .rl-aside-pages { margin-top: 0; flex: 1 0 auto; min-height: calc(100% - 64px); }   /* вкладки всегда можно довести до верха */
 .rl-aside-pages > .rl-slides { flex: 1 0 auto; width: 100%; min-width: 0; max-width: 100%; }   /* по ширине панели: длинная строка (адрес ссылки) — многоточием, а не прокруткой вбок */
 /* текущая вкладка — в потоке (высота панели по содержимому), уходящая во время анимации — поверх */
@@ -2194,10 +2194,11 @@ html[data-blur="0"] .rl-menu { -webkit-backdrop-filter: none; backdrop-filter: n
   :root { --sq: 1.6; }
   .rl-sect-card, .rl-settings-group, .rl-aside-group, .rl-banner, .rl-toast { corner-shape: squircle; border-radius: calc(var(--radius-lg) * var(--sq)); }
   /* правая колонка: и карточка, и сам aside — на узком экране тень и радиус у него, форма должна совпадать */
-  .rl-sidecard, .rl-frail, .rl-glassbar, .rl-shell-aside, .rl-shell-aside > .rl-panel, .rl-shell .rl-composer-field, .rl-shell .rl-selbar, .rl-shell .rl-csearch, .rl-shell .rl-recorder .rl-rec-body {
+  /* шапка чата, поле ввода, полосы выбора и поиска — у Telegram обычные «таблетки» без сквиркла, их не трогаем */
+  .rl-sidecard, .rl-frail, .rl-shell-aside, .rl-shell-aside > .rl-panel, .rl-shell .rl-recorder .rl-rec-body {
     corner-shape: squircle; border-radius: calc(var(--radius-panel) * var(--sq)); }
   .rl-card { corner-shape: squircle; border-radius: calc(var(--radius-xxl) * var(--sq)); }
-  .rl-tabs { corner-shape: squircle; border-radius: calc(24px * var(--sq)); }
+  /* полоса вкладок — как шапка, обычная круглая «таблетка» (у Telegram без сквиркла) */
   .rl-menu { corner-shape: squircle; border-radius: calc(14px * var(--sq)); }
   /* строки списков (как ListItem в Telegram): подсветка строки чата и строк настроек — той же формы */
   .rl-row { corner-shape: squircle; border-radius: calc(var(--radius-lg) * var(--sq)); }
