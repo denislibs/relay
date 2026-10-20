@@ -102,6 +102,7 @@ export interface ChatSummary {
 export class Store {
   /** счётчик sessionsChanged из журнала (не хранится): по нему интерфейс перечитывает сеансы */
   sessionsRev = 0;
+  stickersRev = 0;   // мои стикеры изменились (журнал, переподключение): интерфейс перечитывает
   chats = new Map<number, LocalChat>();
   outbox = new Map<string, OutboxEntry>();
   pendingReads = new Map<number, number>();
@@ -307,6 +308,7 @@ export class Store {
       case 'privacyChanged': this.settings.applyPrivacy(u.rules, seq); return;
       case 'blocksChanged': return applyBlocksChanged(this, u, seq);
       case 'sessionsChanged': this.sessionsRev++; return;
+      case 'myStickers': this.stickersRev++; return;
       case 'pins': { const chat = this.chats.get(u.chatId); if (chat) { chat.pinned = u.ids; this.markChat(chat); } return; }
       case 'chatNotify': return this.setMute(u.chatId, u.muteUntil);
       case 'groupUpdated': { const chat = this.chats.get(u.chatId); if (chat) { chat.group = u.group; this.markChat(chat); } return; }
@@ -464,6 +466,7 @@ export class Store {
       ...(m.fwdFrom ? { fwdFrom: m.fwdFrom } : null),
       ...(m.blocks ? { blocks: m.blocks } : null),
       ...(m.buttons ? { buttons: m.buttons } : null),
+      ...(m.sticker ? { sticker: m.sticker } : null),
       // сервер ещё грузит превью, а у нас оно уже есть (показано в поле ввода) — не прятать его до загрузки
       ...(m.link ? { link: m.link.pending && prev?.link && !prev.link.pending && prev.link.url === m.link.url ? prev.link : m.link } : null),
     };
@@ -525,7 +528,7 @@ export class Store {
       key: o.clientId, clientId: o.clientId, id: null, chatId: o.chatId, senderId: this.userId,
       body: o.body, entities: o.entities ?? [], replyToId: o.replyToId, createdAt: new Date(o.createdAt).toISOString(),
       status: o.failed ? 'failed' : 'pending', sort: PENDING_BASE + o.createdAt,
-      kind: o.todo ? 'todo' : o.attachment ? o.attachment.kind : 'text', attachment: o.attachment ?? null, ...(o.todo ? { todo: o.todo } : {}), progress: o.attachment && !o.attachment.id ? 0 : undefined,
+      kind: o.sticker ? 'sticker' : o.todo ? 'todo' : o.attachment ? o.attachment.kind : 'text', ...(o.sticker ? { sticker: o.sticker } : {}), attachment: o.attachment ?? null, ...(o.todo ? { todo: o.todo } : {}), progress: o.attachment && !o.attachment.id ? 0 : undefined,
       ...(o.failed && o.error ? { error: o.error } : {}),
       ...(o.groupId ? { groupId: o.groupId } : {}),
       ...(o.fwdFrom ? { fwdFrom: o.fwdFrom } : {}),

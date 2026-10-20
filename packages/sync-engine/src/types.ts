@@ -1,3 +1,4 @@
+import type { StickerRef, StickerSetInfo } from '@relay/protocol';
 import type { StoreName } from './schema';
 import type { GroupInfo, MediaTab, MyMembership } from '@relay/protocol';
 import type { Birthday, Block, ChatFolder, Entity, ForwardInfo, ForwardRef, LinkPreview, MessageButton, PrivacyKey, PrivacyMode, ProfileLink, ServiceType, Todo, TodoInput, TodoServiceData, VideoVariant } from '@relay/protocol';
@@ -18,7 +19,8 @@ export interface LocalMessage {
   editedAt?: string | null;
   deleted?: boolean;
   reactions?: { userId: number; emoji: string }[];
-  kind?: 'text' | 'photo' | 'video' | 'file' | 'voice' | 'round' | 'audio' | 'todo';
+  kind?: 'text' | 'photo' | 'video' | 'file' | 'voice' | 'round' | 'audio' | 'todo' | 'sticker';
+  sticker?: StickerRef | null;   // стикер: снимок (адрес, размеры, контур)
   groupId?: string | null;
   attachment?: LocalAttachment | null;
   entities?: Entity[];    // оформление текста
@@ -93,7 +95,8 @@ export interface OutboxEntry {
   noLinkPreview?: boolean;          // превью ссылки убрали в поле ввода
   link?: LinkPreview | null;        // превью, уже показанное в поле ввода, — в ленте сразу, до ответа сервера
   blocks?: Block[] | null;          // «статья»
-  upload?: { id: string; partSize: number; parts: number; done: number[] };   // большой файл частями: что уже принято (докачка)
+  upload?: { id: string; partSize: number; parts: number; done: number[] };
+  sticker?: StickerRef | null;      // стикер: снимок для показа до ответа, на сервер уходит только id   // большой файл частями: что уже принято (докачка)
 }
 
 export type Query =
@@ -144,6 +147,16 @@ export type Patch =
       append?: boolean };
 
 export type Action =
+  /** стикеры (stickers.ts): мои паки/недавние/избранные и паки — из кэша без сети; изменения — очередью операций */
+  | { type: 'sendSticker'; chatId: number; sticker: StickerRef; replyToId?: number | null }
+  | { type: 'myStickers' }
+  | { type: 'stickerSet'; id: number | string; hash?: string }
+  | { type: 'installStickerSet'; setId: number; on: boolean; info?: StickerSetInfo }
+  | { type: 'faveSticker'; id: number; on: boolean; sticker?: StickerRef }
+  | { type: 'clearRecentStickers'; id?: number }
+  | { type: 'featuredStickerSets'; offset?: number }
+  | { type: 'searchStickerSets'; q: string }
+  | { type: 'stickersByEmoji'; emoji: string }
   /** управление группой и вступление по ссылке: HTTP мимо очереди ({ok, data} | {ok:false, code}) */
   | { type: 'group'; method: 'GET' | 'POST' | 'PUT' | 'PATCH' | 'DELETE'; path: string; body?: unknown }
   | { type: 'sendMessage'; chatId: number; body: string; entities?: Entity[]; replyToId?: number | null; noLinkPreview?: boolean; link?: LinkPreview | null; attachment?: LocalAttachment | null; blocks?: Block[] | null }   // blocks — «статья»; attachment — уже загруженный файл (id), например трек из музыки профиля

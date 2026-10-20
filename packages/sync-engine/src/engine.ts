@@ -13,6 +13,7 @@ import { loadOps, Ops, type PendingOp } from './ops';
 import { folderKey, isNotifyOp, normalizeRule, notifyKey, OP_FOLDERS_ORDER, privacyKey, settingsItem, settingsView } from './settings';
 import { applyUserUpdated, meItem, meView, OP_LINKS, OP_PROFILE, OP_USERNAME, userItem } from './profile';
 import { OP_SESSIONS_TTL, Sessions } from './sessions';
+import { Stickers } from './stickers';
 import { SessionEnd } from './session';
 import { DevTools, loadSim, type SimState, type SubStat } from './devlog';
 import { simFlags, watchLoss } from './devsim';
@@ -100,6 +101,7 @@ export class Engine {
   private readonly blocks: Blocks;
   /** активные сеансы (sessions.ts) */
   private readonly sessions: Sessions;
+  private readonly stickers: Stickers;
   /** конец сеанса: sessionTerminated / 401 (session.ts) */
   private readonly session: SessionEnd;
   /** чужие профили, которых нет в кэше: подгрузим, когда будет связь; asked — уже спрашивали за это подключение */
@@ -163,6 +165,7 @@ export class Engine {
     this.media = new MediaLoader(store, { online: () => this.online && this.ready, http: (path) => this.http(path), run: (fn) => this.run(fn), changed: () => this.changed() });
     this.lists = new ProfileListsLoader(store, { online: () => this.online && this.ready, http: (path) => this.http(path), run: (fn) => this.run(fn), changed: () => this.changed() });
     this.sessions = new Sessions({ ops: this.ops, online: () => this.online, http: (path) => this.http(path) });
+    this.stickers = new Stickers({ db, online: () => this.online, http: (path) => this.http(path), enqueue: (op) => this.ops.enqueue(op), bump: () => { this.store.stickersRev++; this.changed(); } });
     this.session = new SessionEnd({
       httpBase: cfg.httpBase, headers: cfg.headers, fetch: this.dev.fetch,
       closed: () => this.closed,
@@ -355,7 +358,8 @@ export class Engine {
       outbox: [...this.store.outbox.values()].filter((o) => !o.failed).length,
       failed: [...this.store.outbox.values()].filter((o) => o.failed).length,
       ...this.session.status(),
-      sessionsRev: this.store.sessionsRev,   // растёт на sessionsChanged из журнала, переподключении и снимке: интерфейс перечитывает сеансы
+      sessionsRev: this.store.sessionsRev,
+      stickersRev: this.store.stickersRev,   // мои стикеры: журнал, переподключение, снимок, свои изменения   // растёт на sessionsChanged из журнала, переподключении и снимке: интерфейс перечитывает сеансы
       devSim: simFlags(this.dev.sim),   // имитатор сети включён — плашка «Режим разработчика» во всех вкладках
     };
   }
@@ -1169,6 +1173,25 @@ export class Engine {
       case 'removeProfileMusic':
         await this.ops.enqueue({ key: musicKey(a.attId), method: 'DELETE', path: `/me/music/${encodeURIComponent(a.attId)}` });
         return null;
+      case 'sendSticker': {
+        const clientId = crypto.randomUUID();
+        this.lastCreated = Math.max(Date.now(), this.lastCreated + 1);
+        this.store.addPending({ clientId, chatId: a.chatId, body: '', entities: [], replyToId: a.replyToId ?? null, createdAt: this.lastCreated, failed: false, sticker: a.sticker });
+        await this.store.flush();
+        this.changed();
+        this.pumpOutbox();
+        void this.stickers.bumpRecent(a.sticker);
+        return { clientId };
+      }
+      case 'myStickers':
+      case 'stickerSet':
+      case 'installStickerSet':
+      case 'faveSticker':
+      case 'clearRecentStickers':
+      case 'featuredStickerSets':
+      case 'searchStickerSets':
+      case 'stickersByEmoji':
+        return this.stickers.act(a);
       case 'listSessions':
       case 'terminateSession':
       case 'terminateOtherSessions':
@@ -1275,7 +1298,7 @@ export class Engine {
         this.holding = true;
         // переподключение: пока связи не было, sessionsChanged мог уйти мимо (снимок его не несёт) — интерфейс
         // перечитывает сеансы (плашка «Это вы?»); первое подключение не считаем — там интерфейс грузит список сам
-        if (this.hellos++ > 0) { this.store.sessionsRev++; this.changed(); }
+        if (this.hellos++ > 0) { this.store.sessionsRev++; this.store.stickersRev++; this.changed(); }
         this.run(async () => {
           // другое поколение базы (сервер пересоздан): старый кэш недействителен целиком
           if (this.store.epoch && f.epoch && this.store.epoch !== f.epoch) { this.dev.log.record('engine', 'epochWipe', { from: this.store.epoch, to: f.epoch }); await this.store.wipe(f.epoch); this.ops.forget(); this.forgetAsked(); this.changed(); }
@@ -1379,6 +1402,7 @@ export class Engine {
             this.contacts.fetch();
             this.blocks.fetch();
             this.fetchSettings();
+            this.store.stickersRev++;
             this.store.sessionsRev++;   // снимок пропустил записи журнала, в т.ч. sessionsChanged — список сеансов заново
             await this.loadFirstDialogs();
             this.store.lastSeq = f.op === 'tooLong' ? f.seq : f.to;
@@ -1664,7 +1688,7 @@ export class Engine {
           if (!next || !this.online) break;
           try {
             const att = next.attachment ? { id: next.attachment.id, thumb: next.attachment.thumb ?? null, ...(next.attachment.spoiler ? { spoiler: true } : {}) } : null;
-            const r = await this.request({ op: 'send', reqId: '', clientId: next.clientId, chatId: next.chatId, body: next.body, entities: next.entities ?? [], replyToId: next.replyToId, attachment: next.forward ? null : att, ...(next.groupId ? { groupId: next.groupId } : {}), ...(next.forward ? { forward: next.forward } : {}), ...(next.noLinkPreview ? { noLinkPreview: true } : {}), ...(next.blocks ? { blocks: next.blocks } : {}), ...(next.todo ? { todo: { title: next.todo.title, items: next.todo.items.map((x) => ({ title: x.title })), othersCanAppend: next.todo.othersCanAppend, othersCanComplete: next.todo.othersCanComplete } } : {}) });
+            const r = await this.request({ op: 'send', reqId: '', clientId: next.clientId, chatId: next.chatId, body: next.body, entities: next.entities ?? [], replyToId: next.replyToId, attachment: next.forward ? null : att, ...(next.groupId ? { groupId: next.groupId } : {}), ...(next.forward ? { forward: next.forward } : {}), ...(next.noLinkPreview ? { noLinkPreview: true } : {}), ...(next.blocks ? { blocks: next.blocks } : {}), ...(next.sticker ? { sticker: { id: next.sticker.id } } : {}), ...(next.todo ? { todo: { title: next.todo.title, items: next.todo.items.map((x) => ({ title: x.title })), othersCanAppend: next.todo.othersCanAppend, othersCanComplete: next.todo.othersCanComplete } } : {}) });
             this.store.ack(next.clientId, r.id as number, r.createdAt as string);
             // своё опустило начало живого отрезка ниже seed — сообщения между ними догрузить (страница перед seed)
             const c = this.store.chats.get(next.chatId), live = c?.ranges[c.ranges.length - 1];
