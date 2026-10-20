@@ -2318,3 +2318,4 @@ html[data-blur="0"] .rl-menu { -webkit-backdrop-filter: none; backdrop-filter: n
 .rl-presence[data-state="closing"] .rl-symbols-pop { animation: rl-pop-out 160ms var(--ease-standard) forwards; }
 .rl-emoji-toggle-on { color: var(--brand-strong); }
 .rl-quote-thumb-node { width: 36px; height: 36px; align-self: center; margin-left: 2px; display: flex; align-items: center; justify-content: center; flex-shrink: 0; }
+.rl-row-thumb-node { background: none; border-radius: 0; overflow: visible; }

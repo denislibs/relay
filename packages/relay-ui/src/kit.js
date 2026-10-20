@@ -424,7 +424,7 @@ function ChatRow(props) {
       ? h('span', { class: 'rl-row-preview' }, h('b', { class: 'rl-row-draft' }, 'Черновик: '), props.draft)
       : h('span', { class: 'rl-row-preview' },
         props.author ? h('span', { class: 'rl-row-author' }, props.author + ': ') : null,
-        thumb ? h('span', { class: cx('rl-row-thumb', thumb.round && 'rl-row-thumb-round') }, h('img', { src: thumb.src, alt: '', draggable: false }),
+        thumb ? h('span', { class: cx('rl-row-thumb', thumb.round && 'rl-row-thumb-round', thumb.node && 'rl-row-thumb-node') }, thumb.node || h('img', { src: thumb.src, alt: '', draggable: false }),
           thumb.video ? h(Icon, { name: 'play', size: 12 }) : null) : null,
         props.preview);
   return h('button', Object.assign({ type: 'button' }, rest, { onPointerDown: chain(rest.onPointerDown, ripple),

@@ -16,6 +16,7 @@ export type LastMessage = {
   senderId: number; body: string; deleted?: boolean; kind?: string; attachmentId?: string | null; attachmentName?: string | null; attachmentTitle?: string | null; attachmentPerformer?: string | null;
   entities?: Ent[] | null; thumb?: string | null; mime?: string | null; service?: { type: string } | null;
   stickerEmoji?: string | null;
+  sticker?: StickerRef | null;   // стикер: мини-стикер вместо миниатюры
 };
 
 /** Сообщение ленты (вложение — объектом) → формат превью списка чатов (поля вложения — плоско). */
@@ -27,6 +28,7 @@ export function asLast(m: Record<string, unknown>): LastMessage {
     entities: (m.entities as LastMessage['entities']) ?? null, thumb: a?.thumb ?? null, mime: a?.mime ?? null,
     service: (m.service as LastMessage['service']) ?? null,
     stickerEmoji: (m.sticker as { emoji?: string } | null | undefined)?.emoji ?? null,
+    sticker: (m.sticker as StickerRef | null | undefined) ?? null,
   };
 }
 
@@ -60,7 +62,12 @@ export function previewText(text: string, entities?: Ent[] | null): ComponentChi
 /** Миниатюра из встроенного thumb (без загрузки файла): фото, видео (со значком play),
  *  обложка музыки, кружок видеосообщения — как в Telegram. full — настоящий файл фото: где миниатюра крупнее
  *  строки списка (закреп, цитата, поиск), показываем его, а встроенный thumb — подложкой, пока грузится. */
-export function previewThumb(m: LastMessage): { src: string; video: boolean; round?: boolean; full?: string } | null {
+export function previewThumb(m: LastMessage): { src: string; video: boolean; round?: boolean; full?: string; node?: ComponentChildren } | null {
+  // стикер — сам стикер маленьким (первый кадр), как в Telegram
+  if (!m.deleted && m.kind === 'sticker' && m.sticker) {
+    const s = m.sticker;
+    return { src: '', video: false, node: <StickerView src={s.url} outline={s.outline} w={s.w} h={s.h} size={20} play={false} group="list" /> };
+  }
   if (m.deleted || !m.thumb) return null;
   if (m.kind === 'round') return { src: m.thumb, video: false, round: true };
   const video = !!m.mime?.startsWith('video/');
@@ -87,7 +94,7 @@ export function previewBody(m: LastMessage, withThumb: boolean): ComponentChildr
   if (m.kind === 'video') return withThumb ? caption ?? 'Видео' : ['📹 ', caption ?? 'Видео'];
   if (m.kind === 'voice') return caption ?? '🎤 Голосовое сообщение';
   if (m.kind === 'todo') return ['☑️ ', m.body];
-  if (m.kind === 'sticker') return (m.stickerEmoji ? m.stickerEmoji + ' ' : '') + 'Стикер';
+  if (m.kind === 'sticker') return withThumb ? 'Стикер' : (m.stickerEmoji || m.sticker?.emoji ? (m.stickerEmoji || m.sticker?.emoji) + ' ' : '') + 'Стикер';
   if (m.kind === 'round') return withThumb ? 'Видеосообщение' : '📹 Видеосообщение';
   if (m.kind === 'audio') {
     // «Название — исполнитель»; с обложкой эмодзи не нужен
@@ -118,7 +125,7 @@ export function quoteContent(m: Record<string, unknown>): { text: ComponentChild
     // маленький стикер (первый кадр, без анимации), как в Telegram; без снимка — только текст
     const s = m.sticker as StickerRef | null | undefined;
     if (!s) return { text: 'Стикер' };
-    return { text: previewBody(last, false), thumbNode: <StickerView src={s.url} outline={s.outline} w={s.w} h={s.h} size={36} play={false} group="quote" /> };
+    return { text: previewBody(last, true), thumbNode: <StickerView src={s.url} outline={s.outline} w={s.w} h={s.h} size={36} play={false} group="quote" /> };
   }
   else if (last.kind === 'todo') text = ['☑️ ', ((m.todo ?? null) as { title?: string } | null)?.title || last.body || 'Чек-лист'];
   else if ((m.article || (Array.isArray(m.blocks) && m.blocks.length)) && !last.body) text = '📰 Статья';
