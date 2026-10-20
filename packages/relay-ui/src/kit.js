@@ -2,6 +2,7 @@ import { h, Fragment, toChildArray, createContext } from 'preact';
 import { useState, useRef, useEffect, useLayoutEffect, useContext } from 'preact/hooks';
 import { createPortal } from 'preact/compat';
 import { MentionList } from './more.js';
+import { PACK_ICONS, PACK_FILLED } from './iconPack.js';
 import { requestMeasure, requestMutation, beginHeavyAnimation, onHeavyAnimationEnd, isHeavyAnimating, forceMeasure } from './schedule.js';
 import { VideoPlayer } from './media/videoPlayer.js';
 
@@ -214,15 +215,31 @@ var FILLED = { play: 1, stop: 1 };
 
 function Icon(props) {
   var name = props.name, size = props.size || 20, title = props.title;
+  var base = { class: cx('rl-icon', (props.className || props.class)), width: size, height: size, viewBox: '0 0 24 24',
+    role: title ? 'img' : undefined, 'aria-label': title, 'aria-hidden': title ? undefined : 'true', 'data-icon': name };
+  // залитый вариант (там, где он у Telegram): фигура залита, внутренние детали вырезаны маской
+  var filled = PACK_FILLED[name] || (name === 'play' ? PACK_FILLED.playFilled : name === 'pause' ? PACK_FILLED.pauseFilled : name === 'stop' ? PACK_FILLED.stopFilled : null);
+  if (filled) {
+    // маска зависит только от имени значка — один id на имя (одинаковые маски на странице взаимозаменяемы)
+    var id = { current: 'rl-ic-' + name };
+    var sw0 = props.strokeWidth || 1.8;
+    return h('svg', Object.assign(base, { fill: 'none', stroke: 'currentColor', 'stroke-width': sw0, 'stroke-linecap': 'round', 'stroke-linejoin': 'round' }),
+      filled.cut ? h('defs', null, h('mask', { id: id.current, maskUnits: 'userSpaceOnUse', x: 0, y: 0, width: 24, height: 24 },
+        h('rect', { width: 24, height: 24, fill: '#fff', stroke: 'none' }),
+        filled.cut.map(function (d, i) { return h('path', { key: i, d: d, stroke: '#000', 'stroke-width': sw0 + 0.4 }); }))) : null,
+      h('g', { mask: filled.cut ? 'url(#' + id.current + ')' : undefined, fill: 'currentColor' }, filled.fill.map(function (d, i) { return h('path', { key: i, d: d }); })),
+      (filled.extra || []).map(function (d, i) { return h('path', { key: 'x' + i, d: d }); }));
+  }
+  // пак (Messenger icon pack v3): готовые внутренности SVG
+  var pack = PACK_ICONS[name];
+  if (pack) return h('svg', Object.assign(base, { fill: 'none', stroke: 'currentColor', 'stroke-width': props.strokeWidth || 1.8, 'stroke-linecap': 'round', 'stroke-linejoin': 'round',
+    dangerouslySetInnerHTML: { __html: pack } }));
   var d = ICONS[name] || ICONS.info;
   var sw = props.strokeWidth || (HEAVY[name] ? 3 : 1.8);
-  return h('svg', {
-    class: cx('rl-icon', (props.className || props.class)), width: size, height: size, viewBox: '0 0 24 24', fill: FILLED[name] ? 'currentColor' : 'none',
-    stroke: 'currentColor', 'stroke-width': sw, 'stroke-linecap': 'round', 'stroke-linejoin': 'round',
-    role: title ? 'img' : undefined, 'aria-label': title, 'aria-hidden': title ? undefined : 'true', 'data-icon': name
-  }, d.map(function (p, i) { return h('path', { key: i, d: p }); }));
+  return h('svg', Object.assign(base, { fill: FILLED[name] ? 'currentColor' : 'none',
+    stroke: 'currentColor', 'stroke-width': sw, 'stroke-linecap': 'round', 'stroke-linejoin': 'round' }), d.map(function (p, i) { return h('path', { key: i, d: p }); }));
 }
-Icon.names = Object.keys(ICONS);
+Icon.names = Object.keys(ICONS).concat(Object.keys(PACK_FILLED));
 
 /* ---------- Button ---------- */
 function Button(props) {
@@ -385,14 +402,14 @@ function ChatRow(props) {
         h('span', { class: 'rl-row-meta' },
           props.mentioned ? h('span', { class: 'rl-row-at', 'aria-label': 'Вас упомянули' }, '@') : null,
           props.muted ? h(Icon, { name: 'bellOff', size: 16, title: 'Без звука' }) : null,
-          props.pinned ? h(Icon, { name: 'pin', size: 16, title: 'Закреплён', class: 'rl-row-pin' }) : null,
+          props.pinned ? h(Icon, { name: 'pinFilled', size: 16, title: 'Закреплён', class: 'rl-row-pin' }) : null,   // pin-filled
           unread > 0 ? h(Badge, { count: unread, muted: props.muted }) : null))));
 }
 
 /* ---------- ArchivedRow ---------- */
 function ArchivedRow(props) {
   return h('button', { type: 'button', class: 'rl-row rl-row-archived', onPointerDown: ripple, onClick: props.onClick },
-    h('span', { class: 'rl-row-archived-icon' }, h(Icon, { name: 'archive', size: 20 })),
+    h('span', { class: 'rl-row-archived-icon' }, h(Icon, { name: 'archiveFilled', size: 20 })),   // archive-filled
     h('span', { class: 'rl-row-name' }, props.label || 'Архив'),
     props.count ? h('span', { class: 'rl-row-time rl-row-time-unread' }, props.count) : null);
 }

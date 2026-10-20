@@ -310,7 +310,7 @@ function NewChatFab() {
           ]} />
       <button ref={btn} type="button" class={'rl-fab-main app-newchat-btn' + (open ? ' app-newchat-open' : '')} aria-label={open ? 'Закрыть' : 'Новый чат'}
         aria-expanded={open} aria-haspopup="menu" onPointerDown={ripple} onClick={() => setOpen(!open)}>
-        <Icon name="pencil" size={24} class="app-newchat-pencil" />
+        <Icon name="pencilFilled" size={24} class="app-newchat-pencil" />   {/* как у Telegram: new-chat-filled */}
         <Icon name="close" size={24} class="app-newchat-close" />
       </button>
     </div>

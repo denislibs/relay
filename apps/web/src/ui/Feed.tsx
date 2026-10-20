@@ -83,7 +83,7 @@ const Row = memo(function Row({ chatId, voiceTitle, author, onAuthor, onOpen, hl
   const aside = sel !== undefined || m.id == null || m.deleted || m.service ? null
     : src ? <button type="button" class="app-fwd-quick" aria-label="Перейти к сообщению" title="Перейти к сообщению" onClick={(e) => { e.stopPropagation(); goToOriginal(src.chatId, src.messageId); }}><Icon name="arrowRight" size={20} /></button>
     : onQuickForward && (att || (m.body as string).length > 300)
-      ? <button type="button" class="app-fwd-quick" aria-label="Переслать" title="Переслать" onClick={(e) => { e.stopPropagation(); onQuickForward(album?.[0] ?? m); }}><Icon name="forward" size={20} /></button> : null;
+      ? <button type="button" class="app-fwd-quick" aria-label="Переслать" title="Переслать" onClick={(e) => { e.stopPropagation(); onQuickForward(album?.[0] ?? m); }}><Icon name="forwardFilled" size={20} /></button> : null;
   const check = sel !== undefined ? <span class="app-msg-check" aria-hidden="true"><Icon name="check" size={14} strokeWidth={3} /></span> : null;
   const pending = m.status === 'pending' && typeof m.progress === 'number' && (m.progress as number) < 1;
   const mark = m.id != null ? <i class="app-mark" data-mid={m.id as number} aria-hidden="true" /> : null;

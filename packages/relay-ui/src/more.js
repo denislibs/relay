@@ -1051,7 +1051,7 @@ function FolderRail(props) {
 /* ---------- Fab ---------- */
 function Fab(props) {
   return h('button', { type: 'button', class: 'rl-fab-main', 'aria-label': props.label, onPointerDown: ripple, onClick: props.onClick },
-    h(Icon, { name: props.icon || 'pencil', size: 24 }));
+    h(Icon, { name: props.icon || 'pencilFilled', size: 24 }));   // как у Telegram: new-chat-filled
 }
 
 /* ---------- GlassBar: floating chat header over the wallpaper ---------- */
