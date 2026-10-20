@@ -182,14 +182,20 @@ export function Sidebar() {
         {waiting || skeleton ? null : list.length ? (
           <>
           <WindowList
+            keepAlive   // как в Telegram Web K: ушедшие за край строки не пересоздаются, возвращаются готовыми
+            overscanPx={900}   // запас — около экрана (как окно в telegram-tt): ±288 px tweb при быстрой прокрутке давали пустоту
             role="list"
             items={list}
+            // «Все» без поиска — сразу во всю высоту (сколько диалогов на сервере), незагруженное — скелетами
+            total={f === ALL && !q && !status.chatsComplete ? status.chatsTotal : undefined}
+            renderPlaceholder={() => <ChatRowSkeleton />}
+            onPlaceholder={loadMoreChats}
             onNearEnd={!status.chatsComplete ? loadMoreChats : undefined}
             rowHeight={ROW}
             getKey={(c: Item) => 'c' + c.id}
             render={(c: Item) => <SideRow c={c} meId={me.userId} active={c.id === openId} showDraft={!!c.draft && c.id !== openId} muted={isMuted(c)} onMenu={onRowMenu} />}
           />
-          {!q && !status.chatsComplete ? (
+          {!q && !status.chatsComplete && !(f === ALL && status.chatsTotal) ? (
             <MoreLoader />
           ) : null}
           </>

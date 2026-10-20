@@ -351,6 +351,7 @@ export class Engine {
       phase: this.phase(),
       hydrated: this.store.hydrated,   // в кэше есть данные с сервера
       chatsComplete: this.store.dialogsDone,   // все страницы диалогов загружены
+      chatsTotal: this.store.dialogsTotal,     // сколько диалогов всего (до конца подгрузки — высота списка со скелетами)
       chatsCursorAt: this.store.dialogsAt,     // докуда загружен непрерывный диапазон (мс; 0 — ещё не грузили)
       online: this.online,
       synced: this.ready,
@@ -1477,11 +1478,11 @@ export class Engine {
   private async loadFirstDialogs(): Promise<void> {
     const seq = this.store.lastSeq;   // ответы не старее этой позиции журнала — их собеседники перетирают профиль, записанный раньше
     const [page, unread] = await Promise.all([
-      this.http<{ chats: ChatSummary[]; next: { at: string; id: number } | null }>(`/chats/page?limit=${this.cfg.dialogsPage ?? 100}`),
+      this.http<{ chats: ChatSummary[]; next: { at: string; id: number } | null; total?: number }>(`/chats/page?limit=${this.cfg.dialogsPage ?? 100}`),
       this.http<ChatSummary[]>('/chats?unread=1'),
     ]);
     this.store.applyChats([...page.chats, ...unread], seq);
-    this.store.setDialogsCursor(page.next);
+    this.store.setDialogsCursor(page.next, page.total);
   }
 
   /** Следующая страница диалогов (список докрутили до конца). Один запрос за раз. */

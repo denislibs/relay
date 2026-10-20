@@ -293,9 +293,10 @@ function useWindowRange(host, rh, over, n) {
       var offset = el.getBoundingClientRect().top - sc.getBoundingClientRect().top + sc.scrollTop; // where the list starts in the scroller
       var top = sc.scrollTop - offset, bottom = top + sc.clientHeight;
       var vTop = Math.max(0, Math.floor(top / rh)), vBot = Math.max(0, Math.ceil(bottom / rh));
-      // запас с гистерезисом: окно сдвигаем, только когда до его края осталось меньше двух строк,
-      // и сразу с полным запасом — иначе перерисовка всего списка на каждые 72 px прокрутки
-      var r = cur.current, edge = Math.min(2, over);
+      // запас с гистерезисом: окно сдвигаем, когда израсходована половина запаса, и сразу с полным запасом —
+      // иначе перерисовка всего списка на каждые 72 px прокрутки. «Две строки до края», как было, при быстрой
+      // прокрутке (≈ 3 строки за кадр) не успевали: окно приходит кадром позже, и у края мелькала пустота
+      var r = cur.current, edge = Math.max(1, Math.floor(over / 2));
       var covered = r[0] <= Math.max(0, vTop - edge) && r[1] >= vBot + edge;
       var next = [Math.max(0, vTop - over), vBot + over];
       if (covered && r[1] - r[0] <= next[1] - next[0] + over * 2) return;
@@ -343,6 +344,7 @@ function useNearEnd(onNearEnd, last, n, retry) {
    Only rows in view (+ overscan) are in the DOM. Rows are absolutely placed, so a reorder is a transform
    change that CSS animates; scrolling never touches transforms, so it never animates. */
 function WindowList(props) {
+  if (props.keepAlive) return h(KeepList, props);   // как в Telegram Web K: строки не пересоздаются
   var items = props.items || [], rh = props.rowHeight || 72, over = props.overscan == null ? 6 : props.overscan;
   var host = useRef(null);
   var n = items.length;
@@ -371,6 +373,84 @@ function WindowList(props) {
   rows.sort(function (a, b) { return a.key < b.key ? -1 : a.key > b.key ? 1 : 0; });
   rows = rows.map(function (r) { return r.el; });
   return h('div', { ref: host, class: cx('rl-wlist', props.class), role: props.role, style: { height: n * rh } }, rows);
+}
+
+/* ---------- KeepList: список строк фиксированной высоты, как в Telegram Web K ----------
+   В DOM — только строки в пределах overscanPx (по умолчанию 288 px) от экрана. Ушедшая за край строка не
+   уничтожается: она рендерится порталом в свой div, этот div лишь вынимается из DOM и при возврате вставляется
+   обратно — без пересоздания (аватарка и всё остальное уже готово). Когда прокрутка остановилась, хранимые строки
+   дальше KEEP_EXTRA от видимых выбрасываются.
+   total — сколько строк всего (больше загруженных): список сразу во всю высоту, места без данных —
+   renderPlaceholder (скелеты); видимый скелет зовёт onPlaceholder (догрузить страницу). */
+var KEEP_EXTRA = 50;
+function KeepList(props) {
+  var items = props.items || [], rh = props.rowHeight || 72;
+  var n = items.length, total = Math.max(n, props.total || 0);
+  var over = Math.ceil((props.overscanPx == null ? 288 : props.overscanPx) / rh);
+  var host = useRef(null), layer = useRef(null);
+  var range = useWindowRange(host, rh, over, total);
+  useNearEnd(props.onNearEnd, range[1], n, props.nearEndKey);
+  var first = Math.min(range[0], total), last = Math.min(range[1], total);
+  var boxes = useRef(new Map());   // ключ → div строки (пока строка в запасе)
+  var kept = useRef(new Set());    // ключи строк в запасе: смонтированы порталами, в DOM — только видимые
+  var force = useState(0);
+  var at = new Map();
+  for (var i = 0; i < n; i++) at.set(props.getKey(items[i], i), i);
+  var visible = new Set();
+  for (var v = first; v < Math.min(last, n); v++) { var vk = props.getKey(items[v], v); visible.add(vk); kept.current.add(vk); }
+  kept.current.forEach(function (k) { if (!at.has(k)) kept.current.delete(k); });   // чат ушёл из списка
+  var portals = [];
+  kept.current.forEach(function (k) {
+    var box = boxes.current.get(k);
+    if (!box) { box = document.createElement('div'); box.className = 'rl-wrow'; box.setAttribute('role', 'none'); boxes.current.set(k, box); }
+    var idx = at.get(k);
+    portals.push(h(Fragment, { key: k }, createPortal(props.render(items[idx], idx), box)));
+  });
+  // строки переставились (чат поднялся наверх) — пока они едут, это тяжёлая анимация
+  var lastIndex = useRef(new Map());
+  useLayoutEffect(function () {
+    var el = layer.current, prev = lastIndex.current, now = new Map(), moved = false;
+    if (!el) return;
+    boxes.current.forEach(function (box, k) {
+      if (!kept.current.has(k)) { if (box.parentNode) box.parentNode.removeChild(box); boxes.current.delete(k); return; }
+      var idx = at.get(k);
+      box.style.transform = 'translateY(' + idx * rh + 'px)';
+      box.style.height = rh + 'px';
+      box.style.zIndex = String(total - idx);   // поднимающаяся строка едет над соседями
+      if (visible.has(k)) {
+        if (box.parentNode !== el) el.appendChild(box);
+        else if (prev.has(k) && prev.get(k) !== idx) moved = true;
+        now.set(k, idx);
+      } else if (box.parentNode) el.removeChild(box);
+    });
+    lastIndex.current = now;
+    if (moved && !reducedMotion()) beginHeavyAnimation(320);
+  });
+  // прокрутка остановилась — выбросить хранимые строки дальше KEEP_EXTRA от видимых
+  useEffect(function () {
+    var t = setTimeout(function () {
+      var lo = first - KEEP_EXTRA, hi = last + KEEP_EXTRA, cut = false;
+      kept.current.forEach(function (k) { var idx = at.get(k); if (idx == null || idx < lo || idx >= hi) { kept.current.delete(k); cut = true; } });
+      if (cut) requestMutation(function () { force[1](function (x) { return x + 1; }); });
+    }, 200);
+    return function () { clearTimeout(t); };
+  }, [first, last, n]);
+  // скелеты на местах без данных; видимый скелет — догрузить
+  var ph = [];
+  for (var p = Math.max(first, n); p < last; p++) {
+    ph.push(h('div', { key: 'p' + p, role: 'none', class: 'rl-wrow', style: { transform: 'translateY(' + p * rh + 'px)', height: rh } }, props.renderPlaceholder ? props.renderPlaceholder(p) : null));
+  }
+  var onPh = useRef(props.onPlaceholder); onPh.current = props.onPlaceholder;
+  var needMore = ph.length > 0;
+  useEffect(function () { if (needMore && onPh.current) onPh.current(); }, [needMore, n]);
+  useEffect(function () {
+    var map = boxes.current;
+    return function () { map.forEach(function (box) { if (box.parentNode) box.parentNode.removeChild(box); }); map.clear(); };
+  }, []);
+  return h('div', { ref: host, class: cx('rl-wlist', props.class), role: props.role, style: { height: total * rh } },
+    h('div', { class: 'rl-wlist-ph', 'aria-hidden': 'true' }, ph),
+    h('div', { ref: layer, class: 'rl-wlist-rows' }),   // строки вставляются сюда вручную (см. выше)
+    portals);
 }
 
 /* ---------- WindowGrid: квадратные плитки cols в ряд, виртуально (как WindowList, но окно — по строкам) ----------

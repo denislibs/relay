@@ -115,6 +115,7 @@ export class Store {
   dialogsAt = 0;
   dialogsId = 0;
   dialogsDone = false;
+  dialogsTotal = 0;   // сколько диалогов всего (с первой страницы): высота списка до конца подгрузки
   /** чаты, изменившиеся с последнего прохода подписок */
   touched = new Set<number>();
   /** свой профиль и кэш чужих (profile.ts) */
@@ -171,6 +172,7 @@ export class Store {
     s.dialogsAt = meta.find((m) => m.k === 'dialogsAt')?.v ?? 0;
     s.dialogsId = meta.find((m) => m.k === 'dialogsId')?.v ?? 0;
     s.dialogsDone = !!meta.find((m) => m.k === 'dialogsDone')?.v;
+    s.dialogsTotal = Number(meta.find((m) => m.k === 'dialogsTotal')?.v ?? 0);
     s.profile = await ProfileCache.load(db, userId, meta as { k: string; v: unknown }[]);
     s.contacts = await ContactsCache.load(db, meta as { k: string; v: unknown }[]);
     s.settings = SettingsCache.load(meta as { k: string; v: unknown }[]);
@@ -699,7 +701,8 @@ export class Store {
   markMeta(): void { this.dirtyMeta = true; }
 
   /** Куда дошла подгрузка диалогов. next = null — страниц больше нет. */
-  setDialogsCursor(next: { at: string; id: number } | null): void {
+  setDialogsCursor(next: { at: string; id: number } | null, total?: number): void {
+    if (total != null) this.dialogsTotal = total;
     this.dialogsAt = next ? Date.parse(next.at) : 0;
     this.dialogsId = next ? next.id : 0;
     this.dialogsDone = !next;
@@ -769,7 +772,7 @@ export class Store {
     batch.del.outbox = [...this.dirtyOutbox].filter((k) => !this.outbox.has(k));
     batch.put.pendingReads = [...this.dirtyReads].filter((c) => this.pendingReads.has(c)).map((c) => ({ chatId: c, upToId: this.pendingReads.get(c) }));
     batch.del.pendingReads = [...this.dirtyReads].filter((c) => !this.pendingReads.has(c));
-    if (this.dirtyMeta || this.lastSeq !== this.seqAtFlush) batch.put.meta = [{ k: 'lastSeq', v: this.lastSeq }, { k: 'hydrated', v: this.hydrated ? 1 : 0 }, { k: 'dialogsAt', v: this.dialogsAt }, { k: 'dialogsId', v: this.dialogsId }, { k: 'dialogsDone', v: this.dialogsDone ? 1 : 0 }, ...(this.epoch ? [{ k: 'epoch', v: this.epoch as unknown as number }] : [])];
+    if (this.dirtyMeta || this.lastSeq !== this.seqAtFlush) batch.put.meta = [{ k: 'lastSeq', v: this.lastSeq }, { k: 'hydrated', v: this.hydrated ? 1 : 0 }, { k: 'dialogsAt', v: this.dialogsAt }, { k: 'dialogsId', v: this.dialogsId }, { k: 'dialogsDone', v: this.dialogsDone ? 1 : 0 }, { k: 'dialogsTotal', v: this.dialogsTotal }, ...(this.epoch ? [{ k: 'epoch', v: this.epoch as unknown as number }] : [])];
     const prof = this.profile.collect();
     if (prof.me) batch.put.meta = [...(batch.put.meta ?? []), prof.me];
     batch.put.users = prof.users;

@@ -152,12 +152,23 @@ export interface DialogCursor { at: string; id: number }
 export interface ListOpts { limit?: number; before?: DialogCursor; ids?: number[]; unreadOnly?: boolean }
 
 /** Страница диалогов, новые сверху, и курсор следующей (null — дальше пусто). */
-export async function listChatsPage(userId: number, limit: number, before?: DialogCursor): Promise<{ chats: ChatSummary[]; next: DialogCursor | null }> {
+export async function listChatsPage(userId: number, limit: number, before?: DialogCursor): Promise<{ chats: ChatSummary[]; next: DialogCursor | null; total?: number }> {
   const chats = await listChats(userId, { limit: limit + 1, before });
   const more = chats.length > limit;
   const page = more ? chats.slice(0, limit) : chats;
   const last = page[page.length - 1];
-  return { chats: page, next: more && last ? { at: last.sortAt!, id: last.id } : null };
+  // на первой странице — сколько диалогов всего: список сразу во всю высоту, незагруженное — скелетами (как в Telegram)
+  return { chats: page, next: more && last ? { at: last.sortAt!, id: last.id } : null, ...(before ? {} : { total: await countChats(userId) }) };
+}
+
+/** Число диалогов списка — то же условие, что у listChats. */
+export async function countChats(userId: number): Promise<number> {
+  const [r] = await sql`
+    select count(*)::int as n from chat_members cm join chats c on c.id = cm.chat_id
+     where cm.user_id = ${userId}
+       and not (c.kind = 'direct' and cm.history_from > 0
+                and not exists (select 1 from messages m where m.chat_id = c.id and m.id >= cm.history_from))`;
+  return r.n as number;
 }
 
 export async function listChats(userId: number, opts: ListOpts = {}): Promise<ChatSummary[]> {

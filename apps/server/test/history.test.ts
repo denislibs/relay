@@ -91,8 +91,10 @@ test('dialogs come in pages by last activity with a cursor; filters by ids and u
   }
   const p1 = await listChatsPage(a, 2);
   expect(p1.chats.map((c) => c.id)).toEqual([ids[4], ids[3]]);
+  expect(p1.total).toBe(5);   // первая страница знает, сколько всего: список сразу во всю высоту, остальное — скелетами
   const p2 = await listChatsPage(a, 2, p1.next!);
   expect(p2.chats.map((c) => c.id)).toEqual([ids[2], ids[1]]);
+  expect(p2.total).toBeUndefined();
   const p3 = await listChatsPage(a, 2, p2.next!);
   expect(p3.chats.map((c) => c.id)).toEqual([ids[0]]);
   expect(p3.next).toBeNull();
