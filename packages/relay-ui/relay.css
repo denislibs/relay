@@ -2185,3 +2185,19 @@ html[data-blur="0"] .rl-menu { -webkit-backdrop-filter: none; backdrop-filter: n
 .rl-vp-chip-on, .rl-vp-chip-on:hover { background: var(--brand); color: var(--on-brand); }
 @media (max-width: 520px) { .rl-vp-time { display: none; } .rl-vp-vol:hover .rl-vp-range { width: 0; opacity: 0; margin: 0; } }
 @media (prefers-reduced-motion: reduce) { .rl-vp-bar, .rl-vp-center, .rl-vp-knob, .rl-vp-rail, .rl-vp-menu { transition: none; animation: none; } }
+
+/* ---------- Сквиркл: «острова» и плавающие карточки (как в Telegram) ----------
+   corner-shape: squircle — плавная кривизна угла, как у значков iOS. При том же радиусе такой угол острее круга,
+   поэтому радиус больше (×1.6): визуально угол того же размера, только мягче. Где свойство не поддерживается
+   (Safari, Firefox), блок целиком не применяется — остаются обычные скругления. Пузыри не трогаем: у них хвостики. */
+@supports (corner-shape: squircle) {
+  :root { --sq: 1.6; }
+  .rl-sect-card, .rl-settings-group, .rl-aside-group, .rl-banner, .rl-toast { corner-shape: squircle; border-radius: calc(var(--radius-lg) * var(--sq)); }
+  .rl-sidecard, .rl-frail, .rl-glassbar, .rl-shell-aside > .rl-panel, .rl-shell .rl-composer-field, .rl-shell .rl-selbar, .rl-shell .rl-csearch, .rl-shell .rl-recorder .rl-rec-body {
+    corner-shape: squircle; border-radius: calc(var(--radius-panel) * var(--sq)); }
+  .rl-card { corner-shape: squircle; border-radius: calc(var(--radius-xxl) * var(--sq)); }
+  .rl-tabs { corner-shape: squircle; border-radius: calc(24px * var(--sq)); }
+  .rl-menu { corner-shape: squircle; border-radius: calc(14px * var(--sq)); }
+  /* строки внутри острова: подсветка повторяет форму угла */
+  .rl-sect-card :is(.rl-inforow, .rl-optrow, .rl-selrow), .rl-aside-group .rl-inforow { corner-shape: squircle; }
+}
