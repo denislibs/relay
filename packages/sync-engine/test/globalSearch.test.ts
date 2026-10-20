@@ -17,12 +17,15 @@ const direct = (id: number, peer: number, peerName: string) => ({ id, kind: 'dir
 
 test('local people: every word by prefix of a name word, username, contacts first; self and system excluded', async () => {
   const { s } = await open();
-  s.applyChats([direct(10, 2, 'Анна Петрова')]);   // до профиля: краткий peer из списка чатов не несёт фото
+  s.applyChats([direct(10, 2, 'Анна Петрова'), { ...direct(12, 4, 'Relay'), peer: { id: 4, name: 'Relay', system: true } },
+    { id: 11, kind: 'group', title: 'Группа', lastReadId: 0, unread: 0, last: null }]);   // до профилей: краткий peer не несёт фото
+  s.members.applySnapshot(11, [{ userId: 5, role: 'member', rank: null }], 0);   // Борис — участник группы
   s.profile.applyUser(user(ME, 'Анна Я'));
   s.profile.applyUser(user(2, 'Анна Петрова', 'anya_p', { photo: { id: 'p2', small: 's2', thumb: '', at: 0 } }));
   s.profile.applyUser(user(3, 'Антон Смирнов', 'tony'));
   s.profile.applyUser(user(4, 'Relay', 'relay', { system: true }));
   s.profile.applyUser(user(5, 'Борис Ёлкин'));
+  s.profile.applyUser(user(6, 'Анатолий Чужой', 'anatoly'));   // профиль на устройстве, но не контакт, не собеседник, не в группе
   s.contacts.applySnapshot([{ ...contact(3, 'Антон', 'Работа'), user: user(3, 'Антон Смирнов', 'tony') }], 1);
   const view = s.contacts.table.rows;
   const find = (q: string) => localPeople(s, view, ME, q).map((p) => p.id);
@@ -36,7 +39,9 @@ test('local people: every word by prefix of a name word, username, contacts firs
   expect(find('@ton')).toEqual([3]);           // @имя по началу
   expect(find('anya')).toEqual([2]);
   expect(find('relay')).toEqual([]);           // системный
-  expect(find('елк')).toEqual([5]);            // ё = е
+  expect(find('елк')).toEqual([5]);            // ё = е; участник группы
+  expect(find('анатол')).toEqual([]);          // чужой профиль в кэше — не ищем (как сервер)
+  expect(find('чуж')).toEqual([]);
   expect(find('')).toEqual([]);
   const anna = localPeople(s, view, ME, 'анна')[0];
   expect(anna).toEqual({ id: 2, name: 'Анна Петрова', username: 'anya_p', photo: { id: 'p2', small: 's2', thumb: '', at: 0 }, chatId: 10 });
@@ -45,7 +50,7 @@ test('local people: every word by prefix of a name word, username, contacts firs
 
 test('local people: limit 20', async () => {
   const { s } = await open();
-  for (let i = 0; i < 30; i++) s.profile.applyUser(user(100 + i, 'Иван ' + String.fromCharCode(1072 + i)));
+  s.contacts.applySnapshot(Array.from({ length: 30 }, (_, i) => contact(100 + i, 'Иван', String.fromCharCode(1072 + i))), 1);
   expect(localPeople(s, s.contacts.table.rows, ME, 'иван').length).toBe(20);
 });
 
@@ -108,6 +113,49 @@ test('local media: paging by before, hasMore', async () => {
   expect(p3.hasMore).toBe(false);
 });
 
+test('local media: a chat stopped at the scan limit does not lose links — paging returns every link once, in order', async () => {
+  const { db, s } = await open();
+  // чат 7: ссылка на дне (id 1), над ней 900 фото без подписи, ещё ссылки — 450 и 905; чат 8: ссылки вперемешку
+  const put = (id: number, chatId: number, p: Record<string, unknown>) => s.applyUpdate({ type: 'newMessage', message: msg({ id, chatId, senderId: 2, ...p } as never) });
+  const links = new Set<number>();
+  for (let id = 1; id <= 1000; id++) {
+    if (id === 1 || id === 450 || id === 905) { put(id, 7, { body: 'https://a.b/' + id }); links.add(id); }
+    else if (id % 50 === 0) { put(id, 8, { body: 'см https://c.d/' + id }); links.add(id); }
+    else put(id, 7, { kind: 'photo', body: '', attachment: photo('p' + id) });
+  }
+  await s.flush();
+  const got: number[] = [];
+  let before: number | undefined, pages = 0;
+  for (;;) {
+    const r = await localMedia(db, s, 'link', '', before, 5, 300);   // маленький предел: чат 7 не дочитывается за страницу
+    got.push(...r.hits.map((h) => h.message.id));
+    expect(r.scanned).toBeLessThanOrEqual(300 + 10);
+    if (!r.hasMore) break;
+    expect(r.next).toBeLessThan(before ?? Infinity);   // каждая страница продвигается
+    before = r.next; pages++;
+    if (pages > 100) throw new Error('paging does not end');
+  }
+  const want = [...links].sort((a, b) => b - a);
+  expect(got).toEqual(want);
+});
+
+test('local media: work per page stays within the budget on a large cache; empty-count chats are skipped', async () => {
+  const { db, s } = await open();
+  for (let c = 0; c < 30; c++) for (let k = 0; k < 400; k++) {
+    const id = c * 1000 + k + 1;
+    s.applyUpdate({ type: 'newMessage', message: msg({ id, chatId: 100 + c, senderId: 2, kind: 'photo', body: '', attachment: photo('x' + id) } as never) });
+  }
+  await s.flush();
+  const r = await localMedia(db, s, 'link', '', undefined, 40, 2000);
+  expect(r.hits).toEqual([]);
+  expect(r.scanned).toBeLessThanOrEqual(2000);
+  expect(r.hasMore).toBe(true);
+  // по счётчикам ссылок нет ни в одном чате — не открываем ничего
+  for (const c of s.chats.values()) c.mediaCounts = { media: 400, file: 0, link: 0, audio: 0, voice: 0 };
+  const none = await localMedia(db, s, 'link', '', undefined, 40, 2000);
+  expect(none).toMatchObject({ hits: [], hasMore: false, scanned: 0 });
+});
+
 test('local top: direct chats by the last message, not the service chat', async () => {
   const { s } = await open();
   s.applyChats([direct(7, 2, 'Анна'), direct(8, 3, 'Борис'), { ...direct(9, 4, 'Relay'), peer: { id: 4, name: 'Relay', system: true } },
@@ -154,4 +202,15 @@ test('engine: online people/media/top come from the server; offline — from the
   expect(offline.hits.map((h) => [h.message.body, h.chatTitle])).toEqual([['глянь https://example.com', 'Борис Котов']]);
   expect(offline.hasMore).toBe(false);
   expect(await ea.call({ type: 'topChats' })).toEqual([chatId]);
+});
+
+test('engine: an ended session is an error, not device results', async () => {
+  await resetDb();
+  const a = await srv.login('Анна');
+  const ea = await Engine.open(srv.config(a));
+  engines.push(ea);
+  (ea as unknown as { session: { end(r: string): void } }).session.end('terminated');
+  await expect(ea.call({ type: 'searchPeople', q: 'анна' })).rejects.toThrow();
+  await expect(ea.call({ type: 'searchMedia', kind: 'media', q: '' })).rejects.toThrow();
+  await expect(ea.call({ type: 'topChats' })).rejects.toThrow();
 });

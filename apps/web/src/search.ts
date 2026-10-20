@@ -36,9 +36,17 @@ export function clearRecent(): void { saveRecent([]); }
 // ---------- запросы: через движок (с сетью — сервер, без сети — с устройства, см. sync-engine/src/globalSearch.ts) ----------
 export type { MediaHit, PersonHit } from '@relay/sync-engine/src/globalSearch';
 
-/** Вкладка медиа по всем чатам: страница новых сверху, before — id последнего показанного. */
-export const searchGlobalMedia = (kind: MediaTab, q: string, before?: number) =>
-  callEngine<{ hits: MediaHit[]; hasMore: boolean }>({ type: 'searchMedia', kind, q, ...(before ? { before } : {}) });
+/** Вкладка медиа по всем чатам: страница новых сверху. before — next прошлой страницы (без сети движок отдаёт границу
+ *  просмотренного), если его нет — id последнего показанного. Пустая страница без сети при hasMore — предел работы
+ *  за страницу: просим следующую сразу (не больше нескольких раз), чтобы интерфейсу было что показать. */
+export async function searchGlobalMedia(kind: MediaTab, q: string, before?: number): Promise<{ hits: MediaHit[]; hasMore: boolean; next?: number }> {
+  for (let i = 0; ; i++) {
+    const r = await callEngine<{ hits: MediaHit[]; hasMore: boolean; next?: number }>({ type: 'searchMedia', kind, q, ...(before ? { before } : {}) });
+    const next = r.next ?? r.hits[r.hits.length - 1]?.message.id;
+    if (r.hits.length || !r.hasMore || next == null || i >= 5) return { ...r, ...(next != null ? { next } : {}) };
+    before = next;
+  }
+}
 
 export const searchPeople = (q: string) => callEngine<PersonHit[]>({ type: 'searchPeople', q });
 

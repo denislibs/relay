@@ -21,16 +21,21 @@ const fitsWords = (q: string[], own: string[]) => q.every((w) => own.some((t) =>
 type ContactLike = { firstName: string; lastName: string; user?: PublicUser };
 
 /**
- * Люди на устройстве: профили (users) и контакты (с ещё не подтверждёнными). Совпадение — каждое слово запроса
+ * Люди на устройстве — те, кого зритель видит (как на сервере): контакты (с ещё не подтверждёнными), собеседники
+ * личных чатов и участники групп из members; имя и фото — из профилей (users). Совпадение — каждое слово запроса
  * начинает слово имени (как зритель его видит, и собственного имени — как на сервере) или @имени. Себя и системных
  * не показываем. chatId — личный чат с человеком; фото — из профиля. Порядок: контакты, затем по имени.
  */
 export function localPeople(store: Store, contacts: ReadonlyMap<number, ContactLike>, meId: number, raw: string, limit = 20): PersonHit[] {
   const q = nameWords(raw.trim().replace(/^@/, ''));
   if (!q.length) return [];
+  // кого зритель видит, как на сервере: контакты, собеседники личных чатов и участники его групп (что есть на устройстве)
   const direct = new Map<number, number>();
-  for (const c of store.chats.values()) if (c.kind === 'direct' && c.peerId != null && !direct.has(c.peerId)) direct.set(c.peerId, c.id);
-  const ids = new Set<number>([...store.users.rows.keys(), ...contacts.keys()]);
+  const ids = new Set<number>(contacts.keys());
+  for (const c of store.chats.values()) {
+    if (c.kind === 'direct') { if (c.peerId != null) { ids.add(c.peerId); if (!direct.has(c.peerId)) direct.set(c.peerId, c.id); } }
+    else for (const m of store.members.list(c.id)) ids.add(m.userId);
+  }
   const out: (PersonHit & { contact: boolean })[] = [];
   for (const id of ids) {
     if (id === meId) continue;
@@ -47,20 +52,30 @@ export function localPeople(store: Store, contacts: ReadonlyMap<number, ContactL
   return out.slice(0, limit).map(({ contact: _c, ...p }) => p);
 }
 
-/** Сколько строк одного чата (на одну основную вкладку) просматриваем за страницу: предел работы без сети. */
-export const MEDIA_SCAN_CAP = 400;
+/** Предел работы без сети на одну страницу: строк индекса byTab на все чаты вместе. */
+export const MEDIA_BUDGET = 6000;
+/** Строк одного курсора за круг: чаты продвигаются по очереди, ни один не съедает весь предел. */
+const MEDIA_CHUNK = 100;
+
+/** Курсор одного чата по одной основной вкладке: stop — sort последней просмотренной строки (ниже не смотрели). */
+type Scan = { chatId: number; tab: MediaTab; stop: number; done: boolean; hits: number };
 
 /**
  * Вкладка медиа по всем чатам с устройства: страница новых сверху (по id — он общий для всех чатов, как на сервере),
- * before — id последнего показанного. У каждого чата — курсор по byTab [chatId, tab, sort] от новых (ниже before):
- * берём не больше limit + 1 подходящих (вкладка по mediaTabs, не удалено, запрос — по началу слов текста, имени
- * файла, названия и исполнителя) и смотрим не больше MEDIA_SCAN_CAP строк. Ссылки бывают и в подписях файлов —
- * для «ссылок» курсоры по всем основным вкладкам. Затем слияние по id; hasMore — где-то осталось ещё.
+ * before — с какого id (не включая) продолжать. У каждого чата — курсор по byTab [chatId, tab, sort] от новых:
+ * подходящее — по mediaTabs (не удалено), запрос — по началу слов текста, имени файла, названия и исполнителя.
+ * Ссылки бывают и в подписях файлов — для «ссылок» курсоры по всем основным вкладкам; чаты и вкладки, где по
+ * счётчикам (mediaCounts) пусто, не открываем. Курсоры идут кругами по MEDIA_CHUNK строк, все вместе — не больше
+ * MEDIA_BUDGET строк за страницу (первую строку каждый курсор читает всегда — иначе страница не продвинулась бы).
+ * Граница (frontier) — самый высокий stop недочитанного курсора: выше неё просмотрено всё, ниже — не всё, поэтому
+ * в ответ идёт только найденное выше неё. Круги идут, пока страница не полна, предел не исчерпан и есть недочитанные
+ * курсоры, у которых меньше limit + 1 находок. next — откуда продолжать (последнее показанное, если находок больше
+ * limit, иначе граница); его же интерфейс передаёт следующим before. Нет next — дальше пусто.
  */
-export async function localMedia(db: IDBDatabase, store: Store, kind: MediaTab, raw: string, before: number | undefined, limit = 40): Promise<{ hits: MediaHit[]; hasMore: boolean }> {
+export async function localMedia(db: IDBDatabase, store: Store, kind: MediaTab, raw: string, before: number | undefined, limit = 40, budget = MEDIA_BUDGET):
+  Promise<{ hits: MediaHit[]; hasMore: boolean; next?: number; scanned: number }> {
   const q = nameWords(raw.trim());
   const upper = before ?? Infinity;
-  const mains: readonly MediaTab[] = kind === 'link' ? MEDIA_TABS : [kind];
   const fits = (m: LocalMessage): boolean => {
     if (m.id == null || !tabsOf(m).includes(kind)) return false;
     if (!q.length) return true;
@@ -68,34 +83,59 @@ export async function localMedia(db: IDBDatabase, store: Store, kind: MediaTab, 
     const text = kind === 'link' ? m.body : [m.body, a?.name, a?.title, a?.performer].filter(Boolean).join(' ');
     return fitsWords(q, nameWords(text));
   };
-  let more = false;
-  const found: LocalMessage[] = [];
-  const index = db.transaction('messages').objectStore('messages').index('byTab');
-  const scan = (chatId: number, tab: MediaTab) => new Promise<void>((resolve, reject) => {
-    let seen = 0, got = 0;
-    const r = index.openCursor(IDBKeyRange.bound([chatId, tab, -Infinity], [chatId, tab, upper], false, true), 'prev');
+  const scans: Scan[] = [];
+  for (const c of store.chats.values()) {
+    const counts = c.mediaCounts;
+    if (counts?.[kind] === 0) continue;
+    const mains: readonly MediaTab[] = kind === 'link' ? MEDIA_TABS.filter((t) => t === 'link' || counts?.[t] !== 0) : [kind];
+    for (const tab of mains) scans.push({ chatId: c.id, tab, stop: upper, done: false, hits: 0 });
+  }
+  const found = new Map<string, LocalMessage>();
+  let scanned = 0, first = true;
+  const step = (index: IDBIndex, sc: Scan, n: number) => new Promise<void>((resolve, reject) => {
+    let read = 0;
+    const r = index.openCursor(IDBKeyRange.bound([sc.chatId, sc.tab, -Infinity], [sc.chatId, sc.tab, sc.stop], false, true), 'prev');
     r.onerror = () => reject(r.error);
     r.onsuccess = () => {
       const cur = r.result;
-      if (!cur) return resolve();
-      if (++seen > MEDIA_SCAN_CAP || got > limit) { more = true; return resolve(); }
+      if (!cur) { sc.done = true; return resolve(); }
+      if (read >= n) return resolve();   // stop — последняя просмотренная; эта строка — в следующий круг
+      read++; scanned++;
       const row = cur.value as LocalMessage;
-      const m = store.loadedMessage(chatId, row.key) ?? row;   // в памяти — новее строки
-      if (fits(m)) { found.push(m); got++; }
+      sc.stop = row.sort;
+      const m = store.loadedMessage(sc.chatId, row.key) ?? row;   // в памяти — новее строки
+      if (fits(m)) { found.set(m.key, m); sc.hits++; }
+      if (sc.hits > limit) return resolve();
       cur.continue();
     };
   });
-  await Promise.all([...store.chats.keys()].flatMap((chatId) => mains.map((t) => scan(chatId, t))));
-  const uniq = new Map<string, LocalMessage>();
-  for (const m of found) uniq.set(m.key, m);
-  const list = [...uniq.values()].sort((a, b) => b.id! - a.id!);
-  const page = list.slice(0, limit);
+  const frontier = () => scans.reduce((f, sc) => (sc.done ? f : Math.max(f, sc.stop)), -Infinity);
+  const above = () => [...found.values()].filter((m) => m.id! > frontier()).sort((a, b) => b.id! - a.id!);
+  for (;;) {
+    const active = scans.filter((sc) => !sc.done && sc.hits <= limit);
+    const left = budget - scanned;
+    if (!active.length || (!first && left <= 0)) break;
+    const share = Math.min(MEDIA_CHUNK, Math.max(first ? 1 : 0, Math.floor(left / active.length)));
+    if (share <= 0) {
+      // предел почти исчерпан: остаток — первым по очереди (граница выше всех — её и двигаем)
+      active.sort((a, b) => b.stop - a.stop);
+      const index = db.transaction('messages').objectStore('messages').index('byTab');
+      await step(index, active[0], left);
+    } else {
+      const index = db.transaction('messages').objectStore('messages').index('byTab');
+      await Promise.all(active.map((sc) => step(index, sc, share)));
+    }
+    first = false;
+    if (above().length >= limit) break;
+  }
+  const list = above(), page = list.slice(0, limit), f = frontier();
+  const next = list.length > limit ? page[page.length - 1].id! : f > -Infinity ? f : undefined;
   return {
     hits: page.map((m) => {
       const c = store.chats.get(m.chatId);
       return { message: toMessage(m), chatTitle: c ? chatTitle(store, c) : null, chatKind: c?.kind ?? 'direct' };
     }),
-    hasMore: more || list.length > limit,
+    hasMore: next !== undefined, ...(next !== undefined ? { next } : {}), scanned,
   };
 }
 

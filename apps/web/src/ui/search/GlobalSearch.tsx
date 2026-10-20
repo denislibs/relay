@@ -257,7 +257,7 @@ const EMPTY_TEXT: Record<MediaTab, string> = {
 type Hit = MediaHit & { message: MediaHit['message'] & Msg };
 
 function MediaTab({ kind, q }: { kind: MediaTab; q: string }) {
-  const [state, setState] = useState<{ q: string; hits: Hit[]; more: boolean } | null>(null);
+  const [state, setState] = useState<{ q: string; hits: Hit[]; more: boolean; next?: number } | null>(null);
   const busy = useRef(false);
   const end = useRef<HTMLDivElement>(null);
   const load = (before?: number) => {
@@ -266,7 +266,7 @@ function MediaTab({ kind, q }: { kind: MediaTab; q: string }) {
     const query = q;
     searchGlobalMedia(kind, query, before).then((r) => {
       if (getGlobal().search.trim() !== query) return;   // запрос уже сменили — ответ устарел
-      setState((cur) => ({ q: query, hits: [...(before && cur?.q === query ? cur.hits : []), ...(r.hits as Hit[])], more: r.hasMore }));
+      setState((cur) => ({ q: query, hits: [...(before && cur?.q === query ? cur.hits : []), ...(r.hits as Hit[])], more: r.hasMore, next: r.next }));
       wantPeople(r.hits.map((h) => h.message.senderId));
     }).catch(() => setState((cur) => cur ?? { q: query, hits: [], more: false })).finally(() => { busy.current = false; });
   };
@@ -274,7 +274,7 @@ function MediaTab({ kind, q }: { kind: MediaTab; q: string }) {
   useEffect(() => {
     const el = end.current;
     if (!el || !state?.more) return;
-    const io = new IntersectionObserver((e) => { if (e[0].isIntersecting) load(state.hits[state.hits.length - 1].message.id); }, { rootMargin: '400px' });
+    const io = new IntersectionObserver((e) => { if (e[0].isIntersecting) load(state.next ?? state.hits[state.hits.length - 1].message.id); }, { rootMargin: '400px' });
     io.observe(el);
     return () => io.disconnect();
   }, [state]);

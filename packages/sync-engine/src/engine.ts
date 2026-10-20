@@ -612,29 +612,36 @@ export class Engine {
 
   // ---------- глобальный поиск левой колонки: сервер, без сети или при ошибке — устройство (globalSearch.ts) ----------
 
+  /** Запрос к серверу не удался: сеанс завершён — ошибка дальше (не подменяем её ответом с устройства); иначе — сеть. */
+  private searchFailed(e: unknown): void { if (this.session.ended) throw e; }
+
   private async searchPeople(q: string): Promise<PersonHit[]> {
     if (this.online) {
       try { return (await this.http<{ people: PersonHit[] }>(`/search/people?${new URLSearchParams({ q })}`)).people; }
-      catch { /* сеть пропала посреди запроса — ответим с устройства */ }
+      catch (e) { this.searchFailed(e); }   // сеть пропала посреди запроса — ответим с устройства
     }
+    this.searchFailed(new Error('session_ended'));
     return localPeople(this.store, this.contacts.view(), this.cfg.userId, q);
   }
 
-  private async searchMedia(kind: MediaTab, q: string, before?: number): Promise<{ hits: MediaHit[]; hasMore: boolean }> {
+  private async searchMedia(kind: MediaTab, q: string, before?: number): Promise<{ hits: MediaHit[]; hasMore: boolean; next?: number }> {
     if (!MEDIA_TABS.includes(kind)) throw new Error('bad_frame');
     if (this.online) {
       try { return await this.http<{ hits: MediaHit[]; hasMore: boolean }>(`/search/media?${new URLSearchParams({ kind, q, ...(before ? { before: String(before) } : {}) })}`); }
-      catch { /* сеть пропала — с устройства */ }
+      catch (e) { this.searchFailed(e); }   // сеть пропала — с устройства
     }
+    this.searchFailed(new Error('session_ended'));
     if (this.store.termsDirty) await this.store.flush();   // последние сообщения — в IndexedDB (индекс byTab)
-    return localMedia(this.db, this.store, kind, q, before);
+    const { scanned: _s, ...r } = await localMedia(this.db, this.store, kind, q, before);
+    return r;
   }
 
   private async topChats(): Promise<number[]> {
     if (this.online) {
       try { return (await this.http<{ chatIds: number[] }>('/search/top')).chatIds; }
-      catch { /* без сети — по последним сообщениям */ }
+      catch (e) { this.searchFailed(e); }   // без сети — по последним сообщениям
     }
+    this.searchFailed(new Error('session_ended'));
     return localTop(this.store);
   }
 

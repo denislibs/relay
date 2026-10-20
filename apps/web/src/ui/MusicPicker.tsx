@@ -48,7 +48,7 @@ function TrackLine({ r }: { r: Row }) {
 export function MusicPicker({ chatId, open, onClose, replyToId = null, onSent }: { chatId: number; open: boolean; onClose: () => void; replyToId?: number | null; onSent?: () => void }) {
   const [q, setQ] = useState('');
   const profile: ProfileTrack[] | null = useProfileMusic(open ? getGlobal().me?.userId : null)?.tracks ?? null;
-  const [shared, setShared] = useState<{ hits: MediaHit[]; more: boolean; loading: boolean }>({ hits: [], more: true, loading: false });
+  const [shared, setShared] = useState<{ hits: MediaHit[]; more: boolean; loading: boolean; next?: number }>({ hits: [], more: true, loading: false });
   const [found, setFound] = useState<{ q: string; hits: MediaHit[] } | null>(null);
   const [searching, setSearching] = useState(false);
   const gen = useRef(0);
@@ -71,8 +71,8 @@ export function MusicPicker({ chatId, open, onClose, replyToId = null, onSent }:
     setShared({ ...cur, loading: true });
     try {
       const last = cur.hits[cur.hits.length - 1];
-      const r = await searchGlobalMedia('audio', '', last?.message.id);
-      setShared((s) => ({ hits: dedupe([...(fresh ? [] : s.hits), ...r.hits]), more: r.hasMore, loading: false }));
+      const r = await searchGlobalMedia('audio', '', cur.next ?? last?.message.id);
+      setShared((s) => ({ hits: dedupe([...(fresh ? [] : s.hits), ...r.hits]), more: r.hasMore, loading: false, next: r.next }));
     } catch { setShared((s) => ({ ...s, loading: false })); }
   }
 
