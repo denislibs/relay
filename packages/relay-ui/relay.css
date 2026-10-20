@@ -884,7 +884,7 @@ button.rl-quote:active { background: var(--quote-bg-active, var(--pressed)); }
    Floating layout — cards over the wallpaper (Telegram Web K–style)
    ===================================================================== */
 .rl-shell { position: relative; display: flex; gap: var(--space-float); height: 100%; padding: var(--space-float); overflow: hidden; }
-.rl-shell-side { position: relative; z-index: 2; flex: 0 0 var(--side-w, clamp(300px, 30%, 420px)); min-width: 0; display: flex; }
+.rl-shell-side { position: relative; z-index: 2; flex: 0 0 var(--side-w, var(--side-default, clamp(256px, 33vw, 424px))); min-width: 0; display: flex; }
 .rl-shell-main { position: relative; flex: 1; min-width: 0; display: flex; flex-direction: column; gap: var(--space-float); }
 
 /* ---------- SidebarCard ---------- */
@@ -1242,7 +1242,7 @@ html[data-blur="0"] .rl-pop .rl-menu, html[data-blur="0"] .rl-pop .rl-rpick { -w
 
 /* ---------- AsidePanel: slides in from the right, the chat column gives way ---------- */
 .rl-shell > .rl-presence { display: flex; }
-.rl-shell .rl-shell-aside { flex: 0 0 var(--aside-w, 420px); animation: rl-aside-in 280ms cubic-bezier(0.2, 0, 0, 1) both; }
+.rl-shell .rl-shell-aside { flex: 0 0 var(--aside-w, var(--aside-default, 408px)); animation: rl-aside-in 280ms cubic-bezier(0.2, 0, 0, 1) both; }
 .rl-presence[data-state="closing"] > .rl-shell-aside { animation: rl-aside-out 240ms cubic-bezier(0.4, 0, 1, 1) both; }
 /* уходящая панель — вне потока на своём месте: колонка чата сразу занимает ширину (одна раскладка) */
 .rl-shell > .rl-presence[data-state="closing"] { position: absolute; top: var(--space-float); right: var(--space-float); bottom: var(--space-float); pointer-events: none; }
@@ -2215,3 +2215,11 @@ html[data-blur="0"] .rl-menu { -webkit-backdrop-filter: none; backdrop-filter: n
 .rl-aside-group .rl-inforow { min-height: 48px; gap: var(--space-5); padding: 6px var(--space-4); }
 .rl-aside-group .rl-inforow-text small { font-size: 13px; line-height: 18px; }
 .rl-sicon { background-image: linear-gradient(180deg, rgba(255, 255, 255, .14), rgba(0, 0, 0, .06)); }
+
+/* ---------- Ширины колонок по умолчанию — как у Telegram (telegram-tt: #LeftColumn, --right-column-width) ----------
+   левая: 33vw (256…424px), с 926px — 33vw, с 1276px — 25vw; правая: 26.5rem − 1rem отступа (408px), на 1276…1920px — 25vw − 1rem.
+   Перетаскивание края (--side-w) и сохранённая ширина — поверх. */
+.rl-shell { --side-default: clamp(256px, 33vw, 424px); --aside-default: 408px; }
+@media (min-width: 926px) { .rl-shell { --side-default: 33vw; } }
+@media (min-width: 1276px) { .rl-shell { --side-default: 25vw; } }
+@media (min-width: 1276px) and (max-width: 1920px) { .rl-shell { --aside-default: calc(25vw - 16px); } }
