@@ -652,7 +652,6 @@ html[data-anim="0"] .app-chatcol, html[data-anim="0"] .app-chatcol-below, html[d
 .app-media-frame { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; opacity: 0; transition: opacity var(--dur-base) var(--ease-standard); pointer-events: none; }
 .app-media-frame-in { opacity: 1; }
 .app-sm-heading { margin: var(--space-3) var(--space-3) var(--space-2); padding: 0 var(--space-3); font: 500 15px/20px var(--font-sans); color: var(--brand-text, var(--brand-strong)); }
-.app-sm-more { height: 1px; }
 /* строки вкладок в виртуальном списке — фиксированной высоты (шаг строки в SharedMedia.tsx: высота + зазор 4 px) */
 .app-sm-list > .rl-wlist { margin-bottom: -4px; }   /* зазор под последней строкой — не лишний отступ карточки */
 .app-sm-list .rl-wrow > .app-sm-row { height: 60px; }
