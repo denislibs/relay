@@ -1,7 +1,9 @@
+// первым: политика Trusted Types до любой записи в DOM (trustedTypes.ts)
+import './trustedTypes';
 import { installJoinLinks } from './ui/group/JoinLink';
 import { startMuteTimers } from './mute';
 import { startOwnMusic } from './profileLists';
-import { configureLottie, configureSpoilers, configureStickers, installSpoilers, loadPattern } from '@relay/ui';
+import { configureLottie, configureSpoilers, configureVoice, configureStickers, installSpoilers, loadPattern } from '@relay/ui';
 import { fetchBuild, onVisible, startUpdateCheck } from './update';
 import { claimMediaCache, sendMediaPolicy } from './storageInfo';
 import { getPrefs, isDark, subscribePrefs, type Prefs } from './prefs';
@@ -98,6 +100,8 @@ if (__DEV__) void import('./devtools/session').then((s) => import('./devtools/me
 startTitle();
 // спойлеры: частицы рисует воркер (как в Telegram Web K); без него — CSS-точки
 configureSpoilers({ workerUrl: asset('spoiler.worker.js') });
+// голосовые: ворклет — файлом сборки, не из blob: (CSP)
+configureVoice({ workletUrl: asset('voice.worklet.js') });
 configureStickers({ base: '/stickers/' });
 // анимированные стикеры: tlottie в пуле воркеров
 configureLottie({ workerUrl: asset('lottie.worker.js'), wasm: { simd: asset('tlottie.wasm'), noSimd: asset('tlottie-no-simd.wasm') } });

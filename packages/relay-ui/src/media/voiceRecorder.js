@@ -3,26 +3,17 @@
 // шумоподавление, эхо и усиление браузер включает сам. Волна (63 байта) считается из тех же блоков.
 import { OggOpusWriter } from './oggopus.js';
 import { WaveformAnalyser } from './waveform.js';
+import { VOICE_WORKLET } from './voiceWorklet.js';
 
 var RATE = 48000;
-var BLOCK = 2048;
 export var VOICE_ENCODER = { codec: 'opus', sampleRate: RATE, numberOfChannels: 1, bitrate: 32000 };
 var MIN_MS = 1000;   // короче секунды не бывает: остановку дожидаемся
 
-// Ворклет копит моно-блоки по 2048 и отдаёт их в основной поток; на паузе молчит, «reset» — выбросить недобранный блок
-var WORKLET = [
-  'class R extends AudioWorkletProcessor {',
-  '  constructor() { super(); this.buf = new Float32Array(' + BLOCK + '); this.n = 0; this.on = true;',
-  '    this.port.onmessage = (e) => { if (e.data === "pause") this.on = false; else if (e.data === "resume") { this.on = true; this.n = 0; } }; }',
-  '  process(inputs) {',
-  '    const ch = inputs[0] && inputs[0][0];',
-  '    if (!ch || !this.on) return true;',
-  '    for (let i = 0; i < ch.length; i++) { this.buf[this.n++] = ch[i]; if (this.n === ' + BLOCK + ') { this.port.postMessage(this.buf.slice(0)); this.n = 0; } }',
-  '    return true;',
-  '  }',
-  '}',
-  'registerProcessor("relay-voice-capture", R);',
-].join('\n');
+// Ворклет — отдельным файлом сборки (voiceWorklet.js → configureVoice): Content-Security-Policy не пускает скрипты
+// из blob:. Без настройки (тесты, сторибук) — по-старому, из blob:.
+var workletUrl = null;
+/** Адрес файла ворклета (build.ts кладёт его в сборку с хэшем в имени). */
+export function configureVoice(opts) { workletUrl = (opts && opts.workletUrl) || null; }
 
 var supportCache = null;
 /** Можно ли записывать: WebCodecs Opus, AudioWorklet, микрофон. Проверка один раз. */
@@ -51,9 +42,12 @@ export async function startVoice(opts) {
   var ctx = new AudioContext({ sampleRate: RATE });
   // запись продолжается и в фоне: браузер может «усыпить» контекст — будим
   ctx.onstatechange = function () { if (ctx.state === 'suspended' && state !== 'stopped') ctx.resume().catch(function () {}); };
-  var url = URL.createObjectURL(new Blob([WORKLET], { type: 'application/javascript' }));
-  await ctx.audioWorklet.addModule(url);
-  URL.revokeObjectURL(url);
+  if (workletUrl) await ctx.audioWorklet.addModule(workletUrl);
+  else {
+    var url = URL.createObjectURL(new Blob([VOICE_WORKLET], { type: 'application/javascript' }));
+    await ctx.audioWorklet.addModule(url);
+    URL.revokeObjectURL(url);
+  }
   var src = ctx.createMediaStreamSource(stream);
   var node = new AudioWorkletNode(ctx, 'relay-voice-capture', { numberOfInputs: 1, numberOfOutputs: 1, channelCount: 1, channelCountMode: 'explicit' });
   var mute = ctx.createGain();

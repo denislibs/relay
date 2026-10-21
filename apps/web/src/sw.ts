@@ -12,6 +12,7 @@ import {
   fileKeyOf, loadPolicy, migrateLegacyCaches, resetFileKeyCache, savePolicy, serveEncryptedRange, serveMedia, serveVideoRange, sweepAuto,
 } from './mediaCache';
 import { installDeviceFetch } from './deviceAuth';
+import { verified } from './buildIntegrity';
 declare const __BUILD__: string;
 const sw = self as unknown as ServiceWorkerGlobalScope;
 // файлы и API из SW: 401 «обнови доступ» (сеанс привязан к устройству) — подпись ключом устройства и повтор
@@ -35,12 +36,19 @@ store.askKey = async (id: string) => {
 };
 const fileIdFrom = (url: string) => /^\/files\/([0-9a-f-]{36}(?:\/(?:preview|720))?)$/.exec(new URL(url).pathname)?.[1] ?? '';
 declare const __SHELL__: string[];   // код и стили этой сборки с хэшем в имени (build.ts)
+declare const __INTEGRITY__: Record<string, string>;   // файл с хэшем в имени → SHA-256 его байтов (build.ts)
+const INTEGRITY: Record<string, string> = __INTEGRITY__;
 const SHELL = ['/', ...__SHELL__, '/sounds/message.mp3', '/sounds/sent.mp3'];   // звуки сообщений — и без сети
 const API = /^\/(health|me|users|contacts|settings|privacy|blocks|chats|presence|search|uploads|files|push|sessions|session|ws|dev|logout|auth|link-preview|groups|join|sticker-sets|my-stickers|stickers-by-emoji)(\/|$)/;
 
 sw.addEventListener('install', (e) => {
-  // мимо HTTP-кэша браузера: новая сборка не должна положить к себе файл прежней
-  e.waitUntil(caches.open(CACHE).then((c) => c.addAll(SHELL.map((u) => new Request(u, { cache: 'no-cache' })))).then(() => sw.skipWaiting()));
+  // мимо HTTP-кэша браузера: новая сборка не должна положить к себе файл прежней; чужие байты — установка не удаётся,
+  // остаётся прежний SW со своей проверенной оболочкой
+  e.waitUntil(caches.open(CACHE).then((c) => Promise.all(SHELL.map(async (u) => {
+    const res = await fetch(new Request(u, { cache: 'no-cache' }));
+    if (!res.ok) throw new Error(`shell ${u}: ${res.status}`);
+    await c.put(u, await verified(res, u, INTEGRITY));
+  }))).then(() => sw.skipWaiting()));
 });
 
 sw.addEventListener('activate', (e) => {
@@ -160,10 +168,10 @@ sw.addEventListener('fetch', (e) => {
     caches.open(CACHE).then(async (c) => {
       const hit = await c.match(e.request);
       if (hit) return hit;
-      const res = await fetch(e.request);
+      const res = await verified(await fetch(e.request), url.pathname, INTEGRITY);   // в кэш и странице — только проверенное
       if (res.ok && res.status === 200) e.waitUntil(c.put(e.request, res.clone()));
       return res;
-    }).catch(() => Response.error()),
+    }).catch((err) => { console.error('sw:', err); return Response.error(); }),
   );
 });
 

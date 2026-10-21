@@ -6,6 +6,7 @@ import { watch as fsWatch } from 'node:fs';
 import { cp, mkdir, rm } from 'node:fs/promises';
 import { basename, join } from 'node:path';
 import { brotliCompressSync, constants as Z, gzipSync } from 'node:zlib';
+import { VOICE_WORKLET } from '../../packages/relay-ui/src/media/voiceWorklet.js';
 
 const root = import.meta.dir;
 const ui = join(root, '..', '..', 'packages', 'relay-ui');
@@ -14,15 +15,30 @@ const dist = process.env.WEB_OUT ?? join(root, 'dist');   // WEB_OUT — соб�
 const isWatch = process.argv.includes('--watch');
 
 const HASHED = /-[a-z0-9]{8,}\.(js|css|wasm)(\.map|\.gz|\.br)?$/;   // имя с хэшем: кэшируется навсегда (docker/nginx)
-const LEGACY = ['main.js', 'main.js.map', 'shared.worker.js', 'shared.worker.js.map', 'dedicated.worker.js', 'dedicated.worker.js.map', 'spoiler.worker.js', 'spoiler.worker.js.map', 'articleEditor.js', 'articleEditor.js.map', 'relay.css', 'tokens.css', 'app.css'];
+const LEGACY = ['main.js', 'main.js.map', 'shared.worker.js', 'shared.worker.js.map', 'dedicated.worker.js', 'dedicated.worker.js.map', 'spoiler.worker.js', 'spoiler.worker.js.map', 'articleEditor.js', 'articleEditor.js.map', 'relay.css', 'tokens.css', 'app.css', 'boot.js'];
 const HISTORY = '.assets-history.json';   // файлы двух последних сборок: открытые вкладки прежней ещё догружают свои
 
 /** name.css → name-<хэш>.css; возвращает публичный адрес. */
 async function hashedCopy(src: string, dir: string, name: string): Promise<string> {
-  const body = await Bun.file(src).bytes();
-  const file = name.replace(/\.(css|wasm)$/, (ext) => '-' + Bun.hash(body).toString(36).padStart(8, '0').slice(0, 10) + ext);
-  await Bun.write(join(dir, file), body);
+  return hashedWrite(await Bun.file(src).bytes(), dir, name);
+}
+async function hashedWrite(body: Uint8Array | string, dir: string, name: string): Promise<string> {
+  const bytes = typeof body === 'string' ? new TextEncoder().encode(body) : body;
+  const file = name.replace(/\.(css|wasm|js)$/, (ext) => '-' + Bun.hash(bytes).toString(36).padStart(8, '0').slice(0, 10) + ext);
+  await Bun.write(join(dir, file), bytes);
   return '/' + file;
+}
+
+/** Subresource Integrity: «sha384-…» для атрибута integrity в index.html. */
+const sri = async (dir: string, url: string) => 'sha384-' + new Bun.CryptoHasher('sha384').update(await Bun.file(join(dir, url.slice(1))).bytes()).digest('base64');
+/** Таблица целостности для Service Worker: адрес файла с хэшем в имени → SHA-256 (base64) его байтов. */
+async function integrityTable(dir: string): Promise<Record<string, string>> {
+  const out: Record<string, string> = {};
+  for (const f of new Bun.Glob('*.{js,css,wasm}').scanSync(dir)) {
+    if (!HASHED.test(f)) continue;
+    out['/' + f] = new Bun.CryptoHasher('sha256').update(await Bun.file(join(dir, f)).bytes()).digest('base64');
+  }
+  return out;
 }
 
 /** Готовые .gz/.br рядом с файлом — nginx отдаёт их без сжатия на запрос (gzip_static/brotli_static). */
@@ -72,15 +88,23 @@ async function build(): Promise<void> {
     'relay.css': await hashedCopy(join(ui, 'relay.css'), tmp, 'relay.css'),
     'app.css': await hashedCopy(join(root, 'public', 'app.css'), tmp, 'app.css'),
   };
-  // разметка: стили и main — по именам с хэшем, таблица адресов — до main
+  // ворклет записи голосового — файлом (CSP не пускает скрипты из blob:)
+  assets['voice.worklet.js'] = await hashedWrite(VOICE_WORKLET, tmp, 'voice.worklet.js');
+  // первый скрипт страницы (тема до стилей) + таблица адресов; встроенных скриптов нет — CSP пускает только файлы
+  const boot = await hashedWrite(`${await Bun.file(join(root, 'public', 'boot.js')).text()}\nself.__ASSETS__=${JSON.stringify(assets)};\n`, tmp, 'boot.js');
+  await rm(join(tmp, 'boot.js'), { force: true });
+  // разметка: всё по именам с хэшем и с integrity (SRI) — подменённый по дороге файл браузер не выполнит
   let html = await Bun.file(join(root, 'public', 'index.html')).text();
-  for (const [name, url] of Object.entries(css)) html = html.replace(`href="/${name}"`, `href="${url}"`);
-  html = html.replace('<script type="module" src="/main.js"></script>', `<script>self.__ASSETS__=${JSON.stringify(assets)}</script>\n  <script type="module" src="${assets['main.js']}"></script>`);
-  if (!html.includes(assets['main.js'])) throw new Error('index.html: не нашёл <script src="/main.js">');
+  for (const [name, url] of Object.entries(css)) html = html.replace(`<link rel="stylesheet" href="/${name}">`, `<link rel="stylesheet" href="${url}" integrity="${await sri(tmp, url)}">`);
+  html = html.replace('<script src="/boot.js"></script>', `<script src="${boot}" integrity="${await sri(tmp, boot)}"></script>`);
+  html = html.replace('<script type="module" src="/main.js"></script>', `<script type="module" src="${assets['main.js']}" integrity="${await sri(tmp, assets['main.js'])}"></script>`);
+  for (const url of [boot, assets['main.js'], ...Object.values(css)]) if (!html.includes(`"${url}" integrity=`)) throw new Error(`index.html: нет ${url} с integrity`);
   await Bun.write(join(tmp, 'index.html'), html);
   // Service Worker — без хэша (адрес регистрации постоянный), со списком оболочки этой сборки
-  const shell = [assets['main.js'], ...Object.values(css), assets['shared.worker.js'], assets['dedicated.worker.js'], assets['spoiler.worker.js'], assets['lottie.worker.js'], assets['tlottie.wasm']];
-  const sw = await Bun.build({ entrypoints: [join(root, 'src', 'sw.ts')], outdir: tmp, target: 'browser', naming: '[name].[ext]', minify: !isWatch, sourcemap: 'linked', define: { ...define, __SHELL__: JSON.stringify(shell) } });
+  const shell = [boot, assets['main.js'], ...Object.values(css), assets['shared.worker.js'], assets['dedicated.worker.js'], assets['spoiler.worker.js'], assets['lottie.worker.js'], assets['tlottie.wasm'], assets['voice.worklet.js']];
+  // SW сверяет каждый файл с хэшем в имени с этой таблицей: чужие байты (подмена в CDN, кэше, прокси) не выполнятся
+  const integrity = await integrityTable(tmp);
+  const sw = await Bun.build({ entrypoints: [join(root, 'src', 'sw.ts')], outdir: tmp, target: 'browser', naming: '[name].[ext]', minify: !isWatch, sourcemap: 'linked', define: { ...define, __SHELL__: JSON.stringify(shell), __INTEGRITY__: JSON.stringify(integrity) } });
   if (!sw.success) {
     for (const log of sw.logs) console.error(log);
     if (!isWatch) process.exit(1);

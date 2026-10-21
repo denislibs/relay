@@ -1,5 +1,6 @@
 /* шрифт интерфейса — системный (SF Pro / Segoe UI / Roboto), как в Telegram: с кириллицей, без смешения начертаний */
-@import url("https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400&display=swap");
+/* моноширинный — системный (ui-monospace, Menlo): шрифтов со сторонних серверов не грузим — CSP и IP пользователя
+   не уходит третьим лицам. Свой JetBrains Mono можно положить в сборку (@font-face, font-src 'self'). */
 
 /* Relay — component styles. Colors, radii, durations come from tokens.css only. */
 body { margin: 0; font-family: var(--font-sans); color: var(--ink); background: var(--bg); -webkit-font-smoothing: antialiased; }

@@ -139,6 +139,29 @@ Relay — не мессенджер со сквозным шифрованием
 
 Сервер — `apps/server/src/deviceAuth.ts` и `auth.ts`; клиент — `device.ts` в движке, `apps/web/src/deviceAuth.ts`.
 
+## Страница: CSP, Trusted Types, целостность сборки
+
+Ключ устройства не извлекается, но пользоваться им может любой скрипт страницы — поэтому чужой скрипт не должен
+на неё попасть.
+
+- **Content-Security-Policy** (`docker/nginx/security-headers.conf`): скрипты — только файлы своего origin
+  (встроенных нет: `boot-<хэш>.js` вместо inline), без `eval` (`'wasm-unsafe-eval'` — только WASM tlottie);
+  медиа — свои, `blob:`/`data:` и хранилище S3; `frame-ancestors 'none'`, `object-src 'none'`, `base-uri 'none'`.
+  Шрифтов и скриптов со сторонних серверов нет.
+- **Trusted Types** (`require-trusted-types-for 'script'`): строка в `innerHTML`, `DOMParser`, адрес воркера или
+  Service Worker проходит политику:
+  - `default` (`apps/web/src/trustedTypes.ts`) — HTML через DOMPurify (без `<script>`, `on*`, `javascript:`),
+    адрес скрипта — только свой origin, текст скрипта (`eval`, строковые таймеры) — никогда;
+  - `relay-icons` (`kit.js`) — только константы иконок; `dompurify` — внутренняя политика DOMPurify.
+- **Subresource Integrity:** у `boot`, `main` и стилей в `index.html` — `integrity="sha384-…"`.
+- **Целостность в Service Worker:** `build.ts` зашивает в `sw.js` таблицу SHA-256 всех файлов сборки с хэшем в имени
+  (`apps/web/src/buildIntegrity.ts`). Оболочка ставится и файл отдаётся странице только при совпадении байтов;
+  иначе — ошибка загрузки. Подмена кода в CDN, HTTP-кэше или прокси не исполнится. Корень доверия — `index.html`
+  и `sw.js` с нашего origin (без кэша).
+- Прочие заголовки: `X-Content-Type-Options: nosniff`, `Referrer-Policy: no-referrer`,
+  `Cross-Origin-Opener-Policy: same-origin`, `Permissions-Policy` (камера и микрофон — только свои). В production —
+  ещё HSTS.
+
 ## Конфигурация production
 
 Overlay `docker-compose.secure.yml`:
@@ -156,8 +179,8 @@ Overlay `docker-compose.secure.yml`:
 ## Известные пробелы
 
 - **Не E2E:** сервер с доступом к KMS читает переписку. Направление на будущее — секретные чаты и поиск на клиенте.
-- **Не задан Content-Security-Policy в nginx.** XSS на странице может использовать ключ устройства, пока вкладка
-  открыта (вынести ключ она не может).
+- **`style-src 'unsafe-inline'`:** встроенные стили разрешены (тема до загрузки CSS, акцентный цвет). Скрипт ими
+  не запустить, но внедрённый CSS может менять вид страницы.
 - **Метаданные открыты:** кто, кому, когда, размеры файлов.
 
 ## Тесты

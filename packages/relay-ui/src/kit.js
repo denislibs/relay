@@ -248,7 +248,7 @@ function Icon(props) {
   // пак (Messenger icon pack v3): готовые внутренности SVG
   var pack = PACK_ICONS[name];
   if (pack) return h('svg', Object.assign(base, { fill: 'none', stroke: 'currentColor', 'stroke-width': props.strokeWidth || 1.8, 'stroke-linecap': 'round', 'stroke-linejoin': 'round',
-    dangerouslySetInnerHTML: { __html: pack } }));
+    dangerouslySetInnerHTML: { __html: trustedIcon(name, pack) } }));
   var d = ICONS[name] || ICONS.info;
   var sw = props.strokeWidth || (HEAVY[name] ? 3 : 1.8);
   return h('svg', Object.assign(base, { fill: FILLED[name] ? 'currentColor' : 'none',
@@ -266,6 +266,24 @@ function Button(props) {
     props.icon ? h(Icon, { name: props.icon, size: 18 }) : null,
     props.children,
     props.iconRight ? h(Icon, { name: props.iconRight, size: 18 }) : null);
+}
+
+/**
+ * Trusted Types (страница под require-trusted-types-for 'script'): внутренности иконок — константы этого модуля,
+ * им отдельная политика без санитайзера (иначе политика по умолчанию гоняла бы DOMPurify на каждую иконку).
+ * Строка → один и тот же объект: Preact сравнивает __html по ссылке и не перерисовывает.
+ */
+var iconPolicy;
+var trustedIcons = {};
+function trustedIcon(name, svg) {
+  if (iconPolicy === undefined) {
+    iconPolicy = null;
+    var tt = typeof globalThis !== 'undefined' ? globalThis.trustedTypes : undefined;
+    // модуль может оказаться в двух сборках (основная и редактор статьи): политика одна на страницу
+    try { iconPolicy = tt && tt.createPolicy ? (globalThis.__relayIconPolicy || (globalThis.__relayIconPolicy = tt.createPolicy('relay-icons', { createHTML: function (s) { return s; } }))) : null; } catch (e) { iconPolicy = null; }
+  }
+  if (!iconPolicy) return svg;
+  return trustedIcons[name] || (trustedIcons[name] = iconPolicy.createHTML(svg));
 }
 
 /* ---------- IconButton ---------- */

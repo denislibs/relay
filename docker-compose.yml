@@ -132,6 +132,7 @@ services:
     ports: ["443:443", "80:80", "8333:8333"]
     volumes:
       - ./docker/nginx/dev.conf:/etc/nginx/http.d/default.conf:ro
+      - ./docker/nginx/security-headers.conf:/etc/nginx/snippets/relay-security.conf:ro
       - ./docker/nginx/certs:/etc/nginx/certs:ro
       - ./apps/web/dist:/srv/dist:ro
     depends_on:
