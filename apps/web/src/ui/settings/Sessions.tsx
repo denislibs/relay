@@ -21,11 +21,19 @@ const TTL_OPTIONS = [
 ];
 
 type Tile = 'blue' | 'orange' | 'red' | 'gray' | 'green' | 'purple';
-/** Плитка по браузеру, значок — телефон или компьютер (по ОС). */
+/** Знак и цвет плитки — по браузеру, как в Telegram; не браузер (приложение) — телефон или компьютер по ОС. */
+const BROWSERS: [RegExp, string, Tile][] = [
+  [/^Chrome/, 'browserChrome', 'green'],
+  [/^Safari/, 'browserSafari', 'blue'],
+  [/^Firefox/, 'browserFirefox', 'orange'],
+  [/^Edge/, 'browserEdge', 'blue'],
+  [/^Opera/, 'browserOpera', 'red'],
+  [/^Яндекс/, 'browserYandex', 'red'],
+];
 function deviceLook(device: string): { icon: string; tile: Tile } {
-  const icon = /iOS|Android/.test(device) ? 'smartphone' : 'laptop';
-  const tile: Tile = /^Chrome/.test(device) ? 'green' : /^(Safari|Edge)/.test(device) ? 'blue' : /^Firefox/.test(device) ? 'orange' : /^(Opera|Яндекс)/.test(device) ? 'red' : 'gray';
-  return { icon, tile };
+  const b = BROWSERS.find(([re]) => re.test(device));
+  if (b) return { icon: b[1], tile: b[2] };
+  return { icon: /iOS|Android/.test(device) ? 'smartphone' : 'laptop', tile: 'gray' };
 }
 
 const NEW_LOGIN = <span class="app-session-new">Новый вход — не подтверждён</span>;

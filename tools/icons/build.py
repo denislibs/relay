@@ -20,7 +20,8 @@ MAP = {
     'video': 'video', 'mail': 'mail', 'palette': 'palette', 'history': 'history', 'wifiOff': 'wifi-off', 'image': 'image',
     'play': 'play', 'pause': 'pause', 'stop': 'square', 'trash': 'trash', 'star': 'star', 'reply': 'reply', 'forward': 'forward',
     'zoomIn': 'zoom-in', 'chevronLeft': 'chevron-left', 'chevronDown': 'chevron-down', 'menu': 'menu', 'chevronUp': 'chevron-up',
-    'pin': 'pin', 'ban': 'block', 'camera': 'camera', 'contact': 'user', 'poll': 'poll', 'sticker': 'sticker',
+    'ban': 'block',   # pin — свой рисунок в ките (кнопка-булавка: у пакета узкая, в строке списка не читалась)
+    'camera': 'camera', 'contact': 'user', 'poll': 'poll', 'sticker': 'sticker',
     'phoneIn': 'call-incoming', 'phoneOut': 'call-outgoing', 'settings': 'settings', 'copy': 'copy', 'eye': 'eye',
     'eyeOff': 'eye-off', 'key': 'key', 'qr': 'qr', 'link': 'link', 'grip': 'grip-vertical', 'undo': 'undo', 'redo': 'redo',
     'code': 'code', 'heading': 'heading', 'quote': 'quote', 'divider': 'minus', 'text': 'type', 'expand': 'maximize',
