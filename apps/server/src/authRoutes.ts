@@ -1,5 +1,6 @@
 import type { Server } from 'bun';
 import { createSession, sessionCookie } from './auth';
+import { clearAccessCookie } from './deviceAuth';
 import { sql } from './db';
 import { clientIp, parseDevice } from './device';
 import { devOutbox } from './domain/devOutbox';
@@ -39,7 +40,10 @@ async function reply(step: LoginStep, req: Request, server: Server): Promise<Res
   const token = await createSession(userId, { req, server }, { confirmed });
   // «Новый вход» в служебный чат и sessionsChanged (плашка «Это вы?» для неподтверждённых) — для любого входа, кроме регистрации
   if (!step.session.fresh) await announceLogin(userId, token);
-  return Response.json({ userId }, { headers: { 'set-cookie': sessionCookie(token) } });
+  // короткий доступ прежнего сеанса этого браузера (deviceAuth.ts) действовал бы ещё до 10 минут и перебивал новый вход
+  const h = new Headers();
+  h.append('set-cookie', sessionCookie(token)); h.append('set-cookie', clearAccessCookie());
+  return Response.json({ userId }, { headers: h });
 }
 
 export async function publicAuthRoute(req: Request, url: URL, server: Server): Promise<Response | null> {

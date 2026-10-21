@@ -2290,6 +2290,9 @@ html[data-blur="0"] .rl-menu { -webkit-backdrop-filter: none; backdrop-filter: n
 .rl-kb-spin { position: absolute; top: 5px; right: 5px; width: 12px; height: 12px; border: 2px solid rgba(255, 255, 255, .35); border-top-color: #fff; border-radius: 50%;
   animation: rl-kb-spin-in var(--dur-fast) var(--ease-out) both, rl-spin 800ms linear infinite; }
 @keyframes rl-kb-spin-in { from { opacity: 0; } to { opacity: 1; } }
+/* вместо кнопок — подсказка (например, «Новый вход» на новом устройстве): не кнопка, без нажатия */
+.rl-kb-note { margin-top: 4px; padding: 8px 14px; border-radius: var(--bubble-r-sm) var(--bubble-r-sm) var(--bubble-r) var(--bubble-r);
+  background: var(--action-bg); color: rgba(255, 255, 255, .85); font: 400 calc(var(--message-text-size, 16px) - 2px)/1.35 var(--font-sans); text-align: center; }
 /* кнопки убрали (итог в тексте): клавиатура сворачивается и гаснет, а не пропадает рывком */
 .rl-kb-leave { animation: rl-kb-leave 260ms var(--ease-standard) forwards; pointer-events: none; }
 @keyframes rl-kb-leave { from { grid-template-rows: 1fr; opacity: 1; } to { grid-template-rows: 0fr; opacity: 0; } }

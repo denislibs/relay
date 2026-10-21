@@ -103,3 +103,10 @@ test('an unbound session works as before (no challenge); logout clears both cook
   expect(set.join(' ')).toContain('relay_session=;');
   expect(set.join(' ')).toContain('relay_access=;');
 });
+
+test('a new sign-in in the same browser drops the short access cookie of the previous session', async () => {
+  const res = await fetch(`${base}/dev/login`, { method: 'POST', body: JSON.stringify({ name: 'Вера' }) });
+  const set = (res.headers.getSetCookie?.() ?? [res.headers.get('set-cookie') ?? '']).join(' ');
+  expect(set).toContain('relay_session=');
+  expect(set).toContain('relay_access=;');
+});

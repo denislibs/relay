@@ -164,12 +164,17 @@ export async function confirmSession(userId: number, currentId: number, id: numb
   return { ok: true };
 }
 
-/** После входа по коду: служебное «Новый вход» и sessionsChanged — плашка «Это вы?» на остальных устройствах. */
+/**
+ * После входа: sessionsChanged (плашка «Это вы?» на остальных устройствах) и служебное «Новый вход» с кнопками —
+ * только если есть кому ответить: другой живой подтверждённый сеанс. Первый вход, вход после выхода отовсюду или
+ * когда остальные сеансы сами не подтверждены — без вопроса: подтвердить его всё равно некому.
+ */
 export async function announceLogin(userId: number, token: string): Promise<void> {
   const [s] = await sql`select id, device, ip, created_at from sessions where token_hash = ${hashToken(token)}`;
   if (!s) return;
   await sql.begin(async (tx) => {
-    await postService(tx, userId, { type: 'new_login', ...newLoginMessage(s.device || 'Браузер', s.ip, new Date(s.created_at), Number(s.id)) });
+    const [peer] = await tx`select 1 from sessions where user_id = ${userId} and id <> ${s.id} and expires_at > now() and not ${UNCONFIRMED} limit 1`;
+    if (peer) await postService(tx, userId, { type: 'new_login', ...newLoginMessage(s.device || 'Браузер', s.ip, new Date(s.created_at), Number(s.id)) });
     await changed(tx, userId);
   });
 }

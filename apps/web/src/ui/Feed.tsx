@@ -284,7 +284,9 @@ const Row = memo(function Row({ chatId, voiceTitle, author, onAuthor, onOpen, hl
         appear={appear}
         below={m.buttons !== undefined && m.id != null
           // в режиме выбора клик по кнопке выбирает сообщение (onPress нет — клик уходит ленте)
-          ? <InlineKeyboard rows={m.deleted ? null : m.buttons as MessageButton[][] | null} onPress={sel === undefined ? (b: MessageButton) => pressButton(chatId, m.id as number, b.data ?? '') : undefined} />
+          ? ((m.service as { type?: string } | undefined)?.type === 'new_login'
+            ? <LoginKeyboard rows={m.deleted ? null : m.buttons as MessageButton[][] | null} onPress={sel === undefined ? (b: MessageButton) => pressButton(chatId, m.id as number, b.data ?? '') : undefined} />
+            : <InlineKeyboard rows={m.deleted ? null : m.buttons as MessageButton[][] | null} onPress={sel === undefined ? (b: MessageButton) => pressButton(chatId, m.id as number, b.data ?? '') : undefined} />)
           : undefined}
       >
         {m.blocks && !m.deleted
@@ -298,6 +300,27 @@ const Row = memo(function Row({ chatId, voiceTitle, author, onAuthor, onOpen, hl
 
 /** «→» у пересланного, как «Focus message» в Telegram: исходный чат открывается поверх текущего (стрелка «Назад»
  *  вернёт обратно); он уже ниже в стеке — возвращаемся к нему; тот же чат — просто прокрутка к оригиналу. */
+/** Сеанс, о котором «Новый вход» (data кнопок login:<действие>:<id>). */
+const loginSessionOf = (rows: MessageButton[][] | null): number | null => {
+  for (const row of rows ?? []) for (const b of row) { const m = /^login:\w+:(\d+)$/.exec(b.data ?? ''); if (m) return Number(m[1]); }
+  return null;
+};
+
+/**
+ * Кнопки «Нового входа» — только там, где ими можно ответить: на другом устройстве, которое само подтверждено.
+ * На новом устройстве (вход о нём самом) и на ещё не подтверждённом — подсказка, где подтвердить, без кнопок,
+ * которые всё равно ответили бы отказом. Пока список сеансов не пришёл — ничего (не показать кнопки-обманки).
+ */
+function LoginKeyboard({ rows, onPress }: { rows: MessageButton[][] | null; onPress?: (b: MessageButton) => void }) {
+  const current = useGlobal((g) => g.sessions?.find((s) => s.current) ?? null);
+  const sid = loginSessionOf(rows);
+  if (!rows || sid == null) return <InlineKeyboard rows={rows} onPress={onPress} />;   // вопрос закрыт — клавиатура уходит сама
+  if (!current) return null;
+  if (current.id === sid) return <div class="rl-kb-note">Это вход с этого устройства. Подтвердить его можно на устройстве, где вы уже вошли.</div>;
+  if (current.unconfirmed) return <div class="rl-kb-note">Подтвердить или завершить вход можно с устройства, где вы вошли раньше.</div>;
+  return <InlineKeyboard rows={rows} onPress={onPress} />;
+}
+
 function goToOriginal(chatId: number, id: number): void {
   const target = { id, sort: id };
   if (activeFrame(getGlobal())?.chatId === chatId) focusMessage(target); else openInner(chatId, target);

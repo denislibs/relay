@@ -107,7 +107,9 @@ export function createServer(opts: { port: number }): Server {
           if (typeof phone === 'string') await sql`update users set phone = ${phone} where id = ${userId} and phone is null`.catch(() => {});
           // createSession сам чистит неактивные сеансы и пишет устройство/IP (общий путь для любого входа)
           const token = await createSession(userId, { req, server });
-          return Response.json({ userId, token }, { headers: { 'set-cookie': sessionCookie(token) } });
+          const h = new Headers();
+          h.append('set-cookie', sessionCookie(token)); h.append('set-cookie', clearAccessCookie());   // доступ прежнего сеанса — прочь
+          return Response.json({ userId, token }, { headers: h });
         }
 
         // публичный ключ VAPID — не секрет

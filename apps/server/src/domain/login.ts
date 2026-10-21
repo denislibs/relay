@@ -16,11 +16,11 @@ async function findUser(login: string): Promise<number | null> {
   return r ? Number(r.id) : null;
 }
 
-/** Текст сообщения с кодом; entity code — моноширинный, клиент копирует его по клику. */
-export function codeMessage(code: string): { body: string; entities: { type: 'code'; offset: number; length: number }[] } {
+/** Текст сообщения с кодом: код под спойлером (не прочесть через плечо и в превью), моноширинный — по клику копируется. */
+export function codeMessage(code: string): { body: string; entities: { type: 'code' | 'spoiler'; offset: number; length: number }[] } {
   const head = 'Код для входа в Relay: ';
   const body = `${head}${code}\n\nНикому не сообщайте этот код, даже если его просят от имени Relay. Он нужен только для входа в ваш аккаунт.\n\nЕсли вы не входили, ничего не делайте — без кода войти нельзя.`;
-  return { body, entities: [{ type: 'code', offset: head.length, length: code.length }] };
+  return { body, entities: [{ type: 'code', offset: head.length, length: code.length }, { type: 'spoiler', offset: head.length, length: code.length }] };
 }
 
 /** Нормализованный логин — ключ лимитов: телефон как есть (после trim), имя без «@» и в нижнем регистре. */

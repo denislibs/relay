@@ -231,3 +231,24 @@ test('a login finished with the cloud password posts «new login» to the servic
   const [s] = await sql`select confirmed_at from sessions where user_id = ${userId} order by id desc limit 1`;
   expect(s.confirmed_at).toBeNull();   // вход по коду (+ пароль) — «Это вы?» на других устройствах
 });
+
+test('«new login» only when a confirmed device can answer it: after logging out everywhere — no question', async () => {
+  const { userId, cookie } = await signUp('+79990000051');
+  const notices = async () => (await sql`select count(*)::int as n from messages m join service_chats s on s.chat_id = m.chat_id where s.user_id = ${userId} and m.service_type = 'new_login'`)[0].n as number;
+  // единственный сеанс вышел — следующий вход некому подтверждать
+  await call('/logout', {}, cookie);
+  const code = await call('/auth/code', { login: '+79990000051' });
+  await call('/auth/signin', { attemptId: code.json.attemptId, code: code.json.devCode });
+  expect(await notices()).toBe(0);
+  // ещё один вход: есть другой сеанс, но он сам не подтверждён — тоже без вопроса
+  const again = await call('/auth/code', { login: '+79990000051' });
+  await call('/auth/signin', { attemptId: again.json.attemptId, code: again.json.devCode });
+  expect(await notices()).toBe(0);
+});
+
+test('the login code is hidden under a spoiler and stays copyable (code entity on the same range)', async () => {
+  const { codeMessage } = await import('../src/domain/login');
+  const m = codeMessage('12345');
+  const at = m.body.indexOf('12345');
+  expect(m.entities).toEqual([{ type: 'code', offset: at, length: 5 }, { type: 'spoiler', offset: at, length: 5 }]);
+});
