@@ -105,7 +105,7 @@ export function Main() {
       <PanelHeader
         icon="arrowLeft" closeLabel="Назад" title="Настройки" onClose={() => void back()}
         actions={[
-          { icon: 'pencil', label: 'Изменить профиль', onClick: () => void go('settings/profile') },
+          { icon: 'userPen', label: 'Изменить профиль', onClick: () => void go('settings/profile') },
           { icon: 'more', label: 'Ещё', popup: true, onClick: (e: MouseEvent) => setMenu(e.currentTarget as HTMLElement) },
         ]}
       />

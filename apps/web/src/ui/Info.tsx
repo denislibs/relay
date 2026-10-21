@@ -132,8 +132,8 @@ export function Info() {
   const gInfo = (chat?.group as GroupInfo | null) ?? null, gMe = (chat?.me as MyMembership | null) ?? null;
   const action = group ? (canManage(gMe) ? { icon: 'pencil', label: 'Изменить группу', onClick: () => nav.go('gEdit') } : undefined)
     : !peerId || !contactsLoaded ? undefined
-    : contact ? { icon: 'pencil', label: 'Изменить контакт', onClick: () => setPage('edit') }
-    : { icon: 'userPlus', label: 'Добавить в контакты', onClick: addContact };
+    : contact ? { icon: 'userPen', label: 'Изменить контакт', onClick: () => setPage('edit') }
+    : { icon: 'contactAdd', label: 'Добавить в контакты', onClick: addContact };
 
   // участник из вкладки «Участники»: переписка с ним ложится в стек поверх группы (как в Telegram);
   // «Назад» в шапке возвращает в группу. Чата ещё нет — создаётся.
