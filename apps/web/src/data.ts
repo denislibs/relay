@@ -9,7 +9,7 @@ import { connectEngine, EngineClient, Mirror } from '@relay/sync-engine/src/clie
 import type { Item, Patch, Query, SearchResult } from '@relay/sync-engine/src/types';
 import { hideSpoilers, MAX_FILE_BYTES, type Entity } from '@relay/protocol';
 import { activeFrame, frameByKey, getGlobal, setGlobal, type ChatFrame, type FeedMeta, type Me, type Status, type UploadItem } from './global';
-import { bindChatDepth, popChats, pushChat } from './nav';
+import { closeLayer, closeLayers, pushLayer } from './nav';
 import { notifyIncoming, startNotify } from './notify';
 import { rememberKeysIn, startFileKeyService } from './fileKeys';
 import { bindMute, isMuted, startMuteMigration } from './mute';
@@ -98,7 +98,8 @@ export function startData(me: Me): void {
   // закрытие вкладки, пока файл грузится: как в Telegram, спросим (очередь переживёт перезагрузку, но незагруженное придётся догружать)
   addEventListener('beforeunload', (e) => { const g = getGlobal(); if (g.preparing.length || g.uploads.some((u) => !u.uploaded)) { e.preventDefault(); e.returnValue = true; } });
 
-  bindChatDepth(onChatDepth);
+  // запись истории могла вернуть прежний адрес (#chat=…) — поправить на чат на экране
+  addEventListener('popstate', () => queueMicrotask(syncShown));
   startNotify((id) => { focus(); openChat(id); });
   const open = Number(new URLSearchParams(location.hash.slice(1)).get('chat')) || null;
   if (open) openChat(open);
@@ -293,7 +294,7 @@ function popTo(index: number): void {
   // лишние (самые давние) — после ухода, чтобы не оборвать его анимацию
   const extra = getGlobal().chatLeaving.slice(0, -PARK_MAX).map((f) => f.key);
   if (extra.length) setTimeout(() => dropParked(extra), LEAVE_MS);
-  popChats(index);
+  for (const f of removed) dropLayer(f.key);
   syncShown();
 }
 
@@ -302,16 +303,29 @@ function revive(frame: ChatFrame, target?: { id: number; sort: number }): void {
   clearTimeout(parkTimers.get(frame.key)); parkTimers.delete(frame.key);
   beginHeavyAnimation(LEAVE_MS + 50);
   setGlobal((s) => ({ chatStack: [...s.chatStack, frame], chatLeaving: s.chatLeaving.filter((f) => f.key !== frame.key), openChatId: frame.chatId, pendingChatId: null }));
-  pushChat(stack().length - 1);
+  addLayer(frame.key);
   syncShown();
   if (target) focusMessage(target);
 }
 
-/** «Назад» браузера / Esc сменили глубину стека. */
-function onChatDepth(depth: number): void {
-  cancelPending();
-  if (depth < stack().length - 1) popTo(depth);
-  else syncShown();   // запись истории вернула прежний адрес — поправить на чат на экране
+/* Чат поверх чата — свой слой навигации (запись истории): «Назад» браузера и Esc снимают его кадр и всё выше. */
+const layerOf = new Map<string, number>();
+function addLayer(key: string): void {
+  layerOf.set(key, pushLayer('chat', () => {
+    cancelPending();
+    const at = stack().findIndex((f) => f.key === key);
+    if (at > 0) popTo(at - 1);
+  }, key));
+}
+/** Кадр сняли из интерфейса — его запись больше не нужна (уже снятая «Назад» — без изменений). */
+function dropLayer(key: string): void {
+  const id = layerOf.get(key);
+  layerOf.delete(key);
+  if (id) closeLayer(id);
+}
+function dropLayers(): void {
+  layerOf.clear();
+  closeLayers('chat');
 }
 
 /** Чат из списка (или из адреса, уведомления): нижний кадр, стек сбрасывается. */
@@ -325,7 +339,7 @@ export function openChat(chatId: number | null, target?: { id: number; sort: num
   if (!chatId) {
     for (const f of st) closeSession(f.key);
     dropParked();
-    popChats(0);
+    dropLayers();
     setGlobal({ chatStack: [], chatLeaving: [], openChatId: null, pendingChatId: null });
     syncShown();
     return;
@@ -348,7 +362,7 @@ export function openChat(chatId: number | null, target?: { id: number; sort: num
       pendingBottom = null;
       for (const f of stack()) closeSession(f.key);
       dropParked();
-      popChats(0);
+      dropLayers();
       setGlobal({ chatStack: [ready], chatLeaving: [], openChatId: chatId, pendingChatId: null });
       syncShown();
     });
@@ -387,7 +401,7 @@ export function openInner(chatId: number, target?: { id: number; sort: number },
       beginHeavyAnimation(LEAVE_MS + 50);
       patchFrame(frame.key, { ready: true });
       setGlobal({ openChatId: chatId, pendingChatId: null });
-      pushChat(stack().length - 1);
+      addLayer(frame.key);
       syncShown();
     };
     whenReleased(hold, () => (laidOut ? requestMutation(show) : requestAnimationFrame(() => requestMutation(show))));

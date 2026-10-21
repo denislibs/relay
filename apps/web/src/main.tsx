@@ -11,7 +11,7 @@ import { enableStrictDom } from '@relay/ui';
 import { render } from 'preact';
 import { startData } from './data';
 import { installErrorCapture } from './devtools/metrics';
-import { getGlobal, setGlobal, type Me } from './global';
+import { getGlobal, setGlobal, subscribeGlobal, type Me } from './global';
 import * as nav from './nav';
 import { startScreenBlur } from './screenBlur';
 import { startSettingsData } from './settingsData';
@@ -93,6 +93,13 @@ window.addEventListener('relay:signed-in', () => {
 });
 
 nav.installNav({ get: () => getGlobal().sidebarView, set: (p) => setGlobal({ sidebarView: p }), escBusy: () => getGlobal().infoOpen && !!getGlobal().openChatId });
+// правая панель «Информация» — свой слой навигации: «Назад» браузера закрывает её, закрытая из интерфейса — снимает запись
+let infoLayer = 0;
+subscribeGlobal(() => {
+  const g = getGlobal(), open = g.infoOpen && g.openChatId != null;
+  if (open && !infoLayer) infoLayer = nav.pushLayer('info', () => { infoLayer = 0; setGlobal({ infoOpen: false }); });
+  else if (!open && infoLayer) { const id = infoLayer; infoLayer = 0; nav.closeLayer(id); }
+});
 if (__DEV__) (window as unknown as { __nav: typeof nav }).__nav = nav;   // для ручной проверки навигации
 // dev: раздел «Для разработчиков» для проверок — что сейчас в журнале и что ничего не работает при закрытом разделе
 if (__DEV__) void import('./devtools/session').then((s) => import('./devtools/metrics').then((m) => {

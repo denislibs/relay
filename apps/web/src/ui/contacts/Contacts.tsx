@@ -5,7 +5,7 @@ import type { Item } from '@relay/sync-engine/src/types';
 import { useEffect, useRef, useState } from 'preact/hooks';
 import { openChat, startDirectChat } from '../../data';
 import { getGlobal, setGlobal, useGlobal } from '../../global';
-import { back, home } from '../../nav';
+import { back } from '../../nav';
 import { showToast } from '../../settingsData';
 import { lastSeenText } from '../format';
 import { filterContacts, sectionsByLetter, sortByName, sortContacts, type ContactSort } from './contactsLogic';
@@ -13,11 +13,9 @@ import { filterContacts, sectionsByLetter, sortByName, sortContacts, type Contac
 const ROW = 72;          // высота ChatRow
 const VIRTUAL_FROM = 50; // длинный список — виртуальный
 
-/** Личный чат с человеком: уже есть — открыть, нет — создать (как «Новый чат»). Страница контактов уходит.
- *  Порядок важен: сначала назад к списку чатов (дождавшись истории), потом чат. Наоборот — открытый чат ложился
- *  слоем на запись «Контакты», и уход с неё по истории тут же закрывал его. */
+/** Личный чат с человеком: уже есть — открыть, нет — создать (как «Новый чат»). Страница контактов остаётся
+ *  (как в Telegram): чат — свой слой, «Назад» в контактах закрывает только контакты. */
 export async function openDirect(userId: number): Promise<void> {
-  if (getGlobal().sidebarView !== 'chats') await home();
   const chat = getGlobal().chats.find((c) => c.kind === 'direct' && c.peerId === userId);
   try {
     if (chat) openChat(chat.id as number);

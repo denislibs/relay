@@ -1,4 +1,5 @@
 // Дерево страниц боковой панели и навигация по нему. Чистая логика (без DOM) + installNav() для window.
+import { createNavStack, type HistoryApi, type NavStack } from './navStack';
 
 /** Порядок для SlideStack: родитель раньше ребёнка. `:name` — параметр пути. */
 export const PAGES = [
@@ -68,6 +69,8 @@ export function orderFor(active: string): string[] {
 }
 
 // ---------- состояние навигации ----------
+// Каждый открытый слой — своя запись стека navStack (и истории браузера): страницы левой колонки, чаты поверх чата,
+// правая панель. «Назад» закрывает ровно свой слой: стрелка в «Контактах» закрывает контакты, а открытый из них чат остаётся.
 
 interface Binding {
   get: () => string;
@@ -75,203 +78,95 @@ interface Binding {
   /** Esc сейчас принадлежит чему-то другому (правая панель и т.п.) */
   escBusy?: () => boolean;
 }
-interface HistoryLike {
-  pushState(state: unknown, title: string): void;
-  replaceState(state: unknown, title: string): void;
-  back(): void;
-  go?(delta: number): void;
-  state: unknown;
-}
 
 let bind: Binding | null = null;
-let hist: HistoryLike | null = null;
-let stack: string[] = [ROOT];   // путь для каждой записи истории; idx — текущая
-let layers: number[] = [0];     // глубина стека чатов на каждой записи (0 — только нижний чат)
-let idx = 0;
-// стек чатов (data.ts): запись истории сменила глубину — привести стек к ней
-let chatDepth: ((depth: number) => void) | null = null;
-export function bindChatDepth(fn: ((depth: number) => void) | null): void { chatDepth = fn; }
+let stack: NavStack | null = null;
 let guard: (() => boolean | Promise<boolean>) | null = null;
 
 /** Несохранённая форма: guard возвращает false (или промис false) — уход отменяется. */
 export function setLeaveGuard(fn: (() => boolean | Promise<boolean>) | null): void { guard = fn; }
 
 const current = () => bind?.get() ?? ROOT;
-const stamp = (path: string, i: number) => ({ nav: path, i, chat: layers[i] ?? 0 });
-
-/**
- * Чат открыт поверх другого (как setInnerPeer в Telegram): своя запись истории — «Назад» браузера снимает его.
- * depth — новая глубина стека чатов.
- */
-export function pushChat(depth: number): void {
-  if (!bind) return;
-  idx += 1;
-  stack = stack.slice(0, idx);
-  layers = layers.slice(0, idx);
-  stack[idx] = current();
-  layers[idx] = depth;
-  hist?.pushState(stamp(current(), idx), '');
-}
-
-/**
- * Стек чатов сократили сами (кнопка «Назад», Esc, клик в списке): если сверху лежат наши записи чатов —
- * отматываем историю на них, иначе (поверх уже страницы панели) просто помечаем текущую запись новой глубиной.
- */
-export function popChats(to: number): void {
-  if (!bind || (layers[idx] ?? 0) <= to) return;
-  let k = 0;
-  while (idx - k > 0 && layers[idx - k] > to && stack[idx - k - 1] === stack[idx] && layers[idx - k - 1] === layers[idx - k] - 1) k++;
-  if (k > 0 && layers[idx - k] === to && hist?.go) {
-    skipChat = true;
-    idx -= k;
-    hist.go(-k);   // popstate придёт на запись с глубиной to — стек уже такой
-    return;
-  }
-  layers[idx] = to;
-  hist?.replaceState(stamp(current(), idx), '');
-}
-let skipChat = false;
-
-/** Верхняя запись истории — открытие чата поверх (а не страница панели): Esc закрывает его. */
-export const chatOnTop = () => idx > 0 && (layers[idx] ?? 0) > (layers[idx - 1] ?? 0) && stack[idx - 1] === stack[idx];
-
 async function canLeave(): Promise<boolean> { return guard ? await guard() : true; }
+
+/** Путь, который показывает левая колонка при текущих открытых записях страниц. */
+const shownPath = () => stack?.open('page').at(-1)?.key ?? ROOT;
+const pageBack = () => { if (bind && current() !== shownPath()) bind.set(shownPath()); };
 
 /** Вглубь (или в соседний раздел): новая запись истории. */
 export async function go(path: string): Promise<void> {
-  if (!bind || pageIndex(path) < 0 || path === current()) return;
+  if (!bind || !stack || pageIndex(path) < 0 || path === current()) return;
   if (!(await canLeave())) return;
-  idx += 1;
-  stack = stack.slice(0, idx);
-  layers = layers.slice(0, idx);
-  stack[idx] = path;
-  layers[idx] = layers[idx - 1] ?? 0;   // страница панели не меняет стек чатов
-  hist?.pushState(stamp(path, idx), '');
+  if (path === ROOT) { closePages(); return; }
+  stack.push('page', pageBack, { key: path });
   bind.set(path);
 }
 
-/** К родителю: если он — предыдущая запись истории, идём history.back(), иначе подменяем текущую запись. */
+function closePages() {
+  stack?.closeAll('page');
+  bind?.set(ROOT);
+}
+
+/** К родителю: если он — страница под текущей, закрываем запись текущей, иначе подменяем путь у её записи. */
 export async function back(): Promise<void> {
-  if (!bind || current() === ROOT) return;
+  if (!bind || !stack || current() === ROOT) return;
   if (!(await canLeave())) return;
-  const parent = parentOf(current());
-  if (idx > 0 && stack[idx - 1] === parent && layers[idx - 1] === layers[idx]) {
-    skipGuard = true;
-    hist?.back();   // popstate выставит страницу
-    if (!hist) { idx -= 1; bind.set(parent); }
-    return;
-  }
-  stack[idx] = parent;
-  hist?.replaceState(stamp(parent, idx), '');
+  const cur = current(), parent = parentOf(cur);
+  const pages = stack.open('page');
+  const top = pages.at(-1);
+  if (parent === ROOT) { closePages(); return; }   // к списку чатов — все страницы закрыты
+  if (top && top.key === cur && (pages.at(-2)?.key ?? ROOT) === parent) { stack.closeType('page'); return; }
+  if (top) top.key = parent;   // прыжок через уровень (или страница без записи): та же запись, путь — родитель
   bind.set(parent);
 }
 
-let skipGuard = false;
-
-/** Сразу к списку чатов (например, после создания группы): к ближайшей записи истории со списком, иначе подменяем текущую. */
+/** Сразу к списку чатов (например, после создания группы): все страницы панели закрываются, чаты не трогаются. */
 export async function home(): Promise<void> {
   if (!bind || current() === ROOT) return;
-  let j = idx;
-  while (j > 0 && !(stack[j] === ROOT && layers[j] === layers[idx])) j -= 1;
-  if (j < idx && stack[j] === ROOT && hist?.go) {
-    skipGuard = true;
-    const done = new Promise<void>((r) => { popWaiter = r; setTimeout(r, 500); });   // запасной выход, если popstate не придёт
-    hist.go(j - idx);   // popstate выставит страницу
-    await done;
-    return;
-  }
-  stack[idx] = ROOT;
-  hist?.replaceState(stamp(ROOT, idx), '');
-  bind.set(ROOT);
+  closePages();
 }
 
-/** Кнопка «Назад» браузера (или программный history.back()). */
-// home() ждёт, пока popstate будет обработан: иначе открытый сразу после него чат закроет запоздавшая запись истории
-let popWaiter: (() => void) | null = null;
-async function onPop(state: unknown): Promise<void> {
-  try { await onPopInner(state); } finally { const w = popWaiter; popWaiter = null; w?.(); }
-}
-async function onPopInner(state: unknown): Promise<void> {
-  if (!bind) return;
-  const s = state as { nav?: string; i?: number } | null;
-  // запись без нашей отметки (data.ts openChat делает replaceState(null) под #chat=…): остаёмся где были
-  // и помечаем запись текущим путём, чтобы следующие переходы по истории сходились со stack
-  if (!s || typeof s.nav !== 'string' || typeof s.i !== 'number') {
-    const mine = skipGuard;
-    skipGuard = false;
-    // наш back() шёл к родителю (stack[idx - 1]): доходим до него, иначе экран стоит, а браузер уже на запись назад,
-    // и следующий «Назад» уводит из приложения
-    if (mine && idx > 0) {
-      idx -= 1;
-      hist?.replaceState(stamp(stack[idx], idx), '');
-      bind.set(stack[idx]);
-      return;
-    }
-    hist?.replaceState(stamp(current(), idx), '');
-    return;
-  }
-  const target = pageIndex(s.nav) >= 0 ? s.nav : ROOT;
-  const i = s.i;
-  const depth = typeof (s as { chat?: unknown }).chat === 'number' ? (s as { chat: number }).chat : 0;
-  if (skipChat) {   // наш popChats: стек чатов уже сокращён, страница панели та же
-    skipChat = false;
-    idx = i; layers[i] = depth; stack[i] = target;
-    chatDepth?.(depth);
-    return;
-  }
-  // запись отличается только глубиной чатов (та же страница панели) — несохранённой формы это не касается
-  if (target === current() && i !== idx) {
-    idx = i; stack[i] = target; layers[i] = depth;
-    chatDepth?.(depth);
-    return;
-  }
-  const mine = skipGuard;
-  skipGuard = false;
-  if (!mine && !(await canLeave())) {
-    // пользователь отказался уходить: возвращаем запись, на которой стояли
-    const cur = current();
-    if (i < idx) {   // шли назад — запись «вперёд» потеряна, ставим заново поверх
-      idx = i + 1;
-      stack[idx] = cur;
-      hist?.pushState(stamp(cur, idx), '');
-    }
-    return;
-  }
-  idx = i;
-  stack[i] = target;
-  layers[i] = depth;
-  bind.set(target);
-  chatDepth?.(depth);
-}
+// ---------- слои поверх: чаты, правая панель ----------
 
-/** Esc → назад; можно перехватить: preventDefault, открытая модалка/меню, правая панель. */
+/** Открыть слой (чат поверх чата, правая панель): своя запись истории; onBack — «Назад» браузера или Esc. */
+export function pushLayer(type: 'chat' | 'info', onBack: () => void, key?: string): number {
+  return stack ? stack.push(type, onBack, { key }) : 0;
+}
+/** Слой закрыли из интерфейса — убрать его запись (onBack не вызывается). */
+export function closeLayer(id: number): void { stack?.close(id); }
+/** Закрыть все слои типа из интерфейса (сменился нижний чат — верхние уже сняты). */
+export function closeLayers(type: 'chat' | 'info'): void { stack?.closeAll(type); }
+
+/** Esc → верхний открытый слой; можно перехватить: preventDefault, открытая модалка/меню, правая панель. */
 export function onEscape(e: { key: string; defaultPrevented: boolean }, modalOpen: boolean): void {
   if (e.key !== 'Escape' || e.defaultPrevented || modalOpen || bind?.escBusy?.()) return;
-  // последним открыли чат поверх — Esc закрывает его (как «Назад»), а не страницу панели
-  if (chatOnTop()) { popChats(layers[idx] - 1); chatDepth?.(layers[idx]); return; }
+  const top = stack?.topOpen();
+  if (top && top.type !== 'page' && top.type !== 'root') { stack!.closeType(top.type); return; }
   void back();
 }
 
-/** Подключает window: popstate и Esc; первую запись истории помечаем корнем. */
-export function installNav(b: Binding, h: HistoryLike = history): () => void {
+function create(b: Binding, h: HistoryApi): NavStack {
   bind = b;
-  hist = h;
-  stack = [ROOT];
-  layers = [0];
-  idx = 0;
-  h.replaceState(stamp(ROOT, 0), '');
-  const pop = (e: PopStateEvent) => { void onPop(e.state); };
+  guard = null;
+  // «Назад» браузера снимает страницу с несохранённой формой — спросить; слои чатов и панели форму не трогают
+  stack = createNavStack(h, { canPop: (popping) => !popping.some((e) => e.type === 'page') || canLeave() });
+  return stack;
+}
+
+/** Подключает window: popstate и Esc; первую запись истории помечаем корнем. */
+export function installNav(b: Binding, h: HistoryApi = history): () => void {
+  const s = create(b, h);
+  const pop = (e: PopStateEvent) => { void s.onPop(e.state); };
   const key = (e: KeyboardEvent) => onEscape(e, !!document.querySelector('[role="dialog"][aria-modal="true"], [role="menu"]'));
   addEventListener('popstate', pop);
   addEventListener('keydown', key);
-  return () => { removeEventListener('popstate', pop); removeEventListener('keydown', key); bind = null; hist = null; };
+  return () => { removeEventListener('popstate', pop); removeEventListener('keydown', key); bind = null; stack = null; };
 }
 
-/** Только для тестов: подключить без window. */
-export function bindForTest(b: Binding, h: HistoryLike | null = null): void {
-  bind = b; hist = h; stack = [ROOT]; layers = [0]; idx = 0; guard = null; skipGuard = false; skipChat = false; chatDepth = null;
-}
-export const popForTest = onPop;
+/** Только для тестов: подключить без window; popstate подаётся через возвращённый стек (onPop). */
+export const bindForTest = create;
+/** Для тестов и отладки: записи стека. */
+export const navSnapshot = () => stack?.snapshot() ?? [];
 
 // ---------- прокрутка страниц ----------
 const scrolls = new Map<string, number>();
