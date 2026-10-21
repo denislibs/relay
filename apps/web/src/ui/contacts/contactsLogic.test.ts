@@ -32,3 +32,11 @@ test('initials and the edit form', () => {
   expect(contactValid({ firstName: 'Б', lastName: '', note: '😀'.repeat(128) })).toBe(true);
   expect(contactValid({ firstName: 'Б', lastName: '', note: '😀'.repeat(129) })).toBe(false);
 });
+
+test('by name: Latin, then Cyrillic, then the rest under «#»; sections per first letter', async () => {
+  const { sortByName, sectionsByLetter, letterOf } = await import('./contactsLogic');
+  const list = [c('1', { name: 'Яна' }), c('2', { name: 'azamat' }), c('3', { name: 'Борис' }), c('4', { name: '42 Bot' }), c('5', { name: 'Alibek' }), c('6', { name: 'ёжик' }), c('7', { name: 'Zed' })];
+  expect(sortByName(list).map((x) => x.name)).toEqual(['Alibek', 'azamat', 'Zed', 'Борис', 'ёжик', 'Яна', '42 Bot']);
+  expect(sectionsByLetter(sortByName(list)).map((s) => s.letter + s.items.length)).toEqual(['A2', 'Z1', 'Б1', 'Ё1', 'Я1', '#1']);
+  expect(letterOf('  ника')).toBe('Н');
+});

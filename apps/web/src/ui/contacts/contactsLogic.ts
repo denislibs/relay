@@ -14,6 +14,38 @@ export function sortContacts(list: Item[]): Item[] {
     Number(!!b.online) - Number(!!a.online) || seen(b) - seen(a) || String(a.name).localeCompare(String(b.name), 'ru'));
 }
 
+/** Сортировка контактов: по имени (разделы по буквам) или по времени захода. */
+export type ContactSort = 'name' | 'seen';
+
+// как в Telegram: латиница, затем кириллица, затем всё остальное (раздел «#»)
+const scriptRank = (ch: string) => (/^[A-Za-z]$/.test(ch) ? 0 : /^[А-Яа-яЁё]$/.test(ch) ? 1 : 2);
+const firstChar = (name: string) => [...name.trim()][0] ?? '';
+
+/** Буква раздела: первая буква имени (заглавная), не буква — «#». */
+export function letterOf(name: string): string {
+  const ch = firstChar(name);
+  return scriptRank(ch) < 2 ? ch.toLocaleUpperCase('ru') : '#';
+}
+
+/** По имени: латиница → кириллица → прочее, внутри — по алфавиту без учёта регистра. */
+export function sortByName(list: Item[]): Item[] {
+  return [...list].sort((a, b) => {
+    const na = String(a.name), nb = String(b.name);
+    return scriptRank(firstChar(na)) - scriptRank(firstChar(nb)) || na.localeCompare(nb, 'ru', { sensitivity: 'base' }) || na.localeCompare(nb, 'ru');
+  });
+}
+
+/** Разделы по буквам для списка, уже отсортированного sortByName. */
+export function sectionsByLetter(list: Item[]): { letter: string; items: Item[] }[] {
+  const out: { letter: string; items: Item[] }[] = [];
+  for (const c of list) {
+    const l = letterOf(String(c.name));
+    if (out[out.length - 1]?.letter === l) out[out.length - 1].items.push(c);
+    else out.push({ letter: l, items: [c] });
+  }
+  return out;
+}
+
 /** Локальный поиск: по контактному и собственному имени, по @username. */
 export function filterContacts(list: Item[], q: string): Item[] {
   const s = q.trim().toLowerCase().replace(/^@/, '');

@@ -35,7 +35,7 @@ MAP = {
     'code': 'brackets_slash_outline', 'heading': 'text_heading_1_outline', 'quote': 'quote_closing', 'divider': 'minus_outline',
     'text': 'text_outline', 'expand': 'fullscreen', 'pip': 'picture_in_picture_16x9_outline', 'collapse': 'fullscreen_exit',
     'article': 'article_outline', 'listOrdered': 'list_number_outline', 'cloud': 'cloud_outline', 'file': 'document_outline',
-    'pencil': 'write_outline', 'userPlus': 'user_add_outline', 'contactAdd': 'user_add_outline@56', 'userPen': 'user_pen_outline@28', 'users': 'users_outline', 'userCheck': 'user_check_outline',
+    'pencil': 'write_outline', 'userPlus': 'user_add_outline', 'contactAdd': 'user_add_outline@56', 'userPen': 'user_pen_outline@28', 'sortName': 'text_asc_outline', 'sortSeen': 'recent_outline', 'users': 'users_outline', 'userCheck': 'user_check_outline',
     'userX': 'user_slash_outline', 'refresh': 'refresh_outline', 'crown': 'crown_outline', 'bell': 'notification_outline',
     'timer': 'clock_circle_dashed_outline', 'shield': 'check_shield_outline', 'upload': 'upload_outline',
     'account': 'user_circle_outline', 'general': 'sliders_vertical_outline', 'folder': 'folder_simple_outline',

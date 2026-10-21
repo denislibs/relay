@@ -1148,3 +1148,11 @@ html[data-anim="0"] .app-chatcol, html[data-anim="0"] .app-chatcol-below, html[d
 .app-login-layer.is-leaving { position: fixed; inset: 0; z-index: 100; pointer-events: none; animation: app-login-out 220ms cubic-bezier(.4, 0, .2, 1) both; }
 @keyframes app-login-out { to { opacity: 0; transform: scale(1.025); } }
 html[data-anim="0"] :is(.app-enter-reload, .app-enter-login) :is(.rl-shell-side, .rl-shell-main, .rl-frail), html[data-anim="0"] .app-login-layer.is-leaving { animation-duration: 1ms; animation-delay: 0ms; }
+
+/* ---------- Контакты по имени: разделы по буквам и указатель справа (как в Telegram) ---------- */
+.app-ct-letter { margin: 0; padding: 14px 0 4px 22px; font: 600 16px/20px var(--font-sans); color: var(--brand-strong); }
+.app-ct-sec:first-child .app-ct-letter { padding-top: 6px; }
+.app-ct-sec { content-visibility: auto; contain-intrinsic-size: auto 400px; }
+.app-ct-index { position: absolute; right: 2px; top: 50%; transform: translateY(-50%); z-index: 2; display: flex; flex-direction: column; align-items: center; padding: 4px 0; touch-action: none; user-select: none; }
+.app-ct-index button { width: 20px; height: 18px; padding: 0; border: 0; background: none; color: var(--brand-strong); font: 600 12px/18px var(--font-sans); cursor: pointer; }
+.app-ct-index button:hover { color: var(--ink); }
