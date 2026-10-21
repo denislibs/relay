@@ -961,11 +961,7 @@ button.rl-tab:hover { color: var(--ink); }
 .rl-folder-count-on { background: var(--brand-strong); color: #fff; }
 
 /* ---------- FAB inside the card ---------- */
-.rl-fab-slot { position: absolute; right: var(--space-4); bottom: var(--space-4); z-index: 3; transform: translateY(5rem); transition: transform 250ms cubic-bezier(.34, 1.56, .64, 1); }
-/* выехала: курсор над списком или открыто её меню (иначе меню уехало бы вместе с кнопкой) */
-.rl-fab-slot.is-revealed, .rl-fab-slot:has(.app-newchat-open) { transform: none; }
-html[data-anim="0"] .rl-fab-slot { transform: none; opacity: 0; transition: opacity 150ms; }
-html[data-anim="0"] .rl-fab-slot:is(.is-revealed, :has(.app-newchat-open)) { opacity: 1; }
+.rl-fab-slot { position: absolute; right: var(--space-4); bottom: var(--space-4); z-index: 3; }
 .rl-fab-main { position: relative; display: inline-flex; align-items: center; justify-content: center; width: 56px; height: 56px; border: 0; border-radius: 50%; background: var(--fab); color: var(--on-fab); cursor: pointer; transition: border-radius var(--dur-base) var(--ease-out), transform var(--dur-instant) var(--ease-standard); }
 .rl-fab-main:active { transform: scale(var(--press-lg)); }
 .rl-fab-main .rl-ripple-host { border-radius: inherit; }
