@@ -10,20 +10,27 @@ export const QR_TTL_SEC = 30;
 const hash = (t: string) => createHash('sha256').update('relay-qr:' + t).digest('hex');
 const valid = (t: unknown): t is string => typeof t === 'string' && /^[A-Za-z0-9_-]{43}$/.test(t);
 
-export async function createQr(device: string | null, ip: string | null): Promise<{ token: string; expiresAt: string }> {
+/** deviceKey — ключ нового устройства: вход по этому коду заберёт только оно (pollQr сверяет ключ). */
+export async function createQr(device: string | null, ip: string | null, deviceKey: Uint8Array | null = null): Promise<{ token: string; expiresAt: string }> {
   const token = randomBytes(32).toString('base64url');
   await sql`delete from qr_logins where expires_at < now() - interval '1 hour'`;
-  const [r] = await sql`insert into qr_logins (token_hash, device, ip, expires_at) values (${hash(token)}, ${device}, ${ip}, now() + ${QR_TTL_SEC + ' seconds'}::interval) returning expires_at`;
+  const [r] = await sql`insert into qr_logins (token_hash, device, ip, expires_at, device_key)
+                        values (${hash(token)}, ${device}, ${ip}, now() + ${QR_TTL_SEC + ' seconds'}::interval, ${deviceKey ? Buffer.from(deviceKey) : null}) returning expires_at`;
   return { token, expiresAt: new Date(r.expires_at as string).toISOString() };
 }
 
-/** Опрос с нового устройства: 'wait' — ещё не подтвердили, 'expired' — нужен новый токен, userId — входим. */
-export async function pollQr(token: unknown): Promise<'wait' | 'expired' | { userId: number }> {
+/**
+ * Опрос с нового устройства: 'wait' — ещё не подтвердили, 'expired' — нужен новый токен, userId — входим.
+ * Код создан с ключом устройства — забрать вход можно только с ним (deviceKey — проверенный deviceProof опроса):
+ * подсмотревший QR не войдёт вместо владельца.
+ */
+export async function pollQr(token: unknown, deviceKey: Uint8Array | null = null): Promise<'wait' | 'expired' | { userId: number }> {
   if (!valid(token)) return 'expired';
   // подтверждённый токен годится ещё минуту после срока показа: подтверждение могло прийти на последней секунде
   const [r] = await sql`
     update qr_logins set used_at = now()
      where token_hash = ${hash(token)} and accepted_at is not null and used_at is null and expires_at > now() - interval '60 seconds'
+       and (device_key is null or device_key = ${deviceKey ? Buffer.from(deviceKey) : null})
      returning user_id`;
   if (r) return { userId: Number(r.user_id) };
   const [live] = await sql`select 1 from qr_logins where token_hash = ${hash(token)} and accepted_at is null and expires_at > now()`;

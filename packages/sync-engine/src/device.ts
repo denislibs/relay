@@ -6,7 +6,8 @@
  *
  *   refreshAccess  — GET /session/challenge → POST /session/refresh {nonce, sig, key}: первый раз привязывает ключ
  *   deviceFetch    — обёртка fetch: 401 с «x-relay-auth: refresh» → обновить доступ и повторить один раз
- *   signDevice     — подпись «relay-device|<purpose>|<nonce>» (purpose: refresh | ws)
+ *   bindProof      — ключ и подпись для входа: сеанс создаётся сразу привязанным
+ *   signDevice     — подпись «relay-device|<purpose>|<nonce>» (purpose: refresh | ws | bind)
  */
 const DB = 'relay-device';
 const STORE = 'keys';
@@ -46,7 +47,7 @@ function deviceKey(): Promise<Stored> {
   })().catch((e) => { loading = null; throw e; });
 }
 
-export async function signDevice(purpose: 'refresh' | 'ws', nonce: string): Promise<string> {
+export async function signDevice(purpose: 'refresh' | 'ws' | 'bind', nonce: string): Promise<string> {
   const { pair } = await deviceKey();
   return b64(await crypto.subtle.sign({ name: 'ECDSA', hash: 'SHA-256' }, pair.privateKey, new TextEncoder().encode(`relay-device|${purpose}|${nonce}`)));
 }
@@ -84,8 +85,29 @@ export function deviceFetch(inner: Fetch, httpBase = ''): Fetch {
   };
 }
 
+export interface DeviceProof { key: string; nonce: string; sig: string }
+const BIND_REUSE_MS = 60_000;   // вызов живёт 2 минуты; опрос QR раз в пару секунд не просит новый каждый раз
+let bind: { at: number; p: Promise<DeviceProof> } | null = null;
+/**
+ * Ключ устройства для входа (код, пароль, регистрация, паскей, QR): публичный ключ и подпись «relay-device|bind|вызов».
+ * Сервер создаёт сеанс уже привязанным к этому ключу (deviceAuth.ts: deviceProof).
+ */
+export function bindProof(httpBase = '', f: Fetch = fetch): Promise<DeviceProof> {
+  if (bind && Date.now() - bind.at < BIND_REUSE_MS) return bind.p;
+  const p = (async () => {
+    const { spki } = await deviceKey();
+    const c = await f(`${httpBase}/session/challenge`, { credentials: 'include' });
+    if (!c.ok) throw new Error(`challenge ${c.status}`);
+    const { nonce } = await c.json() as { nonce: string };
+    return { key: spki, nonce, sig: await signDevice('bind', nonce) };
+  })();
+  bind = { at: Date.now(), p };
+  p.catch(() => { if (bind?.p === p) bind = null; });
+  return p;
+}
+
 /** Выход: ключ этого сеанса больше не нужен — следующий вход привяжет новый. */
 export async function forgetDeviceKey(): Promise<void> {
-  loading = null;
+  loading = null; bind = null;
   await tx('readwrite', (s) => s.delete(ID)).catch(() => {});
 }

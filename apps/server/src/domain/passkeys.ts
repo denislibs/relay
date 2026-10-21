@@ -33,32 +33,34 @@ const AAGUID: Record<string, string> = {
   'bada5566-a7aa-401f-bd96-45619a55120d': '1Password',
 };
 
-async function saveChallenge(challenge: string, userId: number | null): Promise<string> {
+async function saveChallenge(challenge: string, userId: number | null, deviceKey: Uint8Array | null = null): Promise<string> {
   const id = crypto.randomUUID();
   await sql`delete from webauthn_challenges where expires_at < now()`;
-  await sql`insert into webauthn_challenges (id, challenge, user_id, expires_at) values (${id}, ${challenge}, ${userId}, now() + ${CHALLENGE_MIN + ' minutes'}::interval)`;
+  await sql`insert into webauthn_challenges (id, challenge, user_id, expires_at, device_key)
+            values (${id}, ${challenge}, ${userId}, now() + ${CHALLENGE_MIN + ' minutes'}::interval, ${deviceKey ? Buffer.from(deviceKey) : null})`;
   return id;
 }
 
-async function takeChallenge(id: unknown, userId: number | null): Promise<string> {
+async function takeChallenge(id: unknown, userId: number | null): Promise<{ challenge: string; deviceKey: Uint8Array | null }> {
   if (typeof id !== 'string' || !/^[0-9a-f-]{36}$/.test(id)) throw new DomainError('passkey_invalid');
   const [c] = userId == null
-    ? await sql`delete from webauthn_challenges where id = ${id} and user_id is null and expires_at > now() returning challenge`
-    : await sql`delete from webauthn_challenges where id = ${id} and user_id = ${userId} and expires_at > now() returning challenge`;
+    ? await sql`delete from webauthn_challenges where id = ${id} and user_id is null and expires_at > now() returning challenge, device_key`
+    : await sql`delete from webauthn_challenges where id = ${id} and user_id = ${userId} and expires_at > now() returning challenge, device_key`;
   if (!c) throw new DomainError('passkey_invalid');
-  return c.challenge as string;
+  return { challenge: c.challenge as string, deviceKey: c.device_key ? new Uint8Array(c.device_key as Uint8Array) : null };
 }
 
 /* ---------- вход ---------- */
 
-export async function loginOptions(req: Request) {
+/** deviceKey — ключ устройства, которое входит: хранится с вызовом, finishLogin вернёт его для сверки. */
+export async function loginOptions(req: Request, deviceKey: Uint8Array | null = null) {
   const { rpID } = relyingParty(req);
   const options = await generateAuthenticationOptions({ rpID, userVerification: 'preferred', allowCredentials: [] });
-  return { id: await saveChallenge(options.challenge, null), options };
+  return { id: await saveChallenge(options.challenge, null, deviceKey), options };
 }
 
-export async function finishLogin(req: Request, id: unknown, response: unknown): Promise<{ userId: number }> {
-  const challenge = await takeChallenge(id, null);
+export async function finishLogin(req: Request, id: unknown, response: unknown): Promise<{ userId: number; deviceKey: Uint8Array | null }> {
+  const { challenge, deviceKey } = await takeChallenge(id, null);
   const r = response as { id?: unknown };
   if (!r || typeof r.id !== 'string' || r.id.length > 1024) throw new DomainError('passkey_invalid');
   const [pk] = await sql`select * from passkeys where id = ${r.id}`;
@@ -74,7 +76,7 @@ export async function finishLogin(req: Request, id: unknown, response: unknown):
   } catch { throw new DomainError('passkey_invalid'); }
   if (!verified.verified) throw new DomainError('passkey_invalid');
   await sql`update passkeys set counter = ${verified.authenticationInfo.newCounter}, last_used_at = now() where id = ${pk.id}`;
-  return { userId: Number(pk.user_id) };
+  return { userId: Number(pk.user_id), deviceKey };
 }
 
 /* ---------- настройки ---------- */
@@ -102,7 +104,7 @@ export async function registrationOptions(req: Request, userId: number) {
 }
 
 export async function registerPasskey(req: Request, userId: number, id: unknown, response: unknown) {
-  const challenge = await takeChallenge(id, userId);
+  const { challenge } = await takeChallenge(id, userId);
   const { rpID, origin } = relyingParty(req);
   let verified;
   try {

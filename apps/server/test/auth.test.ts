@@ -252,3 +252,71 @@ test('the login code is hidden under a spoiler and stays copyable (code entity o
   const at = m.body.indexOf('12345');
   expect(m.entities).toEqual([{ type: 'code', offset: at, length: 5 }, { type: 'spoiler', offset: at, length: 5 }]);
 });
+
+/* ---------- ключ устройства с самого входа (deviceAuth.ts: deviceProof) ---------- */
+
+async function deviceOf() {
+  const pair = await crypto.subtle.generateKey({ name: 'ECDSA', namedCurve: 'P-256' }, false, ['sign', 'verify']) as CryptoKeyPair;
+  const key = Buffer.from(await crypto.subtle.exportKey('spki', pair.publicKey)).toString('base64');
+  const sign = async (purpose: string, nonce: string) => Buffer.from(await crypto.subtle.sign({ name: 'ECDSA', hash: 'SHA-256' }, pair.privateKey, new TextEncoder().encode(`relay-device|${purpose}|${nonce}`))).toString('base64');
+  return { key, sign, proof: async () => { const { nonce } = (await (await fetch(base + '/session/challenge')).json()) as { nonce: string }; return { key, nonce, sig: await sign('bind', nonce) }; } };
+}
+const cookiesOf = async (path: string, data: unknown) => {
+  const res = await fetch(base + path, { method: 'POST', headers: { 'content-type': 'application/json', origin: base }, body: JSON.stringify(data) });
+  const set = res.headers.getSetCookie?.() ?? [];
+  const pick = (n: string) => set.find((c) => c.startsWith(n + '='))?.split(';')[0] ?? null;
+  return { status: res.status, json: await res.json().catch(() => ({})) as Record<string, any>, session: pick('relay_session'), access: pick('relay_access') };
+};
+
+test('sign-in with a device key: the session is bound from the start — the long cookie alone opens nothing', async () => {
+  const { userId } = await signUp('+79990000060');
+  const dev = await deviceOf();
+  const code = await call('/auth/code', { login: '+79990000060' });
+  const r = await cookiesOf('/auth/signin', { attemptId: code.json.attemptId, code: code.json.devCode, device: await dev.proof() });
+  expect(r.json).toEqual({ userId });
+  expect(r.access).toMatch(/^relay_access=.+/);
+  const [s] = await sql`select device_key is not null as bound from sessions where user_id = ${userId} order by id desc limit 1`;
+  expect(s.bound).toBe(true);
+  expect((await call('/me', undefined, r.session, 'GET')).status).toBe(401);   // украденный долгий cookie — ничего
+  expect((await call('/me', undefined, `${r.session}; ${r.access}`, 'GET')).status).toBe(200);
+});
+
+test('a bad device proof refuses the sign-in before the code is checked — the code stays usable', async () => {
+  await signUp('+79990000061');
+  const dev = await deviceOf();
+  const code = await call('/auth/code', { login: '+79990000061' });
+  const forged = { ...(await dev.proof()), sig: await dev.sign('refresh', 'x') };
+  const bad = await cookiesOf('/auth/signin', { attemptId: code.json.attemptId, code: code.json.devCode, device: forged });
+  expect(bad.status).toBe(400);
+  expect(bad.json.code).toBe('device_invalid');
+  const ok = await cookiesOf('/auth/signin', { attemptId: code.json.attemptId, code: code.json.devCode, device: await dev.proof() });
+  expect(ok.status).toBe(200);
+});
+
+test('QR: only the device that created the code can take the login — not whoever saw the QR', async () => {
+  const { userId, cookie } = await signUp('+79990000062');
+  const owner = await deviceOf(), peeker = await deviceOf();
+  const qr = await call('/auth/qr', { device: await owner.proof() });
+  expect((await call('/auth/qr/accept', { token: qr.json.token }, cookie)).json).toEqual({ ok: true });
+  const stolen = await cookiesOf('/auth/qr/poll', { token: qr.json.token, device: await peeker.proof() });
+  expect(stolen.session).toBeNull();
+  expect(stolen.json.status).toBe('expired');
+  const mine = await cookiesOf('/auth/qr/poll', { token: qr.json.token, device: await owner.proof() });
+  expect(mine.json).toEqual({ userId });
+  expect(mine.access).toMatch(/^relay_access=.+/);
+});
+
+test('passkey: the challenge carries the device key — finishing it with another key is refused', async () => {
+  const { userId, cookie } = await signUp('+79990000063');
+  const auth = await authenticator();
+  const reg = (await call('/settings/passkeys/options', {}, cookie)).json;
+  await call('/settings/passkeys', { id: reg.id, response: await auth.create(reg.options.challenge) }, cookie);
+  const mine = await deviceOf(), other = await deviceOf();
+  const opt = (await call('/auth/passkey/options', { device: await mine.proof() })).json;
+  const swapped = await cookiesOf('/auth/passkey/finish', { id: opt.id, response: await auth.get(opt.options.challenge), device: await other.proof() });
+  expect(swapped.json.code).toBe('device_invalid');
+  const opt2 = (await call('/auth/passkey/options', { device: await mine.proof() })).json;
+  const ok = await cookiesOf('/auth/passkey/finish', { id: opt2.id, response: await auth.get(opt2.options.challenge), device: await mine.proof() });
+  expect(ok.json).toEqual({ userId });
+  expect(ok.access).toMatch(/^relay_access=.+/);
+});

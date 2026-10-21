@@ -1,6 +1,7 @@
 import type { Server } from 'bun';
-import { createSession, sessionCookie } from './auth';
-import { clearAccessCookie } from './deviceAuth';
+import { createSession, hashToken, sessionCookie } from './auth';
+import { accessCookie, clearAccessCookie, deviceProof, issueAccess, sameKey } from './deviceAuth';
+import { DomainError } from './domain/errors';
 import { sql } from './db';
 import { clientIp, parseDevice } from './device';
 import { devOutbox } from './domain/devOutbox';
@@ -33,16 +34,24 @@ export function signInRequestOk(req: Request): boolean {
 
 const body = async (req: Request) => ((await req.json().catch(() => null)) ?? {}) as Record<string, unknown>;
 
-/** Шаг входа → ответ: сеанс (cookie) или следующий шаг (пароль, регистрация). */
-async function reply(step: LoginStep, req: Request, server: Server): Promise<Response> {
+/**
+ * Шаг входа → ответ: сеанс (cookie) или следующий шаг (пароль, регистрация).
+ * device — ключ устройства (deviceProof): сеанс создаётся привязанным к нему и сразу с коротким доступом — долгий
+ * cookie без ключа ничего не открывает уже с первого запроса. Без ключа (старый клиент) — как раньше: доступ
+ * прежнего сеанса этого браузера сбрасываем, иначе он ещё до 10 минут перебивал бы новый вход.
+ */
+async function reply(step: LoginStep, req: Request, server: Server, device: Uint8Array | null = null): Promise<Response> {
   if (!('session' in step)) return Response.json(step);
   const { userId, confirmed } = step.session;
-  const token = await createSession(userId, { req, server }, { confirmed });
+  const token = await createSession(userId, { req, server }, { confirmed, deviceKey: device });
   // «Новый вход» в служебный чат и sessionsChanged (плашка «Это вы?» для неподтверждённых) — для любого входа, кроме регистрации
   if (!step.session.fresh) await announceLogin(userId, token);
-  // короткий доступ прежнего сеанса этого браузера (deviceAuth.ts) действовал бы ещё до 10 минут и перебивал новый вход
   const h = new Headers();
-  h.append('set-cookie', sessionCookie(token)); h.append('set-cookie', clearAccessCookie());
+  h.append('set-cookie', sessionCookie(token));
+  if (device) {
+    const [s] = await sql`select id from sessions where token_hash = ${hashToken(token)}`;
+    h.append('set-cookie', accessCookie(await issueAccess(Number(s.id))));
+  } else h.append('set-cookie', clearAccessCookie());
   return Response.json({ userId }, { headers: h });
 }
 
@@ -60,39 +69,53 @@ export async function publicAuthRoute(req: Request, url: URL, server: Server): P
     return Response.json(await requestCode(login, clientIp(req, server)));
   }
   if (post && p === '/auth/signin') {
-    const { attemptId, code } = await body(req);
+    const { attemptId, code, device } = await body(req);
     if (typeof attemptId !== 'string' || typeof code !== 'string') return Response.json({ code: 'bad_frame' }, { status: 400 });
+    const key = await deviceProof(device);   // до проверки кода: негодный ключ не сжигает попытку
     const r = await signIn(attemptId, code);
     // вход по коду — сеанс неподтверждённый («Это вы?» на других устройствах)
-    return reply('signupPhone' in r ? await startSignup(r.signupPhone) : await afterFirstFactor({ userId: r.userId, confirmed: false }), req, server);
+    return reply('signupPhone' in r ? await startSignup(r.signupPhone) : await afterFirstFactor({ userId: r.userId, confirmed: false }), req, server, key);
   }
   if (post && p === '/auth/signup') {
     const b = await body(req);
-    return reply({ session: { ...(await finishSignup(b.pendingId, b.firstName, b.lastName)), fresh: true } }, req, server);
+    const key = await deviceProof(b.device);
+    return reply({ session: { ...(await finishSignup(b.pendingId, b.firstName, b.lastName)), fresh: true } }, req, server, key);
   }
   if (post && p === '/auth/password/challenge') return Response.json(await pendingChallenge((await body(req)).pendingId));
   if (post && p === '/auth/password/check') {
     const b = await body(req);
-    return reply({ session: await checkPending(b.pendingId, b) }, req, server);
+    const key = await deviceProof(b.device);
+    return reply({ session: await checkPending(b.pendingId, b) }, req, server, key);
   }
   if (post && p === '/auth/password/recover') return Response.json(await startRecovery((await body(req)).pendingId));
   if (post && p === '/auth/password/recover/check') {
     const b = await body(req);
-    return reply({ session: await finishRecovery(b.pendingId, b.code) }, req, server);
+    const key = await deviceProof(b.device);
+    return reply({ session: await finishRecovery(b.pendingId, b.code) }, req, server, key);
   }
 
-  if (post && p === '/auth/qr') return Response.json(await createQr(parseDevice(req.headers.get('user-agent')), clientIp(req, server)));
+  // QR: ключ нового устройства записан при создании кода — забрать вход опросом может только оно (подпись этим ключом),
+  // а не тот, кто подсмотрел или сфотографировал QR
+  if (post && p === '/auth/qr') {
+    const key = await deviceProof((await body(req)).device);
+    return Response.json(await createQr(parseDevice(req.headers.get('user-agent')), clientIp(req, server), key));
+  }
   if (post && p === '/auth/qr/poll') {
-    const r = await pollQr((await body(req)).token);
+    const b = await body(req);
+    const key = await deviceProof(b.device);
+    const r = await pollQr(b.token, key);
     if (typeof r === 'string') return Response.json({ status: r });
-    return reply(await afterFirstFactor({ userId: r.userId, confirmed: true }), req, server);   // впустило вошедшее устройство
+    return reply(await afterFirstFactor({ userId: r.userId, confirmed: true }), req, server, key);   // впустило вошедшее устройство
   }
 
-  if (post && p === '/auth/passkey/options') return Response.json(await loginOptions(req));
+  // паскей: ключ устройства записан вместе с вызовом — подпись паскея над этим вызовом впускает именно это устройство
+  if (post && p === '/auth/passkey/options') return Response.json(await loginOptions(req, await deviceProof((await body(req)).device)));
   if (post && p === '/auth/passkey/finish') {
     const b = await body(req);
-    const { userId } = await finishLogin(req, b.id, b.response);
-    return reply(await afterFirstFactor({ userId, confirmed: true }), req, server);
+    const key = await deviceProof(b.device);
+    const { userId, deviceKey } = await finishLogin(req, b.id, b.response);
+    if (deviceKey && !sameKey(deviceKey, key)) throw new DomainError('device_invalid');   // вызов выдан другому устройству
+    return reply(await afterFirstFactor({ userId, confirmed: true }), req, server, key);
   }
   return null;
 }
