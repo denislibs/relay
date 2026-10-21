@@ -67,3 +67,25 @@ test('master key change: the worker rewraps through the service, which alone kno
     expect((await getHistory(b, chat, null, 10)).messages[0].body).toBe('до смены');
   } finally { after.stop(true); }
 });
+
+test('audit log is a keyed hash chain: it continues across restarts; an edit, a removal or a reorder is found', async () => {
+  const { createAuditChain, verifyAuditLog } = await import('../src/auditLog');
+  const { mkdtempSync, readFileSync, writeFileSync } = await import('node:fs');
+  const file = mkdtempSync('/tmp/audit-') + '/audit.log';
+  const key = Buffer.alloc(32, 7), out: string[] = [];
+  const a = createAuditChain({ key, file, sink: (l) => out.push(l) });
+  a.append({ client: 'server', op: 'unwrap' });
+  a.append({ client: 'worker', op: 'unwrap' });
+  const b = createAuditChain({ key, file, sink: (l) => out.push(l) });   // перезапуск — продолжает цепочку
+  b.append({ client: 'server', op: 'wrap' });
+  expect(b.head().seq).toBe(3);
+  expect(out).toHaveLength(3);
+  const good = readFileSync(file, 'utf8');
+  expect(verifyAuditLog(good, key)).toEqual({ ok: true, count: 3 });
+  const lines = good.trimEnd().split('\n');
+  expect(verifyAuditLog(lines[0] + '\n' + lines[2], key)).toMatchObject({ ok: false, line: 2 });                        // удалена запись
+  expect(verifyAuditLog([lines[1], lines[0], lines[2]].join('\n'), key)).toMatchObject({ ok: false });                 // переставлены
+  expect(verifyAuditLog(good.replace('"op":"wrap"', '"op":"rewrap"'), key)).toMatchObject({ ok: false, line: 3, reason: expect.stringContaining('mac') });   // правка
+  expect(verifyAuditLog(good, Buffer.alloc(32, 8))).toMatchObject({ ok: false, line: 1 });                              // чужой ключ
+  writeFileSync(file, '');
+});

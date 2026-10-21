@@ -44,7 +44,12 @@ services:
       KEY_SERVICE_PORT: "7800"
       KEY_SERVICE_TOKENS: server:${KEY_TOKEN_SERVER:?set KEY_TOKEN_SERVER},worker:${KEY_TOKEN_WORKER:?set KEY_TOKEN_WORKER}
       KEY_SERVICE_UNWRAP_PER_MIN: "6000"
+      # журнал аудита — цепочка с HMAC (auditLog.ts): ключ — только здесь и у того, кто проверяет журнал
+      KEY_SERVICE_AUDIT_KEY: ${KEY_SERVICE_AUDIT_KEY:?set KEY_SERVICE_AUDIT_KEY (32 bytes, base64)}
+      KEY_SERVICE_AUDIT_FILE: /var/log/relay-keys/audit.log
       NODE_ENV: production
+    volumes:
+      - keys-audit:/var/log/relay-keys
     networks: [keys, kms-egress]
     restart: unless-stopped
 
@@ -71,3 +76,6 @@ services:
       NODE_ENV: production
     networks: [default, search, keys]
     depends_on: [keys]
+
+volumes:
+  keys-audit: {}

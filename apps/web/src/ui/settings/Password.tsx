@@ -6,6 +6,7 @@ import { showToast } from '../../settingsData';
 
 const ERR: Record<string, string> = {
   password_invalid: 'Неверный текущий пароль', email_invalid: 'Проверьте адрес почты', offline: 'Нет соединения', flood: 'Слишком много попыток',
+  fresh_session: 'С нового входа это можно сделать через сутки или после подтверждения на другом устройстве',
 };
 
 /**

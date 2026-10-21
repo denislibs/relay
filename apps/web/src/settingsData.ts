@@ -15,7 +15,7 @@ import { isSessionOp, sessionConfirmKey } from '@relay/sync-engine/src/sessions'
 import { sessionsAfterOps } from './banners';
 import { reducedMotion } from '@relay/ui';
 import { engineConfig } from './engineConfig';
-import { getGlobal, setGlobal, type AccountSettings, type DevSimFlags, type Me } from './global';
+import { getGlobal, setGlobal, THIS_SESSION_KEY, type AccountSettings, type DevSimFlags, type Me } from './global';
 import { dropSubscription } from './notify';
 import { asset } from './assets';
 import { wantPeople } from './people';
@@ -53,7 +53,7 @@ const FAIL_TEXT: Record<string, string> = {
   name_invalid: 'Укажите имя',
   note_too_long: 'Слишком длинная заметка',
   not_found: 'Пользователь не найден в Relay',
-  fresh_session: 'Сначала подтвердите этот вход на другом устройстве',
+  fresh_session: 'С нового входа это можно сделать через сутки или после подтверждения на другом устройстве',
   folder_title: 'Укажите название папки (до 16 символов)',
   folder_empty: 'Добавьте в папку хотя бы один чат или тип чатов',
   folder_too_many_chats: 'В папке может быть не больше 200 чатов',
@@ -183,7 +183,12 @@ export function loadSessions(force = false): Promise<void> {
   return call<{ sessions: SessionInfo[] } | { offline: true }>({ type: 'listSessions' })
     .then((r) => {
       if (gen !== sessionsGen) return;
-      if ('sessions' in r) setGlobal({ sessions: r.sessions, sessionsOffline: false }); else setGlobal({ sessionsOffline: true });
+      if ('sessions' in r) {
+        const cur = r.sessions.find((s) => s.current);
+        const thisSession = cur ? { id: cur.id, limited: !!cur.limited, unconfirmed: cur.unconfirmed } : null;
+        try { if (thisSession) localStorage.setItem(THIS_SESSION_KEY, JSON.stringify(thisSession)); } catch { /* приватный режим */ }
+        setGlobal({ sessions: r.sessions, sessionsOffline: false, thisSession });
+      } else setGlobal({ sessionsOffline: true });
     })
     .catch(() => { if (gen === sessionsGen) setGlobal({ sessionsOffline: true }); });
 }
@@ -206,7 +211,7 @@ function onTerminated(reason: 'logout' | 'terminated'): void {
   terminating = true;
   // сервер удалил подписку вместе с сеансом; отписываем и браузер (best effort, не ждём)
   void dropSubscription().catch(() => {});
-  try { localStorage.removeItem(ME_KEY); } catch { /* приватный режим */ }
+  try { localStorage.removeItem(ME_KEY); localStorage.removeItem(THIS_SESSION_KEY); } catch { /* приватный режим */ }
   void releaseMediaCache();
   // IndexedDB стирает движок (он же её и держит); здесь — плавный уход на экран входа и тост
   const root = document.getElementById('app');

@@ -78,6 +78,8 @@ export interface GlobalState {
   blocked: Item[];          // подписка blocked движка: чёрный список (с неподтверждёнными правками)
   blockedLoaded: boolean;   // список с сервера уже был
   sessions: SessionInfo[] | null;   // активные сеансы с сервера (null — ещё не знаем); вид — sessionsView(sessions, opsKeys)
+  /** этот сеанс из прошлой загрузки списка (localStorage): кнопки «Нового входа» решаются на первом кадре, а не после запроса */
+  thisSession: ThisSession | null;
   sessionsOffline: boolean;         // последний запрос списка не дошёл (нет сети)
   opsKeys: string[];                // ключи операций настроек в очереди: оптимистичный вид сеансов
   people: Record<number, Person>;   // люди по id (подписка people движка, см. people.ts); нет ключа — ещё не знаем
@@ -103,6 +105,12 @@ export interface ForwardPick { fromChatId: number; ids: number[]; preview: Forwa
 export interface ForwardPreview { senders: { id: number; name: string }[]; text: string; count: number; captions: boolean }
 /** Пересылка в поле ввода: с опциями «скрыть отправителя / подписи». */
 export interface ForwardDraft extends ForwardPick { hideSender: boolean; hideCaption: boolean }
+export type ThisSession = { id: number; limited: boolean; unconfirmed: boolean };
+export const THIS_SESSION_KEY = 'relay.thisSession';
+function loadThisSession(): ThisSession | null {
+  try { const v = JSON.parse(localStorage.getItem(THIS_SESSION_KEY) ?? 'null'); return v && typeof v.id === 'number' ? v as ThisSession : null; } catch { return null; }
+}
+
 export interface AccountSettings { notify: Record<'direct' | 'group', { muted: boolean; preview: boolean }>; sessionsTtlDays: number; folders: ChatFolder[]; privacy: PrivacyRules; loaded: boolean; pending: boolean }
 export const defaultAccountSettings = (): AccountSettings => ({ notify: { direct: { muted: false, preview: true }, group: { muted: false, preview: true } }, sessionsTtlDays: 180, folders: [], privacy: defaultPrivacy(), loaded: false, pending: false });
 
@@ -157,6 +165,7 @@ let state: GlobalState = {
   blocked: [],
   blockedLoaded: false,
   sessions: null,
+  thisSession: loadThisSession(),
   sessionsOffline: false,
   opsKeys: [],
   people: {},

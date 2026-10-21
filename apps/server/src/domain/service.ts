@@ -59,11 +59,31 @@ export async function postService(tx: Tx, userId: number, msg: { type: ServiceTy
  * «Новый вход»: устройство, IP и время, совет, что делать, если это не вы; заголовок жирным.
  * sessionId — новый сеанс: под сообщением кнопки «Это я», «Завершить этот сеанс», «Завершить все остальные сеансы».
  */
-export function newLoginMessage(device: string, ip: string | null, at: Date, sessionId?: number): { body: string; entities: Entity[]; buttons?: MessageButton[][] } {
+/** Как вошли — для текста «Нового входа». */
+export const LOGIN_METHOD_TEXT: Record<string, string> = {
+  code: 'код из Relay', password: 'код и облачный пароль', recovery: 'восстановление через почту', signup: 'регистрация',
+  passkey: 'паскей', qr: 'QR-код с другого устройства', dev: 'вход для разработки',
+};
+
+export function newLoginMessage(device: string, ip: string | null, at: Date, sessionId?: number,
+  extra: { place?: string | null; unusual?: boolean; method?: string | null; usual?: string[] } = {}): { body: string; entities: Entity[]; buttons?: MessageButton[][] } {
   const when = at.toLocaleString('ru-RU', { day: 'numeric', month: 'long', hour: '2-digit', minute: '2-digit', timeZone: 'UTC' }) + ' UTC';
   const title = 'Новый вход в аккаунт';
-  const body = `${title}\n\nУстройство: ${device}\nIP: ${ip ?? 'неизвестен'}\nВремя: ${when}\n\nЕсли это были не вы, завершите этот сеанс — кнопкой ниже или в Настройках → Активные сеансы.`;
-  return { body, entities: [{ type: 'bold', offset: 0, length: title.length }], ...(sessionId != null ? { buttons: loginButtons(sessionId) } : {}) };
+  const lines = [`Устройство: ${device}`];
+  if (extra.place) lines.push(`Место: ${extra.place}`);
+  lines.push(`IP: ${ip ?? 'неизвестен'}`, `Время: ${when}`);
+  if (extra.method && LOGIN_METHOD_TEXT[extra.method]) lines.push(`Способ входа: ${LOGIN_METHOD_TEXT[extra.method]}`);
+  const entities: Entity[] = [{ type: 'bold', offset: 0, length: title.length }];
+  let body = `${title}\n\n${lines.join('\n')}`;
+  if (extra.unusual) {
+    // страны входа нет ни у одного другого сеанса — выделяем, это главный повод насторожиться
+    const warn = `Необычное место: раньше вы входили только из ${(extra.usual ?? []).join(', ') || 'других мест'}.`;
+    body += '\n\n';
+    entities.push({ type: 'bold', offset: body.length, length: warn.length });
+    body += warn;
+  }
+  body += '\n\nЕсли это были не вы, завершите этот сеанс — кнопкой ниже или в Настройках → Активные сеансы.';
+  return { body, entities, ...(sessionId != null ? { buttons: loginButtons(sessionId) } : {}) };
 }
 
 /** Кнопки «Нового входа»: data — login:<действие>:<id нового сеанса>. */

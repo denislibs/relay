@@ -11,6 +11,7 @@
       "dependencies": {
         "@relay/protocol": "workspace:*",
         "@simplewebauthn/server": "14.0.3",
+        "mmdb-lib": "2.1.1",
         "postgres": "3.4.9",
       },
     },
@@ -471,6 +472,8 @@
     "mediabunny": ["mediabunny@1.61.3", "", { "dependencies": { "@types/dom-mediacapture-transform": "^0.1.11", "@types/dom-webcodecs": "0.1.13" } }, "sha512-kUqLKVXQVwHR62GkOJxYosAmXERJbqnXBgJDTtRlxHEYviVkMg/Evhl9XN6kedqS5LP1tV4kFKyzY/V4a4ofow=="],
 
     "min-indent": ["min-indent@1.0.1", "", {}, "sha512-I9jwMn07Sy/IwOj3zVkVik2JTvgpaykDZEigL6Rx6N9LbMywwUSMtxET+7lVoDLLd3O3IXwJwvuuns8UB/HeAg=="],
+
+    "mmdb-lib": ["mmdb-lib@2.1.1", "", {}, "sha512-yx8H/1H5AfnufiLnzzPqPf4yr/dKU9IFT1rPVwSkrKWHsQEeVVd6+X+L0nUbXhlEFTu3y/7hu38CFmEVgzvyeg=="],
 
     "nanoid": ["nanoid@3.3.20", "", { "bin": { "nanoid": "bin/nanoid.cjs" } }, "sha512-uKdg2G3GNCKQn9byYOpxbGqrT2fGO5KRt5J/8b3pok8rT6qxGWF6hxMyJiEYtAf+FVyYuD9hRaDqX5uPFYJ4ZQ=="],
 

@@ -32,7 +32,7 @@ test('client talks to Meilisearch with the master key; errors carry status and c
   await waitTask((await meili<{ taskUid: number }>(`/indexes/${name}`, { method: 'DELETE' })).taskUid);
 });
 
-test('sync indexes the current state: edit replaces, delete removes; word prefix and typos match; newest first; chat filter', async () => {
+test('sync indexes the current state: edit replaces, delete removes; word prefix matches, typos do not (tokens); newest first; chat filter', async () => {
   const a = await makeUser('a'), b = await makeUser('b'), c = await makeUser('c');
   const ab = await makeChat([a, b]), bc = await makeChat([b, c]);
   const m1 = await say(a, ab, 'Встреча в пятницу');
@@ -41,8 +41,8 @@ test('sync indexes the current state: edit replaces, delete removes; word prefix
   for (const m of [m1, m2, m3]) await syncMessage(m.id);
 
   expect(await searchIds('встр', [ab], { limit: 10 })).toEqual([m2.id, m1.id]);
-  // одна опечатка (перестановка) в слове из 7 букв прощается; «встречу» — уже две, не находится
-  expect(await searchIds('встерча', [ab, bc], { limit: 10 })).toEqual([m3.id, m1.id]);
+  // в индексе HMAC-токены: у токена нет «соседей», поэтому опечатка не прощается (цена того, что текста в индексе нет)
+  expect(await searchIds('встерча', [ab, bc], { limit: 10 })).toEqual([]);
   expect(await searchIds('встреч', [ab], { limit: 1 })).toEqual([m2.id, m1.id]);               // limit + 1 — признак «есть ещё»
   expect(await searchIds('встреч', [ab], { beforeId: m2.id, limit: 10 })).toEqual([m1.id]);
   expect(await searchIds('встреч', [], { limit: 10 })).toEqual([]);
@@ -162,7 +162,11 @@ test('sync before the index exists: removal is a no-op, an upsert creates the in
   const m2 = await say(a, ab, 'встреча снова');
   await syncMessage(m2.id);                                  // индекс создаётся сам, первичный ключ — id
   // настроек у него нет, искать по нему нельзя — до перестройки поиск всё равно идёт по Postgres
-  expect(await meili(`/indexes/${liveIndex()}/documents/${m2.id}`)).toMatchObject({ id: m2.id, chatId: ab, body: 'встреча снова' });
+  const doc = await meili<Record<string, unknown>>(`/indexes/${liveIndex()}/documents/${m2.id}`);
+  expect(doc).toMatchObject({ id: m2.id, chatId: ab });
+  // в индексе — только токены: ни слова текста
+  expect(JSON.stringify(doc)).not.toContain('встреча');
+  expect(String(doc.b)).toMatch(/^[a-p]{18}( [a-p]{18})*$/);
 });
 
 const meta = async (k: string) => (await sql`select v from server_meta where k = ${k}`)[0]?.v as string | undefined;
@@ -214,7 +218,7 @@ test('a build left by an older run without a cursor, or a cursor without its ind
   const m = await say(a, ab, 'встреча');
   const next = liveIndex() + '_next';
   await ensureIndex(next);
-  await meili(`/indexes/${next}/documents?primaryKey=id`, { method: 'POST', body: [{ id: 999_999, chatId: ab, body: 'мусор', attachmentName: null }] }).then((t: any) => waitTask(t.taskUid));
+  await meili(`/indexes/${next}/documents?primaryKey=id`, { method: 'POST', body: [{ id: 999_999, chatId: ab, b: 'мусор', a: '' }] }).then((t: any) => waitTask(t.taskUid));
   await sql`insert into server_meta (k, v) values ('search_building', ${next})`;   // курсора нет — прежняя версия оборвалась
   expect(await reindexAll()).toBe(1);
   expect(await docIds(liveIndex())).toEqual([m.id]);
@@ -234,4 +238,14 @@ test('search.reindex job runs in short steps and requeues itself until the swap'
   expect(await searchReady()).toBe(true);
   expect(await docCount(liveIndex())).toBe(5);
   expect((await sql`select count(*)::int as n from jobs`)[0].n).toBe(0);
+});
+
+test('the index holds HMAC tokens, not text: words and their beginnings are found, the text is nowhere in Meilisearch', async () => {
+  const { indexTokens, queryTokens, words } = await import('../src/search/tokens');
+  expect(words('Привет, Ёжик! Встреча в 10:30')).toEqual(['привет', 'ежик', 'встреча', 'в', '10', '30']);
+  const doc = await indexTokens('Встреча завтра');
+  // начало слова и слово целиком дают токены, которые есть в документе; чужое слово — нет
+  for (const q of ['встр', 'встреча', 'ЗАВТРА']) expect(doc.split(' ')).toContain(await queryTokens(q));
+  expect(doc.split(' ')).not.toContain(await queryTokens('вечер'));
+  expect(doc).not.toMatch(/встр|завт/);
 });

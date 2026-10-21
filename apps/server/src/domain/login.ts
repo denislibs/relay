@@ -2,6 +2,8 @@ import { createHash, randomInt } from 'node:crypto';
 import { sql, type Tx } from '../db';
 import { DomainError } from './errors';
 import { postService, systemUserId } from './service';
+import { updateContent } from './messageContent';
+import { fanOut } from './journal';
 
 export const CODE_LENGTH = 5;
 const CODE_TTL_MIN = 5, MAX_TRIES = 5, MAX_PER_HOUR = 5;
@@ -21,6 +23,35 @@ export function codeMessage(code: string): { body: string; entities: { type: 'co
   const head = 'Код для входа в Relay: ';
   const body = `${head}${code}\n\nНикому не сообщайте этот код, даже если его просят от имени Relay. Он нужен только для входа в ваш аккаунт.\n\nЕсли вы не входили, ничего не делайте — без кода войти нельзя.`;
   return { body, entities: [{ type: 'code', offset: head.length, length: code.length }, { type: 'spoiler', offset: head.length, length: code.length }] };
+}
+
+export const CODE_USED = 'Код использован для входа.';
+export const CODE_REPLACED = 'Код заменён новым.';
+
+/**
+ * Скрыть цифры в сообщениях с кодами входа владельца (login_attempts.message_id): код уходит из текста, вместо него —
+ * «•••••» и итог курсивом. Всем устройствам — правкой (messageMarkup), как итоги под «Новым входом».
+ */
+export async function hideLoginCodes(tx: Tx, userId: number, note: string): Promise<void> {
+  // returning после update отдал бы уже null — прежнее значение берём из подзапроса
+  const rows = await tx`
+    update login_attempts a set message_id = null
+      from (select id, message_id from login_attempts where user_id = ${userId} and message_id is not null for update) old
+     where a.id = old.id
+    returning old.message_id`;
+  if (!rows.length) return;
+  const [svc] = await tx`select chat_id from service_chats where user_id = ${userId}`;
+  if (!svc) return;
+  const chatId = Number(svc.chat_id);
+  for (const r of rows) {
+    const id = Number(r.message_id);
+    const head = 'Код для входа в Relay: ';
+    const body = `${head}${'•'.repeat(CODE_LENGTH)}\n\n${note}`;
+    const entities = [{ type: 'italic' as const, offset: body.length - note.length, length: note.length }];
+    const row = await updateContent(tx, chatId, id, (c, m) => (m.deleted ? false : { body, entities }));
+    if (!row) continue;
+    await fanOut(tx, [userId], { type: 'messageMarkup', chatId, id, body, entities, buttons: null });
+  }
 }
 
 /** Нормализованный логин — ключ лимитов: телефон как есть (после trim), имя без «@» и в нижнем регистре. */
@@ -78,7 +109,12 @@ export async function requestCode(login: string, ip: string | null = null): Prom
     // некому получить код — реальный хэш хранится только в dev (devCode), иначе его мог бы лишь угадать злоумышленник
     const stored = live || dev ? hash(code) : hash(crypto.randomUUID());
     await tx`insert into login_attempts (id, user_id, code_hash, expires_at, login, ip) values (${attemptId}, ${userId}, ${stored}, ${expires}, ${key}, ${ip})`;
-    if (live) await postService(tx, userId, { type: 'login_code', ...codeMessage(code) });
+    if (live) {
+      // прежние коды в чате больше не показываем: новая попытка — старые цифры скрыты («Код заменён новым»)
+      await hideLoginCodes(tx, userId, CODE_REPLACED);
+      const m = await postService(tx, userId, { type: 'login_code', ...codeMessage(code) });
+      await tx`update login_attempts set message_id = ${m.id} where id = ${attemptId}`;
+    }
   });
   return { attemptId, via: 'app', length: CODE_LENGTH, ...(dev && code ? { devCode: code } : {}) };
 }
@@ -105,6 +141,8 @@ export async function signIn(attemptId: string, code: string): Promise<{ userId:
       return 'code_invalid';
     }
     await tx`update login_attempts set dead_at = now() where id = ${attemptId}`;
+    // код сделал своё — в чате его цифр больше нет (новое устройство не прочтёт старые коды из истории)
+    if (Number(a.user_id) !== sys) await hideLoginCodes(tx, Number(a.user_id), CODE_USED);
     // попытка на системного пользователя с верным кодом — только регистрация нового номера (см. requestCode)
     if (Number(a.user_id) === sys) return /^\+[0-9]{7,15}$/.test(a.login as string) ? { signupPhone: a.login as string } : 'code_invalid';
     return { userId: Number(a.user_id) };

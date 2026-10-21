@@ -239,7 +239,10 @@ export interface SettingsSnapshot extends UserSettings { privacy?: PrivacyRules;
 export const SESSION_TTLS: readonly number[] = [7, 30, 90, 180, 365];
 
 /** Сеанс (GET /sessions): устройство — грубо по User-Agent («Chrome 141, macOS»), IP входа; current — этот запрос. */
-export interface SessionInfo { id: Id; device: string; ip: string | null; createdAt: string; lastActiveAt: string; current: boolean; online: boolean; unconfirmed: boolean }
+/** limited — новый сеанс (не подтверждён или первые сутки): не завершает другие, не меняет пароль и паскеи.
+ *  place — «Москва, Россия» по IP; method — как вошли. */
+export interface SessionInfo { id: Id; device: string; ip: string | null; createdAt: string; lastActiveAt: string; current: boolean; online: boolean; unconfirmed: boolean;
+  limited?: boolean; place?: string | null; method?: 'code' | 'password' | 'recovery' | 'signup' | 'passkey' | 'qr' | 'dev' | null }
 
 /** Правила конфиденциальности. phoneDiscovery — «Кто найдёт меня по номеру» (только everyone | contacts). */
 export type PrivacyKey = 'phone' | 'phoneDiscovery' | 'lastSeen' | 'bio' | 'birthday';

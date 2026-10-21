@@ -37,8 +37,14 @@ function deviceLook(device: string): { icon: string; tile: Tile } {
 }
 
 const NEW_LOGIN = <span class="app-session-new">Новый вход — не подтверждён</span>;
-/** Неподтверждённый сеанс не может завершать другие (сервер ответит fresh_session) — не предлагаем. */
-const LOCKED_HINT = 'Доступно после подтверждения входа на другом устройстве';
+/** Новый сеанс (не подтверждён или первые сутки) не может завершать другие (сервер ответит fresh_session) — не предлагаем. */
+const LOCKED_HINT = 'Доступно через сутки после входа или после подтверждения на другом устройстве';
+const METHOD: Record<string, string> = {
+  code: 'Код из Relay', password: 'Код и облачный пароль', recovery: 'Восстановление через почту', signup: 'Регистрация',
+  passkey: 'Паскей', qr: 'QR-код с другого устройства', dev: 'Вход для разработки',
+};
+/** Подпись строки: место (или IP, если места нет) — как в Telegram «Москва, Россия». */
+const where = (s: SessionInfo) => s.place ?? s.ip ?? '';
 
 /** «Активные сеансы»: это устройство, другие сеансы (меню строки и детали), автозавершение неактивных. */
 export function Sessions() {
@@ -69,7 +75,7 @@ export function Sessions() {
   const skeleton = useMinVisible(waiting, { delay: 150, min: 600 });
   const current = list?.find((s) => s.current) ?? null;
   const others = list?.filter((s) => !s.current) ?? [];
-  const locked = !!current?.unconfirmed;
+  const locked = !!(current?.unconfirmed || current?.limited);
   // подсказку, раз показав, не выдёргиваем: после подтверждения она сворачивается по высоте — строка не прыгает
   const lockSeen = useRef(false);
   if (locked) lockSeen.current = true;
@@ -101,7 +107,7 @@ export function Sessions() {
             <div>
               {current ? (
                 <Section title="Это устройство">
-                  <InfoRow {...deviceLook(current.device)} title={current.device} subtitle={current.unconfirmed ? NEW_LOGIN : (current.ip ? current.ip + ' · ' : '') + 'в сети'} onClick={() => setDetails(current)} />
+                  <InfoRow {...deviceLook(current.device)} title={current.device} subtitle={current.unconfirmed ? NEW_LOGIN : (where(current) ? where(current) + ' · ' : '') + 'в сети'} onClick={() => setDetails(current)} />
                   {allRow.map((r) => (
                     <div key={r.key} class={'app-collapse' + (r.leaving ? ' app-collapse-out' : '')}>
                       <div class={'app-row-lock' + (locked ? ' app-row-off' : '')} aria-disabled={locked ? 'true' : undefined}>
@@ -118,7 +124,7 @@ export function Sessions() {
                       <div key={key} role="listitem" class={'app-collapse' + (leaving ? ' app-collapse-out' : '')}
                         onContextMenu={(e) => { e.preventDefault(); if (!leaving && !locked) setMenu({ x: e.clientX, y: e.clientY, id: s.id }); }}>
                         <div>
-                          <InfoRow {...deviceLook(s.device)} title={s.device} subtitle={s.unconfirmed ? NEW_LOGIN : s.ip ?? ''} value={s.online ? 'в сети' : sessionTime(s.lastActiveAt)} onClick={() => { if (!leaving) setDetails(s); }} />
+                          <InfoRow {...deviceLook(s.device)} title={s.device} subtitle={s.unconfirmed ? NEW_LOGIN : where(s)} value={s.online ? 'в сети' : sessionTime(s.lastActiveAt)} onClick={() => { if (!leaving) setDetails(s); }} />
                         </div>
                       </div>
                     ))}
@@ -143,12 +149,15 @@ export function Sessions() {
         )}>
           <dl class="app-session-info">
             <dt>Устройство</dt><dd>{shown.device}</dd>
+            {shown.place ? <><dt>Место</dt><dd>{shown.place}</dd></> : null}
             <dt>IP</dt><dd>{shown.ip ?? '—'}</dd>
+            {shown.method && METHOD[shown.method] ? <><dt>Способ входа</dt><dd>{METHOD[shown.method]}</dd></> : null}
             <dt>Вход</dt><dd>{fullDateTime(shown.createdAt)}</dd>
             <dt>Последняя активность</dt><dd>{shown.online ? 'в сети' : fullDateTime(shown.lastActiveAt)}</dd>
           </dl>
           {shown.unconfirmed ? <p class="app-session-note">{NEW_LOGIN}</p> : null}
           {locked && !shown.current ? <p class="app-session-note">{LOCKED_HINT}</p> : null}
+          {shown.current && shown.limited && !shown.unconfirmed ? <p class="app-session-note">Новый вход: первые сутки с этого устройства нельзя завершать другие сеансы, менять пароль и паскеи.</p> : null}
         </Modal>
       ) : null}
       {scan ? <QrScanner onClose={() => setScan(false)} /> : null}

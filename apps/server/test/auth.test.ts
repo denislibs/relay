@@ -5,7 +5,7 @@ import { createServer } from '../src/http';
 import { clearOutbox, devOutbox } from '../src/domain/devOutbox';
 import '../src/jobs/kinds';
 import { drainJobs } from '../src/jobs/worker';
-import { resetDb } from './helpers';
+import { opened, resetDb } from './helpers';
 
 process.env.DEV_LOGIN = '1';
 const server = createServer({ port: 0 });
@@ -319,4 +319,81 @@ test('passkey: the challenge carries the device key — finishing it with anothe
   const ok = await cookiesOf('/auth/passkey/finish', { id: opt2.id, response: await auth.get(opt2.options.challenge), device: await mine.proof() });
   expect(ok.json).toEqual({ userId });
   expect(ok.access).toMatch(/^relay_access=.+/);
+});
+
+/* ---------- новый сеанс первые сутки; коды скрываются; место входа ---------- */
+
+test('a new login is limited for a day: no password, passkeys, ending or letting in others; «it is me» lifts it; the first session is free', async () => {
+  const { userId, cookie: first } = await signUp('+79990000070');
+  // первый сеанс аккаунта — без ограничений
+  expect((await call('/settings/passkeys/options', {}, first)).status).toBe(200);
+  // вход паскеем при живом первом сеансе — подтверждён, но первые сутки ограничен
+  const auth = await authenticator();
+  const reg = (await call('/settings/passkeys/options', {}, first)).json;
+  await call('/settings/passkeys', { id: reg.id, response: await auth.create(reg.options.challenge) }, first);
+  const opt = (await call('/auth/passkey/options')).json;
+  const fresh = (await call('/auth/passkey/finish', { id: opt.id, response: await auth.get(opt.options.challenge) })).cookie!;
+  const [s] = await sql`select id, restricted_until > now() as limited, login_method from sessions where user_id = ${userId} order by id desc limit 1`;
+  expect(s).toMatchObject({ limited: true, login_method: 'passkey' });
+  for (const [path, method] of [['/settings/passkeys/options', 'POST'], ['/settings/password', 'PUT'], ['/settings/password', 'DELETE']] as const) {
+    expect((await call(path, {}, fresh, method)).json.code).toBe('fresh_session');
+  }
+  expect((await call(`/sessions/${(await sql`select min(id) as id from sessions where user_id = ${userId}`)[0].id}`, undefined, fresh, 'DELETE')).json.code).toBe('fresh_session');
+  const qr = await call('/auth/qr', {});
+  expect((await call('/auth/qr/accept', { token: qr.json.token }, fresh)).json.code).toBe('fresh_session');
+  // в списке — ограничение, способ входа
+  const mine = ((await call("/sessions", undefined, fresh, "GET")).json as unknown as { current: boolean }[]).find((x: { current: boolean }) => x.current);
+  expect(mine).toMatchObject({ limited: true, method: 'passkey', place: 'Локальная сеть' });
+  // «Это я» со старого устройства снимает ограничение
+  await call(`/sessions/${s.id}/confirm`, {}, first);
+  expect((await call('/settings/passkeys/options', {}, fresh)).status).toBe(200);
+});
+
+test('login codes leave the chat once used or replaced: digits hidden, a note instead', async () => {
+  const { userId } = await signUp('+79990000071');
+  const text = async () => (await opened(await sql`select m.* from messages m join service_chats s on s.chat_id = m.chat_id where s.user_id = ${userId} and m.service_type = 'login_code' order by m.id`)).map((r) => r.body as string);
+  const a = await call('/auth/code', { login: '+79990000071' });
+  const b = await call('/auth/code', { login: '+79990000071' });
+  let bodies = await text();
+  expect(bodies[0]).toContain('•••••');
+  expect(bodies[0]).toContain('Код заменён новым.');
+  expect(bodies[0]).not.toContain(a.json.devCode);
+  expect(bodies[1]).toContain(b.json.devCode);
+  await call('/auth/signin', { attemptId: b.json.attemptId, code: b.json.devCode });
+  bodies = await text();
+  expect(bodies[1]).not.toContain(b.json.devCode);
+  expect(bodies[1]).toContain('Код использован для входа.');
+});
+
+test('«new login» names the place and the method, and flags a country the account never signed in from', async () => {
+  const { setGeoReader } = await import('../src/geoip');
+  const places: Record<string, { country: { names: { ru: string } }; city: { names: { ru: string } } }> = {
+    '203.0.113.5': { country: { names: { ru: 'Россия' } }, city: { names: { ru: 'Москва' } } },
+    '198.51.100.7': { country: { names: { ru: 'Бразилия' } }, city: { names: { ru: 'Сан-Паулу' } } },
+  };
+  setGeoReader({ get: (ip: string) => places[ip] ?? null } as never);
+  const prev = process.env.TRUST_PROXY;
+  process.env.TRUST_PROXY = '1';
+  try {
+    const login = async (ip: string) => {
+      const code = await call('/auth/code', { login: '+79990000072' });
+      await fetch(base + '/auth/signin', { method: 'POST', headers: { 'content-type': 'application/json', origin: base, 'x-forwarded-for': ip }, body: JSON.stringify({ attemptId: code.json.attemptId, code: code.json.devCode }) });
+    };
+    const { userId, cookie } = await signUp('+79990000072');
+    await sql`update sessions set country = 'Россия', city = 'Москва' where user_id = ${userId}`;
+    await login('203.0.113.5');
+    const last = async () => (await opened(await sql`select m.* from messages m join service_chats s on s.chat_id = m.chat_id where s.user_id = ${userId} and m.service_type = 'new_login' order by m.id desc limit 1`))[0].body as string;
+    let body = await last();
+    expect(body).toContain('Место: Москва, Россия');
+    expect(body).toContain('Способ входа: код из Relay');
+    expect(body).not.toContain('Необычное место');
+    await login('198.51.100.7');
+    body = await last();
+    expect(body).toContain('Место: Сан-Паулу, Бразилия');
+    expect(body).toContain('Необычное место: раньше вы входили только из Россия.');
+    expect(cookie).toBeTruthy();
+  } finally {
+    process.env.TRUST_PROXY = prev;
+    setGeoReader(null);
+  }
 });

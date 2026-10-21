@@ -12,6 +12,7 @@
 // ещё и внутренняя сеть + mTLS (docker-compose.secure.yml). Запуск: bun apps/server/src/keyService.ts
 import { getKms, kmsFor, type Kms } from './crypto/kms';
 import { assertTransportSecure } from './tls';
+import { auditKeyFromEnv, createAuditChain } from './auditLog';
 
 export interface KeyServiceOptions {
   port: number;
@@ -41,7 +42,9 @@ export function createKeyService(o: KeyServiceOptions) {
   const kms = o.kms ?? getKms;
   const byKek = o.kmsFor ?? ((id: string | null) => kmsFor(id));
   const limit = o.unwrapPerMinute ?? 6000;
-  const audit = o.audit ?? ((e) => console.log(JSON.stringify({ at: new Date().toISOString(), ...e })));
+  // по умолчанию — цепочка с HMAC (auditLog.ts): файл KEY_SERVICE_AUDIT_FILE и stdout
+  const chain = o.audit ? null : createAuditChain({ key: auditKeyFromEnv(), file: process.env.KEY_SERVICE_AUDIT_FILE || undefined });
+  const audit = o.audit ?? ((e: Record<string, unknown>) => { chain!.append(e); });
   const windows = new Map<string, { start: number; n: number; alarmed: boolean }>();
 
   /** Счёт развёртываний клиента за минуту; превышение — отказ и одна тревога на окно. */
@@ -113,6 +116,10 @@ if (import.meta.main) {
   assertTransportSecure();
   const tokens = parseTokens();
   if (!tokens.size) throw new Error('KEY_SERVICE_TOKENS is empty: set "server:<token>,worker:<token>"');
-  const s = createKeyService({ port: Number(process.env.KEY_SERVICE_PORT ?? 7800), tokens, unwrapPerMinute: Number(process.env.KEY_SERVICE_UNWRAP_PER_MIN) || undefined });
+  const chain = createAuditChain({ key: auditKeyFromEnv(), file: process.env.KEY_SERVICE_AUDIT_FILE || undefined });
+  const s = createKeyService({ port: Number(process.env.KEY_SERVICE_PORT ?? 7800), tokens, unwrapPerMinute: Number(process.env.KEY_SERVICE_UNWRAP_PER_MIN) || undefined, audit: (e) => { chain.append(e); } });
+  chain.append({ event: 'start', kms: getKms().id });
+  // «жив» раз в минуту: обрезанный хвост журнала виден по разрыву во времени, а голова цепочки — в собранных логах
+  setInterval(() => chain.append({ event: 'heartbeat' }), 60_000).unref();
   console.log(`relay key service on :${s.port} (kms: ${getKms().id}, clients: ${[...tokens.values()].join(', ')})`);
 }

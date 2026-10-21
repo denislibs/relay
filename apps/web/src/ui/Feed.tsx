@@ -312,7 +312,8 @@ const loginSessionOf = (rows: MessageButton[][] | null): number | null => {
  * которые всё равно ответили бы отказом. Пока список сеансов не пришёл — ничего (не показать кнопки-обманки).
  */
 function LoginKeyboard({ rows, onPress }: { rows: MessageButton[][] | null; onPress?: (b: MessageButton) => void }) {
-  const current = useGlobal((g) => g.sessions?.find((s) => s.current) ?? null);
+  // свежий список сеансов, а до него — этот сеанс из прошлой загрузки (localStorage): без позднего появления под лентой
+  const current = useGlobal((g) => g.sessions?.find((s) => s.current) ?? g.thisSession);
   const sid = loginSessionOf(rows);
   if (!rows || sid == null) return <InlineKeyboard rows={rows} onPress={onPress} />;   // вопрос закрыт — клавиатура уходит сама
   if (!current) return null;

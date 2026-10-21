@@ -1,6 +1,7 @@
 import { openRows } from '../domain/messageContent';
 import { sql } from '../db';
 import { indexName, meili, MeiliError, waitTask } from './meili';
+import { indexTokens, queryTokens } from './tokens';
 
 /**
  * Индекс сообщений: только то, по чему ищем, и id чата для фильтра. Прав доступа здесь нет — их проверяет
@@ -8,18 +9,23 @@ import { indexName, meili, MeiliError, waitTask } from './meili';
  * строки messages, поэтому синхронизация идемпотентна и не зависит от порядка задач.
  */
 // 2: вложения ищутся и по тегам трека (название, исполнитель) — смена версии перестраивает индекс
-export const SEARCH_INDEX_VERSION = 2;
+// 3: в индексе не текст, а HMAC-токены слов (search/tokens.ts) — перестройка убирает из Meilisearch открытый текст
+export const SEARCH_INDEX_VERSION = 3;
 export const liveIndex = (): string => indexName('messages');
 
 const SETTINGS = {
-  searchableAttributes: ['body', 'attachmentName', 'attachmentTitle', 'attachmentPerformer'],
+  // b — токены текста, a — токены имени файла и тегов трека (search/tokens.ts)
+  searchableAttributes: ['b', 'a'],
   filterableAttributes: ['chatId', 'id'],
   sortableAttributes: ['id'],
-  // новые сверху, как в Telegram: сортировка раньше релевантности; совпадение по словам и опечаткам остаётся
-  rankingRules: ['sort', 'words', 'typo', 'proximity', 'attribute', 'exactness'],
+  // новые сверху, как в Telegram. Токены — случайные строки: опечаток и «начала токена» у них нет (начало слова —
+  // отдельные токены префиксов), порядок токенов ничего не значит — без typo и proximity
+  rankingRules: ['sort', 'words', 'attribute', 'exactness'],
+  typoTolerance: { enabled: false },
+  prefixSearch: 'disabled',
 };
 
-type Doc = { id: number; chatId: number; body: string; attachmentName: string | null; attachmentTitle: string | null; attachmentPerformer: string | null };
+type Doc = { id: number; chatId: number; b: string; a: string };
 
 export async function ensureIndex(uid: string): Promise<void> {
   try {
@@ -30,12 +36,12 @@ export async function ensureIndex(uid: string): Promise<void> {
   await waitTask((await meili<{ taskUid: number }>(`/indexes/${uid}/settings`, { method: 'PATCH', body: SETTINGS })).taskUid);
 }
 
-function docOf(r: Record<string, unknown>): Doc | null {
+async function docOf(r: Record<string, unknown>): Promise<Doc | null> {
   if (r.deleted || r.service_type === 'login_code') return null;   // удалённые и коды входа не ищутся
   const a = r.attachment as { name?: string; title?: string; performer?: string } | null;
-  const attachmentName = a?.name || null, attachmentTitle = a?.title || null, attachmentPerformer = a?.performer || null;
-  if (!r.body && !attachmentName && !attachmentTitle && !attachmentPerformer) return null;
-  return { id: Number(r.id), chatId: Number(r.chat_id), body: String(r.body ?? ''), attachmentName, attachmentTitle, attachmentPerformer };
+  const b = await indexTokens(r.body as string | null), att = await indexTokens(a?.name, a?.title, a?.performer);
+  if (!b && !att) return null;
+  return { id: Number(r.id), chatId: Number(r.chat_id), b, a: att };
 }
 
 /** Индексы, в которые пишем: живой и, пока идёт перестройка, строящийся. */
@@ -46,8 +52,8 @@ async function targets(): Promise<string[]> {
 
 export async function syncMessage(id: number): Promise<void> {
   const [row] = await sql`select id, chat_id, client_id, body, deleted, service_type, attachment, content from messages where id = ${id}`;
-  if (row) await openRows([row]);   // в индекс — расшифрованный текст (индекс изолирован, см. ARCHITECTURE)
-  const doc = row ? docOf(row) : null;
+  if (row) await openRows([row]);   // текст открываем только чтобы посчитать токены: в индекс уходят токены
+  const doc = row ? await docOf(row) : null;
   for (const uid of await targets()) {
     if (doc) {
       // индекса может ещё не быть (перестройка впереди): Meilisearch создаст его сам, ключ — явно (id и chatId оба «*id»)
@@ -65,11 +71,13 @@ export async function syncMessage(id: number): Promise<void> {
 
 export async function searchIds(q: string, chatIds: number[], opts: { beforeId?: number; limit: number }): Promise<number[]> {
   if (!chatIds.length) return [];
+  const tokens = await queryTokens(q);
+  if (!tokens) return [];
   const filter = [`chatId IN [${chatIds.join(',')}]`];
   if (opts.beforeId) filter.push(`id < ${opts.beforeId}`);
   const res = await meili<{ hits: { id: number }[] }>(`/indexes/${liveIndex()}/search`, {
     method: 'POST',
-    body: { q, filter, sort: ['id:desc'], limit: opts.limit + 1, attributesToRetrieve: ['id'], matchingStrategy: 'all' },
+    body: { q: tokens, filter, sort: ['id:desc'], limit: opts.limit + 1, attributesToRetrieve: ['id'], matchingStrategy: 'all' },
   });
   return res.hits.map((h) => Number(h.id));
 }
@@ -142,7 +150,7 @@ export async function reindexStep(opts: { batch?: number; maxBatches?: number; m
       });
       return { done: true, copied };
     }
-    const docs = rows.map(docOf).filter((d): d is Doc => d !== null);
+    const docs = (await Promise.all(rows.map(docOf))).filter((d): d is Doc => d !== null);
     if (docs.length) await waitTask((await meili<{ taskUid: number }>(`/indexes/${next}/documents?primaryKey=id`, { method: 'POST', body: docs })).taskUid, 120_000);
     after = Number(rows[rows.length - 1].id);
     await setMeta('search_reindex_after', String(after));   // курсор — только после того, как пачка записана

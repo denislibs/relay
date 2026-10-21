@@ -83,6 +83,7 @@ async function boot(): Promise<void> {
 
 // вход завершён (ui/auth): сеанс уже в cookie — узнаём, кто мы, и запускаем приложение без перезагрузки
 window.addEventListener('relay:signed-in', () => {
+  try { localStorage.removeItem('relay.thisSession'); } catch { /* приватный режим */ }   // новый вход — другой сеанс
   void fetch('/me').then(async (res) => {
     if (!res.ok) { location.reload(); return; }
     const me = (await res.json()) as Me;

@@ -1,4 +1,5 @@
 import type { SessionInfo } from '@relay/protocol';
+import { isPrivateIp, placeText } from '../geoip';
 import { sql, type Tx } from '../db';
 import { hashToken } from '../auth';
 import { DomainError } from './errors';
@@ -105,23 +106,30 @@ export async function touchLive(): Promise<number[]> {
 
 /** Сеанс не подтверждён: вход по коду без «Да, это я» и моложе недели. */
 const UNCONFIRMED = sql`(confirmed_at is null and created_at > now() - interval '7 days')`;
+/** Новый сеанс (как в Telegram): не подтверждён или ещё не прошли сутки после входа (restricted_until). */
+const LIMITED = sql`(${UNCONFIRMED} or coalesce(restricted_until > now(), false))`;
 
-/** Неподтверждённый (свежий) сеанс не может завершать и подтверждать другие. */
+/**
+ * Новый сеанс не может: завершать, подтверждать и впускать (QR) другие, менять пароль, почту восстановления и паскеи.
+ * Ограничение снимается подтверждением «Это я» с другого устройства или само — через сутки (неделю, если вход по коду
+ * так и не подтвердили).
+ */
 export async function assertConfirmed(db: Tx | typeof sql, sessionId: number): Promise<void> {
   // for update: строка вызывающего сеанса держится до конца транзакции, параллельное завершение дождётся
-  const [r] = await db`select ${UNCONFIRMED} as u from sessions where id = ${sessionId} for update`;
+  const [r] = await db`select ${LIMITED} as u from sessions where id = ${sessionId} for update`;
   if (!r) throw new DomainError('unauthorized');   // сеанса уже нет — закрыто, а не открыто
   if (r.u) throw new DomainError('fresh_session');
 }
 
 const changed = (db: Tx, userId: number) => appendUpdates(db, [{ userId, update: { type: 'sessionsChanged' } }]);
 
-type Row = { id: number; device: string | null; ip: string | null; created_at: Date; last_active_at: Date; unconfirmed: boolean };
+type Row = { id: number; device: string | null; ip: string | null; created_at: Date; last_active_at: Date; unconfirmed: boolean; limited: boolean;
+  restricted_until: Date | null; login_method: string | null; country: string | null; city: string | null };
 
 /** Сеансы пользователя: текущий первым, дальше — по последней активности. */
 export async function listSessions(userId: number, currentId: number): Promise<SessionInfo[]> {
   const rows = await sql<Row[]>`
-    select id, device, ip, created_at, last_active_at, ${UNCONFIRMED} as unconfirmed from sessions
+    select id, device, ip, created_at, last_active_at, ${UNCONFIRMED} as unconfirmed, ${LIMITED} as limited, restricted_until, login_method, country, city from sessions
      where user_id = ${userId} and expires_at > now()
      order by (id = ${currentId}) desc, last_active_at desc, id desc`;
   const now = Date.now();
@@ -134,6 +142,9 @@ export async function listSessions(userId: number, currentId: number): Promise<S
     current: Number(r.id) === currentId,
     online: Number(r.id) === currentId || isLive(Number(r.id)) || now - new Date(r.last_active_at).getTime() < ONLINE_MS,
     unconfirmed: !!r.unconfirmed,
+    limited: !!r.limited,
+    place: placeText({ country: r.country, city: r.city, local: !!r.ip && isPrivateIp(r.ip) }),
+    method: (r.login_method as SessionInfo['method']) ?? null,
   }));
 }
 
@@ -156,7 +167,7 @@ export async function confirmSession(userId: number, currentId: number, id: numb
   if (id === currentId) throw new DomainError('bad_frame');
   await sql.begin(async (tx) => {
     await assertConfirmed(tx, currentId);
-    const rows = await tx`update sessions set confirmed_at = now() where id = ${id} and user_id = ${userId} returning id`;
+    const rows = await tx`update sessions set confirmed_at = now(), restricted_until = null where id = ${id} and user_id = ${userId} returning id`;
     if (!rows.length) throw new DomainError('not_found');
     await changed(tx, userId);
     await resolveLoginAlerts(tx, userId, [id], LOGIN_CONFIRMED);
@@ -168,13 +179,19 @@ export async function confirmSession(userId: number, currentId: number, id: numb
  * После входа: sessionsChanged (плашка «Это вы?» на остальных устройствах) и служебное «Новый вход» с кнопками —
  * только если есть кому ответить: другой живой подтверждённый сеанс. Первый вход, вход после выхода отовсюду или
  * когда остальные сеансы сами не подтверждены — без вопроса: подтвердить его всё равно некому.
+ * В сообщении — устройство, место по IP, способ входа; «необычное место» — страны входа нет ни у одного другого сеанса.
  */
 export async function announceLogin(userId: number, token: string): Promise<void> {
-  const [s] = await sql`select id, device, ip, created_at from sessions where token_hash = ${hashToken(token)}`;
+  const [s] = await sql`select id, device, ip, created_at, country, city, login_method from sessions where token_hash = ${hashToken(token)}`;
   if (!s) return;
   await sql.begin(async (tx) => {
     const [peer] = await tx`select 1 from sessions where user_id = ${userId} and id <> ${s.id} and expires_at > now() and not ${UNCONFIRMED} limit 1`;
-    if (peer) await postService(tx, userId, { type: 'new_login', ...newLoginMessage(s.device || 'Браузер', s.ip, new Date(s.created_at), Number(s.id)) });
+    if (peer) {
+      const known = (await tx`select distinct country from sessions where user_id = ${userId} and id <> ${s.id} and expires_at > now() and country is not null`).map((r) => r.country as string);
+      const unusual = !!s.country && known.length > 0 && !known.includes(s.country as string);
+      const place = placeText({ country: s.country as string | null, city: s.city as string | null, local: !!s.ip && isPrivateIp(s.ip as string) });
+      await postService(tx, userId, { type: 'new_login', ...newLoginMessage(s.device || 'Браузер', s.ip, new Date(s.created_at), Number(s.id), { place, unusual, method: s.login_method as string | null, usual: known }) });
+    }
     await changed(tx, userId);
   });
 }

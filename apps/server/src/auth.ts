@@ -1,3 +1,4 @@
+import { lookupIp } from './geoip';
 import { readAccessToken, sessionIdFromAccess } from './deviceAuth';
 import { createHash, randomBytes } from 'node:crypto';
 import { sql } from './db';
@@ -16,16 +17,28 @@ export async function createUser(name: string): Promise<number> {
  * Новый сеанс — единственный путь входа (любой будущий вход идёт через него): сначала чистка неактивных сеансов
  * этого человека, затем строка с устройством (грубо по User-Agent) и IP входа.
  */
-/** deviceKey — публичный ключ устройства (deviceProof при входе): сеанс сразу привязан к нему. */
-export async function createSession(userId: number, from?: { req: Request; server: IpSource }, opts: { confirmed?: boolean; deviceKey?: Uint8Array | null } = {}): Promise<string> {
+/** Как вошли — для «Новый вход» и списка сеансов. */
+export type LoginMethod = 'code' | 'password' | 'recovery' | 'signup' | 'passkey' | 'qr' | 'dev';
+
+/**
+ * deviceKey — публичный ключ устройства (deviceProof при входе): сеанс сразу привязан к нему.
+ * restrict — новый вход при живых других сеансах: первые сутки без опасных действий (restricted_until, sessions.ts).
+ */
+export async function createSession(userId: number, from?: { req: Request; server: IpSource }, opts: { confirmed?: boolean; deviceKey?: Uint8Array | null; method?: LoginMethod; restrict?: boolean } = {}): Promise<string> {
   await sweepInactive(userId).catch((e) => console.error('sessions sweep:', e));
   const device = from ? parseDevice(from.req.headers.get('user-agent')) : null;
   const ip = from ? clientIp(from.req, from.server) : null;
   const token = randomBytes(32).toString('base64url');
   const key = opts.deviceKey ? Buffer.from(opts.deviceKey) : null;
-  await sql`insert into sessions (token_hash, user_id, expires_at, device, ip, confirmed_at, device_key, bound_at)
+  const place = await lookupIp(ip);
+  const ua = from ? (from.req.headers.get('user-agent') ?? '').slice(0, 300) || null : null;
+  // ограничение — только если у аккаунта уже есть живые сеансы: первому устройству защищать нечего
+  const restricted = opts.restrict
+    ? sql`case when exists (select 1 from sessions where user_id = ${userId} and expires_at > now()) then now() + interval '24 hours' end`
+    : null;
+  await sql`insert into sessions (token_hash, user_id, expires_at, device, ip, confirmed_at, device_key, bound_at, restricted_until, login_method, country, city, user_agent)
             values (${hashToken(token)}, ${userId}, now() + ${SESSION_DAYS + ' days'}::interval, ${device}, ${ip}, ${opts.confirmed === false ? null : sql`now()`},
-                    ${key}, ${key ? sql`now()` : null})`;
+                    ${key}, ${key ? sql`now()` : null}, ${restricted}, ${opts.method ?? null}, ${place?.country ?? null}, ${place?.city ?? null}, ${ua})`;
   return token;
 }
 

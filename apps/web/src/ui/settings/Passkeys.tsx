@@ -20,14 +20,15 @@ export function Passkeys() {
     const r = await createPasskey();
     setBusy(false);
     if (r.ok) { setList(r.data.passkeys); showToast('Паскей создан'); return; }
-    if (r.code !== 'cancelled') showToast('Не удалось создать паскей. Попробуйте ещё раз.');
+    if (r.code === 'fresh_session') showToast('С нового входа это можно сделать через сутки или после подтверждения на другом устройстве');
+    else if (r.code !== 'cancelled') showToast('Не удалось создать паскей. Попробуйте ещё раз.');
   }
 
   async function remove(p: Passkey) {
     setAsk(null);
     const r = await deletePasskey(p.id);
     if (r.ok) setList(r.data.passkeys);
-    else showToast('Не удалось удалить паскей');
+    else showToast(r.code === 'fresh_session' ? 'С нового входа это можно сделать через сутки или после подтверждения на другом устройстве' : 'Не удалось удалить паскей');
   }
 
   return (

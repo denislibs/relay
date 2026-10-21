@@ -157,5 +157,10 @@ export async function rewrapStep(sql: import('postgres').Sql<{ bigint: number }>
     rewrapped++;
   }
   const last = rows.at(-1);
-  return { rewrapped, next: last ? [Number(last.chat_id), Number(last.version)] : after, done: rows.length < batch };
+  const done = rows.length < batch;
+  // ключ поиска — тем же проходом; его сбой не отменяет перезаворачивание ключей чатов (повторится следующей задачей)
+  if (done) {
+    try { if (await (await import('./searchKey')).rewrapSearchKey()) rewrapped++; } catch (e) { console.warn('rewrap search key:', String(e)); }
+  }
+  return { rewrapped, next: last ? [Number(last.chat_id), Number(last.version)] : after, done };
 }
