@@ -50,7 +50,7 @@ body { margin: 0; font-family: var(--font-sans); color: var(--ink); background: 
 .rl-avatar-dot { position: absolute; right: 0; bottom: 0; width: 28%; height: 28%; min-width: 10px; min-height: 10px; border-radius: 50%; background: var(--brand); box-shadow: 0 0 0 2px var(--bg); }
 
 /* ---------- Badge ---------- */
-.rl-badge { display: inline-flex; align-items: center; justify-content: center; min-width: 20px; height: 20px; padding: 0 6px; border-radius: var(--radius-pill); background: var(--brand); color: var(--on-brand); font: 600 12px/1 var(--font-sans); font-variant-numeric: tabular-nums; animation: rl-pop var(--dur-base) var(--ease-out); }
+.rl-badge { display: inline-flex; align-items: center; justify-content: center; min-width: 20px; height: 20px; padding: 0 6px; border-radius: var(--radius-pill); background: var(--brand-strong); color: var(--on-brand); font: 600 12px/1 var(--font-sans); font-variant-numeric: tabular-nums; animation: rl-pop var(--dur-base) var(--ease-out); }
 /* цифры счётчика всегда белые, как в Telegram; серый «без звука» — сплошной, чтобы белое читалось и в тёмной теме */
 .rl-badge, .rl-badge-muted { color: #fff; }
 .rl-badge-muted { background: #c4c9cc; }
@@ -114,7 +114,7 @@ body { margin: 0; font-family: var(--font-sans); color: var(--ink); background: 
 .rl-row-top, .rl-row-bottom { display: flex; align-items: center; gap: var(--space-1); min-width: 0; }
 .rl-row-name { flex: 1; min-width: 0; font: 500 16px/24px var(--font-sans); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .rl-row-time { font: 400 13px/16px var(--font-sans); color: var(--ink-muted); font-variant-numeric: tabular-nums; }
-.rl-row-time-unread { color: var(--brand); font-weight: 600; }   /* основной цвет — как значок непрочитанных */
+.rl-row-time-unread { color: var(--brand-strong); font-weight: 600; }   /* основной цвет — как кнопка микрофона */
 /* как в Telegram: превью того же кегля, что текст сообщений, высота строки ×1.5 (в пузыре — ×1.3125) */
 .rl-row-preview { flex: 1; min-width: 0; font: 400 var(--message-text-size, 16px)/round(calc(var(--message-text-size, 16px) * 1.5), 1px) var(--font-sans); color: var(--ink-muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .rl-row-typing { color: var(--brand-text); }
@@ -125,7 +125,7 @@ body { margin: 0; font-family: var(--font-sans); color: var(--ink); background: 
 .rl-row-thumb-round img { border-radius: 50%; }
 .rl-row-thumb .rl-icon { position: absolute; inset: 0; margin: auto; color: #fff; filter: drop-shadow(0 0 2px rgb(0 0 0 / 0.5)); }
 .rl-row-spoiler { letter-spacing: 1px; }
-.rl-row-top .rl-status { flex: none; color: var(--brand); }
+.rl-row-top .rl-status { flex: none; color: var(--brand-strong); }
 .rl-row-top .rl-status-failed { color: var(--danger); }
 .rl-row-meta { display: inline-flex; align-items: center; gap: 6px; color: var(--ink-muted); }
 
@@ -1529,12 +1529,12 @@ html[data-blur="0"] .rl-shell .rl-rpick { background: color-mix(in srgb, var(--r
 /* выбор «голосовое / кружок» над кнопкой */
 
 /* ---------- голосовое в ленте (как в Telegram Web A) ---------- */
-.rl-vb { --voice-progress: var(--brand); --voice-fill: color-mix(in srgb, var(--brand) 38%, var(--bubble-in)); --voice-btn: var(--brand); --voice-btn-ink: #fff;
+.rl-vb { --voice-progress: var(--brand-strong); --voice-fill: color-mix(in srgb, var(--brand-strong) 38%, var(--bubble-in)); --voice-btn: var(--brand-strong); --voice-btn-ink: #fff;
   padding: 6px 8px 6px 6px; min-width: 0; }
 /* свои: акцент, смешанный с цветом своего пузыря (следует за акцентом и темой) */
 .rl-bubble-out { --out-accent: color-mix(in srgb, var(--brand-text) 75%, var(--bubble-out)); --out-accent-soft: color-mix(in srgb, var(--brand-text) 30%, var(--bubble-out)); }
-/* исходящее голосовое: кнопка, прогресс и точка «не прослушано» — основной цвет (как значок непрочитанных), не разбавленный */
-.rl-vb.rl-bubble-out { --voice-progress: var(--brand); --voice-fill: color-mix(in srgb, var(--brand) 40%, var(--bubble-out)); --voice-btn: var(--brand); --voice-btn-ink: #fff; }
+/* исходящее голосовое: кнопка, прогресс и точка «не прослушано» — основной цвет (как кнопка микрофона), не разбавленный */
+.rl-vb.rl-bubble-out { --voice-progress: var(--brand-strong); --voice-fill: color-mix(in srgb, var(--brand-strong) 35%, var(--bubble-out)); --voice-btn: var(--brand-strong); --voice-btn-ink: #fff; }
 :root[data-theme="dark"] .rl-vb.rl-bubble-out { --voice-progress: #fff; --voice-fill: color-mix(in srgb, #fff 45%, var(--bubble-out)); --voice-btn: #fff; --voice-btn-ink: var(--bubble-out); }
 @media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) .rl-vb.rl-bubble-out { --voice-progress: #fff; --voice-fill: color-mix(in srgb, #fff 45%, var(--bubble-out)); --voice-btn: #fff; --voice-btn-ink: var(--bubble-out); } }
 .rl-vb-row { display: flex; align-items: center; padding-right: 52px; }
@@ -1663,7 +1663,7 @@ html[data-blur="0"] .rl-menu { -webkit-backdrop-filter: none; backdrop-filter: n
 
 /* Музыка в ленте (musicBubble.js) — как в Telegram; цвета — как у голосового (зелёный в исходящем) */
 .rl-music { min-width: 280px; max-width: 360px; padding: 8px 12px 6px 8px; --music-accent: var(--voice-btn, var(--brand-strong)); }
-.rl-bubble-out.rl-music { --music-accent: var(--brand); --music-sub: var(--out-accent); }   /* кнопка — основной цвет, подписи — приглушённые */
+.rl-bubble-out.rl-music { --music-accent: var(--brand-strong); --music-sub: var(--out-accent); }   /* кнопка — основной цвет, подписи — приглушённые */
 .rl-music-row { display: flex; align-items: center; gap: 12px; }
 .rl-music-btnwrap { position: relative; flex: none; width: 48px; height: 48px; }
 .rl-music-play { position: relative; width: 48px; height: 48px; border: 0; border-radius: 50%; background: var(--music-accent); background-size: cover; background-position: center; color: #fff; cursor: pointer; }
