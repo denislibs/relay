@@ -11,7 +11,7 @@ export function UpdatePill() {
     <Presence show={ready && !going} exitMs={200}>
       <div class="app-update-slot">
         <button type="button" class="app-update" onPointerDown={ripple} onClick={() => { setGoing(true); void applyUpdate(); }}>
-          <Icon name="download" size={20} />
+          <Icon name="sync" size={20} />
           <span>Обновить Relay</span>
         </button>
       </div>

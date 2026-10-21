@@ -12,7 +12,7 @@ VERSION_NOTE = '@vkontakte/icons'
 
 MAP = {
     'search': 'search_outline', 'more': 'more_vertical', 'plus': 'add', 'close': 'cancel', 'chats': 'message_outline',
-    'contacts': 'user_book_outline@56', 'phone': 'phone_outline', 'status': 'story_outline', 'channels': 'megaphone_outline', 'community': 'users_outline',
+    'contacts': 'user_book_outline@56', 'sync': 'sync@20', 'phone': 'phone_outline', 'status': 'story_outline', 'channels': 'megaphone_outline', 'community': 'users_outline',
     'archive': 'archive_outline', 'unarchive': 'unarchive_outline', 'send': 'send_outline', 'mic': 'voice_outline',
     'smile': 'smile_outline', 'leaf': 'lotus_outline', 'like': 'thumbs_up_outline', 'dislike': 'thumbs_down_outline',
     'sad': 'sad_face_outline', 'coffee': 'cup_outline', 'bulb': 'lightbulb_outline', 'flag': 'flag_start',
