@@ -383,11 +383,14 @@ html[data-blur="0"] .app-sidemenu .rl-menu { -webkit-backdrop-filter: none; back
 .app-banner-x { position: absolute; top: 4px; right: 4px; }
 .app-banner-x .rl-iconbtn { width: 32px; height: 32px; color: var(--ink-muted); }
 /* «Это вы?»: не кликается целиком и не закрывается — только кнопки ответа */
-.app-banner-alert { flex-direction: column; align-items: stretch; gap: 8px; padding: 10px 14px 12px; cursor: default; border-left: 3px solid var(--danger); }
+.app-banner-alert { flex-direction: column; align-items: stretch; gap: 4px; padding: 10px 6px 4px 14px; cursor: default; }
 .app-banner-alert:hover { background: var(--field); }
 .app-banner-alert .app-banner-text b { white-space: normal; }
-.app-banner-actions { display: flex; gap: 8px; }
-.app-banner-actions .rl-btn { flex: 1; height: 32px; padding: 0 12px; font-size: 13px; }
+/* ответы — текстовые кнопки справа, как в Telegram: без заливки и красной рамки */
+.app-banner-actions { display: flex; justify-content: flex-end; gap: 2px; }
+.app-banner-actions .rl-btn { height: 32px; padding: 0 10px; border: 0; font: 500 14px/1 var(--font-sans); }
+.app-banner-actions .app-banner-no { color: var(--ink-muted); }
+.app-banner-actions .app-banner-no:hover { background: var(--hover); }
 @media (prefers-reduced-motion: reduce) { .app-banner-slot { animation: none; transition: none; } }
 
 /* Стек чатов (как в Telegram Web): колонки лежат друг на друге, на экране — верхняя готовая.

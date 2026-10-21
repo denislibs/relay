@@ -94,14 +94,15 @@ export function ChatBanner() {
           <div class="app-banner-clip">
             {b.kind === 'unconfirmed' ? (
               // без крестика и без клика по всей плашке: закрывается только ответом
-              <div class="app-banner app-banner-alert" role="alert">
+              // спокойно, как в Telegram: вопрос, а не тревога; ответы — текстовые кнопки
+              <div class="app-banner app-banner-alert" role="status">
                 <div class="app-banner-text">
-                  <b>Кто-то вошёл в ваш аккаунт</b>
-                  <span>{b.session.device}{b.session.ip ? `, IP ${b.session.ip}` : ''}. Это вы?</span>
+                  <b>Новый вход в аккаунт</b>
+                  <span>{b.session.device}{b.session.ip ? ` · ${b.session.ip}` : ''}. Это были вы?</span>
                 </div>
                 <div class="app-banner-actions">
-                  <Button size="sm" onClick={() => void confirmSession(b.session.id)}>Да, это я</Button>
-                  <Button size="sm" variant="danger" onClick={() => void terminateSession(b.session.id)}>Нет, завершить</Button>
+                  <Button variant="ghost" onClick={() => void confirmSession(b.session.id)}>Да, это я</Button>
+                  <Button variant="ghost" class="app-banner-no" onClick={() => void terminateSession(b.session.id)}>Нет, это не я</Button>
                 </div>
               </div>
             ) : (
