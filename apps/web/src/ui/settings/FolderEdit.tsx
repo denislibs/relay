@@ -12,7 +12,7 @@ import { FOLDER_EMOJI, FOLDER_ICONS } from '../../folders';
 /** Иконки на выбор (как набор иконок папок в Telegram, плюс «без иконки» — по типу). */
 
 export const INCLUDE_TYPES = [
-  { key: 'contacts', icon: 'contact', title: 'Контакты' },
+  { key: 'contacts', icon: 'contacts', title: 'Контакты' },
   { key: 'nonContacts', icon: 'account', title: 'Не контакты' },
   { key: 'groups', icon: 'community', title: 'Группы' },
 ] as const;

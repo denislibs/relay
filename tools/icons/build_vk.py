@@ -12,7 +12,7 @@ VERSION_NOTE = '@vkontakte/icons'
 
 MAP = {
     'search': 'search_outline', 'more': 'more_vertical', 'plus': 'add', 'close': 'cancel', 'chats': 'message_outline',
-    'phone': 'phone_outline', 'status': 'story_outline', 'channels': 'megaphone_outline', 'community': 'users_outline',
+    'contacts': 'user_book_outline@56', 'phone': 'phone_outline', 'status': 'story_outline', 'channels': 'megaphone_outline', 'community': 'users_outline',
     'archive': 'archive_outline', 'unarchive': 'unarchive_outline', 'send': 'send_outline', 'mic': 'voice_outline',
     'smile': 'smile_outline', 'leaf': 'lotus_outline', 'like': 'thumbs_up_outline', 'dislike': 'thumbs_down_outline',
     'sad': 'sad_face_outline', 'coffee': 'cup_outline', 'bulb': 'lightbulb_outline', 'flag': 'flag_start',
@@ -68,6 +68,10 @@ SIZES = ('24', '28', '20', '16', '32', '36', '12')
 def main(pkg):
     src = os.path.join(pkg, 'src', 'svg')
     def find(name):
+        if '@' in name:   # явный размер: «имя@56»
+            name, size = name.split('@')
+            p = os.path.join(src, size, f'{name}_{size}.svg')
+            return p if os.path.exists(p) else None
         for s in SIZES:
             p = os.path.join(src, s, f'{name}_{s}.svg')
             if os.path.exists(p): return p
@@ -84,7 +88,7 @@ def main(pkg):
         else: missing.append(f'{ours}→{vk}')
     for f in sorted(filled_names):
         base = MAP.get(f[:-len('Filled')])
-        guess = FILLED.get(f) or (base and base.replace('_outline', ''))
+        guess = FILLED.get(f) or (base and base.split('@')[0].replace('_outline', ''))
         p = guess and find(guess)
         if p: out[f] = p   # и когда совпадает с обычным (уже залитым): плитки берут имя *Filled
 
