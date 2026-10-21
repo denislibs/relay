@@ -1533,7 +1533,8 @@ html[data-blur="0"] .rl-shell .rl-rpick { background: color-mix(in srgb, var(--r
   padding: 6px 8px 6px 6px; min-width: 0; }
 /* свои: акцент, смешанный с цветом своего пузыря (следует за акцентом и темой) */
 .rl-bubble-out { --out-accent: color-mix(in srgb, var(--brand-text) 75%, var(--bubble-out)); --out-accent-soft: color-mix(in srgb, var(--brand-text) 30%, var(--bubble-out)); }
-.rl-vb.rl-bubble-out { --voice-progress: var(--out-accent); --voice-fill: var(--out-accent-soft); --voice-btn: var(--out-accent); --voice-btn-ink: #fff; }
+/* исходящее голосовое: кнопка, прогресс и точка «не прослушано» — основной цвет (как значок непрочитанных), не разбавленный */
+.rl-vb.rl-bubble-out { --voice-progress: var(--brand-strong); --voice-fill: color-mix(in srgb, var(--brand-strong) 35%, var(--bubble-out)); --voice-btn: var(--brand-strong); --voice-btn-ink: #fff; }
 :root[data-theme="dark"] .rl-vb.rl-bubble-out { --voice-progress: #fff; --voice-fill: color-mix(in srgb, #fff 45%, var(--bubble-out)); --voice-btn: #fff; --voice-btn-ink: var(--bubble-out); }
 @media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) .rl-vb.rl-bubble-out { --voice-progress: #fff; --voice-fill: color-mix(in srgb, #fff 45%, var(--bubble-out)); --voice-btn: #fff; --voice-btn-ink: var(--bubble-out); } }
 .rl-vb-row { display: flex; align-items: center; padding-right: 52px; }
@@ -1663,7 +1664,7 @@ html[data-blur="0"] .rl-menu { -webkit-backdrop-filter: none; backdrop-filter: n
 
 /* Музыка в ленте (musicBubble.js) — как в Telegram; цвета — как у голосового (зелёный в исходящем) */
 .rl-music { min-width: 280px; max-width: 360px; padding: 8px 12px 6px 8px; --music-accent: var(--voice-btn, var(--brand-strong)); }
-.rl-bubble-out.rl-music { --music-accent: var(--out-accent); --music-sub: var(--out-accent); }
+.rl-bubble-out.rl-music { --music-accent: var(--brand-strong); --music-sub: var(--out-accent); }   /* кнопка — основной цвет, подписи — приглушённые */
 .rl-music-row { display: flex; align-items: center; gap: 12px; }
 .rl-music-btnwrap { position: relative; flex: none; width: 48px; height: 48px; }
 .rl-music-play { position: relative; width: 48px; height: 48px; border: 0; border-radius: 50%; background: var(--music-accent); background-size: cover; background-position: center; color: #fff; cursor: pointer; }
