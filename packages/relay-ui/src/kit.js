@@ -3,6 +3,7 @@ import { useState, useRef, useEffect, useLayoutEffect, useContext } from 'preact
 import { createPortal } from 'preact/compat';
 import { MentionList } from './more.js';
 import { PACK_ICONS, PACK_FILLED } from './iconPack.js';
+import { VK_ICONS } from './vkIcons.js';
 import { requestMeasure, requestMutation, beginHeavyAnimation, onHeavyAnimationEnd, isHeavyAnimating, forceMeasure } from './schedule.js';
 import { VideoPlayer } from './media/videoPlayer.js';
 
@@ -238,6 +239,9 @@ function Icon(props) {
   var name = props.name, size = props.size || 20, title = props.title;
   var base = { class: cx('rl-icon', (props.className || props.class)), width: size, height: size, viewBox: '0 0 24 24',
     role: title ? 'img' : undefined, 'aria-label': title, 'aria-hidden': title ? undefined : 'true', 'data-icon': name };
+  // VK Icons (MIT): залитые фигуры в своём viewBox; имён без пары в наборе VK — прежние рисунки ниже
+  var vk = VK_ICONS[name];
+  if (vk) return h('svg', Object.assign(base, { viewBox: vk[0], fill: 'currentColor', dangerouslySetInnerHTML: { __html: trustedIcon('vk:' + name, vk[1]) } }));
   // залитый вариант (там, где он у Telegram): фигура залита, внутренние детали вырезаны маской
   var filled = PACK_FILLED[name] || (name === 'play' ? PACK_FILLED.playFilled : name === 'pause' ? PACK_FILLED.pauseFilled : name === 'stop' ? PACK_FILLED.stopFilled : null);
   if (filled) {
@@ -261,7 +265,7 @@ function Icon(props) {
   return h('svg', Object.assign(base, { fill: FILLED[name] ? 'currentColor' : 'none',
     stroke: 'currentColor', 'stroke-width': sw, 'stroke-linecap': 'round', 'stroke-linejoin': 'round' }), d.map(function (p, i) { return h('path', { key: i, d: p }); }));
 }
-Icon.names = Object.keys(ICONS).concat(Object.keys(PACK_FILLED));
+Icon.names = Object.keys(ICONS).concat(Object.keys(PACK_FILLED), Object.keys(VK_ICONS).filter(function (n) { return !ICONS[n] && !PACK_FILLED[n]; }));
 
 /* ---------- Button ---------- */
 function Button(props) {
@@ -1427,7 +1431,7 @@ function ActionTile(props) {
 // Цветная плитка 32×32 с белой иконкой; color — blue|orange|red|gray|green|purple|pink
 function SettingsIcon(props) {
   // в цветной плитке значок залитый, как у Telegram; у значков из одних линий заливать нечего — контур потолще
-  var filled = PACK_FILLED[props.icon + 'Filled'] ? props.icon + 'Filled' : null;
+  var filled = PACK_FILLED[props.icon + 'Filled'] || VK_ICONS[props.icon + 'Filled'] ? props.icon + 'Filled' : null;
   return h('span', { class: cx('rl-sicon', 'rl-sicon-' + (props.color || 'blue')), 'aria-hidden': 'true' }, h(Icon, { name: filled || props.icon, size: 18, strokeWidth: filled ? 1.8 : 2 }));
 }
 function InfoRow(props) {
