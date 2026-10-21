@@ -973,20 +973,17 @@ function FloatShell(props) {
 
 /* ---------- SidebarCard: header, folder tabs, scrolling body, FAB that hides on scroll down ---------- */
 function SidebarCard(props) {
-  var fab = useState(true), last = useRef(0), pending = useRef(false);
-  function onScroll(e) {
-    var el = e.target; // the scroller that moved (body itself or a page inside it)
-    if (!el || !('scrollTop' in el)) return; // только проверка свойства — без чтения раскладки
-    if (pending.current) return;
-    pending.current = true;
-    requestMeasure(function () {
-      pending.current = false;
-      var top = el.scrollTop, d = top - last.current;
-      last.current = top;
-      if (Math.abs(d) < 4) return;
-      var show = d < 0 || top < 24;
-      if (show !== fab[0]) fab[1](show);
-    });
+  // кнопка «новый чат» — как в Telegram Web A: выезжает снизу, когда курсор над списком диалогов, и уезжает
+  // через 250 мс после ухода; на сенсорных экранах (наведения нет) видна всегда
+  var touch = typeof matchMedia === 'function' && matchMedia('(hover: none)').matches;
+  var fab = useState(touch), inside = useRef(false), closeT = useRef(0);
+  useEffect(function () { return function () { clearTimeout(closeT.current); }; }, []);
+  function onEnter() { if (touch) return; inside.current = true; clearTimeout(closeT.current); fab[1](true); }
+  function onLeave() {
+    if (touch) return;
+    inside.current = false;
+    clearTimeout(closeT.current);
+    closeT.current = setTimeout(function () { if (!inside.current) fab[1](false); }, 250);
   }
   // Вкладки (и подсказка над ними) — слой поверх списка, как в Telegram: список уходит под него,
   // а его отступ сверху равен высоте слоя (--over-h; меняется плавно, когда подсказка раскрывается)
@@ -1003,9 +1000,10 @@ function SidebarCard(props) {
     ro.observe(el);
     return function () { ro.disconnect(); };
   }, [floating]);
-  var body = h('div', { class: cx('rl-sidecard-body', props.paged && 'rl-sidecard-paged'), onScrollCapture: onScroll }, props.children);
+  var body = h('div', { class: cx('rl-sidecard-body', props.paged && 'rl-sidecard-paged') }, props.children);
   // embedded: a page inside SideFrame/SlideStack — same content, the card surface belongs to the frame
-  return h(props.embedded ? 'div' : 'section', { class: cx(props.embedded ? 'rl-sidepage' : 'rl-sidecard', props.class), 'aria-label': props.label || 'Чаты' },
+  return h(props.embedded ? 'div' : 'section', { class: cx(props.embedded ? 'rl-sidepage' : 'rl-sidecard', props.class), 'aria-label': props.label || 'Чаты',
+    onMouseEnter: props.fab ? onEnter : undefined, onMouseLeave: props.fab ? onLeave : undefined },
     props.header || null,
     props.banner || null,
     floating
@@ -1013,7 +1011,7 @@ function SidebarCard(props) {
         h('div', { ref: over, class: 'rl-sidecard-over' }, props.top || null, props.tabs || null),
         body)
       : body,
-    props.fab ? h('div', { class: cx('rl-fab-slot', !fab[0] && 'rl-fab-hidden') }, props.fab) : null,
+    props.fab ? h('div', { class: cx('rl-fab-slot', fab[0] && 'is-revealed') }, props.fab) : null,
     props.overlay || null);   // поверх списка у нижнего края (например «Обновить»)
 }
 
