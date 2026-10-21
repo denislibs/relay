@@ -1523,6 +1523,7 @@ html[data-blur="0"] .rl-shell .rl-rpick { background: color-mix(in srgb, var(--r
 .rl-recbar-wave { flex: 1; min-width: 0; height: 1.5rem; color: var(--brand); }
 .rl-recbar-wave-seek { cursor: pointer; }
 .rl-recbar-time { flex-shrink: 0; min-width: 3.75rem; text-align: right; font: 400 .875rem/1.375rem var(--font-sans); font-variant-numeric: tabular-nums; color: var(--ink); }
+.rl-recbar-pause { margin-inline-end: .5rem; }   /* пауза не липнет к кнопке отправки */
 .rl-recbar-pause .rl-icon { animation: rl-rec-grow 200ms var(--ease-out); }
 .rl-recbar-pause-off { opacity: .4; pointer-events: none; }
 /* выбор «голосовое / кружок» над кнопкой */
