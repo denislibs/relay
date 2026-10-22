@@ -103,14 +103,14 @@ type DocVT = Document & { startViewTransition?: (cb: () => void | Promise<void>)
 let circle: VT | null = null;
 
 // где нажали последний раз: переключатель темы в меню или в настройках
-let lastPoint: { x: number; y: number; t: number } | null = null;
+let lastPoint: { x: number; y: number; t: number; toggle: boolean } | null = null;
 // Пока идёт View Transition, браузер отдаёт все нажатия <html> (pointer-events не помогает): интерфейс
 // полсекунды глух — это ощущается как фриз. Нажатие во время круга досрочно завершает его, а клик
 // доставляется элементу под курсором, когда страница снова настоящая.
 let tapDuringCircle: { x: number; y: number; done: Promise<void> } | null = null;
 if (typeof addEventListener === 'function') {
   addEventListener('pointerdown', (e: PointerEvent) => {
-    lastPoint = { x: e.clientX, y: e.clientY, t: performance.now() };
+    lastPoint = { x: e.clientX, y: e.clientY, t: performance.now(), toggle: e.target instanceof Element && !!e.target.closest('[data-theme-toggle]') };
     if (!circle) return;
     tapDuringCircle = { x: e.clientX, y: e.clientY, done: circle.finished.catch(() => {}) };
     stopCircle();
@@ -160,8 +160,10 @@ function circleSwitch(root: HTMLElement, pref: 'system' | 'light' | 'dark', toDa
   clear(root);
   stopCircle();
   const { x, y } = circleOrigin();
-  // в тёмную — тёмный круг растёт из кнопки; в светлую — тёмный круг сжимается в неё (старый снимок поверх)
-  const grow = toDark;
+  // в тёмную — тёмный круг растёт из точки нажатия. В светлую с кнопки-переключателя (data-theme-toggle, экран
+  // входа) тёмный круг сжимается обратно в неё; из списка тем в настройках — светлый круг растёт, как обычно
+  const fromToggle = !!lastPoint?.toggle && performance.now() - lastPoint.t < 1500;
+  const grow = toDark || !fromToggle;
   const end = beginHeavyAnimation(CIRCLE_MS + 150);
   root.classList.add('rl-theme-vt');
   root.classList.toggle('rl-theme-shrink', !grow);

@@ -80,7 +80,7 @@ export function AuthFlow() {
       </div>
       <div class={'auth' + (leaving ? ' auth-leaving' : '')}>
         {/* как в Telegram Web: смена темы прямо на экране входа (новая тема раскрывается кругом из кнопки) */}
-        <IconButton class="auth-theme" icon={dark ? 'sun' : 'moon'} label={dark ? 'Светлая тема' : 'Тёмная тема'} onClick={() => applyTheme(dark ? 'light' : 'dark')} />
+        <IconButton class="auth-theme" data-theme-toggle icon={dark ? 'sun' : 'moon'} label={dark ? 'Светлая тема' : 'Тёмная тема'} onClick={() => applyTheme(dark ? 'light' : 'dark')} />
         <div class="auth-spacer" />
         <div
           key={card.name + ('attemptId' in card ? card.attemptId : '')}
