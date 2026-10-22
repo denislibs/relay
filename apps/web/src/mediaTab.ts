@@ -1,10 +1,10 @@
 import { useEffect, useRef, useState } from 'preact/hooks';
-import type { MediaTab } from '@relay/protocol';
+import type { MediaCounts as ProtocolMediaCounts, MediaTab } from '@relay/protocol';
 import { Mirror } from '@relay/sync-engine/src/client';
 import type { Item, Patch } from '@relay/sync-engine/src/types';
 import { watchQuery } from './settingsData';
 
-export type MediaCounts = Record<MediaTab, number>;
+export type MediaCounts = ProtocolMediaCounts;
 export type MediaView = { items: Item[]; done: boolean; loading: boolean; counts: MediaCounts | null };
 
 /** Страница вкладки: на столько поднимается limit подписки за раз. */

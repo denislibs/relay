@@ -155,6 +155,11 @@ export type AttachmentKind = 'photo' | 'video' | 'file' | 'voice' | 'round' | 'a
 /** Вкладки «Общих медиа» (как в Telegram): медиа — фото и видео, файлы, музыка, голосовые и кружки, ссылки. */
 export type MediaTab = 'media' | 'file' | 'audio' | 'voice' | 'link';
 export const MEDIA_TABS: readonly MediaTab[] = ['media', 'file', 'link', 'audio', 'voice'];
+/** Счётчики вкладок; video — сколько из «Медиа» видео (шапка пишет «N фото, M видео»), у старого сервера его нет. */
+export type MediaCounts = Record<MediaTab, number> & { video?: number };
+/** Видео среди «Медиа» — зеркало SQL в getChatMediaCounts. */
+export const isVideoMedia = (m: Pick<Message, 'kind' | 'attachment'>): boolean =>
+  m.kind === 'video' || (m.kind === 'file' && (m.attachment?.mime?.startsWith('video/') ?? false));
 
 type TabFields = Pick<Message, 'kind' | 'attachment' | 'body' | 'entities'> & Partial<Pick<Message, 'service'>>;
 /**

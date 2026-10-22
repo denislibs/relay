@@ -1,4 +1,4 @@
-import { graphemes, normalizeEntities, type Entity, type Block, type ForwardInfo, type LinkPreview, type MediaTab, type Message, type MessageButton, type ProfilePhoto, type ServiceData, type ServiceType, type StickerRef, type Todo } from '@relay/protocol';
+import { graphemes, normalizeEntities, type Entity, type Block, type ForwardInfo, type LinkPreview, type MediaCounts, type MediaTab, type Message, type MessageButton, type ProfilePhoto, type ServiceData, type ServiceType, type StickerRef, type Todo } from '@relay/protocol';
 import { sql, type Tx } from '../db';
 import { muteFromDb } from './chatNotify';
 import { DomainError } from './errors';
@@ -272,16 +272,17 @@ export async function getChatMedia(userId: number, chatId: number, tab: MediaTab
 }
 
 /** Сколько всего в каждой вкладке — пустые вкладки панель не показывает (как в Telegram Web K). */
-export async function getChatMediaCounts(userId: number, chatId: number): Promise<Record<MediaTab, number>> {
+export async function getChatMediaCounts(userId: number, chatId: number): Promise<MediaCounts> {
   await assertMember(sql, chatId, userId);
   const [r] = await sql`
     select count(*) filter (where ${tabWhere('media')})::int as media,
            count(*) filter (where ${tabWhere('file')})::int as file,
            count(*) filter (where ${tabWhere('audio')})::int as audio,
            count(*) filter (where ${tabWhere('voice')})::int as voice,
-           count(*) filter (where ${tabWhere('link')})::int as link
+           count(*) filter (where ${tabWhere('link')})::int as link,
+           count(*) filter (where kind = 'video' or (kind = 'file' and attachment->>'mime' like 'video/%'))::int as video
       from messages where chat_id = ${chatId} and not deleted and id >= ${await historyFrom(chatId, userId)}`;
-  return { media: r.media, file: r.file, audio: r.audio, voice: r.voice, link: r.link };
+  return { media: r.media, file: r.file, audio: r.audio, voice: r.voice, link: r.link, video: r.video };
 }
 
 /** «Перейти к дате»: первое сообщение не раньше from (полночь выбранного дня у клиента); позже нет — последнее. */

@@ -64,7 +64,7 @@ export function SharedMedia({ chatId, group = false, onHead, onMember }: { chatI
   const tabs: Tab[] = [...(group ? ['members' as const] : []), ...(counts ? ORDER.filter((t) => counts[t] > 0) : [])];
   const active = tab && tabs.includes(tab) ? tab : tabs[0] ?? null;
   const shown = pending && tabs.includes(pending) ? pending : active;
-  const counters = tabs.map((t) => tabCounter(t, known as Parameters<typeof tabCounter>[1], members ? members.members.length : null));
+  const counters = tabs.map((t) => tabCounter(t, known, members ? members.members.length : null));
   const headKey = shown ? tabs.join() + '|' + shown + '|' + counters.join() : '';
   useEffect(() => { onHead?.(shown ? { tabs, shown, counters } : null); }, [headKey]);
   const pick = (id: Tab) => {

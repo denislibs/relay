@@ -1,4 +1,4 @@
-import type { MediaTab, Message } from '@relay/protocol';
+import type { MediaCounts, MediaTab, Message } from '@relay/protocol';
 import { tabsOf } from './derive';
 import { messageItem } from './queries';
 import type { Store } from './store';
@@ -106,11 +106,11 @@ export class MediaLoader {
     if (!chat.mediaCounts) {
       this.task('counts:' + chatId, chatId, async () => {
         const gen = this.store.resetGen;
-        const r = await this.deps.http<Record<MediaTab, number>>(`/chats/${chatId}/media/counts`);
+        const r = await this.deps.http<MediaCounts>(`/chats/${chatId}/media/counts`);
         const c = this.store.chats.get(chatId);
         if (!c || gen !== this.store.resetGen) return;
         // всё, что уже известно, сервер посчитал; новее — прибавит onMessage
-        c.mediaCounts = { media: r.media ?? 0, file: r.file ?? 0, audio: r.audio ?? 0, voice: r.voice ?? 0, link: r.link ?? 0 };
+        c.mediaCounts = { media: r.media ?? 0, file: r.file ?? 0, audio: r.audio ?? 0, voice: r.voice ?? 0, link: r.link ?? 0, ...(typeof r.video === 'number' ? { video: r.video } : {}) };
         c.mediaCountsAt = c.knownMaxId;
         this.store.markChat(c);
       });

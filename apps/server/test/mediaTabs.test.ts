@@ -36,7 +36,7 @@ test('shared media tabs: photo and video files are media, music and voice/round 
   expect(await ids('audio')).toEqual([song]);
   expect(await ids('voice')).toEqual([round, voice]);
   expect(await ids('link')).toEqual([link2, link1]);
-  expect(await getChatMediaCounts(a, chat)).toEqual({ media: 2, file: 1, audio: 1, voice: 2, link: 2 });
+  expect(await getChatMediaCounts(a, chat)).toEqual({ media: 2, file: 1, audio: 1, voice: 2, link: 2, video: 1 });
   await expect(getChatMediaCounts(c, chat)).rejects.toMatchObject({ code: 'not_member' });
 });
 

@@ -1,6 +1,6 @@
 import type { StickerRef, StickerSetInfo } from '@relay/protocol';
 import type { StoreName } from './schema';
-import type { GroupInfo, MediaTab, MyMembership } from '@relay/protocol';
+import type { GroupInfo, MediaCounts, MediaTab, MyMembership } from '@relay/protocol';
 import type { Birthday, Block, ChatFolder, Entity, ForwardInfo, ForwardRef, LinkPreview, MessageButton, PrivacyKey, PrivacyMode, ProfileLink, ServiceType, Todo, TodoInput, TodoServiceData, VideoVariant } from '@relay/protocol';
 
 export type Status = 'pending' | 'sent' | 'read' | 'failed';
@@ -74,7 +74,7 @@ export interface LocalChat {
   me?: MyMembership;      // группа: моя роль и права
   membersDone?: boolean;  // группа: участники загружены (true — целиком, false — первые 200 большой группы; нет — не загружали)
   /** «Общие медиа» (media.ts): сколько во вкладках — снимок сервера, дальше ведёт onMessage; нет — не спрашивали или сбросили */
-  mediaCounts?: Record<MediaTab, number>;
+  mediaCounts?: MediaCounts;
   mediaCountsAt?: number; // до какого id сообщения уже учтены в mediaCounts (новее — прибавляются по приходу)
   /** вкладка известна подряд от новых: true — целиком, число — с этого id (страницы старше просим с него) */
   mediaDone?: Partial<Record<MediaTab, number | true>>;

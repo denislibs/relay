@@ -1,4 +1,4 @@
-import { mediaTabs, type MediaTab, type Message } from '@relay/protocol';
+import { isVideoMedia, mediaTabs, type MediaTab, type Message } from '@relay/protocol';
 import type { Store } from './store';
 import type { LocalChat, LocalMessage } from './types';
 
@@ -74,13 +74,17 @@ export function tabsOf(m: LocalMessage): MediaTab[] {
 function countMedia(chat: LocalChat, m: LocalMessage, prev: LocalMessage | undefined): void {
   const counts = chat.mediaCounts;
   if (!counts || m.id == null) return;
+  // видео среди «Медиа» (counts.video) — пока сервер его прислал; удалённое видео — минус
+  const video = (x: LocalMessage) => tabsOf(x).includes('media') && isVideoMedia(x as Pick<Message, 'kind' | 'attachment'>);
   if (m.id > (chat.mediaCountsAt ?? 0)) {
     chat.mediaCountsAt = m.id;
     for (const t of tabsOf(m)) counts[t]++;
+    if (counts.video != null && video(m)) counts.video++;
     return;
   }
   if (prev?.id == null) return;
   const before = tabsOf(prev), after = tabsOf(m);
   for (const t of before) if (!after.includes(t)) counts[t] = Math.max(0, counts[t] - 1);
   for (const t of after) if (!before.includes(t)) counts[t]++;
+  if (counts.video != null && video(prev) !== video(m)) counts.video = Math.max(0, counts.video + (video(m) ? 1 : -1));
 }

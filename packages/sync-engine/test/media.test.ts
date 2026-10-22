@@ -52,6 +52,18 @@ test('counts: a photo with a link in its caption counts in media and link; delet
   expect(c.mediaCounts).toEqual({ media: 0, file: 0, audio: 0, voice: 0, link: 0 });
 });
 
+test('counts: video among media is counted while the server sent it; deletion takes it out', async () => {
+  const s = await fresh();
+  s.applyUpdate({ type: 'newMessage', message: msg({ id: 1, chatId: CH, senderId: PEER }) });
+  const c = counted(s);
+  c.mediaCounts!.video = 0;
+  s.applyUpdate({ type: 'newMessage', message: msg({ id: 2, chatId: CH, senderId: PEER, kind: 'video', attachment: { id: 'v', kind: 'video', mime: 'video/mp4', name: 'v.mp4', size: 1, w: 1, h: 1 } as never }) });
+  s.applyUpdate({ type: 'newMessage', message: photo(3, '') });
+  expect(c.mediaCounts).toEqual({ media: 2, file: 0, audio: 0, voice: 0, link: 0, video: 1 });
+  s.applyUpdate({ type: 'messageDeleted', chatId: CH, id: 2 });
+  expect(c.mediaCounts).toEqual({ media: 1, file: 0, audio: 0, voice: 0, link: 0, video: 0 });
+});
+
 test('counts: an edit adding a link increments link, removing it decrements; old messages are not counted twice', async () => {
   const s = await fresh();
   s.applyUpdate({ type: 'newMessage', message: msg({ id: 5, chatId: CH, senderId: PEER, body: 'привет' }) });
