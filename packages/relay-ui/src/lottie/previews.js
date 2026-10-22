@@ -31,15 +31,27 @@ export function getPreview(key) {
 }
 
 /** Первый показанный кадр → PNG в кэш (один раз на ключ, в простое). */
+// кодирование PNG идёт в главном потоке: по одному кадру за простой и только если в нём есть время —
+// иначе первая прокрутка панели стикеров кодировала десятки превью посреди кадров
+const toEncode = [];
+let encodeScheduled = false;
+const idle = (fn) => (self.requestIdleCallback ? self.requestIdleCallback(fn, { timeout: 3000 }) : setTimeout(() => fn({ timeRemaining: () => 50, didTimeout: true }), 200));
+function encodeOne(deadline) {
+  encodeScheduled = false;
+  if (toEncode.length && (deadline.didTimeout || deadline.timeRemaining() > 12)) {
+    const { key, c } = toEncode.shift();
+    c.convertToBlob({ type: 'image/png' })
+      .then((blob) => caches.open(CACHE).then((cache) => cache.put(req(key), new Response(blob, { headers: { 'content-type': 'image/png' } }))))
+      .catch(() => saved.delete(key));
+  }
+  if (toEncode.length) { encodeScheduled = true; idle(encodeOne); }
+}
+
 export function savePreview(key, bmp) {
   if (saved.has(key) || typeof caches === 'undefined' || typeof OffscreenCanvas === 'undefined') return;
   saved.add(key);
   const c = new OffscreenCanvas(bmp.width, bmp.height);
   c.getContext('2d').drawImage(bmp, 0, 0);
-  const idle = self.requestIdleCallback ?? ((fn) => setTimeout(fn, 200));
-  idle(() => {
-    c.convertToBlob({ type: 'image/png' })
-      .then((blob) => caches.open(CACHE).then((cache) => cache.put(req(key), new Response(blob, { headers: { 'content-type': 'image/png' } }))))
-      .catch(() => saved.delete(key));
-  });
+  toEncode.push({ key, c });
+  if (!encodeScheduled) { encodeScheduled = true; idle(encodeOne); }
 }

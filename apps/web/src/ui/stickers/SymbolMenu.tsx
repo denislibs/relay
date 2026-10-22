@@ -238,8 +238,8 @@ function StickersTab({ onPick }: { onPick(s: StickerRef): void }) {
       <Strip items={stripItems} state={s.state} go={s.go} />
       <div class="app-sym-scroll" ref={s.scroller} onScroll={s.onScroll}>
         <SearchRow placeholder="Поиск стикеров" q={q} setQ={setQ} group={group} setGroup={setGroup} />
-        {sections.map((sec) => (
-          <StickerSection key={sec.key} sec={sec} root={s.scroller} onPick={onPick}
+        {sections.map((sec, i) => (
+          <StickerSection key={sec.key} sec={sec} root={s.scroller} eager={i < 2} onPick={onPick}
             onClear={sec.clear ? clearRecent : undefined}
             onMenu={(st, el) => setMenu({ s: st, el, recent: sec.key === 'recent' })} />
         ))}
@@ -256,8 +256,29 @@ function StickersTab({ onPick }: { onPick(s: StickerRef): void }) {
   );
 }
 
-function StickerSection({ sec, root, onPick, onClear, onMenu }: { sec: Section; root: { current: HTMLDivElement | null }; onPick(s: StickerRef): void; onClear?: () => void; onMenu(s: StickerRef, el: HTMLElement): void }) {
+/**
+ * Секция рядом с видимой областью (±300 px)? Как в Telegram Web K: стикеры есть в DOM только у таких наборов —
+ * ушедший набор отпускает свои плееры и холсты, вернувшийся встаёт сохранёнными первыми кадрами, затем оживает.
+ * Пока вкладка скрыта (display: none), наблюдатель видит «ничего не пересекается» — это не уход, состояние держим.
+ */
+function useNear(el: { current: HTMLElement | null }, root: { current: HTMLElement | null }, initial: boolean): boolean {
+  const [near, setNear] = useState(initial);
+  useEffect(() => {
+    if (!el.current) return;
+    const io = new IntersectionObserver((es) => {
+      const e = es[es.length - 1];
+      if (!e.isIntersecting && !root.current?.getClientRects().length) return;   // вкладка скрыта
+      setNear(e.isIntersecting);
+    }, { root: root.current, rootMargin: '300px 0px' });
+    io.observe(el.current);
+    return () => io.disconnect();
+  }, []);
+  return near;
+}
+
+function StickerSection({ sec, root, eager, onPick, onClear, onMenu }: { sec: Section; root: { current: HTMLDivElement | null }; eager: boolean; onPick(s: StickerRef): void; onClear?: () => void; onMenu(s: StickerRef, el: HTMLElement): void }) {
   const el = useRef<HTMLElement>(null);
+  const near = useNear(el, root, eager);
   const [stickers, setStickers] = useState<StickerRef[] | null>(sec.stickers ?? null);
   useEffect(() => { if (sec.stickers) setStickers(sec.stickers); }, [sec.stickers]);
   // содержимое пака — когда секция в 500 px от видимой области
@@ -281,7 +302,7 @@ function StickerSection({ sec, root, onPick, onClear, onMenu }: { sec: Section; 
         {onClear ? <IconButton class="app-sym-clear" icon="close" label="Очистить недавние" size={20} onClick={(e: Event) => { e.stopPropagation(); onClear(); }} /> : null}
       </h4>
       <div class="app-stk-grid" style={{ minHeight: rows * STK_ROW + 'px' }}>
-        {stickers?.map((s) => (
+        {near && stickers?.map((s) => (
           <StickerPreviewHold key={s.id} sticker={s}>
             <button type="button" class="app-stk-cell" onClick={() => onPick(s)} title={s.emoji}
               onContextMenu={(e) => { e.preventDefault(); onMenu(s, e.currentTarget as HTMLElement); }}>

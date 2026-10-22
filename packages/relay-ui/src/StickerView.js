@@ -21,6 +21,24 @@ function watchVisible(el, cb) {
   return () => { seen.delete(el); io.unobserve(el); };
 }
 
+// плееры подключаются по очереди, не больше двух за кадр (как очередь загрузки в Telegram Web K): быстрая
+// прокрутка панели стикеров иначе создавала десятки плееров и холстов в одном кадре
+const ATTACH_PER_FRAME = 2;
+const attachQueue = [];
+let attachRaf = 0;
+function queueAttach(fn) {
+  const job = { fn, live: true };
+  attachQueue.push(job);
+  if (!attachRaf) attachRaf = requestAnimationFrame(runAttach);
+  return () => { job.live = false; };
+}
+function runAttach() {
+  attachRaf = 0;
+  let n = 0;
+  while (attachQueue.length && n < ATTACH_PER_FRAME) { const j = attachQueue.shift(); if (j.live) { j.fn(); n++; } }
+  if (attachQueue.length) attachRaf = requestAnimationFrame(runAttach);
+}
+
 /** Вписать w×h в квадрат size (CSS px). */
 export function stickerBox(w, h, size) {
   const k = size / Math.max(w || 512, h || 512);
@@ -69,16 +87,16 @@ export function StickerView(props) {
   useEffect(() => {
     const el = root.current;
     if (!el || !src || isStatic || !lottieAvailable()) return;
-    let offVisible = null;
-    const offLazy = lazyObserve(el, () => {
+    let offVisible = null, cancel = null;
+    const offLazy = lazyObserve(el, () => { cancel = queueAttach(() => {
       const c = attachSticker({
         url: src, px, canvas: canvas.current, group, play: play && !reducedMotion(), loop,
         onFirstFrame: () => requestAnimationFrame(() => requestAnimationFrame(() => requestMutation(() => setStage('ready')))),
       });
       ctl.current = c;
       offVisible = watchVisible(el, (v) => c.setVisible(v));
-    });
-    return () => { offLazy?.(); offVisible?.(); ctl.current?.destroy(); ctl.current = null; };
+    }); });
+    return () => { offLazy?.(); cancel?.(); offVisible?.(); ctl.current?.destroy(); ctl.current = null; };
   }, [key, group]);
 
   useEffect(() => { ctl.current?.setPlay(play && !reducedMotion()); }, [play]);
