@@ -19,7 +19,11 @@ body { background: var(--bg); color: var(--ink); font-family: var(--font-sans); 
 /* скелетон ↔ список: скелетон всплывает построчно, уходит поверх появляющегося списка (crossfade) */
 .app-listwrap { position: relative; }
 .app-skel > div { animation: app-rise 320ms var(--ease-out) both; animation-delay: calc(var(--i) * 35ms); }
-.app-listwrap > .rl-presence { position: absolute; inset: 0 0 auto 0; z-index: 1; pointer-events: none; }
+/* слоем — сам скелетон: обёртка Presence — display: contents (своей коробки нет, position на ней не работает) */
+.app-listwrap > .rl-presence > .app-skel { position: absolute; inset: 0 0 auto 0; z-index: 1; pointer-events: none; }
+/* пока скелетон стоит, список под ним скрыт: данные, пришедшие во время проявления строк, не просвечивают
+   сквозь полупрозрачный скелетон; уход скелетона открывает уже готовый список */
+.app-listwrap:has(> .rl-presence[data-state="open"]) > :not(.rl-presence) { visibility: hidden; }
 .app-skel > div { background: var(--card); }   /* строки скелетона закрывают готовый список под собой */
 /* уход скелетона — стирание построчно сверху вниз (как в Telegram Web K: 150 мс, сдвиг 15 мс) */
 .app-listwrap > .rl-presence[data-state="closing"] .app-skel > div { animation: app-fade-out 150ms cubic-bezier(.37, 0, .63, 1) both; animation-delay: calc(var(--i) * 15ms); }
