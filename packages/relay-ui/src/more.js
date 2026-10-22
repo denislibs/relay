@@ -829,8 +829,6 @@ function Wallpaper(props) {
           // (View Transition, .rl-theme-vt) снимок не нужен — его снимет сам браузер
           var root = document.documentElement;
           if (wp && !first && themeSwitch && !reducedMotion() && !root.classList.contains('rl-theme-vt')) crossfadeSnapshot(el, THEME_FADE_MS);
-          // светлая ↔ тёмная: узор меняет режим (маска ↔ рисунок), а updatePattern режим маски не снимает — собираем заново
-          if (wp && modeChanged) { wallpapers.splice(wallpapers.indexOf(wp), 1); wp.dispose(); wp = null; }
           var size = patternSize(set) + 'px';
           // своя картинка вместо обоев: узора нет, градиент остаётся подложкой, пока картинка не проявилась
           var none = P.pattern === false || !ready || !!P.image;
@@ -838,6 +836,10 @@ function Wallpaper(props) {
             ? { image: buildPattern(set), mask: true, background: t.ink, size: size, opacity: P.maskOpacity || intensityAlpha(P.intensity, true) }
             // светлая тема: узор нарисован цветом, выведенным из фона (прозрачность уже в цвете)
             : { image: buildPattern(set, patternColor(colors, intensityAlpha(P.intensity, false))), mask: false, background: 'transparent', size: size, opacity: 1, blur: 0 };
+          // светлая ↔ тёмная: узор меняет режим (маска ↔ рисунок) — updatePattern переключает его сам (twallpaper 2.1),
+          // холст остаётся: новый холст — новый контекст canvas, его первая отрисовка стоит десятки мс посреди смены темы.
+          // Пересобираем, только если узора в новом режиме нет
+          if (wp && modeChanged && !(pattern && wp.pattern)) { wallpapers.splice(wallpapers.indexOf(wp), 1); wp.dispose(); wp = null; }
           // плашки дат и служебных сообщений — в тон обоям (как в Telegram): светлая тема — цвет узора, но плотнее;
           // своя картинка — нейтральная тёмная; тёмная тема — из CSS (нейтральная серо-синяя)
           var shell = el.parentElement;
