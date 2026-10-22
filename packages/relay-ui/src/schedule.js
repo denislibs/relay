@@ -39,6 +39,9 @@ function schedule() { if (!scheduled) { scheduled = true; raf(flush); } }
 
 export function requestMeasure(fn) { measures.push(fn); schedule(); }
 export function requestMutation(fn) { mutations.push(fn); schedule(); }
+/* Прогнать очередь кадра прямо сейчас, до max проходов (работа, поставленная внутри прохода, — следующим).
+   Для View Transition: пока браузер ждёт новое состояние страницы, requestAnimationFrame не приходит. */
+export function flushFrames(max) { for (var i = 0; i < (max || 1) && (measures.length || mutations.length); i++) flush(); }
 /* Осознанное исключение: чтение и запись прямо сейчас, вне кадра (FLIP, первая раскладка до отрисовки).
    Strict-dom такие места не помечает — они видны в коде по этому вызову. */
 export function forceMeasure(fn) {

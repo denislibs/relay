@@ -1,0 +1,258 @@
+<title>Relay: смена темы</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Onest:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap">
+<style>
+/* Сетка карточек-образцов: в каждой — маленький Relay, переключатель темы в шапке. */
+:root {
+  --page: #f3f5f2; --ink: #17201b; --muted: #5d6b63; --line: #d9e0db; --card: #ffffff; --brand: #1daa61;
+  --f-ui: "Onest", system-ui, -apple-system, sans-serif;
+  --f-mono: "JetBrains Mono", ui-monospace, monospace;
+  --k: 1;
+}
+@media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) { --page: #111513; --ink: #e8eeea; --muted: #93a29a; --line: #26302b; --card: #181e1b; color-scheme: dark } }
+:root[data-theme="dark"] { --page: #111513; --ink: #e8eeea; --muted: #93a29a; --line: #26302b; --card: #181e1b; color-scheme: dark }
+
+body { background: var(--page); color: var(--ink); font-family: var(--f-ui); font-size: 15px; line-height: 1.5;
+  padding-left: max(16px, env(safe-area-inset-left, 0px)); padding-right: max(16px, env(safe-area-inset-right, 0px)); padding-block: 28px 48px; }
+.wrap { max-width: 1180px; margin: 0 auto; display: grid; gap: 22px; }
+h1 { font-size: 28px; font-weight: 700; margin: 0; letter-spacing: -0.01em; text-wrap: balance; }
+.lead { margin: 0; color: var(--muted); max-width: 68ch; }
+.bar { display: flex; flex-wrap: wrap; gap: 10px 18px; align-items: center; }
+.btn { font: 600 14px var(--f-ui); border: 0; border-radius: 999px; padding: 10px 18px; background: var(--brand); color: #fff; cursor: pointer; }
+.btn:focus-visible, .seg button:focus-visible, .moon:focus-visible { outline: 2px solid var(--brand); outline-offset: 2px; }
+.seg { display: inline-flex; border: 1px solid var(--line); border-radius: 999px; padding: 3px; background: var(--card); }
+.seg button { font: 500 13px var(--f-ui); border: 0; background: none; color: var(--muted); padding: 6px 12px; border-radius: 999px; cursor: pointer; }
+.seg button[aria-pressed="true"] { background: var(--ink); color: var(--page); }
+.hint { font-size: 13px; color: var(--muted); }
+
+.grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(340px, 1fr)); gap: 18px; }
+.card { background: var(--card); border: 1px solid var(--line); border-radius: 16px; padding: 14px; display: grid; gap: 12px; min-width: 0; }
+.card header { display: flex; gap: 10px; align-items: baseline; }
+.tag { font: 500 12px var(--f-mono); color: var(--muted); white-space: nowrap; }
+.card h2 { font-size: 17px; margin: 0; font-weight: 600; }
+.card p { margin: 0; font-size: 14px; color: var(--muted); }
+.card.pick { border-color: var(--brand); box-shadow: 0 0 0 1px var(--brand); }
+.verdict { font-size: 13px; display: flex; flex-wrap: wrap; gap: 6px; }
+.chip { font-size: 12px; line-height: 1.5; white-space: nowrap; padding: 2px 9px; border-radius: 999px; border: 1px solid var(--line); color: var(--muted); }
+.chip.good { color: #138a4c; border-color: #9fd8b9; }
+.chip.bad { color: #b4472f; border-color: #e7b3a6; }
+@media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) .chip.good { color: #5fd096; border-color: #285c41; } :root:not([data-theme="light"]) .chip.bad { color: #f08b72; border-color: #6a3326; } }
+:root[data-theme="dark"] .chip.good { color: #5fd096; border-color: #285c41; }
+:root[data-theme="dark"] .chip.bad { color: #f08b72; border-color: #6a3326; }
+
+/* ---------- маленький Relay: свои токены светлой и тёмной темы, не зависят от темы страницы ---------- */
+@property --a-bg { syntax: "<color>"; inherits: true; initial-value: #fff; }
+@property --a-side { syntax: "<color>"; inherits: true; initial-value: #fff; }
+@property --a-text { syntax: "<color>"; inherits: true; initial-value: #000; }
+@property --a-sub { syntax: "<color>"; inherits: true; initial-value: #666; }
+@property --a-in { syntax: "<color>"; inherits: true; initial-value: #fff; }
+@property --a-out { syntax: "<color>"; inherits: true; initial-value: #dcf8c6; }
+@property --a-row { syntax: "<color>"; inherits: true; initial-value: #eee; }
+.stage { position: relative; height: 260px; border-radius: 12px; overflow: hidden; isolation: isolate; font-size: 12px; color: var(--a-text); background: var(--a-bg); }
+.stage[data-t="light"] { --a-bg: #ffffff; --a-side: #ffffff; --a-text: #111b21; --a-sub: #667781; --a-in: #ffffff; --a-out: #d9fdd3; --a-row: #f0f2f5; }
+.stage[data-t="dark"] { --a-bg: #161717; --a-side: #1d1f1f; --a-text: #e9edef; --a-sub: #8696a0; --a-in: #242626; --a-out: #144d37; --a-row: #2a2c2c; }
+.stage.blend { transition: --a-bg, --a-side, --a-text, --a-sub, --a-in, --a-out, --a-row; transition-duration: calc(200ms * var(--k)); transition-timing-function: cubic-bezier(.2,.7,.3,1); }
+
+.wp { position: absolute; inset: 0; z-index: 0; }
+.wp > div { position: absolute; inset: 0; transition-property: opacity; transition-timing-function: ease; }
+.wp-light { background: radial-gradient(60% 70% at 15% 20%, #e8efd9, transparent 70%), radial-gradient(60% 70% at 85% 30%, #b9d3c5, transparent 70%), radial-gradient(70% 60% at 30% 90%, #c9dcc0, transparent 70%), #dfe9d6; }
+.wp-light::after { content: ""; position: absolute; inset: 0; background-image: var(--doodle); background-size: 90px; opacity: .22; }
+.wp-dark { background: #0d100f; }
+.wp-dark::after { content: ""; position: absolute; inset: 0;
+  background: radial-gradient(60% 70% at 15% 20%, #22313f, transparent 70%), radial-gradient(60% 70% at 85% 30%, #1a2c25, transparent 70%), radial-gradient(70% 60% at 30% 90%, #1b3650, transparent 70%), #16202a;
+  -webkit-mask-image: var(--doodle); mask-image: var(--doodle); -webkit-mask-size: 90px; mask-size: 90px; filter: brightness(2.4) saturate(1.3); }
+.stage[data-t="light"] .wp-dark, .stage[data-t="dark"] .wp-light { opacity: 0; }
+.wp.drift > div { animation: drift 14s ease-in-out infinite alternate; }
+@keyframes drift { to { transform: scale(1.08) translate(-2%, 1%); } }
+
+.ui { position: absolute; inset: 0; z-index: 1; display: grid; grid-template-columns: 38% 1fr; gap: 8px; padding: 8px; }
+.side { background: var(--a-side); border-radius: 10px; padding: 8px 6px; display: grid; align-content: start; gap: 4px; box-shadow: 0 1px 2px rgba(0,0,0,.12); }
+.side .row { display: grid; grid-template-columns: 24px 1fr; gap: 6px; align-items: center; padding: 4px; border-radius: 7px; }
+.side .row.on { background: var(--a-row); }
+.ava { width: 24px; height: 24px; border-radius: 50%; }
+.name { font-weight: 600; font-size: 11px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.prev { font-size: 10px; color: var(--a-sub); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.chat { display: grid; grid-template-rows: auto 1fr auto; gap: 6px; min-width: 0; }
+.head { background: var(--a-side); border-radius: 10px; padding: 6px 8px; display: flex; align-items: center; gap: 8px; box-shadow: 0 1px 2px rgba(0,0,0,.12); }
+.head .name { flex: 1; }
+.moon { width: 26px; height: 26px; border-radius: 50%; border: 0; display: grid; place-items: center; background: var(--a-row); color: var(--a-text); cursor: pointer; }
+.moon svg { width: 15px; height: 15px; }
+.feed { display: flex; flex-direction: column; justify-content: end; gap: 5px; padding: 0 2px; }
+.b { max-width: 82%; padding: 5px 8px 4px; border-radius: 9px; font-size: 11px; line-height: 1.35; box-shadow: 0 1px 1px rgba(0,0,0,.1); }
+.b.in { background: var(--a-in); align-self: start; border-bottom-left-radius: 3px; }
+.b.out { background: var(--a-out); align-self: end; border-bottom-right-radius: 3px; }
+.b time { display: block; text-align: right; font-size: 9px; color: var(--a-sub); }
+.comp { display: flex; gap: 6px; align-items: center; }
+.field { flex: 1; background: var(--a-side); border-radius: 999px; padding: 7px 10px; font-size: 11px; color: var(--a-sub); box-shadow: 0 1px 2px rgba(0,0,0,.12); }
+.mic { width: 28px; height: 28px; border-radius: 50%; background: #1daa61; }
+
+/* копия поверх для «круга» и «растворения» */
+.ghost { position: absolute; inset: 0; z-index: 5; pointer-events: none; }
+
+@media (prefers-reduced-motion: reduce) { .wp.drift > div { animation: none; } }
+@media (max-width: 420px) { .stage { height: 240px; } .ui { grid-template-columns: 1fr; } .side { display: none; } }
+</style>
+
+<div class="wrap">
+  <h1>Смена темы в Relay: пять вариантов</h1>
+  <p class="lead">В каждой карточке — маленький Relay с обоями. Нажмите луну в шапке чата: тема сменится так, как это сделано в варианте. Медленный режим растягивает время вчетверо, чтобы рассмотреть кадры.</p>
+  <div class="bar">
+    <button class="btn" id="all" type="button">Переключить все</button>
+    <div class="seg" role="group" aria-label="Скорость">
+      <button type="button" id="k1" aria-pressed="true">Обычная скорость</button>
+      <button type="button" id="k4" aria-pressed="false">Медленно ×4</button>
+    </div>
+    <span class="hint">Карточки независимы: у каждой своя тема.</span>
+  </div>
+  <div class="grid" id="grid"></div>
+</div>
+
+<template id="stage">
+  <div class="stage" data-t="dark">
+    <div class="wp drift"><div class="wp-light"></div><div class="wp-dark"></div></div>
+    <div class="ui">
+      <div class="side">
+        <div class="row on"><div class="ava" style="background:#7b61d6"></div><div><div class="name">Alibek</div><div class="prev">Отлично, размер подходит</div></div></div>
+        <div class="row"><div class="ava" style="background:#e0705a"></div><div><div class="name">Mark</div><div class="prev">Стикер</div></div></div>
+        <div class="row"><div class="ava" style="background:#3a9ad9"></div><div><div class="name">Команда Relay</div><div class="prev">Сборка готова</div></div></div>
+        <div class="row"><div class="ava" style="background:#e6a23c"></div><div><div class="name">Zed</div><div class="prev">Голосовое, 0:12</div></div></div>
+      </div>
+      <div class="chat">
+        <div class="head"><div class="ava" style="background:#7b61d6"></div><div class="name">Alibek</div>
+          <button class="moon" type="button" aria-label="Сменить тему"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 14.5A8 8 0 0 1 9.5 4a8 8 0 1 0 10.5 10.5z"/></svg></button></div>
+        <div class="feed">
+          <div class="b in">Привет! Так выглядит ваш текст.<time>08:46</time></div>
+          <div class="b out">Отлично, размер подходит.<time>08:46 ✓✓</time></div>
+        </div>
+        <div class="comp"><div class="field">Сообщение</div><div class="mic"></div></div>
+      </div>
+    </div>
+  </div>
+</template>
+
+<script>
+// Узор обоев: несколько каракулей на прозрачном, бесшовная плитка 90×90
+const doodle = `<svg xmlns='http://www.w3.org/2000/svg' width='90' height='90' fill='none' stroke='black' stroke-width='2.2' stroke-linecap='round' stroke-linejoin='round'><path d='M12 18c4-6 10-6 14 0'/><circle cx='62' cy='20' r='7'/><path d='M40 52l6 8 10-14'/><path d='M14 70h14M21 63v14'/><path d='M70 64c4 4 4 10 0 14'/><path d='M78 40l3 3-3 3-3-3z'/></svg>`;
+document.documentElement.style.setProperty('--doodle', `url("data:image/svg+xml;utf8,${encodeURIComponent(doodle)}")`);
+
+let K = 1;
+const ms = (n) => n * K;
+const flip = (t) => (t === 'dark' ? 'light' : 'dark');
+const wait = (n) => new Promise((r) => setTimeout(r, n));
+const reduced = () => matchMedia('(prefers-reduced-motion: reduce)').matches;
+
+/** Обои без анимации: мгновенно показать слой нужной темы */
+function wpInstant(stage) { for (const d of stage.querySelectorAll('.wp > div')) d.style.transitionDuration = '0ms'; }
+function wpFade(stage, dur, delay = 0) { for (const d of stage.querySelectorAll('.wp > div')) { d.style.transitionDuration = dur + 'ms'; d.style.transitionDelay = delay + 'ms'; } }
+
+const VARIANTS = [
+  {
+    id: 'now', tag: 'Сейчас', title: 'Как сейчас в Relay',
+    text: 'Цвета интерфейса перетекают за 200 мс, обои всё это время стоят старые и меняются одним кадром на ~250 мс.',
+    chips: [['bad', 'обои прыгают'], ['bad', 'два события подряд']],
+    async run(stage) {
+      stage.classList.add('blend');
+      wpInstant(stage);
+      // обои ждут конца смешивания цветов: держим старый слой видимым
+      const next = flip(stage.dataset.t), wl = stage.querySelector(next === 'dark' ? '.wp-light' : '.wp-dark'), wn = stage.querySelector(next === 'dark' ? '.wp-dark' : '.wp-light');
+      wl.style.opacity = 1; wn.style.opacity = 0;
+      stage.dataset.t = next;
+      await wait(ms(250));
+      wl.style.opacity = ''; wn.style.opacity = '';
+    },
+  },
+  {
+    id: 'blend', tag: 'Вариант 1', title: 'Обои перетекают вместе с цветами',
+    text: 'То же переливание, но обои растворяются одновременно с цветами и с той же кривой. Правка маленькая.',
+    chips: [['good', 'одно движение'], ['good', 'работает везде'], ['bad', 'пересчёт стилей каждый кадр']],
+    async run(stage) {
+      stage.classList.add('blend');
+      wpFade(stage, ms(200));
+      stage.dataset.t = flip(stage.dataset.t);
+    },
+  },
+  {
+    id: 'circle', tag: 'Вариант 2', title: 'Круг от точки нажатия',
+    text: 'Новая тема раскрывается кругом из кнопки, как в мобильном Telegram. В Relay — через View Transitions: браузер снимает экран и растит круг маской.',
+    chips: [['good', 'эффектно'], ['good', 'тема и обои целиком'], ['good', 'кадры на композиторе'], ['bad', 'экран — снимок на 0,45 с']],
+    pick: true,
+    async run(stage, from) {
+      const next = flip(stage.dataset.t);
+      const ghost = stage.cloneNode(true);
+      ghost.classList.remove('blend'); ghost.classList.add('ghost'); ghost.dataset.t = next;
+      wpInstant(ghost);
+      const r = stage.getBoundingClientRect();
+      const x = from ? from.x - r.left : r.width - 20, y = from ? from.y - r.top : 20;
+      const rad = Math.hypot(Math.max(x, r.width - x), Math.max(y, r.height - y));
+      stage.appendChild(ghost);
+      const a = ghost.animate({ clipPath: [`circle(0px at ${x}px ${y}px)`, `circle(${rad}px at ${x}px ${y}px)`] }, { duration: ms(450), easing: 'cubic-bezier(.4,0,.2,1)' });
+      await a.finished;
+      stage.classList.remove('blend'); wpInstant(stage); stage.dataset.t = next;
+      ghost.remove();
+    },
+  },
+  {
+    id: 'fade', tag: 'Вариант 3', title: 'Растворение экрана целиком',
+    text: 'Тоже View Transitions, без круга: старый экран тает поверх нового за 250 мс. Спокойнее круга, так же дёшево.',
+    chips: [['good', 'тема и обои целиком'], ['good', 'кадры на композиторе'], ['bad', 'скромнее круга']],
+    async run(stage) {
+      const ghost = stage.cloneNode(true);
+      ghost.classList.remove('blend'); ghost.classList.add('ghost');
+      wpInstant(ghost);
+      stage.appendChild(ghost);
+      stage.classList.remove('blend'); wpInstant(stage); stage.dataset.t = flip(stage.dataset.t);
+      await ghost.animate({ opacity: [1, 0] }, { duration: ms(250), easing: 'ease-out' }).finished;
+      ghost.remove();
+    },
+  },
+  {
+    id: 'stagger', tag: 'Вариант 4', title: 'Сначала интерфейс, потом обои',
+    text: 'Цвета перетекают как сейчас, обои проявляются следом с задержкой 100 мс. Скачка нет, но смена всё ещё читается как два события.',
+    chips: [['good', 'без скачка'], ['bad', 'два события подряд']],
+    async run(stage) {
+      stage.classList.add('blend');
+      wpFade(stage, ms(250), ms(300));
+      stage.dataset.t = flip(stage.dataset.t);
+    },
+  },
+];
+
+const grid = document.getElementById('grid');
+const tpl = document.getElementById('stage');
+const stages = [];
+for (const v of VARIANTS) {
+  const card = document.createElement('section');
+  card.className = 'card' + (v.pick ? ' pick' : '');
+  card.innerHTML = `<header><span class="tag"></span><h2></h2></header><p></p><div class="verdict"></div>`;
+  card.querySelector('.tag').textContent = v.tag + (v.pick ? ' · советую' : '');
+  card.querySelector('h2').textContent = v.title;
+  card.querySelector('p').textContent = v.text;
+  for (const [kind, label] of v.chips) { const c = document.createElement('span'); c.className = 'chip ' + kind; c.textContent = label; card.querySelector('.verdict').appendChild(c); }
+  const stage = tpl.content.firstElementChild.cloneNode(true);
+  card.insertBefore(stage, card.querySelector('p'));
+  grid.appendChild(card);
+  let busy = false;
+  const go = async (e) => {
+    if (busy) return;
+    busy = true;
+    try {
+      if (reduced()) { stage.classList.remove('blend'); wpInstant(stage); stage.dataset.t = flip(stage.dataset.t); }
+      else await v.run(stage, e && e.clientX ? { x: e.clientX, y: e.clientY } : null);
+    } finally { busy = false; }
+  };
+  stage.querySelector('.moon').addEventListener('click', go);
+  stages.push({ stage, go });
+}
+
+document.getElementById('all').addEventListener('click', () => {
+  for (const s of stages) { const r = s.stage.querySelector('.moon').getBoundingClientRect(); s.go({ clientX: r.left + r.width / 2, clientY: r.top + r.height / 2 }); }
+});
+for (const [id, k] of [['k1', 1], ['k4', 4]]) {
+  document.getElementById(id).addEventListener('click', () => {
+    K = k;
+    document.documentElement.style.setProperty('--k', k);
+    for (const b of document.querySelectorAll('.seg button')) b.setAttribute('aria-pressed', String(b.id === id));
+  });
+}
+</script>

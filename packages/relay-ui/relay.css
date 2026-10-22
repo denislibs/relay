@@ -645,6 +645,8 @@ body { margin: 0; font-family: var(--font-sans); color: var(--ink); background: 
 
 /* ---------- Theme switch: token colors are blended frame by frame on <html>; other transitions are off meanwhile ---------- */
 .rl-theme-switching, .rl-theme-switching *, .rl-theme-switching *::before, .rl-theme-switching *::after { transition: none !important; }
+/* смена темы кругом (themeSwitch.ts): новая тема поверх старой, круг — clip-path из JS; своё растворение браузера выключено */
+::view-transition-old(root), ::view-transition-new(root) { animation: none; mix-blend-mode: normal; }
 
 @media (prefers-reduced-motion: reduce) {
   .rl-ripple, .rl-empty-line, .rl-empty-fill, .rl-empty-dot, .rl-empty-float, .rl-sync-draw, .rl-sync-spin, .rl-linear span, .rl-fab, .rl-slide-panel, .rl-icon, .rl-icon path { animation-duration: 1ms !important; animation-iteration-count: 1 !important; transition-duration: 1ms !important; }

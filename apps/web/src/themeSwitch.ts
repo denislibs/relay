@@ -1,9 +1,10 @@
-import { beginHeavyAnimation, reducedMotion, requestMutation } from '@relay/ui';
+import { beginHeavyAnimation, flushFrames, reducedMotion, requestMutation } from '@relay/ui';
 import tokens from '@relay/ui/tokens.json';
 import { accentCss, accentTokens } from './accent';
-// Смена темы и акцента кадр за кадром: цвета токенов смешиваются на <html> от старых значений
-// к новым (≈200 мс). Остальные transition на это время выключены (.rl-theme-switching):
-// иначе каждый элемент переливался бы по-своему.
+// Смена темы: новая тема раскрывается кругом из точки нажатия (View Transitions, как в мобильном Telegram).
+// Где View Transitions нет — и для смены акцента — цвета токенов смешиваются на <html> кадр за кадром
+// (≈200 мс), а обои тают вместе с ними (Wallpaper в relay-ui). Остальные transition на это время выключены
+// (.rl-theme-switching): иначе каждый элемент переливался бы по-своему.
 
 type Rgba = [number, number, number, number];
 type Theme = 'light' | 'dark';
@@ -58,9 +59,13 @@ const themeNow = (root: HTMLElement): Theme => {
 /** Палитра окончательно сменилась (тема или акцент). Кто рисует на canvas и запомнил цвета — перечитывает их. */
 function paletteChanged(): void { requestMutation(() => dispatchEvent(new Event('rl:palette'))); }
 
+// цвета обоев не смешиваются: обои читают их сразу после смены и тают снимком (иначе полпути — rgba, а не hex)
+const NOT_BLENDED = /^--wallpaper/;
+
 function blend(root: HTMLElement, from: Map<string, Rgba>, to: Map<string, Rgba>, swap: () => void, animate: boolean): void {
   const run = ++running;
-  const names = [...to.keys()].filter((n) => { const a = from.get(n), b = to.get(n)!; return a && a.some((x, i) => x !== b[i]); });
+  stopCircle();
+  const names = [...to.keys()].filter((n) => { const a = from.get(n), b = to.get(n)!; return !NOT_BLENDED.test(n) && a && a.some((x, i) => x !== b[i]); });
   if (!animate || reducedMotion() || !names.length) {
     requestMutation(() => { if (run !== running) return; clear(root); swap(); paletteChanged(); });   // прерванное смешивание не оставляет переопределений
     return;
@@ -90,6 +95,62 @@ function blend(root: HTMLElement, from: Map<string, Rgba>, to: Map<string, Rgba>
   });
 }
 
+// ---------- круг из точки нажатия ----------
+
+const CIRCLE_MS = 450;
+type VT = { ready: Promise<void>; finished: Promise<void>; skipTransition(): void };
+type DocVT = Document & { startViewTransition?: (cb: () => void | Promise<void>) => VT };
+let circle: VT | null = null;
+
+// где нажали последний раз: переключатель темы в меню или в настройках
+let lastPoint: { x: number; y: number; t: number } | null = null;
+if (typeof addEventListener === 'function') {
+  addEventListener('pointerdown', (e: PointerEvent) => { lastPoint = { x: e.clientX, y: e.clientY, t: performance.now() }; }, { capture: true, passive: true });
+}
+
+/** Центр круга: недавнее нажатие; с клавиатуры — элемент в фокусе; иначе центр окна. */
+export function circleOrigin(now = performance.now()): { x: number; y: number } {
+  if (lastPoint && now - lastPoint.t < 1500) return { x: lastPoint.x, y: lastPoint.y };
+  const a = typeof document !== 'undefined' ? document.activeElement : null;
+  if (a && a !== document.body && a instanceof HTMLElement) { const r = a.getBoundingClientRect(); if (r.width) return { x: r.left + r.width / 2, y: r.top + r.height / 2 }; }
+  return { x: innerWidth / 2, y: innerHeight / 2 };
+}
+
+/** Радиус, при котором круг из (x, y) закрывает всё окно w×h. */
+export const circleRadius = (x: number, y: number, w: number, h: number): number => Math.hypot(Math.max(x, w - x), Math.max(y, h - y));
+
+function stopCircle() { circle?.skipTransition(); circle = null; }
+
+/** Есть View Transitions и движение не урезано — смена темы кругом. */
+const canCircle = () => typeof (document as DocVT).startViewTransition === 'function' && !reducedMotion();
+
+function circleSwitch(root: HTMLElement, pref: 'system' | 'light' | 'dark'): void {
+  running++;            // прервать смешивание, если шло
+  clear(root);
+  stopCircle();
+  const { x, y } = circleOrigin();
+  const r = circleRadius(x, y, innerWidth, innerHeight);
+  const end = beginHeavyAnimation(CIRCLE_MS + 150);
+  root.classList.add('rl-theme-vt');
+  const t = (document as DocVT).startViewTransition!(() => {
+    setAttr(root, pref);
+    // браузер ждёт новое состояние и не даёт кадров (requestAnimationFrame молчит): перерисовка темы и
+    // обоев — сейчас, иначе в круге сначала окажутся старые обои
+    flushFrames(6);
+  });
+  circle = t;
+  t.ready.then(() => {
+    root.animate({ clipPath: [`circle(0px at ${x}px ${y}px)`, `circle(${r}px at ${x}px ${y}px)`] },
+      { duration: CIRCLE_MS, easing: 'cubic-bezier(.4,0,.2,1)', pseudoElement: '::view-transition-new(root)' });
+  }).catch(() => {});
+  t.finished.catch(() => {}).then(() => {
+    if (circle === t) circle = null;
+    if (!circle) root.classList.remove('rl-theme-vt');
+    end();
+    paletteChanged();
+  });
+}
+
 let accentNow = 'green';
 
 /**
@@ -98,6 +159,7 @@ let accentNow = 'green';
  */
 export function switchTheme(root: HTMLElement, pref: 'system' | 'light' | 'dark', toDark: boolean, animate: boolean): void {
   const from = themeNow(root), to: Theme = toDark ? 'dark' : 'light';
+  if (animate && from !== to && canCircle()) { circleSwitch(root, pref); return; }
   blend(root, palette(from, accentNow), palette(to, accentNow), () => setAttr(root, pref), animate && from !== to);
 }
 

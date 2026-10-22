@@ -763,17 +763,18 @@ function nudgeWallpaper() {
   wallpapers.forEach(function (w) { var end = beginHeavyAnimation(700); w.toNextPosition(end); });
 }
 function readTheme(el) {
-  var cs = getComputedStyle(el), dark = false;
+  var cs = getComputedStyle(el), root = document.documentElement;
   var colors = [1, 2, 3, 4].map(function (i) { return cs.getPropertyValue('--wallpaper-' + i).trim() || '#dfe9d6'; });
-  var bg = cs.getPropertyValue('--bg').trim();
-  // dark theme = dark page background
-  var m = /^#?([0-9a-f]{2})([0-9a-f]{2})([0-9a-f]{2})/i.exec(bg);
-  if (m) dark = (parseInt(m[1], 16) + parseInt(m[2], 16) + parseInt(m[3], 16)) / 3 < 96;
+  // тема — по атрибуту (или ОС), а не по цвету фона: во время смены темы цвета на <html> смешиваются
+  var attr = root.getAttribute('data-theme');
+  var dark = attr ? attr === 'dark' : !!(window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches);
   return { colors: colors, dark: dark, ink: cs.getPropertyValue('--wallpaper-pattern').trim() || '#000000' };
 }
+var THEME_FADE_MS = 200;   // = длительность смешивания цветов темы (themeSwitch.ts)
 var TW_VARS = ['--tw-image', '--tw-size', '--tw-opacity', '--tw-blur', '--tw-background'];
-/* Снимок текущих обоев поверх хоста: после смены цветов/узора тает за 300 мс (кроссфейд без вспышки). */
-function crossfadeSnapshot(el) {
+/* Снимок текущих обоев поверх хоста: после смены цветов/узора тает за 300 мс (кроссфейд без вспышки).
+   ms — смена темы: тает сразу и вместе с цветами интерфейса (WAAPI: transition на время смены темы выключены). */
+function crossfadeSnapshot(el, ms) {
   var cv = el.querySelector('canvas.tw-canvas');
   if (!cv || !cv.width) return;
   var snap = document.createElement('div');
@@ -786,6 +787,12 @@ function crossfadeSnapshot(el) {
   var pat = el.querySelector('.tw-pattern');
   if (pat) snap.appendChild(pat.cloneNode(false));
   el.appendChild(snap);
+  if (ms) {
+    var done = beginHeavyAnimation(ms + 20);
+    snap.animate({ opacity: [1, 0] }, { duration: ms, easing: 'cubic-bezier(.2,.7,.3,1)', fill: 'forwards' }).finished
+      .catch(function () {}).then(function () { snap.remove(); done(); });
+    return;
+  }
   var end = beginHeavyAnimation(320);
   requestAnimationFrame(function () { requestAnimationFrame(function () { snap.style.opacity = '0'; }); });
   setTimeout(function () { snap.remove(); end(); }, 340);
@@ -802,8 +809,6 @@ function Wallpaper(props) {
     function apply(animate) {
       requestMeasure(function () {
         var P = latest.current;
-        // идёт смена темы: токены на <html> смешиваются (rgba, не hex) — применим по снятию класса
-        if (document.documentElement.classList.contains('rl-theme-switching')) return;
         var t = readTheme(el);
         // props.dark — тема, с которой отрисован App; DOM переключился раньше рендера: ждём props (эффект по ним применит один раз)
         if (typeof P.dark === 'boolean' && P.dark !== t.dark) return;
@@ -817,8 +822,13 @@ function Wallpaper(props) {
         if (theme && key === lastKey) return;
         var modeChanged = theme && t.dark !== theme.dark;
         var themeSwitch = !theme || modeChanged || (!custom && t.colors.join() !== theme.colors.join());
+        var first = !theme;
         theme = t; lastKey = key;
         requestMutation(function () {
+          // смена темы (или цветов темы): старые обои тают вместе с цветами интерфейса. Под кругом смены темы
+          // (View Transition, .rl-theme-vt) снимок не нужен — его снимет сам браузер
+          var root = document.documentElement;
+          if (wp && !first && themeSwitch && !reducedMotion() && !root.classList.contains('rl-theme-vt')) crossfadeSnapshot(el, THEME_FADE_MS);
           // светлая ↔ тёмная: узор меняет режим (маска ↔ рисунок), а updatePattern режим маски не снимает — собираем заново
           if (wp && modeChanged) { wallpapers.splice(wallpapers.indexOf(wp), 1); wp.dispose(); wp = null; }
           var size = patternSize(set) + 'px';
@@ -872,7 +882,8 @@ function Wallpaper(props) {
     };
   }, []);
   var colorsKey = props.colors ? props.colors.join() : '';
-  useEffect(function () { if (rerun.current) rerun.current(true); }, [props.pattern, colorsKey, props.dark, props.intensity, !!props.image]);
+  // layout-эффект: при смене темы под View Transition кадр прогоняется синхронно (flushFrames) — обои успевают в снимок
+  useLayoutEffect(function () { if (rerun.current) rerun.current(true); }, [props.pattern, colorsKey, props.dark, props.intensity, !!props.image]);
   // своя картинка — отдельным слоем над градиентом; проявляется, когда декодирована (без вспышки пустого фона)
   // убрали картинку — слой не пропадает, а тает (под ним уже собраны обои)
   var shown = useState(null), shownUrl = shown[0], setShownUrl = shown[1];
