@@ -658,6 +658,16 @@ html[data-anim="0"] .app-chatcol, html[data-anim="0"] .app-chatcol-below, html[d
 /* музыка и голосовые: круглая кнопка 48 px, у кружка — его кадр */
 .app-sm-play { flex: none; width: 48px; height: 48px; display: grid; place-items: center; border: 0; border-radius: 50%; background: var(--brand-strong); color: #fff; cursor: pointer; background-size: cover; background-position: center; }
 .app-sm-play-round { color: #fff; box-shadow: inset 0 0 0 100px rgba(0,0,0,.25); }
+/* загрузка трека (SharedMedia LoadRing): затемнение и белое кольцо поверх кнопки; иконка «плей» под ним прячется */
+.app-sm-play { position: relative; }
+.app-sm-play > .rl-icon { transition: opacity 200ms ease-in-out; }
+.app-sm-play[aria-busy="true"] > .rl-icon { opacity: 0; }
+.app-sm-load { position: absolute; inset: 0; border-radius: 50%; background: rgba(0, 0, 0, .3); opacity: 0; transform: scale(0); pointer-events: none; transition: opacity 200ms ease-in-out, transform 200ms ease-in-out; }
+.app-sm-load.is-on { opacity: 1; transform: none; }
+.app-sm-load svg { width: 100%; height: 100%; animation: app-sm-load-spin 2s linear infinite; }
+.app-sm-load circle { fill: none; stroke: #fff; stroke-width: 2; stroke-linecap: round; transform: rotate(-90deg); transform-origin: center; transition: stroke-dasharray 200ms ease-in-out; }
+@keyframes app-sm-load-spin { to { transform: rotate(360deg); } }
+@media (prefers-reduced-motion: reduce) { .app-sm-load svg { animation: none; } }
 /* медиа: у видео — длительность в углу */
 .app-media-cell .app-media-dur { position: absolute; top: 5px; left: 5px; padding: 1px 6px; border-radius: 6px; background: rgba(0,0,0,.35); color: #fff; font: 500 12px/18px var(--font-sans); }
 .app-media-video { position: absolute; inset: 0; display: grid; place-items: center; background: #2b2f33; color: #fff; }

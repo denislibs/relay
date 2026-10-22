@@ -25,7 +25,7 @@ var state = { key: null, playing: false, time: 0, duration: 0, rate: load(RATE_K
   volume: Math.min(1, load(VOL_KEY, 1)), muted: false, order: ORDERS.indexOf(savedOrder) >= 0 ? savedOrder : 'all' };
 
 function emit() { var s = snapshot(); for (var i = 0; i < subs.length; i++) subs[i](s); }
-function snapshot() { return { key: state.key, playing: state.playing, time: state.time, duration: state.duration, rate: state.rate, fast: state.fast, track: cur, volume: state.volume, muted: state.muted, order: state.order, playlist: playlist }; }
+function snapshot() { return { key: state.key, playing: state.playing, loading: !!state.loading, buffered: state.buffered || 0, time: state.time, duration: state.duration, rate: state.rate, fast: state.fast, track: cur, volume: state.volume, muted: state.muted, order: state.order, playlist: playlist }; }
 
 function el() {
   if (audio) return audio;
@@ -34,7 +34,7 @@ function el() {
   // с CORS: звук можно разобрать анализатором (кольцо вокруг играющего трека); хранилище отвечает CORS для приложения
   audio.crossOrigin = 'anonymous';
   audio.addEventListener('play', function () { state.playing = true; loop(); emit(); session(); });
-  audio.addEventListener('pause', function () { state.playing = false; tick(); emit(); session(); });
+  audio.addEventListener('pause', function () { state.playing = false; state.loading = false; tick(); emit(); session(); });
   audio.addEventListener('loadedmetadata', function () { if (isFinite(audio.duration)) state.duration = audio.duration; emit(); session(); });
   audio.addEventListener('ended', function () {
     state.playing = false; state.time = 0; tick(); emit();
@@ -42,6 +42,20 @@ function el() {
     // дальше — следующий трек плейлиста / следующее голосовое того же чата (как в Telegram)
     var next = neighbour(1, true);
     if (next) play(next); else if (isMusic()) { audio.currentTime = 0; emit(); } else close();
+  });
+  // загрузка (как в Telegram Web K — кольцо поверх кнопки): с начала нового файла и пока ждём данных, до первого
+  // звука; buffered — доля загруженного (дуга кольца)
+  var busy = function (on) { if (state.loading !== on) { state.loading = on; emit(); } };
+  audio.addEventListener('loadstart', function () { state.buffered = 0; busy(true); });
+  audio.addEventListener('waiting', function () { busy(true); });
+  audio.addEventListener('playing', function () { busy(false); });
+  audio.addEventListener('canplaythrough', function () { if (audio.paused) busy(false); });
+  audio.addEventListener('error', function () { busy(false); });
+  audio.addEventListener('progress', function () {
+    var b = audio.buffered, d = audio.duration;
+    if (!b.length || !isFinite(d) || d <= 0) return;
+    var f = Math.min(1, b.end(b.length - 1) / d);
+    if (Math.abs(f - (state.buffered || 0)) > 0.01) { state.buffered = f; if (state.loading) emit(); }
   });
   audio.addEventListener('ratechange', session);
   audio.addEventListener('seeked', session);
@@ -93,7 +107,7 @@ export function seek(key, fraction) {
 }
 export function close() {
   if (audio) { audio.pause(); audio.removeAttribute('src'); audio.load(); }
-  cur = null; state.key = null; state.playing = false; state.time = 0; state.duration = 0;
+  cur = null; state.key = null; state.playing = false; state.loading = false; state.time = 0; state.duration = 0;
   tick(); emit(); session();
 }
 export function setRate(rate) {

@@ -260,6 +260,7 @@ function TrackRow({ m, chatId, items }: { m: Msg; chatId: number; items: Msg[] }
   const [st, setSt] = useState(() => player.playerState());
   useEffect(() => player.subscribe(setSt), []);
   const playing = st.key === key && st.playing;
+  const loading = st.key === key && !!st.loading;
   const music = a.kind === 'audio';
   const g = getGlobal(), me = g.me?.userId;
   const chat = g.chats.find((c) => c.id === chatId);
@@ -279,8 +280,9 @@ function TrackRow({ m, chatId, items }: { m: Msg; chatId: number; items: Msg[] }
   return (
     <div class="app-sm-row">
       <button type="button" class={'app-sm-play' + (a.kind === 'round' && a.thumb ? ' app-sm-play-round' : '')} style={a.kind === 'round' && a.thumb ? { backgroundImage: `url(${a.thumb})` } : undefined}
-        aria-label={playing ? 'Пауза' : 'Слушать'} onClick={toggle}>
+        aria-label={loading ? 'Загрузка' : playing ? 'Пауза' : 'Слушать'} aria-busy={loading || undefined} onClick={toggle}>
         <Icon name={playing ? 'pause' : 'play'} size={22} />
+        <LoadRing on={loading} progress={loading ? st.buffered ?? 0 : 0} />
       </button>
       <div class="app-sm-text">
         <div class="app-sm-head">
@@ -346,5 +348,19 @@ function GroupsList({ groups }: { groups: CommonGroup[] }) {
         </button>
       )} />
     </div>
+  );
+}
+
+/**
+ * Загрузка трека, как в Telegram Web K: поверх кнопки — затемнение и белое кольцо. Пока доля загруженного неизвестна —
+ * крутится короткая точка; дальше растёт дуга. Появляется и уходит масштабом и прозрачностью (200 мс).
+ */
+const RING_R = 21, RING_LEN = 2 * Math.PI * RING_R;
+function LoadRing({ on, progress }: { on: boolean; progress: number }) {
+  const arc = Math.max(5, Math.min(1, progress) * RING_LEN);
+  return (
+    <span class={'app-sm-load' + (on ? ' is-on' : '')} aria-hidden="true">
+      <svg viewBox="0 0 48 48"><circle cx="24" cy="24" r={RING_R} style={{ strokeDasharray: `${arc} ${RING_LEN}` }} /></svg>
+    </span>
   );
 }
