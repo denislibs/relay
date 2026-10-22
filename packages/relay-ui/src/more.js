@@ -546,20 +546,27 @@ function SideFrame(props) {
 var SLIDE_MS = 300;
 function SlideStack(props) {
   var order = props.order || [], active = props.active;
-  var st = useState(null), anim = st[0]; // { from, to, dir: 1 push | -1 pop }
+  // переход считается прямо в рендере, в котором сменилась страница: раньше его ставил эффект, и один рендер
+  // (а с отложенным рендером — и кадр) новая страница стояла без анимации, а уходящую удаляло из DOM — потом она
+  // строилась заново (список монтировался с нуля и «моргал»)
+  var animRef = useRef(null); // { from, to, dir: 1 push | -1 pop }
   var prev = useRef(active);
-  useLayoutEffect(function () {
-    if (prev.current === active) return;
+  var redraw = useState(0)[1];
+  if (prev.current !== active) {
     var from = prev.current;
     prev.current = active;
     // instant — сменить страницу без слайда (панель ещё закрыта и сама выезжает уже на нужной странице)
-    if (reducedMotion() || props.instant) { st[1](null); return; }
-    var dir = order.indexOf(active) > order.indexOf(from) ? 1 : -1;
-    st[1]({ from: from, to: active, dir: dir });
+    animRef.current = reducedMotion() || props.instant ? null
+      : { from: from, to: active, dir: order.indexOf(active) > order.indexOf(from) ? 1 : -1 };
+  }
+  useEffect(function () {
+    var a = animRef.current;
+    if (!a) return;
     var end = beginHeavyAnimation(SLIDE_MS);
-    var t = setTimeout(function () { st[1](null); end(); }, SLIDE_MS);
+    var t = setTimeout(function () { if (animRef.current === a) { animRef.current = null; redraw(function (n) { return n + 1; }); } end(); }, SLIDE_MS);
     return function () { clearTimeout(t); end(); };
   }, [active]);
+  var anim = animRef.current;
   var root = order[0];
   return h('div', { class: cx('rl-slides', props.variant === 'tabs' && 'rl-slides-tabs') }, order.map(function (key) {
     var isActive = key === active, leaving = anim && anim.from === key;

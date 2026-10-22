@@ -27,8 +27,9 @@ body { background: var(--bg); color: var(--ink); font-family: var(--font-sans); 
 .app-skel > div { background: var(--card); }   /* строки скелетона закрывают готовый список под собой */
 /* уход скелетона — стирание построчно сверху вниз (как в Telegram Web K: 150 мс, сдвиг 15 мс) */
 .app-listwrap > .rl-presence[data-state="closing"] .app-skel > div { animation: app-fade-out 150ms cubic-bezier(.37, 0, .63, 1) both; animation-delay: calc(var(--i) * 15ms); }
-/* список без скелетона над ним (данные были сразу) — проявляется; под скелетоном его открывает стирание */
-.app-listwrap:not(.is-covered) > :not(.rl-presence) { animation: app-fade 320ms var(--ease-out) both; }
+/* список без скелетона над ним (данные были сразу) — проявляется при первом показе; под скелетоном его
+   открывает стирание; страницы папок при переключении вкладок не проявляются (Sidebar: is-fresh) */
+.app-listwrap.is-fresh > :not(.rl-presence) { animation: app-fade 320ms var(--ease-out) both; }
 @keyframes app-rise { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: none; } }
 @keyframes app-fade-out { to { opacity: 0; } }
 @media (prefers-reduced-motion: reduce) { .app-skel > div, .app-listwrap > * { animation-duration: 1ms !important; animation-delay: 0ms !important; } }

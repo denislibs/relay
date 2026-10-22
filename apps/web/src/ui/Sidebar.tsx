@@ -94,6 +94,8 @@ export const SideRow = memo(function SideRow({ c, meId, active, showDraft, muted
 const ROW = 72; // высота строки чата (--size-row) — список виртуальный, строки фиксированной высоты
 
 
+let listShownAt = 0;   // когда список чатов впервые показан с данными (проявление — только тогда)
+
 export function Sidebar() {
   const [menu, setMenu] = useState<HTMLElement | null>(null);   // главное меню: у кнопки ☰
   // контекстное меню строки чата (правая кнопка): как в Telegram — у курсора
@@ -150,6 +152,10 @@ export function Sidebar() {
   const covered = useRef(false);
   if (waiting) covered.current = false;
   if (skeleton) covered.current = true;
+  // проявление списка — только при первом приходе данных (окно 400 мс): страница папки, смонтированная при
+  // переключении вкладки, иначе въезжала полупрозрачной, и сквозь строки «моргал» белый фон карточки
+  if (!waiting && !listShownAt) listShownAt = performance.now();
+  const fade = !covered.current && !waiting && performance.now() - listShownAt < 400;
 
   const q = search.trim().toLowerCase();
   // «Все» — только непрерывно загруженный диапазон (как в Telegram): старые непрочитанные из-за курсора
@@ -181,7 +187,7 @@ export function Sidebar() {
     const list = listOf(f);
     return (
       <>
-      <div class={'app-listwrap' + (covered.current ? ' is-covered' : '')}>
+      <div class={'app-listwrap' + (fade ? ' is-fresh' : '')}>
         <Presence show={skeleton} exitMs={320}>
           <div class="app-skel" aria-busy="true" aria-label="Загрузка чатов">
             {Array.from({ length: 9 }, (_, i) => <div key={i} style={{ '--i': i }}><ChatRowSkeleton /></div>)}
