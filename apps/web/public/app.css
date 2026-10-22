@@ -683,10 +683,6 @@ html[data-anim="0"] .app-chatcol, html[data-anim="0"] .app-chatcol-below, html[d
 
 /* Музыка профиля: плашка поверх низа аватара */
 .app-prof-ava { position: relative; display: inline-flex; justify-content: center; }
-.app-prof-music { position: absolute; left: 50%; bottom: -6px; transform: translateX(-50%); display: inline-flex; align-items: center; gap: 4px; max-width: 220px; padding: 3px 8px; border: 0; border-radius: 12px;
-  background: rgba(0, 0, 0, .35); color: #fff; font: 500 12px/16px var(--font-sans); cursor: pointer; -webkit-backdrop-filter: blur(10px); backdrop-filter: blur(10px); white-space: nowrap; animation: rl-fade 240ms var(--ease-out) both; }
-.app-prof-music span { overflow: hidden; text-overflow: ellipsis; }
-.app-prof-music:hover { background: rgba(0, 0, 0, .5); }
 
 /* Окно плейлиста (Playlist.tsx) — как в Telegram */
 .app-pl-dialog { background: var(--card); }
@@ -782,7 +778,7 @@ html[data-anim="0"] .app-chatcol, html[data-anim="0"] .app-chatcol-below, html[d
 .app-plinks-stack .app-svc { will-change: auto; }
 
 /* ---------- Шапка профиля с фото (Info): квадрат во всю ширину, имя поверх, полоски, листание ---------- */
-.app-gallery { position: relative; flex-shrink: 0; width: 100%; aspect-ratio: 1; overflow: hidden; border-radius: 0; background: #111; touch-action: pan-y;   /* углы — от самой панели, своё скругление лишнее */ user-select: none; cursor: pointer; margin-bottom: var(--space-3); }
+.app-gallery { position: relative; overflow: hidden; background: #111; touch-action: pan-y; user-select: none; cursor: pointer; }
 .app-gallery-track { position: absolute; inset: 0; transition: transform 320ms cubic-bezier(.22, .9, .3, 1); will-change: transform; }
 .app-gallery.is-dragging .app-gallery-track { transition: none; }
 .app-gallery-slide { position: absolute; top: 0; width: 100%; height: 100%; overflow: hidden; }
@@ -796,13 +792,47 @@ html[data-anim="0"] .app-chatcol, html[data-anim="0"] .app-chatcol-below, html[d
 .app-gallery-prev { left: 0; justify-content: flex-start; }
 .app-gallery-next { right: 0; justify-content: flex-end; }
 .app-gallery:hover .app-gallery-nav, .app-gallery-nav:focus-visible { opacity: 1; }
-.app-gallery-info { position: absolute; left: 0; right: 0; bottom: 0; z-index: 2; padding: 48px 16px 14px; background: linear-gradient(to top, rgba(0, 0, 0, .55), transparent); color: #fff; pointer-events: none; display: flex; flex-direction: column; align-items: flex-start; }
-.app-gallery-info :is(button, a) { pointer-events: auto; }
-.app-gallery-info > :first-child:not(.app-gallery-name) { margin-bottom: 8px; position: static; transform: none; }
-.app-gallery-name { display: flex; align-items: center; gap: 6px; font: 500 20px/26px var(--font-sans); text-shadow: 0 1px 4px rgba(0, 0, 0, .35); }
-.app-gallery-sub { font: 400 14px/20px var(--font-sans); color: rgba(255, 255, 255, .85); }
-.app-gallery-sub .app-online { color: #8ff0b4; }
 @media (prefers-reduced-motion: reduce) { .app-gallery-track, .app-gallery-img { transition: none; } }
+/* ---------- шапка профиля (ProfileGallery), как в Telegram Web K ----------
+   Свёрнута: круг 120 px, под ним имя и статус по центру. Развёрнута: то же фото квадратом во всю ширину, подписи
+   белым в левом нижнем углу. Один элемент фото: масштаб (--hero-s = 120 / ширина) и скругление 50% → 0 за 0.3 с. */
+.app-hero-wrap { container-type: inline-size; --hero-ease: cubic-bezier(.4, 0, .2, 1); --hero-top: 16px; }
+.app-hero { position: relative; height: 216px; overflow: hidden; transition: height .3s var(--hero-ease); }
+.app-hero.has-music { height: 240px; }
+.app-hero.is-expanded { height: 100cqw; }
+.app-hero-photo { position: absolute; left: 0; top: 0; width: 100cqw; height: 100cqw; border-radius: 50%; transform-origin: 50% 0; transform: translateY(var(--hero-top)) scale(var(--hero-s, .3));
+  transition: transform .3s var(--hero-ease), border-radius .3s var(--hero-ease); will-change: transform; }
+.app-hero.is-expanded .app-hero-photo { transform: none; border-radius: 0; }
+.app-hero:not(.is-expanded) .app-gallery-track { transition: none; }   /* свернули — к первому фото без пролистывания */
+.app-hero:not(.is-expanded) :is(.app-gallery-bars, .app-gallery-nav) { opacity: 0; pointer-events: none; }
+.app-gallery-bars { transition: opacity .2s ease; }
+.app-hero-shade { position: absolute; left: 0; top: 0; width: 100%; height: 100cqw; pointer-events: none; opacity: 0; transition: opacity .1s ease;
+  background: linear-gradient(to top, rgba(0, 0, 0, .45), transparent 32%), linear-gradient(to bottom, rgba(0, 0, 0, .3), transparent 22%); }
+.app-hero.is-expanded .app-hero-shade { opacity: 1; transition: opacity .15s ease .15s; }
+.app-hero-info { position: absolute; left: 16px; right: 16px; top: calc(var(--hero-top) + 120px + 12px); pointer-events: none; transition: top .3s var(--hero-ease); }
+.app-hero.is-expanded .app-hero-info { top: calc(100cqw - 66px); }
+.app-hero.is-expanded.has-music .app-hero-info { top: calc(100cqw - 66px - 24px); }
+/* подпись — из центра под кругом в левый край: left 50% + translateX(-50%) → 0 (как в Telegram) */
+.app-hero-name, .app-hero-sub { position: relative; left: 50%; width: max-content; max-width: 100%; transform: translateX(-50%); overflow: hidden; white-space: nowrap; text-overflow: ellipsis;
+  transition: left .3s var(--hero-ease), transform .3s var(--hero-ease), color .3s var(--hero-ease); }
+.app-hero.is-expanded :is(.app-hero-name, .app-hero-sub) { left: 0; transform: none; }
+.app-hero-name { display: flex; align-items: center; gap: 6px; font: 500 22px/28px var(--font-sans); color: var(--ink); }
+.app-hero-sub { font: 400 15px/22px var(--font-sans); color: var(--ink-muted); }
+.app-hero-sub .app-online { color: var(--brand-text); transition: color .3s var(--hero-ease); }
+.app-hero.is-expanded .app-hero-name { color: #fff; text-shadow: 0 1px 4px rgba(0, 0, 0, .35); }
+.app-hero.is-expanded .app-hero-sub { color: rgba(255, 255, 255, .75); }
+.app-hero.is-expanded .app-hero-sub .app-online { color: #8ff0b4; }
+/* прикреплённый трек — полоса во всю ширину внизу шапки (в обоих видах, как в Telegram) */
+.rl-profile.has-music { position: relative; padding-bottom: calc(var(--space-6) + 24px); }
+.app-hero-music { position: absolute; left: 0; right: 0; bottom: 0; z-index: 2; display: flex; align-items: center; justify-content: center; gap: 4px; height: 24px; padding: 0 8px; border: 0;
+  background: color-mix(in srgb, var(--ink) 6%, transparent); color: var(--ink); font: 500 12px/1 var(--font-sans); letter-spacing: -.2px; cursor: pointer; transition: background-color .3s var(--hero-ease), color .3s var(--hero-ease); }
+.app-hero-music > span { overflow: hidden; white-space: nowrap; text-overflow: ellipsis; min-width: 0; }
+.app-hero-music .app-hero-music-title { font-weight: 400; opacity: .7; }
+.app-hero.is-expanded .app-hero-music { background: rgba(0, 0, 0, .2); color: #fff; }
+.app-hero-music:hover { background: color-mix(in srgb, var(--ink) 10%, transparent); }
+.app-hero.is-expanded .app-hero-music:hover { background: rgba(0, 0, 0, .3); }
+@media (prefers-reduced-motion: reduce) { .app-hero, .app-hero-photo, .app-hero-info, .app-hero-name, .app-hero-sub, .app-hero-shade { transition: none !important; } }
+html[data-anim="0"] :is(.app-hero, .app-hero-photo, .app-hero-info, .app-hero-name, .app-hero-sub, .app-hero-shade) { transition: none !important; }
 .app-bday-row .rl-tf-label { max-width: calc(100% - 20px); }   /* узкие поля — подпись целиком */
 
 /* ---------- Глобальный поиск (левая колонка), как в Telegram Web ---------- */

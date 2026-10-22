@@ -102,7 +102,9 @@ export function Info() {
   const gallery = useProfilePhotos(group || system ? null : peerId, chat?.photo as ProfilePhoto | null);
   const [slide, setSlide] = useState(0);
   const [viewer, setViewer] = useState<number | null>(null);
-  useEffect(() => { setSlide(0); setViewer(null); }, [chatId]);
+  // шапка с фото развёрнута во всю ширину (как в Telegram Web K): колесо вверх / свайп вниз у самого верха
+  const [expanded, setExpanded] = useState(false);
+  useEffect(() => { setSlide(0); setViewer(null); setExpanded(false); }, [chatId]);
   // как в Telegram: вкладки медиа доехали до верха и прилипли — шапка становится названием текущей вкладки
   // («Участники», «Медиа», «Файлы»…) со стрелкой наверх; смена вкладки — то же мягкое проявление заголовка
   const body = useRef<HTMLDivElement>(null);
@@ -121,6 +123,41 @@ export function Info() {
   };
   const toTop = () => body.current?.scrollTo({ top: 0, behavior: 'smooth' });
   useEffect(() => { setMedia(false); }, [chatId]);
+  // шапка с фото, как в Telegram Web K: у самого верха колесо вверх (или палец вниз) разворачивает фото во всю
+  // ширину, колесо вниз (палец вверх) и любая прокрутка — сворачивают; шаг, сменивший вид, страницу не прокручивает.
+  // Инерция трекпада после прокрутки (колесо ещё крутится, а панель уже доехала до верха) не разворачивает.
+  const canExpand = gallery.length > 0;
+  const expandedNow = useRef(expanded);
+  expandedNow.current = expanded;
+  useEffect(() => {
+    const el = body.current;
+    if (!el || !canExpand) return;
+    let scrolledAt = 0, touchY: number | null = null;
+    const set = (on: boolean) => { if (expandedNow.current !== on) { expandedNow.current = on; setExpanded(on); } };
+    const onScroll = () => { if (el.scrollTop > 0) { scrolledAt = performance.now(); set(false); } };
+    const onWheel = (e: WheelEvent) => {
+      if (e.ctrlKey || Math.abs(e.deltaX) > Math.abs(e.deltaY) || el.scrollTop > 0) return;
+      if (e.deltaY < 0 && !expandedNow.current && performance.now() - scrolledAt > 250) { e.preventDefault(); set(true); }
+      else if (e.deltaY > 0 && expandedNow.current) { e.preventDefault(); set(false); }
+    };
+    const onTouchStart = (e: TouchEvent) => { touchY = el.scrollTop <= 0 ? e.touches[0].clientY : null; };
+    const onTouchMove = (e: TouchEvent) => {
+      if (touchY == null) return;
+      const dy = e.touches[0].clientY - touchY;
+      if (dy > 12 && !expandedNow.current) { set(true); touchY = null; }
+      else if (dy < -12 && expandedNow.current) { e.preventDefault(); set(false); touchY = null; }
+    };
+    el.addEventListener('scroll', onScroll, { passive: true });
+    el.addEventListener('wheel', onWheel, { passive: false });
+    el.addEventListener('touchstart', onTouchStart, { passive: true });
+    el.addEventListener('touchmove', onTouchMove, { passive: false });
+    return () => {
+      el.removeEventListener('scroll', onScroll);
+      el.removeEventListener('wheel', onWheel);
+      el.removeEventListener('touchstart', onTouchStart);
+      el.removeEventListener('touchmove', onTouchMove);
+    };
+  }, [canExpand, chatId]);
   const subtitle = system ? 'служебные уведомления' : group ? (members ? membersStatus(members, false) : 'группа') : myPeer ? lastSeenText(!!myPeer.online, myPeer.lastSeen as string | null) : '';
 
   const addContact = () => setGlobal({ newContact: {
@@ -155,15 +192,16 @@ export function Info() {
           <ProfileGallery photos={gallery} index={slide} onIndex={setSlide} onOpen={setViewer}
             name={<>{title}{system ? <Verified size={22} /> : null}</>}
             sub={<span class={myPeer?.online ? 'app-online' : ''}>{subtitle || ' '}</span>}
-            extra={peerId ? <ProfileMusicPill userId={peerId} music={user?.music as ProfileMusicSummary | null | undefined} /> : null} />
+            music={peerId ? <ProfileMusicBar userId={peerId} music={user?.music as ProfileMusicSummary | null | undefined} /> : null}
+            expanded={expanded} onExpand={setExpanded} />
         ) : (
-        <div class="rl-profile">
+        <div class={'rl-profile' + (peerId && (user?.music as ProfileMusicSummary | null | undefined)?.top ? ' has-music' : '')}>
           <div class="app-prof-ava">
             <Avatar name={title} tone={chatTone(chat)} size={120} logo={system} {...avatarPhoto(chat?.photo as ProfilePhoto | null, true)} />
-            {peerId ? <ProfileMusicPill userId={peerId} music={user?.music as ProfileMusicSummary | null | undefined} /> : null}
           </div>
           <div class="rl-profile-name">{title}{system ? <Verified size={22} /> : null}</div>
           <div class={'rl-profile-sub' + (myPeer?.online ? ' app-online' : '')}>{subtitle || ' '}</div>
+          {peerId ? <ProfileMusicBar userId={peerId} music={user?.music as ProfileMusicSummary | null | undefined} /> : null}
         </div>
         )}
         <div class="rl-aside-group">
@@ -244,11 +282,17 @@ function Expand({ show, unclip, children }: { show: boolean; unclip?: boolean; c
 
 /** Музыка профиля — плашка поверх низа аватара (как в Telegram): «♪ трек ›», клик — играть и открыть плейлист.
  *  Сводка приходит в самом профиле (PublicUser.music) и обновляется по журналу (userUpdated) — без своего запроса. */
-function ProfileMusicPill({ userId, music }: { userId: number; music: ProfileMusicSummary | null | undefined }) {
+/** Прикреплённый трек — полоса во всю ширину внизу шапки (как в Telegram): ♫ Исполнитель - Название ›. */
+function ProfileMusicBar({ userId, music }: { userId: number; music: ProfileMusicSummary | null | undefined }) {
   if (!music?.top) return null;
+  const t = music.top.title, cut = t.search(/ [-–—] /);
+  const performer = cut > 0 ? t.slice(0, cut) : null, name = cut > 0 ? t.slice(cut + 3) : t;
   return (
-    <button type="button" class="app-prof-music" onClick={() => playProfileTop(userId, music.top)}>
-      <Icon name="music" size={14} /><span>{music.top.title}</span><Icon name="chevronRight" size={14} />
+    <button type="button" class="app-hero-music" onClick={() => playProfileTop(userId, music.top)}>
+      <Icon name="music" size={14} />
+      {performer ? <span>{performer}</span> : null}
+      <span class={performer ? 'app-hero-music-title' : undefined}>{performer ? '- ' + name : name}</span>
+      <Icon name="chevronRight" size={14} />
     </button>
   );
 }
