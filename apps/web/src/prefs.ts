@@ -128,7 +128,7 @@ export function loadPrefs(storage: KV | null = defaultStorage(), reduced = false
   if (raw !== null) {
     try {
       const j = JSON.parse(raw);
-      if (isObj(j) && (j.v === undefined || j.v === 1)) return sanitize(merge(d, j) as Prefs, d); // без v — до версионирования, это v1
+      if (isObj(j) && (j.v === undefined || j.v === 1)) return sharePattern(sanitize(merge(d, j) as Prefs, d)); // без v — до версионирования, это v1
       if (isObj(j) && THEMES.includes(j.theme as string)) d.theme = j.theme as ThemePref; // неизвестная версия: умолчания, тема — если читается
     } catch { /* битый JSON */ }
     return d;
@@ -136,6 +136,14 @@ export function loadPrefs(storage: KV | null = defaultStorage(), reduced = false
   // первого запуска ещё не было: переносим старую тему
   try { const t = storage.getItem(OLD_THEME_KEY); if (t === 'light' || t === 'dark') d.theme = t; } catch { /* */ }
   return d;
+}
+
+/** Узор обоев общий для светлой и тёмной темы. Раньше выбирался отдельно: разошлись — берём узор темы на экране. */
+export function sharePattern(p: Prefs, dark?: boolean): Prefs {
+  const { light, dark: night } = p.wallpaper;
+  if (light.pattern === night.pattern) return p;
+  const pattern = ((dark ?? isDark(p.theme)) ? night : light).pattern;
+  return { ...p, wallpaper: { light: { ...light, pattern }, dark: { ...night, pattern } } };
 }
 
 /** Иммутабельная запись по пути `anim.level`; остальные ветки сохраняют ссылки. */
@@ -170,7 +178,7 @@ export function localeTimeFormat(): '12h' | '24h' {
 }
 
 export function isDark(pref: ThemePref): boolean {
-  return pref === 'dark' || (pref === 'system' && matchMedia('(prefers-color-scheme: dark)').matches);
+  return pref === 'dark' || (pref === 'system' && typeof matchMedia !== 'undefined' && matchMedia('(prefers-color-scheme: dark)').matches);
 }
 
 /** Выставляет на :root всё, что зависит от настроек. Тему плавно меняет (themeSwitch.ts), только если она сменилась. */
@@ -199,6 +207,10 @@ export function setPrefs(values: Record<string, unknown>): void {
   const d = defaultPrefs(reducedMotion());
   let draft: Prefs = current;
   for (const [path, value] of Object.entries(values)) draft = setPath(draft, path, value);
+  // узор общий для обеих тем: выбрали в одной — тот же и в другой (цвета у каждой темы свои)
+  const patternOf = (t: 'light' | 'dark'): unknown => (draft.wallpaper as Partial<Prefs['wallpaper']> | undefined)?.[t]?.pattern;
+  const changed = (['light', 'dark'] as const).find((t) => typeof patternOf(t) === 'string' && patternOf(t) !== current.wallpaper[t].pattern);
+  if (changed) draft = setPath(draft, `wallpaper.${changed === 'light' ? 'dark' : 'light'}.pattern`, patternOf(changed));
   let next = sanitize(merge(d, draft) as Prefs, d); // мусор не попадает ни в состояние, ни в хранилище
   if ('anim.level' in values) next = { ...next, anim: animPreset(next.anim.level) };
   commit(next, true);

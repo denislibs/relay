@@ -1,5 +1,5 @@
 import { expect, test } from 'bun:test';
-import { PREFS_KEY, defaultPrefs, getPrefs, levelOf, loadPrefs, resetPrefsForTest, setPath, setPref, subscribePrefs, type KV } from './prefs';
+import { PREFS_KEY, defaultPrefs, getPrefs, levelOf, loadPrefs, sharePattern, resetPrefsForTest, setPath, setPref, subscribePrefs, type KV } from './prefs';
 
 const fake = (init: Record<string, string> = {}): KV & { m: Record<string, string> } => {
   const m = { ...init };
@@ -122,4 +122,26 @@ test('setPref wallpaper paths are sanitized', () => {
   expect(getPrefs().wallpaper.dark.image).toBe('mv4k2x1');
   setPref('wallpaper.dark.image', '../x"');
   expect(getPrefs().wallpaper.dark.image).toBeNull();
+});
+
+test('узор обоев общий для обеих тем, цвета — у каждой свои', () => {
+  const kv = fake(); resetPrefsForTest(kv);
+  setPref('wallpaper.dark.colors', ['#111111', '#222222', '#333333', '#444444']);
+  setPref('wallpaper.light', { ...getPrefs().wallpaper.light, pattern: 'spaceCats', colors: ['#aaaaaa', '#bbbbbb', '#cccccc', '#dddddd'] });
+  expect(getPrefs().wallpaper.dark.pattern).toBe('spaceCats');
+  expect(getPrefs().wallpaper.dark.colors).toEqual(['#111111', '#222222', '#333333', '#444444']);
+  setPref('wallpaper.dark.pattern', 'garden');
+  expect(getPrefs().wallpaper.light.pattern).toBe('garden');
+  expect(getPrefs().wallpaper.light.colors).toEqual(['#aaaaaa', '#bbbbbb', '#cccccc', '#dddddd']);
+  expect(resetPrefsForTest(kv).wallpaper.light.pattern).toBe('garden');   // и в хранилище
+});
+
+test('разошедшиеся узоры из старых настроек сводятся к узору темы на экране', () => {
+  const kv = fake();
+  const old = defaultPrefs();
+  kv.setItem(PREFS_KEY, JSON.stringify({ ...old, theme: 'dark', wallpaper: { light: { ...old.wallpaper.light, pattern: 'garden' }, dark: { ...old.wallpaper.dark, pattern: 'spaceCats' } } }));
+  const p = loadPrefs(kv);
+  expect(p.wallpaper.light.pattern).toBe('spaceCats');
+  expect(p.wallpaper.dark.pattern).toBe('spaceCats');
+  expect(sharePattern({ ...p, wallpaper: { ...p.wallpaper, light: { ...p.wallpaper.light, pattern: 'garden' } } }, false).wallpaper.dark.pattern).toBe('garden');
 });
