@@ -1,7 +1,7 @@
 // Пересылка сообщений, как в Telegram Web: «Переслать» → окно выбора чатов. Один чат — открываем его, пересылка
 // ждёт в поле ввода (можно дописать комментарий, скрыть отправителя или подписи); несколько — уходит сразу во все.
 import type { Entity } from '@relay/protocol';
-import { forwardMessages, openChat, sentSound } from './data';
+import { forwardMessages, openInner, sentSound } from './data';
 import { getGlobal, setGlobal, type ForwardDraft } from './global';
 import { showToast } from './settingsData';
 import { plural } from '@relay/ui';
@@ -37,7 +37,7 @@ export async function forwardTo(chatIds: number[], comment: string): Promise<voi
   if (chatIds.length === 1) {
     const chatId = chatIds[0];
     setGlobal({ fwdDraft: { ...getGlobal().fwdDraft, [chatId]: { ...pick, hideSender: false, hideCaption: false } } });
-    openChat(chatId);
+    openInner(chatId);   // переслать из чата — получатель поверх, «Назад» возвращает (docs/navigation-rules.md)
     return;
   }
   sentSound();

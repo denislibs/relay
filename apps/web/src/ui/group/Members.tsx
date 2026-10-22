@@ -1,7 +1,7 @@
 import { ContactPicker, Modal, SearchInput, peerTone } from '@relay/ui';
 import type { GroupInvite, GroupMember } from '@relay/protocol';
 import { useState } from 'preact/hooks';
-import { createDirectChat, engineSend, startDirectChat } from '../../data';
+import { createDirectChat, engineSend, openUserChat } from '../../data';
 import { useGlobal } from '../../global';
 import { act, adminCan, canInvite, inviteUrl, plural, useGroup, useGroupData } from '../../groups';
 import { senderAvatar } from '../../profilePhoto';
@@ -28,7 +28,7 @@ export function ManageMembers({ nav }: { nav: Nav }) {
     if (m.userId === myId) return;
     // обычному участнику действия не нужны — сразу личный чат
     if (m.role === 'member' && (canBan || canPromote)) setMenu(m);
-    else { nav.close(); void startDirectChat(m.userId); }
+    else { nav.close(); void openUserChat(m.userId); }   // поверх группы (docs/navigation-rules.md)
   };
   const remove = async (m: GroupMember) => { setMenu(null); await act('DELETE', `/groups/${chatId}/members/${m.userId}`, undefined, `${m.name} удалён(а) из группы`); };
   return (
@@ -45,7 +45,7 @@ export function ManageMembers({ nav }: { nav: Nav }) {
         actions={[<button key="x" type="button" class="rl-mdl-btn" onClick={() => setMenu(null)}>Закрыть</button>]}>
         {menu ? (
           <div class="app-gm-actions">
-            <button type="button" class="rl-optrow" onClick={() => { const id = menu.userId; setMenu(null); nav.close(); void startDirectChat(id); }}>Написать сообщение</button>
+            <button type="button" class="rl-optrow" onClick={() => { const id = menu.userId; setMenu(null); nav.close(); void openUserChat(id); }}>Написать сообщение</button>
             {canPromote ? <button type="button" class="rl-optrow" onClick={() => { const id = menu.userId; setMenu(null); nav.go('gAdminRights', { userId: id, fresh: true }); }}>Назначить администратором</button> : null}
             {canBan ? <button type="button" class="rl-optrow" onClick={() => { const id = menu.userId; setMenu(null); nav.go('gException', { userId: id }); }}>Ограничить права</button> : null}
             {canBan ? <button type="button" class="rl-optrow app-gm-danger" onClick={() => void remove(menu)}>Удалить из группы</button> : null}

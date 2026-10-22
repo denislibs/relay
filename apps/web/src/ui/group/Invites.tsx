@@ -1,7 +1,7 @@
 import { Button, ConfirmDialog, Icon, InfoRow, RadioRow, Section, Switch, TextField } from '@relay/ui';
 import { INVITE_USAGE_MAX, type GroupInvite, type JoinRequest } from '@relay/protocol';
 import { useEffect, useState } from 'preact/hooks';
-import { startDirectChat } from '../../data';
+import { openUserChat } from '../../data';
 import { act, copyText, inviteUrl, plural, publicUrl, useGroup, useGroupData } from '../../groups';
 import { clock, dayLabel } from '../format';
 import { GPage, Loading, PersonRow } from './common';
@@ -162,7 +162,7 @@ export function InviteInfo({ nav }: { nav: Nav }) {
       </Section>
       <Section title={joined.data?.joined.length ? `${joined.data.joined.length} ${plural(joined.data.joined.length, 'вступил', 'вступили', 'вступили')}` : 'Вступившие'}>
         {joined.data ? joined.data.joined.length ? joined.data.joined.map((j) => (
-          <PersonRow key={j.userId} id={j.userId} name={j.name} subtitle={dayLabel(j.at) + ' ' + clock(j.at)} onClick={() => { nav.close(); void startDirectChat(j.userId); }} />
+          <PersonRow key={j.userId} id={j.userId} name={j.name} subtitle={dayLabel(j.at) + ' ' + clock(j.at)} onClick={() => { nav.close(); void openUserChat(j.userId); }} />
         )) : <p class="app-gm-empty">{i.usageLimit != null ? `Вступить могут ещё ${i.usageLimit - i.usage}` : 'Пока никто не вступил'}</p> : <Loading />}
       </Section>
       {joined.data?.requests.length && !i.revoked ? (

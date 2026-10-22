@@ -1,7 +1,7 @@
 import { Avatar, Button, Modal, peerTone } from '@relay/ui';
 import type { InvitePreview } from '@relay/protocol';
 import { useEffect, useState } from 'preact/hooks';
-import { groupCall, openChat, startDirectChat } from '../../data';
+import { groupCall, openInner, openUserChat } from '../../data';
 import { setGlobal, useGlobal } from '../../global';
 import { errorText, plural } from '../../groups';
 import { avatarPhoto } from '../../profilePhoto';
@@ -49,7 +49,7 @@ export function JoinLink() {
     void groupCall<InvitePreview>('GET', '/join/' + key).then(async (r) => {
       if (!live) return;
       if (r.ok) {
-        if (r.data.member) { close(); openChat(r.data.chatId); return; }   // уже в группе — просто открыть
+        if (r.data.member) { close(); openInner(r.data.chatId); return; }   // уже в группе — открыть поверх (ссылка из чата)
         setPreview(r.data);
         return;
       }
@@ -57,7 +57,7 @@ export function JoinLink() {
       if (key.startsWith('@') && r.code === 'not_found') {
         const u = await resolveUser(key);
         if (!live) return;
-        if ('user' in u) { close(); void startDirectChat(u.user.id); return; }
+        if ('user' in u) { close(); void openUserChat(u.user.id); return; }
       }
       setError(r.code === 'not_found' ? 'Ссылка недействительна или срок её действия истёк.' : errorText(r.code));
     });
@@ -72,7 +72,7 @@ export function JoinLink() {
     if (!r.ok) { showToast(r.code === 'forbidden' ? 'Вас удалили из этой группы' : errorText(r.code)); return; }
     close();
     if (r.data.requested) showToast('Заявка отправлена — администраторы её рассмотрят');
-    else openChat(r.data.chatId);
+    else openInner(r.data.chatId);   // ссылка из чата — поверх; при загрузке по ссылке чата нет — станет нижним
   };
 
   return (

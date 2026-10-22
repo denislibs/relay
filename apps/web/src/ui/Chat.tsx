@@ -32,7 +32,7 @@ import { inProfile, toggleProfileMusic, type Track } from '../music';
 import { useOwnMusic } from '../profileLists';
 import { Avatar, Button, Chip, Icon, MediaPolicy, peerTone, ChatSearchBar, Highlight, ripple, useMinVisible, requestMeasure, Composer, DropOverlay, GlassBar, IconButton, MenuPopover, Modal, ConfirmDialog, Presence, ReactionPicker, reducedMotion, plural, requestMutation, SelectionBar, isHeavyAnimating, onHeavyAnimationEnd, applyMarkdown, emptyValue, sameValue, voiceSupported, PlayerBar, roundSupported, startRound, Verified, canCopyImage, clipboardHtml, copyImage, copyRich, downloadUrl, TodoModal, TODO_ITEMS_MAX, DateModal, setDateCopiedToast } from '@relay/ui';
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'preact/hooks';
-import { sendTodo, appendTodo, editTodo, closeChat, deleteMessage, editMessage, focusMessage, openChat, openUserChat, pinMessage, unpinMessage, sendFile, sendFiles, sendRound, sendVoice, react, rejectTooBig, PLAYABLE_VIDEO, retrySend, discardUnsent, saveDraft, searchMessages, send, typing, typingDone } from '../data';
+import { sendTodo, appendTodo, editTodo, closeChat, deleteMessage, editMessage, focusMessage, openInner, openUserChat, pinMessage, unpinMessage, sendFile, sendFiles, sendRound, sendVoice, react, rejectTooBig, PLAYABLE_VIDEO, retrySend, discardUnsent, saveDraft, searchMessages, send, typing, typingDone } from '../data';
 import { wantPeople } from '../people';
 import type { Item, SearchHit, SearchResult } from '@relay/sync-engine/src/types';
 import type { Entity, Todo, TodoInput } from '@relay/protocol';
@@ -475,7 +475,7 @@ export function Chat({ chatId, frameKey, active }: { chatId: number; frameKey: s
       <span ref={shell} hidden />
       {/* плеер — остров над шапкой (как в Telegram): шапка плавно уезжает вниз, пока он открыт */}
       <PlayerBar
-        onTitle={(t: Track) => { if (t.msgId != null && t.chatId) { if (t.chatId === chatId) focusMessage({ id: t.msgId, sort: t.msgId }); else openChat(t.chatId, { id: t.msgId, sort: t.msgId }); } }}
+        onTitle={(t: Track) => { if (t.msgId != null && t.chatId) { if (t.chatId === chatId) focusMessage({ id: t.msgId, sort: t.msgId }); else openInner(t.chatId, { id: t.msgId, sort: t.msgId }); } }}
         onPlaylist={() => setGlobal({ playlistOpen: true })}
         inProfile={inProfile}
         onToggleProfile={(t: Track) => { if (t.msgId != null || inProfile(t)) void toggleProfileMusic(t); else showToast('В профиль можно добавить трек из чата'); }}
