@@ -1085,7 +1085,7 @@ html[data-anim="0"] .app-chatcol, html[data-anim="0"] .app-chatcol-below, html[d
 .app-sym-strip-btn { flex: none; display: flex; align-items: center; justify-content: center; width: 38px; height: 38px; margin: 0 1px; padding: 0; border: 0; border-radius: 50%; background: transparent; color: var(--ink-muted); cursor: pointer; transition: background-color 150ms, color 150ms; }
 .app-sym-strip-btn:hover { color: color-mix(in srgb, var(--ink) 80%, transparent); }
 .app-sym-strip-btn.is-on { background: var(--sym-fill); color: color-mix(in srgb, var(--ink) 80%, transparent); }
-.app-sym-scroll { flex: 1; min-height: 0; overflow-y: auto; overscroll-behavior: contain; padding: 8px 0 8px; scrollbar-width: thin; }
+.app-sym-scroll { flex: 1; min-height: 0; overflow-y: auto; overscroll-behavior: contain; padding: 8px 0 60px; scrollbar-width: thin; }   /* снизу — место под вкладками-«пилюлей» */
 .app-sym-search { position: relative; display: flex; align-items: center; height: 38px; margin: 0 8px 4px; border-radius: 16px; background: var(--sym-fill); color: var(--ink-muted); }
 .app-sym-search-icon { flex: none; display: flex; align-items: center; justify-content: center; width: 42px; height: 38px; padding: 0 0 0 6px; border: 0; background: none; color: var(--ink-muted); }
 .app-sym-search-icon.is-back { cursor: pointer; }
@@ -1106,14 +1106,26 @@ html[data-anim="0"] .app-chatcol, html[data-anim="0"] .app-chatcol-below, html[d
 .app-stk-grid { display: grid; grid-template-columns: repeat(auto-fill, 72px); grid-auto-rows: 72px; justify-content: space-between; gap: 4px; padding: 0 3px; }
 .app-stk-cell { display: flex; align-items: center; justify-content: center; width: 72px; height: 72px; padding: 0; border: 0; border-radius: 16px; background: transparent; cursor: pointer; }
 .app-stk-cell:hover { background: var(--sym-hover); }
-.app-sym-bar { position: relative; display: flex; align-items: center; justify-content: center; flex: none; height: 49px; padding: 0 5px; border-top: 1px solid var(--line); }
-.app-sym-bar-left { position: absolute; left: 8px; }
-.app-sym-bar-right { position: absolute; right: 8px; }
-.app-sym-tabs { display: flex; gap: 24px; }
-.app-sym-tab { display: flex; align-items: center; justify-content: center; width: 40px; height: 40px; padding: 0; border: 0; border-radius: 50%; background: transparent; color: var(--ink-muted); cursor: pointer; transition: background-color 150ms, color 150ms; }
-.app-sym-tab:hover { background: var(--sym-fill); }
-.app-sym-tab.is-on { background: var(--sym-fill); color: color-mix(in srgb, var(--ink) 80%, transparent); }
-.app-sym-tab:disabled { opacity: .35; cursor: default; background: none; }
+/* нижние вкладки — маленькая стеклянная «пилюля» поверх содержимого (как в Telegram для macOS), без полосы и границы;
+   выбранная подсвечена подложкой, которая переезжает между равными сегментами */
+.app-sym { --sym-glass: color-mix(in srgb, var(--panel, var(--bg)) 72%, transparent); --sym-glass-line: color-mix(in srgb, var(--ink) 8%, transparent); }
+.app-sym-bar { position: absolute; left: 0; right: 0; bottom: 10px; z-index: 2; display: flex; align-items: center; justify-content: center; pointer-events: none; }
+.app-sym-bar > * { pointer-events: auto; }
+.app-sym-tabs, .app-sym-bar-btn { background: var(--sym-glass); box-shadow: 0 0 0 .5px var(--sym-glass-line), 0 4px 14px rgba(0, 0, 0, .14); -webkit-backdrop-filter: blur(18px) saturate(1.6); backdrop-filter: blur(18px) saturate(1.6); }
+[data-blur="0"] .app-sym { --sym-glass: var(--panel, var(--bg)); }
+[data-blur="0"] .app-sym-tabs, [data-blur="0"] .app-sym-bar-btn { -webkit-backdrop-filter: none; backdrop-filter: none; }
+.app-sym-tabs { position: relative; display: grid; grid-template-columns: repeat(3, 1fr); height: 34px; padding: 3px; border-radius: 999px; }
+.app-sym-tabs-pill { position: absolute; top: 3px; bottom: 3px; left: 3px; width: calc((100% - 6px) / 3); border-radius: 999px; background: color-mix(in srgb, var(--ink) 10%, transparent);
+  transform: translateX(calc(var(--sym-at) * 100%)); transition: transform 240ms cubic-bezier(.3, .7, .2, 1); }
+.app-sym-tab { position: relative; min-width: 72px; height: 28px; padding: 0 12px; border: 0; border-radius: 999px; background: transparent; color: var(--ink-muted); font: 500 13px/28px var(--font-sans); cursor: pointer; transition: color 150ms; }
+.app-sym-tab:hover:not(:disabled) { color: var(--ink); }
+.app-sym-tab.is-on { color: var(--ink); }
+.app-sym-tab:disabled { opacity: .4; cursor: default; }
+.app-sym-bar-btn { position: absolute; width: 34px; height: 34px; color: var(--ink-muted); }
+.app-sym-bar-btn:hover { background: var(--sym-glass); color: var(--ink); }
+.app-sym-bar-left { left: 10px; }
+.app-sym-bar-right { right: 10px; }
+@media (prefers-reduced-motion: reduce) { .app-sym-tabs-pill { transition: none; } }
 
 /* ---------- Правая панель «Стикеры» ---------- */
 .app-stkpanel { display: flex; flex-direction: column; height: 100%; }

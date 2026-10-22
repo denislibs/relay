@@ -42,14 +42,16 @@ export function SymbolMenu(p: SymbolMenuProps) {
       <div class={'app-sym-body' + (dir ? ' app-sym-from-' + dir : '')} key={tab + ':' + epoch}>
         {tab === 'emoji' ? <EmojiTab onPick={p.onEmoji} /> : <StickersTab onPick={p.onSticker} />}
       </div>
+      {/* вкладки — маленькой «пилюлей» поверх содержимого, как в Telegram для macOS; по бокам — круглые кнопки */}
       <div class="app-sym-bar">
-        {tab === 'stickers' ? <IconButton class="app-sym-bar-left" icon="search" label="Найти стикеры" onClick={p.onSearch} /> : null}
-        <div class="app-sym-tabs" role="tablist">
-          <button type="button" role="tab" aria-selected={tab === 'emoji'} class={'app-sym-tab' + (tab === 'emoji' ? ' is-on' : '')} onClick={() => pick('emoji')} aria-label="Эмодзи"><Icon name="smile" size={24} /></button>
-          <button type="button" role="tab" aria-selected={tab === 'stickers'} class={'app-sym-tab' + (tab === 'stickers' ? ' is-on' : '')} onClick={() => pick('stickers')} aria-label="Стикеры"><Icon name="sticker" size={24} /></button>
-          <button type="button" role="tab" aria-selected={false} class="app-sym-tab" disabled title="GIF — скоро" aria-label="GIF"><Icon name="gif" size={24} /></button>
+        {tab === 'stickers' ? <IconButton class="app-sym-bar-btn app-sym-bar-left" icon="search" size={20} label="Найти стикеры" onClick={p.onSearch} /> : null}
+        <div class="app-sym-tabs" role="tablist" style={{ '--sym-at': tab === 'emoji' ? 0 : 1 }}>
+          <span class="app-sym-tabs-pill" aria-hidden="true" />
+          <button type="button" role="tab" aria-selected={tab === 'emoji'} class={'app-sym-tab' + (tab === 'emoji' ? ' is-on' : '')} onClick={() => pick('emoji')}>Эмодзи</button>
+          <button type="button" role="tab" aria-selected={tab === 'stickers'} class={'app-sym-tab' + (tab === 'stickers' ? ' is-on' : '')} onClick={() => pick('stickers')}>Стикеры</button>
+          <button type="button" role="tab" aria-selected={false} class="app-sym-tab" disabled title="GIF — скоро">GIF</button>
         </div>
-        {tab === 'emoji' ? <IconButton class="app-sym-bar-right" icon="backspace" label="Стереть" onClick={p.onBackspace} /> : null}
+        {tab === 'emoji' ? <IconButton class="app-sym-bar-btn app-sym-bar-right" icon="backspace" size={20} label="Стереть" onClick={p.onBackspace} /> : null}
       </div>
     </div>
   );
