@@ -70,4 +70,7 @@ test('счётчики вкладок для шапки: склонения, ф�
   expect(tabCounter('voice', { voice: 11 })).toBe('11 голосовых сообщений');
   expect(tabCounter('members', null, 21)).toBe('21 участник');
   expect(tabCounter('file', null)).toBeNull();
+  expect(tabCounter('groups', null, null, 13)).toBe('13 общих групп');
+  expect(tabCounter('groups', null, null, 2)).toBe('2 общие группы');
+  expect(tabCounter('groups', null, null, 21)).toBe('21 общая группа');
 });

@@ -16,6 +16,7 @@ import { bindMute, isMuted, startMuteMigration } from './mute';
 import { bindChatFlags, clearUnreadMark } from './chatFlags';
 import { startPeople, wantPeople } from './people';
 import { resetMembers } from './members';
+import { resetCommonGroups } from './commonGroups';
 import { resetMediaTabs } from './mediaTab';
 import { isSystemChat } from './ui/format';
 import { asset } from './assets';
@@ -50,7 +51,7 @@ export function startData(me: Me): void {
   engine.onData(rememberKeysIn);
   startFileKeyService();
   startPeople(engine);
-  resetMembers(); resetMediaTabs();   // вход другим пользователем без перезагрузки: кэши отрисовки прежнего — прочь
+  resetMembers(); resetMediaTabs(); resetCommonGroups();   // вход другим пользователем без перезагрузки: кэши отрисовки прежнего — прочь
   bindMute((chatId, muteUntil) => engine.call({ type: 'setMute', chatId, muteUntil }));
   bindChatFlags((chatId, f) => engine.call({ type: 'setChatFlags', chatId, ...f }));
   bindStickers((a) => engine.call(a as never));

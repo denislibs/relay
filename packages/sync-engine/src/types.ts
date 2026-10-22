@@ -190,6 +190,7 @@ export type Action =
   | { type: 'pin'; chatId: number; id: number }
   | { type: 'unpin'; chatId: number; id: number | null }
   | { type: 'messagesByIds'; chatId: number; ids: number[] }
+  | { type: 'commonGroups'; userId: number }
   | { type: 'updateProfile'; firstName?: string; lastName?: string; bio?: string | null; birthday?: Birthday | null }
   | { type: 'setLinks'; links: ProfileLink[] }
   | { type: 'setUsername'; username: string | null }

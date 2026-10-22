@@ -7,7 +7,7 @@ import type { Server } from 'bun';
 import { authenticate, clearSessionCookie, createSession, createUser, deleteSession, readSessionToken, sessionCookie, sessionFromToken } from './auth';
 import { accessCookie, ACCESS_SEC, clearAccessCookie, deviceKeyOf, newChallenge, refreshAccess, verifyDevice } from './deviceAuth';
 import { announceLogin, announceSessionsChanged, assertConfirmed, checkSocket, confirmSession, listSessions, sessionEnded, sweepInactive, terminateOthers, terminateSession, trackSocket, untrackSocket } from './domain/sessions';
-import { deleteDirectChat, createChat, createGroup, openDirect, messageAtDate, getChatMedia, getChatMediaCounts, getHistory, getMessagesByIds, listChats, listChatsPage } from './domain/chats';
+import { commonGroups, deleteDirectChat, createChat, createGroup, openDirect, messageAtDate, getChatMedia, getChatMediaCounts, getHistory, getMessagesByIds, listChats, listChatsPage } from './domain/chats';
 import { sql } from './db';
 import { DomainError } from './domain/errors';
 import { setChatNotify } from './domain/chatNotify';
@@ -174,6 +174,8 @@ export function createServer(opts: { port: number }): Server {
         }
         const myTrack = /^\/me\/music\/([0-9a-f-]{36})$/.exec(url.pathname);
         if (req.method === 'DELETE' && myTrack) return Response.json({ tracks: await removeProfileMusic(userId, myTrack[1]) });
+        const common = /^\/users\/(\d+)\/common-groups$/.exec(url.pathname);
+        if (req.method === 'GET' && common) return Response.json({ groups: await commonGroups(userId, Number(common[1])) });
         if (req.method === 'GET' && url.pathname === '/users/check-username') {
           return Response.json(await checkUsername(userId, url.searchParams.get('u')));
         }

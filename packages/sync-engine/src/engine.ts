@@ -1094,6 +1094,7 @@ export class Engine {
         this.changed();
         return res;
       }
+      case 'commonGroups': return this.http<{ groups: unknown[] }>(`/users/${a.userId}/common-groups`).then((r) => r.groups);
       case 'messagesByIds': return this.http<{ messages: Message[] }>(`/chats/${a.chatId}/messages?ids=${a.ids.slice(0, 100).join(',')}`).then((r) => r.messages);
       case 'sendFile': {
         // файл — в IDB (переживёт офлайн и перезагрузку), сообщение — в очередь; загрузка и отправка — в pumpOutbox

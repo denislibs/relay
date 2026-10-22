@@ -285,6 +285,24 @@ export async function getChatMediaCounts(userId: number, chatId: number): Promis
   return { media: r.media, file: r.file, audio: r.audio, voice: r.voice, link: r.link, video: r.video };
 }
 
+/** Общая группа с собеседником (вкладка «Группы» в профиле): название, фото, число участников. */
+export interface CommonGroup { id: number; title: string; photo: ProfilePhoto | null; members: number }
+/** Группы, где состоят и зритель, и собеседник (как «Groups in common» в Telegram): свежие по последнему сообщению сверху. */
+export async function commonGroups(userId: number, peerId: number): Promise<CommonGroup[]> {
+  if (!Number.isSafeInteger(peerId) || peerId === userId) return [];
+  const rows = await sql`
+    select c.id, c.title, c.photo,
+           (select count(*) from chat_members x where x.chat_id = c.id)::int as members,
+           (select max(id) from messages m where m.chat_id = c.id) as last_id
+      from chats c
+      join chat_members me on me.chat_id = c.id and me.user_id = ${userId}
+      join chat_members peer on peer.chat_id = c.id and peer.user_id = ${peerId}
+     where c.kind = 'group'
+     order by last_id desc nulls last, c.id desc
+     limit 200`;
+  return rows.map((r) => ({ id: Number(r.id), title: String(r.title ?? ''), photo: (r.photo as ProfilePhoto | null) ?? null, members: Number(r.members) }));
+}
+
 /** «Перейти к дате»: первое сообщение не раньше from (полночь выбранного дня у клиента); позже нет — последнее. */
 export async function messageAtDate(userId: number, chatId: number, from: string): Promise<{ id: number | null }> {
   const at = new Date(from);

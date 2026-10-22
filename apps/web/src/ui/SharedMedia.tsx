@@ -5,7 +5,7 @@ import { avatarPhoto, userPhoto } from '../profilePhoto';
 import { senderAvatar } from '../profilePhoto';
 import type { Item } from '@relay/sync-engine/src/types';
 import { useContext, useEffect, useLayoutEffect, useRef, useState } from 'preact/hooks';
-import { focusMessage, type MediaTab } from '../data';
+import { focusMessage, openChat, type MediaTab } from '../data';
 import { useMedia } from '../mediaTab';
 import { animateScroll, gridCorners, tabCounter, tabLabel, tabScrollTarget, tileSrc, videoFrameSrc, type SharedTab } from '../mediaGrid';
 import { getGlobal, useGlobal } from '../global';
@@ -13,7 +13,8 @@ import { toggleMusic, trackTitle } from '../music';
 import { clock, dayLabel, fileSize, lastSeenText } from './format';
 import { openUserChat, prepareUserChat } from '../data';
 import { pressOpen } from './press';
-import { useMembers, type Member } from '../members';
+import { membersWord, useMembers, type Member } from '../members';
+import { useCommonGroups, type CommonGroup } from '../commonGroups';
 import { wantPeople } from '../people';
 
 // «Общие медиа» в правой панели — как в Telegram: Медиа, Файлы, Ссылки, Музыка, Голосовые.
@@ -44,9 +45,11 @@ type Tab = SharedTab;
  *  onHead — вкладки, показанная и их счётчики: шапка панели пишет счётчик, когда вкладки прилипли к верху.
  *  onMember — клик по участнику (без него — переписка с ним поверх текущего чата, через стек). */
 export interface MediaHead { tabs: Tab[]; shown: Tab; counters: (string | null)[] }
-export function SharedMedia({ chatId, group = false, onHead, onMember }: { chatId: number; group?: boolean; onHead?: (h: MediaHead | null) => void; onMember?: (userId: number) => void }) {
+export function SharedMedia({ chatId, group = false, peerId = null, onHead, onMember }: { chatId: number; group?: boolean; peerId?: number | null; onHead?: (h: MediaHead | null) => void; onMember?: (userId: number) => void }) {
   const [tab, setTab] = useState<Tab | null>(null);
   const members = useMembers(chatId, group);
+  // личный чат: группы, где состоите оба (как в Telegram — последней вкладкой)
+  const common = useCommonGroups(group ? null : peerId);
   // счётчики приходят с любой подпиской media этого чата и обновляются журналом (новое сообщение — новый счётчик)
   const { counts: known, loading: countsLoading } = useMedia(chatId, 'media', 0);
   // офлайн на холодную: счётчиков нет и не ждём — как раньше, нули (пустое состояние), а не вечная заглушка
@@ -61,10 +64,10 @@ export function SharedMedia({ chatId, group = false, onHead, onMember }: { chatI
   const cancel = useRef<(() => void) | null>(null);
   useEffect(() => { setTab(null); setPending(null); }, [chatId]);
   useEffect(() => () => cancel.current?.(), [chatId]);
-  const tabs: Tab[] = [...(group ? ['members' as const] : []), ...(counts ? ORDER.filter((t) => counts[t] > 0) : [])];
+  const tabs: Tab[] = [...(group ? ['members' as const] : []), ...(counts ? ORDER.filter((t) => counts[t] > 0) : []), ...(common?.length ? ['groups' as const] : [])];
   const active = tab && tabs.includes(tab) ? tab : tabs[0] ?? null;
   const shown = pending && tabs.includes(pending) ? pending : active;
-  const counters = tabs.map((t) => tabCounter(t, known, members ? members.members.length : null));
+  const counters = tabs.map((t) => tabCounter(t, known, members ? members.members.length : null, common ? common.length : null));
   const headKey = shown ? tabs.join() + '|' + shown + '|' + counters.join() : '';
   useEffect(() => { onHead?.(shown ? { tabs, shown, counters } : null); }, [headKey]);
   const pick = (id: Tab) => {
@@ -90,7 +93,7 @@ export function SharedMedia({ chatId, group = false, onHead, onMember }: { chatI
       <div class="rl-aside-pages" ref={pages}>
         {/* ленивые картинки и кадры видео меряют запас от прокрутки панели, а не от окна (её край их обрезает) */}
         <LazyRoot.Provider value={root}>
-          <SlideStack variant="tabs" order={tabs} active={active} render={(k: string) => k === 'members' ? <MembersList key={chatId + k} data={members} onOpen={onMember ?? ((id) => void openUserChat(id))} /> : <TabList key={chatId + k} chatId={chatId} tab={k as MediaTab} />} />
+          <SlideStack variant="tabs" order={tabs} active={active} render={(k: string) => k === 'members' ? <MembersList key={chatId + k} data={members} onOpen={onMember ?? ((id) => void openUserChat(id))} /> : k === 'groups' ? <GroupsList key={chatId + k} groups={common ?? []} /> : <TabList key={chatId + k} chatId={chatId} tab={k as MediaTab} />} />
         </LazyRoot.Provider>
       </div>
     </>
@@ -325,6 +328,23 @@ function MembersList({ data, onOpen }: { data: { ownerId: number | null; members
           </button>
         );
       }} />
+    </div>
+  );
+}
+
+/** «Группы»: общие с собеседником — аватар, название, «N участников»; нажатие открывает группу (как в Telegram). */
+function GroupsList({ groups }: { groups: CommonGroup[] }) {
+  return (
+    <div class="app-members">
+      <WindowList items={groups} rowHeight={MEMBER_ROW} overscan={6} role="list" getKey={(g: CommonGroup) => g.id} render={(g: CommonGroup) => (
+        <button type="button" role="listitem" class="rl-row app-member" onClick={() => openChat(g.id)}>
+          <Avatar name={g.title} tone={peerTone(g.id)} size={44} {...avatarPhoto(g.photo)} />
+          <span class="rl-row-main">
+            <span class="app-member-top"><span class="rl-row-name">{g.title || 'Группа'}</span></span>
+            <span class="rl-row-preview">{g.members} {membersWord(g.members)}</span>
+          </span>
+        </button>
+      )} />
     </div>
   );
 }
