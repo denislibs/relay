@@ -104,8 +104,27 @@ let circle: VT | null = null;
 
 // где нажали последний раз: переключатель темы в меню или в настройках
 let lastPoint: { x: number; y: number; t: number } | null = null;
+// Пока идёт View Transition, браузер отдаёт все нажатия <html> (pointer-events не помогает): интерфейс
+// полсекунды глух — это ощущается как фриз. Нажатие во время круга досрочно завершает его, а клик
+// доставляется элементу под курсором, когда страница снова настоящая.
+let tapDuringCircle: { x: number; y: number; done: Promise<void> } | null = null;
 if (typeof addEventListener === 'function') {
-  addEventListener('pointerdown', (e: PointerEvent) => { lastPoint = { x: e.clientX, y: e.clientY, t: performance.now() }; }, { capture: true, passive: true });
+  addEventListener('pointerdown', (e: PointerEvent) => {
+    lastPoint = { x: e.clientX, y: e.clientY, t: performance.now() };
+    if (!circle) return;
+    tapDuringCircle = { x: e.clientX, y: e.clientY, done: circle.finished.catch(() => {}) };
+    stopCircle();
+  }, { capture: true, passive: true });
+  addEventListener('click', (e: MouseEvent) => {
+    const tap = tapDuringCircle;
+    tapDuringCircle = null;
+    if (!tap || e.target !== document.documentElement) return;
+    e.stopPropagation();
+    void tap.done.then(() => {
+      const el = document.elementFromPoint(tap.x, tap.y);
+      if (el instanceof HTMLElement && el !== document.documentElement) { el.focus({ preventScroll: true }); el.click(); }
+    });
+  }, { capture: true });
 }
 
 /** Центр круга: недавнее нажатие; с клавиатуры — элемент в фокусе; иначе центр окна. */
