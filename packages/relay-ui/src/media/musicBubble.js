@@ -13,31 +13,48 @@ var heard = new Set();
 
 function fmt(sec) { sec = Math.max(0, Math.floor(sec || 0)); return Math.floor(sec / 60) + ':' + (sec % 60 < 10 ? '0' : '') + (sec % 60); }
 
+/**
+ * Время и полоса перемотки трека, пока он текущий в плеере (как в Telegram: вторая строка вместо «длительность • …»).
+ * Двигается каждый кадр без перерисовки компонента (onTick); перемотка — нажатием и перетаскиванием.
+ * Цвет — --music-accent (полоса, бегунок), подпись — --music-sub.
+ */
+export function TrackSeek(props) {
+  var bar = useRef(null), knob = useRef(null), clock = useRef(null);
+  var paint = function (t, d) {
+    var f = d ? Math.min(1, t / d) : 0;
+    if (bar.current) bar.current.style.transform = 'scaleX(' + f + ')';
+    if (knob.current) knob.current.style.transform = 'translateX(' + (f * 100) + '%)';
+    if (clock.current) { var x = fmt(t); if (clock.current.textContent !== x) clock.current.textContent = x; }
+  };
+  useEffect(function () {
+    var s = player.playerState();
+    if (s.key === props.trackKey) paint(s.time, s.duration);
+    return player.onTick(function (k, t, d) { if (k === props.trackKey) paint(t, d); });
+  }, [props.trackKey]);
+  function at(e) {
+    var r = e.currentTarget.getBoundingClientRect();
+    if (r.width) player.seek(props.trackKey, Math.min(1, Math.max(0, (e.clientX - r.left) / r.width)));
+  }
+  var s0 = player.playerState();
+  return h('div', { class: cx('rl-music-live', props.class) },
+    h('span', { class: 'rl-music-sub', ref: clock }, fmt(s0.key === props.trackKey ? s0.time : 0)),
+    h('div', { class: 'rl-music-seek', role: 'slider', 'aria-label': 'Перемотка', tabIndex: -1,
+      onPointerDown: function (e) { if (e.button !== 0) return; e.stopPropagation(); e.currentTarget.setPointerCapture(e.pointerId); at(e); },
+      onPointerMove: function (e) { if (e.currentTarget.hasPointerCapture(e.pointerId)) at(e); },
+      onClick: function (e) { e.stopPropagation(); } },
+      h('i', { ref: bar }), h('span', { class: 'rl-music-knob', ref: knob }, h('b', null))));
+}
+
 export function MusicBubble(props) {
   var out = props.from === 'out';
   var pos = props.pos || 'single';
   var st = useState(player.playerState()), s = st[0];
-  var bar = useRef(null), knob = useRef(null), clock = useRef(null);
   var mine = s.key === props.trackKey;
-  useEffect(function () {
-    var off = player.subscribe(function (n) { st[1](n); });
-    var offTick = player.onTick(function (k, t, d) {
-      if (k !== props.trackKey) return;
-      var f = d ? Math.min(1, t / d) : 0;
-      if (bar.current) bar.current.style.transform = 'scaleX(' + f + ')';
-      if (knob.current) knob.current.style.transform = 'translateX(' + (f * 100) + '%)';
-      if (clock.current) { var x = fmt(t); if (clock.current.textContent !== x) clock.current.textContent = x; }
-    });
-    return function () { off(); offTick(); };
-  }, [props.trackKey]);
+  useEffect(function () { return player.subscribe(function (n) { st[1](n); }); }, []);
   var playing = mine && s.playing;
   if (mine) heard.add(props.trackKey);
   var showDl = !props.uploading && !!props.onDownload && !props.downloaded && !heard.has(props.trackKey);
   var last = pos === 'single' || pos === 'last';
-  function seekAt(e) {
-    var r = e.currentTarget.getBoundingClientRect();
-    if (r.width) player.seek(props.trackKey, (e.clientX - r.left) / r.width);
-  }
   return h(MsgLine, { aside: props.aside, class: cx('rl-msgline', out && 'rl-msgline-out', props.groupStart && pos !== 'middle' && pos !== 'last' && 'rl-msgline-gap', 'rl-music-line', 'rl-music-' + pos) },
     h('div', { class: cx('rl-bubble', out ? 'rl-bubble-out' : 'rl-bubble-in-side', props.tail && last && 'rl-bubble-tail', 'rl-music') },
       props.fwd ? h(ForwardTitle, { fwd: props.fwd }) : null,
@@ -59,9 +76,7 @@ export function MusicBubble(props) {
           h('b', { title: props.title }, props.title),
           mine
             // как в Telegram: при воспроизведении вторая строка — время и полоса с бегунком, той же высоты, что «длительность • исполнитель»
-            ? h('div', { class: 'rl-music-live' },
-              h('span', { class: 'rl-music-sub', ref: clock }, fmt(s.time)),
-              h('div', { class: 'rl-music-seek', onClick: seekAt }, h('i', { ref: bar }), h('span', { class: 'rl-music-knob', ref: knob }, h('b', null))))
+            ? h(TrackSeek, { trackKey: props.trackKey })
             : h('span', { class: 'rl-music-sub' }, fmt(props.duration), props.performer ? ' • ' + props.performer : props.size ? ' • ' + props.size : ''))),
       last ? h('span', { class: 'rl-music-meta' }, props.time, out ? h(MessageStatus, { status: props.status || 'sent' }) : null) : null));
 }

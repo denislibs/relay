@@ -627,6 +627,11 @@ html[data-anim="0"] .app-chatcol, html[data-anim="0"] .app-chatcol-below, html[d
 @media (prefers-reduced-motion: reduce) { .app-sm-page-in, .app-sm-spin { animation-duration: 1ms; } .app-sm-spin { animation: none; } }
 .app-sm-list { display: flex; flex-direction: column; gap: 4px; margin: 0 var(--space-3) var(--space-4); padding: 10px 6px; border-radius: 16px; background: var(--raised); box-shadow: var(--tg-shadow-bubble, 0 1px 2px rgba(0,0,0,.1)); }
 .app-sm-row { display: flex; align-items: center; gap: 14px; min-height: 60px; padding: 6px 10px; border-radius: 12px; }
+/* полоса перемотки текущего трека вместо подписи (TrackSeek из кита), как в Telegram: время и бегунок цветом акцента */
+.app-sm-row { --music-accent: var(--brand-strong); --music-sub: var(--ink-muted); }
+.app-sm-seek { height: 18px; animation: rl-fade 160ms var(--ease-out); }
+.app-sm-seek .rl-music-sub { font: 400 13.5px/18px var(--font-sans); }
+.app-sm-seek .rl-music-seek { margin-right: 6px; }
 .app-sm-text { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
 /* элементы колонки — тоже сжимаются (у flex-элемента min-width по содержимому): длинный адрес — многоточием, без прокрутки вбок */
 .app-sm-text > * { min-width: 0; max-width: 100%; }

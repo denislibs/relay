@@ -1696,7 +1696,7 @@ html[data-blur="0"] .rl-menu { -webkit-backdrop-filter: none; backdrop-filter: n
 .rl-music-sub { font: 400 14.5px/20px var(--font-sans); color: var(--music-sub, var(--meta, var(--ink-muted))); font-variant-numeric: tabular-nums; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .rl-music-live { display: flex; align-items: center; gap: 10px; height: 20px; }
 .rl-music-live .rl-music-sub { flex: none; }
-.rl-music-seek { position: relative; flex: 1; height: 20px; cursor: pointer; }
+.rl-music-seek { position: relative; flex: 1; height: 20px; cursor: pointer; touch-action: none; }   /* перетаскивание бегунка пальцем */
 .rl-music-seek::before, .rl-music-seek > i { content: ''; position: absolute; left: 0; right: 0; top: 9px; height: 2px; border-radius: 1px; }
 /* бегунок: обёртка во всю ширину сдвигается на долю своей ширины, точка 12px — у её левого края */
 .rl-music-knob { position: absolute; inset: 0; pointer-events: none; }

@@ -1,7 +1,7 @@
 import type { MediaTab, ProfilePhoto } from '@relay/protocol';
 import { LinkTile, linkInfo } from '../linkTile';
 import { senderAvatar } from '../../profilePhoto';
-import { Avatar, EmptyState, FolderTabs, Highlight, Icon, MediaViewer, peerTone, player, SlideStack } from '@relay/ui';
+import { Avatar, EmptyState, FolderTabs, Highlight, Icon, MediaViewer, peerTone, player, SlideStack, TrackSeek } from '@relay/ui';
 import type { Item, SearchHit, SearchResult } from '@relay/sync-engine/src/types';
 import type { ComponentChildren } from 'preact';
 import { useEffect, useMemo, useRef, useState } from 'preact/hooks';
@@ -377,10 +377,12 @@ function LinkHit({ h, who }: { h: Hit; who: string }) {
 /** Музыка (обложка/кнопка, название, исполнитель) и голосовые (аватар отправителя или кадр кружка). */
 function TrackHit({ h, who, hits, music }: { h: Hit; who: string; hits: Hit[]; music: boolean }) {
   const m = h.message, a = m.attachment!;
-  const key = String(m.clientId);
+  // ключ трека — как его ставит плеер: у музыки musicTrack (ключ сообщения), у голосовых — clientId
+  const key = music ? String((m as { key?: string }).key ?? m.clientId) : String(m.clientId);
   const [st, setSt] = useState(() => player.playerState());
   useEffect(() => player.subscribe(setSt), []);
-  const playing = st.key === key && st.playing;
+  const mine = st.key === key;   // текущий трек плеера — вместо подписи полоса перемотки (как в Telegram)
+  const playing = mine && st.playing;
   const people = getGlobal().people, meId = getGlobal().me?.userId;
   const senderName = m.senderId === meId ? (getGlobal().me?.name ?? 'Вы') : people[m.senderId]?.name ?? h.chatTitle ?? '';
   const voiceTrack = (x: Hit) => ({ key: String(x.message.clientId), kind: 'voice' as const, src: fileUrl(x.message.attachment!), duration: x.message.attachment!.duration ?? 0,
@@ -409,7 +411,8 @@ function TrackHit({ h, who, hits, music }: { h: Hit; who: string; hits: Hit[]; m
       )}
       <button type="button" class="app-sm-text app-sm-plain" onClick={() => showMessage(m.chatId as number, m.id)}>
         <span class="app-gsearch-line"><b class="app-sm-title">{music ? ((a as { title?: string }).title || trackTitle(a.name)) : who}</b><span class="app-gsearch-date">{chatTime(m.createdAt)}</span></span>
-        <small class="app-gsearch-sub">{dur(a.duration)}{music && (a as { performer?: string }).performer ? <> • {(a as { performer?: string }).performer}</> : null}{music ? <> • {who}</> : null}</small>
+        {mine ? <TrackSeek class="app-sm-seek" trackKey={key} />
+          : <small class="app-gsearch-sub">{dur(a.duration)}{music && (a as { performer?: string }).performer ? <> • {(a as { performer?: string }).performer}</> : null}{music ? <> • {who}</> : null}</small>}
       </button>
     </div>
   );

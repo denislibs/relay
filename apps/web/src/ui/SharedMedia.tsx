@@ -1,4 +1,4 @@
-import { Avatar, FolderTabs, Icon, LazyImage, LazyRoot, lazyObserve, MediaViewer, peerTone, player, Presence, reducedMotion, SlideStack, useMinVisible, WindowGrid, WindowList } from '@relay/ui';
+import { Avatar, FolderTabs, Icon, LazyImage, LazyRoot, lazyObserve, MediaViewer, peerTone, player, Presence, reducedMotion, SlideStack, TrackSeek, useMinVisible, WindowGrid, WindowList } from '@relay/ui';
 import { offlineUrlNow } from '../downloads';
 import { LinkTile, linkInfo } from './linkTile';
 import { avatarPhoto, userPhoto } from '../profilePhoto';
@@ -256,12 +256,15 @@ function LinkRow({ m }: { m: Msg }) {
  *  поэтому состояние кнопки общее с лентой и плеером; плейлист / очередь — эта вкладка. */
 function TrackRow({ m, chatId, items }: { m: Msg; chatId: number; items: Msg[] }) {
   const a = m.attachment!;
-  const key = String(m.clientId);
+  const music0 = a.kind === 'audio';
+  // ключ трека — как его ставит плеер: у музыки musicTrack (ключ сообщения), у голосовых — clientId
+  const key = music0 ? String((m as { key?: string }).key ?? m.clientId) : String(m.clientId);
   const [st, setSt] = useState(() => player.playerState());
   useEffect(() => player.subscribe(setSt), []);
-  const playing = st.key === key && st.playing;
-  const loading = st.key === key && !!st.loading;
-  const music = a.kind === 'audio';
+  const mine = st.key === key;   // текущий трек плеера (играет или на паузе) — вместо подписи полоса перемотки
+  const playing = mine && st.playing;
+  const loading = mine && !!st.loading;
+  const music = music0;
   const g = getGlobal(), me = g.me?.userId;
   const chat = g.chats.find((c) => c.id === chatId);
   // музыка — «Исполнитель — Название» из тегов (как в ленте и в Telegram), без тегов — имя файла
@@ -292,7 +295,8 @@ function TrackRow({ m, chatId, items }: { m: Msg; chatId: number; items: Msg[] }
           <b class="app-sm-title">{title}</b>
           {!music ? <button type="button" class="app-sm-date app-sm-right" onClick={() => show(m)}>{short(m.createdAt)}</button> : null}
         </div>
-        <small>{dur(a.duration)}{music ? <> • <button type="button" class="app-sm-date" onClick={() => show(m)}>{when(m.createdAt)}</button></> : null}</small>
+        {mine ? <TrackSeek class="app-sm-seek" trackKey={key} />
+          : <small>{dur(a.duration)}{music ? <> • <button type="button" class="app-sm-date" onClick={() => show(m)}>{when(m.createdAt)}</button></> : null}</small>}
       </div>
     </div>
   );
