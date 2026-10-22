@@ -1,4 +1,4 @@
-import { Wallpaper } from '@relay/ui';
+import { IconButton, Wallpaper } from '@relay/ui';
 import { createContext } from 'preact';
 import { useContext, useEffect, useRef, useState } from 'preact/hooks';
 import { call, signedIn, type Step } from './api';
@@ -8,6 +8,7 @@ import { PasswordCard, RecoverCard } from './PasswordCard';
 import { PhoneCard } from './PhoneCard';
 import { QrCard } from './QrCard';
 import { SignUpCard } from './SignUpCard';
+import { applyTheme } from '../../theme';
 import { useWallpaper } from '../../wallpapers';
 import { useWallpaperImage } from '../../wallpaperImage';
 
@@ -78,6 +79,8 @@ export function AuthFlow() {
         <Wallpaper pattern={wp.pattern} colors={wp.colors} blur={wp.blur} dark={dark} intensity={wp.intensity} image={wpImage} />
       </div>
       <div class={'auth' + (leaving ? ' auth-leaving' : '')}>
+        {/* как в Telegram Web: смена темы прямо на экране входа (новая тема раскрывается кругом из кнопки) */}
+        <IconButton class="auth-theme" icon={dark ? 'sun' : 'moon'} label={dark ? 'Светлая тема' : 'Тёмная тема'} onClick={() => applyTheme(dark ? 'light' : 'dark')} />
         <div class="auth-spacer" />
         <div
           key={card.name + ('attemptId' in card ? card.attemptId : '')}
