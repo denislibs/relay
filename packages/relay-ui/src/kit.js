@@ -1468,6 +1468,30 @@ function ReadMore(props) {
    ===================================================================== */
 
 /* ---------- Presence: keeps a child mounted while it plays its exit animation ---------- */
+/* ---------- SlideFade: смена строки, как в Telegram Web K ----------
+   Старая строка уходит в сторону и гаснет, новая приезжает с другой стороны (400 мс, сдвиг 1.5rem); индекс меньше
+   прежнего — зеркально. Слои лежат абсолютно в коробке фиксированной высоты: соседи и строка не прыгают. */
+var SLIDE_FADE_MS = 400;
+function SlideFade(props) {
+  var index = props.index, items = props.items || [];
+  var prev = useRef(index), from = useRef(null), redraw = useState(0)[1];
+  if (prev.current !== index) {
+    from.current = { i: prev.current, back: index < prev.current, id: (from.current ? from.current.id : 0) + 1 };
+    prev.current = index;
+  }
+  var f = from.current;
+  useEffect(function () {
+    if (!f) return;
+    var t = setTimeout(function () { if (from.current === f) { from.current = null; redraw(function (n) { return n + 1; }); } }, reducedMotion() ? 0 : SLIDE_FADE_MS);
+    return function () { clearTimeout(t); };
+  }, [f && f.id]);
+  return h('div', { class: cx('rl-slidefade', f && f.back && 'is-back', props.class) }, items.map(function (it, i) {
+    var on = i === index, out = !!f && f.i === i && !on;
+    if (!on && !out) return null;
+    return h('div', { key: i, class: cx('rl-slidefade-item', on && f && 'is-in', out && 'is-out'), 'aria-hidden': out || undefined }, it);
+  }));
+}
+
 function Presence(props) {
   var st = useState(!!props.show);
   var mounted = st[0];
@@ -1656,4 +1680,4 @@ function ScrollToBottom(props) {
 }
 
 
-export { RowBadge, WebPage, MsgLine, ForwardTitle, peerTone, RelayLogo, Verified, ArchivedRow, ReplyQuote, ReactionChips, cx, chain, ripple, reducedMotion, omit, fmtTime, makeWave, ICONS, Icon, Button, IconButton, Avatar, Badge, Chip, ChatRow, ChatRowSkeleton, Bubble, MessageStatus, TypingIndicator, DateDivider, Banner, NavRail, Checkbox, Toast, Card, Steps, MediaArt, ProgressRing, Waveform, VoiceMessage, VoiceRecorder, MediaBubble, MediaPolicy, mediaHeld, FileBubble, MediaThumb, MediaViewer, Switch, PanelHeader, ProfileHeader, ActionTile, InfoRow, SettingsIcon, ReadMore, Presence, useMinVisible, LazyImage, LazyRoot, lazyObserve, lazyRoots, FlipList, SyncIndicator, LinearProgress, EmptyState, ScrollToBottom };
+export { RowBadge, WebPage, MsgLine, ForwardTitle, peerTone, RelayLogo, Verified, ArchivedRow, ReplyQuote, ReactionChips, cx, chain, ripple, reducedMotion, omit, fmtTime, makeWave, ICONS, Icon, Button, IconButton, Avatar, Badge, Chip, ChatRow, ChatRowSkeleton, Bubble, MessageStatus, TypingIndicator, DateDivider, Banner, NavRail, Checkbox, Toast, Card, Steps, MediaArt, ProgressRing, Waveform, VoiceMessage, VoiceRecorder, MediaBubble, MediaPolicy, mediaHeld, FileBubble, MediaThumb, MediaViewer, Switch, PanelHeader, ProfileHeader, ActionTile, InfoRow, SettingsIcon, ReadMore, Presence, useMinVisible, LazyImage, LazyRoot, lazyObserve, lazyRoots, FlipList, SyncIndicator, LinearProgress, EmptyState, ScrollToBottom, SlideFade };

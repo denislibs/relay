@@ -7,7 +7,7 @@ import type { Item } from '@relay/sync-engine/src/types';
 import { useContext, useEffect, useLayoutEffect, useRef, useState } from 'preact/hooks';
 import { focusMessage, type MediaTab } from '../data';
 import { useMedia } from '../mediaTab';
-import { animateScroll, gridCorners, tabLabel, tabScrollTarget, tileSrc, videoFrameSrc, type SharedTab } from '../mediaGrid';
+import { animateScroll, gridCorners, tabCounter, tabLabel, tabScrollTarget, tileSrc, videoFrameSrc, type SharedTab } from '../mediaGrid';
 import { getGlobal, useGlobal } from '../global';
 import { toggleMusic, trackTitle } from '../music';
 import { clock, dayLabel, fileSize, lastSeenText } from './format';
@@ -41,9 +41,10 @@ export function extTone(ext: string): string {
 type Tab = SharedTab;
 
 /** group — в группе первая вкладка «Участники» (как в Telegram): панель не бывает пустой.
- *  onTitle — название показанной вкладки: шапка панели пишет его, когда вкладки прилипли к верху.
+ *  onHead — вкладки, показанная и их счётчики: шапка панели пишет счётчик, когда вкладки прилипли к верху.
  *  onMember — клик по участнику (без него — переписка с ним поверх текущего чата, через стек). */
-export function SharedMedia({ chatId, group = false, onTitle, onMember }: { chatId: number; group?: boolean; onTitle?: (title: string) => void; onMember?: (userId: number) => void }) {
+export interface MediaHead { tabs: Tab[]; shown: Tab; counters: (string | null)[] }
+export function SharedMedia({ chatId, group = false, onHead, onMember }: { chatId: number; group?: boolean; onHead?: (h: MediaHead | null) => void; onMember?: (userId: number) => void }) {
   const [tab, setTab] = useState<Tab | null>(null);
   const members = useMembers(chatId, group);
   // счётчики приходят с любой подпиской media этого чата и обновляются журналом (новое сообщение — новый счётчик)
@@ -63,8 +64,9 @@ export function SharedMedia({ chatId, group = false, onTitle, onMember }: { chat
   const tabs: Tab[] = [...(group ? ['members' as const] : []), ...(counts ? ORDER.filter((t) => counts[t] > 0) : [])];
   const active = tab && tabs.includes(tab) ? tab : tabs[0] ?? null;
   const shown = pending && tabs.includes(pending) ? pending : active;
-  const title = shown ? tabLabel(shown) : null;
-  useEffect(() => { if (title) onTitle?.(title); }, [title]);
+  const counters = tabs.map((t) => tabCounter(t, known as Parameters<typeof tabCounter>[1], members ? members.members.length : null));
+  const headKey = shown ? tabs.join() + '|' + shown + '|' + counters.join() : '';
+  useEffect(() => { onHead?.(shown ? { tabs, shown, counters } : null); }, [headKey]);
   const pick = (id: Tab) => {
     cancel.current?.();
     cancel.current = null;

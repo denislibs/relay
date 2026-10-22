@@ -1,5 +1,5 @@
 import { expect, test } from 'bun:test';
-import { gridCorners, scrollAt, tabLabel, tabScrollTarget, tileSrc, videoFrameSrc } from './mediaGrid';
+import { gridCorners, scrollAt, tabCounter, tabLabel, tabScrollTarget, tileSrc, videoFrameSrc } from './mediaGrid';
 
 const photo = { id: 'p1', kind: 'photo', mime: 'image/jpeg' };
 
@@ -55,4 +55,19 @@ test('virtual grid corners: only the outer corners of the whole grid are rounded
   // одна плитка — все четыре; две — верх слева / верх и низ справа
   expect(gridCorners(0, 1)).toBe('tl tr bl br');
   expect([0, 1].map((i) => gridCorners(i, 2))).toEqual(['tl bl', 'tr br']);
+});
+
+test('счётчики вкладок для шапки: склонения, фото и видео раздельно', () => {
+  const c = { media: 307, file: 8, link: 138, audio: 1, voice: 22, video: 36 };
+  expect(tabCounter('media', c)).toBe('271 фото, 36 видео');
+  expect(tabCounter('media', { ...c, media: 36 })).toBe('36 видео');
+  expect(tabCounter('media', { ...c, media: 5, video: 0 })).toBe('5 фото');
+  expect(tabCounter('media', { media: 3 })).toBe('3 медиафайла');
+  expect(tabCounter('file', c)).toBe('8 файлов');
+  expect(tabCounter('link', c)).toBe('138 ссылок');
+  expect(tabCounter('audio', c)).toBe('1 аудиофайл');
+  expect(tabCounter('voice', c)).toBe('22 голосовых сообщения');
+  expect(tabCounter('voice', { voice: 11 })).toBe('11 голосовых сообщений');
+  expect(tabCounter('members', null, 21)).toBe('21 участник');
+  expect(tabCounter('file', null)).toBeNull();
 });

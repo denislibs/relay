@@ -16,6 +16,31 @@ export const TAB_LABEL: Record<SharedTab, string> = { members: 'Участник
 /** Название вкладки: на самой вкладке и в шапке панели, когда вкладки прилипли к верху (как в Telegram). */
 export const tabLabel = (t: SharedTab): string => TAB_LABEL[t];
 
+const ru = (n: number, one: string, few: string, many: string) => {
+  const d = n % 10, h = n % 100;
+  return `${n} ${d === 1 && h !== 11 ? one : d >= 2 && d <= 4 && (h < 12 || h > 14) ? few : many}`;
+};
+/** Счётчик вкладки для шапки (как в Telegram: «271 фото, 36 видео», «8 файлов»…); null — ещё неизвестен.
+ *  media: фото и видео раздельно, если сервер прислал video; нулевая часть не пишется. */
+export function tabCounter(t: SharedTab, counts: (Partial<Record<MediaTab, number>> & { video?: number }) | null, members?: number | null): string | null {
+  if (t === 'members') return members == null ? null : ru(members, 'участник', 'участника', 'участников');
+  const n = counts?.[t];
+  if (n == null) return null;
+  switch (t) {
+    case 'media': {
+      if (counts!.video == null) return ru(n, 'медиафайл', 'медиафайла', 'медиафайлов');
+      const video = counts!.video, photo = Math.max(0, n - video);
+      const parts = [photo ? `${photo} фото` : '', video ? `${video} видео` : ''].filter(Boolean);
+      return parts.length ? parts.join(', ') : '0 фото';
+    }
+    case 'file': return ru(n, 'файл', 'файла', 'файлов');
+    case 'link': return ru(n, 'ссылка', 'ссылки', 'ссылок');
+    case 'audio': return ru(n, 'аудиофайл', 'аудиофайла', 'аудиофайлов');
+    case 'voice': return ru(n, 'голосовое сообщение', 'голосовых сообщения', 'голосовых сообщений');
+  }
+  return null;
+}
+
 /** Клик по вкладке, пока над ней ещё виден профиль: куда прокрутить панель, чтобы вкладки доехали до верха.
  *  offset — расстояние от верха области прокрутки до вкладок, max — предел прокрутки. null — уже прилипли, ехать некуда. */
 export function tabScrollTarget(p: { scrollTop: number; offset: number; max: number }): number | null {

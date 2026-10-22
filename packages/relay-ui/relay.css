@@ -445,6 +445,21 @@ body { margin: 0; font-family: var(--font-sans); color: var(--ink); background: 
 .rl-panel-head.is-media .rl-panel-head-btn .rl-icon { animation: rl-head-btn 220ms cubic-bezier(.2, .8, .2, 1) both; }
 @keyframes rl-head-btn { from { opacity: 0; transform: rotate(-45deg) scale(.7); } }
 @media (prefers-reduced-motion: reduce) { .rl-panel-head-title, .rl-panel-head-btn .rl-icon { animation: none; } }
+/* SlideFade (kit.js): слои строки абсолютно в коробке; вперёд — новая справа, старая влево; назад — зеркально */
+.rl-slidefade { position: relative; }
+.rl-slidefade-item { position: absolute; inset: 0; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+.rl-slidefade-item.is-in { animation: rl-sf-x-in 400ms cubic-bezier(.2, .8, .3, 1) both, rl-sf-in 400ms cubic-bezier(.47, 0, .745, .715) both; }
+.rl-slidefade-item.is-out { animation: rl-sf-x-out 400ms cubic-bezier(.2, .8, .3, 1) both, rl-sf-out 400ms ease-out both; }
+.rl-slidefade.is-back .rl-slidefade-item.is-in { animation-name: rl-sf-x-in-back, rl-sf-in; animation-timing-function: cubic-bezier(.2, .8, .3, 1), cubic-bezier(.39, .575, .565, 1); }
+.rl-slidefade.is-back .rl-slidefade-item.is-out { animation-name: rl-sf-x-out-back, rl-sf-out; }
+@keyframes rl-sf-x-in { from { transform: translateX(1.5rem); } }
+@keyframes rl-sf-x-in-back { from { transform: translateX(-1.5rem); } }
+@keyframes rl-sf-x-out { to { transform: translateX(-1.5rem); } }
+@keyframes rl-sf-x-out-back { to { transform: translateX(1.5rem); } }
+@keyframes rl-sf-in { from { opacity: 0; } }
+@keyframes rl-sf-out { to { opacity: 0; } }
+@media (prefers-reduced-motion: reduce) { .rl-slidefade-item { animation: none !important; } }
+html[data-anim="0"] .rl-slidefade-item { animation: none !important; }
 .rl-panel-head h2 { flex: 1; margin: 0; font: 400 16px/22px var(--font-sans); }
 .rl-profile { display: flex; flex-direction: column; align-items: center; gap: var(--space-1); padding: var(--space-4) var(--space-4) var(--space-6); text-align: center; }
 .rl-avatar-tone { background: linear-gradient(color-mix(in srgb, var(--avatar-tone), #fff 22%), var(--avatar-tone)); color: #fff; }

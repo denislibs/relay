@@ -1,10 +1,10 @@
 import type { ProfileLink, ProfileMusicSummary } from '@relay/protocol';
 import { ProfileLinks } from './links/ProfileLinks';
-import { SharedMedia } from './SharedMedia';
+import { SharedMedia, type MediaHead } from './SharedMedia';
 import { membersStatus, useMembers } from '../members';
 import { openUserChat, startDirectChat } from '../data';
 import { playProfileTop } from '../music';
-import { Avatar, Icon, InfoRow, PanelHeader, RichText, SettingsIcon, SlideStack, Switch, Verified, onHeavyAnimationEnd, peerTone } from '@relay/ui';
+import { Avatar, Icon, InfoRow, PanelHeader, RichText, SettingsIcon, SlideFade, SlideStack, Switch, Verified, onHeavyAnimationEnd, peerTone } from '@relay/ui';
 import type { Item } from '@relay/sync-engine/src/types';
 import { chatTone, isSystemChat } from './format';
 import type { ComponentChildren } from 'preact';
@@ -107,7 +107,7 @@ export function Info() {
   // («Участники», «Медиа», «Файлы»…) со стрелкой наверх; смена вкладки — то же мягкое проявление заголовка
   const body = useRef<HTMLDivElement>(null);
   const [media, setMedia] = useState(false);
-  const [mediaTitle, setMediaTitle] = useState('Общие медиа');
+  const [mediaHead, setMediaHead] = useState<MediaHead | null>(null);
   const measuring = useRef(false);
   const onBodyScroll = () => {
     if (measuring.current) return;
@@ -149,7 +149,7 @@ export function Info() {
     ) : (
     <div class="rl-sidepage">
       <PanelHeader class={media ? 'is-media' : undefined} icon={media ? 'arrowLeft' : 'close'} closeLabel={media ? 'Наверх' : 'Закрыть'}
-        title={media ? mediaTitle : group ? 'Информация о группе' : 'Информация'} onClose={media ? toTop : close} action={media ? undefined : action} />
+        title={<HeadTitle media={media} plain={group ? 'Информация о группе' : 'Информация'} name={title} head={mediaHead} />} onClose={media ? toTop : close} action={media ? undefined : action} />
       <div class="rl-aside-body" ref={body} onScroll={onBodyScroll}>
         {gallery.length ? (
           <ProfileGallery photos={gallery} index={slide} onIndex={setSlide} onOpen={setViewer}
@@ -192,7 +192,7 @@ export function Info() {
             </div>
           ) : null}</Expand>
         </div>
-        <SharedMedia chatId={chatId} group={group} onTitle={setMediaTitle} onMember={openMember} />
+        <SharedMedia chatId={chatId} group={group} onHead={setMediaHead} onMember={openMember} />
         {viewer != null && gallery.length ? (
           <PhotoViewer photos={gallery} index={viewer} name={title} onIndex={setSlide} onClose={() => setViewer(null)}
             origin={(k) => (k === slide ? document.querySelector<HTMLElement>(`.app-gallery [data-gallery-slide="${k}"]`) : null)} />
@@ -253,3 +253,21 @@ function ProfileMusicPill({ userId, music }: { userId: number; music: ProfileMus
   );
 }
 
+
+/**
+ * Шапка «Информации», как в Telegram Web K: пока вкладки медиа не прилипли — заголовок панели; прилипли — имя
+ * чата и под ним счётчик показанной вкладки («271 фото, 36 видео», «8 файлов»). Смена режима и смена вкладки —
+ * SlideFade: строка уезжает в сторону и гаснет, новая приезжает (имя при этом стоит на месте).
+ */
+function HeadTitle({ media, plain, name, head }: { media: boolean; plain: string; name: string; head: MediaHead | null }) {
+  const sub = head ? head.tabs.indexOf(head.shown) : 0;
+  return (
+    <SlideFade class="app-head-title" index={media && head ? 1 : 0} items={[
+      <span class="app-head-plain">{plain}</span>,
+      <span class="app-head-rows">
+        <b>{name}</b>
+        <SlideFade class="app-head-sub" index={Math.max(0, sub)} items={(head?.counters ?? ['']).map((c) => <span>{c ?? 'Загрузка…'}</span>)} />
+      </span>,
+    ]} />
+  );
+}
