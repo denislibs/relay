@@ -143,14 +143,28 @@ function stopCircle() { circle?.skipTransition(); circle = null; }
 /** Есть View Transitions и движение не урезано — смена темы кругом. */
 const canCircle = () => typeof (document as DocVT).startViewTransition === 'function' && !reducedMotion();
 
-function circleSwitch(root: HTMLElement, pref: 'system' | 'light' | 'dark'): void {
+/**
+ * clip-path круга в процентах от снимка. Пиксели не годятся: часть версий Chromium считала их в пикселях
+ * подложки (на Retina круг уезжал к половине координаты нажатия); проценты везде считаются от размера снимка.
+ * Процент радиуса у circle() — от диагонали, делённой на √2.
+ */
+export function circleClip(x: number, y: number, radius: number, w: number, h: number): string {
+  const pct = (v: number) => +v.toFixed(3) + '%';
+  return `circle(${pct(radius / (Math.hypot(w, h) / Math.SQRT2) * 100)} at ${pct(x / w * 100)} ${pct(y / h * 100)})`;
+}
+
+const STUCK_MS = 2000;   // переход завис (браузер не дождался кадра и т. п.) — завершить, страница не остаётся снимком
+
+function circleSwitch(root: HTMLElement, pref: 'system' | 'light' | 'dark', toDark: boolean): void {
   running++;            // прервать смешивание, если шло
   clear(root);
   stopCircle();
   const { x, y } = circleOrigin();
-  const r = circleRadius(x, y, innerWidth, innerHeight);
+  // в тёмную — тёмный круг растёт из кнопки; в светлую — тёмный круг сжимается в неё (старый снимок поверх)
+  const grow = toDark;
   const end = beginHeavyAnimation(CIRCLE_MS + 150);
   root.classList.add('rl-theme-vt');
+  root.classList.toggle('rl-theme-shrink', !grow);
   const t = (document as DocVT).startViewTransition!(() => {
     setAttr(root, pref);
     // браузер ждёт новое состояние и не даёт кадров (requestAnimationFrame молчит): перерисовка темы и
@@ -158,13 +172,22 @@ function circleSwitch(root: HTMLElement, pref: 'system' | 'light' | 'dark'): voi
     flushFrames(6);
   });
   circle = t;
+  const stuck = setTimeout(() => t.skipTransition(), STUCK_MS);
+  let anim: Animation | null = null;
   t.ready.then(() => {
-    root.animate({ clipPath: [`circle(0px at ${x}px ${y}px)`, `circle(${r}px at ${x}px ${y}px)`] },
-      { duration: CIRCLE_MS, easing: 'cubic-bezier(.4,0,.2,1)', pseudoElement: '::view-transition-new(root)' });
+    const pseudo = grow ? '::view-transition-new(root)' : '::view-transition-old(root)';
+    const box = getComputedStyle(root, pseudo);
+    const w = parseFloat(box.width) || innerWidth, h = parseFloat(box.height) || innerHeight;
+    const from = circleClip(x, y, 0, w, h), to = circleClip(x, y, circleRadius(x, y, w, h), w, h);
+    // fill: forwards — иначе между концом анимации и снятием снимка мелькает исходный кадр
+    anim = root.animate({ clipPath: grow ? [from, to] : [to, from] },
+      { duration: CIRCLE_MS, easing: 'cubic-bezier(.4,0,.2,1)', pseudoElement: pseudo, fill: 'forwards' });
   }).catch(() => {});
   t.finished.catch(() => {}).then(() => {
+    clearTimeout(stuck);
+    anim?.cancel();
     if (circle === t) circle = null;
-    if (!circle) root.classList.remove('rl-theme-vt');
+    if (!circle) root.classList.remove('rl-theme-vt', 'rl-theme-shrink');
     end();
     paletteChanged();
   });
@@ -178,7 +201,7 @@ let accentNow = 'green';
  */
 export function switchTheme(root: HTMLElement, pref: 'system' | 'light' | 'dark', toDark: boolean, animate: boolean): void {
   const from = themeNow(root), to: Theme = toDark ? 'dark' : 'light';
-  if (animate && from !== to && canCircle()) { circleSwitch(root, pref); return; }
+  if (animate && from !== to && canCircle()) { circleSwitch(root, pref, toDark); return; }
   blend(root, palette(from, accentNow), palette(to, accentNow), () => setAttr(root, pref), animate && from !== to);
 }
 
