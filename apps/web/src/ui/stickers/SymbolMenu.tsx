@@ -74,10 +74,18 @@ export function SymbolMenu(p: SymbolMenuProps) {
 }
 
 /** Полоса сверху: активная — по прокрутке (центруется), нажатие — плавно к секции. Граница снизу — только когда прокручено. */
+/* Активная секция и «прокручено ли» живут не в состоянии вкладки, а в маленьком хранилище, на которое подписана
+ * только полоса: смена секции при прокрутке перерисовывает одну полосу, а не всю сетку (343 стикера — ~40% времени
+ * прокрутки при 4× замедлении). */
+interface SectionsState { active: number; top: boolean; subs: Set<() => void> }
 function useSections(count: number) {
   const scroller = useRef<HTMLDivElement>(null);
-  const [active, setActive] = useState(0);
-  const [top, setTop] = useState(true);
+  const state = useRef<SectionsState>({ active: 0, top: true, subs: new Set() }).current;
+  const set = (active: number, top: boolean) => {
+    if (active === state.active && top === state.top) return;
+    state.active = active; state.top = top;
+    state.subs.forEach((f) => f());
+  };
   const onScroll = () => requestMeasure(() => {
     const el = scroller.current;
     if (!el) return;
@@ -85,20 +93,23 @@ function useSections(count: number) {
     let cur = 0;
     secs.forEach((s, i) => { if (s.offsetTop - el.offsetTop <= el.scrollTop + 8) cur = i; });
     const atTop = el.scrollTop <= 0;
-    requestMutation(() => { setActive(cur); setTop(atTop); });
+    requestMutation(() => set(cur, atTop));
   });
   const go = (i: number) => requestMeasure(() => {
     const el = scroller.current, sec = el?.querySelectorAll<HTMLElement>('[data-sec]')[i];
     if (!el || !sec) return;
     const y = i === 0 ? 0 : sec.offsetTop - el.offsetTop;
-    requestMutation(() => { el.scrollTo({ top: y, behavior: 'smooth' }); setActive(i); });
+    requestMutation(() => { el.scrollTo({ top: y, behavior: 'smooth' }); set(i, state.top); });
   });
-  useEffect(() => { if (active >= count) setActive(0); }, [count]);
-  return { scroller, active, top, onScroll, go };
+  useEffect(() => { if (state.active >= count) set(0, state.top); }, [count]);
+  return { scroller, state, onScroll, go };
 }
 
-function Strip({ items, active, go, border }: { items: ComponentChildren[]; active: number; go(i: number): void; border: boolean }) {
+function Strip({ items, state, go }: { items: ComponentChildren[]; state: SectionsState; go(i: number): void }) {
   const ref = useRef<HTMLDivElement>(null);
+  const [, redraw] = useState(0);
+  useEffect(() => { const f = () => redraw((n) => n + 1); state.subs.add(f); return () => { state.subs.delete(f); }; }, [state]);
+  const { active, top } = state;
   // центрируем активную кнопку прокруткой только самой полосы: scrollIntoView прокрутил бы и всех предков —
   // вплоть до корня приложения (он сдвигался вбок посреди выезда правой панели)
   useEffect(() => requestMeasure(() => {
@@ -108,7 +119,7 @@ function Strip({ items, active, go, border }: { items: ComponentChildren[]; acti
     if (Math.abs(strip.scrollLeft - left) > 1) requestMutation(() => strip.scrollTo({ left, behavior: 'smooth' }));
   }), [active]);
   return (
-    <div class={'app-sym-strip' + (border ? ' has-border' : '')} ref={ref} role="tablist">
+    <div class={'app-sym-strip' + (!top ? ' has-border' : '')} ref={ref} role="tablist">
       {items.map((it, i) => <button key={i} type="button" role="tab" aria-selected={i === active} class={'app-sym-strip-btn' + (i === active ? ' is-on' : '')} onClick={() => go(i)}>{it}</button>)}
     </div>
   );
@@ -146,7 +157,7 @@ function EmojiTab({ onPick }: { onPick(e: string): void }) {
   const pick = (e: string) => { pushRecentEmoji(e); onPick(e); };
   return (
     <div class="app-sym-pane">
-      <Strip items={(found ? [] : cats).map((c) => <Icon name={c.icon} size={24} />)} active={s.active} go={s.go} border={!s.top} />
+      <Strip items={(found ? [] : cats).map((c) => <Icon name={c.icon} size={24} />)} state={s.state} go={s.go} />
       <div class="app-sym-scroll" ref={s.scroller} onScroll={s.onScroll}>
         <SearchRow placeholder="Поиск эмодзи" q={q} setQ={setQ} group={group} setGroup={setGroup} />
         {cats.map((c, i) => <EmojiSection key={c.id} cat={c} eager={i < 2} root={s.scroller} onPick={pick} />)}
@@ -224,7 +235,7 @@ function StickersTab({ onPick }: { onPick(s: StickerRef): void }) {
 
   return (
     <div class="app-sym-pane">
-      <Strip items={stripItems} active={s.active} go={s.go} border={!s.top} />
+      <Strip items={stripItems} state={s.state} go={s.go} />
       <div class="app-sym-scroll" ref={s.scroller} onScroll={s.onScroll}>
         <SearchRow placeholder="Поиск стикеров" q={q} setQ={setQ} group={group} setGroup={setGroup} />
         {sections.map((sec) => (
