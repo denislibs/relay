@@ -13,6 +13,7 @@ import { StickerPreviewHold } from './StickerPreview';
 // когда она закрыта — под курсором ничего не перестраивается.
 type Tab = 'emoji' | 'stickers';
 const TAB_KEY = 'relay.symbols.tab';
+const CLOSE_MS = 180;   // закрытие панели (composer.js, relay.css .rl-symbols-pop.is-closing)
 const EMOJI_COLS = 8, EMOJI_ROW = 42;      // ячейка эмодзи 42 px (глиф 34)
 const STK_COLS = 5, STK_ROW = 76;          // ячейка стикера 72 px + 4 px зазор
 
@@ -27,21 +28,36 @@ export interface SymbolMenuProps {
 export function SymbolMenu(p: SymbolMenuProps) {
   const [tab, setTab] = useState<Tab>(() => { try { return (localStorage.getItem(TAB_KEY) as Tab) || 'emoji'; } catch { return 'emoji'; } });
   const [dir, setDir] = useState<'l' | 'r' | null>(null);
-  // закрыли панель — со следующего открытия «Недавние» свежие (ключ пересоздаёт вкладку, пока её не видно)
+  // как в Telegram Web K: обе вкладки, раз построенные, живут в DOM (скрытая — display: none, её стикеры стоят).
+  // Переключение — только показ: без перерисовки сетки, новых плееров стикеров и сборки мусора от старых
+  const [built, setBuilt] = useState<Record<Tab, boolean>>(() => ({ emoji: tab === 'emoji', stickers: tab === 'stickers' }));
+  // закрыли панель — со следующего открытия «Недавние» свежие: вкладки пересоздаются, но уже после
+  // анимации закрытия (иначе новое содержимое въезжало бы в исчезающую панель)
   const [epoch, setEpoch] = useState(0);
   const wasOpen = useRef(p.open);
-  useEffect(() => { if (wasOpen.current && !p.open) setEpoch((n) => n + 1); wasOpen.current = p.open; }, [p.open]);
+  useEffect(() => {
+    const closed = wasOpen.current && !p.open;
+    wasOpen.current = p.open;
+    if (!closed) return;
+    const t = setTimeout(() => { setDir(null); setEpoch((n) => n + 1); }, CLOSE_MS + 50);
+    return () => clearTimeout(t);
+  }, [p.open]);
   const pick = (t: Tab) => {
     if (t === tab) return;
     setDir(t === 'stickers' ? 'r' : 'l');
     setTab(t);
+    setBuilt((b) => (b[t] ? b : { ...b, [t]: true }));
     try { localStorage.setItem(TAB_KEY, t); } catch { /* ok */ }
   };
+  const body = (t: Tab) => built[t] ? (
+    <div class={'app-sym-body' + (t === tab && dir ? ' app-sym-from-' + dir : '')} key={t + ':' + epoch} hidden={t !== tab}>
+      {t === 'emoji' ? <EmojiTab onPick={p.onEmoji} /> : <StickersTab onPick={p.onSticker} />}
+    </div>
+  ) : null;
   return (
     <div class="app-sym">
-      <div class={'app-sym-body' + (dir ? ' app-sym-from-' + dir : '')} key={tab + ':' + epoch}>
-        {tab === 'emoji' ? <EmojiTab onPick={p.onEmoji} /> : <StickersTab onPick={p.onSticker} />}
-      </div>
+      {body('emoji')}
+      {body('stickers')}
       {/* вкладки — маленькой «пилюлей» поверх содержимого, как в Telegram для macOS; по бокам — круглые кнопки */}
       <div class="app-sym-bar">
         {tab === 'stickers' ? <IconButton class="app-sym-bar-btn app-sym-bar-left" icon="search" size={20} label="Найти стикеры" onClick={p.onSearch} /> : null}

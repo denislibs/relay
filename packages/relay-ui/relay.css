@@ -2328,4 +2328,6 @@ html[data-blur="0"] .rl-menu { -webkit-backdrop-filter: none; backdrop-filter: n
 .rl-symbols-pop { position: absolute; right: clamp(0px, 8%, 96px); bottom: calc(100% + 8px); z-index: 30; display: flex; flex-direction: column; width: 382px; max-width: calc(100% - 16px); height: 420px; max-height: calc(100vh - 140px); border-radius: 20px; background: var(--panel, var(--bg)); color: var(--ink); box-shadow: 0 5px 10px 5px rgba(16, 35, 47, .14); overflow: hidden;
   opacity: 0; transform: scale(.85); transform-origin: 100% 100%; transition: transform 200ms cubic-bezier(.4, 0, .2, 1), opacity 200ms cubic-bezier(.4, 0, .2, 1); }
 .rl-symbols-pop.is-active { opacity: 1; transform: none; }
+/* закрытие — как у выпадающего меню (rl-pop-out): быстрее открытия, лёгкое сжатие к 0.95, ускорение к концу */
+.rl-symbols-pop.is-closing { transform: scale(.95); transition-duration: var(--dur-fast); transition-timing-function: var(--ease-in); }
 html[data-anim="0"] .rl-symbols-pop { transition: none; }

@@ -67,7 +67,7 @@ function Composer(props) {
     }
     symView[1](function (v) { return v === 'hidden' ? v : 'shown'; });
     var endC = beginHeavyAnimation(220);
-    var t = setTimeout(function () { symView[1]('hidden'); endC(); }, reducedMotion() ? 0 : 200);
+    var t = setTimeout(function () { symView[1]('hidden'); endC(); }, reducedMotion() ? 0 : 180);   // закрытие — как у меню (--dur-fast 160 мс) (relay.css .is-closing)
     return function () { clearTimeout(t); endC(); };
   }, [symbols[0]]);
   useEffect(function () {
@@ -491,7 +491,7 @@ function Composer(props) {
   return h('div', { class: cx('rl-composer-wrap', props.className || props.class), ref: wrapRef },
     h(Presence, { show: !!(mentionList && mentionList.length), exitMs: 120 },
       h(MentionList, { items: mentionList || [], onPick: pickMention })),
-    props.symbolMenu && symMounted.current ? h('div', { class: cx('rl-symbols-pop', symView[0] === 'active' && 'is-active'), ref: popRef, role: 'dialog', 'aria-label': 'Эмодзи и стикеры',
+    props.symbolMenu && symMounted.current ? h('div', { class: cx('rl-symbols-pop', symbols[0] && symView[0] === 'active' && 'is-active', !symbols[0] && symView[0] !== 'hidden' && 'is-closing'), ref: popRef, role: 'dialog', 'aria-label': 'Эмодзи и стикеры',
         'aria-hidden': symbols[0] ? undefined : 'true', style: symView[0] === 'hidden' && !symbols[0] ? { display: 'none' } : undefined,
         onPointerEnter: symbolsHover.onPointerEnter, onPointerLeave: symbolsHover.onPointerLeave,
         onMouseDown: function (e) { if (e.target.nodeName !== 'INPUT') e.preventDefault(); } },
