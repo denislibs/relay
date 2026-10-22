@@ -394,7 +394,7 @@ function TrackHit({ h, who, hits, music }: { h: Hit; who: string; hits: Hit[]; m
     });
     player.toggle(voiceTrack(h));
   };
-  const round = a.kind === 'round' && a.thumb;
+  const round = (a.kind === 'round' || a.kind === 'audio') && a.thumb;   // кадр кружка или обложка трека
   return (
     <div class="app-sm-row app-gsearch-hit">
       {music || round ? (

@@ -5,7 +5,7 @@ import { avatarPhoto, userPhoto } from '../profilePhoto';
 import { senderAvatar } from '../profilePhoto';
 import type { Item } from '@relay/sync-engine/src/types';
 import { useContext, useEffect, useLayoutEffect, useRef, useState } from 'preact/hooks';
-import { focusMessage, openChat, type MediaTab } from '../data';
+import { focusMessage, openInner, type MediaTab } from '../data';
 import { useMedia } from '../mediaTab';
 import { animateScroll, gridCorners, tabCounter, tabLabel, tabScrollTarget, tileSrc, videoFrameSrc, type SharedTab } from '../mediaGrid';
 import { getGlobal, useGlobal } from '../global';
@@ -22,7 +22,7 @@ import { wantPeople } from '../people';
 
 const ORDER: MediaTab[] = ['media', 'file', 'link', 'audio', 'voice'];
 
-export type Att = { id: string; kind: string; mime: string; name: string; size: number; thumb?: string | null; duration?: number | null; w?: number | null; h?: number | null;
+export type Att = { id: string; kind: string; mime: string; name: string; size: number; thumb?: string | null; duration?: number | null; w?: number | null; h?: number | null; title?: string | null; performer?: string | null;
   preview?: { name: string; w: number; h: number; size: number } | null };
 export type Msg = Item & { id: number; clientId: string; senderId: number; createdAt: string; body: string; attachment?: Att | null; entities?: { type: string; offset: number; length: number; url?: string }[] | null };
 
@@ -264,7 +264,10 @@ function TrackRow({ m, chatId, items }: { m: Msg; chatId: number; items: Msg[] }
   const music = a.kind === 'audio';
   const g = getGlobal(), me = g.me?.userId;
   const chat = g.chats.find((c) => c.id === chatId);
-  const title = music ? trackTitle(a.name) : senderTitle(m.senderId, me, chat);
+  // музыка — «Исполнитель — Название» из тегов (как в ленте и в Telegram), без тегов — имя файла
+  const title = music ? (a.performer && a.title ? `${a.performer} — ${a.title}` : a.title || trackTitle(a.name)) : senderTitle(m.senderId, me, chat);
+  // обложка: у трека — обложка альбома, у кружка — его кадр (как в ленте)
+  const cover = (music || a.kind === 'round') && a.thumb ? a.thumb : null;
   const voiceTrack = (x: Msg) => ({ key: String(x.clientId), kind: 'voice' as const, src: offlineUrlNow(x.attachment!.id) ?? fileUrl(x.attachment!), duration: x.attachment!.duration ?? 0,
     title: senderTitle(x.senderId, me, chat), subtitle: x.attachment!.kind === 'round' ? 'Видеосообщение' : 'Голосовое сообщение', chatId, msgId: x.id });
   const toggle = () => {
@@ -279,7 +282,7 @@ function TrackRow({ m, chatId, items }: { m: Msg; chatId: number; items: Msg[] }
   };
   return (
     <div class="app-sm-row">
-      <button type="button" class={'app-sm-play' + (a.kind === 'round' && a.thumb ? ' app-sm-play-round' : '')} style={a.kind === 'round' && a.thumb ? { backgroundImage: `url(${a.thumb})` } : undefined}
+      <button type="button" class={'app-sm-play' + (cover ? ' app-sm-play-round' : '')} style={cover ? { backgroundImage: `url(${cover})` } : undefined}
         aria-label={loading ? 'Загрузка' : playing ? 'Пауза' : 'Слушать'} aria-busy={loading || undefined} onClick={toggle}>
         <Icon name={playing ? 'pause' : 'play'} size={22} />
         <LoadRing on={loading} progress={loading ? st.buffered ?? 0 : 0} />
@@ -334,12 +337,13 @@ function MembersList({ data, onOpen }: { data: { ownerId: number | null; members
   );
 }
 
-/** «Группы»: общие с собеседником — аватар, название, «N участников»; нажатие открывает группу (как в Telegram). */
+/** «Группы»: общие с собеседником — аватар, название, «N участников»; нажатие открывает группу поверх переписки
+ *  (стек чатов, как участник из вкладки «Участники»): «Назад» возвращает к собеседнику. */
 function GroupsList({ groups }: { groups: CommonGroup[] }) {
   return (
     <div class="app-members">
       <WindowList items={groups} rowHeight={MEMBER_ROW} overscan={6} role="list" getKey={(g: CommonGroup) => g.id} render={(g: CommonGroup) => (
-        <button type="button" role="listitem" class="rl-row app-member" onClick={() => openChat(g.id)}>
+        <button type="button" role="listitem" class="rl-row app-member" onClick={() => openInner(g.id)}>
           <Avatar name={g.title} tone={peerTone(g.id)} size={44} {...avatarPhoto(g.photo)} />
           <span class="rl-row-main">
             <span class="app-member-top"><span class="rl-row-name">{g.title || 'Группа'}</span></span>
