@@ -52,6 +52,15 @@ export function AuthFlow() {
   const wpImage = useWallpaperImage(wpKey, wp.image);
 
   useEffect(() => { void call<{ dev: boolean }>('/auth/config').then((r) => { if (r.ok) setDev(r.data.dev); }); }, []);
+  // адрес открытого чата (#chat=…) остаётся от прошлого сеанса — после входа под другим аккаунтом приложение
+  // открыло бы по нему чужой номер («Чат №497»). Экран входа его стирает; остальной хэш (токен QR и т. п.) не трогаем
+  useEffect(() => {
+    const h = new URLSearchParams(location.hash.slice(1));
+    if (!h.has('chat')) return;
+    h.delete('chat');
+    const rest = h.toString();
+    history.replaceState(history.state, '', location.pathname + location.search + (rest ? '#' + rest : ''));
+  }, []);
   useEffect(() => { try { sessionStorage.setItem(KEY, JSON.stringify(card)); } catch { /* ok */ } }, [card]);
   useEffect(() => () => clearTimeout(timer.current), []);
 
