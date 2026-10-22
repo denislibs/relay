@@ -1138,7 +1138,8 @@ html[data-anim="0"] .app-chatcol, html[data-anim="0"] .app-chatcol-below, html[d
 .app-stkpanel-empty { padding: 32px 16px; text-align: center; color: var(--ink-muted); }
 .app-stkpanel-end { height: 1px; }
 .app-stkrow { padding: 10px 8px; border-radius: 14px; cursor: pointer; animation: rl-fade 200ms var(--ease-out); }
-.app-stkrow:hover { background: var(--hover, rgba(127,127,127,.06)); }
+/* как в Telegram Web K: подсвечивается стикер под курсором, а не весь набор */
+.app-stkrow:focus-visible { outline: 2px solid var(--brand); outline-offset: -2px; }
 .app-stkrow-head { display: flex; align-items: center; gap: 12px; }
 .app-stkrow-title { flex: 1; min-width: 0; display: flex; flex-direction: column; }
 .app-stkrow-title b { font: 600 16px/22px var(--font-sans); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
@@ -1147,9 +1148,9 @@ html[data-anim="0"] .app-chatcol, html[data-anim="0"] .app-chatcol-below, html[d
 .app-stkrow-btn.is-added { background: var(--hover-strong, rgba(127,127,127,.16)); color: var(--ink-muted); }
 .app-stkrow-btn:disabled { opacity: .7; }
 .app-stkrow-strip { display: grid; grid-template-columns: repeat(5, 1fr); height: 72px; margin-top: 6px; }
-.app-stkrow-cell { display: flex; align-items: center; justify-content: center; }
+.app-stkrow-cell { display: flex; align-items: center; justify-content: center; margin: 0 2px; border-radius: 16px; transition: background-color var(--dur-fast); }
+.app-stkrow-cell:hover { background: var(--hover, rgba(127,127,127,.08)); }
 .app-stkrow-skel { cursor: default; animation: none; }
-.app-stkrow-skel:hover { background: none; }
 .app-stkrow-skel .app-stkrow-title i { display: block; height: 14px; border-radius: 7px; background: var(--hover, rgba(127,127,127,.12)); }
 .app-stkrow-skel .app-stkrow-title i:first-child { width: 45%; margin: 4px 0 8px; }
 .app-stkrow-skel .app-stkrow-title i:last-child { width: 25%; }
