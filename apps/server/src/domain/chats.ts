@@ -12,15 +12,13 @@ import type { GroupInfo, MyMembership } from '@relay/protocol';
 export async function createChat(kind: 'direct' | 'group', title: string | null, memberIds: number[]): Promise<number> {
   return sql.begin(async (tx) => {
     const [chat] = await tx`insert into chats (kind, title) values (${kind}, ${title}) returning id`;
-    for (const userId of new Set(memberIds)) {
-      await tx`insert into chat_members (chat_id, user_id) values (${chat.id}, ${userId})`;
-    }
+    await tx`insert into chat_members (chat_id, user_id) select ${chat.id}, unnest(${[...new Set(memberIds)]}::bigint[])`;
     return chat.id as number;
   });
 }
 
 export const GROUP_TITLE_MAX = 128;
-export const GROUP_MEMBERS_MAX = 200;   // вместе с создателем
+export const GROUP_MEMBERS_MAX = 5000;   // вместе с создателем: журнал пишется одним запросом на всех, уведомление — частями по 8000 байт
 
 /**
  * Новая группа: создатель и участники, первое сообщение — служебное «создал(а) группу» (его newMessage

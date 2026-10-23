@@ -17,19 +17,45 @@ const NOTIFY_MAX = 7800;
 
 export type UpdatesNotify = number[] | { p: number[]; u: [number, number][]; e: Update };
 
-/** Содержимое NOTIFY 'updates' по записям одной транзакции: массив — пинок всем; объект — p пинок, u получают e сразу. */
-export function notifyPayload(written: Written[]): string {
+/**
+ * Содержимое NOTIFY 'updates' по записям одной транзакции: массив — пинок всем; объект — p пинок, u получают e сразу.
+ * Полезная нагрузка pg_notify не больше 8000 байт, а получателей бывают тысячи: режем на несколько уведомлений
+ * (e повторяется в каждом). Каждый получатель — ровно в одном.
+ */
+export function notifyPayloads(written: Written[]): string[] {
   const count = new Map<number, number>();
   for (const w of written) count.set(w.userId, (count.get(w.userId) ?? 0) + 1);
   const all = [...count.keys()];
-  const plain = JSON.stringify(all);
   // одно и то же newMessage (один объект) у тех, кому в этой транзакции записали только его
   const inline = written.filter((w) => w.update.type === 'newMessage' && count.get(w.userId) === 1);
   const e = inline[0]?.update;
-  if (!e || inline.some((w) => w.update !== e)) return plain;
+  const plain = () => chunks(all.map((id) => String(id)), 2, (ids) => `[${ids.join(',')}]`);
+  if (!e || inline.some((w) => w.update !== e)) return plain();
+  const eJson = JSON.stringify(e);
+  const head = Buffer.byteLength(eJson) + 20;   // {"p":[],"u":[],"e":…}
+  if (head > NOTIFY_MAX) return plain();          // длинное сообщение: всем обычный пинок
   const u = new Set(inline.map((w) => w.userId));
-  const rich = JSON.stringify({ p: all.filter((id) => !u.has(id)), u: inline.map((w) => [w.userId, w.seq]), e } satisfies UpdatesNotify);
-  return Buffer.byteLength(rich) <= NOTIFY_MAX ? rich : plain;
+  const pokes = all.filter((id) => !u.has(id)).map((id) => String(id));
+  const pairs = inline.map((w) => `[${w.userId},${w.seq}]`);
+  const out: string[] = [];
+  // пинки — первыми частями, затем пары; часть вмещает столько, сколько влезает
+  let p: string[] = [], pu: string[] = [], size = head;
+  const flush = () => { if (p.length || pu.length) out.push(`{"p":[${p.join(',')}],"u":[${pu.join(',')}],"e":${eJson}}`); p = []; pu = []; size = head; };
+  for (const x of pokes) { if (size + x.length + 1 > NOTIFY_MAX) flush(); p.push(x); size += x.length + 1; }
+  for (const x of pairs) { if (size + x.length + 1 > NOTIFY_MAX) flush(); pu.push(x); size += x.length + 1; }
+  flush();
+  return out;
+}
+
+function chunks(items: string[], head: number, wrap: (part: string[]) => string): string[] {
+  const out: string[] = [];
+  let part: string[] = [], size = head;
+  for (const x of items) {
+    if (size + x.length + 1 > NOTIFY_MAX) { out.push(wrap(part)); part = []; size = head; }
+    part.push(x); size += x.length + 1;
+  }
+  if (part.length) out.push(wrap(part));
+  return out;
 }
 
 /**
@@ -67,9 +93,9 @@ export async function appendUpdates(tx: Tx, entries: { userId: number; update: U
     perTx.set(tx, written);
     const w = written;
     // уведомление — после коммита, одним NOTIFY на транзакцию (db.ts: почему не внутри)
-    if (!onCommit(tx, async () => { await sql`select pg_notify('updates', ${notifyPayload(w)})`; })) {
+    if (!onCommit(tx, async () => { for (const n of notifyPayloads(w)) await sql`select pg_notify('updates', ${n})`; })) {
       perTx.delete(tx);
-      await tx`select pg_notify('updates', ${JSON.stringify([...new Set(ids)])})`;   // не транзакция (тесты): как раньше
+      for (const n of notifyPayloads(entries.map((e, i) => ({ userId: e.userId, seq: seqs[i], update: e.update })))) await tx`select pg_notify('updates', ${n})`;   // не транзакция (тесты): сразу
       return seqs;
     }
   }

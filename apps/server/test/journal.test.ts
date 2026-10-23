@@ -148,3 +148,31 @@ test('NOTIFY leaves after the commit, not inside it: a rolled-back fanOut pokes 
   expect(n.e.type).toBe('newMessage');
   await l.unlisten();
 });
+
+import { notifyPayloads } from '../src/domain/journal';
+
+test('notify payloads for thousands of recipients: several parts, each under 8000 bytes, every recipient exactly once', () => {
+  const e = { type: 'newMessage' as const, message: { id: 7, chatId: 1, senderId: 1, body: 'ж'.repeat(1500) } as never };
+  const written = Array.from({ length: 3000 }, (_, i) => ({ userId: 100000 + i, seq: 42, update: e }));
+  written.push({ userId: 100000, seq: 43, update: { type: 'readOwn', chatId: 1, upToId: 1 } as never });   // две записи — пинок
+  const parts = notifyPayloads(written);
+  expect(parts.length).toBeGreaterThan(3);
+  const seen = new Map<number, number>();
+  for (const s of parts) {
+    expect(Buffer.byteLength(s)).toBeLessThanOrEqual(8000);
+    const n = JSON.parse(s) as { p: number[]; u: [number, number][]; e: unknown };
+    expect(n.e).toEqual(e);
+    for (const id of n.p) seen.set(id, (seen.get(id) ?? 0) + 1);
+    for (const [id, seq] of n.u) { expect(seq).toBe(42); seen.set(id, (seen.get(id) ?? 0) + 1); }
+    if (n.p.length) expect(n.p).toEqual([100000]);
+  }
+  expect(seen.size).toBe(3000);
+  expect([...seen.values()].every((c) => c === 1)).toBe(true);
+  // без inline — простые массивы, тоже частями
+  const plain = notifyPayloads(Array.from({ length: 3000 }, (_, i) => ({ userId: 100000 + i, seq: 1, update: { type: 'readOwn', chatId: 1, upToId: 1 } as never })));
+  expect(plain.length).toBeGreaterThan(1);
+  expect(plain.flatMap((s) => JSON.parse(s) as number[]).length).toBe(3000);
+  // длинное сообщение не влезает — всем пинок
+  const big = notifyPayloads([{ userId: 1, seq: 1, update: { type: 'newMessage', message: { id: 1, chatId: 1, senderId: 2, body: 'я'.repeat(4096) } } as never }]);
+  expect(big).toEqual(['[1]']);
+});
