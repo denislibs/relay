@@ -28,6 +28,7 @@ export type Tx = postgres.TransactionSql<{ bigint: number }>;
  * клиент: синхронизация при переподключении и редкая сверочная.
  */
 const commitHooks = new WeakMap<object, (() => Promise<void>)[]>();
+const preCommitHooks = new WeakMap<object, (() => Promise<void>)[]>();
 
 /** Выполнить fn после коммита транзакции db. false — db не транзакция (автокоммит): делать сразу. */
 export function onCommit(db: object, fn: () => Promise<void>): boolean {
@@ -37,21 +38,44 @@ export function onCommit(db: object, fn: () => Promise<void>): boolean {
   return true;
 }
 
+/** db — транзакция, открытая через sql.begin (хуки доступны). */
+export const isTx = (db: object): boolean => commitHooks.has(db);
+
+/**
+ * Выполнить fn внутри транзакции после её тела, перед commit. Здесь пишутся журналы (journal.ts): замки их
+ * счётчиков живут только от этого момента до коммита. Исключение в хуке — откат, как любое исключение в теле.
+ * Не транзакция — исключение: отложить некуда.
+ */
+export function beforeCommit(db: object, fn: () => Promise<void>): void {
+  const hooks = preCommitHooks.get(db);
+  if (!hooks) throw new Error('beforeCommit: not a transaction');
+  hooks.push(fn);
+}
+
 type BeginFn = <T>(cb: (tx: Tx) => T | Promise<T>) => Promise<T>;
 const rawBegin = sql.begin.bind(sql) as unknown as (opts: string | ((tx: Tx) => unknown), cb?: (tx: Tx) => unknown) => Promise<unknown>;
 function beginWithHooks(a: string | ((tx: Tx) => unknown), b?: (tx: Tx) => unknown): Promise<unknown> {
   const cb = (typeof a === 'function' ? a : b) as (tx: Tx) => unknown;
   let hooks: (() => Promise<void>)[] = [];
   let ref: Tx | null = null;
-  const wrapped = (tx: Tx) => { ref = tx; hooks = []; commitHooks.set(tx, hooks); return cb(tx); };
+  const wrapped = async (tx: Tx) => {
+    ref = tx; hooks = [];
+    const pre: (() => Promise<void>)[] = [];
+    commitHooks.set(tx, hooks); preCommitHooks.set(tx, pre);
+    const res = await cb(tx);
+    // хуки перед коммитом; хук может добавить следующий (журналы: сначала чаты, затем личные)
+    for (let i = 0; i < pre.length; i++) await pre[i]();
+    return res;
+  };
   const done = typeof a === 'function' ? rawBegin(wrapped) : rawBegin(a, wrapped);
+  const forget = () => { if (ref) { commitHooks.delete(ref); preCommitHooks.delete(ref); } };
   return done.then(
     async (res) => {
-      if (ref) commitHooks.delete(ref);
+      forget();
       for (const h of hooks) await h().catch((e) => console.error('after commit:', e));
       return res;
     },
-    (e) => { if (ref) commitHooks.delete(ref); throw e; },
+    (e) => { forget(); throw e; },
   );
 }
 (sql as unknown as { begin: BeginFn }).begin = beginWithHooks as unknown as BeginFn;

@@ -47,6 +47,7 @@ export interface MyMembership {
   rank: string | null;
   rights: MemberRights;
   restricted: boolean;         // для меня есть исключение
+  historyFrom?: number;        // вступил при скрытой истории: сообщения с id меньше не видны (и из журнала чата тоже)
 }
 
 export interface GroupMember {

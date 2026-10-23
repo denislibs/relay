@@ -219,7 +219,10 @@ export type Update =
   // группа: информация и настройки целиком — всем участникам
   | { type: 'groupUpdated'; chatId: Id; group: GroupInfo }
   // моё место в группе (роль, права, исключение, звание) — только мне
-  | { type: 'membership'; chatId: Id; me: MyMembership }
+  // seq — у вступления: номер журнала чата на момент коммита (клиент заводит чат и ничего не догоняет); при смене прав нет
+  | { type: 'membership'; chatId: Id; me: MyMembership; seq?: number }
+  // заявок на вступление — только тем, кто их принимает (groupUpdated этого поля больше не несёт: оно у каждого своё)
+  | { type: 'joinRequests'; chatId: Id; requests: number }
   // состав изменился: у кого строка новая или другая (upsert), кто вышел или удалён (remove)
   | { type: 'members'; chatId: Id; upsert: MemberRow[]; remove: Id[] }
   // чат больше не мой: вышел, удалили, группу удалили

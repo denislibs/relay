@@ -1,7 +1,7 @@
 import { normalizeLinks, type Birthday, type Me, type ProfileLink, type ProfileMusicSummary, type ProfilePhoto, type PublicUser, type UserPhoto } from '@relay/protocol';
-import { sql, type Tx } from '../db';
+import { isTx, sql, type Tx } from '../db';
 import { DomainError } from './errors';
-import { appendUpdates } from './journal';
+import { appendUpdates, flushJournals } from './journal';
 import { blocksViewer, canSee, privacyCtx, type PrivacyCtx } from './privacy';
 
 const RESERVED = new Set(['admin', 'relay', 'support', 'settings', 'help', 'api', 'root', 'system', 'null', 'undefined', 'me']);
@@ -30,6 +30,7 @@ function shape(r: Row) {
 
 /** Последний номер своего журнала: профиль «на момент seq» (см. Me.seq). */
 export async function selfSeq(tx: Tx | typeof sql, userId: number): Promise<number> {
+  if (isTx(tx)) await flushJournals(tx as Tx);   // записи этой транзакции ещё в буфере — seq ответа должен их учитывать
   const [s] = await tx`select seq from user_seq where user_id = ${userId}`;
   return s ? Number(s.seq) : 0;
 }

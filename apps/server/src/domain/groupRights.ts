@@ -86,7 +86,7 @@ export const canPin = (ctx: GroupCtx) => ctx.kind !== 'group' || hasAdmin(ctx, '
 export const canInvite = (ctx: GroupCtx) => hasAdmin(ctx, 'invite') || (ctx.kind === 'group' && can(ctx, 'invite'));
 
 export function myMembership(ctx: GroupCtx, rank: string | null): MyMembership {
-  return { role: ctx.role, admin: ctx.admin, rank, rights: ctx.rights, restricted: !!ctx.restricted };
+  return { role: ctx.role, admin: ctx.admin, rank, rights: ctx.rights, restricted: !!ctx.restricted, ...(ctx.historyFrom ? { historyFrom: ctx.historyFrom } : {}) };
 }
 
 const photoOf = (raw: unknown): ProfilePhoto | null => raw && typeof raw === 'object' ? raw as ProfilePhoto : null;

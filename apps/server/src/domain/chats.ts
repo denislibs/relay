@@ -13,6 +13,7 @@ export async function createChat(kind: 'direct' | 'group', title: string | null,
   return sql.begin(async (tx) => {
     const [chat] = await tx`insert into chats (kind, title) values (${kind}, ${title}) returning id`;
     await tx`insert into chat_members (chat_id, user_id) select ${chat.id}, unnest(${[...new Set(memberIds)]}::bigint[])`;
+    if (kind !== 'direct') await tx`insert into chat_seq (chat_id) values (${chat.id})`;   // журнал чата (journal.ts)
     return chat.id as number;
   });
 }
@@ -39,6 +40,7 @@ export async function createGroup(creatorId: number, input: { title?: unknown; m
     const [blocked] = await tx`select 1 from blocks where (owner_id = ${creatorId} and user_id = any(${ids}::bigint[])) or (user_id = ${creatorId} and owner_id = any(${ids}::bigint[])) limit 1`;
     if (blocked) throw new DomainError('blocked');
     const [chat] = await tx`insert into chats (kind, title, owner_id) values ('group', ${title}, ${creatorId}) returning id`;
+    await tx`insert into chat_seq (chat_id) values (${chat.id})`;   // журнал чата (journal.ts)
     const members = [creatorId, ...ids];
     await tx`insert into chat_members (chat_id, user_id, inviter_id) select ${chat.id}, unnest(${ids}::bigint[]), ${creatorId}`;
     await tx`insert into chat_members (chat_id, user_id, role) values (${chat.id}, ${creatorId}, 'owner')`;
