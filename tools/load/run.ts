@@ -15,10 +15,10 @@ const TARGET = process.env.TARGET ?? 'http://server:3000';
 const WS = TARGET.replace(/^http/, 'ws') + '/ws';
 const RUN = Date.now().toString(36);
 
-type Conn = { i: number; userId: number; token: string; ws?: WebSocket; seq: number; syncing: boolean; dirty: boolean; chats: number[] };
+type Conn = { i: number; userId: number; token: string; ws?: WebSocket; seq: number; syncing: boolean; dirty: boolean; chats: number[]; chatSeq: Map<number, number>; chatSyncing: Set<number> };
 
 const lat = { connect: [] as number[], ack: [] as number[], deliver: [] as number[] };
-const count = { sent: 0, acked: 0, ackErr: 0, delivered: 0, expected: 0, wsErrors: 0, wsClosed: 0, syncs: 0, pushed: 0 };
+const count = { sent: 0, acked: 0, ackErr: 0, delivered: 0, expected: 0, wsErrors: 0, wsClosed: 0, syncs: 0, pushed: 0, chatSyncs: 0, gaps: 0 };
 const pendingAcks = new Map<string, number>();
 
 async function pool<T>(items: T[], par: number, fn: (x: T) => Promise<void>): Promise<void> {
@@ -41,7 +41,7 @@ const summary = (xs: number[]) => ({ n: xs.length, p50: pct(xs, 50), p95: pct(xs
 
 // ---------- подготовка: пользователи и чаты ----------
 const t0 = performance.now();
-const conns: Conn[] = Array.from({ length: USERS }, (_, i) => ({ i, userId: 0, token: '', seq: 0, syncing: false, dirty: false, chats: [] }));
+const conns: Conn[] = Array.from({ length: USERS }, (_, i) => ({ i, userId: 0, token: '', seq: 0, syncing: false, dirty: false, chats: [], chatSeq: new Map(), chatSyncing: new Set() }));
 await pool(conns, SETUP_PAR, async (c) => {
   const r = await post('/dev/login', { name: `load-${RUN}-${c.i}` });
   c.userId = r.userId as number; c.token = r.token as string;
@@ -61,12 +61,50 @@ function sync(c: Conn): void {
   c.ws!.send(JSON.stringify({ op: 'sync', since: c.seq }));
 }
 
+/** Журнал чата (группы): как движок — push с from === номер чата применяем, иначе syncChat. */
+function syncChat(c: Conn, chatId: number): void {
+  if (c.chatSyncing.has(chatId)) return;
+  c.chatSyncing.add(chatId); count.chatSyncs++;
+  c.ws!.send(JSON.stringify({ op: 'syncChat', reqId: 'c' + chatId, chatId, since: c.chatSeq.get(chatId) ?? 0 }));
+}
+function countDelivered(c: Conn, items: { update: { type: string; message?: { senderId: number; body: string } } }[], now: number): void {
+  for (const e of items) {
+    const m = e.update.type === 'newMessage' ? e.update.message! : null;
+    if (m && m.senderId !== c.userId && m.body.startsWith('L:')) { lat.deliver.push(now - Number(m.body.slice(2))); count.delivered++; }
+  }
+}
+
 function onFrame(c: Conn, f: Record<string, unknown>, resolveHello?: () => void): void {
   switch (f.op) {
-    case 'hello': c.seq = f.seq as number; resolveHello?.(); return;
+    case 'hello': {
+      c.seq = f.seq as number;
+      // группы: номера из hello (since = 0 — все); догонять нечего, старт с текущего
+      for (const [chatId, seq] of (f.chats as [number, number][]) ?? []) c.chatSeq.set(chatId, seq);
+      resolveHello?.(); return;
+    }
+    case 'chatUpdates': {
+      const chatId = f.chatId as number;
+      countDelivered(c, f.items as never, performance.now());
+      c.chatSeq.set(chatId, f.to as number);
+      c.chatSyncing.delete(chatId);
+      if (f.more) syncChat(c, chatId);
+      return;
+    }
+    case 'chatTooLong': { c.chatSeq.set(f.chatId as number, f.seq as number); c.chatSyncing.delete(f.chatId as number); return; }
+    case 'chatGone': { c.chatSyncing.delete(f.chatId as number); c.chatSeq.delete(f.chatId as number); return; }
     case 'poke': sync(c); return;
     case 'push': {
-      // запись журнала сразу, как у движка: применяем, если ровно следующая, иначе — обычная синхронизация
+      if (f.chatId != null) {
+        // журнал чата: применяем, если ровно следующая запись; иначе — догонка этого чата
+        const chatId = f.chatId as number, local = c.chatSeq.get(chatId);
+        const items = f.items as never[];
+        if (local == null) { c.chatSeq.set(chatId, (f.from as number)); }   // чат, которого не знали: начинаем с него
+        if (c.chatSyncing.has(chatId) || f.from !== c.chatSeq.get(chatId) || !items.length) { count.gaps++; syncChat(c, chatId); return; }
+        countDelivered(c, items, performance.now()); count.pushed++;
+        c.chatSeq.set(chatId, f.to as number);
+        return;
+      }
+      // личный журнал: применяем, если ровно следующая, иначе — обычная синхронизация
       if (c.syncing || f.from !== c.seq) { sync(c); return; }
       const now = performance.now();
       for (const e of f.items as { seq: number; update: { type: string; message?: { senderId: number; body: string } } }[]) {
@@ -107,7 +145,7 @@ function connect(c: Conn): Promise<void> {
     const finish = () => { if (!done) { done = true; resolve(); } };
     const ws = new WebSocket(WS, { headers: { cookie: `relay_session=${c.token}` } } as unknown as string[]);
     c.ws = ws;
-    ws.onopen = () => ws.send(JSON.stringify({ op: 'hello', lastSeq: 0 }));
+    ws.onopen = () => ws.send(JSON.stringify({ op: 'hello', lastSeq: 0, since: 0 }));
     ws.onmessage = (e) => onFrame(c, JSON.parse(String(e.data)), () => { lat.connect.push(performance.now() - started); finish(); });
     ws.onerror = () => { count.wsErrors++; finish(); };
     ws.onclose = () => { count.wsClosed++; finish(); };
@@ -157,7 +195,7 @@ console.log(JSON.stringify({
   connect: { open, of: USERS, ...summary(lat.connect) },
   ack: { ...summary(lat.ack), errors: count.ackErr, lost: pendingAcks.size },
   deliver: { ...summary(lat.deliver), got: count.delivered, expected: count.expected },
-  throughput: { sentPerSec: Math.round(count.sent / DURATION), deliveredPerSec: Math.round(count.delivered / elapsed), syncs: count.syncs, pushed: count.pushed },
+  throughput: { sentPerSec: Math.round(count.sent / DURATION), deliveredPerSec: Math.round(count.delivered / elapsed), syncs: count.syncs, pushed: count.pushed, chatSyncs: count.chatSyncs, gaps: count.gaps },
   ws: { errors: count.wsErrors, closed: count.wsClosed },
 }, null, 1));
 for (const c of conns) c.ws?.close();
