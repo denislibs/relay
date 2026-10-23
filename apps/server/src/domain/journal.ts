@@ -1,24 +1,80 @@
 import { normalizeEntities, type Entity, type JournalEntry, type Update } from '@relay/protocol';
-import { sql, type Tx } from '../db';
+import { onCommit, sql, type Tx } from '../db';
 import { toMessage } from './chats';
 import { openDrafts, openRows } from './messageContent';
 
 export const MAX_BATCH = 500;
 
-/** Пишет по одной записи журнала на каждый элемент. Блокирует user_seq в порядке возрастания user_id — без дедлоков между параллельными транзакциями. */
-export async function appendUpdates(tx: Tx, entries: { userId: number; update: Update }[]): Promise<void> {
-  const sorted = [...entries].sort((x, y) => x.userId - y.userId);
-  const users = new Set<number>();
-  for (const { userId, update } of sorted) {
-    const [row] = await tx`
-      insert into user_seq (user_id, seq) values (${userId}, 1)
-      on conflict (user_id) do update set seq = user_seq.seq + 1
-      returning seq`;
-    await tx`insert into updates (user_id, seq, type, payload) values (${userId}, ${row.seq}, ${update.type}, ${tx.json(stored(update) as never)})`;
-    users.add(userId);
+/**
+ * Журнал за одну транзакцию: что кому записали. После коммита уходит один NOTIFY 'updates' (db.ts onCommit):
+ * получателям ровно одной записи newMessage — само событие с его seq (сервер отдаёт его в сокет без чтения базы,
+ * клиент применяет, если seq следующий за его lastSeq), остальным — «пинок» на обычную синхронизацию.
+ */
+type Written = { userId: number; seq: number; update: Update };
+const perTx = new WeakMap<object, Written[]>();
+/** Предел полезной нагрузки pg_notify — 8000 байт; длинное сообщение уходит обычным «пинком». */
+const NOTIFY_MAX = 7800;
+
+export type UpdatesNotify = number[] | { p: number[]; u: [number, number][]; e: Update };
+
+/** Содержимое NOTIFY 'updates' по записям одной транзакции: массив — пинок всем; объект — p пинок, u получают e сразу. */
+export function notifyPayload(written: Written[]): string {
+  const count = new Map<number, number>();
+  for (const w of written) count.set(w.userId, (count.get(w.userId) ?? 0) + 1);
+  const all = [...count.keys()];
+  const plain = JSON.stringify(all);
+  // одно и то же newMessage (один объект) у тех, кому в этой транзакции записали только его
+  const inline = written.filter((w) => w.update.type === 'newMessage' && count.get(w.userId) === 1);
+  const e = inline[0]?.update;
+  if (!e || inline.some((w) => w.update !== e)) return plain;
+  const u = new Set(inline.map((w) => w.userId));
+  const rich = JSON.stringify({ p: all.filter((id) => !u.has(id)), u: inline.map((w) => [w.userId, w.seq]), e } satisfies UpdatesNotify);
+  return Buffer.byteLength(rich) <= NOTIFY_MAX ? rich : plain;
+}
+
+/**
+ * Пишет по одной записи журнала на каждый элемент — одним запросом: счётчики user_seq поднимаются в порядке
+ * возрастания user_id (как и прежде — без дедлоков между параллельными транзакциями), записи получают
+ * последовательные seq в порядке entries. Строки user_seq заперты до коммита: так seq у пользователя становятся
+ * видимы по порядку и без дыр. Возвращает seq каждой записи в порядке entries.
+ */
+export async function appendUpdates(tx: Tx, entries: { userId: number; update: Update }[]): Promise<number[]> {
+  if (!entries.length) return [];
+  const ids = entries.map((e) => e.userId), types = entries.map((e) => e.update.type), payloads = entries.map((e) => JSON.stringify(stored(e.update)));
+  const rows = await tx`
+    with w as (
+      select user_id, type, payload::jsonb as payload, ord, row_number() over (partition by user_id order by ord) as rn,
+             count(*) over (partition by user_id) as n
+        from unnest(${ids}::bigint[], ${types}::text[], ${payloads}::text[]) with ordinality as t(user_id, type, payload, ord)),
+    s as (
+      insert into user_seq (user_id, seq)
+      select user_id, n from (select distinct user_id, n from w) d order by user_id
+      on conflict (user_id) do update set seq = user_seq.seq + excluded.seq
+      returning user_id, seq)
+    insert into updates (user_id, seq, type, payload)
+    select w.user_id, s.seq - w.n + w.rn, w.type, w.payload from w join s using (user_id)
+    returning user_id, seq`;
+  // seq по записям: у пользователя — по порядку его записей в entries
+  const byUser = new Map<number, number[]>();
+  for (const r of rows) { const l = byUser.get(r.user_id as number) ?? []; l.push(r.seq as number); byUser.set(r.user_id as number, l); }
+  for (const l of byUser.values()) l.sort((a, b) => a - b);
+  const next = new Map<number, number>();
+  const seqs = entries.map((e) => { const i = next.get(e.userId) ?? 0; next.set(e.userId, i + 1); return byUser.get(e.userId)![i]; });
+
+  let written = perTx.get(tx);
+  if (!written) {
+    written = [];
+    perTx.set(tx, written);
+    const w = written;
+    // уведомление — после коммита, одним NOTIFY на транзакцию (db.ts: почему не внутри)
+    if (!onCommit(tx, async () => { await sql`select pg_notify('updates', ${notifyPayload(w)})`; })) {
+      perTx.delete(tx);
+      await tx`select pg_notify('updates', ${JSON.stringify([...new Set(ids)])})`;   // не транзакция (тесты): как раньше
+      return seqs;
+    }
   }
-  // уведомление уйдёт только после коммита
-  if (users.size) await tx`select pg_notify('updates', ${JSON.stringify([...users])})`;
+  entries.forEach((e, i) => written!.push({ userId: e.userId, seq: seqs[i], update: e.update }));
+  return seqs;
 }
 
 /**
@@ -80,8 +136,8 @@ async function hydrate(userId: number, rows: { seq: number; payload: Stored }[])
   return out;
 }
 
-export function fanOut(tx: Tx, userIds: number[], update: Update): Promise<void> {
-  return appendUpdates(tx, [...new Set(userIds)].map((userId) => ({ userId, update })));
+export async function fanOut(tx: Tx, userIds: number[], update: Update): Promise<void> {
+  await appendUpdates(tx, [...new Set(userIds)].map((userId) => ({ userId, update })));
 }
 
 export async function currentSeq(userId: number): Promise<number> {

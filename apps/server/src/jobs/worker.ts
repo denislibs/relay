@@ -134,8 +134,9 @@ export function startWorker(opts: { concurrency?: number; pollMs?: number; lease
   };
   const claimSafe = (limit: number, f: KindFilter) => claim(limit, leaseSec, f).catch((e) => { console.error('jobs claim:', e); return [] as Job[]; });
 
-  const listening = sql.listen('jobs', (kind) => {
-    if (wantLane.has(kind)) wantLane.set(kind, true); else wantSingles = true;
+  // один NOTIFY на транзакцию несёт все её kind через запятую (queue.ts)
+  const listening = sql.listen('jobs', (payload) => {
+    for (const kind of payload.split(',')) { if (wantLane.has(kind)) wantLane.set(kind, true); else wantSingles = true; }
     poke();
   });
   const loop = (async () => {

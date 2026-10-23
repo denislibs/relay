@@ -114,3 +114,37 @@ test('old entries with the full body (written before the change) are read as is'
   await sql`insert into updates (user_id, seq, type, payload) values (${a}, 1, 'newMessage', ${sql.json(legacy as never)})`;
   expect((await getUpdates(a, 0)).items).toEqual([{ seq: 1, update: legacy as never }]);
 });
+
+test('one fanOut to many users is one statement: contiguous seqs, in entry order, repeated user gets consecutive seqs', async () => {
+  const ids: number[] = [];
+  for (let i = 0; i < 50; i++) ids.push(await makeUser('u' + i));
+  await sql.begin((tx) => fanOut(tx, ids, ping(1)));
+  const seqs = await sql.begin((tx) => appendUpdates(tx, [
+    { userId: ids[3], update: ping(2) }, { userId: ids[0], update: ping(3) }, { userId: ids[3], update: ping(4) }, { userId: ids[3], update: ping(5) },
+  ]));
+  expect(seqs).toEqual([2, 2, 3, 4]);   // в порядке entries: ids[3] получает 2,3,4, ids[0] — 2
+  for (const id of ids) expect(await currentSeq(id)).toBe(id === ids[3] ? 4 : id === ids[0] ? 2 : 1);
+  const { items } = await getUpdates(ids[3], 0);
+  expect(items.map((i) => [i.seq, (i.update as { chatId: number }).chatId])).toEqual([[1, 1], [2, 2], [3, 4], [4, 5]]);
+});
+
+test('NOTIFY leaves after the commit, not inside it: a rolled-back fanOut pokes nobody, a committed one pokes once with the seqs', async () => {
+  const a = await makeUser('a'), b = await makeUser('b');
+  const got: string[] = [];
+  const l = await sql.listen('updates', (p) => { got.push(p); });
+  await sql.begin(async (tx) => { await fanOut(tx, [a, b], ping(1)); throw new Error('rollback'); }).catch(() => {});
+  await Bun.sleep(100);
+  expect(got).toEqual([]);
+  await sql.begin(async (tx) => {
+    await fanOut(tx, [a, b], { type: 'newMessage', message: { id: 1, chatId: 1, senderId: a } as never });
+    await appendUpdates(tx, [{ userId: a, update: ping(1) }]);   // у a две записи — ему только пинок
+    expect(got).toEqual([]);   // до коммита ничего не ушло
+  });
+  await Bun.sleep(100);
+  expect(got.length).toBe(1);
+  const n = JSON.parse(got[0]) as { p: number[]; u: [number, number][]; e: { type: string } };
+  expect(n.p).toEqual([a]);
+  expect(n.u).toEqual([[b, 1]]);
+  expect(n.e.type).toBe('newMessage');
+  await l.unlisten();
+});

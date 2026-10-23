@@ -1,4 +1,4 @@
-import { sql, type Tx } from '../db';
+import { onCommit, sql, type Tx } from '../db';
 
 /**
  * Очередь задач в Postgres (transactional outbox). Задача ставится в транзакции изменения данных;
@@ -16,8 +16,14 @@ export async function enqueue(db: Db, kind: string, payload: object, opts: { run
     insert into jobs (kind, payload, run_at, dedupe_key, max_attempts)
     values (${kind}, ${db.json(payload as never)}, coalesce(${opts.runAt ?? null}::timestamptz, now()), ${opts.dedupeKey ?? null}, ${opts.maxAttempts ?? 8})
     on conflict (dedupe_key) where dedupe_key is not null do nothing`;
-  await db`select pg_notify('jobs', ${kind})`;
+  // NOTIFY — после коммита и один на транзакцию (db.ts); вне транзакции — сразу
+  const kinds = pending.get(db);
+  if (kinds) { kinds.add(kind); return; }
+  const set = new Set([kind]);
+  if (onCommit(db, async () => { pending.delete(db); await sql`select pg_notify('jobs', ${[...set].join(',')})`; })) pending.set(db, set);
+  else await db`select pg_notify('jobs', ${kind})`;
 }
+const pending = new WeakMap<object, Set<string>>();
 
 /** Периодическая задача: ровно одна строка на kind; после выполнения обработчик переносит её вперёд (complete с again). */
 export function ensurePeriodic(kind: string): Promise<void> {
