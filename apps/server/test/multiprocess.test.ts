@@ -46,10 +46,10 @@ test('presence, typing and new messages cross processes; a second device keeps t
   wa1.send(JSON.stringify({ op: 'typing', chatId }));
   expect(await typing).toMatchObject({ op: 'typing', userId: a.userId });
 
-  // сообщение — через журнал и NOTIFY
-  const poke = nextFrame(wb, (f) => f.op === 'poke');
+  // сообщение — через журнал и NOTIFY (другой процесс отдаёт его в сокет сразу, как push)
+  const push = nextFrame(wb, (f) => f.op === 'push');
   wa1.send(JSON.stringify({ op: 'send', reqId: 'r1', chatId, clientId: crypto.randomUUID(), body: 'привет' }));
-  await poke;
+  expect(await push).toMatchObject({ op: 'push', from: 0, to: 1 });
 
   // второе устройство Анны на процессе 1; закрытие первого не делает её «не в сети»
   const wa2 = await connect(1, a.token);

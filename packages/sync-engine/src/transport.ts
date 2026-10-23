@@ -124,6 +124,8 @@ export class WsTransport {
       // потери — любые кадры, кроме hello и sessionTerminated: без них сеанс не начать и не закончить, восстановиться нечем
       if (f.op !== 'hello' && f.op !== 'challenge' && f.op !== 'sessionTerminated' && lost(sim.profile)) { sim.losses++; dev.log.frameIn(f, raw.length, 'lost'); return; }
       if (f.op === 'updates' && sim.dropNextUpdates) { sim.dropNextUpdates = false; sim.losses++; dev.log.frameIn(f, raw.length, 'dropped'); return; }
+      // «дыра в журнале» для push: событие потеряно, «пинок» дошёл — догонка пойдёт через sync, и уже его ответ теряем
+      if (f.op === 'push' && sim.dropNextUpdates) { sim.losses++; dev.log.frameIn(f, raw.length, 'dropped'); f = { op: 'poke' }; }
       if (f.op === 'updates' && sim.forceTooLong) { sim.forceTooLong = false; dev.log.frameIn(f, raw.length, 'asTooLong'); f = { op: 'tooLong', seq: f.to }; }
       dev.log.frameIn(f, raw.length);
     }

@@ -231,6 +231,7 @@ export class Engine {
     if (this.readTimer) { clearTimeout(this.readTimer); this.readTimer = null; }
     if (this.outboxTimer) { clearTimeout(this.outboxTimer); this.outboxTimer = null; }
     if (this.evictTimer) { clearTimeout(this.evictTimer); this.evictTimer = null; }
+    if (this.safetyTimer) { clearInterval(this.safetyTimer); this.safetyTimer = null; }
     this.watchers.clear();
     this.onObsoleteCb();
   }
@@ -243,8 +244,12 @@ export class Engine {
     this.wantOnline = true;
     this.watchNetwork();
     this.transport.start();
+    // сверочная синхронизация: NOTIFY уходит после коммита, и упавший между ними процесс никого не «пнёт» —
+    // раз в safetySyncMs спрашиваем журнал сами (три дешёвых запроса; при отсутствии нового — пустой ответ)
+    if (!this.safetyTimer) this.safetyTimer = setInterval(() => { if (this.online && this.ready && !this.syncing) this.runSync(); }, this.cfg.safetySyncMs ?? 90_000);
   }
-  disconnect(): void { this.wantOnline = false; this.transport.stop(); this.changed(); }
+  private safetyTimer: ReturnType<typeof setInterval> | null = null;
+  disconnect(): void { this.wantOnline = false; this.transport.stop(); if (this.safetyTimer) { clearInterval(this.safetyTimer); this.safetyTimer = null; } this.changed(); }
 
   /** События сети воркера/окна: «нет сети» показываем сразу, а при возврате сети подключаемся без ожидания паузы. */
   private watchNetwork(): void {
@@ -1377,6 +1382,13 @@ export class Engine {
         if (this.resetting) this.skipped.poke = true;
         this.runSync();
         return;
+      case 'push':
+        // событие пришло вместе с «пинком»: применяем без sync, если оно ровно следующее и мы ничего не догоняем;
+        // иначе — обычная синхронизация (она принесёт и его)
+        if (this.resetting) { this.skipped.poke = true; return; }
+        if (!this.ready || this.syncing || this.syncWaiter || f.from !== this.store.lastSeq || !this.online) { this.runSync(); return; }
+        this.run(() => this.applyPush(f));
+        return;
       case 'typing': {
         // «печатает…» гаснет через typingMs после последнего кадра
         const key = f.chatId + ':' + f.userId;
@@ -1416,6 +1428,32 @@ export class Engine {
       this.syncing = false;
     }
     await this.syncLoop();
+  }
+
+  /** Запись журнала из push: как шаг syncLoop, под тем же флагом syncing (параллельной догонки нет). */
+  private async applyPush(f: Extract<ServerFrame, { op: 'push' }>): Promise<void> {
+    if (this.syncing || this.resetting || f.from !== this.store.lastSeq) { this.runSync(); return; }
+    this.syncing = true;
+    try {
+      for (const chatId of patchedChats(f.items, this.store.lastSeq)) await this.store.loadChatMessages(chatId);
+      for (const it of f.items) {
+        if (it.seq <= this.store.lastSeq) continue;
+        this.store.applyUpdate(it.update, it.seq);
+        this.store.lastSeq = it.seq;
+      }
+      await this.store.flush();
+      this.dev.counters.serverSeq = Math.max(this.dev.counters.serverSeq ?? 0, f.to);
+      this.dev.counters.pushed = (this.dev.counters.pushed ?? 0) + 1;
+      this.changed();
+    } finally {
+      this.syncing = false;
+    }
+    if (this.syncAgain) { this.runSync(); return; }
+    // как после догонки: чат, известный только по сообщению, — имя с сервера; открытые чаты, люди и участники, которых не хватает
+    if (this.store.unnamed().length) this.refreshList();
+    this.loadOpenChats();
+    this.fetchUsers();
+    this.fetchMembers();
   }
 
   private runSync(): void {

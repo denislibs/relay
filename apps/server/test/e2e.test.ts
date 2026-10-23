@@ -21,16 +21,18 @@ async function connect(token: string): Promise<WebSocket> {
 }
 const send = (ws: WebSocket, f: unknown) => ws.send(JSON.stringify(f));
 
-test('A sends → B is poked → B syncs → B reads → A sees readBy', async () => {
+test('A sends → B gets it pushed → B syncs → B reads → A sees readBy', async () => {
   const a = await login('Анна'), b = await login('Борис');
   const { id: chatId } = await (await fetch(`${base}/dev/chats`, { method: 'POST', headers: { cookie: `relay_session=${a.token}` }, body: JSON.stringify({ kind: 'direct', title: null, memberIds: [a.userId, b.userId] }) })).json() as { id: number };
   const wa = await connect(a.token), wb = await connect(b.token);
 
-  const poked = nextFrame(wb, (f) => f.op === 'poke');
+  const pushed = nextFrame(wb, (f) => f.op === 'push');
   const acked = nextFrame(wa, (f) => f.op === 'ack');
   send(wa, { op: 'send', reqId: 'r1', clientId: crypto.randomUUID(), chatId, body: 'привет' });
   const ack = (await acked) as Extract<ServerFrame, { op: 'ack' }>;
-  await poked;
+  // сообщение приходит Борису сразу, с его seq — без sync
+  const push = (await pushed) as Extract<ServerFrame, { op: 'push' }>;
+  expect(push).toMatchObject({ from: 0, to: 1, items: [{ seq: 1, update: { type: 'newMessage', message: { id: ack.result.id, body: 'привет' } } }] });
 
   const gotUpdates = nextFrame(wb, (f) => f.op === 'updates');
   send(wb, { op: 'sync', since: 0 });

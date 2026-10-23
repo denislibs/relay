@@ -355,6 +355,8 @@ export type ServerFrame =
   | { op: 'challenge'; nonce: string }   // сеанс привязан к устройству: подпиши вызов (prove), иначе кадры не выполняются
   | { op: 'hello'; seq: number; epoch: string }   // epoch — поколение базы; сменилось — кэш клиента недействителен
   | { op: 'updates'; from: number; to: number; items: JournalEntry[]; more: boolean }
+  // событие журнала сразу, без sync: клиент применяет, если from — его lastSeq, иначе синхронизируется как по poke
+  | { op: 'push'; from: number; to: number; items: JournalEntry[] }
   | { op: 'tooLong'; seq: number }
   | { op: 'ack'; reqId: string; result: Record<string, unknown> }
   | { op: 'err'; reqId?: string; code: ErrorCode; retry: boolean }

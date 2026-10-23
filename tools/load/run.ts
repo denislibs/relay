@@ -18,7 +18,7 @@ const RUN = Date.now().toString(36);
 type Conn = { i: number; userId: number; token: string; ws?: WebSocket; seq: number; syncing: boolean; dirty: boolean; chats: number[] };
 
 const lat = { connect: [] as number[], ack: [] as number[], deliver: [] as number[] };
-const count = { sent: 0, acked: 0, ackErr: 0, delivered: 0, expected: 0, wsErrors: 0, wsClosed: 0, syncs: 0 };
+const count = { sent: 0, acked: 0, ackErr: 0, delivered: 0, expected: 0, wsErrors: 0, wsClosed: 0, syncs: 0, pushed: 0 };
 const pendingAcks = new Map<string, number>();
 
 async function pool<T>(items: T[], par: number, fn: (x: T) => Promise<void>): Promise<void> {
@@ -65,6 +65,17 @@ function onFrame(c: Conn, f: Record<string, unknown>, resolveHello?: () => void)
   switch (f.op) {
     case 'hello': c.seq = f.seq as number; resolveHello?.(); return;
     case 'poke': sync(c); return;
+    case 'push': {
+      // запись журнала сразу, как у движка: применяем, если ровно следующая, иначе — обычная синхронизация
+      if (c.syncing || f.from !== c.seq) { sync(c); return; }
+      const now = performance.now();
+      for (const e of f.items as { seq: number; update: { type: string; message?: { senderId: number; body: string } } }[]) {
+        const m = e.update.type === 'newMessage' ? e.update.message! : null;
+        if (m && m.senderId !== c.userId && m.body.startsWith('L:')) { lat.deliver.push(now - Number(m.body.slice(2))); count.delivered++; count.pushed++; }
+      }
+      c.seq = f.to as number;
+      return;
+    }
     case 'updates': {
       const now = performance.now();
       for (const e of f.items as { seq: number; update: { type: string; message?: { senderId: number; body: string } } }[]) {
@@ -146,7 +157,7 @@ console.log(JSON.stringify({
   connect: { open, of: USERS, ...summary(lat.connect) },
   ack: { ...summary(lat.ack), errors: count.ackErr, lost: pendingAcks.size },
   deliver: { ...summary(lat.deliver), got: count.delivered, expected: count.expected },
-  throughput: { sentPerSec: Math.round(count.sent / DURATION), deliveredPerSec: Math.round(count.delivered / elapsed), syncs: count.syncs },
+  throughput: { sentPerSec: Math.round(count.sent / DURATION), deliveredPerSec: Math.round(count.delivered / elapsed), syncs: count.syncs, pushed: count.pushed },
   ws: { errors: count.wsErrors, closed: count.wsClosed },
 }, null, 1));
 for (const c of conns) c.ws?.close();

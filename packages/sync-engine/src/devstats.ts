@@ -32,7 +32,7 @@ export interface EngineView {
 export interface HostInfo { build: string; kind: 'shared' | 'dedicated-leader' | 'dedicated-follower'; clients(): number; startedAt: number }
 
 /** Счётчики, которые движок ведёт для снимка. */
-export interface SyncCounters { serverSeq: number | null; lastSyncAt: number | null; tooLongCount: number }
+export interface SyncCounters { serverSeq: number | null; lastSyncAt: number | null; tooLongCount: number; pushed?: number }
 
 const EWMA = 0.5;
 const SAMPLE = 8;

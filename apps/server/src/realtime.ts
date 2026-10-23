@@ -1,5 +1,7 @@
 import type { Server } from 'bun';
+import type { ServerFrame } from '@relay/protocol';
 import { sql } from './db';
+import type { UpdatesNotify } from './domain/journal';
 import { processAlive, processGone } from './domain/liveRegistry';
 import { closeLive, parseEnded, terminatedFrame, touchLive } from './domain/sessions';
 
@@ -31,9 +33,12 @@ export async function startRealtime(server: Server): Promise<() => Promise<void>
   const alive = setInterval(() => { processAlive().catch((e) => console.error('live registry:', e)); }, 30_000);
   alive.unref?.();
   const sub = await sql.listen('updates', (payload) => {
-    let users: number[];
-    try { users = JSON.parse(payload); } catch { return; }
-    for (const id of users) server.publish(`user:${id}`, POKE);
+    let n: UpdatesNotify;
+    try { n = JSON.parse(payload); } catch { return; }
+    if (Array.isArray(n)) { for (const id of n) server.publish(`user:${id}`, POKE); return; }
+    for (const id of n.p) server.publish(`user:${id}`, POKE);
+    // событие с seq получателя — в сокет сразу; клиент сверит seq и при расхождении синхронизируется сам
+    for (const [id, seq] of n.u) server.publish(`user:${id}`, JSON.stringify({ op: 'push', from: seq - 1, to: seq, items: [{ seq, update: n.e }] } satisfies ServerFrame));
   });
   // завершённые сеансы (в любом процессе): кадр в топик сеанса, затем сокеты этого процесса закрываются
   const subSessions = await sql.listen('sessions', (payload) => {
