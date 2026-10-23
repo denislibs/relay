@@ -1,6 +1,9 @@
 services:
   postgres:
     image: postgres:17-alpine
+    # wal_compression: журнал и счётчики на каждого получателя пишут много WAL (≈27 КБ на сообщение в группе на 50);
+    # shared_buffers: дефолт 128 МБ мал для messages (≈120 МБ) с индексами
+    command: ["postgres", "-c", "wal_compression=on", "-c", "shared_buffers=512MB", "-c", "effective_cache_size=1536MB"]
     environment:
       POSTGRES_USER: relay
       POSTGRES_PASSWORD: relay
