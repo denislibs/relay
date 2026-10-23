@@ -19,6 +19,7 @@ import { chatMembers, connected, disconnected, listPresence, type Publish } from
 import { searchMessages } from './domain/search';
 import { abortUpload, confirmUpload, createUpload, uploadParts, uploadStatus, downloadTtl, fileFor, signedDownload } from './domain/files';
 import { handleFrame } from './ws';
+import { registerSocket, releaseChats, syncSubscriptions, unregisterSocket } from './sockets';
 import { pinMessage, unpinMessage } from './domain/pins';
 import { addProfileMusic, listProfileMusic, removeProfileMusic } from './domain/profileMusic';
 import { journalStats } from './domain/journal';
@@ -45,6 +46,8 @@ export type WsData = {
   challenge?: string; proven?: boolean; queue?: string[]; proveTimer?: ReturnType<typeof setTimeout>;
   /** open дошёл до конца (подписки в Valkey, «в сети»): close ждёт его, чтобы «ушёл» не обогнал «пришёл». */
   opened?: Promise<void>;
+  /** журналы чатов, на которые подписан сокет (sockets.ts) */
+  chats?: Set<number>;
 };
 
 /** /dev/stats: ответ на пользователя живёт devStatsMs (тесты ставят 0). */
@@ -85,7 +88,7 @@ export function createServer(opts: { port: number }): Server {
     // любой кадр (и отправка, и прочтение): раз в минуту — отметка активности и проверка, что сеанс жив;
     // сеанс пропал (NOTIFY мог потеряться) — сокет закрыт, кадр не выполняем
     if (!(await checkSocket(ws.data.sessionId, ws.data).catch(() => true))) return;
-    for (const out of await handleFrame(ws.data.userId, frame, publish, ws.data.sessionId)) ws.send(JSON.stringify(out));
+    for (const out of await handleFrame(ws.data.userId, frame, publish, ws.data.sessionId, ws)) ws.send(JSON.stringify(out));
   };
   const server = Bun.serve<WsData>({
     port: opts.port,
@@ -413,21 +416,27 @@ export function createServer(opts: { port: number }): Server {
         ws.subscribe(`session:${sessionId}`);
         trackSocket(sessionId, ws);
         countSocket(userId, 1);
-        // подписка в Valkey — до объявления «в сети»: ответные кадры собеседников не должны потеряться
+        registerSocket(ws, bus);
+        // подписка в Valkey — до объявления «в сети»: ответные кадры собеседников не должны потеряться.
+        // Журналы групп — после «в сети»; привязанный сеанс подписывается на них только после prove (в push идут тексты)
         ws.data.opened = Promise.all([bus.listen(`user:${userId}`), bus.listen(`session:${sessionId}`)])
           .catch((err) => console.error('bus:', err))
           .then(() => connected(publish, userId))
-          .catch((err) => console.error('presence:', err));
+          .catch((err) => console.error('presence:', err))
+          .then(() => (ws.data.challenge ? undefined : syncSubscriptions(ws)))
+          .catch((err) => console.error('chat subscriptions:', err));
       },
       close(ws) {
         const { userId, sessionId } = ws.data;
         if (ws.data.proveTimer) clearTimeout(ws.data.proveTimer);
         untrackSocket(sessionId, ws);
         countSocket(userId, -1);
+        unregisterSocket(ws);
         void (ws.data.opened ?? Promise.resolve()).then(() => {
           disconnected(publish, userId);
           void bus.unlisten(`user:${userId}`).catch((err) => console.error('bus:', err));
           void bus.unlisten(`session:${sessionId}`).catch((err) => console.error('bus:', err));
+          void releaseChats(ws);
         });
       },
       async message(ws, raw) {
@@ -440,6 +449,8 @@ export function createServer(opts: { port: number }): Server {
           if (!spki || !(await verifyDevice(spki, 'ws', ws.data.challenge, f.sig))) { ws.close(4401, 'device proof failed'); return; }
           ws.data.proven = true;
           clearTimeout(ws.data.proveTimer);
+          await (ws.data.opened ?? Promise.resolve());
+          await syncSubscriptions(ws).catch((err) => console.error('chat subscriptions:', err));
           for (const q of ws.data.queue!.splice(0)) await runFrame(ws, q);
           return;
         }

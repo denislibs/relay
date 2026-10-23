@@ -329,8 +329,10 @@ export type ErrorCode = 'bad_frame' | 'pin_limit' | 'unauthorized' | 'not_member
 
 export type ClientFrame =
   | { op: 'prove'; sig: string }   // ответ на challenge: подпись «relay-device|ws|<nonce>» ключом устройства
-  | { op: 'hello'; lastSeq: number }
+  | { op: 'hello'; lastSeq: number; since?: number }   // since — мс по часам сервера из прошлого hello/chats: какие группы менялись с тех пор
   | { op: 'sync'; since: number }
+  | { op: 'syncChat'; reqId: string; chatId: Id; since: number }   // догнать журнал одного чата (группы, каналы)
+  | { op: 'chatsSince'; since: number }                             // сверка: какие группы менялись после since
   | { op: 'send'; reqId: string; clientId: string; chatId: Id; body: string; entities?: Entity[]; replyToId?: Id | null; attachment?: { id: string; thumb?: string | null; spoiler?: boolean } | null; groupId?: string | null; forward?: ForwardRef | null; noLinkPreview?: boolean; blocks?: Block[] | null; todo?: TodoInput; sticker?: { id: Id } | null }
   | { op: 'read'; reqId: string; chatId: Id; upToId: Id }
   | { op: 'typing'; chatId: Id }   // «печатаю» — без ответа, сервер пересылает остальным участникам
@@ -356,10 +358,15 @@ export interface PresenceItem { userId: number; online: boolean | null; lastSeen
 
 export type ServerFrame =
   | { op: 'challenge'; nonce: string }   // сеанс привязан к устройству: подпиши вызов (prove), иначе кадры не выполняются
-  | { op: 'hello'; seq: number; epoch: string }   // epoch — поколение базы; сменилось — кэш клиента недействителен
+  | { op: 'hello'; seq: number; epoch: string; now: number; chats: [chatId: Id, seq: number][] }   // epoch — поколение базы; chats — группы, менявшиеся после since; now — следующий since
+  | { op: 'chats'; now: number; items: [chatId: Id, seq: number][] }
+  | { op: 'chatUpdates'; reqId: string; chatId: Id; from: number; to: number; items: JournalEntry[]; more: boolean }
+  | { op: 'chatTooLong'; reqId: string; chatId: Id; seq: number }   // журнал чата подрезан дальше since: перезагрузить этот чат
+  | { op: 'chatGone'; reqId: string; chatId: Id }                   // не участник (исключён) или чата нет
   | { op: 'updates'; from: number; to: number; items: JournalEntry[]; more: boolean }
-  // событие журнала сразу, без sync: клиент применяет, если from — его lastSeq, иначе синхронизируется как по poke
-  | { op: 'push'; from: number; to: number; items: JournalEntry[] }
+  // событие журнала сразу, без sync: клиент применяет, если from — его номер (личный или чата chatId), иначе
+  // синхронизируется (sync / syncChat). Пустые items — «догони чат» (события не поместились в уведомление)
+  | { op: 'push'; chatId?: Id; from: number; to: number; items: JournalEntry[] }
   | { op: 'tooLong'; seq: number }
   | { op: 'ack'; reqId: string; result: Record<string, unknown> }
   | { op: 'err'; reqId?: string; code: ErrorCode; retry: boolean }
@@ -380,8 +387,10 @@ export function parseClientFrame(raw: string): ClientFrame | null {
   try { f = JSON.parse(raw); } catch { return null; }
   if (!f || typeof f !== 'object') return null;
   switch (f.op) {
-    case 'hello': return int(f.lastSeq) ? { op: 'hello', lastSeq: f.lastSeq } : null;
+    case 'hello': return int(f.lastSeq) ? { op: 'hello', lastSeq: f.lastSeq, ...(int(f.since) ? { since: f.since } : {}) } : null;
     case 'sync': return int(f.since) ? { op: 'sync', since: f.since } : null;
+    case 'syncChat': return str(f.reqId, 64) && int(f.chatId) && int(f.since) ? { op: 'syncChat', reqId: f.reqId, chatId: f.chatId, since: f.since } : null;
+    case 'chatsSince': return int(f.since) ? { op: 'chatsSince', since: f.since } : null;
     case 'ping': return { op: 'ping' };
     case 'typing': return int(f.chatId) ? { op: 'typing', chatId: f.chatId } : null;
     case 'edit': return str(f.reqId, 64) && int(f.chatId) && int(f.id) && typeof f.body === 'string' ? { op: 'edit', reqId: f.reqId, chatId: f.chatId, id: f.id, body: f.body, entities: normalizeEntities(f.body, f.entities) } : null;
