@@ -1,7 +1,7 @@
 import { beforeEach, expect, test } from 'bun:test';
 import { sql } from '../src/db';
-import { backoffMs, claim, complete, enqueue, ensurePeriodic, fail } from '../src/jobs/queue';
-import { PermanentError, register } from '../src/jobs/handlers';
+import { backoffMs, claim, complete, completeMany, enqueue, ensurePeriodic, fail } from '../src/jobs/queue';
+import { PermanentError, register, registerBatch } from '../src/jobs/handlers';
 import { drainJobs, startWorker } from '../src/jobs/worker';
 import { resetDb } from './helpers';
 
@@ -129,4 +129,69 @@ test('two workers take every job exactly once and wake on NOTIFY', async () => {
   await Promise.all([w1.stop(), w2.stop()]);
   expect(done.length).toBe(40);
   expect(new Set(done).size).toBe(40);
+});
+
+test('completeMany deletes in one statement and skips jobs whose lease was taken over', async () => {
+  for (let i = 0; i < 3; i++) await enqueue(sql, 'test.noop', { i });
+  const first = await claim(10, 1);
+  await Bun.sleep(1100);
+  const [taken] = await claim(1, 60);                    // одну аренду перехватил другой воркер
+  await completeMany(first);
+  expect((await sql`select id from jobs`).map((r) => Number(r.id))).toEqual([taken.id]);
+  await completeMany([]);
+});
+
+test('a batch handler gets every claimed job of its kind at once; drainJobs completes them together', async () => {
+  const calls: number[][] = [];
+  register('test.item', async () => { throw new Error('single path must not run'); });
+  registerBatch('test.item', async (jobs) => { calls.push(jobs.map((j) => j.payload.i as number)); }, { max: 100 });
+  await sql.begin(async (tx) => { for (let i = 0; i < 30; i++) await enqueue(tx, 'test.item', { i }); });
+  expect(await drainJobs()).toBe(30);
+  expect(calls.length).toBe(1);
+  expect(calls[0].sort((x, y) => x - y)).toEqual(Array.from({ length: 30 }, (_, i) => i));
+  expect(await count('jobs')).toBe(0);
+});
+
+test('a failing batch falls back to one job at a time: a poison job does not hold back the rest', async () => {
+  const single: number[] = [];
+  register('test.poison', async (p: { i: number }) => {
+    if (p.i === 3) throw new PermanentError('bad row');
+    single.push(p.i);
+  });
+  registerBatch('test.poison', async () => { throw new Error('batch failed'); }, { max: 100 });
+  await sql.begin(async (tx) => { for (let i = 0; i < 6; i++) await enqueue(tx, 'test.poison', { i }); });
+  await drainJobs();
+  expect(single.sort()).toEqual([0, 1, 2, 4, 5]);
+  expect(await count('jobs')).toBe(0);
+  expect((await sql`select payload from jobs_dead`).map((r) => r.payload.i)).toEqual([3]);
+});
+
+test('the worker is pipelined: a slow job does not hold a batch of fast ones; batch kinds run alongside', async () => {
+  const done: string[] = [];
+  register('test.slow', async () => { await Bun.sleep(800); done.push('slow'); });
+  register('test.fast', async (p: { i: number }) => { await Bun.sleep(10); done.push(`fast${p.i}`); });
+  registerBatch('test.many', async (jobs) => { for (const j of jobs) done.push(`many${j.payload.i}`); }, { max: 50 });
+  const w = startWorker({ concurrency: 2, pollMs: 60_000 });
+  await Bun.sleep(100);
+  await sql.begin(async (tx) => {
+    await enqueue(tx, 'test.slow', {});
+    for (let i = 0; i < 20; i++) await enqueue(tx, 'test.fast', { i });
+    for (let i = 0; i < 20; i++) await enqueue(tx, 'test.many', { i });
+  });
+  for (let t = 0; t < 100 && done.length < 41; t++) await Bun.sleep(20);
+  await w.stop();
+  expect(done.length).toBe(41);
+  // с одним медленным в работе вторая «полоса» успела все 20 быстрых, до того как он закончил
+  expect(done.indexOf('slow')).toBe(40);
+  expect(await count('jobs')).toBe(0);
+});
+
+test('stop waits for jobs in flight and their completion', async () => {
+  register('test.wait', async () => { await Bun.sleep(200); });
+  const w = startWorker({ concurrency: 4, pollMs: 60_000 });
+  await Bun.sleep(100);
+  await sql.begin(async (tx) => { for (let i = 0; i < 4; i++) await enqueue(tx, 'test.wait', { i }); });
+  await Bun.sleep(100);
+  await w.stop();
+  expect(await count('jobs')).toBe(0);
 });

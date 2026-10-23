@@ -50,23 +50,35 @@ async function targets(): Promise<string[]> {
   return b ? [liveIndex(), b.v as string] : [liveIndex()];
 }
 
-export async function syncMessage(id: number): Promise<void> {
-  const [row] = await sql`select id, chat_id, client_id, body, deleted, service_type, attachment, content from messages where id = ${id}`;
-  if (row) await openRows([row]);   // текст открываем только чтобы посчитать токены: в индекс уходят токены
-  const doc = row ? await docOf(row) : null;
+export function syncMessage(id: number): Promise<void> {
+  return syncMessages([id]);
+}
+
+/**
+ * Пачка сообщений (задачи search.sync): одно чтение строк, на каждый целевой индекс — один POST документов
+ * и одно удаление пачкой, ожидание задач Meilisearch — разом. Задачи одного индекса Meilisearch выполняет
+ * по порядку, поэтому удаление после upsert видит уже созданный индекс.
+ */
+export async function syncMessages(ids: number[]): Promise<void> {
+  const uniq = [...new Set(ids)];
+  if (!uniq.length) return;
+  const rows = await sql`select id, chat_id, client_id, body, deleted, service_type, attachment, content from messages where id = any(${uniq}::bigint[])`;
+  if (rows.length) await openRows(rows);   // текст открываем только чтобы посчитать токены: в индекс уходят токены
+  const docs = (await Promise.all(rows.map(docOf))).filter((d): d is Doc => d !== null);
+  const indexed = new Set(docs.map((d) => d.id));
+  const gone = uniq.filter((id) => !indexed.has(id));
+  const tasks: Promise<void>[] = [];
   for (const uid of await targets()) {
-    if (doc) {
-      // индекса может ещё не быть (перестройка впереди): Meilisearch создаст его сам, ключ — явно (id и chatId оба «*id»)
-      await waitTask((await meili<{ taskUid: number }>(`/indexes/${uid}/documents?primaryKey=id`, { method: 'POST', body: [doc] })).taskUid);
-      continue;
-    }
-    try {
-      await waitTask((await meili<{ taskUid: number }>(`/indexes/${uid}/documents/${id}`, { method: 'DELETE' })).taskUid);
-    } catch (e) {
-      // индекса ещё нет — убирать нечего (его построит перестройка)
-      if (!(e instanceof MeiliError && e.code === 'index_not_found')) throw e;
+    // индекса может ещё не быть (перестройка впереди): Meilisearch создаст его сам, ключ — явно (id и chatId оба «*id»)
+    if (docs.length) tasks.push(meili<{ taskUid: number }>(`/indexes/${uid}/documents?primaryKey=id`, { method: 'POST', body: docs }).then((t) => waitTask(t.taskUid)));
+    if (gone.length) {
+      tasks.push(meili<{ taskUid: number }>(`/indexes/${uid}/documents/delete-batch`, { method: 'POST', body: gone }).then((t) => waitTask(t.taskUid)).catch((e) => {
+        // индекса ещё нет — убирать нечего (его построит перестройка)
+        if (!(e instanceof MeiliError && e.code === 'index_not_found')) throw e;
+      }));
     }
   }
+  await Promise.all(tasks);
 }
 
 export async function searchIds(q: string, chatIds: number[], opts: { beforeId?: number; limit: number }): Promise<number[]> {

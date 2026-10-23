@@ -5,8 +5,8 @@ import { sweepPendingUploads } from '../domain/files';
 import { collectGarbage, purgeObjects } from '../domain/storageGc';
 import { sweepInactive } from '../domain/sessions';
 import { deliverPush, planPush, type PushMessage, type PushPayload } from '../domain/push';
-import { reindexStep, syncMessage } from '../search/messagesIndex';
-import { register } from './handlers';
+import { reindexStep, syncMessage, syncMessages } from '../search/messagesIndex';
+import { register, registerBatch } from './handlers';
 import { applyLinkPreview } from '../domain/messages';
 import { s3 } from '../domain/files';
 import { processVideo } from './video';
@@ -55,9 +55,11 @@ register('sessions.sweep', async () => {
 });
 
 // сообщение создано, изменено или удалено: привести индекс к текущей строке (идемпотентно)
+// под нагрузкой — пачкой: одно чтение строк и один запрос в Meilisearch на индекс вместо пары на сообщение
 register('search.sync', async (p: { id: number }) => {
   await syncMessage(p.id);
 });
+registerBatch('search.sync', (jobs) => syncMessages(jobs.map((j) => Number(j.payload.id))), { max: 200 });
 
 // полная перестройка индекса поиска рядом с живым (воркер при старте, dev-seed): короткими шагами, каждый
 // укладывается в аренду; не закончили — та же задача сразу снова в очередь и продолжит с курсора

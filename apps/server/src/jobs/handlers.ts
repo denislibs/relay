@@ -15,3 +15,15 @@ export const handlers: Record<string, Handler> = {};
 export function register(kind: string, h: Handler): void {
   handlers[kind] = h;
 }
+
+/**
+ * Обработчик пачки задач одного kind (search.sync: один запрос в Meilisearch на сотни сообщений). Успех — все
+ * задачи пачки готовы разом; ошибка — воркер прогоняет их по одной через обычный обработчик (он обязателен),
+ * поэтому одна «ядовитая» задача не держит остальные, а повторы и PermanentError работают как всегда.
+ */
+export type BatchHandler = (jobs: Job[]) => Promise<void>;
+export const batchHandlers: Record<string, { run: BatchHandler; max: number }> = {};
+
+export function registerBatch(kind: string, run: BatchHandler, opts: { max: number }): void {
+  batchHandlers[kind] = { run, max: opts.max };
+}

@@ -6,7 +6,7 @@ import '../src/jobs/kinds';
 import { drainJobs } from '../src/jobs/worker';
 import { deleteMessage, editMessage } from '../src/domain/messageOps';
 import { indexName, meili, MeiliError, waitTask } from '../src/search/meili';
-import { ensureIndex, liveIndex, reindexAll, reindexStep, searchIds, searchReady, syncMessage } from '../src/search/messagesIndex';
+import { ensureIndex, liveIndex, reindexAll, reindexStep, searchIds, searchReady, syncMessage, syncMessages } from '../src/search/messagesIndex';
 import { enqueue } from '../src/jobs/queue';
 import { makeChat, makeUser, resetDb } from './helpers';
 
@@ -248,4 +248,39 @@ test('the index holds HMAC tokens, not text: words and their beginnings are foun
   for (const q of ['встр', 'встреча', 'ЗАВТРА']) expect(doc.split(' ')).toContain(await queryTokens(q));
   expect(doc.split(' ')).not.toContain(await queryTokens('вечер'));
   expect(doc).not.toMatch(/встр|завт/);
+});
+
+test('syncMessages: one batch upserts the live rows and removes deleted, missing and duplicate ids', async () => {
+  const a = await makeUser('a'), b = await makeUser('b');
+  const ab = await makeChat([a, b]);
+  const keep = await say(a, ab, 'встреча в пятницу');
+  const gone = await say(a, ab, 'встреча отменена');
+  await syncMessage(gone.id);
+  await deleteMessage(a, ab, gone.id);
+  const late = await say(b, ab, 'встреча перенесена');
+  await syncMessages([keep.id, gone.id, late.id, keep.id, 999_999]);
+  const docs = await meili<{ results: { id: number }[] }>(`/indexes/${liveIndex()}/documents?limit=100`);
+  expect(docs.results.map((d) => d.id).sort((x, y) => x - y)).toEqual([keep.id, late.id]);
+  await syncMessages([]);
+});
+
+test('syncMessages during a rebuild writes both indexes; removal from a not yet created index is a no-op', async () => {
+  const a = await makeUser('a'), b = await makeUser('b');
+  const ab = await makeChat([a, b]);
+  const m = await say(a, ab, 'встреча');
+  const gone = await say(a, ab, 'удалю');
+  await deleteMessage(a, ab, gone.id);
+  const next = liveIndex() + '_building_test';
+  await sql`insert into server_meta (k, v) values ('search_building', ${next})`;
+  try {
+    await syncMessages([gone.id]);                           // next ещё нет: удаление ничего не ломает
+    await syncMessages([m.id, gone.id]);
+    for (const uid of [liveIndex(), next]) {
+      const doc = await meili<{ id: number }>(`/indexes/${uid}/documents/${m.id}`);
+      expect(doc.id).toBe(m.id);
+    }
+  } finally {
+    await sql`delete from server_meta where k = 'search_building'`;
+    await meili<{ taskUid: number }>(`/indexes/${next}`, { method: 'DELETE' }).then((t) => waitTask(t.taskUid)).catch(() => {});
+  }
 });

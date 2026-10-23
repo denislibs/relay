@@ -54,6 +54,18 @@ export async function complete(job: Job, again?: { inSec: number }): Promise<voi
   await sql`delete from jobs where id = ${job.id} and attempts = ${job.attempts}`;
 }
 
+/**
+ * Готово, пачкой: одна команда delete на все задачи вместо коммита на каждую. Условие на attempts — то же,
+ * что в complete: задачу с перехваченной арендой не трогаем.
+ */
+export async function completeMany(jobs: Job[]): Promise<void> {
+  if (!jobs.length) return;
+  if (jobs.length === 1) { await complete(jobs[0]); return; }
+  await sql`
+    delete from jobs j using unnest(${jobs.map((x) => x.id)}::bigint[], ${jobs.map((x) => x.attempts)}::int[]) as d(id, attempts)
+     where j.id = d.id and j.attempts = d.attempts`;
+}
+
 /** Пауза перед попыткой N+1: 1 с, 2 с, 4 с… не больше 10 минут, ±20 % чтобы повторы не шли стаей. */
 export function backoffMs(attempts: number): number {
   const base = Math.min(BACKOFF_CAP_MS, 1000 * 2 ** Math.max(0, attempts - 1));
