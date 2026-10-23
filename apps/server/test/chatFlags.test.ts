@@ -26,7 +26,7 @@ test('pin: newest pin first, limit per list, journal of own devices only, unpin'
   await setChatFlags(a, chats[0], { pinned: true });
   expect((await flagUpdates(a)).length).toBe(before);
   expect(await flagUpdates(b)).toEqual([]);
-  expect(await setChatFlags(a, chats[0], { pinned: false })).toEqual({ pinnedAt: null, archived: false, unreadMark: false });
+  expect(await setChatFlags(a, chats[0], { pinned: false })).toEqual({ pinnedAt: null, archived: false, unreadMark: false, archivedAtId: 0 });
   await setChatFlags(a, chats[PIN_LIMIT], { pinned: true });   // место освободилось
   await expect(setChatFlags(a, chats[0], { pinned: 'yes' })).rejects.toMatchObject({ code: 'bad_frame' });
 });
@@ -35,7 +35,7 @@ test('archive: unpins, own pin limit, out of «All» total; a new message brings
   const a = await makeUser('Анна'), b = await makeUser('Борис'), c = await makeUser('Вера');
   const ab = await makeChat([a, b]), ac = await makeChat([a, c]);
   await setChatFlags(a, ab, { pinned: true });
-  expect(await setChatFlags(a, ab, { archived: true })).toEqual({ pinnedAt: null, archived: true, unreadMark: false });
+  expect(await setChatFlags(a, ab, { archived: true })).toEqual({ pinnedAt: null, archived: true, unreadMark: false, archivedAtId: 0 });   // сообщений ещё нет
   await setChatFlags(a, ac, { archived: true });
   expect(await countChats(a)).toBe(0);
   expect((await listChats(a, { archivedOnly: true })).map((x) => x.id).sort()).toEqual([ab, ac].sort());

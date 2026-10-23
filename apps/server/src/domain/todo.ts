@@ -2,7 +2,7 @@ import { normalizeTodo, TODO_ITEMS_MAX, TODO_ITEM_MAX, type Message, type Todo, 
 import { sql, type Tx } from '../db';
 import { assertMember, toMessage } from './chats';
 import { DomainError } from './errors';
-import { fanOut } from './journal';
+import { chatEvent } from './journal';
 import { lockOpen, updateContent } from './messageContent';
 import { blockedInDirect } from './privacy';
 
@@ -30,12 +30,12 @@ async function serviceLine(tx: Tx, chatId: number, userId: number, listId: numbe
     insert into messages (chat_id, sender_id, client_id, kind, body, service_type, service_data, reply_to_id)
     values (${chatId}, ${userId}, ${crypto.randomUUID()}, 'text', '', ${type}, ${sql.json(data as never)}, ${listId}) returning *`;
   const message = toMessage(row);
-  await fanOut(tx, to, { type: 'newMessage', message });
+  await chatEvent(tx, chatId, { type: 'newMessage', message });
   return message;
 }
 
 async function publish(tx: Tx, chatId: number, id: number, todo: Todo, to: number[], editedAt?: string) {
-  await fanOut(tx, to, { type: 'todoUpdated', chatId, id, todo, ...(editedAt ? { editedAt } : {}) } satisfies Update);
+  await chatEvent(tx, chatId, { type: 'todoUpdated', chatId, id, todo, ...(editedAt ? { editedAt } : {}) } satisfies Update);
 }
 
 /** Отметить / снять отметки. Повтор того же — без записи. */

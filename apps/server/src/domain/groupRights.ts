@@ -4,7 +4,7 @@ import {
 } from '@relay/protocol';
 import { sql, type Tx } from '../db';
 import { DomainError } from './errors';
-import { appendUpdates } from './journal';
+import { appendUpdates, chatEvent, membershipEvent } from './journal';
 import { privacyCtx } from './privacy';
 import { COLS, publicUser, type ContactName, type Row } from './profile';
 
@@ -121,13 +121,15 @@ async function approvers(db: Db, chatId: number): Promise<Set<number>> {
   return new Set(rows.map((r) => Number(r.user_id)));
 }
 
-/** Информация группы изменилась — всем участникам (заявки — только тем, кто их принимает). */
+/**
+ * Информация группы изменилась — одной записью в журнал чата (без заявок: это поле у каждого своё). Число заявок —
+ * личным joinRequests тем, кто их принимает; extra — кто только что перестал принимать (получит 0).
+ */
 export async function broadcastGroup(tx: Tx, chatId: number, extra: number[] = []): Promise<void> {
   const { pending, ...info } = await groupInfo(tx, chatId);
-  const members = (await tx`select user_id from chat_members where chat_id = ${chatId}`).map((r) => Number(r.user_id));
+  await chatEvent(tx, chatId, { type: 'groupUpdated', chatId, group: { ...info, requests: 0 } }, 'group');
   const can = await approvers(tx, chatId);
-  const ids = [...new Set([...members, ...extra])];
-  await appendUpdates(tx, ids.map((userId) => ({ userId, update: { type: 'groupUpdated', chatId, group: { ...info, requests: can.has(userId) ? pending : 0 } } })));
+  await appendUpdates(tx, [...new Set([...can, ...extra])].map((userId) => ({ userId, update: { type: 'joinRequests', chatId, requests: can.has(userId) ? pending : 0 } })));
 }
 
 /** Моя роль или права изменились — только этому человеку. */
@@ -135,6 +137,13 @@ export async function sendMembership(tx: Tx, chatId: number, userId: number): Pr
   const ctx = await groupCtx(tx, chatId, userId);
   const [m] = await tx`select rank from chat_members where chat_id = ${chatId} and user_id = ${userId}`;
   await appendUpdates(tx, [{ userId, update: { type: 'membership', chatId, me: myMembership(ctx, (m?.rank as string | null) ?? null) } }]);
+}
+
+/** Вступил: membership с seq журнала чата на момент коммита (journal.ts) — клиент заводит чат и ничего не догоняет. */
+export async function joinMembership(tx: Tx, chatId: number, userId: number): Promise<void> {
+  const ctx = await groupCtx(tx, chatId, userId);
+  const [m] = await tx`select rank from chat_members where chat_id = ${chatId} and user_id = ${userId}`;
+  membershipEvent(tx, userId, chatId, myMembership(ctx, (m?.rank as string | null) ?? null));
 }
 
 export async function membersOf(db: Db, chatId: number): Promise<number[]> {
@@ -154,8 +163,7 @@ export async function broadcastMembers(tx: Tx, chatId: number, delta: MembersDel
   const rows = upsertIds.length ? await tx`select user_id, role, rank from chat_members where chat_id = ${chatId} and user_id = any(${upsertIds}::bigint[])` : [];
   const upsert: MemberRow[] = rows.map((r) => ({ userId: Number(r.user_id), role: ((r.role as string) ?? 'member') as MemberRow['role'], rank: (r.rank as string | null) ?? null }));
   const members = await membersOf(tx, chatId);
-  const to = [...new Set([...members, ...remove])];
-  await appendUpdates(tx, to.map((userId) => ({ userId, update: { type: 'members', chatId, upsert, remove } })));
+  await chatEvent(tx, chatId, { type: 'members', chatId, upsert, remove }, 'group');   // вышедшие получают chatRemoved
   const inGroup = new Set(members);
   const joined = [...new Set(delta.joined ?? [])].filter((id) => inGroup.has(id));
   if (joined.length) await exchangeProfiles(tx, chatId, members, joined);

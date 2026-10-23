@@ -2,7 +2,7 @@ import { afterAll, beforeEach, expect, test } from 'bun:test';
 import { sql } from '../src/db';
 import { createServer } from '../src/http';
 import { sendMessage } from '../src/domain/messages';
-import { journalOf, makeChat, resetDb } from './helpers';
+import { chatEventsOf, journalOf, makeChat, resetDb } from './helpers';
 
 const server = createServer({ port: 0 });
 const base = `http://localhost:${server.port}`;
@@ -21,6 +21,7 @@ const group = async (owner: U, members: U[], title = 'Дача') => (await ok(ow
 const send = (u: U, chatId: number, body = 'привет') => sendMessage(u.userId, { chatId, clientId: crypto.randomUUID(), body });
 const services = async (chatId: number) => (await sql`select service_type, service_data from messages where chat_id = ${chatId} and service_type is not null order by id`).map((r) => r.service_type);
 const lastUpdate = async (u: U, type: string) => (await journalOf(u.userId, type as never)).at(-1) as any;
+const lastChatEvent = async (chatId: number, type: string) => (await chatEventsOf(chatId, type as never)).at(-1) as any;
 
 test('owner and roles: creator is the owner; summary in the chat list carries group info and my membership', async () => {
   const a = await login('Анна'), b = await login('Борис');
@@ -42,7 +43,7 @@ test('info: members cannot rename unless allowed; rename makes a service message
   expect((await call(b, 'PATCH', `/groups/${id}`, { title: 'Нет' })).status).toBe(403);
   await ok(a, 'PATCH', `/groups/${id}`, { title: 'Дача 2', about: 'Шашлыки\nв субботу' });
   expect(await services(id)).toEqual(['group_created', 'title_changed']);
-  const u = await lastUpdate(b, 'groupUpdated');
+  const u = await lastChatEvent(id, 'groupUpdated');   // одной записью всем в журнале чата
   expect(u.group).toMatchObject({ title: 'Дача 2', about: 'Шашлыки\nв субботу' });
   expect((await call(a, 'PATCH', `/groups/${id}`, { about: 'x'.repeat(256) })).status).toBe(400);
   // участнику разрешили менять информацию
@@ -154,8 +155,9 @@ test('invites: expiry, usage limit, approval requests, revoke, joined list', asy
   const req = await ok(a, 'POST', `/groups/${id}/invites`, { approval: true });
   expect(await ok(d, 'POST', `/join/+${req.link}`)).toMatchObject({ requested: true });
   expect(await ok(e, 'POST', `/join/+${req.link}`)).toMatchObject({ requested: true });
-  expect((await lastUpdate(a, 'groupUpdated')).group.requests).toBe(2);
-  expect((await lastUpdate(b, 'groupUpdated')).group.requests).toBe(0);   // участнику заявки не показываются
+  expect((await lastUpdate(a, 'joinRequests')).requests).toBe(2);   // счётчик заявок — личным событием одобряющим
+  expect(await lastUpdate(b, 'joinRequests')).toBeUndefined();        // участнику заявки не показываются
+  expect((await lastChatEvent(id, 'groupUpdated')).group.requests).toBe(0);   // в общей записи поля нет
   expect((await call(b, 'GET', `/groups/${id}/requests`)).status).toBe(403);
   await ok(a, 'POST', `/groups/${id}/requests/${d.userId}`, { approve: true });
   await ok(a, 'POST', `/groups/${id}/requests`, { approve: false });
@@ -253,15 +255,15 @@ const updatesOf = async (u: U, type: string) => (await journalOf(u.userId, type 
 test('members delta: adding two people gives everyone a members record with two upserts and profile exchange', async () => {
   const a = await login('Анна'), b = await login('Борис'), c = await login('Вера'), d = await login('Глеб');
   const id = await group(a, [b]);
-  const before = (await updatesOf(a, 'members')).length;
+  const before = (await chatEventsOf(id, 'members')).length;
   await ok(a, 'POST', `/groups/${id}/members`, { userIds: [c.userId, d.userId] });
-  for (const u of [a, b, c, d]) {
-    const m = (await updatesOf(u, 'members')).at(-1);
-    expect(m).toMatchObject({ type: 'members', chatId: id, remove: [] });
-    expect(m.upsert.map((r: any) => r.userId).sort()).toEqual([c.userId, d.userId].sort());
-    expect(m.upsert[0]).toMatchObject({ role: 'member', rank: null });
-  }
-  expect((await updatesOf(a, 'members')).length).toBe(before + 1);
+  const m = (await chatEventsOf(id, 'members')).at(-1) as any;   // одна запись в журнале чата — всем
+  expect(m).toMatchObject({ type: 'members', chatId: id, remove: [] });
+  expect(m.upsert.map((r: any) => r.userId).sort()).toEqual([c.userId, d.userId].sort());
+  expect(m.upsert[0]).toMatchObject({ role: 'member', rank: null });
+  expect((await chatEventsOf(id, 'members')).length).toBe(before + 1);
+  // новички узнают о группе личным membership с seq чата на момент коммита
+  for (const u of [c, d]) expect(await lastUpdate(u, 'membership')).toMatchObject({ chatId: id, seq: (await chatEventsOf(id)).length });
   // Борис не знал Веру и Глеба — получил их профили; Вера получила профили Бориса и Анны
   const bSees = (await updatesOf(b, 'userUpdated')).map((x) => x.user.id);
   expect(bSees).toContain(c.userId);
@@ -275,14 +277,14 @@ test('members delta: admin and rank changes give an upsert with the role; remova
   const a = await login('Анна'), b = await login('Борис'), c = await login('Вера');
   const id = await group(a, [b, c]);
   await ok(a, 'PUT', `/groups/${id}/admins/${b.userId}`, { rights: { pin: true }, rank: 'Завхоз' });
-  const m = await lastUpdate(c, 'members');
+  const m = await lastChatEvent(id, 'members');
   expect(m.upsert).toEqual([{ userId: b.userId, role: 'admin', rank: 'Завхоз' }]);
   expect(m.remove).toEqual([]);
   await ok(a, 'PUT', `/groups/${id}/members/${c.userId}/restrict`, { rights: { text: false } });
-  expect((await lastUpdate(b, 'members')).upsert).toEqual([{ userId: c.userId, role: 'member', rank: null }]);
+  expect((await lastChatEvent(id, 'members')).upsert).toEqual([{ userId: c.userId, role: 'member', rank: null }]);
   await ok(a, 'DELETE', `/groups/${id}/members/${c.userId}`);
-  for (const u of [a, b, c]) expect(await lastUpdate(u, 'members')).toMatchObject({ upsert: [], remove: [c.userId] });
-  expect(await lastUpdate(c, 'chatRemoved')).toMatchObject({ chatId: id });
+  expect(await lastChatEvent(id, 'members')).toMatchObject({ upsert: [], remove: [c.userId] });
+  expect(await lastUpdate(c, 'chatRemoved')).toMatchObject({ chatId: id });   // удалённому — лично
 });
 
 test('members delta: profiles are exchanged only between people who did not see each other before', async () => {

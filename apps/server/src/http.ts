@@ -11,7 +11,7 @@ import { commonGroups, deleteDirectChat, createChat, createGroup, openDirect, me
 import { sql } from './db';
 import { DomainError } from './domain/errors';
 import { setChatNotify } from './domain/chatNotify';
-import { setChatFlags } from './domain/chatFlags';
+import { setChatFlags, unarchiveByMessage } from './domain/chatFlags';
 import { storageUsage } from './domain/uploadLimits';
 import { ensureServiceChat } from './domain/service';
 import { processAlive } from './domain/liveRegistry';
@@ -201,6 +201,8 @@ export function createServer(opts: { port: number }): Server {
         // закрепить / в архив / отметить непрочитанным: { pinned?, archived?, unreadMark? } → все три флага
         const chatFlags = /^\/chats\/(\d{1,15})\/flags$/.exec(url.pathname);
         if (req.method === 'PUT' && chatFlags) return Response.json(await setChatFlags(userId, Number(chatFlags[1]), await req.json().catch(() => null)));
+        const chatUnarchive = /^\/chats\/(\d{1,15})\/unarchive$/.exec(url.pathname);
+        if (req.method === 'POST' && chatUnarchive) return Response.json(await unarchiveByMessage(userId, Number(chatUnarchive[1]), await req.json().catch(() => null)));
         const chatNotify = /^\/chats\/(\d{1,15})\/notify$/.exec(url.pathname);
         if (req.method === 'PUT' && chatNotify) return Response.json(await setChatNotify(userId, Number(chatNotify[1]), await req.json().catch(() => null)));
         const privacyKey = /^\/privacy\/([a-zA-Z]{1,16})$/.exec(url.pathname);

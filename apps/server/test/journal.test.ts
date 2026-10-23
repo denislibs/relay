@@ -68,13 +68,17 @@ const raw = async (userId: number) => (await sql`select type, payload from updat
 const SECRET = 'пароль от сейфа 4242';
 
 test('the journal keeps references, not texts: message, edit and draft are stored as ids only', async () => {
-  const a = await makeUser('a'), b = await makeUser('b'), c = await makeUser('c');
-  const chat = await makeChat([a, b, c]);
+  const a = await makeUser('a'), b = await makeUser('b');
+  const chat = await makeChat([a, b]);   // личный: события в личных журналах (группы — в журнале чата, там тоже ссылки)
   const { message } = await sendMessage(a, { chatId: chat, clientId: crypto.randomUUID(), body: SECRET });
   await editMessage(a, chat, message.id, SECRET + ' (новый)');
   await saveDraft(a, chat, SECRET + ' черновик');
-  for (const u of [a, b, c]) expect(JSON.stringify(await raw(u))).not.toContain('сейфа');
+  for (const u of [a, b]) expect(JSON.stringify(await raw(u))).not.toContain('сейфа');
   expect((await raw(b))[0]).toEqual({ type: 'newMessage', chatId: chat, id: message.id, ref: 1 });
+  const g = await makeChat([a, b, await makeUser('c')]);
+  const gm = (await sendMessage(a, { chatId: g, clientId: crypto.randomUUID(), body: SECRET })).message;
+  const [row] = await sql`select payload from chat_updates where chat_id = ${g} order by seq desc limit 1`;
+  expect(row.payload).toEqual({ type: 'newMessage', chatId: g, id: gm.id, ref: 1 });
 });
 
 test('sync gives the client the same events as before: full message, edit, draft — current state', async () => {

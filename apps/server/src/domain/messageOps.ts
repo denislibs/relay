@@ -3,7 +3,7 @@ import { normalizeEntities, trimFormatted, type Entity, type Reaction } from '@r
 import { sql } from '../db';
 import { assertMember } from './chats';
 import { DomainError } from './errors';
-import { fanOut } from './journal';
+import { chatEvent } from './journal';
 import { updateContent } from './messageContent';
 import { blockedInDirect } from './privacy';
 import { isServiceChat } from './service';
@@ -19,8 +19,6 @@ async function ownMessage(tx: Parameters<typeof assertMember>[0], userId: number
   if (!m || m.deleted) throw new DomainError('not_found', 'message');
   if (m.sender_id !== userId) throw new DomainError('forbidden', 'not your message');
 }
-const membersOf = async (tx: Parameters<typeof assertMember>[0], chatId: number) =>
-  (await tx`select user_id from chat_members where chat_id = ${chatId}`).map((r) => r.user_id as number);
 
 /** Правка своего сообщения: новое тело и отметка «изм.» — всем участникам через журнал. */
 export async function editMessage(userId: number, chatId: number, id: number, body: string, rawEntities?: Entity[]): Promise<{ editedAt: string }> {
@@ -39,7 +37,7 @@ export async function editMessage(userId: number, chatId: number, id: number, bo
       return { body: text, entities: entities.length ? entities : null };
     }, () => ({ edited_at: sql`now()` })))!;
     const editedAt = new Date(row.edited_at as string).toISOString();
-    await fanOut(tx, await membersOf(tx, chatId), { type: 'messageEdited', chatId, id, body: text, editedAt, entities });
+    await chatEvent(tx, chatId, { type: 'messageEdited', chatId, id, body: text, editedAt, entities });
     await enqueue(tx, 'search.sync', { id });
     return { editedAt };
   });
@@ -57,7 +55,7 @@ export async function deleteMessage(userId: number, chatId: number, id: number):
     // текст и шифр стираются целиком: у удалённого не остаётся содержимого ни открыто, ни шифром
     await tx`update messages set body = '', entities = null, todo = null, blocks = null, link = null, content = null, deleted = true where chat_id = ${chatId} and id = ${id}`;
     await tx`delete from reactions where chat_id = ${chatId} and message_id = ${id}`;
-    await fanOut(tx, await membersOf(tx, chatId), { type: 'messageDeleted', chatId, id });
+    await chatEvent(tx, chatId, { type: 'messageDeleted', chatId, id });
     await enqueue(tx, 'search.sync', { id });   // убрать из индекса
     await unpinDeleted(tx, chatId, id);
     return { ok: true };
@@ -85,7 +83,7 @@ export async function reactMessage(userId: number, chatId: number, id: number, e
     }
     const rows = await tx`select user_id, emoji from reactions where chat_id = ${chatId} and message_id = ${id} order by created_at`;
     const reactions = rows.map((r) => ({ userId: r.user_id as number, emoji: r.emoji as string }));
-    await fanOut(tx, await membersOf(tx, chatId), { type: 'reactions', chatId, id, reactions });
+    await chatEvent(tx, chatId, { type: 'reactions', chatId, id, reactions });
     return { reactions };
   });
 }
@@ -99,7 +97,7 @@ export async function markListened(userId: number, chatId: number, id: number): 
     if (m.kind !== 'voice' && m.kind !== 'round') throw new DomainError('bad_frame', 'not a voice message');
     if (m.sender_id === userId || m.listened) return { changed: false };   // своё не «прослушивается»
     await tx`update messages set listened = true where chat_id = ${chatId} and id = ${id}`;
-    await fanOut(tx, await membersOf(tx, chatId), { type: 'mediaListened', chatId, id });
+    await chatEvent(tx, chatId, { type: 'mediaListened', chatId, id });
     return { changed: true };
   });
 }

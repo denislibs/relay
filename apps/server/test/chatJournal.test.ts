@@ -61,8 +61,6 @@ test('getChatUpdates: pages with more, hides messages before history_from, tooLo
   const g = await makeChat([a, b, await makeUser('c')]);
   const sent: number[] = [];
   for (let i = 0; i < 5; i++) sent.push((await sendMessage(a, { chatId: g, clientId: crypto.randomUUID(), body: 'm' + i })).message.id);
-  // sendMessage ещё пишет в личные журналы (переводится в следующем коммите) — здесь журнал чата заполняем сами
-  await sql.begin(async (tx) => { for (const id of sent) await chatEvent(tx, g, { type: 'newMessage', message: { id, chatId: g } as never }, 'group'); });
   const p1 = await getChatUpdates(b, g, 0, 2);
   expect(p1.items.map((i) => i.seq)).toEqual([1, 2]);
   expect(p1.more).toBe(true);
@@ -128,4 +126,59 @@ test('chatSeqsSince lists only groups changed after since, with the db clock as 
   const later = await chatSeqsSince(a, first.now);
   expect(later.items).toEqual([[g2, 1]]);
   expect(later.now).toBeGreaterThanOrEqual(first.now);
+});
+
+import { markRead } from '../src/domain/reads';
+import { setChatFlags, unarchiveByMessage } from '../src/domain/chatFlags';
+import { setChatNotify } from '../src/domain/chatNotify';
+import { listChats } from '../src/domain/chats';
+
+const sendTo = (u: number, chat: number, body = 'm') => sendMessage(u, { chatId: chat, clientId: crypto.randomUUID(), body }).then((r) => r.message.id);
+
+test('readBy in a group goes only to the authors of the messages just read; readOwn stays personal', async () => {
+  const a = await makeUser('a'), b = await makeUser('b'), c = await makeUser('c'), d = await makeUser('d');
+  const g = await makeChat([a, b, c, d]);
+  await sendTo(a, g); const m2 = await sendTo(a, g); await sendTo(c, g); const last = await sendTo(a, g);
+  await markRead(b, g, m2);
+  const by = async (u: number) => (await getUpdates(u, 0)).items.map((i) => i.update).filter((x) => x.type === 'readBy');
+  expect((await by(a)).map((x) => (x as { upToId: number }).upToId)).toEqual([m2]);
+  expect(await by(c)).toEqual([]);   // её сообщение дальше границы прочтения
+  expect(await by(d)).toEqual([]);   // не автор — ничего
+  expect((await getUpdates(b, 0)).items.map((i) => i.update.type)).toContain('readOwn');
+  await markRead(b, g, last);
+  expect((await by(c)).map((x) => (x as { upToId: number }).upToId)).toEqual([last]);
+  // в списке у автора peerReadUpTo группы — «кто-то дочитал до»
+  expect((await listChats(a, { ids: [g] }))[0].peerReadUpTo).toBe(last);
+});
+
+test('group unarchive is a conditional operation: newer foreign message lifts the archive, older/own/muted do not; re-archive moves the boundary', async () => {
+  const a = await makeUser('a'), b = await makeUser('b');
+  const g = await makeChat([a, b, await makeUser('c')]);
+  const old = await sendTo(b, g);
+  await setChatFlags(a, g, { pinned: true });
+  const archived = await setChatFlags(a, g, { archived: true });
+  expect(archived).toMatchObject({ archived: true, pinnedAt: null, archivedAtId: old });
+  // сообщение в группу само архив не снимает (сервер не пишет каждому участнику)
+  const fresh = await sendTo(b, g);
+  expect((await listChats(a, { ids: [g] }))[0].archived).toBe(true);
+  // старое — нет; своё — нет; свежее чужое — да, с chatFlags в личный журнал
+  expect(await unarchiveByMessage(a, g, { messageId: old })).toMatchObject({ changed: false, archived: true });
+  const own = await sendTo(a, g);
+  expect(await unarchiveByMessage(a, g, { messageId: own })).toMatchObject({ changed: false, archived: true });
+  const lifted = await unarchiveByMessage(a, g, { messageId: fresh });
+  expect(lifted).toMatchObject({ changed: true, archived: false, pinnedAt: null, archivedAtId: old });
+  expect((await getUpdates(a, 0)).items.map((i) => i.update).filter((x) => x.type === 'chatFlags').at(-1)).toMatchObject({ chatId: g, archived: false, archivedAtId: old });
+  // повтор того же сообщения после ручной повторной архивации — граница сдвинулась, архив остаётся
+  const again = await setChatFlags(a, g, { archived: true });
+  expect(again.archivedAtId).toBe(own);
+  expect(await unarchiveByMessage(a, g, { messageId: fresh })).toMatchObject({ changed: false, archived: true });
+  // повторная запись archived = true поверх архивного тоже двигает границу
+  const newer = await sendTo(b, g);
+  expect((await setChatFlags(a, g, { archived: true })).archivedAtId).toBe(newer);
+  // заглушённый — остаётся
+  const next = await sendTo(b, g);
+  await setChatNotify(a, g, { muteUntil: 0 });
+  expect(await unarchiveByMessage(a, g, { messageId: next })).toMatchObject({ changed: false, archived: true });
+  await expect(unarchiveByMessage(a, g, { messageId: 'x' })).rejects.toMatchObject({ code: 'bad_frame' });
+  await expect(unarchiveByMessage(await makeUser('z'), g, { messageId: next })).rejects.toMatchObject({ code: 'not_member' });
 });
