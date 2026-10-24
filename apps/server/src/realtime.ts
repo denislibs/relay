@@ -100,6 +100,8 @@ export async function startRealtime(server: Server): Promise<() => Promise<void>
   const subChats = await sql.listen('chat_updates', (payload) => {
     let n: ChatNotify;
     try { n = JSON.parse(payload); } catch { return; }
+    // чат удалён: всем в топике — push с gone, клиенты убирают чат сами (без syncChat)
+    if (n.g) { server.publish(`chat:${n.c}`, JSON.stringify({ op: 'push', chatId: n.c, from: n.f, to: n.t, items: [], gone: true } satisfies ServerFrame)); return; }
     const queued = chatQueues.get(n.c);
     if (n.e && !queued) {   // быстрый путь — синхронно, как раньше
       publishChat(n.c, n.f, n.t, n.e.map((update, i) => ({ seq: n.f + 1 + i, update })));

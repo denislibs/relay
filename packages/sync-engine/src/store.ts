@@ -147,6 +147,13 @@ export class Store {
   since = 0;
   /** Подсказки движку из applyChats/membership: new — чат появился без строки, ahead — журнал чата ушёл вперёд */
   seqHints = new Map<number, 'new' | 'ahead'>();
+  /**
+   * Превью публичных каналов без подписки (как в Telegram): чат живёт в памяти рядом с остальными — лента, отрезки,
+   * журнал чата (chatSeq, пока движок его смотрит, watchChat), — но это не строка списка: не в «Чатах» и счётчиках,
+   * ни строка, ни сообщения, ни номер журнала не пишутся в IndexedDB, уведомлений нет. Вступил (membership) —
+   * promote: обычный чат, всё уже загруженное ложится в кэш без перезагрузки ленты.
+   */
+  previews = new Set<number>();
   /** снимок с сервера уже лежит в кэше (иначе показывать нечего — идёт первая загрузка) */
   hydrated = false;
   /** Поколение базы сервера, с которым синхронизирован кэш. */
@@ -378,7 +385,7 @@ export class Store {
       case 'joinRequests': { const chat = this.chats.get(u.chatId); if (chat?.group) { chat.group = { ...chat.group, requests: u.requests }; this.markChat(chat); } return; }
       case 'membership': {
         const chat = this.chats.get(u.chatId);
-        if (chat) { chat.me = u.me; this.markChat(chat); return; }
+        if (chat) { chat.me = u.me; if (this.previews.has(u.chatId)) this.promote(chat); this.markChat(chat); return; }
         // вступил: чат незнаком, seq — номер журнала чата на момент коммита; строку подтянет движок (seqHints)
         if (u.seq != null && !this.chatSeq.has(u.chatId)) { this.setChatSeq(u.chatId, u.seq); this.seqHints.set(u.chatId, 'new'); }
         return;
@@ -386,6 +393,41 @@ export class Store {
       case 'members': return applyMembersUpdate(this, u.chatId, u.upsert, u.remove, seq);
       case 'chatRemoved': return this.removeChat(u.chatId);
     }
+  }
+
+  /** Превью канала: чат в памяти без строки списка (previews). Строка сервера (GET /groups/:id) — как строка списка. */
+  applyPreview(s: ChatSummary, requested = false): void {
+    this.previews.add(s.id);
+    this.applyChats([s]);
+    const c = this.chats.get(s.id);
+    if (c && !!c.requested !== requested) { c.requested = requested; this.markChat(c); }
+  }
+
+  /** Превью закрыто, а подписки не было: из памяти целиком (в IndexedDB его и не было). */
+  dropPreview(chatId: number): void {
+    if (!this.previews.has(chatId)) return;
+    for (const k of this.messages.get(chatId)?.keys() ?? []) this.dirtyMessages.delete(k);
+    for (const [k, t] of this.staleTerms) if (t[1] === chatId) this.staleTerms.delete(k);
+    this.removeChat(chatId);
+    this.dirtyChats.delete(chatId);
+    this.dirtyChatSeq.delete(chatId);
+    this.previews.delete(chatId);
+  }
+
+  /**
+   * Вступил в канал, пока смотрел превью: теперь это обычный чат. Строка, сообщения и номер журнала уходят в
+   * IndexedDB (то, что уже в памяти, — без перезагрузки ленты); непрочитанного нет — вступивший начинает с
+   * прочитанного (так же решает сервер). Строку списка движок перечитает (seqHints new: заявки, флаги, точный seq).
+   */
+  private promote(chat: LocalChat): void {
+    this.previews.delete(chat.id);
+    delete chat.requested;
+    chat.unread = 0;
+    chat.lastReadId = Math.max(chat.lastReadId, chat.knownMaxId);
+    for (const m of this.messages.get(chat.id)?.values() ?? []) this.dirtyMessages.set(m.key, m);
+    this.loaded.add(chat.id);
+    if (this.chatSeq.has(chat.id)) this.dirtyChatSeq.add(chat.id);
+    this.seqHints.set(chat.id, 'new');
   }
 
   /** Закреплён / архив / пометка «непрочитанное» (журнал, ответ операции): значение сервера — база. */
@@ -458,6 +500,7 @@ export class Store {
   applySnapshot(list: ChatSummary[], seq = 0): void {
     const keep = new Set(list.map((c) => c.id));
     for (const c of this.outbox.values()) keep.add(c.chatId);
+    for (const id of this.previews) keep.add(id);   // превью — не строка списка, снимок его не касается
     for (const id of [...this.chats.keys()]) if (!keep.has(id)) { this.chats.delete(id); this.chatV.delete(id); this.messages.delete(id); this.loaded.delete(id); this.members.dropChat(id); this.dirtyChats.add(id); this.touch(id); } // dirty → удалится и из IDB
     this.applyChats(list, seq);
   }
@@ -710,9 +753,16 @@ export class Store {
   notifications: Item[] = [];
   private notifiedIds = new Set<string>();
   private notify(m: Message, mention: boolean, threadId?: number): void {
+    if (this.previews.has(m.chatId)) return;   // превью канала: не подписан — не уведомляем
     const k = m.chatId + ':' + m.id;
     if (this.notifiedIds.has(k)) return;
     this.notifiedIds.add(k);
+    // альбом (несколько файлов одним пузырём): одно уведомление на альбом, как в Telegram — от первого пришедшего фото
+    if (m.groupId && !mention) {
+      const ak = m.chatId + ':album:' + m.groupId;
+      if (this.notifiedIds.has(ak)) return;
+      this.notifiedIds.add(ak);
+    }
     if (this.notifiedIds.size > 2000) this.notifiedIds.delete(this.notifiedIds.values().next().value!);
     // тред — и у упоминания, и у простого комментария: клик по уведомлению открывает тред, а не ленту группы
     const thread = threadId ?? m.threadId;
@@ -1036,6 +1086,7 @@ export class Store {
     this.quotes.clear(); this.quoteAsked.clear(); this.quoteWants.clear();   // цитаты старого кэша — спросим заново
     this.lastSeq = this.seqAtFlush = 0;
     this.chatSeq.clear(); this.dirtyChatSeq.clear(); this.seqHints.clear(); this.since = 0;   // хранилище chatSeq стирается вместе с кэшем
+    this.previews.clear();
     this.hydrated = false;
     this.dialogsAt = 0; this.dialogsId = 0; this.dialogsDone = false;
     this.pendingDrafts.clear();   // черновики жили в стёртых чатах: пустой текст на сервер не отправляем
@@ -1065,6 +1116,7 @@ export class Store {
   /** Страницы диалогов — заново (tooLong): чаты без неотправленного забываем, курсор в начало. */
   resetDialogs(): void {
     const keep = new Set([...this.outbox.values()].map((o) => o.chatId));
+    for (const id of this.previews) keep.add(id);
     for (const id of [...this.chats.keys()]) if (!keep.has(id)) { this.chats.delete(id); this.chatV.delete(id); this.messages.delete(id); this.loaded.delete(id); this.members.dropChat(id); this.dirtyChats.add(id); this.touch(id); } // dirty → удалится и из IDB
     this.dialogsAt = 0; this.dialogsId = 0; this.dialogsDone = false;
     this.rowPatches.clear();
@@ -1112,18 +1164,20 @@ export class Store {
     }
     // чат, который сейчас урезает уборка, ждёт: его строку пишет транзакция уборки, а в памяти отрезки ещё шире
     const held = [...this.dirtyChats].filter((id) => this.trimming.has(id) && this.chats.has(id));
-    batch.put.chats = [...this.dirtyChats].filter((id) => !this.trimming.has(id)).map((id) => this.chats.get(id)).filter(Boolean) as LocalChat[];
+    // превью каналов (previews) — только в памяти: ни строки, ни сообщений, ни слов, ни номера журнала
+    const kept = (chatId: number) => !this.previews.has(chatId);
+    batch.put.chats = [...this.dirtyChats].filter((id) => !this.trimming.has(id) && kept(id)).map((id) => this.chats.get(id)).filter(Boolean) as LocalChat[];
     batch.del.chats = [...this.dirtyChats].filter((id) => !this.chats.has(id));
     // основная вкладка «Общих медиа» (mediaTab, первая из tabsOf) — поле индекса byTab; в памяти его нет
-    batch.put.messages = [...this.dirtyMessages.values()].map((m) => { const tab = tabsOf(m)[0]; return tab ? { ...m, tab } : m; });
+    batch.put.messages = [...this.dirtyMessages.values()].filter((m) => kept(m.chatId)).map((m) => { const tab = tabsOf(m)[0]; return tab ? { ...m, tab } : m; });
     if (this.deletedMessages.size) { batch.del.messages = [...this.deletedMessages]; this.deletedMessages.clear(); }
-    batch.put.chatSeq = [...this.dirtyChatSeq].filter((id) => this.chatSeq.has(id)).map((chatId) => ({ chatId, seq: this.chatSeq.get(chatId)! }));
+    batch.put.chatSeq = [...this.dirtyChatSeq].filter((id) => this.chatSeq.has(id) && kept(id)).map((chatId) => ({ chatId, seq: this.chatSeq.get(chatId)! }));
     batch.del.chatSeq = [...this.dirtyChatSeq].filter((id) => !this.chatSeq.has(id));
     this.dirtyChatSeq.clear();
     // указатель слов — в той же транзакции; в IDB только подтверждённые сервером (у неотправленных sort меняется при ack)
     const termRows: { term: string; chatId: number; sort: number; key: string }[] = [];
     const fresh = new Set<string>();
-    for (const m of this.dirtyMessages.values()) for (const term of termsOf(m)) { termRows.push({ term, chatId: m.chatId, sort: m.sort, key: m.key }); fresh.add(termKey(term, m.chatId, m.sort)); }
+    for (const m of this.dirtyMessages.values()) if (kept(m.chatId)) for (const term of termsOf(m)) { termRows.push({ term, chatId: m.chatId, sort: m.sort, key: m.key }); fresh.add(termKey(term, m.chatId, m.sort)); }
     batch.put.terms = termRows;
     batch.del.terms = [...this.staleTerms].filter(([k]) => !fresh.has(k)).map(([, v]) => v);
     this.staleTerms.clear();

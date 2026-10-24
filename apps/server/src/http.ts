@@ -1,6 +1,7 @@
 import { MEDIA_TABS, parseClientFrame, type MediaTab } from '@relay/protocol';
 import { getPreview, normalizeUrl } from './domain/linkPreview';
 import { searchMedia, searchPeople, topPeers } from './domain/globalSearch';
+import { searchChannels } from './domain/channelPreview';
 import { createBus } from './bus';
 import { clientIp } from './device';
 import type { Server } from 'bun';
@@ -356,6 +357,7 @@ export function createServer(opts: { port: number }): Server {
           return Response.json(await searchMedia(userId, kind, { q: url.searchParams.get('q') ?? '', before: Number.isInteger(before) && before > 0 ? before : undefined }));
         }
         if (req.method === 'GET' && url.pathname === '/search/people') return Response.json(await searchPeople(userId, url.searchParams.get('q') ?? ''));
+        if (req.method === 'GET' && url.pathname === '/search/channels') return Response.json(await searchChannels(userId, url.searchParams.get('q') ?? ''));
         if (req.method === 'GET' && url.pathname === '/search/top') return Response.json(await topPeers(userId));
         if (req.method === 'GET' && url.pathname === '/search') {
           // ?q=текст[&chatId=N][&beforeId=M][&limit=K]

@@ -185,7 +185,7 @@ export function computeQuery(store: Store, q: Query, mute: Map<number, number | 
     case 'chatList': {
       // закреплённые — сверху, в порядке закрепления (позже — выше), новые сообщения их не двигают; дальше — по последнему
       const pin = (c: LocalChat) => flagsOf(c, flags.get(c.id)).pinnedAt;
-      const chats = [...store.chats.values()].sort((a, b) => {
+      const chats = [...store.chats.values()].filter((c) => !store.previews.has(c.id)).sort((a, b) => {
         const pa = pin(a), pb = pin(b);
         if (pa != null || pb != null) { if (pa == null) return 1; if (pb == null) return -1; if (pa !== pb) return pb - pa; }
         const x = sortAt(a), y = sortAt(b); return x < y ? 1 : x > y ? -1 : b.id - a.id;
@@ -194,6 +194,18 @@ export function computeQuery(store: Store, q: Query, mute: Map<number, number | 
       for (const c of chats.slice(0, q.limit)) {
         const { item, sig: g } = chatListItem(store, c, mute, flags);
         items.set(item.key, item); sig.set(item.key, g); order.push(item.key);
+      }
+      return { items, sig, order };
+    }
+    case 'previews': {
+      // превью каналов без подписки: те же строки, что у списка, с пометкой preview (canSend — false: me нет)
+      const items = new Map<string, Item>(), sig = new Map<string, string>(), order: string[] = [];
+      for (const id of store.previews) {
+        const c = store.chats.get(id);
+        if (!c) continue;
+        const { item, sig: g } = chatListItem(store, c, mute, flags);
+        const it = { ...item, preview: true, requested: !!c.requested };
+        items.set(it.key, it); sig.set(it.key, g); order.push(it.key);
       }
       return { items, sig, order };
     }
@@ -251,6 +263,7 @@ export function computeQuery(store: Store, q: Query, mute: Map<number, number | 
       // архив — отдельно (бейдж строки «Архив»); пометка «непрочитанное» — непрочитанный чат без сообщений в счёте
       let unreadChats = 0, unreadMessages = 0, archivedUnread = 0;
       for (const c of store.chats.values()) {
+        if (store.previews.has(c.id)) continue;   // превью канала — не подписка
         const f = flagsOf(c, flags.get(c.id));
         if (!(c.unread > 0 || f.unreadMark)) continue;
         if (f.archived) { archivedUnread++; continue; }

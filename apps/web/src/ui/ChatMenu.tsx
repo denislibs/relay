@@ -8,7 +8,7 @@
 import { useEffect, useRef, useState } from 'preact/hooks';
 import type { GroupInfo, MyMembership } from '@relay/protocol';
 import { ConfirmDialog, IconButton, MenuPopover, Modal, RadioRow, useHoverMenu } from '@relay/ui';
-import { getGlobal, setGlobal, useGlobal } from '../global';
+import { getGlobal, setGlobal, useGlobal, findChat } from '../global';
 import { blockUser, showToast, unblockUser, useUser } from '../settingsData';
 import { act, canManage } from '../groups';
 import { isSystemChat } from './format';
@@ -19,8 +19,8 @@ import { closeChat, openInner } from '../data';
 type Ask = null | 'mute' | 'delete' | 'leave';
 
 export function ChatMenu({ chatId, title }: { chatId: number; title: string }) {
-  const chat = useGlobal((s) => s.chats.find((c) => c.id === chatId));
-  const muted = useGlobal((s) => isMuted(s.chats.find((c) => c.id === chatId)));
+  const chat = useGlobal((s) => findChat(s, chatId));
+  const muted = useGlobal((s) => isMuted(findChat(s, chatId)));
   const system = isSystemChat(chat);
   const peerId = chat?.kind === 'direct' && !system ? (chat.peerId as number | null) : null;
   const user = useUser(peerId);
@@ -50,9 +50,10 @@ export function ChatMenu({ chatId, title }: { chatId: number; title: string }) {
       ? { icon: 'pencil', label: 'Изменить', onClick: () => setGlobal({ infoOpen: true, infoGo: 'edit' }) }
       : { icon: 'userPlus', label: 'Добавить в контакты', onClick: addContact }] : []),
     ...(gMe && canManage(gMe) ? [{ icon: 'pencil', label: 'Изменить', onClick: () => setGlobal({ infoOpen: true, infoGo: 'gEdit' }) }] : []),
-    muted
+    // превью канала (не подписан): звук не настраивается — уведомлений и так нет
+    ...(chat?.preview ? [] : [muted
       ? { icon: 'bell', label: 'Включить звук', onClick: () => unmuteChat(chatId) }
-      : { icon: 'bellOff', label: 'Отключить звук…', onClick: () => { setPreset(MUTE_PRESETS.length - 1); setAsk('mute'); } },
+      : { icon: 'bellOff', label: 'Отключить звук…', onClick: () => { setPreset(MUTE_PRESETS.length - 1); setAsk('mute'); } }]),
     ...(!system && !gInfo?.protected ? [{ icon: 'checkCircle', label: 'Выбрать сообщения', onClick: () => startSelect(chatId, []) }] : []),
     ...(peerId ? [iBlocked
       ? { icon: 'block', label: 'Разблокировать', onClick: () => { void unblockUser(peerId).then(() => showToast('Пользователь разблокирован')); } }

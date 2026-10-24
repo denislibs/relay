@@ -4,6 +4,7 @@ import {
 } from './domain/groups';
 import { createInvite, decideRequests, deleteInvites, editInvite, inviteJoined, joinByInvite, joinDiscussion, listInvites, listRequests, previewInvite } from './domain/invites';
 import { DomainError } from './domain/errors';
+import { channelPreview } from './domain/channelPreview';
 
 // Управление группой и каналом: /groups/:id/... и вступление по ссылке /join/:key («+токен» или «@имя»). Права проверяет домен.
 
@@ -35,6 +36,8 @@ export async function groupRoute(req: Request, url: URL, userId: number): Promis
   let r: RegExpExecArray | null;
 
   if (rest === '') {
+    // строка чата: участнику — его, не участнику публичного канала — превью до подписки (channelPreview.ts)
+    if (m === 'GET') return json(await channelPreview(userId, chatId));
     if (m === 'PATCH') return json(await updateGroupInfo(userId, chatId, await body(req)));
     if (m === 'DELETE') return json(await deleteGroup(userId, chatId));
   }

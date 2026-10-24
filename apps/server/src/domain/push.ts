@@ -103,7 +103,7 @@ export async function unsubscribe(userId: number, endpoint: string): Promise<voi
 /** mention — упоминание меня (push.mention): SW может показать его даже в заглушённом чате. */
 export type PushPayload = { chatId: number; id: number; title: string; body: string; system?: true; mention?: true };
 
-export type PushMessage = { chatId: number; id: number; senderId: number; body: string; entities?: { type: string; offset: number; length: number }[]; kind?: string; attachment?: { name?: string } | null; service?: { type: string }; sticker?: { emoji?: string } | null; post?: boolean };
+export type PushMessage = { chatId: number; id: number; senderId: number; body: string; entities?: { type: string; offset: number; length: number }[]; kind?: string; attachment?: { name?: string } | null; service?: { type: string }; sticker?: { emoji?: string } | null; post?: boolean; album?: number };   // album — файлов в альбоме (одно уведомление на все)
 
 /** Новое сообщение → кому и что слать (задача push.message): подписки участников без соединения в любом процессе,
  *  кроме отправителя, заглушивших чат и заблокировавших отправителя.
@@ -169,7 +169,7 @@ export async function planPushPage(m: PushMessage, opts: { excludeChatId?: numbe
   const defaults = await notifyDefaults(sql, [...new Set(offline.map((s) => s.user_id as number))]);
   const kind = info.kind === 'channel' ? 'channel' : info.kind === 'group' ? 'group' : 'direct';
   const prefOf = (userId: number) => defaults.get(userId)?.[kind] ?? { muted: false, preview: true };
-  const preview = m.kind === 'sticker' ? (m.sticker?.emoji ? m.sticker.emoji + ' Стикер' : 'Стикер') : m.kind === 'voice' ? '🎤 Голосовое сообщение' : m.kind === 'todo' ? '☑️ ' + m.body : m.kind === 'round' ? 'Видеосообщение' : m.kind === 'photo' ? (m.body ? '🖼 ' + m.body : 'Фотография') : m.kind === 'video' ? (m.body ? '📹 ' + m.body : 'Видео') : m.kind === 'file' ? '📎 ' + (m.body || m.attachment?.name || 'Файл') : m.kind === 'audio' ? '🎵 ' + (m.body || (m.attachment as { title?: string } | null | undefined)?.title || (m.attachment?.name ?? 'Музыка').replace(/\.[^.]{1,5}$/, '')) : m.body;
+  const preview = m.album && m.album > 1 ? `🖼 ${m.album} фото` + (m.body ? ': ' + m.body : '') : m.kind === 'sticker' ? (m.sticker?.emoji ? m.sticker.emoji + ' Стикер' : 'Стикер') : m.kind === 'voice' ? '🎤 Голосовое сообщение' : m.kind === 'todo' ? '☑️ ' + m.body : m.kind === 'round' ? 'Видеосообщение' : m.kind === 'photo' ? (m.body ? '🖼 ' + m.body : 'Фотография') : m.kind === 'video' ? (m.body ? '📹 ' + m.body : 'Видео') : m.kind === 'file' ? '📎 ' + (m.body || m.attachment?.name || 'Файл') : m.kind === 'audio' ? '🎵 ' + (m.body || (m.attachment as { title?: string } | null | undefined)?.title || (m.attachment?.name ?? 'Музыка').replace(/\.[^.]{1,5}$/, '')) : m.body;
   const targets = offline.filter((s) => only != null || !prefOf(s.user_id as number).muted).map((s) => {
     const name = s.sender_name as string;
     const shown = prefOf(s.user_id as number).preview;

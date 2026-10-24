@@ -103,6 +103,28 @@ export async function assertMember(db: Tx | typeof sql, chatId: number, userId: 
   if (row.deleted_at) throw new DomainError('not_found', 'chat');
 }
 
+/**
+ * Читать чат (история, медиа, закрепы, журнал): участник — или любой вошедший, если это публичный канал (есть
+ * @имя), как превью канала до подписки в Telegram. Исключённый (бан) публичный канал не читает. Писать (отправка,
+ * реакции, просмотры, прочтение) — только участнику: там остаётся assertMember / groupCtx. Удалённый (мягко) —
+ * not_found (syncChat → chatGone); приватный чужой — not_member.
+ */
+export async function canRead(db: Tx | typeof sql, chatId: number, userId: number): Promise<{ member: boolean }> {
+  const [row] = await db`
+    select c.kind, c.username, c.deleted_at,
+           exists (select 1 from chat_members m where m.chat_id = c.id and m.user_id = ${userId}) as member,
+           exists (select 1 from chat_bans b where b.chat_id = c.id and b.user_id = ${userId}) as banned
+      from chats c where c.id = ${chatId}`;
+  if (!row) throw new DomainError('not_member');
+  if (row.member) {
+    if (row.deleted_at) throw new DomainError('not_found', 'chat');
+    return { member: true };
+  }
+  if (row.kind !== 'channel' || row.username == null || row.banned) throw new DomainError('not_member');
+  if (row.deleted_at) throw new DomainError('not_found', 'chat');
+  return { member: false };
+}
+
 /** Сообщение от имени канала (пост, служебное, строка чек-листа: senderId 0) — тому, кто его создал, не непрочитанное:
  *  last_read_id и readOwn его устройствам (unreadOnArrival иначе посчитал бы его чужим). */
 export async function readOwnPost(tx: Tx, chatId: number, userId: number, id: number): Promise<void> {
@@ -379,7 +401,7 @@ export function tabWhere(tab: MediaTab) {
 export const MEDIA_PAGE = 40, MEDIA_PAGE_MAX = 100;
 export async function getChatMedia(userId: number, chatId: number, tab: MediaTab, beforeId: number | null, limit = MEDIA_PAGE): Promise<{ messages: Message[]; hasMore: boolean }> {
   limit = Number.isFinite(limit) && limit >= 1 ? Math.min(MEDIA_PAGE_MAX, Math.floor(limit)) : MEDIA_PAGE;
-  await assertMember(sql, chatId, userId);
+  await canRead(sql, chatId, userId);   // публичный канал — и не участнику (превью)
   const rows = await sql`
     select * from messages
      where chat_id = ${chatId} and not deleted and ${tabWhere(tab)} and id >= ${await historyFrom(chatId, userId)}
@@ -390,7 +412,7 @@ export async function getChatMedia(userId: number, chatId: number, tab: MediaTab
 
 /** Сколько всего в каждой вкладке — пустые вкладки панель не показывает (как в Telegram Web K). */
 export async function getChatMediaCounts(userId: number, chatId: number): Promise<MediaCounts> {
-  await assertMember(sql, chatId, userId);
+  await canRead(sql, chatId, userId);   // публичный канал — и не участнику (превью)
   const [r] = await sql`
     select count(*) filter (where ${tabWhere('media')})::int as media,
            count(*) filter (where ${tabWhere('file')})::int as file,
@@ -424,7 +446,7 @@ export async function commonGroups(userId: number, peerId: number): Promise<Comm
 export async function messageAtDate(userId: number, chatId: number, from: string): Promise<{ id: number | null }> {
   const at = new Date(from);
   if (Number.isNaN(at.getTime())) throw new DomainError('bad_frame', 'from');
-  await assertMember(sql, chatId, userId);
+  await canRead(sql, chatId, userId);   // публичный канал — и не участнику (превью)
   const visible = await historyFrom(chatId, userId);
   const [first] = await sql`select id from messages where chat_id = ${chatId} and id >= ${visible} and created_at >= ${at} order by created_at, id limit 1`;
   if (first) return { id: Number(first.id) };
@@ -433,7 +455,7 @@ export async function messageAtDate(userId: number, chatId: number, from: string
 }
 
 export async function getMessagesByIds(userId: number, chatId: number, ids: number[]): Promise<Message[]> {
-  await assertMember(sql, chatId, userId);
+  await canRead(sql, chatId, userId);   // публичный канал — и не участнику (превью)
   if (!ids.length) return [];
   const rows = await sql`select * from messages where chat_id = ${chatId} and id = any(${ids}::bigint[]) and id >= ${await historyFrom(chatId, userId)} order by id`;
   return withAllReactions((await openRows(rows)).map(toMessage), userId);
@@ -444,7 +466,7 @@ export async function getMessagesByIds(userId: number, chatId: number, ids: numb
  * догружает дыру между отрезками своей истории). hasMore — за страницей в ту же сторону есть ещё.
  */
 export async function getHistory(userId: number, chatId: number, before: number | null, limit: number, after: number | null = null): Promise<{ messages: Message[]; hasMore: boolean }> {
-  await assertMember(sql, chatId, userId);
+  await canRead(sql, chatId, userId);   // публичный канал — и не участнику (превью)
   const take = Math.min(Math.max(limit, 1), 200);
   if (after != null) {
     const up = await sql`

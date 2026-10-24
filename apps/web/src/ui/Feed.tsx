@@ -1,8 +1,8 @@
 import { isGroupService, serviceText } from './serviceText';
 import type { ServiceData, ServiceType } from '@relay/protocol';
 import type { Item } from '@relay/sync-engine/src/types';
-import { senderAvatar } from '../profilePhoto';
-import type { Entity, MessageButton, Todo } from '@relay/protocol';
+import { avatarPhoto, senderAvatar } from '../profilePhoto';
+import type { Entity, MessageButton, ProfilePhoto, Todo } from '@relay/protocol';
 import { Presence, ProgressRing, useMinVisible, MediaPolicy, ArticleBlocks, Avatar, Bubble, Icon, peerTone, DateDivider, DatePicker, FileBubble, MediaBubble, MessageText, VoiceBubble, MusicBubble, RoundBubble, player, MediaViewer, ScrollToBottom, beginHeavyAnimation, forceMeasure, isHeavyAnimating, onHeavyAnimationEnd, requestMeasure, requestMutation, selectionValue, TodoBubble, InlineKeyboard, StickerBubble } from '@relay/ui';
 import { openStickerSet } from '../stickers';
 import type { StickerRef } from '@relay/protocol';
@@ -14,7 +14,7 @@ import { pressButton, toggleTodo, clearFocus, discardUnsent, retrySend, focusMes
 import { isPost } from '@relay/sync-engine/src/channel';
 import { Comments, MentionFab, postMeta } from './channel';
 import { wantPeople } from '../people';
-import { activeFrame, frameByKey, getGlobal, setGlobal, useGlobal } from '../global';
+import { activeFrame, frameByKey, getGlobal, setGlobal, useGlobal, findChat } from '../global';
 import { toggleMusic, trackTitle, useFileCached } from '../music';
 import { showToast } from '../settingsData';
 import { startForward, toggleSelect } from '../forward';
@@ -80,16 +80,19 @@ const Row = memo(function Row({ post, pinned, discussion, chatId, voiceTitle, au
   const att = m.attachment as Att | null | undefined;
   // пересланное: «Переслано от» с аватаром и именем автора. Клик (как в Telegram): оригинал доступен — к нему;
   // иначе — чат с автором, а если мы уже в нём — его профиль (панель «Информация»)
-  const ff = !m.deleted ? m.fwdFrom as { userId: number; name: string; chatId: number; messageId: number } | null | undefined : null;
+  const ff = !m.deleted ? m.fwdFrom as { userId: number | null; name: string; chatId: number; messageId: number; photo?: ProfilePhoto | null } | null | undefined : null;
   const openFwd = ff ? () => {
     const g = getGlobal();
     if (ff.chatId != null && g.chats.some((c) => c.id === ff.chatId)) { goToOriginal(ff.chatId, ff.messageId); return; }
     if (ff.userId === meId) return;
     const here = g.chats.find((c) => c.id === chatId);
     if (here?.kind === 'direct' && here.peerId === ff.userId) { setGlobal({ infoOpen: true }); return; }
-    onUser?.(ff.userId);
+    if (ff.userId != null) onUser?.(ff.userId);
   } : undefined;
-  const fwd = ff ? { name: ff.name, tone: peerTone(ff.userId), avatar: senderAvatar(ff.userId), onClick: openFwd } : undefined;
+  // от канала (userId null): аватар — фото канала из списка чатов, а не подписчику — снимок из fwdFrom
+  const fwd = ff ? (ff.userId == null
+    ? { name: ff.name, tone: peerTone(ff.chatId), avatar: avatarPhoto(getGlobal().chats.find((c) => c.id === ff.chatId)?.photo as ProfilePhoto | null ?? ff.photo), onClick: openFwd }
+    : { name: ff.name, tone: peerTone(ff.userId), avatar: senderAvatar(ff.userId), onClick: openFwd }) : undefined;
   // ответ — у любого типа сообщения (как в Telegram); клик по цитате ловит лента (onClick ниже ищет .rl-quote)
   const replyQ = quoted && !m.deleted ? { author: quoteAuthor, ...quoteContent(quoted as unknown as Record<string, unknown>), tone: quoteTone, onClick: noop } : undefined;
   // режим выбора: строка отмечается кликом (обработчик — у ленты), кружок-галочка слева
@@ -444,9 +447,10 @@ function CachedMusic({ fileId, ...props }: { fileId?: string } & Record<string, 
   return <MusicBubble {...props} downloaded={downloaded} />;
 }
 
-export function Feed({ frameKey, active, chatId, threadId, channel = false, meId, peerName, group, onAuthor, stick, onMenu, highlight }: {
+export function Feed({ frameKey, active, chatId, threadId, channel = false, meId, peerName, chatPhoto, group, onAuthor, stick, onMenu, highlight }: {
   frameKey: string; active: boolean;   // кадр стека чатов; active — на экране (только он отмечает прочитанное)
   chatId: number; meId: number; peerName: string; highlight?: string;
+  chatPhoto?: ProfilePhoto | null;   // фото чата: автор поста в просмотрщике — сам канал
   threadId?: number;    // тред комментариев: прочитанность — markThreadRead, позиция — своим ключом
   channel?: boolean;    // лента канала: все сообщения — посты (слева, без автора), просмотры засчитываются по видимости
   group: boolean; onAuthor: (userId: number) => void;   // в группе — имя автора над пачкой; клик — личный чат поверх
@@ -467,6 +471,8 @@ export function Feed({ frameKey, active, chatId, threadId, channel = false, meId
   }, [chatId, peerName, active]);
   const meta = useGlobal((s) => frameByKey(s, frameKey)?.feedMeta ?? null);
   const unreadFrom = useGlobal((s) => frameByKey(s, frameKey)?.unreadFrom ?? null);
+  // подписался на канал из превью: местная строка «Вы подписались на канал» после последнего поста на тот момент
+  const joinedAfter = useGlobal((s) => frameByKey(s, frameKey)?.joinedAfter ?? null);
   const focus = useGlobal((s) => frameByKey(s, frameKey)?.focus ?? null);
   const activeRef = useRef(active); activeRef.current = active;
   const [flashKey, setFlashKey] = useState<string | null>(null);
@@ -474,7 +480,7 @@ export function Feed({ frameKey, active, chatId, threadId, channel = false, meId
   const [pickDate, setPickDate] = useState<Date | null>(null);   // «Перейти к дате» по клику на плашку даты
   const [pickerUsed, setPickerUsed] = useState(false);   // календарь монтируется с первого открытия: закрытый строил сетку месяца в каждом чате
   if (pickDate && !pickerUsed) setPickerUsed(true);
-  const unread = useGlobal((s) => (s.chats.find((c) => c.id === chatId)?.unread as number) ?? 0);
+  const unread = useGlobal((s) => (findChat(s, chatId)?.unread as number) ?? 0);
   const el = useRef<HTMLDivElement>(null);
   const metaRef = useRef(meta); metaRef.current = meta;
   const anchor = useRef<{ key: string; top: number } | null>(null);   // якорь до сдвига окна
@@ -620,8 +626,9 @@ export function Feed({ frameKey, active, chatId, threadId, channel = false, meId
       for (const id of visible.current) if (id > max) max = id;
       // тред — своя прочитанность (точка у кнопки поста); основную ленту группы он не читает
       if (max) { if (threadId != null) markThreadRead(chatId, threadId, max); else seen(chatId, max); }
-      // канал: видимые посты — в просмотры (каждый — один раз за сессию; батч раз в секунду — в движке)
-      if (channel) {
+      // канал: видимые посты — в просмотры (каждый — один раз за сессию; батч раз в секунду — в движке);
+      // превью без подписки — не считаем и не запоминаем: подпишется — посты на экране засчитаются
+      if (channel && !findChat(getGlobal(), chatId)?.preview) {
         const fresh = [...visible.current].filter((id) => !viewed.current.has(id));
         for (const id of fresh) viewed.current.add(id);
         countViews(chatId, fresh);
@@ -889,6 +896,8 @@ export function Feed({ frameKey, active, chatId, threadId, channel = false, meId
   // реакция под баблом: своя — снять, чужая — поставить такую же
   const onReact = useRef((m: Item, emoji: string) => {
     if (m.id == null) return;
+    // превью канала: реакции только для чтения (как в Telegram — сначала подписка)
+    if (findChat(getGlobal(), chatId)?.preview) { showToast('Подпишитесь на канал, чтобы ставить реакции'); return; }
     // пост: своя реакция — myReaction (списка реакторов нет)
     const mine = m.reactionCounts ? (m.myReaction as string | undefined) : ((m.reactions as { userId: number; emoji: string }[] | undefined) ?? []).find((r) => r.userId === meId)?.emoji;
     react(chatId, m.id as number, mine === emoji ? null : emoji);
@@ -943,19 +952,19 @@ export function Feed({ frameKey, active, chatId, threadId, channel = false, meId
   }, [!!selecting]);
   const selShown = selecting ?? (selVis ? lastSel.current : null);
   const me = useGlobal((s) => s.me);
-  const pinnedIds = useGlobal((s) => (s.chats.find((c) => c.id === chatId)?.pinned as number[] | undefined) ?? NO_IDS);
+  const pinnedIds = useGlobal((s) => (findChat(s, chatId)?.pinned as number[] | undefined) ?? NO_IDS);
   const threadHead = useGlobal((s) => frameByKey(s, frameKey)?.thread ?? null);
   // имя канала для копии поста в группе обсуждения: связанный канал в списке — его название, иначе просто «Канал»
   // (строкой, а не списком чатов: лента не перерисовывается от каждой перемены в списке)
   const linkedTitle = useGlobal((s) => {
     // тред гостя: строки группы нет — канал из guest
-    const l = (s.chats.find((x) => x.id === chatId)?.group as { linkedChatId?: number | null } | undefined)?.linkedChatId ?? frameByKey(s, frameKey)?.thread?.guest?.channelId;
+    const l = (findChat(s, chatId)?.group as { linkedChatId?: number | null } | undefined)?.linkedChatId ?? frameByKey(s, frameKey)?.thread?.guest?.channelId;
     return l != null ? (s.chats.find((x) => x.id === l)?.title as string | undefined) ?? null : null;
   });
   const channelName = (_m: Item) => linkedTitle || 'Канал';
   // канал с группой обсуждения: её id — заглушке кнопки комментариев (пока копия поста не пришла)
-  const discussion = useGlobal((s) => (channel && threadId == null ? (s.chats.find((x) => x.id === chatId)?.group as { linkedChatId?: number | null } | undefined)?.linkedChatId ?? null : null));
-  const mentions = useGlobal((s) => (threadId == null ? (s.chats.find((c) => c.id === chatId)?.mentions as number | undefined) ?? 0 : 0));
+  const discussion = useGlobal((s) => (channel && threadId == null ? (findChat(s, chatId)?.group as { linkedChatId?: number | null } | undefined)?.linkedChatId ?? null : null));
+  const mentions = useGlobal((s) => (threadId == null ? (findChat(s, chatId)?.mentions as number | undefined) ?? 0 : 0));
   // «к упоминанию»: старейшее непрочитанное — в ленте (focusMessage) или в треде (тред поверх)
   const toMention = () => {
     void nextMention(chatId).then((t) => {
@@ -1020,8 +1029,11 @@ export function Feed({ frameKey, active, chatId, threadId, channel = false, meId
     );
     run = null;
   };
+  let joinedShown = false;
+  const joinedLine = () => { joinedShown = true; flushRun(); out.push(<div class="rl-action app-joined" key="joined" role="note"><span>Вы подписались на канал</span></div>); };
   shown.forEach((m, i) => {
     if (inAlbum.has(m.key)) return;   // уже нарисовано в альбоме выше
+    if (joinedAfter != null && !joinedShown && typeof m.id === 'number' && m.id > joinedAfter) { joinedLine(); prevSender = null; }
     const day = dayKey(m.createdAt as string);
     const post = isPosted(m);
     // пост никогда не «исходящий»: слева, без хвоста отправителя (даже свой)
@@ -1115,6 +1127,7 @@ export function Feed({ frameKey, active, chatId, threadId, channel = false, meId
     }
   });
   flushRun();
+  if (joinedAfter != null && !joinedShown && shown.length && !meta?.hasNewer) joinedLine();   // новых постов ещё нет — строка внизу
   out.push(<div class="app-sentinel" data-dir="newer" key={'n' + (messages[messages.length - 1]?.key ?? '')} aria-hidden="true" />);
 
   // тред ещё не загружен и в кэше пусто (открыли по адресу): лоадер с задержкой и минимумом — без мигания
@@ -1127,7 +1140,7 @@ export function Feed({ frameKey, active, chatId, threadId, channel = false, meId
         <MediaViewer
           index={openIndex}
           sender={peerName}
-          items={photos.map((m) => { const a = m.attachment as Att; return { sender: people[m.senderId as number]?.name ?? '', avatar: senderAvatar(m.senderId as number),   // не название группы: пока имени нет — пусто, оно подгружается заранее
+          items={photos.map((m) => { const a = m.attachment as Att; return { ...(isPosted(m) ? { sender: peerName, avatar: avatarPhoto(chatPhoto) } : { sender: people[m.senderId as number]?.name ?? '', avatar: senderAvatar(m.senderId as number) }),   // не название группы: пока имени нет — пусто, оно подгружается заранее
  src: localPreview(m.key) ?? (openOffline && a.id === openAtt?.id ? openOffline : fileUrl(a)), qualities: localPreview(m.key) || (openOffline && a.id === openAtt?.id) ? undefined : qualitiesOf(a), kind: a.kind === 'video' ? 'video' : 'image', thumb: a.thumb, w: a.w, h: a.h, name: a.name, download: fileUrl(a, true), caption: m.body, date: clock(m.createdAt as string) }; })}
           origin={originOf}
           actions={(_it: unknown, i: number) => [{ icon: 'forward', label: 'Переслать', onClick: () => { const p = photos[i]; setViewer(null); if (p) startForward(chatId, [p], nameOf); } }]}

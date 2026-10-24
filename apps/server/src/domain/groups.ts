@@ -6,7 +6,7 @@ import { sql, type Tx } from '../db';
 import { GROUP_TITLE_MAX, readOwnPost, toMessage } from './chats';
 import { contentColumns, openRows } from './messageContent';
 import { DomainError } from './errors';
-import { appendUpdates, chatEvent } from './journal';
+import { appendUpdates, chatEvent, type ChatNotify } from './journal';
 import { nameForSql } from './profile';
 import { checkPassword } from './password';
 import { onlineUsers } from './liveRegistry';
@@ -303,7 +303,12 @@ export async function acceptMember(tx: Tx, chatId: number, userId: number, actor
   if (n >= MEMBERS_MAX[kind]) throw new DomainError('too_long', 'members');
   if (!(await insertMember(tx, chatId, userId, actorId))) return false;
   await tx`delete from chat_join_requests where chat_id = ${chatId} and user_id = ${userId}`;
-  if (kind === 'channel') { await joinMembership(tx, chatId, userId); return true; }
+  if (kind === 'channel') {
+    // канал: вступивший начинает с прочитанного (как в Telegram) — история не становится сотней непрочитанных
+    await tx`update chat_members set last_read_id = (select coalesce(max(id), 0) from messages where chat_id = ${chatId}) where chat_id = ${chatId} and user_id = ${userId}`;
+    await joinMembership(tx, chatId, userId);
+    return true;
+  }
   await serviceMessage(tx, chatId, userId, type, { users: await names(tx, [userId]) });
   await joinMembership(tx, chatId, userId);   // с seq чата на момент коммита: новичок ничего не догоняет
   await broadcastGroup(tx, chatId);
@@ -528,6 +533,11 @@ export async function transferGroupOwnership(userId: number, chatId: number, tar
 async function deleteGroupTx(tx: Tx, chatId: number): Promise<void> {
   const [c] = await tx`select linked_chat_id from chats where id = ${chatId}`;
   await tx`update chats set deleted_at = now(), linked_chat_id = null where id = ${chatId}`;
+  // зрители превью (не участники: им не придёт chatRemoved) — после коммита кадр «чата нет» в топик чата: клиент
+  // убирает чат у себя, без syncChat (на канале в 200 000 онлайн — ни одного чтения журнала); участникам chatRemoved — от chat.purge
+  const [cs] = await tx`select seq from chat_seq where chat_id = ${chatId}`;
+  const seq = Number(cs?.seq ?? 0);
+  await tx`select pg_notify('chat_updates', ${JSON.stringify({ c: chatId, f: seq, t: seq, g: 1 } satisfies ChatNotify)})`;
   if (c?.linked_chat_id != null) {   // связанный канал или группа отвязывается
     await tx`update chats set linked_chat_id = null where id = ${c.linked_chat_id} and linked_chat_id = ${chatId}`;
     await broadcastGroup(tx, Number(c.linked_chat_id));

@@ -4,11 +4,12 @@ import { LinkTile, linkInfo } from './linkTile';
 import { avatarPhoto, userPhoto } from '../profilePhoto';
 import { senderAvatar } from '../profilePhoto';
 import type { Item } from '@relay/sync-engine/src/types';
+import type { ProfilePhoto } from '@relay/protocol';
 import { useContext, useEffect, useLayoutEffect, useRef, useState } from 'preact/hooks';
 import { focusMessage, openInner, type MediaTab } from '../data';
 import { useMedia } from '../mediaTab';
 import { animateScroll, gridCorners, tabCounter, tabLabel, tabScrollTarget, tileSrc, videoFrameSrc, type SharedTab } from '../mediaGrid';
-import { getGlobal, useGlobal } from '../global';
+import { getGlobal, useGlobal, findChat } from '../global';
 import { toggleMusic, trackTitle } from '../music';
 import { clock, dayLabel, fileSize, lastSeenText } from './format';
 import { openUserChat, prepareUserChat } from '../data';
@@ -116,6 +117,7 @@ function TabList({ chatId, tab }: { chatId: number; tab: MediaTab }) {
   const grid = useRef<HTMLDivElement>(null);
   const people = useGlobal((s) => s.people);
   const meId = useGlobal((s) => s.me?.userId);
+  const chatRow = useGlobal((s) => s.chats.find((c) => c.id === chatId));
   // авторы в просмотрщике (имя и аватарка) — из people
   const senders = [...new Set(items.map((m) => m.senderId as number))].join(',');
   useEffect(() => { if (senders) wantPeople(senders.split(',').map(Number)); }, [senders]);
@@ -153,7 +155,8 @@ function TabList({ chatId, tab }: { chatId: number; tab: MediaTab }) {
     {viewer !== null && photos[viewer] ? (
       <MediaViewer index={viewer}
         items={photos.map((m) => { const a = m.attachment!; return { src: fileUrl(a), thumb: a.thumb, w: a.w, h: a.h, name: a.name, download: fileUrl(a) + '?download=1', caption: m.body,
-          date: when(m.createdAt), sender: m.senderId === meId ? 'Вы' : people[m.senderId]?.name ?? '', avatar: senderAvatar(m.senderId) }; })}
+          // пост канала (senderId 0): автор — сам канал, с его фото
+          date: when(m.createdAt), ...(m.post ? { sender: String(chatRow?.title ?? ''), avatar: avatarPhoto(chatRow?.photo as ProfilePhoto | null) } : { sender: m.senderId === meId ? 'Вы' : people[m.senderId]?.name ?? '', avatar: senderAvatar(m.senderId) }) }; })}
         origin={(k: number) => grid.current?.querySelector<HTMLElement>(`[data-mid="${photos[k]?.id}"]`) ?? null}
         onClose={() => setViewer(null)} />
     ) : null}
@@ -268,7 +271,7 @@ function TrackRow({ m, chatId, items }: { m: Msg; chatId: number; items: Msg[] }
   const loading = mine && !!st.loading;
   const music = music0;
   const g = getGlobal(), me = g.me?.userId;
-  const chat = g.chats.find((c) => c.id === chatId);
+  const chat = findChat(g, chatId);
   // музыка — «Исполнитель — Название» из тегов (как в ленте и в Telegram), без тегов — имя файла
   const title = music ? (a.performer && a.title ? `${a.performer} — ${a.title}` : a.title || trackTitle(a.name)) : senderTitle(m.senderId, me, chat);
   // обложка: у трека — обложка альбома, у кружка — его кадр (как в ленте)

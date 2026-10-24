@@ -62,6 +62,7 @@ export interface LocalChat {
   unread: number;
   knownMaxId: number;     // максимальный id сообщения, который уже учтён в unread
   peerReadUpTo: number;   // до какого id собеседники прочитали мои сообщения
+  requested?: boolean;    // превью канала (store.previews): заявка на вступление подана, ждёт одобрения
   /**
    * Отрезки непрерывной истории [fromSort, toSort] (включительно), по возрастанию, не пересекаются. Последний —
    * живой: его продлевают журнал и снимок, неотправленные — после него. Сообщения вне отрезков (медиа, догруженные
@@ -131,6 +132,8 @@ export type Query =
    *  я не участник группы, тред живым видом без строки чата} */
   | { kind: 'thread'; chatId: number; threadId: number; limit: number; anchor?: { sort: number; side: 'end' | 'start' | 'center' } }
   | { kind: 'counters' }
+  /** превью публичных каналов без подписки (openPreview): элементы — как строки chatList (preview: true), в список не входят */
+  | { kind: 'previews' }
   /** последние уведомления (новое чужое сообщение или упоминание меня), по порядку прихода: одно на сообщение;
    *  mention — сквозь mute; элемент {key, chatId, id, mention, threadId?, senderId, body, kind, createdAt, …} */
   | { kind: 'notifications' }
@@ -223,6 +226,12 @@ export type Action =
   | { type: 'searchPeople'; q: string }
   | { type: 'searchMedia'; kind: MediaTab; q: string; before?: number }
   | { type: 'topChats' }
+  /** публичные каналы, где я не состою (глобальный поиск, «Глобальный поиск»): только с сетью */
+  | { type: 'searchChannels'; q: string }
+  /** превью публичного канала до подписки: строка (GET /groups/:id) в память без списка и push'и канала (watchChat);
+   *  ответ — {member, requested}: участнику превью не нужно, чат и так в списке; closePreview — закрыть (не вступил — забыть) */
+  | { type: 'openPreview'; chatId: number }
+  | { type: 'closePreview'; chatId: number }
   | { type: 'pin'; chatId: number; id: number }
   | { type: 'unpin'; chatId: number; id: number | null }
   | { type: 'messagesByIds'; chatId: number; ids: number[] }
