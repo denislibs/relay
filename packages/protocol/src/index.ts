@@ -354,6 +354,9 @@ export type ClientFrame =
   | { op: 'sync'; since: number }
   | { op: 'syncChat'; reqId: string; chatId: Id; since: number }   // догнать журнал одного чата (группы, каналы)
   | { op: 'chatsSince'; since: number }                             // сверка: какие группы менялись после since
+  // превью публичного канала: push'и канала в этот сокет без подписки, пока превью открыто; ack.result — {seq}
+  | { op: 'watchChat'; reqId: string; chatId: Id }
+  | { op: 'unwatchChat'; chatId: Id }
   | { op: 'send'; reqId: string; clientId: string; chatId: Id; body: string; entities?: Entity[]; replyToId?: Id | null; attachment?: { id: string; thumb?: string | null; spoiler?: boolean } | null; groupId?: string | null; forward?: ForwardRef | null; noLinkPreview?: boolean; blocks?: Block[] | null; todo?: TodoInput; sticker?: { id: Id } | null; threadId?: Id }   // threadId — комментарий в треде (группа обсуждения)
   | { op: 'read'; reqId: string; chatId: Id; upToId: Id }
   | { op: 'typing'; chatId: Id }   // «печатаю» — без ответа, сервер пересылает остальным участникам
@@ -387,7 +390,8 @@ export type ServerFrame =
   | { op: 'updates'; from: number; to: number; items: JournalEntry[]; more: boolean }
   // событие журнала сразу, без sync: клиент применяет, если from — его номер (личный или чата chatId), иначе
   // синхронизируется (sync / syncChat). Пустые items — «догони чат» (события не поместились в уведомление)
-  | { op: 'push'; chatId?: Id; from: number; to: number; items: JournalEntry[] }
+  // gone — чат удалён (журнал чата закрыт): убрать его у себя без syncChat
+  | { op: 'push'; chatId?: Id; from: number; to: number; items: JournalEntry[]; gone?: true }
   | { op: 'tooLong'; seq: number }
   | { op: 'ack'; reqId: string; result: Record<string, unknown> }
   | { op: 'err'; reqId?: string; code: ErrorCode; retry: boolean }
@@ -412,6 +416,8 @@ export function parseClientFrame(raw: string): ClientFrame | null {
     case 'sync': return int(f.since) ? { op: 'sync', since: f.since } : null;
     case 'syncChat': return str(f.reqId, 64) && int(f.chatId) && int(f.since) ? { op: 'syncChat', reqId: f.reqId, chatId: f.chatId, since: f.since } : null;
     case 'chatsSince': return int(f.since) ? { op: 'chatsSince', since: f.since } : null;
+    case 'watchChat': return str(f.reqId, 64) && int(f.chatId) ? { op: 'watchChat', reqId: f.reqId, chatId: f.chatId } : null;
+    case 'unwatchChat': return int(f.chatId) ? { op: 'unwatchChat', chatId: f.chatId } : null;
     case 'ping': return { op: 'ping' };
     case 'typing': return int(f.chatId) ? { op: 'typing', chatId: f.chatId } : null;
     case 'edit': return str(f.reqId, 64) && int(f.chatId) && int(f.id) && typeof f.body === 'string' ? { op: 'edit', reqId: f.reqId, chatId: f.chatId, id: f.id, body: f.body, entities: normalizeEntities(f.body, f.entities) } : null;

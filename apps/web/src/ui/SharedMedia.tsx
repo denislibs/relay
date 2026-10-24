@@ -9,7 +9,7 @@ import { useContext, useEffect, useLayoutEffect, useRef, useState } from 'preact
 import { focusMessage, openInner, type MediaTab } from '../data';
 import { useMedia } from '../mediaTab';
 import { animateScroll, gridCorners, gridDateIndex, tabCounter, tabLabel, tabScrollTarget, tileSrc, videoFrameSrc, type SharedTab } from '../mediaGrid';
-import { getGlobal, useGlobal } from '../global';
+import { getGlobal, useGlobal, findChat } from '../global';
 import { toggleMusic, trackTitle } from '../music';
 import { clock, dayLabel, fileSize, lastSeenText } from './format';
 import { openUserChat, prepareUserChat } from '../data';
@@ -335,7 +335,7 @@ function TrackRow({ m, chatId, items }: { m: Msg; chatId: number; items: Msg[] }
   const loading = mine && !!st.loading;
   const music = music0;
   const g = getGlobal(), me = g.me?.userId;
-  const chat = g.chats.find((c) => c.id === chatId);
+  const chat = findChat(g, chatId);
   // музыка — «Исполнитель — Название» из тегов (как в ленте и в Telegram), без тегов — имя файла
   const title = music ? (a.performer && a.title ? `${a.performer} — ${a.title}` : a.title || trackTitle(a.name)) : senderTitle(m.senderId, me, chat);
   // обложка: у трека — обложка альбома, у кружка — его кадр (как в ленте)

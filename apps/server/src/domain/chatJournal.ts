@@ -2,6 +2,7 @@ import type { JournalEntry } from '@relay/protocol';
 import { sql } from '../db';
 import { DomainError } from './errors';
 import { hydrate, MAX_BATCH, type Stored } from './journal';
+import { canRead } from './chats';
 
 /**
  * Чтение журнала чата (запись — journal.ts chatEvent/flushJournals). У каждой группы и канала свой счётчик
@@ -15,16 +16,17 @@ export async function chatSeqOf(chatId: number): Promise<number> {
 }
 
 /**
- * Записи чата после since для участника. Ссылки на сообщения до history_from (вступил при скрытой истории)
+ * Записи чата после since для участника (или зрителя превью публичного канала). Ссылки на сообщения до history_from (вступил при скрытой истории)
  * отдаются как messageDeleted — клиент их и так не видит. Отстал дальше, чем есть записей, — tooLong:
  * клиент перезагружает этот чат.
  */
 export async function getChatUpdates(userId: number, chatId: number, since: number, limit = Number(process.env.RELAY_SYNC_BATCH) || MAX_BATCH):
   Promise<{ items: JournalEntry[]; seq: number; more: boolean; tooLong: boolean }> {
   const [m] = await sql`select m.history_from, c.deleted_at from chat_members m join chats c on c.id = m.chat_id where m.chat_id = ${chatId} and m.user_id = ${userId}`;
-  if (!m) throw new DomainError('not_member');
-  if (m.deleted_at) throw new DomainError('not_found', 'chat');   // syncChat → chatGone
-  const historyFrom = Number(m.history_from ?? 0);
+  if (m?.deleted_at) throw new DomainError('not_found', 'chat');   // syncChat → chatGone
+  // не участник: превью публичного канала (canRead) — журнал целиком, скрытой истории у него нет; иначе not_member
+  if (!m) await canRead(sql, chatId, userId);
+  const historyFrom = Number(m?.history_from ?? 0);
   const seq = await chatSeqOf(chatId);
   if (since >= seq) return { items: [], seq, more: false, tooLong: false };
   const [first] = await sql`select min(seq) as min from chat_updates where chat_id = ${chatId}`;

@@ -4,7 +4,7 @@ import {
 } from '@relay/protocol';
 import { useEffect, useState } from 'preact/hooks';
 import { groupCall, type GroupResult } from './data';
-import { useGlobal } from './global';
+import { findChat, useGlobal } from './global';
 import { showToast } from './settingsData';
 
 // Группа на клиенте: моё место в ней, тексты прав и ошибок, загрузка списков управления (участники, ссылки, заявки…).
@@ -14,7 +14,7 @@ export type ChatGroup = { group: GroupInfo | null; me: MyMembership | null; memb
 
 export function useGroup(chatId: number): ChatGroup {
   return useGlobal((s) => {
-    const c = s.chats.find((x) => x.id === chatId);
+    const c = findChat(s, chatId);
     return { group: (c?.group as GroupInfo | null) ?? null, me: (c?.me as MyMembership | null) ?? null, membersRev: (c?.membersRev as number) ?? 0, title: String(c?.title ?? ''), kind: c?.kind === 'channel' ? 'channel' : 'group' };
   });
 }
