@@ -90,7 +90,7 @@ body { margin: 0; font-family: var(--font-sans); color: var(--ink); background: 
 .rl-search-icon > * { position: absolute; inset: 0; transition: opacity var(--dur-fast) var(--ease-out), transform var(--dur-fast) var(--ease-out); }
 .rl-search-spin { opacity: 0; transform: scale(0.6); color: var(--brand-text); }
 /* крутится только во время загрузки: скрытый SVG-лоадер с бесконечной анимацией гонял стили и раскладку на каждом кадре */
-.rl-search-busy .rl-search-spin path { transform-origin: 9px 9px; animation: rl-spin 900ms linear infinite; }
+.rl-search-busy .rl-search-spin circle { transform-box: fill-box; transform-origin: center; animation: rl-arc-rotate 2s linear infinite, rl-arc-dash 1.5s ease-in-out infinite; }
 .rl-search-busy .rl-search-icon .rl-icon { opacity: 0; transform: scale(0.6) rotate(-45deg); }
 .rl-search-busy .rl-search-spin { opacity: 1; transform: none; }
 .rl-search-back { position: relative; width: 32px; height: 32px; margin-left: -6px; padding: 0; justify-content: center; align-items: center; border: 0; border-radius: 50%; background: none; cursor: pointer; overflow: hidden; }
@@ -322,7 +322,16 @@ body { margin: 0; font-family: var(--font-sans); color: var(--ink); background: 
 .rl-ring > svg { position: absolute; inset: 0; transform: rotate(-90deg); }
 .rl-ring-track { fill: none; stroke: var(--line); stroke-width: 3; }
 .rl-ring-arc { fill: none; stroke: currentColor; stroke-width: 3; stroke-linecap: round; transition: stroke-dashoffset var(--dur-base) linear; }
-.rl-ring-spin > svg { animation: rl-ring-rotate 1.4s linear infinite; }
+.rl-ring-spin > svg { animation: rl-arc-rotate 2s linear infinite; }
+.rl-ring-spin .rl-ring-arc { transition: none; animation: rl-arc-dash 1.5s ease-in-out infinite; }
+/* Неопределённая загрузка — как в Telegram Web: дуга вырастает из точки, а затем сходит, догоняя свой хвост,
+   пока всё кольцо медленно вращается. Единицы — pathLength=100 у дуги, одни ключевые кадры на любой размер. */
+@keyframes rl-arc-rotate { from { transform: rotate(-90deg); } to { transform: rotate(270deg); } }
+@keyframes rl-arc-dash {
+  0% { stroke-dasharray: 1 200; stroke-dashoffset: 0; }
+  50% { stroke-dasharray: 70 200; stroke-dashoffset: -20; }
+  100% { stroke-dasharray: 70 200; stroke-dashoffset: -99; }
+}
 /* без известного прогресса дуга постоянной длины только вращается: «дышащая» дуга сжималась быстрее, чем крутилась, — казалось, что едет назад */
 .rl-ring-onmedia { color: var(--on-media); border-radius: 50%; background: var(--media-scrim); }
 .rl-ring-onmedia .rl-ring-track { stroke: transparent; }
@@ -330,6 +339,8 @@ body { margin: 0; font-family: var(--font-sans); color: var(--ink); background: 
    за 1 с, с прогрессом — за 2 с, длина дуги меняется плавно */
 .rl-preloader { color: #fff; border-radius: 50%; background: rgba(0, 0, 0, 0.3); }
 .rl-preloader > svg { animation: rl-preloader-rotate 1s linear infinite; }
+.rl-preloader:not(.rl-preloader-det) > svg { animation: rl-arc-rotate 2s linear infinite; }
+.rl-preloader:not(.rl-preloader-det) .rl-preloader-arc { transition: none; animation: rl-arc-dash 1.5s ease-in-out infinite; }
 .rl-preloader-det > svg { animation-duration: 2s; }
 .rl-preloader-arc { fill: none; stroke: currentColor; stroke-linecap: round; transition: stroke-dasharray 200ms linear; }
 .rl-preloader .rl-ring-cancel { position: absolute; inset: 0; }

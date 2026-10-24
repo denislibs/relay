@@ -724,7 +724,8 @@ function Preloader(props) {
   var arc = det ? Math.max(PRELOADER_MIN, Math.min(1, p) * PRELOADER_C) : PRELOADER_C * 0.75;
   return h('div', { class: cx('rl-ring rl-preloader', det && 'rl-preloader-det'), style: { width: size, height: size }, role: 'progressbar', 'aria-valuenow': det ? Math.round(p * 100) : undefined, 'aria-label': props.label || 'Загрузка' },
     h('svg', { width: size, height: size, viewBox: '0 0 54 54', 'aria-hidden': 'true' },
-      h('circle', { class: 'rl-preloader-arc', cx: 27, cy: 27, r: PRELOADER_R, style: { strokeDasharray: arc + ' ' + PRELOADER_C, strokeWidth: +(2 * 54 / size).toFixed(2) } })),
+      h('circle', det ? { class: 'rl-preloader-arc', cx: 27, cy: 27, r: PRELOADER_R, style: { strokeDasharray: arc + ' ' + PRELOADER_C, strokeWidth: +(2 * 54 / size).toFixed(2) } }
+        : { class: 'rl-preloader-arc', cx: 27, cy: 27, r: PRELOADER_R, pathLength: 100, style: { strokeWidth: +(2 * 54 / size).toFixed(2) } })),
     props.onCancel ? h('button', { type: 'button', class: 'rl-ring-cancel', 'aria-label': 'Отменить', onClick: props.onCancel }, h(Icon, { name: 'close', size: Math.round(size / 3) })) : null);
 }
 function ProgressRing(props) {
@@ -735,7 +736,8 @@ function ProgressRing(props) {
   return h('div', { class: cx('rl-ring', !det && 'rl-ring-spin', props.onMedia && 'rl-ring-onmedia'), style: { width: size, height: size }, role: 'progressbar', 'aria-valuenow': det ? Math.round(p * 100) : undefined, 'aria-label': props.label || 'Загрузка' },
     h('svg', { width: size, height: size, viewBox: '0 0 ' + size + ' ' + size, 'aria-hidden': 'true' },
       h('circle', { class: 'rl-ring-track', cx: size / 2, cy: size / 2, r: r }),
-      h('circle', { class: 'rl-ring-arc', cx: size / 2, cy: size / 2, r: r, style: { strokeDasharray: c, strokeDashoffset: c * (1 - (det ? Math.max(RING_IDLE_ARC, Math.min(1, p)) : RING_IDLE_ARC)) } })),
+      det ? h('circle', { class: 'rl-ring-arc', cx: size / 2, cy: size / 2, r: r, style: { strokeDasharray: c, strokeDashoffset: c * (1 - Math.max(RING_IDLE_ARC, Math.min(1, p))) } })
+        : h('circle', { class: 'rl-ring-arc', cx: size / 2, cy: size / 2, r: r, pathLength: 100 })),
     props.onCancel ? h('button', { type: 'button', class: 'rl-ring-cancel', 'aria-label': 'Отменить', onClick: props.onCancel }, h(Icon, { name: 'close', size: 18 })) : null);
 }
 
