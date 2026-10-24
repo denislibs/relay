@@ -26,6 +26,7 @@ import { getPrefs } from '../prefs';
 import { bubbleSrc } from '../mediaGrid';
 import { clock, dayKey, dayLabel, fileSize } from './format';
 import { arrivals, type FeedSeen } from './appear';
+import { requestShift, rowFor, shiftWanted } from './windowShift';
 
 /*
  * Лента сообщений, устроенная как в Telegram:
@@ -421,6 +422,8 @@ function viewAnchorOf(root: HTMLElement): { key: string; top: number } | null {
   }
   return null;
 }
+/** Строка сообщения: по ключу, а нет — та, что его содержит (альбом, разрезанный окном иначе; windowShift.rowFor). */
+const rowAt = (root: HTMLElement, key: string, sort: number) => rowFor(root.querySelectorAll<HTMLElement>('.app-msg[data-sort]'), key, sort);
 const anchorEl = (root: HTMLElement, key: string) =>
   key === 'unread' ? root.querySelector<HTMLElement>('.app-unread-divider') : root.querySelector<HTMLElement>(`[data-key="${CSS.escape(key)}"]`);
 
@@ -492,7 +495,7 @@ export function Feed({ frameKey, active, chatId, threadId, channel = false, meId
   const unread = useGlobal((s) => (findChat(s, chatId)?.unread as number) ?? 0);
   const el = useRef<HTMLDivElement>(null);
   const metaRef = useRef(meta); metaRef.current = meta;
-  const anchor = useRef<{ key: string; top: number } | null>(null);   // якорь до сдвига окна
+  const anchor = useRef<{ key: string; sort: number; top: number } | null>(null);   // якорь до сдвига окна
   const toBottom = useRef(false);                                     // после перехода к хвосту — вниз
   const programmatic = useRef(0);
   const placed = useRef(false);
@@ -521,14 +524,13 @@ export function Feed({ frameKey, active, chatId, threadId, channel = false, meId
   const viewAnchor = useRef<{ key: string; top: number } | null>(null);   // что было вверху видимой части (для смены ширины)
   const lastTop = useRef(0);
   const shift = (dir: 'older' | 'newer') => {
-    const root = el.current, m = metaRef.current;
-    if (!root || !placed.current || !m || (dir === 'older' ? !m.hasOlder : !m.hasNewer)) return;
-    if (scrollDir.current === (dir === 'older' ? 1 : -1)) return;
+    const root = el.current;
+    if (!root || !placed.current || !shiftWanted(dir, metaRef.current, scrollDir.current)) return;
     requestMeasure(() => {
       if (anchor.current) return; // предыдущий сдвиг ещё не применён
-      const v = firstVisible(root);
-      if (v) anchor.current = { key: v.key, top: v.top };
-      moveWindow(dir, frameKey);
+      // окно не двинулось (край в кадре уже пуст — лента не успела перерисоваться; прежний сдвиг в пути) — якорь
+      // не держим: он ждал бы окна, которое не придёт, и окно встало бы в обе стороны
+      anchor.current = requestShift(() => firstVisible(root), () => moveWindow(dir, frameKey));
     });
   };
 
@@ -546,7 +548,7 @@ export function Feed({ frameKey, active, chatId, threadId, channel = false, meId
         const pos = savedPosition(here);
         const bottom = root.scrollHeight - root.clientHeight;
         let target = bottom;
-        const row = pos ? root.querySelector<HTMLElement>(`[data-key="${CSS.escape(pos.key)}"]`) : null;
+        const row = pos ? rowAt(root, pos.key, pos.sort) : null;
         // вернулись в чат, из которого ушли посреди истории, — туда же; иначе к первому непрочитанному
         if (row) target = Math.min(bottom, topIn(root, row) - pos!.offset);
         else if (divider) target = Math.min(bottom, divider.offsetTop - TOP_ZONE - 10);
@@ -579,7 +581,7 @@ export function Feed({ frameKey, active, chatId, threadId, channel = false, meId
       let next: number | null = null;
       if (a) {
         anchor.current = null;
-        const row = root.querySelector<HTMLElement>(`[data-key="${CSS.escape(a.key)}"]`);
+        const row = rowAt(root, a.key, a.sort);
         if (row) next = top + (row.getBoundingClientRect().top - root.getBoundingClientRect().top) - a.top;
       } else if (down || (stick.current && top + ch < h - 1)) {
         toBottom.current = false;
@@ -648,7 +650,7 @@ export function Feed({ frameKey, active, chatId, threadId, channel = false, meId
       const root = el.current;
       if (!alive || !root) return;
       const v = firstVisible(root);
-      if (v) anchor.current = { key: v.key, top: v.top };
+      if (v) anchor.current = v;
       requestMutation(() => { if (alive) setLimit((l) => (l == null || l + FILL_CHUNK >= messages.length ? null : l + FILL_CHUNK)); });
     }));
     return () => { alive = false; };
@@ -686,6 +688,25 @@ export function Feed({ frameKey, active, chatId, threadId, channel = false, meId
       for (const e of entries) if (e.isIntersecting) shift((e.target as HTMLElement).dataset.dir as 'older' | 'newer');
     }, { root: el.current, rootMargin: `${EDGE} 0px` });
     return () => edges.current?.disconnect();
+  }, [chatId]);
+
+  // колёсико у предела прокрутки: scrollTop уже упёрся — событий scroll нет, а датчик края мог сработать, пока
+  // листали в другую сторону (и сдвиг тогда не начался). Направление — по колёсику, сдвиг — туда, куда крутят
+  useEffect(() => {
+    const root = el.current;
+    if (!root) return;
+    const onWheel = (e: WheelEvent) => {
+      if (!e.deltaY) return;
+      const dir = e.deltaY < 0 ? -1 : 1;
+      requestMeasure(() => {
+        const top = root.scrollTop, fromBottom = root.scrollHeight - top - root.clientHeight;
+        if (dir < 0 ? top > 1 : fromBottom > 1) return;   // не у предела — сдвиг начнёт onScroll
+        scrollDir.current = dir;
+        shift(dir < 0 ? 'older' : 'newer');
+      });
+    };
+    root.addEventListener('wheel', onWheel, { passive: true });
+    return () => root.removeEventListener('wheel', onWheel);
   }, [chatId]);
 
   const scheduleRead = useRef<(() => void) | null>(null);   // вернулись к чату (верхний сняли) — отметить то, что видно
