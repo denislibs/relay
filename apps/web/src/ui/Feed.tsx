@@ -1055,8 +1055,9 @@ export function Feed({ frameKey, active, chatId, threadId, channel = false, meId
     // посты (и копии постов в группе) — пачкой «канала»: отправитель для пачки — 0
     const sender = post ? 0 : m.senderId;
     const nextSender = next ? (isPosted(next) ? 0 : next.senderId) : null;
-    const start = prevSender !== sender || day !== prevDay || breaksGroup(shown[i - 1], m, unreadFrom, meId);
-    const end = !next || nextSender !== sender || dayKey(next.createdAt as string) !== day || breaksGroup(m, next, unreadFrom, meId);
+    // пост канала — всегда отдельный пузырь с хвостиком (как в Telegram: посты в пачку не склеиваются)
+    const start = post || prevSender !== sender || day !== prevDay || breaksGroup(shown[i - 1], m, unreadFrom, meId);
+    const end = post || !next || nextSender !== sender || dayKey(next.createdAt as string) !== day || breaksGroup(m, next, unreadFrom, meId);
     const quoted = m.reply as Quote | null;
     // файлы, отправленные вместе (groupId), — одним пузырём: позиция строки внутри группы
     const prevM = shown[i - 1];
