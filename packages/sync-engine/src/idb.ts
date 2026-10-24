@@ -48,8 +48,9 @@ export function termsOf(m: LocalMessage): string[] {
   return searchTerms(a ? [a.name, a.title, a.performer, m.body].filter(Boolean).join(' ') : m.body);
 }
 
-/** Правка сохранённой строки сообщения, которого нет в памяти (sort подтверждённого = id) */
-export interface RowPatch { chatId: number; id: number; patch: Partial<LocalMessage> }
+/** Правка сохранённой строки сообщения, которого нет в памяти (sort подтверждённого = id); drop — сообщение удалено:
+ *  строку и её слова стереть */
+export interface RowPatch { chatId: number; id: number; patch: Partial<LocalMessage>; drop?: true }
 
 export interface WriteBatch {
   rowPatches?: RowPatch[];
@@ -83,12 +84,13 @@ export function write(db: IDBDatabase, batch: WriteBatch): Promise<void> {
     }
   }
   // правка незагруженного сообщения: строка и её слова — вместе, той же транзакцией (иначе удалённый текст остался бы в кэше и поиске)
-  for (const { chatId, id, patch } of batch.rowPatches ?? []) {
+  for (const { chatId, id, patch, drop } of batch.rowPatches ?? []) {
     const cur = t.objectStore('messages').index('byChat').openCursor(IDBKeyRange.only([chatId, id]));
     cur.onsuccess = () => {
       const c = cur.result;
       if (!c) return;
       const old = c.value as LocalMessage & { tab?: string };
+      if (drop) { for (const term of termsOf(old)) t.objectStore('terms').delete([term, old.chatId, old.sort]); c.delete(); return; }
       const next = { ...old, ...patch } as LocalMessage & { tab?: string };
       const terms = t.objectStore('terms');
       for (const term of termsOf(old)) terms.delete([term, old.chatId, old.sort]);

@@ -66,7 +66,8 @@ export async function editMessage(userId: number, chatId: number, id: number, bo
   });
 }
 
-/** Удаление своего сообщения у всех: тело стирается, остаётся «Сообщение удалено». Реакции уходят вместе с ним. */
+/** Удаление своего сообщения у всех (как в Telegram): сообщение исчезает из истории целиком, тело стирается, реакции
+ *  уходят вместе с ним. Пересланные копии в других чатах — свои строки, их это не касается. */
 export async function deleteMessage(userId: number, chatId: number, id: number): Promise<{ ok: true }> {
   return sql.begin(async (tx) => {
     const ctx = await messageCtx(tx, chatId, userId, id);   // и гость треда — свой комментарий (threads.ts)
@@ -77,7 +78,7 @@ export async function deleteMessage(userId: number, chatId: number, id: number):
       if (m.service_type) throw new DomainError('not_found', 'message');
     } else m = await ownMessage(tx, userId, chatId, id);
     await erase(tx, chatId, id, ctx.kind);
-    // пост канала — копия в группе обсуждения удаляется тоже (тред остаётся, шапка — «удалено»)
+    // пост канала — копия в группе обсуждения удаляется тоже: из ленты группы пропадает, тред остаётся (шапка «Пост удалён»)
     if (ctx.kind === 'channel') await withCopy(tx, chatId, id, (groupId, copyId) => erase(tx, groupId, copyId, 'group'));
     // комментарий — счётчики треда заново
     if (m.thread_id != null) await recountThread(tx, chatId, Number(m.thread_id));

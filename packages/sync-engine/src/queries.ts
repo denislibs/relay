@@ -146,6 +146,19 @@ export function messageWindow(all: LocalMessage[], q: Pick<Extract<Query, { kind
   return { from, to };
 }
 
+/**
+ * Сообщения ленты чата: без удалённых (как в Telegram — удалённое исчезает). В кэше удалённое остаётся только пометкой
+ * копии поста (шапка треда «Пост удалён», messageById) или строкой из кэша до этого правила. Массив кэшируется вместе с
+ * отсортированным кэшем чата; удалённых нет — тот же массив.
+ */
+const feedCache = new WeakMap<LocalMessage[], LocalMessage[]>();
+export function feedMessages(store: Store, chatId: number): LocalMessage[] {
+  const all = store.chatMessages(chatId);
+  let list = feedCache.get(all);
+  if (!list) { list = all.some((m) => m.deleted) ? all.filter((m) => !m.deleted) : all; feedCache.set(all, list); }
+  return list;
+}
+
 /** Комментарии треда из кэша группы (по порядку; массив кэшируется вместе с отсортированной лентой чата). */
 const threadCache = new WeakMap<LocalMessage[], Map<number, LocalMessage[]>>();
 export function threadMessages(store: Store, chatId: number, threadId: number): LocalMessage[] {
@@ -153,7 +166,7 @@ export function threadMessages(store: Store, chatId: number, threadId: number): 
   let by = threadCache.get(all);
   if (!by) { by = new Map(); threadCache.set(all, by); }
   let list = by.get(threadId);
-  if (!list) { list = all.filter((m) => m.threadId === threadId); by.set(threadId, list); }
+  if (!list) { list = all.filter((m) => m.threadId === threadId && !m.deleted); by.set(threadId, list); }
   return list;
 }
 /** Тред: его комментарии и где окно (отрезки треда; не открывали — только неотправленные). */
@@ -211,7 +224,7 @@ export function computeQuery(store: Store, q: Query, mute: Map<number, number | 
     }
     case 'messages': {
       // только окно: бинарный поиск по отсортированному кэшу, подписи — без сериализации
-      const all = store.chatMessages(q.chatId);
+      const all = feedMessages(store, q.chatId);
       const chat = store.chats.get(q.chatId);
       const span = feedSpan(chat, all, q.anchor?.sort);
       const { from, to } = messageWindow(all, q, span.lo, span.hi);

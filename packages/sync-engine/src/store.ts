@@ -20,6 +20,8 @@ function sameDraft(a: { text: string; entities?: Entity[] } | null | undefined, 
 
 type Range = [number, number];
 
+/** Цитата удалённого сообщения: «Удалённое сообщение», без содержимого. */
+const deletedQuote = (id: number, senderId: number): QuoteMsg => ({ id, sort: id, body: '', senderId, kind: 'text', deleted: true, attachment: null, todo: null, article: false });
 /** События, которые гость треда применяет из threadPush (остальное — состав, закрепы, информация группы — не для него). */
 const GUEST_UPDATES = new Set<Update['type']>(['messageEdited', 'messageMarkup', 'messageDeleted', 'reactions', 'reactionCounts', 'linkPreview', 'todoUpdated', 'attachmentUpdated', 'mediaListened']);
 
@@ -27,8 +29,9 @@ const GUEST_UPDATES = new Set<Update['type']>(['messageEdited', 'messageMarkup',
 const NOTIFY_KEEP = 20;
 
 /**
- * Удалённое сообщение: на устройстве от него остаётся только то, что нужно строке «Сообщение удалено» (автор, время,
- * место в ленте); текст, оформление, вложение, превью, статья, чек-лист и пересылка — стираются (память и IDB).
+ * Удалённое сообщение: стирается всё содержимое — текст, оформление, вложение, превью, статья, чек-лист и пересылка.
+ * Обычное удалённое на устройстве не остаётся вовсе (removeMessage); пометкой с этими полями живёт только копия поста
+ * в группе обсуждения — шапка её треда «Пост удалён».
  */
 const DELETED: Partial<LocalMessage> = {
   body: '', deleted: true, reactions: [], entities: [], attachment: null, link: null, blocks: null, fwdFrom: null, todo: undefined, listened: undefined, buttons: null,
@@ -255,6 +258,11 @@ export class Store {
       this.rowPatches.delete(rk);
       const old = rows.find((r) => r.id === rp.id);
       if (!old || map.get(old.key) !== old) continue;   // строки нет или в памяти уже новее
+      if (rp.drop) {   // удалено, пока чат не был загружен: строку и её слова — прочь
+        map.delete(old.key); this.deletedMessages.add(old.key);
+        for (const t of termsOf(old)) this.staleTerms.set(termKey(t, old.chatId, old.sort), [t, old.chatId, old.sort]);
+        continue;
+      }
       const next = { ...old, ...rp.patch };
       map.set(old.key, next);
       this.dirtyMessages.set(old.key, next);
@@ -316,9 +324,12 @@ export class Store {
     }
   }
   /** Пришедшие исходники цитат: в память и в кэш как сообщения вне ленты (отрезки истории не трогают) —
-   *  после перезапуска без сети цитата берётся из сохранённой строки (messageById). Чат уже загружен (см. fetchQuotes). */
-  addQuotes(chatId: number, list: Message[]): void {
+   *  после перезапуска без сети цитата берётся из сохранённой строки (messageById). Чат уже загружен (см. fetchQuotes).
+   *  asked — что спрашивали: сервер не вернул — удалено (или вне видимой истории), цитата «Удалённое сообщение». */
+  addQuotes(chatId: number, list: Message[], asked: number[] = []): void {
     for (const m of list) this.quotes.set(chatId + ':' + m.id, toQuote(m as Parameters<typeof toQuote>[0]));
+    const got = new Set(list.map((m) => m.id));
+    for (const id of asked) if (!got.has(id) && !this.messageById(chatId, id)) this.quotes.set(chatId + ':' + id, deletedQuote(id, 0));
     this.addLoose(chatId, list);
     this.touch(chatId);
   }
@@ -330,9 +341,12 @@ export class Store {
   }
 
   /** Указатель слов отстаёт от памяти: есть незаписанные сообщения, лишние слова или правки строк. */
-  get termsDirty(): boolean { return this.dirtyMessages.size > 0 || this.staleTerms.size > 0 || this.rowPatches.size > 0 || this.clearPersistedMessages; }
-  /** Сообщение из памяти по ключу строки (новее сохранённой в IDB); нет в памяти — undefined. */
-  loadedMessage(chatId: number, key: string): LocalMessage | undefined { return this.messages.get(chatId)?.get(key); }
+  get termsDirty(): boolean { return this.dirtyMessages.size > 0 || this.staleTerms.size > 0 || this.rowPatches.size > 0 || this.deletedMessages.size > 0 || this.clearPersistedMessages; }
+  /** Сообщение из памяти по ключу строки (новее сохранённой в IDB); нет в памяти — undefined. Удалённое, чья строка ещё
+   *  ждёт стирания (до flush), — пометкой deleted: поиск по IDB не найдёт его по старой строке. */
+  loadedMessage(chatId: number, key: string): LocalMessage | undefined {
+    return this.messages.get(chatId)?.get(key) ?? (this.deletedMessages.has(key) ? { key, chatId, deleted: true } as LocalMessage : undefined);
+  }
 
   // ---------- изменения с сервера ----------
 
@@ -352,7 +366,7 @@ export class Store {
       case 'draft': return this.applyRemoteDraft(u.chatId, u.text, u.at, u.entities);
       case 'messageEdited': return this.patchMessage(u.chatId, u.id, { body: u.body, editedAt: u.editedAt, entities: u.entities ?? [] });
       case 'messageMarkup': return this.patchMessage(u.chatId, u.id, { body: u.body, entities: u.entities ?? [], buttons: u.buttons });
-      case 'messageDeleted': this.dropMentions(u.chatId, (id) => id === u.id); return this.patchMessage(u.chatId, u.id, DELETED);
+      case 'messageDeleted': return this.removeMessage(u.chatId, u.id);
       case 'reactions': return this.patchMessage(u.chatId, u.id, { reactions: u.reactions });
       case 'reactionCounts': return this.patchMessage(u.chatId, u.id, { reactionCounts: u.counts });
       case 'replies': return this.applyReplies(u.chatId, u.id, { count: u.count, lastId: u.lastId, recent: u.recent });
@@ -540,7 +554,9 @@ export class Store {
       if (s.last) {
         chat.knownMaxId = Math.max(chat.knownMaxId, s.last.id);
         this.applyMessage(s.last, false, 'snapshot');
-      }
+        // место в списке — как у сервера: удалили последнее — чат опускается к дате предыдущего
+        if (chat.last?.id === s.last.id) chat.lastAt = s.last.createdAt;
+      } else if (!chat.last && s.sortAt) chat.lastAt = s.sortAt;   // сообщений нет (все удалены) — время сервера
       this.markChat(chat);
     }
   }
@@ -594,7 +610,7 @@ export class Store {
   private placeSnapLast(c: LocalChat): void {
     const m = c.snapLast;
     delete c.snapLast;
-    if (m && !this.messages.get(c.id)?.has(m.key)) this.putMessage(m);
+    if (m && !m.deleted && !this.messages.get(c.id)?.has(m.key)) this.putMessage(m);   // удалённое, пока ждало, — не в ленту
   }
 
   /** Чаты, где последнее из снимка ждёт журнала (snapLast), — движок берёт их в начале догонки. */
@@ -632,6 +648,9 @@ export class Store {
     const mine = m.senderId === this.userId;
     const map = this.map(m.chatId);
     const prev = map.get(m.clientId);
+    // страница истории или строка списка, запрошенные до удаления, — удалённое не воскрешаем (журнал его уже убрал);
+    // пометку удалённой копии поста (шапка треда) — можно
+    if (range !== 'journal' && !m.deleted && this.quotes.get(m.chatId + ':' + m.id)?.deleted) return;
     const status = mine && (prev?.status === 'read' || m.id <= (chat?.peerReadUpTo ?? 0)) ? 'read' : 'sent';
     const local: LocalMessage = {
       key: m.clientId, clientId: m.clientId, id: m.id, chatId: m.chatId, senderId: m.senderId,
@@ -1030,16 +1049,67 @@ export class Store {
     if (m) this.putMessage({ ...m, progress: p });
   }
 
-  /** Правка/удаление/реакции загруженного сообщения (и превью последнего сообщения чата). Незагруженное — придёт с историей. */
+  /**
+   * Сообщение удалено (как в Telegram — исчезает целиком): из памяти и IndexedDB вместе со словами поиска, из
+   * упоминаний и уведомлений; цитаты на него — «Удалённое сообщение». Отрезки истории — интервалы id: дыра на его
+   * месте им не мешает. Непрочитанное чужое — минус из unread. Было последним — последним становится предыдущее из
+   * памяти (onMessage); нет такого — строку чата спросим у сервера (wantRow).
+   * Копия поста в группе обсуждения (origin) остаётся пометкой deleted: шапка её треда — «Пост удалён», а лента группы
+   * удалённое не показывает (queries.ts).
+   */
+  private removeMessage(chatId: number, id: number): void {
+    this.dropMentions(chatId, (x) => x === id);
+    const k = chatId + ':' + id, m = this.messageById(chatId, id), q = this.quotes.get(k);
+    // цитата знает о нём и без запроса к серверу (сервер удалённое больше не отдаёт); автор нужен только для цвета полосы
+    if (!q?.deleted) { this.quotes.set(k, deletedQuote(id, m?.senderId ?? q?.senderId ?? 0)); this.touch(chatId); }
+    const n = this.notifications.length;
+    this.notifications = this.notifications.filter((x) => !(x.chatId === chatId && x.id === id));
+    if (this.notifications.length !== n) this.touch(chatId);
+    const chat = this.chats.get(chatId);
+    if (!chat) {
+      // гость треда: сообщения только в памяти — комментарий убрать, копию поста (шапку) — пометкой «Пост удалён»
+      if (m && !m.deleted && this.isGuest(chatId)) {
+        if (m.origin) this.putMessage({ ...m, ...DELETED });
+        else { this.messages.get(chatId)!.delete(m.key); this.touch(chatId); }
+      }
+      return;
+    }
+    // последнее из снимка ждало журнала — журнал дошёл до него (удаление на его месте): до него всё подряд, дыры нет
+    if (chat.snapLast?.id === id) { extendLive(chat, chat.snapLast.sort); delete chat.snapLast; this.markChat(chat); }
+    if (!m) {
+      this.rowPatches.set(k, { chatId, id, patch: { ...DELETED }, drop: true });   // строка могла остаться в IDB
+      const last = chat.last;
+      if (last?.id === id) {   // и пометка из старого кэша: превью — предыдущее
+        if (!last.deleted && last.senderId !== this.userId && id > chat.lastReadId && chat.unread > 0) chat.unread--;
+        onMessage(this, chat, { ...last, ...DELETED }, 'deleted', last);
+        return;
+      }
+      // чьё оно — не знаем: непрочитанное (новее прочитанного) — счётчик возьмём у сервера
+      if (id > chat.lastReadId && chat.unread > 0) this.wantRow(chatId);
+      if (chat.mediaCounts && id <= (chat.mediaCountsAt ?? 0)) { delete chat.mediaCounts; delete chat.mediaCountsAt; this.markChat(chat); }   // могло быть во вкладке — спросим заново
+      return;
+    }
+    if (m.deleted) return;   // уже пометка (копия поста)
+    if (m.senderId !== this.userId && id > chat.lastReadId && chat.unread > 0) chat.unread--;
+    if (m.origin) { this.putMessage({ ...m, ...DELETED }); return; }
+    const map = this.messages.get(chatId)!;
+    map.delete(m.key); this.dirtyMessages.delete(m.key); this.deletedMessages.add(m.key);
+    for (const t of termsOf(m)) this.staleTerms.set(termKey(t, chatId, m.sort), [t, chatId, m.sort]);
+    this.rowPatches.delete(k);
+    this.touch(chatId);
+    onMessage(this, chat, { ...m, ...DELETED }, 'deleted', m);   // last, счётчики вкладок, строка списка
+  }
+  /** Строке чата нужен свежий снимок с сервера (последнее удалили, а предыдущего в кэше нет); движок спросит /chats?ids. */
+  wantRow: (chatId: number) => void = () => {};
+
+  /** Правка/реакции загруженного сообщения (и превью последнего сообщения чата). Незагруженное — придёт с историей. */
   patchMessage(chatId: number, id: number, patch: Partial<LocalMessage>): void {
-    // исходник цитаты удалён: его текст не держим, а цитата показывает «Сообщение удалено»
-    const qk = chatId + ':' + id, q = patch.deleted ? this.quotes.get(qk) : undefined;
-    if (q) { this.quotes.set(qk, { ...q, body: '', entities: undefined, attachment: null, todo: null, article: false, deleted: true }); this.touch(chatId); }
     const m = this.messageById(chatId, id);
     if (m) { this.putMessage({ ...m, ...patch }); return; }
     if (this.isGuest(chatId)) return;   // гость: в IndexedDB ничего нет — править нечего
     const rk = `${chatId}:${id}`, prevP = this.rowPatches.get(rk);
-    this.rowPatches.set(rk, { chatId, id, patch: { ...prevP?.patch, ...patch } });   // в IDB строка могла остаться — поправим при записи (с её словами)
+    // в IDB строка могла остаться — поправим при записи (с её словами); уже удалённую (drop) правка не воскрешает
+    this.rowPatches.set(rk, { ...prevP, chatId, id, patch: { ...prevP?.patch, ...patch } });
     const chat0 = this.chats.get(chatId);
     if (chat0?.snapLast?.id === id) { chat0.snapLast = { ...chat0.snapLast, ...patch }; this.markChat(chat0); }   // ждёт журнала — правка не теряется
     // сообщение не загружено — правится только превью последнего

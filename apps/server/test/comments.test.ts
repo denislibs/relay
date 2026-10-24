@@ -110,7 +110,7 @@ test('edit, delete, link preview and checklist of the post reach the copy with g
   expect((await chatEventsOf(g, 'todoUpdated')).at(-1)).toMatchObject({ chatId: g, id: tcopy, todo: { completions: [{ id: 1, by: 0 }] } });
 
   await deleteMessage(a.userId, ch, p.id);
-  expect((await history(b, g)).find((m) => m.id === copyId)).toMatchObject({ deleted: true, body: '' });
+  expect((await history(b, g)).some((m) => m.id === copyId)).toBe(false);   // из ленты группы копия пропадает
   expect((await chatEventsOf(g, 'messageDeleted')).at(-1)).toEqual({ type: 'messageDeleted', chatId: g, id: copyId });
 });
 
@@ -259,10 +259,12 @@ test('relinking hides replies of the old threads; post deleted → copy deleted,
   const p2 = await send(a, ch, 'второй');
   const copy2 = (await copyOf(ch, p2.id))!;
   expect((await history(b, g2)).some((m) => m.id === copy2)).toBe(true);
+  const c2 = await comment(b, g2, copy2, 'к удалённому');
   await deleteMessage(a.userId, ch, p2.id);
-  expect((await history(b, g2)).find((m) => m.id === copy2)).toMatchObject({ deleted: true });
+  expect((await history(b, g2)).some((m) => m.id === copy2)).toBe(false);   // лента группы — без копии
   const t = await ok(b, 'GET', `/chats/${g2}/threads/${copy2}/messages`);
-  expect(t.header).toMatchObject({ id: copy2, deleted: true, body: '' });
+  expect(t.header).toMatchObject({ id: copy2, deleted: true, body: '' });   // тред — с шапкой «Пост удалён»
+  expect(t.messages.map((m: { id: number }) => m.id)).toEqual([c2.id]);      // и комментариями
   await expect(comment(b, g2, copy2)).rejects.toMatchObject({ code: 'not_found' });   // в удалённый — нельзя
 });
 

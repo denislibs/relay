@@ -1,5 +1,6 @@
 import { expect, test } from 'bun:test';
 import { openDb } from '../src/idb';
+import { computeQuery } from '../src/queries';
 import { Store } from '../src/store';
 import { msg } from './fixtures';
 
@@ -122,7 +123,7 @@ test('contacts and the block list survive a restart; removals are deleted from t
   expect([...again.blocks.table.rows.keys()]).toEqual([3]);
 });
 
-test('a deleted message keeps no content in memory or IndexedDB (loaded and unloaded paths); its quote is a deleted stub, tabs go', async () => {
+test('a deleted message vanishes from memory and IndexedDB with its terms (loaded and unloaded paths); its quote is a deleted stub', async () => {
   const name = 'store-' + crypto.randomUUID();
   const db = await openDb(name);
   const s = await Store.open(db, ME);
@@ -151,25 +152,34 @@ test('a deleted message keeps no content in memory or IndexedDB (loaded and unlo
   const rows = async () => new Promise<Record<string, unknown>[]>((res) => { const r = db.transaction('messages').objectStore('messages').getAll(); r.onsuccess = () => res(r.result); });
   const terms = async () => new Promise<{ term: string; sort: number }[]>((res) => { const r = db.transaction('terms').objectStore('terms').getAll(); r.onsuccess = () => res(r.result); });
 
-  // загруженное: в памяти и после записи
+  // загруженное: из памяти сразу, из IDB — с записью
   s.applyUpdate({ type: 'messageDeleted', chatId: 7, id: 10 });
-  check(s.messageById(7, 10) as never);
-  // цитата остаётся — «Сообщение удалено», без текста и вложения
+  expect(s.messageById(7, 10)).toBeUndefined();
+  const feed = computeQuery(s, { kind: 'messages', chatId: 7, limit: 50 });
+  expect(feed.order.filter((k) => k !== '~window').map((k) => feed.items.get(k)!.id)).toEqual([11, 12]);
+  // цитата остаётся — «Удалённое сообщение», без текста и вложения
   expect(s.quoteFor(7, 10)).toMatchObject({ id: 10, deleted: true, body: '', attachment: null, todo: null, article: false });
   expect(s.quoteFor(7, 10)!.entities).toBeUndefined();
   expect(JSON.stringify(s.quoteFor(7, 10))).not.toContain('тайна');
   await s.flush();
-  check((await rows()).find((r) => r.id === 10));
+  expect((await rows()).find((r) => r.id === 10)).toBeUndefined();
   expect((await terms()).some((t) => t.sort === 10)).toBe(false);
 
-  // незагруженное: правка строки в IDB
+  // незагруженное: строка в IDB стирается при записи
   const cold = await Store.open(db, ME);
   cold.applyUpdate({ type: 'messageDeleted', chatId: 7, id: 11 });
   await cold.flush();
-  check((await rows()).find((r) => r.id === 11));
+  expect((await rows()).find((r) => r.id === 11)).toBeUndefined();
   expect((await terms()).some((t) => t.sort === 11)).toBe(false);
   await cold.loadChatMessages(7);
-  check(cold.messageById(7, 11) as never);
+  expect(cold.messageById(7, 11)).toBeUndefined();
+  // незагруженное, удалённое до чтения из IDB (запись ещё не прошла): чтение его не воскрешает
+  const cold2 = await Store.open(db, ME);
+  cold2.applyUpdate({ type: 'messageDeleted', chatId: 7, id: 12 });
+  await cold2.loadChatMessages(7);
+  expect(cold2.messageById(7, 12)).toBeUndefined();
+  await cold2.flush();
+  expect((await rows()).map((r) => r.id)).toEqual([]);
 
   // удалённое, пришедшее с сервера (страница истории) — тоже без содержимого
   cold.applyHistory(7, [{ ...rich(5), deleted: true, attachment: null } as never], true, 10);

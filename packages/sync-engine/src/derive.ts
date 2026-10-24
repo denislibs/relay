@@ -1,6 +1,6 @@
 import { isVideoMedia, mediaTabs, type MediaTab, type Message } from '@relay/protocol';
 import type { Store } from './store';
-import type { LocalChat, LocalMessage } from './types';
+import { PENDING_BASE, type LocalChat, type LocalMessage } from './types';
 
 /*
  * Поля чата, производные из сообщений (last, lastAt, unread), пересчитываются только здесь: хранилище сообщает,
@@ -10,19 +10,19 @@ import type { LocalChat, LocalMessage } from './types';
 /**
  * Сообщение чата добавлено, изменено или удалено (m — уже новое состояние; при отмене неотправленного — убранное;
  * prev — прежнее, если было известно).
- * Новое или правка последнего — становится last; удалили последнее — last и lastAt = предыдущего не удалённого
- * из памяти (чат опускается к дате нового верхнего сообщения, как в Telegram); не удалённых нет — lastAt прежний.
+ * Новое или правка последнего — становится last (удалённое — никогда: пометка копии поста в превью не попадает);
+ * удалили последнее — last и lastAt = предыдущего не удалённого из памяти (чат опускается к дате нового верхнего
+ * сообщения, как в Telegram); в памяти его нет — last пуст, lastAt прежний, строку чата спросим у сервера (wantRow).
  */
 export function onMessage(store: Store, chat: LocalChat, m: LocalMessage, kind: 'added' | 'edited' | 'deleted', prev?: LocalMessage): void {
   countMedia(chat, m, prev);
   const last = chat.last;
   if (kind === 'deleted') {
     if (last?.key === m.key) {
-      recomputeLast(store, chat);
-      // в памяти ничего нет (чат не загружен) — остаётся удалённое: в превью «Сообщение удалено»
-      if (!chat.last && m.deleted) chat.last = m;
+      recomputeLast(store, chat, m.sort);
+      if (!chat.last) store.wantRow(chat.id);
     }
-  } else if (!last || last.key === m.key || m.sort >= last.sort) {
+  } else if (!m.deleted && (!last || last.deleted || last.key === m.key || m.sort >= last.sort)) {   // last.deleted — пометка из старого кэша
     chat.last = m;
     if (m.createdAt > chat.lastAt) chat.lastAt = m.createdAt;
   }
@@ -30,14 +30,24 @@ export function onMessage(store: Store, chat: LocalChat, m: LocalMessage, kind: 
 }
 
 /**
- * last — самое позднее не удалённое из сообщений в памяти, lastAt — его время; все удалены — last самое позднее,
- * нет ни одного — null, lastAt в обоих случаях не трогаем. Черновик по-прежнему может поднять чат (sortAt).
+ * last — самое позднее не удалённое из сообщений в памяти, lastAt — его время; таких нет — null, lastAt не трогаем.
+ * Черновик по-прежнему может поднять чат (sortAt). gone — sort удалённого последнего: предыдущее берём, только если
+ * оно с ним в одном отрезке истории (подряд). За дырой или вне ленты (исходник цитаты, страница вкладки) — не
+ * доказано, что между ними ничего нет: last пуст, строку спросят у сервера.
  */
-export function recomputeLast(store: Store, chat: LocalChat): void {
+/** a и b (a < b) в одном отрезке ленты чата или треда — между ними всё известно. */
+function sameRange(chat: LocalChat, a: number, b: number): boolean {
+  const has = (rs: readonly [number, number][]) => rs.some((r) => r[0] <= a && b <= r[1]);
+  return has(chat.ranges) || Object.values(chat.threads ?? {}).some((t) => has(t.ranges));
+}
+
+export function recomputeLast(store: Store, chat: LocalChat, gone?: number): void {
   const all = store.chatMessages(chat.id);
-  let last: LocalMessage | null = all.length ? all[all.length - 1] : null;
+  let last: LocalMessage | null = null;
   for (let i = all.length - 1; i >= 0; i--) {
     if (all[i].deleted) continue;
+    const s = all[i].sort;
+    if (gone != null && s < PENDING_BASE && !sameRange(chat, s, gone)) break;
     last = all[i];
     chat.lastAt = last.createdAt;
     break;

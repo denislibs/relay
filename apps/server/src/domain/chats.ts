@@ -298,7 +298,7 @@ export async function countChats(userId: number): Promise<number> {
      where cm.user_id = ${userId} and not cm.archived   -- архив — не в «Все»
        and c.deleted_at is null
        and not (c.kind = 'direct' and cm.history_from > 0
-                and not exists (select 1 from messages m where m.chat_id = c.id and m.id >= cm.history_from))`;
+                and not exists (select 1 from messages m where m.chat_id = c.id and m.id >= cm.history_from and not m.deleted))`;
   return r.n as number;
 }
 
@@ -315,7 +315,7 @@ export async function listChats(userId: number, opts: ListOpts = {}): Promise<Ch
            lm.body as m_body, lm.kind as m_kind, lm.attachment as m_attachment, lm.reply_to_id as m_reply_to_id, lm.created_at as m_created_at, lm.edited_at as m_edited_at, lm.deleted as m_deleted, lm.entities as m_entities, lm.service_type as m_service_type, lm.service_data as m_service_data, lm.todo as m_todo, lm.fwd_from as m_fwd_from, lm.buttons as m_buttons, lm.sticker as m_sticker, lm.content as m_content, lm.post as m_post, lm.post_author as m_post_author, lm.thread_id as m_thread_id, lm.origin as m_origin,
            case when lm.post and lm.service_type is null then coalesce((select v.views from message_views v where v.chat_id = lm.chat_id and v.message_id = lm.id), 0) end as m_views,
            (select count(*) from messages m
-             where m.chat_id = c.id and m.id > cm.last_read_id and m.id >= cm.history_from and m.sender_id <> ${userId})::int as unread,
+             where m.chat_id = c.id and m.id > cm.last_read_id and m.id >= cm.history_from and m.sender_id <> ${userId} and not m.deleted)::int as unread,
            (select count(*) from message_mentions mm where mm.user_id = ${userId} and mm.chat_id = c.id)::int as unread_mentions,   -- префикс PK
            (select json_build_object('id', u.id, 'name', ${nameForSql(userId)}, 'system', u.system,   -- контактное имя — только владельцу
                     'photo', case when exists (select 1 from blocks b where b.owner_id = u.id and b.user_id = ${userId}) then null else u.photo end)
@@ -331,8 +331,9 @@ export async function listChats(userId: number, opts: ListOpts = {}): Promise<Ch
       from chat_members cm
       join chats c on c.id = cm.chat_id
       left join chat_seq cs on cs.chat_id = c.id
+      -- последнее — не удалённое (как в Telegram: удалённое исчезает, в превью — предыдущее)
       left join lateral (
-        select * from messages where chat_id = c.id and id >= cm.history_from order by id desc limit 1
+        select * from messages where chat_id = c.id and id >= cm.history_from and not deleted order by id desc limit 1
       ) lm on true
      where cm.user_id = ${userId}
        and c.deleted_at is null   -- удалённый (мягко) канал или группа: строки участников убирает chat.purge
@@ -340,7 +341,7 @@ export async function listChats(userId: number, opts: ListOpts = {}): Promise<Ch
        and not (c.kind = 'direct' and cm.history_from > 0 and lm.id is null)
        ${opts.before ? sql`and (date_trunc('milliseconds', coalesce(lm.created_at, c.created_at)), c.id) < (${opts.before.at}::timestamptz, ${opts.before.id})` : sql``}
        ${opts.ids ? sql`and c.id = any(${opts.ids}::bigint[])` : sql``}
-       ${opts.unreadOnly ? sql`and (cm.unread_mark or exists (select 1 from messages m where m.chat_id = c.id and m.id > cm.last_read_id and m.sender_id <> ${userId}))` : sql``}
+       ${opts.unreadOnly ? sql`and (cm.unread_mark or exists (select 1 from messages m where m.chat_id = c.id and m.id > cm.last_read_id and m.sender_id <> ${userId} and not m.deleted))` : sql``}
        ${opts.pinnedOnly ? sql`and cm.pinned_at is not null` : sql``}
        ${opts.archivedOnly ? sql`and cm.archived` : sql``}
      order by date_trunc('milliseconds', coalesce(lm.created_at, c.created_at)) desc, c.id desc
@@ -383,7 +384,6 @@ export async function listChats(userId: number, opts: ListOpts = {}): Promise<Ch
   return list;
 }
 
-/** Конкретные сообщения чата по id (исходники цитат, которых нет в загруженной истории). */
 /** Условие вкладки «Общих медиа» (как в Telegram): видео, присланное файлом, — тоже медиа; ссылки — по тексту и сущностям. */
 export function tabWhere(tab: MediaTab) {
   switch (tab) {
@@ -448,22 +448,25 @@ export async function messageAtDate(userId: number, chatId: number, from: string
   if (Number.isNaN(at.getTime())) throw new DomainError('bad_frame', 'from');
   await canRead(sql, chatId, userId);   // публичный канал — и не участнику (превью)
   const visible = await historyFrom(chatId, userId);
-  const [first] = await sql`select id from messages where chat_id = ${chatId} and id >= ${visible} and created_at >= ${at} order by created_at, id limit 1`;
+  const [first] = await sql`select id from messages where chat_id = ${chatId} and id >= ${visible} and created_at >= ${at} and not deleted order by created_at, id limit 1`;
   if (first) return { id: Number(first.id) };
-  const [last] = await sql`select id from messages where chat_id = ${chatId} order by id desc limit 1`;
+  const [last] = await sql`select id from messages where chat_id = ${chatId} and id >= ${visible} and not deleted order by id desc limit 1`;
   return { id: last ? Number(last.id) : null };
 }
 
+/** Конкретные сообщения чата по id (исходники цитат, которых нет в загруженной истории). Удалённого нет — цитата
+ *  у клиента «Удалённое сообщение». */
 export async function getMessagesByIds(userId: number, chatId: number, ids: number[]): Promise<Message[]> {
   await canRead(sql, chatId, userId);   // публичный канал — и не участнику (превью)
   if (!ids.length) return [];
-  const rows = await sql`select * from messages where chat_id = ${chatId} and id = any(${ids}::bigint[]) and id >= ${await historyFrom(chatId, userId)} order by id`;
+  const rows = await sql`select * from messages where chat_id = ${chatId} and id = any(${ids}::bigint[]) and id >= ${await historyFrom(chatId, userId)} and not deleted order by id`;
   return withAllReactions((await openRows(rows)).map(toMessage), userId);
 }
 
 /**
  * Страница истории по возрастанию id: before — старее него (с конца), after — новее него (с after вверх; клиент
- * догружает дыру между отрезками своей истории). hasMore — за страницей в ту же сторону есть ещё.
+ * догружает дыру между отрезками своей истории). hasMore — за страницей в ту же сторону есть ещё. Удалённых в
+ * истории нет (как в Telegram): на их месте в отрезке клиента просто нет id.
  */
 export async function getHistory(userId: number, chatId: number, before: number | null, limit: number, after: number | null = null): Promise<{ messages: Message[]; hasMore: boolean }> {
   await canRead(sql, chatId, userId);   // публичный канал — и не участнику (превью)
@@ -471,14 +474,14 @@ export async function getHistory(userId: number, chatId: number, before: number 
   if (after != null) {
     const up = await sql`
       select * from messages
-       where chat_id = ${chatId} and id > ${after} and id >= ${await historyFrom(chatId, userId)}
+       where chat_id = ${chatId} and id > ${after} and id >= ${await historyFrom(chatId, userId)} and not deleted
        order by id
        limit ${take + 1}`;
     return { messages: await withAllReactions((await openRows(up.slice(0, take))).map(toMessage), userId), hasMore: up.length > take };
   }
   const rows = await sql`
     select * from messages
-     where chat_id = ${chatId} and (${before}::bigint is null or id < ${before}) and id >= ${await historyFrom(chatId, userId)}
+     where chat_id = ${chatId} and (${before}::bigint is null or id < ${before}) and id >= ${await historyFrom(chatId, userId)} and not deleted
      order by id desc
      limit ${take + 1}`;
   const hasMore = rows.length > take;

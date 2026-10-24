@@ -495,6 +495,7 @@ export function Feed({ frameKey, active, chatId, threadId, channel = false, meId
   const partial = limit != null && messages.length > limit;
   const initial = useRef<Set<string> | null>(null);
   if (initial.current === null && messages.length) initial.current = new Set(messages.map((m) => m.key));
+  const shownKeys = useRef<Set<string> | null>(null);   // ключи прошлого окна: что из него пропало (удалили сообщение)
 
   /** Сдвиг окна: сначала замер якоря, потом — запрос нового окна. */
   // направление последней прокрутки пользователя: окно двигаем только туда, куда листают. Иначе на коротких
@@ -518,6 +519,8 @@ export function Feed({ frameKey, active, chatId, threadId, channel = false, meId
   useLayoutEffect(() => {
     const root = el.current;
     if (!root || !messages.length) return;
+    const before = shownKeys.current, keys = new Set(messages.map((m) => m.key as string));
+    shownKeys.current = keys;
     if (!placed.current) {
       placed.current = true;
       // первый кадр чата — до отрисовки (осознанное исключение): сохранённая позиция → непрочитанное → низ
@@ -538,7 +541,20 @@ export function Feed({ frameKey, active, chatId, threadId, channel = false, meId
       return;
     }
     const a = anchor.current, down = toBottom.current;
-    if (!a && !down && !stick.current) return;
+    if (!a && !down && !stick.current) {
+      // сообщение удалили (пропало из окна без его сдвига): что было вверху видимой части, там и остаётся — удалённое
+      // выше экрана не дёргает ленту, удалённое на экране просто уходит, и нижние поднимаются на его место
+      const va = viewAnchor.current;
+      if (!va || !before || ![...before].some((k) => !keys.has(k))) return;
+      forceMeasure(() => {   // одно чтение и одна запись до отрисовки — иначе кадр со сдвинутой лентой
+        const row = anchorEl(root, va.key);
+        if (!row) return;   // удалили саму верхнюю строку — держится та, что над ней
+        const top = root.scrollTop, max = root.scrollHeight - root.clientHeight;
+        const next = Math.max(0, Math.min(max, top + (row.getBoundingClientRect().top - root.getBoundingClientRect().top) - va.top));
+        if (Math.abs(next - top) > 0.5) { programmatic.current++; root.scrollTop = next; }
+      });
+      return;
+    }
     // как «forced reflow» в Telegram: поправить прокрутку в том же коммите, до отрисовки — иначе
     // браузер успеет показать кадр со сдвинутым контентом. Одно чтение и одна запись (осознанное исключение)
     forceMeasure(() => {
@@ -1029,10 +1045,19 @@ export function Feed({ frameKey, active, chatId, threadId, channel = false, meId
     );
     run = null;
   };
+  // тред: под шапкой (копией поста) — начало обсуждения; комментариев нет — так и сказать (после загрузки, без мигания)
+  const threadStart = () => {
+    const empty = shown.length === 1 && threadHead!.loaded && !meta?.hasOlder;
+    out.push(<div class="rl-action app-thread-start" key="thread-start" role="separator"><span>{empty ? 'Здесь пока нет комментариев' : 'Начало обсуждения'}</span></div>);
+    prevSender = null;
+  };
   let joinedShown = false;
   const joinedLine = () => { joinedShown = true; flushRun(); out.push(<div class="rl-action app-joined" key="joined" role="note"><span>Вы подписались на канал</span></div>); };
   shown.forEach((m, i) => {
     if (inAlbum.has(m.key)) return;   // уже нарисовано в альбоме выше
+    // удалённых в ленте нет (как в Telegram); остаётся только шапка треда удалённого поста — без пузыря: «Пост удалён»
+    // написано на плашке над тредом (ThreadBar)
+    if (m.deleted) { if (threadId != null && m.key === threadHead?.header) { flushRun(); threadStart(); } return; }
     if (joinedAfter != null && !joinedShown && typeof m.id === 'number' && m.id > joinedAfter) { joinedLine(); prevSender = null; }
     const day = dayKey(m.createdAt as string);
     const post = isPosted(m);
@@ -1102,7 +1127,7 @@ export function Feed({ frameKey, active, chatId, threadId, channel = false, meId
         start={start}
         end={end}
         quoted={quoted}
-        quoteAuthor={quoted ? (quoted.senderId === meId ? 'Вы' : group ? people[quoted.senderId as number]?.name ?? '' : peerName) : undefined}
+        quoteAuthor={quoted && !quoted.deleted ? (quoted.senderId === meId ? 'Вы' : group ? people[quoted.senderId as number]?.name ?? '' : peerName) : undefined}
         quoteTone={quoted ? (quoted.senderId === meId ? 'accent' : peerTone(quoted.senderId as number)) : undefined}
         appear={initial.current !== null && !initial.current.has(m.key)}
         flash={flashKey === m.key || !!album?.some((x) => x.key === flashKey)}
@@ -1119,12 +1144,7 @@ export function Feed({ frameKey, active, chatId, threadId, channel = false, meId
       out.push(row);
     }
     prevDay = day; prevSender = sender;
-    // тред: под шапкой (копией поста) — начало обсуждения; комментариев нет — так и сказать (после загрузки, без мигания)
-    if (threadId != null && m.key === threadHead?.header) {
-      const empty = shown.length === 1 && threadHead.loaded && !meta?.hasOlder;
-      out.push(<div class="rl-action app-thread-start" key="thread-start" role="separator"><span>{empty ? 'Здесь пока нет комментариев' : 'Начало обсуждения'}</span></div>);
-      prevSender = null;
-    }
+    if (threadId != null && m.key === threadHead?.header) threadStart();
   });
   flushRun();
   if (joinedAfter != null && !joinedShown && shown.length && !meta?.hasNewer) joinedLine();   // новых постов ещё нет — строка внизу
