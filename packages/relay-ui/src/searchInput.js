@@ -19,7 +19,6 @@ export function searchKeyAction(key, value) {
   return value ? 'clear' : 'blur';
 }
 
-var SPIN_PATH = 'M9 2a7 7 0 1 1-7 7';
 
 export function SearchInput(props) {
   var input = useRef(null);
@@ -76,7 +75,7 @@ export function SearchInput(props) {
     : h('span', { class: 'rl-search-icon', 'aria-hidden': 'true', style: { width: iconSize, height: iconSize } },
         h(Icon, { name: 'search', size: iconSize }),
         h('svg', { class: 'rl-search-spin', width: iconSize, height: iconSize, viewBox: '0 0 18 18', fill: 'none' },
-          h('path', { d: SPIN_PATH, stroke: 'currentColor', 'stroke-width': 1.8, 'stroke-linecap': 'round' })));
+          h('circle', { cx: 9, cy: 9, r: 7, pathLength: 100, stroke: 'currentColor', 'stroke-width': 1.8, 'stroke-linecap': 'round' })));
 
   var placeholder = props.status || (props.placeholder != null ? props.placeholder : 'Поиск');
 
