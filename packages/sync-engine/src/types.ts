@@ -189,6 +189,7 @@ export type Action =
   | { type: 'featuredStickerSets'; offset?: number }
   | { type: 'searchStickerSets'; q: string }
   | { type: 'stickersByEmoji'; emoji: string }
+  | { type: 'greetingSticker' }   // стикер-приветствие для пустого личного чата (случайный; без сети — null)
   /** управление группой и вступление по ссылке: HTTP мимо очереди ({ok, data} | {ok:false, code}) */
   | { type: 'group'; method: 'GET' | 'POST' | 'PUT' | 'PATCH' | 'DELETE'; path: string; body?: unknown }
   | { type: 'sendMessage'; chatId: number; body: string; entities?: Entity[]; replyToId?: number | null; noLinkPreview?: boolean; link?: LinkPreview | null; attachment?: LocalAttachment | null; blocks?: Block[] | null; threadId?: number }   // threadId — комментарий в треде; blocks — «статья»; attachment — уже загруженный файл (id), например трек из музыки профиля

@@ -53,6 +53,7 @@ import { attachmentHit } from '../searchHit';
 import type { ProfilePhoto } from '@relay/protocol';
 import { avatarPhoto } from '../profilePhoto';
 import { openStickersPanel, sendStickerHere, setStickerTarget } from '../stickers';
+import { greetingChat } from '../greeting';
 import { SymbolMenu } from './stickers/SymbolMenu';
 import { cancelForwardDraft, endSelect, forwardElsewhere, patchForwardDraft, sendForwardDraft, startForward, startSelect } from '../forward';
 
@@ -383,6 +384,8 @@ export function Chat({ chatId, frameKey, active, threadId }: { chatId: number; f
   const iBlocked = useGlobal((s) => chat?.kind === 'direct' && chat.peerId != null && s.blocked.some((b) => b.userId === chat.peerId));
   const peerUser = useUser(chat?.kind === 'direct' ? (chat.peerId as number | null) : null);
   const theyBlocked = !!peerUser?.blocksMe;
+  // пустой личный чат встречает карточка-приветствие со стикером (писать туда должно быть можно)
+  const greeting = greetingChat(chat, me.userId, { thread, blocked: iBlocked || theyBlocked });
   // группа: мои права участника (у админов — все), медленный режим, запрет копирования
   const gMe = community ? (chat?.me as MyMembership | null) ?? null : null;
   const gInfo = community ? (chat?.group as GroupInfo | null) ?? null : null;
@@ -585,7 +588,7 @@ export function Chat({ chatId, frameKey, active, threadId }: { chatId: number; f
         ) : null}
       </GlassBar>
       <MediaPolicy.Provider value={policy}>
-        <Feed frameKey={frameKey} active={active} chatId={chatId} threadId={threadId} channel={channel} meId={me.userId} peerName={title} chatPhoto={chat?.photo as ProfilePhoto | null} group={chat?.kind === 'group' || !!guest} onAuthor={openUserChat} stick={stick} highlight={found?.q} onMenu={(key, x, y, extra) => setMenu({ key, x, y, extra })} />
+        <Feed frameKey={frameKey} active={active} chatId={chatId} threadId={threadId} channel={channel} meId={me.userId} peerName={title} chatPhoto={chat?.photo as ProfilePhoto | null} group={chat?.kind === 'group' || !!guest} onAuthor={openUserChat} stick={stick} greeting={greeting} highlight={found?.q} onMenu={(key, x, y, extra) => setMenu({ key, x, y, extra })} />
       </MediaPolicy.Provider>
       {plate === 'channel' ? <ChannelBar chatId={chatId} member={!!gMe} username={gInfo?.username ?? null} approval={!!gInfo?.joinApproval} requested={!!chat?.requested} />
       : plate === 'join' && guest ? <GuestJoinBar chatId={chatId} guest={guest} />

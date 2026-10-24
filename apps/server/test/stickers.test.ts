@@ -3,7 +3,7 @@ import { mkdirSync, rmSync, writeFileSync } from 'node:fs';
 import { sql } from '../src/db';
 import { createServer } from '../src/http';
 import { sendMessage } from '../src/domain/messages';
-import { clearRecent, myStickers, searchSets, setFaved, setInstalled, stickersByEmoji, getStickerSet } from '../src/domain/stickers';
+import { clearRecent, greetingSticker, myStickers, searchSets, setFaved, setInstalled, stickersByEmoji, getStickerSet } from '../src/domain/stickers';
 import { importStickers, webpSize } from '../src/stickers/import';
 import { makeChat, makeUser, resetDb } from './helpers';
 
@@ -162,4 +162,23 @@ test('HTTP: sets, featured, search, mine, install, faved, recent; session requir
   const byEmoji = await (await fetch(`${base}/stickers-by-emoji?e=${encodeURIComponent('👍')}`, as())).json() as unknown[];
   expect(byEmoji.length).toBeGreaterThan(0);
   expect((await fetch(`${base}/my-stickers/recent`, as({ method: 'DELETE' }))).status).toBe(200);
+});
+
+test('greeting sticker: random among greeting emoji, any sticker without them, 404 without packs', async () => {
+  const picks = await Promise.all(Array.from({ length: 30 }, () => greetingSticker()));
+  expect(picks.every((s) => s?.emoji === '👍')).toBe(true);           // в фикстуре из приветственных — только 👍
+  expect(new Set(picks.map((s) => s!.id)).size).toBeGreaterThan(1);    // случайный, а не всегда первый
+  await sql`update stickers set emoji = '🦆' where emoji = '👍'`;
+  expect(['😂', '❤️', '🦆', '😺']).toContain((await greetingSticker())!.emoji);   // приветственных нет — любой
+
+  const { token } = (await (await fetch(`${base}/dev/login`, { method: 'POST', body: JSON.stringify({ name: 'Анна' }) })).json()) as { token: string };
+  const as = { headers: { cookie: `relay_session=${token}` } };
+  expect((await fetch(`${base}/stickers/greeting`)).status).toBe(401);
+  const res = await fetch(`${base}/stickers/greeting`, as);
+  expect(res.status).toBe(200);
+  expect(res.headers.get('cache-control')).toBe('no-store');
+  expect((await res.json()) as object).toMatchObject({ url: expect.stringMatching(/^\/stk\//), format: expect.any(String) });
+  await sql`truncate sticker_sets restart identity cascade`;
+  expect(await greetingSticker()).toBeNull();
+  expect((await fetch(`${base}/stickers/greeting`, as)).status).toBe(404);
 });

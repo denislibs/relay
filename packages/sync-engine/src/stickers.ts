@@ -7,7 +7,7 @@ import type { Action } from './types';
 import { req } from './idb';
 import type { OpSpec } from './ops';
 
-export type StickersAction = Extract<Action, { type: 'myStickers' | 'stickerSet' | 'installStickerSet' | 'faveSticker' | 'clearRecentStickers' | 'featuredStickerSets' | 'searchStickerSets' | 'stickersByEmoji' }>;
+export type StickersAction = Extract<Action, { type: 'myStickers' | 'stickerSet' | 'installStickerSet' | 'faveSticker' | 'clearRecentStickers' | 'featuredStickerSets' | 'searchStickerSets' | 'stickersByEmoji' | 'greetingSticker' }>;
 
 export interface StickersHost {
   db: IDBDatabase;
@@ -114,6 +114,10 @@ export class Stickers {
         if (!this.h.online()) return local();
         return this.h.http<StickerRef[]>(`/stickers-by-emoji?e=${encodeURIComponent(a.emoji)}`).catch(local);
       }
+      case 'greetingSticker':
+        // каждый раз новый случайный: запоминает выбранный интерфейс (на время открытого чата)
+        if (!this.h.online()) return null;
+        return this.h.http<StickerRef>('/stickers/greeting').catch(() => null);
     }
   }
 

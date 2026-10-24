@@ -20,7 +20,35 @@ export const stickersByEmoji = (emoji: string) => call({ type: 'stickersByEmoji'
 export const installSet = (setId: number, on: boolean, info?: StickerSetInfo) => call({ type: 'installStickerSet', setId, on, ...(info ? { info } : {}) });
 export const faveSticker = (s: StickerRef, on: boolean) => call({ type: 'faveSticker', id: s.id, on, sticker: s });
 export const clearRecentStickers = (id?: number) => call({ type: 'clearRecentStickers', ...(id != null ? { id } : {}) });
+export const greetingSticker = () => call({ type: 'greetingSticker' }) as Promise<StickerRef | null>;
 export const sendSticker = (chatId: number, sticker: StickerRef, replyToId?: number | null, threadId?: number) => call({ type: 'sendSticker', chatId, sticker, replyToId: replyToId ?? null, ...(threadId != null ? { threadId } : {}) });
+
+/*
+ * Стикер-приветствие пустого личного чата: случайный, но один на открытие чата (кадр стека) — перерисовки и
+ * возврат в припаркованный кадр его не меняют, новое открытие берёт новый. Держим несколько последних кадров.
+ */
+const greetings = new Map<string, Promise<StickerRef | null>>();
+const GREETING_WAIT = 1000;   // дольше стикер не ждём: карточка показывается без него (и уже не дорастает)
+/** undefined — ещё выбираем (карточку не показывать), null — без стикера. */
+export function useGreetingSticker(frameKey: string, want: boolean): StickerRef | null | undefined {
+  const [got, setGot] = useState<{ key: string; sticker: StickerRef | null } | null>(null);
+  const known = got?.key === frameKey;
+  useEffect(() => {
+    if (!want || known) return;
+    let p = greetings.get(frameKey);
+    if (!p) {
+      p = greetingSticker().catch(() => null);
+      greetings.set(frameKey, p);
+      if (greetings.size > 8) greetings.delete(greetings.keys().next().value!);
+    }
+    let live = true;
+    const done = (sticker: StickerRef | null) => { if (live) { live = false; setGot({ key: frameKey, sticker }); } };
+    const t = setTimeout(() => done(null), GREETING_WAIT);
+    void p.then((s) => { if (!s) greetings.delete(frameKey); done(s); });   // без сети — попробуем при следующем показе
+    return () => { live = false; clearTimeout(t); };
+  }, [frameKey, want, known]);
+  return known ? got!.sticker : undefined;
+}
 
 /** Мои стикеры, свежие: перечитываются, когда движок поднимает stickersRev (журнал, переподключение, свои действия). */
 export function useMyStickers(): MyStickers {
