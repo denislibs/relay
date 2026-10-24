@@ -59,9 +59,9 @@ export function Comments({ m }: { m: Item }) {
         {unread ? <i class="app-comments-dot" aria-hidden="true" /> : null}
         <Icon name="chevronRight" size={20} class="app-comments-chev" />
       </button>
-      <Modal open={ask} onClose={() => setAsk(false)} title="Вступите в группу, чтобы читать и писать" size="confirm" closeButton={false}
+      <Modal open={ask} onClose={() => setAsk(false)} title="Комментарии" size="confirm" closeButton={false}
         actions={[<button key="ok" type="button" class="rl-mdl-btn" onClick={() => setAsk(false)}>Понятно</button>]}>
-        <p class="rl-mdl-text">Комментарии к постам живут в группе обсуждения канала. Вступите в неё по ссылке из описания канала или попросите приглашение у администраторов.</p>
+        <p class="rl-mdl-text">Вступите в группу обсуждения, чтобы читать и писать комментарии. Ссылку на неё можно найти в описании канала или попросить у администраторов.</p>
       </Modal>
     </>
   );

@@ -247,6 +247,7 @@ const Row = memo(function Row({ post, pinned, chatId, voiceTitle, author, onAuth
           progress={m.progress as number}
           onCancel={m.id == null && out ? () => discardUnsent(m.key as string) : undefined}
           onRetry={() => retrySend(m.key as string)}
+          metaBefore={metaBefore} footer={footer}
           time={clock(m.createdAt as string)} status={out ? m.status : undefined}
         />
         {mark}

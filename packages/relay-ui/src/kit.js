@@ -1191,7 +1191,8 @@ function FileBubble(props) {
               h('b', { key: 'ext', class: 'rl-file-face' }, label))
           : h('span', { class: 'rl-file-icon', 'data-ext': ext, 'data-kind': fileKind(ext) }, h('b', { key: 'ext', class: 'rl-file-face' }, label)),
         h('span', { class: 'rl-file-text' }, h('span', { class: 'rl-file-name' }, props.name), h('span', { class: 'rl-file-sub' }, props.meta))),
-      h('div', { class: 'rl-file-foot' }, h('span', { class: 'rl-bubble-meta' }, props.time, out ? h(MessageStatus, { status: props.status || 'read' }) : null))));
+      h('div', { class: 'rl-file-foot' }, h('span', { class: 'rl-bubble-meta' }, props.metaBefore ? props.metaBefore() : null, props.time, out ? h(MessageStatus, { status: props.status || 'read' }) : null)),
+      props.footer ? h('div', { class: 'rl-bubble-footer' }, props.footer) : null));
 }
 
 /* ---------- MediaThumb: gallery tile (info panel, media tab) ---------- */

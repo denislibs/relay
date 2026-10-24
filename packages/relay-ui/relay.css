@@ -2359,3 +2359,4 @@ html[data-anim="0"] .rl-symbols-pop { transition: none; }
 .rl-bubble-has-footer > .rl-bubble-meta { bottom: 46px; }
 .rl-bubble-footer > * { min-height: 40px; }
 .rl-media .rl-media-caption + .rl-bubble-footer, .rl-media .rl-media-frame + .rl-bubble-footer { border-top: 1px solid var(--line); }
+.rl-file .rl-bubble-footer { margin-top: 4px; }
