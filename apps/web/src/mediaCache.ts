@@ -53,13 +53,13 @@ export function deviceStore(): AttachmentStore {
 const withTimeout = <T>(p: Promise<T>, ms = OP_MS): Promise<T> =>
   Promise.race([p, new Promise<T>((_, rej) => setTimeout(() => rej(new Error('cache timeout')), ms))]);
 
-/** Ключ файла в кэше: путь без параметров. fileId — «<uuid>», копия видео — «<uuid>/preview», «<uuid>/720»,
+/** Ключ файла в кэше: путь без параметров. fileId — «<uuid>», копия — «<uuid>/preview», «<uuid>/720», «<uuid>/medium»,
  *  кусок начала видео — «…@<смещение>». */
 export const attachmentKey = (fileId: string): string => `/files/${fileId}`;
-/** Адрес вложения, который просит страница: оригинал или копия видео. */
-const FILE_PATH = /^\/files\/([0-9a-f-]{36}(?:\/(?:preview|720))?)$/;
+/** Адрес вложения, который просит страница: оригинал или копия (видео, фото). */
+const FILE_PATH = /^\/files\/([0-9a-f-]{36}(?:\/(?:preview|720|medium))?)$/;
 /** Ключ в кэше: адрес вложения или кусок начала видео. */
-const KEY_PATH = /^\/files\/([0-9a-f-]{36}(?:\/(?:preview|720))?(?:@\d+)?)$/;
+const KEY_PATH = /^\/files\/([0-9a-f-]{36}(?:\/(?:preview|720|medium))?(?:@\d+)?)$/;
 const fileIdOf = (path: string): string | null => FILE_PATH.exec(path)?.[1] ?? null;
 const keyIdOf = (path: string): string | null => KEY_PATH.exec(path)?.[1] ?? null;
 
@@ -364,7 +364,7 @@ export async function migrateLegacyCaches(store: AttachmentStore, now = Date.now
 
 /* ---------- зашифрованные вложения (packages/protocol/src/fileCrypto.ts) ----------
    В хранилище — шифр; ключ файла знает клиент (из сообщения). SW расшифровывает: целый файл — для <img> и роликов,
-   куски — для Range плеера (перемотка). В кэш устройства кладётся открытый текст. Копия (preview, 720) — ключом,
+   куски — для Range плеера (перемотка). В кэш устройства кладётся открытый текст. Копия (preview, 720, medium) — ключом,
    выведенным из ключа файла. Ключа нет (публичный файл: аватар, музыка профиля) — файл открытый, как раньше. */
 
 const keyCache = new Map<string, Uint8Array | null>();   // «id файла» → сырой ключ; null — проверено: ключа нет

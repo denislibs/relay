@@ -1,5 +1,5 @@
 import { expect, test } from 'bun:test';
-import { gridCorners, scrollAt, tabCounter, tabLabel, tabScrollTarget, tileSrc, videoFrameSrc } from './mediaGrid';
+import { bubbleSrc, gridCorners, scrollAt, tabCounter, tabLabel, tabScrollTarget, tileSrc, videoFrameSrc } from './mediaGrid';
 
 const photo = { id: 'p1', kind: 'photo', mime: 'image/jpeg' };
 
@@ -7,6 +7,24 @@ test('photo tile: the small server preview when there is one, else the original'
   expect(tileSrc({ ...photo, preview: { name: 'preview', w: 480, h: 360, size: 30000 } })).toBe('/files/p1/preview');
   expect(tileSrc(photo)).toBe('/files/p1');
   expect(tileSrc({ ...photo, preview: null })).toBe('/files/p1');
+});
+
+test('bubble photo: the medium copy (800 px), else the preview of a big original, else the original; the viewer keeps the original', () => {
+  const preview = { name: 'preview', w: 480, h: 320, size: 30000 };
+  const medium = { name: 'medium', w: 800, h: 533, size: 90000 };
+  const big = { ...photo, w: 1600, h: 1067 };
+  expect(bubbleSrc({ ...big, preview, variants: [medium] })).toBe('/files/p1/medium');
+  // обработано до появления medium (ещё не дозаполнено) — превью вместо оригинала на сотни килобайт
+  expect(bubbleSrc({ ...big, preview })).toBe('/files/p1/preview');
+  expect(bubbleSrc({ ...big, preview, variants: [] })).toBe('/files/p1/preview');
+  // оригинал не больше 800 px — сам размером с medium: резче превью
+  expect(bubbleSrc({ ...photo, w: 800, h: 600, preview })).toBe('/files/p1');
+  expect(bubbleSrc({ ...photo, w: null, h: null, preview })).toBe('/files/p1');
+  // ещё не обработано — оригинал, как раньше
+  expect(bubbleSrc(big)).toBe('/files/p1');
+  expect(bubbleSrc({ ...big, preview: null })).toBe('/files/p1');
+  // видео в пузыре — оригинал (ролик ленты выбирает inlineUrl), копия 720 — не для пузыря
+  expect(bubbleSrc({ id: 'v1', kind: 'video', mime: 'video/mp4', w: 1280, h: 720, preview: { name: 'preview', w: 640, h: 360, size: 1 }, variants: [{ name: '720', w: 1280, h: 720, size: 1 }] })).toBe('/files/v1');
 });
 
 test('video tile frame: the short muted server preview when there is one, else the original; seeks past a black first frame', () => {

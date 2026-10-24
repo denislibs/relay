@@ -41,8 +41,9 @@ const ok = (bytes: number, type = 'image/png') => new Response(new Uint8Array(by
 describe('isMediaRequest', () => {
   test('only plain GETs of /files/<uuid> on our origin', () => {
     expect(isMediaRequest(req(), 'http://app')).toBe(true);
-    expect(isMediaRequest(req(ID + '/preview'), 'http://app')).toBe(true);   // копии видео — тоже через SW
+    expect(isMediaRequest(req(ID + '/preview'), 'http://app')).toBe(true);   // копии видео и фото — тоже через SW
     expect(isMediaRequest(req(ID + '/720'), 'http://app')).toBe(true);
+    expect(isMediaRequest(req(ID + '/medium'), 'http://app')).toBe(true);   // копия фото для пузыря
     expect(isMediaRequest(req(ID + '/1080'), 'http://app')).toBe(false);
     expect(isMediaRequest(req(ID + '?download=1'), 'http://app')).toBe(false);
     expect(isMediaRequest(req(ID, { headers: { range: 'bytes=0-1' } }), 'http://app')).toBe(false);

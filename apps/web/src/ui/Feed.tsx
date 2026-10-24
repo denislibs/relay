@@ -21,6 +21,7 @@ import { startForward, toggleSelect } from '../forward';
 import { FileMessage } from './FileMessage';
 import { isCached, keepOffline, offlineUrlNow, useKeptMedia, useOfflineUrl, warmCached } from '../downloads';
 import { getPrefs } from '../prefs';
+import { bubbleSrc } from '../mediaGrid';
 import { clock, dayKey, dayLabel, fileSize } from './format';
 
 /*
@@ -120,7 +121,7 @@ const Row = memo(function Row({ post, pinned, discussion, chatId, voiceTitle, au
           fwd={fwd} reply={replyQ}
           aside={aside}
           from={out ? 'out' : 'in'} tail={end} groupStart={start} appear={appear}
-          items={album.map((x) => { const a = x.attachment as Att; const local = localPreview(x.key); return { src: local ?? (a.id ? fileUrl(a) : undefined), inline: local ? undefined : inlineUrl(a), thumb: a.thumb, alt: a.name, w: a.w, h: a.h, mkey: x.key, skey: x.key, kind: a.kind === 'video' ? 'video' : 'image', duration: a.duration ?? 0, spoiler: !!a.spoiler,
+          items={album.map((x) => { const a = x.attachment as Att; const local = localPreview(x.key); return { src: local ?? (a.id ? bubbleSrc(a) : undefined), inline: local ? undefined : inlineUrl(a), thumb: a.thumb, alt: a.name, w: a.w, h: a.h, mkey: x.key, skey: x.key, kind: a.kind === 'video' ? 'video' : 'image', duration: a.duration ?? 0, spoiler: !!a.spoiler,
             sel: selIn !== undefined ? selIn.split(',').includes(x.key as string) : undefined }; })}
           state={busy ? 'loading' : 'ready'} progress={busy ? Math.min(...album.map((x) => (typeof x.progress === 'number' ? x.progress as number : 1))) : undefined}
           caption={cap ? <MessageText text={cap.body as string} entities={cap.entities as Entity[] | undefined} highlight={hl} /> : undefined}
@@ -136,7 +137,7 @@ const Row = memo(function Row({ post, pinned, discussion, chatId, voiceTitle, au
     // фото и видео знают размеры заранее: рамка нужной высоты сразу, размытое превью, полная картинка — лениво;
     // видео играет в ленте без звука (своё — прямо из файла, пока грузится), с процентом и × при отправке
     const local = localPreview(m.key);
-    const src = local ?? (att.id ? fileUrl(att) : undefined);
+    const src = local ?? (att.id ? bubbleSrc(att) : undefined);
     return (
       <div class={wrap('app-msg app-msg-media')} data-key={m.key} data-sort={m.sort as number}>
         {check}
