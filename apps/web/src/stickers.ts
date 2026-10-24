@@ -28,6 +28,18 @@ export const sendSticker = (chatId: number, sticker: StickerRef, replyToId?: num
  * возврат в припаркованный кадр его не меняют, новое открытие берёт новый. Держим несколько последних кадров.
  */
 const greetings = new Map<string, Promise<StickerRef | null>>();
+const GREET_KEY = 'relay.greetings';   // последние стикеры-приветствия: без сети карточка не ждёт, а берёт один из них
+function savedGreetings(): StickerRef[] { try { return JSON.parse(localStorage.getItem(GREET_KEY) ?? '[]') as StickerRef[]; } catch { return []; } }
+/** Новый случайный с сервера (и в запас); без сети — один из запомненных, если они есть. */
+async function askGreeting(): Promise<StickerRef | null> {
+  const s = await greetingSticker().catch(() => null);
+  const saved = savedGreetings();
+  if (s) {
+    try { localStorage.setItem(GREET_KEY, JSON.stringify([s, ...saved.filter((x) => x.id !== s.id)].slice(0, 8))); } catch { /* без хранилища — просто не запомним */ }
+    return s;
+  }
+  return saved.length ? saved[Math.floor(Math.random() * saved.length)] : null;
+}
 const GREETING_WAIT = 1000;   // дольше стикер не ждём: карточка показывается без него, а опоздавший раскрывается в ней
 /** undefined — ещё выбираем (карточку не показывать), null — без стикера. */
 export function useGreetingSticker(frameKey: string, want: boolean): StickerRef | null | undefined {
@@ -37,7 +49,7 @@ export function useGreetingSticker(frameKey: string, want: boolean): StickerRef 
     if (!want || known) return;
     let p = greetings.get(frameKey);
     if (!p) {
-      p = greetingSticker().catch(() => null);
+      p = askGreeting();
       greetings.set(frameKey, p);
       if (greetings.size > 8) greetings.delete(greetings.keys().next().value!);
     }
@@ -57,7 +69,7 @@ export function useGreetingSticker(frameKey: string, want: boolean): StickerRef 
     if (!want || !missing || !online) return;
     let live = true;
     let p = greetings.get(frameKey);
-    if (!p) { p = greetingSticker().catch(() => null); greetings.set(frameKey, p); }
+    if (!p) { p = askGreeting(); greetings.set(frameKey, p); }
     void p.then((s) => {
       if (!s) { greetings.delete(frameKey); return; }
       if (live) setGot((g) => g?.key === frameKey && g.sticker ? g : { key: frameKey, sticker: s });
