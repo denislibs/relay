@@ -34,7 +34,7 @@ store.askKey = async (id: string) => {
   }
   return null;
 };
-const fileIdFrom = (url: string) => /^\/files\/([0-9a-f-]{36}(?:\/(?:preview|720))?)$/.exec(new URL(url).pathname)?.[1] ?? '';
+const fileIdFrom = (url: string) => /^\/files\/([0-9a-f-]{36}(?:\/(?:preview|720|medium))?)$/.exec(new URL(url).pathname)?.[1] ?? '';
 declare const __SHELL__: string[];   // код и стили этой сборки с хэшем в имени (build.ts)
 declare const __INTEGRITY__: Record<string, string>;   // файл с хэшем в имени → SHA-256 его байтов (build.ts)
 const INTEGRITY: Record<string, string> = __INTEGRITY__;

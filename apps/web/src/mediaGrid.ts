@@ -7,6 +7,19 @@ export type TileAtt = { id: string; kind: string; mime: string; preview?: Varian
 /** Плитка фото: маленькая копия сервера (jobs/photo.ts, до 480 px), пока её нет — оригинал. */
 export const tileSrc = (a: TileAtt): string => (a.preview ? `/files/${a.id}/preview` : `/files/${a.id}`);
 
+/** Длинная сторона копии medium на сервере (jobs/photo.ts PHOTO_MEDIUM_SIDE). */
+export const BUBBLE_SIDE = 800;
+export type BubbleAtt = TileAtt & { w?: number | null; h?: number | null; variants?: Variant[] };
+/** Фото в пузыре ленты (как в Telegram — средний размер, не оригинал): копия medium (до 800 px); её ещё нет
+ *  (фото до дозаполнения, backfillPhotos.ts) — превью до 480 px, но только у большого оригинала: оригинал до 800 px
+ *  сам размером с medium и резче превью. Видео и всё прочее — оригинал. Оригинал фото — для просмотрщика. */
+export const bubbleSrc = (a: BubbleAtt): string => {
+  if (a.kind !== 'photo') return `/files/${a.id}`;
+  if (a.variants?.some((v) => v.name === 'medium')) return `/files/${a.id}/medium`;
+  if (a.preview && Math.max(a.w ?? 0, a.h ?? 0) > BUBBLE_SIDE) return `/files/${a.id}/preview`;
+  return `/files/${a.id}`;
+};
+
 /** Кадр видео без миниатюры: короткий немой ролик сервера (jobs/video.ts, 360p), пока его нет — оригинал;
  *  #t=0.1 — не чёрный самый первый кадр. */
 export const videoFrameSrc = (a: TileAtt): string => (a.preview ? `/files/${a.id}/preview` : `/files/${a.id}`) + '#t=0.1';

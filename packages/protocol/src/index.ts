@@ -161,8 +161,8 @@ export interface Attachment {
   key?: string;
 }
 /** Копия видео: preview — первые секунды без звука, 360p, до 1 МБ (лента); '720' — H.264 720p (просмотрщик по умолчанию).
- *  У фото и картинки-файла preview — WebP, длинная сторона до 480 px (сетка «Медиа»). */
-export interface VideoVariant { name: 'preview' | '720'; w: number; h: number; size: number }
+ *  У фото и картинки-файла preview — WebP, длинная сторона до 480 px (сетка «Медиа»); medium — WebP до 800 px (пузырь в ленте). */
+export interface VideoVariant { name: 'preview' | '720' | 'medium'; w: number; h: number; size: number }
 /** video — видео как медиа (кадр, длительность, играет в ленте); видео «как файл» остаётся file с mime video/*. */
 export type AttachmentKind = 'photo' | 'video' | 'file' | 'voice' | 'round' | 'audio';
 /** Вкладки «Общих медиа» (как в Telegram): медиа — фото и видео, файлы, музыка, голосовые и кружки, ссылки. */

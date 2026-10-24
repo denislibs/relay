@@ -714,7 +714,21 @@ function MediaArt(props) {
 
 /* ---------- ProgressRing: upload / download, determinate or spinning ---------- */
 var RING_IDLE_ARC = 0.25;   // длина дуги без известного прогресса; известный прогресс стартует с неё же — без скачка
+/* preloader — кольцо поверх фото и видео (как в Telegram): тёмный полупрозрачный круг size×size, в нём тонкая белая
+   дуга диаметром 48/54 круга (штрих 2 px при любом размере). Без прогресса — дуга в 3/4 окружности, оборот за 1 с;
+   с прогрессом — растёт от короткого штриха, оборот за 2 с. Кольца вокруг кнопок (голосовое, кружок, файл) — прежние. */
+var PRELOADER_R = 24, PRELOADER_C = 2 * Math.PI * PRELOADER_R, PRELOADER_MIN = 5;
+function Preloader(props) {
+  var size = props.size || 54;
+  var p = props.progress, det = typeof p === 'number';
+  var arc = det ? Math.max(PRELOADER_MIN, Math.min(1, p) * PRELOADER_C) : PRELOADER_C * 0.75;
+  return h('div', { class: cx('rl-ring rl-preloader', det && 'rl-preloader-det'), style: { width: size, height: size }, role: 'progressbar', 'aria-valuenow': det ? Math.round(p * 100) : undefined, 'aria-label': props.label || 'Загрузка' },
+    h('svg', { width: size, height: size, viewBox: '0 0 54 54', 'aria-hidden': 'true' },
+      h('circle', { class: 'rl-preloader-arc', cx: 27, cy: 27, r: PRELOADER_R, style: { strokeDasharray: arc + ' ' + PRELOADER_C, strokeWidth: +(2 * 54 / size).toFixed(2) } })),
+    props.onCancel ? h('button', { type: 'button', class: 'rl-ring-cancel', 'aria-label': 'Отменить', onClick: props.onCancel }, h(Icon, { name: 'close', size: Math.round(size / 3) })) : null);
+}
 function ProgressRing(props) {
+  if (props.preloader) return h(Preloader, props);
   var size = props.size || 48, r = (size - 6) / 2, c = 2 * Math.PI * r;
   var p = props.progress;
   var det = typeof p === 'number';
@@ -828,7 +842,7 @@ function VoiceRecorder(props) {
 function MediaOverlay(props) {
   // state: 'ready' | 'remote' (not downloaded) | 'loading' | 'uploading'
   if (props.state === 'remote') return h('button', { type: 'button', class: 'rl-media-dl', onClick: props.onDownload }, h(Icon, { name: 'download', size: 18 }), props.size || 'Скачать');
-  if (props.state === 'loading' || props.state === 'uploading') return h('div', { class: 'rl-media-center' }, h(ProgressRing, { progress: props.progress, onMedia: true, onCancel: props.onCancel, label: props.state === 'uploading' ? 'Отправка' : 'Загрузка' }));
+  if (props.state === 'loading' || props.state === 'uploading') return h('div', { class: 'rl-media-center' }, h(ProgressRing, { progress: props.progress, preloader: true, onCancel: props.onCancel, label: props.state === 'uploading' ? 'Отправка' : 'Загрузка' }));
   if (props.kind === 'video' && !props.playing) return h('div', { class: 'rl-media-center' }, h('span', { class: 'rl-media-play' }, h(Icon, { name: 'play', size: 26 })));
   return null;
 }
@@ -989,13 +1003,44 @@ function lazyObserve(el, cb, root) {
 }
 /** Сколько корней сейчас наблюдается (для тестов: утечки наблюдателей). */
 function lazyRoots() { return lazyIOs.size; }
+/* Полная картинка проявляется поверх миниатюры только разжатой: onload → img.decode() → класс loaded. Иначе
+   первый кадр перехода может прийтись на ещё не разжатую картинку (рывок посреди появления).
+   ring — размер кольца загрузки (как в Telegram: тёмный круг с белой дугой по центру миниатюры), пока полной нет:
+   с задержкой 150 мс (быстрая загрузка — без кольца) и не меньше 600 мс (не мигает); уходит плавно, вместе с
+   появлением картинки. Не загрузилась — остаётся миниатюра, без кольца. Раскладку не трогает: всё — поверх. */
 function LazyImage(props) {
-  var ref = useRef(null), vis = useState(!!props.eager), loaded = useState(false);
+  var ref = useRef(null), vis = useState(!!props.eager), loaded = useState(false), failed = useState(false);
   var root = useContext(LazyRoot);
+  var alive = useRef(true);
+  useEffect(function () { alive.current = true; return function () { alive.current = false; }; }, []);
   useEffect(function () { if (vis[0] || !ref.current) return; return lazyObserve(ref.current, function () { vis[1](true); }, root); }, [root]);
+  useEffect(function () { if (failed[0]) failed[1](false); }, [props.src]);   // новый адрес — новая попытка
+  var ringOn = useMinVisible(!!props.ring && vis[0] && !!props.src && !loaded[0] && !failed[0], { delay: 150, min: 600 });
+  // кольцо в DOM с первого показа и до конца своего исчезновения (200 мс): иначе оно пропало бы рывком.
+  // По таймеру, а не transitionend: без анимаций (reduced motion, data-anim=0) перехода нет и события не будет
+  var ringKept = useState(false), ringShown = ringOn || ringKept[0];
+  useEffect(function () {
+    if (ringOn) { ringKept[1](true); return undefined; }
+    if (!ringKept[0]) return undefined;
+    var t = setTimeout(function () { ringKept[1](false); }, 240);
+    return function () { clearTimeout(t); };
+  }, [ringOn]);
+  function onLoad(e) {
+    var img = e.currentTarget, src = img.currentSrc || img.src;
+    function done() {
+      if (!alive.current || (img.currentSrc || img.src) !== src) return;   // уже размонтировано или сменился адрес
+      loaded[1](true); failed[1](false);
+      if (props.onLoad) props.onLoad();
+    }
+    if (loaded[0] || !img.decode) return done();
+    img.decode().then(done, done);   // decode отказал (картинка уже сменилась и т. п.) — показываем как есть
+  }
   return h('span', { ref: ref, class: cx('rl-lazy', loaded[0] && 'rl-lazy-loaded') },
     props.thumb ? h('img', { class: 'rl-lazy-thumb', src: props.thumb, alt: '', 'aria-hidden': 'true' }) : null,
-    vis[0] && props.src ? h('img', { class: 'rl-lazy-full', src: props.src, alt: props.alt || '', decoding: 'async', draggable: false, onLoad: function () { loaded[1](true); if (props.onLoad) props.onLoad(); } }) : null);
+    vis[0] && props.src ? h('img', { class: 'rl-lazy-full', src: props.src, alt: props.alt || '', decoding: 'async', draggable: false, onLoad: onLoad,
+      onError: function () { if (alive.current) failed[1](true); } }) : null,
+    ringShown ? h('span', { class: cx('rl-lazy-ring', ringOn && 'rl-lazy-ring-on'), 'aria-hidden': ringOn ? undefined : 'true' },
+      h(ProgressRing, { size: props.ring, preloader: true, label: 'Загрузка фото' })) : null);
 }
 
 /* ---------- MediaPolicy: autoload of incoming media, set by the app per chat ----------
@@ -1123,7 +1168,8 @@ function MediaBubble(props) {
     return h('button', { key: i, type: 'button', class: cx('rl-media-cell', it.sel !== undefined && 'rl-media-cell-sel', it.sel && 'rl-media-cell-on'), 'data-mkey': it.mkey, onClick: function () { if (props.onOpen && state === 'ready') props.onOpen(i); }, 'aria-label': it.kind === 'video' ? 'Открыть видео' : 'Открыть фото' },
       hidden ? h(MediaSpoiler, { thumb: it.thumb, onReveal: function () { spoilersOpen.add(it.skey || it.src || it.thumb || i); reveal[1](reveal[0] + 1); } })
         : vid ? h(InlineVideo, { src: it.inline || it.src, preview: !!it.inline, thumb: it.thumb, duration: it.duration, autoplay: autoplay && !(album && i > 3), chip: !busy })
-        : it.src || it.thumb ? h(LazyImage, { src: it.kind === 'video' ? undefined : it.src, thumb: it.thumb, alt: it.alt }) : h(MediaArt, { seed: it.seed, blur: state === 'remote' }),
+        // кольцо загрузки — у каждой ячейки своё (в альбоме поменьше); при отправке его заменяет кольцо с процентом
+        : it.src || it.thumb ? h(LazyImage, { src: it.kind === 'video' ? undefined : it.src, thumb: it.thumb, alt: it.alt, ring: state === 'ready' ? (album ? 40 : 54) : 0 }) : h(MediaArt, { seed: it.seed, blur: state === 'remote' }),
       it.kind === 'video' && !vid && !hidden && !busy ? h('span', { class: 'rl-media-chip rl-media-chip-dur rl-media-chip-top' }, h(Icon, { name: 'video', size: 14 }), fmtTime(it.duration || 0)) : null,
       // загрузка: процент слева сверху (как в Telegram), кольцо с × — по центру
       !album && busy && typeof props.progress === 'number' ? h('span', { class: 'rl-media-chip rl-media-chip-dur rl-media-chip-top' }, Math.round(Math.max(0, Math.min(1, props.progress)) * 100) + '%') : null,
