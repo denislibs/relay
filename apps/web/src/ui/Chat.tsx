@@ -10,7 +10,9 @@ import { senderAvatar } from '../profilePhoto';
 import { firstUrl, loadPreview } from '../linkUrl';
 import { MusicPicker } from './MusicPicker';
 import { ArticleComposer, preloadArticleEditor } from './ArticleComposer';
-import { blocksText, blocksToText, textToBlocks, type Block } from '@relay/protocol';
+import { blocksText, blocksToText, textToBlocks, type Block, type Replies } from '@relay/protocol';
+import { ChannelBar, ReadByModal, ThreadBar } from './channel';
+import { canAskReadBy, subscribersText, threadTitle } from '../channelText';
 
 /** Меню скрепки, как в Telegram: фото/видео, файл, музыка. */
 const ATTACH_ITEMS = [
@@ -21,6 +23,9 @@ const ATTACH_ITEMS = [
   { key: 'date', icon: 'calendar', label: 'Дата' },
   { key: 'article', icon: 'article', label: 'Статья' },
 ];
+
+/** В треде — то, что уходит комментарием (чек-лист и трек из музыки профиля отправляются без треда). */
+const THREAD_ATTACH = ATTACH_ITEMS.filter((x) => x.key !== 'todo' && x.key !== 'music');
 
 /** Дата из окна → значение для вставки: текст по умолчанию, вся строка — одна сущность даты с выбранным форматом. */
 // после даты — пробел вне неё (как в Telegram): дальше набирается обычный текст, а не продолжение даты
@@ -95,10 +100,36 @@ function downloadName(a: { id?: string; kind?: string; name?: string; mime?: str
   return `${a.kind ?? 'file'}_${(a.id ?? '').slice(0, 8)}.${ext}`;
 }
 
-export function Chat({ chatId, frameKey, active }: { chatId: number; frameKey: string; active: boolean }) {
+/** Комментариев в треде: число с кнопки поста (пост в канале где-то в стеке), иначе — сколько уже загружено. */
+function useThreadCount(frameKey: string): number {
+  return useGlobal((s) => {
+    const f = frameByKey(s, frameKey);
+    if (!f?.thread) return 0;
+    const head = f.thread.header ? f.messages.find((m) => m.key === f.thread!.header) : undefined;
+    const loaded = f.messages.length - (head ? 1 : 0);
+    const o = head?.origin as { chatId: number; id: number } | undefined;
+    if (o) for (const g of [...s.chatStack, ...s.chatLeaving]) {
+      if (g.chatId !== o.chatId || g.threadId != null) continue;
+      const r = g.messages.find((m) => m.id === o.id)?.replies as Replies | undefined;
+      if (r) return Math.max(r.count, loaded);
+    }
+    return loaded;
+  });
+}
+
+export function Chat({ chatId, frameKey, active, threadId }: { chatId: number; frameKey: string; active: boolean; threadId?: number }) {
   const me = useGlobal((s) => s.me)!;
   useOwnMusic();   // кнопка «в профиль» в плеере
   const chat = useGlobal((s) => s.chats.find((c) => c.id === chatId));
+  // канал: пишут только админы с правом post (canSend); подписчику — нижняя панель. Тред — комментарии группы
+  const channel = chat?.kind === 'channel';
+  const community = chat?.kind === 'group' || channel;
+  const thread = threadId != null;
+  const threadCount = useThreadCount(frameKey);
+  const threadHeader = useGlobal((s) => { const f = frameByKey(s, frameKey); return f?.thread?.header ? f.messages.find((m) => m.key === f.thread!.header) ?? null : null; });
+  const [readByOf, setReadByOf] = useState<number | null>(null);
+  // плашка над тредом подписана каналом поста (если он в списке)
+  const originTitle = useGlobal((s) => { const o = threadHeader?.origin as { chatId: number } | undefined; return o ? (s.chats.find((c) => c.id === o.chatId)?.title as string | undefined) ?? null : null; });
   const messages = useGlobal((s) => frameByKey(s, frameKey)?.messages ?? NO_MESSAGES);
   const depth = useGlobal((s) => s.chatStack.length);
   const activeRef = useRef(active); activeRef.current = active;
@@ -236,7 +267,7 @@ export function Chat({ chatId, frameKey, active }: { chatId: number; frameKey: s
     for (const f of pending.files) if (!allowed(rightForKind(/^image\//.test(f.type) && !/gif/.test(f.type) ? 'photo' : /^audio\//.test(f.type) ? 'audio' : 'file', f.type))) return;
     stick.current = true;
     typingDone(chatId);
-    sendFiles(chatId, pending.files, pending.caption.trim(), (replyTo?.id as number) ?? null, { asFile: pending.asFile, spoiler: pending.spoiler && !pending.asFile, quality: canCompress ? pending.quality ?? savedQuality() : 'original' }).catch(() => {});
+    sendFiles(chatId, pending.files, pending.caption.trim(), (replyTo?.id as number) ?? null, { asFile: pending.asFile, spoiler: pending.spoiler && !pending.asFile, quality: canCompress ? pending.quality ?? savedQuality() : 'original', ...(thread ? { threadId } : {}) }).catch(() => {});
     if (pending.caption === latest.current.text) { api.current?.setValue(emptyValue()); latest.current = saved.current = emptyValue(); }
     setReplyKey(null);
     closePending();
@@ -349,10 +380,12 @@ export function Chat({ chatId, frameKey, active }: { chatId: number; frameKey: s
   const peerUser = useUser(chat?.kind === 'direct' ? (chat.peerId as number | null) : null);
   const theyBlocked = !!peerUser?.blocksMe;
   // группа: мои права участника (у админов — все), медленный режим, запрет копирования
-  const gMe = chat?.kind === 'group' ? (chat?.me as MyMembership | null) ?? null : null;
-  const gInfo = chat?.kind === 'group' ? (chat?.group as GroupInfo | null) ?? null : null;
-  const gRights = gMe && !gMe.admin ? gMe.rights : null;
-  const plate = iBlocked ? 'mine' : theyBlocked ? 'theirs' : gRights && !gRights.text && !hasMedia(gRights) ? 'group' : null;
+  const gMe = community ? (chat?.me as MyMembership | null) ?? null : null;
+  const gInfo = community ? (chat?.group as GroupInfo | null) ?? null : null;
+  const gRights = gMe && !gMe.admin && !channel ? gMe.rights : null;
+  // канал без права публиковать (подписчик или не подписан) — панель «Подписаться» / «Звук» вместо поля ввода
+  const channelBar = channel && !chat?.canSend;
+  const plate = channelBar ? 'channel' : iBlocked ? 'mine' : theyBlocked ? 'theirs' : gRights && !gRights.text && !hasMedia(gRights) ? 'group' : null;
   /** Можно ли отправить сейчас (вид сообщения и медленный режим); нельзя — тост и false. */
   const allowed = (right: MemberRight): boolean => {
     if (gRights && !gRights[right]) { showToast(right === 'text' ? 'В этой группе нельзя отправлять текст' : `В этой группе нельзя отправлять: ${MEMBER_RIGHT_TEXT[right].toLowerCase()}`); return false; }
@@ -404,14 +437,14 @@ export function Chat({ chatId, frameKey, active }: { chatId: number; frameKey: s
   useEffect(() => { const t = setInterval(() => tick((n) => n + 1), 30_000); return () => clearInterval(t); }, []);
   const myPeer = peer && chat?.peerId === peer.userId && peer.known ? peer : null;
   const online = !!myPeer?.online;
-  const isTyping = !!chat?.typing;
+  const isTyping = !!chat?.typing && !channel;   // в канале «печатает…» не показывается
   const members = useMembers(chatId, chat?.kind === 'group');
-  const subtitle = system ? 'служебные уведомления' : isTyping ? 'печатает…' : chat?.kind === 'group' ? (members ? membersStatus(members, true) : 'Группа') : myPeer ? lastSeenText(online, myPeer.lastSeen as string | null) : '';
+  const subtitle = thread ? title : system ? 'служебные уведомления' : isTyping ? 'печатает…' : channel ? (gInfo ? subscribersText(gInfo.members) : 'Канал') : chat?.kind === 'group' ? (members ? membersStatus(members, true) : 'Группа') : myPeer ? lastSeenText(online, myPeer.lastSeen as string | null) : '';
   const replyTo = replyKey ? messages.find((m) => m.key === replyKey) : undefined;
   // стикер из модалки пака или правой панели уходит сюда — с текущим ответом
   const replyIdRef = useRef<number | null>(null);
   replyIdRef.current = (replyTo?.id as number) ?? null;
-  useEffect(() => setStickerTarget({ chatId, replyId: () => replyIdRef.current, sent: () => setReplyKey(null) }), [chatId]);
+  useEffect(() => setStickerTarget({ chatId, ...(thread ? { threadId } : {}), replyId: () => replyIdRef.current, sent: () => setReplyKey(null) }), [chatId, threadId]);
   const authorOf = (senderId: unknown) => (senderId === me.userId ? 'Вы' : title);
   const menuMsg = menu ? messages.find((m) => m.key === menu.key) : undefined;
   // пересылка, ждущая в поле ввода: «От: …» (или «Имена отправителей скрыты») и что пересылаем
@@ -449,8 +482,8 @@ export function Chat({ chatId, frameKey, active }: { chatId: number; frameKey: s
     // ответ, открытый в поле, уходит вместе со статьёй — как с любым сообщением
     const reply = (replyTo?.id as number) ?? null;
     setReplyKey(null);
-    if (simple) { if (simple.text.trim()) void send(chatId, simple.text, reply, simple.entities); return; }
-    void send(chatId, blocksText(blocks), reply, [], { blocks });
+    if (simple) { if (simple.text.trim()) void send(chatId, simple.text, reply, simple.entities, thread ? { threadId } : {}); return; }
+    void send(chatId, blocksText(blocks), reply, [], { blocks, ...(thread ? { threadId } : {}) });
   };
   const artQuote = art && !art.open && art.blocks.length && !editing ? {
     icon: 'article', author: 'Статья', text: blocksText(art.blocks).split('\n')[0] || 'Без текста', tone: 5,
@@ -487,16 +520,17 @@ export function Chat({ chatId, frameKey, active }: { chatId: number; frameKey: s
         <button type="button" class="rl-glassbar-who" aria-label="Информация о чате" onClick={() => setGlobal({ infoOpen: !infoOpen })}>
           <Avatar name={title} tone={chatTone(chat)} size={40} logo={system} {...avatarPhoto(chat?.photo as ProfilePhoto | null)} />
           <span class="rl-glassbar-title">
-            <b>{title}{system ? <Verified size={16} /> : null}</b>
+            <b>{thread ? threadTitle(threadCount) : title}{system ? <Verified size={16} /> : null}</b>
             <span key={phaseLabel ?? (isTyping ? 'typing' : online ? 'on' : 'off')} class={phaseLabel ? 'app-phase' : isTyping || online ? 'app-online' : undefined}>{phaseLabel ?? (subtitle || '\u00a0')}</span>
           </span>
         </button>
-        <IconButton icon="search" label="Поиск по чату" onClick={() => setFinding(true)} />
+        {!thread ? <IconButton icon="search" label="Поиск по чату" onClick={() => setFinding(true)} /> : null}
         <ChatMenu chatId={chatId} title={title} />
-        {/* закреплённые — под шапкой, как в Telegram (плеер — над ней) */}
-        {!system ? <PinnedBar chatId={chatId} /> : null}
+        {/* закреплённые — под шапкой, как в Telegram (плеер — над ней); в треде вместо них — плашка поста */}
+        {thread ? <ThreadBar header={threadHeader} title={originTitle ?? 'Пост'} onClick={() => { if (threadHeader?.id != null) focusMessage({ id: threadHeader.id as number, sort: threadHeader.sort as number }); }} />
+          : !system ? <PinnedBar chatId={chatId} /> : null}
         {!system ? <UploadBar chatId={chatId} /> : null}
-        {gInfo && gInfo.requests > 0 ? (
+        {gInfo && gInfo.requests > 0 && !thread ? (
           <button type="button" class="app-requests-bar" onClick={() => setGlobal({ infoOpen: true, infoGo: 'gRequests' })}>
             <Icon name="userPlus" size={18} /><span>{gInfo.requests} {plural(gInfo.requests, 'заявка', 'заявки', 'заявок')} на вступление</span><Icon name="chevronRight" size={18} />
           </button>
@@ -537,9 +571,10 @@ export function Chat({ chatId, frameKey, active }: { chatId: number; frameKey: s
         ) : null}
       </GlassBar>
       <MediaPolicy.Provider value={policy}>
-        <Feed frameKey={frameKey} active={active} chatId={chatId} meId={me.userId} peerName={title} group={chat?.kind === 'group'} onAuthor={openUserChat} stick={stick} highlight={found?.q} onMenu={(key, x, y, extra) => setMenu({ key, x, y, extra })} />
+        <Feed frameKey={frameKey} active={active} chatId={chatId} threadId={threadId} channel={channel} meId={me.userId} peerName={title} group={chat?.kind === 'group'} onAuthor={openUserChat} stick={stick} highlight={found?.q} onMenu={(key, x, y, extra) => setMenu({ key, x, y, extra })} />
       </MediaPolicy.Provider>
-      {plate ? (
+      {plate === 'channel' ? <ChannelBar chatId={chatId} member={!!gMe} username={gInfo?.username ?? null} approval={!!gInfo?.joinApproval} />
+      : plate ? (
         <div class="rl-composer-wrap app-plate-wrap">
           <div class="rl-composer app-plate" role="status" key={plate}>
             {plate === 'mine' ? (
@@ -572,7 +607,7 @@ export function Chat({ chatId, frameKey, active }: { chatId: number; frameKey: s
         initialValue={initial}
         captureTyping={active}
         sendKey={sendKey}
-        placeholder="Сообщение"
+        placeholder={thread ? 'Комментарий' : channel ? 'Публикация' : 'Сообщение'}
         editing={!!editing}
         sendEmpty={!!fwdQuote || !!artQuote}
         replyTo={editing ? { author: 'Редактирование', text: editing.original.text, tone: 'accent', icon: 'pencil' } : fwdQuote ? fwdQuote : artQuote ? artQuote : !replyTo && lp?.link && !lp.off ? {
@@ -590,7 +625,7 @@ export function Chat({ chatId, frameKey, active }: { chatId: number; frameKey: s
         onPickDate={(apply: (r: { date: number; format: string } | null) => void) => setDateOpen({ mode: 'mark', done: (r) => { if (r) apply(r); } })}
         onEditDate={(initial: { date: number; format: string }, range: { start: number; end: number }) => setDateOpen({ mode: 'format', initial, done: (r) => { if (r) api.current?.insert(dateValue(r), range); } })}
         onEditLast={editLast}
-        onReplyNav={replyNav}
+        onReplyNav={channel ? undefined : replyNav}
         chatKey={chatId}
         recordModes={recordModes.filter((m) => !gRights || gRights[m === 'round' ? 'round' : 'voice'])}
         startRound={startRound}
@@ -599,15 +634,15 @@ export function Chat({ chatId, frameKey, active }: { chatId: number; frameKey: s
         onRecordError={(err: { name?: string }, mode: string) => showToast(err?.name === 'NotAllowedError' || err?.name === 'NotFoundError'
           ? (mode === 'round' ? 'Разрешите доступ к камере и микрофону, чтобы записывать видеосообщения' : 'Разрешите доступ к микрофону, чтобы записывать голосовые')
           : mode === 'round' ? 'Не удалось записать видеосообщение' : 'Не удалось записать голосовое')}
-        onSendVoice={(r: { blob: Blob; duration: number; waveform: Uint8Array }) => { if (!allowed('voice')) return; stick.current = true; sendVoice(chatId, r, (replyTo?.id as number) ?? null).catch(() => {}); setReplyKey(null); }}
-        onSendRound={(r: { blob: Blob; duration: number; size: number; thumb: string | null }) => { if (!allowed('round')) return; stick.current = true; sendRound(chatId, r, (replyTo?.id as number) ?? null).catch(() => {}); setReplyKey(null); }}
-        attachItems={ATTACH_ITEMS}
+        onSendVoice={(r: { blob: Blob; duration: number; waveform: Uint8Array }) => { if (!allowed('voice')) return; stick.current = true; sendVoice(chatId, r, (replyTo?.id as number) ?? null, threadId).catch(() => {}); setReplyKey(null); }}
+        onSendRound={(r: { blob: Blob; duration: number; size: number; thumb: string | null }) => { if (!allowed('round')) return; stick.current = true; sendRound(chatId, r, (replyTo?.id as number) ?? null, threadId).catch(() => {}); setReplyKey(null); }}
+        attachItems={thread ? THREAD_ATTACH : ATTACH_ITEMS}
         onExpand={() => openArticle()}
         onAttach={(k: string) => { if (k === 'music') { if (allowed('music')) setMusicOpen(true); return; } if (k === 'article') { openArticle(); return; } if (k === 'todo') { setTodoOpen({ mode: 'create' }); return; } if (k === 'date') { setDateOpen({ mode: 'format', done: (r) => { if (r) api.current?.insert(dateValue(r)); } }); return; } const el = picker.current!; el.accept = k === 'media' || k === 'camera' ? 'image/*,video/*' : ''; el.value = ''; el.click(); }}
         onSend={(v: Value) => {
           if (editing) {
             const next = applyMarkdown(v);
-            if (!sameValue(next, editing.original)) editMessage(chatId, editing.id, next.text, next.entities).catch(() => {});
+            if (!sameValue(next, editing.original)) editMessage(chatId, editing.id, next.text, next.entities).catch(() => { if (channel) showToast('Не удалось изменить — недостаточно прав?'); });
             endEdit(editing.draft);
             return false;   // в поле уже черновик — композер его не трогает
           }
@@ -623,7 +658,7 @@ export function Chat({ chatId, frameKey, active }: { chatId: number; frameKey: s
           const url = firstUrl(out.text, out.entities);
           const pv = lp && url === lp.url ? (lp.off ? { noLinkPreview: true } : { link: lp.link }) : {};
           lpUrl.current = null; setLp(null);
-          const sent = send(chatId, out.text, (replyTo?.id as number) ?? null, out.entities, pv);
+          const sent = send(chatId, out.text, (replyTo?.id as number) ?? null, out.entities, thread ? { ...pv, threadId } : pv);
           setReplyKey(null);
           return sent;   // поле очистится, когда сообщение встанет в ленту
         }}
@@ -642,9 +677,16 @@ export function Chat({ chatId, frameKey, active }: { chatId: number; frameKey: s
       {/* меню сообщения: левый верхний угол — у курсора, реакции — над ним (как в Telegram) */}
       {(() => {
         if (!menu || !menuMsg) return <MenuPopover open={false} />;
-        const own = menuMsg.senderId === me.userId && !menuMsg.deleted && menuMsg.id != null;
+        // пост канала: автор скрыт (senderId 0) — править может админ с post (своё) или edit (чужое), сервер проверит;
+        // копию поста в группе обсуждения не правят и не удаляют (только пост в канале)
+        const postMsg = channel && !menuMsg.service;
+        const copy = menuMsg.origin != null;
+        const own = !copy && !menuMsg.deleted && menuMsg.id != null && (postMsg ? !!(gMe?.admin?.post || gMe?.admin?.edit) : menuMsg.senderId === me.userId);
+        const canDelete = !copy && !menuMsg.deleted && menuMsg.id != null && !menuMsg.service && (own || !!gMe?.admin?.delete);
+        // закреп: в канале — право post (тихий, без «уведомить всех»); в группе — право pin
+        const canPin = channel ? !!gMe?.admin?.post : !gMe || !!gMe.admin?.pin || gMe.rights.pin;
         const att = menuMsg.attachment as { id?: string; kind?: string; name?: string; mime?: string } | null | undefined;
-        const myReaction = ((menuMsg.reactions as { userId: number; emoji: string }[] | undefined) ?? []).find((r) => r.userId === me.userId)?.emoji;
+        const myReaction = menuMsg.reactionCounts ? menuMsg.myReaction as string | undefined : ((menuMsg.reactions as { userId: number; emoji: string }[] | undefined) ?? []).find((r) => r.userId === me.userId)?.emoji;
         // в служебном чате «Relay» уведомления — обычные пузыри с текстом: копировать и выбирать их можно (как у Telegram);
         // служебные события групп («X вступил») — плашки, у них этих пунктов нет
         const textual = !menuMsg.service || system;
@@ -656,7 +698,7 @@ export function Chat({ chatId, frameKey, active }: { chatId: number; frameKey: s
                 label="Действия с сообщением"
                 onClose={() => setMenu(null)}
                 items={[
-                  ...(menuMsg.id != null && !menuMsg.deleted && !system ? [{ icon: 'reply', label: 'Ответить', onClick: () => { if (editing) endEdit(editing.draft); setReplyKey(menuMsg.key as string); api.current?.focus({ end: true }); } }] : []),
+                  ...(menuMsg.id != null && !menuMsg.deleted && !system && !channel ? [{ icon: 'reply', label: 'Ответить', onClick: () => { if (editing) endEdit(editing.draft); setReplyKey(menuMsg.key as string); api.current?.focus({ end: true }); } }] : []),
                   ...(own && !system && !menuMsg.blocks ? [{ icon: 'pencil', label: 'Изменить', onClick: () => { if (menuMsg.kind === 'todo') { if (!menuMsg.fwdFrom) setTodoOpen({ mode: 'edit', msg: menuMsg }); } else startEdit(menuMsg); } }] : []),
                   // чек-лист: добавить задачу — автору или всем, если автор разрешил; не больше 30
                   ...(menuMsg.kind === 'todo' && menuMsg.todo && !menuMsg.fwdFrom && menuMsg.id != null && (own || (menuMsg.todo as Todo).othersCanAppend) && (menuMsg.todo as Todo).items.length < TODO_ITEMS_MAX
@@ -672,13 +714,14 @@ export function Chat({ chatId, frameKey, active }: { chatId: number; frameKey: s
                     const v = menu.extra?.selection ?? { text: menuMsg.body as string, entities: (menuMsg.entities as Entity[] | undefined) ?? [] };
                     copyRich(v.text, clipboardHtml(v.text, v.entities)).then((ok: boolean) => showToast(ok ? 'Текст скопирован' : 'Не удалось скопировать'));
                   } }] : []),
-                  ...(menuMsg.id != null && !menuMsg.deleted && !system && !menuMsg.service && (!gMe || gMe.admin?.pin || gMe.rights.pin) ? [((chat?.pinned as number[] | undefined) ?? []).includes(menuMsg.id as number)
+                  ...(menuMsg.id != null && !menuMsg.deleted && !system && !menuMsg.service && canPin ? [((chat?.pinned as number[] | undefined) ?? []).includes(menuMsg.id as number)
                     ? { icon: 'pin', label: 'Открепить', onClick: () => void unpinMessage(chatId, menuMsg.id as number) }
                     : { icon: 'pin', label: 'Закрепить', onClick: () => void pinMessage(chatId, menuMsg.id as number) }] : []),
                   ...(!menuMsg.deleted && !gInfo?.protected && att?.id ? [{ icon: 'download', label: 'Скачать', onClick: () => downloadUrl(`/files/${att.id}?download=1`, downloadName(att)) }] : []),
                   ...(menuMsg.id != null && !menuMsg.deleted && !menuMsg.service && !gInfo?.protected ? [{ icon: 'forward', label: 'Переслать', onClick: () => forwardMenuMsg(menuMsg) }] : []),
                   ...(menuMsg.id != null && !menuMsg.deleted && textual && !gInfo?.protected ? [{ icon: 'checkCircle', label: 'Выбрать', onClick: () => startSelect(chatId, groupOf(menuMsg).map((x) => x.key as string)) }] : []),
-                  ...(own || (gMe?.admin?.delete && !menuMsg.deleted && menuMsg.id != null && !menuMsg.service) ? ['-' as const, { icon: 'trash', label: 'Удалить', danger: true, onClick: () => setConfirmDelete({ ids: [menuMsg.id as number] }) }] : []),
+                  ...(canAskReadBy(menuMsg, chat?.kind === 'group' && gInfo ? { kind: 'group', members: gInfo.members } : null, me.userId) ? [{ icon: 'markRead', label: 'Кто прочитал', onClick: () => setReadByOf(menuMsg.id as number) }] : []),
+                  ...(canDelete ? ['-' as const, { icon: 'trash', label: 'Удалить', danger: true, onClick: () => setConfirmDelete({ ids: [menuMsg.id as number] }) }] : []),
                   // неотправленное (своё, без id): после отказа — «Повторить»; «Удалить» убирает его только у себя и прерывает загрузку
                   ...(menuMsg.id == null && menuMsg.senderId === me.userId && !menuMsg.deleted ? [
                     ...(menuMsg.status === 'failed' ? [{ icon: 'refresh', label: 'Повторить отправку', onClick: () => retrySend(menuMsg.key as string) }] : []),
@@ -794,9 +837,10 @@ export function Chat({ chatId, frameKey, active }: { chatId: number; frameKey: s
         );
         })()
       ) : null}
+      {readByOf != null ? <ReadByModal chatId={chatId} id={readByOf} onClose={() => setReadByOf(null)} /> : null}
       <ConfirmDialog open={!!confirmDelete} danger title={confirmDelete && confirmDelete.ids.length > 1 ? `Удалить ${confirmDelete.ids.length} ${plural(confirmDelete.ids.length, 'сообщение', 'сообщения', 'сообщений')}?` : 'Удалить сообщение?'}
         text={confirmDelete && confirmDelete.ids.length > 1 ? 'Сообщения исчезнут у всех участников чата.' : 'Сообщение исчезнет у всех участников чата.'} confirm="Удалить у всех"
-        onCancel={() => setConfirmDelete(null)} onConfirm={() => { if (confirmDelete) for (const id of confirmDelete.ids) deleteMessage(chatId, id).catch(() => {}); setConfirmDelete(null); endSelect(); }} />
+        onCancel={() => setConfirmDelete(null)} onConfirm={() => { if (confirmDelete) for (const id of confirmDelete.ids) deleteMessage(chatId, id).catch(() => { if (channel) showToast('Не удалось удалить — недостаточно прав?'); }); setConfirmDelete(null); endSelect(); }} />
     </>
   );
 }

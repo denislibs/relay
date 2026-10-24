@@ -33,6 +33,8 @@ export const PAGES = [
   'contacts/:userId/edit',
   'newGroup',        // новая группа: выбор участников
   'newGroup/name',   // и название
+  'newChannel',         // новый канал: название, описание, фото
+  'newChannel/members', // и подписчики (можно пропустить)
 ];
 
 const ROOT = 'chats';

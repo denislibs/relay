@@ -112,12 +112,18 @@ function resyncSubscription(): void {
 
 const FRESH_MS = 2 * 60_000;   // догоняющая синхронизация после долгого офлайна не засыпает уведомлениями
 
-/** Пришло чужое сообщение (по патчу списка чатов): показать, если окно не в фокусе. */
-export function notifyIncoming(chat: { id: number; title: string; muted: boolean; system?: boolean }, m: { id: number; body: string; kind?: string; attachmentName?: string | null; createdAt: string; service?: { type: string } | null }): void {
+/**
+ * Пришло чужое сообщение или упоминание (запрос notifications движка — одно на сообщение): показать, если окно не в
+ * фокусе. Упоминание пробивает выключенный звук чата и умолчание вида (как в Telegram).
+ */
+export function notifyIncoming(chat: { id: number; title: string; muted: boolean; system?: boolean }, m: { id: number; body: string; kind?: string; attachmentName?: string | null; createdAt: string; service?: { type: string } | null }, o: { mention?: boolean } = {}): void {
   if (Date.now() - Date.parse(m.createdAt) > FRESH_MS) return;
   const g = getGlobal();
-  const kind = g.chats.find((c) => c.id === chat.id)?.kind === 'group' ? 'group' : 'direct';
-  const plan = planIncoming({ state: g.notify, device: getPrefs().notify, chatMuted: chat.muted, pref: g.settings.notify[kind], hasFocus: document.hasFocus() });
+  const ck = g.chats.find((c) => c.id === chat.id)?.kind;
+  const kind = ck === 'channel' ? 'channel' : ck === 'group' ? 'group' : 'direct';
+  const notify = g.settings.notify as Record<string, { muted: boolean; preview: boolean } | undefined>;
+  const pref = notify[kind] ?? notify.group ?? { muted: false, preview: true };
+  const plan = planIncoming({ state: g.notify, device: getPrefs().notify, chatMuted: chat.muted && !o.mention, pref: o.mention ? { ...pref, muted: false } : pref, hasFocus: document.hasFocus() });
   if (!plan.show) return;
   const text = incomingText(m);
   const t = notifyText({ title: chat.title, text }, { preview: plan.preview, hideText: getPrefs().screen.hideNotifyText });
