@@ -62,7 +62,7 @@ export function MusicBubble(props) {
       h('div', { class: 'rl-music-row' },
         h('div', { class: 'rl-music-btnwrap' },
           props.uploading
-            ? h(ProgressRing, { size: 48, progress: props.progress, onMedia: true, onCancel: props.onCancel, label: 'Отправка' })
+            ? h(ProgressRing, { size: 48, progress: props.progress, spin: true, onMedia: true, onCancel: props.onCancel, label: 'Отправка' })
             : h('button', { type: 'button', class: cx('rl-music-play', playing && 'rl-vb-playing', props.cover && 'rl-music-cover'),
                 style: props.cover ? { backgroundImage: 'url(' + props.cover + ')' } : undefined,
                 'aria-label': playing ? 'Пауза' : 'Слушать', onClick: function (e) { e.stopPropagation(); if (props.onToggle) props.onToggle(); } },

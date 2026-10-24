@@ -145,7 +145,7 @@ export function VoiceBubble(props) {
         },
           h(Icon, { name: 'play', size: 26, class: 'rl-vb-play' }),
           h(Icon, { name: 'pause', size: 26, class: 'rl-vb-pause' }),
-          props.uploading ? h('span', { class: 'rl-vb-ring' }, h(ProgressRing, { size: 48, progress: props.progress, onMedia: true, label: 'Отправка' }), h(Icon, { name: 'close', size: 20, class: 'rl-vb-cancel' })) : null),
+          props.uploading ? h('span', { class: 'rl-vb-ring' }, h(ProgressRing, { size: 48, progress: props.progress, spin: true, onMedia: true, label: 'Отправка' }), h(Icon, { name: 'close', size: 20, class: 'rl-vb-cancel' })) : null),
         h('div', { class: 'rl-vb-body' },
           h('canvas', { ref: canvas, class: 'rl-vb-wave', style: { width: width + 'px', height: HEIGHT + 'px' }, role: 'slider', 'aria-label': 'Позиция', 'aria-valuemin': 0, 'aria-valuemax': duration, tabIndex: -1,
             onPointerDown: onDown, onPointerMove: move, onPointerUp: up, onPointerCancel: up }),
