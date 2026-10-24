@@ -1478,7 +1478,9 @@ html[data-blur="0"] .rl-shell .rl-rpick { background: color-mix(in srgb, var(--r
 /* фон вкладок — сплошной цвет панели (как в Telegram): без размытия и без маски-градиента, сетка под ними не просвечивает */
 .rl-aside-tabs::before { content: ''; position: absolute; inset: 0;   /* не ниже вкладок: выступ накрывал верх первого острова со скруглением */ z-index: -1; pointer-events: none; background: var(--card); }
 .rl-aside-pages { margin-top: 0; flex: 1 0 auto; min-height: calc(100% - 64px); }   /* вкладки всегда можно довести до верха */
-.rl-aside-pages > .rl-slides { flex: 1 0 auto; width: 100%; min-width: 0; max-width: 100%; }   /* по ширине панели: длинная строка (адрес ссылки) — многоточием, а не прокруткой вбок */
+.rl-aside-pages > .rl-slides { flex: 1 0 auto; width: 100%; min-width: 0; max-width: 100%; overflow: clip; }   /* по ширине панели: длинная строка (адрес ссылки) — многоточием, а не прокруткой вбок */
+/* overflow: clip, а не hidden: уезжающая вкладка обрезается так же, но слайды не становятся контейнером прокрутки —
+   sticky внутри вкладки (плашка даты над «Медиа») липнет к прокрутке панели */
 /* текущая вкладка — в потоке (высота панели по содержимому), уходящая во время анимации — поверх */
 .rl-aside-pages .rl-slide:not(.rl-slide-parked):not(.rl-slide-out-push):not(.rl-slide-out-pop) { position: relative; inset: auto; width: 100%; }
 .rl-aside-pages .rl-aside-links { overflow: visible; }

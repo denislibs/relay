@@ -279,19 +279,24 @@ function LoginQR(props) {
    Прокрутка — у ближайшего прокручиваемого предка. Место списка в нём меняется не только прокруткой:
    содержимое над списком (профиль в панели, раскрывающиеся строки) растёт и сжимается — за ним следит
    ResizeObserver (предки на пути до прокрутки и всё, что стоит перед ними). Спрятанный список (вкладка
-   SlideStack в стороне) не меряется: его раскладка ничего не значит; показали — мерим заново. */
-function useWindowRange(host, rh, over, n) {
+   SlideStack в стороне) не меряется: его раскладка ничего не значит; показали — мерим заново.
+   onView (ref, необязательно) — на каждый замер в фазе measure: onView.current(top, scrolled), где top — верх
+   видимой области прокрутки относительно начала списка (px, до начала списка — отрицательный), scrolled — замер
+   вызван прокруткой (а не сменой размеров) */
+function useWindowRange(host, rh, over, n, onView) {
   var range = useState([0, Math.min(n, 20)]);
   var cur = useRef(range[0]); cur.current = range[0];
   var poke = useRef(null);
   useLayoutEffect(function () {
-    var el = host.current, sc = null, queued = false, ro = null, mo = null, alive = true;
+    var el = host.current, sc = null, queued = false, scrolled = false, ro = null, mo = null, alive = true;
     function measure() {
       queued = false;
+      var byScroll = scrolled; scrolled = false;
       if (!alive || !sc || !rh) return;
       if (!el.getClientRects().length || el.closest('.rl-slide-parked')) return;
       var offset = el.getBoundingClientRect().top - sc.getBoundingClientRect().top + sc.scrollTop; // where the list starts in the scroller
       var top = sc.scrollTop - offset, bottom = top + sc.clientHeight;
+      if (onView && onView.current) onView.current(top, byScroll);
       var vTop = Math.max(0, Math.floor(top / rh)), vBot = Math.max(0, Math.ceil(bottom / rh));
       // запас с гистерезисом: окно сдвигаем, когда израсходована половина запаса, и сразу с полным запасом —
       // иначе перерисовка всего списка на каждые 72 px прокрутки. «Две строки до края», как было, при быстрой
@@ -302,7 +307,10 @@ function useWindowRange(host, rh, over, n) {
       if (covered && r[1] - r[0] <= next[1] - next[0] + over * 2) return;
       requestMutation(function () { range[1](function (r) { return r[0] === next[0] && r[1] === next[1] ? r : next; }); });
     }
-    function onScroll() { if (!queued && alive) { queued = true; requestMeasure(measure); } }
+    function onScroll(e) {
+      if (e && e.type === 'scroll') scrolled = true;
+      if (!queued && alive) { queued = true; requestMeasure(measure); }
+    }
     poke.current = onScroll;
     // прокручиваемого родителя ищем в фазе замера: getComputedStyle — это чтение стилей
     requestMeasure(function () {
@@ -456,7 +464,10 @@ function KeepList(props) {
 /* ---------- WindowGrid: квадратные плитки cols в ряд, виртуально (как WindowList, но окно — по строкам) ----------
    Плитки — один слой, каждая на своём месте (transform), ключ — у самой плитки: новая плитка сверху сдвигает
    остальные, но не пересоздаёт их (картинки не мигают). Размеры — в целых пикселях (windowMath.gridLayout).
-   initialWidth — ширина с прошлого показа: первый кадр уже с плитками. */
+   initialWidth — ширина с прошлого показа: первый кадр уже с плитками.
+   onView(top, cell, step, scrolled) — на каждый замер окна в фазе measure (без своих чтений раскладки): top — верх
+   видимой области прокрутки относительно сетки, cell и step — высота плитки и шаг строки, scrolled — от прокрутки.
+   По нему считают, что сейчас у верхнего края (плашка даты над «Медиа»), не трогая плитки. */
 function WindowGrid(props) {
   var items = props.items || [], cols = props.cols || 3, gap = props.gap == null ? 1 : props.gap, over = props.overscan == null ? 4 : props.overscan;
   var host = useRef(null), wSt = useState(props.initialWidth || 0);
@@ -473,7 +484,10 @@ function WindowGrid(props) {
   }, []);
   var L = gridLayout(wSt[0], cols, gap);
   var n = items.length, rows = Math.ceil(n / cols);
-  var range = useWindowRange(host, L.step, over, rows);
+  var view = useRef(null);
+  var onView = props.onView;
+  view.current = onView ? function (top, scrolled) { onView(top, L.cell, L.step, scrolled); } : null;
+  var range = useWindowRange(host, L.step, over, rows, view);
   useNearEnd(props.onNearEnd, range[1], rows, props.nearEndKey);
   var cells = [];
   if (L.step) {

@@ -92,3 +92,14 @@ export function gridCorners(i: number, n: number): string {
   if (last || (col === GRID_COLS - 1 && tail)) out.push('br');
   return out.join(' ');
 }
+
+/** Плашка даты над «Медиа» (как в Telegram): чью дату показывать, когда линия y (px от верха сетки, у нижнего края
+ *  вкладок) — первая плитка, чей низ ниже линии; плитки одного ряда — первая в ряду. Ряды одинаковые (cell — высота
+ *  плитки, step — шаг ряда с зазором), поэтому ряд считается делением, без обхода плиток. -1 — сетка пуста. */
+export function gridDateIndex(y: number, cell: number, step: number, n: number, cols = GRID_COLS): number {
+  if (n <= 0 || cols <= 0) return -1;
+  const rows = Math.ceil(n / cols);
+  // низ ряда r — r·step + cell; нужен первый r, у которого он ниже y (линия в зазоре — уже следующий ряд)
+  const row = step > 0 ? Math.floor((y - cell) / step) + 1 : 0;
+  return Math.min(Math.max(row, 0), rows - 1) * cols;
+}
