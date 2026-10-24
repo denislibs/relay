@@ -11,7 +11,7 @@ import { applyLinkPreview } from '../domain/messages';
 import { s3 } from '../domain/files';
 import { processVideo } from './video';
 import { processPhoto } from './photo';
-import { encryptLegacyStep, loadOpen, openForChat, sealForChat } from '../domain/messageContent';
+import { encryptLegacyStep, loadOpen, openForChat, openRows, sealForChat } from '../domain/messageContent';
 import { rewrapStep } from '../crypto/kms';
 import { toMessage } from '../domain/chats';
 import { enqueue, type Job } from './queue';
@@ -30,9 +30,18 @@ class LeaseLost extends Error {}
 // страницами по PUSH_PAGE.size подписок: канал на 200 000 с 2000 подписками — две страницы. Страница — одна транзакция:
 // доставки (dedupe по endpoint и сообщению), продолжение со своим курсором и удаление самой задачи; строку задачи
 // уже удалил другой воркер (аренда истекла и перехвачена) — откат, ничего не вставлено. Либо всё, либо ничего
-register('push.message', async (p: { chatId?: number; id?: number; message?: PushMessage; after?: PushCursor }, job: Job) => {
+register('push.message', async (p: { chatId?: number; id?: number; groupId?: string; message?: PushMessage; after?: PushCursor }, job: Job) => {
   let m = p.message;
   let excludeChatId: number | undefined;
+  if (!m && p.chatId != null && p.id != null && p.groupId) {
+    // альбом: одно уведомление на все файлы — по первому сообщению, подпись берётся у того, где она есть
+    const rows = await openRows(await sql`select * from messages where chat_id = ${p.chatId} and group_id = ${p.groupId} and not deleted order by id`);
+    if (!rows.length) return;
+    const captioned = rows.find((r) => (r.body as string)) ?? rows[0];
+    m = { ...toMessage(rows[0]), body: captioned.body as string, entities: (captioned.entities as PushMessage['entities']) ?? undefined, senderId: Number(rows[0].sender_id), album: rows.length } as PushMessage;
+    const origin = rows[0].origin as { chatId?: unknown } | null;
+    if (origin?.chatId != null) excludeChatId = Number(origin.chatId);
+  }
   if (!m && p.chatId != null && p.id != null) {
     const row = await loadOpen(p.chatId, p.id);
     if (!row || row.deleted) return;   // удалили, пока задача ждала

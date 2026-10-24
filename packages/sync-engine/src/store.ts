@@ -704,6 +704,12 @@ export class Store {
     const k = m.chatId + ':' + m.id;
     if (this.notifiedIds.has(k)) return;
     this.notifiedIds.add(k);
+    // альбом (несколько файлов одним пузырём): одно уведомление на альбом, как в Telegram — от первого пришедшего фото
+    if (m.groupId && !mention) {
+      const ak = m.chatId + ':album:' + m.groupId;
+      if (this.notifiedIds.has(ak)) return;
+      this.notifiedIds.add(ak);
+    }
     if (this.notifiedIds.size > 2000) this.notifiedIds.delete(this.notifiedIds.values().next().value!);
     // тред — и у упоминания, и у простого комментария: клик по уведомлению открывает тред, а не ленту группы
     const thread = threadId ?? m.threadId;
