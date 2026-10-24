@@ -135,7 +135,7 @@ test('a guest thread (subscriber outside the group): loads and updates from thre
   await list.until((x) => x.some((r) => r.id === ch));
   const th = watchInto(ec, { kind: 'thread', chatId: g, threadId: copyId, limit: 50 });
   expect((await th.until((x) => x.length === 2)).map((m) => m.body)).toEqual(['пост', 'к1']);
-  expect(th.item('~thread')).toMatchObject({ loaded: true, guest: { channelId: ch, title: 'Обсуждение', joinToSend: false, joinApproval: false } });
+  expect(th.item('~thread')).toMatchObject({ loaded: true, guest: { channelId: ch, title: 'Обсуждение', joinToSend: false, joinApproval: false, requested: false, rights: { text: true } } });
   expect(ec.store.chats.has(g)).toBe(false);
   expect(ec.store.isGuest(g)).toBe(true);
   // живые комментарии участника — кадром threadPush (подписка на тред после первой страницы)
@@ -217,4 +217,23 @@ test('a guest thread after a reconnect: comments posted while offline arrive (th
   await send(b.userId, g, 'снова живой', copyId);
   await th.until((x) => x.some((m) => m.body === 'снова живой'));
   expect(ec.store.chats.has(g)).toBe(false);
+});
+
+test('a pending guest comment survives a wipe (keep outbox) without creating a chat row', async () => {
+  const a = await srv.login('Анна'), c = await srv.login('Вера'), b = await srv.login('Борис');
+  const { chatId: ch } = await createGroup(a.userId, { kind: 'channel', title: 'Новости', memberIds: [c.userId] });
+  const { chatId: g } = await createGroup(a.userId, { title: 'Обсуждение', memberIds: [b.userId] });
+  await setLinkedChat(a.userId, ch, g);
+  const post = await send(a.userId, ch, 'пост');
+  const copyId = await copyOf(ch, post.id);
+  const ec = await open(srv.config(c));
+  ec.connect(); await ec.whenIdle();
+  const th = watchInto(ec, { kind: 'thread', chatId: g, threadId: copyId, limit: 50 });
+  await th.until((x) => x.length === 1);
+  th.handle.close();
+  ec.disconnect();
+  await ec.call({ type: 'sendMessage', chatId: g, body: 'офлайн', threadId: copyId });
+  await ec.store.wipe(ec.store.epoch, { outbox: true });
+  expect(ec.store.chats.has(g)).toBe(false);
+  expect([...ec.store.outbox.values()].some((o) => o.chatId === g && o.body === 'офлайн')).toBe(true);
 });

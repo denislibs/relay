@@ -2129,6 +2129,8 @@ export class Engine {
   private loadOpenChats(): void {
     for (const w of this.watchers.values()) {
       const q = w.q;
+      // тред, открытый без сети (перезагрузка с адресом треда): страница не грузилась — гостю строки чата не будет
+      if (q.kind === 'thread') { if (!this.store.threadRanges(q.chatId, q.threadId)) this.run(() => this.ensureThreadWindow(q)); continue; }
       if (q.kind !== 'messages') continue;
       const c = this.store.chats.get(q.chatId);
       if (c && !Store.unnamed(c)) continue;
@@ -2511,7 +2513,7 @@ export class Engine {
       const [chatId, threadId] = k.split(':').map(Number);
       this.request({ op: 'watchThread', reqId: '', chatId, threadId })
         .then(() => { if (!this.watchingThreads.has(k)) return; this.store.guestWatch(chatId, threadId, true); this.run(() => this.catchUpThread(chatId, threadId)); })
-        .catch((e: ReqError) => { if (this.watchingThreads.delete(k) && e?.code !== 'offline') this.refusedThreads.add(k); });
+        .catch((e: ReqError) => { if (this.watchingThreads.delete(k) && e?.code !== 'offline' && !e?.retry) this.refusedThreads.add(k); });   // временный отказ — спросим снова
     }
     for (const k of [...this.watchingThreads]) {
       if (want.has(k)) continue;

@@ -120,22 +120,23 @@ export function ChannelBar({ chatId, member, username, approval, requested }: { 
  * ввода — «Вступить в группу» / «Подать заявку» (как в Telegram). Вступил — строка группы приходит журналом, поле ввода
  * появляется само; заявка — тост.
  */
-export function GuestJoinBar({ chatId, guest }: { chatId: number; guest: { joinToSend: boolean; joinApproval: boolean } }) {
+export function GuestJoinBar({ chatId, guest }: { chatId: number; guest: { joinToSend: boolean; joinApproval: boolean; requested?: boolean } }) {
   const [busy, setBusy] = useState(false);
   const [sent, setSent] = useState(false);
   const spin = useMinVisible(busy, { delay: 150, min: 600 });
+  const requested = sent || !!guest.requested;   // заявка подана (и при повторном открытии треда — из ответа сервера)
   const join = async () => {
     setBusy(true);
     const r = await groupCall<{ chatId: number; requested: boolean }>('POST', `/groups/${chatId}/join`);
-    setBusy(false);
-    if (!r.ok) { showToast(errorText(r.code)); return; }
-    if (r.data.requested) { setSent(true); showToast('Заявка отправлена — администраторы её рассмотрят'); }
+    if (!r.ok) { setBusy(false); showToast(errorText(r.code)); return; }
+    // вступил: спиннер держим, пока не придёт строка группы (панель сменится полем ввода одним кадром, как у ChannelBar)
+    if (r.data.requested) { setBusy(false); setSent(true); showToast('Заявка отправлена — администраторы её рассмотрят'); }
   };
   return (
     <div class="rl-composer-wrap app-plate-wrap">
       <div class="rl-composer app-plate app-channel-bar">
-        <button type="button" class="app-channel-btn app-channel-join" disabled={busy || sent} onPointerDown={ripple} onClick={() => void join()}>
-          <span class={spin ? 'is-busy' : undefined}>{sent ? 'Заявка отправлена' : guestJoinLabel(guest)}</span>
+        <button type="button" class="app-channel-btn app-channel-join" disabled={busy || requested} onPointerDown={ripple} onClick={() => void join()}>
+          <span class={spin ? 'is-busy' : undefined}>{requested ? 'Заявка отправлена' : guestJoinLabel(guest)}</span>
         </button>
       </div>
     </div>

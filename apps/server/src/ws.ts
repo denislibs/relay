@@ -111,7 +111,8 @@ export async function handleFrame(userId: number, frame: ClientFrame, publish: (
       case 'watchThread': {
         // гость треда (не участник группы, threads.ts threadAccess) — топик треда; участнику хватает топика чата
         const { guest } = await threadAccess(sql, frame.chatId, userId, frame.threadId);
-        if (guest && sock) watchThread(sock, frame.chatId, frame.threadId);
+        // сокет мог закрыться, пока проверяли (releaseThreads уже прошёл) — не подписывать: счётчик тредов процесса не утечёт
+        if (guest && sock && sock.readyState === 1 && !watchThread(sock, frame.chatId, frame.threadId, guest.channelId)) throw new DomainError('flood', 'watch');
         return [{ op: 'ack', reqId: frame.reqId, result: { guest: !!guest } }];
       }
       case 'unwatchThread':

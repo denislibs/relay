@@ -23,7 +23,7 @@ import { asset } from './assets';
 import { compressPhoto } from './media/compressPhoto';
 import { compressVideo, type VideoQuality } from './media/compressVideo';
 import { isOwnChannelPost, postCopyChannel } from './channelText';
-import { findTarget, hashFor, parseHash, positionKey, sameTarget, toTarget, type StackTarget } from './stackTarget';
+import { baseOf, findTarget, hashFor, parseHash, positionKey, sameTarget, toTarget, type StackTarget } from './stackTarget';
 
 declare const __BUILD__: string;
 declare const __DEV__: boolean;
@@ -96,9 +96,9 @@ export function startData(me: Me): void {
   // запись истории могла вернуть прежний адрес (#chat=…) — поправить на чат на экране
   addEventListener('popstate', () => queueMicrotask(syncShown));
   startNotify((id, threadId) => { focus(); openNotified(id, threadId); });
-  // #chat=…&thread=… при загрузке: нижний слой — чат, тред — поверх него (docs/navigation-rules.md)
+  // #chat=…&thread=… при загрузке: нижний слой — чат (тред гостя, &via= — канал поста), тред — поверх него (docs/navigation-rules.md)
   const open = parseHash(location.hash);
-  if (open) { openChat(open.chatId); if (open.threadId != null) whenShown(open.chatId, () => openInner(open)); }
+  if (open) { openChat(baseOf(open)); if (open.threadId != null) whenShown(baseOf(open), () => openInner(open)); }
 }
 
 /**
@@ -289,6 +289,7 @@ function startFeed(frame: ChatFrame, anchor: Anchor | undefined, onFirst: (patch
     const meta = patch.feedMeta ?? null;
     toastUploadRefusals(patch.messages!);
     if (s.first) first(patch); else patchFrame(frame.key, patch);
+    if (patch.thread?.guest && topReady()?.key === frame.key) syncShown();   // тред гостя узнан позже — в адрес канал (&via=)
     // окно дошло до последних сообщений — снова живой хвост (новые сообщения появятся сами)
     if (s.anchor && meta?.live && !meta.hasNewer) { s.anchor = undefined; s.watch.update(feedQuery(frame, undefined)); }
   });
@@ -327,7 +328,12 @@ function newFrame(t: StackTarget, target?: { id: number; sort: number }): { fram
 /** Адрес и присутствие — по чату на экране. */
 function syncShown(): void {
   const top = topReady();
-  history.replaceState(history.state, '', top ? hashFor(top) : location.pathname);
+  // тред гостя: в адресе и канал поста (&via=) — перезагрузка положит под тред канал, а не группу, где я не состою
+  if (!top) history.replaceState(history.state, '', location.pathname);
+  else {
+    const hash = hashFor({ chatId: top.chatId, threadId: top.threadId, via: top.thread?.guest?.channelId });
+    if (location.hash !== hash) history.replaceState(history.state, '', hash);
+  }
   const thread = top?.threadId ?? null;
   if (getGlobal().openThreadId !== thread) setGlobal({ openThreadId: thread });
   if ((top?.chatId ?? null) !== peerFor) watchPeer(top?.chatId ?? null);
@@ -566,8 +572,9 @@ export function openInner(to: number | StackTarget, target?: { id: number; sort:
   const t = toTarget(to), chatId = t.chatId;
   const g = getGlobal();
   if (!topReady()) {
-    openChat(chatId, t.threadId == null ? target : undefined);
-    if (t.threadId != null) whenShown(chatId, () => openInner(t, target));   // тред без открытого чата: группа снизу, тред поверх
+    openChat(baseOf(t), t.threadId == null ? target : undefined);
+    // тред без открытого чата: группа снизу (тред гостя — канал поста), тред поверх
+    if (t.threadId != null) whenShown(baseOf(t), () => openInner(t, target));
     return;
   }
   cancelPending();

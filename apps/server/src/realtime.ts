@@ -3,7 +3,7 @@ import type { JournalEntry, ServerFrame, Update } from '@relay/protocol';
 import { sql } from './db';
 import type { ChatNotify, UpdatesNotify } from './domain/journal';
 import { getChatUpdatesRange } from './domain/chatJournal';
-import { subscribeUserSockets, threadTopic, unsubscribeUserSockets, watchedThreads } from './sockets';
+import { recheckThreads, subscribeUserSockets, threadTopic, unsubscribeUserSockets, watchedThreads } from './sockets';
 import { processAlive, processGone } from './domain/liveRegistry';
 import { closeLive, parseEnded, terminatedFrame, touchLive } from './domain/sessions';
 
@@ -93,6 +93,8 @@ export async function startRealtime(server: Server): Promise<() => Promise<void>
   const publishChat = (c: number, from: number, to: number, items: JournalEntry[]) => {
     server.publish(`chat:${c}`, JSON.stringify({ op: 'push', chatId: c, from, to, items } satisfies ServerFrame));
     publishThreads(c, items.length || from === to ? items : null);
+    // перепривязка группы обсуждения и прочие перемены чата — треды гостей перепроверяются (доступ мог пропасть)
+    if (items.some((it) => it.update.type === 'groupUpdated')) void recheckThreads(c);
   };
   // длинное событие (без e — не влезло в 8000 байт): записи читаются один раз на процесс, а не syncChat каждого сокета.
   // Пока чтение в полёте, следующие NOTIFY этого чата встают за ним — push уходят по порядку seq

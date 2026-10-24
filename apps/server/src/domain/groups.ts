@@ -281,10 +281,16 @@ export async function listBanned(viewer: number, chatId: number): Promise<{ bann
  * Добавить в группу (участником). Видимая история — с момента вступления, если история для новых скрыта.
  * Не шлёт служебное — вызывающий решает, каким оно будет (добавил(а) / вступил(а) по ссылке / заявка принята).
  */
-async function insertMember(tx: Tx, chatId: number, userId: number, inviterId: number | null): Promise<boolean> {
+async function insertMember(tx: Tx, chatId: number, userId: number, inviterId: number | null, keep: boolean): Promise<boolean> {
   const [c] = await tx`select history_hidden, (select coalesce(max(id), 0) from messages where chat_id = ${chatId}) as last_id from chats where id = ${chatId}`;
   const from = c.history_hidden ? Number(c.last_id) + 1 : 0;
-  const ins = await tx`insert into chat_members (chat_id, user_id, inviter_id, history_from) values (${chatId}, ${userId}, ${inviterId}, ${from}) on conflict do nothing returning 1`;
+  // вернулся сам (keep: ссылка, заявка, из треда) — с прежними ограничениями; добавил админ — ограничения сняты (решил он)
+  const [r] = keep
+    ? await tx`delete from chat_restrictions where chat_id = ${chatId} and user_id = ${userId} returning restricted, history_from`
+    : await tx`delete from chat_restrictions where chat_id = ${chatId} and user_id = ${userId} returning null as restricted, 0 as history_from`;
+  const ins = await tx`insert into chat_members (chat_id, user_id, inviter_id, history_from, restricted)
+                       values (${chatId}, ${userId}, ${inviterId}, ${Math.max(from, Number(r?.history_from ?? 0))}, ${r?.restricted ? tx.json(r.restricted as never) : null})
+                       on conflict do nothing returning 1`;
   return ins.length > 0;
 }
 
@@ -301,7 +307,7 @@ async function chatSize(db: Db, chatId: number): Promise<{ kind: CommunityKind; 
 export async function acceptMember(tx: Tx, chatId: number, userId: number, actorId: number | null, type: 'joined_by_link' | 'joined_by_request' | 'members_added'): Promise<boolean> {
   const { kind, n } = await chatSize(tx, chatId);
   if (n >= MEMBERS_MAX[kind]) throw new DomainError('too_long', 'members');
-  if (!(await insertMember(tx, chatId, userId, actorId))) return false;
+  if (!(await insertMember(tx, chatId, userId, actorId, type !== 'members_added'))) return false;
   await tx`delete from chat_join_requests where chat_id = ${chatId} and user_id = ${userId}`;
   if (kind === 'channel') {
     // канал: вступивший начинает с прочитанного (как в Telegram) — история не становится сотней непрочитанных
@@ -342,7 +348,7 @@ export async function addGroupMembers(userId: number, chatId: number, rawIds: un
       if (banned.has(id) && !canUnban) continue;
       if ((await chatSize(tx, chatId)).n >= max) break;
       if (banned.has(id)) await tx`delete from chat_bans where chat_id = ${chatId} and user_id = ${id}`;
-      if (await insertMember(tx, chatId, id, userId)) added.push(id);
+      if (await insertMember(tx, chatId, id, userId, false)) added.push(id);
     }
     const already = new Set((await tx`select user_id from chat_members where chat_id = ${chatId} and user_id = any(${ids}::bigint[])`).map((r) => Number(r.user_id)));
     const failed = ids.filter((id) => !already.has(id));
@@ -363,6 +369,12 @@ export async function addGroupMembers(userId: number, chatId: number, rawIds: un
 /** Убрать из группы: служебное, удалённому — chatRemoved, всем — новый состав. Канал — только chatRemoved ушедшему. */
 async function dropMember(tx: Tx, chatId: number, target: number, actor: number, type: 'member_left' | 'member_removed', kind: GroupCtx['kind']): Promise<void> {
   if (kind !== 'channel') await serviceMessage(tx, chatId, actor, type, { users: await names(tx, [target]) });
+  // ограничения переживают выход (chat_restrictions): гость треда и вернувшийся по ссылке — с теми же правами и историей
+  if (kind === 'group') await tx`
+    insert into chat_restrictions (chat_id, user_id, restricted, history_from)
+    select chat_id, user_id, restricted, history_from from chat_members
+     where chat_id = ${chatId} and user_id = ${target} and role = 'member' and (restricted is not null or history_from > 0)
+    on conflict (chat_id, user_id) do update set restricted = excluded.restricted, history_from = excluded.history_from`;
   await tx`delete from chat_members where chat_id = ${chatId} and user_id = ${target}`;
   await tx`delete from drafts where chat_id = ${chatId} and user_id = ${target}`;
   await tx`delete from message_mentions where user_id = ${target} and chat_id = ${chatId}`;

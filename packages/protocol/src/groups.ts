@@ -66,7 +66,9 @@ export interface ThreadGuest {
   username: string | null;
   joinToSend: boolean;
   joinApproval: boolean;
+  requested: boolean;     // заявка на вступление уже подана
   slowMode: number;
+  rights: MemberRights;   // что гостю можно писать: умолчания группы или прежнее исключение (вышел ограниченным)
 }
 
 /** Моё место в группе. rights — что мне можно как участнику (исключение или умолчания). */

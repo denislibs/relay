@@ -378,7 +378,7 @@ test('a channel subscriber outside the group reads the thread (all comments, gue
   const page = await ok(d, 'GET', `/chats/${g}/threads/${copyId}/messages?limit=50`);
   expect(page.header).toMatchObject({ id: copyId, origin: { chatId: ch } });
   expect(page.messages.map((m: any) => m.body)).toEqual(['от участника']);
-  expect(page.guest).toEqual({ channelId: ch, title: 'Обсуждение', username: null, joinToSend: false, joinApproval: false, slowMode: 0 });
+  expect(page.guest).toMatchObject({ channelId: ch, title: 'Обсуждение', username: null, joinToSend: false, joinApproval: false, requested: false, slowMode: 0, rights: { text: true, photos: true } });
   expect((await ok(b, 'GET', `/chats/${g}/threads/${copyId}/messages`)).guest).toBeUndefined();   // участнику — без guest
   // комментирует, не вступая: обычное сообщение группы, счётчик треда, своя прочитанность треда
   const mine = await comment(d, g, copyId, 'от гостя', { replyToId: k1.id });
@@ -520,4 +520,101 @@ test('a guest edits and deletes own comments and reacts in the thread; outside t
   const plain = await send(a, g, 'в группе');
   await expect(reactMessage(d.userId, g, plain.id, '👍')).rejects.toMatchObject({ code: 'not_member' });
   await expect(deleteMessage(d.userId, g, plain.id)).rejects.toMatchObject({ code: 'not_member' });
+});
+
+// ---------- ревью #14 ----------
+
+test('guest thread subscriptions are revoked: leaving the channel, relinking — no more threadPush on the live socket', async () => {
+  const { a, b, d, ch, g, copyId } = await guests();
+  const wd = await connect(d);
+  expect(await frame(wd, { op: 'watchThread', reqId: 'w1', chatId: g, threadId: copyId })).toMatchObject({ op: 'ack', result: { guest: true } });
+  const live = nextFrame(wd, (f) => f.op === 'threadPush');
+  await comment(b, g, copyId, 'пока гость');
+  await live;
+  const got = collect(wd);
+  await ok(d, 'DELETE', `/groups/${ch}/members/${d.userId}`);   // вышел из канала
+  await Bun.sleep(150);
+  await comment(b, g, copyId, 'уже не гость');
+  await Bun.sleep(250);
+  expect(got.some((f) => f.op === 'threadPush')).toBe(false);
+  // перепривязка: подписка гостя на тред старой группы снимается (по groupUpdated), в том числе в чужом процессе
+  const e = await login('Ева');
+  await ok(a, 'POST', `/groups/${ch}/members`, { userIds: [e.userId] });
+  const we = await connect(e);
+  expect(await frame(we, { op: 'watchThread', reqId: 'w2', chatId: g, threadId: copyId })).toMatchObject({ op: 'ack', result: { guest: true } });
+  const gotE = collect(we);
+  await setLinkedChat(a.userId, ch, await group(a, [b], 'Новое'));
+  await Bun.sleep(300);
+  await comment(b, g, copyId, 'после перепривязки');
+  await Bun.sleep(250);
+  expect(gotE.filter((f) => f.op === 'threadPush').flatMap((f: any) => f.items).some((u: any) => u.message?.body === 'после перепривязки')).toBe(false);
+  wd.close(); we.close();
+});
+
+test('restrictions survive leaving the group: the guest keeps the member exception and the hidden-history boundary; rejoining from the thread too; admin re-add clears', async () => {
+  const { a, b, ch, g, copyId } = await guests();
+  const r = await login('Рома');
+  await ok(a, 'POST', `/groups/${ch}/members`, { userIds: [r.userId] });
+  await ok(a, 'POST', `/groups/${g}/members`, { userIds: [r.userId] });
+  const k1 = await comment(b, g, copyId, 'до');
+  await ok(a, 'PUT', `/groups/${g}/members/${r.userId}/restrict`, { rights: { text: false } });
+  await sql`update chat_members set history_from = ${k1.id + 1} where chat_id = ${g} and user_id = ${r.userId}`;
+  await comment(b, g, copyId, 'после');
+  await ok(r, 'DELETE', `/groups/${g}/members/${r.userId}`);   // вышел сам
+  const page = await ok(r, 'GET', `/chats/${g}/threads/${copyId}/messages`);
+  expect(page.guest.rights).toMatchObject({ text: false });
+  expect(page.messages.map((m: any) => m.body)).toEqual(['после']);   // граница скрытой истории — прежняя
+  await expect(comment(r, g, copyId, 'гостем')).rejects.toMatchObject({ code: 'forbidden', message: 'text' });
+  // вернулся из треда — с тем же исключением
+  expect(await ok(r, 'POST', `/groups/${g}/join`)).toEqual({ chatId: g, requested: false });
+  expect((await ok(r, 'GET', '/chats?ids=' + g))[0].me).toMatchObject({ restricted: true, rights: { text: false } });
+  await expect(comment(r, g, copyId, 'вернулся')).rejects.toMatchObject({ code: 'forbidden' });
+  // снова вышел; админ добавил — ограничения сняты
+  await ok(r, 'DELETE', `/groups/${g}/members/${r.userId}`);
+  await ok(a, 'POST', `/groups/${g}/members`, { userIds: [r.userId] });
+  expect((await ok(r, 'GET', '/chats?ids=' + g))[0].me).toMatchObject({ restricted: false, rights: { text: true } });
+  await comment(r, g, copyId, 'можно');
+  expect((await sql`select 1 from chat_restrictions where chat_id = ${g} and user_id = ${r.userId}`).length).toBe(0);
+});
+
+test('profiles: a guest sees authors of the thread, group members see guest commenters (list and profile); others and banned guests do not', async () => {
+  const { a, b, d, x, ch, g, copyId } = await guests();
+  await comment(b, g, copyId, 'участник');
+  expect((await call(d, 'GET', `/users/${b.userId}`)).status).toBe(200);
+  // гость ещё не писал — участникам группы не виден
+  expect((await ok(b, 'GET', `/users?ids=${d.userId}`)).users).toEqual([]);
+  expect((await call(b, 'GET', `/users/${d.userId}`)).status).toBe(404);
+  await comment(d, g, copyId, 'гость');
+  expect((await ok(b, 'GET', `/users?ids=${d.userId}`)).users.map((u: any) => u.id)).toEqual([d.userId]);
+  expect((await call(b, 'GET', `/users/${d.userId}`)).status).toBe(200);
+  expect((await ok(x, 'GET', `/users?ids=${b.userId},${d.userId}`)).users).toEqual([]);   // ни в канале, ни в группе
+  // комментарий в группе, но не в треде этого канала (сообщение вне треда) — гостю не виден
+  const q = await login('Квентин');
+  await ok(a, 'POST', `/groups/${g}/members`, { userIds: [q.userId] });
+  await send(q, g, 'просто в группе');
+  expect((await ok(d, 'GET', `/users?ids=${q.userId}`)).users).toEqual([]);
+  // гость в бане группы — авторов не видит
+  await sql`insert into chat_bans (chat_id, user_id, banned_by) values (${g}, ${d.userId}, ${a.userId})`;
+  expect((await ok(d, 'GET', `/users?ids=${b.userId}`)).users).toEqual([]);
+  void ch;
+});
+
+test('watchThread: at most WATCH_MAX threads and previews per socket (flood); album non-root copy: no guest reaction', async () => {
+  const { a, b, d, ch, g } = await guests();
+  const wd = await connect(d);
+  for (let i = 0; i < 10; i++) {
+    const p = await send(a, ch, 'пост ' + i);
+    expect(await frame(wd, { op: 'watchThread', reqId: 'w' + i, chatId: g, threadId: (await copyOf(ch, p.id))! })).toMatchObject({ op: 'ack' });
+  }
+  const p11 = await send(a, ch, 'пост 11');
+  expect(await frame(wd, { op: 'watchThread', reqId: 'w11', chatId: g, threadId: (await copyOf(ch, p11.id))! })).toMatchObject({ op: 'err', code: 'flood' });
+  wd.close();
+  // альбом: копия второго поста — не корень треда, гостю реакцию на неё не поставить
+  const groupId = crypto.randomUUID();
+  const file = async (n: number) => ({ id: (await uploadFile(base, a.token, { name: `f${n}.pdf`, mime: 'application/pdf' }, 'pdf' + n) as { id: string }).id });
+  await send(a, ch, 'альбом', { attachment: await file(1), groupId });
+  const p2 = await send(a, ch, '', { attachment: await file(2), groupId });
+  const [second] = await sql`select id from messages where origin->>'chatId' = ${String(ch)} and origin->>'id' = ${String(p2.id)}`;
+  await expect(reactMessage(d.userId, g, Number(second.id), '👍')).rejects.toMatchObject({ code: 'not_member' });
+  void b;
 });

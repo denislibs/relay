@@ -806,6 +806,9 @@ export class Store {
   addPending(o: OutboxEntry): void {
     this.outbox.set(o.clientId, o);
     this.dirtyOutbox.add(o.clientId);
+    // комментарий в чат без строки, а треда гостя в памяти нет (wipe, перезапуск): только очередь — строку не заводим,
+    // сообщение придёт с краем треда, когда его откроют
+    if (o.threadId != null && !this.chats.has(o.chatId) && !this.guests.has(o.chatId)) return;
     if (!this.isGuest(o.chatId)) this.ensureChat(o.chatId);   // свой комментарий гостя — без строки чата
     this.loaded.add(o.chatId);
     this.putMessage({

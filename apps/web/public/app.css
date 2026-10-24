@@ -185,6 +185,8 @@ body { background: var(--bg); color: var(--ink); font-family: var(--font-sans); 
 /* личный чат и чёрный список: плашка вместо поля ввода */
 .app-plate, .rl-shell .app-plate { justify-content: center; align-items: center; gap: var(--space-2); padding: 4px 8px 4px 16px; min-height: 48px; color: var(--ink-muted); font: 400 15px/1.3 var(--font-sans); text-align: center; animation: app-fade var(--dur-base) var(--ease-out); }
 .app-plate .rl-btn { flex-shrink: 0; }
+/* тред ещё грузится: место поля ввода держим, но пусто — поле или «Вступить» появятся один раз, без подмены */
+.app-plate-wait, .rl-shell .app-plate-wait { visibility: hidden; animation: none; }
 /* выбор людей (исключения, «Заблокировать»): список прокручивается внутри */
 .app-people { display: flex; flex-direction: column; padding-top: var(--space-2); }
 .app-people .rl-picker { flex: 1; min-height: 0; }

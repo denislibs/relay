@@ -129,6 +129,8 @@ export function Chat({ chatId, frameKey, active, threadId }: { chatId: number; f
   const threadHeader = useGlobal((s) => { const f = frameByKey(s, frameKey); return f?.thread?.header ? f.messages.find((m) => m.key === f.thread!.header) ?? null : null; });
   // тред гостя: я не участник группы обсуждения (комментирую как подписчик канала) — строки чата нет
   const guest = useGlobal((s) => (thread ? frameByKey(s, frameKey)?.thread?.guest ?? null : null));
+  // тред ещё не загружен — не знаем, гость ли я: ни поля ввода, ни «Вступить» (место под ним держим), без подмены кадром позже
+  const threadWaiting = useGlobal((s) => thread && !frameByKey(s, frameKey)?.thread?.loaded);
   const [readByOf, setReadByOf] = useState<number | null>(null);
   // плашка над тредом подписана каналом поста (если он в списке)
   const originTitle = useGlobal((s) => { const o = threadHeader?.origin as { chatId: number } | undefined; return o ? (s.chats.find((c) => c.id === o.chatId)?.title as string | undefined) ?? null : null; });
@@ -384,19 +386,21 @@ export function Chat({ chatId, frameKey, active, threadId }: { chatId: number; f
   // группа: мои права участника (у админов — все), медленный режим, запрет копирования
   const gMe = community ? (chat?.me as MyMembership | null) ?? null : null;
   const gInfo = community ? (chat?.group as GroupInfo | null) ?? null : null;
-  const gRights = gMe && !gMe.admin && !channel ? gMe.rights : null;
+  // гость треда — права из ответа сервера (умолчания группы или прежнее исключение)
+  const gRights = guest ? guest.rights : gMe && !gMe.admin && !channel ? gMe.rights : null;
+  const slowMode = gInfo?.slowMode ?? guest?.slowMode ?? 0;
   // канал без права публиковать (подписчик или не подписан) — панель «Подписаться» / «Звук» вместо поля ввода
   const channelBar = channel && !chat?.canSend;
   // правка поста редактором без права post (только edit): на время правки — поле ввода вместо панели канала
-  const plate = channelBar && !editing ? 'channel' : guestJoinLabel(guest) && !editing ? 'join' : iBlocked ? 'mine' : theyBlocked ? 'theirs' : gRights && !gRights.text && !hasMedia(gRights) ? 'group' : null;
+  const plate = channelBar && !editing ? 'channel' : threadWaiting ? 'wait' : guestJoinLabel(guest) && !editing ? 'join' : iBlocked ? 'mine' : theyBlocked ? 'theirs' : gRights && !gRights.text && !hasMedia(gRights) ? 'group' : null;
   // поле ввода смонтировалось только ради правки (панель канала) — startEdit не застал его, текст кладём сейчас
   useEffect(() => { if (editing && channelBar) api.current?.setValue(editing.original, { focus: true }); }, [editing?.id, channelBar]);
   /** Можно ли отправить сейчас (вид сообщения и медленный режим); нельзя — тост и false. */
   const allowed = (right: MemberRight): boolean => {
     if (gRights && !gRights[right]) { showToast(right === 'text' ? 'В этой группе нельзя отправлять текст' : `В этой группе нельзя отправлять: ${MEMBER_RIGHT_TEXT[right].toLowerCase()}`); return false; }
-    if (gInfo?.slowMode && gRights) {
+    if (slowMode && gRights) {
       const last = messages.filter((m) => m.senderId === me.userId && !m.service && m.id != null).pop();
-      const left = last ? Math.ceil(gInfo.slowMode - (Date.now() - Date.parse(last.createdAt as string)) / 1000) : 0;
+      const left = last ? Math.ceil(slowMode - (Date.now() - Date.parse(last.createdAt as string)) / 1000) : 0;
       if (left > 0) { showToast(`Медленный режим: следующее сообщение — через ${left} с`); return false; }
     }
     return true;
@@ -585,6 +589,7 @@ export function Chat({ chatId, frameKey, active, threadId }: { chatId: number; f
       </MediaPolicy.Provider>
       {plate === 'channel' ? <ChannelBar chatId={chatId} member={!!gMe} username={gInfo?.username ?? null} approval={!!gInfo?.joinApproval} requested={!!chat?.requested} />
       : plate === 'join' && guest ? <GuestJoinBar chatId={chatId} guest={guest} />
+      : plate === 'wait' ? <div class="rl-composer-wrap app-plate-wrap" aria-hidden="true"><div class="rl-composer app-plate app-plate-wait" /></div>
       : plate ? (
         <div class="rl-composer-wrap app-plate-wrap">
           <div class="rl-composer app-plate" role="status" key={plate}>
