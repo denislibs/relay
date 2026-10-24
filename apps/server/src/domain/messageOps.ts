@@ -20,14 +20,18 @@ async function ownMessage(tx: Parameters<typeof assertMember>[0], userId: number
   if (m.sender_id !== userId) throw new DomainError('forbidden', 'not your message');
 }
 
-/** Правка своего сообщения: новое тело и отметка «изм.» — всем участникам через журнал. */
+/** Правка своего сообщения (в канале — и чужого поста админом с правом edit, без срока): новое тело и отметка «изм.» —
+ *  всем участникам через журнал. */
 export async function editMessage(userId: number, chatId: number, id: number, body: string, rawEntities?: Entity[]): Promise<{ editedAt: string }> {
   const { text, entities } = trimFormatted(body, normalizeEntities(body, rawEntities));
   if (!text) throw new DomainError('bad_frame', 'empty body');
   if (text.length > MAX_BODY) throw new DomainError('too_long');
   return sql.begin(async (tx) => {
-    await assertMember(tx, chatId, userId);
-    await ownMessage(tx, userId, chatId, id);   // в служебном чате — тоже только свои (сообщения Relay не правятся)
+    const ctx = await groupCtx(tx, chatId, userId);
+    if (ctx.kind === 'channel' && hasAdmin(ctx, 'edit')) {
+      const [m] = await tx`select deleted, service_type from messages where chat_id = ${chatId} and id = ${id} for update`;
+      if (!m || m.deleted || m.service_type) throw new DomainError('not_found', 'message');
+    } else await ownMessage(tx, userId, chatId, id);   // в служебном чате — тоже только свои (сообщения Relay не правятся)
     // заблокированный не правит сообщения в личном чате с тем, кто его заблокировал
     if (await blockedInDirect(tx, chatId, userId)) throw new DomainError('blocked');
     await burnCodes(tx, userId, text);

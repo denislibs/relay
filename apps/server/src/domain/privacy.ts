@@ -122,7 +122,7 @@ export async function validRule(db: Db, userId: number, key: unknown, body: unkn
       select u.id from users u
        where u.id = any(${all}::bigint[])
          and (exists (select 1 from contacts c where c.owner_id = ${userId} and c.user_id = u.id)
-              or exists (select 1 from chat_members a join chat_members b on b.chat_id = a.chat_id where a.user_id = ${userId} and b.user_id = u.id))`).map((r) => Number(r.id))]);
+              or exists (select 1 from chat_members a join chats c on c.id = a.chat_id and c.kind <> 'channel' join chat_members b on b.chat_id = a.chat_id where a.user_id = ${userId} and b.user_id = u.id))`).map((r) => Number(r.id))]);
     allow = allow.filter((x) => known.has(x));
     deny = deny.filter((x) => known.has(x));
   }

@@ -21,7 +21,7 @@ const login = async (name: string): Promise<U> => (await (await fetch(`${base}/d
 const call = (u: U, method: string, path: string, body?: unknown) =>
   fetch(`${base}${path}`, { method, headers: { cookie: `relay_session=${u.token}` }, body: body === undefined ? undefined : JSON.stringify(body) });
 
-const DEFAULTS = { direct: { muted: false, preview: true }, group: { muted: false, preview: true } };
+const DEFAULTS = { direct: { muted: false, preview: true }, group: { muted: false, preview: true }, channel: { muted: false, preview: true } };
 
 test('defaults without a row; PUT upserts, keeps the other fields and writes settingsChanged', async () => {
   const a = await login('Анна');
@@ -31,7 +31,7 @@ test('defaults without a row; PUT upserts, keeps the other fields and writes set
   const r = await call(a, 'PUT', '/settings/notify/group', { muted: true });
   expect(r.status).toBe(200);
   const j = await r.json();
-  expect(j.notify).toEqual({ direct: DEFAULTS.direct, group: { muted: true, preview: true } });
+  expect(j.notify).toEqual({ direct: DEFAULTS.direct, group: { muted: true, preview: true }, channel: DEFAULTS.channel });
   expect(j.seq).toBe(1);
   await call(a, 'PUT', '/settings/notify/group', { preview: false });
   expect((await (await call(a, 'GET', '/settings')).json()).notify.group).toEqual({ muted: true, preview: false });
@@ -41,7 +41,7 @@ test('defaults without a row; PUT upserts, keeps the other fields and writes set
   expect(same.seq).toBe(2);
   const items = (await getUpdates(a.userId, 0)).items;
   expect(items.map((i) => i.update.type)).toEqual(['settingsChanged', 'settingsChanged']);
-  expect(items[1].update).toEqual({ type: 'settingsChanged', settings: { notify: { direct: DEFAULTS.direct, group: { muted: true, preview: false } }, sessionsTtlDays: 180, folders: [] } });
+  expect(items[1].update).toEqual({ type: 'settingsChanged', settings: { notify: { direct: DEFAULTS.direct, group: { muted: true, preview: false }, channel: DEFAULTS.channel }, sessionsTtlDays: 180, folders: [] } });
 });
 
 test('settingsChanged reaches a second session of the same user, not another user', async () => {
@@ -59,7 +59,7 @@ test('settingsChanged reaches a second session of the same user, not another use
   await poke;
   w2.send(JSON.stringify({ op: 'sync', since: 0 }));
   const f = await nextFrame(w2, (f) => f.op === 'updates') as Extract<ServerFrame, { op: 'updates' }>;
-  expect(f.items.map((i) => i.update)).toEqual([{ type: 'settingsChanged', settings: { notify: { direct: { muted: true, preview: true }, group: DEFAULTS.group }, sessionsTtlDays: 180, folders: [] } }]);
+  expect(f.items.map((i) => i.update)).toEqual([{ type: 'settingsChanged', settings: { notify: { direct: { muted: true, preview: true }, group: DEFAULTS.group, channel: DEFAULTS.channel }, sessionsTtlDays: 180, folders: [] } }]);
   await Bun.sleep(100);
   expect(seen.some((x) => x.op === 'poke')).toBe(false);
   w1.close(); w2.close(); wb.close();
@@ -67,7 +67,7 @@ test('settingsChanged reaches a second session of the same user, not another use
 
 test('invalid type, body or field type → 400; needs a session', async () => {
   const a = await login('Анна');
-  for (const [path, body] of [['/settings/notify/channel', { muted: true }], ['/settings/notify/direct', { muted: 'yes' }], ['/settings/notify/direct', [1]], ['/settings/notify/direct', null]] as const) {
+  for (const [path, body] of [['/settings/notify/forum', { muted: true }], ['/settings/notify/direct', { muted: 'yes' }], ['/settings/notify/direct', [1]], ['/settings/notify/direct', null]] as const) {
     const r = await call(a, 'PUT', path, body);
     expect([path, r.status]).toEqual([path, 400]);
   }

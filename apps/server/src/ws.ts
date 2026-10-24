@@ -11,6 +11,7 @@ import { saveDraft } from './domain/drafts';
 import { deleteMessage, editMessage, markListened, reactMessage } from './domain/messageOps';
 import { appendTodo, editTodo, toggleTodo } from './domain/todo';
 import { pressButton } from './domain/buttons';
+import { ctxFromRow, hasAdmin } from './domain/groupRights';
 
 /** Ждать open сокета (подписки на журналы чатов), но не дольше ms: Valkey недоступен — отвечаем, сверка догонит. */
 const opened = (sock: ChatSocket | undefined, ms = 5000) => sock?.data.opened ? Promise.race([sock.data.opened, new Promise<void>((r) => setTimeout(r, ms))]) : Promise.resolve();
@@ -23,8 +24,11 @@ export async function handleFrame(userId: number, frame: ClientFrame, publish: (
     switch (frame.op) {
       case 'typing': {
         // не участник — молча игнорируем (это не данные, ответа нет)
-        const [c] = await sql`select c.kind, exists (select 1 from chat_members m where m.chat_id = c.id and m.user_id = ${userId}) as member from chats c where c.id = ${frame.chatId}`;
-        if (!c?.member) return [];
+        const [c] = await sql`select c.kind, m.role, m.admin_rights from chats c join chat_members m on m.chat_id = c.id and m.user_id = ${userId}
+                               where c.id = ${frame.chatId} and c.deleted_at is null`;
+        if (!c) return [];
+        // канал: «печатает» шлёт только тот, кто публикует (админ с post); подписчика игнорируем
+        if (c.kind === 'channel' && !hasAdmin(ctxFromRow(frame.chatId, userId, c), 'post')) return [];
         const msg = JSON.stringify({ op: 'typing', chatId: frame.chatId, userId } satisfies ServerFrame);
         if (c.kind !== 'direct') {
           // группа: один publish в топик чата (все процессы раздают своим подписчикам); свой userId и заблокированных отсеивает клиент

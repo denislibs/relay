@@ -262,6 +262,7 @@ export async function fileFor(userId: number, id: string, variant?: string): Pro
      where a.id = ${id} and a.status = 'ready'
        and (a.owner_id = ${userId} or exists (
          select 1 from messages m join chat_members cm on cm.chat_id = m.chat_id and cm.user_id = ${userId}
+                                  join chats c on c.id = m.chat_id and c.deleted_at is null   -- удалённый (мягко) чат файлов не отдаёт
           where m.attachment->>'id' = ${id} and not m.deleted)
        or exists (select 1 from link_previews lp where lp.photo_id = a.id)   -- картинка превью ссылки: публичная страница, видна всем
        or exists (   -- трек в чьём-то профиле: его видят все, кого владелец не заблокировал

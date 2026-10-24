@@ -1,9 +1,9 @@
 import {
-  graphemes, normalizeAdminRights, normalizeRights, narrowRights, allAdminRights, ADMIN_RIGHTS, GROUP_ABOUT_MAX, RANK_MAX, SLOW_MODES,
-  type AdminRights, type BannedMember, type GroupMember, type GroupReactions, type GroupRole, type Message, type MemberRights, type ServiceData, type ServiceType,
+  graphemes, normalizeAdminRights, normalizeRights, narrowRights, allAdminRights, ADMIN_RIGHTS_BY_KIND, GROUP_ABOUT_MAX, MEMBERS_MAX, RANK_MAX, SLOW_MODES,
+  type AdminRights, type CommunityKind, type ProfilePhoto, type BannedMember, type GroupMember, type GroupReactions, type GroupRole, type Message, type MemberRights, type ServiceData, type ServiceType,
 } from '@relay/protocol';
 import { sql, type Tx } from '../db';
-import { GROUP_MEMBERS_MAX, GROUP_TITLE_MAX, toMessage } from './chats';
+import { GROUP_TITLE_MAX, toMessage } from './chats';
 import { contentColumns, openRows } from './messageContent';
 import { DomainError } from './errors';
 import { appendUpdates, chatEvent } from './journal';
@@ -12,8 +12,9 @@ import { checkPassword } from './password';
 import { onlineUsers } from './liveRegistry';
 import { presenceFor } from './presence';
 import { privacyCtx } from './privacy';
+import { enqueue } from '../jobs/queue';
 import {
-  broadcastGroup, broadcastMembers, canChangeInfo, canInvite, groupCtx, hasAdmin, isGroup, membersOf, requireAdmin, sendMembership, type GroupCtx, joinMembership } from './groupRights';
+  broadcastGroup, broadcastMembers, canChangeInfo, canInvite, groupCtx, hasAdmin, isCommunity, isGroup, requireAdmin, sendMembership, type GroupCtx, joinMembership, membersOf } from './groupRights';
 
 type Db = Tx | typeof sql;
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
@@ -65,7 +66,7 @@ function validRank(raw: unknown): string | null {
 export async function updateGroupInfo(userId: number, chatId: number, body: { title?: unknown; about?: unknown }): Promise<{ ok: true }> {
   return sql.begin(async (tx) => {
     const ctx = await groupCtx(tx, chatId, userId, { lock: true });
-    isGroup(ctx);
+    isCommunity(ctx);
     if (!canChangeInfo(ctx)) throw new DomainError('forbidden', 'info');
     const [c] = await tx`select title, about from chats where id = ${chatId}`;
     let changed = false;
@@ -105,7 +106,7 @@ export async function setGroupPhoto(userId: number, chatId: number, body: unknow
   }
   return sql.begin(async (tx) => {
     const ctx = await groupCtx(tx, chatId, userId, { lock: true });
-    isGroup(ctx);
+    isCommunity(ctx);
     if (!canChangeInfo(ctx)) throw new DomainError('forbidden', 'info');
     if (photo) {
       const [p] = await tx`insert into chat_photos (chat_id, big, small, thumb) values (${chatId}, ${photo.id}, ${photo.small}, ${photo.thumb}) returning id, created_at`;
@@ -127,6 +128,7 @@ export async function setGroupPhoto(userId: number, chatId: number, body: unknow
 export async function setGroupRights(userId: number, chatId: number, body: { rights?: unknown; slowMode?: unknown }): Promise<{ ok: true }> {
   return sql.begin(async (tx) => {
     const ctx = await groupCtx(tx, chatId, userId, { lock: true });
+    isGroup(ctx);   // права участников и медленный режим — только у группы
     requireAdmin(ctx, 'ban');
     if (body.rights !== undefined) await tx`update chats set rights = ${tx.json(normalizeRights(body.rights) as never)} where id = ${chatId}`;
     if (body.slowMode !== undefined) {
@@ -140,15 +142,23 @@ export async function setGroupRights(userId: number, chatId: number, body: { rig
   });
 }
 
-/** История для новых, одобрение вступающих, запрет копирования, реакции. */
-export async function setGroupSettings(userId: number, chatId: number, body: { historyHidden?: unknown; joinApproval?: unknown; protected?: unknown; reactions?: unknown }): Promise<{ ok: true }> {
+/** История для новых, одобрение вступающих, запрет копирования, реакции; у канала — подписи постов. */
+export async function setGroupSettings(userId: number, chatId: number, body: { historyHidden?: unknown; joinApproval?: unknown; protected?: unknown; reactions?: unknown; signatures?: unknown }): Promise<{ ok: true }> {
   return sql.begin(async (tx) => {
     const ctx = await groupCtx(tx, chatId, userId, { lock: true });
-    isGroup(ctx);
-    const [c] = await tx`select history_hidden, join_approval, protected from chats where id = ${chatId}`;
+    isCommunity(ctx);
+    const [c] = await tx`select history_hidden, join_approval, protected, linked_chat_id from chats where id = ${chatId}`;
     if (body.historyHidden !== undefined) {
+      isGroup(ctx);
       requireAdmin(ctx, 'ban');
+      // группа обсуждения канала: история видна всем (тред читают и вступившие позже)
+      if (body.historyHidden === true && c.linked_chat_id != null) throw new DomainError('forbidden', 'linked');
       await tx`update chats set history_hidden = ${body.historyHidden === true} where id = ${chatId}`;
+    }
+    if (body.signatures !== undefined) {
+      if (ctx.kind !== 'channel') throw new DomainError('bad_frame', 'not a channel');
+      requireAdmin(ctx, 'info');
+      await tx`update chats set signatures = ${body.signatures === true} where id = ${chatId}`;
     }
     if (body.joinApproval !== undefined) {
       requireAdmin(ctx, 'invite');
@@ -187,7 +197,7 @@ export async function setGroupUsername(userId: number, chatId: number, raw: unkn
   if (name !== null && !/^[a-z][a-z0-9_]{4,31}$/i.test(name)) throw new DomainError('username_invalid');
   return sql.begin(async (tx) => {
     const ctx = await groupCtx(tx, chatId, userId, { lock: true });
-    isGroup(ctx);
+    isCommunity(ctx);
     if (ctx.role !== 'owner') throw new DomainError('forbidden', 'owner');
     if (name) {
       const [u] = await tx`select 1 from users where lower(username) = lower(${name}) union all select 1 from chats where lower(username) = lower(${name}) and id <> ${chatId} limit 1`;
@@ -211,10 +221,13 @@ const MEMBER_COLS = (viewer: number) => sql`
   case when exists (select 1 from blocks b where b.owner_id = u.id and b.user_id = ${viewer}) then null else u.photo end as photo,
   m.role, m.rank, m.admin_rights, m.promoted_by, m.restricted, m.inviter_id, m.joined_at`;
 
-/** Участники с ролями. filter: all | admins | restricted. Присутствие — по правилам приватности (presence.ts). */
+/** Участники с ролями. filter: all | admins | restricted. Присутствие — по правилам приватности (presence.ts).
+ *  Подписчики канала — только админам: подписчики не видят состав. */
 export async function listGroupMembers(viewer: number, chatId: number, filter = 'all', q = ''): Promise<{ members: GroupMember[] }> {
   const ctx = await groupCtx(sql, chatId, viewer);
-  isGroup(ctx);
+  isCommunity(ctx);
+  if (ctx.kind === 'channel' && !ctx.admin) throw new DomainError('forbidden', 'members');
+  const ck: CommunityKind = ctx.kind === 'channel' ? 'channel' : 'group';
   const like = q.trim() ? '%' + q.trim().toLowerCase().replace(/[%_\\]/g, (c) => '\\' + c) + '%' : null;
   const rows = await sql`
     select ${MEMBER_COLS(viewer)} from chat_members m join users u on u.id = m.user_id
@@ -236,7 +249,7 @@ export async function listGroupMembers(viewer: number, chatId: number, filter = 
       photo: (r.photo as GroupMember['photo']) ?? null,
       role: r.role as GroupRole,
       rank: (r.rank as string | null) ?? null,
-      admin: r.role === 'owner' ? allAdminRights() : r.role === 'admin' ? normalizeAdminRights(r.admin_rights) : null,
+      admin: r.role === 'owner' ? allAdminRights(ck) : r.role === 'admin' ? normalizeAdminRights(r.admin_rights, ck) : null,
       promotedBy: r.promoted_by == null ? null : Number(r.promoted_by),
       restricted: r.role === 'member' && r.restricted ? narrowRights(normalizeRights(r.restricted), defaults) : null,
       inviterId: r.inviter_id == null ? null : Number(r.inviter_id),
@@ -266,16 +279,22 @@ async function insertMember(tx: Tx, chatId: number, userId: number, inviterId: n
   return ins.length > 0;
 }
 
-async function memberCount(db: Db, chatId: number): Promise<number> {
-  const [{ n }] = await db`select count(*)::int as n from chat_members where chat_id = ${chatId}`;
-  return n;
+/** Вид чата и число участников (members_count держит триггер — счёт без count(*); своя транзакция видит свои вставки). */
+async function chatSize(db: Db, chatId: number): Promise<{ kind: CommunityKind; n: number }> {
+  const [c] = await db`select kind, members_count from chats where id = ${chatId}`;
+  return { kind: c.kind === 'channel' ? 'channel' : 'group', n: Number(c.members_count) };
 }
 
-/** Вступление по ссылке, юзернейму или принятой заявке: участник, служебное, всем — новый состав. */
+/**
+ * Вступление по ссылке, юзернейму или принятой заявке: участник, служебное, всем — новый состав.
+ * Канал: только membership новичку — ни служебного, ни groupUpdated, ни members (O(1) на вступление при 200 000).
+ */
 export async function acceptMember(tx: Tx, chatId: number, userId: number, actorId: number | null, type: 'joined_by_link' | 'joined_by_request' | 'members_added'): Promise<boolean> {
-  if (await memberCount(tx, chatId) >= GROUP_MEMBERS_MAX) throw new DomainError('too_long', 'members');
+  const { kind, n } = await chatSize(tx, chatId);
+  if (n >= MEMBERS_MAX[kind]) throw new DomainError('too_long', 'members');
   if (!(await insertMember(tx, chatId, userId, actorId))) return false;
   await tx`delete from chat_join_requests where chat_id = ${chatId} and user_id = ${userId}`;
+  if (kind === 'channel') { await joinMembership(tx, chatId, userId); return true; }
   await serviceMessage(tx, chatId, userId, type, { users: await names(tx, [userId]) });
   await joinMembership(tx, chatId, userId);   // с seq чата на момент коммита: новичок ничего не догоняет
   await broadcastGroup(tx, chatId);
@@ -289,12 +308,13 @@ export async function acceptMember(tx: Tx, chatId: number, userId: number, actor
  */
 export async function addGroupMembers(userId: number, chatId: number, rawIds: unknown): Promise<{ added: number[]; failed: number[] }> {
   if (!Array.isArray(rawIds)) throw new DomainError('bad_frame', 'userIds');
-  const ids = [...new Set(rawIds.map(Number).filter((n) => Number.isInteger(n) && n > 0 && n !== userId))].slice(0, GROUP_MEMBERS_MAX);
+  const ids = [...new Set(rawIds.map(Number).filter((n) => Number.isInteger(n) && n > 0 && n !== userId))].slice(0, MEMBERS_MAX.group);   // за один запрос — не больше группы
   if (!ids.length) throw new DomainError('bad_frame', 'userIds');
   return sql.begin(async (tx) => {
     const ctx = await groupCtx(tx, chatId, userId, { lock: true });
-    isGroup(ctx);
+    isCommunity(ctx);
     if (!canInvite(ctx)) throw new DomainError('forbidden', 'invite');
+    const max = MEMBERS_MAX[ctx.kind === 'channel' ? 'channel' : 'group'];
     const ok = await tx`
       select u.id from users u
        where u.id = any(${ids}::bigint[]) and not u.system
@@ -306,13 +326,16 @@ export async function addGroupMembers(userId: number, chatId: number, rawIds: un
     const added: number[] = [];
     for (const id of okIds) {
       if (banned.has(id) && !canUnban) continue;
-      if (await memberCount(tx, chatId) >= GROUP_MEMBERS_MAX) break;
+      if ((await chatSize(tx, chatId)).n >= max) break;
       if (banned.has(id)) await tx`delete from chat_bans where chat_id = ${chatId} and user_id = ${id}`;
       if (await insertMember(tx, chatId, id, userId)) added.push(id);
     }
     const already = new Set((await tx`select user_id from chat_members where chat_id = ${chatId} and user_id = any(${ids}::bigint[])`).map((r) => Number(r.user_id)));
     const failed = ids.filter((id) => !already.has(id));
-    if (added.length) {
+    if (added.length && ctx.kind === 'channel') {   // канал: только membership добавленным
+      await tx`delete from chat_join_requests where chat_id = ${chatId} and user_id = any(${added}::bigint[])`;
+      for (const id of added) await joinMembership(tx, chatId, id);
+    } else if (added.length) {
       await tx`delete from chat_join_requests where chat_id = ${chatId} and user_id = any(${added}::bigint[])`;
       await serviceMessage(tx, chatId, userId, 'members_added', { users: await names(tx, added) });
       for (const id of added) await joinMembership(tx, chatId, id);
@@ -323,12 +346,13 @@ export async function addGroupMembers(userId: number, chatId: number, rawIds: un
   });
 }
 
-/** Убрать из группы: служебное, удалённому — chatRemoved, всем — новый состав. */
-async function dropMember(tx: Tx, chatId: number, target: number, actor: number, type: 'member_left' | 'member_removed'): Promise<void> {
-  await serviceMessage(tx, chatId, actor, type, { users: await names(tx, [target]) });
+/** Убрать из группы: служебное, удалённому — chatRemoved, всем — новый состав. Канал — только chatRemoved ушедшему. */
+async function dropMember(tx: Tx, chatId: number, target: number, actor: number, type: 'member_left' | 'member_removed', kind: GroupCtx['kind']): Promise<void> {
+  if (kind !== 'channel') await serviceMessage(tx, chatId, actor, type, { users: await names(tx, [target]) });
   await tx`delete from chat_members where chat_id = ${chatId} and user_id = ${target}`;
   await tx`delete from drafts where chat_id = ${chatId} and user_id = ${target}`;
   await appendUpdates(tx, [{ userId: target, update: { type: 'chatRemoved', chatId } }]);
+  if (kind === 'channel') return;
   await broadcastGroup(tx, chatId);
   await broadcastMembers(tx, chatId, { remove: [target] });
 }
@@ -345,7 +369,7 @@ function canManageAdmin(ctx: GroupCtx, target: { role: GroupRole; promoted_by: u
 export async function removeGroupMember(userId: number, chatId: number, target: number): Promise<{ ok: true }> {
   return sql.begin(async (tx) => {
     const ctx = await groupCtx(tx, chatId, userId, { lock: true });
-    isGroup(ctx);
+    isCommunity(ctx);
     if (target === userId) {
       if (ctx.role === 'owner') {
         // новый владелец — самый давний админ, иначе самый давний участник; никого — группа удаляется
@@ -354,7 +378,7 @@ export async function removeGroupMember(userId: number, chatId: number, target: 
         if (!next) { await deleteGroupTx(tx, chatId); return { ok: true }; }
         await makeOwner(tx, chatId, Number(next.user_id), userId);
       }
-      await dropMember(tx, chatId, userId, userId, 'member_left');
+      await dropMember(tx, chatId, userId, userId, 'member_left', ctx.kind);
       return { ok: true };
     }
     requireAdmin(ctx, 'ban');
@@ -362,7 +386,7 @@ export async function removeGroupMember(userId: number, chatId: number, target: 
     if (!t) throw new DomainError('not_found', 'member');
     if (t.role !== 'member' && !canManageAdmin(ctx, t as never)) throw new DomainError('forbidden', 'admin');
     await tx`insert into chat_bans (chat_id, user_id, banned_by) values (${chatId}, ${target}, ${userId}) on conflict (chat_id, user_id) do update set banned_by = excluded.banned_by, at = now()`;
-    await dropMember(tx, chatId, target, userId, 'member_removed');
+    await dropMember(tx, chatId, target, userId, 'member_removed', ctx.kind);
     return { ok: true };
   });
 }
@@ -380,6 +404,7 @@ export async function unbanGroupMember(userId: number, chatId: number, target: n
 export async function restrictGroupMember(userId: number, chatId: number, target: number, raw: unknown): Promise<{ ok: true }> {
   return sql.begin(async (tx) => {
     const ctx = await groupCtx(tx, chatId, userId, { lock: true });
+    isGroup(ctx);   // исключения — только у группы
     requireAdmin(ctx, 'ban');
     const [t] = await tx`select role from chat_members where chat_id = ${chatId} and user_id = ${target}`;
     if (!t) throw new DomainError('not_found', 'member');
@@ -405,8 +430,9 @@ export async function setGroupAdmin(userId: number, chatId: number, target: numb
     if (body.rights === null) {
       await tx`update chat_members set role = 'member', admin_rights = null, rank = null, promoted_by = null where chat_id = ${chatId} and user_id = ${target}`;
     } else {
-      const rights: AdminRights = normalizeAdminRights(body.rights);
-      for (const r of ADMIN_RIGHTS) if (rights[r] && !ctx.admin![r]) throw new DomainError('forbidden', r);
+      const ck: CommunityKind = ctx.kind === 'channel' ? 'channel' : 'group';
+      const rights: AdminRights = normalizeAdminRights(body.rights, ck);
+      for (const r of ADMIN_RIGHTS_BY_KIND[ck]) if (rights[r] && !ctx.admin![r]) throw new DomainError('forbidden', r);
       const rank = body.rank === undefined ? undefined : validRank(body.rank);
       await tx`update chat_members set role = 'admin', admin_rights = ${tx.json(rights as never)}, restricted = null,
                  promoted_by = case when role = 'admin' then promoted_by else ${userId} end
@@ -439,10 +465,11 @@ export async function setGroupRank(userId: number, chatId: number, target: numbe
 }
 
 async function makeOwner(tx: Tx, chatId: number, target: number, prev: number): Promise<void> {
+  const { kind } = await chatSize(tx, chatId);
   await tx`update chats set owner_id = ${target} where id = ${chatId}`;
   await tx`update chat_members set role = 'owner', admin_rights = null, restricted = null, promoted_by = null where chat_id = ${chatId} and user_id = ${target}`;
   // прежний владелец остаётся админом со всеми правами (как в Telegram)
-  await tx`update chat_members set role = 'admin', admin_rights = ${tx.json(allAdminRights() as never)}, promoted_by = ${target} where chat_id = ${chatId} and user_id = ${prev}`;
+  await tx`update chat_members set role = 'admin', admin_rights = ${tx.json(allAdminRights(kind) as never)}, promoted_by = ${target} where chat_id = ${chatId} and user_id = ${prev}`;
   await serviceMessage(tx, chatId, prev, 'owner_changed', { users: await names(tx, [target]) });
   await sendMembership(tx, chatId, target);
   await sendMembership(tx, chatId, prev).catch(() => {});   // прежний мог уже выйти
@@ -453,7 +480,7 @@ async function makeOwner(tx: Tx, chatId: number, target: number, prev: number): 
 /** Передать права на группу: только владелец и только с паролем 2FA (как в Telegram). */
 export async function transferGroupOwnership(userId: number, chatId: number, target: number, proof: unknown): Promise<{ ok: true }> {
   const ctx = await groupCtx(sql, chatId, userId);
-  isGroup(ctx);
+  isCommunity(ctx);
   if (ctx.role !== 'owner') throw new DomainError('forbidden', 'owner');
   if (target === userId) throw new DomainError('bad_frame', 'target');
   const [pw] = await sql`select 1 from user_passwords where user_id = ${userId}`;
@@ -469,21 +496,82 @@ export async function transferGroupOwnership(userId: number, chatId: number, tar
   });
 }
 
+/**
+ * Удаление группы или канала — мягкое: deleted_at, и с этого момента чат для всех «пропал» (groupCtx, список,
+ * syncChat → not_found/chatGone). Строки участников (chatRemoved каждому), сообщения и сам чат убирает задача
+ * chat.purge страницами (chatPurge.ts) — без одной гигантской транзакции на 200 000 участников.
+ */
 async function deleteGroupTx(tx: Tx, chatId: number): Promise<void> {
-  const ids = await membersOf(tx, chatId);
-  await appendUpdates(tx, ids.map((uid) => ({ userId: uid, update: { type: 'chatRemoved', chatId } })));
-  await tx`delete from chats where id = ${chatId}`;
+  const [c] = await tx`select linked_chat_id from chats where id = ${chatId}`;
+  await tx`update chats set deleted_at = now(), linked_chat_id = null where id = ${chatId}`;
+  if (c?.linked_chat_id != null) {   // связанный канал или группа отвязывается
+    await tx`update chats set linked_chat_id = null where id = ${c.linked_chat_id} and linked_chat_id = ${chatId}`;
+    await broadcastGroup(tx, Number(c.linked_chat_id));
+  }
+  await enqueue(tx, 'chat.purge', { chatId, after: 0 }, { dedupeKey: `chat.purge:${chatId}:m:0` });
 }
 
-/** Удалить группу у всех (владелец). */
+/** Удалить группу или канал у всех (владелец). */
 export async function deleteGroup(userId: number, chatId: number): Promise<{ ok: true }> {
   return sql.begin(async (tx) => {
     const ctx = await groupCtx(tx, chatId, userId, { lock: true });
-    isGroup(ctx);
+    isCommunity(ctx);
     if (ctx.role !== 'owner') throw new DomainError('forbidden', 'owner');
     await deleteGroupTx(tx, chatId);
     return { ok: true };
   });
+}
+
+/**
+ * Группа обсуждения канала (groupId null — отвязать). Владелец канала и админ группы с правом info. Замки строк
+ * chats обоих (и прежней группы) — по возрастанию id; группа, уже привязанная к другому каналу, — forbidden.
+ * Скрытая история группы выключается (и не включается, пока группа привязана). groupUpdated — всем затронутым.
+ */
+export async function setLinkedChat(userId: number, channelId: number, groupId: number | null): Promise<{ ok: true }> {
+  if (groupId != null && (!Number.isSafeInteger(groupId) || groupId <= 0)) throw new DomainError('bad_frame', 'groupId');
+  return sql.begin(async (tx) => {
+    let prev: number | null = null;
+    for (let attempt = 0; ; attempt++) {
+      // прежняя группа — читаем без замка, запираем всё по порядку и сверяем: связь могли поменять между чтением и замком
+      const [c0] = await tx`select linked_chat_id from chats where id = ${channelId}`;
+      if (!c0) throw new DomainError('not_found', 'chat');
+      prev = c0.linked_chat_id == null ? null : Number(c0.linked_chat_id);
+      const ids = [...new Set([channelId, groupId, prev].filter((x): x is number => x != null))].sort((a, b) => a - b);
+      await tx`select id from chats where id = any(${ids}::bigint[]) order by id for update`;
+      const [c1] = await tx`select linked_chat_id from chats where id = ${channelId}`;
+      if ((c1.linked_chat_id == null ? null : Number(c1.linked_chat_id)) === prev) break;
+      if (attempt >= 2) throw new DomainError('flood', 'linked', 1);   // связь меняют одновременно — повторить
+    }
+    const ch = await groupCtx(tx, channelId, userId);
+    if (ch.kind !== 'channel') throw new DomainError('bad_frame', 'not a channel');
+    if (ch.role !== 'owner') throw new DomainError('forbidden', 'owner');
+    if (groupId != null) {
+      const g = await groupCtx(tx, groupId, userId);
+      isGroup(g);
+      if (!hasAdmin(g, 'info')) throw new DomainError('forbidden', 'info');
+      const [gr] = await tx`select linked_chat_id from chats where id = ${groupId}`;
+      if (gr.linked_chat_id != null && Number(gr.linked_chat_id) !== channelId) throw new DomainError('forbidden', 'linked');
+    }
+    if (prev === groupId) return { ok: true };
+    if (prev != null) await tx`update chats set linked_chat_id = null where id = ${prev}`;
+    await tx`update chats set linked_chat_id = ${groupId} where id = ${channelId}`;
+    if (groupId != null) await tx`update chats set linked_chat_id = ${channelId}, history_hidden = false where id = ${groupId}`;
+    for (const id of [channelId, groupId, prev].filter((x): x is number => x != null).sort((a, b) => a - b)) await broadcastGroup(tx, id);
+    return { ok: true };
+  });
+}
+
+/** Группы, которые можно сделать обсуждением канала: мои, где я админ с info (или владелец), ни к чему не привязаны. */
+export async function discussionCandidates(userId: number, channelId: number): Promise<{ groups: { id: number; title: string; photo: ProfilePhoto | null; members: number }[] }> {
+  const ch = await groupCtx(sql, channelId, userId);
+  if (ch.kind !== 'channel') throw new DomainError('bad_frame', 'not a channel');
+  if (!hasAdmin(ch, 'info')) throw new DomainError('forbidden', 'info');
+  const rows = await sql`
+    select c.id, c.title, c.photo, c.members_count from chat_members m join chats c on c.id = m.chat_id
+     where m.user_id = ${userId} and c.kind = 'group' and c.deleted_at is null and c.linked_chat_id is null
+       and (m.role = 'owner' or (m.role = 'admin' and coalesce((m.admin_rights->>'info')::boolean, false)))
+     order by c.id desc limit 200`;
+  return { groups: rows.map((r) => ({ id: Number(r.id), title: (r.title as string | null) ?? '', photo: (r.photo as ProfilePhoto | null) ?? null, members: Number(r.members_count) })) };
 }
 
 export { hasAdmin };

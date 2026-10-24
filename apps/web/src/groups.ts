@@ -30,7 +30,7 @@ export const MEMBER_RIGHT_TEXT: Record<MemberRight, string> = {
   round: 'Видеосообщения', links: 'Превью ссылок', react: 'Реакции', invite: 'Добавление участников', pin: 'Закрепление сообщений', info: 'Изменение профиля группы',
 };
 export const ADMIN_RIGHT_TEXT: Record<AdminRight, string> = {
-  info: 'Изменение профиля группы', delete: 'Удаление сообщений', ban: 'Блокировка пользователей', invite: 'Пригласительные ссылки', pin: 'Закрепление сообщений', addAdmins: 'Назначение администраторов',
+  info: 'Изменение профиля группы', post: 'Публикация сообщений', edit: 'Изменение чужих публикаций', delete: 'Удаление сообщений', ban: 'Блокировка пользователей', invite: 'Пригласительные ссылки', pin: 'Закрепление сообщений', addAdmins: 'Назначение администраторов',
 };
 export { ADMIN_RIGHTS, MEDIA_RIGHTS, MEMBER_RIGHTS };
 export const PLAIN_RIGHTS: MemberRight[] = ['react', 'invite', 'pin', 'info'];

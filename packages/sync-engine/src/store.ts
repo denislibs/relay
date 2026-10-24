@@ -85,7 +85,7 @@ export interface ChatSummary {
   unreadMark?: boolean;
   sortAt?: string;
   id: number;
-  kind: 'direct' | 'group';
+  kind: 'direct' | 'group' | 'channel';
   title: string | null;
   lastReadId: number;
   unread: number;

@@ -9,10 +9,23 @@ export type MemberRights = Record<MemberRight, boolean>;
 export const MEMBER_RIGHTS: readonly MemberRight[] = ['text', 'photos', 'videos', 'files', 'music', 'voice', 'round', 'stickers', 'links', 'react', 'invite', 'pin', 'info'];
 export const MEDIA_RIGHTS: readonly MemberRight[] = ['photos', 'videos', 'files', 'music', 'voice', 'round', 'stickers', 'links'];
 
-/** Права администратора. Владелец имеет все неявно. */
-export type AdminRight = 'info' | 'delete' | 'ban' | 'invite' | 'pin' | 'addAdmins';
+/** Группа или канал — чаты с ролями, правами и журналом чата. */
+export type CommunityKind = 'group' | 'channel';
+
+/** Права администратора. Владелец имеет все неявно. post/edit — только у канала: публиковать и править чужие посты. */
+export type AdminRight = 'info' | 'post' | 'edit' | 'delete' | 'ban' | 'invite' | 'pin' | 'addAdmins';
 export type AdminRights = Record<AdminRight, boolean>;
-export const ADMIN_RIGHTS: readonly AdminRight[] = ['info', 'delete', 'ban', 'invite', 'pin', 'addAdmins'];
+const ANY_ADMIN_RIGHTS: readonly AdminRight[] = ['info', 'post', 'edit', 'delete', 'ban', 'invite', 'pin', 'addAdmins'];
+/** Какие права админа бывают у вида чата (порядок — как на экране прав). */
+export const ADMIN_RIGHTS_BY_KIND: Record<CommunityKind, readonly AdminRight[]> = {
+  group: ['info', 'delete', 'ban', 'invite', 'pin', 'addAdmins'],
+  channel: ['info', 'post', 'edit', 'delete', 'ban', 'invite', 'addAdmins'],
+};
+/** Права админа группы (экран прав группы). */
+export const ADMIN_RIGHTS: readonly AdminRight[] = ADMIN_RIGHTS_BY_KIND.group;
+
+/** Предел участников по виду: группа — журнал на всех одним запросом; канал — без рассылки на каждого (журнал чата). */
+export const MEMBERS_MAX: Record<CommunityKind, number> = { group: 5000, channel: 200_000 };
 
 export type GroupRole = 'owner' | 'admin' | 'member';
 export type ReactionsMode = 'all' | 'some' | 'none';
@@ -38,6 +51,8 @@ export interface GroupInfo {
   protected: boolean;
   members: number;
   requests: number;   // заявок на вступление (видят те, кто может их принимать; остальным 0)
+  signatures: boolean;        // канал: подписи авторов под постами
+  linkedChatId: Id | null;    // канал → группа обсуждения, группа → её канал
 }
 
 /** Моё место в группе. rights — что мне можно как участнику (исключение или умолчания). */
@@ -87,11 +102,15 @@ export interface GroupInvite {
 export interface JoinRequest { userId: Id; name: string; photo: ProfilePhoto | null; about: string | null; at: string; inviteId: Id | null }
 
 /** Превью приглашения (GET /join/:token): видно и не участнику. */
-export interface InvitePreview { chatId: Id; title: string; about: string; photo: ProfilePhoto | null; members: number; approval: boolean; member: boolean; requested: boolean }
+export interface InvitePreview { chatId: Id; kind: CommunityKind; title: string; about: string; photo: ProfilePhoto | null; members: number; approval: boolean; member: boolean; requested: boolean }   // members у канала — подписчики
 
 export const allRights = (): MemberRights => Object.fromEntries(MEMBER_RIGHTS.map((r) => [r, true])) as MemberRights;
-export const allAdminRights = (): AdminRights => Object.fromEntries(ADMIN_RIGHTS.map((r) => [r, true])) as AdminRights;
-export const noAdminRights = (): AdminRights => Object.fromEntries(ADMIN_RIGHTS.map((r) => [r, false])) as AdminRights;
+/** Все права админа этого вида чата (владелец); чужие виду — false. */
+export const allAdminRights = (kind: CommunityKind = 'group'): AdminRights =>
+  Object.fromEntries(ANY_ADMIN_RIGHTS.map((r) => [r, ADMIN_RIGHTS_BY_KIND[kind].includes(r)])) as AdminRights;
+export const noAdminRights = (_kind: CommunityKind = 'group'): AdminRights => Object.fromEntries(ANY_ADMIN_RIGHTS.map((r) => [r, false])) as AdminRights;
+/** Подписчик канала: писать нельзя ничего; реакции решает настройка чата, не права участника. */
+export const subscriberRights = (): MemberRights => ({ ...Object.fromEntries(MEMBER_RIGHTS.map((r) => [r, false])) as MemberRights, react: true });
 
 /** Из чего угодно — полный набор прав; превью ссылок без текста не бывает. */
 export function normalizeRights(raw: unknown, base: MemberRights = allRights()): MemberRights {
@@ -101,9 +120,11 @@ export function normalizeRights(raw: unknown, base: MemberRights = allRights()):
   return r;
 }
 
-export function normalizeAdminRights(raw: unknown): AdminRights {
+/** Полный набор прав админа; права, которых у вида чата нет, — всегда false. */
+export function normalizeAdminRights(raw: unknown, kind: CommunityKind = 'group'): AdminRights {
   const o = raw && typeof raw === 'object' ? raw as Record<string, unknown> : {};
-  return Object.fromEntries(ADMIN_RIGHTS.map((k) => [k, o[k] === true])) as AdminRights;
+  const own = ADMIN_RIGHTS_BY_KIND[kind];
+  return Object.fromEntries(ANY_ADMIN_RIGHTS.map((k) => [k, own.includes(k) && o[k] === true])) as AdminRights;
 }
 
 /** Исключение не шире умолчаний: запрещённое для всех запрещено и ему. */

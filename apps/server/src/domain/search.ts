@@ -22,7 +22,7 @@ export async function searchMessages(userId: number, q: string, opts: { chatId?:
   let ids: number[];
   try {
     if (!(await searchReady())) return searchPostgres(userId, q, opts);
-    const chatIds = opts.chatId ? [opts.chatId] : (await sql`select chat_id from chat_members where user_id = ${userId}`).map((r) => Number(r.chat_id));
+    const chatIds = opts.chatId ? [opts.chatId] : (await sql`select cm.chat_id from chat_members cm join chats c on c.id = cm.chat_id and c.deleted_at is null where cm.user_id = ${userId}`).map((r) => Number(r.chat_id));
     ids = await searchIds(text, chatIds, { beforeId: opts.beforeId, limit });
   } catch (e) {
     console.warn('search: meilisearch unavailable, using postgres:', String(e));
@@ -39,7 +39,7 @@ export async function searchMessages(userId: number, q: string, opts: { chatId?:
                                where c.kind = 'direct' and pm.chat_id = c.id and pm.user_id <> ${userId} limit 1)) as chat_title
       from messages m
       join chat_members cm on cm.chat_id = m.chat_id and cm.user_id = ${userId}
-      join chats c on c.id = m.chat_id
+      join chats c on c.id = m.chat_id and c.deleted_at is null   -- удалённый (мягко) чат не ищется
      where m.id = any(${page}::bigint[]) and not m.deleted`;
   await openRows(rows);
   const byId = new Map(rows.map((r) => [Number(r.id), r]));
@@ -68,7 +68,7 @@ export async function searchPostgres(userId: number, q: string, opts: { chatId?:
                                where c.kind = 'direct' and pm.chat_id = c.id and pm.user_id <> ${userId} limit 1)) as chat_title
       from messages m
       join chat_members cm on cm.chat_id = m.chat_id and cm.user_id = ${userId}
-      join chats c on c.id = m.chat_id
+      join chats c on c.id = m.chat_id and c.deleted_at is null   -- удалённый (мягко) чат не ищется
      where not m.deleted
        and (m.content is not null or m.body ilike ${pattern}
             or (m.attachment is not null   -- то же выражение, что в индексе messages_attachment_trgm

@@ -252,9 +252,9 @@ export function createServer(opts: { port: number }): Server {
           const bound = (await deviceKeyOf(sessionId)) != null;
           return server.upgrade(req, { data: { userId, sessionId, checkedAt: Date.now(), ...(bound ? { challenge: await newChallenge(), proven: false, queue: [] } : {}) } }) ? undefined : fail('bad_frame');
         }
-        // новая группа (создатель — текущий пользователь) и личный чат с человеком (существующий или новый)
+        // новая группа или канал ({kind: 'channel'}; создатель — текущий пользователь) и личный чат с человеком (существующий или новый)
         if (req.method === 'POST' && url.pathname === '/chats') {
-          const { chatId } = await createGroup(userId, (await req.json().catch(() => ({}))) as { title?: unknown; memberIds?: unknown });
+          const { chatId } = await createGroup(userId, (await req.json().catch(() => ({}))) as { kind?: unknown; title?: unknown; about?: unknown; memberIds?: unknown });
           return Response.json({ id: chatId });
         }
         if (req.method === 'POST' && url.pathname === '/chats/direct') {
@@ -262,7 +262,7 @@ export function createServer(opts: { port: number }): Server {
           return Response.json({ id: await openDirect(userId, body.userId) });
         }
         if (process.env.DEV_LOGIN === '1' && req.method === 'POST' && url.pathname === '/dev/chats') {
-          const { kind, title, memberIds } = (await req.json()) as { kind: 'direct' | 'group'; title: string | null; memberIds: number[] };
+          const { kind, title, memberIds } = (await req.json()) as { kind: 'direct' | 'group' | 'channel'; title: string | null; memberIds: number[] };
           const ids = memberIds.includes(userId) ? memberIds : [userId, ...memberIds];
           return Response.json({ id: await createChat(kind, title, ids) });
         }

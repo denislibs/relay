@@ -15,6 +15,7 @@ import { encryptLegacyStep, loadOpen, openForChat, sealForChat } from '../domain
 import { rewrapStep } from '../crypto/kms';
 import { toMessage } from '../domain/chats';
 import { enqueue } from './queue';
+import { purgeStep, type PurgeJob } from '../domain/chatPurge';
 
 // новое сообщение → по задаче на подписку: повтор одной не шлёт остальным второй раз
 // в задаче — ссылка на сообщение (новые) или само сообщение (поставленные до шифрования)
@@ -23,7 +24,8 @@ register('push.message', async (p: { chatId?: number; id?: number; message?: Pus
   if (!m && p.chatId != null && p.id != null) {
     const row = await loadOpen(p.chatId, p.id);
     if (!row || row.deleted) return;   // удалили, пока задача ждала
-    m = toMessage(row) as PushMessage;
+    // автор — внутренний sender_id строки: у поста канала в API senderId 0, а исключить автора и блокировки нужно по нему
+    m = { ...toMessage(row), senderId: Number(row.sender_id) } as PushMessage;
   }
   if (!m) return;
   const targets = await planPush(m);
@@ -119,6 +121,11 @@ register('storage.gc', async () => {
 // объекты удалённого сборкой мусора вложения: оригинал, перепакованный оригинал, копии видео (удаление идемпотентно)
 register('attachment.purge', async (p: { keys: string[] }) => {
   await purgeObjects(p.keys);
+});
+
+// мягко удалённый канал или группа: участники (chatRemoved каждому), сообщения и сам чат — страницами (chatPurge.ts)
+register('chat.purge', async (p: PurgeJob) => {
+  await purgeStep(p);
 });
 
 register('link.preview', async (p: { chatId: number; id: number; url: string }) => {

@@ -40,7 +40,7 @@ export function orderFolders(folders: readonly ChatFolder[], ids: readonly unkno
 }
 
 export const defaultSettings = (): AccountSettings => ({
-  notify: { direct: { muted: false, preview: true }, group: { muted: false, preview: true } },
+  notify: { direct: { muted: false, preview: true }, group: { muted: false, preview: true }, channel: { muted: false, preview: true } },
   sessionsTtlDays: 180,
   folders: [],
   privacy: defaultPrivacy(),
@@ -70,7 +70,7 @@ export function normalizePrivacy(p: unknown): PrivacyRules {
 /** Полные настройки из возможно неполных (старый IDB, ответ другой версии): по каждому виду чата — слияние с умолчаниями. */
 export function normalizeSettings(s: Partial<AccountSettings> | null | undefined): AccountSettings {
   const d = defaultSettings();
-  for (const t of ['direct', 'group'] as const) {
+  for (const t of ['direct', 'group', 'channel'] as const) {
     const v = s?.notify?.[t];
     if (typeof v?.muted === 'boolean') d.notify[t].muted = v.muted;
     if (typeof v?.preview === 'boolean') d.notify[t].preview = v.preview;

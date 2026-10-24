@@ -7,7 +7,7 @@ import { DomainError } from './errors';
 import { nameForSql } from './profile';
 import { openRows, rowMatches, scanMatching, SCAN_BATCH } from './messageContent';
 
-export interface GlobalHit { message: Message; chatTitle: string | null; chatKind: 'direct' | 'group' }
+export interface GlobalHit { message: Message; chatTitle: string | null; chatKind: 'direct' | 'group' | 'channel' }
 
 const like = (q: string) => '%' + q.replace(/[\\%_]/g, (c) => '\\' + c) + '%';
 
@@ -34,7 +34,7 @@ export async function searchMedia(userId: number, tab: MediaTab, opts: { q?: str
                                 from chat_members pm join users u on u.id = pm.user_id
                                where c.kind = 'direct' and pm.chat_id = c.id and pm.user_id <> ${userId} limit 1)) as chat_title
       from (select * from messages
-             where chat_id in (select chat_id from chat_members where user_id = ${userId})
+             where chat_id in (select cm.chat_id from chat_members cm join chats dc on dc.id = cm.chat_id and dc.deleted_at is null where cm.user_id = ${userId})
                and not deleted and ${tabWhere(tab)}
                ${q ? textWhere(tab, q) : sql``}
                ${before ? sql`and id < ${before}` : sql``}
@@ -46,7 +46,7 @@ export async function searchMedia(userId: number, tab: MediaTab, opts: { q?: str
   else { const rows = await batch(opts.before ?? null); page = await openRows(rows.slice(0, limit)); hasMore = rows.length > limit; }
   const messages = await withReactions(page.map(toMessage));
   return {
-    hits: messages.map((message, i) => ({ message, chatTitle: (page[i].chat_title as string | null) ?? null, chatKind: page[i].chat_kind as 'direct' | 'group' })),
+    hits: messages.map((message, i) => ({ message, chatTitle: (page[i].chat_title as string | null) ?? null, chatKind: page[i].chat_kind as GlobalHit['chatKind'] })),
     hasMore,
   };
 }
@@ -65,7 +65,7 @@ export async function searchPeople(userId: number, raw: string, limit = 20): Pro
   const p = like(q), exact = q.toLowerCase();
   const rows = await sql`
     with seen as (
-      select b.user_id as id from chat_members a join chat_members b on b.chat_id = a.chat_id where a.user_id = ${userId} and b.user_id <> ${userId}
+      select b.user_id as id from chat_members a join chats c on c.id = a.chat_id and c.kind <> 'channel' join chat_members b on b.chat_id = a.chat_id where a.user_id = ${userId} and b.user_id <> ${userId}
       union select user_id from contacts where owner_id = ${userId}
     )
     select u.id, ${nameForSql(userId)} as name, u.username,

@@ -46,7 +46,7 @@ export interface LocalAttachment {
 
 export interface LocalChat {
   id: number;
-  kind: 'direct' | 'group';
+  kind: 'direct' | 'group' | 'channel';
   lastReadId: number;
   unread: number;
   knownMaxId: number;     // максимальный id сообщения, который уже учтён в unread
@@ -211,7 +211,7 @@ export type Action =
   | { type: 'setMute'; chatId: number; muteUntil: number | null }
   /** Закрепить / в архив / отметить непрочитанным: что не задано — как сейчас. Сразу видно, уходит очередью. */
   | { type: 'setChatFlags'; chatId: number; pinned?: boolean; archived?: boolean; unreadMark?: boolean }
-  | { type: 'setNotify'; notifyType: 'direct' | 'group'; muted?: boolean; preview?: boolean }
+  | { type: 'setNotify'; notifyType: 'direct' | 'group' | 'channel'; muted?: boolean; preview?: boolean }
   /** правило конфиденциальности целиком — через очередь операций */
   | { type: 'setPrivacy'; key: PrivacyKey; mode: PrivacyMode; allow?: number[]; deny?: number[] }
   /** чёрный список — через очередь операций */

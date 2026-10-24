@@ -1,4 +1,4 @@
-import { graphemes, normalizeEntities, type Entity, type Block, type ForwardInfo, type LinkPreview, type MediaCounts, type MediaTab, type Message, type MessageButton, type ProfilePhoto, type ServiceData, type ServiceType, type StickerRef, type Todo } from '@relay/protocol';
+import { graphemes, GROUP_ABOUT_MAX, normalizeEntities, type Entity, type Block, type ForwardInfo, type LinkPreview, type MediaCounts, type MediaTab, type Message, type MessageButton, type ProfilePhoto, type ServiceData, type ServiceType, type StickerRef, type Todo } from '@relay/protocol';
 import { sql, type Tx } from '../db';
 import { muteFromDb } from './chatNotify';
 import { DomainError } from './errors';
@@ -7,9 +7,9 @@ import { contentColumns, openDrafts, openRows } from './messageContent';
 import { shredChatHistory } from '../crypto/chatKeys';
 import { nameForSql } from './profile';
 import { summaryFromRow, joinMembership } from './groupRights';
-import type { GroupInfo, MyMembership } from '@relay/protocol';
+import { MEMBERS_MAX, type CommunityKind, type GroupInfo, type MyMembership } from '@relay/protocol';
 
-export async function createChat(kind: 'direct' | 'group', title: string | null, memberIds: number[]): Promise<number> {
+export async function createChat(kind: 'direct' | 'group' | 'channel', title: string | null, memberIds: number[]): Promise<number> {
   return sql.begin(async (tx) => {
     const [chat] = await tx`insert into chats (kind, title) values (${kind}, ${title}) returning id`;
     await tx`insert into chat_members (chat_id, user_id) select ${chat.id}, unnest(${[...new Set(memberIds)]}::bigint[])`;
@@ -19,30 +19,40 @@ export async function createChat(kind: 'direct' | 'group', title: string | null,
 }
 
 export const GROUP_TITLE_MAX = 128;
-export const GROUP_MEMBERS_MAX = 5000;   // вместе с создателем: журнал пишется одним запросом на всех, уведомление — частями по 8000 байт
+/** Группа — вместе с создателем: журнал пишется одним запросом на всех, уведомление — частями по 8000 байт. */
+export const GROUP_MEMBERS_MAX = MEMBERS_MAX.group;
 
 /**
- * Новая группа: создатель и участники, первое сообщение — служебное «создал(а) группу» (его newMessage
- * всем участникам и приносит чат в их списки). Нельзя добавить несуществующего, системного или того,
- * с кем есть блокировка в любую сторону.
+ * Новая группа или канал: создатель (владелец) и участники, первое сообщение — служебное «создал(а) группу» (его
+ * newMessage в журнал чата; чат приносит участникам membership). Нельзя добавить несуществующего, системного или
+ * того, с кем есть блокировка в любую сторону. Канал можно создать без подписчиков — только владелец.
  */
-export async function createGroup(creatorId: number, input: { title?: unknown; memberIds?: unknown }): Promise<{ chatId: number; message: Message }> {
+export async function createGroup(creatorId: number, input: { kind?: unknown; title?: unknown; about?: unknown; memberIds?: unknown }): Promise<{ chatId: number; message: Message }> {
+  const kind: CommunityKind = input.kind === 'channel' ? 'channel' : 'group';
+  if (input.kind !== undefined && input.kind !== 'group' && input.kind !== 'channel') throw new DomainError('bad_frame', 'kind');
   const title = typeof input.title === 'string' ? input.title.replace(/\s+/g, ' ').trim() : '';
   if (!title) throw new DomainError('bad_frame', 'title');
   if (graphemes(title) > GROUP_TITLE_MAX) throw new DomainError('too_long', 'title');
-  if (!Array.isArray(input.memberIds)) throw new DomainError('bad_frame', 'members');
-  const ids = [...new Set(input.memberIds.map(Number).filter((n) => Number.isInteger(n) && n > 0 && n !== creatorId))];
-  if (!ids.length) throw new DomainError('bad_frame', 'members');
-  if (ids.length + 1 > GROUP_MEMBERS_MAX) throw new DomainError('too_long', 'members');
+  let about: string | null = null;
+  if (input.about != null && input.about !== '') {
+    if (typeof input.about !== 'string') throw new DomainError('bad_frame', 'about');
+    about = input.about.replace(/\r\n?/g, '\n').trim() || null;
+    if (about && graphemes(about) > GROUP_ABOUT_MAX) throw new DomainError('too_long', 'about');
+  }
+  const raw = input.memberIds === undefined && kind === 'channel' ? [] : input.memberIds;
+  if (!Array.isArray(raw)) throw new DomainError('bad_frame', 'members');
+  const ids = [...new Set(raw.map(Number).filter((n) => Number.isInteger(n) && n > 0 && n !== creatorId))];
+  if (!ids.length && kind === 'group') throw new DomainError('bad_frame', 'members');
+  if (ids.length + 1 > MEMBERS_MAX[kind]) throw new DomainError('too_long', 'members');
   return sql.begin(async (tx) => {
     const found = await tx`select id from users where id = any(${ids}::bigint[]) and not system`;
     if (found.length !== ids.length) throw new DomainError('not_found', 'member');
     const [blocked] = await tx`select 1 from blocks where (owner_id = ${creatorId} and user_id = any(${ids}::bigint[])) or (user_id = ${creatorId} and owner_id = any(${ids}::bigint[])) limit 1`;
     if (blocked) throw new DomainError('blocked');
-    const [chat] = await tx`insert into chats (kind, title, owner_id) values ('group', ${title}, ${creatorId}) returning id`;
+    const [chat] = await tx`insert into chats (kind, title, about, owner_id) values (${kind}, ${title}, ${about}, ${creatorId}) returning id`;
     await tx`insert into chat_seq (chat_id) values (${chat.id})`;   // журнал чата (journal.ts)
     const members = [creatorId, ...ids];
-    await tx`insert into chat_members (chat_id, user_id, inviter_id) select ${chat.id}, unnest(${ids}::bigint[]), ${creatorId}`;
+    if (ids.length) await tx`insert into chat_members (chat_id, user_id, inviter_id) select ${chat.id}, unnest(${ids}::bigint[]), ${creatorId}`;
     await tx`insert into chat_members (chat_id, user_id, role) values (${chat.id}, ${creatorId}, 'owner')`;
     const clientId = crypto.randomUUID();
     const c = await contentColumns(Number(chat.id), clientId, { body: title, entities: null, todo: null, blocks: null, link: null, attachment: null }, tx);
@@ -50,7 +60,7 @@ export async function createGroup(creatorId: number, input: { title?: unknown; m
       insert into messages (chat_id, sender_id, client_id, kind, body, service_type, content)
       values (${chat.id}, ${creatorId}, ${clientId}, 'text', ${c.body}, 'group_created', ${c.content}) returning *`;
     const message = toMessage((await openRows([row], '', tx))[0]);
-    await chatEvent(tx, Number(chat.id), { type: 'newMessage', message }, 'group');
+    await chatEvent(tx, Number(chat.id), { type: 'newMessage', message }, kind);
     for (const id of members) await joinMembership(tx, Number(chat.id), id);   // чат приходит участникам через membership с seq
     return { chatId: Number(chat.id), message };
   });
@@ -85,16 +95,20 @@ export async function historyFrom(chatId: number, userId: number): Promise<numbe
   return Number(r?.history_from ?? 0);
 }
 
+/** Участник и чат не удалён (мягкое удаление — not_found, как у groupCtx). */
 export async function assertMember(db: Tx | typeof sql, chatId: number, userId: number): Promise<void> {
-  const [row] = await db`select 1 from chat_members where chat_id = ${chatId} and user_id = ${userId}`;
+  const [row] = await db`select c.deleted_at from chat_members m join chats c on c.id = m.chat_id where m.chat_id = ${chatId} and m.user_id = ${userId}`;
   if (!row) throw new DomainError('not_member');
+  if (row.deleted_at) throw new DomainError('not_found', 'chat');
 }
 
+/** Строка messages → сообщение API. Пост (post) — от имени канала: senderId 0, автор наружу не уходит (sender_id
+ *  остаётся внутренней правдой: права, push); подпись — post_author, если в канале включены подписи. */
 export function toMessage(r: Record<string, unknown>): Message {
   return {
     id: r.id as number,
     chatId: r.chat_id as number,
-    senderId: r.sender_id as number,
+    senderId: r.post ? 0 : r.sender_id as number,
     clientId: r.client_id as string,
     kind: ((r.kind as string) ?? 'text') as Message['kind'],
     body: r.body as string,
@@ -114,6 +128,8 @@ export function toMessage(r: Record<string, unknown>): Message {
     ...(r.blocks ? { blocks: r.blocks as Block[] } : {}),
     ...(Array.isArray(r.buttons) && r.buttons.length && !r.deleted ? { buttons: r.buttons as MessageButton[][] } : {}),
     ...(!r.deleted && Array.isArray(r.entities) && r.entities.length ? { entities: normalizeEntities(r.body as string, r.entities) } : {}),
+    ...(r.post ? { post: true, ...(r.post_author ? { postAuthor: r.post_author as string } : {}) } : {}),
+    ...(r.views != null ? { views: Number(r.views) } : {}),
   };
 }
 
@@ -137,7 +153,7 @@ export async function withReactions(messages: Message[]): Promise<Message[]> {
 
 export type ChatSummary = {
   id: number;
-  kind: 'direct' | 'group';
+  kind: 'direct' | 'group' | 'channel';
   title: string | null;
   lastReadId: number;
   unread: number;
@@ -153,8 +169,8 @@ export type ChatSummary = {
   seq?: number;              // журнал чата (группы и каналы): текущий номер; 0 у личных
   unreadMark?: boolean;      // «Отметить как непрочитанное»
   pinned?: number[]; // закреплённые сообщения (новые сверху)
-  group?: GroupInfo;    // только у групп: информация и настройки
-  me?: MyMembership;    // только у групп: моя роль и права
+  group?: GroupInfo;    // только у групп и каналов: информация и настройки
+  me?: MyMembership;    // только у групп и каналов: моя роль и права
 };
 
 /** Курсор страницы диалогов: время последнего сообщения (или создания чата) и id — как offset_date/offset_peer в Telegram. */
@@ -176,6 +192,7 @@ export async function countChats(userId: number): Promise<number> {
   const [r] = await sql`
     select count(*)::int as n from chat_members cm join chats c on c.id = cm.chat_id
      where cm.user_id = ${userId} and not cm.archived   -- архив — не в «Все»
+       and c.deleted_at is null
        and not (c.kind = 'direct' and cm.history_from > 0
                 and not exists (select 1 from messages m where m.chat_id = c.id and m.id >= cm.history_from))`;
   return r.n as number;
@@ -185,21 +202,23 @@ export async function listChats(userId: number, opts: ListOpts = {}): Promise<Ch
   // время списка — с точностью до мс: курсор уходит клиенту в ISO (мс), иначе на стыке страниц теряются чаты одной миллисекунды
   const rows = await sql`
     select c.id, c.kind, c.title, c.created_at as chat_created_at, cm.last_read_id,
-           c.about, c.photo as g_photo, c.owner_id, c.rights as chat_rights, c.slow_mode, c.history_hidden, c.join_approval, c.username, c.reactions, c.protected,
+           c.about, c.photo as g_photo, c.owner_id, c.rights as chat_rights, c.slow_mode, c.history_hidden, c.join_approval, c.username, c.reactions, c.protected, c.signatures, c.linked_chat_id,
            cm.mute_until, cm.mute_until = 'infinity' as mute_forever, cm.pinned_at, cm.archived, cm.archived_at_id, cm.unread_mark, cm.role, cm.admin_rights, cm.restricted, cm.history_from, cm.rank,
            coalesce(cs.seq, 0) as seq,
-           case when c.kind = 'group' then (select count(*)::int from chat_members gm where gm.chat_id = c.id) end as g_members,
-           case when c.kind = 'group' then (select count(*)::int from chat_join_requests jr where jr.chat_id = c.id) end as g_pending,
+           case when c.kind <> 'direct' then c.members_count end as g_members,   -- держит триггер (миграция 145)
+           case when c.kind <> 'direct' then (select count(*)::int from chat_join_requests jr where jr.chat_id = c.id) end as g_pending,
            lm.id as m_id, lm.chat_id as m_chat_id, lm.sender_id as m_sender_id, lm.client_id as m_client_id,
-           lm.body as m_body, lm.kind as m_kind, lm.attachment as m_attachment, lm.reply_to_id as m_reply_to_id, lm.created_at as m_created_at, lm.edited_at as m_edited_at, lm.deleted as m_deleted, lm.entities as m_entities, lm.service_type as m_service_type, lm.service_data as m_service_data, lm.todo as m_todo, lm.fwd_from as m_fwd_from, lm.buttons as m_buttons, lm.sticker as m_sticker, lm.content as m_content,
+           lm.body as m_body, lm.kind as m_kind, lm.attachment as m_attachment, lm.reply_to_id as m_reply_to_id, lm.created_at as m_created_at, lm.edited_at as m_edited_at, lm.deleted as m_deleted, lm.entities as m_entities, lm.service_type as m_service_type, lm.service_data as m_service_data, lm.todo as m_todo, lm.fwd_from as m_fwd_from, lm.buttons as m_buttons, lm.sticker as m_sticker, lm.content as m_content, lm.post as m_post, lm.post_author as m_post_author,
            (select count(*) from messages m
              where m.chat_id = c.id and m.id > cm.last_read_id and m.id >= cm.history_from and m.sender_id <> ${userId})::int as unread,
            (select json_build_object('id', u.id, 'name', ${nameForSql(userId)}, 'system', u.system,   -- контактное имя — только владельцу
                     'photo', case when exists (select 1 from blocks b where b.owner_id = u.id and b.user_id = ${userId}) then null else u.photo end)
               from chat_members pm join users u on u.id = pm.user_id
              where c.kind = 'direct' and pm.chat_id = c.id and pm.user_id <> ${userId} limit 1) as peer,
-           -- личный: до чего дочитал собеседник; группа: до чего дочитал хоть кто-то (readBy там — только авторам, смысл «кто-то прочитал»)
-           (select coalesce(case when c.kind = 'direct' then min(om.last_read_id) else max(om.last_read_id) end, 0) from chat_members om where om.chat_id = c.id and om.user_id <> ${userId}) as peer_read_up_to,
+           -- личный: до чего дочитал собеседник; группа: до чего дочитал хоть кто-то (readBy там — только авторам, смысл «кто-то прочитал»);
+           -- канал: прочитанности нет (вместо галочек — просмотры), и max по 200 000 строк не считаем
+           case when c.kind = 'channel' then 0 else
+             (select coalesce(case when c.kind = 'direct' then min(om.last_read_id) else max(om.last_read_id) end, 0) from chat_members om where om.chat_id = c.id and om.user_id <> ${userId}) end as peer_read_up_to,
            date_trunc('milliseconds', coalesce(lm.created_at, c.created_at)) as sort_at,
            (select json_build_object('text', d.text, 'at', d.updated_at, 'entities', d.entities, 'content', encode(d.content, 'base64')) from drafts d where d.user_id = ${userId} and d.chat_id = c.id) as draft,
            (select coalesce(json_agg(p.message_id order by p.message_id desc), '[]') from (select message_id from pinned_messages where chat_id = c.id order by message_id desc limit 100) p) as pinned
@@ -210,6 +229,7 @@ export async function listChats(userId: number, opts: ListOpts = {}): Promise<Ch
         select * from messages where chat_id = c.id and id >= cm.history_from order by id desc limit 1
       ) lm on true
      where cm.user_id = ${userId}
+       and c.deleted_at is null   -- удалённый (мягко) канал или группа: строки участников убирает chat.purge
        -- личный чат, который удалили (история сдвинута) и в котором с тех пор ничего нет, — не в списке
        and not (c.kind = 'direct' and cm.history_from > 0 and lm.id is null)
        ${opts.before ? sql`and (date_trunc('milliseconds', coalesce(lm.created_at, c.created_at)), c.id) < (${opts.before.at}::timestamptz, ${opts.before.id})` : sql``}
@@ -229,7 +249,7 @@ export async function listChats(userId: number, opts: ListOpts = {}): Promise<Ch
   for (const d of drafts) { d.ref.text = d.text; d.ref.entities = d.entities; }
   return rows.map((r) => ({
     id: r.id as number,
-    kind: r.kind as 'direct' | 'group',
+    kind: r.kind as ChatSummary['kind'],
     title: (r.title as string | null) ?? null,
     lastReadId: r.last_read_id as number,
     unread: r.unread as number,
@@ -243,11 +263,12 @@ export async function listChats(userId: number, opts: ListOpts = {}): Promise<Ch
     seq: Number(r.seq ?? 0),
     unreadMark: !!r.unread_mark,
     pinned: ((r.pinned as number[] | null) ?? []).map(Number),
-    ...(r.kind === 'group' ? summaryFromRow(Number(r.id), userId, r) : {}),
+    ...(r.kind !== 'direct' ? summaryFromRow(Number(r.id), userId, r) : {}),
     draft: r.draft ? { text: (r.draft as { text: string }).text, at: new Date((r.draft as { at: string }).at).toISOString(), ...((r.draft as { entities?: Entity[] | null }).entities?.length ? { entities: normalizeEntities((r.draft as { text: string }).text, (r.draft as { entities: Entity[] }).entities) } : {}) } : null,
     last: r.m_id == null ? null : toMessage({
       id: r.m_id, chat_id: r.m_chat_id, sender_id: r.m_sender_id, client_id: r.m_client_id,
       body: r.m_body, kind: r.m_kind, attachment: r.m_attachment, reply_to_id: r.m_reply_to_id, created_at: r.m_created_at, edited_at: r.m_edited_at, deleted: r.m_deleted, entities: r.m_entities, service_type: r.m_service_type, service_data: r.m_service_data, todo: r.m_todo, fwd_from: r.m_fwd_from, buttons: r.m_buttons, sticker: r.m_sticker,
+      post: r.m_post, post_author: r.m_post_author,
     }),
   }));
 }
@@ -300,12 +321,12 @@ export async function commonGroups(userId: number, peerId: number): Promise<Comm
   if (!Number.isSafeInteger(peerId) || peerId === userId) return [];
   const rows = await sql`
     select c.id, c.title, c.photo,
-           (select count(*) from chat_members x where x.chat_id = c.id)::int as members,
+           c.members_count as members,
            (select max(id) from messages m where m.chat_id = c.id) as last_id
       from chats c
       join chat_members me on me.chat_id = c.id and me.user_id = ${userId}
       join chat_members peer on peer.chat_id = c.id and peer.user_id = ${peerId}
-     where c.kind = 'group'
+     where c.kind = 'group' and c.deleted_at is null   -- только группы: канал общей «группой» не считается
      order by last_id desc nulls last, c.id desc
      limit 200`;
   return rows.map((r) => ({ id: Number(r.id), title: String(r.title ?? ''), photo: (r.photo as ProfilePhoto | null) ?? null, members: Number(r.members) }));

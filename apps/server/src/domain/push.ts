@@ -102,7 +102,7 @@ export async function unsubscribe(userId: number, endpoint: string): Promise<voi
 /** system — служебное сообщение Relay: SW ставит знак Relay иконкой. */
 export type PushPayload = { chatId: number; id: number; title: string; body: string; system?: true };
 
-export type PushMessage = { chatId: number; id: number; senderId: number; body: string; entities?: { type: string; offset: number; length: number }[]; kind?: string; attachment?: { name?: string } | null; service?: { type: string }; sticker?: { emoji?: string } | null };
+export type PushMessage = { chatId: number; id: number; senderId: number; body: string; entities?: { type: string; offset: number; length: number }[]; kind?: string; attachment?: { name?: string } | null; service?: { type: string }; sticker?: { emoji?: string } | null; post?: boolean };
 
 /** Новое сообщение → кому и что слать (задача push.message): подписки участников без соединения в любом процессе,
  *  кроме отправителя, заглушивших чат и заблокировавших отправителя.
@@ -131,15 +131,18 @@ export async function planPush(m: PushMessage): Promise<{ endpoint: string; push
   if (!info) return [];   // чат удалили, пока задача ждала
   // умолчания получателя для этого вида чата: выключено — не шлём; без предпросмотра — текст не отдаём
   const defaults = await notifyDefaults(sql, [...new Set(offline.map((s) => s.user_id as number))]);
-  const kind = info.kind === 'group' ? 'group' : 'direct';
+  const kind = info.kind === 'channel' ? 'channel' : info.kind === 'group' ? 'group' : 'direct';
   const prefOf = (userId: number) => defaults.get(userId)?.[kind] ?? { muted: false, preview: true };
   const preview = m.kind === 'sticker' ? (m.sticker?.emoji ? m.sticker.emoji + ' Стикер' : 'Стикер') : m.kind === 'voice' ? '🎤 Голосовое сообщение' : m.kind === 'todo' ? '☑️ ' + m.body : m.kind === 'round' ? 'Видеосообщение' : m.kind === 'photo' ? (m.body ? '🖼 ' + m.body : 'Фотография') : m.kind === 'video' ? (m.body ? '📹 ' + m.body : 'Видео') : m.kind === 'file' ? '📎 ' + (m.body || m.attachment?.name || 'Файл') : m.kind === 'audio' ? '🎵 ' + (m.body || (m.attachment as { title?: string } | null | undefined)?.title || (m.attachment?.name ?? 'Музыка').replace(/\.[^.]{1,5}$/, '')) : m.body;
   return offline.filter((s) => !prefOf(s.user_id as number).muted).map((s) => {
     const name = s.sender_name as string;
     const shown = prefOf(s.user_id as number).preview;
     // «Скрывать текст в уведомлениях» на этом устройстве — ни имени, ни текста (как и локальное уведомление)
+    // пост (канал или его копия в группе) — от имени канала: заголовок — название чата, имени автора нет
     const push: PushPayload = s.hide_text === true
       ? { chatId: m.chatId, id: m.id, title: 'Relay', body: NO_PREVIEW }
+      : kind === 'channel' || m.post
+      ? { chatId: m.chatId, id: m.id, title: (info.title as string) ?? 'Канал', body: shown ? preview : NO_PREVIEW }
       : kind === 'group'
       ? { chatId: m.chatId, id: m.id, title: (info.title as string) ?? 'Группа', body: shown ? `${name}: ${preview}` : NO_PREVIEW }
       : { chatId: m.chatId, id: m.id, title: name, body: shown ? preview : NO_PREVIEW };

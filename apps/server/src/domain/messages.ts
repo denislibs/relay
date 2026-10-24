@@ -5,12 +5,12 @@ import { newTodo } from './todo';
 import { sql } from '../db';
 import { assertMember, toMessage } from './chats';
 import { DomainError } from './errors';
-import { chatEvent } from './journal';
+import { appendUpdates, chatEvent } from './journal';
 import { unarchiveOnMessage } from './chatFlags';
 import { blockedInDirect } from './privacy';
 import { burnCodes } from './login';
 import { enqueue } from '../jobs/queue';
-import { can, groupCtx, requireRight } from './groupRights';
+import { can, groupCtx, hasAdmin, requireRight } from './groupRights';
 import { stickerForSend } from './stickers';
 import { cachedPreview, firstUrl, getPreview } from './linkPreview';
 import { contentColumns, openRows, updateContent } from './messageContent';
@@ -55,6 +55,14 @@ export async function sendMessage(
       const [existing] = await tx`select * from messages where sender_id = ${userId} and client_id = ${input.clientId}`;
       if (existing) return { message: toMessage((await openRows([existing], '', tx))[0]), duplicate: true };
       throw new DomainError('blocked');
+    }
+    // канал: публикуют только админы с правом post; ответов в ленте канала нет (обсуждение — в треде группы)
+    let post: { author: string | null } | null = null;
+    if (ctx.kind === 'channel') {
+      if (!hasAdmin(ctx, 'post')) throw new DomainError('forbidden', 'post');
+      if (input.replyToId != null) throw new DomainError('bad_frame', 'reply in channel');
+      const [pc] = await tx`select c.signatures, u.name from chats c, users u where c.id = ${input.chatId} and u.id = ${userId}`;
+      post = { author: pc.signatures ? (pc.name as string) : null };   // подпись — имя на момент поста
     }
     // копия без «Переслано от» — новое сообщение и может быть ответом; настоящая пересылка — нет (как в Telegram)
     const canReply = !input.forward || !!input.forward.hideSender;
@@ -117,10 +125,10 @@ export async function sendMessage(
     // содержимое — шифром ключа чата (messageContent.ts); открытыми остаются метаданные
     const c = await contentColumns(input.chatId, input.clientId, { body, entities: entities.length ? entities : null, todo: todo ?? fwdTodo, blocks, link, attachment }, tx);
     const inserted = await tx`
-      insert into messages (chat_id, sender_id, client_id, kind, body, entities, reply_to_id, attachment, group_id, fwd_from, link, blocks, todo, sticker, content, has_link)
+      insert into messages (chat_id, sender_id, client_id, kind, body, entities, reply_to_id, attachment, group_id, fwd_from, link, blocks, todo, sticker, content, has_link, post, post_author)
       values (${input.chatId}, ${userId}, ${input.clientId}, ${kind}, ${c.body}, ${c.entities?.length ? sql.json(c.entities as never) : null}, ${canReply ? input.replyToId ?? null : null}, ${c.attachment ? sql.json(c.attachment as never) : null},
               ${attachment && input.groupId && /^[0-9a-f-]{36}$/.test(input.groupId) ? input.groupId : null},   -- группа — только у вложений
-              ${fwdFrom ? sql.json(fwdFrom as never) : null}, ${c.link ? sql.json(c.link as never) : null}, ${c.blocks ? sql.json(c.blocks as never) : null}, ${c.todo ? sql.json(c.todo as never) : null}, ${sticker ? sql.json(sticker as never) : null}, ${c.content}, ${c.hasLink})
+              ${fwdFrom ? sql.json(fwdFrom as never) : null}, ${c.link ? sql.json(c.link as never) : null}, ${c.blocks ? sql.json(c.blocks as never) : null}, ${c.todo ? sql.json(c.todo as never) : null}, ${sticker ? sql.json(sticker as never) : null}, ${c.content}, ${c.hasLink}, ${!!post}, ${post?.author ?? null})
       on conflict (sender_id, client_id) do nothing
       returning *`;
     if (inserted.length === 0) {
@@ -130,6 +138,11 @@ export async function sendMessage(
     const message = toMessage((await openRows([inserted[0]], '', tx))[0]);
     await burnCodes(tx, userId, body);
     await chatEvent(tx, input.chatId, { type: 'newMessage', message }, ctx.kind);
+    if (post) {
+      // свой пост — не непрочитанный: senderId у поста 0, другие устройства автора сняли бы +1 только по readOwn
+      await tx`update chat_members set last_read_id = greatest(last_read_id, ${message.id}) where chat_id = ${input.chatId} and user_id = ${userId}`;
+      await appendUpdates(tx, [{ userId, update: { type: 'readOwn', chatId: input.chatId, upToId: message.id } }]);
+    }
     // как в Telegram: новое сообщение возвращает чат из архива (если не заглушён). Группы — клиент условной операцией
     // unarchive (chatFlags.ts): запись каждому участнику на каждое сообщение для них непозволительна
     if (ctx.kind === 'direct') await unarchiveOnMessage(tx, input.chatId, userId);

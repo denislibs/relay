@@ -6,6 +6,7 @@ import { broadcastGroup, groupCtx, hasAdmin, requireAdmin } from './groupRights'
 
 // Ссылки-приглашения и заявки (как в Telegram): основная ссылка группы, дополнительные со сроком и лимитом,
 // отзыв, «кто вступил», одобрение вступающих. Вступление по юзернейму публичной группы — тем же путём.
+// Каналы — тем же путём; вступление в канал — без служебного и groupUpdated (acceptMember).
 
 type Db = Tx | typeof sql;
 const token = () => Buffer.from(crypto.getRandomValues(new Uint8Array(12))).toString('base64url');
@@ -153,15 +154,15 @@ export async function decideRequests(userId: number, chatId: number, target: num
 
 type Target = { chatId: number; inviteId: number | null; approval: boolean; live: boolean };
 
-/** Что открывает ссылка: «+токен» — приглашение, «@имя» — публичная группа. */
+/** Что открывает ссылка: «+токен» — приглашение, «@имя» — публичная группа или канал. Удалённый (мягко) — нет. */
 async function resolve(db: Db, key: string): Promise<Target> {
   if (key.startsWith('@')) {
-    const [c] = await db`select id, join_approval from chats where kind = 'group' and lower(username) = lower(${key.slice(1)})`;
+    const [c] = await db`select id, join_approval from chats where kind in ('group', 'channel') and deleted_at is null and lower(username) = lower(${key.slice(1)})`;
     if (!c) throw new DomainError('not_found', 'group');
     return { chatId: Number(c.id), inviteId: null, approval: !!c.join_approval, live: true };
   }
   const [i] = await db`select i.id, i.chat_id, i.approval, i.revoked, i.expires_at, i.usage_limit, i.usage, i.primary_link, c.join_approval
-                         from chat_invites i join chats c on c.id = i.chat_id where i.token = ${key}`;
+                         from chat_invites i join chats c on c.id = i.chat_id and c.deleted_at is null where i.token = ${key}`;
   if (!i) throw new DomainError('not_found', 'invite');
   const live = !i.revoked && (!i.expires_at || new Date(i.expires_at as string).getTime() > Date.now()) && (i.usage_limit == null || Number(i.usage) < Number(i.usage_limit));
   return { chatId: Number(i.chat_id), inviteId: Number(i.id), approval: !!i.approval || (!!i.join_approval && !!i.primary_link), live };
@@ -171,11 +172,11 @@ export async function previewInvite(userId: number, key: string): Promise<Invite
   const t = await resolve(sql, key);
   if (!t.live) throw new DomainError('not_found', 'expired');
   const [c] = await sql`
-    select c.title, c.about, c.photo, (select count(*)::int from chat_members m where m.chat_id = c.id) as members,
+    select c.kind, c.title, c.about, c.photo, c.members_count as members,
            exists (select 1 from chat_members m where m.chat_id = c.id and m.user_id = ${userId}) as member,
            exists (select 1 from chat_join_requests r where r.chat_id = c.id and r.user_id = ${userId}) as requested
       from chats c where c.id = ${t.chatId}`;
-  return { chatId: t.chatId, title: (c.title as string) ?? '', about: (c.about as string | null) ?? '', photo: (c.photo as InvitePreview['photo']) ?? null, members: Number(c.members), approval: t.approval, member: !!c.member, requested: !!c.requested };
+  return { chatId: t.chatId, kind: c.kind === 'channel' ? 'channel' : 'group', title: (c.title as string) ?? '', about: (c.about as string | null) ?? '', photo: (c.photo as InvitePreview['photo']) ?? null, members: Number(c.members), approval: t.approval, member: !!c.member, requested: !!c.requested };
 }
 
 /** Вступить по ссылке. С одобрением — заявка (requested). Удалённым из группы — нельзя. */
@@ -183,7 +184,8 @@ export async function joinByInvite(userId: number, key: string): Promise<{ chatI
   return sql.begin(async (tx) => {
     const t = await resolve(tx, key);
     if (!t.live) throw new DomainError('not_found', 'expired');
-    await tx`select 1 from chats where id = ${t.chatId} for update`;
+    const [c] = await tx`select deleted_at from chats where id = ${t.chatId} for update`;
+    if (!c || c.deleted_at) throw new DomainError('not_found', 'group');
     const [m] = await tx`select 1 from chat_members where chat_id = ${t.chatId} and user_id = ${userId}`;
     if (m) return { chatId: t.chatId, requested: false };
     const [ban] = await tx`select 1 from chat_bans where chat_id = ${t.chatId} and user_id = ${userId}`;

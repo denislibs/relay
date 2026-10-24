@@ -38,6 +38,9 @@ export interface Message {
   blocks?: Block[] | null;        // «статья»: блоки (body — её простой текст)
   buttons?: MessageButton[][] | null;   // кнопки под сообщением (как inline-клавиатура в Telegram): ряды слева направо
   sticker?: StickerRef | null;          // kind 'sticker': снимок стикера на момент отправки
+  post?: boolean;        // пост канала: автор — канал (senderId 0), наружу автор не раскрывается
+  postAuthor?: string;   // подпись автора поста (если в канале включены подписи)
+  views?: number;        // просмотры поста
 }
 
 /** Стикер: всё, чтобы нарисовать его без запросов (url — неизменяемый файл /stk/<пак>/<хэш>/<файл>). */
@@ -238,7 +241,7 @@ export interface MemberRow { userId: Id; role: 'owner' | 'admin' | 'member'; ran
 export const NO_PREVIEW = 'Новое сообщение';
 
 /** Вид чата для умолчаний уведомлений. */
-export type NotifyType = 'direct' | 'group';
+export type NotifyType = 'direct' | 'group' | 'channel';
 export interface NotifyPref { muted: boolean; preview: boolean }
 /** Настройки аккаунта (GET /settings добавляет seq своей записи журнала на момент снимка). */
 export interface UserSettings { notify: Record<NotifyType, NotifyPref>; sessionsTtlDays: number; folders: ChatFolder[] }   // folders — свои папки по порядку вкладок
