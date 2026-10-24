@@ -214,6 +214,7 @@ export class Engine {
     });
     store.contactOf = (id) => this.contacts.view().get(id);
     store.wantUser = (id) => this.userWants.add(id);
+    store.wantRow = (chatId) => this.refreshRows([chatId]);
     store.wantPost = (chatId, id) => {
       if (this.postsNoReplies.has(chatId + ':' + id)) return;   // уже перечитывали — кнопки нет (тред не в текущей группе): не спрашивать снова
       let s = this.postWants.get(chatId); if (!s) { s = new Set(); this.postWants.set(chatId, s); } s.add(id);
@@ -770,7 +771,7 @@ export class Engine {
       this.run(async () => {
         const res = await this.http<{ messages: Message[] }>(`/chats/${chatId}/messages?ids=${[...ids].join(',')}`);
         await this.store.loadChatMessages(chatId);   // исходники ложатся строками чата: сначала — его сохранённые сообщения
-        this.store.addQuotes(chatId, res.messages);
+        this.store.addQuotes(chatId, res.messages, [...ids]);
         this.changed();
       });
     }

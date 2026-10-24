@@ -99,13 +99,12 @@ test('edits and deletions of a chat not opened since start reach the cached copy
   await again.whenIdle();
   await again.close(); engines.length = 0;
 
-  // без сети лента читается из кэша: там уже правка и удаление
+  // без сети лента читается из кэша: там уже правка, а удалённого нет
   const offline = await open(cfg);
   const cached = watchInto(offline, { kind: 'messages', chatId, limit: 50 });
   const l = await cached.until((x) => x.length > 0);
-  const byId = new Map(l.map((m) => [m.id, m]));
-  expect(byId.get(ids[0])).toMatchObject({ deleted: true, body: '' });
-  expect(byId.get(ids[1])).toMatchObject({ body: 'm2 правка' });
+  expect(l.map((m) => m.id)).toEqual([ids[1], ids[2]]);
+  expect(l[0]).toMatchObject({ body: 'm2 правка' });
 });
 
 test('a quote fetched online survives an offline restart: its source is stored as a loose message', async () => {

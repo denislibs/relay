@@ -297,9 +297,10 @@ test('edit, delete and reactions reach the other side through the journal', asyn
   const feedA = watchInto(ea, { kind: 'messages', chatId, limit: 20 });
   await feedA.until((l) => (l[0]?.reactions as { emoji: string }[] | undefined)?.[0]?.emoji === '👍');
   await ea.call({ type: 'deleteMessage', chatId, id: m.id as number });
-  await feedB.until((l) => l[0].deleted === true && l[0].body === '');
+  await feedB.until((l) => l.length === 0);   // исчезает целиком, как в Telegram
+  await feedA.until((l) => l.length === 0);
   const listB = watchInto(eb, { kind: 'chatList', limit: 5 });
-  await listB.until((l) => (l[0]?.last as { deleted: boolean } | null)?.deleted === true);
+  await listB.until((l) => l.length === 1 && l[0].last == null);   // других сообщений нет — превью пустое
 });
 
 test('search: server when online, cached messages when offline', async () => {

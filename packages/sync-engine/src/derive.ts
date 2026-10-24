@@ -10,8 +10,9 @@ import type { LocalChat, LocalMessage } from './types';
 /**
  * Сообщение чата добавлено, изменено или удалено (m — уже новое состояние; при отмене неотправленного — убранное;
  * prev — прежнее, если было известно).
- * Новое или правка последнего — становится last; удалили последнее — last и lastAt = предыдущего не удалённого
- * из памяти (чат опускается к дате нового верхнего сообщения, как в Telegram); не удалённых нет — lastAt прежний.
+ * Новое или правка последнего — становится last (удалённое — никогда: пометка копии поста в превью не попадает);
+ * удалили последнее — last и lastAt = предыдущего не удалённого из памяти (чат опускается к дате нового верхнего
+ * сообщения, как в Telegram); в памяти его нет — last пуст, lastAt прежний, строку чата спросим у сервера (wantRow).
  */
 export function onMessage(store: Store, chat: LocalChat, m: LocalMessage, kind: 'added' | 'edited' | 'deleted', prev?: LocalMessage): void {
   countMedia(chat, m, prev);
@@ -19,10 +20,9 @@ export function onMessage(store: Store, chat: LocalChat, m: LocalMessage, kind: 
   if (kind === 'deleted') {
     if (last?.key === m.key) {
       recomputeLast(store, chat);
-      // в памяти ничего нет (чат не загружен) — остаётся удалённое: в превью «Сообщение удалено»
-      if (!chat.last && m.deleted) chat.last = m;
+      if (!chat.last) store.wantRow(chat.id);
     }
-  } else if (!last || last.key === m.key || m.sort >= last.sort) {
+  } else if (!m.deleted && (!last || last.deleted || last.key === m.key || m.sort >= last.sort)) {   // last.deleted — пометка из старого кэша
     chat.last = m;
     if (m.createdAt > chat.lastAt) chat.lastAt = m.createdAt;
   }
@@ -30,12 +30,12 @@ export function onMessage(store: Store, chat: LocalChat, m: LocalMessage, kind: 
 }
 
 /**
- * last — самое позднее не удалённое из сообщений в памяти, lastAt — его время; все удалены — last самое позднее,
- * нет ни одного — null, lastAt в обоих случаях не трогаем. Черновик по-прежнему может поднять чат (sortAt).
+ * last — самое позднее не удалённое из сообщений в памяти, lastAt — его время; таких нет — null, lastAt не трогаем.
+ * Черновик по-прежнему может поднять чат (sortAt).
  */
 export function recomputeLast(store: Store, chat: LocalChat): void {
   const all = store.chatMessages(chat.id);
-  let last: LocalMessage | null = all.length ? all[all.length - 1] : null;
+  let last: LocalMessage | null = null;
   for (let i = all.length - 1; i >= 0; i--) {
     if (all[i].deleted) continue;
     last = all[i];

@@ -81,7 +81,7 @@ test('delete/edit of a cached but unloaded message repairs the stored row and it
   again.applyUpdate({ type: 'messageEdited', chatId: 7, id: 11, body: 'new text', editedAt: new Date().toISOString() } as any);
   await again.flush();
   expect(await words(db)).toEqual(['new', 'text']);
-  expect(await row(db, a.clientId)).toMatchObject({ deleted: true, body: '' });
+  expect(await row(db, a.clientId)).toBeUndefined();   // удалённое — строки нет совсем
   expect(await row(db, b.clientId)).toMatchObject({ body: 'new text' });
 });
 
@@ -100,7 +100,7 @@ test('edit then delete of an unloaded message in one flush leaves nothing', asyn
   again.applyUpdate({ type: 'messageDeleted', chatId: 7, id: 10 } as any);
   await again.flush();
   expect(await words(db)).toEqual([]);
-  expect(await row(db, a.clientId)).toMatchObject({ deleted: true });
+  expect(await row(db, a.clientId)).toBeUndefined();
 });
 
 test('two edits of an unloaded message: final body and only its terms', async () => {
