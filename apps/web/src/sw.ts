@@ -193,13 +193,14 @@ sw.addEventListener('push', (e) => {
 sw.addEventListener('notificationclick', (e) => {
   e.notification.close();
   const chatId = Number(e.notification.data?.chatId) || null;
+  const threadId = Number(e.notification.data?.threadId) || null;   // комментарий в треде — открыть тред
   e.waitUntil((async () => {
     const wins = await sw.clients.matchAll({ type: 'window', includeUncontrolled: true });
     const win = wins[0] as WindowClient | undefined;
     if (win) {
       await win.focus();
-      if (chatId) win.postMessage({ type: 'openChat', chatId });
-    } else await sw.clients.openWindow(chatId ? '/#chat=' + chatId : '/');
+      if (chatId) win.postMessage({ type: 'openChat', chatId, ...(threadId ? { threadId } : {}) });
+    } else await sw.clients.openWindow(chatId ? '/#chat=' + chatId + (threadId ? '&thread=' + threadId : '') : '/');
   })());
 });
 

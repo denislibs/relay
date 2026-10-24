@@ -14,7 +14,7 @@ import { act, canManage } from '../groups';
 import { isSystemChat } from './format';
 import { startSelect } from '../forward';
 import { isMuted, MUTE_PRESETS, muteChat, unmuteChat } from '../mute';
-import { closeChat } from '../data';
+import { closeChat, openInner } from '../data';
 
 type Ask = null | 'mute' | 'delete' | 'leave';
 
@@ -27,8 +27,10 @@ export function ChatMenu({ chatId, title }: { chatId: number; title: string }) {
   const contact = useGlobal((s) => (peerId ? s.contacts.some((c) => c.userId === peerId) : false));
   const contactsLoaded = useGlobal((s) => s.contactsLoaded);
   const iBlocked = useGlobal((s) => peerId != null && s.blocked.some((b) => b.userId === peerId));
-  const gMe = chat?.kind === 'group' ? (chat.me as MyMembership | null) ?? null : null;
-  const gInfo = chat?.kind === 'group' ? (chat.group as GroupInfo | null) ?? null : null;
+  const channel = chat?.kind === 'channel';
+  const gMe = chat?.kind === 'group' || channel ? (chat!.me as MyMembership | null) ?? null : null;
+  const gInfo = chat?.kind === 'group' || channel ? (chat!.group as GroupInfo | null) ?? null : null;
+  const what = channel ? 'канал' : 'группу';
   const owner = gMe?.role === 'owner';
 
   const [open, setOpen] = useState(false);
@@ -56,7 +58,9 @@ export function ChatMenu({ chatId, title }: { chatId: number; title: string }) {
       ? { icon: 'block', label: 'Разблокировать', onClick: () => { void unblockUser(peerId).then(() => showToast('Пользователь разблокирован')); } }
       : { icon: 'block', label: 'Заблокировать', onClick: () => { void blockUser(peerId).then(() => showToast('Пользователь заблокирован')); } }] : []),
     ...(peerId ? ['-' as const, { icon: 'trash', label: 'Удалить чат', danger: true, onClick: () => setAsk('delete') }] : []),
-    ...(gMe ? ['-' as const, { icon: owner ? 'trash' : 'logout', label: owner ? 'Удалить и покинуть' : 'Покинуть группу', danger: true, onClick: () => setAsk('leave') }] : []),
+    // канал с обсуждением — «Обсуждение»: группа комментариев поверх (если я в ней)
+    ...(channel && gInfo?.linkedChatId != null && getGlobal().chats.some((c) => c.id === gInfo.linkedChatId) ? [{ icon: 'chats', label: 'Обсуждение', onClick: () => openInner(gInfo.linkedChatId!) }] : []),
+    ...(gMe ? ['-' as const, { icon: owner ? 'trash' : 'logout', label: owner ? 'Удалить и покинуть' : channel ? 'Покинуть канал' : 'Покинуть группу', danger: true, onClick: () => setAsk('leave') }] : []),
   ];
 
   const remove = async (forAll: boolean) => {
@@ -95,8 +99,8 @@ export function ChatMenu({ chatId, title }: { chatId: number; title: string }) {
           <button type="button" class="rl-mdl-btn" data-autofocus="" onClick={() => setAsk(null)}>Отмена</button>
         </div>
       </Modal>
-      <ConfirmDialog open={ask === 'leave'} danger title={owner ? 'Удалить группу' : 'Покинуть группу'}
-        text={owner ? `Удалить группу «${title}» для всех участников? Это действие нельзя отменить.` : `Покинуть группу «${title}»?`}
+      <ConfirmDialog open={ask === 'leave'} danger title={owner ? `Удалить ${what}` : `Покинуть ${what}`}
+        text={owner ? `Удалить ${what} «${title}» для всех ${channel ? 'подписчиков' : 'участников'}? Это действие нельзя отменить.` : `Покинуть ${what} «${title}»?`}
         confirm={owner ? 'Удалить' : 'Покинуть'} onConfirm={() => void leave()} onCancel={() => setAsk(null)} />
     </>
   );

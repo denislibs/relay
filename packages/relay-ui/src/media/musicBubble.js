@@ -78,5 +78,7 @@ export function MusicBubble(props) {
             // как в Telegram: при воспроизведении вторая строка — время и полоса с бегунком, той же высоты, что «длительность • исполнитель»
             ? h(TrackSeek, { trackKey: props.trackKey })
             : h('span', { class: 'rl-music-sub' }, fmt(props.duration), props.performer ? ' • ' + props.performer : props.size ? ' • ' + props.size : ''))),
-      last ? h('span', { class: 'rl-music-meta' }, props.time, out ? h(MessageStatus, { status: props.status || 'sent' }) : null) : null));
+      last ? h('span', { class: 'rl-music-meta' }, props.metaBefore ? props.metaBefore() : null, props.time, out || props.status ? h(MessageStatus, { status: props.status || 'sent' }) : null) : null,
+      // пост канала: кнопка комментариев — у последнего трека группы
+      last && props.footer ? h('div', { class: 'rl-bubble-footer' }, props.footer) : null));
 }

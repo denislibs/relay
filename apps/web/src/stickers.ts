@@ -20,7 +20,7 @@ export const stickersByEmoji = (emoji: string) => call({ type: 'stickersByEmoji'
 export const installSet = (setId: number, on: boolean, info?: StickerSetInfo) => call({ type: 'installStickerSet', setId, on, ...(info ? { info } : {}) });
 export const faveSticker = (s: StickerRef, on: boolean) => call({ type: 'faveSticker', id: s.id, on, sticker: s });
 export const clearRecentStickers = (id?: number) => call({ type: 'clearRecentStickers', ...(id != null ? { id } : {}) });
-export const sendSticker = (chatId: number, sticker: StickerRef, replyToId?: number | null) => call({ type: 'sendSticker', chatId, sticker, replyToId: replyToId ?? null });
+export const sendSticker = (chatId: number, sticker: StickerRef, replyToId?: number | null, threadId?: number) => call({ type: 'sendSticker', chatId, sticker, replyToId: replyToId ?? null, ...(threadId != null ? { threadId } : {}) });
 
 /** Мои стикеры, свежие: перечитываются, когда движок поднимает stickersRev (журнал, переподключение, свои действия). */
 export function useMyStickers(): MyStickers {
@@ -36,7 +36,7 @@ export function useMyStickers(): MyStickers {
 let lastMine: MyStickers = EMPTY_MINE;
 
 /** Куда уходит стикер, выбранный в модалке или правой панели: открытый чат и его текущий ответ (ставит Chat). */
-type Target = { chatId: number; replyId: () => number | null; sent: () => void };
+type Target = { chatId: number; threadId?: number; replyId: () => number | null; sent: () => void };   // threadId — комментарий в треде
 let target: Target | null = null;
 export function setStickerTarget(t: Target | null): () => void {
   target = t;
@@ -46,7 +46,7 @@ export const hasStickerTarget = () => !!target;
 /** Отправить в открытый чат (с ответом, если он выбран). false — чата нет. */
 export function sendStickerHere(s: StickerRef): boolean {
   if (!target) return false;
-  void sendSticker(target.chatId, s, target.replyId());
+  void sendSticker(target.chatId, s, target.replyId(), target.threadId);
   target.sent();
   return true;
 }

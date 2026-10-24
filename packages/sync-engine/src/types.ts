@@ -176,7 +176,7 @@ export type Patch =
 
 export type Action =
   /** стикеры (stickers.ts): мои паки/недавние/избранные и паки — из кэша без сети; изменения — очередью операций */
-  | { type: 'sendSticker'; chatId: number; sticker: StickerRef; replyToId?: number | null }
+  | { type: 'sendSticker'; chatId: number; sticker: StickerRef; replyToId?: number | null; threadId?: number }   // threadId — комментарий в треде
   | { type: 'myStickers' }
   | { type: 'stickerSet'; id: number | string; hash?: string }
   | { type: 'installStickerSet'; setId: number; on: boolean; info?: StickerSetInfo }
@@ -274,7 +274,7 @@ export type Action =
   /** раздел «Для разработчиков»: имитатор сети и служебные команды (devlog.ts) */
   | DevAction
   | { type: 'sendFile'; chatId: number; body: string; file: Blob; name: string; mime: string; w?: number | null; h?: number | null; thumb?: string | null; replyToId?: number | null;
-      kind?: 'voice' | 'round' | 'audio' | 'video'; duration?: number; waveform?: string | null; title?: string | null; performer?: string | null; groupId?: string | null; spoiler?: boolean }
+      kind?: 'voice' | 'round' | 'audio' | 'video'; duration?: number; waveform?: string | null; title?: string | null; performer?: string | null; groupId?: string | null; spoiler?: boolean; threadId?: number }
   | { type: 'listened'; chatId: number; id: number }
   /** Переслать сообщения ids (по порядку) из fromChatId в каждый из toChatIds; comment — отдельным сообщением перед ними. */
   /** replyToId — только для копии (hideSender) в один чат: копия — новое сообщение и может быть ответом; пересылка с «Переслано от» — нет */

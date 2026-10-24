@@ -9,8 +9,20 @@ const GROUP_TYPES = new Set<ServiceType>([
 ]);
 export const isGroupService = (t: string | undefined): t is ServiceType => !!t && GROUP_TYPES.has(t as ServiceType);
 
-export function serviceText(type: ServiceType, opts: { data?: ServiceData; body?: string; mine: boolean; sender: string; meId: number }): string {
+export function serviceText(type: ServiceType, opts: { data?: ServiceData; body?: string; mine: boolean; sender: string; meId: number; fromChannel?: boolean }): string {
   const { data, mine, sender, meId } = opts;
+  // строки от имени канала (senderId 0, автор скрыт) — безличные, как в Telegram
+  if (opts.fromChannel) {
+    switch (type) {
+      case 'channel_created': return `Канал «${opts.body ?? ''}» создан`;
+      case 'title_changed': return `Название канала изменено на «${data?.title ?? opts.body ?? ''}»`;
+      case 'photo_changed': return 'Фото канала изменено';
+      case 'photo_removed': return 'Фото канала удалено';
+      case 'protected_on': return 'Копирование в канале запрещено';
+      case 'protected_off': return 'Копирование в канале разрешено';
+      default: break;
+    }
+  }
   const v = (you: string, other: string) => (mine ? 'Вы ' + you : `${sender} ${other}`);
   const users = (data?.users ?? []).map((u) => (u.id === meId ? 'вас' : u.name)).join(', ');
   const first = data?.users?.[0];

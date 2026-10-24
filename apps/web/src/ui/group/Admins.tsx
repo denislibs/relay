@@ -1,9 +1,9 @@
 import { CheckRow, ConfirmDialog, InfoRow, Modal, Section, TextField } from '@relay/ui';
-import { ADMIN_RIGHTS, RANK_MAX, allAdminRights, noAdminRights, type AdminRights, type GroupMember } from '@relay/protocol';
+import { ADMIN_RIGHTS_BY_KIND, RANK_MAX, allAdminRights, noAdminRights, type AdminRights, type GroupMember } from '@relay/protocol';
 import { useState } from 'preact/hooks';
 import { proofOf } from '../../authSettings';
 import { useGlobal } from '../../global';
-import { ADMIN_RIGHT_TEXT, act, adminCan, errorText, sameAdmin, useGroup, useGroupData } from '../../groups';
+import { act, adminCan, adminRightText, errorText, sameAdmin, useGroup, useGroupData } from '../../groups';
 import { showToast } from '../../settingsData';
 import { lastSeenText } from '../format';
 import { GPage, Loading, PersonRow } from './common';
@@ -12,13 +12,13 @@ import type { Nav } from './Manage';
 /** «Администраторы»: владелец первым, у остальных — кто назначил; «+» — назначить. */
 export function Admins({ nav }: { nav: Nav }) {
   const { chatId } = nav;
-  const { me, membersRev } = useGroup(chatId);
+  const { me, membersRev, kind } = useGroup(chatId);
   const all = useGroupData<{ members: GroupMember[] }>(`/groups/${chatId}/members`, membersRev);
   const names = new Map((all.data?.members ?? []).map((m) => [m.userId, m.name]));
   const admins = (all.data?.members ?? []).filter((m) => m.role !== 'member');
   return (
     <GPage title="Администраторы" onBack={nav.back} fab={adminCan(me, 'addAdmins') ? { show: true, icon: 'userPlus', label: 'Назначить администратора', onClick: () => nav.go('gAdminPick') } : undefined}>
-      <Section footer="Администраторы помогают управлять группой. Права каждого настраиваются отдельно.">
+      <Section footer={kind === 'channel' ? 'Администраторы помогают вести канал. Права каждого настраиваются отдельно.' : 'Администраторы помогают управлять группой. Права каждого настраиваются отдельно.'}>
         {all.data ? admins.map((m) => (
           <PersonRow key={m.userId} id={m.userId} name={m.name} photo={m.photo} trailing={m.rank ?? undefined}
             subtitle={m.role === 'owner' ? 'Владелец' : m.promotedBy && names.has(m.promotedBy) ? `Назначил(а) ${names.get(m.promotedBy)}` : 'Администратор'}
@@ -32,7 +32,7 @@ export function Admins({ nav }: { nav: Nav }) {
 /** Права администратора: чекбоксы (только те, что есть у меня), звание, снять с должности, передать права на группу. */
 export function AdminRightsPage({ nav }: { nav: Nav }) {
   const { chatId, params } = nav;
-  const { me, membersRev, group } = useGroup(chatId);
+  const { me, membersRev, group, kind } = useGroup(chatId);
   const myId = useGlobal((s) => s.me!.userId);
   const all = useGroupData<{ members: GroupMember[] }>(`/groups/${chatId}/members`, membersRev);
   const target = all.data?.members.find((m) => m.userId === params.userId) ?? null;
@@ -51,7 +51,7 @@ export function AdminRightsPage({ nav }: { nav: Nav }) {
   const editable = !isOwner && (me.role === 'owner' || (adminCan(me, 'addAdmins') && (fresh || target.promotedBy === myId)));
   const rankEditable = editable || self;
   const mine = me.admin ?? noAdminRights();
-  const start = isOwner ? allAdminRights() : target.admin ?? (fresh ? { ...mine, addAdmins: false } : noAdminRights());
+  const start = isOwner ? allAdminRights(kind) : target.admin ?? (fresh ? { ...mine, addAdmins: false } : noAdminRights());
   const rights = draft ?? start;
   const r0 = target.rank ?? '';
   const r1 = rank ?? r0;
@@ -83,8 +83,8 @@ export function AdminRightsPage({ nav }: { nav: Nav }) {
         <PersonRow id={target.userId} name={target.name} photo={target.photo} online={!!target.online} subtitle={self ? 'это вы' : lastSeenText(!!target.online, target.lastSeen)} />
       </Section>
       <Section title="Что может этот администратор" footer={!editable && !isOwner ? 'Менять права может владелец или тот, кто назначил этого администратора.' : isOwner ? 'У владельца все права.' : undefined}>
-        {ADMIN_RIGHTS.map((k) => (
-          <CheckRow key={k} label={ADMIN_RIGHT_TEXT[k]} checked={rights[k]} disabled={!editable || !mine[k]}
+        {ADMIN_RIGHTS_BY_KIND[kind].map((k) => (
+          <CheckRow key={k} label={adminRightText(k, kind)} checked={rights[k]} disabled={!editable || !mine[k]}
             onChange={(on: boolean) => setDraft({ ...rights, [k]: on })} />
         ))}
       </Section>
@@ -98,7 +98,7 @@ export function AdminRightsPage({ nav }: { nav: Nav }) {
       ) : null}
       {me.role === 'owner' && !self && !isOwner ? (
         <Section footer="Новый владелец получит все права, а вы останетесь администратором.">
-          <InfoRow icon="crown" title="Передать права на группу" onClick={() => setAsk('transfer')} />
+          <InfoRow icon="crown" title={kind === 'channel' ? 'Передать права на канал' : 'Передать права на группу'} onClick={() => setAsk('transfer')} />
         </Section>
       ) : null}
       <ConfirmDialog open={ask === 'dismiss'} danger title="Снять с должности?" text={`${target.name} станет обычным участником.`} confirm="Снять" onCancel={() => setAsk(null)} onConfirm={() => void dismiss()} />

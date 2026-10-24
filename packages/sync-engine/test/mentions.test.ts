@@ -60,6 +60,15 @@ test('one notification per message: newMessage then mention, or mention then new
   expect(s.chats.get(7)!.mentions).toBe(2);   // упоминание считается, даже если уведомило сообщение
 });
 
+test('a comment notifies with its thread (the click opens the thread), a mention in a thread too', async () => {
+  const s = await store();
+  group(s, 7);
+  s.applyUpdate({ type: 'newMessage', message: msg({ id: 40, chatId: 7, senderId: PEER, threadId: 5 }) });
+  s.applyUpdate({ type: 'mention', message: msg({ id: 41, chatId: 7, senderId: PEER, threadId: 6 }), threadId: 6 });
+  s.applyUpdate({ type: 'newMessage', message: msg({ id: 42, chatId: 7, senderId: PEER }) });
+  expect(s.notifications.map((n) => [n.key, n.threadId])).toEqual([['n7:40', 5], ['n7:41', 6], ['n7:42', undefined]]);
+});
+
 // ---- через сервер: журнал mention, строка списка, «кто прочитал» ----
 const srv = await startTestServer();
 afterAll(() => srv.stop());

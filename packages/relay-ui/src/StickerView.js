@@ -144,7 +144,9 @@ export function StickerBubble(props) {
       h('div', { class: 'rl-sticker-box' },
         h(StickerView, { src: s.url, outline: s.outline, w: s.w, h: s.h, size: props.size || stickerMsgSize(), group: 'feed',
           title: s.emoji ? 'Стикер ' + s.emoji : 'Стикер', onClick: props.onOpen ? (e) => { e.stopPropagation(); props.onOpen(); } : undefined }),
-        h('span', { class: 'rl-media-chip rl-sticker-meta' }, props.time, out ? h(MessageStatus, { status: props.status || 'read' }) : null)),
+        h('span', { class: 'rl-media-chip rl-sticker-meta' }, props.metaBefore ? props.metaBefore() : null, props.time, out || props.status ? h(MessageStatus, { status: props.status || 'read' }) : null)),
+      // пост канала: кнопка комментариев плашкой под стикером (пузыря нет), шириной со стикер
+      props.footer ? h('div', { class: 'rl-footer-plate' }, props.footer) : null,
       props.reactions && props.reactions.length ? h(ReactionChips, { items: props.reactions, out, onClick: props.onReact }) : null));
 }
 
