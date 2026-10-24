@@ -2,7 +2,7 @@ import { INVITE_USAGE_MAX, type GroupInvite, type InvitePreview, type JoinReques
 import { sql, type Tx } from '../db';
 import { DomainError } from './errors';
 import { acceptMember } from './groups';
-import { broadcastGroup, groupCtx, hasAdmin, requireAdmin } from './groupRights';
+import { broadcastGroup, broadcastRequests, groupCtx, hasAdmin, requireAdmin } from './groupRights';
 
 // Ссылки-приглашения и заявки (как в Telegram): основная ссылка группы, дополнительные со сроком и лимитом,
 // отзыв, «кто вступил», одобрение вступающих. Вступление по юзернейму публичной группы — тем же путём.
@@ -82,14 +82,15 @@ async function oneInvite(db: Db, chatId: number, id: number): Promise<GroupInvit
 /** Правка (не основной и не отозванной) или отзыв ({revoked: true}). Отзыв основной — сразу новая основная. */
 export async function editInvite(userId: number, chatId: number, id: number, body: Record<string, unknown>): Promise<GroupInvite> {
   return sql.begin(async (tx) => {
-    requireAdmin(await groupCtx(tx, chatId, userId), 'invite');
+    const ctx = await groupCtx(tx, chatId, userId);
+    requireAdmin(ctx, 'invite');
     const [i] = await tx`select primary_link, revoked from chat_invites where chat_id = ${chatId} and id = ${id} for update`;
     if (!i) throw new DomainError('not_found', 'invite');
     if (body.revoked === true) {
       await tx`update chat_invites set revoked = true where id = ${id}`;
       await tx`delete from chat_join_requests where invite_id = ${id}`;
       if (i.primary_link) await primaryInvite(tx, chatId, userId);
-      await broadcastGroup(tx, chatId);
+      await (ctx.kind === 'channel' ? broadcastRequests(tx, chatId) : broadcastGroup(tx, chatId));   // в канале — только заявки
       return oneInvite(tx, chatId, id);
     }
     if (i.primary_link || i.revoked) throw new DomainError('forbidden', 'invite');
@@ -136,7 +137,8 @@ export async function listRequests(userId: number, chatId: number): Promise<{ re
 /** Принять или отклонить заявку (target = null — все). */
 export async function decideRequests(userId: number, chatId: number, target: number | null, approve: boolean): Promise<{ ok: true }> {
   return sql.begin(async (tx) => {
-    requireAdmin(await groupCtx(tx, chatId, userId, { lock: true }), 'invite');
+    const ctx = await groupCtx(tx, chatId, userId, { lock: true });
+    requireAdmin(ctx, 'invite');
     const rows = await tx`select user_id, invite_id from chat_join_requests where chat_id = ${chatId} ${target != null ? tx`and user_id = ${target}` : tx``}`;
     if (target != null && !rows.length) throw new DomainError('not_found', 'request');
     for (const r of rows) {
@@ -147,7 +149,8 @@ export async function decideRequests(userId: number, chatId: number, target: num
       }
     }
     await tx`delete from chat_join_requests where chat_id = ${chatId} ${target != null ? tx`and user_id = ${target}` : tx``}`;
-    await broadcastGroup(tx, chatId);
+    // канал: принятые получили membership, groupUpdated всем подписчикам не нужен — только заявки
+    await (ctx.kind === 'channel' ? broadcastRequests(tx, chatId) : broadcastGroup(tx, chatId));
     return { ok: true };
   });
 }
@@ -184,7 +187,7 @@ export async function joinByInvite(userId: number, key: string): Promise<{ chatI
   return sql.begin(async (tx) => {
     const t = await resolve(tx, key);
     if (!t.live) throw new DomainError('not_found', 'expired');
-    const [c] = await tx`select deleted_at from chats where id = ${t.chatId} for update`;
+    const [c] = await tx`select kind, deleted_at from chats where id = ${t.chatId} for update`;
     if (!c || c.deleted_at) throw new DomainError('not_found', 'group');
     const [m] = await tx`select 1 from chat_members where chat_id = ${t.chatId} and user_id = ${userId}`;
     if (m) return { chatId: t.chatId, requested: false };
@@ -194,7 +197,8 @@ export async function joinByInvite(userId: number, key: string): Promise<{ chatI
     if (sys) throw new DomainError('forbidden');
     if (t.approval) {
       await tx`insert into chat_join_requests (chat_id, user_id, invite_id) values (${t.chatId}, ${userId}, ${t.inviteId}) on conflict (chat_id, user_id) do nothing`;
-      await broadcastGroup(tx, t.chatId);
+      // заявка в канал — только тем, кто принимает (не groupUpdated на 200 000)
+      await (c.kind === 'channel' ? broadcastRequests(tx, t.chatId) : broadcastGroup(tx, t.chatId));
       return { chatId: t.chatId, requested: true };
     }
     await acceptMember(tx, t.chatId, userId, null, 'joined_by_link');

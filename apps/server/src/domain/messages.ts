@@ -3,7 +3,7 @@ import { clearDraftInTx } from './drafts';
 import { rightForKind, normalizeEntities, trimFormatted, type Block, blocksText, normalizeBlocks, type Entity, type ForwardInfo, type ForwardRef, type LinkPreview, type Message, type StickerRef, type Todo, type TodoInput } from '@relay/protocol';
 import { newTodo } from './todo';
 import { sql } from '../db';
-import { assertMember, toMessage } from './chats';
+import { assertMember, shownTodo, toMessage } from './chats';
 import { DomainError } from './errors';
 import { appendUpdates, chatEvent } from './journal';
 import { unarchiveOnMessage } from './chatFlags';
@@ -90,7 +90,7 @@ export async function sendMessage(
       // строка вложения — for share до конца транзакции: сборка мусора (storageGc.ts) не удалит его посреди пересылки
       if (attachment && !(await tx`select 1 from attachments where id = ${attachment.id as string} for share`).length) throw new DomainError('not_found', 'forward attachment');
       kind = src.kind as string;
-      fwdTodo = (src.todo as Todo | null) ?? null;   // пересланный чек-лист — копия, только для чтения
+      fwdTodo = src.todo ? shownTodo(src.todo as Todo, !!src.post) : null;   // пересланный чек-лист — копия, только для чтения (у поста — без отметивших админов)
       sticker = (src.sticker as StickerRef | null) ?? null;   // стикер пересылается своим снимком
       const dropCaption = !!f.hideCaption && !!attachment;
       body = dropCaption ? '' : src.body as string;

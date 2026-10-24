@@ -344,7 +344,16 @@ export class Store {
       case 'chatNotify': return this.setMute(u.chatId, u.muteUntil);
       case 'chatFlags': return this.setFlags(u.chatId, u);
       // requests у каждого своё (joinRequests), общая запись его не несёт — не затирать
-      case 'groupUpdated': { const chat = this.chats.get(u.chatId); if (chat) { chat.group = { ...u.group, requests: chat.group?.requests ?? 0 }; this.markChat(chat); } return; }
+      // канал: владельца общая запись не несёт (null — подписчикам он не раскрывается); админ знает его из сводки — не затирать
+      case 'groupUpdated': {
+        const chat = this.chats.get(u.chatId);
+        if (chat) {
+          const ownerId = u.group.ownerId ?? (chat.kind === 'channel' && chat.me?.admin ? chat.group?.ownerId ?? null : null);
+          chat.group = { ...u.group, ownerId, requests: chat.group?.requests ?? 0 };
+          this.markChat(chat);
+        }
+        return;
+      }
       case 'joinRequests': { const chat = this.chats.get(u.chatId); if (chat?.group) { chat.group = { ...chat.group, requests: u.requests }; this.markChat(chat); } return; }
       case 'membership': {
         const chat = this.chats.get(u.chatId);

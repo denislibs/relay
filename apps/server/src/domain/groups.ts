@@ -370,13 +370,18 @@ function canManageAdmin(ctx: GroupCtx, target: { role: GroupRole; promoted_by: u
 /** Удалить участника (бан: в «Удалённые») или выйти самому. Владелец выходит — права переходят дальше. */
 export async function removeGroupMember(userId: number, chatId: number, target: number): Promise<{ ok: true }> {
   return sql.begin(async (tx) => {
+    // свой выход может удалить чат (последний владелец) — тогда запирается и связанный: оба замка заранее, по порядку
+    if (target === userId) await lockWithLinked(tx, chatId);
     const ctx = await groupCtx(tx, chatId, userId, { lock: true });
     isCommunity(ctx);
     if (target === userId) {
       if (ctx.role === 'owner') {
-        // новый владелец — самый давний админ, иначе самый давний участник; никого — группа удаляется
+        // новый владелец — самый давний админ, иначе самый давний участник; никого — группа удаляется.
+        // Канал: только админ (подписчик не получает канал на 200 000 случайно); админа нет — сначала передать права
         const [next] = await tx`select user_id from chat_members where chat_id = ${chatId} and user_id <> ${userId}
+                                 ${ctx.kind === 'channel' ? tx`and role = 'admin'` : tx``}
                                  order by case role when 'admin' then 0 else 1 end, joined_at limit 1`;
+        if (!next && ctx.kind === 'channel') throw new DomainError('forbidden', 'transfer ownership first');
         if (!next) { await deleteGroupTx(tx, chatId); return { ok: true }; }
         await makeOwner(tx, chatId, Number(next.user_id), userId);
       }
@@ -513,9 +518,33 @@ async function deleteGroupTx(tx: Tx, chatId: number): Promise<void> {
   await enqueue(tx, 'chat.purge', { chatId, after: 0 }, { dedupeKey: `chat.purge:${chatId}:m:0` });
 }
 
+/**
+ * Замки строк chats чата и связанного (канал ↔ группа обсуждения) — одним select по возрастанию id, до любых
+ * других замков: тот же порядок, что у setLinkedChat. Связь могли поменять между чтением и замком — тогда откат
+ * к точке сохранения (замки отпускаются) и заново, а не новые замки поверх старых.
+ */
+async function lockWithLinked(tx: Tx, chatId: number): Promise<void> {
+  for (let attempt = 0; ; attempt++) {
+    const ok = await tx.savepoint(async (sp) => {
+      const [c0] = await sp`select linked_chat_id from chats where id = ${chatId}`;
+      if (!c0) return true;   // чата нет — дальше groupCtx ответит not_member
+      const linked = c0.linked_chat_id == null ? null : Number(c0.linked_chat_id);
+      const ids = [...new Set([chatId, linked].filter((x): x is number => x != null))].sort((a, b) => a - b);
+      await sp`select id from chats where id = any(${ids}::bigint[]) order by id for update`;
+      const [c1] = await sp`select linked_chat_id from chats where id = ${chatId}`;
+      if ((c1.linked_chat_id == null ? null : Number(c1.linked_chat_id)) === linked) return true;
+      throw new RetryLock();
+    }).catch((e) => { if (e instanceof RetryLock) return false; throw e; });
+    if (ok) return;
+    if (attempt >= 2) throw new DomainError('flood', 'linked', 1);
+  }
+}
+class RetryLock extends Error {}
+
 /** Удалить группу или канал у всех (владелец). */
 export async function deleteGroup(userId: number, chatId: number): Promise<{ ok: true }> {
   return sql.begin(async (tx) => {
+    await lockWithLinked(tx, chatId);
     const ctx = await groupCtx(tx, chatId, userId, { lock: true });
     isCommunity(ctx);
     if (ctx.role !== 'owner') throw new DomainError('forbidden', 'owner');
@@ -534,14 +563,19 @@ export async function setLinkedChat(userId: number, channelId: number, groupId: 
   return sql.begin(async (tx) => {
     let prev: number | null = null;
     for (let attempt = 0; ; attempt++) {
-      // прежняя группа — читаем без замка, запираем всё по порядку и сверяем: связь могли поменять между чтением и замком
-      const [c0] = await tx`select linked_chat_id from chats where id = ${channelId}`;
-      if (!c0) throw new DomainError('not_found', 'chat');
-      prev = c0.linked_chat_id == null ? null : Number(c0.linked_chat_id);
-      const ids = [...new Set([channelId, groupId, prev].filter((x): x is number => x != null))].sort((a, b) => a - b);
-      await tx`select id from chats where id = any(${ids}::bigint[]) order by id for update`;
-      const [c1] = await tx`select linked_chat_id from chats where id = ${channelId}`;
-      if ((c1.linked_chat_id == null ? null : Number(c1.linked_chat_id)) === prev) break;
+      // прежняя группа — читаем без замка, запираем всё по порядку и сверяем: связь могли поменять между чтением и
+      // замком — тогда откат к точке сохранения (её замки отпускаются) и заново, без новых замков поверх старых
+      const ok = await tx.savepoint(async (sp) => {
+        const [c0] = await sp`select linked_chat_id from chats where id = ${channelId}`;
+        if (!c0) throw new DomainError('not_found', 'chat');
+        prev = c0.linked_chat_id == null ? null : Number(c0.linked_chat_id);
+        const ids = [...new Set([channelId, groupId, prev].filter((x): x is number => x != null))].sort((a, b) => a - b);
+        await sp`select id from chats where id = any(${ids}::bigint[]) order by id for update`;
+        const [c1] = await sp`select linked_chat_id from chats where id = ${channelId}`;
+        if ((c1.linked_chat_id == null ? null : Number(c1.linked_chat_id)) === prev) return true;
+        throw new RetryLock();
+      }).catch((e) => { if (e instanceof RetryLock) return false; throw e; });
+      if (ok) break;
       if (attempt >= 2) throw new DomainError('flood', 'linked', 1);   // связь меняют одновременно — повторить
     }
     const ch = await groupCtx(tx, channelId, userId);

@@ -78,7 +78,7 @@ export async function publicUserFor(db: Tx | typeof sql, viewer: number, r: Row,
  *  Канал общим чатом не считается: подписчики друг друга не видят. */
 export async function viewersOf(tx: Tx | typeof sql, userId: number): Promise<number[]> {
   const rows = await tx`
-    select b.user_id from chat_members a join chats c on c.id = a.chat_id and c.kind <> 'channel' join chat_members b on b.chat_id = a.chat_id
+    select b.user_id from chat_members a join chats c on c.id = a.chat_id and c.kind <> 'channel' and c.deleted_at is null join chat_members b on b.chat_id = a.chat_id
      where a.user_id = ${userId} and b.user_id <> ${userId}
     union
     select owner_id from contacts where user_id = ${userId}`;
@@ -104,7 +104,7 @@ export const nameForSql = (viewer: number | ReturnType<typeof sql>) =>
 export async function canView(db: Tx | typeof sql, viewer: number, id: number): Promise<boolean> {
   if (id === viewer) return true;
   const [r] = await db`select (
-      exists (select 1 from chat_members a join chats c on c.id = a.chat_id and c.kind <> 'channel' join chat_members b on b.chat_id = a.chat_id where a.user_id = ${id} and b.user_id = ${viewer})
+      exists (select 1 from chat_members a join chats c on c.id = a.chat_id and c.kind <> 'channel' and c.deleted_at is null join chat_members b on b.chat_id = a.chat_id where a.user_id = ${id} and b.user_id = ${viewer})
       or exists (select 1 from contacts where owner_id = ${viewer} and user_id = ${id})
     ) as ok`;
   return !!r.ok;

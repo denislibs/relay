@@ -140,3 +140,19 @@ test('typing frames in a channel are ignored on the client', async () => {
   const feed = watchInto(eb, { kind: 'messages', chatId, limit: 50 });
   await feed.until((l) => l.some((m) => m.id === p.id && m.body === 'стало'));
 });
+
+test('groupUpdated of a channel carries no owner: an admin keeps the known ownerId, a subscriber has none', async () => {
+  const { allAdminRights, allRights, subscriberRights: noRights } = await import('@relay/protocol');
+  const s = await Store.open(await openDb('channel-' + crypto.randomUUID()), 1);
+  const group = { title: 'Новости', about: '', photo: null, ownerId: 7, rights: noRights(), slowMode: 0, historyHidden: false, joinApproval: false, username: null,
+    reactions: { mode: 'all' as const, allowed: [] }, protected: false, members: 3, requests: 0, signatures: false, linkedChatId: null };
+  s.applyUpdate({ type: 'newMessage', message: msg({ id: 1, chatId: 9, senderId: 0, post: true }) });
+  s.applyUpdate({ type: 'newMessage', message: msg({ id: 1, chatId: 10, senderId: 0, post: true }) });
+  for (const id of [9, 10]) { const c = s.chats.get(id)!; c.kind = 'channel'; c.group = group; }
+  s.applyUpdate({ type: 'membership', chatId: 9, me: { role: 'admin', admin: allAdminRights('channel'), rank: null, rights: allRights(), restricted: false } });
+  s.applyUpdate({ type: 'membership', chatId: 10, me: { role: 'member', admin: null, rank: null, rights: noRights(), restricted: false } });
+  s.applyUpdate({ type: 'groupUpdated', chatId: 9, group: { ...group, about: 'новое', ownerId: null } });
+  s.applyUpdate({ type: 'groupUpdated', chatId: 10, group: { ...group, about: 'новое', ownerId: null } });
+  expect(s.chats.get(9)!.group).toMatchObject({ about: 'новое', ownerId: 7 });
+  expect(s.chats.get(10)!.group).toMatchObject({ about: 'новое', ownerId: null });
+});

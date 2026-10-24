@@ -10,8 +10,11 @@ import { pinMessage } from '../src/domain/pins';
 import { markRead } from '../src/domain/reads';
 import { planPush, subscribe } from '../src/domain/push';
 import { canView, viewersOf } from '../src/domain/profile';
-import { setLinkedChat } from '../src/domain/groups';
+import { deleteGroup, setLinkedChat } from '../src/domain/groups';
+import { appendTodo, toggleTodo } from '../src/domain/todo';
+import { unarchiveByMessage } from '../src/domain/chatFlags';
 import { PURGE } from '../src/domain/chatPurge';
+import { DomainError } from '../src/domain/errors';
 import '../src/jobs/kinds';
 import { drainJobs } from '../src/jobs/worker';
 import { chatEventsOf, journalOf, makeChat, makeUser, pushBrowser, resetDb } from './helpers';
@@ -369,4 +372,108 @@ test('service messages of a channel are from the channel: channel_created with t
   expect(gs).toMatchObject({ service_type: 'group_created', post: false });
   await ok(a, 'PATCH', `/groups/${g}`, { title: 'Другое' });
   expect((await ok(b, 'GET', `/chats/${g}/messages`)).messages.at(-1)).toMatchObject({ senderId: a.userId, service: { type: 'title_changed' } });
+});
+
+test('checklists in a channel: only admins with post toggle/append; service lines are posts; who completed is hidden (by 0)', async () => {
+  const a = await login('Анна'), b = await login('Борис'), c = await login('Вера');
+  const id = await channel(a, [b, c]);
+  await makeAdmin(a, id, c, { post: true });
+  const todo = { title: 'План', items: [{ title: 'раз' }, { title: 'два' }], othersCanAppend: true, othersCanComplete: true };
+  const list = (await post(a, id, 'План', { todo })).message;
+  expect(list).toMatchObject({ kind: 'todo', senderId: 0, post: true });
+  await expect(toggleTodo(b.userId, id, list.id, [1], [])).rejects.toMatchObject({ code: 'forbidden' });
+  await expect(appendTodo(b.userId, id, list.id, ['три'])).rejects.toMatchObject({ code: 'forbidden' });
+  expect(await toggleTodo(c.userId, id, list.id, [1], [])).toEqual({ changed: true });
+  expect(await appendTodo(c.userId, id, list.id, ['три'])).toEqual({ ids: [3] });
+  const lines = await sql`select service_type, post, sender_id from messages where chat_id = ${id} and service_type like 'todo_%' order by id`;
+  expect(lines.map((r) => [r.service_type, r.post, Number(r.sender_id)])).toEqual([['todo_done', true, c.userId], ['todo_append', true, c.userId]]);
+  const ev = (await chatEventsOf(id, 'todoUpdated')).at(-1) as any;
+  expect(ev.todo.completions.map((x: any) => x.by)).toEqual([0]);
+  const hist = (await ok(b, 'GET', `/chats/${id}/messages`)).messages;
+  expect(hist.find((m: any) => m.id === list.id).todo.completions.map((x: any) => [x.id, x.by])).toEqual([[1, 0]]);
+  expect(hist.filter((m: any) => m.service?.type?.startsWith('todo_')).map((m: any) => m.senderId)).toEqual([0, 0]);
+  expect(JSON.stringify(hist)).not.toContain(`"by":${c.userId}`);
+  // пересланный из канала чек-лист — тоже без отметивших
+  const direct = await createChat('direct', null, [b.userId, c.userId]);
+  const fwd = (await sendMessage(b.userId, { chatId: direct, clientId: crypto.randomUUID(), body: '', forward: { chatId: id, id: list.id } })).message;
+  expect(fwd.todo!.completions.map((x) => x.by)).toEqual([0]);
+  // группа — как раньше: отмечают участники, by — настоящий
+  const g = await group(a, [b]);
+  const gl = (await post(a, g, 'План', { todo })).message;
+  await toggleTodo(b.userId, g, gl.id, [2], []);
+  expect(((await chatEventsOf(g, 'todoUpdated')).at(-1) as any).todo.completions.map((x: any) => x.by)).toEqual([b.userId]);
+  expect((await sql`select post from messages where chat_id = ${g} and service_type = 'todo_done'`)[0].post).toBe(false);
+});
+
+test('the owner leaving a channel: ownership goes to the oldest admin only (not an older subscriber); no admin — forbidden; groups unchanged', async () => {
+  const a = await login('Анна'), b = await login('Борис'), c = await login('Вера');
+  const id = await channel(a, [b]);   // b — давний подписчик
+  const r = await call(a, 'DELETE', `/groups/${id}/members/${a.userId}`);
+  expect(r.status).toBe(403);   // админа нет — сначала передать права
+  expect(await realCount(id)).toBe(2);
+  await ok(a, 'POST', `/groups/${id}/members`, { userIds: [c.userId] });
+  await makeAdmin(a, id, c, { post: true });
+  await ok(a, 'DELETE', `/groups/${id}/members/${a.userId}`);
+  const roles = await sql`select user_id, role from chat_members where chat_id = ${id} order by user_id`;
+  expect(roles.map((x) => [Number(x.user_id), x.role])).toEqual([[b.userId, 'member'], [c.userId, 'owner']]);
+  // группа: владелец уходит — самый давний участник, если админов нет
+  const g = await group(a, [b]);
+  await ok(a, 'DELETE', `/groups/${g}/members/${a.userId}`);
+  expect((await sql`select role from chat_members where chat_id = ${g} and user_id = ${b.userId}`)[0].role).toBe('owner');
+});
+
+test('deleting a linked chat and relinking at the same time do not deadlock (one ordered lock of both rows)', async () => {
+  const a = await login('Анна'), b = await login('Борис');
+  for (let i = 0; i < 5; i++) {
+    const g = await group(a, [b], 'Обсуждение');   // группа раньше канала: id меньше
+    const ch = await channel(a, [b]);
+    await setLinkedChat(a.userId, ch, g);
+    const res = await Promise.allSettled([deleteGroup(a.userId, ch), setLinkedChat(a.userId, ch, null), deleteGroup(a.userId, g)]);
+    for (const x of res) if (x.status === 'rejected') expect(x.reason).toBeInstanceOf(DomainError);   // доменная ошибка (not_found…), не дедлок 40P01
+    expect(res.filter((x) => x.status === 'fulfilled').length).toBeGreaterThanOrEqual(1);
+  }
+});
+
+test('a join request to a channel writes no groupUpdated: only joinRequests to approvers; approving neither', async () => {
+  const a = await login('Анна'), b = await login('Борис'), c = await login('Вера');
+  const id = await channel(a, [b]);
+  await ok(a, 'PUT', `/groups/${id}/settings`, { joinApproval: true });
+  const before = (await chatEventsOf(id, 'groupUpdated')).length;
+  const { invites } = await ok(a, 'GET', `/groups/${id}/invites`);
+  expect(await ok(c, 'POST', `/join/+${invites.find((i: any) => i.primary).link}`)).toMatchObject({ requested: true });
+  expect((await journalOf(a.userId, 'joinRequests')).at(-1)).toEqual({ type: 'joinRequests', chatId: id, requests: 1 });
+  expect(await journalOf(b.userId, 'joinRequests')).toEqual([]);
+  await ok(a, 'POST', `/groups/${id}/requests/${c.userId}`, { approve: true });
+  expect((await journalOf(a.userId, 'joinRequests')).at(-1)).toEqual({ type: 'joinRequests', chatId: id, requests: 0 });
+  expect((await chatEventsOf(id, 'groupUpdated')).length).toBe(before);
+  expect(await realCount(id)).toBe(3);
+});
+
+test('a soft-deleted chat is gone for reads, flags and profile visibility', async () => {
+  const a = await login('Анна'), b = await login('Борис');
+  const g = await group(a, [b]);
+  const m = (await sendMessage(a.userId, { chatId: g, clientId: crypto.randomUUID(), body: 'привет' })).message;
+  await ok(b, 'PUT', `/chats/${g}/flags`, { archived: true });
+  expect(await canView(sql, a.userId, b.userId)).toBe(true);
+  await ok(a, 'DELETE', `/groups/${g}`);
+  await expect(markRead(b.userId, g, m.id)).rejects.toMatchObject({ code: 'not_found' });
+  await expect(unarchiveByMessage(b.userId, g, { messageId: m.id })).rejects.toMatchObject({ code: 'not_found' });
+  expect((await call(b, 'PUT', `/chats/${g}/flags`, { pinned: true })).status).toBe(404);
+  // общей была только удалённая группа — профили друг другу больше не видны
+  expect(await canView(sql, a.userId, b.userId)).toBe(false);
+  expect(await viewersOf(sql, b.userId)).not.toContain(a.userId);
+});
+
+test('channel owner is shown to admins only: subscriber summary and the shared groupUpdated carry ownerId null', async () => {
+  const a = await login('Анна'), b = await login('Борис'), c = await login('Вера');
+  const id = await channel(a, [b, c]);
+  await makeAdmin(a, id, c, { post: true });
+  expect((await summary(b, id)).group.ownerId).toBeNull();
+  expect((await summary(c, id)).group.ownerId).toBe(a.userId);
+  expect((await summary(a, id)).group.ownerId).toBe(a.userId);
+  await ok(a, 'PATCH', `/groups/${id}`, { about: 'о канале' });
+  expect((await chatEventsOf(id, 'groupUpdated')).at(-1)).toMatchObject({ group: { about: 'о канале', ownerId: null } });
+  // группа — владелец виден всем
+  const g = await group(a, [b]);
+  expect((await summary(b, g)).group.ownerId).toBe(a.userId);
 });

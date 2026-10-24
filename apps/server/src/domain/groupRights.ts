@@ -104,9 +104,9 @@ export function myMembership(ctx: GroupCtx, rank: string | null): MyMembership {
 const photoOf = (raw: unknown): ProfilePhoto | null => raw && typeof raw === 'object' ? raw as ProfilePhoto : null;
 
 /** Сводка группы. requests — только тем, кто может принимать заявки (остальным 0). */
-export async function groupInfo(db: Db, chatId: number): Promise<Omit<GroupInfo, 'requests'> & { pending: number }> {
+export async function groupInfo(db: Db, chatId: number): Promise<Omit<GroupInfo, 'requests'> & { pending: number; kind: string }> {
   const [c] = await db`
-    select title, about, photo, owner_id, rights, slow_mode, history_hidden, join_approval, username, reactions, protected,
+    select kind, title, about, photo, owner_id, rights, slow_mode, history_hidden, join_approval, username, reactions, protected,
            members_count, signatures, linked_chat_id,
            (select count(*)::int from chat_join_requests r where r.chat_id = c.id) as pending
       from chats c where id = ${chatId}`;
@@ -126,6 +126,7 @@ export async function groupInfo(db: Db, chatId: number): Promise<Omit<GroupInfo,
     signatures: !!c.signatures,
     linkedChatId: c.linked_chat_id == null ? null : Number(c.linked_chat_id),
     pending: Number(c.pending),
+    kind: c.kind as string,
   };
 }
 
@@ -140,10 +141,21 @@ async function approvers(db: Db, chatId: number): Promise<Set<number>> {
  * личным joinRequests тем, кто их принимает; extra — кто только что перестал принимать (получит 0).
  */
 export async function broadcastGroup(tx: Tx, chatId: number, extra: number[] = []): Promise<void> {
-  const { pending, ...info } = await groupInfo(tx, chatId);
-  await chatEvent(tx, chatId, { type: 'groupUpdated', chatId, group: { ...info, requests: 0 } }, 'group');
+  const { pending, kind, ...info } = await groupInfo(tx, chatId);
+  // владелец канала подписчикам не раскрывается: в общую запись — null (админы знают его из сводки списка)
+  await chatEvent(tx, chatId, { type: 'groupUpdated', chatId, group: { ...info, ...(kind === 'channel' ? { ownerId: null } : {}), requests: 0 } }, 'group');
   const can = await approvers(tx, chatId);
   await appendUpdates(tx, [...new Set([...can, ...extra])].map((userId) => ({ userId, update: { type: 'joinRequests', chatId, requests: can.has(userId) ? pending : 0 } })));
+}
+
+/**
+ * Только заявки: личные joinRequests тем, кто их принимает, без groupUpdated в журнал чата. Канал — так всегда:
+ * заявка одного человека не должна расходиться событием по 200 000 подписчиков (информация канала не менялась).
+ */
+export async function broadcastRequests(tx: Tx, chatId: number): Promise<void> {
+  const [{ pending }] = await tx`select count(*)::int as pending from chat_join_requests where chat_id = ${chatId}`;
+  const can = await approvers(tx, chatId);
+  await appendUpdates(tx, [...can].map((userId) => ({ userId, update: { type: 'joinRequests' as const, chatId, requests: Number(pending) } })));
 }
 
 /** Моя роль или права изменились — только этому человеку. */
@@ -227,7 +239,7 @@ export function summaryFromRow(chatId: number, userId: number, r: Record<string,
       title: (r.title as string | null) ?? '',
       about: (r.about as string | null) ?? '',
       photo: photoOf(r.g_photo),
-      ownerId: r.owner_id == null ? null : Number(r.owner_id),
+      ownerId: r.owner_id == null || (ctx.kind === 'channel' && !ctx.admin) ? null : Number(r.owner_id),   // канал: владельца видят только админы
       rights: ctx.defaults,
       slowMode: ctx.slowMode,
       historyHidden: !!r.history_hidden,
@@ -247,7 +259,8 @@ export function summaryFromRow(chatId: number, userId: number, r: Record<string,
 /** Сводка для списка чатов (снимок): группа и моё место в ней. */
 export async function groupSummary(db: Db, chatId: number, userId: number): Promise<{ group: GroupInfo; me: MyMembership }> {
   const ctx = await groupCtx(db, chatId, userId);
-  const { pending, ...info } = await groupInfo(db, chatId);
+  const { pending, kind, ...info } = await groupInfo(db, chatId);
+  if (kind === 'channel' && !ctx.admin) info.ownerId = null;   // владельца канала видят только админы
   const [m] = await db`select rank from chat_members where chat_id = ${chatId} and user_id = ${userId}`;
   return { group: { ...info, requests: hasAdmin(ctx, 'invite') ? pending : 0 }, me: myMembership(ctx, (m?.rank as string | null) ?? null) };
 }

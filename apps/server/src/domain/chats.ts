@@ -102,6 +102,9 @@ export async function assertMember(db: Tx | typeof sql, chatId: number, userId: 
   if (row.deleted_at) throw new DomainError('not_found', 'chat');
 }
 
+/** Чек-лист поста канала — от имени канала: кто из админов отметил задачу, наружу не уходит (by: 0). */
+export const shownTodo = (todo: Todo, post: boolean): Todo => post ? { ...todo, completions: todo.completions.map((c) => ({ ...c, by: 0 })) } : todo;
+
 /** Строка messages → сообщение API. Пост (post) — от имени канала: senderId 0, автор наружу не уходит (sender_id
  *  остаётся внутренней правдой: права, push); подпись — post_author, если в канале включены подписи. */
 export function toMessage(r: Record<string, unknown>): Message {
@@ -120,7 +123,7 @@ export function toMessage(r: Record<string, unknown>): Message {
     ...((r.kind === 'voice' || r.kind === 'round') && !r.deleted ? { listened: !!r.listened } : {}),
     // из jsonb — в каноническом виде (порядок ключей у jsonb свой)
     ...(r.service_type ? { service: { type: r.service_type as ServiceType, ...(r.service_data ? { data: r.service_data as ServiceData } : {}) } } : {}),
-    ...(r.kind === 'todo' && r.todo && !r.deleted ? { todo: r.todo as Todo } : {}),
+    ...(r.kind === 'todo' && r.todo && !r.deleted ? { todo: shownTodo(r.todo as Todo, !!r.post) } : {}),
     ...(r.kind === 'sticker' && r.sticker && !r.deleted ? { sticker: r.sticker as StickerRef } : {}),
     ...(r.group_id ? { groupId: r.group_id as string } : {}),
     ...(r.fwd_from ? { fwdFrom: r.fwd_from as ForwardInfo } : {}),
