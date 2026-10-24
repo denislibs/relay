@@ -110,6 +110,14 @@ export function EditGroup({ nav }: { nav: Nav }) {
               onChange={() => void act('PUT', `/groups/${chatId}/settings`, { historyHidden: !group.historyHidden })} />} />
         </Section>
       ) : null}
+      {/* группа обсуждения: подписчики канала комментируют, не вступая; включено — сначала вступить (join_to_send) */}
+      {!channel && group.linkedChatId != null && (adminCan(me, 'ban') || adminCan(me, 'info')) ? (
+        <Section footer={group.joinToSend ? 'Чтобы оставить комментарий, подписчику канала нужно вступить в группу.' : 'Подписчики канала могут комментировать посты, не вступая в группу.'}>
+          <InfoRow icon="chats" title="Комментировать могут только участники"
+            trailing={<Switch id="g-join-to-send" label="Комментировать могут только участники" checked={!!group.joinToSend}
+              onChange={() => void act('PUT', `/groups/${chatId}/settings`, { joinToSend: !group.joinToSend })} />} />
+        </Section>
+      ) : null}
       <Section>
         <InfoRow icon="logout" danger title={owner ? (channel ? 'Удалить канал' : 'Удалить и покинуть группу') : channel ? 'Покинуть канал' : 'Покинуть группу'} onClick={() => setAsk(owner ? 'delete' : 'leave')} />
       </Section>

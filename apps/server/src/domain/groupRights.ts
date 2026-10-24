@@ -107,7 +107,7 @@ const photoOf = (raw: unknown): ProfilePhoto | null => raw && typeof raw === 'ob
 export async function groupInfo(db: Db, chatId: number): Promise<Omit<GroupInfo, 'requests'> & { pending: number; kind: string }> {
   const [c] = await db`
     select kind, title, about, photo, owner_id, rights, slow_mode, history_hidden, join_approval, username, reactions, protected,
-           members_count, signatures, linked_chat_id,
+           members_count, signatures, linked_chat_id, join_to_send,
            (select count(*)::int from chat_join_requests r where r.chat_id = c.id) as pending
       from chats c where id = ${chatId}`;
   return {
@@ -125,6 +125,7 @@ export async function groupInfo(db: Db, chatId: number): Promise<Omit<GroupInfo,
     members: Number(c.members_count),
     signatures: !!c.signatures,
     linkedChatId: c.linked_chat_id == null ? null : Number(c.linked_chat_id),
+    joinToSend: !!c.join_to_send,
     pending: Number(c.pending),
     kind: c.kind as string,
   };
@@ -251,6 +252,7 @@ export function summaryFromRow(chatId: number, userId: number, r: Record<string,
       requests: hasAdmin(ctx, 'invite') ? Number(r.g_pending ?? 0) : 0,
       signatures: !!r.signatures,
       linkedChatId: r.linked_chat_id == null ? null : Number(r.linked_chat_id),
+      joinToSend: !!r.join_to_send,
     },
     me: myMembership(ctx, (r.rank as string | null) ?? null),
   };

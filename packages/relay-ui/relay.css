@@ -1499,9 +1499,13 @@ html[data-blur="0"] .rl-shell .rl-rpick { background: color-mix(in srgb, var(--r
 
 /* «Информация» прокручивается целиком (как в Telegram): вкладки медиа прилипают сверху и плавают над сеткой */
 .rl-aside-tabs { position: sticky; top: 0; z-index: 3; margin: 0; padding: var(--space-3) var(--space-3) var(--space-3);   /* снизу как сбоку — сетка медиа не липнет к вкладкам */ }
-.rl-aside-tabs::before { content: ''; position: absolute; inset: 0;   /* не ниже вкладок: выступ накрывал верх первого острова со скруглением */ z-index: -1; pointer-events: none; background: color-mix(in srgb, var(--card) 72%, transparent); -webkit-backdrop-filter: blur(10px); backdrop-filter: blur(10px); -webkit-mask-image: linear-gradient(#000 65%, transparent); mask-image: linear-gradient(#000 65%, transparent); }
+/* фон вкладок — сплошной цвет панели (как в Telegram): без размытия и без маски-градиента, сетка под ними не просвечивает */
+/* вкладки плавают над сеткой как в Telegram: подложки под ними нет, только сама пилюля с тенью */
+.rl-aside-tabs .rl-tabs { box-shadow: 0 2px 8px rgba(0, 0, 0, .18); }
 .rl-aside-pages { margin-top: 0; flex: 1 0 auto; min-height: calc(100% - 64px); }   /* вкладки всегда можно довести до верха */
-.rl-aside-pages > .rl-slides { flex: 1 0 auto; width: 100%; min-width: 0; max-width: 100%; }   /* по ширине панели: длинная строка (адрес ссылки) — многоточием, а не прокруткой вбок */
+.rl-aside-pages > .rl-slides { flex: 1 0 auto; width: 100%; min-width: 0; max-width: 100%; overflow: clip; }   /* по ширине панели: длинная строка (адрес ссылки) — многоточием, а не прокруткой вбок */
+/* overflow: clip, а не hidden: уезжающая вкладка обрезается так же, но слайды не становятся контейнером прокрутки —
+   sticky внутри вкладки (плашка даты над «Медиа») липнет к прокрутке панели */
 /* текущая вкладка — в потоке (высота панели по содержимому), уходящая во время анимации — поверх */
 .rl-aside-pages .rl-slide:not(.rl-slide-parked):not(.rl-slide-out-push):not(.rl-slide-out-pop) { position: relative; inset: auto; width: 100%; }
 .rl-aside-pages .rl-aside-links { overflow: visible; }
@@ -1745,7 +1749,7 @@ html[data-blur="0"] .rl-menu { -webkit-backdrop-filter: none; backdrop-filter: n
 /* «Информация» — в одной гамме с настройками: серый фон страницы, белые карточки групп и списков */
 .rl-asidecard, .rl-asidecard .rl-slide:has(> .rl-sidepage > .rl-aside-body), .rl-sidepage:has(> .rl-aside-body) { background: var(--page); }
 .rl-asidecard .rl-aside-pages .rl-slide { background: transparent; }
-.rl-aside-tabs::before { background: color-mix(in srgb, var(--page) 72%, transparent); }
+
 
 /* Анимированный стикер (TGS): место занято сразу, canvas проявляется, когда воркер нарисовал первый кадр */
 

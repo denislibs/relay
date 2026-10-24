@@ -23,7 +23,7 @@ import { chatMembers, connected, disconnected, listPresence, type Publish } from
 import { searchMessages } from './domain/search';
 import { abortUpload, confirmUpload, createUpload, uploadParts, uploadStatus, downloadTtl, fileFor, signedDownload } from './domain/files';
 import { handleFrame } from './ws';
-import { registerSocket, releaseChats, syncSubscriptions, unregisterSocket } from './sockets';
+import { registerSocket, releaseChats, releaseThreads, syncSubscriptions, unregisterSocket } from './sockets';
 import { pinMessage, unpinMessage } from './domain/pins';
 import { addProfileMusic, listProfileMusic, removeProfileMusic } from './domain/profileMusic';
 import { journalStats } from './domain/journal';
@@ -456,6 +456,7 @@ export function createServer(opts: { port: number }): Server {
         untrackSocket(sessionId, ws);
         countSocket(userId, -1);
         unregisterSocket(ws);
+        releaseThreads(ws);
         void (ws.data.opened ?? Promise.resolve()).then(() => {
           disconnected(publish, userId);
           void bus.unlisten(`user:${userId}`).catch((err) => console.error('bus:', err));

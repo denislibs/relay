@@ -1,6 +1,6 @@
 import type { PublicUser } from '@relay/protocol';
 import { sql } from '../db';
-import { COLS, publicUser, selfSeq, type ContactName, type Row } from './profile';
+import { COLS, commentPeerSql, publicUser, selfSeq, type ContactName, type Row } from './profile';
 import { privacyCtx } from './privacy';
 
 /** Профили людей по id — как GET /users/:id (PublicUser, правила приватности и контактные имена зрителя) + seq зрителя.
@@ -16,7 +16,9 @@ export async function usersByIds(viewer: number, ids: number[]): Promise<{ users
       select ${COLS} from users
        where id = any(${want}::bigint[]) and (id = ${viewer}
          or exists (select 1 from chat_members m join chats c on c.id = m.chat_id and c.kind <> 'channel' and c.deleted_at is null join chat_members o on o.chat_id = m.chat_id where m.user_id = ${viewer} and o.user_id = users.id)
-         or exists (select 1 from contacts c where c.owner_id = ${viewer} and c.user_id = users.id))`;
+         or exists (select 1 from contacts c where c.owner_id = ${viewer} and c.user_id = users.id)
+         -- комментарии без вступления: автор комментария — гостю треда, гость-комментатор — участникам группы
+         or ${commentPeerSql(tx, viewer, tx`users.id`)})`;
     if (!rows.length) return { users: [], seq };
     const found = rows.map((r) => r.id);
     const names = new Map<number, ContactName>(

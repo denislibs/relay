@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test';
-import { canAskReadBy, commentsLabel, compactCount, isOwnChannelPost, postCopyChannel, subscribersText, threadTitle, type NotifyChat } from './channelText';
+import { canAskReadBy, commentsAction, commentsLabel, compactCount, guestJoinLabel, isOwnChannelPost, postCopyChannel, subscribersText, threadTitle, type NotifyChat } from './channelText';
 
 describe('channelText', () => {
   test('подпись кнопки комментариев', () => {
@@ -15,6 +15,24 @@ describe('channelText', () => {
     expect(commentsLabel(111)).toBe('111 комментариев');
     expect(threadTitle(0)).toBe('Комментарии');
     expect(threadTitle(3)).toBe('3 комментария');
+  });
+
+  test('кнопка комментариев: участник и подписчик канала — в тред, без копии — ждать, не подписан — подсказка', () => {
+    expect(commentsAction({ member: true, subscriber: true, replies: true })).toBe('thread');
+    expect(commentsAction({ member: false, subscriber: true, replies: true })).toBe('thread');   // не вступая в группу
+    expect(commentsAction({ member: true, subscriber: false, replies: true })).toBe('thread');   // участник группы вне канала
+    expect(commentsAction({ member: false, subscriber: true, replies: false })).toBe('wait');
+    expect(commentsAction({ member: true, subscriber: false, replies: false })).toBe('wait');
+    expect(commentsAction({ member: false, subscriber: false, replies: true })).toBe('hint');
+    expect(commentsAction({ member: false, subscriber: false, replies: false })).toBe('hint');
+  });
+
+  test('тред гостя: вместо поля ввода — вступить или подать заявку; иначе поле ввода', () => {
+    expect(guestJoinLabel(null)).toBeNull();
+    expect(guestJoinLabel({ joinToSend: false, joinApproval: false })).toBeNull();
+    expect(guestJoinLabel({ joinToSend: true, joinApproval: false })).toBe('Вступить в группу');
+    expect(guestJoinLabel({ joinToSend: false, joinApproval: true })).toBe('Подать заявку');
+    expect(guestJoinLabel({ joinToSend: true, joinApproval: true })).toBe('Подать заявку');
   });
 
   test('подписчики', () => {

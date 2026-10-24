@@ -1,9 +1,9 @@
 import type { Server } from 'bun';
-import type { JournalEntry, ServerFrame } from '@relay/protocol';
+import type { JournalEntry, ServerFrame, Update } from '@relay/protocol';
 import { sql } from './db';
 import type { ChatNotify, UpdatesNotify } from './domain/journal';
 import { getChatUpdatesRange } from './domain/chatJournal';
-import { subscribeUserSockets, unsubscribeUserSockets } from './sockets';
+import { recheckThreads, subscribeUserSockets, threadTopic, unsubscribeUserSockets, watchedThreads } from './sockets';
 import { processAlive, processGone } from './domain/liveRegistry';
 import { closeLive, parseEnded, terminatedFrame, touchLive } from './domain/sessions';
 
@@ -28,6 +28,36 @@ export async function notifyLatency(timeoutMs = 2000): Promise<number | null> {
   return got;
 }
 
+/**
+ * События push группы, относящиеся к открытым гостями тредам (sockets.ts watchThread): тред → его события. Новое
+ * сообщение знает свой тред само (threadId; шапка — сама копия); правка, удаление, реакции, превью — по id, одним
+ * запросом на push (O(событий), только если у чата есть гости); информация группы (groupUpdated) — всем тредам.
+ * Прочее (состав, закрепы) гостю не нужно. items null — push пустой («догоните сами»): гостям тоже пустой кадр, они перечитают край треда.
+ */
+export async function threadSlices(chatId: number, watched: ReadonlyMap<number, number>, items: JournalEntry[] | null): Promise<Map<number, Update[]>> {
+  const out = new Map<number, Update[]>();
+  if (!items) { for (const t of watched.keys()) out.set(t, []); return out; }
+  const add = (t: number | null | undefined, u: Update) => { if (t != null && watched.has(t)) { let l = out.get(t); if (!l) out.set(t, (l = [])); l.push(u); } };
+  const ask = new Set<number>();
+  for (const { update: u } of items) {
+    if (u.type === 'newMessage') continue;
+    const id = (u as { id?: unknown }).id;
+    if ((u as { chatId?: unknown }).chatId === chatId && typeof id === 'number') ask.add(id);
+  }
+  const threadOf = new Map<number, number>();
+  if (ask.size) {
+    for (const r of await sql`select id, thread_id from messages where chat_id = ${chatId} and id = any(${[...ask]}::bigint[])`) {
+      threadOf.set(Number(r.id), r.thread_id == null ? Number(r.id) : Number(r.thread_id));   // без треда — может быть сама копия (шапка)
+    }
+  }
+  for (const { update: u } of items) {
+    if (u.type === 'groupUpdated') { for (const t of watched.keys()) add(t, u); continue; }   // «только участники», заявки, название — гостю тоже
+    if (u.type === 'newMessage') add(u.message.threadId ?? u.message.id, u);
+    else if (threadOf.has((u as { id?: number }).id!)) add(threadOf.get((u as { id: number }).id), u);
+  }
+  return out;
+}
+
 /** Будит сокеты пользователей, чьи журналы изменились в любом процессе сервера. */
 export async function startRealtime(server: Server): Promise<() => Promise<void>> {
   await processAlive();   // до первого сокета: иначе его счётчик не попадёт в сумму
@@ -45,9 +75,27 @@ export async function startRealtime(server: Server): Promise<() => Promise<void>
     // событие с seq получателя — в сокет сразу; клиент сверит seq и при расхождении синхронизируется сам
     if (n.e) for (const [id, seq] of n.u) server.publish(`user:${id}`, JSON.stringify({ op: 'push', from: seq - 1, to: seq, items: [{ seq, update: n.e }] } satisfies ServerFrame));
   });
+  // гости тредов (не участники группы): свой кадр на тред, по порядку push чата — очередь на чат, как у длинных событий
+  const threadQueues = new Map<number, Promise<void>>();
+  const publishThreads = (c: number, items: JournalEntry[] | null) => {
+    if (!watchedThreads(c)) return;
+    const next: Promise<void> = (threadQueues.get(c) ?? Promise.resolve()).then(async () => {
+      const watched = watchedThreads(c);
+      if (!watched) return;
+      for (const [t, list] of await threadSlices(c, watched, items)) {
+        server.publish(threadTopic(c, t), JSON.stringify({ op: 'threadPush', chatId: c, threadId: t, items: list } satisfies ServerFrame));
+      }
+    }).catch((e) => { console.error('thread push:', e); })
+      .finally(() => { if (threadQueues.get(c) === next) threadQueues.delete(c); });
+    threadQueues.set(c, next);
+  };
   // журнал чата: один кадр на всех подписчиков чата в этом процессе (кадр у всех одинаковый — номер общий)
-  const publishChat = (c: number, from: number, to: number, items: JournalEntry[]) =>
+  const publishChat = (c: number, from: number, to: number, items: JournalEntry[]) => {
     server.publish(`chat:${c}`, JSON.stringify({ op: 'push', chatId: c, from, to, items } satisfies ServerFrame));
+    publishThreads(c, items.length || from === to ? items : null);
+    // перепривязка группы обсуждения и прочие перемены чата — треды гостей перепроверяются (доступ мог пропасть)
+    if (items.some((it) => it.update.type === 'groupUpdated')) void recheckThreads(c);
+  };
   // длинное событие (без e — не влезло в 8000 байт): записи читаются один раз на процесс, а не syncChat каждого сокета.
   // Пока чтение в полёте, следующие NOTIFY этого чата встают за ним — push уходят по порядку seq
   const chatQueues = new Map<number, Promise<void>>();
