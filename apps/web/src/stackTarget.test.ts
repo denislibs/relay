@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test';
-import { findTarget, hashFor, parseHash, positionKey, sameTarget, toTarget } from './stackTarget';
+import { baseOf, findTarget, hashFor, parseHash, positionKey, sameTarget, toTarget } from './stackTarget';
 
 describe('stackTarget', () => {
   test('лента группы и её тред — разные слои', () => {
@@ -32,6 +32,17 @@ describe('stackTarget', () => {
     expect(parseHash('#chat=-1')).toBeNull();
     expect(parseHash('')).toBeNull();
     expect(parseHash(hashFor({ chatId: 12, threadId: 7 }))).toEqual({ chatId: 12, threadId: 7 });
+  });
+
+  test('тред гостя: канал поста в адресе (&via=) и под тредом', () => {
+    expect(hashFor({ chatId: 3, threadId: 40, via: 2 })).toBe('#chat=3&thread=40&via=2');
+    expect(hashFor({ chatId: 3, via: 2 })).toBe('#chat=3');   // via — только у треда
+    expect(parseHash('#chat=3&thread=40&via=2')).toEqual({ chatId: 3, threadId: 40, via: 2 });
+    expect(parseHash('#chat=3&thread=40&via=x')).toEqual({ chatId: 3, threadId: 40 });
+    expect(baseOf({ chatId: 3, threadId: 40, via: 2 })).toBe(2);
+    expect(baseOf({ chatId: 3, threadId: 40 })).toBe(3);
+    expect(baseOf({ chatId: 3, via: 2 })).toBe(3);
+    expect(sameTarget({ chatId: 3, threadId: 40, via: 2 }, { chatId: 3, threadId: 40 })).toBe(true);
   });
 
   test('openInner принимает id или слой', () => {

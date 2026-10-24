@@ -1007,7 +1007,8 @@ export function Feed({ frameKey, active, chatId, threadId, channel = false, meId
   // имя канала для копии поста в группе обсуждения: связанный канал в списке — его название, иначе просто «Канал»
   // (строкой, а не списком чатов: лента не перерисовывается от каждой перемены в списке)
   const linkedTitle = useGlobal((s) => {
-    const l = (findChat(s, chatId)?.group as { linkedChatId?: number | null } | undefined)?.linkedChatId;
+    // тред гостя: строки группы нет — канал из guest
+    const l = (findChat(s, chatId)?.group as { linkedChatId?: number | null } | undefined)?.linkedChatId ?? frameByKey(s, frameKey)?.thread?.guest?.channelId;
     return l != null ? (s.chats.find((x) => x.id === l)?.title as string | undefined) ?? null : null;
   });
   const channelName = (_m: Item) => linkedTitle || 'Канал';

@@ -2,7 +2,7 @@ import { bindStickers } from './stickers';
 import { showToast } from './settingsData';
 import { coverThumb, readAudioTags } from './id3';
 import { getPrefs } from './prefs';
-import type { Block, LinkPreview, TodoInput } from '@relay/protocol';
+import type { Block, LinkPreview, ThreadGuest, TodoInput } from '@relay/protocol';
 import { playSentSound } from './sound';
 import { beginHeavyAnimation, nudgeWallpaper, requestMutation, toBase64 } from '@relay/ui';
 import { connectEngine, EngineClient, Mirror } from '@relay/sync-engine/src/client';
@@ -23,7 +23,7 @@ import { asset } from './assets';
 import { compressPhoto } from './media/compressPhoto';
 import { compressVideo, type VideoQuality } from './media/compressVideo';
 import { isOwnChannelPost, postCopyChannel } from './channelText';
-import { findTarget, hashFor, parseHash, positionKey, sameTarget, toTarget, type StackTarget } from './stackTarget';
+import { baseOf, findTarget, hashFor, parseHash, positionKey, sameTarget, toTarget, type StackTarget } from './stackTarget';
 
 declare const __BUILD__: string;
 declare const __DEV__: boolean;
@@ -96,9 +96,9 @@ export function startData(me: Me): void {
   // запись истории могла вернуть прежний адрес (#chat=…) — поправить на чат на экране
   addEventListener('popstate', () => queueMicrotask(syncShown));
   startNotify((id, threadId) => { focus(); openNotified(id, threadId); });
-  // #chat=…&thread=… при загрузке: нижний слой — чат, тред — поверх него (docs/navigation-rules.md)
+  // #chat=…&thread=… при загрузке: нижний слой — чат (тред гостя, &via= — канал поста), тред — поверх него (docs/navigation-rules.md)
   const open = parseHash(location.hash);
-  if (open) { openChat(open.chatId); if (open.threadId != null) whenShown(open.chatId, () => openInner(open)); }
+  if (open) { openChat(baseOf(open)); if (open.threadId != null) whenShown(baseOf(open), () => openInner(open)); }
 }
 
 /**
@@ -285,16 +285,23 @@ function startFeed(frame: ChatFrame, anchor: Anchor | undefined, onFirst: (patch
     // авторы пришедших сообщений — в people сразу, до отрисовки (повторы wantPeople отбрасывает сам)
     wantPeople((p.op === 'snapshot' ? p.items : p.upsert).flatMap((m) => (typeof m.senderId === 'number' ? [m.senderId] : [])));
     s.moving = false;
-    const meta = (s.mirror.meta('~window') as unknown as FeedMeta) ?? null;
-    const patch: Partial<ChatFrame> = { messages: s.mirror.list() as Item[], feedMeta: meta };
-    // тред: шапка (копия поста) первой; загружен ли с сервера (пока нет — «Загрузка…», а не «нет комментариев»)
-    if (frame.threadId != null) { const th = s.mirror.meta('~thread'); patch.thread = { header: (th?.header as string | null) ?? null, loaded: !!th?.loaded }; }
+    const patch = mirrorPatch(s);
+    const meta = patch.feedMeta ?? null;
     toastUploadRefusals(patch.messages!);
     if (s.first) first(patch); else patchFrame(frame.key, patch);
+    if (patch.thread?.guest && topReady()?.key === frame.key) syncShown();   // тред гостя узнан позже — в адрес канал (&via=)
     // окно дошло до последних сообщений — снова живой хвост (новые сообщения появятся сами)
     if (s.anchor && meta?.live && !meta.hasNewer) { s.anchor = undefined; s.watch.update(feedQuery(frame, undefined)); }
   });
   s.timer = setTimeout(() => { if (s.first) first({}); }, 700);
+}
+
+/** Лента кадра из зеркала подписки: сообщения, окно и (тред) шапка, загружен ли, гость ли я. */
+function mirrorPatch(s: Session): Partial<ChatFrame> {
+  const patch: Partial<ChatFrame> = { messages: s.mirror.list() as Item[], feedMeta: (s.mirror.meta('~window') as unknown as FeedMeta) ?? null };
+  // тред: шапка (копия поста) первой; загружен ли с сервера (пока нет — «Загрузка…», а не «нет комментариев»)
+  if (s.threadId != null) { const th = s.mirror.meta('~thread'); patch.thread = { header: (th?.header as string | null) ?? null, loaded: !!th?.loaded, guest: (th?.guest as ThreadGuest | undefined) ?? null }; }
+  return patch;
 }
 
 /** Окно ленты кадра: чат — messages, тред — thread (шапка-копия поста и комментарии из кэша группы). */
@@ -321,7 +328,12 @@ function newFrame(t: StackTarget, target?: { id: number; sort: number }): { fram
 /** Адрес и присутствие — по чату на экране. */
 function syncShown(): void {
   const top = topReady();
-  history.replaceState(history.state, '', top ? hashFor(top) : location.pathname);
+  // тред гостя: в адресе и канал поста (&via=) — перезагрузка положит под тред канал, а не группу, где я не состою
+  if (!top) history.replaceState(history.state, '', location.pathname);
+  else {
+    const hash = hashFor({ chatId: top.chatId, threadId: top.threadId, via: top.thread?.guest?.channelId });
+    if (location.hash !== hash) history.replaceState(history.state, '', hash);
+  }
   const thread = top?.threadId ?? null;
   if (getGlobal().openThreadId !== thread) setGlobal({ openThreadId: thread });
   if ((top?.chatId ?? null) !== peerFor) watchPeer(top?.chatId ?? null);
@@ -370,10 +382,13 @@ function popTo(index: number): void {
 }
 
 /** Вернуть припаркованную колонку наверх стека: подготовка не нужна — только переход. */
-function revive(frame: ChatFrame, target?: { id: number; sort: number }): void {
-  clearTimeout(parkTimers.get(frame.key)); parkTimers.delete(frame.key);
+function revive(parked: ChatFrame, target?: { id: number; sort: number }): void {
+  clearTimeout(parkTimers.get(parked.key)); parkTimers.delete(parked.key);
+  // запаркованный кадр патчей не получает (patchFrame — только стек), а подписка жива: что пришло за это время — из зеркала
+  const s = sessions.get(parked.key);
+  const frame: ChatFrame = s && !s.first ? { ...parked, ...mirrorPatch(s) } : parked;
   beginHeavyAnimation(LEAVE_MS + 50);
-  setGlobal((s) => ({ chatStack: [...s.chatStack, frame], chatLeaving: s.chatLeaving.filter((f) => f.key !== frame.key), openChatId: frame.chatId, pendingChatId: null }));
+  setGlobal((g) => ({ chatStack: [...g.chatStack, frame], chatLeaving: g.chatLeaving.filter((f) => f.key !== frame.key), openChatId: frame.chatId, pendingChatId: null }));
   addLayer(frame.key);
   syncShown();
   if (target) focusMessage(target);
@@ -557,8 +572,9 @@ export function openInner(to: number | StackTarget, target?: { id: number; sort:
   const t = toTarget(to), chatId = t.chatId;
   const g = getGlobal();
   if (!topReady()) {
-    openChat(chatId, t.threadId == null ? target : undefined);
-    if (t.threadId != null) whenShown(chatId, () => openInner(t, target));   // тред без открытого чата: группа снизу, тред поверх
+    openChat(baseOf(t), t.threadId == null ? target : undefined);
+    // тред без открытого чата: группа снизу (тред гостя — канал поста), тред поверх
+    if (t.threadId != null) whenShown(baseOf(t), () => openInner(t, target));
     return;
   }
   cancelPending();

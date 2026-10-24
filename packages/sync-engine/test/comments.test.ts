@@ -120,3 +120,120 @@ test('resetChat (chatTooLong) clears the thread ranges; the thread reloads on op
   const again = watchInto(eb, { kind: 'thread', chatId: g, threadId: copyId, limit: 50 });
   expect((await again.until((x) => x.length === 2)).map((m) => m.body)).toEqual(['пост', 'к1']);
 });
+
+test('a guest thread (subscriber outside the group): loads and updates from threadPush without a chat row; own comment and markThreadRead; nothing in the chat list', async () => {
+  const a = await srv.login('Анна'), b = await srv.login('Борис'), c = await srv.login('Вера');
+  const { chatId: ch } = await createGroup(a.userId, { kind: 'channel', title: 'Новости', memberIds: [b.userId, c.userId] });
+  const { chatId: g } = await createGroup(a.userId, { title: 'Обсуждение', memberIds: [b.userId] });   // c — только в канале
+  await setLinkedChat(a.userId, ch, g);
+  const post = await send(a.userId, ch, 'пост');
+  const copyId = await copyOf(ch, post.id);
+  await send(b.userId, g, 'к1', copyId);
+  const ec = await open(srv.config(c));
+  ec.connect(); await ec.whenIdle();
+  const list = watchInto(ec, { kind: 'chatList', limit: 50 });
+  await list.until((x) => x.some((r) => r.id === ch));
+  const th = watchInto(ec, { kind: 'thread', chatId: g, threadId: copyId, limit: 50 });
+  expect((await th.until((x) => x.length === 2)).map((m) => m.body)).toEqual(['пост', 'к1']);
+  expect(th.item('~thread')).toMatchObject({ loaded: true, guest: { channelId: ch, title: 'Обсуждение', joinToSend: false, joinApproval: false, requested: false, rights: { text: true } } });
+  expect(ec.store.chats.has(g)).toBe(false);
+  expect(ec.store.isGuest(g)).toBe(true);
+  // живые комментарии участника — кадром threadPush (подписка на тред после первой страницы)
+  await ec.whenIdle();
+  await send(b.userId, g, 'к2', copyId);
+  await send(b.userId, g, 'в группе, не в треде');
+  expect((await th.until((x) => x.length === 3)).map((m) => m.body)).toEqual(['пост', 'к1', 'к2']);
+  // свой комментарий: сразу в треде, после ack — с id; строки чата так и нет
+  await ec.call({ type: 'sendMessage', chatId: g, body: 'от гостя', threadId: copyId });
+  await th.until((x) => x.some((m) => m.body === 'от гостя'));
+  await ec.whenIdle();
+  const mine = (await th.until((x) => x.some((m) => m.body === 'от гостя' && m.id != null))).find((m) => m.body === 'от гостя')!;
+  expect(Number((await sql`select thread_id from messages where id = ${mine.id as number}`)[0].thread_id)).toBe(copyId);
+  expect(ec.store.chats.has(g)).toBe(false);
+  // прочитал — на сервер (thread_reads гостя)
+  const k3 = await send(b.userId, g, 'к3', copyId);
+  await th.until((x) => x.some((m) => m.body === 'к3'));
+  await ec.call({ type: 'markThreadRead', chatId: g, threadId: copyId, upToId: k3.id });
+  const readOf = async () => Number((await sql`select read_max_id from thread_reads where user_id = ${c.userId} and thread_id = ${copyId}`)[0]?.read_max_id ?? 0);
+  for (let i = 0; i < 100 && (await readOf()) !== k3.id; i++) await Bun.sleep(20);
+  expect(await readOf()).toBe(k3.id);
+  // группа включила «только участники» — тред гостя узнаёт сразу (threadPush groupUpdated)
+  await fetch(`${srv.base}/groups/${g}/settings`, { method: 'PUT', headers: { cookie: `relay_session=${a.token}`, 'content-type': 'application/json' }, body: JSON.stringify({ joinToSend: true }) });
+  for (let i = 0; i < 100 && !(th.item('~thread')?.guest as { joinToSend?: boolean } | undefined)?.joinToSend; i++) await Bun.sleep(20);
+  expect(th.item('~thread')).toMatchObject({ guest: { joinToSend: true } });
+  // список чатов — без группы, в IndexedDB ни строки, ни сообщений группы
+  expect(list.list().some((r) => r.id === g)).toBe(false);
+  await ec.store.flush();
+  expect(ec.store.chats.has(g)).toBe(false);
+  // тред закрыт — подписка снята: новые события не применяются; открыли снова — край догружен
+  th.handle.close();
+  await ec.whenIdle();
+  await send(b.userId, g, 'к4', copyId);
+  await Bun.sleep(150);
+  expect(ec.store.chatMessages(g).some((m) => m.body === 'к4')).toBe(false);
+  const again = watchInto(ec, { kind: 'thread', chatId: g, threadId: copyId, limit: 50 });
+  expect((await again.until((x) => x.some((m) => m.body === 'к4'))).map((m) => m.body)).toEqual(['пост', 'к1', 'к2', 'от гостя', 'к3', 'к4']);
+});
+
+test('a guest who joins the discussion group: the chat row appears and the guest state is dropped', async () => {
+  const a = await srv.login('Анна'), c = await srv.login('Вера');
+  const { chatId: ch } = await createGroup(a.userId, { kind: 'channel', title: 'Новости', memberIds: [c.userId] });
+  const b = await srv.login('Борис');
+  const { chatId: g } = await createGroup(a.userId, { title: 'Обсуждение', memberIds: [b.userId] });
+  await setLinkedChat(a.userId, ch, g);
+  const post = await send(a.userId, ch, 'пост');
+  const copyId = await copyOf(ch, post.id);
+  const ec = await open(srv.config(c));
+  ec.connect(); await ec.whenIdle();
+  const th = watchInto(ec, { kind: 'thread', chatId: g, threadId: copyId, limit: 50 });
+  await th.until((x) => x.length === 1);
+  expect(ec.store.isGuest(g)).toBe(true);
+  expect((await fetch(`${srv.base}/groups/${g}/join`, { method: 'POST', headers: { cookie: `relay_session=${c.token}` } })).status).toBe(200);
+  for (let i = 0; i < 150 && !ec.store.chats.get(g)?.group; i++) await Bun.sleep(20);
+  expect(ec.store.chats.get(g)?.group).toMatchObject({ title: 'Обсуждение' });
+  expect(ec.store.isGuest(g)).toBe(false);
+  await send(b.userId, g, 'уже участнику', copyId);
+  await th.until((x) => x.some((m) => m.body === 'уже участнику'));
+}, 15_000);
+
+test('a guest thread after a reconnect: comments posted while offline arrive (the edge is reloaded), live pushes resume', async () => {
+  const a = await srv.login('Анна'), c = await srv.login('Вера');
+  const { chatId: ch } = await createGroup(a.userId, { kind: 'channel', title: 'Новости', memberIds: [c.userId] });
+  const b = await srv.login('Борис');
+  const { chatId: g } = await createGroup(a.userId, { title: 'Обсуждение', memberIds: [b.userId] });
+  await setLinkedChat(a.userId, ch, g);
+  const post = await send(a.userId, ch, 'пост');
+  const copyId = await copyOf(ch, post.id);
+  const ec = await open(srv.config(c));
+  ec.connect(); await ec.whenIdle();
+  const th = watchInto(ec, { kind: 'thread', chatId: g, threadId: copyId, limit: 50 });
+  await th.until((x) => x.length === 1);
+  await ec.whenIdle();
+  ec.disconnect();
+  await send(b.userId, g, 'пока не было связи', copyId);
+  ec.connect();
+  expect((await th.until((x) => x.length === 2)).map((m) => m.body)).toEqual(['пост', 'пока не было связи']);
+  await ec.whenIdle();
+  await send(b.userId, g, 'снова живой', copyId);
+  await th.until((x) => x.some((m) => m.body === 'снова живой'));
+  expect(ec.store.chats.has(g)).toBe(false);
+});
+
+test('a pending guest comment survives a wipe (keep outbox) without creating a chat row', async () => {
+  const a = await srv.login('Анна'), c = await srv.login('Вера'), b = await srv.login('Борис');
+  const { chatId: ch } = await createGroup(a.userId, { kind: 'channel', title: 'Новости', memberIds: [c.userId] });
+  const { chatId: g } = await createGroup(a.userId, { title: 'Обсуждение', memberIds: [b.userId] });
+  await setLinkedChat(a.userId, ch, g);
+  const post = await send(a.userId, ch, 'пост');
+  const copyId = await copyOf(ch, post.id);
+  const ec = await open(srv.config(c));
+  ec.connect(); await ec.whenIdle();
+  const th = watchInto(ec, { kind: 'thread', chatId: g, threadId: copyId, limit: 50 });
+  await th.until((x) => x.length === 1);
+  th.handle.close();
+  ec.disconnect();
+  await ec.call({ type: 'sendMessage', chatId: g, body: 'офлайн', threadId: copyId });
+  await ec.store.wipe(ec.store.epoch, { outbox: true });
+  expect(ec.store.chats.has(g)).toBe(false);
+  expect([...ec.store.outbox.values()].some((o) => o.chatId === g && o.body === 'офлайн')).toBe(true);
+});

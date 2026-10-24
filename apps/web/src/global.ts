@@ -1,4 +1,4 @@
-import type { ProfileLink, ProfilePhoto } from '@relay/protocol';
+import type { ProfileLink, ProfilePhoto, ThreadGuest } from '@relay/protocol';
 import type { NotifyState } from './notify';
 import { options } from 'preact';
 import { useEffect, useRef, useState } from 'preact/hooks';
@@ -22,7 +22,8 @@ export interface ChatFrame {
   key: string;
   chatId: number;
   threadId?: number;          // тред комментариев в группе обсуждения: id копии поста (лента — Query thread)
-  thread?: { header: string | null; loaded: boolean };   // тред: ключ шапки (копии поста) в messages; загружен ли с сервера
+  // тред: ключ шапки (копии поста) в messages; загружен ли с сервера; guest — я не участник группы (комментирую как подписчик канала)
+  thread?: { header: string | null; loaded: boolean; guest?: ThreadGuest | null };
   ready: boolean;
   instant?: boolean;          // встал на место без анимации (смена нижнего чата)
   messages: Item[];
