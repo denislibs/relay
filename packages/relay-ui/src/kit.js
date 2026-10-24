@@ -720,9 +720,9 @@ var RING_IDLE_ARC = 0.25;   // длина дуги без известного �
 var PRELOADER_R = 24, PRELOADER_C = 2 * Math.PI * PRELOADER_R, PRELOADER_MIN = 5;
 function Preloader(props) {
   var size = props.size || 54;
-  var p = props.progress, det = typeof p === 'number';
+  var p = props.progress, det = typeof p === 'number' && !props.spin;
   var arc = det ? Math.max(PRELOADER_MIN, Math.min(1, p) * PRELOADER_C) : PRELOADER_C * 0.75;
-  return h('div', { class: cx('rl-ring rl-preloader', det && 'rl-preloader-det'), style: { width: size, height: size }, role: 'progressbar', 'aria-valuenow': det ? Math.round(p * 100) : undefined, 'aria-label': props.label || 'Загрузка' },
+  return h('div', { class: cx('rl-ring rl-preloader', det && 'rl-preloader-det'), style: { width: size, height: size }, role: 'progressbar', 'aria-valuenow': typeof p === 'number' ? Math.round(p * 100) : undefined, 'aria-label': props.label || 'Загрузка' },
     h('svg', { width: size, height: size, viewBox: '0 0 54 54', 'aria-hidden': 'true' },
       h('circle', det ? { class: 'rl-preloader-arc', cx: 27, cy: 27, r: PRELOADER_R, style: { strokeDasharray: arc + ' ' + PRELOADER_C, strokeWidth: +(2 * 54 / size).toFixed(2) } }
         : { class: 'rl-preloader-arc', cx: 27, cy: 27, r: PRELOADER_R, pathLength: 100, style: { strokeWidth: +(2 * 54 / size).toFixed(2) } })),
@@ -732,8 +732,8 @@ function ProgressRing(props) {
   if (props.preloader) return h(Preloader, props);
   var size = props.size || 48, r = (size - 6) / 2, c = 2 * Math.PI * r;
   var p = props.progress;
-  var det = typeof p === 'number';
-  return h('div', { class: cx('rl-ring', !det && 'rl-ring-spin', props.onMedia && 'rl-ring-onmedia'), style: { width: size, height: size }, role: 'progressbar', 'aria-valuenow': det ? Math.round(p * 100) : undefined, 'aria-label': props.label || 'Загрузка' },
+  var det = typeof p === 'number' && !props.spin;   // spin — дуга растёт и сходит и при известном прогрессе (видео, файлы)
+  return h('div', { class: cx('rl-ring', !det && 'rl-ring-spin', props.onMedia && 'rl-ring-onmedia'), style: { width: size, height: size }, role: 'progressbar', 'aria-valuenow': typeof p === 'number' ? Math.round(p * 100) : undefined, 'aria-label': props.label || 'Загрузка' },
     h('svg', { width: size, height: size, viewBox: '0 0 ' + size + ' ' + size, 'aria-hidden': 'true' },
       h('circle', { class: 'rl-ring-track', cx: size / 2, cy: size / 2, r: r }),
       det ? h('circle', { class: 'rl-ring-arc', cx: size / 2, cy: size / 2, r: r, style: { strokeDasharray: c, strokeDashoffset: c * (1 - Math.max(RING_IDLE_ARC, Math.min(1, p))) } })
@@ -844,7 +844,7 @@ function VoiceRecorder(props) {
 function MediaOverlay(props) {
   // state: 'ready' | 'remote' (not downloaded) | 'loading' | 'uploading'
   if (props.state === 'remote') return h('button', { type: 'button', class: 'rl-media-dl', onClick: props.onDownload }, h(Icon, { name: 'download', size: 18 }), props.size || 'Скачать');
-  if (props.state === 'loading' || props.state === 'uploading') return h('div', { class: 'rl-media-center' }, h(ProgressRing, { progress: props.progress, preloader: true, onCancel: props.onCancel, label: props.state === 'uploading' ? 'Отправка' : 'Загрузка' }));
+  if (props.state === 'loading' || props.state === 'uploading') return h('div', { class: 'rl-media-center' }, h(ProgressRing, { progress: props.progress, preloader: true, spin: true, onCancel: props.onCancel, label: props.state === 'uploading' ? 'Отправка' : 'Загрузка' }));
   if (props.kind === 'video' && !props.playing) return h('div', { class: 'rl-media-center' }, h('span', { class: 'rl-media-play' }, h(Icon, { name: 'play', size: 26 })));
   return null;
 }
@@ -1233,7 +1233,7 @@ function FileBubble(props) {
           ? h('button', { type: 'button', class: 'rl-file-icon rl-file-icon-btn rl-file-icon-failed', 'data-ext': ext, 'data-kind': fileKind(ext), 'aria-label': 'Повторить отправку', onClick: props.onRetry }, h(Icon, { name: 'refresh', size: 24 }))
           : face === 'loading'
           ? h('span', { class: 'rl-file-icon', 'data-ext': ext, 'data-kind': fileKind(ext) },
-              h('span', { key: 'ring', class: 'rl-file-face' }, h(ProgressRing, { size: 40, progress: props.state === 'loading' ? props.progress : 1, onMedia: true, onCancel: props.state === 'loading' ? props.onCancel : undefined })))
+              h('span', { key: 'ring', class: 'rl-file-face' }, h(ProgressRing, { size: 40, progress: props.state === 'loading' ? props.progress : 1, spin: true, onMedia: true, onCancel: props.state === 'loading' ? props.onCancel : undefined })))
           // скачан (лежит на устройстве): квадрат с расширением — нажатие открывает сразу, без сети
           : props.onOpen
           ? h('button', { type: 'button', class: 'rl-file-icon rl-file-icon-btn', 'data-ext': ext, 'data-kind': fileKind(ext), 'aria-label': 'Открыть файл', onClick: props.onOpen },

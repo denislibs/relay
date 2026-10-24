@@ -106,11 +106,11 @@ export function RoundBubble(props) {
       }) : null,
       s.on ? h('svg', { class: 'rl-round-ring', viewBox: '0 0 240 240', 'aria-hidden': 'true' },
         h('circle', { ref: ring, cx: 120, cy: 120, r: R, 'stroke-dasharray': C.toFixed(1), 'stroke-dashoffset': C.toFixed(1) })) : null,
-      props.uploading ? h('div', { class: 'rl-round-center' }, h(ProgressRing, { size: 54, progress: props.progress, onMedia: true, onCancel: props.onCancel, label: 'Отправка' })) : null,
+      props.uploading ? h('div', { class: 'rl-round-center' }, h(ProgressRing, { size: 54, progress: props.progress, spin: true, onMedia: true, onCancel: props.onCancel, label: 'Отправка' })) : null,
       // как в Telegram: пока видео не пришло — размытое превью и кольцо с крестиком (отменить скачивание)
       !props.uploading && props.src && !s.loaded ? h('div', { class: 'rl-round-center' }, s.stopped
         ? h('span', { class: 'rl-round-dl', 'aria-label': 'Скачать' }, h(Icon, { name: 'download', size: 24 }))
-        : h(ProgressRing, { size: 54, progress: s.got == null ? undefined : s.got, onMedia: true, label: 'Загрузка видеосообщения',
+        : h(ProgressRing, { size: 54, progress: s.got == null ? undefined : s.got, spin: true, onMedia: true, label: 'Загрузка видеосообщения',
             onCancel: function (e) { e.stopPropagation(); var v = video.current; if (v) { v.removeAttribute('src'); v.load(); } setS({ stopped: true }); } })) : null,
       h('span', { class: 'rl-round-badge' },
         h('span', { ref: badge }, fmt(dur)),
