@@ -1488,7 +1488,7 @@ function SlideFade(props) {
   return h('div', { class: cx('rl-slidefade', f && f.back && 'is-back', props.class) }, items.map(function (it, i) {
     var on = i === index, out = !!f && f.i === i && !on;
     if (!on && !out) return null;
-    return h('div', { key: i, class: cx('rl-slidefade-item', on && f && 'is-in', out && 'is-out'), 'aria-hidden': out || undefined }, it);
+    return h('div', { key: i, class: cx('rl-slidefade-item', on && f && 'is-in', out && 'is-out'), inert: out || undefined }, it);
   }));
 }
 

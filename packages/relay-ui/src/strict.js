@@ -8,7 +8,10 @@
    Отчёт: console.warn по первому разу с каждого места + window.__strictDom.report(). */
 import { currentPhase } from './schedule.js';
 
-var enabled = false, dirty = false, sites = new Map(), opts = {};
+// «Грязь» раскладки двух видов. Записи внутри кадра (requestAnimationFrame, в том числе фаза mutate) браузер
+// разложит сам в конце этого же кадра — они опасны только для чтений дальше в этом же кадре. Записи из обычных задач
+// (обработчики событий, сообщения воркера) висят до следующей раскладки — их видят и события прокрутки следующего кадра.
+var enabled = false, dirtyTask = false, dirtyFrame = false, inFrame = false, frameTs = -1, sites = new Map(), opts = {};
 
 // стек: violation → onRead/onWrite → обёртка → вызвавший код. Первые три кадра — наши (в бандле имени файла нет)
 function where(stack) {
@@ -31,14 +34,14 @@ function onRead(prop) {
   if (!enabled) return;
   var ph = currentPhase();
   if (ph === 'mutate') violation('read in mutate phase', prop);
-  else if (ph === null && dirty) violation('forced layout (read after writes, outside measure)', prop);
-  dirty = false; // раскладка теперь посчитана
+  else if (ph === null && (dirtyTask || inFrame && dirtyFrame)) violation('forced layout (read after writes, outside measure)', prop);
+  dirtyTask = dirtyFrame = false; // раскладка теперь посчитана
 }
 
 function onWrite(prop) {
   if (!enabled) return;
   if (currentPhase() === 'measure') violation('write in measure phase', prop);
-  dirty = true;
+  if (inFrame) dirtyFrame = true; else dirtyTask = true;
 }
 
 function wrapMethod(proto, name, hook) {
@@ -83,8 +86,23 @@ export function enableStrictDom(options) {
   wrapAccessor(Element.prototype, 'innerHTML', null, onWrite);
   var gcs = window.getComputedStyle;
   window.getComputedStyle = function (el, pseudo) { onRead('getComputedStyle'); return gcs.call(window, el, pseudo); };
-  // после отрисовки кадра раскладка чистая: снимаем «грязь» сразу за rAF (задача после рендера)
-  (function loop() { requestAnimationFrame(function () { setTimeout(function () { dirty = false; }, 0); loop(); }); })();
+  // колбэки кадра помечаем: записи в них разложатся в конце кадра. Новый кадр (другая метка времени) — раскладка
+  // прошлого уже сделана, её «грязь» снимаем
+  var raf = window.requestAnimationFrame;
+  window.requestAnimationFrame = function (cb) {
+    return raf.call(window, function (ts) {
+      if (ts !== frameTs) { frameTs = ts; dirtyFrame = false; }
+      var was = inFrame; inFrame = true;
+      try { cb(ts); } finally { inFrame = was; }
+    });
+  };
+  // ResizeObserver зовёт колбэк сразу после раскладки, до отрисовки: читать в нём бесплатно
+  var RO = window.ResizeObserver;
+  if (RO) window.ResizeObserver = class extends RO {
+    constructor(cb) { super(function (entries, obs) { dirtyTask = dirtyFrame = false; var was = inFrame; inFrame = true; try { cb(entries, obs); } finally { inFrame = was; } }); }
+  };
+  // записи из задач раскладываются в следующем кадре: снимаем их «грязь» сразу за ним (задача после отрисовки)
+  (function loop() { raf.call(window, function () { setTimeout(function () { dirtyTask = false; }, 0); loop(); }); })();
   window.__strictDom = {
     report: function () { return Array.from(sites.values()).map(function (v) { return { kind: v.kind, prop: v.prop, at: v.at, phase: v.phase, count: v.count }; }); },
     reset: function () { sites.clear(); },

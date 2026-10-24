@@ -1233,6 +1233,7 @@ html[data-blur="0"] .rl-pop .rl-menu, html[data-blur="0"] .rl-pop .rl-rpick { -w
 .rl-sidepage { position: relative; flex: 1; min-height: 0; display: flex; flex-direction: column; }
 .rl-slides { position: relative; flex: 1; min-width: 0; min-height: 0; display: flex; overflow: hidden; }
 .rl-slide { position: absolute; inset: 0; display: flex; flex-direction: column; background: var(--card); }
+.rl-slide:focus { outline: none; }   /* фокус ставится программно при смене страницы — без рамки */
 .rl-slide-parked { visibility: hidden; pointer-events: none; }
 .rl-slide-in-push { z-index: 2; animation: rl-slide-from-right 300ms cubic-bezier(0.2, 0, 0, 1) both; box-shadow: -8px 0 24px rgba(0,0,0,0.08); }
 .rl-slide-out-push { z-index: 1; animation: rl-slide-to-left 300ms cubic-bezier(0.2, 0, 0, 1) both; }

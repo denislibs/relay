@@ -1,5 +1,5 @@
 import type { UserPhoto } from '@relay/protocol';
-import { Icon } from '@relay/ui';
+import { forceMeasure, Icon } from '@relay/ui';
 import type { ComponentChildren } from 'preact';
 import { useEffect, useLayoutEffect, useRef, useState } from 'preact/hooks';
 
@@ -35,7 +35,7 @@ export function ProfileGallery({ photos, index, onIndex, onOpen, name, sub, musi
     const el = wrap.current;
     if (!el) return;
     const set = (w: number) => { if (w) el.style.setProperty('--hero-s', String(AVATAR / w)); };
-    set(el.clientWidth);
+    set(forceMeasure(() => el.clientWidth));   // первый масштаб — до отрисовки
     const ro = new ResizeObserver((es) => set(es[0].contentRect.width));
     ro.observe(el);
     return () => ro.disconnect();
