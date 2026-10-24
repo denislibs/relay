@@ -48,6 +48,21 @@ export function useGreetingSticker(frameKey: string, want: boolean): StickerRef 
     void p.then((s) => { if (!s) { greetings.delete(frameKey); done(null); return; } if (live) done(s); else setGot((g) => g?.key === frameKey && !g.sticker ? { key: frameKey, sticker: s } : g); });   // без сети — попробуем при следующем показе
     return () => { live = false; clearTimeout(t); };
   }, [frameKey, want, known]);
+  // без сети движок сразу отвечает null (так бывает сразу после запуска, пока он подключается) — карточка уже
+  // показана без стикера; сеть появилась — спрашиваем ещё раз, пришедший встанет в карточку
+  const online = useGlobal((s) => s.status.online);
+  const missing = known && !got!.sticker;
+  useEffect(() => {
+    if (!want || !missing || !online) return;
+    let live = true;
+    let p = greetings.get(frameKey);
+    if (!p) { p = greetingSticker().catch(() => null); greetings.set(frameKey, p); }
+    void p.then((s) => {
+      if (!s) { greetings.delete(frameKey); return; }
+      if (live) setGot((g) => g?.key === frameKey && !g.sticker ? { key: frameKey, sticker: s } : g);
+    });
+    return () => { live = false; };
+  }, [frameKey, want, missing, online]);
   return known ? got!.sticker : undefined;
 }
 
