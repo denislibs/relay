@@ -98,6 +98,22 @@ export async function contactNames(tx: Tx | typeof sql, userId: number, viewers:
 export const nameForSql = (viewer: number | ReturnType<typeof sql>) =>
   sql`coalesce((select nullif(btrim(ct.first_name || ' ' || ct.last_name), '') from contacts ct where ct.owner_id = ${viewer} and ct.user_id = u.id), u.name)`;
 
+/**
+ * Комментарии без вступления (threads.ts threadAccess): автор комментария виден гостю треда — подписчику канала, чья
+ * это группа обсуждения (корень треда — копия поста этого канала, гость в группе не в бане), а гость-комментатор —
+ * участникам группы. target — id или выражение (sql`users.id`).
+ */
+export const commentPeerSql = (db: Tx | typeof sql, viewer: number, target: number | ReturnType<typeof sql>) => db`(
+  exists (select 1 from chat_members vm
+            join chats ch on ch.id = vm.chat_id and ch.kind = 'channel' and ch.deleted_at is null and ch.linked_chat_id is not null
+            join messages cm on cm.chat_id = ch.linked_chat_id and cm.sender_id = ${target} and cm.thread_id is not null and not cm.deleted
+            join messages r on r.chat_id = cm.chat_id and r.id = cm.thread_id and (r.origin->>'chatId')::bigint = ch.id
+           where vm.user_id = ${viewer}
+             and not exists (select 1 from chat_bans b where b.chat_id = ch.linked_chat_id and b.user_id = ${viewer}))
+  or exists (select 1 from chat_members gm join chats g on g.id = gm.chat_id and g.kind = 'group' and g.deleted_at is null
+               join messages cm on cm.chat_id = gm.chat_id and cm.sender_id = ${target} and cm.thread_id is not null and not cm.deleted
+              where gm.user_id = ${viewer}))`;
+
 /** Может ли зритель смотреть профиль: общий чат (не канал) или человек у зрителя в контактах.
  *  Обратное направление («у кого я в контактах») доступа не даёт — иначе оно себя выдаёт. */
 export async function canView(db: Tx | typeof sql, viewer: number, id: number): Promise<boolean> {
@@ -105,6 +121,7 @@ export async function canView(db: Tx | typeof sql, viewer: number, id: number): 
   const [r] = await db`select (
       exists (select 1 from chat_members a join chats c on c.id = a.chat_id and c.kind <> 'channel' and c.deleted_at is null join chat_members b on b.chat_id = a.chat_id where a.user_id = ${id} and b.user_id = ${viewer})
       or exists (select 1 from contacts where owner_id = ${viewer} and user_id = ${id})
+      or ${commentPeerSql(db, viewer, id)}   -- автор комментария в треде, который я вижу (гостем или участником)
     ) as ok`;
   return !!r.ok;
 }

@@ -187,27 +187,48 @@ export async function joinByInvite(userId: number, key: string): Promise<{ chatI
   return sql.begin(async (tx) => {
     const t = await resolve(tx, key);
     if (!t.live) throw new DomainError('not_found', 'expired');
-    const [c] = await tx`select kind, deleted_at from chats where id = ${t.chatId} for update`;
-    if (!c || c.deleted_at) throw new DomainError('not_found', 'group');
-    const [m] = await tx`select 1 from chat_members where chat_id = ${t.chatId} and user_id = ${userId}`;
-    if (m) return { chatId: t.chatId, requested: false };
-    const [ban] = await tx`select 1 from chat_bans where chat_id = ${t.chatId} and user_id = ${userId}`;
-    if (ban) throw new DomainError('forbidden', 'banned');
-    const [sys] = await tx`select 1 from users where id = ${userId} and system`;
-    if (sys) throw new DomainError('forbidden');
-    if (t.approval) {
-      await tx`insert into chat_join_requests (chat_id, user_id, invite_id) values (${t.chatId}, ${userId}, ${t.inviteId}) on conflict (chat_id, user_id) do nothing`;
-      // заявка в канал — только тем, кто принимает (не groupUpdated на 200 000)
-      await (c.kind === 'channel' ? broadcastRequests(tx, t.chatId) : broadcastGroup(tx, t.chatId));
-      return { chatId: t.chatId, requested: true };
-    }
-    await acceptMember(tx, t.chatId, userId, null, 'joined_by_link');
-    if (t.inviteId != null) {
-      await tx`update chat_invites set usage = usage + 1 where id = ${t.inviteId}`;
-      await tx`insert into chat_invite_joins (invite_id, user_id) values (${t.inviteId}, ${userId}) on conflict do nothing`;
-    }
-    return { chatId: t.chatId, requested: false };
+    return joinTarget(tx, userId, t);
   });
+}
+
+/**
+ * Вступить в группу обсуждения из треда («Вступить в группу» / «Подать заявку» у гостя, threads.ts threadAccess):
+ * подписчику канала, чья это группа обсуждения, — и без ссылки, даже если группа частная (как в Telegram). С одобрением —
+ * заявка.
+ */
+export async function joinDiscussion(userId: number, groupId: number): Promise<{ chatId: number; requested: boolean }> {
+  return sql.begin(async (tx) => {
+    const [g] = await tx`
+      select g.join_approval from chats g
+        join chats ch on ch.linked_chat_id = g.id and ch.kind = 'channel' and ch.deleted_at is null
+        join chat_members cm on cm.chat_id = ch.id and cm.user_id = ${userId}
+       where g.id = ${groupId} and g.kind = 'group' and g.deleted_at is null and g.linked_chat_id = ch.id`;
+    if (!g) throw new DomainError('not_found', 'group');
+    return joinTarget(tx, userId, { chatId: groupId, inviteId: null, approval: !!g.join_approval, live: true });
+  });
+}
+
+async function joinTarget(tx: Tx, userId: number, t: Target): Promise<{ chatId: number; requested: boolean }> {
+  const [c] = await tx`select kind, deleted_at from chats where id = ${t.chatId} for update`;
+  if (!c || c.deleted_at) throw new DomainError('not_found', 'group');
+  const [m] = await tx`select 1 from chat_members where chat_id = ${t.chatId} and user_id = ${userId}`;
+  if (m) return { chatId: t.chatId, requested: false };
+  const [ban] = await tx`select 1 from chat_bans where chat_id = ${t.chatId} and user_id = ${userId}`;
+  if (ban) throw new DomainError('forbidden', 'banned');
+  const [sys] = await tx`select 1 from users where id = ${userId} and system`;
+  if (sys) throw new DomainError('forbidden');
+  if (t.approval) {
+    await tx`insert into chat_join_requests (chat_id, user_id, invite_id) values (${t.chatId}, ${userId}, ${t.inviteId}) on conflict (chat_id, user_id) do nothing`;
+    // заявка в канал — только тем, кто принимает (не groupUpdated на 200 000)
+    await (c.kind === 'channel' ? broadcastRequests(tx, t.chatId) : broadcastGroup(tx, t.chatId));
+    return { chatId: t.chatId, requested: true };
+  }
+  await acceptMember(tx, t.chatId, userId, null, 'joined_by_link');
+  if (t.inviteId != null) {
+    await tx`update chat_invites set usage = usage + 1 where id = ${t.inviteId}`;
+    await tx`insert into chat_invite_joins (invite_id, user_id) values (${t.inviteId}, ${userId}) on conflict do nothing`;
+  }
+  return { chatId: t.chatId, requested: false };
 }
 
 export { hasAdmin };

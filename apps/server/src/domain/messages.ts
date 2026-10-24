@@ -15,7 +15,7 @@ import { stickerForSend } from './stickers';
 import { cachedPreview, firstUrl, getPreview } from './linkPreview';
 import { contentColumns, openRows, updateContent } from './messageContent';
 import { currentChatKey } from '../crypto/chatKeys';
-import { copyPost, isThreadRoot, noteComment, withCopy } from './threads';
+import { copyPost, isThreadRoot, noteComment, threadAccess, withCopy } from './threads';
 import { collectMentions } from './mentions';
 
 export const MAX_BODY = 4096;
@@ -50,7 +50,8 @@ export async function sendMessage(
   // ключ чата — в кэш до транзакции: внутри неё он берётся из памяти (создание в транзакции в кэш не попадает)
   await currentChatKey(input.chatId).catch(() => {});
   const res = await sql.begin(async (tx) => {
-    const ctx = await groupCtx(tx, input.chatId, userId);
+    // комментарий может написать и не участник группы — подписчик канала (threadAccess: гость треда)
+    const { ctx, guest } = input.threadId != null ? await threadAccess(tx, input.chatId, userId, input.threadId) : { ctx: await groupCtx(tx, input.chatId, userId), guest: null };
     // повтор уже принятого — ack, даже если права с тех пор отобрали
     const [again] = await tx`select * from messages where sender_id = ${userId} and client_id = ${input.clientId}`;
     if (again) return { message: toMessage((await openRows([again], '', tx))[0]), duplicate: true };
@@ -76,6 +77,8 @@ export async function sendMessage(
       const [root] = await tx`select origin, deleted from messages where chat_id = ${input.chatId} and id = ${threadId} for share`;
       // корень — только копия, на которую указывает тред поста (копия не первого поста альбома — не корень)
       if (!root || root.origin == null || root.deleted || !(await isThreadRoot(tx, root.origin, threadId))) throw new DomainError('not_found', 'thread');
+      // «Комментировать могут только участники» или вступление по заявке — гостю сначала вступить
+      if (guest && (guest.joinToSend || guest.joinApproval)) throw new DomainError('forbidden', 'join');
     }
     // копия без «Переслано от» — новое сообщение и может быть ответом; настоящая пересылка — нет (как в Telegram)
     const canReply = !input.forward || !!input.forward.hideSender;
