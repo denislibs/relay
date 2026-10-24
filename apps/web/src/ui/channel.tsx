@@ -162,6 +162,7 @@ export function ThreadBar({ header, title, onClick }: { header: Item | null; tit
   return (
     <div class="app-pins app-threadbar" role="region" aria-label="Пост">
       <button type="button" class="app-pins-main" onClick={onClick} disabled={!header || gone}>
+        <Icon name="pin" size={24} class="app-pins-icon" />
         <span class="app-pins-track" aria-hidden="true"><span class="app-pins-segs"><i class="app-pins-on" style={{ height: '36px' }} /></span></span>
         <span class="app-pins-text">
           <b>{title || 'Пост'}</b>
