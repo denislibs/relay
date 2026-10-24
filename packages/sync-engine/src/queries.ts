@@ -91,7 +91,7 @@ function chatListItem(store: Store, c: LocalChat, mute: Map<number, number | nul
 // элемент сообщения переиспользуется, пока сообщение не изменилось: дешёвая подпись вместо JSON.stringify
 // цитата — короткая копия исходного сообщения, если оно есть в кэше (видна, даже когда оригинал вне окна)
 type Quote = QuoteMsg | null;
-const msgSig = (m: LocalMessage, q: Quote): string => `${m.id}|${m.status}|${m.sort}|${m.replyToId}|${m.body}|${m.editedAt ?? ''}|${m.deleted ? 1 : 0}|${m.reactions?.map((r) => r.userId + r.emoji).join(',') ?? ''}|${m.attachment ? m.attachment.id + ':' + (m.progress ?? '') + ':' + m.attachment.size + (m.attachment.preview ? ':p' : '') + ':' + (m.attachment.variants?.length ?? 0) : ''}|${q ? q.id + ':' + q.body + ':' + (q.deleted ? 1 : 0) + ':' + (q.attachment?.thumb?.length ?? 0) + ':' + (q.entities?.length ?? 0) : ''}|${m.error ?? ''}|${m.listened ? 1 : 0}|${m.entities?.map((e) => e.type + e.offset + ':' + e.length + (e.url ?? '')).join(',') ?? ''}|${m.todo ? JSON.stringify(m.todo) : ''}|${m.service?.data ? JSON.stringify(m.service.data) : ''}|${m.buttons ? JSON.stringify(m.buttons) : ''}|${m.views ?? ''}|${m.reactionCounts?.map((r) => r[0] + r[1]).join(',') ?? ''}|${m.myReaction ?? ''}|${m.postAuthor ?? ''}`;
+const msgSig = (m: LocalMessage, q: Quote): string => `${m.id}|${m.status}|${m.sort}|${m.replyToId}|${m.body}|${m.editedAt ?? ''}|${m.deleted ? 1 : 0}|${m.reactions?.map((r) => r.userId + r.emoji).join(',') ?? ''}|${m.attachment ? m.attachment.id + ':' + (m.progress ?? '') + ':' + m.attachment.size + (m.attachment.preview ? ':p' : '') + ':' + (m.attachment.variants?.length ?? 0) : ''}|${q ? q.id + ':' + q.body + ':' + (q.deleted ? 1 : 0) + ':' + (q.attachment?.thumb?.length ?? 0) + ':' + (q.entities?.length ?? 0) : ''}|${m.error ?? ''}|${m.listened ? 1 : 0}|${m.entities?.map((e) => e.type + e.offset + ':' + e.length + (e.url ?? '')).join(',') ?? ''}|${m.todo ? JSON.stringify(m.todo) : ''}|${m.service?.data ? JSON.stringify(m.service.data) : ''}|${m.buttons ? JSON.stringify(m.buttons) : ''}|${m.views ?? ''}|${m.reactionCounts?.map((r) => r[0] + r[1]).join(',') ?? ''}|${m.myReaction ?? ''}|${m.postAuthor ?? ''}|${m.replies ? m.replies.count + ':' + m.replies.lastId + ':' + m.replies.recent.join(',') + ':' + (m.replies.readMaxId ?? '') : ''}`;
 const msgCache = new WeakMap<LocalMessage, { sig: string; item: Item }>();
 export const messageItem = (m: LocalMessage, q: Quote): { item: Item; sig: string } => {
   const sig = msgSig(m, q);
@@ -126,7 +126,7 @@ export function rangeAt(ranges: readonly [number, number][], sort?: number): num
  * что после него: неотправленные). start — отрезок от начала истории; live — отрезок живой (за ним новее нет).
  * Сообщения вне отрезка (догруженные отдельно, за дырой) в ленту не попадают.
  */
-export function feedSpan(chat: LocalChat | undefined, all: LocalMessage[], sort?: number): { lo: number; hi: number; i: number; start: boolean; live: boolean } {
+export function feedSpan(chat: Pick<LocalChat, 'ranges' | 'historyStart'> | undefined, all: LocalMessage[], sort?: number): { lo: number; hi: number; i: number; start: boolean; live: boolean } {
   if (!chat) return { lo: 0, hi: all.length, i: -1, start: false, live: true };
   const ranges = chat.ranges, i = rangeAt(ranges, sort), live = i === ranges.length - 1;
   const lo = lowerBound(all, i < 0 ? PENDING_BASE : ranges[i][0]);
@@ -134,7 +134,7 @@ export function feedSpan(chat: LocalChat | undefined, all: LocalMessage[], sort?
 }
 
 /** Границы окна ленты [from, to) по запросу внутри [lo, hi) (отрезок истории, feedSpan). */
-export function messageWindow(all: LocalMessage[], q: Extract<Query, { kind: 'messages' }>, lo = 0, hi = all.length): { from: number; to: number } {
+export function messageWindow(all: LocalMessage[], q: Pick<Extract<Query, { kind: 'messages' }>, 'limit' | 'anchor'>, lo = 0, hi = all.length): { from: number; to: number } {
   const limit = q.limit;
   if (!q.anchor) return { from: Math.max(lo, hi - limit), to: hi };
   const i = lowerBound(all, q.anchor.sort, lo, hi);
@@ -144,6 +144,40 @@ export function messageWindow(all: LocalMessage[], q: Extract<Query, { kind: 'me
   const to = Math.min(hi, from + limit);
   from = Math.max(lo, to - limit);
   return { from, to };
+}
+
+/** Комментарии треда из кэша группы (по порядку; массив кэшируется вместе с отсортированной лентой чата). */
+const threadCache = new WeakMap<LocalMessage[], Map<number, LocalMessage[]>>();
+export function threadMessages(store: Store, chatId: number, threadId: number): LocalMessage[] {
+  const all = store.chatMessages(chatId);
+  let by = threadCache.get(all);
+  if (!by) { by = new Map(); threadCache.set(all, by); }
+  let list = by.get(threadId);
+  if (!list) { list = all.filter((m) => m.threadId === threadId); by.set(threadId, list); }
+  return list;
+}
+/** Тред: его комментарии и где окно (отрезки треда; не открывали — только неотправленные). */
+export function threadView(store: Store, q: Extract<Query, { kind: 'thread' }>) {
+  const all = threadMessages(store, q.chatId, q.threadId);
+  const span = feedSpan(store.threadRanges(q.chatId, q.threadId) ?? { ranges: [] }, all, q.anchor?.sort);
+  return { all, span, ...messageWindow(all, q, span.lo, span.hi) };
+}
+
+/** Окно сообщений → элементы с цитатами (лента чата и тред). */
+function windowItems(store: Store, chatId: number, all: LocalMessage[], from: number, to: number, out: Result): void {
+  const missingQuotes = new Set<number>();
+  for (let k = from; k < to; k++) {
+    const m = all[k];
+    let quote: Quote = null;
+    if (m.replyToId != null) {
+      const r = store.messageById(chatId, m.replyToId);
+      quote = r ? toQuote(r) : store.quoteFor(chatId, m.replyToId) ?? null;
+      if (!quote) missingQuotes.add(m.replyToId);
+    }
+    const { item, sig: g } = messageItem(m, quote);
+    out.items.set(item.key, item); out.sig.set(item.key, g); out.order.push(item.key);
+  }
+  if (missingQuotes.size) store.wantQuotes(chatId, [...missingQuotes]);
 }
 
 export function computeQuery(store: Store, q: Query, mute: Map<number, number | null> = new Map(), flags: Map<number, FlagsOp> = new Map()): Result {
@@ -189,6 +223,18 @@ export function computeQuery(store: Store, q: Query, mute: Map<number, number | 
       if (missingQuotes.size) store.wantQuotes(q.chatId, [...missingQuotes]);
       return { items, sig, order };
     }
+    case 'thread': {
+      // шапка — копия поста (из того же кэша сообщений группы), дальше окно комментариев по отрезкам треда
+      const { all, span, from, to } = threadView(store, q);
+      const out: Result = { items: new Map(), sig: new Map(), order: [] };
+      const header = store.messageById(q.chatId, q.threadId);
+      if (header) { const { item, sig: g } = messageItem(header, null); out.items.set(item.key, item); out.sig.set(item.key, g); out.order.push(item.key); }
+      windowItems(store, q.chatId, all, from, to, out);
+      const meta: Item = { key: '~window', hasOlder: from > span.lo || !span.start, hasNewer: to < span.hi || !span.live, live: !q.anchor || (span.live && to === span.hi) };
+      const th: Item = { key: '~thread', header: header?.key ?? null, loaded: !!store.threadRanges(q.chatId, q.threadId) };
+      for (const it of [meta, th]) { out.items.set(it.key, it); out.sig.set(it.key, JSON.stringify(it)); out.order.push(it.key); }
+      return out;
+    }
     case 'uploads': {
       // очередь отправки файлов во всех чатах (индикатор «Отправка N файлов» и предупреждение при закрытии вкладки)
       const list: Item[] = [];
@@ -233,7 +279,7 @@ export function computeQuery(store: Store, q: Query, mute: Map<number, number | 
 export function affects(q: Query, touched: Set<number>): boolean {
   if (!touched.size) return false;
   if (q.kind === 'status' || q.kind === 'me' || q.kind === 'user' || q.kind === 'people' || q.kind === 'ops' || q.kind === 'contacts' || q.kind === 'settings' || q.kind === 'blocked' || q.kind === 'members' || q.kind === 'profileMusic' || q.kind === 'profilePhotos' || q.kind === 'devStats' || q.kind === 'devLog') return false;   // у них свои флаги в движке
-  return q.kind === 'messages' || q.kind === 'media' ? touched.has(q.chatId) : true;
+  return q.kind === 'messages' || q.kind === 'media' || q.kind === 'thread' ? touched.has(q.chatId) : true;
 }
 
 export function diffResults(prev: Result | null, next: Result): Patch | null {

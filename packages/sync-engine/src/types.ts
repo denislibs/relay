@@ -1,6 +1,6 @@
 import type { StickerRef, StickerSetInfo } from '@relay/protocol';
 import type { StoreName } from './schema';
-import type { GroupInfo, MediaCounts, MediaTab, MyMembership } from '@relay/protocol';
+import type { GroupInfo, MediaCounts, MediaTab, MyMembership, Replies } from '@relay/protocol';
 import type { Birthday, Block, ChatFolder, Entity, ForwardInfo, ForwardRef, LinkPreview, MessageButton, PrivacyKey, PrivacyMode, ProfileLink, ServiceType, Todo, TodoInput, TodoServiceData, VideoVariant } from '@relay/protocol';
 
 export type Status = 'pending' | 'sent' | 'read' | 'failed';
@@ -38,7 +38,13 @@ export interface LocalMessage {
   views?: number;                     // просмотры поста: только растут (журнал их не несёт — нет поля ≠ ноль)
   reactionCounts?: [string, number][]; // реакции поста счётчиками (вместо reactions)
   myReaction?: string;                // моя реакция на пост
+  threadId?: number;                  // комментарий: id копии поста в группе обсуждения (корень треда)
+  origin?: { chatId: number; id: number };   // копия поста в группе обсуждения: канал и пост
+  replies?: Replies;                  // пост с обсуждением: число комментариев, последние, моя прочитанность треда
 }
+
+/** Отрезки истории треда (как у ленты чата): страницы треда — свой эндпоинт, живой отрезок продлевают комментарии из журнала. */
+export interface ThreadRanges { ranges: [number, number][]; historyStart?: true; seed?: number }
 
 /** Вложение сообщения; у неотправленного id пустой, пока файл не загружен. */
 export interface LocalAttachment {
@@ -85,6 +91,8 @@ export interface LocalChat {
   /** вкладка известна подряд от новых: true — целиком, число — с этого id (страницы старше просим с него) */
   mediaDone?: Partial<Record<MediaTab, number | true>>;
   openedAt?: number;      // когда ленту чата открывали в последний раз (мс): уборка урезает давно не открытые (evict.ts)
+  /** группа обсуждения: отрезки тредов по id копии; нет — тред не открывали (перезагрузится при открытии) */
+  threads?: Record<number, ThreadRanges>;
 }
 
 export interface OutboxEntry {
@@ -106,6 +114,7 @@ export interface OutboxEntry {
   blocks?: Block[] | null;          // «статья»
   upload?: { id: string; partSize: number; parts: number; done: number[]; key?: string; base?: string };
   sticker?: StickerRef | null;      // стикер: снимок для показа до ответа, на сервер уходит только id   // большой файл частями: что уже принято (докачка)
+  threadId?: number;                // комментарий в треде (группа обсуждения)
 }
 
 export type Query =
@@ -113,6 +122,9 @@ export type Query =
   /** Окно ленты: без якоря — последние limit (живой хвост); с якорем — limit сообщений, которые
    *  заканчиваются на sort (end), начинаются с него (start) или стоят вокруг него (center). */
   | { kind: 'messages'; chatId: number; limit: number; anchor?: { sort: number; side: 'end' | 'start' | 'center' } }
+  /** тред комментариев (chatId — группа обсуждения, threadId — копия поста): шапка (копия) первой, дальше окно комментариев
+   *  по тем же правилам, что messages; служебные ~window и ~thread {header: ключ шапки или null} */
+  | { kind: 'thread'; chatId: number; threadId: number; limit: number; anchor?: { sort: number; side: 'end' | 'start' | 'center' } }
   | { kind: 'counters' }
   | { kind: 'status' }
   | { kind: 'uploads' }   // неотправленные файлы во всех чатах: имя, размер, прогресс
@@ -168,9 +180,13 @@ export type Action =
   | { type: 'stickersByEmoji'; emoji: string }
   /** управление группой и вступление по ссылке: HTTP мимо очереди ({ok, data} | {ok:false, code}) */
   | { type: 'group'; method: 'GET' | 'POST' | 'PUT' | 'PATCH' | 'DELETE'; path: string; body?: unknown }
-  | { type: 'sendMessage'; chatId: number; body: string; entities?: Entity[]; replyToId?: number | null; noLinkPreview?: boolean; link?: LinkPreview | null; attachment?: LocalAttachment | null; blocks?: Block[] | null }   // blocks — «статья»; attachment — уже загруженный файл (id), например трек из музыки профиля
+  | { type: 'sendMessage'; chatId: number; body: string; entities?: Entity[]; replyToId?: number | null; noLinkPreview?: boolean; link?: LinkPreview | null; attachment?: LocalAttachment | null; blocks?: Block[] | null; threadId?: number }   // threadId — комментарий в треде; blocks — «статья»; attachment — уже загруженный файл (id), например трек из музыки профиля
   | { type: 'seen'; chatId: number; upToId: number }
   | { type: 'loadOlder'; chatId: number }
+  /** тред: страница старее загруженного (как loadOlder у ленты) */
+  | { type: 'loadThread'; chatId: number; threadId: number }
+  /** тред прочитан до upToId: сразу у себя (точка на кнопке поста гаснет), на сервер — пачкой, как seen; основную ленту не трогает */
+  | { type: 'markThreadRead'; chatId: number; threadId: number; upToId: number }
   | { type: 'retry'; clientId: string }
   /** неотправленное — убрать из очереди и ленты; идущая загрузка файла прерывается */
   | { type: 'discard'; clientId: string }

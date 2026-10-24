@@ -133,6 +133,8 @@ export function toMessage(r: Record<string, unknown>): Message {
     ...(!r.deleted && Array.isArray(r.entities) && r.entities.length ? { entities: normalizeEntities(r.body as string, r.entities) } : {}),
     ...(r.post ? { post: true, ...(r.post_author ? { postAuthor: r.post_author as string } : {}) } : {}),
     ...(r.views != null ? { views: Number(r.views) } : {}),
+    ...(r.thread_id != null ? { threadId: Number(r.thread_id) } : {}),
+    ...(r.origin ? { origin: { chatId: Number((r.origin as { chatId: unknown }).chatId), id: Number((r.origin as { id: unknown }).id) } } : {}),
   };
 }
 
@@ -187,9 +189,38 @@ export async function withReactionCounts(messages: Message[], userId: number): P
   return messages;
 }
 
-/** Реакции к выдаче: посты каналов — счётчиками и с просмотрами (withReactionCounts), остальные — списком (withReactions). */
+/**
+ * Комментарии к постам (кнопка «N комментариев»): message_threads и моя прочитанность треда (thread_reads). Только
+ * если копия лежит в ТЕКУЩЕЙ группе обсуждения канала: после перепривязки старые треды остаются в старой группе,
+ * а кнопки у постов пропадают (как в Telegram).
+ */
+export async function withReplies(messages: Message[], userId: number): Promise<Message[]> {
+  const posts = messages.filter((m) => !m.deleted && !m.service);
+  if (!posts.length) return messages;
+  const rows = await sql`
+    select t.chat_id, t.post_id, t.copy_id, t.count, t.last_id, t.recent, c.linked_chat_id as group_id, r.read_max_id
+      from unnest(${posts.map((m) => m.chatId)}::bigint[], ${posts.map((m) => m.id)}::bigint[]) as k(chat_id, post_id)
+      join message_threads t on t.chat_id = k.chat_id and t.post_id = k.post_id
+      join chats c on c.id = t.chat_id
+      join messages cp on cp.chat_id = c.linked_chat_id and cp.id = t.copy_id
+      left join thread_reads r on r.user_id = ${userId} and r.chat_id = c.linked_chat_id and r.thread_id = t.copy_id`;
+  const by = new Map(rows.map((r) => [r.chat_id + ':' + r.post_id, r]));
+  for (const m of posts) {
+    const r = by.get(m.chatId + ':' + m.id);
+    if (!r) continue;
+    m.replies = {
+      copyId: Number(r.copy_id), chatId: Number(r.group_id), count: Number(r.count), lastId: r.last_id == null ? null : Number(r.last_id),
+      recent: (r.recent as (number | string)[]).map(Number), ...(r.read_max_id != null ? { readMaxId: Number(r.read_max_id) } : {}),
+    };
+  }
+  return messages;
+}
+
+/** Реакции к выдаче: посты каналов — счётчиками и с просмотрами (withReactionCounts) и комментариями (withReplies),
+ *  остальные (и копии постов в группе обсуждения — это сообщения группы) — списком (withReactions). */
 export async function withAllReactions(messages: Message[], userId: number): Promise<Message[]> {
-  await Promise.all([withReactions(messages.filter((m) => !m.post)), withReactionCounts(messages.filter((m) => m.post), userId)]);
+  const posts = messages.filter((m) => m.post && !m.origin);
+  await Promise.all([withReactions(messages.filter((m) => !m.post || m.origin)), withReactionCounts(posts, userId), withReplies(posts, userId)]);
   return messages;
 }
 
@@ -250,7 +281,7 @@ export async function listChats(userId: number, opts: ListOpts = {}): Promise<Ch
            case when c.kind <> 'direct' then c.members_count end as g_members,   -- держит триггер (миграция 145)
            case when c.kind <> 'direct' then (select count(*)::int from chat_join_requests jr where jr.chat_id = c.id) end as g_pending,
            lm.id as m_id, lm.chat_id as m_chat_id, lm.sender_id as m_sender_id, lm.client_id as m_client_id,
-           lm.body as m_body, lm.kind as m_kind, lm.attachment as m_attachment, lm.reply_to_id as m_reply_to_id, lm.created_at as m_created_at, lm.edited_at as m_edited_at, lm.deleted as m_deleted, lm.entities as m_entities, lm.service_type as m_service_type, lm.service_data as m_service_data, lm.todo as m_todo, lm.fwd_from as m_fwd_from, lm.buttons as m_buttons, lm.sticker as m_sticker, lm.content as m_content, lm.post as m_post, lm.post_author as m_post_author,
+           lm.body as m_body, lm.kind as m_kind, lm.attachment as m_attachment, lm.reply_to_id as m_reply_to_id, lm.created_at as m_created_at, lm.edited_at as m_edited_at, lm.deleted as m_deleted, lm.entities as m_entities, lm.service_type as m_service_type, lm.service_data as m_service_data, lm.todo as m_todo, lm.fwd_from as m_fwd_from, lm.buttons as m_buttons, lm.sticker as m_sticker, lm.content as m_content, lm.post as m_post, lm.post_author as m_post_author, lm.thread_id as m_thread_id, lm.origin as m_origin,
            case when lm.post and lm.service_type is null then coalesce((select v.views from message_views v where v.chat_id = lm.chat_id and v.message_id = lm.id), 0) end as m_views,
            (select count(*) from messages m
              where m.chat_id = c.id and m.id > cm.last_read_id and m.id >= cm.history_from and m.sender_id <> ${userId})::int as unread,
@@ -290,7 +321,7 @@ export async function listChats(userId: number, opts: ListOpts = {}): Promise<Ch
   });
   await openDrafts(drafts);
   for (const d of drafts) { d.ref.text = d.text; d.ref.entities = d.entities; }
-  return rows.map((r) => ({
+  const list = rows.map((r) => ({
     id: r.id as number,
     kind: r.kind as ChatSummary['kind'],
     title: (r.title as string | null) ?? null,
@@ -311,9 +342,12 @@ export async function listChats(userId: number, opts: ListOpts = {}): Promise<Ch
     last: r.m_id == null ? null : toMessage({
       id: r.m_id, chat_id: r.m_chat_id, sender_id: r.m_sender_id, client_id: r.m_client_id,
       body: r.m_body, kind: r.m_kind, attachment: r.m_attachment, reply_to_id: r.m_reply_to_id, created_at: r.m_created_at, edited_at: r.m_edited_at, deleted: r.m_deleted, entities: r.m_entities, service_type: r.m_service_type, service_data: r.m_service_data, todo: r.m_todo, fwd_from: r.m_fwd_from, buttons: r.m_buttons, sticker: r.m_sticker,
-      post: r.m_post, post_author: r.m_post_author, views: r.m_views,
+      post: r.m_post, post_author: r.m_post_author, views: r.m_views, thread_id: r.m_thread_id, origin: r.m_origin,
     }),
   }));
+  // последний пост канала — с кнопкой комментариев: устройство, узнавшее пост только из списка, иначе её не увидит
+  await withReplies(list.filter((c) => c.kind === 'channel' && c.last?.post).map((c) => c.last!), userId);
+  return list;
 }
 
 /** Конкретные сообщения чата по id (исходники цитат, которых нет в загруженной истории). */

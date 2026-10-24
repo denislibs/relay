@@ -4,4 +4,4 @@ export { HostCore, fromMessagePort, type FromHost, type ToHost, type PortLike } 
 export { createDedicatedHost } from './hosts/dedicated';
 export { computeQuery, diffResults } from './queries';
 export * from './types';
-export { isPost, canPost, shiftCounts } from './channel';
+export { isPost, canPost, shiftCounts, hasUnreadReplies } from './channel';

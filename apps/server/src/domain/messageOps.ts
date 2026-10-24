@@ -11,14 +11,24 @@ import { burnCodes } from './login';
 import { enqueue } from '../jobs/queue';
 import { can, groupCtx, hasAdmin } from './groupRights';
 import { reactPost, type Counts } from './reactionCounts';
+import { recountThread, withCopy } from './threads';
+import type { Tx } from '../db';
 
 const MAX_BODY = 4096;
 const EMOJI = /^\p{Extended_Pictographic}(️|‍\p{Extended_Pictographic})*$/u;
 
-async function ownMessage(tx: Parameters<typeof assertMember>[0], userId: number, chatId: number, id: number) {
-  const [m] = await tx`select sender_id, deleted from messages where chat_id = ${chatId} and id = ${id} for update`;
+/** Строка под замком; копия поста в группе обсуждения (origin) из группы не правится и не удаляется — только через пост. */
+async function lockMessage(tx: Parameters<typeof assertMember>[0], chatId: number, id: number) {
+  const [m] = await tx`select sender_id, deleted, service_type, origin, thread_id from messages where chat_id = ${chatId} and id = ${id} for update`;
   if (!m || m.deleted) throw new DomainError('not_found', 'message');
+  if (m.origin != null) throw new DomainError('forbidden', 'post copy');
+  return m;
+}
+
+async function ownMessage(tx: Parameters<typeof assertMember>[0], userId: number, chatId: number, id: number) {
+  const m = await lockMessage(tx, chatId, id);
   if (m.sender_id !== userId) throw new DomainError('forbidden', 'not your message');
+  return m;
 }
 
 /** Правка своего сообщения (в канале — и чужого поста админом с правом edit, без срока): новое тело и отметка «изм.» —
@@ -44,6 +54,11 @@ export async function editMessage(userId: number, chatId: number, id: number, bo
     const editedAt = new Date(row.edited_at as string).toISOString();
     await chatEvent(tx, chatId, { type: 'messageEdited', chatId, id, body: text, editedAt, entities });
     await enqueue(tx, 'search.sync', { id });
+    // пост канала — та же правка копии в группе обсуждения
+    if (ctx.kind === 'channel') await withCopy(tx, chatId, id, async (groupId, copyId) => {
+      const copy = await updateContent(tx, groupId, copyId, () => ({ body: text, entities: entities.length ? entities : null }), () => ({ edited_at: sql`now()` }));
+      if (copy) await chatEvent(tx, groupId, { type: 'messageEdited', chatId: groupId, id: copyId, body: text, editedAt: new Date(copy.edited_at as string).toISOString(), entities }, 'group');
+    });
     return { editedAt };
   });
 }
@@ -53,19 +68,29 @@ export async function deleteMessage(userId: number, chatId: number, id: number):
   return sql.begin(async (tx) => {
     const ctx = await groupCtx(tx, chatId, userId);
     // админ группы с правом удалять — и чужие (кроме служебных)
+    let m;
     if (hasAdmin(ctx, 'delete')) {
-      const [m] = await tx`select deleted, service_type from messages where chat_id = ${chatId} and id = ${id} for update`;
-      if (!m || m.deleted || m.service_type) throw new DomainError('not_found', 'message');
-    } else await ownMessage(tx, userId, chatId, id);
-    // текст и шифр стираются целиком: у удалённого не остаётся содержимого ни открыто, ни шифром
-    await tx`update messages set body = '', entities = null, todo = null, blocks = null, link = null, content = null, deleted = true where chat_id = ${chatId} and id = ${id}`;
-    await tx`delete from reactions where chat_id = ${chatId} and message_id = ${id}`;
-    if (ctx.kind === 'channel') await tx`delete from message_reaction_counts where chat_id = ${chatId} and message_id = ${id}`;
-    await chatEvent(tx, chatId, { type: 'messageDeleted', chatId, id });
-    await enqueue(tx, 'search.sync', { id });   // убрать из индекса
-    await unpinDeleted(tx, chatId, id);
+      m = await lockMessage(tx, chatId, id);
+      if (m.service_type) throw new DomainError('not_found', 'message');
+    } else m = await ownMessage(tx, userId, chatId, id);
+    await erase(tx, chatId, id, ctx.kind);
+    // пост канала — копия в группе обсуждения удаляется тоже (тред остаётся, шапка — «удалено»)
+    if (ctx.kind === 'channel') await withCopy(tx, chatId, id, (groupId, copyId) => erase(tx, groupId, copyId, 'group'));
+    // комментарий — счётчики треда заново
+    if (m.thread_id != null) await recountThread(tx, chatId, Number(m.thread_id));
     return { ok: true };
   });
+}
+
+/** Стереть сообщение у всех (замок строки уже взят): текст и шифр целиком, реакции, закреп; событие в журнал чата. */
+async function erase(tx: Tx, chatId: number, id: number, kind: 'direct' | 'group' | 'channel'): Promise<void> {
+  // текст и шифр стираются целиком: у удалённого не остаётся содержимого ни открыто, ни шифром
+  await tx`update messages set body = '', entities = null, todo = null, blocks = null, link = null, content = null, deleted = true where chat_id = ${chatId} and id = ${id}`;
+  await tx`delete from reactions where chat_id = ${chatId} and message_id = ${id}`;
+  if (kind === 'channel') await tx`delete from message_reaction_counts where chat_id = ${chatId} and message_id = ${id}`;
+  await chatEvent(tx, chatId, { type: 'messageDeleted', chatId, id }, kind);
+  await enqueue(tx, 'search.sync', { id });   // убрать из индекса
+  await unpinDeleted(tx, chatId, id);
 }
 
 /** Реакция (null — снять). Одна от пользователя; всем участникам уходит полный список реакций сообщения.

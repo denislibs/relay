@@ -1,5 +1,5 @@
 import type { GroupInfo, MyMembership } from '@relay/protocol';
-import type { Entity, Message, ProfilePhoto, Update } from '@relay/protocol';
+import type { Entity, Message, ProfilePhoto, Replies, Update } from '@relay/protocol';
 import { getAll, getByChat, termsOf, write, type RowPatch, type WriteBatch } from './idb';
 import { CACHE_STORES, STORES } from './schema';
 import { applyUserUpdated, ProfileCache } from './profile';
@@ -10,7 +10,7 @@ import { applyMembersUpdate, MembersCache } from './members';
 import { ProfileLists } from './profileLists';
 import { onMessage, recomputeLast, tabsOf, unreadAfterRead, unreadOnArrival } from './derive';
 import { nextV } from './rows';
-import { PENDING_BASE, toQuote, type LocalChat, type LocalMessage, type OutboxEntry, type QuoteMsg } from './types';
+import { PENDING_BASE, toQuote, type LocalChat, type LocalMessage, type OutboxEntry, type QuoteMsg, type ThreadRanges } from './types';
 
 /** Тот же черновик: текст и оформление (порядок ключей в сущностях не важен). */
 function sameDraft(a: { text: string; entities?: Entity[] } | null | undefined, b: { text: string; entities?: Entity[] } | null | undefined): boolean {
@@ -36,7 +36,7 @@ const DELETED: Partial<LocalMessage> = {
  * отправлялось, и его id ниже начала — начало опускается до него (не залезая на предыдущий отрезок); сообщения
  * между ним и seed догрузит страница истории перед seed (движок, ensureHistory), seed остаётся до неё.
  */
-function extendLive(chat: LocalChat, sort: number, own = false): void {
+function extendLive(chat: Pick<LocalChat, 'ranges' | 'seed' | 'snapLast'>, sort: number, own = false): void {
   const ranges = chat.ranges, n = ranges.length, last = ranges[n - 1];
   if (!last) ranges.push([sort, sort]);
   else if (sort > last[1]) last[1] = sort;
@@ -62,7 +62,7 @@ function snapshotLive(chat: LocalChat, m: LocalMessage): boolean {
  * (end — до самого нового). Сливается с отрезком, где at (null — страница с новейшего края: сама по себе живой
  * отрезок), и со всеми отрезками, которые задевает.
  */
-function addPage(ranges: Range[], lo: number | null, hi: number | null, at: number | null, dir: 'older' | 'newer', end: boolean): Range[] {
+export function addPage(ranges: Range[], lo: number | null, hi: number | null, at: number | null, dir: 'older' | 'newer', end: boolean): Range[] {
   const i = at == null ? -1 : ranges.findIndex((r) => r[0] <= at && at <= r[1]);
   let span: Range | null = i >= 0 ? [ranges[i][0], ranges[i][1]] : null;
   if (lo != null) span = !span ? [lo, hi!] : dir === 'older' ? [Math.min(span[0], lo), span[1]] : [span[0], Math.max(span[1], hi!)];
@@ -109,8 +109,15 @@ export interface ChatSummary {
  * Просмотры и реакции-счётчики поста: журнал (newMessage) их не несёт — нет поля значит «не знаю», а не ноль, и
  * прежнее значение остаётся. Просмотры только растут. Счётчики пришли (история) — с ними и моя реакция (нет — не ставил).
  */
-function postExtras(m: Message, prev: LocalMessage | undefined): Partial<LocalMessage> {
+function postExtras(m: Message, prev: LocalMessage | undefined, threadRead?: (chatId: number, copyId: number) => number | undefined): Partial<LocalMessage> {
   const out: Partial<LocalMessage> = {};
+  // комментарии: история канала несёт replies с моей прочитанностью; журнал — нет (не затирать); прочитанность только растёт
+  const r: Replies | undefined = m.replies ?? prev?.replies;
+  if (r) {
+    const same = prev?.replies && prev.replies.copyId === r.copyId && prev.replies.chatId === r.chatId;
+    const read = Math.max(r.readMaxId ?? 0, same ? prev!.replies!.readMaxId ?? 0 : 0, threadRead?.(r.chatId, r.copyId) ?? 0);
+    out.replies = { ...r, ...(read ? { readMaxId: read } : {}) };
+  }
   const views = Math.max(m.views ?? 0, prev?.views ?? 0);
   if (m.views != null || prev?.views != null) out.views = views;
   if (m.reactionCounts) { out.reactionCounts = m.reactionCounts; if (m.myReaction) out.myReaction = m.myReaction; }
@@ -329,6 +336,8 @@ export class Store {
       case 'messageDeleted': return this.patchMessage(u.chatId, u.id, DELETED);
       case 'reactions': return this.patchMessage(u.chatId, u.id, { reactions: u.reactions });
       case 'reactionCounts': return this.patchMessage(u.chatId, u.id, { reactionCounts: u.counts });
+      case 'replies': return this.applyReplies(u.chatId, u.id, { count: u.count, lastId: u.lastId, recent: u.recent });
+      case 'readThread': return this.applyThreadRead(u.chatId, u.threadId, u.upToId);
       case 'mediaListened': return this.patchMessage(u.chatId, u.id, { listened: true });
       case 'todoUpdated': return this.patchMessage(u.chatId, u.id, { todo: u.todo, ...(u.editedAt ? { editedAt: u.editedAt } : {}) });
       case 'linkPreview': return this.patchMessage(u.chatId, u.id, { link: u.link });
@@ -407,7 +416,7 @@ export class Store {
       this.rowPatches.delete(`${chatId}:${m.id}`);
     }
     this.loaded.delete(chatId);
-    c.ranges = []; delete c.historyStart; delete c.snapLast; delete c.seed; delete c.mediaDone; delete c.mediaCounts; delete c.mediaCountsAt;
+    c.ranges = []; delete c.historyStart; delete c.snapLast; delete c.seed; delete c.mediaDone; delete c.mediaCounts; delete c.mediaCountsAt; delete c.threads;
     this.resetGen++;   // страницы истории, начатые до сброса, устарели
     this.markChat(c);
   }
@@ -424,6 +433,7 @@ export class Store {
   removeChat(id: number): void {
     if (!this.chats.has(id)) return;
     this.chats.delete(id); this.chatV.delete(id); this.messages.delete(id); this.loaded.delete(id); this.members.dropChat(id);
+    for (const k of [...this.threadReads.keys()]) if (k.startsWith(id + ':')) { this.threadReads.delete(k); this.pendingThreadReads.delete(k); }
     if (this.chatSeq.delete(id)) this.dirtyChatSeq.add(id);   // вернёмся — чат снова «незнакомый», seq из membership
     this.seqHints.delete(id);
     for (const [k, p] of this.rowPatches) if (p.chatId === id) this.rowPatches.delete(k);
@@ -576,14 +586,26 @@ export class Store {
       ...(m.sticker ? { sticker: m.sticker } : null),
       ...(m.post ? { post: true } : null),
       ...(m.postAuthor ? { postAuthor: m.postAuthor } : null),
-      ...postExtras(m, prev),
+      ...(m.threadId != null ? { threadId: m.threadId } : null),
+      ...(m.origin ? { origin: m.origin } : null),
+      ...postExtras(m, prev, (c, t) => this.threadReads.get(c + ':' + t)),
       // сервер ещё грузит превью, а у нас оно уже есть (показано в поле ввода) — не прятать его до загрузки
       ...(m.link ? { link: m.link.pending && prev?.link && !prev.link.pending && prev.link.url === m.link.url ? prev.link : m.link } : null),
     };
     if (local.deleted) Object.assign(local, DELETED);   // сервер ещё отдаёт превью, статью и пересылку удалённого
+    // кнопка комментариев у поста, пришедшего журналом (журнал replies не несёт): копию в группе обсуждения мы видим
+    // своим журналом группы — связываем пост и копию в любом порядке прихода (число придёт событием replies)
+    if (m.origin && !local.deleted) {
+      this.copyByPost.set(m.origin.chatId + ':' + m.origin.id, { chatId: m.chatId, copyId: m.id });
+      const p = this.messageById(m.origin.chatId, m.origin.id);
+      if (p && !p.replies && !p.deleted && p.id != null) this.patchMessage(p.chatId, p.id, { replies: this.baseReplies(m.chatId, m.id) });
+    } else if (m.post && !local.replies && !local.deleted) {
+      const c = this.copyByPost.get(m.chatId + ':' + m.id);
+      if (c) local.replies = this.baseReplies(c.chatId, c.copyId);
+    }
     unreadOnArrival(this, chat, m, countUnread);
     chat.knownMaxId = Math.max(chat.knownMaxId, m.id);
-    if (range === 'journal') this.extendLive(chat, m.id);
+    if (range === 'journal') { this.extendLive(chat, m.id); if (m.threadId != null) this.extendThread(chat, m.threadId, m.id); }
     else if (range === 'snapshot' && !snapshotLive(chat, local) && !prev) {
       // ждёт журнала: в ленту (за живым отрезком) не кладём — только в превью чата; доставит журнал или settleSnapshots
       onMessage(this, chat, local, 'added');
@@ -652,6 +674,7 @@ export class Store {
       ...(o.fwdFrom ? { fwdFrom: o.fwdFrom } : {}),
       ...(o.link ? { link: o.link } : {}),
       ...(o.blocks ? { blocks: o.blocks } : {}),
+      ...(o.threadId != null ? { threadId: o.threadId } : {}),
     });
   }
 
@@ -665,7 +688,79 @@ export class Store {
     if (m) this.putMessage({ ...m, id, createdAt, sort: id, status: m.status === 'read' || id <= chat.peerReadUpTo ? 'read' : 'sent' });
     chat.knownMaxId = Math.max(chat.knownMaxId, id);
     this.extendLive(chat, id, true);   // неотправленные — часть живого отрезка
+    // свой комментарий: продлевает живой отрезок треда, и тред прочитан до него (сервер так же поднял thread_reads)
+    if (m?.threadId != null) { this.extendThread(chat, m.threadId, id, true); this.applyThreadRead(chatId, m.threadId, id); }
     this.markChat(chat);
+  }
+
+  // ---------- треды комментариев (группа обсуждения) ----------
+
+  /** Моя прочитанность тредов: «группа:копия» → до какого id (журнал readThread, своё прочтение, свой комментарий). */
+  threadReads = new Map<string, number>();
+  /** Неотправленные прочтения тредов («группа:копия» → upToId) — уходят пачкой (движок, flushReads). Только в памяти. */
+  pendingThreadReads = new Map<string, number>();
+  /** Пост, у которого журнал принёс replies, а в кэше нет copyId (пост без кнопки): движок перечитает его по id. */
+  wantPost: (chatId: number, id: number) => void = () => {};
+
+  /** Копии постов, увиденные в группах обсуждения: «канал:пост» → копия (только в памяти). */
+  private copyByPost = new Map<string, { chatId: number; copyId: number }>();
+  private baseReplies(chatId: number, copyId: number): Replies {
+    const read = this.threadReads.get(chatId + ':' + copyId);
+    return { copyId, chatId, count: 0, lastId: null, recent: [], ...(read ? { readMaxId: read } : {}) };
+  }
+
+  /** Комментарий из журнала или своё подтверждение: живой отрезок треда — только если тред открывали (есть отрезки). */
+  private extendThread(chat: LocalChat, threadId: number, sort: number, own = false): void {
+    const t = chat.threads?.[threadId];
+    if (!t) return;
+    extendLive(t, sort, own);
+    this.markChat(chat);
+  }
+
+  /** Отрезки треда; create — завести (страница треда). */
+  threadRanges(chatId: number, threadId: number): ThreadRanges | undefined { return this.chats.get(chatId)?.threads?.[threadId]; }
+
+  /** Страница треда: шапка (копия) и комментарии — в кэш чата (отрезки ленты группы не трогают), отрезки — треда. */
+  applyThreadPage(chatId: number, threadId: number, header: Message | null, list: Message[], hasMore: boolean, at: number | null, dir: 'older' | 'newer', gen?: number): void {
+    if (gen != null && gen !== this.resetGen) return;
+    if (header) this.applyMessage(header, false, 'none');
+    for (const m of list) this.applyMessage(m, false, 'none');
+    const chat = this.ensureChat(chatId);
+    const threads = chat.threads ?? (chat.threads = {});
+    const t = threads[threadId] ?? (threads[threadId] = { ranges: [] });
+    let lo: number | null = null, hi: number | null = null;
+    for (const m of list) { if (lo == null || m.id < lo) lo = m.id; if (hi == null || m.id > hi) hi = m.id; }
+    t.ranges = addPage(t.ranges, lo, hi, at, dir, !hasMore);
+    if (!hasMore && dir === 'older') t.historyStart = true;
+    this.markChat(chat);
+  }
+
+  /** Событие replies (журнал канала): число, последний и комментаторы; copyId и моя прочитанность — как были. */
+  private applyReplies(chatId: number, id: number, r: Pick<Replies, 'count' | 'lastId' | 'recent'>): void {
+    const m = this.messageById(chatId, id);
+    if (m?.replies) { this.patchMessage(chatId, id, { replies: { ...m.replies, ...r } }); return; }
+    if (m) this.wantPost(chatId, id);   // кнопки ещё не было (первый комментарий): copyId знает только история
+  }
+
+  /** Тред прочитан до upToId: запомнить и погасить точку на кнопке поста (если пост в кэше). */
+  applyThreadRead(chatId: number, threadId: number, upToId: number): void {
+    const k = chatId + ':' + threadId;
+    if ((this.threadReads.get(k) ?? 0) >= upToId) return;
+    this.threadReads.set(k, upToId);
+    const copy = this.messageById(chatId, threadId);
+    const channelId = copy?.origin?.chatId ?? this.chats.get(chatId)?.group?.linkedChatId ?? null;
+    if (channelId == null) return;
+    const post = copy?.origin ? this.messageById(channelId, copy.origin.id) : this.chatMessages(channelId).find((x) => x.replies?.copyId === threadId && x.replies.chatId === chatId);
+    if (post?.replies && post.id != null && (post.replies.readMaxId ?? 0) < upToId) this.patchMessage(channelId, post.id, { replies: { ...post.replies, readMaxId: upToId } });
+  }
+
+  /** Прочтение треда на этом устройстве: сразу у себя, на сервер — пачкой. Основная лента группы (lastReadId) не трогается. */
+  localThreadRead(chatId: number, threadId: number, upToId: number): boolean {
+    const k = chatId + ':' + threadId;
+    if ((this.threadReads.get(k) ?? 0) >= upToId) return false;
+    this.applyThreadRead(chatId, threadId, upToId);
+    this.pendingThreadReads.set(k, Math.max(this.pendingThreadReads.get(k) ?? 0, upToId));
+    return true;
   }
 
   /** Сервер отказал (или отправить нечего). error — код отказа (blocked — собеседник заблокировал отправителя). */
@@ -843,7 +938,7 @@ export class Store {
       const map = this.messages.get(chatId);
       if (map) for (const [k, m] of map) if (m.id != null) { map.delete(k); }
       const c = this.chats.get(chatId)!;
-      c.unread = 0; c.knownMaxId = 0; c.ranges = []; delete c.historyStart; delete c.snapLast; delete c.seed; c.last = null;
+      c.unread = 0; c.knownMaxId = 0; c.ranges = []; delete c.historyStart; delete c.snapLast; delete c.seed; delete c.threads; c.last = null;
       delete c.mediaCounts; delete c.mediaCountsAt; delete c.mediaDone;
       this.markChat(c);
     }

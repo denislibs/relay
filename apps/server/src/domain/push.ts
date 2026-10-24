@@ -107,7 +107,10 @@ export type PushMessage = { chatId: number; id: number; senderId: number; body: 
 /** Новое сообщение → кому и что слать (задача push.message): подписки участников без соединения в любом процессе,
  *  кроме отправителя, заглушивших чат и заблокировавших отправителя.
  *  Только подпискам живых сеансов: истёкший или неактивный дольше срока, но ещё не убранный sweepInactive — молчит. */
-export async function planPush(m: PushMessage): Promise<{ endpoint: string; push: PushPayload }[]> {
+/** excludeChatId — копия поста в группе обсуждения: участники этого канала (получили push о посте) пропускаются,
+ *  заголовок — название канала. */
+export async function planPush(m: PushMessage, opts: { excludeChatId?: number } = {}): Promise<{ endpoint: string; push: PushPayload }[]> {
+  const excl = opts.excludeChatId ?? null;
   m = { ...m, body: hideSpoilers(m.body, m.entities) };   // скрытый текст в уведомление не уходит
   // код входа не уходит в push-сервис и на экран блокировки
   if (m.service?.type === 'login_code') m = { ...m, body: 'Код для входа в Relay' };
@@ -123,12 +126,14 @@ export async function planPush(m: PushMessage): Promise<{ endpoint: string; push
       and (cm.mute_until is null or cm.mute_until <= now())   -- выключенный на аккаунте чат: мьют 'infinity' в будущем всегда
       and se.expires_at > now()
       and se.last_active_at > now() - make_interval(days => coalesce(us.sessions_ttl_days, ${DEFAULT_TTL_DAYS}))
-      and not exists (select 1 from blocks b where b.owner_id = s.user_id and b.user_id = ${m.senderId})   -- от заблокированного — никогда`;
+      and not exists (select 1 from blocks b where b.owner_id = s.user_id and b.user_id = ${m.senderId})   -- от заблокированного — никогда
+      ${excl != null ? sql`and not exists (select 1 from chat_members x where x.chat_id = ${excl} and x.user_id = s.user_id)` : sql``}`;
   const online = await onlineUsers([...new Set(subs.map((s) => Number(s.user_id)))]);
   const offline = subs.filter((s) => !online.has(Number(s.user_id)));
   if (!offline.length) return [];
   const [info] = await sql`select kind, title from chats where id = ${m.chatId}`;
   if (!info) return [];   // чат удалили, пока задача ждала
+  if (excl != null) { const [ch] = await sql`select title from chats where id = ${excl}`; if (ch) info.title = ch.title; }
   // умолчания получателя для этого вида чата: выключено — не шлём; без предпросмотра — текст не отдаём
   const defaults = await notifyDefaults(sql, [...new Set(offline.map((s) => s.user_id as number))]);
   const kind = info.kind === 'channel' ? 'channel' : info.kind === 'group' ? 'group' : 'direct';

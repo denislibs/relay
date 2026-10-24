@@ -6,6 +6,7 @@ import { DomainError } from './errors';
 import { chatEvent } from './journal';
 import { lockOpen, updateContent } from './messageContent';
 import { blockedInDirect } from './privacy';
+import { withCopy } from './threads';
 
 /**
  * Чек-листы, как в Telegram: автор создаёт список (задачи 1..N); отмечать могут автор и — если разрешено — другие,
@@ -21,6 +22,7 @@ export function newTodo(input: TodoInput): Todo {
 async function lockTodo(tx: Tx, chatId: number, id: number) {
   const m = await lockOpen(tx, chatId, id);   // список — в шифре: открыть под блокировкой
   if (!m || m.deleted || m.kind !== 'todo' || !m.todo) throw new DomainError('not_found', 'checklist');
+  if (m.origin != null) throw new DomainError('forbidden', 'post copy');   // копия поста: отмечают в самом посте канала
   return { author: Number(m.sender_id), todo: m.todo as Todo, forwarded: !!m.fwd_from };
 }
 /** В канале отмечать и добавлять задачи могут только публикующие (админы с post) — подписчики только читают. */
@@ -39,8 +41,14 @@ async function serviceLine(tx: Tx, ctx: GroupCtx, chatId: number, userId: number
 }
 
 // событие — в журнал чата одной записью (членов не перебираем: в канале их 200 000)
+// пост канала: тот же список — копии в группе обсуждения (её строка и событие в журнал группы), без служебной строки
 async function publish(tx: Tx, ctx: GroupCtx, chatId: number, id: number, todo: Todo, editedAt?: string) {
   await chatEvent(tx, chatId, { type: 'todoUpdated', chatId, id, todo: shownTodo(todo, ctx.kind === 'channel'), ...(editedAt ? { editedAt } : {}) } satisfies Update, ctx.kind);
+  if (ctx.kind !== 'channel') return;
+  await withCopy(tx, chatId, id, async (groupId, copyId) => {
+    const row = await updateContent(tx, groupId, copyId, () => ({ todo, ...(editedAt ? { body: todo.title } : {}) }), () => (editedAt ? { edited_at: sql`now()` } : {}));
+    if (row) await chatEvent(tx, groupId, { type: 'todoUpdated', chatId: groupId, id: copyId, todo: shownTodo(todo, true), ...(editedAt && row.edited_at ? { editedAt: new Date(row.edited_at as string).toISOString() } : {}) } satisfies Update, 'group');
+  });
 }
 
 /** Отметить / снять отметки. Повтор того же — без записи. */

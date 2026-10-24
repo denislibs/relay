@@ -149,6 +149,8 @@ function narrow(chat: LocalChat, floor: number, removed: Removed[], kept: number
   if (chat.seed != null && (!live || live[0] > chat.seed)) delete chat.seed;
   // вкладки медиа знали страницы подряд — среди них стёртые: заново с сервера (счётчики верны)
   if (removed.some((r) => r.media)) delete chat.mediaDone;
+  // отрезки тредов не сжимаем по одному — тред перезагрузится при открытии
+  delete chat.threads;
 }
 
 /** Стирание порции — в память вслед за IDB: сообщения и курсоры чата. */

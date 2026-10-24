@@ -17,19 +17,24 @@ import { toMessage } from '../domain/chats';
 import { enqueue } from './queue';
 import { purgeStep, type PurgeJob } from '../domain/chatPurge';
 import { flushReactionCounts } from '../domain/reactionCounts';
+import { flushReplies } from '../domain/threads';
 
 // новое сообщение → по задаче на подписку: повтор одной не шлёт остальным второй раз
 // в задаче — ссылка на сообщение (новые) или само сообщение (поставленные до шифрования)
 register('push.message', async (p: { chatId?: number; id?: number; message?: PushMessage }) => {
   let m = p.message;
+  let excludeChatId: number | undefined;
   if (!m && p.chatId != null && p.id != null) {
     const row = await loadOpen(p.chatId, p.id);
     if (!row || row.deleted) return;   // удалили, пока задача ждала
     // автор — внутренний sender_id строки: у поста канала в API senderId 0, а исключить автора и блокировки нужно по нему
     m = { ...toMessage(row), senderId: Number(row.sender_id) } as PushMessage;
+    // копия поста в группе обсуждения: подписчики канала уже получили push о самом посте — им второго не шлём
+    const origin = row.origin as { chatId?: unknown } | null;
+    if (origin?.chatId != null) excludeChatId = Number(origin.chatId);
   }
   if (!m) return;
-  const targets = await planPush(m);
+  const targets = await planPush(m, { excludeChatId });
   if (!targets.length) return;
   // текст уведомления — запечатан ключом чата: в jobs/jobs_dead не лежит открытым
   const sealed = await Promise.all(targets.map(async (t) => ({ endpoint: t.endpoint, chatId: t.push.chatId, sealed: await sealForChat(t.push.chatId, t.push, 'jobs|push') })));
@@ -127,6 +132,11 @@ register('attachment.purge', async (p: { keys: string[] }) => {
 // мягко удалённый канал или группа: участники (chatRemoved каждому), сообщения и сам чат — страницами (chatPurge.ts)
 register('chat.purge', async (p: PurgeJob) => {
   await purgeStep(p);
+});
+
+// комментарии к посту: счётчики треда одним событием replies на секундное окно (threads.ts)
+register('replies.flush', async (p: { chatId: number; postId: number }) => {
+  await flushReplies(p);
 });
 
 // реакции поста канала: счётчики одним событием reactionCounts на секундное окно (reactionCounts.ts)

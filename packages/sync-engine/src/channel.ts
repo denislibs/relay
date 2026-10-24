@@ -11,6 +11,10 @@ export const isPost = (m: Pick<LocalMessage, 'post'> | null | undefined): boolea
 /** Можно ли писать в чат: в канале — только админу с правом post (подписчику — нижняя панель вместо поля ввода). */
 export const canPost = (c: Pick<LocalChat, 'kind' | 'me'>): boolean => c.kind !== 'channel' || !!c.me?.admin?.post;
 
+/** Точка на кнопке «N комментариев»: в треде есть комментарий новее прочитанного мной. */
+export const hasUnreadReplies = (m: Pick<LocalMessage, 'replies'> | null | undefined): boolean =>
+  !!m?.replies && m.replies.lastId != null && m.replies.lastId > (m.replies.readMaxId ?? 0);
+
 /** Счётчики после смены своей реакции (оптимистично, до ответа сервера): старая −1, новая +1, больше — раньше. */
 export function shiftCounts(counts: [string, number][], prev: string | null, next: string | null): [string, number][] {
   const by = new Map(counts);

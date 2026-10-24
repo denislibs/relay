@@ -8,6 +8,7 @@ import { authenticate, clearSessionCookie, createSession, createUser, deleteSess
 import { accessCookie, ACCESS_SEC, clearAccessCookie, deviceKeyOf, newChallenge, refreshAccess, verifyDevice } from './deviceAuth';
 import { announceLogin, announceSessionsChanged, assertConfirmed, checkSocket, confirmSession, listSessions, sessionEnded, sweepInactive, terminateOthers, terminateSession, trackSocket, untrackSocket } from './domain/sessions';
 import { countViews } from './domain/views';
+import { getThread, readThread } from './domain/threads';
 import { commonGroups, deleteDirectChat, createChat, createGroup, openDirect, messageAtDate, getChatMedia, getChatMediaCounts, getHistory, getMessagesByIds, listChats, listChatsPage } from './domain/chats';
 import { sql } from './db';
 import { DomainError } from './domain/errors';
@@ -392,6 +393,16 @@ export function createServer(opts: { port: number }): Server {
         if (req.method === 'POST' && views) {
           const body = (await req.json().catch(() => null)) as { ids?: unknown } | null;
           return Response.json(await countViews(userId, Number(views[1]), body?.ids));
+        }
+        // тред комментариев к посту (группа обсуждения): страница с шапкой и прочитанность (threads.ts)
+        const thr = /^\/chats\/(\d+)\/threads\/(\d+)\/(messages|read)$/.exec(url.pathname);
+        if (thr && thr[3] === 'messages' && req.method === 'GET') {
+          const before = Number(url.searchParams.get('before')), after = Number(url.searchParams.get('after'));
+          return Response.json(await getThread(userId, Number(thr[1]), Number(thr[2]), Number.isInteger(before) && before > 0 ? before : null, Number(url.searchParams.get('limit') ?? 50), Number.isInteger(after) && after > 0 ? after : null));
+        }
+        if (thr && thr[3] === 'read' && req.method === 'PUT') {
+          const body = (await req.json().catch(() => null)) as { upToId?: unknown } | null;
+          return Response.json(await readThread(userId, Number(thr[1]), Number(thr[2]), body?.upToId));
         }
         const mem = /^\/chats\/(\d+)\/members$/.exec(url.pathname);
         if (req.method === 'GET' && mem) return Response.json(await chatMembers(userId, Number(mem[1])));

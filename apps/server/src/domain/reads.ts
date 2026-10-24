@@ -22,7 +22,7 @@ export async function markRead(userId: number, chatId: number, upToId: number): 
     const others = c.kind === 'direct'
       ? await tx`select user_id from chat_members where chat_id = ${chatId} and user_id <> ${userId}`
       : c.kind === 'channel' ? []
-      : await tx`select distinct sender_id as user_id from messages where chat_id = ${chatId} and id > ${current} and id <= ${upToId} and sender_id <> ${userId}`;
+      : await tx`select distinct sender_id as user_id from messages where chat_id = ${chatId} and id > ${current} and id <= ${upToId} and sender_id <> ${userId} and not post`;   // копия поста — от канала: автору не сообщаем, кто читал
     await appendUpdates(tx, [
       { userId, update: { type: 'readOwn', chatId, upToId } },
       ...others.map((o) => ({ userId: o.user_id as number, update: { type: 'readBy' as const, chatId, userId, upToId } })),
