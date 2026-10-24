@@ -82,7 +82,7 @@ export function RoundBubble(props) {
   }
 
   var dur = props.duration || 0;
-  return h(MsgLine, { aside: props.aside, class: cx('rl-msgline', out && 'rl-msgline-out', props.groupStart && 'rl-msgline-gap', props.fwd && 'rl-round-line-fwd', props.reply && 'rl-round-line-reply') },
+  return h(MsgLine, { aside: props.aside, class: cx('rl-msgline', out && 'rl-msgline-out', props.groupStart && 'rl-msgline-gap', props.fwd && 'rl-round-line-fwd', props.reply && 'rl-round-line-reply', props.footer && 'rl-round-line-foot') },
     // у кружка нет пузыря — «Переслано от» плашкой над ним, как подпись к стикеру
     props.fwd ? h(ForwardTitle, { fwd: props.fwd, class: 'rl-fwd-plate' }) : null,
     // у кружка нет пузыря — цитата отдельной плашкой рядом с ним, как у стикера в Telegram
@@ -116,5 +116,7 @@ export function RoundBubble(props) {
         h('span', { ref: badge }, fmt(dur)),
         !s.on || !s.playing ? h(Icon, { name: 'soundOff', size: 16, class: 'rl-round-muted' }) : null,
         props.unread ? h('i', { class: 'rl-round-dot', 'aria-label': 'Не просмотрено' }) : null),
-      h('span', { class: 'rl-round-meta' }, props.time, out ? h(MessageStatus, { status: props.status || 'sent' }) : null)));
+      h('span', { class: 'rl-round-meta' }, props.metaBefore ? props.metaBefore() : null, props.time, out || props.status ? h(MessageStatus, { status: props.status || 'sent' }) : null)),
+    // пост канала: у кружка нет пузыря — кнопка комментариев плашкой под ним
+    props.footer ? h('div', { class: 'rl-footer-plate rl-footer-plate-round' }, props.footer) : null);
 }

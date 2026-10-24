@@ -54,10 +54,10 @@ const inlineUrl = (a: Att) => (a.kind === 'video' && a.preview && a.id ? `/files
 /** Качества в просмотрщике: 720p по умолчанию, переключатель на оригинал; без копии — один оригинал. */
 const qualitiesOf = (a: Att) => (a.kind === 'video' && a.variants?.some((v) => v.name === '720')
   ? [{ label: '720p', src: `/files/${a.id}/720` }, { label: 'Оригинал', src: fileUrl(a) }] : undefined);
-type RowProps = { post?: boolean; pinned?: boolean; chatId: number; voiceTitle: string; author?: string; onAuthor?: (m: Item) => void; onOpen: (m: Item) => void; hl?: string; m: Item; meId: number; out: boolean; start: boolean; end: boolean; pos?: 'single' | 'first' | 'middle' | 'last'; quoted?: Quote | null; quoteAuthor?: string; quoteTone?: number | 'accent'; appear: boolean; flash: boolean; onReact: (m: Item, emoji: string) => void; album?: Item[]; onUser?: (userId: number) => void; sel?: boolean; selIn?: string; onQuickForward?: (m: Item) => void; grp?: boolean };
+type RowProps = { post?: boolean; pinned?: boolean; discussion?: number | null; chatId: number; voiceTitle: string; author?: string; onAuthor?: (m: Item) => void; onOpen: (m: Item) => void; hl?: string; m: Item; meId: number; out: boolean; start: boolean; end: boolean; pos?: 'single' | 'first' | 'middle' | 'last'; quoted?: Quote | null; quoteAuthor?: string; quoteTone?: number | 'accent'; appear: boolean; flash: boolean; onReact: (m: Item, emoji: string) => void; album?: Item[]; onUser?: (userId: number) => void; sel?: boolean; selIn?: string; onQuickForward?: (m: Item) => void; grp?: boolean };
 
 /** Строка ленты: перерисовывается только если изменилось её сообщение или место в группе. */
-const Row = memo(function Row({ post, pinned, chatId, voiceTitle, author, onAuthor, onOpen, hl, m, meId, out, start, end, pos, quoted, quoteAuthor, quoteTone, appear, flash, onReact, album, onUser, sel, selIn, onQuickForward, grp }: RowProps) {
+const Row = memo(function Row({ post, pinned, discussion, chatId, voiceTitle, author, onAuthor, onOpen, hl, m, meId, out, start, end, pos, quoted, quoteAuthor, quoteTone, appear, flash, onReact, album, onUser, sel, selIn, onQuickForward, grp }: RowProps) {
   // реакции: по эмодзи — сколько и есть ли моя
   const list = (m.reactions as { userId: number; emoji: string }[] | undefined) ?? [];
   const chips: { emoji: string; count: number; mine: boolean }[] = [];
@@ -70,7 +70,13 @@ const Row = memo(function Row({ post, pinned, chatId, voiceTitle, author, onAuth
   }
   // пост: в мете — просмотры, подпись автора и булавка; под пузырём — кнопка комментариев (если у канала есть обсуждение)
   const metaBefore = post && !m.deleted ? postMeta(m, !!pinned) : undefined;
-  const footer = post && m.replies && !m.deleted ? <Comments m={m} /> : undefined;
+  // у канала есть обсуждение (discussion) — кнопка сразу у каждого поста, заглушкой, пока не пришли replies (копия
+  // в группе): иначе она появлялась позже и сдвигала пузырь
+  const footer = post && (m.replies || discussion != null) && !m.deleted ? <Comments m={m} groupId={discussion} /> : undefined;
+  // свой пост, ещё не подтверждённый сервером: пост всегда слева (out = false), но часы/«не отправлено» и отмена загрузки нужны
+  const own = !!post && m.id == null && m.senderId === meId;
+  const mineSend = out || own;
+  const status = mineSend ? m.status : undefined;
   const att = m.attachment as Att | null | undefined;
   // пересланное: «Переслано от» с аватаром и именем автора. Клик (как в Telegram): оригинал доступен — к нему;
   // иначе — чат с автором, а если мы уже в нём — его профиль (панель «Информация»)
@@ -116,7 +122,7 @@ const Row = memo(function Row({ post, pinned, chatId, voiceTitle, author, onAuth
           state={busy ? 'loading' : 'ready'} progress={busy ? Math.min(...album.map((x) => (typeof x.progress === 'number' ? x.progress as number : 1))) : undefined}
           caption={cap ? <MessageText text={cap.body as string} entities={cap.entities as Entity[] | undefined} highlight={hl} /> : undefined}
           metaBefore={metaBefore} footer={footer}
-          time={clock(last.createdAt as string)} status={out ? last.status : undefined}
+          time={clock(last.createdAt as string)} status={mineSend ? last.status : undefined}
           onOpen={(i: number) => onOpen(album[i] ?? m)}
         />
         {album.map((x) => (x.id != null ? <i key={x.key} class="app-mark" data-mid={x.id as number} aria-hidden="true" /> : null))}
@@ -138,10 +144,10 @@ const Row = memo(function Row({ post, pinned, chatId, voiceTitle, author, onAuth
           items={[{ src, inline: local ? undefined : inlineUrl(att), thumb: att.thumb, alt: att.name, skey: m.key, kind: att.kind === 'video' ? 'video' : 'image', duration: att.duration ?? 0, spoiler: !!att.spoiler }]}
           ratio={`${att.w} / ${att.h}`} size={att.kind === 'video' ? fileSize(att.size) : undefined}
           state={pending ? 'loading' : 'ready'} progress={m.progress as number}
-          onCancel={pending && out ? () => discardUnsent(m.key as string) : undefined}
+          onCancel={pending && mineSend ? () => discardUnsent(m.key as string) : undefined}
           caption={m.body ? <MessageText text={m.body as string} entities={m.entities as Entity[] | undefined} highlight={hl} /> : undefined}
           metaBefore={metaBefore} footer={footer}
-          time={clock(m.createdAt as string)} status={out ? m.status : undefined}
+          time={clock(m.createdAt as string)} status={status}
           onOpen={() => onOpen(m)}
         />
         {mark}
@@ -158,7 +164,8 @@ const Row = memo(function Row({ post, pinned, chatId, voiceTitle, author, onAuth
           todo={todo} from={out ? 'out' : 'in'} tail={end} groupStart={start} appear={appear}
           forwarded={!!m.fwdFrom} authorName={out ? '' : voiceTitle}
           reply={replyQ}
-          edited={!!m.editedAt} time={clock(m.createdAt as string)} status={out ? m.status : undefined}
+          edited={!!m.editedAt} time={clock(m.createdAt as string)} status={status}
+          metaBefore={metaBefore} footer={footer}
           canToggle={canToggle}
           onToggle={(itemId: number, done: boolean) => { void toggleTodo(chatId, m.id as number, itemId, done).then((ok: boolean) => { if (!ok) showToast('Не удалось отметить задачу'); }); }}
           onReadOnly={() => showToast(m.fwdFrom ? 'Пересланный чек-лист нельзя менять' : `${voiceTitle} не разрешил(а) другим отмечать задачи`)}
@@ -182,7 +189,9 @@ const Row = memo(function Row({ post, pinned, chatId, voiceTitle, author, onAuth
           trackKey={m.key as string} duration={att.duration ?? 0} waveform={att.waveform ?? null}
           unread={unheard} unreadIncoming={unheard && !out}
           uploading={pending} progress={m.progress as number}
-          time={clock(m.createdAt as string)} status={out ? m.status : undefined}
+          onCancel={pending && mineSend ? () => discardUnsent(m.key as string) : undefined}
+          metaBefore={metaBefore} footer={footer}
+          time={clock(m.createdAt as string)} status={status}
         />
         {mark}
       </div>
@@ -201,7 +210,9 @@ const Row = memo(function Row({ post, pinned, chatId, voiceTitle, author, onAuth
           thumb={att.thumb ?? null}
           duration={att.duration ?? 0} unread={unseen}
           uploading={pending} progress={m.progress as number}
-          time={clock(m.createdAt as string)} status={out ? m.status : undefined}
+          onCancel={pending && mineSend ? () => discardUnsent(m.key as string) : undefined}
+          metaBefore={metaBefore} footer={footer}
+          time={clock(m.createdAt as string)} status={status}
           onListened={!out && unseen ? () => markListened(chatId, m.id as number) : undefined}
         />
         {mark}
@@ -220,7 +231,9 @@ const Row = memo(function Row({ post, pinned, chatId, voiceTitle, author, onAuth
           duration={att.duration ?? 0} size={fileSize(att.size)}
           onDownload={att.id ? () => { const a = document.createElement('a'); a.href = fileUrl(att, true); a.download = att.name; a.click(); } : undefined}
           uploading={pending} progress={m.progress as number}
-          time={clock(m.createdAt as string)} status={out ? m.status : undefined}
+          onCancel={pending && mineSend ? () => discardUnsent(m.key as string) : undefined}
+          metaBefore={metaBefore} footer={footer}
+          time={clock(m.createdAt as string)} status={status}
           onToggle={() => {
             // плейлист — музыка загруженного окна ленты, новые сверху
             const list = (activeFrame(getGlobal())?.messages ?? []).filter((x) => !x.deleted && (x.attachment as Att | null)?.kind === 'audio' && x.id != null).reverse();
@@ -245,10 +258,10 @@ const Row = memo(function Row({ post, pinned, chatId, voiceTitle, author, onAuth
           from={out ? 'out' : 'in'} tail={end} groupStart={start}
           name={att.name} ext={ext} meta={fileSize(att.size)}
           progress={m.progress as number}
-          onCancel={m.id == null && out ? () => discardUnsent(m.key as string) : undefined}
+          onCancel={m.id == null && mineSend ? () => discardUnsent(m.key as string) : undefined}
           onRetry={() => retrySend(m.key as string)}
           metaBefore={metaBefore} footer={footer}
-          time={clock(m.createdAt as string)} status={out ? m.status : undefined}
+          time={clock(m.createdAt as string)} status={status}
         />
         {mark}
       </div>
@@ -263,7 +276,8 @@ const Row = memo(function Row({ post, pinned, chatId, voiceTitle, author, onAuth
         <StickerBubble
           from={out ? 'out' : 'in'} groupStart={start} appear={appear} aside={aside} fwd={fwd} reply={replyQ}
           author={author} authorTone={author ? peerTone(m.senderId as number) : undefined}
-          sticker={st} time={clock(m.createdAt as string)} status={out ? m.status : undefined}
+          sticker={st} time={clock(m.createdAt as string)} status={status}
+          metaBefore={metaBefore} footer={footer}
           reactions={chips.length ? chips : undefined} onReact={(emoji: string) => onReact(m, emoji)}
           onOpen={sel === undefined ? () => openStickerSet(st.setId) : undefined}
         />
@@ -293,7 +307,7 @@ const Row = memo(function Row({ post, pinned, chatId, voiceTitle, author, onAuth
         metaBefore={metaBefore}
         footer={footer}
         time={clock(m.createdAt as string)}
-        status={out ? m.status : undefined}
+        status={status}
         appear={appear}
         below={m.buttons !== undefined && m.id != null
           // в режиме выбора клик по кнопке выбирает сообщение (onPress нет — клик уходит ленте)
@@ -933,6 +947,8 @@ export function Feed({ frameKey, active, chatId, threadId, channel = false, meId
     return l != null ? (s.chats.find((x) => x.id === l)?.title as string | undefined) ?? null : null;
   });
   const channelName = (_m: Item) => linkedTitle || 'Канал';
+  // канал с группой обсуждения: её id — заглушке кнопки комментариев (пока копия поста не пришла)
+  const discussion = useGlobal((s) => (channel && threadId == null ? (s.chats.find((x) => x.id === chatId)?.group as { linkedChatId?: number | null } | undefined)?.linkedChatId ?? null : null));
   const mentions = useGlobal((s) => (threadId == null ? (s.chats.find((c) => c.id === chatId)?.mentions as number | undefined) ?? 0 : 0));
   // «к упоминанию»: старейшее непрочитанное — в ленте (focusMessage) или в треде (тред поверх)
   const toMention = () => {
@@ -1046,6 +1062,7 @@ export function Feed({ frameKey, active, chatId, threadId, channel = false, meId
         pos={pos}
         key={m.key}
         post={post}
+        discussion={post ? discussion : null}
         pinned={post && m.id != null && pinnedIds.includes(m.id as number)}
         // копия поста в группе (и шапка треда) подписана каналом; в самом канале автора нет
         author={post ? (!channel && start && !m.deleted ? channelName(m) : undefined) : group && !mine && start && !m.deleted ? people[m.senderId as number]?.name ?? '' : undefined}

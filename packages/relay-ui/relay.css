@@ -2360,3 +2360,13 @@ html[data-anim="0"] .rl-symbols-pop { transition: none; }
 .rl-bubble-footer > * { min-height: 40px; }
 .rl-media .rl-media-caption + .rl-bubble-footer, .rl-media .rl-media-frame + .rl-bubble-footer { border-top: 1px solid var(--line); }
 .rl-file .rl-bubble-footer { margin-top: 4px; }
+/* голосовое и чек-лист поста: мета шире обычной (просмотры, подпись) — строкой под содержимым, а не поверх него */
+.rl-meta-flow > .rl-bubble-meta { position: static; display: flex; justify-content: flex-end; margin: 2px -2px -2px 0; }
+.rl-meta-flow.rl-vb .rl-vb-row { padding-right: 0; }
+.rl-music .rl-bubble-footer { margin-top: 4px; }
+/* у кружка и стикера пузыря нет: кнопка комментариев — отдельной плашкой под ними */
+.rl-footer-plate { align-self: stretch; border-radius: var(--radius-bubble); background: var(--bubble-in); box-shadow: var(--shadow-bubble); overflow: hidden; }
+.rl-footer-plate > * { min-height: 40px; }
+.rl-footer-plate-round { align-self: auto; width: 15rem; }
+.rl-round-line-foot { flex-direction: column; align-items: flex-start; gap: 4px; }
+.rl-msgline-out.rl-round-line-foot { align-items: flex-end; }

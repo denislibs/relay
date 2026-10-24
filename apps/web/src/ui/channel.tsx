@@ -29,33 +29,40 @@ export function postMeta(m: Item, pinned: boolean): () => preact.VNode {
   );
 }
 
+const NO_RECENT: number[] = [];
+
 /**
  * Кнопка под постом: до трёх аватаров последних комментаторов, «N комментариев» / «Оставить комментарий», точка
  * непрочитанного. Участник группы обсуждения — тред поверх стека; не участник — подсказка вступить.
  */
-export function Comments({ m }: { m: Item }) {
-  const r = m.replies as Replies;
-  const recent = r.recent.slice(0, 3);
+export function Comments({ m, groupId }: { m: Item; groupId?: number | null }) {
+  // replies ещё нет (копия поста в группе не пришла, а не участнику группы может и не прийти) — заглушка «Оставить
+  // комментарий» той же высоты: кнопка на месте сразу, пузырь не прыгает, когда счётчик появится
+  const r = m.replies as Replies | undefined;
+  const recent = r ? r.recent.slice(0, 3) : NO_RECENT;
+  const gid = r?.chatId ?? groupId ?? null;
   // имена для инициалов: свои — из профиля (себя в people нет), чужие — из people (неизвестные — без имени, иконкой)
   const names = useGlobal((s) => recent.map((id) => (id === s.me?.userId ? s.me.name : s.people[id]?.name ?? '')));
-  const member = useGlobal((s) => s.chats.some((c) => c.id === r.chatId));
+  const member = useGlobal((s) => gid != null && s.chats.some((c) => c.id === gid));
   const [ask, setAsk] = useState(false);
   useEffect(() => { if (recent.length) wantPeople(recent); }, [recent.join(',')]);
   const unread = hasUnreadReplies(m as never);
+  const count = r?.count ?? 0;
   const open = (e: MouseEvent) => {
     e.stopPropagation();
-    if (member) openInner({ chatId: r.chatId, threadId: r.copyId });
-    else setAsk(true);
+    if (!member) setAsk(true);
+    else if (r) openInner({ chatId: r.chatId, threadId: r.copyId });
+    // участник, а копии ещё нет — тред открывать не с чего, кнопка оживёт с приходом replies
   };
   return (
     <>
-      <button type="button" class="app-comments" onPointerDown={ripple} onClick={open} aria-label={commentsLabel(r.count) + (unread ? ', есть новые' : '')}>
+      <button type="button" class="app-comments" onPointerDown={ripple} onClick={open} aria-disabled={!r && member ? 'true' : undefined} aria-label={commentsLabel(count) + (unread ? ', есть новые' : '')}>
         {recent.length ? (
           <span class="app-comments-avas" aria-hidden="true">
             {recent.map((id, i) => <Avatar key={id} name={names[i]} tone={peerTone(id)} size={24} {...senderAvatar(id)} />)}
           </span>
         ) : <Icon name="chats" size={22} class="app-comments-icon" />}
-        <span class="app-comments-label">{commentsLabel(r.count)}</span>
+        <span class="app-comments-label">{commentsLabel(count)}</span>
         {unread ? <i class="app-comments-dot" aria-hidden="true" /> : null}
         <Icon name="chevronRight" size={20} class="app-comments-chev" />
       </button>
