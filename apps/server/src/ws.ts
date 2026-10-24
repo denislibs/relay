@@ -3,8 +3,9 @@ import { currentEpoch } from './domain/epoch';
 import type { ClientFrame, ServerFrame } from '@relay/protocol';
 import { DomainError } from './domain/errors';
 import { currentSeq, getUpdates } from './domain/journal';
-import { chatSeqsSince, getChatUpdates } from './domain/chatJournal';
-import { syncSubscriptions, type ChatSocket } from './sockets';
+import { chatSeqOf, chatSeqsSince, getChatUpdates } from './domain/chatJournal';
+import { syncSubscriptions, unwatchChat, watchChat, type ChatSocket } from './sockets';
+import { canRead } from './domain/chats';
 import { sendMessage } from './domain/messages';
 import { markRead } from './domain/reads';
 import { saveDraft } from './domain/drafts';
@@ -65,6 +66,17 @@ export async function handleFrame(userId: number, frame: ClientFrame, publish: (
         if (page.tooLong) return [{ op: 'chatTooLong', reqId: frame.reqId, chatId: frame.chatId, seq: page.seq }];
         const to = page.items.length ? page.items[page.items.length - 1].seq : frame.since;
         return [{ op: 'chatUpdates', reqId: frame.reqId, chatId: frame.chatId, from: frame.since, to, items: page.items, more: page.more }];
+      }
+      case 'watchChat': {
+        // превью публичного канала: читать можно (canRead) — сокет получает push'и канала; seq — догнать, что прошло мимо
+        await canRead(sql, frame.chatId, userId);
+        await opened(sock);
+        if (sock && !(await watchChat(sock, frame.chatId))) throw new DomainError('flood', 'watch');
+        return [{ op: 'ack', reqId: frame.reqId, result: { seq: await chatSeqOf(frame.chatId) } }];
+      }
+      case 'unwatchChat': {
+        if (sock) await unwatchChat(sock, frame.chatId);
+        return [];
       }
       case 'sync': {
         const page = await getUpdates(userId, frame.since);

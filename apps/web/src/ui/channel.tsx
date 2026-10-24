@@ -4,7 +4,7 @@ import type { Item } from '@relay/sync-engine/src/types';
 import { hasUnreadReplies } from '@relay/sync-engine/src/channel';
 import { useEffect, useState } from 'preact/hooks';
 import { commentsLabel, compactCount } from '../channelText';
-import { groupCall, openInner, readBy } from '../data';
+import { groupCall, openInner, readBy, refreshPreview } from '../data';
 import { useGlobal } from '../global';
 import { errorText } from '../groups';
 import { isChatMuted, toggleMute } from '../mute';
@@ -78,17 +78,22 @@ export function Comments({ m, groupId }: { m: Item; groupId?: number | null }) {
  * Нижняя панель канала вместо поля ввода (как в Telegram): не подписан — «Подписаться» («Подать заявку», если
  * вступление по одобрению); подписчик без права публиковать — «Выключить / Включить звук».
  */
-export function ChannelBar({ chatId, member, username, approval }: { chatId: number; member: boolean; username: string | null; approval: boolean }) {
+export function ChannelBar({ chatId, member, username, approval, requested }: { chatId: number; member: boolean; username: string | null; approval: boolean; requested?: boolean }) {
   const muted = useGlobal((s) => isChatMuted(chatId, s));
   const [busy, setBusy] = useState(false);
   const spin = useMinVisible(busy, { delay: 150, min: 600 });
+  // подписался: «Подписаться» держит лоадер, пока membership не сменит панель (key) — без вспышки прежней кнопки
+  useEffect(() => { setBusy(false); }, [member]);
   const join = async () => {
     if (!username) { showToast('Вступить можно по пригласительной ссылке канала'); return; }
     setBusy(true);
     const r = await groupCall<{ chatId: number; requested: boolean }>('POST', '/join/@' + username);
-    setBusy(false);
-    if (!r.ok) { showToast(errorText(r.code)); return; }
-    if (r.data.requested) showToast('Заявка отправлена — администраторы её рассмотрят');
+    if (!r.ok) { setBusy(false); showToast(errorText(r.code)); return; }
+    if (r.data.requested) {
+      setBusy(false);
+      refreshPreview(chatId);   // строка превью — с заявкой: кнопка «Заявка отправлена», и при повторном открытии
+      showToast('Заявка отправлена — администраторы её рассмотрят');
+    }
   };
   return (
     <div class="rl-composer-wrap app-plate-wrap">
@@ -98,8 +103,8 @@ export function ChannelBar({ chatId, member, username, approval }: { chatId: num
             <Icon name={muted ? 'bell' : 'bellOff'} size={22} /><span>{muted ? 'Включить звук' : 'Выключить звук'}</span>
           </button>
         ) : (
-          <button type="button" class="app-channel-btn app-channel-join" disabled={busy} onPointerDown={ripple} onClick={() => void join()}>
-            <span class={spin ? 'is-busy' : undefined}>{approval ? 'Подать заявку' : 'Подписаться'}</span>
+          <button type="button" class="app-channel-btn app-channel-join" disabled={busy || requested} onPointerDown={ripple} onClick={() => void join()}>
+            <span class={spin ? 'is-busy' : undefined}>{requested ? 'Заявка отправлена' : approval ? 'Подать заявку' : 'Подписаться'}</span>
           </button>
         )}
       </div>

@@ -3,7 +3,7 @@ import { ConfirmDialog, Icon, IconButton, MenuPopover, Presence } from '@relay/u
 import type { Item } from '@relay/sync-engine/src/types';
 import { useEffect, useState } from 'preact/hooks';
 import { focusMessage, messagesByIds, unpinMessage } from '../data';
-import { activeFrame, useGlobal } from '../global';
+import { activeFrame, useGlobal, findChat } from '../global';
 import { asLast, previewBody, previewThumb, thumbUnder } from './preview';
 
 // Закреплённые сообщения под шапкой — как в Telegram: слева полоска из сегментов (по числу закреплённых),
@@ -17,7 +17,7 @@ const cache = new Map<string, Item>();          // chatId:id → сообщен�
 const position = new Map<number, number>();     // чат → какой из закреплённых показан
 
 export function PinnedBar({ chatId }: { chatId: number }) {
-  const pinned = useGlobal((s) => (s.chats.find((c) => c.id === chatId)?.pinned as number[] | undefined) ?? []);
+  const pinned = useGlobal((s) => (findChat(s, chatId)?.pinned as number[] | undefined) ?? []);
   const loaded = useGlobal((s) => activeFrame(s)?.messages);
   const [, rerender] = useState(0);
   const [idx, setIdx] = useState(() => position.get(chatId) ?? 0);

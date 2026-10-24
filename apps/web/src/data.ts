@@ -8,7 +8,7 @@ import { beginHeavyAnimation, nudgeWallpaper, requestMutation, toBase64 } from '
 import { connectEngine, EngineClient, Mirror } from '@relay/sync-engine/src/client';
 import type { Item, Patch, Query, SearchResult } from '@relay/sync-engine/src/types';
 import { hideSpoilers, MAX_FILE_BYTES, type Entity } from '@relay/protocol';
-import { activeFrame, frameByKey, getGlobal, setGlobal, subscribeGlobal, type ChatFrame, type FeedMeta, type Me, type Status, type UploadItem } from './global';
+import { activeFrame, findChat, frameByKey, getGlobal, setGlobal, subscribeGlobal, type ChatFrame, type FeedMeta, type Me, type Status, type UploadItem } from './global';
 import { closeLayer, closeLayers, pushLayer } from './nav';
 import { notifyIncoming, startNotify } from './notify';
 import { rememberKeysIn, startFileKeyService } from './fileKeys';
@@ -66,6 +66,7 @@ export function startData(me: Me): void {
     // сразу, не дожидаясь конца анимаций: список виртуальный (≈20 строк), а отложенный подъём чата
     // после отправки выглядит как запоздалый рывок
     setGlobal({ chats: chats.list(), chatsLoaded: true });
+    settlePreviews();
     // открытый чат исчез из списка (меня удалили из группы, я вышел, группу удалили) — закрыть его и правую панель
     const open = getGlobal().openChatId;
     if (p.op === 'diff' && open != null && p.remove.includes('c' + open)) {
@@ -81,6 +82,7 @@ export function startData(me: Me): void {
     const g = getGlobal(), current = g.pendingChatId ?? g.openChatId;
     if (current && peerFor !== current) watchPeer(current);
   });
+  watchPreviews();
   watchNotifications(me.userId);
   const counters = new Mirror();
   engine.watch({ kind: 'counters' }, (p) => { counters.apply(p); const c = counters.list()[0]; if (c) setGlobal({ counters: { unreadChats: c.unreadChats as number, unreadMessages: c.unreadMessages as number } }); });
@@ -203,7 +205,7 @@ function watchPeer(chatId: number | null): void {
   peerWatch?.close();
   peerWatch = null;
   peerFor = null;
-  const chat = chatId ? getGlobal().chats.find((c) => c.id === chatId) : undefined;
+  const chat = chatId ? findChat(getGlobal(), chatId) : undefined;
   // чата ещё нет в списке (открыт по #chat= до загрузки списка) — решим, когда список придёт
   if (chat) peerFor = chatId;
   // у служебного чата «Relay» присутствия нет — подзаголовок постоянный, подписка не нужна
@@ -248,6 +250,8 @@ function closeSession(key: string): void {
   s.watch.close();
   if (s.timer) clearTimeout(s.timer);
   sessions.delete(key);
+  // кадр снимают из стека после закрытия ленты: превью проверяем, когда стек уже обновлён
+  queueMicrotask(() => releasePreview(s.chatId));
 }
 
 /** Отказ сервера в загрузке по пределам (apps/server/src/domain/uploadLimits.ts): сообщение — «не отправлено», причина — тостом. */
@@ -300,7 +304,7 @@ function feedQuery(f: { chatId: number; threadId?: number }, anchor: Anchor | un
 
 function newFrame(t: StackTarget, target?: { id: number; sort: number }): { frame: ChatFrame; anchor: Anchor | undefined } {
   const chatId = t.chatId;
-  const chat = getGlobal().chats.find((c) => c.id === chatId);
+  const chat = findChat(getGlobal(), chatId);
   const pos = positions.get(positionKey(t));
   // разделитель «Непрочитанные» — только у ленты чата (у треда своя прочитанность, readMaxId)
   const unread = t.threadId == null && (chat?.unread as number) > 0 ? (chat!.lastReadId as number) : null;
@@ -395,8 +399,115 @@ function dropLayers(): void {
   closeLayers('chat');
 }
 
+/* ---------- превью публичного канала (без подписки) ----------
+ * Как в Telegram: канал с @именем открывается и без подписки — лента для чтения, внизу «Подписаться». Строка
+ * канала живёт в движке как превью (подписка previews → global.previews, findChat), в списке её нет. Лента ушла
+ * со стека (и из припаркованных) — превью закрывается. Подписался — строка переходит из previews в chats; пока
+ * chatList её не принёс, прежняя строка превью держится (шапка не мигает «Чат №N»), в ленте — «Вы подписались». */
+
+const previewMirror = new Mirror();
+/** Превью, исчезнувшие из движка: ждём строку списка (подписался) или признаём канал недоступным. */
+const previewGone = new Map<number, ReturnType<typeof setTimeout>>();
+
+function watchPreviews(): void {
+  engine.watch({ kind: 'previews' }, (p) => {
+    previewMirror.apply(p);
+    const live = previewMirror.list();
+    const g = getGlobal();
+    // ушедшее из движка — держим, пока на экране и строки в списке ещё нет (вступление: chatList догоняет)
+    const held = g.previews.filter((x) => !live.some((y) => y.id === x.id) && !g.chats.some((c) => c.id === x.id) && onStack(x.id as number));
+    for (const x of held) if (!previewGone.has(x.id as number)) previewGone.set(x.id as number, setTimeout(() => dropGonePreview(x.id as number), 1500));
+    setGlobal({ previews: [...live, ...held] });
+  });
+}
+
+const onStack = (chatId: number): boolean => {
+  const g = getGlobal();
+  return g.chatStack.some((f) => f.chatId === chatId) || g.chatLeaving.some((f) => f.chatId === chatId) || pendingBottom?.frame.chatId === chatId;
+};
+
+/** Список принёс чат, который был превью: подписались — строка превью больше не нужна; лента отмечает вступление. */
+function settlePreviews(): void {
+  const g = getGlobal();
+  const joined = g.previews.filter((x) => g.chats.some((c) => c.id === x.id));
+  if (!joined.length) return;
+  for (const x of joined) {
+    clearTimeout(previewGone.get(x.id as number)); previewGone.delete(x.id as number);
+    for (const f of [...g.chatStack, ...g.chatLeaving]) {
+      if (f.chatId !== x.id || f.threadId != null) continue;
+      const last = f.messages.reduce((n, m) => (typeof m.id === 'number' && m.id > n ? m.id : n), 0);
+      patchFrame(f.key, { joinedAfter: last });
+    }
+  }
+  setGlobal((s) => ({ previews: s.previews.filter((x) => !joined.includes(x)) }));
+}
+
+/** Превью пропало, а в список канал не пришёл: удалили или закрыли — снять его ленты со стека, как исчезнувший чат. */
+function dropGonePreview(chatId: number): void {
+  previewGone.delete(chatId);
+  const g = getGlobal();
+  if (g.chats.some((c) => c.id === chatId)) return;
+  setGlobal((s) => ({ previews: s.previews.filter((x) => x.id !== chatId || previewMirror.list().some((y) => y.id === chatId)) }));
+  if (!onStack(chatId)) return;
+  showToast('Канал больше недоступен');
+  const st = stack(), at = st.findIndex((f) => f.chatId === chatId);
+  if (at === 0) { setGlobal({ infoOpen: false }); openChat(null); } else if (at > 0) popTo(at - 1);
+  dropParked(getGlobal().chatLeaving.filter((f) => f.chatId === chatId).map((f) => f.key));
+}
+
+/** Лента чата закрыта: если это было превью и других его лент нет — движок отписывается и забывает его. */
+function releasePreview(chatId: number): void {
+  if (!getGlobal().previews.some((x) => x.id === chatId) || onStack(chatId) || [...sessions.values()].some((s) => s.chatId === chatId)) return;
+  engine.call({ type: 'closePreview', chatId }).catch(() => {});   // строку превью уберёт подписка previews
+}
+
+/**
+ * Открыть публичный канал: подписан — как обычный чат; нет — превью (лента для чтения, «Подписаться»). from —
+ * откуда (docs/navigation-rules.md): left — левая колонка (поиск) заменяет стек, inner — ссылка в чате кладёт поверх.
+ * false — открыть нечего (приватный канал, удалён, нет сети): тост уже показан.
+ */
+export function openChannel(chatId: number, from: 'left' | 'inner'): Promise<boolean> {
+  // двойной клик (или ссылка, нажатая дважды) — тот же переход, не второй
+  let p = channelOpening.get(chatId);
+  if (!p) {
+    p = openChannelOnce(chatId, from).finally(() => channelOpening.delete(chatId));
+    channelOpening.set(chatId, p);
+  }
+  return p;
+}
+const channelOpening = new Map<number, Promise<boolean>>();
+/** Номер последнего перехода: открыли что-то другое, пока ждали сервер, — запоздалый переход в канал отменяется. */
+let openSeq = 0;
+
+async function openChannelOnce(chatId: number, from: 'left' | 'inner'): Promise<boolean> {
+  const open = () => { if (from === 'left') openChat(chatId); else openInner(chatId); };
+  if (getGlobal().chats.some((c) => c.id === chatId)) { open(); return true; }
+  const tok = ++openSeq;
+  const r = await engine.call({ type: 'openPreview', chatId }) as { member: boolean; requested: boolean } | { error: string };
+  if ('error' in r) {
+    if (tok === openSeq) showToast(r.error === 'offline' ? 'Нет сети — канал откроется, когда связь вернётся' : r.error === 'not_found' ? 'Канал удалён'
+      : r.error === 'flood' ? 'Открыто слишком много каналов без подписки — закройте какие-нибудь' : 'Канал недоступен');
+    return false;
+  }
+  if (!r.member) {
+    // строка превью — сразу в global (подписка previews придёт следующим кадром): шапка новой колонки уже с названием
+    await new Promise<void>((res) => { if (getGlobal().previews.some((x) => x.id === chatId)) res(); else { const stop = subscribeGlobal(() => { if (getGlobal().previews.some((x) => x.id === chatId)) { stop(); res(); } }); setTimeout(() => { stop(); res(); }, 500); } });
+  }
+  // пока ждали, пользователь ушёл в другой чат — не перебиваем его; превью, которое так и не открылось, — закрыть
+  if (tok !== openSeq) {
+    if (!r.member && !onStack(chatId) && ![...sessions.values()].some((s) => s.chatId === chatId)) engine.call({ type: 'closePreview', chatId }).catch(() => {});
+    return false;
+  }
+  open();
+  return true;
+}
+
+/** Строку превью — заново с сервера (заявка подана: «Заявка отправлена» держится и при повторном открытии). */
+export function refreshPreview(chatId: number): void { engine.call({ type: 'openPreview', chatId }).catch(() => {}); }
+
 /** Чат из списка (или из адреса, уведомления): нижний кадр, стек сбрасывается. */
 export function openChat(chatId: number | null, target?: { id: number; sort: number }, hold?: Hold): void {
+  openSeq++;   // любой переход отменяет ждущий openChannel
   const g = getGlobal(), st = g.chatStack, top = topReady();
   // тот же чат на экране — только прокрутка; его тред поверх — другой слой (ниже вернёмся к самой группе)
   if (chatId != null && (g.pendingChatId ?? top?.chatId) === chatId && top?.threadId == null && (st.length <= 1 || top?.chatId === chatId)) {
@@ -442,6 +553,7 @@ export function openChat(chatId: number | null, target?: { id: number; sort: num
  * поста}): поверх стека, прежний остаётся живым. Дубль ищется по паре чат+тред.
  */
 export function openInner(to: number | StackTarget, target?: { id: number; sort: number }, hold?: Hold): void {
+  openSeq++;
   const t = toTarget(to), chatId = t.chatId;
   const g = getGlobal();
   if (!topReady()) {

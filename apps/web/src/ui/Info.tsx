@@ -9,7 +9,7 @@ import type { Item } from '@relay/sync-engine/src/types';
 import { chatTone, isSystemChat } from './format';
 import type { ComponentChildren } from 'preact';
 import { useEffect, useRef, useState } from 'preact/hooks';
-import { activeFrame, setGlobal, useGlobal, getGlobal } from '../global';
+import { activeFrame, setGlobal, useGlobal, getGlobal, findChat } from '../global';
 import { isChatMuted, toggleMute } from '../mute';
 
 import { birthdayText, lastSeenText, type Birthday } from './format';
@@ -45,7 +45,7 @@ export function Info() {
   // чат панели догоняет открытый после анимации перехода стека: её перерисовка (профиль, медиа, участники)
   // в первых кадрах перехода съедала бы их
   const chatId = useSettled(useGlobal((s) => s.openChatId))!;
-  const chat = useGlobal((s) => s.chats.find((c) => c.id === chatId));
+  const chat = useGlobal((s) => findChat(s, chatId));
   const peer = useGlobal((s) => s.peer);
   const muted = useGlobal((s) => isChatMuted(chatId, s));
   // панель открывают сразу на «Стикерах» (поиск в панели стикеров): она выезжает уже на этой странице
@@ -222,12 +222,13 @@ export function Info() {
             <InfoRow tile="blue" icon="link" title={publicUrl(gInfo.username).replace(/^https?:\/\//, '')} subtitle="Ссылка" onClick={() => copyText(publicUrl(gInfo.username!))} />
           ) : null}</Expand>
           <Expand show={!group && !!(user?.links as ProfileLink[] | undefined)?.length}>{!group && user ? <ProfileLinks links={(user.links as ProfileLink[] | undefined) ?? []} /> : null}</Expand>
-          <InfoRow
+          {/* превью канала без подписки: уведомлений нет — и переключателя (участников и управления не видно: me нет) */}
+          {chat?.preview ? null : <InfoRow
             tile="red"
             icon={muted ? 'bellOff' : 'bell'}
             title="Уведомления"
             trailing={<Switch id="info-notify" label="Уведомления" checked={!muted} onChange={() => toggleMute(chatId)} />}
-          />
+          />}
           <Expand show={!!contact?.note}>{contact?.note ? (
             <div class="rl-inforow rl-inforow-static">
               <SettingsIcon icon="pencil" color="gray" />
