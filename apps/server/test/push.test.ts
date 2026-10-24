@@ -4,15 +4,16 @@ import { createServer } from '../src/http';
 import { NO_PREVIEW } from '@relay/protocol';
 import { sendMessage } from '../src/domain/messages';
 import { postService } from '../src/domain/service';
-import '../src/jobs/kinds';
-import { drainJobs } from '../src/jobs/worker';
+import { PUSH_PAGE } from '../src/jobs/kinds';
+import { drainJobs, runJob, startWorker } from '../src/jobs/worker';
+import { claim } from '../src/jobs/queue';
 import { connect, processAlive } from '../src/domain/liveRegistry';
 import { makeChat, makeUser, resetDb } from './helpers';
 
 const server = createServer({ port: 0 });
 const base = `http://localhost:${server.port}`;
 afterAll(() => { server.stop(true); push.stop(true); });
-beforeEach(async () => { await resetDb(); got.length = 0; status = 201; });
+beforeEach(async () => { await resetDb(); got.length = 0; status = 201; PUSH_PAGE.size = 1000; });
 
 // поддельный push-сервис: копит запросы, отвечает status
 const got: { path: string; auth: string; encoding: string; body: Uint8Array }[] = [];
@@ -338,4 +339,115 @@ test('an online recipient (any process) gets no push', async () => {
   await sendMessage(a, { chatId: chat, clientId: crypto.randomUUID(), body: 'вижу сам' });
   await drainJobs();
   expect(got.length).toBe(0);
+});
+
+// ---- push.message страницами ----
+/** Группа автора и n подписчиков, у каждого своя подписка (endpoint 100 + i). */
+async function groupWithSubs(n: number) {
+  const a = await makeUser('Автор');
+  const users: number[] = [];
+  for (let i = 0; i < n; i++) users.push(await makeUser('П' + i));
+  const chat = await makeChat([a, ...users]);
+  const { subscribe } = await import('../src/domain/push');
+  for (const [i, u] of users.entries()) await subscribe(u, { endpoint: endpoint(100 + i), keys: (await browser()).keys }, await sessionFor(u));
+  return { a, users, chat };
+}
+/** Только страницы push.message, по одной: сколько их было. */
+async function runPages(): Promise<number> {
+  let pages = 0;
+  for (let j; (j = await claim(1, 300, { only: ['push.message'] })).length;) { pages++; await runJob(j[0]); }
+  return pages;
+}
+const kindsInJobs = async () => (await sql`select kind from jobs where kind like 'push.%' order by kind`).map((r) => r.kind as string);
+
+test('push.message goes in pages: 5 subscriptions by 2 — 3 pages, every endpoint gets exactly one push', async () => {
+  const { a, chat } = await groupWithSubs(5);
+  PUSH_PAGE.size = 2;
+  await sendMessage(a, { chatId: chat, clientId: crypto.randomUUID(), body: 'всем' });
+  expect(await runPages()).toBe(3);
+  expect((await kindsInJobs()).filter((k) => k === 'push.deliver').length).toBe(5);
+  await drainJobs();
+  expect(got.map((g) => g.path).sort()).toEqual([100, 101, 102, 103, 104].map((n) => `/ep/${n}`));
+  expect(await kindsInJobs()).toEqual([]);
+  // ровно полная последняя страница — без пустого продолжения: 4 подписки по 2 — 2 страницы
+  await sql`delete from push_subscriptions where endpoint = ${endpoint(104)}`;
+  got.length = 0;
+  await sendMessage(a, { chatId: chat, clientId: crypto.randomUUID(), body: 'ещё' });
+  expect(await runPages()).toBe(2);
+  await drainJobs();
+  expect(got.length).toBe(4);
+});
+
+test('a page run twice (lost complete) adds no second continuation and no second delivery', async () => {
+  const { a, chat } = await groupWithSubs(3);
+  PUSH_PAGE.size = 2;
+  await sendMessage(a, { chatId: chat, clientId: crypto.randomUUID(), body: 'раз' });
+  const [orig] = await sql`select kind, payload from jobs where kind = 'push.message'`;
+  const [job] = await claim(1, 300, { only: ['push.message'] });
+  await runJob(job);
+  // та же первая страница ещё раз (как если бы её строка вернулась): дедуп по ключам доставок и продолжения
+  await sql`insert into jobs (kind, payload, run_at) values (${orig.kind}, ${sql.json(orig.payload)}, now() - interval '1 minute')`;
+  const [again] = await claim(1, 300, { only: ['push.message'] });
+  expect(again.payload.after).toBeUndefined();
+  await runJob(again);
+  const kinds = await kindsInJobs();
+  expect(kinds.filter((k) => k === 'push.message').length).toBe(1);
+  expect(kinds.filter((k) => k === 'push.deliver').length).toBe(2);
+  await drainJobs();
+  expect(got.length).toBe(3);
+});
+
+test('lease taken over before the page commits: nothing is inserted, no wakeup; the retry delivers once', async () => {
+  const { a, chat } = await groupWithSubs(3);
+  PUSH_PAGE.size = 2;
+  const notes: string[] = [];
+  const listening = await sql.listen('jobs', (p) => { notes.push(p); });
+  try {
+    await sendMessage(a, { chatId: chat, clientId: crypto.randomUUID(), body: 'аренда' });
+    const [job] = await claim(1, 300, { only: ['push.message'] });
+    // аренда истекла, задачу взял другой воркер: attempts уже другой
+    await sql`update jobs set attempts = attempts + 1 where id = ${job.id}`;
+    await Bun.sleep(50);
+    notes.length = 0;
+    await runJob(job);
+    await Bun.sleep(100);
+    expect(await kindsInJobs()).toEqual(['push.message']);   // ни доставок, ни продолжения; сама строка на месте
+    expect(notes).toEqual([]);                               // откат — не будим
+    expect((await sql`select count(*)::int as n from jobs_dead`)[0].n).toBe(0);
+    // «другой воркер» упал — аренда снова истекла: повтор проходит, каждая подписка — ровно один раз
+    await sql`update jobs set locked_until = null`;
+    await runPages();
+    await drainJobs();
+    expect(got.map((g) => g.path).sort()).toEqual(['/ep/100', '/ep/101', '/ep/102']);
+  } finally { await listening.unlisten(); }
+});
+
+test('a page wakes the workers after commit: deliveries go without waiting for the poll', async () => {
+  const { a, chat } = await groupWithSubs(2);
+  const notes: string[] = [];
+  const listening = await sql.listen('jobs', (p) => { notes.push(p); });
+  await sendMessage(a, { chatId: chat, clientId: crypto.randomUUID(), body: 'быстро' });
+  await runPages();
+  await Bun.sleep(100);
+  expect(notes).toContain('push.deliver');
+  await listening.unlisten();
+  // живой воркер с опросом в минуту: доставки берёт по NOTIFY страницы
+  const w = startWorker({ pollMs: 60_000 });
+  try {
+    await Bun.sleep(100);   // воркер слушает
+    got.length = 0;
+    await sendMessage(a, { chatId: chat, clientId: crypto.randomUUID(), body: 'ещё' });
+    const t0 = Date.now();
+    while (got.length < 2 && Date.now() - t0 < 3000) await Bun.sleep(20);
+    expect(got.length).toBe(2);
+  } finally { await w.stop(); }
+});
+
+test('push.message skips a user mentioned in that message (push.mention notifies them)', async () => {
+  const { a, users, chat } = await groupWithSubs(3);
+  const { message } = await sendMessage(a, { chatId: chat, clientId: crypto.randomUUID(), body: 'тебе' });
+  await sql`insert into message_mentions (user_id, chat_id, message_id) values (${users[1]}, ${chat}, ${message.id})`;
+  await runPages();
+  const eps = (await sql`select payload->>'endpoint' as e from jobs where kind = 'push.deliver' order by e`).map((r) => r.e);
+  expect(eps).toEqual([endpoint(100), endpoint(102)]);
 });

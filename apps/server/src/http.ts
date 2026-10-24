@@ -7,6 +7,9 @@ import type { Server } from 'bun';
 import { authenticate, clearSessionCookie, createSession, createUser, deleteSession, readSessionToken, sessionCookie, sessionFromToken } from './auth';
 import { accessCookie, ACCESS_SEC, clearAccessCookie, deviceKeyOf, newChallenge, refreshAccess, verifyDevice } from './deviceAuth';
 import { announceLogin, announceSessionsChanged, assertConfirmed, checkSocket, confirmSession, listSessions, sessionEnded, sweepInactive, terminateOthers, terminateSession, trackSocket, untrackSocket } from './domain/sessions';
+import { countViews } from './domain/views';
+import { getThread, readThread } from './domain/threads';
+import { readBy } from './domain/reads';
 import { commonGroups, deleteDirectChat, createChat, createGroup, openDirect, messageAtDate, getChatMedia, getChatMediaCounts, getHistory, getMessagesByIds, listChats, listChatsPage } from './domain/chats';
 import { sql } from './db';
 import { DomainError } from './domain/errors';
@@ -252,9 +255,9 @@ export function createServer(opts: { port: number }): Server {
           const bound = (await deviceKeyOf(sessionId)) != null;
           return server.upgrade(req, { data: { userId, sessionId, checkedAt: Date.now(), ...(bound ? { challenge: await newChallenge(), proven: false, queue: [] } : {}) } }) ? undefined : fail('bad_frame');
         }
-        // новая группа (создатель — текущий пользователь) и личный чат с человеком (существующий или новый)
+        // новая группа или канал ({kind: 'channel'}; создатель — текущий пользователь) и личный чат с человеком (существующий или новый)
         if (req.method === 'POST' && url.pathname === '/chats') {
-          const { chatId } = await createGroup(userId, (await req.json().catch(() => ({}))) as { title?: unknown; memberIds?: unknown });
+          const { chatId } = await createGroup(userId, (await req.json().catch(() => ({}))) as { kind?: unknown; title?: unknown; about?: unknown; memberIds?: unknown });
           return Response.json({ id: chatId });
         }
         if (req.method === 'POST' && url.pathname === '/chats/direct') {
@@ -262,7 +265,7 @@ export function createServer(opts: { port: number }): Server {
           return Response.json({ id: await openDirect(userId, body.userId) });
         }
         if (process.env.DEV_LOGIN === '1' && req.method === 'POST' && url.pathname === '/dev/chats') {
-          const { kind, title, memberIds } = (await req.json()) as { kind: 'direct' | 'group'; title: string | null; memberIds: number[] };
+          const { kind, title, memberIds } = (await req.json()) as { kind: 'direct' | 'group' | 'channel'; title: string | null; memberIds: number[] };
           const ids = memberIds.includes(userId) ? memberIds : [userId, ...memberIds];
           return Response.json({ id: await createChat(kind, title, ids) });
         }
@@ -386,6 +389,25 @@ export function createServer(opts: { port: number }): Server {
             archivedOnly: url.searchParams.get('archived') === '1',
           }));
         }
+        // просмотры постов канала: батч id от клиента раз в секунду (views.ts)
+        const views = /^\/chats\/(\d+)\/views$/.exec(url.pathname);
+        if (req.method === 'POST' && views) {
+          const body = (await req.json().catch(() => null)) as { ids?: unknown } | null;
+          return Response.json(await countViews(userId, Number(views[1]), body?.ids));
+        }
+        // тред комментариев к посту (группа обсуждения): страница с шапкой и прочитанность (threads.ts)
+        const thr = /^\/chats\/(\d+)\/threads\/(\d+)\/(messages|read)$/.exec(url.pathname);
+        if (thr && thr[3] === 'messages' && req.method === 'GET') {
+          const before = Number(url.searchParams.get('before')), after = Number(url.searchParams.get('after'));
+          return Response.json(await getThread(userId, Number(thr[1]), Number(thr[2]), Number.isInteger(before) && before > 0 ? before : null, Number(url.searchParams.get('limit') ?? 50), Number.isInteger(after) && after > 0 ? after : null));
+        }
+        if (thr && thr[3] === 'read' && req.method === 'PUT') {
+          const body = (await req.json().catch(() => null)) as { upToId?: unknown } | null;
+          return Response.json(await readThread(userId, Number(thr[1]), Number(thr[2]), body?.upToId));
+        }
+        // «кто прочитал» своё сообщение в небольшой группе (reads.ts)
+        const rb = /^\/chats\/(\d+)\/messages\/(\d+)\/read-by$/.exec(url.pathname);
+        if (rb && req.method === 'GET') return Response.json(await readBy(userId, Number(rb[1]), Number(rb[2])));
         const mem = /^\/chats\/(\d+)\/members$/.exec(url.pathname);
         if (req.method === 'GET' && mem) return Response.json(await chatMembers(userId, Number(mem[1])));
         const hist = /^\/chats\/(\d+)\/messages$/.exec(url.pathname);

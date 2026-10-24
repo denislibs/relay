@@ -21,14 +21,14 @@ export function ChatStack() {
   ];
   return (
     <div class="app-chats">
-      {cols.map(({ f, place, instant, pending }) => <ChatColumn key={f.key} frame={f.key} chatId={f.chatId} place={place} instant={instant} pending={pending} />)}
+      {cols.map(({ f, place, instant, pending }) => <ChatColumn key={f.key} frame={f.key} chatId={f.chatId} threadId={f.threadId} place={place} instant={instant} pending={pending} />)}
     </div>
   );
 }
 
 type Place = 'below' | 'on' | 'above';
 
-function ChatColumn({ frame, chatId, place, instant, pending }: { frame: string; chatId: number; place: Place; instant: boolean; pending: boolean }) {
+function ChatColumn({ frame, chatId, threadId, place, instant, pending }: { frame: string; chatId: number; threadId?: number; place: Place; instant: boolean; pending: boolean }) {
   // первый кадр колонки — на исходной позиции, иначе переход не с чего начинать; нижний чат встаёт сразу.
   // Колонка, смонтированная справа (готовится поверх), уже стоит на исходной — ей ждать нечего: иначе она
   // въезжала позже, чем уезжал нижний чат (ожидание кадра + длинный рендер переключения ≈ 70 мс рассинхрона)
@@ -56,7 +56,7 @@ function ChatColumn({ frame, chatId, place, instant, pending }: { frame: string;
   const hidden = on ? {} : { 'aria-hidden': true, inert: true };
   return (
     <div ref={box} class={cls} data-current={on ? '' : undefined} {...hidden}>
-      <Chat frameKey={frame} chatId={chatId} active={on} />
+      <Chat frameKey={frame} chatId={chatId} threadId={threadId} active={on} />
     </div>
   );
 }

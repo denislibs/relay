@@ -119,11 +119,12 @@ export function startWorker(opts: { concurrency?: number; pollMs?: number; lease
   let lowSince = 0;                  // свободно меньше refillAt: с какого момента ждём добора
 
   const poke = () => { dirty = true; wake?.(); };
-  const nap = (ms: number) => new Promise<void>((resolve) => {
+  // due — сон до poll или до ближайшей отложенной задачи: по таймеру очередь снова стоит проверить
+  const nap = (ms: number, due = ms >= pollMs) => new Promise<void>((resolve) => {
     if (dirty || stopped) { resolve(); return; }
     const t = setTimeout(() => {
       wake = null;
-      if (ms >= pollMs) { wantSingles = true; for (const k of lanes) wantLane.set(k, true); }
+      if (due) { wantSingles = true; for (const k of lanes) wantLane.set(k, true); }
       resolve();
     }, ms);
     wake = () => { clearTimeout(t); wake = null; resolve(); };
@@ -133,6 +134,17 @@ export function startWorker(opts: { concurrency?: number; pollMs?: number; lease
     inFlight.add(q);
   };
   const claimSafe = (limit: number, f: KindFilter) => claim(limit, leaseSec, f).catch((e) => { console.error('jobs claim:', e); return [] as Job[]; });
+  // через сколько созреет ближайшая отложенная задача (окна reactions.flush / replies.flush, повторы): о ней NOTIFY нет —
+  // спим до неё, а не весь poll. Только будущие: созревшие, но не взятые, ждут конца задачи в работе (poke), не опроса
+  const nextDue = async (): Promise<number> => {
+    const only = kinds.only ?? null, except = kinds.except ?? [];
+    const rows = await sql`
+      select ceil(extract(epoch from (min(run_at) - now())) * 1000)::bigint as ms from jobs
+       where run_at > now() and (${only}::text[] is null or kind = any(${only}::text[])) and not (kind = any(${except}::text[]))`
+      .catch((e) => { console.error('jobs next due:', e); return [] as { ms: unknown }[]; });
+    const ms = rows[0]?.ms;
+    return ms == null ? pollMs : Math.min(pollMs, Math.max(1, Number(ms)));
+  };
 
   // один NOTIFY на транзакцию несёт все её kind через запятую (queue.ts)
   const listening = sql.listen('jobs', (payload) => {
@@ -165,7 +177,8 @@ export function startWorker(opts: { concurrency?: number; pollMs?: number; lease
           lowSince = Date.now();
         }
       }
-      await nap(lowSince ? Math.max(1, REFILL_MS - (Date.now() - lowSince)) : pollMs);
+      if (lowSince) await nap(Math.max(1, REFILL_MS - (Date.now() - lowSince)));
+      else if (!dirty) { const ms = await nextDue(); await nap(ms, true); }
     }
   })();
   return {

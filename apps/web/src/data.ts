@@ -8,7 +8,7 @@ import { beginHeavyAnimation, nudgeWallpaper, requestMutation, toBase64 } from '
 import { connectEngine, EngineClient, Mirror } from '@relay/sync-engine/src/client';
 import type { Item, Patch, Query, SearchResult } from '@relay/sync-engine/src/types';
 import { hideSpoilers, MAX_FILE_BYTES, type Entity } from '@relay/protocol';
-import { activeFrame, frameByKey, getGlobal, setGlobal, type ChatFrame, type FeedMeta, type Me, type Status, type UploadItem } from './global';
+import { activeFrame, frameByKey, getGlobal, setGlobal, subscribeGlobal, type ChatFrame, type FeedMeta, type Me, type Status, type UploadItem } from './global';
 import { closeLayer, closeLayers, pushLayer } from './nav';
 import { notifyIncoming, startNotify } from './notify';
 import { rememberKeysIn, startFileKeyService } from './fileKeys';
@@ -22,6 +22,8 @@ import { isSystemChat } from './ui/format';
 import { asset } from './assets';
 import { compressPhoto } from './media/compressPhoto';
 import { compressVideo, type VideoQuality } from './media/compressVideo';
+import { isOwnChannelPost, postCopyChannel } from './channelText';
+import { findTarget, hashFor, parseHash, positionKey, sameTarget, toTarget, type StackTarget } from './stackTarget';
 
 declare const __BUILD__: string;
 declare const __DEV__: boolean;
@@ -59,19 +61,8 @@ export function startData(me: Me): void {
   try { localStorage.removeItem('relay.names'); } catch { /* приватный режим */ }   // прежний кэш имён — теперь их держит движок
 
   const chats = new Mirror();
-  let seen: Map<number, number> | null = null;
   engine.watch({ kind: 'chatList', limit: 1000 }, (p) => {
-    const before = seen;
     chats.apply(p);
-    seen = new Map(chats.list().map((c) => [c.id as number, ((c.last as { id?: number } | null)?.id ?? 0)]));
-    // новое чужое сообщение в чате, который уже знали (первый снимок из IndexedDB — не новость)
-    if (before) for (const c of chats.list()) {
-      const last = c.last as { id: number | null; senderId: number; body: string; kind?: string; attachment?: { name: string } | null; createdAt: string; service?: { type: string } } | null;
-      if (!last?.id || last.senderId === me.userId || last.id <= (before.get(c.id as number) ?? 0)) continue;
-      if (c.id === getGlobal().openChatId && document.visibilityState === 'visible') continue;
-      notifyIncoming({ id: c.id as number, title: (c.title as string) || 'Чат №' + c.id, muted: isMuted(c), system: isSystemChat(c) },
-        { id: last.id, body: hideSpoilers(last.body, (last as { entities?: Entity[] }).entities), kind: last.kind, attachmentName: last.attachment?.name, createdAt: last.createdAt, service: last.service });
-    }
     // сразу, не дожидаясь конца анимаций: список виртуальный (≈20 строк), а отложенный подъём чата
     // после отправки выглядит как запоздалый рывок
     setGlobal({ chats: chats.list(), chatsLoaded: true });
@@ -90,6 +81,7 @@ export function startData(me: Me): void {
     const g = getGlobal(), current = g.pendingChatId ?? g.openChatId;
     if (current && peerFor !== current) watchPeer(current);
   });
+  watchNotifications(me.userId);
   const counters = new Mirror();
   engine.watch({ kind: 'counters' }, (p) => { counters.apply(p); const c = counters.list()[0]; if (c) setGlobal({ counters: { unreadChats: c.unreadChats as number, unreadMessages: c.unreadMessages as number } }); });
   const status = new Mirror();
@@ -101,9 +93,72 @@ export function startData(me: Me): void {
 
   // запись истории могла вернуть прежний адрес (#chat=…) — поправить на чат на экране
   addEventListener('popstate', () => queueMicrotask(syncShown));
-  startNotify((id) => { focus(); openChat(id); });
-  const open = Number(new URLSearchParams(location.hash.slice(1)).get('chat')) || null;
-  if (open) openChat(open);
+  startNotify((id, threadId) => { focus(); openNotified(id, threadId); });
+  // #chat=…&thread=… при загрузке: нижний слой — чат, тред — поверх него (docs/navigation-rules.md)
+  const open = parseHash(location.hash);
+  if (open) { openChat(open.chatId); if (open.threadId != null) whenShown(open.chatId, () => openInner(open)); }
+}
+
+/**
+ * Клик по уведомлению: чат — нижним слоем (замена стека, docs/navigation-rules.md), комментарий — его тред поверх
+ * группы, как адрес с thread. Тред уже наверху — ничего; группа уже нижняя и одна — openChat ничего не меняет, тред
+ * кладётся сразу.
+ */
+function openNotified(chatId: number, threadId?: number): void {
+  const top = activeFrame(getGlobal());
+  if (threadId != null && top?.chatId === chatId && top.threadId === threadId) return;
+  openChat(chatId);
+  if (threadId == null) return;
+  const g = getGlobal(), now = activeFrame(g);
+  if (g.pendingChatId == null && now?.chatId === chatId && now.threadId == null) openInner({ chatId, threadId });
+  else whenShown(chatId, () => openInner({ chatId, threadId }));
+}
+
+/** Когда чат станет нижним на экране (адрес при загрузке: тред кладётся поверх уже открытой группы). */
+function whenShown(chatId: number, fn: () => void): void {
+  const stop = subscribeGlobal(() => {
+    const g = getGlobal(), top = activeFrame(g);
+    if (top?.chatId === chatId && top.threadId == null) { stop(); queueMicrotask(fn); return; }
+    if (g.pendingChatId == null && top) stop();   // открыли что-то другое — тред уже не нужен
+  });
+}
+
+/**
+ * Уведомления и звук — по запросу notifications движка: одно на сообщение (новое чужое или упоминание — что пришло
+ * первым), а не по патчам списка чатов (иначе упоминание и сообщение дали бы два). Снимок при подключении вкладки —
+ * старое, не новость.
+ */
+function watchNotifications(meId: number): void {
+  const m = new Mirror();
+  let shown: Set<string> | null = null;
+  engine.watch({ kind: 'notifications' }, (p) => {
+    m.apply(p);
+    const items = m.list();
+    if (!shown) { shown = new Set(items.map((n) => n.key)); return; }
+    const g = getGlobal();
+    const chatOf = (id: number) => {
+      const c = g.chats.find((x) => x.id === id);
+      return c ? { id, kind: c.kind, canPost: !!c.canSend, member: c.me != null, linkedChatId: (c.group as { linkedChatId?: number | null } | null)?.linkedChatId ?? null } : undefined;
+    };
+    for (const n of items) {
+      if (shown.has(n.key)) continue;
+      shown.add(n.key);
+      const chatId = n.chatId as number;
+      if (n.senderId === meId && !n.post) continue;
+      const item = { chatId, post: !!n.post, mention: !!n.mention };
+      // копия поста в группе обсуждения: подписчик канала уже уведомлён самим постом; открыт канал — пост на экране
+      const copyOf = postCopyChannel(item, chatOf);
+      if (copyOf?.member) continue;
+      if ((chatId === g.openChatId || (copyOf && copyOf.id === g.openChatId)) && document.visibilityState === 'visible') continue;
+      if (isOwnChannelPost(item, chatOf)) continue;   // свои посты и их копии
+      const c = g.chats.find((x) => x.id === chatId);
+      notifyIncoming({ id: chatId, title: (c?.title as string) || 'Чат №' + chatId, muted: isMuted(c ?? { id: chatId }), system: isSystemChat(c) },
+        { id: n.id as number, body: hideSpoilers(String(n.body ?? ''), n.entities as Entity[] | undefined), kind: n.kind as string | undefined, attachmentName: n.attachmentName as string | null, createdAt: n.createdAt as string, service: n.service as { type: string } | undefined, threadId: n.threadId as number | undefined },
+        { mention: !!n.mention });
+    }
+    // держим только ключи, что ещё в списке движка (он сам хранит последние)
+    if (shown.size > items.length * 2 + 50) shown = new Set(items.map((n) => n.key));
+  });
 }
 
 const PHASE_LABEL: Record<string, string> = {
@@ -160,20 +215,20 @@ function watchPeer(chatId: number | null): void {
 
 type Anchor = { sort: number; side: 'end' | 'start' | 'center' };
 const WINDOW = FEED_PAGE * 2;                  // сообщений в DOM: две порции (как окно viewport в Telegram)
-/** Позиция прокрутки чата при уходе: первый видимый бабл и его отступ (нет записи — чат был внизу). */
-const positions = new Map<number, { key: string; sort: number; offset: number }>();
+/** Позиция прокрутки чата (и треда — свой ключ chatId:threadId) при уходе: первый видимый бабл и его отступ (нет записи — был внизу). */
+const positions = new Map<string, { key: string; sort: number; offset: number }>();
 
-export function savePosition(chatId: number, pos: { key: string; sort: number; offset: number } | null): void {
-  if (pos) positions.set(chatId, pos); else positions.delete(chatId);
+export function savePosition(t: StackTarget, pos: { key: string; sort: number; offset: number } | null): void {
+  if (pos) positions.set(positionKey(t), pos); else positions.delete(positionKey(t));
 }
-export function savedPosition(chatId: number) { return positions.get(chatId) ?? null; }
+export function savedPosition(t: StackTarget) { return positions.get(positionKey(t)) ?? null; }
 
 /* ---------- стек чатов ----------
  * Как в Telegram Web: openChat (клик в списке) — нижний чат, стек сбрасывается; openInner (переход
  * изнутри чата) — новый чат поверх, прежний остаётся живым в DOM (вернуться — мгновенно, на том же месте).
  * У каждого кадра — своя подписка на окно ленты. */
 
-interface Session { chatId: number; watch: { update(q: Query): void; close(): void }; mirror: Mirror; anchor: Anchor | undefined; moving: boolean; first: boolean; timer: ReturnType<typeof setTimeout> | null }
+interface Session { chatId: number; threadId?: number; watch: { update(q: Query): void; close(): void }; mirror: Mirror; anchor: Anchor | undefined; moving: boolean; first: boolean; timer: ReturnType<typeof setTimeout> | null }
 const sessions = new Map<string, Session>();
 let frameSeq = 0;
 let pendingBottom: { frame: ChatFrame; target?: { id: number; sort: number } } | null = null;   // новый нижний чат, лента ещё не готова
@@ -215,35 +270,44 @@ function toastUploadRefusals(items: Item[]): void {
 
 /** Окно ленты кадра; onFirst — первый снимок (или 700 мс без него: не держим пользователя на прежнем чате). */
 function startFeed(frame: ChatFrame, anchor: Anchor | undefined, onFirst: (patch: Partial<ChatFrame>) => void): void {
-  const s: Session = { chatId: frame.chatId, mirror: new Mirror(), anchor, moving: true, first: true, timer: null, watch: null as never };
+  const s: Session = { chatId: frame.chatId, threadId: frame.threadId, mirror: new Mirror(), anchor, moving: true, first: true, timer: null, watch: null as never };
   sessions.set(frame.key, s);
   const asked = performance.now();
   // сколько лента ждала первый снимок от движка (SharedWorker → IndexedDB → сюда) — видно во вкладке Performance
   const first = (patch: Partial<ChatFrame>) => { s.first = false; if (s.timer) { clearTimeout(s.timer); s.timer = null; } performance.measure('relay:feed-snapshot', { start: asked }); onFirst(patch); };
   // лента — срочная: свои сообщения должны появляться в тот же кадр
-  s.watch = engine.watch({ kind: 'messages', chatId: frame.chatId, limit: WINDOW, anchor }, (p: Patch) => {
+  s.watch = engine.watch(feedQuery(frame, anchor), (p: Patch) => {
     s.mirror.apply(p);
     // авторы пришедших сообщений — в people сразу, до отрисовки (повторы wantPeople отбрасывает сам)
     wantPeople((p.op === 'snapshot' ? p.items : p.upsert).flatMap((m) => (typeof m.senderId === 'number' ? [m.senderId] : [])));
     s.moving = false;
     const meta = (s.mirror.meta('~window') as unknown as FeedMeta) ?? null;
-    const patch = { messages: s.mirror.list() as Item[], feedMeta: meta };
-    toastUploadRefusals(patch.messages);
+    const patch: Partial<ChatFrame> = { messages: s.mirror.list() as Item[], feedMeta: meta };
+    // тред: шапка (копия поста) первой; загружен ли с сервера (пока нет — «Загрузка…», а не «нет комментариев»)
+    if (frame.threadId != null) { const th = s.mirror.meta('~thread'); patch.thread = { header: (th?.header as string | null) ?? null, loaded: !!th?.loaded }; }
+    toastUploadRefusals(patch.messages!);
     if (s.first) first(patch); else patchFrame(frame.key, patch);
     // окно дошло до последних сообщений — снова живой хвост (новые сообщения появятся сами)
-    if (s.anchor && meta?.live && !meta.hasNewer) { s.anchor = undefined; s.watch.update({ kind: 'messages', chatId: frame.chatId, limit: WINDOW }); }
+    if (s.anchor && meta?.live && !meta.hasNewer) { s.anchor = undefined; s.watch.update(feedQuery(frame, undefined)); }
   });
   s.timer = setTimeout(() => { if (s.first) first({}); }, 700);
 }
 
-function newFrame(chatId: number, target?: { id: number; sort: number }): { frame: ChatFrame; anchor: Anchor | undefined } {
+/** Окно ленты кадра: чат — messages, тред — thread (шапка-копия поста и комментарии из кэша группы). */
+function feedQuery(f: { chatId: number; threadId?: number }, anchor: Anchor | undefined): Query {
+  return f.threadId != null ? { kind: 'thread', chatId: f.chatId, threadId: f.threadId, limit: WINDOW, anchor } : { kind: 'messages', chatId: f.chatId, limit: WINDOW, anchor };
+}
+
+function newFrame(t: StackTarget, target?: { id: number; sort: number }): { frame: ChatFrame; anchor: Anchor | undefined } {
+  const chatId = t.chatId;
   const chat = getGlobal().chats.find((c) => c.id === chatId);
-  const pos = positions.get(chatId);
-  const unread = (chat?.unread as number) > 0 ? (chat!.lastReadId as number) : null;
+  const pos = positions.get(positionKey(t));
+  // разделитель «Непрочитанные» — только у ленты чата (у треда своя прочитанность, readMaxId)
+  const unread = t.threadId == null && (chat?.unread as number) > 0 ? (chat!.lastReadId as number) : null;
   // открыть на найденном сообщении; иначе: ушли из середины истории — туда же; непрочитанное; низ
   const anchor: Anchor | undefined = target ? { sort: target.sort, side: 'center' } : pos ? { sort: pos.sort, side: 'center' } : unread != null ? { sort: unread + 0.5, side: 'center' } : undefined;
   const frame: ChatFrame = {
-    key: 'c' + ++frameSeq, chatId, ready: false, messages: [], feedMeta: null,
+    key: 'c' + ++frameSeq, chatId, ...(t.threadId != null ? { threadId: t.threadId, thread: { header: null, loaded: false } } : {}), ready: false, messages: [], feedMeta: null,
     unreadFrom: target ? null : unread,
     focus: target ? { ...target, nonce: Date.now(), replaced: true } : null,
   };
@@ -253,7 +317,9 @@ function newFrame(chatId: number, target?: { id: number; sort: number }): { fram
 /** Адрес и присутствие — по чату на экране. */
 function syncShown(): void {
   const top = topReady();
-  history.replaceState(history.state, '', top ? '#chat=' + top.chatId : location.pathname);
+  history.replaceState(history.state, '', top ? hashFor(top) : location.pathname);
+  const thread = top?.threadId ?? null;
+  if (getGlobal().openThreadId !== thread) setGlobal({ openThreadId: thread });
   if ((top?.chatId ?? null) !== peerFor) watchPeer(top?.chatId ?? null);
   if (top) clearUnreadMark(top.chatId);   // открыли чат, отмеченный непрочитанным, — пометка снята (как в Telegram)
 }
@@ -332,7 +398,8 @@ function dropLayers(): void {
 /** Чат из списка (или из адреса, уведомления): нижний кадр, стек сбрасывается. */
 export function openChat(chatId: number | null, target?: { id: number; sort: number }, hold?: Hold): void {
   const g = getGlobal(), st = g.chatStack, top = topReady();
-  if (chatId != null && (g.pendingChatId ?? top?.chatId) === chatId && (st.length <= 1 || top?.chatId === chatId)) {
+  // тот же чат на экране — только прокрутка; его тред поверх — другой слой (ниже вернёмся к самой группе)
+  if (chatId != null && (g.pendingChatId ?? top?.chatId) === chatId && top?.threadId == null && (st.length <= 1 || top?.chatId === chatId)) {
     if (target) focusMessage(target);
     return;
   }
@@ -351,7 +418,7 @@ export function openChat(chatId: number | null, target?: { id: number; sort: num
     if (target) focusMessage(target);
     return;
   }
-  const { frame, anchor } = newFrame(chatId, target);
+  const { frame, anchor } = newFrame({ chatId }, target);
   pendingBottom = { frame, target };
   if (hold) { hold.key = frame.key; hold.onCommit = () => setGlobal({ pendingChatId: chatId }); } else setGlobal({ pendingChatId: chatId });
   // пока лента нового чата не готова, на экране остаётся прежний; затем шапка и лента меняются одним кадром
@@ -370,21 +437,29 @@ export function openChat(chatId: number | null, target?: { id: number; sort: num
   });
 }
 
-/** Чат изнутри другого (автор в группе, найденное сообщение): поверх стека, прежний остаётся живым. */
-export function openInner(chatId: number, target?: { id: number; sort: number }, hold?: Hold): void {
+/**
+ * Чат изнутри другого (автор в группе, найденное сообщение) или тред комментариев ({chatId: группа, threadId: копия
+ * поста}): поверх стека, прежний остаётся живым. Дубль ищется по паре чат+тред.
+ */
+export function openInner(to: number | StackTarget, target?: { id: number; sort: number }, hold?: Hold): void {
+  const t = toTarget(to), chatId = t.chatId;
   const g = getGlobal();
-  if (!topReady()) { openChat(chatId, target); return; }
+  if (!topReady()) {
+    openChat(chatId, t.threadId == null ? target : undefined);
+    if (t.threadId != null) whenShown(chatId, () => openInner(t, target));   // тред без открытого чата: группа снизу, тред поверх
+    return;
+  }
   cancelPending();
   const st = g.chatStack;
-  const at = st.findIndex((f) => f.chatId === chatId);
+  const at = findTarget(st, t);
   if (at >= 0) {   // уже в стеке — снять всё выше него
     if (at < st.length - 1) popTo(at);
     if (target) focusMessage(target);
     return;
   }
-  const parked = g.chatLeaving.find((f) => f.chatId === chatId);
+  const parked = g.chatLeaving.find((f) => sameTarget(f, t));
   if (parked) { hold ? whenReleased(hold, () => requestMutation(() => revive(parked, target))) : requestMutation(() => revive(parked, target)); return; }
-  const { frame, anchor } = newFrame(chatId, target);
+  const { frame, anchor } = newFrame(t, target);
   // колонка сразу в DOM (скрыта): лента раскладывается и встаёт на позицию до показа
   setGlobal(hold ? { chatStack: [...st, frame] } : { chatStack: [...st, frame], pendingChatId: chatId });
   if (hold) { hold.key = frame.key; hold.onCommit = () => setGlobal({ pendingChatId: chatId }); }
@@ -481,7 +556,7 @@ export function moveWindow(dir: 'older' | 'newer' | 'latest', frameKey?: string)
   const s = f && sessions.get(f.key);
   if (!f || !s || s.moving) return;
   const ms = f.messages, meta = f.feedMeta;
-  const set = (anchor: Anchor | undefined) => { s.anchor = anchor; s.moving = true; s.watch.update({ kind: 'messages', chatId: f.chatId, limit: WINDOW, anchor }); };
+  const set = (anchor: Anchor | undefined) => { s.anchor = anchor; s.moving = true; s.watch.update(feedQuery(f, anchor)); };
   if (dir === 'latest') { if (s.anchor) set(undefined); return; }
   if (!ms.length) return;
   if (dir === 'older' && meta?.hasOlder) set({ sort: ms[Math.min(ms.length - 1, FEED_PAGE - 1)].sort as number, side: 'end' });
@@ -512,7 +587,7 @@ export function focusMessage(target: { id: number; sort: number }): void {
   if (!f || !s) return;
   const inWindow = f.messages.some((m) => m.id === target.id);
   patchFrame(f.key, { focus: { ...target, nonce: Date.now(), replaced: !inWindow } });
-  if (!inWindow) { s.anchor = { sort: target.sort, side: 'center' }; s.moving = true; s.watch.update({ kind: 'messages', chatId: f.chatId, limit: WINDOW, anchor: s.anchor }); }
+  if (!inWindow) { s.anchor = { sort: target.sort, side: 'center' }; s.moving = true; s.watch.update(feedQuery(f, s.anchor)); }
 }
 
 /** Переход к сообщению выполнен — снять отметку кадра. */
@@ -537,7 +612,7 @@ export function sentSound(): void {
   if (p.sound) playSentSound(p.volume);
 }
 
-export async function send(chatId: number, body: string, replyToId: number | null = null, entities: Entity[] = [], opts: { noLinkPreview?: boolean; link?: LinkPreview | null; blocks?: Block[] | null } = {}): Promise<void> {
+export async function send(chatId: number, body: string, replyToId: number | null = null, entities: Entity[] = [], opts: { noLinkPreview?: boolean; link?: LinkPreview | null; blocks?: Block[] | null; threadId?: number } = {}): Promise<void> {
   sentSound();
   nudgeWallpaper();
   toLatestOf(chatId); // своё сообщение — внизу, как в Telegram
@@ -633,7 +708,7 @@ export function describeVideo(file: Blob): Promise<{ w: number; h: number; durat
 
 /** Как отправить: asFile — документом (без сжатия и превью, как «Отправить как файл» в Telegram); spoiler — фото/видео размыто;
  *  quality — видео: '720'/'1080' — пережать в браузере (WebCodecs, где есть), 'original' — как есть. */
-export interface SendOpts { asFile?: boolean; spoiler?: boolean; quality?: VideoQuality }
+export interface SendOpts { asFile?: boolean; spoiler?: boolean; quality?: VideoQuality; threadId?: number }   // threadId — комментарий в треде
 
 /** Видео, которые сейчас сжимаются (ещё не в очереди движка): отмена из плашки «Сжатие видео». */
 const preparing = new Map<string, AbortController>();
@@ -665,20 +740,20 @@ async function shrinkForSend(chatId: number, file: File, quality: VideoQuality):
 
 /** Отправить файл (фото — с размерами и превью). Офлайн — уйдёт, когда появится сеть. */
 /** Голосовое: Ogg/Opus, длительность в секундах и волна (63 байта). Локально играет сам записанный файл. */
-export async function sendVoice(chatId: number, rec: { blob: Blob; duration: number; waveform: Uint8Array }, replyToId: number | null = null): Promise<void> {
+export async function sendVoice(chatId: number, rec: { blob: Blob; duration: number; waveform: Uint8Array }, replyToId: number | null = null, threadId?: number): Promise<void> {
   sentSound();
   nudgeWallpaper();
   toLatestOf(chatId);
-  const res = (await engine.call({ type: 'sendFile', chatId, body: '', file: rec.blob, name: 'voice.ogg', mime: 'audio/ogg', kind: 'voice', duration: rec.duration, waveform: toBase64(rec.waveform), replyToId })) as { clientId: string };
+  const res = (await engine.call({ type: 'sendFile', chatId, body: '', file: rec.blob, name: 'voice.ogg', mime: 'audio/ogg', kind: 'voice', duration: rec.duration, waveform: toBase64(rec.waveform), replyToId, ...(threadId != null ? { threadId } : {}) })) as { clientId: string };
   localPreviews.set(res.clientId, URL.createObjectURL(rec.blob));
 }
 
 /** Кружок: квадрат 400×400, до 60 с; превью — кадр из записи. */
-export async function sendRound(chatId: number, rec: { blob: Blob; duration: number; size: number; thumb: string | null }, replyToId: number | null = null): Promise<void> {
+export async function sendRound(chatId: number, rec: { blob: Blob; duration: number; size: number; thumb: string | null }, replyToId: number | null = null, threadId?: number): Promise<void> {
   sentSound();
   nudgeWallpaper();
   toLatestOf(chatId);
-  const res = (await engine.call({ type: 'sendFile', chatId, body: '', file: rec.blob, name: 'video.mp4', mime: rec.blob.type.split(';')[0] || 'video/mp4', kind: 'round', duration: rec.duration, w: rec.size, h: rec.size, thumb: rec.thumb, replyToId })) as { clientId: string };
+  const res = (await engine.call({ type: 'sendFile', chatId, body: '', file: rec.blob, name: 'video.mp4', mime: rec.blob.type.split(';')[0] || 'video/mp4', kind: 'round', duration: rec.duration, w: rec.size, h: rec.size, thumb: rec.thumb, replyToId, ...(threadId != null ? { threadId } : {}) })) as { clientId: string };
   localPreviews.set(res.clientId, URL.createObjectURL(rec.blob));
 }
 
@@ -699,9 +774,10 @@ export async function sendFile(chatId: number, file: File, caption: string, repl
   if (!opts.asFile) file = await shrinkForSend(chatId, file, opts.quality ?? 'original');
   const img = opts.asFile ? null : await describeImage(file);
   const vid = opts.asFile || img ? null : await describeVideo(file);
+  const thread = opts.threadId != null ? { threadId: opts.threadId } : {};
   if (vid) {
     const res = (await engine.call({ type: 'sendFile', chatId, body: caption, file, name: file.name || 'video.mp4', mime: file.type, kind: 'video', w: vid.w, h: vid.h, duration: vid.duration, thumb: vid.thumb, replyToId,
-      ...(opts.spoiler ? { spoiler: true } : {}), ...(groupId ? { groupId } : {}) })) as { clientId: string };
+      ...(opts.spoiler ? { spoiler: true } : {}), ...(groupId ? { groupId } : {}), ...thread })) as { clientId: string };
     // своё видео играет из самого файла, пока грузится (как в Telegram) и сразу после
     localPreviews.set(res.clientId, URL.createObjectURL(file));
     return;
@@ -712,7 +788,7 @@ export async function sendFile(chatId: number, file: File, caption: string, repl
   const cover = tags?.cover ? await coverThumb(tags.cover) : null;
   const res = (await engine.call({ type: 'sendFile', chatId, body: caption, file, name: file.name || 'file', mime: file.type || 'application/octet-stream', w: img?.w ?? null, h: img?.h ?? null, thumb: img?.thumb ?? cover ?? null, replyToId,
     ...(seconds ? { kind: 'audio' as const, duration: seconds, title: tags?.title ?? null, performer: tags?.performer ?? null } : {}),
-    ...(img && opts.spoiler ? { spoiler: true } : {}), ...(groupId ? { groupId } : {}) })) as { clientId: string };
+    ...(img && opts.spoiler ? { spoiler: true } : {}), ...(groupId ? { groupId } : {}), ...thread })) as { clientId: string };
   if (img) localPreviews.set(res.clientId, URL.createObjectURL(file));
 }
 
@@ -814,6 +890,26 @@ export function seen(chatId: number, upToId: number): void {
   engine.call({ type: 'seen', chatId, upToId }).catch(() => {});
 }
 
+/** Прочитано в треде: точка у кнопки поста гаснет; основную ленту группы (seen) не трогает. */
+export function markThreadRead(chatId: number, threadId: number, upToId: number): void {
+  engine.call({ type: 'markThreadRead', chatId, threadId, upToId }).catch(() => {});
+}
+
+/** Посты канала на экране: просмотр — по разу на пост за сессию (батч и дубли — в движке, channel.ts). */
+export function countViews(chatId: number, ids: number[]): void {
+  if (ids.length) engine.call({ type: 'countViews', chatId, ids }).catch(() => {});
+}
+
+/** «К упоминанию»: старейшее непрочитанное упоминание чата ({id, threadId?}) из кэша движка или null. */
+export function nextMention(chatId: number): Promise<{ id: number; threadId?: number } | null> {
+  return (engine.call({ type: 'nextMention', chatId }) as Promise<{ id: number; threadId?: number } | null>).catch(() => null);
+}
+
+/** «Кто прочитал» своё сообщение в небольшой группе. */
+export function readBy(chatId: number, id: number): Promise<GroupResult<{ id: number; name: string }[]>> {
+  return engine.call({ type: 'readBy', chatId, id }) as Promise<GroupResult<{ id: number; name: string }[]>>;
+}
+
 export async function createDirectChat(peerId: number): Promise<number> {
   // существующая личная переписка или новая (сервер не создаёт вторую на ту же пару)
   const res = await fetch('/chats/direct', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ userId: peerId }) });
@@ -824,19 +920,23 @@ export async function createDirectChat(peerId: number): Promise<number> {
 }
 
 /** Новая группа: сервер создаёт чат и служебное «создал(а) группу» — по нему чат появится у всех участников. */
-export async function createGroup(title: string, memberIds: number[]): Promise<number> {
-  const res = await fetch('/chats', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ title, memberIds }) });
+export async function createGroup(title: string, memberIds: number[], channel?: { about: string }): Promise<number> {
+  // канал: {kind: 'channel'}, без участников — подписчиков добавляют следующим шагом (как в Telegram)
+  const res = await fetch('/chats', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(channel ? { kind: 'channel', title, about: channel.about, memberIds } : { title, memberIds }) });
   if (!res.ok) {
     const code = ((await res.json().catch(() => ({}))) as { code?: string }).code;
     throw new Error(code === 'blocked' ? 'Кого-то из выбранных нельзя добавить в группу'
       : code === 'too_long' ? 'Слишком длинное название или слишком много участников'
       : code === 'not_found' ? 'Кого-то из выбранных больше нет в Relay'
-      : res.status === 401 ? 'Сессия истекла' : 'Не удалось создать группу');
+      : res.status === 401 ? 'Сессия истекла' : channel ? 'Не удалось создать канал' : 'Не удалось создать группу');
   }
   const { id } = (await res.json()) as { id: number };
   await engine.call({ type: 'refreshChats' });
   return id;
 }
+
+/** Перечитать список чатов с сервера (число подписчиков канала после добавления: журнал канала состав не несёт). */
+export function refreshChats(): void { engine.call({ type: 'refreshChats' }).catch(() => {}); }
 
 export async function startDirectChat(peerId: number): Promise<void> {
   openChat(await createDirectChat(peerId));

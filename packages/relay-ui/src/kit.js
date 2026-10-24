@@ -549,7 +549,7 @@ function Bubble(props) {
   var deleted = !!props.deleted;
   var line = h('div', {
       class: cx('rl-bubble', out ? 'rl-bubble-out' : 'rl-bubble-in-side', props.tail && 'rl-bubble-tail', failed && 'rl-bubble-failed',
-        deleted && 'rl-bubble-deleted', props.reactions && props.reactions.length && 'rl-bubble-has-react',
+        deleted && 'rl-bubble-deleted', props.reactions && props.reactions.length && 'rl-bubble-has-react', props.footer && !deleted && 'rl-bubble-has-footer',
         props.appear && (out ? 'rl-appear-out' : 'rl-appear-in'), props.flash && 'rl-bubble-flash', (props.className || props.class)),
       onContextMenu: props.onContextMenu, onDblClick: props.onDoubleClick
     },
@@ -561,11 +561,19 @@ function Bubble(props) {
         ? h('span', { class: 'rl-bubble-text rl-bubble-deleted-text' }, h(Icon, { name: 'ban', size: 16 }), out ? 'Вы удалили это сообщение' : 'Сообщение удалено')
         : h('span', { class: 'rl-bubble-text' }, props.children),
       props.link && !deleted ? h(WebPage, { link: props.link, tone: props.linkTone }) : null,
-      h('span', { class: cx('rl-bubble-spacer', props.edited && 'rl-bubble-spacer-edited'), 'aria-hidden': 'true' }),
+      // metaBefore (функция → узлы: просмотры, подпись автора поста) — мета шире обычной: место под неё держит
+      // невидимая копия, а не фиксированная ширина отступа
+      props.metaBefore && !deleted
+        ? h('span', { class: 'rl-bubble-spacer rl-bubble-spacer-fit', 'aria-hidden': 'true' }, props.metaBefore(), props.edited ? h('span', { class: 'rl-bubble-edited' }, 'изм.') : null, props.time)
+        : h('span', { class: cx('rl-bubble-spacer', props.edited && 'rl-bubble-spacer-edited'), 'aria-hidden': 'true' }),
       h('span', { class: 'rl-bubble-meta' },
+        props.metaBefore && !deleted ? props.metaBefore() : null,
         props.edited ? h('span', { class: 'rl-bubble-edited' }, 'изм.') : null,
         props.time,
-        out && !deleted ? h(MessageStatus, { status: props.status || 'sent' }) : null),
+        // статус у входящего вида — только если его передали: свой неотправленный пост канала (пост всегда слева)
+        (out || props.status) && !deleted ? h(MessageStatus, { status: props.status || 'sent' }) : null),
+      // footer — полоса внизу пузыря во всю его ширину (кнопка комментариев поста)
+      props.footer && !deleted ? h('div', { class: 'rl-bubble-footer' }, props.footer) : null,
       props.reactions && props.reactions.length ? h(ReactionChips, { items: props.reactions, out: out, onClick: props.onReactionClick }) : null);
   // below — под пузырём во всю его ширину (кнопки сообщения); обёртка остаётся, пока строка жива, чтобы пузырь не
   // пересоздавался, когда содержимое снизу уходит
@@ -784,7 +792,7 @@ function VoiceMessage(props) {
             h('span', { class: 'rl-voice-mic', style: { color: !s.played && !out ? 'var(--voice-new)' : 'var(--tick-read)' } }, h(Icon, { name: 'mic', size: 16, strokeWidth: 2.4 })))),
       h('div', { class: 'rl-voice-foot' },
         h('span', { ref: clock, class: 'rl-voice-time' }, fmtTime(duration)),
-        h('span', { class: 'rl-bubble-meta rl-voice-meta' }, props.time, out ? h(MessageStatus, { status: props.status || 'read' }) : null))));
+        h('span', { class: 'rl-bubble-meta rl-voice-meta' }, props.time, out || props.status ? h(MessageStatus, { status: props.status || 'read' }) : null))));
 }
 
 /* ---------- VoiceRecorder: replaces the Composer while recording ---------- */
@@ -1100,7 +1108,7 @@ function MediaBubble(props) {
   // у всех фото альбома известны размеры — мозаикой, как в Telegram (иначе — старая сетка 2×2)
   var mosaic = album && items.every(function (it) { return it.w && it.h; }) ? albumLayout(items.map(function (it) { return it.w / it.h; }), 330, 2) : null;
   if (mosaic) extra = 0;
-  var mediaOnly = !props.caption && !props.author && !props.fwd && !props.reply;
+  var mediaOnly = !props.caption && !props.author && !props.fwd && !props.reply && !props.footer;
   // у одиночного фото без рамки хвостик красится в цвет нижнего угла картинки (как в Telegram); у альбома — последней ячейки
   var cornerOf = items[album ? Math.min(items.length, 4) - 1 : 0] || {};
   var tailColor = useTailColor(mediaOnly && props.tail ? cornerOf.src : null, mediaOnly && props.tail ? cornerOf.thumb : null, out);
@@ -1137,9 +1145,11 @@ function MediaBubble(props) {
           return h('div', { key: i, class: 'rl-media-tile', style: { left: c.x * 100 + '%', top: c.y * 100 + '%', width: c.w * 100 + '%', height: c.h * 100 + '%' } }, cell(it, i));
         }) : (album ? items.slice(0, 4) : items).map(cell),
         album && state !== 'ready' ? h(MediaOverlay, { state: state, progress: props.progress, size: props.size, onDownload: props.onDownload, onCancel: props.onCancel }) : null,
-        !props.caption ? h('span', { class: 'rl-media-chip rl-media-chip-meta' }, props.time, out ? h(MessageStatus, { status: props.status || 'read' }) : null) : null),
-      props.caption ? h('div', { class: 'rl-media-caption' }, props.caption, h('span', { class: 'rl-bubble-spacer', 'aria-hidden': 'true' }),
-        h('span', { class: 'rl-bubble-meta' }, props.time, out ? h(MessageStatus, { status: props.status || 'read' }) : null)) : null));
+        !props.caption ? h('span', { class: 'rl-media-chip rl-media-chip-meta' }, props.metaBefore ? props.metaBefore() : null, props.time, out || props.status ? h(MessageStatus, { status: props.status || 'read' }) : null) : null),
+      props.caption ? h('div', { class: 'rl-media-caption' }, props.caption,
+        props.metaBefore ? h('span', { class: 'rl-bubble-spacer rl-bubble-spacer-fit', 'aria-hidden': 'true' }, props.metaBefore(), props.time) : h('span', { class: 'rl-bubble-spacer', 'aria-hidden': 'true' }),
+        h('span', { class: 'rl-bubble-meta' }, props.metaBefore ? props.metaBefore() : null, props.time, out || props.status ? h(MessageStatus, { status: props.status || 'read' }) : null)) : null,
+      props.footer ? h('div', { class: 'rl-bubble-footer' }, props.footer) : null));
 }
 
 /* ---------- FileBubble: documents ---------- */
@@ -1182,7 +1192,8 @@ function FileBubble(props) {
               h('b', { key: 'ext', class: 'rl-file-face' }, label))
           : h('span', { class: 'rl-file-icon', 'data-ext': ext, 'data-kind': fileKind(ext) }, h('b', { key: 'ext', class: 'rl-file-face' }, label)),
         h('span', { class: 'rl-file-text' }, h('span', { class: 'rl-file-name' }, props.name), h('span', { class: 'rl-file-sub' }, props.meta))),
-      h('div', { class: 'rl-file-foot' }, h('span', { class: 'rl-bubble-meta' }, props.time, out ? h(MessageStatus, { status: props.status || 'read' }) : null))));
+      h('div', { class: 'rl-file-foot' }, h('span', { class: 'rl-bubble-meta' }, props.metaBefore ? props.metaBefore() : null, props.time, out || props.status ? h(MessageStatus, { status: props.status || 'read' }) : null)),
+      props.footer ? h('div', { class: 'rl-bubble-footer' }, props.footer) : null));
 }
 
 /* ---------- MediaThumb: gallery tile (info panel, media tab) ---------- */

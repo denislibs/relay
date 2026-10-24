@@ -83,7 +83,7 @@ export function previewBody(m: LastMessage, withThumb: boolean): ComponentChildr
   if (m.deleted) return 'Сообщение удалено';
   if (isGroupService(m.service?.type)) {
     const g = getGlobal();
-    return serviceText(m.service!.type as ServiceType, { data: (m.service as { data?: ServiceData }).data, body: m.body, mine: m.senderId === g.me?.userId, sender: personName(m.senderId), meId: g.me?.userId ?? 0 });
+    return serviceText(m.service!.type as ServiceType, { data: (m.service as { data?: ServiceData }).data, body: m.body, mine: m.senderId === g.me?.userId, sender: personName(m.senderId), meId: g.me?.userId ?? 0, fromChannel: m.senderId === 0 });
   }
   // код входа в списке не показываем: цифры — точками, оформление (code над цифрами) отбрасываем
   const code = m.service?.type === 'login_code';

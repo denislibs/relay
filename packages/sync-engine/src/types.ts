@@ -1,6 +1,6 @@
 import type { StickerRef, StickerSetInfo } from '@relay/protocol';
 import type { StoreName } from './schema';
-import type { GroupInfo, MediaCounts, MediaTab, MyMembership } from '@relay/protocol';
+import type { GroupInfo, MediaCounts, MediaTab, MyMembership, Replies } from '@relay/protocol';
 import type { Birthday, Block, ChatFolder, Entity, ForwardInfo, ForwardRef, LinkPreview, MessageButton, PrivacyKey, PrivacyMode, ProfileLink, ServiceType, Todo, TodoInput, TodoServiceData, VideoVariant } from '@relay/protocol';
 
 export type Status = 'pending' | 'sent' | 'read' | 'failed';
@@ -33,7 +33,18 @@ export interface LocalMessage {
   link?: LinkPreview | null;         // превью ссылки (pending — сервер ещё загружает)
   blocks?: Block[] | null;           // «статья»
   buttons?: MessageButton[][] | null; // кнопки под сообщением (inline-клавиатура)
+  post?: boolean;                     // пост канала: от имени канала (senderId 0), вид — не «своё» (isPost)
+  postAuthor?: string;                // подпись автора поста
+  views?: number;                     // просмотры поста: только растут (журнал их не несёт — нет поля ≠ ноль)
+  reactionCounts?: [string, number][]; // реакции поста счётчиками (вместо reactions)
+  myReaction?: string;                // моя реакция на пост
+  threadId?: number;                  // комментарий: id копии поста в группе обсуждения (корень треда)
+  origin?: { chatId: number; id: number };   // копия поста в группе обсуждения: канал и пост
+  replies?: Replies;                  // пост с обсуждением: число комментариев, последние, моя прочитанность треда
 }
+
+/** Отрезки истории треда (как у ленты чата): страницы треда — свой эндпоинт, живой отрезок продлевают комментарии из журнала. */
+export interface ThreadRanges { ranges: [number, number][]; historyStart?: true; seed?: number }
 
 /** Вложение сообщения; у неотправленного id пустой, пока файл не загружен. */
 export interface LocalAttachment {
@@ -46,7 +57,7 @@ export interface LocalAttachment {
 
 export interface LocalChat {
   id: number;
-  kind: 'direct' | 'group';
+  kind: 'direct' | 'group' | 'channel';
   lastReadId: number;
   unread: number;
   knownMaxId: number;     // максимальный id сообщения, который уже учтён в unread
@@ -80,6 +91,12 @@ export interface LocalChat {
   /** вкладка известна подряд от новых: true — целиком, число — с этого id (страницы старше просим с него) */
   mediaDone?: Partial<Record<MediaTab, number | true>>;
   openedAt?: number;      // когда ленту чата открывали в последний раз (мс): уборка урезает давно не открытые (evict.ts)
+  /** группа обсуждения: отрезки тредов по id копии; нет — тред не открывали (перезагрузится при открытии) */
+  threads?: Record<number, ThreadRanges>;
+  /** непрочитанные упоминания меня: число (строка списка, +1 журналом mention) и известные id по возрастанию («к упоминанию») */
+  mentions?: number;
+  mentionIds?: number[];
+  mentionThreads?: Record<number, number>;   // id упоминания в треде → тред (копия поста)
 }
 
 export interface OutboxEntry {
@@ -101,6 +118,7 @@ export interface OutboxEntry {
   blocks?: Block[] | null;          // «статья»
   upload?: { id: string; partSize: number; parts: number; done: number[]; key?: string; base?: string };
   sticker?: StickerRef | null;      // стикер: снимок для показа до ответа, на сервер уходит только id   // большой файл частями: что уже принято (докачка)
+  threadId?: number;                // комментарий в треде (группа обсуждения)
 }
 
 export type Query =
@@ -108,7 +126,13 @@ export type Query =
   /** Окно ленты: без якоря — последние limit (живой хвост); с якорем — limit сообщений, которые
    *  заканчиваются на sort (end), начинаются с него (start) или стоят вокруг него (center). */
   | { kind: 'messages'; chatId: number; limit: number; anchor?: { sort: number; side: 'end' | 'start' | 'center' } }
+  /** тред комментариев (chatId — группа обсуждения, threadId — копия поста): шапка (копия) первой, дальше окно комментариев
+   *  по тем же правилам, что messages; служебные ~window и ~thread {header: ключ шапки или null} */
+  | { kind: 'thread'; chatId: number; threadId: number; limit: number; anchor?: { sort: number; side: 'end' | 'start' | 'center' } }
   | { kind: 'counters' }
+  /** последние уведомления (новое чужое сообщение или упоминание меня), по порядку прихода: одно на сообщение;
+   *  mention — сквозь mute; элемент {key, chatId, id, mention, threadId?, senderId, body, kind, createdAt, …} */
+  | { kind: 'notifications' }
   | { kind: 'status' }
   | { kind: 'uploads' }   // неотправленные файлы во всех чатах: имя, размер, прогресс
   | { kind: 'presence'; userId: number }
@@ -152,7 +176,7 @@ export type Patch =
 
 export type Action =
   /** стикеры (stickers.ts): мои паки/недавние/избранные и паки — из кэша без сети; изменения — очередью операций */
-  | { type: 'sendSticker'; chatId: number; sticker: StickerRef; replyToId?: number | null }
+  | { type: 'sendSticker'; chatId: number; sticker: StickerRef; replyToId?: number | null; threadId?: number }   // threadId — комментарий в треде
   | { type: 'myStickers' }
   | { type: 'stickerSet'; id: number | string; hash?: string }
   | { type: 'installStickerSet'; setId: number; on: boolean; info?: StickerSetInfo }
@@ -163,9 +187,17 @@ export type Action =
   | { type: 'stickersByEmoji'; emoji: string }
   /** управление группой и вступление по ссылке: HTTP мимо очереди ({ok, data} | {ok:false, code}) */
   | { type: 'group'; method: 'GET' | 'POST' | 'PUT' | 'PATCH' | 'DELETE'; path: string; body?: unknown }
-  | { type: 'sendMessage'; chatId: number; body: string; entities?: Entity[]; replyToId?: number | null; noLinkPreview?: boolean; link?: LinkPreview | null; attachment?: LocalAttachment | null; blocks?: Block[] | null }   // blocks — «статья»; attachment — уже загруженный файл (id), например трек из музыки профиля
+  | { type: 'sendMessage'; chatId: number; body: string; entities?: Entity[]; replyToId?: number | null; noLinkPreview?: boolean; link?: LinkPreview | null; attachment?: LocalAttachment | null; blocks?: Block[] | null; threadId?: number }   // threadId — комментарий в треде; blocks — «статья»; attachment — уже загруженный файл (id), например трек из музыки профиля
   | { type: 'seen'; chatId: number; upToId: number }
   | { type: 'loadOlder'; chatId: number }
+  /** тред: страница старее загруженного (как loadOlder у ленты) */
+  | { type: 'loadThread'; chatId: number; threadId: number }
+  /** тред прочитан до upToId: сразу у себя (точка на кнопке поста гаснет), на сервер — пачкой, как seen; основную ленту не трогает */
+  | { type: 'markThreadRead'; chatId: number; threadId: number; upToId: number }
+  /** «к упоминанию»: старейшее непрочитанное упоминание {id, threadId?} или null (только из кэша) */
+  | { type: 'nextMention'; chatId: number }
+  /** «кто прочитал» своё сообщение в небольшой группе: {ok, data: [{id, name}]} | {ok:false, code} */
+  | { type: 'readBy'; chatId: number; id: number }
   | { type: 'retry'; clientId: string }
   /** неотправленное — убрать из очереди и ленты; идущая загрузка файла прерывается */
   | { type: 'discard'; clientId: string }
@@ -176,6 +208,8 @@ export type Action =
   | { type: 'editMessage'; chatId: number; id: number; body: string; entities?: Entity[] }
   | { type: 'deleteMessage'; chatId: number; id: number }
   | { type: 'react'; chatId: number; id: number; emoji: string | null }
+  /** посты канала показаны на экране: просмотр — по разу на пост за сессию, батчем не чаще раза в секунду (channel.ts) */
+  | { type: 'countViews'; chatId: number; ids: number[] }
   | { type: 'sendTodo'; chatId: number; todo: TodoInput; replyToId?: number | null }
   | { type: 'todoToggle'; chatId: number; id: number; itemId: number; done: boolean }
   | { type: 'todoAppend'; chatId: number; id: number; items: string[] }
@@ -211,7 +245,7 @@ export type Action =
   | { type: 'setMute'; chatId: number; muteUntil: number | null }
   /** Закрепить / в архив / отметить непрочитанным: что не задано — как сейчас. Сразу видно, уходит очередью. */
   | { type: 'setChatFlags'; chatId: number; pinned?: boolean; archived?: boolean; unreadMark?: boolean }
-  | { type: 'setNotify'; notifyType: 'direct' | 'group'; muted?: boolean; preview?: boolean }
+  | { type: 'setNotify'; notifyType: 'direct' | 'group' | 'channel'; muted?: boolean; preview?: boolean }
   /** правило конфиденциальности целиком — через очередь операций */
   | { type: 'setPrivacy'; key: PrivacyKey; mode: PrivacyMode; allow?: number[]; deny?: number[] }
   /** чёрный список — через очередь операций */
@@ -240,7 +274,7 @@ export type Action =
   /** раздел «Для разработчиков»: имитатор сети и служебные команды (devlog.ts) */
   | DevAction
   | { type: 'sendFile'; chatId: number; body: string; file: Blob; name: string; mime: string; w?: number | null; h?: number | null; thumb?: string | null; replyToId?: number | null;
-      kind?: 'voice' | 'round' | 'audio' | 'video'; duration?: number; waveform?: string | null; title?: string | null; performer?: string | null; groupId?: string | null; spoiler?: boolean }
+      kind?: 'voice' | 'round' | 'audio' | 'video'; duration?: number; waveform?: string | null; title?: string | null; performer?: string | null; groupId?: string | null; spoiler?: boolean; threadId?: number }
   | { type: 'listened'; chatId: number; id: number }
   /** Переслать сообщения ids (по порядку) из fromChatId в каждый из toChatIds; comment — отдельным сообщением перед ними. */
   /** replyToId — только для копии (hideSender) в один чат: копия — новое сообщение и может быть ответом; пересылка с «Переслано от» — нет */
@@ -283,6 +317,7 @@ export interface EngineConfig {
   /** уборка кэша (evict.ts): через сколько после записи в IDB, мс (по умолчанию 5000), и не чаще чем (по умолчанию 10 минут) */
   evictDelayMs?: number;
   evictEveryMs?: number;
+  viewsFlushMs?: number;  // просмотры постов: не чаще раза в столько мс (по умолчанию 1000 — лимит сервера)
   typingMs?: number;      // сколько держать «печатает…» после последнего кадра (по умолчанию 6000)   // диалогов в странице (по умолчанию 100)
 }
 

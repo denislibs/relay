@@ -6,9 +6,9 @@ import { getRules, privacyCtx, validRule, withRule, writeRule } from './privacy'
 import { reannounce, type Publish } from './presence';
 import { republishUser, selfSeq, viewersOf } from './profile';
 
-export const NOTIFY_TYPES: readonly NotifyType[] = ['direct', 'group'];
+export const NOTIFY_TYPES: readonly NotifyType[] = ['direct', 'group', 'channel'];
 const DEFAULT_TTL = 180;
-export const defaultNotify = (): Record<NotifyType, NotifyPref> => ({ direct: { muted: false, preview: true }, group: { muted: false, preview: true } });
+export const defaultNotify = (): Record<NotifyType, NotifyPref> => ({ direct: { muted: false, preview: true }, group: { muted: false, preview: true }, channel: { muted: false, preview: true } });
 
 type Row = { notify: Partial<Record<NotifyType, Partial<NotifyPref>>> | null; sessions_ttl_days: number; folders?: unknown };
 

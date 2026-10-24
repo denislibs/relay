@@ -78,9 +78,10 @@ export async function unarchiveByMessage(userId: number, chatId: number, body: u
   const messageId = Number((body as { messageId?: unknown } | null)?.messageId);
   if (!Number.isInteger(messageId) || messageId <= 0) throw new DomainError('bad_frame', 'messageId');
   return sql.begin(async (tx) => {
-    const [cur] = await tx`select pinned_at, archived, unread_mark, archived_at_id, (mute_until is not null and mute_until > now()) as muted
-                             from chat_members where chat_id = ${chatId} and user_id = ${userId} for update`;
+    const [cur] = await tx`select m.pinned_at, m.archived, m.unread_mark, m.archived_at_id, (m.mute_until is not null and m.mute_until > now()) as muted, c.deleted_at
+                             from chat_members m join chats c on c.id = m.chat_id where m.chat_id = ${chatId} and m.user_id = ${userId} for update of m`;
     if (!cur) throw new DomainError('not_member');
+    if (cur.deleted_at) throw new DomainError('not_found', 'chat');
     const was = toFlags(cur as Row);
     const muted = !!cur.muted;   // в базе: 'infinity' — навсегда
     const [m] = await tx`select sender_id from messages where chat_id = ${chatId} and id = ${messageId} and not deleted`;

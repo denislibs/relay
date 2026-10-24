@@ -2,6 +2,8 @@ import { afterAll, beforeEach, expect, test } from 'bun:test';
 import { sql } from '../src/db';
 import { createServer } from '../src/http';
 import { sendMessage } from '../src/domain/messages';
+import '../src/jobs/kinds';
+import { drainJobs } from '../src/jobs/worker';
 import { chatEventsOf, journalOf, makeChat, resetDb } from './helpers';
 
 const server = createServer({ port: 0 });
@@ -220,6 +222,8 @@ test('protected group: messages cannot be forwarded out; delete group removes it
   await expect(sendMessage(b.userId, { chatId: other, clientId: crypto.randomUUID(), body: '', forward: { chatId: id, id: message.id } })).rejects.toMatchObject({ code: 'forbidden' });
   expect((await call(b, 'DELETE', `/groups/${id}`)).status).toBe(403);
   await ok(a, 'DELETE', `/groups/${id}`);
+  expect((await call(b, 'GET', `/chats/${id}/messages`)).status).toBe(404);   // мягко удалён: сразу «пропал»
+  await drainJobs();   // chat.purge: chatRemoved участникам и строки — страницами
   expect(await lastUpdate(b, 'chatRemoved')).toMatchObject({ chatId: id });
   expect((await sql`select 1 from chats where id = ${id}`).length).toBe(0);
 });

@@ -114,17 +114,24 @@ test('typing in a group travels over the chat topic across processes (sender inc
   wa.close(); wb.close();
 });
 
-test('a push with too many events to fit the notify arrives with empty items (catch up via syncChat)', async () => {
-  const a = await login('Анна'), b = await login('Борис');
-  const id = await group(a, [b, await login('Вера')]);
-  const wb = await connect(b);
-  await hello(wb);
-  const push = nextFrame(wb, (f) => f.op === 'push' && f.chatId === id);
-  await say(a, id, 'я'.repeat(4000));   // одно событие на 8 КБ — в 8000 байт не влезает
-  const f = (await push) as Extract<ServerFrame, { op: 'push' }>;
-  expect(f).toMatchObject({ chatId: id, from: 1, to: 2, items: [] });
-  send(wb, { op: 'syncChat', reqId: 'r', chatId: id, since: 1 });
-  const upd = (await nextFrame(wb, (f) => f.op === 'chatUpdates')) as Extract<ServerFrame, { op: 'chatUpdates' }>;
-  expect(upd.items.length).toBe(1);
-  wb.close();
+test('a long event (does not fit the notify) is read once per process and arrives as a full push; a short one after it keeps the order', async () => {
+  const a = await login('Анна'), b = await login('Борис'), c = await login('Вера');
+  const id = await group(a, [b, c]);
+  const wb = await connect(b, 0), wc = await connect(c, 1);
+  await hello(wb); await hello(wc);
+  const gb = collect(wb), gc = collect(wc);
+  // одно событие на 8 КБ — в 8000 байт NOTIFY не влезает; следующее короткое уходит сразу за ним
+  const long = await say(a, id, 'я'.repeat(4000));
+  const short = await say(a, id, 'коротко');
+  const t0 = Date.now();
+  while ((gb.filter((f) => f.op === 'push').length < 2 || gc.filter((f) => f.op === 'push').length < 2) && Date.now() - t0 < 3000) await Bun.sleep(20);
+  for (const got of [gb, gc]) {
+    const pushes = got.filter((f) => f.op === 'push' && f.chatId === id) as Extract<ServerFrame, { op: 'push' }>[];
+    expect(pushes.map((p) => [p.from, p.to])).toEqual([[1, 2], [2, 3]]);   // по порядку seq
+    expect(pushes[0].items).toMatchObject([{ seq: 2, update: { type: 'newMessage', message: { id: long.message.id, body: 'я'.repeat(4000) } } }]);
+    expect(pushes[1].items).toMatchObject([{ seq: 3, update: { type: 'newMessage', message: { id: short.message.id, body: 'коротко' } } }]);
+  }
+  // кадр у всех одинаковый — догонять чат (syncChat) никому не нужно
+  expect(gc.filter((f) => f.op === 'push')).toEqual(gb.filter((f) => f.op === 'push'));
+  wb.close(); wc.close();
 });

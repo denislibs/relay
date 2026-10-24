@@ -134,7 +134,8 @@ export function VoiceBubble(props) {
 
   var unreadDot = props.unread;
   return h(MsgLine, { aside: props.aside, class: cx('rl-msgline', out && 'rl-msgline-out', props.groupStart && 'rl-msgline-gap') },
-    h('div', { class: cx('rl-bubble rl-vb', out ? 'rl-bubble-out' : 'rl-bubble-in-side', props.tail && 'rl-bubble-tail', props.appear && (out ? 'rl-appear-out' : 'rl-appear-in')) },
+    // пост канала: metaBefore (просмотры, подпись) делает мету шире — она встаёт строкой под волной (rl-meta-flow), footer — кнопка комментариев
+    h('div', { class: cx('rl-bubble rl-vb', out ? 'rl-bubble-out' : 'rl-bubble-in-side', props.tail && 'rl-bubble-tail', props.metaBefore && 'rl-meta-flow', props.footer && 'rl-bubble-has-footer', props.appear && (out ? 'rl-appear-out' : 'rl-appear-in')) },
       props.fwd ? h(ForwardTitle, { fwd: props.fwd }) : null,
       props.reply ? h(ReplyQuote, Object.assign({ inBubble: true }, props.reply)) : null,
       h('div', { class: 'rl-vb-row' },
@@ -151,5 +152,6 @@ export function VoiceBubble(props) {
           h('div', { class: 'rl-vb-foot' },
             h('span', { ref: timeRef, class: 'rl-vb-time' }, fmt(duration)),
             unreadDot ? h('span', { class: 'rl-vb-dot', 'aria-label': 'Не прослушано' }) : null))),
-      h('span', { class: 'rl-bubble-meta' }, props.time, out ? h(MessageStatus, { status: props.status || 'sent' }) : null)));
+      h('span', { class: 'rl-bubble-meta' }, props.metaBefore ? props.metaBefore() : null, props.time, out || props.status ? h(MessageStatus, { status: props.status || 'sent' }) : null),
+      props.footer ? h('div', { class: 'rl-bubble-footer' }, props.footer) : null));
 }

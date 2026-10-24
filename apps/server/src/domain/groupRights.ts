@@ -1,6 +1,6 @@
 import {
-  allAdminRights, allRights, normalizeAdminRights, normalizeRights, narrowRights,
-  type AdminRight, type AdminRights, type GroupInfo, type GroupReactions, type GroupRole, type MemberRight, type MemberRow, type MemberRights, type MyMembership, type ProfilePhoto,
+  allAdminRights, allRights, normalizeAdminRights, normalizeRights, narrowRights, subscriberRights,
+  type AdminRight, type CommunityKind, type AdminRights, type GroupInfo, type GroupReactions, type GroupRole, type MemberRight, type MemberRow, type MemberRights, type MyMembership, type ProfilePhoto,
 } from '@relay/protocol';
 import { sql, type Tx } from '../db';
 import { DomainError } from './errors';
@@ -14,7 +14,7 @@ type Db = Tx | typeof sql;
 export interface GroupCtx {
   chatId: number;
   userId: number;
-  kind: 'direct' | 'group';
+  kind: 'direct' | 'group' | 'channel';
   role: GroupRole;
   admin: AdminRights | null;      // у владельца — все
   rights: MemberRights;           // что можно мне как участнику (у админа и владельца — всё)
@@ -33,44 +33,55 @@ const reactionsOf = (raw: unknown): GroupReactions => {
   return { mode, allowed: mode === 'some' && Array.isArray(o.allowed) ? o.allowed.filter((e): e is string => typeof e === 'string').slice(0, 100) : [] };
 };
 
-/** Для записи (for update) — когда операция меняет состав или роли, чтобы параллельные не разошлись. */
+/** Для записи (for update) — когда операция меняет состав или роли, чтобы параллельные не разошлись.
+ *  Удалённый (мягко, deleted_at) чат — not_found: строки участников ещё живы, пока их не убрала chat.purge. */
 export async function groupCtx(db: Db, chatId: number, userId: number, opts: { lock?: boolean } = {}): Promise<GroupCtx> {
   const [r] = await db`
-    select c.kind, c.rights as chat_rights, c.slow_mode, c.reactions, c.protected, c.owner_id,
+    select c.kind, c.rights as chat_rights, c.slow_mode, c.reactions, c.protected, c.owner_id, c.deleted_at,
            m.role, m.admin_rights, m.restricted, m.history_from
       from chat_members m join chats c on c.id = m.chat_id
      where m.chat_id = ${chatId} and m.user_id = ${userId}
      ${opts.lock ? db`for update of c` : db``}`;
   if (!r) throw new DomainError('not_member');
+  if (r.deleted_at) throw new DomainError('not_found', 'chat');
   return ctxFromRow(chatId, userId, r);
 }
 
 /** Строка (chats + chat_members) → права. Колонки: kind, chat_rights, slow_mode, reactions, protected, owner_id, role, admin_rights, restricted, history_from. */
 export function ctxFromRow(chatId: number, userId: number, r: Record<string, unknown>): GroupCtx {
-  const kind = r.kind as 'direct' | 'group';
+  const kind = r.kind as GroupCtx['kind'];
+  const community = kind !== 'direct';
+  const ck: CommunityKind = kind === 'channel' ? 'channel' : 'group';
   const defaults = normalizeRights(r.chat_rights);
-  const role: GroupRole = kind === 'group' ? (r.role as GroupRole) ?? 'member' : 'member';
-  const admin = role === 'owner' ? allAdminRights() : role === 'admin' ? normalizeAdminRights(r.admin_rights) : null;
+  const role: GroupRole = community ? (r.role as GroupRole) ?? 'member' : 'member';
+  const admin = role === 'owner' ? allAdminRights(ck) : role === 'admin' ? normalizeAdminRights(r.admin_rights, ck) : null;
   const restricted = kind === 'group' && role === 'member' && r.restricted ? narrowRights(normalizeRights(r.restricted), defaults) : null;
-  const rights = kind !== 'group' || admin ? allRights() : restricted ?? defaults;
+  // подписчик канала не пишет ничего (только реакции, если их разрешает чат); права участников канала не настраиваются
+  const rights = !community || admin ? allRights() : kind === 'channel' ? subscriberRights() : restricted ?? defaults;
   return {
     chatId, userId, kind, role, admin, rights, restricted, defaults,
     slowMode: kind === 'group' ? Number(r.slow_mode ?? 0) : 0,
-    reactions: kind === 'group' ? reactionsOf(r.reactions) : { mode: 'all', allowed: [] },
+    reactions: community ? reactionsOf(r.reactions) : { mode: 'all', allowed: [] },
     protected: !!r.protected,
     historyFrom: Number(r.history_from ?? 0),
     ownerId: r.owner_id == null ? null : Number(r.owner_id),
   };
 }
 
+/** Только группа: права участников, медленный режим, скрытая история, исключения, звания. */
 export function isGroup(ctx: GroupCtx): void {
   if (ctx.kind !== 'group') throw new DomainError('bad_frame', 'not a group');
+}
+
+/** Группа или канал: информация, фото, админы, ссылки, заявки, баны, реакции, юзернейм, удаление, передача. */
+export function isCommunity(ctx: GroupCtx): void {
+  if (ctx.kind === 'direct') throw new DomainError('bad_frame', 'not a group');
 }
 
 /** Право администратора (владелец — всегда). */
 export const hasAdmin = (ctx: GroupCtx, right: AdminRight) => !!ctx.admin?.[right];
 export function requireAdmin(ctx: GroupCtx, right: AdminRight): void {
-  isGroup(ctx);
+  isCommunity(ctx);
   if (!hasAdmin(ctx, right)) throw new DomainError('forbidden', right);
 }
 
@@ -82,7 +93,8 @@ export function requireRight(ctx: GroupCtx, right: MemberRight): void {
 
 /** Менять информацию: админ с правом или участник, которому это разрешено. */
 export const canChangeInfo = (ctx: GroupCtx) => hasAdmin(ctx, 'info') || (ctx.kind === 'group' && can(ctx, 'info'));
-export const canPin = (ctx: GroupCtx) => ctx.kind !== 'group' || hasAdmin(ctx, 'pin') || can(ctx, 'pin');
+/** Закреп: личный — любой; группа — админ с правом или участник, которому разрешено; канал — тот, кто публикует. */
+export const canPin = (ctx: GroupCtx) => ctx.kind === 'direct' || (ctx.kind === 'channel' ? hasAdmin(ctx, 'post') : hasAdmin(ctx, 'pin') || can(ctx, 'pin'));
 export const canInvite = (ctx: GroupCtx) => hasAdmin(ctx, 'invite') || (ctx.kind === 'group' && can(ctx, 'invite'));
 
 export function myMembership(ctx: GroupCtx, rank: string | null): MyMembership {
@@ -92,10 +104,10 @@ export function myMembership(ctx: GroupCtx, rank: string | null): MyMembership {
 const photoOf = (raw: unknown): ProfilePhoto | null => raw && typeof raw === 'object' ? raw as ProfilePhoto : null;
 
 /** Сводка группы. requests — только тем, кто может принимать заявки (остальным 0). */
-export async function groupInfo(db: Db, chatId: number): Promise<Omit<GroupInfo, 'requests'> & { pending: number }> {
+export async function groupInfo(db: Db, chatId: number): Promise<Omit<GroupInfo, 'requests'> & { pending: number; kind: string }> {
   const [c] = await db`
-    select title, about, photo, owner_id, rights, slow_mode, history_hidden, join_approval, username, reactions, protected,
-           (select count(*)::int from chat_members m where m.chat_id = c.id) as members,
+    select kind, title, about, photo, owner_id, rights, slow_mode, history_hidden, join_approval, username, reactions, protected,
+           members_count, signatures, linked_chat_id,
            (select count(*)::int from chat_join_requests r where r.chat_id = c.id) as pending
       from chats c where id = ${chatId}`;
   return {
@@ -110,8 +122,11 @@ export async function groupInfo(db: Db, chatId: number): Promise<Omit<GroupInfo,
     username: (c.username as string | null) ?? null,
     reactions: reactionsOf(c.reactions),
     protected: !!c.protected,
-    members: Number(c.members),
+    members: Number(c.members_count),
+    signatures: !!c.signatures,
+    linkedChatId: c.linked_chat_id == null ? null : Number(c.linked_chat_id),
     pending: Number(c.pending),
+    kind: c.kind as string,
   };
 }
 
@@ -126,10 +141,21 @@ async function approvers(db: Db, chatId: number): Promise<Set<number>> {
  * личным joinRequests тем, кто их принимает; extra — кто только что перестал принимать (получит 0).
  */
 export async function broadcastGroup(tx: Tx, chatId: number, extra: number[] = []): Promise<void> {
-  const { pending, ...info } = await groupInfo(tx, chatId);
-  await chatEvent(tx, chatId, { type: 'groupUpdated', chatId, group: { ...info, requests: 0 } }, 'group');
+  const { pending, kind, ...info } = await groupInfo(tx, chatId);
+  // владелец канала подписчикам не раскрывается: в общую запись — null (админы знают его из сводки списка)
+  await chatEvent(tx, chatId, { type: 'groupUpdated', chatId, group: { ...info, ...(kind === 'channel' ? { ownerId: null } : {}), requests: 0 } }, 'group');
   const can = await approvers(tx, chatId);
   await appendUpdates(tx, [...new Set([...can, ...extra])].map((userId) => ({ userId, update: { type: 'joinRequests', chatId, requests: can.has(userId) ? pending : 0 } })));
+}
+
+/**
+ * Только заявки: личные joinRequests тем, кто их принимает, без groupUpdated в журнал чата. Канал — так всегда:
+ * заявка одного человека не должна расходиться событием по 200 000 подписчиков (информация канала не менялась).
+ */
+export async function broadcastRequests(tx: Tx, chatId: number): Promise<void> {
+  const [{ pending }] = await tx`select count(*)::int as pending from chat_join_requests where chat_id = ${chatId}`;
+  const can = await approvers(tx, chatId);
+  await appendUpdates(tx, [...can].map((userId) => ({ userId, update: { type: 'joinRequests' as const, chatId, requests: Number(pending) } })));
 }
 
 /** Моя роль или права изменились — только этому человеку. */
@@ -156,12 +182,15 @@ export interface MembersDelta { upsert?: number[]; remove?: number[]; joined?: n
 /**
  * Состав или роли изменились — запись `members` всем участникам (и вышедшим, чтобы их список сбросился).
  * Новички (joined): с теми, кого они раньше не видели (нет другого общего чата и контакта — правило viewersOf),
- * обмен профилями — userUpdated каждому в его представлении; всё пачками, группа не больше GROUP_MEMBERS_MAX.
+ * обмен профилями — userUpdated каждому в его представлении; всё пачками, группа не больше MEMBERS_MAX.group.
  */
 export async function broadcastMembers(tx: Tx, chatId: number, delta: MembersDelta): Promise<void> {
   const upsertIds = [...new Set(delta.upsert ?? [])], remove = [...new Set(delta.remove ?? [])];
   const rows = upsertIds.length ? await tx`select user_id, role, rank from chat_members where chat_id = ${chatId} and user_id = any(${upsertIds}::bigint[])` : [];
   const upsert: MemberRow[] = rows.map((r) => ({ userId: Number(r.user_id), role: ((r.role as string) ?? 'member') as MemberRow['role'], rank: (r.rank as string | null) ?? null }));
+  // канал: подписчики не видят состав и друг друга — ни members в журнал, ни обмена профилями
+  const [c] = await tx`select kind from chats where id = ${chatId}`;
+  if (c?.kind === 'channel') return;
   const members = await membersOf(tx, chatId);
   await chatEvent(tx, chatId, { type: 'members', chatId, upsert, remove }, 'group');   // вышедшие получают chatRemoved
   const inGroup = new Set(members);
@@ -176,6 +205,7 @@ async function exchangeProfiles(tx: Tx, chatId: number, members: number[], joine
   // кто уже видел друг друга: общий чат, кроме этой группы, или контакт (как viewersOf: видит тот, у кого человек в контактах)
   const seen = new Set<string>();
   for (const r of await tx`select distinct a.user_id as a, b.user_id as b from chat_members a join chat_members b on b.chat_id = a.chat_id and b.user_id <> a.user_id
+                              join chats c on c.id = a.chat_id and c.kind <> 'channel'   -- канал не делает профили видимыми
                             where a.chat_id <> ${chatId} and a.user_id = any(${joined}::bigint[]) and b.user_id = any(${members}::bigint[])`) {
     seen.add(`${r.a}:${r.b}`); seen.add(`${r.b}:${r.a}`);
   }
@@ -209,7 +239,7 @@ export function summaryFromRow(chatId: number, userId: number, r: Record<string,
       title: (r.title as string | null) ?? '',
       about: (r.about as string | null) ?? '',
       photo: photoOf(r.g_photo),
-      ownerId: r.owner_id == null ? null : Number(r.owner_id),
+      ownerId: r.owner_id == null || (ctx.kind === 'channel' && !ctx.admin) ? null : Number(r.owner_id),   // канал: владельца видят только админы
       rights: ctx.defaults,
       slowMode: ctx.slowMode,
       historyHidden: !!r.history_hidden,
@@ -219,6 +249,8 @@ export function summaryFromRow(chatId: number, userId: number, r: Record<string,
       protected: ctx.protected,
       members: Number(r.g_members ?? 0),
       requests: hasAdmin(ctx, 'invite') ? Number(r.g_pending ?? 0) : 0,
+      signatures: !!r.signatures,
+      linkedChatId: r.linked_chat_id == null ? null : Number(r.linked_chat_id),
     },
     me: myMembership(ctx, (r.rank as string | null) ?? null),
   };
@@ -227,7 +259,8 @@ export function summaryFromRow(chatId: number, userId: number, r: Record<string,
 /** Сводка для списка чатов (снимок): группа и моё место в ней. */
 export async function groupSummary(db: Db, chatId: number, userId: number): Promise<{ group: GroupInfo; me: MyMembership }> {
   const ctx = await groupCtx(db, chatId, userId);
-  const { pending, ...info } = await groupInfo(db, chatId);
+  const { pending, kind, ...info } = await groupInfo(db, chatId);
+  if (kind === 'channel' && !ctx.admin) info.ownerId = null;   // владельца канала видят только админы
   const [m] = await db`select rank from chat_members where chat_id = ${chatId} and user_id = ${userId}`;
   return { group: { ...info, requests: hasAdmin(ctx, 'invite') ? pending : 0 }, me: myMembership(ctx, (m?.rank as string | null) ?? null) };
 }

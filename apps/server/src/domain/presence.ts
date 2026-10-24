@@ -151,8 +151,10 @@ export function resetPresence(): void {
  * и владелец — создатель группы (автор служебного «создал(а) группу»). Онлайн сверху, дальше — по последнему визиту.
  */
 export async function chatMembers(viewer: number, chatId: number): Promise<{ ownerId: number | null; members: (PresenceItem & { name: string; username: string | null; photo: unknown })[] }> {
-  const [me] = await sql`select 1 from chat_members where chat_id = ${chatId} and user_id = ${viewer}`;
+  const [me] = await sql`select m.role, c.kind, c.deleted_at from chat_members m join chats c on c.id = m.chat_id where m.chat_id = ${chatId} and m.user_id = ${viewer}`;
   if (!me) throw new DomainError('not_member');
+  if (me.deleted_at) throw new DomainError('not_found', 'chat');
+  if (me.kind === 'channel' && me.role === 'member') throw new DomainError('forbidden', 'members');   // подписчики не видят состав канала
   const rows = await sql`
     select u.id, ${nameForSql(viewer)} as name, u.username, u.last_seen_at, m.role, m.rank,
            case when exists (select 1 from blocks b where b.owner_id = u.id and b.user_id = ${viewer}) then null else u.photo end as photo
