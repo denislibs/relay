@@ -2346,3 +2346,16 @@ html[data-blur="0"] .rl-menu { -webkit-backdrop-filter: none; backdrop-filter: n
 /* закрытие — как у выпадающего меню (rl-pop-out): быстрее открытия, лёгкое сжатие к 0.95, ускорение к концу */
 .rl-symbols-pop.is-closing { transform: scale(.95); transition-duration: var(--dur-fast); transition-timing-function: var(--ease-in); }
 html[data-anim="0"] .rl-symbols-pop { transition: none; }
+
+/* ---------- Пост канала: просмотры и подпись в мете, кнопка комментариев внизу пузыря ---------- */
+/* место под мету поста держит её невидимая копия (ширина по содержимому, высота строки не растёт) */
+.rl-bubble-spacer-fit { width: auto !important; height: 1px; overflow: hidden; visibility: hidden; display: inline-flex; gap: 3px; padding-left: 12px; font: 400 12px/15px var(--font-sans); font-variant-numeric: tabular-nums; white-space: nowrap; }
+.rl-post-views { display: inline-flex; align-items: center; gap: 2px; margin-right: 3px; }
+.rl-post-sign { max-width: 140px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; margin-right: 3px; }
+.rl-post-pin { display: inline-flex; margin-right: 1px; }
+.rl-bubble-footer { margin: 6px -8px -6px -10px; border-top: 1px solid var(--line); border-radius: 0 0 var(--bubble-r, 12px) var(--bubble-r, 12px); overflow: hidden; }
+.rl-media .rl-bubble-footer { margin: 0; }
+/* с кнопкой внизу мета стоит над ней (кнопка — 40 px + линия) */
+.rl-bubble-has-footer > .rl-bubble-meta { bottom: 46px; }
+.rl-bubble-footer > * { min-height: 40px; }
+.rl-media .rl-media-caption + .rl-bubble-footer, .rl-media .rl-media-frame + .rl-bubble-footer { border-top: 1px solid var(--line); }
