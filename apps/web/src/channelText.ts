@@ -12,6 +12,22 @@ export function commentsLabel(count: number): string {
 /** Шапка треда: «N комментариев»; пока пусто — «Комментарии». */
 export const threadTitle = (count: number): string => (count > 0 ? commentsLabel(count) : 'Комментарии');
 
+/**
+ * Кнопка «N комментариев» под постом (как в Telegram): участник группы обсуждения и подписчик канала открывают тред
+ * (подписчик — гостем, не вступая; если группа пускает писать только участников, тред покажет «Вступить в группу»);
+ * копии поста ещё нет (replies не пришли) — ждать; не подписан на канал — подсказка подписаться.
+ */
+export function commentsAction(o: { member: boolean; subscriber: boolean; replies: boolean }): 'thread' | 'wait' | 'hint' {
+  if (!o.member && !o.subscriber) return 'hint';
+  return o.replies ? 'thread' : 'wait';
+}
+
+/** Вместо поля ввода в треде гостя: пишут только участники — «Вступить в группу», вступление по заявке — «Подать заявку». */
+export function guestJoinLabel(g: { joinToSend: boolean; joinApproval: boolean } | null | undefined): string | null {
+  if (!g) return null;
+  return g.joinApproval ? 'Подать заявку' : g.joinToSend ? 'Вступить в группу' : null;
+}
+
 /** «N подписчиков» — в шапке канала, в «Информации», в строке списка. */
 export const subscribersText = (n: number): string => `${n} ${plural(n, 'подписчик', 'подписчика', 'подписчиков')}`;
 

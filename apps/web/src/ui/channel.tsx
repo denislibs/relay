@@ -3,7 +3,7 @@ import type { Replies } from '@relay/protocol';
 import type { Item } from '@relay/sync-engine/src/types';
 import { hasUnreadReplies } from '@relay/sync-engine/src/channel';
 import { useEffect, useState } from 'preact/hooks';
-import { commentsLabel, compactCount } from '../channelText';
+import { commentsAction, commentsLabel, compactCount, guestJoinLabel } from '../channelText';
 import { groupCall, openInner, readBy } from '../data';
 import { useGlobal } from '../global';
 import { errorText } from '../groups';
@@ -33,7 +33,8 @@ const NO_RECENT: number[] = [];
 
 /**
  * Кнопка под постом: до трёх аватаров последних комментаторов, «N комментариев» / «Оставить комментарий», точка
- * непрочитанного. Участник группы обсуждения — тред поверх стека; не участник — подсказка вступить.
+ * непрочитанного. Участник группы обсуждения и подписчик канала — тред поверх стека (подписчик — не вступая, как в
+ * Telegram); не подписан на канал — подсказка подписаться (commentsAction).
  */
 export function Comments({ m, groupId }: { m: Item; groupId?: number | null }) {
   // replies ещё нет (копия поста в группе не пришла, а не участнику группы может и не прийти) — заглушка «Оставить
@@ -44,19 +45,21 @@ export function Comments({ m, groupId }: { m: Item; groupId?: number | null }) {
   // имена для инициалов: свои — из профиля (себя в people нет), чужие — из people (неизвестные — без имени, иконкой)
   const names = useGlobal((s) => recent.map((id) => (id === s.me?.userId ? s.me.name : s.people[id]?.name ?? '')));
   const member = useGlobal((s) => gid != null && s.chats.some((c) => c.id === gid));
+  const subscriber = useGlobal((s) => s.chats.find((c) => c.id === m.chatId)?.me != null);
+  const action = commentsAction({ member, subscriber, replies: !!r });
   const [ask, setAsk] = useState(false);
   useEffect(() => { if (recent.length) wantPeople(recent); }, [recent.join(',')]);
   const unread = hasUnreadReplies(m as never);
   const count = r?.count ?? 0;
   const open = (e: MouseEvent) => {
     e.stopPropagation();
-    if (!member) setAsk(true);
-    else if (r) openInner({ chatId: r.chatId, threadId: r.copyId });
-    // участник, а копии ещё нет — тред открывать не с чего, кнопка оживёт с приходом replies
+    if (action === 'hint') setAsk(true);
+    else if (action === 'thread' && r) openInner({ chatId: r.chatId, threadId: r.copyId });
+    // копии ещё нет — тред открывать не с чего, кнопка оживёт с приходом replies
   };
   return (
     <>
-      <button type="button" class="app-comments" onPointerDown={ripple} onClick={open} aria-disabled={!r && member ? 'true' : undefined} aria-label={commentsLabel(count) + (unread ? ', есть новые' : '')}>
+      <button type="button" class="app-comments" onPointerDown={ripple} onClick={open} aria-disabled={action === 'wait' ? 'true' : undefined} aria-label={commentsLabel(count) + (unread ? ', есть новые' : '')}>
         {recent.length ? (
           <span class="app-comments-avas" aria-hidden="true">
             {recent.map((id, i) => <Avatar key={id} name={names[i]} tone={peerTone(id)} size={24} {...senderAvatar(id)} />)}
@@ -68,7 +71,7 @@ export function Comments({ m, groupId }: { m: Item; groupId?: number | null }) {
       </button>
       <Modal open={ask} onClose={() => setAsk(false)} title="Комментарии" size="confirm" closeButton={false}
         actions={[<button key="ok" type="button" class="rl-mdl-btn" onClick={() => setAsk(false)}>Понятно</button>]}>
-        <p class="rl-mdl-text">Вступите в группу обсуждения, чтобы читать и писать комментарии. Ссылку на неё можно найти в описании канала или попросить у администраторов.</p>
+        <p class="rl-mdl-text">Подпишитесь на канал, чтобы читать и писать комментарии.</p>
       </Modal>
     </>
   );
@@ -102,6 +105,33 @@ export function ChannelBar({ chatId, member, username, approval }: { chatId: num
             <span class={spin ? 'is-busy' : undefined}>{approval ? 'Подать заявку' : 'Подписаться'}</span>
           </button>
         )}
+      </div>
+    </div>
+  );
+}
+
+/**
+ * Тред гостя (не участник группы обсуждения), где писать могут только участники или вступают по заявке: вместо поля
+ * ввода — «Вступить в группу» / «Подать заявку» (как в Telegram). Вступил — строка группы приходит журналом, поле ввода
+ * появляется само; заявка — тост.
+ */
+export function GuestJoinBar({ chatId, guest }: { chatId: number; guest: { joinToSend: boolean; joinApproval: boolean } }) {
+  const [busy, setBusy] = useState(false);
+  const [sent, setSent] = useState(false);
+  const spin = useMinVisible(busy, { delay: 150, min: 600 });
+  const join = async () => {
+    setBusy(true);
+    const r = await groupCall<{ chatId: number; requested: boolean }>('POST', `/groups/${chatId}/join`);
+    setBusy(false);
+    if (!r.ok) { showToast(errorText(r.code)); return; }
+    if (r.data.requested) { setSent(true); showToast('Заявка отправлена — администраторы её рассмотрят'); }
+  };
+  return (
+    <div class="rl-composer-wrap app-plate-wrap">
+      <div class="rl-composer app-plate app-channel-bar">
+        <button type="button" class="app-channel-btn app-channel-join" disabled={busy || sent} onPointerDown={ripple} onClick={() => void join()}>
+          <span class={spin ? 'is-busy' : undefined}>{sent ? 'Заявка отправлена' : guestJoinLabel(guest)}</span>
+        </button>
       </div>
     </div>
   );

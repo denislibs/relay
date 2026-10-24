@@ -2,7 +2,7 @@ import { bindStickers } from './stickers';
 import { showToast } from './settingsData';
 import { coverThumb, readAudioTags } from './id3';
 import { getPrefs } from './prefs';
-import type { Block, LinkPreview, TodoInput } from '@relay/protocol';
+import type { Block, LinkPreview, ThreadGuest, TodoInput } from '@relay/protocol';
 import { playSentSound } from './sound';
 import { beginHeavyAnimation, nudgeWallpaper, requestMutation, toBase64 } from '@relay/ui';
 import { connectEngine, EngineClient, Mirror } from '@relay/sync-engine/src/client';
@@ -284,7 +284,7 @@ function startFeed(frame: ChatFrame, anchor: Anchor | undefined, onFirst: (patch
     const meta = (s.mirror.meta('~window') as unknown as FeedMeta) ?? null;
     const patch: Partial<ChatFrame> = { messages: s.mirror.list() as Item[], feedMeta: meta };
     // тред: шапка (копия поста) первой; загружен ли с сервера (пока нет — «Загрузка…», а не «нет комментариев»)
-    if (frame.threadId != null) { const th = s.mirror.meta('~thread'); patch.thread = { header: (th?.header as string | null) ?? null, loaded: !!th?.loaded }; }
+    if (frame.threadId != null) { const th = s.mirror.meta('~thread'); patch.thread = { header: (th?.header as string | null) ?? null, loaded: !!th?.loaded, guest: (th?.guest as ThreadGuest | undefined) ?? null }; }
     toastUploadRefusals(patch.messages!);
     if (s.first) first(patch); else patchFrame(frame.key, patch);
     // окно дошло до последних сообщений — снова живой хвост (новые сообщения появятся сами)
