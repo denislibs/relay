@@ -13,8 +13,15 @@ test('a quote says what the message is, for every kind, with a thumbnail for pic
   expect(txt({ senderId: 1, body: '', kind: 'file', attachment: { kind: 'file', mime: 'application/pdf', name: 'отчёт.pdf' } }).text).toBe('📎 отчёт.pdf');
   expect(txt({ senderId: 1, body: '', kind: 'voice', attachment: { kind: 'voice', mime: 'audio/ogg', name: 'v.ogg', duration: 75 } }).text).toBe('🎤 Голосовое сообщение · 1:15');
   expect(txt({ senderId: 1, body: '', kind: 'todo', todo: { title: 'Покупки' } }).text).toBe('☑️ Покупки');
-  expect(txt({ senderId: 1, body: 'уже нет', deleted: true }).text).toBe('Сообщение удалено');
+  expect(txt({ senderId: 1, body: 'уже нет', deleted: true }).text).toBe('Удалённое сообщение');   // исходник удалён, как в Telegram
   expect(txt({ senderId: 1, body: 'просто текст' })).toEqual({ text: 'просто текст', thumb: null });
   // фото с id — настоящий файл, миниатюра подложкой
   expect(quoteContent({ senderId: 1, body: '', kind: 'photo', attachment: { id: 'abc', kind: 'photo', mime: 'image/png', name: 'p.png', thumb } })).toMatchObject({ thumbSrc: '/files/abc', thumbBg: thumb });
+});
+
+test('a quote of a deleted source: «Удалённое сообщение» without thumbnail or sticker, whatever the stub still carries', () => {
+  const thumb = 'data:image/jpeg;base64,AAAA';
+  expect(txt({ senderId: 0, body: '', kind: 'text', deleted: true, attachment: null })).toEqual({ text: 'Удалённое сообщение', thumb: null });
+  expect(txt({ senderId: 1, body: '', kind: 'photo', deleted: true, attachment: { id: 'x', kind: 'photo', mime: 'image/jpeg', name: 'a.jpg', thumb } })).toEqual({ text: 'Удалённое сообщение', thumb: null });
+  expect(quoteContent({ senderId: 1, body: '', kind: 'sticker', deleted: true, sticker: { url: '/s.webp', w: 1, h: 1 } }).thumbNode).toBeUndefined();
 });

@@ -117,7 +117,7 @@ export function quoteContent(m: Record<string, unknown>): { text: ComponentChild
   const a = (m.attachment ?? null) as { duration?: number | null } | null;
   const len = a?.duration ? ` · ${Math.floor(a.duration / 60)}:${String(Math.round(a.duration % 60)).padStart(2, '0')}` : '';
   let text: ComponentChildren;
-  if (last.deleted) text = 'Сообщение удалено';
+  if (last.deleted) text = 'Удалённое сообщение';   // исходник удалён (как в Telegram): цитата остаётся, без автора
   else if (last.kind === 'voice' && !last.body) text = '🎤 Голосовое сообщение' + len;
   else if (last.kind === 'round' && !last.body) text = 'Видеосообщение' + len;
   else if (last.kind === 'video' && !last.body) text = (thumb ? 'Видео' : '📹 Видео') + len;
