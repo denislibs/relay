@@ -1,71 +1,137 @@
-import { normalizeEntities, type Entity, type JournalEntry, type Update } from '@relay/protocol';
-import { onCommit, sql, type Tx } from '../db';
+import { normalizeEntities, type Entity, type JournalEntry, type MyMembership, type Update } from '@relay/protocol';
+import { beforeCommit, isTx, onCommit, sql, type Tx } from '../db';
+import { DomainError } from './errors';
 import { toMessage } from './chats';
 import { openDrafts, openRows } from './messageContent';
 
 export const MAX_BATCH = 500;
 
 /**
- * Журнал за одну транзакцию: что кому записали. После коммита уходит один NOTIFY 'updates' (db.ts onCommit):
- * получателям ровно одной записи newMessage — само событие с его seq (сервер отдаёт его в сокет без чтения базы,
- * клиент применяет, если seq следующий за его lastSeq), остальным — «пинок» на обычную синхронизацию.
+ * Журналы пишутся в момент коммита (db.ts beforeCommit), одним запросом каждый, всегда в порядке
+ * «журналы чатов (по возрастанию chat_id) → личные (по возрастанию user_id)». Так замки счётчиков живут от
+ * flushJournals до коммита, а порядок замков один для всех транзакций — дедлоков между параллельными
+ * транзакциями нет. Тело транзакции только копит записи: chatEvent / appendUpdates / membershipEvent.
+ *
+ * После коммита (db.ts onCommit): на каждый чат — один NOTIFY 'chat_updates' со всеми его событиями этой
+ * транзакции (если помещаются в 8000 байт); для личных — один NOTIFY 'updates' (notifyPayloads).
  */
 type Written = { userId: number; seq: number; update: Update };
-const perTx = new WeakMap<object, Written[]>();
+type Entry = { userId: number; update: Update };
+type PerTx = {
+  chats: Map<number, Update[]>;
+  users: Entry[];
+  memberships: { userId: number; chatId: number; me: MyMembership }[];
+  chatRanges: Map<number, { from: number; to: number; updates: Update[] }>;   // после flush: для membership.seq и NOTIFY
+  written: Written[];                                                         // личные записи после flush: для NOTIFY
+  usersFlushed: boolean;                                                      // личный журнал уже писался: chatEvent после этого запрещён (порядок замков)
+};
+const perTx = new WeakMap<object, PerTx>();
 /** Предел полезной нагрузки pg_notify — 8000 байт; длинное сообщение уходит обычным «пинком». */
 const NOTIFY_MAX = 7800;
 
-export type UpdatesNotify = number[] | { p: number[]; u: [number, number][]; e: Update };
-
-/**
- * Содержимое NOTIFY 'updates' по записям одной транзакции: массив — пинок всем; объект — p пинок, u получают e сразу.
- * Полезная нагрузка pg_notify не больше 8000 байт, а получателей бывают тысячи: режем на несколько уведомлений
- * (e повторяется в каждом). Каждый получатель — ровно в одном.
- */
-export function notifyPayloads(written: Written[]): string[] {
-  const count = new Map<number, number>();
-  for (const w of written) count.set(w.userId, (count.get(w.userId) ?? 0) + 1);
-  const all = [...count.keys()];
-  // одно и то же newMessage (один объект) у тех, кому в этой транзакции записали только его
-  const inline = written.filter((w) => w.update.type === 'newMessage' && count.get(w.userId) === 1);
-  const e = inline[0]?.update;
-  const plain = () => chunks(all.map((id) => String(id)), 2, (ids) => `[${ids.join(',')}]`);
-  if (!e || inline.some((w) => w.update !== e)) return plain();
-  const eJson = JSON.stringify(e);
-  const head = Buffer.byteLength(eJson) + 20;   // {"p":[],"u":[],"e":…}
-  if (head > NOTIFY_MAX) return plain();          // длинное сообщение: всем обычный пинок
-  const u = new Set(inline.map((w) => w.userId));
-  const pokes = all.filter((id) => !u.has(id)).map((id) => String(id));
-  const pairs = inline.map((w) => `[${w.userId},${w.seq}]`);
-  const out: string[] = [];
-  // пинки — первыми частями, затем пары; часть вмещает столько, сколько влезает
-  let p: string[] = [], pu: string[] = [], size = head;
-  const flush = () => { if (p.length || pu.length) out.push(`{"p":[${p.join(',')}],"u":[${pu.join(',')}],"e":${eJson}}`); p = []; pu = []; size = head; };
-  for (const x of pokes) { if (size + x.length + 1 > NOTIFY_MAX) flush(); p.push(x); size += x.length + 1; }
-  for (const x of pairs) { if (size + x.length + 1 > NOTIFY_MAX) flush(); pu.push(x); size += x.length + 1; }
-  flush();
-  return out;
+function txState(tx: Tx): PerTx {
+  let st = perTx.get(tx);
+  if (st) return st;
+  if (!isTx(tx)) throw new Error('journal: not a transaction');
+  st = { chats: new Map(), users: [], memberships: [], chatRanges: new Map(), written: [], usersFlushed: false };
+  perTx.set(tx, st);
+  const state = st;
+  beforeCommit(tx, () => flushJournals(tx));
+  onCommit(tx, async () => {
+    for (const [chatId, r] of state.chatRanges) await sql`select pg_notify('chat_updates', ${chatNotifyPayload(chatId, r)})`;
+    for (const n of notifyPayloads(state.written)) await sql`select pg_notify('updates', ${n})`;
+  });
+  return st;
 }
 
-function chunks(items: string[], head: number, wrap: (part: string[]) => string): string[] {
-  const out: string[] = [];
-  let part: string[] = [], size = head;
-  for (const x of items) {
-    if (size + x.length + 1 > NOTIFY_MAX) { out.push(wrap(part)); part = []; size = head; }
-    part.push(x); size += x.length + 1;
+/** NOTIFY 'chat_updates': {c, f, t, e?} — e: события транзакции, если влезают; иначе клиент сделает syncChat. */
+export type ChatNotify = { c: number; f: number; t: number; e?: Update[] };
+function chatNotifyPayload(chatId: number, r: { from: number; to: number; updates: Update[] }): string {
+  const rich = JSON.stringify({ c: chatId, f: r.from, t: r.to, e: r.updates } satisfies ChatNotify);
+  return Buffer.byteLength(rich) <= NOTIFY_MAX ? rich : JSON.stringify({ c: chatId, f: r.from, t: r.to } satisfies ChatNotify);
+}
+
+/**
+ * Событие чата — в журнал по виду чата: личный → в личные журналы участников (как было), группа/канал → в журнал
+ * чата одной записью. kind передавать, где он известен (groupCtx, строка чата) — иначе лишний select.
+ */
+export async function chatEvent(tx: Tx, chatId: number, update: Update, kind?: 'direct' | 'group' | 'channel'): Promise<void> {
+  const st = txState(tx);
+  if (!kind) {
+    const [c] = await tx`select kind from chats where id = ${chatId}`;
+    if (!c) throw new DomainError('not_found', 'chat');
+    kind = c.kind as 'direct' | 'group' | 'channel';
   }
-  if (part.length) out.push(wrap(part));
-  return out;
+  if (kind === 'direct') {
+    const members = (await tx`select user_id from chat_members where chat_id = ${chatId}`).map((r) => Number(r.user_id));
+    for (const userId of members) st.users.push({ userId, update });
+    return;
+  }
+  if (st.usersFlushed) throw new Error('journal: chatEvent after the personal journal was flushed (lock order)');
+  const list = st.chats.get(chatId) ?? [];
+  list.push(update);
+  st.chats.set(chatId, list);
+}
+
+/** Личные записи — копятся до коммита. Вне транзакции (тесты, скрипты): сразу, с NOTIFY. */
+export async function appendUpdates(tx: Tx, entries: Entry[]): Promise<void> {
+  if (!entries.length) return;
+  if (!isTx(tx)) {
+    const written = await writeUserEntries(tx, entries);
+    for (const n of notifyPayloads(written)) await tx`select pg_notify('updates', ${n})`;
+    return;
+  }
+  txState(tx).users.push(...entries);
+}
+
+/** Вступление: membership с seq чата на момент коммита — клиент заводит чат и ничего не догоняет. */
+export function membershipEvent(tx: Tx, userId: number, chatId: number, me: MyMembership): void {
+  txState(tx).memberships.push({ userId, chatId, me });
 }
 
 /**
- * Пишет по одной записи журнала на каждый элемент — одним запросом: счётчики user_seq поднимаются в порядке
- * возрастания user_id (как и прежде — без дедлоков между параллельными транзакциями), записи получают
- * последовательные seq в порядке entries. Строки user_seq заперты до коммита: так seq у пользователя становятся
- * видимы по порядку и без дыр. Возвращает seq каждой записи в порядке entries.
+ * Записать накопленное: журналы чатов, затем личный. Повторяемый — хук перед коммитом допишет то, что добавили
+ * после явного вызова (selfSeq читает свой seq внутри транзакции).
  */
-export async function appendUpdates(tx: Tx, entries: { userId: number; update: Update }[]): Promise<number[]> {
-  if (!entries.length) return [];
+export async function flushJournals(tx: Tx): Promise<void> {
+  const st = perTx.get(tx);
+  if (!st) return;
+  for (const chatId of [...st.chats.keys()].sort((a, b) => a - b)) {
+    const updates = st.chats.get(chatId)!;
+    const n = updates.length;
+    const rows = await tx`
+      with s as (
+        insert into chat_seq (chat_id, seq, updated_at) values (${chatId}, ${n}, clock_timestamp())
+        on conflict (chat_id) do update set seq = chat_seq.seq + ${n}, updated_at = clock_timestamp()
+        returning seq)
+      insert into chat_updates (chat_id, seq, type, payload)
+      select ${chatId}, s.seq - ${n} + t.ord, t.type, t.payload::jsonb
+        from s, unnest(${updates.map((u) => u.type)}::text[], ${updates.map((u) => JSON.stringify(stored(u)))}::text[]) with ordinality as t(type, payload, ord)
+      returning seq`;
+    const to = Math.max(...rows.map((r) => Number(r.seq)));
+    const prev = st.chatRanges.get(chatId);
+    st.chatRanges.set(chatId, { from: prev ? prev.from : to - n, to, updates: [...(prev?.updates ?? []), ...updates] });
+  }
+  st.chats.clear();
+  for (const m of st.memberships) {
+    let seq = st.chatRanges.get(m.chatId)?.to;
+    if (seq == null) { const [r] = await tx`select seq from chat_seq where chat_id = ${m.chatId}`; seq = r ? Number(r.seq) : 0; }
+    st.users.push({ userId: m.userId, update: { type: 'membership', chatId: m.chatId, me: m.me, seq } });
+  }
+  st.memberships = [];
+  if (st.users.length) {
+    const entries = st.users; st.users = [];
+    st.written.push(...await writeUserEntries(tx, entries));
+    st.usersFlushed = true;
+  }
+}
+
+/**
+ * Личный журнал одним запросом: счётчики user_seq поднимаются в порядке возрастания user_id, записи получают
+ * последовательные seq в порядке entries. Строки user_seq заперты до коммита: seq у пользователя становятся
+ * видимы по порядку и без дыр.
+ */
+async function writeUserEntries(tx: Tx, entries: Entry[]): Promise<Written[]> {
   const ids = entries.map((e) => e.userId), types = entries.map((e) => e.update.type), payloads = entries.map((e) => JSON.stringify(stored(e.update)));
   const rows = await tx`
     with w as (
@@ -80,27 +146,53 @@ export async function appendUpdates(tx: Tx, entries: { userId: number; update: U
     insert into updates (user_id, seq, type, payload)
     select w.user_id, s.seq - w.n + w.rn, w.type, w.payload from w join s using (user_id)
     returning user_id, seq`;
-  // seq по записям: у пользователя — по порядку его записей в entries
   const byUser = new Map<number, number[]>();
   for (const r of rows) { const l = byUser.get(r.user_id as number) ?? []; l.push(r.seq as number); byUser.set(r.user_id as number, l); }
   for (const l of byUser.values()) l.sort((a, b) => a - b);
   const next = new Map<number, number>();
-  const seqs = entries.map((e) => { const i = next.get(e.userId) ?? 0; next.set(e.userId, i + 1); return byUser.get(e.userId)![i]; });
+  return entries.map((e) => { const i = next.get(e.userId) ?? 0; next.set(e.userId, i + 1); return { userId: e.userId, seq: byUser.get(e.userId)![i], update: e.update }; });
+}
 
-  let written = perTx.get(tx);
-  if (!written) {
-    written = [];
-    perTx.set(tx, written);
-    const w = written;
-    // уведомление — после коммита, одним NOTIFY на транзакцию (db.ts: почему не внутри)
-    if (!onCommit(tx, async () => { for (const n of notifyPayloads(w)) await sql`select pg_notify('updates', ${n})`; })) {
-      perTx.delete(tx);
-      for (const n of notifyPayloads(entries.map((e, i) => ({ userId: e.userId, seq: seqs[i], update: e.update })))) await tx`select pg_notify('updates', ${n})`;   // не транзакция (тесты): сразу
-      return seqs;
-    }
-  }
-  entries.forEach((e, i) => written!.push({ userId: e.userId, seq: seqs[i], update: e.update }));
-  return seqs;
+export type UpdatesNotify = number[] | { p: number[]; u: [number, number][]; e?: Update; s?: [number, number][]; x?: [number, number][] };
+
+/**
+ * Содержимое NOTIFY 'updates' по записям одной транзакции: p — пинок, u — получают e сразу (ровно одна запись
+ * newMessage у них в этой транзакции), s/x — подписать/отписать сокеты пользователя на журнал чата (membership /
+ * chatRemoved). Полезная нагрузка pg_notify не больше 8000 байт, а получателей бывают тысячи: режем на части,
+ * e повторяется в каждой; каждый получатель — ровно в одной.
+ */
+export function notifyPayloads(written: Written[]): string[] {
+  if (!written.length) return [];
+  const count = new Map<number, number>();
+  for (const w of written) count.set(w.userId, (count.get(w.userId) ?? 0) + 1);
+  const all = [...count.keys()];
+  const subs = written.filter((w) => w.update.type === 'membership').map((w) => `[${w.userId},${(w.update as { chatId: number }).chatId}]`);
+  const unsubs = written.filter((w) => w.update.type === 'chatRemoved').map((w) => `[${w.userId},${(w.update as { chatId: number }).chatId}]`);
+  // одно и то же newMessage (один объект) у тех, кому в этой транзакции записали только его
+  const inline = written.filter((w) => w.update.type === 'newMessage' && count.get(w.userId) === 1);
+  const e = inline[0]?.update;
+  const withE = !!e && !inline.some((w) => w.update !== e);
+  const eJson = withE ? JSON.stringify(e) : '';
+  const u = new Set(withE ? inline.map((w) => w.userId) : []);
+  const head = 40 + Buffer.byteLength(eJson);   // {"p":[],"u":[],"s":[],"x":[],"e":…}
+  const pokes = all.filter((id) => !u.has(id)).map((id) => String(id));
+  const pairs = withE && head <= NOTIFY_MAX ? inline.map((w) => `[${w.userId},${w.seq}]`) : [];
+  if (withE && head > NOTIFY_MAX) for (const w of inline) pokes.push(String(w.userId));   // длинное сообщение — всем пинок
+  const out: string[] = [];
+  type Part = { p: string[]; u: string[]; s: string[]; x: string[] };
+  let cur: Part = { p: [], u: [], s: [], x: [] }, size = head;
+  const flush = () => {
+    if (!cur.p.length && !cur.u.length && !cur.s.length && !cur.x.length) return;
+    out.push(`{"p":[${cur.p.join(',')}],"u":[${cur.u.join(',')}],"s":[${cur.s.join(',')}],"x":[${cur.x.join(',')}]${cur.u.length ? `,"e":${eJson}` : ''}}`);
+    cur = { p: [], u: [], s: [], x: [] }; size = head;
+  };
+  const add = (k: keyof Part, v: string) => { if (size + v.length + 1 > NOTIFY_MAX) flush(); cur[k].push(v); size += v.length + 1; };
+  for (const v of pokes) add('p', v);
+  for (const v of subs) add('s', v);
+  for (const v of unsubs) add('x', v);
+  for (const v of pairs) add('u', v);
+  flush();
+  return out;
 }
 
 /**
@@ -109,7 +201,7 @@ export async function appendUpdates(tx: Tx, entries: { userId: number; update: U
  * в группе на 200 человек текст лежал 200 раз, а удалённое сообщение оставалось в журнале. Клиент получает прежний
  * формат: подстановка — на сервере, при отдаче.
  */
-type Stored = Update | { type: MessageRef; chatId: number; id: number; ref: 1 } | { type: 'draft'; chatId: number; at: string; ref: 1 };
+export type Stored = Update | { type: MessageRef; chatId: number; id: number; ref: 1 } | { type: 'draft'; chatId: number; at: string; ref: 1 };
 type MessageRef = 'newMessage' | 'messageEdited' | 'messageMarkup' | 'todoUpdated' | 'linkPreview' | 'attachmentUpdated';
 
 export function stored(u: Update): Stored {
@@ -123,7 +215,7 @@ export function stored(u: Update): Stored {
 }
 
 /** Ссылки журнала → полные события: сообщения одним запросом, черновики — вторым. Сообщения уже нет — «удалено». */
-async function hydrate(userId: number, rows: { seq: number; payload: Stored }[]): Promise<JournalEntry[]> {
+export async function hydrate(userId: number | null, rows: { seq: number; payload: Stored }[]): Promise<JournalEntry[]> {
   const refs = rows.filter((r) => 'ref' in r.payload && r.payload.type !== 'draft') as { payload: { chatId: number; id: number } }[];
   const drafts = rows.filter((r) => 'ref' in r.payload && r.payload.type === 'draft') as { payload: { chatId: number } }[];
   const byKey = new Map<string, Record<string, unknown>>();
@@ -134,7 +226,7 @@ async function hydrate(userId: number, rows: { seq: number; payload: Stored }[])
     for (const m of msgs) byKey.set(m.chat_id + ':' + m.id, m);
   }
   const draftBy = new Map<number, Record<string, unknown>>();
-  if (drafts.length) {
+  if (drafts.length && userId != null) {
     const ds = await openDrafts(await sql`select user_id, chat_id, text, entities, content, updated_at from drafts where user_id = ${userId} and chat_id = any(${[...new Set(drafts.map((d) => d.payload.chatId))]}::bigint[])`);
     for (const d of ds) draftBy.set(Number(d.chat_id), d);
   }

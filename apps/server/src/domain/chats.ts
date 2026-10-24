@@ -2,17 +2,18 @@ import { graphemes, normalizeEntities, type Entity, type Block, type ForwardInfo
 import { sql, type Tx } from '../db';
 import { muteFromDb } from './chatNotify';
 import { DomainError } from './errors';
-import { fanOut } from './journal';
+import { chatEvent, fanOut } from './journal';
 import { contentColumns, openDrafts, openRows } from './messageContent';
 import { shredChatHistory } from '../crypto/chatKeys';
 import { nameForSql } from './profile';
-import { summaryFromRow } from './groupRights';
+import { summaryFromRow, joinMembership } from './groupRights';
 import type { GroupInfo, MyMembership } from '@relay/protocol';
 
 export async function createChat(kind: 'direct' | 'group', title: string | null, memberIds: number[]): Promise<number> {
   return sql.begin(async (tx) => {
     const [chat] = await tx`insert into chats (kind, title) values (${kind}, ${title}) returning id`;
     await tx`insert into chat_members (chat_id, user_id) select ${chat.id}, unnest(${[...new Set(memberIds)]}::bigint[])`;
+    if (kind !== 'direct') await tx`insert into chat_seq (chat_id) values (${chat.id})`;   // журнал чата (journal.ts)
     return chat.id as number;
   });
 }
@@ -39,6 +40,7 @@ export async function createGroup(creatorId: number, input: { title?: unknown; m
     const [blocked] = await tx`select 1 from blocks where (owner_id = ${creatorId} and user_id = any(${ids}::bigint[])) or (user_id = ${creatorId} and owner_id = any(${ids}::bigint[])) limit 1`;
     if (blocked) throw new DomainError('blocked');
     const [chat] = await tx`insert into chats (kind, title, owner_id) values ('group', ${title}, ${creatorId}) returning id`;
+    await tx`insert into chat_seq (chat_id) values (${chat.id})`;   // журнал чата (journal.ts)
     const members = [creatorId, ...ids];
     await tx`insert into chat_members (chat_id, user_id, inviter_id) select ${chat.id}, unnest(${ids}::bigint[]), ${creatorId}`;
     await tx`insert into chat_members (chat_id, user_id, role) values (${chat.id}, ${creatorId}, 'owner')`;
@@ -48,7 +50,8 @@ export async function createGroup(creatorId: number, input: { title?: unknown; m
       insert into messages (chat_id, sender_id, client_id, kind, body, service_type, content)
       values (${chat.id}, ${creatorId}, ${clientId}, 'text', ${c.body}, 'group_created', ${c.content}) returning *`;
     const message = toMessage((await openRows([row], '', tx))[0]);
-    await fanOut(tx, members, { type: 'newMessage', message });
+    await chatEvent(tx, Number(chat.id), { type: 'newMessage', message }, 'group');
+    for (const id of members) await joinMembership(tx, Number(chat.id), id);   // чат приходит участникам через membership с seq
     return { chatId: Number(chat.id), message };
   });
 }
@@ -146,6 +149,8 @@ export type ChatSummary = {
   muteUntil?: number | null; // уведомления выключены: мс эпохи, 0 — навсегда, null — включены
   pinnedAt?: number | null;  // чат закреплён (мс, порядок: позже — выше); null — нет
   archived?: boolean;        // в архиве
+  archivedAtId?: number;     // граница архива: max id сообщений на момент архивирования (разархивирование группы — unarchive)
+  seq?: number;              // журнал чата (группы и каналы): текущий номер; 0 у личных
   unreadMark?: boolean;      // «Отметить как непрочитанное»
   pinned?: number[]; // закреплённые сообщения (новые сверху)
   group?: GroupInfo;    // только у групп: информация и настройки
@@ -181,7 +186,8 @@ export async function listChats(userId: number, opts: ListOpts = {}): Promise<Ch
   const rows = await sql`
     select c.id, c.kind, c.title, c.created_at as chat_created_at, cm.last_read_id,
            c.about, c.photo as g_photo, c.owner_id, c.rights as chat_rights, c.slow_mode, c.history_hidden, c.join_approval, c.username, c.reactions, c.protected,
-           cm.mute_until, cm.mute_until = 'infinity' as mute_forever, cm.pinned_at, cm.archived, cm.unread_mark, cm.role, cm.admin_rights, cm.restricted, cm.history_from, cm.rank,
+           cm.mute_until, cm.mute_until = 'infinity' as mute_forever, cm.pinned_at, cm.archived, cm.archived_at_id, cm.unread_mark, cm.role, cm.admin_rights, cm.restricted, cm.history_from, cm.rank,
+           coalesce(cs.seq, 0) as seq,
            case when c.kind = 'group' then (select count(*)::int from chat_members gm where gm.chat_id = c.id) end as g_members,
            case when c.kind = 'group' then (select count(*)::int from chat_join_requests jr where jr.chat_id = c.id) end as g_pending,
            lm.id as m_id, lm.chat_id as m_chat_id, lm.sender_id as m_sender_id, lm.client_id as m_client_id,
@@ -192,12 +198,14 @@ export async function listChats(userId: number, opts: ListOpts = {}): Promise<Ch
                     'photo', case when exists (select 1 from blocks b where b.owner_id = u.id and b.user_id = ${userId}) then null else u.photo end)
               from chat_members pm join users u on u.id = pm.user_id
              where c.kind = 'direct' and pm.chat_id = c.id and pm.user_id <> ${userId} limit 1) as peer,
-           (select coalesce(min(om.last_read_id), 0) from chat_members om where om.chat_id = c.id and om.user_id <> ${userId}) as peer_read_up_to,
+           -- личный: до чего дочитал собеседник; группа: до чего дочитал хоть кто-то (readBy там — только авторам, смысл «кто-то прочитал»)
+           (select coalesce(case when c.kind = 'direct' then min(om.last_read_id) else max(om.last_read_id) end, 0) from chat_members om where om.chat_id = c.id and om.user_id <> ${userId}) as peer_read_up_to,
            date_trunc('milliseconds', coalesce(lm.created_at, c.created_at)) as sort_at,
            (select json_build_object('text', d.text, 'at', d.updated_at, 'entities', d.entities, 'content', encode(d.content, 'base64')) from drafts d where d.user_id = ${userId} and d.chat_id = c.id) as draft,
            (select coalesce(json_agg(p.message_id order by p.message_id desc), '[]') from (select message_id from pinned_messages where chat_id = c.id order by message_id desc limit 100) p) as pinned
       from chat_members cm
       join chats c on c.id = cm.chat_id
+      left join chat_seq cs on cs.chat_id = c.id
       left join lateral (
         select * from messages where chat_id = c.id and id >= cm.history_from order by id desc limit 1
       ) lm on true
@@ -231,6 +239,8 @@ export async function listChats(userId: number, opts: ListOpts = {}): Promise<Ch
     muteUntil: muteFromDb(r.mute_until as Date | null, r.mute_forever as boolean | null),
     pinnedAt: r.pinned_at ? new Date(r.pinned_at as string).getTime() : null,
     archived: !!r.archived,
+    archivedAtId: Number(r.archived_at_id ?? 0),
+    seq: Number(r.seq ?? 0),
     unreadMark: !!r.unread_mark,
     pinned: ((r.pinned as number[] | null) ?? []).map(Number),
     ...(r.kind === 'group' ? summaryFromRow(Number(r.id), userId, r) : {}),

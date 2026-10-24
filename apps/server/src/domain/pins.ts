@@ -1,7 +1,7 @@
 import { sql, type Tx } from '../db';
 import { assertMember } from './chats';
 import { DomainError } from './errors';
-import { fanOut } from './journal';
+import { chatEvent } from './journal';
 import { isServiceChat } from './service';
 import { canPin, groupCtx } from './groupRights';
 
@@ -15,8 +15,7 @@ export async function pinnedIds(db: Tx | typeof sql, chatId: number): Promise<nu
 
 async function broadcast(tx: Tx, chatId: number): Promise<number[]> {
   const ids = await pinnedIds(tx, chatId);
-  const members = await tx`select user_id from chat_members where chat_id = ${chatId}`;
-  await fanOut(tx, members.map((m) => Number(m.user_id)), { type: 'pins', chatId, ids });
+  await chatEvent(tx, chatId, { type: 'pins', chatId, ids });
   return ids;
 }
 

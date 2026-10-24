@@ -100,6 +100,14 @@ export async function journalOf(userId: number, type?: Update['type']): Promise<
   return items.map((i) => i.update).filter((u) => !type || u.type === type);
 }
 
+import { hydrate, type Stored } from '../src/domain/journal';
+/** Журнал чата (группы и каналы): события всем участникам одной записью. */
+export async function chatEventsOf(chatId: number, type?: Update['type']): Promise<Update[]> {
+  const rows = await sql`select seq, payload from chat_updates where chat_id = ${chatId} order by seq`;
+  const items = await hydrate(null, rows.map((r) => ({ seq: Number(r.seq), payload: r.payload as Stored })));
+  return items.map((i) => i.update).filter((u) => !type || u.type === type);
+}
+
 import { openRows } from '../src/domain/messageContent';
 /** Строки messages, как их видит сервер: содержимое — из шифра (для проверок текста в тестах). */
 export const opened = <T extends Record<string, unknown>>(rows: T[]): Promise<T[]> => openRows(rows);

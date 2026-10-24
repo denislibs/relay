@@ -5,7 +5,7 @@ import { newTodo } from './todo';
 import { sql } from '../db';
 import { assertMember, toMessage } from './chats';
 import { DomainError } from './errors';
-import { fanOut } from './journal';
+import { chatEvent } from './journal';
 import { unarchiveOnMessage } from './chatFlags';
 import { blockedInDirect } from './privacy';
 import { burnCodes } from './login';
@@ -129,9 +129,10 @@ export async function sendMessage(
     }
     const message = toMessage((await openRows([inserted[0]], '', tx))[0]);
     await burnCodes(tx, userId, body);
-    const members = await tx`select user_id from chat_members where chat_id = ${input.chatId}`;
-    await fanOut(tx, members.map((m) => m.user_id as number), { type: 'newMessage', message });
-    await unarchiveOnMessage(tx, input.chatId, userId);   // как в Telegram: новое сообщение возвращает чат из архива (если не заглушён)
+    await chatEvent(tx, input.chatId, { type: 'newMessage', message }, ctx.kind);
+    // как в Telegram: новое сообщение возвращает чат из архива (если не заглушён). Группы — клиент условной операцией
+    // unarchive (chatFlags.ts): запись каждому участнику на каждое сообщение для них непозволительна
+    if (ctx.kind === 'direct') await unarchiveOnMessage(tx, input.chatId, userId);
     await clearDraftInTx(tx, userId, input.chatId); // отправили — черновик на всех устройствах больше не нужен
     // уйдёт после коммита, воркером: ack не ждёт push-сервис. В задаче — ссылка: текст в jobs не храним
     await enqueue(tx, 'push.message', { chatId: input.chatId, id: message.id });
@@ -153,7 +154,6 @@ export async function applyLinkPreview(p: { chatId: number; id: number; url: str
       return !r.deleted && l?.url === p.url && l.pending === true ? { link: data } : false;
     });
     if (!row) return;
-    const members = await tx`select user_id from chat_members where chat_id = ${p.chatId}`;
-    await fanOut(tx, members.map((m) => m.user_id as number), { type: 'linkPreview', chatId: p.chatId, id: p.id, link: data });
+    await chatEvent(tx, p.chatId, { type: 'linkPreview', chatId: p.chatId, id: p.id, link: data });
   });
 }

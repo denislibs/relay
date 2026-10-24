@@ -1,7 +1,7 @@
 import { afterAll, beforeEach, expect, test } from 'bun:test';
 import { sql } from '../src/db';
 import { createServer } from '../src/http';
-import { journalOf, opened, resetDb } from './helpers';
+import { chatEventsOf, journalOf, opened, resetDb } from './helpers';
 
 const server = createServer({ port: 0 });
 const base = `http://localhost:${server.port}`;
@@ -23,9 +23,10 @@ test('group: creator and members, a "created the group" service message reaches 
   const [msg] = await opened(await sql`select * from messages where chat_id = ${id}`);
   expect(msg).toMatchObject({ body: 'Дача 2026', service_type: 'group_created' });
   expect(Number(msg.sender_id)).toBe(a.userId);
-  // newMessage в журнале у каждого участника
+  // newMessage — одной записью в журнале чата; каждому участнику лично — membership с seq чата (так клиент узнаёт о группе)
+  expect((await chatEventsOf(id, 'newMessage')).filter((x) => x.type === 'newMessage' && x.message.chatId === id).length).toBe(1);
   for (const u of [a, b, c]) {
-    expect((await journalOf(u.userId, 'newMessage')).filter((x) => x.type === 'newMessage' && x.message.chatId === id).length).toBe(1);
+    expect((await journalOf(u.userId, 'membership')).filter((x) => x.type === 'membership' && x.chatId === id).map((x) => (x as { seq?: number }).seq)).toEqual([1]);
   }
 });
 

@@ -1,7 +1,8 @@
 import type { Server } from 'bun';
 import type { ServerFrame } from '@relay/protocol';
 import { sql } from './db';
-import type { UpdatesNotify } from './domain/journal';
+import type { ChatNotify, UpdatesNotify } from './domain/journal';
+import { subscribeUserSockets, unsubscribeUserSockets } from './sockets';
 import { processAlive, processGone } from './domain/liveRegistry';
 import { closeLive, parseEnded, terminatedFrame, touchLive } from './domain/sessions';
 
@@ -36,9 +37,19 @@ export async function startRealtime(server: Server): Promise<() => Promise<void>
     let n: UpdatesNotify;
     try { n = JSON.parse(payload); } catch { return; }
     if (Array.isArray(n)) { for (const id of n) server.publish(`user:${id}`, POKE); return; }
+    // вступил / исключён — подписки сокетов этого процесса на журнал чата, до пинка: следующий push чата не должен пройти мимо
+    for (const [uid, chatId] of n.s ?? []) subscribeUserSockets(uid, chatId);
+    for (const [uid, chatId] of n.x ?? []) unsubscribeUserSockets(uid, chatId);
     for (const id of n.p) server.publish(`user:${id}`, POKE);
     // событие с seq получателя — в сокет сразу; клиент сверит seq и при расхождении синхронизируется сам
-    for (const [id, seq] of n.u) server.publish(`user:${id}`, JSON.stringify({ op: 'push', from: seq - 1, to: seq, items: [{ seq, update: n.e }] } satisfies ServerFrame));
+    if (n.e) for (const [id, seq] of n.u) server.publish(`user:${id}`, JSON.stringify({ op: 'push', from: seq - 1, to: seq, items: [{ seq, update: n.e }] } satisfies ServerFrame));
+  });
+  // журнал чата: один кадр на всех подписчиков чата в этом процессе (кадр у всех одинаковый — номер общий)
+  const subChats = await sql.listen('chat_updates', (payload) => {
+    let n: ChatNotify;
+    try { n = JSON.parse(payload); } catch { return; }
+    const items = n.e ? n.e.map((update, i) => ({ seq: n.f + 1 + i, update })) : [];   // без e — «догони чат» (syncChat)
+    server.publish(`chat:${n.c}`, JSON.stringify({ op: 'push', chatId: n.c, from: n.f, to: n.t, items } satisfies ServerFrame));
   });
   // завершённые сеансы (в любом процессе): кадр в топик сеанса, затем сокеты этого процесса закрываются
   const subSessions = await sql.listen('sessions', (payload) => {
@@ -53,7 +64,7 @@ export async function startRealtime(server: Server): Promise<() => Promise<void>
   timer.unref?.();
   return async () => {
     clearInterval(timer); clearInterval(alive);
-    await sub.unlisten(); await subSessions.unlisten();
+    await sub.unlisten(); await subChats.unlisten(); await subSessions.unlisten();
     await processGone().catch(() => {});
   };
 }

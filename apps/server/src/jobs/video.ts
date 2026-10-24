@@ -12,7 +12,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { sql } from '../db';
 import { attachmentOf, s3, variantsOf } from '../domain/files';
-import { fanOut } from '../domain/journal';
+import { chatEvent } from '../domain/journal';
 import { enqueue } from './queue';
 
 export const PREVIEW_SECONDS = 4;
@@ -207,7 +207,6 @@ export async function patchMessages(tx: Parameters<Parameters<typeof sql.begin>[
     const old = m.attachment as Attachment;
     const next: Attachment = { ...old, size: fresh.size, ...(fresh.preview ? { preview: fresh.preview } : {}), ...(fresh.variants ? { variants: fresh.variants } : {}) };
     await tx`update messages set attachment = ${tx.json(next as never)} where id = ${m.id} and chat_id = ${m.chat_id}`;
-    const members = await tx`select user_id from chat_members where chat_id = ${m.chat_id}`;
-    await fanOut(tx, members.map((r) => r.user_id as number), { type: 'attachmentUpdated', chatId: Number(m.chat_id), id: Number(m.id), attachment: next });
+    await chatEvent(tx, Number(m.chat_id), { type: 'attachmentUpdated', chatId: Number(m.chat_id), id: Number(m.id), attachment: next });
   }
 }

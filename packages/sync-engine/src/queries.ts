@@ -15,18 +15,25 @@ export const flagsKey = (chatId: number) => 'flags:' + chatId;
 
 /** Флаги чата, которые видит список: закреплён (мс), в архиве, пометка «непрочитанное». */
 export interface Flags { pinnedAt: number | null; archived: boolean; unreadMark: boolean }
-type FlagsOp = { pinned: boolean; archived: boolean; unreadMark: boolean; at: number };
-/** Неотправленные операции setChatFlags: их значение перекрывает значение чата (видно сразу, до ответа сервера). */
+type FlagsOp = { pinned: boolean; archived: boolean; unreadMark?: boolean; at: number };
+/**
+ * Неотправленные операции setChatFlags: их значение перекрывает значение чата (видно сразу, до ответа сервера).
+ * unarchive:<id> (сообщение в архивную группу) — чат показывается вне архива, пока сервер не ответил; ручная
+ * flags: того же чата в очереди побеждает (идёт по порядку очереди, позже — выше).
+ */
 export function flagsOverlay(ops: readonly { key: string; body?: unknown }[]): Map<number, FlagsOp> {
   const m = new Map<number, FlagsOp>();
-  for (const o of ops) if (o.key.startsWith('flags:')) m.set(Number(o.key.slice(6)), o.body as FlagsOp);
+  for (const o of ops) {
+    if (o.key.startsWith('flags:')) m.set(Number(o.key.slice(6)), o.body as FlagsOp);
+    else if (o.key.startsWith('unarchive:')) m.set(Number(o.key.slice(10)), { pinned: false, archived: false, at: 0 });
+  }
   return m;
 }
 /** Флаги чата с учётом операции в очереди: закреплённый раньше сохраняет своё место, только что закреплённый — время операции. */
 export function flagsOf(c: LocalChat, over?: FlagsOp): Flags {
   if (!over) return { pinnedAt: c.pinnedAt ?? null, archived: !!c.archived, unreadMark: !!c.unreadMark };
   const keep = c.pinnedAt != null && !!c.archived === over.archived;
-  return { pinnedAt: over.pinned ? (keep ? c.pinnedAt! : over.at) : null, archived: over.archived, unreadMark: over.unreadMark };
+  return { pinnedAt: over.pinned ? (keep ? c.pinnedAt! : over.at) : null, archived: over.archived, unreadMark: over.unreadMark ?? !!c.unreadMark };
 }
 export function muteOverlay(ops: readonly { key: string; body?: unknown }[]): Map<number, number | null> {
   const m = new Map<number, number | null>();

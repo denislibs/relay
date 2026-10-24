@@ -94,6 +94,8 @@ export interface ChatSummary {
   peerReadUpTo?: number;
   group?: GroupInfo;
   me?: MyMembership;
+  seq?: number;            // журнал чата (группы, каналы): текущий номер
+  archivedAtId?: number;   // граница архива
 }
 
 /**
@@ -110,6 +112,13 @@ export class Store {
   outbox = new Map<string, OutboxEntry>();
   pendingReads = new Map<number, number>();
   lastSeq = 0;
+  /** Журналы чатов (группы, каналы): номер, до которого события чата применены. Правила — engine.ts (chat journal). */
+  chatSeq = new Map<number, number>();
+  private dirtyChatSeq = new Set<number>();
+  /** hello {since}: мс по часам сервера последней полной сверки (личная догонка и все syncChat завершены) */
+  since = 0;
+  /** Подсказки движку из applyChats/membership: new — чат появился без строки, ahead — журнал чата ушёл вперёд */
+  seqHints = new Map<number, 'new' | 'ahead'>();
   /** снимок с сервера уже лежит в кэше (иначе показывать нечего — идёт первая загрузка) */
   hydrated = false;
   /** Поколение базы сервера, с которым синхронизирован кэш. */
@@ -168,8 +177,10 @@ export class Store {
     const outbox = (await getAll<OutboxEntry>(db, 'outbox')).sort((a, b) => a.createdAt - b.createdAt);
     for (const o of outbox) s.outbox.set(o.clientId, o);
     for (const r of await getAll<{ chatId: number; upToId: number }>(db, 'pendingReads')) s.pendingReads.set(r.chatId, r.upToId);
+    for (const r of await getAll<{ chatId: number; seq: number }>(db, 'chatSeq')) s.chatSeq.set(r.chatId, r.seq);
     const meta = await getAll<{ k: string; v: number }>(db, 'meta');
     s.lastSeq = s.seqAtFlush = meta.find((m) => m.k === 'lastSeq')?.v ?? 0;
+    s.since = Number(meta.find((m) => m.k === 'since')?.v ?? 0);
     s.hydrated = !!meta.find((m) => m.k === 'hydrated')?.v;
     s.epoch = ((meta as { k: string; v: unknown }[]).find((m) => m.k === 'epoch')?.v as string) ?? null;
     s.dialogsAt = meta.find((m) => m.k === 'dialogsAt')?.v ?? 0;
@@ -317,19 +328,66 @@ export class Store {
       case 'pins': { const chat = this.chats.get(u.chatId); if (chat) { chat.pinned = u.ids; this.markChat(chat); } return; }
       case 'chatNotify': return this.setMute(u.chatId, u.muteUntil);
       case 'chatFlags': return this.setFlags(u.chatId, u);
-      case 'groupUpdated': { const chat = this.chats.get(u.chatId); if (chat) { chat.group = u.group; this.markChat(chat); } return; }
-      case 'membership': { const chat = this.chats.get(u.chatId); if (chat) { chat.me = u.me; this.markChat(chat); } return; }
+      // requests у каждого своё (joinRequests), общая запись его не несёт — не затирать
+      case 'groupUpdated': { const chat = this.chats.get(u.chatId); if (chat) { chat.group = { ...u.group, requests: chat.group?.requests ?? 0 }; this.markChat(chat); } return; }
+      case 'joinRequests': { const chat = this.chats.get(u.chatId); if (chat?.group) { chat.group = { ...chat.group, requests: u.requests }; this.markChat(chat); } return; }
+      case 'membership': {
+        const chat = this.chats.get(u.chatId);
+        if (chat) { chat.me = u.me; this.markChat(chat); return; }
+        // вступил: чат незнаком, seq — номер журнала чата на момент коммита; строку подтянет движок (seqHints)
+        if (u.seq != null && !this.chatSeq.has(u.chatId)) { this.setChatSeq(u.chatId, u.seq); this.seqHints.set(u.chatId, 'new'); }
+        return;
+      }
       case 'members': return applyMembersUpdate(this, u.chatId, u.upsert, u.remove, seq);
       case 'chatRemoved': return this.removeChat(u.chatId);
     }
   }
 
   /** Закреплён / архив / пометка «непрочитанное» (журнал, ответ операции): значение сервера — база. */
-  setFlags(chatId: number, f: { pinnedAt: number | null; archived: boolean; unreadMark: boolean }): void {
+  setFlags(chatId: number, f: { pinnedAt: number | null; archived: boolean; unreadMark: boolean; archivedAtId?: number }): void {
     const chat = this.chats.get(chatId);
-    if (!chat || ((chat.pinnedAt ?? null) === f.pinnedAt && !!chat.archived === f.archived && !!chat.unreadMark === f.unreadMark)) return;
-    chat.pinnedAt = f.pinnedAt; chat.archived = f.archived; chat.unreadMark = f.unreadMark; this.markChat(chat);
+    if (!chat) return;
+    const sameAt = f.archivedAtId == null || (chat.archivedAtId ?? 0) === f.archivedAtId;
+    if ((chat.pinnedAt ?? null) === f.pinnedAt && !!chat.archived === f.archived && !!chat.unreadMark === f.unreadMark && sameAt) return;
+    chat.pinnedAt = f.pinnedAt; chat.archived = f.archived; chat.unreadMark = f.unreadMark;
+    if (f.archivedAtId != null) chat.archivedAtId = f.archivedAtId;
+    this.markChat(chat);
   }
+
+  /** Журнал чата: номер, до которого применены его события (только для групп и каналов). */
+  setChatSeq(chatId: number, seq: number): void {
+    if (this.chatSeq.get(chatId) === seq) return;
+    this.chatSeq.set(chatId, seq);
+    this.dirtyChatSeq.add(chatId);
+  }
+
+  /** Время последней полной сверки по часам сервера (hello/chats now) — следующий since. Назад не двигается. */
+  setSince(ms: number): void {
+    if (ms <= this.since) return;
+    this.since = ms;
+    this.dirtyMeta = true;
+  }
+
+  /**
+   * Лента чата сброшена (chatTooLong: журнал чата подрезан дальше, чем мы знаем): сообщения с сервера стираются из
+   * памяти и IndexedDB, отрезки истории — заново; строка списка (last, unread, флаги) остаётся. Неотправленное — тоже.
+   */
+  async resetChat(chatId: number): Promise<void> {
+    const c = this.chats.get(chatId);
+    if (!c) return;
+    if (!this.loaded.has(chatId)) await this.loadChatMessages(chatId);   // чтобы стереть и те строки, что лежали только в IDB
+    const map = this.messages.get(chatId);
+    if (map) for (const [k, m] of map) if (m.id != null) {
+      map.delete(k); this.dirtyMessages.delete(k); this.deletedMessages.add(k);
+      for (const t of termsOf(m)) this.staleTerms.set(termKey(t, chatId, m.sort), [t, chatId, m.sort]);
+      this.rowPatches.delete(`${chatId}:${m.id}`);
+    }
+    this.loaded.delete(chatId);
+    c.ranges = []; delete c.historyStart; delete c.snapLast; delete c.seed; delete c.mediaDone; delete c.mediaCounts; delete c.mediaCountsAt;
+    this.resetGen++;   // страницы истории, начатые до сброса, устарели
+    this.markChat(c);
+  }
+  private deletedMessages = new Set<string>();
 
   /** Уведомления чата (журнал, снимок, ответ операции): значение сервера — база; чата в кэше нет — ждать нечего. */
   setMute(chatId: number, muteUntil: number | null): void {
@@ -342,6 +400,8 @@ export class Store {
   removeChat(id: number): void {
     if (!this.chats.has(id)) return;
     this.chats.delete(id); this.chatV.delete(id); this.messages.delete(id); this.loaded.delete(id); this.members.dropChat(id);
+    if (this.chatSeq.delete(id)) this.dirtyChatSeq.add(id);   // вернёмся — чат снова «незнакомый», seq из membership
+    this.seqHints.delete(id);
     for (const [k, p] of this.rowPatches) if (p.chatId === id) this.rowPatches.delete(k);
     for (const [k, o] of this.outbox) if (o.chatId === id) { this.outbox.delete(k); this.dirtyOutbox.add(k); }
     if (this.pendingReads.delete(id)) this.dirtyReads.add(id);
@@ -361,6 +421,13 @@ export class Store {
   applyChats(list: ChatSummary[], seq = 0): void {
     if (!this.hydrated) { this.hydrated = true; this.dirtyMeta = true; }
     for (const s of list) {
+      // журнал чата: строка старее того, что мы уже применили push'ами, — устарела целиком (ответ, ушедший до них)
+      if (s.kind !== 'direct' && s.seq != null) {
+        const local = this.chatSeq.get(s.id);
+        if (local == null) this.setChatSeq(s.id, s.seq);
+        else if (s.seq < local) continue;
+        else if (s.seq > local) this.seqHints.set(s.id, 'ahead');
+      }
       const chat = this.ensureChat(s.id);
       chat.kind = s.kind;
       // личный чат хранит только peerId: имя и фото собеседника — в people
@@ -371,6 +438,7 @@ export class Store {
       if (s.pinned) chat.pinned = s.pinned;
       if (s.muteUntil !== undefined) chat.muteUntil = s.muteUntil;
       if (s.archived !== undefined) { chat.pinnedAt = s.pinnedAt ?? null; chat.archived = s.archived; chat.unreadMark = !!s.unreadMark; }
+      if (s.archivedAtId != null) chat.archivedAtId = s.archivedAtId;
       if (s.group) { chat.group = s.group; chat.me = s.me; }
       if (s.peerReadUpTo && s.peerReadUpTo > chat.peerReadUpTo) this.applyPeerRead(s.id, s.peerReadUpTo);
       chat.lastReadId = Math.max(chat.lastReadId, s.lastReadId);
@@ -436,9 +504,10 @@ export class Store {
   }
 
   /** Чаты, где последнее из снимка ждёт журнала (snapLast), — движок берёт их в начале догонки. */
+  /** Только личные чаты: у групп snapLast разрешает журнал чата (syncChat/push) или resetChat, не личная догонка. */
   pendingSnapshots(): Map<number, number> {
     const out = new Map<number, number>();
-    for (const c of this.chats.values()) if (c.snapLast) out.set(c.id, c.snapLast.sort);
+    for (const c of this.chats.values()) if (c.snapLast && c.kind === 'direct') out.set(c.id, c.snapLast.sort);
     return out;
   }
 
@@ -695,6 +764,7 @@ export class Store {
     this.rowPatches.clear();
     this.quotes.clear(); this.quoteAsked.clear(); this.quoteWants.clear();   // цитаты старого кэша — спросим заново
     this.lastSeq = this.seqAtFlush = 0;
+    this.chatSeq.clear(); this.dirtyChatSeq.clear(); this.seqHints.clear(); this.since = 0;   // хранилище chatSeq стирается вместе с кэшем
     this.hydrated = false;
     this.dialogsAt = 0; this.dialogsId = 0; this.dialogsDone = false;
     this.pendingDrafts.clear();   // черновики жили в стёртых чатах: пустой текст на сервер не отправляем
@@ -743,6 +813,8 @@ export class Store {
       this.markChat(c);
     }
     this.lastSeq = 0;
+    for (const id of this.chatSeq.keys()) this.dirtyChatSeq.add(id);
+    this.chatSeq.clear(); this.seqHints.clear(); this.since = 0;   // ленты групп стёрты вместе со всеми — номера возьмутся из строк снимка
     this.rowPatches.clear();
     this.dirtyMeta = true;
     this.clearPersistedMessages = true;
@@ -773,6 +845,10 @@ export class Store {
     batch.del.chats = [...this.dirtyChats].filter((id) => !this.chats.has(id));
     // основная вкладка «Общих медиа» (mediaTab, первая из tabsOf) — поле индекса byTab; в памяти его нет
     batch.put.messages = [...this.dirtyMessages.values()].map((m) => { const tab = tabsOf(m)[0]; return tab ? { ...m, tab } : m; });
+    if (this.deletedMessages.size) { batch.del.messages = [...this.deletedMessages]; this.deletedMessages.clear(); }
+    batch.put.chatSeq = [...this.dirtyChatSeq].filter((id) => this.chatSeq.has(id)).map((chatId) => ({ chatId, seq: this.chatSeq.get(chatId)! }));
+    batch.del.chatSeq = [...this.dirtyChatSeq].filter((id) => !this.chatSeq.has(id));
+    this.dirtyChatSeq.clear();
     // указатель слов — в той же транзакции; в IDB только подтверждённые сервером (у неотправленных sort меняется при ack)
     const termRows: { term: string; chatId: number; sort: number; key: string }[] = [];
     const fresh = new Set<string>();
@@ -784,7 +860,7 @@ export class Store {
     batch.del.outbox = [...this.dirtyOutbox].filter((k) => !this.outbox.has(k));
     batch.put.pendingReads = [...this.dirtyReads].filter((c) => this.pendingReads.has(c)).map((c) => ({ chatId: c, upToId: this.pendingReads.get(c) }));
     batch.del.pendingReads = [...this.dirtyReads].filter((c) => !this.pendingReads.has(c));
-    if (this.dirtyMeta || this.lastSeq !== this.seqAtFlush) batch.put.meta = [{ k: 'lastSeq', v: this.lastSeq }, { k: 'hydrated', v: this.hydrated ? 1 : 0 }, { k: 'dialogsAt', v: this.dialogsAt }, { k: 'dialogsId', v: this.dialogsId }, { k: 'dialogsDone', v: this.dialogsDone ? 1 : 0 }, { k: 'dialogsTotal', v: this.dialogsTotal }, ...(this.epoch ? [{ k: 'epoch', v: this.epoch as unknown as number }] : [])];
+    if (this.dirtyMeta || this.lastSeq !== this.seqAtFlush) batch.put.meta = [{ k: 'lastSeq', v: this.lastSeq }, { k: 'since', v: this.since }, { k: 'hydrated', v: this.hydrated ? 1 : 0 }, { k: 'dialogsAt', v: this.dialogsAt }, { k: 'dialogsId', v: this.dialogsId }, { k: 'dialogsDone', v: this.dialogsDone ? 1 : 0 }, { k: 'dialogsTotal', v: this.dialogsTotal }, ...(this.epoch ? [{ k: 'epoch', v: this.epoch as unknown as number }] : [])];
     const prof = this.profile.collect();
     if (prof.me) batch.put.meta = [...(batch.put.meta ?? []), prof.me];
     batch.put.users = prof.users;
