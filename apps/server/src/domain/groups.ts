@@ -145,8 +145,8 @@ export async function setGroupRights(userId: number, chatId: number, body: { rig
   });
 }
 
-/** История для новых, одобрение вступающих, запрет копирования, реакции; у канала — подписи постов. */
-export async function setGroupSettings(userId: number, chatId: number, body: { historyHidden?: unknown; joinApproval?: unknown; protected?: unknown; reactions?: unknown; signatures?: unknown }): Promise<{ ok: true }> {
+/** История для новых, одобрение вступающих, запрет копирования, реакции; у канала — подписи постов; у группы — «комментировать только участникам». */
+export async function setGroupSettings(userId: number, chatId: number, body: { historyHidden?: unknown; joinApproval?: unknown; joinToSend?: unknown; protected?: unknown; reactions?: unknown; signatures?: unknown }): Promise<{ ok: true }> {
   return sql.begin(async (tx) => {
     const ctx = await groupCtx(tx, chatId, userId, { lock: true });
     isCommunity(ctx);
@@ -157,6 +157,12 @@ export async function setGroupSettings(userId: number, chatId: number, body: { h
       // группа обсуждения канала: история видна всем (тред читают и вступившие позже)
       if (body.historyHidden === true && c.linked_chat_id != null) throw new DomainError('forbidden', 'linked');
       await tx`update chats set history_hidden = ${body.historyHidden === true} where id = ${chatId}`;
+    }
+    // группа обсуждения: писать в тред — только вступившим (иначе комментируют и подписчики канала, не вступая)
+    if (body.joinToSend !== undefined) {
+      isGroup(ctx);
+      if (!hasAdmin(ctx, 'ban') && !hasAdmin(ctx, 'info')) throw new DomainError('forbidden', 'ban');
+      await tx`update chats set join_to_send = ${body.joinToSend === true} where id = ${chatId}`;
     }
     if (body.signatures !== undefined) {
       if (ctx.kind !== 'channel') throw new DomainError('bad_frame', 'not a channel');

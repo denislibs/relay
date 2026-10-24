@@ -264,6 +264,12 @@ export async function fileFor(userId: number, id: string, variant?: string): Pro
          select 1 from messages m join chat_members cm on cm.chat_id = m.chat_id and cm.user_id = ${userId}
                                   join chats c on c.id = m.chat_id and c.deleted_at is null   -- удалённый (мягко) чат файлов не отдаёт
           where m.attachment->>'id' = ${id} and not m.deleted)
+       or exists (   -- комментарий в треде: его видит и гость треда — подписчик канала, чья это группа обсуждения (threads.ts threadAccess)
+         select 1 from messages m join messages r on r.chat_id = m.chat_id and r.id = m.thread_id
+                                  join chats ch on ch.id = (r.origin->>'chatId')::bigint and ch.linked_chat_id = m.chat_id and ch.deleted_at is null
+                                  join chat_members cm on cm.chat_id = ch.id and cm.user_id = ${userId}
+          where m.attachment->>'id' = ${id} and not m.deleted and m.thread_id is not null
+            and not exists (select 1 from chat_bans b where b.chat_id = m.chat_id and b.user_id = ${userId}))
        or exists (select 1 from link_previews lp where lp.photo_id = a.id)   -- картинка превью ссылки: публичная страница, видна всем
        or exists (   -- трек в чьём-то профиле: его видят все, кого владелец не заблокировал
          select 1 from profile_music p where p.attachment_id = a.id

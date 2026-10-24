@@ -2,7 +2,7 @@ import {
   addGroupMembers, checkGroupUsername, deleteGroup, discussionCandidates, listBanned, listGroupMembers, removeGroupMember, restrictGroupMember,
   setGroupAdmin, setGroupPhoto, setGroupRank, setGroupRights, setGroupSettings, setGroupUsername, setLinkedChat, transferGroupOwnership, unbanGroupMember, updateGroupInfo,
 } from './domain/groups';
-import { createInvite, decideRequests, deleteInvites, editInvite, inviteJoined, joinByInvite, listInvites, listRequests, previewInvite } from './domain/invites';
+import { createInvite, decideRequests, deleteInvites, editInvite, inviteJoined, joinByInvite, joinDiscussion, listInvites, listRequests, previewInvite } from './domain/invites';
 import { DomainError } from './domain/errors';
 
 // Управление группой и каналом: /groups/:id/... и вступление по ссылке /join/:key («+токен» или «@имя»). Права проверяет домен.
@@ -46,6 +46,8 @@ export async function groupRoute(req: Request, url: URL, userId: number): Promis
   if (rest === '/settings' && m === 'PUT') return json(await setGroupSettings(userId, chatId, await body(req)));
   // канал: группа обсуждения ({groupId: null} — отвязать) и кандидаты в неё
   if (rest === '/discussion' && m === 'PUT') { const g = (await body(req)).groupId; return json(await setLinkedChat(userId, chatId, g == null ? null : Number(g))); }
+  // группа обсуждения: вступить из треда (гость — подписчик канала, invites.ts joinDiscussion)
+  if (rest === '/join' && m === 'POST') return json(await joinDiscussion(userId, chatId));
   if (rest === '/discussion-candidates' && m === 'GET') return json(await discussionCandidates(userId, chatId));
   if (rest === '/username' && m === 'PUT') return json(await setGroupUsername(userId, chatId, (await body(req)).username));
   if (rest === '/owner' && m === 'POST') { const b = await body(req); return json(await transferGroupOwnership(userId, chatId, Number(b.userId), b.proof)); }

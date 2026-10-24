@@ -53,6 +53,20 @@ export interface GroupInfo {
   requests: number;   // заявок на вступление (видят те, кто может их принимать; остальным 0)
   signatures: boolean;        // канал: подписи авторов под постами
   linkedChatId: Id | null;    // канал → группа обсуждения, группа → её канал
+  joinToSend: boolean;        // группа обсуждения: комментировать могут только участники (иначе и подписчики канала)
+}
+
+/**
+ * Тред глазами не участника группы обсуждения (подписчик канала: читает и комментирует, не вступая — как в Telegram).
+ * Приходит в странице треда только такому читателю. joinToSend или joinApproval — писать нельзя, сначала вступить.
+ */
+export interface ThreadGuest {
+  channelId: Id;
+  title: string;
+  username: string | null;
+  joinToSend: boolean;
+  joinApproval: boolean;
+  slowMode: number;
 }
 
 /** Моё место в группе. rights — что мне можно как участнику (исключение или умолчания). */

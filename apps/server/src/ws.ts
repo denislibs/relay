@@ -4,7 +4,8 @@ import type { ClientFrame, ServerFrame } from '@relay/protocol';
 import { DomainError } from './domain/errors';
 import { currentSeq, getUpdates } from './domain/journal';
 import { chatSeqsSince, getChatUpdates } from './domain/chatJournal';
-import { syncSubscriptions, type ChatSocket } from './sockets';
+import { syncSubscriptions, unwatchThread, watchThread, type ChatSocket } from './sockets';
+import { threadAccess } from './domain/threads';
 import { sendMessage } from './domain/messages';
 import { markRead } from './domain/reads';
 import { saveDraft } from './domain/drafts';
@@ -95,6 +96,15 @@ export async function handleFrame(userId: number, frame: ClientFrame, publish: (
         const res = await saveDraft(userId, frame.chatId, frame.text, frame.entities);
         return [{ op: 'ack', reqId: frame.reqId, result: res }];
       }
+      case 'watchThread': {
+        // гость треда (не участник группы, threads.ts threadAccess) — топик треда; участнику хватает топика чата
+        const { guest } = await threadAccess(sql, frame.chatId, userId, frame.threadId);
+        if (guest && sock) watchThread(sock, frame.chatId, frame.threadId);
+        return [{ op: 'ack', reqId: frame.reqId, result: { guest: !!guest } }];
+      }
+      case 'unwatchThread':
+        if (sock) unwatchThread(sock, frame.chatId, frame.threadId);
+        return [{ op: 'ack', reqId: frame.reqId, result: { ok: true } }];
       case 'ping':
         return [{ op: 'pong' }];
     }

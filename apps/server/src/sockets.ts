@@ -9,7 +9,7 @@ import { sql } from './db';
  * NOTIFY личного журнала (s/x в notifyPayloads), а hello/chatsSince сверяют подписки с chat_members — страховка.
  * Реестр сокетов по пользователю — в этом процессе (у каждого сокета своя шина: тесты поднимают несколько серверов).
  */
-export type ChatSocket = ServerWebSocket<{ userId: number; chats?: Set<number>; opened?: Promise<void> }>;
+export type ChatSocket = ServerWebSocket<{ userId: number; chats?: Set<number>; threads?: Set<string>; opened?: Promise<void> }>;
 
 const byUser = new Map<number, Set<ChatSocket>>();
 const busOf = new WeakMap<ChatSocket, Bus>();
@@ -71,4 +71,40 @@ export function subscribeUserSockets(userId: number, chatId: number): void {
 }
 export function unsubscribeUserSockets(userId: number, chatId: number): void {
   for (const ws of socketsOf(userId)) void unsubscribeChat(ws, chatId);
+}
+
+/**
+ * Тред глазами гостя (не участник группы обсуждения, threads.ts threadAccess): сокет подписан на топик
+ * `thread:<группа>:<копия>`, пока тред открыт. Кадры threadPush собирает realtime.ts из push группы — только события
+ * этого треда. Счётчик открытых тредов по чатам — в процессе: realtime смотрит его, чтобы не разбирать push групп,
+ * где гостей нет. Valkey не нужен: push каждый процесс собирает сам из NOTIFY журнала чата.
+ */
+const watched = new Map<number, Map<number, number>>();
+export const threadTopic = (chatId: number, threadId: number) => `thread:${chatId}:${threadId}`;
+/** Открытые гостями треды чата в этом процессе (id копий) или undefined. */
+export const watchedThreads = (chatId: number): ReadonlyMap<number, number> | undefined => watched.get(chatId);
+
+export function watchThread(ws: ChatSocket, chatId: number, threadId: number): void {
+  const set = (ws.data.threads ??= new Set()), k = chatId + ':' + threadId;
+  if (set.has(k)) return;
+  set.add(k);
+  ws.subscribe(threadTopic(chatId, threadId));
+  let by = watched.get(chatId);
+  if (!by) watched.set(chatId, (by = new Map()));
+  by.set(threadId, (by.get(threadId) ?? 0) + 1);
+}
+
+export function unwatchThread(ws: ChatSocket, chatId: number, threadId: number): void {
+  const k = chatId + ':' + threadId;
+  if (!ws.data.threads?.delete(k)) return;
+  ws.unsubscribe(threadTopic(chatId, threadId));
+  const by = watched.get(chatId);
+  const n = (by?.get(threadId) ?? 0) - 1;
+  if (n > 0) by!.set(threadId, n);
+  else { by?.delete(threadId); if (!by?.size) watched.delete(chatId); }
+}
+
+/** Сокет закрывается: снять его треды со счёта (топики Bun снимает сам). */
+export function releaseThreads(ws: ChatSocket): void {
+  for (const k of [...(ws.data.threads ?? [])]) { const [c, t] = k.split(':').map(Number); unwatchThread(ws, c, t); }
 }

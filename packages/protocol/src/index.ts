@@ -365,6 +365,9 @@ export type ClientFrame =
   | { op: 'todoAppend'; reqId: string; chatId: Id; id: Id; items: string[] }
   | { op: 'todoEdit'; reqId: string; chatId: Id; id: Id; todo: TodoInput }
   | { op: 'listened'; reqId: string; chatId: Id; id: Id }
+  // открыт тред группы обсуждения, где я не участник: живые события треда кадрами threadPush, пока не unwatchThread
+  | { op: 'watchThread'; reqId: string; chatId: Id; threadId: Id }
+  | { op: 'unwatchThread'; reqId: string; chatId: Id; threadId: Id }
   // нажата callback-кнопка; ack.result — ButtonAnswer
   | { op: 'button'; reqId: string; chatId: Id; id: Id; data: string }
   | { op: 'ping' };
@@ -389,6 +392,9 @@ export type ServerFrame =
   // синхронизируется (sync / syncChat). Пустые items — «догони чат» (события не поместились в уведомление)
   | { op: 'push'; chatId?: Id; from: number; to: number; items: JournalEntry[] }
   | { op: 'tooLong'; seq: number }
+  // события треда для того, кто смотрит его не участником (watchThread): без номеров журнала — живой вид, не журнал.
+  // Пустые items — «перечитай край треда» (события не поместились в уведомление)
+  | { op: 'threadPush'; chatId: Id; threadId: Id; items: Update[] }
   | { op: 'ack'; reqId: string; result: Record<string, unknown> }
   | { op: 'err'; reqId?: string; code: ErrorCode; retry: boolean }
   | { op: 'poke' }
@@ -418,6 +424,8 @@ export function parseClientFrame(raw: string): ClientFrame | null {
     case 'delete': return str(f.reqId, 64) && int(f.chatId) && int(f.id) ? { op: 'delete', reqId: f.reqId, chatId: f.chatId, id: f.id } : null;
     case 'button': return str(f.reqId, 64) && int(f.chatId) && int(f.id) && str(f.data, BUTTON_DATA_MAX) ? { op: 'button', reqId: f.reqId, chatId: f.chatId, id: f.id, data: f.data } : null;
     case 'listened': return str(f.reqId, 64) && int(f.chatId) && int(f.id) ? { op: 'listened', reqId: f.reqId, chatId: f.chatId, id: f.id } : null;
+    case 'watchThread': case 'unwatchThread':
+      return str(f.reqId, 64) && int(f.chatId) && int(f.threadId) ? { op: f.op, reqId: f.reqId, chatId: f.chatId, threadId: f.threadId } : null;
     case 'todoToggle': {
       const ids = (v: unknown) => Array.isArray(v) && v.length <= TODO_ITEMS_MAX && v.every((x) => int(x)) ? v as number[] : null;
       const done = ids(f.completed), undone = ids(f.incompleted);
