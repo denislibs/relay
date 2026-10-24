@@ -93,6 +93,10 @@ export interface LocalChat {
   openedAt?: number;      // когда ленту чата открывали в последний раз (мс): уборка урезает давно не открытые (evict.ts)
   /** группа обсуждения: отрезки тредов по id копии; нет — тред не открывали (перезагрузится при открытии) */
   threads?: Record<number, ThreadRanges>;
+  /** непрочитанные упоминания меня: число (строка списка, +1 журналом mention) и известные id по возрастанию («к упоминанию») */
+  mentions?: number;
+  mentionIds?: number[];
+  mentionThreads?: Record<number, number>;   // id упоминания в треде → тред (копия поста)
 }
 
 export interface OutboxEntry {
@@ -126,6 +130,9 @@ export type Query =
    *  по тем же правилам, что messages; служебные ~window и ~thread {header: ключ шапки или null} */
   | { kind: 'thread'; chatId: number; threadId: number; limit: number; anchor?: { sort: number; side: 'end' | 'start' | 'center' } }
   | { kind: 'counters' }
+  /** последние уведомления (новое чужое сообщение или упоминание меня), по порядку прихода: одно на сообщение;
+   *  mention — сквозь mute; элемент {key, chatId, id, mention, threadId?, senderId, body, kind, createdAt, …} */
+  | { kind: 'notifications' }
   | { kind: 'status' }
   | { kind: 'uploads' }   // неотправленные файлы во всех чатах: имя, размер, прогресс
   | { kind: 'presence'; userId: number }
@@ -187,6 +194,10 @@ export type Action =
   | { type: 'loadThread'; chatId: number; threadId: number }
   /** тред прочитан до upToId: сразу у себя (точка на кнопке поста гаснет), на сервер — пачкой, как seen; основную ленту не трогает */
   | { type: 'markThreadRead'; chatId: number; threadId: number; upToId: number }
+  /** «к упоминанию»: старейшее непрочитанное упоминание {id, threadId?} или null (только из кэша) */
+  | { type: 'nextMention'; chatId: number }
+  /** «кто прочитал» своё сообщение в небольшой группе: {ok, data: [{id, name}]} | {ok:false, code} */
+  | { type: 'readBy'; chatId: number; id: number }
   | { type: 'retry'; clientId: string }
   /** неотправленное — убрать из очереди и ленты; идущая загрузка файла прерывается */
   | { type: 'discard'; clientId: string }

@@ -15,7 +15,8 @@ import { stickerForSend } from './stickers';
 import { cachedPreview, firstUrl, getPreview } from './linkPreview';
 import { contentColumns, openRows, updateContent } from './messageContent';
 import { currentChatKey } from '../crypto/chatKeys';
-import { copyPost, noteComment, withCopy } from './threads';
+import { copyPost, isThreadRoot, noteComment, withCopy } from './threads';
+import { collectMentions } from './mentions';
 
 export const MAX_BODY = 4096;
 
@@ -70,7 +71,8 @@ export async function sendMessage(
     if (threadId != null) {
       if (ctx.kind !== 'group') throw new DomainError('bad_frame', 'thread outside a group');
       const [root] = await tx`select origin, deleted from messages where chat_id = ${input.chatId} and id = ${threadId}`;
-      if (!root || root.origin == null || root.deleted) throw new DomainError('not_found', 'thread');
+      // корень — только копия, на которую указывает тред поста (копия не первого поста альбома — не корень)
+      if (!root || root.origin == null || root.deleted || !(await isThreadRoot(tx, root.origin, threadId))) throw new DomainError('not_found', 'thread');
     }
     // копия без «Переслано от» — новое сообщение и может быть ответом; настоящая пересылка — нет (как в Telegram)
     const canReply = !input.forward || !!input.forward.hideSender;
@@ -160,6 +162,8 @@ export async function sendMessage(
       await copyPost(tx, input.chatId, inserted[0], userId);   // у канала есть группа обсуждения — корень треда в ней
     }
     if (threadId != null) await noteComment(tx, input.chatId, threadId, userId, message.id);
+    // упоминания — после noteComment: свой комментарий уже поднял мою прочитанность треда (себя и так не упоминаем)
+    if (!input.forward) await collectMentions(tx, ctx, inserted[0]);   // пересланное никого не упоминает
     // как в Telegram: новое сообщение возвращает чат из архива (если не заглушён). Группы — клиент условной операцией
     // unarchive (chatFlags.ts): запись каждому участнику на каждое сообщение для них непозволительна
     if (ctx.kind === 'direct') await unarchiveOnMessage(tx, input.chatId, userId);

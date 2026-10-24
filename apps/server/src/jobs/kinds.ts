@@ -43,6 +43,21 @@ register('push.message', async (p: { chatId?: number; id?: number; message?: Pus
   });
 });
 
+// упоминание (mentions.ts): одному адресату, сквозь mute; строки упоминания уже нет (прочитал, удалили) — молчим
+register('push.mention', async (p: { chatId: number; id: number; userId: number }) => {
+  const [still] = await sql`select 1 from message_mentions where user_id = ${p.userId} and chat_id = ${p.chatId} and message_id = ${p.id}`;
+  if (!still) return;
+  const row = await loadOpen(p.chatId, p.id);
+  if (!row || row.deleted) return;
+  const m = { ...toMessage(row), senderId: Number(row.sender_id) } as PushMessage;
+  const targets = await planPush(m, { mentionOf: Number(p.userId) });
+  if (!targets.length) return;
+  const sealed = await Promise.all(targets.map(async (t) => ({ endpoint: t.endpoint, chatId: t.push.chatId, sealed: await sealForChat(t.push.chatId, t.push, 'jobs|push') })));
+  await sql.begin(async (tx) => {
+    for (const t of sealed) await enqueue(tx, 'push.deliver', t);
+  });
+});
+
 register('push.deliver', async (p: { endpoint: string; push?: PushPayload; chatId?: number; sealed?: string }) => {
   const push = p.push ?? (p.sealed && p.chatId != null ? await openForChat<PushPayload>(p.chatId, p.sealed, 'jobs|push').catch(() => null) : null);
   if (!push) return;   // чат удалён — ключа нет, слать нечего

@@ -9,7 +9,7 @@ import { planPush, subscribe } from '../src/domain/push';
 import { allowPrivateHostsForTests } from '../src/domain/linkPreview';
 import '../src/jobs/kinds';
 import { drainJobs } from '../src/jobs/worker';
-import { chatEventsOf, journalOf, pushBrowser, resetDb } from './helpers';
+import { chatEventsOf, journalOf, opened, pushBrowser, resetDb, uploadFile } from './helpers';
 
 const server = createServer({ port: 0 });
 const base = `http://localhost:${server.port}`;
@@ -273,4 +273,34 @@ test('push for the copy skips channel subscribers (one push per post) and is tit
   expect(forPost.map((x) => x.endpoint)).toEqual([ep(2)]);
   // обычное сообщение группы — как раньше, всем
   expect((await planPush({ chatId: g, id: copyId, senderId: a.userId, body: 'x' })).map((x) => x.endpoint).sort()).toEqual([ep(2), ep(3)]);
+});
+
+test('album: posts sharing a group_id share one thread — the first copy is the root, comments count on every post', async () => {
+  const { a, b, ch, g } = await linked();
+  const groupId = crypto.randomUUID();
+  const file = async (n: number) => ({ id: (await uploadFile(base, a.token, { name: `f${n}.pdf`, mime: 'application/pdf' }, 'pdf' + n) as { id: string }).id });
+  const p1 = await send(a, ch, 'альбом', { attachment: await file(1), groupId });
+  const p2 = await send(a, ch, '', { attachment: await file(2), groupId });
+  const root = (await copyOf(ch, p1.id))!;
+  expect(await copyOf(ch, p2.id)).toBe(root);   // один тред
+  const [second] = await sql`select id, group_id from messages where origin->>'chatId' = ${String(ch)} and origin->>'id' = ${String(p2.id)}`;
+  expect(Number(second.id)).not.toBe(root);     // своя копия — часть того же пузыря
+  expect(second.group_id).toBe(groupId);
+  await expect(comment(b, g, Number(second.id))).rejects.toMatchObject({ code: 'not_found' });   // не корень
+  expect((await call(b, 'GET', `/chats/${g}/threads/${Number(second.id)}/messages`)).status).toBe(404);
+  const k = await comment(b, g, root, 'к альбому');
+  expect(await thread(ch, p1.id)).toEqual({ count: 1, lastId: k.id, recent: [b.userId] });
+  expect(await thread(ch, p2.id)).toEqual({ count: 1, lastId: k.id, recent: [b.userId] });
+  await runNow();
+  const ev = (await chatEventsOf(ch, 'replies')) as { id: number; count: number }[];
+  expect(ev.map((e) => [e.id, e.count]).sort()).toEqual([[p1.id, 1], [p2.id, 1]].sort());
+  const h = await history(b, ch);
+  expect(h.find((m) => m.id === p2.id).replies).toMatchObject({ copyId: root, count: 1 });
+  // правка второго поста — правит его собственную копию
+  await editMessage(a.userId, ch, p2.id, 'подпись');
+  const [e2] = await opened(await sql`select * from messages where id = ${Number(second.id)}`);
+  expect(e2.body).toBe('подпись');
+  // комментарий удалён — пересчёт на обоих постах
+  await deleteMessage(b.userId, g, k.id);
+  expect(await thread(ch, p2.id)).toEqual({ count: 0, lastId: null, recent: [] });
 });

@@ -201,7 +201,7 @@ export function notifyPayloads(written: Written[]): string[] {
  * в группе на 200 человек текст лежал 200 раз, а удалённое сообщение оставалось в журнале. Клиент получает прежний
  * формат: подстановка — на сервере, при отдаче.
  */
-export type Stored = Update | { type: MessageRef; chatId: number; id: number; ref: 1 } | { type: 'draft'; chatId: number; at: string; ref: 1 };
+export type Stored = Update | { type: MessageRef; chatId: number; id: number; ref: 1 } | { type: 'mention'; chatId: number; id: number; threadId?: number; ref: 1 } | { type: 'draft'; chatId: number; at: string; ref: 1 };
 type MessageRef = 'newMessage' | 'messageEdited' | 'messageMarkup' | 'todoUpdated' | 'linkPreview' | 'attachmentUpdated';
 
 export function stored(u: Update): Stored {
@@ -210,6 +210,7 @@ export function stored(u: Update): Stored {
     case 'messageEdited': case 'messageMarkup': case 'todoUpdated': case 'linkPreview': case 'attachmentUpdated':
       return { type: u.type, chatId: u.chatId, id: u.id, ref: 1 };
     case 'draft': return { type: 'draft', chatId: u.chatId, at: u.at, ref: 1 };
+    case 'mention': return { type: 'mention', chatId: u.message.chatId, id: u.message.id, ...(u.threadId != null ? { threadId: u.threadId } : {}), ref: 1 };
     default: return u;
   }
 }
@@ -244,6 +245,8 @@ export async function hydrate(userId: number | null, rows: { seq: number; payloa
     const m = toMessage(row);
     switch (p.type) {
       case 'newMessage': return { seq, update: { type: 'newMessage', message: m } };   // реакции — своими событиями, как и раньше
+      // упоминание удалённого — удаление (счётчик «@» у клиента уходит вместе с ним)
+      case 'mention': return row.deleted ? { seq, update: { type: 'messageDeleted', chatId: p.chatId, id: p.id } } : { seq, update: { type: 'mention', message: m, ...(p.threadId != null ? { threadId: p.threadId } : {}) } };
       case 'messageEdited': return { seq, update: { type: 'messageEdited', chatId: p.chatId, id: p.id, body: m.body, editedAt: m.editedAt ?? m.createdAt, entities: m.entities ?? [] } };
       case 'messageMarkup': return { seq, update: { type: 'messageMarkup', chatId: p.chatId, id: p.id, body: m.body, ...(m.entities ? { entities: m.entities } : {}), buttons: m.buttons ?? null } };
       case 'todoUpdated': return m.todo ? { seq, update: { type: 'todoUpdated', chatId: p.chatId, id: p.id, todo: m.todo, ...(m.editedAt ? { editedAt: m.editedAt } : {}) } } : { seq, update: { type: 'messageDeleted', chatId: p.chatId, id: p.id } };

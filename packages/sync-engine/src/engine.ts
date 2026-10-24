@@ -1026,6 +1026,15 @@ export class Engine {
         if (this.store.localThreadRead(a.chatId, a.threadId, a.upToId)) { this.changed(); this.scheduleReads(); }
         return null;
       }
+      case 'nextMention': return this.store.nextMention(a.chatId);
+      case 'readBy': {
+        let res: Response;
+        try { res = await this.dev.fetch(`${this.cfg.httpBase}/chats/${a.chatId}/messages/${a.id}/read-by`, { credentials: 'include', headers: this.cfg.headers }); }
+        catch { return { ok: false, code: 'offline' }; }
+        if (this.session.unauthorized(res.status)) return { ok: false, code: 'offline' };
+        const data = await res.json().catch(() => null) as { code?: string } | null;
+        return res.ok ? { ok: true, data } : { ok: false, code: data?.code ?? 'internal' };
+      }
       case 'loadThread': {
         await this.store.loadChatMessages(a.chatId);
         await this.loadThreadPage(a.chatId, a.threadId, (t) => t?.historyStart && t.ranges.length <= 1 ? undefined : t?.ranges[t.ranges.length - 1]?.[0] ?? null);

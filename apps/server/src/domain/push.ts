@@ -100,7 +100,8 @@ export async function unsubscribe(userId: number, endpoint: string): Promise<voi
 }
 
 /** system — служебное сообщение Relay: SW ставит знак Relay иконкой. */
-export type PushPayload = { chatId: number; id: number; title: string; body: string; system?: true };
+/** mention — упоминание меня (push.mention): SW может показать его даже в заглушённом чате. */
+export type PushPayload = { chatId: number; id: number; title: string; body: string; system?: true; mention?: true };
 
 export type PushMessage = { chatId: number; id: number; senderId: number; body: string; entities?: { type: string; offset: number; length: number }[]; kind?: string; attachment?: { name?: string } | null; service?: { type: string }; sticker?: { emoji?: string } | null; post?: boolean };
 
@@ -109,8 +110,11 @@ export type PushMessage = { chatId: number; id: number; senderId: number; body: 
  *  Только подпискам живых сеансов: истёкший или неактивный дольше срока, но ещё не убранный sweepInactive — молчит. */
 /** excludeChatId — копия поста в группе обсуждения: участники этого канала (получили push о посте) пропускаются,
  *  заголовок — название канала. */
-export async function planPush(m: PushMessage, opts: { excludeChatId?: number } = {}): Promise<{ endpoint: string; push: PushPayload }[]> {
-  const excl = opts.excludeChatId ?? null;
+/** mentionOf — упоминание (push.mention): только этому получателю и сквозь mute — чата на аккаунте, списка muted
+ *  подписки и умолчания вида чата (как в Telegram); блокировки, «скрывать текст» и предпросмотр — как обычно.
+ *  Без mentionOf упомянутые пропускаются: им уходит push.mention, одно уведомление на сообщение. */
+export async function planPush(m: PushMessage, opts: { excludeChatId?: number; mentionOf?: number } = {}): Promise<{ endpoint: string; push: PushPayload }[]> {
+  const excl = opts.excludeChatId ?? null, only = opts.mentionOf ?? null;
   m = { ...m, body: hideSpoilers(m.body, m.entities) };   // скрытый текст в уведомление не уходит
   // код входа не уходит в push-сервис и на экран блокировки
   if (m.service?.type === 'login_code') m = { ...m, body: 'Код для входа в Relay' };
@@ -122,8 +126,11 @@ export async function planPush(m: PushMessage, opts: { excludeChatId?: number } 
     join chat_members cm on cm.user_id = s.user_id and cm.chat_id = ${m.chatId}
     join sessions se on se.id = s.session_id
     left join user_settings us on us.user_id = s.user_id
-    where s.user_id <> ${m.senderId} and not (${m.chatId} = any(s.muted))
+    where s.user_id <> ${m.senderId}
+      ${only != null ? sql`and s.user_id = ${only}` : sql`
+      and not (${m.chatId} = any(s.muted))
       and (cm.mute_until is null or cm.mute_until <= now())   -- выключенный на аккаунте чат: мьют 'infinity' в будущем всегда
+      and not exists (select 1 from message_mentions mm where mm.user_id = s.user_id and mm.chat_id = ${m.chatId} and mm.message_id = ${m.id})`}
       and se.expires_at > now()
       and se.last_active_at > now() - make_interval(days => coalesce(us.sessions_ttl_days, ${DEFAULT_TTL_DAYS}))
       and not exists (select 1 from blocks b where b.owner_id = s.user_id and b.user_id = ${m.senderId})   -- от заблокированного — никогда
@@ -139,7 +146,7 @@ export async function planPush(m: PushMessage, opts: { excludeChatId?: number } 
   const kind = info.kind === 'channel' ? 'channel' : info.kind === 'group' ? 'group' : 'direct';
   const prefOf = (userId: number) => defaults.get(userId)?.[kind] ?? { muted: false, preview: true };
   const preview = m.kind === 'sticker' ? (m.sticker?.emoji ? m.sticker.emoji + ' Стикер' : 'Стикер') : m.kind === 'voice' ? '🎤 Голосовое сообщение' : m.kind === 'todo' ? '☑️ ' + m.body : m.kind === 'round' ? 'Видеосообщение' : m.kind === 'photo' ? (m.body ? '🖼 ' + m.body : 'Фотография') : m.kind === 'video' ? (m.body ? '📹 ' + m.body : 'Видео') : m.kind === 'file' ? '📎 ' + (m.body || m.attachment?.name || 'Файл') : m.kind === 'audio' ? '🎵 ' + (m.body || (m.attachment as { title?: string } | null | undefined)?.title || (m.attachment?.name ?? 'Музыка').replace(/\.[^.]{1,5}$/, '')) : m.body;
-  return offline.filter((s) => !prefOf(s.user_id as number).muted).map((s) => {
+  return offline.filter((s) => only != null || !prefOf(s.user_id as number).muted).map((s) => {
     const name = s.sender_name as string;
     const shown = prefOf(s.user_id as number).preview;
     // «Скрывать текст в уведомлениях» на этом устройстве — ни имени, ни текста (как и локальное уведомление)
@@ -152,6 +159,7 @@ export async function planPush(m: PushMessage, opts: { excludeChatId?: number } 
       ? { chatId: m.chatId, id: m.id, title: (info.title as string) ?? 'Группа', body: shown ? `${name}: ${preview}` : NO_PREVIEW }
       : { chatId: m.chatId, id: m.id, title: name, body: shown ? preview : NO_PREVIEW };
     if (m.service) push.system = true;
+    if (only != null) push.mention = true;
     return { endpoint: s.endpoint as string, push };
   });
 }

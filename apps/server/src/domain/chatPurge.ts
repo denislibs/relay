@@ -27,6 +27,7 @@ export async function purgeStep(p: PurgeJob): Promise<void> {
         await appendUpdates(tx, ids.map((userId) => ({ userId, update: { type: 'chatRemoved' as const, chatId } })));
         await tx`delete from chat_members where chat_id = ${chatId} and user_id = any(${ids}::bigint[])`;
         await tx`delete from drafts where chat_id = ${chatId} and user_id = any(${ids}::bigint[])`;
+        await tx`delete from message_mentions where chat_id = ${chatId} and user_id = any(${ids}::bigint[])`;
       }
       const last = ids[ids.length - 1];
       if (ids.length === page) await enqueue(tx, 'chat.purge', { chatId, after: last }, { dedupeKey: `chat.purge:${chatId}:m:${last}` });

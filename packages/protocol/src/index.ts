@@ -221,6 +221,8 @@ export type Update =
   | { type: 'replies'; chatId: Id; id: Id; count: number; lastId: Id | null; recent: Id[] }
   // тред прочитан до upToId (chatId — группа обсуждения, threadId — копия поста): только своим устройствам
   | { type: 'readThread'; chatId: Id; threadId: Id; upToId: Id }
+  // меня упомянули (@имя или ответ): только мне; сообщение целиком (журнал хранит ссылку), threadId — упоминание в треде
+  | { type: 'mention'; message: Message; threadId?: Id }
   | { type: 'mediaListened'; chatId: Id; id: Id }   // голосовое/кружок прослушали
   | { type: 'userUpdated'; user: PublicUser }   // профиль изменился: себе и всем, кто видит пользователя
   // контакт добавлен/изменён (contact) или удалён (removed + user — как его видно без контакта); только владельцу
@@ -518,3 +520,4 @@ export function searchTerms(text: string): string[] {
 export * from './groups';
 export * from './blocks';
 export * from './fileCrypto';
+export * from './mentions';

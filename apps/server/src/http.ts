@@ -9,6 +9,7 @@ import { accessCookie, ACCESS_SEC, clearAccessCookie, deviceKeyOf, newChallenge,
 import { announceLogin, announceSessionsChanged, assertConfirmed, checkSocket, confirmSession, listSessions, sessionEnded, sweepInactive, terminateOthers, terminateSession, trackSocket, untrackSocket } from './domain/sessions';
 import { countViews } from './domain/views';
 import { getThread, readThread } from './domain/threads';
+import { readBy } from './domain/reads';
 import { commonGroups, deleteDirectChat, createChat, createGroup, openDirect, messageAtDate, getChatMedia, getChatMediaCounts, getHistory, getMessagesByIds, listChats, listChatsPage } from './domain/chats';
 import { sql } from './db';
 import { DomainError } from './domain/errors';
@@ -404,6 +405,9 @@ export function createServer(opts: { port: number }): Server {
           const body = (await req.json().catch(() => null)) as { upToId?: unknown } | null;
           return Response.json(await readThread(userId, Number(thr[1]), Number(thr[2]), body?.upToId));
         }
+        // «кто прочитал» своё сообщение в небольшой группе (reads.ts)
+        const rb = /^\/chats\/(\d+)\/messages\/(\d+)\/read-by$/.exec(url.pathname);
+        if (rb && req.method === 'GET') return Response.json(await readBy(userId, Number(rb[1]), Number(rb[2])));
         const mem = /^\/chats\/(\d+)\/members$/.exec(url.pathname);
         if (req.method === 'GET' && mem) return Response.json(await chatMembers(userId, Number(mem[1])));
         const hist = /^\/chats\/(\d+)\/messages$/.exec(url.pathname);

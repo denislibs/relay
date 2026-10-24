@@ -37,14 +37,24 @@ export async function copyPost(tx: Tx, channelId: number, post: Record<string, u
     returning *`;
   const copy = toMessage((await openRows([row], '', tx))[0]);
   await chatEvent(tx, groupId, { type: 'newMessage', message: copy }, 'group');
-  await tx`insert into message_threads (chat_id, post_id, copy_id) values (${channelId}, ${Number(post.id)}, ${copy.id})
+  // альбом (общий group_id): тред один — у копии первого поста альбома; копии остальных — части того же пузыря в
+  // группе, но не корни (send {threadId} их не примет), строки их постов указывают на ту же копию
+  const [first] = post.group_id ? await tx`
+    select t.copy_id from messages p join message_threads t on t.chat_id = p.chat_id and t.post_id = p.id
+     where p.chat_id = ${channelId} and p.group_id = ${post.group_id as string} and p.id < ${Number(post.id)}
+       and (select cp.chat_id from messages cp where cp.id = t.copy_id) = ${groupId}
+     order by p.id limit 1` : [];
+  const root = first ? Number(first.copy_id) : copy.id;
+  const [cur] = root !== copy.id ? await tx`select count, last_id, recent from message_threads where chat_id = ${channelId} and copy_id = ${root} limit 1` : [];
+  await tx`insert into message_threads (chat_id, post_id, copy_id, count, last_id, recent)
+           values (${channelId}, ${Number(post.id)}, ${root}, ${cur ? Number(cur.count) : 0}, ${cur?.last_id ?? null}, ${(cur?.recent as unknown[] | undefined)?.map(Number) ?? []}::bigint[])
            on conflict (chat_id, post_id) do update set copy_id = excluded.copy_id`;
   // автору своя копия — не непрочитанная (senderId у неё 0, как у поста): last_read_id и readOwn своим устройствам
   await readOwnPost(tx, groupId, authorId, copy.id);
   // push группы для копии пропускает подписчиков канала (kinds.ts → planPush excludeChatId): одно уведомление на пост
   await enqueue(tx, 'push.message', { chatId: groupId, id: copy.id });
   await enqueue(tx, 'search.sync', { id: copy.id });   // индекс копию пропускает (её находят как пост канала)
-  // TODO(упоминания, коммит 4): из текста копии упоминания не создаются — их создаёт только пост
+  // упоминаний копия не создаёт (mentions.ts: origin) — их создаёт только пост
 }
 
 /**
@@ -53,11 +63,13 @@ export async function copyPost(tx: Tx, channelId: number, post: Record<string, u
  * взят вызывающим; строку копии запирает fn (updateContent) — порядок всегда «пост → копия».
  */
 export async function withCopy(tx: Tx, channelId: number, postId: number, fn: (groupId: number, copyId: number) => Promise<void>): Promise<void> {
+  // копия — по origin (индекс messages_origin), не по message_threads: у постов альбома тред общий (копия первого),
+  // а своя копия у каждого
   const [t] = await tx`
-    select m.chat_id, m.id from message_threads t
-      join messages m on m.id = t.copy_id and m.origin is not null and not m.deleted
+    select m.chat_id, m.id from messages m
       join chats c on c.id = m.chat_id and c.deleted_at is null
-     where t.chat_id = ${channelId} and t.post_id = ${postId} and (m.origin->>'chatId')::bigint = t.chat_id`;
+     where m.origin->>'chatId' = ${String(channelId)} and m.origin->>'id' = ${String(postId)} and not m.deleted
+     order by m.id limit 1`;
   if (t) await fn(Number(t.chat_id), Number(t.id));
 }
 
@@ -66,6 +78,13 @@ async function threadKey(tx: Tx, groupId: number, copyId: number): Promise<{ cha
   const [r] = await tx`select origin from messages where chat_id = ${groupId} and id = ${copyId}`;
   const o = r?.origin as { chatId?: unknown; id?: unknown } | null | undefined;
   return o ? { channelId: Number(o.chatId), postId: Number(o.id) } : null;
+}
+
+/** Корень ли треда эта копия: строка message_threads её поста указывает на неё (копия не первого поста альбома — нет). */
+export async function isThreadRoot(db: Tx | typeof sql, origin: unknown, copyId: number): Promise<boolean> {
+  const o = origin as { chatId?: unknown; id?: unknown } | null;
+  if (!o) return false;
+  return (await db`select 1 from message_threads where chat_id = ${Number(o.chatId)} and post_id = ${Number(o.id)} and copy_id = ${copyId}`).length > 0;
 }
 
 /** replies.flush на секундное окно: w — по часам базы ПОСЛЕ замка строки message_threads (см. reactionCounts.ts). */
@@ -80,10 +99,12 @@ export async function noteComment(tx: Tx, groupId: number, copyId: number, sende
   const key = await threadKey(tx, groupId, copyId);
   if (key) {
     // update запирает строку; recent — комментатор впереди, без повторов, не больше трёх
+    // все посты треда (альбом — несколько строк с одной копией): строки по порядку post_id — один порядок замков
     const up = await tx`
       update message_threads set count = count + 1, last_id = greatest(coalesce(last_id, 0), ${id}),
              recent = (array[${senderId}::bigint] || array_remove(recent, ${senderId}::bigint))[1:3]
-       where chat_id = ${key.channelId} and post_id = ${key.postId} and copy_id = ${copyId} returning 1`;
+       where chat_id = ${key.channelId} and post_id in (select post_id from message_threads where chat_id = ${key.channelId} and copy_id = ${copyId} order by post_id for update)
+       returning 1`;
     if (up.length) await scheduleReplies(tx, key.channelId, key.postId);
   }
   // свой комментарий — тред прочитан до него (на всех моих устройствах)
@@ -94,26 +115,29 @@ export async function noteComment(tx: Tx, groupId: number, copyId: number, sende
 export async function recountThread(tx: Tx, groupId: number, copyId: number): Promise<void> {
   const key = await threadKey(tx, groupId, copyId);
   if (!key) return;
-  const [t] = await tx`select 1 from message_threads where chat_id = ${key.channelId} and post_id = ${key.postId} and copy_id = ${copyId} for update`;
-  if (!t) return;
+  const t = await tx`select post_id from message_threads where chat_id = ${key.channelId} and copy_id = ${copyId} order by post_id for update`;
+  if (!t.length) return;
   const [agg] = await tx`select count(*)::int as n, max(id) as last from messages where chat_id = ${groupId} and thread_id = ${copyId} and not deleted`;
   const recent = await tx`
     select sender_id from messages where chat_id = ${groupId} and thread_id = ${copyId} and not deleted
      group by sender_id order by max(id) desc limit 3`;
   await tx`update message_threads set count = ${agg.n}, last_id = ${agg.last ?? null}, recent = ${recent.map((r) => Number(r.sender_id))}::bigint[]
-            where chat_id = ${key.channelId} and post_id = ${key.postId}`;
+            where chat_id = ${key.channelId} and copy_id = ${copyId}`;
   await scheduleReplies(tx, key.channelId, key.postId);
 }
 
-/** Задача replies.flush: счётчики треда одним событием в журнал канала. Строка — for share: смена до чтения учтена. */
+/** Задача replies.flush: счётчики треда событием replies на каждый пост треда (альбом — на каждый) в журнал канала.
+ *  Строки — for share: смена до чтения учтена. */
 export async function flushReplies(p: { chatId: number; postId: number }): Promise<void> {
   const chatId = Number(p.chatId), postId = Number(p.postId);
   await sql.begin(async (tx) => {
-    const [t] = await tx`select t.count, t.last_id, t.recent, c.deleted_at from message_threads t join chats c on c.id = t.chat_id
-                          where t.chat_id = ${chatId} and t.post_id = ${postId} for share of t`;
-    if (!t || t.deleted_at) return;
-    await chatEvent(tx, chatId, {
-      type: 'replies', chatId, id: postId, count: Number(t.count), lastId: t.last_id == null ? null : Number(t.last_id), recent: (t.recent as (number | string)[]).map(Number),
+    const rows = await tx`
+      select t.post_id, t.count, t.last_id, t.recent, c.deleted_at from message_threads t join chats c on c.id = t.chat_id
+       where t.chat_id = ${chatId} and t.copy_id = (select copy_id from message_threads where chat_id = ${chatId} and post_id = ${postId})
+       order by t.post_id for share of t`;
+    if (!rows.length || rows[0].deleted_at) return;
+    for (const t of rows) await chatEvent(tx, chatId, {
+      type: 'replies', chatId, id: Number(t.post_id), count: Number(t.count), lastId: t.last_id == null ? null : Number(t.last_id), recent: (t.recent as (number | string)[]).map(Number),
     }, 'channel');
   });
 }
@@ -121,7 +145,7 @@ export async function flushReplies(p: { chatId: number; postId: number }): Promi
 /** Корень треда в группе: копия поста; удалённая — тоже (тред читается с шапкой «пост удалён»). */
 async function threadRoot(db: Tx | typeof sql, groupId: number, copyId: number): Promise<Record<string, unknown>> {
   const [h] = await db`select * from messages where chat_id = ${groupId} and id = ${copyId} and origin is not null`;
-  if (!h) throw new DomainError('not_found', 'thread');
+  if (!h || !(await isThreadRoot(db, h.origin, copyId))) throw new DomainError('not_found', 'thread');
   return h;
 }
 
@@ -158,6 +182,7 @@ async function markThreadReadTx(tx: Tx, userId: number, groupId: number, copyId:
     on conflict (user_id, chat_id, thread_id) do update set read_max_id = excluded.read_max_id where thread_reads.read_max_id < excluded.read_max_id
     returning 1`;
   if (!up.length) return false;
+  await tx`delete from message_mentions where user_id = ${userId} and chat_id = ${groupId} and thread_id = ${copyId} and message_id <= ${upToId}`;   // упоминания треда прочитаны
   await appendUpdates(tx, [{ userId, update: { type: 'readThread', chatId: groupId, threadId: copyId, upToId } }]);
   return true;
 }

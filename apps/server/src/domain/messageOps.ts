@@ -12,6 +12,7 @@ import { enqueue } from '../jobs/queue';
 import { can, groupCtx, hasAdmin } from './groupRights';
 import { reactPost, type Counts } from './reactionCounts';
 import { recountThread, withCopy } from './threads';
+import { collectMentions } from './mentions';
 import type { Tx } from '../db';
 
 const MAX_BODY = 4096;
@@ -54,6 +55,8 @@ export async function editMessage(userId: number, chatId: number, id: number, bo
     const editedAt = new Date(row.edited_at as string).toISOString();
     await chatEvent(tx, chatId, { type: 'messageEdited', chatId, id, body: text, editedAt, entities });
     await enqueue(tx, 'search.sync', { id });
+    // новые @имена правки — новые упоминания; убранные остаются (как в Telegram)
+    await collectMentions(tx, ctx, row);
     // пост канала — та же правка копии в группе обсуждения
     if (ctx.kind === 'channel') await withCopy(tx, chatId, id, async (groupId, copyId) => {
       const copy = await updateContent(tx, groupId, copyId, () => ({ body: text, entities: entities.length ? entities : null }), () => ({ edited_at: sql`now()` }));
@@ -87,6 +90,7 @@ async function erase(tx: Tx, chatId: number, id: number, kind: 'direct' | 'group
   // текст и шифр стираются целиком: у удалённого не остаётся содержимого ни открыто, ни шифром
   await tx`update messages set body = '', entities = null, todo = null, blocks = null, link = null, content = null, deleted = true where chat_id = ${chatId} and id = ${id}`;
   await tx`delete from reactions where chat_id = ${chatId} and message_id = ${id}`;
+  await tx`delete from message_mentions where chat_id = ${chatId} and message_id = ${id}`;   // «@» у упомянутых гаснет
   if (kind === 'channel') await tx`delete from message_reaction_counts where chat_id = ${chatId} and message_id = ${id}`;
   await chatEvent(tx, chatId, { type: 'messageDeleted', chatId, id }, kind);
   await enqueue(tx, 'search.sync', { id });   // убрать из индекса

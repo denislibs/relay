@@ -10,7 +10,7 @@ import { applyMembersUpdate, MembersCache } from './members';
 import { ProfileLists } from './profileLists';
 import { onMessage, recomputeLast, tabsOf, unreadAfterRead, unreadOnArrival } from './derive';
 import { nextV } from './rows';
-import { PENDING_BASE, toQuote, type LocalChat, type LocalMessage, type OutboxEntry, type QuoteMsg, type ThreadRanges } from './types';
+import { PENDING_BASE, toQuote, type Item, type LocalChat, type LocalMessage, type OutboxEntry, type QuoteMsg, type ThreadRanges } from './types';
 
 /** Тот же черновик: текст и оформление (порядок ключей в сущностях не важен). */
 function sameDraft(a: { text: string; entities?: Entity[] } | null | undefined, b: { text: string; entities?: Entity[] } | null | undefined): boolean {
@@ -19,6 +19,9 @@ function sameDraft(a: { text: string; entities?: Entity[] } | null | undefined, 
 }
 
 type Range = [number, number];
+
+/** Сколько последних уведомлений держит запрос notifications. */
+const NOTIFY_KEEP = 20;
 
 /**
  * Удалённое сообщение: на устройстве от него остаётся только то, что нужно строке «Сообщение удалено» (автор, время,
@@ -90,6 +93,7 @@ export interface ChatSummary {
   title: string | null;
   lastReadId: number;
   unread: number;
+  unreadMentions?: number;   // непрочитанные упоминания меня (основная лента и треды)
   last: Message | null;
   peer?: { id: number; name: string; system?: true; photo?: ProfilePhoto | null } | null;
   peerReadUpTo?: number;
@@ -325,15 +329,20 @@ export class Store {
   /** seq — номер записи журнала (нужен профилю, чтобы старая запись не откатила свежий ответ). */
   applyUpdate(u: Update, seq?: number): void {
     switch (u.type) {
-      case 'newMessage':
+      case 'newMessage': {
         this.setTyping(u.message.chatId, u.message.senderId, false); // написал — уже не «печатает»
-        return this.applyMessage(u.message, true, 'journal');
+        const own = this.isOwn(u.message);   // до applyMessage: у своего поста с сервера senderId 0
+        this.applyMessage(u.message, true, 'journal');
+        if (!own) this.notify(u.message, false);
+        return;
+      }
+      case 'mention': return this.applyMention(u.message, u.threadId);
       case 'readOwn': return this.applyOwnRead(u.chatId, u.upToId);
       case 'readBy': return this.applyPeerRead(u.chatId, u.upToId);
       case 'draft': return this.applyRemoteDraft(u.chatId, u.text, u.at, u.entities);
       case 'messageEdited': return this.patchMessage(u.chatId, u.id, { body: u.body, editedAt: u.editedAt, entities: u.entities ?? [] });
       case 'messageMarkup': return this.patchMessage(u.chatId, u.id, { body: u.body, entities: u.entities ?? [], buttons: u.buttons });
-      case 'messageDeleted': return this.patchMessage(u.chatId, u.id, DELETED);
+      case 'messageDeleted': this.dropMentions(u.chatId, (id) => id === u.id); return this.patchMessage(u.chatId, u.id, DELETED);
       case 'reactions': return this.patchMessage(u.chatId, u.id, { reactions: u.reactions });
       case 'reactionCounts': return this.patchMessage(u.chatId, u.id, { reactionCounts: u.counts });
       case 'replies': return this.applyReplies(u.chatId, u.id, { count: u.count, lastId: u.lastId, recent: u.recent });
@@ -477,6 +486,11 @@ export class Store {
       if (s.peerReadUpTo && s.peerReadUpTo > chat.peerReadUpTo) this.applyPeerRead(s.id, s.peerReadUpTo);
       chat.lastReadId = Math.max(chat.lastReadId, s.lastReadId);
       chat.unread = s.unread;
+      // упоминания: число — сервера (строка списка); известные id старше прочитанного — прочь
+      if (s.unreadMentions !== undefined) {
+        chat.mentions = s.unreadMentions;
+        if (!s.unreadMentions) { delete chat.mentionIds; delete chat.mentionThreads; }
+      }
       if (s.last) {
         chat.knownMaxId = Math.max(chat.knownMaxId, s.last.id);
         this.applyMessage(s.last, false, 'snapshot');
@@ -596,9 +610,12 @@ export class Store {
     // кнопка комментариев у поста, пришедшего журналом (журнал replies не несёт): копию в группе обсуждения мы видим
     // своим журналом группы — связываем пост и копию в любом порядке прихода (число придёт событием replies)
     if (m.origin && !local.deleted) {
-      this.copyByPost.set(m.origin.chatId + ':' + m.origin.id, { chatId: m.chatId, copyId: m.id });
+      // альбом: тред один — у первой копии альбома (у остальных копий своего треда нет)
+      let copyId = m.id;
+      if (m.groupId) for (const x of this.chatMessages(m.chatId)) if (x.groupId === m.groupId && x.origin && x.id != null && x.id < copyId) copyId = x.id;
+      this.copyByPost.set(m.origin.chatId + ':' + m.origin.id, { chatId: m.chatId, copyId });
       const p = this.messageById(m.origin.chatId, m.origin.id);
-      if (p && !p.replies && !p.deleted && p.id != null) this.patchMessage(p.chatId, p.id, { replies: this.baseReplies(m.chatId, m.id) });
+      if (p && !p.replies && !p.deleted && p.id != null) this.patchMessage(p.chatId, p.id, { replies: this.baseReplies(m.chatId, copyId) });
     } else if (m.post && !local.replies && !local.deleted) {
       const c = this.copyByPost.get(m.chatId + ':' + m.id);
       if (c) local.replies = this.baseReplies(c.chatId, c.copyId);
@@ -628,7 +645,73 @@ export class Store {
     if (upToId <= chat.lastReadId) return;
     chat.unread = unreadAfterRead(this, chat, chat.lastReadId, upToId);
     chat.lastReadId = upToId;
+    // упоминания основной ленты до upToId прочитаны; дочитал до конца — и те, что знали только числом
+    this.dropMentions(chatId, (id, thread) => thread == null && id <= upToId, upToId >= chat.knownMaxId);
     this.markChat(chat);
+  }
+
+  // ---------- упоминания и уведомления ----------
+
+  /** Своё ли сообщение: senderId мой или это ответ на моё неотправленное (пост: с сервера senderId 0). */
+  private isOwn(m: Message): boolean {
+    return m.senderId === this.userId || this.outbox.has(m.clientId) || this.messages.get(m.chatId)?.get(m.clientId)?.senderId === this.userId;
+  }
+
+  /** Упоминание меня (личный журнал): «@» +1 и id в очередь «к упоминанию»; уже прочитанное место или повтор — мимо. */
+  private applyMention(m: Message, threadId?: number): void {
+    const chat = this.chats.get(m.chatId);
+    if (!chat) return;   // чат ещё не знаем: число придёт строкой списка
+    const read = threadId != null ? this.threadReads.get(m.chatId + ':' + threadId) ?? 0 : chat.lastReadId;
+    const ids = chat.mentionIds ?? [];
+    if (m.id <= read || ids.includes(m.id)) return;
+    ids.push(m.id); ids.sort((a, b) => a - b);
+    chat.mentionIds = ids;
+    if (threadId != null) (chat.mentionThreads ??= {})[m.id] = threadId;
+    chat.mentions = (chat.mentions ?? 0) + 1;
+    this.markChat(chat);
+    this.notify(m, true, threadId);
+  }
+
+  /** Убрать прочитанные/удалённые упоминания; all — и известные только числом (дочитал ленту до конца). */
+  private dropMentions(chatId: number, gone: (id: number, threadId: number | undefined) => boolean, all = false): void {
+    const chat = this.chats.get(chatId);
+    if (!chat || !chat.mentions) return;
+    const ids = chat.mentionIds ?? [], threads = chat.mentionThreads ?? {};
+    const keep = ids.filter((id) => !gone(id, threads[id]));
+    const unknown = all ? 0 : Math.max(0, chat.mentions - ids.length);
+    if (keep.length === ids.length && unknown === chat.mentions - ids.length) return;
+    for (const id of ids) if (!keep.includes(id)) delete threads[id];
+    chat.mentionIds = keep;
+    chat.mentions = keep.length + unknown;
+    if (!keep.length) { delete chat.mentionIds; delete chat.mentionThreads; }
+    this.markChat(chat);
+  }
+
+  /** «К упоминанию»: старейшее непрочитанное упоминание чата (и его тред) или null. */
+  nextMention(chatId: number): { id: number; threadId?: number } | null {
+    const chat = this.chats.get(chatId);
+    const id = chat?.mentionIds?.[0];
+    if (id == null) return null;
+    const threadId = chat!.mentionThreads?.[id];
+    return threadId != null ? { id, threadId } : { id };
+  }
+
+  /** Уведомления о новых чужих сообщениях и упоминаниях (запрос notifications): одно на сообщение — что пришло первым
+   *  (newMessage или mention), то и уведомляет; второе молчит. Только в памяти. */
+  notifications: Item[] = [];
+  private notifiedIds = new Set<string>();
+  private notify(m: Message, mention: boolean, threadId?: number): void {
+    const k = m.chatId + ':' + m.id;
+    if (this.notifiedIds.has(k)) return;
+    this.notifiedIds.add(k);
+    if (this.notifiedIds.size > 2000) this.notifiedIds.delete(this.notifiedIds.values().next().value!);
+    this.notifications.push({
+      key: 'n' + k, chatId: m.chatId, id: m.id, mention, ...(threadId != null ? { threadId } : {}),
+      senderId: m.senderId, body: m.body, kind: m.kind ?? 'text', createdAt: m.createdAt, attachmentName: m.attachment?.name ?? null,
+      ...(m.entities?.length ? { entities: m.entities } : {}), ...(m.service ? { service: m.service } : {}), ...(m.post ? { post: true } : {}),
+    });
+    if (this.notifications.length > NOTIFY_KEEP) this.notifications.splice(0, this.notifications.length - NOTIFY_KEEP);
+    this.touch(m.chatId);
   }
 
   private applyPeerRead(chatId: number, upToId: number): void {
@@ -747,6 +830,7 @@ export class Store {
     const k = chatId + ':' + threadId;
     if ((this.threadReads.get(k) ?? 0) >= upToId) return;
     this.threadReads.set(k, upToId);
+    this.dropMentions(chatId, (id, t) => t === threadId && id <= upToId);   // упоминания треда прочитаны
     const copy = this.messageById(chatId, threadId);
     const channelId = copy?.origin?.chatId ?? this.chats.get(chatId)?.group?.linkedChatId ?? null;
     if (channelId == null) return;

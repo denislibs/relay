@@ -1,11 +1,10 @@
-import { normalizeLinks, type Birthday, type Me, type ProfileLink, type ProfileMusicSummary, type ProfilePhoto, type PublicUser, type UserPhoto } from '@relay/protocol';
+import { normalizeLinks, USERNAME, type Birthday, type Me, type ProfileLink, type ProfileMusicSummary, type ProfilePhoto, type PublicUser, type UserPhoto } from '@relay/protocol';
 import { isTx, sql, type Tx } from '../db';
 import { DomainError } from './errors';
 import { appendUpdates, flushJournals } from './journal';
 import { blocksViewer, canSee, privacyCtx, type PrivacyCtx } from './privacy';
 
 const RESERVED = new Set(['admin', 'relay', 'support', 'settings', 'help', 'api', 'root', 'system', 'null', 'undefined', 'me']);
-const USERNAME = /^[a-z][a-z0-9_]{4,31}$/;
 const len = (s: string) => [...s].length;
 
 export type Row = { id: number; name: string; first_name: string | null; last_name: string | null; username: string | null; bio: string | null; birthday: Birthday | null; phone: string | null; links: ProfileLink[]; photo: ProfilePhoto | null; music: ProfileMusicSummary | null };
