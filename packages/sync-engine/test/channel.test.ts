@@ -3,7 +3,8 @@ import type { ServerFrame } from '@relay/protocol';
 import { createGroup } from '../../../apps/server/src/domain/chats';
 import { sendMessage } from '../../../apps/server/src/domain/messages';
 import { editMessage, reactMessage } from '../../../apps/server/src/domain/messageOps';
-import { setGroupAdmin } from '../../../apps/server/src/domain/groups';
+import { deleteGroup, setGroupAdmin, setGroupUsername } from '../../../apps/server/src/domain/groups';
+import { joinByInvite } from '../../../apps/server/src/domain/invites';
 import { flushOwn } from '../../../apps/server/src/valkey';
 import '../../../apps/server/src/jobs/kinds';
 import { drainJobs } from '../../../apps/server/src/jobs/worker';
@@ -155,4 +156,116 @@ test('groupUpdated of a channel carries no owner: an admin keeps the known owner
   s.applyUpdate({ type: 'groupUpdated', chatId: 10, group: { ...group, about: 'новое', ownerId: null } });
   expect(s.chats.get(9)!.group).toMatchObject({ about: 'новое', ownerId: 7 });
   expect(s.chats.get(10)!.group).toMatchObject({ about: 'новое', ownerId: null });
+});
+
+// ---------- превью публичного канала без подписки ----------
+
+/** Публичный канал (@name) Анны, в котором Чужой не состоит; два поста. */
+async function publicChannel() {
+  const a = await srv.login('Анна'), x = await srv.login('Чужой');
+  const { chatId } = await createGroup(a.userId, { kind: 'channel', title: 'Новости', memberIds: [] });
+  await setGroupUsername(a.userId, chatId, 'news_pv');
+  const p1 = await post(a.userId, chatId, 'раз'), p2 = await post(a.userId, chatId, 'два');
+  return { a, x, chatId, p1, p2 };
+}
+
+test('preview: a public channel opens for a non-member — feed loads, no list row, no counters, nothing in IndexedDB', async () => {
+  const { x, chatId } = await publicChannel();
+  const cfg = srv.config(x);
+  const ex = await open(cfg);
+  ex.connect(); await ex.whenIdle();
+  const list = watchInto(ex, { kind: 'chatList', limit: 50 }), previews = watchInto(ex, { kind: 'previews' });
+  expect(await ex.call({ type: 'openPreview', chatId })).toEqual({ member: false, requested: false });
+  const row = (await previews.until((l) => l.length === 1))[0];
+  expect(row).toMatchObject({ id: chatId, kind: 'channel', title: 'Новости', preview: true, canSend: false, me: null, group: { username: 'news_pv', ownerId: null } });
+  const feed = watchInto(ex, { kind: 'messages', chatId, limit: 50 });
+  expect((await feed.until((l) => l.some((m) => m.body === 'два'))).filter((m) => !m.service).map((m) => m.body)).toEqual(['раз', 'два']);
+  await ex.whenIdle();
+  expect(list.list().some((c) => c.id === chatId)).toBe(false);
+  const counters = watchInto(ex, { kind: 'counters' });
+  expect((await counters.until((l) => l.length === 1))[0]).toMatchObject({ unreadChats: 0, unreadMessages: 0 });
+  // в IndexedDB — ничего от превью
+  const s = await Store.open(await openDb(cfg.dbName), x.userId);
+  expect(s.chats.has(chatId)).toBe(false);
+  expect(s.chatSeq.has(chatId)).toBe(false);
+  await s.loadChatMessages(chatId);
+  expect(s.chatMessages(chatId)).toEqual([]);
+});
+
+test('preview: a new post arrives by push (watchChat); views, reads and reactions are not sent', async () => {
+  const { a, x, chatId, p1 } = await publicChannel();
+  const ex = await open(srv.config(x));
+  ex.connect(); await ex.whenIdle();
+  await ex.call({ type: 'openPreview', chatId });
+  const feed = watchInto(ex, { kind: 'messages', chatId, limit: 50 });
+  await feed.until((l) => l.some((m) => m.body === 'два'));
+  await ex.whenIdle();
+  const calls: string[] = [];
+  const real = (ex as unknown as { http: (p: string, i?: { method: string; body?: string }) => Promise<unknown> }).http.bind(ex);
+  (ex as unknown as { http: typeof real }).http = (p, i) => { calls.push(p); return real(p, i); };
+  await post(a.userId, chatId, 'три');
+  await feed.until((l) => l.some((m) => m.body === 'три'));
+  await ex.call({ type: 'countViews', chatId, ids: [p1.id] });
+  await ex.call({ type: 'seen', chatId, upToId: p1.id });
+  await expect(ex.call({ type: 'react', chatId, id: p1.id, emoji: '👍' })).rejects.toThrow('not_member');
+  await Bun.sleep(1200);
+  expect(calls.filter((c) => c.endsWith('/views'))).toEqual([]);
+  expect(Number((await (await import('../../../apps/server/src/db')).sql`select count(*)::int as n from message_views where chat_id = ${chatId}`)[0].n)).toBe(0);
+});
+
+test('preview: subscribing promotes it to a listed chat without reloading the feed; then it is cached like any chat', async () => {
+  const { a, x, chatId } = await publicChannel();
+  const cfg = srv.config(x);
+  const ex = await open(cfg);
+  ex.connect(); await ex.whenIdle();
+  await ex.call({ type: 'openPreview', chatId });
+  const list = watchInto(ex, { kind: 'chatList', limit: 50 }), previews = watchInto(ex, { kind: 'previews' });
+  const feed = watchInto(ex, { kind: 'messages', chatId, limit: 50 });
+  await feed.until((l) => l.some((m) => m.body === 'два'));
+  await ex.whenIdle();
+  const history: string[] = [];
+  const real = (ex as unknown as { http: (p: string, i?: { method: string; body?: string }) => Promise<unknown> }).http.bind(ex);
+  (ex as unknown as { http: typeof real }).http = (p, i) => { if (p.includes('/messages')) history.push(p); return real(p, i); };
+  const before = feed.patches.length;
+  await joinByInvite(x.userId, '@news_pv');
+  const row = (await list.until((l) => l.some((c) => c.id === chatId))).find((c) => c.id === chatId)!;
+  expect(row).toMatchObject({ kind: 'channel', unread: 0, me: { role: 'member' }, canSend: false });
+  await previews.until((l) => l.length === 0);
+  // лента не перезагружалась: ни снимка заново, ни запроса истории
+  expect(feed.patches.slice(before).some((p) => p.op === 'snapshot')).toBe(false);
+  expect(history).toEqual([]);
+  await post(a.userId, chatId, 'после');
+  await feed.until((l) => l.some((m) => m.body === 'после'));
+  await ex.call({ type: 'closePreview', chatId });   // интерфейс закрыл ленту — чат остаётся (уже подписан)
+  await ex.whenIdle();
+  expect(list.list().some((c) => c.id === chatId)).toBe(true);
+  const s = await Store.open(await openDb(cfg.dbName), x.userId);
+  expect(s.chats.get(chatId)?.me?.role).toBe('member');
+  await s.loadChatMessages(chatId);
+  expect(s.chatMessages(chatId).filter((m) => !m.service).map((m) => m.body)).toEqual(['раз', 'два', 'после']);
+  expect(s.chatSeq.get(chatId)).toBeGreaterThan(0);
+});
+
+test('preview: closing forgets it; a deleted channel drops an open preview (chatGone)', async () => {
+  const { a, x, chatId } = await publicChannel();
+  const ex = await open(srv.config(x));
+  ex.connect(); await ex.whenIdle();
+  const previews = watchInto(ex, { kind: 'previews' });
+  await ex.call({ type: 'openPreview', chatId });
+  const feed = watchInto(ex, { kind: 'messages', chatId, limit: 50 });
+  await feed.until((l) => l.some((m) => m.body === 'два'));
+  feed.handle.close();
+  await ex.call({ type: 'closePreview', chatId });
+  await previews.until((l) => l.length === 0);
+  expect((ex as unknown as { store: Store }).store.chats.has(chatId)).toBe(false);
+  // снова открыли — и канал удалили, пока смотрим
+  await ex.call({ type: 'openPreview', chatId });
+  await previews.until((l) => l.length === 1);
+  await ex.whenIdle();
+  await deleteGroup(a.userId, chatId);
+  await previews.until((l) => l.length === 0, 5000);
+  expect((ex as unknown as { store: Store }).store.chats.has(chatId)).toBe(false);
+  // приватный канал по id — не участник
+  const { chatId: priv } = await createGroup(a.userId, { kind: 'channel', title: 'Закрытый', memberIds: [] });
+  expect(await ex.call({ type: 'openPreview', chatId: priv })).toEqual({ error: 'not_member' });
 });
