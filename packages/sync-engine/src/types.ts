@@ -127,7 +127,8 @@ export type Query =
    *  заканчиваются на sort (end), начинаются с него (start) или стоят вокруг него (center). */
   | { kind: 'messages'; chatId: number; limit: number; anchor?: { sort: number; side: 'end' | 'start' | 'center' } }
   /** тред комментариев (chatId — группа обсуждения, threadId — копия поста): шапка (копия) первой, дальше окно комментариев
-   *  по тем же правилам, что messages; служебные ~window и ~thread {header: ключ шапки или null} */
+   *  по тем же правилам, что messages; служебные ~window и ~thread {header: ключ шапки или null, guest?: ThreadGuest —
+   *  я не участник группы, тред живым видом без строки чата} */
   | { kind: 'thread'; chatId: number; threadId: number; limit: number; anchor?: { sort: number; side: 'end' | 'start' | 'center' } }
   | { kind: 'counters' }
   /** последние уведомления (новое чужое сообщение или упоминание меня), по порядку прихода: одно на сообщение;

@@ -231,7 +231,9 @@ export function computeQuery(store: Store, q: Query, mute: Map<number, number | 
       if (header) { const { item, sig: g } = messageItem(header, null); out.items.set(item.key, item); out.sig.set(item.key, g); out.order.push(item.key); }
       windowItems(store, q.chatId, all, from, to, out);
       const meta: Item = { key: '~window', hasOlder: from > span.lo || !span.start, hasNewer: to < span.hi || !span.live, live: !q.anchor || (span.live && to === span.hi) };
-      const th: Item = { key: '~thread', header: header?.key ?? null, loaded: !!store.threadRanges(q.chatId, q.threadId) };
+      // guest — я не участник группы (комментирую как подписчик канала): чем подписать тред и можно ли писать
+      const guest = store.guestInfo(q.chatId);
+      const th: Item = { key: '~thread', header: header?.key ?? null, loaded: !!store.threadRanges(q.chatId, q.threadId), ...(guest ? { guest } : {}) };
       for (const it of [meta, th]) { out.items.set(it.key, it); out.sig.set(it.key, JSON.stringify(it)); out.order.push(it.key); }
       return out;
     }

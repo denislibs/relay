@@ -1,6 +1,6 @@
 import { deviceFetch, signDevice } from './device';
 import { MAX_FILE_BYTES, MEDIA_TABS, type MediaTab } from '@relay/protocol';
-import type { ClientFrame, JournalEntry, Me, SettingsSnapshot, Message, PublicUser, ServerFrame } from '@relay/protocol';
+import type { ClientFrame, JournalEntry, Me, SettingsSnapshot, Message, PublicUser, ServerFrame, ThreadGuest } from '@relay/protocol';
 import { Blocks } from './blocks';
 import { Contacts } from './contacts';
 import { delBlob, getBlob, openDb, putBlob, write } from './idb';
@@ -35,6 +35,8 @@ interface Watcher { id: number; q: Query; cb: (p: Patch) => void; prev: Result |
 type ReqError = { code: string; retry: boolean };
 type SyncReply = Extract<ServerFrame, { op: 'updates' | 'tooLong' }>;
 type ChatPush = Extract<ServerFrame, { op: 'push' }> & { chatId: number };
+/** Страница треда; guest — я не участник группы (тред гостя, store.guests). */
+type ThreadPage = { header: Message; messages: Message[]; hasMore: boolean; guest?: ThreadGuest };
 type ChatReply = Extract<ServerFrame, { op: 'chatUpdates' | 'chatTooLong' | 'chatGone' }>;
 /** Догонка журнала одного чата: идёт ли сейчас, просили ли ещё раз, push'и, пришедшие не по порядку или во время догонки. */
 interface ChatSyncState { syncing: boolean; again: boolean; queued: boolean; buffer: Map<number, ChatPush>; gapTimer: ReturnType<typeof setTimeout> | null }
@@ -333,7 +335,7 @@ export class Engine {
     this.schedule();
     return {
       update: (q2) => { const chatChanged = q2.kind === 'messages' && (w.q.kind !== 'messages' || w.q.chatId !== q2.chatId); if (chatChanged) this.store.noteOpened(q2.chatId); w.q = q2; w.force = true; if (chatChanged) w.gated = true; this.dev.track(this.watchers.values()); this.prepare(w); this.schedule(); },
-      close: () => { this.watchers.delete(w.id); this.dev.track(this.watchers.values()); },
+      close: () => { this.watchers.delete(w.id); this.dev.track(this.watchers.values()); if (w.q.kind === 'thread') this.syncThreadWatches(); },
     };
   }
 
@@ -384,7 +386,7 @@ export class Engine {
     });
   }
 
-  private changed(): void { this.handleSeqHints(); this.pushStatus(); this.schedule(); }
+  private changed(): void { this.handleSeqHints(); this.syncThreadWatches(); this.pushStatus(); this.schedule(); }
 
   /** Смена стадии уходит сразу, не дожидаясь кадра: иначе короткая «догонка» склеится и интерфейс её не покажет. */
   private pushStatus(): void {
@@ -1412,6 +1414,8 @@ export class Engine {
     this.syncWaiter = null;
     for (const p of this.pending.values()) p.reject(offline);
     this.pending.clear();
+    for (const k of this.watchingThreads) { const [c, t] = k.split(':').map(Number); this.store.guestWatch(c, t, false); }
+    this.watchingThreads.clear(); this.refusedThreads.clear();   // подписки на треды гостя — у сокета: новое подключение подпишется заново
     for (const w of this.chatWaiters.values()) w.reject(offline);
     this.chatWaiters.clear();
     for (const st of this.chatSync.values()) { if (st.gapTimer) clearTimeout(st.gapTimer); st.gapTimer = null; st.buffer.clear(); st.again = false; st.queued = false; }
@@ -1489,6 +1493,14 @@ export class Engine {
         if (this.resetting) this.skipped.poke = true;
         this.runSync();
         return;
+      case 'threadPush': {
+        // тред гостя (не участник группы): живые события без журнала; пустой кадр — перечитать край треда
+        if (!this.store.isGuest(f.chatId) || !this.watchingThreads.has(f.chatId + ':' + f.threadId)) return;
+        if (!f.items.length) { this.run(() => this.catchUpThread(f.chatId, f.threadId)); return; }
+        this.store.applyGuestPush(f.chatId, f.items);
+        this.run(async () => { await this.store.flush(); this.changed(); });   // пост канала мог получить кнопку (копия) — это пишется
+        return;
+      }
       case 'push':
         if (f.chatId != null) { this.onChatPush(f as ChatPush); return; }   // журнал чата — свои правила
         // событие пришло вместе с «пинком»: применяем без sync, если оно ровно следующее и мы ничего не догоняем;
@@ -2368,9 +2380,9 @@ export class Engine {
     if (at === undefined) return Promise.resolve(0);
     const page = this.cfg.historyPage ?? 50, gen = this.store.resetGen;
     const p = (async () => {
-      const res = await this.http<{ header: Message; messages: Message[]; hasMore: boolean }>(`/chats/${chatId}/threads/${threadId}/messages?limit=${page}${at ? `&before=${at}` : ''}`);
+      const res = await this.http<ThreadPage>(`/chats/${chatId}/threads/${threadId}/messages?limit=${page}${at ? `&before=${at}` : ''}`);
       if (gen !== this.store.resetGen) return 0;
-      this.store.applyThreadPage(chatId, threadId, res.header, res.messages, res.hasMore, at, 'older', gen);
+      this.store.applyThreadPage(chatId, threadId, res.header, res.messages, res.hasMore, at, 'older', gen, res.guest ?? null);
       await this.store.flush();
       this.changed();
       return res.messages.length;
@@ -2379,6 +2391,55 @@ export class Engine {
     return p;
   }
   private threadLoads = new Map<string, Promise<number>>();
+
+  /**
+   * Треды гостя (store.guests): журнала группы у меня нет — пока тред открыт, сокет подписан на него (watchThread) и
+   * получает threadPush. Подписка — по открытым подпискам thread на чат без строки; закрыли — unwatchThread.
+   * После подписки (и после переподключения) край треда догружается страницами новее (catchUpThread): то, что
+   * пришло между страницей и подпиской или пока связи не было.
+   */
+  private watchingThreads = new Set<string>();
+  private refusedThreads = new Set<string>();   // сервер отказал (вышел из канала…): до переподключения не просим
+  private syncThreadWatches(): void {
+    if (!this.online || this.closed) return;
+    const want = new Set<string>();
+    for (const w of this.watchers.values()) if (w.q.kind === 'thread' && this.store.isGuest(w.q.chatId)) want.add(w.q.chatId + ':' + w.q.threadId);
+    for (const k of want) {
+      if (this.watchingThreads.has(k) || this.refusedThreads.has(k)) continue;
+      this.watchingThreads.add(k);
+      const [chatId, threadId] = k.split(':').map(Number);
+      this.request({ op: 'watchThread', reqId: '', chatId, threadId })
+        .then(() => { if (!this.watchingThreads.has(k)) return; this.store.guestWatch(chatId, threadId, true); this.run(() => this.catchUpThread(chatId, threadId)); })
+        .catch((e: ReqError) => { if (this.watchingThreads.delete(k) && e?.code !== 'offline') this.refusedThreads.add(k); });
+    }
+    for (const k of [...this.watchingThreads]) {
+      if (want.has(k)) continue;
+      this.watchingThreads.delete(k);
+      const [chatId, threadId] = k.split(':').map(Number);
+      this.store.guestWatch(chatId, threadId, false);
+      this.request({ op: 'unwatchThread', reqId: '', chatId, threadId }).catch(() => {});
+      // вступил, пока тред открыт: дальше — журнал группы; край между последним threadPush и ним — страницей
+      if (!this.store.isGuest(chatId) && [...this.watchers.values()].some((w) => w.q.kind === 'thread' && w.q.chatId === chatId && w.q.threadId === threadId)) this.run(() => this.catchUpThread(chatId, threadId));
+    }
+  }
+
+  /** Край треда гостя: страницы новее последнего известного (не больше десяти); дальше — страница с живого края (новый отрезок). */
+  private async catchUpThread(chatId: number, threadId: number): Promise<void> {
+    const page = this.cfg.historyPage ?? 50;
+    for (let i = 0; i < 10; i++) {
+      const t = this.store.threadRanges(chatId, threadId);
+      const last = t?.ranges[t.ranges.length - 1]?.[1];
+      if (last == null) { await this.loadThreadPage(chatId, threadId, () => null); return; }
+      const gen = this.store.resetGen;
+      const res = await this.http<ThreadPage>(`/chats/${chatId}/threads/${threadId}/messages?limit=${page}&after=${last}`);
+      if (gen !== this.store.resetGen) return;
+      this.store.applyThreadPage(chatId, threadId, res.header, res.messages, res.hasMore, last, 'newer', gen, res.guest ?? null);
+      await this.store.flush();
+      this.changed();
+      if (!res.hasMore) return;
+    }
+    await this.loadThreadPage(chatId, threadId, () => null);
+  }
 
   /** Посты, у которых журнал принёс replies без кнопки в кэше: перечитать по id (история несёт copyId и прочитанность). */
   private fetchPosts(): void {
