@@ -52,6 +52,7 @@ export function PinnedBar({ chatId }: { chatId: number }) {
     <Presence show={n > 0} exitMs={220}>
       <div class="app-pins" role="region" aria-label="Закреплённые сообщения">
         <button type="button" class="app-pins-main" onClick={go}>
+          <Icon name="pin" size={24} class="app-pins-icon" />
           <span class="app-pins-track" aria-hidden="true">
             <span class="app-pins-segs" style={{ transform: `translateY(${-shift}px)` }}>
               {pinned.map((p, k) => <i key={p} class={k === i ? 'app-pins-on' : ''} style={{ height: seg + 'px' }} />)}
