@@ -17,7 +17,10 @@ const clip = (s: string, max: number) => [...s].slice(0, max).join('');
 /** «Изменить группу» — фото, название, описание и разделы управления (что видно — зависит от прав). */
 export function EditGroup({ nav }: { nav: Nav }) {
   const { chatId } = nav;
-  const { group, me, title: chatTitle } = useGroup(chatId);
+  const { group, me, title: chatTitle, kind } = useGroup(chatId);
+  // канал: без прав участников, скрытой истории и медленного режима; есть тип, обсуждение и подписи постов
+  const channel = kind === 'channel';
+  const linkedTitle = useGlobal((s) => { const id = group?.linkedChatId; return id != null ? (s.chats.find((c) => c.id === id)?.title as string | undefined) ?? null : null; });
   const members = useMembers(chatId, true);
   const myUserId = useGlobal((s) => s.me!.userId);
   const [title, setTitle] = useState(group?.title ?? chatTitle);
@@ -47,7 +50,7 @@ export function EditGroup({ nav }: { nav: Nav }) {
   if (!group || !me) return <GPage title="Изменить" onBack={nav.back}><div /></GPage>;
 
   const dirty = title.trim() !== group.title || about.trim() !== group.about;
-  const titleErr = !title.trim() ? 'Укажите название группы' : undefined;
+  const titleErr = !title.trim() ? (channel ? 'Укажите название канала' : 'Укажите название группы') : undefined;
   const save = async () => {
     if (!dirty || titleErr) return;
     setBusy(true);
@@ -69,23 +72,37 @@ export function EditGroup({ nav }: { nav: Nav }) {
       <ProfileHeader name={title || group.title} tone={peerTone(chatId)} size={96} {...(info ? photo.avatar : {})} />
       {info ? photo.ui : null}
       <Section>
-        <TextField label="Название группы" value={title} disabled={!info} maxLength={TITLE_MAX} measure={cpLen} error={titleErr}
+        <TextField label={channel ? 'Название канала' : 'Название группы'} value={title} disabled={!info} maxLength={TITLE_MAX} measure={cpLen} error={titleErr}
           onInput={(v: string, e: Event) => { const c = clip(v, TITLE_MAX); if (c !== v) (e.currentTarget as HTMLInputElement).value = c; setTitle(c); }} />
         <TextField label="Описание" multiline rows={3} counter value={about} disabled={!info} maxLength={GROUP_ABOUT_MAX} measure={cpLen}
-          hint="Расскажите, о чём эта группа" onInput={(v: string, e: Event) => { const c = clip(v, GROUP_ABOUT_MAX); if (c !== v) (e.currentTarget as HTMLTextAreaElement).value = c; setAbout(c); }} />
+          hint={channel ? 'Расскажите, о чём этот канал' : 'Расскажите, о чём эта группа'} onInput={(v: string, e: Event) => { const c = clip(v, GROUP_ABOUT_MAX); if (c !== v) (e.currentTarget as HTMLTextAreaElement).value = c; setAbout(c); }} />
       </Section>
       <Section>
-        {owner ? <InfoRow tile="blue" icon="lock" title="Тип группы" subtitle={group.username ? 'Публичная' : 'Частная'} onClick={() => nav.go('gType')} /> : null}
-        {adminCan(me, 'ban') ? <InfoRow tile="green" icon="key" title="Разрешения" subtitle={`${rightsCount(group.rights)}/${total}`} onClick={() => nav.go('gPerms')} /> : null}
+        {owner ? <InfoRow tile="blue" icon="lock" title={channel ? 'Тип канала' : 'Тип группы'} subtitle={channel ? (group.username ? 'Публичный' : 'Частный') : group.username ? 'Публичная' : 'Частная'} onClick={() => nav.go('gType')} /> : null}
+        {/* обсуждение (комментарии к постам): привязывает владелец канала */}
+        {channel && owner ? <InfoRow tile="blue" icon="chats" title="Обсуждение" subtitle={group.linkedChatId != null ? linkedTitle ?? 'Группа привязана' : 'Добавить группу'} onClick={() => nav.go('gDiscussion')} /> : null}
+        {!channel && adminCan(me, 'ban') ? <InfoRow tile="green" icon="key" title="Разрешения" subtitle={`${rightsCount(group.rights)}/${total}`} onClick={() => nav.go('gPerms')} /> : null}
         {adminCan(me, 'info') ? <InfoRow tile="orange" icon="smile" title="Реакции" subtitle={group.reactions.mode === 'all' ? 'Все' : group.reactions.mode === 'none' ? 'Выкл.' : String(group.reactions.allowed.length)} onClick={() => nav.go('gReactions')} /> : null}
         <InfoRow tile="purple" icon="shield" title="Администраторы" subtitle={admins != null ? String(admins) : '…'} onClick={() => nav.go('gAdmins')} />
         {adminCan(me, 'invite') ? <InfoRow tile="green" icon="link" title="Пригласительные ссылки" subtitle={live != null ? String(live) : '…'} onClick={() => nav.go('gInvites')} /> : null}
         {group.requests > 0 ? <InfoRow tile="red" icon="userPlus" title="Заявки на вступление" subtitle={String(group.requests)} onClick={() => nav.go('gRequests')} /> : null}
       </Section>
+      {channel && adminCan(me, 'info') ? (
+        <Section footer={group.signatures ? 'Под постами видно имя администратора, который их опубликовал.' : 'Посты публикуются от имени канала, без имени автора.'}>
+          <InfoRow icon="pencil" title="Подписи постов"
+            trailing={<Switch id="g-signatures" label="Подписи постов" checked={group.signatures}
+              onChange={() => void act('PUT', `/groups/${chatId}/settings`, { signatures: !group.signatures })} />} />
+        </Section>
+      ) : null}
+      {!channel && group.linkedChatId != null ? (
+        <Section footer="Посты канала приходят в эту группу, комментарии к ним — ответы в треде.">
+          <InfoRow tile="blue" icon="channels" title="Связанный канал" subtitle={linkedTitle ?? 'Канал'} />
+        </Section>
+      ) : null}
       <Section>
-        <InfoRow tile="blue" icon="users" title="Участники" subtitle={`${group.members} ${plural(group.members, 'участник', 'участника', 'участников')}`} onClick={() => nav.go('gMembers')} />
+        <InfoRow tile="blue" icon="users" title={channel ? 'Подписчики' : 'Участники'} subtitle={channel ? `${group.members} ${plural(group.members, 'подписчик', 'подписчика', 'подписчиков')}` : `${group.members} ${plural(group.members, 'участник', 'участника', 'участников')}`} onClick={() => nav.go('gMembers')} />
       </Section>
-      {!group.username && adminCan(me, 'ban') ? (
+      {!channel && !group.username && adminCan(me, 'ban') ? (
         <Section footer={group.historyHidden ? 'Новые участники не увидят сообщения, отправленные до их вступления.' : 'Новые участники увидят все сообщения группы.'}>
           <InfoRow icon="history" title="История чата для новых участников" subtitle={group.historyHidden ? 'Скрыта' : 'Видна'}
             trailing={<Switch id="g-history" label="История для новых участников" checked={!group.historyHidden}
@@ -93,10 +110,10 @@ export function EditGroup({ nav }: { nav: Nav }) {
         </Section>
       ) : null}
       <Section>
-        <InfoRow icon="logout" danger title={owner ? 'Удалить и покинуть группу' : 'Покинуть группу'} onClick={() => setAsk(owner ? 'delete' : 'leave')} />
+        <InfoRow icon="logout" danger title={owner ? (channel ? 'Удалить канал' : 'Удалить и покинуть группу') : channel ? 'Покинуть канал' : 'Покинуть группу'} onClick={() => setAsk(owner ? 'delete' : 'leave')} />
       </Section>
-      <ConfirmDialog open={!!ask} danger title={ask === 'delete' ? 'Удалить группу?' : 'Покинуть группу?'}
-        text={ask === 'delete' ? `Группа «${group.title}» будет удалена у всех участников вместе с историей.` : `Вы покинете «${group.title}». Вернуться можно будет только по приглашению.`}
+      <ConfirmDialog open={!!ask} danger title={ask === 'delete' ? (channel ? 'Удалить канал?' : 'Удалить группу?') : channel ? 'Покинуть канал?' : 'Покинуть группу?'}
+        text={ask === 'delete' ? `${channel ? 'Канал' : 'Группа'} «${group.title}» будет удалён${channel ? '' : 'а'} у всех ${channel ? 'подписчиков' : 'участников'} вместе с историей.` : `Вы покинете «${group.title}». Вернуться можно будет только по приглашению.`}
         confirm={ask === 'delete' ? 'Удалить у всех' : 'Покинуть'} onCancel={() => setAsk(null)} onConfirm={() => void leave()} />
     </GPage>
   );
@@ -105,7 +122,9 @@ export function EditGroup({ nav }: { nav: Nav }) {
 /** «Тип группы» (владелец): частная по ссылке или публичная по @имени; одобрение вступающих; запрет копирования. */
 export function GroupType({ nav }: { nav: Nav }) {
   const { chatId } = nav;
-  const { group, me } = useGroup(chatId);
+  const { group, me, kind } = useGroup(chatId);
+  const channel = kind === 'channel';
+  const T = channel ? 'Тип канала' : 'Тип группы';
   const [pub, setPub] = useState(!!group?.username);
   const [name, setName] = useState(group?.username ?? '');
   const [status, setStatus] = useState<'checking' | 'free' | 'taken' | 'invalid' | null>(null);
@@ -128,7 +147,7 @@ export function GroupType({ nav }: { nav: Nav }) {
     }, 400);
     return () => clearTimeout(t);
   }, [name, pub]);
-  if (!group || !me) return <GPage title="Тип группы" onBack={nav.back}><div /></GPage>;
+  if (!group || !me) return <GPage title={T} onBack={nav.back}><div /></GPage>;
 
   const was = group.username;
   const n = name.trim().replace(/^@/, '').toLowerCase();
@@ -151,14 +170,14 @@ export function GroupType({ nav }: { nav: Nav }) {
   const err = status === 'taken' ? 'Это имя уже занято' : status === 'invalid' ? 'Имя: 5–32 символа, латиница, цифры и _' : undefined;
 
   return (
-    <GPage title="Тип группы" onBack={nav.back} fab={{ show: dirty && valid, icon: 'check', label: 'Сохранить', onClick: save, busy }}>
-      <Section title="Тип группы" role="radiogroup">
-        <RadioRow checked={!pub} label="Частная" subtitle="Вступить можно только по пригласительной ссылке." onClick={() => setPub(false)} />
-        <RadioRow checked={pub} label="Публичная" subtitle="Группу можно найти по имени, вступить может любой." onClick={() => setPub(true)} />
+    <GPage title={T} onBack={nav.back} fab={{ show: dirty && valid, icon: 'check', label: 'Сохранить', onClick: save, busy }}>
+      <Section title={T} role="radiogroup">
+        <RadioRow checked={!pub} label={channel ? 'Частный' : 'Частная'} subtitle={channel ? 'Подписаться можно только по пригласительной ссылке.' : 'Вступить можно только по пригласительной ссылке.'} onClick={() => setPub(false)} />
+        <RadioRow checked={pub} label={channel ? 'Публичный' : 'Публичная'} subtitle={channel ? 'Канал можно найти по имени, подписаться может любой.' : 'Группу можно найти по имени, вступить может любой.'} onClick={() => setPub(true)} />
       </Section>
       {pub ? (
         <Section title="Публичная ссылка" footer="По этой ссылке группу найдут и смогут вступить. Имя — латиница, цифры и _, от 5 символов.">
-          <TextField label="Имя группы" value={name} error={err} hint={hint} class={status === 'free' ? 'app-tf-ok' : undefined} onInput={(v: string) => setName(v)} />
+          <TextField label={channel ? 'Имя канала' : 'Имя группы'} value={name} error={err} hint={hint} class={status === 'free' ? 'app-tf-ok' : undefined} onInput={(v: string) => setName(v)} />
           {n && !err ? <button type="button" class="app-uname-link" onClick={() => copyText(publicUrl(n))}><span>Ссылка:</span> <b>{publicUrl(n).replace(/^https?:\/\//, '')}</b></button> : null}
         </Section>
       ) : (
@@ -171,16 +190,16 @@ export function GroupType({ nav }: { nav: Nav }) {
           ) : <div class="app-sm-loading" aria-busy="true" />}
         </Section>
       )}
-      <Section title="Новые участники" footer={group.joinApproval ? 'Вступающие по ссылке или имени сначала подают заявку — её одобряют администраторы.' : 'Вступающие по ссылке попадают в группу сразу.'}>
-        <InfoRow icon="userCheck" title="Одобрять новых участников"
-          trailing={<Switch id="g-approval" label="Одобрять новых участников" checked={group.joinApproval}
+      <Section title={channel ? 'Новые подписчики' : 'Новые участники'} footer={group.joinApproval ? 'Вступающие по ссылке или имени сначала подают заявку — её одобряют администраторы.' : channel ? 'Подписавшиеся по ссылке попадают в канал сразу.' : 'Вступающие по ссылке попадают в группу сразу.'}>
+        <InfoRow icon="userCheck" title={channel ? 'Одобрять новых подписчиков' : 'Одобрять новых участников'}
+          trailing={<Switch id="g-approval" label="Одобрять новых" checked={group.joinApproval}
             onChange={() => void act('PUT', `/groups/${chatId}/settings`, { joinApproval: !group.joinApproval })} />} />
       </Section>
-      <Section title="Копирование" role="radiogroup" footer={group.protected ? 'Участники не смогут пересылать сообщения из группы и сохранять медиа.' : 'Участники могут пересылать сообщения из группы.'}>
+      <Section title="Копирование" role="radiogroup" footer={channel ? (group.protected ? 'Подписчики не смогут пересылать посты и сохранять медиа.' : 'Подписчики могут пересылать посты канала.') : group.protected ? 'Участники не смогут пересылать сообщения из группы и сохранять медиа.' : 'Участники могут пересылать сообщения из группы.'}>
         <RadioRow checked={!group.protected} label="Разрешить копирование" onClick={() => group.protected && void act('PUT', `/groups/${chatId}/settings`, { protected: false })} />
         <RadioRow checked={group.protected} label="Запретить копирование" onClick={() => !group.protected && void act('PUT', `/groups/${chatId}/settings`, { protected: true })} />
       </Section>
-      <ConfirmDialog open={askPrivate} danger title="Сделать группу частной?" text={`Имя @${was} освободится — его сможет занять кто угодно.`} confirm="Сделать частной" onCancel={() => setAskPrivate(false)} onConfirm={() => void save()} />
+      <ConfirmDialog open={askPrivate} danger title={channel ? 'Сделать канал частным?' : 'Сделать группу частной?'} text={`Имя @${was} освободится — его сможет занять кто угодно.`} confirm="Сделать частной" onCancel={() => setAskPrivate(false)} onConfirm={() => void save()} />
       <ConfirmDialog open={askRevoke} danger title="Сбросить ссылку?" text="Старая ссылка перестанет работать, появится новая." confirm="Сбросить" onCancel={() => setAskRevoke(false)} onConfirm={() => void revoke()} />
     </GPage>
   );

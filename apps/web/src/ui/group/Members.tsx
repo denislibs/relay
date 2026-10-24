@@ -14,7 +14,8 @@ import type { Nav } from './Manage';
 /** «Участники» в управлении: поиск, звания и роли, действия над участником; «+» — добавить. */
 export function ManageMembers({ nav }: { nav: Nav }) {
   const { chatId } = nav;
-  const { me, membersRev } = useGroup(chatId);
+  const { me, membersRev, kind } = useGroup(chatId);
+  const channel = kind === 'channel';   // подписчики: без ограничения прав (их у подписчика нет)
   const myId = useGlobal((s) => s.me!.userId);
   const all = useGroupData<{ members: GroupMember[] }>(`/groups/${chatId}/members`, membersRev);
   const [q, setQ] = useState('');
@@ -30,11 +31,12 @@ export function ManageMembers({ nav }: { nav: Nav }) {
     if (m.role === 'member' && (canBan || canPromote)) setMenu(m);
     else { nav.close(); void openUserChat(m.userId); }   // поверх группы (docs/navigation-rules.md)
   };
-  const remove = async (m: GroupMember) => { setMenu(null); await act('DELETE', `/groups/${chatId}/members/${m.userId}`, undefined, `${m.name} удалён(а) из группы`); };
+  const remove = async (m: GroupMember) => { setMenu(null); await act('DELETE', `/groups/${chatId}/members/${m.userId}`, undefined, `${m.name} удалён(а) из ${channel ? 'канала' : 'группы'}`); };
+  const who = channel ? 'подписчиков' : 'участников';
   return (
-    <GPage title="Участники" onBack={nav.back} fab={canInvite(me) ? { show: true, icon: 'userPlus', label: 'Добавить участников', onClick: () => nav.go('gAddMembers') } : undefined}>
-      <div class="app-gm-search"><SearchInput id="gm-members-search" label="Поиск участников" value={q} placeholder="Поиск участников" onInput={(e: Event) => setQ((e.currentTarget as HTMLInputElement).value)} /></div>
-      <p class="app-gm-note">{n ? `${n} ${plural(n, 'участник', 'участника', 'участников')}` : ''}</p>
+    <GPage title={channel ? 'Подписчики' : 'Участники'} onBack={nav.back} fab={canInvite(me) ? { show: true, icon: 'userPlus', label: 'Добавить ' + who, onClick: () => nav.go('gAddMembers') } : undefined}>
+      <div class="app-gm-search"><SearchInput id="gm-members-search" label={'Поиск ' + who} value={q} placeholder={'Поиск ' + who} onInput={(e: Event) => setQ((e.currentTarget as HTMLInputElement).value)} /></div>
+      <p class="app-gm-note">{n ? `${n} ${channel ? plural(n, 'подписчик', 'подписчика', 'подписчиков') : plural(n, 'участник', 'участника', 'участников')}` : ''}</p>
       <div class="app-members" role="list">
         {all.data ? list.length ? list.map((m) => (
           <PersonRow key={m.userId} id={m.userId} name={m.name} label={m.userId === myId ? m.name + ' (вы)' : m.name} photo={m.photo} online={!!m.online || m.userId === myId}
@@ -47,8 +49,8 @@ export function ManageMembers({ nav }: { nav: Nav }) {
           <div class="app-gm-actions">
             <button type="button" class="rl-optrow" onClick={() => { const id = menu.userId; setMenu(null); nav.close(); void openUserChat(id); }}>Написать сообщение</button>
             {canPromote ? <button type="button" class="rl-optrow" onClick={() => { const id = menu.userId; setMenu(null); nav.go('gAdminRights', { userId: id, fresh: true }); }}>Назначить администратором</button> : null}
-            {canBan ? <button type="button" class="rl-optrow" onClick={() => { const id = menu.userId; setMenu(null); nav.go('gException', { userId: id }); }}>Ограничить права</button> : null}
-            {canBan ? <button type="button" class="rl-optrow app-gm-danger" onClick={() => void remove(menu)}>Удалить из группы</button> : null}
+            {canBan && !channel ? <button type="button" class="rl-optrow" onClick={() => { const id = menu.userId; setMenu(null); nav.go('gException', { userId: id }); }}>Ограничить права</button> : null}
+            {canBan ? <button type="button" class="rl-optrow app-gm-danger" onClick={() => void remove(menu)}>{channel ? 'Удалить из канала' : 'Удалить из группы'}</button> : null}
           </div>
         ) : null}
       </Modal>
@@ -59,7 +61,7 @@ export function ManageMembers({ nav }: { nav: Nav }) {
 /** Добавить участников: контакты и собеседники, кроме тех, кто уже в группе. Кого нельзя — предложить ссылку. */
 export function AddMembers({ nav }: { nav: Nav }) {
   const { chatId } = nav;
-  const { me: my, membersRev } = useGroup(chatId);
+  const { me: my, membersRev, kind } = useGroup(chatId);
   const me = useGlobal((s) => s.me!.userId);
   const contacts = useGlobal((s) => s.contacts);
   const chats = useGlobal((s) => s.chats);
@@ -93,7 +95,7 @@ export function AddMembers({ nav }: { nav: Nav }) {
     nav.back();
   };
   return (
-    <GPage title="Добавить участников" onBack={nav.back} fab={{ show: picked.length > 0, icon: 'check', label: 'Добавить', onClick: add, busy }}>
+    <GPage title={kind === 'channel' ? 'Добавить подписчиков' : 'Добавить участников'} onBack={nav.back} fab={{ show: picked.length > 0, icon: 'check', label: 'Добавить', onClick: add, busy }}>
       <div class="rl-page-scroll app-newgroup">
         {all.data ? (
           <ContactPicker multi selected={picked} contacts={people.map((p) => ({ ...p, tone: peerTone(p.id), avatar: senderAvatar(p.id) }))}

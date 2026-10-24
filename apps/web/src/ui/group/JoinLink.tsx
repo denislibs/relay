@@ -69,7 +69,7 @@ export function JoinLink() {
     setBusy(true);
     const r = await groupCall<{ chatId: number; requested: boolean }>('POST', '/join/' + key);
     setBusy(false);
-    if (!r.ok) { showToast(r.code === 'forbidden' ? 'Вас удалили из этой группы' : errorText(r.code)); return; }
+    if (!r.ok) { showToast(r.code === 'forbidden' ? (preview?.kind === 'channel' ? 'Вас удалили из этого канала' : 'Вас удалили из этой группы') : errorText(r.code)); return; }
     close();
     if (r.data.requested) showToast('Заявка отправлена — администраторы её рассмотрят');
     else openInner(r.data.chatId);   // ссылка из чата — поверх; при загрузке по ссылке чата нет — станет нижним
@@ -84,12 +84,12 @@ export function JoinLink() {
         <div class="app-join">
           <Avatar name={preview.title} tone={peerTone(preview.chatId)} size={96} {...avatarPhoto(preview.photo, true)} />
           <div class="app-join-title">{preview.title}</div>
-          <div class="app-join-sub">{preview.members} {plural(preview.members, 'участник', 'участника', 'участников')}</div>
+          <div class="app-join-sub">{preview.members} {preview.kind === 'channel' ? plural(preview.members, 'подписчик', 'подписчика', 'подписчиков') : plural(preview.members, 'участник', 'участника', 'участников')}</div>
           {preview.about ? <p class="app-join-about">{preview.about}</p> : null}
           {preview.requested ? <p class="app-join-note">Вы уже подали заявку — ждите одобрения.</p> : (
-            <Button variant="primary" class="app-join-btn" disabled={busy} onClick={() => void join()}>{preview.approval ? 'Подать заявку' : 'Вступить в группу'}</Button>
+            <Button variant="primary" class="app-join-btn" disabled={busy} onClick={() => void join()}>{preview.approval ? 'Подать заявку' : preview.kind === 'channel' ? 'Подписаться' : 'Вступить в группу'}</Button>
           )}
-          {preview.approval && !preview.requested ? <p class="app-join-note">Администраторы группы рассматривают заявки на вступление.</p> : null}
+          {preview.approval && !preview.requested ? <p class="app-join-note">{preview.kind === 'channel' ? 'Администраторы канала рассматривают заявки на подписку.' : 'Администраторы группы рассматривают заявки на вступление.'}</p> : null}
         </div>
       ) : <div class="app-sm-loading" aria-busy="true" />}
     </Modal>
