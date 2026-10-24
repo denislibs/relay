@@ -12,10 +12,14 @@ export const LEASE_SEC = 300;
 const BACKOFF_CAP_MS = 600_000;
 
 export async function enqueue(db: Db, kind: string, payload: object, opts: { runAt?: Date; dedupeKey?: string; maxAttempts?: number } = {}): Promise<void> {
-  await db`
+  const ins = await db`
     insert into jobs (kind, payload, run_at, dedupe_key, max_attempts)
     values (${kind}, ${db.json(payload as never)}, coalesce(${opts.runAt ?? null}::timestamptz, now()), ${opts.dedupeKey ?? null}, ${opts.maxAttempts ?? 8})
-    on conflict (dedupe_key) where dedupe_key is not null do nothing`;
+    on conflict (dedupe_key) where dedupe_key is not null do nothing
+    returning id`;
+  // будить воркеры незачем: задача уже стоит (повтор ключа — реакция в том же окне) или ещё не созрела — к её run_at
+  // воркер проснётся сам (worker.ts спит до ближайшей отложенной)
+  if (!ins.length || (opts.runAt && opts.runAt.getTime() > Date.now())) return;
   // NOTIFY — после коммита и один на транзакцию (db.ts); вне транзакции — сразу
   const kinds = pending.get(db);
   if (kinds) { kinds.add(kind); return; }

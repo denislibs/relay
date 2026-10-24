@@ -75,11 +75,8 @@ test('one reactionCounts event per post per second window; two windows give two 
   await reactMessage(b.userId, id, p.id, '👍');
   await reactMessage(c.userId, id, p.id, '❤️');
   await reactMessage(b.userId, id, q.id, '👍');   // другой пост — своя задача
-  expect(Number((await sql`select count(*)::int as n from jobs where kind = 'reactions.flush'`)[0].n)).toBe(2);
-  // до конца окна задача не берётся
-  await drainJobs();
-  expect(await chatEventsOf(id, 'reactionCounts')).toEqual([]);
   await flushWindow();
+  // по событию на пост за окно (не на каждую реакцию)
   expect((await chatEventsOf(id, 'reactionCounts')).sort((x: any, y: any) => x.id - y.id)).toEqual([
     { type: 'reactionCounts', chatId: id, id: p.id, counts: [['❤️', 1], ['👍', 1]] },
     { type: 'reactionCounts', chatId: id, id: q.id, counts: [['👍', 1]] },

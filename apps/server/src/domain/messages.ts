@@ -3,7 +3,7 @@ import { clearDraftInTx } from './drafts';
 import { rightForKind, normalizeEntities, trimFormatted, type Block, blocksText, normalizeBlocks, type Entity, type ForwardInfo, type ForwardRef, type LinkPreview, type Message, type StickerRef, type Todo, type TodoInput } from '@relay/protocol';
 import { newTodo } from './todo';
 import { sql } from '../db';
-import { assertMember, shownTodo, toMessage } from './chats';
+import { assertMember, readOwnPost, shownTodo, toMessage } from './chats';
 import { DomainError } from './errors';
 import { appendUpdates, chatEvent } from './journal';
 import { unarchiveOnMessage } from './chatFlags';
@@ -156,8 +156,7 @@ export async function sendMessage(
     await chatEvent(tx, input.chatId, { type: 'newMessage', message }, ctx.kind);
     if (post) {
       // свой пост — не непрочитанный: senderId у поста 0, другие устройства автора сняли бы +1 только по readOwn
-      await tx`update chat_members set last_read_id = greatest(last_read_id, ${message.id}) where chat_id = ${input.chatId} and user_id = ${userId}`;
-      await appendUpdates(tx, [{ userId, update: { type: 'readOwn', chatId: input.chatId, upToId: message.id } }]);
+      await readOwnPost(tx, input.chatId, userId, message.id);
       await copyPost(tx, input.chatId, inserted[0], userId);   // у канала есть группа обсуждения — корень треда в ней
     }
     if (threadId != null) await noteComment(tx, input.chatId, threadId, userId, message.id);

@@ -352,17 +352,23 @@ test('forwarding a post hides the admin: fwdFrom is the channel (userId null, ti
   expect(f3.fwdFrom).toMatchObject({ userId: b.userId, name: 'Борис' });
 });
 
-test('service messages of a channel are from the channel: channel_created with the title, title/owner changes have senderId 0', async () => {
+test('service messages of a channel are from the channel: channel_created with the title, title change has senderId 0, not unread for the actor; no owner_changed', async () => {
   const a = await login('Анна'), b = await login('Борис');
   const id = await channel(a, [b], 'Новости');
   await ok(a, 'PATCH', `/groups/${id}`, { title: 'Свежие новости' });
+  // от канала (senderId 0) — значит автору своё служебное поднимает last_read_id и readOwn (иначе его устройства сочтут его чужим)
+  const lastSvc = Number((await sql`select max(id) as id from messages where chat_id = ${id}`)[0].id);
+  expect(Number((await sql`select last_read_id from chat_members where chat_id = ${id} and user_id = ${a.userId}`)[0].last_read_id)).toBe(lastSvc);
+  expect((await journalOf(a.userId, 'readOwn')).filter((u: any) => u.chatId === id).map((u: any) => u.upToId)).toEqual([lastSvc - 1, lastSvc]);
+  expect(Number((await sql`select last_read_id from chat_members where chat_id = ${id} and user_id = ${b.userId}`)[0].last_read_id)).toBe(0);
   await ok(a, 'PUT', `/groups/${id}/admins/${b.userId}`, { rights: { post: true } });
-  await ok(a, 'DELETE', `/groups/${id}/members/${a.userId}`);   // владелец вышел — права у админа (owner_changed)
+  await ok(a, 'DELETE', `/groups/${id}/members/${a.userId}`);   // владелец вышел — права у админа; служебного owner_changed в канале нет
   const rows = await sql`select service_type, sender_id, post from messages where chat_id = ${id} and service_type is not null order by id`;
-  expect(rows.map((r) => r.service_type)).toEqual(['channel_created', 'title_changed', 'owner_changed']);
+  expect(rows.map((r) => r.service_type)).toEqual(['channel_created', 'title_changed']);
   expect(rows.every((r) => r.post)).toBe(true);
   const hist = (await ok(b, 'GET', `/chats/${id}/messages`)).messages;
-  expect(hist.map((m: any) => [m.service?.type, m.senderId])).toEqual([['channel_created', 0], ['title_changed', 0], ['owner_changed', 0]]);
+  expect(hist.map((m: any) => [m.service?.type, m.senderId])).toEqual([['channel_created', 0], ['title_changed', 0]]);
+  expect(JSON.stringify(hist)).not.toContain(`"id":${b.userId},"name"`);   // новый владелец подписчикам не раскрыт
   expect(hist[0].body).toBe('Новости');
   const evs = (await chatEventsOf(id, 'newMessage')).map((u: any) => u.message);
   expect(evs.every((m: any) => m.senderId === 0 && m.post)).toBe(true);
@@ -387,6 +393,10 @@ test('checklists in a channel: only admins with post toggle/append; service line
   expect(await appendTodo(c.userId, id, list.id, ['три'])).toEqual({ ids: [3] });
   const lines = await sql`select service_type, post, sender_id from messages where chat_id = ${id} and service_type like 'todo_%' order by id`;
   expect(lines.map((r) => [r.service_type, r.post, Number(r.sender_id)])).toEqual([['todo_done', true, c.userId], ['todo_append', true, c.userId]]);
+  // строки — от канала: отметившему не непрочитанные
+  const lastLine = Number((await sql`select max(id) as id from messages where chat_id = ${id}`)[0].id);
+  expect(Number((await sql`select last_read_id from chat_members where chat_id = ${id} and user_id = ${c.userId}`)[0].last_read_id)).toBe(lastLine);
+  expect((await journalOf(c.userId, 'readOwn')).filter((u: any) => u.chatId === id).at(-1)).toMatchObject({ upToId: lastLine });
   const ev = (await chatEventsOf(id, 'todoUpdated')).at(-1) as any;
   expect(ev.todo.completions.map((x: any) => x.by)).toEqual([0]);
   const hist = (await ok(b, 'GET', `/chats/${id}/messages`)).messages;
@@ -411,11 +421,17 @@ test('the owner leaving a channel: ownership goes to the oldest admin only (not 
   const r = await call(a, 'DELETE', `/groups/${id}/members/${a.userId}`);
   expect(r.status).toBe(403);   // админа нет — сначала передать права
   expect(await realCount(id)).toBe(2);
-  await ok(a, 'POST', `/groups/${id}/members`, { userIds: [c.userId] });
+  const d = await login('Глеб');
+  await ok(a, 'POST', `/groups/${id}/members`, { userIds: [c.userId, d.userId] });
   await makeAdmin(a, id, c, { post: true });
+  await makeAdmin(a, id, d, { post: true });
   await ok(a, 'DELETE', `/groups/${id}/members/${a.userId}`);
   const roles = await sql`select user_id, role from chat_members where chat_id = ${id} order by user_id`;
-  expect(roles.map((x) => [Number(x.user_id), x.role])).toEqual([[b.userId, 'member'], [c.userId, 'owner']]);
+  expect(roles.map((x) => [Number(x.user_id), x.role])).toEqual([[b.userId, 'member'], [c.userId, 'owner'], [d.userId, 'admin']]);
+  // общая запись — без владельца; админам (и новому владельцу) он — личной записью; подписчику — нет
+  expect((await chatEventsOf(id, 'groupUpdated')).at(-1)).toMatchObject({ group: { ownerId: null } });
+  for (const u of [c, d]) expect((await journalOf(u.userId, 'groupUpdated')).at(-1)).toMatchObject({ chatId: id, group: { ownerId: c.userId } });
+  expect((await journalOf(b.userId, 'groupUpdated')).filter((u: any) => u.chatId === id)).toEqual([]);
   // группа: владелец уходит — самый давний участник, если админов нет
   const g = await group(a, [b]);
   await ok(a, 'DELETE', `/groups/${g}/members/${a.userId}`);

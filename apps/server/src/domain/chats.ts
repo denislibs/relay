@@ -2,7 +2,7 @@ import { graphemes, GROUP_ABOUT_MAX, normalizeEntities, type Entity, type Block,
 import { sql, type Tx } from '../db';
 import { muteFromDb } from './chatNotify';
 import { DomainError } from './errors';
-import { chatEvent, fanOut } from './journal';
+import { appendUpdates, chatEvent, fanOut } from './journal';
 import { contentColumns, openDrafts, openRows } from './messageContent';
 import { shredChatHistory } from '../crypto/chatKeys';
 import { nameForSql } from './profile';
@@ -61,6 +61,7 @@ export async function createGroup(creatorId: number, input: { kind?: unknown; ti
       values (${chat.id}, ${creatorId}, ${clientId}, 'text', ${c.body}, ${kind === 'channel' ? 'channel_created' : 'group_created'}, ${c.content}, ${kind === 'channel'}) returning *`;
     const message = toMessage((await openRows([row], '', tx))[0]);
     await chatEvent(tx, Number(chat.id), { type: 'newMessage', message }, kind);
+    if (message.post) await readOwnPost(tx, Number(chat.id), creatorId, message.id);   // «создал канал» — от канала, создателю не непрочитанное
     for (const id of members) await joinMembership(tx, Number(chat.id), id);   // чат приходит участникам через membership с seq
     return { chatId: Number(chat.id), message };
   });
@@ -100,6 +101,13 @@ export async function assertMember(db: Tx | typeof sql, chatId: number, userId: 
   const [row] = await db`select c.deleted_at from chat_members m join chats c on c.id = m.chat_id where m.chat_id = ${chatId} and m.user_id = ${userId}`;
   if (!row) throw new DomainError('not_member');
   if (row.deleted_at) throw new DomainError('not_found', 'chat');
+}
+
+/** Сообщение от имени канала (пост, служебное, строка чек-листа: senderId 0) — тому, кто его создал, не непрочитанное:
+ *  last_read_id и readOwn его устройствам (unreadOnArrival иначе посчитал бы его чужим). */
+export async function readOwnPost(tx: Tx, chatId: number, userId: number, id: number): Promise<void> {
+  const up = await tx`update chat_members set last_read_id = ${id} where chat_id = ${chatId} and user_id = ${userId} and last_read_id < ${id} returning 1`;
+  if (up.length) await appendUpdates(tx, [{ userId, update: { type: 'readOwn', chatId, upToId: id } }]);
 }
 
 /** Чек-лист поста канала — от имени канала: кто из админов отметил задачу, наружу не уходит (by: 0). */

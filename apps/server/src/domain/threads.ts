@@ -1,7 +1,7 @@
 import type { Message } from '@relay/protocol';
 import { sql, type Tx } from '../db';
 import { enqueue } from '../jobs/queue';
-import { toMessage, withAllReactions } from './chats';
+import { readOwnPost, toMessage, withAllReactions } from './chats';
 import { DomainError } from './errors';
 import { appendUpdates, chatEvent } from './journal';
 import { contentColumns, openRows } from './messageContent';
@@ -40,8 +40,7 @@ export async function copyPost(tx: Tx, channelId: number, post: Record<string, u
   await tx`insert into message_threads (chat_id, post_id, copy_id) values (${channelId}, ${Number(post.id)}, ${copy.id})
            on conflict (chat_id, post_id) do update set copy_id = excluded.copy_id`;
   // автору своя копия — не непрочитанная (senderId у неё 0, как у поста): last_read_id и readOwn своим устройствам
-  const own = await tx`update chat_members set last_read_id = greatest(last_read_id, ${copy.id}) where chat_id = ${groupId} and user_id = ${authorId} returning 1`;
-  if (own.length) await appendUpdates(tx, [{ userId: authorId, update: { type: 'readOwn', chatId: groupId, upToId: copy.id } }]);
+  await readOwnPost(tx, groupId, authorId, copy.id);
   // push группы для копии пропускает подписчиков канала (kinds.ts → planPush excludeChatId): одно уведомление на пост
   await enqueue(tx, 'push.message', { chatId: groupId, id: copy.id });
   await enqueue(tx, 'search.sync', { id: copy.id });   // индекс копию пропускает (её находят как пост канала)

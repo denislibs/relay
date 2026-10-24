@@ -3,7 +3,7 @@ import {
   type AdminRights, type CommunityKind, type ProfilePhoto, type BannedMember, type GroupMember, type GroupReactions, type GroupRole, type Message, type MemberRights, type ServiceData, type ServiceType,
 } from '@relay/protocol';
 import { sql, type Tx } from '../db';
-import { GROUP_TITLE_MAX, toMessage } from './chats';
+import { GROUP_TITLE_MAX, readOwnPost, toMessage } from './chats';
 import { contentColumns, openRows } from './messageContent';
 import { DomainError } from './errors';
 import { appendUpdates, chatEvent } from './journal';
@@ -14,7 +14,7 @@ import { presenceFor } from './presence';
 import { privacyCtx } from './privacy';
 import { enqueue } from '../jobs/queue';
 import {
-  broadcastGroup, broadcastMembers, canChangeInfo, canInvite, groupCtx, hasAdmin, isCommunity, isGroup, requireAdmin, sendMembership, type GroupCtx, joinMembership, membersOf } from './groupRights';
+  broadcastGroup, groupInfo, broadcastMembers, canChangeInfo, canInvite, groupCtx, hasAdmin, isCommunity, isGroup, requireAdmin, sendMembership, type GroupCtx, joinMembership, membersOf } from './groupRights';
 
 type Db = Tx | typeof sql;
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
@@ -39,6 +39,7 @@ export async function serviceMessage(tx: Tx, chatId: number, senderId: number, t
             (select kind = 'channel' from chats where id = ${chatId})) returning *`;
   const message = toMessage((await openRows([row], '', tx))[0]);
   await chatEvent(tx, chatId, { type: 'newMessage', message }, 'group');
+  if (message.post) await readOwnPost(tx, chatId, senderId, message.id);   // в канале — от канала: своё не непрочитанное
   return message;
 }
 
@@ -477,11 +478,20 @@ async function makeOwner(tx: Tx, chatId: number, target: number, prev: number): 
   await tx`update chat_members set role = 'owner', admin_rights = null, restricted = null, promoted_by = null where chat_id = ${chatId} and user_id = ${target}`;
   // прежний владелец остаётся админом со всеми правами (как в Telegram)
   await tx`update chat_members set role = 'admin', admin_rights = ${tx.json(allAdminRights(kind) as never)}, promoted_by = ${target} where chat_id = ${chatId} and user_id = ${prev}`;
-  await serviceMessage(tx, chatId, prev, 'owner_changed', { users: await names(tx, [target]) });
+  // в канале владелец подписчикам не раскрывается — служебного «X теперь владелец» там нет
+  if (kind !== 'channel') await serviceMessage(tx, chatId, prev, 'owner_changed', { users: await names(tx, [target]) });
   await sendMembership(tx, chatId, target);
   await sendMembership(tx, chatId, prev).catch(() => {});   // прежний мог уже выйти
   await broadcastGroup(tx, chatId, [prev]);
+  if (kind === 'channel') await sendOwnerToAdmins(tx, chatId);
   await broadcastMembers(tx, chatId, { upsert: [target, prev] });
+}
+
+/** Канал: общая запись groupUpdated несёт ownerId null — админам новый владелец личной записью (O(админов)). */
+async function sendOwnerToAdmins(tx: Tx, chatId: number): Promise<void> {
+  const { pending, kind, ...info } = await groupInfo(tx, chatId);
+  const admins = await tx`select user_id from chat_members where chat_id = ${chatId} and role in ('owner', 'admin')`;
+  await appendUpdates(tx, admins.map((r) => ({ userId: Number(r.user_id), update: { type: 'groupUpdated' as const, chatId, group: { ...info, requests: 0 } } })));
 }
 
 /** Передать права на группу: только владелец и только с паролем 2FA (как в Telegram). */

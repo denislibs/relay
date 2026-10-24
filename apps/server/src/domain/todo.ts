@@ -1,6 +1,6 @@
 import { normalizeTodo, TODO_ITEMS_MAX, TODO_ITEM_MAX, type Message, type Todo, type TodoInput, type TodoServiceData, type Update } from '@relay/protocol';
 import { sql, type Tx } from '../db';
-import { shownTodo, toMessage } from './chats';
+import { readOwnPost, shownTodo, toMessage } from './chats';
 import { groupCtx, hasAdmin, type GroupCtx } from './groupRights';
 import { DomainError } from './errors';
 import { chatEvent } from './journal';
@@ -37,6 +37,7 @@ async function serviceLine(tx: Tx, ctx: GroupCtx, chatId: number, userId: number
     values (${chatId}, ${userId}, ${crypto.randomUUID()}, 'text', '', ${type}, ${sql.json(data as never)}, ${listId}, ${ctx.kind === 'channel'}) returning *`;
   const message = toMessage(row);
   await chatEvent(tx, chatId, { type: 'newMessage', message }, ctx.kind);
+  if (message.post) await readOwnPost(tx, chatId, userId, message.id);   // строка канала — от канала: отметившему не непрочитанная
   return message;
 }
 
