@@ -326,6 +326,16 @@ body { margin: 0; font-family: var(--font-sans); color: var(--ink); background: 
 /* без известного прогресса дуга постоянной длины только вращается: «дышащая» дуга сжималась быстрее, чем крутилась, — казалось, что едет назад */
 .rl-ring-onmedia { color: var(--on-media); border-radius: 50%; background: var(--media-scrim); }
 .rl-ring-onmedia .rl-ring-track { stroke: transparent; }
+/* кольцо поверх медиа (ProgressRing preloader): круг rgba(0,0,0,.3), тонкая белая дуга; без прогресса — оборот
+   за 1 с, с прогрессом — за 2 с, длина дуги меняется плавно */
+.rl-preloader { color: #fff; border-radius: 50%; background: rgba(0, 0, 0, 0.3); }
+.rl-preloader > svg { animation: rl-preloader-rotate 1s linear infinite; }
+.rl-preloader-det > svg { animation-duration: 2s; }
+.rl-preloader-arc { fill: none; stroke: currentColor; stroke-linecap: round; transition: stroke-dasharray 200ms linear; }
+.rl-preloader .rl-ring-cancel { position: absolute; inset: 0; }
+@keyframes rl-preloader-rotate { from { transform: rotate(-90deg); } to { transform: rotate(270deg); } }
+.rl-ring-cancel { position: absolute; inset: 0; }
+@keyframes rl-preloader-rotate { from { transform: rotate(-90deg); } to { transform: rotate(270deg); } }
 .rl-ring-cancel { position: relative; display: inline-flex; align-items: center; justify-content: center; width: 100%; height: 100%; border: 0; border-radius: 50%; background: transparent; color: inherit; cursor: pointer; }
 
 /* ---------- Waveform ---------- */
@@ -1327,13 +1337,27 @@ html[data-blur="0"] .rl-pop .rl-menu, html[data-blur="0"] .rl-pop .rl-rpick { -w
 /* диалог с опасным действием — иконка в цвет кнопки */
 
 /* ---------- LazyImage and real photos in media bubbles / viewer ---------- */
-.rl-lazy { position: absolute; inset: 0; display: block; overflow: hidden; background: var(--field); }
+.rl-lazy { position: absolute; inset: 0; display: block; overflow: hidden; background: var(--field); container-type: size; }
 .rl-lazy img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; }
-.rl-lazy-thumb { filter: blur(14px); transform: scale(1.12); }
-.rl-lazy-full { opacity: 0; transition: opacity 260ms var(--ease-out); }
+/* «матовое стекло», как в Telegram: миниатюра растянута на ячейку и размыта — радиус от размера ячейки (≈ 2 px на
+   40 px миниатюры: большое фото не проступает квадратами, маленькая ячейка альбома не превращается в одно пятно);
+   scale прячет прозрачный край размытия. Без единиц контейнера — постоянные 16 px. В пузыре миниатюра чуть прозрачна.
+   Полная проявилась (200 мс) — миниатюру не рисуем. */
+.rl-lazy-thumb { filter: blur(16px); filter: blur(clamp(6px, 5cqmax, 32px)); transform: scale(1.2); }
+.rl-media-cell .rl-lazy-thumb { opacity: 0.8; }
+.rl-lazy-loaded .rl-lazy-thumb { visibility: hidden; transition: visibility 0s linear 200ms; }
+.rl-lazy-full { opacity: 0; transition: opacity 200ms ease-in-out; }
 .rl-lazy-loaded .rl-lazy-full { opacity: 1; }
+/* кольцо загрузки над миниатюрой: появляется и уходит из точки (scale 0 → 1 с прозрачностью), клики идут в ячейку под ним */
+.rl-lazy-ring { position: absolute; inset: 0; z-index: 2; display: flex; align-items: center; justify-content: center; pointer-events: none; }
+.rl-lazy-ring > .rl-ring { opacity: 0; transform: scale(0); transition: opacity 200ms ease-in-out, transform 200ms ease-in-out; }
+.rl-lazy-ring-on > .rl-ring { opacity: 1; transform: none; animation: rl-lazy-ring-in 200ms ease-in-out; }
+@keyframes rl-lazy-ring-in { from { opacity: 0; transform: scale(0); } }
+/* узкая ячейка альбома: кольцо поменьше, совсем крошечная — без кольца */
+@container (max-width: 72px) or (max-height: 72px) { .rl-lazy-ring > .rl-ring { zoom: 0.7; } }
+@container (max-width: 36px) or (max-height: 36px) { .rl-lazy-ring { display: none; } }
 .rl-media-cell { position: relative; }
-@media (prefers-reduced-motion: reduce) { .rl-lazy-full { transition: none; } }
+@media (prefers-reduced-motion: reduce) { .rl-lazy-full, .rl-lazy-ring > .rl-ring { transition: none; } .rl-lazy-ring-on > .rl-ring { animation: none; } .rl-lazy-loaded .rl-lazy-thumb { transition: none; } }
 
 /* ---------- Settings kit ---------- */
 .rl-sicon { display: inline-flex; align-items: center; justify-content: center; flex-shrink: 0; width: 32px; height: 32px; border-radius: 8px; color: #fff; }
@@ -1439,9 +1463,9 @@ html[data-blur="0"] .rl-pop .rl-menu, html[data-blur="0"] .rl-pop .rl-rpick { -w
    чтобы fill-состояния (появление, галочки) не залипли. Спиннеры, шиммер скелета и «печатает» не трогаем:
    они показывают состояние, а не украшают. Не глобальное `*`, только поддеревья Relay. */
 html[data-anim="0"] .rl-slide { animation: none !important; box-shadow: none !important; }
-html[data-anim="0"] :is([class*="rl-"], [class*="app-"], [class*="rl-"] *, [class*="app-"] *):not(:is(.rl-ring-spin, .rl-search-spin, .app-more, .rl-sync-spin, .rl-sync-syncing, .rl-linear-indet, .rl-skel, .app-skel, .rl-typing, .rl-typing-inline, .rl-status-clock, .rl-rec-dot, .rl-rec-pulse) , :is(.rl-ring-spin, .rl-search-spin, .app-more, .rl-sync-spin, .rl-sync-syncing, .rl-linear-indet, .rl-skel, .app-skel, .rl-typing, .rl-typing-inline, .rl-status-clock, .rl-rec-dot, .rl-rec-pulse) *),
-html[data-anim="0"] :is([class*="rl-"], [class*="app-"], [class*="rl-"] *, [class*="app-"] *):not(:is(.rl-ring-spin, .rl-search-spin, .app-more, .rl-sync-spin, .rl-sync-syncing, .rl-linear-indet, .rl-skel, .app-skel, .rl-typing, .rl-typing-inline, .rl-status-clock, .rl-rec-dot, .rl-rec-pulse), :is(.rl-ring-spin, .rl-search-spin, .app-more, .rl-sync-spin, .rl-sync-syncing, .rl-linear-indet, .rl-skel, .app-skel, .rl-typing, .rl-typing-inline, .rl-status-clock, .rl-rec-dot, .rl-rec-pulse) *)::before,
-html[data-anim="0"] :is([class*="rl-"], [class*="app-"], [class*="rl-"] *, [class*="app-"] *):not(:is(.rl-ring-spin, .rl-search-spin, .app-more, .rl-sync-spin, .rl-sync-syncing, .rl-linear-indet, .rl-skel, .app-skel, .rl-typing, .rl-typing-inline, .rl-status-clock, .rl-rec-dot, .rl-rec-pulse), :is(.rl-ring-spin, .rl-search-spin, .app-more, .rl-sync-spin, .rl-sync-syncing, .rl-linear-indet, .rl-skel, .app-skel, .rl-typing, .rl-typing-inline, .rl-status-clock, .rl-rec-dot, .rl-rec-pulse) *)::after {
+html[data-anim="0"] :is([class*="rl-"], [class*="app-"], [class*="rl-"] *, [class*="app-"] *):not(:is(.rl-ring-spin, .rl-preloader, .rl-search-spin, .app-more, .rl-sync-spin, .rl-sync-syncing, .rl-linear-indet, .rl-skel, .app-skel, .rl-typing, .rl-typing-inline, .rl-status-clock, .rl-rec-dot, .rl-rec-pulse) , :is(.rl-ring-spin, .rl-preloader, .rl-search-spin, .app-more, .rl-sync-spin, .rl-sync-syncing, .rl-linear-indet, .rl-skel, .app-skel, .rl-typing, .rl-typing-inline, .rl-status-clock, .rl-rec-dot, .rl-rec-pulse) *),
+html[data-anim="0"] :is([class*="rl-"], [class*="app-"], [class*="rl-"] *, [class*="app-"] *):not(:is(.rl-ring-spin, .rl-preloader, .rl-search-spin, .app-more, .rl-sync-spin, .rl-sync-syncing, .rl-linear-indet, .rl-skel, .app-skel, .rl-typing, .rl-typing-inline, .rl-status-clock, .rl-rec-dot, .rl-rec-pulse), :is(.rl-ring-spin, .rl-preloader, .rl-search-spin, .app-more, .rl-sync-spin, .rl-sync-syncing, .rl-linear-indet, .rl-skel, .app-skel, .rl-typing, .rl-typing-inline, .rl-status-clock, .rl-rec-dot, .rl-rec-pulse) *)::before,
+html[data-anim="0"] :is([class*="rl-"], [class*="app-"], [class*="rl-"] *, [class*="app-"] *):not(:is(.rl-ring-spin, .rl-preloader, .rl-search-spin, .app-more, .rl-sync-spin, .rl-sync-syncing, .rl-linear-indet, .rl-skel, .app-skel, .rl-typing, .rl-typing-inline, .rl-status-clock, .rl-rec-dot, .rl-rec-pulse), :is(.rl-ring-spin, .rl-preloader, .rl-search-spin, .app-more, .rl-sync-spin, .rl-sync-syncing, .rl-linear-indet, .rl-skel, .app-skel, .rl-typing, .rl-typing-inline, .rl-status-clock, .rl-rec-dot, .rl-rec-pulse) *)::after {
   animation-duration: 1ms !important; animation-delay: 0s !important; animation-iteration-count: 1 !important; transition: none !important;
 }
 
@@ -2205,7 +2229,7 @@ html[data-blur="0"] .rl-menu { -webkit-backdrop-filter: none; backdrop-filter: n
   display: flex; align-items: center; justify-content: center; opacity: 0; transform: scale(.82); pointer-events: none;
   transition: opacity var(--dur-base) var(--ease-standard), transform var(--dur-base) var(--ease-out); }
 .rl-vp-center-on { opacity: 1; transform: none; pointer-events: auto; }
-.rl-vp-spin { position: absolute; left: 50%; top: 50%; margin: -24px 0 0 -24px; opacity: 0; transition: opacity var(--dur-base) var(--ease-standard); pointer-events: none; }
+.rl-vp-spin { position: absolute; left: 50%; top: 50%; margin: -27px 0 0 -27px; opacity: 0; transition: opacity var(--dur-base) var(--ease-standard); pointer-events: none; }
 .rl-vp-spin-on { opacity: 1; }
 
 .rl-vp-menu { position: absolute; right: 12px; bottom: 76px; width: 228px; max-height: calc(100% - 92px); overflow: auto; padding: 10px; border-radius: 14px;

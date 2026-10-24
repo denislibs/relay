@@ -229,7 +229,7 @@ export function VideoPlayer(props) {
     // большая кнопка по центру — на паузе
     h('button', { type: 'button', class: cx('rl-vp-center', (!s.playing && !spinner) && 'rl-vp-center-on'), tabIndex: s.playing ? -1 : 0,
       'aria-label': 'Воспроизвести', onClick: function (e) { e.stopPropagation(); toggle(); } }, h(Icon, { name: 'play', size: 32 })),
-    h('div', { class: cx('rl-vp-spin', spinner && 'rl-vp-spin-on'), 'aria-hidden': spinner ? undefined : 'true' }, h(ProgressRing, { size: 48, onMedia: true, label: 'Загрузка видео' })),
+    h('div', { class: cx('rl-vp-spin', spinner && 'rl-vp-spin-on'), 'aria-hidden': spinner ? undefined : 'true' }, h(ProgressRing, { size: 54, preloader: true, label: 'Загрузка видео' })),
     s.menu ? h('div', { class: 'rl-vp-menu', role: 'menu', onClick: function (e) { e.stopPropagation(); } },
       h('div', { class: 'rl-vp-menu-title' }, 'Скорость'),
       h('div', { class: 'rl-vp-chips' }, SPEEDS.map(function (r) {
