@@ -214,7 +214,10 @@ export class Engine {
     });
     store.contactOf = (id) => this.contacts.view().get(id);
     store.wantUser = (id) => this.userWants.add(id);
-    store.wantPost = (chatId, id) => { let s = this.postWants.get(chatId); if (!s) { s = new Set(); this.postWants.set(chatId, s); } s.add(id); };
+    store.wantPost = (chatId, id) => {
+      if (this.postsNoReplies.has(chatId + ':' + id)) return;   // уже перечитывали — кнопки нет (тред не в текущей группе): не спрашивать снова
+      let s = this.postWants.get(chatId); if (!s) { s = new Set(); this.postWants.set(chatId, s); } s.add(id);
+    };
     this.transport = new WsTransport(cfg.wsUrl, {
       onOpen: () => this.onOpen(),
       onFrame: (f) => this.onFrame(f),
@@ -2384,7 +2387,11 @@ export class Engine {
     this.postWants.clear();
     for (const [chatId, ids] of wants) {
       this.run(async () => {
-        const res = await this.http<{ messages: Message[] }>(`/chats/${chatId}/messages?ids=${[...ids].slice(0, 100).join(',')}`);
+        const asked = [...ids].slice(0, 100);
+        const res = await this.http<{ messages: Message[] }>(`/chats/${chatId}/messages?ids=${asked.join(',')}`);
+        // без replies (или пост не пришёл) — запомнить: следующие replies по нему перечитывания не вызывают
+        const withReplies = new Set(res.messages.filter((m) => m.replies).map((m) => m.id));
+        for (const id of asked) if (!withReplies.has(id)) this.postsNoReplies.add(chatId + ':' + id);
         this.store.addLoose(chatId, res.messages);
         await this.store.flush();
         this.changed();
@@ -2392,6 +2399,8 @@ export class Engine {
     }
   }
   private postWants = new Map<number, Set<number>>();
+  /** «канал:пост», перечитанные без replies (в памяти, на сессию) */
+  private postsNoReplies = new Set<string>();
 
   /** Страницы истории одна за другой, пока next() говорит, перед чем грузить (null — с новейшего края). Одна загрузка на чат за раз. */
   private loadHistory(chatId: number, page: number, next: () => { before: number | null } | null): Promise<void> {

@@ -70,7 +70,8 @@ export async function sendMessage(
     const threadId = input.threadId ?? null;
     if (threadId != null) {
       if (ctx.kind !== 'group') throw new DomainError('bad_frame', 'thread outside a group');
-      const [root] = await tx`select origin, deleted from messages where chat_id = ${input.chatId} and id = ${threadId}`;
+      // for share: удаление поста (и копии) не проскочит между проверкой и вставкой комментария
+      const [root] = await tx`select origin, deleted from messages where chat_id = ${input.chatId} and id = ${threadId} for share`;
       // корень — только копия, на которую указывает тред поста (копия не первого поста альбома — не корень)
       if (!root || root.origin == null || root.deleted || !(await isThreadRoot(tx, root.origin, threadId))) throw new DomainError('not_found', 'thread');
     }

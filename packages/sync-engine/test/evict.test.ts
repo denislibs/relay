@@ -459,3 +459,23 @@ test('an evicted person is asked again when a new message brings them back (no r
   const p2 = watchInto(eb, { kind: 'people', ids: [c.userId] });
   expect((await p2.until((l) => l[0]?.name === 'Вера'))[0].id).toBe(c.userId);
 });
+
+test('thread ranges: an open thread (its window kept) keeps its ranges; otherwise they shrink by its own evicted comments', async () => {
+  const mk = () => {
+    const msgs = Array.from({ length: 30 }, (_, j) => row(5, 100 + j, (j >= 10 && j <= 15) || j >= 25 ? { threadId: 200 } : {}));
+    return { msgs, chat: chatRow(5, msgs[29], { kind: 'group', ranges: [[100, 129]], threads: { 200: { ranges: [[110, 128]], historyStart: true }, 300: { ranges: [[90, 95]] } } }) };
+  };
+  // тред открыт: окно треда защищено — отрезки треда на месте
+  const a = mk();
+  const dbA = await seed('evict-' + crypto.randomUUID(), [a]);
+  const sA = await Store.open(dbA, ME);
+  const win = new Set(a.msgs.filter((m) => m.threadId === 200).map((m) => m.key));
+  await evict(sA, dbA, () => ({ ...keepNone(), windows: new Map([[5, win]]) }), { ...EVICT_LIMITS, perChat: 10 });
+  expect(sA.chats.get(5)!.threads).toEqual({ 200: { ranges: [[110, 128]], historyStart: true }, 300: { ranges: [[90, 95]] } });
+  // не открыт: стёрты его ранние комментарии — отрезок с пола, начала истории треда больше нет; другой тред не тронут
+  const b = mk();
+  const dbB = await seed('evict-' + crypto.randomUUID(), [b]);
+  const sB = await Store.open(dbB, ME);
+  await evict(sB, dbB, keepNone, { ...EVICT_LIMITS, perChat: 10 });
+  expect(sB.chats.get(5)!.threads).toEqual({ 200: { ranges: [[120, 128]] }, 300: { ranges: [[90, 95]] } });
+});

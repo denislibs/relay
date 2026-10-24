@@ -9,6 +9,7 @@ import { planPush, subscribe } from '../src/domain/push';
 import { allowPrivateHostsForTests } from '../src/domain/linkPreview';
 import '../src/jobs/kinds';
 import { drainJobs } from '../src/jobs/worker';
+import { markRead } from '../src/domain/reads';
 import { chatEventsOf, journalOf, opened, pushBrowser, resetDb, uploadFile } from './helpers';
 
 const server = createServer({ port: 0 });
@@ -148,6 +149,9 @@ test('message_threads: count, last and recent (commenter first, distinct, at mos
   const { a, b, c, ch, g } = await linked();
   const p = await send(a, ch, 'пост');
   const copyId = (await copyOf(ch, p.id))!;
+  // начать с начала секунды: пять комментариев — в одно окно (иначе окно закончится до drainJobs ниже)
+  const [w0] = await sql`select extract(epoch from clock_timestamp()) as t`;
+  await Bun.sleep((1 - (Number(w0.t) % 1)) * 1000 + 30);
   await comment(b, g, copyId, '1');
   await comment(c, g, copyId, '2');
   const x3 = await comment(b, g, copyId, '3');
@@ -303,4 +307,38 @@ test('album: posts sharing a group_id share one thread — the first copy is the
   // комментарий удалён — пересчёт на обоих постах
   await deleteMessage(b.userId, g, k.id);
   expect(await thread(ch, p2.id)).toEqual({ count: 0, lastId: null, recent: [] });
+});
+
+test('after relinking, comments in the old group do not emit replies into the channel journal', async () => {
+  const { a, b, ch, g } = await linked();
+  const p = await send(a, ch, 'пост');
+  const copyId = (await copyOf(ch, p.id))!;
+  await comment(b, g, copyId, 'до');
+  await runNow();
+  const before = (await chatEventsOf(ch, 'replies')).length;
+  expect(before).toBe(1);
+  const g2 = await group(a, [b], 'Новое обсуждение');
+  await setLinkedChat(a.userId, ch, g2);
+  await comment(b, g, copyId, 'после перепривязки');   // старая группа: тред читается и пишется, кнопки у поста нет
+  const k = await comment(b, g, copyId, 'ещё');
+  await deleteMessage(b.userId, g, k.id);
+  await runNow();
+  expect((await chatEventsOf(ch, 'replies')).length).toBe(before);
+  expect((await sql`select 1 from jobs where kind = 'replies.flush'`).length).toBe(0);
+});
+
+test('the author\'s copy is read for them only when everything before it in the group is read', async () => {
+  const { a, b, ch, g } = await linked();
+  const hi = await send(b, g, 'привет в группе');   // a его ещё не прочитала
+  const p = await send(a, ch, 'пост');
+  const copyId = (await copyOf(ch, p.id))!;
+  const [m] = await sql`select last_read_id from chat_members where chat_id = ${g} and user_id = ${a.userId}`;
+  expect(Number(m.last_read_id)).toBeLessThan(hi.id);   // чужое перед копией осталось непрочитанным
+  expect((await ok(a, 'GET', '/chats?ids=' + g))[0].unread).toBeGreaterThanOrEqual(1);
+  // всё прочитано — следующая копия прочитана автору сразу
+  await markRead(a.userId, g, copyId);
+  const p2 = await send(a, ch, 'пост 2');
+  const copy2 = (await copyOf(ch, p2.id))!;
+  const [m2] = await sql`select last_read_id from chat_members where chat_id = ${g} and user_id = ${a.userId}`;
+  expect(Number(m2.last_read_id)).toBe(copy2);
 });

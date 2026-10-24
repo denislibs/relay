@@ -49,8 +49,12 @@ export async function copyPost(tx: Tx, channelId: number, post: Record<string, u
   await tx`insert into message_threads (chat_id, post_id, copy_id, count, last_id, recent)
            values (${channelId}, ${Number(post.id)}, ${root}, ${cur ? Number(cur.count) : 0}, ${cur?.last_id ?? null}, ${(cur?.recent as unknown[] | undefined)?.map(Number) ?? []}::bigint[])
            on conflict (chat_id, post_id) do update set copy_id = excluded.copy_id`;
-  // автору своя копия — не непрочитанная (senderId у неё 0, как у поста): last_read_id и readOwn своим устройствам
-  await readOwnPost(tx, groupId, authorId, copy.id);
+  // автору своя копия — не непрочитанная (senderId у неё 0, как у поста): last_read_id и readOwn своим устройствам.
+  // Только если до копии в группе всё прочитано: иначе прыжок last_read_id «прочитал» бы чужие сообщения перед ней
+  const [caught] = await tx`
+    select 1 from chat_members cm where cm.chat_id = ${groupId} and cm.user_id = ${authorId}
+       and cm.last_read_id >= coalesce((select max(m.id) from messages m where m.chat_id = ${groupId} and m.id < ${copy.id} and (m.sender_id <> ${authorId} or m.post)), 0)`;
+  if (caught) await readOwnPost(tx, groupId, authorId, copy.id);
   // push группы для копии пропускает подписчиков канала (kinds.ts → planPush excludeChatId): одно уведомление на пост
   await enqueue(tx, 'push.message', { chatId: groupId, id: copy.id });
   await enqueue(tx, 'search.sync', { id: copy.id });   // индекс копию пропускает (её находят как пост канала)
@@ -87,6 +91,12 @@ export async function isThreadRoot(db: Tx | typeof sql, origin: unknown, copyId:
   return (await db`select 1 from message_threads where chat_id = ${Number(o.chatId)} and post_id = ${Number(o.id)} and copy_id = ${copyId}`).length > 0;
 }
 
+/** Тред в текущей группе обсуждения канала: после перепривязки комментарии старой группы событий replies не шлют. */
+async function linkedNow(tx: Tx, channelId: number, copyId: number): Promise<boolean> {
+  const [r] = await tx`select 1 from chats c join messages m on m.id = ${copyId} and m.chat_id = c.linked_chat_id where c.id = ${channelId}`;
+  return !!r;
+}
+
 /** replies.flush на секундное окно: w — по часам базы ПОСЛЕ замка строки message_threads (см. reactionCounts.ts). */
 async function scheduleReplies(tx: Tx, channelId: number, postId: number): Promise<void> {
   const [{ w }] = await tx`select floor(extract(epoch from clock_timestamp()))::bigint as w`;
@@ -105,7 +115,7 @@ export async function noteComment(tx: Tx, groupId: number, copyId: number, sende
              recent = (array[${senderId}::bigint] || array_remove(recent, ${senderId}::bigint))[1:3]
        where chat_id = ${key.channelId} and post_id in (select post_id from message_threads where chat_id = ${key.channelId} and copy_id = ${copyId} order by post_id for update)
        returning 1`;
-    if (up.length) await scheduleReplies(tx, key.channelId, key.postId);
+    if (up.length && await linkedNow(tx, key.channelId, copyId)) await scheduleReplies(tx, key.channelId, key.postId);
   }
   // свой комментарий — тред прочитан до него (на всех моих устройствах)
   await markThreadReadTx(tx, senderId, groupId, copyId, id);
@@ -123,7 +133,7 @@ export async function recountThread(tx: Tx, groupId: number, copyId: number): Pr
      group by sender_id order by max(id) desc limit 3`;
   await tx`update message_threads set count = ${agg.n}, last_id = ${agg.last ?? null}, recent = ${recent.map((r) => Number(r.sender_id))}::bigint[]
             where chat_id = ${key.channelId} and copy_id = ${copyId}`;
-  await scheduleReplies(tx, key.channelId, key.postId);
+  if (await linkedNow(tx, key.channelId, copyId)) await scheduleReplies(tx, key.channelId, key.postId);
 }
 
 /** Задача replies.flush: счётчики треда событием replies на каждый пост треда (альбом — на каждый) в журнал канала.
@@ -134,6 +144,7 @@ export async function flushReplies(p: { chatId: number; postId: number }): Promi
     const rows = await tx`
       select t.post_id, t.count, t.last_id, t.recent, c.deleted_at from message_threads t join chats c on c.id = t.chat_id
        where t.chat_id = ${chatId} and t.copy_id = (select copy_id from message_threads where chat_id = ${chatId} and post_id = ${postId})
+         and exists (select 1 from messages lm join chats lc on lc.id = t.chat_id where lm.id = t.copy_id and lm.chat_id = lc.linked_chat_id)   -- перепривязали, пока задача ждала: тред старой группы молчит
        order by t.post_id for share of t`;
     if (!rows.length || rows[0].deleted_at) return;
     for (const t of rows) await chatEvent(tx, chatId, {

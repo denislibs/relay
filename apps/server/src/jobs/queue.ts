@@ -17,9 +17,9 @@ export async function enqueue(db: Db, kind: string, payload: object, opts: { run
     values (${kind}, ${db.json(payload as never)}, coalesce(${opts.runAt ?? null}::timestamptz, now()), ${opts.dedupeKey ?? null}, ${opts.maxAttempts ?? 8})
     on conflict (dedupe_key) where dedupe_key is not null do nothing
     returning id`;
-  // будить воркеры незачем: задача уже стоит (повтор ключа — реакция в том же окне) или ещё не созрела — к её run_at
-  // воркер проснётся сам (worker.ts спит до ближайшей отложенной)
-  if (!ins.length || (opts.runAt && opts.runAt.getTime() > Date.now())) return;
+  // повтор ключа (реакция в том же окне) — задача уже стоит, будить незачем. Отложенная — будим тоже: спящий воркер
+  // иначе узнал бы о ней только через poll; проснувшись, он ничего не возьмёт и уснёт до её run_at (worker.ts nextDue)
+  if (!ins.length) return;
   // NOTIFY — после коммита и один на транзакцию (db.ts); вне транзакции — сразу
   const kinds = pending.get(db);
   if (kinds) { kinds.add(kind); return; }

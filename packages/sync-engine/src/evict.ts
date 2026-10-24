@@ -44,7 +44,7 @@ export interface EvictOpts {
 /** Строк сообщений в одной транзакции уборки: запись и чтение остальных ждут её недолго. */
 export const EVICT_CHUNK = 300;
 
-type Removed = { key: string; id: number | null; sort: number; media: boolean };
+type Removed = { key: string; id: number | null; sort: number; media: boolean; threadId?: number };
 type Prot = { keys: Set<string>; ids: Set<number> };
 
 /** Подтверждённые сообщения чата (неотправленные — с PENDING_BASE, их не считаем и не трогаем). */
@@ -105,7 +105,7 @@ async function trimChunk(db: IDBDatabase, chatId: number, from: number | null, f
     if (prot.keys.has(m.key) || (m.id != null && prot.ids.has(m.id))) kept.push(m.sort);
     else {
       for (const term of termsOf(m)) terms.delete([term, m.chatId, m.sort]);
-      removed.push({ key: m.key, id: m.id, sort: m.sort, media: !!m.tab || tabsOf(m).length > 0 });
+      removed.push({ key: m.key, id: m.id, sort: m.sort, media: !!m.tab || tabsOf(m).length > 0, ...(m.threadId != null ? { threadId: m.threadId } : {}) });
       d.delete();
     }
     d.continue();
@@ -149,8 +149,17 @@ function narrow(chat: LocalChat, floor: number, removed: Removed[], kept: number
   if (chat.seed != null && (!live || live[0] > chat.seed)) delete chat.seed;
   // вкладки медиа знали страницы подряд — среди них стёртые: заново с сервера (счётчики верны)
   if (removed.some((r) => r.media)) delete chat.mediaDone;
-  // отрезки тредов не сжимаем по одному — тред перезагрузится при открытии
-  delete chat.threads;
+  // отрезки тредов — так же, по стёртым комментариям своего треда (открытый тред не теряет загруженное)
+  if (chat.threads) for (const [k, t] of Object.entries(chat.threads)) {
+    const cut = removed.filter((r) => r.threadId === Number(k)).map((r) => r.sort).sort((x, y) => x - y);
+    if (!cut.length) continue;
+    const before = t.ranges;
+    t.ranges = trimRanges(before, floor, cut, kept.slice().sort((x, y) => x - y));
+    if (t.historyStart && (!t.ranges.length || !before.length || t.ranges[0][0] !== before[0][0])) delete t.historyStart;
+    const tl = t.ranges[t.ranges.length - 1];
+    if (t.seed != null && (!tl || tl[0] > t.seed)) delete t.seed;
+    if (!t.ranges.length) delete chat.threads[Number(k)];
+  }
 }
 
 /** Стирание порции — в память вслед за IDB: сообщения и курсоры чата. */

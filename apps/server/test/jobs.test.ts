@@ -196,32 +196,33 @@ test('stop waits for jobs in flight and their completion', async () => {
   expect(await count('jobs')).toBe(0);
 });
 
-test('enqueue wakes workers only for a job that is new and due: no NOTIFY on a dedupe hit or a future runAt', async () => {
+test('enqueue wakes workers for a new job (due or delayed), not for a dedupe hit', async () => {
   const got: string[] = [];
   const l = await sql.listen('jobs', (p) => { got.push(p); });
   try {
     await enqueue(sql, 'test.noop', {}, { dedupeKey: 'win:1' });
     await enqueue(sql, 'test.noop', {}, { dedupeKey: 'win:1' });                        // повтор ключа — задача уже стоит
-    await enqueue(sql, 'test.noop', {}, { runAt: new Date(Date.now() + 60_000) });      // ещё не созрела
-    await sql.begin(async (tx) => { await enqueue(tx, 'test.later', {}, { dedupeKey: 'w2', runAt: new Date(Date.now() + 60_000) }); });
+    await enqueue(sql, 'test.noop', {}, { runAt: new Date(Date.now() + 60_000) });      // отложенная — будим (воркер уснёт до неё)
+    await sql.begin(async (tx) => {
+      await enqueue(tx, 'test.later', {}, { dedupeKey: 'w2', runAt: new Date(Date.now() + 60_000) });
+      await enqueue(tx, 'test.later', {}, { dedupeKey: 'w2', runAt: new Date(Date.now() + 60_000) });   // повтор в той же транзакции
+    });
     await Bun.sleep(200);
-    expect(got).toEqual(['test.noop']);
+    expect(got).toEqual(['test.noop', 'test.noop', 'test.later']);
     expect(await count('jobs')).toBe(3);
   } finally {
     await l.unlisten();
   }
 });
 
-test('an idle worker sleeps until the nearest delayed job, not the whole poll', async () => {
+test('a delayed job enqueued while the worker idles: it wakes, finds nothing due and sleeps until the job, not the whole poll', async () => {
   let ranAt = 0;
   register('test.delayed', async () => { ranAt = Date.now(); });
-  register('test.noop2', async () => {});
   const w = startWorker({ concurrency: 2, pollMs: 60_000 });
   try {
-    await Bun.sleep(100);   // воркер уснул на пустой очереди
+    await Bun.sleep(100);   // воркер уснул на пустой очереди (до poll — минута)
     const t0 = Date.now();
-    await enqueue(sql, 'test.delayed', {}, { runAt: new Date(t0 + 400) });   // без NOTIFY (не созрела)
-    await enqueue(sql, 'test.noop2', {});   // NOTIFY: воркер проснётся, увидит отложенную и уснёт до неё, а не на poll
+    await enqueue(sql, 'test.delayed', {}, { runAt: new Date(t0 + 400) });   // только она: потерянного пробуждения нет
     for (let i = 0; i < 100 && !ranAt; i++) await Bun.sleep(20);
     expect(ranAt).toBeGreaterThan(0);
     expect(ranAt - t0).toBeGreaterThanOrEqual(350);
