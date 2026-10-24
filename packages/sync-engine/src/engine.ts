@@ -1335,6 +1335,7 @@ export class Engine {
       case 'featuredStickerSets':
       case 'searchStickerSets':
       case 'stickersByEmoji':
+      case 'greetingSticker':
         return this.stickers.act(a);
       case 'listSessions':
       case 'terminateSession':

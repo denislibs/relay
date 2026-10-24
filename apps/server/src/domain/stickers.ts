@@ -66,6 +66,21 @@ export async function stickersByEmoji(userId: number, emoji: string, limit = 100
   return rows.map(refOf);
 }
 
+/** Эмодзи приветствия (без вариационного селектора): из них выбирается стикер для пустого личного чата. */
+export const GREETING_EMOJI = ['👋', '🤝', '🙋', '🫡', '✋', '😊', '👍'];
+
+/**
+ * Стикер-приветствие для пустого личного чата: случайный среди стикеров с эмодзи приветствия, а если таких
+ * нет — любой. null — паков нет вовсе.
+ */
+export async function greetingSticker(): Promise<StickerRef | null> {
+  const [row] = await sql`
+    select ${STICKER_COLS} from stickers s join sticker_sets ss on ss.id = s.set_id
+    where ss.kind = 'sticker'
+    order by (replace(s.emoji, ${'\uFE0F'}, '') = any(${GREETING_EMOJI}::text[])) desc, random() limit 1`;
+  return row ? refOf(row) : null;
+}
+
 const changed = (tx: Tx, userId: number) => appendUpdates(tx, [{ userId, update: { type: 'myStickers' } }]);
 
 /** Паки по умолчанию — один раз за жизнь аккаунта. */

@@ -1,8 +1,8 @@
-import { clearRecent, featuredSets, getStickerSet, myStickers, searchSets, setFaved, setInstalled, stickersByEmoji } from '../domain/stickers';
+import { clearRecent, featuredSets, getStickerSet, greetingSticker, myStickers, searchSets, setFaved, setInstalled, stickersByEmoji } from '../domain/stickers';
 
 const fail = (code: string, status: number) => Response.json({ code }, { status });
 
-/** /sticker-sets/*, /my-stickers/*, /stickers-by-emoji — паки, мои стикеры и поиск по эмодзи (нужна сессия). */
+/** /sticker-sets/*, /my-stickers/*, /stickers-by-emoji, /stickers/greeting — паки, мои стикеры, поиск по эмодзи и приветствие (нужна сессия). */
 export async function stickerRoute(req: Request, url: URL, userId: number): Promise<Response | null> {
   const p = url.pathname, m = req.method;
   if (m === 'GET' && p === '/sticker-sets/featured') return Response.json(await featuredSets(Number(url.searchParams.get('offset')) || 0));
@@ -16,6 +16,11 @@ export async function stickerRoute(req: Request, url: URL, userId: number): Prom
     return Response.json(set, { headers: { etag: `"${set.hash}"`, 'cache-control': 'private, no-cache' } });
   }
   if (m === 'GET' && p === '/stickers-by-emoji') return Response.json(await stickersByEmoji(userId, url.searchParams.get('e') ?? ''));
+  if (m === 'GET' && p === '/stickers/greeting') {
+    // случайный на каждый запрос: клиент держит выбранный, пока открыт чат
+    const st = await greetingSticker();
+    return st ? Response.json(st, { headers: { 'cache-control': 'no-store' } }) : fail('not_found', 404);
+  }
   if (m === 'GET' && p === '/my-stickers') return Response.json(await myStickers(userId));
   if (m === 'POST' && p === '/my-stickers/sets') {
     const b = (await req.json().catch(() => null)) as { setId?: unknown; on?: unknown } | null;

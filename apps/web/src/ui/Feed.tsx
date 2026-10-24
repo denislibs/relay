@@ -3,8 +3,10 @@ import type { ServiceData, ServiceType } from '@relay/protocol';
 import type { Item } from '@relay/sync-engine/src/types';
 import { avatarPhoto, senderAvatar } from '../profilePhoto';
 import type { Entity, MessageButton, ProfilePhoto, Todo } from '@relay/protocol';
-import { Presence, ProgressRing, useMinVisible, MediaPolicy, ArticleBlocks, Avatar, Bubble, Icon, peerTone, DateDivider, DatePicker, FileBubble, MediaBubble, MessageText, VoiceBubble, MusicBubble, RoundBubble, player, MediaViewer, ScrollToBottom, beginHeavyAnimation, forceMeasure, isHeavyAnimating, onHeavyAnimationEnd, requestMeasure, requestMutation, selectionValue, TodoBubble, InlineKeyboard, StickerBubble } from '@relay/ui';
-import { openStickerSet } from '../stickers';
+import { Presence, ProgressRing, useMinVisible, MediaPolicy, ArticleBlocks, Avatar, Bubble, Icon, peerTone, DateDivider, DatePicker, FileBubble, MediaBubble, MessageText, VoiceBubble, MusicBubble, RoundBubble, player, MediaViewer, ScrollToBottom, beginHeavyAnimation, forceMeasure, isHeavyAnimating, onHeavyAnimationEnd, requestMeasure, requestMutation, selectionValue, TodoBubble, InlineKeyboard, StickerBubble, reducedMotion } from '@relay/ui';
+import { openStickerSet, sendSticker, useGreetingSticker } from '../stickers';
+import { historyEmpty } from '../greeting';
+import { GreetingCard } from './GreetingCard';
 import type { StickerRef } from '@relay/protocol';
 import type { QuoteMsg } from '@relay/sync-engine/src/types';
 import { quoteContent } from './preview';
@@ -447,8 +449,12 @@ function CachedMusic({ fileId, ...props }: { fileId?: string } & Record<string, 
   return <MusicBubble {...props} downloaded={downloaded} />;
 }
 
-export function Feed({ frameKey, active, chatId, threadId, channel = false, meId, peerName, chatPhoto, group, onAuthor, stick, onMenu, highlight }: {
+const GREET_FLIGHT_MS = 320;   // перелёт стикера-приветствия в пузырь
+const GREET_LAND_MS = 120;     // сколько после посадки ждать первый кадр пузыря (плеер общий с карточкой — обычно уже есть)
+
+export function Feed({ frameKey, active, chatId, threadId, channel = false, meId, peerName, chatPhoto, group, onAuthor, stick, onMenu, highlight, greeting = false }: {
   frameKey: string; active: boolean;   // кадр стека чатов; active — на экране (только он отмечает прочитанное)
+  greeting?: boolean;   // личный чат, где пустую ленту встречает карточка-приветствие (greetingChat)
   chatId: number; meId: number; peerName: string; highlight?: string;
   chatPhoto?: ProfilePhoto | null;   // фото чата: автор поста в просмотрщике — сам канал
   threadId?: number;    // тред комментариев: прочитанность — markThreadRead, позиция — своим ключом
@@ -557,6 +563,50 @@ export function Feed({ frameKey, active, chatId, threadId, channel = false, meId
       if (next !== null && Math.abs(next - top) > 0.5) { programmatic.current++; root.scrollTop = next; }
     });
   }, [messages, limit]);   // каждая порция дорисовки — восстановить якорь
+
+  // пустой личный чат: карточка-приветствие — только когда пустоту подтвердило окно ленты и стикер выбран
+  // (или ждать его дольше секунды не стали), чтобы ничего не мелькнуло и карточка не выросла после показа
+  const greetSticker = useGreetingSticker(frameKey, greeting && !messages.length);
+  const greetReady = greeting && greetSticker !== undefined;
+  const greetShown = greetReady && historyEmpty(meta, messages.length);
+  const flight = useRef<{ id: number; from: HTMLElement } | null>(null);
+  const onGreet = (st: StickerRef, from: HTMLElement) => {
+    if (flight.current) return;   // второй клик, пока первый стикер в пути
+    flight.current = { id: st.id, from };
+    void sendSticker(chatId, st);
+  };
+  // пришёл свой стикер-приветствие: стикер карточки (он уже играет) перелетает на место пузыря, пузырь скрыт до
+  // посадки, карточка вокруг гаснет. Осознанное исключение до отрисовки (после якоря выше): одно чтение и одна
+  // запись — иначе мелькнул бы кадр с пузырём внизу и стикером на карточке одновременно
+  useLayoutEffect(() => {
+    const f = flight.current, root = el.current;
+    if (!f || !root) return;
+    const m = messages.find((x) => x.kind === 'sticker' && x.senderId === meId && (x.sticker as StickerRef | null)?.id === f.id);
+    if (!m) return;
+    flight.current = null;
+    const box = root.querySelector<HTMLElement>(`[data-key="${CSS.escape(m.key as string)}"] .rl-sticker-box`);
+    const target = box?.querySelector<HTMLElement>('.rl-sticker');
+    if (!box || !target) return;
+    forceMeasure(() => {
+      const from = f.from.getBoundingClientRect(), to = target.getBoundingClientRect();
+      if (reducedMotion() || !from.width) { f.from.style.visibility = 'hidden'; return; }
+      box.style.visibility = 'hidden';
+      f.from.parentElement?.classList.add('is-flying');
+      beginHeavyAnimation(GREET_FLIGHT_MS);
+      const a = f.from.animate([
+        { transformOrigin: '0 0', transform: 'none' },
+        { transformOrigin: '0 0', transform: `translate(${to.left - from.left}px, ${to.top - from.top}px) scale(${to.width / from.width})` },
+      ], { duration: GREET_FLIGHT_MS, easing: 'cubic-bezier(.2, .8, .2, 1)', fill: 'forwards' });
+      // посадка: подменяем летевший стикер пузырём, когда у пузыря уже нарисован кадр анимации (иначе мелькнёт
+      // силуэт); ждём не дольше GREET_LAND_MS — карточку Presence держит до конца ожидания
+      const landBy = performance.now() + GREET_FLIGHT_MS + GREET_LAND_MS;
+      const land = () => {
+        if (!target.classList.contains('rl-sticker-ready') && performance.now() < landBy) { requestAnimationFrame(land); return; }
+        requestMutation(() => { box.style.visibility = ''; f.from.style.visibility = 'hidden'; });
+      };
+      a.onfinish = land;
+    });
+  }, [messages]);
 
   // Строки выше первого экрана — когда колонка на экране и переход стека закончился: в скрытой колонке их не видно,
   // а во время перехода их рендер съедал бы кадры анимации. И порциями по FILL_CHUNK за кадр: одна большая задача
@@ -1133,6 +1183,7 @@ export function Feed({ frameKey, active, chatId, threadId, channel = false, meId
   const threadLoading = useMinVisible(threadId != null && !threadHead?.loaded && !messages.length, { delay: 150, min: 600 });
   return (
     <>
+      {greetReady ? <Presence show={greetShown} exitMs={GREET_FLIGHT_MS + GREET_LAND_MS + 60}><GreetingCard sticker={greetSticker} onSend={onGreet} /></Presence> : null}
       {threadId != null ? <Presence show={threadLoading} exitMs={200}><div class="app-thread-loading" role="status" aria-label="Загрузка комментариев"><span class="app-thread-spinner"><ProgressRing size={32} onMedia /></span></div></Presence> : null}
       <div class={'rl-feed' + (selVis ? ' app-feed-selecting' : '') + (selOn && selecting ? ' app-feed-sel-on' : '')} ref={el} onScroll={onScroll} onClick={onClick} onClickCapture={selecting ? onSelectClick : undefined} onPointerDownCapture={selecting ? onSelectDown : undefined} onContextMenu={onContextMenu} aria-live="polite">{out}</div>
       {openIndex !== null && photos[openIndex] ? (
