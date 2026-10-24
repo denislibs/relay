@@ -1277,10 +1277,12 @@ html[data-anim="0"] :is(.app-enter-reload, .app-enter-login) :is(.rl-shell-side,
   box-sizing: border-box; max-width: 300px; padding: 16px 20px 14px; color: #fff; text-align: center; }
 .app-greeting-card::before { content: ""; position: absolute; inset: 0; z-index: -1; border-radius: 18px; background: var(--greeting-bg);
   -webkit-backdrop-filter: blur(12px); backdrop-filter: blur(12px); }
-:root[data-theme="dark"] .app-greeting-card { --greeting-bg: rgba(64, 44, 96, .55); }
-@media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) .app-greeting-card { --greeting-bg: rgba(64, 44, 96, .55); } }
 .app-greeting-title { font: 500 15px/1.3 var(--font-sans); }
 .app-greeting-text { font: 400 14px/1.35 var(--font-sans); opacity: .9; }
+.app-greeting-slot { display: grid; grid-template-rows: 1fr; }
+.app-greeting-slot > * { min-height: 0; overflow: hidden; }
+.app-greeting-slot.is-late { animation: app-greeting-grow 320ms var(--ease-out) both; }
+@keyframes app-greeting-grow { from { grid-template-rows: 0fr; opacity: 0; } }
 .app-greeting-sticker { all: unset; margin-top: 10px; border-radius: 12px; cursor: pointer; line-height: 0; }
 .app-greeting-sticker:focus-visible { outline: 2px solid rgba(255, 255, 255, .7); outline-offset: 2px; }
 @media (hover: hover) { .app-greeting-sticker:hover { transform: scale(1.04); transition: transform var(--dur-base) var(--ease-out); } }
