@@ -581,7 +581,7 @@ export function Chat({ chatId, frameKey, active, threadId }: { chatId: number; f
         ) : null}
       </GlassBar>
       <MediaPolicy.Provider value={policy}>
-        <Feed frameKey={frameKey} active={active} chatId={chatId} threadId={threadId} channel={channel} meId={me.userId} peerName={title} group={chat?.kind === 'group'} onAuthor={openUserChat} stick={stick} highlight={found?.q} onMenu={(key, x, y, extra) => setMenu({ key, x, y, extra })} />
+        <Feed frameKey={frameKey} active={active} chatId={chatId} threadId={threadId} channel={channel} meId={me.userId} peerName={title} group={chat?.kind === 'group' || !!guest} onAuthor={openUserChat} stick={stick} highlight={found?.q} onMenu={(key, x, y, extra) => setMenu({ key, x, y, extra })} />
       </MediaPolicy.Provider>
       {plate === 'channel' ? <ChannelBar chatId={chatId} member={!!gMe} username={gInfo?.username ?? null} approval={!!gInfo?.joinApproval} />
       : plate === 'join' && guest ? <GuestJoinBar chatId={chatId} guest={guest} />

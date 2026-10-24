@@ -281,16 +281,22 @@ function startFeed(frame: ChatFrame, anchor: Anchor | undefined, onFirst: (patch
     // авторы пришедших сообщений — в people сразу, до отрисовки (повторы wantPeople отбрасывает сам)
     wantPeople((p.op === 'snapshot' ? p.items : p.upsert).flatMap((m) => (typeof m.senderId === 'number' ? [m.senderId] : [])));
     s.moving = false;
-    const meta = (s.mirror.meta('~window') as unknown as FeedMeta) ?? null;
-    const patch: Partial<ChatFrame> = { messages: s.mirror.list() as Item[], feedMeta: meta };
-    // тред: шапка (копия поста) первой; загружен ли с сервера (пока нет — «Загрузка…», а не «нет комментариев»)
-    if (frame.threadId != null) { const th = s.mirror.meta('~thread'); patch.thread = { header: (th?.header as string | null) ?? null, loaded: !!th?.loaded, guest: (th?.guest as ThreadGuest | undefined) ?? null }; }
+    const patch = mirrorPatch(s);
+    const meta = patch.feedMeta ?? null;
     toastUploadRefusals(patch.messages!);
     if (s.first) first(patch); else patchFrame(frame.key, patch);
     // окно дошло до последних сообщений — снова живой хвост (новые сообщения появятся сами)
     if (s.anchor && meta?.live && !meta.hasNewer) { s.anchor = undefined; s.watch.update(feedQuery(frame, undefined)); }
   });
   s.timer = setTimeout(() => { if (s.first) first({}); }, 700);
+}
+
+/** Лента кадра из зеркала подписки: сообщения, окно и (тред) шапка, загружен ли, гость ли я. */
+function mirrorPatch(s: Session): Partial<ChatFrame> {
+  const patch: Partial<ChatFrame> = { messages: s.mirror.list() as Item[], feedMeta: (s.mirror.meta('~window') as unknown as FeedMeta) ?? null };
+  // тред: шапка (копия поста) первой; загружен ли с сервера (пока нет — «Загрузка…», а не «нет комментариев»)
+  if (s.threadId != null) { const th = s.mirror.meta('~thread'); patch.thread = { header: (th?.header as string | null) ?? null, loaded: !!th?.loaded, guest: (th?.guest as ThreadGuest | undefined) ?? null }; }
+  return patch;
 }
 
 /** Окно ленты кадра: чат — messages, тред — thread (шапка-копия поста и комментарии из кэша группы). */
@@ -366,10 +372,13 @@ function popTo(index: number): void {
 }
 
 /** Вернуть припаркованную колонку наверх стека: подготовка не нужна — только переход. */
-function revive(frame: ChatFrame, target?: { id: number; sort: number }): void {
-  clearTimeout(parkTimers.get(frame.key)); parkTimers.delete(frame.key);
+function revive(parked: ChatFrame, target?: { id: number; sort: number }): void {
+  clearTimeout(parkTimers.get(parked.key)); parkTimers.delete(parked.key);
+  // запаркованный кадр патчей не получает (patchFrame — только стек), а подписка жива: что пришло за это время — из зеркала
+  const s = sessions.get(parked.key);
+  const frame: ChatFrame = s && !s.first ? { ...parked, ...mirrorPatch(s) } : parked;
   beginHeavyAnimation(LEAVE_MS + 50);
-  setGlobal((s) => ({ chatStack: [...s.chatStack, frame], chatLeaving: s.chatLeaving.filter((f) => f.key !== frame.key), openChatId: frame.chatId, pendingChatId: null }));
+  setGlobal((g) => ({ chatStack: [...g.chatStack, frame], chatLeaving: g.chatLeaving.filter((f) => f.key !== frame.key), openChatId: frame.chatId, pendingChatId: null }));
   addLayer(frame.key);
   syncShown();
   if (target) focusMessage(target);
