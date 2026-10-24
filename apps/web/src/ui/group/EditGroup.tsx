@@ -102,7 +102,8 @@ export function EditGroup({ nav }: { nav: Nav }) {
       <Section>
         <InfoRow tile="blue" icon="users" title={channel ? 'Подписчики' : 'Участники'} subtitle={channel ? `${group.members} ${plural(group.members, 'подписчик', 'подписчика', 'подписчиков')}` : `${group.members} ${plural(group.members, 'участник', 'участника', 'участников')}`} onClick={() => nav.go('gMembers')} />
       </Section>
-      {!channel && !group.username && adminCan(me, 'ban') ? (
+      {/* у группы обсуждения история всегда видна (новичок читает комментарии к старым постам): сервер откажет 'linked' */}
+      {!channel && !group.username && group.linkedChatId == null && adminCan(me, 'ban') ? (
         <Section footer={group.historyHidden ? 'Новые участники не увидят сообщения, отправленные до их вступления.' : 'Новые участники увидят все сообщения группы.'}>
           <InfoRow icon="history" title="История чата для новых участников" subtitle={group.historyHidden ? 'Скрыта' : 'Видна'}
             trailing={<Switch id="g-history" label="История для новых участников" checked={!group.historyHidden}

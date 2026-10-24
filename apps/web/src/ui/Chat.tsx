@@ -385,7 +385,10 @@ export function Chat({ chatId, frameKey, active, threadId }: { chatId: number; f
   const gRights = gMe && !gMe.admin && !channel ? gMe.rights : null;
   // канал без права публиковать (подписчик или не подписан) — панель «Подписаться» / «Звук» вместо поля ввода
   const channelBar = channel && !chat?.canSend;
-  const plate = channelBar ? 'channel' : iBlocked ? 'mine' : theyBlocked ? 'theirs' : gRights && !gRights.text && !hasMedia(gRights) ? 'group' : null;
+  // правка поста редактором без права post (только edit): на время правки — поле ввода вместо панели канала
+  const plate = channelBar && !editing ? 'channel' : iBlocked ? 'mine' : theyBlocked ? 'theirs' : gRights && !gRights.text && !hasMedia(gRights) ? 'group' : null;
+  // поле ввода смонтировалось только ради правки (панель канала) — startEdit не застал его, текст кладём сейчас
+  useEffect(() => { if (editing && channelBar) api.current?.setValue(editing.original, { focus: true }); }, [editing?.id, channelBar]);
   /** Можно ли отправить сейчас (вид сообщения и медленный режим); нельзя — тост и false. */
   const allowed = (right: MemberRight): boolean => {
     if (gRights && !gRights[right]) { showToast(right === 'text' ? 'В этой группе нельзя отправлять текст' : `В этой группе нельзя отправлять: ${MEMBER_RIGHT_TEXT[right].toLowerCase()}`); return false; }
@@ -444,7 +447,8 @@ export function Chat({ chatId, frameKey, active, threadId }: { chatId: number; f
   // стикер из модалки пака или правой панели уходит сюда — с текущим ответом
   const replyIdRef = useRef<number | null>(null);
   replyIdRef.current = (replyTo?.id as number) ?? null;
-  useEffect(() => setStickerTarget({ chatId, ...(thread ? { threadId } : {}), replyId: () => replyIdRef.current, sent: () => setReplyKey(null) }), [chatId, threadId]);
+  // цель — только у чата на экране: после «Назад» из треда стикер уходит в группу, а не в оставшийся живым тред
+  useEffect(() => (active ? setStickerTarget({ chatId, ...(thread ? { threadId } : {}), replyId: () => replyIdRef.current, sent: () => setReplyKey(null) }) : undefined), [chatId, threadId, active]);
   const authorOf = (senderId: unknown) => (senderId === me.userId ? 'Вы' : title);
   const menuMsg = menu ? messages.find((m) => m.key === menu.key) : undefined;
   // пересылка, ждущая в поле ввода: «От: …» (или «Имена отправителей скрыты») и что пересылаем
@@ -670,7 +674,7 @@ export function Chat({ chatId, frameKey, active, threadId }: { chatId: number; f
             <SelectionBar count={selected.length} onCancel={endSelect}
               onForward={() => { const list = selected; endSelect(); startForward(chatId, list, nameOf); }}
               onCopy={() => { navigator.clipboard?.writeText(selected.filter((m) => m.body).map((m) => m.body as string).join('\n\n')).catch(() => {}); showToast('Скопировано'); endSelect(); }}
- onDelete={selected.length && (gMe?.admin?.delete || selected.every((m) => m.senderId === me.userId)) ? () => setConfirmDelete({ ids: selected.map((m) => m.id as number) }) : undefined} />
+ onDelete={selected.length && !selected.some((m) => m.origin != null) && (gMe?.admin?.delete || selected.every((m) => m.senderId === me.userId)) ? () => setConfirmDelete({ ids: selected.map((m) => m.id as number) }) : undefined} />
           </div>
         </Presence>
       </div>}
@@ -840,7 +844,7 @@ export function Chat({ chatId, frameKey, active, threadId }: { chatId: number; f
       {readByOf != null ? <ReadByModal chatId={chatId} id={readByOf} onClose={() => setReadByOf(null)} /> : null}
       <ConfirmDialog open={!!confirmDelete} danger title={confirmDelete && confirmDelete.ids.length > 1 ? `Удалить ${confirmDelete.ids.length} ${plural(confirmDelete.ids.length, 'сообщение', 'сообщения', 'сообщений')}?` : 'Удалить сообщение?'}
         text={confirmDelete && confirmDelete.ids.length > 1 ? 'Сообщения исчезнут у всех участников чата.' : 'Сообщение исчезнет у всех участников чата.'} confirm="Удалить у всех"
-        onCancel={() => setConfirmDelete(null)} onConfirm={() => { if (confirmDelete) for (const id of confirmDelete.ids) deleteMessage(chatId, id).catch(() => { if (channel) showToast('Не удалось удалить — недостаточно прав?'); }); setConfirmDelete(null); endSelect(); }} />
+        onCancel={() => setConfirmDelete(null)} onConfirm={() => { if (confirmDelete) for (const id of confirmDelete.ids) deleteMessage(chatId, id).catch(() => { if (community) showToast('Не удалось удалить — недостаточно прав?'); }); setConfirmDelete(null); endSelect(); }} />
     </>
   );
 }
