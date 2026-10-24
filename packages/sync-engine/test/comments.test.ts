@@ -157,6 +157,10 @@ test('a guest thread (subscriber outside the group): loads and updates from thre
   const readOf = async () => Number((await sql`select read_max_id from thread_reads where user_id = ${c.userId} and thread_id = ${copyId}`)[0]?.read_max_id ?? 0);
   for (let i = 0; i < 100 && (await readOf()) !== k3.id; i++) await Bun.sleep(20);
   expect(await readOf()).toBe(k3.id);
+  // группа включила «только участники» — тред гостя узнаёт сразу (threadPush groupUpdated)
+  await fetch(`${srv.base}/groups/${g}/settings`, { method: 'PUT', headers: { cookie: `relay_session=${a.token}`, 'content-type': 'application/json' }, body: JSON.stringify({ joinToSend: true }) });
+  for (let i = 0; i < 100 && !(th.item('~thread')?.guest as { joinToSend?: boolean } | undefined)?.joinToSend; i++) await Bun.sleep(20);
+  expect(th.item('~thread')).toMatchObject({ guest: { joinToSend: true } });
   // список чатов — без группы, в IndexedDB ни строки, ни сообщений группы
   expect(list.list().some((r) => r.id === g)).toBe(false);
   await ec.store.flush();

@@ -840,11 +840,18 @@ export class Store {
   isGuest(chatId: number): boolean { return !this.chats.has(chatId) && this.guests.has(chatId); }
   guestInfo(chatId: number): ThreadGuest | null { return this.isGuest(chatId) ? this.guests.get(chatId)!.info : null; }
 
-  /** threadPush: события треда гостя. Новое — в тред (уведомлений нет: гость не участник), правки — как из журнала. */
+  /** threadPush: события треда гостя. Новое — в тред (уведомлений нет: гость не участник), правки — как из журнала,
+   *  информация группы — в guest. */
   applyGuestPush(chatId: number, items: Update[]): void {
     if (!this.isGuest(chatId)) return;
     for (const u of items) {
       if (u.type === 'newMessage') { if (u.message.chatId === chatId) this.applyMessage(u.message, false, 'journal'); }
+      else if (u.type === 'groupUpdated') {
+        // группа сменила «только участники», одобрение, название — тред гостя показывает это сразу
+        const g = this.guests.get(chatId)!, n = u.group;
+        g.info = { ...g.info, title: n.title, username: n.username, joinToSend: !!n.joinToSend, joinApproval: n.joinApproval, slowMode: n.slowMode };
+        this.touch(chatId);
+      }
       else if (GUEST_UPDATES.has(u.type) && (u as { chatId?: number }).chatId === chatId) this.applyUpdate(u);
     }
   }

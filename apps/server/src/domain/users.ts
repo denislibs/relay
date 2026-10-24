@@ -16,7 +16,11 @@ export async function usersByIds(viewer: number, ids: number[]): Promise<{ users
       select ${COLS} from users
        where id = any(${want}::bigint[]) and (id = ${viewer}
          or exists (select 1 from chat_members m join chats c on c.id = m.chat_id and c.kind <> 'channel' and c.deleted_at is null join chat_members o on o.chat_id = m.chat_id where m.user_id = ${viewer} and o.user_id = users.id)
-         or exists (select 1 from contacts c where c.owner_id = ${viewer} and c.user_id = users.id))`;
+         or exists (select 1 from contacts c where c.owner_id = ${viewer} and c.user_id = users.id)
+         -- автор комментария в группе обсуждения канала, где я подписчик: его видит и гость треда (threads.ts threadAccess)
+         or exists (select 1 from chat_members vm join chats ch on ch.id = vm.chat_id and ch.kind = 'channel' and ch.deleted_at is null and ch.linked_chat_id is not null
+                      join messages cm on cm.sender_id = users.id and cm.chat_id = ch.linked_chat_id and cm.thread_id is not null
+                     where vm.user_id = ${viewer}))`;
     if (!rows.length) return { users: [], seq };
     const found = rows.map((r) => r.id);
     const names = new Map<number, ContactName>(

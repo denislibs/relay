@@ -395,6 +395,11 @@ test('a channel subscriber outside the group reads the thread (all comments, gue
   expect((await sql`select 1 from chat_members where chat_id = ${g} and user_id = ${d.userId}`).length).toBe(0);
   expect((await journalOf(d.userId, 'membership')).some((u: any) => u.chatId === g)).toBe(false);
   expect((await call(d, 'GET', `/chats/${g}/messages?limit=10`)).status).toBe(403);   // лента группы — только участникам
+  // профили комментаторов гостю видны (имя над комментарием); участник группы, не писавший в треды, — нет
+  const quiet = await login('Тихий');
+  await ok(a, 'POST', `/groups/${g}/members`, { userIds: [quiet.userId] });
+  const seen = (await ok(d, 'GET', `/users?ids=${b.userId},${quiet.userId}`)).users.map((u: any) => u.id);
+  expect(seen).toEqual([b.userId]);
   void a;
 });
 
@@ -477,6 +482,10 @@ test('watchThread: the guest socket gets threadPush with only this thread\'s eve
   expect(gotD.filter((f) => f.op === 'threadPush').flatMap((f: any) => f.items).some((u: any) => u.message?.body === 'мимо треда')).toBe(false);
   expect(gotB.some((f) => f.op === 'threadPush')).toBe(false);   // участник — своим push группы
   expect(gotB.some((f) => f.op === 'push' && (f as any).chatId === g)).toBe(true);
+  // информация группы — гостю тоже («только участники» меняет поле ввода сразу)
+  const upd = nextFrame(wd, (f) => f.op === 'threadPush' && f.items.some((u) => u.type === 'groupUpdated'));
+  await ok(a, 'PUT', `/groups/${g}/settings`, { joinToSend: true });
+  expect(await upd).toMatchObject({ threadId: copyId, items: [{ type: 'groupUpdated', chatId: g, group: { joinToSend: true } }] });
   // unwatch — больше ничего
   expect(await frame(wd, { op: 'unwatchThread', reqId: 'u1', chatId: g, threadId: copyId })).toMatchObject({ op: 'ack' });
   const n = gotD.length;

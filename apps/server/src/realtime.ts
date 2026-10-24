@@ -31,8 +31,8 @@ export async function notifyLatency(timeoutMs = 2000): Promise<number | null> {
 /**
  * События push группы, относящиеся к открытым гостями тредам (sockets.ts watchThread): тред → его события. Новое
  * сообщение знает свой тред само (threadId; шапка — сама копия); правка, удаление, реакции, превью — по id, одним
- * запросом на push (O(событий), только если у чата есть гости). Прочее (состав, закрепы, информация группы) гостю
- * не нужно. items null — push пустой («догоните сами»): гостям тоже пустой кадр, они перечитают край треда.
+ * запросом на push (O(событий), только если у чата есть гости); информация группы (groupUpdated) — всем тредам.
+ * Прочее (состав, закрепы) гостю не нужно. items null — push пустой («догоните сами»): гостям тоже пустой кадр, они перечитают край треда.
  */
 export async function threadSlices(chatId: number, watched: ReadonlyMap<number, number>, items: JournalEntry[] | null): Promise<Map<number, Update[]>> {
   const out = new Map<number, Update[]>();
@@ -51,6 +51,7 @@ export async function threadSlices(chatId: number, watched: ReadonlyMap<number, 
     }
   }
   for (const { update: u } of items) {
+    if (u.type === 'groupUpdated') { for (const t of watched.keys()) add(t, u); continue; }   // «только участники», заявки, название — гостю тоже
     if (u.type === 'newMessage') add(u.message.threadId ?? u.message.id, u);
     else if (threadOf.has((u as { id?: number }).id!)) add(threadOf.get((u as { id: number }).id), u);
   }
