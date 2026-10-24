@@ -122,6 +122,8 @@ if (!SERVER_SIDE) {
     senders0 = conns.slice(0, ADMINS);
     perSend = USERS - 1;
     console.log(`setup: channel ${ch} (${title}), members_count ${mc.members_count}, in ${Math.round(performance.now() - t0)} ms`);
+    // подписки на заглушку прежнего прогона: её адреса больше нет — воркер повторял бы доставки в никуда
+    await sql`delete from push_subscriptions where endpoint like ${'%/load-sink/%'}`;
     if (PUSH_SINK > 0) {
       // заглушка push-сервиса: считает запросы (расшифровывать незачем); подписки — первым K офлайн
       Bun.serve({ port: SINK_PORT, hostname: '0.0.0.0', fetch: async (req) => { await req.arrayBuffer(); count.pushDelivered++; return new Response(null, { status: 201 }); } });
@@ -320,6 +322,8 @@ while (PUSH_SINK && count.pushDelivered < pushExpected && performance.now() - pu
 }
 if (PUSH_SINK) pushDoneMs = Math.round(performance.now() - ts);
 if (leasePoll) clearInterval(leasePoll);
+// заглушка уходит вместе с процессом — её подписки тоже
+if (db && PUSH_SINK) await db`delete from push_subscriptions where endpoint like ${'%/load-sink/%'}`;
 const deadAfter = db ? Number((await db`select count(*)::int as n from jobs_dead`)[0].n) : 0;
 clearInterval(reportEvery);
 /** replies владельцу: сколько и наибольшее число за одну секунду (окна по секунде от старта). */

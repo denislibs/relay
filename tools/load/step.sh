@@ -4,6 +4,9 @@
 # канал: KIND=channel USERS=2000 OFFLINE=198000 ADMINS=5 RATE=10 DURATION=25 [PUSH_SINK=2000] tools/load/step.sh
 # комментарии: COMMENTS=1 USERS=3000 RATE=20 DURATION=25 tools/load/step.sh   (push и replies — нужен worker)
 set -euo pipefail
+# между ступенями — пауза (PAUSE секунд, перед прогоном): уход тысяч сокетов прошлой ступени — это тысячи
+# update users.last_seen_at и объявлений присутствия через RELAY_PRESENCE_GRACE_MS; без паузы они попадают в замер
+sleep "${PAUSE:-0}"
 cd "$(dirname "$0")/../.."
 OUT=$(mktemp)
 NAME="relay-load-$$"   # имя контейнера генератора: адрес заглушки push для воркера (PUSH_SINK) и строка «load» в пиках
