@@ -3,7 +3,7 @@ import type { ServerFrame } from '@relay/protocol';
 import { createGroup } from '../../../apps/server/src/domain/chats';
 import { sendMessage } from '../../../apps/server/src/domain/messages';
 import { editMessage, reactMessage } from '../../../apps/server/src/domain/messageOps';
-import { deleteGroup, setGroupAdmin, setGroupUsername } from '../../../apps/server/src/domain/groups';
+import { deleteGroup, setGroupAdmin, setGroupSettings, setGroupUsername } from '../../../apps/server/src/domain/groups';
 import { joinByInvite } from '../../../apps/server/src/domain/invites';
 import { flushOwn } from '../../../apps/server/src/valkey';
 import '../../../apps/server/src/jobs/kinds';
@@ -268,4 +268,76 @@ test('preview: closing forgets it; a deleted channel drops an open preview (chat
   // приватный канал по id — не участник
   const { chatId: priv } = await createGroup(a.userId, { kind: 'channel', title: 'Закрытый', memberIds: [] });
   expect(await ex.call({ type: 'openPreview', chatId: priv })).toEqual({ error: 'not_member' });
+});
+
+/** Кадры, которые движок шлёт в сокет (op), — чтобы проверить, чего он не спрашивает у сервера. */
+function sentOps(e: Engine): string[] {
+  const t = (e as unknown as { transport: { send(f: { op: string }): boolean } }).transport;
+  const ops: string[] = [];
+  const real = t.send.bind(t);
+  t.send = (f) => { ops.push(f.op); return real(f); };
+  return ops;
+}
+
+test('preview: a deleted channel is dropped from the gone push without syncChat — for a watcher and for a subscriber', async () => {
+  const { a, x, chatId } = await publicChannel();
+  const b = await srv.login('Борис');
+  await joinByInvite(b.userId, '@news_pv');
+  const ex = await open(srv.config(x)), eb = await open(srv.config(b));
+  ex.connect(); eb.connect(); await ex.whenIdle(); await eb.whenIdle();
+  const previews = watchInto(ex, { kind: 'previews' }), list = watchInto(eb, { kind: 'chatList', limit: 50 });
+  await ex.call({ type: 'openPreview', chatId });
+  await previews.until((l) => l.length === 1);
+  await list.until((l) => l.some((c) => c.id === chatId));
+  await ex.whenIdle(); await eb.whenIdle();
+  const opsX = sentOps(ex), opsB = sentOps(eb);
+  await deleteGroup(a.userId, chatId);
+  await previews.until((l) => l.length === 0);
+  await list.until((l) => !l.some((c) => c.id === chatId));
+  expect(opsX.filter((o) => o === 'syncChat')).toEqual([]);
+  expect(opsB.filter((o) => o === 'syncChat')).toEqual([]);
+});
+
+test('preview: chatGone from syncChat also unwatches the socket (frees a watch slot)', async () => {
+  const { x, chatId } = await publicChannel();
+  const ex = await open(srv.config(x));
+  ex.connect(); await ex.whenIdle();
+  const previews = watchInto(ex, { kind: 'previews' });
+  await ex.call({ type: 'openPreview', chatId });
+  await previews.until((l) => l.length === 1);
+  await ex.whenIdle();
+  const ops = sentOps(ex);
+  await (await import('../../../apps/server/src/db')).sql`update chats set username = null where id = ${chatId}`;   // стал приватным → chatGone
+  inject(ex, { op: 'push', chatId, from: 999, to: 1000, items: [] });   // «догони»: syncChat
+  await previews.until((l) => l.length === 0, 5000);
+  expect(ops).toContain('syncChat');
+  expect(ops).toContain('unwatchChat');
+});
+
+test('preview: a pending join request is kept in the preview row (also on re-open); too many previews — flood error', async () => {
+  const { a, x, chatId } = await publicChannel();
+  await setGroupSettings(a.userId, chatId, { joinApproval: true });
+  const ex = await open(srv.config(x));
+  ex.connect(); await ex.whenIdle();
+  const previews = watchInto(ex, { kind: 'previews' });
+  expect(await ex.call({ type: 'openPreview', chatId })).toEqual({ member: false, requested: false });
+  expect((await previews.until((l) => l.length === 1))[0]).toMatchObject({ requested: false, group: { joinApproval: true } });
+  expect(await joinByInvite(x.userId, '@news_pv')).toEqual({ chatId, requested: true });
+  expect(await ex.call({ type: 'openPreview', chatId })).toEqual({ member: false, requested: true });
+  await previews.until((l) => l[0]?.requested === true);
+  await ex.call({ type: 'closePreview', chatId });
+  await previews.until((l) => l.length === 0);
+  await ex.call({ type: 'openPreview', chatId });
+  await previews.until((l) => l[0]?.requested === true);
+  // предел превью на сокет (WATCH_MAX = 10): одиннадцатое — отказ, превью не остаётся без push'ей
+  for (let i = 0; i < 9; i++) {
+    const { chatId: c } = await createGroup(a.userId, { kind: 'channel', title: 'К' + i, memberIds: [] });
+    await setGroupUsername(a.userId, c, 'many_' + i);
+    expect(await ex.call({ type: 'openPreview', chatId: c })).toEqual({ member: false, requested: false });
+  }
+  const { chatId: last } = await createGroup(a.userId, { kind: 'channel', title: 'Лишний', memberIds: [] });
+  await setGroupUsername(a.userId, last, 'many_last');
+  expect(await ex.call({ type: 'openPreview', chatId: last })).toEqual({ error: 'flood' });
+  await ex.whenIdle();
+  expect(previews.list().some((c) => c.id === last)).toBe(false);
 });

@@ -204,7 +204,7 @@ export function computeQuery(store: Store, q: Query, mute: Map<number, number | 
         const c = store.chats.get(id);
         if (!c) continue;
         const { item, sig: g } = chatListItem(store, c, mute, flags);
-        const it = { ...item, preview: true };
+        const it = { ...item, preview: true, requested: !!c.requested };
         items.set(it.key, it); sig.set(it.key, g); order.push(it.key);
       }
       return { items, sig, order };

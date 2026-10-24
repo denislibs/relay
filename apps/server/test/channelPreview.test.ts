@@ -5,7 +5,8 @@ import { createServer } from '../src/http';
 import { startRealtime } from '../src/realtime';
 import { sendMessage } from '../src/domain/messages';
 import { handleFrame } from '../src/ws';
-import { nextFrame, resetDb } from './helpers';
+import { nextFrame, resetDb, uploadFile } from './helpers';
+import { fileFor } from '../src/domain/files';
 
 // Превью публичного канала до подписки (как в Telegram): не участник читает историю, закрепы и медиа канала с
 // @именем, получает его push'и через watchChat и догоняет журнал syncChat; писать (отправка, реакции, просмотры,
@@ -140,7 +141,7 @@ test('watchChat: a non-member socket gets the channel push while watching, not a
   ws.close();
 });
 
-test('joining while watching keeps the socket on the channel (unwatch no longer drops it); deleting it pushes an empty frame', async () => {
+test('joining while watching keeps the socket on the channel (unwatch no longer drops it); deleting it pushes a gone frame', async () => {
   const a = await login('Анна'), x = await login('Чужой');
   const id = await publicChannel(a);
   await post(a, id, 'раз');
@@ -158,15 +159,16 @@ test('joining while watching keeps the socket on the channel (unwatch no longer 
   await post(a, id, 'после');
   expect(await got).toMatchObject({ chatId: id, items: [{ update: { type: 'newMessage' } }] });
 
-  // другой зритель (не участник) — канал удалён: пустой push, его syncChat — chatGone
+  // другой зритель (не участник) — канал удалён: push с gone
   const y = await login('Зритель');
   const wy = await connect(y);
   await hello(wy);
   send(wy, { op: 'watchChat', reqId: 'w', chatId: id });
   await nextFrame(wy, (f) => f.op === 'ack' && f.reqId === 'w');
-  const empty = nextFrame(wy, (f) => f.op === 'push' && f.chatId === id);
+  const gone = nextFrame(wy, (f) => f.op === 'push' && f.chatId === id);
   await ok(a, 'DELETE', `/groups/${id}`);
-  expect(await empty).toMatchObject({ chatId: id, items: [] });
+  // отдельный кадр «чата нет»: клиенты убирают чат сами, без syncChat
+  expect(await gone).toMatchObject({ chatId: id, items: [], gone: true });
   ws.close(); wy.close();
 });
 
@@ -180,4 +182,41 @@ test('resolve @name: /join/@name previews a public channel; channel search finds
   expect((await ok(a, 'GET', '/search/channels?q=tech')).channels).toEqual([]);   // уже участник — найдёт список на устройстве
   const priv = (await ok(a, 'POST', '/chats', { kind: 'channel', title: 'Новости закрытые' })).id as number;
   expect((await ok(x, 'GET', '/search/channels?q=Новости')).channels.map((c: any) => c.id)).not.toContain(priv);
+});
+
+test('a watcher who joined and then got banned is not re-subscribed by the next hello; a channel made private drops watchers', async () => {
+  const a = await login('Анна'), x = await login('Чужой'), y = await login('Зритель');
+  const id = await publicChannel(a);
+  const ws = await connect(x), wy = await connect(y);
+  await hello(ws); await hello(wy);
+  for (const w of [ws, wy]) { send(w, { op: 'watchChat', reqId: 'w', chatId: id }); await nextFrame(w, (f) => f.op === 'ack' && f.reqId === 'w'); }
+  await ok(x, 'POST', '/join/@news_ch');
+  await ok(a, 'DELETE', `/groups/${id}/members/${x.userId}`);   // исключён — бан
+  await Bun.sleep(200);   // NOTIFY личного журнала (x) снимает подписку сокета
+  await hello(ws);
+  // канал стал приватным: сверка (hello) снимает превью
+  await ok(a, 'PUT', `/groups/${id}/username`, { username: null });
+  await hello(wy);
+  const got: ServerFrame[] = [];
+  for (const w of [ws, wy]) w.addEventListener('message', (e) => got.push(JSON.parse(String(e.data))));
+  await post(a, id, 'после бана');
+  await Bun.sleep(400);
+  expect(got.filter((f) => f.op === 'push' && f.chatId === id)).toEqual([]);
+  ws.close(); wy.close();
+});
+
+test('attachments of public-channel posts download for non-members; not after ban, deletion, or in a private channel', async () => {
+  const a = await login('Анна'), x = await login('Чужой'), b = await login('Борис');
+  const id = await publicChannel(a, 'news_ch', [b]);
+  const up = await uploadFile(base, a.token, { name: 'report.pdf', mime: 'application/pdf' }, 'pdf') as { id: string };
+  await post(a, id, 'файл', { attachment: { id: up.id } });
+  expect(await fileFor(x.userId, up.id)).not.toBeNull();
+  const priv = (await ok(a, 'POST', '/chats', { kind: 'channel', title: 'Закрытый' })).id as number;
+  const up2 = await uploadFile(base, a.token, { name: 'secret.pdf', mime: 'application/pdf' }, 'sec') as { id: string };
+  await post(a, priv, 'тайна', { attachment: { id: up2.id } });
+  expect(await fileFor(x.userId, up2.id)).toBeNull();
+  await ok(a, 'DELETE', `/groups/${id}/members/${b.userId}`);   // бан
+  expect(await fileFor(b.userId, up.id)).toBeNull();
+  await ok(a, 'DELETE', `/groups/${id}`);
+  expect(await fileFor(x.userId, up.id)).toBeNull();
 });

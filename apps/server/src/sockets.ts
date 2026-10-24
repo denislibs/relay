@@ -1,6 +1,7 @@
 import type { ServerWebSocket } from 'bun';
 import type { Bus } from './bus';
 import { sql } from './db';
+import { canRead } from './domain/chats';
 
 /**
  * Подписки сокетов на журналы чатов. Группа или канал — топик `chat:<id>` (Bun pub/sub внутри процесса: один
@@ -73,10 +74,17 @@ export async function unwatchChat(ws: ChatSocket, chatId: number): Promise<void>
   if (!m) await unsubscribeChat(ws, chatId);
 }
 
-/** Привести подписки сокета к текущему составу групп пользователя (открытие сокета, hello, chatsSince); превью — не трогает. */
+/**
+ * Привести подписки сокета к текущему составу групп пользователя (открытие сокета, hello, chatsSince). Превью
+ * остаются, пока их можно читать (canRead): канал удалили, сделали приватным или забанили — превью снимается.
+ */
 export async function syncSubscriptions(ws: ChatSocket): Promise<void> {
   const mine = new Set(await groupChatIds(ws.data.userId));
-  for (const id of ws.data.watching ?? []) mine.add(id);
+  for (const id of [...(ws.data.watching ?? [])]) {
+    if (mine.has(id)) continue;
+    if (await canRead(sql, id, ws.data.userId).then(() => true, () => false)) mine.add(id);
+    else ws.data.watching!.delete(id);
+  }
   const chats = (ws.data.chats ??= new Set());
   for (const id of mine) if (!chats.has(id)) await subscribeChat(ws, id);
   for (const id of [...chats]) if (!mine.has(id)) await unsubscribeChat(ws, id);
@@ -92,5 +100,6 @@ export function subscribeUserSockets(userId: number, chatId: number): void {
   for (const ws of socketsOf(userId)) void subscribeChat(ws, chatId);
 }
 export function unsubscribeUserSockets(userId: number, chatId: number): void {
-  for (const ws of socketsOf(userId)) void unsubscribeChat(ws, chatId);
+  // исключён (бан) или вышел: и превью этого канала снимается — сверка не должна подписать снова
+  for (const ws of socketsOf(userId)) { ws.data.watching?.delete(chatId); void unsubscribeChat(ws, chatId); }
 }

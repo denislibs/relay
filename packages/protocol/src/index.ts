@@ -390,7 +390,8 @@ export type ServerFrame =
   | { op: 'updates'; from: number; to: number; items: JournalEntry[]; more: boolean }
   // событие журнала сразу, без sync: клиент применяет, если from — его номер (личный или чата chatId), иначе
   // синхронизируется (sync / syncChat). Пустые items — «догони чат» (события не поместились в уведомление)
-  | { op: 'push'; chatId?: Id; from: number; to: number; items: JournalEntry[] }
+  // gone — чат удалён (журнал чата закрыт): убрать его у себя без syncChat
+  | { op: 'push'; chatId?: Id; from: number; to: number; items: JournalEntry[]; gone?: true }
   | { op: 'tooLong'; seq: number }
   | { op: 'ack'; reqId: string; result: Record<string, unknown> }
   | { op: 'err'; reqId?: string; code: ErrorCode; retry: boolean }

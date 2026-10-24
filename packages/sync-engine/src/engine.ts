@@ -1459,7 +1459,7 @@ export class Engine {
           if (!this.store.hydrated) await this.bootstrap(f.seq);
           else this.runSync();
           this.onChatsList(f.chats ?? [], f.now);
-          for (const id of this.watched) this.watchPreview(id);   // новый сокет: превью снова на push'ах канала
+          for (const id of this.watched) this.run(() => this.watchPreview(id));   // новый сокет: превью снова на push'ах канала
         });
         return;
       case 'chats':
@@ -1641,6 +1641,7 @@ export class Engine {
 
   private onChatPush(f: ChatPush): void {
     if (this.resetting || !this.online) return;
+    if (f.gone) { this.run(() => this.onChatDeleted(f.chatId)); return; }
     const local = this.store.chatSeq.get(f.chatId);
     if (local == null) { this.askUnknownChat(f.chatId); return; }
     const st = this.chatState(f.chatId);
@@ -1659,6 +1660,18 @@ export class Engine {
     }
     if (f.from > local) { this.bufferPush(st, f); this.startGapTimer(f.chatId); }
     // from < local — повтор уже применённого
+  }
+
+  /** Кадр push с gone: чат удалён. Убираем у себя сразу, без syncChat (на большом канале — ни одного чтения журнала). */
+  private async onChatDeleted(chatId: number): Promise<void> {
+    this.dev.log.record('engine', 'chatGone', { chatId });
+    if (this.store.previews.has(chatId)) { await this.forgetPreview(chatId, false); return; }
+    const st = this.chatSync.get(chatId);
+    if (st?.gapTimer) clearTimeout(st.gapTimer);
+    this.chatSync.delete(chatId);
+    this.store.removeChat(chatId);
+    await this.store.flush();
+    this.changed();
   }
 
   private bufferPush(st: ChatSyncState, f: ChatPush): void {
@@ -1728,8 +1741,8 @@ export class Engine {
         try { f = await this.requestSyncChat(chatId, since); } catch { return; }   // таймаут или обрыв: следующий push или сверка догонят
         if (f.op === 'chatGone') {
           this.dev.log.record('engine', 'chatGone', { chatId });
-          if (this.store.previews.has(chatId)) { this.watched.delete(chatId); this.store.dropPreview(chatId); }   // превью удалённого канала
-          else this.store.removeChat(chatId);
+          if (this.store.previews.has(chatId)) { st.buffer.clear(); await this.forgetPreview(chatId); return; }   // превью удалённого канала: и сокет отписать
+          this.store.removeChat(chatId);
           st.buffer.clear();
           await this.store.flush();
           this.changed();
@@ -1838,46 +1851,60 @@ export class Engine {
       // уже подписан: обычная строка списка (могла не попасть в загруженные страницы)
       this.store.applyChats([data.chat], this.store.lastSeq);
     } else if (!this.store.chats.has(chatId) || this.store.previews.has(chatId)) {
-      this.store.applyPreview(data.chat);
-      this.watched.add(chatId);
-      this.watchPreview(chatId);
+      const again = this.watched.has(chatId);   // уже смотрим (повторное открытие, заявка подана) — только строка
+      this.store.applyPreview(data.chat, !!data.requested);
+      if (!again && this.online) {
+        // подписка на push'и — до ответа: отказ (превью в других вкладках исчерпали предел) интерфейс покажет сразу
+        const err = await this.watchPreview(chatId);
+        if (err) return { error: err };
+      }
     }
     await this.store.flush();
     this.changed();
     return { member: !!data.member, requested: !!data.requested };
   }
 
-  /** watchChat: push'и канала в этот сокет; seq сервера впереди нашего — догнать журнал. */
-  private watchPreview(chatId: number): void {
-    if (!this.online || !this.store.previews.has(chatId)) { if (!this.store.previews.has(chatId)) this.watched.delete(chatId); return; }
-    this.run(async () => {
-      let r: Record<string, unknown>;
-      try { r = await this.request({ op: 'watchChat', reqId: '', chatId }); }
-      catch (e) {
-        // канал удалили или он стал приватным — превью закрывается (интерфейс увидит, что его больше нет)
-        const code = (e as ReqError).code;
-        if (code === 'not_member' || code === 'not_found') { this.watched.delete(chatId); this.store.dropPreview(chatId); await this.store.flush(); this.changed(); }
-        return;
-      }
-      const local = this.store.chatSeq.get(chatId);
-      if (typeof r.seq === 'number' && local != null && r.seq > local) this.scheduleChatSync(chatId, true);
-    });
+  /**
+   * watchChat: push'и канала в этот сокет; seq сервера впереди нашего — догнать журнал. Отказ — код ошибки, и превью
+   * закрывается: канал удалили или сделали приватным (not_found / not_member) или открыто слишком много превью
+   * (flood) — без push'ей лента молча устарела бы. Обрыв связи — null: после hello подпишемся снова.
+   */
+  private async watchPreview(chatId: number): Promise<string | null> {
+    if (!this.store.previews.has(chatId)) { this.watched.delete(chatId); return null; }
+    this.watched.add(chatId);
+    if (!this.online) return null;
+    let r: Record<string, unknown>;
+    try { r = await this.request({ op: 'watchChat', reqId: '', chatId }); }
+    catch (e) {
+      const code = (e as ReqError).code;
+      if (code === 'offline' || (e as ReqError).retry) return null;
+      await this.forgetPreview(chatId, false);
+      return code;
+    }
+    const local = this.store.chatSeq.get(chatId);
+    if (typeof r.seq === 'number' && local != null && r.seq > local) this.scheduleChatSync(chatId, true);
+    return null;
+  }
+
+  /** Превью больше не нужно (закрыто, канал удалён, отказ): отписать сокет (освободить место из WATCH_MAX) и забыть. */
+  private async forgetPreview(chatId: number, unwatch = true): Promise<void> {
+    this.watched.delete(chatId);
+    if (unwatch && this.online) this.transport.send({ op: 'unwatchChat', chatId });
+    if (!this.store.previews.has(chatId)) return;
+    const st = this.chatSync.get(chatId);
+    if (st?.gapTimer) clearTimeout(st.gapTimer);
+    this.chatSync.delete(chatId);
+    this.store.dropPreview(chatId);
+    await this.store.flush();
+    this.changed();
   }
 
   /** Превью закрыли (лента ушла со стека): сокет отписывается; не вступил — превью забывается целиком. */
   private async closePreview(chatId: number): Promise<null> {
     if (!this.watched.has(chatId)) return null;
     for (const w of this.watchers.values()) if ((w.q.kind === 'messages' || w.q.kind === 'media') && w.q.chatId === chatId) return null;   // ещё открыто (другая вкладка)
-    this.watched.delete(chatId);
-    if (this.online) this.transport.send({ op: 'unwatchChat', chatId });
-    if (this.store.previews.has(chatId)) {
-      const st = this.chatSync.get(chatId);
-      if (st?.gapTimer) clearTimeout(st.gapTimer);
-      this.chatSync.delete(chatId);
-      this.store.dropPreview(chatId);
-      await this.store.flush();
-      this.changed();
-    }
+    if (this.store.previews.has(chatId)) await this.forgetPreview(chatId);
+    else { this.watched.delete(chatId); if (this.online) this.transport.send({ op: 'unwatchChat', chatId }); }   // подписался: сокет и так на канале
     return null;
   }
 

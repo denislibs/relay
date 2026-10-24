@@ -393,9 +393,11 @@ export class Store {
   }
 
   /** Превью канала: чат в памяти без строки списка (previews). Строка сервера (GET /groups/:id) — как строка списка. */
-  applyPreview(s: ChatSummary): void {
+  applyPreview(s: ChatSummary, requested = false): void {
     this.previews.add(s.id);
     this.applyChats([s]);
+    const c = this.chats.get(s.id);
+    if (c && !!c.requested !== requested) { c.requested = requested; this.markChat(c); }
   }
 
   /** Превью закрыто, а подписки не было: из памяти целиком (в IndexedDB его и не было). */
@@ -416,6 +418,7 @@ export class Store {
    */
   private promote(chat: LocalChat): void {
     this.previews.delete(chat.id);
+    delete chat.requested;
     chat.unread = 0;
     chat.lastReadId = Math.max(chat.lastReadId, chat.knownMaxId);
     for (const m of this.messages.get(chat.id)?.values() ?? []) this.dirtyMessages.set(m.key, m);

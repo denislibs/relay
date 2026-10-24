@@ -6,7 +6,7 @@ import { sql, type Tx } from '../db';
 import { GROUP_TITLE_MAX, readOwnPost, toMessage } from './chats';
 import { contentColumns, openRows } from './messageContent';
 import { DomainError } from './errors';
-import { appendUpdates, chatEvent } from './journal';
+import { appendUpdates, chatEvent, type ChatNotify } from './journal';
 import { nameForSql } from './profile';
 import { checkPassword } from './password';
 import { onlineUsers } from './liveRegistry';
@@ -527,10 +527,11 @@ export async function transferGroupOwnership(userId: number, chatId: number, tar
 async function deleteGroupTx(tx: Tx, chatId: number): Promise<void> {
   const [c] = await tx`select linked_chat_id from chats where id = ${chatId}`;
   await tx`update chats set deleted_at = now(), linked_chat_id = null where id = ${chatId}`;
-  // зрители превью (не участники: им не придёт chatRemoved) — пустой push канала после коммита: их syncChat ответит chatGone
+  // зрители превью (не участники: им не придёт chatRemoved) — после коммита кадр «чата нет» в топик чата: клиент
+  // убирает чат у себя, без syncChat (на канале в 200 000 онлайн — ни одного чтения журнала); участникам chatRemoved — от chat.purge
   const [cs] = await tx`select seq from chat_seq where chat_id = ${chatId}`;
   const seq = Number(cs?.seq ?? 0);
-  await tx`select pg_notify('chat_updates', ${JSON.stringify({ c: chatId, f: seq, t: seq })})`;
+  await tx`select pg_notify('chat_updates', ${JSON.stringify({ c: chatId, f: seq, t: seq, g: 1 } satisfies ChatNotify)})`;
   if (c?.linked_chat_id != null) {   // связанный канал или группа отвязывается
     await tx`update chats set linked_chat_id = null where id = ${c.linked_chat_id} and linked_chat_id = ${chatId}`;
     await broadcastGroup(tx, Number(c.linked_chat_id));
