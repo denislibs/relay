@@ -541,9 +541,12 @@ export function Feed({ frameKey, active, chatId, meId, peerName, group, onAuthor
   useEffect(() => {
     const root = el.current;
     if (!root) return;
-    let last = root.clientHeight, lastW = root.clientWidth;
+    // начальный размер — из первого вызова наблюдателя (он приходит сразу после раскладки), а не чтением при монтировании
+    let last = -1, lastW = -1;
     const ro = new ResizeObserver(() => {
-      const ch = root.clientHeight, d = last - ch, cw = root.clientWidth, widened = cw !== lastW;
+      const ch = root.clientHeight, cw = root.clientWidth;
+      if (last < 0) { last = ch; lastW = cw; return; }
+      const d = last - ch, widened = cw !== lastW;
       last = ch; lastW = cw;
       if ((!d && !widened) || !placed.current) return;
       const max = root.scrollHeight - ch;

@@ -486,7 +486,12 @@ function Composer(props) {
   var canSwitch = modes.length > 1 && (mode === 'mic' || mode === 'round');
   var pressTimer = useRef(null);
   var ready = useRef(false);
-  useEffect(function () { var t = setTimeout(function () { ready.current = true; if (sendRef.current) sendRef.current.setAttribute('data-ready', ''); }, 0); return function () { clearTimeout(t); }; }, []);
+  // после первой отрисовки, в фазе mutate кадра: запись из обычной задачи «пачкала» раскладку до следующей прокрутки
+  useEffect(function () {
+    var alive = true;
+    requestMutation(function () { if (!alive) return; ready.current = true; if (sendRef.current) sendRef.current.setAttribute('data-ready', ''); });
+    return function () { alive = false; };
+  }, []);
 
   var id = props.id || 'rl-composer';
   var b = bar[0];
