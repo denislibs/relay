@@ -25,10 +25,10 @@ test('edit, react, delete: journal events for every member, rules enforced, hist
   expect(h.reactions).toEqual([{ userId: a, emoji: '❤️' }, { userId: b, emoji: '🔥' }]);
 
   await deleteMessage(a, chat, message.id);
-  [h] = (await getHistory(b, chat, null, 10)).messages;
-  expect(h).toMatchObject({ body: '', deleted: true, reactions: [] });
+  expect((await getHistory(b, chat, null, 10)).messages).toEqual([]);   // удалённое исчезает из истории (как в Telegram)
   await expect(reactMessage(b, chat, message.id, '👍')).rejects.toMatchObject({ code: 'not_found' });
 
+  // события удалённого (новое, правка) читаются удалением; реакции — своими событиями, как были
   const types = (await getUpdates(b, 0)).items.map((i) => i.update.type);
-  expect(types).toEqual(['newMessage', 'messageEdited', 'reactions', 'reactions', 'reactions', 'messageDeleted']);
+  expect(types).toEqual(['messageDeleted', 'messageDeleted', 'reactions', 'reactions', 'reactions', 'messageDeleted']);
 });

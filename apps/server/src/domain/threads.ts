@@ -166,8 +166,8 @@ async function threadRoot(db: Tx | typeof sql, groupId: number, copyId: number):
 export const THREAD_PAGE_MAX = 200;
 
 /**
- * Страница треда (участник группы): шапка — копия поста (и удалённая), комментарии по возрастанию id — before (старее
- * него, с конца) или after (новее него). Видимые участнику — с history_from (общий count на кнопке может быть больше).
+ * Страница треда (участник группы): шапка — копия поста (и удалённая: «Пост удалён»), комментарии по возрастанию id —
+ * before (старее него, с конца) или after (новее него); удалённых комментариев нет. Видимые участнику — с history_from (общий count на кнопке может быть больше).
  */
 export async function getThread(userId: number, groupId: number, copyId: number, before: number | null, limit: number, after: number | null = null): Promise<{ header: Message; messages: Message[]; hasMore: boolean }> {
   const ctx = await groupCtx(sql, groupId, userId);
@@ -176,12 +176,12 @@ export async function getThread(userId: number, groupId: number, copyId: number,
   let rows: Record<string, unknown>[], hasMore: boolean;
   if (after != null) {
     const up = await sql`
-      select * from messages where chat_id = ${groupId} and thread_id = ${copyId} and id > ${after} and id >= ${ctx.historyFrom}
+      select * from messages where chat_id = ${groupId} and thread_id = ${copyId} and id > ${after} and id >= ${ctx.historyFrom} and not deleted
        order by id limit ${take + 1}`;
     rows = up.slice(0, take); hasMore = up.length > take;
   } else {
     const down = await sql`
-      select * from messages where chat_id = ${groupId} and thread_id = ${copyId} and (${before}::bigint is null or id < ${before}) and id >= ${ctx.historyFrom}
+      select * from messages where chat_id = ${groupId} and thread_id = ${copyId} and (${before}::bigint is null or id < ${before}) and id >= ${ctx.historyFrom} and not deleted
        order by id desc limit ${take + 1}`;
     rows = down.slice(0, take).reverse(); hasMore = down.length > take;
   }

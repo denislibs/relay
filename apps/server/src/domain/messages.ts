@@ -80,7 +80,7 @@ export async function sendMessage(
     // копия без «Переслано от» — новое сообщение и может быть ответом; настоящая пересылка — нет (как в Telegram)
     const canReply = !input.forward || !!input.forward.hideSender;
     if (input.replyToId != null && canReply) {
-      const [target] = await tx`select 1 from messages where chat_id = ${input.chatId} and id = ${input.replyToId}
+      const [target] = await tx`select 1 from messages where chat_id = ${input.chatId} and id = ${input.replyToId} and not deleted
                                   and (${threadId}::bigint is null or thread_id = ${threadId} or id = ${threadId})`;
       if (!target) throw new DomainError('not_found', 'reply target');
     }

@@ -216,7 +216,8 @@ export function stored(u: Update): Stored {
   }
 }
 
-/** Ссылки журнала → полные события: сообщения одним запросом, черновики — вторым. Сообщения уже нет — «удалено». */
+/** Ссылки журнала → полные события: сообщения одним запросом, черновики — вторым. Сообщения уже нет или оно удалено —
+ *  messageDeleted (клиент его убирает; удалённое в ленту не попадает даже на миг). */
 export async function hydrate(userId: number | null, rows: { seq: number; payload: Stored }[]): Promise<JournalEntry[]> {
   const refs = rows.filter((r) => 'ref' in r.payload && r.payload.type !== 'draft') as { payload: { chatId: number; id: number } }[];
   const drafts = rows.filter((r) => 'ref' in r.payload && r.payload.type === 'draft') as { payload: { chatId: number } }[];
@@ -241,13 +242,13 @@ export async function hydrate(userId: number | null, rows: { seq: number; payloa
       return { seq, update: { type: 'draft', chatId: p.chatId, text, at: d ? new Date(d.updated_at as string).toISOString() : p.at, ...(entities.length ? { entities } : {}) } };
     }
     const row = byKey.get(p.chatId + ':' + p.id);
-    // строки нет (чат удалён целиком) — «удалено»; удалённое сообщение — то же событие с пустым содержимым, за ним в журнале messageDeleted
-    if (!row) return { seq, update: { type: 'messageDeleted', chatId: p.chatId, id: p.id } };
+    // строки нет (чат удалён целиком) или сообщение удалено — удаление: новое, правка, упоминание удалённого уходят
+    // вместе с ним (счётчик «@» у клиента — тоже); своё messageDeleted в журнале дальше — повтор, клиенту он не мешает
+    if (!row || row.deleted) return { seq, update: { type: 'messageDeleted', chatId: p.chatId, id: p.id } };
     const m = toMessage(row);
     switch (p.type) {
       case 'newMessage': return { seq, update: { type: 'newMessage', message: m } };   // реакции — своими событиями, как и раньше
-      // упоминание удалённого — удаление (счётчик «@» у клиента уходит вместе с ним)
-      case 'mention': return row.deleted ? { seq, update: { type: 'messageDeleted', chatId: p.chatId, id: p.id } } : { seq, update: { type: 'mention', message: m, ...(p.threadId != null ? { threadId: p.threadId } : {}) } };
+      case 'mention': return { seq, update: { type: 'mention', message: m, ...(p.threadId != null ? { threadId: p.threadId } : {}) } };
       case 'messageEdited': return { seq, update: { type: 'messageEdited', chatId: p.chatId, id: p.id, body: m.body, editedAt: m.editedAt ?? m.createdAt, entities: m.entities ?? [] } };
       case 'messageMarkup': return { seq, update: { type: 'messageMarkup', chatId: p.chatId, id: p.id, body: m.body, ...(m.entities ? { entities: m.entities } : {}), buttons: m.buttons ?? null } };
       case 'todoUpdated': return m.todo ? { seq, update: { type: 'todoUpdated', chatId: p.chatId, id: p.id, todo: m.todo, ...(m.editedAt ? { editedAt: m.editedAt } : {}) } } : { seq, update: { type: 'messageDeleted', chatId: p.chatId, id: p.id } };

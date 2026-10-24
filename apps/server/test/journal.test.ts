@@ -102,7 +102,9 @@ test('a deleted message is not revealed by old journal entries; a vanished chat 
   const { message } = await sendMessage(a, { chatId: chat, clientId: crypto.randomUUID(), body: SECRET });
   await deleteMessage(a, chat, message.id);
   const ups = (await getUpdates(b, 0)).items.map((i) => i.update);
-  expect(ups[0]).toMatchObject({ type: 'newMessage', message: { id: message.id, body: '', deleted: true } });
+  // новое удалённого — удаление: в ленту клиента оно не попадает даже на миг
+  expect(ups.map((u) => u.type)).toEqual(['messageDeleted', 'messageDeleted']);
+  expect(ups[0]).toEqual({ type: 'messageDeleted', chatId: chat, id: message.id });
   expect(JSON.stringify(ups)).not.toContain('сейфа');
   await sql`delete from chats where id = ${chat}`;
   const page = await getUpdates(b, 0);
