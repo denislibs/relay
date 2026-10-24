@@ -28,7 +28,7 @@ export const sendSticker = (chatId: number, sticker: StickerRef, replyToId?: num
  * возврат в припаркованный кадр его не меняют, новое открытие берёт новый. Держим несколько последних кадров.
  */
 const greetings = new Map<string, Promise<StickerRef | null>>();
-const GREETING_WAIT = 1000;   // дольше стикер не ждём: карточка показывается без него (и уже не дорастает)
+const GREETING_WAIT = 1000;   // дольше стикер не ждём: карточка показывается без него, а опоздавший раскрывается в ней
 /** undefined — ещё выбираем (карточку не показывать), null — без стикера. */
 export function useGreetingSticker(frameKey: string, want: boolean): StickerRef | null | undefined {
   const [got, setGot] = useState<{ key: string; sticker: StickerRef | null } | null>(null);
@@ -44,7 +44,8 @@ export function useGreetingSticker(frameKey: string, want: boolean): StickerRef 
     let live = true;
     const done = (sticker: StickerRef | null) => { if (live) { live = false; setGot({ key: frameKey, sticker }); } };
     const t = setTimeout(() => done(null), GREETING_WAIT);
-    void p.then((s) => { if (!s) greetings.delete(frameKey); done(s); });   // без сети — попробуем при следующем показе
+    // опоздал к показу — карточка уже без стикера: он всё равно встанет, плавно (GreetingCard)
+    void p.then((s) => { if (!s) { greetings.delete(frameKey); done(null); return; } if (live) done(s); else setGot((g) => g?.key === frameKey && !g.sticker ? { key: frameKey, sticker: s } : g); });   // без сети — попробуем при следующем показе
     return () => { live = false; clearTimeout(t); };
   }, [frameKey, want, known]);
   return known ? got!.sticker : undefined;
