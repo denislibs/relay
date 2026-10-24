@@ -1,5 +1,5 @@
 import type { Message } from '@relay/protocol';
-import { sql, type Tx } from '../db';
+import { beforeCommit, sql, type Tx } from '../db';
 import { enqueue } from '../jobs/queue';
 import { readOwnPost, toMessage, withAllReactions } from './chats';
 import { DomainError } from './errors';
@@ -107,7 +107,10 @@ async function scheduleReplies(tx: Tx, channelId: number, postId: number): Promi
 /** Новый комментарий (в транзакции sendMessage): счётчики треда, моя прочитанность треда, replies.flush. */
 export async function noteComment(tx: Tx, groupId: number, copyId: number, senderId: number, id: number): Promise<void> {
   const key = await threadKey(tx, groupId, copyId);
-  if (key) {
+  // счётчики — перед коммитом, раньше журналов: строка треда одна на все комментарии поста, и её замок живёт от
+  // update до коммита, а не с середины sendMessage (упоминания, черновик, задачи) — иначе комментарии в один тред
+  // стоят в очереди за этим замком. Порядок замков прежний: строка треда → журналы
+  if (key) beforeCommit(tx, async () => {
     // update запирает строку; recent — комментатор впереди, без повторов, не больше трёх
     // все посты треда (альбом — несколько строк с одной копией): строки по порядку post_id — один порядок замков
     const up = await tx`
@@ -116,7 +119,7 @@ export async function noteComment(tx: Tx, groupId: number, copyId: number, sende
        where chat_id = ${key.channelId} and post_id in (select post_id from message_threads where chat_id = ${key.channelId} and copy_id = ${copyId} order by post_id for update)
        returning 1`;
     if (up.length && await linkedNow(tx, key.channelId, copyId)) await scheduleReplies(tx, key.channelId, key.postId);
-  }
+  }, { first: true });
   // свой комментарий — тред прочитан до него (на всех моих устройствах)
   await markThreadReadTx(tx, senderId, groupId, copyId, id);
 }

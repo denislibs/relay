@@ -81,7 +81,8 @@ export async function appendUpdates(tx: Tx, entries: Entry[]): Promise<void> {
     for (const n of notifyPayloads(written)) await tx`select pg_notify('updates', ${n})`;
     return;
   }
-  txState(tx).users.push(...entries);
+  const users = txState(tx).users;
+  for (const e of entries) users.push(e);   // не push(...entries): обмен профилями при вступлении — миллионы записей, стек кончится
 }
 
 /** Вступление: membership с seq чата на момент коммита — клиент заводит чат и ничего не догоняет. */
@@ -121,7 +122,7 @@ export async function flushJournals(tx: Tx): Promise<void> {
   st.memberships = [];
   if (st.users.length) {
     const entries = st.users; st.users = [];
-    st.written.push(...await writeUserEntries(tx, entries));
+    for (const w of await writeUserEntries(tx, entries)) st.written.push(w);
     st.usersFlushed = true;
   }
 }
