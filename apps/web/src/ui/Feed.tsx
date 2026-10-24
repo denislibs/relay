@@ -25,6 +25,7 @@ import { isCached, keepOffline, offlineUrlNow, useKeptMedia, useOfflineUrl, warm
 import { getPrefs } from '../prefs';
 import { bubbleSrc } from '../mediaGrid';
 import { clock, dayKey, dayLabel, fileSize } from './format';
+import { arrivals, type FeedSeen } from './appear';
 
 /*
  * Лента сообщений, устроенная как в Telegram:
@@ -47,6 +48,7 @@ const BOTTOM = 50;        // «у низа» — ближе 50 px
 const READ_EVERY = 150;   // отправка «вижу до id» не чаще
 const FIRST_PAINT = 24;   // при открытии внизу первым кадром — столько последних сообщений, остальное порциями после
 const FILL_CHUNK = 16;    // дорисовка истории выше первого экрана — по столько строк за кадр
+const APPEAR_MS = 400;    // анимация появления нового сообщения (200 мс) + запас: дольше класс не держим
 
 type Quote = QuoteMsg;
 type Att = { id: string; kind: 'photo' | 'video' | 'file' | 'voice' | 'round' | 'audio'; spoiler?: boolean; title?: string | null; performer?: string | null; mime: string; name: string; size: number; w: number | null; h: number | null; thumb?: string | null; duration?: number | null; waveform?: string | null;
@@ -500,8 +502,16 @@ export function Feed({ frameKey, active, chatId, threadId, channel = false, meId
   const here = { chatId, threadId };   // слой стека: позиция прокрутки треда — своим ключом
   const [limit, setLimit] = useState<number | null>(() => (!unreadFrom && !savedPosition(here) && !focus ? FIRST_PAINT : null));
   const partial = limit != null && messages.length > limit;
-  const initial = useRef<Set<string> | null>(null);
-  if (initial.current === null && messages.length) initial.current = new Set(messages.map((m) => m.key));
+  // анимация появления — только у пришедших в живую ленту (appear.ts), не у истории. Отметка живёт APPEAR_MS: потом
+  // класс снимается, и строка, пересобранная позже, анимацию не повторит
+  const appearAt = useRef(new Map<string, number>());
+  const lastWindow = useRef<FeedSeen | null>(null);
+  if (lastWindow.current?.list !== messages) {
+    const now = performance.now(), next = arrivals(lastWindow.current, messages as { key: string }[], !!meta?.live && !meta.hasNewer);
+    lastWindow.current = next.seen;
+    for (const k of next.fresh) appearAt.current.set(k, now);
+    for (const [k, t] of appearAt.current) if (now - t > APPEAR_MS) appearAt.current.delete(k);
+  }
   const shownKeys = useRef<Set<string> | null>(null);   // ключи прошлого окна: что из него пропало (удалили сообщение)
 
   /** Сдвиг окна: сначала замер якоря, потом — запрос нового окна. */
@@ -1180,7 +1190,7 @@ export function Feed({ frameKey, active, chatId, threadId, channel = false, meId
         quoted={quoted}
         quoteAuthor={quoted && !quoted.deleted ? (quoted.senderId === meId ? 'Вы' : group ? people[quoted.senderId as number]?.name ?? '' : peerName) : undefined}
         quoteTone={quoted ? (quoted.senderId === meId ? 'accent' : peerTone(quoted.senderId as number)) : undefined}
-        appear={initial.current !== null && !initial.current.has(m.key)}
+        appear={appearAt.current.has(m.key as string)}
         flash={flashKey === m.key || !!album?.some((x) => x.key === flashKey)}
         album={album}
       />

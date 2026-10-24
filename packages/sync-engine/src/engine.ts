@@ -46,6 +46,8 @@ interface ChatSyncState { syncing: boolean; again: boolean; queued: boolean; buf
  * отправляет очередь, схлопывает прочтение и раздаёт подпискам патчи раз в кадр.
  */
 const HISTORY_GATE_MS = 400;
+/** Запас истории над окном ленты, в страницах (historyPage): окно сдвигается на страницу — следующая уже в кэше. */
+export const HISTORY_AHEAD = 2;
 /** Сколько файлов грузится одновременно (как в Telegram — несколько, но не все разом: канал делится, а первый файл не ждёт последнего). */
 const UPLOAD_SLOTS = 3;
 /** сколько id в одном GET /users?ids= (предел сервера) */
@@ -2422,8 +2424,10 @@ export class Engine {
       // далеко в истории (переход к сообщению) — крупными страницами, а не десятками мелких запросов
       const far = q.anchor && have > 0 && all[span.lo].sort > q.anchor.sort;
       if (short) { await this.ensureHistory(q.chatId, q.anchor?.sort, have + (far ? 200 : page), far ? 200 : undefined); continue; }
-      // окно близко к старому краю — страница наперёд, в фоне, чтобы прокрутка вверх не упиралась
-      if (from - span.lo < page) this.run(() => this.ensureHistory(q.chatId, q.anchor?.sort, have + page));
+      // запас над окном — HISTORY_AHEAD страниц, догружается в фоне, пока окно до него не дошло (как в Telegram
+      // история грузится наперёд): лента сдвигает окно на страницу, и быстрая прокрутка вверх не ждёт сервер
+      const lead = from - span.lo, want = page * HISTORY_AHEAD;
+      if (lead < want) this.run(() => this.ensureHistory(q.chatId, q.anchor?.sort, have + want - lead));
       return;
     }
   }
