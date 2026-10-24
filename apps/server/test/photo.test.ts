@@ -7,7 +7,7 @@ import { createServer } from '../src/http';
 import { sql } from '../src/db';
 import '../src/jobs/kinds';
 import { inputOf, probe, videoFormat } from '../src/jobs/video';
-import { PHOTO_PREVIEW_SIDE } from '../src/jobs/photo';
+import { backfillPhotos, PHOTO_MEDIUM_SIDE, PHOTO_PREVIEW_SIDE } from '../src/jobs/photo';
 import { SLOW_KINDS } from '../src/jobs/kinds';
 import { claim, enqueue } from '../src/jobs/queue';
 import { drainJobs } from '../src/jobs/worker';
@@ -31,7 +31,7 @@ async function makeImage(name: string, w: number, h: number, src = `testsrc2=siz
   return new Uint8Array(await Bun.file(out).arrayBuffer());
 }
 
-test('a big photo gets a small preview (longer side 480): messages, clients and /files/<id>/preview learn about it', async () => {
+test('a big photo gets a small preview (longer side 480) and a medium copy (800): messages, clients and /files/<id>/preview|medium learn about them', async () => {
   const a = await login('Анна'), b = await login('Борис');
   const chatId = await chatOf(a, b);
   const bytes = await makeImage('big.jpg', 1600, 1200);
@@ -47,16 +47,20 @@ test('a big photo gets a small preview (longer side 480): messages, clients and 
 
   const [row] = await sql`select processed, storage_key from attachments where id = ${up.id}`;
   expect(row).toEqual({ processed: 'done', storage_key: null });   // оригинал не трогаем
-  const [v] = await sql`select name, mime, width, height, size from attachment_variants where attachment_id = ${up.id}`;
+  const [v, md] = await sql`select name, mime, width, height, size from attachment_variants where attachment_id = ${up.id} order by name desc`;
   expect(v).toMatchObject({ name: 'preview', mime: 'image/webp', width: PHOTO_PREVIEW_SIDE, height: 360 });
   expect(Number(v.size)).toBeLessThan(bytes.length);
+  expect(md).toMatchObject({ name: 'medium', mime: 'image/webp', width: PHOTO_MEDIUM_SIDE, height: 600 });
+  expect(Number(md.size)).toBeLessThan(bytes.length);
+  expect(Number(md.size)).toBeGreaterThan(Number(v.size));
 
   const [m] = await opened(await sql`select * from messages where id = ${message.id}`);
   const att = m.attachment as Attachment;
   expect(att.thumb).toBe('data:image/jpeg;base64,AAAA');
   expect(att.preview).toMatchObject({ name: 'preview', w: 480, h: 360 });
+  expect(att.variants).toEqual([{ name: 'medium', w: 800, h: 600, size: Number(md.size) }]);
   const [u] = await journalOf(b.userId, 'attachmentUpdated');
-  expect(u).toMatchObject({ chatId, id: message.id, attachment: { preview: { name: 'preview', w: 480, h: 360 } } });
+  expect(u).toMatchObject({ chatId, id: message.id, attachment: { preview: { name: 'preview', w: 480, h: 360 }, variants: [{ name: 'medium', w: 800, h: 600 }] } });
 
   // копия — по тем же правам, что и оригинал, показывается inline как картинка
   const pv = await fetch(`${base}/files/${up.id}/preview`, { headers: as(b.token) });
@@ -64,21 +68,30 @@ test('a big photo gets a small preview (longer side 480): messages, clients and 
   expect(pv.headers.get('content-type')).toBe('image/webp');
   await Bun.write(join(dir, 'preview.webp'), await pv.arrayBuffer());
   expect(await probe(join(dir, 'preview.webp'))).toMatchObject({ w: 480, h: 360 });
+  const mv = await fetch(`${base}/files/${up.id}/medium`, { headers: as(b.token) });
+  expect(mv.status).toBe(200);
+  expect(mv.headers.get('content-type')).toBe('image/webp');
+  await Bun.write(join(dir, 'medium.webp'), await mv.arrayBuffer());
+  expect(await probe(join(dir, 'medium.webp'))).toMatchObject({ w: 800, h: 600 });
   const c = await login('Чужой');
   expect((await fetch(`${base}/files/${up.id}/preview`, { headers: as(c.token) })).status).toBe(404);
+  expect((await fetch(`${base}/files/${up.id}/medium`, { headers: as(c.token) })).status).toBe(404);
+  expect((await fetch(`${base}/files/${up.id}/original`, { headers: as(b.token) })).status).toBe(404);   // других имён нет
 
   // отправленное после обработки — сразу с копией
   const again = await sendMessage(a.userId, { chatId, clientId: crypto.randomUUID(), body: '', attachment: { id: up.id } });
-  expect(again.message.attachment).toMatchObject({ preview: { name: 'preview', w: 480, h: 360 } });
+  expect(again.message.attachment).toMatchObject({ preview: { name: 'preview', w: 480, h: 360 }, variants: [{ name: 'medium', w: 800, h: 600 }] });
 }, 60_000);
 
-test('a portrait photo keeps its aspect: the longer side (height) becomes 480', async () => {
+test('a portrait photo keeps its aspect: the longer side (height) becomes 480 and 800', async () => {
   const a = await login('Анна');
   const bytes = await makeImage('tall.png', 900, 1600);
   const up = await uploadFile(base, a.token, { name: 'tall.png', mime: 'image/png', kind: 'photo', w: 900, h: 1600 }, bytes) as unknown as Attachment;
   await drainJobs();
   const [v] = await sql`select width, height from attachment_variants where attachment_id = ${up.id} and name = 'preview'`;
   expect(v).toEqual({ width: 270, height: 480 });
+  const [m] = await sql`select width, height from attachment_variants where attachment_id = ${up.id} and name = 'medium'`;
+  expect(m).toEqual({ width: 450, height: 800 });
 }, 60_000);
 
 test('an image sent as a file (no size, kind file) also gets a preview', async () => {
@@ -89,6 +102,50 @@ test('an image sent as a file (no size, kind file) also gets a preview', async (
   await drainJobs();
   const [v] = await sql`select width, height from attachment_variants where attachment_id = ${up.id} and name = 'preview'`;
   expect(v).toEqual({ width: 480, height: 320 });
+  const [m] = await sql`select width, height from attachment_variants where attachment_id = ${up.id} and name = 'medium'`;
+  expect(m).toEqual({ width: 800, height: 533 });
+}, 60_000);
+
+test('a mid-size light photo (up to 800 px, not heavy) gets only the preview: the original is already medium-sized', async () => {
+  const a = await login('Анна');
+  const bytes = await makeImage('mid.jpg', 640, 480, 'color=c=teal:s=640x480');
+  expect(bytes.length).toBeLessThan(300 * 1024);
+  const up = await uploadFile(base, a.token, { name: 'mid.jpg', mime: 'image/jpeg', kind: 'photo', w: 640, h: 480 }, bytes) as unknown as Attachment;
+  await drainJobs();
+  expect((await sql`select processed from attachments where id = ${up.id}`)[0].processed).toBe('done');
+  expect((await sql`select name from attachment_variants where attachment_id = ${up.id} order by name`).map((r) => r.name)).toEqual(['preview']);
+  expect((await fetch(`${base}/files/${up.id}/medium`, { headers: as(a.token), redirect: 'manual' })).status).toBe(404);   // клиент берёт оригинал
+}, 60_000);
+
+test('backfill: a photo processed before the medium copy gets it (redo), messages learn; done and queued ones are not redone', async () => {
+  const a = await login('Анна'), b = await login('Борис');
+  const chatId = await chatOf(a, b);
+  const bytes = await makeImage('old.jpg', 1600, 1200);
+  const up = await uploadFile(base, a.token, { name: 'old.jpg', mime: 'image/jpeg', kind: 'photo', w: 1600, h: 1200 }, bytes) as unknown as Attachment;
+  const broken = await uploadFile(base, a.token, { name: 'broken.jpg', mime: 'image/jpeg', kind: 'photo', w: 1600, h: 1200 }, 'not a picture') as unknown as Attachment;
+  const small = await uploadFile(base, a.token, { name: 'small.jpg', mime: 'image/jpeg', kind: 'photo', w: 320, h: 240 }, await makeImage('small2.jpg', 320, 240)) as unknown as Attachment;
+  const { sendMessage } = await import('../src/domain/messages');
+  const { message } = await sendMessage(a.userId, { chatId, clientId: crypto.randomUUID(), body: '', attachment: { id: up.id } });
+  await drainJobs();
+  // как до появления medium: копии нет, в сообщении только превью
+  await sql`delete from attachment_variants where attachment_id = ${up.id} and name = 'medium'`;
+  await sql`update messages set attachment = attachment - 'variants' where id = ${message.id}`;
+
+  expect(await backfillPhotos()).toBe(1);   // битое (skipped) и маленькое (нечего делать) — не ставятся
+  expect(await backfillPhotos()).toBe(1);   // повторный запуск: та же задача (dedupe), не вторая
+  expect(await sql`select payload from jobs where kind = 'photo.process'`).toEqual([{ payload: { id: up.id, redo: true } }]);
+  await drainJobs();
+
+  expect((await sql`select processed from attachments where id = ${up.id}`)[0].processed).toBe('done');
+  const vs = await sql`select name, width, height from attachment_variants where attachment_id = ${up.id} order by name`;
+  expect(vs).toEqual([{ name: 'medium', width: 800, height: 600 }, { name: 'preview', width: 480, height: 360 }]);
+  const [m] = await opened(await sql`select * from messages where id = ${message.id}`);
+  expect(m.attachment).toMatchObject({ preview: { name: 'preview' }, variants: [{ name: 'medium', w: 800, h: 600 }] });
+  const ups = await journalOf(b.userId, 'attachmentUpdated');
+  expect(ups.at(-1)).toMatchObject({ id: message.id, attachment: { variants: [{ name: 'medium' }] } });
+  expect(await backfillPhotos()).toBe(0);   // всё готово
+  expect((await sql`select processed from attachments where id = ${broken.id}`)[0].processed).toBe('skipped');
+  expect(await sql`select 1 from attachment_variants where attachment_id = ${small.id}`).toHaveLength(0);
 }, 60_000);
 
 test('a small photo needs nothing: no copy, the original is its own preview', async () => {

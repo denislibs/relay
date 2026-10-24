@@ -253,7 +253,7 @@ export function attachmentOf(a: Record<string, unknown>, thumb: string | null, v
 }
 
 /** Файл для скачивания: владельцу и участникам чатов, где он отправлен. key — объект в бакете (после перепаковки — не id);
- *  variant — копия видео (preview, 720) или превью фото (preview): права те же, что у оригинала. */
+ *  variant — копия видео (preview, 720) или фото (preview, medium): права те же, что у оригинала. */
 export interface StoredFile { id: string; key: string; mime: string; name: string }
 export async function fileFor(userId: number, id: string, variant?: string): Promise<StoredFile | null> {
   if (!UUID.test(id)) return null;

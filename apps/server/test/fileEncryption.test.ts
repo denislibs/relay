@@ -102,3 +102,33 @@ test('an encrypted video is processed by the worker: faststart original and copi
   expect(m.attachment).toMatchObject({ enc: 1, name: 'clip.mp4' });
   expect(m.attachment!.preview ?? m.attachment!.variants).toBeTruthy();
 });
+
+test('an encrypted photo: preview and medium copies are stored encrypted with derived keys and open as WebP of the right size', async () => {
+  const a = await login('Анна'), b = await login('Борис');
+  const chat = await chatOf(a, b);
+  const out = `/tmp/relay-enc-${crypto.randomUUID()}.jpg`;
+  const p = Bun.spawn(['ffmpeg', '-v', 'error', '-y', '-f', 'lavfi', '-i', 'testsrc2=size=1600x1200:rate=1', '-vf', 'noise=alls=30:allf=t', '-frames:v', '1', '-q:v', '2', out]);
+  await p.exited;
+  const bytes = new Uint8Array(await Bun.file(out).arrayBuffer());
+  const { att, raw } = await uploadEncrypted(a.token, { name: 'photo.jpg', mime: 'image/jpeg', kind: 'photo', w: 1600, h: 1200 }, bytes);
+  await sendMessage(a.userId, { chatId: chat, clientId: crypto.randomUUID(), body: '', attachment: { id: att.id } });
+  await drainJobs();
+  const vs = await sql`select name, key, mime, size, width from attachment_variants where attachment_id = ${att.id} order by name`;
+  expect(vs.map((v) => [v.name, v.width])).toEqual([['medium', 800], ['preview', 480]]);
+  for (const v of vs) {
+    const obj = await s3().file(v.key as string).arrayBuffer();
+    expect(new TextDecoder().decode(new Uint8Array(obj).subarray(0, 4))).toBe('RLF1');
+    // ключом другой копии не открыть
+    const other = vs.find((x) => x.name !== v.name)!.name as string;
+    await expect(openFile(new Blob([obj]), await importFileKey(await variantKey(raw, other)))).rejects.toThrow();
+    const plain = await openFile(new Blob([obj]), await importFileKey(await variantKey(raw, v.name as string)));
+    expect(plain.size).toBe(Number(v.size));
+    expect(new TextDecoder().decode(new Uint8Array(await plain.slice(8, 12).arrayBuffer()))).toBe('WEBP');
+  }
+  // наружу — шифр: тип octet-stream, расшифровывает клиент (SW) ключом копии
+  const r = await fetch(`${base}/files/${att.id}/medium`, { headers: { cookie: `relay_session=${b.token}` } });
+  expect(r.status).toBe(200);
+  expect(new TextDecoder().decode(new Uint8Array(await r.arrayBuffer()).subarray(0, 4))).toBe('RLF1');
+  const [m] = (await getHistory(b.userId, chat, null, 10)).messages;
+  expect(m.attachment).toMatchObject({ enc: 1, preview: { name: 'preview', w: 480 }, variants: [{ name: 'medium', w: 800, h: 600 }] });
+});
