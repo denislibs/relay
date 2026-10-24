@@ -44,14 +44,15 @@ export function useGreetingSticker(frameKey: string, want: boolean): StickerRef 
     let live = true;
     const done = (sticker: StickerRef | null) => { if (live) { live = false; setGot({ key: frameKey, sticker }); } };
     const t = setTimeout(() => done(null), GREETING_WAIT);
+    // null — движок ещё без сети: не сдаёмся раньше срока, ответ после подключения успеет (эффект ниже);
     // опоздал к показу — карточка уже без стикера: он всё равно встанет, плавно (GreetingCard)
-    void p.then((s) => { if (!s) { greetings.delete(frameKey); done(null); return; } if (live) done(s); else setGot((g) => g?.key === frameKey && !g.sticker ? { key: frameKey, sticker: s } : g); });   // без сети — попробуем при следующем показе
+    void p.then((s) => { if (!s) { greetings.delete(frameKey); return; } if (live) done(s); else setGot((g) => g?.key === frameKey && !g.sticker ? { key: frameKey, sticker: s } : g); });
     return () => { live = false; clearTimeout(t); };
   }, [frameKey, want, known]);
-  // без сети движок сразу отвечает null (так бывает сразу после запуска, пока он подключается) — карточка уже
-  // показана без стикера; сеть появилась — спрашиваем ещё раз, пришедший встанет в карточку
+  // без сети движок сразу отвечает null (так бывает сразу после запуска, пока он подключается); сеть появилась —
+  // спрашиваем ещё раз: успели до срока — карточка выходит сразу со стикером, нет — он встанет в неё позже
   const online = useGlobal((s) => s.status.online);
-  const missing = known && !got!.sticker;
+  const missing = !known || !got!.sticker;
   useEffect(() => {
     if (!want || !missing || !online) return;
     let live = true;
@@ -59,7 +60,7 @@ export function useGreetingSticker(frameKey: string, want: boolean): StickerRef 
     if (!p) { p = greetingSticker().catch(() => null); greetings.set(frameKey, p); }
     void p.then((s) => {
       if (!s) { greetings.delete(frameKey); return; }
-      if (live) setGot((g) => g?.key === frameKey && !g.sticker ? { key: frameKey, sticker: s } : g);
+      if (live) setGot((g) => g?.key === frameKey && g.sticker ? g : { key: frameKey, sticker: s });
     });
     return () => { live = false; };
   }, [frameKey, want, missing, online]);
