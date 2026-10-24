@@ -1,8 +1,8 @@
 import { isGroupService, serviceText } from './serviceText';
 import type { ServiceData, ServiceType } from '@relay/protocol';
 import type { Item } from '@relay/sync-engine/src/types';
-import { senderAvatar } from '../profilePhoto';
-import type { Entity, MessageButton, Todo } from '@relay/protocol';
+import { avatarPhoto, senderAvatar } from '../profilePhoto';
+import type { Entity, MessageButton, ProfilePhoto, Todo } from '@relay/protocol';
 import { Presence, ProgressRing, useMinVisible, MediaPolicy, ArticleBlocks, Avatar, Bubble, Icon, peerTone, DateDivider, DatePicker, FileBubble, MediaBubble, MessageText, VoiceBubble, MusicBubble, RoundBubble, player, MediaViewer, ScrollToBottom, beginHeavyAnimation, forceMeasure, isHeavyAnimating, onHeavyAnimationEnd, requestMeasure, requestMutation, selectionValue, TodoBubble, InlineKeyboard, StickerBubble } from '@relay/ui';
 import { openStickerSet } from '../stickers';
 import type { StickerRef } from '@relay/protocol';
@@ -444,9 +444,10 @@ function CachedMusic({ fileId, ...props }: { fileId?: string } & Record<string, 
   return <MusicBubble {...props} downloaded={downloaded} />;
 }
 
-export function Feed({ frameKey, active, chatId, threadId, channel = false, meId, peerName, group, onAuthor, stick, onMenu, highlight }: {
+export function Feed({ frameKey, active, chatId, threadId, channel = false, meId, peerName, chatPhoto, group, onAuthor, stick, onMenu, highlight }: {
   frameKey: string; active: boolean;   // кадр стека чатов; active — на экране (только он отмечает прочитанное)
   chatId: number; meId: number; peerName: string; highlight?: string;
+  chatPhoto?: ProfilePhoto | null;   // фото чата: автор поста в просмотрщике — сам канал
   threadId?: number;    // тред комментариев: прочитанность — markThreadRead, позиция — своим ключом
   channel?: boolean;    // лента канала: все сообщения — посты (слева, без автора), просмотры засчитываются по видимости
   group: boolean; onAuthor: (userId: number) => void;   // в группе — имя автора над пачкой; клик — личный чат поверх
@@ -1126,7 +1127,7 @@ export function Feed({ frameKey, active, chatId, threadId, channel = false, meId
         <MediaViewer
           index={openIndex}
           sender={peerName}
-          items={photos.map((m) => { const a = m.attachment as Att; return { sender: people[m.senderId as number]?.name ?? '', avatar: senderAvatar(m.senderId as number),   // не название группы: пока имени нет — пусто, оно подгружается заранее
+          items={photos.map((m) => { const a = m.attachment as Att; return { ...(isPosted(m) ? { sender: peerName, avatar: avatarPhoto(chatPhoto) } : { sender: people[m.senderId as number]?.name ?? '', avatar: senderAvatar(m.senderId as number) }),   // не название группы: пока имени нет — пусто, оно подгружается заранее
  src: localPreview(m.key) ?? (openOffline && a.id === openAtt?.id ? openOffline : fileUrl(a)), qualities: localPreview(m.key) || (openOffline && a.id === openAtt?.id) ? undefined : qualitiesOf(a), kind: a.kind === 'video' ? 'video' : 'image', thumb: a.thumb, w: a.w, h: a.h, name: a.name, download: fileUrl(a, true), caption: m.body, date: clock(m.createdAt as string) }; })}
           origin={originOf}
           actions={(_it: unknown, i: number) => [{ icon: 'forward', label: 'Переслать', onClick: () => { const p = photos[i]; setViewer(null); if (p) startForward(chatId, [p], nameOf); } }]}
