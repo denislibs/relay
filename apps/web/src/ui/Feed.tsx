@@ -680,14 +680,16 @@ export function Feed({ frameKey, active, chatId, meId, peerName, group, onAuthor
     // позицию — после любой прокрутки, в том числе нашей (после сдвига окна якорь тоже меняется)
     if (posTimer.current) clearTimeout(posTimer.current);
     posTimer.current = setTimeout(() => { posTimer.current = null; requestMeasure(() => storePosition(root)); }, 200);
-    const top = root.scrollTop, prev = lastTop.current;
-    lastTop.current = top;
-    if (programmatic.current > 0) { programmatic.current--; return; } // наша прокрутка не меняет «прижата к низу»
-    if (top !== prev) scrollDir.current = top < prev ? -1 : 1;
+    // всё чтение — в фазе measure: в самом событии раскладку мог «испачкать» любой код до него (картинка, патч ленты),
+    // и чтение scrollTop пересчитывало бы её. Колбэки идут в порядке событий, счётчик нашей прокрутки не сбивается
     requestMeasure(() => {
-      const fromBottom = root.scrollHeight - root.scrollTop - root.clientHeight;
+      const top = root.scrollTop, prev = lastTop.current;
+      lastTop.current = top;
+      if (programmatic.current > 0) { programmatic.current--; return; } // наша прокрутка не меняет «прижата к низу»
+      if (top !== prev) scrollDir.current = top < prev ? -1 : 1;
+      const fromBottom = root.scrollHeight - top - root.clientHeight;
       // датчик края уже в зоне (его пропустили, пока листали в другую сторону) — сдвигаем по прокрутке
-      if (scrollDir.current < 0 && root.scrollTop < EDGE_PX) shift('older');
+      if (scrollDir.current < 0 && top < EDGE_PX) shift('older');
       else if (scrollDir.current > 0 && fromBottom < EDGE_PX) shift('newer');
       const live = metaRef.current?.live ?? true;
       stick.current = fromBottom < BOTTOM && live;
