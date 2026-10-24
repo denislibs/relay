@@ -558,10 +558,14 @@ export function Chat({ chatId, frameKey, active, threadId }: { chatId: number; f
             <Presence show={listOpen && !!found} exitMs={140}>
               <div class="app-findlist" ref={listBox} role="listbox" aria-label="Найденные сообщения"><div class="app-findlist-in" ref={listInner}>
                 {found && found.hits.length ? found.hits.map((x, k) => {
-                  const who = people[x.senderId]?.name ?? (x.senderId === me.userId ? me.name : chat?.kind === 'direct' ? title : '');
+                  // пост канала (senderId 0): автор — сам канал, строка с его аватаром и названием (как в Telegram)
+                  const asChat = x.senderId === 0;
+                  const who = asChat ? title : people[x.senderId]?.name ?? (x.senderId === me.userId ? me.name : chat?.kind === 'direct' ? title : '');
                   return (
                     <button type="button" role="option" aria-selected={k === found.at} key={x.id} class={'app-findrow' + (k === found.at ? ' app-findrow-on' : '')} onPointerDown={ripple} onClick={() => pick(k)}>
-                      <Avatar name={who} tone={peerTone(x.senderId)} size={40} {...senderAvatar(x.senderId)} />
+                      {asChat
+                        ? <Avatar name={who} tone={chatTone(chat)} size={40} {...avatarPhoto(chat?.photo as ProfilePhoto | null)} />
+                        : <Avatar name={who} tone={peerTone(x.senderId)} size={40} {...senderAvatar(x.senderId)} />}
                       <span class="app-findrow-text">
                         <span class="app-findrow-top"><b>{who}</b><time>{chatTime(x.createdAt)}</time></span>
                         <span class="app-findrow-body"><Highlight text={attachmentHit(shownBody(x), x.attachment, found.q) ?? snippet(shownBody(x), found.q)} query={found.q} /></span>
