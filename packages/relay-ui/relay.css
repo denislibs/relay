@@ -2355,6 +2355,9 @@ html[data-anim="0"] .rl-symbols-pop { transition: none; }
 .rl-post-sign { max-width: 140px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; margin-right: 3px; }
 .rl-post-pin { display: inline-flex; margin-right: 1px; }
 .rl-bubble-footer { margin: 6px -8px -6px -10px; border-top: 1px solid var(--line); border-radius: 0 0 var(--bubble-r, 12px) var(--bubble-r, 12px); overflow: hidden; }
+/* у пузыря с хвостиком нижний угол со стороны хвостика прямой — полоса комментариев повторяет его */
+.rl-bubble-tail.rl-bubble-in-side .rl-bubble-footer { border-bottom-left-radius: 0; }
+.rl-bubble-tail.rl-bubble-out .rl-bubble-footer { border-bottom-right-radius: 0; }
 .rl-media .rl-bubble-footer { margin: 0; }
 /* с кнопкой внизу мета стоит над ней (кнопка — 40 px + линия) */
 .rl-bubble-has-footer > .rl-bubble-meta { bottom: 46px; }
