@@ -718,6 +718,7 @@ html[data-anim="0"] .app-chatcol, html[data-anim="0"] .app-chatcol-below, html[d
   background: var(--raised); box-shadow: var(--tg-shadow-header); animation: rl-pbar-in 260ms cubic-bezier(.25, 1, .5, 1) both; }
 .rl-presence[data-state="closing"] .app-pins { animation: rl-pbar-out 220ms cubic-bezier(.33, 1, .68, 1) forwards; }
 .app-pins-main { flex: 1; min-width: 0; display: flex; align-items: center; gap: 10px; height: 100%; padding: 0; border: 0; background: none; color: inherit; text-align: left; cursor: pointer; }
+.app-pins-icon { flex: none; margin-right: -2px; color: var(--brand-strong); }
 .app-pins-track { flex: none; width: 2px; height: 36px; overflow: hidden; border-radius: 1px; }
 .app-pins-segs { display: flex; flex-direction: column; gap: 2px; transition: transform 240ms var(--ease-out); }
 .app-pins-segs i { display: block; width: 2px; border-radius: 1px; background: color-mix(in srgb, var(--brand-strong) 35%, transparent); transition: background-color 200ms var(--ease-standard); }
