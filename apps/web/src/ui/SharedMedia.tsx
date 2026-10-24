@@ -1,4 +1,4 @@
-import { Avatar, FolderTabs, Icon, LazyImage, LazyRoot, lazyObserve, MediaViewer, peerTone, player, Presence, reducedMotion, SlideStack, TrackSeek, useMinVisible, WindowGrid, WindowList } from '@relay/ui';
+import { Avatar, DateDivider, FolderTabs, Icon, LazyImage, LazyRoot, lazyObserve, MediaViewer, peerTone, player, Presence, reducedMotion, requestMutation, SlideStack, TrackSeek, useMinVisible, WindowGrid, WindowList } from '@relay/ui';
 import { offlineUrlNow } from '../downloads';
 import { LinkTile, linkInfo } from './linkTile';
 import { avatarPhoto, userPhoto } from '../profilePhoto';
@@ -8,7 +8,7 @@ import type { ProfilePhoto } from '@relay/protocol';
 import { useContext, useEffect, useLayoutEffect, useRef, useState } from 'preact/hooks';
 import { focusMessage, openInner, type MediaTab } from '../data';
 import { useMedia } from '../mediaTab';
-import { animateScroll, gridCorners, tabCounter, tabLabel, tabScrollTarget, tileSrc, videoFrameSrc, type SharedTab } from '../mediaGrid';
+import { animateScroll, gridCorners, gridDateIndex, tabCounter, tabLabel, tabScrollTarget, tileSrc, videoFrameSrc, type SharedTab } from '../mediaGrid';
 import { getGlobal, useGlobal, findChat } from '../global';
 import { toggleMusic, trackTitle } from '../music';
 import { clock, dayLabel, fileSize, lastSeenText } from './format';
@@ -179,11 +179,75 @@ let gridWidth = 0;
  *  поэтому новое фото сверху сдвигает плитки, а не пересоздаёт их (картинки не мигают). */
 function MediaGrid({ items, onOpen, host, onNearEnd, nearKey }: { items: Msg[]; onOpen: (m: Msg) => void; host: { current: HTMLDivElement | null }; onNearEnd?: () => void; nearKey: string }) {
   const n = items.length;
+  const date = useGridDate(items, host);
   return (
     <div class="app-media-vgrid" ref={host}>
+      <MediaDate sink={date.sink} />
       <WindowGrid items={items} cols={3} gap={1} overscan={4} initialWidth={gridWidth} onWidth={(w: number) => { gridWidth = w; }}
-        getKey={(m: Msg) => m.id} onNearEnd={onNearEnd} nearEndKey={nearKey}
+        getKey={(m: Msg) => m.id} onNearEnd={onNearEnd} nearEndKey={nearKey} onView={date.fn}
         render={(m: Msg, i: number) => <MediaCell m={m} onOpen={onOpen} corners={gridCorners(i, n)} />} />
+    </div>
+  );
+}
+
+/** Плашка гаснет через столько после последней прокрутки (как в Telegram). */
+const DATE_HIDE_MS = 1000;
+type DateShow = { label: string; top: number } | null;   // null — спрятать
+type DateSink = { current: ((v: DateShow) => void) | null };
+
+/** Плашка даты над «Медиа», как в Telegram: пока панель прокручивают, под вкладками — день плитки у их нижнего края;
+ *  через секунду после последней прокрутки гаснет. Окно сетки (WindowGrid.onView) зовёт fn в фазе замера на каждую
+ *  прокрутку: ряд у края — делением (gridDateIndex), плитки не меряются; из чтений — только высота вкладок.
+ *  Плашке пишется в фазе записи и только когда что-то поменялось (день, высота вкладок, видна/нет). */
+function useGridDate(items: Msg[], host: { current: HTMLDivElement | null }) {
+  const list = useRef(items); list.current = items;
+  const st = useRef<{ sink: DateSink; fn: (top: number, cell: number, step: number, scrolled: boolean) => void; stop: () => void } | null>(null);
+  if (!st.current) {
+    const sink: DateSink = { current: null };
+    let tabs: HTMLElement | null = null, at: Msg | null = null, on = false, label = '', top0 = -1, last = 0, timer = 0;
+    // гасит таймер, который не переставляется на каждый кадр прокрутки: сработал раньше срока — ждёт остаток
+    const check = () => {
+      const left = DATE_HIDE_MS - (performance.now() - last);
+      if (left > 4) { timer = window.setTimeout(check, left); return; }
+      timer = 0; on = false;
+      requestMutation(() => sink.current?.(null));
+    };
+    const fn = (top: number, cell: number, step: number, scrolled: boolean) => {
+      if (!scrolled && !on) return;   // смена размеров без прокрутки плашку не показывает
+      const items = list.current;
+      // вкладки липнут к верху панели; одна вкладка — заголовок не липнет, плашка — у самого верха
+      // (вкладки появляются и пропадают вместе с непустыми разделами — ищутся заново, пока их нет)
+      if (!tabs?.isConnected) tabs = host.current?.closest('.rl-aside-body')?.querySelector<HTMLElement>('.rl-aside-tabs') ?? null;
+      const tabsH = tabs ? tabs.offsetHeight : 0;
+      const k = gridDateIndex(top + tabsH, cell, step, items.length);
+      if (k < 0) return;
+      // день считается заново, только когда у края другая плитка (Intl — не на каждый кадр)
+      const day = items[k] === at ? label : dayLabel(items[k].createdAt);
+      at = items[k];
+      if (scrolled) { last = performance.now(); if (!timer) timer = window.setTimeout(check, DATE_HIDE_MS); }
+      if (on && day === label && tabsH === top0) return;
+      on = true; label = day; top0 = tabsH;
+      const v = { label: day, top: tabsH };
+      requestMutation(() => sink.current?.(v));
+    };
+    st.current = { sink, fn, stop: () => { clearTimeout(timer); timer = 0; } };
+  }
+  useEffect(() => st.current!.stop, []);
+  return st.current;
+}
+
+/** Сама плашка — тот же вид, что разделитель дня в ленте; спрятанная остаётся на месте (только прозрачность),
+ *  высота 0 — сетку не сдвигает. */
+function MediaDate({ sink }: { sink: DateSink }) {
+  const [v, setV] = useState<{ label: string; top: number }>({ label: '', top: 0 });
+  const [on, setOn] = useState(false);
+  useLayoutEffect(() => {
+    sink.current = (x) => { if (x) { setV((o) => (o.label === x.label && o.top === x.top ? o : x)); setOn(true); } else setOn(false); };
+    return () => { sink.current = null; };
+  }, []);
+  return (
+    <div class="app-media-date" data-state={on ? 'on' : 'off'} style={{ top: v.top }} aria-hidden="true">
+      <DateDivider>{v.label}</DateDivider>
     </div>
   );
 }
