@@ -6,15 +6,14 @@ import { sql, type Tx } from '../db';
 import { GROUP_MEMBERS_MAX, GROUP_TITLE_MAX, toMessage } from './chats';
 import { contentColumns, openRows } from './messageContent';
 import { DomainError } from './errors';
-import { appendUpdates, fanOut } from './journal';
+import { appendUpdates, chatEvent } from './journal';
 import { nameForSql } from './profile';
 import { checkPassword } from './password';
 import { onlineUsers } from './liveRegistry';
 import { presenceFor } from './presence';
 import { privacyCtx } from './privacy';
 import {
-  broadcastGroup, broadcastMembers, canChangeInfo, canInvite, groupCtx, hasAdmin, isGroup, membersOf, requireAdmin, sendMembership, type GroupCtx,
-} from './groupRights';
+  broadcastGroup, broadcastMembers, canChangeInfo, canInvite, groupCtx, hasAdmin, isGroup, membersOf, requireAdmin, sendMembership, type GroupCtx, joinMembership } from './groupRights';
 
 type Db = Tx | typeof sql;
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
@@ -36,7 +35,7 @@ export async function serviceMessage(tx: Tx, chatId: number, senderId: number, t
     insert into messages (chat_id, sender_id, client_id, kind, body, service_type, service_data, content)
     values (${chatId}, ${senderId}, ${clientId}, 'text', ${c.body}, ${type}, ${Object.keys(data).length ? tx.json(data as never) : null}, ${c.content}) returning *`;
   const message = toMessage((await openRows([row], '', tx))[0]);
-  await fanOut(tx, await membersOf(tx, chatId), { type: 'newMessage', message });
+  await chatEvent(tx, chatId, { type: 'newMessage', message }, 'group');
   return message;
 }
 
@@ -278,7 +277,7 @@ export async function acceptMember(tx: Tx, chatId: number, userId: number, actor
   if (!(await insertMember(tx, chatId, userId, actorId))) return false;
   await tx`delete from chat_join_requests where chat_id = ${chatId} and user_id = ${userId}`;
   await serviceMessage(tx, chatId, userId, type, { users: await names(tx, [userId]) });
-  await sendMembership(tx, chatId, userId);
+  await joinMembership(tx, chatId, userId);   // с seq чата на момент коммита: новичок ничего не догоняет
   await broadcastGroup(tx, chatId);
   await broadcastMembers(tx, chatId, { upsert: [userId], joined: [userId] });
   return true;
@@ -316,7 +315,7 @@ export async function addGroupMembers(userId: number, chatId: number, rawIds: un
     if (added.length) {
       await tx`delete from chat_join_requests where chat_id = ${chatId} and user_id = any(${added}::bigint[])`;
       await serviceMessage(tx, chatId, userId, 'members_added', { users: await names(tx, added) });
-      for (const id of added) await sendMembership(tx, chatId, id);
+      for (const id of added) await joinMembership(tx, chatId, id);
       await broadcastGroup(tx, chatId);
       await broadcastMembers(tx, chatId, { upsert: added, joined: added });
     }
@@ -415,7 +414,7 @@ export async function setGroupAdmin(userId: number, chatId: number, target: numb
                where chat_id = ${chatId} and user_id = ${target}`;
     }
     await sendMembership(tx, chatId, target);
-    await broadcastGroup(tx, chatId);   // список тех, кто видит заявки, мог поменяться
+    await broadcastGroup(tx, chatId, [target]);   // список тех, кто видит заявки, мог поменяться: снятому — joinRequests 0
     await broadcastMembers(tx, chatId, { upsert: [target] });
     return { ok: true };
   });
@@ -447,7 +446,7 @@ async function makeOwner(tx: Tx, chatId: number, target: number, prev: number): 
   await serviceMessage(tx, chatId, prev, 'owner_changed', { users: await names(tx, [target]) });
   await sendMembership(tx, chatId, target);
   await sendMembership(tx, chatId, prev).catch(() => {});   // прежний мог уже выйти
-  await broadcastGroup(tx, chatId);
+  await broadcastGroup(tx, chatId, [prev]);
   await broadcastMembers(tx, chatId, { upsert: [target, prev] });
 }
 

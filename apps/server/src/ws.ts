@@ -3,6 +3,8 @@ import { currentEpoch } from './domain/epoch';
 import type { ClientFrame, ServerFrame } from '@relay/protocol';
 import { DomainError } from './domain/errors';
 import { currentSeq, getUpdates } from './domain/journal';
+import { chatSeqsSince, getChatUpdates } from './domain/chatJournal';
+import { syncSubscriptions, type ChatSocket } from './sockets';
 import { sendMessage } from './domain/messages';
 import { markRead } from './domain/reads';
 import { saveDraft } from './domain/drafts';
@@ -10,25 +12,55 @@ import { deleteMessage, editMessage, markListened, reactMessage } from './domain
 import { appendTodo, editTodo, toggleTodo } from './domain/todo';
 import { pressButton } from './domain/buttons';
 
-/** publish — разослать кадр в топик пользователя (для «печатает…»); у тестов без сокетов — no-op.
- *  sessionId — сеанс сокета (кнопки «Нового входа» отличают этот сеанс от остальных). */
-export async function handleFrame(userId: number, frame: ClientFrame, publish: (topic: string, msg: string) => void = () => {}, sessionId?: number): Promise<ServerFrame[]> {
+/** Ждать open сокета (подписки на журналы чатов), но не дольше ms: Valkey недоступен — отвечаем, сверка догонит. */
+const opened = (sock: ChatSocket | undefined, ms = 5000) => sock?.data.opened ? Promise.race([sock.data.opened, new Promise<void>((r) => setTimeout(r, ms))]) : Promise.resolve();
+
+/** publish — разослать кадр в топик (шина Valkey: «печатает…»); у тестов без сокетов — no-op.
+ *  sessionId — сеанс сокета (кнопки «Нового входа» отличают этот сеанс от остальных); sock — сам сокет (подписки на журналы чатов). */
+export async function handleFrame(userId: number, frame: ClientFrame, publish: (topic: string, msg: string) => void = () => {}, sessionId?: number, sock?: ChatSocket): Promise<ServerFrame[]> {
   const reqId = 'reqId' in frame ? frame.reqId : undefined;
   try {
     switch (frame.op) {
       case 'typing': {
-        // участникам, кроме себя; не участник — молча игнорируем (это не данные, ответа нет)
-        // кто заблокировал отправителя, «печатает…» от него не видит
+        // не участник — молча игнорируем (это не данные, ответа нет)
+        const [c] = await sql`select c.kind, exists (select 1 from chat_members m where m.chat_id = c.id and m.user_id = ${userId}) as member from chats c where c.id = ${frame.chatId}`;
+        if (!c?.member) return [];
+        const msg = JSON.stringify({ op: 'typing', chatId: frame.chatId, userId } satisfies ServerFrame);
+        if (c.kind !== 'direct') {
+          // группа: один publish в топик чата (все процессы раздают своим подписчикам); свой userId и заблокированных отсеивает клиент
+          publish(`chat:${frame.chatId}`, msg);
+          return [];
+        }
+        // личный: собеседнику, кроме того, кто заблокировал отправителя
         const rows = await sql`
           select m.user_id, exists (select 1 from blocks b where b.owner_id = m.user_id and b.user_id = ${userId}) as blocked
-            from chat_members m where m.chat_id = ${frame.chatId}`;
-        if (!rows.some((r) => r.user_id === userId)) return [];
-        const msg = JSON.stringify({ op: 'typing', chatId: frame.chatId, userId } satisfies ServerFrame);
-        for (const r of rows) if (r.user_id !== userId && !r.blocked) publish(`user:${r.user_id}`, msg);
+            from chat_members m where m.chat_id = ${frame.chatId} and m.user_id <> ${userId}`;
+        for (const r of rows) if (!r.blocked) publish(`user:${r.user_id}`, msg);
         return [];
       }
-      case 'hello':
-        return [{ op: 'hello', seq: await currentSeq(userId), epoch: await currentEpoch() }];
+      case 'hello': {
+        // отвечаем после подписок сокета: событие между ответом и подпиской иначе потерялось бы до сверки
+        await opened(sock);
+        if (sock) await syncSubscriptions(sock).catch((e) => console.error('chat subscriptions:', e));
+        const [seq, epoch, chats] = await Promise.all([currentSeq(userId), currentEpoch(), chatSeqsSince(userId, frame.since ?? 0)]);
+        return [{ op: 'hello', seq, epoch, now: chats.now, chats: chats.items }];
+      }
+      case 'chatsSince': {
+        if (sock) await syncSubscriptions(sock).catch((e) => console.error('chat subscriptions:', e));
+        const chats = await chatSeqsSince(userId, frame.since);
+        return [{ op: 'chats', now: chats.now, items: chats.items }];
+      }
+      case 'syncChat': {
+        let page;
+        try { page = await getChatUpdates(userId, frame.chatId, frame.since); }
+        catch (e) {
+          if (e instanceof DomainError && (e.code === 'not_member' || e.code === 'not_found')) return [{ op: 'chatGone', reqId: frame.reqId, chatId: frame.chatId }];
+          throw e;
+        }
+        if (page.tooLong) return [{ op: 'chatTooLong', reqId: frame.reqId, chatId: frame.chatId, seq: page.seq }];
+        const to = page.items.length ? page.items[page.items.length - 1].seq : frame.since;
+        return [{ op: 'chatUpdates', reqId: frame.reqId, chatId: frame.chatId, from: frame.since, to, items: page.items, more: page.more }];
+      }
       case 'sync': {
         const page = await getUpdates(userId, frame.since);
         if (page.tooLong) return [{ op: 'tooLong', seq: page.seq }];

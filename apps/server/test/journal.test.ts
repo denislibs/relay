@@ -68,13 +68,17 @@ const raw = async (userId: number) => (await sql`select type, payload from updat
 const SECRET = 'пароль от сейфа 4242';
 
 test('the journal keeps references, not texts: message, edit and draft are stored as ids only', async () => {
-  const a = await makeUser('a'), b = await makeUser('b'), c = await makeUser('c');
-  const chat = await makeChat([a, b, c]);
+  const a = await makeUser('a'), b = await makeUser('b');
+  const chat = await makeChat([a, b]);   // личный: события в личных журналах (группы — в журнале чата, там тоже ссылки)
   const { message } = await sendMessage(a, { chatId: chat, clientId: crypto.randomUUID(), body: SECRET });
   await editMessage(a, chat, message.id, SECRET + ' (новый)');
   await saveDraft(a, chat, SECRET + ' черновик');
-  for (const u of [a, b, c]) expect(JSON.stringify(await raw(u))).not.toContain('сейфа');
+  for (const u of [a, b]) expect(JSON.stringify(await raw(u))).not.toContain('сейфа');
   expect((await raw(b))[0]).toEqual({ type: 'newMessage', chatId: chat, id: message.id, ref: 1 });
+  const g = await makeChat([a, b, await makeUser('c')]);
+  const gm = (await sendMessage(a, { chatId: g, clientId: crypto.randomUUID(), body: SECRET })).message;
+  const [row] = await sql`select payload from chat_updates where chat_id = ${g} order by seq desc limit 1`;
+  expect(row.payload).toEqual({ type: 'newMessage', chatId: g, id: gm.id, ref: 1 });
 });
 
 test('sync gives the client the same events as before: full message, edit, draft — current state', async () => {
@@ -119,10 +123,11 @@ test('one fanOut to many users is one statement: contiguous seqs, in entry order
   const ids: number[] = [];
   for (let i = 0; i < 50; i++) ids.push(await makeUser('u' + i));
   await sql.begin((tx) => fanOut(tx, ids, ping(1)));
-  const seqs = await sql.begin((tx) => appendUpdates(tx, [
+  await sql.begin((tx) => appendUpdates(tx, [
     { userId: ids[3], update: ping(2) }, { userId: ids[0], update: ping(3) }, { userId: ids[3], update: ping(4) }, { userId: ids[3], update: ping(5) },
   ]));
-  expect(seqs).toEqual([2, 2, 3, 4]);   // в порядке entries: ids[3] получает 2,3,4, ids[0] — 2
+  // в порядке entries: ids[3] получает 2,3,4, ids[0] — 2
+  expect((await getUpdates(ids[0], 0)).items.map((i) => [i.seq, (i.update as { chatId: number }).chatId])).toEqual([[1, 1], [2, 3]]);
   for (const id of ids) expect(await currentSeq(id)).toBe(id === ids[3] ? 4 : id === ids[0] ? 2 : 1);
   const { items } = await getUpdates(ids[3], 0);
   expect(items.map((i) => [i.seq, (i.update as { chatId: number }).chatId])).toEqual([[1, 1], [2, 2], [3, 4], [4, 5]]);
@@ -139,6 +144,7 @@ test('NOTIFY leaves after the commit, not inside it: a rolled-back fanOut pokes 
     await fanOut(tx, [a, b], { type: 'newMessage', message: { id: 1, chatId: 1, senderId: a } as never });
     await appendUpdates(tx, [{ userId: a, update: ping(1) }]);   // у a две записи — ему только пинок
     expect(got).toEqual([]);   // до коммита ничего не ушло
+    expect((await tx`select count(*)::int as n from updates`)[0].n).toBe(0);   // и в базе тоже: журнал пишется при коммите
   });
   await Bun.sleep(100);
   expect(got.length).toBe(1);
@@ -168,11 +174,19 @@ test('notify payloads for thousands of recipients: several parts, each under 800
   }
   expect(seen.size).toBe(3000);
   expect([...seen.values()].every((c) => c === 1)).toBe(true);
-  // без inline — простые массивы, тоже частями
+  // без inline — только пинки, тоже частями, без e
   const plain = notifyPayloads(Array.from({ length: 3000 }, (_, i) => ({ userId: 100000 + i, seq: 1, update: { type: 'readOwn', chatId: 1, upToId: 1 } as never })));
   expect(plain.length).toBeGreaterThan(1);
-  expect(plain.flatMap((s) => JSON.parse(s) as number[]).length).toBe(3000);
+  expect(plain.flatMap((s) => (JSON.parse(s) as { p: number[]; e?: unknown }).p).length).toBe(3000);
+  expect(plain.every((s) => !('e' in (JSON.parse(s) as object)))).toBe(true);
   // длинное сообщение не влезает — всем пинок
   const big = notifyPayloads([{ userId: 1, seq: 1, update: { type: 'newMessage', message: { id: 1, chatId: 1, senderId: 2, body: 'я'.repeat(4096) } } as never }]);
-  expect(big).toEqual(['[1]']);
+  expect(big.length).toBe(1);
+  expect(JSON.parse(big[0])).toMatchObject({ p: [1], u: [] });
+  // membership / chatRemoved → s / x: подписать и отписать сокеты
+  const sx = notifyPayloads([
+    { userId: 5, seq: 1, update: { type: 'membership', chatId: 42, me: {} } as never },
+    { userId: 6, seq: 1, update: { type: 'chatRemoved', chatId: 42 } as never },
+  ]);
+  expect(JSON.parse(sx[0])).toEqual({ p: [5, 6], u: [], s: [[5, 42]], x: [[6, 42]] });
 });
