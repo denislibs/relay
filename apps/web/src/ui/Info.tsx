@@ -22,6 +22,7 @@ import { PhotoViewer } from './PhotoViewer';
 import { StickersPanel } from './stickers/StickersPanel';
 import { GROUP_PAGES, GroupScreen, isGroupPage, parentOf, type GroupPage, type Params } from './group/Manage';
 import { canManage, copyText, publicUrl } from '../groups';
+import { subscribersText } from '../channelText';
 import type { GroupInfo, MyMembership } from '@relay/protocol';
 
 const PAGES = ['info', 'stickers', 'edit', ...GROUP_PAGES];   // «Стикеры» — вторая вложенность (из поиска в панели стикеров)   // «Изменить контакт» и управление группой выезжают внутри панели справа налево
@@ -96,8 +97,11 @@ export function Info() {
   }, [page]);
 
   const title = (chat?.title as string) || 'Чат №' + chatId;
-  const group = chat?.kind === 'group';
-  const members = useMembers(chatId, group);
+  // группа или канал: у канала — подписчики числом, без онлайна; список подписчиков — только админам
+  const channel = chat?.kind === 'channel';
+  const group = chat?.kind === 'group' || channel;
+  const gAdmin = !!(chat?.me as MyMembership | null | undefined)?.admin;
+  const members = useMembers(chatId, chat?.kind === 'group' || (channel && gAdmin));
   const myPeer = peer && chat?.peerId === peer.userId && peer.known ? peer : null;
   const gallery = useProfilePhotos(group || system ? null : peerId, chat?.photo as ProfilePhoto | null);
   const [slide, setSlide] = useState(0);
@@ -159,7 +163,7 @@ export function Info() {
       el.removeEventListener('touchmove', onTouchMove);
     };
   }, [canExpand, chatId]);
-  const subtitle = system ? 'служебные уведомления' : group ? (members ? membersStatus(members, false) : 'группа') : myPeer ? lastSeenText(!!myPeer.online, myPeer.lastSeen as string | null) : '';
+  const subtitle = system ? 'служебные уведомления' : channel ? subscribersText(((chat?.group as GroupInfo | null)?.members) ?? 0) : group ? (members ? membersStatus(members, false) : 'группа') : myPeer ? lastSeenText(!!myPeer.online, myPeer.lastSeen as string | null) : '';
 
   const addContact = () => setGlobal({ newContact: {
     // запрос — то, что видно человеку: @имя или телефон; нет ни того, ни другого — поле пустое, добавим по id
@@ -168,7 +172,7 @@ export function Info() {
   } });
   // шапка справа: контакт — ✎ «Изменить», не контакт — «Добавить в контакты» (как в Telegram)
   const gInfo = (chat?.group as GroupInfo | null) ?? null, gMe = (chat?.me as MyMembership | null) ?? null;
-  const action = group ? (canManage(gMe) ? { icon: 'pencil', label: 'Изменить группу', onClick: () => nav.go('gEdit') } : undefined)
+  const action = group ? (canManage(gMe) ? { icon: 'pencil', label: channel ? 'Изменить канал' : 'Изменить группу', onClick: () => nav.go('gEdit') } : undefined)
     : !peerId || !contactsLoaded ? undefined
     : contact ? { icon: 'userPen', label: 'Изменить контакт', onClick: () => setPage('edit') }
     : { icon: 'contactAdd', label: 'Добавить в контакты', onClick: addContact };
@@ -187,7 +191,7 @@ export function Info() {
     ) : (
     <div class="rl-sidepage">
       <PanelHeader class={media ? 'is-media' : undefined} icon={media ? 'arrowLeft' : 'close'} closeLabel={media ? 'Наверх' : 'Закрыть'}
-        title={<HeadTitle media={media} plain={group ? 'Информация о группе' : 'Информация'} name={title} head={mediaHead} />} onClose={media ? toTop : close} action={media ? undefined : action} />
+        title={<HeadTitle media={media} plain={channel ? 'Информация о канале' : group ? 'Информация о группе' : 'Информация'} name={title} head={mediaHead} />} onClose={media ? toTop : close} action={media ? undefined : action} />
       <div class="rl-aside-body" ref={body} onScroll={onBodyScroll}>
         {gallery.length ? (
           <ProfileGallery photos={gallery} index={slide} onIndex={setSlide} onOpen={setViewer}
@@ -231,7 +235,7 @@ export function Info() {
             </div>
           ) : null}</Expand>
         </div>
-        <SharedMedia chatId={chatId} group={group} peerId={system ? null : peerId} onHead={setMediaHead} onMember={openMember} />
+        <SharedMedia chatId={chatId} group={chat?.kind === 'group' || (channel && gAdmin)} channel={channel} peerId={system ? null : peerId} onHead={setMediaHead} onMember={openMember} />
         {viewer != null && gallery.length ? (
           <PhotoViewer photos={gallery} index={viewer} name={title} onIndex={setSlide} onClose={() => setViewer(null)}
             origin={(k) => (k === slide ? document.querySelector<HTMLElement>(`.app-gallery [data-gallery-slide="${k}"]`) : null)} />

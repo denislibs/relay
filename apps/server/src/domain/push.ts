@@ -100,52 +100,93 @@ export async function unsubscribe(userId: number, endpoint: string): Promise<voi
 }
 
 /** system — служебное сообщение Relay: SW ставит знак Relay иконкой. */
-export type PushPayload = { chatId: number; id: number; title: string; body: string; system?: true };
+/** mention — упоминание меня (push.mention): SW может показать его даже в заглушённом чате. */
+export type PushPayload = { chatId: number; id: number; title: string; body: string; system?: true; mention?: true };
 
-export type PushMessage = { chatId: number; id: number; senderId: number; body: string; entities?: { type: string; offset: number; length: number }[]; kind?: string; attachment?: { name?: string } | null; service?: { type: string }; sticker?: { emoji?: string } | null };
+export type PushMessage = { chatId: number; id: number; senderId: number; body: string; entities?: { type: string; offset: number; length: number }[]; kind?: string; attachment?: { name?: string } | null; service?: { type: string }; sticker?: { emoji?: string } | null; post?: boolean };
 
 /** Новое сообщение → кому и что слать (задача push.message): подписки участников без соединения в любом процессе,
  *  кроме отправителя, заглушивших чат и заблокировавших отправителя.
  *  Только подпискам живых сеансов: истёкший или неактивный дольше срока, но ещё не убранный sweepInactive — молчит. */
-export async function planPush(m: PushMessage): Promise<{ endpoint: string; push: PushPayload }[]> {
+/** excludeChatId — копия поста в группе обсуждения: участники этого канала (получили push о посте) пропускаются,
+ *  заголовок — название канала. */
+/** mentionOf — упоминание (push.mention): только этому получателю и сквозь mute — чата на аккаунте, списка muted
+ *  подписки и умолчания вида чата (как в Telegram); блокировки, «скрывать текст» и предпросмотр — как обычно.
+ *  Без mentionOf упомянутые пропускаются: им уходит push.mention, одно уведомление на сообщение. */
+export async function planPush(m: PushMessage, opts: { excludeChatId?: number; mentionOf?: number } = {}): Promise<{ endpoint: string; push: PushPayload }[]> {
+  return (await planPushPage(m, opts)).targets;
+}
+
+/** Курсор страницы push.message: последняя (user_id, endpoint) прочитанной страницы. */
+export type PushCursor = [number, string];
+
+/**
+ * Страница planPush (задача push.message по страницам): подписки по возрастанию (user_id, endpoint) после after,
+ * не больше limit строк до фильтра «онлайн / умолчания вида чата». full — за страницей есть ещё подписки,
+ * last — курсор следующей страницы. Без limit — все подписки разом (push.mention, тесты).
+ */
+export async function planPushPage(m: PushMessage, opts: { excludeChatId?: number; mentionOf?: number; after?: PushCursor; limit?: number } = {}):
+  Promise<{ targets: { endpoint: string; push: PushPayload }[]; last: PushCursor | null; full: boolean }> {
+  const excl = opts.excludeChatId ?? null, only = opts.mentionOf ?? null;
+  const [afterUid, afterEp] = opts.after ?? [0, ''];
+  const limit = opts.limit ?? null;
   m = { ...m, body: hideSpoilers(m.body, m.entities) };   // скрытый текст в уведомление не уходит
   // код входа не уходит в push-сервис и на экран блокировки
   if (m.service?.type === 'login_code') m = { ...m, body: 'Код для входа в Relay' };
   // имя отправителя — глазами получателя (контактное, если он его задал)
-  const subs = await sql`
+  const rows = await sql`
     select s.endpoint, s.user_id, s.hide_text,
            (select ${nameForSql(sql`s.user_id`)} from users u where u.id = ${m.senderId}) as sender_name
       from push_subscriptions s
     join chat_members cm on cm.user_id = s.user_id and cm.chat_id = ${m.chatId}
     join sessions se on se.id = s.session_id
     left join user_settings us on us.user_id = s.user_id
-    where s.user_id <> ${m.senderId} and not (${m.chatId} = any(s.muted))
+    where s.user_id <> ${m.senderId}
+      ${only != null ? sql`and s.user_id = ${only}` : sql`
+      and not (${m.chatId} = any(s.muted))
       and (cm.mute_until is null or cm.mute_until <= now())   -- выключенный на аккаунте чат: мьют 'infinity' в будущем всегда
+      and not exists (select 1 from message_mentions mm where mm.user_id = s.user_id and mm.chat_id = ${m.chatId} and mm.message_id = ${m.id})`}
       and se.expires_at > now()
       and se.last_active_at > now() - make_interval(days => coalesce(us.sessions_ttl_days, ${DEFAULT_TTL_DAYS}))
-      and not exists (select 1 from blocks b where b.owner_id = s.user_id and b.user_id = ${m.senderId})   -- от заблокированного — никогда`;
+      and not exists (select 1 from blocks b where b.owner_id = s.user_id and b.user_id = ${m.senderId})   -- от заблокированного — никогда
+      ${excl != null ? sql`and not exists (select 1 from chat_members x where x.chat_id = ${excl} and x.user_id = s.user_id)` : sql``}
+      -- курсор по (user_id, endpoint); cm.user_id >= — чтобы страница шла по ключу chat_members (chat_id, user_id)
+      and (s.user_id, s.endpoint) > (${afterUid}::bigint, ${afterEp}::text) and cm.user_id >= ${afterUid}
+    order by s.user_id, s.endpoint
+    ${limit != null ? sql`limit ${limit + 1}` : sql``}`;
+  // строкой больше страницы: есть ли продолжение (иначе ровно полная последняя страница ставила бы пустое)
+  const more = limit != null && rows.length > limit;
+  const subs = more ? rows.slice(0, limit) : rows;
+  const lastRow = subs.length ? subs[subs.length - 1] : null;
+  const page = { last: lastRow ? [Number(lastRow.user_id), lastRow.endpoint as string] as PushCursor : null, full: more };
   const online = await onlineUsers([...new Set(subs.map((s) => Number(s.user_id)))]);
   const offline = subs.filter((s) => !online.has(Number(s.user_id)));
-  if (!offline.length) return [];
+  if (!offline.length) return { targets: [], ...page };
   const [info] = await sql`select kind, title from chats where id = ${m.chatId}`;
-  if (!info) return [];   // чат удалили, пока задача ждала
+  if (!info) return { targets: [], last: null, full: false };   // чат удалили, пока задача ждала
+  if (excl != null) { const [ch] = await sql`select title from chats where id = ${excl}`; if (ch) info.title = ch.title; }
   // умолчания получателя для этого вида чата: выключено — не шлём; без предпросмотра — текст не отдаём
   const defaults = await notifyDefaults(sql, [...new Set(offline.map((s) => s.user_id as number))]);
-  const kind = info.kind === 'group' ? 'group' : 'direct';
+  const kind = info.kind === 'channel' ? 'channel' : info.kind === 'group' ? 'group' : 'direct';
   const prefOf = (userId: number) => defaults.get(userId)?.[kind] ?? { muted: false, preview: true };
   const preview = m.kind === 'sticker' ? (m.sticker?.emoji ? m.sticker.emoji + ' Стикер' : 'Стикер') : m.kind === 'voice' ? '🎤 Голосовое сообщение' : m.kind === 'todo' ? '☑️ ' + m.body : m.kind === 'round' ? 'Видеосообщение' : m.kind === 'photo' ? (m.body ? '🖼 ' + m.body : 'Фотография') : m.kind === 'video' ? (m.body ? '📹 ' + m.body : 'Видео') : m.kind === 'file' ? '📎 ' + (m.body || m.attachment?.name || 'Файл') : m.kind === 'audio' ? '🎵 ' + (m.body || (m.attachment as { title?: string } | null | undefined)?.title || (m.attachment?.name ?? 'Музыка').replace(/\.[^.]{1,5}$/, '')) : m.body;
-  return offline.filter((s) => !prefOf(s.user_id as number).muted).map((s) => {
+  const targets = offline.filter((s) => only != null || !prefOf(s.user_id as number).muted).map((s) => {
     const name = s.sender_name as string;
     const shown = prefOf(s.user_id as number).preview;
     // «Скрывать текст в уведомлениях» на этом устройстве — ни имени, ни текста (как и локальное уведомление)
+    // пост (канал или его копия в группе) — от имени канала: заголовок — название чата, имени автора нет
     const push: PushPayload = s.hide_text === true
       ? { chatId: m.chatId, id: m.id, title: 'Relay', body: NO_PREVIEW }
+      : kind === 'channel' || m.post
+      ? { chatId: m.chatId, id: m.id, title: (info.title as string) ?? 'Канал', body: shown ? preview : NO_PREVIEW }
       : kind === 'group'
       ? { chatId: m.chatId, id: m.id, title: (info.title as string) ?? 'Группа', body: shown ? `${name}: ${preview}` : NO_PREVIEW }
       : { chatId: m.chatId, id: m.id, title: name, body: shown ? preview : NO_PREVIEW };
     if (m.service) push.system = true;
+    if (only != null) push.mention = true;
     return { endpoint: s.endpoint as string, push };
   });
+  return { targets, ...page };
 }
 
 const PUSH_TIMEOUT_MS = 10_000;

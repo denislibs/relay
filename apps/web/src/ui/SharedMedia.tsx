@@ -14,6 +14,7 @@ import { clock, dayLabel, fileSize, lastSeenText } from './format';
 import { openUserChat, prepareUserChat } from '../data';
 import { pressOpen } from './press';
 import { membersWord, useMembers, type Member } from '../members';
+import { subscribersText } from '../channelText';
 import { useCommonGroups, type CommonGroup } from '../commonGroups';
 import { wantPeople } from '../people';
 
@@ -45,7 +46,7 @@ type Tab = SharedTab;
  *  onHead — вкладки, показанная и их счётчики: шапка панели пишет счётчик, когда вкладки прилипли к верху.
  *  onMember — клик по участнику (без него — переписка с ним поверх текущего чата, через стек). */
 export interface MediaHead { tabs: Tab[]; shown: Tab; counters: (string | null)[] }
-export function SharedMedia({ chatId, group = false, peerId = null, onHead, onMember }: { chatId: number; group?: boolean; peerId?: number | null; onHead?: (h: MediaHead | null) => void; onMember?: (userId: number) => void }) {
+export function SharedMedia({ chatId, group = false, channel = false, peerId = null, onHead, onMember }: { chatId: number; group?: boolean; channel?: boolean; peerId?: number | null; onHead?: (h: MediaHead | null) => void; onMember?: (userId: number) => void }) {
   const [tab, setTab] = useState<Tab | null>(null);
   const members = useMembers(chatId, group);
   // личный чат: группы, где состоите оба (как в Telegram — последней вкладкой)
@@ -67,7 +68,8 @@ export function SharedMedia({ chatId, group = false, peerId = null, onHead, onMe
   const tabs: Tab[] = [...(group ? ['members' as const] : []), ...(counts ? ORDER.filter((t) => counts[t] > 0) : []), ...(common?.length ? ['groups' as const] : [])];
   const active = tab && tabs.includes(tab) ? tab : tabs[0] ?? null;
   const shown = pending && tabs.includes(pending) ? pending : active;
-  const counters = tabs.map((t) => tabCounter(t, known, members ? members.members.length : null, common ? common.length : null));
+  // канал (админу): вкладка подписчиков вместо участников
+  const counters = tabs.map((t) => (channel && t === 'members' ? (members ? subscribersText(members.members.length) : null) : tabCounter(t, known, members ? members.members.length : null, common ? common.length : null)));
   const headKey = shown ? tabs.join() + '|' + shown + '|' + counters.join() : '';
   useEffect(() => { onHead?.(shown ? { tabs, shown, counters } : null); }, [headKey]);
   const pick = (id: Tab) => {
@@ -87,7 +89,7 @@ export function SharedMedia({ chatId, group = false, peerId = null, onHead, onMe
       {/* одна непустая вкладка — переключать нечего: вместо одинокой плашки заголовок раздела */}
       {tabs.length > 1 ? (
         <div class="rl-aside-tabs" ref={bar}>
-          <FolderTabs label="Общие медиа" active={shown} onChange={pick} items={tabs.map((t) => ({ id: t, label: tabLabel(t) }))} />
+          <FolderTabs label="Общие медиа" active={shown} onChange={pick} items={tabs.map((t) => ({ id: t, label: channel && t === 'members' ? 'Подписчики' : tabLabel(t) }))} />
         </div>
       ) : <h3 class="app-sm-heading">{tabLabel(tabs[0])}</h3>}
       <div class="rl-aside-pages" ref={pages}>

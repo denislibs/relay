@@ -32,7 +32,7 @@ export function unregisterSocket(ws: ChatSocket): void {
 export const socketsOf = (userId: number): ChatSocket[] => [...(byUser.get(userId) ?? [])];
 
 export async function groupChatIds(userId: number): Promise<number[]> {
-  const rows = await sql`select cm.chat_id from chat_members cm join chats c on c.id = cm.chat_id where cm.user_id = ${userId} and c.kind <> 'direct'`;
+  const rows = await sql`select cm.chat_id from chat_members cm join chats c on c.id = cm.chat_id where cm.user_id = ${userId} and c.kind <> 'direct' and c.deleted_at is null`;
   return rows.map((r) => Number(r.chat_id));
 }
 

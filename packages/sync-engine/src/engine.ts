@@ -4,7 +4,7 @@ import type { ClientFrame, JournalEntry, Me, SettingsSnapshot, Message, PublicUs
 import { Blocks } from './blocks';
 import { Contacts } from './contacts';
 import { delBlob, getBlob, openDb, putBlob, write } from './idb';
-import { affects, computeQuery, diffResults, feedSpan, flagsKey, flagsOf, flagsOverlay, messageWindow, muteKey, rangeAt, muteOverlay, type Result } from './queries';
+import { affects, computeQuery, diffResults, feedSpan, flagsKey, flagsOf, flagsOverlay, messageWindow, muteKey, rangeAt, muteOverlay, threadView, type Result } from './queries';
 import type { Item } from './types';
 import { countStores } from './devstats';
 import { Store, type ChatSummary } from './store';
@@ -27,6 +27,7 @@ import { evict, EVICT_LIMITS, type EvictKeep, type EvictLimits, type EvictOpts, 
 import { musicKey, profileMusicResult, profilePhotosResult, ProfileListsLoader, trackOf } from './profileLists';
 import type { Action, StorageStats, EngineConfig, LocalChat, LocalMessage, OutboxEntry, Patch, Query, SearchHit, SearchResult } from './types';
 import { searchLocal } from './search';
+import { shiftCounts, ViewCounter } from './channel';
 
 export interface WatchHandle { update(q: Query): void; close(): void }
 
@@ -52,7 +53,7 @@ const USERS_BATCH = 200;
 function patchedChats(items: JournalEntry[], after: number): Set<number> {
   const out = new Set<number>();
   for (const { seq, update: u } of items) {
-    if (seq > after && (u.type === 'messageEdited' || u.type === 'messageDeleted' || u.type === 'reactions' || u.type === 'mediaListened' || u.type === 'attachmentUpdated')) out.add(u.chatId);
+    if (seq > after && (u.type === 'messageEdited' || u.type === 'messageDeleted' || u.type === 'reactions' || u.type === 'reactionCounts' || u.type === 'mediaListened' || u.type === 'attachmentUpdated')) out.add(u.chatId);
   }
   return out;
 }
@@ -123,6 +124,8 @@ export class Engine {
   private membersAsked = new Set<number>();
   /** «Общие медиа»: загрузка вкладок и счётчиков для подписок media (media.ts) */
   private readonly media: MediaLoader;
+  /** просмотры постов каналов: батч раз в секунду (channel.ts) */
+  private readonly views: ViewCounter;
   /** музыка и фото профиля: загрузка для подписок (profileLists.ts) */
   private readonly lists: ProfileListsLoader;
   /** раздел «Для разработчиков»: журнал, снимок состояния, имитатор сети (devlog.ts) */
@@ -171,6 +174,11 @@ export class Engine {
       changed: () => this.changed(),
     });
     this.blocks = new Blocks({ store, ops: this.ops, http: (path) => this.http(path), run: (fn) => this.run(fn), changed: () => this.changed() });
+    this.views = new ViewCounter({
+      online: () => this.online && this.ready, run: (fn) => this.run(fn), everyMs: cfg.viewsFlushMs ?? 1000,
+      post: (chatId, ids) => this.http(`/chats/${chatId}/views`, { method: 'POST', body: JSON.stringify({ ids }) }),
+      apply: (chatId, views) => this.run(async () => { this.store.applyViews(chatId, views); this.changed(); }),
+    });
     this.media = new MediaLoader(store, { online: () => this.online && this.ready, http: (path) => this.http(path), run: (fn) => this.run(fn), changed: () => this.changed() });
     this.lists = new ProfileListsLoader(store, { online: () => this.online && this.ready, http: (path) => this.http(path), run: (fn) => this.run(fn), changed: () => this.changed() });
     this.sessions = new Sessions({ ops: this.ops, online: () => this.online, http: (path) => this.http(path) });
@@ -194,6 +202,7 @@ export class Engine {
         if (this.evictTimer) { clearTimeout(this.evictTimer); this.evictTimer = null; }
         for (const t of this.typingTimers.values()) clearTimeout(t);
         this.typingTimers.clear();
+        this.views.close();
         this.watchers.clear();
         return true;
       },
@@ -205,6 +214,10 @@ export class Engine {
     });
     store.contactOf = (id) => this.contacts.view().get(id);
     store.wantUser = (id) => this.userWants.add(id);
+    store.wantPost = (chatId, id) => {
+      if (this.postsNoReplies.has(chatId + ':' + id)) return;   // уже перечитывали — кнопки нет (тред не в текущей группе): не спрашивать снова
+      let s = this.postWants.get(chatId); if (!s) { s = new Set(); this.postWants.set(chatId, s); } s.add(id);
+    };
     this.transport = new WsTransport(cfg.wsUrl, {
       onOpen: () => this.onOpen(),
       onFrame: (f) => this.onFrame(f),
@@ -312,7 +325,7 @@ export class Engine {
   // =====================================================================
 
   watch(q: Query, cb: (p: Patch) => void): WatchHandle {
-    const w: Watcher = { id: this.nextWatch++, q, cb, prev: null, force: true, gated: q.kind === 'messages' };
+    const w: Watcher = { id: this.nextWatch++, q, cb, prev: null, force: true, gated: q.kind === 'messages' || q.kind === 'thread' };
     this.watchers.set(w.id, w);
     if (q.kind === 'messages') this.store.noteOpened(q.chatId);   // уборка урезает давно не открытые первыми
     if (q.kind === 'devStats' || q.kind === 'devLog') this.dev.track(this.watchers.values());
@@ -333,6 +346,7 @@ export class Engine {
     if (w.q.kind === 'media') { this.media.want(w.q); return; }
     // музыка и фото профиля: из IndexedDB сразу; с сервера — если не загружали или сводка в профиле сменилась
     if (w.q.kind === 'profileMusic' || w.q.kind === 'profilePhotos') { this.lists.want(w.q); return; }
+    if (w.q.kind === 'thread') { this.prepareThread(w); return; }
     if (w.q.kind !== 'messages') return;
     const { chatId, limit } = w.q;
     const q = w.q;
@@ -344,6 +358,23 @@ export class Engine {
         await this.store.loadChatMessages(chatId);
         // чат вне загруженных страниц (ссылка #chat=N): сначала он сам, иначе ни шапки, ни истории
         const history = this.ensureOpenChat(chatId).catch(() => {}).then(() => this.ensureWindow(q));
+        if (this.online && w.gated) await Promise.race([history.catch(() => {}), new Promise((r) => setTimeout(r, HISTORY_GATE_MS))]);
+        open();
+        await history;
+      } finally {
+        open();
+      }
+    });
+  }
+
+  /** Тред: кэш группы из IndexedDB, затем страницы треда под окно; первый снимок — как у ленты (ждём не дольше HISTORY_GATE_MS). */
+  private prepareThread(w: Watcher): void {
+    const q = w.q as Extract<Query, { kind: 'thread' }>;
+    const open = () => { if (w.q === q && w.gated) { w.gated = false; this.changed(); } };
+    this.run(async () => {
+      try {
+        await this.store.loadChatMessages(q.chatId);
+        const history = this.ensureThreadWindow(q);
         if (this.online && w.gated) await Promise.race([history.catch(() => {}), new Promise((r) => setTimeout(r, HISTORY_GATE_MS))]);
         open();
         await history;
@@ -817,6 +848,7 @@ export class Engine {
     }
     this.dev.afterEmit();
     this.fetchQuotes();
+    this.fetchPosts();
     this.fetchUsers();
     this.fetchMembers();
     for (const w of this.watchers.values()) {
@@ -977,7 +1009,8 @@ export class Engine {
         this.store.addPending({ clientId, chatId: a.chatId, body: a.body, entities: a.entities ?? [], replyToId: a.replyToId ?? null, createdAt: this.lastCreated, failed: false,
           ...(a.noLinkPreview ? { noLinkPreview: true } : a.link ? { link: a.link } : {}),
           ...(a.attachment && a.attachment.id ? { attachment: a.attachment } : {}),
-          ...(a.blocks && a.blocks.length ? { blocks: a.blocks } : {}) });
+          ...(a.blocks && a.blocks.length ? { blocks: a.blocks } : {}),
+          ...(a.threadId != null ? { threadId: a.threadId } : {}) });
         this.store.setDraft(a.chatId, '');   // отправили — черновик больше не нужен
         await this.store.flush();
         this.changed();
@@ -990,6 +1023,24 @@ export class Engine {
           this.changed();
           this.scheduleReads();
         }
+        return null;
+      }
+      case 'markThreadRead': {
+        if (this.store.localThreadRead(a.chatId, a.threadId, a.upToId)) { this.changed(); this.scheduleReads(); }
+        return null;
+      }
+      case 'nextMention': return this.store.nextMention(a.chatId);
+      case 'readBy': {
+        let res: Response;
+        try { res = await this.dev.fetch(`${this.cfg.httpBase}/chats/${a.chatId}/messages/${a.id}/read-by`, { credentials: 'include', headers: this.cfg.headers }); }
+        catch { return { ok: false, code: 'offline' }; }
+        if (this.session.unauthorized(res.status)) return { ok: false, code: 'offline' };
+        const data = await res.json().catch(() => null) as { code?: string } | null;
+        return res.ok ? { ok: true, data } : { ok: false, code: data?.code ?? 'internal' };
+      }
+      case 'loadThread': {
+        await this.store.loadChatMessages(a.chatId);
+        await this.loadThreadPage(a.chatId, a.threadId, (t) => t?.historyStart && t.ranges.length <= 1 ? undefined : t?.ranges[t.ranges.length - 1]?.[0] ?? null);
         return null;
       }
       case 'loadOlder': {
@@ -1021,6 +1072,7 @@ export class Engine {
         await this.request({ op: 'edit', reqId: '', chatId: a.chatId, id: a.id, body: a.body, entities: a.entities ?? [] });
         return null;
       }
+      case 'countViews': this.views.add(a.chatId, a.ids); return null;
       case 'listened': {
         // у себя — сразу (точка гаснет), сервер разнесёт остальным; без сети — повторим при следующем прослушивании
         this.store.patchMessage(a.chatId, a.id, { listened: true });
@@ -1078,8 +1130,19 @@ export class Engine {
       }
       case 'react': {
         if (!this.online) throw new Error('offline');
-        // сразу у себя (реакция должна отзываться мгновенно), подтверждение и чужие — через журнал
         const m = this.store.messageById(a.chatId, a.id);
+        if (m?.post) {
+          // пост канала: счётчики и моя — сразу у себя, затем точные из ответа; чужие — событием reactionCounts раз в секунду
+          const prev = { reactionCounts: m.reactionCounts ?? [], myReaction: m.myReaction };
+          this.store.patchMessage(a.chatId, a.id, { reactionCounts: shiftCounts(prev.reactionCounts, m.myReaction ?? null, a.emoji), myReaction: a.emoji ?? undefined });
+          this.changed();
+          try {
+            const r = await this.request({ op: 'react', reqId: '', chatId: a.chatId, id: a.id, emoji: a.emoji }) as { counts?: [string, number][]; mine?: string | null };
+            if (r.counts) { this.store.patchMessage(a.chatId, a.id, { reactionCounts: r.counts, myReaction: r.mine ?? undefined }); this.changed(); }
+          } catch (err) { this.store.patchMessage(a.chatId, a.id, prev); this.changed(); throw err; }
+          return null;
+        }
+        // сразу у себя (реакция должна отзываться мгновенно), подтверждение и чужие — через журнал
         const prev = m?.reactions ?? [];
         if (m) {
           const next = prev.filter((r) => r.userId !== this.cfg.userId);
@@ -1137,7 +1200,7 @@ export class Engine {
         const photo = !a.kind && /^image\//.test(a.mime) && !!a.w && !!a.h;
         const sized = photo || a.kind === 'round' || a.kind === 'video';
         this.store.addPending({ clientId, chatId: a.chatId, body: a.body, replyToId: a.replyToId ?? null, createdAt: this.lastCreated, failed: false,
-          ...(a.groupId ? { groupId: a.groupId } : {}),
+          ...(a.groupId ? { groupId: a.groupId } : {}), ...(a.threadId != null ? { threadId: a.threadId } : {}),
           attachment: { id: '', kind: a.kind ?? (photo ? 'photo' : 'file'), mime: a.mime, name: a.name, size: a.file.size, w: sized ? a.w ?? null : null, h: sized ? a.h ?? null : null, thumb: a.thumb ?? null,
             ...(a.kind ? { duration: a.duration ?? null, waveform: a.waveform ?? null } : {}),
             ...(a.kind === 'audio' ? { title: a.title ?? null, performer: a.performer ?? null } : {}),
@@ -1168,7 +1231,10 @@ export class Engine {
           const groups = new Map<string, string>();
           for (const m of srcs) {
             const dropCaption = !!a.hideCaption && !!m.attachment;
-            const fwdFrom = a.hideSender ? null : m.fwdFrom ?? { userId: m.senderId, name: this.nameOf(m.senderId), chatId: a.fromChatId, messageId: m.id!, at: m.createdAt };
+            // пересылка поста — от имени канала (как покажет сервер): автора-админа нет
+            const fwdFrom = a.hideSender ? null : m.fwdFrom ?? (m.post
+              ? { userId: null, name: this.titleOfChat(a.fromChatId) ?? '', chatId: a.fromChatId, messageId: m.id!, at: m.createdAt, ...(m.postAuthor ? { postAuthor: m.postAuthor } : {}) }
+              : { userId: m.senderId, name: this.nameOf(m.senderId), chatId: a.fromChatId, messageId: m.id!, at: m.createdAt });
             let groupId: string | null = null;
             if (m.groupId && m.attachment) { groupId = groups.get(m.groupId) ?? crypto.randomUUID(); groups.set(m.groupId, groupId); }
             queue({ chatId, body: dropCaption ? '' : m.body, entities: dropCaption ? [] : m.entities ?? [], replyToId: takeReply(), attachment: m.attachment ?? null,
@@ -1247,7 +1313,7 @@ export class Engine {
       case 'sendSticker': {
         const clientId = crypto.randomUUID();
         this.lastCreated = Math.max(Date.now(), this.lastCreated + 1);
-        this.store.addPending({ clientId, chatId: a.chatId, body: '', entities: [], replyToId: a.replyToId ?? null, createdAt: this.lastCreated, failed: false, sticker: a.sticker });
+        this.store.addPending({ clientId, chatId: a.chatId, body: '', entities: [], replyToId: a.replyToId ?? null, createdAt: this.lastCreated, failed: false, sticker: a.sticker, ...(a.threadId != null ? { threadId: a.threadId } : {}) });
         await this.store.flush();
         this.changed();
         this.pumpOutbox();
@@ -1434,6 +1500,7 @@ export class Engine {
       case 'typing': {
         // группа шлёт в топик чата всем, включая автора и тех, кто его заблокировал, — отсеиваем здесь
         if (f.userId === this.cfg.userId || this.store.blocks.table.get(f.userId)) return;
+        if (this.store.chats.get(f.chatId)?.kind === 'channel') return;   // в канале «печатает…» не показывается
         // «печатает…» гаснет через typingMs после последнего кадра
         const key = f.chatId + ':' + f.userId;
         clearTimeout(this.typingTimers.get(key));
@@ -2106,7 +2173,7 @@ export class Engine {
           if (!next || !this.online) break;
           try {
             const att = next.attachment ? { id: next.attachment.id, thumb: next.attachment.thumb ?? null, ...(next.attachment.spoiler ? { spoiler: true } : {}) } : null;
-            const r = await this.request({ op: 'send', reqId: '', clientId: next.clientId, chatId: next.chatId, body: next.body, entities: next.entities ?? [], replyToId: next.replyToId, attachment: next.forward ? null : att, ...(next.groupId ? { groupId: next.groupId } : {}), ...(next.forward ? { forward: next.forward } : {}), ...(next.noLinkPreview ? { noLinkPreview: true } : {}), ...(next.blocks ? { blocks: next.blocks } : {}), ...(next.sticker ? { sticker: { id: next.sticker.id } } : {}), ...(next.todo ? { todo: { title: next.todo.title, items: next.todo.items.map((x) => ({ title: x.title })), othersCanAppend: next.todo.othersCanAppend, othersCanComplete: next.todo.othersCanComplete } } : {}) });
+            const r = await this.request({ op: 'send', reqId: '', clientId: next.clientId, chatId: next.chatId, body: next.body, entities: next.entities ?? [], replyToId: next.replyToId, attachment: next.forward ? null : att, ...(next.groupId ? { groupId: next.groupId } : {}), ...(next.forward ? { forward: next.forward } : {}), ...(next.noLinkPreview ? { noLinkPreview: true } : {}), ...(next.blocks ? { blocks: next.blocks } : {}), ...(next.sticker ? { sticker: { id: next.sticker.id } } : {}), ...(next.todo ? { todo: { title: next.todo.title, items: next.todo.items.map((x) => ({ title: x.title })), othersCanAppend: next.todo.othersCanAppend, othersCanComplete: next.todo.othersCanComplete } } : {}), ...(next.threadId != null ? { threadId: next.threadId } : {}) });
             this.store.ack(next.clientId, r.id as number, r.createdAt as string);
             // своё опустило начало живого отрезка ниже seed — сообщения между ними догрузить (страница перед seed)
             const c = this.store.chats.get(next.chatId), live = c?.ranges[c.ranges.length - 1];
@@ -2181,8 +2248,19 @@ export class Engine {
   }
 
   private flushReads(): void {
-    if (!this.online || !this.ready || !this.store.pendingReads.size) return;
+    if (!this.online || !this.ready || (!this.store.pendingReads.size && !this.store.pendingThreadReads.size)) return;
     this.run(async () => {
+      // треды: PUT …/read, отказ (не участник, тред удалён) — не повторять
+      for (const [k, upToId] of [...this.store.pendingThreadReads]) {
+        const [chatId, threadId] = k.split(':').map(Number);
+        try {
+          await this.http(`/chats/${chatId}/threads/${threadId}/read`, { method: 'PUT', body: JSON.stringify({ upToId }) });
+          if ((this.store.pendingThreadReads.get(k) ?? 0) <= upToId) this.store.pendingThreadReads.delete(k);
+        } catch (e) {
+          if (/HTTP 4\d\d/.test(String((e as Error)?.message ?? ''))) this.store.pendingThreadReads.delete(k);
+          else break;
+        }
+      }
       for (const [chatId, upToId] of [...this.store.pendingReads]) {
         try {
           await this.request({ op: 'read', reqId: '', chatId, upToId });
@@ -2193,7 +2271,7 @@ export class Engine {
         }
       }
       await this.store.flush();
-      if (this.store.pendingReads.size && this.online) this.scheduleReads(); // указатель вырос, пока отправляли
+      if ((this.store.pendingReads.size || this.store.pendingThreadReads.size) && this.online) this.scheduleReads(); // указатель вырос, пока отправляли
     });
   }
 
@@ -2264,6 +2342,65 @@ export class Engine {
     return p;
   }
   private newerLoads = new Map<number, Promise<void>>();
+
+  /** Догрузить тред под окно запроса (как ensureWindow ленты, без страниц новее: открытие треда — с живого края). */
+  private async ensureThreadWindow(q: Extract<Query, { kind: 'thread' }>): Promise<void> {
+    const page = this.cfg.historyPage ?? 50;
+    for (let guard = 0; guard < 50; guard++) {
+      if (!this.store.chats.has(q.chatId) && !this.online) return;
+      const { all, span, from, to } = threadView(this.store, q);
+      if (span.start) return;
+      const have = span.hi - span.lo;
+      const short = !q.anchor ? have < q.limit
+        : have === 0 || all[span.lo].sort > q.anchor.sort || (q.anchor.side !== 'start' && from === span.lo && to - from < q.limit);
+      const before = () => { const t = this.store.threadRanges(q.chatId, q.threadId); return span.i >= 0 && t ? t.ranges[span.i][0] : null; };
+      if (short) { if (!(await this.loadThreadPage(q.chatId, q.threadId, before))) return; continue; }
+      if (from - span.lo < page) this.run(() => this.loadThreadPage(q.chatId, q.threadId, before));
+      return;
+    }
+  }
+
+  /** Страница треда старее before() (null — с живого края; undefined — грузить нечего). Одна загрузка на тред за раз; ответ — сколько пришло. */
+  private loadThreadPage(chatId: number, threadId: number, before: (t: ReturnType<Store['threadRanges']>) => number | null | undefined): Promise<number> {
+    const k = chatId + ':' + threadId, running = this.threadLoads.get(k);
+    if (running) return running.then(() => 0);
+    const at = before(this.store.threadRanges(chatId, threadId));
+    if (at === undefined) return Promise.resolve(0);
+    const page = this.cfg.historyPage ?? 50, gen = this.store.resetGen;
+    const p = (async () => {
+      const res = await this.http<{ header: Message; messages: Message[]; hasMore: boolean }>(`/chats/${chatId}/threads/${threadId}/messages?limit=${page}${at ? `&before=${at}` : ''}`);
+      if (gen !== this.store.resetGen) return 0;
+      this.store.applyThreadPage(chatId, threadId, res.header, res.messages, res.hasMore, at, 'older', gen);
+      await this.store.flush();
+      this.changed();
+      return res.messages.length;
+    })().finally(() => this.threadLoads.delete(k));
+    this.threadLoads.set(k, p);
+    return p;
+  }
+  private threadLoads = new Map<string, Promise<number>>();
+
+  /** Посты, у которых журнал принёс replies без кнопки в кэше: перечитать по id (история несёт copyId и прочитанность). */
+  private fetchPosts(): void {
+    if (!this.online || !this.postWants.size) return;
+    const wants = [...this.postWants.entries()];
+    this.postWants.clear();
+    for (const [chatId, ids] of wants) {
+      this.run(async () => {
+        const asked = [...ids].slice(0, 100);
+        const res = await this.http<{ messages: Message[] }>(`/chats/${chatId}/messages?ids=${asked.join(',')}`);
+        // без replies (или пост не пришёл) — запомнить: следующие replies по нему перечитывания не вызывают
+        const withReplies = new Set(res.messages.filter((m) => m.replies).map((m) => m.id));
+        for (const id of asked) if (!withReplies.has(id)) this.postsNoReplies.add(chatId + ':' + id);
+        this.store.addLoose(chatId, res.messages);
+        await this.store.flush();
+        this.changed();
+      });
+    }
+  }
+  private postWants = new Map<number, Set<number>>();
+  /** «канал:пост», перечитанные без replies (в памяти, на сессию) */
+  private postsNoReplies = new Set<string>();
 
   /** Страницы истории одна за другой, пока next() говорит, перед чем грузить (null — с новейшего края). Одна загрузка на чат за раз. */
   private loadHistory(chatId: number, page: number, next: () => { before: number | null } | null): Promise<void> {
@@ -2340,6 +2477,12 @@ export class Engine {
         };
         for (let k = from; k < to; k++) add(all[k]);
         for (const k of w.prev?.order ?? []) { const m = this.store.loadedMessage(q.chatId, k); if (m) add(m); }
+      } else if (q.kind === 'thread') {
+        if (w.gated || !this.store.isLoaded(q.chatId) || this.threadLoads.has(q.chatId + ':' + q.threadId)) keep.busy.add(q.chatId);
+        const set = win(q.chatId), { all, from, to } = threadView(this.store, q);
+        const h = this.store.messageById(q.chatId, q.threadId);
+        if (h) set.add(h.key);
+        for (let k = from; k < to; k++) { set.add(all[k].key); const r = all[k].replyToId != null ? this.store.messageById(q.chatId, all[k].replyToId!) : undefined; if (r) set.add(r.key); }
       } else if (q.kind === 'media') {
         const set = win(q.chatId);
         for (const m of tabMessages(this.store, q.chatId, q.tab).slice(-q.limit)) set.add(m.key);

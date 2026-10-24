@@ -8,12 +8,12 @@ import type { GroupInfo, MyMembership } from './groups';
 export type Id = number;
 
 /** Служебное сообщение от системного пользователя: машинный тип для отрисовки и склейки повторов. */
-export type ServiceType = 'login_code' | 'new_login' | 'group_created' | 'welcome'
+export type ServiceType = 'login_code' | 'new_login' | 'group_created' | 'channel_created' | 'welcome'
   | 'title_changed' | 'photo_changed' | 'photo_removed' | 'members_added' | 'member_left' | 'member_removed'
   | 'joined_by_link' | 'joined_by_request' | 'owner_changed' | 'protected_on' | 'protected_off'
   | 'todo_done' | 'todo_append';   // чек-лист: автор отметил / добавил задачи в список replyToId (номера — в data)
 /** Участники служебного события (имена на момент события) и новое название. */
-export interface ServiceData { users?: { id: Id; name: string }[]; title?: string; completed?: number[]; incompleted?: number[]; items?: number[] }   // group_created: тело — название группы, автор — создатель
+export interface ServiceData { users?: { id: Id; name: string }[]; title?: string; completed?: number[]; incompleted?: number[]; items?: number[] }   // group_created / channel_created: тело — название, автор — создатель
 
 export interface Message {
   id: Id;
@@ -38,7 +38,19 @@ export interface Message {
   blocks?: Block[] | null;        // «статья»: блоки (body — её простой текст)
   buttons?: MessageButton[][] | null;   // кнопки под сообщением (как inline-клавиатура в Telegram): ряды слева направо
   sticker?: StickerRef | null;          // kind 'sticker': снимок стикера на момент отправки
+  post?: boolean;        // пост канала: автор — канал (senderId 0), наружу автор не раскрывается
+  postAuthor?: string;   // подпись автора поста (если в канале включены подписи)
+  views?: number;        // просмотры поста (история, поиск, строка списка; в журнале нет — клиент держит своё значение)
+  reactionCounts?: [string, number][];   // реакции поста счётчиками: [эмодзи, сколько], больше — раньше (вместо reactions)
+  myReaction?: string;   // моя реакция на пост (кто ещё поставил — у поста не отдаётся)
+  threadId?: Id;         // комментарий: id копии поста в группе обсуждения (корень треда)
+  origin?: { chatId: Id; id: Id };   // копия поста в группе обсуждения: канал и пост-оригинал (управляется только через пост)
+  replies?: Replies;     // пост канала с обсуждением: кнопка «N комментариев» (только история канала, в журнале нет)
 }
+
+/** Комментарии к посту: тред — копия copyId в группе chatId; recent — последние (до 3) комментаторы, свежий первым.
+ *  readMaxId — докуда я прочитал тред (только в истории канала; нет — не читал). */
+export interface Replies { copyId: Id; chatId: Id; count: number; lastId: Id | null; recent: Id[]; readMaxId?: Id }
 
 /** Стикер: всё, чтобы нарисовать его без запросов (url — неизменяемый файл /stk/<пак>/<хэш>/<файл>). */
 export interface StickerRef { id: Id; setId: Id; emoji: string; w: number; h: number; format: 'tgs' | 'webp' | 'json'; url: string; outline: string | null }
@@ -66,7 +78,8 @@ export interface LinkPreview {
 }
 
 /** Откуда пересланное: исходный автор (имя — на момент пересылки), чат и сообщение оригинала, когда оно написано. */
-export interface ForwardInfo { userId: Id; name: string; chatId: Id; messageId: Id; at: string }
+/** Переслан пост канала: userId null, name — название канала (автор не раскрывается), postAuthor — подпись поста. */
+export interface ForwardInfo { userId: Id | null; name: string; chatId: Id; messageId: Id; at: string; postAuthor?: string }
 /** Ссылка на пересылаемое в кадре send: сервер сам берёт текст, оформление и вложение оригинала. */
 export interface ForwardRef { chatId: Id; id: Id; hideSender?: boolean; hideCaption?: boolean }
 
@@ -202,6 +215,14 @@ export type Update =
   | { type: 'messageMarkup'; chatId: Id; id: Id; body: string; entities?: Entity[]; buttons: MessageButton[][] | null }
   | { type: 'messageDeleted'; chatId: Id; id: Id }
   | { type: 'reactions'; chatId: Id; id: Id; reactions: Reaction[] }
+  // пост канала: реакции счётчиками (не чаще раза в секунду на пост — reactions.flush); своя реакция — ответом на react
+  | { type: 'reactionCounts'; chatId: Id; id: Id; counts: [string, number][] }
+  // комментарии к посту (журнал канала, не чаще раза в секунду на пост — replies.flush); readMaxId не несёт
+  | { type: 'replies'; chatId: Id; id: Id; count: number; lastId: Id | null; recent: Id[] }
+  // тред прочитан до upToId (chatId — группа обсуждения, threadId — копия поста): только своим устройствам
+  | { type: 'readThread'; chatId: Id; threadId: Id; upToId: Id }
+  // меня упомянули (@имя или ответ): только мне; сообщение целиком (журнал хранит ссылку), threadId — упоминание в треде
+  | { type: 'mention'; message: Message; threadId?: Id }
   | { type: 'mediaListened'; chatId: Id; id: Id }   // голосовое/кружок прослушали
   | { type: 'userUpdated'; user: PublicUser }   // профиль изменился: себе и всем, кто видит пользователя
   // контакт добавлен/изменён (contact) или удалён (removed + user — как его видно без контакта); только владельцу
@@ -238,7 +259,7 @@ export interface MemberRow { userId: Id; role: 'owner' | 'admin' | 'member'; ran
 export const NO_PREVIEW = 'Новое сообщение';
 
 /** Вид чата для умолчаний уведомлений. */
-export type NotifyType = 'direct' | 'group';
+export type NotifyType = 'direct' | 'group' | 'channel';
 export interface NotifyPref { muted: boolean; preview: boolean }
 /** Настройки аккаунта (GET /settings добавляет seq своей записи журнала на момент снимка). */
 export interface UserSettings { notify: Record<NotifyType, NotifyPref>; sessionsTtlDays: number; folders: ChatFolder[] }   // folders — свои папки по порядку вкладок
@@ -333,7 +354,7 @@ export type ClientFrame =
   | { op: 'sync'; since: number }
   | { op: 'syncChat'; reqId: string; chatId: Id; since: number }   // догнать журнал одного чата (группы, каналы)
   | { op: 'chatsSince'; since: number }                             // сверка: какие группы менялись после since
-  | { op: 'send'; reqId: string; clientId: string; chatId: Id; body: string; entities?: Entity[]; replyToId?: Id | null; attachment?: { id: string; thumb?: string | null; spoiler?: boolean } | null; groupId?: string | null; forward?: ForwardRef | null; noLinkPreview?: boolean; blocks?: Block[] | null; todo?: TodoInput; sticker?: { id: Id } | null }
+  | { op: 'send'; reqId: string; clientId: string; chatId: Id; body: string; entities?: Entity[]; replyToId?: Id | null; attachment?: { id: string; thumb?: string | null; spoiler?: boolean } | null; groupId?: string | null; forward?: ForwardRef | null; noLinkPreview?: boolean; blocks?: Block[] | null; todo?: TodoInput; sticker?: { id: Id } | null; threadId?: Id }   // threadId — комментарий в треде (группа обсуждения)
   | { op: 'read'; reqId: string; chatId: Id; upToId: Id }
   | { op: 'typing'; chatId: Id }   // «печатаю» — без ответа, сервер пересылает остальным участникам
   | { op: 'draft'; reqId: string; chatId: Id; text: string; entities?: Entity[] }
@@ -420,7 +441,8 @@ export function parseClientFrame(raw: string): ClientFrame | null {
       }
       if (f.todo != null && !normalizeTodo(f.todo)) return null;
       if (f.sticker != null && (typeof f.sticker !== 'object' || !int((f.sticker as { id: unknown }).id))) return null;
-      return { op: 'send', ...(f.sticker != null ? { sticker: { id: (f.sticker as { id: number }).id } } : {}), ...(f.todo != null ? { todo: normalizeTodo(f.todo)! } : {}), reqId: f.reqId, clientId: f.clientId, chatId: f.chatId, body: f.body, entities: normalizeEntities(f.body, f.entities), replyToId: (f.replyToId as number | null) ?? null, attachment: (f.attachment as { id: string; thumb?: string | null; spoiler?: boolean } | null) ?? null, groupId: (f.groupId as string | null) ?? null, forward, ...(f.noLinkPreview === true ? { noLinkPreview: true } : {}), ...(Array.isArray(f.blocks) ? { blocks: f.blocks as Block[] } : {}) };
+      if (f.threadId != null && !int(f.threadId)) return null;
+      return { op: 'send', ...(f.threadId != null ? { threadId: f.threadId as number } : {}), ...(f.sticker != null ? { sticker: { id: (f.sticker as { id: number }).id } } : {}), ...(f.todo != null ? { todo: normalizeTodo(f.todo)! } : {}), reqId: f.reqId, clientId: f.clientId, chatId: f.chatId, body: f.body, entities: normalizeEntities(f.body, f.entities), replyToId: (f.replyToId as number | null) ?? null, attachment: (f.attachment as { id: string; thumb?: string | null; spoiler?: boolean } | null) ?? null, groupId: (f.groupId as string | null) ?? null, forward, ...(f.noLinkPreview === true ? { noLinkPreview: true } : {}), ...(Array.isArray(f.blocks) ? { blocks: f.blocks as Block[] } : {}) };
     case 'read':
       return str(f.reqId, 64) && int(f.chatId) && int(f.upToId) ? { op: 'read', reqId: f.reqId, chatId: f.chatId, upToId: f.upToId } : null;
     default: return null;
@@ -498,3 +520,4 @@ export function searchTerms(text: string): string[] {
 export * from './groups';
 export * from './blocks';
 export * from './fileCrypto';
+export * from './mentions';

@@ -37,7 +37,8 @@ export async function ensureIndex(uid: string): Promise<void> {
 }
 
 async function docOf(r: Record<string, unknown>): Promise<Doc | null> {
-  if (r.deleted || r.service_type === 'login_code') return null;   // удалённые и коды входа не ищутся
+  // удалённые и коды входа не ищутся; копия поста в группе обсуждения — тоже (находится как сам пост канала)
+  if (r.deleted || r.service_type === 'login_code' || r.origin) return null;
   const a = r.attachment as { name?: string; title?: string; performer?: string } | null;
   const b = await indexTokens(r.body as string | null), att = await indexTokens(a?.name, a?.title, a?.performer);
   if (!b && !att) return null;
@@ -62,7 +63,7 @@ export function syncMessage(id: number): Promise<void> {
 export async function syncMessages(ids: number[]): Promise<void> {
   const uniq = [...new Set(ids)];
   if (!uniq.length) return;
-  const rows = await sql`select id, chat_id, client_id, body, deleted, service_type, attachment, content from messages where id = any(${uniq}::bigint[])`;
+  const rows = await sql`select id, chat_id, client_id, body, deleted, service_type, attachment, content, origin from messages where id = any(${uniq}::bigint[])`;
   if (rows.length) await openRows(rows);   // текст открываем только чтобы посчитать токены: в индекс уходят токены
   const docs = (await Promise.all(rows.map(docOf))).filter((d): d is Doc => d !== null);
   const indexed = new Set(docs.map((d) => d.id));
@@ -152,7 +153,7 @@ export async function reindexStep(opts: { batch?: number; maxBatches?: number; m
   }
   let copied = 0;
   for (let n = 0; n < maxBatches && Date.now() < until; n++) {
-    const rows = await openRows(await sql`select id, chat_id, client_id, body, deleted, service_type, attachment, content from messages where id > ${after} order by id limit ${batch}`);
+    const rows = await openRows(await sql`select id, chat_id, client_id, body, deleted, service_type, attachment, content, origin from messages where id > ${after} order by id limit ${batch}`);
     if (!rows.length) {
       await waitTask((await meili<{ taskUid: number }>('/swap-indexes', { method: 'POST', body: [{ indexes: [live, next] }] })).taskUid);
       await dropIndex(next);

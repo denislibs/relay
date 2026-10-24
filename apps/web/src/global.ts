@@ -21,6 +21,8 @@ export type Focus = { id: number; sort: number; nonce: number; replaced: boolean
 export interface ChatFrame {
   key: string;
   chatId: number;
+  threadId?: number;          // тред комментариев в группе обсуждения: id копии поста (лента — Query thread)
+  thread?: { header: string | null; loaded: boolean };   // тред: ключ шапки (копии поста) в messages; загружен ли с сервера
   ready: boolean;
   instant?: boolean;          // встал на место без анимации (смена нижнего чата)
   messages: Item[];
@@ -45,6 +47,7 @@ export interface GlobalState {
   status: Status;
   syncLabel: string | null;   // стадия для поля поиска; каждая держится не меньше 600 мс
   openChatId: number | null;     // чат на экране (верхний готовый в стеке)
+  openThreadId: number | null;   // тред на экране (верхний кадр — тред этого чата), иначе null
   pendingChatId: number | null;  // выбран, но лента ещё не готова: на экране прежний чат, строка уже подсвечена
   peer: Item | null;   // присутствие собеседника открытого личного чата {userId, known, online, lastSeen}
   chatStack: ChatFrame[];        // стек чатов, снизу вверх
@@ -75,6 +78,7 @@ export interface GlobalState {
   joinLink: string | null;
   infoGo: string | null;     // открыть правую панель сразу на экране управления группой (например, заявки)   // открытая ссылка-приглашение: '+токен' или '@имя'
   newGroup: { ids: number[]; title: string; edited: boolean } | null;   // черновик «Новой группы»: участники и название (живёт между шагами)   // открытая модалка «Новый контакт» и чем её заполнить
+  newChannel: { title: string; about: string; chatId: number | null } | null;   // черновик «Нового канала»; chatId — уже создан (шаг подписчиков)
   blocked: Item[];          // подписка blocked движка: чёрный список (с неподтверждёнными правками)
   blockedLoaded: boolean;   // список с сервера уже был
   sessions: SessionInfo[] | null;   // активные сеансы с сервера (null — ещё не знаем); вид — sessionsView(sessions, opsKeys)
@@ -132,6 +136,7 @@ let state: GlobalState = {
   status: { phase: 'connecting', hydrated: false, online: false, synced: false, syncing: false, outbox: 0, failed: 0 },
   syncLabel: null,
   openChatId: null,
+  openThreadId: null,
   pendingChatId: null,
   peer: null,
   chatStack: [],
@@ -162,6 +167,7 @@ let state: GlobalState = {
   joinLink: null,
   infoGo: null,
   newGroup: null,
+  newChannel: null,
   blocked: [],
   blockedLoaded: false,
   sessions: null,

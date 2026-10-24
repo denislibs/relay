@@ -46,10 +46,12 @@ export const isTx = (db: object): boolean => commitHooks.has(db);
  * счётчиков живут только от этого момента до коммита. Исключение в хуке — откат, как любое исключение в теле.
  * Не транзакция — исключение: отложить некуда.
  */
-export function beforeCommit(db: object, fn: () => Promise<void>): void {
+/** first — перед уже зарегистрированными (до журналов): горячий замок строки, взятый здесь, живёт только от этого
+ *  момента до коммита, а порядок замков — тот же, что взять его в теле. Только из тела транзакции, не из хука. */
+export function beforeCommit(db: object, fn: () => Promise<void>, opts: { first?: boolean } = {}): void {
   const hooks = preCommitHooks.get(db);
   if (!hooks) throw new Error('beforeCommit: not a transaction');
-  hooks.push(fn);
+  if (opts.first) hooks.unshift(fn); else hooks.push(fn);
 }
 
 type BeginFn = <T>(cb: (tx: Tx) => T | Promise<T>) => Promise<T>;

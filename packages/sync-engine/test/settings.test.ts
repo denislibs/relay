@@ -80,7 +80,7 @@ test('a rejected change rolls back and reports opFailed', async () => {
 test('partial settings from an old cache are completed per kind and never crash the view', () => {
   const old = { notify: { group: { muted: true } } } as never;
   const c = SettingsCache.load([{ k: 'settings', v: { base: old, seq: 3 } }]);
-  expect(c.base.notify).toEqual({ direct: { muted: false, preview: true }, group: { muted: true, preview: true } });
+  expect(c.base.notify).toEqual({ direct: { muted: false, preview: true }, group: { muted: true, preview: true }, channel: { muted: false, preview: true } });
   expect(() => settingsView(c.base, [op('notify:direct', { preview: false })])).not.toThrow();
   expect(settingsView(c.base, [op('notify:direct', { preview: false })]).notify.direct).toEqual({ muted: false, preview: false });
   expect(normalizeSettings({} as never).sessionsTtlDays).toBe(180);

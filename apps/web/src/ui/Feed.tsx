@@ -3,14 +3,16 @@ import type { ServiceData, ServiceType } from '@relay/protocol';
 import type { Item } from '@relay/sync-engine/src/types';
 import { senderAvatar } from '../profilePhoto';
 import type { Entity, MessageButton, Todo } from '@relay/protocol';
-import { MediaPolicy, ArticleBlocks, Avatar, Bubble, Icon, peerTone, DateDivider, DatePicker, FileBubble, MediaBubble, MessageText, VoiceBubble, MusicBubble, RoundBubble, player, MediaViewer, ScrollToBottom, beginHeavyAnimation, forceMeasure, isHeavyAnimating, onHeavyAnimationEnd, requestMeasure, requestMutation, selectionValue, TodoBubble, InlineKeyboard, StickerBubble } from '@relay/ui';
+import { Presence, ProgressRing, useMinVisible, MediaPolicy, ArticleBlocks, Avatar, Bubble, Icon, peerTone, DateDivider, DatePicker, FileBubble, MediaBubble, MessageText, VoiceBubble, MusicBubble, RoundBubble, player, MediaViewer, ScrollToBottom, beginHeavyAnimation, forceMeasure, isHeavyAnimating, onHeavyAnimationEnd, requestMeasure, requestMutation, selectionValue, TodoBubble, InlineKeyboard, StickerBubble } from '@relay/ui';
 import { openStickerSet } from '../stickers';
 import type { StickerRef } from '@relay/protocol';
 import type { QuoteMsg } from '@relay/sync-engine/src/types';
 import { quoteContent } from './preview';
 import { memo } from 'preact/compat';
 import { useContext, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'preact/hooks';
-import { pressButton, toggleTodo, clearFocus, discardUnsent, retrySend, focusMessage, openInner, jumpToDate, localPreview, markListened, moveWindow, react, savePosition, savedPosition, seen } from '../data';
+import { pressButton, toggleTodo, clearFocus, discardUnsent, retrySend, focusMessage, openInner, jumpToDate, localPreview, markListened, moveWindow, react, savePosition, savedPosition, seen, markThreadRead, countViews, nextMention } from '../data';
+import { isPost } from '@relay/sync-engine/src/channel';
+import { Comments, MentionFab, postMeta } from './channel';
 import { wantPeople } from '../people';
 import { activeFrame, frameByKey, getGlobal, setGlobal, useGlobal } from '../global';
 import { toggleMusic, trackTitle, useFileCached } from '../music';
@@ -52,17 +54,29 @@ const inlineUrl = (a: Att) => (a.kind === 'video' && a.preview && a.id ? `/files
 /** Качества в просмотрщике: 720p по умолчанию, переключатель на оригинал; без копии — один оригинал. */
 const qualitiesOf = (a: Att) => (a.kind === 'video' && a.variants?.some((v) => v.name === '720')
   ? [{ label: '720p', src: `/files/${a.id}/720` }, { label: 'Оригинал', src: fileUrl(a) }] : undefined);
-type RowProps = { chatId: number; voiceTitle: string; author?: string; onAuthor?: (m: Item) => void; onOpen: (m: Item) => void; hl?: string; m: Item; meId: number; out: boolean; start: boolean; end: boolean; pos?: 'single' | 'first' | 'middle' | 'last'; quoted?: Quote | null; quoteAuthor?: string; quoteTone?: number | 'accent'; appear: boolean; flash: boolean; onReact: (m: Item, emoji: string) => void; album?: Item[]; onUser?: (userId: number) => void; sel?: boolean; selIn?: string; onQuickForward?: (m: Item) => void; grp?: boolean };
+type RowProps = { post?: boolean; pinned?: boolean; discussion?: number | null; chatId: number; voiceTitle: string; author?: string; onAuthor?: (m: Item) => void; onOpen: (m: Item) => void; hl?: string; m: Item; meId: number; out: boolean; start: boolean; end: boolean; pos?: 'single' | 'first' | 'middle' | 'last'; quoted?: Quote | null; quoteAuthor?: string; quoteTone?: number | 'accent'; appear: boolean; flash: boolean; onReact: (m: Item, emoji: string) => void; album?: Item[]; onUser?: (userId: number) => void; sel?: boolean; selIn?: string; onQuickForward?: (m: Item) => void; grp?: boolean };
 
 /** Строка ленты: перерисовывается только если изменилось её сообщение или место в группе. */
-const Row = memo(function Row({ chatId, voiceTitle, author, onAuthor, onOpen, hl, m, meId, out, start, end, pos, quoted, quoteAuthor, quoteTone, appear, flash, onReact, album, onUser, sel, selIn, onQuickForward, grp }: RowProps) {
+const Row = memo(function Row({ post, pinned, discussion, chatId, voiceTitle, author, onAuthor, onOpen, hl, m, meId, out, start, end, pos, quoted, quoteAuthor, quoteTone, appear, flash, onReact, album, onUser, sel, selIn, onQuickForward, grp }: RowProps) {
   // реакции: по эмодзи — сколько и есть ли моя
   const list = (m.reactions as { userId: number; emoji: string }[] | undefined) ?? [];
   const chips: { emoji: string; count: number; mine: boolean }[] = [];
-  for (const r of list) {
+  // пост канала — счётчиками (reactionCounts), своя — myReaction; списка реакторов у поста нет
+  const counts = m.reactionCounts as [string, number][] | undefined;
+  if (counts) for (const [emoji, count] of counts) chips.push({ emoji, count, mine: m.myReaction === emoji });
+  else for (const r of list) {
     const c = chips.find((x) => x.emoji === r.emoji);
     if (c) { c.count++; c.mine ||= r.userId === meId; } else chips.push({ emoji: r.emoji, count: 1, mine: r.userId === meId });
   }
+  // пост: в мете — просмотры, подпись автора и булавка; под пузырём — кнопка комментариев (если у канала есть обсуждение)
+  const metaBefore = post && !m.deleted ? postMeta(m, !!pinned) : undefined;
+  // у канала есть обсуждение (discussion) — кнопка сразу у каждого поста, заглушкой, пока не пришли replies (копия
+  // в группе): иначе она появлялась позже и сдвигала пузырь
+  const footer = post && (m.replies || discussion != null) && !m.deleted ? <Comments m={m} groupId={discussion} /> : undefined;
+  // свой пост, ещё не подтверждённый сервером: пост всегда слева (out = false), но часы/«не отправлено» и отмена загрузки нужны
+  const own = !!post && m.id == null && m.senderId === meId;
+  const mineSend = out || own;
+  const status = mineSend ? m.status : undefined;
   const att = m.attachment as Att | null | undefined;
   // пересланное: «Переслано от» с аватаром и именем автора. Клик (как в Telegram): оригинал доступен — к нему;
   // иначе — чат с автором, а если мы уже в нём — его профиль (панель «Информация»)
@@ -85,7 +99,7 @@ const Row = memo(function Row({ chatId, voiceTitle, author, onAuthor, onOpen, hl
   const src = ff && ff.chatId != null && getGlobal().chats.some((c) => c.id === ff.chatId) ? ff : null;
   const aside = sel !== undefined || m.id == null || m.deleted || m.service ? null
     : src ? <button type="button" class="app-fwd-quick" aria-label="Перейти к сообщению" title="Перейти к сообщению" onClick={(e) => { e.stopPropagation(); goToOriginal(src.chatId, src.messageId); }}><Icon name="arrowRight" size={20} /></button>
-    : onQuickForward && (att || (m.body as string).length > 300)
+    : onQuickForward && (post || att || (m.body as string).length > 300)   // у поста — всегда (как в Telegram)
       ? <button type="button" class="app-fwd-quick" aria-label="Переслать" title="Переслать" onClick={(e) => { e.stopPropagation(); onQuickForward(album?.[0] ?? m); }}><Icon name="forwardFilled" size={20} /></button> : null;
   const check = sel !== undefined ? <span class="app-msg-check" aria-hidden="true"><Icon name="check" size={14} strokeWidth={3} /></span> : null;
   const pending = m.status === 'pending' && typeof m.progress === 'number' && (m.progress as number) < 1;
@@ -107,7 +121,8 @@ const Row = memo(function Row({ chatId, voiceTitle, author, onAuthor, onOpen, hl
             sel: selIn !== undefined ? selIn.split(',').includes(x.key as string) : undefined }; })}
           state={busy ? 'loading' : 'ready'} progress={busy ? Math.min(...album.map((x) => (typeof x.progress === 'number' ? x.progress as number : 1))) : undefined}
           caption={cap ? <MessageText text={cap.body as string} entities={cap.entities as Entity[] | undefined} highlight={hl} /> : undefined}
-          time={clock(last.createdAt as string)} status={out ? last.status : undefined}
+          metaBefore={metaBefore} footer={footer}
+          time={clock(last.createdAt as string)} status={mineSend ? last.status : undefined}
           onOpen={(i: number) => onOpen(album[i] ?? m)}
         />
         {album.map((x) => (x.id != null ? <i key={x.key} class="app-mark" data-mid={x.id as number} aria-hidden="true" /> : null))}
@@ -129,9 +144,10 @@ const Row = memo(function Row({ chatId, voiceTitle, author, onAuthor, onOpen, hl
           items={[{ src, inline: local ? undefined : inlineUrl(att), thumb: att.thumb, alt: att.name, skey: m.key, kind: att.kind === 'video' ? 'video' : 'image', duration: att.duration ?? 0, spoiler: !!att.spoiler }]}
           ratio={`${att.w} / ${att.h}`} size={att.kind === 'video' ? fileSize(att.size) : undefined}
           state={pending ? 'loading' : 'ready'} progress={m.progress as number}
-          onCancel={pending && out ? () => discardUnsent(m.key as string) : undefined}
+          onCancel={pending && mineSend ? () => discardUnsent(m.key as string) : undefined}
           caption={m.body ? <MessageText text={m.body as string} entities={m.entities as Entity[] | undefined} highlight={hl} /> : undefined}
-          time={clock(m.createdAt as string)} status={out ? m.status : undefined}
+          metaBefore={metaBefore} footer={footer}
+          time={clock(m.createdAt as string)} status={status}
           onOpen={() => onOpen(m)}
         />
         {mark}
@@ -148,7 +164,8 @@ const Row = memo(function Row({ chatId, voiceTitle, author, onAuthor, onOpen, hl
           todo={todo} from={out ? 'out' : 'in'} tail={end} groupStart={start} appear={appear}
           forwarded={!!m.fwdFrom} authorName={out ? '' : voiceTitle}
           reply={replyQ}
-          edited={!!m.editedAt} time={clock(m.createdAt as string)} status={out ? m.status : undefined}
+          edited={!!m.editedAt} time={clock(m.createdAt as string)} status={status}
+          metaBefore={metaBefore} footer={footer}
           canToggle={canToggle}
           onToggle={(itemId: number, done: boolean) => { void toggleTodo(chatId, m.id as number, itemId, done).then((ok: boolean) => { if (!ok) showToast('Не удалось отметить задачу'); }); }}
           onReadOnly={() => showToast(m.fwdFrom ? 'Пересланный чек-лист нельзя менять' : `${voiceTitle} не разрешил(а) другим отмечать задачи`)}
@@ -172,7 +189,9 @@ const Row = memo(function Row({ chatId, voiceTitle, author, onAuthor, onOpen, hl
           trackKey={m.key as string} duration={att.duration ?? 0} waveform={att.waveform ?? null}
           unread={unheard} unreadIncoming={unheard && !out}
           uploading={pending} progress={m.progress as number}
-          time={clock(m.createdAt as string)} status={out ? m.status : undefined}
+          onCancel={pending && mineSend ? () => discardUnsent(m.key as string) : undefined}
+          metaBefore={metaBefore} footer={footer}
+          time={clock(m.createdAt as string)} status={status}
         />
         {mark}
       </div>
@@ -191,7 +210,9 @@ const Row = memo(function Row({ chatId, voiceTitle, author, onAuthor, onOpen, hl
           thumb={att.thumb ?? null}
           duration={att.duration ?? 0} unread={unseen}
           uploading={pending} progress={m.progress as number}
-          time={clock(m.createdAt as string)} status={out ? m.status : undefined}
+          onCancel={pending && mineSend ? () => discardUnsent(m.key as string) : undefined}
+          metaBefore={metaBefore} footer={footer}
+          time={clock(m.createdAt as string)} status={status}
           onListened={!out && unseen ? () => markListened(chatId, m.id as number) : undefined}
         />
         {mark}
@@ -210,7 +231,9 @@ const Row = memo(function Row({ chatId, voiceTitle, author, onAuthor, onOpen, hl
           duration={att.duration ?? 0} size={fileSize(att.size)}
           onDownload={att.id ? () => { const a = document.createElement('a'); a.href = fileUrl(att, true); a.download = att.name; a.click(); } : undefined}
           uploading={pending} progress={m.progress as number}
-          time={clock(m.createdAt as string)} status={out ? m.status : undefined}
+          onCancel={pending && mineSend ? () => discardUnsent(m.key as string) : undefined}
+          metaBefore={metaBefore} footer={footer}
+          time={clock(m.createdAt as string)} status={status}
           onToggle={() => {
             // плейлист — музыка загруженного окна ленты, новые сверху
             const list = (activeFrame(getGlobal())?.messages ?? []).filter((x) => !x.deleted && (x.attachment as Att | null)?.kind === 'audio' && x.id != null).reverse();
@@ -235,9 +258,10 @@ const Row = memo(function Row({ chatId, voiceTitle, author, onAuthor, onOpen, hl
           from={out ? 'out' : 'in'} tail={end} groupStart={start}
           name={att.name} ext={ext} meta={fileSize(att.size)}
           progress={m.progress as number}
-          onCancel={m.id == null && out ? () => discardUnsent(m.key as string) : undefined}
+          onCancel={m.id == null && mineSend ? () => discardUnsent(m.key as string) : undefined}
           onRetry={() => retrySend(m.key as string)}
-          time={clock(m.createdAt as string)} status={out ? m.status : undefined}
+          metaBefore={metaBefore} footer={footer}
+          time={clock(m.createdAt as string)} status={status}
         />
         {mark}
       </div>
@@ -252,7 +276,8 @@ const Row = memo(function Row({ chatId, voiceTitle, author, onAuthor, onOpen, hl
         <StickerBubble
           from={out ? 'out' : 'in'} groupStart={start} appear={appear} aside={aside} fwd={fwd} reply={replyQ}
           author={author} authorTone={author ? peerTone(m.senderId as number) : undefined}
-          sticker={st} time={clock(m.createdAt as string)} status={out ? m.status : undefined}
+          sticker={st} time={clock(m.createdAt as string)} status={status}
+          metaBefore={metaBefore} footer={footer}
           reactions={chips.length ? chips : undefined} onReact={(emoji: string) => onReact(m, emoji)}
           onOpen={sel === undefined ? () => openStickerSet(st.setId) : undefined}
         />
@@ -279,8 +304,10 @@ const Row = memo(function Row({ chatId, voiceTitle, author, onAuthor, onOpen, hl
         linkTone={out ? undefined : `var(--peer-${peerTone(m.senderId as number)})`}
         reactions={chips.length ? chips : undefined}
         onReactionClick={(emoji: string) => onReact(m, emoji)}
+        metaBefore={metaBefore}
+        footer={footer}
         time={clock(m.createdAt as string)}
-        status={out ? m.status : undefined}
+        status={status}
         appear={appear}
         below={m.buttons !== undefined && m.id != null
           // в режиме выбора клик по кнопке выбирает сообщение (onPress нет — клик уходит ленте)
@@ -362,6 +389,12 @@ function breaksGroup(a: Item | undefined, b: Item, unreadFrom: number | null, me
   return unreadFrom != null && b.senderId !== meId && b.id != null && (b.id as number) > unreadFrom && (a.id == null || (a.id as number) <= unreadFrom || a.senderId === meId);
 }
 
+/** Верх строки в координатах прокрутки ленты. Не offsetTop: строки группы лежат в «пачке» (.app-run, position:
+ *  relative), и offsetTop считался бы от неё — переход к сообщению в группе промахивался на высоту пачек выше. */
+function topIn(root: HTMLElement, el: HTMLElement): number {
+  return el.getBoundingClientRect().top - root.getBoundingClientRect().top + root.scrollTop;
+}
+
 function firstVisible(root: HTMLElement): { key: string; sort: number; top: number } | null {
   const rootTop = root.getBoundingClientRect().top;
   for (const row of root.querySelectorAll<HTMLElement>('.app-msg')) {
@@ -384,6 +417,7 @@ const anchorEl = (root: HTMLElement, key: string) =>
   key === 'unread' ? root.querySelector<HTMLElement>('.app-unread-divider') : root.querySelector<HTMLElement>(`[data-key="${CSS.escape(key)}"]`);
 
 const NO_MESSAGES: Item[] = [];
+const NO_IDS: number[] = [];
 
 /** Музыкальный пузырь + есть ли файл в кэше (значок «скачать» в углу — только пока файла нет). */
 const asFile = (att: Att) => ({ id: att.id, name: att.name, mime: att.mime, size: att.size });
@@ -410,9 +444,11 @@ function CachedMusic({ fileId, ...props }: { fileId?: string } & Record<string, 
   return <MusicBubble {...props} downloaded={downloaded} />;
 }
 
-export function Feed({ frameKey, active, chatId, meId, peerName, group, onAuthor, stick, onMenu, highlight }: {
+export function Feed({ frameKey, active, chatId, threadId, channel = false, meId, peerName, group, onAuthor, stick, onMenu, highlight }: {
   frameKey: string; active: boolean;   // кадр стека чатов; active — на экране (только он отмечает прочитанное)
   chatId: number; meId: number; peerName: string; highlight?: string;
+  threadId?: number;    // тред комментариев: прочитанность — markThreadRead, позиция — своим ключом
+  channel?: boolean;    // лента канала: все сообщения — посты (слева, без автора), просмотры засчитываются по видимости
   group: boolean; onAuthor: (userId: number) => void;   // в группе — имя автора над пачкой; клик — личный чат поверх
   stick: { current: boolean };
   onMenu: (key: string, x: number, y: number, extra: MenuExtra) => void;
@@ -448,7 +484,8 @@ export function Feed({ frameKey, active, chatId, meId, peerName, group, onAuthor
   const [away, setAway] = useState(false);
   // дешёвый первый показ (как постепенный рендер в tt): открыли внизу — сначала хвост, выше экрана — следующим кадром
   // сколько последних сообщений показано (null — все): открыли внизу — сначала первый экран, остальное порциями
-  const [limit, setLimit] = useState<number | null>(() => (!unreadFrom && !savedPosition(chatId) && !focus ? FIRST_PAINT : null));
+  const here = { chatId, threadId };   // слой стека: позиция прокрутки треда — своим ключом
+  const [limit, setLimit] = useState<number | null>(() => (!unreadFrom && !savedPosition(here) && !focus ? FIRST_PAINT : null));
   const partial = limit != null && messages.length > limit;
   const initial = useRef<Set<string> | null>(null);
   if (initial.current === null && messages.length) initial.current = new Set(messages.map((m) => m.key));
@@ -480,12 +517,12 @@ export function Feed({ frameKey, active, chatId, meId, peerName, group, onAuthor
       // первый кадр чата — до отрисовки (осознанное исключение): сохранённая позиция → непрочитанное → низ
       forceMeasure(() => {
         const divider = root.querySelector<HTMLElement>('.app-unread-divider');
-        const pos = savedPosition(chatId);
+        const pos = savedPosition(here);
         const bottom = root.scrollHeight - root.clientHeight;
         let target = bottom;
         const row = pos ? root.querySelector<HTMLElement>(`[data-key="${CSS.escape(pos.key)}"]`) : null;
         // вернулись в чат, из которого ушли посреди истории, — туда же; иначе к первому непрочитанному
-        if (row) target = Math.min(bottom, row.offsetTop - pos!.offset);
+        if (row) target = Math.min(bottom, topIn(root, row) - pos!.offset);
         else if (divider) target = Math.min(bottom, divider.offsetTop - TOP_ZONE - 10);
         stick.current = target >= bottom - BOTTOM && !!metaRef.current?.live;
         target = Math.max(0, target);
@@ -572,6 +609,7 @@ export function Feed({ frameKey, active, chatId, meId, peerName, group, onAuthor
   // прочтение: метки под баблами (видна нижняя кромка — прочитано), отправка раз в 150 мс, пауза на тяжёлых анимациях
   const marks = useRef<IntersectionObserver | null>(null);
   const visible = useRef(new Set<number>());
+  const viewed = useRef(new Set<number>());   // уже отданные в просмотры (движок тоже не повторяет — здесь без лишних вызовов)
   const readTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   useEffect(() => {
     const flush = () => {
@@ -580,7 +618,14 @@ export function Feed({ frameKey, active, chatId, meId, peerName, group, onAuthor
       if (!activeRef.current || document.visibilityState !== 'visible' || !document.hasFocus()) return;
       let max = 0;
       for (const id of visible.current) if (id > max) max = id;
-      if (max) seen(chatId, max);
+      // тред — своя прочитанность (точка у кнопки поста); основную ленту группы он не читает
+      if (max) { if (threadId != null) markThreadRead(chatId, threadId, max); else seen(chatId, max); }
+      // канал: видимые посты — в просмотры (каждый — один раз за сессию; батч раз в секунду — в движке)
+      if (channel) {
+        const fresh = [...visible.current].filter((id) => !viewed.current.has(id));
+        for (const id of fresh) viewed.current.add(id);
+        countViews(chatId, fresh);
+      }
     };
     const schedule = () => { if (!readTimer.current) readTimer.current = setTimeout(flush, READ_EVERY); };
     // низ зоны — верх композера: лента уходит под него на свой нижний отступ (--bottom-zone + 8 px), а он
@@ -666,7 +711,7 @@ export function Feed({ frameKey, active, chatId, meId, peerName, group, onAuthor
   const storePosition = (root: HTMLElement) => {
     const atBottom = root.scrollHeight - root.scrollTop - root.clientHeight < BOTTOM && (metaRef.current?.live ?? true);
     const v = atBottom ? null : firstVisible(root);
-    savePosition(chatId, v ? { key: v.key, sort: v.sort, offset: v.top } : null);
+    savePosition(here, v ? { key: v.key, sort: v.sort, offset: v.top } : null);
   };
   // уходим из чата, а сохранение ещё ждёт паузы — сохранить сейчас (DOM ещё на месте)
   useLayoutEffect(() => () => {
@@ -717,12 +762,12 @@ export function Feed({ frameKey, active, chatId, meId, peerName, group, onAuthor
     if (focus.replaced) {
       // окно заменили целиком — сразу по центру, до отрисовки (иначе кадр со старой позицией и долгая прокрутка)
       forceMeasure(() => {
-        const top = Math.max(0, row.offsetTop - (root.clientHeight - row.offsetHeight) / 2);
+        const top = Math.max(0, topIn(root, row) - (root.clientHeight - row.offsetHeight) / 2);
         if (Math.abs(root.scrollTop - top) > 1) { programmatic.current++; root.scrollTop = top; }
       });
     } else {
       requestMeasure(() => {
-        const top = Math.max(0, row.offsetTop - (root.clientHeight - row.offsetHeight) / 2);
+        const top = Math.max(0, topIn(root, row) - (root.clientHeight - row.offsetHeight) / 2);
         const from = root.scrollTop, h = root.clientHeight;
         requestMutation(() => {
           // как в Telegram: далеко — сначала прыжок почти к цели, плавно — только последний экран
@@ -844,8 +889,9 @@ export function Feed({ frameKey, active, chatId, meId, peerName, group, onAuthor
   // реакция под баблом: своя — снять, чужая — поставить такую же
   const onReact = useRef((m: Item, emoji: string) => {
     if (m.id == null) return;
-    const mine = ((m.reactions as { userId: number; emoji: string }[] | undefined) ?? []).find((r) => r.userId === meId);
-    react(chatId, m.id as number, mine?.emoji === emoji ? null : emoji);
+    // пост: своя реакция — myReaction (списка реакторов нет)
+    const mine = m.reactionCounts ? (m.myReaction as string | undefined) : ((m.reactions as { userId: number; emoji: string }[] | undefined) ?? []).find((r) => r.userId === meId)?.emoji;
+    react(chatId, m.id as number, mine === emoji ? null : emoji);
   }).current;
 
   // просмотрщик: все фото текущего окна ленты
@@ -897,6 +943,26 @@ export function Feed({ frameKey, active, chatId, meId, peerName, group, onAuthor
   }, [!!selecting]);
   const selShown = selecting ?? (selVis ? lastSel.current : null);
   const me = useGlobal((s) => s.me);
+  const pinnedIds = useGlobal((s) => (s.chats.find((c) => c.id === chatId)?.pinned as number[] | undefined) ?? NO_IDS);
+  const threadHead = useGlobal((s) => frameByKey(s, frameKey)?.thread ?? null);
+  // имя канала для копии поста в группе обсуждения: связанный канал в списке — его название, иначе просто «Канал»
+  // (строкой, а не списком чатов: лента не перерисовывается от каждой перемены в списке)
+  const linkedTitle = useGlobal((s) => {
+    const l = (s.chats.find((x) => x.id === chatId)?.group as { linkedChatId?: number | null } | undefined)?.linkedChatId;
+    return l != null ? (s.chats.find((x) => x.id === l)?.title as string | undefined) ?? null : null;
+  });
+  const channelName = (_m: Item) => linkedTitle || 'Канал';
+  // канал с группой обсуждения: её id — заглушке кнопки комментариев (пока копия поста не пришла)
+  const discussion = useGlobal((s) => (channel && threadId == null ? (s.chats.find((x) => x.id === chatId)?.group as { linkedChatId?: number | null } | undefined)?.linkedChatId ?? null : null));
+  const mentions = useGlobal((s) => (threadId == null ? (s.chats.find((c) => c.id === chatId)?.mentions as number | undefined) ?? 0 : 0));
+  // «к упоминанию»: старейшее непрочитанное — в ленте (focusMessage) или в треде (тред поверх)
+  const toMention = () => {
+    void nextMention(chatId).then((t) => {
+      if (!t) { toLatest(); return; }   // id ещё не пришли журналом — хотя бы к новым
+      const target = { id: t.id, sort: t.id };
+      if (t.threadId != null) openInner({ chatId, threadId: t.threadId }, target); else focusMessage(target);
+    });
+  };
   const nameOf = (id: number) => (id === meId ? me?.name ?? '' : people[id]?.name ?? peerName);
   const nameRef = useRef(nameOf); nameRef.current = nameOf;
   const msgsRef = useRef<Item[]>([]);
@@ -922,6 +988,7 @@ export function Feed({ frameKey, active, chatId, meId, peerName, group, onAuthor
 
   const out: unknown[] = [];
   let prevDay = '', prevSender: unknown = null, unreadShown = false;
+  const isPosted = (x: Item) => isPost(x as { post?: boolean }) || (channel && !x.service);   // в канале и своё неподтверждённое — пост
   if (!partial) out.push(<div class="app-sentinel" data-dir="older" key={'o' + (messages[0]?.key ?? '')} aria-hidden="true" />);
   const shown = partial ? messages.slice(messages.length - limit!) : messages;
   // альбомы: подряд идущие фото одного отправителя с общим groupId (до 10) — одной строкой с мозаикой
@@ -955,7 +1022,9 @@ export function Feed({ frameKey, active, chatId, meId, peerName, group, onAuthor
   shown.forEach((m, i) => {
     if (inAlbum.has(m.key)) return;   // уже нарисовано в альбоме выше
     const day = dayKey(m.createdAt as string);
-    const mine = m.senderId === meId;
+    const post = isPosted(m);
+    // пост никогда не «исходящий»: слева, без хвоста отправителя (даже свой)
+    const mine = !post && m.senderId === meId;
     if (day !== prevDay) flushRun();
     if (day !== prevDay) { const at = m.createdAt as string; out.push(<DateDivider key={'d' + day} onClick={() => setPickDate(new Date(at))}>{dayLabel(at)}</DateDivider>); }
     if (!unreadShown && unreadFrom != null && !mine && m.id != null && (m.id as number) > unreadFrom) {
@@ -974,7 +1043,7 @@ export function Feed({ frameKey, active, chatId, meId, peerName, group, onAuthor
       return;
     }
     if (isGroupService(svc?.type)) {
-      const text = serviceText(svc!.type as ServiceType, { data: svc!.data, body: m.body as string, mine, sender: people[m.senderId as number]?.name ?? peerName, meId });
+      const text = serviceText(svc!.type as ServiceType, { data: svc!.data, body: m.body as string, mine, sender: people[m.senderId as number]?.name ?? peerName, meId, fromChannel: post || m.senderId === 0 });
       flushRun();
       out.push(<div class="rl-action" key={m.key} role="note"><span>{text}</span></div>);
       prevDay = day; prevSender = null;
@@ -983,8 +1052,11 @@ export function Feed({ frameKey, active, chatId, meId, peerName, group, onAuthor
     const album = albums.get(m.key);
     const next = shown[i + (album ? album.length : 1)];
     // группа — как в Telegram: тот же отправитель и день, пауза не больше 10 минут, не на границе «Непрочитанные»
-    const start = prevSender !== m.senderId || day !== prevDay || breaksGroup(shown[i - 1], m, unreadFrom, meId);
-    const end = !next || next.senderId !== m.senderId || dayKey(next.createdAt as string) !== day || breaksGroup(m, next, unreadFrom, meId);
+    // посты (и копии постов в группе) — пачкой «канала»: отправитель для пачки — 0
+    const sender = post ? 0 : m.senderId;
+    const nextSender = next ? (isPosted(next) ? 0 : next.senderId) : null;
+    const start = prevSender !== sender || day !== prevDay || breaksGroup(shown[i - 1], m, unreadFrom, meId);
+    const end = !next || nextSender !== sender || dayKey(next.createdAt as string) !== day || breaksGroup(m, next, unreadFrom, meId);
     const quoted = m.reply as Quote | null;
     // файлы, отправленные вместе (groupId), — одним пузырём: позиция строки внутри группы
     const prevM = shown[i - 1];
@@ -994,18 +1066,22 @@ export function Feed({ frameKey, active, chatId, meId, peerName, group, onAuthor
       <Row
         pos={pos}
         key={m.key}
-        author={group && !mine && start && !m.deleted ? people[m.senderId as number]?.name ?? '' : undefined}
+        post={post}
+        discussion={post ? discussion : null}
+        pinned={post && m.id != null && pinnedIds.includes(m.id as number)}
+        // копия поста в группе (и шапка треда) подписана каналом; в самом канале автора нет
+        author={post ? (!channel && start && !m.deleted ? channelName(m) : undefined) : group && !mine && start && !m.deleted ? people[m.senderId as number]?.name ?? '' : undefined}
         onAuthor={onAuthorRow}
         onUser={onUserRow}
         sel={selShown ? (album ?? [m]).every((x) => selShown.includes(x.key as string)) : undefined}
         selIn={selShown && album ? album.filter((x) => selShown.includes(x.key as string)).map((x) => x.key).join(',') : undefined}
-        grp={group && !mine}
+        grp={group && !mine && !post}
         onQuickForward={onQuickForward}
         hl={highlight && (m.body as string).toLowerCase().includes(highlight.toLowerCase()) ? highlight : undefined}
         m={m}
         meId={meId}
         chatId={chatId}
-        voiceTitle={mine ? 'Вы' : (group ? people[m.senderId as number]?.name ?? peerName : peerName)}
+        voiceTitle={mine ? 'Вы' : post ? (channel ? peerName : channelName(m)) : (group ? people[m.senderId as number]?.name ?? peerName : peerName)}
         onReact={onReact}
         onOpen={onOpen}
         out={mine}
@@ -1019,7 +1095,7 @@ export function Feed({ frameKey, active, chatId, meId, peerName, group, onAuthor
         album={album}
       />
     );
-    if (group && !mine) {
+    if (group && !mine && !post) {
       if (run && (start || runSender !== m.senderId)) flushRun();
       if (!run) { run = []; runKey = m.key as string; runSender = m.senderId as number; }
       run.push(row);
@@ -1028,13 +1104,22 @@ export function Feed({ frameKey, active, chatId, meId, peerName, group, onAuthor
       flushRun();
       out.push(row);
     }
-    prevDay = day; prevSender = m.senderId;
+    prevDay = day; prevSender = sender;
+    // тред: под шапкой (копией поста) — начало обсуждения; комментариев нет — так и сказать (после загрузки, без мигания)
+    if (threadId != null && m.key === threadHead?.header) {
+      const empty = shown.length === 1 && threadHead.loaded && !meta?.hasOlder;
+      out.push(<div class="rl-action app-thread-start" key="thread-start" role="separator"><span>{empty ? 'Здесь пока нет комментариев' : 'Начало обсуждения'}</span></div>);
+      prevSender = null;
+    }
   });
   flushRun();
   out.push(<div class="app-sentinel" data-dir="newer" key={'n' + (messages[messages.length - 1]?.key ?? '')} aria-hidden="true" />);
 
+  // тред ещё не загружен и в кэше пусто (открыли по адресу): лоадер с задержкой и минимумом — без мигания
+  const threadLoading = useMinVisible(threadId != null && !threadHead?.loaded && !messages.length, { delay: 150, min: 600 });
   return (
     <>
+      {threadId != null ? <Presence show={threadLoading} exitMs={200}><div class="app-thread-loading" role="status" aria-label="Загрузка комментариев"><span class="app-thread-spinner"><ProgressRing size={32} onMedia /></span></div></Presence> : null}
       <div class={'rl-feed' + (selVis ? ' app-feed-selecting' : '') + (selOn && selecting ? ' app-feed-sel-on' : '')} ref={el} onScroll={onScroll} onClick={onClick} onClickCapture={selecting ? onSelectClick : undefined} onPointerDownCapture={selecting ? onSelectDown : undefined} onContextMenu={onContextMenu} aria-live="polite">{out}</div>
       {openIndex !== null && photos[openIndex] ? (
         <MediaViewer
@@ -1050,7 +1135,8 @@ export function Feed({ frameKey, active, chatId, meId, peerName, group, onAuthor
       {pickerUsed ? <DatePicker open={!!pickDate} value={pickDate ?? undefined} onClose={() => setPickDate(null)}
         onPick={(d: Date) => { setPickDate(null); void jumpToDate(chatId, d).then((ok) => { if (!ok) showToast('В этот день сообщений нет'); }); }} /> : null}
       <div class="rl-scrolldown-slot">
-        <ScrollToBottom show={away || (meta ? !meta.live : false)} unread={unread} onClick={toLatest} />
+        <MentionFab count={mentions} raised={away || (meta ? !meta.live : false)} onClick={toMention} />
+        <ScrollToBottom show={away || (meta ? !meta.live : false)} unread={threadId != null ? 0 : unread} onClick={toLatest} />
       </div>
     </>
   );

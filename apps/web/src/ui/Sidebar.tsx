@@ -81,6 +81,7 @@ export const SideRow = memo(function SideRow({ c, meId, active, showDraft, muted
       typing={!!c.typing}
       time={chatTime((c.sortAt ?? c.lastAt) as string)}
       unread={c.unread as number}
+      mentioned={(c.mentions as number) > 0}   // непрочитанное упоминание меня — «@» рядом со счётчиком
       unreadMark={hasUnreadMark(c)}
       pinned={isPinned(c)}
       status={!draft && last && last.senderId === meId ? last.status : null}
@@ -336,6 +337,7 @@ function NewChatFab() {
   return (
     <div class="app-newchat-fab">
       <MenuPopover open={open} anchor={btn.current ?? undefined} placement="top-end" label="Создать" onClose={() => setOpen(false)} items={[
+            { icon: 'channels', label: 'Новый канал', onClick: () => { setGlobal({ newChannel: null }); pick('newChannel'); } },
             { icon: 'community', label: 'Новая группа', onClick: () => { setGlobal({ newGroup: null }); pick('newGroup'); } },
             { icon: 'contact', label: 'Новое сообщение', onClick: () => pick('contacts') },
           ]} />

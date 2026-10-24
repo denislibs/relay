@@ -195,3 +195,39 @@ test('stop waits for jobs in flight and their completion', async () => {
   await w.stop();
   expect(await count('jobs')).toBe(0);
 });
+
+test('enqueue wakes workers for a new job (due or delayed), not for a dedupe hit', async () => {
+  const got: string[] = [];
+  const l = await sql.listen('jobs', (p) => { got.push(p); });
+  try {
+    await enqueue(sql, 'test.noop', {}, { dedupeKey: 'win:1' });
+    await enqueue(sql, 'test.noop', {}, { dedupeKey: 'win:1' });                        // повтор ключа — задача уже стоит
+    await enqueue(sql, 'test.noop', {}, { runAt: new Date(Date.now() + 60_000) });      // отложенная — будим (воркер уснёт до неё)
+    await sql.begin(async (tx) => {
+      await enqueue(tx, 'test.later', {}, { dedupeKey: 'w2', runAt: new Date(Date.now() + 60_000) });
+      await enqueue(tx, 'test.later', {}, { dedupeKey: 'w2', runAt: new Date(Date.now() + 60_000) });   // повтор в той же транзакции
+    });
+    await Bun.sleep(200);
+    expect(got).toEqual(['test.noop', 'test.noop', 'test.later']);
+    expect(await count('jobs')).toBe(3);
+  } finally {
+    await l.unlisten();
+  }
+});
+
+test('a delayed job enqueued while the worker idles: it wakes, finds nothing due and sleeps until the job, not the whole poll', async () => {
+  let ranAt = 0;
+  register('test.delayed', async () => { ranAt = Date.now(); });
+  const w = startWorker({ concurrency: 2, pollMs: 60_000 });
+  try {
+    await Bun.sleep(100);   // воркер уснул на пустой очереди (до poll — минута)
+    const t0 = Date.now();
+    await enqueue(sql, 'test.delayed', {}, { runAt: new Date(t0 + 400) });   // только она: потерянного пробуждения нет
+    for (let i = 0; i < 100 && !ranAt; i++) await Bun.sleep(20);
+    expect(ranAt).toBeGreaterThan(0);
+    expect(ranAt - t0).toBeGreaterThanOrEqual(350);
+    expect(ranAt - t0).toBeLessThan(1500);
+  } finally {
+    await w.stop();
+  }
+});

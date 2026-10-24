@@ -1230,3 +1230,31 @@ html[data-anim="0"] :is(.app-enter-reload, .app-enter-login) :is(.rl-shell-side,
 .app-head-sub { height: 20px; font: 400 14px/20px var(--font-sans); color: var(--ink-muted); }
 /* у составного заголовка своя анимация — общий «проявляющийся» заголовок панели её не дублирует */
 .rl-panel-head .rl-panel-head-title:has(> .app-head-title) { display: block; animation: none !important; }
+
+/* ---------- Каналы: кнопка комментариев, нижняя панель подписчика, «к упоминанию», тред, «кто прочитал» ---------- */
+.app-comments { display: flex; align-items: center; gap: 8px; width: 100%; min-height: 40px; padding: 6px 8px 6px 10px; border: 0; background: none; color: var(--brand-text); font: 500 14px/1.2 var(--font-sans); text-align: left; cursor: pointer; }
+.app-comments:hover { background: var(--hover); }
+.app-comments-avas { display: inline-flex; flex: none; }
+.app-comments-avas .rl-avatar { box-shadow: 0 0 0 2px var(--bubble-in); font-size: 10px; }
+.app-comments-avas .rl-avatar + .rl-avatar { margin-left: -8px; }
+.app-comments-icon { flex: none; }
+.app-comments-label { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.app-comments-dot { flex: none; width: 8px; height: 8px; border-radius: 50%; background: var(--brand); animation: app-fade var(--dur-base) var(--ease-out); }
+.app-comments-chev { flex: none; color: var(--ink-muted); }
+.app-channel-bar { padding: 0; overflow: hidden; }
+.app-channel-btn { display: inline-flex; align-items: center; justify-content: center; gap: 8px; width: 100%; height: 48px; border: 0; background: none; color: var(--brand-text); font: 600 15px/1 var(--font-sans); cursor: pointer; text-transform: none; }
+.app-channel-btn:hover { background: var(--hover); }
+.app-channel-btn .is-busy { opacity: .5; transition: opacity var(--dur-base) var(--ease-out); }
+.app-mention-fab { position: absolute; right: 0; bottom: 0; transition: transform var(--dur-base) var(--ease-out); }
+.app-mention-fab.is-raised { transform: translateY(calc(-1 * var(--composer-h-min, 48px) - 10px)); }
+.app-thread-start span { font-weight: 500; }
+.app-threadbar { pointer-events: auto; }
+.app-threadbar .app-pins-main:disabled { cursor: default; }
+.app-readby { min-height: 60px; animation: app-fade var(--dur-base) var(--ease-out); }
+.app-readby-row { cursor: default; }
+.app-sm-loading.is-quiet { visibility: hidden; }
+.app-newchannel-skip { position: absolute; left: 16px; bottom: 28px; z-index: 3; }
+.app-thread-loading { position: absolute; inset: 0; z-index: 1; display: grid; place-items: center; pointer-events: none; animation: app-fade var(--dur-base) var(--ease-out); }
+.rl-presence[data-state="closing"] .app-thread-loading { animation: app-fade-out 200ms var(--ease-in) forwards; }
+.app-thread-spinner { display: grid; place-items: center; width: 48px; height: 48px; border-radius: 50%; background: rgba(0, 0, 0, .35); }
+.app-readby-wait { display: grid; place-items: center; min-height: 60px; }
