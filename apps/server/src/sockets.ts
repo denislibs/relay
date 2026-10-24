@@ -9,7 +9,10 @@ import { sql } from './db';
  * NOTIFY личного журнала (s/x в notifyPayloads), а hello/chatsSince сверяют подписки с chat_members — страховка.
  * Реестр сокетов по пользователю — в этом процессе (у каждого сокета своя шина: тесты поднимают несколько серверов).
  */
-export type ChatSocket = ServerWebSocket<{ userId: number; chats?: Set<number>; opened?: Promise<void> }>;
+export type ChatSocket = ServerWebSocket<{ userId: number; chats?: Set<number>; opened?: Promise<void>; watching?: Set<number> }>;
+
+/** Сколько публичных каналов сокет может смотреть без подписки одновременно (как shortpoll в Telegram Web A — до 10). */
+export const WATCH_MAX = 10;
 
 const byUser = new Map<number, Set<ChatSocket>>();
 const busOf = new WeakMap<ChatSocket, Bus>();
@@ -52,9 +55,28 @@ export async function unsubscribeChat(ws: ChatSocket, chatId: number): Promise<v
   await busOf.get(ws)?.unlisten(`chat:${chatId}`).catch((e) => console.error('bus:', e));
 }
 
-/** Привести подписки сокета к текущему составу групп пользователя (открытие сокета, hello, chatsSince). */
+/**
+ * Превью публичного канала (watchChat): топик канала без членства, пока превью открыто. Права проверяет вызывающий
+ * (canRead). Сверка подписок такие топики не снимает; unwatch снимает, только если человек так и не вступил.
+ */
+export async function watchChat(ws: ChatSocket, chatId: number): Promise<boolean> {
+  const watching = (ws.data.watching ??= new Set());
+  if (!watching.has(chatId) && watching.size >= WATCH_MAX) return false;
+  watching.add(chatId);
+  await subscribeChat(ws, chatId);
+  return true;
+}
+
+export async function unwatchChat(ws: ChatSocket, chatId: number): Promise<void> {
+  if (!ws.data.watching?.delete(chatId)) return;
+  const [m] = await sql`select 1 from chat_members where chat_id = ${chatId} and user_id = ${ws.data.userId}`;
+  if (!m) await unsubscribeChat(ws, chatId);
+}
+
+/** Привести подписки сокета к текущему составу групп пользователя (открытие сокета, hello, chatsSince); превью — не трогает. */
 export async function syncSubscriptions(ws: ChatSocket): Promise<void> {
   const mine = new Set(await groupChatIds(ws.data.userId));
+  for (const id of ws.data.watching ?? []) mine.add(id);
   const chats = (ws.data.chats ??= new Set());
   for (const id of mine) if (!chats.has(id)) await subscribeChat(ws, id);
   for (const id of [...chats]) if (!mine.has(id)) await unsubscribeChat(ws, id);
