@@ -25,8 +25,8 @@ export function compactCount(n: number): string {
 
 /** Строка уведомления (запрос notifications движка): то, что нужно правилу. */
 export interface NotifyItem { chatId: number; post?: boolean; mention?: boolean }
-/** Чат из списка: вид, связанный чат и могу ли я публиковать (канал). */
-export interface NotifyChat { id: number; kind?: unknown; linkedChatId?: number | null; canPost?: boolean }
+/** Чат из списка: вид, связанный чат, могу ли я публиковать (канал) и состою ли в нём (канал в списке бывает и без подписки). */
+export interface NotifyChat { id: number; kind?: unknown; linkedChatId?: number | null; canPost?: boolean; member?: boolean }
 
 /**
  * Не уведомлять о посте, который публикую я сам (или могу публиковать): пост канала, где у меня право post, и его
@@ -42,6 +42,19 @@ export function isOwnChannelPost(n: NotifyItem, chatOf: (id: number) => NotifyCh
   if (c.kind === 'channel') return !!c.canPost;
   const ch = c.linkedChatId != null ? chatOf(c.linkedChatId) : undefined;   // копия поста в группе обсуждения
   return ch?.kind === 'channel' && !!ch.canPost;
+}
+
+/**
+ * Копия поста в группе обсуждения: канал, к которому она относится (иначе undefined). Подписчик канала, состоящий и
+ * в группе, получает пост дважды — сам пост и его копию; уведомлять стоит один раз, о посте. Копия и при открытом
+ * канале — «на экране»: пост уже виден в его ленте. Упоминание — не копия: оно уведомляет всегда.
+ */
+export function postCopyChannel(n: NotifyItem, chatOf: (id: number) => NotifyChat | undefined): NotifyChat | undefined {
+  if (!n.post || n.mention) return undefined;
+  const c = chatOf(n.chatId);
+  if (c?.kind !== 'group' || c.linkedChatId == null) return undefined;
+  const ch = chatOf(c.linkedChatId);
+  return ch?.kind === 'channel' ? ch : undefined;
 }
 
 /** «Кто прочитал»: только своё сообщение в группе до 100 участников, не комментарий в треде и не копия поста. */

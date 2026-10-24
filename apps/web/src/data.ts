@@ -22,7 +22,7 @@ import { isSystemChat } from './ui/format';
 import { asset } from './assets';
 import { compressPhoto } from './media/compressPhoto';
 import { compressVideo, type VideoQuality } from './media/compressVideo';
-import { isOwnChannelPost } from './channelText';
+import { isOwnChannelPost, postCopyChannel } from './channelText';
 import { findTarget, hashFor, parseHash, positionKey, sameTarget, toTarget, type StackTarget } from './stackTarget';
 
 declare const __BUILD__: string;
@@ -93,10 +93,25 @@ export function startData(me: Me): void {
 
   // запись истории могла вернуть прежний адрес (#chat=…) — поправить на чат на экране
   addEventListener('popstate', () => queueMicrotask(syncShown));
-  startNotify((id) => { focus(); openChat(id); });
+  startNotify((id, threadId) => { focus(); openNotified(id, threadId); });
   // #chat=…&thread=… при загрузке: нижний слой — чат, тред — поверх него (docs/navigation-rules.md)
   const open = parseHash(location.hash);
   if (open) { openChat(open.chatId); if (open.threadId != null) whenShown(open.chatId, () => openInner(open)); }
+}
+
+/**
+ * Клик по уведомлению: чат — нижним слоем (замена стека, docs/navigation-rules.md), комментарий — его тред поверх
+ * группы, как адрес с thread. Тред уже наверху — ничего; группа уже нижняя и одна — openChat ничего не меняет, тред
+ * кладётся сразу.
+ */
+function openNotified(chatId: number, threadId?: number): void {
+  const top = activeFrame(getGlobal());
+  if (threadId != null && top?.chatId === chatId && top.threadId === threadId) return;
+  openChat(chatId);
+  if (threadId == null) return;
+  const g = getGlobal(), now = activeFrame(g);
+  if (g.pendingChatId == null && now?.chatId === chatId && now.threadId == null) openInner({ chatId, threadId });
+  else whenShown(chatId, () => openInner({ chatId, threadId }));
 }
 
 /** Когда чат станет нижним на экране (адрес при загрузке: тред кладётся поверх уже открытой группы). */
@@ -123,18 +138,22 @@ function watchNotifications(meId: number): void {
     const g = getGlobal();
     const chatOf = (id: number) => {
       const c = g.chats.find((x) => x.id === id);
-      return c ? { id, kind: c.kind, canPost: !!c.canSend, linkedChatId: (c.group as { linkedChatId?: number | null } | null)?.linkedChatId ?? null } : undefined;
+      return c ? { id, kind: c.kind, canPost: !!c.canSend, member: c.me != null, linkedChatId: (c.group as { linkedChatId?: number | null } | null)?.linkedChatId ?? null } : undefined;
     };
     for (const n of items) {
       if (shown.has(n.key)) continue;
       shown.add(n.key);
       const chatId = n.chatId as number;
       if (n.senderId === meId && !n.post) continue;
-      if (chatId === g.openChatId && document.visibilityState === 'visible') continue;
-      if (isOwnChannelPost({ chatId, post: !!n.post, mention: !!n.mention }, chatOf)) continue;   // свои посты и их копии
+      const item = { chatId, post: !!n.post, mention: !!n.mention };
+      // копия поста в группе обсуждения: подписчик канала уже уведомлён самим постом; открыт канал — пост на экране
+      const copyOf = postCopyChannel(item, chatOf);
+      if (copyOf?.member) continue;
+      if ((chatId === g.openChatId || (copyOf && copyOf.id === g.openChatId)) && document.visibilityState === 'visible') continue;
+      if (isOwnChannelPost(item, chatOf)) continue;   // свои посты и их копии
       const c = g.chats.find((x) => x.id === chatId);
       notifyIncoming({ id: chatId, title: (c?.title as string) || 'Чат №' + chatId, muted: isMuted(c ?? { id: chatId }), system: isSystemChat(c) },
-        { id: n.id as number, body: hideSpoilers(String(n.body ?? ''), n.entities as Entity[] | undefined), kind: n.kind as string | undefined, attachmentName: n.attachmentName as string | null, createdAt: n.createdAt as string, service: n.service as { type: string } | undefined },
+        { id: n.id as number, body: hideSpoilers(String(n.body ?? ''), n.entities as Entity[] | undefined), kind: n.kind as string | undefined, attachmentName: n.attachmentName as string | null, createdAt: n.createdAt as string, service: n.service as { type: string } | undefined, threadId: n.threadId as number | undefined },
         { mention: !!n.mention });
     }
     // держим только ключи, что ещё в списке движка (он сам хранит последние)

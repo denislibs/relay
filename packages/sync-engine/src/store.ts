@@ -705,8 +705,10 @@ export class Store {
     if (this.notifiedIds.has(k)) return;
     this.notifiedIds.add(k);
     if (this.notifiedIds.size > 2000) this.notifiedIds.delete(this.notifiedIds.values().next().value!);
+    // тред — и у упоминания, и у простого комментария: клик по уведомлению открывает тред, а не ленту группы
+    const thread = threadId ?? m.threadId;
     this.notifications.push({
-      key: 'n' + k, chatId: m.chatId, id: m.id, mention, ...(threadId != null ? { threadId } : {}),
+      key: 'n' + k, chatId: m.chatId, id: m.id, mention, ...(thread != null ? { threadId: thread } : {}),
       senderId: m.senderId, body: m.body, kind: m.kind ?? 'text', createdAt: m.createdAt, attachmentName: m.attachment?.name ?? null,
       ...(m.entities?.length ? { entities: m.entities } : {}), ...(m.service ? { service: m.service } : {}), ...(m.post ? { post: true } : {}),
     });

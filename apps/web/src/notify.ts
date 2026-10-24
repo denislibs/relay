@@ -59,7 +59,7 @@ export async function dropSubscription(): Promise<void> {
 const quietly = (p: Promise<unknown>) => { p.catch((e) => console.warn('push:', String(e))); };
 
 /** Старт приложения: состояние в global, подписка обновляется, клики по уведомлениям открывают чат. */
-export function startNotify(openChat: (id: number) => void): void {
+export function startNotify(openChat: (id: number, threadId?: number) => void): void {
   // единый источник — prefs.notify.web: старый флаг переносим один раз и удаляем
   try { if (localStorage.getItem(OLD_OFF_KEY) !== null) { if (localStorage.getItem(OLD_OFF_KEY) === '1') setPref('notify.web', false); localStorage.removeItem(OLD_OFF_KEY); } } catch { /* ok */ }
   let hideText = getPrefs().screen.hideNotifyText;
@@ -80,7 +80,7 @@ export function startNotify(openChat: (id: number) => void): void {
     wasOnline = online;
   });
   navigator.serviceWorker?.addEventListener('message', (e) => {
-    if (e.data?.type === 'openChat') openChat(Number(e.data.chatId));
+    if (e.data?.type === 'openChat') openChat(Number(e.data.chatId), Number(e.data.threadId) || undefined);
   });
 }
 
@@ -116,7 +116,7 @@ const FRESH_MS = 2 * 60_000;   // догоняющая синхронизаци�
  * Пришло чужое сообщение или упоминание (запрос notifications движка — одно на сообщение): показать, если окно не в
  * фокусе. Упоминание пробивает выключенный звук чата и умолчание вида (как в Telegram).
  */
-export function notifyIncoming(chat: { id: number; title: string; muted: boolean; system?: boolean }, m: { id: number; body: string; kind?: string; attachmentName?: string | null; createdAt: string; service?: { type: string } | null }, o: { mention?: boolean } = {}): void {
+export function notifyIncoming(chat: { id: number; title: string; muted: boolean; system?: boolean }, m: { id: number; body: string; kind?: string; attachmentName?: string | null; createdAt: string; service?: { type: string } | null; threadId?: number }, o: { mention?: boolean } = {}): void {
   if (Date.now() - Date.parse(m.createdAt) > FRESH_MS) return;
   const g = getGlobal();
   const ck = g.chats.find((c) => c.id === chat.id)?.kind;
@@ -127,6 +127,6 @@ export function notifyIncoming(chat: { id: number; title: string; muted: boolean
   if (!plan.show) return;
   const text = incomingText(m);
   const t = notifyText({ title: chat.title, text }, { preview: plan.preview, hideText: getPrefs().screen.hideNotifyText });
-  quietly(navigator.serviceWorker.ready.then((reg) => reg.showNotification(t.title, { body: t.body, tag: 'chat-' + chat.id, data: { chatId: chat.id }, ...(chat.system ? { icon: '/relay-logo-192.png' } : {}) })));
+  quietly(navigator.serviceWorker.ready.then((reg) => reg.showNotification(t.title, { body: t.body, tag: 'chat-' + chat.id, data: { chatId: chat.id, ...(m.threadId != null ? { threadId: m.threadId } : {}) }, ...(chat.system ? { icon: '/relay-logo-192.png' } : {}) })));
   playNotifySound(plan.volume);
 }

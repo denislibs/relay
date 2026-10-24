@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test';
-import { canAskReadBy, commentsLabel, compactCount, isOwnChannelPost, subscribersText, threadTitle, type NotifyChat } from './channelText';
+import { canAskReadBy, commentsLabel, compactCount, isOwnChannelPost, postCopyChannel, subscribersText, threadTitle, type NotifyChat } from './channelText';
 
 describe('channelText', () => {
   test('подпись кнопки комментариев', () => {
@@ -47,6 +47,27 @@ describe('channelText', () => {
     expect(isOwnChannelPost({ chatId: 4, post: true }, of)).toBe(false);   // копия в группе чужого канала
     expect(isOwnChannelPost({ chatId: 1, post: true, mention: true }, of)).toBe(false);   // упоминание важнее
     expect(isOwnChannelPost({ chatId: 9, post: true }, of)).toBe(false);   // чата нет в списке
+  });
+
+  test('копия поста в группе обсуждения — канал, к которому она относится', () => {
+    const chats = new Map<number, NotifyChat>([
+      [1, { id: 1, kind: 'channel', linkedChatId: 2, member: true }],
+      [2, { id: 2, kind: 'group', linkedChatId: 1 }],
+      [3, { id: 3, kind: 'channel', linkedChatId: 4, member: false }],
+      [4, { id: 4, kind: 'group', linkedChatId: 3 }],
+      [5, { id: 5, kind: 'group', linkedChatId: 9 }],   // канал не в списке
+      [6, { id: 6, kind: 'group' }],
+    ]);
+    const of = (id: number) => chats.get(id);
+    expect(postCopyChannel({ chatId: 2, post: true }, of)?.id).toBe(1);             // подписчик: уведомит сам пост
+    expect(postCopyChannel({ chatId: 2, post: true }, of)?.member).toBe(true);
+    expect(postCopyChannel({ chatId: 4, post: true }, of)?.member).toBe(false);     // не подписан — уведомляет копия
+    expect(postCopyChannel({ chatId: 2 }, of)).toBeUndefined();                     // комментарий — не копия
+    expect(postCopyChannel({ chatId: 2, post: true, mention: true }, of)).toBeUndefined();   // упоминание важнее
+    expect(postCopyChannel({ chatId: 1, post: true }, of)).toBeUndefined();         // сам пост в канале
+    expect(postCopyChannel({ chatId: 5, post: true }, of)).toBeUndefined();
+    expect(postCopyChannel({ chatId: 6, post: true }, of)).toBeUndefined();
+    expect(postCopyChannel({ chatId: 9, post: true }, of)).toBeUndefined();
   });
 
   test('кто прочитал — только своё в небольшой группе, не комментарий и не копия', () => {
