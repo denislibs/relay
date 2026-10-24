@@ -23,7 +23,7 @@ export async function channelPreview(userId: number, chatId: number): Promise<Ch
   }
   const { pending: _p, kind: _k, ...info } = await groupInfo(sql, chatId);
   const [rows, pins, seq, [req]] = await Promise.all([
-    sql`select * from messages where chat_id = ${chatId} order by id desc limit 1`,
+    sql`select * from messages where chat_id = ${chatId} and not deleted order by id desc limit 1`,   // последнее — не удалённое (как listChats)
     sql`select message_id from pinned_messages where chat_id = ${chatId} order by message_id desc limit 100`,
     chatSeqOf(chatId),
     sql`select exists (select 1 from chat_join_requests r where r.chat_id = ${chatId} and r.user_id = ${userId}) as requested`,

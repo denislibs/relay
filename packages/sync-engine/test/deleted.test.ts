@@ -99,8 +99,9 @@ test('post copy in the discussion group: gone from the group feed and the row pr
   s.applyUpdate({ type: 'newMessage', message: msg({ id: 2, chatId: G, senderId: PEER, body: 'пост', post: true, origin: { chatId: CH, id: 50 } }) });
   s.applyThreadPage(G, 2, null, [3, 4].map((id) => msg({ id, chatId: G, senderId: PEER, threadId: 2, body: 'коммент ' + id })), false, null, 'older');
   s.applyUpdate({ type: 'messageDeleted', chatId: G, id: 4 });
+  expect(s.chats.get(G)!.last).toMatchObject({ id: 3 });   // в том же отрезке (треда) — подряд
   s.applyUpdate({ type: 'messageDeleted', chatId: G, id: 3 });
-  expect(s.chats.get(G)!.last).toMatchObject({ id: 2, body: 'пост' });
+  expect(s.chats.get(G)!.last).toBeNull();   // копия — в другом отрезке: что между ними, знает только сервер
   s.applyUpdate({ type: 'newMessage', message: msg({ id: 6, chatId: G, senderId: PEER, threadId: 2, body: 'живой' }) });
   s.applyUpdate({ type: 'messageDeleted', chatId: G, id: 6 });
   s.applyUpdate({ type: 'messageDeleted', chatId: G, id: 2 });
@@ -115,4 +116,61 @@ test('post copy in the discussion group: gone from the group feed and the row pr
   // шапка треда, пришедшая с сервера удалённой, в превью группы не попадает
   s.applyThreadPage(G, 2, msg({ id: 2, chatId: G, senderId: PEER, body: '', deleted: true, post: true, origin: { chatId: CH, id: 50 } }), [], false, null, 'older');
   expect(s.chats.get(G)!.last).toMatchObject({ id: 1 });
+});
+
+test('the server row after wantRow sets the place in the list (lastAt): previous message time, or sortAt when none is left', async () => {
+  const s = await fresh();
+  s.applyUpdate({ type: 'newMessage', message: msg({ id: 5, chatId: 7, senderId: PEER }) });
+  s.applyUpdate({ type: 'messageDeleted', chatId: 7, id: 5 });
+  expect(s.chats.get(7)!.last).toBeNull();
+  const prev = msg({ id: 3, chatId: 7, senderId: PEER });
+  s.applyChats([{ id: 7, kind: 'direct', title: null, lastReadId: 0, unread: 0, last: prev, sortAt: prev.createdAt }]);
+  expect(s.chats.get(7)!.last).toMatchObject({ id: 3 });
+  expect(s.chats.get(7)!.lastAt).toBe(prev.createdAt);   // опустился, как у сервера
+  // всё удалено: время — sortAt сервера (создание чата)
+  s.applyUpdate({ type: 'newMessage', message: msg({ id: 9, chatId: 8, senderId: PEER }) });
+  s.applyUpdate({ type: 'messageDeleted', chatId: 8, id: 9 });
+  const created = new Date(1_600_000_000_000).toISOString();
+  s.applyChats([{ id: 8, kind: 'direct', title: null, lastReadId: 0, unread: 0, last: null, sortAt: created }]);
+  expect(s.chats.get(8)!.lastAt).toBe(created);
+});
+
+test('a deleted snapshot last that waited for the journal closes the live range: no false gap', async () => {
+  const s = await fresh();
+  for (let i = 1; i <= 3; i++) s.applyUpdate({ type: 'newMessage', message: msg({ id: i, chatId: 7, senderId: PEER }) });
+  s.applyChats([{ id: 7, kind: 'direct', title: null, lastReadId: 0, unread: 0, last: msg({ id: 4, chatId: 7, senderId: PEER }) }]);
+  expect(s.chats.get(7)!.snapLast?.id).toBe(4);   // ждёт журнала
+  s.applyUpdate({ type: 'messageDeleted', chatId: 7, id: 4 });   // журнал: на его месте — удаление
+  expect(s.chats.get(7)!.snapLast).toBeUndefined();
+  s.applyUpdate({ type: 'newMessage', message: msg({ id: 5, chatId: 7, senderId: PEER }) });
+  expect(s.chats.get(7)!.ranges).toEqual([[1, 5]]);   // один отрезок — лишней догрузки нет
+  expect(feedIds(s, 7)).toEqual([1, 2, 3, 5]);
+});
+
+test('the previous last is taken only from the same range: across a gap or from a loose row — empty, asked from the server', async () => {
+  const s = await fresh();
+  const wanted: number[] = [];
+  s.wantRow = (id) => wanted.push(id);
+  s.applyHistory(7, [10, 11, 12].map((id) => msg({ id, chatId: 7, senderId: PEER })), true, null);
+  s.addLoose(7, [msg({ id: 5, chatId: 7, senderId: PEER })]);   // исходник цитаты или страница вкладки — вне ленты
+  s.applyUpdate({ type: 'messageDeleted', chatId: 7, id: 12 });
+  expect(s.chats.get(7)!.last?.id).toBe(11);
+  s.applyUpdate({ type: 'messageDeleted', chatId: 7, id: 11 });
+  s.applyUpdate({ type: 'messageDeleted', chatId: 7, id: 10 });
+  expect(s.chats.get(7)!.last).toBeNull();   // не 5: между ним и удалённым могло быть что угодно
+  expect(wanted).toEqual([7]);
+});
+
+test('a history page asked before the delete does not resurrect the message; a deleted thread header still lands', async () => {
+  const s = await fresh();
+  const stale = [1, 2, 3].map((id) => msg({ id, chatId: 7, senderId: PEER }));
+  for (const m of stale) s.applyUpdate({ type: 'newMessage', message: m });
+  s.applyUpdate({ type: 'messageDeleted', chatId: 7, id: 2 });
+  s.applyHistory(7, stale, false, null);   // ответ, ушедший до удаления
+  expect(feedIds(s, 7)).toEqual([1, 3]);
+  expect(s.messageById(7, 2)).toBeUndefined();
+  // копия поста: удалена, пока тред был закрыт; страница треда приносит её шапкой с deleted — ляжет пометкой
+  s.applyUpdate({ type: 'messageDeleted', chatId: 8, id: 20 });
+  s.applyThreadPage(8, 20, msg({ id: 20, chatId: 8, senderId: PEER, body: '', deleted: true, post: true, origin: { chatId: 9, id: 1 } }), [], false, null, 'older');
+  expect(s.messageById(8, 20)).toMatchObject({ deleted: true });
 });

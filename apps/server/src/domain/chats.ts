@@ -450,7 +450,7 @@ export async function messageAtDate(userId: number, chatId: number, from: string
   const visible = await historyFrom(chatId, userId);
   const [first] = await sql`select id from messages where chat_id = ${chatId} and id >= ${visible} and created_at >= ${at} and not deleted order by created_at, id limit 1`;
   if (first) return { id: Number(first.id) };
-  const [last] = await sql`select id from messages where chat_id = ${chatId} and not deleted order by id desc limit 1`;
+  const [last] = await sql`select id from messages where chat_id = ${chatId} and id >= ${visible} and not deleted order by id desc limit 1`;
   return { id: last ? Number(last.id) : null };
 }
 

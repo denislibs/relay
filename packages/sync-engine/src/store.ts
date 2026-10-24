@@ -552,7 +552,9 @@ export class Store {
       if (s.last) {
         chat.knownMaxId = Math.max(chat.knownMaxId, s.last.id);
         this.applyMessage(s.last, false, 'snapshot');
-      }
+        // место в списке — как у сервера: удалили последнее — чат опускается к дате предыдущего
+        if (chat.last?.id === s.last.id) chat.lastAt = s.last.createdAt;
+      } else if (!chat.last && s.sortAt) chat.lastAt = s.sortAt;   // сообщений нет (все удалены) — время сервера
       this.markChat(chat);
     }
   }
@@ -643,6 +645,9 @@ export class Store {
     const mine = m.senderId === this.userId;
     const map = this.map(m.chatId);
     const prev = map.get(m.clientId);
+    // страница истории или строка списка, запрошенные до удаления, — удалённое не воскрешаем (журнал его уже убрал);
+    // пометку удалённой копии поста (шапка треда) — можно
+    if (range !== 'journal' && !m.deleted && this.quotes.get(m.chatId + ':' + m.id)?.deleted) return;
     const status = mine && (prev?.status === 'read' || m.id <= chat.peerReadUpTo) ? 'read' : 'sent';
     const local: LocalMessage = {
       key: m.clientId, clientId: m.clientId, id: m.id, chatId: m.chatId, senderId: m.senderId,
@@ -1007,7 +1012,8 @@ export class Store {
     const chat = this.chats.get(chatId);
     if (!chat) return;
     // последнее из снимка ждёт журнала: дыру перед ним ещё отметит (settleSnapshots), но в ленту не ляжет (placeSnapLast)
-    if (chat.snapLast?.id === id) { chat.snapLast = { ...chat.snapLast, ...DELETED }; this.markChat(chat); }
+    // последнее из снимка ждало журнала — журнал дошёл до него (удаление на его месте): до него всё подряд, дыры нет
+    if (chat.snapLast?.id === id) { extendLive(chat, chat.snapLast.sort); delete chat.snapLast; this.markChat(chat); }
     if (!m) {
       this.rowPatches.set(k, { chatId, id, patch: { ...DELETED }, drop: true });   // строка могла остаться в IDB
       const last = chat.last;

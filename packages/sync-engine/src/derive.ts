@@ -1,6 +1,6 @@
 import { isVideoMedia, mediaTabs, type MediaTab, type Message } from '@relay/protocol';
 import type { Store } from './store';
-import type { LocalChat, LocalMessage } from './types';
+import { PENDING_BASE, type LocalChat, type LocalMessage } from './types';
 
 /*
  * Поля чата, производные из сообщений (last, lastAt, unread), пересчитываются только здесь: хранилище сообщает,
@@ -19,7 +19,7 @@ export function onMessage(store: Store, chat: LocalChat, m: LocalMessage, kind: 
   const last = chat.last;
   if (kind === 'deleted') {
     if (last?.key === m.key) {
-      recomputeLast(store, chat);
+      recomputeLast(store, chat, m.sort);
       if (!chat.last) store.wantRow(chat.id);
     }
   } else if (!m.deleted && (!last || last.deleted || last.key === m.key || m.sort >= last.sort)) {   // last.deleted — пометка из старого кэша
@@ -31,13 +31,23 @@ export function onMessage(store: Store, chat: LocalChat, m: LocalMessage, kind: 
 
 /**
  * last — самое позднее не удалённое из сообщений в памяти, lastAt — его время; таких нет — null, lastAt не трогаем.
- * Черновик по-прежнему может поднять чат (sortAt).
+ * Черновик по-прежнему может поднять чат (sortAt). gone — sort удалённого последнего: предыдущее берём, только если
+ * оно с ним в одном отрезке истории (подряд). За дырой или вне ленты (исходник цитаты, страница вкладки) — не
+ * доказано, что между ними ничего нет: last пуст, строку спросят у сервера.
  */
-export function recomputeLast(store: Store, chat: LocalChat): void {
+/** a и b (a < b) в одном отрезке ленты чата или треда — между ними всё известно. */
+function sameRange(chat: LocalChat, a: number, b: number): boolean {
+  const has = (rs: readonly [number, number][]) => rs.some((r) => r[0] <= a && b <= r[1]);
+  return has(chat.ranges) || Object.values(chat.threads ?? {}).some((t) => has(t.ranges));
+}
+
+export function recomputeLast(store: Store, chat: LocalChat, gone?: number): void {
   const all = store.chatMessages(chat.id);
   let last: LocalMessage | null = null;
   for (let i = all.length - 1; i >= 0; i--) {
     if (all[i].deleted) continue;
+    const s = all[i].sort;
+    if (gone != null && s < PENDING_BASE && !sameRange(chat, s, gone)) break;
     last = all[i];
     chat.lastAt = last.createdAt;
     break;

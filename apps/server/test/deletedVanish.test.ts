@@ -41,6 +41,9 @@ test('a deleted message is gone from history (both directions), by-ids, jump-to-
   // «Перейти к дате» за последним — последнее не удалённое
   await deleteMessage(b, chat, m3.id);
   expect(await messageAtDate(b, chat, new Date(Date.now() + 86_400_000).toISOString())).toEqual({ id: m1.id });
+  // скрытая история (history_from) — и в запасном «последнем» тоже не видна
+  await sql`update chat_members set history_from = ${m1.id + 1} where chat_id = ${chat} and user_id = ${b}`;
+  expect(await messageAtDate(b, chat, new Date(Date.now() + 86_400_000).toISOString())).toEqual({ id: null });
 });
 
 test('pins: a deleted message is unpinned and cannot be pinned', async () => {

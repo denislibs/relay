@@ -1918,6 +1918,9 @@ export class Engine {
 
   private runRefreshRows(): void {
     if (this.rowsInFlight || !this.refreshIds.size || !this.online || !this.store.hydrated) return;
+    // идёт догонка журнала: строка, снятая посреди неё, уже учла события, которые догонка ещё применит (unread
+    // уменьшился бы дважды) — после догонки
+    if (this.syncing || this.chatActive) { this.refreshRows([]); return; }
     const ids = [...this.refreshIds].slice(0, 500);
     for (const id of ids) this.refreshIds.delete(id);
     this.rowsInFlight = true;
