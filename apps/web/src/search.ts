@@ -1,6 +1,6 @@
 // Глобальный поиск (левая колонка, как в Telegram Web): режим поиска, вкладки, недавние чаты и загрузка
 // результатов. Состояние режима — в global (searchOpen, searchTab, search); выдача — на вкладках.
-import type { MediaTab } from '@relay/protocol';
+import type { MediaTab, ProfilePhoto } from '@relay/protocol';
 import type { MediaHit, PersonHit } from '@relay/sync-engine/src/globalSearch';
 import { getGlobal, setGlobal } from './global';
 import { callEngine } from './settingsData';
@@ -49,6 +49,9 @@ export async function searchGlobalMedia(kind: MediaTab, q: string, before?: numb
 }
 
 export const searchPeople = (q: string) => callEngine<PersonHit[]>({ type: 'searchPeople', q });
+/** Публичный канал с сервера (я в нём не состою): открывается превью. */
+export interface ChannelHit { id: number; title: string; username: string; photo: ProfilePhoto | null; members: number }
+export const searchChannels = (q: string) => callEngine<ChannelHit[]>({ type: 'searchChannels', q });
 
 /** «Частые собеседники» — личные чаты; ответ кэшируем на минуту (как Top people в Telegram). */
 let top: { at: number; ids: Promise<number[]> } | null = null;

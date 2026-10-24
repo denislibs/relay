@@ -1,14 +1,16 @@
 import { Avatar, Button, Modal, peerTone } from '@relay/ui';
 import type { InvitePreview } from '@relay/protocol';
 import { useEffect, useState } from 'preact/hooks';
-import { groupCall, openInner, openUserChat } from '../../data';
+import { groupCall, openChannel, openInner, openUserChat } from '../../data';
 import { setGlobal, useGlobal } from '../../global';
 import { errorText, plural } from '../../groups';
 import { avatarPhoto } from '../../profilePhoto';
+import { joinAction, showCardAt } from '../../joinLink';
 import { resolveUser, showToast } from '../../settingsData';
 
 // Ссылка-приглашение (/+токен) или публичное имя (/@имя), как t.me в Telegram: карточка группы → «Вступить»
-// или «Подать заявку»; уже участник — сразу в чат; @имя человека — личный чат с ним.
+// или «Подать заявку»; уже участник — сразу в чат; @имя человека — личный чат с ним; @имя канала — превью
+// канала (лента для чтения с «Подписаться» внизу), без карточки.
 
 const LINK = /^\/([+@][A-Za-z0-9_-]{1,64})$/;
 
@@ -49,7 +51,10 @@ export function JoinLink() {
     void groupCall<InvitePreview>('GET', '/join/' + key).then(async (r) => {
       if (!live) return;
       if (r.ok) {
-        if (r.data.member) { close(); openInner(r.data.chatId); return; }   // уже в группе — открыть поверх (ссылка из чата)
+        const act = joinAction(key, r.data);
+        if (act === 'open') { close(); openInner(r.data.chatId); return; }   // уже в группе — открыть поверх (ссылка из чата)
+        // публичный канал по @имени — сразу его лента (превью), поверх: ссылка из чата
+        if (act === 'preview') { close(); void openChannel(r.data.chatId, 'inner'); return; }
         setPreview(r.data);
         return;
       }
@@ -76,7 +81,7 @@ export function JoinLink() {
   };
 
   return (
-    <Modal open={!!key} onClose={close} title={error ? 'Приглашение' : ''} size="confirm" closeButton={false}
+    <Modal open={showCardAt(key, !!preview || !!error)} onClose={close} title={error ? 'Приглашение' : ''} size="confirm" closeButton={false}
       actions={error ? [<button key="ok" type="button" class="rl-mdl-btn" onClick={close}>Понятно</button>] : preview ? [
         <button key="no" type="button" class="rl-mdl-btn" onClick={close}>Отмена</button>,
       ] : []}>

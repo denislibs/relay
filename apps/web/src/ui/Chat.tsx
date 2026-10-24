@@ -44,7 +44,7 @@ import type { Entity, Todo, TodoInput } from '@relay/protocol';
 
 type Value = { text: string; entities: Entity[] };
 type ComposerApi = { getValue(): Value; setValue(v: Value, opts?: { focus?: boolean; instant?: boolean }): void; focus(opts?: { end?: boolean }): void; insert(v: Value, range?: { start: number; end: number }): void };
-import { frameByKey, setGlobal, useGlobal, getGlobal } from '../global';
+import { frameByKey, setGlobal, useGlobal, getGlobal, findChat } from '../global';
 import { showToast, unblockUser, useUser } from '../settingsData';
 import { Feed, type MenuExtra } from './Feed';
 import { chatKindFor, mediaPolicy } from '../autoload';
@@ -120,7 +120,7 @@ function useThreadCount(frameKey: string): number {
 export function Chat({ chatId, frameKey, active, threadId }: { chatId: number; frameKey: string; active: boolean; threadId?: number }) {
   const me = useGlobal((s) => s.me)!;
   useOwnMusic();   // кнопка «в профиль» в плеере
-  const chat = useGlobal((s) => s.chats.find((c) => c.id === chatId));
+  const chat = useGlobal((s) => findChat(s, chatId));
   // канал: пишут только админы с правом post (canSend); подписчику — нижняя панель. Тред — комментарии группы
   const channel = chat?.kind === 'channel';
   const community = chat?.kind === 'group' || channel;
@@ -700,7 +700,7 @@ export function Chat({ chatId, frameKey, active, threadId }: { chatId: number; f
         const textual = !menuMsg.service || system;
         return (
           <MenuPopover open anchor={menu} class="app-msgmenu"
-            header={menuMsg.id != null && !menuMsg.deleted && !system && (!gRights || gRights.react) && gInfo?.reactions.mode !== 'none' ? (
+            header={menuMsg.id != null && !menuMsg.deleted && !system && !chat?.preview && (!gRights || gRights.react) && gInfo?.reactions.mode !== 'none' ? (
                 <ReactionPicker emoji={gInfo?.reactions.mode === 'some' ? gInfo.reactions.allowed.slice(0, 7) : undefined} selected={myReaction} onPick={(emoji: string) => { react(chatId, menuMsg.id as number, myReaction === emoji ? null : emoji); setMenu(null); }} />
               ) : null}
                 label="Действия с сообщением"

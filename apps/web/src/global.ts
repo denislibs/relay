@@ -29,6 +29,7 @@ export interface ChatFrame {
   feedMeta: FeedMeta | null;
   unreadFrom: number | null;  // lastReadId на момент открытия: разделитель «Непрочитанные» (заморожен)
   focus: Focus | null;        // перейти к сообщению и подсветить
+  joinedAfter?: number;       // подписался на канал из превью, пока лента открыта: после этого id — «Вы подписались на канал»
 }
 
 /** Свой профиль (GET /me, дальше — подписка me движка). Поля опциональны: старый кэш relay.me их не знает. */
@@ -42,6 +43,8 @@ export interface GlobalState {
   enter: 'login' | 'reload' | null;   // как появилось приложение: после входа (колонка выезжает) или при запуске (проявление)
   me: Me | null;
   chats: Item[];
+  /** превью публичных каналов без подписки (подписка previews движка): как строки списка, preview: true; в списке их нет */
+  previews: Item[];
   chatsLoaded: boolean;   // первый снимок списка из воркера уже пришёл
   counters: { unreadChats: number; unreadMessages: number };
   status: Status;
@@ -129,6 +132,7 @@ let state: GlobalState = {
   enter: null,
   me: null,
   chats: [],
+  previews: [],
   chatsLoaded: false,
   counters: { unreadChats: 0, unreadMessages: 0 },
   uploads: [],
@@ -221,6 +225,12 @@ export function useGlobal<T>(select: (s: GlobalState) => T): T {
     return () => { subscribers.delete(check); };
   }, []);
   return value;
+}
+
+/** Чат по id: строка списка, а нет её — превью канала без подписки (шапка, лента, «Информация» читают отсюда). */
+export function findChat(s: GlobalState, id: number | null | undefined): Item | undefined {
+  if (id == null) return undefined;
+  return s.chats.find((c) => c.id === id) ?? s.previews.find((c) => c.id === id);
 }
 
 /** Чат на экране: верхний готовый кадр стека. */
