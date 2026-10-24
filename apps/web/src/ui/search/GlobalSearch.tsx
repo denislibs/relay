@@ -5,17 +5,18 @@ import { Avatar, EmptyState, FolderTabs, Highlight, Icon, MediaViewer, peerTone,
 import type { Item, SearchHit, SearchResult } from '@relay/sync-engine/src/types';
 import type { ComponentChildren } from 'preact';
 import { useEffect, useMemo, useRef, useState } from 'preact/hooks';
-import { openChat, searchMessages } from '../../data';
+import { openChannel, openChat, searchMessages } from '../../data';
 import { wantPeople } from '../../people';
 import { getGlobal, useGlobal, type Person } from '../../global';
 import { toggleMusic, trackTitle } from '../../music';
 import { avatarPhoto } from '../../profilePhoto';
 import {
-  addRecent, clearRecent, closeSearch, getRecent, monthKey, monthLabel, SEARCH_TABS, searchGlobalMedia, searchPeople, setSearchTab,
-  subscribeRecent, topChats, type MediaHit, type PersonHit, type SearchTab,
+  addRecent, clearRecent, closeSearch, getRecent, monthKey, monthLabel, SEARCH_TABS, searchChannels, searchGlobalMedia, searchPeople, setSearchTab,
+  subscribeRecent, topChats, type ChannelHit, type MediaHit, type PersonHit, type SearchTab,
 } from '../../search';
 import { chatTime, chatTone, fileSize, isSystemChat, shownBody, snippet } from '../format';
 import { attachmentHit } from '../../searchHit';
+import { subscribersText } from '../../channelText';
 import { dur, extTone, fileUrl, MediaCell, type Msg, when } from '../SharedMedia';
 
 // Глобальный поиск — содержимое левой колонки в режиме поиска (как в Telegram Web): вкладки сверху,
@@ -139,6 +140,8 @@ function ChatResults({ q }: { q: string }) {
     return { chats: found, contacts: extra };
   }, [chats, contacts, needle]);
   const people = usePeople(q);
+  // публичные каналы, где я не состою (как «Глобальный поиск» в Telegram): клик — превью канала
+  const channels = useChannels(q);
   const shownIds = new Set(local.chats.map((c) => c.peerId as number | null).filter(Boolean));
   for (const x of local.contacts) shownIds.add(x.userId as number);
   const global = (people ?? []).filter((p) => !shownIds.has(p.id));
@@ -154,10 +157,13 @@ function ChatResults({ q }: { q: string }) {
           {all ? localRows : localRows.slice(0, LOCAL_SHOWN)}
         </Section>
       ) : null}
-      {global.length ? (
-        <Section title="Глобальный поиск">{global.slice(0, 10).map((p) => <PersonRow key={p.id} p={p} q={q} />)}</Section>
+      {global.length || channels?.length ? (
+        <Section title="Глобальный поиск">
+          {(channels ?? []).map((c) => <ChannelRow key={'ch' + c.id} c={c} q={q} />)}
+          {global.slice(0, 10).map((p) => <PersonRow key={p.id} p={p} q={q} />)}
+        </Section>
       ) : null}
-      <MessageResults q={q} empty={!localCount && !global.length && people !== null} />
+      <MessageResults q={q} empty={!localCount && !global.length && !channels?.length && people !== null} />
     </>
   );
 }
@@ -171,6 +177,31 @@ function usePeople(q: string): PersonHit[] | null {
     return () => { live = false; clearTimeout(t); };
   }, [q]);
   return res && res.q === q ? res.list : null;
+}
+
+/** Каналы с сервера: как люди — троттлинг 300 мс, ответ на устаревший запрос отбрасываем; без сети — пусто. */
+function useChannels(q: string): ChannelHit[] | null {
+  const [res, setRes] = useState<{ q: string; list: ChannelHit[] } | null>(null);
+  useEffect(() => {
+    let live = true;
+    const t = setTimeout(() => { void searchChannels(q).then((list) => { if (live) setRes({ q, list }); }, () => { if (live) setRes({ q, list: [] }); }); }, 300);
+    return () => { live = false; clearTimeout(t); };
+  }, [q]);
+  return res && res.q === q ? res.list : null;
+}
+
+/** Публичный канал из поиска — левая колонка: заменяет стек (docs/navigation-rules.md), без подписки — превью. */
+function ChannelRow({ c, q }: { c: ChannelHit; q: string }) {
+  const open = () => { void openChannel(c.id, 'left').then((ok) => { if (ok) setTimeout(closeSearch, 0); }); };
+  return (
+    <button type="button" class="rl-row app-gsearch-row" onClick={open}>
+      <Avatar name={c.title} tone={peerTone(c.id)} size={48} {...avatarPhoto(c.photo)} />
+      <span class="rl-row-main">
+        <span class="rl-row-name"><Highlight text={c.title} query={q} /></span>
+        <span class="rl-row-preview">@<Highlight text={c.username} query={q.replace(/^@/, '')} />, {subscribersText(c.members)}</span>
+      </span>
+    </button>
+  );
 }
 
 function PersonRow({ p, q }: { p: PersonHit; q: string }) {

@@ -264,6 +264,10 @@ export async function fileFor(userId: number, id: string, variant?: string): Pro
          select 1 from messages m join chat_members cm on cm.chat_id = m.chat_id and cm.user_id = ${userId}
                                   join chats c on c.id = m.chat_id and c.deleted_at is null   -- удалённый (мягко) чат файлов не отдаёт
           where m.attachment->>'id' = ${id} and not m.deleted)
+       or exists (   -- пост публичного канала: превью без подписки (те же условия, что у canRead: @имя, не удалён, не в бане)
+         select 1 from messages m join chats c on c.id = m.chat_id and c.kind = 'channel' and c.username is not null and c.deleted_at is null
+          where m.attachment->>'id' = ${id} and not m.deleted
+            and not exists (select 1 from chat_bans b where b.chat_id = c.id and b.user_id = ${userId}))
        or exists (select 1 from link_previews lp where lp.photo_id = a.id)   -- картинка превью ссылки: публичная страница, видна всем
        or exists (   -- трек в чьём-то профиле: его видят все, кого владелец не заблокировал
          select 1 from profile_music p where p.attachment_id = a.id

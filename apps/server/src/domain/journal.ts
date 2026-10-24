@@ -45,7 +45,7 @@ function txState(tx: Tx): PerTx {
 }
 
 /** NOTIFY 'chat_updates': {c, f, t, e?} — e: события транзакции, если влезают; иначе клиент сделает syncChat. */
-export type ChatNotify = { c: number; f: number; t: number; e?: Update[] };
+export type ChatNotify = { c: number; f: number; t: number; e?: Update[]; g?: 1 };   // g — чат удалён (deleteGroup): кадр push с gone
 function chatNotifyPayload(chatId: number, r: { from: number; to: number; updates: Update[] }): string {
   const rich = JSON.stringify({ c: chatId, f: r.from, t: r.to, e: r.updates } satisfies ChatNotify);
   return Buffer.byteLength(rich) <= NOTIFY_MAX ? rich : JSON.stringify({ c: chatId, f: r.from, t: r.to } satisfies ChatNotify);

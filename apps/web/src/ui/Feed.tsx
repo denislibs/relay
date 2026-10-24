@@ -14,7 +14,7 @@ import { pressButton, toggleTodo, clearFocus, discardUnsent, retrySend, focusMes
 import { isPost } from '@relay/sync-engine/src/channel';
 import { Comments, MentionFab, postMeta } from './channel';
 import { wantPeople } from '../people';
-import { activeFrame, frameByKey, getGlobal, setGlobal, useGlobal } from '../global';
+import { activeFrame, frameByKey, getGlobal, setGlobal, useGlobal, findChat } from '../global';
 import { toggleMusic, trackTitle, useFileCached } from '../music';
 import { showToast } from '../settingsData';
 import { startForward, toggleSelect } from '../forward';
@@ -471,6 +471,8 @@ export function Feed({ frameKey, active, chatId, threadId, channel = false, meId
   }, [chatId, peerName, active]);
   const meta = useGlobal((s) => frameByKey(s, frameKey)?.feedMeta ?? null);
   const unreadFrom = useGlobal((s) => frameByKey(s, frameKey)?.unreadFrom ?? null);
+  // подписался на канал из превью: местная строка «Вы подписались на канал» после последнего поста на тот момент
+  const joinedAfter = useGlobal((s) => frameByKey(s, frameKey)?.joinedAfter ?? null);
   const focus = useGlobal((s) => frameByKey(s, frameKey)?.focus ?? null);
   const activeRef = useRef(active); activeRef.current = active;
   const [flashKey, setFlashKey] = useState<string | null>(null);
@@ -478,7 +480,7 @@ export function Feed({ frameKey, active, chatId, threadId, channel = false, meId
   const [pickDate, setPickDate] = useState<Date | null>(null);   // «Перейти к дате» по клику на плашку даты
   const [pickerUsed, setPickerUsed] = useState(false);   // календарь монтируется с первого открытия: закрытый строил сетку месяца в каждом чате
   if (pickDate && !pickerUsed) setPickerUsed(true);
-  const unread = useGlobal((s) => (s.chats.find((c) => c.id === chatId)?.unread as number) ?? 0);
+  const unread = useGlobal((s) => (findChat(s, chatId)?.unread as number) ?? 0);
   const el = useRef<HTMLDivElement>(null);
   const metaRef = useRef(meta); metaRef.current = meta;
   const anchor = useRef<{ key: string; top: number } | null>(null);   // якорь до сдвига окна
@@ -640,8 +642,9 @@ export function Feed({ frameKey, active, chatId, threadId, channel = false, meId
       for (const id of visible.current) if (id > max) max = id;
       // тред — своя прочитанность (точка у кнопки поста); основную ленту группы он не читает
       if (max) { if (threadId != null) markThreadRead(chatId, threadId, max); else seen(chatId, max); }
-      // канал: видимые посты — в просмотры (каждый — один раз за сессию; батч раз в секунду — в движке)
-      if (channel) {
+      // канал: видимые посты — в просмотры (каждый — один раз за сессию; батч раз в секунду — в движке);
+      // превью без подписки — не считаем и не запоминаем: подпишется — посты на экране засчитаются
+      if (channel && !findChat(getGlobal(), chatId)?.preview) {
         const fresh = [...visible.current].filter((id) => !viewed.current.has(id));
         for (const id of fresh) viewed.current.add(id);
         countViews(chatId, fresh);
@@ -909,6 +912,8 @@ export function Feed({ frameKey, active, chatId, threadId, channel = false, meId
   // реакция под баблом: своя — снять, чужая — поставить такую же
   const onReact = useRef((m: Item, emoji: string) => {
     if (m.id == null) return;
+    // превью канала: реакции только для чтения (как в Telegram — сначала подписка)
+    if (findChat(getGlobal(), chatId)?.preview) { showToast('Подпишитесь на канал, чтобы ставить реакции'); return; }
     // пост: своя реакция — myReaction (списка реакторов нет)
     const mine = m.reactionCounts ? (m.myReaction as string | undefined) : ((m.reactions as { userId: number; emoji: string }[] | undefined) ?? []).find((r) => r.userId === meId)?.emoji;
     react(chatId, m.id as number, mine === emoji ? null : emoji);
@@ -963,18 +968,18 @@ export function Feed({ frameKey, active, chatId, threadId, channel = false, meId
   }, [!!selecting]);
   const selShown = selecting ?? (selVis ? lastSel.current : null);
   const me = useGlobal((s) => s.me);
-  const pinnedIds = useGlobal((s) => (s.chats.find((c) => c.id === chatId)?.pinned as number[] | undefined) ?? NO_IDS);
+  const pinnedIds = useGlobal((s) => (findChat(s, chatId)?.pinned as number[] | undefined) ?? NO_IDS);
   const threadHead = useGlobal((s) => frameByKey(s, frameKey)?.thread ?? null);
   // имя канала для копии поста в группе обсуждения: связанный канал в списке — его название, иначе просто «Канал»
   // (строкой, а не списком чатов: лента не перерисовывается от каждой перемены в списке)
   const linkedTitle = useGlobal((s) => {
-    const l = (s.chats.find((x) => x.id === chatId)?.group as { linkedChatId?: number | null } | undefined)?.linkedChatId;
+    const l = (findChat(s, chatId)?.group as { linkedChatId?: number | null } | undefined)?.linkedChatId;
     return l != null ? (s.chats.find((x) => x.id === l)?.title as string | undefined) ?? null : null;
   });
   const channelName = (_m: Item) => linkedTitle || 'Канал';
   // канал с группой обсуждения: её id — заглушке кнопки комментариев (пока копия поста не пришла)
-  const discussion = useGlobal((s) => (channel && threadId == null ? (s.chats.find((x) => x.id === chatId)?.group as { linkedChatId?: number | null } | undefined)?.linkedChatId ?? null : null));
-  const mentions = useGlobal((s) => (threadId == null ? (s.chats.find((c) => c.id === chatId)?.mentions as number | undefined) ?? 0 : 0));
+  const discussion = useGlobal((s) => (channel && threadId == null ? (findChat(s, chatId)?.group as { linkedChatId?: number | null } | undefined)?.linkedChatId ?? null : null));
+  const mentions = useGlobal((s) => (threadId == null ? (findChat(s, chatId)?.mentions as number | undefined) ?? 0 : 0));
   // «к упоминанию»: старейшее непрочитанное — в ленте (focusMessage) или в треде (тред поверх)
   const toMention = () => {
     void nextMention(chatId).then((t) => {
@@ -1045,11 +1050,14 @@ export function Feed({ frameKey, active, chatId, threadId, channel = false, meId
     out.push(<div class="rl-action app-thread-start" key="thread-start" role="separator"><span>{empty ? 'Здесь пока нет комментариев' : 'Начало обсуждения'}</span></div>);
     prevSender = null;
   };
+  let joinedShown = false;
+  const joinedLine = () => { joinedShown = true; flushRun(); out.push(<div class="rl-action app-joined" key="joined" role="note"><span>Вы подписались на канал</span></div>); };
   shown.forEach((m, i) => {
     if (inAlbum.has(m.key)) return;   // уже нарисовано в альбоме выше
     // удалённых в ленте нет (как в Telegram); остаётся только шапка треда удалённого поста — без пузыря: «Пост удалён»
     // написано на плашке над тредом (ThreadBar)
     if (m.deleted) { if (threadId != null && m.key === threadHead?.header) { flushRun(); threadStart(); } return; }
+    if (joinedAfter != null && !joinedShown && typeof m.id === 'number' && m.id > joinedAfter) { joinedLine(); prevSender = null; }
     const day = dayKey(m.createdAt as string);
     const post = isPosted(m);
     // пост никогда не «исходящий»: слева, без хвоста отправителя (даже свой)
@@ -1138,6 +1146,7 @@ export function Feed({ frameKey, active, chatId, threadId, channel = false, meId
     if (threadId != null && m.key === threadHead?.header) threadStart();
   });
   flushRun();
+  if (joinedAfter != null && !joinedShown && shown.length && !meta?.hasNewer) joinedLine();   // новых постов ещё нет — строка внизу
   out.push(<div class="app-sentinel" data-dir="newer" key={'n' + (messages[messages.length - 1]?.key ?? '')} aria-hidden="true" />);
 
   // тред ещё не загружен и в кэше пусто (открыли по адресу): лоадер с задержкой и минимумом — без мигания
