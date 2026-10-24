@@ -188,6 +188,20 @@ export async function threadAccess(db: Tx | typeof sql, groupId: number, userId:
   };
 }
 
+/** Права на операцию с сообщением группы (правка, удаление, реакция): участник — groupCtx; не участник — гость треда,
+ *  если сообщение — комментарий или шапка треда (threadAccess). */
+export async function messageCtx(tx: Tx, chatId: number, userId: number, id: number): Promise<GroupCtx> {
+  try {
+    return await groupCtx(tx, chatId, userId);
+  } catch (e) {
+    if (!(e instanceof DomainError && e.code === 'not_member')) throw e;
+  }
+  const [m] = await tx`select thread_id, origin from messages where chat_id = ${chatId} and id = ${id}`;
+  const root = m?.thread_id != null ? Number(m.thread_id) : m?.origin != null ? id : null;
+  if (root == null) throw new DomainError('not_member');
+  return (await threadAccess(tx, chatId, userId, root)).ctx;
+}
+
 /** Корень треда в группе: копия поста; удалённая — тоже (тред читается с шапкой «пост удалён»). */
 async function threadRoot(db: Tx | typeof sql, groupId: number, copyId: number): Promise<Record<string, unknown>> {
   const [h] = await db`select * from messages where chat_id = ${groupId} and id = ${copyId} and origin is not null`;

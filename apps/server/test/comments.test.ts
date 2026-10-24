@@ -4,7 +4,7 @@ import type { ServerFrame } from '@relay/protocol';
 import { createServer } from '../src/http';
 import { startRealtime } from '../src/realtime';
 import { sendMessage } from '../src/domain/messages';
-import { deleteMessage, editMessage } from '../src/domain/messageOps';
+import { deleteMessage, editMessage, reactMessage } from '../src/domain/messageOps';
 import { setLinkedChat } from '../src/domain/groups';
 import { toggleTodo } from '../src/domain/todo';
 import { planPush, subscribe } from '../src/domain/push';
@@ -495,4 +495,20 @@ test('a guest opens files of comments in the thread', async () => {
   const get = (u: U) => fetch(`${base}/files/${f.id}`, { headers: hdr(u), redirect: 'manual' });
   expect((await get(d)).status).toBe(302);
   expect((await get(x)).status).toBe(404);
+});
+
+test('a guest edits and deletes own comments and reacts in the thread; outside the thread — not_member', async () => {
+  const { a, b, d, ch, g, copyId } = await guests();
+  const mine = await comment(d, g, copyId, 'черновик');
+  await editMessage(d.userId, g, mine.id, 'исправил');
+  expect((await ok(d, 'GET', `/chats/${g}/threads/${copyId}/messages`)).messages.find((m: any) => m.id === mine.id)).toMatchObject({ body: 'исправил' });
+  const other = await comment(b, g, copyId, 'чужой');
+  await expect(editMessage(d.userId, g, other.id, 'нельзя')).rejects.toMatchObject({ code: 'forbidden' });
+  expect((await reactMessage(d.userId, g, other.id, '👍')).reactions).toEqual([{ userId: d.userId, emoji: '👍' }]);
+  await reactMessage(d.userId, g, copyId, '🔥');   // шапка треда — тоже
+  await deleteMessage(d.userId, g, mine.id);
+  expect(await thread(ch, (await sql`select post_id from message_threads where copy_id = ${copyId}`)[0].post_id)).toMatchObject({ count: 1 });
+  const plain = await send(a, g, 'в группе');
+  await expect(reactMessage(d.userId, g, plain.id, '👍')).rejects.toMatchObject({ code: 'not_member' });
+  await expect(deleteMessage(d.userId, g, plain.id)).rejects.toMatchObject({ code: 'not_member' });
 });
