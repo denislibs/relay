@@ -79,7 +79,7 @@ export interface LinkPreview {
 
 /** Откуда пересланное: исходный автор (имя — на момент пересылки), чат и сообщение оригинала, когда оно написано. */
 /** Переслан пост канала: userId null, name — название канала (автор не раскрывается), postAuthor — подпись поста. */
-export interface ForwardInfo { userId: Id | null; name: string; chatId: Id; messageId: Id; at: string; postAuthor?: string }
+export interface ForwardInfo { userId: Id | null; name: string; chatId: Id; messageId: Id; at: string; postAuthor?: string; photo?: ProfilePhoto | null }   // userId null — от канала (photo — его фото на момент пересылки)
 /** Ссылка на пересылаемое в кадре send: сервер сам берёт текст, оформление и вложение оригинала. */
 export interface ForwardRef { chatId: Id; id: Id; hideSender?: boolean; hideCaption?: boolean }
 

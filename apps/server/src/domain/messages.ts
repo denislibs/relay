@@ -1,6 +1,6 @@
 import { attachmentForSend } from './files';
 import { clearDraftInTx } from './drafts';
-import { rightForKind, normalizeEntities, trimFormatted, type Block, blocksText, normalizeBlocks, type Entity, type ForwardInfo, type ForwardRef, type LinkPreview, type Message, type StickerRef, type Todo, type TodoInput } from '@relay/protocol';
+import { rightForKind, normalizeEntities, trimFormatted, type Block, blocksText, normalizeBlocks, type Entity, type ForwardInfo, type ForwardRef, type ProfilePhoto, type LinkPreview, type Message, type StickerRef, type Todo, type TodoInput } from '@relay/protocol';
 import { newTodo } from './todo';
 import { sql } from '../db';
 import { assertMember, readOwnPost, shownTodo, toMessage } from './chats';
@@ -96,7 +96,7 @@ export async function sendMessage(
       const f = input.forward;
       const from = await groupCtx(tx, f.chatId, userId);
       if (from.protected) throw new DomainError('forbidden', 'protected');   // в группе запрещено копирование
-      const [src] = await tx`select m.*, u.name as sender_name, coalesce(oc.title, c.title) as chat_title from messages m join users u on u.id = m.sender_id join chats c on c.id = m.chat_id
+      const [src] = await tx`select m.*, u.name as sender_name, coalesce(oc.title, c.title) as chat_title, coalesce(oc.photo, c.photo) as chat_photo from messages m join users u on u.id = m.sender_id join chats c on c.id = m.chat_id
         left join chats oc on oc.id = (m.origin->>'chatId')::bigint   -- копия поста в группе обсуждения: от имени канала
         where m.chat_id = ${f.chatId} and m.id = ${f.id} and m.id >= ${from.historyFrom} and not m.deleted and m.service_type is null`;
       if (!src) throw new DomainError('not_found', 'forward source');
@@ -121,6 +121,7 @@ export async function sendMessage(
       fwdFrom = f.hideSender ? null : (src.fwd_from as ForwardInfo | null) ?? (src.post ? {
         userId: null, name: (src.chat_title as string | null) ?? '', chatId: origin ? Number(origin.chatId) : f.chatId, messageId: origin ? Number(origin.id) : Number(src.id), at: (src.created_at as Date).toISOString(),
         ...(src.post_author ? { postAuthor: src.post_author as string } : {}),
+        ...(src.chat_photo ? { photo: src.chat_photo as ProfilePhoto } : {}),   // фото канала в заголовке «Переслано от» у тех, кто на канал не подписан
       } : {
         userId: Number(src.sender_id), name: src.sender_name as string, chatId: f.chatId, messageId: Number(src.id), at: (src.created_at as Date).toISOString(),
       });

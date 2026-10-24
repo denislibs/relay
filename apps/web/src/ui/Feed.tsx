@@ -80,16 +80,19 @@ const Row = memo(function Row({ post, pinned, discussion, chatId, voiceTitle, au
   const att = m.attachment as Att | null | undefined;
   // пересланное: «Переслано от» с аватаром и именем автора. Клик (как в Telegram): оригинал доступен — к нему;
   // иначе — чат с автором, а если мы уже в нём — его профиль (панель «Информация»)
-  const ff = !m.deleted ? m.fwdFrom as { userId: number; name: string; chatId: number; messageId: number } | null | undefined : null;
+  const ff = !m.deleted ? m.fwdFrom as { userId: number | null; name: string; chatId: number; messageId: number; photo?: ProfilePhoto | null } | null | undefined : null;
   const openFwd = ff ? () => {
     const g = getGlobal();
     if (ff.chatId != null && g.chats.some((c) => c.id === ff.chatId)) { goToOriginal(ff.chatId, ff.messageId); return; }
     if (ff.userId === meId) return;
     const here = g.chats.find((c) => c.id === chatId);
     if (here?.kind === 'direct' && here.peerId === ff.userId) { setGlobal({ infoOpen: true }); return; }
-    onUser?.(ff.userId);
+    if (ff.userId != null) onUser?.(ff.userId);
   } : undefined;
-  const fwd = ff ? { name: ff.name, tone: peerTone(ff.userId), avatar: senderAvatar(ff.userId), onClick: openFwd } : undefined;
+  // от канала (userId null): аватар — фото канала из списка чатов, а не подписчику — снимок из fwdFrom
+  const fwd = ff ? (ff.userId == null
+    ? { name: ff.name, tone: peerTone(ff.chatId), avatar: avatarPhoto(getGlobal().chats.find((c) => c.id === ff.chatId)?.photo as ProfilePhoto | null ?? ff.photo), onClick: openFwd }
+    : { name: ff.name, tone: peerTone(ff.userId), avatar: senderAvatar(ff.userId), onClick: openFwd }) : undefined;
   // ответ — у любого типа сообщения (как в Telegram); клик по цитате ловит лента (onClick ниже ищет .rl-quote)
   const replyQ = quoted && !m.deleted ? { author: quoteAuthor, ...quoteContent(quoted as unknown as Record<string, unknown>), tone: quoteTone, onClick: noop } : undefined;
   // режим выбора: строка отмечается кликом (обработчик — у ленты), кружок-галочка слева
