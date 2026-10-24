@@ -338,7 +338,7 @@ console.log(JSON.stringify({
   deliver: { ...summary(lat.deliver), got: count.delivered, expected: count.expected },
   throughput: { sentPerSec: Math.round(count.sent / DURATION), deliveredPerSec: Math.round(count.delivered / elapsed), syncs: count.syncs, pushed: count.pushed, chatSyncs: count.chatSyncs, gaps: count.gaps },
   ws: { errors: count.wsErrors, closed: count.wsClosed },
-  ...(PUSH_SINK ? { push: { pushDelivered: count.pushDelivered, expected: pushExpected, pushPages: count.pushPages, pagesExpected: count.acked * Math.ceil(Math.min(PUSH_SINK, OFFLINE) / 1000), leaseRetries: leaseSeen.size, dead: deadAfter - deadBefore, doneMs: pushDoneMs } } : {}),
+  ...(PUSH_SINK ? { push: { pushDelivered: count.pushDelivered, expected: pushExpected, pushPages: count.pushPages, pagesExpected: count.acked * Math.ceil(Math.min(PUSH_SINK, OFFLINE) / 1000)   /* = PUSH_PAGE.size на сервере */, leaseRetries: leaseSeen.size, dead: deadAfter - deadBefore, doneMs: pushDoneMs } } : {}),
   ...(COMMENTS ? { replies: { events: repliesAt.length, seconds: Math.round(elapsed), maxPerSecond: Math.max(0, ...perSecond.values()),
     minGapMs: Math.round(Math.min(...repliesAt.slice(1).map((t, i) => t - repliesAt[i]))) } } : {}),
 }, null, 1));
