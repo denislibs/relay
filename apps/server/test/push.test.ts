@@ -451,3 +451,30 @@ test('push.message skips a user mentioned in that message (push.mention notifies
   const eps = (await sql`select payload->>'endpoint' as e from jobs where kind = 'push.deliver' order by e`).map((r) => r.e);
   expect(eps).toEqual([endpoint(100), endpoint(102)]);
 });
+
+test('album: one push for all its photos — «N фото» with the caption, after the album delay; a single photo stays as is', async () => {
+  const a = await makeUser('Анна'), b = await makeUser('Борис');
+  const chat = await makeChat([a, b]);
+  const br = await browser();
+  const { subscribe } = await import('../src/domain/push');
+  await subscribe(b, { endpoint: endpoint(7), keys: br.keys }, await sessionFor(b));
+  const photo = async () => (await sql`insert into attachments (owner_id, mime, name, size, status, kind, width, height) values (${a}, 'image/jpeg', 'p.jpg', 10, 'ready', 'photo', 100, 100) returning id`)[0].id as string;
+  const groupId = crypto.randomUUID();
+  const first = await sendMessage(a, { chatId: chat, clientId: crypto.randomUUID(), body: '', attachment: { id: await photo() }, groupId });
+  await sendMessage(a, { chatId: chat, clientId: crypto.randomUUID(), body: 'подпись', attachment: { id: await photo() }, groupId });
+  await sendMessage(a, { chatId: chat, clientId: crypto.randomUUID(), body: '', attachment: { id: await photo() }, groupId });
+  // одна задача на альбом, отложенная на сбор файлов
+  const jobs = await sql`select payload, run_at > now() as later from jobs where kind = 'push.message'`;
+  expect(jobs.length).toBe(1);
+  expect(jobs[0].later).toBe(true);
+  expect(jobs[0].payload.groupId).toBe(groupId);
+  await sql`update jobs set run_at = now() where kind = 'push.message'`;
+  await drainJobs();
+  expect(got.length).toBe(1);
+  expect(await br.decrypt(got[0].body)).toEqual({ chatId: chat, id: first.message.id, title: 'Анна', body: '🖼 3 фото: подпись' });
+  // одиночное фото — обычный push без задержки
+  await sendMessage(a, { chatId: chat, clientId: crypto.randomUUID(), body: '', attachment: { id: await photo() } });
+  await drainJobs();
+  expect(got.length).toBe(2);
+  expect((await br.decrypt(got[1].body)).body).toBe('Фотография');
+});

@@ -106,3 +106,15 @@ test('engine: a mention from the server counts, shows in the chat row and notifi
   expect(await ea.call({ type: 'readBy', chatId: g, id: m2.id })).toEqual({ ok: true, data: [{ id: b.userId, name: 'Борис' }] });
   expect(await eb.call({ type: 'readBy', chatId: g, id: m2.id })).toEqual({ ok: false, code: 'forbidden' });
 });
+
+test('album: several photos with one groupId notify once; a mention in the album still notifies', async () => {
+  const s = await store();
+  group(s, 7);
+  const g = crypto.randomUUID();
+  for (const id of [30, 31, 32]) s.applyUpdate({ type: 'newMessage', message: msg({ id, chatId: 7, senderId: PEER, kind: 'photo', groupId: g }) });
+  expect(keys(s)).toEqual([['n7:30', false]]);
+  s.applyUpdate({ type: 'newMessage', message: msg({ id: 33, chatId: 7, senderId: PEER, kind: 'photo', groupId: crypto.randomUUID() }) });   // другой альбом
+  expect(keys(s)).toEqual([['n7:30', false], ['n7:33', false]]);
+  s.applyUpdate({ type: 'mention', message: msg({ id: 34, chatId: 7, senderId: PEER, kind: 'photo', groupId: g }) });   // упоминание в подписи — своё уведомление
+  expect(keys(s)).toEqual([['n7:30', false], ['n7:33', false], ['n7:34', true]]);
+});

@@ -19,6 +19,8 @@ import { copyPost, isThreadRoot, noteComment, withCopy } from './threads';
 import { collectMentions } from './mentions';
 
 export const MAX_BODY = 4096;
+/** Сколько ждать остальные файлы альбома перед уведомлением (клиент грузит их по очереди). */
+export const ALBUM_PUSH_DELAY_MS = 3000;
 
 export async function sendMessage(
   userId: number,
@@ -170,7 +172,11 @@ export async function sendMessage(
     if (ctx.kind === 'direct') await unarchiveOnMessage(tx, input.chatId, userId);
     await clearDraftInTx(tx, userId, input.chatId); // отправили — черновик на всех устройствах больше не нужен
     // уйдёт после коммита, воркером: ack не ждёт push-сервис. В задаче — ссылка: текст в jobs не храним
-    await enqueue(tx, 'push.message', { chatId: input.chatId, id: message.id });
+    // альбом (несколько файлов одним пузырём): одно уведомление на альбом, как в Telegram — задача по ключу groupId
+    // с задержкой на сбор остальных файлов; обработчик сам считает, сколько их (kinds.ts)
+    const album = attachment && message.groupId ? message.groupId : null;
+    await enqueue(tx, 'push.message', album ? { chatId: input.chatId, id: message.id, groupId: album } : { chatId: input.chatId, id: message.id },
+      album ? { dedupeKey: `push.album:${input.chatId}:${album}`, runAt: new Date(Date.now() + ALBUM_PUSH_DELAY_MS) } : {});
     await enqueue(tx, 'search.sync', { id: message.id });   // в индекс поиска — тоже после коммита
     if (fetchLink) await enqueue(tx, 'link.preview', { chatId: input.chatId, id: message.id, url: fetchLink }, { maxAttempts: 2 });
     return { message, duplicate: false };
