@@ -33,6 +33,11 @@ export interface LocalMessage {
   link?: LinkPreview | null;         // превью ссылки (pending — сервер ещё загружает)
   blocks?: Block[] | null;           // «статья»
   buttons?: MessageButton[][] | null; // кнопки под сообщением (inline-клавиатура)
+  post?: boolean;                     // пост канала: от имени канала (senderId 0), вид — не «своё» (isPost)
+  postAuthor?: string;                // подпись автора поста
+  views?: number;                     // просмотры поста: только растут (журнал их не несёт — нет поля ≠ ноль)
+  reactionCounts?: [string, number][]; // реакции поста счётчиками (вместо reactions)
+  myReaction?: string;                // моя реакция на пост
 }
 
 /** Вложение сообщения; у неотправленного id пустой, пока файл не загружен. */
@@ -176,6 +181,8 @@ export type Action =
   | { type: 'editMessage'; chatId: number; id: number; body: string; entities?: Entity[] }
   | { type: 'deleteMessage'; chatId: number; id: number }
   | { type: 'react'; chatId: number; id: number; emoji: string | null }
+  /** посты канала показаны на экране: просмотр — по разу на пост за сессию, батчем не чаще раза в секунду (channel.ts) */
+  | { type: 'countViews'; chatId: number; ids: number[] }
   | { type: 'sendTodo'; chatId: number; todo: TodoInput; replyToId?: number | null }
   | { type: 'todoToggle'; chatId: number; id: number; itemId: number; done: boolean }
   | { type: 'todoAppend'; chatId: number; id: number; items: string[] }
@@ -283,6 +290,7 @@ export interface EngineConfig {
   /** уборка кэша (evict.ts): через сколько после записи в IDB, мс (по умолчанию 5000), и не чаще чем (по умолчанию 10 минут) */
   evictDelayMs?: number;
   evictEveryMs?: number;
+  viewsFlushMs?: number;  // просмотры постов: не чаще раза в столько мс (по умолчанию 1000 — лимит сервера)
   typingMs?: number;      // сколько держать «печатает…» после последнего кадра (по умолчанию 6000)   // диалогов в странице (по умолчанию 100)
 }
 

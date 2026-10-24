@@ -1,7 +1,7 @@
 import type { Message } from '@relay/protocol';
 import { sql } from '../db';
 import { nameForSql } from './profile';
-import { assertMember, toMessage, withReactions } from './chats';
+import { assertMember, toMessage, withAllReactions } from './chats';
 import { DomainError } from './errors';
 import { searchIds, searchReady } from '../search/messagesIndex';
 import { openRows, rowMatches, scanMatching, SCAN_BATCH } from './messageContent';
@@ -44,7 +44,7 @@ export async function searchMessages(userId: number, q: string, opts: { chatId?:
   await openRows(rows);
   const byId = new Map(rows.map((r) => [Number(r.id), r]));
   const ordered = page.map((id) => byId.get(id)).filter((r): r is NonNullable<typeof r> => !!r);
-  const messages = await withReactions(ordered.map(toMessage));
+  const messages = await withAllReactions(ordered.map(toMessage), userId);
   return { hits: messages.map((message, i) => ({ message, chatTitle: (ordered[i].chat_title as string | null) ?? null })), hasMore: more };
 }
 
@@ -77,6 +77,6 @@ export async function searchPostgres(userId: number, q: string, opts: { chatId?:
        ${before ? sql`and m.id < ${before}` : sql``}
      order by m.id desc
      limit ${SCAN_BATCH}`, (r) => rowMatches(r, text), limit, opts.beforeId ?? null);
-  const messages = await withReactions(page.map(toMessage));
+  const messages = await withAllReactions(page.map(toMessage), userId);
   return { hits: messages.map((message, i) => ({ message, chatTitle: (page[i].chat_title as string | null) ?? null })), hasMore: more };
 }

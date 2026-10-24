@@ -14,7 +14,7 @@ import { setLinkedChat } from '../src/domain/groups';
 import { PURGE } from '../src/domain/chatPurge';
 import '../src/jobs/kinds';
 import { drainJobs } from '../src/jobs/worker';
-import { chatEventsOf, journalOf, makeUser, pushBrowser, resetDb } from './helpers';
+import { chatEventsOf, journalOf, makeChat, makeUser, pushBrowser, resetDb } from './helpers';
 
 const server = createServer({ port: 0 });
 const base = `http://localhost:${server.port}`;
@@ -113,7 +113,7 @@ test('a post is anonymous: senderId 0 everywhere, postAuthor only with signature
   const second = (await post(a, id, 'с подписью')).message;
   expect(second).toMatchObject({ senderId: 0, post: true, postAuthor: 'Анна' });
   // журнал канала, история и строка списка — тот же вид
-  const evs = (await chatEventsOf(id, 'newMessage')).map((u: any) => u.message).filter((m: any) => m.post);
+  const evs = (await chatEventsOf(id, 'newMessage')).map((u: any) => u.message).filter((m: any) => m.post && !m.service);
   expect(evs.map((m: any) => [m.senderId, m.postAuthor ?? null])).toEqual([[0, null], [0, 'Анна']]);
   const hist = await ok(b, 'GET', `/chats/${id}/messages`);
   expect(hist.messages.filter((m: any) => !m.service).map((m: any) => m.senderId)).toEqual([0, 0]);
@@ -165,7 +165,7 @@ test('join by invite and by @name: no service message, no groupUpdated, no membe
   expect(await ok(c, 'GET', `/join/+${link}`)).toMatchObject({ chatId: id, kind: 'channel', members: 2, member: false });
   const before = { updated: (await chatEventsOf(id, 'groupUpdated')).length, members: (await chatEventsOf(id, 'members')).length };
   await ok(c, 'POST', `/join/+${link}`);
-  expect(await services(id)).toEqual(['group_created']);
+  expect(await services(id)).toEqual(['channel_created']);
   expect((await chatEventsOf(id, 'groupUpdated')).length).toBe(before.updated);
   expect((await chatEventsOf(id, 'members')).length).toBe(0);
   expect(before.members).toBe(0);
@@ -176,7 +176,7 @@ test('join by invite and by @name: no service message, no groupUpdated, no membe
   await ok(a, 'PUT', `/groups/${id}/username`, { username: 'relaynews' });
   const d = await login('Глеб');
   expect(await ok(d, 'POST', '/join/@relaynews')).toMatchObject({ chatId: id, requested: false });
-  expect(await services(id)).toEqual(['group_created']);
+  expect(await services(id)).toEqual(['channel_created']);
   // подписчики не видят друг друга: канал не общий чат
   expect(await canView(sql, c.userId, d.userId)).toBe(false);
   expect(await viewersOf(sql, c.userId)).not.toContain(d.userId);
@@ -204,15 +204,19 @@ test('reading a channel writes no readBy; readOwn still goes to the reader', asy
   expect((await journalOf(b.userId, 'readOwn')).at(-1)).toEqual({ type: 'readOwn', chatId: id, upToId: message.id });
 });
 
-test('typing in a channel: a subscriber is ignored, an admin with post is published to the chat topic', async () => {
+test('typing in a channel: a subscriber is ignored, an admin with post is published to the chat topic as the channel (userId 0)', async () => {
   const a = await makeUser('a'), b = await makeUser('b');
   const { chatId: id } = await createGroup(a, { kind: 'channel', title: 'К', memberIds: [b] });
-  const got: string[] = [];
-  const publish = (topic: string) => { got.push(topic); };
+  const got: [string, any][] = [];
+  const publish = (topic: string, msg: string) => { got.push([topic, JSON.parse(msg)]); };
   expect(await handleFrame(b, { op: 'typing', chatId: id }, publish)).toEqual([]);
   expect(got).toEqual([]);
   await handleFrame(a, { op: 'typing', chatId: id }, publish);
-  expect(got).toEqual([`chat:${id}`]);
+  expect(got).toEqual([[`chat:${id}`, { op: 'typing', chatId: id, userId: 0 }]]);   // какой админ пишет — не раскрывается
+  // в группе — как раньше, с автором
+  const g = await makeChat([a, b], 'group');
+  await handleFrame(a, { op: 'typing', chatId: g }, publish);
+  expect(got.at(-1)).toEqual([`chat:${g}`, { op: 'typing', chatId: g, userId: a }]);
 });
 
 test('discussion group: linking sets both rows, turns hidden history off and keeps it off; a group linked elsewhere is refused; relink and unlink', async () => {
@@ -316,4 +320,53 @@ test('push for a channel: title is the channel, no sender name; author never not
   const g = await group(a, [c]);
   const gm = (await sendMessage(a.userId, { chatId: g, clientId: crypto.randomUUID(), body: 'в группе' })).message;
   expect((await planPush({ chatId: g, id: gm.id, senderId: a.userId, body: 'в группе' })).map((p) => p.push)).toEqual([{ chatId: g, id: gm.id, title: 'Обсуждение', body: 'Анна: в группе' }]);
+});
+
+test('forwarding a post hides the admin: fwdFrom is the channel (userId null, title), postAuthor kept; a forward of the forward keeps it', async () => {
+  const a = await login('Анна'), b = await login('Борис'), c = await login('Вера');
+  const id = await channel(a, [b], 'Новости');
+  await ok(a, 'PUT', `/groups/${id}/settings`, { signatures: true });
+  const p = (await post(a, id, 'новость')).message;
+  const direct = await createChat('direct', null, [b.userId, c.userId]);
+  const fwd = (await sendMessage(b.userId, { chatId: direct, clientId: crypto.randomUUID(), body: '', forward: { chatId: id, id: p.id } })).message;
+  expect(fwd.fwdFrom).toEqual({ userId: null, name: 'Новости', chatId: id, messageId: p.id, at: p.createdAt, postAuthor: 'Анна' });
+  expect(fwd).toMatchObject({ senderId: b.userId, body: 'новость' });
+  expect(fwd.post).toBeUndefined();   // в личном чате это обычное сообщение пересылавшего
+  expect(JSON.stringify(fwd)).not.toContain(`"userId":${a.userId}`);
+  // пересылка пересланного — тот же заголовок канала
+  const g = await group(c, [b]);
+  const again = (await sendMessage(c.userId, { chatId: g, clientId: crypto.randomUUID(), body: '', forward: { chatId: direct, id: fwd.id } })).message;
+  expect(again.fwdFrom).toEqual(fwd.fwdFrom);
+  // без подписей — без postAuthor; не участник канала переслать не может
+  await ok(a, 'PUT', `/groups/${id}/settings`, { signatures: false });
+  const p2 = (await post(a, id, 'вторая')).message;
+  const f2 = (await sendMessage(b.userId, { chatId: direct, clientId: crypto.randomUUID(), body: '', forward: { chatId: id, id: p2.id } })).message;
+  expect(f2.fwdFrom).toEqual({ userId: null, name: 'Новости', chatId: id, messageId: p2.id, at: p2.createdAt });
+  await expect(sendMessage(c.userId, { chatId: direct, clientId: crypto.randomUUID(), body: '', forward: { chatId: id, id: p2.id } })).rejects.toMatchObject({ code: 'not_member' });
+  // обычное сообщение группы — как раньше, с автором
+  const gm = (await sendMessage(b.userId, { chatId: g, clientId: crypto.randomUUID(), body: 'в группе' })).message;
+  const f3 = (await sendMessage(c.userId, { chatId: direct, clientId: crypto.randomUUID(), body: '', forward: { chatId: g, id: gm.id } })).message;
+  expect(f3.fwdFrom).toMatchObject({ userId: b.userId, name: 'Борис' });
+});
+
+test('service messages of a channel are from the channel: channel_created with the title, title/owner changes have senderId 0', async () => {
+  const a = await login('Анна'), b = await login('Борис');
+  const id = await channel(a, [b], 'Новости');
+  await ok(a, 'PATCH', `/groups/${id}`, { title: 'Свежие новости' });
+  await ok(a, 'PUT', `/groups/${id}/admins/${b.userId}`, { rights: { post: true } });
+  await ok(a, 'DELETE', `/groups/${id}/members/${a.userId}`);   // владелец вышел — права у админа (owner_changed)
+  const rows = await sql`select service_type, sender_id, post from messages where chat_id = ${id} and service_type is not null order by id`;
+  expect(rows.map((r) => r.service_type)).toEqual(['channel_created', 'title_changed', 'owner_changed']);
+  expect(rows.every((r) => r.post)).toBe(true);
+  const hist = (await ok(b, 'GET', `/chats/${id}/messages`)).messages;
+  expect(hist.map((m: any) => [m.service?.type, m.senderId])).toEqual([['channel_created', 0], ['title_changed', 0], ['owner_changed', 0]]);
+  expect(hist[0].body).toBe('Новости');
+  const evs = (await chatEventsOf(id, 'newMessage')).map((u: any) => u.message);
+  expect(evs.every((m: any) => m.senderId === 0 && m.post)).toBe(true);
+  // в группе служебные — от автора, как раньше
+  const g = await group(a, [b]);
+  const [gs] = await sql`select service_type, post from messages where chat_id = ${g}`;
+  expect(gs).toMatchObject({ service_type: 'group_created', post: false });
+  await ok(a, 'PATCH', `/groups/${g}`, { title: 'Другое' });
+  expect((await ok(b, 'GET', `/chats/${g}/messages`)).messages.at(-1)).toMatchObject({ senderId: a.userId, service: { type: 'title_changed' } });
 });

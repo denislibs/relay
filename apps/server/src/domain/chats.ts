@@ -23,7 +23,7 @@ export const GROUP_TITLE_MAX = 128;
 export const GROUP_MEMBERS_MAX = MEMBERS_MAX.group;
 
 /**
- * Новая группа или канал: создатель (владелец) и участники, первое сообщение — служебное «создал(а) группу» (его
+ * Новая группа или канал: создатель (владелец) и участники, первое сообщение — служебное «создал(а) группу» / «канал» (его
  * newMessage в журнал чата; чат приносит участникам membership). Нельзя добавить несуществующего, системного или
  * того, с кем есть блокировка в любую сторону. Канал можно создать без подписчиков — только владелец.
  */
@@ -57,8 +57,8 @@ export async function createGroup(creatorId: number, input: { kind?: unknown; ti
     const clientId = crypto.randomUUID();
     const c = await contentColumns(Number(chat.id), clientId, { body: title, entities: null, todo: null, blocks: null, link: null, attachment: null }, tx);
     const [row] = await tx`
-      insert into messages (chat_id, sender_id, client_id, kind, body, service_type, content)
-      values (${chat.id}, ${creatorId}, ${clientId}, 'text', ${c.body}, 'group_created', ${c.content}) returning *`;
+      insert into messages (chat_id, sender_id, client_id, kind, body, service_type, content, post)
+      values (${chat.id}, ${creatorId}, ${clientId}, 'text', ${c.body}, ${kind === 'channel' ? 'channel_created' : 'group_created'}, ${c.content}, ${kind === 'channel'}) returning *`;
     const message = toMessage((await openRows([row], '', tx))[0]);
     await chatEvent(tx, Number(chat.id), { type: 'newMessage', message }, kind);
     for (const id of members) await joinMembership(tx, Number(chat.id), id);   // чат приходит участникам через membership с seq
@@ -151,6 +151,45 @@ export async function withReactions(messages: Message[]): Promise<Message[]> {
   return messages;
 }
 
+/**
+ * Реакции поста канала — счётчиками: [эмодзи, n] из message_reaction_counts (больше — раньше) и моя реакция из
+ * reactions; список «кто поставил» у поста не отдаётся (O(эмодзи), а не O(подписчиков)). Тем же запросом — просмотры.
+ */
+export async function withReactionCounts(messages: Message[], userId: number): Promise<Message[]> {
+  if (!messages.length) return messages;
+  const chats = messages.map((m) => m.chatId), ids = messages.map((m) => m.id);
+  const [counts, extra] = await Promise.all([
+    sql`select chat_id, message_id, emoji, n from message_reaction_counts
+         where (chat_id, message_id) in (select * from unnest(${chats}::bigint[], ${ids}::bigint[]))
+         order by n desc, emoji collate "C"`,
+    sql`select k.chat_id, k.message_id, v.views, r.emoji as mine
+          from unnest(${chats}::bigint[], ${ids}::bigint[]) as k(chat_id, message_id)
+          left join message_views v on v.chat_id = k.chat_id and v.message_id = k.message_id
+          left join reactions r on r.chat_id = k.chat_id and r.message_id = k.message_id and r.user_id = ${userId}`,
+  ]);
+  const by = new Map<string, [string, number][]>();
+  for (const r of counts) {
+    const k = r.chat_id + ':' + r.message_id;
+    let list = by.get(k);
+    if (!list) { list = []; by.set(k, list); }
+    list.push([r.emoji as string, Number(r.n)]);
+  }
+  const ex = new Map(extra.map((r) => [r.chat_id + ':' + r.message_id, r]));
+  for (const m of messages) {
+    const k = m.chatId + ':' + m.id, e = ex.get(k);
+    m.reactionCounts = by.get(k) ?? [];
+    if (e?.mine) m.myReaction = e.mine as string;
+    if (!m.service && !m.deleted) m.views = Number(e?.views ?? 0);
+  }
+  return messages;
+}
+
+/** Реакции к выдаче: посты каналов — счётчиками и с просмотрами (withReactionCounts), остальные — списком (withReactions). */
+export async function withAllReactions(messages: Message[], userId: number): Promise<Message[]> {
+  await Promise.all([withReactions(messages.filter((m) => !m.post)), withReactionCounts(messages.filter((m) => m.post), userId)]);
+  return messages;
+}
+
 export type ChatSummary = {
   id: number;
   kind: 'direct' | 'group' | 'channel';
@@ -209,6 +248,7 @@ export async function listChats(userId: number, opts: ListOpts = {}): Promise<Ch
            case when c.kind <> 'direct' then (select count(*)::int from chat_join_requests jr where jr.chat_id = c.id) end as g_pending,
            lm.id as m_id, lm.chat_id as m_chat_id, lm.sender_id as m_sender_id, lm.client_id as m_client_id,
            lm.body as m_body, lm.kind as m_kind, lm.attachment as m_attachment, lm.reply_to_id as m_reply_to_id, lm.created_at as m_created_at, lm.edited_at as m_edited_at, lm.deleted as m_deleted, lm.entities as m_entities, lm.service_type as m_service_type, lm.service_data as m_service_data, lm.todo as m_todo, lm.fwd_from as m_fwd_from, lm.buttons as m_buttons, lm.sticker as m_sticker, lm.content as m_content, lm.post as m_post, lm.post_author as m_post_author,
+           case when lm.post and lm.service_type is null then coalesce((select v.views from message_views v where v.chat_id = lm.chat_id and v.message_id = lm.id), 0) end as m_views,
            (select count(*) from messages m
              where m.chat_id = c.id and m.id > cm.last_read_id and m.id >= cm.history_from and m.sender_id <> ${userId})::int as unread,
            (select json_build_object('id', u.id, 'name', ${nameForSql(userId)}, 'system', u.system,   -- контактное имя — только владельцу
@@ -268,7 +308,7 @@ export async function listChats(userId: number, opts: ListOpts = {}): Promise<Ch
     last: r.m_id == null ? null : toMessage({
       id: r.m_id, chat_id: r.m_chat_id, sender_id: r.m_sender_id, client_id: r.m_client_id,
       body: r.m_body, kind: r.m_kind, attachment: r.m_attachment, reply_to_id: r.m_reply_to_id, created_at: r.m_created_at, edited_at: r.m_edited_at, deleted: r.m_deleted, entities: r.m_entities, service_type: r.m_service_type, service_data: r.m_service_data, todo: r.m_todo, fwd_from: r.m_fwd_from, buttons: r.m_buttons, sticker: r.m_sticker,
-      post: r.m_post, post_author: r.m_post_author,
+      post: r.m_post, post_author: r.m_post_author, views: r.m_views,
     }),
   }));
 }
@@ -348,7 +388,7 @@ export async function getMessagesByIds(userId: number, chatId: number, ids: numb
   await assertMember(sql, chatId, userId);
   if (!ids.length) return [];
   const rows = await sql`select * from messages where chat_id = ${chatId} and id = any(${ids}::bigint[]) and id >= ${await historyFrom(chatId, userId)} order by id`;
-  return withReactions((await openRows(rows)).map(toMessage));
+  return withAllReactions((await openRows(rows)).map(toMessage), userId);
 }
 
 /**
@@ -364,7 +404,7 @@ export async function getHistory(userId: number, chatId: number, before: number 
        where chat_id = ${chatId} and id > ${after} and id >= ${await historyFrom(chatId, userId)}
        order by id
        limit ${take + 1}`;
-    return { messages: await withReactions((await openRows(up.slice(0, take))).map(toMessage)), hasMore: up.length > take };
+    return { messages: await withAllReactions((await openRows(up.slice(0, take))).map(toMessage), userId), hasMore: up.length > take };
   }
   const rows = await sql`
     select * from messages
@@ -372,7 +412,7 @@ export async function getHistory(userId: number, chatId: number, before: number 
      order by id desc
      limit ${take + 1}`;
   const hasMore = rows.length > take;
-  return { messages: await withReactions((await openRows(rows.slice(0, take).reverse())).map(toMessage)), hasMore };
+  return { messages: await withAllReactions((await openRows(rows.slice(0, take).reverse())).map(toMessage), userId), hasMore };
 }
 
 /**

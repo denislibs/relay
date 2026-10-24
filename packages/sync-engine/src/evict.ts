@@ -241,7 +241,7 @@ export async function evict(store: Store, db: IDBDatabase, keepNow: () => EvictK
     const note = (m: Pick<LocalMessage, 'senderId' | 'fwdFrom' | 'reactions' | 'service' | 'todo'> | null | undefined) => {
       if (!m) return;
       refs.add(m.senderId);
-      if (m.fwdFrom) refs.add(m.fwdFrom.userId);
+      if (m.fwdFrom?.userId != null) refs.add(m.fwdFrom.userId);   // пересланный пост — от канала, человека нет
       for (const r of m.reactions ?? []) refs.add(r.userId);
       for (const u of m.service?.data?.users ?? []) refs.add(u.id);   // участники служебного события
       for (const c of m.todo?.completions ?? []) refs.add(c.by);      // кто отметил задачи

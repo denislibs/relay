@@ -26,6 +26,7 @@ type Range = [number, number];
  */
 const DELETED: Partial<LocalMessage> = {
   body: '', deleted: true, reactions: [], entities: [], attachment: null, link: null, blocks: null, fwdFrom: null, todo: undefined, listened: undefined, buttons: null,
+  reactionCounts: undefined, myReaction: undefined,
 };
 
 /**
@@ -104,6 +105,19 @@ export interface ChatSummary {
  * Сообщения чата держатся в памяти только для загруженных чатов (`loadChatMessages`);
  * у остальных чатов в памяти лишь последнее сообщение (`chat.last`).
  */
+/**
+ * Просмотры и реакции-счётчики поста: журнал (newMessage) их не несёт — нет поля значит «не знаю», а не ноль, и
+ * прежнее значение остаётся. Просмотры только растут. Счётчики пришли (история) — с ними и моя реакция (нет — не ставил).
+ */
+function postExtras(m: Message, prev: LocalMessage | undefined): Partial<LocalMessage> {
+  const out: Partial<LocalMessage> = {};
+  const views = Math.max(m.views ?? 0, prev?.views ?? 0);
+  if (m.views != null || prev?.views != null) out.views = views;
+  if (m.reactionCounts) { out.reactionCounts = m.reactionCounts; if (m.myReaction) out.myReaction = m.myReaction; }
+  else if (prev?.reactionCounts) { out.reactionCounts = prev.reactionCounts; if (prev.myReaction) out.myReaction = prev.myReaction; }
+  return out;
+}
+
 export class Store {
   /** счётчик sessionsChanged из журнала (не хранится): по нему интерфейс перечитывает сеансы */
   sessionsRev = 0;
@@ -314,6 +328,7 @@ export class Store {
       case 'messageMarkup': return this.patchMessage(u.chatId, u.id, { body: u.body, entities: u.entities ?? [], buttons: u.buttons });
       case 'messageDeleted': return this.patchMessage(u.chatId, u.id, DELETED);
       case 'reactions': return this.patchMessage(u.chatId, u.id, { reactions: u.reactions });
+      case 'reactionCounts': return this.patchMessage(u.chatId, u.id, { reactionCounts: u.counts });
       case 'mediaListened': return this.patchMessage(u.chatId, u.id, { listened: true });
       case 'todoUpdated': return this.patchMessage(u.chatId, u.id, { todo: u.todo, ...(u.editedAt ? { editedAt: u.editedAt } : {}) });
       case 'linkPreview': return this.patchMessage(u.chatId, u.id, { link: u.link });
@@ -550,6 +565,9 @@ export class Store {
       ...(m.blocks ? { blocks: m.blocks } : null),
       ...(m.buttons ? { buttons: m.buttons } : null),
       ...(m.sticker ? { sticker: m.sticker } : null),
+      ...(m.post ? { post: true } : null),
+      ...(m.postAuthor ? { postAuthor: m.postAuthor } : null),
+      ...postExtras(m, prev),
       // сервер ещё грузит превью, а у нас оно уже есть (показано в поле ввода) — не прятать его до загрузки
       ...(m.link ? { link: m.link.pending && prev?.link && !prev.link.pending && prev.link.url === m.link.url ? prev.link : m.link } : null),
     };
@@ -564,6 +582,14 @@ export class Store {
     }
     if (!prev || JSON.stringify(prev) !== JSON.stringify(local)) this.putMessage(local);
     this.markChat(chat);
+  }
+
+  /** Ответ на просмотры (channel.ts): число только растёт — запоздалый ответ не опускает уже показанное. */
+  applyViews(chatId: number, views: [number, number][]): void {
+    for (const [id, n] of views) {
+      const m = this.messageById(chatId, id);
+      if (m && n > (m.views ?? 0)) this.patchMessage(chatId, id, { views: n });
+    }
   }
 
   private applyOwnRead(chatId: number, upToId: number): void {

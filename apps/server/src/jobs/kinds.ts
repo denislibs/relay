@@ -16,6 +16,7 @@ import { rewrapStep } from '../crypto/kms';
 import { toMessage } from '../domain/chats';
 import { enqueue } from './queue';
 import { purgeStep, type PurgeJob } from '../domain/chatPurge';
+import { flushReactionCounts } from '../domain/reactionCounts';
 
 // новое сообщение → по задаче на подписку: повтор одной не шлёт остальным второй раз
 // в задаче — ссылка на сообщение (новые) или само сообщение (поставленные до шифрования)
@@ -126,6 +127,11 @@ register('attachment.purge', async (p: { keys: string[] }) => {
 // мягко удалённый канал или группа: участники (chatRemoved каждому), сообщения и сам чат — страницами (chatPurge.ts)
 register('chat.purge', async (p: PurgeJob) => {
   await purgeStep(p);
+});
+
+// реакции поста канала: счётчики одним событием reactionCounts на секундное окно (reactionCounts.ts)
+register('reactions.flush', async (p: { chatId: number; id: number }) => {
+  await flushReactionCounts(p);
 });
 
 register('link.preview', async (p: { chatId: number; id: number; url: string }) => {

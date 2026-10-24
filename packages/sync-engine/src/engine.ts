@@ -27,6 +27,7 @@ import { evict, EVICT_LIMITS, type EvictKeep, type EvictLimits, type EvictOpts, 
 import { musicKey, profileMusicResult, profilePhotosResult, ProfileListsLoader, trackOf } from './profileLists';
 import type { Action, StorageStats, EngineConfig, LocalChat, LocalMessage, OutboxEntry, Patch, Query, SearchHit, SearchResult } from './types';
 import { searchLocal } from './search';
+import { shiftCounts, ViewCounter } from './channel';
 
 export interface WatchHandle { update(q: Query): void; close(): void }
 
@@ -52,7 +53,7 @@ const USERS_BATCH = 200;
 function patchedChats(items: JournalEntry[], after: number): Set<number> {
   const out = new Set<number>();
   for (const { seq, update: u } of items) {
-    if (seq > after && (u.type === 'messageEdited' || u.type === 'messageDeleted' || u.type === 'reactions' || u.type === 'mediaListened' || u.type === 'attachmentUpdated')) out.add(u.chatId);
+    if (seq > after && (u.type === 'messageEdited' || u.type === 'messageDeleted' || u.type === 'reactions' || u.type === 'reactionCounts' || u.type === 'mediaListened' || u.type === 'attachmentUpdated')) out.add(u.chatId);
   }
   return out;
 }
@@ -123,6 +124,8 @@ export class Engine {
   private membersAsked = new Set<number>();
   /** «Общие медиа»: загрузка вкладок и счётчиков для подписок media (media.ts) */
   private readonly media: MediaLoader;
+  /** просмотры постов каналов: батч раз в секунду (channel.ts) */
+  private readonly views: ViewCounter;
   /** музыка и фото профиля: загрузка для подписок (profileLists.ts) */
   private readonly lists: ProfileListsLoader;
   /** раздел «Для разработчиков»: журнал, снимок состояния, имитатор сети (devlog.ts) */
@@ -171,6 +174,11 @@ export class Engine {
       changed: () => this.changed(),
     });
     this.blocks = new Blocks({ store, ops: this.ops, http: (path) => this.http(path), run: (fn) => this.run(fn), changed: () => this.changed() });
+    this.views = new ViewCounter({
+      online: () => this.online && this.ready, run: (fn) => this.run(fn), everyMs: cfg.viewsFlushMs ?? 1000,
+      post: (chatId, ids) => this.http(`/chats/${chatId}/views`, { method: 'POST', body: JSON.stringify({ ids }) }),
+      apply: (chatId, views) => this.run(async () => { this.store.applyViews(chatId, views); this.changed(); }),
+    });
     this.media = new MediaLoader(store, { online: () => this.online && this.ready, http: (path) => this.http(path), run: (fn) => this.run(fn), changed: () => this.changed() });
     this.lists = new ProfileListsLoader(store, { online: () => this.online && this.ready, http: (path) => this.http(path), run: (fn) => this.run(fn), changed: () => this.changed() });
     this.sessions = new Sessions({ ops: this.ops, online: () => this.online, http: (path) => this.http(path) });
@@ -194,6 +202,7 @@ export class Engine {
         if (this.evictTimer) { clearTimeout(this.evictTimer); this.evictTimer = null; }
         for (const t of this.typingTimers.values()) clearTimeout(t);
         this.typingTimers.clear();
+        this.views.close();
         this.watchers.clear();
         return true;
       },
@@ -1021,6 +1030,7 @@ export class Engine {
         await this.request({ op: 'edit', reqId: '', chatId: a.chatId, id: a.id, body: a.body, entities: a.entities ?? [] });
         return null;
       }
+      case 'countViews': this.views.add(a.chatId, a.ids); return null;
       case 'listened': {
         // у себя — сразу (точка гаснет), сервер разнесёт остальным; без сети — повторим при следующем прослушивании
         this.store.patchMessage(a.chatId, a.id, { listened: true });
@@ -1078,8 +1088,19 @@ export class Engine {
       }
       case 'react': {
         if (!this.online) throw new Error('offline');
-        // сразу у себя (реакция должна отзываться мгновенно), подтверждение и чужие — через журнал
         const m = this.store.messageById(a.chatId, a.id);
+        if (m?.post) {
+          // пост канала: счётчики и моя — сразу у себя, затем точные из ответа; чужие — событием reactionCounts раз в секунду
+          const prev = { reactionCounts: m.reactionCounts ?? [], myReaction: m.myReaction };
+          this.store.patchMessage(a.chatId, a.id, { reactionCounts: shiftCounts(prev.reactionCounts, m.myReaction ?? null, a.emoji), myReaction: a.emoji ?? undefined });
+          this.changed();
+          try {
+            const r = await this.request({ op: 'react', reqId: '', chatId: a.chatId, id: a.id, emoji: a.emoji }) as { counts?: [string, number][]; mine?: string | null };
+            if (r.counts) { this.store.patchMessage(a.chatId, a.id, { reactionCounts: r.counts, myReaction: r.mine ?? undefined }); this.changed(); }
+          } catch (err) { this.store.patchMessage(a.chatId, a.id, prev); this.changed(); throw err; }
+          return null;
+        }
+        // сразу у себя (реакция должна отзываться мгновенно), подтверждение и чужие — через журнал
         const prev = m?.reactions ?? [];
         if (m) {
           const next = prev.filter((r) => r.userId !== this.cfg.userId);
@@ -1168,7 +1189,10 @@ export class Engine {
           const groups = new Map<string, string>();
           for (const m of srcs) {
             const dropCaption = !!a.hideCaption && !!m.attachment;
-            const fwdFrom = a.hideSender ? null : m.fwdFrom ?? { userId: m.senderId, name: this.nameOf(m.senderId), chatId: a.fromChatId, messageId: m.id!, at: m.createdAt };
+            // пересылка поста — от имени канала (как покажет сервер): автора-админа нет
+            const fwdFrom = a.hideSender ? null : m.fwdFrom ?? (m.post
+              ? { userId: null, name: this.titleOfChat(a.fromChatId) ?? '', chatId: a.fromChatId, messageId: m.id!, at: m.createdAt, ...(m.postAuthor ? { postAuthor: m.postAuthor } : {}) }
+              : { userId: m.senderId, name: this.nameOf(m.senderId), chatId: a.fromChatId, messageId: m.id!, at: m.createdAt });
             let groupId: string | null = null;
             if (m.groupId && m.attachment) { groupId = groups.get(m.groupId) ?? crypto.randomUUID(); groups.set(m.groupId, groupId); }
             queue({ chatId, body: dropCaption ? '' : m.body, entities: dropCaption ? [] : m.entities ?? [], replyToId: takeReply(), attachment: m.attachment ?? null,
@@ -1434,6 +1458,7 @@ export class Engine {
       case 'typing': {
         // группа шлёт в топик чата всем, включая автора и тех, кто его заблокировал, — отсеиваем здесь
         if (f.userId === this.cfg.userId || this.store.blocks.table.get(f.userId)) return;
+        if (this.store.chats.get(f.chatId)?.kind === 'channel') return;   // в канале «печатает…» не показывается
         // «печатает…» гаснет через typingMs после последнего кадра
         const key = f.chatId + ':' + f.userId;
         clearTimeout(this.typingTimers.get(key));

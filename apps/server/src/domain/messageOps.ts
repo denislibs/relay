@@ -10,6 +10,7 @@ import { isServiceChat } from './service';
 import { burnCodes } from './login';
 import { enqueue } from '../jobs/queue';
 import { can, groupCtx, hasAdmin } from './groupRights';
+import { reactPost, type Counts } from './reactionCounts';
 
 const MAX_BODY = 4096;
 const EMOJI = /^\p{Extended_Pictographic}(️|‍\p{Extended_Pictographic})*$/u;
@@ -59,6 +60,7 @@ export async function deleteMessage(userId: number, chatId: number, id: number):
     // текст и шифр стираются целиком: у удалённого не остаётся содержимого ни открыто, ни шифром
     await tx`update messages set body = '', entities = null, todo = null, blocks = null, link = null, content = null, deleted = true where chat_id = ${chatId} and id = ${id}`;
     await tx`delete from reactions where chat_id = ${chatId} and message_id = ${id}`;
+    if (ctx.kind === 'channel') await tx`delete from message_reaction_counts where chat_id = ${chatId} and message_id = ${id}`;
     await chatEvent(tx, chatId, { type: 'messageDeleted', chatId, id });
     await enqueue(tx, 'search.sync', { id });   // убрать из индекса
     await unpinDeleted(tx, chatId, id);
@@ -66,8 +68,9 @@ export async function deleteMessage(userId: number, chatId: number, id: number):
   });
 }
 
-/** Реакция (null — снять). Одна от пользователя; всем участникам уходит полный список реакций сообщения. */
-export async function reactMessage(userId: number, chatId: number, id: number, emoji: string | null): Promise<{ reactions: Reaction[] }> {
+/** Реакция (null — снять). Одна от пользователя; всем участникам уходит полный список реакций сообщения.
+ *  Канал — счётчиками (reactionCounts.ts): событие reactionCounts раз в секунду на пост, в ответе — counts и mine. */
+export async function reactMessage(userId: number, chatId: number, id: number, emoji: string | null): Promise<{ reactions: Reaction[]; counts?: Counts; mine?: string | null }> {
   if (emoji !== null && !EMOJI.test(emoji)) throw new DomainError('bad_frame', 'emoji');
   return sql.begin(async (tx) => {
     const ctx = await groupCtx(tx, chatId, userId);
@@ -76,6 +79,7 @@ export async function reactMessage(userId: number, chatId: number, id: number, e
       if (!can(ctx, 'react') || ctx.reactions.mode === 'none') throw new DomainError('forbidden', 'react');
       if (ctx.reactions.mode === 'some' && !ctx.reactions.allowed.includes(emoji)) throw new DomainError('forbidden', 'reaction');
     }
+    if (ctx.kind === 'channel') return reactPost(tx, userId, chatId, id, ctx.historyFrom, emoji);
     const [m] = await tx`select deleted from messages where chat_id = ${chatId} and id = ${id} and id >= ${ctx.historyFrom}`;
     if (!m || m.deleted) throw new DomainError('not_found', 'message');
     if (await blockedInDirect(tx, chatId, userId)) throw new DomainError('blocked');

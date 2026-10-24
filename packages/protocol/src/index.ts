@@ -8,12 +8,12 @@ import type { GroupInfo, MyMembership } from './groups';
 export type Id = number;
 
 /** Служебное сообщение от системного пользователя: машинный тип для отрисовки и склейки повторов. */
-export type ServiceType = 'login_code' | 'new_login' | 'group_created' | 'welcome'
+export type ServiceType = 'login_code' | 'new_login' | 'group_created' | 'channel_created' | 'welcome'
   | 'title_changed' | 'photo_changed' | 'photo_removed' | 'members_added' | 'member_left' | 'member_removed'
   | 'joined_by_link' | 'joined_by_request' | 'owner_changed' | 'protected_on' | 'protected_off'
   | 'todo_done' | 'todo_append';   // чек-лист: автор отметил / добавил задачи в список replyToId (номера — в data)
 /** Участники служебного события (имена на момент события) и новое название. */
-export interface ServiceData { users?: { id: Id; name: string }[]; title?: string; completed?: number[]; incompleted?: number[]; items?: number[] }   // group_created: тело — название группы, автор — создатель
+export interface ServiceData { users?: { id: Id; name: string }[]; title?: string; completed?: number[]; incompleted?: number[]; items?: number[] }   // group_created / channel_created: тело — название, автор — создатель
 
 export interface Message {
   id: Id;
@@ -40,7 +40,9 @@ export interface Message {
   sticker?: StickerRef | null;          // kind 'sticker': снимок стикера на момент отправки
   post?: boolean;        // пост канала: автор — канал (senderId 0), наружу автор не раскрывается
   postAuthor?: string;   // подпись автора поста (если в канале включены подписи)
-  views?: number;        // просмотры поста
+  views?: number;        // просмотры поста (история, поиск, строка списка; в журнале нет — клиент держит своё значение)
+  reactionCounts?: [string, number][];   // реакции поста счётчиками: [эмодзи, сколько], больше — раньше (вместо reactions)
+  myReaction?: string;   // моя реакция на пост (кто ещё поставил — у поста не отдаётся)
 }
 
 /** Стикер: всё, чтобы нарисовать его без запросов (url — неизменяемый файл /stk/<пак>/<хэш>/<файл>). */
@@ -69,7 +71,8 @@ export interface LinkPreview {
 }
 
 /** Откуда пересланное: исходный автор (имя — на момент пересылки), чат и сообщение оригинала, когда оно написано. */
-export interface ForwardInfo { userId: Id; name: string; chatId: Id; messageId: Id; at: string }
+/** Переслан пост канала: userId null, name — название канала (автор не раскрывается), postAuthor — подпись поста. */
+export interface ForwardInfo { userId: Id | null; name: string; chatId: Id; messageId: Id; at: string; postAuthor?: string }
 /** Ссылка на пересылаемое в кадре send: сервер сам берёт текст, оформление и вложение оригинала. */
 export interface ForwardRef { chatId: Id; id: Id; hideSender?: boolean; hideCaption?: boolean }
 
@@ -205,6 +208,8 @@ export type Update =
   | { type: 'messageMarkup'; chatId: Id; id: Id; body: string; entities?: Entity[]; buttons: MessageButton[][] | null }
   | { type: 'messageDeleted'; chatId: Id; id: Id }
   | { type: 'reactions'; chatId: Id; id: Id; reactions: Reaction[] }
+  // пост канала: реакции счётчиками (не чаще раза в секунду на пост — reactions.flush); своя реакция — ответом на react
+  | { type: 'reactionCounts'; chatId: Id; id: Id; counts: [string, number][] }
   | { type: 'mediaListened'; chatId: Id; id: Id }   // голосовое/кружок прослушали
   | { type: 'userUpdated'; user: PublicUser }   // профиль изменился: себе и всем, кто видит пользователя
   // контакт добавлен/изменён (contact) или удалён (removed + user — как его видно без контакта); только владельцу

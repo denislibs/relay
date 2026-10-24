@@ -82,7 +82,7 @@ export async function sendMessage(
       const f = input.forward;
       const from = await groupCtx(tx, f.chatId, userId);
       if (from.protected) throw new DomainError('forbidden', 'protected');   // в группе запрещено копирование
-      const [src] = await tx`select m.*, u.name as sender_name from messages m join users u on u.id = m.sender_id
+      const [src] = await tx`select m.*, u.name as sender_name, c.title as chat_title from messages m join users u on u.id = m.sender_id join chats c on c.id = m.chat_id
         where m.chat_id = ${f.chatId} and m.id = ${f.id} and m.id >= ${from.historyFrom} and not m.deleted and m.service_type is null`;
       if (!src) throw new DomainError('not_found', 'forward source');
       await openRows([src], '', tx);   // текст и вложение оригинала — из шифра его чата
@@ -100,9 +100,13 @@ export async function sendMessage(
       blocks = (src.blocks as Block[] | null) ?? null;   // статья пересылается целиком
       const sl = src.link as LinkPreview | null;
       if (sl && !sl.pending && !dropCaption) link = sl;
-      fwdFrom = f.hideSender ? null : (src.fwd_from as ForwardInfo | null) ?? {
+      // пост канала — от имени канала (как channel_post в Telegram): автора-админа не раскрываем, подпись — если была
+      fwdFrom = f.hideSender ? null : (src.fwd_from as ForwardInfo | null) ?? (src.post ? {
+        userId: null, name: (src.chat_title as string | null) ?? '', chatId: f.chatId, messageId: Number(src.id), at: (src.created_at as Date).toISOString(),
+        ...(src.post_author ? { postAuthor: src.post_author as string } : {}),
+      } : {
         userId: Number(src.sender_id), name: src.sender_name as string, chatId: f.chatId, messageId: Number(src.id), at: (src.created_at as Date).toISOString(),
-      };
+      });
     } else {
       attachment = input.attachment ? await attachmentForSend(tx, userId, input.attachment) as unknown as Record<string, unknown> : null;
       sticker = stickerId != null ? await stickerForSend(tx, userId, stickerId) : null;

@@ -7,6 +7,7 @@ import type { Server } from 'bun';
 import { authenticate, clearSessionCookie, createSession, createUser, deleteSession, readSessionToken, sessionCookie, sessionFromToken } from './auth';
 import { accessCookie, ACCESS_SEC, clearAccessCookie, deviceKeyOf, newChallenge, refreshAccess, verifyDevice } from './deviceAuth';
 import { announceLogin, announceSessionsChanged, assertConfirmed, checkSocket, confirmSession, listSessions, sessionEnded, sweepInactive, terminateOthers, terminateSession, trackSocket, untrackSocket } from './domain/sessions';
+import { countViews } from './domain/views';
 import { commonGroups, deleteDirectChat, createChat, createGroup, openDirect, messageAtDate, getChatMedia, getChatMediaCounts, getHistory, getMessagesByIds, listChats, listChatsPage } from './domain/chats';
 import { sql } from './db';
 import { DomainError } from './domain/errors';
@@ -385,6 +386,12 @@ export function createServer(opts: { port: number }): Server {
             pinnedOnly: url.searchParams.get('pinned') === '1',
             archivedOnly: url.searchParams.get('archived') === '1',
           }));
+        }
+        // просмотры постов канала: батч id от клиента раз в секунду (views.ts)
+        const views = /^\/chats\/(\d+)\/views$/.exec(url.pathname);
+        if (req.method === 'POST' && views) {
+          const body = (await req.json().catch(() => null)) as { ids?: unknown } | null;
+          return Response.json(await countViews(userId, Number(views[1]), body?.ids));
         }
         const mem = /^\/chats\/(\d+)\/members$/.exec(url.pathname);
         if (req.method === 'GET' && mem) return Response.json(await chatMembers(userId, Number(mem[1])));

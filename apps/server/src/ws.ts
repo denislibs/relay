@@ -29,7 +29,8 @@ export async function handleFrame(userId: number, frame: ClientFrame, publish: (
         if (!c) return [];
         // канал: «печатает» шлёт только тот, кто публикует (админ с post); подписчика игнорируем
         if (c.kind === 'channel' && !hasAdmin(ctxFromRow(frame.chatId, userId, c), 'post')) return [];
-        const msg = JSON.stringify({ op: 'typing', chatId: frame.chatId, userId } satisfies ServerFrame);
+        // в канале — от имени канала (userId 0): какой админ пишет, подписчики не узнают (как и автора поста)
+        const msg = JSON.stringify({ op: 'typing', chatId: frame.chatId, userId: c.kind === 'channel' ? 0 : userId } satisfies ServerFrame);
         if (c.kind !== 'direct') {
           // группа: один publish в топик чата (все процессы раздают своим подписчикам); свой userId и заблокированных отсеивает клиент
           publish(`chat:${frame.chatId}`, msg);

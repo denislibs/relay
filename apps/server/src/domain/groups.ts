@@ -28,13 +28,15 @@ async function names(db: Db, ids: number[]): Promise<{ id: number; name: string 
   return ids.map((id) => ({ id, name: by.get(id) ?? '' }));
 }
 
-/** Служебное сообщение группы: в ленту всем участникам (и extra — тем, кого уже нет, чтобы увидели «вас удалили»). */
+/** Служебное сообщение группы: в ленту всем участникам (и extra — тем, кого уже нет, чтобы увидели «вас удалили»).
+ *  В канале — от имени канала (post: senderId 0), как и посты: какой админ сменил название, подписчики не видят. */
 export async function serviceMessage(tx: Tx, chatId: number, senderId: number, type: ServiceType, data: ServiceData = {}, body = ''): Promise<Message> {
   const clientId = crypto.randomUUID();
   const c = await contentColumns(chatId, clientId, { body, entities: null, todo: null, blocks: null, link: null, attachment: null }, tx);
   const [row] = await tx`
-    insert into messages (chat_id, sender_id, client_id, kind, body, service_type, service_data, content)
-    values (${chatId}, ${senderId}, ${clientId}, 'text', ${c.body}, ${type}, ${Object.keys(data).length ? tx.json(data as never) : null}, ${c.content}) returning *`;
+    insert into messages (chat_id, sender_id, client_id, kind, body, service_type, service_data, content, post)
+    values (${chatId}, ${senderId}, ${clientId}, 'text', ${c.body}, ${type}, ${Object.keys(data).length ? tx.json(data as never) : null}, ${c.content},
+            (select kind = 'channel' from chats where id = ${chatId})) returning *`;
   const message = toMessage((await openRows([row], '', tx))[0]);
   await chatEvent(tx, chatId, { type: 'newMessage', message }, 'group');
   return message;

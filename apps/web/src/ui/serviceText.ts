@@ -4,7 +4,7 @@ import type { ServiceData, ServiceType } from '@relay/protocol';
 // «вас» — когда событие о вас. Имена участников — те, что сервер записал в момент события.
 
 const GROUP_TYPES = new Set<ServiceType>([
-  'group_created', 'title_changed', 'photo_changed', 'photo_removed', 'members_added', 'member_left', 'member_removed',
+  'group_created', 'channel_created', 'title_changed', 'photo_changed', 'photo_removed', 'members_added', 'member_left', 'member_removed',
   'joined_by_link', 'joined_by_request', 'owner_changed', 'protected_on', 'protected_off',
 ]);
 export const isGroupService = (t: string | undefined): t is ServiceType => !!t && GROUP_TYPES.has(t as ServiceType);
@@ -17,6 +17,7 @@ export function serviceText(type: ServiceType, opts: { data?: ServiceData; body?
   const subject = first ? (first.id === meId ? 'Вы' : first.name) : sender;
   switch (type) {
     case 'group_created': return v('создали группу', 'создал(а) группу') + ` «${opts.body ?? ''}»`;
+    case 'channel_created': return v('создали канал', 'создал(а) канал') + ` «${opts.body ?? ''}»`;
     case 'title_changed': return v('изменили название группы на', 'изменил(а) название группы на') + ` «${data?.title ?? opts.body ?? ''}»`;
     case 'photo_changed': return v('изменили фото группы', 'изменил(а) фото группы');
     case 'photo_removed': return v('удалили фото группы', 'удалил(а) фото группы');

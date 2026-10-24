@@ -2,7 +2,7 @@
 // люди по имени и «частые собеседники». Права — только чаты, где пользователь состоит; удалённое не отдаём.
 import type { MediaTab, Message } from '@relay/protocol';
 import { sql } from '../db';
-import { tabWhere, toMessage, withReactions } from './chats';
+import { tabWhere, toMessage, withAllReactions } from './chats';
 import { DomainError } from './errors';
 import { nameForSql } from './profile';
 import { openRows, rowMatches, scanMatching, SCAN_BATCH } from './messageContent';
@@ -44,7 +44,7 @@ export async function searchMedia(userId: number, tab: MediaTab, opts: { q?: str
   let page: Record<string, unknown>[], hasMore: boolean;
   if (q) ({ rows: page, more: hasMore } = await scanMatching(batch, (r) => rowMatches(r, q, tab === 'link'), limit, opts.before ?? null));
   else { const rows = await batch(opts.before ?? null); page = await openRows(rows.slice(0, limit)); hasMore = rows.length > limit; }
-  const messages = await withReactions(page.map(toMessage));
+  const messages = await withAllReactions(page.map(toMessage), userId);
   return {
     hits: messages.map((message, i) => ({ message, chatTitle: (page[i].chat_title as string | null) ?? null, chatKind: page[i].chat_kind as GlobalHit['chatKind'] })),
     hasMore,
