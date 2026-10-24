@@ -1200,7 +1200,7 @@ export class Engine {
         const photo = !a.kind && /^image\//.test(a.mime) && !!a.w && !!a.h;
         const sized = photo || a.kind === 'round' || a.kind === 'video';
         this.store.addPending({ clientId, chatId: a.chatId, body: a.body, replyToId: a.replyToId ?? null, createdAt: this.lastCreated, failed: false,
-          ...(a.groupId ? { groupId: a.groupId } : {}),
+          ...(a.groupId ? { groupId: a.groupId } : {}), ...(a.threadId != null ? { threadId: a.threadId } : {}),
           attachment: { id: '', kind: a.kind ?? (photo ? 'photo' : 'file'), mime: a.mime, name: a.name, size: a.file.size, w: sized ? a.w ?? null : null, h: sized ? a.h ?? null : null, thumb: a.thumb ?? null,
             ...(a.kind ? { duration: a.duration ?? null, waveform: a.waveform ?? null } : {}),
             ...(a.kind === 'audio' ? { title: a.title ?? null, performer: a.performer ?? null } : {}),
@@ -1313,7 +1313,7 @@ export class Engine {
       case 'sendSticker': {
         const clientId = crypto.randomUUID();
         this.lastCreated = Math.max(Date.now(), this.lastCreated + 1);
-        this.store.addPending({ clientId, chatId: a.chatId, body: '', entities: [], replyToId: a.replyToId ?? null, createdAt: this.lastCreated, failed: false, sticker: a.sticker });
+        this.store.addPending({ clientId, chatId: a.chatId, body: '', entities: [], replyToId: a.replyToId ?? null, createdAt: this.lastCreated, failed: false, sticker: a.sticker, ...(a.threadId != null ? { threadId: a.threadId } : {}) });
         await this.store.flush();
         this.changed();
         this.pumpOutbox();
