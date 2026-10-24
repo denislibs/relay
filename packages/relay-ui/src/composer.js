@@ -113,6 +113,8 @@ function Composer(props) {
       if (!el || !box) return;
       if (!maxH.current) maxH.current = parseFloat(getComputedStyle(box).maxHeight) || 240;
       var natural = el.offsetHeight, hgt = Math.min(natural, maxH.current);
+      var multi = el.scrollHeight > 64;   // от трёх строк — кнопка «Открыть полный редактор» (как в Telegram)
+      setSt(function (s) { return s.multi === multi ? s : Object.assign({}, s, { multi: multi }); });
       requestMutation(function () {
         var prev = height.current;
         box.classList.toggle('rl-composer-input-over', natural > maxH.current);
@@ -142,8 +144,8 @@ function Composer(props) {
     var m = sel && v.start === v.end ? /(^|\s)@([^\s@]*)$/.exec(before) : null;
     var mention = m ? { q: m[2], at: v.end - m[2].length - 1 } : null;
     if (mention && dismissed.current === mention.at) mention = null; else if (!mention) dismissed.current = null;
-    // от трёх строк — кнопка «Открыть полный редактор» (как в Telegram)
-    setSt({ empty: !v.text, hasText: !!v.text.trim(), mention: mention, caret: v.end || 0, multi: el.scrollHeight > 64 });
+    // «много строк» меряем вместе с высотой в fit (фаза measure) — здесь, сразу после правки DOM, это был бы пересчёт раскладки
+    setSt(function (s) { return { empty: !v.text, hasText: !!v.text.trim(), mention: mention, caret: v.end || 0, multi: s.multi }; });
     fit(animate);
     if (latest.current.onChange) latest.current.onChange({ text: v.text, entities: v.entities });
   }
@@ -468,7 +470,7 @@ function Composer(props) {
       if (!el || recNow.current || e.defaultPrevented || e.isComposing || document.activeElement === el) return;
       if (isTextTarget(e.target) || isTextTarget(document.activeElement)) return;
       if (e.altKey || ((e.metaKey || e.ctrlKey) && !(e.code === 'KeyV' && !e.shiftKey))) return;
-      if (!(e.metaKey || e.ctrlKey) && (e.key.length !== 1 || e.key === ' ' && document.activeElement && document.activeElement.nodeName === 'BUTTON')) return;
+      if (!(e.metaKey || e.ctrlKey) && (!e.key || e.key.length !== 1 || e.key === ' ' && document.activeElement && document.activeElement.nodeName === 'BUTTON')) return;
       if (document.querySelector('.rl-scrim, [aria-modal="true"], .rl-pop, .rl-viewer')) return;
       var s = document.getSelection();
       if (s && !s.isCollapsed && !(e.metaKey || e.ctrlKey)) return;   // выделяют текст в ленте — не мешаем

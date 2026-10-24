@@ -73,7 +73,7 @@ export function PhoneCard(props: { initial?: string }) {
               ref={input} id="auth-phone" class="rl-tf-input" type="tel" inputMode="tel" autoComplete="tel" placeholder=" "
               value={phone.value} disabled={busy} aria-invalid={invalid ? 'true' : undefined}
               onInput={(e) => onPhone(e.currentTarget.value)}
-              onKeyDown={(e) => { if (e.key.length === 1 && !/[\d+]/.test(e.key) && !e.metaKey && !e.ctrlKey) e.preventDefault(); }}
+              onKeyDown={(e) => { if (e.key?.length === 1 && !/[\d+]/.test(e.key) && !e.metaKey && !e.ctrlKey) e.preventDefault(); }}
             />
             <label class="rl-tf-label" for="auth-phone">{invalid ? 'Неверный номер' : 'Номер телефона'}</label>
             <span class="auth-ghost" aria-hidden="true"><span>{phone.value}</span>{phone.ghost}</span>

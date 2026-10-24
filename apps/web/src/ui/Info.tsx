@@ -4,7 +4,7 @@ import { SharedMedia, type MediaHead } from './SharedMedia';
 import { membersStatus, useMembers } from '../members';
 import { openUserChat, startDirectChat } from '../data';
 import { playProfileTop } from '../music';
-import { Avatar, Icon, InfoRow, PanelHeader, RichText, SettingsIcon, SlideFade, SlideStack, Switch, Verified, onHeavyAnimationEnd, peerTone } from '@relay/ui';
+import { Avatar, Icon, InfoRow, PanelHeader, RichText, SettingsIcon, SlideFade, SlideStack, Switch, Verified, onHeavyAnimationEnd, peerTone, requestMeasure } from '@relay/ui';
 import type { Item } from '@relay/sync-engine/src/types';
 import { chatTone, isSystemChat } from './format';
 import type { ComponentChildren } from 'preact';
@@ -114,7 +114,8 @@ export function Info() {
   const onBodyScroll = () => {
     if (measuring.current) return;
     measuring.current = true;
-    requestAnimationFrame(() => {
+    // в фазе measure кадра: в голом rAF чтение могло прийтись после записей и пересчитать раскладку
+    requestMeasure(() => {
       measuring.current = false;
       const el = body.current, tabs = el?.querySelector('.rl-aside-tabs, .app-sm-heading');
       const stuck = !!el && !!tabs && el.scrollTop > 0 && tabs.getBoundingClientRect().top - el.getBoundingClientRect().top <= 1;

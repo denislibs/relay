@@ -465,7 +465,7 @@ function WindowGrid(props) {
     var el = host.current;
     if (!el) return;
     function put(w) { w = Math.floor(w); if (w > 0) { wSt[1](w); if (onWidth.current) onWidth.current(w); } }
-    put(el.clientWidth);
+    put(forceMeasure(function () { return el.clientWidth; }));   // первая ширина нужна до отрисовки
     if (typeof ResizeObserver !== 'function') return;
     var ro = new ResizeObserver(function (es) { put(es[0].contentRect.width); });
     ro.observe(el);
@@ -566,9 +566,19 @@ function SlideStack(props) {
     var t = setTimeout(function () { if (animRef.current === a) { animRef.current = null; redraw(function (n) { return n + 1; }); } end(); }, SLIDE_MS);
     return function () { clearTimeout(t); end(); };
   }, [active]);
+  // фокус остался на уходящей странице (нажали «назад» в её шапке) — переводим на новую, иначе inert сбросит его в body
+  var host = useRef(null);
+  useLayoutEffect(function () {
+    var box = host.current, f = document.activeElement;
+    if (!box || !f || !box.contains(f)) return;
+    var page = f.closest('.rl-slide');
+    if (!page || page.parentElement !== box || page.getAttribute('data-slide') === String(active)) return;
+    var next = box.querySelector(':scope > .rl-slide[data-slide="' + String(active).replace(/"/g, '') + '"]');
+    if (next) next.focus({ preventScroll: true });
+  }, [active]);
   var anim = animRef.current;
   var root = order[0];
-  return h('div', { class: cx('rl-slides', props.variant === 'tabs' && 'rl-slides-tabs') }, order.map(function (key) {
+  return h('div', { ref: host, class: cx('rl-slides', props.variant === 'tabs' && 'rl-slides-tabs') }, order.map(function (key) {
     var isActive = key === active, leaving = anim && anim.from === key;
     if (!isActive && !leaving && key !== root) return null;
     var cls = 'rl-slide';
@@ -576,7 +586,8 @@ function SlideStack(props) {
       var push = anim.dir > 0;
       cls += isActive ? (push ? ' rl-slide-in-push' : ' rl-slide-in-pop') : (push ? ' rl-slide-out-push' : ' rl-slide-out-pop');
     } else if (!isActive) cls += ' rl-slide-parked';
-    return h('div', { key: key, class: cls, inert: !isActive || undefined, 'aria-hidden': !isActive || undefined }, props.render(key));
+    // только inert: он и убирает страницу от скринридера, и не даёт фокуса; aria-hidden на странице с фокусом браузер блокирует
+    return h('div', { key: key, 'data-slide': String(key), tabIndex: isActive ? -1 : undefined, class: cls, inert: !isActive || undefined }, props.render(key));
   }));
 }
 

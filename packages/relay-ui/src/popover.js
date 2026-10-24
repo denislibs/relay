@@ -10,7 +10,7 @@ import { createPortal } from 'preact/compat';
 import { useEffect, useLayoutEffect, useRef, useState } from 'preact/hooks';
 import { cx, reducedMotion } from './kit.js';
 import { Menu } from './more.js';
-import { beginHeavyAnimation } from './schedule.js';
+import { beginHeavyAnimation, forceMeasure } from './schedule.js';
 
 var EXIT_MS = 200, GAP = 6, MARGIN = 8;
 
@@ -68,7 +68,8 @@ export function MenuPopover(props) {
     return function () { clearTimeout(t); end(); };
   }, [open]);
 
-  useLayoutEffect(function () { if (open) place(box.current, p); }, [open, p.anchor, p.items, p.header]);
+  // меню только что вставлено — размер известен лишь после раскладки, а ставить его надо до первой отрисовки
+  useLayoutEffect(function () { if (open) forceMeasure(function () { place(box.current, p); }); }, [open, p.anchor, p.items, p.header]);
 
   useEffect(function () {
     if (!open) return;
