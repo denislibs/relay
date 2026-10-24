@@ -1,11 +1,11 @@
-import type { Message } from '@relay/protocol';
+import type { Message, ThreadGuest } from '@relay/protocol';
 import { beforeCommit, sql, type Tx } from '../db';
 import { enqueue } from '../jobs/queue';
 import { readOwnPost, toMessage, withAllReactions } from './chats';
 import { DomainError } from './errors';
 import { appendUpdates, chatEvent } from './journal';
 import { contentColumns, openRows } from './messageContent';
-import { groupCtx } from './groupRights';
+import { ctxFromRow, groupCtx, type GroupCtx } from './groupRights';
 
 /**
  * Комментарии к постам канала (как в Telegram): корень треда — копия поста в группе обсуждения (linked_chat_id).
@@ -156,6 +156,56 @@ export async function flushReplies(p: { chatId: number; postId: number }): Promi
   });
 }
 
+/**
+ * Кто может читать и писать в тред (как в Telegram: комментировать можно, не вступая в группу обсуждения). Участник
+ * группы — со своими правами. Не участник — гость: подписчик канала, у которого эта группа — текущая группа обсуждения
+ * (linked_chat_id), а корень треда — копия поста этого канала; права — умолчания группы, история — вся, но вышедший
+ * ограниченным (chat_restrictions) сохраняет исключение прав и границу скрытой истории; исключённым из группы — нельзя. Гость в группе не состоит: ни строки списка, ни журнала группы — тред он видит живым
+ * видом (watchThread). joinToSend / joinApproval — писать гостю нельзя (sendMessage: forbidden 'join').
+ */
+export async function threadAccess(db: Tx | typeof sql, groupId: number, userId: number, copyId: number): Promise<{ ctx: GroupCtx; guest: ThreadGuest | null }> {
+  try {
+    return { ctx: await groupCtx(db, groupId, userId), guest: null };
+  } catch (e) {
+    if (!(e instanceof DomainError && e.code === 'not_member')) throw e;
+  }
+  const [r] = await db`
+    select g.kind, g.rights as chat_rights, g.slow_mode, g.reactions, g.protected, g.owner_id, g.title, g.username, g.join_to_send, g.join_approval, ch.id as channel_id,
+           cr.restricted, coalesce(cr.history_from, 0) as history_from,
+           exists (select 1 from chat_join_requests q where q.chat_id = g.id and q.user_id = ${userId}) as requested
+      from chats g
+      join messages cp on cp.chat_id = g.id and cp.id = ${copyId} and cp.origin is not null
+      join chats ch on ch.id = (cp.origin->>'chatId')::bigint and ch.kind = 'channel' and ch.deleted_at is null and ch.linked_chat_id = g.id
+      join chat_members cm on cm.chat_id = ch.id and cm.user_id = ${userId}
+      left join chat_restrictions cr on cr.chat_id = g.id and cr.user_id = ${userId}   -- вышел ограниченным: ограничения те же
+     where g.id = ${groupId} and g.kind = 'group' and g.deleted_at is null
+       and not exists (select 1 from chat_bans b where b.chat_id = g.id and b.user_id = ${userId})`;
+  if (!r) throw new DomainError('not_member');
+  const ctx = ctxFromRow(groupId, userId, { ...r, role: 'member', admin_rights: null });
+  return {
+    ctx,
+    guest: {
+      channelId: Number(r.channel_id), title: (r.title as string | null) ?? '', username: (r.username as string | null) ?? null,
+      joinToSend: !!r.join_to_send, joinApproval: !!r.join_approval, requested: !!r.requested, slowMode: ctx.slowMode, rights: ctx.rights,
+    },
+  };
+}
+
+/** Права на операцию с сообщением группы (правка, удаление, реакция): участник — groupCtx; не участник — гость треда,
+ *  если сообщение — комментарий или шапка треда (threadAccess). */
+export async function messageCtx(tx: Tx, chatId: number, userId: number, id: number): Promise<GroupCtx> {
+  try {
+    return await groupCtx(tx, chatId, userId);
+  } catch (e) {
+    if (!(e instanceof DomainError && e.code === 'not_member')) throw e;
+  }
+  const [m] = await tx`select thread_id, origin from messages where chat_id = ${chatId} and id = ${id}`;
+  // шапка — только корень треда (копия не первого поста альбома корнем не является)
+  const root = m?.thread_id != null ? Number(m.thread_id) : m?.origin != null && await isThreadRoot(tx, m.origin, id) ? id : null;
+  if (root == null) throw new DomainError('not_member');
+  return (await threadAccess(tx, chatId, userId, root)).ctx;
+}
+
 /** Корень треда в группе: копия поста; удалённая — тоже (тред читается с шапкой «пост удалён»). */
 async function threadRoot(db: Tx | typeof sql, groupId: number, copyId: number): Promise<Record<string, unknown>> {
   const [h] = await db`select * from messages where chat_id = ${groupId} and id = ${copyId} and origin is not null`;
@@ -166,11 +216,13 @@ async function threadRoot(db: Tx | typeof sql, groupId: number, copyId: number):
 export const THREAD_PAGE_MAX = 200;
 
 /**
- * Страница треда (участник группы): шапка — копия поста (и удалённая: «Пост удалён»), комментарии по возрастанию id —
- * before (старее него, с конца) или after (новее него); удалённых комментариев нет. Видимые участнику — с history_from (общий count на кнопке может быть больше).
+ * Страница треда (участник группы или гость — threadAccess): шапка — копия поста (и удалённая: «Пост удалён»),
+ * комментарии по возрастанию id — before (старее него, с конца) или after (новее него); удалённых комментариев нет.
+ * Видимые участнику — с history_from (общий count на кнопке может быть больше); гостю — все. guest — только гостю:
+ * чем подписать тред и можно ли писать.
  */
-export async function getThread(userId: number, groupId: number, copyId: number, before: number | null, limit: number, after: number | null = null): Promise<{ header: Message; messages: Message[]; hasMore: boolean }> {
-  const ctx = await groupCtx(sql, groupId, userId);
+export async function getThread(userId: number, groupId: number, copyId: number, before: number | null, limit: number, after: number | null = null): Promise<{ header: Message; messages: Message[]; hasMore: boolean; guest?: ThreadGuest }> {
+  const { ctx, guest } = await threadAccess(sql, groupId, userId, copyId);
   const take = Math.min(Math.max(Number.isFinite(limit) ? limit : 50, 1), THREAD_PAGE_MAX);
   const h = await threadRoot(sql, groupId, copyId);
   let rows: Record<string, unknown>[], hasMore: boolean;
@@ -186,7 +238,7 @@ export async function getThread(userId: number, groupId: number, copyId: number,
     rows = down.slice(0, take).reverse(); hasMore = down.length > take;
   }
   const [header, ...messages] = await withAllReactions((await openRows([h, ...rows])).map(toMessage), userId);
-  return { header, messages, hasMore };
+  return { header, messages, hasMore, ...(guest ? { guest } : {}) };
 }
 
 /** Прочитанность треда — только растёт; изменилась — readThread моим устройствам (личный журнал). */
@@ -201,11 +253,11 @@ async function markThreadReadTx(tx: Tx, userId: number, groupId: number, copyId:
   return true;
 }
 
-/** PUT /chats/:group/threads/:copyId/read {upToId}: участник группы, upToId — не новее последнего в треде. */
+/** PUT /chats/:group/threads/:copyId/read {upToId}: участник группы или гость (threadAccess), upToId — не новее последнего в треде. */
 export async function readThread(userId: number, groupId: number, copyId: number, upToId: unknown): Promise<{ readMaxId: number; changed: boolean }> {
   if (!Number.isSafeInteger(upToId) || (upToId as number) <= 0) throw new DomainError('bad_frame', 'upToId');
   return sql.begin(async (tx) => {
-    await groupCtx(tx, groupId, userId);
+    await threadAccess(tx, groupId, userId, copyId);
     await threadRoot(tx, groupId, copyId);
     const [{ max }] = await tx`select greatest(${copyId}::bigint, coalesce(max(id), 0)) as max from messages where chat_id = ${groupId} and thread_id = ${copyId}`;
     if ((upToId as number) > Number(max)) throw new DomainError('not_found', 'message');

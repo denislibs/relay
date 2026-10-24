@@ -62,6 +62,7 @@ export function watchInto(engine: Engine, q: Query) {
   const list = () => order.map((k) => items.get(k)!).filter((i) => i && !i.key.startsWith('~')); // служебные элементы (~window) — не данные
   return {
     handle, patches, list,
+    item: (key: string) => items.get(key),   // и служебные (~window, ~thread)
     async until(pred: (l: Item[]) => boolean, ms = 3000): Promise<Item[]> {
       const end = Date.now() + ms;
       while (Date.now() < end) { if (pred(list())) return list(); await Bun.sleep(5); }

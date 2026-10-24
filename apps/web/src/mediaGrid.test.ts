@@ -1,5 +1,5 @@
 import { expect, test } from 'bun:test';
-import { gridCorners, scrollAt, tabCounter, tabLabel, tabScrollTarget, tileSrc, videoFrameSrc } from './mediaGrid';
+import { gridCorners, gridDateIndex, scrollAt, tabCounter, tabLabel, tabScrollTarget, tileSrc, videoFrameSrc } from './mediaGrid';
 
 const photo = { id: 'p1', kind: 'photo', mime: 'image/jpeg' };
 
@@ -73,4 +73,21 @@ test('счётчики вкладок для шапки: склонения, ф�
   expect(tabCounter('groups', null, null, 13)).toBe('13 общих групп');
   expect(tabCounter('groups', null, null, 2)).toBe('2 общие группы');
   expect(tabCounter('groups', null, null, 21)).toBe('21 общая группа');
+});
+
+test('плашка даты над «Медиа»: первая плитка ряда, чей низ ниже линии; зазор — уже следующий ряд', () => {
+  // плитка 100 px, зазор 1 px: ряд r занимает [101·r, 101·r + 100)
+  const at = (y: number, n = 30) => gridDateIndex(y, 100, 101, n);
+  expect(at(-500)).toBe(0);           // сетка ещё ниже вкладок
+  expect(at(0)).toBe(0);
+  expect(at(99.5)).toBe(0);           // низ первого ряда (100) ещё ниже линии
+  expect(at(100)).toBe(3);            // линия ровно по низу ряда — он уже ушёл под вкладки
+  expect(at(100.5)).toBe(3);          // линия в зазоре между рядами
+  expect(at(101)).toBe(3);
+  expect(at(250)).toBe(6);            // любая плитка ряда даёт первую в ряду
+  expect(at(5000)).toBe(27);          // ниже конца сетки — последний ряд
+  expect(at(5000, 28)).toBe(27);      // неполный последний ряд — его первая плитка
+  expect(at(50, 0)).toBe(-1);
+  // ряд — делением: тысячи плиток не обходятся
+  expect(gridDateIndex(101 * 5000 + 10, 100, 101, 30000)).toBe(15000);
 });

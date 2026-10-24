@@ -11,7 +11,7 @@ import { burnCodes } from './login';
 import { enqueue } from '../jobs/queue';
 import { can, groupCtx, hasAdmin } from './groupRights';
 import { reactPost, type Counts } from './reactionCounts';
-import { recountThread, withCopy } from './threads';
+import { messageCtx, recountThread, withCopy } from './threads';
 import { collectMentions } from './mentions';
 import type { Tx } from '../db';
 
@@ -39,7 +39,7 @@ export async function editMessage(userId: number, chatId: number, id: number, bo
   if (!text) throw new DomainError('bad_frame', 'empty body');
   if (text.length > MAX_BODY) throw new DomainError('too_long');
   return sql.begin(async (tx) => {
-    const ctx = await groupCtx(tx, chatId, userId);
+    const ctx = await messageCtx(tx, chatId, userId, id);   // и гость треда — свой комментарий (threads.ts)
     if (ctx.kind === 'channel' && hasAdmin(ctx, 'edit')) {
       const [m] = await tx`select deleted, service_type from messages where chat_id = ${chatId} and id = ${id} for update`;
       if (!m || m.deleted || m.service_type) throw new DomainError('not_found', 'message');
@@ -70,7 +70,7 @@ export async function editMessage(userId: number, chatId: number, id: number, bo
  *  уходят вместе с ним. Пересланные копии в других чатах — свои строки, их это не касается. */
 export async function deleteMessage(userId: number, chatId: number, id: number): Promise<{ ok: true }> {
   return sql.begin(async (tx) => {
-    const ctx = await groupCtx(tx, chatId, userId);
+    const ctx = await messageCtx(tx, chatId, userId, id);   // и гость треда — свой комментарий (threads.ts)
     // админ группы с правом удалять — и чужие (кроме служебных)
     let m;
     if (hasAdmin(ctx, 'delete')) {
@@ -103,7 +103,7 @@ async function erase(tx: Tx, chatId: number, id: number, kind: 'direct' | 'group
 export async function reactMessage(userId: number, chatId: number, id: number, emoji: string | null): Promise<{ reactions: Reaction[]; counts?: Counts; mine?: string | null }> {
   if (emoji !== null && !EMOJI.test(emoji)) throw new DomainError('bad_frame', 'emoji');
   return sql.begin(async (tx) => {
-    const ctx = await groupCtx(tx, chatId, userId);
+    const ctx = await messageCtx(tx, chatId, userId, id);   // и гость треда — сообщения треда (threads.ts)
     if (await isServiceChat(tx, chatId)) throw new DomainError('forbidden');   // служебный чат только для чтения
     if (emoji) {   // реакции в группе: право участника и набор, разрешённый группой
       if (!can(ctx, 'react') || ctx.reactions.mode === 'none') throw new DomainError('forbidden', 'react');

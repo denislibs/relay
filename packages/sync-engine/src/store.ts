@@ -1,4 +1,4 @@
-import type { GroupInfo, MyMembership } from '@relay/protocol';
+import type { GroupInfo, MyMembership, ThreadGuest } from '@relay/protocol';
 import type { Entity, Message, ProfilePhoto, Replies, Update } from '@relay/protocol';
 import { getAll, getByChat, termsOf, write, type RowPatch, type WriteBatch } from './idb';
 import { CACHE_STORES, STORES } from './schema';
@@ -22,6 +22,8 @@ type Range = [number, number];
 
 /** Цитата удалённого сообщения: «Удалённое сообщение», без содержимого. */
 const deletedQuote = (id: number, senderId: number): QuoteMsg => ({ id, sort: id, body: '', senderId, kind: 'text', deleted: true, attachment: null, todo: null, article: false });
+/** События, которые гость треда применяет из threadPush (остальное — состав, закрепы, информация группы — не для него). */
+const GUEST_UPDATES = new Set<Update['type']>(['messageEdited', 'messageMarkup', 'messageDeleted', 'reactions', 'reactionCounts', 'linkPreview', 'todoUpdated', 'attachmentUpdated', 'mediaListened']);
 
 /** Сколько последних уведомлений держит запрос notifications. */
 const NOTIFY_KEEP = 20;
@@ -641,14 +643,15 @@ export class Store {
 
   /** range: journal — продлевает живой отрезок, snapshot — последнее из снимка (snapshotLive), none — отрезки не трогает. */
   private applyMessage(m: Message, countUnread: boolean, range: 'journal' | 'snapshot' | 'none'): void {
-    const chat = this.ensureChat(m.chatId);
+    // гость треда (не участник группы обсуждения): строки чата нет и не заводим — только сообщения в памяти и отрезки треда
+    const chat = this.isGuest(m.chatId) ? null : this.ensureChat(m.chatId);
     const mine = m.senderId === this.userId;
     const map = this.map(m.chatId);
     const prev = map.get(m.clientId);
     // страница истории или строка списка, запрошенные до удаления, — удалённое не воскрешаем (журнал его уже убрал);
     // пометку удалённой копии поста (шапка треда) — можно
     if (range !== 'journal' && !m.deleted && this.quotes.get(m.chatId + ':' + m.id)?.deleted) return;
-    const status = mine && (prev?.status === 'read' || m.id <= chat.peerReadUpTo) ? 'read' : 'sent';
+    const status = mine && (prev?.status === 'read' || m.id <= (chat?.peerReadUpTo ?? 0)) ? 'read' : 'sent';
     const local: LocalMessage = {
       key: m.clientId, clientId: m.clientId, id: m.id, chatId: m.chatId, senderId: m.senderId,
       body: m.body, replyToId: m.replyToId, createdAt: m.createdAt, status, sort: m.id,
@@ -683,9 +686,14 @@ export class Store {
       const c = this.copyByPost.get(m.chatId + ':' + m.id);
       if (c) local.replies = this.baseReplies(c.chatId, c.copyId);
     }
+    if (!chat) {
+      if (range === 'journal' && m.threadId != null) this.extendThread(m.chatId, m.threadId, m.id);
+      if (!prev || JSON.stringify(prev) !== JSON.stringify(local)) this.putMessage(local);
+      return;
+    }
     unreadOnArrival(this, chat, m, countUnread);
     chat.knownMaxId = Math.max(chat.knownMaxId, m.id);
-    if (range === 'journal') { this.extendLive(chat, m.id); if (m.threadId != null) this.extendThread(chat, m.threadId, m.id); }
+    if (range === 'journal') { this.extendLive(chat, m.id); if (m.threadId != null) this.extendThread(m.chatId, m.threadId, m.id); }
     else if (range === 'snapshot' && !snapshotLive(chat, local) && !prev) {
       // ждёт журнала: в ленту (за живым отрезком) не кладём — только в превью чата; доставит журнал или settleSnapshots
       onMessage(this, chat, local, 'added');
@@ -817,7 +825,10 @@ export class Store {
   addPending(o: OutboxEntry): void {
     this.outbox.set(o.clientId, o);
     this.dirtyOutbox.add(o.clientId);
-    this.ensureChat(o.chatId);
+    // комментарий в чат без строки, а треда гостя в памяти нет (wipe, перезапуск): только очередь — строку не заводим,
+    // сообщение придёт с краем треда, когда его откроют
+    if (o.threadId != null && !this.chats.has(o.chatId) && !this.guests.has(o.chatId)) return;
+    if (!this.isGuest(o.chatId)) this.ensureChat(o.chatId);   // свой комментарий гостя — без строки чата
     this.loaded.add(o.chatId);
     this.putMessage({
       key: o.clientId, clientId: o.clientId, id: null, chatId: o.chatId, senderId: this.userId,
@@ -838,13 +849,20 @@ export class Store {
     if (o) { this.outbox.delete(o.clientId); this.dirtyOutbox.add(o.clientId); }
     const chatId = o?.chatId ?? this.findChatOf(clientId);
     if (chatId == null) return;
-    const chat = this.ensureChat(chatId);
     const m = this.messages.get(chatId)?.get(clientId);
+    // гость треда: строки чата нет — только сообщение и отрезок треда; гость прошлого запуска (в памяти уже ничего) — не заводить чат
+    if (this.isGuest(chatId) || (!this.chats.has(chatId) && !m)) {
+      if (!m) return;
+      this.putMessage({ ...m, id, createdAt, sort: id, status: m.status === 'read' ? 'read' : 'sent' });
+      if (m.threadId != null) { this.extendThread(chatId, m.threadId, id, true); this.applyThreadRead(chatId, m.threadId, id); }
+      return;
+    }
+    const chat = this.ensureChat(chatId);
     if (m) this.putMessage({ ...m, id, createdAt, sort: id, status: m.status === 'read' || id <= chat.peerReadUpTo ? 'read' : 'sent' });
     chat.knownMaxId = Math.max(chat.knownMaxId, id);
     this.extendLive(chat, id, true);   // неотправленные — часть живого отрезка
     // свой комментарий: продлевает живой отрезок треда, и тред прочитан до него (сервер так же поднял thread_reads)
-    if (m?.threadId != null) { this.extendThread(chat, m.threadId, id, true); this.applyThreadRead(chatId, m.threadId, id); }
+    if (m?.threadId != null) { this.extendThread(chatId, m.threadId, id, true); this.applyThreadRead(chatId, m.threadId, id); }
     this.markChat(chat);
   }
 
@@ -865,29 +883,67 @@ export class Store {
   }
 
   /** Комментарий из журнала или своё подтверждение: живой отрезок треда — только если тред открывали (есть отрезки). */
-  private extendThread(chat: LocalChat, threadId: number, sort: number, own = false): void {
-    const t = chat.threads?.[threadId];
+  private extendThread(chatId: number, threadId: number, sort: number, own = false): void {
+    const chat = this.chats.get(chatId);
+    const t = chat ? chat.threads?.[threadId] : this.guests.get(chatId)?.threads[threadId];
     if (!t) return;
     extendLive(t, sort, own);
-    this.markChat(chat);
+    if (chat) this.markChat(chat); else this.touch(chatId);
   }
 
-  /** Отрезки треда; create — завести (страница треда). */
-  threadRanges(chatId: number, threadId: number): ThreadRanges | undefined { return this.chats.get(chatId)?.threads?.[threadId]; }
+  /** Отрезки треда (участника — в строке чата, гостя — в памяти). */
+  threadRanges(chatId: number, threadId: number): ThreadRanges | undefined {
+    const chat = this.chats.get(chatId);
+    return chat ? chat.threads?.[threadId] : this.guests.get(chatId)?.threads[threadId];
+  }
+
+  /**
+   * Треды гостя: группа обсуждения, где я не участник, но читаю и пишу комментарии как подписчик канала (сервер
+   * threads.ts threadAccess). Строки чата нет — группа не попадает в список, журнала группы нет: тред — живой вид
+   * (watchThread → threadPush), сообщения и отрезки только в памяти, в IndexedDB не пишутся. Вступил — строка
+   * чата появилась (ensureChat): открытые сейчас треды переходят в строку чата (их отрезки живые), остальные забываются.
+   */
+  guests = new Map<number, { info: ThreadGuest; threads: Record<number, ThreadRanges>; open: Set<number> }>();
+  /** Движок подписал (on) или отписал тред гостя. Пока не подписан, события мимо — отрезки при переходе в чат не годятся. */
+  guestWatch(chatId: number, threadId: number, on: boolean): void {
+    const g = this.guests.get(chatId);
+    if (g) { if (on) g.open.add(threadId); else g.open.delete(threadId); }
+  }
+  isGuest(chatId: number): boolean { return !this.chats.has(chatId) && this.guests.has(chatId); }
+  guestInfo(chatId: number): ThreadGuest | null { return this.isGuest(chatId) ? this.guests.get(chatId)!.info : null; }
+
+  /** threadPush: события треда гостя. Новое — в тред (уведомлений нет: гость не участник), правки — как из журнала,
+   *  информация группы — в guest. */
+  applyGuestPush(chatId: number, items: Update[]): void {
+    if (!this.isGuest(chatId)) return;
+    for (const u of items) {
+      if (u.type === 'newMessage') { if (u.message.chatId === chatId) this.applyMessage(u.message, false, 'journal'); }
+      else if (u.type === 'groupUpdated') {
+        // группа сменила «только участники», одобрение, название — тред гостя показывает это сразу
+        const g = this.guests.get(chatId)!, n = u.group;
+        g.info = { ...g.info, title: n.title, username: n.username, joinToSend: !!n.joinToSend, joinApproval: n.joinApproval, slowMode: n.slowMode };
+        this.touch(chatId);
+      }
+      else if (GUEST_UPDATES.has(u.type) && (u as { chatId?: number }).chatId === chatId) this.applyUpdate(u);
+    }
+  }
 
   /** Страница треда: шапка (копия) и комментарии — в кэш чата (отрезки ленты группы не трогают), отрезки — треда. */
-  applyThreadPage(chatId: number, threadId: number, header: Message | null, list: Message[], hasMore: boolean, at: number | null, dir: 'older' | 'newer', gen?: number): void {
+  applyThreadPage(chatId: number, threadId: number, header: Message | null, list: Message[], hasMore: boolean, at: number | null, dir: 'older' | 'newer', gen?: number, guest?: ThreadGuest | null): void {
     if (gen != null && gen !== this.resetGen) return;
+    // ответ гостю (guest) — тред без строки чата; ответ участнику — гость в прошлом (вступил)
+    if (guest && !this.chats.has(chatId)) { const g = this.guests.get(chatId); this.guests.set(chatId, { info: guest, threads: g?.threads ?? {}, open: g?.open ?? new Set() }); }
+    else if (!guest && this.guests.delete(chatId)) this.touch(chatId);
     if (header) this.applyMessage(header, false, 'none');
     for (const m of list) this.applyMessage(m, false, 'none');
-    const chat = this.ensureChat(chatId);
-    const threads = chat.threads ?? (chat.threads = {});
+    const chat = this.isGuest(chatId) ? null : this.ensureChat(chatId);
+    const threads = chat ? (chat.threads ??= {}) : this.guests.get(chatId)!.threads;
     const t = threads[threadId] ?? (threads[threadId] = { ranges: [] });
     let lo: number | null = null, hi: number | null = null;
     for (const m of list) { if (lo == null || m.id < lo) lo = m.id; if (hi == null || m.id > hi) hi = m.id; }
     t.ranges = addPage(t.ranges, lo, hi, at, dir, !hasMore);
     if (!hasMore && dir === 'older') t.historyStart = true;
-    this.markChat(chat);
+    if (chat) this.markChat(chat); else this.touch(chatId);
   }
 
   /** Событие replies (журнал канала): число, последний и комментаторы; copyId и моя прочитанность — как были. */
@@ -904,7 +960,7 @@ export class Store {
     this.threadReads.set(k, upToId);
     this.dropMentions(chatId, (id, t) => t === threadId && id <= upToId);   // упоминания треда прочитаны
     const copy = this.messageById(chatId, threadId);
-    const channelId = copy?.origin?.chatId ?? this.chats.get(chatId)?.group?.linkedChatId ?? null;
+    const channelId = copy?.origin?.chatId ?? this.chats.get(chatId)?.group?.linkedChatId ?? this.guests.get(chatId)?.info.channelId ?? null;
     if (channelId == null) return;
     const post = copy?.origin ? this.messageById(channelId, copy.origin.id) : this.chatMessages(channelId).find((x) => x.replies?.copyId === threadId && x.replies.chatId === chatId);
     if (post?.replies && post.id != null && (post.replies.readMaxId ?? 0) < upToId) this.patchMessage(channelId, post.id, { replies: { ...post.replies, readMaxId: upToId } });
@@ -1010,8 +1066,14 @@ export class Store {
     this.notifications = this.notifications.filter((x) => !(x.chatId === chatId && x.id === id));
     if (this.notifications.length !== n) this.touch(chatId);
     const chat = this.chats.get(chatId);
-    if (!chat) return;
-    // последнее из снимка ждёт журнала: дыру перед ним ещё отметит (settleSnapshots), но в ленту не ляжет (placeSnapLast)
+    if (!chat) {
+      // гость треда: сообщения только в памяти — комментарий убрать, копию поста (шапку) — пометкой «Пост удалён»
+      if (m && !m.deleted && this.isGuest(chatId)) {
+        if (m.origin) this.putMessage({ ...m, ...DELETED });
+        else { this.messages.get(chatId)!.delete(m.key); this.touch(chatId); }
+      }
+      return;
+    }
     // последнее из снимка ждало журнала — журнал дошёл до него (удаление на его месте): до него всё подряд, дыры нет
     if (chat.snapLast?.id === id) { extendLive(chat, chat.snapLast.sort); delete chat.snapLast; this.markChat(chat); }
     if (!m) {
@@ -1044,6 +1106,7 @@ export class Store {
   patchMessage(chatId: number, id: number, patch: Partial<LocalMessage>): void {
     const m = this.messageById(chatId, id);
     if (m) { this.putMessage({ ...m, ...patch }); return; }
+    if (this.isGuest(chatId)) return;   // гость: в IndexedDB ничего нет — править нечего
     const rk = `${chatId}:${id}`, prevP = this.rowPatches.get(rk);
     // в IDB строка могла остаться — поправим при записи (с её словами); уже удалённую (drop) правка не воскрешает
     this.rowPatches.set(rk, { ...prevP, chatId, id, patch: { ...prevP?.patch, ...patch } });
@@ -1089,7 +1152,7 @@ export class Store {
     const reads = keep.outbox ? new Map(this.pendingReads) : new Map<number, number>();
     this.resetGen++;
     for (const id of this.chats.keys()) this.touch(id);
-    this.chats.clear(); this.chatV.clear(); this.messages.clear(); this.loaded.clear(); this.sorted.clear(); this.ids.clear();
+    this.chats.clear(); this.chatV.clear(); this.messages.clear(); this.loaded.clear(); this.sorted.clear(); this.ids.clear(); this.guests.clear();
     this.outbox.clear(); this.pendingReads.clear(); this.profile.reset(); this.contacts.reset(); this.settings.reset(); this.blocks.reset(); this.members.reset(); this.profileLists.reset();
     this.dirtyChats.clear(); this.dirtyMessages.clear(); this.dirtyOutbox.clear(); this.dirtyReads.clear();
     this.rowPatches.clear();
@@ -1244,6 +1307,13 @@ export class Store {
     let c = this.chats.get(id);
     if (!c) {
       c = { id, kind: 'direct', lastReadId: 0, unread: 0, knownMaxId: 0, peerReadUpTo: 0, ranges: [], peerId: null, last: null, lastAt: new Date(0).toISOString() };
+      // вступил в группу обсуждения: открытые треды гостя (живые отрезки) — в строку чата, их сообщения — в IndexedDB
+      const g = this.guests.get(id);
+      if (g) {
+        this.guests.delete(id);
+        for (const t of g.open) if (g.threads[t]) (c.threads ??= {})[t] = g.threads[t];
+        for (const m of this.messages.get(id)?.values() ?? []) this.dirtyMessages.set(m.key, m);
+      }
       this.chats.set(id, c);
       this.markChat(c);
     }
@@ -1253,6 +1323,7 @@ export class Store {
   private putMessage(m: LocalMessage): void {
     const map = this.map(m.chatId), prev = map.get(m.key);
     map.set(m.key, m);
+    if (this.isGuest(m.chatId)) { this.touch(m.chatId); return; }   // гость треда: только память (ни IndexedDB, ни строки чата)
     this.dirtyMessages.set(m.key, m);
     if (prev) { const now = new Set(termsOf(m)); for (const t of termsOf(prev)) if (!now.has(t) || prev.sort !== m.sort) this.staleTerms.set(termKey(t, prev.chatId, prev.sort), [t, prev.chatId, prev.sort]); }
     const chat = this.ensureChat(m.chatId);

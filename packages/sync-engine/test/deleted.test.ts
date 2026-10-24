@@ -174,3 +174,16 @@ test('a history page asked before the delete does not resurrect the message; a d
   s.applyThreadPage(8, 20, msg({ id: 20, chatId: 8, senderId: PEER, body: '', deleted: true, post: true, origin: { chatId: 9, id: 1 } }), [], false, null, 'older');
   expect(s.messageById(8, 20)).toMatchObject({ deleted: true });
 });
+
+test('thread guest (not a group member): a deleted comment leaves the thread, a deleted post copy stays as the header', async () => {
+  const s = await fresh();
+  const G = 8, guest = { title: 'Обсуждение', username: null, joinToSend: false, joinApproval: false, slowMode: 0 } as never;
+  s.applyThreadPage(G, 2, msg({ id: 2, chatId: G, senderId: PEER, body: 'пост', post: true, origin: { chatId: 9, id: 1 } }),
+    [3, 4].map((id) => msg({ id, chatId: G, senderId: PEER, threadId: 2 })), false, null, 'older', undefined, guest);
+  expect(s.isGuest(G)).toBe(true);
+  s.applyGuestPush(G, [{ type: 'messageDeleted', chatId: G, id: 4 }, { type: 'messageDeleted', chatId: G, id: 2 }]);
+  const t = computeQuery(s, { kind: 'thread', chatId: G, threadId: 2, limit: 50 });
+  expect(t.order.filter((k) => !k.startsWith('~')).map((k) => t.items.get(k)!.id)).toEqual([2, 3]);
+  expect(s.messageById(G, 2)).toMatchObject({ deleted: true, body: '' });
+  expect(s.chats.has(G)).toBe(false);   // строки чата у гостя так и нет
+});
