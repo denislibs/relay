@@ -1,7 +1,7 @@
 import { ContactPicker, Modal, SearchInput, peerTone } from '@relay/ui';
 import type { GroupInvite, GroupMember } from '@relay/protocol';
 import { useState } from 'preact/hooks';
-import { createDirectChat, engineSend, openUserChat } from '../../data';
+import { createDirectChat, engineSend, openUserChat, refreshChats } from '../../data';
 import { useGlobal } from '../../global';
 import { act, adminCan, canInvite, inviteUrl, plural, useGroup, useGroupData } from '../../groups';
 import { senderAvatar } from '../../profilePhoto';
@@ -78,6 +78,7 @@ export function AddMembers({ nav }: { nav: Nav }) {
     const r = await act<{ added: number[]; failed: number[] }>('POST', `/groups/${chatId}/members`, { userIds: picked });
     setBusy(false);
     if (!r) return;
+    if (r.added.length && kind === 'channel') refreshChats();   // число подписчиков журнал канала не несёт
     if (r.added.length) showToast(r.added.length === 1 ? `${nameOf(r.added[0])} в группе` : `Добавлено: ${r.added.length}`);
     if (r.failed.length) setFailed(r.failed); else nav.back();
   };

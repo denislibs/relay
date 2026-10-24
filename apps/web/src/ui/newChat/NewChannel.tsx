@@ -1,7 +1,7 @@
 import { Button, ContactPicker, EmptyState, Fab, PanelHeader, Presence, ProfileHeader, ProgressRing, Section, TextField, peerTone } from '@relay/ui';
 import { GROUP_ABOUT_MAX } from '@relay/protocol';
 import { useEffect, useRef, useState } from 'preact/hooks';
-import { createGroup, groupCall, openChat } from '../../data';
+import { createGroup, groupCall, openChat, refreshChats } from '../../data';
 import { getGlobal, setGlobal, useGlobal } from '../../global';
 import { back, go, home } from '../../nav';
 import { senderAvatar, upload } from '../../profilePhoto';
@@ -108,6 +108,7 @@ export function NewChannelMembers() {
     setBusy(false);
     if (!r.ok) { showToast(errorText(r.code)); return; }
     if (r.data.failed.length) showToast(`Не удалось добавить: ${r.data.failed.length}`);
+    refreshChats();   // «N подписчиков» в шапке — из строки списка
     void finish();
   };
 

@@ -916,6 +916,9 @@ export async function createGroup(title: string, memberIds: number[], channel?: 
   return id;
 }
 
+/** Перечитать список чатов с сервера (число подписчиков канала после добавления: журнал канала состав не несёт). */
+export function refreshChats(): void { engine.call({ type: 'refreshChats' }).catch(() => {}); }
+
 export async function startDirectChat(peerId: number): Promise<void> {
   openChat(await createDirectChat(peerId));
 }

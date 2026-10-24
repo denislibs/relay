@@ -234,7 +234,7 @@ export function Info() {
             </div>
           ) : null}</Expand>
         </div>
-        <SharedMedia chatId={chatId} group={chat?.kind === 'group' || (channel && gAdmin)} peerId={system ? null : peerId} onHead={setMediaHead} onMember={openMember} />
+        <SharedMedia chatId={chatId} group={chat?.kind === 'group' || (channel && gAdmin)} channel={channel} peerId={system ? null : peerId} onHead={setMediaHead} onMember={openMember} />
         {viewer != null && gallery.length ? (
           <PhotoViewer photos={gallery} index={viewer} name={title} onIndex={setSlide} onClose={() => setViewer(null)}
             origin={(k) => (k === slide ? document.querySelector<HTMLElement>(`.app-gallery [data-gallery-slide="${k}"]`) : null)} />
