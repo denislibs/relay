@@ -55,3 +55,13 @@ export async function chatSeqsSince(userId: number, sinceMs: number): Promise<{ 
   const [n] = await sql`select (extract(epoch from clock_timestamp()) * 1000)::bigint as now`;
   return { now: Number(rows[0]?.now ?? n.now), items: rows.map((r) => [Number(r.chat_id), Number(r.seq)]) };
 }
+
+/**
+ * Записи чата (from, to] для всех подписчиков разом — длинное событие (NOTIFY chat_updates без e, realtime.ts):
+ * процесс читает их один раз и публикует полный push вместо syncChat от каждого сокета. Без пользовательского
+ * фильтра: скрытую историю (history_from) отбрасывает клиент, как и у push с e. Не больше MAX_BATCH записей.
+ */
+export async function getChatUpdatesRange(chatId: number, from: number, to: number): Promise<JournalEntry[]> {
+  const rows = await sql`select seq, payload from chat_updates where chat_id = ${chatId} and seq > ${from} and seq <= ${to} order by seq limit ${MAX_BATCH}`;
+  return hydrate(null, rows.map((r) => ({ seq: Number(r.seq), payload: r.payload as Stored })));
+}

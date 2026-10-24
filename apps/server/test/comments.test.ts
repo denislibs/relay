@@ -7,8 +7,9 @@ import { setLinkedChat } from '../src/domain/groups';
 import { toggleTodo } from '../src/domain/todo';
 import { planPush, subscribe } from '../src/domain/push';
 import { allowPrivateHostsForTests } from '../src/domain/linkPreview';
-import '../src/jobs/kinds';
-import { drainJobs } from '../src/jobs/worker';
+import { PUSH_PAGE } from '../src/jobs/kinds';
+import { drainJobs, runJob } from '../src/jobs/worker';
+import { claim } from '../src/jobs/queue';
 import { markRead } from '../src/domain/reads';
 import { chatEventsOf, journalOf, opened, pushBrowser, resetDb, uploadFile } from './helpers';
 
@@ -277,6 +278,12 @@ test('push for the copy skips channel subscribers (one push per post) and is tit
   expect(forPost.map((x) => x.endpoint)).toEqual([ep(2)]);
   // обычное сообщение группы — как раньше, всем
   expect((await planPush({ chatId: g, id: copyId, senderId: a.userId, body: 'x' })).map((x) => x.endpoint).sort()).toEqual([ep(2), ep(3)]);
+  // сами задачи, страницами по одной подписке: пост — b, копия — только c (b уже уведомлён как подписчик канала)
+  await sql`delete from jobs where kind <> 'push.message'`;
+  PUSH_PAGE.size = 1;
+  try { for (let j; (j = await claim(1, 300, { only: ['push.message'] })).length;) await runJob(j[0]); } finally { PUSH_PAGE.size = 1000; }
+  const delivers = await sql`select payload->>'endpoint' as e, (payload->>'chatId')::bigint as c from jobs where kind = 'push.deliver' order by e`;
+  expect(delivers.map((d) => [d.e, Number(d.c)])).toEqual([[ep(2), ch], [ep(3), g]]);
 });
 
 test('album: posts sharing a group_id share one thread — the first copy is the root, comments count on every post', async () => {

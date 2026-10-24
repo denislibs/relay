@@ -1,7 +1,8 @@
 import type { Server } from 'bun';
-import type { ServerFrame } from '@relay/protocol';
+import type { JournalEntry, ServerFrame } from '@relay/protocol';
 import { sql } from './db';
 import type { ChatNotify, UpdatesNotify } from './domain/journal';
+import { getChatUpdatesRange } from './domain/chatJournal';
 import { subscribeUserSockets, unsubscribeUserSockets } from './sockets';
 import { processAlive, processGone } from './domain/liveRegistry';
 import { closeLive, parseEnded, terminatedFrame, touchLive } from './domain/sessions';
@@ -45,11 +46,28 @@ export async function startRealtime(server: Server): Promise<() => Promise<void>
     if (n.e) for (const [id, seq] of n.u) server.publish(`user:${id}`, JSON.stringify({ op: 'push', from: seq - 1, to: seq, items: [{ seq, update: n.e }] } satisfies ServerFrame));
   });
   // журнал чата: один кадр на всех подписчиков чата в этом процессе (кадр у всех одинаковый — номер общий)
+  const publishChat = (c: number, from: number, to: number, items: JournalEntry[]) =>
+    server.publish(`chat:${c}`, JSON.stringify({ op: 'push', chatId: c, from, to, items } satisfies ServerFrame));
+  // длинное событие (без e — не влезло в 8000 байт): записи читаются один раз на процесс, а не syncChat каждого сокета.
+  // Пока чтение в полёте, следующие NOTIFY этого чата встают за ним — push уходят по порядку seq
+  const chatQueues = new Map<number, Promise<void>>();
   const subChats = await sql.listen('chat_updates', (payload) => {
     let n: ChatNotify;
     try { n = JSON.parse(payload); } catch { return; }
-    const items = n.e ? n.e.map((update, i) => ({ seq: n.f + 1 + i, update })) : [];   // без e — «догони чат» (syncChat)
-    server.publish(`chat:${n.c}`, JSON.stringify({ op: 'push', chatId: n.c, from: n.f, to: n.t, items } satisfies ServerFrame));
+    const queued = chatQueues.get(n.c);
+    if (n.e && !queued) {   // быстрый путь — синхронно, как раньше
+      publishChat(n.c, n.f, n.t, n.e.map((update, i) => ({ seq: n.f + 1 + i, update })));
+      return;
+    }
+    const step = async () => {
+      if (n.e) { publishChat(n.c, n.f, n.t, n.e.map((update, i) => ({ seq: n.f + 1 + i, update }))); return; }
+      const items = await getChatUpdatesRange(n.c, n.f, n.t).catch((e) => { console.error('chat_updates range:', e); return null; });
+      // не прочитали (или записей больше пачки) — пустой push: клиенты догонят чат сами (syncChat)
+      publishChat(n.c, n.f, n.t, items && items.length === n.t - n.f ? items : []);
+    };
+    const next: Promise<void> = (queued ?? Promise.resolve()).then(step).catch((e) => { console.error('chat_updates:', e); })
+      .finally(() => { if (chatQueues.get(n.c) === next) chatQueues.delete(n.c); });
+    chatQueues.set(n.c, next);
   });
   // завершённые сеансы (в любом процессе): кадр в топик сеанса, затем сокеты этого процесса закрываются
   const subSessions = await sql.listen('sessions', (payload) => {

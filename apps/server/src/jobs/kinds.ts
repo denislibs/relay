@@ -4,7 +4,7 @@ import { deliver } from '../domain/devOutbox';
 import { sweepPendingUploads } from '../domain/files';
 import { collectGarbage, purgeObjects } from '../domain/storageGc';
 import { sweepInactive } from '../domain/sessions';
-import { deliverPush, planPush, type PushMessage, type PushPayload } from '../domain/push';
+import { deliverPush, planPush, planPushPage, type PushCursor, type PushMessage, type PushPayload } from '../domain/push';
 import { reindexStep, syncMessage, syncMessages } from '../search/messagesIndex';
 import { register, registerBatch } from './handlers';
 import { applyLinkPreview } from '../domain/messages';
@@ -14,14 +14,23 @@ import { processPhoto } from './photo';
 import { encryptLegacyStep, loadOpen, openForChat, sealForChat } from '../domain/messageContent';
 import { rewrapStep } from '../crypto/kms';
 import { toMessage } from '../domain/chats';
-import { enqueue } from './queue';
+import { enqueue, type Job } from './queue';
 import { purgeStep, type PurgeJob } from '../domain/chatPurge';
 import { flushReactionCounts } from '../domain/reactionCounts';
 import { flushReplies } from '../domain/threads';
 
+/** Подписок на страницу push.message (тесты уменьшают). */
+export const PUSH_PAGE = { size: 1000 };
+
+/** Аренду страницы push.message перехватил другой воркер (истекла): транзакция страницы откатывается целиком. */
+class LeaseLost extends Error {}
+
 // новое сообщение → по задаче на подписку: повтор одной не шлёт остальным второй раз
 // в задаче — ссылка на сообщение (новые) или само сообщение (поставленные до шифрования)
-register('push.message', async (p: { chatId?: number; id?: number; message?: PushMessage }) => {
+// страницами по PUSH_PAGE.size подписок: канал на 200 000 с 2000 подписками — две страницы. Страница — одна транзакция:
+// доставки (dedupe по endpoint и сообщению), продолжение со своим курсором и удаление самой задачи; строку задачи
+// уже удалил другой воркер (аренда истекла и перехвачена) — откат, ничего не вставлено. Либо всё, либо ничего
+register('push.message', async (p: { chatId?: number; id?: number; message?: PushMessage; after?: PushCursor }, job: Job) => {
   let m = p.message;
   let excludeChatId: number | undefined;
   if (!m && p.chatId != null && p.id != null) {
@@ -34,13 +43,32 @@ register('push.message', async (p: { chatId?: number; id?: number; message?: Pus
     if (origin?.chatId != null) excludeChatId = Number(origin.chatId);
   }
   if (!m) return;
-  const targets = await planPush(m, { excludeChatId });
-  if (!targets.length) return;
+  const page = await planPushPage(m, { excludeChatId, after: p.after, limit: PUSH_PAGE.size });
   // текст уведомления — запечатан ключом чата: в jobs/jobs_dead не лежит открытым
-  const sealed = await Promise.all(targets.map(async (t) => ({ endpoint: t.endpoint, chatId: t.push.chatId, sealed: await sealForChat(t.push.chatId, t.push, 'jobs|push') })));
+  const sealed = await Promise.all(page.targets.map(async (t) => ({ endpoint: t.endpoint, chatId: t.push.chatId, sealed: await sealForChat(t.push.chatId, t.push, 'jobs|push') })));
+  const next = page.full && page.last ? page.last : null;
+  if (!sealed.length && !next) return;
+  let delivered = 0;
   await sql.begin(async (tx) => {
-    for (const t of sealed) await enqueue(tx, 'push.deliver', t);
+    if (sealed.length) {
+      const ins = await tx`
+        insert into jobs (kind, payload, run_at, dedupe_key, max_attempts)
+        select 'push.deliver', d.p::jsonb, now(), d.k, 8
+          from unnest(${sealed.map((s) => JSON.stringify(s))}::text[], ${sealed.map((s) => `push.deliver:${s.endpoint}:${m.id}`)}::text[]) as d(p, k)
+        on conflict (dedupe_key) where dedupe_key is not null do nothing
+        returning id`;
+      delivered = ins.length;
+    }
+    if (next) await enqueue(tx, 'push.message', { ...p, after: next }, { dedupeKey: `push.message:${m.chatId}:${m.id}:${next[0]}:${next[1]}` });
+    // строка задачи — та, что мы арендовали: иначе её уже ведёт другой воркер (и вставит то же сам)
+    if (job?.id != null) {
+      const gone = await tx`delete from jobs where id = ${job.id} and attempts = ${job.attempts} returning id`;
+      if (!gone.length) throw new LeaseLost(`push.message ${job.id}: lease taken over`);
+    }
   });
+  // массовая вставка — мимо enqueue: будим воркеры сами, только после коммита (при откате сюда не дойдём)
+  if (delivered) await sql`select pg_notify('jobs', 'push.deliver')`;
+  // строка уже удалена в транзакции: complete воркера (delete … and attempts) ничего не найдёт и не бросит
 });
 
 // упоминание (mentions.ts): одному адресату, сквозь mute; строки упоминания уже нет (прочитал, удалили) — молчим

@@ -114,12 +114,27 @@ export type PushMessage = { chatId: number; id: number; senderId: number; body: 
  *  подписки и умолчания вида чата (как в Telegram); блокировки, «скрывать текст» и предпросмотр — как обычно.
  *  Без mentionOf упомянутые пропускаются: им уходит push.mention, одно уведомление на сообщение. */
 export async function planPush(m: PushMessage, opts: { excludeChatId?: number; mentionOf?: number } = {}): Promise<{ endpoint: string; push: PushPayload }[]> {
+  return (await planPushPage(m, opts)).targets;
+}
+
+/** Курсор страницы push.message: последняя (user_id, endpoint) прочитанной страницы. */
+export type PushCursor = [number, string];
+
+/**
+ * Страница planPush (задача push.message по страницам): подписки по возрастанию (user_id, endpoint) после after,
+ * не больше limit строк до фильтра «онлайн / умолчания вида чата». full — за страницей есть ещё подписки,
+ * last — курсор следующей страницы. Без limit — все подписки разом (push.mention, тесты).
+ */
+export async function planPushPage(m: PushMessage, opts: { excludeChatId?: number; mentionOf?: number; after?: PushCursor; limit?: number } = {}):
+  Promise<{ targets: { endpoint: string; push: PushPayload }[]; last: PushCursor | null; full: boolean }> {
   const excl = opts.excludeChatId ?? null, only = opts.mentionOf ?? null;
+  const [afterUid, afterEp] = opts.after ?? [0, ''];
+  const limit = opts.limit ?? null;
   m = { ...m, body: hideSpoilers(m.body, m.entities) };   // скрытый текст в уведомление не уходит
   // код входа не уходит в push-сервис и на экран блокировки
   if (m.service?.type === 'login_code') m = { ...m, body: 'Код для входа в Relay' };
   // имя отправителя — глазами получателя (контактное, если он его задал)
-  const subs = await sql`
+  const rows = await sql`
     select s.endpoint, s.user_id, s.hide_text,
            (select ${nameForSql(sql`s.user_id`)} from users u where u.id = ${m.senderId}) as sender_name
       from push_subscriptions s
@@ -134,19 +149,28 @@ export async function planPush(m: PushMessage, opts: { excludeChatId?: number; m
       and se.expires_at > now()
       and se.last_active_at > now() - make_interval(days => coalesce(us.sessions_ttl_days, ${DEFAULT_TTL_DAYS}))
       and not exists (select 1 from blocks b where b.owner_id = s.user_id and b.user_id = ${m.senderId})   -- от заблокированного — никогда
-      ${excl != null ? sql`and not exists (select 1 from chat_members x where x.chat_id = ${excl} and x.user_id = s.user_id)` : sql``}`;
+      ${excl != null ? sql`and not exists (select 1 from chat_members x where x.chat_id = ${excl} and x.user_id = s.user_id)` : sql``}
+      -- курсор по (user_id, endpoint); cm.user_id >= — чтобы страница шла по ключу chat_members (chat_id, user_id)
+      and (s.user_id, s.endpoint) > (${afterUid}::bigint, ${afterEp}::text) and cm.user_id >= ${afterUid}
+    order by s.user_id, s.endpoint
+    ${limit != null ? sql`limit ${limit + 1}` : sql``}`;
+  // строкой больше страницы: есть ли продолжение (иначе ровно полная последняя страница ставила бы пустое)
+  const more = limit != null && rows.length > limit;
+  const subs = more ? rows.slice(0, limit) : rows;
+  const lastRow = subs.length ? subs[subs.length - 1] : null;
+  const page = { last: lastRow ? [Number(lastRow.user_id), lastRow.endpoint as string] as PushCursor : null, full: more };
   const online = await onlineUsers([...new Set(subs.map((s) => Number(s.user_id)))]);
   const offline = subs.filter((s) => !online.has(Number(s.user_id)));
-  if (!offline.length) return [];
+  if (!offline.length) return { targets: [], ...page };
   const [info] = await sql`select kind, title from chats where id = ${m.chatId}`;
-  if (!info) return [];   // чат удалили, пока задача ждала
+  if (!info) return { targets: [], last: null, full: false };   // чат удалили, пока задача ждала
   if (excl != null) { const [ch] = await sql`select title from chats where id = ${excl}`; if (ch) info.title = ch.title; }
   // умолчания получателя для этого вида чата: выключено — не шлём; без предпросмотра — текст не отдаём
   const defaults = await notifyDefaults(sql, [...new Set(offline.map((s) => s.user_id as number))]);
   const kind = info.kind === 'channel' ? 'channel' : info.kind === 'group' ? 'group' : 'direct';
   const prefOf = (userId: number) => defaults.get(userId)?.[kind] ?? { muted: false, preview: true };
   const preview = m.kind === 'sticker' ? (m.sticker?.emoji ? m.sticker.emoji + ' Стикер' : 'Стикер') : m.kind === 'voice' ? '🎤 Голосовое сообщение' : m.kind === 'todo' ? '☑️ ' + m.body : m.kind === 'round' ? 'Видеосообщение' : m.kind === 'photo' ? (m.body ? '🖼 ' + m.body : 'Фотография') : m.kind === 'video' ? (m.body ? '📹 ' + m.body : 'Видео') : m.kind === 'file' ? '📎 ' + (m.body || m.attachment?.name || 'Файл') : m.kind === 'audio' ? '🎵 ' + (m.body || (m.attachment as { title?: string } | null | undefined)?.title || (m.attachment?.name ?? 'Музыка').replace(/\.[^.]{1,5}$/, '')) : m.body;
-  return offline.filter((s) => only != null || !prefOf(s.user_id as number).muted).map((s) => {
+  const targets = offline.filter((s) => only != null || !prefOf(s.user_id as number).muted).map((s) => {
     const name = s.sender_name as string;
     const shown = prefOf(s.user_id as number).preview;
     // «Скрывать текст в уведомлениях» на этом устройстве — ни имени, ни текста (как и локальное уведомление)
@@ -162,6 +186,7 @@ export async function planPush(m: PushMessage, opts: { excludeChatId?: number; m
     if (only != null) push.mention = true;
     return { endpoint: s.endpoint as string, push };
   });
+  return { targets, ...page };
 }
 
 const PUSH_TIMEOUT_MS = 10_000;
