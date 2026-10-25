@@ -1191,11 +1191,13 @@ export class Store {
   /** Черновики, ещё не отправленные на сервер (правки этого устройства). */
   pendingDrafts = new Set<number>();
 
-  /** Черновик с другого устройства (журнал) или из снимка: локальный неотправленный и более новый — главнее. */
+  /** Черновик с другого устройства (журнал): локальный, ещё не отправленный на сервер, главнее — он уйдёт следом и
+   *  станет общим (как в снимке, applyChats). Время не сравниваем: стирание черновика отправкой, дошедшей после
+   *  переподключения, несёт время сервера — оно позже черновика, набранного здесь без сети, хотя по смыслу раньше. */
   applyRemoteDraft(chatId: number, text: string, at: string, entities?: Entity[]): void {
     const chat = this.chats.get(chatId);
     if (!chat) return;
-    if (this.pendingDrafts.has(chatId) && chat.draft && chat.draft.at > at) return;
+    if (this.pendingDrafts.has(chatId)) return;
     const next = text ? { text, at, ...(entities?.length ? { entities } : {}) } : null;
     if (sameDraft(chat.draft, next)) return;
     chat.draft = next;

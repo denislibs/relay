@@ -129,6 +129,27 @@ test('a draft typed after an offline send survives the reconnect, on the server 
   expect(eb.store.chats.get(chatId)?.draft?.text).toBe('новое');
 });
 
+test('the same text typed again after an offline send survives too (the draft waits for the send)', async () => {
+  const a = await srv.login('a'), b = await srv.login('b');
+  const chatId = await srv.chat(a.token, [a.userId, b.userId]);
+  const eb = await open(srv.config(b));
+  eb.connect();
+  await eb.whenIdle();
+  const serverDraft = async () => (await listChats(b.userId)).find((c) => c.id === chatId)?.draft?.text ?? null;
+  await eb.call({ type: 'setDraft', chatId, text: 'то же' });
+  await eb.whenIdle();
+  eb.disconnect();
+  await eb.call({ type: 'sendMessage', chatId, body: 'то же' });
+  await eb.call({ type: 'setDraft', chatId, text: 'то же' });   // набрали заново ровно то, что ушло
+  eb.connect();
+  const feed = watchInto(eb, { kind: 'messages', chatId, limit: 10 });
+  await feed.until((l) => l.some((m) => m.body === 'то же' && m.status === 'sent'));
+  await eb.whenIdle();
+  await Bun.sleep(50);
+  expect(await serverDraft()).toBe('то же');
+  expect(eb.store.chats.get(chatId)?.draft?.text).toBe('то же');
+});
+
 test('an online send clears the draft everywhere (the engine pushes the empty draft too)', async () => {
   const a = await srv.login('a'), b = await srv.login('b');
   const chatId = await srv.chat(a.token, [a.userId, b.userId]);

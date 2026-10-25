@@ -766,10 +766,15 @@ export class Engine {
     return draftHash(text);
   }
 
-  /** Отправить на сервер черновики этого устройства (сервер разнесёт их по остальным через журнал). */
+  /** Отправить на сервер черновики этого устройства (сервер разнесёт их по остальным через журнал). Чат, где в очереди
+   *  ещё стоит отправка, забравшая черновик, ждёт её ответа (pumpOutbox зовёт снова): сервер сперва сотрёт забранный,
+   *  потом примет новый — даже если новый текст тот же, что ушёл (хеш совпал бы). */
   private pushDrafts(): void {
     if (!this.online || !this.ready) return;
+    const sending = new Set<number>();
+    for (const o of this.store.outbox.values()) if (!o.failed && o.draftHash !== null) sending.add(o.chatId);
     for (const chatId of [...this.store.pendingDrafts]) {
+      if (sending.has(chatId)) continue;
       const draft = this.store.chats.get(chatId)?.draft ?? null;
       const text = draft?.text ?? '';
       this.run(async () => {
@@ -2364,6 +2369,7 @@ export class Engine {
           }
           await this.store.flush();
           this.changed();
+          this.pushDrafts();   // черновики чатов, ждавшие эту отправку
         }
       } finally {
         this.pumping = false;
