@@ -981,42 +981,46 @@ function MediaSpoiler(props) {
 var LazyRoot = createContext(/** @type {Element | null} */ (null));
 /* Наблюдатель на корень живёт, пока за ним есть элементы: счётчик; последний ушёл (загрузился или размонтирован) —
    disconnect и запись корня удаляется (закрытая панель не держит наблюдатель и своё отсоединённое дерево). */
-var lazyIOs = new Map(), lazyCbs = typeof WeakMap === 'function' ? new WeakMap() : null;
+var lazyIOs = new Map();
 /* Пока идёт тяжёлая анимация (переход стека, доезд ленты), загрузку не начинаем: пересечения копятся
    (последнее состояние цели выигрывает, как заморозка наблюдателей в Telegram) и разбираются по её концу.
    Наблюдатель не отключаем — переподписка дороже, чем карта ожидающих. */
-function lazyObserve(el, cb, root) {
-  root = root || null;
-  var ent = lazyIOs.get(root);
+/* margin — запас зоны ('500px 0px' по умолчанию: загрузка заранее; '0px' — «видно сейчас», для приоритета).
+   На корень — по наблюдателю на каждый запас; у одного элемента может быть по наблюдению в каждом. */
+function lazyObserve(el, cb, root, margin) {
+  root = root || null; margin = margin || '500px 0px';
+  var byMargin = lazyIOs.get(root);
+  if (!byMargin) { byMargin = new Map(); lazyIOs.set(root, byMargin); }
+  var ent = byMargin.get(margin);
   if (!ent) {
-    ent = { io: null, n: 0, pending: new Map(), waiting: false };
+    ent = { io: null, n: 0, pending: new Map(), waiting: false, cbs: new Map() };
     ent.io = new IntersectionObserver(function (es) {
       if (isHeavyAnimating()) {
         es.forEach(function (e) { ent.pending.set(e.target, e.isIntersecting); });
         if (!ent.waiting) { ent.waiting = true; onHeavyAnimationEnd(function () { flushLazy(ent); }); }
         return;
       }
-      es.forEach(function (e) { if (e.isIntersecting) fireLazy(e.target); });
-    }, { root: root, rootMargin: '500px 0px' });
-    lazyIOs.set(root, ent);
+      es.forEach(function (e) { if (e.isIntersecting) fireLazy(ent, e.target); });
+    }, { root: root, rootMargin: margin });
+    byMargin.set(margin, ent);
   }
   var done = false;
   function release() {
     if (done) return;
     done = true;
-    lazyCbs.delete(el); ent.pending.delete(el); ent.io.unobserve(el);
-    if (--ent.n === 0) { ent.io.disconnect(); if (lazyIOs.get(root) === ent) lazyIOs.delete(root); }
+    ent.cbs.delete(el); ent.pending.delete(el); ent.io.unobserve(el);
+    if (--ent.n === 0) { ent.io.disconnect(); if (byMargin.get(margin) === ent) byMargin.delete(margin); if (!byMargin.size && lazyIOs.get(root) === byMargin) lazyIOs.delete(root); }
   }
-  lazyCbs.set(el, { f: cb, release: release });
+  ent.cbs.set(el, { f: cb, release: release });
   ent.n++; ent.io.observe(el);
   return release;
 }
-function fireLazy(el) { var x = lazyCbs.get(el); if (x) { x.release(); x.f(); } }
+function fireLazy(ent, el) { var x = ent.cbs.get(el); if (x) { x.release(); x.f(); } }
 function flushLazy(ent) {
   ent.waiting = false;
   var list = Array.from(ent.pending.entries());
   ent.pending.clear();
-  list.forEach(function (p) { if (p[1]) fireLazy(p[0]); });
+  list.forEach(function (p) { if (p[1]) fireLazy(ent, p[0]); });
 }
 /** Сколько корней сейчас наблюдается (для тестов: утечки наблюдателей). */
 function lazyRoots() { return lazyIOs.size; }
@@ -1031,6 +1035,10 @@ function LazyImage(props) {
   var alive = useRef(true);
   useEffect(function () { alive.current = true; return function () { alive.current = false; }; }, []);
   useEffect(function () { if (vis[0] || !ref.current) return; return lazyObserve(ref.current, function () { vis[1](true); }, root); }, [root]);
+  // приоритет сети (как очередь «видимое вперёд» в Telegram, но силами браузера): в зоне запаса — low, в экране — high;
+  // атрибут меняется и у уже идущего запроса. Второй наблюдатель — без запаса
+  var seen = useState(false);
+  useEffect(function () { if (seen[0] || !ref.current) return; return lazyObserve(ref.current, function () { seen[1](true); }, root, '0px'); }, [root]);
   useEffect(function () { if (failed[0]) failed[1](false); }, [props.src]);   // новый адрес — новая попытка
   var ringOn = useMinVisible(!!props.ring && vis[0] && !!props.src && !loaded[0] && !failed[0], { delay: 150, min: 600 });
   // кольцо в DOM с первого показа и до конца своего исчезновения (200 мс): иначе оно пропало бы рывком.
@@ -1049,12 +1057,13 @@ function LazyImage(props) {
       loaded[1](true); failed[1](false);
       if (props.onLoad) props.onLoad();
     }
-    if (loaded[0] || !img.decode) return done();
+    // в скрытой вкладке Chrome decode() может не завершиться до её показа — не ждём, показываем по load
+    if (loaded[0] || !img.decode || (typeof document !== 'undefined' && document.hidden)) return done();
     img.decode().then(done, done);   // decode отказал (картинка уже сменилась и т. п.) — показываем как есть
   }
   return h('span', { ref: ref, class: cx('rl-lazy', loaded[0] && 'rl-lazy-loaded') },
     props.thumb ? h('img', { class: 'rl-lazy-thumb', src: props.thumb, alt: '', 'aria-hidden': 'true' }) : null,
-    vis[0] && props.src ? h('img', { class: 'rl-lazy-full', src: props.src, alt: props.alt || '', decoding: 'async', draggable: false, onLoad: onLoad,
+    vis[0] && props.src ? h('img', { class: 'rl-lazy-full', src: props.src, alt: props.alt || '', decoding: 'async', draggable: false, fetchpriority: seen[0] ? 'high' : 'low', onLoad: onLoad,
       onError: function () { if (alive.current) failed[1](true); } }) : null,
     ringShown ? h('span', { class: cx('rl-lazy-ring', ringOn && 'rl-lazy-ring-on'), 'aria-hidden': ringOn ? undefined : 'true' },
       h(ProgressRing, { size: props.ring, preloader: true, label: 'Загрузка фото' })) : null);
