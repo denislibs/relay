@@ -76,3 +76,22 @@ test('released before the animation ends — the callback never runs', () => {
   end();
   expect(n).toBe(0);
 });
+
+test('a second margin on the same root gets its own observer; the root is forgotten after both leave', () => {
+  const root = {}, a = {};
+  const base = lazyRoots();
+  const offNear = lazyObserve(a, () => {}, root);
+  const offSeen = lazyObserve(a, () => {}, root, '0px');
+  const near = made.at(-2), seen = made.at(-1);
+  expect(near.opts.rootMargin).toBe('500px 0px');
+  expect(seen.opts.rootMargin).toBe('0px');
+  expect(lazyRoots()).toBe(base + 1);          // один корень, два наблюдателя
+  let n = 0;
+  lazyObserve({}, () => { n++; }, root, '0px');
+  seen.fire(a);                                 // «видно сейчас» для a — колбэк только у a
+  expect(n).toBe(0);
+  offNear(); offSeen();
+  expect(near.off).toBe(true);
+  expect(seen.off).toBe(false);                 // второй элемент ещё наблюдается
+  expect(lazyRoots()).toBe(base + 1);
+});
