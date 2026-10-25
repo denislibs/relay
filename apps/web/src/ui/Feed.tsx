@@ -417,11 +417,11 @@ function firstVisible(root: HTMLElement): { key: string; sort: number; top: numb
 }
 
 /** Якорь для смены ширины: первое сообщение (или разделитель непрочитанных), начинающееся в видимой части. */
-function viewAnchorOf(root: HTMLElement): { key: string; top: number } | null {
+function viewAnchorOf(root: HTMLElement): { key: string; top: number; sort: number } | null {
   const rootTop = root.getBoundingClientRect().top;
   for (const row of root.querySelectorAll<HTMLElement>('.app-msg:not(.app-msg-leaving), .app-unread-divider')) {
     const r = row.getBoundingClientRect();
-    if (r.top >= rootTop + TOP_ZONE - 1) return { key: row.dataset.key ?? 'unread', top: r.top - rootTop };
+    if (r.top >= rootTop + TOP_ZONE - 1) return { key: row.dataset.key ?? 'unread', top: r.top - rootTop, sort: row.dataset.sort != null ? Number(row.dataset.sort) : -Infinity };
   }
   return null;
 }
@@ -526,7 +526,10 @@ export function Feed({ frameKey, active, chatId, threadId, channel = false, meId
     if (prevList && placed.current && !anchor.current && !toBottom.current && !reducedMotion() && !document.hidden) {
       // у живого края удалённое последнее — тоже удаление (а не подрезка окна); у начала истории — первое
       const edges = { atEnd: !!meta?.live && !meta.hasNewer, atStart: !!meta && !meta.hasOlder };
-      for (const x of interiorRemovals(prevList as unknown as (Item & Msg)[], messages as unknown as (Item & Msg)[], edges)) if (!leaving.current.has(x.key)) leaving.current.set(x.key, x);
+      // выше видимой области (до якоря ширины) — не анимируем: там нечего показывать, а якорь удержит главный эффект
+      // синхронно, как раньше; ниже — буфер (вне экрана строка просто уйдёт)
+      const aboveView = viewAnchor.current?.sort ?? -Infinity;
+      for (const x of interiorRemovals(prevList as unknown as (Item & Msg)[], messages as unknown as (Item & Msg)[], edges)) if (x.sort > aboveView && !leaving.current.has(x.key)) leaving.current.set(x.key, x);
     }
     for (const m of messages) leaving.current.delete(m.key as string);   // вернулось в окно (повтор отправки) — не уходит
   }
@@ -537,7 +540,7 @@ export function Feed({ frameKey, active, chatId, threadId, channel = false, meId
   // направление последней прокрутки пользователя: окно двигаем только туда, куда листают. Иначе на коротких
   // сообщениях окно качается — сдвиг к старым оставляет нижний датчик в зоне, он тянет к новым, и так по кругу
   const scrollDir = useRef<-1 | 0 | 1>(0);
-  const viewAnchor = useRef<{ key: string; top: number } | null>(null);   // что было вверху видимой части (для смены ширины)
+  const viewAnchor = useRef<{ key: string; top: number; sort: number } | null>(null);   // что было вверху видимой части (для смены ширины)
   const lastTop = useRef(0);
   // программная плавная прокрутка (scrollDrive.ts): одна на ленту, пока едет — события scroll наши, не пользователя
   const driving = useRef<Drive | null>(null);
@@ -698,16 +701,10 @@ export function Feed({ frameKey, active, chatId, threadId, channel = false, meId
       }
       const going = near.filter((x) => fresh.has(x.key) && x.rect.bottom > rr.top && x.rect.top < rr.bottom);
       if (!going.length) {
-        // всё вне экрана: убрать сразу и удержать видимое (у низа — низ), как ветка удаления главного эффекта;
-        // сам сброс буфера — следующим рендером
-        // точка отсчёта — якорь с последней прокрутки (viewAnchor), а не замер сейчас: сосед удалённого мог уже
-        // подрасти хвостом группы в этом же рендере, и это тоже надо вернуть на место
-        const va = viewAnchor.current, row = va && !stick.current ? anchorEl(root, va.key) : null;
+        // всё ниже экрана: убрать сразу, у низа — остаться у низа; сам сброс буфера — следующим рендером
         for (const k of fresh) { const r = root.querySelector<HTMLElement>(`.app-msg[data-key="${CSS.escape(k)}"]`); if (r) r.style.display = 'none'; }
         const max = root.scrollHeight - ch;
-        let next = stick.current ? max : row ? st + (row.getBoundingClientRect().top - rr.top) - va!.top : null;
-        if (next != null) next = Math.max(0, Math.min(max, next));
-        if (next != null && Math.abs(next - root.scrollTop) > 0.5) { root.scrollTop = next; leaveScroll.current = root.scrollTop; }
+        if (stick.current && Math.abs(max - root.scrollTop) > 0.5) { root.scrollTop = max; leaveScroll.current = root.scrollTop; }
         schedule(0);
         return;
       }
@@ -1310,15 +1307,15 @@ export function Feed({ frameKey, active, chatId, threadId, channel = false, meId
       return;
     }
     const album = albums.get(m.key);
-    const next = neighbour(i + (album ? album.length : 1) - 1, 1);
+    const next = going ? shown[i + 1] : neighbour(i + (album ? album.length : 1) - 1, 1);
     // группа — как в Telegram: тот же отправитель и день, пауза не больше 10 минут, не на границе «Непрочитанные»
     // посты (и копии постов в группе) — пачкой «канала»: отправитель для пачки — 0
     const sender = post ? 0 : m.senderId;
     const nextSender = next ? (isPosted(next) ? 0 : next.senderId) : null;
     // пост канала — всегда отдельный пузырь с хвостиком (как в Telegram: посты в пачку не склеиваются)
-    const prevM = neighbour(i, -1);
-    const start = going || post || prevSender !== sender || day !== prevDay || breaksGroup(prevM, m, unreadFrom, meId);
-    const end = going || post || !next || nextSender !== sender || dayKey(next.createdAt as string) !== day || breaksGroup(m, next, unreadFrom, meId);
+    const prevM = going ? shown[i - 1] : neighbour(i, -1);   // уходящая держит свои прежние хвосты: соседи для неё — как были
+    const start = post || prevSender !== sender || day !== prevDay || breaksGroup(prevM, m, unreadFrom, meId);
+    const end = post || !next || nextSender !== sender || dayKey(next.createdAt as string) !== day || breaksGroup(m, next, unreadFrom, meId);
     const quoted = m.reply as Quote | null;
     // файлы, отправленные вместе (groupId), — одним пузырём: позиция строки внутри группы
     const same = (x: Item | undefined) => !!x && !!m.groupId && x.groupId === m.groupId && x.senderId === m.senderId && !x.deleted;
