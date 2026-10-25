@@ -1334,6 +1334,9 @@ html[data-anim="0"] :is(.app-enter-reload, .app-enter-login) :is(.rl-shell-side,
 .rl-presence[data-state="closing"] .app-thread-spinner { animation: app-thread-unpop 200ms ease-in-out forwards; }
 @keyframes app-thread-pop { from { opacity: 0; transform: scale(0); } }
 @keyframes app-thread-unpop { to { opacity: 0; transform: scale(0); } }
+/* история чата пришла, лоадер гаснет — лента проявляется (одним слоем, только прозрачность), а не появляется рывком */
+.rl-feed.app-feed-reveal { animation: app-fade 200ms var(--ease-out) both; }
+@media (prefers-reduced-motion: reduce) { .rl-feed.app-feed-reveal { animation: none; } }
 /* пустой личный чат (GreetingCard): плашка по центру ленты поверх обоев, как в Telegram. Слой над лентой, а не строка
    в ней: появление и уход карточки не двигают ленту. Плашка — ::before, чтобы при уходе гасли она и текст, а
    отправленный стикер долетел до своего пузыря видимым (Feed) */
