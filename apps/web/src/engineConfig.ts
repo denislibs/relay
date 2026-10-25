@@ -5,7 +5,7 @@ import type { Me } from './global';
 
 export function engineConfig(me: Me): EngineConfig {
   // порция ленты — два экрана сообщений (строка-бабл ≈ 40 px), не меньше 30
-  const FEED_PAGE = Math.max(30, Math.ceil(innerHeight / 40) * 2);
+  const FEED_PAGE = Math.max(30, Math.ceil((typeof innerHeight === 'number' ? innerHeight : 0) / 40) * 2);
   return {
     userId: me.userId,
     dbName: 'relay-' + me.userId,

@@ -342,6 +342,8 @@ body { margin: 0; font-family: var(--font-sans); color: var(--ink); background: 
 .rl-preloader:not(.rl-preloader-det) > svg { animation: rl-arc-rotate 2s linear infinite; }
 .rl-preloader:not(.rl-preloader-det) .rl-preloader-arc { transition: none; animation: rl-arc-dash 1.5s ease-in-out infinite; }
 .rl-preloader-det > svg { animation-duration: 2s; }
+.rl-preloader.rl-preloader-swing > svg { animation: rl-preloader-rotate 1s linear infinite; }
+.rl-preloader.rl-preloader-swing .rl-preloader-arc { animation: none; stroke-dasharray: 75 100; }
 .rl-preloader-arc { fill: none; stroke: currentColor; stroke-linecap: round; transition: stroke-dasharray 200ms linear; }
 .rl-preloader .rl-ring-cancel { position: absolute; inset: 0; }
 @keyframes rl-preloader-rotate { from { transform: rotate(-90deg); } to { transform: rotate(270deg); } }
@@ -801,6 +803,9 @@ button.rl-quote:active { background: var(--quote-bg-active, var(--pressed)); }
 .rl-fx-center { width: 40px; height: 40px; left: -20px; top: -20px; }
 .rl-fx-around { width: 80px; height: 80px; left: -40px; top: -40px; }
 .rl-react-icon-hidden { visibility: hidden; }
+/* эффект у большого эмодзи: 360 px, transform-origin по центру — отражение не сдвигает */
+.rl-fx-item-big { transform-origin: 180px 180px; }
+.rl-fx-big { position: absolute; left: 0; top: 0; width: 360px; height: 360px; }
 
 /* панель невидима, пока ячейки не отрисовали первые кадры (is-ready), затем появляется вместе с меню */
 .rl-rpick { position: relative; display: inline-flex; align-items: center; height: 40px; min-width: 56px; padding: 0 4px; border-radius: 40px; background: var(--raised); box-shadow: 0 2px 8px rgba(0, 0, 0, .24); opacity: 0; transform-origin: 0 100%; }
@@ -1100,6 +1105,9 @@ button.rl-tab:hover { color: var(--ink); }
   .rl-shell-side { flex-basis: 100%; }
   .rl-sidecard { border-radius: 0; box-shadow: none; }
   .rl-shell-side + .rl-shell-main { display: none; }
+  /* чат на телефоне — как в Telegram: шапка, закреп и поле ввода остаются скруглёнными «островками» и стоят в 8px
+     от краёв экрана (не упираются скруглением в край); лента под ними — от края до края (--space-float = зазор) */
+  .rl-shell-main { --space-float: 8px; padding: var(--space-float); }
 }
 
 @media (prefers-reduced-motion: reduce) {
@@ -1355,7 +1363,6 @@ html[data-blur="0"] .rl-pop .rl-menu, html[data-blur="0"] .rl-pop .rl-rpick { -w
 .rl-aside-group { margin: var(--space-2) var(--space-3) 0; padding: var(--space-2); border-radius: var(--radius-lg); background: var(--raised); box-shadow: var(--tg-shadow-bubble, 0 1px 2px rgba(0,0,0,.1)); }
 .rl-aside-group .rl-inforow { border-radius: var(--radius-md); }
 .rl-aside-tabs { margin: var(--space-3) var(--space-3) 0; }
-.rl-aside-tabs .rl-tabs { box-shadow: 0 1px 4px rgba(0, 0, 0, .06); }
 .rl-aside-pages { position: relative; flex: 1; min-height: 260px; display: flex; margin-top: var(--space-2); }
 .rl-aside-pages .rl-slide { background: transparent; }
 .rl-aside-links { list-style: none; margin: 0; padding: 0 var(--space-3) var(--space-4); overflow-y: auto; }
@@ -1364,7 +1371,18 @@ html[data-blur="0"] .rl-pop .rl-menu, html[data-blur="0"] .rl-pop .rl-rpick { -w
 .rl-aside-links b { font: 500 15px/20px var(--font-sans); color: var(--tick-read); word-break: break-all; }
 .rl-aside-links small { color: var(--ink-muted); font-size: 13px; }
 .rl-glassbar .rl-glassbar-who { border-radius: 22px; transition: background-color var(--dur-instant) var(--ease-standard); }
-@media (max-width: 1100px) { .rl-shell > .rl-presence { position: absolute; top: var(--space-float); right: var(--space-float); bottom: var(--space-float); z-index: 6; } .rl-shell .rl-shell-aside { box-shadow: var(--shadow-pop); border-radius: var(--radius-panel); } }
+/* места под чат полной ширины рядом с панелью нет (FloatShell → rl-shell-float): панель выезжает поверх чата,
+   колонка чата не сужается и не сдвигается; клик мимо панели закрывает её (прозрачная подложка) */
+.rl-shell.rl-shell-float > .rl-presence { position: absolute; top: var(--space-float); right: var(--space-float); bottom: var(--space-float); z-index: 6; }
+.rl-shell.rl-shell-float .rl-shell-aside { box-shadow: var(--shadow-pop); border-radius: var(--radius-panel); }
+.rl-aside-scrim { display: none; }
+.rl-shell.rl-shell-float > .rl-aside-scrim { display: block; position: absolute; inset: 0; z-index: 5; }
+/* ширина телефона: «Информация», как и левая колонка, — весь экран, а не плавающая карточка шире экрана */
+@media (max-width: 720px) {
+  .rl-shell > .rl-presence { inset: 0; }
+  .rl-shell .rl-shell-aside { flex: 1 1 auto; box-shadow: none; }
+  .rl-shell .rl-shell-aside, .rl-shell-aside > .rl-panel { border-radius: 0; }
+}
 
 /* ---------- EmptyState kinds: media / files / links — same line style, a gentle loop after drawing ---------- */
 .rl-empty-sun-fill { fill: var(--brand); opacity: 0; animation: rl-fade-to-35 400ms var(--ease-out) 700ms forwards; }
@@ -1551,12 +1569,10 @@ html[data-blur="0"] .rl-shell .rl-rpick { background: color-mix(in srgb, var(--r
 .rl-sidecard-over > * { pointer-events: auto; }
 .rl-sidecard-main .rl-page-scroll, .rl-sidecard-main > .rl-sidecard-body:not(.rl-sidecard-paged) { padding-top: var(--over-h, 0px); scroll-padding-top: var(--over-h, 0px); }
 
-/* «Информация» прокручивается целиком (как в Telegram): вкладки медиа прилипают сверху и плавают над сеткой */
-.rl-aside-tabs { position: sticky; top: 0; z-index: 3; margin: 0; padding: var(--space-3) var(--space-3) var(--space-3);   /* снизу как сбоку — сетка медиа не липнет к вкладкам */ }
-/* фон вкладок — сплошной цвет панели (как в Telegram): без размытия и без маски-градиента, сетка под ними не просвечивает */
-/* вкладки плавают над сеткой как в Telegram: подложки под ними нет, только сама пилюля с тенью */
-.rl-aside-tabs .rl-tabs { box-shadow: 0 2px 8px rgba(0, 0, 0, .18); }
-.rl-aside-pages { margin-top: 0; flex: 1 0 auto; min-height: calc(100% - 64px); }   /* вкладки всегда можно довести до верха */
+/* «Информация» прокручивается целиком (как в Telegram): вкладки медиа прилипают сверху и плавают над сеткой.
+   Отступы и тень пилюли — как у вкладок глобального поиска (.app-gsearch-tabs): 8 px от шапки, 10 px до сетки */
+.rl-aside-tabs { position: sticky; top: 0; z-index: 3; margin: 0; padding: 8px var(--space-3) 10px; }
+.rl-aside-pages { margin-top: 0; flex: 1 0 auto; min-height: calc(100% - 66px); }   /* вкладки (66 px) всегда можно довести до верха */
 .rl-aside-pages > .rl-slides { flex: 1 0 auto; width: 100%; min-width: 0; max-width: 100%; overflow: clip; }   /* по ширине панели: длинная строка (адрес ссылки) — многоточием, а не прокруткой вбок */
 /* overflow: clip, а не hidden: уезжающая вкладка обрезается так же, но слайды не становятся контейнером прокрутки —
    sticky внутри вкладки (плашка даты над «Медиа») липнет к прокрутке панели */
@@ -2360,12 +2376,13 @@ html[data-blur="0"] .rl-menu { -webkit-backdrop-filter: none; backdrop-filter: n
 .rl-sicon { background-image: linear-gradient(180deg, rgba(255, 255, 255, .14), rgba(0, 0, 0, .06)); }
 
 /* ---------- Ширины колонок по умолчанию — как у Telegram (telegram-tt: #LeftColumn, --right-column-width) ----------
-   левая: 33vw (256…424px), с 926px — 33vw, с 1276px — 25vw; правая: 26.5rem − 1rem отступа (408px), на 1276…1920px — 25vw − 1rem.
+   левая: 33vw (256…424px), с 926px — 33vw, с 1276px — 25vw; правая: 26.5rem − 1rem отступа (408px), с 1276px — 25vw − 1rem, но не уже 408 и не шире 464px.
    Перетаскивание края (--side-w) и сохранённая ширина — поверх. */
 .rl-shell { --side-default: clamp(256px, 33vw, 424px); --aside-default: 408px; }
 @media (min-width: 926px) { .rl-shell { --side-default: 33vw; } }
 @media (min-width: 1276px) { .rl-shell { --side-default: 25vw; } }
-@media (min-width: 1276px) and (max-width: 1920px) { .rl-shell { --aside-default: calc(25vw - 16px); } }
+/* правая панель не уже 408px (в Telegram поверх чата — 26.5rem): 25vw − 16px давали 303…392px на 1276…1630px — узко */
+@media (min-width: 1276px) { .rl-shell { --aside-default: clamp(408px, calc(25vw - 16px), 464px); } }
 
 /* ---------- Кнопки под сообщением (inline-клавиатура, как в Telegram) ----------
    Ряды во всю ширину пузыря (пузырь растягивается до клавиатуры), зазоры 4px; плашка цвета обоев с белым текстом —

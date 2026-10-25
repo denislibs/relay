@@ -63,12 +63,15 @@ test('HostCore: two tabs, one engine, each gets only its own subscriptions', asy
   const f2 = mirrorOf(tab2, { kind: 'messages', chatId: c2, limit: 50 });
   await f1.until(() => f1.patches.length > 0);
   await f2.until(() => f2.patches.length > 0);
-  const before2 = f2.patches.length;
+  // данные второй ленты: служебный ~window не в счёт — после синхронизации открытая пустая c2 дочитывает свою историю
+  // (loadOpenChats), и её окно узнаёт начало истории; это её собственная подписка, а не сообщение из c1
+  const dataPatches = () => f2.patches.filter((p) => p.op === 'snapshot' || p.remove.length || p.upsert.some((i) => !i.key.startsWith('~'))).length;
+  const before2 = dataPatches();
 
   await sendMessage(a.userId, { chatId: c1, clientId: crypto.randomUUID(), body: 'в первый' });
   await f1.until((l) => l.length === 1 && l[0].body === 'в первый');
   await Bun.sleep(50);
-  expect(f2.patches.length).toBe(before2);
+  expect(dataPatches()).toBe(before2);
 
   const res = await tab2.call<{ clientId: string }>({ type: 'sendMessage', chatId: c2, body: 'из второй вкладки' });
   expect(res.clientId).toMatch(/[0-9a-f-]{36}/);

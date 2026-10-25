@@ -9,7 +9,8 @@ import type { Item } from '@relay/sync-engine/src/types';
 import { defaultPrivacy, type ChatFolder, type PrivacyRules, type SessionInfo } from '@relay/protocol';
 
 /** Края окна ленты: есть ли сообщения раньше/позже, окно ли это живого хвоста. */
-export interface FeedMeta { hasOlder: boolean; hasNewer: boolean; live: boolean }
+/** filling — окно у живого края не набрано: история не дошла до начала, сообщений меньше лимита (движок, queries.ts). */
+export interface FeedMeta { hasOlder: boolean; hasNewer: boolean; live: boolean; filling?: boolean }
 
 export type Focus = { id: number; sort: number; nonce: number; replaced: boolean };
 

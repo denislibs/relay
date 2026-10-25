@@ -32,7 +32,7 @@ export function rollDice(emoji: DiceEmoji): number {
 
 export async function sendMessage(
   userId: number,
-  input: { chatId: number; clientId: string; body: string; entities?: Entity[]; replyToId?: number | null; attachment?: { id: string; thumb?: string | null } | null; groupId?: string | null; forward?: ForwardRef | null; noLinkPreview?: boolean; blocks?: unknown; todo?: TodoInput | null; poll?: PollInput | null; contact?: { userId: number } | null; geo?: GeoPoint | null; dice?: { emoji: DiceEmoji } | null; sticker?: { id: number } | null; threadId?: number | null },
+  input: { chatId: number; clientId: string; body: string; entities?: Entity[]; replyToId?: number | null; attachment?: { id: string; thumb?: string | null } | null; groupId?: string | null; forward?: ForwardRef | null; noLinkPreview?: boolean; blocks?: unknown; todo?: TodoInput | null; poll?: PollInput | null; contact?: { userId: number } | null; geo?: GeoPoint | null; dice?: { emoji: DiceEmoji } | null; sticker?: { id: number } | null; threadId?: number | null; draftHash?: string | null },
 ): Promise<{ message: Message; duplicate: boolean }> {
   // пробелы по краям срезаем вместе с оформлением; оформление — только проверенное
   let { text: body, entities } = trimFormatted(input.body, normalizeEntities(input.body, input.entities));
@@ -208,7 +208,9 @@ export async function sendMessage(
     // как в Telegram: новое сообщение возвращает чат из архива (если не заглушён). Группы — клиент условной операцией
     // unarchive (chatFlags.ts): запись каждому участнику на каждое сообщение для них непозволительна
     if (ctx.kind === 'direct') await unarchiveOnMessage(tx, input.chatId, userId);
-    await clearDraftInTx(tx, userId, input.chatId); // отправили — черновик на всех устройствах больше не нужен
+    // отправили — черновик на всех устройствах больше не нужен; только тот, что отправка забрала (draftHash в протоколе):
+    // новый, набранный после отправки без сети, остаётся. null — отправка черновик не трогала; нет поля — старый клиент
+    if (input.draftHash !== null) await clearDraftInTx(tx, userId, input.chatId, input.draftHash);
     // уйдёт после коммита, воркером: ack не ждёт push-сервис. В задаче — ссылка: текст в jobs не храним
     // альбом (несколько файлов одним пузырём): одно уведомление на альбом, как в Telegram — задача по ключу groupId
     // с задержкой на сбор остальных файлов; обработчик сам считает, сколько их (kinds.ts)
