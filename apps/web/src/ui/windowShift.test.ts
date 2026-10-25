@@ -41,17 +41,19 @@ test('row of a message: by key, or the album row that contains it when the windo
   expect(rowFor(rows, 'x', 99)).toBe(rows[2]);
 });
 
-test('deferShift: during a heavy animation the last direction is kept and run once after it; idle — runs now', () => {
+test('deferShift: during a heavy animation both directions are kept and run once after it; idle — runs now', () => {
   const ran: ShiftDir[] = [];
   const later: (() => void)[] = [];
-  const box = { dir: null as ShiftDir | null };
+  const box = { dirs: new Set<ShiftDir>() };
+  // короткая лента при открытии: оба датчика в кадре — оба направления нужны (older грузит историю)
   deferShift(box, 'older', true, (fn) => later.push(fn), (d) => ran.push(d));
   deferShift(box, 'newer', true, (fn) => later.push(fn), (d) => ran.push(d));
+  deferShift(box, 'older', true, (fn) => later.push(fn), (d) => ran.push(d));
   expect(ran).toEqual([]);
   expect(later).toHaveLength(1);           // одна подписка на конец анимации
   later[0]();
-  expect(ran).toEqual(['newer']);          // последнее направление
-  expect(box.dir).toBeNull();
+  expect(ran).toEqual(['older', 'newer']);
+  expect(box.dirs.size).toBe(0);
   deferShift(box, 'older', false, (fn) => later.push(fn), (d) => ran.push(d));
-  expect(ran).toEqual(['newer', 'older']);
+  expect(ran).toEqual(['older', 'newer', 'older']);
 });

@@ -568,7 +568,7 @@ export function Feed({ frameKey, active, chatId, threadId, channel = false, meId
   }, [chatId]);
   useEffect(() => () => driving.current?.cancel(), []);   // размонтирование — драйвер не пишет в мёртвый узел
   // во время тяжёлой анимации сдвиг ждёт её конца (deferShift): перераскладка ленты съедала бы кадры перехода
-  const pendingShift = useRef<{ dir: 'older' | 'newer' | null }>({ dir: null });
+  const pendingShift = useRef<{ dirs: Set<'older' | 'newer'> }>({ dirs: new Set() });
   const shift = (dir: 'older' | 'newer') => deferShift(pendingShift.current, dir, isHeavyAnimating(), onHeavyAnimationEnd, (d) => {
     const root = el.current;
     if (!root || !placed.current || !shiftWanted(d, metaRef.current, scrollDir.current)) return;

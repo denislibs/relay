@@ -42,11 +42,11 @@ export function rowFor<R extends Row>(rows: Iterable<R>, key: string, sort: numb
 }
 
 /** Сдвиг окна во время тяжёлой анимации (переход стека, доезд ленты) откладывается до её конца: перераскладка
- *  ленты съедала бы кадры анимации. Запоминается одно, последнее направление; после анимации сдвиг сам
- *  перепроверит, нужен ли он ещё. */
-export function deferShift(box: { dir: ShiftDir | null }, dir: ShiftDir, heavy: boolean, later: (fn: () => void) => void, run: (dir: ShiftDir) => void): void {
+ *  ленты съедала бы кадры анимации. Запоминаются оба направления (у короткой ленты оба датчика в кадре сразу);
+ *  после анимации каждый сдвиг сам перепроверит, нужен ли он ещё. */
+export function deferShift(box: { dirs: Set<ShiftDir> }, dir: ShiftDir, heavy: boolean, later: (fn: () => void) => void, run: (dir: ShiftDir) => void): void {
   if (!heavy) { run(dir); return; }
-  const had = box.dir;
-  box.dir = dir;
-  if (!had) later(() => { const d = box.dir; box.dir = null; if (d) run(d); });
+  const waiting = box.dirs.size > 0;
+  box.dirs.add(dir);
+  if (!waiting) later(() => { const ds = [...box.dirs]; box.dirs.clear(); for (const d of ds) run(d); });
 }
