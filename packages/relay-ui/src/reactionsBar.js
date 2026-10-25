@@ -42,8 +42,9 @@ function Cell(props) {
         ? h('img', { class: 'rl-rpick-img', src: a.static, alt: '', draggable: false, decoding: 'async', onLoad: onFirst, onError: onFirst })
         : h('span', { class: 'rl-rpick-glyph' }, a.key))
       : [
-        // select лежит под appear с нулевого кадра: подмена без мигания; играет только по наведению
-        h(StickerView, { key: 's', class: 'rl-rpick-anim', src: a.select, w: 512, h: 512, size: 28, group: 'menu', force: true, loop: false,
+        // select лежит под appear с нулевого кадра (подмена без мигания), но скрыт, пока appear растёт из точки;
+        // играет только по наведению
+        h(StickerView, { key: 's', class: cx('rl-rpick-anim', stage === 'appear' && 'rl-rpick-under'), src: a.select, w: 512, h: 512, size: 28, group: 'menu', force: true, loop: false,
           play: stage === 'playing', onEnded: function () { dispatch('selectEnded'); } }),
         stage === 'appear' ? h(StickerView, { key: 'a', class: 'rl-rpick-anim', src: a.appear, w: 512, h: 512, size: 28, group: 'menu', force: true, loop: false, play: true,
           onFirstFrame: onFirst, onEnded: function () { requestAnimationFrame(function () { dispatch('appearEnded'); }); } }) : null,

@@ -721,8 +721,11 @@ export function Chat({ chatId, frameKey, active, threadId }: { chatId: number; f
                 (() => {
                   const allowed = gInfo?.reactions.mode === 'some' ? gInfo.reactions.allowed : null;
                   const mineKey = myReaction ? emojiKey(myReaction) : undefined;
-                  return <ReactionsBar items={quickAssets(allowed)} selected={mineKey} animated={getPrefs().anim.level > 0 && !reducedMotion()}
-                    more={quickReactions(allowed, 9).length > 8}
+                  // как в Telegram: семь и шеврон «ещё»; ровно восемь доступных — все восемь без шеврона; пусто — без панели
+                  const all = quickReactions(allowed, 9).length;
+                  if (!all) return null;
+                  return <ReactionsBar items={quickAssets(allowed, all === 8 ? 8 : 7)} selected={mineKey} animated={getPrefs().anim.level > 0 && !reducedMotion()}
+                    more={all > 8}
                     onPick={(key: string) => { const off = mineKey === key; react(chatId, menuMsg.id as number, off ? null : key); if (!off) pushRecentReaction(key); setMenu(null); }}
                     onMore={(e: MouseEvent) => {
                       const r = (e.currentTarget as HTMLElement).closest('.rl-rpick')!.getBoundingClientRect();

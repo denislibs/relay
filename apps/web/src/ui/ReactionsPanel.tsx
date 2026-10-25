@@ -9,7 +9,6 @@ import { catalogFor, quickReactions } from '../reactions';
 import { moveFocus, panelPosition, panelSections, PANEL_H } from '../reactionsPanelModel';
 import { EMOJI, searchEmoji } from './stickers/emojiData';
 
-const COLS = 8;
 const coarse = () => { try { return matchMedia('(pointer: coarse)').matches; } catch { return false; } };
 
 type Props = {
@@ -40,12 +39,27 @@ export function ReactionsPanel({ bar, allowed, selected, animated, onPick, onClo
   useEffect(() => { const end = beginHeavyAnimation(200); if (!coarse() && !limited) input.current?.focus(); return end; }, []);
   useLayoutEffect(() => { root.current?.style.setProperty('--rpanel-h', limited ? 'auto' : PANEL_H + 'px'); }, [limited]);
 
+  // Esc — на окне: фокус может быть вне панели (скрим, body после закрытия меню), а глобальный обработчик
+  // навигации закрыл бы чат; data-esc-layer говорит ему, что слой открыт
+  useEffect(() => {
+    const onEsc = (e: KeyboardEvent) => { if (e.key === 'Escape') { e.preventDefault(); e.stopPropagation(); onClose(); } };
+    window.addEventListener('keydown', onEsc, true);
+    return () => window.removeEventListener('keydown', onEsc, true);
+  }, [onClose]);
+  // ячейки сменились (поиск, категория) — наведение больше не на них
+  useEffect(() => { setHover(null); }, [sections]);
+
   const onKey = (e: KeyboardEvent) => {
-    if (e.key === 'Escape') { e.preventDefault(); onClose(); return; }
     if (!e.key.startsWith('Arrow')) return;
     const btns = [...(root.current?.querySelectorAll<HTMLButtonElement>('.app-rpanel-cell') ?? [])];
-    const i = btns.indexOf(document.activeElement as HTMLButtonElement);
-    const j = moveFocus(i < 0 ? 0 : i, e.key, COLS, btns.length);
+    if (!btns.length) return;
+    const fromInput = e.target === input.current;
+    if (fromInput && e.key !== 'ArrowDown') return;   // в поле ввода стрелки двигают каретку
+    // колонок в ряду — по раскладке (на узком экране и с классическим скроллбаром их меньше восьми)
+    const top0 = btns[0].offsetTop;
+    const cols = Math.max(1, btns.filter((b) => b.offsetTop === top0).length);
+    const i = fromInput ? -1 : btns.indexOf(document.activeElement as HTMLButtonElement);
+    const j = fromInput ? 0 : moveFocus(i < 0 ? 0 : i, e.key, cols, btns.length);
     if (j >= 0) { e.preventDefault(); btns[j].focus(); }
   };
 
@@ -60,7 +74,7 @@ export function ReactionsPanel({ bar, allowed, selected, animated, onPick, onClo
   return createPortal(
     <div class="rl app-rpanel-root" onKeyDown={onKey}>
       <div class="rl-pop-scrim" onClick={onClose} onContextMenu={(e) => { e.preventDefault(); onClose(); }} />
-      <div ref={root} class={'app-sym app-rpanel' + (limited ? ' is-shrink' : '')} role="dialog" aria-label="Реакции" style={{ left: pos.left + 'px', top: pos.top + 'px', width: pos.width + 'px' }}>
+      <div ref={root} class={'app-sym app-rpanel' + (limited ? ' is-shrink' : '')} role="dialog" aria-modal="true" aria-label="Реакции" data-esc-layer style={{ left: pos.left + 'px', top: pos.top + 'px', width: pos.width + 'px' }}>
         {!limited ? (
           <div class={'app-sym-search' + (q ? ' is-typing' : '')}>
             {cat != null
