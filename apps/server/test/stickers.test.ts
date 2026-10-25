@@ -3,6 +3,7 @@ import { mkdirSync, rmSync, writeFileSync } from 'node:fs';
 import { sql } from '../src/db';
 import { createServer } from '../src/http';
 import { sendMessage } from '../src/domain/messages';
+import { editMessage } from '../src/domain/messageOps';
 import { clearRecent, greetingSticker, myStickers, searchSets, setFaved, setInstalled, stickersByEmoji, getStickerSet } from '../src/domain/stickers';
 import { importStickers, webpSize } from '../src/stickers/import';
 import { makeChat, makeUser, resetDb } from './helpers';
@@ -131,6 +132,8 @@ test('sticker message: snapshot, reply to anything, forward, rights', async () =
   expect(message).toMatchObject({ kind: 'sticker', body: '', replyToId: text.id, sticker: { id: s.id, emoji: '😂', url: s.url, outline: 'zMQB' } });
   const { message: reply } = await sendMessage(b, { chatId: chat, clientId: crypto.randomUUID(), body: '', replyToId: message.id, sticker: { id: s.id } });
   expect(reply.kind).toBe('sticker');
+  // текста у стикера нет — правка запрещена (раньше дописывала подпись и ломала пузырь)
+  await expect(editMessage(a, chat, message.id, 'подпись')).rejects.toMatchObject({ code: 'forbidden' });
   await expect(sendMessage(a, { chatId: chat, clientId: crypto.randomUUID(), body: '', sticker: { id: 999999 } })).rejects.toMatchObject({ code: 'not_found' });
   const other = await makeChat([a, b]);
   const { message: fwd } = await sendMessage(b, { chatId: other, clientId: crypto.randomUUID(), body: '', forward: { chatId: chat, id: message.id } });
