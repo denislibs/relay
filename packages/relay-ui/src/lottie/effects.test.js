@@ -1,16 +1,17 @@
 import { expect, test } from 'bun:test';
-import { createEffects, FX_MAX, FX_TIMEOUT_MS } from './effects.js';
+import { createEffects, EMOJI_FX_MAX, FX_MAX, FX_TIMEOUT_MS } from './effects.js';
 
 // плеер и DOM подменены: тест проверяет оркестрацию (синхронный старт, лимиты, уборку), не отрисовку
 function harness() {
   const views = [];
-  const attach = (o) => { const v = { o, play: false, visible: false, destroyed: false, setPlay(p) { v.play = p; }, setVisible(s) { v.visible = s; }, destroy() { v.destroyed = true; }, restart() {} }; views.push(v); return v; };
+  const attach = (o) => { const v = { o, play: !!o.play, visible: false, destroyed: false, setPlay(p) { v.play = p; }, setVisible(s) { v.visible = s; }, destroy() { v.destroyed = true; }, restart() {} }; views.push(v); return v; };
   const boxes = [];
   const timers = [];
   const hidden = new Map();
   let scrolls = [];
   const vib = [];
   const dom = {
+    makeBig() { const b = { placed: [], removed: false, canvas: {}, place(x, y, m) { b.placed.push([Math.round(x), Math.round(y), m]); }, remove() { b.removed = true; } }; boxes.push(b); return b; },
     make() { const b = { placed: [], removed: false, centerGone: false, center: {}, around: {}, place(x, y) { b.placed.push([x, y]); }, dropCenter() { b.centerGone = true; }, remove() { b.removed = true; } }; boxes.push(b); return b; },
     rect: (el) => el.rect || { x: 100, y: 200, top: 190, bottom: 210, gone: false },
     hide(el, on) { hidden.set(el, on); },
@@ -80,4 +81,26 @@ test('прокрутка переставляет эффект за иконко
   icon.rect = { x: 10, y: 60, top: 50, bottom: 70, gone: false };
   h.scrolls()[0]();
   expect(h.boxes[0].placed.at(-1)).toEqual([10, 60]);
+});
+
+test('эффект у большого эмодзи: якорь по стороне, отражение, лимит и уборка', () => {
+  const h = harness();
+  const el = { rect: { x: 300, y: 400, left: 200, right: 400, width: 200, height: 112, top: 344, bottom: 456, gone: false } };
+  expect(h.fx.playBig(el, { url: '/stk/e/1/1.tgs', side: 'right', mirror: false })).toBe(true);
+  const v = h.views.at(-1);
+  expect(v.o.px).toBe(720);
+  expect(v.play && v.o.force && v.o.shared === false && v.o.loop === false).toBe(true);
+  const [x, y, m] = h.boxes[0].placed[0];
+  expect(x).toBeGreaterThanOrEqual(400 - 360 + 16 - 16); expect(x).toBeLessThanOrEqual(400 - 360 + 16 + 16);   // right − 360 + наружу ±16
+  expect(y).toBeGreaterThanOrEqual(344 + (112 - 360) / 2 - 4); expect(y).toBeLessThanOrEqual(344 + (112 - 360) / 2 + 4);
+  expect(m).toBe(false);
+  expect(h.fx.playBig({ rect: el.rect }, { url: '/stk/e/1/1.tgs', side: 'left', mirror: true })).toBe(true);
+  expect(h.boxes[1].placed[0][2]).toBe(true);
+  expect(h.boxes[1].placed[0][0]).toBeLessThanOrEqual(200 - 16 + 16);
+  h.fx.playBig({ rect: el.rect }, { url: '/stk/e/1/1.tgs', side: 'left' });
+  expect(h.fx.playBig({ rect: el.rect }, { url: '/stk/e/1/1.tgs', side: 'left' })).toBe(false);   // EMOJI_FX_MAX
+  expect(h.fx.activeBig()).toBe(EMOJI_FX_MAX);
+  v.o.onEnded();
+  expect(h.fx.activeBig()).toBe(EMOJI_FX_MAX - 1);
+  expect(h.boxes[0].removed && v.destroyed).toBe(true);
 });

@@ -736,13 +736,15 @@ function MediaArt(props) {
 var RING_IDLE_ARC = 0.25;   // длина дуги без известного прогресса; известный прогресс стартует с неё же — без скачка
 /* preloader — кольцо поверх фото и видео (как в Telegram): тёмный полупрозрачный круг size×size, в нём тонкая белая
    дуга диаметром 48/54 круга (штрих 2 px при любом размере). Без прогресса — дуга в 3/4 окружности, оборот за 1 с;
-   с прогрессом — растёт от короткого штриха, оборот за 2 с. Кольца вокруг кнопок (голосовое, кружок, файл) — прежние. */
+   с прогрессом — растёт от короткого штриха, оборот за 2 с. Кольца вокруг кнопок (голосовое, кружок, файл) — прежние.
+   swing — лоадер ленты, как ProgressivePreloader в Telegram Web K (cancelable: false, preloader-swing): постоянная дуга
+   в 3/4 окружности, ровный оборот за 1 с, без «дыхания» дуги. */
 var PRELOADER_R = 24, PRELOADER_C = 2 * Math.PI * PRELOADER_R, PRELOADER_MIN = 5;
 function Preloader(props) {
   var size = props.size || 54;
   var p = props.progress, det = typeof p === 'number' && !props.spin;
   var arc = det ? Math.max(PRELOADER_MIN, Math.min(1, p) * PRELOADER_C) : PRELOADER_C * 0.75;
-  return h('div', { class: cx('rl-ring rl-preloader', det && 'rl-preloader-det'), style: { width: size, height: size }, role: 'progressbar', 'aria-valuenow': typeof p === 'number' ? Math.round(p * 100) : undefined, 'aria-label': props.label || 'Загрузка' },
+  return h('div', { class: cx('rl-ring rl-preloader', det && 'rl-preloader-det', props.swing && !det && 'rl-preloader-swing'), style: { width: size, height: size }, role: 'progressbar', 'aria-valuenow': typeof p === 'number' ? Math.round(p * 100) : undefined, 'aria-label': props.label || 'Загрузка' },
     h('svg', { width: size, height: size, viewBox: '0 0 54 54', 'aria-hidden': 'true' },
       h('circle', det ? { class: 'rl-preloader-arc', cx: 27, cy: 27, r: PRELOADER_R, style: { strokeDasharray: arc + ' ' + PRELOADER_C, strokeWidth: +(2 * 54 / size).toFixed(2) } }
         : { class: 'rl-preloader-arc', cx: 27, cy: 27, r: PRELOADER_R, pathLength: 100, style: { strokeWidth: +(2 * 54 / size).toFixed(2) } })),

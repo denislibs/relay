@@ -406,7 +406,9 @@ export function Chat({ chatId, frameKey, active, threadId }: { chatId: number; f
   // канал без права публиковать (подписчик или не подписан) — панель «Подписаться» / «Звук» вместо поля ввода
   const channelBar = channel && !chat?.canSend;
   // правка поста редактором без права post (только edit): на время правки — поле ввода вместо панели канала
-  const plate = channelBar && !editing ? 'channel' : threadWaiting ? 'wait' : guestJoinLabel(guest) && !editing ? 'join' : iBlocked ? 'mine' : theyBlocked ? 'theirs' : gRights && !gRights.text && !hasMedia(gRights) ? 'group' : null;
+  // тред не загружен: ждём только гостю (строки группы нет — права и «Вступить» приходят с первой страницей, иначе поле
+  // ввода мигнуло бы и сменилось плашкой); участнику права известны — поле ввода сразу, и без сети (отправка — в очередь)
+  const plate = channelBar && !editing ? 'channel' : threadWaiting && !chat ? 'wait' : guestJoinLabel(guest) && !editing ? 'join' : iBlocked ? 'mine' : theyBlocked ? 'theirs' : gRights && !gRights.text && !hasMedia(gRights) ? 'group' : null;
   // поле ввода смонтировалось только ради правки (панель канала) — startEdit не застал его, текст кладём сейчас
   useEffect(() => { if (editing && channelBar) api.current?.setValue(editing.original, { focus: true }); }, [editing?.id, channelBar]);
   /** Можно ли отправить сейчас (вид сообщения и медленный режим); нельзя — тост и false. */

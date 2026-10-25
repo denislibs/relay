@@ -93,12 +93,12 @@ function chatListItem(store: Store, c: LocalChat, mute: Map<number, number | nul
 // элемент сообщения переиспользуется, пока сообщение не изменилось: дешёвая подпись вместо JSON.stringify
 // цитата — короткая копия исходного сообщения, если оно есть в кэше (видна, даже когда оригинал вне окна)
 type Quote = QuoteMsg | null;
-const msgSig = (m: LocalMessage, q: Quote): string => `${m.id}|${m.status}|${m.sort}|${m.replyToId}|${m.body}|${m.editedAt ?? ''}|${m.deleted ? 1 : 0}|${m.reactions?.map((r) => r.userId + r.emoji).join(',') ?? ''}|${m.attachment ? m.attachment.id + ':' + (m.progress ?? '') + ':' + m.attachment.size + (m.attachment.preview ? ':p' : '') + ':' + (m.attachment.variants?.length ?? 0) : ''}|${q ? q.id + ':' + q.body + ':' + (q.deleted ? 1 : 0) + ':' + (q.attachment?.thumb?.length ?? 0) + ':' + (q.entities?.length ?? 0) : ''}|${m.error ?? ''}|${m.listened ? 1 : 0}|${m.entities?.map((e) => e.type + e.offset + ':' + e.length + (e.url ?? '')).join(',') ?? ''}|${m.todo ? JSON.stringify(m.todo) : ''}|${m.poll ? JSON.stringify(m.poll) : ''}|${m.service?.data ? JSON.stringify(m.service.data) : ''}|${m.buttons ? JSON.stringify(m.buttons) : ''}|${m.views ?? ''}|${m.reactionCounts?.map((r) => r[0] + r[1]).join(',') ?? ''}|${m.myReaction ?? ''}|${m.postAuthor ?? ''}|${m.replies ? m.replies.count + ':' + m.replies.lastId + ':' + m.replies.recent.join(',') + ':' + (m.replies.readMaxId ?? '') : ''}`;
+const msgSig = (m: LocalMessage, q: Quote, fxAt?: number): string => `${fxAt ?? ''}|${m.id}|${m.status}|${m.sort}|${m.replyToId}|${m.body}|${m.editedAt ?? ''}|${m.deleted ? 1 : 0}|${m.reactions?.map((r) => r.userId + r.emoji).join(',') ?? ''}|${m.attachment ? m.attachment.id + ':' + (m.progress ?? '') + ':' + m.attachment.size + (m.attachment.preview ? ':p' : '') + ':' + (m.attachment.variants?.length ?? 0) : ''}|${q ? q.id + ':' + q.body + ':' + (q.deleted ? 1 : 0) + ':' + (q.attachment?.thumb?.length ?? 0) + ':' + (q.entities?.length ?? 0) : ''}|${m.error ?? ''}|${m.listened ? 1 : 0}|${m.entities?.map((e) => e.type + e.offset + ':' + e.length + (e.url ?? '')).join(',') ?? ''}|${m.todo ? JSON.stringify(m.todo) : ''}|${m.poll ? JSON.stringify(m.poll) : ''}|${m.service?.data ? JSON.stringify(m.service.data) : ''}|${m.buttons ? JSON.stringify(m.buttons) : ''}|${m.views ?? ''}|${m.reactionCounts?.map((r) => r[0] + r[1]).join(',') ?? ''}|${m.myReaction ?? ''}|${m.postAuthor ?? ''}|${m.replies ? m.replies.count + ':' + m.replies.lastId + ':' + m.replies.recent.join(',') + ':' + (m.replies.readMaxId ?? '') : ''}`;
 const msgCache = new WeakMap<LocalMessage, { sig: string; item: Item }>();
-export const messageItem = (m: LocalMessage, q: Quote): { item: Item; sig: string } => {
-  const sig = msgSig(m, q);
+export const messageItem = (m: LocalMessage, q: Quote, fx?: { key: string; t: number[]; at: number }): { item: Item; sig: string } => {
+  const sig = msgSig(m, q, fx?.at);
   let c = msgCache.get(m);
-  if (!c || c.sig !== sig) { c = { sig, item: { ...m, reply: q } }; msgCache.set(m, c); }
+  if (!c || c.sig !== sig) { c = { sig, item: { ...m, reply: q, ...(fx ? { fx } : {}) } }; msgCache.set(m, c); }
   return c;
 };
 
@@ -189,7 +189,7 @@ function windowItems(store: Store, chatId: number, all: LocalMessage[], from: nu
       quote = r ? toQuote(r) : store.quoteFor(chatId, m.replyToId) ?? null;
       if (!quote) missingQuotes.add(m.replyToId);
     }
-    const { item, sig: g } = messageItem(m, quote);
+    const { item, sig: g } = messageItem(m, quote, m.id != null ? store.emojiFx.get(chatId + ':' + m.id) : undefined);
     out.items.set(item.key, item); out.sig.set(item.key, g); out.order.push(item.key);
   }
   if (missingQuotes.size) store.wantQuotes(chatId, [...missingQuotes]);
@@ -240,13 +240,16 @@ export function computeQuery(store: Store, q: Query, mute: Map<number, number | 
           quote = r ? toQuote(r) : store.quoteFor(q.chatId, m.replyToId) ?? null;
           if (!quote) missingQuotes.add(m.replyToId);
         }
-        const { item, sig: g } = messageItem(m, quote);
+        const { item, sig: g } = messageItem(m, quote, m.id != null ? store.emojiFx.get(q.chatId + ':' + m.id) : undefined);
         items.set(item.key, item); sig.set(item.key, g); order.push(item.key);
       }
       // служебный элемент: есть ли что-то за краями окна (интерфейс по нему решает, двигать ли окно);
       // старее — и за началом отрезка, пока он не от начала истории; новее — и за концом не живого отрезка
-      const meta: Item = { key: '~window', hasOlder: from > span.lo || !span.start, hasNewer: to < span.hi || !span.live, live: !q.anchor || (span.live && to === span.hi) };
-      items.set(meta.key, meta); sig.set(meta.key, `${meta.hasOlder}|${meta.hasNewer}|${meta.live}`); order.push(meta.key);
+      // filling — окно у живого края ещё не набрано: сообщений меньше лимита, а начало истории не достигнуто (чат не
+      // открывали на устройстве, страница не пришла — например, без сети); лента показывает по нему лоадер
+      const filling = !q.anchor && !span.start && to - from < q.limit;
+      const meta: Item = { key: '~window', hasOlder: from > span.lo || !span.start, hasNewer: to < span.hi || !span.live, live: !q.anchor || (span.live && to === span.hi), filling };
+      items.set(meta.key, meta); sig.set(meta.key, `${meta.hasOlder}|${meta.hasNewer}|${meta.live}|${filling}`); order.push(meta.key);
       if (missingQuotes.size) store.wantQuotes(q.chatId, [...missingQuotes]);
       return { items, sig, order };
     }

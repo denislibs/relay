@@ -5,6 +5,7 @@ import { unsupportedText } from './messageStub';
 import { avatarPhoto, senderAvatar } from '../profilePhoto';
 import { reactionIcon, useReactionCatalog } from '../reactions';
 import { animatedEmojiUrl, useAnimatedEmoji } from '../animatedEmoji';
+import { clickBigEmoji, playEmojiEffect, scheduleIncomingFx } from '../emojiFx';
 import { emojiOnly } from '@relay/protocol';
 import { FX_READ_DELAY_MS, playFxForMessage, queueReactionFx, takeReactionFx } from '../reactionFx';
 import { groupReactions, type Chip } from '../reactionChips';
@@ -83,14 +84,31 @@ function reactionChips(m: Item, meId: number, people: Record<number, { name: str
   return chips;
 }
 
-type RowProps = { post?: boolean; pinned?: boolean; discussion?: number | null; chatId: number; voiceTitle: string; author?: string; onAuthor?: (m: Item) => void; onOpen: (m: Item) => void; hl?: string; m: Item; meId: number; out: boolean; start: boolean; end: boolean; pos?: 'single' | 'first' | 'middle' | 'last'; quoted?: Quote | null; quoteAuthor?: string; quoteTone?: number | 'accent'; appear: boolean; flash: boolean; onReact: (m: Item, emoji: string) => void; album?: Item[]; onUser?: (userId: number) => void; sel?: boolean; selIn?: string; onQuickForward?: (m: Item) => void; grp?: boolean; leaving?: boolean; rxv: number; aev: number; bigEmoji: boolean; people: Record<number, { name: string } | undefined> };
+type RowProps = { post?: boolean; pinned?: boolean; discussion?: number | null; chatId: number; voiceTitle: string; author?: string; onAuthor?: (m: Item) => void; onOpen: (m: Item) => void; hl?: string; m: Item; meId: number; out: boolean; start: boolean; end: boolean; pos?: 'single' | 'first' | 'middle' | 'last'; quoted?: Quote | null; quoteAuthor?: string; quoteTone?: number | 'accent'; appear: boolean; flash: boolean; onReact: (m: Item, emoji: string) => void; album?: Item[]; onUser?: (userId: number) => void; sel?: boolean; selIn?: string; onQuickForward?: (m: Item) => void; grp?: boolean; leaving?: boolean; rxv: number; aev: number; bigEmoji: boolean; direct: boolean; people: Record<number, { name: string } | undefined> };
 
 /** Строка ленты: перерисовывается только если изменилось её сообщение или место в группе. */
-const Row = memo(function Row({ post, pinned, discussion, chatId, voiceTitle, author, onAuthor, onOpen, hl, m, meId, out, start, end, pos, quoted, quoteAuthor, quoteTone, appear, flash, onReact, album, onUser, sel, selIn, onQuickForward, grp, leaving, people, bigEmoji }: RowProps) {
+const Row = memo(function Row({ post, pinned, discussion, chatId, voiceTitle, author, onAuthor, onOpen, hl, m, meId, out, start, end, pos, quoted, quoteAuthor, quoteTone, appear, flash, onReact, album, onUser, sel, selIn, onQuickForward, grp, leaving, people, bigEmoji, direct }: RowProps) {
   // реакции: по эмодзи (ключ без FE0F — «❤️» и «❤» одна плашка) — сколько, есть ли моя, кто поставил;
   // картинка — из каталога (rxv — версия каталога: пришёл — строка перерисуется)
   // эффект своей реакции: заявка ждёт, пока плашка появится в DOM после перерисовки строки
   useLayoutEffect(() => { const k = takeReactionFx(m.key as string); if (k) playFxForMessage(m.key as string, k); });
+  // большой эмодзи (личный чат): чужая пачка кликов — те же эффекты с теми же паузами; свежее сообщение из одного
+  // эмодзи (только что пришло или отправлено) — эффект один раз само, как в tweb
+  const fxAt = (m.fx as { at: number } | undefined)?.at;
+  const autoFx = useRef(false);
+  useLayoutEffect(() => {
+    if (!direct || !bigEmoji) return;
+    const fx = m.fx as { key: string; t: number[]; at: number } | undefined;
+    if (fx) scheduleIncomingFx(m.key as string, fx, out);
+    if (appear && !autoFx.current) {
+      const eo1 = !att && !m.sticker && !m.service ? emojiOnly(m.body as string, m.entities as Entity[] | undefined) : null;
+      if (eo1?.count === 1 && animatedEmojiUrl(eo1.keys[0])) {
+        autoFx.current = true;
+        const el = document.querySelector<HTMLElement>(`.app-chatcol[data-current] .app-msg[data-key="${CSS.escape(m.key as string)}"] .rl-emoji-one`);
+        if (el) playEmojiEffect(el, eo1.keys[0], out);
+      }
+    }
+  }, [fxAt, appear]);
   // альбом: реакции всех его сообщений одним рядом (ставятся на первое)
   const chips = reactionChips(album ? { ...m, reactions: album.flatMap((x) => (x.reactions as { userId: number; emoji: string }[] | undefined) ?? []) } : m, meId, people);
   // пост: в мете — просмотры, подпись автора и булавка; под пузырём — кнопка комментариев (если у канала есть обсуждение)
@@ -337,6 +355,7 @@ const Row = memo(function Row({ post, pinned, discussion, chatId, voiceTitle, au
           edited={!!m.editedAt} time={clock(m.createdAt as string)} status={status}
           metaBefore={metaBefore} footer={footer}
           reactions={chips.length ? chips : undefined} onReact={(emoji: string) => onReact(m, emoji)}
+          onClick={direct && eo.count === 1 && m.id != null ? (e: MouseEvent) => clickBigEmoji(chatId, m.id as number, eo.keys[0], (e.currentTarget as HTMLElement).closest('.rl-emoji-one') as HTMLElement, out, e.isTrusted) : undefined}
         />
         {mark}
       </div>
@@ -1344,11 +1363,21 @@ export function Feed({ frameKey, active, chatId, threadId, channel = false, meId
     onMenu(row.dataset.key!, e.clientX, e.clientY, { link: link && row.contains(link) ? link.href : null, selection });
   };
 
+  // лента чата: история ещё не загружена (чат не открывали на устройстве, без сети — пока связь не вернётся) — только
+  // лоадер посередине и мои неотправленные: обрывок из списка чатов с «Сегодня» и «Непрочитанными» вне контекста
+  // выглядел бы как весь чат. Лента целиком — когда лоадер гаснет (минимум 600 мс, задержка 150 мс — онлайн не мигает),
+  // проявлением, а не поверх лоадера
+  const historyLoading = useMinVisible(threadId == null && !!meta?.filling, { delay: 150, min: 600 });
+  const bare = threadId == null && (!!meta?.filling || historyLoading);
+  const wasBare = useRef(false);
+  if (bare) wasBare.current = true;
   const out: unknown[] = [];
   let prevDay = '', prevSender: unknown = null, unreadShown = false;
   const isPosted = (x: Item) => isPost(x as { post?: boolean }) || (channel && !x.service);   // в канале и своё неподтверждённое — пост
   if (!partial) out.push(<div class="app-sentinel" data-dir="older" key={'o' + (messages[0]?.key ?? '')} aria-hidden="true" />);
-  const shown = partial ? mergeLeaving(messages.slice(messages.length - limit!) as unknown as (Item & Msg)[], leaving.current.values() as Iterable<Item & Msg>) as Item[] : rendered;
+  const shown0 = partial ? mergeLeaving(messages.slice(messages.length - limit!) as unknown as (Item & Msg)[], leaving.current.values() as Iterable<Item & Msg>) as Item[] : rendered;
+  // история не загружена: только своё неотправленное (у него ещё нет id) — отправка без сети видна сразу
+  const shown = bare ? shown0.filter((m) => m.id == null && m.senderId === meId) : shown0;
   // соседи для хвостов, дат и пачек — без уходящих строк: раскладка соседей устоялась в кадре FLIP, не при сбросе буфера
   const isLeaving = (x: Item | undefined) => !!x && leaving.current.has(x.key as string);
   const neighbour = (i: number, dir: 1 | -1) => { let j = i + dir; while (isLeaving(shown[j])) j += dir; return shown[j]; };
@@ -1382,7 +1411,9 @@ export function Feed({ frameKey, active, chatId, threadId, channel = false, meId
   };
   // тред: под шапкой (копией поста) — начало обсуждения; комментариев нет — так и сказать (после загрузки, без мигания)
   const threadStart = () => {
-    const empty = shown.length === 1 && threadHead!.loaded && !meta?.hasOlder;
+    // пока тред не загружен, о комментариях ничего не известно: не «Начало обсуждения», а лоадер посередине (ниже)
+    if (!threadHead?.loaded) { prevSender = null; return; }
+    const empty = shown.length === 1 && !meta?.hasOlder;
     out.push(<div class="rl-action app-thread-start" key="thread-start" role="separator"><span>{empty ? 'Здесь пока нет комментариев' : 'Начало обсуждения'}</span></div>);
     prevSender = null;
   };
@@ -1400,8 +1431,8 @@ export function Feed({ frameKey, active, chatId, threadId, channel = false, meId
     const mine = !post && m.senderId === meId;
     const going = isLeaving(m);   // уходящая: рисуется на месте, но дату, пачку и группу соседей не меняет
     if (!going && day !== prevDay) flushRun();
-    if (!going && day !== prevDay) { const at = m.createdAt as string; out.push(<DateDivider key={'d' + day} onClick={() => setPickDate(new Date(at))}>{dayLabel(at)}</DateDivider>); }
-    if (!going && !unreadShown && unreadFrom != null && !mine && m.id != null && (m.id as number) > unreadFrom) {
+    if (!going && !bare && day !== prevDay) { const at = m.createdAt as string; out.push(<DateDivider key={'d' + day} onClick={() => setPickDate(new Date(at))}>{dayLabel(at)}</DateDivider>); }
+    if (!going && !bare && !unreadShown && unreadFrom != null && !mine && m.id != null && (m.id as number) > unreadFrom) {
       unreadShown = true;
       flushRun();
       out.push(<div class="app-unread-divider" key="unread" role="separator"><span>Непрочитанные сообщения</span></div>);
@@ -1461,6 +1492,7 @@ export function Feed({ frameKey, active, chatId, threadId, channel = false, meId
         rxv={rxv}
         aev={aev}
         bigEmoji={bigEmoji}
+        direct={!group && !channel}
         people={(m.reactions as unknown[] | undefined)?.length && (m.reactions as unknown[]).length < 4 ? people : NO_PEOPLE}
         onOpen={onOpen}
         out={mine}
@@ -1496,13 +1528,15 @@ export function Feed({ frameKey, active, chatId, threadId, channel = false, meId
   if (joinedAfter != null && !joinedShown && shown.length && !meta?.hasNewer) joinedLine();   // новых постов ещё нет — строка внизу
   out.push(<div class="app-sentinel" data-dir="newer" key={'n' + (messages[messages.length - 1]?.key ?? '')} aria-hidden="true" />);
 
-  // тред ещё не загружен и в кэше пусто (открыли по адресу): лоадер с задержкой и минимумом — без мигания
-  const threadLoading = useMinVisible(threadId != null && !threadHead?.loaded && !messages.length, { delay: 150, min: 600 });
+  // тред ещё не загружен (первая страница с сервера; без сети — пока связь не вернётся) и комментариев на экране нет —
+  // лоадер посередине, как в Telegram Web K; шапка-копия поста комментарием не считается. С задержкой и минимумом — без мигания
+  const threadLoading = useMinVisible(threadId != null && !threadHead?.loaded && !messages.some((m) => m.key !== threadHead?.header), { delay: 150, min: 600 });
   return (
     <>
       {greetReady ? <Presence show={greetShown} exitMs={GREET_FLIGHT_MS + GREET_LAND_MS + 60}><GreetingCard sticker={greetSticker} onSend={onGreet} /></Presence> : null}
-      {threadId != null ? <Presence show={threadLoading} exitMs={200}><div class="app-thread-loading" role="status" aria-label="Загрузка комментариев"><span class="app-thread-spinner"><ProgressRing size={32} onMedia /></span></div></Presence> : null}
-      <div class={'rl-feed' + (selVis ? ' app-feed-selecting' : '') + (selOn && selecting ? ' app-feed-sel-on' : '')} ref={el} onScroll={onScroll} onClick={onClick} onClickCapture={selecting ? onSelectClick : undefined} onPointerDownCapture={selecting ? onSelectDown : undefined} onContextMenu={onContextMenu} aria-live="polite"><LazyRoot.Provider value={lazyRoot}>{out}</LazyRoot.Provider></div>
+      {threadId != null ? <Presence show={threadLoading} exitMs={200}><div class="app-thread-loading" role="status" aria-label="Загрузка комментариев"><span class="app-thread-spinner"><ProgressRing preloader swing size={54} label="Загрузка комментариев" /></span></div></Presence>
+        : <Presence show={historyLoading} exitMs={200}><div class="app-thread-loading" role="status" aria-label="Загрузка сообщений"><span class="app-thread-spinner"><ProgressRing preloader swing size={54} label="Загрузка сообщений" /></span></div></Presence>}
+      <div class={'rl-feed' + (!bare && wasBare.current ? ' app-feed-reveal' : '') + (selVis ? ' app-feed-selecting' : '') + (selOn && selecting ? ' app-feed-sel-on' : '')} ref={el} onScroll={onScroll} onClick={onClick} onClickCapture={selecting ? onSelectClick : undefined} onPointerDownCapture={selecting ? onSelectDown : undefined} onContextMenu={onContextMenu} aria-live="polite"><LazyRoot.Provider value={lazyRoot}>{out}</LazyRoot.Provider></div>
       {openIndex !== null && photos[openIndex] ? (
         <MediaViewer
           index={openIndex}
