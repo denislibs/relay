@@ -9,7 +9,7 @@ import { useContext, useEffect, useLayoutEffect, useRef, useState } from 'preact
 import { focusMessage, openInner, type MediaTab } from '../data';
 import { useMedia } from '../mediaTab';
 import { animateScroll, gridCorners, gridDateIndex, tabCounter, tabLabel, tabScrollTarget, tileSrc, videoFrameSrc, type SharedTab } from '../mediaGrid';
-import { getGlobal, useGlobal, findChat } from '../global';
+import { getGlobal, setGlobal, useGlobal, findChat } from '../global';
 import { toggleMusic, trackTitle } from '../music';
 import { clock, dayLabel, fileSize, lastSeenText } from './format';
 import { openUserChat, prepareUserChat } from '../data';
@@ -18,6 +18,7 @@ import { membersWord, useMembers, type Member } from '../members';
 import { subscribersText } from '../channelText';
 import { useCommonGroups, type CommonGroup } from '../commonGroups';
 import { wantPeople } from '../people';
+import { MediaActions, MediaTabsSlot, useGridPress, useMediaCtl, useMediaPick } from './mediaMenu';
 
 // «Общие медиа» в правой панели — как в Telegram: Медиа, Файлы, Ссылки, Музыка, Голосовые.
 // Пустые вкладки не показываем (счётчики из подписки движка); каждая вкладка — страницами по 40, новые сверху.
@@ -32,6 +33,9 @@ export const when = (iso: string) => `${dayLabel(iso)}, ${clock(iso)}`;
 export const dur = (s?: number | null) => { s = Math.max(0, Math.round(s ?? 0)); return Math.floor(s / 60) + ':' + String(s % 60).padStart(2, '0'); };
 export const fileUrl = (a: Att) => `/files/${a.id}`;
 const show = (m: Msg) => focusMessage({ id: m.id, sort: m.id });
+/** «Показать в чате» из меню плитки: сообщение в том же чате — прокрутка к нему (focusMessage); на узком экране
+ *  панель лежит поверх чата — закрывается, иначе переход не виден (как в Telegram). */
+const showInChat = (m: Msg) => { show(m); if (matchMedia('(max-width: 1100px)').matches) setGlobal({ infoOpen: false }); };
 
 /** Цвет плитки по расширению (как в Telegram): таблицы и apk — зелёный, архивы и презентации — оранжевый, pdf — красный. */
 export function extTone(ext: string): string {
@@ -65,6 +69,7 @@ export function SharedMedia({ chatId, group = false, channel = false, peerId = n
   const bar = useRef<HTMLDivElement>(null);
   const cancel = useRef<(() => void) | null>(null);
   useEffect(() => { setTab(null); setPending(null); }, [chatId]);
+  const pick = useMediaPick(chatId, chatId);
   useEffect(() => () => cancel.current?.(), [chatId]);
   const tabs: Tab[] = [...(group ? ['members' as const] : []), ...(counts ? ORDER.filter((t) => counts[t] > 0) : []), ...(common?.length ? ['groups' as const] : [])];
   const active = tab && tabs.includes(tab) ? tab : tabs[0] ?? null;
@@ -73,7 +78,7 @@ export function SharedMedia({ chatId, group = false, channel = false, peerId = n
   const counters = tabs.map((t) => (channel && t === 'members' ? (members ? subscribersText(members.members.length) : null) : tabCounter(t, known, members ? members.members.length : null, common ? common.length : null)));
   const headKey = shown ? tabs.join() + '|' + shown + '|' + counters.join() : '';
   useEffect(() => { onHead?.(shown ? { tabs, shown, counters } : null); }, [headKey]);
-  const pick = (id: Tab) => {
+  const pickTab = (id: Tab) => {
     cancel.current?.();
     cancel.current = null;
     const el = bar.current, body = el?.closest<HTMLElement>('.rl-aside-body');
@@ -88,15 +93,20 @@ export function SharedMedia({ chatId, group = false, channel = false, peerId = n
   return (
     <>
       {/* одна непустая вкладка — переключать нечего: вместо одинокой плашки заголовок раздела */}
+      {/* в режиме выбора медиа вместо вкладок — пилюля «✕ N сообщений ⟶» на том же месте (липнет так же) */}
       {tabs.length > 1 ? (
         <div class="rl-aside-tabs" ref={bar}>
-          <FolderTabs label="Общие медиа" active={shown} onChange={pick} items={tabs.map((t) => ({ id: t, label: channel && t === 'members' ? 'Подписчики' : tabLabel(t) }))} />
+          <MediaTabsSlot pick={pick}>
+            <FolderTabs label="Общие медиа" active={shown} onChange={pickTab} items={tabs.map((t) => ({ id: t, label: channel && t === 'members' ? 'Подписчики' : tabLabel(t) }))} />
+          </MediaTabsSlot>
         </div>
-      ) : <h3 class="app-sm-heading">{tabLabel(tabs[0])}</h3>}
+      ) : <div class={'app-sm-heading-slot' + (pick.picked.size ? ' is-selecting' : '')}><MediaTabsSlot pick={pick}><h3 class="app-sm-heading">{tabLabel(tabs[0])}</h3></MediaTabsSlot></div>}
       <div class="rl-aside-pages" ref={pages}>
         {/* ленивые картинки и кадры видео меряют запас от прокрутки панели, а не от окна (её край их обрезает) */}
         <LazyRoot.Provider value={root}>
-          <SlideStack variant="tabs" order={tabs} active={active} render={(k: string) => k === 'members' ? <MembersList key={chatId + k} data={members} onOpen={onMember ?? ((id) => void openUserChat(id))} /> : k === 'groups' ? <GroupsList key={chatId + k} groups={common ?? []} /> : <TabList key={chatId + k} chatId={chatId} tab={k as MediaTab} />} />
+          <MediaActions chatId={chatId} pick={pick} show={showInChat}>
+            <SlideStack variant="tabs" order={tabs} active={active} render={(k: string) => k === 'members' ? <MembersList key={chatId + k} data={members} onOpen={onMember ?? ((id) => void openUserChat(id))} /> : k === 'groups' ? <GroupsList key={chatId + k} groups={common ?? []} /> : <TabList key={chatId + k} chatId={chatId} tab={k as MediaTab} />} />
+          </MediaActions>
         </LazyRoot.Provider>
       </div>
     </>
@@ -177,14 +187,18 @@ let gridWidth = 0;
 
 /** «Медиа»: квадраты по 3 в ряд через 1 px — виртуальная сетка (WindowGrid): плитки одним слоем, ключ — сообщение,
  *  поэтому новое фото сверху сдвигает плитки, а не пересоздаёт их (картинки не мигают). */
-function MediaGrid({ items, onOpen, host, onNearEnd, nearKey }: { items: Msg[]; onOpen: (m: Msg) => void; host: { current: HTMLDivElement | null }; onNearEnd?: () => void; nearKey: string }) {
+export function MediaGrid({ items, onOpen, host, onNearEnd, nearKey, class: cls }: { items: Msg[]; onOpen: (m: Msg) => void; host: { current: HTMLDivElement | null }; onNearEnd?: () => void; nearKey: string; class?: string }) {
   const n = items.length;
   const date = useGridDate(items, host);
+  // меню плитки и режим выбора (ui/mediaMenu.tsx): ключ плитки — чат и id (в поиске id разных чатов совпадают)
+  const ctl = useMediaCtl();
+  const keyOf = (m: Msg) => (ctl ? ctl.keyOf(m) : String(m.id));
+  const press = useGridPress((k) => items.find((m) => keyOf(m) === k));
   return (
-    <div class="app-media-vgrid" ref={host}>
+    <div class={'app-media-vgrid' + (ctl?.picked.size ? ' is-selecting' : '') + (cls ? ' ' + cls : '')} ref={host} {...press}>
       <MediaDate sink={date.sink} />
       <WindowGrid items={items} cols={3} gap={1} overscan={4} initialWidth={gridWidth} onWidth={(w: number) => { gridWidth = w; }}
-        getKey={(m: Msg) => m.id} onNearEnd={onNearEnd} nearEndKey={nearKey} onView={date.fn}
+        getKey={keyOf} onNearEnd={onNearEnd} nearEndKey={nearKey} onView={date.fn}
         render={(m: Msg, i: number) => <MediaCell m={m} onOpen={onOpen} corners={gridCorners(i, n)} />} />
     </div>
   );
@@ -204,7 +218,7 @@ function useGridDate(items: Msg[], host: { current: HTMLDivElement | null }) {
   const st = useRef<{ sink: DateSink; fn: (top: number, cell: number, step: number, scrolled: boolean) => void; stop: () => void } | null>(null);
   if (!st.current) {
     const sink: DateSink = { current: null };
-    let tabs: HTMLElement | null = null, at: Msg | null = null, on = false, label = '', top0 = -1, last = 0, timer = 0;
+    let tabs: HTMLElement | null = null, pad = 0, at: Msg | null = null, on = false, label = '', top0 = -1, last = 0, timer = 0;
     // гасит таймер, который не переставляется на каждый кадр прокрутки: сработал раньше срока — ждёт остаток
     const check = () => {
       const left = DATE_HIDE_MS - (performance.now() - last);
@@ -217,7 +231,13 @@ function useGridDate(items: Msg[], host: { current: HTMLDivElement | null }) {
       const items = list.current;
       // вкладки липнут к верху панели; одна вкладка — заголовок не липнет, плашка — у самого верха
       // (вкладки появляются и пропадают вместе с непустыми разделами — ищутся заново, пока их нет)
-      if (!tabs?.isConnected) tabs = host.current?.closest('.rl-aside-body')?.querySelector<HTMLElement>('.rl-aside-tabs') ?? null;
+      // в глобальном поиске вкладки плавают над прокруткой так же (.app-gsearch-tabs)
+      // там выдача начинается под ними отступом прокрутки, а sticky отсчитывает top от этого отступа — его вычитаем
+      if (!tabs?.isConnected) {
+        const box = host.current?.closest<HTMLElement>('.rl-aside-body, .app-gsearch-scroll');
+        tabs = box?.closest('.rl-aside-body, .app-gsearch')?.querySelector<HTMLElement>('.rl-aside-tabs, .app-gsearch-tabs') ?? null;
+        pad = box ? parseFloat(getComputedStyle(box).paddingTop) || 0 : 0;
+      }
       const tabsH = tabs ? tabs.offsetHeight : 0;
       const k = gridDateIndex(top + tabsH, cell, step, items.length);
       if (k < 0) return;
@@ -227,7 +247,7 @@ function useGridDate(items: Msg[], host: { current: HTMLDivElement | null }) {
       if (scrolled) { last = performance.now(); if (!timer) timer = window.setTimeout(check, DATE_HIDE_MS); }
       if (on && day === label && tabsH === top0) return;
       on = true; label = day; top0 = tabsH;
-      const v = { label: day, top: tabsH };
+      const v = { label: day, top: Math.max(0, tabsH - pad) };
       requestMutation(() => sink.current?.(v));
     };
     st.current = { sink, fn, stop: () => { clearTimeout(timer); timer = 0; } };
@@ -266,8 +286,11 @@ export function MediaCell({ m, onOpen, corners }: { m: Msg; onOpen: (m: Msg) => 
   const bare = video && !a.thumb;
   const root = useContext(LazyRoot);
   useEffect(() => { if (!bare || near || !box.current) return; return lazyObserve(box.current, () => setNear(true), root); }, [bare, root]);
+  // режим выбора: кружок в углу (пустой — не выбрана), aria-pressed для чтения с экрана
+  const ctl = useMediaCtl(), key = ctl?.keyOf(m), picking = !!ctl?.picked.size, picked = !!key && !!ctl?.picked.has(key);
   return (
-    <button type="button" class={'app-media-cell' + (corners ? ' ' + corners.split(' ').map((c) => 'is-' + c).join(' ') : '')} data-mid={m.id} aria-label={a.name} onClick={() => onOpen(m)}>
+    <button type="button" class={'app-media-cell' + (corners ? ' ' + corners.split(' ').map((c) => 'is-' + c).join(' ') : '') + (picked ? ' is-picked' : '')} data-mid={m.id} data-mkey={key} aria-label={a.name}
+      aria-pressed={picking ? String(picked) : undefined} onClick={() => onOpen(m)}>
       {!bare ? <LazyImage src={video ? '' : tileSrc(a)} thumb={a.thumb ?? undefined} alt={a.name} /> : (
         <span class="app-media-video" ref={box}>
           {near ? <video class={'app-media-frame' + (frame ? ' app-media-frame-in' : '')} src={videoFrameSrc(a)} preload="metadata" muted playsInline tabIndex={-1} aria-hidden="true"
@@ -277,6 +300,7 @@ export function MediaCell({ m, onOpen, corners }: { m: Msg; onOpen: (m: Msg) => 
         </span>
       )}
       {video && len ? <span class="app-media-dur">{dur(len)}</span> : null}
+      {ctl ? <span class="app-media-check" aria-hidden="true"><Icon name="check" size={16} /></span> : null}
     </button>
   );
 }

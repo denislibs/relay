@@ -111,6 +111,37 @@ body { background: var(--bg); color: var(--ink); font-family: var(--font-sans); 
 .app-media-cell.is-bl { border-bottom-left-radius: 14px; }
 .app-media-cell.is-br { border-bottom-right-radius: 14px; }
 
+/* ---------- «Медиа»: вкладки-стекло, меню плитки и выбор (ui/mediaMenu.tsx), как в Telegram Web K ---------- */
+/* место вкладок: в режиме выбора они гаснут, поверх проявляется пилюля «✕ N сообщений ⟶» той же высоты */
+.app-mtabs { position: relative; }
+.app-mtabs-tabs { transition: opacity 200ms var(--ease-out); }
+.app-mtabs.is-selecting > .app-mtabs-tabs { opacity: 0; pointer-events: none; }
+.app-mtabs > .rl-presence { position: absolute; inset: 0; display: flex; animation: app-fade-in 200ms var(--ease-out) both; }
+.app-mtabs > .rl-presence[data-state="closing"] { animation: app-fade-out 200ms var(--ease-out) forwards; pointer-events: none; }
+/* пилюля выбора — как пилюля вкладок: сплошная белая (как в Telegram Web K), сетка видна только вокруг */
+.app-msel { display: flex; align-items: center; gap: 8px; flex: 1; min-height: 48px; padding: 0 6px; border-radius: 24px; background: var(--raised); color: var(--ink); box-shadow: 0 2px 8px rgba(0, 0, 0, .18); }
+.app-msel-count { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font: 500 16px/20px var(--font-sans); }
+/* одна непустая вкладка — заголовок не липнет; в режиме выбора на его месте пилюля, и она липнет, как вкладки */
+.app-sm-heading-slot.is-selecting { position: sticky; top: 0; z-index: 3; padding: var(--space-3); }
+.app-sm-heading-slot.is-selecting .app-sm-heading { margin: 0; }
+/* палец на плитке — долгое нажатие для меню, а не системная выноска картинки */
+.app-media-vgrid .app-media-cell { -webkit-touch-callout: none; -webkit-user-select: none; user-select: none; }
+.app-media-vgrid.is-selecting { -webkit-user-select: none; user-select: none; }
+/* кружок выбора — в правом верхнем углу; пустой — белое кольцо, выбранная — цвет акцента с галочкой */
+.app-media-check { position: absolute; top: 6px; right: 6px; display: grid; place-items: center; width: 24px; height: 24px; border: 2px solid #fff; border-radius: 50%;
+  background: rgba(0, 0, 0, .18); color: #fff; box-shadow: 0 1px 3px rgba(0, 0, 0, .25); opacity: 0; transform: scale(.6); pointer-events: none;
+  transition: opacity 200ms var(--ease-out), transform 200ms var(--ease-out), background-color 150ms ease; }
+.app-media-vgrid.is-selecting .app-media-check { opacity: 1; transform: none; }
+.app-media-check .rl-icon { opacity: 0; transform: scale(.5); transition: opacity 120ms ease, transform 160ms cubic-bezier(.34, 1.56, .64, 1); }
+.app-media-cell.is-picked .app-media-check { background: var(--brand); }
+.app-media-cell.is-picked .app-media-check .rl-icon { opacity: 1; transform: none; }
+/* выбранная плитка чуть утоплена (как в Telegram) — transform, без перераскладки */
+.app-media-vgrid .app-media-cell > :not(.app-media-check):not(.app-media-dur) { transition: transform 200ms var(--ease-out); }
+.app-media-vgrid .app-media-cell.is-picked > :not(.app-media-check):not(.app-media-dur) { transform: scale(.9); }
+.app-media-vgrid .app-media-cell.is-picked { background: color-mix(in srgb, var(--brand) 22%, var(--field)); }
+@media (prefers-reduced-motion: reduce) { .app-mtabs-tabs, .app-mtabs > .rl-presence, .app-media-check, .app-media-check .rl-icon, .app-media-vgrid .app-media-cell > * { transition: none; animation: none; } }
+:root[data-anim="0"] .app-mtabs-tabs, :root[data-anim="0"] .app-mtabs > .rl-presence, :root[data-anim="0"] .app-media-check, :root[data-anim="0"] .app-media-check .rl-icon, :root[data-anim="0"] .app-media-vgrid .app-media-cell > * { transition: none; animation: none; }
+
 /* страница настроек: меню ⋮ и тост «Скопировано» */
 .app-toast { position: absolute; left: 0; right: 0; bottom: 16px; z-index: 41; display: flex; justify-content: center; pointer-events: none; }
 .app-toast .rl-toast { pointer-events: auto; }
@@ -872,10 +903,14 @@ html[data-anim="0"] :is(.app-hero, .app-hero-photo, .app-hero-info, .app-hero-na
 @keyframes app-gsearch-in { from { opacity: 0; transform: scale(1.1); } }
 @keyframes app-gsearch-out { 0% { opacity: 1; transform: none; } 66% { opacity: 0; } 100% { opacity: 0; transform: scale(1.1); } }
 @keyframes app-list-back { from { opacity: 0; transform: scale(.95); } }
-.app-gsearch-tabs { padding: 8px 12px 10px; }
+/* вкладки поиска плавают над выдачей (как в Telegram Web K): выдача начинается под ними (отступ — их высота)
+   и прокручивается под полупрозрачную пилюлю */
+.app-gsearch { position: relative; --gs-tabs-h: 66px; }
+.app-gsearch-tabs { position: absolute; z-index: 3; top: 0; left: 0; right: 0; padding: 8px 12px 10px; pointer-events: none; }
+.app-gsearch-tabs > * { pointer-events: auto; }
 .app-gsearch-pages { position: relative; flex: 1; min-height: 0; min-width: 0; display: flex; overflow: hidden; }
 .app-gsearch-pages > * { flex: 1; min-width: 0; }
-.app-gsearch-scroll { height: 100%; overflow-y: auto; padding: 0 0 16px; scrollbar-width: thin; }
+.app-gsearch-scroll { height: 100%; overflow-y: auto; padding: var(--gs-tabs-h) 0 16px; scroll-padding-top: var(--gs-tabs-h); scrollbar-width: thin; }
 .app-gsearch-sect { margin: 0 8px 8px; padding: 6px 0 4px; border-radius: 16px; background: var(--card); }
 .app-gsearch-sect-head { display: flex; align-items: center; justify-content: space-between; min-height: 32px; padding: 0 8px 0 16px; font: 500 14px/20px var(--font-sans); color: var(--ink-muted); }
 .app-gsearch-clear { display: inline-flex; padding: 6px; border: 0; border-radius: 50%; background: none; color: var(--ink-muted); cursor: pointer; }
@@ -897,7 +932,7 @@ html[data-anim="0"] :is(.app-hero, .app-hero-photo, .app-hero-info, .app-hero-na
 .app-gsearch-month { padding: 12px 16px 6px; font: 500 14px/20px var(--font-sans); color: var(--ink-muted); }
 .app-gsearch-hit .app-sm-text { min-width: 0; text-align: left; }
 .app-gsearch-sub { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.app-gsearch-grid { margin: 0 8px; border-radius: 16px; overflow: hidden; }
+.app-media-vgrid.app-gsearch-grid { margin: 0 8px; }
 .app-gsearch-thumb { background: center / cover no-repeat; }
 .app-gsearch-thumb .app-sm-ext-label { display: none; }
 .app-gsearch-voice { position: relative; display: inline-flex; flex-shrink: 0; padding: 0; border: 0; border-radius: 50%; background: none; cursor: pointer; }
