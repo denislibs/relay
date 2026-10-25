@@ -245,8 +245,11 @@ export function computeQuery(store: Store, q: Query, mute: Map<number, number | 
       }
       // служебный элемент: есть ли что-то за краями окна (интерфейс по нему решает, двигать ли окно);
       // старее — и за началом отрезка, пока он не от начала истории; новее — и за концом не живого отрезка
-      const meta: Item = { key: '~window', hasOlder: from > span.lo || !span.start, hasNewer: to < span.hi || !span.live, live: !q.anchor || (span.live && to === span.hi) };
-      items.set(meta.key, meta); sig.set(meta.key, `${meta.hasOlder}|${meta.hasNewer}|${meta.live}`); order.push(meta.key);
+      // filling — окно у живого края ещё не набрано: сообщений меньше лимита, а начало истории не достигнуто (чат не
+      // открывали на устройстве, страница не пришла — например, без сети); лента показывает по нему лоадер
+      const filling = !q.anchor && !span.start && to - from < q.limit;
+      const meta: Item = { key: '~window', hasOlder: from > span.lo || !span.start, hasNewer: to < span.hi || !span.live, live: !q.anchor || (span.live && to === span.hi), filling };
+      items.set(meta.key, meta); sig.set(meta.key, `${meta.hasOlder}|${meta.hasNewer}|${meta.live}|${filling}`); order.push(meta.key);
       if (missingQuotes.size) store.wantQuotes(q.chatId, [...missingQuotes]);
       return { items, sig, order };
     }

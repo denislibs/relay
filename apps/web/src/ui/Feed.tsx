@@ -1497,10 +1497,14 @@ export function Feed({ frameKey, active, chatId, threadId, channel = false, meId
   // тред ещё не загружен (первая страница с сервера; без сети — пока связь не вернётся) и комментариев на экране нет —
   // лоадер посередине, как в Telegram Web K; шапка-копия поста комментарием не считается. С задержкой и минимумом — без мигания
   const threadLoading = useMinVisible(threadId != null && !threadHead?.loaded && !messages.some((m) => m.key !== threadHead?.header), { delay: 150, min: 600 });
+  // лента чата: история ещё не загружена (чат не открывали на устройстве — есть только сообщение из списка чатов;
+  // без сети — пока связь не вернётся) — тот же лоадер посередине, поверх того, что уже есть
+  const historyLoading = useMinVisible(threadId == null && !!meta?.filling, { delay: 150, min: 600 });
   return (
     <>
       {greetReady ? <Presence show={greetShown} exitMs={GREET_FLIGHT_MS + GREET_LAND_MS + 60}><GreetingCard sticker={greetSticker} onSend={onGreet} /></Presence> : null}
-      {threadId != null ? <Presence show={threadLoading} exitMs={200}><div class="app-thread-loading" role="status" aria-label="Загрузка комментариев"><span class="app-thread-spinner"><ProgressRing preloader swing size={54} label="Загрузка комментариев" /></span></div></Presence> : null}
+      {threadId != null ? <Presence show={threadLoading} exitMs={200}><div class="app-thread-loading" role="status" aria-label="Загрузка комментариев"><span class="app-thread-spinner"><ProgressRing preloader swing size={54} label="Загрузка комментариев" /></span></div></Presence>
+        : <Presence show={historyLoading} exitMs={200}><div class="app-thread-loading" role="status" aria-label="Загрузка сообщений"><span class="app-thread-spinner"><ProgressRing preloader swing size={54} label="Загрузка сообщений" /></span></div></Presence>}
       <div class={'rl-feed' + (selVis ? ' app-feed-selecting' : '') + (selOn && selecting ? ' app-feed-sel-on' : '')} ref={el} onScroll={onScroll} onClick={onClick} onClickCapture={selecting ? onSelectClick : undefined} onPointerDownCapture={selecting ? onSelectDown : undefined} onContextMenu={onContextMenu} aria-live="polite"><LazyRoot.Provider value={lazyRoot}>{out}</LazyRoot.Provider></div>
       {openIndex !== null && photos[openIndex] ? (
         <MediaViewer

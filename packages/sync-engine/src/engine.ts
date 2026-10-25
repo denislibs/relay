@@ -2169,7 +2169,9 @@ export class Engine {
     return p;
   }
 
-  /** После синхронизации: ленты, открытые до снимка или без сети, получают свой чат и историю. */
+  /** После синхронизации: ленты, открытые до снимка или без сети, получают свой чат и историю. Окно открытого
+   *  чата, недобранное без сети (запрос истории упал, повтора не было), добирается здесь же — иначе лента так и
+   *  стояла бы с одним сообщением из снимка списка, пока её не прокрутят. */
   private loadOpenChats(): void {
     for (const w of this.watchers.values()) {
       const q = w.q;
@@ -2177,7 +2179,8 @@ export class Engine {
       if (q.kind === 'thread') { if (!this.store.threadRanges(q.chatId, q.threadId)) this.run(() => this.ensureThreadWindow(q)); continue; }
       if (q.kind !== 'messages') continue;
       const c = this.store.chats.get(q.chatId);
-      if (c && !Store.unnamed(c)) continue;
+      // окно полное или история дочитана — ensureWindow вернётся сразу; недобранное — догрузит страницы
+      if (c && !Store.unnamed(c)) { this.run(() => this.ensureWindow(q)); continue; }
       this.run(() => this.ensureOpenChat(q.chatId).then(() => this.ensureWindow(q)));
     }
   }
