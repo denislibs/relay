@@ -433,6 +433,9 @@ body { margin: 0; font-family: var(--font-sans); color: var(--ink); background: 
   transition: transform 220ms cubic-bezier(.2, 0, .2, 1), border-radius 220ms cubic-bezier(.2, 0, .2, 1), clip-path 220ms cubic-bezier(.2, 0, .2, 1), opacity 220ms ease; }
 .rl-viewer-box img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; display: block; max-width: none; max-height: none; border-radius: 0; }
 .rl-viewer-thumb { filter: blur(12px); transform: scale(1.06); }
+/* оригинал поверх копии из пузыря: проявляется, когда загружен и раскодирован (до того — ни частичной отрисовки, ни пустоты) */
+.rl-viewer-box .rl-viewer-fade { opacity: 0; transition: opacity 200ms ease-in-out; }
+.rl-viewer-box .rl-viewer-fade.rl-viewer-sharp { opacity: 1; }
 .rl-viewer-caption { position: absolute; z-index: 2; left: 50%; bottom: 12px; transform: translateX(-50%); max-width: min(680px, 90vw); padding: 6px 14px; border-radius: 12px; background: rgba(0, 0, 0, .45); color: #fff; font: 400 15px/21px var(--font-sans); text-align: center; }
 /* до старта и при уходе: подложка и панели прозрачны, коробка подлетает/улетает сама */
 .rl-viewer-pre .rl-viewer-backdrop, .rl-viewer-pre .rl-viewer-top, .rl-viewer-pre .rl-viewer-nav, .rl-viewer-pre .rl-viewer-caption,

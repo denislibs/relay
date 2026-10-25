@@ -23,7 +23,7 @@ import { startForward, toggleSelect } from '../forward';
 import { FileMessage } from './FileMessage';
 import { isCached, keepOffline, offlineUrlNow, useKeptMedia, useOfflineUrl, warmCached } from '../downloads';
 import { getPrefs } from '../prefs';
-import { bubbleSrc } from '../mediaGrid';
+import { bubbleSrc, viewerPreview } from '../mediaGrid';
 import { clock, dayKey, dayLabel, fileSize } from './format';
 import { arrivals, type FeedSeen } from './appear';
 import { requestShift, rowFor, shiftWanted } from './windowShift';
@@ -1244,7 +1244,7 @@ export function Feed({ frameKey, active, chatId, threadId, channel = false, meId
           index={openIndex}
           sender={peerName}
           items={photos.map((m) => { const a = m.attachment as Att; return { ...(isPosted(m) ? { sender: peerName, avatar: avatarPhoto(chatPhoto) } : { sender: people[m.senderId as number]?.name ?? '', avatar: senderAvatar(m.senderId as number) }),   // не название группы: пока имени нет — пусто, оно подгружается заранее
- src: localPreview(m.key) ?? (openOffline && a.id === openAtt?.id ? openOffline : fileUrl(a)), qualities: localPreview(m.key) || (openOffline && a.id === openAtt?.id) ? undefined : qualitiesOf(a), kind: a.kind === 'video' ? 'video' : 'image', thumb: a.thumb, w: a.w, h: a.h, name: a.name, download: fileUrl(a, true), caption: m.body, date: clock(m.createdAt as string) }; })}
+ src: localPreview(m.key) ?? (openOffline && a.id === openAtt?.id ? openOffline : fileUrl(a)), qualities: localPreview(m.key) || (openOffline && a.id === openAtt?.id) ? undefined : qualitiesOf(a), preview: localPreview(m.key) ? undefined : viewerPreview(a), kind: a.kind === 'video' ? 'video' : 'image', thumb: a.thumb, w: a.w, h: a.h, name: a.name, download: fileUrl(a, true), caption: m.body, date: clock(m.createdAt as string) }; })}
           origin={originOf}
           actions={(_it: unknown, i: number) => [{ icon: 'forward', label: 'Переслать', onClick: () => { const p = photos[i]; setViewer(null); if (p) startForward(chatId, [p], nameOf); } }]}
           onClose={() => setViewer(null)}

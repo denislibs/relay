@@ -1,5 +1,5 @@
 import { expect, test } from 'bun:test';
-import { bubbleSrc, gridCorners, gridDateIndex, scrollAt, tabCounter, tabLabel, tabScrollTarget, tileSrc, videoFrameSrc } from './mediaGrid';
+import { bubbleSrc, gridCorners, gridDateIndex, scrollAt, tabCounter, tabLabel, tabScrollTarget, tileSrc, videoFrameSrc, viewerPreview } from './mediaGrid';
 
 const photo = { id: 'p1', kind: 'photo', mime: 'image/jpeg' };
 
@@ -108,4 +108,16 @@ test('плашка даты над «Медиа»: первая плитка р�
   expect(at(50, 0)).toBe(-1);
   // ряд — делением: тысячи плиток не обходятся
   expect(gridDateIndex(101 * 5000 + 10, 100, 101, 30000)).toBe(15000);
+});
+
+test('viewer first layer: what the bubble already shows (medium / preview), never the original itself and never a video', () => {
+  const medium = { name: 'medium', w: 800, h: 533, size: 90000 }, preview = { name: 'preview', w: 480, h: 320, size: 30000 };
+  const big = { ...photo, w: 1600, h: 1067 };
+  expect(viewerPreview({ ...big, preview, variants: [medium] })).toBe('/files/p1/medium');
+  expect(viewerPreview({ ...big, preview })).toBe('/files/p1/preview');
+  // пузырь показывает сам оригинал — второго слоя нет, он и так грузится
+  expect(viewerPreview({ ...photo, w: 800, h: 600, preview })).toBeUndefined();
+  expect(viewerPreview(big)).toBeUndefined();
+  expect(viewerPreview({ ...big, id: '', variants: [medium] })).toBeUndefined();
+  expect(viewerPreview({ id: 'v1', kind: 'video', mime: 'video/mp4', w: 1280, h: 720, preview, variants: [medium] })).toBeUndefined();
 });

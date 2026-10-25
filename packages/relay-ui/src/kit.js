@@ -1293,6 +1293,13 @@ function visibleArea(el) {
   if (comp) bottom = Math.min(bottom, comp.getBoundingClientRect().top);
   return { top: top, bottom: bottom };
 }
+/* Слои фото в просмотре (как в tweb): размытая миниатюра → копия из пузыря (it.preview: тот же адрес, что уже
+   показан в ленте — из кэша браузера сразу и резкой) → оригинал. Летит из пузыря резкая копия; оригинал появляется
+   поверх неё crossfade только когда загружен и раскодирован, ничего не сдвигая. Без копии (тот же адрес, видео) — null. */
+function viewerPreview(it) {
+  return it && it.kind !== 'video' && it.preview && it.preview !== it.src ? it.preview : null;
+}
+var viewerShown = new Set();   // оригиналы, уже раскодированные в этой вкладке: при повторном открытии — сразу, без проявления
 function MediaViewer(props) {
   var idx = useState(props.index || 0);
   var items = props.items || [];
@@ -1304,6 +1311,22 @@ function MediaViewer(props) {
   var tick = useState(0);
   var root = useRef(null), box = useRef(null), hidden = useRef(null), closeRef = useRef(null);
   var real = !!it.src;
+  var shown = useState(null), alive = useRef(true);
+  useEffect(function () { alive.current = true; return function () { alive.current = false; }; }, []);
+  var preview = viewerPreview(it);
+  var sharp = !preview || shown[0] === it.src || viewerShown.has(it.src);
+  // оригинал загрузился: ждём раскодирования (decode), чтобы проявление не стартовало с пустого кадра
+  function onSharpLoad(e) {
+    var img = e.currentTarget, src = it.src;
+    function done() {
+      if (!alive.current || img.getAttribute('src') !== src) return;   // закрыли или пролистали
+      if (viewerShown.size > 200) viewerShown.clear();
+      viewerShown.add(src);
+      shown[1](src);
+    }
+    if (sharp || !img.decode) return done();
+    img.decode().then(done, done);
+  }
   var rect = real && it.w && it.h ? viewerRect(it.w, it.h) : null;
   // качество видео (как в Telegram): it.qualities — [{ label: '720p', src }, { label: 'Оригинал', src }], первое — по умолчанию.
   // Выбор помним до закрытия просмотра; при переключении то же место и пауза/игра сохраняются.
@@ -1405,7 +1428,11 @@ function MediaViewer(props) {
           ? h(VideoPlayer, { src: videoSrc, videoRef: videoEl, poster: it.thumb || undefined,
               qualities: qs, quality: qs ? Math.min(quality[0], qs.length - 1) : 0, onQuality: switchQuality,
               onLoadedMetadata: function (e) { var r = resume.current, v = e.currentTarget; resume.current = null; if (!r) return; v.currentTime = r.t; if (r.paused) v.pause(); } })
-          : h('img', { class: 'rl-viewer-img', src: it.src, alt: it.caption || '', decoding: 'async' }),
+          : [
+              // копия из пузыря: уже раскодирована для ленты — sync, чтобы первый же кадр полёта был резким
+              preview ? h('img', { key: 'p' + i, class: 'rl-viewer-preview', src: preview, alt: '', 'aria-hidden': 'true', decoding: 'sync' }) : null,
+              h('img', { key: 'o' + i, class: cx('rl-viewer-img', preview && 'rl-viewer-fade', sharp && 'rl-viewer-sharp'), src: it.src, alt: it.caption || '', decoding: 'async', onLoad: onSharpLoad }),
+            ],
         // видео-аватарка и т.п.: зацикленное видео без звука поверх кадра-обложки
         it.video ? h('video', { key: it.video, class: 'rl-viewer-img rl-viewer-loop', src: it.video, autoPlay: true, loop: true, muted: true, playsInline: true, disablePictureInPicture: true }) : null)
     : h('figure', { key: i, class: 'rl-viewer-media' },
@@ -1739,4 +1766,4 @@ function ScrollToBottom(props) {
 }
 
 
-export { RowBadge, WebPage, MsgLine, ForwardTitle, peerTone, RelayLogo, Verified, ArchivedRow, ReplyQuote, ReactionChips, cx, chain, ripple, reducedMotion, omit, fmtTime, makeWave, ICONS, Icon, Button, IconButton, Avatar, Badge, Chip, ChatRow, ChatRowSkeleton, Bubble, MessageStatus, TypingIndicator, DateDivider, Banner, NavRail, Checkbox, Toast, Card, Steps, MediaArt, ProgressRing, Waveform, VoiceMessage, VoiceRecorder, MediaBubble, MediaPolicy, mediaHeld, FileBubble, MediaThumb, MediaViewer, Switch, PanelHeader, ProfileHeader, ActionTile, InfoRow, SettingsIcon, ReadMore, Presence, useMinVisible, LazyImage, LazyRoot, lazyObserve, lazyRoots, FlipList, SyncIndicator, LinearProgress, EmptyState, ScrollToBottom, SlideFade };
+export { RowBadge, WebPage, MsgLine, ForwardTitle, peerTone, RelayLogo, Verified, ArchivedRow, ReplyQuote, ReactionChips, cx, chain, ripple, reducedMotion, omit, fmtTime, makeWave, ICONS, Icon, Button, IconButton, Avatar, Badge, Chip, ChatRow, ChatRowSkeleton, Bubble, MessageStatus, TypingIndicator, DateDivider, Banner, NavRail, Checkbox, Toast, Card, Steps, MediaArt, ProgressRing, Waveform, VoiceMessage, VoiceRecorder, MediaBubble, MediaPolicy, mediaHeld, FileBubble, MediaThumb, MediaViewer, viewerPreview, Switch, PanelHeader, ProfileHeader, ActionTile, InfoRow, SettingsIcon, ReadMore, Presence, useMinVisible, LazyImage, LazyRoot, lazyObserve, lazyRoots, FlipList, SyncIndicator, LinearProgress, EmptyState, ScrollToBottom, SlideFade };

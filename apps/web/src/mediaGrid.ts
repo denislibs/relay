@@ -2,7 +2,8 @@
 import type { MediaTab } from '@relay/protocol';
 
 type Variant = { name: string; w: number; h: number; size: number };
-export type TileAtt = { id: string; kind: string; mime: string; preview?: Variant | null };
+// у превью имя не обязательно: вложение в ленте (Feed Att) несёт только размеры
+export type TileAtt = { id: string; kind: string; mime: string; preview?: (Omit<Variant, 'name'> & { name?: string }) | null };
 
 /** Плитка фото: маленькая копия сервера (jobs/photo.ts, до 480 px), пока её нет — оригинал. */
 export const tileSrc = (a: TileAtt): string => (a.preview ? `/files/${a.id}/preview` : `/files/${a.id}`);
@@ -18,6 +19,14 @@ export const bubbleSrc = (a: BubbleAtt): string => {
   if (a.variants?.some((v) => v.name === 'medium')) return `/files/${a.id}/medium`;
   if (a.preview && Math.max(a.w ?? 0, a.h ?? 0) > BUBBLE_SIDE) return `/files/${a.id}/preview`;
   return `/files/${a.id}`;
+};
+
+/** Первый слой просмотрщика: то, что уже показано в пузыре (bubbleSrc), — из кэша браузера сразу и резко, пока
+ *  грузится оригинал. Только фото и только если пузырь показывает не сам оригинал. */
+export const viewerPreview = (a: BubbleAtt): string | undefined => {
+  if (a.kind !== 'photo' || !a.id) return undefined;
+  const s = bubbleSrc(a);
+  return s === `/files/${a.id}` ? undefined : s;
 };
 
 /** Кадр видео без миниатюры: короткий немой ролик сервера (jobs/video.ts, 360p), пока его нет — оригинал;
