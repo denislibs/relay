@@ -32,3 +32,12 @@ test('текст, цифры, оформление, пусто — не эмод
   expect(emojiOnly('😀', [{ type: 'bold' }])).toBeNull();
   expect(emojiOnly('😀'.repeat(101))).toBeNull();
 });
+
+test('текстовые символы не эмодзи; флаги-теги — эмодзи; буквы отсекаются сразу', () => {
+  expect(emojiOnly('★★★★★')).toBeNull();
+  expect(emojiOnly('♪♪')).toBeNull();
+  expect(emojiOnly('🏴󠁧󠁢󠁥󠁮󠁧󠁿')?.count).toBe(1);
+  expect(emojiOnly('☺')?.count).toBe(1);
+  expect(emojiOnly('✈')?.count).toBe(1);
+  expect(emojiOnly('a'.repeat(700) + '😀')).toBeNull();
+});

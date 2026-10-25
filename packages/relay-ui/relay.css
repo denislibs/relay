@@ -2418,10 +2418,15 @@ html[data-blur="0"] .rl-menu { -webkit-backdrop-filter: none; backdrop-filter: n
 .rl-sticker-box { position: relative; line-height: 0; }
 .rl-sticker-meta { right: 0; bottom: 0; }
 /* сообщение из одних эмодзи: без пузыря; крупные глифы (2–7 — по таблице, больше — 36 px), время под ними справа */
-.rl-emoji-msg .rl-sticker-box { min-width: 112px; }
 .rl-emoji-box { margin-bottom: 18px; max-width: 420px; }
 .rl-emoji-text { display: block; padding: 4px 0 0; line-height: 1.15; white-space: pre-wrap; word-break: break-word; font-family: var(--font-sans); user-select: text; }
 .rl-emoji-box .rl-sticker-meta { bottom: -18px; }
+/* один эмодзи: бокс 112×112 (как стикер Telegram), глиф по центру; анимация поверх, глиф уходит с первым кадром */
+.rl-emoji-one { position: relative; width: 112px; height: 112px; margin-bottom: 0; }
+.rl-emoji-one .rl-emoji-text { padding: 0; font-size: 96px !important; line-height: 112px; text-align: center; }
+.rl-emoji-one .rl-sticker { position: absolute; left: 0; top: 0; }
+.rl-emoji-one:has(.rl-sticker-ready) .rl-emoji-text { visibility: hidden; }
+.rl-emoji-one .rl-sticker-meta { bottom: 0; }
 
 /* ---------- Панель эмодзи и стикеров над полем ввода ---------- */
 .rl-emoji-toggle-on { color: var(--brand-strong); }

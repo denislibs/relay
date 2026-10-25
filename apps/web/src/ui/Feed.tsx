@@ -312,7 +312,7 @@ const Row = memo(function Row({ post, pinned, discussion, chatId, voiceTitle, au
           from={out ? 'out' : 'in'} groupStart={start} appear={appear} aside={aside} fwd={fwd} reply={replyQ}
           author={author} authorTone={author ? peerTone(m.senderId as number) : undefined}
           text={m.body as string} count={eo.count} src={eo.count === 1 ? animatedEmojiUrl(eo.keys[0]) ?? null : null}
-          time={clock(m.createdAt as string)} status={status}
+          edited={!!m.editedAt} time={clock(m.createdAt as string)} status={status}
           metaBefore={metaBefore} footer={footer}
           reactions={chips.length ? chips : undefined} onReact={(emoji: string) => onReact(m, emoji)}
         />
@@ -519,7 +519,7 @@ export function Feed({ frameKey, active, chatId, threadId, channel = false, meId
   const rxv = useReactionCatalog();              // каталог реакций пришёл — плашки с картинками вместо глифов
   // крупные эмодзи: каталог анимаций грузим, только когда в окне есть сообщение из одного эмодзи
   const bigEmoji = useGlobal((s) => s.prefs.bigEmoji);
-  const needEmoji = bigEmoji && messages.some((x) => !x.deleted && !x.attachment && !x.sticker && !x.service && emojiOnly(x.body as string, x.entities as { type: string }[] | undefined)?.count === 1);
+  const needEmoji = useMemo(() => bigEmoji && messages.some((x) => !x.deleted && !x.attachment && !x.sticker && !x.service && emojiOnly(x.body as string, x.entities as { type: string }[] | undefined)?.count === 1), [messages, bigEmoji]);
   const aev = useAnimatedEmoji(needEmoji);
   // следующее/предыдущее голосовое этого чата — для автоперехода и кнопок плеера
   useEffect(() => {
