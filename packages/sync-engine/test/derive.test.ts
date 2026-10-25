@@ -121,3 +121,17 @@ test('incoming messages still count as unread; reading clears them', async () =>
   s.applyUpdate({ type: 'readOwn', chatId: 10, upToId: 2 });
   expect(s.chats.get(10)!.unread).toBe(1);
 });
+
+test('a remote draft event does not overwrite a local draft that is still waiting to be pushed, whatever its time', async () => {
+  const s = await fresh();
+  s.applyUpdate({ type: 'newMessage', message: msg({ id: 1, chatId: 10, senderId: PEER }) });
+  s.setDraft(10, 'набрано без сети');
+  s.pendingDrafts.add(10);
+  // отправка без сети дошла после переподключения: сервер стёр забранный черновик — время сервера позже набранного
+  s.applyRemoteDraft(10, '', new Date(Date.now() + 60_000).toISOString());
+  expect(s.chats.get(10)!.draft?.text).toBe('набрано без сети');
+  // ушёл на сервер — дальше журнал снова главный
+  s.pendingDrafts.delete(10);
+  s.applyRemoteDraft(10, 'с другого устройства', new Date(Date.now() + 120_000).toISOString());
+  expect(s.chats.get(10)!.draft?.text).toBe('с другого устройства');
+});
