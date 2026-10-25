@@ -1283,6 +1283,8 @@ export class Engine {
       case 'refreshSettings':
         if (this.online && this.ready) this.fetchSettings();
         return null;
+      case 'positions': return this.store.positions();
+      case 'setPosition': await this.store.setPosition(a.key, a.pos); return null;
       case 'setMute':
         await this.ops.enqueue({ key: muteKey(a.chatId), method: 'PUT', path: `/chats/${a.chatId}/notify`, body: { muteUntil: a.muteUntil } });
         return null;

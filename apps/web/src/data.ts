@@ -58,6 +58,10 @@ export function startData(me: Me): void {
   bindChatFlags((chatId, f) => engine.call({ type: 'setChatFlags', chatId, ...f }));
   bindStickers((a) => engine.call(a as never));
   startMuteMigration();   // прежние relay.muted / relay.mutedUntil — на сервер, один раз (до первого снимка: значки не мигают)
+  // позиции прокрутки из IndexedDB — до первого открытия чата (ответ движка приходит раньше списка чатов)
+  void engine.call({ type: 'positions' }).then((r) => { for (const [k, v] of Object.entries((r as Record<string, { key: string; sort: number; offset: number }>) ?? {})) if (!dirtyPositions.has(k)) positions.set(k, v); }).catch(() => { /* без кэша — как раньше, только память */ });
+  addEventListener('pagehide', flushPositions);
+  document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'hidden') flushPositions(); });
   try { localStorage.removeItem('relay.names'); } catch { /* приватный режим */ }   // прежний кэш имён — теперь их держит движок
 
   const chats = new Mirror();
@@ -217,11 +221,24 @@ function watchPeer(chatId: number | null): void {
 
 type Anchor = { sort: number; side: 'end' | 'start' | 'center' };
 const WINDOW = FEED_PAGE * 2;                  // сообщений в DOM: две порции (как окно viewport в Telegram)
-/** Позиция прокрутки чата (и треда — свой ключ chatId:threadId) при уходе: первый видимый бабл и его отступ (нет записи — был внизу). */
+/** Позиция прокрутки чата (и треда — свой ключ chatId:threadId) при уходе: первый видимый бабл и его отступ (нет записи — был внизу).
+ *  В памяти — сразу; в IndexedDB движка — через секунду после последней записи и при уходе со страницы: после
+ *  перезагрузки чат откроется на том же месте, окно ленты запросится с якорем и придёт из кэша без сети. */
 const positions = new Map<string, { key: string; sort: number; offset: number }>();
-
+const dirtyPositions = new Set<string>();
+let positionsTimer: ReturnType<typeof setTimeout> | null = null;
+function flushPositions(): void {
+  if (positionsTimer) { clearTimeout(positionsTimer); positionsTimer = null; }
+  for (const k of dirtyPositions) void engine.call({ type: 'setPosition', key: k, pos: positions.get(k) ?? null }).catch(() => { /* кэш недоступен — позиция останется в памяти */ });
+  dirtyPositions.clear();
+}
 export function savePosition(t: StackTarget, pos: { key: string; sort: number; offset: number } | null): void {
-  if (pos) positions.set(positionKey(t), pos); else positions.delete(positionKey(t));
+  const k = positionKey(t);
+  const had = positions.get(k);
+  if (pos) positions.set(k, pos); else positions.delete(k);
+  if (!pos && !had) return;   // внизу и записи не было — нечего стирать
+  dirtyPositions.add(k);
+  if (!positionsTimer) positionsTimer = setTimeout(flushPositions, 1000);
 }
 export function savedPosition(t: StackTarget) { return positions.get(positionKey(t)) ?? null; }
 

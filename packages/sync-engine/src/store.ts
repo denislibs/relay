@@ -1,6 +1,6 @@
 import type { GroupInfo, MyMembership, ThreadGuest } from '@relay/protocol';
 import type { Entity, Message, ProfilePhoto, Replies, Update } from '@relay/protocol';
-import { getAll, getByChat, termsOf, write, type RowPatch, type WriteBatch } from './idb';
+import { getAll, getByChat, req, termsOf, write, type RowPatch, type WriteBatch } from './idb';
 import { CACHE_STORES, STORES } from './schema';
 import { applyUserUpdated, ProfileCache } from './profile';
 import { applyContactsChanged, ContactsCache } from './contacts';
@@ -204,6 +204,18 @@ export class Store {
   onFlush: ((keys: number, ms: number) => void) | null = null;
 
   private constructor(private db: IDBDatabase, readonly userId: number) {}
+
+  /** Позиции прокрутки чатов (meta «pos:<chatId[:threadId]>»): переживают перезагрузку страницы; нет записи — чат был внизу. */
+  async positions(): Promise<Record<string, unknown>> {
+    const rows = await getAll<{ k: string; v: unknown }>(this.db, 'meta');
+    const out: Record<string, unknown> = {};
+    for (const r of rows) if (r.k.startsWith('pos:')) out[r.k.slice(4)] = r.v;
+    return out;
+  }
+  async setPosition(key: string, pos: unknown | null): Promise<void> {
+    const os = this.db.transaction('meta', 'readwrite').objectStore('meta');
+    if (pos) await req(os.put({ k: 'pos:' + key, v: pos })); else await req(os.delete('pos:' + key));
+  }
 
   static async open(db: IDBDatabase, userId: number): Promise<Store> {
     const s = new Store(db, userId);

@@ -1,5 +1,5 @@
 import { expect, test } from 'bun:test';
-import { deferShift, requestShift, rowFor, shiftWanted, type ShiftDir } from './windowShift';
+import { anchorShift, deferShift, requestShift, rowFor, shiftWanted, type ShiftDir } from './windowShift';
 
 const both = { hasOlder: true, hasNewer: true };
 
@@ -56,4 +56,13 @@ test('deferShift: during a heavy animation both directions are kept and run once
   expect(box.dirs.size).toBe(0);
   deferShift(box, 'older', false, (fn) => later.push(fn), (d) => ran.push(d));
   expect(ran).toEqual(['older', 'newer', 'older']);
+});
+
+test('anchorShift: the top edge is held by default; a row clipped at the top keeps its bottom; a row covering the screen that shrank comes to the top', () => {
+  const view = 900;
+  expect(anchorShift({ top: 100, bottom: 300 }, { top: 160, bottom: 360 }, view)).toBe(60);          // в экране — верх
+  expect(anchorShift({ top: -200, bottom: 100 }, { top: -400, bottom: 160 }, view)).toBe(60);        // торчит за верх — низ (строка подросла сверху)
+  expect(anchorShift({ top: 100, bottom: 1200 }, { top: 150, bottom: 1250 }, view)).toBe(50);        // торчит за низ — верх
+  expect(anchorShift({ top: -300, bottom: 1200 }, { top: -300, bottom: 700 }, view)).toBe(-300);     // за оба края и свернулась — её верх к верху экрана
+  expect(anchorShift({ top: -300, bottom: 1200 }, { top: -250, bottom: 1250 }, view)).toBe(50);      // за оба края, размер тот же — верх
 });

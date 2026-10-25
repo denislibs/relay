@@ -254,6 +254,9 @@ export type Action =
   /** свои фото изменились HTTP-запросом мимо очереди (удалили, загрузили, сменили главное): перечитать список */
   | { type: 'refreshProfilePhotos' }
   | { type: 'setMute'; chatId: number; muteUntil: number | null }
+  /** позиция прокрутки чата (ключ chatId[:threadId]) — в IndexedDB, переживает перезагрузку; null — был внизу, запись долой */
+  | { type: 'positions' }
+  | { type: 'setPosition'; key: string; pos: { key: string; sort: number; offset: number } | null }
   /** Закрепить / в архив / отметить непрочитанным: что не задано — как сейчас. Сразу видно, уходит очередью. */
   | { type: 'setChatFlags'; chatId: number; pinned?: boolean; archived?: boolean; unreadMark?: boolean }
   | { type: 'setNotify'; notifyType: 'direct' | 'group' | 'channel'; muted?: boolean; preview?: boolean }
