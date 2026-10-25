@@ -4,7 +4,7 @@ import { unsupportedText } from './messageStub';
 const msg = (o: Record<string, unknown>) => ({ key: 'k', kind: 'text', body: '', ...o });
 
 test('unknown kind asks to update, even with a caption', () => {
-  expect(unsupportedText(msg({ kind: 'poll', body: 'Куда едем?' }))).toContain('не поддерживается');
+  expect(unsupportedText(msg({ kind: 'dice', body: '🎲' }))).toContain('не поддерживается');
 });
 
 test('known kinds that came without content are unavailable, not blank', () => {

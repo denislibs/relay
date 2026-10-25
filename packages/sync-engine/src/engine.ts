@@ -1147,6 +1147,41 @@ export class Engine {
         this.pumpOutbox();
         return { clientId };
       }
+      case 'sendPoll': {
+        // опрос — как сообщение: в очередь (переживёт офлайн); варианты пронумерует сервер
+        const clientId = crypto.randomUUID();
+        this.lastCreated = Math.max(Date.now(), this.lastCreated + 1);
+        this.store.addPending({ clientId, chatId: a.chatId, body: a.poll.question, entities: [], replyToId: a.replyToId ?? null, createdAt: this.lastCreated, failed: false, poll: a.poll });
+        await this.store.flush();
+        this.changed();
+        this.pumpOutbox();
+        return { clientId };
+      }
+      case 'pollVote': {
+        if (!this.online) throw new Error('offline');
+        // голос — сразу у себя (полоски отзываются мгновенно); итоги и ответ викторины поправит сервер, ошибка — откат
+        const m = this.store.messageById(a.chatId, a.id);
+        const prev = m?.poll;
+        if (prev) {
+          const had = new Set(prev.my ?? []), want = new Set(a.options);
+          const counts = prev.options.map((o, i) => Math.max(0, prev.counts[i] - (had.has(o.id) ? 1 : 0) + (want.has(o.id) ? 1 : 0)));
+          const voters = Math.max(0, prev.voters - (had.size ? 1 : 0) + (want.size ? 1 : 0));
+          const { my: _, ...rest } = prev;
+          this.store.patchMessage(a.chatId, a.id, { poll: { ...rest, counts, voters, ...(want.size ? { my: [...want] } : {}) } });
+          this.changed();
+        }
+        try {
+          await this.request({ op: 'pollVote', reqId: '', chatId: a.chatId, id: a.id, options: a.options });
+        } catch (e) {
+          if (prev) { this.store.patchMessage(a.chatId, a.id, { poll: prev }); this.changed(); }
+          throw e;
+        }
+        return null;
+      }
+      case 'pollClose': {
+        if (!this.online) throw new Error('offline');
+        return this.request({ op: 'pollClose', reqId: '', chatId: a.chatId, id: a.id });
+      }
       case 'todoToggle': {
         if (!this.online) throw new Error('offline');
         // отметка — сразу у себя (галочка отзывается мгновенно); ошибка — откат
@@ -2355,7 +2390,7 @@ export class Engine {
           if (!next || !this.online) break;
           try {
             const att = next.attachment ? { id: next.attachment.id, thumb: next.attachment.thumb ?? null, ...(next.attachment.spoiler ? { spoiler: true } : {}) } : null;
-            const r = await this.request({ op: 'send', reqId: '', clientId: next.clientId, chatId: next.chatId, body: next.body, entities: next.entities ?? [], replyToId: next.replyToId, attachment: next.forward ? null : att, ...(next.groupId ? { groupId: next.groupId } : {}), ...(next.forward ? { forward: next.forward } : {}), ...(next.noLinkPreview ? { noLinkPreview: true } : {}), ...(next.blocks ? { blocks: next.blocks } : {}), ...(next.sticker ? { sticker: { id: next.sticker.id } } : {}), ...(next.todo ? { todo: { title: next.todo.title, items: next.todo.items.map((x) => ({ title: x.title })), othersCanAppend: next.todo.othersCanAppend, othersCanComplete: next.todo.othersCanComplete } } : {}), ...(next.threadId != null ? { threadId: next.threadId } : {}), ...(next.draftHash !== undefined ? { draftHash: next.draftHash } : {}) });
+            const r = await this.request({ op: 'send', reqId: '', clientId: next.clientId, chatId: next.chatId, body: next.body, entities: next.entities ?? [], replyToId: next.replyToId, attachment: next.forward ? null : att, ...(next.groupId ? { groupId: next.groupId } : {}), ...(next.forward ? { forward: next.forward } : {}), ...(next.noLinkPreview ? { noLinkPreview: true } : {}), ...(next.blocks ? { blocks: next.blocks } : {}), ...(next.sticker ? { sticker: { id: next.sticker.id } } : {}), ...(next.todo ? { todo: { title: next.todo.title, items: next.todo.items.map((x) => ({ title: x.title })), othersCanAppend: next.todo.othersCanAppend, othersCanComplete: next.todo.othersCanComplete } } : {}), ...(next.poll ? { poll: next.poll } : {}), ...(next.threadId != null ? { threadId: next.threadId } : {}), ...(next.draftHash !== undefined ? { draftHash: next.draftHash } : {}) });
             this.store.ack(next.clientId, r.id as number, r.createdAt as string);
             // своё опустило начало живого отрезка ниже seed — сообщения между ними догрузить (страница перед seed)
             const c = this.store.chats.get(next.chatId), live = c?.ranges[c.ranges.length - 1];

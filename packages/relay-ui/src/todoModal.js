@@ -52,14 +52,17 @@ export function TodoModal(props) {
     return function () { clearTimeout(t); };
   }, []);
 
+  // от текущего списка, а не из замыкания: рендер — раз в кадр, два ввода в одном кадре иначе затёрли бы друг друга
   function setRow(i, text) {
-    var next = rows[0].slice();
-    next[i] = Object.assign({}, next[i], { title: text.slice(0, TODO_ITEM_MAX) });
-    rows[1](normalize(next, room));
+    rows[1](function (cur) {
+      var next = cur.slice();
+      next[i] = Object.assign({}, next[i], { title: text.slice(0, TODO_ITEM_MAX) });
+      return normalize(next, room);
+    });
   }
   function remove(i) {
-    var next = rows[0].filter(function (_, k) { return k !== i; });
-    rows[1](normalize(next, room));
+    var key = rows[0][i].key;
+    rows[1](function (cur) { return normalize(cur.filter(function (r) { return r.key !== key; }), room); });
   }
   // Enter — в пустую строку внизу. Её может ещё не быть в DOM (рисуем раз в кадр) — тогда фокус переводит
   // эффект сразу после отрисовки, до того как браузер покажет кадр

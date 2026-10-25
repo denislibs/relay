@@ -2482,3 +2482,56 @@ html[data-anim="0"] .rl-symbols-pop { transition: none; }
 .rl-footer-plate-round { align-self: auto; width: 15rem; }
 .rl-round-line-foot { flex-direction: column; align-items: flex-start; gap: 4px; }
 .rl-msgline-out.rl-round-line-foot { align-items: flex-end; }
+
+/* ---------- PollMessage: опрос и викторина в ленте ---------- */
+.rl-pollm { min-width: 260px; width: 340px; max-width: 100%; padding: 8px 12px 6px; }
+.rl-pollm-head { display: flex; align-items: flex-start; gap: 8px; margin-bottom: 6px; }
+.rl-pollm-titles { flex: 1; min-width: 0; display: flex; flex-direction: column; }
+.rl-pollm-q { font: 600 15px/20px var(--font-sans); overflow-wrap: anywhere; }
+.rl-pollm-sub { font: 400 13px/17px var(--font-sans); color: var(--bubble-meta); }
+.rl-pollm-left { font-variant-numeric: tabular-nums; }
+.rl-pollm-tipbtn { flex: none; display: grid; place-items: center; width: 32px; height: 32px; margin: -4px -6px 0 0; border: 0; border-radius: 50%; background: transparent; color: var(--brand-text, var(--brand)); cursor: pointer; transition: background-color 150ms ease; }
+.rl-pollm-tipbtn:hover, .rl-pollm-tipbtn-on { background: color-mix(in srgb, currentColor 12%, transparent); }
+.rl-pollm-tip { margin: 0 0 8px; padding: 6px 10px; border-left: 3px solid var(--brand-text, var(--brand)); border-radius: 4px 8px 8px 4px; background: color-mix(in srgb, var(--brand-text, var(--brand)) 10%, transparent); font: 400 14px/19px var(--font-sans); overflow-wrap: anywhere; animation: rl-fade 180ms var(--ease-out) both; }
+.rl-pollm-opts { display: flex; flex-direction: column; margin: 0 -6px; }
+.rl-pollm-opt { display: flex; align-items: flex-start; gap: 10px; width: 100%; padding: 6px; border: 0; border-radius: 10px; background: transparent; color: inherit; text-align: left; font: 400 15px/20px var(--font-sans); cursor: pointer; transition: background-color 150ms ease; }
+.rl-pollm-opt:hover:not(:disabled), .rl-pollm-opt:focus-visible { background: color-mix(in srgb, currentColor 7%, transparent); outline: none; }
+.rl-pollm-opt:disabled, .rl-pollm-ro { cursor: default; }
+.rl-pollm-mark { flex: none; display: grid; place-items: center; width: 20px; height: 20px; margin-top: 0; box-sizing: border-box; border: 2px solid color-mix(in srgb, var(--bubble-meta) 80%, transparent); border-radius: 50%; color: #fff; transition: background-color 150ms ease, border-color 150ms ease; }
+.rl-pollm-mark-sq { border-radius: 6px; }
+.rl-pollm-mark .rl-icon { opacity: 0; transform: scale(.5); transition: opacity 150ms ease, transform 200ms cubic-bezier(.34, 1.56, .64, 1); }
+.rl-pollm-on .rl-pollm-mark { background: var(--brand); border-color: var(--brand); }
+.rl-msgline-out .rl-pollm-on .rl-pollm-mark { background: color-mix(in srgb, var(--brand-text) 75%, var(--bubble-out)); border-color: color-mix(in srgb, var(--brand-text) 75%, var(--bubble-out)); }
+.rl-pollm-on .rl-pollm-mark .rl-icon { opacity: 1; transform: none; }
+.rl-pollm-text { min-width: 0; overflow-wrap: anywhere; }
+.rl-pollm-res { display: flex; align-items: flex-start; gap: 8px; padding: 4px 6px 6px; font: 400 15px/20px var(--font-sans); }
+.rl-pollm-pct { flex: none; width: 44px; white-space: nowrap; text-align: right; font-weight: 600; font-variant-numeric: tabular-nums; }
+.rl-pollm-body { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 5px; }
+.rl-pollm-line { display: flex; align-items: center; gap: 6px; }
+.rl-pollm-badge { flex: none; display: grid; place-items: center; width: 16px; height: 16px; border-radius: 50%; background: var(--brand); color: #fff; }
+.rl-msgline-out .rl-pollm-badge { background: color-mix(in srgb, var(--brand-text) 75%, var(--bubble-out)); }
+.rl-pollm-right .rl-pollm-badge { background: var(--tile-green, #31b545); }
+.rl-pollm-wrong .rl-pollm-badge { background: var(--danger, #e53935); }
+.rl-pollm-bar { display: block; height: 4px; border-radius: 2px; overflow: hidden; }
+.rl-pollm-bar i { display: block; height: 100%; border-radius: 2px; background: var(--brand); transform-origin: 0 50%; transition: transform 400ms var(--ease-out); }
+.rl-msgline-out .rl-pollm-bar i { background: color-mix(in srgb, var(--brand-text) 75%, var(--bubble-out)); }
+.rl-pollm-right .rl-pollm-bar i { background: var(--tile-green, #31b545); }
+.rl-pollm-wrong .rl-pollm-bar i { background: var(--danger, #e53935); }
+/* итоги появились на глазах (голос): полоски растут от нуля, проценты проявляются */
+.rl-pollm-grow .rl-pollm-bar i { animation: rl-pollm-bar 450ms var(--ease-out) both; }
+.rl-pollm-grow .rl-pollm-pct, .rl-pollm-grow .rl-pollm-badge { animation: rl-fade 250ms var(--ease-out) both; }
+@keyframes rl-pollm-bar { from { transform: scaleX(0); } }
+.rl-pollm-foot { display: flex; justify-content: center; min-height: 24px; margin-top: 4px; }
+.rl-pollm-voters { font: 400 13px/24px var(--font-sans); color: var(--bubble-meta); }
+.rl-pollm-action { height: 30px; padding: 0 14px; border: 0; border-radius: 15px; background: transparent; color: var(--brand-text, var(--brand)); font: 600 14px/30px var(--font-sans); cursor: pointer; transition: background-color 150ms ease, opacity 150ms ease; }
+.rl-pollm-action:hover:not(:disabled) { background: color-mix(in srgb, currentColor 10%, transparent); }
+.rl-pollm-action:disabled { opacity: .45; cursor: default; }
+@media (prefers-reduced-motion: reduce) { .rl-pollm-grow .rl-pollm-bar i, .rl-pollm-grow .rl-pollm-pct, .rl-pollm-grow .rl-pollm-badge { animation: none; } .rl-pollm-bar i { transition: none; } }
+
+/* окно «Новый опрос» */
+.rl-pollmod-pick { flex: none; display: grid; place-items: center; width: 22px; height: 22px; margin: 0 3px; box-sizing: border-box; border: 2px solid color-mix(in srgb, var(--ink-muted) 70%, transparent); border-radius: 50%; background: transparent; color: #fff; cursor: pointer; transition: background-color 150ms ease, border-color 150ms ease; }
+.rl-pollmod-pick .rl-icon { opacity: 0; transform: scale(.5); transition: opacity 150ms ease, transform 200ms cubic-bezier(.34, 1.56, .64, 1); }
+.rl-pollmod-pick-on { background: var(--tile-green, #31b545); border-color: var(--tile-green, #31b545); }
+.rl-pollmod-pick-on .rl-icon { opacity: 1; transform: none; }
+.rl-pollmod-err { color: var(--danger, #e53935); }
+.rl-pollmod-off { opacity: .5; }

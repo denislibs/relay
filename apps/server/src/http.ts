@@ -24,6 +24,7 @@ import { chatMembers, connected, disconnected, listPresence, type Publish } from
 import { searchMessages } from './domain/search';
 import { abortUpload, confirmUpload, createUpload, uploadParts, uploadStatus, downloadTtl, fileFor, signedDownload } from './domain/files';
 import { handleFrame } from './ws';
+import { pollVoters } from './domain/polls';
 import { registerSocket, releaseChats, releaseThreads, syncSubscriptions, unregisterSocket } from './sockets';
 import { pinMessage, unpinMessage } from './domain/pins';
 import { addProfileMusic, listProfileMusic, removeProfileMusic } from './domain/profileMusic';
@@ -428,6 +429,9 @@ export function createServer(opts: { port: number }): Server {
         }
         const mem = /^\/chats\/(\d+)\/members$/.exec(url.pathname);
         if (req.method === 'GET' && mem) return Response.json(await chatMembers(userId, Number(mem[1])));
+        // неанонимный опрос: кто за какой вариант (как «Посмотреть результаты» в Telegram)
+        const voters = /^\/chats\/(\d+)\/messages\/(\d+)\/votes$/.exec(url.pathname);
+        if (req.method === 'GET' && voters) return Response.json({ options: await pollVoters(userId, Number(voters[1]), Number(voters[2])) });
         const hist = /^\/chats\/(\d+)\/messages$/.exec(url.pathname);
         if (req.method === 'GET' && hist) {
           const from = url.searchParams.get('from');   // «Перейти к дате»

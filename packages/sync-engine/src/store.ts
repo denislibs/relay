@@ -1,5 +1,5 @@
 import type { GroupInfo, MyMembership, ThreadGuest } from '@relay/protocol';
-import type { Entity, Message, ProfilePhoto, Replies, Update } from '@relay/protocol';
+import type { Entity, Message, Poll, PollInput, ProfilePhoto, Replies, Update } from '@relay/protocol';
 import { getAll, getByChat, req, termsOf, write, type RowPatch, type WriteBatch } from './idb';
 import { CACHE_STORES, STORES } from './schema';
 import { applyUserUpdated, ProfileCache } from './profile';
@@ -21,9 +21,14 @@ function sameDraft(a: { text: string; entities?: Entity[] } | null | undefined, 
 type Range = [number, number];
 
 /** Цитата удалённого сообщения: «Удалённое сообщение», без содержимого. */
+/** Опрос до ответа сервера: варианты 1..N, голосов нет (ответ викторины автор знает и так). */
+const pendingPoll = (p: PollInput): Poll => ({
+  question: p.question, options: p.options.map((text, i) => ({ id: i + 1, text })), multiple: p.multiple, quiz: p.quiz, anonymous: p.anonymous,
+  closed: false, closesAt: p.closesIn ? new Date(Date.now() + p.closesIn * 1000).toISOString() : null, voters: 0, counts: p.options.map(() => 0),
+});
 const deletedQuote = (id: number, senderId: number): QuoteMsg => ({ id, sort: id, body: '', senderId, kind: 'text', deleted: true, attachment: null, todo: null, article: false });
 /** События, которые гость треда применяет из threadPush (остальное — состав, закрепы, информация группы — не для него). */
-const GUEST_UPDATES = new Set<Update['type']>(['messageEdited', 'messageMarkup', 'messageDeleted', 'reactions', 'reactionCounts', 'linkPreview', 'todoUpdated', 'attachmentUpdated', 'mediaListened']);
+const GUEST_UPDATES = new Set<Update['type']>(['messageEdited', 'messageMarkup', 'messageDeleted', 'reactions', 'reactionCounts', 'linkPreview', 'todoUpdated', 'pollUpdated', 'attachmentUpdated', 'mediaListened']);
 
 /** Сколько последних уведомлений держит запрос notifications. */
 const NOTIFY_KEEP = 20;
@@ -390,6 +395,18 @@ export class Store {
       case 'readThread': return this.applyThreadRead(u.chatId, u.threadId, u.upToId);
       case 'mediaListened': return this.patchMessage(u.chatId, u.id, { listened: true });
       case 'todoUpdated': return this.patchMessage(u.chatId, u.id, { todo: u.todo, ...(u.editedAt ? { editedAt: u.editedAt } : {}) });
+      // опрос: общие итоги — поверх своего (мои голоса и раскрытый ответ викторины остаются)
+      case 'pollUpdated': {
+        const p = this.messageById(u.chatId, u.id)?.poll;
+        if (!p) return;
+        return this.patchMessage(u.chatId, u.id, { poll: { ...p, voters: u.voters, counts: u.counts, closed: u.closed, ...(u.correct != null ? { correct: u.correct } : {}), ...(u.solution ? { solution: u.solution } : {}) } });
+      }
+      case 'pollVoted': {
+        const p = this.messageById(u.chatId, u.id)?.poll;
+        if (!p) return;
+        const { my: _, ...rest } = p;
+        return this.patchMessage(u.chatId, u.id, { poll: { ...rest, ...(u.my.length ? { my: u.my } : {}), ...(u.correct != null ? { correct: u.correct } : {}), ...(u.solution ? { solution: u.solution } : {}) } });
+      }
       case 'linkPreview': return this.patchMessage(u.chatId, u.id, { link: u.link });
       // копии и размер — поверх того, что уже знаем: имя, миниатюра и ключ файла из события могут отсутствовать
       // (сервер старой сборки слал вложение без текста) — своё не теряем
@@ -682,6 +699,7 @@ export class Store {
       kind: m.kind ?? 'text', attachment: m.attachment ?? null, entities: m.entities ?? [], ...(m.listened != null ? { listened: m.listened } : {}),
       ...(m.service ? { service: m.service } : null),
       ...(m.todo ? { todo: m.todo } : null),
+      ...(m.poll ? { poll: m.poll } : null),
       ...(m.groupId ? { groupId: m.groupId } : null),
       ...(m.fwdFrom ? { fwdFrom: m.fwdFrom } : null),
       ...(m.blocks ? { blocks: m.blocks } : null),
@@ -902,7 +920,7 @@ export class Store {
       key: o.clientId, clientId: o.clientId, id: null, chatId: o.chatId, senderId: this.userId,
       body: o.body, entities: o.entities ?? [], replyToId: o.replyToId, createdAt: new Date(o.createdAt).toISOString(),
       status: o.failed ? 'failed' : 'pending', sort: PENDING_BASE + o.createdAt,
-      kind: o.sticker ? 'sticker' : o.todo ? 'todo' : o.attachment ? o.attachment.kind : 'text', ...(o.sticker ? { sticker: o.sticker } : {}), attachment: o.attachment ?? null, ...(o.todo ? { todo: o.todo } : {}), progress: o.attachment && !o.attachment.id ? 0 : undefined,
+      kind: o.sticker ? 'sticker' : o.todo ? 'todo' : o.poll ? 'poll' : o.attachment ? o.attachment.kind : 'text', ...(o.sticker ? { sticker: o.sticker } : {}), attachment: o.attachment ?? null, ...(o.todo ? { todo: o.todo } : {}), ...(o.poll ? { poll: pendingPoll(o.poll) } : {}), progress: o.attachment && !o.attachment.id ? 0 : undefined,
       ...(o.failed && o.error ? { error: o.error } : {}),
       ...(o.groupId ? { groupId: o.groupId } : {}),
       ...(o.fwdFrom ? { fwdFrom: o.fwdFrom } : {}),

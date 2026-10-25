@@ -79,7 +79,7 @@ export function previewThumb(m: LastMessage): { src: string; video: boolean; rou
 export const thumbUnder = (src: string) => ({ background: `center / cover no-repeat url("${src.replace(/"/g, '')}")` });
 
 /** Текст после имени: подпись к медиа, а без подписи — тип. С миниатюрой эмодзи типа не нужен. */
-const KNOWN_PREVIEW = new Set(['text', 'photo', 'video', 'file', 'voice', 'round', 'audio', 'todo', 'sticker']);
+const KNOWN_PREVIEW = new Set(['text', 'photo', 'video', 'file', 'voice', 'round', 'audio', 'todo', 'sticker', 'poll']);
 
 export function previewBody(m: LastMessage, withThumb: boolean): ComponentChildren {
   if (m.deleted) return 'Сообщение удалено';
@@ -96,6 +96,7 @@ export function previewBody(m: LastMessage, withThumb: boolean): ComponentChildr
   if (m.kind === 'video') return withThumb ? caption ?? 'Видео' : ['📹 ', caption ?? 'Видео'];
   if (m.kind === 'voice') return caption ?? '🎤 Голосовое сообщение';
   if (m.kind === 'todo') return ['☑️ ', m.body];
+  if (m.kind === 'poll') return ['📊 ', m.body || 'Опрос'];
   // эмодзи стикера — всегда, и рядом с миниатюрой тоже (как «😀 Sticker» в Telegram)
   if (m.kind === 'sticker') return (m.stickerEmoji || m.sticker?.emoji ? (m.stickerEmoji || m.sticker?.emoji) + ' ' : '') + 'Стикер';
   if (m.kind === 'round') return withThumb ? 'Видеосообщение' : '📹 Видеосообщение';
@@ -133,6 +134,7 @@ export function quoteContent(m: Record<string, unknown>): { text: ComponentChild
     return { text: previewBody(last, true), thumbNode: <StickerView src={s.url} outline={s.outline} w={s.w} h={s.h} size={36} play={false} group="quote" /> };
   }
   else if (last.kind === 'todo') text = ['☑️ ', ((m.todo ?? null) as { title?: string } | null)?.title || last.body || 'Чек-лист'];
+  else if (last.kind === 'poll') text = ['📊 ', ((m.poll ?? null) as { question?: string } | null)?.question || last.body || 'Опрос'];
   else if ((m.article || (Array.isArray(m.blocks) && m.blocks.length)) && !last.body) text = '📰 Статья';
   else text = previewBody(last, !!thumb) || 'Сообщение';
   if (!thumb) return { text };

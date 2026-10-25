@@ -65,6 +65,7 @@ export interface GlobalState {
   newChatOpen: boolean;
   sidebarView: string;   // путь страницы боковой панели, см. nav.ts
   infoOpen: boolean;   // правая панель «Информация»
+  pollResults: { chatId: number; id: number } | null;   // окно «Результаты» неанонимного опроса
   muteTick: number;    // истёк срок «Отключить звук» какого-то чата (mute.ts): повод перерисовать
   theme: ThemePref;   // зеркало prefs.theme для прежних читателей
   prefs: Prefs;       // настройки устройства, см. prefs.ts
@@ -172,6 +173,7 @@ let state: GlobalState = {
   newContact: null,
   joinLink: null,
   infoGo: null,
+  pollResults: null,
   newGroup: null,
   newChannel: null,
   blocked: [],

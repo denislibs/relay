@@ -1524,7 +1524,7 @@ function MediaViewer(props) {
 function Switch(props) {
   var id = props.id || 'rl-switch';
   return h('label', { class: 'rl-switch', for: id },
-    h('input', { id: id, type: 'checkbox', role: 'switch', checked: props.checked, defaultChecked: props.defaultChecked, onChange: props.onChange, 'aria-label': props.label }),
+    h('input', { id: id, type: 'checkbox', role: 'switch', checked: props.checked, disabled: props.disabled, defaultChecked: props.defaultChecked, onChange: props.onChange, 'aria-label': props.label }),
     h('span', { class: 'rl-switch-track', 'aria-hidden': 'true' }, h('span', { class: 'rl-switch-knob' })));
 }
 function PanelHeader(props) {
