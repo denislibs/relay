@@ -700,11 +700,12 @@ export function Feed({ frameKey, active, chatId, threadId, channel = false, meId
       if (!going.length) {
         // всё вне экрана: убрать сразу и удержать видимое (у низа — низ), как ветка удаления главного эффекта;
         // сам сброс буфера — следующим рендером
+        // точка отсчёта — якорь с последней прокрутки (viewAnchor), а не замер сейчас: сосед удалённого мог уже
+        // подрасти хвостом группы в этом же рендере, и это тоже надо вернуть на место
         const va = viewAnchor.current, row = va && !stick.current ? anchorEl(root, va.key) : null;
-        const was = row ? row.getBoundingClientRect().top - rr.top : null;
         for (const k of fresh) { const r = root.querySelector<HTMLElement>(`.app-msg[data-key="${CSS.escape(k)}"]`); if (r) r.style.display = 'none'; }
         const max = root.scrollHeight - ch;
-        let next = stick.current ? max : row && was != null ? st + (row.getBoundingClientRect().top - rr.top) - was : null;
+        let next = stick.current ? max : row ? st + (row.getBoundingClientRect().top - rr.top) - va!.top : null;
         if (next != null) next = Math.max(0, Math.min(max, next));
         if (next != null && Math.abs(next - root.scrollTop) > 0.5) { root.scrollTop = next; leaveScroll.current = root.scrollTop; }
         schedule(0);
