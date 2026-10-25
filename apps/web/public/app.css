@@ -1379,3 +1379,19 @@ html[data-anim="0"] :is(.app-enter-reload, .app-enter-login) :is(.rl-shell-side,
 /* заглушка вместо пустого пузыря: неподдерживаемый тип или содержимое, которое не открылось */
 .app-msg-stub { display: block; font-style: italic; color: var(--ink-muted); }
 .app-msg-stub + * { margin-top: 4px; }
+
+/* окно «Геопозиция» */
+.app-geosend-map { position: relative; display: grid; place-items: center; width: 320px; max-width: 100%; height: 200px; margin: 0 auto; border-radius: 12px; overflow: hidden; background: var(--hover); }
+.app-geosend-map .rl-geom-map { cursor: default; }
+.app-geosend-note { padding: 0 16px; text-align: center; font: 400 14px/20px var(--font-sans); color: var(--ink-muted); animation: rl-fade 200ms var(--ease-out) both; }
+.app-geosend-err { color: var(--danger, #e53935); }
+.app-geosend-acc { margin: 6px 4px 10px; font: 400 13px/18px var(--font-sans); color: var(--ink-muted); text-align: center; }
+.app-geosend-in { margin-top: 8px; }
+/* «Результаты» опроса */
+.app-pollres-q { margin: 0 4px 12px; font: 600 15px/20px var(--font-sans); }
+.app-pollres-opt { margin-bottom: 12px; }
+.app-pollres-opt header { display: flex; justify-content: space-between; gap: 12px; padding: 0 4px 4px; font: 600 14px/18px var(--font-sans); color: var(--brand-text, var(--brand)); }
+.app-pollres-pct { flex: none; color: var(--ink-muted); font-weight: 400; font-variant-numeric: tabular-nums; }
+.app-pollres-user { display: flex; align-items: center; gap: 10px; width: 100%; padding: 6px 4px; border: 0; border-radius: 10px; background: transparent; color: var(--ink); font: 400 15px/20px var(--font-sans); text-align: left; cursor: pointer; }
+.app-pollres-user:hover { background: var(--hover); }
+.app-pollres-note { margin: 8px 4px 0; color: var(--ink-muted); font: 400 13px/18px var(--font-sans); }

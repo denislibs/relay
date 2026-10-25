@@ -1,4 +1,4 @@
-import type { Poll, PollInput, StickerRef, StickerSetInfo } from '@relay/protocol';
+import type { ContactCard, Dice, DiceEmoji, GeoPoint, Poll, PollInput, StickerRef, StickerSetInfo } from '@relay/protocol';
 import type { StoreName } from './schema';
 import type { GroupInfo, MediaCounts, MediaTab, MyMembership, Replies } from '@relay/protocol';
 import type { Birthday, Block, ChatFolder, Entity, ForwardInfo, ForwardRef, LinkPreview, MessageButton, PrivacyKey, PrivacyMode, ProfileLink, ServiceType, Todo, TodoInput, TodoServiceData, VideoVariant } from '@relay/protocol';
@@ -19,7 +19,7 @@ export interface LocalMessage {
   editedAt?: string | null;
   deleted?: boolean;
   reactions?: { userId: number; emoji: string }[];
-  kind?: 'text' | 'photo' | 'video' | 'file' | 'voice' | 'round' | 'audio' | 'todo' | 'sticker' | 'poll';
+  kind?: 'text' | 'photo' | 'video' | 'file' | 'voice' | 'round' | 'audio' | 'todo' | 'sticker' | 'poll' | 'contact' | 'geo' | 'dice';
   sticker?: StickerRef | null;   // стикер: снимок (адрес, размеры, контур)
   groupId?: string | null;
   attachment?: LocalAttachment | null;
@@ -30,6 +30,9 @@ export interface LocalMessage {
   service?: { type: ServiceType; data?: TodoServiceData };   // служебное сообщение от «Relay» (и строки чек-листов)
   todo?: Todo;            // чек-лист
   poll?: Poll;            // опрос: итоги и мои голоса (для этого пользователя)
+  contact?: ContactCard;  // контакт: пользователь Relay
+  geo?: GeoPoint;         // геопозиция или место
+  dice?: Dice;            // кубики: эмодзи и выпавшее (у неотправленного значения ещё нет)
   fwdFrom?: ForwardInfo | null;      // пересланное: исходный автор, откуда и когда
   link?: LinkPreview | null;         // превью ссылки (pending — сервер ещё загружает)
   blocks?: Block[] | null;           // «статья»
@@ -115,6 +118,7 @@ export interface OutboxEntry {
   entities?: Entity[];
   todo?: Todo;            // чек-лист: уходит вместе с сообщением (задачи пронумерует сервер)
   poll?: PollInput;       // опрос: уходит как ввел пользователь (варианты пронумерует сервер)
+  special?: { contact?: { userId: number; name: string }; geo?: GeoPoint; dice?: { emoji: DiceEmoji } };   // контакт, точка, кубик
   error?: string;         // код отказа сервера (failed)
   groupId?: string | null;   // отправлены вместе — один пузырь
   forward?: ForwardRef | null;      // пересылка: сервер копирует оригинал (вложение не загружается заново)
@@ -228,6 +232,7 @@ export type Action =
   | { type: 'sendPoll'; chatId: number; poll: PollInput; replyToId?: number | null }
   | { type: 'pollVote'; chatId: number; id: number; options: number[] }   // пусто — отозвать
   | { type: 'pollClose'; chatId: number; id: number }
+  | { type: 'sendSpecial'; chatId: number; special: { contact?: { userId: number; name: string }; geo?: GeoPoint; dice?: { emoji: DiceEmoji } }; replyToId?: number | null }
   | { type: 'todoAppend'; chatId: number; id: number; items: string[] }
   | { type: 'todoEdit'; chatId: number; id: number; todo: TodoInput }
   /** нажатие callback-кнопки под сообщением (онлайн): ответ — ButtonAnswer ({toast?}), правка придёт журналом */
@@ -365,11 +370,12 @@ export type QuoteMsg = {
   service?: LocalMessage['service']; todo?: { title?: string } | null; article?: boolean;
   sticker?: StickerRef | null;   // ответ на стикер: в цитате — маленький стикер
   poll?: { question: string; quiz: boolean } | null;   // ответ на опрос: «📊 вопрос»
+  contact?: ContactCard | null; geo?: GeoPoint | null; dice?: Dice | null;
 };
 /** Сообщение (локальное или с сервера) → цитата. */
 export function toQuote(m: { id: number | null; sort?: number; body: string; senderId: number; kind?: string; deleted?: boolean; entities?: unknown;
   attachment?: { id: string; kind: string; mime: string; name: string; thumb?: string | null; title?: string | null; performer?: string | null; duration?: number | null } | null;
-  service?: unknown; todo?: { title?: string } | null; blocks?: unknown[] | null; sticker?: StickerRef | null; poll?: { question: string; quiz: boolean } | null }): QuoteMsg {
+  service?: unknown; todo?: { title?: string } | null; blocks?: unknown[] | null; sticker?: StickerRef | null; poll?: { question: string; quiz: boolean } | null; contact?: ContactCard | null; geo?: GeoPoint | null; dice?: Dice | null }): QuoteMsg {
   const a = m.attachment;
   return {
     id: m.id!, sort: m.sort ?? m.id!, body: m.body, senderId: m.senderId, kind: (m.kind as QuoteMsg['kind']) ?? 'text', deleted: !!m.deleted,
@@ -378,6 +384,7 @@ export function toQuote(m: { id: number | null; sort?: number; body: string; sen
     service: (m.service as QuoteMsg['service']) ?? undefined, todo: m.todo ? { title: m.todo.title } : null, article: !!m.blocks?.length,
     ...(m.sticker ? { sticker: m.sticker } : {}),
     ...(m.poll ? { poll: { question: m.poll.question, quiz: m.poll.quiz } } : {}),
+    ...(m.contact ? { contact: m.contact } : {}), ...(m.geo ? { geo: m.geo } : {}), ...(m.dice ? { dice: m.dice } : {}),
   };
 }
 

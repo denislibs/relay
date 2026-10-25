@@ -1136,6 +1136,17 @@ export class Engine {
         this.pumpOutbox();
         return { clientId };
       }
+      case 'sendSpecial': {
+        // контакт, точка, кубик — как сообщение: в очередь (переживёт офлайн); значение кубика выберет сервер
+        const clientId = crypto.randomUUID();
+        this.lastCreated = Math.max(Date.now(), this.lastCreated + 1);
+        const s = a.special, body = s.contact ? s.contact.name : s.geo ? s.geo.title ?? '' : s.dice ? s.dice.emoji : '';
+        this.store.addPending({ clientId, chatId: a.chatId, body, entities: [], replyToId: a.replyToId ?? null, createdAt: this.lastCreated, failed: false, special: s });
+        await this.store.flush();
+        this.changed();
+        this.pumpOutbox();
+        return { clientId };
+      }
       case 'pollVote': {
         if (!this.online) throw new Error('offline');
         // голос — сразу у себя (полоски отзываются мгновенно); итоги и ответ викторины поправит сервер, ошибка — откат
@@ -2354,7 +2365,7 @@ export class Engine {
           if (!next || !this.online) break;
           try {
             const att = next.attachment ? { id: next.attachment.id, thumb: next.attachment.thumb ?? null, ...(next.attachment.spoiler ? { spoiler: true } : {}) } : null;
-            const r = await this.request({ op: 'send', reqId: '', clientId: next.clientId, chatId: next.chatId, body: next.body, entities: next.entities ?? [], replyToId: next.replyToId, attachment: next.forward ? null : att, ...(next.groupId ? { groupId: next.groupId } : {}), ...(next.forward ? { forward: next.forward } : {}), ...(next.noLinkPreview ? { noLinkPreview: true } : {}), ...(next.blocks ? { blocks: next.blocks } : {}), ...(next.sticker ? { sticker: { id: next.sticker.id } } : {}), ...(next.todo ? { todo: { title: next.todo.title, items: next.todo.items.map((x) => ({ title: x.title })), othersCanAppend: next.todo.othersCanAppend, othersCanComplete: next.todo.othersCanComplete } } : {}), ...(next.poll ? { poll: next.poll } : {}), ...(next.threadId != null ? { threadId: next.threadId } : {}) });
+            const r = await this.request({ op: 'send', reqId: '', clientId: next.clientId, chatId: next.chatId, body: next.body, entities: next.entities ?? [], replyToId: next.replyToId, attachment: next.forward ? null : att, ...(next.groupId ? { groupId: next.groupId } : {}), ...(next.forward ? { forward: next.forward } : {}), ...(next.noLinkPreview ? { noLinkPreview: true } : {}), ...(next.blocks ? { blocks: next.blocks } : {}), ...(next.sticker ? { sticker: { id: next.sticker.id } } : {}), ...(next.todo ? { todo: { title: next.todo.title, items: next.todo.items.map((x) => ({ title: x.title })), othersCanAppend: next.todo.othersCanAppend, othersCanComplete: next.todo.othersCanComplete } } : {}), ...(next.poll ? { poll: next.poll } : {}), ...(next.special?.contact ? { contact: { userId: next.special.contact.userId } } : {}), ...(next.special?.geo ? { geo: next.special.geo } : {}), ...(next.special?.dice ? { dice: next.special.dice } : {}), ...(next.threadId != null ? { threadId: next.threadId } : {}) });
             this.store.ack(next.clientId, r.id as number, r.createdAt as string);
             // своё опустило начало живого отрезка ниже seed — сообщения между ними догрузить (страница перед seed)
             const c = this.store.chats.get(next.chatId), live = c?.ranges[c.ranges.length - 1];

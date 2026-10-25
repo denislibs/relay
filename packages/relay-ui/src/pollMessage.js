@@ -91,7 +91,7 @@ export function PollMessage(props) {
           h('b', { class: 'rl-pollm-q' }, p.question),
           h('span', { class: 'rl-pollm-sub' }, pollSubtitle(p), left ? h('span', { class: 'rl-pollm-left' }, ' · осталось ' + left) : null)),
         p.quiz && p.solution
-          ? h('button', { type: 'button', class: cx('rl-pollm-tipbtn', tip[0] && 'rl-pollm-tipbtn-on'), 'aria-label': 'Пояснение', 'aria-expanded': String(tip[0]), onClick: function (e) { e.stopPropagation(); tip[1](!tip[0]); } }, h(Icon, { name: 'info', size: 20 }))
+          ? h('button', { type: 'button', class: cx('rl-pollm-tipbtn', tip[0] && 'rl-pollm-tipbtn-on'), 'aria-label': 'Пояснение', 'aria-expanded': String(tip[0]), onClick: function (e) { e.stopPropagation(); tip[1](!tip[0]); } }, h(Icon, { name: 'bulb', size: 20 }))
           : null),
       p.quiz && p.solution && tip[0] ? h('div', { class: 'rl-pollm-tip', role: 'note' }, p.solution) : null,
       h('div', { class: cx('rl-pollm-opts', showResults && 'rl-pollm-results'), role: showResults ? 'list' : p.multiple ? 'group' : 'radiogroup', 'aria-label': p.question },

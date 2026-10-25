@@ -79,7 +79,7 @@ export function previewThumb(m: LastMessage): { src: string; video: boolean; rou
 export const thumbUnder = (src: string) => ({ background: `center / cover no-repeat url("${src.replace(/"/g, '')}")` });
 
 /** Текст после имени: подпись к медиа, а без подписи — тип. С миниатюрой эмодзи типа не нужен. */
-const KNOWN_PREVIEW = new Set(['text', 'photo', 'video', 'file', 'voice', 'round', 'audio', 'todo', 'sticker', 'poll']);
+const KNOWN_PREVIEW = new Set(['text', 'photo', 'video', 'file', 'voice', 'round', 'audio', 'todo', 'sticker', 'poll', 'contact', 'geo', 'dice']);
 
 export function previewBody(m: LastMessage, withThumb: boolean): ComponentChildren {
   if (m.deleted) return 'Сообщение удалено';
@@ -97,6 +97,9 @@ export function previewBody(m: LastMessage, withThumb: boolean): ComponentChildr
   if (m.kind === 'voice') return caption ?? '🎤 Голосовое сообщение';
   if (m.kind === 'todo') return ['☑️ ', m.body];
   if (m.kind === 'poll') return ['📊 ', m.body || 'Опрос'];
+  if (m.kind === 'contact') return ['👤 ', m.body || 'Контакт'];
+  if (m.kind === 'geo') return ['📍 ', m.body || 'Геопозиция'];
+  if (m.kind === 'dice') return m.body || '🎲';
   // эмодзи стикера — всегда, и рядом с миниатюрой тоже (как «😀 Sticker» в Telegram)
   if (m.kind === 'sticker') return (m.stickerEmoji || m.sticker?.emoji ? (m.stickerEmoji || m.sticker?.emoji) + ' ' : '') + 'Стикер';
   if (m.kind === 'round') return withThumb ? 'Видеосообщение' : '📹 Видеосообщение';

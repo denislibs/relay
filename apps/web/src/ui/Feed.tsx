@@ -9,8 +9,8 @@ import { emojiOnly } from '@relay/protocol';
 import { FX_READ_DELAY_MS, playFxForMessage, queueReactionFx, takeReactionFx } from '../reactionFx';
 import { groupReactions, type Chip } from '../reactionChips';
 import { emojiKey } from '@relay/protocol';
-import type { Entity, MessageButton, Poll, ProfilePhoto, Todo } from '@relay/protocol';
-import { Presence, ProgressRing, useMinVisible, MediaPolicy, ArticleBlocks, Avatar, Bubble, Icon, peerTone, DateDivider, DatePicker, FileBubble, MediaBubble, MessageText, VoiceBubble, MusicBubble, RoundBubble, player, MediaViewer, ScrollToBottom, beginHeavyAnimation, forceMeasure, isHeavyAnimating, onHeavyAnimationEnd, requestMeasure, requestMutation, selectionValue, TodoBubble, PollMessage, InlineKeyboard, StickerBubble, EmojiBubble, reducedMotion, LazyRoot } from '@relay/ui';
+import type { ContactCard, Dice, Entity, GeoPoint, MessageButton, Poll, ProfilePhoto, Todo } from '@relay/protocol';
+import { Presence, ProgressRing, useMinVisible, MediaPolicy, ArticleBlocks, Avatar, Bubble, Icon, peerTone, DateDivider, DatePicker, FileBubble, MediaBubble, MessageText, VoiceBubble, MusicBubble, RoundBubble, player, MediaViewer, ScrollToBottom, beginHeavyAnimation, forceMeasure, isHeavyAnimating, onHeavyAnimationEnd, requestMeasure, requestMutation, selectionValue, TodoBubble, PollMessage, ContactMessage, GeoMessage, DiceMessage, InlineKeyboard, StickerBubble, EmojiBubble, reducedMotion, LazyRoot } from '@relay/ui';
 import { openStickerSet, sendSticker, useGreetingSticker } from '../stickers';
 import { historyEmpty } from '../greeting';
 import { GreetingCard } from './GreetingCard';
@@ -19,7 +19,7 @@ import type { QuoteMsg } from '@relay/sync-engine/src/types';
 import { quoteContent } from './preview';
 import { memo } from 'preact/compat';
 import { useContext, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'preact/hooks';
-import { pressButton, toggleTodo, votePoll, clearFocus, discardUnsent, retrySend, focusMessage, openInner, jumpToDate, localPreview, markListened, moveWindow, react, savePosition, savedPosition, seen, markThreadRead, countViews, nextMention, nextReaction, readReactions } from '../data';
+import { pressButton, toggleTodo, votePoll, openUserChat, clearFocus, discardUnsent, retrySend, focusMessage, openInner, jumpToDate, localPreview, markListened, moveWindow, react, savePosition, savedPosition, seen, markThreadRead, countViews, nextMention, nextReaction, readReactions } from '../data';
 import { isPost } from '@relay/sync-engine/src/channel';
 import { Comments, MentionFab, ReactionFab, postMeta } from './channel';
 import { wantPeople } from '../people';
@@ -86,6 +86,14 @@ function reactionChips(m: Item, meId: number, people: Record<number, { name: str
 type RowProps = { post?: boolean; pinned?: boolean; discussion?: number | null; chatId: number; voiceTitle: string; author?: string; onAuthor?: (m: Item) => void; onOpen: (m: Item) => void; hl?: string; m: Item; meId: number; out: boolean; start: boolean; end: boolean; pos?: 'single' | 'first' | 'middle' | 'last'; quoted?: Quote | null; quoteAuthor?: string; quoteTone?: number | 'accent'; appear: boolean; flash: boolean; onReact: (m: Item, emoji: string) => void; album?: Item[]; onUser?: (userId: number) => void; sel?: boolean; selIn?: string; onQuickForward?: (m: Item) => void; grp?: boolean; leaving?: boolean; rxv: number; aev: number; bigEmoji: boolean; people: Record<number, { name: string } | undefined> };
 
 /** Строка ленты: перерисовывается только если изменилось её сообщение или место в группе. */
+/** Тайл карты — с нашего сервера (политика безопасности и приватность: координаты не уходят наружу из браузера). */
+const mapTileUrl = (z: number, x: number, y: number) => `/maptile/${z}/${x}/${y}.png`;
+/** Карта целиком — в новой вкладке (OpenStreetMap), без адреса страницы, откуда перешли. */
+const openMap = (g: GeoPoint) => {
+  const url = `https://www.openstreetmap.org/?mlat=${g.lat}&mlon=${g.lng}#map=17/${g.lat}/${g.lng}`;
+  window.open(url, '_blank', 'noopener,noreferrer');
+};
+
 const Row = memo(function Row({ post, pinned, discussion, chatId, voiceTitle, author, onAuthor, onOpen, hl, m, meId, out, start, end, pos, quoted, quoteAuthor, quoteTone, appear, flash, onReact, album, onUser, sel, selIn, onQuickForward, grp, leaving, people, bigEmoji }: RowProps) {
   // реакции: по эмодзи (ключ без FE0F — «❤️» и «❤» одна плашка) — сколько, есть ли моя, кто поставил;
   // картинка — из каталога (rxv — версия каталога: пришёл — строка перерисуется)
@@ -222,6 +230,60 @@ const Row = memo(function Row({ post, pinned, discussion, chatId, voiceTitle, au
           canVote={sel === undefined && m.id != null}
           onVote={(ids: number[]) => votePoll(chatId, m.id as number, ids).then((ok: boolean) => { if (!ok) showToast(poll.closed ? 'Опрос уже закрыт' : 'Не удалось проголосовать'); })}
           onResults={() => setGlobal({ pollResults: { chatId, id: m.id as number } })}
+        />
+        {mark}
+      </div>
+    );
+  }
+  if (m.kind === 'contact' && m.contact && !m.deleted) {
+    const c = m.contact as ContactCard;
+    return (
+      <div class={wrap('app-msg')} data-key={m.key} data-sort={m.sort as number}>
+        {check}
+        <ContactMessage
+          contact={c} tone={c.userId != null ? peerTone(c.userId) : 5} avatar={c.userId != null ? senderAvatar(c.userId) : undefined}
+          from={out ? 'out' : 'in'} tail={end} groupStart={start} appear={appear} aside={aside} fwd={fwd} reply={replyQ}
+          author={author} authorTone={author ? peerTone(m.senderId as number) : undefined}
+          time={clock(m.createdAt as string)} status={status} metaBefore={metaBefore} footer={footer}
+          reactions={chips.length ? chips : undefined} onReact={(emoji: string) => onReact(m, emoji)}
+          // из чата — поверх стека (правила навигации): профиль и «Написать» открывают его чат
+          canWrite={sel === undefined && c.userId != null && c.userId !== meId}
+          onWrite={() => { void openUserChat(c.userId!); }}
+          onOpen={sel === undefined && c.userId != null && onUser ? () => onUser(c.userId!) : undefined}
+        />
+        {mark}
+      </div>
+    );
+  }
+  if (m.kind === 'geo' && m.geo && !m.deleted) {
+    const g = m.geo as GeoPoint;
+    return (
+      <div class={wrap('app-msg')} data-key={m.key} data-sort={m.sort as number}>
+        {check}
+        <GeoMessage
+          geo={g} tileUrl={mapTileUrl}
+          from={out ? 'out' : 'in'} tail={end} groupStart={start} appear={appear} aside={aside} fwd={fwd} reply={replyQ}
+          author={author} authorTone={author ? peerTone(m.senderId as number) : undefined}
+          time={clock(m.createdAt as string)} status={status} metaBefore={metaBefore} footer={footer}
+          reactions={chips.length ? chips : undefined} onReact={(emoji: string) => onReact(m, emoji)}
+          onOpen={() => { if (sel === undefined) openMap(g); }}
+        />
+        {mark}
+      </div>
+    );
+  }
+  if (m.kind === 'dice' && m.dice && !m.deleted) {
+    const d = m.dice as Dice;
+    return (
+      <div class={wrap('app-msg app-msg-sticker')} data-key={m.key} data-sort={m.sort as number}>
+        {check}
+        <DiceMessage
+          dice={d} roll={appear}
+          from={out ? 'out' : 'in'} groupStart={start} appear={appear} aside={aside} fwd={fwd} reply={replyQ}
+          author={author} authorTone={author ? peerTone(m.senderId as number) : undefined}
+          time={clock(m.createdAt as string)} status={status} metaBefore={metaBefore}
+          reactions={chips.length ? chips : undefined} onReact={(emoji: string) => onReact(m, emoji)}
+          onClick={sel === undefined ? () => showToast(`Отправьте ${d.emoji}, чтобы испытать удачу`) : undefined}
         />
         {mark}
       </div>
