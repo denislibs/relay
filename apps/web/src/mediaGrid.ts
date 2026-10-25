@@ -2,8 +2,7 @@
 import type { MediaTab } from '@relay/protocol';
 
 type Variant = { name: string; w: number; h: number; size: number };
-// у превью имя не обязательно: вложение в ленте (Feed Att) несёт только размеры
-export type TileAtt = { id: string; kind: string; mime: string; preview?: (Omit<Variant, 'name'> & { name?: string }) | null };
+export type TileAtt = { id: string; kind: string; mime: string; preview?: Omit<Variant, 'name'> & { name?: string } | null };   // у снимка в ленте имени копии нет
 
 /** Плитка фото: маленькая копия сервера (jobs/photo.ts, до 480 px), пока её нет — оригинал. */
 export const tileSrc = (a: TileAtt): string => (a.preview ? `/files/${a.id}/preview` : `/files/${a.id}`);
