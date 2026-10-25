@@ -1041,6 +1041,23 @@ export class Engine {
         return null;
       }
       case 'nextMention': return this.store.nextMention(a.chatId);
+      case 'nextReaction': {
+        const known = this.store.nextReaction(a.chatId);
+        if (known != null) return known;
+        if (!(this.store.chats.get(a.chatId)?.reactions ?? 0)) return null;
+        // число есть, id ещё нет (пришли строкой списка) — спросить сервер
+        const r = await this.http<{ ids: number[]; count: number }>(`/chats/${a.chatId}/reactions/unread`);
+        this.store.setReactionIds(a.chatId, r.ids, r.count);
+        this.changed();
+        return r.ids[0] ?? null;
+      }
+      case 'readReactions': {
+        // сразу у себя (кнопка гаснет), серверу — следом; подтверждение придёт журналом reactionsRead и ничего не изменит
+        this.store.dropReactions(a.chatId, a.ids);
+        this.changed();
+        await this.http(`/chats/${a.chatId}/reactions/read`, { method: 'POST', body: JSON.stringify(a.ids ? { ids: a.ids } : {}) });
+        return null;
+      }
       case 'readBy': {
         let res: Response;
         try { res = await this.dev.fetch(`${this.cfg.httpBase}/chats/${a.chatId}/messages/${a.id}/read-by`, { credentials: 'include', headers: this.cfg.headers }); }

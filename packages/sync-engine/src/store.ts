@@ -100,6 +100,7 @@ export interface ChatSummary {
   lastReadId: number;
   unread: number;
   unreadMentions?: number;   // непрочитанные упоминания меня (основная лента и треды)
+  unreadReactions?: number;  // непрочитанные реакции на мои сообщения
   last: Message | null;
   peer?: { id: number; name: string; system?: true; photo?: ProfilePhoto | null } | null;
   peerReadUpTo?: number;
@@ -361,6 +362,8 @@ export class Store {
         return;
       }
       case 'mention': return this.applyMention(u.message, u.threadId);
+      case 'reaction': return this.applyReaction(u.chatId, u.id);
+      case 'reactionsRead': return this.dropReactions(u.chatId, u.ids);
       case 'readOwn': return this.applyOwnRead(u.chatId, u.upToId);
       case 'readBy': return this.applyPeerRead(u.chatId, u.upToId);
       case 'draft': return this.applyRemoteDraft(u.chatId, u.text, u.at, u.entities);
@@ -552,6 +555,10 @@ export class Store {
       if (s.unreadMentions !== undefined) {
         chat.mentions = s.unreadMentions;
         if (!s.unreadMentions) { delete chat.mentionIds; delete chat.mentionThreads; }
+      }
+      if (s.unreadReactions !== undefined) {
+        chat.reactions = s.unreadReactions;
+        if (!s.unreadReactions) delete chat.reactionIds;
       }
       if (s.last) {
         chat.knownMaxId = Math.max(chat.knownMaxId, s.last.id);
@@ -761,6 +768,42 @@ export class Store {
   }
 
   /** «К упоминанию»: старейшее непрочитанное упоминание чата (и его тред) или null. */
+  /** Чужая реакция на моё сообщение: +1 и id в очередь (по возрастанию, без повторов). Число — сервера (строка списка). */
+  private applyReaction(chatId: number, id: number): void {
+    const chat = this.chats.get(chatId);
+    if (!chat) return;
+    const ids = chat.reactionIds ?? [];
+    if (ids.includes(id)) return;
+    ids.push(id); ids.sort((a, b) => a - b);
+    chat.reactionIds = ids;
+    chat.reactions = (chat.reactions ?? 0) + 1;
+    this.markChat(chat);
+  }
+  /** Реакции прочитаны: ids — эти (увидел, убрали, удалили), без ids — все. Известные только числом — тоже. */
+  dropReactions(chatId: number, ids?: number[]): void {
+    const chat = this.chats.get(chatId);
+    if (!chat || !chat.reactions) return;
+    if (!ids) { chat.reactions = 0; delete chat.reactionIds; this.markChat(chat); return; }
+    const known = chat.reactionIds ?? [], keep = known.filter((x) => !ids.includes(x));
+    if (keep.length === known.length) return;
+    const unknown = Math.max(0, chat.reactions - known.length);
+    chat.reactionIds = keep;
+    chat.reactions = keep.length + unknown;
+    if (!keep.length) delete chat.reactionIds;
+    this.markChat(chat);
+  }
+  /** Самая старая непрочитанная реакция, если id известны; null — спросить сервер (или нет вовсе). */
+  nextReaction(chatId: number): number | null { return this.chats.get(chatId)?.reactionIds?.[0] ?? null; }
+  /** id с сервера (unread): запомнить, число — не меньше их. */
+  setReactionIds(chatId: number, ids: number[], count: number): void {
+    const chat = this.chats.get(chatId);
+    if (!chat) return;
+    chat.reactionIds = ids.length ? [...ids].sort((a, b) => a - b) : undefined;
+    chat.reactions = Math.max(count, ids.length);
+    if (!chat.reactions) delete chat.reactionIds;
+    this.markChat(chat);
+  }
+
   nextMention(chatId: number): { id: number; threadId?: number } | null {
     const chat = this.chats.get(chatId);
     const id = chat?.mentionIds?.[0];
@@ -1061,6 +1104,7 @@ export class Store {
    */
   private removeMessage(chatId: number, id: number): void {
     this.dropMentions(chatId, (x) => x === id);
+    this.dropReactions(chatId, [id]);
     const k = chatId + ':' + id, m = this.messageById(chatId, id), q = this.quotes.get(k);
     // цитата знает о нём и без запроса к серверу (сервер удалённое больше не отдаёт); автор нужен только для цвета полосы
     if (!q?.deleted) { this.quotes.set(k, deletedQuote(id, m?.senderId ?? q?.senderId ?? 0)); this.touch(chatId); }

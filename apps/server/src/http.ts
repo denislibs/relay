@@ -11,6 +11,7 @@ import { announceLogin, announceSessionsChanged, assertConfirmed, checkSocket, c
 import { countViews } from './domain/views';
 import { getThread, readThread } from './domain/threads';
 import { readBy } from './domain/reads';
+import { readReactions, unreadReactions } from './domain/reactionsUnread';
 import { commonGroups, deleteDirectChat, createChat, createGroup, openDirect, messageAtDate, getChatMedia, getChatMediaCounts, getHistory, getMessagesByIds, listChats, listChatsPage } from './domain/chats';
 import { sql } from './db';
 import { DomainError } from './domain/errors';
@@ -410,6 +411,14 @@ export function createServer(opts: { port: number }): Server {
         // «кто прочитал» своё сообщение в небольшой группе (reads.ts)
         const rb = /^\/chats\/(\d+)\/messages\/(\d+)\/read-by$/.exec(url.pathname);
         if (rb && req.method === 'GET') return Response.json(await readBy(userId, Number(rb[1]), Number(rb[2])));
+        // непрочитанные реакции на мои сообщения: самые старые id и «прочитал» (ids — увидел на экране; без ids — все)
+        const ur = /^\/chats\/(\d+)\/reactions\/(unread|read)$/.exec(url.pathname);
+        if (ur && ur[2] === 'unread' && req.method === 'GET') return Response.json(await unreadReactions(userId, Number(ur[1])));
+        if (ur && ur[2] === 'read' && req.method === 'POST') {
+          const body = (await req.json().catch(() => ({}))) as { ids?: unknown };
+          const ids = Array.isArray(body.ids) ? body.ids.map(Number).filter((n) => Number.isInteger(n) && n > 0).slice(0, 200) : undefined;
+          return Response.json(await readReactions(userId, Number(ur[1]), ids));
+        }
         const mem = /^\/chats\/(\d+)\/members$/.exec(url.pathname);
         if (req.method === 'GET' && mem) return Response.json(await chatMembers(userId, Number(mem[1])));
         const hist = /^\/chats\/(\d+)\/messages$/.exec(url.pathname);

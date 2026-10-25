@@ -261,6 +261,7 @@ export type ChatSummary = {
   lastReadId: number;
   unread: number;
   unreadMentions?: number;   // непрочитанные упоминания меня (основная лента и треды): бейдж «@»
+  unreadReactions?: number;  // непрочитанные реакции на мои сообщения: кнопка «сердце» над «вниз»
   last: Message | null;
   peer: { id: number; name: string; system?: true; photo?: ProfilePhoto | null } | null; // собеседник личного чата
   peerReadUpTo: number; // до какого id мои сообщения прочитаны всеми остальными участниками
@@ -317,6 +318,7 @@ export async function listChats(userId: number, opts: ListOpts = {}): Promise<Ch
            (select count(*) from messages m
              where m.chat_id = c.id and m.id > cm.last_read_id and m.id >= cm.history_from and m.sender_id <> ${userId} and not m.deleted)::int as unread,
            (select count(*) from message_mentions mm where mm.user_id = ${userId} and mm.chat_id = c.id)::int as unread_mentions,   -- префикс PK
+           (select count(*) from unread_reactions ur where ur.user_id = ${userId} and ur.chat_id = c.id)::int as unread_reactions,
            (select json_build_object('id', u.id, 'name', ${nameForSql(userId)}, 'system', u.system,   -- контактное имя — только владельцу
                     'photo', case when exists (select 1 from blocks b where b.owner_id = u.id and b.user_id = ${userId}) then null else u.photo end)
               from chat_members pm join users u on u.id = pm.user_id
@@ -361,6 +363,7 @@ export async function listChats(userId: number, opts: ListOpts = {}): Promise<Ch
     lastReadId: r.last_read_id as number,
     unread: r.unread as number,
     unreadMentions: Number(r.unread_mentions ?? 0),
+    unreadReactions: Number(r.unread_reactions ?? 0),
     peer: r.peer ? { id: (r.peer as { id: number }).id, name: (r.peer as { name: string }).name, photo: (r.peer as { photo?: ProfilePhoto | null }).photo ?? null, ...((r.peer as { system?: boolean }).system ? { system: true as const } : {}) } : null,
     peerReadUpTo: (r.peer_read_up_to as number) ?? 0,
     sortAt: new Date(r.sort_at as string).toISOString(),
