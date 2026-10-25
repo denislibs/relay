@@ -26,7 +26,7 @@ import { getPrefs } from '../prefs';
 import { bubbleSrc, viewerPreview } from '../mediaGrid';
 import { clock, dayKey, dayLabel, fileSize } from './format';
 import { arrivals, type FeedSeen } from './appear';
-import { deferShift, requestShift, rowFor, shiftWanted } from './windowShift';
+import { anchorShift, deferShift, requestShift, rowFor, shiftWanted } from './windowShift';
 import { burstAnimates, driveScroll, jumpNear, DRIVE_MS, DRIVE_OWN_MS, type Drive } from './scrollDrive';
 import { interiorRemovals, mergeLeaving, LEAVE_HOLD_MS, LEAVE_MS, type Msg } from './leaving';
 
@@ -407,11 +407,11 @@ function topIn(root: HTMLElement, el: HTMLElement): number {
   return el.getBoundingClientRect().top - root.getBoundingClientRect().top + root.scrollTop;
 }
 
-function firstVisible(root: HTMLElement): { key: string; sort: number; top: number } | null {
+function firstVisible(root: HTMLElement): { key: string; sort: number; top: number; bottom: number } | null {
   const rootTop = root.getBoundingClientRect().top;
   for (const row of root.querySelectorAll<HTMLElement>('.app-msg:not(.app-msg-leaving)')) {
     const r = row.getBoundingClientRect();
-    if (r.bottom > rootTop + TOP_ZONE) return { key: row.dataset.key!, sort: Number(row.dataset.sort), top: r.top - rootTop };
+    if (r.bottom > rootTop + TOP_ZONE) return { key: row.dataset.key!, sort: Number(row.dataset.sort), top: r.top - rootTop, bottom: r.bottom - rootTop };
   }
   return null;
 }
@@ -502,7 +502,7 @@ export function Feed({ frameKey, active, chatId, threadId, channel = false, meId
   const [lazyRoot, setLazyRoot] = useState<HTMLElement | null>(null);
   useLayoutEffect(() => { setLazyRoot(el.current); }, []);
   const metaRef = useRef(meta); metaRef.current = meta;
-  const anchor = useRef<{ key: string; sort: number; top: number } | null>(null);   // якорь до сдвига окна
+  const anchor = useRef<{ key: string; sort: number; top: number; bottom: number } | null>(null);   // якорь до сдвига окна
   const toBottom = useRef(false);                                     // после перехода к хвосту — вниз
   const programmatic = useRef(0);
   const placed = useRef(false);
@@ -660,7 +660,9 @@ export function Feed({ frameKey, active, chatId, threadId, channel = false, meId
       if (a) {
         anchor.current = null;
         const row = rowAt(root, a.key, a.sort);
-        if (row) next = top + (row.getBoundingClientRect().top - root.getBoundingClientRect().top) - a.top;
+        // край якоря — по правилу tweb (anchorShift): строка, торчащая за верх (альбом, разрезанный окном иначе и
+        // собранный целиком), держится за видимый низ, а не за верх, уехавший за экран
+        if (row) { const r = row.getBoundingClientRect(), rt = root.getBoundingClientRect().top; next = top + anchorShift(a, { top: r.top - rt, bottom: r.bottom - rt }, ch); }
       } else if (down || (stick.current && top + ch < h - 1)) {
         toBottom.current = false;
         next = h;

@@ -50,3 +50,18 @@ export function deferShift(box: { dirs: Set<ShiftDir> }, dir: ShiftDir, heavy: b
   box.dirs.add(dir);
   if (!waiting) later(() => { const ds = [...box.dirs]; box.dirs.clear(); for (const d of ds) run(d); });
 }
+
+/** Края якорной строки относительно видимой области (0 — её верх). */
+export type Edges2 = { top: number; bottom: number };
+
+/**
+ * На сколько сдвинуть прокрутку, чтобы якорная строка осталась на месте (как ScrollSaver в Telegram Web K):
+ * обычно держим верх; строка торчит только за верхний край — держим её низ (то, что видно); торчит за оба края
+ * и стала ниже (свернулась) — подтягиваем её верх к верху экрана, а не к старой координате за экраном.
+ */
+export function anchorShift(was: Edges2, now: Edges2, viewHeight: number): number {
+  const overTop = was.top < 0, overBottom = was.bottom > viewHeight;
+  if (overTop && overBottom && now.bottom - now.top < was.bottom - was.top - 1) return now.top;
+  if (overTop && !overBottom) return now.bottom - was.bottom;
+  return now.top - was.top;
+}
