@@ -10,9 +10,10 @@ import type { Attachment, VideoVariant } from '@relay/protocol';
 import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { sql } from '../db';
+import { sql, type Tx } from '../db';
 import { attachmentOf, s3, variantsOf } from '../domain/files';
 import { chatEvent } from '../domain/journal';
+import { openRows } from '../domain/messageContent';
 import { enqueue } from './queue';
 
 export const PREVIEW_SECONDS = 4;
@@ -203,11 +204,15 @@ async function dims(path: string): Promise<{ w: number; h: number }> {
  *  Общий для видео и фото (jobs/photo.ts). */
 export async function patchMessages(tx: Parameters<Parameters<typeof sql.begin>[0]>[0], fresh: Attachment): Promise<void> {
   // замки строк — по возрастанию id: пост раньше своей копии в группе обсуждения, как у withCopy (без дедлока с правкой поста)
-  const msgs = await tx`select id, chat_id, attachment from messages where attachment->>'id' = ${fresh.id} and not deleted order by id for update`;
+  const msgs = await tx`select * from messages where attachment->>'id' = ${fresh.id} and not deleted order by id for update`;
+  const patch = { size: fresh.size, ...(fresh.preview ? { preview: fresh.preview } : {}), ...(fresh.variants ? { variants: fresh.variants } : {}) };
   for (const m of msgs) {
-    const old = m.attachment as Attachment;
-    const next: Attachment = { ...old, size: fresh.size, ...(fresh.preview ? { preview: fresh.preview } : {}), ...(fresh.variants ? { variants: fresh.variants } : {}) };
-    await tx`update messages set attachment = ${tx.json(next as never)} where id = ${m.id} and chat_id = ${m.chat_id}`;
-    await chatEvent(tx, Number(m.chat_id), { type: 'attachmentUpdated', chatId: Number(m.chat_id), id: Number(m.id), attachment: next });
+    // в базе — как лежало: текст вложения (имя, миниатюра, ключ файла) в шифре content, в jsonb его нет и не будет
+    const stored = m.attachment as Attachment;
+    await tx`update messages set attachment = ${tx.json({ ...stored, ...patch } as never)} where id = ${m.id} and chat_id = ${m.chat_id}`;
+    // клиентам — вложение открытое: кадр push несёт событие как есть, и вложение без имени и миниатюры
+    // заменило бы у всех, кто онлайн, полное (пропадали размытые миниатюры и имена файлов)
+    const [full] = await openRows([{ ...m }], '', tx as Tx);
+    await chatEvent(tx, Number(m.chat_id), { type: 'attachmentUpdated', chatId: Number(m.chat_id), id: Number(m.id), attachment: { ...(full.attachment as Attachment), ...patch } });
   }
 }
