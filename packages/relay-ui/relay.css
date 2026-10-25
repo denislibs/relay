@@ -1105,6 +1105,9 @@ button.rl-tab:hover { color: var(--ink); }
   .rl-shell-side { flex-basis: 100%; }
   .rl-sidecard { border-radius: 0; box-shadow: none; }
   .rl-shell-side + .rl-shell-main { display: none; }
+  /* чат на телефоне — как в Telegram: шапка, закреп и поле ввода остаются скруглёнными «островками» и стоят в 8px
+     от краёв экрана (не упираются скруглением в край); лента под ними — от края до края (--space-float = зазор) */
+  .rl-shell-main { --space-float: 8px; padding: var(--space-float); }
 }
 
 @media (prefers-reduced-motion: reduce) {
@@ -1368,7 +1371,12 @@ html[data-blur="0"] .rl-pop .rl-menu, html[data-blur="0"] .rl-pop .rl-rpick { -w
 .rl-aside-links b { font: 500 15px/20px var(--font-sans); color: var(--tick-read); word-break: break-all; }
 .rl-aside-links small { color: var(--ink-muted); font-size: 13px; }
 .rl-glassbar .rl-glassbar-who { border-radius: 22px; transition: background-color var(--dur-instant) var(--ease-standard); }
-@media (max-width: 1100px) { .rl-shell > .rl-presence { position: absolute; top: var(--space-float); right: var(--space-float); bottom: var(--space-float); z-index: 6; } .rl-shell .rl-shell-aside { box-shadow: var(--shadow-pop); border-radius: var(--radius-panel); } }
+/* места под чат полной ширины рядом с панелью нет (FloatShell → rl-shell-float): панель выезжает поверх чата,
+   колонка чата не сужается и не сдвигается; клик мимо панели закрывает её (прозрачная подложка) */
+.rl-shell.rl-shell-float > .rl-presence { position: absolute; top: var(--space-float); right: var(--space-float); bottom: var(--space-float); z-index: 6; }
+.rl-shell.rl-shell-float .rl-shell-aside { box-shadow: var(--shadow-pop); border-radius: var(--radius-panel); }
+.rl-aside-scrim { display: none; }
+.rl-shell.rl-shell-float > .rl-aside-scrim { display: block; position: absolute; inset: 0; z-index: 5; }
 /* ширина телефона: «Информация», как и левая колонка, — весь экран, а не плавающая карточка шире экрана */
 @media (max-width: 720px) {
   .rl-shell > .rl-presence { inset: 0; }
@@ -2368,12 +2376,13 @@ html[data-blur="0"] .rl-menu { -webkit-backdrop-filter: none; backdrop-filter: n
 .rl-sicon { background-image: linear-gradient(180deg, rgba(255, 255, 255, .14), rgba(0, 0, 0, .06)); }
 
 /* ---------- Ширины колонок по умолчанию — как у Telegram (telegram-tt: #LeftColumn, --right-column-width) ----------
-   левая: 33vw (256…424px), с 926px — 33vw, с 1276px — 25vw; правая: 26.5rem − 1rem отступа (408px), на 1276…1920px — 25vw − 1rem.
+   левая: 33vw (256…424px), с 926px — 33vw, с 1276px — 25vw; правая: 26.5rem − 1rem отступа (408px), с 1276px — 25vw − 1rem, но не уже 408 и не шире 464px.
    Перетаскивание края (--side-w) и сохранённая ширина — поверх. */
 .rl-shell { --side-default: clamp(256px, 33vw, 424px); --aside-default: 408px; }
 @media (min-width: 926px) { .rl-shell { --side-default: 33vw; } }
 @media (min-width: 1276px) { .rl-shell { --side-default: 25vw; } }
-@media (min-width: 1276px) and (max-width: 1920px) { .rl-shell { --aside-default: calc(25vw - 16px); } }
+/* правая панель не уже 408px (в Telegram поверх чата — 26.5rem): 25vw − 16px давали 303…392px на 1276…1630px — узко */
+@media (min-width: 1276px) { .rl-shell { --aside-default: clamp(408px, calc(25vw - 16px), 464px); } }
 
 /* ---------- Кнопки под сообщением (inline-клавиатура, как в Telegram) ----------
    Ряды во всю ширину пузыря (пузырь растягивается до клавиатуры), зазоры 4px; плашка цвета обоев с белым текстом —
