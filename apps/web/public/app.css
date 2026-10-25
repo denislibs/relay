@@ -47,12 +47,6 @@ body { background: var(--bg); color: var(--ink); font-family: var(--font-sans); 
 .app-msg { position: relative; }
 /* уходящая строка (удалена, соседи доезжают — Feed/leaving.ts): без кликов; absolute на своём месте ставит сам эффект */
 .app-msg-leaving { pointer-events: none; }
-/* лесенка появления при открытии чата (Feed/reveal.ts): до конца перехода стека строки скрыты, потом снизу вверх
-   с шагом 10 мс (--reveal — ступень строки); только opacity и transform */
-.app-feed-wait .app-msg { opacity: 0; }
-.app-feed-reveal .app-msg { animation: app-reveal 200ms ease-out both; animation-delay: calc(var(--reveal, 0) * 10ms); transform-origin: 50% 100%; }
-@keyframes app-reveal { from { opacity: 0; transform: scale(.92); } to { opacity: 1; transform: none; } }
-@media (prefers-reduced-motion: reduce) { .app-feed-wait .app-msg { opacity: 1; } .app-feed-reveal .app-msg { animation: none; } }
 .app-sentinel { flex: 0 0 1px; height: 1px; margin: -1px 0 0; pointer-events: none; }
 .app-mark { position: absolute; left: 0; right: 0; bottom: 0; height: 1px; pointer-events: none; }
 .app-unread-divider { position: relative; isolation: isolate; display: flex; justify-content: center; margin: var(--space-3) 0; padding: 6px 0; color: var(--brand-text); font: 500 13.5px/18px var(--font-sans); animation: app-fade 300ms var(--ease-out) both; }
