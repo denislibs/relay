@@ -28,7 +28,7 @@ import { clock, dayKey, dayLabel, fileSize } from './format';
 import { arrivals, type FeedSeen } from './appear';
 import { deferShift, requestShift, rowFor, shiftWanted } from './windowShift';
 import { burstAnimates, driveScroll, jumpNear, DRIVE_MS, DRIVE_OWN_MS, type Drive } from './scrollDrive';
-import { flipDeltas, interiorRemovals, mergeLeaving, LEAVE_HOLD_MS, LEAVE_MS, type Msg } from './leaving';
+import { interiorRemovals, mergeLeaving, LEAVE_HOLD_MS, LEAVE_MS, type Msg } from './leaving';
 
 /*
  * Лента сообщений, устроенная как в Telegram:
@@ -668,10 +668,12 @@ export function Feed({ frameKey, active, chatId, threadId, channel = false, meId
   }, [messages, limit, leaveTick]);   // каждая порция дорисовки — восстановить якорь; уход строк из буфера — тоже
 
   // удаление с анимацией: уходящие строки ещё в потоке — снять раскладку, вывести их из потока (absolute на своём
-  // месте в пачке) и довезти соседей FLIP-переводом; уходящая гаснет. Два чтения и две записи до отрисовки —
-  // осознанное исключение §1 SMOOTH-UI: иначе кадр со схлопнувшимися соседями. Вне экрана — без анимации, строка
-  // просто уходит (якорь удержит главный эффект). По таймеру буфер очищается, а якорь ширины снимается заново —
-  // соседи уже на новых местах, и уход строк из DOM ничего не сдвигает
+  // месте в пачке) и довезти соседей FLIP-переводом; уходящая гаснет. Одно чтение раскладки и одна запись до
+  // отрисовки — осознанное исключение §1 SMOOTH-UI: иначе кадр со схлопнувшимися соседями. Куда сдвинутся соседи,
+  // не перемеряем, а считаем: строки ниже уходящей поднимаются ровно на её высоту (соседи уже перегруппированы в
+  // этом рендере), у прижатой ленты прокрутка подрежется, и всё опустится на величину подрезки. Вне экрана — без
+  // анимации, строка просто уходит. По таймеру буфер очищается, а якорь ширины снимается заново — соседи уже на
+  // новых местах, и уход строк из DOM ничего не сдвигает. Метки performance: relay:leave-measure / relay:leave-start
   const leavePlayed = useRef(new Set<string>());
   // прокрутка, которую подрезала или выставила уборка уходящих: событие scroll с этим значением — наше, не пользователя
   // (по значению, а не счётчиком: подрезка у низа события может и не дать, и счётчик проглотил бы чужую прокрутку)
@@ -690,17 +692,20 @@ export function Feed({ frameKey, active, chatId, threadId, channel = false, meId
       requestMeasure(() => { viewAnchor.current = viewAnchorOf(root); requestMutation(() => { for (const k of mine) { leaving.current.delete(k); leavePlayed.current.delete(k); } bumpLeave((n) => n + 1); }); });
     };
     const schedule = (ms: number) => { if (leaveTimer.current) clearTimeout(leaveTimer.current); leaveTimer.current = setTimeout(drop, ms); };
+    const t0 = performance.now();
     forceMeasure(() => {
-      const rr = root.getBoundingClientRect(), st = root.scrollTop, ch = root.clientHeight;
-      // только строки около экрана (по offsetTop, без замера каждой): ±100 px — дальше сдвиги не видны
+      const rr = root.getBoundingClientRect(), st = root.scrollTop, ch = root.clientHeight, sh = root.scrollHeight;
+      // только строки около экрана: ±100 px — дальше сдвиги не видны. Один проход, один прямоугольник на строку
       const near: { r: HTMLElement; key: string; rect: DOMRect }[] = [];
       for (const r of root.querySelectorAll<HTMLElement>('.app-msg')) {
-        const t = topIn(root, r) - st;   // верх строки относительно видимой области (через rect — пачки position: relative)
-        if (t > ch + 100 || t + r.offsetHeight < -100) continue;
-        near.push({ r, key: r.dataset.key!, rect: r.getBoundingClientRect() });
+        const rect = r.getBoundingClientRect();
+        if (rect.top > rr.bottom + 100 || rect.bottom < rr.top - 100) continue;
+        near.push({ r, key: r.dataset.key!, rect });
       }
-      const going = near.filter((x) => fresh.has(x.key) && x.rect.bottom > rr.top && x.rect.top < rr.bottom);
-      if (!going.length) {
+      const going = near.filter((x) => fresh.has(x.key));
+      const seen = going.some((x) => x.rect.bottom > rr.top && x.rect.top < rr.bottom);
+      performance.measure('relay:leave-measure', { start: t0 });
+      if (!seen) {
         // всё ниже экрана: убрать сразу, у низа — остаться у низа; сам сброс буфера — следующим рендером
         for (const k of fresh) { const r = root.querySelector<HTMLElement>(`.app-msg[data-key="${CSS.escape(k)}"]`); if (r) r.style.display = 'none'; }
         const max = root.scrollHeight - ch;
@@ -708,23 +713,25 @@ export function Feed({ frameKey, active, chatId, threadId, channel = false, meId
         schedule(0);
         return;
       }
-      const stay = near.filter((x) => !leaving.current.has(x.key));
-      const first = new Map(stay.map((x) => [x.key, x.rect.top]));
-      const place = going.map((x) => ({ el: x.r, top: x.r.offsetTop, left: x.r.offsetLeft, width: x.r.offsetWidth }));
-      for (const p of place) { const style = p.el.style; style.position = 'absolute'; style.top = p.top + 'px'; style.left = p.left + 'px'; style.width = p.width + 'px'; }
-      const last = new Map(stay.map((x) => [x.key, x.r.getBoundingClientRect().top]));
-      // лента схлопнулась, прокрутка подрезалась — это событие scroll наше, не пользователя
-      if (Math.abs(root.scrollTop - st) > 0.5) leaveScroll.current = root.scrollTop;
+      // куда всё сдвинется после вывода уходящих из потока — без второго пересчёта раскладки
+      const removed = going.reduce((n, x) => n + x.rect.height, 0);
+      const clamp = Math.max(0, st - Math.max(0, sh - removed - ch));   // подрезка прокрутки у низа: контент опустится
+      const above = (top: number) => going.reduce((n, x) => n + (x.rect.top < top ? x.rect.height : 0), 0);
+      for (const x of going) { const style = x.r.style; style.position = 'absolute'; style.top = x.r.offsetTop + 'px'; style.left = x.r.offsetLeft + 'px'; style.width = x.r.offsetWidth + 'px'; }
+      if (clamp > 0) leaveScroll.current = st - clamp;
       beginHeavyAnimation(LEAVE_HOLD_MS);
-      const ease = 'cubic-bezier(0.2, 0, 0, 1)', byKey = new Map(stay.map((x) => [x.key, x.r]));
-      for (const [key, d] of flipDeltas(first, last)) byKey.get(key)!.animate([{ transform: `translateY(${d}px)` }, { transform: 'none' }], { duration: LEAVE_MS, easing: ease });
-      // уходящая гаснет там, где была: при подрезке прокрутки всё (и absolute тоже) сместилось — держим её тем же переводом
-      for (const x of going) {
-        const d = x.rect.top - x.r.getBoundingClientRect().top, at = Math.abs(d) > 1 ? `translateY(${d}px)` : '';
-        x.r.animate([{ opacity: 1, transform: at || 'none' }, { opacity: 0, transform: `${at} scale(0.96)`.trim() }], { duration: LEAVE_MS - 20, easing: 'ease-in', fill: 'forwards' });
+      const ease = 'cubic-bezier(0.2, 0, 0, 1)';
+      for (const x of near) {
+        if (fresh.has(x.key) || leaving.current.has(x.key)) continue;
+        const d = above(x.rect.top) - clamp;   // было − стало
+        if (Math.abs(d) > 1) x.r.animate([{ transform: `translateY(${d}px)` }, { transform: 'none' }], { duration: LEAVE_MS, easing: ease });
       }
+      // уходящая гаснет там, где была: при подрезке всё (и absolute тоже) опустилось — держим её тем же переводом
+      const at = clamp > 1 ? `translateY(${-clamp}px)` : '';
+      for (const x of going) x.r.animate([{ opacity: 1, transform: at || 'none' }, { opacity: 0, transform: `${at} scale(0.96)`.trim() }], { duration: LEAVE_MS - 20, easing: 'ease-in', fill: 'forwards' });
       schedule(LEAVE_HOLD_MS);
     });
+    performance.measure('relay:leave-start', { start: t0 });
   });
   useEffect(() => () => { if (leaveTimer.current) clearTimeout(leaveTimer.current); }, []);
 
