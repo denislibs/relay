@@ -801,6 +801,9 @@ button.rl-quote:active { background: var(--quote-bg-active, var(--pressed)); }
 .rl-fx-center { width: 40px; height: 40px; left: -20px; top: -20px; }
 .rl-fx-around { width: 80px; height: 80px; left: -40px; top: -40px; }
 .rl-react-icon-hidden { visibility: hidden; }
+/* эффект у большого эмодзи: 360 px, transform-origin по центру — отражение не сдвигает */
+.rl-fx-item-big { transform-origin: 180px 180px; }
+.rl-fx-big { position: absolute; left: 0; top: 0; width: 360px; height: 360px; }
 
 /* панель невидима, пока ячейки не отрисовали первые кадры (is-ready), затем появляется вместе с меню */
 .rl-rpick { position: relative; display: inline-flex; align-items: center; height: 40px; min-width: 56px; padding: 0 4px; border-radius: 40px; background: var(--raised); box-shadow: 0 2px 8px rgba(0, 0, 0, .24); opacity: 0; transform-origin: 0 100%; }

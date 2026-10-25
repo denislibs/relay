@@ -26,6 +26,7 @@ export interface LocalMessage {
   entities?: Entity[];    // оформление текста
   listened?: boolean;     // голосовое/кружок прослушан получателем
   progress?: number;      // загрузка файла 0..1, пока сообщение в очереди
+  fx?: { key: string; t: number[]; at: number };   // клики собеседника по большому эмодзи (эфемерно: at — когда пришло)
   error?: string;         // почему не отправлено (failed): 'blocked' — собеседник заблокировал отправителя
   service?: { type: ServiceType; data?: TodoServiceData };   // служебное сообщение от «Relay» (и строки чек-листов)
   todo?: Todo;            // чек-лист
@@ -216,6 +217,7 @@ export type Action =
   | { type: 'loadMoreChats' }
   | { type: 'setDraft'; chatId: number; text: string; entities?: Entity[] }
   | { type: 'typing'; chatId: number }
+  | { type: 'emojiFx'; chatId: number; id: number; key: string; t: number[] }
   | { type: 'editMessage'; chatId: number; id: number; body: string; entities?: Entity[] }
   | { type: 'deleteMessage'; chatId: number; id: number }
   | { type: 'react'; chatId: number; id: number; emoji: string | null }

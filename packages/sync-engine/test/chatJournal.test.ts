@@ -244,3 +244,19 @@ test('typing from myself or from a blocked user is dropped (group topic sends it
   await Bun.sleep(50);
   expect(chatOf(list.list(), g)?.typing).toBe(false);
 });
+
+test('emojiFx from the peer marks the message (fx: key, t, at); my own and from a blocked user are dropped', async () => {
+  const { a, b, g } = await group();
+  const eb = await open(srv.config(b));
+  eb.connect(); await eb.whenIdle();
+  const id = (await say(a.userId, g, '❤️')).id;
+  const feed = watchInto(eb, { kind: 'messages', chatId: g, limit: 50 });
+  await feed.until((l) => l.some((m) => m.id === id));
+  inject(eb, { op: 'emojiFx', chatId: g, id, key: '❤', t: [0, 0.4], userId: a.userId });
+  await feed.until((l) => !!(l.find((m) => m.id === id) as { fx?: unknown } | undefined)?.fx, 2000);
+  const fx = (feed.list().find((m) => m.id === id) as { fx: { key: string; t: number[]; at: number } }).fx;
+  expect(fx.key).toBe('❤'); expect(fx.t).toEqual([0, 0.4]); expect(fx.at).toBeGreaterThan(0);
+  inject(eb, { op: 'emojiFx', chatId: g, id, key: '🔥', t: [0], userId: b.userId });   // своя — мимо
+  await Bun.sleep(50);
+  expect((feed.list().find((m) => m.id === id) as { fx: { key: string } }).fx.key).toBe('❤');
+});

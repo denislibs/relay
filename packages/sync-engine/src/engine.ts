@@ -1097,6 +1097,9 @@ export class Engine {
       case 'typing':
         if (this.online) this.transport.send({ op: 'typing', chatId: a.chatId });
         return null;
+      case 'emojiFx':
+        if (this.online) this.transport.send({ op: 'emojiFx', chatId: a.chatId, id: a.id, key: a.key, t: a.t });
+        return null;
       case 'editMessage': {
         if (!this.online) throw new Error('offline');
         await this.request({ op: 'edit', reqId: '', chatId: a.chatId, id: a.id, body: a.body, entities: a.entities ?? [] });
@@ -1554,6 +1557,14 @@ export class Engine {
         clearTimeout(this.typingTimers.get(key));
         this.store.setTyping(f.chatId, f.userId, true);
         this.typingTimers.set(key, setTimeout(() => { this.typingTimers.delete(key); this.store.setTyping(f.chatId, f.userId, false); this.changed(); }, this.cfg.typingMs ?? 6000));
+        this.changed();
+        return;
+      }
+      case 'emojiFx': {
+        // клики собеседника по большому эмодзи: сообщению ставится отметка, лента проигрывает эффект с теми же паузами
+        if (f.userId === this.cfg.userId || this.store.blocks.table.get(f.userId)) return;
+        if (!this.store.messageById(f.chatId, f.id)) return;   // не загружено — показывать негде
+        this.store.patchMessage(f.chatId, f.id, { fx: { key: f.key, t: f.t, at: Date.now() } });
         this.changed();
         return;
       }

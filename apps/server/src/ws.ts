@@ -20,6 +20,8 @@ const opened = (sock: ChatSocket | undefined, ms = 5000) => sock?.data.opened ? 
 
 /** publish — разослать кадр в топик (шина Valkey: «печатает…»); у тестов без сокетов — no-op.
  *  sessionId — сеанс сокета (кнопки «Нового входа» отличают этот сеанс от остальных); sock — сам сокет (подписки на журналы чатов). */
+const emojiFxAt = new Map<string, number>();   // последний emojiFx по «пользователь:чат»
+
 export async function handleFrame(userId: number, frame: ClientFrame, publish: (topic: string, msg: string) => void = () => {}, sessionId?: number, sock?: ChatSocket): Promise<ServerFrame[]> {
   const reqId = 'reqId' in frame ? frame.reqId : undefined;
   try {
@@ -39,6 +41,22 @@ export async function handleFrame(userId: number, frame: ClientFrame, publish: (
           return [];
         }
         // личный: собеседнику, кроме того, кто заблокировал отправителя
+        const rows = await sql`
+          select m.user_id, exists (select 1 from blocks b where b.owner_id = m.user_id and b.user_id = ${userId}) as blocked
+            from chat_members m where m.chat_id = ${frame.chatId} and m.user_id <> ${userId}`;
+        for (const r of rows) if (!r.blocked) publish(`user:${r.user_id}`, msg);
+        return [];
+      }
+      case 'emojiFx': {
+        // клики по большому эмодзи — только личный чат и не чаще раза в секунду на (пользователь, чат); в журнал не пишем
+        const rk = userId + ':' + frame.chatId, now = Date.now();
+        if (now - (emojiFxAt.get(rk) ?? 0) < 1000) return [];
+        emojiFxAt.set(rk, now);
+        if (emojiFxAt.size > 10_000) emojiFxAt.clear();
+        const [c] = await sql`select c.kind from chats c join chat_members m on m.chat_id = c.id and m.user_id = ${userId}
+                               where c.id = ${frame.chatId} and c.kind = 'direct' and c.deleted_at is null`;
+        if (!c) return [];
+        const msg = JSON.stringify({ op: 'emojiFx', chatId: frame.chatId, id: frame.id, key: frame.key, t: frame.t, userId } satisfies ServerFrame);
         const rows = await sql`
           select m.user_id, exists (select 1 from blocks b where b.owner_id = m.user_id and b.user_id = ${userId}) as blocked
             from chat_members m where m.chat_id = ${frame.chatId} and m.user_id <> ${userId}`;
