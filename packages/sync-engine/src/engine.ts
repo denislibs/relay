@@ -1,5 +1,5 @@
 import { deviceFetch, signDevice } from './device';
-import { MAX_FILE_BYTES, MEDIA_TABS, type MediaTab } from '@relay/protocol';
+import { draftHash, MAX_FILE_BYTES, MEDIA_TABS, type MediaTab } from '@relay/protocol';
 import type { ClientFrame, JournalEntry, Me, SettingsSnapshot, Message, PublicUser, ServerFrame, ThreadGuest } from '@relay/protocol';
 import { Blocks } from './blocks';
 import { Contacts } from './contacts';
@@ -754,6 +754,18 @@ export class Engine {
     };
   }
 
+  /**
+   * Отправка забирает черновик чата: здесь — пустой, и пустой уходит на сервер (pushDrafts), как любая правка; хеш
+   * забранного текста едет с сообщением (draftHash в протоколе) — сервер сотрёт свою копию, только если она та же.
+   * Так отправка без сети, дошедшая позже, не стирает черновик, набранный после неё; а очередь черновиков (в памяти)
+   * не обязана пережить перезагрузку — хеш лежит в очереди отправки.
+   */
+  private async takeDraft(chatId: number): Promise<string> {
+    const text = this.store.chats.get(chatId)?.draft?.text ?? '';
+    if (this.store.setDraft(chatId, '')) this.store.pendingDrafts.add(chatId);
+    return draftHash(text);
+  }
+
   /** Отправить на сервер черновики этого устройства (сервер разнесёт их по остальным через журнал). */
   private pushDrafts(): void {
     if (!this.online || !this.ready) return;
@@ -1015,16 +1027,17 @@ export class Engine {
     switch (a.type) {
       case 'sendMessage': {
         const clientId = crypto.randomUUID();
+        const draft = await this.takeDraft(a.chatId);   // отправили — черновик больше не нужен
         this.lastCreated = Math.max(Date.now(), this.lastCreated + 1); // порядок черновиков внутри одной миллисекунды
-        this.store.addPending({ clientId, chatId: a.chatId, body: a.body, entities: a.entities ?? [], replyToId: a.replyToId ?? null, createdAt: this.lastCreated, failed: false,
+        this.store.addPending({ clientId, chatId: a.chatId, body: a.body, entities: a.entities ?? [], replyToId: a.replyToId ?? null, createdAt: this.lastCreated, failed: false, draftHash: draft,
           ...(a.noLinkPreview ? { noLinkPreview: true } : a.link ? { link: a.link } : {}),
           ...(a.attachment && a.attachment.id ? { attachment: a.attachment } : {}),
           ...(a.blocks && a.blocks.length ? { blocks: a.blocks } : {}),
           ...(a.threadId != null ? { threadId: a.threadId } : {}) });
-        this.store.setDraft(a.chatId, '');   // отправили — черновик больше не нужен
         await this.store.flush();
         this.changed();
         this.pumpOutbox();
+        this.pushDrafts();
         return { clientId };
       }
       case 'seen': {
@@ -1123,7 +1136,7 @@ export class Engine {
         const clientId = crypto.randomUUID();
         this.lastCreated = Math.max(Date.now(), this.lastCreated + 1);
         const todo = { title: a.todo.title, items: a.todo.items.map((it, i) => ({ id: i + 1, title: it.title })), othersCanAppend: a.todo.othersCanAppend, othersCanComplete: a.todo.othersCanComplete, completions: [] };
-        this.store.addPending({ clientId, chatId: a.chatId, body: a.todo.title, entities: [], replyToId: a.replyToId ?? null, createdAt: this.lastCreated, failed: false, todo });
+        this.store.addPending({ clientId, chatId: a.chatId, body: a.todo.title, entities: [], replyToId: a.replyToId ?? null, createdAt: this.lastCreated, failed: false, todo, draftHash: null });
         await this.store.flush();
         this.changed();
         this.pumpOutbox();
@@ -1231,21 +1244,22 @@ export class Engine {
         // больше предела — не ставим в очередь вовсе (интерфейс уже показал, почему): сервер всё равно откажет
         if (a.file.size > MAX_FILE_BYTES) throw new Error('file_too_big');
         const clientId = crypto.randomUUID();
+        const draft = await this.takeDraft(a.chatId);
         this.lastCreated = Math.max(Date.now(), this.lastCreated + 1);
         // большой файл может не влезть в квоту IndexedDB — тогда держим его в памяти (не переживёт перезагрузку, но уйдёт)
         await putBlob(this.db, clientId, a.file).catch((err) => { this.dev.log.error('putBlob', err); this.memBlobs.set(clientId, a.file); });
         const photo = !a.kind && /^image\//.test(a.mime) && !!a.w && !!a.h;
         const sized = photo || a.kind === 'round' || a.kind === 'video';
-        this.store.addPending({ clientId, chatId: a.chatId, body: a.body, replyToId: a.replyToId ?? null, createdAt: this.lastCreated, failed: false,
+        this.store.addPending({ clientId, chatId: a.chatId, body: a.body, replyToId: a.replyToId ?? null, createdAt: this.lastCreated, failed: false, draftHash: draft,
           ...(a.groupId ? { groupId: a.groupId } : {}), ...(a.threadId != null ? { threadId: a.threadId } : {}),
           attachment: { id: '', kind: a.kind ?? (photo ? 'photo' : 'file'), mime: a.mime, name: a.name, size: a.file.size, w: sized ? a.w ?? null : null, h: sized ? a.h ?? null : null, thumb: a.thumb ?? null,
             ...(a.kind ? { duration: a.duration ?? null, waveform: a.waveform ?? null } : {}),
             ...(a.kind === 'audio' ? { title: a.title ?? null, performer: a.performer ?? null } : {}),
             ...(a.spoiler && (photo || a.kind === 'video') ? { spoiler: true } : {}) } });
-        this.store.setDraft(a.chatId, '');
         await this.store.flush();
         this.changed();
         this.pumpOutbox();
+        this.pushDrafts();
         return { clientId };
       }
       case 'forwardMessages': {
@@ -1253,7 +1267,7 @@ export class Engine {
         // альбом остаётся альбомом: у копий одной группы — общий новый groupId (свой в каждом чате)
         const srcs = a.ids.map((id) => this.store.messageById(a.fromChatId, id)).filter((m): m is LocalMessage => !!m && m.id != null && !m.deleted && !m.service);
         const clientIds: string[] = [];
-        const queue = (o: Omit<OutboxEntry, 'clientId' | 'createdAt' | 'failed'>) => {
+        const queue = (o: Omit<OutboxEntry, 'clientId' | 'createdAt' | 'failed'>) => {   // draftHash: копии черновик не трогают
           const clientId = crypto.randomUUID();
           this.lastCreated = Math.max(Date.now(), this.lastCreated + 1);
           this.store.addPending({ ...o, clientId, createdAt: this.lastCreated, failed: false });
@@ -1264,7 +1278,8 @@ export class Engine {
         const takeReply = () => { const r = reply; reply = null; return r; };
         for (const chatId of a.toChatIds) {
           const comment = a.comment?.body.trim() ? a.comment : null;
-          if (comment) queue({ chatId, body: comment.body, entities: comment.entities ?? [], replyToId: takeReply() });
+          // подпись набрана в поле ввода — она и забирает черновик чата
+          if (comment) queue({ chatId, body: comment.body, entities: comment.entities ?? [], replyToId: takeReply(), draftHash: await this.takeDraft(chatId) });
           const groups = new Map<string, string>();
           for (const m of srcs) {
             const dropCaption = !!a.hideCaption && !!m.attachment;
@@ -1274,14 +1289,14 @@ export class Engine {
               : { userId: m.senderId, name: this.nameOf(m.senderId), chatId: a.fromChatId, messageId: m.id!, at: m.createdAt });
             let groupId: string | null = null;
             if (m.groupId && m.attachment) { groupId = groups.get(m.groupId) ?? crypto.randomUUID(); groups.set(m.groupId, groupId); }
-            queue({ chatId, body: dropCaption ? '' : m.body, entities: dropCaption ? [] : m.entities ?? [], replyToId: takeReply(), attachment: m.attachment ?? null,
+            queue({ chatId, body: dropCaption ? '' : m.body, entities: dropCaption ? [] : m.entities ?? [], replyToId: takeReply(), attachment: m.attachment ?? null, draftHash: null,
               ...(groupId ? { groupId } : {}), forward: { chatId: a.fromChatId, id: m.id!, ...(a.hideSender ? { hideSender: true } : {}), ...(a.hideCaption ? { hideCaption: true } : {}) }, fwdFrom });
           }
-          if (comment) this.store.setDraft(chatId, '');
         }
         await this.store.flush();
         this.changed();
         this.pumpOutbox();
+        this.pushDrafts();
         return { clientIds };
       }
       case 'loadMoreChats':
@@ -1352,7 +1367,7 @@ export class Engine {
       case 'sendSticker': {
         const clientId = crypto.randomUUID();
         this.lastCreated = Math.max(Date.now(), this.lastCreated + 1);
-        this.store.addPending({ clientId, chatId: a.chatId, body: '', entities: [], replyToId: a.replyToId ?? null, createdAt: this.lastCreated, failed: false, sticker: a.sticker, ...(a.threadId != null ? { threadId: a.threadId } : {}) });
+        this.store.addPending({ clientId, chatId: a.chatId, body: '', entities: [], replyToId: a.replyToId ?? null, createdAt: this.lastCreated, failed: false, sticker: a.sticker, draftHash: null, ...(a.threadId != null ? { threadId: a.threadId } : {}) });
         await this.store.flush();
         this.changed();
         this.pumpOutbox();
@@ -2335,7 +2350,7 @@ export class Engine {
           if (!next || !this.online) break;
           try {
             const att = next.attachment ? { id: next.attachment.id, thumb: next.attachment.thumb ?? null, ...(next.attachment.spoiler ? { spoiler: true } : {}) } : null;
-            const r = await this.request({ op: 'send', reqId: '', clientId: next.clientId, chatId: next.chatId, body: next.body, entities: next.entities ?? [], replyToId: next.replyToId, attachment: next.forward ? null : att, ...(next.groupId ? { groupId: next.groupId } : {}), ...(next.forward ? { forward: next.forward } : {}), ...(next.noLinkPreview ? { noLinkPreview: true } : {}), ...(next.blocks ? { blocks: next.blocks } : {}), ...(next.sticker ? { sticker: { id: next.sticker.id } } : {}), ...(next.todo ? { todo: { title: next.todo.title, items: next.todo.items.map((x) => ({ title: x.title })), othersCanAppend: next.todo.othersCanAppend, othersCanComplete: next.todo.othersCanComplete } } : {}), ...(next.threadId != null ? { threadId: next.threadId } : {}) });
+            const r = await this.request({ op: 'send', reqId: '', clientId: next.clientId, chatId: next.chatId, body: next.body, entities: next.entities ?? [], replyToId: next.replyToId, attachment: next.forward ? null : att, ...(next.groupId ? { groupId: next.groupId } : {}), ...(next.forward ? { forward: next.forward } : {}), ...(next.noLinkPreview ? { noLinkPreview: true } : {}), ...(next.blocks ? { blocks: next.blocks } : {}), ...(next.sticker ? { sticker: { id: next.sticker.id } } : {}), ...(next.todo ? { todo: { title: next.todo.title, items: next.todo.items.map((x) => ({ title: x.title })), othersCanAppend: next.todo.othersCanAppend, othersCanComplete: next.todo.othersCanComplete } } : {}), ...(next.threadId != null ? { threadId: next.threadId } : {}), ...(next.draftHash !== undefined ? { draftHash: next.draftHash } : {}) });
             this.store.ack(next.clientId, r.id as number, r.createdAt as string);
             // своё опустило начало живого отрезка ниже seed — сообщения между ними догрузить (страница перед seed)
             const c = this.store.chats.get(next.chatId), live = c?.ranges[c.ranges.length - 1];

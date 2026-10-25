@@ -1,4 +1,4 @@
-import { normalizeEntities, type Entity, type Update } from '@relay/protocol';
+import { draftHash, normalizeEntities, type Entity, type Update } from '@relay/protocol';
 import { sql, type Tx } from '../db';
 import { assertMember } from './chats';
 import { DomainError } from './errors';
@@ -33,8 +33,15 @@ export async function saveDraft(userId: number, chatId: number, text: string, ra
   });
 }
 
-/** Отправили сообщение — черновик этого чата больше не нужен (в той же транзакции, что и сообщение). */
-export async function clearDraftInTx(tx: Tx, userId: number, chatId: number): Promise<void> {
+/** Отправили сообщение — черновик этого чата больше не нужен (в той же транзакции, что и сообщение).
+ *  expect — хеш черновика, который забрала отправка: другой текст (набран после неё) не трогаем. */
+export async function clearDraftInTx(tx: Tx, userId: number, chatId: number, expect?: string): Promise<void> {
+  if (expect !== undefined) {
+    const [row] = await tx`select user_id, chat_id, text, entities, content from drafts where user_id = ${userId} and chat_id = ${chatId} for update`;
+    if (!row) return;
+    await openDrafts([row]);
+    if (await draftHash(String(row.text ?? '')) !== expect) return;
+  }
   const del = await tx`delete from drafts where user_id = ${userId} and chat_id = ${chatId} returning 1`;
   if (del.length) await appendUpdates(tx, [{ userId, update: { type: 'draft', chatId, text: '', at: new Date().toISOString() } }]);
 }
