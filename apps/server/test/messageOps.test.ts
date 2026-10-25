@@ -32,3 +32,15 @@ test('edit, react, delete: journal events for every member, rules enforced, hist
   const types = (await getUpdates(b, 0)).items.map((i) => i.update.type);
   expect(types).toEqual(['messageDeleted', 'messageDeleted', 'reactions', 'reactions', 'reactions', 'messageDeleted']);
 });
+
+test('forwarded message is not editable by whoever forwarded it; a forward without the author is', async () => {
+  const a = await makeUser('a'), b = await makeUser('b'), c = await makeUser('c');
+  const ab = await makeChat([a, b]), bc = await makeChat([b, c]);
+  const { message: src } = await sendMessage(a, { chatId: ab, clientId: crypto.randomUUID(), body: 'текст Анны' });
+  const { message: fwd } = await sendMessage(b, { chatId: bc, clientId: crypto.randomUUID(), body: '', forward: { chatId: ab, id: src.id } });
+  expect(fwd.fwdFrom).toBeTruthy();
+  await expect(editMessage(b, bc, fwd.id, 'подменил')).rejects.toMatchObject({ code: 'forbidden' });
+  const { message: copy } = await sendMessage(b, { chatId: bc, clientId: crypto.randomUUID(), body: '', forward: { chatId: ab, id: src.id, hideSender: true } });
+  expect(copy.fwdFrom).toBeUndefined();
+  expect((await editMessage(b, bc, copy.id, 'уже моё')).editedAt).toBeTruthy();
+});

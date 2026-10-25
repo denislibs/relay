@@ -44,6 +44,10 @@ export async function editMessage(userId: number, chatId: number, id: number, bo
       const [m] = await tx`select deleted, service_type from messages where chat_id = ${chatId} and id = ${id} for update`;
       if (!m || m.deleted || m.service_type) throw new DomainError('not_found', 'message');
     } else await ownMessage(tx, userId, chatId, id);   // в служебном чате — тоже только свои (сообщения Relay не правятся)
+    // пересланное — чужой текст: как в Telegram, его не правит ни переславший, ни админ канала
+    // (пересылка «без автора» — уже своё сообщение, fwd_from у неё нет)
+    const [f] = await tx`select fwd_from is not null as fwd from messages where chat_id = ${chatId} and id = ${id}`;
+    if (f?.fwd) throw new DomainError('forbidden', 'forwarded');
     // заблокированный не правит сообщения в личном чате с тем, кто его заблокировал
     if (await blockedInDirect(tx, chatId, userId)) throw new DomainError('blocked');
     await burnCodes(tx, userId, text);

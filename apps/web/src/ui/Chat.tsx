@@ -365,7 +365,7 @@ export function Chat({ chatId, frameKey, active, threadId }: { chatId: number; f
   const editLast = () => {
     for (let i = messages.length - 1; i >= 0; i--) {
       const m = messages[i];
-      if (m.senderId === me.userId && m.id != null && !m.deleted && (m.kind ?? 'text') === 'text') { startEdit(m); return; }
+      if (m.senderId === me.userId && m.id != null && !m.deleted && !m.fwdFrom && (m.kind ?? 'text') === 'text') { startEdit(m); return; }
     }
   };
   // ⌘↑ / ⌘↓ в пустом поле — выбрать сообщение для ответа (дальше конца — отменить ответ)
@@ -718,7 +718,7 @@ export function Chat({ chatId, frameKey, active, threadId }: { chatId: number; f
                 onClose={() => setMenu(null)}
                 items={[
                   ...(menuMsg.id != null && !menuMsg.deleted && !system && !channel ? [{ icon: 'reply', label: 'Ответить', onClick: () => { if (editing) endEdit(editing.draft); setReplyKey(menuMsg.key as string); api.current?.focus({ end: true }); } }] : []),
-                  ...(own && !system && !menuMsg.blocks ? [{ icon: 'pencil', label: 'Изменить', onClick: () => { if (menuMsg.kind === 'todo') { if (!menuMsg.fwdFrom) setTodoOpen({ mode: 'edit', msg: menuMsg }); } else startEdit(menuMsg); } }] : []),
+                  ...(own && !system && !menuMsg.blocks && !menuMsg.fwdFrom ? [{ icon: 'pencil', label: 'Изменить', onClick: () => { if (menuMsg.kind === 'todo') setTodoOpen({ mode: 'edit', msg: menuMsg }); else startEdit(menuMsg); } }] : []),
                   // чек-лист: добавить задачу — автору или всем, если автор разрешил; не больше 30
                   ...(menuMsg.kind === 'todo' && menuMsg.todo && !menuMsg.fwdFrom && menuMsg.id != null && (own || (menuMsg.todo as Todo).othersCanAppend) && (menuMsg.todo as Todo).items.length < TODO_ITEMS_MAX
                     ? [{ icon: 'plus', label: 'Добавить задачу', onClick: () => setTodoOpen({ mode: 'append', msg: menuMsg }) }] : []),
