@@ -3,7 +3,7 @@ import type { ServiceData, ServiceType } from '@relay/protocol';
 import type { Item } from '@relay/sync-engine/src/types';
 import { avatarPhoto, senderAvatar } from '../profilePhoto';
 import type { Entity, MessageButton, ProfilePhoto, Todo } from '@relay/protocol';
-import { Presence, ProgressRing, useMinVisible, MediaPolicy, ArticleBlocks, Avatar, Bubble, Icon, peerTone, DateDivider, DatePicker, FileBubble, MediaBubble, MessageText, VoiceBubble, MusicBubble, RoundBubble, player, MediaViewer, ScrollToBottom, beginHeavyAnimation, forceMeasure, isHeavyAnimating, onHeavyAnimationEnd, requestMeasure, requestMutation, selectionValue, TodoBubble, InlineKeyboard, StickerBubble, reducedMotion } from '@relay/ui';
+import { Presence, ProgressRing, useMinVisible, MediaPolicy, ArticleBlocks, Avatar, Bubble, Icon, peerTone, DateDivider, DatePicker, FileBubble, MediaBubble, MessageText, VoiceBubble, MusicBubble, RoundBubble, player, MediaViewer, ScrollToBottom, beginHeavyAnimation, forceMeasure, isHeavyAnimating, onHeavyAnimationEnd, requestMeasure, requestMutation, selectionValue, TodoBubble, InlineKeyboard, StickerBubble, reducedMotion, LazyRoot } from '@relay/ui';
 import { openStickerSet, sendSticker, useGreetingSticker } from '../stickers';
 import { historyEmpty } from '../greeting';
 import { GreetingCard } from './GreetingCard';
@@ -498,6 +498,10 @@ export function Feed({ frameKey, active, chatId, threadId, channel = false, meId
   if (pickDate && !pickerUsed) setPickerUsed(true);
   const unread = useGlobal((s) => (findChat(s, chatId)?.unread as number) ?? 0);
   const el = useRef<HTMLDivElement>(null);
+  // корень ленивых картинок — сама лента: наблюдатель с корнем-окном не видит строки, обрезанные прокруткой ленты,
+  // и запас 500 px не работал (плитки грузились только уже в экране). Состояние — чтобы провайдер получил узел после монтирования
+  const [lazyRoot, setLazyRoot] = useState<HTMLElement | null>(null);
+  useLayoutEffect(() => { setLazyRoot(el.current); }, []);
   const metaRef = useRef(meta); metaRef.current = meta;
   const anchor = useRef<{ key: string; sort: number; top: number } | null>(null);   // якорь до сдвига окна
   const toBottom = useRef(false);                                     // после перехода к хвосту — вниз
@@ -1411,7 +1415,7 @@ export function Feed({ frameKey, active, chatId, threadId, channel = false, meId
     <>
       {greetReady ? <Presence show={greetShown} exitMs={GREET_FLIGHT_MS + GREET_LAND_MS + 60}><GreetingCard sticker={greetSticker} onSend={onGreet} /></Presence> : null}
       {threadId != null ? <Presence show={threadLoading} exitMs={200}><div class="app-thread-loading" role="status" aria-label="Загрузка комментариев"><span class="app-thread-spinner"><ProgressRing size={32} onMedia /></span></div></Presence> : null}
-      <div class={'rl-feed' + (selVis ? ' app-feed-selecting' : '') + (selOn && selecting ? ' app-feed-sel-on' : '')} ref={el} onScroll={onScroll} onClick={onClick} onClickCapture={selecting ? onSelectClick : undefined} onPointerDownCapture={selecting ? onSelectDown : undefined} onContextMenu={onContextMenu} aria-live="polite">{out}</div>
+      <div class={'rl-feed' + (selVis ? ' app-feed-selecting' : '') + (selOn && selecting ? ' app-feed-sel-on' : '')} ref={el} onScroll={onScroll} onClick={onClick} onClickCapture={selecting ? onSelectClick : undefined} onPointerDownCapture={selecting ? onSelectDown : undefined} onContextMenu={onContextMenu} aria-live="polite"><LazyRoot.Provider value={lazyRoot}>{out}</LazyRoot.Provider></div>
       {openIndex !== null && photos[openIndex] ? (
         <MediaViewer
           index={openIndex}
