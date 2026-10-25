@@ -121,3 +121,10 @@ test('viewer first layer: what the bubble already shows (medium / preview), neve
   expect(viewerPreview({ ...big, id: '', variants: [medium] })).toBeUndefined();
   expect(viewerPreview({ id: 'v1', kind: 'video', mime: 'video/mp4', w: 1280, h: 720, preview, variants: [medium] })).toBeUndefined();
 });
+
+test('GIF in the bubble is the original (server copies are the first frame), so the viewer has no static first layer', () => {
+  const gif = { id: 'g', kind: 'photo', mime: 'image/gif', w: 1200, h: 900, preview: { w: 480, h: 360, size: 1 }, variants: [{ name: 'medium', w: 800, h: 600, size: 2 }] };
+  expect(bubbleSrc(gif)).toBe('/files/g');
+  expect(viewerPreview(gif)).toBeUndefined();
+  expect(bubbleSrc({ ...gif, mime: 'image/jpeg' })).toBe('/files/g/medium');
+});

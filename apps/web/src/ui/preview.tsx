@@ -92,6 +92,7 @@ export function previewBody(m: LastMessage, withThumb: boolean): ComponentChildr
   const text = code ? hideCode(m.body) : m.body;
   const entities = code ? [] : m.entities;
   const caption = text ? previewText(text, entities) : null;
+  if (m.kind === 'photo' && m.mime === 'image/gif') return withThumb ? caption ?? 'GIF' : ['🎞 ', caption ?? 'GIF'];
   if (m.kind === 'photo') return caption ?? (withThumb ? 'Фото' : '🖼 Фото');
   if (m.kind === 'video') return withThumb ? caption ?? 'Видео' : ['📹 ', caption ?? 'Видео'];
   if (m.kind === 'voice') return caption ?? '🎤 Голосовое сообщение';

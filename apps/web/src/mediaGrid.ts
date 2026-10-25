@@ -15,6 +15,8 @@ export type BubbleAtt = TileAtt & { w?: number | null; h?: number | null; varian
  *  сам размером с medium и резче превью. Видео и всё прочее — оригинал. Оригинал фото — для просмотрщика. */
 export const bubbleSrc = (a: BubbleAtt): string => {
   if (a.kind !== 'photo') return `/files/${a.id}`;
+  // GIF — оригинал: копии сервера — первый кадр, анимация пропала бы (как «GIF» в Telegram — играет в ленте)
+  if (a.mime === 'image/gif') return `/files/${a.id}`;
   if (a.variants?.some((v) => v.name === 'medium')) return `/files/${a.id}/medium`;
   if (a.preview && Math.max(a.w ?? 0, a.h ?? 0) > BUBBLE_SIDE) return `/files/${a.id}/preview`;
   return `/files/${a.id}`;

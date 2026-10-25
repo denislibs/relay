@@ -172,7 +172,7 @@ const Row = memo(function Row({ post, pinned, discussion, chatId, voiceTitle, au
           fwd={fwd} reply={replyQ}
           aside={aside}
           from={out ? 'out' : 'in'} tail={end} groupStart={start} appear={appear}
-          items={album.map((x) => { const a = x.attachment as Att; const local = localPreview(x.key); return { src: local ?? (a.id ? bubbleSrc(a) : undefined), inline: local ? undefined : inlineUrl(a), thumb: a.thumb, alt: a.name, w: a.w, h: a.h, mkey: x.key, skey: x.key, kind: a.kind === 'video' ? 'video' : 'image', duration: a.duration ?? 0, spoiler: !!a.spoiler,
+          items={album.map((x) => { const a = x.attachment as Att; const local = localPreview(x.key); return { src: local ?? (a.id ? bubbleSrc(a) : undefined), inline: local ? undefined : inlineUrl(a), thumb: a.thumb, alt: a.name, w: a.w, h: a.h, mkey: x.key, skey: x.key, kind: a.kind === 'video' ? 'video' : 'image', gif: a.mime === 'image/gif', duration: a.duration ?? 0, spoiler: !!a.spoiler,
             sel: selIn !== undefined ? selIn.split(',').includes(x.key as string) : undefined }; })}
           state={busy ? 'loading' : 'ready'} progress={busy ? Math.min(...album.map((x) => (typeof x.progress === 'number' ? x.progress as number : 1))) : undefined}
           caption={cap ? <MessageText text={cap.body as string} entities={cap.entities as Entity[] | undefined} highlight={hl} /> : undefined}
@@ -197,7 +197,7 @@ const Row = memo(function Row({ post, pinned, discussion, chatId, voiceTitle, au
           fwd={fwd} reply={replyQ}
           aside={aside}
           from={out ? 'out' : 'in'} tail={end} groupStart={start} appear={appear}
-          items={[{ src, inline: local ? undefined : inlineUrl(att), thumb: att.thumb, alt: att.name, skey: m.key, kind: att.kind === 'video' ? 'video' : 'image', duration: att.duration ?? 0, spoiler: !!att.spoiler }]}
+          items={[{ src, inline: local ? undefined : inlineUrl(att), thumb: att.thumb, alt: att.name, skey: m.key, kind: att.kind === 'video' ? 'video' : 'image', gif: att.mime === 'image/gif', duration: att.duration ?? 0, spoiler: !!att.spoiler }]}
           ratio={`${att.w} / ${att.h}`} size={att.kind === 'video' ? fileSize(att.size) : undefined}
           state={pending ? 'loading' : 'ready'} progress={m.progress as number}
           onCancel={pending && mineSend ? () => discardUnsent(m.key as string) : undefined}
