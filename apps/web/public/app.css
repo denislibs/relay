@@ -1311,3 +1311,22 @@ html[data-anim="0"] :is(.app-enter-reload, .app-enter-login) :is(.rl-shell-side,
 .rl-presence[data-state="closing"] .app-greeting-sticker:not(.is-flying) { animation: app-fade-out 200ms var(--ease-in) forwards; }
 .app-thread-spinner { display: grid; place-items: center; width: 48px; height: 48px; border-radius: 50%; background: rgba(0, 0, 0, .35); }
 .app-readby-wait { display: grid; place-items: center; min-height: 60px; }
+
+/* ---------- Полный пикер реакций (по шеврону панели быстрых реакций) ---------- */
+.app-rpanel-root { position: fixed; inset: 0; z-index: 1502; }
+/* окно выше скрима (.rl-pop-scrim z-index 1500 внутри корня) */
+.app-rpanel { position: fixed; z-index: 1501; display: flex; flex-direction: column; height: var(--rpanel-h, 420px); max-height: calc(100vh - 16px); border-radius: 20px; background: var(--raised); box-shadow: 0 5px 10px 5px rgba(16, 35, 47, .14); overflow: hidden; transform-origin: 144px 74px; animation: app-rpanel-in 200ms cubic-bezier(.4, 0, .2, 1) both; }
+/* ограниченный набор чата — одна сетка по содержимому, не выше 288 px */
+.app-rpanel.is-shrink { max-height: 288px; transform-origin: 144px 40px; }
+@keyframes app-rpanel-in { from { opacity: 0; transform: scale(.85); } to { opacity: 1; transform: none; } }
+.app-rpanel .app-sym-search { flex: none; margin: 8px 8px 4px; }
+.app-rpanel-body { flex: 1 1 auto; min-height: 0; overflow-y: auto; padding: 4px 0 8px; }
+.app-rpanel-sec h4 { margin: 0; padding: 10px 12px 4px; font: 500 13px/16px var(--font-sans); color: var(--sym-muted); }
+.app-rpanel-cell { position: relative; display: grid; place-items: center; width: 42px; height: 42px; padding: 0; border: 0; border-radius: 10px; background: transparent; font-size: 30px; line-height: 1; cursor: pointer; }
+.app-rpanel-cell:hover, .app-rpanel-cell:focus-visible, .app-rpanel-cell.is-on { background: var(--sym-hover); }
+.app-rpanel-cell.is-on { background: var(--accent-soft); }
+.app-rpanel-cell img { width: 36px; height: 36px; }
+/* select при наведении — поверх картинки, тем же размером */
+.app-rpanel-cell .rl-sticker { position: absolute; left: 3px; top: 3px; }
+.app-rpanel-cell:has(.rl-sticker-ready) img { visibility: hidden; }
+@media (prefers-reduced-motion: reduce) { .app-rpanel { animation-duration: 1ms; } }

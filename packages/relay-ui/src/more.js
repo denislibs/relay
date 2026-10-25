@@ -70,21 +70,6 @@ function Menu(props) {
         onBack: function () { closeSub(true); var b = ref.current && ref.current.querySelector('.rl-menu-item-open'); if (b) b.focus(); } })), document.body) : null);
 }
 
-/* ---------- ReactionPicker: quick reactions row (emoji are content, not UI icons) ---------- */
-/** emoji — список (из каталога реакций), icons(emoji) — адрес картинки реакции (нет — глиф), more — шеврон «ещё». */
-function ReactionPicker(props) {
-  var list = props.emoji || [];
-  return h('div', { class: 'rl-rpick', role: 'toolbar', 'aria-label': 'Реакции' },
-    list.map(function (e, i) {
-      var icon = props.icons ? props.icons(e) : null;
-      return h('button', { key: e, type: 'button', class: cx('rl-rpick-btn', props.selected === e && 'rl-rpick-on'), style: { '--i': i }, 'aria-label': 'Реакция ' + e, 'aria-pressed': String(props.selected === e),
-        onClick: function () { if (props.onPick) props.onPick(e); } }, icon ? h('img', { class: 'rl-rpick-img', src: icon, alt: '', draggable: false, decoding: 'async' }) : e);
-    }),
-    // шеврон «ещё» — только когда доступных реакций больше, чем в панели (как в Telegram)
-    props.more ? h('button', { type: 'button', class: 'rl-rpick-btn rl-rpick-more', style: { '--i': list.length }, 'aria-label': 'Другие реакции', onClick: props.onMore }, h(Icon, { name: 'chevronDown', size: 22 })) : null,
-    h('i', { class: 'rl-rpick-tail', 'aria-hidden': 'true' }));
-}
-
 /* ---------- MentionList: @-autocomplete above the composer ---------- */
 function MentionList(props) {
   return h('div', { class: 'rl-mentions', role: 'listbox', 'aria-label': 'Участники' },
@@ -1173,4 +1158,4 @@ function GlassBar(props) {
   return h('header', { class: cx('rl-glassbar', props.class) }, props.children);
 }
 
-export { patternColor, intensityAlpha, Wallpaper, nudgeWallpaper, buildPattern, loadPattern, patternSize, PATTERN_FILES, DOODLES, PATTERN_SETS, FloatShell, SideResizer, SidebarCard, SidebarHeader, FolderTabs, FolderRail, Fab, GlassBar, WindowList, WindowGrid, gridLayout, AsidePanel, SideFrame, SlideStack, Menu, ReactionPicker, MentionList, DropOverlay, LinkPreview, PollBubble, UnreadDivider, SelectionBar, ChatSearchBar, Highlight, ContactPicker, CallRow, StatusAvatar, LoginQR, VirtualList, BottomNav, Tooltip, plural };
+export { patternColor, intensityAlpha, Wallpaper, nudgeWallpaper, buildPattern, loadPattern, patternSize, PATTERN_FILES, DOODLES, PATTERN_SETS, FloatShell, SideResizer, SidebarCard, SidebarHeader, FolderTabs, FolderRail, Fab, GlassBar, WindowList, WindowGrid, gridLayout, AsidePanel, SideFrame, SlideStack, Menu, MentionList, DropOverlay, LinkPreview, PollBubble, UnreadDivider, SelectionBar, ChatSearchBar, Highlight, ContactPicker, CallRow, StatusAvatar, LoginQR, VirtualList, BottomNav, Tooltip, plural };
