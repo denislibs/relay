@@ -1,6 +1,7 @@
 import { isGroupService, serviceText } from './serviceText';
 import type { ServiceData, ServiceType } from '@relay/protocol';
 import type { Item } from '@relay/sync-engine/src/types';
+import { unsupportedText } from './messageStub';
 import { avatarPhoto, senderAvatar } from '../profilePhoto';
 import { reactionIcon, useReactionCatalog } from '../reactions';
 import { animatedEmojiUrl, useAnimatedEmoji } from '../animatedEmoji';
@@ -278,7 +279,8 @@ const Row = memo(function Row({ post, pinned, discussion, chatId, voiceTitle, au
       </div>
     );
   }
-  if (att && !m.deleted && att.id !== undefined && att.kind === 'file') {
+  // файл — и фото/видео без размеров (рамку не рассчитать): скачать можно, пустого пузыря нет
+  if (att && !m.deleted && att.id !== undefined && (att.kind === 'file' || att.kind === 'photo' || att.kind === 'video')) {
     const ext = (att.name.split('.').pop() ?? 'file').slice(0, 4);
     return (
       <div class={wrap('app-msg')} data-key={m.key} data-sort={m.sort as number}>
@@ -338,6 +340,7 @@ const Row = memo(function Row({ post, pinned, discussion, chatId, voiceTitle, au
       </div>
     );
   }
+  const stub = m.deleted ? null : unsupportedText(m);
   return (
     <div class={wrap('app-msg')} data-key={m.key} data-sort={m.sort as number}>
       {check}
@@ -369,9 +372,10 @@ const Row = memo(function Row({ post, pinned, discussion, chatId, voiceTitle, au
             : <InlineKeyboard rows={m.deleted ? null : m.buttons as MessageButton[][] | null} onPress={sel === undefined ? (b: MessageButton) => pressButton(chatId, m.id as number, b.data ?? '') : undefined} />)
           : undefined}
       >
+        {stub ? <span class="app-msg-stub">{stub}</span> : null}
         {m.blocks && !m.deleted
           ? <ArticleBlocks blocks={m.blocks} highlight={hl} />
-          : <MessageText text={m.body as string} entities={m.entities as Entity[] | undefined} highlight={hl} />}
+          : m.body || !stub ? <MessageText text={m.body as string} entities={m.entities as Entity[] | undefined} highlight={hl} /> : null}
       </Bubble>
       {m.id != null ? <i class="app-mark" data-mid={m.id as number} aria-hidden="true" /> : null}
     </div>

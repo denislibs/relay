@@ -769,6 +769,7 @@ html[data-anim="0"] .app-chatcol, html[data-anim="0"] .app-chatcol-below, html[d
 .app-pins-segs i.app-pins-on { background: var(--brand-strong); }
 .app-pins-thumb { flex: none; width: 36px; height: 36px; border-radius: 4px; object-fit: cover; }
 .app-pins-thumb-round { border-radius: 50%; }
+.app-pins-thumb-node { display: grid; place-items: center; border-radius: 0; }
 .app-pins-text { flex: 1; min-width: 0; display: flex; flex-direction: column; font: 400 14px/18px var(--font-sans); }
 .app-pins-text b { font-weight: 500; color: var(--brand-text, var(--brand-strong)); }
 .app-pins-text > span { color: var(--ink); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; animation: app-pins-swap 220ms var(--ease-out) both; }
@@ -1374,3 +1375,7 @@ html[data-anim="0"] :is(.app-enter-reload, .app-enter-login) :is(.rl-shell-side,
 .app-rpanel-cell .rl-sticker { position: absolute; left: 3px; top: 3px; }
 .app-rpanel-cell:has(.rl-sticker-ready) img { visibility: hidden; }
 @media (prefers-reduced-motion: reduce) { .app-rpanel { animation-duration: 1ms; } }
+
+/* заглушка вместо пустого пузыря: неподдерживаемый тип или содержимое, которое не открылось */
+.app-msg-stub { display: block; font-style: italic; color: var(--ink-muted); }
+.app-msg-stub + * { margin-top: 4px; }
