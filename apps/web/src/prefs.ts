@@ -27,6 +27,7 @@ export interface Prefs {
   screen: { blur: boolean; blurDelay: number; hideChatInTitle: boolean; hideUnreadInTitle: boolean; hideNotifyText: boolean };
   media: { keepDays: number; maxMb: number };   // кэш вложений: 0 — без срока / без лимита
   dev: { enabled: boolean };
+  bigEmoji: boolean;   // сообщение из одних эмодзи — крупно, один эмодзи — анимированный (как в Telegram)
   folders: { position: 'top' | 'left' };   // вкладки папок: полосой над списком или колонкой слева
 }
 
@@ -53,6 +54,7 @@ export function defaultPrefs(reduced = false): Prefs {
     screen: { blur: false, blurDelay: 0, hideChatInTitle: false, hideUnreadInTitle: false, hideNotifyText: false },
     media: { keepDays: 30, maxMb: 0 },
     dev: { enabled: false },
+    bigEmoji: true,
     folders: { position: 'top' },
   };
 }
@@ -101,6 +103,7 @@ function sanitize(src: Prefs, d: Prefs): Prefs {
   if (p.folders.position !== 'top' && p.folders.position !== 'left') p.folders.position = d.folders.position;
   if (p.timeFormat !== '12h' && p.timeFormat !== '24h') p.timeFormat = null;
   if (![0, 1, 2].includes(p.anim.level)) p.anim.level = d.anim.level;
+  if (typeof p.bigEmoji !== 'boolean') p.bigEmoji = d.bigEmoji;
   p.textSize = Math.min(20, Math.max(12, Math.round(num(p.textSize, d.textSize))));
   p.notify.volume = Math.min(1, Math.max(0, num(p.notify.volume, d.notify.volume)));
   p.autoload.fileMaxMb = nearest(FILE_MB, num(p.autoload.fileMaxMb, d.autoload.fileMaxMb));

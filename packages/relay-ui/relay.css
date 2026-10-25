@@ -2417,6 +2417,11 @@ html[data-blur="0"] .rl-menu { -webkit-backdrop-filter: none; backdrop-filter: n
 .rl-sticker-head .rl-quote-in { margin: 0; }
 .rl-sticker-box { position: relative; line-height: 0; }
 .rl-sticker-meta { right: 0; bottom: 0; }
+/* сообщение из одних эмодзи: без пузыря; крупные глифы (2–7 — по таблице, больше — 36 px), время под ними справа */
+.rl-emoji-msg .rl-sticker-box { min-width: 112px; }
+.rl-emoji-box { margin-bottom: 18px; max-width: 420px; }
+.rl-emoji-text { display: block; padding: 4px 0 0; line-height: 1.15; white-space: pre-wrap; word-break: break-word; font-family: var(--font-sans); user-select: text; }
+.rl-emoji-box .rl-sticker-meta { bottom: -18px; }
 
 /* ---------- Панель эмодзи и стикеров над полем ввода ---------- */
 .rl-emoji-toggle-on { color: var(--brand-strong); }
