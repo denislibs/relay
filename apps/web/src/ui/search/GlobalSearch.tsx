@@ -17,7 +17,8 @@ import {
 import { chatTime, chatTone, fileSize, isSystemChat, shownBody, snippet } from '../format';
 import { attachmentHit } from '../../searchHit';
 import { subscribersText } from '../../channelText';
-import { dur, extTone, fileUrl, MediaCell, type Msg, when } from '../SharedMedia';
+import { dur, extTone, fileUrl, MediaGrid, type Msg, when } from '../SharedMedia';
+import { MediaActions, MediaTabsSlot, useMediaPick } from '../mediaMenu';
 
 // Глобальный поиск — содержимое левой колонки в режиме поиска (как в Telegram Web): вкладки сверху,
 // «Чаты» (недавние и частые без запроса; чаты, люди и сообщения с запросом) и вкладки медиа по всем чатам.
@@ -34,13 +35,20 @@ export function GlobalSearch() {
     addEventListener('keydown', onKey);
     return () => removeEventListener('keydown', onKey);
   }, []);
+  // выбор медиа (как в Telegram Web K): пилюля «✕ N сообщений ⟶» вместо вкладок; другой запрос или вкладка — выбор снят
+  const pick = useMediaPick(null, tab + '\n' + q);
+  // вкладки плавают над выдачей (как в Telegram): прокрутка уходит под полупрозрачную пилюлю
   return (
     <div class="app-gsearch">
       <div class="app-gsearch-tabs">
-        <FolderTabs label="Разделы поиска" active={tab} onChange={(id: SearchTab) => setSearchTab(id)} items={SEARCH_TABS} />
+        <MediaTabsSlot pick={pick}>
+          <FolderTabs label="Разделы поиска" active={tab} onChange={(id: SearchTab) => setSearchTab(id)} items={SEARCH_TABS} />
+        </MediaTabsSlot>
       </div>
       <div class="app-gsearch-pages">
-        <SlideStack variant="tabs" order={order} active={tab} render={(k: string) => (k === 'chats' ? <ChatsTab q={q} /> : <MediaTab key={k} kind={k as MediaTab} q={q} />)} />
+        <MediaActions chatId={null} pick={pick} show={(m: Msg) => showMessage(m.chatId as number, m.id)}>
+          <SlideStack variant="tabs" order={order} active={tab} render={(k: string) => (k === 'chats' ? <ChatsTab q={q} /> : <MediaTab key={k} kind={k as MediaTab} q={q} />)} />
+        </MediaActions>
       </div>
     </div>
   );
@@ -324,10 +332,12 @@ function MediaTab({ kind, q }: { kind: MediaTab; q: string }) {
       const k = photos.findIndex((h) => h.message.id === m.id && h.message.chatId === m.chatId);
       if (k >= 0) setViewer(k); else showMessage(m.chatId as number, m.id);
     };
+    // та же виртуальная сетка, что в правой панели: плашка даты при прокрутке, меню плитки, выбор;
+    // следующая страница — когда окно сетки дошло до хвоста
+    const nextPage = state.more ? () => load(state.next ?? state.hits[state.hits.length - 1].message.id) : undefined;
     return (
       <div class="app-gsearch-scroll">
-        <div class="app-media-grid app-gsearch-grid" ref={grid}>{state.hits.map((h) => <MediaCell key={h.message.chatId + ':' + h.message.id} m={h.message} onOpen={open} />)}</div>
-        {state.more ? <div ref={end} class="app-sm-more" /> : null}
+        <MediaGrid class="app-gsearch-grid" items={state.hits.map((h) => h.message)} onOpen={open} host={grid} onNearEnd={nextPage} nearKey={state.hits.length + ':' + state.more} />
         {viewer !== null && photos[viewer] ? (
           <MediaViewer index={viewer}
             items={photos.map((h) => { const a = h.message.attachment!; return { src: fileUrl(a), thumb: a.thumb, w: a.w, h: a.h, name: a.name, download: fileUrl(a) + '?download=1', caption: h.message.body, date: when(h.message.createdAt), sender: who(h), avatar: senderAvatar(h.message.senderId) }; })}

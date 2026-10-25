@@ -2,7 +2,7 @@
 // ждёт в поле ввода (можно дописать комментарий, скрыть отправителя или подписи); несколько — уходит сразу во все.
 import type { Entity } from '@relay/protocol';
 import { forwardMessages, openInner, sentSound } from './data';
-import { getGlobal, setGlobal, type ForwardDraft } from './global';
+import { getGlobal, setGlobal, type ForwardDraft, type ForwardPick } from './global';
 import { showToast } from './settingsData';
 import { plural } from '@relay/ui';
 
@@ -11,8 +11,15 @@ const KIND: Record<string, string> = { photo: 'Фото', file: 'Файл', voic
 
 /** Открыть окно «Переслать в…» для сообщений чата fromChatId (по порядку в ленте); nameOf — имя автора для панели. */
 export function startForward(fromChatId: number, items: Src[], nameOf: (userId: number) => string): void {
-  const list = items.filter((m) => m.id != null && !m.deleted && !m.service).sort((a, b) => (a.id as number) - (b.id as number));
-  if (!list.length) return;
+  startForwardMany([{ chatId: fromChatId, items }], nameOf);
+}
+
+/** То же для сообщений из нескольких чатов (выбор в глобальном поиске): пересылаются по чатам, в порядке групп. */
+export function startForwardMany(groups: { chatId: number; items: Src[] }[], nameOf: (userId: number) => string): void {
+  const parts = groups.map((g) => ({ chatId: g.chatId, list: g.items.filter((m) => m.id != null && !m.deleted && !m.service).sort((a, b) => (a.id as number) - (b.id as number)) }))
+    .filter((g) => g.list.length);
+  if (!parts.length) return;
+  const list = parts.flatMap((g) => g.list);
   const senders: { id: number; name: string }[] = [];
   for (const m of list) {
     // у пересланного — исходный автор, как и покажет получатель
@@ -24,7 +31,9 @@ export function startForward(fromChatId: number, items: Src[], nameOf: (userId: 
   const att = first.attachment as { kind?: string; name?: string } | null | undefined;
   const text = (first.body as string) || (att ? (att.kind === 'file' && att.name ? att.name : KIND[att.kind ?? ''] ?? 'Вложение') : '');
   const captions = list.some((m) => !!m.attachment && !!m.body);
-  setGlobal({ fwdPick: { fromChatId, ids: list.map((m) => m.id as number), preview: { senders, text, count: list.length, captions } } });
+  const [head, ...rest] = parts;
+  setGlobal({ fwdPick: { fromChatId: head.chatId, ids: head.list.map((m) => m.id as number), ...(rest.length ? { more: rest.map((g) => ({ fromChatId: g.chatId, ids: g.list.map((m) => m.id as number) })) } : {}),
+    preview: { senders, text, count: list.length, captions } } });
 }
 
 export function closeForwardPick(): void { setGlobal({ fwdPick: null }); }
@@ -41,7 +50,7 @@ export async function forwardTo(chatIds: number[], comment: string): Promise<voi
     return;
   }
   sentSound();
-  await forwardMessages({ fromChatId: pick.fromChatId, ids: pick.ids, toChatIds: chatIds, comment: comment.trim() ? { body: comment } : null });
+  await forwardParts(pick, { toChatIds: chatIds, comment: comment.trim() ? { body: comment } : null });
   const n = chatIds.length, chats = `${n} ${plural(n, 'чат', 'чата', 'чатов')}`;
   showToast(pick.ids.length > 1 ? `Сообщения пересланы в ${chats}` : `Сообщение переслано в ${chats}`);
 }
@@ -65,7 +74,7 @@ export function forwardElsewhere(chatId: number): void {
   const d = getGlobal().fwdDraft[chatId];
   if (!d) return;
   cancelForwardDraft(chatId);
-  setGlobal({ fwdPick: { fromChatId: d.fromChatId, ids: d.ids, preview: d.preview } });
+  setGlobal({ fwdPick: { fromChatId: d.fromChatId, ids: d.ids, ...(d.more ? { more: d.more } : {}), preview: d.preview } });
 }
 
 /** Отправка из поля ввода: комментарий (если есть) первым, затем пересланное. */
@@ -74,8 +83,14 @@ export async function sendForwardDraft(chatId: number, body: string, entities: E
   if (!d) return;
   cancelForwardDraft(chatId);
   sentSound();
-  await forwardMessages({ fromChatId: d.fromChatId, ids: d.ids, toChatIds: [chatId], hideSender: d.hideSender, hideCaption: d.hideCaption,
-    comment: body.trim() ? { body, entities } : null });
+  await forwardParts(d, { toChatIds: [chatId], hideSender: d.hideSender, hideCaption: d.hideCaption, comment: body.trim() ? { body, entities } : null });
+}
+
+type ForwardOpts = Omit<Parameters<typeof forwardMessages>[0], 'fromChatId' | 'ids'>;
+/** Пересылка по чатам-источникам: комментарий — только с первой частью (он уходит первым, перед пересланным). */
+async function forwardParts(p: ForwardPick, o: ForwardOpts): Promise<void> {
+  const parts = [{ fromChatId: p.fromChatId, ids: p.ids }, ...(p.more ?? [])];
+  for (let i = 0; i < parts.length; i++) await forwardMessages({ ...o, ...parts[i], comment: i ? null : o.comment });
 }
 
 /** Режим выбора: начать с сообщения (у альбома — все его ключи), отметить/снять, выйти. */

@@ -107,8 +107,8 @@ export type DevTab = 'overview' | 'log' | 'network' | 'data' | 'errors';
 export interface DevSimFlags { offline: boolean; profile: { latency: number; jitter: number; lossPct: number; kbps: number } | null; dropNextUpdates: boolean; forceTooLong: boolean; persist: boolean }
 
 /** Настройки аккаунта (общие для устройств). loaded — снимок с сервера уже был; pending — есть неподтверждённые правки. */
-/** Что пересылаем: сообщения fromChatId по порядку. */
-export interface ForwardPick { fromChatId: number; ids: number[]; preview: ForwardPreview }
+/** Что пересылаем: сообщения fromChatId по порядку; more — ещё из других чатов (выбор в глобальном поиске), каждый чат своим вызовом. */
+export interface ForwardPick { fromChatId: number; ids: number[]; more?: { fromChatId: number; ids: number[] }[]; preview: ForwardPreview }
 /** Для панели в поле ввода: авторы, текст первого, сколько и есть ли подписи у медиа. */
 export interface ForwardPreview { senders: { id: number; name: string }[]; text: string; count: number; captions: boolean }
 /** Пересылка в поле ввода: с опциями «скрыть отправителя / подписи». */
