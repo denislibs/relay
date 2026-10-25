@@ -18,7 +18,7 @@ const chat = async (a: { userId: number; token: string }, kind: 'direct' | 'grou
   ((await (await fetch(`${base}/dev/chats`, { method: 'POST', headers: { cookie: `relay_session=${a.token}` }, body: JSON.stringify({ kind, title: kind === 'group' ? 'Чат' : null, memberIds: members }) })).json()) as { id: number }).id;
 const silence = (ws: WebSocket, ms = 300) => new Promise<boolean>((ok) => { const on = (e: MessageEvent) => { if ((JSON.parse(String(e.data)) as ServerFrame).op === 'emojiFx') { ws.removeEventListener('message', on); ok(false); } }; ws.addEventListener('message', on); setTimeout(() => { ws.removeEventListener('message', on); ok(true); }, ms); });
 
-test('direct chat: the peer gets the batch with userId; a second batch within a second is dropped', async () => {
+test('direct chat: the peer gets the batch with userId; a second batch on the same message within 800 ms is dropped, another message passes', async () => {
   const a = await login('Анна'), b = await login('Борис');
   const chatId = await chat(a, 'direct', [a.userId, b.userId]);
   const wa = await connect(a.token), wb = await connect(b.token);
@@ -27,6 +27,9 @@ test('direct chat: the peer gets the batch with userId; a second batch within a 
   expect(await got).toEqual({ op: 'emojiFx', chatId, id: 1, key: '❤', t: [0, 0.4], userId: a.userId } satisfies ServerFrame);
   wa.send(JSON.stringify({ op: 'emojiFx', chatId, id: 1, key: '❤', t: [0] }));
   expect(await silence(wb)).toBe(true);
+  const other = nextFrame(wb, (f) => f.op === 'emojiFx' && f.id === 2);
+  wa.send(JSON.stringify({ op: 'emojiFx', chatId, id: 2, key: '🔥', t: [0] }));   // другое сообщение — не под лимитом
+  expect((await other).op).toBe('emojiFx');
   wa.close(); wb.close();
 });
 

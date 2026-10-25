@@ -1564,7 +1564,9 @@ export class Engine {
         // клики собеседника по большому эмодзи: сообщению ставится отметка, лента проигрывает эффект с теми же паузами
         if (f.userId === this.cfg.userId || this.store.blocks.table.get(f.userId)) return;
         if (!this.store.messageById(f.chatId, f.id)) return;   // не загружено — показывать негде
-        this.store.patchMessage(f.chatId, f.id, { fx: { key: f.key, t: f.t, at: Date.now() } });
+        this.store.emojiFx.set(f.chatId + ':' + f.id, { key: f.key, t: f.t, at: Date.now() });
+        if (this.store.emojiFx.size > 200) this.store.emojiFx.clear();
+        this.store.retouch(f.chatId);   // лента чата пересчитается (карта — не сообщение, сама чат не трогает)
         this.changed();
         return;
       }

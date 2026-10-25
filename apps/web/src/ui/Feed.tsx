@@ -98,10 +98,10 @@ const Row = memo(function Row({ post, pinned, discussion, chatId, voiceTitle, au
   useLayoutEffect(() => {
     if (!direct || !bigEmoji) return;
     const fx = m.fx as { key: string; t: number[]; at: number } | undefined;
-    if (fx) scheduleIncomingFx(m.key as string, fx);
+    if (fx) scheduleIncomingFx(m.key as string, fx, out);
     if (appear && !autoFx.current) {
       const eo1 = !att && !m.sticker && !m.service ? emojiOnly(m.body as string, m.entities as Entity[] | undefined) : null;
-      if (eo1?.count === 1) {
+      if (eo1?.count === 1 && animatedEmojiUrl(eo1.keys[0])) {
         autoFx.current = true;
         const el = document.querySelector<HTMLElement>(`.app-chatcol[data-current] .app-msg[data-key="${CSS.escape(m.key as string)}"] .rl-emoji-one`);
         if (el) playEmojiEffect(el, eo1.keys[0], out);

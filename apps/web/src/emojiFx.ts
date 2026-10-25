@@ -47,7 +47,7 @@ export function playEmojiEffect(el: HTMLElement, key: string, out: boolean): boo
  * синтетический (проигрывание его пачки) — нет.
  */
 export function clickBigEmoji(chatId: number, id: number, key: string, el: HTMLElement, out: boolean, trusted: boolean): void {
-  playEmojiEffect(el, key, out);
+  if (!playEmojiEffect(el, key, out)) return;   // эффекты выключены — собеседнику тоже ничего
   if (trusted && id > 0) batcher.click(chatId, id, key);
 }
 
@@ -55,18 +55,20 @@ const played = new Set<number>();   // at пачек, которые уже пр
 export const FX_STALE_MS = 10_000;
 
 /** Чужая пачка на сообщении: эффекты с теми же паузами — синтетический клик по стикеру (анимация заново + эффект). */
-export function scheduleIncomingFx(msgKey: string, fx: { key: string; t: number[]; at: number }): void {
+export function scheduleIncomingFx(msgKey: string, fx: { key: string; t: number[]; at: number }, out: boolean): void {
   if (played.has(fx.at) || Date.now() - fx.at > FX_STALE_MS || !emojiFxEnabled()) return;
   played.add(fx.at);
   if (played.size > 200) played.clear();
   for (const t of fx.t.slice(0, EMOJI_FX_MAX)) {
     setTimeout(() => {
       const col = document.querySelector('.app-chatcol[data-current]') ?? document;
-      const el = col.querySelector<HTMLElement>(`.app-msg[data-key="${CSS.escape(msgKey)}"] .rl-emoji-one .rl-sticker`);
-      if (!el) return;
-      const r = el.getBoundingClientRect();
+      const one = col.querySelector<HTMLElement>(`.app-msg[data-key="${CSS.escape(msgKey)}"] .rl-emoji-one`);
+      if (!one) return;
+      const r = one.getBoundingClientRect();
       if (r.bottom < 0 || r.top > window.innerHeight) return;   // не на экране — молча
-      el.dispatchEvent(new MouseEvent('click', { bubbles: true }));   // не trusted — обратно не уйдёт
+      const sticker = one.querySelector<HTMLElement>('.rl-sticker');
+      if (sticker) sticker.dispatchEvent(new MouseEvent('click', { bubbles: true }));   // не trusted — обратно не уйдёт
+      else playEmojiEffect(one, fx.key, out);   // эмодзи без анимации в наборе — только эффект
     }, Math.max(0, t * 1000));
   }
 }

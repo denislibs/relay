@@ -20,7 +20,7 @@ const opened = (sock: ChatSocket | undefined, ms = 5000) => sock?.data.opened ? 
 
 /** publish — разослать кадр в топик (шина Valkey: «печатает…»); у тестов без сокетов — no-op.
  *  sessionId — сеанс сокета (кнопки «Нового входа» отличают этот сеанс от остальных); sock — сам сокет (подписки на журналы чатов). */
-const emojiFxAt = new Map<string, number>();   // последний emojiFx по «пользователь:чат»
+const emojiFxAt = new Map<string, number>();   // последний emojiFx по «пользователь:чат:сообщение»
 
 export async function handleFrame(userId: number, frame: ClientFrame, publish: (topic: string, msg: string) => void = () => {}, sessionId?: number, sock?: ChatSocket): Promise<ServerFrame[]> {
   const reqId = 'reqId' in frame ? frame.reqId : undefined;
@@ -48,9 +48,10 @@ export async function handleFrame(userId: number, frame: ClientFrame, publish: (
         return [];
       }
       case 'emojiFx': {
-        // клики по большому эмодзи — только личный чат и не чаще раза в секунду на (пользователь, чат); в журнал не пишем
-        const rk = userId + ':' + frame.chatId, now = Date.now();
-        if (now - (emojiFxAt.get(rk) ?? 0) < 1000) return [];
+        // клики по большому эмодзи — только личный чат; пачки на одно сообщение клиент шлёт не чаще раза в секунду —
+        // лимит на (пользователь, чат, сообщение) с запасом на дрожание сети; в журнал не пишем
+        const rk = userId + ':' + frame.chatId + ':' + frame.id, now = Date.now();
+        if (now - (emojiFxAt.get(rk) ?? 0) < 800) return [];
         emojiFxAt.set(rk, now);
         if (emojiFxAt.size > 10_000) emojiFxAt.clear();
         const [c] = await sql`select c.kind from chats c join chat_members m on m.chat_id = c.id and m.user_id = ${userId}

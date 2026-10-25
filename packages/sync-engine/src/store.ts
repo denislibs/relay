@@ -316,6 +316,8 @@ export class Store {
   quoteFor(chatId: number, id: number) { return this.quotes.get(chatId + ':' + id); }
   /** Кто сейчас печатает: chatId → userId. Только в памяти — это состояние момента. */
   typing = new Map<number, Set<number>>();
+  /** Клики собеседника по большому эмодзи: «чат:id» → пачка; эфемерно (в IndexedDB не пишется, после перезагрузки нет). */
+  emojiFx = new Map<string, { key: string; t: number[]; at: number }>();
   setTyping(chatId: number, userId: number, on: boolean): void {
     let set = this.typing.get(chatId);
     if (on) { if (!set) { set = new Set(); this.typing.set(chatId, set); } if (set.has(userId)) return; set.add(userId); }

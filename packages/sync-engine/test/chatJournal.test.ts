@@ -245,7 +245,7 @@ test('typing from myself or from a blocked user is dropped (group topic sends it
   expect(chatOf(list.list(), g)?.typing).toBe(false);
 });
 
-test('emojiFx from the peer marks the message (fx: key, t, at); my own and from a blocked user are dropped', async () => {
+test('emojiFx from the peer marks the message (fx: key, t, at) without touching the store; my own is dropped', async () => {
   const { a, b, g } = await group();
   const eb = await open(srv.config(b));
   eb.connect(); await eb.whenIdle();
@@ -259,4 +259,7 @@ test('emojiFx from the peer marks the message (fx: key, t, at); my own and from 
   inject(eb, { op: 'emojiFx', chatId: g, id, key: '🔥', t: [0], userId: b.userId });   // своя — мимо
   await Bun.sleep(50);
   expect((feed.list().find((m) => m.id === id) as { fx: { key: string } }).fx.key).toBe('❤');
+  // отметка эфемерная: в самом сообщении стора её нет
+  const store = (eb as unknown as { store: { messageById(c: number, i: number): { fx?: unknown } | undefined } }).store;
+  expect(store.messageById(g, id)?.fx).toBeUndefined();
 });
