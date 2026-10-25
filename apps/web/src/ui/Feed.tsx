@@ -623,21 +623,24 @@ export function Feed({ frameKey, active, chatId, threadId, channel = false, meId
         viewAnchor.current = viewAnchorOf(root);
         // лесенка появления (reveal.ts): только первый кадр чата, не тред и не переход к сообщению; до конца перехода
         // стека строки скрыты (app-feed-wait), потом снизу вверх по 10 мс под своим окном тяжёлой анимации —
-        // сдвиг окна и медиа ждут её конца (прошлые пустоты при быстрой прокрутке были из-за сдвига посреди анимации)
+        // сдвиг окна и медиа ждут её конца (прошлые пустоты при быстрой прокрутке были из-за сдвига посреди анимации).
+        // Окно анимации перехода открывается после первого патча ленты, то есть уже после этого кадра — спрашиваем
+        // про него следующим кадром; порядок строк снимаем перед самым стартом: первый снимок мог быть короче
+        // (история догрузилась за время перехода), и дорисованные строки тоже встают в лесенку
         if (threadId == null && !focus && !reducedMotion() && !document.hidden) {
-          const rr = root.getBoundingClientRect();
-          const boxes = [...root.querySelectorAll<HTMLElement>('.app-msg')].map((r) => { const b = r.getBoundingClientRect(); return { el: r, key: r.dataset.key!, top: b.top - rr.top, bottom: b.bottom - rr.top }; });
-          const order = revealOrder(boxes, 0, rr.height), total = revealTotalMs(order.size);
-          for (const b of boxes) b.el.style.setProperty('--reveal', String(order.get(b.key) ?? 0));
           root.classList.add('app-feed-wait');
-          // окно анимации перехода стека открывается после первого патча ленты, то есть уже после этого кадра —
-          // спрашиваем про него следующим кадром, иначе лесенка стартовала бы посреди перехода
-          requestMeasure(() => onHeavyAnimationEnd(() => requestMutation(() => {
-            if (!root.isConnected) { root.classList.remove('app-feed-wait'); return; }
-            root.classList.remove('app-feed-wait'); root.classList.add('app-feed-reveal');
-            const end = beginHeavyAnimation(total);
-            // по таймеру, не по animationend: класс снимается и с дорисованных позже строк, у которых анимации не было
-            setTimeout(() => { root.classList.remove('app-feed-reveal'); for (const b of boxes) b.el.style.removeProperty('--reveal'); end(); }, total + 60);
+          requestMeasure(() => onHeavyAnimationEnd(() => requestMeasure(() => {
+            if (!root.isConnected) return;
+            const rr = root.getBoundingClientRect();
+            const boxes = [...root.querySelectorAll<HTMLElement>('.app-msg')].map((r) => { const b = r.getBoundingClientRect(); return { el: r, key: r.dataset.key!, top: b.top - rr.top, bottom: b.bottom - rr.top }; });
+            const order = revealOrder(boxes, 0, rr.height), total = revealTotalMs(order.size);
+            requestMutation(() => {
+              for (const b of boxes) b.el.style.setProperty('--reveal', String(order.get(b.key) ?? 0));
+              root.classList.remove('app-feed-wait'); root.classList.add('app-feed-reveal');
+              const end = beginHeavyAnimation(total);
+              // по таймеру, не по animationend: класс снимается и с дорисованных позже строк, у которых анимации не было
+              setTimeout(() => { root.classList.remove('app-feed-reveal'); for (const b of boxes) b.el.style.removeProperty('--reveal'); end(); }, total + 60);
+            });
           })));
         }
       });
