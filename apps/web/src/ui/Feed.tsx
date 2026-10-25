@@ -27,6 +27,7 @@ import { bubbleSrc, viewerPreview } from '../mediaGrid';
 import { clock, dayKey, dayLabel, fileSize } from './format';
 import { arrivals, type FeedSeen } from './appear';
 import { deferShift, requestShift, rowFor, shiftWanted } from './windowShift';
+import { driveScroll, jumpNear, DRIVE_MS, DRIVE_OWN_MS, type Drive } from './scrollDrive';
 
 /*
  * Лента сообщений, устроенная как в Telegram:
@@ -523,6 +524,46 @@ export function Feed({ frameKey, active, chatId, threadId, channel = false, meId
   const scrollDir = useRef<-1 | 0 | 1>(0);
   const viewAnchor = useRef<{ key: string; top: number } | null>(null);   // что было вверху видимой части (для смены ширины)
   const lastTop = useRef(0);
+  // программная плавная прокрутка (scrollDrive.ts): одна на ленту, пока едет — события scroll наши, не пользователя
+  const driving = useRef<Drive | null>(null);
+  const driveSince = useRef(0);
+  /** Поехать к цели: далеко — сначала прыжок на экран от неё. Без анимаций или в скрытой вкладке — сразу.
+   *  Вызывать из requestMutation / layout-эффекта: мгновенный путь пишет scrollTop. */
+  const drive = (root: HTMLElement, target: () => number, ms: number) => {
+    driving.current?.cancel();
+    const to = target(), from = root.scrollTop, screen = root.clientHeight;
+    const now = performance.now();
+    // поток сообщений: едем дольше 600 мс подряд — дальше без анимации, пока не будет паузы
+    const flood = driveSince.current > 0 && now - driveSince.current > 600;
+    if (reducedMotion() || document.hidden || flood) { if (Math.abs(to - from) > 0.5) { programmatic.current++; root.scrollTop = to; } return; }
+    if (!driveSince.current) driveSince.current = now;
+    const end = beginHeavyAnimation(ms);
+    driving.current = driveScroll(root, { ms, target, start: jumpNear(from, to, screen) ?? undefined, onEnd: () => {
+      end();
+      driving.current = null;
+      setTimeout(() => { if (!driving.current) driveSince.current = 0; }, 300);
+      // где остановились — пересчитать «прижата к низу» и кнопку «вниз» (события scroll драйвера пропускались)
+      requestMeasure(() => {
+        const fromBottom = root.scrollHeight - root.scrollTop - root.clientHeight, live = metaRef.current?.live ?? true;
+        lastTop.current = root.scrollTop;
+        stick.current = fromBottom < BOTTOM && live;
+        setAway(fromBottom > root.clientHeight || !live);
+      });
+    } });
+  };
+  // первый ввод пользователя обрывает поездку: дальше лента его
+  useEffect(() => {
+    const root = el.current;
+    if (!root) return;
+    const stop = () => driving.current?.cancel();
+    const keys = (e: KeyboardEvent) => { if (/^(Arrow(Up|Down)|Page(Up|Down)|Home|End| )$/.test(e.key)) stop(); };
+    root.addEventListener('wheel', stop, { passive: true });
+    root.addEventListener('touchstart', stop, { passive: true });
+    root.addEventListener('pointerdown', stop);
+    root.addEventListener('keydown', keys);
+    return () => { root.removeEventListener('wheel', stop); root.removeEventListener('touchstart', stop); root.removeEventListener('pointerdown', stop); root.removeEventListener('keydown', keys); };
+  }, [chatId]);
+  useEffect(() => () => driving.current?.cancel(), []);   // размонтирование — драйвер не пишет в мёртвый узел
   // во время тяжёлой анимации сдвиг ждёт её конца (deferShift): перераскладка ленты съедала бы кадры перехода
   const pendingShift = useRef<{ dir: 'older' | 'newer' | null }>({ dir: null });
   const shift = (dir: 'older' | 'newer') => deferShift(pendingShift.current, dir, isHeavyAnimating(), onHeavyAnimationEnd, (d) => {
@@ -574,6 +615,15 @@ export function Feed({ frameKey, active, chatId, threadId, channel = false, meId
         const next = Math.max(0, Math.min(max, top + (row.getBoundingClientRect().top - root.getBoundingClientRect().top) - va.top));
         if (Math.abs(next - top) > 0.5) { programmatic.current++; root.scrollTop = next; }
       });
+      return;
+    }
+    // пришло новое в живую ленту, прижатую к низу (свежие — из arrivals этого рендера) — доезжаем, как Telegram,
+    // а не прыгаем: контент остаётся на месте, лента едет к новому низу. Остальное (якорь, «вниз», перераскладка
+    // при stick) — как раньше, одним кадром
+    const fresh = [...appearAt.current.keys()].filter((k) => !before?.has(k));
+    if (!a && !down && stick.current && fresh.length > 0 && (metaRef.current?.live ?? true)) {
+      const own = fresh.every((k) => messages.find((m) => m.key === k)?.senderId === meId);
+      requestMutation(() => drive(root, () => root.scrollHeight - root.clientHeight, own ? DRIVE_OWN_MS : DRIVE_MS));
       return;
     }
     // как «forced reflow» в Telegram: поправить прокрутку в том же коммите, до отрисовки — иначе
@@ -835,6 +885,7 @@ export function Feed({ frameKey, active, chatId, threadId, channel = false, meId
     // всё чтение — в фазе measure: в самом событии раскладку мог «испачкать» любой код до него (картинка, патч ленты),
     // и чтение scrollTop пересчитывало бы её. Колбэки идут в порядке событий, счётчик нашей прокрутки не сбивается
     requestMeasure(() => {
+      if (driving.current) { lastTop.current = root.scrollTop; return; }   // едем сами: направление, низ и сдвиги не трогаем
       const top = root.scrollTop, prev = lastTop.current;
       lastTop.current = top;
       if (programmatic.current > 0) { programmatic.current--; return; } // наша прокрутка не меняет «прижата к низу»
@@ -853,7 +904,7 @@ export function Feed({ frameKey, active, chatId, threadId, channel = false, meId
     stick.current = true;
     const root = el.current!;
     if (metaRef.current && !metaRef.current.live) { toBottom.current = true; moveWindow('latest', frameKey); return; }
-    requestMeasure(() => { const top = root.scrollHeight; requestMutation(() => root.scrollTo({ top, behavior: 'smooth' })); });
+    requestMutation(() => drive(root, () => root.scrollHeight - root.clientHeight, DRIVE_MS));
   };
 
   // переход к сообщению: строка в окне — плавно к ней (по центру) и подсветить; нет — ждём новое окно
@@ -873,19 +924,11 @@ export function Feed({ frameKey, active, chatId, threadId, channel = false, meId
         if (Math.abs(root.scrollTop - top) > 1) { programmatic.current++; root.scrollTop = top; }
       });
     } else {
-      requestMeasure(() => {
-        const top = Math.max(0, topIn(root, row) - (root.clientHeight - row.offsetHeight) / 2);
-        const from = root.scrollTop, h = root.clientHeight;
-        requestMutation(() => {
-          // как в Telegram: далеко — сначала прыжок почти к цели, плавно — только последний экран
-          // (иначе прокрутка пролетает десятки пузырей и кружков, каждый из которых просыпается — кадры проседают)
-          if (Math.abs(top - from) > h * 2) { programmatic.current++; root.scrollTop = top + (top > from ? -h : h); }
-          // пока едем — тяжёлая анимация: кружки не запускают видео, отложенная работа ждёт
-          const end = beginHeavyAnimation(1200);
-          const done = () => { root.removeEventListener('scrollend', done); end(); };
-          root.addEventListener('scrollend', done);
-          root.scrollTo({ top, behavior: 'smooth' });
-        });
+      requestMutation(() => {
+        // как в Telegram: далеко — сначала прыжок почти к цели (jumpNear внутри drive), плавно — только последний
+        // экран (иначе прокрутка пролетает десятки пузырей и кружков, каждый из которых просыпается — кадры
+        // проседают). Пока едем — тяжёлая анимация: кружки не запускают видео, отложенная работа ждёт
+        drive(root, () => Math.max(0, topIn(root, row) - (root.clientHeight - row.offsetHeight) / 2), DRIVE_MS);
       });
     }
   }, [focus, messages]);
