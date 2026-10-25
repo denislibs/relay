@@ -862,12 +862,22 @@ html[data-anim="0"] :is(.app-hero, .app-hero-photo, .app-hero-info, .app-hero-na
 
 /* ---------- Глобальный поиск (левая колонка), как в Telegram Web ---------- */
 .app-gsearch { display: flex; flex-direction: column; flex: 1; min-height: 0; min-width: 0; width: 100%; background: var(--gsearch-bg);   /* как в Telegram: серая подложка, разделы — белыми карточками */
-   animation: app-gsearch-in 160ms ease both; transform-origin: 50% 0; }
-/* вход в поиск — проявление с лёгким «наездом» (110% → 100%), выход — список возвращается из 95% (как zoomFade в Telegram) */
-@keyframes app-gsearch-in { from { opacity: 0; transform: scale(1.06); } }
-.app-from-search .rl-sidecard-body > .rl-slides { animation: app-list-back 160ms ease both; transform-origin: 50% 0; }
-@keyframes app-list-back { from { opacity: 0; transform: scale(.97); } }
-@media (prefers-reduced-motion: reduce) { .app-gsearch, .rl-sidecard-body > .rl-slides { animation: none !important; } }
+   transform-origin: 50% 0; }
+/* Поиск — слой поверх списка и вкладок (Sidebar), переход как zoomFade в Telegram, 150 мс:
+   вход — список с вкладками и «+» гаснут, поиск проявляется из 110%; выход — поиск гаснет (100 мс), уходя в 110%,
+   список с вкладками возвращается из 95%. Тело колонки не прокручивается (paged) — слой ложится ровно на него. */
+.app-searching .rl-sidecard-body, .app-search-out .rl-sidecard-body { position: relative; }
+.app-search-layer { position: absolute; inset: 0; z-index: 3; display: flex; }
+.app-searching:not(.app-search-in) :is(.rl-sidecard-over, .rl-sidecard-body > .rl-slides, .rl-fab-slot) { visibility: hidden; }
+.app-search-in :is(.rl-sidecard-over, .rl-sidecard-body > .rl-slides, .rl-fab-slot) { animation: app-fade-out 150ms ease both; }
+.app-search-in .app-gsearch { animation: app-gsearch-in 150ms ease both; }
+.app-search-out .app-search-layer { pointer-events: none; }
+.app-search-out .app-gsearch { animation: app-gsearch-out 150ms ease both; }
+.app-search-out :is(.rl-sidecard-over, .rl-sidecard-body > .rl-slides) { animation: app-list-back 150ms ease both; transform-origin: 50% 0; }
+.app-search-out .rl-fab-slot { animation: app-fade 150ms ease both; }
+@keyframes app-gsearch-in { from { opacity: 0; transform: scale(1.1); } }
+@keyframes app-gsearch-out { 0% { opacity: 1; transform: none; } 66% { opacity: 0; } 100% { opacity: 0; transform: scale(1.1); } }
+@keyframes app-list-back { from { opacity: 0; transform: scale(.95); } }
 .app-gsearch-tabs { padding: 8px 12px 10px; }
 .app-gsearch-pages { position: relative; flex: 1; min-height: 0; min-width: 0; display: flex; overflow: hidden; }
 .app-gsearch-pages > * { flex: 1; min-width: 0; }

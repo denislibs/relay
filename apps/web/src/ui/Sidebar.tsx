@@ -1,6 +1,6 @@
 import { ChatBanner } from './ChatBanner';
 import { UpdatePill } from './UpdatePill';
-import { ArchivedRow, Avatar, ChatRow, Highlight, Icon, MenuPopover, Presence, SlideStack, ChatRowSkeleton, useMinVisible, EmptyState, WindowList, FolderTabs, SidebarCard, SidebarHeader, peerTone, ripple } from '@relay/ui';
+import { ArchivedRow, Avatar, ChatRow, Highlight, Icon, MenuPopover, Presence, SlideStack, ChatRowSkeleton, useMinVisible, EmptyState, WindowList, FolderTabs, SidebarCard, SidebarHeader, beginHeavyAnimation, peerTone, reducedMotion, ripple } from '@relay/ui';
 import type { Item } from '@relay/sync-engine/src/types';
 import { loadMoreChats, openChat, prepareChat } from '../data';
 import { pressOpen } from './press';
@@ -97,6 +97,8 @@ const ROW = 72; // высота строки чата (--size-row) — спис�
 
 let listShownAt = 0;   // когда список чатов впервые показан с данными (проявление — только тогда)
 
+const SEARCH_MS = 150;   // как zoomFade у Telegram
+
 export function Sidebar() {
   const [menu, setMenu] = useState<HTMLElement | null>(null);   // главное меню: у кнопки ☰
   // контекстное меню строки чата (правая кнопка): как в Telegram — у курсора
@@ -104,13 +106,25 @@ export function Sidebar() {
   const onRowMenu = useRef((id: number, x: number, y: number) => setRowMenu({ id, x, y })).current;
   // глобальный поиск — свой режим колонки (search/GlobalSearch): вкладки, недавние, выдача по всем чатам
   const searchOpen = useGlobal((s) => s.searchOpen);
-  // список возвращается из поиска — с мягким проявлением (только в этот момент, не при загрузке страницы)
-  const [fromSearch, setFromSearch] = useState(false);
+  // Переход в поиск и обратно — как zoomFade в Telegram: оба экрана на SEARCH_MS лежат друг на друге. Вход: список
+  // с вкладками гаснет, поиск проявляется из 110%; выход: поиск гаснет, уходя в 110%, список возвращается из 95%.
+  // Список не размонтируется (прокрутка и окно на месте). Переход считается прямо в рендере, где сменился режим:
+  // через эффект первый кадр шёл бы без класса — список мелькал целиком и только потом начинал проявляться.
+  const searchAnim = useRef<'in' | 'out' | null>(null);
   const wasSearch = useRef(searchOpen);
-  useEffect(() => {
-    if (wasSearch.current && !searchOpen) { setFromSearch(true); const t = setTimeout(() => setFromSearch(false), 300); wasSearch.current = searchOpen; return () => clearTimeout(t); }
+  const [, redrawSearch] = useState(0);
+  if (wasSearch.current !== searchOpen) {
     wasSearch.current = searchOpen;
+    searchAnim.current = reducedMotion() ? null : searchOpen ? 'in' : 'out';
+  }
+  useEffect(() => {
+    const a = searchAnim.current;
+    if (!a) return;
+    const end = beginHeavyAnimation(SEARCH_MS);
+    const t = setTimeout(() => { if (searchAnim.current === a) { searchAnim.current = null; redrawSearch((n) => n + 1); } end(); }, SEARCH_MS);
+    return () => { clearTimeout(t); end(); };
   }, [searchOpen]);
+  const searchLayer = searchOpen || searchAnim.current === 'out';
   const theme = useGlobal((s) => s.theme);
   useGlobal((s) => s.prefs.timeFormat);   // смена формата времени перерисовывает время в списке
   const dark = isDark(theme);
@@ -239,14 +253,14 @@ export function Sidebar() {
 
   return (
     <SidebarCard
-      class={fromSearch ? 'app-from-search' : undefined}
+      class={[searchOpen && 'app-searching', searchAnim.current && 'app-search-' + searchAnim.current].filter(Boolean).join(' ') || undefined}
       embedded
       paged
       header={<SidebarHeader onMenu={(e: MouseEvent) => setMenu(e.currentTarget as HTMLElement)} back={searchOpen} onBack={closeSearch} status={searchStatus ?? undefined} searchId="side-search" value={search} placeholder="Поиск"
         onSearchFocus={openSearch} onSearchKey={(e: KeyboardEvent) => { if (e.key === 'Escape') { e.preventDefault(); closeSearch(); } }}
         onSearch={(e: Event) => setGlobal({ search: (e.target as HTMLInputElement).value, searchOpen: true })} />}
-      top={!searchOpen ? <ChatBanner /> : null}
-      tabs={place === 'top' && !searchOpen ? <FolderTabs class="app-folders" active={folder} onChange={selectFolder} onItemMenu={folderMenu.open} items={items.map((t, i) => (i === 0 ? { ...t, label: 'Все' } : t))} /> : null}
+      top={<ChatBanner />}
+      tabs={place === 'top' ? <FolderTabs class="app-folders" active={folder} onChange={selectFolder} onItemMenu={folderMenu.open} items={items.map((t, i) => (i === 0 ? { ...t, label: 'Все' } : t))} /> : null}
       banner={
         <>
           <RowMenu at={rowMenu} onClose={() => setRowMenu(null)} />
@@ -272,10 +286,11 @@ export function Sidebar() {
               />
         </>
       }
-      fab={searchOpen ? undefined : <NewChatFab />}
+      fab={<NewChatFab />}
       overlay={<UpdatePill />}
     >
-      {searchOpen ? <GlobalSearch /> : <SlideStack variant="tabs" order={order} active={String(shown)} render={(f: string) => <div class="rl-page-scroll">{renderFolder(f)}</div>} />}
+      <SlideStack variant="tabs" order={order} active={String(shown)} render={(f: string) => <div class="rl-page-scroll">{renderFolder(f)}</div>} />
+      {searchLayer ? <div class="app-search-layer" inert={!searchOpen}><GlobalSearch /></div> : null}
       {folderMenu.node}
     </SidebarCard>
   );
