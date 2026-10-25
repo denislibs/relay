@@ -908,6 +908,15 @@ html[data-anim="0"] :is(.app-hero, .app-hero-photo, .app-hero-info, .app-hero-na
 .app-gsearch { position: relative; --gs-tabs-h: 66px; }
 .app-gsearch-tabs { position: absolute; z-index: 3; top: 0; left: 0; right: 0; padding: 8px 12px 10px; pointer-events: none; }
 .app-gsearch-tabs > * { pointer-events: auto; }
+/* под вкладками — растушёвка цветом шапки, как menu-horizontal-gradient в Telegram Web K: 80 px от верха прокрутки,
+   сверху сплошной цвет, к низу прозрачно; выдача, уехавшая под вкладки, плавно уходит в шапку (тёмная тема — 70 %) */
+.app-gsearch-tabs::before, .rl-aside-tabs::before { content: ''; position: absolute; z-index: -1; top: 0; left: 0; right: 0; height: 80px; pointer-events: none;
+  background: linear-gradient(180deg, color-mix(in srgb, var(--mtabs-fade) var(--mtabs-fade-alpha), transparent), transparent); }
+.app-gsearch-tabs { --mtabs-fade: var(--card); }
+.rl-aside-tabs { --mtabs-fade: var(--page); }
+:root { --mtabs-fade-alpha: 100%; }
+:root[data-theme="dark"] { --mtabs-fade-alpha: 70%; }
+@media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) { --mtabs-fade-alpha: 70%; } }
 .app-gsearch-pages { position: relative; flex: 1; min-height: 0; min-width: 0; display: flex; overflow: hidden; }
 .app-gsearch-pages > * { flex: 1; min-width: 0; }
 .app-gsearch-scroll { height: 100%; overflow-y: auto; padding: var(--gs-tabs-h) 0 16px; scroll-padding-top: var(--gs-tabs-h); scrollbar-width: thin; }
