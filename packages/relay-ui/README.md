@@ -121,7 +121,7 @@ Figtree (Google Fonts) с откатом на Helvetica Neue/Arial; моноши
 - **База:** Icon, Button, IconButton, Chip, Checkbox, Switch, Avatar, Badge, Tooltip, Menu, Toast, Card, Steps.
 - **Раскладка:** Wallpaper (+ nudgeWallpaper), FloatShell, SidebarCard, SidebarHeader, FolderTabs, Fab, GlassBar.
 - **Список чатов:** SearchInput (одно поле поиска на всё приложение: фокус-кольцо, «×», лоадер вместо лупы, Esc, режим «назад», вариант plain и «чипы» внутри; SearchField — старое имя), ChatRow (закреп, черновик, @, без звука), ArchivedRow, ChatRowSkeleton, FlipList, NavRail, BottomNav.
-- **Переписка:** Bubble (ответ, переслано, изменено, удалено, реакции, выбор, вспышка), ReplyQuote, ReactionPicker, MessageStatus, TypingIndicator, DateDivider, UnreadDivider, Composer (ответ, вложения, @-упоминания, запись), AttachMenu, MentionList, SelectionBar, ChatSearchBar + Highlight, VirtualList, ScrollToBottom.
+- **Переписка:** Bubble (ответ, переслано, изменено, удалено, реакции, выбор, вспышка), ReplyQuote, ReactionsBar, MessageStatus, TypingIndicator, DateDivider, UnreadDivider, Composer (ответ, вложения, @-упоминания, запись), AttachMenu, MentionList, SelectionBar, ChatSearchBar + Highlight, VirtualList, ScrollToBottom.
 - **Медиа:** VoiceMessage, VoiceRecorder, MediaBubble, FileBubble, LinkPreview, PollBubble, MediaThumb, MediaViewer, ProgressRing, DropOverlay, MediaArt, Waveform.
 - **Панели и экраны:** PanelHeader, ProfileHeader, ActionTile, InfoRow, ReadMore, ContactPicker, CallRow, StatusAvatar, LoginQR.
 - **Состояния:** Banner, SyncIndicator, LinearProgress, EmptyState, Presence, Modal.

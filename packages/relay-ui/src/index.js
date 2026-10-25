@@ -3,6 +3,7 @@
 export * from './kit.js';
 export * from './searchInput.js';
 export * from './more.js';
+export * from './reactionsBar.js';
 export * from './settings.js';
 export * from './owl.js';
 export * from './schedule.js';

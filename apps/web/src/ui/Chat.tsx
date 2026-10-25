@@ -1,6 +1,8 @@
 import { hasMedia, rightForKind, type GroupInfo, type MemberRight, type MyMembership } from '@relay/protocol';
 import { emojiKey } from '@relay/protocol';
-import { pushRecentReaction, quickReactions, reactionIcon } from '../reactions';
+import { pushRecentReaction, quickAssets, quickReactions } from '../reactions';
+import { ReactionsPanel } from './ReactionsPanel';
+import { getPrefs } from '../prefs';
 import { MEMBER_RIGHT_TEXT } from '../groups';
 import { PinnedBar } from './PinnedBar';
 import { UploadBar } from './UploadBar';
@@ -37,7 +39,7 @@ import { membersStatus, useMembers } from '../members';
 import { Playlist } from './Playlist';
 import { inProfile, toggleProfileMusic, type Track } from '../music';
 import { useOwnMusic } from '../profileLists';
-import { Avatar, Button, Chip, Icon, MediaPolicy, peerTone, ChatSearchBar, Highlight, ripple, useMinVisible, requestMeasure, Composer, DropOverlay, GlassBar, IconButton, MenuPopover, Modal, ConfirmDialog, Presence, ReactionPicker, reducedMotion, plural, requestMutation, SelectionBar, isHeavyAnimating, onHeavyAnimationEnd, applyMarkdown, emptyValue, sameValue, voiceSupported, PlayerBar, roundSupported, startRound, Verified, canCopyImage, clipboardHtml, copyImage, copyRich, downloadUrl, TodoModal, TODO_ITEMS_MAX, DateModal, setDateCopiedToast } from '@relay/ui';
+import { Avatar, Button, Chip, Icon, MediaPolicy, peerTone, ChatSearchBar, Highlight, ripple, useMinVisible, requestMeasure, Composer, DropOverlay, GlassBar, IconButton, MenuPopover, Modal, ConfirmDialog, Presence, ReactionsBar, reducedMotion, plural, requestMutation, SelectionBar, isHeavyAnimating, onHeavyAnimationEnd, applyMarkdown, emptyValue, sameValue, voiceSupported, PlayerBar, roundSupported, startRound, Verified, canCopyImage, clipboardHtml, copyImage, copyRich, downloadUrl, TodoModal, TODO_ITEMS_MAX, DateModal, setDateCopiedToast } from '@relay/ui';
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'preact/hooks';
 import { sendTodo, appendTodo, editTodo, closeChat, deleteMessage, editMessage, focusMessage, openInner, openUserChat, pinMessage, unpinMessage, sendFile, sendFiles, sendRound, sendVoice, react, rejectTooBig, PLAYABLE_VIDEO, retrySend, discardUnsent, saveDraft, searchMessages, send, typing, typingDone } from '../data';
 import { wantPeople } from '../people';
@@ -151,6 +153,8 @@ export function Chat({ chatId, frameKey, active, threadId }: { chatId: number; f
   const shell = useRef<HTMLSpanElement>(null);
   const stick = useRef(true);              // лента прижата к низу (Feed ведёт, отправка выставляет)
   const [menu, setMenu] = useState<{ x: number; y: number; key: string; extra?: MenuExtra } | null>(null);
+  // полный пикер реакций (по шеврону панели): откуда вырос, к какому сообщению, набор чата
+  const [rpanel, setRpanel] = useState<{ bar: { left: number; top: number }; msgId: number; allowed: string[] | null; mine?: string } | null>(null);
   const [fwdMenu, setFwdMenu] = useState<HTMLElement | null>(null);   // опции пересылки в поле ввода
   const [replyKey, setReplyKey] = useState<string | null>(null);
   const [editing, setEditing] = useState<{ id: number; original: Value; draft: Value } | null>(null);   // правка своего сообщения
@@ -714,8 +718,21 @@ export function Chat({ chatId, frameKey, active, threadId }: { chatId: number; f
         return (
           <MenuPopover open anchor={menu} class="app-msgmenu"
             header={menuMsg.id != null && !menuMsg.deleted && !system && !chat?.preview && (!gRights || gRights.react) && gInfo?.reactions.mode !== 'none' ? (
-                <ReactionPicker emoji={quickReactions(gInfo?.reactions.mode === 'some' ? gInfo.reactions.allowed : null)} icons={reactionIcon} more={quickReactions(gInfo?.reactions.mode === 'some' ? gInfo.reactions.allowed : null, 9).length > 8} selected={myReaction ? emojiKey(myReaction) : undefined}
-                  onPick={(emoji: string) => { const off = !!myReaction && emojiKey(myReaction) === emoji; react(chatId, menuMsg.id as number, off ? null : emoji); if (!off) pushRecentReaction(emoji); setMenu(null); }} />
+                (() => {
+                  const allowed = gInfo?.reactions.mode === 'some' ? gInfo.reactions.allowed : null;
+                  const mineKey = myReaction ? emojiKey(myReaction) : undefined;
+                  // как в Telegram: семь и шеврон «ещё»; ровно восемь доступных — все восемь без шеврона; пусто — без панели
+                  const all = quickReactions(allowed, 9).length;
+                  if (!all) return null;
+                  return <ReactionsBar items={quickAssets(allowed, all === 8 ? 8 : 7)} selected={mineKey} animated={getPrefs().anim.level > 0 && !reducedMotion()}
+                    more={all > 8}
+                    onPick={(key: string) => { const off = mineKey === key; react(chatId, menuMsg.id as number, off ? null : key); if (!off) pushRecentReaction(key); setMenu(null); }}
+                    onMore={(e: MouseEvent) => {
+                      const r = (e.currentTarget as HTMLElement).closest('.rl-rpick')!.getBoundingClientRect();
+                      setMenu(null);
+                      setRpanel({ bar: { left: r.left, top: r.top }, msgId: menuMsg.id as number, allowed, mine: mineKey });
+                    }} />;
+                })()
               ) : null}
                 label="Действия с сообщением"
                 onClose={() => setMenu(null)}
@@ -765,6 +782,9 @@ export function Chat({ chatId, frameKey, active, threadId }: { chatId: number; f
                 { icon: 'forward', label: 'Другой чат…', onClick: () => forwardElsewhere(chatId) },
               ]}
       />
+      {rpanel ? <ReactionsPanel bar={rpanel.bar} allowed={rpanel.allowed} selected={rpanel.mine} animated={getPrefs().anim.level > 0 && !reducedMotion()}
+        onPick={(key: string) => { const off = rpanel.mine === key; react(chatId, rpanel.msgId, off ? null : key); if (!off) pushRecentReaction(key); setRpanel(null); }}
+        onClose={() => setRpanel(null)} /> : null}
       <MusicPicker chatId={chatId} open={musicOpen} onClose={() => setMusicOpen(false)} replyToId={(replyTo?.id as number) ?? null} onSent={() => setReplyKey(null)} />
       {dateOpen ? (
         <DateModal

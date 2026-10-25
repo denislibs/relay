@@ -61,6 +61,19 @@ export function pushRecentReaction(emoji: string): void {
  * Реакции для панели и пикера: недавние вперёд, затем каталог; allowed — набор чата («некоторые»), остальные не
  * показываем. n — сколько взять (панель — 7). Без каталога — FALLBACK.
  */
+/** Ассеты для панели быстрых реакций: из каталога, без каталога — глифы (только key). */
+export function quickAssets(allowed?: readonly string[] | null, n = 7): ReactionAsset[] {
+  return quickReactions(allowed, n).map((k) => byKey.get(k) ?? glyph(k));
+}
+/** Весь каталог для полного пикера (с учётом набора чата); без каталога — FALLBACK глифами. */
+export function catalogFor(allowed?: readonly string[] | null): ReactionAsset[] {
+  const base = items.length ? items : FALLBACK.map(glyph);
+  if (!allowed) return base;
+  const ok = new Set(allowed.map(emojiKey));
+  return base.filter((r) => ok.has(r.key));
+}
+const glyph = (key: string): ReactionAsset => ({ key, title: key, inactive: false, static: '', appear: '', select: '', center: null, around: null });
+
 export function quickReactions(allowed?: readonly string[] | null, n = 7): string[] {
   const base = items.length ? items.map((r) => r.key) : FALLBACK;
   const ok = allowed ? new Set(allowed.map(emojiKey)) : null;
