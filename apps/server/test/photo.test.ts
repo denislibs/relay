@@ -249,9 +249,11 @@ test('attachmentUpdated reaches online clients with the sealed text of the attac
   const bytes = await makeImage('live.jpg', 1600, 1200);
   const up = await uploadFile(base, a.token, { name: 'live.jpg', mime: 'image/jpeg', kind: 'photo', w: 1600, h: 1200 }, bytes) as unknown as Attachment;
   const { sendMessage } = await import('../src/domain/messages');
+  // слушатели — до действия: кадр может прийти раньше, чем вернётся вызов
+  const sent = nextFrame(ws, (f) => f.op === 'push' && f.items.some((i) => i.update.type === 'newMessage'), 10_000);
+  const pushed = nextFrame(ws, (f) => f.op === 'push' && f.items.some((i) => i.update.type === 'attachmentUpdated'), 10_000);
   const { message } = await sendMessage(a.userId, { chatId, clientId: crypto.randomUUID(), body: '', attachment: { id: up.id, thumb: 'data:image/jpeg;base64,AAAA' } });
-  await nextFrame(ws, (f) => f.op === 'push' && f.items.some((i) => i.update.type === 'newMessage'));
-  const pushed = nextFrame(ws, (f) => f.op === 'push' && f.items.some((i) => i.update.type === 'attachmentUpdated'));
+  await sent;
   await drainJobs();
   const f = (await pushed) as Extract<ServerFrame, { op: 'push' }>;
   const u = f.items.find((i) => i.update.type === 'attachmentUpdated')!.update as Extract<Update, { type: 'attachmentUpdated' }>;
