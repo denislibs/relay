@@ -33,6 +33,10 @@ export async function startTestServer() {
       const res = await fetch(`${base}/dev/login`, { method: 'POST', body: JSON.stringify({ name }) });
       return (await res.json()) as { userId: number; token: string };
     },
+    async unreadReactions(token: string, chatId: number) {
+      const res = await fetch(`${base}/chats/${chatId}/reactions/unread`, { headers: { cookie: `relay_session=${token}` } });
+      return (await res.json()) as { ids: number[]; count: number };
+    },
     async chat(token: string, memberIds: number[]) {
       const res = await fetch(`${base}/dev/chats`, { method: 'POST', headers: { cookie: `relay_session=${token}` }, body: JSON.stringify({ kind: memberIds.length > 2 ? 'group' : 'direct', title: null, memberIds }) });
       return ((await res.json()) as { id: number }).id;

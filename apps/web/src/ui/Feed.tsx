@@ -12,9 +12,9 @@ import type { QuoteMsg } from '@relay/sync-engine/src/types';
 import { quoteContent } from './preview';
 import { memo } from 'preact/compat';
 import { useContext, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'preact/hooks';
-import { pressButton, toggleTodo, clearFocus, discardUnsent, retrySend, focusMessage, openInner, jumpToDate, localPreview, markListened, moveWindow, react, savePosition, savedPosition, seen, markThreadRead, countViews, nextMention } from '../data';
+import { pressButton, toggleTodo, clearFocus, discardUnsent, retrySend, focusMessage, openInner, jumpToDate, localPreview, markListened, moveWindow, react, savePosition, savedPosition, seen, markThreadRead, countViews, nextMention, nextReaction, readReactions } from '../data';
 import { isPost } from '@relay/sync-engine/src/channel';
-import { Comments, MentionFab, postMeta } from './channel';
+import { Comments, MentionFab, ReactionFab, postMeta } from './channel';
 import { wantPeople } from '../people';
 import { activeFrame, frameByKey, getGlobal, setGlobal, useGlobal, findChat } from '../global';
 import { toggleMusic, trackTitle, useFileCached } from '../music';
@@ -858,6 +858,7 @@ export function Feed({ frameKey, active, chatId, threadId, channel = false, meId
   }, [chatId]);
 
   const scheduleRead = useRef<(() => void) | null>(null);   // вернулись к чату (верхний сняли) — отметить то, что видно
+  const reactionIdsRef = useRef<number[] | null>(null);   // id сообщений с непрочитанной реакцией — для чтения по видимости
   // прочтение: метки под баблами (видна нижняя кромка — прочитано), отправка раз в 150 мс, пауза на тяжёлых анимациях
   const marks = useRef<IntersectionObserver | null>(null);
   const visible = useRef(new Set<number>());
@@ -872,6 +873,9 @@ export function Feed({ frameKey, active, chatId, threadId, channel = false, meId
       for (const id of visible.current) if (id > max) max = id;
       // тред — своя прочитанность (точка у кнопки поста); основную ленту группы он не читает
       if (max) { if (threadId != null) markThreadRead(chatId, threadId, max); else seen(chatId, max); }
+      // мои сообщения с непрочитанной реакцией на экране — реакции прочитаны (как в Telegram: по видимости, не по кнопке)
+      const ur = reactionIdsRef.current;
+      if (ur?.length) { const seenIds = ur.filter((id) => visible.current.has(id)); if (seenIds.length) readReactions(chatId, seenIds); }
       // канал: видимые посты — в просмотры (каждый — один раз за сессию; батч раз в секунду — в движке);
       // превью без подписки — не считаем и не запоминаем: подпишется — посты на экране засчитаются
       if (channel && !findChat(getGlobal(), chatId)?.preview) {
@@ -1209,6 +1213,15 @@ export function Feed({ frameKey, active, chatId, threadId, channel = false, meId
   // канал с группой обсуждения: её id — заглушке кнопки комментариев (пока копия поста не пришла)
   const discussion = useGlobal((s) => (channel && threadId == null ? (findChat(s, chatId)?.group as { linkedChatId?: number | null } | undefined)?.linkedChatId ?? null : null));
   const mentions = useGlobal((s) => (threadId == null ? (findChat(s, chatId)?.mentions as number | undefined) ?? 0 : 0));
+  // непрочитанные реакции на мои сообщения: число и известные id (гасятся, когда сообщение видно на экране — в flush чтения)
+  const reactionsUnread = useGlobal((s) => (threadId == null ? (findChat(s, chatId)?.reactions as number | undefined) ?? 0 : 0));
+  const reactionIds = useGlobal((s) => (threadId == null ? (findChat(s, chatId)?.reactionIds as number[] | null | undefined) ?? null : null));
+  reactionIdsRef.current = reactionIds;
+  // число есть, id нет (пришли строкой списка) — спросить, чтобы чтение по видимости работало без нажатия кнопки
+  useEffect(() => { if (active && reactionsUnread > 0 && !reactionIds?.length) void nextReaction(chatId); }, [active, chatId, reactionsUnread, reactionIds]);
+  const toReaction = () => {
+    void nextReaction(chatId).then((id) => { if (id == null) { toLatest(); return; } focusMessage({ id, sort: id }); });
+  };
   // «к упоминанию»: старейшее непрочитанное — в ленте (focusMessage) или в треде (тред поверх)
   const toMention = () => {
     void nextMention(chatId).then((t) => {
@@ -1409,6 +1422,7 @@ export function Feed({ frameKey, active, chatId, threadId, channel = false, meId
       {pickerUsed ? <DatePicker open={!!pickDate} value={pickDate ?? undefined} onClose={() => setPickDate(null)}
         onPick={(d: Date) => { setPickDate(null); void jumpToDate(chatId, d).then((ok) => { if (!ok) showToast('В этот день сообщений нет'); }); }} /> : null}
       <div class="rl-scrolldown-slot">
+        <ReactionFab count={reactionsUnread} raised={away || (meta ? !meta.live : false)} lifted={mentions > 0} onClick={toReaction} onReadAll={() => readReactions(chatId)} />
         <MentionFab count={mentions} raised={away || (meta ? !meta.live : false)} onClick={toMention} />
         <ScrollToBottom show={away || (meta ? !meta.live : false)} unread={threadId != null ? 0 : unread} onClick={toLatest} />
       </div>

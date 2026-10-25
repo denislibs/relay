@@ -223,6 +223,10 @@ export type Update =
   | { type: 'readThread'; chatId: Id; threadId: Id; upToId: Id }
   // меня упомянули (@имя или ответ): только мне; сообщение целиком (журнал хранит ссылку), threadId — упоминание в треде
   | { type: 'mention'; message: Message; threadId?: Id }
+  // чужая реакция на моё сообщение (только мне): кнопка «сердце» над «вниз»; reactionsRead — снято (увидел на экране,
+  // «прочитать все», реакцию убрали или сообщение удалили); без ids — все в чате
+  | { type: 'reaction'; chatId: Id; id: Id }
+  | { type: 'reactionsRead'; chatId: Id; ids?: Id[] }
   | { type: 'mediaListened'; chatId: Id; id: Id }   // голосовое/кружок прослушали
   | { type: 'userUpdated'; user: PublicUser }   // профиль изменился: себе и всем, кто видит пользователя
   // контакт добавлен/изменён (contact) или удалён (removed + user — как его видно без контакта); только владельцу

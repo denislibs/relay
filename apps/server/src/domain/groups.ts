@@ -378,6 +378,7 @@ async function dropMember(tx: Tx, chatId: number, target: number, actor: number,
   await tx`delete from chat_members where chat_id = ${chatId} and user_id = ${target}`;
   await tx`delete from drafts where chat_id = ${chatId} and user_id = ${target}`;
   await tx`delete from message_mentions where user_id = ${target} and chat_id = ${chatId}`;
+  await tx`delete from unread_reactions where user_id = ${target} and chat_id = ${chatId}`;
   await appendUpdates(tx, [{ userId: target, update: { type: 'chatRemoved', chatId } }]);
   if (kind === 'channel') return;
   await broadcastGroup(tx, chatId);

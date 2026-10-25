@@ -1272,6 +1272,10 @@ html[data-anim="0"] :is(.app-enter-reload, .app-enter-login) :is(.rl-shell-side,
 .app-channel-btn .is-busy { opacity: .5; transition: opacity var(--dur-base) var(--ease-out); }
 .app-mention-fab { position: absolute; right: 0; bottom: 0; transition: transform var(--dur-base) var(--ease-out); }
 .app-mention-fab.is-raised { transform: translateY(calc(-1 * var(--composer-h-min, 48px) - 10px)); }
+/* «сердце» (непрочитанные реакции): над «вниз», а если есть «@» — над ней; шаг — размер кнопки + зазор */
+.app-reaction-fab { position: absolute; right: 0; bottom: 0; --fab-step: calc(var(--composer-h-min, 48px) + 10px); transition: transform var(--dur-base) var(--ease-out); }
+.app-reaction-fab.is-raised, .app-reaction-fab.has-mention { transform: translateY(calc(-1 * var(--fab-step))); }
+.app-reaction-fab.is-raised.has-mention { transform: translateY(calc(-2 * var(--fab-step))); }
 .app-thread-start span { font-weight: 500; }
 .app-threadbar { pointer-events: auto; }
 .app-threadbar .app-pins-main:disabled { cursor: default; }

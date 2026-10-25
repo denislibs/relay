@@ -63,6 +63,8 @@ const chatItem = (store: Store, c: LocalChat, person: ReturnType<typeof personVi
   canSend: canPost(c),
   photo: person ? person.photo : c.group?.photo ?? null, group: c.group ?? null, me: c.me ?? null, membersRev: store.members.rev(c.id), sortAt: sortAt(c), draft: c.draft?.text ?? null, draftEntities: c.draft?.entities ?? null, pinned: c.pinned ?? [], muteUntil,
   pinnedAt: f.pinnedAt, archived: f.archived, unreadMark: f.unreadMark, mentions: c.mentions ?? 0,
+  // непрочитанные реакции на мои сообщения: число и известные id (лента гасит их, увидев сообщение на экране)
+  reactions: c.reactions ?? 0, reactionIds: c.reactionIds ?? null,
   last: c.last ? { key: c.last.key, id: c.last.id, senderId: c.last.senderId, body: c.last.body, status: c.last.status, createdAt: c.last.createdAt, deleted: !!c.last.deleted, kind: c.last.kind ?? 'text', attachmentName: c.last.attachment?.name ?? null, attachmentTitle: c.last.attachment?.title ?? null, attachmentPerformer: c.last.attachment?.performer ?? null,
     // для превью в списке: спойлеры прячем, миниатюра 20 px — из встроенного thumb, без загрузки файла
     entities: c.last.entities ?? null, thumb: c.last.attachment?.thumb ?? null, mime: c.last.attachment?.mime ?? null,

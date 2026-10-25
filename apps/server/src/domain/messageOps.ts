@@ -3,6 +3,7 @@ import { normalizeEntities, trimFormatted, type Entity, type Reaction } from '@r
 import { sql } from '../db';
 import { assertMember } from './chats';
 import { DomainError } from './errors';
+import { dropUnreadReactions, noteReaction } from './reactionsUnread';
 import { chatEvent } from './journal';
 import { updateContent } from './messageContent';
 import { blockedInDirect } from './privacy';
@@ -96,6 +97,7 @@ async function erase(tx: Tx, chatId: number, id: number, kind: 'direct' | 'group
   await tx`update messages set body = '', entities = null, todo = null, blocks = null, link = null, content = null, deleted = true where chat_id = ${chatId} and id = ${id}`;
   await tx`delete from reactions where chat_id = ${chatId} and message_id = ${id}`;
   await tx`delete from message_mentions where chat_id = ${chatId} and message_id = ${id}`;   // «@» у упомянутых гаснет
+  await dropUnreadReactions(tx, chatId, id);   // и «сердце» у автора
   if (kind === 'channel') await tx`delete from message_reaction_counts where chat_id = ${chatId} and message_id = ${id}`;
   await chatEvent(tx, chatId, { type: 'messageDeleted', chatId, id }, kind);
   await enqueue(tx, 'search.sync', { id });   // убрать из индекса
@@ -117,6 +119,7 @@ export async function reactMessage(userId: number, chatId: number, id: number, e
     const [m] = await tx`select deleted from messages where chat_id = ${chatId} and id = ${id} and id >= ${ctx.historyFrom}`;
     if (!m || m.deleted) throw new DomainError('not_found', 'message');
     if (await blockedInDirect(tx, chatId, userId)) throw new DomainError('blocked');
+    const [was] = await tx`select emoji from reactions where chat_id = ${chatId} and message_id = ${id} and user_id = ${userId}`;
     if (emoji) {
       await tx`insert into reactions (chat_id, message_id, user_id, emoji) values (${chatId}, ${id}, ${userId}, ${emoji})
                on conflict (chat_id, message_id, user_id) do update set emoji = excluded.emoji, created_at = now()`;
@@ -126,6 +129,7 @@ export async function reactMessage(userId: number, chatId: number, id: number, e
     const rows = await tx`select user_id, emoji from reactions where chat_id = ${chatId} and message_id = ${id} order by created_at`;
     const reactions = rows.map((r) => ({ userId: r.user_id as number, emoji: r.emoji as string }));
     await chatEvent(tx, chatId, { type: 'reactions', chatId, id, reactions });
+    await noteReaction(tx, chatId, id, userId, (was?.emoji as string | undefined) ?? null, emoji);   // автору — непрочитанная реакция (кнопка «сердце»)
     return { reactions };
   });
 }

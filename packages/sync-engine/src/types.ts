@@ -98,6 +98,9 @@ export interface LocalChat {
   mentions?: number;
   mentionIds?: number[];
   mentionThreads?: Record<number, number>;   // id упоминания в треде → тред (копия поста)
+  /** непрочитанные реакции на мои сообщения: число (строка списка, +1 журналом reaction) и известные id по возрастанию */
+  reactions?: number;
+  reactionIds?: number[];
 }
 
 export interface OutboxEntry {
@@ -201,6 +204,9 @@ export type Action =
   | { type: 'markThreadRead'; chatId: number; threadId: number; upToId: number }
   /** «к упоминанию»: старейшее непрочитанное упоминание {id, threadId?} или null (только из кэша) */
   | { type: 'nextMention'; chatId: number }
+  /** самая старая непрочитанная реакция (id сообщения): известна — сразу, нет — спросить сервер; readReactions — увидел (ids) или все */
+  | { type: 'nextReaction'; chatId: number }
+  | { type: 'readReactions'; chatId: number; ids?: number[] }
   /** «кто прочитал» своё сообщение в небольшой группе: {ok, data: [{id, name}]} | {ok:false, code} */
   | { type: 'readBy'; chatId: number; id: number }
   | { type: 'retry'; clientId: string }
