@@ -1102,15 +1102,36 @@ button.rl-tab:hover { color: var(--ink); }
 /* ---------- Phone width: the card becomes the screen ---------- */
 @media (max-width: 720px) {
   .rl-shell { padding: 0; gap: 0; }
-  .rl-shell-side { flex-basis: 100%; }
   .rl-sidecard { border-radius: 0; box-shadow: none; }
-  .rl-shell-side + .rl-shell-main { display: none; }
+  /* Экраны, как в Telegram и как страницы SlideStack: список, чат и «Информация» — во весь экран друг над другом,
+     какой сверху — data-screen (FloatShell ← App). Чат въезжает справа вместе с обоями (обои — фон чата, иначе
+     сквозь прозрачную колонку был бы виден список), уходящий экран сдвигается на четверть и гаснет. Колонки
+     всегда в DOM: лента, прокрутка и виртуальный список не пересоздаются. Скрытый экран — visibility: hidden
+     после перехода (не в фокусе и не для скринридера). */
+  /* [data-screen] — сильнее общих правил оболочки ниже (.rl-shell > :not(.rl-tw…) { position: relative; z-index } ) */
+  .rl-shell[data-screen] > :is(.rl-shell-side, .rl-shell-main, .rl-tw, .rl-tw-photo) {
+    position: absolute; inset: 0; flex: none;
+    /* translate, а не transform: у фото-обоев свой transform (размытие) */
+    transition: translate 300ms cubic-bezier(0.2, 0, 0, 1), opacity 300ms cubic-bezier(0.2, 0, 0, 1), visibility 0s linear 0s, filter 300ms var(--ease-out), transform 300ms var(--ease-out);   /* последние два — свои у фото-обоев */
+  }
+  .rl-shell[data-screen] > .rl-shell-side { z-index: 1; }
+  .rl-shell[data-screen] > .rl-tw { z-index: 2; box-shadow: -8px 0 24px rgba(0, 0, 0, 0.08); }
+  .rl-shell[data-screen] > .rl-tw-photo { z-index: 2; }
+  .rl-shell[data-screen] > .rl-shell-main { z-index: 3; }
+  /* список под чатом или под «Информацией» */
+  .rl-shell:is([data-screen="chat"], [data-screen="info"]) > .rl-shell-side { translate: -25% 0; opacity: 0.4; visibility: hidden; transition-delay: 0s, 0s, 300ms; }
+  /* чат ещё не открыт (или уже уехал): за правым краем */
+  .rl-shell:not([data-screen="chat"]):not([data-screen="info"]) > :is(.rl-shell-main, .rl-tw, .rl-tw-photo) { translate: 100% 0; visibility: hidden; transition-delay: 0s, 0s, 300ms; }
+  /* чат под «Информацией» */
+  .rl-shell[data-screen="info"] > :is(.rl-shell-main, .rl-tw, .rl-tw-photo) { translate: -25% 0; opacity: 0.4; visibility: hidden; transition-delay: 0s, 0s, 300ms; }
+  html[data-anim="0"] .rl-shell > :is(.rl-shell-side, .rl-shell-main, .rl-tw, .rl-tw-photo) { transition-duration: 1ms; }
   /* чат на телефоне — как в Telegram: шапка, закреп и поле ввода остаются скруглёнными «островками» и стоят в 8px
      от краёв экрана (не упираются скруглением в край); лента под ними — от края до края (--space-float = зазор) */
   .rl-shell-main { --space-float: 8px; padding: var(--space-float); }
 }
 
 @media (prefers-reduced-motion: reduce) {
+  .rl-shell > :is(.rl-shell-side, .rl-shell-main, .rl-tw, .rl-tw-photo) { transition-duration: 1ms !important; }
   .rl-sidecard, .rl-fab-main, .rl-tabs-top, .rl-fab-slot { animation-duration: 1ms !important; transition-duration: 1ms !important; }
 }
 
@@ -1269,7 +1290,7 @@ html[data-blur="0"] .rl-pop .rl-menu, html[data-blur="0"] .rl-pop .rl-rpick { -w
   /* сверху лента тоже до края окна (и над плеером): под шапкой и плеером сообщения видны приглушённо, без обрыва.
      --player-h идёт ровно вместе с раскрытием плеера: шапка уезжает вниз, а лента остаётся на месте и не перестраивается */
   margin: calc(-1 * (var(--top-zone) + var(--space-float) + var(--player-h))) calc(-1 * var(--space-float)) calc(-1 * (48px + 2 * var(--space-float)));   /* 48 — высота поля в потоке */
-  padding: calc(var(--top-zone) + var(--space-float) + 8px) var(--space-float) calc(var(--bottom-zone) + var(--space-float) - 6px);   /* последнее сообщение ≈10px над полем ввода, как в Telegram */
+  padding: calc(var(--top-zone) + var(--space-float) + 8px) var(--space-float) calc(var(--bottom-zone) + 10px);   /* последнее сообщение — 10px над полем ввода, как в Telegram, при любом отступе (--space-float: 16px, на телефоне 8px) */
   /* низ ленты не растворяется: как в Telegram, сообщения видны под полем ввода и вокруг него до края окна */
   /* как в Telegram: под шапкой, закрепом, плеером и под полем ввода сообщения не пропадают, а приглушены до 24%;
      к краю этой зоны — мягкий спад (кривая ease-in-out по пяти точкам). Верх зоны — низ шапки (+ плеер, + закреп),
@@ -1379,9 +1400,14 @@ html[data-blur="0"] .rl-pop .rl-menu, html[data-blur="0"] .rl-pop .rl-rpick { -w
 .rl-shell.rl-shell-float > .rl-aside-scrim { display: block; position: absolute; inset: 0; z-index: 5; }
 /* ширина телефона: «Информация», как и левая колонка, — весь экран, а не плавающая карточка шире экрана */
 @media (max-width: 720px) {
-  .rl-shell > .rl-presence { inset: 0; }
-  .rl-shell .rl-shell-aside { flex: 1 1 auto; box-shadow: none; }
-  .rl-shell .rl-shell-aside, .rl-shell-aside > .rl-panel { border-radius: 0; }
+  /* весь экран: перебивает и плавающий режим (.rl-shell-float — отступы 16px) */
+  .rl-shell > .rl-presence, .rl-shell.rl-shell-float > .rl-presence { inset: 0; z-index: 6; }
+  .rl-shell .rl-shell-aside, .rl-shell.rl-shell-float .rl-shell-aside { flex: 1 1 auto; box-shadow: -8px 0 24px rgba(0, 0, 0, 0.08); }
+  .rl-shell .rl-shell-aside, .rl-shell.rl-shell-float .rl-shell-aside, .rl-shell-aside > .rl-panel { border-radius: 0; }
+  /* въезжает и уезжает, как страница SlideStack: справа на весь экран; чат под ней сдвигается на четверть (data-screen) */
+  .rl-shell .rl-shell-aside { animation: rl-slide-from-right 300ms cubic-bezier(0.2, 0, 0, 1) both; }
+  .rl-presence[data-state="closing"] > .rl-shell-aside { animation: rl-slide-to-right 300ms cubic-bezier(0.2, 0, 0, 1) both; }
+  .rl-shell > .rl-presence[data-state="closing"] { inset: 0; }
 }
 
 /* ---------- EmptyState kinds: media / files / links — same line style, a gentle loop after drawing ---------- */
@@ -2330,6 +2356,8 @@ html[data-blur="0"] .rl-menu { -webkit-backdrop-filter: none; backdrop-filter: n
   :root { --sq: 1.6; }
   /* колонки */
   .rl-sidecard, .rl-frail, .rl-shell-aside, .rl-shell-aside > .rl-panel { corner-shape: squircle; border-radius: calc(var(--radius-panel) * var(--sq)); }
+  /* телефон: колонки во весь экран — без скругления (правило выше иначе возвращало его поверх правил телефона) */
+  @media (max-width: 720px) { .rl-sidecard, .rl-shell-aside, .rl-shell-aside > .rl-panel { border-radius: 0; } }
   /* острова правой колонки («Информация») */
   .rl-aside-group { corner-shape: squircle; border-radius: calc(var(--radius-lg) * var(--sq)); }
   /* строки списков (ListItem): чаты, участники, «Информация», настройки — сами секции настроек без сквиркла */

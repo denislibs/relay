@@ -65,6 +65,7 @@ export interface GlobalState {
   newChatOpen: boolean;
   sidebarView: string;   // путь страницы боковой панели, см. nav.ts
   infoOpen: boolean;   // правая панель «Информация»
+  listLeaving: boolean;   // телефон: чат закрыли — экран уже едет к списку, лента снимется после перехода (data.ts)
   pollResults: { chatId: number; id: number } | null;   // окно «Результаты» неанонимного опроса
   muteTick: number;    // истёк срок «Отключить звук» какого-то чата (mute.ts): повод перерисовать
   theme: ThemePref;   // зеркало prefs.theme для прежних читателей
@@ -156,6 +157,7 @@ let state: GlobalState = {
   newChatOpen: false,
   sidebarView: 'chats',
   infoOpen: false,
+  listLeaving: false,
   muteTick: 0,
   theme: loadTheme(),
   prefs: getPrefs(),
@@ -244,3 +246,7 @@ export function activeFrame(s: GlobalState): ChatFrame | undefined {
 }
 export const frameByKey = (s: GlobalState, key: string): ChatFrame | undefined =>
   s.chatStack.find((f) => f.key === key) ?? s.chatLeaving.find((f) => f.key === key);
+
+/** Телефон: колонки — экраны друг над другом (список → чат → «Информация»), как в Telegram; порог — как в relay.css. */
+export const PHONE_QUERY = '(max-width: 720px)';
+export const isPhone = (): boolean => typeof matchMedia === 'function' && matchMedia(PHONE_QUERY).matches;

@@ -10,9 +10,7 @@ body { background: var(--bg); color: var(--ink); font-family: var(--font-sans); 
 .app-field:focus { border-color: var(--brand-text); }
 .app-back { display: none; }
 @media (max-width: 720px) {
-  .app-chat-open .rl-shell-side { display: none; }
-  .app-chat-open .rl-shell-side + .rl-shell-main { display: flex; }
-  .app-back { display: inline-flex; }
+  .app-back { display: inline-flex; }   /* колонки на телефоне — экраны (relay.css, data-screen) */
 }
 .rl-feed { overflow-anchor: none; } /* якорь прокрутки держим сами (requestMeasure → requestMutation) */
 @keyframes app-fade { from { opacity: 0; } to { opacity: 1; } }

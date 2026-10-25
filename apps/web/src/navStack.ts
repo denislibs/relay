@@ -9,7 +9,7 @@
 //                  чужая сессия (запись от прошлой загрузки) — закрыть всё; «вперёд» не поддерживаем.
 // history.go асинхронный: операции с историей идут очередью, следующая ждёт popstate от предыдущего go.
 
-export type LayerType = 'page' | 'chat' | 'info';
+export type LayerType = 'page' | 'screen' | 'chat' | 'info';
 
 export interface Entry {
   id: number;
