@@ -1,6 +1,7 @@
 import { hasMedia, rightForKind, type GroupInfo, type MemberRight, type MyMembership } from '@relay/protocol';
 import { emojiKey } from '@relay/protocol';
 import { pushRecentReaction, quickAssets, quickReactions } from '../reactions';
+import { queueReactionFx } from '../reactionFx';
 import { ReactionsPanel } from './ReactionsPanel';
 import { getPrefs } from '../prefs';
 import { MEMBER_RIGHT_TEXT } from '../groups';
@@ -154,7 +155,7 @@ export function Chat({ chatId, frameKey, active, threadId }: { chatId: number; f
   const stick = useRef(true);              // лента прижата к низу (Feed ведёт, отправка выставляет)
   const [menu, setMenu] = useState<{ x: number; y: number; key: string; extra?: MenuExtra } | null>(null);
   // полный пикер реакций (по шеврону панели): откуда вырос, к какому сообщению, набор чата
-  const [rpanel, setRpanel] = useState<{ bar: { left: number; top: number }; msgId: number; allowed: string[] | null; mine?: string } | null>(null);
+  const [rpanel, setRpanel] = useState<{ bar: { left: number; top: number }; msgId: number; msgKey: string; allowed: string[] | null; mine?: string } | null>(null);
   const [fwdMenu, setFwdMenu] = useState<HTMLElement | null>(null);   // опции пересылки в поле ввода
   const [replyKey, setReplyKey] = useState<string | null>(null);
   const [editing, setEditing] = useState<{ id: number; original: Value; draft: Value } | null>(null);   // правка своего сообщения
@@ -726,11 +727,11 @@ export function Chat({ chatId, frameKey, active, threadId }: { chatId: number; f
                   if (!all) return null;
                   return <ReactionsBar items={quickAssets(allowed, all === 8 ? 8 : 7)} selected={mineKey} animated={getPrefs().anim.level > 0 && !reducedMotion()}
                     more={all > 8}
-                    onPick={(key: string) => { const off = mineKey === key; react(chatId, menuMsg.id as number, off ? null : key); if (!off) pushRecentReaction(key); setMenu(null); }}
+                    onPick={(key: string) => { const off = mineKey === key; if (!off) { pushRecentReaction(key); queueReactionFx(menuMsg.key as string, key); } react(chatId, menuMsg.id as number, off ? null : key); setMenu(null); }}
                     onMore={(e: MouseEvent) => {
                       const r = (e.currentTarget as HTMLElement).closest('.rl-rpick')!.getBoundingClientRect();
                       setMenu(null);
-                      setRpanel({ bar: { left: r.left, top: r.top }, msgId: menuMsg.id as number, allowed, mine: mineKey });
+                      setRpanel({ bar: { left: r.left, top: r.top }, msgId: menuMsg.id as number, msgKey: menuMsg.key as string, allowed, mine: mineKey });
                     }} />;
                 })()
               ) : null}
@@ -783,7 +784,7 @@ export function Chat({ chatId, frameKey, active, threadId }: { chatId: number; f
               ]}
       />
       {rpanel ? <ReactionsPanel bar={rpanel.bar} allowed={rpanel.allowed} selected={rpanel.mine} animated={getPrefs().anim.level > 0 && !reducedMotion()}
-        onPick={(key: string) => { const off = rpanel.mine === key; react(chatId, rpanel.msgId, off ? null : key); if (!off) pushRecentReaction(key); setRpanel(null); }}
+        onPick={(key: string) => { const off = rpanel.mine === key; if (!off) { pushRecentReaction(key); queueReactionFx(rpanel.msgKey, key); } react(chatId, rpanel.msgId, off ? null : key); setRpanel(null); }}
         onClose={() => setRpanel(null)} /> : null}
       <MusicPicker chatId={chatId} open={musicOpen} onClose={() => setMusicOpen(false)} replyToId={(replyTo?.id as number) ?? null} onSent={() => setReplyKey(null)} />
       {dateOpen ? (

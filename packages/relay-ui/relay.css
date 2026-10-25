@@ -794,6 +794,13 @@ button.rl-quote:active { background: var(--quote-bg-active, var(--pressed)); }
 .rl-react-mine .rl-react-avatars .rl-avatar { box-shadow: 0 0 0 2px var(--react-on-bg); }
 .rl-react-avatars .rl-avatar + .rl-avatar { margin-right: -14px; }
 @keyframes rl-react-in { from { transform: scale(.6); opacity: 0; } to { transform: none; opacity: 1; } }
+/* эффект реакции: фиксированный слой поверх ленты, центр и «вокруг» по центру иконки плашки; иконка на время спрятана */
+.rl-fx-layer { position: fixed; inset: 0; z-index: 1400; pointer-events: none; contain: strict; }
+.rl-fx-item { position: absolute; left: 0; top: 0; will-change: transform; }
+.rl-fx-center, .rl-fx-around { position: absolute; }
+.rl-fx-center { width: 40px; height: 40px; left: -20px; top: -20px; }
+.rl-fx-around { width: 80px; height: 80px; left: -40px; top: -40px; }
+.rl-react-icon-hidden { visibility: hidden; }
 
 /* панель невидима, пока ячейки не отрисовали первые кадры (is-ready), затем появляется вместе с меню */
 .rl-rpick { position: relative; display: inline-flex; align-items: center; height: 40px; min-width: 56px; padding: 0 4px; border-radius: 40px; background: var(--raised); box-shadow: 0 2px 8px rgba(0, 0, 0, .24); opacity: 0; transform-origin: 0 100%; }

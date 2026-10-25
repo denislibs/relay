@@ -626,7 +626,7 @@ function ReactionChips(props) {
     props.items.map(function (r) {
       var n = r.count || 1;
       var avatars = r.users && r.users.length ? r.users.slice(0, 3) : null;
-      return h('button', { key: r.key || r.emoji, type: 'button', class: cx('rl-react', r.mine && 'rl-react-mine'), onClick: function (e) { e.stopPropagation(); if (props.onClick) props.onClick(r.key || r.emoji); },
+      return h('button', { key: r.key || r.emoji, 'data-key': r.key || r.emoji, type: 'button', class: cx('rl-react', r.mine && 'rl-react-mine'), onClick: function (e) { e.stopPropagation(); if (props.onClick) props.onClick(r.key || r.emoji); },
         'aria-label': 'Реакция ' + r.emoji + ', ' + n + (r.mine ? ', ваша' : ''), 'aria-pressed': String(!!r.mine) },
         h('span', { class: 'rl-react-icon' }, r.icon ? h('img', { src: r.icon, alt: '', draggable: false, decoding: 'async' }) : r.emoji),
         avatars
