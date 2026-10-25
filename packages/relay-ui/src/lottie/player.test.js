@@ -82,3 +82,13 @@ test('force plays through heavy animation, autoplay off and an exclusive group',
   end(); setStickerPolicy({ autoplay: true }); setStickerGroupExclusive(null);
   plain.destroy(); forced.destroy();
 });
+
+test('shared:false даёт отдельный плеер при том же url и размере (часы не делятся)', async () => {
+  const a = attachSticker({ url: '/stk/x/aaaaaaaa/7.tgs', px: 64, canvas: canvas(), shared: false });
+  const b = attachSticker({ url: '/stk/x/aaaaaaaa/7.tgs', px: 64, canvas: canvas(), shared: false });
+  const c = attachSticker({ url: '/stk/x/aaaaaaaa/7.tgs', px: 64, canvas: canvas() });
+  await wait();
+  expect(stickerStats().players).toBe(3);
+  a.destroy(); b.destroy(); c.destroy();
+  expect(stickerStats().players).toBe(0);
+});
