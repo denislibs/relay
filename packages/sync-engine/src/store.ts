@@ -374,7 +374,9 @@ export class Store {
       case 'mediaListened': return this.patchMessage(u.chatId, u.id, { listened: true });
       case 'todoUpdated': return this.patchMessage(u.chatId, u.id, { todo: u.todo, ...(u.editedAt ? { editedAt: u.editedAt } : {}) });
       case 'linkPreview': return this.patchMessage(u.chatId, u.id, { link: u.link });
-      case 'attachmentUpdated': return this.patchMessage(u.chatId, u.id, { attachment: u.attachment });
+      // копии и размер — поверх того, что уже знаем: имя, миниатюра и ключ файла из события могут отсутствовать
+      // (сервер старой сборки слал вложение без текста) — своё не теряем
+      case 'attachmentUpdated': return this.patchMessage(u.chatId, u.id, { attachment: { ...(this.messageById(u.chatId, u.id)?.attachment ?? {}), ...u.attachment } as typeof u.attachment });
       case 'userUpdated': return applyUserUpdated(this, u.user, seq);
       case 'contactsChanged': return applyContactsChanged(this, u, seq);
       case 'settingsChanged': this.settings.apply(u.settings, seq); return;

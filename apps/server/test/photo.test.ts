@@ -2,8 +2,9 @@ import { afterAll, beforeEach, expect, test } from 'bun:test';
 import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import type { Attachment } from '@relay/protocol';
+import type { Attachment, ServerFrame, Update } from '@relay/protocol';
 import { createServer } from '../src/http';
+import { startRealtime } from '../src/realtime';
 import { sql } from '../src/db';
 import '../src/jobs/kinds';
 import { inputOf, probe, videoFormat } from '../src/jobs/video';
@@ -11,12 +12,13 @@ import { backfillPhotos, PHOTO_MEDIUM_SIDE, PHOTO_PREVIEW_SIDE } from '../src/jo
 import { SLOW_KINDS } from '../src/jobs/kinds';
 import { claim, enqueue } from '../src/jobs/queue';
 import { drainJobs } from '../src/jobs/worker';
-import { journalOf, opened, resetDb, uploadFile } from './helpers';
+import { journalOf, nextFrame, opened, resetDb, uploadFile } from './helpers';
 
 const server = createServer({ port: 0 });
+const stopRealtime = await startRealtime(server);   // живые кадры push сокетам — через шину уведомлений
 const base = `http://localhost:${server.port}`;
 const dir = await mkdtemp(join(tmpdir(), 'relay-photo-test-'));
-afterAll(async () => { server.stop(true); await rm(dir, { recursive: true, force: true }); });
+afterAll(async () => { await stopRealtime(); server.stop(true); await rm(dir, { recursive: true, force: true }); });
 beforeEach(resetDb);
 const login = async (name: string) => (await (await fetch(`${base}/dev/login`, { method: 'POST', body: JSON.stringify({ name }) })).json()) as { userId: number; token: string };
 const as = (t: string) => ({ cookie: `relay_session=${t}` });
@@ -235,4 +237,31 @@ test('ffmpeg input is pinned: only the local file protocol and the declared form
   expect(videoFormat('video/mp4')).toBe('mov');
   expect(videoFormat('video/quicktime')).toBe('mov');
   expect(videoFormat('video/webm')).toBe('matroska');
+});
+
+test('attachmentUpdated reaches online clients with the sealed text of the attachment (name, thumb), not the bare jsonb row', async () => {
+  const a = await login('Анна'), b = await login('Борис');
+  const { id: chatId } = (await (await fetch(`${base}/chats`, { method: 'POST', headers: { ...as(a.token), 'content-type': 'application/json' }, body: JSON.stringify({ title: 'Фото', memberIds: [b.userId] }) })).json()) as { id: number };
+  const ws = new WebSocket(`ws://localhost:${server.port}/ws?token=${b.token}`);
+  await new Promise((r, j) => { ws.onopen = r; ws.onerror = j; });
+  ws.send(JSON.stringify({ op: 'hello', lastSeq: 0, since: 0 }));
+  await nextFrame(ws, (f) => f.op === 'hello');
+  const bytes = await makeImage('live.jpg', 1600, 1200);
+  const up = await uploadFile(base, a.token, { name: 'live.jpg', mime: 'image/jpeg', kind: 'photo', w: 1600, h: 1200 }, bytes) as unknown as Attachment;
+  const { sendMessage } = await import('../src/domain/messages');
+  // слушатели — до действия: кадр может прийти раньше, чем вернётся вызов
+  const sent = nextFrame(ws, (f) => f.op === 'push' && f.items.some((i) => i.update.type === 'newMessage'), 10_000);
+  const pushed = nextFrame(ws, (f) => f.op === 'push' && f.items.some((i) => i.update.type === 'attachmentUpdated'), 10_000);
+  const { message } = await sendMessage(a.userId, { chatId, clientId: crypto.randomUUID(), body: '', attachment: { id: up.id, thumb: 'data:image/jpeg;base64,AAAA' } });
+  await sent;
+  await drainJobs();
+  const f = (await pushed) as Extract<ServerFrame, { op: 'push' }>;
+  const u = f.items.find((i) => i.update.type === 'attachmentUpdated')!.update as Extract<Update, { type: 'attachmentUpdated' }>;
+  // живой кадр несёт событие как есть: имя и миниатюра из шифра — на месте, копии и размер — новые
+  expect(u).toMatchObject({ chatId, id: message.id, attachment: { id: up.id, name: 'live.jpg', thumb: 'data:image/jpeg;base64,AAAA', size: bytes.length, preview: { name: 'preview', w: 480, h: 360 }, variants: [{ name: 'medium', w: 800, h: 600 }] } });
+  // а в самой строке текст вложения по-прежнему только в шифре
+  const [raw] = await sql`select attachment from messages where id = ${message.id}`;
+  expect((raw.attachment as Record<string, unknown>).thumb).toBeUndefined();
+  expect((raw.attachment as Record<string, unknown>).name).toBeUndefined();
+  ws.close();
 });
