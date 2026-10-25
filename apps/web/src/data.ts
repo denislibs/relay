@@ -791,6 +791,8 @@ export function typing(chatId: number): void {
 }
 /** Отправили — следующий набор снова сразу сообщит «печатаю». */
 export function typingDone(chatId: number): void { typingSent.delete(chatId); }
+/** Клики по большому эмодзи — собеседнику (личный чат): t — секунды от первого клика пачки. */
+export function emojiFx(chatId: number, id: number, key: string, t: number[]): void { engine.call({ type: 'emojiFx', chatId, id, key, t }).catch(() => {}); }
 
 /**
  * Поиск сообщений: по словам на устройстве, с сетью — вместе с сервером (вся история).

@@ -93,6 +93,9 @@ export interface Entity { type: EntityType; offset: number; length: number; url?
 export const DATE_FORMAT = /^(r|w?[dD]?[tT]?)$/;
 export const ENTITY_TYPES: readonly EntityType[] = ['bold', 'italic', 'underline', 'strike', 'spoiler', 'code', 'pre', 'link', 'date'];
 export const MAX_ENTITIES = 100;
+/** Пачка кликов по большому эмодзи: не больше кликов и секунд от первого (как в Telegram — окно в секунду). */
+export const EMOJI_FX_MAX = 10;
+export const EMOJI_FX_WINDOW_S = 10;
 
 /** Адрес ссылки, который можно показать: http(s) или mailto, без пробелов, до 2048 символов. */
 export function entityUrl(raw: unknown): string | null {
@@ -377,6 +380,8 @@ export type ClientFrame =
   | { op: 'send'; reqId: string; clientId: string; chatId: Id; body: string; entities?: Entity[]; replyToId?: Id | null; attachment?: { id: string; thumb?: string | null; spoiler?: boolean } | null; groupId?: string | null; forward?: ForwardRef | null; noLinkPreview?: boolean; blocks?: Block[] | null; todo?: TodoInput; sticker?: { id: Id } | null; threadId?: Id }   // threadId — комментарий в треде (группа обсуждения)
   | { op: 'read'; reqId: string; chatId: Id; upToId: Id }
   | { op: 'typing'; chatId: Id }   // «печатаю» — без ответа, сервер пересылает остальным участникам
+  // клики по большому эмодзи (только личный чат): t — секунды от первого клика пачки; сервер пересылает собеседнику, в журнал не пишет
+  | { op: 'emojiFx'; chatId: Id; id: Id; key: string; t: number[] }
   | { op: 'draft'; reqId: string; chatId: Id; text: string; entities?: Entity[] }
   | { op: 'edit'; reqId: string; chatId: Id; id: Id; body: string; entities?: Entity[] }
   | { op: 'delete'; reqId: string; chatId: Id; id: Id }
@@ -421,6 +426,7 @@ export type ServerFrame =
   | { op: 'poke' }
   | { op: 'presence'; items: PresenceItem[] }
   | { op: 'typing'; chatId: Id; userId: Id }
+  | { op: 'emojiFx'; chatId: Id; id: Id; key: string; t: number[]; userId: Id }
   // сеанс этого сокета завершён; следом сокет закрывается. reason: logout — выход в другой вкладке этого же браузера,
   // terminated — с другого устройства, автозавершением или сеанс пропал
   | { op: 'sessionTerminated'; reason?: 'logout' | 'terminated' }
@@ -443,6 +449,8 @@ export function parseClientFrame(raw: string): ClientFrame | null {
     case 'unwatchChat': return int(f.chatId) ? { op: 'unwatchChat', chatId: f.chatId } : null;
     case 'ping': return { op: 'ping' };
     case 'typing': return int(f.chatId) ? { op: 'typing', chatId: f.chatId } : null;
+    case 'emojiFx': return int(f.chatId) && int(f.id) && str(f.key, 16) && Array.isArray(f.t) && f.t.length > 0 && f.t.length <= EMOJI_FX_MAX && f.t.every((x) => typeof x === 'number' && x >= 0 && x <= EMOJI_FX_WINDOW_S)
+      ? { op: 'emojiFx', chatId: f.chatId, id: f.id, key: f.key, t: (f.t as number[]).map((x) => Math.round(x * 100) / 100) } : null;
     case 'edit': return str(f.reqId, 64) && int(f.chatId) && int(f.id) && typeof f.body === 'string' ? { op: 'edit', reqId: f.reqId, chatId: f.chatId, id: f.id, body: f.body, entities: normalizeEntities(f.body, f.entities) } : null;
     case 'delete': return str(f.reqId, 64) && int(f.chatId) && int(f.id) ? { op: 'delete', reqId: f.reqId, chatId: f.chatId, id: f.id } : null;
     case 'button': return str(f.reqId, 64) && int(f.chatId) && int(f.id) && str(f.data, BUTTON_DATA_MAX) ? { op: 'button', reqId: f.reqId, chatId: f.chatId, id: f.id, data: f.data } : null;
