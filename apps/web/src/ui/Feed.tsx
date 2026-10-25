@@ -630,13 +630,15 @@ export function Feed({ frameKey, active, chatId, threadId, channel = false, meId
           const order = revealOrder(boxes, 0, rr.height), total = revealTotalMs(order.size);
           for (const b of boxes) b.el.style.setProperty('--reveal', String(order.get(b.key) ?? 0));
           root.classList.add('app-feed-wait');
-          onHeavyAnimationEnd(() => requestMutation(() => {
+          // окно анимации перехода стека открывается после первого патча ленты, то есть уже после этого кадра —
+          // спрашиваем про него следующим кадром, иначе лесенка стартовала бы посреди перехода
+          requestMeasure(() => onHeavyAnimationEnd(() => requestMutation(() => {
             if (!root.isConnected) { root.classList.remove('app-feed-wait'); return; }
             root.classList.remove('app-feed-wait'); root.classList.add('app-feed-reveal');
             const end = beginHeavyAnimation(total);
             // по таймеру, не по animationend: класс снимается и с дорисованных позже строк, у которых анимации не было
             setTimeout(() => { root.classList.remove('app-feed-reveal'); for (const b of boxes) b.el.style.removeProperty('--reveal'); end(); }, total + 60);
-          }));
+          })));
         }
       });
       return;
