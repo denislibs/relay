@@ -1358,7 +1358,9 @@ export function Feed({ frameKey, active, chatId, threadId, channel = false, meId
   };
   // тред: под шапкой (копией поста) — начало обсуждения; комментариев нет — так и сказать (после загрузки, без мигания)
   const threadStart = () => {
-    const empty = shown.length === 1 && threadHead!.loaded && !meta?.hasOlder;
+    // пока тред не загружен, о комментариях ничего не известно: не «Начало обсуждения», а лоадер посередине (ниже)
+    if (!threadHead?.loaded) { prevSender = null; return; }
+    const empty = shown.length === 1 && !meta?.hasOlder;
     out.push(<div class="rl-action app-thread-start" key="thread-start" role="separator"><span>{empty ? 'Здесь пока нет комментариев' : 'Начало обсуждения'}</span></div>);
     prevSender = null;
   };
@@ -1472,12 +1474,13 @@ export function Feed({ frameKey, active, chatId, threadId, channel = false, meId
   if (joinedAfter != null && !joinedShown && shown.length && !meta?.hasNewer) joinedLine();   // новых постов ещё нет — строка внизу
   out.push(<div class="app-sentinel" data-dir="newer" key={'n' + (messages[messages.length - 1]?.key ?? '')} aria-hidden="true" />);
 
-  // тред ещё не загружен и в кэше пусто (открыли по адресу): лоадер с задержкой и минимумом — без мигания
-  const threadLoading = useMinVisible(threadId != null && !threadHead?.loaded && !messages.length, { delay: 150, min: 600 });
+  // тред ещё не загружен (первая страница с сервера; без сети — пока связь не вернётся) и комментариев на экране нет —
+  // лоадер посередине, как в Telegram Web K; шапка-копия поста комментарием не считается. С задержкой и минимумом — без мигания
+  const threadLoading = useMinVisible(threadId != null && !threadHead?.loaded && !messages.some((m) => m.key !== threadHead?.header), { delay: 150, min: 600 });
   return (
     <>
       {greetReady ? <Presence show={greetShown} exitMs={GREET_FLIGHT_MS + GREET_LAND_MS + 60}><GreetingCard sticker={greetSticker} onSend={onGreet} /></Presence> : null}
-      {threadId != null ? <Presence show={threadLoading} exitMs={200}><div class="app-thread-loading" role="status" aria-label="Загрузка комментариев"><span class="app-thread-spinner"><ProgressRing size={32} onMedia /></span></div></Presence> : null}
+      {threadId != null ? <Presence show={threadLoading} exitMs={200}><div class="app-thread-loading" role="status" aria-label="Загрузка комментариев"><span class="app-thread-spinner"><ProgressRing preloader swing size={54} label="Загрузка комментариев" /></span></div></Presence> : null}
       <div class={'rl-feed' + (selVis ? ' app-feed-selecting' : '') + (selOn && selecting ? ' app-feed-sel-on' : '')} ref={el} onScroll={onScroll} onClick={onClick} onClickCapture={selecting ? onSelectClick : undefined} onPointerDownCapture={selecting ? onSelectDown : undefined} onContextMenu={onContextMenu} aria-live="polite"><LazyRoot.Provider value={lazyRoot}>{out}</LazyRoot.Provider></div>
       {openIndex !== null && photos[openIndex] ? (
         <MediaViewer
