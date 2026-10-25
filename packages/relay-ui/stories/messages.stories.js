@@ -1,5 +1,5 @@
 import { h } from 'preact';
-import { Bubble, DateDivider, MessageStatus, ReplyQuote, TypingIndicator, UnreadDivider, ReactionChips, SelectionBar, PollBubble, InlineKeyboard } from '../src/index.js';
+import { Bubble, DateDivider, MessageStatus, ReplyQuote, TypingIndicator, UnreadDivider, ReactionChips, SelectionBar, PollBubble, InlineKeyboard, MediaBubble, FileBubble, VoiceBubble, TodoBubble, RoundBubble } from '../src/index.js';
 
 export default { title: 'Сообщения', parameters: { surface: 'page' } };
 
@@ -68,5 +68,25 @@ export const Buttons = {
     return h('div', { style: feed },
       h(Bubble, { from: 'in', tail: true, groupStart: true, time: '08:33', below: h(InlineKeyboard, { rows: rows, onPress: wait }) },
         'Новый вход в аккаунт\n\nУстройство: Chrome 155, macOS\nIP: 192.168.97.1'));
+  },
+};
+
+// реакции как в Telegram: внутри пузыря время — последним в ряду; у медиа без подписи, стикера и кружка — снаружи
+export const ReactionsEverywhere = {
+  name: 'Реакции в пузырях',
+  render: function () {
+    var rx = [{ key: '❤', emoji: '❤', count: 2, mine: true, icon: 'data:image/svg+xml;utf8,' + encodeURIComponent('<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path fill="%23e53935" d="M12 21s-7-4.6-9.3-8.6C.8 9 2.4 5 6.2 5c2 0 3.3 1 4.3 2.4h1C12.5 6 13.8 5 15.8 5c3.8 0 5.4 4 3.5 7.4C19 16.4 12 21 12 21z"/></svg>') }, { key: '👍', emoji: '👍', count: 1 }];
+    var many = ['👍', '❤', '🔥', '🥰', '👏', '😁', '🤔', '🤯', '😱'].map(function (e) { return { key: e, emoji: e, count: 1 }; });
+    var avatars = [{ key: '❤', emoji: '❤', count: 2, mine: true, users: [{ name: 'Вера', tone: 2 }, { name: 'Глеб', tone: 4 }] }, { key: '👍', emoji: '👍', count: 1, users: [{ name: 'Дина', tone: 1 }] }];
+    var photo = { src: '/patterns/catCafe.svg', thumb: undefined, w: 400, h: 300, kind: 'image' };
+    return h('div', { style: feed },
+      h(Bubble, { from: 'in', tail: true, time: '10:00', reactions: many }, 'Девять реакций: ряд переносится, время уходит на свою строку'),
+      h(Bubble, { from: 'out', tail: true, time: '10:01', status: 'read', reactions: avatars }, 'Мало реакций — аватары'),
+      h(MediaBubble, { from: 'in', tail: true, time: '10:02', items: [photo], ratio: '4 / 3', reactions: rx, onReact: function () {} }),
+      h(MediaBubble, { from: 'out', tail: true, time: '10:03', status: 'read', items: [photo], ratio: '4 / 3', caption: 'С подписью — реакции внутри', reactions: rx, onReact: function () {} }),
+      h(FileBubble, { from: 'in', tail: true, time: '10:04', name: 'Отчёт.pdf', ext: 'pdf', meta: '1,2 МБ', reactions: rx, onReact: function () {} }),
+      h(VoiceBubble, { from: 'out', tail: true, time: '10:05', status: 'read', duration: 12, waveform: null, trackKey: 'sb', track: function () { return { key: 'sb', src: '', duration: 12 }; }, reactions: rx, onReact: function () {} }),
+      h(TodoBubble, { from: 'in', tail: true, time: '10:06', todo: { title: 'Список', items: [{ id: 1, title: 'Купить хлеб' }, { id: 2, title: 'Позвонить' }], completions: [] }, reactions: rx, onReact: function () {} }),
+      h(RoundBubble, { from: 'out', time: '10:07', status: 'read', duration: 5, reactions: rx, onReact: function () {} }));
   },
 };

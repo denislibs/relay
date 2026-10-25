@@ -36,7 +36,8 @@ import { deleteFolder, getSettings, reorderFolders, saveFolder, setNotify, setPr
 import { publicAuthRoute, privateAuthRoute } from './authRoutes';
 import { groupRoute } from './groupRoutes';
 import { addContact, blockUser, listBlocked, listContacts, removeContact, resolveUser, unblockUser, updateContact } from './domain/contacts';
-import { serveStickerFile } from './stickers/files';
+import { serveReactionFile, serveStickerFile } from './stickers/files';
+import { reactionsRoute } from './reactions/routes';
 import { stickerRoute } from './stickers/routes';
 
 const STATUS: Record<string, number> = { bad_frame: 400, pin_limit: 409, too_long: 400, file_too_big: 413, username_invalid: 400, username_reserved: 400, username_taken: 409, bio_too_long: 400, note_too_long: 400, name_invalid: 400, birthday_invalid: 400, links_invalid: 400, folder_title: 400, folder_empty: 400, folder_too_many_chats: 400, folder_emoji: 400, folders_limit: 400, unauthorized: 401, not_member: 403, blocked: 403, not_found: 404, code_invalid: 400, code_expired: 400, flood: 429, fresh_session: 403, device_invalid: 400, password_invalid: 400, password_missing: 400, recovery_unavailable: 400, email_invalid: 400, qr_expired: 400, passkey_not_found: 404, passkey_invalid: 400, forbidden: 403, upload_missing: 409, upload_mismatch: 400, upload_pending: 409, upload_incomplete: 409, upload_limit: 429, upload_quota: 429, photo_invalid: 400 };
@@ -77,7 +78,7 @@ function withCookie(req: Request, res: Response | undefined): Response | undefin
 
 const INLINE_MIME = /^(image\/(jpeg|png|webp|gif|avif)|video\/(mp4|webm|ogg|quicktime)|audio\/(mpeg|mp4|ogg|webm|wav|x-wav|aac|flac))$/;
 
-const API = /^\/(health|me|users|contacts|settings|privacy|blocks|chats|presence|search|uploads|files|push|sessions|session|ws|dev|logout|auth|link-preview|groups|join|sticker-sets|my-stickers|stickers-by-emoji|stickers)(\/|$)/;
+const API = /^\/(health|me|users|contacts|settings|privacy|blocks|chats|presence|search|uploads|files|push|sessions|session|ws|dev|logout|auth|link-preview|groups|join|sticker-sets|my-stickers|stickers-by-emoji|stickers|reactions)(\/|$)/;
 
 export function createServer(opts: { port: number }): Server {
   // кадры мимо журнала — через Valkey, чтобы дошли до сокетов в любом процессе
@@ -101,8 +102,9 @@ export function createServer(opts: { port: number }): Server {
       const url = new URL(req.url);
       try {
         if (url.pathname === '/health') return Response.json({ ok: true });
-        // файлы стикеров публичные (без сессии); nginx отдаёт их сам, сюда доходят, если его нет
+        // файлы стикеров и реакций публичные (без сессии); nginx отдаёт их сам, сюда доходят, если его нет
         if (url.pathname.startsWith('/stk/')) return await serveStickerFile(url.pathname, req.method);
+        if (url.pathname.startsWith('/rx/')) return await serveReactionFile(url.pathname, req.method);
         // только API: статику клиента раздаёт nginx (docker/nginx), сюда доходит лишь то, чего нет в сборке
         if (!API.test(url.pathname)) return fail('not_found');
 
@@ -152,6 +154,8 @@ export function createServer(opts: { port: number }): Server {
 
         const stk = await stickerRoute(req, url, userId);
         if (stk) return stk;
+        const rx = await reactionsRoute(req, url);
+        if (rx) return rx;
         if (req.method === 'GET' && url.pathname === '/me') {
           await ensureServiceChat(userId).catch((e) => console.warn('service chat', String(e)));   // «Relay» в списке у всех
           return Response.json(await getMe(userId));

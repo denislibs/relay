@@ -6,7 +6,7 @@
 // Перемотка перетаскиванием: пока тянем — пауза и предпросмотр, отпустили — переход и продолжение.
 import { h } from 'preact';
 import { useEffect, useRef } from 'preact/hooks';
-import { cx, ForwardTitle, ReplyQuote, MsgLine, Icon, MessageStatus, ProgressRing } from '../kit.js';
+import { cx, ForwardTitle, ReplyQuote, MsgLine, Icon, MessageStatus, ProgressRing, metaOrReactions } from '../kit.js';
 import { requestMeasure, requestMutation } from '../schedule.js';
 import { fromBase64, unpack, waveBars } from './waveform.js';
 import * as player from './player.js';
@@ -135,7 +135,7 @@ export function VoiceBubble(props) {
   var unreadDot = props.unread;
   return h(MsgLine, { aside: props.aside, class: cx('rl-msgline', out && 'rl-msgline-out', props.groupStart && 'rl-msgline-gap') },
     // пост канала: metaBefore (просмотры, подпись) делает мету шире — она встаёт строкой под волной (rl-meta-flow), footer — кнопка комментариев
-    h('div', { class: cx('rl-bubble rl-vb', out ? 'rl-bubble-out' : 'rl-bubble-in-side', props.tail && 'rl-bubble-tail', props.metaBefore && 'rl-meta-flow', props.footer && 'rl-bubble-has-footer', props.appear && (out ? 'rl-appear-out' : 'rl-appear-in')) },
+    h('div', { class: cx('rl-bubble rl-vb', out ? 'rl-bubble-out' : 'rl-bubble-in-side', props.tail && 'rl-bubble-tail', props.metaBefore && 'rl-meta-flow', props.footer && 'rl-bubble-has-footer', props.reactions && props.reactions.length && 'rl-bubble-has-react', props.appear && (out ? 'rl-appear-out' : 'rl-appear-in')) },
       props.fwd ? h(ForwardTitle, { fwd: props.fwd }) : null,
       props.reply ? h(ReplyQuote, Object.assign({ inBubble: true }, props.reply)) : null,
       h('div', { class: 'rl-vb-row' },
@@ -152,6 +152,6 @@ export function VoiceBubble(props) {
           h('div', { class: 'rl-vb-foot' },
             h('span', { ref: timeRef, class: 'rl-vb-time' }, fmt(duration)),
             unreadDot ? h('span', { class: 'rl-vb-dot', 'aria-label': 'Не прослушано' }) : null))),
-      h('span', { class: 'rl-bubble-meta' }, props.metaBefore ? props.metaBefore() : null, props.time, out || props.status ? h(MessageStatus, { status: props.status || 'sent' }) : null),
+      metaOrReactions(props, out, h('span', { class: 'rl-bubble-meta' }, props.metaBefore ? props.metaBefore() : null, props.time, out || props.status ? h(MessageStatus, { status: props.status || 'sent' }) : null)),
       props.footer ? h('div', { class: 'rl-bubble-footer' }, props.footer) : null));
 }

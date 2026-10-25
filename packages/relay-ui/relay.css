@@ -731,7 +731,6 @@ html[data-anim="0"] .rl-slidefade-item { animation: none !important; }
 .rl-bubble-in-side .rl-bubble-spacer-edited { width: 72px; }   /* входящее: без галочек, но с «изм.» */
 :root[data-time12] .rl-bubble-in-side .rl-bubble-spacer-edited { width: 100px; }
 .rl-bubble-deleted .rl-bubble-deleted-text { display: inline-flex; align-items: center; gap: 6px; font-style: italic; color: var(--bubble-meta); }
-.rl-bubble-has-react { margin-bottom: 18px; }
 .rl-bubble-flash { animation: rl-flash 1.2s var(--ease-out); }
 @keyframes rl-flash { 0%, 30% { box-shadow: 0 0 0 3px var(--favorite), var(--shadow-bubble); } 100% { box-shadow: var(--shadow-bubble); } }
 
@@ -760,19 +759,49 @@ button.rl-quote:active { background: var(--quote-bg-active, var(--pressed)); }
 .rl-quote-thumb { width: 52px; flex-shrink: 0; }
 .rl-quote .rl-iconbtn { align-self: center; width: 32px; height: 32px; margin-right: 4px; }
 
-/* ---------- Reactions ---------- */
-.rl-reacts { position: absolute; left: 8px; bottom: -18px; z-index: 1; display: flex; gap: 2px; }
-.rl-reacts-out { left: auto; right: 8px; }
-.rl-react { display: inline-flex; align-items: center; gap: 3px; height: 26px; padding: 0 6px; border: 2px solid var(--wallpaper); border-radius: var(--radius-pill); background: var(--raised); color: var(--ink-muted); font: 500 12px/1 var(--font-sans); cursor: pointer; box-shadow: var(--shadow-bubble); animation: rl-react-in var(--dur-base) var(--ease-out); transition: transform var(--dur-instant) var(--ease-standard); }
-.rl-react:hover { transform: scale(1.08); }
-.rl-react-mine { background: var(--accent-soft); }
-.rl-react-emoji { font-size: 14px; line-height: 1; }
-@keyframes rl-react-in { 0% { transform: scale(0); } 60% { transform: scale(1.2); } 100% { transform: scale(1); } }
+/* ---------- Reactions (как в Telegram) ---------- */
+/* внутри пузыря — ряд плашек под текстом, время последним в ряду; снаружи (rl-reacts-float) — под медиа, без фона пузыря */
+.rl-reacts { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 6px; padding-bottom: 2px; }
+.rl-reacts-meta > .rl-bubble-meta, .rl-reacts-meta > .rl-music-meta { position: static; order: 100; margin: 0 -2px 0 auto; align-self: flex-end; padding-bottom: 2px; }
+.rl-bubble-has-react > .rl-bubble-spacer, .rl-bubble-has-react > .rl-bubble-text + .rl-bubble-spacer { display: none; }
+.rl-bubble-has-footer.rl-bubble-has-react > .rl-bubble-meta { bottom: auto; }
+.rl-reacts-float { margin-top: 4px; padding-bottom: 0; }
+.rl-reacts-out.rl-reacts-float { justify-content: flex-end; }
+.rl-react-wrap { align-items: flex-start; }
+.rl-msgline-out .rl-react-wrap { align-items: flex-end; }
+.rl-sticker-msg .rl-reacts { margin-top: 4px; }
+/* файл: подвал фиксированной высоты держит только время; с реакциями он растёт под ряд */
+.rl-file-foot:has(> .rl-reacts) { height: auto; }
+.rl-file .rl-reacts, .rl-vb .rl-reacts { margin-top: 8px; }
+/* цвета: --react-bg/--react-fg — обычная, --react-on-bg/--react-on-fg — моя; у чужих от акцента, у своих — от цвета своего пузыря */
+.rl-reacts { --react-bg: color-mix(in srgb, var(--brand-text) 12%, transparent); --react-fg: var(--brand-text); --react-on-bg: var(--brand-text); --react-on-fg: #fff; }
+.rl-reacts-float { --react-bg: var(--media-scrim); --react-fg: var(--on-media); }
+.rl-reacts-float.rl-reacts-out { --react-on-bg: var(--raised); --react-on-fg: var(--brand-text); }
+.rl-react { position: relative; isolation: isolate; display: inline-flex; align-items: center; height: 30px; padding: 0 8px 0 6px; border: 0; border-radius: var(--radius-pill); background: var(--react-bg); color: var(--react-fg); font: 600 15px/18px var(--font-sans); font-variant-numeric: tabular-nums; white-space: nowrap; cursor: pointer; overflow: hidden; -webkit-tap-highlight-color: transparent; transition: color 300ms var(--ease-standard); animation: rl-react-in 200ms var(--ease-out); }
+/* заливка «моей» вырастает пятном из центра (300 ms), hover — лёгкое затемнение, без масштаба */
+.rl-react::before { content: ''; position: absolute; inset: 0; z-index: -1; border-radius: inherit; background: var(--react-on-bg); transform: scale(0); opacity: 0; transition: transform 300ms cubic-bezier(.4, 0, .2, 1), opacity 300ms cubic-bezier(.4, 0, .2, 1); }
+.rl-react-mine { color: var(--react-on-fg); }
+.rl-react-mine::before { transform: scale(1); opacity: 1; }
+.rl-react::after { content: ''; position: absolute; inset: 0; border-radius: inherit; background: var(--react-on-bg); opacity: 0; transition: opacity 150ms var(--ease-standard); pointer-events: none; }
+.rl-reacts-float .rl-react::after { background: #fff; }
+.rl-react:hover::after { opacity: .08; }
+.rl-react:active::after { opacity: .14; }
+.rl-react-icon { display: inline-flex; align-items: center; justify-content: center; width: 22px; height: 22px; font-size: 18px; line-height: 1; }
+.rl-react-icon img { width: 22px; height: 22px; }
+.rl-react-n { margin-left: 6px; }
+/* стопка аватаров вместо числа: до трёх, перекрытие 14 px, рамка цвета плашки */
+.rl-react-avatars { display: flex; flex-direction: row-reverse; margin-left: 3px; padding-right: 2px; }
+.rl-react-avatars .rl-avatar { box-shadow: 0 0 0 2px var(--react-bg); }
+.rl-react-mine .rl-react-avatars .rl-avatar { box-shadow: 0 0 0 2px var(--react-on-bg); }
+.rl-react-avatars .rl-avatar + .rl-avatar { margin-right: -14px; }
+@keyframes rl-react-in { from { transform: scale(.6); opacity: 0; } to { transform: none; opacity: 1; } }
 
 .rl-rpick { display: inline-flex; align-items: center; gap: 2px; padding: 6px; border-radius: var(--radius-pill); background: var(--raised); box-shadow: var(--shadow-pop); animation: rl-rpick-in var(--dur-base) var(--ease-out) both; transform-origin: 50% 100%; }
 .rl-rpick-btn { display: inline-flex; align-items: center; justify-content: center; width: 40px; height: 40px; border: 0; border-radius: 50%; background: transparent; color: var(--ink-muted); font-size: 24px; line-height: 1; cursor: pointer; animation: rl-rpick-pop 320ms var(--ease-out) both; animation-delay: calc(var(--i) * 30ms + 60ms); transition: transform var(--dur-fast) var(--ease-out), background-color var(--dur-instant) var(--ease-standard); }
-.rl-rpick-btn:hover { transform: scale(1.3) translateY(-4px); }
+/* как в Telegram: при наведении — подсветка, без увеличения */
+.rl-rpick-btn:hover { background: var(--hover); }
 .rl-rpick-btn:active { transform: scale(0.9); }
+.rl-rpick-img { width: 28px; height: 28px; }
 .rl-rpick-on { background: var(--accent-soft); }
 .rl-rpick-more { background: var(--field); font-size: 0; }
 @keyframes rl-rpick-in { from { opacity: 0; transform: translateY(8px) scale(0.9); } to { opacity: 1; transform: none; } }
@@ -2377,7 +2406,6 @@ html[data-blur="0"] .rl-menu { -webkit-backdrop-filter: none; backdrop-filter: n
 .rl-sticker-head .rl-quote-in { margin: 0; }
 .rl-sticker-box { position: relative; line-height: 0; }
 .rl-sticker-meta { right: 0; bottom: 0; }
-.rl-sticker-msg .rl-reacts { margin-top: 0; }
 
 /* ---------- Панель эмодзи и стикеров над полем ввода ---------- */
 .rl-emoji-toggle-on { color: var(--brand-strong); }

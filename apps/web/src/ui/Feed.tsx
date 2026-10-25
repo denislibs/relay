@@ -2,6 +2,8 @@ import { isGroupService, serviceText } from './serviceText';
 import type { ServiceData, ServiceType } from '@relay/protocol';
 import type { Item } from '@relay/sync-engine/src/types';
 import { avatarPhoto, senderAvatar } from '../profilePhoto';
+import { reactionIcon, useReactionCatalog } from '../reactions';
+import { groupReactions, type Chip } from '../reactionChips';
 import type { Entity, MessageButton, ProfilePhoto, Todo } from '@relay/protocol';
 import { Presence, ProgressRing, useMinVisible, MediaPolicy, ArticleBlocks, Avatar, Bubble, Icon, peerTone, DateDivider, DatePicker, FileBubble, MediaBubble, MessageText, VoiceBubble, MusicBubble, RoundBubble, player, MediaViewer, ScrollToBottom, beginHeavyAnimation, forceMeasure, isHeavyAnimating, onHeavyAnimationEnd, requestMeasure, requestMutation, selectionValue, TodoBubble, InlineKeyboard, StickerBubble, reducedMotion, LazyRoot } from '@relay/ui';
 import { openStickerSet, sendSticker, useGreetingSticker } from '../stickers';
@@ -62,20 +64,27 @@ const inlineUrl = (a: Att) => (a.kind === 'video' && a.preview && a.id ? `/files
 /** Качества в просмотрщике: 720p по умолчанию, переключатель на оригинал; без копии — один оригинал. */
 const qualitiesOf = (a: Att) => (a.kind === 'video' && a.variants?.some((v) => v.name === '720')
   ? [{ label: '720p', src: `/files/${a.id}/720` }, { label: 'Оригинал', src: fileUrl(a) }] : undefined);
-type RowProps = { post?: boolean; pinned?: boolean; discussion?: number | null; chatId: number; voiceTitle: string; author?: string; onAuthor?: (m: Item) => void; onOpen: (m: Item) => void; hl?: string; m: Item; meId: number; out: boolean; start: boolean; end: boolean; pos?: 'single' | 'first' | 'middle' | 'last'; quoted?: Quote | null; quoteAuthor?: string; quoteTone?: number | 'accent'; appear: boolean; flash: boolean; onReact: (m: Item, emoji: string) => void; album?: Item[]; onUser?: (userId: number) => void; sel?: boolean; selIn?: string; onQuickForward?: (m: Item) => void; grp?: boolean; leaving?: boolean };
+/** Плашки реакций сообщения с картинками из каталога; пока реакций меньше четырёх — вместо числа аватары (как в Telegram). */
+function reactionChips(m: Item, meId: number, people: Record<number, { name: string } | undefined>): Chip[] {
+  const chips = groupReactions(m as Parameters<typeof groupReactions>[0], meId);
+  for (const c of chips) c.icon = reactionIcon(c.key);
+  const missing: number[] = [];
+  for (const c of chips) if (c.who) c.users = c.who.map((uid) => {
+    const name = uid === meId ? getGlobal().me?.name ?? '' : people[uid]?.name ?? '';
+    if (!name && uid !== meId) missing.push(uid);
+    return { name, tone: peerTone(uid), ...senderAvatar(uid) };
+  });
+  if (missing.length) wantPeople(missing);
+  return chips;
+}
+
+type RowProps = { post?: boolean; pinned?: boolean; discussion?: number | null; chatId: number; voiceTitle: string; author?: string; onAuthor?: (m: Item) => void; onOpen: (m: Item) => void; hl?: string; m: Item; meId: number; out: boolean; start: boolean; end: boolean; pos?: 'single' | 'first' | 'middle' | 'last'; quoted?: Quote | null; quoteAuthor?: string; quoteTone?: number | 'accent'; appear: boolean; flash: boolean; onReact: (m: Item, emoji: string) => void; album?: Item[]; onUser?: (userId: number) => void; sel?: boolean; selIn?: string; onQuickForward?: (m: Item) => void; grp?: boolean; leaving?: boolean; rxv: number; people: Record<number, { name: string } | undefined> };
 
 /** Строка ленты: перерисовывается только если изменилось её сообщение или место в группе. */
-const Row = memo(function Row({ post, pinned, discussion, chatId, voiceTitle, author, onAuthor, onOpen, hl, m, meId, out, start, end, pos, quoted, quoteAuthor, quoteTone, appear, flash, onReact, album, onUser, sel, selIn, onQuickForward, grp, leaving }: RowProps) {
-  // реакции: по эмодзи — сколько и есть ли моя
-  const list = (m.reactions as { userId: number; emoji: string }[] | undefined) ?? [];
-  const chips: { emoji: string; count: number; mine: boolean }[] = [];
-  // пост канала — счётчиками (reactionCounts), своя — myReaction; списка реакторов у поста нет
-  const counts = m.reactionCounts as [string, number][] | undefined;
-  if (counts) for (const [emoji, count] of counts) chips.push({ emoji, count, mine: m.myReaction === emoji });
-  else for (const r of list) {
-    const c = chips.find((x) => x.emoji === r.emoji);
-    if (c) { c.count++; c.mine ||= r.userId === meId; } else chips.push({ emoji: r.emoji, count: 1, mine: r.userId === meId });
-  }
+const Row = memo(function Row({ post, pinned, discussion, chatId, voiceTitle, author, onAuthor, onOpen, hl, m, meId, out, start, end, pos, quoted, quoteAuthor, quoteTone, appear, flash, onReact, album, onUser, sel, selIn, onQuickForward, grp, leaving, people }: RowProps) {
+  // реакции: по эмодзи (ключ без FE0F — «❤️» и «❤» одна плашка) — сколько, есть ли моя, кто поставил;
+  // картинка — из каталога (rxv — версия каталога: пришёл — строка перерисуется)
+  const chips = reactionChips(m, meId, people);
   // пост: в мете — просмотры, подпись автора и булавка; под пузырём — кнопка комментариев (если у канала есть обсуждение)
   const metaBefore = post && !m.deleted ? postMeta(m, !!pinned) : undefined;
   // у канала есть обсуждение (discussion) — кнопка сразу у каждого поста, заглушкой, пока не пришли replies (копия
@@ -134,6 +143,7 @@ const Row = memo(function Row({ post, pinned, discussion, chatId, voiceTitle, au
           state={busy ? 'loading' : 'ready'} progress={busy ? Math.min(...album.map((x) => (typeof x.progress === 'number' ? x.progress as number : 1))) : undefined}
           caption={cap ? <MessageText text={cap.body as string} entities={cap.entities as Entity[] | undefined} highlight={hl} /> : undefined}
           metaBefore={metaBefore} footer={footer}
+          reactions={chips.length ? chips : undefined} onReact={(emoji: string) => onReact(m, emoji)}
           time={clock(last.createdAt as string)} status={mineSend ? last.status : undefined}
           onOpen={(i: number) => onOpen(album[i] ?? m)}
         />
@@ -159,6 +169,7 @@ const Row = memo(function Row({ post, pinned, discussion, chatId, voiceTitle, au
           onCancel={pending && mineSend ? () => discardUnsent(m.key as string) : undefined}
           caption={m.body ? <MessageText text={m.body as string} entities={m.entities as Entity[] | undefined} highlight={hl} /> : undefined}
           metaBefore={metaBefore} footer={footer}
+          reactions={chips.length ? chips : undefined} onReact={(emoji: string) => onReact(m, emoji)}
           time={clock(m.createdAt as string)} status={status}
           onOpen={() => onOpen(m)}
         />
@@ -178,6 +189,7 @@ const Row = memo(function Row({ post, pinned, discussion, chatId, voiceTitle, au
           reply={replyQ}
           edited={!!m.editedAt} time={clock(m.createdAt as string)} status={status}
           metaBefore={metaBefore} footer={footer}
+          reactions={chips.length ? chips : undefined} onReact={(emoji: string) => onReact(m, emoji)}
           canToggle={canToggle}
           onToggle={(itemId: number, done: boolean) => { void toggleTodo(chatId, m.id as number, itemId, done).then((ok: boolean) => { if (!ok) showToast('Не удалось отметить задачу'); }); }}
           onReadOnly={() => showToast(m.fwdFrom ? 'Пересланный чек-лист нельзя менять' : `${voiceTitle} не разрешил(а) другим отмечать задачи`)}
@@ -203,6 +215,7 @@ const Row = memo(function Row({ post, pinned, discussion, chatId, voiceTitle, au
           uploading={pending} progress={m.progress as number}
           onCancel={pending && mineSend ? () => discardUnsent(m.key as string) : undefined}
           metaBefore={metaBefore} footer={footer}
+          reactions={chips.length ? chips : undefined} onReact={(emoji: string) => onReact(m, emoji)}
           time={clock(m.createdAt as string)} status={status}
         />
         {mark}
@@ -224,6 +237,7 @@ const Row = memo(function Row({ post, pinned, discussion, chatId, voiceTitle, au
           uploading={pending} progress={m.progress as number}
           onCancel={pending && mineSend ? () => discardUnsent(m.key as string) : undefined}
           metaBefore={metaBefore} footer={footer}
+          reactions={chips.length ? chips : undefined} onReact={(emoji: string) => onReact(m, emoji)}
           time={clock(m.createdAt as string)} status={status}
           onListened={!out && unseen ? () => markListened(chatId, m.id as number) : undefined}
         />
@@ -245,6 +259,7 @@ const Row = memo(function Row({ post, pinned, discussion, chatId, voiceTitle, au
           uploading={pending} progress={m.progress as number}
           onCancel={pending && mineSend ? () => discardUnsent(m.key as string) : undefined}
           metaBefore={metaBefore} footer={footer}
+          reactions={chips.length ? chips : undefined} onReact={(emoji: string) => onReact(m, emoji)}
           time={clock(m.createdAt as string)} status={status}
           onToggle={() => {
             // плейлист — музыка загруженного окна ленты, новые сверху
@@ -273,6 +288,7 @@ const Row = memo(function Row({ post, pinned, discussion, chatId, voiceTitle, au
           onCancel={m.id == null && mineSend ? () => discardUnsent(m.key as string) : undefined}
           onRetry={() => retrySend(m.key as string)}
           metaBefore={metaBefore} footer={footer}
+          reactions={chips.length ? chips : undefined} onReact={(emoji: string) => onReact(m, emoji)}
           time={clock(m.createdAt as string)} status={status}
         />
         {mark}
@@ -474,6 +490,7 @@ export function Feed({ frameKey, active, chatId, threadId, channel = false, meId
 }) {
   const messages = useGlobal((s) => frameByKey(s, frameKey)?.messages ?? NO_MESSAGES);
   const people = useGlobal((s) => s.people);   // имена и фото авторов пришли — пачки перерисовываются
+  const rxv = useReactionCatalog();              // каталог реакций пришёл — плашки с картинками вместо глифов
   // следующее/предыдущее голосовое этого чата — для автоперехода и кнопок плеера
   useEffect(() => {
     if (!active) return;
@@ -1367,6 +1384,8 @@ export function Feed({ frameKey, active, chatId, threadId, channel = false, meId
         chatId={chatId}
         voiceTitle={mine ? 'Вы' : post ? (channel ? peerName : channelName(m)) : (group ? people[m.senderId as number]?.name ?? peerName : peerName)}
         onReact={onReact}
+        rxv={rxv}
+        people={people}
         onOpen={onOpen}
         out={mine}
         start={start}

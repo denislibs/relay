@@ -101,3 +101,14 @@ test('read by ids, read all, and a deleted message: rows go, the journal says so
   expect(r.status).not.toBe(200);
   expect(await sql`select count(*)::int as n from unread_reactions`).toEqual([{ n: 0 }]);
 });
+
+test('the chat list carries reactions of the last message (the engine never loads history after it)', async () => {
+  const a = await login('Анна'), b = await login('Борис');
+  const chatId = await group(a, [b]);
+  const { message } = await sendMessage(b.userId, { chatId, clientId: crypto.randomUUID(), body: 'последнее' });
+  await reactMessage(a.userId, chatId, message.id, '🎉');
+  await reactMessage(b.userId, chatId, message.id, '🎉');
+  const row = (await ok(a, 'GET', '/chats/page?limit=20')).chats.find((c: any) => c.id === chatId);
+  expect(row.last.id).toBe(message.id);
+  expect(row.last.reactions).toEqual([{ userId: a.userId, emoji: '🎉' }, { userId: b.userId, emoji: '🎉' }]);
+});

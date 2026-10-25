@@ -3,7 +3,7 @@
 //   relay-app-shell@<сборка>          — код, стили, воркеры, звуки: холодный старт без сети;
 //   relay-attachments-auto-evictable  — вложения, подгруженные сами (уходят по сроку, лимиту и при нехватке места);
 //   relay-attachments-saved-by-user   — вложения, скачанные кнопкой (сами не удаляются);
-//   relay-stickers                    — файлы стикеров /stk/… (адрес с хэшем содержимого: неизменны, живут между сборками).
+//   relay-stickers                    — файлы стикеров /stk/… и реакций /rx/… (адрес с хэшем содержимого: неизменны, живут между сборками).
 // Сведения о вложениях — в IndexedDB relay-attachments-on-device (mediaCache.ts, attachmentsOnDevice.ts).
 // Остальной API и WebSocket — только сеть.
 import type { AutoCleanupPolicy } from './attachmentsOnDevice';
@@ -112,9 +112,10 @@ function networkFirst(req: Request, fallback: () => Promise<Response | undefined
   });
 }
 
-// Стикеры: сначала кэш (файл по адресу не меняется никогда), иначе сеть и в кэш. Предел — по числу файлов:
+// Стикеры и реакции: сначала кэш (файл по адресу не меняется никогда), иначе сеть и в кэш. Предел — по числу файлов:
 // при переполнении уходят самые давно положенные (порядок ключей Cache Storage — порядок добавления).
 const STICKERS_CACHE = 'relay-stickers';
+const STICKER_PREFIXES = ['/stk/', '/rx/'];
 const STICKERS_MAX = 6000;   // ≈ 60–120 МБ при 10–20 КБ на .tgs
 let stickerPuts = 0;
 async function serveSticker(req: Request): Promise<Response> {
@@ -134,7 +135,7 @@ async function serveSticker(req: Request): Promise<Response> {
 
 sw.addEventListener('fetch', (e) => {
   const url = new URL(e.request.url);
-  if (e.request.method === 'GET' && url.origin === location.origin && url.pathname.startsWith('/stk/')) {
+  if (e.request.method === 'GET' && url.origin === location.origin && STICKER_PREFIXES.some((p) => url.pathname.startsWith(p))) {
     e.respondWith(serveSticker(e.request).catch(() => Response.error()));
     return;
   }

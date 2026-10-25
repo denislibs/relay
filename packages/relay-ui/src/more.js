@@ -71,13 +71,14 @@ function Menu(props) {
 }
 
 /* ---------- ReactionPicker: quick reactions row (emoji are content, not UI icons) ---------- */
-var QUICK = ['👍', '❤️', '😂', '😮', '😢', '🙏'];
+/** emoji — список (из каталога реакций), icons(emoji) — адрес картинки реакции (нет — глиф). */
 function ReactionPicker(props) {
-  var list = props.emoji || QUICK;
+  var list = props.emoji || [];
   return h('div', { class: 'rl-rpick', role: 'toolbar', 'aria-label': 'Реакции' },
     list.map(function (e, i) {
+      var icon = props.icons ? props.icons(e) : null;
       return h('button', { key: e, type: 'button', class: cx('rl-rpick-btn', props.selected === e && 'rl-rpick-on'), style: { '--i': i }, 'aria-label': 'Реакция ' + e, 'aria-pressed': String(props.selected === e),
-        onClick: function () { if (props.onPick) props.onPick(e); } }, e);
+        onClick: function () { if (props.onPick) props.onPick(e); } }, icon ? h('img', { class: 'rl-rpick-img', src: icon, alt: '', draggable: false, decoding: 'async' }) : e);
     }),
     h('button', { type: 'button', class: 'rl-rpick-btn rl-rpick-more', style: { '--i': list.length }, 'aria-label': 'Другие реакции', onClick: props.onMore }, h(Icon, { name: 'plus', size: 18 })));
 }

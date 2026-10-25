@@ -566,15 +566,15 @@ function Bubble(props) {
       props.metaBefore && !deleted
         ? h('span', { class: 'rl-bubble-spacer rl-bubble-spacer-fit', 'aria-hidden': 'true' }, props.metaBefore(), props.edited ? h('span', { class: 'rl-bubble-edited' }, 'изм.') : null, props.time)
         : h('span', { class: cx('rl-bubble-spacer', props.edited && 'rl-bubble-spacer-edited'), 'aria-hidden': 'true' }),
-      h('span', { class: 'rl-bubble-meta' },
+      // с реакциями время — последним в их ряду (как в Telegram), иначе в правом нижнем углу
+      metaOrReactions(props, out, h('span', { class: 'rl-bubble-meta' },
         props.metaBefore && !deleted ? props.metaBefore() : null,
         props.edited ? h('span', { class: 'rl-bubble-edited' }, 'изм.') : null,
         props.time,
         // статус у входящего вида — только если его передали: свой неотправленный пост канала (пост всегда слева)
-        (out || props.status) && !deleted ? h(MessageStatus, { status: props.status || 'sent' }) : null),
-      // footer — полоса внизу пузыря во всю его ширину (кнопка комментариев поста)
-      props.footer && !deleted ? h('div', { class: 'rl-bubble-footer' }, props.footer) : null,
-      props.reactions && props.reactions.length ? h(ReactionChips, { items: props.reactions, out: out, onClick: props.onReactionClick }) : null);
+        (out || props.status) && !deleted ? h(MessageStatus, { status: props.status || 'sent' }) : null)),
+      // footer — полоса внизу пузыря во всю его ширину (кнопка комментариев поста), ниже реакций
+      props.footer && !deleted ? h('div', { class: 'rl-bubble-footer' }, props.footer) : null);
   // below — под пузырём во всю его ширину (кнопки сообщения); обёртка остаётся, пока строка жива, чтобы пузырь не
   // пересоздавался, когда содержимое снизу уходит
   var hadBelow = useRef(false);
@@ -614,13 +614,33 @@ function ReplyQuote(props) {
     props.onCancel ? h(IconButton, { icon: 'close', label: 'Отменить ответ', onClick: props.onCancel, size: 18 }) : null);
 }
 
-/* ---------- ReactionChips: under a bubble ---------- */
+/* ---------- ReactionChips: как в Telegram — внутри пузыря (время последним в ряду) или плашками под медиа ---------- */
+/**
+ * items: [{ key, emoji, count, mine, icon?, users? }] — icon: адрес картинки реакции (нет — глиф эмодзи);
+ * users: [{ name, src?, thumb?, tone? }] — вместо числа стопка аватаров (пока реакций на сообщении мало).
+ * meta: узел времени — внутри пузыря встаёт последним в ряд реакций (как в Telegram); float — снаружи, под медиа.
+ * Ключ плашки — эмодзи: при смене счётчика узел живёт, и заливка «моей» растёт пятном, а не пересоздаётся.
+ */
 function ReactionChips(props) {
-  return h('div', { class: cx('rl-reacts', props.out && 'rl-reacts-out') },
+  return h('div', { class: cx('rl-reacts', props.out && 'rl-reacts-out', props.float && 'rl-reacts-float', props.meta && 'rl-reacts-meta') },
     props.items.map(function (r) {
-      return h('button', { key: r.emoji + (r.count || 1) + (r.mine ? 'm' : ''), type: 'button', class: cx('rl-react', r.mine && 'rl-react-mine'), onClick: function (e) { e.stopPropagation(); if (props.onClick) props.onClick(r.emoji); }, 'aria-label': 'Реакция ' + r.emoji + (r.count > 1 ? ', ' + r.count : '') },
-        h('span', { class: 'rl-react-emoji' }, r.emoji), r.count > 1 ? h('span', null, r.count) : null);
-    }));
+      var n = r.count || 1;
+      var avatars = r.users && r.users.length ? r.users.slice(0, 3) : null;
+      return h('button', { key: r.key || r.emoji, type: 'button', class: cx('rl-react', r.mine && 'rl-react-mine'), onClick: function (e) { e.stopPropagation(); if (props.onClick) props.onClick(r.emoji); },
+        'aria-label': 'Реакция ' + r.emoji + ', ' + n + (r.mine ? ', ваша' : ''), 'aria-pressed': String(!!r.mine) },
+        h('span', { class: 'rl-react-icon' }, r.icon ? h('img', { src: r.icon, alt: '', draggable: false, decoding: 'async' }) : r.emoji),
+        avatars
+          ? h('span', { class: 'rl-react-avatars' }, avatars.map(function (u, i) { return h(Avatar, { key: i, name: u.name, src: u.src, thumb: u.thumb, tone: u.tone, size: 24 }); }))
+          : h('span', { class: 'rl-react-n' }, n));
+    }),
+    props.meta || null);
+}
+
+/** Мета (время, статус) пузыря: с реакциями — последним элементом их ряда, без них — как есть. */
+function metaOrReactions(props, out, meta) {
+  return props.reactions && props.reactions.length
+    ? h(ReactionChips, { items: props.reactions, out: out, onClick: props.onReact || props.onReactionClick, meta: meta })
+    : meta;
 }
 
 /* ---------- DateDivider ---------- */
@@ -1203,10 +1223,10 @@ function MediaBubble(props) {
       it.sel !== undefined ? h('span', { class: 'rl-media-check', 'aria-hidden': 'true' }, h(Icon, { name: 'check', size: 12, strokeWidth: 3 })) : null,
       !album && !hidden ? h(MediaOverlay, { state: state, kind: it.kind, playing: vid && autoplay, progress: props.progress, size: props.size, onDownload: props.onDownload, onCancel: props.onCancel }) : null);
   }
-  return h(MsgLine, { aside: props.aside, class: cx('rl-msgline', out && 'rl-msgline-out', props.groupStart && 'rl-msgline-gap') },
-    // без подписи и автора — как в Telegram: картинка без рамки пузыря (без фона и отступов), углы — от пузыря;
-    // хвостик остаётся, а его цвет берётся из нижнего угла картинки (см. useTailColor)
-    h('div', { class: cx('rl-bubble rl-media', mediaOnly && 'rl-media-only', out ? 'rl-bubble-out' : 'rl-bubble-in-side', props.tail && 'rl-bubble-tail', props.appear && (out ? 'rl-appear-out' : 'rl-appear-in')),
+  var hasReact = !!(props.reactions && props.reactions.length);
+  // без подписи и автора — как в Telegram: картинка без рамки пузыря (без фона и отступов), углы — от пузыря;
+  // хвостик остаётся, а его цвет берётся из нижнего угла картинки (см. useTailColor)
+  var bubble = h('div', { class: cx('rl-bubble rl-media', mediaOnly && 'rl-media-only', out ? 'rl-bubble-out' : 'rl-bubble-in-side', props.tail && 'rl-bubble-tail', props.appear && (out ? 'rl-appear-out' : 'rl-appear-in')),
       style: tailColor ? { '--tail-bg': tailColor } : undefined },
       props.fwd ? h(ForwardTitle, { fwd: props.fwd, class: 'rl-media-author' }) : null,
       props.author && !props.fwd ? h('span', { class: 'rl-bubble-author rl-media-author', style: { color: 'var(--peer-' + (props.authorTone != null ? props.authorTone : 5) + ')' } }, props.author) : null,
@@ -1218,10 +1238,13 @@ function MediaBubble(props) {
         }) : (album ? items.slice(0, 4) : items).map(cell),
         album && state !== 'ready' ? h(MediaOverlay, { state: state, progress: props.progress, size: props.size, onDownload: props.onDownload, onCancel: props.onCancel }) : null,
         !props.caption ? h('span', { class: 'rl-media-chip rl-media-chip-meta' }, props.metaBefore ? props.metaBefore() : null, props.time, out || props.status ? h(MessageStatus, { status: props.status || 'read' }) : null) : null),
-      props.caption ? h('div', { class: 'rl-media-caption' }, props.caption,
+      props.caption ? h('div', { class: cx('rl-media-caption', hasReact && 'rl-bubble-has-react') }, props.caption,
         props.metaBefore ? h('span', { class: 'rl-bubble-spacer rl-bubble-spacer-fit', 'aria-hidden': 'true' }, props.metaBefore(), props.time) : h('span', { class: 'rl-bubble-spacer', 'aria-hidden': 'true' }),
-        h('span', { class: 'rl-bubble-meta' }, props.metaBefore ? props.metaBefore() : null, props.time, out || props.status ? h(MessageStatus, { status: props.status || 'read' }) : null)) : null,
-      props.footer ? h('div', { class: 'rl-bubble-footer' }, props.footer) : null));
+        metaOrReactions(props, out, h('span', { class: 'rl-bubble-meta' }, props.metaBefore ? props.metaBefore() : null, props.time, out || props.status ? h(MessageStatus, { status: props.status || 'read' }) : null))) : null,
+      props.footer ? h('div', { class: 'rl-bubble-footer' }, props.footer) : null);
+  // без подписи реакции — плашками под картинкой, снаружи (как у стикера в Telegram), по краю своей стороны
+  if (hasReact && !props.caption) bubble = h('div', { class: 'rl-below-wrap rl-react-wrap' }, bubble, h(ReactionChips, { items: props.reactions, out: out, float: true, onClick: props.onReact }));
+  return h(MsgLine, { aside: props.aside, class: cx('rl-msgline', out && 'rl-msgline-out', props.groupStart && 'rl-msgline-gap') }, bubble);
 }
 
 /* ---------- FileBubble: documents ---------- */
@@ -1264,7 +1287,7 @@ function FileBubble(props) {
               h('b', { key: 'ext', class: 'rl-file-face' }, label))
           : h('span', { class: 'rl-file-icon', 'data-ext': ext, 'data-kind': fileKind(ext) }, h('b', { key: 'ext', class: 'rl-file-face' }, label)),
         h('span', { class: 'rl-file-text' }, h('span', { class: 'rl-file-name' }, props.name), h('span', { class: 'rl-file-sub' }, props.meta))),
-      h('div', { class: 'rl-file-foot' }, h('span', { class: 'rl-bubble-meta' }, props.metaBefore ? props.metaBefore() : null, props.time, out || props.status ? h(MessageStatus, { status: props.status || 'read' }) : null)),
+      h('div', { class: 'rl-file-foot' }, metaOrReactions(props, out, h('span', { class: 'rl-bubble-meta' }, props.metaBefore ? props.metaBefore() : null, props.time, out || props.status ? h(MessageStatus, { status: props.status || 'read' }) : null))),
       props.footer ? h('div', { class: 'rl-bubble-footer' }, props.footer) : null));
 }
 
@@ -1790,4 +1813,4 @@ function ScrollToBottom(props) {
 }
 
 
-export { RowBadge, WebPage, MsgLine, ForwardTitle, peerTone, RelayLogo, Verified, ArchivedRow, ReplyQuote, ReactionChips, cx, chain, ripple, reducedMotion, omit, fmtTime, makeWave, ICONS, Icon, Button, IconButton, Avatar, Badge, Chip, ChatRow, ChatRowSkeleton, Bubble, MessageStatus, TypingIndicator, DateDivider, Banner, NavRail, Checkbox, Toast, Card, Steps, MediaArt, ProgressRing, Waveform, VoiceMessage, VoiceRecorder, MediaBubble, MediaPolicy, mediaHeld, FileBubble, MediaThumb, MediaViewer, viewerPreview, Switch, PanelHeader, ProfileHeader, ActionTile, InfoRow, SettingsIcon, ReadMore, Presence, useMinVisible, LazyImage, LazyRoot, lazyObserve, lazyRoots, FlipList, SyncIndicator, LinearProgress, EmptyState, ScrollToBottom, SlideFade };
+export { RowBadge, WebPage, MsgLine, ForwardTitle, peerTone, RelayLogo, Verified, ArchivedRow, ReplyQuote, ReactionChips, metaOrReactions, cx, chain, ripple, reducedMotion, omit, fmtTime, makeWave, ICONS, Icon, Button, IconButton, Avatar, Badge, Chip, ChatRow, ChatRowSkeleton, Bubble, MessageStatus, TypingIndicator, DateDivider, Banner, NavRail, Checkbox, Toast, Card, Steps, MediaArt, ProgressRing, Waveform, VoiceMessage, VoiceRecorder, MediaBubble, MediaPolicy, mediaHeld, FileBubble, MediaThumb, MediaViewer, viewerPreview, Switch, PanelHeader, ProfileHeader, ActionTile, InfoRow, SettingsIcon, ReadMore, Presence, useMinVisible, LazyImage, LazyRoot, lazyObserve, lazyRoots, FlipList, SyncIndicator, LinearProgress, EmptyState, ScrollToBottom, SlideFade };

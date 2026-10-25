@@ -1,6 +1,7 @@
 import type { Block } from './blocks';
 import type { ProfileLink } from './links';
 export * from './links';
+export * from './emoji';
 export * from './folders';
 import type { ChatFolder } from './folders';
 import type { GroupInfo, MyMembership } from './groups';
@@ -203,6 +204,15 @@ export const MAX_FILE_BYTES = 2 * 1024 * 1024 * 1024;
 
 /** Реакция: кто и какой эмодзи (одна от пользователя на сообщение). */
 export interface Reaction { userId: Id; emoji: string }
+/** Реакция из каталога сервера (GET /reactions): ключ — emojiKey, адреса — неизменяемые файлы /rx/<slug>/<хэш>/<файл>. */
+export interface ReactionAsset {
+  key: string;
+  title: string;         // «Red Heart»
+  inactive: boolean;     // в Telegram снята с выбора — рисуем, но не предлагаем
+  static: string;        // .webp
+  appear: string; select: string;   // .tgs
+  center: string | null; around: string | null;   // эффект над сообщением (.tgs), не у всех
+}
 
 export type Update =
   | { type: 'newMessage'; message: Message }

@@ -1,4 +1,6 @@
 import { hasMedia, rightForKind, type GroupInfo, type MemberRight, type MyMembership } from '@relay/protocol';
+import { emojiKey } from '@relay/protocol';
+import { pushRecentReaction, quickReactions, reactionIcon } from '../reactions';
 import { MEMBER_RIGHT_TEXT } from '../groups';
 import { PinnedBar } from './PinnedBar';
 import { UploadBar } from './UploadBar';
@@ -712,7 +714,8 @@ export function Chat({ chatId, frameKey, active, threadId }: { chatId: number; f
         return (
           <MenuPopover open anchor={menu} class="app-msgmenu"
             header={menuMsg.id != null && !menuMsg.deleted && !system && !chat?.preview && (!gRights || gRights.react) && gInfo?.reactions.mode !== 'none' ? (
-                <ReactionPicker emoji={gInfo?.reactions.mode === 'some' ? gInfo.reactions.allowed.slice(0, 7) : undefined} selected={myReaction} onPick={(emoji: string) => { react(chatId, menuMsg.id as number, myReaction === emoji ? null : emoji); setMenu(null); }} />
+                <ReactionPicker emoji={quickReactions(gInfo?.reactions.mode === 'some' ? gInfo.reactions.allowed : null)} icons={reactionIcon} selected={myReaction ? emojiKey(myReaction) : undefined}
+                  onPick={(emoji: string) => { const off = !!myReaction && emojiKey(myReaction) === emoji; react(chatId, menuMsg.id as number, off ? null : emoji); if (!off) pushRecentReaction(emoji); setMenu(null); }} />
               ) : null}
                 label="Действия с сообщением"
                 onClose={() => setMenu(null)}

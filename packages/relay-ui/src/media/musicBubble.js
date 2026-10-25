@@ -4,7 +4,7 @@
 import { h } from 'preact';
 import { useEffect, useRef, useState } from 'preact/hooks';
 import { PlayingRing } from './playingRing.js';
-import { cx, ForwardTitle, ReplyQuote, MsgLine, Icon, MessageStatus, ProgressRing } from '../kit.js';
+import { cx, ForwardTitle, ReplyQuote, MsgLine, Icon, MessageStatus, ProgressRing, metaOrReactions } from '../kit.js';
 import * as player from './player.js';
 
 // треки, которые включали в этой вкладке: файл уже качается в кэш — значок «скачать» в углу не нужен (как в Telegram).
@@ -78,7 +78,7 @@ export function MusicBubble(props) {
             // как в Telegram: при воспроизведении вторая строка — время и полоса с бегунком, той же высоты, что «длительность • исполнитель»
             ? h(TrackSeek, { trackKey: props.trackKey })
             : h('span', { class: 'rl-music-sub' }, fmt(props.duration), props.performer ? ' • ' + props.performer : props.size ? ' • ' + props.size : ''))),
-      last ? h('span', { class: 'rl-music-meta' }, props.metaBefore ? props.metaBefore() : null, props.time, out || props.status ? h(MessageStatus, { status: props.status || 'sent' }) : null) : null,
+      last ? metaOrReactions(props, out, h('span', { class: 'rl-music-meta' }, props.metaBefore ? props.metaBefore() : null, props.time, out || props.status ? h(MessageStatus, { status: props.status || 'sent' }) : null)) : null,
       // пост канала: кнопка комментариев — у последнего трека группы
       last && props.footer ? h('div', { class: 'rl-bubble-footer' }, props.footer) : null));
 }
