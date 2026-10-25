@@ -30,7 +30,7 @@ declare const __DEV__: boolean;
 
 let engine: EngineClient;
 // порция ленты — два экрана сообщений (строка-бабл ≈ 40 px), не меньше 30: как и страница диалогов, от высоты окна
-const FEED_PAGE = Math.max(30, Math.ceil(innerHeight / 40) * 2);
+const FEED_PAGE = Math.max(30, Math.ceil((typeof innerHeight === 'number' ? innerHeight : 0) / 40) * 2);   // вне браузера (тесты) — минимум
 
 /** Подписки движка → GlobalState. Несрочное применяем после тяжёлых анимаций. */
 export function startData(me: Me): void {
