@@ -26,6 +26,7 @@ export interface LocalMessage {
   entities?: Entity[];    // оформление текста
   listened?: boolean;     // голосовое/кружок прослушан получателем
   progress?: number;      // загрузка файла 0..1, пока сообщение в очереди
+  fx?: { key: string; t: number[]; at: number };   // только в элементе для UI: клики собеседника по большому эмодзи (store.emojiFx)
   error?: string;         // почему не отправлено (failed): 'blocked' — собеседник заблокировал отправителя
   service?: { type: ServiceType; data?: TodoServiceData };   // служебное сообщение от «Relay» (и строки чек-листов)
   todo?: Todo;            // чек-лист
@@ -129,6 +130,7 @@ export interface OutboxEntry {
   upload?: { id: string; partSize: number; parts: number; done: number[]; key?: string; base?: string };
   sticker?: StickerRef | null;      // стикер: снимок для показа до ответа, на сервер уходит только id   // большой файл частями: что уже принято (докачка)
   threadId?: number;                // комментарий в треде (группа обсуждения)
+  draftHash?: string | null;        // черновик, который забрала отправка (protocol draftHash); null — не трогала; нет — старая запись: сервер стирает всегда
 }
 
 export type Query =
@@ -222,6 +224,7 @@ export type Action =
   | { type: 'loadMoreChats' }
   | { type: 'setDraft'; chatId: number; text: string; entities?: Entity[] }
   | { type: 'typing'; chatId: number }
+  | { type: 'emojiFx'; chatId: number; id: number; key: string; t: number[] }
   | { type: 'editMessage'; chatId: number; id: number; body: string; entities?: Entity[] }
   | { type: 'deleteMessage'; chatId: number; id: number }
   | { type: 'react'; chatId: number; id: number; emoji: string | null }

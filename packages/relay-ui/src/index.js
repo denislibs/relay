@@ -46,4 +46,4 @@ export { configureLottie, openRenderer, liveRenderers } from './lottie/pool.js';
 export { StickerView, StickerBubble, stickerBox, stickerMsgSize, stickerThumb } from './StickerView.js';
 export { setStickerPolicy, setStickerGroupExclusive, stickerGroupExclusive, stickerStats } from './lottie/player.js';
 export { decodeOutline } from './lottie/outline.js';
-export { playReactionEffect, activeEffects } from './lottie/effects.js';
+export { playReactionEffect, activeEffects, playEmojiInteraction } from './lottie/effects.js';

@@ -30,7 +30,7 @@ declare const __DEV__: boolean;
 
 let engine: EngineClient;
 // порция ленты — два экрана сообщений (строка-бабл ≈ 40 px), не меньше 30: как и страница диалогов, от высоты окна
-const FEED_PAGE = Math.max(30, Math.ceil(innerHeight / 40) * 2);
+const FEED_PAGE = Math.max(30, Math.ceil((typeof innerHeight === 'number' ? innerHeight : 0) / 40) * 2);   // вне браузера (тесты) — минимум
 
 /** Подписки движка → GlobalState. Несрочное применяем после тяжёлых анимаций. */
 export function startData(me: Me): void {
@@ -791,6 +791,8 @@ export function typing(chatId: number): void {
 }
 /** Отправили — следующий набор снова сразу сообщит «печатаю». */
 export function typingDone(chatId: number): void { typingSent.delete(chatId); }
+/** Клики по большому эмодзи — собеседнику (личный чат): t — секунды от первого клика пачки. */
+export function emojiFx(chatId: number, id: number, key: string, t: number[]): void { engine.call({ type: 'emojiFx', chatId, id, key, t }).catch(() => {}); }
 
 /**
  * Поиск сообщений: по словам на устройстве, с сетью — вместе с сервером (вся история).

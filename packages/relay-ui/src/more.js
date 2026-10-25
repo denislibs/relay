@@ -514,8 +514,8 @@ function AsidePanel(props) {
     was.current = open;
     var aside = ref.current, shell = aside && aside.closest('.rl-shell');
     var main = shell && shell.querySelector(':scope > .rl-shell-main');
-    // узкий экран: панель поверх чата, колонка не меняется
-    if (!main || reducedMotion() || matchMedia('(max-width: 1100px)').matches) return;
+    // панель поверх чата: колонка не меняется
+    if (!main || reducedMotion() || shell.classList.contains('rl-shell-float')) return;
     var end = beginHeavyAnimation(ASIDE_MS + 20);
     var from = before.current, to = anchorX(aside);
     if (from == null || to == null || Math.abs(from - to) < 1) { end(); return; }
@@ -531,9 +531,12 @@ function AsidePanel(props) {
     var t = setTimeout(function () { requestMutation(function () { main.style.transition = ''; main.style.willChange = ''; }); end(); }, ASIDE_MS + 20);
     return function () { cancelAnimationFrame(raf); clearTimeout(t); end(); };
   }, [props.open]);
-  return h(Presence, { show: !!props.open, exitMs: 260 },
-    h('aside', { class: 'rl-shell-aside', ref: ref },
-      h('section', { class: 'rl-panel rl-asidecard', 'aria-label': props.label || 'Панель' }, props.children)));
+  return h(Fragment, null,
+    // поверх чата: прозрачная подложка, клик мимо панели закрывает её (как в Telegram); рядом с чатом её нет (CSS)
+    props.open && props.onClose ? h('div', { class: 'rl-aside-scrim', 'aria-hidden': 'true', onPointerDown: function (e) { e.preventDefault(); props.onClose(); } }) : null,
+    h(Presence, { show: !!props.open, exitMs: 260 },
+      h('aside', { class: 'rl-shell-aside', ref: ref },
+        h('section', { class: 'rl-panel rl-asidecard', 'aria-label': props.label || 'Панель' }, props.children))));
 }
 
 /* ---------- SideFrame: the floating sidebar card as a frame for SlideStack pages ---------- */
@@ -988,11 +991,51 @@ function SideResizer(props) {
     onPointerDown: onPointerDown, onDblClick: onDblClick, onKeyDown: onKeyDown, title: 'Потяните, чтобы изменить ширину; двойной клик — по умолчанию' });
 }
 
+/* Правая панель встаёт рядом с чатом, только когда рядом с ней чату остаётся полная ширина (--chat-max),
+   как в Telegram Web K; иначе она выезжает поверх, а чат не двигается (класс rl-shell-float на оболочке).
+   Ширина панели — то же правило, что в CSS (--aside-default): 408px, с 1276px — 25vw − 16px в пределах 408…464px. */
+function asideWidthFor(vw) { return vw >= 1276 ? Math.min(464, Math.max(408, vw * 0.25 - 16)) : 408; }
+function asideFloats() { return !!document.querySelector('.rl-shell.rl-shell-float'); }
+function useAsideMode(ref) {
+  // в состоянии, а не classList: рендер оболочки переписывает class целиком
+  var st = useState(false), float = st[0], setFloat = st[1];
+  useLayoutEffect(function () {
+    var shell = ref.current;
+    if (!shell || typeof ResizeObserver !== 'function') return;
+    var last = null;
+    function check() {
+      requestMeasure(function () {
+        var cs = getComputedStyle(shell);
+        var gap = parseFloat(cs.getPropertyValue('--space-float')) || 16;
+        var chat = parseFloat(cs.getPropertyValue('--chat-max')) || 696;
+        var main = shell.querySelector(':scope > .rl-shell-main');
+        if (!main) return;
+        var s = shell.getBoundingClientRect(), m = main.getBoundingClientRect();
+        // всё, что левее колонки чата (папки, список, отступы), + чат полной ширины + панель + отступы справа
+        var need = (m.left - s.left) + chat + gap + asideWidthFor(innerWidth) + gap;
+        var f = s.width < need || innerWidth <= 720;
+        if (f === last) return;
+        last = f;
+        setFloat(f);
+      });
+    }
+    var ro = new ResizeObserver(check);
+    ro.observe(shell);
+    var main = shell.querySelector(':scope > .rl-shell-main');
+    if (main) ro.observe(main);   // колонка папок слева появилась или ушла
+    var side = shell.querySelector(':scope > .rl-shell-side');
+    if (side) ro.observe(side);   // перетаскивание края списка меняет место под чат
+    return function () { ro.disconnect(); };
+  }, []);
+  return float;
+}
+
 function FloatShell(props) {
   var ref = useRef(null);
   // начальная ширина — один раз; дальше --side-w ведёт только ручка (иначе каждый рендер затирал бы перетаскивание)
   useLayoutEffect(function () { if (props.sideWidth && ref.current) ref.current.style.setProperty('--side-w', props.sideWidth + 'px'); }, []);
-  return h('div', { ref: ref, class: cx('rl-shell rl-wallpaper', props.wallpaper !== false && 'rl-shell-tw', props.class), style: props.style },
+  var float = useAsideMode(ref);
+  return h('div', { ref: ref, class: cx('rl-shell rl-wallpaper', props.wallpaper !== false && 'rl-shell-tw', float && 'rl-shell-float', props.class), style: props.style },
     props.wallpaper !== false ? h(Wallpaper, { pattern: props.pattern, colors: props.wallpaperColors, blur: props.wallpaperBlur, dark: props.wallpaperDark, intensity: props.wallpaperIntensity, image: props.wallpaperImage }) : null,
     props.rail || null,
     props.sidebar ? h('div', { class: 'rl-shell-side' }, props.sidebar,
@@ -1158,4 +1201,4 @@ function GlassBar(props) {
   return h('header', { class: cx('rl-glassbar', props.class) }, props.children);
 }
 
-export { patternColor, intensityAlpha, Wallpaper, nudgeWallpaper, buildPattern, loadPattern, patternSize, PATTERN_FILES, DOODLES, PATTERN_SETS, FloatShell, SideResizer, SidebarCard, SidebarHeader, FolderTabs, FolderRail, Fab, GlassBar, WindowList, WindowGrid, gridLayout, AsidePanel, SideFrame, SlideStack, Menu, MentionList, DropOverlay, LinkPreview, PollBubble, UnreadDivider, SelectionBar, ChatSearchBar, Highlight, ContactPicker, CallRow, StatusAvatar, LoginQR, VirtualList, BottomNav, Tooltip, plural };
+export { patternColor, intensityAlpha, Wallpaper, nudgeWallpaper, buildPattern, loadPattern, patternSize, PATTERN_FILES, DOODLES, PATTERN_SETS, FloatShell, asideFloats, SideResizer, SidebarCard, SidebarHeader, FolderTabs, FolderRail, Fab, GlassBar, WindowList, WindowGrid, gridLayout, AsidePanel, SideFrame, SlideStack, Menu, MentionList, DropOverlay, LinkPreview, PollBubble, UnreadDivider, SelectionBar, ChatSearchBar, Highlight, ContactPicker, CallRow, StatusAvatar, LoginQR, VirtualList, BottomNav, Tooltip, plural };

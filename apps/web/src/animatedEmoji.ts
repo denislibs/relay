@@ -19,8 +19,10 @@ export function loadAnimatedEmoji(): void {
 
 /** Адрес анимации эмодзи (ключ без FE0F), нет — undefined: сообщение остаётся крупным текстом. */
 export const animatedEmojiUrl = (key: string): string | undefined => cat?.emoji[key];
-/** Эффекты по клику: варианты для эмодзи, иначе общие (💥); пусто — без эффекта. */
-export const emojiEffects = (key: string): string[] => cat?.effects[key] ?? cat?.generic ?? [];
+/** Эффекты по клику: варианты для этого эмодзи (пусто — берут общие). */
+export const emojiEffects = (key: string): string[] => cat?.effects[key] ?? [];
+/** Общие эффекты (💥) — когда у эмодзи своих нет. */
+export const genericEmojiEffects = (): string[] => cat?.generic ?? [];
 export const animatedEmojiLoaded = (): boolean => !!cat;
 
 /** Версия каталога — строки ленты перерисовываются, когда он пришёл. Вызов — только там, где такие сообщения есть. */
