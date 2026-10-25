@@ -45,6 +45,8 @@ body { background: var(--bg); color: var(--ink); font-family: var(--font-sans); 
 /* ---------- лента: окно, датчики, метки прочтения, разделитель непрочитанного, «липкие» даты ---------- */
 .rl-feed { position: relative; }
 .app-msg { position: relative; }
+/* уходящая строка (удалена, соседи доезжают — Feed/leaving.ts): без кликов; absolute на своём месте ставит сам эффект */
+.app-msg-leaving { pointer-events: none; }
 .app-sentinel { flex: 0 0 1px; height: 1px; margin: -1px 0 0; pointer-events: none; }
 .app-mark { position: absolute; left: 0; right: 0; bottom: 0; height: 1px; pointer-events: none; }
 .app-unread-divider { position: relative; isolation: isolate; display: flex; justify-content: center; margin: var(--space-3) 0; padding: 6px 0; color: var(--brand-text); font: 500 13.5px/18px var(--font-sans); animation: app-fade 300ms var(--ease-out) both; }

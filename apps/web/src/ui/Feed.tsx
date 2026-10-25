@@ -28,6 +28,7 @@ import { clock, dayKey, dayLabel, fileSize } from './format';
 import { arrivals, type FeedSeen } from './appear';
 import { deferShift, requestShift, rowFor, shiftWanted } from './windowShift';
 import { burstAnimates, driveScroll, jumpNear, DRIVE_MS, DRIVE_OWN_MS, type Drive } from './scrollDrive';
+import { flipDeltas, interiorRemovals, mergeLeaving, LEAVE_HOLD_MS, LEAVE_MS, type Msg } from './leaving';
 
 /*
  * Лента сообщений, устроенная как в Telegram:
@@ -61,10 +62,10 @@ const inlineUrl = (a: Att) => (a.kind === 'video' && a.preview && a.id ? `/files
 /** Качества в просмотрщике: 720p по умолчанию, переключатель на оригинал; без копии — один оригинал. */
 const qualitiesOf = (a: Att) => (a.kind === 'video' && a.variants?.some((v) => v.name === '720')
   ? [{ label: '720p', src: `/files/${a.id}/720` }, { label: 'Оригинал', src: fileUrl(a) }] : undefined);
-type RowProps = { post?: boolean; pinned?: boolean; discussion?: number | null; chatId: number; voiceTitle: string; author?: string; onAuthor?: (m: Item) => void; onOpen: (m: Item) => void; hl?: string; m: Item; meId: number; out: boolean; start: boolean; end: boolean; pos?: 'single' | 'first' | 'middle' | 'last'; quoted?: Quote | null; quoteAuthor?: string; quoteTone?: number | 'accent'; appear: boolean; flash: boolean; onReact: (m: Item, emoji: string) => void; album?: Item[]; onUser?: (userId: number) => void; sel?: boolean; selIn?: string; onQuickForward?: (m: Item) => void; grp?: boolean };
+type RowProps = { post?: boolean; pinned?: boolean; discussion?: number | null; chatId: number; voiceTitle: string; author?: string; onAuthor?: (m: Item) => void; onOpen: (m: Item) => void; hl?: string; m: Item; meId: number; out: boolean; start: boolean; end: boolean; pos?: 'single' | 'first' | 'middle' | 'last'; quoted?: Quote | null; quoteAuthor?: string; quoteTone?: number | 'accent'; appear: boolean; flash: boolean; onReact: (m: Item, emoji: string) => void; album?: Item[]; onUser?: (userId: number) => void; sel?: boolean; selIn?: string; onQuickForward?: (m: Item) => void; grp?: boolean; leaving?: boolean };
 
 /** Строка ленты: перерисовывается только если изменилось её сообщение или место в группе. */
-const Row = memo(function Row({ post, pinned, discussion, chatId, voiceTitle, author, onAuthor, onOpen, hl, m, meId, out, start, end, pos, quoted, quoteAuthor, quoteTone, appear, flash, onReact, album, onUser, sel, selIn, onQuickForward, grp }: RowProps) {
+const Row = memo(function Row({ post, pinned, discussion, chatId, voiceTitle, author, onAuthor, onOpen, hl, m, meId, out, start, end, pos, quoted, quoteAuthor, quoteTone, appear, flash, onReact, album, onUser, sel, selIn, onQuickForward, grp, leaving }: RowProps) {
   // реакции: по эмодзи — сколько и есть ли моя
   const list = (m.reactions as { userId: number; emoji: string }[] | undefined) ?? [];
   const chips: { emoji: string; count: number; mine: boolean }[] = [];
@@ -103,7 +104,8 @@ const Row = memo(function Row({ post, pinned, discussion, chatId, voiceTitle, au
   // ответ — у любого типа сообщения (как в Telegram); клик по цитате ловит лента (onClick ниже ищет .rl-quote)
   const replyQ = quoted && !m.deleted ? { author: quoteAuthor, ...quoteContent(quoted as unknown as Record<string, unknown>), tone: quoteTone, onClick: noop } : undefined;
   // режим выбора: строка отмечается кликом (обработчик — у ленты), кружок-галочка слева
-  const wrap = (base: string) => base + (flash ? ' app-msg-flash' : '') + (sel !== undefined ? ' app-msg-sel' : '') + (sel ? ' app-msg-on' : '') + (grp ? ' app-msg-grp' : '');
+  // уходящая (удалённая, пока доезжают соседи — leaving.ts): без кликов и метки прочтения, вне якорей
+  const wrap = (base: string) => base + (flash ? ' app-msg-flash' : '') + (sel !== undefined ? ' app-msg-sel' : '') + (sel ? ' app-msg-on' : '') + (grp ? ' app-msg-grp' : '') + (leaving ? ' app-msg-leaving' : '');
   // круглая стрелка «Переслать» у пузыря при наведении — у медиа и длинных сообщений (не в режиме выбора)
   // у пересланного, чей исходный чат мне доступен, вместо неё — «→ к оригиналу» (как в Telegram)
   const src = ff && ff.chatId != null && getGlobal().chats.some((c) => c.id === ff.chatId) ? ff : null;
@@ -113,7 +115,7 @@ const Row = memo(function Row({ post, pinned, discussion, chatId, voiceTitle, au
       ? <button type="button" class="app-fwd-quick" aria-label="Переслать" title="Переслать" onClick={(e) => { e.stopPropagation(); onQuickForward(album?.[0] ?? m); }}><Icon name="forwardFilled" size={20} /></button> : null;
   const check = sel !== undefined ? <span class="app-msg-check" aria-hidden="true"><Icon name="check" size={14} strokeWidth={3} /></span> : null;
   const pending = m.status === 'pending' && typeof m.progress === 'number' && (m.progress as number) < 1;
-  const mark = m.id != null ? <i class="app-mark" data-mid={m.id as number} aria-hidden="true" /> : null;
+  const mark = m.id != null && !leaving ? <i class="app-mark" data-mid={m.id as number} aria-hidden="true" /> : null;
   if (album && album.length > 1) {
     // альбом — фото, отправленные вместе (один groupId): один пузырь с мозаикой, как в Telegram;
     // время и статус — у последнего, подпись — у первого, где она есть
@@ -169,7 +171,7 @@ const Row = memo(function Row({ post, pinned, discussion, chatId, voiceTitle, au
     // отмечать: автор — всегда, другие — если разрешено; пересланный — только для чтения
     const canToggle = m.id != null && !m.fwdFrom && (out || todo.othersCanComplete);
     return (
-      <div class={flash ? 'app-msg app-msg-flash' : 'app-msg'} data-key={m.key} data-sort={m.sort as number}>
+      <div class={(flash ? 'app-msg app-msg-flash' : 'app-msg') + (leaving ? ' app-msg-leaving' : '')} data-key={m.key} data-sort={m.sort as number}>
         <TodoBubble
           todo={todo} from={out ? 'out' : 'in'} tail={end} groupStart={start} appear={appear}
           forwarded={!!m.fwdFrom} authorName={out ? '' : voiceTitle}
@@ -407,7 +409,7 @@ function topIn(root: HTMLElement, el: HTMLElement): number {
 
 function firstVisible(root: HTMLElement): { key: string; sort: number; top: number } | null {
   const rootTop = root.getBoundingClientRect().top;
-  for (const row of root.querySelectorAll<HTMLElement>('.app-msg')) {
+  for (const row of root.querySelectorAll<HTMLElement>('.app-msg:not(.app-msg-leaving)')) {
     const r = row.getBoundingClientRect();
     if (r.bottom > rootTop + TOP_ZONE) return { key: row.dataset.key!, sort: Number(row.dataset.sort), top: r.top - rootTop };
   }
@@ -415,16 +417,16 @@ function firstVisible(root: HTMLElement): { key: string; sort: number; top: numb
 }
 
 /** Якорь для смены ширины: первое сообщение (или разделитель непрочитанных), начинающееся в видимой части. */
-function viewAnchorOf(root: HTMLElement): { key: string; top: number } | null {
+function viewAnchorOf(root: HTMLElement): { key: string; top: number; sort: number } | null {
   const rootTop = root.getBoundingClientRect().top;
-  for (const row of root.querySelectorAll<HTMLElement>('.app-msg, .app-unread-divider')) {
+  for (const row of root.querySelectorAll<HTMLElement>('.app-msg:not(.app-msg-leaving), .app-unread-divider')) {
     const r = row.getBoundingClientRect();
-    if (r.top >= rootTop + TOP_ZONE - 1) return { key: row.dataset.key ?? 'unread', top: r.top - rootTop };
+    if (r.top >= rootTop + TOP_ZONE - 1) return { key: row.dataset.key ?? 'unread', top: r.top - rootTop, sort: row.dataset.sort != null ? Number(row.dataset.sort) : -Infinity };
   }
   return null;
 }
 /** Строка сообщения: по ключу, а нет — та, что его содержит (альбом, разрезанный окном иначе; windowShift.rowFor). */
-const rowAt = (root: HTMLElement, key: string, sort: number) => rowFor(root.querySelectorAll<HTMLElement>('.app-msg[data-sort]'), key, sort);
+const rowAt = (root: HTMLElement, key: string, sort: number) => rowFor(root.querySelectorAll<HTMLElement>('.app-msg[data-sort]:not(.app-msg-leaving)'), key, sort);
 const anchorEl = (root: HTMLElement, key: string) =>
   key === 'unread' ? root.querySelector<HTMLElement>('.app-unread-divider') : root.querySelector<HTMLElement>(`[data-key="${CSS.escape(key)}"]`);
 
@@ -510,19 +512,35 @@ export function Feed({ frameKey, active, chatId, threadId, channel = false, meId
   // класс снимается, и строка, пересобранная позже, анимацию не повторит
   const appearAt = useRef(new Map<string, number>());
   const lastWindow = useRef<FeedSeen | null>(null);
+  // удаление с анимацией (leaving.ts): удалённые из середины окна ещё один рендер рисуются на своих местах, FLIP-эффект
+  // ниже выводит их из потока и довозит соседей; по таймеру буфер очищается (leaveTick — перерисовка без них)
+  const viewAnchor = useRef<{ key: string; top: number; sort: number } | null>(null);   // что было вверху видимой части (для смены ширины)
+  const leaving = useRef(new Map<string, Item>());
+  const [leaveTick, bumpLeave] = useState(0);
   if (lastWindow.current?.list !== messages) {
+    const prevList = lastWindow.current?.list as readonly Item[] | undefined;
     const now = performance.now(), next = arrivals(lastWindow.current, messages as { key: string }[], !!meta?.live && !meta.hasNewer);
     lastWindow.current = next.seen;
     for (const k of next.fresh) appearAt.current.set(k, now);
     for (const [k, t] of appearAt.current) if (now - t > APPEAR_MS) appearAt.current.delete(k);
+    // не при сдвиге окна, не на первом кадре, не без анимаций и не в скрытой вкладке — тогда обычный путь (якорь)
+    if (prevList && placed.current && !anchor.current && !toBottom.current && !reducedMotion() && !document.hidden) {
+      // у живого края удалённое последнее — тоже удаление (а не подрезка окна); у начала истории — первое
+      const edges = { atEnd: !!meta?.live && !meta.hasNewer, atStart: !!meta && !meta.hasOlder };
+      // выше видимой области (до якоря ширины) — не анимируем: там нечего показывать, а якорь удержит главный эффект
+      // синхронно, как раньше; ниже — буфер (вне экрана строка просто уйдёт)
+      const aboveView = viewAnchor.current?.sort ?? -Infinity;
+      for (const x of interiorRemovals(prevList as unknown as (Item & Msg)[], messages as unknown as (Item & Msg)[], edges)) if (x.sort > aboveView && !leaving.current.has(x.key)) leaving.current.set(x.key, x);
+    }
+    for (const m of messages) leaving.current.delete(m.key as string);   // вернулось в окно (повтор отправки) — не уходит
   }
-  const shownKeys = useRef<Set<string> | null>(null);   // ключи прошлого окна: что из него пропало (удалили сообщение)
+  const rendered = leaving.current.size ? mergeLeaving(messages as unknown as (Item & Msg)[], leaving.current.values() as Iterable<Item & Msg>) as Item[] : messages;
+  const shownKeys = useRef<Set<string> | null>(null);   // ключи прошлых строк: что из них пропало (удалили сообщение)
 
   /** Сдвиг окна: сначала замер якоря, потом — запрос нового окна. */
   // направление последней прокрутки пользователя: окно двигаем только туда, куда листают. Иначе на коротких
   // сообщениях окно качается — сдвиг к старым оставляет нижний датчик в зоне, он тянет к новым, и так по кругу
   const scrollDir = useRef<-1 | 0 | 1>(0);
-  const viewAnchor = useRef<{ key: string; top: number } | null>(null);   // что было вверху видимой части (для смены ширины)
   const lastTop = useRef(0);
   // программная плавная прокрутка (scrollDrive.ts): одна на ленту, пока едет — события scroll наши, не пользователя
   const driving = useRef<Drive | null>(null);
@@ -584,7 +602,7 @@ export function Feed({ frameKey, active, chatId, threadId, channel = false, meId
   useLayoutEffect(() => {
     const root = el.current;
     if (!root || !messages.length) return;
-    const before = shownKeys.current, keys = new Set(messages.map((m) => m.key as string));
+    const before = shownKeys.current, keys = new Set(rendered.map((m) => m.key as string));
     shownKeys.current = keys;
     if (!placed.current) {
       placed.current = true;
@@ -647,7 +665,68 @@ export function Feed({ frameKey, active, chatId, threadId, channel = false, meId
       if (next !== null) next = Math.max(0, Math.min(next, max)); // за пределы браузер не прокрутит — и события не будет
       if (next !== null && Math.abs(next - top) > 0.5) { programmatic.current++; root.scrollTop = next; }
     });
-  }, [messages, limit]);   // каждая порция дорисовки — восстановить якорь
+  }, [messages, limit, leaveTick]);   // каждая порция дорисовки — восстановить якорь; уход строк из буфера — тоже
+
+  // удаление с анимацией: уходящие строки ещё в потоке — снять раскладку, вывести их из потока (absolute на своём
+  // месте в пачке) и довезти соседей FLIP-переводом; уходящая гаснет. Два чтения и две записи до отрисовки —
+  // осознанное исключение §1 SMOOTH-UI: иначе кадр со схлопнувшимися соседями. Вне экрана — без анимации, строка
+  // просто уходит (якорь удержит главный эффект). По таймеру буфер очищается, а якорь ширины снимается заново —
+  // соседи уже на новых местах, и уход строк из DOM ничего не сдвигает
+  const leavePlayed = useRef(new Set<string>());
+  // прокрутка, которую подрезала или выставила уборка уходящих: событие scroll с этим значением — наше, не пользователя
+  // (по значению, а не счётчиком: подрезка у низа события может и не дать, и счётчик проглотил бы чужую прокрутку)
+  const leaveScroll = useRef<number | null>(null);
+  const leaveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  useLayoutEffect(() => {
+    const root = el.current;
+    if (!root || !leaving.current.size) return;
+    const fresh = new Set([...leaving.current.keys()].filter((k) => !leavePlayed.current.has(k)));
+    if (!fresh.size) return;
+    for (const k of fresh) leavePlayed.current.add(k);
+    // чистим только свои ключи: следующий залп, пришедший перед самым сбросом, доживёт свою анимацию
+    const mine = [...fresh];
+    const drop = () => {
+      leaveTimer.current = null;
+      requestMeasure(() => { viewAnchor.current = viewAnchorOf(root); requestMutation(() => { for (const k of mine) { leaving.current.delete(k); leavePlayed.current.delete(k); } bumpLeave((n) => n + 1); }); });
+    };
+    const schedule = (ms: number) => { if (leaveTimer.current) clearTimeout(leaveTimer.current); leaveTimer.current = setTimeout(drop, ms); };
+    forceMeasure(() => {
+      const rr = root.getBoundingClientRect(), st = root.scrollTop, ch = root.clientHeight;
+      // только строки около экрана (по offsetTop, без замера каждой): ±100 px — дальше сдвиги не видны
+      const near: { r: HTMLElement; key: string; rect: DOMRect }[] = [];
+      for (const r of root.querySelectorAll<HTMLElement>('.app-msg')) {
+        const t = topIn(root, r) - st;   // верх строки относительно видимой области (через rect — пачки position: relative)
+        if (t > ch + 100 || t + r.offsetHeight < -100) continue;
+        near.push({ r, key: r.dataset.key!, rect: r.getBoundingClientRect() });
+      }
+      const going = near.filter((x) => fresh.has(x.key) && x.rect.bottom > rr.top && x.rect.top < rr.bottom);
+      if (!going.length) {
+        // всё ниже экрана: убрать сразу, у низа — остаться у низа; сам сброс буфера — следующим рендером
+        for (const k of fresh) { const r = root.querySelector<HTMLElement>(`.app-msg[data-key="${CSS.escape(k)}"]`); if (r) r.style.display = 'none'; }
+        const max = root.scrollHeight - ch;
+        if (stick.current && Math.abs(max - root.scrollTop) > 0.5) { root.scrollTop = max; leaveScroll.current = root.scrollTop; }
+        schedule(0);
+        return;
+      }
+      const stay = near.filter((x) => !leaving.current.has(x.key));
+      const first = new Map(stay.map((x) => [x.key, x.rect.top]));
+      const place = going.map((x) => ({ el: x.r, top: x.r.offsetTop, left: x.r.offsetLeft, width: x.r.offsetWidth }));
+      for (const p of place) { const style = p.el.style; style.position = 'absolute'; style.top = p.top + 'px'; style.left = p.left + 'px'; style.width = p.width + 'px'; }
+      const last = new Map(stay.map((x) => [x.key, x.r.getBoundingClientRect().top]));
+      // лента схлопнулась, прокрутка подрезалась — это событие scroll наше, не пользователя
+      if (Math.abs(root.scrollTop - st) > 0.5) leaveScroll.current = root.scrollTop;
+      beginHeavyAnimation(LEAVE_HOLD_MS);
+      const ease = 'cubic-bezier(0.2, 0, 0, 1)', byKey = new Map(stay.map((x) => [x.key, x.r]));
+      for (const [key, d] of flipDeltas(first, last)) byKey.get(key)!.animate([{ transform: `translateY(${d}px)` }, { transform: 'none' }], { duration: LEAVE_MS, easing: ease });
+      // уходящая гаснет там, где была: при подрезке прокрутки всё (и absolute тоже) сместилось — держим её тем же переводом
+      for (const x of going) {
+        const d = x.rect.top - x.r.getBoundingClientRect().top, at = Math.abs(d) > 1 ? `translateY(${d}px)` : '';
+        x.r.animate([{ opacity: 1, transform: at || 'none' }, { opacity: 0, transform: `${at} scale(0.96)`.trim() }], { duration: LEAVE_MS - 20, easing: 'ease-in', fill: 'forwards' });
+      }
+      schedule(LEAVE_HOLD_MS);
+    });
+  });
+  useEffect(() => () => { if (leaveTimer.current) clearTimeout(leaveTimer.current); }, []);
 
   // пустой личный чат: карточка-приветствие — только когда пустоту подтвердило окно ленты и стикер выбран
   // (или ждать его дольше секунды не стали), чтобы ничего не мелькнуло и карточка не выросла после показа
@@ -892,6 +971,7 @@ export function Feed({ frameKey, active, chatId, threadId, channel = false, meId
       if (driving.current) { lastTop.current = root.scrollTop; return; }   // едем сами: направление, низ и сдвиги не трогаем
       const top = root.scrollTop, prev = lastTop.current;
       lastTop.current = top;
+      if (leaveScroll.current != null) { const at = leaveScroll.current; leaveScroll.current = null; if (Math.abs(top - at) < 1) return; }   // подрезка после удаления — не пользователь
       if (programmatic.current > 0) { programmatic.current--; return; } // наша прокрутка не меняет «прижата к низу»
       if (top !== prev) scrollDir.current = top < prev ? -1 : 1;
       const fromBottom = root.scrollHeight - top - root.clientHeight;
@@ -917,7 +997,7 @@ export function Feed({ frameKey, active, chatId, threadId, channel = false, meId
   useLayoutEffect(() => {
     const root = el.current;
     if (!root || !focus || !placed.current) return;
-    const row = root.querySelector<HTMLElement>(`.app-msg[data-sort="${focus.sort}"]`);
+    const row = root.querySelector<HTMLElement>(`.app-msg[data-sort="${focus.sort}"]:not(.app-msg-leaving)`);
     if (!row) return;
     clearFocus(frameKey);
     stick.current = false;
@@ -1151,7 +1231,10 @@ export function Feed({ frameKey, active, chatId, threadId, channel = false, meId
   let prevDay = '', prevSender: unknown = null, unreadShown = false;
   const isPosted = (x: Item) => isPost(x as { post?: boolean }) || (channel && !x.service);   // в канале и своё неподтверждённое — пост
   if (!partial) out.push(<div class="app-sentinel" data-dir="older" key={'o' + (messages[0]?.key ?? '')} aria-hidden="true" />);
-  const shown = partial ? messages.slice(messages.length - limit!) : messages;
+  const shown = partial ? mergeLeaving(messages.slice(messages.length - limit!) as unknown as (Item & Msg)[], leaving.current.values() as Iterable<Item & Msg>) as Item[] : rendered;
+  // соседи для хвостов, дат и пачек — без уходящих строк: раскладка соседей устоялась в кадре FLIP, не при сбросе буфера
+  const isLeaving = (x: Item | undefined) => !!x && leaving.current.has(x.key as string);
+  const neighbour = (i: number, dir: 1 | -1) => { let j = i + dir; while (isLeaving(shown[j])) j += dir; return shown[j]; };
   // альбомы: подряд идущие фото одного отправителя с общим groupId (до 10) — одной строкой с мозаикой
   const isPhoto = (x: Item | undefined) => !!x && !x.deleted && ['photo', 'video'].includes((x.attachment as Att | null)?.kind ?? '') && !!(x.attachment as Att).w && !!(x.attachment as Att).h;
   const albums = new Map<string, Item[]>(), inAlbum = new Set<string>();
@@ -1198,9 +1281,10 @@ export function Feed({ frameKey, active, chatId, threadId, channel = false, meId
     const post = isPosted(m);
     // пост никогда не «исходящий»: слева, без хвоста отправителя (даже свой)
     const mine = !post && m.senderId === meId;
-    if (day !== prevDay) flushRun();
-    if (day !== prevDay) { const at = m.createdAt as string; out.push(<DateDivider key={'d' + day} onClick={() => setPickDate(new Date(at))}>{dayLabel(at)}</DateDivider>); }
-    if (!unreadShown && unreadFrom != null && !mine && m.id != null && (m.id as number) > unreadFrom) {
+    const going = isLeaving(m);   // уходящая: рисуется на месте, но дату, пачку и группу соседей не меняет
+    if (!going && day !== prevDay) flushRun();
+    if (!going && day !== prevDay) { const at = m.createdAt as string; out.push(<DateDivider key={'d' + day} onClick={() => setPickDate(new Date(at))}>{dayLabel(at)}</DateDivider>); }
+    if (!going && !unreadShown && unreadFrom != null && !mine && m.id != null && (m.id as number) > unreadFrom) {
       unreadShown = true;
       flushRun();
       out.push(<div class="app-unread-divider" key="unread" role="separator"><span>Непрочитанные сообщения</span></div>);
@@ -1223,17 +1307,17 @@ export function Feed({ frameKey, active, chatId, threadId, channel = false, meId
       return;
     }
     const album = albums.get(m.key);
-    const next = shown[i + (album ? album.length : 1)];
+    const next = going ? shown[i + 1] : neighbour(i + (album ? album.length : 1) - 1, 1);
     // группа — как в Telegram: тот же отправитель и день, пауза не больше 10 минут, не на границе «Непрочитанные»
     // посты (и копии постов в группе) — пачкой «канала»: отправитель для пачки — 0
     const sender = post ? 0 : m.senderId;
     const nextSender = next ? (isPosted(next) ? 0 : next.senderId) : null;
     // пост канала — всегда отдельный пузырь с хвостиком (как в Telegram: посты в пачку не склеиваются)
-    const start = post || prevSender !== sender || day !== prevDay || breaksGroup(shown[i - 1], m, unreadFrom, meId);
+    const prevM = going ? shown[i - 1] : neighbour(i, -1);   // уходящая держит свои прежние хвосты: соседи для неё — как были
+    const start = post || prevSender !== sender || day !== prevDay || breaksGroup(prevM, m, unreadFrom, meId);
     const end = post || !next || nextSender !== sender || dayKey(next.createdAt as string) !== day || breaksGroup(m, next, unreadFrom, meId);
     const quoted = m.reply as Quote | null;
     // файлы, отправленные вместе (groupId), — одним пузырём: позиция строки внутри группы
-    const prevM = shown[i - 1];
     const same = (x: Item | undefined) => !!x && !!m.groupId && x.groupId === m.groupId && x.senderId === m.senderId && !x.deleted;
     const pos = !m.groupId || m.deleted ? 'single' : same(prevM) && same(next) ? 'middle' : same(prevM) ? 'last' : same(next) ? 'first' : 'single';
     const row = (
@@ -1267,8 +1351,14 @@ export function Feed({ frameKey, active, chatId, threadId, channel = false, meId
         appear={appearAt.current.has(m.key as string)}
         flash={flashKey === m.key || !!album?.some((x) => x.key === flashKey)}
         album={album}
+        leaving={going}
       />
     );
+    if (going) {
+      // уходящая внутри пачки остаётся в её обёртке (absolute считается от пачки), иначе — отдельной строкой
+      if (run) run.push(row); else out.push(row);
+      return;
+    }
     if (group && !mine && !post) {
       if (run && (start || runSender !== m.senderId)) flushRun();
       if (!run) { run = []; runKey = m.key as string; runSender = m.senderId as number; }
