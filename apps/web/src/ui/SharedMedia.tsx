@@ -6,7 +6,7 @@ import { senderAvatar } from '../profilePhoto';
 import type { Item } from '@relay/sync-engine/src/types';
 import type { ProfilePhoto } from '@relay/protocol';
 import { useContext, useEffect, useLayoutEffect, useRef, useState } from 'preact/hooks';
-import { focusMessage, openInner, type MediaTab } from '../data';
+import { openInner, type MediaTab } from '../data';
 import { useMedia } from '../mediaTab';
 import { animateScroll, gridCorners, gridDateIndex, tabCounter, tabLabel, tabScrollTarget, tileSrc, videoFrameSrc, type SharedTab } from '../mediaGrid';
 import { getGlobal, setGlobal, useGlobal, findChat } from '../global';
@@ -32,8 +32,10 @@ export type Msg = Item & { id: number; clientId: string; senderId: number; creat
 export const when = (iso: string) => `${dayLabel(iso)}, ${clock(iso)}`;
 export const dur = (s?: number | null) => { s = Math.max(0, Math.round(s ?? 0)); return Math.floor(s / 60) + ':' + String(s % 60).padStart(2, '0'); };
 export const fileUrl = (a: Att) => `/files/${a.id}`;
-const show = (m: Msg) => focusMessage({ id: m.id, sort: m.id });
-/** «Показать в чате» из меню плитки: сообщение в том же чате — прокрутка к нему (focusMessage); на узком экране
+/** Переход к сообщению из правой панели — поверх стека (docs/navigation-rules.md): чат уже наверху — только
+ *  прокрутка; поверх него тред — снимается до чата; иначе чат кладётся сверху. */
+const show = (m: Msg) => openInner(m.chatId as number, { id: m.id, sort: m.id });
+/** «Показать в чате» из меню плитки; на узком экране
  *  панель лежит поверх чата — закрывается, иначе переход не виден (как в Telegram). */
 const showInChat = (m: Msg) => { show(m); if (matchMedia('(max-width: 1100px)').matches) setGlobal({ infoOpen: false }); };
 
