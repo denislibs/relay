@@ -228,6 +228,65 @@ test('feed window: anchored by sort (end/start/center), loads history under it, 
   expect(meta()).toMatchObject({ hasNewer: false, live: true });
 }, 20000);
 
+test('feed window inside one cached range: moving to newer advances to the live edge, also after a restart', async () => {
+  const a = await srv.login('a'), b = await srv.login('b');
+  const chatId = await srv.chat(a.token, [a.userId, b.userId]);
+  const ids: number[] = [];
+  for (let i = 0; i < 100; i++) ids.push((await sendMessage(b.userId, { chatId, clientId: crypto.randomUUID(), body: 'm' + i })).message.id);
+  const cfg = { ...srv.config(a), historyPage: 20 };
+  const PAGE = 15, WINDOW = 30;
+  const meta = (f: ReturnType<typeof watchInto>) => f.item('~window')!;
+  // как moveWindow ленты: к новым — окно с PAGE-го с конца сообщения
+  const walk = async (f: ReturnType<typeof watchInto>) => {
+    const seen: number[] = [];
+    for (let step = 0; step < 20 && meta(f).hasNewer; step++) {
+      const l = f.list(), last = l.at(-1)!.id as number;
+      f.handle.update({ kind: 'messages', chatId, limit: WINDOW, anchor: { sort: l[Math.max(0, l.length - PAGE)].sort as number, side: 'start' } });
+      await f.until((x) => (x.at(-1)!.id as number) > last, 5000);   // каждый сдвиг — дальше к новым
+      seen.push(f.list().at(-1)!.id as number);
+    }
+    return seen;
+  };
+  const ea = await open(cfg);
+  ea.connect();
+  await ea.whenIdle();
+  // вся история — одним отрезком: от начала окном у первого сообщения
+  const f1 = watchInto(ea, { kind: 'messages', chatId, limit: WINDOW, anchor: { sort: ids[0], side: 'center' } });
+  await f1.until((l) => l[0]?.id === ids[0] && l.length === WINDOW, 5000);
+  expect(meta(f1)).toMatchObject({ hasOlder: false, hasNewer: true, live: false });
+  expect(await walk(f1)).toContain(ids[99]);
+  expect(meta(f1)).toMatchObject({ hasNewer: false, live: true });
+  f1.handle.close();
+  await ea.close();
+  engines.splice(engines.indexOf(ea), 1);
+
+  // перезагрузка: окно — на сохранённой позиции у начала истории, всё уже в кэше одним отрезком
+  const again = await open(cfg);
+  again.connect();
+  const f2 = watchInto(again, { kind: 'messages', chatId, limit: WINDOW, anchor: { sort: ids[3], side: 'center' } });
+  await f2.until((l) => l[0]?.id === ids[0] && l.length === WINDOW, 5000);
+  expect(meta(f2)).toMatchObject({ hasOlder: false, hasNewer: true });
+  expect(await walk(f2)).toContain(ids[99]);
+  expect(meta(f2)).toMatchObject({ hasNewer: false, live: true });
+}, 20000);
+
+test('feed window: a query update that gives the same window still answers (empty patch), so a shift is never left pending', async () => {
+  const a = await srv.login('a'), b = await srv.login('b');
+  const chatId = await srv.chat(a.token, [a.userId, b.userId]);
+  for (let i = 0; i < 10; i++) await sendMessage(b.userId, { chatId, clientId: crypto.randomUUID(), body: 'm' + i });
+  const ea = await open(srv.config(a));
+  ea.connect();
+  await ea.whenIdle();
+  const feed = watchInto(ea, { kind: 'messages', chatId, limit: 30 });
+  await feed.until((l) => l.length === 10);
+  await ea.whenIdle();
+  const n = feed.patches.length;
+  feed.handle.update({ kind: 'messages', chatId, limit: 30, anchor: { sort: feed.list()[0].sort as number, side: 'start' } });   // то же окно
+  await feed.until(() => feed.patches.length > n);
+  expect(feed.patches[n]).toEqual({ op: 'diff', upsert: [], remove: [] });
+  expect(feed.list()).toHaveLength(10);
+});
+
 test('epoch: the server database was recreated — the client drops its stale cache and starts over', async () => {
   const a = await srv.login('a'), b = await srv.login('b');
   const stale = await srv.chat(a.token, [a.userId, b.userId]);

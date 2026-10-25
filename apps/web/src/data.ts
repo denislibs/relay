@@ -678,17 +678,22 @@ export async function openUserChat(userId: number): Promise<void> {
   openInner(id);
 }
 
-/** Сдвинуть окно ленты кадра на порцию: к старым (верх) или к новым (низ). Дальняя сторона обрезается. */
-export function moveWindow(dir: 'older' | 'newer' | 'latest', frameKey?: string): void {
+/**
+ * Сдвинуть окно ленты кадра на порцию: к старым (верх) или к новым (низ). Дальняя сторона обрезается.
+ * false — окно не двигается: прежний сдвиг ещё в пути или за этим краем уже ничего нет (края окна в кадре свежее,
+ * чем у ленты, которая ещё не перерисовалась). Лента тогда не ждёт нового окна — оно не придёт.
+ */
+export function moveWindow(dir: 'older' | 'newer' | 'latest', frameKey?: string): boolean {
   const f = frameKey ? frameByKey(getGlobal(), frameKey) : topReady();
   const s = f && sessions.get(f.key);
-  if (!f || !s || s.moving) return;
+  if (!f || !s || s.moving) return false;
   const ms = f.messages, meta = f.feedMeta;
-  const set = (anchor: Anchor | undefined) => { s.anchor = anchor; s.moving = true; s.watch.update(feedQuery(f, anchor)); };
-  if (dir === 'latest') { if (s.anchor) set(undefined); return; }
-  if (!ms.length) return;
-  if (dir === 'older' && meta?.hasOlder) set({ sort: ms[Math.min(ms.length - 1, FEED_PAGE - 1)].sort as number, side: 'end' });
-  if (dir === 'newer' && meta?.hasNewer) set({ sort: ms[Math.max(0, ms.length - FEED_PAGE)].sort as number, side: 'start' });
+  const set = (anchor: Anchor | undefined) => { s.anchor = anchor; s.moving = true; s.watch.update(feedQuery(f, anchor)); return true; };
+  if (dir === 'latest') return !!s.anchor && set(undefined);
+  if (!ms.length) return false;
+  if (dir === 'older' && meta?.hasOlder) return set({ sort: ms[Math.min(ms.length - 1, FEED_PAGE - 1)].sort as number, side: 'end' });
+  if (dir === 'newer' && meta?.hasNewer) return set({ sort: ms[Math.max(0, ms.length - FEED_PAGE)].sort as number, side: 'start' });
+  return false;
 }
 
 /** Перейти к сообщению чата на экране (цитата, поиск): в окне — прокрутка, нет — окно вокруг него. */

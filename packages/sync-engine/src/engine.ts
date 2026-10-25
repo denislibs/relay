@@ -843,10 +843,13 @@ export class Engine {
       if (!w.force && !affects(w.q, touched) && !own) continue;
       if (hold && !w.force && w.q.kind !== 'status' && w.q.kind !== 'presence' && w.q.kind !== 'ops' && w.q.kind !== 'contacts' && w.q.kind !== 'people' && w.q.kind !== 'settings' && w.q.kind !== 'blocked' && w.q.kind !== 'members' && w.q.kind !== 'profileMusic' && w.q.kind !== 'profilePhotos' && w.q.kind !== 'devStats') continue;
       if (w.gated) continue;
+      const forced = w.force;
       w.force = false;
       const next = this.compute(w.q);
       if (w.q.kind === 'people') this.wantPeople(w.q.ids);
-      const patch = diffResults(w.prev, next);
+      // новый запрос (update) отвечает всегда, даже тем же результатом — пустым патчем: интерфейс ждёт ответа на
+      // сдвиг окна ленты и без него считал бы сдвиг «в пути» навсегда (и следующие не начинал)
+      const patch = diffResults(w.prev, next) ?? (forced ? { op: 'diff' as const, upsert: [], remove: [] } : null);
       w.prev = next;
       if (patch) {
         this.dev.patched(w, patch);
