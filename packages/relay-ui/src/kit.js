@@ -1218,6 +1218,7 @@ function MediaBubble(props) {
         // кольцо загрузки — у каждой ячейки своё (в альбоме поменьше); при отправке его заменяет кольцо с процентом
         : it.src || it.thumb ? h(LazyImage, { src: it.kind === 'video' ? undefined : it.src, thumb: it.thumb, alt: it.alt, ring: state === 'ready' ? (album ? 40 : 54) : 0 }) : h(MediaArt, { seed: it.seed, blur: state === 'remote' }),
       it.kind === 'video' && !vid && !hidden && !busy ? h('span', { class: 'rl-media-chip rl-media-chip-dur rl-media-chip-top' }, h(Icon, { name: 'video', size: 14 }), fmtTime(it.duration || 0)) : null,
+      it.gif && !hidden && !busy ? h('span', { class: 'rl-media-chip rl-media-chip-dur rl-media-chip-top', 'aria-hidden': 'true' }, 'GIF') : null,
       // загрузка: процент слева сверху (как в Telegram), кольцо с × — по центру
       !album && busy && typeof props.progress === 'number' ? h('span', { class: 'rl-media-chip rl-media-chip-dur rl-media-chip-top' }, Math.round(Math.max(0, Math.min(1, props.progress)) * 100) + '%') : null,
       last ? h('span', { class: 'rl-media-more' }, '+' + (extra + 1)) : null,
