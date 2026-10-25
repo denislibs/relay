@@ -1,6 +1,7 @@
 import { afterAll, afterEach, beforeEach, expect, test } from 'bun:test';
 import { sql } from '../../../apps/server/src/db';
 import { sendMessage } from '../../../apps/server/src/domain/messages';
+import { listChats } from '../../../apps/server/src/domain/chats';
 import { deleteMessage, editMessage } from '../../../apps/server/src/domain/messageOps';
 import { Engine } from '../src/engine';
 import { resetDb, startTestServer, watchInto } from './helpers';
@@ -103,6 +104,44 @@ test('a chat first opened offline is flagged as filling; after a reconnect its w
   const l = await feed.until((x) => x.length === limit);
   expect(l[l.length - 1].body).toBe(String(N));
   expect(feed.item('~window')).toMatchObject({ filling: false });
+});
+
+test('a draft typed after an offline send survives the reconnect, on the server and on the device', async () => {
+  const a = await srv.login('a'), b = await srv.login('b');
+  const chatId = await srv.chat(a.token, [a.userId, b.userId]);
+  const eb = await open(srv.config(b));
+  eb.connect();
+  await eb.whenIdle();
+  const serverDraft = async () => (await listChats(b.userId)).find((c) => c.id === chatId)?.draft?.text ?? null;
+  await eb.call({ type: 'setDraft', chatId, text: 'было' });
+  await eb.whenIdle();
+  expect(await serverDraft()).toBe('было');
+  // нет сети: отправили то, что было в поле, и начали новое
+  eb.disconnect();
+  await eb.call({ type: 'sendMessage', chatId, body: 'было' });
+  await eb.call({ type: 'setDraft', chatId, text: 'новое' });
+  eb.connect();
+  const feed = watchInto(eb, { kind: 'messages', chatId, limit: 10 });
+  await feed.until((l) => l.some((m) => m.body === 'было' && m.status === 'sent'));
+  await eb.whenIdle();
+  await Bun.sleep(50);
+  expect(await serverDraft()).toBe('новое');
+  expect(eb.store.chats.get(chatId)?.draft?.text).toBe('новое');
+});
+
+test('an online send clears the draft everywhere (the engine pushes the empty draft too)', async () => {
+  const a = await srv.login('a'), b = await srv.login('b');
+  const chatId = await srv.chat(a.token, [a.userId, b.userId]);
+  const eb = await open(srv.config(b));
+  eb.connect();
+  await eb.whenIdle();
+  await eb.call({ type: 'setDraft', chatId, text: 'привет' });
+  await eb.whenIdle();
+  await eb.call({ type: 'sendMessage', chatId, body: 'привет' });
+  await eb.whenIdle();
+  await Bun.sleep(50);
+  expect((await listChats(b.userId)).find((c) => c.id === chatId)?.draft ?? null).toBeNull();
+  expect(eb.store.chats.get(chatId)?.draft ?? null).toBeNull();
 });
 
 test('edits and deletions of a chat not opened since start reach the cached copy', async () => {

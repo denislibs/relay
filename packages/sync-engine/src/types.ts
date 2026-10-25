@@ -124,6 +124,7 @@ export interface OutboxEntry {
   upload?: { id: string; partSize: number; parts: number; done: number[]; key?: string; base?: string };
   sticker?: StickerRef | null;      // стикер: снимок для показа до ответа, на сервер уходит только id   // большой файл частями: что уже принято (докачка)
   threadId?: number;                // комментарий в треде (группа обсуждения)
+  draftHash?: string | null;        // черновик, который забрала отправка (protocol draftHash); null — не трогала; нет — старая запись: сервер стирает всегда
 }
 
 export type Query =

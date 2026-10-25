@@ -109,6 +109,17 @@ export function entityUrl(raw: unknown): string | null {
  * Проверка оформления от клиента: только известные типы и целые смещения в пределах текста, ссылки — безопасные,
  * один тип склеивается сам с собой, не больше MAX_ENTITIES. Мусор отбрасывается, а не превращается в ошибку.
  */
+/**
+ * Черновик, который забирает отправка (кадр send, draftHash): SHA-256 его текста в hex. Отправка без сети доходит до
+ * сервера позже — за это время на устройстве мог появиться новый черновик; сервер стирает черновик чата, только если
+ * его текст — тот же, что был в момент отправки. null — отправка черновик не трогает (стикер, чек-лист, пересылка без
+ * подписи); поля нет (старый клиент) — сервер стирает всегда, как раньше.
+ */
+export async function draftHash(text: string): Promise<string> {
+  const d = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(text));
+  return [...new Uint8Array(d)].map((b) => b.toString(16).padStart(2, '0')).join('');
+}
+
 export function normalizeEntities(text: string, raw: unknown): Entity[] {
   if (!Array.isArray(raw)) return [];
   const by = new Map<string, Entity[]>();
@@ -377,7 +388,7 @@ export type ClientFrame =
   // превью публичного канала: push'и канала в этот сокет без подписки, пока превью открыто; ack.result — {seq}
   | { op: 'watchChat'; reqId: string; chatId: Id }
   | { op: 'unwatchChat'; chatId: Id }
-  | { op: 'send'; reqId: string; clientId: string; chatId: Id; body: string; entities?: Entity[]; replyToId?: Id | null; attachment?: { id: string; thumb?: string | null; spoiler?: boolean } | null; groupId?: string | null; forward?: ForwardRef | null; noLinkPreview?: boolean; blocks?: Block[] | null; todo?: TodoInput; sticker?: { id: Id } | null; threadId?: Id }   // threadId — комментарий в треде (группа обсуждения)
+  | { op: 'send'; reqId: string; clientId: string; chatId: Id; body: string; entities?: Entity[]; replyToId?: Id | null; attachment?: { id: string; thumb?: string | null; spoiler?: boolean } | null; groupId?: string | null; forward?: ForwardRef | null; noLinkPreview?: boolean; blocks?: Block[] | null; todo?: TodoInput; sticker?: { id: Id } | null; threadId?: Id; draftHash?: string | null }   // threadId — комментарий в треде (группа обсуждения); draftHash — см. draftHash()
   | { op: 'read'; reqId: string; chatId: Id; upToId: Id }
   | { op: 'typing'; chatId: Id }   // «печатаю» — без ответа, сервер пересылает остальным участникам
   // клики по большому эмодзи (только личный чат): t — секунды от первого клика пачки; сервер пересылает собеседнику, в журнал не пишет
@@ -433,6 +444,7 @@ export type ServerFrame =
   | { op: 'pong' };
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+const DRAFT_HASH = /^[0-9a-f]{64}$/;
 const int = (v: unknown): v is number => typeof v === 'number' && Number.isSafeInteger(v) && v >= 0;
 const str = (v: unknown, max: number): v is string => typeof v === 'string' && v.length > 0 && v.length <= max;
 
@@ -481,7 +493,8 @@ export function parseClientFrame(raw: string): ClientFrame | null {
       if (f.todo != null && !normalizeTodo(f.todo)) return null;
       if (f.sticker != null && (typeof f.sticker !== 'object' || !int((f.sticker as { id: unknown }).id))) return null;
       if (f.threadId != null && !int(f.threadId)) return null;
-      return { op: 'send', ...(f.threadId != null ? { threadId: f.threadId as number } : {}), ...(f.sticker != null ? { sticker: { id: (f.sticker as { id: number }).id } } : {}), ...(f.todo != null ? { todo: normalizeTodo(f.todo)! } : {}), reqId: f.reqId, clientId: f.clientId, chatId: f.chatId, body: f.body, entities: normalizeEntities(f.body, f.entities), replyToId: (f.replyToId as number | null) ?? null, attachment: (f.attachment as { id: string; thumb?: string | null; spoiler?: boolean } | null) ?? null, groupId: (f.groupId as string | null) ?? null, forward, ...(f.noLinkPreview === true ? { noLinkPreview: true } : {}), ...(Array.isArray(f.blocks) ? { blocks: f.blocks as Block[] } : {}) };
+      if (f.draftHash != null && !(typeof f.draftHash === 'string' && DRAFT_HASH.test(f.draftHash))) return null;
+      return { op: 'send', ...(f.draftHash !== undefined ? { draftHash: f.draftHash as string | null } : {}), ...(f.threadId != null ? { threadId: f.threadId as number } : {}), ...(f.sticker != null ? { sticker: { id: (f.sticker as { id: number }).id } } : {}), ...(f.todo != null ? { todo: normalizeTodo(f.todo)! } : {}), reqId: f.reqId, clientId: f.clientId, chatId: f.chatId, body: f.body, entities: normalizeEntities(f.body, f.entities), replyToId: (f.replyToId as number | null) ?? null, attachment: (f.attachment as { id: string; thumb?: string | null; spoiler?: boolean } | null) ?? null, groupId: (f.groupId as string | null) ?? null, forward, ...(f.noLinkPreview === true ? { noLinkPreview: true } : {}), ...(Array.isArray(f.blocks) ? { blocks: f.blocks as Block[] } : {}) };
     case 'read':
       return str(f.reqId, 64) && int(f.chatId) && int(f.upToId) ? { op: 'read', reqId: f.reqId, chatId: f.chatId, upToId: f.upToId } : null;
     default: return null;
