@@ -202,9 +202,13 @@ class Player {
  * Представление стикера (канвас). Возвращает управление: visible/play/loop меняются снаружи,
  * destroy() — при размонтировании. onFirstFrame — первый нарисованный кадр (снять подложку). onEnded — без цикла
  * показан последний кадр (один раз до restart). force — играть вопреки тяжёлой анимации, автоплею и эксклюзивной группе.
+ * shared:false — отдельный плеер (свои часы) даже при том же url и размере.
  */
-export function attachSticker({ url, px, canvas, group = 'feed', play = true, loop, force = false, onFirstFrame, onEnded, onError }) {
-  const key = url + '|' + px;
+let privateSeq = 0;
+export function attachSticker({ url, px, canvas, group = 'feed', play = true, loop, force = false, shared = true, onFirstFrame, onEnded, onError }) {
+  // shared:false — свои часы (эффекты реакций: две копии одной анимации не должны стартовать с середины
+  // и заканчиваться вместе); рендерер и кэш кадров всё равно общие (pool)
+  const key = url + '|' + px + (shared ? '' : '|#' + ++privateSeq);
   let pl = players.get(key);
   if (!pl) { pl = new Player(key, url, px); players.set(key, pl); }
   let first = true;

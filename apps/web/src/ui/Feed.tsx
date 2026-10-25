@@ -3,6 +3,7 @@ import type { ServiceData, ServiceType } from '@relay/protocol';
 import type { Item } from '@relay/sync-engine/src/types';
 import { avatarPhoto, senderAvatar } from '../profilePhoto';
 import { reactionIcon, useReactionCatalog } from '../reactions';
+import { FX_READ_DELAY_MS, playFxForMessage, queueReactionFx, takeReactionFx } from '../reactionFx';
 import { groupReactions, type Chip } from '../reactionChips';
 import { emojiKey } from '@relay/protocol';
 import type { Entity, MessageButton, ProfilePhoto, Todo } from '@relay/protocol';
@@ -85,6 +86,8 @@ type RowProps = { post?: boolean; pinned?: boolean; discussion?: number | null; 
 const Row = memo(function Row({ post, pinned, discussion, chatId, voiceTitle, author, onAuthor, onOpen, hl, m, meId, out, start, end, pos, quoted, quoteAuthor, quoteTone, appear, flash, onReact, album, onUser, sel, selIn, onQuickForward, grp, leaving, people }: RowProps) {
   // реакции: по эмодзи (ключ без FE0F — «❤️» и «❤» одна плашка) — сколько, есть ли моя, кто поставил;
   // картинка — из каталога (rxv — версия каталога: пришёл — строка перерисуется)
+  // эффект своей реакции: заявка ждёт, пока плашка появится в DOM после перерисовки строки
+  useLayoutEffect(() => { const k = takeReactionFx(m.key as string); if (k) playFxForMessage(m.key as string, k); });
   // альбом: реакции всех его сообщений одним рядом (ставятся на первое)
   const chips = reactionChips(album ? { ...m, reactions: album.flatMap((x) => (x.reactions as { userId: number; emoji: string }[] | undefined) ?? []) } : m, meId, people);
   // пост: в мете — просмотры, подпись автора и булавка; под пузырём — кнопка комментариев (если у канала есть обсуждение)
@@ -879,6 +882,8 @@ export function Feed({ frameKey, active, chatId, threadId, channel = false, meId
 
   const scheduleRead = useRef<(() => void) | null>(null);   // вернулись к чату (верхний сняли) — отметить то, что видно
   const reactionIdsRef = useRef<number[] | null>(null);   // id сообщений с непрочитанной реакцией — для чтения по видимости
+  const messagesRef = useRef(messages); messagesRef.current = messages;
+  const fxTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   // прочтение: метки под баблами (видна нижняя кромка — прочитано), отправка раз в 150 мс, пауза на тяжёлых анимациях
   const marks = useRef<IntersectionObserver | null>(null);
   const visible = useRef(new Set<number>());
@@ -895,7 +900,20 @@ export function Feed({ frameKey, active, chatId, threadId, channel = false, meId
       if (max) { if (threadId != null) markThreadRead(chatId, threadId, max); else seen(chatId, max); }
       // мои сообщения с непрочитанной реакцией на экране — реакции прочитаны (как в Telegram: по видимости, не по кнопке)
       const ur = reactionIdsRef.current;
-      if (ur?.length) { const seenIds = ur.filter((id) => visible.current.has(id)); if (seenIds.length) readReactions(chatId, seenIds); }
+      if (ur?.length) {
+        const seenIds = ur.filter((id) => visible.current.has(id));
+        if (seenIds.length) {
+          readReactions(chatId, seenIds);
+          // как в Telegram: эффект у последней чужой реакции — когда сообщение увидели, с задержкой
+          fxTimer.current = setTimeout(() => {
+            for (const id of seenIds) {
+              const msg = messagesRef.current.find((x) => x.id === id);
+              const last = ((msg?.reactions as { userId: number; emoji: string }[] | undefined) ?? []).filter((r) => r.userId !== meId).at(-1);
+              if (msg && last) playFxForMessage(msg.key as string, emojiKey(last.emoji));
+            }
+          }, FX_READ_DELAY_MS);
+        }
+      }
       // канал: видимые посты — в просмотры (каждый — один раз за сессию; батч раз в секунду — в движке);
       // превью без подписки — не считаем и не запоминаем: подпишется — посты на экране засчитаются
       if (channel && !findChat(getGlobal(), chatId)?.preview) {
@@ -921,6 +939,7 @@ export function Feed({ frameKey, active, chatId, threadId, channel = false, meId
     document.addEventListener('visibilitychange', schedule);
     scheduleRead.current = schedule;
     return () => {
+      if (fxTimer.current) clearTimeout(fxTimer.current);
       marks.current?.disconnect();
       if (readTimer.current) clearTimeout(readTimer.current);
       removeEventListener('focus', schedule);
@@ -1168,7 +1187,9 @@ export function Feed({ frameKey, active, chatId, threadId, channel = false, meId
     if (findChat(getGlobal(), chatId)?.preview) { showToast('Подпишитесь на канал, чтобы ставить реакции'); return; }
     // пост: своя реакция — myReaction (списка реакторов нет)
     const mine = m.reactionCounts ? (m.myReaction as string | undefined) : ((m.reactions as { userId: number; emoji: string }[] | undefined) ?? []).find((r) => r.userId === meId)?.emoji;
-    react(chatId, m.id as number, mine != null && emojiKey(mine) === emojiKey(emoji) ? null : emoji);
+    const off = mine != null && emojiKey(mine) === emojiKey(emoji);
+    if (!off) queueReactionFx(m.key as string, emojiKey(emoji));
+    react(chatId, m.id as number, off ? null : emoji);
   }).current;
 
   // просмотрщик: все фото текущего окна ленты
@@ -1237,6 +1258,8 @@ export function Feed({ frameKey, active, chatId, threadId, channel = false, meId
   const reactionsUnread = useGlobal((s) => (threadId == null ? (findChat(s, chatId)?.reactions as number | undefined) ?? 0 : 0));
   const reactionIds = useGlobal((s) => (threadId == null ? (findChat(s, chatId)?.reactionIds as number[] | null | undefined) ?? null : null));
   reactionIdsRef.current = reactionIds;
+  // реакция пришла на сообщение, которое уже на экране: датчики видимости молчат — прочитать (и показать эффект) сразу
+  useEffect(() => { if (reactionIds?.length) scheduleRead.current?.(); }, [reactionIds]);
   // число есть, id нет (пришли строкой списка) — спросить, чтобы чтение по видимости работало без нажатия кнопки
   useEffect(() => { if (active && reactionsUnread > 0 && !reactionIds?.length) void nextReaction(chatId); }, [active, chatId, reactionsUnread, reactionIds]);
   const toReaction = () => {
