@@ -982,13 +982,21 @@ var LazyRoot = createContext(/** @type {Element | null} */ (null));
 /* Наблюдатель на корень живёт, пока за ним есть элементы: счётчик; последний ушёл (загрузился или размонтирован) —
    disconnect и запись корня удаляется (закрытая панель не держит наблюдатель и своё отсоединённое дерево). */
 var lazyIOs = new Map(), lazyCbs = typeof WeakMap === 'function' ? new WeakMap() : null;
+/* Пока идёт тяжёлая анимация (переход стека, доезд ленты), загрузку не начинаем: пересечения копятся
+   (последнее состояние цели выигрывает, как заморозка наблюдателей в Telegram) и разбираются по её концу.
+   Наблюдатель не отключаем — переподписка дороже, чем карта ожидающих. */
 function lazyObserve(el, cb, root) {
   root = root || null;
   var ent = lazyIOs.get(root);
   if (!ent) {
-    ent = { io: null, n: 0 };
+    ent = { io: null, n: 0, pending: new Map(), waiting: false };
     ent.io = new IntersectionObserver(function (es) {
-      es.forEach(function (e) { if (!e.isIntersecting) return; var x = lazyCbs.get(e.target); if (x) { x.release(); x.f(); } });
+      if (isHeavyAnimating()) {
+        es.forEach(function (e) { ent.pending.set(e.target, e.isIntersecting); });
+        if (!ent.waiting) { ent.waiting = true; onHeavyAnimationEnd(function () { flushLazy(ent); }); }
+        return;
+      }
+      es.forEach(function (e) { if (e.isIntersecting) fireLazy(e.target); });
     }, { root: root, rootMargin: '500px 0px' });
     lazyIOs.set(root, ent);
   }
@@ -996,12 +1004,19 @@ function lazyObserve(el, cb, root) {
   function release() {
     if (done) return;
     done = true;
-    lazyCbs.delete(el); ent.io.unobserve(el);
+    lazyCbs.delete(el); ent.pending.delete(el); ent.io.unobserve(el);
     if (--ent.n === 0) { ent.io.disconnect(); if (lazyIOs.get(root) === ent) lazyIOs.delete(root); }
   }
   lazyCbs.set(el, { f: cb, release: release });
   ent.n++; ent.io.observe(el);
   return release;
+}
+function fireLazy(el) { var x = lazyCbs.get(el); if (x) { x.release(); x.f(); } }
+function flushLazy(ent) {
+  ent.waiting = false;
+  var list = Array.from(ent.pending.entries());
+  ent.pending.clear();
+  list.forEach(function (p) { if (p[1]) fireLazy(p[0]); });
 }
 /** Сколько корней сейчас наблюдается (для тестов: утечки наблюдателей). */
 function lazyRoots() { return lazyIOs.size; }

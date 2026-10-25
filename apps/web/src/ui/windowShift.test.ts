@@ -1,5 +1,5 @@
 import { expect, test } from 'bun:test';
-import { requestShift, rowFor, shiftWanted } from './windowShift';
+import { deferShift, requestShift, rowFor, shiftWanted, type ShiftDir } from './windowShift';
 
 const both = { hasOlder: true, hasNewer: true };
 
@@ -39,4 +39,21 @@ test('row of a message: by key, or the album row that contains it when the windo
   expect(rowFor(rows, 'p24', 24)).toBe(rows[1]);
   expect(rowFor(rows, 'p5', 5)).toBeNull();      // раньше окна — не найдена (откроется как без позиции)
   expect(rowFor(rows, 'x', 99)).toBe(rows[2]);
+});
+
+test('deferShift: during a heavy animation both directions are kept and run once after it; idle — runs now', () => {
+  const ran: ShiftDir[] = [];
+  const later: (() => void)[] = [];
+  const box = { dirs: new Set<ShiftDir>() };
+  // короткая лента при открытии: оба датчика в кадре — оба направления нужны (older грузит историю)
+  deferShift(box, 'older', true, (fn) => later.push(fn), (d) => ran.push(d));
+  deferShift(box, 'newer', true, (fn) => later.push(fn), (d) => ran.push(d));
+  deferShift(box, 'older', true, (fn) => later.push(fn), (d) => ran.push(d));
+  expect(ran).toEqual([]);
+  expect(later).toHaveLength(1);           // одна подписка на конец анимации
+  later[0]();
+  expect(ran).toEqual(['older', 'newer']);
+  expect(box.dirs.size).toBe(0);
+  deferShift(box, 'older', false, (fn) => later.push(fn), (d) => ran.push(d));
+  expect(ran).toEqual(['older', 'newer', 'older']);
 });

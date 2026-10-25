@@ -10,6 +10,7 @@ globalThis.IntersectionObserver = class {
   fire(el) { this.cb([{ target: el, isIntersecting: true }]); }
 };
 const { lazyObserve, lazyRoots } = await import('./kit.js');
+const { beginHeavyAnimation } = await import('./schedule.js');
 
 test('one observer per root; after the last element leaves, the observer is disconnected and the root forgotten', () => {
   const root = {}, a = {}, b = {};
@@ -44,4 +45,34 @@ test('a loaded element releases itself: the callback runs once and the root entr
   expect(io.off).toBe(true);
   off();                                  // размонтирование после загрузки — без двойного учёта
   expect(lazyRoots()).toBe(0);
+});
+
+test('during a heavy animation the callback waits; it runs once the animation ends, with the last known state', () => {
+  const root = {}, a = {}, b = {};
+  let na = 0, nb = 0;
+  lazyObserve(a, () => { na++; }, root);
+  lazyObserve(b, () => { nb++; }, root);
+  const io = made.at(-1);
+  const end = beginHeavyAnimation(1000);
+  io.fire(a);
+  io.cb([{ target: b, isIntersecting: true }, { target: b, isIntersecting: false }]);   // b вошёл и вышел
+  expect(na).toBe(0);
+  expect(io.els.has(a)).toBe(true);        // наблюдение не снято: состояние может измениться до конца анимации
+  end();
+  expect(na).toBe(1);
+  expect(nb).toBe(0);                      // последнее состояние b — вне зоны
+  expect(io.els.has(a)).toBe(false);
+  expect(io.els.has(b)).toBe(true);        // b ждёт следующего пересечения
+});
+
+test('released before the animation ends — the callback never runs', () => {
+  const root = {}, a = {};
+  let n = 0;
+  const off = lazyObserve(a, () => { n++; }, root);
+  const io = made.at(-1);
+  const end = beginHeavyAnimation(1000);
+  io.fire(a);
+  off();
+  end();
+  expect(n).toBe(0);
 });
