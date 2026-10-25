@@ -43,6 +43,41 @@ test('a reaction from another member marks my message unread; my own does not; r
   expect(await journalOf(a.userId, 'reactionsRead')).toEqual([{ type: 'reactionsRead', chatId, ids: [message.id] }]);
 });
 
+test('a read reaction does not come back: a changed emoji, the same emoji again, or another member leaving theirs', async () => {
+  const a = await login('Анна'), b = await login('Борис'), c = await login('Вера');
+  const chatId = await group(a, [b, c]);
+  const { message } = await sendMessage(a.userId, { chatId, clientId: crypto.randomUUID(), body: 'привет' });
+  await reactMessage(b.userId, chatId, message.id, '❤');
+  await reactMessage(c.userId, chatId, message.id, '🔥');
+  await ok(a, 'POST', `/chats/${chatId}/reactions/read`, {});   // прочитала
+  await reactMessage(b.userId, chatId, message.id, '🔥');       // сменил эмодзи
+  await reactMessage(b.userId, chatId, message.id, '🔥');       // повтор
+  await reactMessage(c.userId, chatId, message.id, null);       // Вера убрала, реакция Бориса осталась
+  expect(await unreadOf(a, chatId)).toBe(0);
+  expect(await journalOf(a.userId, 'reaction')).toHaveLength(1);   // событие — на первое появление строки (вторая чужая реакция легла в ту же)
+  // новый реактор — снова непрочитанное
+  const d = await login('Дима');
+  await ok(a, 'POST', `/groups/${chatId}/members`, { userIds: [d.userId] });
+  await reactMessage(d.userId, chatId, message.id, '👍');
+  expect(await unreadOf(a, chatId)).toBe(1);
+  expect(await journalOf(a.userId, 'reaction')).toHaveLength(2);
+});
+
+test('direct chat: the only other member reacts; an author who left the group gets no row', async () => {
+  const a = await login('Анна'), b = await login('Борис');
+  const direct = (await ok(a, 'POST', '/dev/chats', { kind: 'direct', title: null, memberIds: [a.userId, b.userId] })).id as number;
+  const { message } = await sendMessage(a.userId, { chatId: direct, clientId: crypto.randomUUID(), body: 'лично' });
+  await reactMessage(b.userId, direct, message.id, '❤');
+  expect(await unreadOf(a, direct)).toBe(1);
+  // группа: Анна вышла, Борис реагирует на её старое сообщение — строки нет
+  const c = await login('Вера');
+  const g = await group(a, [b, c]);
+  const old = (await sendMessage(a.userId, { chatId: g, clientId: crypto.randomUUID(), body: 'до ухода' })).message;
+  await ok(a, 'DELETE', `/groups/${g}/members/${a.userId}`);
+  await reactMessage(b.userId, g, old.id, '❤');
+  expect(await sql`select count(*)::int as n from unread_reactions where user_id = ${a.userId} and chat_id = ${g}`).toEqual([{ n: 0 }]);
+});
+
 test('read by ids, read all, and a deleted message: rows go, the journal says so', async () => {
   const a = await login('Анна'), b = await login('Борис');
   const chatId = await group(a, [b]);

@@ -11,20 +11,28 @@ import { appendUpdates } from './journal';
  */
 export const UNREAD_REACTIONS_PAGE = 50;
 
-/** После смены реакции reactor на сообщении: чужие реакции есть — автору строка и событие; не осталось — строка долой. */
-export async function noteReaction(tx: Tx, chatId: number, id: number, reactor: number): Promise<void> {
+/**
+ * После смены реакции reactor на сообщении (prev → next): новая чужая реакция — автору строка и событие (смена
+ * эмодзи и повтор того же — нет: прочитанное не воскресает); реакцию убрали и чужих не осталось — строка долой.
+ * Автор должен быть участником чата: ушедшему строк не копим.
+ */
+export async function noteReaction(tx: Tx, chatId: number, id: number, reactor: number, prev: string | null, next: string | null): Promise<void> {
   const [m] = await tx`select sender_id from messages where chat_id = ${chatId} and id = ${id}`;
   if (!m) return;
   const author = Number(m.sender_id);
   if (author === reactor || author <= 0) return;   // своя реакция и служебные/посты — не считаются
-  const [{ n }] = await tx`select count(*)::int as n from reactions where chat_id = ${chatId} and message_id = ${id} and user_id <> ${author}`;
-  if (Number(n) > 0) {
-    const ins = await tx`insert into unread_reactions (user_id, chat_id, message_id) values (${author}, ${chatId}, ${id}) on conflict do nothing returning 1`;
+  if (next) {
+    if (prev) return;   // смена или повтор эмодзи — ничего нового для автора
+    const ins = await tx`insert into unread_reactions (user_id, chat_id, message_id)
+      select ${author}, ${chatId}, ${id} where exists (select 1 from chat_members where chat_id = ${chatId} and user_id = ${author})
+      on conflict do nothing returning 1`;
     if (ins.length) await appendUpdates(tx, [{ userId: author, update: { type: 'reaction', chatId, id } }]);
-  } else {
-    const del = await tx`delete from unread_reactions where user_id = ${author} and chat_id = ${chatId} and message_id = ${id} returning 1`;
-    if (del.length) await appendUpdates(tx, [{ userId: author, update: { type: 'reactionsRead', chatId, ids: [id] } }]);
+    return;
   }
+  const [{ n }] = await tx`select count(*)::int as n from reactions where chat_id = ${chatId} and message_id = ${id} and user_id <> ${author}`;
+  if (Number(n) > 0) return;
+  const del = await tx`delete from unread_reactions where user_id = ${author} and chat_id = ${chatId} and message_id = ${id} returning 1`;
+  if (del.length) await appendUpdates(tx, [{ userId: author, update: { type: 'reactionsRead', chatId, ids: [id] } }]);
 }
 
 /** Сообщение удалено или чат чистится: строки долой у всех (журнал — только тем, у кого они были). */

@@ -774,26 +774,35 @@ export class Store {
     if (!chat) return;
     const ids = chat.reactionIds ?? [];
     if (ids.includes(id)) return;
+    // число строки списка могло уже учитывать это сообщение (id тогда не знали): лучше недосчитать, чем удвоить
+    const counted = (chat.reactions ?? 0) > ids.length;
     ids.push(id); ids.sort((a, b) => a - b);
     chat.reactionIds = ids;
-    chat.reactions = (chat.reactions ?? 0) + 1;
+    chat.reactions = counted ? Math.max(chat.reactions ?? 0, ids.length) : ids.length;
     this.markChat(chat);
   }
-  /** Реакции прочитаны: ids — эти (увидел, убрали, удалили), без ids — все. Известные только числом — тоже. */
-  dropReactions(chatId: number, ids?: number[]): void {
+  /** Реакции прочитаны: ids — эти (увидел, убрали, удалили), без ids — все. Сервер сказал про id, которых мы не
+   *  знали (число пришло строкой списка) — они были среди «известных только числом», число уменьшаем.
+   *  knownOnly — удаление сообщения у себя: была ли у него реакция, не знаем, число не трогаем (сервер скажет). */
+  dropReactions(chatId: number, ids?: number[], knownOnly = false): void {
     const chat = this.chats.get(chatId);
     if (!chat || !chat.reactions) return;
     if (!ids) { chat.reactions = 0; delete chat.reactionIds; this.markChat(chat); return; }
     const known = chat.reactionIds ?? [], keep = known.filter((x) => !ids.includes(x));
-    if (keep.length === known.length) return;
-    const unknown = Math.max(0, chat.reactions - known.length);
+    const unknownGone = knownOnly ? 0 : ids.filter((x) => !known.includes(x)).length;
+    if (keep.length === known.length && !unknownGone) return;
+    const unknown = Math.max(0, chat.reactions - known.length - unknownGone);
     chat.reactionIds = keep;
     chat.reactions = keep.length + unknown;
     if (!keep.length) delete chat.reactionIds;
     this.markChat(chat);
   }
-  /** Самая старая непрочитанная реакция, если id известны; null — спросить сервер (или нет вовсе). */
-  nextReaction(chatId: number): number | null { return this.chats.get(chatId)?.reactionIds?.[0] ?? null; }
+  /** Самая старая непрочитанная реакция, если известны все id; null — спросить сервер (или нет вовсе). */
+  nextReaction(chatId: number): number | null {
+    const chat = this.chats.get(chatId);
+    if (!chat?.reactionIds?.length || chat.reactionIds.length < (chat.reactions ?? 0)) return null;   // знаем не все — у сервера точнее
+    return chat.reactionIds[0];
+  }
   /** id с сервера (unread): запомнить, число — не меньше их. */
   setReactionIds(chatId: number, ids: number[], count: number): void {
     const chat = this.chats.get(chatId);
@@ -1104,7 +1113,7 @@ export class Store {
    */
   private removeMessage(chatId: number, id: number): void {
     this.dropMentions(chatId, (x) => x === id);
-    this.dropReactions(chatId, [id]);
+    this.dropReactions(chatId, [id], true);
     const k = chatId + ':' + id, m = this.messageById(chatId, id), q = this.quotes.get(k);
     // цитата знает о нём и без запроса к серверу (сервер удалённое больше не отдаёт); автор нужен только для цвета полосы
     if (!q?.deleted) { this.quotes.set(k, deletedQuote(id, m?.senderId ?? q?.senderId ?? 0)); this.touch(chatId); }

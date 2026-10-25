@@ -1052,10 +1052,12 @@ export class Engine {
         return r.ids[0] ?? null;
       }
       case 'readReactions': {
-        // сразу у себя (кнопка гаснет), серверу — следом; подтверждение придёт журналом reactionsRead и ничего не изменит
+        // сразу у себя (кнопка гаснет); серверу — через очередь операций: без сети дойдёт позже, подтверждение
+        // придёт журналом reactionsRead и ничего не изменит
         this.store.dropReactions(a.chatId, a.ids);
         this.changed();
-        await this.http(`/chats/${a.chatId}/reactions/read`, { method: 'POST', body: JSON.stringify(a.ids ? { ids: a.ids } : {}) });
+        const ids = a.ids ? [...a.ids].sort((x, y) => x - y) : null;
+        await this.ops.enqueue({ key: `reactions-read:${a.chatId}:${ids ? ids.join(',') : 'all'}`, method: 'POST', path: `/chats/${a.chatId}/reactions/read`, body: ids ? { ids } : {} });
         return null;
       }
       case 'readBy': {

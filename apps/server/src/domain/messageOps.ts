@@ -115,6 +115,7 @@ export async function reactMessage(userId: number, chatId: number, id: number, e
     const [m] = await tx`select deleted from messages where chat_id = ${chatId} and id = ${id} and id >= ${ctx.historyFrom}`;
     if (!m || m.deleted) throw new DomainError('not_found', 'message');
     if (await blockedInDirect(tx, chatId, userId)) throw new DomainError('blocked');
+    const [was] = await tx`select emoji from reactions where chat_id = ${chatId} and message_id = ${id} and user_id = ${userId}`;
     if (emoji) {
       await tx`insert into reactions (chat_id, message_id, user_id, emoji) values (${chatId}, ${id}, ${userId}, ${emoji})
                on conflict (chat_id, message_id, user_id) do update set emoji = excluded.emoji, created_at = now()`;
@@ -124,7 +125,7 @@ export async function reactMessage(userId: number, chatId: number, id: number, e
     const rows = await tx`select user_id, emoji from reactions where chat_id = ${chatId} and message_id = ${id} order by created_at`;
     const reactions = rows.map((r) => ({ userId: r.user_id as number, emoji: r.emoji as string }));
     await chatEvent(tx, chatId, { type: 'reactions', chatId, id, reactions });
-    await noteReaction(tx, chatId, id, userId);   // автору — непрочитанная реакция (кнопка «сердце»)
+    await noteReaction(tx, chatId, id, userId, (was?.emoji as string | undefined) ?? null, emoji);   // автору — непрочитанная реакция (кнопка «сердце»)
     return { reactions };
   });
 }

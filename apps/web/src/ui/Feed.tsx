@@ -1238,6 +1238,8 @@ export function Feed({ frameKey, active, chatId, threadId, channel = false, meId
   const reactionsUnread = useGlobal((s) => (threadId == null ? (findChat(s, chatId)?.reactions as number | undefined) ?? 0 : 0));
   const reactionIds = useGlobal((s) => (threadId == null ? (findChat(s, chatId)?.reactionIds as number[] | null | undefined) ?? null : null));
   reactionIdsRef.current = reactionIds;
+  // число есть, id нет (пришли строкой списка) — спросить, чтобы чтение по видимости работало без нажатия кнопки
+  useEffect(() => { if (active && reactionsUnread > 0 && !reactionIds?.length) void nextReaction(chatId); }, [active, chatId, reactionsUnread, reactionIds]);
   const toReaction = () => {
     void nextReaction(chatId).then((id) => { if (id == null) { toLatest(); return; } focusMessage({ id, sort: id }); });
   };
