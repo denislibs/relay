@@ -514,6 +514,7 @@ export function Feed({ frameKey, active, chatId, threadId, channel = false, meId
   const lastWindow = useRef<FeedSeen | null>(null);
   // удаление с анимацией (leaving.ts): удалённые из середины окна ещё один рендер рисуются на своих местах, FLIP-эффект
   // ниже выводит их из потока и довозит соседей; по таймеру буфер очищается (leaveTick — перерисовка без них)
+  const viewAnchor = useRef<{ key: string; top: number; sort: number } | null>(null);   // что было вверху видимой части (для смены ширины)
   const leaving = useRef(new Map<string, Item>());
   const [leaveTick, bumpLeave] = useState(0);
   if (lastWindow.current?.list !== messages) {
@@ -540,7 +541,6 @@ export function Feed({ frameKey, active, chatId, threadId, channel = false, meId
   // направление последней прокрутки пользователя: окно двигаем только туда, куда листают. Иначе на коротких
   // сообщениях окно качается — сдвиг к старым оставляет нижний датчик в зоне, он тянет к новым, и так по кругу
   const scrollDir = useRef<-1 | 0 | 1>(0);
-  const viewAnchor = useRef<{ key: string; top: number; sort: number } | null>(null);   // что было вверху видимой части (для смены ширины)
   const lastTop = useRef(0);
   // программная плавная прокрутка (scrollDrive.ts): одна на ленту, пока едет — события scroll наши, не пользователя
   const driving = useRef<Drive | null>(null);
