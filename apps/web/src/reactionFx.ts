@@ -20,6 +20,8 @@ export function playFxForMessage(msgKey: string, key: string): boolean {
   if (!fxEnabled()) return false;
   const asset = reactionByKey(key);
   if (!asset?.center || !asset.around) return false;
-  const icon = document.querySelector<HTMLElement>(`.app-msg[data-key="${CSS.escape(msgKey)}"] .rl-react[data-key="${CSS.escape(key)}"] .rl-react-icon`);
+  // в стеке чатов закрытые колонки остаются в DOM (сдвинуты за край) — ищем только в текущей
+  const col = document.querySelector('.app-chatcol[data-current]') ?? document;
+  const icon = col.querySelector<HTMLElement>(`.app-msg[data-key="${CSS.escape(msgKey)}"] .rl-react[data-key="${CSS.escape(key)}"] .rl-react-icon`);
   return !!icon && playReactionEffect(icon, { center: asset.center, around: asset.around });
 }

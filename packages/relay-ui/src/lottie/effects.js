@@ -87,11 +87,11 @@ export function createEffects(deps = {}) {
     const part = () => { if (++item.done >= 2) finish(); };
     const d = dom.dpr();
     item.views = [
-      attach({ url: assets.center, px: Math.round(CENTER_PX * d), canvas: box.center, group: 'fx', play: false, loop: false, force: true,
+      attach({ url: assets.center, px: Math.round(CENTER_PX * d), canvas: box.center, group: 'fx', play: false, loop: false, force: true, shared: false,
         onFirstFrame: onFirst, onError: finish,
         // центр доиграл — иконка возвращается в следующем кадре, вокруг ещё летит
         onEnded: () => { mutate(() => { if (live.get(iconEl) !== item) return; dom.hide(iconEl, false); box.dropCenter(); }); part(); } }),
-      attach({ url: assets.around, px: Math.round(AROUND_PX * d), canvas: box.around, group: 'fx', play: false, loop: false, force: true,
+      attach({ url: assets.around, px: Math.round(AROUND_PX * d), canvas: box.around, group: 'fx', play: false, loop: false, force: true, shared: false,
         onFirstFrame: onFirst, onError: finish, onEnded: part }),
     ];
     for (const v of item.views) v.setVisible(true);

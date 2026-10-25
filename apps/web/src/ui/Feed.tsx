@@ -883,6 +883,7 @@ export function Feed({ frameKey, active, chatId, threadId, channel = false, meId
   const scheduleRead = useRef<(() => void) | null>(null);   // вернулись к чату (верхний сняли) — отметить то, что видно
   const reactionIdsRef = useRef<number[] | null>(null);   // id сообщений с непрочитанной реакцией — для чтения по видимости
   const messagesRef = useRef(messages); messagesRef.current = messages;
+  const fxTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   // прочтение: метки под баблами (видна нижняя кромка — прочитано), отправка раз в 150 мс, пауза на тяжёлых анимациях
   const marks = useRef<IntersectionObserver | null>(null);
   const visible = useRef(new Set<number>());
@@ -904,7 +905,7 @@ export function Feed({ frameKey, active, chatId, threadId, channel = false, meId
         if (seenIds.length) {
           readReactions(chatId, seenIds);
           // как в Telegram: эффект у последней чужой реакции — когда сообщение увидели, с задержкой
-          setTimeout(() => {
+          fxTimer.current = setTimeout(() => {
             for (const id of seenIds) {
               const msg = messagesRef.current.find((x) => x.id === id);
               const last = ((msg?.reactions as { userId: number; emoji: string }[] | undefined) ?? []).filter((r) => r.userId !== meId).at(-1);
@@ -938,6 +939,7 @@ export function Feed({ frameKey, active, chatId, threadId, channel = false, meId
     document.addEventListener('visibilitychange', schedule);
     scheduleRead.current = schedule;
     return () => {
+      if (fxTimer.current) clearTimeout(fxTimer.current);
       marks.current?.disconnect();
       if (readTimer.current) clearTimeout(readTimer.current);
       removeEventListener('focus', schedule);

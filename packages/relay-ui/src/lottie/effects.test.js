@@ -28,7 +28,7 @@ test('оба плеера ждут первый кадр и стартуют в�
   expect(h.fx.play(icon, assets)).toBe(true);
   expect(h.views.length).toBe(2);
   expect(h.views.map((v) => v.o.px)).toEqual([80, 160]);                // 40 и 80 px при dpr 2
-  expect(h.views.every((v) => v.visible && !v.play && v.o.force && v.o.loop === false)).toBe(true);
+  expect(h.views.every((v) => v.visible && !v.play && v.o.force && v.o.loop === false && v.o.shared === false)).toBe(true);
   expect(h.boxes[0].placed[0]).toEqual([100, 200]);                      // центр иконки
   h.views[0].o.onFirstFrame();
   expect(h.views.some((v) => v.play)).toBe(false);                       // один кадр — ещё ждём
