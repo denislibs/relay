@@ -9,9 +9,9 @@ import { claimMediaCache, sendMediaPolicy } from './storageInfo';
 import { getPrefs, isDark, subscribePrefs, type Prefs } from './prefs';
 import { enableStrictDom } from '@relay/ui';
 import { render } from 'preact';
-import { startData } from './data';
+import { openChat, startData } from './data';
 import { installErrorCapture } from './devtools/metrics';
-import { getGlobal, setGlobal, subscribeGlobal, type Me } from './global';
+import { getGlobal, isPhone, setGlobal, subscribeGlobal, type Me } from './global';
 import * as nav from './nav';
 import { startScreenBlur } from './screenBlur';
 import { startSettingsData } from './settingsData';
@@ -95,8 +95,14 @@ window.addEventListener('relay:signed-in', () => {
 nav.installNav({ get: () => getGlobal().sidebarView, set: (p) => setGlobal({ sidebarView: p }), escBusy: () => getGlobal().infoOpen && !!getGlobal().openChatId });
 // правая панель «Информация» — свой слой навигации: «Назад» браузера закрывает её, закрытая из интерфейса — снимает запись
 let infoLayer = 0;
+// телефон: открытый чат — отдельный экран поверх списка (как в Telegram), «Назад» браузера возвращает к списку.
+// Запись — под слоями чатов поверх и панели: заводится раньше них, когда чат открылся; на широком экране её нет
+let screenLayer = 0;
 subscribeGlobal(() => {
-  const g = getGlobal(), open = g.infoOpen && g.openChatId != null;
+  const g = getGlobal(), chat = g.openChatId != null && !g.listLeaving;
+  if (chat && !screenLayer && isPhone()) screenLayer = nav.pushLayer('screen', () => { screenLayer = 0; openChat(null); });
+  else if (!chat && screenLayer) { const id = screenLayer; screenLayer = 0; nav.closeLayer(id); }
+  const open = g.infoOpen && g.openChatId != null;
   if (open && !infoLayer) infoLayer = nav.pushLayer('info', () => { infoLayer = 0; setGlobal({ infoOpen: false }); });
   else if (!open && infoLayer) { const id = infoLayer; infoLayer = 0; nav.closeLayer(id); }
 });

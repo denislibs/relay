@@ -8,7 +8,7 @@ import { beginHeavyAnimation, nudgeWallpaper, requestMutation, toBase64 } from '
 import { connectEngine, EngineClient, Mirror } from '@relay/sync-engine/src/client';
 import type { Item, Patch, Query, SearchResult } from '@relay/sync-engine/src/types';
 import { hideSpoilers, MAX_FILE_BYTES, type Entity } from '@relay/protocol';
-import { activeFrame, findChat, frameByKey, getGlobal, setGlobal, subscribeGlobal, type ChatFrame, type FeedMeta, type Me, type Status, type UploadItem } from './global';
+import { activeFrame, findChat, frameByKey, getGlobal, isPhone, setGlobal, subscribeGlobal, type ChatFrame, type FeedMeta, type Me, type Status, type UploadItem } from './global';
 import { closeLayer, closeLayers, pushLayer } from './nav';
 import { notifyIncoming, startNotify } from './notify';
 import { rememberKeysIn, startFileKeyService } from './fileKeys';
@@ -538,8 +538,15 @@ async function openChannelOnce(chatId: number, from: 'left' | 'inner'): Promise<
 export function refreshPreview(chatId: number): void { engine.call({ type: 'openPreview', chatId }).catch(() => {}); }
 
 /** Чат из списка (или из адреса, уведомления): нижний кадр, стек сбрасывается. */
+/* Телефон: чат закрыли — экран сначала уезжает к списку (listLeaving, App → data-screen), и только потом лента
+   снимается; иначе колонка уезжала бы уже пустой. Открыли чат за это время — уход отменяется. */
+const SCREEN_MS = 320;   // переход экранов (relay.css, телефон: 300 мс) + кадр запаса
+let leaveTimer: ReturnType<typeof setTimeout> | 0 = 0;
+let closingNow = false;
 export function openChat(chatId: number | null, target?: { id: number; sort: number }, hold?: Hold): void {
   openSeq++;   // любой переход отменяет ждущий openChannel
+  if (chatId == null && leaveTimer) return;   // уже едем к списку
+  if (leaveTimer) { clearTimeout(leaveTimer); leaveTimer = 0; setGlobal({ listLeaving: false }); }
   const g = getGlobal(), st = g.chatStack, top = topReady();
   // тот же чат на экране — только прокрутка; его тред поверх — другой слой (ниже вернёмся к самой группе)
   if (chatId != null && (g.pendingChatId ?? top?.chatId) === chatId && top?.threadId == null && (st.length <= 1 || top?.chatId === chatId)) {
@@ -547,6 +554,11 @@ export function openChat(chatId: number | null, target?: { id: number; sort: num
     return;
   }
   cancelPending();
+  if (!chatId && isPhone() && st.length && !closingNow) {
+    setGlobal({ listLeaving: true });
+    leaveTimer = setTimeout(() => { leaveTimer = 0; closingNow = true; try { openChat(null); } finally { closingNow = false; } setGlobal({ listLeaving: false }); }, SCREEN_MS);
+    return;
+  }
   if (!chatId) {
     for (const f of st) closeSession(f.key);
     dropParked();

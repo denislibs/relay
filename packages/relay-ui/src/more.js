@@ -1030,12 +1030,20 @@ function useAsideMode(ref) {
   return float;
 }
 
+var SCREEN_MS = 300;   // relay.css: переход экранов на телефоне
 function FloatShell(props) {
   var ref = useRef(null);
   // начальная ширина — один раз; дальше --side-w ведёт только ручка (иначе каждый рендер затирал бы перетаскивание)
   useLayoutEffect(function () { if (props.sideWidth && ref.current) ref.current.style.setProperty('--side-w', props.sideWidth + 'px'); }, []);
   var float = useAsideMode(ref);
-  return h('div', { ref: ref, class: cx('rl-shell rl-wallpaper', props.wallpaper !== false && 'rl-shell-tw', float && 'rl-shell-float', props.class), style: props.style },
+  // телефон: экран (list | chat | info) двигает колонки целиком (relay.css); пока едут — тяжёлая анимация
+  var screen = useRef(props.screen);
+  useLayoutEffect(function () {
+    if (screen.current === props.screen) return;
+    screen.current = props.screen;
+    if (props.screen && matchMedia('(max-width: 720px)').matches && !reducedMotion()) beginHeavyAnimation(SCREEN_MS + 20);
+  }, [props.screen]);
+  return h('div', { ref: ref, class: cx('rl-shell rl-wallpaper', props.wallpaper !== false && 'rl-shell-tw', float && 'rl-shell-float', props.class), style: props.style, 'data-screen': props.screen || undefined },
     props.wallpaper !== false ? h(Wallpaper, { pattern: props.pattern, colors: props.wallpaperColors, blur: props.wallpaperBlur, dark: props.wallpaperDark, intensity: props.wallpaperIntensity, image: props.wallpaperImage }) : null,
     props.rail || null,
     props.sidebar ? h('div', { class: 'rl-shell-side' }, props.sidebar,

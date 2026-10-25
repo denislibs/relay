@@ -131,13 +131,13 @@ export async function home(): Promise<void> {
 // ---------- слои поверх: чаты, правая панель ----------
 
 /** Открыть слой (чат поверх чата, правая панель): своя запись истории; onBack — «Назад» браузера или Esc. */
-export function pushLayer(type: 'chat' | 'info', onBack: () => void, key?: string): number {
+export function pushLayer(type: 'screen' | 'chat' | 'info', onBack: () => void, key?: string): number {
   return stack ? stack.push(type, onBack, { key }) : 0;
 }
 /** Слой закрыли из интерфейса — убрать его запись (onBack не вызывается). */
 export function closeLayer(id: number): void { stack?.close(id); }
 /** Закрыть все слои типа из интерфейса (сменился нижний чат — верхние уже сняты). */
-export function closeLayers(type: 'chat' | 'info'): void { stack?.closeAll(type); }
+export function closeLayers(type: 'screen' | 'chat' | 'info'): void { stack?.closeAll(type); }
 
 /** Esc → верхний открытый слой; можно перехватить: preventDefault, открытая модалка/меню, правая панель. */
 export function onEscape(e: { key: string; defaultPrevented: boolean }, modalOpen: boolean): void {
