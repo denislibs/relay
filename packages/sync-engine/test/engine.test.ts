@@ -77,6 +77,34 @@ test('watching a chat loads history from the server; growing the limit pages old
   await feed.until((l) => l.map((m) => m.body).join() === '1,2,3,4,5,6,7');
 });
 
+test('a chat first opened offline is flagged as filling; after a reconnect its window fills without scrolling', async () => {
+  const a = await srv.login('a'), b = await srv.login('b');
+  const chatId = await srv.chat(a.token, [a.userId, b.userId]);
+  const N = 60;
+  for (let i = 1; i <= N; i++) await sendMessage(a.userId, { chatId, clientId: crypto.randomUUID(), body: String(i) });
+  const eb = await open({ ...srv.config(b), historyPage: 3 });
+  eb.connect();
+  await eb.whenIdle();   // синхронизация принесла только хвост чата, ленту не открывали
+  // нет сети: сокет закрыт и HTTP не проходит (как при обрыве — fetch падает)
+  eb.disconnect();
+  const realFetch = globalThis.fetch;
+  globalThis.fetch = (() => Promise.reject(new TypeError('Failed to fetch'))) as unknown as typeof fetch;
+  // окно больше, чем есть на устройстве: без сети его не добрать
+  const limit = eb.store.chatMessages(chatId).length + 5;
+  expect(limit).toBeLessThan(N);
+  const feed = watchInto(eb, { kind: 'messages', chatId, limit });
+  await feed.until((l) => l.length > 0);
+  await eb.whenIdle();
+  expect(feed.list().length).toBeLessThan(limit);
+  expect(feed.item('~window')).toMatchObject({ filling: true });
+  // связь вернулась: окно добирается само, без изменения запроса (прокрутки)
+  globalThis.fetch = realFetch;
+  eb.connect();
+  const l = await feed.until((x) => x.length === limit);
+  expect(l[l.length - 1].body).toBe(String(N));
+  expect(feed.item('~window')).toMatchObject({ filling: false });
+});
+
 test('edits and deletions of a chat not opened since start reach the cached copy', async () => {
   const a = await srv.login('a'), b = await srv.login('b');
   const chatId = await srv.chat(a.token, [a.userId, b.userId]);
