@@ -40,3 +40,13 @@ export function rowFor<R extends Row>(rows: Iterable<R>, key: string, sort: numb
   }
   return hit;
 }
+
+/** Сдвиг окна во время тяжёлой анимации (переход стека, доезд ленты) откладывается до её конца: перераскладка
+ *  ленты съедала бы кадры анимации. Запоминается одно, последнее направление; после анимации сдвиг сам
+ *  перепроверит, нужен ли он ещё. */
+export function deferShift(box: { dir: ShiftDir | null }, dir: ShiftDir, heavy: boolean, later: (fn: () => void) => void, run: (dir: ShiftDir) => void): void {
+  if (!heavy) { run(dir); return; }
+  const had = box.dir;
+  box.dir = dir;
+  if (!had) later(() => { const d = box.dir; box.dir = null; if (d) run(d); });
+}

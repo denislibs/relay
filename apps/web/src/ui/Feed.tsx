@@ -26,7 +26,7 @@ import { getPrefs } from '../prefs';
 import { bubbleSrc, viewerPreview } from '../mediaGrid';
 import { clock, dayKey, dayLabel, fileSize } from './format';
 import { arrivals, type FeedSeen } from './appear';
-import { requestShift, rowFor, shiftWanted } from './windowShift';
+import { deferShift, requestShift, rowFor, shiftWanted } from './windowShift';
 
 /*
  * Лента сообщений, устроенная как в Telegram:
@@ -523,16 +523,18 @@ export function Feed({ frameKey, active, chatId, threadId, channel = false, meId
   const scrollDir = useRef<-1 | 0 | 1>(0);
   const viewAnchor = useRef<{ key: string; top: number } | null>(null);   // что было вверху видимой части (для смены ширины)
   const lastTop = useRef(0);
-  const shift = (dir: 'older' | 'newer') => {
+  // во время тяжёлой анимации сдвиг ждёт её конца (deferShift): перераскладка ленты съедала бы кадры перехода
+  const pendingShift = useRef<{ dir: 'older' | 'newer' | null }>({ dir: null });
+  const shift = (dir: 'older' | 'newer') => deferShift(pendingShift.current, dir, isHeavyAnimating(), onHeavyAnimationEnd, (d) => {
     const root = el.current;
-    if (!root || !placed.current || !shiftWanted(dir, metaRef.current, scrollDir.current)) return;
+    if (!root || !placed.current || !shiftWanted(d, metaRef.current, scrollDir.current)) return;
     requestMeasure(() => {
       if (anchor.current) return; // предыдущий сдвиг ещё не применён
       // окно не двинулось (край в кадре уже пуст — лента не успела перерисоваться; прежний сдвиг в пути) — якорь
       // не держим: он ждал бы окна, которое не придёт, и окно встало бы в обе стороны
-      anchor.current = requestShift(() => firstVisible(root), () => moveWindow(dir, frameKey));
+      anchor.current = requestShift(() => firstVisible(root), () => moveWindow(d, frameKey));
     });
-  };
+  });
 
   // после каждого обновления окна: первая раскладка, якорь или «прилипание» к низу
   useLayoutEffect(() => {
