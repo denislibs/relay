@@ -670,6 +670,9 @@ export function Feed({ frameKey, active, chatId, threadId, channel = false, meId
   // просто уходит (якорь удержит главный эффект). По таймеру буфер очищается, а якорь ширины снимается заново —
   // соседи уже на новых местах, и уход строк из DOM ничего не сдвигает
   const leavePlayed = useRef(new Set<string>());
+  // прокрутка, которую подрезала или выставила уборка уходящих: событие scroll с этим значением — наше, не пользователя
+  // (по значению, а не счётчиком: подрезка у низа события может и не дать, и счётчик проглотил бы чужую прокрутку)
+  const leaveScroll = useRef<number | null>(null);
   const leaveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   useLayoutEffect(() => {
     const root = el.current;
@@ -703,7 +706,7 @@ export function Feed({ frameKey, active, chatId, threadId, channel = false, meId
         const max = root.scrollHeight - ch;
         let next = stick.current ? max : row && was != null ? st + (row.getBoundingClientRect().top - rr.top) - was : null;
         if (next != null) next = Math.max(0, Math.min(max, next));
-        if (next != null && Math.abs(next - root.scrollTop) > 0.5) { programmatic.current++; root.scrollTop = next; }
+        if (next != null && Math.abs(next - root.scrollTop) > 0.5) { root.scrollTop = next; leaveScroll.current = root.scrollTop; }
         schedule(0);
         return;
       }
@@ -713,7 +716,7 @@ export function Feed({ frameKey, active, chatId, threadId, channel = false, meId
       for (const p of place) { const style = p.el.style; style.position = 'absolute'; style.top = p.top + 'px'; style.left = p.left + 'px'; style.width = p.width + 'px'; }
       const last = new Map(stay.map((x) => [x.key, x.r.getBoundingClientRect().top]));
       // лента схлопнулась, прокрутка подрезалась — это событие scroll наше, не пользователя
-      if (Math.abs(root.scrollTop - st) > 0.5) programmatic.current++;
+      if (Math.abs(root.scrollTop - st) > 0.5) leaveScroll.current = root.scrollTop;
       beginHeavyAnimation(LEAVE_HOLD_MS);
       const ease = 'cubic-bezier(0.2, 0, 0, 1)', byKey = new Map(stay.map((x) => [x.key, x.r]));
       for (const [key, d] of flipDeltas(first, last)) byKey.get(key)!.animate([{ transform: `translateY(${d}px)` }, { transform: 'none' }], { duration: LEAVE_MS, easing: ease });
@@ -970,6 +973,7 @@ export function Feed({ frameKey, active, chatId, threadId, channel = false, meId
       if (driving.current) { lastTop.current = root.scrollTop; return; }   // едем сами: направление, низ и сдвиги не трогаем
       const top = root.scrollTop, prev = lastTop.current;
       lastTop.current = top;
+      if (leaveScroll.current != null) { const at = leaveScroll.current; leaveScroll.current = null; if (Math.abs(top - at) < 1) return; }   // подрезка после удаления — не пользователь
       if (programmatic.current > 0) { programmatic.current--; return; } // наша прокрутка не меняет «прижата к низу»
       if (top !== prev) scrollDir.current = top < prev ? -1 : 1;
       const fromBottom = root.scrollHeight - top - root.clientHeight;
