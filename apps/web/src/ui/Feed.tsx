@@ -523,8 +523,12 @@ export function Feed({ frameKey, active, chatId, threadId, channel = false, meId
     for (const k of next.fresh) appearAt.current.set(k, now);
     for (const [k, t] of appearAt.current) if (now - t > APPEAR_MS) appearAt.current.delete(k);
     // не при сдвиге окна, не на первом кадре, не без анимаций и не в скрытой вкладке — тогда обычный путь (якорь)
-    if (prevList && placed.current && !anchor.current && !toBottom.current && !reducedMotion() && !document.hidden)
-      for (const x of interiorRemovals(prevList as unknown as (Item & Msg)[], messages as unknown as (Item & Msg)[])) if (!leaving.current.has(x.key)) leaving.current.set(x.key, x);
+    if (prevList && placed.current && !anchor.current && !toBottom.current && !reducedMotion() && !document.hidden) {
+      // у живого края удалённое последнее — тоже удаление (а не подрезка окна); у начала истории — первое
+      const edges = { atEnd: !!meta?.live && !meta.hasNewer, atStart: !!meta && !meta.hasOlder };
+      for (const x of interiorRemovals(prevList as unknown as (Item & Msg)[], messages as unknown as (Item & Msg)[], edges)) if (!leaving.current.has(x.key)) leaving.current.set(x.key, x);
+    }
+    for (const m of messages) leaving.current.delete(m.key as string);   // вернулось в окно (повтор отправки) — не уходит
   }
   const rendered = leaving.current.size ? mergeLeaving(messages as unknown as (Item & Msg)[], leaving.current.values() as Iterable<Item & Msg>) as Item[] : messages;
   const shownKeys = useRef<Set<string> | null>(null);   // ключи прошлых строк: что из них пропало (удалили сообщение)
@@ -670,29 +674,54 @@ export function Feed({ frameKey, active, chatId, threadId, channel = false, meId
   useLayoutEffect(() => {
     const root = el.current;
     if (!root || !leaving.current.size) return;
-    const fresh = [...leaving.current.keys()].filter((k) => !leavePlayed.current.has(k));
-    if (!fresh.length) return;
+    const fresh = new Set([...leaving.current.keys()].filter((k) => !leavePlayed.current.has(k)));
+    if (!fresh.size) return;
     for (const k of fresh) leavePlayed.current.add(k);
+    // чистим только свои ключи: следующий залп, пришедший перед самым сбросом, доживёт свою анимацию
+    const mine = [...fresh];
     const drop = () => {
       leaveTimer.current = null;
-      requestMeasure(() => { viewAnchor.current = viewAnchorOf(root); requestMutation(() => { leaving.current.clear(); leavePlayed.current.clear(); bumpLeave((n) => n + 1); }); });
+      requestMeasure(() => { viewAnchor.current = viewAnchorOf(root); requestMutation(() => { for (const k of mine) { leaving.current.delete(k); leavePlayed.current.delete(k); } bumpLeave((n) => n + 1); }); });
     };
     const schedule = (ms: number) => { if (leaveTimer.current) clearTimeout(leaveTimer.current); leaveTimer.current = setTimeout(drop, ms); };
     forceMeasure(() => {
-      const rr = root.getBoundingClientRect();
-      const rows = [...root.querySelectorAll<HTMLElement>('.app-msg')].map((r) => ({ r, key: r.dataset.key!, rect: r.getBoundingClientRect() }))
-        .filter((x) => x.rect.bottom > rr.top - 200 && x.rect.top < rr.bottom + 200);
-      const going = rows.filter((x) => fresh.includes(x.key) && x.rect.bottom > rr.top && x.rect.top < rr.bottom);
-      if (!going.length) { schedule(0); return; }
-      const stay = rows.filter((x) => !leaving.current.has(x.key));
+      const rr = root.getBoundingClientRect(), st = root.scrollTop, ch = root.clientHeight;
+      // только строки около экрана (по offsetTop, без замера каждой): ±100 px — дальше сдвиги не видны
+      const near: { r: HTMLElement; key: string; rect: DOMRect }[] = [];
+      for (const r of root.querySelectorAll<HTMLElement>('.app-msg')) {
+        const t = topIn(root, r) - st;   // верх строки относительно видимой области (через rect — пачки position: relative)
+        if (t > ch + 100 || t + r.offsetHeight < -100) continue;
+        near.push({ r, key: r.dataset.key!, rect: r.getBoundingClientRect() });
+      }
+      const going = near.filter((x) => fresh.has(x.key) && x.rect.bottom > rr.top && x.rect.top < rr.bottom);
+      if (!going.length) {
+        // всё вне экрана: убрать сразу и удержать видимое (у низа — низ), как ветка удаления главного эффекта;
+        // сам сброс буфера — следующим рендером
+        const va = viewAnchor.current, row = va && !stick.current ? anchorEl(root, va.key) : null;
+        const was = row ? row.getBoundingClientRect().top - rr.top : null;
+        for (const k of fresh) { const r = root.querySelector<HTMLElement>(`.app-msg[data-key="${CSS.escape(k)}"]`); if (r) r.style.display = 'none'; }
+        const max = root.scrollHeight - ch;
+        let next = stick.current ? max : row && was != null ? st + (row.getBoundingClientRect().top - rr.top) - was : null;
+        if (next != null) next = Math.max(0, Math.min(max, next));
+        if (next != null && Math.abs(next - root.scrollTop) > 0.5) { programmatic.current++; root.scrollTop = next; }
+        schedule(0);
+        return;
+      }
+      const stay = near.filter((x) => !leaving.current.has(x.key));
       const first = new Map(stay.map((x) => [x.key, x.rect.top]));
       const place = going.map((x) => ({ el: x.r, top: x.r.offsetTop, left: x.r.offsetLeft, width: x.r.offsetWidth }));
-      for (const p of place) { const st = p.el.style; st.position = 'absolute'; st.top = p.top + 'px'; st.left = p.left + 'px'; st.width = p.width + 'px'; }
+      for (const p of place) { const style = p.el.style; style.position = 'absolute'; style.top = p.top + 'px'; style.left = p.left + 'px'; style.width = p.width + 'px'; }
       const last = new Map(stay.map((x) => [x.key, x.r.getBoundingClientRect().top]));
+      // лента схлопнулась, прокрутка подрезалась — это событие scroll наше, не пользователя
+      if (Math.abs(root.scrollTop - st) > 0.5) programmatic.current++;
       beginHeavyAnimation(LEAVE_HOLD_MS);
-      const ease = 'cubic-bezier(0.2, 0, 0, 1)';
-      for (const [key, d] of flipDeltas(first, last)) stay.find((x) => x.key === key)!.r.animate([{ transform: `translateY(${d}px)` }, { transform: 'none' }], { duration: LEAVE_MS, easing: ease });
-      for (const p of place) p.el.animate([{ opacity: 1, transform: 'none' }, { opacity: 0, transform: 'scale(0.96)' }], { duration: LEAVE_MS - 20, easing: 'ease-in', fill: 'forwards' });
+      const ease = 'cubic-bezier(0.2, 0, 0, 1)', byKey = new Map(stay.map((x) => [x.key, x.r]));
+      for (const [key, d] of flipDeltas(first, last)) byKey.get(key)!.animate([{ transform: `translateY(${d}px)` }, { transform: 'none' }], { duration: LEAVE_MS, easing: ease });
+      // уходящая гаснет там, где была: при подрезке прокрутки всё (и absolute тоже) сместилось — держим её тем же переводом
+      for (const x of going) {
+        const d = x.rect.top - x.r.getBoundingClientRect().top, at = Math.abs(d) > 1 ? `translateY(${d}px)` : '';
+        x.r.animate([{ opacity: 1, transform: at || 'none' }, { opacity: 0, transform: `${at} scale(0.96)`.trim() }], { duration: LEAVE_MS - 20, easing: 'ease-in', fill: 'forwards' });
+      }
       schedule(LEAVE_HOLD_MS);
     });
   });
@@ -1200,7 +1229,10 @@ export function Feed({ frameKey, active, chatId, threadId, channel = false, meId
   let prevDay = '', prevSender: unknown = null, unreadShown = false;
   const isPosted = (x: Item) => isPost(x as { post?: boolean }) || (channel && !x.service);   // в канале и своё неподтверждённое — пост
   if (!partial) out.push(<div class="app-sentinel" data-dir="older" key={'o' + (messages[0]?.key ?? '')} aria-hidden="true" />);
-  const shown = partial ? rendered.slice(rendered.length - limit!) : rendered;
+  const shown = partial ? mergeLeaving(messages.slice(messages.length - limit!) as unknown as (Item & Msg)[], leaving.current.values() as Iterable<Item & Msg>) as Item[] : rendered;
+  // соседи для хвостов, дат и пачек — без уходящих строк: раскладка соседей устоялась в кадре FLIP, не при сбросе буфера
+  const isLeaving = (x: Item | undefined) => !!x && leaving.current.has(x.key as string);
+  const neighbour = (i: number, dir: 1 | -1) => { let j = i + dir; while (isLeaving(shown[j])) j += dir; return shown[j]; };
   // альбомы: подряд идущие фото одного отправителя с общим groupId (до 10) — одной строкой с мозаикой
   const isPhoto = (x: Item | undefined) => !!x && !x.deleted && ['photo', 'video'].includes((x.attachment as Att | null)?.kind ?? '') && !!(x.attachment as Att).w && !!(x.attachment as Att).h;
   const albums = new Map<string, Item[]>(), inAlbum = new Set<string>();
@@ -1247,9 +1279,10 @@ export function Feed({ frameKey, active, chatId, threadId, channel = false, meId
     const post = isPosted(m);
     // пост никогда не «исходящий»: слева, без хвоста отправителя (даже свой)
     const mine = !post && m.senderId === meId;
-    if (day !== prevDay) flushRun();
-    if (day !== prevDay) { const at = m.createdAt as string; out.push(<DateDivider key={'d' + day} onClick={() => setPickDate(new Date(at))}>{dayLabel(at)}</DateDivider>); }
-    if (!unreadShown && unreadFrom != null && !mine && m.id != null && (m.id as number) > unreadFrom) {
+    const going = isLeaving(m);   // уходящая: рисуется на месте, но дату, пачку и группу соседей не меняет
+    if (!going && day !== prevDay) flushRun();
+    if (!going && day !== prevDay) { const at = m.createdAt as string; out.push(<DateDivider key={'d' + day} onClick={() => setPickDate(new Date(at))}>{dayLabel(at)}</DateDivider>); }
+    if (!going && !unreadShown && unreadFrom != null && !mine && m.id != null && (m.id as number) > unreadFrom) {
       unreadShown = true;
       flushRun();
       out.push(<div class="app-unread-divider" key="unread" role="separator"><span>Непрочитанные сообщения</span></div>);
@@ -1272,17 +1305,17 @@ export function Feed({ frameKey, active, chatId, threadId, channel = false, meId
       return;
     }
     const album = albums.get(m.key);
-    const next = shown[i + (album ? album.length : 1)];
+    const next = neighbour(i + (album ? album.length : 1) - 1, 1);
     // группа — как в Telegram: тот же отправитель и день, пауза не больше 10 минут, не на границе «Непрочитанные»
     // посты (и копии постов в группе) — пачкой «канала»: отправитель для пачки — 0
     const sender = post ? 0 : m.senderId;
     const nextSender = next ? (isPosted(next) ? 0 : next.senderId) : null;
     // пост канала — всегда отдельный пузырь с хвостиком (как в Telegram: посты в пачку не склеиваются)
-    const start = post || prevSender !== sender || day !== prevDay || breaksGroup(shown[i - 1], m, unreadFrom, meId);
-    const end = post || !next || nextSender !== sender || dayKey(next.createdAt as string) !== day || breaksGroup(m, next, unreadFrom, meId);
+    const prevM = neighbour(i, -1);
+    const start = going || post || prevSender !== sender || day !== prevDay || breaksGroup(prevM, m, unreadFrom, meId);
+    const end = going || post || !next || nextSender !== sender || dayKey(next.createdAt as string) !== day || breaksGroup(m, next, unreadFrom, meId);
     const quoted = m.reply as Quote | null;
     // файлы, отправленные вместе (groupId), — одним пузырём: позиция строки внутри группы
-    const prevM = shown[i - 1];
     const same = (x: Item | undefined) => !!x && !!m.groupId && x.groupId === m.groupId && x.senderId === m.senderId && !x.deleted;
     const pos = !m.groupId || m.deleted ? 'single' : same(prevM) && same(next) ? 'middle' : same(prevM) ? 'last' : same(next) ? 'first' : 'single';
     const row = (
@@ -1316,9 +1349,14 @@ export function Feed({ frameKey, active, chatId, threadId, channel = false, meId
         appear={appearAt.current.has(m.key as string)}
         flash={flashKey === m.key || !!album?.some((x) => x.key === flashKey)}
         album={album}
-        leaving={leaving.current.has(m.key as string)}
+        leaving={going}
       />
     );
+    if (going) {
+      // уходящая внутри пачки остаётся в её обёртке (absolute считается от пачки), иначе — отдельной строкой
+      if (run) run.push(row); else out.push(row);
+      return;
+    }
     if (group && !mine && !post) {
       if (run && (start || runSender !== m.senderId)) flushRun();
       if (!run) { run = []; runKey = m.key as string; runSender = m.senderId as number; }

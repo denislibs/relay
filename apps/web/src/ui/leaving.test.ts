@@ -39,3 +39,20 @@ test('flipDeltas: was − now for rows present in both layouts, ignoring sub-pix
   const last = new Map([['a', 100.4], ['b', 150], ['d', 400]]);
   expect(flipDeltas(first, last)).toEqual([['b', 50]]);
 });
+
+test('at the live end the last message is a deletion too; at the start of history — the first', () => {
+  expect(interiorRemovals(win(1, 2, 3, 4), win(1, 2, 3), { atEnd: true }).map((x) => x.key)).toEqual(['k4']);
+  expect(interiorRemovals(win(1, 2, 3, 4), win(2, 3, 4), { atStart: true }).map((x) => x.key)).toEqual(['k1']);
+  expect(interiorRemovals(win(1, 2, 3, 4), win(2, 3), { atStart: true, atEnd: true }).map((x) => x.key)).toEqual(['k1', 'k4']);
+  expect(interiorRemovals(win(1, 2, 3, 4), win(1, 2, 3), { atStart: true })).toEqual([]);   // хвост подрезали, не удалили
+  expect(interiorRemovals([], win(1))).toEqual([]);
+});
+
+test('mergeLeaving: a key that came back into the window is not duplicated; equal sorts keep the window row first', () => {
+  expect(mergeLeaving(win(1, 2, 3), [m('k2', 2), m('k9', 9)]).map((x) => x.key)).toEqual(['k1', 'k2', 'k3', 'k9']);
+  expect(mergeLeaving(win(1, 2), [m('x', 2)]).map((x) => x.key)).toEqual(['k1', 'k2', 'x']);
+});
+
+test('flipDeltas: negative deltas (rows moving down) are reported too', () => {
+  expect(flipDeltas(new Map([['a', 100]]), new Map([['a', 160]]))).toEqual([['a', -60]]);
+});

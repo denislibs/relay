@@ -10,10 +10,11 @@ export const LEAVE_HOLD_MS = 240;   // буфер живёт до конца а�
 
 /**
  * Удалённые из середины окна: были в прошлом окне, нет в новом, и по sort лежат между соседями нового окна.
- * Края (окно сдвинулось или подрезалось), смена окна целиком (нет общих ключей), фото живого альбома (альбом
- * перерисуется на месте) и служебные строки — не анимируются.
+ * У живого края (atEnd: окно у последних сообщений) удалённое последнее — тоже удаление, у начала истории
+ * (atStart) — первое. Иначе края не считаются: окно сдвинулось или подрезалось. Смена окна целиком (нет общих
+ * ключей), фото живого альбома (альбом перерисуется на месте) и служебные строки — не анимируются.
  */
-export function interiorRemovals<M extends Msg>(prev: readonly M[] | null, next: readonly M[]): M[] {
+export function interiorRemovals<M extends Msg>(prev: readonly M[] | null, next: readonly M[], edges: { atStart?: boolean; atEnd?: boolean } = {}): M[] {
   if (!prev || !prev.length || !next.length) return [];
   const keys = new Set(next.map((m) => m.key));
   if (!prev.some((m) => keys.has(m.key))) return [];
@@ -22,7 +23,9 @@ export function interiorRemovals<M extends Msg>(prev: readonly M[] | null, next:
   for (const m of next) if (m.groupId) groups.add(m.groupId);
   const out: M[] = [];
   for (const m of prev) {
-    if (keys.has(m.key) || m.sort <= lo || m.sort >= hi || m.service || m.deleted) continue;
+    if (keys.has(m.key) || m.service || m.deleted) continue;
+    if (!edges.atStart && m.sort <= lo) continue;
+    if (!edges.atEnd && m.sort >= hi) continue;
     if (m.groupId && groups.has(m.groupId)) continue;
     out.push(m);
   }
@@ -31,7 +34,8 @@ export function interiorRemovals<M extends Msg>(prev: readonly M[] | null, next:
 
 /** Уходящие — обратно в список на свои места (оба отсортированы по sort). */
 export function mergeLeaving<M extends Msg>(next: readonly M[], leaving: Iterable<M>): M[] {
-  const extra = [...leaving].sort((a, b) => a.sort - b.sort);
+  const keys = new Set(next.map((m) => m.key));
+  const extra = [...leaving].filter((m) => !keys.has(m.key)).sort((a, b) => a.sort - b.sort);   // вернулось в окно — не дубль
   if (!extra.length) return next as M[];
   const out: M[] = [];
   let j = 0;
