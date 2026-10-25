@@ -1,3 +1,4 @@
+import { closePoll, votePoll } from './domain/polls';
 import { sql } from './db';
 import { currentEpoch } from './domain/epoch';
 import type { ClientFrame, ServerFrame } from '@relay/protocol';
@@ -98,6 +99,8 @@ export async function handleFrame(userId: number, frame: ClientFrame, publish: (
       case 'listened': return [{ op: 'ack', reqId: frame.reqId, result: await markListened(userId, frame.chatId, frame.id) }];
       case 'react': return [{ op: 'ack', reqId: frame.reqId, result: await reactMessage(userId, frame.chatId, frame.id, frame.emoji) }];
       case 'todoToggle': return [{ op: 'ack', reqId: frame.reqId, result: await toggleTodo(userId, frame.chatId, frame.id, frame.completed, frame.incompleted) }];
+      case 'pollVote': return [{ op: 'ack', reqId: frame.reqId, result: await votePoll(userId, frame.chatId, frame.id, frame.options) }];
+      case 'pollClose': return [{ op: 'ack', reqId: frame.reqId, result: await closePoll(userId, frame.chatId, frame.id) }];
       case 'todoAppend': return [{ op: 'ack', reqId: frame.reqId, result: await appendTodo(userId, frame.chatId, frame.id, frame.items) }];
       case 'button': {
         if (sessionId == null) throw new DomainError('unauthorized');

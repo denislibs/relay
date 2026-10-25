@@ -9,8 +9,8 @@ import { emojiOnly } from '@relay/protocol';
 import { FX_READ_DELAY_MS, playFxForMessage, queueReactionFx, takeReactionFx } from '../reactionFx';
 import { groupReactions, type Chip } from '../reactionChips';
 import { emojiKey } from '@relay/protocol';
-import type { Entity, MessageButton, ProfilePhoto, Todo } from '@relay/protocol';
-import { Presence, ProgressRing, useMinVisible, MediaPolicy, ArticleBlocks, Avatar, Bubble, Icon, peerTone, DateDivider, DatePicker, FileBubble, MediaBubble, MessageText, VoiceBubble, MusicBubble, RoundBubble, player, MediaViewer, ScrollToBottom, beginHeavyAnimation, forceMeasure, isHeavyAnimating, onHeavyAnimationEnd, requestMeasure, requestMutation, selectionValue, TodoBubble, InlineKeyboard, StickerBubble, EmojiBubble, reducedMotion, LazyRoot } from '@relay/ui';
+import type { Entity, MessageButton, Poll, ProfilePhoto, Todo } from '@relay/protocol';
+import { Presence, ProgressRing, useMinVisible, MediaPolicy, ArticleBlocks, Avatar, Bubble, Icon, peerTone, DateDivider, DatePicker, FileBubble, MediaBubble, MessageText, VoiceBubble, MusicBubble, RoundBubble, player, MediaViewer, ScrollToBottom, beginHeavyAnimation, forceMeasure, isHeavyAnimating, onHeavyAnimationEnd, requestMeasure, requestMutation, selectionValue, TodoBubble, PollMessage, InlineKeyboard, StickerBubble, EmojiBubble, reducedMotion, LazyRoot } from '@relay/ui';
 import { openStickerSet, sendSticker, useGreetingSticker } from '../stickers';
 import { historyEmpty } from '../greeting';
 import { GreetingCard } from './GreetingCard';
@@ -19,7 +19,7 @@ import type { QuoteMsg } from '@relay/sync-engine/src/types';
 import { quoteContent } from './preview';
 import { memo } from 'preact/compat';
 import { useContext, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'preact/hooks';
-import { pressButton, toggleTodo, clearFocus, discardUnsent, retrySend, focusMessage, openInner, jumpToDate, localPreview, markListened, moveWindow, react, savePosition, savedPosition, seen, markThreadRead, countViews, nextMention, nextReaction, readReactions } from '../data';
+import { pressButton, toggleTodo, votePoll, clearFocus, discardUnsent, retrySend, focusMessage, openInner, jumpToDate, localPreview, markListened, moveWindow, react, savePosition, savedPosition, seen, markThreadRead, countViews, nextMention, nextReaction, readReactions } from '../data';
 import { isPost } from '@relay/sync-engine/src/channel';
 import { Comments, MentionFab, ReactionFab, postMeta } from './channel';
 import { wantPeople } from '../people';
@@ -202,6 +202,26 @@ const Row = memo(function Row({ post, pinned, discussion, chatId, voiceTitle, au
           onToggle={(itemId: number, done: boolean) => { void toggleTodo(chatId, m.id as number, itemId, done).then((ok: boolean) => { if (!ok) showToast('Не удалось отметить задачу'); }); }}
           onReadOnly={() => showToast(m.fwdFrom ? 'Пересланный чек-лист нельзя менять' : `${voiceTitle} не разрешил(а) другим отмечать задачи`)}
           person={(uid: number) => { const g = getGlobal(); const full = uid === meId ? g.me?.name ?? '' : g.people[uid]?.name ?? ''; return { name: uid === meId ? 'Вы' : full, fullName: full, tone: peerTone(uid), avatar: senderAvatar(uid) }; }}
+        />
+        {mark}
+      </div>
+    );
+  }
+  if (m.kind === 'poll' && m.poll && !m.deleted) {
+    const poll = m.poll as Poll;
+    return (
+      <div class={wrap('app-msg')} data-key={m.key} data-sort={m.sort as number}>
+        {check}
+        <PollMessage
+          poll={poll} from={out ? 'out' : 'in'} tail={end} groupStart={start} appear={appear}
+          reply={replyQ}
+          edited={!!m.editedAt} time={clock(m.createdAt as string)} status={status}
+          metaBefore={metaBefore} footer={footer}
+          reactions={chips.length ? chips : undefined} onReact={(emoji: string) => onReact(m, emoji)}
+          // в режиме выбора клик выбирает сообщение; неотправленный — ещё без id
+          canVote={sel === undefined && m.id != null}
+          onVote={(ids: number[]) => votePoll(chatId, m.id as number, ids).then((ok: boolean) => { if (!ok) showToast(poll.closed ? 'Опрос уже закрыт' : 'Не удалось проголосовать'); })}
+          onResults={() => setGlobal({ pollResults: { chatId, id: m.id as number } })}
         />
         {mark}
       </div>

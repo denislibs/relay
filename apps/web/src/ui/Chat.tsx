@@ -1,4 +1,4 @@
-import { canEditKind, hasMedia, rightForKind, type GroupInfo, type MemberRight, type MyMembership } from '@relay/protocol';
+import { canEditKind, hasMedia, rightForKind, type Poll, type PollInput, type GroupInfo, type MemberRight, type MyMembership } from '@relay/protocol';
 import { emojiKey } from '@relay/protocol';
 import { pushRecentReaction, quickAssets, quickReactions } from '../reactions';
 import { queueReactionFx } from '../reactionFx';
@@ -6,6 +6,7 @@ import { ReactionsPanel } from './ReactionsPanel';
 import { getPrefs } from '../prefs';
 import { MEMBER_RIGHT_TEXT } from '../groups';
 import { PinnedBar } from './PinnedBar';
+import { PollResults } from './PollResults';
 import { UploadBar } from './UploadBar';
 import { videoCompressSupported, type VideoQuality } from '../media/compressVideo';
 import { entriesOf, filesFromEntries } from '../media/dropFiles';
@@ -25,12 +26,13 @@ const ATTACH_ITEMS = [
   { key: 'doc', icon: 'file', label: 'Файл' },
   { key: 'music', icon: 'music', label: 'Музыка' },
   { key: 'todo', icon: 'checkCircle', label: 'Чек-лист' },
+  { key: 'poll', icon: 'poll', label: 'Опрос' },
   { key: 'date', icon: 'calendar', label: 'Дата' },
   { key: 'article', icon: 'article', label: 'Статья' },
 ];
 
 /** В треде — то, что уходит комментарием (чек-лист и трек из музыки профиля отправляются без треда). */
-const THREAD_ATTACH = ATTACH_ITEMS.filter((x) => x.key !== 'todo' && x.key !== 'music');
+const THREAD_ATTACH = ATTACH_ITEMS.filter((x) => x.key !== 'todo' && x.key !== 'poll' && x.key !== 'music');
 
 /** Дата из окна → значение для вставки: текст по умолчанию, вся строка — одна сущность даты с выбранным форматом. */
 // после даты — пробел вне неё (как в Telegram): дальше набирается обычный текст, а не продолжение даты
@@ -40,9 +42,9 @@ import { membersStatus, useMembers } from '../members';
 import { Playlist } from './Playlist';
 import { inProfile, toggleProfileMusic, type Track } from '../music';
 import { useOwnMusic } from '../profileLists';
-import { Avatar, Button, Chip, Icon, MediaPolicy, peerTone, ChatSearchBar, Highlight, ripple, useMinVisible, requestMeasure, Composer, DropOverlay, GlassBar, IconButton, MenuPopover, Modal, ConfirmDialog, Presence, ReactionsBar, reducedMotion, plural, requestMutation, SelectionBar, isHeavyAnimating, onHeavyAnimationEnd, applyMarkdown, emptyValue, sameValue, voiceSupported, PlayerBar, roundSupported, startRound, Verified, canCopyImage, clipboardHtml, copyImage, copyRich, downloadUrl, TodoModal, TODO_ITEMS_MAX, DateModal, setDateCopiedToast } from '@relay/ui';
+import { Avatar, Button, Chip, Icon, MediaPolicy, peerTone, ChatSearchBar, Highlight, ripple, useMinVisible, requestMeasure, Composer, DropOverlay, GlassBar, IconButton, MenuPopover, Modal, ConfirmDialog, Presence, ReactionsBar, reducedMotion, plural, requestMutation, SelectionBar, isHeavyAnimating, onHeavyAnimationEnd, applyMarkdown, emptyValue, sameValue, voiceSupported, PlayerBar, roundSupported, startRound, Verified, canCopyImage, clipboardHtml, copyImage, copyRich, downloadUrl, TodoModal, PollModal, TODO_ITEMS_MAX, DateModal, setDateCopiedToast } from '@relay/ui';
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'preact/hooks';
-import { sendTodo, appendTodo, editTodo, closeChat, deleteMessage, editMessage, focusMessage, openInner, openUserChat, pinMessage, unpinMessage, sendFile, sendFiles, sendRound, sendVoice, react, rejectTooBig, PLAYABLE_VIDEO, retrySend, discardUnsent, saveDraft, searchMessages, send, typing, typingDone } from '../data';
+import { sendPoll, votePoll, closePoll, sendTodo, appendTodo, editTodo, closeChat, deleteMessage, editMessage, focusMessage, openInner, openUserChat, pinMessage, unpinMessage, sendFile, sendFiles, sendRound, sendVoice, react, rejectTooBig, PLAYABLE_VIDEO, retrySend, discardUnsent, saveDraft, searchMessages, send, typing, typingDone } from '../data';
 import { wantPeople } from '../people';
 import type { Item, SearchHit, SearchResult } from '@relay/sync-engine/src/types';
 import type { Entity, Todo, TodoInput } from '@relay/protocol';
@@ -236,6 +238,8 @@ export function Chat({ chatId, frameKey, active, threadId }: { chatId: number; f
   const picker = useRef<HTMLInputElement>(null);
   const [musicOpen, setMusicOpen] = useState(false);   // «Музыка» из меню вложений
   // чек-лист: новый (меню вложений), правка или «Добавить задачу» (меню сообщения)
+  const [pollOpen, setPollOpen] = useState(false);
+  const [stopPoll, setStopPoll] = useState<number | null>(null);   // «Остановить опрос?»: id сообщения
   const [todoOpen, setTodoOpen] = useState<{ mode: 'create' | 'edit' | 'append'; msg?: Item } | null>(null);
   // дата: окно формата (вставка из меню вложений, правка «плашки») или выбор даты для выделенного текста (⌘D)
   const [dateOpen, setDateOpen] = useState<{ mode: 'format' | 'mark'; initial?: { date: number; format: string }; done: (r: { date: number; format: string; label: string } | null) => void } | null>(null);
@@ -664,7 +668,7 @@ export function Chat({ chatId, frameKey, active, threadId }: { chatId: number; f
         onSendRound={(r: { blob: Blob; duration: number; size: number; thumb: string | null }) => { if (!allowed('round')) return; stick.current = true; sendRound(chatId, r, (replyTo?.id as number) ?? null, threadId).catch(() => {}); setReplyKey(null); }}
         attachItems={thread ? THREAD_ATTACH : ATTACH_ITEMS}
         onExpand={() => openArticle()}
-        onAttach={(k: string) => { if (k === 'music') { if (allowed('music')) setMusicOpen(true); return; } if (k === 'article') { openArticle(); return; } if (k === 'todo') { setTodoOpen({ mode: 'create' }); return; } if (k === 'date') { setDateOpen({ mode: 'format', done: (r) => { if (r) api.current?.insert(dateValue(r)); } }); return; } const el = picker.current!; el.accept = k === 'media' || k === 'camera' ? 'image/*,video/*' : ''; el.value = ''; el.click(); }}
+        onAttach={(k: string) => { if (k === 'music') { if (allowed('music')) setMusicOpen(true); return; } if (k === 'article') { openArticle(); return; } if (k === 'todo') { setTodoOpen({ mode: 'create' }); return; } if (k === 'poll') { setPollOpen(true); return; } if (k === 'date') { setDateOpen({ mode: 'format', done: (r) => { if (r) api.current?.insert(dateValue(r)); } }); return; } const el = picker.current!; el.accept = k === 'media' || k === 'camera' ? 'image/*,video/*' : ''; el.value = ''; el.click(); }}
         onSend={(v: Value) => {
           if (editing) {
             const next = applyMarkdown(v);
@@ -740,6 +744,11 @@ export function Chat({ chatId, frameKey, active, threadId }: { chatId: number; f
                 items={[
                   ...(menuMsg.id != null && !menuMsg.deleted && !system && !channel ? [{ icon: 'reply', label: 'Ответить', onClick: () => { if (editing) endEdit(editing.draft); setReplyKey(menuMsg.key as string); api.current?.focus({ end: true }); } }] : []),
                   ...(own && !system && !menuMsg.blocks && !menuMsg.fwdFrom && (menuMsg.kind === 'todo' || canEditKind(String(menuMsg.kind ?? 'text'))) ? [{ icon: 'pencil', label: 'Изменить', onClick: () => { if (menuMsg.kind === 'todo') setTodoOpen({ mode: 'edit', msg: menuMsg }); else startEdit(menuMsg); } }] : []),
+                  // опрос: отозвать голос (не у викторины и не у закрытого), закрыть — автору
+                  ...(menuMsg.kind === 'poll' && menuMsg.poll && menuMsg.id != null && !(menuMsg.poll as Poll).closed && !(menuMsg.poll as Poll).quiz && ((menuMsg.poll as Poll).my ?? []).length
+                    ? [{ icon: 'undo', label: 'Отменить голос', onClick: () => void votePoll(chatId, menuMsg.id as number, []).then((ok: boolean) => { if (!ok) showToast('Не удалось отменить голос'); }) }] : []),
+                  ...(menuMsg.kind === 'poll' && menuMsg.poll && menuMsg.id != null && !(menuMsg.poll as Poll).closed && own && !menuMsg.fwdFrom
+                    ? [{ icon: 'stop', label: (menuMsg.poll as Poll).quiz ? 'Остановить викторину' : 'Остановить опрос', onClick: () => setStopPoll(menuMsg.id as number) }] : []),
                   // чек-лист: добавить задачу — автору или всем, если автор разрешил; не больше 30
                   ...(menuMsg.kind === 'todo' && menuMsg.todo && !menuMsg.fwdFrom && menuMsg.id != null && (own || (menuMsg.todo as Todo).othersCanAppend) && (menuMsg.todo as Todo).items.length < TODO_ITEMS_MAX
                     ? [{ icon: 'plus', label: 'Добавить задачу', onClick: () => setTodoOpen({ mode: 'append', msg: menuMsg }) }] : []),
@@ -794,6 +803,16 @@ export function Chat({ chatId, frameKey, active, threadId }: { chatId: number; f
           onSubmit={(r: { date: number; format: string; label: string }) => { const d = dateOpen; setDateOpen(null); d.done(r); }}
         />
       ) : null}
+      {pollOpen ? (
+        <PollModal
+          onClose={() => setPollOpen(false)}
+          onSubmit={(r: PollInput) => { setPollOpen(false); stick.current = true; void sendPoll(chatId, r, (replyTo?.id as number) ?? null); setReplyKey(null); }}
+        />
+      ) : null}
+      <PollResults />
+      <ConfirmDialog open={stopPoll != null} title="Остановить опрос?" text="Голосовать больше будет нельзя, итоги увидят все. Отменить это нельзя." confirm="Остановить"
+        onConfirm={() => { const id = stopPoll!; setStopPoll(null); (closePoll(chatId, id) as Promise<unknown>).catch(() => showToast('Не удалось остановить опрос')); }}
+        onCancel={() => setStopPoll(null)} />
       {todoOpen ? (
         <TodoModal
           mode={todoOpen.mode}

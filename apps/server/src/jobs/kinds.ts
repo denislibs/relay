@@ -8,6 +8,7 @@ import { deliverPush, planPush, planPushPage, type PushCursor, type PushMessage,
 import { reindexStep, syncMessage, syncMessages } from '../search/messagesIndex';
 import { register, registerBatch } from './handlers';
 import { applyLinkPreview } from '../domain/messages';
+import { closeExpired } from '../domain/polls';
 import { s3 } from '../domain/files';
 import { processVideo } from './video';
 import { processPhoto } from './photo';
@@ -194,6 +195,10 @@ register('replies.flush', async (p: { chatId: number; postId: number }) => {
 // реакции поста канала: счётчики одним событием reactionCounts на секундное окно (reactionCounts.ts)
 register('reactions.flush', async (p: { chatId: number; id: number }) => {
   await flushReactionCounts(p);
+});
+
+register('poll.close', async (p: { chatId: number; id: number }) => {
+  await closeExpired(p.chatId, p.id);
 });
 
 register('link.preview', async (p: { chatId: number; id: number; url: string }) => {

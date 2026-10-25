@@ -1,3 +1,4 @@
+import { shownPoll, withPolls, type PollDef } from './polls';
 import { graphemes, GROUP_ABOUT_MAX, normalizeEntities, type Entity, type Block, type ForwardInfo, type LinkPreview, type MediaCounts, type MediaTab, type Message, type MessageButton, type ProfilePhoto, type ServiceData, type ServiceType, type StickerRef, type Todo } from '@relay/protocol';
 import { sql, type Tx } from '../db';
 import { muteFromDb } from './chatNotify';
@@ -154,6 +155,7 @@ export function toMessage(r: Record<string, unknown>): Message {
     // из jsonb — в каноническом виде (порядок ключей у jsonb свой)
     ...(r.service_type ? { service: { type: r.service_type as ServiceType, ...(r.service_data ? { data: r.service_data as ServiceData } : {}) } } : {}),
     ...(r.kind === 'todo' && r.todo && !r.deleted ? { todo: shownTodo(r.todo as Todo, !!r.post) } : {}),
+    ...(r.kind === 'poll' && r.poll && !r.deleted ? { poll: shownPoll(r.poll as PollDef) } : {}),
     ...(r.kind === 'sticker' && r.sticker && !r.deleted ? { sticker: r.sticker as StickerRef } : {}),
     ...(r.group_id ? { groupId: r.group_id as string } : {}),
     ...(r.fwd_from ? { fwdFrom: r.fwd_from as ForwardInfo } : {}),
@@ -250,7 +252,7 @@ export async function withReplies(messages: Message[], userId: number): Promise<
  *  остальные (и копии постов в группе обсуждения — это сообщения группы) — списком (withReactions). */
 export async function withAllReactions(messages: Message[], userId: number): Promise<Message[]> {
   const posts = messages.filter((m) => m.post && !m.origin);
-  await Promise.all([withReactions(messages.filter((m) => !m.post || m.origin)), withReactionCounts(posts, userId), withReplies(posts, userId)]);
+  await Promise.all([withReactions(messages.filter((m) => !m.post || m.origin)), withReactionCounts(posts, userId), withReplies(posts, userId), withPolls(messages, userId)]);
   return messages;
 }
 
@@ -313,7 +315,7 @@ export async function listChats(userId: number, opts: ListOpts = {}): Promise<Ch
            case when c.kind <> 'direct' then c.members_count end as g_members,   -- держит триггер (миграция 145)
            case when c.kind <> 'direct' then (select count(*)::int from chat_join_requests jr where jr.chat_id = c.id) end as g_pending,
            lm.id as m_id, lm.chat_id as m_chat_id, lm.sender_id as m_sender_id, lm.client_id as m_client_id,
-           lm.body as m_body, lm.kind as m_kind, lm.attachment as m_attachment, lm.reply_to_id as m_reply_to_id, lm.created_at as m_created_at, lm.edited_at as m_edited_at, lm.deleted as m_deleted, lm.entities as m_entities, lm.service_type as m_service_type, lm.service_data as m_service_data, lm.todo as m_todo, lm.fwd_from as m_fwd_from, lm.buttons as m_buttons, lm.sticker as m_sticker, lm.content as m_content, lm.post as m_post, lm.post_author as m_post_author, lm.thread_id as m_thread_id, lm.origin as m_origin,
+           lm.body as m_body, lm.kind as m_kind, lm.attachment as m_attachment, lm.reply_to_id as m_reply_to_id, lm.created_at as m_created_at, lm.edited_at as m_edited_at, lm.deleted as m_deleted, lm.entities as m_entities, lm.service_type as m_service_type, lm.service_data as m_service_data, lm.todo as m_todo, lm.poll as m_poll, lm.fwd_from as m_fwd_from, lm.buttons as m_buttons, lm.sticker as m_sticker, lm.content as m_content, lm.post as m_post, lm.post_author as m_post_author, lm.thread_id as m_thread_id, lm.origin as m_origin,
            case when lm.post and lm.service_type is null then coalesce((select v.views from message_views v where v.chat_id = lm.chat_id and v.message_id = lm.id), 0) end as m_views,
            (select count(*) from messages m
              where m.chat_id = c.id and m.id > cm.last_read_id and m.id >= cm.history_from and m.sender_id <> ${userId} and not m.deleted)::int as unread,
@@ -378,7 +380,7 @@ export async function listChats(userId: number, opts: ListOpts = {}): Promise<Ch
     draft: r.draft ? { text: (r.draft as { text: string }).text, at: new Date((r.draft as { at: string }).at).toISOString(), ...((r.draft as { entities?: Entity[] | null }).entities?.length ? { entities: normalizeEntities((r.draft as { text: string }).text, (r.draft as { entities: Entity[] }).entities) } : {}) } : null,
     last: r.m_id == null ? null : toMessage({
       id: r.m_id, chat_id: r.m_chat_id, sender_id: r.m_sender_id, client_id: r.m_client_id,
-      body: r.m_body, kind: r.m_kind, attachment: r.m_attachment, reply_to_id: r.m_reply_to_id, created_at: r.m_created_at, edited_at: r.m_edited_at, deleted: r.m_deleted, entities: r.m_entities, service_type: r.m_service_type, service_data: r.m_service_data, todo: r.m_todo, fwd_from: r.m_fwd_from, buttons: r.m_buttons, sticker: r.m_sticker,
+      body: r.m_body, kind: r.m_kind, attachment: r.m_attachment, reply_to_id: r.m_reply_to_id, created_at: r.m_created_at, edited_at: r.m_edited_at, deleted: r.m_deleted, entities: r.m_entities, service_type: r.m_service_type, service_data: r.m_service_data, todo: r.m_todo, poll: r.m_poll, fwd_from: r.m_fwd_from, buttons: r.m_buttons, sticker: r.m_sticker,
       post: r.m_post, post_author: r.m_post_author, views: r.m_views, thread_id: r.m_thread_id, origin: r.m_origin,
     }),
   }));

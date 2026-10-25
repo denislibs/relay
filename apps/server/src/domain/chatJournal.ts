@@ -32,7 +32,8 @@ export async function getChatUpdates(userId: number, chatId: number, since: numb
   const [first] = await sql`select min(seq) as min from chat_updates where chat_id = ${chatId}`;
   if (first.min === null || since < Number(first.min) - 1) return { items: [], seq, more: false, tooLong: true };
   const rows = await sql`select seq, payload from chat_updates where chat_id = ${chatId} and seq > ${since} order by seq limit ${limit}`;
-  const items = (await hydrate(null, rows.map((r) => ({ seq: Number(r.seq), payload: r.payload as Stored })))).map((it) => {
+  // читатель — для опросов: итоги и свои голоса у каждого свои (черновиков в журнале чата нет)
+  const items = (await hydrate(userId, rows.map((r) => ({ seq: Number(r.seq), payload: r.payload as Stored })))).map((it) => {
     const u = it.update;
     const id = u.type === 'newMessage' ? u.message.id : 'id' in u && typeof u.id === 'number' && u.type !== 'pins' ? u.id : null;
     return id != null && id < historyFrom ? { seq: it.seq, update: { type: 'messageDeleted' as const, chatId, id } } : it;

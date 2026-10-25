@@ -21,7 +21,7 @@ export interface Message {
   chatId: Id;
   senderId: Id;
   clientId: string;
-  kind: 'text' | 'photo' | 'video' | 'file' | 'voice' | 'round' | 'audio' | 'todo' | 'sticker';
+  kind: 'text' | 'photo' | 'video' | 'file' | 'voice' | 'round' | 'audio' | 'todo' | 'sticker' | 'poll';
   groupId?: string | null;   // отправлены вместе (несколько файлов) — в ленте одним пузырём
   body: string;
   replyToId: Id | null;
@@ -32,6 +32,7 @@ export interface Message {
   attachment?: Attachment | null;
   service?: { type: ServiceType; data?: ServiceData };   // есть только у служебных сообщений
   todo?: Todo;           // чек-лист (kind 'todo'): задачи и кто что отметил
+  poll?: Poll;           // опрос или викторина (kind 'poll'): счётчики и мои голоса — для этого читателя
   entities?: Entity[];   // оформление текста; нет или пусто — простой текст
   listened?: boolean;    // голосовое/кружок прослушан получателем
   fwdFrom?: ForwardInfo | null;   // переслано: откуда (нет — своё или отправитель скрыт)
@@ -223,7 +224,9 @@ export type Update =
   | { type: 'readBy'; chatId: Id; userId: Id; upToId: Id }
   | { type: 'draft'; chatId: Id; text: string; at: string; entities?: Entity[] }   // черновик своих устройств; пустой текст — удалён
   | { type: 'messageEdited'; chatId: Id; id: Id; body: string; editedAt: string; entities?: Entity[] }
-  | { type: 'todoUpdated'; chatId: Id; id: Id; todo: Todo; editedAt?: string }   // чек-лист целиком: отметили, добавили или изменили
+  | { type: 'todoUpdated'; chatId: Id; id: Id; todo: Todo; editedAt?: string }
+  | { type: 'pollUpdated'; chatId: Id; id: Id; voters: number; counts: number[]; closed: boolean; correct?: number; solution?: string }   // общие итоги опроса (ответ викторины — только у закрытого)
+  | { type: 'pollVoted'; chatId: Id; id: Id; my: number[]; correct?: number; solution?: string }   // свои голоса (свой журнал): после голоса викторина раскрывает ответ   // чек-лист целиком: отметили, добавили или изменили
   // ответ на нажатие кнопки: новый текст и кнопки (null — кнопок больше нет); «изм.» не ставится — как правка бота
   | { type: 'messageMarkup'; chatId: Id; id: Id; body: string; entities?: Entity[]; buttons: MessageButton[][] | null }
   | { type: 'messageDeleted'; chatId: Id; id: Id }
@@ -374,7 +377,7 @@ export type ClientFrame =
   // превью публичного канала: push'и канала в этот сокет без подписки, пока превью открыто; ack.result — {seq}
   | { op: 'watchChat'; reqId: string; chatId: Id }
   | { op: 'unwatchChat'; chatId: Id }
-  | { op: 'send'; reqId: string; clientId: string; chatId: Id; body: string; entities?: Entity[]; replyToId?: Id | null; attachment?: { id: string; thumb?: string | null; spoiler?: boolean } | null; groupId?: string | null; forward?: ForwardRef | null; noLinkPreview?: boolean; blocks?: Block[] | null; todo?: TodoInput; sticker?: { id: Id } | null; threadId?: Id }   // threadId — комментарий в треде (группа обсуждения)
+  | { op: 'send'; reqId: string; clientId: string; chatId: Id; body: string; entities?: Entity[]; replyToId?: Id | null; attachment?: { id: string; thumb?: string | null; spoiler?: boolean } | null; groupId?: string | null; forward?: ForwardRef | null; noLinkPreview?: boolean; blocks?: Block[] | null; todo?: TodoInput; poll?: PollInput; sticker?: { id: Id } | null; threadId?: Id }   // threadId — комментарий в треде (группа обсуждения)
   | { op: 'read'; reqId: string; chatId: Id; upToId: Id }
   | { op: 'typing'; chatId: Id }   // «печатаю» — без ответа, сервер пересылает остальным участникам
   | { op: 'draft'; reqId: string; chatId: Id; text: string; entities?: Entity[] }
@@ -382,6 +385,8 @@ export type ClientFrame =
   | { op: 'delete'; reqId: string; chatId: Id; id: Id }
   | { op: 'react'; reqId: string; chatId: Id; id: Id; emoji: string | null }
   | { op: 'todoToggle'; reqId: string; chatId: Id; id: Id; completed: number[]; incompleted: number[] }
+  | { op: 'pollVote'; reqId: string; chatId: Id; id: Id; options: number[] }   // пусто — отозвать голос
+  | { op: 'pollClose'; reqId: string; chatId: Id; id: Id }
   | { op: 'todoAppend'; reqId: string; chatId: Id; id: Id; items: string[] }
   | { op: 'todoEdit'; reqId: string; chatId: Id; id: Id; todo: TodoInput }
   | { op: 'listened'; reqId: string; chatId: Id; id: Id }
@@ -454,6 +459,9 @@ export function parseClientFrame(raw: string): ClientFrame | null {
       const done = ids(f.completed), undone = ids(f.incompleted);
       return str(f.reqId, 64) && int(f.chatId) && int(f.id) && done && undone ? { op: 'todoToggle', reqId: f.reqId, chatId: f.chatId, id: f.id, completed: done, incompleted: undone } : null;
     }
+    case 'pollVote': return str(f.reqId, 64) && int(f.chatId) && int(f.id) && Array.isArray(f.options) && f.options.length <= POLL_OPTIONS_MAX && f.options.every((x) => Number.isSafeInteger(x) && (x as number) > 0)
+      ? { op: 'pollVote', reqId: f.reqId, chatId: f.chatId, id: f.id, options: [...new Set(f.options as number[])] } : null;
+    case 'pollClose': return str(f.reqId, 64) && int(f.chatId) && int(f.id) ? { op: 'pollClose', reqId: f.reqId, chatId: f.chatId, id: f.id } : null;
     case 'todoAppend': return str(f.reqId, 64) && int(f.chatId) && int(f.id) && Array.isArray(f.items) && f.items.length >= 1 && f.items.length <= TODO_ITEMS_MAX && f.items.every((x) => typeof x === 'string')
       ? { op: 'todoAppend', reqId: f.reqId, chatId: f.chatId, id: f.id, items: f.items as string[] } : null;
     case 'todoEdit': { const t = normalizeTodo(f.todo); return str(f.reqId, 64) && int(f.chatId) && int(f.id) && t ? { op: 'todoEdit', reqId: f.reqId, chatId: f.chatId, id: f.id, todo: t } : null; }
@@ -471,9 +479,10 @@ export function parseClientFrame(raw: string): ClientFrame | null {
         forward = { chatId: w.chatId as number, id: w.id as number, hideSender: w.hideSender === true, hideCaption: w.hideCaption === true };
       }
       if (f.todo != null && !normalizeTodo(f.todo)) return null;
+      if (f.poll != null && !normalizePoll(f.poll)) return null;
       if (f.sticker != null && (typeof f.sticker !== 'object' || !int((f.sticker as { id: unknown }).id))) return null;
       if (f.threadId != null && !int(f.threadId)) return null;
-      return { op: 'send', ...(f.threadId != null ? { threadId: f.threadId as number } : {}), ...(f.sticker != null ? { sticker: { id: (f.sticker as { id: number }).id } } : {}), ...(f.todo != null ? { todo: normalizeTodo(f.todo)! } : {}), reqId: f.reqId, clientId: f.clientId, chatId: f.chatId, body: f.body, entities: normalizeEntities(f.body, f.entities), replyToId: (f.replyToId as number | null) ?? null, attachment: (f.attachment as { id: string; thumb?: string | null; spoiler?: boolean } | null) ?? null, groupId: (f.groupId as string | null) ?? null, forward, ...(f.noLinkPreview === true ? { noLinkPreview: true } : {}), ...(Array.isArray(f.blocks) ? { blocks: f.blocks as Block[] } : {}) };
+      return { op: 'send', ...(f.threadId != null ? { threadId: f.threadId as number } : {}), ...(f.sticker != null ? { sticker: { id: (f.sticker as { id: number }).id } } : {}), ...(f.todo != null ? { todo: normalizeTodo(f.todo)! } : {}), ...(f.poll != null ? { poll: normalizePoll(f.poll)! } : {}), reqId: f.reqId, clientId: f.clientId, chatId: f.chatId, body: f.body, entities: normalizeEntities(f.body, f.entities), replyToId: (f.replyToId as number | null) ?? null, attachment: (f.attachment as { id: string; thumb?: string | null; spoiler?: boolean } | null) ?? null, groupId: (f.groupId as string | null) ?? null, forward, ...(f.noLinkPreview === true ? { noLinkPreview: true } : {}), ...(Array.isArray(f.blocks) ? { blocks: f.blocks as Block[] } : {}) };
     case 'read':
       return str(f.reqId, 64) && int(f.chatId) && int(f.upToId) ? { op: 'read', reqId: f.reqId, chatId: f.chatId, upToId: f.upToId } : null;
     default: return null;
@@ -549,6 +558,8 @@ export function searchTerms(text: string): string[] {
 }
 
 export * from './groups';
+export * from './polls';
+import { normalizePoll, POLL_OPTIONS_MAX, type Poll, type PollInput } from './polls';
 export * from './blocks';
 export * from './fileCrypto';
 export * from './mentions';

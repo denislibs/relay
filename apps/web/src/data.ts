@@ -2,7 +2,7 @@ import { bindStickers } from './stickers';
 import { showToast } from './settingsData';
 import { coverThumb, readAudioTags } from './id3';
 import { getPrefs } from './prefs';
-import type { Block, LinkPreview, ThreadGuest, TodoInput } from '@relay/protocol';
+import type { Block, LinkPreview, PollInput, ThreadGuest, TodoInput } from '@relay/protocol';
 import { playSentSound } from './sound';
 import { beginHeavyAnimation, nudgeWallpaper, requestMutation, toBase64 } from '@relay/ui';
 import { connectEngine, EngineClient, Mirror } from '@relay/sync-engine/src/client';
@@ -1015,6 +1015,22 @@ export async function sendTodo(chatId: number, todo: TodoInput, replyToId: numbe
 /** Отметка у себя — сразу; ошибка (нет прав, нет сети) — откат и false. */
 export function toggleTodo(chatId: number, id: number, itemId: number, done: boolean): Promise<boolean> {
   return engine.call({ type: 'todoToggle', chatId, id, itemId, done }).then(() => true, () => false);
+}
+export async function sendPoll(chatId: number, poll: PollInput, replyToId: number | null = null): Promise<void> {
+  nudgeWallpaper();
+  toLatestOf(chatId);
+  await engine.call({ type: 'sendPoll', chatId, poll, replyToId });
+}
+/** Голос у себя — сразу; ошибка (закрыт, нет прав, нет сети) — откат и false. Пусто — отозвать голос. */
+export function votePoll(chatId: number, id: number, options: number[]): Promise<boolean> {
+  return engine.call({ type: 'pollVote', chatId, id, options }).then(() => true, () => false);
+}
+export function closePoll(chatId: number, id: number): Promise<unknown> { return engine.call({ type: 'pollClose', chatId, id }); }
+/** Неанонимный опрос: кто за какой вариант (по варианту — последние сначала). */
+export async function pollVoters(chatId: number, id: number): Promise<{ option: number; users: { id: number; name: string }[] }[]> {
+  const res = await fetch(`/chats/${chatId}/messages/${id}/votes`);
+  if (!res.ok) throw new Error('votes ' + res.status);
+  return ((await res.json()) as { options: { option: number; users: { id: number; name: string }[] }[] }).options;
 }
 export function appendTodo(chatId: number, id: number, items: string[]): Promise<unknown> { return engine.call({ type: 'todoAppend', chatId, id, items }); }
 export function editTodo(chatId: number, id: number, todo: TodoInput): Promise<unknown> { return engine.call({ type: 'todoEdit', chatId, id, todo }); }

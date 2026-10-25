@@ -1,3 +1,4 @@
+import { withPolls } from './polls';
 import { normalizeEntities, type Entity, type JournalEntry, type MyMembership, type Update } from '@relay/protocol';
 import { beforeCommit, isTx, onCommit, sql, type Tx } from '../db';
 import { DomainError } from './errors';
@@ -256,6 +257,11 @@ export async function hydrate(userId: number | null, rows: { seq: number; payloa
       case 'attachmentUpdated': return m.attachment ? { seq, update: { type: 'attachmentUpdated', chatId: p.chatId, id: p.id, attachment: m.attachment } } : { seq, update: { type: 'messageDeleted', chatId: p.chatId, id: p.id } };
     }
   });
+  // опросы: итоги и мои голоса — для этого читателя (в журнале у всех одна ссылка)
+  if (userId != null) {
+    const polls = out.map((e) => e.update).flatMap((u) => (u.type === 'newMessage' || u.type === 'mention') && u.message.kind === 'poll' ? [u.message] : []);
+    if (polls.length) await withPolls(polls, userId);
+  }
   return out;
 }
 
