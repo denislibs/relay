@@ -1290,7 +1290,7 @@ html[data-blur="0"] .rl-pop .rl-menu, html[data-blur="0"] .rl-pop .rl-rpick { -w
   /* сверху лента тоже до края окна (и над плеером): под шапкой и плеером сообщения видны приглушённо, без обрыва.
      --player-h идёт ровно вместе с раскрытием плеера: шапка уезжает вниз, а лента остаётся на месте и не перестраивается */
   margin: calc(-1 * (var(--top-zone) + var(--space-float) + var(--player-h))) calc(-1 * var(--space-float)) calc(-1 * (48px + 2 * var(--space-float)));   /* 48 — высота поля в потоке */
-  padding: calc(var(--top-zone) + var(--space-float) + 8px) var(--space-float) calc(var(--bottom-zone) + var(--space-float) - 6px);   /* последнее сообщение ≈10px над полем ввода, как в Telegram */
+  padding: calc(var(--top-zone) + var(--space-float) + 8px) var(--space-float) calc(var(--bottom-zone) + 10px);   /* последнее сообщение — 10px над полем ввода, как в Telegram, при любом отступе (--space-float: 16px, на телефоне 8px) */
   /* низ ленты не растворяется: как в Telegram, сообщения видны под полем ввода и вокруг него до края окна */
   /* как в Telegram: под шапкой, закрепом, плеером и под полем ввода сообщения не пропадают, а приглушены до 24%;
      к краю этой зоны — мягкий спад (кривая ease-in-out по пяти точкам). Верх зоны — низ шапки (+ плеер, + закреп),
