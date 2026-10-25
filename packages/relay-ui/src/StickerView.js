@@ -98,7 +98,7 @@ export function StickerView(props) {
       offVisible = watchVisible(el, (v) => c.setVisible(v));
     }); });
     return () => { offLazy?.(); cancel?.(); offVisible?.(); ctl.current?.destroy(); ctl.current = null; };
-  }, [key, group]);
+  }, [key, group, force]);
 
   useEffect(() => { ctl.current?.setPlay(play && !reducedMotion()); }, [play]);
   useEffect(() => { ctl.current?.setLoop(loop); }, [loop]);

@@ -26,7 +26,8 @@ export function Reactions({ nav }: { nav: Nav }) {
   const set = cat.length ? cat.map((r) => ({ key: r.key, icon: r.static })) : REACTION_SET.map((e) => ({ key: emojiKey(e), icon: undefined }));
   const m = mode ?? group.reactions.mode;
   const a = (allowed ?? (group.reactions.mode === 'some' ? group.reactions.allowed : set.slice(0, 7).map((x) => x.key))).map(emojiKey);
-  const dirty = m !== group.reactions.mode || (m === 'some' && (a.length !== group.reactions.allowed.length || a.some((e) => !group.reactions.allowed.includes(e))));
+  const saved = group.reactions.allowed.map(emojiKey);
+  const dirty = m !== group.reactions.mode || (m === 'some' && (a.length !== saved.length || a.some((e) => !saved.includes(e))));
   const toggle = (e: string) => setAllowed(a.includes(e) ? a.filter((x) => x !== e) : [...a, e]);
   const save = async () => {
     setBusy(true);

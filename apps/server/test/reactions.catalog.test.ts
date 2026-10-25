@@ -37,7 +37,8 @@ beforeAll(() => {
   writeFileSync(`${dir}/secret.txt`, 'nope');
   process.env.ASSETS_DIR = dir;
 });
-afterAll(() => rmSync(dir, { recursive: true, force: true }));
+const prevAssets = process.env.ASSETS_DIR;
+afterAll(() => { rmSync(dir, { recursive: true, force: true }); if (prevAssets === undefined) delete process.env.ASSETS_DIR; else process.env.ASSETS_DIR = prevAssets; });
 
 test('catalog: json order, emojiKey, hashed urls, optional effects, broken entries skipped', async () => {
   const cat = await reactionCatalog();

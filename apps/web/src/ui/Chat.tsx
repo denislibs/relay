@@ -714,7 +714,7 @@ export function Chat({ chatId, frameKey, active, threadId }: { chatId: number; f
         return (
           <MenuPopover open anchor={menu} class="app-msgmenu"
             header={menuMsg.id != null && !menuMsg.deleted && !system && !chat?.preview && (!gRights || gRights.react) && gInfo?.reactions.mode !== 'none' ? (
-                <ReactionPicker emoji={quickReactions(gInfo?.reactions.mode === 'some' ? gInfo.reactions.allowed : null)} icons={reactionIcon} selected={myReaction ? emojiKey(myReaction) : undefined}
+                <ReactionPicker emoji={quickReactions(gInfo?.reactions.mode === 'some' ? gInfo.reactions.allowed : null)} icons={reactionIcon} more={quickReactions(gInfo?.reactions.mode === 'some' ? gInfo.reactions.allowed : null, 9).length > 8} selected={myReaction ? emojiKey(myReaction) : undefined}
                   onPick={(emoji: string) => { const off = !!myReaction && emojiKey(myReaction) === emoji; react(chatId, menuMsg.id as number, off ? null : emoji); if (!off) pushRecentReaction(emoji); setMenu(null); }} />
               ) : null}
                 label="Действия с сообщением"

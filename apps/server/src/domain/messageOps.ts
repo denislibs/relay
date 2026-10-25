@@ -1,5 +1,5 @@
 import { unpinDeleted } from './pins';
-import { normalizeEntities, trimFormatted, type Entity, type Reaction } from '@relay/protocol';
+import { emojiKey, normalizeEntities, trimFormatted, type Entity, type Reaction } from '@relay/protocol';
 import { sql } from '../db';
 import { assertMember } from './chats';
 import { DomainError } from './errors';
@@ -113,7 +113,8 @@ export async function reactMessage(userId: number, chatId: number, id: number, e
     if (await isServiceChat(tx, chatId)) throw new DomainError('forbidden');   // служебный чат только для чтения
     if (emoji) {   // реакции в группе: право участника и набор, разрешённый группой
       if (!can(ctx, 'react') || ctx.reactions.mode === 'none') throw new DomainError('forbidden', 'react');
-      if (ctx.reactions.mode === 'some' && !ctx.reactions.allowed.includes(emoji)) throw new DomainError('forbidden', 'reaction');
+      // набор сравниваем по ключу без FE0F: старые настройки и клиенты шлют «❤️», новые — «❤»
+      if (ctx.reactions.mode === 'some' && !ctx.reactions.allowed.some((a) => emojiKey(a) === emojiKey(emoji))) throw new DomainError('forbidden', 'reaction');
     }
     if (ctx.kind === 'channel') return reactPost(tx, userId, chatId, id, ctx.historyFrom, emoji);
     const [m] = await tx`select deleted from messages where chat_id = ${chatId} and id = ${id} and id >= ${ctx.historyFrom}`;

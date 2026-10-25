@@ -4,6 +4,7 @@ import type { Item } from '@relay/sync-engine/src/types';
 import { avatarPhoto, senderAvatar } from '../profilePhoto';
 import { reactionIcon, useReactionCatalog } from '../reactions';
 import { groupReactions, type Chip } from '../reactionChips';
+import { emojiKey } from '@relay/protocol';
 import type { Entity, MessageButton, ProfilePhoto, Todo } from '@relay/protocol';
 import { Presence, ProgressRing, useMinVisible, MediaPolicy, ArticleBlocks, Avatar, Bubble, Icon, peerTone, DateDivider, DatePicker, FileBubble, MediaBubble, MessageText, VoiceBubble, MusicBubble, RoundBubble, player, MediaViewer, ScrollToBottom, beginHeavyAnimation, forceMeasure, isHeavyAnimating, onHeavyAnimationEnd, requestMeasure, requestMutation, selectionValue, TodoBubble, InlineKeyboard, StickerBubble, reducedMotion, LazyRoot } from '@relay/ui';
 import { openStickerSet, sendSticker, useGreetingSticker } from '../stickers';
@@ -84,7 +85,8 @@ type RowProps = { post?: boolean; pinned?: boolean; discussion?: number | null; 
 const Row = memo(function Row({ post, pinned, discussion, chatId, voiceTitle, author, onAuthor, onOpen, hl, m, meId, out, start, end, pos, quoted, quoteAuthor, quoteTone, appear, flash, onReact, album, onUser, sel, selIn, onQuickForward, grp, leaving, people }: RowProps) {
   // реакции: по эмодзи (ключ без FE0F — «❤️» и «❤» одна плашка) — сколько, есть ли моя, кто поставил;
   // картинка — из каталога (rxv — версия каталога: пришёл — строка перерисуется)
-  const chips = reactionChips(m, meId, people);
+  // альбом: реакции всех его сообщений одним рядом (ставятся на первое)
+  const chips = reactionChips(album ? { ...m, reactions: album.flatMap((x) => (x.reactions as { userId: number; emoji: string }[] | undefined) ?? []) } : m, meId, people);
   // пост: в мете — просмотры, подпись автора и булавка; под пузырём — кнопка комментариев (если у канала есть обсуждение)
   const metaBefore = post && !m.deleted ? postMeta(m, !!pinned) : undefined;
   // у канала есть обсуждение (discussion) — кнопка сразу у каждого поста, заглушкой, пока не пришли replies (копия
@@ -448,6 +450,7 @@ const anchorEl = (root: HTMLElement, key: string) =>
 
 const NO_MESSAGES: Item[] = [];
 const NO_IDS: number[] = [];
+const NO_PEOPLE: Record<number, { name: string } | undefined> = {};
 
 /** Музыкальный пузырь + есть ли файл в кэше (значок «скачать» в углу — только пока файла нет). */
 const asFile = (att: Att) => ({ id: att.id, name: att.name, mime: att.mime, size: att.size });
@@ -1165,7 +1168,7 @@ export function Feed({ frameKey, active, chatId, threadId, channel = false, meId
     if (findChat(getGlobal(), chatId)?.preview) { showToast('Подпишитесь на канал, чтобы ставить реакции'); return; }
     // пост: своя реакция — myReaction (списка реакторов нет)
     const mine = m.reactionCounts ? (m.myReaction as string | undefined) : ((m.reactions as { userId: number; emoji: string }[] | undefined) ?? []).find((r) => r.userId === meId)?.emoji;
-    react(chatId, m.id as number, mine === emoji ? null : emoji);
+    react(chatId, m.id as number, mine != null && emojiKey(mine) === emojiKey(emoji) ? null : emoji);
   }).current;
 
   // просмотрщик: все фото текущего окна ленты
@@ -1385,7 +1388,7 @@ export function Feed({ frameKey, active, chatId, threadId, channel = false, meId
         voiceTitle={mine ? 'Вы' : post ? (channel ? peerName : channelName(m)) : (group ? people[m.senderId as number]?.name ?? peerName : peerName)}
         onReact={onReact}
         rxv={rxv}
-        people={people}
+        people={(m.reactions as unknown[] | undefined)?.length && (m.reactions as unknown[]).length < 4 ? people : NO_PEOPLE}
         onOpen={onOpen}
         out={mine}
         start={start}

@@ -1,5 +1,5 @@
 import {
-  graphemes, normalizeAdminRights, normalizeRights, narrowRights, allAdminRights, ADMIN_RIGHTS_BY_KIND, GROUP_ABOUT_MAX, MEMBERS_MAX, RANK_MAX, SLOW_MODES,
+  emojiKey, graphemes, normalizeAdminRights, normalizeRights, narrowRights, allAdminRights, ADMIN_RIGHTS_BY_KIND, GROUP_ABOUT_MAX, MEMBERS_MAX, RANK_MAX, SLOW_MODES,
   type AdminRights, type CommunityKind, type ProfilePhoto, type BannedMember, type GroupMember, type GroupReactions, type GroupRole, type Message, type MemberRights, type ServiceData, type ServiceType,
 } from '@relay/protocol';
 import { sql, type Tx } from '../db';
@@ -191,7 +191,8 @@ export async function setGroupSettings(userId: number, chatId: number, body: { h
       const o = (body.reactions && typeof body.reactions === 'object' ? body.reactions : {}) as Record<string, unknown>;
       const mode = o.mode === 'some' || o.mode === 'none' ? o.mode : o.mode === 'all' ? 'all' : null;
       if (!mode) throw new DomainError('bad_frame', 'reactions');
-      const allowed = mode === 'some' && Array.isArray(o.allowed) ? [...new Set(o.allowed.filter((e): e is string => typeof e === 'string' && e.length <= 16))].slice(0, 100) : [];
+      // храним ключи без FE0F (как шлёт клиент), дубли по ключу схлопываем
+      const allowed = mode === 'some' && Array.isArray(o.allowed) ? [...new Set(o.allowed.filter((e): e is string => typeof e === 'string' && e.length <= 16).map(emojiKey))].slice(0, 100) : [];
       const value: GroupReactions = { mode, allowed };
       await tx`update chats set reactions = ${tx.json(value as never)} where id = ${chatId}`;
     }

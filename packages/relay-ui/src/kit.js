@@ -626,7 +626,7 @@ function ReactionChips(props) {
     props.items.map(function (r) {
       var n = r.count || 1;
       var avatars = r.users && r.users.length ? r.users.slice(0, 3) : null;
-      return h('button', { key: r.key || r.emoji, type: 'button', class: cx('rl-react', r.mine && 'rl-react-mine'), onClick: function (e) { e.stopPropagation(); if (props.onClick) props.onClick(r.emoji); },
+      return h('button', { key: r.key || r.emoji, type: 'button', class: cx('rl-react', r.mine && 'rl-react-mine'), onClick: function (e) { e.stopPropagation(); if (props.onClick) props.onClick(r.key || r.emoji); },
         'aria-label': 'Реакция ' + r.emoji + ', ' + n + (r.mine ? ', ваша' : ''), 'aria-pressed': String(!!r.mine) },
         h('span', { class: 'rl-react-icon' }, r.icon ? h('img', { src: r.icon, alt: '', draggable: false, decoding: 'async' }) : r.emoji),
         avatars
@@ -1242,8 +1242,11 @@ function MediaBubble(props) {
         props.metaBefore ? h('span', { class: 'rl-bubble-spacer rl-bubble-spacer-fit', 'aria-hidden': 'true' }, props.metaBefore(), props.time) : h('span', { class: 'rl-bubble-spacer', 'aria-hidden': 'true' }),
         metaOrReactions(props, out, h('span', { class: 'rl-bubble-meta' }, props.metaBefore ? props.metaBefore() : null, props.time, out || props.status ? h(MessageStatus, { status: props.status || 'read' }) : null))) : null,
       props.footer ? h('div', { class: 'rl-bubble-footer' }, props.footer) : null);
-  // без подписи реакции — плашками под картинкой, снаружи (как у стикера в Telegram), по краю своей стороны
-  if (hasReact && !props.caption) bubble = h('div', { class: 'rl-below-wrap rl-react-wrap' }, bubble, h(ReactionChips, { items: props.reactions, out: out, float: true, onClick: props.onReact }));
+  // без подписи реакции — плашками под картинкой, снаружи (как у стикера в Telegram), по краю своей стороны;
+  // обёртка остаётся, пока строка жива: иначе при первой реакции картинка и видео пересоздавались бы (мигание)
+  var hadReact = useRef(false);
+  if (hasReact && !props.caption) hadReact.current = true;
+  if (hadReact.current) bubble = h('div', { class: 'rl-below-wrap rl-react-wrap' }, bubble, hasReact && !props.caption ? h(ReactionChips, { items: props.reactions, out: out, float: true, onClick: props.onReact }) : null);
   return h(MsgLine, { aside: props.aside, class: cx('rl-msgline', out && 'rl-msgline-out', props.groupStart && 'rl-msgline-gap') }, bubble);
 }
 

@@ -39,7 +39,7 @@ declare const __SHELL__: string[];   // код и стили этой сборк
 declare const __INTEGRITY__: Record<string, string>;   // файл с хэшем в имени → SHA-256 его байтов (build.ts)
 const INTEGRITY: Record<string, string> = __INTEGRITY__;
 const SHELL = ['/', ...__SHELL__, '/sounds/message.mp3', '/sounds/sent.mp3'];   // звуки сообщений — и без сети
-const API = /^\/(health|me|users|contacts|settings|privacy|blocks|chats|presence|search|uploads|files|push|sessions|session|ws|dev|logout|auth|link-preview|groups|join|sticker-sets|my-stickers|stickers-by-emoji|stickers)(\/|$)/;
+const API = /^\/(health|me|users|contacts|settings|privacy|blocks|chats|presence|search|uploads|files|push|sessions|session|ws|dev|logout|auth|link-preview|groups|join|sticker-sets|my-stickers|stickers-by-emoji|stickers|reactions)(\/|$)/;
 
 sw.addEventListener('install', (e) => {
   // мимо HTTP-кэша браузера: новая сборка не должна положить к себе файл прежней; чужие байты — установка не удаётся,

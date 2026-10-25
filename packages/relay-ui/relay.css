@@ -764,7 +764,6 @@ button.rl-quote:active { background: var(--quote-bg-active, var(--pressed)); }
 .rl-reacts { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 6px; padding-bottom: 2px; }
 .rl-reacts-meta > .rl-bubble-meta, .rl-reacts-meta > .rl-music-meta { position: static; order: 100; margin: 0 -2px 0 auto; align-self: flex-end; padding-bottom: 2px; }
 .rl-bubble-has-react > .rl-bubble-spacer, .rl-bubble-has-react > .rl-bubble-text + .rl-bubble-spacer { display: none; }
-.rl-bubble-has-footer.rl-bubble-has-react > .rl-bubble-meta { bottom: auto; }
 .rl-reacts-float { margin-top: 4px; padding-bottom: 0; }
 .rl-reacts-out.rl-reacts-float { justify-content: flex-end; }
 .rl-react-wrap { align-items: flex-start; }
@@ -796,16 +795,18 @@ button.rl-quote:active { background: var(--quote-bg-active, var(--pressed)); }
 .rl-react-avatars .rl-avatar + .rl-avatar { margin-right: -14px; }
 @keyframes rl-react-in { from { transform: scale(.6); opacity: 0; } to { transform: none; opacity: 1; } }
 
-.rl-rpick { display: inline-flex; align-items: center; gap: 2px; padding: 6px; border-radius: var(--radius-pill); background: var(--raised); box-shadow: var(--shadow-pop); animation: rl-rpick-in var(--dur-base) var(--ease-out) both; transform-origin: 50% 100%; }
-.rl-rpick-btn { display: inline-flex; align-items: center; justify-content: center; width: 40px; height: 40px; border: 0; border-radius: 50%; background: transparent; color: var(--ink-muted); font-size: 24px; line-height: 1; cursor: pointer; animation: rl-rpick-pop 320ms var(--ease-out) both; animation-delay: calc(var(--i) * 30ms + 60ms); transition: transform var(--dur-fast) var(--ease-out), background-color var(--dur-instant) var(--ease-standard); }
-/* как в Telegram: при наведении — подсветка, без увеличения */
+.rl-rpick { position: relative; display: inline-flex; align-items: center; height: 40px; min-width: 56px; padding: 0 4px; border-radius: 40px; background: var(--raised); box-shadow: 0 2px 8px rgba(0, 0, 0, .24); animation: rl-rpick-in 200ms cubic-bezier(.4, 0, .2, 1) both; transform-origin: 0 100%; }
+.rl-rpick-btn { display: inline-flex; align-items: center; justify-content: center; width: 36px; height: 36px; padding: 0; border: 0; border-radius: 50%; background: transparent; color: var(--ink-muted); font-size: 26px; line-height: 1; cursor: pointer; animation: rl-rpick-pop 200ms var(--ease-out) both; animation-delay: calc(var(--i) * 20ms); transition: background-color var(--dur-instant) var(--ease-standard), transform var(--dur-instant) var(--ease-standard); }
+/* как в Telegram: при наведении — подсветка, без увеличения; моя — круг под иконкой */
 .rl-rpick-btn:hover { background: var(--hover); }
 .rl-rpick-btn:active { transform: scale(0.9); }
 .rl-rpick-img { width: 28px; height: 28px; }
 .rl-rpick-on { background: var(--accent-soft); }
-.rl-rpick-more { background: var(--field); font-size: 0; }
-@keyframes rl-rpick-in { from { opacity: 0; transform: translateY(8px) scale(0.9); } to { opacity: 1; transform: none; } }
-@keyframes rl-rpick-pop { 0% { transform: scale(0) translateY(10px); opacity: 0; } 70% { transform: scale(1.15); opacity: 1; } 100% { transform: none; } }
+.rl-rpick-more { width: 32px; height: 32px; margin: 0 2px 0 0; color: var(--ink-muted); }
+/* хвостик-полукруг под правым краем панели (к меню) */
+.rl-rpick-tail { position: absolute; right: 20px; bottom: -8px; width: 16px; height: 8px; border-radius: 0 0 8px 8px; background: inherit; box-shadow: inherit; clip-path: inset(0 -10px -10px -10px); }
+@keyframes rl-rpick-in { from { opacity: 0; transform: scale(0.8); } to { opacity: 1; transform: none; } }
+@keyframes rl-rpick-pop { from { opacity: 0; transform: scale(0.5); } to { opacity: 1; transform: none; } }
 
 /* ---------- Menu ---------- */
 .rl-menu { position: absolute; z-index: 20; min-width: 200px; padding: 4px; border-radius: 14px; background: var(--menu-bg); color: var(--ink); box-shadow: var(--menu-shadow); -webkit-backdrop-filter: blur(24px) saturate(1.8); backdrop-filter: blur(24px) saturate(1.8); transform-origin: top left; animation: rl-menu-in 160ms var(--ease-out) both; }
@@ -1188,8 +1189,7 @@ button.rl-tab:hover { color: var(--ink); }
 .rl-shell .rl-bubble-menu { display: none; }
 
 /* message context menu: reaction pill above a soft rounded list */
-.rl-shell .rl-rpick { padding: 4px 6px; background: color-mix(in srgb, var(--raised) 92%, transparent); -webkit-backdrop-filter: blur(18px); backdrop-filter: blur(18px); }
-.rl-shell .rl-rpick-btn { width: 38px; height: 38px; font-size: 26px; }
+.rl-shell .rl-rpick { background: color-mix(in srgb, var(--raised) 92%, transparent); -webkit-backdrop-filter: blur(50px); backdrop-filter: blur(50px); }
 /* MenuPopover — одно окно меню на всё приложение (портал в body): появление 150 мс от угла у курсора/кнопки,
    исчезание 200 мс ease-in обратно в тот же угол (как в Telegram Web A) */
 .rl-pop-root { display: contents; }
@@ -1201,9 +1201,8 @@ button.rl-tab:hover { color: var(--ink); }
 .rl-pop > .rl-menu { position: relative; min-width: 13.5rem; animation: rl-menu-in 150ms cubic-bezier(.2, 0, .2, 1) both; }
 .rl-pop[data-state="closing"] > .rl-menu, .rl-pop[data-state="closing"] > .rl-pop-header { animation: rl-menu-out 200ms ease-in forwards; }
 @keyframes rl-menu-out { from { opacity: 1; transform: none; } to { opacity: 0; transform: scale(0.85); } }
-.rl-pop-header { position: absolute; left: 0; bottom: calc(100% + 8px); }
-.rl-pop .rl-rpick { padding: 4px 6px; background: color-mix(in srgb, var(--raised) 92%, transparent); -webkit-backdrop-filter: blur(18px); backdrop-filter: blur(18px); }
-.rl-pop .rl-rpick-btn { width: 38px; height: 38px; font-size: 26px; }
+.rl-pop-header { position: absolute; left: 0; bottom: calc(100% + 8px); max-width: calc(100% + 40px); }   /* панель реакций выступает за меню вправо на 40 px, как в Telegram */
+.rl-pop .rl-rpick { background: color-mix(in srgb, var(--raised) 92%, transparent); -webkit-backdrop-filter: blur(50px); backdrop-filter: blur(50px); }
 html[data-blur="0"] .rl-pop .rl-menu, html[data-blur="0"] .rl-pop .rl-rpick { -webkit-backdrop-filter: none; backdrop-filter: none; background: color-mix(in srgb, var(--raised) 96%, transparent); }
 :root[data-screen-blur] .rl-pop { filter: blur(16px) brightness(.8); }
 .app-chatmenu-btn { display: contents; }
