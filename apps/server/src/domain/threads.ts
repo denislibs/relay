@@ -25,14 +25,14 @@ export async function copyPost(tx: Tx, channelId: number, post: Record<string, u
   if (attachment && !(await tx`select 1 from attachments where id = ${attachment.id as string} for share`).length) return;
   // содержимое — заново шифром ключа группы: блоб канала в группе не откроется (AAD — чат и client_id)
   const c = await contentColumns(groupId, clientId, {
-    body: post.body as string, entities: (post.entities as unknown[] | null) ?? null, todo: post.todo ?? null, poll: post.poll ?? null,
+    body: post.body as string, entities: (post.entities as unknown[] | null) ?? null, todo: post.todo ?? null, poll: post.poll ?? null, data: post.data ?? null,
     blocks: (post.blocks as unknown[] | null) ?? null, link: post.link ?? null, attachment,
   }, tx);
   const [row] = await tx`
-    insert into messages (chat_id, sender_id, client_id, kind, body, entities, attachment, group_id, fwd_from, link, blocks, todo, poll, sticker, content, has_link, post, post_author, origin)
+    insert into messages (chat_id, sender_id, client_id, kind, body, entities, attachment, group_id, fwd_from, link, blocks, todo, poll, data, sticker, content, has_link, post, post_author, origin)
     values (${groupId}, ${authorId}, ${clientId}, ${post.kind as string}, ${c.body}, ${c.entities?.length ? sql.json(c.entities as never) : null}, ${c.attachment ? sql.json(c.attachment as never) : null},
             ${(post.group_id as string | null) ?? null}, ${post.fwd_from ? sql.json(post.fwd_from as never) : null}, ${c.link ? sql.json(c.link as never) : null}, ${c.blocks ? sql.json(c.blocks as never) : null},
-            ${c.todo ? sql.json(c.todo as never) : null}, ${c.poll ? sql.json(c.poll as never) : null}, ${post.sticker ? sql.json(post.sticker as never) : null}, ${c.content}, ${c.hasLink}, true, ${(post.post_author as string | null) ?? null},
+            ${c.todo ? sql.json(c.todo as never) : null}, ${c.poll ? sql.json(c.poll as never) : null}, ${c.data ? sql.json(c.data as never) : null}, ${post.sticker ? sql.json(post.sticker as never) : null}, ${c.content}, ${c.hasLink}, true, ${(post.post_author as string | null) ?? null},
             ${sql.json({ chatId: channelId, id: Number(post.id) } as never)})
     returning *`;
   const copy = toMessage((await openRows([row], '', tx))[0]);

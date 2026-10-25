@@ -766,15 +766,10 @@ export class Engine {
     return draftHash(text);
   }
 
-  /** Отправить на сервер черновики этого устройства (сервер разнесёт их по остальным через журнал). Чат, где в очереди
-   *  ещё стоит отправка, забравшая черновик, ждёт её ответа (pumpOutbox зовёт снова): сервер сперва сотрёт забранный,
-   *  потом примет новый — даже если новый текст тот же, что ушёл (хеш совпал бы). */
+  /** Отправить на сервер черновики этого устройства (сервер разнесёт их по остальным через журнал). */
   private pushDrafts(): void {
     if (!this.online || !this.ready) return;
-    const sending = new Set<number>();
-    for (const o of this.store.outbox.values()) if (!o.failed && o.draftHash !== null) sending.add(o.chatId);
     for (const chatId of [...this.store.pendingDrafts]) {
-      if (sending.has(chatId)) continue;
       const draft = this.store.chats.get(chatId)?.draft ?? null;
       const text = draft?.text ?? '';
       this.run(async () => {
@@ -1152,6 +1147,17 @@ export class Engine {
         const clientId = crypto.randomUUID();
         this.lastCreated = Math.max(Date.now(), this.lastCreated + 1);
         this.store.addPending({ clientId, chatId: a.chatId, body: a.poll.question, entities: [], replyToId: a.replyToId ?? null, createdAt: this.lastCreated, failed: false, poll: a.poll });
+        await this.store.flush();
+        this.changed();
+        this.pumpOutbox();
+        return { clientId };
+      }
+      case 'sendSpecial': {
+        // контакт, точка, кубик — как сообщение: в очередь (переживёт офлайн); значение кубика выберет сервер
+        const clientId = crypto.randomUUID();
+        this.lastCreated = Math.max(Date.now(), this.lastCreated + 1);
+        const s = a.special, body = s.contact ? s.contact.name : s.geo ? s.geo.title ?? '' : s.dice ? s.dice.emoji : '';
+        this.store.addPending({ clientId, chatId: a.chatId, body, entities: [], replyToId: a.replyToId ?? null, createdAt: this.lastCreated, failed: false, special: s });
         await this.store.flush();
         this.changed();
         this.pumpOutbox();
@@ -2390,7 +2396,7 @@ export class Engine {
           if (!next || !this.online) break;
           try {
             const att = next.attachment ? { id: next.attachment.id, thumb: next.attachment.thumb ?? null, ...(next.attachment.spoiler ? { spoiler: true } : {}) } : null;
-            const r = await this.request({ op: 'send', reqId: '', clientId: next.clientId, chatId: next.chatId, body: next.body, entities: next.entities ?? [], replyToId: next.replyToId, attachment: next.forward ? null : att, ...(next.groupId ? { groupId: next.groupId } : {}), ...(next.forward ? { forward: next.forward } : {}), ...(next.noLinkPreview ? { noLinkPreview: true } : {}), ...(next.blocks ? { blocks: next.blocks } : {}), ...(next.sticker ? { sticker: { id: next.sticker.id } } : {}), ...(next.todo ? { todo: { title: next.todo.title, items: next.todo.items.map((x) => ({ title: x.title })), othersCanAppend: next.todo.othersCanAppend, othersCanComplete: next.todo.othersCanComplete } } : {}), ...(next.poll ? { poll: next.poll } : {}), ...(next.threadId != null ? { threadId: next.threadId } : {}), ...(next.draftHash !== undefined ? { draftHash: next.draftHash } : {}) });
+            const r = await this.request({ op: 'send', reqId: '', clientId: next.clientId, chatId: next.chatId, body: next.body, entities: next.entities ?? [], replyToId: next.replyToId, attachment: next.forward ? null : att, ...(next.groupId ? { groupId: next.groupId } : {}), ...(next.forward ? { forward: next.forward } : {}), ...(next.noLinkPreview ? { noLinkPreview: true } : {}), ...(next.blocks ? { blocks: next.blocks } : {}), ...(next.sticker ? { sticker: { id: next.sticker.id } } : {}), ...(next.todo ? { todo: { title: next.todo.title, items: next.todo.items.map((x) => ({ title: x.title })), othersCanAppend: next.todo.othersCanAppend, othersCanComplete: next.todo.othersCanComplete } } : {}), ...(next.poll ? { poll: next.poll } : {}), ...(next.special?.contact ? { contact: { userId: next.special.contact.userId } } : {}), ...(next.special?.geo ? { geo: next.special.geo } : {}), ...(next.special?.dice ? { dice: next.special.dice } : {}), ...(next.threadId != null ? { threadId: next.threadId } : {}), ...(next.draftHash !== undefined ? { draftHash: next.draftHash } : {}) });
             this.store.ack(next.clientId, r.id as number, r.createdAt as string);
             // своё опустило начало живого отрезка ниже seed — сообщения между ними догрузить (страница перед seed)
             const c = this.store.chats.get(next.chatId), live = c?.ranges[c.ranges.length - 1];
@@ -2404,7 +2410,6 @@ export class Engine {
           }
           await this.store.flush();
           this.changed();
-          this.pushDrafts();   // черновики чатов, ждавшие эту отправку
         }
       } finally {
         this.pumping = false;

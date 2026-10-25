@@ -2,7 +2,7 @@ import { bindStickers } from './stickers';
 import { showToast } from './settingsData';
 import { coverThumb, readAudioTags } from './id3';
 import { getPrefs } from './prefs';
-import type { Block, LinkPreview, PollInput, ThreadGuest, TodoInput } from '@relay/protocol';
+import type { Block, DiceEmoji, GeoPoint, LinkPreview, PollInput, ThreadGuest, TodoInput } from '@relay/protocol';
 import { playSentSound } from './sound';
 import { beginHeavyAnimation, nudgeWallpaper, requestMutation, toBase64 } from '@relay/ui';
 import { connectEngine, EngineClient, Mirror } from '@relay/sync-engine/src/client';
@@ -1022,6 +1022,12 @@ export async function sendPoll(chatId: number, poll: PollInput, replyToId: numbe
   nudgeWallpaper();
   toLatestOf(chatId);
   await engine.call({ type: 'sendPoll', chatId, poll, replyToId });
+}
+/** Контакт, точка или кубик — как сообщение (очередь, офлайн); значение кубика выбирает сервер. */
+export async function sendSpecial(chatId: number, special: { contact?: { userId: number; name: string }; geo?: GeoPoint; dice?: { emoji: DiceEmoji } }, replyToId: number | null = null): Promise<void> {
+  nudgeWallpaper();
+  toLatestOf(chatId);
+  await engine.call({ type: 'sendSpecial', chatId, special, replyToId });
 }
 /** Голос у себя — сразу; ошибка (закрыт, нет прав, нет сети) — откат и false. Пусто — отозвать голос. */
 export function votePoll(chatId: number, id: number, options: number[]): Promise<boolean> {

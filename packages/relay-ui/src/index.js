@@ -37,6 +37,7 @@ export * from './todoModal.js';
 export * from './todoBubble.js';
 export * from './pollMessage.js';
 export * from './pollModal.js';
+export * from './specialMessages.js';
 export * from './inlineKeyboard.js';
 export * from './formattedDate.js';
 export * from './dateView.js';

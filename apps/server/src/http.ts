@@ -25,6 +25,7 @@ import { searchMessages } from './domain/search';
 import { abortUpload, confirmUpload, createUpload, uploadParts, uploadStatus, downloadTtl, fileFor, signedDownload } from './domain/files';
 import { handleFrame } from './ws';
 import { pollVoters } from './domain/polls';
+import { mapTile } from './domain/mapTiles';
 import { registerSocket, releaseChats, releaseThreads, syncSubscriptions, unregisterSocket } from './sockets';
 import { pinMessage, unpinMessage } from './domain/pins';
 import { addProfileMusic, listProfileMusic, removeProfileMusic } from './domain/profileMusic';
@@ -80,7 +81,7 @@ function withCookie(req: Request, res: Response | undefined): Response | undefin
 
 const INLINE_MIME = /^(image\/(jpeg|png|webp|gif|avif)|video\/(mp4|webm|ogg|quicktime)|audio\/(mpeg|mp4|ogg|webm|wav|x-wav|aac|flac))$/;
 
-const API = /^\/(health|me|users|contacts|settings|privacy|blocks|chats|presence|search|uploads|files|push|sessions|session|ws|dev|logout|auth|link-preview|groups|join|sticker-sets|my-stickers|stickers-by-emoji|stickers|reactions|animated-emoji)(\/|$)/;
+const API = /^\/(health|me|users|contacts|settings|privacy|blocks|chats|presence|search|uploads|files|push|sessions|session|ws|dev|logout|auth|link-preview|groups|join|sticker-sets|my-stickers|stickers-by-emoji|stickers|reactions|animated-emoji|maptile)(\/|$)/;
 
 export function createServer(opts: { port: number }): Server {
   // кадры мимо журнала — через Valkey, чтобы дошли до сокетов в любом процессе
@@ -429,6 +430,12 @@ export function createServer(opts: { port: number }): Server {
         }
         const mem = /^\/chats\/(\d+)\/members$/.exec(url.pathname);
         if (req.method === 'GET' && mem) return Response.json(await chatMembers(userId, Number(mem[1])));
+        // тайл карты для пузыря геопозиции — только вошедшим (не открытый прокси)
+        const tile = /^\/maptile\/(\d+)\/(\d+)\/(\d+)\.png$/.exec(url.pathname);
+        if (req.method === 'GET' && tile) {
+          const t = await mapTile(Number(tile[1]), Number(tile[2]), Number(tile[3]));
+          return t ? new Response(t.body, { headers: { 'content-type': t.type, 'cache-control': 'private, max-age=604800' } }) : fail('not_found');
+        }
         // неанонимный опрос: кто за какой вариант (как «Посмотреть результаты» в Telegram)
         const voters = /^\/chats\/(\d+)\/messages\/(\d+)\/votes$/.exec(url.pathname);
         if (req.method === 'GET' && voters) return Response.json({ options: await pollVoters(userId, Number(voters[1]), Number(voters[2])) });

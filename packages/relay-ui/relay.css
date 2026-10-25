@@ -2535,3 +2535,51 @@ html[data-anim="0"] .rl-symbols-pop { transition: none; }
 .rl-pollmod-pick-on .rl-icon { opacity: 1; transform: none; }
 .rl-pollmod-err { color: var(--danger, #e53935); }
 .rl-pollmod-off { opacity: .5; }
+
+/* ---------- контакт ---------- */
+.rl-contactm { min-width: 240px; max-width: 320px; padding: 8px 10px 6px; }
+.rl-contactm-card { display: flex; align-items: center; gap: 12px; width: 100%; padding: 2px 0 4px; border: 0; background: transparent; color: inherit; text-align: left; cursor: pointer; }
+.rl-contactm-card:disabled { cursor: default; }
+.rl-contactm-text { min-width: 0; display: flex; flex-direction: column; }
+.rl-contactm-text b { font: 600 15px/20px var(--font-sans); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.rl-contactm-text small { font: 400 13px/17px var(--font-sans); color: var(--bubble-meta); }
+.rl-contactm-write { display: block; width: calc(100% + 20px); margin: 6px -10px -6px; padding: 9px 10px; border: 0; border-top: 1px solid color-mix(in srgb, var(--bubble-meta) 25%, transparent); background: transparent; color: var(--brand-text, var(--brand)); font: 600 14px/20px var(--font-sans); cursor: pointer; border-radius: 0 0 var(--radius-bubble) var(--radius-bubble); transition: background-color 150ms ease; }
+.rl-contactm-write:hover { background: color-mix(in srgb, currentColor 8%, transparent); }
+
+/* ---------- геопозиция ---------- */
+.rl-geom { width: 300px; max-width: 100%; padding: 0; overflow: hidden; }
+.rl-geom .rl-quote-in, .rl-geom .rl-fwd, .rl-geom > .rl-bubble-author { margin: 6px 8px 4px; }
+.rl-geom-map { position: relative; display: block; width: 300px; max-width: 100%; height: 200px; padding: 0; border: 0; overflow: hidden; cursor: pointer;
+  background: color-mix(in srgb, var(--bubble-meta) 12%, var(--bubble-in)) repeating-linear-gradient(0deg, transparent 0 39px, color-mix(in srgb, var(--bubble-meta) 18%, transparent) 39px 40px),
+              repeating-linear-gradient(90deg, transparent 0 39px, color-mix(in srgb, var(--bubble-meta) 18%, transparent) 39px 40px); }
+.rl-geom-tile { position: absolute; width: 256px; height: 256px; max-width: none; user-select: none; }
+.rl-geom-pin { position: absolute; left: 50%; top: 50%; transform: translate(-50%, -100%); filter: drop-shadow(0 1px 2px rgba(0,0,0,.3)); }
+.rl-geom-coords { position: absolute; left: 8px; top: 8px; padding: 2px 6px; border-radius: 6px; background: rgba(0,0,0,.45); color: #fff; font: 500 12px/16px var(--font-sans); font-variant-numeric: tabular-nums; }
+.rl-geom-meta { right: 6px; bottom: 6px; }
+.rl-geom-venue { display: flex; flex-direction: column; padding: 6px 10px 0; }
+.rl-geom-venue b { font: 600 15px/20px var(--font-sans); overflow-wrap: anywhere; }
+.rl-geom-venue small { font: 400 13px/17px var(--font-sans); color: var(--bubble-meta); overflow-wrap: anywhere; }
+.rl-geom:not(.rl-geom-bare) > .rl-bubble-meta { margin: 0 10px 6px auto; }
+
+/* ---------- кубики ---------- */
+.rl-dice { display: flex; flex-direction: column; align-items: center; gap: 4px; padding: 0 6px 28px; border: 0; background: transparent; cursor: pointer; line-height: 1; }
+.rl-dice-emoji { font-size: 96px; line-height: 112px; }
+.rl-dice-result { padding: 2px 8px; border-radius: 10px; background: rgba(0,0,0,.4); color: #fff; font: 600 13px/18px var(--font-sans); }
+.rl-dice-roll .rl-dice-die, .rl-dice-roll .rl-dice-emoji { animation: rl-dice-roll 900ms cubic-bezier(.2, .8, .3, 1) both; }
+.rl-dice-roll .rl-dice-result { animation: rl-fade 250ms 850ms var(--ease-out) both; }
+.rl-dice-pending .rl-dice-die, .rl-dice-pending .rl-dice-emoji { animation: rl-dice-spin 700ms linear infinite; }
+@keyframes rl-dice-roll { 0% { transform: translateY(-40px) rotate(-200deg) scale(.6); opacity: 0; } 55% { transform: translateY(6px) rotate(20deg) scale(1.05); opacity: 1; } 75% { transform: translateY(-4px) rotate(-6deg); } 100% { transform: none; } }
+@keyframes rl-dice-spin { to { transform: rotate(360deg); } }
+@media (prefers-reduced-motion: reduce) { .rl-dice-roll .rl-dice-die, .rl-dice-roll .rl-dice-emoji, .rl-dice-pending .rl-dice-die, .rl-dice-pending .rl-dice-emoji, .rl-dice-roll .rl-dice-result { animation: none; } }
+
+/* слоты: три барабана своей отрисовки */
+.rl-slots { display: flex; gap: 4px; padding: 10px; border-radius: 16px; background: linear-gradient(#3a3f4b, #23262e); box-shadow: inset 0 2px 0 rgba(255,255,255,.12), 0 2px 6px rgba(0,0,0,.25); }
+.rl-slots-reel { display: grid; place-items: center; width: 44px; height: 56px; border-radius: 8px; background: linear-gradient(#fff, #e9ecf1); font-size: 28px; line-height: 1; }
+.rl-slots-bar { font: 800 15px/1 var(--font-sans); letter-spacing: .5px; color: #fff; background: linear-gradient(#2b2f38, #11131a); }
+.rl-slots-seven { font: 900 34px/1 var(--font-sans); color: #e53935; }
+.rl-slots-win { box-shadow: 0 0 0 3px #f6c343, 0 2px 10px rgba(246,195,67,.6); }
+.rl-dice-roll .rl-slots-reel { animation: rl-slots-spin 700ms cubic-bezier(.2, .8, .3, 1) both; }
+.rl-dice-pending .rl-slots-reel { animation: rl-slots-spin 500ms linear infinite; }
+.rl-dice-roll .rl-slots, .rl-dice-pending .rl-slots { animation: none; }
+@keyframes rl-slots-spin { 0% { transform: translateY(-60%); opacity: 0; } 60% { transform: translateY(8%); opacity: 1; } 100% { transform: none; } }
+@media (prefers-reduced-motion: reduce) { .rl-dice-roll .rl-slots-reel, .rl-dice-pending .rl-slots-reel { animation: none; } }

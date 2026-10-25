@@ -21,7 +21,7 @@ export interface Message {
   chatId: Id;
   senderId: Id;
   clientId: string;
-  kind: 'text' | 'photo' | 'video' | 'file' | 'voice' | 'round' | 'audio' | 'todo' | 'sticker' | 'poll';
+  kind: 'text' | 'photo' | 'video' | 'file' | 'voice' | 'round' | 'audio' | 'todo' | 'sticker' | 'poll' | 'contact' | 'geo' | 'dice';
   groupId?: string | null;   // отправлены вместе (несколько файлов) — в ленте одним пузырём
   body: string;
   replyToId: Id | null;
@@ -33,6 +33,9 @@ export interface Message {
   service?: { type: ServiceType; data?: ServiceData };   // есть только у служебных сообщений
   todo?: Todo;           // чек-лист (kind 'todo'): задачи и кто что отметил
   poll?: Poll;           // опрос или викторина (kind 'poll'): счётчики и мои голоса — для этого читателя
+  contact?: ContactCard; // kind 'contact': пользователь Relay, которым поделились
+  geo?: GeoPoint;        // kind 'geo': точка на карте (с названием — место)
+  dice?: Dice;           // kind 'dice': эмодзи и выпавшее значение
   entities?: Entity[];   // оформление текста; нет или пусто — простой текст
   listened?: boolean;    // голосовое/кружок прослушан получателем
   fwdFrom?: ForwardInfo | null;   // переслано: откуда (нет — своё или отправитель скрыт)
@@ -391,7 +394,7 @@ export type ClientFrame =
   // превью публичного канала: push'и канала в этот сокет без подписки, пока превью открыто; ack.result — {seq}
   | { op: 'watchChat'; reqId: string; chatId: Id }
   | { op: 'unwatchChat'; chatId: Id }
-  | { op: 'send'; reqId: string; clientId: string; chatId: Id; body: string; entities?: Entity[]; replyToId?: Id | null; attachment?: { id: string; thumb?: string | null; spoiler?: boolean } | null; groupId?: string | null; forward?: ForwardRef | null; noLinkPreview?: boolean; blocks?: Block[] | null; todo?: TodoInput; poll?: PollInput; sticker?: { id: Id } | null; threadId?: Id; draftHash?: string | null }   // threadId — комментарий в треде (группа обсуждения)
+  | { op: 'send'; reqId: string; clientId: string; chatId: Id; body: string; entities?: Entity[]; replyToId?: Id | null; attachment?: { id: string; thumb?: string | null; spoiler?: boolean } | null; groupId?: string | null; forward?: ForwardRef | null; noLinkPreview?: boolean; blocks?: Block[] | null; todo?: TodoInput; poll?: PollInput; contact?: { userId: Id }; geo?: GeoPoint; dice?: { emoji: DiceEmoji }; sticker?: { id: Id } | null; threadId?: Id; draftHash?: string | null }   // threadId — комментарий в треде (группа обсуждения)
   | { op: 'read'; reqId: string; chatId: Id; upToId: Id }
   | { op: 'typing'; chatId: Id }   // «печатаю» — без ответа, сервер пересылает остальным участникам
   // клики по большому эмодзи (только личный чат): t — секунды от первого клика пачки; сервер пересылает собеседнику, в журнал не пишет
@@ -500,10 +503,13 @@ export function parseClientFrame(raw: string): ClientFrame | null {
       }
       if (f.todo != null && !normalizeTodo(f.todo)) return null;
       if (f.poll != null && !normalizePoll(f.poll)) return null;
+      if (f.geo != null && !normalizeGeo(f.geo)) return null;
+      if (f.dice != null && !isDiceEmoji((f.dice as { emoji?: unknown }).emoji)) return null;
+      if (f.contact != null && !int((f.contact as { userId?: unknown }).userId)) return null;
       if (f.sticker != null && (typeof f.sticker !== 'object' || !int((f.sticker as { id: unknown }).id))) return null;
       if (f.threadId != null && !int(f.threadId)) return null;
       if (f.draftHash != null && !(typeof f.draftHash === 'string' && DRAFT_HASH.test(f.draftHash))) return null;
-      return { op: 'send', ...(f.draftHash !== undefined ? { draftHash: f.draftHash as string | null } : {}), ...(f.threadId != null ? { threadId: f.threadId as number } : {}), ...(f.sticker != null ? { sticker: { id: (f.sticker as { id: number }).id } } : {}), ...(f.todo != null ? { todo: normalizeTodo(f.todo)! } : {}), ...(f.poll != null ? { poll: normalizePoll(f.poll)! } : {}), reqId: f.reqId, clientId: f.clientId, chatId: f.chatId, body: f.body, entities: normalizeEntities(f.body, f.entities), replyToId: (f.replyToId as number | null) ?? null, attachment: (f.attachment as { id: string; thumb?: string | null; spoiler?: boolean } | null) ?? null, groupId: (f.groupId as string | null) ?? null, forward, ...(f.noLinkPreview === true ? { noLinkPreview: true } : {}), ...(Array.isArray(f.blocks) ? { blocks: f.blocks as Block[] } : {}) };
+      return { op: 'send', ...(f.draftHash !== undefined ? { draftHash: f.draftHash as string | null } : {}), ...(f.threadId != null ? { threadId: f.threadId as number } : {}), ...(f.sticker != null ? { sticker: { id: (f.sticker as { id: number }).id } } : {}), ...(f.todo != null ? { todo: normalizeTodo(f.todo)! } : {}), ...(f.poll != null ? { poll: normalizePoll(f.poll)! } : {}), ...(f.geo != null ? { geo: normalizeGeo(f.geo)! } : {}), ...(f.dice != null ? { dice: { emoji: (f.dice as { emoji: DiceEmoji }).emoji } } : {}), ...(f.contact != null ? { contact: { userId: (f.contact as { userId: number }).userId } } : {}), reqId: f.reqId, clientId: f.clientId, chatId: f.chatId, body: f.body, entities: normalizeEntities(f.body, f.entities), replyToId: (f.replyToId as number | null) ?? null, attachment: (f.attachment as { id: string; thumb?: string | null; spoiler?: boolean } | null) ?? null, groupId: (f.groupId as string | null) ?? null, forward, ...(f.noLinkPreview === true ? { noLinkPreview: true } : {}), ...(Array.isArray(f.blocks) ? { blocks: f.blocks as Block[] } : {}) };
     case 'read':
       return str(f.reqId, 64) && int(f.chatId) && int(f.upToId) ? { op: 'read', reqId: f.reqId, chatId: f.chatId, upToId: f.upToId } : null;
     default: return null;
@@ -580,6 +586,8 @@ export function searchTerms(text: string): string[] {
 
 export * from './groups';
 export * from './polls';
+export * from './special';
+import { isDiceEmoji, normalizeGeo, type ContactCard, type Dice, type DiceEmoji, type GeoPoint } from './special';
 import { normalizePoll, POLL_OPTIONS_MAX, type Poll, type PollInput } from './polls';
 export * from './blocks';
 export * from './fileCrypto';
@@ -587,4 +595,4 @@ export * from './mentions';
 
 /** Можно ли править текст сообщения этого вида (как в Telegram): у стикера, кружка, голосового и опроса текста нет,
  *  чек-лист правится своей операцией. Общее правило для меню клиента и проверки сервера. */
-export const canEditKind = (kind: string): boolean => !['sticker', 'round', 'voice', 'poll', 'todo'].includes(kind);
+export const canEditKind = (kind: string): boolean => !['sticker', 'round', 'voice', 'poll', 'todo', 'contact', 'geo', 'dice'].includes(kind);

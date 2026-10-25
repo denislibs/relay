@@ -1,4 +1,4 @@
-import { canEditKind, hasMedia, rightForKind, type Poll, type PollInput, type GroupInfo, type MemberRight, type MyMembership } from '@relay/protocol';
+import { canEditKind, hasMedia, isDiceEmoji, rightForKind, type GeoPoint, type Poll, type PollInput, type GroupInfo, type MemberRight, type MyMembership } from '@relay/protocol';
 import { emojiKey } from '@relay/protocol';
 import { pushRecentReaction, quickAssets, quickReactions } from '../reactions';
 import { queueReactionFx } from '../reactionFx';
@@ -7,6 +7,8 @@ import { getPrefs } from '../prefs';
 import { MEMBER_RIGHT_TEXT } from '../groups';
 import { PinnedBar } from './PinnedBar';
 import { PollResults } from './PollResults';
+import { GeoSend } from './GeoSend';
+import { candidates } from './settings/privacyLogic';
 import { UploadBar } from './UploadBar';
 import { videoCompressSupported, type VideoQuality } from '../media/compressVideo';
 import { entriesOf, filesFromEntries } from '../media/dropFiles';
@@ -27,12 +29,15 @@ const ATTACH_ITEMS = [
   { key: 'music', icon: 'music', label: 'Музыка' },
   { key: 'todo', icon: 'checkCircle', label: 'Чек-лист' },
   { key: 'poll', icon: 'poll', label: 'Опрос' },
+  { key: 'geo', icon: 'location', label: 'Геопозиция' },
+  { key: 'contact', icon: 'contact', label: 'Контакт' },
   { key: 'date', icon: 'calendar', label: 'Дата' },
   { key: 'article', icon: 'article', label: 'Статья' },
 ];
 
 /** В треде — то, что уходит комментарием (чек-лист и трек из музыки профиля отправляются без треда). */
-const THREAD_ATTACH = ATTACH_ITEMS.filter((x) => x.key !== 'todo' && x.key !== 'poll' && x.key !== 'music');
+// контакт, геопозиция и опрос пока уходят без треда — в треде их нет
+const THREAD_ATTACH = ATTACH_ITEMS.filter((x) => !['todo', 'poll', 'geo', 'contact', 'music'].includes(x.key));
 
 /** Дата из окна → значение для вставки: текст по умолчанию, вся строка — одна сущность даты с выбранным форматом. */
 // после даты — пробел вне неё (как в Telegram): дальше набирается обычный текст, а не продолжение даты
@@ -42,9 +47,9 @@ import { membersStatus, useMembers } from '../members';
 import { Playlist } from './Playlist';
 import { inProfile, toggleProfileMusic, type Track } from '../music';
 import { useOwnMusic } from '../profileLists';
-import { Avatar, Button, Chip, Icon, MediaPolicy, peerTone, ChatSearchBar, Highlight, ripple, useMinVisible, requestMeasure, Composer, DropOverlay, GlassBar, IconButton, MenuPopover, Modal, ConfirmDialog, Presence, ReactionsBar, reducedMotion, plural, requestMutation, SelectionBar, isHeavyAnimating, onHeavyAnimationEnd, applyMarkdown, emptyValue, sameValue, voiceSupported, PlayerBar, roundSupported, startRound, Verified, canCopyImage, clipboardHtml, copyImage, copyRich, downloadUrl, TodoModal, PollModal, TODO_ITEMS_MAX, DateModal, setDateCopiedToast } from '@relay/ui';
+import { Avatar, Button, Chip, Icon, MediaPolicy, peerTone, ChatSearchBar, Highlight, ripple, useMinVisible, requestMeasure, Composer, DropOverlay, GlassBar, IconButton, MenuPopover, Modal, ConfirmDialog, Presence, ReactionsBar, reducedMotion, plural, requestMutation, SelectionBar, isHeavyAnimating, onHeavyAnimationEnd, applyMarkdown, emptyValue, sameValue, voiceSupported, PlayerBar, roundSupported, startRound, Verified, canCopyImage, clipboardHtml, copyImage, copyRich, downloadUrl, TodoModal, PollModal, ContactPicker, TODO_ITEMS_MAX, DateModal, setDateCopiedToast } from '@relay/ui';
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'preact/hooks';
-import { sendPoll, votePoll, closePoll, sendTodo, appendTodo, editTodo, closeChat, deleteMessage, editMessage, focusMessage, openInner, openUserChat, pinMessage, unpinMessage, sendFile, sendFiles, sendRound, sendVoice, react, rejectTooBig, PLAYABLE_VIDEO, retrySend, discardUnsent, saveDraft, searchMessages, send, typing, typingDone } from '../data';
+import { sendSpecial, sendPoll, votePoll, closePoll, sendTodo, appendTodo, editTodo, closeChat, deleteMessage, editMessage, focusMessage, openInner, openUserChat, pinMessage, unpinMessage, sendFile, sendFiles, sendRound, sendVoice, react, rejectTooBig, PLAYABLE_VIDEO, retrySend, discardUnsent, saveDraft, searchMessages, send, typing, typingDone } from '../data';
 import { wantPeople } from '../people';
 import type { Item, SearchHit, SearchResult } from '@relay/sync-engine/src/types';
 import type { Entity, Todo, TodoInput } from '@relay/protocol';
@@ -239,6 +244,12 @@ export function Chat({ chatId, frameKey, active, threadId }: { chatId: number; f
   const [musicOpen, setMusicOpen] = useState(false);   // «Музыка» из меню вложений
   // чек-лист: новый (меню вложений), правка или «Добавить задачу» (меню сообщения)
   const [pollOpen, setPollOpen] = useState(false);
+  const [geoOpen, setGeoOpen] = useState(false);
+  const [contactOpen, setContactOpen] = useState(false);
+  const contactsAll = useGlobal((s) => s.contacts);
+  const chatsAll = useGlobal((s) => s.chats);
+  // кем поделиться: контакты и собеседники (как у выбора «Заблокировать»), без себя и служебных
+  const shareable = useMemo(() => (contactOpen ? candidates(contactsAll, chatsAll.filter((c) => !isSystemChat(c)), me.userId) : []), [contactOpen, contactsAll, chatsAll]);
   const [stopPoll, setStopPoll] = useState<number | null>(null);   // «Остановить опрос?»: id сообщения
   const [todoOpen, setTodoOpen] = useState<{ mode: 'create' | 'edit' | 'append'; msg?: Item } | null>(null);
   // дата: окно формата (вставка из меню вложений, правка «плашки») или выбор даты для выделенного текста (⌘D)
@@ -670,7 +681,7 @@ export function Chat({ chatId, frameKey, active, threadId }: { chatId: number; f
         onSendRound={(r: { blob: Blob; duration: number; size: number; thumb: string | null }) => { if (!allowed('round')) return; stick.current = true; sendRound(chatId, r, (replyTo?.id as number) ?? null, threadId).catch(() => {}); setReplyKey(null); }}
         attachItems={thread ? THREAD_ATTACH : ATTACH_ITEMS}
         onExpand={() => openArticle()}
-        onAttach={(k: string) => { if (k === 'music') { if (allowed('music')) setMusicOpen(true); return; } if (k === 'article') { openArticle(); return; } if (k === 'todo') { setTodoOpen({ mode: 'create' }); return; } if (k === 'poll') { setPollOpen(true); return; } if (k === 'date') { setDateOpen({ mode: 'format', done: (r) => { if (r) api.current?.insert(dateValue(r)); } }); return; } const el = picker.current!; el.accept = k === 'media' || k === 'camera' ? 'image/*,video/*' : ''; el.value = ''; el.click(); }}
+        onAttach={(k: string) => { if (k === 'music') { if (allowed('music')) setMusicOpen(true); return; } if (k === 'article') { openArticle(); return; } if (k === 'todo') { setTodoOpen({ mode: 'create' }); return; } if (k === 'poll') { setPollOpen(true); return; } if (k === 'geo') { setGeoOpen(true); return; } if (k === 'contact') { setContactOpen(true); return; } if (k === 'date') { setDateOpen({ mode: 'format', done: (r) => { if (r) api.current?.insert(dateValue(r)); } }); return; } const el = picker.current!; el.accept = k === 'media' || k === 'camera' ? 'image/*,video/*' : ''; el.value = ''; el.click(); }}
         onSend={(v: Value) => {
           if (editing) {
             const next = applyMarkdown(v);
@@ -686,6 +697,9 @@ export function Chat({ chatId, frameKey, active, threadId }: { chatId: number; f
           const out = applyMarkdown(v);   // **жирный**, `код`, [текст](ссылка)… — в оформление
           if (fwd) return sendForwardDraft(chatId, out.text, out.entities);   // комментарий первым, затем пересланное
           if (art) { sendArticle(art.blocks); return false; }
+          // одно эмодзи кубика без оформления — бросок (как в Telegram): значение выберет сервер
+          const die = out.text.replace(/\uFE0F/g, '').trim();
+          if (!thread && !out.entities.length && isDiceEmoji(die)) { const r = sendSpecial(chatId, { dice: { emoji: die } }, (replyTo?.id as number) ?? null); setReplyKey(null); return r; }
           // превью: убрали крестиком — без него; уже загружено для этой ссылки — сразу в ленте, до ответа сервера
           const url = firstUrl(out.text, out.entities);
           const pv = lp && url === lp.url ? (lp.off ? { noLinkPreview: true } : { link: lp.link }) : {};
@@ -812,6 +826,18 @@ export function Chat({ chatId, frameKey, active, threadId }: { chatId: number; f
         />
       ) : null}
       <PollResults />
+      {geoOpen ? <GeoSend onClose={() => setGeoOpen(false)} onSend={(g: GeoPoint) => { setGeoOpen(false); stick.current = true; void sendSpecial(chatId, { geo: g }, (replyTo?.id as number) ?? null); setReplyKey(null); }} /> : null}
+      {contactOpen ? (
+        <Modal title="Отправить контакт" size="slim" onClose={() => setContactOpen(false)}>
+          <div class="app-block-pick">
+            <ContactPicker
+              contacts={shareable.map((p) => ({ ...p, tone: peerTone(p.id), avatar: senderAvatar(p.id) }))} searchLabel="Поиск контактов" placeholder="Имя или @имя пользователя"
+              empty="Здесь будут ваши контакты и собеседники."
+              onPick={(p: { id: number; name: string }) => { setContactOpen(false); stick.current = true; void sendSpecial(chatId, { contact: { userId: p.id, name: p.name } }, (replyTo?.id as number) ?? null); setReplyKey(null); }}
+            />
+          </div>
+        </Modal>
+      ) : null}
       <ConfirmDialog open={stopPoll != null} title="Остановить опрос?" text="Голосовать больше будет нельзя, итоги увидят все. Отменить это нельзя." confirm="Остановить"
         onConfirm={() => { const id = stopPoll!; setStopPoll(null); (closePoll(chatId, id) as Promise<unknown>).catch(() => showToast('Не удалось остановить опрос')); }}
         onCancel={() => setStopPoll(null)} />

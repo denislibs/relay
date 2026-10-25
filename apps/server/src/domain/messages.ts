@@ -1,7 +1,7 @@
 import { newPoll, scheduleClose, type PollDef } from './polls';
 import { attachmentForSend } from './files';
 import { clearDraftInTx } from './drafts';
-import { rightForKind, normalizeEntities, trimFormatted, type Block, blocksText, normalizeBlocks, type Entity, type ForwardInfo, type ForwardRef, type ProfilePhoto, type LinkPreview, type Message, type StickerRef, type Todo, type TodoInput, type PollInput } from '@relay/protocol';
+import { rightForKind, normalizeEntities, trimFormatted, type Block, blocksText, normalizeBlocks, type Entity, type ForwardInfo, type ForwardRef, type ProfilePhoto, type LinkPreview, type Message, type StickerRef, type Todo, type TodoInput, type PollInput, normalizeGeo, isDiceEmoji, DICE_FACES, type ContactCard, type GeoPoint, type Dice, type DiceEmoji } from '@relay/protocol';
 import { newTodo } from './todo';
 import { sql } from '../db';
 import { assertMember, readOwnPost, shownTodo, toMessage } from './chats';
@@ -23,9 +23,16 @@ export const MAX_BODY = 4096;
 /** Сколько ждать остальные файлы альбома перед уведомлением (клиент грузит их по очереди). */
 export const ALBUM_PUSH_DELAY_MS = 3000;
 
+/** Значение кубика: равномерно 1..N без перекоса по модулю (у слотов N = 64 — делится без остатка). */
+export function rollDice(emoji: DiceEmoji): number {
+  const n = DICE_FACES[emoji], limit = Math.floor(0x100000000 / n) * n, buf = new Uint32Array(1);
+  do crypto.getRandomValues(buf); while (buf[0] >= limit);
+  return (buf[0] % n) + 1;
+}
+
 export async function sendMessage(
   userId: number,
-  input: { chatId: number; clientId: string; body: string; entities?: Entity[]; replyToId?: number | null; attachment?: { id: string; thumb?: string | null } | null; groupId?: string | null; forward?: ForwardRef | null; noLinkPreview?: boolean; blocks?: unknown; todo?: TodoInput | null; poll?: PollInput | null; sticker?: { id: number } | null; threadId?: number | null; draftHash?: string | null },
+  input: { chatId: number; clientId: string; body: string; entities?: Entity[]; replyToId?: number | null; attachment?: { id: string; thumb?: string | null } | null; groupId?: string | null; forward?: ForwardRef | null; noLinkPreview?: boolean; blocks?: unknown; todo?: TodoInput | null; poll?: PollInput | null; contact?: { userId: number } | null; geo?: GeoPoint | null; dice?: { emoji: DiceEmoji } | null; sticker?: { id: number } | null; threadId?: number | null; draftHash?: string | null },
 ): Promise<{ message: Message; duplicate: boolean }> {
   // пробелы по краям срезаем вместе с оформлением; оформление — только проверенное
   let { text: body, entities } = trimFormatted(input.body, normalizeEntities(input.body, input.entities));
@@ -43,10 +50,19 @@ export async function sendMessage(
   // опрос: тело — вопрос (превью и поиск), вариантов и флагов в тексте нет
   const poll = input.poll && !input.forward && !input.attachment && !blocks && !todo ? newPoll(input.poll) : null;
   if (poll) { body = poll.question; entities = []; }
+  // геопозиция и кубики — без своего текста (тело — название места / эмодзи: превью и поиск); контакт — имя (ниже)
+  const plain = !input.forward && !input.attachment && !blocks && !todo && !poll;
+  const geo = plain && input.geo ? normalizeGeo(input.geo) : null;
+  if (input.geo && plain && !geo) throw new DomainError('bad_frame', 'geo');
+  const dice: Dice | null = plain && !geo && input.dice && isDiceEmoji(input.dice.emoji) ? { emoji: input.dice.emoji, value: rollDice(input.dice.emoji) } : null;
+  const contactId = plain && !geo && !dice && input.contact ? input.contact.userId : null;
+  if (geo) { body = geo.title ?? ''; entities = []; }
+  if (dice) { body = dice.emoji; entities = []; }
+  if (contactId != null) { body = ''; entities = []; }
   // стикер — без текста и вложения: тело пустое, всё в снимке стикера
-  const stickerId = input.sticker && !input.forward && !input.attachment && !blocks && !todo && !poll ? input.sticker.id : null;
+  const stickerId = input.sticker && plain && !geo && !dice && contactId == null ? input.sticker.id : null;
   if (stickerId != null) { body = ''; entities = []; }
-  if (!input.forward && !blocks && stickerId == null) {
+  if (!input.forward && !blocks && stickerId == null && !geo && !dice && contactId == null) {
     if (!body && !input.attachment) throw new DomainError('bad_frame', 'empty body'); // у вложения подпись необязательна
     if (body.length > MAX_BODY) throw new DomainError('too_long');
   }
@@ -97,6 +113,7 @@ export async function sendMessage(
     let link: LinkPreview | null = null, fetchLink: string | null = null;
     let fwdTodo: Todo | null = null;
     let fwdPoll: PollDef | null = null;
+    let data: ContactCard | GeoPoint | Dice | null = geo ?? dice ?? null;
     let sticker: StickerRef | null = null;
     if (input.forward) {
       // пересылка: всё берём у оригинала — только из чата, где пересылающий состоит; вложение — тот же объект
@@ -118,6 +135,7 @@ export async function sendMessage(
       // пересланный опрос — новый опрос с теми же вопросом и вариантами, голоса свои (в Telegram голоса общие:
       // у нас опрос живёт в чате, и чужой чат не должен видеть, кто голосовал); закрытый остаётся закрытым
       fwdPoll = src.poll ? { ...(src.poll as PollDef) } : null;
+      data = (src.data as ContactCard | GeoPoint | Dice | null) ?? null;   // контакт, точка и кубик — как есть (выпавшее не перебрасываем)
       const dropCaption = !!f.hideCaption && !!attachment;
       body = dropCaption ? '' : src.body as string;
       entities = dropCaption || !Array.isArray(src.entities) ? [] : normalizeEntities(body, src.entities as Entity[]);
@@ -139,9 +157,16 @@ export async function sendMessage(
     } else {
       attachment = input.attachment ? await attachmentForSend(tx, userId, input.attachment) as unknown as Record<string, unknown> : null;
       sticker = stickerId != null ? await stickerForSend(tx, userId, stickerId) : null;
-      kind = sticker ? 'sticker' : todo ? 'todo' : poll ? 'poll' : attachment ? attachment.kind as string : 'text';
+      if (contactId != null) {
+        // контакт — пользователь Relay: имя на момент отправки; номер не раскрываем (у получателя его может не быть)
+        const [u] = await tx`select id, name from users where id = ${contactId} and not system`;
+        if (!u) throw new DomainError('not_found', 'contact');
+        data = { userId: Number(u.id), name: u.name as string } satisfies ContactCard;
+        body = u.name as string;
+      }
+      kind = sticker ? 'sticker' : todo ? 'todo' : poll ? 'poll' : contactId != null ? 'contact' : geo ? 'geo' : dice ? 'dice' : attachment ? attachment.kind as string : 'text';
       // превью первой ссылки (как в Telegram): готовое в кэше — сразу, иначе «грузится» и задача link.preview
-      const url = !attachment && !blocks && !todo && !poll && !sticker && !input.noLinkPreview ? firstUrl(body, entities) : null;
+      const url = !attachment && !blocks && !todo && !poll && !data && !sticker && !input.noLinkPreview ? firstUrl(body, entities) : null;
       if (url) {
         const cached = await cachedPreview(url);
         if (cached === undefined) { link = { url, pending: true }; fetchLink = url; } else link = cached;
@@ -156,12 +181,12 @@ export async function sendMessage(
       if (last && !sameAlbum && Date.now() - new Date(last.created_at as string).getTime() < ctx.slowMode * 1000) throw new DomainError('flood', 'slow_mode');
     }
     // содержимое — шифром ключа чата (messageContent.ts); открытыми остаются метаданные
-    const c = await contentColumns(input.chatId, input.clientId, { body, entities: entities.length ? entities : null, todo: todo ?? fwdTodo, poll: poll ?? fwdPoll, blocks, link, attachment }, tx);
+    const c = await contentColumns(input.chatId, input.clientId, { body, entities: entities.length ? entities : null, todo: todo ?? fwdTodo, poll: poll ?? fwdPoll, data, blocks, link, attachment }, tx);
     const inserted = await tx`
-      insert into messages (chat_id, sender_id, client_id, kind, body, entities, reply_to_id, attachment, group_id, fwd_from, link, blocks, todo, poll, sticker, content, has_link, post, post_author, thread_id)
+      insert into messages (chat_id, sender_id, client_id, kind, body, entities, reply_to_id, attachment, group_id, fwd_from, link, blocks, todo, poll, data, sticker, content, has_link, post, post_author, thread_id)
       values (${input.chatId}, ${userId}, ${input.clientId}, ${kind}, ${c.body}, ${c.entities?.length ? sql.json(c.entities as never) : null}, ${canReply ? input.replyToId ?? null : null}, ${c.attachment ? sql.json(c.attachment as never) : null},
               ${attachment && input.groupId && /^[0-9a-f-]{36}$/.test(input.groupId) ? input.groupId : null},   -- группа — только у вложений
-              ${fwdFrom ? sql.json(fwdFrom as never) : null}, ${c.link ? sql.json(c.link as never) : null}, ${c.blocks ? sql.json(c.blocks as never) : null}, ${c.todo ? sql.json(c.todo as never) : null}, ${c.poll ? sql.json(c.poll as never) : null}, ${sticker ? sql.json(sticker as never) : null}, ${c.content}, ${c.hasLink}, ${!!post}, ${post?.author ?? null}, ${threadId})
+              ${fwdFrom ? sql.json(fwdFrom as never) : null}, ${c.link ? sql.json(c.link as never) : null}, ${c.blocks ? sql.json(c.blocks as never) : null}, ${c.todo ? sql.json(c.todo as never) : null}, ${c.poll ? sql.json(c.poll as never) : null}, ${c.data ? sql.json(c.data as never) : null}, ${sticker ? sql.json(sticker as never) : null}, ${c.content}, ${c.hasLink}, ${!!post}, ${post?.author ?? null}, ${threadId})
       on conflict (sender_id, client_id) do nothing
       returning *`;
     if (inserted.length === 0) {
