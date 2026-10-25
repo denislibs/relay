@@ -4,7 +4,7 @@ import type { Item } from '@relay/sync-engine/src/types';
 import { useEffect, useState } from 'preact/hooks';
 import { focusMessage, messagesByIds, unpinMessage } from '../data';
 import { activeFrame, useGlobal, findChat } from '../global';
-import { asLast, previewBody, previewThumb, thumbUnder } from './preview';
+import { quoteContent, thumbUnder } from './preview';
 
 // Закреплённые сообщения под шапкой — как в Telegram: слева полоска из сегментов (по числу закреплённых),
 // «Закреплённое сообщение #N» и строка текста; клик — к сообщению и следующий клик — к более старому (по кругу).
@@ -46,8 +46,8 @@ export function PinnedBar({ chatId }: { chatId: number }) {
   const n = pinned.length;
   const seg = n <= 1 ? 36 : n === 2 ? 17 : n === 3 ? 11 : 7.5;   // высоты сегментов, как в Telegram
   const shift = n > 4 ? Math.max(0, Math.min(i - 1, n - 4)) * (seg + 2) : 0;
-  const last = msg ? asLast(msg) : null;   // вложение у сообщения ленты — объектом, превью ждёт плоские поля
-  const thumb = last ? previewThumb(last) : null;
+  // то же, что в цитате: текст по типу и миниатюра (у стикера — сам стикер первым кадром, у фото — файл поверх thumb)
+  const q = msg ? quoteContent(msg) : null;
   return (
     <Presence show={n > 0} exitMs={220}>
       <div class="app-pins" role="region" aria-label="Закреплённые сообщения">
@@ -58,10 +58,11 @@ export function PinnedBar({ chatId }: { chatId: number }) {
               {pinned.map((p, k) => <i key={p} class={k === i ? 'app-pins-on' : ''} style={{ height: seg + 'px' }} />)}
             </span>
           </span>
-          {thumb ? <img class={'app-pins-thumb' + (thumb.round ? ' app-pins-thumb-round' : '')} src={thumb.full ?? thumb.src} style={thumb.full ? thumbUnder(thumb.src) : undefined} decoding="async" alt="" /> : null}
+          {q?.thumbNode ? <span class="app-pins-thumb app-pins-thumb-node">{q.thumbNode}</span>
+            : q?.thumbSrc ? <img class={'app-pins-thumb' + (msg?.kind === 'round' ? ' app-pins-thumb-round' : '')} src={q.thumbSrc} style={q.thumbBg ? thumbUnder(q.thumbBg) : undefined} decoding="async" alt="" /> : null}
           <span class="app-pins-text">
             <b>{n > 1 ? `Закреплённое сообщение #${n - i}` : 'Закреплённое сообщение'}</b>
-            <span key={id}>{last ? previewBody(last, !!thumb) : '…'}</span>
+            <span key={id}>{q ? q.text : '…'}</span>
           </span>
         </button>
         {n > 1

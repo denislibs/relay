@@ -573,3 +573,7 @@ export * from './groups';
 export * from './blocks';
 export * from './fileCrypto';
 export * from './mentions';
+
+/** Можно ли править текст сообщения этого вида (как в Telegram): у стикера, кружка, голосового и опроса текста нет,
+ *  чек-лист правится своей операцией. Общее правило для меню клиента и проверки сервера. */
+export const canEditKind = (kind: string): boolean => !['sticker', 'round', 'voice', 'poll', 'todo'].includes(kind);

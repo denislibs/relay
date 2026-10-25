@@ -1,5 +1,5 @@
 import { unpinDeleted } from './pins';
-import { emojiKey, normalizeEntities, trimFormatted, type Entity, type Reaction } from '@relay/protocol';
+import { canEditKind, emojiKey, normalizeEntities, trimFormatted, type Entity, type Reaction } from '@relay/protocol';
 import { sql } from '../db';
 import { assertMember } from './chats';
 import { DomainError } from './errors';
@@ -47,8 +47,11 @@ export async function editMessage(userId: number, chatId: number, id: number, bo
     } else await ownMessage(tx, userId, chatId, id);   // в служебном чате — тоже только свои (сообщения Relay не правятся)
     // пересланное — чужой текст: как в Telegram, его не правит ни переславший, ни админ канала
     // (пересылка «без автора» — уже своё сообщение, fwd_from у неё нет)
-    const [f] = await tx`select fwd_from is not null as fwd from messages where chat_id = ${chatId} and id = ${id}`;
+    const [f] = await tx`select fwd_from is not null as fwd, kind from messages where chat_id = ${chatId} and id = ${id}`;
     if (f?.fwd) throw new DomainError('forbidden', 'forwarded');
+    // текста у таких нет (как в Telegram): правка дописала бы стикеру или кружку подпись и сломала пузырь;
+    // чек-лист правится своей операцией (todoEdit), иначе потерялись бы задачи
+    if (f && !canEditKind(f.kind as string)) throw new DomainError('forbidden', 'kind');
     // заблокированный не правит сообщения в личном чате с тем, кто его заблокировал
     if (await blockedInDirect(tx, chatId, userId)) throw new DomainError('blocked');
     await burnCodes(tx, userId, text);

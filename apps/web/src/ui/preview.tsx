@@ -79,6 +79,8 @@ export function previewThumb(m: LastMessage): { src: string; video: boolean; rou
 export const thumbUnder = (src: string) => ({ background: `center / cover no-repeat url("${src.replace(/"/g, '')}")` });
 
 /** Текст после имени: подпись к медиа, а без подписи — тип. С миниатюрой эмодзи типа не нужен. */
+const KNOWN_PREVIEW = new Set(['text', 'photo', 'video', 'file', 'voice', 'round', 'audio', 'todo', 'sticker']);
+
 export function previewBody(m: LastMessage, withThumb: boolean): ComponentChildren {
   if (m.deleted) return 'Сообщение удалено';
   if (isGroupService(m.service?.type)) {
@@ -94,7 +96,8 @@ export function previewBody(m: LastMessage, withThumb: boolean): ComponentChildr
   if (m.kind === 'video') return withThumb ? caption ?? 'Видео' : ['📹 ', caption ?? 'Видео'];
   if (m.kind === 'voice') return caption ?? '🎤 Голосовое сообщение';
   if (m.kind === 'todo') return ['☑️ ', m.body];
-  if (m.kind === 'sticker') return withThumb ? 'Стикер' : (m.stickerEmoji || m.sticker?.emoji ? (m.stickerEmoji || m.sticker?.emoji) + ' ' : '') + 'Стикер';
+  // эмодзи стикера — всегда, и рядом с миниатюрой тоже (как «😀 Sticker» в Telegram)
+  if (m.kind === 'sticker') return (m.stickerEmoji || m.sticker?.emoji ? (m.stickerEmoji || m.sticker?.emoji) + ' ' : '') + 'Стикер';
   if (m.kind === 'round') return withThumb ? 'Видеосообщение' : '📹 Видеосообщение';
   if (m.kind === 'audio') {
     // «Название — исполнитель»; с обложкой эмодзи не нужен
@@ -106,7 +109,9 @@ export function previewBody(m: LastMessage, withThumb: boolean): ComponentChildr
     if (m.mime?.startsWith('video/')) return withThumb ? caption ?? 'Видео' : ['📹 ', caption ?? 'Видео'];
     return ['📎 ', caption ?? m.attachmentName ?? 'Файл'];
   }
-  return caption ?? '';
+  if (caption) return caption;
+  // пустая строка в списке выглядит как ошибка: неизвестный тип или содержимое, которое не открылось
+  return KNOWN_PREVIEW.has(String(m.kind ?? 'text')) ? (m.kind === 'text' && !m.service ? 'Сообщение недоступно' : '') : 'Сообщение не поддерживается';
 }
 
 /** Цитата (в пузыре и над полем ввода) для сообщения любого типа: что в нём — текстом, а у медиа — миниатюра,
