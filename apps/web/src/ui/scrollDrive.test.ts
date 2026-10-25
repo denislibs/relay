@@ -1,5 +1,5 @@
 import { expect, test } from 'bun:test';
-import { driveScroll, jumpNear } from './scrollDrive';
+import { burstAnimates, driveScroll, jumpNear } from './scrollDrive';
 
 // ручные кадры: raf копит колбэки, tick() выполняет их с заданным временем
 function clock() {
@@ -29,17 +29,30 @@ test('drive: eases from the current position to the target and lands exactly on 
   expect(ends).toEqual(['done']);
 });
 
-test('drive: the target is read every frame — it moves, we follow without restarting', () => {
+test('drive: the target is read every frame — it moves, we re-base from where we are: no jump, no restart from zero', () => {
   const c = clock(), root = { scrollTop: 0 };
   let bottom = 600;
   driveScroll(root, { ms: 300, target: () => bottom, ...c });
-  c.tick(0); c.tick(150);
+  c.tick(0);
+  for (let i = 0; i < 10; i++) c.tick(15);      // 150 мс по 15
   const mid = root.scrollTop;
-  bottom = 900;                    // пришло ещё сообщение
-  c.tick(75);
-  expect(root.scrollTop).toBeGreaterThan(mid);   // не откатывается и не прыгает в старт
-  c.tick(75);
-  expect(root.scrollTop).toBe(900);
+  bottom = 1000;                   // пришло ещё сообщение: цель дальше на 400
+  const steps: number[] = [];
+  for (let i = 0; i < 21; i++) { const was = root.scrollTop; c.tick(15); steps.push(root.scrollTop - was); }   // кадр смены цели + 300 мс
+  expect(Math.min(...steps)).toBeGreaterThanOrEqual(0);        // не откатывается
+  expect(Math.max(...steps)).toBeLessThan(120);                // и не прыгает: шаг кадра ограничен новой кривой от mid
+  expect(root.scrollTop).toBe(1000);                           // новая кривая 300 мс от момента смены цели — доехали
+  expect(mid).toBeGreaterThan(300);
+});
+
+test('burstAnimates: the first 600 ms of a burst animate, then instant until a 300 ms pause starts a new burst', () => {
+  const b = { since: 0, last: 0 };
+  expect(burstAnimates(b, 1000)).toBe(true);
+  expect(burstAnimates(b, 1200)).toBe(true);
+  expect(burstAnimates(b, 1500)).toBe(true);
+  expect(burstAnimates(b, 1700)).toBe(false);   // 700 мс серии — мгновенно
+  expect(burstAnimates(b, 1900)).toBe(false);   // поток продолжается (пауза 200 < 300)
+  expect(burstAnimates(b, 2300)).toBe(true);    // пауза 400 мс — новая серия
 });
 
 test('drive: cancel stops where it is and reports cancel once', () => {

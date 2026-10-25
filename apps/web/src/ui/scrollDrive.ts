@@ -25,7 +25,7 @@ const ease = (p: number) => 1 - (1 - p) ** 3;   // ease-out cubic — близк
 export function driveScroll(root: { scrollTop: number }, o: DriveOpts): Drive {
   const raf = o.raf ?? ((cb) => requestAnimationFrame(cb)), caf = o.caf ?? ((id) => cancelAnimationFrame(id));
   const now = o.now ?? (() => performance.now());
-  let id = 0, t0 = -1, from = 0, active = true;
+  let id = 0, t0 = -1, from = 0, lastTo = NaN, active = true;
   const finish = (reason: 'done' | 'cancel') => { if (!active) return; active = false; caf(id); o.onEnd?.(reason); };
   const frame = () => {
     if (!active) return;
@@ -34,16 +34,28 @@ export function driveScroll(root: { scrollTop: number }, o: DriveOpts): Drive {
         t0 = now();
         if (o.start != null) root.scrollTop = o.start;
         from = root.scrollTop;
+        lastTo = o.target();
         id = raf(frame);
         return;
       }
-      const p = Math.min(1, (now() - t0) / o.ms), to = o.target();
+      const to = o.target();
+      // цель сдвинулась (пришло ещё сообщение, подросла картинка) — новая кривая от текущего места, без скачка
+      if (to !== lastTo) { from = root.scrollTop; t0 = now(); lastTo = to; }
+      const p = Math.min(1, (now() - t0) / o.ms);
       root.scrollTop = p >= 1 ? to : from + (to - from) * ease(p);
       if (p >= 1) finish('done'); else id = raf(frame);
     });
   };
   id = raf(frame);
   return { cancel: () => finish('cancel'), get active() { return active; } };
+}
+
+/** Серия сообщений подряд: анимируем первые maxMs серии, дальше — мгновенно, пока не будет паузы gapMs. */
+export type Burst = { since: number; last: number };
+export function burstAnimates(b: Burst, now: number, maxMs = 600, gapMs = 300): boolean {
+  if (!b.last || now - b.last > gapMs) b.since = now;   // пауза — новая серия
+  b.last = now;
+  return now - b.since <= maxMs;
 }
 
 /** Далеко (больше двух экранов) — сначала прыжок на экран от цели с ближней стороны, плавно — только последний экран. */
