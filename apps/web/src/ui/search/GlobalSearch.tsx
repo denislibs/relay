@@ -7,7 +7,8 @@ import type { ComponentChildren } from 'preact';
 import { useEffect, useMemo, useRef, useState } from 'preact/hooks';
 import { openChannel, openChat, searchMessages } from '../../data';
 import { wantPeople } from '../../people';
-import { getGlobal, useGlobal, type Person } from '../../global';
+import { findChat, getGlobal, useGlobal, type Person } from '../../global';
+import { tileSrc } from '../../mediaGrid';
 import { toggleMusic, trackTitle } from '../../music';
 import { avatarPhoto } from '../../profilePhoto';
 import {
@@ -340,7 +341,7 @@ function MediaTab({ kind, q }: { kind: MediaTab; q: string }) {
         <MediaGrid class="app-gsearch-grid" items={state.hits.map((h) => h.message)} onOpen={open} host={grid} onNearEnd={nextPage} nearKey={state.hits.length + ':' + state.more} />
         {viewer !== null && photos[viewer] ? (
           <MediaViewer index={viewer}
-            items={photos.map((h) => { const a = h.message.attachment!; return { src: fileUrl(a), thumb: a.thumb, w: a.w, h: a.h, name: a.name, download: fileUrl(a) + '?download=1', caption: h.message.body, date: when(h.message.createdAt), sender: who(h), avatar: senderAvatar(h.message.senderId) }; })}
+            items={photos.map((h) => { const a = h.message.attachment!; return { src: fileUrl(a), preview: a.kind === 'photo' ? tileSrc(a) : undefined, thumb: a.thumb, w: a.w, h: a.h, name: a.name, download: fileUrl(a) + '?download=1', caption: h.message.body, date: when(h.message.createdAt), sender: who(h), avatar: hitAvatar(h) }; })}
             origin={(k: number) => grid.current?.querySelector<HTMLElement>(`[data-mid="${photos[k]?.message.id}"]`) ?? null}
             onClose={() => setViewer(null)} />
         ) : null}
@@ -364,6 +365,14 @@ function MediaTab({ kind, q }: { kind: MediaTab; q: string }) {
       {state.more ? <div ref={end} class="app-sm-more" /> : null}
     </div>
   );
+}
+
+/** Аватар автора в просмотрщике: у поста канала автора нет (senderId 0) — фото самого канала, как в «Медиа»
+ *  правой панели; иначе — фото отправителя. */
+function hitAvatar(h: Hit): { src?: string; thumb?: string } {
+  const m = h.message;
+  if (h.chatKind !== 'channel' && !m.post && m.senderId) return senderAvatar(m.senderId);
+  return avatarPhoto(findChat(getGlobal(), m.chatId as number)?.photo as ProfilePhoto | null | undefined);
 }
 
 /** «Вы → чат» за свои, «Отправитель → группа» в группах, имя собеседника в личных (как в Telegram). */
