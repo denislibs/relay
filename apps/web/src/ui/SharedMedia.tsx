@@ -1,4 +1,4 @@
-import { Avatar, DateDivider, FolderTabs, Icon, LazyImage, LazyRoot, lazyObserve, MediaViewer, peerTone, player, Presence, reducedMotion, requestMutation, SlideStack, TrackSeek, useMinVisible, WindowGrid, WindowList } from '@relay/ui';
+import { asideFloats, Avatar, DateDivider, FolderTabs, Icon, LazyImage, LazyRoot, lazyObserve, MediaViewer, peerTone, player, Presence, reducedMotion, requestMutation, SlideStack, TrackSeek, useMinVisible, WindowGrid, WindowList } from '@relay/ui';
 import { offlineUrlNow } from '../downloads';
 import { LinkTile, linkInfo } from './linkTile';
 import { avatarPhoto, userPhoto } from '../profilePhoto';
@@ -35,9 +35,9 @@ export const fileUrl = (a: Att) => `/files/${a.id}`;
 /** Переход к сообщению из правой панели — поверх стека (docs/navigation-rules.md): чат уже наверху — только
  *  прокрутка; поверх него тред — снимается до чата; иначе чат кладётся сверху. */
 const show = (m: Msg) => openInner(m.chatId as number, { id: m.id, sort: m.id });
-/** «Показать в чате» из меню плитки; на узком экране
- *  панель лежит поверх чата — закрывается, иначе переход не виден (как в Telegram). */
-const showInChat = (m: Msg) => { show(m); if (matchMedia('(max-width: 1100px)').matches) setGlobal({ infoOpen: false }); };
+/** «Показать в чате» из меню плитки; когда панель лежит поверх чата
+ *  (места рядом нет), она закрывается, иначе переход не виден (как в Telegram). */
+const showInChat = (m: Msg) => { show(m); if (asideFloats()) setGlobal({ infoOpen: false }); };
 
 /** Цвет плитки по расширению (как в Telegram): таблицы и apk — зелёный, архивы и презентации — оранжевый, pdf — красный. */
 export function extTone(ext: string): string {
