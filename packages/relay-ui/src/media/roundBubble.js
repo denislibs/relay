@@ -4,7 +4,7 @@
 // Слева сверху — плашка: длительность (при игре — сколько прошло), «без звука», точка «не просмотрено».
 import { h } from 'preact';
 import { useEffect, useRef, useState } from 'preact/hooks';
-import { cx, ForwardTitle, ReplyQuote, MsgLine, Icon, MessageStatus, ProgressRing } from '../kit.js';
+import { cx, ForwardTitle, ReplyQuote, MsgLine, Icon, MessageStatus, ProgressRing, ReactionChips } from '../kit.js';
 import * as player from './player.js';
 import { isHeavyAnimating, onHeavyAnimationEnd } from '../schedule.js';
 
@@ -82,7 +82,8 @@ export function RoundBubble(props) {
   }
 
   var dur = props.duration || 0;
-  return h(MsgLine, { aside: props.aside, class: cx('rl-msgline', out && 'rl-msgline-out', props.groupStart && 'rl-msgline-gap', props.fwd && 'rl-round-line-fwd', props.reply && 'rl-round-line-reply', props.footer && 'rl-round-line-foot') },
+  var hasReact = !!(props.reactions && props.reactions.length);
+  return h(MsgLine, { aside: props.aside, class: cx('rl-msgline', out && 'rl-msgline-out', props.groupStart && 'rl-msgline-gap', props.fwd && 'rl-round-line-fwd', props.reply && 'rl-round-line-reply', (props.footer || hasReact) && 'rl-round-line-foot') },
     // у кружка нет пузыря — «Переслано от» плашкой над ним, как подпись к стикеру
     props.fwd ? h(ForwardTitle, { fwd: props.fwd, class: 'rl-fwd-plate' }) : null,
     // у кружка нет пузыря — цитата отдельной плашкой рядом с ним, как у стикера в Telegram
@@ -118,5 +119,7 @@ export function RoundBubble(props) {
         props.unread ? h('i', { class: 'rl-round-dot', 'aria-label': 'Не просмотрено' }) : null),
       h('span', { class: 'rl-round-meta' }, props.metaBefore ? props.metaBefore() : null, props.time, out || props.status ? h(MessageStatus, { status: props.status || 'sent' }) : null)),
     // пост канала: у кружка нет пузыря — кнопка комментариев плашкой под ним
-    props.footer ? h('div', { class: 'rl-footer-plate rl-footer-plate-round' }, props.footer) : null);
+    props.footer ? h('div', { class: 'rl-footer-plate rl-footer-plate-round' }, props.footer) : null,
+    // у кружка нет пузыря — реакции плашками под ним, как у стикера
+    hasReact ? h(ReactionChips, { items: props.reactions, out: out, float: true, onClick: props.onReact }) : null);
 }

@@ -55,11 +55,11 @@ function outlinePath(b64) {
 
 /**
  * props: src (адрес .tgs/.json/.webp), outline (base64 контур), w, h (размер документа, обычно 512),
- * size (сторона рамки, CSS px), play (по умолчанию да), loop (undefined — как в настройках), group,
- * class, onClick, title.
+ * size (сторона рамки, CSS px), play (по умолчанию да), loop (undefined — как в настройках), group, force (играть
+ * вопреки тяжёлой анимации и автоплею), onFirstFrame, onEnded (последний кадр без цикла), class, onClick, title.
  */
 export function StickerView(props) {
-  const { src, outline, size, group = 'feed', play = true, loop } = props;
+  const { src, outline, size, group = 'feed', play = true, loop, force } = props;
   const box = stickerBox(props.w, props.h, size);
   const isStatic = /\.webp$/.test(src || '');
   const px = Math.round(Math.max(box.width, box.height) * Math.min(2, Math.max(1, (typeof devicePixelRatio === 'number' && devicePixelRatio) || 1)));
@@ -90,14 +90,15 @@ export function StickerView(props) {
     let offVisible = null, cancel = null;
     const offLazy = lazyObserve(el, () => { cancel = queueAttach(() => {
       const c = attachSticker({
-        url: src, px, canvas: canvas.current, group, play: play && !reducedMotion(), loop,
-        onFirstFrame: () => requestAnimationFrame(() => requestAnimationFrame(() => requestMutation(() => setStage('ready')))),
+        url: src, px, canvas: canvas.current, group, play: play && !reducedMotion(), loop, force,
+        onFirstFrame: () => { props.onFirstFrame?.(); requestAnimationFrame(() => requestAnimationFrame(() => requestMutation(() => setStage('ready')))); },
+        onEnded: () => props.onEnded?.(),
       });
       ctl.current = c;
       offVisible = watchVisible(el, (v) => c.setVisible(v));
     }); });
     return () => { offLazy?.(); cancel?.(); offVisible?.(); ctl.current?.destroy(); ctl.current = null; };
-  }, [key, group]);
+  }, [key, group, force]);
 
   useEffect(() => { ctl.current?.setPlay(play && !reducedMotion()); }, [play]);
   useEffect(() => { ctl.current?.setLoop(loop); }, [loop]);
@@ -147,7 +148,7 @@ export function StickerBubble(props) {
         h('span', { class: 'rl-media-chip rl-sticker-meta' }, props.metaBefore ? props.metaBefore() : null, props.time, out || props.status ? h(MessageStatus, { status: props.status || 'read' }) : null)),
       // пост канала: кнопка комментариев плашкой под стикером (пузыря нет), шириной со стикер
       props.footer ? h('div', { class: 'rl-footer-plate' }, props.footer) : null,
-      props.reactions && props.reactions.length ? h(ReactionChips, { items: props.reactions, out, onClick: props.onReact }) : null));
+      props.reactions && props.reactions.length ? h(ReactionChips, { items: props.reactions, out, float: true, onClick: props.onReact }) : null));
 }
 
 /** Миниатюра стикера для цитаты и поиска: у картинки — сам файл, у анимации — силуэт (SVG data:), без загрузок. */

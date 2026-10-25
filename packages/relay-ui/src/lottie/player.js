@@ -72,6 +72,7 @@ class Player {
     this.time = 0;           // мс проигранного времени (на паузе стоит)
     this.last = 0;           // performance.now() прошлого шага
     this.ended = false;
+    this.finished = false;       // onEnded уже вызван
     this.wanted = -1;        // кадр, который ждём из воркера
     this.shownOnce = false;
     this.closed = false;
@@ -84,12 +85,25 @@ class Player {
         this.update();
       }, () => { for (const v of this.views) v.onError?.(); });
     };
-    // во время тяжёлой анимации (открытие панели, модалки) даже не начинаем: WASM и сеть подождут
-    if (isHeavyAnimating()) onHeavyAnimationEnd(start); else start();
+    this.start = start;
+    this.starting = false;
+  }
+
+  /** Открыть рендерер: во время тяжёлой анимации (открытие панели, модалки) ждём её конца — WASM и сеть подождут;
+   *  вид с force (эффект, панель реакций) открывает сразу. */
+  begin(force) {
+    if (this.starting) return;
+    if (!force && isHeavyAnimating()) { onHeavyAnimationEnd(() => { if (!this.starting) { this.starting = true; this.start(); } }); return; }
+    this.starting = true;
+    this.start();
   }
 
   playable() {
-    if (!this.renderer || !focused || !policy.autoplay || isHeavyAnimating()) return false;
+    if (!this.renderer || !focused) return false;
+    // force — эффекты и панель реакций: играют и во время тяжёлой анимации, и при выключенном автоплее, и под
+    // эксклюзивной группой (меню открывается с beginHeavyAnimation, иначе «появление» ждало бы его конца)
+    for (const v of this.views) if (v.visible && v.play && v.force) return true;
+    if (!policy.autoplay || isHeavyAnimating()) return false;
     for (const v of this.views) if (v.visible && v.play && (!exclusive || v.group === exclusive)) return true;
     return false;
   }
@@ -102,7 +116,7 @@ class Player {
   update() {
     const go = this.playable();
     if (go && !active.has(this)) {
-      if (this.ended) { this.ended = false; this.time = 0; }   // снова на экране — проигрываем заново
+      if (this.ended) { this.ended = false; this.finished = false; this.time = 0; }   // снова на экране — проигрываем заново
       active.add(this);
       this.last = performance.now();
       schedule();
@@ -126,6 +140,7 @@ class Player {
       else { i = total - 1; this.ended = true; active.delete(this); }
     }
     if (i !== this.index) this.show(i);
+    else if (this.ended) this.finish();
     const next = (i + r.step) % total;
     r.prefetch(next);                                          // на шаг вперёд — к следующему тику готов
   }
@@ -140,6 +155,7 @@ class Player {
         if (this.closed || this.wanted !== i || !bmp.width) { r.done(i, bmp); return; }   // ширина 0 — кадр уже освобождён
         this.index = i;
         for (const v of this.views) v.draw(bmp);
+        if (this.ended && i === r.frames - 1) this.finish();
         if (!this.shownOnce && i === 0) { this.shownOnce = true; savePreview(this.key, bmp); }
         r.done(i, bmp);
       });
@@ -148,6 +164,7 @@ class Player {
 
   attach(v) {
     this.views.add(v);
+    this.begin(v.force);
     if (this.renderer) {
       const bmp = this.renderer.cache.get(this.index);
       if (bmp) requestMutation(() => { if (bmp.width) v.draw(bmp); }); else this.show(this.index);
@@ -155,9 +172,17 @@ class Player {
     this.update();
   }
 
+  /** Последний кадр без цикла показан: onEnded каждого вида — один раз, пока не restart(). */
+  finish() {
+    if (this.finished) return;
+    this.finished = true;
+    for (const v of this.views) v.onEnded?.();
+  }
+
   /** Проиграть с начала (повтор по клику у героев настроек). */
   restart() {
     this.ended = false;
+    this.finished = false;
     this.time = 0;
     active.delete(this);
     this.update();
@@ -175,9 +200,10 @@ class Player {
 
 /**
  * Представление стикера (канвас). Возвращает управление: visible/play/loop меняются снаружи,
- * destroy() — при размонтировании. onFirstFrame — первый нарисованный кадр (снять подложку).
+ * destroy() — при размонтировании. onFirstFrame — первый нарисованный кадр (снять подложку). onEnded — без цикла
+ * показан последний кадр (один раз до restart). force — играть вопреки тяжёлой анимации, автоплею и эксклюзивной группе.
  */
-export function attachSticker({ url, px, canvas, group = 'feed', play = true, loop, onFirstFrame, onError }) {
+export function attachSticker({ url, px, canvas, group = 'feed', play = true, loop, force = false, onFirstFrame, onEnded, onError }) {
   const key = url + '|' + px;
   let pl = players.get(key);
   if (!pl) { pl = new Player(key, url, px); players.set(key, pl); }
@@ -185,7 +211,7 @@ export function attachSticker({ url, px, canvas, group = 'feed', play = true, lo
   const ctx = canvas.getContext('2d');
   canvas.width = px; canvas.height = px;
   const view = {
-    group, play, loop, visible: false, onError,
+    group, play, loop, force, visible: false, onError, onEnded,
     draw(bmp) {
       ctx.clearRect(0, 0, px, px);
       ctx.drawImage(bmp, 0, 0, px, px);

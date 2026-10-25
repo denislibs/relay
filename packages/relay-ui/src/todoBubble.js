@@ -4,7 +4,7 @@
 //  под задачей — его имя; только для чтения (пересланный или чужой без права отмечать) — точка или галочка,
 //  выполненное зачёркнуто; внизу — «N из M выполнено» (число меняется с переходом).
 import { h } from 'preact';
-import { cx, Avatar, Icon, MessageStatus, ReplyQuote } from './kit.js';
+import { cx, Avatar, Icon, MessageStatus, ReplyQuote, metaOrReactions } from './kit.js';
 
 /**
  * props: todo, from ('in'|'out'), groupStart, tail, appear, time, status, edited, forwarded, authorName, metaBefore, footer,
@@ -20,7 +20,7 @@ export function TodoBubble(props) {
   var interactive = !!props.canToggle;
   return h('div', { class: cx('rl-msgline', out && 'rl-msgline-out', props.groupStart && 'rl-msgline-gap') },
     // пост канала: metaBefore (просмотры, подпись) — мета строкой под списком (rl-meta-flow), footer — кнопка комментариев
-    h('div', { class: cx('rl-bubble rl-todo', out ? 'rl-bubble-out' : 'rl-bubble-in-side', props.tail && 'rl-bubble-tail', props.metaBefore && 'rl-meta-flow', props.footer && 'rl-bubble-has-footer', props.appear && (out ? 'rl-appear-out' : 'rl-appear-in')) },
+    h('div', { class: cx('rl-bubble rl-todo', out ? 'rl-bubble-out' : 'rl-bubble-in-side', props.tail && 'rl-bubble-tail', props.metaBefore && 'rl-meta-flow', props.footer && 'rl-bubble-has-footer', props.reactions && props.reactions.length && 'rl-bubble-has-react', props.appear && (out ? 'rl-appear-out' : 'rl-appear-in')) },
       props.reply ? h(ReplyQuote, Object.assign({ inBubble: true }, props.reply)) : null,
       h('div', { class: 'rl-todo-head' }, h('b', { class: 'rl-todo-name' }, t.title), h('span', { class: 'rl-todo-sub' }, subtitle)),
       h('div', { class: 'rl-todo-items', role: 'group', 'aria-label': t.title },
@@ -43,6 +43,6 @@ export function TodoBubble(props) {
         })),
       h('div', { class: 'rl-todo-foot' },
         h('span', { key: count, class: 'rl-todo-count' }, count), ' из ' + t.items.length + ' выполнено'),
-      h('span', { class: 'rl-bubble-meta' }, props.metaBefore ? props.metaBefore() : null, props.edited ? h('span', { class: 'rl-bubble-edited' }, 'изм.') : null, props.time, out || props.status ? h(MessageStatus, { status: props.status || 'sent' }) : null),
+      metaOrReactions(props, out, h('span', { class: 'rl-bubble-meta' }, props.metaBefore ? props.metaBefore() : null, props.edited ? h('span', { class: 'rl-bubble-edited' }, 'изм.') : null, props.time, out || props.status ? h(MessageStatus, { status: props.status || 'sent' }) : null)),
       props.footer ? h('div', { class: 'rl-bubble-footer' }, props.footer) : null));
 }

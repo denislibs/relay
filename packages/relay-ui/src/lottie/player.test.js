@@ -51,3 +51,34 @@ test('an exclusive group pauses everything else', async () => {
   expect(stickerStats().playing).toBe(2);
   feed.destroy(); modal.destroy();
 });
+
+test('onEnded fires once when a non-looping sticker reaches its last frame; restart arms it again', async () => {
+  let ended = 0;
+  const v = attachSticker({ url: '/stk/x/aaaaaaaa/4.tgs', px: 64, canvas: canvas(), loop: false, onEnded: () => ended++ });
+  await wait();
+  v.setVisible(true);
+  await wait(1200);   // 60 кадров при 60 fps — секунда
+  expect(ended).toBe(1);
+  expect(stickerStats().playing).toBe(0);
+  await wait(100);
+  expect(ended).toBe(1);
+  v.restart();
+  await wait(1200);
+  expect(ended).toBe(2);
+  v.destroy();
+});
+
+test('force plays through heavy animation, autoplay off and an exclusive group', async () => {
+  const { beginHeavyAnimation } = await import('../schedule.js');
+  const { setStickerPolicy } = await import('./player.js');
+  const end = beginHeavyAnimation(5000);
+  setStickerPolicy({ autoplay: false });
+  setStickerGroupExclusive('modal');
+  const plain = attachSticker({ url: '/stk/x/aaaaaaaa/5.tgs', px: 64, canvas: canvas(), group: 'feed' });
+  const forced = attachSticker({ url: '/stk/x/aaaaaaaa/6.tgs', px: 64, canvas: canvas(), group: 'fx', force: true });
+  await wait();
+  plain.setVisible(true); forced.setVisible(true);
+  expect(stickerStats().playing).toBe(1);
+  end(); setStickerPolicy({ autoplay: true }); setStickerGroupExclusive(null);
+  plain.destroy(); forced.destroy();
+});

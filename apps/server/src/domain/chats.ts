@@ -382,8 +382,9 @@ export async function listChats(userId: number, opts: ListOpts = {}): Promise<Ch
       post: r.m_post, post_author: r.m_post_author, views: r.m_views, thread_id: r.m_thread_id, origin: r.m_origin,
     }),
   }));
-  // последний пост канала — с кнопкой комментариев: устройство, узнавшее пост только из списка, иначе её не увидит
-  await withReplies(list.filter((c) => c.kind === 'channel' && c.last?.post).map((c) => c.last!), userId);
+  // последнее сообщение — с реакциями (и у поста канала — с кнопкой комментариев): устройство, узнавшее его только из
+  // списка, историю «после» не грузит и иначе показало бы его без плашек до следующей реакции
+  await withAllReactions(list.filter((c) => c.last && !c.last.deleted).map((c) => c.last!), userId);
   return list;
 }
 

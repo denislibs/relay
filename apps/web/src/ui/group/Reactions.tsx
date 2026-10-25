@@ -1,12 +1,13 @@
 import { RadioRow, Section } from '@relay/ui';
-import type { ReactionsMode } from '@relay/protocol';
+import { emojiKey, type ReactionsMode } from '@relay/protocol';
+import { reactionCatalog, useReactionCatalog } from '../../reactions';
 import { useState } from 'preact/hooks';
 import { act, useGroup } from '../../groups';
 import { GPage, Loading } from './common';
 import type { Nav } from './Manage';
 
-/** Набор, из которого выбирают «некоторые» реакции (первые шесть — быстрые реакции из меню сообщения). */
-export const REACTION_SET = [
+/** Набор на случай, когда каталога реакций с сервера нет (первые семь — быстрые реакции из меню сообщения). */
+const REACTION_SET = [
   '👍', '❤️', '😂', '😮', '😢', '🙏', '👎', '🔥', '🥰', '👏', '😁', '🤔', '🤯', '😱', '🎉', '🤩', '💯', '🤣', '⚡', '🏆',
   '💔', '🤨', '😐', '🍓', '🍾', '😈', '😴', '😭', '🤓', '👻', '👀', '🙈', '😇', '🤝', '✍️', '🤗', '🫡', '💅', '🤪', '🗿', '😎', '👌',
 ];
@@ -18,10 +19,15 @@ export function Reactions({ nav }: { nav: Nav }) {
   const [mode, setMode] = useState<ReactionsMode | null>(null);
   const [allowed, setAllowed] = useState<string[] | null>(null);
   const [busy, setBusy] = useState(false);
+  useReactionCatalog();
   if (!group) return <GPage title="Реакции" onBack={nav.back}><Loading /></GPage>;
+  // каталог с сервера (порядок Telegram) — картинками; без него — глифы из REACTION_SET; в настройках храним ключи без FE0F
+  const cat = reactionCatalog();
+  const set = cat.length ? cat.map((r) => ({ key: r.key, icon: r.static })) : REACTION_SET.map((e) => ({ key: emojiKey(e), icon: undefined }));
   const m = mode ?? group.reactions.mode;
-  const a = allowed ?? (group.reactions.mode === 'some' ? group.reactions.allowed : REACTION_SET.slice(0, 6));
-  const dirty = m !== group.reactions.mode || (m === 'some' && (a.length !== group.reactions.allowed.length || a.some((e) => !group.reactions.allowed.includes(e))));
+  const a = (allowed ?? (group.reactions.mode === 'some' ? group.reactions.allowed : set.slice(0, 7).map((x) => x.key))).map(emojiKey);
+  const saved = group.reactions.allowed.map(emojiKey);
+  const dirty = m !== group.reactions.mode || (m === 'some' && (a.length !== saved.length || a.some((e) => !saved.includes(e))));
   const toggle = (e: string) => setAllowed(a.includes(e) ? a.filter((x) => x !== e) : [...a, e]);
   const save = async () => {
     setBusy(true);
@@ -39,8 +45,10 @@ export function Reactions({ nav }: { nav: Nav }) {
       {m === 'some' ? (
         <Section title={`Доступные реакции · ${a.length}`} footer="Нажмите на эмодзи, чтобы включить или выключить его.">
           <div class="app-gm-emoji" role="group" aria-label="Доступные реакции">
-            {REACTION_SET.map((e) => (
-              <button key={e} type="button" class={'app-gm-emoji-btn' + (a.includes(e) ? ' is-on' : '')} aria-pressed={a.includes(e)} aria-label={'Реакция ' + e} onClick={() => toggle(e)}>{e}</button>
+            {set.map((e) => (
+              <button key={e.key} type="button" class={'app-gm-emoji-btn' + (a.includes(e.key) ? ' is-on' : '')} aria-pressed={a.includes(e.key)} aria-label={'Реакция ' + e.key} onClick={() => toggle(e.key)}>
+                {e.icon ? <img src={e.icon} alt="" draggable={false} decoding="async" /> : e.key}
+              </button>
             ))}
           </div>
         </Section>
