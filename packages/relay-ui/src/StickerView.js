@@ -93,6 +93,7 @@ export function StickerView(props) {
         url: src, px, canvas: canvas.current, group, play: play && !reducedMotion(), loop, force,
         onFirstFrame: () => { props.onFirstFrame?.(); requestAnimationFrame(() => requestAnimationFrame(() => requestMutation(() => setStage('ready')))); },
         onEnded: () => props.onEnded?.(),
+        onError: () => props.onError?.(),
       });
       ctl.current = c;
       offVisible = watchVisible(el, (v) => c.setVisible(v));

@@ -3,11 +3,13 @@ import type { ServiceData, ServiceType } from '@relay/protocol';
 import type { Item } from '@relay/sync-engine/src/types';
 import { avatarPhoto, senderAvatar } from '../profilePhoto';
 import { reactionIcon, useReactionCatalog } from '../reactions';
+import { animatedEmojiUrl, useAnimatedEmoji } from '../animatedEmoji';
+import { emojiOnly } from '@relay/protocol';
 import { FX_READ_DELAY_MS, playFxForMessage, queueReactionFx, takeReactionFx } from '../reactionFx';
 import { groupReactions, type Chip } from '../reactionChips';
 import { emojiKey } from '@relay/protocol';
 import type { Entity, MessageButton, ProfilePhoto, Todo } from '@relay/protocol';
-import { Presence, ProgressRing, useMinVisible, MediaPolicy, ArticleBlocks, Avatar, Bubble, Icon, peerTone, DateDivider, DatePicker, FileBubble, MediaBubble, MessageText, VoiceBubble, MusicBubble, RoundBubble, player, MediaViewer, ScrollToBottom, beginHeavyAnimation, forceMeasure, isHeavyAnimating, onHeavyAnimationEnd, requestMeasure, requestMutation, selectionValue, TodoBubble, InlineKeyboard, StickerBubble, reducedMotion, LazyRoot } from '@relay/ui';
+import { Presence, ProgressRing, useMinVisible, MediaPolicy, ArticleBlocks, Avatar, Bubble, Icon, peerTone, DateDivider, DatePicker, FileBubble, MediaBubble, MessageText, VoiceBubble, MusicBubble, RoundBubble, player, MediaViewer, ScrollToBottom, beginHeavyAnimation, forceMeasure, isHeavyAnimating, onHeavyAnimationEnd, requestMeasure, requestMutation, selectionValue, TodoBubble, InlineKeyboard, StickerBubble, EmojiBubble, reducedMotion, LazyRoot } from '@relay/ui';
 import { openStickerSet, sendSticker, useGreetingSticker } from '../stickers';
 import { historyEmpty } from '../greeting';
 import { GreetingCard } from './GreetingCard';
@@ -80,10 +82,10 @@ function reactionChips(m: Item, meId: number, people: Record<number, { name: str
   return chips;
 }
 
-type RowProps = { post?: boolean; pinned?: boolean; discussion?: number | null; chatId: number; voiceTitle: string; author?: string; onAuthor?: (m: Item) => void; onOpen: (m: Item) => void; hl?: string; m: Item; meId: number; out: boolean; start: boolean; end: boolean; pos?: 'single' | 'first' | 'middle' | 'last'; quoted?: Quote | null; quoteAuthor?: string; quoteTone?: number | 'accent'; appear: boolean; flash: boolean; onReact: (m: Item, emoji: string) => void; album?: Item[]; onUser?: (userId: number) => void; sel?: boolean; selIn?: string; onQuickForward?: (m: Item) => void; grp?: boolean; leaving?: boolean; rxv: number; people: Record<number, { name: string } | undefined> };
+type RowProps = { post?: boolean; pinned?: boolean; discussion?: number | null; chatId: number; voiceTitle: string; author?: string; onAuthor?: (m: Item) => void; onOpen: (m: Item) => void; hl?: string; m: Item; meId: number; out: boolean; start: boolean; end: boolean; pos?: 'single' | 'first' | 'middle' | 'last'; quoted?: Quote | null; quoteAuthor?: string; quoteTone?: number | 'accent'; appear: boolean; flash: boolean; onReact: (m: Item, emoji: string) => void; album?: Item[]; onUser?: (userId: number) => void; sel?: boolean; selIn?: string; onQuickForward?: (m: Item) => void; grp?: boolean; leaving?: boolean; rxv: number; aev: number; bigEmoji: boolean; people: Record<number, { name: string } | undefined> };
 
 /** Строка ленты: перерисовывается только если изменилось её сообщение или место в группе. */
-const Row = memo(function Row({ post, pinned, discussion, chatId, voiceTitle, author, onAuthor, onOpen, hl, m, meId, out, start, end, pos, quoted, quoteAuthor, quoteTone, appear, flash, onReact, album, onUser, sel, selIn, onQuickForward, grp, leaving, people }: RowProps) {
+const Row = memo(function Row({ post, pinned, discussion, chatId, voiceTitle, author, onAuthor, onOpen, hl, m, meId, out, start, end, pos, quoted, quoteAuthor, quoteTone, appear, flash, onReact, album, onUser, sel, selIn, onQuickForward, grp, leaving, people, bigEmoji }: RowProps) {
   // реакции: по эмодзи (ключ без FE0F — «❤️» и «❤» одна плашка) — сколько, есть ли моя, кто поставил;
   // картинка — из каталога (rxv — версия каталога: пришёл — строка перерисуется)
   // эффект своей реакции: заявка ждёт, пока плашка появится в DOM после перерисовки строки
@@ -300,6 +302,24 @@ const Row = memo(function Row({ post, pinned, discussion, chatId, voiceTitle, au
       </div>
     );
   }
+  // сообщение из одних эмодзи (как в Telegram): без пузыря; один из анимированного набора — стикер 112 px
+  const eo = bigEmoji && !m.deleted && !att && !m.sticker && !m.service && !m.blocks && !m.todo && !m.buttons && !m.link ? emojiOnly(m.body as string, m.entities as Entity[] | undefined) : null;
+  if (eo) {
+    return (
+      <div class={wrap('app-msg app-msg-sticker')} data-key={m.key} data-sort={m.sort as number}>
+        {check}
+        <EmojiBubble
+          from={out ? 'out' : 'in'} groupStart={start} appear={appear} aside={aside} fwd={fwd} reply={replyQ}
+          author={author} authorTone={author ? peerTone(m.senderId as number) : undefined}
+          text={m.body as string} count={eo.count} src={eo.count === 1 ? animatedEmojiUrl(eo.keys[0]) ?? null : null}
+          edited={!!m.editedAt} time={clock(m.createdAt as string)} status={status}
+          metaBefore={metaBefore} footer={footer}
+          reactions={chips.length ? chips : undefined} onReact={(emoji: string) => onReact(m, emoji)}
+        />
+        {mark}
+      </div>
+    );
+  }
   if (m.kind === 'sticker' && m.sticker && !m.deleted) {
     // стикер — без пузыря (как в Telegram): ответ и автор — маленьким пузырём над ним, клик — модалка пака
     const st = m.sticker as StickerRef;
@@ -497,6 +517,10 @@ export function Feed({ frameKey, active, chatId, threadId, channel = false, meId
   const messages = useGlobal((s) => frameByKey(s, frameKey)?.messages ?? NO_MESSAGES);
   const people = useGlobal((s) => s.people);   // имена и фото авторов пришли — пачки перерисовываются
   const rxv = useReactionCatalog();              // каталог реакций пришёл — плашки с картинками вместо глифов
+  // крупные эмодзи: каталог анимаций грузим, только когда в окне есть сообщение из одного эмодзи
+  const bigEmoji = useGlobal((s) => s.prefs.bigEmoji);
+  const needEmoji = useMemo(() => bigEmoji && messages.some((x) => !x.deleted && !x.attachment && !x.sticker && !x.service && emojiOnly(x.body as string, x.entities as { type: string }[] | undefined)?.count === 1), [messages, bigEmoji]);
+  const aev = useAnimatedEmoji(needEmoji);
   // следующее/предыдущее голосовое этого чата — для автоперехода и кнопок плеера
   useEffect(() => {
     if (!active) return;
@@ -1411,6 +1435,8 @@ export function Feed({ frameKey, active, chatId, threadId, channel = false, meId
         voiceTitle={mine ? 'Вы' : post ? (channel ? peerName : channelName(m)) : (group ? people[m.senderId as number]?.name ?? peerName : peerName)}
         onReact={onReact}
         rxv={rxv}
+        aev={aev}
+        bigEmoji={bigEmoji}
         people={(m.reactions as unknown[] | undefined)?.length && (m.reactions as unknown[]).length < 4 ? people : NO_PEOPLE}
         onOpen={onOpen}
         out={mine}

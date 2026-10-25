@@ -11,6 +11,7 @@ const systemReduced = (): boolean => { try { return matchMedia('(prefers-reduced
 /** «Анимации и производительность»: уровень-пресет и отдельные флаги (на этом устройстве). */
 export function Performance() {
   const a = useGlobal((s) => s.prefs.anim);
+  const bigEmoji = useGlobal((s) => s.prefs.bigEmoji);
   const scroll = useScrollMemory('settings/performance');
   const lv = levelOf(a);
   const reduced = systemReduced();
@@ -39,6 +40,9 @@ export function Performance() {
         <Section title="Стикеры">
           <CheckRow label="Анимированные стикеры" subtitle="Играют в чатах и в панели стикеров" checked={a.autoplayStickers} onChange={flag('autoplayStickers')} />
           <CheckRow label="Зацикливать стикеры" subtitle="Иначе стикер в чате проигрывается один раз" checked={a.loopStickers} disabled={!a.autoplayStickers} onChange={flag('loopStickers')} />
+        </Section>
+        <Section title="Эмодзи">
+          <CheckRow label="Крупные эмодзи" subtitle="Сообщение из одних эмодзи — крупно, один эмодзи — анимированный" checked={bigEmoji} onChange={(v: boolean) => setPref('bigEmoji', v)} />
         </Section>
       </div>
     </div>

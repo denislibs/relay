@@ -12,7 +12,7 @@ const pending = new Map<string, string>();   // ключ сообщения → 
 export const fxEnabled = (): boolean => getPrefs().anim.level > 0 && !reducedMotion();
 
 /** Заявка на эффект: строка ленты заберёт её при следующей перерисовке. */
-export function queueReactionFx(msgKey: string, key: string): void { if (fxEnabled()) pending.set(msgKey, key); }
+export function queueReactionFx(msgKey: string, key: string): void { pending.set(msgKey, key); }   // включены ли эффекты — решает playFxForMessage
 export function takeReactionFx(msgKey: string): string | undefined { const k = pending.get(msgKey); if (k) pending.delete(msgKey); return k; }
 
 /** Запустить эффект над плашкой реакции key в строке сообщения msgKey (если она на экране и у реакции есть анимации). */

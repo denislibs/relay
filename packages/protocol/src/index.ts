@@ -205,6 +205,9 @@ export const MAX_FILE_BYTES = 2 * 1024 * 1024 * 1024;
 /** Реакция: кто и какой эмодзи (одна от пользователя на сообщение). */
 export interface Reaction { userId: Id; emoji: string }
 /** Реакция из каталога сервера (GET /reactions): ключ — emojiKey, адреса — неизменяемые файлы /rx/<slug>/<хэш>/<файл>. */
+/** Каталог анимированных эмодзи: emoji — анимация одиночного эмодзи, effects — варианты эффекта по клику, generic — общие (💥). */
+export interface AnimatedEmojiCatalog { hash: string; emoji: Record<string, string>; effects: Record<string, string[]>; generic: string[] }
+
 export interface ReactionAsset {
   key: string;
   title: string;         // «Red Heart»
