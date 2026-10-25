@@ -155,6 +155,20 @@ export function MentionFab({ count, raised, onClick }: { count: number; raised: 
   );
 }
 
+/** «К реакции»: сердце над «вниз» (и над «@», если оно есть) с числом непрочитанных реакций на мои сообщения, как в Telegram.
+ *  Клик — к самой старой, правый клик — прочитать все. */
+export function ReactionFab({ count, raised, lifted, onClick, onReadAll }: { count: number; raised: boolean; lifted: boolean; onClick: () => void; onReadAll: () => void }) {
+  return (
+    <Presence show={count > 0} exitMs={160}>
+      <button type="button" class={'rl-fab rl-fab-down app-reaction-fab' + (raised ? ' is-raised' : '') + (lifted ? ' has-mention' : '')} onPointerDown={ripple} onClick={onClick}
+        onContextMenu={(e) => { e.preventDefault(); onReadAll(); }} aria-label="К непрочитанной реакции" title="Клик — к реакции, правый клик — прочитать все">
+        <Icon name="heart" size={24} />
+        <Badge count={count} />
+      </button>
+    </Presence>
+  );
+}
+
 /** «Кто прочитал» своё сообщение: список имён (сервер — участники, дошедшие до него), с лоадером без мигания. */
 export function ReadByModal({ chatId, id, onClose }: { chatId: number; id: number | null; onClose: () => void }) {
   const [list, setList] = useState<{ id: number; name: string }[] | null>(null);

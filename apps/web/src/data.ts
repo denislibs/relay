@@ -1033,6 +1033,15 @@ export function countViews(chatId: number, ids: number[]): void {
   if (ids.length) engine.call({ type: 'countViews', chatId, ids }).catch(() => {});
 }
 
+/** «К реакции»: самое старое моё сообщение с непрочитанной реакцией (id) — из кэша движка или с сервера; null — нет. */
+export function nextReaction(chatId: number): Promise<number | null> {
+  return (engine.call({ type: 'nextReaction', chatId }) as Promise<number | null>).catch(() => null);
+}
+/** Реакции прочитаны: ids — увидел эти сообщения на экране, без ids — «прочитать все». */
+export function readReactions(chatId: number, ids?: number[]): void {
+  engine.call({ type: 'readReactions', chatId, ids }).catch(() => {});
+}
+
 /** «К упоминанию»: старейшее непрочитанное упоминание чата ({id, threadId?}) из кэша движка или null. */
 export function nextMention(chatId: number): Promise<{ id: number; threadId?: number } | null> {
   return (engine.call({ type: 'nextMention', chatId }) as Promise<{ id: number; threadId?: number } | null>).catch(() => null);
