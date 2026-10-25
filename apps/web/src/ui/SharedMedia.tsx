@@ -154,7 +154,7 @@ function TabList({ chatId, tab }: { chatId: number; tab: MediaTab }) {
     </div>
     {viewer !== null && photos[viewer] ? (
       <MediaViewer index={viewer}
-        items={photos.map((m) => { const a = m.attachment!; return { src: fileUrl(a), thumb: a.thumb, w: a.w, h: a.h, name: a.name, download: fileUrl(a) + '?download=1', caption: m.body,
+        items={photos.map((m) => { const a = m.attachment!; return { src: fileUrl(a), preview: a.kind === 'photo' ? tileSrc(a) : undefined, thumb: a.thumb, w: a.w, h: a.h, name: a.name, download: fileUrl(a) + '?download=1', caption: m.body,
           // пост канала (senderId 0): автор — сам канал, с его фото
           date: when(m.createdAt), ...(m.post ? { sender: String(chatRow?.title ?? ''), avatar: avatarPhoto(chatRow?.photo as ProfilePhoto | null) } : { sender: m.senderId === meId ? 'Вы' : people[m.senderId]?.name ?? '', avatar: senderAvatar(m.senderId) }) }; })}
         origin={(k: number) => grid.current?.querySelector<HTMLElement>(`[data-mid="${photos[k]?.id}"]`) ?? null}

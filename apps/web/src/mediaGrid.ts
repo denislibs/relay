@@ -20,6 +20,14 @@ export const bubbleSrc = (a: BubbleAtt): string => {
   return `/files/${a.id}`;
 };
 
+/** Первый слой просмотрщика: то, что уже показано в пузыре (bubbleSrc), — из кэша браузера сразу и резко, пока
+ *  грузится оригинал. Только фото и только если пузырь показывает не сам оригинал. */
+export const viewerPreview = (a: BubbleAtt): string | undefined => {
+  if (a.kind !== 'photo' || !a.id) return undefined;
+  const s = bubbleSrc(a);
+  return s === `/files/${a.id}` ? undefined : s;
+};
+
 /** Кадр видео без миниатюры: короткий немой ролик сервера (jobs/video.ts, 360p), пока его нет — оригинал;
  *  #t=0.1 — не чёрный самый первый кадр. */
 export const videoFrameSrc = (a: TileAtt): string => (a.preview ? `/files/${a.id}/preview` : `/files/${a.id}`) + '#t=0.1';
