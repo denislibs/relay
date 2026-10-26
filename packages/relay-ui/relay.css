@@ -112,7 +112,12 @@ body { margin: 0; font-family: var(--font-sans); color: var(--ink); background: 
 .rl-row[aria-current="true"] { background: var(--selected); }
 .rl-row-main { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 1px; }
 .rl-row-top, .rl-row-bottom { display: flex; align-items: center; gap: var(--space-1); min-width: 0; }
-.rl-row-name { flex: 1; min-width: 0; font: 500 16px/24px var(--font-sans); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.rl-row-name { flex: 1; min-width: 0; display: flex; align-items: center; gap: 2px; font: 500 16px/24px var(--font-sans); white-space: nowrap; overflow: hidden; }
+.rl-row-name > .rl-icon { flex: none; }
+.rl-row-mute { color: var(--row-icon); }
+.rl-row-fwd { color: var(--row-icon); margin-right: 2px; vertical-align: -4px; }
+/* непросмотренные реакции: красный кружок с белым сердцем (как в Telegram) */
+.rl-row-react { display: inline-flex; align-items: center; justify-content: center; width: 20px; height: 20px; border-radius: 50%; background: var(--danger); color: #fff; animation: rl-pop var(--dur-base) var(--ease-out); }
 .rl-row-time { font: 400 13px/16px var(--font-sans); color: var(--ink-muted); font-variant-numeric: tabular-nums; }
 .rl-row-time-unread { color: var(--brand-strong); font-weight: 600; }   /* основной цвет — как кнопка микрофона */
 /* как в Telegram: превью того же кегля, что текст сообщений, высота строки ×1.5 (в пузыре — ×1.3125) */
@@ -1005,7 +1010,8 @@ button.rl-quote:active { background: var(--quote-bg-active, var(--pressed)); }
 .rl-sidecard .rl-row[aria-current="true"] { background: var(--row-current); }
 /* выбранная строка — как в Telegram: сплошной акцент, всё белое, счётчик наоборот */
 .rl-sidecard .rl-row[aria-current="true"],
-.rl-sidecard .rl-row[aria-current="true"] :is(.rl-row-preview, .rl-row-time, .rl-row-author, .rl-row-draft, .rl-row-typing, .rl-row-meta, .rl-status, .app-online) { color: var(--on-media); }
+.rl-sidecard .rl-row[aria-current="true"] :is(.rl-row-preview, .rl-row-time, .rl-row-author, .rl-row-draft, .rl-row-typing, .rl-row-meta, .rl-status, .app-online, .rl-row-fwd) { color: var(--on-media); }
+.rl-sidecard .rl-row[aria-current="true"] .rl-row-mute { color: var(--on-media); opacity: .7; }
 .rl-sidecard .rl-row[aria-current="true"] .rl-badge { background: var(--on-media); color: var(--row-current); }
 .rl-sidecard .rl-row[aria-current="true"] .rl-badge-muted { background: rgb(255 255 255 / 0.25); color: var(--on-media); }
 .rl-sidecard .rl-row[aria-current="true"] .rl-row-at { background: var(--on-media); color: var(--row-current); }
@@ -1797,7 +1803,6 @@ html[data-blur="0"] .rl-menu { -webkit-backdrop-filter: none; backdrop-filter: n
 @media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) { --verified: #4ea6f0; } }
 .rl-verified { display: inline-flex; flex-shrink: 0; vertical-align: -2px; margin-left: 4px; }
 .rl-verified svg { display: block; }
-.rl-row-name-verified { display: flex; align-items: center; }
 .rl-row-name-text { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .rl-row[aria-current="true"] .rl-avatar-logo { box-shadow: 0 0 0 2px rgba(255,255,255,.85); }   /* выбранная строка зелёная — знак не сливается */
 
