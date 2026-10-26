@@ -1483,7 +1483,11 @@ html[data-anim="0"] .rl-sidepage > .rl-aside-body { transition: none; }
 .app-flight-text { position: absolute; box-sizing: border-box; overflow: hidden; white-space: pre-wrap; word-break: break-word; }
 .app-flight-x { position: absolute; will-change: transform; }
 .app-flight-y { will-change: transform; }
-.app-flight-bg { position: relative; overflow: hidden; }
+.app-flight-bg { position: absolute; overflow: hidden; will-change: left, top, width, height; }
+/* время и галочки летят отдельно, на углу фона (sendFlight): в копии с текстом их нет, в своей копии — только они */
+.app-flight-body:not(.app-flight-meta) .rl-bubble-meta { visibility: hidden; }
+.app-flight-meta * { visibility: hidden; }
+.app-flight-meta .rl-bubble-meta, .app-flight-meta .rl-bubble-meta * { visibility: visible; }
 .app-flight-body::before, .app-flight-body::after { display: none; }
 .app-flight-body { position: absolute; left: 0; top: 0; margin: 0 !important; max-width: none !important; transform: none !important; }
 .app-flight-target { visibility: hidden !important; animation: none !important; }

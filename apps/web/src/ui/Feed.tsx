@@ -709,13 +709,13 @@ export function Feed({ frameKey, active, chatId, threadId, channel = false, meId
    *  (цель, позиция, высота экрана), а пишет сам драйвер в своём кадре. Если уже едем — новая
    *  поездка открывает своё окно анимации раньше, чем закроется старое: счётчик не падает до нуля, и отложенная
    *  работа (медиа, сдвиг окна) не стартует посреди пути. */
-  const drive = (root: HTMLElement, target: () => number, ms: number, curve?: readonly [number, number, number, number]) => {
+  const drive = (root: HTMLElement, target: () => number, ms: number, curve?: readonly [number, number, number, number], since?: number) => {
     if (!root.isConnected) return;
     const prev = driving.current;
     const end = beginHeavyAnimation(ms);
     prev?.cancel();
     const to = target(), from = root.scrollTop, screen = root.clientHeight;
-    const me: Drive = driveScroll(root, { ms, target, curve, start: jumpNear(from, to, screen) ?? undefined, onEnd: () => {
+    const me: Drive = driveScroll(root, { ms, target, curve, since, start: jumpNear(from, to, screen) ?? undefined, onEnd: () => {
       end();
       if (driving.current !== me) return;   // нас сменила следующая поездка — состояние пересчитает она
       driving.current = null;
@@ -820,7 +820,27 @@ export function Feed({ frameKey, active, chatId, threadId, channel = false, meId
         else giveUp(f);
       }
       // кадр за стеком (скрытый) не едет: там нечего анимировать, а окно анимации задержало бы медиа видимого чата
-      requestMeasure(() => { if (activeRef.current) drive(root, goal, flew ? FLIGHT_SCROLL.ms : own ? DRIVE_OWN_MS : DRIVE_MS, flew ? FLIGHT_SCROLL.curve : undefined); });
+      const ms = flew ? FLIGHT_SCROLL.ms : own ? DRIVE_OWN_MS : DRIVE_MS, since = performance.now();   // строка уже в ленте
+      // лента короче экрана (или почти): прокручивать некуда, и новая строка вытолкнула старые вверх. Насколько —
+      // высота новых минус путь, который проедет прокрутка; на столько старые строки опускаем и плавно поднимаем за
+      // то же время и по той же кривой, что и прокрутка. В этом же коммите, до отрисовки (одно чтение и одна запись —
+      // осознанное исключение): иначе один кадр старые строки стоят уже наверху и потом прыгают обратно
+      if (activeRef.current && canDrive(false)) forceMeasure(() => {
+        const rows = fresh.map((k) => root.querySelector<HTMLElement>(`.app-msg[data-key="${CSS.escape(k)}"]`)).filter((r): r is HTMLElement => !!r);
+        const firstNew = rows.reduce<HTMLElement | null>((a, r) => (!a || (a.compareDocumentPosition(r) & Node.DOCUMENT_POSITION_PRECEDING) ? r : a), null);
+        const lastNew = rows.reduce<HTMLElement | null>((a, r) => (!a || (a.compareDocumentPosition(r) & Node.DOCUMENT_POSITION_FOLLOWING) ? r : a), null);
+        const before = firstNew?.previousElementSibling as HTMLElement | null;
+        const pushed = firstNew && lastNew && before ? lastNew.getBoundingClientRect().bottom - before.getBoundingClientRect().bottom - (goal() - root.scrollTop) : 0;
+        if (pushed <= 0.5) return;
+        const easing = flew ? `cubic-bezier(${FLIGHT_SCROLL.curve.join(', ')})` : 'cubic-bezier(.33, 1, .68, 1)';
+        for (let n: Element | null = before; n; n = n.previousElementSibling) {
+          (n as HTMLElement).animate([{ transform: `translateY(${pushed}px)` }, { transform: 'none' }], { duration: ms, easing });
+        }
+      });
+      requestMeasure(() => {
+        if (!activeRef.current) return;
+        drive(root, goal, ms, flew ? FLIGHT_SCROLL.curve : undefined, flew ? since : undefined);
+      });
       return;
     }
     // как «forced reflow» в Telegram: поправить прокрутку в том же коммите, до отрисовки — иначе
@@ -834,7 +854,10 @@ export function Feed({ frameKey, active, chatId, threadId, channel = false, meId
         // край якоря — по правилу tweb (anchorShift): строка, торчащая за верх (альбом, разрезанный окном иначе и
         // собранный целиком), держится за видимый низ, а не за верх, уехавший за экран
         if (row) { const r = row.getBoundingClientRect(), rt = root.getBoundingClientRect().top; next = top + anchorShift(a, { top: r.top - rt, bottom: r.bottom - rt }, ch); }
-      } else if (down || (stick.current && top + ch < h - 1)) {
+      } else if (down || (stick.current && top + ch < h - 1 && !driving.current?.active)) {
+        // пока лента сама плавно едет к низу (driveScroll), не ставим её в конец: драйвер каждый кадр перечитывает,
+        // где низ, и доедет сам. Иначе перерисовка посреди пути (сервер подтвердил отправку, статус «отправлено»)
+        // ставила низ на кадр, а драйвер возвращал свою точку — лента дёргалась туда и обратно
         toBottom.current = false;
         next = h;
       }

@@ -13,6 +13,7 @@ export type DriveOpts = {
   ms: number;
   target: () => number;             // куда едем (читается каждый кадр)
   start?: number;                   // прыжок перед доездом (далеко — сначала на экран от цели)
+  since?: number;                   // момент старта (performance.now): первый кадр уже едет, а не только засекает время
   curve?: readonly [number, number, number, number];   // своя кривая cubic-bezier (полёт отправленного — sendFlight)
   onEnd?: (reason: 'done' | 'cancel') => void;
   raf?: (cb: (t: number) => void) => number;
@@ -50,12 +51,12 @@ export function driveScroll(root: { scrollTop: number }, o: DriveOpts): Drive {
     if (!active) return;
     forceMeasure(() => {
       if (t0 < 0) {   // первый кадр: прыжок, если просили, и точка старта
-        t0 = now();
+        t0 = o.since ?? now();
         if (o.start != null) root.scrollTop = o.start;
         from = root.scrollTop;
         lastTo = o.target();
-        id = raf(frame);
-        return;
+        // старт задан заранее (строка появилась кадр назад, а поле ввода уже сжимается) — едем с этого же кадра
+        if (o.since == null) { id = raf(frame); return; }
       }
       const to = o.target();
       // цель сдвинулась (пришло ещё сообщение, подросла картинка) — новая кривая от текущего места, без скачка
