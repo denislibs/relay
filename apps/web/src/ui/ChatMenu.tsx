@@ -7,16 +7,16 @@
 // «Отключить звук…» — окно со сроками (без подменю), «Включить звук» — сразу.
 import { useEffect, useRef, useState } from 'preact/hooks';
 import type { GroupInfo, MyMembership } from '@relay/protocol';
-import { ConfirmDialog, IconButton, MenuPopover, Modal, RadioRow, useHoverMenu } from '@relay/ui';
+import { IconButton, MenuPopover, useHoverMenu } from '@relay/ui';
 import { getGlobal, setGlobal, useGlobal, findChat } from '../global';
 import { blockUser, showToast, unblockUser, useUser } from '../settingsData';
-import { act, canManage } from '../groups';
+import { canManage } from '../groups';
 import { isSystemChat } from './format';
 import { startSelect } from '../forward';
-import { isMuted, MUTE_PRESETS, muteChat, unmuteChat } from '../mute';
-import { closeChat, openInner } from '../data';
+import { isMuted, unmuteChat } from '../mute';
+import { openInner } from '../data';
+import { useChatDialogs } from './chatActions';
 
-type Ask = null | 'mute' | 'delete' | 'leave';
 
 export function ChatMenu({ chatId, title }: { chatId: number; title: string }) {
   const chat = useGlobal((s) => findChat(s, chatId));
@@ -30,15 +30,14 @@ export function ChatMenu({ chatId, title }: { chatId: number; title: string }) {
   const channel = chat?.kind === 'channel';
   const gMe = chat?.kind === 'group' || channel ? (chat!.me as MyMembership | null) ?? null : null;
   const gInfo = chat?.kind === 'group' || channel ? (chat!.group as GroupInfo | null) ?? null : null;
-  const what = channel ? 'канал' : 'группу';
   const owner = gMe?.role === 'owner';
 
   const [open, setOpen] = useState(false);
   const hover = useHoverMenu(open, setOpen);   // как в Telegram: наведение открывает, уход с кнопки и меню — закрывает
-  const [ask, setAsk] = useState<Ask>(null);
-  const [preset, setPreset] = useState(MUTE_PRESETS.length - 1);
+  const dialogs = useChatDialogs(chatId, title);
+  const setAsk = (a: 'mute' | 'delete' | 'leave') => { setOpen(false); dialogs.open(a); };
   const btn = useRef<HTMLSpanElement>(null);
-  useEffect(() => { setOpen(false); setAsk(null); }, [chatId]);
+  useEffect(() => { setOpen(false); }, [chatId]);
 
   const addContact = () => setGlobal({ newContact: {
     query: user?.username ? '@' + String(user.username) : user?.phone ? String(user.phone) : '', userId: peerId!,
@@ -53,7 +52,7 @@ export function ChatMenu({ chatId, title }: { chatId: number; title: string }) {
     // превью канала (не подписан): звук не настраивается — уведомлений и так нет
     ...(chat?.preview ? [] : [muted
       ? { icon: 'bell', label: 'Включить звук', onClick: () => unmuteChat(chatId) }
-      : { icon: 'bellOff', label: 'Отключить звук…', onClick: () => { setPreset(MUTE_PRESETS.length - 1); setAsk('mute'); } }]),
+      : { icon: 'bellOff', label: 'Отключить звук…', onClick: () => setAsk('mute') }]),
     ...(!system && !gInfo?.protected ? [{ icon: 'checkCircle', label: 'Выбрать сообщения', onClick: () => startSelect(chatId, []) }] : []),
     ...(peerId ? [iBlocked
       ? { icon: 'block', label: 'Разблокировать', onClick: () => { void unblockUser(peerId).then(() => showToast('Пользователь разблокирован')); } }
@@ -64,17 +63,6 @@ export function ChatMenu({ chatId, title }: { chatId: number; title: string }) {
     ...(gMe ? ['-' as const, { icon: owner ? 'trash' : 'logout', label: owner ? 'Удалить и покинуть' : channel ? 'Покинуть канал' : 'Покинуть группу', danger: true, onClick: () => setAsk('leave') }] : []),
   ];
 
-  const remove = async (forAll: boolean) => {
-    setAsk(null);
-    const ok = await act('POST', `/chats/${chatId}/delete`, { forAll });
-    if (ok && getGlobal().openChatId === chatId) closeChat();
-  };
-  const leave = async () => {
-    setAsk(null);
-    const me = getGlobal().me?.userId;
-    await act('DELETE', owner ? `/groups/${chatId}` : `/groups/${chatId}/members/${me}`);   // чат закроется сам, когда исчезнет из списка
-  };
-
   return (
     <>
       <span ref={btn} class="app-chatmenu-btn">
@@ -83,26 +71,7 @@ export function ChatMenu({ chatId, title }: { chatId: number; title: string }) {
       </span>
       <MenuPopover open={open} hover anchor={btn.current?.firstElementChild ?? undefined} placement="bottom-end" label="Действия с чатом"
         items={items} onClose={() => setOpen(false)} onPointerEnter={hover.onPointerEnter} onPointerLeave={hover.onPointerLeave} />
-      <Modal open={ask === 'mute'} onClose={() => setAsk(null)} title="Отключить звук" size="confirm" closeButton={false}
-        actions={[
-          <button key="no" type="button" class="rl-mdl-btn" onClick={() => setAsk(null)}>Отмена</button>,
-          <button key="ok" type="button" class="rl-mdl-btn" data-autofocus="" onClick={() => { muteChat(chatId, MUTE_PRESETS[preset].seconds); setAsk(null); }}>Готово</button>,
-        ]}>
-        <div role="radiogroup" aria-label="Срок" class="app-mute-list">
-          {MUTE_PRESETS.map((p, i) => <RadioRow key={p.label} label={p.label} checked={i === preset} onClick={() => setPreset(i)} />)}
-        </div>
-      </Modal>
-      <Modal open={ask === 'delete'} onClose={() => setAsk(null)} title="Удалить чат" size="confirm" role="alertdialog" closeButton={false}>
-        <p class="rl-mdl-text">Удалить чат с <b>{title}</b>? Это действие нельзя отменить.</p>
-        <div class="app-delchat-actions">
-          <button type="button" class="rl-mdl-btn rl-mdl-btn-danger" onClick={() => void remove(true)}>Удалить для меня и {title}</button>
-          <button type="button" class="rl-mdl-btn rl-mdl-btn-danger" onClick={() => void remove(false)}>Удалить только для меня</button>
-          <button type="button" class="rl-mdl-btn" data-autofocus="" onClick={() => setAsk(null)}>Отмена</button>
-        </div>
-      </Modal>
-      <ConfirmDialog open={ask === 'leave'} danger title={owner ? `Удалить ${what}` : `Покинуть ${what}`}
-        text={owner ? `Удалить ${what} «${title}» для всех ${channel ? 'подписчиков' : 'участников'}? Это действие нельзя отменить.` : `Покинуть ${what} «${title}»?`}
-        confirm={owner ? 'Удалить' : 'Покинуть'} onConfirm={() => void leave()} onCancel={() => setAsk(null)} />
+      {dialogs.node}
     </>
   );
 }

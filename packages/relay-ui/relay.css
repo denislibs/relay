@@ -2611,3 +2611,15 @@ html[data-anim="0"] .rl-symbols-pop { transition: none; }
 .rl-dice-roll .rl-slots, .rl-dice-pending .rl-slots { animation: none; }
 @keyframes rl-slots-spin { 0% { transform: translateY(-60%); opacity: 0; } 60% { transform: translateY(8%); opacity: 1; } 100% { transform: none; } }
 @media (prefers-reduced-motion: reduce) { .rl-dice-roll .rl-slots-reel, .rl-dice-pending .rl-slots-reel { animation: none; } }
+
+/* ---------- ProfileActions: ряд действий под именем в «Информации» (как в Telegram Web K) ----------
+   Белые плитки равной ширины на сером фоне панели: 58 px, скругление 16, иконка 24, подпись 12 px строчными. */
+.rl-pacts { display: flex; gap: var(--space-2); margin: var(--space-2) var(--space-3) 0; }
+.rl-pact { position: relative; flex: 1 1 0; min-width: 0; height: 58px; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 2px; padding: 0 4px; overflow: hidden;
+  border: 0; border-radius: 16px; background: var(--raised); color: var(--ink); box-shadow: var(--tg-shadow-bubble, 0 1px 2px rgba(0,0,0,.1)); cursor: pointer;
+  font: 400 12px/16px var(--font-sans); -webkit-tap-highlight-color: transparent; transition: background-color var(--dur-instant) var(--ease-standard); }
+.rl-pact:is(:hover, :focus-visible, .is-open) { background: color-mix(in srgb, var(--raised), var(--ink) 6%); }
+.rl-pact:focus-visible { outline: 2px solid var(--brand-text); outline-offset: -2px; }
+.rl-pact .rl-icon { flex: none; }
+.rl-pact-label { max-width: 100%; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; text-transform: lowercase; }
+@supports (corner-shape: squircle) { .rl-pact { corner-shape: squircle; border-radius: calc(16px * var(--sq)); } }

@@ -2,18 +2,19 @@ import type { ProfileLink, ProfileMusicSummary } from '@relay/protocol';
 import { ProfileLinks } from './links/ProfileLinks';
 import { SharedMedia, type MediaHead } from './SharedMedia';
 import { membersStatus, useMembers } from '../members';
-import { openUserChat, startDirectChat } from '../data';
+import { openInner, openUserChat, startDirectChat } from '../data';
 import { playProfileTop } from '../music';
-import { Avatar, Icon, InfoRow, PanelHeader, RichText, SettingsIcon, SlideFade, SlideStack, Switch, Verified, onHeavyAnimationEnd, peerTone, requestMeasure } from '@relay/ui';
+import { Avatar, Icon, InfoRow, PanelHeader, ProfileActions, RichText, SettingsIcon, SlideFade, SlideStack, Verified, onHeavyAnimationEnd, peerTone, requestMeasure } from '@relay/ui';
 import type { Item } from '@relay/sync-engine/src/types';
 import { chatTone, isSystemChat } from './format';
 import type { ComponentChildren } from 'preact';
 import { useEffect, useRef, useState } from 'preact/hooks';
 import { activeFrame, setGlobal, useGlobal, getGlobal, findChat } from '../global';
-import { isChatMuted, toggleMute } from '../mute';
+import { isChatMuted, unmuteChat } from '../mute';
+import { joinChat, useChatDialogs } from './chatActions';
 
 import { birthdayText, lastSeenText, type Birthday } from './format';
-import { showToast, useUser } from '../settingsData';
+import { blockUser, showToast, unblockUser, useUser } from '../settingsData';
 import { EditContactPanel } from './contacts/EditContact';
 import type { ProfilePhoto } from '@relay/protocol';
 import { avatarPhoto, useProfilePhotos, userPhoto } from '../profilePhoto';
@@ -177,6 +178,33 @@ export function Info() {
     : contact ? { icon: 'userPen', label: 'Изменить контакт', onClick: () => setPage('edit') }
     : { icon: 'contactAdd', label: 'Добавить в контакты', onClick: addContact };
 
+  // ряд кнопок под именем (как в Telegram Web K): вступить, звук, обсуждение, покинуть; у человека «Ещё» —
+  // заблокировать и удалить чат. Звук: выключен — включается сразу, включён — окно со сроками (как «⋮» в шапке).
+  const dialogs = useChatDialogs(chatId, title);
+  const iBlocked = useGlobal((s) => peerId != null && s.blocked.some((b) => b.userId === peerId));
+  const [joining, setJoining] = useState(false);
+  useEffect(() => { setJoining(false); }, [chatId, !!gMe]);
+  const linked = channel && gInfo?.linkedChatId != null && getGlobal().chats.some((c) => c.id === gInfo.linkedChatId) ? gInfo.linkedChatId : null;
+  const tiles = [
+    ...(group && !gMe ? [{ key: 'join', icon: 'userPlus',
+      label: chat?.requested ? 'заявка отправлена' : gInfo?.joinApproval ? 'подать заявку' : channel ? 'подписаться' : 'вступить',
+      onClick: () => { if (joining || chat?.requested) return; setJoining(true); void joinChat(chatId).then((r) => { if (r !== 'joined') setJoining(false); }); } }] : []),
+    // превью канала без подписки: уведомлений нет — и звук не настраивается
+    ...(chat?.preview ? [] : [muted
+      ? { key: 'mute', icon: 'bell', label: 'вкл. звук', menuLabel: 'Включить звук', onClick: () => unmuteChat(chatId) }
+      : { key: 'mute', icon: 'bellOff', label: 'без звука', menuLabel: 'Отключить звук…', onClick: () => dialogs.open('mute') }]),
+    ...(linked != null ? [{ key: 'discussion', icon: 'chats', label: 'обсуждение', onClick: () => openInner(linked) }] : []),
+    ...(gMe ? [{ key: 'leave', icon: gMe.role === 'owner' ? 'trash' : 'logout', label: gMe.role === 'owner' ? 'удалить' : 'покинуть',
+      menuLabel: gMe.role === 'owner' ? 'Удалить и покинуть' : channel ? 'Покинуть канал' : 'Покинуть группу', danger: true, onClick: () => dialogs.open('leave') }] : []),
+  ];
+  const tileMenu = peerId ? [
+    iBlocked
+      ? { icon: 'block', label: 'Разблокировать', onClick: () => { void unblockUser(peerId).then(() => showToast('Пользователь разблокирован')); } }
+      : { icon: 'block', label: 'Заблокировать', onClick: () => { void blockUser(peerId).then(() => showToast('Пользователь заблокирован')); } },
+    '-' as const,
+    { icon: 'trash', label: 'Удалить чат', danger: true, onClick: () => dialogs.open('delete') },
+  ] : [];
+
   // участник из вкладки «Участники»: переписка с ним ложится в стек поверх группы (как в Telegram);
   // «Назад» в шапке возвращает в группу. Чата ещё нет — создаётся.
   const openMember = (userId: number) => { void openUserChat(userId); };
@@ -209,7 +237,8 @@ export function Info() {
           {peerId ? <ProfileMusicBar userId={peerId} music={user?.music as ProfileMusicSummary | null | undefined} /> : null}
         </div>
         )}
-        <div class="rl-aside-group">
+        <ProfileActions label="Действия с чатом" actions={tiles} menu={tileMenu} />
+        <div class="rl-aside-group app-info-rows">
           {/* как в Telegram: имя уже в шапке — строками только то, чего там нет, и только если поле заполнено */}
           <Expand show={!group && !!user}>{!group && user ? <PeerRows user={user} /> : null}</Expand>
           <Expand show={group && !!gInfo?.about}>{group && gInfo?.about ? (
@@ -222,13 +251,6 @@ export function Info() {
             <InfoRow tile="blue" icon="link" title={publicUrl(gInfo.username).replace(/^https?:\/\//, '')} subtitle="Ссылка" onClick={() => copyText(publicUrl(gInfo.username!))} />
           ) : null}</Expand>
           <Expand show={!group && !!(user?.links as ProfileLink[] | undefined)?.length}>{!group && user ? <ProfileLinks links={(user.links as ProfileLink[] | undefined) ?? []} /> : null}</Expand>
-          {/* превью канала без подписки: уведомлений нет — и переключателя (участников и управления не видно: me нет) */}
-          {chat?.preview ? null : <InfoRow
-            tile="red"
-            icon={muted ? 'bellOff' : 'bell'}
-            title="Уведомления"
-            trailing={<Switch id="info-notify" label="Уведомления" checked={!muted} onChange={() => toggleMute(chatId)} />}
-          />}
           <Expand show={!!contact?.note}>{contact?.note ? (
             <div class="rl-inforow rl-inforow-static">
               <SettingsIcon icon="pencil" color="gray" />
@@ -237,6 +259,7 @@ export function Info() {
           ) : null}</Expand>
         </div>
         <SharedMedia chatId={chatId} group={chat?.kind === 'group' || (channel && gAdmin)} channel={channel} peerId={system ? null : peerId} onHead={setMediaHead} onMember={openMember} />
+        {dialogs.node}
         {viewer != null && gallery.length ? (
           <PhotoViewer photos={gallery} index={viewer} name={title} onIndex={setSlide} onClose={() => setViewer(null)}
             origin={(k) => (k === slide ? document.querySelector<HTMLElement>(`.app-gallery [data-gallery-slide="${k}"]`) : null)} />

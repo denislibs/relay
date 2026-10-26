@@ -12,6 +12,7 @@ import { wantPeople } from '../people';
 import { senderAvatar } from '../profilePhoto';
 import { showToast } from '../settingsData';
 import { asLast, previewBody } from './preview';
+import { joinChat } from './chatActions';
 
 // Каналы в ленте: мета поста, кнопка комментариев, нижняя панель подписчика, «к упоминанию», «кто прочитал»,
 // плашка поста над тредом. Поведение — как в Telegram, разметка — своя.
@@ -90,13 +91,7 @@ export function ChannelBar({ chatId, member, username, approval, requested }: { 
   const join = async () => {
     if (!username) { showToast('Вступить можно по пригласительной ссылке канала'); return; }
     setBusy(true);
-    const r = await groupCall<{ chatId: number; requested: boolean }>('POST', '/join/@' + username);
-    if (!r.ok) { setBusy(false); showToast(errorText(r.code)); return; }
-    if (r.data.requested) {
-      setBusy(false);
-      refreshPreview(chatId);   // строка превью — с заявкой: кнопка «Заявка отправлена», и при повторном открытии
-      showToast('Заявка отправлена — администраторы её рассмотрят');
-    }
+    if ((await joinChat(chatId)) !== 'joined') setBusy(false);   // заявка или ошибка — тост уже показан
   };
   return (
     <div class="rl-composer-wrap app-plate-wrap">

@@ -1400,3 +1400,5 @@ html[data-anim="0"] :is(.app-enter-reload, .app-enter-login) :is(.rl-shell-side,
 .app-pollres-user { display: flex; align-items: center; gap: 10px; width: 100%; padding: 6px 4px; border: 0; border-radius: 10px; background: transparent; color: var(--ink); font: 400 15px/20px var(--font-sans); text-align: left; cursor: pointer; }
 .app-pollres-user:hover { background: var(--hover); }
 .app-pollres-note { margin: 8px 4px 0; color: var(--ink-muted); font: 400 13px/18px var(--font-sans); }
+/* «Информация»: строки профиля — карточкой; нет ни одной строки (звук теперь кнопкой в ряду над ней) — карточки нет */
+.app-info-rows:not(:has(.rl-inforow)) { display: none; }
