@@ -11,6 +11,7 @@ import { hideSpoilers, MAX_FILE_BYTES, type Entity } from '@relay/protocol';
 import { activeFrame, findChat, frameByKey, getGlobal, isPhone, setGlobal, subscribeGlobal, type ChatFrame, type FeedMeta, type Me, type Status, type UploadItem } from './global';
 import { closeLayer, closeLayers, pushLayer } from './nav';
 import { notifyIncoming, startNotify } from './notify';
+import { noteIncoming } from './title';
 import { rememberKeysIn, startFileKeyService } from './fileKeys';
 import { bindMute, isMuted, startMuteMigration } from './mute';
 import { bindChatFlags, clearUnreadMark } from './chatFlags';
@@ -161,6 +162,7 @@ function watchNotifications(meId: number): void {
       if ((chatId === g.openChatId || (copyOf && copyOf.id === g.openChatId)) && document.visibilityState === 'visible') continue;
       if (isOwnChannelPost(item, chatOf)) continue;   // свои посты и их копии
       const c = g.chats.find((x) => x.id === chatId);
+      noteIncoming(chatId, { muted: isMuted(c ?? { id: chatId }) && !item.mention, createdAt: n.createdAt as string });
       notifyIncoming({ id: chatId, title: (c?.title as string) || 'Чат №' + chatId, muted: isMuted(c ?? { id: chatId }), system: isSystemChat(c) },
         { id: n.id as number, body: hideSpoilers(String(n.body ?? ''), n.entities as Entity[] | undefined), kind: n.kind as string | undefined, attachmentName: n.attachmentName as string | null, createdAt: n.createdAt as string, service: n.service as { type: string } | undefined, threadId: n.threadId as number | undefined },
         { mention: !!n.mention });
