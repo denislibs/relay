@@ -62,6 +62,8 @@ async function build(): Promise<void> {
     entrypoints: [join(root, 'src', 'main.tsx'), join(engineHosts, 'shared.worker.ts'), join(engineHosts, 'dedicated.worker.ts'), join(ui, 'src', 'spoiler.worker.js'), join(ui, 'src', 'lottie', 'lottie.worker.js'), join(ui, 'src', 'articleEditor.js'), join(root, 'src', 'media', 'videoTranscode.ts')],   // articleEditor — Tiptap, грузится при первом развороте; videoTranscode — Mediabunny, при первом сжатии видео
     outdir: tmp,
     target: 'browser',
+    format: 'esm',
+    splitting: true,
     naming: { entry: '[name]-[hash].[ext]', chunk: '[name]-[hash].[ext]', asset: '[name]-[hash].[ext]' },
     minify: !isWatch,
     sourcemap: 'linked',
@@ -74,7 +76,10 @@ async function build(): Promise<void> {
   }
   // логическое имя → адрес с хэшем: код берёт его из index.html (src/assets.ts)
   const assets: Record<string, string> = {};
+  // чанки (splitting): общий код точек входа и разделы за import() — ui/lazy.tsx (вход, настройки, эмодзи, группы)
+  const chunks: string[] = [];
   for (const o of res.outputs) {
+    if (o.kind === 'chunk') chunks.push('/' + basename(o.path));
     if (o.kind !== 'entry-point') continue;
     const file = basename(o.path);
     assets[file.replace(/-[a-z0-9]{8,}(\.js)$/, '$1')] = '/' + file;
@@ -97,11 +102,17 @@ async function build(): Promise<void> {
   let html = await Bun.file(join(root, 'public', 'index.html')).text();
   for (const [name, url] of Object.entries(css)) html = html.replace(`<link rel="stylesheet" href="/${name}">`, `<link rel="stylesheet" href="${url}" integrity="${await sri(tmp, url)}">`);
   html = html.replace('<script src="/boot.js"></script>', `<script src="${boot}" integrity="${await sri(tmp, boot)}"></script>`);
-  html = html.replace('<script type="module" src="/main.js"></script>', `<script type="module" src="${assets['main.js']}" integrity="${await sri(tmp, assets['main.js'])}"></script>`);
+  // чанки, которые main импортирует статически, — modulepreload рядом с ним: качаются параллельно, а не после разбора main
+  const mainCode = await Bun.file(join(tmp, assets['main.js'].slice(1))).text();
+  const direct = [...mainCode.matchAll(/(?:^|[;}\s])import\s*(?:[\w${}\s,*]*?from\s*)?"\.\/([\w.-]+\.js)"/g)].map((m) => '/' + m[1]).filter((u) => chunks.includes(u));
+  let preload = '';
+  for (const url of [...new Set(direct)]) preload += `<link rel="modulepreload" href="${url}" integrity="${await sri(tmp, url)}">\n  `;
+  html = html.replace('<script type="module" src="/main.js"></script>', `${preload}<script type="module" src="${assets['main.js']}" integrity="${await sri(tmp, assets['main.js'])}"></script>`);
   for (const url of [boot, assets['main.js'], ...Object.values(css)]) if (!html.includes(`"${url}" integrity=`)) throw new Error(`index.html: нет ${url} с integrity`);
   await Bun.write(join(tmp, 'index.html'), html);
   // Service Worker — без хэша (адрес регистрации постоянный), со списком оболочки этой сборки
-  const shell = [boot, assets['main.js'], ...Object.values(css), assets['shared.worker.js'], assets['dedicated.worker.js'], assets['spoiler.worker.js'], assets['lottie.worker.js'], assets['tlottie.wasm'], assets['voice.worklet.js']];
+  // чанки — все: ленивые разделы (настройки, вход…) должны открываться и без сети
+  const shell = [boot, assets['main.js'], ...chunks, ...Object.values(css), assets['shared.worker.js'], assets['dedicated.worker.js'], assets['spoiler.worker.js'], assets['lottie.worker.js'], assets['tlottie.wasm'], assets['voice.worklet.js']];
   // SW сверяет каждый файл с хэшем в имени с этой таблицей: чужие байты (подмена в CDN, кэше, прокси) не выполнятся
   const integrity = await integrityTable(tmp);
   const sw = await Bun.build({ entrypoints: [join(root, 'src', 'sw.ts')], outdir: tmp, target: 'browser', naming: '[name].[ext]', minify: !isWatch, sourcemap: 'linked', define: { ...define, __SHELL__: JSON.stringify(shell), __INTEGRITY__: JSON.stringify(integrity) } });

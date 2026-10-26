@@ -19,6 +19,8 @@ import { startSettingsData } from './settingsData';
 import { startTitle } from './title';
 import { warmEmoji } from '@relay/protocol';
 import { App } from './ui/App';
+import { preloadLazy } from './ui/lazy';
+import { Login } from './ui/Login';
 import { warmSounds } from './sound';
 import { asset } from './assets';
 import { installDeviceFetch, startDeviceAuth } from './deviceAuth';
@@ -66,6 +68,7 @@ async function boot(): Promise<void> {
     start(cached);
     return;
   }
+  void Login.preload();   // профиля на устройстве нет — скорее всего, вход: его чанк качается вместе с запросом /me
   let me: Me | null = null;
   try {
     const res = await fetch('/me');
@@ -144,3 +147,8 @@ render(<App />, document.getElementById('app')!);
 boot();
 // звуки сообщений: вывод звука заводится заранее, в простое — иначе первая отправка ждёт его в обработчике (sound.ts)
 onFullyIdle(() => { if (getPrefs().notify.sound) warmSounds(); });
+// настройки, эмодзи и стикеры, управление группой — чанками (ui/lazy.tsx): к первому открытию они уже загружены.
+// После первого экрана — когда пришёл список чатов (первое простое наступает раньше, пока ждём данные)
+{
+  const off = subscribeGlobal(() => { if (getGlobal().chatsLoaded) { off(); onFullyIdle(() => preloadLazy(onFullyIdle)); } });
+}
