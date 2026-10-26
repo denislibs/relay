@@ -603,8 +603,10 @@ export function openChat(chatId: number | null, target?: { id: number; sort: num
       pendingBottom = null;
       setGlobal((s) => ({ chatStack: [...s.chatStack.filter((f) => f.ready), staged] }));
       const alive = () => stack().some((f) => f.key === staged.key);
-      // кадр N — колонка рендерится и раскладывается скрытой; кадр N+1 — смена
-      requestAnimationFrame(() => requestAnimationFrame(() => requestMutation(() => {
+      // кадр N — колонка рендерится (Preact — в мутациях этого кадра) и раскладывается скрытой; кадр N+1 — смена.
+      // rAF ставится после кадра планировщика и идёт в кадре N сразу за ним: setGlobal отсюда рендерится уже в N+1
+      // (из requestMutation смена ушла бы ещё на кадр позже — рендер, заказанный в мутации, идёт следующим кадром)
+      requestAnimationFrame(() => {
         if (!alive()) return;
         for (const f of stack()) if (f.key !== staged.key) closeSession(f.key);
         dropParked();
@@ -613,7 +615,7 @@ export function openChat(chatId: number | null, target?: { id: number; sort: num
         syncShown();
         // смена без перехода только в этот раз: потом колонка уезжает влево под следующий чат как обычно
         requestAnimationFrame(() => requestAnimationFrame(() => { if (alive()) patchFrame(staged.key, { swap: false }); }));
-      })));
+      });
     });
   });
 }
