@@ -1,7 +1,8 @@
 /** @jsxImportSource preact */
 import type { StickerRef, StickerSetInfo } from '@relay/protocol';
-import { Icon, IconButton, MenuPopover, StickerView, confirmModal, reducedMotion, requestMeasure, requestMutation } from '@relay/ui';
+import { Icon, IconButton, MenuPopover, StickerView, beginHeavyAnimation, confirmModal, reducedMotion, requestMeasure, requestMutation } from '@relay/ui';
 import type { ComponentChildren } from 'preact';
+import { memo } from 'preact/compat';
 import { useEffect, useRef, useState } from 'preact/hooks';
 import { clearRecentStickers, faveSticker, loadStickerSet, openStickerSet, searchSets, stickersByEmoji, useMyStickers } from '../../stickers';
 import { EMOJI, QUICK, pushRecentEmoji, recentEmoji, searchEmoji } from './emojiData';
@@ -15,6 +16,7 @@ import { StickerPreviewHold } from './StickerPreview';
 type Tab = 'emoji' | 'stickers';
 const TAB_KEY = 'relay.symbols.tab';
 const CLOSE_MS = 180;   // закрытие панели (composer.js, relay.css .rl-symbols-pop.is-closing)
+const SLIDE_MS = 200;   // смена вкладки: обе едут вместе (app.css .app-sym-slide-*)
 const EMOJI_COLS = 8, EMOJI_ROW = 42;      // ячейка эмодзи 42 px (глиф 34)
 const STK_COLS = 5, STK_ROW = 76;          // ячейка стикера 72 px + 4 px зазор
 
@@ -28,10 +30,14 @@ export interface SymbolMenuProps {
 
 export function SymbolMenu(p: SymbolMenuProps) {
   const [tab, setTab] = useState<Tab>(() => { try { return (localStorage.getItem(TAB_KEY) as Tab) || 'emoji'; } catch { return 'emoji'; } });
-  const [dir, setDir] = useState<'l' | 'r' | null>(null);
   // как в Telegram Web K: обе вкладки, раз построенные, живут в DOM (скрытая — display: none, её стикеры стоят).
   // Переключение — только показ: без перерисовки сетки, новых плееров стикеров и сборки мусора от старых
   const [built, setBuilt] = useState<Record<Tab, boolean>>(() => ({ emoji: tab === 'emoji', stickers: tab === 'stickers' }));
+  // Смена вкладки — как в Telegram Web K: уходящая и новая едут вместе на всю ширину, без прозрачности (затухание
+  // показывало пустой фон панели — «вспышку белым»). Два шага: prep — новая вкладка в раскладке, но невидима
+  // (впервые построенная сетка и показ из display: none не попадают в кадр анимации); следующим кадром — slide.
+  const [prep, setPrep] = useState<Tab | null>(null);
+  const [slide, setSlide] = useState<{ from: Tab; dir: 'l' | 'r' } | null>(null);
   // закрыли панель — со следующего открытия «Недавние» свежие: вкладки пересоздаются, но уже после
   // анимации закрытия (иначе новое содержимое въезжало бы в исчезающую панель)
   const [epoch, setEpoch] = useState(0);
@@ -40,21 +46,50 @@ export function SymbolMenu(p: SymbolMenuProps) {
     const closed = wasOpen.current && !p.open;
     wasOpen.current = p.open;
     if (!closed) return;
-    const t = setTimeout(() => { setDir(null); setEpoch((n) => n + 1); }, CLOSE_MS + 50);
+    const t = setTimeout(() => { setSlide(null); setEpoch((n) => n + 1); }, CLOSE_MS + 50);
     return () => clearTimeout(t);
   }, [p.open]);
   const pick = (t: Tab) => {
-    if (t === tab) return;
-    setDir(t === 'stickers' ? 'r' : 'l');
-    setTab(t);
+    if (t === tab || t === prep) return;
     setBuilt((b) => (b[t] ? b : { ...b, [t]: true }));
     try { localStorage.setItem(TAB_KEY, t); } catch { /* ok */ }
+    if (reducedMotion()) { setSlide(null); setTab(t); return; }
+    setPrep(t);
   };
-  const body = (t: Tab) => built[t] ? (
-    <div class={'app-sym-body' + (t === tab && dir ? ' app-sym-from-' + dir : '')} key={t + ':' + epoch} hidden={t !== tab}>
-      {t === 'emoji' ? <EmojiTab onPick={p.onEmoji} /> : <StickersTab onPick={p.onSticker} />}
-    </div>
-  ) : null;
+  // prep отрисован и разложен — со следующей фазы записи обе вкладки едут; уходящая прячется по окончании
+  useEffect(() => {
+    if (!prep) return;
+    let live = true;
+    requestMeasure(() => requestMutation(() => {
+      if (!live) return;
+      beginHeavyAnimation(SLIDE_MS + 50);
+      setSlide({ from: tab, dir: prep === 'stickers' ? 'r' : 'l' });
+      setTab(prep);
+      setPrep(null);
+    }));
+    return () => { live = false; };
+  }, [prep]);
+  useEffect(() => {
+    if (!slide) return;
+    const t = setTimeout(() => setSlide(null), SLIDE_MS + 30);
+    return () => clearTimeout(t);
+  }, [slide]);
+  // содержимое вкладок не зависит от шагов переключения: memo + постоянные обработчики — смена классов
+  // не перерисовывает сотни стикеров и эмодзи (без этого кадр старта длился ~50 мс)
+  const handlers = useRef(p);
+  handlers.current = p;
+  const stable = useRef({ emoji: (e: string) => handlers.current.onEmoji(e), sticker: (s: StickerRef) => handlers.current.onSticker(s) }).current;
+  const body = (t: Tab) => {
+    if (!built[t]) return null;
+    const cls = t === prep ? ' is-prep'
+      : slide && t === tab ? ' app-sym-slide-in-' + slide.dir
+      : slide && t === slide.from ? ' app-sym-slide-out-' + slide.dir : '';
+    return (
+      <div class={'app-sym-body' + cls} key={t + ':' + epoch} hidden={t !== tab && t !== prep && t !== slide?.from} inert={t !== tab}>
+        {t === 'emoji' ? <EmojiTabMemo onPick={stable.emoji} /> : <StickersTabMemo onPick={stable.sticker} />}
+      </div>
+    );
+  };
   return (
     <div class="app-sym">
       {body('emoji')}
@@ -149,13 +184,13 @@ function ChipIcon({ src }: { src: string }) {
 }
 
 /** Строка поиска с фильтрами справа; выбранный фильтр — стрелка «назад» вместо лупы. */
-function SearchRow({ placeholder, q, setQ, group, setGroup, chips }: { placeholder: string; q: string; setQ(v: string): void; group: number | null; setGroup(i: number | null): void; chips: Chip[] | undefined }) {
+function SearchRow({ placeholder, q, setQ, group, setGroup, chips, onFocus }: { placeholder: string; q: string; setQ(v: string): void; group: number | null; setGroup(i: number | null): void; chips: Chip[] | undefined; onFocus(on: boolean): void }) {
   return (
     <div class={'app-sym-search' + (q ? ' is-typing' : '')}>
       {group != null
         ? <button type="button" class="app-sym-search-icon is-back" aria-label="Назад" onClick={() => setGroup(null)}><Icon name="arrowLeft" size={20} /></button>
         : <span class="app-sym-search-icon" aria-hidden="true"><Icon name="search" size={20} /></span>}
-      <input type="text" placeholder={placeholder} value={q} aria-label={placeholder} onInput={(e) => { setGroup(null); setQ((e.target as HTMLInputElement).value); }} />
+      <input type="text" placeholder={placeholder} value={q} aria-label={placeholder} onFocus={() => onFocus(true)} onBlur={() => onFocus(false)} onInput={(e) => { setGroup(null); setQ((e.target as HTMLInputElement).value); }} />
       {q ? <IconButton icon="close" label="Очистить" size={18} onClick={() => setQ('')} /> : (
         chips ? <div class="app-sym-chips">
           {chips.map((c, i) => (
@@ -178,18 +213,20 @@ export function EmojiTab({ onPick, animate, selected }: { onPick(e: string): voi
   const [drawn, setDrawn] = useState<string | null>(null);   // у анимации под курсором есть первый кадр — глиф под ней прячем
   const [q, setQ] = useState('');
   const [group, setGroup] = useState<number | null>(null);
+  const [focused, setFocused] = useState(false);
   const chips = useChips('emoji');
   const chip = group != null ? chips?.[group] : undefined;
   const found = chip ? chip.emoticons : q.trim() ? searchEmoji(q) : null;
-  const cats = found ? [{ id: 'found', title: chip ? chip.label : 'Найдено', icon: 'search', list: found }]
-    : recent.length ? [{ id: 'recent', title: 'Часто используемые', icon: 'clock', list: recent }, ...EMOJI] : EMOJI;
+  const base = recent.length ? [{ id: 'recent', title: 'Часто используемые', icon: 'clock', list: recent }, ...EMOJI] : EMOJI;
+  const cats = found ? [{ id: 'found', title: chip ? chip.label : 'Найдено', icon: 'search', list: found }] : base;
   const s = useSections(cats.length);
   const pick = (e: string) => { pushRecentEmoji(e); onPick(e); };
   return (
-    <div class="app-sym-pane">
-      <Strip items={(found ? [] : cats).map((c) => <Icon name={c.icon} size={24} />)} state={s.state} go={s.go} />
+    <div class={'app-sym-pane' + (focused || found ? ' is-searching' : '')}>
+      {/* полоса при поиске уезжает вверх с прежними иконками — не пустеет на лету */}
+      <Strip items={base.map((c) => <Icon name={c.icon} size={24} />)} state={s.state} go={s.go} />
       <div class="app-sym-scroll" ref={s.scroller} onScroll={s.onScroll}>
-        <SearchRow placeholder="Поиск эмодзи" q={q} setQ={setQ} group={group} setGroup={setGroup} chips={chips} />
+        <SearchRow placeholder="Поиск эмодзи" q={q} setQ={setQ} group={group} setGroup={setGroup} chips={chips} onFocus={setFocused} />
         {cats.map((c, i) => <EmojiSection key={c.id} cat={c} eager={i < 2} root={s.scroller} onPick={pick} cell={animate ? (e) => (
           <button key={e} type="button" class={'app-emoji' + (selected === e ? ' is-on' : '')} aria-pressed={selected === e} onClick={() => pick(e)}
             onMouseEnter={() => { if (animate(e)) { setDrawn(null); setHover(e); } }} onMouseLeave={() => setHover((h) => (h === e ? null : h))}>
@@ -234,6 +271,7 @@ function StickersTab({ onPick }: { onPick(s: StickerRef): void }) {
   const recent = frozen.current ?? mine.recent;
   const [q, setQ] = useState('');
   const [group, setGroup] = useState<number | null>(null);
+  const [focused, setFocused] = useState(false);
   const chips = useChips('sticker');
   const chip = group != null ? chips?.[group] : undefined;
   const [found, setFound] = useState<{ stickers?: StickerRef[]; sets?: StickerSetInfo[] } | null>(null);
@@ -253,16 +291,17 @@ function StickersTab({ onPick }: { onPick(s: StickerRef): void }) {
     return () => { live = false; clearTimeout(t); };
   }, [q, group, chip?.query]);
 
+  const own: Section[] = [
+    ...(mine.faved.length ? [{ key: 'faved', title: 'Избранное', stickers: mine.faved, count: mine.faved.length }] : []),
+    ...(recent.length ? [{ key: 'recent', title: 'Недавние', stickers: recent, count: recent.length, clear: true }] : []),
+  ];
+  const setSection = (set: StickerSetInfo): Section => ({ key: 'set' + set.id, title: set.title, set, count: set.count });
+  const base: Section[] = [...own, ...mine.sets.filter((x) => x.kind === 'sticker').map(setSection)];
   const sections: Section[] = found?.stickers ? [{ key: 'found', title: chip ? chip.label : 'Найдено', stickers: found.stickers, count: found.stickers.length }]
-    : [
-      ...(found?.sets ? [] : [
-        ...(mine.faved.length ? [{ key: 'faved', title: 'Избранное', stickers: mine.faved, count: mine.faved.length }] : []),
-        ...(recent.length ? [{ key: 'recent', title: 'Недавние', stickers: recent, count: recent.length, clear: true }] : []),
-      ]),
-      ...(found?.sets ?? mine.sets).filter((x) => x.kind === 'sticker').map((set) => ({ key: 'set' + set.id, title: set.title, set, count: set.count })),
-    ];
+    : found?.sets ? found.sets.filter((x) => x.kind === 'sticker').map(setSection)
+    : base;
   const s = useSections(sections.length);
-  const stripItems = (found ? [] : sections).map((sec) => sec.key === 'faved' ? <Icon name="bookmark" size={24} /> : sec.key === 'recent' ? <Icon name="clock" size={24} />
+  const stripItems = base.map((sec) => sec.key === 'faved' ? <Icon name="bookmark" size={24} /> : sec.key === 'recent' ? <Icon name="clock" size={24} />
     : sec.set?.cover ? <StickerView src={sec.set.cover.url} outline={sec.set.cover.outline} w={512} h={512} size={30} play={false} group="panel" title={sec.title} /> : <Icon name="sticker" size={24} />);
 
   const clearRecent = async () => {
@@ -273,10 +312,10 @@ function StickersTab({ onPick }: { onPick(s: StickerRef): void }) {
   };
 
   return (
-    <div class="app-sym-pane">
+    <div class={'app-sym-pane' + (focused || q.trim() || group != null ? ' is-searching' : '')}>
       <Strip items={stripItems} state={s.state} go={s.go} />
       <div class="app-sym-scroll" ref={s.scroller} onScroll={s.onScroll}>
-        <SearchRow placeholder="Поиск стикеров" q={q} setQ={setQ} group={group} setGroup={setGroup} chips={chips} />
+        <SearchRow placeholder="Поиск стикеров" q={q} setQ={setQ} group={group} setGroup={setGroup} chips={chips} onFocus={setFocused} />
         {sections.map((sec, i) => (
           <StickerSection key={sec.key} sec={sec} root={s.scroller} eager={i < 2} onPick={onPick}
             onClear={sec.clear ? clearRecent : undefined}
@@ -353,3 +392,6 @@ function StickerSection({ sec, root, eager, onPick, onClear, onMenu }: { sec: Se
     </section>
   );
 }
+
+const EmojiTabMemo = memo(EmojiTab);
+const StickersTabMemo = memo(StickersTab);
