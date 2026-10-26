@@ -7,6 +7,7 @@ import { cp, mkdir, rm } from 'node:fs/promises';
 import { basename, join } from 'node:path';
 import { brotliCompressSync, constants as Z, gzipSync } from 'node:zlib';
 import { VOICE_WORKLET } from '../../packages/relay-ui/src/media/voiceWorklet.js';
+import { minifyCss } from './cssMin';
 
 const root = import.meta.dir;
 const ui = join(root, '..', '..', 'packages', 'relay-ui');
@@ -21,6 +22,10 @@ const HISTORY = '.assets-history.json';   // файлы двух последн�
 /** name.css → name-<хэш>.css; возвращает публичный адрес. */
 async function hashedCopy(src: string, dir: string, name: string): Promise<string> {
   return hashedWrite(await Bun.file(src).bytes(), dir, name);
+}
+/** Стили: в продакшене — без комментариев и лишних пробелов (cssMin.ts), в dev — как в исходнике, для чтения. */
+async function hashedCss(src: string, dir: string, name: string): Promise<string> {
+  return isWatch ? hashedCopy(src, dir, name) : hashedWrite(minifyCss(await Bun.file(src).text()), dir, name);
 }
 async function hashedWrite(body: Uint8Array | string, dir: string, name: string): Promise<string> {
   const bytes = typeof body === 'string' ? new TextEncoder().encode(body) : body;
@@ -89,9 +94,9 @@ async function build(): Promise<void> {
   for (const w of ['tlottie.wasm', 'tlottie-no-simd.wasm']) assets[w] = await hashedCopy(join(ui, 'vendor', 'tlottie', w), tmp, w);
   await rm(join(tmp, 'app.css'), { force: true });
   const css = {
-    'tokens.css': await hashedCopy(join(ui, 'tokens.css'), tmp, 'tokens.css'),
-    'relay.css': await hashedCopy(join(ui, 'relay.css'), tmp, 'relay.css'),
-    'app.css': await hashedCopy(join(root, 'public', 'app.css'), tmp, 'app.css'),
+    'tokens.css': await hashedCss(join(ui, 'tokens.css'), tmp, 'tokens.css'),
+    'relay.css': await hashedCss(join(ui, 'relay.css'), tmp, 'relay.css'),
+    'app.css': await hashedCss(join(root, 'public', 'app.css'), tmp, 'app.css'),
   };
   // ворклет записи голосового — файлом (CSP не пускает скрипты из blob:)
   assets['voice.worklet.js'] = await hashedWrite(VOICE_WORKLET, tmp, 'voice.worklet.js');
