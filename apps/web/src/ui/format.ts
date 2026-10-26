@@ -39,13 +39,23 @@ export function clock(iso: string, fmt?: TimeFormat): string {
   return hm(new Date(iso), fmt);
 }
 
+// Форматтеры Intl создаются один раз: toLocaleDateString с параметрами строил новый на каждое сообщение ленты
+const DAY_SAME_YEAR = new Intl.DateTimeFormat('ru-RU', { day: 'numeric', month: 'long' });
+const DAY_OTHER_YEAR = new Intl.DateTimeFormat('ru-RU', { day: 'numeric', month: 'long', year: 'numeric' });
+const dayLabels = new Map<string, string>();   // день + сегодняшний день («Сегодня/Вчера» зависят от него) → подпись
+
 export function dayLabel(iso: string): string {
   const d = new Date(iso), now = new Date();
   const day = (x: Date) => new Date(x.getFullYear(), x.getMonth(), x.getDate()).getTime();
+  const key = day(d) + ':' + day(now);
+  const hit = dayLabels.get(key);
+  if (hit) return hit;
   const diff = Math.round((day(now) - day(d)) / 86_400_000);
-  if (diff === 0) return 'Сегодня';
-  if (diff === 1) return 'Вчера';
-  return d.toLocaleDateString('ru-RU', { day: 'numeric', month: 'long', year: d.getFullYear() === now.getFullYear() ? undefined : 'numeric' });
+  const label = diff === 0 ? 'Сегодня' : diff === 1 ? 'Вчера'
+    : (d.getFullYear() === now.getFullYear() ? DAY_SAME_YEAR : DAY_OTHER_YEAR).format(d);
+  if (dayLabels.size > 500) dayLabels.clear();
+  dayLabels.set(key, label);
+  return label;
 }
 
 export function dayKey(iso: string): string {

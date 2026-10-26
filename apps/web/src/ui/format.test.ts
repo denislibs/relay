@@ -1,5 +1,5 @@
 import { expect, test } from 'bun:test';
-import { chatTime, clock, hideCode, hm, isSystemChat, shownBody, snippet } from './format';
+import { chatTime, clock, dayLabel, hideCode, hm, isSystemChat, shownBody, snippet } from './format';
 
 const at = (h: number, m: number) => new Date(2026, 9, 17, h, m).toISOString();
 
@@ -55,4 +55,20 @@ test('search hits: a login_code hit shows the code as dots in the snippet', () =
   expect(snippet(shownBody(hit), '48213')).not.toContain('48213');
   expect(shownBody({ body: 'встреча 48213' })).toBe('встреча 48213');
   expect(shownBody({ body: 'встреча 48213', service: { type: 'new_login' } })).toBe('встреча 48213');
+});
+
+test('dayLabel: сегодня, вчера, дата этого и прошлого года', () => {
+  const now = new Date();
+  const d = (days: number) => new Date(now.getFullYear(), now.getMonth(), now.getDate() - days, 12).toISOString();
+  expect(dayLabel(d(0))).toBe('Сегодня');
+  expect(dayLabel(d(1))).toBe('Вчера');
+  const old = new Date(now.getFullYear() - 1, 2, 8, 12);
+  expect(dayLabel(old.toISOString())).toBe(old.toLocaleDateString('ru-RU', { day: 'numeric', month: 'long', year: 'numeric' }));
+  const thisYear = new Date(now.getFullYear(), now.getMonth(), now.getDate() - 40, 12);
+  if (thisYear.getFullYear() === now.getFullYear()) expect(dayLabel(thisYear.toISOString())).toBe(thisYear.toLocaleDateString('ru-RU', { day: 'numeric', month: 'long' }));
+});
+
+test('dayLabel: два момента одного дня — одна подпись', () => {
+  expect(dayLabel(new Date(2020, 4, 9, 0, 5).toISOString())).toBe(dayLabel(new Date(2020, 4, 9, 23, 55).toISOString()));
+  expect(dayLabel(new Date(2020, 4, 9, 12).toISOString())).toBe('9 мая 2020 г.');
 });
