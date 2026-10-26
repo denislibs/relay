@@ -20,6 +20,7 @@ const CLOSE_MS = 180;   // закрытие панели (composer.js, relay.css
 const SLIDE_MS = 200;   // смена вкладки: обе едут вместе (app.css .app-sym-slide-*)
 const EMOJI_COLS = 8, EMOJI_ROW = 42;      // ячейка эмодзи 42 px (глиф 34)
 const STK_COLS = 5, STK_ROW = 76;          // ячейка стикера 72 px + 4 px зазор
+const PREBUILD_MS = 400;                    // после открытия (200 мс) — построить вторую вкладку про запас
 
 export interface SymbolMenuProps {
   open: boolean;
@@ -39,8 +40,9 @@ export function SymbolMenu(p: SymbolMenuProps) {
   // (впервые построенная сетка и показ из display: none не попадают в кадр анимации); следующим кадром — slide.
   const [prep, setPrep] = useState<Tab | null>(null);
   const [slide, setSlide] = useState<{ from: Tab; dir: 'l' | 'r' } | null>(null);
-  // закрыли панель — со следующего открытия «Недавние» свежие: вкладки пересоздаются, но уже после
-  // анимации закрытия (иначе новое содержимое въезжало бы в исчезающую панель)
+  // закрыли панель — со следующего открытия «Недавние» свежие. Вкладки не пересоздаются (как в Telegram Web K:
+  // вкладка, прокрутка и подсветка категории остаются), только перечитывают снимок «Недавних» — после анимации
+  // закрытия, иначе ряд менялся бы в исчезающей панели
   const [epoch, setEpoch] = useState(0);
   const wasOpen = useRef(p.open);
   useEffect(() => {
@@ -50,6 +52,14 @@ export function SymbolMenu(p: SymbolMenuProps) {
     const t = setTimeout(() => { setSlide(null); setEpoch((n) => n + 1); }, CLOSE_MS + 50);
     return () => clearTimeout(t);
   }, [p.open]);
+  // вторая вкладка строится заранее, скрытой (display: none), когда панель уже открылась и анимация прошла:
+  // к нажатию на неё данные паков на месте — в кадре подготовки уже стоит сетка, а не въезжает пустая вкладка
+  useEffect(() => {
+    if (!p.open || (built.emoji && built.stickers)) return;
+    const other: Tab = tab === 'emoji' ? 'stickers' : 'emoji';
+    const t = setTimeout(() => setBuilt((b) => (b[other] ? b : { ...b, [other]: true })), PREBUILD_MS);
+    return () => clearTimeout(t);
+  }, [p.open, built.emoji && built.stickers]);
   const pick = (t: Tab) => {
     if (t === tab || t === prep) return;
     setBuilt((b) => (b[t] ? b : { ...b, [t]: true }));
@@ -86,8 +96,8 @@ export function SymbolMenu(p: SymbolMenuProps) {
       : slide && t === tab ? ' app-sym-slide-in-' + slide.dir
       : slide && t === slide.from ? ' app-sym-slide-out-' + slide.dir : '';
     return (
-      <div class={'app-sym-body' + cls} key={t + ':' + epoch} hidden={t !== tab && t !== prep && t !== slide?.from} inert={t !== tab}>
-        {t === 'emoji' ? <EmojiTabMemo onPick={stable.emoji} /> : <StickersTabMemo onPick={stable.sticker} />}
+      <div class={'app-sym-body' + cls} key={t} hidden={t !== tab && t !== prep && t !== slide?.from} inert={t !== tab}>
+        {t === 'emoji' ? <EmojiTabMemo onPick={stable.emoji} epoch={epoch} /> : <StickersTabMemo onPick={stable.sticker} epoch={epoch} />}
       </div>
     );
   };
@@ -114,10 +124,16 @@ export function SymbolMenu(p: SymbolMenuProps) {
 /* Активная секция и «прокручено ли» живут не в состоянии вкладки, а в маленьком хранилище, на которое подписана
  * только полоса: смена секции при прокрутке перерисовывает одну полосу, а не всю сетку (343 стикера — ~40% времени
  * прокрутки при 4× замедлении). */
-interface SectionsState { active: number; top: boolean; subs: Set<() => void> }
+interface SectionsState { active: number; top: boolean; subs: Set<() => void>; jump: { i: number; at: number; anim: boolean } | null }
+/** Секции просят наполниться заранее (переход к категории): событие на элементе секции. */
+const SEC_SHOW = 'app-sym-show';
+// Переход к секции — как в Telegram Web K: издалека встаём в 150 px от цели и доезжаем их за 150 мс, а не летим
+// через все категории (полёт перебирал подсветку полосы и показывал недорисованные секции)
+const JUMP_PX = 150, JUMP_MS = 150;
+const easeInOut = (t: number) => (t < 0.5 ? 2 * t * t : 1 - (2 - 2 * t) ** 2 / 2);
 function useSections(count: number) {
   const scroller = useRef<HTMLDivElement>(null);
-  const state = useRef<SectionsState>({ active: 0, top: true, subs: new Set() }).current;
+  const state = useRef<SectionsState>({ active: 0, top: true, subs: new Set(), jump: null }).current;
   const set = (active: number, top: boolean) => {
     if (active === state.active && top === state.top) return;
     state.active = active; state.top = top;
@@ -126,18 +142,60 @@ function useSections(count: number) {
   const onScroll = () => requestMeasure(() => {
     const el = scroller.current;
     if (!el) return;
+    const j = state.jump;
+    if (j?.anim) return;   // подсветка уже на цели — путь к ней её не трогает
+    // встали на цель: она остаётся подсвеченной, даже если до её начала не докрутить (короткая последняя секция)
+    if (j && Math.abs(el.scrollTop - j.at) <= 1) return;
+    state.jump = null;
     const secs = el.querySelectorAll<HTMLElement>('[data-sec]');
     let cur = 0;
     secs.forEach((s, i) => { if (s.offsetTop - el.offsetTop <= el.scrollTop + 8) cur = i; });
     const atTop = el.scrollTop <= 0;
     requestMutation(() => set(cur, atTop));
   });
-  const go = (i: number) => requestMeasure(() => {
-    const el = scroller.current, sec = el?.querySelectorAll<HTMLElement>('[data-sec]')[i];
-    if (!el || !sec) return;
-    const y = i === 0 ? 0 : sec.offsetTop - el.offsetTop;
-    requestMutation(() => { el.scrollTo({ top: y, behavior: 'smooth' }); set(i, state.top); });
-  });
+  const stop = useRef<() => void>(() => {});
+  const go = (i: number) => {
+    const el = scroller.current;
+    const secs = el?.querySelectorAll<HTMLElement>('[data-sec]');
+    if (!el || !secs?.[i]) return;
+    stop.current();
+    // цель и соседи наполняются до прокрутки: ни место посадки, ни конец пути не пустые
+    for (const k of [i - 1, i, i + 1]) secs[k]?.dispatchEvent(new Event(SEC_SHOW));
+    const jump = { i, at: -1, anim: true };
+    state.jump = jump;
+    set(i, state.top);
+    requestMeasure(() => {
+      if (state.jump !== jump) return;
+      const max = el.scrollHeight - el.clientHeight;
+      const to = Math.max(0, Math.min(max, i === 0 ? 0 : secs[i].offsetTop - el.offsetTop));
+      const from = el.scrollTop;
+      jump.at = to;
+      const far = Math.abs(to - from) > JUMP_PX;
+      const start = far ? to - Math.sign(to - from) * JUMP_PX : from;
+      requestMutation(() => {
+        if (state.jump !== jump) return;
+        const land = () => { jump.anim = false; set(i, to <= 0); };
+        if (reducedMotion() || to === from) { el.scrollTop = to; land(); return; }
+        el.scrollTop = start;
+        let raf = 0;
+        const t0 = performance.now();
+        const step = (now: number) => {
+          const t = Math.min(1, (now - t0) / JUMP_MS);
+          el.scrollTop = start + (to - start) * easeInOut(t);
+          if (t < 1) raf = requestAnimationFrame(step); else { off(); land(); }
+        };
+        // колесо или палец посреди доводки — дальше прокручивает человек
+        const cut = () => { cancelAnimationFrame(raf); off(); if (state.jump === jump) state.jump = null; };
+        const off = () => { el.removeEventListener('wheel', cut); el.removeEventListener('pointerdown', cut); el.removeEventListener('touchstart', cut); stop.current = () => {}; };
+        el.addEventListener('wheel', cut, { passive: true });
+        el.addEventListener('pointerdown', cut);
+        el.addEventListener('touchstart', cut, { passive: true });
+        stop.current = cut;
+        raf = requestAnimationFrame(step);
+      });
+    });
+  };
+  useEffect(() => () => stop.current(), []);
   useEffect(() => { if (state.active >= count) set(0, state.top); }, [count]);
   return { scroller, state, onScroll, go };
 }
@@ -208,8 +266,10 @@ function SearchRow({ placeholder, q, setQ, group, setGroup, chips, onFocus }: { 
 /** Вкладка эмодзи (поиск, «Часто используемые», категории) — и для выбора иконки папки (FolderEmojiPicker). */
 // animate(e) — адрес анимации эмодзи: под курсором она играет поверх глифа (как реакции в полном пикере);
 // selected — выбранный эмодзи подсвечен
-export function EmojiTab({ onPick, animate, selected }: { onPick(e: string): void; animate?: (e: string) => string | undefined; selected?: string | null }) {
-  const [recent] = useState(recentEmoji);
+// epoch — панель закрылась: перечитать «Часто используемые» (пока она открыта, ряд под курсором не меняется)
+export function EmojiTab({ onPick, animate, selected, epoch }: { onPick(e: string): void; animate?: (e: string) => string | undefined; selected?: string | null; epoch?: number }) {
+  const [recent, setRecent] = useState(recentEmoji);
+  useEffect(() => { if (epoch) setRecent(recentEmoji()); }, [epoch]);
   const [hover, setHover] = useState<string | null>(null);
   const [drawn, setDrawn] = useState<string | null>(null);   // у анимации под курсором есть первый кадр — глиф под ней прячем
   const [q, setQ] = useState('');
@@ -247,10 +307,13 @@ function EmojiSection({ cat, eager, root, onPick, cell }: { cat: { id: string; t
   const el = useRef<HTMLElement>(null);
   const [shown, setShown] = useState(eager);
   useEffect(() => {
-    if (shown || !el.current) return;
-    const io = new IntersectionObserver((es) => { if (es.some((e) => e.isIntersecting)) { io.disconnect(); setShown(true); } }, { root: root.current, rootMargin: '300px 0px' });
-    io.observe(el.current);
-    return () => io.disconnect();
+    const sec = el.current;
+    if (shown || !sec) return;
+    const show = () => setShown(true);
+    const io = new IntersectionObserver((es) => { if (es.some((e) => e.isIntersecting)) show(); }, { root: root.current, rootMargin: '300px 0px' });
+    io.observe(sec);
+    sec.addEventListener(SEC_SHOW, show);   // переход к категории: наполниться до прокрутки
+    return () => { io.disconnect(); sec.removeEventListener(SEC_SHOW, show); };
   }, [shown]);
   return (
     <section ref={el} data-sec class="app-sym-sec">
@@ -264,10 +327,12 @@ function EmojiSection({ cat, eager, root, onPick, cell }: { cat: { id: string; t
 
 type Section = { key: string; title: string; set?: StickerSetInfo; stickers?: StickerRef[]; count: number; clear?: boolean };
 
-function StickersTab({ onPick }: { onPick(s: StickerRef): void }) {
+function StickersTab({ onPick, epoch }: { onPick(s: StickerRef): void; epoch: number }) {
   const mine = useMyStickers();
-  // «Недавние» — снимок на время показа (вкладка пересоздаётся после закрытия панели)
+  // «Недавние» — снимок на время показа; панель закрылась (epoch) — снимок снимается заново
   const frozen = useRef<StickerRef[] | null>(null);
+  const seen = useRef(epoch);
+  if (seen.current !== epoch) { seen.current = epoch; frozen.current = null; }
   if (!frozen.current && (mine.recent.length || mine.sets.length)) frozen.current = mine.recent;
   const recent = frozen.current ?? mine.recent;
   const [q, setQ] = useState('');
@@ -360,15 +425,18 @@ function StickerSection({ sec, root, eager, onPick, onClear, onMenu }: { sec: Se
   const near = useNear(el, root, eager);
   const [stickers, setStickers] = useState<StickerRef[] | null>(sec.stickers ?? null);
   useEffect(() => { if (sec.stickers) setStickers(sec.stickers); }, [sec.stickers]);
-  // содержимое пака — когда секция в 500 px от видимой области
+  // содержимое пака — когда секция в 500 px от видимой области; первые паки — сразу: вкладка строится скрытой
+  // заранее, и к её показу сетка уже есть (иначе пак доезжал посреди анимации смены вкладки)
   useEffect(() => {
     if (sec.stickers || !sec.set || !el.current) return;
     const set = sec.set;
     let live = true;
+    const load = () => loadStickerSet(set.id, set.hash).then((full) => { if (live && full) setStickers(full.stickers); }, () => {});
+    if (eager) { void load(); return () => { live = false; }; }
     const io = new IntersectionObserver((es) => {
       if (!es.some((e) => e.isIntersecting)) return;
       io.disconnect();
-      loadStickerSet(set.id, set.hash).then((full) => { if (live && full) setStickers(full.stickers); }, () => {});
+      void load();
     }, { root: root.current, rootMargin: '500px 0px' });
     io.observe(el.current);
     return () => { live = false; io.disconnect(); };
