@@ -10,7 +10,7 @@ import { claimMediaCache, sendMediaPolicy } from './storageInfo';
 import { getPrefs, isDark, subscribePrefs, type Prefs } from './prefs';
 import { enableStrictDom } from '@relay/ui';
 import { render } from 'preact';
-import { openChat, startData } from './data';
+import { closeAllChats, openChat, startData } from './data';
 import { installErrorCapture } from './devtools/metrics';
 import { getGlobal, isPhone, setGlobal, subscribeGlobal, type Me } from './global';
 import * as nav from './nav';
@@ -42,7 +42,7 @@ function start(me: Me, enter: 'login' | 'reload' = 'reload'): void {
   setGlobal({ me, boot: 'app', enter });
   setTimeout(() => setGlobal({ enter: null }), 1000);   // анимации входа доиграли
   startDeviceAuth();   // привязать сеанс к ключу этого браузера и держать короткий доступ свежим
-  startData(me);
+  startData(me, enter !== 'login');   // после входа — список, а не чат из адреса прошлого сеанса
   startMuteTimers();   // «Отключить звук» на время: таймер до ближайшего срока — перерисовать, когда чат включится
   startSettingsData(me);
   installJoinLinks();
@@ -108,6 +108,13 @@ subscribeGlobal(() => {
   const open = g.infoOpen && g.openChatId != null;
   if (open && !infoLayer) infoLayer = nav.pushLayer('info', () => { infoLayer = 0; setGlobal({ infoOpen: false }); });
   else if (!open && infoLayer) { const id = infoLayer; infoLayer = 0; nav.closeLayer(id); }
+});
+// сеанс кончился (экран входа): стек чатов прошлого сеанса закрыть — иначе он держит #chat=… в адресе и показывается после входа
+let inApp = false;
+subscribeGlobal(() => {
+  const app = getGlobal().boot === 'app';
+  if (inApp && !app) queueMicrotask(closeAllChats);
+  inApp = app;
 });
 if (__DEV__) (window as unknown as { __nav: typeof nav }).__nav = nav;   // для ручной проверки навигации
 // dev: раздел «Для разработчиков» для проверок — что сейчас в журнале и что ничего не работает при закрытом разделе
