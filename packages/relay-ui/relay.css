@@ -1912,9 +1912,10 @@ html[data-blur="0"] .rl-menu { -webkit-backdrop-filter: none; backdrop-filter: n
 .rl-bubble-tail::after { background: inherit; }
 .rl-bubble-tail.rl-bubble-in-side::before, .rl-bubble-tail.rl-bubble-in-side::after { left: -8.5px; }
 .rl-bubble-tail.rl-bubble-out::before, .rl-bubble-tail.rl-bubble-out::after { right: -8.5px; transform: scaleX(-1); }
-/* отступы: внутри группы 6px, между группами 10px */
-.rl-msgline + .rl-msgline, .app-msg + .app-msg .rl-msgline { margin-top: 6px; }
-.rl-msgline.rl-msgline-gap, .app-msg + .app-msg .rl-msgline-gap { margin-top: 10px; }
+/* отступы, как в Telegram Web K: внутри группы 2px ($bubble-margin .125rem), между группами 6px ($bubble-margin-big .375rem);
+   было 6 / 10 — как в telegram-tt, на глаз заметно реже */
+.rl-msgline + .rl-msgline, .app-msg + .app-msg .rl-msgline { margin-top: 2px; }
+.rl-msgline.rl-msgline-gap, .app-msg + .app-msg .rl-msgline-gap { margin-top: 6px; }
 /* даты и служебные: плашка цвета обоев с белым текстом */
 .rl-date { padding: 1rem 0; }
 .rl-date span, .rl-shell .rl-date span { padding: 3px 8px; border-radius: 15px; background: var(--action-bg); color: #fff; box-shadow: none;
