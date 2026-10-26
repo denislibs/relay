@@ -240,6 +240,7 @@ export interface ReactionAsset {
   static: string;        // .webp
   appear: string; select: string;   // .tgs
   center: string | null; around: string | null;   // эффект над сообщением (.tgs), не у всех
+  silhouette?: string | null;   // маска-силуэт (data: PNG) — на месте значка, пока он грузится (tools/reactions/silhouettes.py)
 }
 
 export type Update =

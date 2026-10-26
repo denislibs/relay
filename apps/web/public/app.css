@@ -1423,9 +1423,16 @@ html[data-anim="0"] :is(.app-enter-reload, .app-enter-login) :is(.rl-shell-side,
 .app-rpanel-cell { position: relative; display: grid; place-items: center; width: 42px; height: 42px; padding: 0; border: 0; border-radius: 10px; background: transparent; font-size: 30px; line-height: 1; cursor: pointer; }
 .app-rpanel-cell:hover, .app-rpanel-cell:focus-visible, .app-rpanel-cell.is-on { background: var(--sym-hover); }
 .app-rpanel-cell.is-on { background: var(--accent-soft); }
-.app-rpanel-cell img { width: 36px; height: 36px; }
+/* статичный значок и силуэт — в рамке рисунка анимации выбора (~86% её кадра 36 px): смена на анимацию без прыжка */
+.app-rpanel-cell img, .app-rpanel-sil { width: 31px; height: 31px; grid-area: 1 / 1; }
+.app-rpanel-cell img { opacity: 0; transition: opacity 150ms ease-out; }
+.app-rpanel-cell img.is-loaded { opacity: 1; }
+.app-rpanel-sil { background: var(--sym-muted); opacity: .22; -webkit-mask-size: contain; mask-size: contain; -webkit-mask-repeat: no-repeat; mask-repeat: no-repeat; transition: opacity 150ms ease-out; }
+img.is-loaded ~ .app-rpanel-sil { opacity: 0; }
+/* анимация нарисовала кадр — под ней ничего не нужно (соседние селекторы: :has пересчитывал всю панель) */
+.app-rpanel-cell .rl-sticker-ready ~ :is(img, .app-rpanel-sil) { visibility: hidden; }
 /* select при наведении — поверх картинки, тем же размером */
-.app-rpanel-cell .rl-sticker { position: absolute; left: 3px; top: 3px; }
+.app-rpanel-cell .rl-sticker { position: absolute; left: 3px; top: 3px; z-index: 1; }
 .app-rpanel-cell:has(.rl-sticker-ready) img { visibility: hidden; }
 @media (prefers-reduced-motion: reduce) { .app-rpanel { animation-duration: 1ms; } }
 
