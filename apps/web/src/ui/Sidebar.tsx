@@ -16,7 +16,7 @@ import { isDark } from '../theme';
 import { chatTime, chatTone, isSystemChat, shownBody, snippet } from './format';
 import { applyTheme as setTheme } from '../theme';
 import { previewBody, previewText, previewThumb, type LastMessage } from './preview';
-import { ALL, inFolder, toggleChatInFolder } from '../folders';
+import { ALL, chatFolderTags, fitFolderTags, inFolder, toggleChatInFolder, type FolderTag } from '../folders';
 import { saveFolder, showToast } from '../settingsData';
 import { selectFolder, useFolderCtx, useFolderGuard, useFolderItems, useFolderMenu, useFolderPlace } from './folderNav';
 import { Button } from '@relay/ui';
@@ -56,7 +56,7 @@ function MoreLoader() {
 }
 
 /** Строка списка чатов. memo: чат не изменился (тот же объект из Mirror) — строку не трогаем при сдвиге окна. */
-export const SideRow = memo(function SideRow({ c, meId, active, showDraft, muted, onMenu }: { c: Item; meId: number; active: boolean; showDraft: boolean; muted: boolean; onMenu: (id: number, x: number, y: number) => void }) {
+export const SideRow = memo(function SideRow({ c, meId, active, showDraft, muted, onMenu, tags, tagSpace }: { c: Item; meId: number; active: boolean; showDraft: boolean; muted: boolean; onMenu: (id: number, x: number, y: number) => void; tags?: RowTag[]; tagSpace?: number }) {
   const last = c.last as (LastMessage & { status: string; fwd?: boolean }) | null;
   const thumb = last ? previewThumb(last) : null;
   // имя автора — только в группах (в личке и так ясно, кто пишет); своё — «Вы», чужое — первое слово имени
@@ -88,13 +88,30 @@ export const SideRow = memo(function SideRow({ c, meId, active, showDraft, muted
       pinned={isPinned(c)}
       status={!draft && last && last.senderId === meId ? last.status : null}
       active={active}
+      tags={tags}
+      tagSpace={tagSpace}
+      fitTags={fitFolderTags}
       {...pressOpen(() => prepareChat(c.id as number), () => openChat(c.id as number))}
       onContextMenu={(e: MouseEvent) => { e.preventDefault(); onMenu(c.id as number, e.clientX, e.clientY); }}
     />
   );
 });
 
-const ROW = 72; // высота строки чата (--size-row) — список виртуальный, строки фиксированной высоты
+const ROW = 72; // высота строки чата (--size-row) — список виртуальный, высоты строк известны без раскладки
+const ROW_TAGGED = 82;   // строка с тегами папок (relay.css .rl-row-tagged)
+const ROW_SIDE = 82;     // в строке не под текст: поля 9 + 9, аватар 54, зазор 10 — остальное ширина тегов
+
+type RowTag = { id: number; title: string; tone: number };
+// теги строки — тот же массив, пока они те же: строка (memo) не перерисовывается на каждом патче списка
+const tagMemo = new Map<string, RowTag[]>();
+function stableTags(key: string, tags: FolderTag[]): RowTag[] | undefined {
+  if (!tags.length) { tagMemo.delete(key); return undefined; }
+  const prev = tagMemo.get(key);
+  if (prev && prev.length === tags.length && prev.every((t, i) => t.id === tags[i].id && t.title === tags[i].title && t.tone === tags[i].color)) return prev;
+  const next = tags.map((t) => ({ id: t.id, title: t.title, tone: t.color }));
+  tagMemo.set(key, next);
+  return next;
+}
 
 
 let listShownAt = 0;   // когда список чатов впервые показан с данными (проявление — только тогда)
@@ -140,6 +157,17 @@ export function Sidebar() {
   const folderMenu = useFolderMenu();
   const ctx = useFolderCtx();
   useFolderGuard();
+  // теги папок: только если у какой-то папки есть цвет. Ширина под них — от ширины списка (ResizeObserver
+  // отдаёт размер без чтения раскладки), одна на все страницы папок
+  const tagged = folders.some((f) => f.color !== null);
+  const [tagSpace, setTagSpace] = useState(0);
+  const tagRO = useRef<ResizeObserver | null>(null);
+  const tagRef = useRef((el: HTMLElement | null) => {
+    if (!el || typeof ResizeObserver !== 'function') return;
+    tagRO.current ??= new ResizeObserver((es) => { const w = es[es.length - 1].contentRect.width; if (w > 0) setTagSpace(Math.floor(w - ROW_SIDE)); });
+    tagRO.current.observe(el);
+  }).current;
+  useEffect(() => () => tagRO.current?.disconnect(), []);
   // Ctrl+Shift+1…9 — папка по номеру (как в Telegram Web A)
   useEffect(() => {
     if (place === 'none') return;
@@ -202,9 +230,18 @@ export function Sidebar() {
   const renderFolder = (key: string) => {
     const f = Number(key);
     const list = listOf(f);
+    // теги строк этой страницы (без тега открытой папки); нет цветных папок — null, все строки по 72
+    let tagsOf: Map<number, RowTag[]> | null = null;
+    if (tagged) {
+      tagsOf = new Map();
+      for (const c of list) {
+        const t = stableTags(key + ':' + c.id, chatFolderTags(c as never, folders, ctx, f));
+        if (t) tagsOf.set(c.id as number, t);
+      }
+    }
     return (
       <>
-      <div class={'app-listwrap' + (fade ? ' is-fresh' : '')}>
+      <div ref={tagRef} class={'app-listwrap' + (fade ? ' is-fresh' : '')}>
         <Presence show={skeleton} exitMs={320}>
           <div class="app-skel" aria-busy="true" aria-label="Загрузка чатов">
             {Array.from({ length: 9 }, (_, i) => <div key={i} style={{ '--i': i }}><ChatRowSkeleton /></div>)}
@@ -226,8 +263,9 @@ export function Sidebar() {
             onPlaceholder={loadMoreChats}
             onNearEnd={!status.chatsComplete ? loadMoreChats : undefined}
             rowHeight={ROW}
+            rowHeightOf={tagsOf ? (c: Item) => (tagsOf.get(c.id as number) ? ROW_TAGGED : ROW) : undefined}
             getKey={(c: Item) => 'c' + c.id}
-            render={(c: Item) => <SideRow c={c} meId={me.userId} active={c.id === openId} showDraft={!!c.draft && c.id !== openId} muted={isMuted(c)} onMenu={onRowMenu} />}
+            render={(c: Item) => <SideRow c={c} meId={me.userId} active={c.id === openId} showDraft={!!c.draft && c.id !== openId} muted={isMuted(c)} onMenu={onRowMenu} tags={tagsOf?.get(c.id as number)} tagSpace={tagSpace} />}
           />
           {!q && !status.chatsComplete && !(f === ALL && status.chatsTotal) ? (
             <MoreLoader />

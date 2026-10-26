@@ -91,7 +91,8 @@ function TextField(props) {
   var showCount = props.counter && left != null;
   var Tag = props.multiline ? 'textarea' : 'input';
   var err = props.error;
-  return h('div', { class: cx('rl-tf', value && 'rl-tf-filled', err && 'rl-tf-error', props.multiline && 'rl-tf-multi', (props.className || props.class)) },
+  // trailing — кнопка внутри поля справа (смайлик выбора иконки папки, как в Telegram)
+  return h('div', { class: cx('rl-tf', value && 'rl-tf-filled', err && 'rl-tf-error', props.multiline && 'rl-tf-multi', props.trailing && 'rl-tf-has-trailing', showCount && 'rl-tf-counting', (props.className || props.class)) },
     h('div', { class: 'rl-tf-box' },
       h(Tag, { id: id, class: 'rl-tf-input', value: value, placeholder: ' ', maxLength: props.measure ? undefined : props.maxLength, disabled: props.disabled, rows: props.multiline ? (props.rows || 3) : undefined,
         type: props.multiline ? undefined : (props.type || 'text'), autoComplete: props.autoComplete || 'off', inputMode: props.inputMode, autoFocus: props.autoFocus,
@@ -99,7 +100,8 @@ function TextField(props) {
         onInput: function (e) { if (props.onInput) props.onInput(e.currentTarget.value, e); },
         onBlur: props.onBlur, onKeyDown: props.onKeyDown }),
       h('label', { class: 'rl-tf-label', for: id }, err || props.label),   // ошибка — прямо в подписи, как в Telegram
-      showCount ? h('span', { class: cx('rl-tf-count', left <= 5 && 'rl-tf-count-low'), 'aria-hidden': 'true' }, left) : null),
+      showCount ? h('span', { class: cx('rl-tf-count', left <= 5 && 'rl-tf-count-low'), 'aria-hidden': 'true' }, left) : null,
+      props.trailing ? h('span', { class: 'rl-tf-trailing' }, props.trailing) : null),
     h('div', { class: 'rl-tf-msg', id: id + '-err', role: 'status', 'aria-live': 'polite' }, err ? h('span', { class: 'rl-sr-only' }, err) : (props.hint || '')));
 }
 

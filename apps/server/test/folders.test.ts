@@ -12,7 +12,7 @@ type U = { userId: number; token: string };
 const login = async (name: string): Promise<U> => (await (await fetch(`${base}/dev/login`, { method: 'POST', body: JSON.stringify({ name }) })).json()) as U;
 const call = (u: U, method: string, path: string, body?: unknown) =>
   fetch(`${base}${path}`, { method, headers: { cookie: `relay_session=${u.token}` }, body: body === undefined ? undefined : JSON.stringify(body) });
-const folder = (over: object = {}) => ({ title: 'Работа', emoji: '💼', include: [10, 11], exclude: [], contacts: false, nonContacts: false, groups: true, excludeMuted: false, excludeRead: false, ...over });
+const folder = (over: object = {}) => ({ title: 'Работа', emoji: '💼', color: null, include: [10, 11], exclude: [], contacts: false, nonContacts: false, groups: true, excludeMuted: false, excludeRead: false, ...over });
 
 test('create, edit and delete a folder; every real change lands in the journal as settingsChanged', async () => {
   const a = await login('Анна');
@@ -29,6 +29,11 @@ test('create, edit and delete a folder; every real change lands in the journal a
   // чат в обоих списках остаётся только во включённых
   const edited = await (await call(a, 'PUT', '/settings/folders/2', folder({ title: 'Офис', exclude: [11, 12] }))).json();
   expect(edited.folders[0]).toMatchObject({ title: 'Офис', include: [10, 11], exclude: [12] });
+  // цвет тега: 0…6 — палитра собеседников; чужое значение — без цвета
+  expect((await (await call(a, 'PUT', '/settings/folders/2', folder({ title: 'Офис', color: 3 }))).json()).folders[0].color).toBe(3);
+  for (const bad of [7, -1, 2.5, 'red']) {
+    expect((await (await call(a, 'PUT', '/settings/folders/2', folder({ title: 'Офис', color: bad }))).json()).folders[0].color).toBeNull();
+  }
 
   await call(a, 'PUT', '/settings/folders/3', folder({ title: 'Семья', include: [20], groups: false }));
   const del = await (await call(a, 'DELETE', '/settings/folders/2')).json();
@@ -36,7 +41,8 @@ test('create, edit and delete a folder; every real change lands in the journal a
   expect((await (await call(a, 'DELETE', '/settings/folders/2')).json()).seq).toBe(del.seq);   // повтор удаления — не ошибка и не запись
 
   const items = (await getUpdates(a.userId, 0)).items;
-  expect(items.map((i) => i.update.type)).toEqual(['settingsChanged', 'settingsChanged', 'settingsChanged', 'settingsChanged']);
+  // создание, правка, цвет 3, сброс цвета (повторы того же — без записи), вторая папка, удаление
+  expect(items.map((i) => i.update.type)).toEqual(Array(6).fill('settingsChanged'));
   const last = items[items.length - 1].update as { settings: { folders: { id: number }[] } };
   expect(last.settings.folders.map((f) => f.id)).toEqual([3]);
 });

@@ -452,9 +452,36 @@ function TypingIndicator(props) {
 }
 
 /* ---------- ChatRow ---------- */
+/* ---------- FolderTags: теги папок под строкой чата, как в Telegram ----------
+   tags: [{ id, title, tone }] (tone — номер --peer-N), space — ширина под теги (px), fit(widths, space, moreWidth) →
+   { shown, more } — сколько тегов показать и число на «+N». Ширины считаются по шрифту без раскладки (canvas):
+   текст заглавными, 11 px полужирный, по 5 px полей — как в CSS ниже (.rl-tag). */
+var TAG_FONT = '700 11px -apple-system, BlinkMacSystemFont, "SF Pro Text", "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif';
+var TAG_PAD = 10, tagWidths = new Map(), tagCanvas = null;
+function tagWidth(text) {
+  var w = tagWidths.get(text);
+  if (w !== undefined) return w;
+  if (!tagCanvas && typeof document !== 'undefined') { tagCanvas = document.createElement('canvas').getContext('2d'); if (tagCanvas) tagCanvas.font = TAG_FONT; }
+  w = Math.ceil(tagCanvas ? tagCanvas.measureText(text.toUpperCase()).width : text.length * 7) + TAG_PAD;
+  tagWidths.set(text, w);
+  return w;
+}
+function FolderTags(props) {
+  var tags = props.tags || [];
+  if (!tags.length) return null;
+  var widths = tags.map(function (t) { return tagWidth(t.title); });
+  var fit = props.fit && props.space > 0 ? props.fit(widths, props.space, function (n) { return tagWidth('+' + n); }) : { shown: tags.length, more: 0 };
+  return h('span', { class: 'rl-row-tags', 'aria-label': 'Папки: ' + tags.map(function (t) { return t.title; }).join(', ') },
+    tags.slice(0, fit.shown).map(function (t) {
+      return h('span', { key: t.id, class: 'rl-tag', 'aria-hidden': 'true', style: { '--tag': 'var(--peer-' + t.tone + ')', '--tag-bg': 'var(--peer-' + t.tone + '-bg)' } }, t.title);
+    }),
+    fit.more ? h('span', { class: 'rl-tag rl-tag-more', 'aria-hidden': 'true' }, '+' + fit.more) : null);
+}
+
 function ChatRow(props) {
   var unread = props.unread || 0;
-  var rest = omit(props, ['verified', 'logo', 'name', 'preview', 'time', 'unread', 'muted', 'status', 'active', 'typing', 'online', 'avatar', 'author', 'thumb', 'pinned', 'draft', 'mentioned', 'forwarded', 'reactions', 'className', 'class']);
+  var tagged = !!(props.tags && props.tags.length);
+  var rest = omit(props, ['tags', 'tagSpace', 'fitTags', 'verified', 'logo', 'name', 'preview', 'time', 'unread', 'muted', 'status', 'active', 'typing', 'online', 'avatar', 'author', 'thumb', 'pinned', 'draft', 'mentioned', 'forwarded', 'reactions', 'className', 'class']);
   // как в Telegram: «печатает» важнее черновика, черновик важнее сообщения;
   // строка сообщения — «Автор:», миниатюра 20 px (у видео — play), текст
   var thumb = props.thumb;
@@ -471,7 +498,7 @@ function ChatRow(props) {
           thumb.video ? h(Icon, { name: 'play', size: 12 }) : null) : null,
         props.preview);
   return h('button', Object.assign({ type: 'button' }, rest, { onPointerDown: chain(rest.onPointerDown, ripple),
-    class: cx('rl-row', (props.className || props.class)), 'aria-current': props.active ? 'true' : undefined
+    class: cx('rl-row', tagged && 'rl-row-tagged', (props.className || props.class)), 'aria-current': props.active ? 'true' : undefined
   }),
     h(Avatar, { name: props.avatar === undefined ? props.name : props.avatar, tone: props.avatarTone, online: props.online, logo: props.logo, src: props.avatarSrc, thumb: props.avatarThumb, size: 54 }),   // как в Telegram: 54 в строке 72
     h('span', { class: 'rl-row-main' },
@@ -490,7 +517,8 @@ function ChatRow(props) {
           props.mentioned && !atOnly ? h('span', { class: 'rl-row-at', 'aria-label': 'Вас упомянули' }, '@') : null,
           // булавка — только без бейджа (как в Telegram: непрочитанное важнее)
           props.pinned && !(unread > 0) && !props.unreadMark ? h(Icon, { name: 'pin', size: 22, title: 'Закреплён', class: 'rl-row-pin' }) : null,   // кнопка-булавка, контур (как в Telegram)
-          h(RowBadge, { count: unread > 0 ? unread : props.unreadMark ? 1 : 0, blank: !(unread > 0) && !!props.unreadMark, muted: props.muted && !atOnly, at: atOnly })))));
+          h(RowBadge, { count: unread > 0 ? unread : props.unreadMark ? 1 : 0, blank: !(unread > 0) && !!props.unreadMark, muted: props.muted && !atOnly, at: atOnly }))),
+      tagged ? h(FolderTags, { tags: props.tags, space: props.tagSpace, fit: props.fitTags }) : null));
 }
 
 /* ---------- ArchivedRow ----------
@@ -1826,4 +1854,4 @@ function ScrollToBottom(props) {
 }
 
 
-export { RowBadge, WebPage, MsgLine, ForwardTitle, peerTone, RelayLogo, Verified, ArchivedRow, ReplyQuote, ReactionChips, metaOrReactions, cx, chain, ripple, reducedMotion, omit, fmtTime, makeWave, ICONS, Icon, Button, IconButton, Avatar, Badge, Chip, ChatRow, ChatRowSkeleton, Bubble, MessageStatus, TypingIndicator, DateDivider, Banner, NavRail, Checkbox, Toast, Card, Steps, MediaArt, ProgressRing, Waveform, VoiceMessage, VoiceRecorder, MediaBubble, MediaPolicy, mediaHeld, FileBubble, MediaThumb, MediaViewer, viewerPreview, Switch, PanelHeader, ProfileHeader, ActionTile, InfoRow, SettingsIcon, ReadMore, Presence, useMinVisible, LazyImage, LazyRoot, lazyObserve, lazyRoots, FlipList, SyncIndicator, LinearProgress, EmptyState, ScrollToBottom, SlideFade };
+export { FolderTags, RowBadge, WebPage, MsgLine, ForwardTitle, peerTone, RelayLogo, Verified, ArchivedRow, ReplyQuote, ReactionChips, metaOrReactions, cx, chain, ripple, reducedMotion, omit, fmtTime, makeWave, ICONS, Icon, Button, IconButton, Avatar, Badge, Chip, ChatRow, ChatRowSkeleton, Bubble, MessageStatus, TypingIndicator, DateDivider, Banner, NavRail, Checkbox, Toast, Card, Steps, MediaArt, ProgressRing, Waveform, VoiceMessage, VoiceRecorder, MediaBubble, MediaPolicy, mediaHeld, FileBubble, MediaThumb, MediaViewer, viewerPreview, Switch, PanelHeader, ProfileHeader, ActionTile, InfoRow, SettingsIcon, ReadMore, Presence, useMinVisible, LazyImage, LazyRoot, lazyObserve, lazyRoots, FlipList, SyncIndicator, LinearProgress, EmptyState, ScrollToBottom, SlideFade };

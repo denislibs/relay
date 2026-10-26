@@ -56,8 +56,6 @@ export const FOLDER_ICONS: Record<string, string> = {
   '💼': 'briefcase', '🏠': 'home', '❤️': 'heart', '🎓': 'graduation', '🎮': 'gamepad', '✈️': 'plane',
   '🛒': 'cart', '📢': 'channels', '🔔': 'bell', '🤖': 'bot',
 };
-// 📁 в выборе не нужен: первая кнопка («по типу чатов») и так рисует папку
-export const FOLDER_EMOJI = Object.keys(FOLDER_ICONS).filter((e) => e !== '📁');
 
 /** Иконка папки для вкладок слева: значок по эмодзи (чужое эмодзи — как есть), иначе по единственному типу, иначе общая папка. */
 export function folderIcon(f: ChatFolder | null): { emoji: string } | { icon: string } {
@@ -90,7 +88,7 @@ export function folderSubtitle(f: ChatFolder, count: number): string {
 
 /** Рекомендуемые папки: правила без id. «Непрочитанные» — бывшая зашитая вкладка. */
 export interface Recommended { key: string; folder: Omit<ChatFolder, 'id'>; description: string }
-const empty = { emoji: null, include: [], exclude: [], contacts: false, nonContacts: false, groups: false, excludeMuted: false, excludeRead: false };
+const empty = { emoji: null, color: null, include: [], exclude: [], contacts: false, nonContacts: false, groups: false, excludeMuted: false, excludeRead: false };
 export const RECOMMENDED: readonly Recommended[] = [
   { key: 'unread', folder: { ...empty, title: 'Непрочитанные', emoji: '✅', contacts: true, nonContacts: true, groups: true, excludeRead: true }, description: 'Новые сообщения из всех чатов' },
   { key: 'personal', folder: { ...empty, title: 'Личные', emoji: '👤', contacts: true, nonContacts: true }, description: 'Только личные переписки' },
@@ -123,4 +121,37 @@ export function toggleChatInFolder(f: ChatFolder, c: FolderChat, ctx: FolderCtx)
     return inFolder(next, c, ctx) ? { ...next, exclude: [...next.exclude, c.id] } : next;
   }
   return { ...f, include: [...f.include, c.id], exclude: f.exclude.filter((x) => x !== c.id) };
+}
+
+/** Тег папки на строке чата: название и цвет (номер --peer-N). */
+export interface FolderTag { id: number; title: string; color: number }
+
+/**
+ * Теги чата (как в Telegram): каждая своя папка с цветом, в которую чат входит, по порядку вкладок —
+ * кроме открытой (её тег лишь повторил бы вкладку). Папки без цвета тегов не дают.
+ */
+export function chatFolderTags(c: FolderChat, folders: readonly ChatFolder[], ctx: FolderCtx, current: number): FolderTag[] {
+  const out: FolderTag[] = [];
+  for (const f of folders) if (f.color !== null && f.id !== current && inFolder(f, c, ctx)) out.push({ id: f.id, title: f.title, color: f.color });
+  return out;
+}
+
+/**
+ * Сколько тегов влезает в ширину space (ширины тегов — widths, между ними gap): по порядку, пока влезают;
+ * всё после первого невлезшего — в «+N» в конце. Если и «+N» не влезает — он встаёт на место последнего тега.
+ */
+export function fitFolderTags(widths: readonly number[], space: number, moreWidth: (n: number) => number, gap = 4): { shown: number; more: number } {
+  let shown = 0, used = 0;
+  for (const w of widths) {
+    const need = (shown ? gap : 0) + w;
+    if (used + need > space) break;
+    used += need; shown++;
+  }
+  let more = widths.length - shown;
+  while (more && shown && used + gap + moreWidth(more) > space) {
+    shown--; more++;
+    used = 0;
+    for (let i = 0; i < shown; i++) used += (i ? gap : 0) + widths[i];
+  }
+  return { shown, more };
 }

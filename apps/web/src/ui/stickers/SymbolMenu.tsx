@@ -1,6 +1,6 @@
 /** @jsxImportSource preact */
 import type { StickerRef, StickerSetInfo } from '@relay/protocol';
-import { Icon, IconButton, MenuPopover, StickerView, confirmModal, requestMeasure, requestMutation } from '@relay/ui';
+import { Icon, IconButton, MenuPopover, StickerView, confirmModal, reducedMotion, requestMeasure, requestMutation } from '@relay/ui';
 import type { ComponentChildren } from 'preact';
 import { useEffect, useRef, useState } from 'preact/hooks';
 import { clearRecentStickers, faveSticker, loadStickerSet, openStickerSet, searchSets, stickersByEmoji, useMyStickers } from '../../stickers';
@@ -169,8 +169,13 @@ function SearchRow({ placeholder, q, setQ, group, setGroup, chips }: { placehold
   );
 }
 
-function EmojiTab({ onPick }: { onPick(e: string): void }) {
+/** Вкладка эмодзи (поиск, «Часто используемые», категории) — и для выбора иконки папки (FolderEmojiPicker). */
+// animate(e) — адрес анимации эмодзи: под курсором она играет поверх глифа (как реакции в полном пикере);
+// selected — выбранный эмодзи подсвечен
+export function EmojiTab({ onPick, animate, selected }: { onPick(e: string): void; animate?: (e: string) => string | undefined; selected?: string | null }) {
   const [recent] = useState(recentEmoji);
+  const [hover, setHover] = useState<string | null>(null);
+  const [drawn, setDrawn] = useState<string | null>(null);   // у анимации под курсором есть первый кадр — глиф под ней прячем
   const [q, setQ] = useState('');
   const [group, setGroup] = useState<number | null>(null);
   const chips = useChips('emoji');
@@ -185,7 +190,13 @@ function EmojiTab({ onPick }: { onPick(e: string): void }) {
       <Strip items={(found ? [] : cats).map((c) => <Icon name={c.icon} size={24} />)} state={s.state} go={s.go} />
       <div class="app-sym-scroll" ref={s.scroller} onScroll={s.onScroll}>
         <SearchRow placeholder="Поиск эмодзи" q={q} setQ={setQ} group={group} setGroup={setGroup} chips={chips} />
-        {cats.map((c, i) => <EmojiSection key={c.id} cat={c} eager={i < 2} root={s.scroller} onPick={pick} />)}
+        {cats.map((c, i) => <EmojiSection key={c.id} cat={c} eager={i < 2} root={s.scroller} onPick={pick} cell={animate ? (e) => (
+          <button key={e} type="button" class={'app-emoji' + (selected === e ? ' is-on' : '')} aria-pressed={selected === e} onClick={() => pick(e)}
+            onMouseEnter={() => { if (animate(e)) { setDrawn(null); setHover(e); } }} onMouseLeave={() => setHover((h) => (h === e ? null : h))}>
+            <span class={hover === e && drawn === e ? 'is-under' : undefined}>{e}</span>
+            {hover === e && !reducedMotion() ? <StickerView src={animate(e)!} w={512} h={512} size={34} group="menu" force loop={false} onFirstFrame={() => setDrawn(e)} onEnded={() => setHover((h) => (h === e ? null : h))} /> : null}
+          </button>
+        ) : undefined} />)}
         {found && !found.length ? <p class="app-sym-empty">Эмодзи не найдены</p> : null}
       </div>
     </div>
@@ -194,7 +205,7 @@ function EmojiTab({ onPick }: { onPick(e: string): void }) {
 
 // эмодзи-глифы дороги в отрисовке (≈1500 штук — 100+ мс): категория наполняется, когда подъехала к экрану,
 // а её высота зарезервирована заранее — прокрутка не прыгает
-function EmojiSection({ cat, eager, root, onPick }: { cat: { id: string; title: string; list: string[] }; eager: boolean; root: { current: HTMLDivElement | null }; onPick(e: string): void }) {
+function EmojiSection({ cat, eager, root, onPick, cell }: { cat: { id: string; title: string; list: string[] }; eager: boolean; root: { current: HTMLDivElement | null }; onPick(e: string): void; cell?: (e: string) => ComponentChildren }) {
   const el = useRef<HTMLElement>(null);
   const [shown, setShown] = useState(eager);
   useEffect(() => {
@@ -207,7 +218,7 @@ function EmojiSection({ cat, eager, root, onPick }: { cat: { id: string; title: 
     <section ref={el} data-sec class="app-sym-sec">
       <h4>{cat.title}</h4>
       <div class="app-emoji-grid" style={{ minHeight: Math.ceil(cat.list.length / EMOJI_COLS) * EMOJI_ROW + 'px' }}>
-        {shown ? cat.list.map((e) => <button key={e} type="button" class="app-emoji" onClick={() => onPick(e)}>{e}</button>) : null}
+        {shown ? cat.list.map((e) => (cell ? cell(e) : <button key={e} type="button" class="app-emoji" onClick={() => onPick(e)}>{e}</button>)) : null}
       </div>
     </section>
   );
