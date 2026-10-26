@@ -1201,19 +1201,37 @@ html[data-anim="0"] :is(.app-hero, .app-hero-photo, .app-hero-info, .app-hero-na
 /* ---------- Панель эмодзи и стикеров (по образцу Telegram Web K) ---------- */
 .app-sym { --sym-fill: color-mix(in srgb, var(--ink) 6%, transparent); --sym-hover: color-mix(in srgb, var(--ink-muted) 8%, transparent); --sym-muted: color-mix(in srgb, var(--ink) 42%, transparent);
   position: relative; display: flex; flex-direction: column; height: 100%; }
-.app-sym-body { flex: 1; min-height: 0; }
-.app-sym-from-r { animation: app-sym-in-r 200ms cubic-bezier(.4, 0, .2, 1); }
-.app-sym-from-l { animation: app-sym-in-l 200ms cubic-bezier(.4, 0, .2, 1); }
-@keyframes app-sym-in-r { from { transform: translateX(24px); opacity: 0; } }
-@keyframes app-sym-in-l { from { transform: translateX(-24px); opacity: 0; } }
-.app-sym-pane { display: flex; flex-direction: column; height: 100%; }
-.app-sym-strip { position: relative; display: flex; align-items: center; flex: none; height: 49px; padding: 0 5px; overflow-x: auto; scrollbar-width: none; border-bottom: 1px solid transparent; transition: border-color 150ms; }
+.app-sym { overflow: hidden; }
+/* Вкладки лежат друг на друге. Смена — как в Telegram Web K: уходящая и новая едут вместе на всю ширину
+   (200 мс ease-in-out), без прозрачности — пустой фон панели между ними не виден. */
+.app-sym-body { position: absolute; inset: 0; }
+.app-sym-body.is-prep { visibility: hidden; }   /* новая вкладка уже разложена, кадр до начала движения */
+.app-sym-slide-in-r { animation: app-sym-from-right 200ms ease-in-out; }
+.app-sym-slide-in-l { animation: app-sym-from-left 200ms ease-in-out; }
+.app-sym-slide-out-r { animation: app-sym-to-left 200ms ease-in-out forwards; }   /* вправо по вкладкам: старая уходит влево */
+.app-sym-slide-out-l { animation: app-sym-to-right 200ms ease-in-out forwards; }
+.app-sym-slide-in-r, .app-sym-slide-in-l, .app-sym-slide-out-r, .app-sym-slide-out-l { will-change: transform; pointer-events: none; }
+@keyframes app-sym-from-right { from { transform: translateX(100%); } }
+@keyframes app-sym-from-left { from { transform: translateX(-100%); } }
+@keyframes app-sym-to-left { to { transform: translateX(-100%); } }
+@keyframes app-sym-to-right { to { transform: translateX(100%); } }
+.app-sym-pane { position: relative; display: flex; flex-direction: column; height: 100%; overflow: hidden; }
+/* Фокус в поиске (или запрос, или фильтр) — как в Telegram Web K: полоса категорий уезжает вверх и гаснет,
+   содержимое поднимается на её место. Прокрутка ниже края панели на высоту полосы — после подъёма низ не пустеет. */
+.app-sym-strip { position: relative; z-index: 1; display: flex; align-items: center; flex: none; height: 49px; padding: 0 5px; overflow-x: auto; scrollbar-width: none; border-bottom: 1px solid transparent;
+  transition: border-color 150ms, transform 200ms cubic-bezier(.4, 0, .2, 1), opacity 200ms cubic-bezier(.4, 0, .2, 1); }
+.app-sym-pane.is-searching .app-sym-strip { transform: translateY(-100%); opacity: 0; pointer-events: none; }
 .app-sym-strip.has-border { border-bottom-color: var(--line); }
 .app-sym-strip::-webkit-scrollbar { display: none; }
 .app-sym-strip-btn { flex: none; display: flex; align-items: center; justify-content: center; width: 38px; height: 38px; margin: 0 1px; padding: 0; border: 0; border-radius: 50%; background: transparent; color: var(--ink-muted); cursor: pointer; transition: background-color 150ms, color 150ms; }
 .app-sym-strip-btn:hover { color: color-mix(in srgb, var(--ink) 80%, transparent); }
 .app-sym-strip-btn.is-on { background: var(--sym-fill); color: color-mix(in srgb, var(--ink) 80%, transparent); }
-.app-sym-scroll { flex: 1; min-height: 0; overflow-y: auto; overscroll-behavior: contain; padding: 8px 0 60px; scrollbar-width: thin; }   /* снизу — место под вкладками-«пилюлей» */
+.app-sym-scroll { flex: 1; min-height: 0; overflow-y: auto; overscroll-behavior: contain; padding: 8px 0 calc(60px + 49px); margin-bottom: -49px; scrollbar-width: thin;   /* снизу — место под вкладками-«пилюлей» */
+  transition: transform 200ms cubic-bezier(.4, 0, .2, 1); }
+.app-sym-pane.is-searching .app-sym-scroll { transform: translateY(-49px); }
+:root[data-anim="0"] .app-sym-strip, :root[data-anim="0"] .app-sym-scroll { transition: none; }
+:root[data-anim="0"] .app-sym-body { animation: none !important; }
+@media (prefers-reduced-motion: reduce) { .app-sym-strip, .app-sym-scroll { transition: none; } .app-sym-body { animation: none !important; } }
 .app-sym-search { position: relative; display: flex; align-items: center; height: 38px; margin: 0 8px 4px; border-radius: 16px; background: var(--sym-fill); color: var(--ink-muted); }
 .app-sym-search-icon { flex: none; display: flex; align-items: center; justify-content: center; width: 42px; height: 38px; padding: 0 0 0 6px; border: 0; background: none; color: var(--ink-muted); }
 .app-sym-search-icon.is-back { cursor: pointer; }
