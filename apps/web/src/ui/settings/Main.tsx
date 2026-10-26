@@ -80,9 +80,8 @@ export function Main() {
     navigator.clipboard?.writeText(text).then(() => flash('Скопировано')).catch(() => { /* буфер недоступен */ });
   }
 
-  // пять нажатий на заголовок за 2 с открывают скрытый раздел (флаг на устройстве)
-  function onTitleTap(e: MouseEvent): void {
-    if (!(e.target as HTMLElement).closest('h2')) return;
+  // пять нажатий на версию («О приложении») за 2 с открывают скрытый раздел (флаг на устройстве), как в Telegram
+  function onVersionTap(): void {
     const now = Date.now();
     taps.current = taps.current.filter((t) => now - t < 2000).concat(now);
     if (taps.current.length < 5) return;
@@ -101,7 +100,7 @@ export function Main() {
 
   return (
     <div class="rl-sidepage" aria-label="Настройки">
-      <div class="app-contents" onClick={onTitleTap}>
+      <div class="app-contents">
       <PanelHeader
         icon="arrowLeft" closeLabel="Назад" title="Настройки" onClose={() => void back()}
         actions={[
@@ -151,7 +150,7 @@ export function Main() {
           </Presence>
         </Section>
         <Section title="О приложении">
-          <InfoRow icon="info" title="Relay" subtitle={'Сборка ' + __BUILD__} />
+          <InfoRow icon="info" title="Relay" subtitle={'Сборка ' + __BUILD__} onClick={onVersionTap} />
         </Section>
       </div>
       <Presence show={toast != null} exitMs={200}>

@@ -333,7 +333,7 @@ html[data-blur="0"] .app-sidemenu .rl-menu { -webkit-backdrop-filter: none; back
 @keyframes app-plate-pulse { 50% { opacity: .35; } }
 
 .app-dev { background: var(--page); }
-.app-dev-tabs { padding: 0 var(--space-2) var(--space-2); }
+.app-dev-tabs { padding: var(--space-2) var(--space-2) var(--space-2); }   /* сверху — отступ от шапки раздела */
 .app-dev-tabs .rl-tab { padding: 0 10px; font-size: 14px; }
 .app-dev-pages { position: relative; flex: 1; min-height: 0; display: flex; }
 .app-dev-pages .rl-slide { background: var(--page); }
