@@ -21,7 +21,9 @@ function place(el, p) {
   var w = card.offsetWidth, ht = card.offsetHeight;
   var hw = head ? head.offsetWidth : 0, hh = head ? head.offsetHeight + 8 : 0;
   var vw = document.documentElement.clientWidth, vh = window.innerHeight;
-  var span = Math.max(w, hw);   // по ширине должны влезть и карточка, и шапка над ней
+  // шапка (панель реакций) выступает за карточку с обеих сторон, как в tweb: по ширине влезть должны обе
+  var hl = head ? Math.min(0, head.offsetLeft) : 0, hr = head ? Math.max(w, head.offsetLeft + hw) : w;
+  var span = hr - hl;
   var left, top, ox, oy;
   var a = p.anchor;
   if (a && typeof a.getBoundingClientRect === 'function') {
@@ -34,10 +36,10 @@ function place(el, p) {
     else { top = below; oy = 'top'; }
   } else {
     var x = a ? a.x : 0, y = a ? a.y : 0;
-    if (x + span <= vw - MARGIN) { left = x; ox = 'left'; } else if (x - w >= MARGIN) { left = x - w; ox = 'right'; } else { left = vw - span - MARGIN; ox = 'left'; }
+    if (x + hr <= vw - MARGIN) { left = x; ox = 'left'; } else if (x - w + hl >= MARGIN) { left = x - w; ox = 'right'; } else { left = vw - hr - MARGIN; ox = 'left'; }
     if (y + ht <= vh - MARGIN) { top = y; oy = 'top'; } else if (y - ht >= MARGIN + hh) { top = y - ht; oy = 'bottom'; } else { top = vh - ht - MARGIN; oy = 'top'; }
   }
-  left = Math.max(MARGIN, Math.min(left, vw - span - MARGIN));
+  left = Math.max(MARGIN - hl, Math.min(left, vw - hr - MARGIN));
   top = Math.max(MARGIN + hh, Math.min(top, vh - ht - MARGIN));
   el.style.left = Math.round(left) + 'px';
   el.style.top = Math.round(top) + 'px';
