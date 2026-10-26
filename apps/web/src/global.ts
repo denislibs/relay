@@ -2,7 +2,7 @@ import type { ProfileLink, ProfilePhoto, ThreadGuest } from '@relay/protocol';
 import type { NotifyState } from './notify';
 import { options } from 'preact';
 import { useEffect, useRef, useState } from 'preact/hooks';
-import { requestMutation } from '@relay/ui';
+import { requestMutation } from '@relay/ui/src/schedule.js';
 import { loadTheme, type ThemePref } from './theme';
 import { getPrefs, subscribePrefs, listenStorage, applyPrefs, type Prefs } from './prefs';
 import type { Item } from '@relay/sync-engine/src/types';

@@ -1,4 +1,4 @@
-import { setStickerPolicy } from '@relay/ui';
+import { setStickerPolicy } from '@relay/ui/src/lottie/player.js';
 import { ACCENT_IDS, DEFAULT_ACCENT } from './accent';
 import { switchAccent, switchTheme } from './themeSwitch';
 // Настройки устройства: хранятся в localStorage (`relay.prefs`), применяются в apply() и

@@ -6,7 +6,7 @@
 // путь — дуга (по горизонтали и вертикали — разные кривые), 300 мс. Лента едет к низу те же 300 мс по той же
 // вертикальной кривой (FLIGHT_SCROLL) — клон садится ровно на пиксели пузыря, и пузырь показывается вместо него.
 // Без полной анимации (настройка «Анимации», reduced motion), со скрытой вкладкой и для пузыря выше экрана — не летим.
-import { forceMeasure, requestMeasure, requestMutation } from '@relay/ui';
+import { forceMeasure, requestMeasure, requestMutation } from '@relay/ui/src/schedule.js';
 import { getPrefs } from '../prefs';
 import { bezier } from './scrollDrive';
 

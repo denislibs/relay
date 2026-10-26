@@ -1,4 +1,4 @@
-import { peerTone } from '@relay/ui';
+import { peerTone } from '@relay/ui/src/motion.js';
 import { getPrefs, localeTimeFormat } from '../prefs';
 
 export { localeTimeFormat };

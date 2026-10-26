@@ -1,15 +1,16 @@
+// Старт — сначала данные, потом интерфейс. Этот модуль — только слой данных (движок, состояние, сеанс): без
+// компонентов и без UI-кита, поэтому он маленький и выполняется быстро. Данные запускаются сразу (boot()), а
+// интерфейс (ui/start.tsx) грузится следом через import(): пока браузер разбирает его код, движок (уже открытый
+// ранним стартом из boot.js) отдаёт список чатов — и первый же кадр App рисует строки, а не пустой список.
 // первым: политика Trusted Types до любой записи в DOM (trustedTypes.ts)
 import './trustedTypes';
 import './pwa';   // beforeinstallprompt приходит рано — слушаем с первых строк
-import { installJoinLinks } from './ui/group/JoinLink';
 import { startMuteTimers } from './mute';
 import { startOwnMusic } from './profileLists';
-import { configureLottie, configureSpoilers, configureVoice, configureStickers, installSpoilers, loadPattern, onFullyIdle } from '@relay/ui';
 import { fetchBuild, onVisible, startUpdateCheck } from './update';
 import { claimMediaCache, sendMediaPolicy } from './storageInfo';
-import { getPrefs, isDark, subscribePrefs, type Prefs } from './prefs';
-import { enableStrictDom } from '@relay/ui';
-import { render } from 'preact';
+import { getPrefs, subscribePrefs, type Prefs } from './prefs';
+import { enableStrictDom } from '@relay/ui/src/strict.js';
 import { closeAllChats, openChat, startData } from './data';
 import { installErrorCapture } from './devtools/metrics';
 import { getGlobal, isPhone, setGlobal, subscribeGlobal, type Me } from './global';
@@ -18,12 +19,9 @@ import { startScreenBlur } from './screenBlur';
 import { startSettingsData } from './settingsData';
 import { startTitle } from './title';
 import { warmEmoji } from '@relay/protocol';
-import { App } from './ui/App';
-import { preloadLazy } from './ui/lazy';
 import { Login } from './ui/Login';
-import { warmSounds } from './sound';
-import { asset } from './assets';
 import { installDeviceFetch, startDeviceAuth } from './deviceAuth';
+import { uiRendered } from './uiReady';
 
 // до первого запроса: 401 «обнови доступ» — подпись ключом устройства и повтор, а не экран входа
 installDeviceFetch();
@@ -42,12 +40,12 @@ const ME_KEY = 'relay.me';
 function start(me: Me, enter: 'login' | 'reload' = 'reload'): void {
   void claimMediaCache(me.userId);
   setGlobal({ me, boot: 'app', enter });
-  setTimeout(() => setGlobal({ enter: null }), 1000);   // анимации входа доиграли
+  // анимации входа доиграли — через секунду после первого кадра интерфейса (он грузится после данных)
+  void uiRendered.then(() => setTimeout(() => setGlobal({ enter: null }), 1000));
   startDeviceAuth();   // привязать сеанс к ключу этого браузера и держать короткий доступ свежим
   startData(me, enter !== 'login');   // после входа — список, а не чат из адреса прошлого сеанса
   startMuteTimers();   // «Отключить звук» на время: таймер до ближайшего срока — перерисовать, когда чат включится
   startSettingsData(me);
-  installJoinLinks();
   startOwnMusic(me.userId);   // мои треки в профиле — для кнопки в плеере
 }
 
@@ -131,86 +129,8 @@ startTitle();
   const ric = (window as Window & { requestIdleCallback?: (cb: () => void, o?: { timeout: number }) => number }).requestIdleCallback;
   if (ric) ric(warm, { timeout: 5000 }); else setTimeout(warm, 2000);
 }
-// спойлеры: частицы рисует воркер (как в Telegram Web K); без него — CSS-точки
-configureSpoilers({ workerUrl: asset('spoiler.worker.js') });
-// голосовые: ворклет — файлом сборки, не из blob: (CSP)
-configureVoice({ workletUrl: asset('voice.worklet.js') });
-configureStickers({ base: '/stickers/' });
-// анимированные стикеры: tlottie в пуле воркеров
-configureLottie({ workerUrl: asset('lottie.worker.js'), wasm: { simd: asset('tlottie.wasm'), noSimd: asset('tlottie-no-simd.wasm') } });
-installSpoilers();
 startUpdateCheck({ current: __BUILD__, fetchBuild, onUpdate: () => setGlobal({ updateReady: true }), onVisible });
 startScreenBlur();
-// узор обоев — файлом: начинаем грузить до первого рендера, чтобы он проявился вместе с градиентом
-void loadPattern(getPrefs().wallpaper[isDark(getPrefs().theme) ? 'dark' : 'light'].pattern).catch(() => {});
-render(<App />, document.getElementById('app')!);
-// каркас из index.html (boot.js → html[data-shell]) лежит под приложением, пока его колонки проявляются поверх такой же
-// картинки (app-enter-reload, 300 мс), — потом не нужен. Экран входа — сразу без каркаса
-{
-  const root = document.documentElement, shell = document.getElementById('shell');
-  const drop = () => { shell?.remove(); root.removeAttribute('data-shell'); };
-  // обои каркаса — снимок настоящих (twallpaper): цвет фона, узор, градиент холста — свой у светлой и тёмной темы
-  // (relay.shellWp.light / .dark), boot.js берёт снимок своей темы и ставит переменными CSS до первого кадра.
-  // Снимаем в простое после списка, когда обои уже нарисованы, и заново — после смены обоев или темы
-  const saveWallpaper = () => {
-    const tw = document.querySelector<HTMLElement>('#app .rl-tw'), cv = tw?.querySelector<HTMLCanvasElement>('canvas.tw-canvas');
-    if (!tw || !cv || !cv.width) return;
-    const v = (k: string) => tw.style.getPropertyValue(k);
-    try {
-      localStorage.setItem('relay.shellWp.' + (isDark(getPrefs().theme) ? 'dark' : 'light'), JSON.stringify({ bg: v('--tw-background'), image: v('--tw-image'), size: v('--tw-size'), opacity: v('--tw-opacity'), mask: cv.classList.contains('tw-mask'), grad: cv.toDataURL('image/png') }));
-    } catch { /* приватный режим, квота */ }
-  };
-  // обои перерисовываются с переходом (300 мс) — снимок после него, в простое
-  let wpTimer: ReturnType<typeof setTimeout> | undefined;
-  const resnap = () => { clearTimeout(wpTimer); wpTimer = setTimeout(() => onFullyIdle(saveWallpaper), 1200); };
-  const wpOf = (p: Prefs) => JSON.stringify([p.theme, p.wallpaper]);
-  let wpKey = wpOf(getPrefs());
-  subscribePrefs((p) => { const k = wpOf(p); if (k !== wpKey) { wpKey = k; resnap(); } });
-  matchMedia('(prefers-color-scheme: dark)').addEventListener('change', resnap);
-  // время до списка — следующий запуск решит, рисовать ли в каркасе скелетон (boot.js: дольше 250 мс)
-  const offWp = subscribeGlobal(() => {
-    if (!getGlobal().chatsLoaded) return;
-    offWp();
-    try { localStorage.setItem('relay.listMs', String(Math.round(performance.now()))); } catch { /* приватный режим */ }
-    onFullyIdle(saveWallpaper);
-  });
-  if (!shell || !root.hasAttribute('data-shell')) drop();
-  else {
-    const off = subscribeGlobal(() => {
-      const b = getGlobal().boot;
-      if (b === 'login') { off(); drop(); }
-      // кадр приложения отрисован (рендер — в мутациях кадра, два rAF — после него), анимация появления доиграла
-      else if (b === 'app') {
-        off();
-        requestAnimationFrame(() => requestAnimationFrame(() => {
-          // dev: каркас совпадает с первым кадром приложения? (поменяли шапку или колонку — пора обновить shell.html)
-          if (__DEV__) void import('./devtools/shellMarkup').then((m) => {
-            const app = document.querySelector('#app > .rl-shell'), own = shell.querySelector('.rl-shell');
-            if (!app || !own) return;
-            const snap = m.snapshotShell(app);   // именно первый кадр: позже в колонке будут вкладки папок и строки
-            (window as unknown as { __relayShellSnapshot: () => string }).__relayShellSnapshot = () => snap;
-            const d = m.shellDiff(m.shellSignature(own), m.shellSignature(app));
-            if (d) console.warn('[shell] каркас (public/shell.html) не совпадает с первым кадром приложения:', d, '— обновить: copy(__relayShellSnapshot()) в консоли сразу после загрузки и вставить в public/shell.html');
-          });
-          // и обои приложения встали (они ждут узор — Wallpaper waitPattern; до того видны обои каркаса), но не дольше 3 с
-          setTimeout(() => {
-            const has = () => !!document.querySelector('#app .rl-tw canvas');
-            if (has()) { drop(); return; }
-            const tw = document.querySelector('#app .rl-tw');
-            const mo = new MutationObserver(() => { if (has()) { mo.disconnect(); clearTimeout(t); drop(); } });
-            if (tw) mo.observe(tw, { childList: true });
-            const t = setTimeout(() => { mo.disconnect(); drop(); }, 3000);
-          }, 350);
-        }));
-      }
-    });
-  }
-}
-boot();
-// звуки сообщений: вывод звука заводится заранее, в простое — иначе первая отправка ждёт его в обработчике (sound.ts)
-onFullyIdle(() => { if (getPrefs().notify.sound) warmSounds(); });
-// настройки, эмодзи и стикеры, управление группой — чанками (ui/lazy.tsx): к первому открытию они уже загружены.
-// После первого экрана — когда пришёл список чатов (первое простое наступает раньше, пока ждём данные)
-{
-  const off = subscribeGlobal(() => { if (getGlobal().chatsLoaded) { off(); onFullyIdle(() => preloadLazy(onFullyIdle)); } });
-}
+// данные — сразу; интерфейс — следом (его чанк уже качается: modulepreload в index.html, build.ts)
+void boot();
+void import('./ui/start');

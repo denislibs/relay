@@ -6,6 +6,7 @@ import { TWallpaper } from 'twallpaper';
 import { cx, ripple, reducedMotion, Presence, Icon, IconButton, Avatar, Badge, Button, Checkbox, MediaArt, MessageStatus, ICONS } from './kit.js';
 import { SearchInput } from './searchInput.js';
 import { gridLayout, rowAt } from './windowMath.js';
+import { wallpapers, wpMotion, nudgeWallpaper } from './motion.js';
 
 /* Relay UI kit — components added in the Preact version. */
 
@@ -771,13 +772,7 @@ function intensityAlpha(intensity, dark) {
   var k = typeof intensity === 'number' && isFinite(intensity) ? Math.max(0, Math.min(100, intensity)) / 100 : 0.5;
   return dark ? Math.min(1, k * 0.76) : Math.min(1, k * 0.8);
 }
-var wallpapers = [];
-/* Shift every mounted wallpaper's gradient one step — call on send / receive, like Telegram. */
-function wpMotion() { return !reducedMotion() && document.documentElement.dataset.wpanim !== '0'; }
-function nudgeWallpaper() {
-  if (!wpMotion()) return; // «Анимация обоев» выключена — градиент стоит
-  wallpapers.forEach(function (w) { var end = beginHeavyAnimation(700); w.toNextPosition(end); });
-}
+// реестр обоев и nudgeWallpaper — в motion.js (сдвиг градиента зовёт слой данных, без кита)
 function readTheme(el) {
   var cs = getComputedStyle(el), root = document.documentElement;
   var colors = [1, 2, 3, 4].map(function (i) { return cs.getPropertyValue('--wallpaper-' + i).trim() || '#dfe9d6'; });

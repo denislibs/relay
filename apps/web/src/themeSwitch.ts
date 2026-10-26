@@ -1,4 +1,5 @@
-import { beginHeavyAnimation, flushFrames, reducedMotion, requestMutation } from '@relay/ui';
+import { beginHeavyAnimation, flushFrames, requestMutation } from '@relay/ui/src/schedule.js';
+import { reducedMotion } from '@relay/ui/src/motion.js';
 import tokens from '@relay/ui/tokens.json';
 import { accentCss, accentTokens } from './accent';
 // Смена темы: новая тема раскрывается кругом из точки нажатия (View Transitions, как в мобильном Telegram).

@@ -13,7 +13,7 @@ import { useEffect, useState } from 'preact/hooks';
 import type { ChatFolder, PrivacyKey, PrivacyMode, SessionInfo } from '@relay/protocol';
 import { isSessionOp, sessionConfirmKey } from '@relay/sync-engine/src/sessions';
 import { sessionsAfterOps } from './banners';
-import { reducedMotion } from '@relay/ui';
+import { reducedMotion } from '@relay/ui/src/motion.js';
 import { engineConfig } from './engineConfig';
 import { getGlobal, setGlobal, THIS_SESSION_KEY, type AccountSettings, type DevSimFlags, type Me } from './global';
 import { dropSubscription } from './notify';

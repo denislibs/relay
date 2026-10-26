@@ -118,10 +118,21 @@ async function build(): Promise<void> {
   html = html.replace('<div id="app" class="rl"></div>', `<div id="shell" class="rl" aria-hidden="true" inert>${shellHtml}</div>\n  <div id="app" class="rl"></div>`);
   if (!html.includes('id="shell"')) throw new Error('index.html: нет места под каркас (#app)');
   // чанки, которые main импортирует статически, — modulepreload рядом с ним: качаются параллельно, а не после разбора main
-  const mainCode = await Bun.file(join(tmp, assets['main.js'].slice(1))).text();
-  const direct = [...mainCode.matchAll(/(?:^|[;}\s])import\s*(?:[\w${}\s,*]*?from\s*)?"\.\/([\w.-]+\.js)"/g)].map((m) => '/' + m[1]).filter((u) => chunks.includes(u));
+  // + интерфейс (ui/start.tsx — main грузит его через import() сразу после старта данных) со всеми его статическими
+  // чанками: качается параллельно с main, а не после его выполнения
+  const staticDeps = async (url: string): Promise<string[]> => {
+    const code = await Bun.file(join(tmp, url.slice(1))).text();
+    return [...code.matchAll(/(?:^|[;}\s])import\s*(?:[\w${}\s,*]*?from\s*)?"\.\/([\w.-]+\.js)"/g)].map((m) => '/' + m[1]).filter((u) => chunks.includes(u));
+  };
+  const preloads = new Set<string>();
+  const walk = async (url: string) => { for (const d of await staticDeps(url)) if (!preloads.has(d)) { preloads.add(d); await walk(d); } };
+  await walk(assets['main.js']);
+  const uiStart = chunks.find((u) => /^\/start-[a-z0-9]+\.js$/.test(u));
+  if (!uiStart) throw new Error('сборка: нет чанка ui/start (main.tsx → import(\'./ui/start\'))');
+  preloads.add(uiStart);
+  await walk(uiStart);
   let preload = '';
-  for (const url of [...new Set(direct)]) preload += `<link rel="modulepreload" href="${url}" integrity="${await sri(tmp, url)}">\n  `;
+  for (const url of preloads) preload += `<link rel="modulepreload" href="${url}" integrity="${await sri(tmp, url)}">\n  `;
   html = html.replace('<script type="module" src="/main.js"></script>', `${preload}<script type="module" src="${assets['main.js']}" integrity="${await sri(tmp, assets['main.js'])}"></script>`);
   for (const url of [boot, assets['main.js'], ...Object.values(css)]) if (!html.includes(`"${url}" integrity=`)) throw new Error(`index.html: нет ${url} с integrity`);
   await Bun.write(join(tmp, 'index.html'), html);

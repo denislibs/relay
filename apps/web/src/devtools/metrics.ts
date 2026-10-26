@@ -4,7 +4,7 @@
 //   собираются всегда — в кольцо на 200 записей; это одна запись в массив на ошибку.
 
 import { START, cursorAt, isAfter, type LogCursor } from './logCursor';
-import { frameStats } from '@relay/ui';
+import { frameStats } from '@relay/ui/src/schedule.js';
 
 // ---------- ошибки ----------
 

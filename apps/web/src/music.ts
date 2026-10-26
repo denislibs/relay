@@ -1,4 +1,4 @@
-import { player } from '@relay/ui';
+import * as player from '@relay/ui/src/media/player.js';
 import { useEffect, useState } from 'preact/hooks';
 import { deviceStore, findOnDevice } from './mediaCache';
 import { localPreview } from './data';

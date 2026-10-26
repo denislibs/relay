@@ -4,7 +4,10 @@ import { coverThumb, readAudioTags } from './id3';
 import { getPrefs } from './prefs';
 import type { Block, DiceEmoji, GeoPoint, LinkPreview, PollInput, ThreadGuest, TodoInput } from '@relay/protocol';
 import { playSentSound } from './sound';
-import { beginHeavyAnimation, nudgeWallpaper, requestMutation, toBase64 } from '@relay/ui';
+// прямые модули кита, не его индекс: слой данных стартует раньше интерфейса и не тянет за собой UI (main.tsx)
+import { beginHeavyAnimation, requestMutation } from '@relay/ui/src/schedule.js';
+import { nudgeWallpaper } from '@relay/ui/src/motion.js';
+import { toBase64 } from '@relay/ui/src/media/waveform.js';
 import { connectEngine, EngineClient, Mirror } from '@relay/sync-engine/src/client';
 import type { Item, Patch, Query, SearchResult } from '@relay/sync-engine/src/types';
 import { hideSpoilers, MAX_FILE_BYTES, type Entity } from '@relay/protocol';

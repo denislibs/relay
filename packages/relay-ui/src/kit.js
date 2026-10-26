@@ -6,6 +6,7 @@ import { PACK_ICONS, PACK_FILLED } from './iconPack.js';
 import { VK_ICONS } from './vkIcons.js';
 import { requestMeasure, requestMutation, beginHeavyAnimation, onHeavyAnimationEnd, isHeavyAnimating, forceMeasure } from './schedule.js';
 import { VideoPlayer } from './media/videoPlayer.js';
+import { reducedMotion, peerTone, PEER_COLORS } from './motion.js';
 
 /* Relay UI kit — Preact. Ported 1:1 from the original kit; see index.js for the public surface. */
 
@@ -16,13 +17,7 @@ function cx() {
   return out.join(' ');
 }
 /* ---------- Motion helpers ---------- */
-// Система просит меньше движения ИЛИ в настройках выключены анимации интерфейса (data-anim="0" на <html>).
-var reducedMq = null;   // один MediaQueryList: matchMedia на каждый вызов заметен в профиле (стикеры, анимации)
-function reducedMotion() {
-  if (document.documentElement.dataset.anim === '0') return true;
-  if (!reducedMq && window.matchMedia) reducedMq = window.matchMedia('(prefers-reduced-motion: reduce)');
-  return !!(reducedMq && reducedMq.matches);
-}
+// reducedMotion — в motion.js (его берёт и слой данных приложения, без кита)
 function chain(a, b) { return function (e) { if (a) a(e); if (b) b(e); }; }
 // Pointer ripple: one measure (rect) then one mutation (append), in that order — the fasterdom rule.
 /* Ripple — круг из точки нажатия. Диаметр — до дальнего угла элемента, так что к концу роста он
@@ -321,9 +316,7 @@ function initials(name) {
   var b = parts.length > 1 ? parts[parts.length - 1][0] : '';
   return (a + b).toUpperCase();
 }
-/* Цвет собеседника: 7 оттенков палитры (--peer-0…6). У кого есть id — id % 7, иначе хэш имени. */
-var PEER_COLORS = 7;
-function peerTone(id) { return Math.abs(Math.trunc(id)) % PEER_COLORS; }
+/* Цвет собеседника — peerTone в motion.js; по имени, у кого нет id, — хэш (nameTone). */
 function nameTone(name) {
   var x = 0;
   for (var i = 0; i < name.length; i++) x = (x * 31 + name.charCodeAt(i)) | 0;

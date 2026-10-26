@@ -1,4 +1,4 @@
-import { forceMeasure } from '@relay/ui';
+import { forceMeasure } from '@relay/ui/src/schedule.js';
 
 /**
  * Программная прокрутка ленты со своим таймингом (как animateScroll в Telegram), а не behavior:'smooth':
