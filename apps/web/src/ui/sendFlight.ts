@@ -21,6 +21,7 @@ export const FLIGHT_SCROLL = { ms: FLIGHT_MS, curve: [0.1992, 0.0106, 0.2792, 0.
 type Box = { left: number; top: number; width: number; height: number };
 export type Flight = {
   chatId: number;
+  box?: HTMLElement;   // стикер: снимок картинки из панели (летит, увеличиваясь до стикера сообщения)
   layer: HTMLElement;
   src: Box;            // капсула поля (фон вырастает из неё)
   text: HTMLElement;   // копия текста поля (в слое, на своём месте)
@@ -85,6 +86,85 @@ export function giveUp(f: Flight): void {
   a.onfinish = () => f.layer.remove();
 }
 
+// ---------- стикер: снимок нажатой ячейки панели ----------
+// какая ячейка стикера нажата последней (меню «Стикеры», правая панель, окно пака): отправка идёт из onClick без
+// элемента — берём его отсюда (захват на фазе погружения, раньше всех обработчиков)
+const CELL = '.app-stk-cell, .app-stkrow-cell, .app-stkset-cell';
+let pressed: Element | null = null;
+if (typeof document !== 'undefined') document.addEventListener('pointerdown', (e) => { pressed = (e.target as Element | null)?.closest?.(CELL) ?? null; }, true);
+
+/** Кадр стикера из ячейки: canvas (lottie / видео-стикер) копируем пикселями, картинку — клоном. */
+function snapshot(media: Element): HTMLElement | null {
+  const canvas = media.querySelector('canvas'), video = media.querySelector('video'), img = media.querySelector('img');
+  const src = canvas ?? video;
+  if (src) {
+    const c = document.createElement('canvas');
+    const w = canvas ? canvas.width : (video as HTMLVideoElement).videoWidth, h = canvas ? canvas.height : (video as HTMLVideoElement).videoHeight;
+    if (!w || !h) return null;
+    c.width = w; c.height = h;
+    try { c.getContext('2d')?.drawImage(src as CanvasImageSource, 0, 0, w, h); } catch { return null; }
+    return c;
+  }
+  return img ? (img.cloneNode(true) as HTMLElement) : null;
+}
+
+/** Снять отправку стикера: кадр нажатой ячейки встаёт в слой на её место. */
+export function captureSticker(chatId: number): void {
+  const cell = pressed;
+  pressed = null;
+  if (!cell || !cell.isConnected || !canFly()) return;
+  const media = cell.querySelector('.rl-sticker') ?? cell;
+  const r = media.getBoundingClientRect();
+  const shot = snapshot(media);
+  if (!shot || !r.width) return;
+  const layer = overlay(), box = document.createElement('div');
+  box.className = 'app-flight-box';
+  Object.assign(box.style, { left: r.left + 'px', top: r.top + 'px', width: r.width + 'px', height: r.height + 'px' });
+  box.appendChild(shot);
+  layer.appendChild(box);
+  document.body.appendChild(layer);
+  const text = document.createElement('div');   // пустая: у стикера текста нет
+  const f: Flight = { chatId, layer, src: boxOf(r), text, box, radius: '0', claimed: false, timer: 0 as unknown as ReturnType<typeof setTimeout> };
+  f.timer = setTimeout(() => giveUp(f), HOLD_MS);
+  pending.push(f);
+}
+
+/**
+ * Посадка в стикер или большое эмодзи (у них нет пузыря): летит снимок стикера (box) или копия текста поля —
+ * дугой и с увеличением до блока .rl-sticker-box. Сообщение спрятано и показывается в момент посадки.
+ */
+export function launchBox(f: Flight, msg: HTMLElement, remaining: () => number): void {
+  msg.classList.add('app-flight-target');
+  requestMeasure(() => {
+    const target = msg.querySelector<HTMLElement>('.rl-emoji-text') ?? msg.querySelector<HTMLElement>('.rl-sticker-box .rl-sticker') ?? msg.querySelector<HTMLElement>('.rl-sticker-box');
+    if (!msg.isConnected || !target) { requestMutation(() => finish(f, msg)); return; }
+    // эмодзи: место самих глифов в блоке (они по центру блока), как и у копии из поля — иначе в конце скачок
+    let r = target.getBoundingClientRect();
+    if (!f.box && target.classList.contains('rl-emoji-text')) { const rg = document.createRange(); rg.selectNodeContents(target); const gr = rg.getBoundingClientRect(); if (gr.width) r = gr; }
+    const dy = remaining();
+    const dst: Box = { left: r.left, top: r.top - dy, width: r.width, height: r.height };
+    let src = f.src, flyer: HTMLElement;
+    if (f.box) flyer = f.box;
+    else {
+      // копия текста поля: место и размер самих глифов (Range), а не всего поля
+      const range = document.createRange(); range.selectNodeContents(f.text);
+      const g = range.getBoundingClientRect();
+      if (!g.width) { requestMutation(() => finish(f, msg)); return; }
+      src = boxOf(g); flyer = f.text;
+    }
+    const k = dst.height / src.height;
+    const origin = f.box ? '0 0' : `${src.left - f.text.getBoundingClientRect().left}px ${src.top - f.text.getBoundingClientRect().top}px`;
+    requestMutation(() => {
+      flyer.style.transformOrigin = origin;
+      flyer.animate([
+        { transform: 'none' },
+        { transform: `translate(${dst.left - src.left}px, ${dst.top - src.top}px) scale(${k})` },
+      ], { duration: FLIGHT_MS, easing: EASE_Y, fill: 'forwards' });
+      setTimeout(() => requestMutation(() => finish(f, msg)), FLIGHT_MS + 16);
+    });
+  });
+}
+
 /** Новое своё сообщение чата забирает самый ранний ждущий полёт этого чата. */
 export function claim(chatId: number): Flight | null {
   const f = pending.find((x) => x.chatId === chatId && !x.claimed);
@@ -144,11 +224,13 @@ export function launch(f: Flight, bubble: HTMLElement, remaining: () => number):
   });
 }
 
-function finish(f: Flight, bubble: HTMLElement): void {
+function finish(f: Flight, el: HTMLElement): void {
   drop(f);
-  bubble.classList.remove('app-flight-target');
-  bubble.closest('.app-msg')?.classList.remove('app-flight-row');
+  el.classList.remove('app-flight-target');
+  el.closest('.app-msg')?.classList.remove('app-flight-row');
   f.layer.remove();
+  // у стикера и эмодзи прятали всё сообщение: время и ответ проявляются после посадки, как в Telegram
+  if (el.classList.contains('rl-sticker-msg')) for (const part of el.querySelectorAll<HTMLElement>('.rl-sticker-meta, .rl-sticker-head')) part.animate([{ opacity: 0 }, { opacity: 1 }], { duration: 150 });
 }
 
 /** Для тестов: ждущие полёты. */
