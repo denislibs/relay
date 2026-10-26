@@ -11,7 +11,7 @@ import { currentPhase } from './schedule.js';
 // «Грязь» раскладки двух видов. Записи внутри кадра (requestAnimationFrame, в том числе фаза mutate) браузер
 // разложит сам в конце этого же кадра — они опасны только для чтений дальше в этом же кадре. Записи из обычных задач
 // (обработчики событий, сообщения воркера) висят до следующей раскладки — их видят и события прокрутки следующего кадра.
-var enabled = false, dirtyTask = false, dirtyFrame = false, inFrame = false, frameTs = -1, sites = new Map(), opts = {};
+var enabled = false, dirtyTask = false, dirtyFrame = false, inFrame = false, frameTs = -1, sites = new Map(), opts = {}, subs = new Set();
 
 // стек: violation → onRead/onWrite → обёртка → вызвавший код. Первые три кадра — наши (в бандле имени файла нет)
 function where(stack) {
@@ -26,8 +26,9 @@ function violation(kind, prop) {
   var key = kind + ' ' + prop + ' @ ' + at;
   var v = sites.get(key);
   if (v) { v.count++; return; }
-  sites.set(key, { kind: kind, prop: prop, at: at, phase: currentPhase(), count: 1, stack: err.stack });
+  sites.set(key, { kind: kind, prop: prop, at: at, phase: currentPhase(), count: 1, stack: err.stack, t: Date.now() });
   console.warn('[strict-dom] ' + kind + ' — ' + prop + '\n    at ' + at);
+  subs.forEach(function (fn) { try { fn(); } catch (e) { /* подписчик не ломает проверку */ } });
 }
 
 function onRead(prop) {
@@ -70,6 +71,16 @@ var WRITE_METHODS = {
   DOMTokenList: ['add', 'remove', 'toggle', 'replace'],
   CSSStyleDeclaration: ['setProperty', 'removeProperty'],
 };
+
+/** Включена ли проверка на этой странице (в dev-сборке — с запуска; в обычной — из раздела разработчика, до перезагрузки). */
+export function strictDomEnabled() { return enabled; }
+/** Места нарушений: по одному на «вид + свойство + место», с числом повторов и стеком (новые — в конце). */
+export function strictDomReport() {
+  return Array.from(sites.values()).map(function (v) { return { kind: v.kind, prop: v.prop, at: v.at, phase: v.phase, count: v.count, stack: v.stack, t: v.t }; });
+}
+export function strictDomReset() { sites.clear(); subs.forEach(function (fn) { fn(); }); }
+/** Новое место нарушения — вызвать fn (раздел разработчика обновляет список). */
+export function subscribeStrictDom(fn) { subs.add(fn); return function () { subs.delete(fn); }; }
 
 /** Включить (один раз за страницу). opts.ignore — RegExp мест, которые не проверять (сторонние библиотеки). */
 export function enableStrictDom(options) {

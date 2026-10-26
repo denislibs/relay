@@ -107,7 +107,7 @@ export type Person = Item & { id: number; name: string; photo: ProfilePhoto | nu
 /** Файл в очереди отправки: progress 0…1; uploaded — загружен и ждёт отправки (соседа по альбому); compressing — ещё сжимается (progress — сжатия). */
 export interface UploadItem { key: string; chatId: number; name: string; size: number; kind: string; mime: string; uploaded: boolean; progress: number; compressing?: boolean }
 
-export type DevTab = 'overview' | 'log' | 'network' | 'data' | 'errors';
+export type DevTab = 'overview' | 'perf' | 'log' | 'network' | 'data' | 'errors';
 export interface DevSimFlags { offline: boolean; profile: { latency: number; jitter: number; lossPct: number; kbps: number } | null; dropNextUpdates: boolean; forceTooLong: boolean; persist: boolean }
 
 /** Настройки аккаунта (общие для устройств). loaded — снимок с сервера уже был; pending — есть неподтверждённые правки. */

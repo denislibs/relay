@@ -41,12 +41,17 @@ export function bezier(x1: number, y1: number, x2: number, y2: number): (p: numb
   };
 }
 
+let drives = 0;
+/** Сколько программных прокруток едет сейчас (запись кадров в разделе разработчика помечает ими кадры). */
+export const activeDrives = (): number => drives;
+
 export function driveScroll(root: { scrollTop: number }, o: DriveOpts): Drive {
   const raf = o.raf ?? ((cb) => requestAnimationFrame(cb)), caf = o.caf ?? ((id) => cancelAnimationFrame(id));
   const now = o.now ?? (() => performance.now());
   let id = 0, t0 = -1, from = 0, lastTo = NaN, active = true;
   const curve = o.curve ? bezier(...o.curve) : ease;
-  const finish = (reason: 'done' | 'cancel') => { if (!active) return; active = false; caf(id); o.onEnd?.(reason); };
+  drives++;
+  const finish = (reason: 'done' | 'cancel') => { if (!active) return; active = false; drives--; caf(id); o.onEnd?.(reason); };
   const frame = () => {
     if (!active) return;
     forceMeasure(() => {

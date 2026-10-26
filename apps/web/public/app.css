@@ -355,6 +355,23 @@ html[data-blur="0"] .app-sidemenu .rl-menu { -webkit-backdrop-filter: none; back
 .app-dev-tr > span:not(:first-child) { text-align: right; }
 .app-dev-th { color: var(--ink-muted); font-family: var(--font-sans); }
 .app-dev-empty { margin: 0; padding: var(--space-4); color: var(--ink-muted); font: 400 14px/20px var(--font-sans); text-align: center; }
+/* вкладка «Кадры»: запись, график, медленные кадры, стикеры, строгий DOM */
+.app-perf-hint { margin: 0; padding: var(--space-2) var(--space-4) 0; color: var(--ink-muted); font: 400 13px/18px var(--font-sans); max-width: 60ch; }
+.app-perf-live { display: inline-flex; align-items: center; gap: 6px; color: var(--ink-muted); font: 500 13px/18px var(--font-mono); font-variant-numeric: tabular-nums; }
+.app-perf-live i { width: 8px; height: 8px; border-radius: 50%; background: var(--danger); animation: rl-blink 1s ease-in-out infinite; }
+.app-perf-chart { padding: var(--space-1) var(--space-4) var(--space-2); }
+.app-perf-chart canvas { display: block; width: 100%; height: 120px; border-radius: var(--radius-md); background: var(--field); }
+.app-perf-legend { display: flex; flex-wrap: wrap; gap: 4px 12px; padding-top: 4px; color: var(--ink-muted); font: 400 11px/14px var(--font-sans); }
+.app-perf-slow { display: flex; flex-direction: column; margin: var(--space-1) 0 var(--space-2); }
+.app-perf-row { display: flex; align-items: baseline; gap: var(--space-2); width: 100%; padding: 6px var(--space-4); border: 0; background: none; color: var(--ink); text-align: left; font: 400 13px/18px var(--font-sans); }
+button.app-perf-row { cursor: pointer; }
+button.app-perf-row:hover { background: var(--hover); }
+.app-perf-row > b { flex: none; min-width: 64px; font: 500 13px/18px var(--font-mono); font-variant-numeric: tabular-nums; }
+.app-perf-row > b.is-jank { color: var(--danger); }
+.app-perf-at { flex: none; color: var(--ink-muted); font: 400 12px/18px var(--font-mono); font-variant-numeric: tabular-nums; }
+.app-perf-tags { flex: 1; min-width: 0; overflow-wrap: anywhere; color: var(--ink-muted); }
+.app-perf-tags em { font-style: normal; color: var(--ink); }
+.app-perf-strict .app-dev-pre { margin-inline: var(--space-4); }
 .app-dev-pre { margin: 0 var(--space-3) var(--space-3); padding: var(--space-2) var(--space-3); max-height: 320px; overflow: auto; border-radius: var(--radius-md); background: var(--field); color: var(--ink); font: 400 12px/17px var(--font-mono); white-space: pre-wrap; overflow-wrap: anywhere; }
 
 /* журнал */

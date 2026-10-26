@@ -275,3 +275,21 @@ export function attachSticker({ url, px, canvas, group = 'feed', play = true, lo
 
 /** Отладка и тесты: сколько анимаций сейчас играет / живёт. */
 export const stickerStats = () => ({ players: players.size, playing: active.size });
+
+/** Подробно для раздела разработчика: виды (канвасы), видимые, ждущие рендерер и играющие — по группам. */
+export function stickerDetail() {
+  let views = 0, visible = 0, loading = 0;
+  const groups = {};   // группа → { views, playing }
+  for (const pl of players.values()) {
+    if (!pl.renderer) loading++;
+    const on = active.has(pl);
+    for (const v of pl.views) {
+      views++;
+      if (v.visible) visible++;
+      const g = (groups[v.group] ??= { views: 0, playing: 0 });
+      g.views++;
+      if (on && v.visible) g.playing++;
+    }
+  }
+  return { players: players.size, playing: active.size, loading, views, visible, groups, exclusive, policy: { ...policy } };
+}
