@@ -2,6 +2,19 @@
 html, body, #app { height: 100%; margin: 0; }
 body { background: var(--bg); color: var(--ink); font-family: var(--font-sans); overflow: hidden; }
 #app > .rl-shell { height: 100%; box-sizing: border-box; }
+/* Каркас из index.html (build.ts, boot.js): та же разметка, что первый кадр приложения, неподвижным слоем под #app —
+   колонки приложения проявляются поверх такой же картинки, и подмена не видна. Ширина колонки — сохранённая (boot.js) */
+#shell { display: none; }
+html[data-shell] #shell { display: block; position: fixed; inset: 0; pointer-events: none; }
+#shell > .rl-shell { height: 100%; box-sizing: border-box; --side-w: var(--shell-side-w); }
+/* обои каркаса — те же слои twallpaper (relay.css): холст — снимком градиента, узор — маской (тёмная) или рисунком */
+#shell .rl-tw { --tw-background: var(--shell-tw-background); --tw-image: var(--shell-tw-image); --tw-size: var(--shell-tw-size); --tw-opacity: var(--shell-tw-opacity); --tw-blur: 0px; background: var(--tw-background); }
+#shell .tw-canvas { background: var(--shell-tw-grad) center / 100% 100% no-repeat; animation: none; }
+html:not([data-shell-wp]) #shell .rl-tw > * { display: none; }
+html[data-shell-wp="mask"] #shell .tw-canvas { -webkit-mask: center repeat; -webkit-mask-size: var(--tw-size) auto; -webkit-mask-image: var(--tw-image); mask: center repeat; mask-size: var(--tw-size) auto; mask-image: var(--tw-image); opacity: var(--tw-opacity); }
+html[data-shell-wp="mask"] #shell .tw-pattern { display: none; }
+/* каркас был: обои приложения встают поверх таких же сразу, без проявления (иначе на 600 мс под ним был бы голый фон) */
+html[data-shell-was] #app .rl-tw .tw-canvas { animation: none; }
 .app-center { display: flex; align-items: center; justify-content: center; height: 100%; padding: var(--space-4); box-sizing: border-box; }
 .app-login { width: min(100%, 440px); display: flex; flex-direction: column; gap: var(--space-4); }
 .app-login h1 { margin: 0; font: 500 28px/34px var(--font-sans); }

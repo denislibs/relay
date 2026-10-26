@@ -144,6 +144,32 @@ startScreenBlur();
 // узор обоев — файлом: начинаем грузить до первого рендера, чтобы он проявился вместе с градиентом
 void loadPattern(getPrefs().wallpaper[isDark(getPrefs().theme) ? 'dark' : 'light'].pattern).catch(() => {});
 render(<App />, document.getElementById('app')!);
+// каркас из index.html (boot.js → html[data-shell]) лежит под приложением, пока его колонки проявляются поверх такой же
+// картинки (app-enter-reload, 300 мс), — потом не нужен. Экран входа — сразу без каркаса
+{
+  const root = document.documentElement, shell = document.getElementById('shell');
+  const drop = () => { shell?.remove(); root.removeAttribute('data-shell'); };
+  // обои каркаса — снимок настоящих (twallpaper): цвет фона, узор, градиент холста. boot.js ставит их переменными
+  // CSS до первого кадра. Обновляем в простое после списка, когда обои уже нарисованы
+  const saveWallpaper = () => {
+    const tw = document.querySelector<HTMLElement>('#app .rl-tw'), cv = tw?.querySelector<HTMLCanvasElement>('canvas.tw-canvas');
+    if (!tw || !cv || !cv.width) return;
+    const v = (k: string) => tw.style.getPropertyValue(k);
+    try {
+      localStorage.setItem('relay.shellWp', JSON.stringify({ bg: v('--tw-background'), image: v('--tw-image'), size: v('--tw-size'), opacity: v('--tw-opacity'), mask: cv.classList.contains('tw-mask'), grad: cv.toDataURL('image/png') }));
+    } catch { /* приватный режим, квота */ }
+  };
+  const offWp = subscribeGlobal(() => { if (getGlobal().chatsLoaded) { offWp(); onFullyIdle(saveWallpaper); } });
+  if (!shell || !root.hasAttribute('data-shell')) drop();
+  else {
+    const off = subscribeGlobal(() => {
+      const b = getGlobal().boot;
+      if (b === 'login') { off(); drop(); }
+      // кадр приложения отрисован (рендер — в мутациях кадра, два rAF — после него), анимация появления доиграла
+      else if (b === 'app') { off(); requestAnimationFrame(() => requestAnimationFrame(() => setTimeout(drop, 350))); }
+    });
+  }
+}
 boot();
 // звуки сообщений: вывод звука заводится заранее, в простое — иначе первая отправка ждёт его в обработчике (sound.ts)
 onFullyIdle(() => { if (getPrefs().notify.sound) warmSounds(); });
