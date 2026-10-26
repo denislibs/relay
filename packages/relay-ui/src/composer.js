@@ -215,6 +215,11 @@ function Composer(props) {
     var r = recNow.current;
     recToken.current++;
     if (!r) return;
+    // отправка записи: источник для полёта в сообщение (приложение снимает его до того, как он уйдёт с экрана)
+    if (!cancel && latest.current.onRecordSend) {
+      var src = r.mode === 'round' ? document.querySelector('.rl-roundrec-media') : sendRef.current;
+      try { latest.current.onRecordSend(r.mode === 'round' ? 'round' : 'voice', src); } catch (e) { console.warn('onRecordSend', e); }
+    }
     rec[1](null);
     if (latest.current.onRecording) latest.current.onRecording(null);
     if (r.session.kind === 'round') { roundView[1]({ session: r.session, closing: true }); setTimeout(function () { roundView[1](function (v) { return v && v.session === r.session ? null : v; }); }, 300); }
