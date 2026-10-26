@@ -131,6 +131,7 @@ function Stickers() {
       <KV label="Рендереров (анимация × размер)" value={num(r.renderers)} />
       <KV label="Кадров в памяти (кэш + заготовки)" value={`${num(r.cachedFrames)} + ${num(r.looseFrames)}`} />
       <KV label="Память кадров (≈ ш × в × 4)" value={bytes(r.bytes)} warn={r.bytes > 64 * 1024 * 1024} />
+      <KV label="Бюджет кэша кадров" value={bytes(r.budget)} />
       <KV label="Кадров рисуется сейчас" value={num(r.pendingFrames)} />
       {(r.workers as { index: number; started: boolean; renderers: number; inflight: number }[]).map((w) => (
         <KV key={w.index} label={`  воркер ${w.index + 1}: рендереров / в работе`} value={w.started ? `${num(w.renderers)} / ${num(w.inflight)}` : 'не запущен'} />
