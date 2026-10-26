@@ -187,6 +187,8 @@ sw.addEventListener('push', (e) => {
     const wins = await sw.clients.matchAll({ type: 'window', includeUncontrolled: true });
     if (wins.some((w) => (w as WindowClient).focused)) return;
     await sw.registration.showNotification(d.title, { body: d.body, tag: 'chat-' + d.chatId, data: { chatId: d.chatId }, ...(d.system ? { icon: SYSTEM_ICON } : {}) });
+    // окон нет — некому посчитать непрочитанные: точка на иконке приложения; число поставит приложение при запуске (title.ts)
+    if (!wins.length) await (sw.navigator as WorkerNavigator & { setAppBadge?: () => Promise<void> }).setAppBadge?.().catch(() => {});
   })());
 });
 

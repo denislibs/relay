@@ -25,6 +25,7 @@ import { seen } from '../data';
 import { getGlobal } from '../global';
 import type { ProfilePhoto } from '@relay/protocol';
 import { avatarPhoto } from '../profilePhoto';
+import { installApp } from '../pwa';
 
 const rowPhoto = (p: ProfilePhoto | null) => { const a = avatarPhoto(p); return { avatarSrc: a.src, avatarThumb: a.thumb }; };
 
@@ -147,6 +148,7 @@ export function Sidebar() {
   const theme = useGlobal((s) => s.theme);
   useGlobal((s) => s.prefs.timeFormat);   // смена формата времени перерисовывает время в списке
   const dark = isDark(theme);
+  const installable = useGlobal((s) => s.installable);
   const view = useGlobal((s) => s.sidebarView);
   useEffect(() => { if (view !== 'chats') setMenu(null); }, [view]);   // ушли на другой экран — меню закрыто
   const me = useGlobal((s) => s.me)!;
@@ -318,6 +320,7 @@ export function Sidebar() {
                   { icon: 'account', label: 'Мой профиль', onClick: () => { setMenu(null); void go('settings'); } },
                   { icon: 'contacts', label: 'Контакты', onClick: () => { setMenu(null); void go('contacts'); } },
                   { icon: 'settings', label: 'Настройки', onClick: () => { setMenu(null); void go('settings'); } },
+                  ...(installable ? [{ icon: 'download', label: 'Установить Relay', onClick: () => { setMenu(null); void installApp(); } }] : []),
                   '-',
                   { icon: 'more', label: 'Ещё', submenu: [
                     { icon: 'moon', label: 'Ночной режим', checked: dark, keepOpen: true, onClick: () => setTheme(dark ? 'light' : 'dark') },

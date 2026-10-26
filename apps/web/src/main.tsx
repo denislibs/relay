@@ -1,5 +1,6 @@
 // первым: политика Trusted Types до любой записи в DOM (trustedTypes.ts)
 import './trustedTypes';
+import './pwa';   // beforeinstallprompt приходит рано — слушаем с первых строк
 import { installJoinLinks } from './ui/group/JoinLink';
 import { startMuteTimers } from './mute';
 import { startOwnMusic } from './profileLists';
