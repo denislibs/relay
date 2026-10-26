@@ -4,6 +4,7 @@ import { blocksView } from '../src/blocks';
 import { ProfileCache } from '../src/profile';
 import { Engine } from '../src/engine';
 import { SettingsCache, settingsView } from '../src/settings';
+import { sql } from '../../../apps/server/src/db';
 import { resetDb, startTestServer, watchInto } from './helpers';
 
 const srv = await startTestServer();
@@ -120,6 +121,26 @@ test('block/unblock: optimistic list, server state, blocksChanged to the second 
   await annaB.until((x) => x[0]?.blocksMe === false && x[0]?.bio === 'новое');
   await eb.call({ type: 'sendMessage', chatId, body: 'снова' });
   await msgs.until((x) => x.some((m) => m.body === 'снова' && m.status === 'sent'));
+});
+
+test('unblock re-reads the person: a profile cached without the photo (old servers sent blocked users without it) gets it back', async () => {
+  const a = await srv.login('Анна'), b = await srv.login('Борис');
+  await srv.chat(a.token, [a.userId, b.userId]);
+  const photo = { id: 'p-big', small: 'p-small', thumb: '', at: 1, pid: 1 };
+  await sql`update users set photo = ${sql.json(photo as never)} where id = ${b.userId}`;
+  const ea = await open(srv.config(a));
+  ea.connect(); await ea.whenIdle();
+  const people = watchInto(ea, { kind: 'people', ids: [b.userId] });
+  await people.until((x) => (x[0]?.photo as { small?: string } | null)?.small === 'p-small');
+  await ea.call({ type: 'block', userId: b.userId });
+  await ea.whenIdle();
+  // кэш, испорченный прежним сервером: blocksChanged нёс профиль без фото — с номером записи блокировки
+  const store = (ea as unknown as { store: { profile: ProfileCache } }).store;
+  const cached = store.profile.users.get(b.userId)!;
+  store.profile.applyUser({ ...cached, photo: null }, cached.seq);
+  await ea.call({ type: 'unblock', userId: b.userId });
+  await ea.whenIdle();
+  await people.until((x) => (x[0]?.photo as { small?: string } | null)?.small === 'p-small');
 });
 
 test('profile cache: a snapshot or response older than an applied userUpdated does not overwrite it', () => {

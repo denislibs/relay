@@ -220,6 +220,7 @@ export class Engine {
     });
     store.contactOf = (id) => this.contacts.view().get(id);
     store.wantUser = (id) => this.userWants.add(id);
+    store.refreshUser = (id) => { this.usersAsked.delete(id); this.userWants.add(id); };
     store.wantRow = (chatId) => this.refreshRows([chatId]);
     store.wantPost = (chatId, id) => {
       if (this.postsNoReplies.has(chatId + ':' + id)) return;   // уже перечитывали — кнопки нет (тред не в текущей группе): не спрашивать снова

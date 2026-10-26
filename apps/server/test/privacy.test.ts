@@ -226,6 +226,20 @@ test('blocks API: PUT/GET/DELETE, blocksChanged to the owner, only visible peopl
   expect(ofType(await journal(a.userId), 'blocksChanged').map((u) => u.unblocked ?? u.blocked?.userId)).toEqual([b.userId, b.userId]);
 });
 
+test('blocking keeps the blocked person\'s photo and music in the reply, the list and blocksChanged (the cache must not lose them)', async () => {
+  const a = await login('Анна'), b = await login('Борис');
+  await makeChat([a.userId, b.userId]);
+  const photo = { id: crypto.randomUUID(), small: crypto.randomUUID(), thumb: 'data:image/jpeg;base64,AAAA', at: 1, pid: 1 };
+  const music = { count: 1, top: null };
+  await sql`update users set photo = ${sql.json(photo)}, music = ${sql.json(music)} where id = ${b.userId}`;
+  const item = await (await call(a, 'PUT', `/blocks/${b.userId}`)).json();
+  expect(item.user.photo).toEqual(photo);
+  expect(item.user.music).toEqual(music);
+  const list = await (await call(a, 'GET', '/blocks')).json();
+  expect(list.blocked[0].user.photo).toEqual(photo);
+  expect(ofType(await journal(a.userId), 'blocksChanged')[0].blocked?.user.photo).toEqual(photo);
+});
+
 test('blocked user: no bio/birthday/phone/last seen (corrective userUpdated); the blocker still sees them; unblock restores', async () => {
   const a = await login('Анна', '+79001110000'), b = await login('Борис');
   await makeChat([a.userId, b.userId]);
