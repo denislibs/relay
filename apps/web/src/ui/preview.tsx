@@ -63,11 +63,7 @@ export function previewText(text: string, entities?: Ent[] | null): ComponentChi
  *  обложка музыки, кружок видеосообщения — как в Telegram. full — настоящий файл фото: где миниатюра крупнее
  *  строки списка (закреп, цитата, поиск), показываем его, а встроенный thumb — подложкой, пока грузится. */
 export function previewThumb(m: LastMessage): { src: string; video: boolean; round?: boolean; full?: string; node?: ComponentChildren } | null {
-  // стикер — сам стикер маленьким (первый кадр), как в Telegram
-  if (!m.deleted && m.kind === 'sticker' && m.sticker) {
-    const s = m.sticker;
-    return { src: '', video: false, node: <StickerView src={s.url} outline={s.outline} w={s.w} h={s.h} size={20} play={false} group="list" /> };
-  }
+  // стикер в строке списка — только «😘 Стикер», без картинки: крошечный стикер рядом с эмодзи выглядит мусором
   if (m.deleted || !m.thumb) return null;
   if (m.kind === 'round') return { src: m.thumb, video: false, round: true };
   const video = !!m.mime?.startsWith('video/');
@@ -101,7 +97,7 @@ export function previewBody(m: LastMessage, withThumb: boolean): ComponentChildr
   if (m.kind === 'contact') return ['👤 ', m.body || 'Контакт'];
   if (m.kind === 'geo') return ['📍 ', m.body || 'Геопозиция'];
   if (m.kind === 'dice') return m.body || '🎲';
-  // эмодзи стикера — всегда, и рядом с миниатюрой тоже (как «😀 Sticker» в Telegram)
+  // эмодзи стикера — всегда (как «😀 Sticker» в Telegram)
   if (m.kind === 'sticker') return (m.stickerEmoji || m.sticker?.emoji ? (m.stickerEmoji || m.sticker?.emoji) + ' ' : '') + 'Стикер';
   if (m.kind === 'round') return withThumb ? 'Видеосообщение' : '📹 Видеосообщение';
   if (m.kind === 'audio') {
