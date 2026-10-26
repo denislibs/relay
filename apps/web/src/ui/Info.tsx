@@ -143,15 +143,24 @@ export function Info() {
   useEffect(() => {
     const el = body.current;
     if (!el || !canExpand) return;
-    let scrolledAt = 0, touchY: number | null = null;
+    let scrolledAt = 0, touchY: number | null = null, top = 0, queued = false, alive = true;
     const set = (on: boolean) => { if (expandedNow.current !== on) { expandedNow.current = on; setExpanded(on); } };
-    const onScroll = () => { if (el.scrollTop > 0) { scrolledAt = performance.now(); set(false); } };
+    // scrollTop — чтение раскладки: не в событиях (после записей кадра оно пересчитывало бы раскладку принудительно),
+    // а в фазе замеров, раз за кадр (как PanelHeader, #94). Колесо и касание берут последнее замеренное значение
+    const measure = () => {
+      queued = false;
+      if (!alive) return;
+      top = el.scrollTop;
+      if (top > 0) { scrolledAt = performance.now(); set(false); }
+    };
+    const onScroll = () => { if (!queued) { queued = true; requestMeasure(measure); } };
+    onScroll();   // начальная позиция (панель могла открыться не с самого верха)
     const onWheel = (e: WheelEvent) => {
-      if (e.ctrlKey || Math.abs(e.deltaX) > Math.abs(e.deltaY) || el.scrollTop > 0) return;
+      if (e.ctrlKey || Math.abs(e.deltaX) > Math.abs(e.deltaY) || top > 0) return;
       if (e.deltaY < 0 && !expandedNow.current && performance.now() - scrolledAt > 250) { e.preventDefault(); set(true); }
       else if (e.deltaY > 0 && expandedNow.current) { e.preventDefault(); set(false); }
     };
-    const onTouchStart = (e: TouchEvent) => { touchY = el.scrollTop <= 0 ? e.touches[0].clientY : null; };
+    const onTouchStart = (e: TouchEvent) => { touchY = top <= 0 ? e.touches[0].clientY : null; };
     const onTouchMove = (e: TouchEvent) => {
       if (touchY == null) return;
       const dy = e.touches[0].clientY - touchY;
@@ -163,6 +172,7 @@ export function Info() {
     el.addEventListener('touchstart', onTouchStart, { passive: true });
     el.addEventListener('touchmove', onTouchMove, { passive: false });
     return () => {
+      alive = false;
       el.removeEventListener('scroll', onScroll);
       el.removeEventListener('wheel', onWheel);
       el.removeEventListener('touchstart', onTouchStart);
