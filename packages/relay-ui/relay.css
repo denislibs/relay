@@ -1383,12 +1383,22 @@ html[data-blur="0"] .rl-pop .rl-menu, html[data-blur="0"] .rl-pop .rl-rpick { -w
 .rl-resizing, .rl-resizing * { cursor: col-resize !important; user-select: none !important; }
 @media (max-width: 720px) { .rl-side-resizer { display: none; } }
 
-/* ---------- AsidePanel: slides in from the right, the chat column gives way ---------- */
-.rl-shell > .rl-presence { display: flex; }
-.rl-shell .rl-shell-aside { flex: 0 0 var(--aside-w, var(--aside-default, 408px)); animation: rl-aside-in 280ms cubic-bezier(0.2, 0, 0, 1) both; }
+/* ---------- AsidePanel: как в tweb — только трансформации ----------
+   Панель всегда поверх, у правого края, и въезжает сдвигом. Если рядом с ней чату хватает полной ширины
+   (нет .rl-shell-float), колонка чата уступает место сдвигом на половину панели (её ширина не меняется), а лента
+   прокрутки одновременно сужается симметрично: центр ленты на месте, сообщения (--chat-max) не перестраиваются,
+   полоса прокрутки встаёт вплотную к панели. Раньше колонка сужалась (flex) и догонялась FLIP-сдвигом —
+   перестройка ленты на каждом открытии и гонка с выбором режима */
+.rl-shell { --aside-half: calc((var(--aside-w, var(--aside-default, 408px)) + var(--space-float)) / 2); }
+.rl-shell > .rl-presence { display: flex; position: absolute; top: var(--space-float); right: var(--space-float); bottom: var(--space-float); z-index: 6; }
+.rl-shell > .rl-presence[data-state="closing"] { pointer-events: none; }
+.rl-shell .rl-shell-aside { flex: none; width: var(--aside-w, var(--aside-default, 408px)); animation: rl-aside-in 280ms cubic-bezier(0.2, 0, 0, 1) both; }
 .rl-presence[data-state="closing"] > .rl-shell-aside { animation: rl-aside-out 240ms cubic-bezier(0.4, 0, 1, 1) both; }
-/* уходящая панель — вне потока на своём месте: колонка чата сразу занимает ширину (одна раскладка) */
-.rl-shell > .rl-presence[data-state="closing"] { position: absolute; top: var(--space-float); right: var(--space-float); bottom: var(--space-float); pointer-events: none; }
+.rl-shell > .rl-shell-main { transition: transform 280ms cubic-bezier(0.2, 0, 0, 1); }
+.rl-shell:not(.rl-shell-float):has(> .rl-presence[data-state="open"] > .rl-shell-aside) > .rl-shell-main { transform: translateX(calc(-1 * var(--aside-half))); }
+.rl-shell:not(.rl-shell-float):has(> .rl-presence[data-state="open"] > .rl-shell-aside) .rl-feed { margin-inline: calc(var(--aside-half) - var(--space-float)); }
+@media (prefers-reduced-motion: reduce) { .rl-shell > .rl-shell-main { transition: none; } }
+html[data-anim="0"] .rl-shell > .rl-shell-main { transition: none; }
 @keyframes rl-aside-in { from { transform: translateX(calc(100% + var(--space-float))); opacity: 0.4; } to { transform: none; opacity: 1; } }
 @keyframes rl-aside-out { from { transform: none; opacity: 1; } to { transform: translateX(calc(100% + var(--space-float))); opacity: 0.4; } }
 .rl-asidecard { display: flex; flex-direction: column; min-height: 0; overflow: hidden; color: var(--ink); }
@@ -1407,7 +1417,6 @@ html[data-blur="0"] .rl-pop .rl-menu, html[data-blur="0"] .rl-pop .rl-rpick { -w
 .rl-glassbar .rl-glassbar-who { border-radius: 22px; transition: background-color var(--dur-instant) var(--ease-standard); }
 /* места под чат полной ширины рядом с панелью нет (FloatShell → rl-shell-float): панель выезжает поверх чата,
    колонка чата не сужается и не сдвигается; клик мимо панели закрывает её (прозрачная подложка) */
-.rl-shell.rl-shell-float > .rl-presence { position: absolute; top: var(--space-float); right: var(--space-float); bottom: var(--space-float); z-index: 6; }
 .rl-shell.rl-shell-float .rl-shell-aside { box-shadow: var(--shadow-pop); border-radius: var(--radius-panel); }
 .rl-aside-scrim { display: none; }
 .rl-shell.rl-shell-float > .rl-aside-scrim { display: block; position: absolute; inset: 0; z-index: 5; }
@@ -1415,7 +1424,7 @@ html[data-blur="0"] .rl-pop .rl-menu, html[data-blur="0"] .rl-pop .rl-rpick { -w
 @media (max-width: 720px) {
   /* весь экран: перебивает и плавающий режим (.rl-shell-float — отступы 16px) */
   .rl-shell > .rl-presence, .rl-shell.rl-shell-float > .rl-presence { inset: 0; z-index: 6; }
-  .rl-shell .rl-shell-aside, .rl-shell.rl-shell-float .rl-shell-aside { flex: 1 1 auto; box-shadow: -8px 0 24px rgba(0, 0, 0, 0.08); }
+  .rl-shell .rl-shell-aside, .rl-shell.rl-shell-float .rl-shell-aside { flex: 1 1 auto; width: auto; box-shadow: -8px 0 24px rgba(0, 0, 0, 0.08); }
   .rl-shell .rl-shell-aside, .rl-shell.rl-shell-float .rl-shell-aside, .rl-shell-aside > .rl-panel { border-radius: 0; }
   /* въезжает и уезжает, как страница SlideStack: справа на весь экран; чат под ней сдвигается на четверть (data-screen) */
   .rl-shell .rl-shell-aside { animation: rl-slide-from-right 300ms cubic-bezier(0.2, 0, 0, 1) both; }

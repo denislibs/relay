@@ -512,45 +512,21 @@ function WindowGrid(props) {
    Так каждый кадр анимации — только композиция, без перераскладки ленты. */
 var ASIDE_MS = 280;
 /* x центральной колонки чата (шапка по центру; нет шапки — сама колонка) */
-function anchorX(aside) {
-  var shell = aside ? aside.closest('.rl-shell') : document.querySelector('.rl-shell');
-  var main = shell && shell.querySelector(':scope > .rl-shell-main');
-  if (!main) return null;
-  // стек чатов: шапка колонки на экране ([data-current]), остальные сдвинуты
-  return forceMeasure(function () { return (main.querySelector('[data-current] .rl-glassbar') || main.querySelector('.rl-glassbar') || main).getBoundingClientRect().left; });
-}
 function AsidePanel(props) {
-  var ref = useRef(null), was = useRef(!!props.open), before = useRef(null);
-  // положение колонки до смены — замер в рендере, пока DOM ещё прежний (FLIP: First)
-  if (!!props.open !== was.current) before.current = anchorX(ref.current);
+  var was = useRef(!!props.open);
+  // колонка чата уступает место сдвигом (CSS, relay.css «AsidePanel»): пока едет — тяжёлая анимация
   useLayoutEffect(function () {
     var open = !!props.open;
     if (was.current === open) return;
     was.current = open;
-    var aside = ref.current, shell = aside && aside.closest('.rl-shell');
-    var main = shell && shell.querySelector(':scope > .rl-shell-main');
-    // панель поверх чата: колонка не меняется
-    if (!main || reducedMotion() || shell.classList.contains('rl-shell-float')) return;
-    var end = beginHeavyAnimation(ASIDE_MS + 20);
-    var from = before.current, to = anchorX(aside);
-    if (from == null || to == null || Math.abs(from - to) < 1) { end(); return; }
-    forceMeasure(function () {
-      main.style.transition = 'none';
-      main.style.willChange = 'transform';
-      main.style.transform = 'translateX(' + (from - to) + 'px)';
-    });
-    var raf = requestAnimationFrame(function () { requestMutation(function () {
-      main.style.transition = 'transform ' + ASIDE_MS + 'ms cubic-bezier(0.2, 0, 0, 1)';
-      main.style.transform = '';
-    }); });
-    var t = setTimeout(function () { requestMutation(function () { main.style.transition = ''; main.style.willChange = ''; }); end(); }, ASIDE_MS + 20);
-    return function () { cancelAnimationFrame(raf); clearTimeout(t); end(); };
+    if (reducedMotion() || asideFloats()) return;
+    return beginHeavyAnimation(ASIDE_MS + 20);
   }, [props.open]);
   return h(Fragment, null,
     // поверх чата: прозрачная подложка, клик мимо панели закрывает её (как в Telegram); рядом с чатом её нет (CSS)
     props.open && props.onClose ? h('div', { class: 'rl-aside-scrim', 'aria-hidden': 'true', onPointerDown: function (e) { e.preventDefault(); props.onClose(); } }) : null,
     h(Presence, { show: !!props.open, exitMs: 260 },
-      h('aside', { class: 'rl-shell-aside', ref: ref },
+      h('aside', { class: 'rl-shell-aside' },
         h('section', { class: 'rl-panel rl-asidecard', 'aria-label': props.label || 'Панель' }, props.children))));
 }
 
@@ -1018,21 +994,25 @@ function useAsideMode(ref) {
     var shell = ref.current;
     if (!shell || typeof ResizeObserver !== 'function') return;
     var last = null;
+    // в колбэке ResizeObserver (после раскладки, до отрисовки), а не кадром позже: иначе на ресайзе один кадр
+    // стоял прежний режим и чат перескакивал. Место колонки — offsetLeft: на него не влияет сдвиг колонки
+    // (transform), которым она уступает место панели; getBoundingClientRect его учитывал, и на середине выезда
+    // режим срывался в «поверх»
     function check() {
-      requestMeasure(function () {
+      var main = shell.querySelector(':scope > .rl-shell-main');
+      if (!main) return;
+      var f = forceMeasure(function () {
         var cs = getComputedStyle(shell);
         var gap = parseFloat(cs.getPropertyValue('--space-float')) || 16;
         var chat = parseFloat(cs.getPropertyValue('--chat-max')) || 696;
-        var main = shell.querySelector(':scope > .rl-shell-main');
-        if (!main) return;
-        var s = shell.getBoundingClientRect(), m = main.getBoundingClientRect();
         // всё, что левее колонки чата (папки, список, отступы), + чат полной ширины + панель + отступы справа
-        var need = (m.left - s.left) + chat + gap + asideWidthFor(innerWidth) + gap;
-        var f = s.width < need || innerWidth <= 720;
-        if (f === last) return;
-        last = f;
-        setFloat(f);
+        var need = main.offsetLeft + chat + gap + asideWidthFor(innerWidth) + gap;
+        return shell.clientWidth < need || innerWidth <= 720;
       });
+      if (f === last) return;
+      last = f;
+      shell.classList.toggle('rl-shell-float', f);   // сразу; рендер (setFloat) придёт следом и даст то же
+      setFloat(f);
     }
     var ro = new ResizeObserver(check);
     ro.observe(shell);
