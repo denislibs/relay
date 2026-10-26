@@ -1,9 +1,9 @@
 /** @jsxImportSource preact */
 import type { StickerRef, StickerSetInfo } from '@relay/protocol';
-import { Icon, IconButton, MenuPopover, StickerView, beginHeavyAnimation, confirmModal, reducedMotion, requestMeasure, requestMutation } from '@relay/ui';
+import { Icon, IconButton, MenuPopover, StickerView, beginHeavyAnimation, confirmModal, onHeavyAnimationEnd, reducedMotion, requestMeasure, requestMutation } from '@relay/ui';
 import type { ComponentChildren } from 'preact';
 import { memo } from 'preact/compat';
-import { useEffect, useRef, useState } from 'preact/hooks';
+import { useEffect, useLayoutEffect, useRef, useState } from 'preact/hooks';
 import { clearRecentStickers, faveSticker, loadStickerSet, openStickerSet, searchSets, stickersByEmoji, useMyStickers } from '../../stickers';
 import { EMOJI, QUICK, emojiTones, pushRecentEmoji, recentEmoji, saveTone, savedTones, searchEmoji } from './emojiData';
 import { useEmojiGroups } from '../../emojiGroups';
@@ -18,7 +18,7 @@ import { EmojiGlyph } from './emojiImage';
 type Tab = 'emoji' | 'stickers';
 const TAB_KEY = 'relay.symbols.tab';
 const CLOSE_MS = 180;   // закрытие панели (composer.js, relay.css .rl-symbols-pop.is-closing)
-const SLIDE_MS = 200;   // смена вкладки: обе едут вместе (app.css .app-sym-slide-*)
+const SLIDE_MS = 200;   // смена вкладки: обе едут вместе (Web Animations, SymbolMenu)
 const EMOJI_COLS = 8, EMOJI_ROW = 42;      // ячейка эмодзи 42 px (глиф 34)
 const STK_COLS = 5, STK_ROW = 76;          // ячейка стикера 72 px + 4 px зазор
 const PREBUILD_MS = 400;                    // после открытия (200 мс) — построить вторую вкладку про запас
@@ -38,10 +38,15 @@ export function SymbolMenu(p: SymbolMenuProps) {
   // Переключение — только показ: без перерисовки сетки, новых плееров стикеров и сборки мусора от старых
   const [built, setBuilt] = useState<Record<Tab, boolean>>(() => ({ emoji: tab === 'emoji', stickers: tab === 'stickers' }));
   // Смена вкладки — как в Telegram Web K: уходящая и новая едут вместе на всю ширину, без прозрачности (затухание
-  // показывало пустой фон панели — «вспышку белым»). Два шага: prep — новая вкладка в раскладке, но невидима
-  // (впервые построенная сетка и показ из display: none не попадают в кадр анимации); следующим кадром — slide.
+  // показывало пустой фон панели — «вспышку белым»). Два шага: prep — новая вкладка показана из display: none,
+  // разложена и нарисована за краем панели (это и есть дорогой кадр, но до начала движения); следующим кадром —
+  // slide. Движение — Web Animations по инлайн-transform: ни классов, ни pointer-events, ни inert на вкладках —
+  // их смена пересчитывала стили всего дерева вкладки (1 700 элементов, 20 мс при CPU ×4) в первом кадре движения.
+  // Обе вкладки — постоянные слои (will-change в CSS): слайд не перерисовывает, а двигает их
   const [prep, setPrep] = useState<Tab | null>(null);
-  const [slide, setSlide] = useState<{ from: Tab; dir: 'l' | 'r' } | null>(null);
+  const [slide, setSlide] = useState<{ from: Tab } | null>(null);
+  const bodies = useRef<Record<Tab, HTMLDivElement | null>>({ emoji: null, stickers: null });
+  const leaving = useRef<Animation | null>(null);
   // закрыли панель — со следующего открытия «Недавние» свежие. Вкладки не пересоздаются (как в Telegram Web K:
   // вкладка, прокрутка и подсветка категории остаются), только перечитывают снимок «Недавних» — после анимации
   // закрытия, иначе ряд менялся бы в исчезающей панели
@@ -69,6 +74,12 @@ export function SymbolMenu(p: SymbolMenuProps) {
     if (reducedMotion()) { setSlide(null); setTab(t); return; }
     setPrep(t);
   };
+  const shift = (t: Tab) => (t === 'stickers' ? 100 : -100);   // где новая вкладка ждёт: справа «Стикеры», слева «Эмодзи»
+  // до отрисовки кадра подготовки новая вкладка уже стоит за краем
+  useLayoutEffect(() => {
+    const el = prep && bodies.current[prep];
+    if (el) el.style.transform = `translateX(${shift(prep)}%)`;
+  }, [prep]);
   // prep отрисован и разложен — со следующей фазы записи обе вкладки едут; уходящая прячется по окончании
   useEffect(() => {
     if (!prep) return;
@@ -76,14 +87,18 @@ export function SymbolMenu(p: SymbolMenuProps) {
     requestMeasure(() => requestMutation(() => {
       if (!live) return;
       beginHeavyAnimation(SLIDE_MS + 50);
-      setSlide({ from: tab, dir: prep === 'stickers' ? 'r' : 'l' });
+      const x = shift(prep), opts = { duration: SLIDE_MS, easing: 'ease-in-out' };
+      const inc = bodies.current[prep], out = bodies.current[tab];
+      if (inc) { inc.animate([{ transform: `translateX(${x}%)` }, { transform: 'none' }], opts); inc.style.transform = ''; }
+      leaving.current = out ? out.animate([{ transform: 'none' }, { transform: `translateX(${-x}%)` }], { ...opts, fill: 'forwards' }) : null;
+      setSlide({ from: tab });
       setTab(prep);
       setPrep(null);
     }));
     return () => { live = false; };
   }, [prep]);
   useEffect(() => {
-    if (!slide) return;
+    if (!slide) { leaving.current?.cancel(); leaving.current = null; return; }   // ушедшая уже скрыта — снять её сдвиг
     const t = setTimeout(() => setSlide(null), SLIDE_MS + 30);
     return () => clearTimeout(t);
   }, [slide]);
@@ -95,11 +110,10 @@ export function SymbolMenu(p: SymbolMenuProps) {
   useAnimatedEmoji(p.open);   // каталог анимаций эмодзи: под курсором эмодзи панели оживает, как в выборе иконки папки
   const body = (t: Tab) => {
     if (!built[t]) return null;
-    const cls = t === prep ? ' is-prep'
-      : slide && t === tab ? ' app-sym-slide-in-' + slide.dir
-      : slide && t === slide.from ? ' app-sym-slide-out-' + slide.dir : '';
+    const off = t !== tab && t !== prep && t !== slide?.from;
     return (
-      <div class={'app-sym-body' + cls} key={t} hidden={t !== tab && t !== prep && t !== slide?.from} inert={t !== tab}>
+      // inert меняется только вместе с hidden: на видимой вкладке он пересчитывал бы стили всего её дерева
+      <div class="app-sym-body" key={t} ref={(el) => { bodies.current[t] = el; }} hidden={off} inert={off}>
         {t === 'emoji' ? <EmojiTabMemo onPick={stable.emoji} animate={stable.animate} tones epoch={epoch} /> : <StickersTabMemo onPick={stable.sticker} epoch={epoch} />}
       </div>
     );
@@ -108,6 +122,8 @@ export function SymbolMenu(p: SymbolMenuProps) {
     <div class="app-sym">
       {body('emoji')}
       {body('stickers')}
+      {/* на время слайда нажатия ловит прозрачный щит: pointer-events на самих вкладках наследуется и стоил бы пересчёта стилей */}
+      {prep || slide ? <div class="app-sym-shield" /> : null}
       {/* вкладки — маленькой «пилюлей» поверх содержимого, как в Telegram для macOS; по бокам — круглые кнопки */}
       <div class="app-sym-bar">
         {tab === 'stickers' ? <IconButton class="app-sym-bar-btn app-sym-bar-left" icon="search" size={20} label="Найти стикеры" onClick={p.onSearch} /> : null}
@@ -162,8 +178,12 @@ function useSections(count: number) {
     const secs = el?.querySelectorAll<HTMLElement>('[data-sec]');
     if (!el || !secs?.[i]) return;
     stop.current();
-    // цель и соседи наполняются до прокрутки: ни место посадки, ни конец пути не пустые
-    for (const k of [i - 1, i, i + 1]) secs[k]?.dispatchEvent(new Event(SEC_SHOW));
+    // до прокрутки наполняются то, что будет видно: начало цели и конец предыдущей секции (путь начинается
+    // в 150 px над целью или под ней); остальное дорисуется частями после перехода
+    const show = (k: number, fill: Fill, n: number) => secs[k]?.dispatchEvent(new CustomEvent(SEC_SHOW, { detail: { fill, n } }));
+    show(i, 'head', CHUNK);
+    show(i - 1, 'tail', CHUNK / 2);
+    show(i + 1, 'head', CHUNK / 2);
     const jump = { i, at: -1, anim: true };
     state.jump = jump;
     set(i, state.top);
@@ -180,6 +200,7 @@ function useSections(count: number) {
         const land = () => { jump.anim = false; set(i, to <= 0); };
         if (reducedMotion() || to === from) { el.scrollTop = to; land(); return; }
         el.scrollTop = start;
+        beginHeavyAnimation(JUMP_MS + 50);   // дорисовка секций и прочая отложенная работа — после доводки
         let raf = 0;
         const t0 = performance.now();
         const step = (now: number) => {
@@ -354,20 +375,58 @@ function crossfade(scroller: HTMLElement | null, content: HTMLElement | null): v
   content.animate([{ opacity: 0 }, { opacity: 1 }], opts);
 }
 
-// эмодзи-глифы дороги в отрисовке (≈1900 штук — 100+ мс): категория наполняется, когда подъехала к экрану (300 px),
-// и опустошается, когда ушла далеко (1 200 px) — в DOM живут только соседние с экраном. Высота зарезервирована
-// заранее — прокрутка не прыгает
+// эмодзи-глифы дороги в отрисовке (≈1900 штук — 100+ мс, на слабом CPU ×4 — полсекунды): категория наполняется,
+// когда подъехала к экрану (300 px), и опустошается, когда ушла далеко (1 200 px) — в DOM живут только соседние
+// с экраном. Наполняется частями по CHUNK плиток за кадр — с той стороны, откуда её видно (снизу — с начала,
+// сверху — с конца), и не во время анимаций (открытие, слайд вкладки, переход к категории). Высота
+// зарезервирована заранее — прокрутка не прыгает
+type Fill = 'head' | 'tail';
+interface Win { from: number; to: number; fill: Fill }
+const CHUNK = 64;   // 8 рядов — видимая часть секции; столько плиток кадр успевает и при CPU ×4
+function opened(len: number, fill: Fill, n = CHUNK): Win {
+  return fill === 'tail' ? { from: Math.max(0, len - n), to: len, fill } : { from: 0, to: Math.min(len, n), fill };
+}
+/** Общая очередь дорисовки: за кадр — одна часть одной секции, сколько бы их ни наполнялось (после перехода к
+ *  категории их три), и только когда тяжёлых анимаций нет. */
+const fillers: (() => void)[] = [];
+let fillRaf = 0;
+function runFill(): void {
+  fillRaf = 0;
+  fillers.shift()?.();
+  if (fillers.length) nextFill();
+}
+function nextFill(): void {
+  onHeavyAnimationEnd(() => { if (!fillRaf && fillers.length) fillRaf = requestAnimationFrame(runFill); });
+}
+function queueFill(fn: () => void): () => void {
+  fillers.push(fn);
+  nextFill();
+  return () => { const i = fillers.indexOf(fn); if (i >= 0) fillers.splice(i, 1); };
+}
+function grown(w: Win, len: number): Win {
+  // сначала в сторону, откуда секцию видно, потом в другую
+  if (w.fill === 'head') return w.to < len ? { ...w, to: Math.min(len, w.to + CHUNK) } : { ...w, from: Math.max(0, w.from - CHUNK) };
+  return w.from > 0 ? { ...w, from: Math.max(0, w.from - CHUNK) } : { ...w, to: Math.min(len, w.to + CHUNK) };
+}
 function EmojiSection({ cat, eager, root, ctx, selected, toneOf }: { cat: { id: string; title: string; list: string[] }; eager: boolean; root: { current: HTMLDivElement | null }; ctx: { current: CellCtx }; selected?: string | null; toneOf: Record<string, number> }) {
   const el = useRef<HTMLElement>(null);
-  const [shown, setShown] = useState(eager);
+  const len = cat.list.length;
+  const [win, setWin] = useState<Win | null>(() => (eager ? opened(len, 'head') : null));
+  const shown = !!win;
   useEffect(() => {
     const sec = el.current;
     if (!sec) return;
     if (!shown) {
-      const show = () => setShown(true);
-      const io = new IntersectionObserver((es) => { if (es.some((e) => e.isIntersecting)) show(); }, { root: root.current, rootMargin: '300px 0px' });
+      const io = new IntersectionObserver((es) => {
+        const e = es[es.length - 1];
+        if (!e.isIntersecting) return;
+        // секция выше окна (прокрутка вверх) — к экрану обращён её конец
+        setWin((w) => w ?? opened(len, e.boundingClientRect.top < (e.rootBounds?.top ?? 0) ? 'tail' : 'head'));
+      }, { root: root.current, rootMargin: '300px 0px' });
       io.observe(sec);
-      sec.addEventListener(SEC_SHOW, show);   // переход к категории: наполниться до прокрутки
+      // переход к категории: наполниться до прокрутки — нужной стороной и нужным количеством
+      const show = (ev: Event) => { const d = (ev as CustomEvent<{ fill: Fill; n: number }>).detail; setWin((w) => w ?? opened(len, d.fill, d.n)); };
+      sec.addEventListener(SEC_SHOW, show);
       return () => { io.disconnect(); sec.removeEventListener(SEC_SHOW, show); };
     }
     // опустошаем не сразу, а когда секция полсекунды пробыла вдали: не посреди перехода к категории или броска
@@ -377,16 +436,29 @@ function EmojiSection({ cat, eager, root, ctx, selected, toneOf }: { cat: { id: 
       const e = es[es.length - 1];
       clearTimeout(t);
       // вкладка или панель скрыты (display: none) — «не пересекается» ничего не значит, держим
-      if (!e.isIntersecting && root.current?.getClientRects().length) t = window.setTimeout(() => setShown(false), UNLOAD_MS);
+      if (!e.isIntersecting && root.current?.getClientRects().length) t = window.setTimeout(() => setWin(null), UNLOAD_MS);
     }, { root: root.current, rootMargin: '1200px 0px' });
     io.observe(sec);
-    return () => { clearTimeout(t); io.disconnect(); };
+    // уже наполняется, но не с той стороны, что будет видна после перехода — догнать ту сторону сразу
+    const extend = (ev: Event) => {
+      const d = (ev as CustomEvent<{ fill: Fill; n: number }>).detail;
+      setWin((w) => !w ? opened(len, d.fill, d.n) : d.fill === 'head' && w.from > 0 ? { ...w, from: 0 } : d.fill === 'tail' && w.to < len ? { ...w, to: len } : w);
+    };
+    sec.addEventListener(SEC_SHOW, extend);
+    return () => { clearTimeout(t); io.disconnect(); sec.removeEventListener(SEC_SHOW, extend); };
   }, [shown]);
+  // дорисовка: следующая часть — в общей очереди (кадр — одна часть на всю вкладку)
+  useEffect(() => {
+    if (!win || (win.from === 0 && win.to === len)) return;
+    return queueFill(() => setWin((w) => w && grown(w, len)));
+  }, [win, len]);
+  // первая плитка окна стоит на своём месте сетки: ряды над ней пустые, но той же высоты
+  const place = win && win.from ? { gridRowStart: Math.floor(win.from / EMOJI_COLS) + 1, gridColumnStart: (win.from % EMOJI_COLS) + 1 } : undefined;
   return (
     <section ref={el} data-sec class="app-sym-sec">
       <h4>{cat.title}</h4>
-      <div class="app-emoji-grid" style={{ minHeight: Math.ceil(cat.list.length / EMOJI_COLS) * EMOJI_ROW + 'px' }}>
-        {shown ? cat.list.map((e) => <EmojiCellMemo key={e} e={e} v={toneOf[e] != null ? emojiTones(e)?.[toneOf[e]] ?? e : e} on={selected === e} ctx={ctx} />) : null}
+      <div class="app-emoji-grid" style={{ minHeight: Math.ceil(len / EMOJI_COLS) * EMOJI_ROW + 'px' }}>
+        {win ? cat.list.slice(win.from, win.to).map((e, k) => <EmojiCellMemo key={e} e={e} v={toneOf[e] != null ? emojiTones(e)?.[toneOf[e]] ?? e : e} on={selected === e} ctx={ctx} place={k === 0 ? place : undefined} />) : null}
       </div>
     </section>
   );
@@ -394,13 +466,13 @@ function EmojiSection({ cat, eager, root, ctx, selected, toneOf }: { cat: { id: 
 const EmojiSectionMemo = memo(EmojiSection);
 
 /** Кнопка эмодзи: v — что показать и вставить (с выбранным оттенком); наведение — своя анимация поверх глифа. */
-function EmojiCell({ e, v, on, ctx }: { e: string; v: string; on: boolean; ctx: { current: CellCtx } }) {
+function EmojiCell({ e, v, on, ctx, place }: { e: string; v: string; on: boolean; ctx: { current: CellCtx }; place?: { gridRowStart: number; gridColumnStart: number } }) {
   const [hover, setHover] = useState(false);
   const [drawn, setDrawn] = useState(false);   // у анимации есть первый кадр — глиф под ней прячем
   const { animate, tones } = ctx.current;
   const src = hover && animate && !reducedMotion() ? animate(v) : undefined;
   return (
-    <button type="button" class={'app-emoji' + (on ? ' is-on' : '')} data-e={e} data-tones={tones && emojiTones(e) ? '' : undefined}
+    <button type="button" class={'app-emoji' + (on ? ' is-on' : '')} style={place} data-e={e} data-tones={tones && emojiTones(e) ? '' : undefined}
       aria-label={v} aria-pressed={on || undefined} onClick={() => ctx.current.pick(v)}
       onMouseEnter={animate ? () => { if (animate(v)) { setDrawn(false); setHover(true); } } : undefined} onMouseLeave={animate ? () => setHover(false) : undefined}>
       <span class={src && drawn ? 'is-under' : undefined}><EmojiGlyph e={v} /></span>

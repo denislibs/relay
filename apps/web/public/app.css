@@ -21,7 +21,10 @@ body { background: var(--bg); color: var(--ink); font-family: var(--font-sans); 
 .app-listwrap > .rl-presence > .app-skel { position: absolute; inset: 0 0 auto 0; z-index: 1; pointer-events: none; }
 /* пока скелетон стоит, список под ним скрыт: данные, пришедшие во время проявления строк, не просвечивают
    сквозь полупрозрачный скелетон; уход скелетона открывает уже готовый список */
-.app-listwrap:has(> .rl-presence[data-state="open"]) > :not(.rl-presence) { visibility: hidden; }
+/* :has — в позиции субъекта (ставит переменную на саму обёртку): с :has в середине селектора («> :not(…)») Chrome
+   пересчитывал стили всей колонки чата (≈1 350 элементов) на каждую вставку или удаление узла в ней */
+.app-listwrap:has(> .rl-presence[data-state="open"]) { --listwrap-under: hidden; }
+.app-listwrap > :not(.rl-presence) { visibility: var(--listwrap-under, inherit); }
 .app-skel > div { background: var(--card); }   /* строки скелетона закрывают готовый список под собой */
 /* уход скелетона — стирание построчно сверху вниз (как в Telegram Web K: 150 мс, сдвиг 15 мс) */
 .app-listwrap > .rl-presence[data-state="closing"] .app-skel > div { animation: app-fade-out 150ms cubic-bezier(.37, 0, .63, 1) both; animation-delay: calc(var(--i) * 15ms); }
@@ -53,7 +56,9 @@ body { background: var(--bg); color: var(--ink); font-family: var(--font-sans); 
 /* sticky top считается от края с учётом padding-top ленты (он уже равен шапке + отступу) */
 .rl-shell .rl-feed .rl-date { position: sticky; top: -32px; z-index: 2; pointer-events: none; }   /* у строки даты отступ 1rem, у ленты — 16px до шапки: плашка встаёт в 8px под шапкой */
 /* под шапкой висит закреп (48 px + 10 px отступа) — плашка даты прилипает ниже него, а не заезжает под него */
-.rl-shell :has(> .rl-glassbar .app-pins) .rl-feed .rl-date { top: 0; }
+/* якорь :has — колонка чата (родитель шапки): без него «любой элемент внутри .rl-shell» делал каждую вставку
+   или удаление узла во всём приложении пересчётом стилей ≈1 350 элементов (с якорем — единицы) */
+.rl-shell .app-chatcol:has(> .rl-glassbar .app-pins) .rl-feed .rl-date { top: 0; }
 .rl-shell .rl-feed .rl-date :is(span, .rl-date-btn) { pointer-events: auto; transition: opacity 300ms var(--ease-out); }
 .rl-shell .rl-feed .rl-date.stuck :is(span, .rl-date-btn) { opacity: 0; pointer-events: none; }
 .rl-shell .rl-feed .rl-date.covered :is(span, .rl-date-btn) { opacity: 0; transition: none; pointer-events: none; }
@@ -1204,17 +1209,8 @@ html[data-anim="0"] :is(.app-hero, .app-hero-photo, .app-hero-info, .app-hero-na
 .app-sym { overflow: hidden; }
 /* Вкладки лежат друг на друге. Смена — как в Telegram Web K: уходящая и новая едут вместе на всю ширину
    (200 мс ease-in-out), без прозрачности — пустой фон панели между ними не виден. */
-.app-sym-body { position: absolute; inset: 0; }
-.app-sym-body.is-prep { visibility: hidden; }   /* новая вкладка уже разложена, кадр до начала движения */
-.app-sym-slide-in-r { animation: app-sym-from-right 200ms ease-in-out; }
-.app-sym-slide-in-l { animation: app-sym-from-left 200ms ease-in-out; }
-.app-sym-slide-out-r { animation: app-sym-to-left 200ms ease-in-out forwards; }   /* вправо по вкладкам: старая уходит влево */
-.app-sym-slide-out-l { animation: app-sym-to-right 200ms ease-in-out forwards; }
-.app-sym-slide-in-r, .app-sym-slide-in-l, .app-sym-slide-out-r, .app-sym-slide-out-l { will-change: transform; pointer-events: none; }
-@keyframes app-sym-from-right { from { transform: translateX(100%); } }
-@keyframes app-sym-from-left { from { transform: translateX(-100%); } }
-@keyframes app-sym-to-left { to { transform: translateX(-100%); } }
-@keyframes app-sym-to-right { to { transform: translateX(100%); } }
+.app-sym-body { position: absolute; inset: 0; will-change: transform; }   /* свой слой: слайд (SymbolMenu, Web Animations) двигает, а не перерисовывает */
+.app-sym-shield { position: absolute; inset: 0; z-index: 1; }   /* нажатия во время слайда вкладок */
 .app-sym-pane { position: relative; display: flex; flex-direction: column; height: 100%; overflow: hidden; }
 /* Фокус в поиске (или запрос, или фильтр) — как в Telegram Web K: полоса категорий уезжает вверх и гаснет,
    содержимое поднимается на её место. Прокрутка ниже края панели на высоту полосы — после подъёма низ не пустеет. */
@@ -1240,8 +1236,7 @@ html[data-anim="0"] :is(.app-hero, .app-hero-photo, .app-hero-info, .app-hero-na
   transition: transform 200ms cubic-bezier(.4, 0, .2, 1); }
 .app-sym-pane.is-searching .app-sym-scroll { transform: translateY(-49px); }
 :root[data-anim="0"] .app-sym-strip, :root[data-anim="0"] .app-sym-scroll { transition: none; }
-:root[data-anim="0"] .app-sym-body { animation: none !important; }
-@media (prefers-reduced-motion: reduce) { .app-sym-strip, .app-sym-scroll { transition: none; } .app-sym-body { animation: none !important; } }
+@media (prefers-reduced-motion: reduce) { .app-sym-strip, .app-sym-scroll { transition: none; } }
 .app-sym-search { position: relative; display: flex; align-items: center; height: 38px; margin: 0 8px 4px; border-radius: 16px; background: var(--sym-fill); color: var(--ink-muted); }
 .app-sym-search-icon { flex: none; display: flex; align-items: center; justify-content: center; width: 42px; height: 38px; padding: 0 0 0 6px; border: 0; background: none; color: var(--ink-muted); }
 .app-sym-search-icon.is-back { cursor: pointer; }
