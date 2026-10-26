@@ -1,4 +1,4 @@
-import { IconButton, Wallpaper } from '@relay/ui';
+import { IconButton, RelayBadge, Wallpaper } from '@relay/ui';
 import { createContext } from 'preact';
 import { useContext, useEffect, useRef, useState } from 'preact/hooks';
 import { call, signedIn, type Step } from './api';
@@ -132,15 +132,9 @@ export function ErrorLine(props: { text: string | null; id?: string }) {
   );
 }
 
-/** Логотип Relay: зелёный круг с репликами. */
+/** Логотип Relay — тот же значок, что у официального чата и уведомлений. */
 export function Logo(props: { size?: number }) {
-  const s = props.size ?? 120;
-  return (
-    <svg class="auth-logo" width={s} height={s} viewBox="0 0 32 32" aria-hidden="true">
-      <rect width="32" height="32" rx="16" fill="var(--brand)" />
-      <path d="M9 12h14M9 17h9" stroke="#fff" stroke-width="2.6" stroke-linecap="round" fill="none" />
-    </svg>
-  );
+  return <RelayBadge class="auth-logo" size={props.size ?? 120} />;
 }
 
 export function Spinner() {

@@ -1,3 +1,4 @@
+import { RelayBadge } from '@relay/ui';
 import qrcode from 'qrcode-generator';
 import { useEffect, useRef, useState } from 'preact/hooks';
 import { call, errorText, type Step } from './api';
@@ -85,10 +86,7 @@ function QrImage(props: { text: string }) {
   return (
     <svg class="auth-qr-img" viewBox={`-1 -1 ${n + 2} ${n + 2}`} role="img" aria-label="QR-код для входа">
       <g fill="currentColor">{dots}{corner(0, 0)}{corner(n - 7, 0)}{corner(0, n - 7)}</g>
-      <g transform={`translate(${l0} ${l0}) scale(${logo / 32})`}>
-        <rect width="32" height="32" rx="16" fill="var(--brand)" />
-        <path d="M9 12h14M9 17h9" stroke="#fff" stroke-width="2.6" stroke-linecap="round" fill="none" />
-      </g>
+      <RelayBadge x={l0} y={l0} width={logo} height={logo} />
     </svg>
   );
 }
