@@ -11,7 +11,7 @@ import { FX_READ_DELAY_MS, playFxForMessage, queueReactionFx, takeReactionFx } f
 import { groupReactions, type Chip } from '../reactionChips';
 import { emojiKey } from '@relay/protocol';
 import type { ContactCard, Dice, Entity, GeoPoint, MessageButton, Poll, ProfilePhoto, Todo } from '@relay/protocol';
-import { Presence, ProgressRing, useMinVisible, MediaPolicy, ArticleBlocks, Avatar, Bubble, Icon, peerTone, DateDivider, DatePicker, FileBubble, MediaBubble, MessageText, VoiceBubble, MusicBubble, RoundBubble, player, MediaViewer, ScrollToBottom, beginHeavyAnimation, forceMeasure, isHeavyAnimating, onHeavyAnimationEnd, requestMeasure, requestMutation, selectionValue, TodoBubble, PollMessage, ContactMessage, GeoMessage, DiceMessage, InlineKeyboard, StickerBubble, EmojiBubble, reducedMotion, LazyRoot } from '@relay/ui';
+import { Presence, ProgressRing, useMinVisible, MediaPolicy, ArticleBlocks, Avatar, Bubble, Icon, peerTone, DateDivider, DatePicker, FileBubble, MediaBubble, MessageText, VoiceBubble, MusicBubble, RoundBubble, player, MediaViewer, ScrollToBottom, beginHeavyAnimation, forceMeasure, isHeavyAnimating, onHeavyAnimationEnd, requestMeasure, requestMutation, selectionValue, TodoBubble, PollMessage, ContactMessage, GeoMessage, DiceMessage, InlineKeyboard, StickerBubble, EmojiBubble, reducedMotion, LazyRoot, stickerMsgSize } from '@relay/ui';
 import { openStickerSet, sendSticker, useGreetingSticker } from '../stickers';
 import { historyEmpty } from '../greeting';
 import { GreetingCard } from './GreetingCard';
@@ -38,6 +38,7 @@ import { anchorShift, deferShift, requestShift, rowFor, shiftWanted } from './wi
 import { burstAnimates, driveScroll, jumpNear, DRIVE_MS, DRIVE_OWN_MS, type Drive } from './scrollDrive';
 import { claim, FLIGHT_SCROLL, giveUp, launch, launchBox, launchCircle, type Flight } from './sendFlight';
 import { interiorRemovals, mergeLeaving, LEAVE_HOLD_MS, LEAVE_MS, type Msg } from './leaving';
+import { estimateRow, extendWindow, firstWindow, learnScale, type Metrics, type OpenAt, type RowLike } from './firstScreen';
 
 /*
  * Лента сообщений, устроенная как в Telegram:
@@ -58,8 +59,52 @@ const EDGE_PX = 750;
 const TOP_ZONE = 72;      // шапка (48) + отступ (16) + воздух: выше — под шапкой, не «видно»
 const BOTTOM = 50;        // «у низа» — ближе 50 px
 const READ_EVERY = 150;   // отправка «вижу до id» не чаще
-const FIRST_PAINT = 24;   // при открытии внизу первым кадром — столько последних сообщений, остальное порциями после
-const FILL_CHUNK = 16;    // дорисовка истории выше первого экрана — по столько строк за кадр
+const FILL_CHUNK = 16;    // дорисовка окна за пределами первого экрана — по столько строк за кадр
+const FIRST_MARGIN = 300; // первый экран — с таким запасом сверху и снизу (как в Telegram Web K)
+
+// Оценка высот строк для первого экрана (firstScreen.ts). Ширина текста и шрифт уточняются по настоящей ленте
+// (rememberLayout); до первого замера — ширина окна и шрифт по умолчанию. Поправка общая на вкладку.
+let measureCtx: CanvasRenderingContext2D | null | undefined;
+let measureFont = '400 15px system-ui, sans-serif';
+let feedHeight = 0;   // высота ленты на экране (rememberLayout); до замера — высота окна
+const feedMetrics: Metrics = {
+  textW: Math.max(160, Math.min(560, (typeof innerWidth === 'number' ? innerWidth : 1200) * 0.4) - 18),
+  lineH: 20, pad: 18, gap: 4, mediaW: 360, mediaH: 360, sticker: stickerMsgSize(), scale: 1,
+  measure: (t) => {
+    if (measureCtx === undefined) {
+      try { measureCtx = (typeof OffscreenCanvas === 'function' ? new OffscreenCanvas(1, 1) : document.createElement('canvas')).getContext('2d') as CanvasRenderingContext2D | null; } catch { measureCtx = null; }
+    }
+    if (!measureCtx) return t.length * 8;
+    measureCtx.font = measureFont;
+    return measureCtx.measureText(t).width;
+  },
+};
+
+/** Сверить оценки с лентой на экране (фаза замеров): ширина текста, шрифт, поправка высот. */
+function rememberLayout(root: HTMLElement, byKey: Map<string, Item>): void {
+  const text = root.querySelector<HTMLElement>('.rl-bubble-text');
+  if (text) {
+    const cs = getComputedStyle(text);
+    measureFont = `${cs.fontWeight} ${cs.fontSize} ${cs.fontFamily}`;
+    const lh = parseFloat(cs.lineHeight);
+    if (lh > 0) feedMetrics.lineH = lh;
+  }
+  const bubble = root.querySelector<HTMLElement>('.rl-bubble');
+  if (bubble) {
+    const max = parseFloat(getComputedStyle(bubble).maxWidth);
+    if (max > 0) feedMetrics.textW = Math.max(120, max - 18);
+  }
+  if (root.clientHeight > 0) feedHeight = root.clientHeight;
+  const samples: { actual: number; estimate: number }[] = [];
+  for (const row of root.querySelectorAll<HTMLElement>('.app-msg[data-key]')) {
+    const m = byKey.get(row.dataset.key!);
+    // поправку учим по обычным текстовым строкам: у служебных, медиа и альбомов оценка своя, константами
+    if (!m || m.groupId || m.service || m.deleted || m.attachment || m.sticker || !m.body) continue;
+    samples.push({ actual: row.offsetHeight, estimate: estimateRow(m as unknown as RowLike, feedMetrics) });
+    if (samples.length >= 24) break;
+  }
+  feedMetrics.scale = learnScale(samples, feedMetrics.scale);
+}
 const APPEAR_MS = 400;    // анимация появления нового сообщения (200 мс) + запас: дольше класс не держим
 
 type Quote = QuoteMsg;
@@ -678,11 +723,35 @@ export function Feed({ frameKey, active, chatId, threadId, channel = false, meId
   const programmatic = useRef(0);
   const placed = useRef(false);
   const [away, setAway] = useState(false);
-  // дешёвый первый показ (как постепенный рендер в tt): открыли внизу — сначала хвост, выше экрана — следующим кадром
-  // сколько последних сообщений показано (null — все): открыли внизу — сначала первый экран, остальное порциями
+  // Первый экран (как в Telegram Web K): в первом кадре — только строки, что заполняют экран вокруг точки открытия
+  // (низ, непрочитанное, сохранённая позиция, переход), остальное окно — порциями после показа. Окно — ключами
+  // крайних строк: пришедшее посреди дорисовки сообщение индексы сдвинет, а ключи останутся. null — строить всё
   const here = { chatId, threadId };   // слой стека: позиция прокрутки треда — своим ключом
-  const [limit, setLimit] = useState<number | null>(() => (!unreadFrom && !savedPosition(here) && !focus ? FIRST_PAINT : null));
-  const partial = limit != null && messages.length > limit;
+  const win = useRef<{ from: string; to: string } | null | undefined>(undefined);   // undefined — ещё не решено
+  const [winTick, bumpWin] = useState(0);
+  const fillAnchorFor = useRef<number | null>(null);   // якорь шага дорисовки снимается рендером с winTick не меньше этого
+  if (win.current === undefined && messages.length && !placed.current) {
+    win.current = null;
+    const list = messages as unknown as RowLike[];
+    let at: OpenAt = { mode: 'bottom' };
+    const pos = savedPosition(here);
+    const idxOf = (key: string) => list.findIndex((x) => x.key === key);
+    const posAt = pos ? idxOf(pos.key) : -1;
+    const focusAt = focus ? list.findIndex((x) => (x as unknown as { sort?: number }).sort === focus.sort) : -1;
+    const unreadAt = unreadFrom != null ? list.findIndex((x) => x.senderId !== meId && x.id != null && x.id > unreadFrom) : -1;
+    if (focusAt >= 0) at = { mode: 'anchor', index: focusAt, above: (feedHeight || innerHeight) / 2 };
+    else if (posAt >= 0) at = { mode: 'anchor', index: posAt, above: pos!.offset };
+    else if (unreadAt >= 0) at = { mode: 'anchor', index: unreadAt, above: TOP_ZONE + 40 };
+    const w = firstWindow(list, at, { height: feedHeight || innerHeight, margin: FIRST_MARGIN }, feedMetrics);
+    if (w) win.current = { from: list[w[0]].key, to: list[w[1]].key };
+  }
+  let winFrom = 0, winTo = messages.length - 1;
+  if (win.current) {
+    const f = messages.findIndex((x) => x.key === win.current!.from), t = messages.findIndex((x) => x.key === win.current!.to);
+    if (f < 0 || t < 0 || f > t) win.current = null;   // крайней строки больше нет (окно сдвинули, удалили) — всё целиком
+    else { winFrom = f; winTo = t; }
+  }
+  const partial = !!win.current && (winFrom > 0 || winTo < messages.length - 1);
   // анимация появления — только у пришедших в живую ленту (appear.ts), не у истории. Отметка живёт APPEAR_MS: потом
   // класс снимается, и строка, пересобранная позже, анимацию не повторит
   const appearAt = useRef(new Map<string, number>());
@@ -866,7 +935,9 @@ export function Feed({ frameKey, active, chatId, threadId, channel = false, meId
       const h = root.scrollHeight, top = root.scrollTop, ch = root.clientHeight;
       let next: number | null = null;
       if (a) {
-        anchor.current = null;
+        // якорь дорисовки первого экрана — до рендера, который расширил окно: рендер между замером и им (пришла отметка
+        // прочтения) держит позицию тем же якорем, но его не снимает — иначе строки сверху легли бы без поправки
+        if (fillAnchorFor.current == null || winTick >= fillAnchorFor.current) { anchor.current = null; fillAnchorFor.current = null; }
         const row = rowAt(root, a.key, a.sort);
         // край якоря — по правилу tweb (anchorShift): строка, торчащая за верх (альбом, разрезанный окном иначе и
         // собранный целиком), держится за видимый низ, а не за верх, уехавший за экран
@@ -882,7 +953,7 @@ export function Feed({ frameKey, active, chatId, threadId, channel = false, meId
       if (next !== null) next = Math.max(0, Math.min(next, max)); // за пределы браузер не прокрутит — и события не будет
       if (next !== null && Math.abs(next - top) > 0.5) { programmatic.current++; root.scrollTop = next; }
     });
-  }, [messages, limit, leaveTick]);   // каждая порция дорисовки — восстановить якорь; уход строк из буфера — тоже
+  }, [messages, winTick, leaveTick]);   // каждая порция дорисовки — восстановить якорь; уход строк из буфера — тоже
 
   // удаление с анимацией: уходящие строки ещё в потоке — снять раскладку, вывести их из потока (absolute на своём
   // месте в пачке) и довезти соседей FLIP-переводом; уходящая гаснет. Одно чтение раскладки и одна запись до
@@ -1001,19 +1072,42 @@ export function Feed({ frameKey, active, chatId, threadId, channel = false, meId
   // сразу после перехода тормозила бы прокрутку и ввод. Якорь — первый видимый: позиция не прыгнет.
   const hasMessages = messages.length > 0;
   useEffect(() => {
-    if (limit == null || !hasMessages) return;   // снимка ещё нет — ждём его
-    if (!partial) { setLimit(null); return; }
+    if (!win.current || !hasMessages) return;   // окна нет или снимка ещё нет
+    if (!partial) { win.current = null; return; }
     if (!active) return;
     let alive = true;
     onHeavyAnimationEnd(() => requestMeasure(() => {
       const root = el.current;
-      if (!alive || !root) return;
+      if (!alive || !root || !win.current) return;
       const v = firstVisible(root);
-      if (v) anchor.current = v;
-      requestMutation(() => { if (alive) setLimit((l) => (l == null || l + FILL_CHUNK >= messages.length ? null : l + FILL_CHUNK)); });
+      if (v) { anchor.current = v; fillAnchorFor.current = winTick + 1; }
+      requestMutation(() => {
+        if (!alive || !win.current) return;
+        const list = frameByKey(getGlobal(), frameKey)?.messages as unknown as RowLike[] | undefined;
+        if (!list) return;
+        const f = list.findIndex((x) => x.key === win.current!.from), t = list.findIndex((x) => x.key === win.current!.to);
+        const next = f < 0 || t < 0 ? null : extendWindow(list, [f, t], FILL_CHUNK);
+        win.current = next ? { from: list[next[0]].key, to: list[next[1]].key } : null;
+        bumpWin((n) => n + 1);
+      });
     }));
-    return () => { alive = false; };
-  }, [limit, partial, active, hasMessages]);
+    return () => {
+      alive = false;
+      // шаг отменён до расширения окна — его якорь не должен держать позицию против прокрутки пользователя
+      if (fillAnchorFor.current != null && fillAnchorFor.current > winTick) { anchor.current = null; fillAnchorFor.current = null; }
+    };
+  }, [winTick, partial, active, hasMessages]);
+
+  // оценки высот — по настоящей ленте: через секунду после того, как чат встал (как rememberLayout в Web K)
+  useEffect(() => {
+    if (!active || !hasMessages) return;
+    const t = setTimeout(() => requestMeasure(() => {
+      const root = el.current;
+      if (!root) return;
+      rememberLayout(root, new Map((frameByKey(getGlobal(), frameKey)?.messages ?? []).map((x) => [x.key as string, x])));
+    }), 1000);
+    return () => clearTimeout(t);
+  }, [active, hasMessages]);
 
   // высота ленты меняется сверху (выезжает плеер) или снизу (растёт поле ввода) — держим низ на месте, как в Telegram:
   // что было у нижнего края, там и остаётся. Ширина меняется (открыли «Информацию», тянут край сайдбара) — текст
@@ -1168,7 +1262,7 @@ export function Feed({ frameKey, active, chatId, threadId, channel = false, meId
     const root = el.current;
     if (!root || !messages.length) return;
     forceMeasure(() => measureDates(root)());
-  }, [messages, limit, leaveTick]);
+  }, [messages, winTick, leaveTick]);
 
   const onScrollDates = (root: HTMLElement) => {
     if (!scrolling.current) {
@@ -1239,7 +1333,11 @@ export function Feed({ frameKey, active, chatId, threadId, channel = false, meId
     const root = el.current;
     if (!root || !focus || !placed.current) return;
     const row = root.querySelector<HTMLElement>(`.app-msg[data-sort="${focus.sort}"]:not(.app-msg-leaving)`);
-    if (!row) return;
+    if (!row) {
+      // цель уже в окне данных, но ещё не построена (первый экран дорисовывается) — строим окно целиком
+      if (win.current && messages.some((x) => x.sort === focus.sort)) { win.current = null; bumpWin((n) => n + 1); }
+      return;
+    }
     clearFocus(frameKey);
     stick.current = false;
     anchor.current = null;
@@ -1260,7 +1358,7 @@ export function Feed({ frameKey, active, chatId, threadId, channel = false, meId
         drive(root, target, DRIVE_MS);
       });
     }
-  }, [focus, messages]);
+  }, [focus, messages, winTick]);
   // полоса гаснет сама; таймер — свой: сброс focus выше перезапускает эффект перехода и снял бы его
   useEffect(() => {
     if (!flashKey) return;
@@ -1492,8 +1590,9 @@ export function Feed({ frameKey, active, chatId, threadId, channel = false, meId
   const out: unknown[] = [];
   let prevDay = '', prevSender: unknown = null, unreadShown = false;
   const isPosted = (x: Item) => isPost(x as { post?: boolean }) || (channel && !x.service);   // в канале и своё неподтверждённое — пост
-  if (!partial) out.push(<div class="app-sentinel" data-dir="older" key={'o' + (messages[0]?.key ?? '')} aria-hidden="true" />);
-  const shown0 = partial ? mergeLeaving(messages.slice(messages.length - limit!) as unknown as (Item & Msg)[], leaving.current.values() as Iterable<Item & Msg>) as Item[] : rendered;
+  // датчики краёв — только у достроенного края: пока окно первого экрана дорисовывается, подгрузка не начинается
+  if (!partial || winFrom === 0) out.push(<div class="app-sentinel" data-dir="older" key={'o' + (messages[0]?.key ?? '')} aria-hidden="true" />);
+  const shown0 = partial ? mergeLeaving(messages.slice(winFrom, winTo + 1) as unknown as (Item & Msg)[], leaving.current.values() as Iterable<Item & Msg>) as Item[] : rendered;
   // история не загружена: только своё неотправленное (у него ещё нет id) — отправка без сети видна сразу
   const shown = bare ? shown0.filter((m) => m.id == null && m.senderId === meId) : shown0;
   // соседи для хвостов, дат и пачек — без уходящих строк: раскладка соседей устоялась в кадре FLIP, не при сбросе буфера
@@ -1644,7 +1743,7 @@ export function Feed({ frameKey, active, chatId, threadId, channel = false, meId
   });
   flushRun();
   if (joinedAfter != null && !joinedShown && shown.length && !meta?.hasNewer) joinedLine();   // новых постов ещё нет — строка внизу
-  out.push(<div class="app-sentinel" data-dir="newer" key={'n' + (messages[messages.length - 1]?.key ?? '')} aria-hidden="true" />);
+  if (!partial || winTo === messages.length - 1) out.push(<div class="app-sentinel" data-dir="newer" key={'n' + (messages[messages.length - 1]?.key ?? '')} aria-hidden="true" />);
 
   // тред ещё не загружен (первая страница с сервера; без сети — пока связь не вернётся) и комментариев на экране нет —
   // лоадер посередине, как в Telegram Web K; шапка-копия поста комментарием не считается. С задержкой и минимумом — без мигания
