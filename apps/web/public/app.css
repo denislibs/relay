@@ -892,6 +892,7 @@ html[data-anim="0"] :is(.app-folder-hero-emoji, .app-folder-emoji-glyph, .app-fo
 .app-hero-photo { position: absolute; left: 0; top: 0; width: 100cqw; height: 100cqw; border-radius: 50%; transform-origin: 50% 0; transform: translateY(var(--hero-top)) scale(var(--hero-s, .3));
   transition: transform .3s var(--hero-ease), border-radius .3s var(--hero-ease); will-change: transform; }
 .app-hero.is-expanded .app-hero-photo { transform: none; border-radius: 0; }
+.app-hero-wrap:not([data-sized]) .app-hero-photo { transition: none; }   /* первый масштаб (ProfileGallery) — сразу, без анимации */
 .app-hero:not(.is-expanded) .app-gallery-track { transition: none; }   /* свернули — к первому фото без пролистывания */
 .app-hero:not(.is-expanded) :is(.app-gallery-bars, .app-gallery-nav) { opacity: 0; pointer-events: none; }
 .app-gallery-bars { transition: opacity .2s ease; }

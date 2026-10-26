@@ -479,7 +479,9 @@ function WindowGrid(props) {
     var el = host.current;
     if (!el) return;
     function put(w) { w = Math.floor(w); if (w > 0) { wSt[1](w); if (onWidth.current) onWidth.current(w); } }
-    put(forceMeasure(function () { return el.clientWidth; }));   // первая ширина нужна до отрисовки
+    // первая ширина нужна до отрисовки; известна с прошлого показа — без чтения раскладки посреди рендера
+    // (поправку, если панель стала шире, ResizeObserver даст в этом же кадре, до отрисовки)
+    if (!props.initialWidth || typeof ResizeObserver !== 'function') put(forceMeasure(function () { return el.clientWidth; }));
     if (typeof ResizeObserver !== 'function') return;
     var ro = new ResizeObserver(function (es) { put(es[0].contentRect.width); });
     ro.observe(el);

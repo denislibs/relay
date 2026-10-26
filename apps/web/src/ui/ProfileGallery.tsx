@@ -1,5 +1,5 @@
 import type { UserPhoto } from '@relay/protocol';
-import { forceMeasure, Icon } from '@relay/ui';
+import { Icon, requestMutation } from '@relay/ui';
 import type { ComponentChildren } from 'preact';
 import { useEffect, useLayoutEffect, useRef, useState } from 'preact/hooks';
 
@@ -32,13 +32,18 @@ export function ProfileGallery({ photos, index, onIndex, onOpen, name, sub, musi
   useEffect(() => { if (index > n - 1 && n) onIndex(n - 1); }, [n]);
   // свернули — снова первое фото (как в Telegram), без пролистывания: в свёрнутой шапке лента без перехода
   useEffect(() => { if (!expanded && i !== 0) onIndex(0); }, [expanded]);
-  // масштаб квадрата во всю ширину до круга 120 px: от ширины панели (её меняют, перетаскивая край)
+  // масштаб квадрата во всю ширину до круга 120 px: от ширины панели (её меняют, перетаскивая край).
+  // Первый размер ResizeObserver отдаёт в этом же кадре — после раскладки, до отрисовки; чтение clientWidth здесь
+  // пересчитывало бы стили всей панели посреди рендера (~20 мс при ×4). До первого размера фото без перехода
+  // (CSS :not([data-sized])) — иначе круг доехал бы до 120 px от запасного масштаба
   useLayoutEffect(() => {
     const el = wrap.current;
     if (!el) return;
     const set = (w: number) => { if (w) el.style.setProperty('--hero-s', String(AVATAR / w)); };
-    set(forceMeasure(() => el.clientWidth));   // первый масштаб — до отрисовки
-    const ro = new ResizeObserver((es) => set(es[0].contentRect.width));
+    const ro = new ResizeObserver((es) => {
+      set(es[0].contentRect.width);
+      if (!('sized' in el.dataset)) requestMutation(() => { el.dataset.sized = ''; });
+    });
     ro.observe(el);
     return () => ro.disconnect();
   }, []);
