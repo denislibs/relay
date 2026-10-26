@@ -38,7 +38,8 @@ import { deleteFolder, getSettings, reorderFolders, saveFolder, setNotify, setPr
 import { publicAuthRoute, privateAuthRoute } from './authRoutes';
 import { groupRoute } from './groupRoutes';
 import { addContact, blockUser, listBlocked, listContacts, removeContact, resolveUser, unblockUser, updateContact } from './domain/contacts';
-import { serveReactionFile, serveStickerFile } from './stickers/files';
+import { serveEmojiFile, serveReactionFile, serveStickerFile } from './stickers/files';
+import { emojiGroupsRoute } from './stickers/groups';
 import { reactionsRoute } from './reactions/routes';
 import { animatedEmojiRoute } from './reactions/emoji';
 import { stickerRoute } from './stickers/routes';
@@ -81,7 +82,7 @@ function withCookie(req: Request, res: Response | undefined): Response | undefin
 
 const INLINE_MIME = /^(image\/(jpeg|png|webp|gif|avif)|video\/(mp4|webm|ogg|quicktime)|audio\/(mpeg|mp4|ogg|webm|wav|x-wav|aac|flac))$/;
 
-const API = /^\/(health|me|users|contacts|settings|privacy|blocks|chats|presence|search|uploads|files|push|sessions|session|ws|dev|logout|auth|link-preview|groups|join|sticker-sets|my-stickers|stickers-by-emoji|stickers|reactions|animated-emoji|maptile)(\/|$)/;
+const API = /^\/(health|me|users|contacts|settings|privacy|blocks|chats|presence|search|uploads|files|push|sessions|session|ws|dev|logout|auth|link-preview|groups|join|sticker-sets|my-stickers|stickers-by-emoji|stickers|reactions|animated-emoji|emoji-groups|maptile)(\/|$)/;
 
 export function createServer(opts: { port: number }): Server {
   // кадры мимо журнала — через Valkey, чтобы дошли до сокетов в любом процессе
@@ -108,6 +109,7 @@ export function createServer(opts: { port: number }): Server {
         // файлы стикеров и реакций публичные (без сессии); nginx отдаёт их сам, сюда доходят, если его нет
         if (url.pathname.startsWith('/stk/')) return await serveStickerFile(url.pathname, req.method);
         if (url.pathname.startsWith('/rx/')) return await serveReactionFile(url.pathname, req.method);
+        if (url.pathname.startsWith('/emj/')) return await serveEmojiFile(url.pathname, req.method);
         // только API: статику клиента раздаёт nginx (docker/nginx), сюда доходит лишь то, чего нет в сборке
         if (!API.test(url.pathname)) return fail('not_found');
 
@@ -161,6 +163,8 @@ export function createServer(opts: { port: number }): Server {
         if (rx) return rx;
         const ae = await animatedEmojiRoute(req, url);
         if (ae) return ae;
+        const eg = await emojiGroupsRoute(req, url);
+        if (eg) return eg;
         if (req.method === 'GET' && url.pathname === '/me') {
           await ensureServiceChat(userId).catch((e) => console.warn('service chat', String(e)));   // «Relay» в списке у всех
           return Response.json(await getMe(userId));

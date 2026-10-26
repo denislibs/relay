@@ -3,7 +3,7 @@
 //   relay-app-shell@<сборка>          — код, стили, воркеры, звуки: холодный старт без сети;
 //   relay-attachments-auto-evictable  — вложения, подгруженные сами (уходят по сроку, лимиту и при нехватке места);
 //   relay-attachments-saved-by-user   — вложения, скачанные кнопкой (сами не удаляются);
-//   relay-stickers                    — файлы стикеров /stk/… и реакций /rx/… (адрес с хэшем содержимого: неизменны, живут между сборками).
+//   relay-stickers                    — файлы стикеров /stk/…, реакций /rx/… и иконок групп эмодзи /emj/… (адрес с хэшем содержимого: неизменны, живут между сборками).
 // Сведения о вложениях — в IndexedDB relay-attachments-on-device (mediaCache.ts, attachmentsOnDevice.ts).
 // Остальной API и WebSocket — только сеть.
 import type { AutoCleanupPolicy } from './attachmentsOnDevice';
@@ -39,7 +39,7 @@ declare const __SHELL__: string[];   // код и стили этой сборк
 declare const __INTEGRITY__: Record<string, string>;   // файл с хэшем в имени → SHA-256 его байтов (build.ts)
 const INTEGRITY: Record<string, string> = __INTEGRITY__;
 const SHELL = ['/', ...__SHELL__, '/sounds/message.mp3', '/sounds/sent.mp3'];   // звуки сообщений — и без сети
-const API = /^\/(health|me|users|contacts|settings|privacy|blocks|chats|presence|search|uploads|files|push|sessions|session|ws|dev|logout|auth|link-preview|groups|join|sticker-sets|my-stickers|stickers-by-emoji|stickers|reactions|animated-emoji|maptile)(\/|$)/;
+const API = /^\/(health|me|users|contacts|settings|privacy|blocks|chats|presence|search|uploads|files|push|sessions|session|ws|dev|logout|auth|link-preview|groups|join|sticker-sets|my-stickers|stickers-by-emoji|stickers|reactions|animated-emoji|emoji-groups|maptile)(\/|$)/;
 
 sw.addEventListener('install', (e) => {
   // мимо HTTP-кэша браузера: новая сборка не должна положить к себе файл прежней; чужие байты — установка не удаётся,
@@ -115,7 +115,7 @@ function networkFirst(req: Request, fallback: () => Promise<Response | undefined
 // Стикеры и реакции: сначала кэш (файл по адресу не меняется никогда), иначе сеть и в кэш. Предел — по числу файлов:
 // при переполнении уходят самые давно положенные (порядок ключей Cache Storage — порядок добавления).
 const STICKERS_CACHE = 'relay-stickers';
-const STICKER_PREFIXES = ['/stk/', '/rx/'];
+const STICKER_PREFIXES = ['/stk/', '/rx/', '/emj/'];
 const STICKERS_MAX = 6000;   // ≈ 60–120 МБ при 10–20 КБ на .tgs
 let stickerPuts = 0;
 async function serveSticker(req: Request): Promise<Response> {

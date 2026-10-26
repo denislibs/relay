@@ -223,8 +223,15 @@ export const MAX_FILE_BYTES = 2 * 1024 * 1024 * 1024;
 /** Реакция: кто и какой эмодзи (одна от пользователя на сообщение). */
 export interface Reaction { userId: Id; emoji: string }
 /** Реакция из каталога сервера (GET /reactions): ключ — emojiKey, адреса — неизменяемые файлы /rx/<slug>/<хэш>/<файл>. */
-/** Каталог анимированных эмодзи: emoji — анимация одиночного эмодзи, effects — варианты эффекта по клику, generic — общие (💥). */
-export interface AnimatedEmojiCatalog { hash: string; emoji: Record<string, string>; effects: Record<string, string[]>; generic: string[] }
+/** Каталог анимированных эмодзи: emoji — анимация одиночного эмодзи, effects — варианты эффекта по клику, generic — общие (💥),
+ *  dice — грани броска по эмодзи (DiceEmoji): [0] — «летит», пока значения нет, [n] — исход n (без 🎰: у слотов слои). */
+export interface AnimatedEmojiCatalog { hash: string; emoji: Record<string, string>; effects: Record<string, string[]>; generic: string[]; dice?: Record<string, DiceFace[]> }
+export interface DiceFace { url: string; outline: string | null }
+
+/** Группа эмодзи (как в Telegram): чип в поиске панели — иконка (белая анимация .tgs, подкрашивается темой) и эмодзи группы. */
+export interface EmojiGroup { title: string; icon: string; emoticons: string[] }
+/** Каталог групп (GET /emoji-groups): emoji — для панели эмодзи, sticker — для стикеров (там ещё «Привет»). */
+export interface EmojiGroupsCatalog { hash: string; emoji: EmojiGroup[]; sticker: EmojiGroup[] }
 
 export interface ReactionAsset {
   key: string;

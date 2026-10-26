@@ -92,3 +92,20 @@ test('shared:false даёт отдельный плеер при том же url
   a.destroy(); b.destroy(); c.destroy();
   expect(stickerStats().players).toBe(0);
 });
+
+test('atEnd: the last frame is shown at once and stays (old dice); restart plays from the start', async () => {
+  let ended = 0;
+  const v = attachSticker({ url: '/stk/x/aaaaaaaa/5.tgs', px: 64, canvas: canvas(), play: true, loop: false, shared: false, atEnd: true, onEnded: () => ended++ });
+  await wait();
+  expect(sent('frame').map((m) => m.i)).toEqual([59]);           // сразу последний кадр, не нулевой
+  v.setVisible(true);
+  await wait(100);
+  expect(stickerStats().playing).toBe(0);                        // стоит: исход уже показан
+  expect(sent('frame').map((m) => m.i)).toEqual([59]);
+  v.restart();
+  await wait(200);
+  expect(stickerStats().playing).toBe(1);                        // повтор — с начала
+  expect(sent('frame').some((m) => m.i > 0 && m.i < 59)).toBe(true);
+  v.destroy();
+  expect(ended).toBe(0);
+});

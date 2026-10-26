@@ -2,6 +2,9 @@ import { FAVED_STICKERS_LIMIT, RECENT_STICKERS_LIMIT, type MyStickers, type Stic
 import { sql, type Tx } from '../db';
 import { DomainError } from './errors';
 import { appendUpdates } from './journal';
+import { statSync } from 'node:fs';
+import { join } from 'node:path';
+import { fileHash8, greetingDir } from '../stickers/files';
 
 
 /** Сколько паков ставим новому пользователю (первые по порядку): пустая панель стикеров — тупик. */
@@ -52,16 +55,20 @@ export async function searchSets(q: string, limit = 30): Promise<StickerSetInfo[
   return rows.map(infoOf);
 }
 
-/** Стикеры по эмодзи: сначала из моих паков, потом недавние, потом остальные (до 100). */
+const graphemes = new Intl.Segmenter('en', { granularity: 'grapheme' });
+
+/** Стикеры по эмодзи (одному или группе — чип «Любовь» и т. п.): сначала из моих паков, потом недавние, потом остальные (до 100). */
 export async function stickersByEmoji(userId: number, emoji: string, limit = 100): Promise<StickerRef[]> {
-  const e = emoji.trim().slice(0, 16);
-  if (!e) return [];
+  const list = [...graphemes.segment(emoji.replace(/\s+/g, '').slice(0, 400))].map((x) => x.segment).slice(0, 50);
+  if (!list.length) return [];
+  // в паках эмодзи записаны то с вариационным селектором, то без — ищем оба написания
+  const variants = [...new Set(list.flatMap((e) => [e, e.replace(/\uFE0F/g, ''), e + '\uFE0F']))];
   const rows = await sql`
     select ${STICKER_COLS},
       (exists (select 1 from user_sticker_sets u where u.user_id = ${userId} and u.set_id = s.set_id)) as mine,
       (exists (select 1 from recent_stickers r where r.user_id = ${userId} and r.sticker_id = s.id)) as recent
     from stickers s join sticker_sets ss on ss.id = s.set_id
-    where ss.kind = 'sticker' and (s.emoji = ${e} or s.emoji = ${e.replace(/️/g, '')} or s.emoji = ${e + '️'})
+    where ss.kind = 'sticker' and s.emoji = any(${variants}::text[])
     order by mine desc, recent desc, ss.position, s.idx limit ${limit}`;
   return rows.map(refOf);
 }
@@ -70,10 +77,40 @@ export async function stickersByEmoji(userId: number, emoji: string, limit = 100
 export const GREETING_EMOJI = ['👋', '🤝', '🙋', '🫡', '✋', '😊', '👍'];
 
 /**
- * Стикер-приветствие для пустого личного чата: случайный среди стикеров с эмодзи приветствия, а если таких
- * нет — любой. null — паков нет вовсе.
+ * Подборка приветствий Telegram (ASSETS_DIR/greeting: getStickers по 👋⭐️) — хэши файлов. Сами стикеры уже лежат
+ * в импортированных паках: ищем их там по хэшу, чтобы клик открывал настоящий пак. Пересчёт по mtime greeting.json.
+ */
+let greeting: { stamp: number; hashes: Promise<string[]> } | null = null;
+function greetingHashes(): Promise<string[]> {
+  let stamp = 0;
+  try { stamp = statSync(join(greetingDir(), 'greeting.json')).mtimeMs; } catch { greeting = null; return Promise.resolve([]); }
+  if (greeting?.stamp === stamp) return greeting.hashes;
+  const hashes = (async () => {
+    const j = (await Bun.file(join(greetingDir(), 'greeting.json')).json()) as { stickers?: { file?: unknown }[] };
+    const out: string[] = [];
+    for (const s of j.stickers ?? []) {
+      if (typeof s?.file !== 'string' || !/^[0-9]{1,4}\.(tgs|webp)$/.test(s.file)) continue;
+      const h = await fileHash8(join(greetingDir(), s.file));
+      if (h) out.push(h);
+    }
+    return out;
+  })().catch((e) => { console.warn('greeting:', String(e)); greeting = null; return [] as string[]; });
+  greeting = { stamp, hashes };
+  return hashes;
+}
+
+/**
+ * Стикер-приветствие для пустого личного чата: случайный из подборки Telegram (greeting/), а без неё — среди
+ * стикеров с эмодзи приветствия, если таких нет — любой. null — паков нет вовсе.
  */
 export async function greetingSticker(): Promise<StickerRef | null> {
+  const hashes = await greetingHashes();
+  if (hashes.length) {
+    const [hit] = await sql`
+      select ${STICKER_COLS} from stickers s join sticker_sets ss on ss.id = s.set_id
+      where ss.kind = 'sticker' and s.file_hash = any(${hashes}::text[]) order by random() limit 1`;
+    if (hit) return refOf(hit);
+  }
   const [row] = await sql`
     select ${STICKER_COLS} from stickers s join sticker_sets ss on ss.id = s.set_id
     where ss.kind = 'sticker'

@@ -121,6 +121,9 @@ test('recent (20) and faved (5) are capped, newest first; search by title and em
   const hearts = await stickersByEmoji(b, '❤');                         // без вариационного селектора тоже
   expect(hearts.length).toBeGreaterThan(5);
   expect(hearts.every((s) => s.emoji.startsWith('❤'))).toBe(true);
+  // группа эмодзи (чип «Любовь» и т. п.): стикеры с любым из них
+  const group = await stickersByEmoji(b, '😂 👍 🦄');
+  expect(new Set(group.map((s) => s.emoji))).toEqual(new Set(['😂', '👍']));
 });
 
 test('sticker message: snapshot, reply to anything, forward, rights', async () => {
@@ -165,6 +168,26 @@ test('HTTP: sets, featured, search, mine, install, faved, recent; session requir
   const byEmoji = await (await fetch(`${base}/stickers-by-emoji?e=${encodeURIComponent('👍')}`, as())).json() as unknown[];
   expect(byEmoji.length).toBeGreaterThan(0);
   expect((await fetch(`${base}/my-stickers/recent`, as({ method: 'DELETE' }))).status).toBe(200);
+});
+
+test('greeting sticker: from the Telegram selection when it is there, found in the real packs by file hash', async () => {
+  // подборка: копии двух стикеров утки и файл, которого нет ни в одном паке (его не предлагаем)
+  mkdirSync(`${dir}/greeting`, { recursive: true });
+  writeFileSync(`${dir}/greeting/1.tgs`, new Uint8Array([...tgs, 5]));
+  writeFileSync(`${dir}/greeting/2.tgs`, new Uint8Array([...tgs, 8]));
+  writeFileSync(`${dir}/greeting/3.tgs`, new Uint8Array([9, 9, 9]));
+  writeFileSync(`${dir}/greeting/greeting.json`, JSON.stringify({ emoticon: '👋⭐️', stickers: [{ file: '1.tgs' }, { file: '2.tgs' }, { file: '3.tgs' }, { file: '../secret.txt' }] }));
+  try {
+    const duck = (await getStickerSet('duck'))!.stickers;
+    const want = new Set([duck[3].id, duck[6].id]);                      // 5.tgs и 8.tgs — четвёртый и седьмой
+    const picks = await Promise.all(Array.from({ length: 30 }, () => greetingSticker()));
+    expect(picks.every((s) => want.has(s!.id))).toBe(true);
+    expect(new Set(picks.map((s) => s!.id)).size).toBe(2);
+    expect(picks[0]!.url).toMatch(/^\/stk\/duck\//);                   // из настоящего пака: клик откроет его
+  } finally {
+    rmSync(`${dir}/greeting`, { recursive: true, force: true });
+  }
+  expect(await greetingSticker()).not.toBeNull();                        // подборки нет — прежний выбор
 });
 
 test('greeting sticker: random among greeting emoji, any sticker without them, 404 without packs', async () => {

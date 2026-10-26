@@ -4,7 +4,7 @@ import type { Item } from '@relay/sync-engine/src/types';
 import { unsupportedText } from './messageStub';
 import { avatarPhoto, senderAvatar } from '../profilePhoto';
 import { reactionIcon, useReactionCatalog } from '../reactions';
-import { animatedEmojiUrl, useAnimatedEmoji } from '../animatedEmoji';
+import { animatedEmojiUrl, diceFaces, useAnimatedEmoji } from '../animatedEmoji';
 import { clickBigEmoji, playEmojiEffect, scheduleIncomingFx } from '../emojiFx';
 import { emojiOnly } from '@relay/protocol';
 import { FX_READ_DELAY_MS, playFxForMessage, queueReactionFx, takeReactionFx } from '../reactionFx';
@@ -296,7 +296,7 @@ const Row = memo(function Row({ post, pinned, discussion, chatId, voiceTitle, au
       <div class={wrap('app-msg app-msg-sticker')} data-key={m.key} data-sort={m.sort as number}>
         {check}
         <DiceMessage
-          dice={d} roll={appear}
+          dice={d} roll={appear} faces={diceFaces(d.emoji)}
           from={out ? 'out' : 'in'} groupStart={start} appear={appear} aside={aside} fwd={fwd} reply={replyQ}
           author={author} authorTone={author ? peerTone(m.senderId as number) : undefined}
           time={clock(m.createdAt as string)} status={status} metaBefore={metaBefore}
@@ -624,7 +624,8 @@ export function Feed({ frameKey, active, chatId, threadId, channel = false, meId
   const rxv = useReactionCatalog();              // каталог реакций пришёл — плашки с картинками вместо глифов
   // крупные эмодзи: каталог анимаций грузим, только когда в окне есть сообщение из одного эмодзи
   const bigEmoji = useGlobal((s) => s.prefs.bigEmoji);
-  const needEmoji = useMemo(() => bigEmoji && messages.some((x) => !x.deleted && !x.attachment && !x.sticker && !x.service && emojiOnly(x.body as string, x.entities as { type: string }[] | undefined)?.count === 1), [messages, bigEmoji]);
+  // и когда есть бросок: его грани — в том же каталоге
+  const needEmoji = useMemo(() => messages.some((x) => !x.deleted && (x.kind === 'dice' || (bigEmoji && !x.attachment && !x.sticker && !x.service && emojiOnly(x.body as string, x.entities as { type: string }[] | undefined)?.count === 1))), [messages, bigEmoji]);
   const aev = useAnimatedEmoji(needEmoji);
   // следующее/предыдущее голосовое этого чата — для автоперехода и кнопок плеера
   useEffect(() => {

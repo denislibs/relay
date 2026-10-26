@@ -6,7 +6,7 @@ import { animatedEmojiCatalog, animatedEmojiRoute } from '../src/reactions/emoji
 // Без базы: каталог читает только ASSETS_DIR/stickers/<pack>/meta.json и файлы. Запускать из корня.
 let dir = '';
 const tgs = new Uint8Array([0x1f, 0x8b, 1, 2, 3]);
-function pack(name: string, stickers: { file: string; emoji: string }[], mtime: number) {
+function pack(name: string, stickers: { file: string; emoji: string; path?: string }[], mtime: number) {
   mkdirSync(`${dir}/stickers/${name}`, { recursive: true });
   for (const s of stickers) if (!s.file.includes('/')) writeFileSync(`${dir}/stickers/${name}/${s.file}`, tgs);   // плохой путь — не пишем, каталог должен его отбросить
   const meta = `${dir}/stickers/${name}/meta.json`;
@@ -20,6 +20,9 @@ beforeAll(() => {
   pack('animated_emoji', [{ file: '1.tgs', emoji: '❤' }, { file: '2.tgs', emoji: '😀' }, { file: '3.tgs', emoji: '❤️' }, { file: 'bad/x.tgs', emoji: '💩' }], 1_700_000_000_000);
   pack('emoji_animations', [{ file: '1.tgs', emoji: '❤️' }, { file: '2.tgs', emoji: '❤' }, { file: '3.tgs', emoji: '🎉' }], 1_700_000_000_000);
   pack('emoji_generic_animations', [{ file: '1.tgs', emoji: '💥' }, { file: '2.tgs', emoji: '💥' }], 1_700_000_000_000);
+  const faces = (n: number) => Array.from({ length: n }, (_, i) => ({ file: `${i + 1}.tgs`, emoji: i ? `${i}⃣` : '#⃣', path: 'zMQB' }));
+  pack('animated_dice', faces(7), 1_700_000_000_000);                   // «летит» + 6 исходов
+  pack('animated_dice_26bd', faces(4), 1_700_000_000_000);              // мяч: нужно 1 + 5 — неполный набор не берём
 });
 afterAll(() => { rmSync(dir, { recursive: true, force: true }); if (prevAssets === undefined) delete process.env.ASSETS_DIR; else process.env.ASSETS_DIR = prevAssets; });
 
@@ -31,6 +34,9 @@ test('каталог: ключи без FE0F, первый вариант эмо
   expect(cat.effects['🧡']).toBe(cat.effects['❤']);
   expect(cat.effects['🎉'].length).toBe(1);
   expect(cat.generic.length).toBe(2);
+  expect(cat.dice!['🎲'].map((f) => f.url)).toEqual(Array.from({ length: 7 }, (_, i) => expect.stringMatching(new RegExp(`^/stk/animated_dice/[0-9a-f]{8}/${i + 1}\\.tgs$`))));
+  expect(cat.dice!['🎲'][0].outline).toBe('zMQB');
+  expect(cat.dice!['⚽']).toBeUndefined();
   expect(cat.hash).toMatch(/^[0-9a-f]{16}$/);
   expect(await animatedEmojiCatalog()).toBe(cat);
 });

@@ -5,8 +5,9 @@
 //  • DiceMessage — без пузыря, как стикер: 🎲 — своя грань с точками (бросок кувырком), остальные — крупный
 //    эмодзи и подпись результата; у неотправленного значения ещё нет — кубик крутится, пока не придёт.
 import { h } from 'preact';
-import { useState } from 'preact/hooks';
+import { useEffect, useRef, useState } from 'preact/hooks';
 import { cx, Avatar, MsgLine, ForwardTitle, ReplyQuote, ReactionChips, MessageStatus, metaOrReactions } from './kit.js';
+import { StickerView } from './StickerView.js';
 
 /** Тайл XYZ и смещение точки в нём (256×256) — та же формула, что geoTile в протоколе (кит от протокола не зависит). */
 function geoTile(lat, lng, zoom) {
@@ -136,18 +137,54 @@ export function diceResult(d) {
   }
 }
 
-/** props: dice { emoji, value }, roll (бросок на глазах — анимировать), onClick + общие (время, статус, ответ, реакции). */
+export const DICE_PX = 180;
+
+/**
+ * Бросок анимацией из набора Telegram: faces[0] — «летит» (по кругу, пока исхода нет), faces[n] — исход n.
+ * Живой бросок (смонтирован без значения или только что пришёл) проигрывает исход с начала, старый — сразу стоит
+ * на последнем кадре. До первого кадра — силуэт; если исхода ещё ждали, то вместо силуэта «летящий»: исход ложится
+ * поверх, а тот уходит, когда исход уже проявился, — пустого кадра между ними нет.
+ */
+function DiceAnim(props) {
+  var faces = props.faces, value = props.value;
+  var live = useRef(props.roll || !value).current;
+  var waited = useRef(!value).current;   // исхода ждали — показан «летящий»
+  var result = value ? faces[value] : null;
+  var drawn = useState(false), resultDrawn = drawn[0], setResultDrawn = drawn[1];
+  var gone = useState(false), spinGone = gone[0], setSpinGone = gone[1];
+  // «летящий» снимаем после проявления исхода (фейд стикера ≈ 200 мс), чтобы не крутить его скрытым
+  useEffect(function () {
+    if (!resultDrawn) return;
+    var t = setTimeout(function () { setSpinGone(true); }, 300);
+    return function () { clearTimeout(t); };
+  }, [resultDrawn]);
+  return h('span', { class: 'rl-dice-anim', style: { width: DICE_PX + 'px', height: DICE_PX + 'px' } },
+    waited && !spinGone ? h(StickerView, { key: 'spin', src: faces[0].url, outline: faces[0].outline, w: 512, h: 512, size: DICE_PX, loop: true, force: true, shared: false, class: 'rl-dice-layer' }) : null,
+    result ? h(StickerView, {
+      key: 'v' + value, src: result.url, outline: waited ? null : result.outline, w: 512, h: 512, size: DICE_PX,
+      loop: false, play: live, force: live, shared: false, atEnd: !live, class: 'rl-dice-layer',
+      onFirstFrame: function () { setResultDrawn(true); },
+    }) : null);
+}
+
+/** props: dice { emoji, value }, roll (бросок на глазах — анимировать), faces (грани из набора Telegram — анимация
+ *  вместо своей графики), onClick + общие (время, статус, ответ, реакции). */
 export function DiceMessage(props) {
   var d = props.dice, out = props.from === 'out', pending = !d.value;
   var head = props.fwd || props.author || props.reply;
   var label = (d.emoji === '🎲' ? 'Кубик' : 'Бросок ' + d.emoji) + (pending ? '' : ': ' + diceResult(d));
+  var anim = props.faces && props.faces.length > (d.value || 0) ? props.faces : null;
+  // каталог граней ещё в пути (faces передан, но undefined) — пустая рамка того же размера, а не своя графика,
+  // которую через миг сменила бы анимация
+  var waiting = 'faces' in props && props.faces === undefined;
   return h(MsgLine, { aside: props.aside, class: cx('rl-msgline', out && 'rl-msgline-out', props.groupStart && 'rl-msgline-gap') },
     h('div', { class: cx('rl-sticker-msg', out ? 'rl-sticker-msg-out' : 'rl-sticker-msg-in', props.appear && (out ? 'rl-appear-out' : 'rl-appear-in')) },
       head ? h('div', { class: cx('rl-sticker-head', out && 'rl-sticker-head-out') }, Head(props)) : null,
       h('div', { class: 'rl-sticker-box' },
-        h('button', { type: 'button', class: cx('rl-dice', (props.roll || pending) && 'rl-dice-roll', pending && 'rl-dice-pending'), 'aria-label': label, onClick: props.onClick ? function (e) { e.stopPropagation(); props.onClick(); } : undefined },
-          d.emoji === '🎲' ? h(DieFace, { size: 120, value: pending ? 0 : d.value }) : d.emoji === '🎰' ? h(Slots, { value: pending ? 0 : d.value }) : h('span', { class: 'rl-dice-emoji' }, d.emoji),
-          d.emoji !== '🎲' && !pending && (d.emoji !== '🎰' || d.value === 64) ? h('span', { class: 'rl-dice-result' }, diceResult(d)) : null),
+        h('button', { type: 'button', class: cx('rl-dice', (anim || waiting) && 'rl-dice-tg', !anim && !waiting && (props.roll || pending) && 'rl-dice-roll', !anim && !waiting && pending && 'rl-dice-pending'), 'aria-label': label, onClick: props.onClick ? function (e) { e.stopPropagation(); props.onClick(); } : undefined },
+          // анимация Telegram сама показывает исход (мяч в кольце, страйк) — подписи под ней нет
+          anim ? h(DiceAnim, { faces: anim, value: d.value || 0, roll: props.roll }) : waiting ? h('span', { class: 'rl-dice-anim', style: { width: DICE_PX + 'px', height: DICE_PX + 'px' } }) : d.emoji === '🎲' ? h(DieFace, { size: 120, value: pending ? 0 : d.value }) : d.emoji === '🎰' ? h(Slots, { value: pending ? 0 : d.value }) : h('span', { class: 'rl-dice-emoji' }, d.emoji),
+          !anim && !waiting && d.emoji !== '🎲' && !pending && (d.emoji !== '🎰' || d.value === 64) ? h('span', { class: 'rl-dice-result' }, diceResult(d)) : null),
         h('span', { class: 'rl-media-chip rl-sticker-meta' }, props.metaBefore ? props.metaBefore() : null, props.time, out || props.status ? h(MessageStatus, { status: props.status || 'read' }) : null)),
       props.reactions && props.reactions.length ? h(ReactionChips, { items: props.reactions, out: out, float: true, onClick: props.onReact }) : null));
 }

@@ -64,8 +64,9 @@ function schedule() {
 }
 
 class Player {
-  constructor(key, url, px) {
+  constructor(key, url, px, atEnd = false) {
     this.key = key; this.url = url; this.px = px;
+    this.atEnd = atEnd;      // стоит на последнем кадре, пока не restart() (исход старого броска)
     this.views = new Set();
     this.renderer = null;
     this.index = 0;          // показанный кадр
@@ -81,7 +82,8 @@ class Player {
       openRenderer({ url, px }).then((r) => {
         if (this.closed) { r.release(); return; }
         this.renderer = r;
-        this.show(0);        // первый кадр сразу — даже если играть нельзя
+        if (this.atEnd) { this.ended = true; this.finished = true; this.time = (r.frames * 1000) / r.fps; this.show(r.frames - 1); }
+        else this.show(0);   // первый кадр сразу — даже если играть нельзя
         this.update();
       }, () => { for (const v of this.views) v.onError?.(); });
     };
@@ -99,7 +101,7 @@ class Player {
   }
 
   playable() {
-    if (!this.renderer || !focused) return false;
+    if (!this.renderer || !focused || this.atEnd) return false;   // atEnd стоит на исходе до restart()
     // force — эффекты и панель реакций: играют и во время тяжёлой анимации, и при выключенном автоплее, и под
     // эксклюзивной группой (меню открывается с beginHeavyAnimation, иначе «появление» ждало бы его конца)
     for (const v of this.views) if (v.visible && v.play && v.force) return true;
@@ -181,6 +183,7 @@ class Player {
 
   /** Проиграть с начала (повтор по клику у героев настроек). */
   restart() {
+    this.atEnd = false;
     this.ended = false;
     this.finished = false;
     this.time = 0;
@@ -202,15 +205,16 @@ class Player {
  * Представление стикера (канвас). Возвращает управление: visible/play/loop меняются снаружи,
  * destroy() — при размонтировании. onFirstFrame — первый нарисованный кадр (снять подложку). onEnded — без цикла
  * показан последний кадр (один раз до restart). force — играть вопреки тяжёлой анимации, автоплею и эксклюзивной группе.
- * shared:false — отдельный плеер (свои часы) даже при том же url и размере.
+ * shared:false — отдельный плеер (свои часы) даже при том же url и размере. atEnd — сразу последний кадр и стоп
+ * (только со shared:false: у общего плеера часы общие).
  */
 let privateSeq = 0;
-export function attachSticker({ url, px, canvas, group = 'feed', play = true, loop, force = false, shared = true, onFirstFrame, onEnded, onError }) {
+export function attachSticker({ url, px, canvas, group = 'feed', play = true, loop, force = false, shared = true, atEnd = false, onFirstFrame, onEnded, onError }) {
   // shared:false — свои часы (эффекты реакций: две копии одной анимации не должны стартовать с середины
   // и заканчиваться вместе); рендерер и кэш кадров всё равно общие (pool)
   const key = url + '|' + px + (shared ? '' : '|#' + ++privateSeq);
   let pl = players.get(key);
-  if (!pl) { pl = new Player(key, url, px); players.set(key, pl); }
+  if (!pl) { pl = new Player(key, url, px, !shared && atEnd); players.set(key, pl); }
   let first = true;
   const ctx = canvas.getContext('2d');
   canvas.width = px; canvas.height = px;
