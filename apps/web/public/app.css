@@ -1442,3 +1442,5 @@ html[data-anim="0"] :is(.app-enter-reload, .app-enter-login) :is(.rl-shell-side,
 .app-flight-row :is(.rl-appear-out, .rl-appear-in), .app-flight-row:is(.rl-appear-out, .rl-appear-in) { animation: none !important; }
 .app-flight-box { position: absolute; }
 .app-flight-box > * { display: block; width: 100%; height: 100%; object-fit: contain; }
+.app-flight-circle { border-radius: 50%; overflow: hidden; }
+.app-flight-circle > * { object-fit: cover; }

@@ -22,6 +22,7 @@ type Box = { left: number; top: number; width: number; height: number };
 export type Flight = {
   chatId: number;
   box?: HTMLElement;   // стикер: снимок картинки из панели (летит, увеличиваясь до стикера сообщения)
+  circle?: 'voice' | 'round';   // запись: круг кнопки отправки или превью кружка
   layer: HTMLElement;
   src: Box;            // капсула поля (фон вырастает из неё)
   text: HTMLElement;   // копия текста поля (в слое, на своём месте)
@@ -161,6 +162,58 @@ export function launchBox(f: Flight, msg: HTMLElement, remaining: () => number):
         { transform: `translate(${dst.left - src.left}px, ${dst.top - src.top}px) scale(${k})` },
       ], { duration: FLIGHT_MS, easing: EASE_Y, fill: 'forwards' });
       setTimeout(() => requestMutation(() => finish(f, msg)), FLIGHT_MS + 16);
+    });
+  });
+}
+
+// ---------- голосовое и кружок: круг из поля в сообщение ----------
+/**
+ * Снять отправку записи: голосовое — кнопка отправки (круг цвета кнопки летит в кнопку «играть»), кружок — превью
+ * записи (кадр видео в круге летит в кружок сообщения).
+ */
+export function captureCircle(chatId: number, el: Element | null, kind: 'voice' | 'round'): void {
+  if (!el || !el.isConnected || !canFly()) return;
+  const r = el.getBoundingClientRect();
+  if (!r.width) return;
+  const box = document.createElement('div');
+  box.className = 'app-flight-box app-flight-circle';
+  Object.assign(box.style, { left: r.left + 'px', top: r.top + 'px', width: r.width + 'px', height: r.height + 'px' });
+  if (kind === 'voice') box.style.background = getComputedStyle(el).backgroundColor;
+  else {
+    const v = el.querySelector('video'), shot = v ? snapshot(el) : null;
+    if (shot) box.appendChild(shot); else box.style.background = '#000';
+  }
+  const layer = overlay();
+  layer.appendChild(box);
+  document.body.appendChild(layer);
+  const f: Flight = { chatId, layer, src: boxOf(r), text: document.createElement('div'), box, circle: kind, radius: '50%', claimed: false, timer: 0 as unknown as ReturnType<typeof setTimeout> };
+  f.timer = setTimeout(() => giveUp(f), HOLD_MS);
+  pending.push(f);
+}
+
+/** Посадка круга: в кнопку «играть» голосового или в кружок. Цель спрятана и проявляется под конец, круг гаснет. */
+export function launchCircle(f: Flight, target: HTMLElement, remaining: () => number): void {
+  target.classList.add('app-flight-target');
+  const row = target.closest('.app-msg');
+  row?.classList.add('app-flight-row');
+  requestMeasure(() => {
+    if (!target.isConnected || !f.box) { requestMutation(() => finish(f, target)); return; }
+    const r = target.getBoundingClientRect(), dy = remaining();
+    const dst: Box = { left: r.left, top: r.top - dy, width: r.width, height: r.height }, src = f.src;
+    requestMutation(() => {
+      const box = f.box!;
+      box.style.transformOrigin = '0 0';
+      box.animate([
+        { transform: 'none', opacity: 1 },
+        { opacity: 1, offset: 0.7 },
+        { transform: `translate(${dst.left - src.left}px, ${dst.top - src.top}px) scale(${dst.width / src.width}, ${dst.height / src.height})`, opacity: 0 },
+      ], { duration: FLIGHT_MS, easing: EASE_Y, fill: 'forwards' });
+      // цель проявляется последние 30% пути — круг «становится» кнопкой / кружком
+      setTimeout(() => requestMutation(() => {
+        target.classList.remove('app-flight-target');
+        target.animate([{ opacity: 0 }, { opacity: 1 }], { duration: FLIGHT_MS * 0.3, fill: 'backwards' });
+      }), FLIGHT_MS * 0.7);
+      setTimeout(() => requestMutation(() => finish(f, target)), FLIGHT_MS + 16);
     });
   });
 }

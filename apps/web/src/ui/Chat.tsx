@@ -61,7 +61,7 @@ import { showToast, unblockUser, useUser } from '../settingsData';
 import { Feed, type MenuExtra } from './Feed';
 import { chatKindFor, mediaPolicy } from '../autoload';
 import { chatTime, chatTone, fileSize, isSystemChat, lastSeenText, shownBody, snippet } from './format';
-import { captureText } from './sendFlight';
+import { captureCircle, captureText } from './sendFlight';
 import { attachmentHit } from '../searchHit';
 import type { ProfilePhoto } from '@relay/protocol';
 import { avatarPhoto } from '../profilePhoto';
@@ -678,6 +678,7 @@ export function Chat({ chatId, frameKey, active, threadId }: { chatId: number; f
         onRecordError={(err: { name?: string }, mode: string) => showToast(err?.name === 'NotAllowedError' || err?.name === 'NotFoundError'
           ? (mode === 'round' ? 'Разрешите доступ к камере и микрофону, чтобы записывать видеосообщения' : 'Разрешите доступ к микрофону, чтобы записывать голосовые')
           : mode === 'round' ? 'Не удалось записать видеосообщение' : 'Не удалось записать голосовое')}
+        onRecordSend={(kind: 'voice' | 'round', el: Element | null) => { if (allowed(kind)) captureCircle(chatId, el, kind); }}
         onSendVoice={(r: { blob: Blob; duration: number; waveform: Uint8Array }) => { if (!allowed('voice')) return; stick.current = true; sendVoice(chatId, r, (replyTo?.id as number) ?? null, threadId).catch(() => {}); setReplyKey(null); }}
         onSendRound={(r: { blob: Blob; duration: number; size: number; thumb: string | null }) => { if (!allowed('round')) return; stick.current = true; sendRound(chatId, r, (replyTo?.id as number) ?? null, threadId).catch(() => {}); setReplyKey(null); }}
         attachItems={thread ? THREAD_ATTACH : ATTACH_ITEMS}

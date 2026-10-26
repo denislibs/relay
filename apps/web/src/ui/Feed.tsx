@@ -36,7 +36,7 @@ import { clock, dayKey, dayLabel, fileSize } from './format';
 import { arrivals, type FeedSeen } from './appear';
 import { anchorShift, deferShift, requestShift, rowFor, shiftWanted } from './windowShift';
 import { burstAnimates, driveScroll, jumpNear, DRIVE_MS, DRIVE_OWN_MS, type Drive } from './scrollDrive';
-import { claim, FLIGHT_SCROLL, giveUp, launch, launchBox, type Flight } from './sendFlight';
+import { claim, FLIGHT_SCROLL, giveUp, launch, launchBox, launchCircle, type Flight } from './sendFlight';
 import { interiorRemovals, mergeLeaving, LEAVE_HOLD_MS, LEAVE_MS, type Msg } from './leaving';
 
 /*
@@ -811,6 +811,8 @@ export function Feed({ frameKey, active, chatId, threadId, channel = false, meId
         const f: Flight | null = claim(chatId);
         if (!f) break;
         const row = root.querySelector<HTMLElement>(`.app-msg[data-key="${CSS.escape(k)}"]`);
+        const circle = f.circle ? row?.querySelector<HTMLElement>(f.circle === 'voice' ? '.rl-vb-btn' : '.rl-round') : null;
+        if (f.circle) { if (circle) { launchCircle(f, circle, () => goal() - root.scrollTop); flew = true; } else giveUp(f); continue; }
         const bubble = f.box ? null : row?.querySelector<HTMLElement>('.rl-bubble');
         const boxMsg = row?.querySelector<HTMLElement>('.rl-sticker-msg');   // стикер или большое эмодзи
         if (bubble) { launch(f, bubble, () => goal() - root.scrollTop); flew = true; }
