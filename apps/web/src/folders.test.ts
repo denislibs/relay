@@ -36,7 +36,8 @@ test('badge: unread chats; grey when every unread chat is muted; All ignores mut
 
 test('icon, subtitle, plural, recommendations hide once added', () => {
   expect(folderIcon(null)).toEqual({ icon: 'chats' });
-  expect(folderIcon(F({ emoji: '💼', groups: true }))).toEqual({ icon: 'briefcase' });
+  // выбранный эмодзи — цветной, как в настройках папки (не монохромный значок)
+  expect(folderIcon(F({ emoji: '⭐', groups: true }))).toEqual({ emoji: '⭐' });
   expect(folderIcon(F({ emoji: '🦄' }))).toEqual({ emoji: '🦄' });
   expect(folderIcon(F({ groups: true }))).toEqual({ icon: 'community' });
   expect(folderIcon(F({ include: [1] }))).toEqual({ icon: 'folder' });

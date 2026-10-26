@@ -1039,6 +1039,8 @@ button.rl-quote:active { background: var(--quote-bg-active, var(--pressed)); }
 button.rl-tab:hover { color: var(--ink); }
 .rl-tab > span:not(.rl-ripple-host) { position: relative; z-index: 1; }
 .rl-tab .rl-ripple-host { border-radius: 18px; }
+/* эмодзи папки перед названием — цветной, как в настройках папки */
+.rl-tab-emoji { font-size: 17px; line-height: 1; }
 .rl-tabs-top { position: absolute; z-index: 2; inset: 0; display: flex; pointer-events: none; border-radius: 18px; background: var(--accent-soft); clip-path: inset(0 100% 0 0 round 18px); transition: clip-path 300ms cubic-bezier(.25, 1, .5, 1); }
 .rl-tabs-top .rl-tab { color: var(--brand-text); }
 
