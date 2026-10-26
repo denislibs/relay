@@ -69,6 +69,7 @@ const chatItem = (store: Store, c: LocalChat, person: ReturnType<typeof personVi
     // для превью в списке: спойлеры прячем, миниатюра 20 px — из встроенного thumb, без загрузки файла
     entities: c.last.entities ?? null, thumb: c.last.attachment?.thumb ?? null, mime: c.last.attachment?.mime ?? null,
     ...(c.last.sticker ? { sticker: c.last.sticker } : {}),   // стикер: мини-стикер в строке списка
+    ...(c.last.fwdFrom ? { fwd: true } : null),   // пересланное: серая стрелка в строке (кто автор оригинала — строке не нужно)
     ...(c.last.service ? { service: c.last.service } : null) } : null,
   };
 };

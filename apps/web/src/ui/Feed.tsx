@@ -36,6 +36,7 @@ import { clock, dayKey, dayLabel, fileSize } from './format';
 import { arrivals, type FeedSeen } from './appear';
 import { anchorShift, deferShift, requestShift, rowFor, shiftWanted } from './windowShift';
 import { burstAnimates, driveScroll, jumpNear, DRIVE_MS, DRIVE_OWN_MS, type Drive } from './scrollDrive';
+import { claim, FLIGHT_SCROLL, giveUp, launch, launchBox, launchCircle, type Flight } from './sendFlight';
 import { interiorRemovals, mergeLeaving, LEAVE_HOLD_MS, LEAVE_MS, type Msg } from './leaving';
 
 /*
@@ -708,13 +709,13 @@ export function Feed({ frameKey, active, chatId, threadId, channel = false, meId
    *  (цель, позиция, высота экрана), а пишет сам драйвер в своём кадре. Если уже едем — новая
    *  поездка открывает своё окно анимации раньше, чем закроется старое: счётчик не падает до нуля, и отложенная
    *  работа (медиа, сдвиг окна) не стартует посреди пути. */
-  const drive = (root: HTMLElement, target: () => number, ms: number) => {
+  const drive = (root: HTMLElement, target: () => number, ms: number, curve?: readonly [number, number, number, number]) => {
     if (!root.isConnected) return;
     const prev = driving.current;
     const end = beginHeavyAnimation(ms);
     prev?.cancel();
     const to = target(), from = root.scrollTop, screen = root.clientHeight;
-    const me: Drive = driveScroll(root, { ms, target, start: jumpNear(from, to, screen) ?? undefined, onEnd: () => {
+    const me: Drive = driveScroll(root, { ms, target, curve, start: jumpNear(from, to, screen) ?? undefined, onEnd: () => {
       end();
       if (driving.current !== me) return;   // нас сменила следующая поездка — состояние пересчитает она
       driving.current = null;
@@ -802,8 +803,24 @@ export function Feed({ frameKey, active, chatId, threadId, channel = false, meId
     const fresh = [...appearAt.current.keys()].filter((k) => !before?.has(k));
     if (!a && !down && stick.current && fresh.length > 0 && (metaRef.current?.live ?? true) && canDrive(true)) {
       const own = fresh.every((k) => messages.find((m) => m.key === k)?.senderId === meId);
+      // своё, отправленное из поля ввода, — полёт из поля в пузырь (sendFlight): пузырь прячется сейчас (фаза записи),
+      // клон летит 300 мс, и лента едет к низу те же 300 мс по той же кривой — клон садится на пиксели пузыря
+      const goal = () => root.scrollHeight - root.clientHeight;
+      let flew = false;
+      if (own && activeRef.current) for (const k of fresh) {
+        const f: Flight | null = claim(chatId);
+        if (!f) break;
+        const row = root.querySelector<HTMLElement>(`.app-msg[data-key="${CSS.escape(k)}"]`);
+        const circle = f.circle ? row?.querySelector<HTMLElement>(f.circle === 'voice' ? '.rl-vb-btn' : '.rl-round') : null;
+        if (f.circle) { if (circle) { launchCircle(f, circle, () => goal() - root.scrollTop); flew = true; } else giveUp(f); continue; }
+        const bubble = f.box ? null : row?.querySelector<HTMLElement>('.rl-bubble');
+        const boxMsg = row?.querySelector<HTMLElement>('.rl-sticker-msg');   // стикер или большое эмодзи
+        if (bubble) { launch(f, bubble, () => goal() - root.scrollTop); flew = true; }
+        else if (boxMsg) { launchBox(f, boxMsg, () => goal() - root.scrollTop); flew = true; }
+        else giveUp(f);
+      }
       // кадр за стеком (скрытый) не едет: там нечего анимировать, а окно анимации задержало бы медиа видимого чата
-      requestMeasure(() => { if (activeRef.current) drive(root, () => root.scrollHeight - root.clientHeight, own ? DRIVE_OWN_MS : DRIVE_MS); });
+      requestMeasure(() => { if (activeRef.current) drive(root, goal, flew ? FLIGHT_SCROLL.ms : own ? DRIVE_OWN_MS : DRIVE_MS, flew ? FLIGHT_SCROLL.curve : undefined); });
       return;
     }
     // как «forced reflow» в Telegram: поправить прокрутку в том же коммите, до отрисовки — иначе

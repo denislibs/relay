@@ -14,17 +14,26 @@ export function hm(d: Date, fmt: TimeFormat = getPrefs().timeFormat ?? localeTim
   return `${h % 12 || 12}:${pad(d.getMinutes())} ${h < 12 ? 'AM' : 'PM'}`;
 }
 
-export function chatTime(iso: string | undefined, fmt?: TimeFormat): string {
+/**
+ * Время в строке чата — как в Telegram: сегодня — часы, в этом году на этой неделе — день недели («пн»),
+ * раньше в этом году — «12 мар», другой год — полная дата «12.03.2025». «Вчера» нет: вчера — тоже день недели.
+ */
+export function chatTime(iso: string | undefined, fmt?: TimeFormat, now = new Date()): string {
   if (!iso) return '';
-  const d = new Date(iso), now = new Date();
+  const d = new Date(iso);
   if (d.getTime() <= 0) return '';
   const day = (x: Date) => new Date(x.getFullYear(), x.getMonth(), x.getDate()).getTime();
   const diff = Math.round((day(now) - day(d)) / 86_400_000);
   if (diff === 0) return hm(d, fmt);
-  if (diff === 1) return 'Вчера';
-  if (diff < 7) return d.toLocaleDateString('ru-RU', { weekday: 'short' });
-  return `${pad(d.getDate())}.${pad(d.getMonth() + 1)}.${String(d.getFullYear()).slice(2)}`;
+  if (d.getFullYear() !== now.getFullYear()) return `${pad(d.getDate())}.${pad(d.getMonth() + 1)}.${d.getFullYear()}`;
+  // неделя с понедельника: «вс» прошлой недели в понедельник — уже дата
+  const sinceMonday = (now.getDay() + 6) % 7;
+  if (diff > 0 && diff <= sinceMonday) return d.toLocaleDateString('ru-RU', { weekday: 'short' });
+  return `${d.getDate()} ${MONTHS_SHORT[d.getMonth()]}`;
 }
+
+// свои сокращения: у ICU для части месяцев нет короткой формы («3 марта», «мая»)
+const MONTHS_SHORT = ['янв', 'фев', 'мар', 'апр', 'мая', 'июн', 'июл', 'авг', 'сен', 'окт', 'ноя', 'дек'];
 
 export function clock(iso: string, fmt?: TimeFormat): string {
   return hm(new Date(iso), fmt);
