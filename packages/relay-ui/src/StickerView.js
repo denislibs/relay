@@ -98,19 +98,32 @@ export function StickerView(props) {
   useEffect(() => {
     const el = root.current;
     if (!el || !src || isStatic || !lottieAvailable()) return;
-    let offVisible = null, cancel = null;
-    const attach = () => { cancel = queueAttach(() => {
+    let offVisible = null, cancel = null, offLazy = null;
+    const connect = (forced) => {
       const c = attachSticker({
-        url: src, px, canvas: canvas.current, group, play: play && !reducedMotion(), loop, force, shared, atEnd,
-        onFirstFrame: () => { props.onFirstFrame?.(); requestAnimationFrame(() => requestAnimationFrame(() => requestMutation(() => setStage('ready')))); },
+        url: src, px, canvas: canvas.current, group, play: play && !reducedMotion(), loop, force: force || forced, shared, atEnd,
+        onFirstFrame: () => { el.dataset.drawn = '1'; props.onFirstFrame?.(); requestAnimationFrame(() => requestAnimationFrame(() => requestMutation(() => setStage('ready')))); },
         onEnded: () => props.onEnded?.(),
         onError: () => props.onError?.(),
       });
       ctl.current = c;
       offVisible = watchVisible(el, (v) => c.setVisible(v));
-    }); };
-    const offLazy = force ? (attach(), null) : lazyObserve(el, attach);
-    return () => { offLazy?.(); cancel?.(); offVisible?.(); ctl.current?.destroy(); ctl.current = null; };
+      if (forced) c.setVisible(true);
+    };
+    const attach = () => { cancel = queueAttach(() => connect(false)); };
+    // отправленный стикер летит в своё сообщение (sendFlight) и в полёте показывает его анимацию: подключиться
+    // сейчас и играть вопреки тяжёлой анимации (доезд ленты), не дожидаясь ленивого наблюдения
+    const fly = () => {
+      delete el.dataset.fly;
+      if (ctl.current && el.dataset.drawn) return;
+      offLazy?.(); offLazy = null; cancel?.(); cancel = null; offVisible?.(); offVisible = null; ctl.current?.destroy(); ctl.current = null;
+      connect(true);
+    };
+    el.addEventListener('rl-sticker-fly', fly);
+    // полёт мог начаться раньше этого эффекта (строка ленты появилась кадром раньше) — метка на элементе
+    if (el.dataset.fly) { delete el.dataset.fly; connect(true); }
+    else offLazy = force ? (attach(), null) : lazyObserve(el, attach);
+    return () => { el.removeEventListener('rl-sticker-fly', fly); offLazy?.(); cancel?.(); offVisible?.(); ctl.current?.destroy(); ctl.current = null; delete el.dataset.drawn; };
   }, [key, group, force]);
 
   useEffect(() => { ctl.current?.setPlay(play && !reducedMotion()); }, [play]);

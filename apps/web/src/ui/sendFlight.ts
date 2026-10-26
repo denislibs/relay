@@ -143,6 +143,11 @@ export function captureSticker(chatId: number): void {
  */
 export function launchBox(f: Flight, msg: HTMLElement, remaining: () => number): void {
   msg.classList.add('app-flight-target');
+  // спрятан и анимацией: перерисовка строки (сервер подтвердил) класс снимает, анимацию — нет
+  f.hold = msg.animate([{ opacity: 0 }, { opacity: 0 }], { duration: FLIGHT_MS * 5, fill: 'forwards' });
+  // стикер сообщения подключаем сейчас: в полёте показывается его живая анимация (как в tweb летит сам стикер)
+  const sticker = f.box ? msg.querySelector<HTMLElement>('.rl-sticker-box .rl-sticker') : null;
+  if (sticker) { sticker.dataset.fly = '1'; sticker.dispatchEvent(new Event('rl-sticker-fly')); }   // метка — если стикер ещё не подписался
   requestMeasure(() => {
     const target = msg.querySelector<HTMLElement>('.rl-emoji-text') ?? msg.querySelector<HTMLElement>('.rl-sticker-box .rl-sticker') ?? msg.querySelector<HTMLElement>('.rl-sticker-box');
     if (!msg.isConnected || !target) { requestMutation(() => finish(f, msg)); return; }
@@ -151,27 +156,59 @@ export function launchBox(f: Flight, msg: HTMLElement, remaining: () => number):
     if (!f.box && target.classList.contains('rl-emoji-text')) { const rg = document.createRange(); rg.selectNodeContents(target); const gr = rg.getBoundingClientRect(); if (gr.width) r = gr; }
     const dy = remaining();
     const dst: Box = { left: r.left, top: r.top - dy, width: r.width, height: r.height };
-    let src = f.src, flyer: HTMLElement;
+    let src = f.src, flyer: HTMLElement, origin = '50% 50%';
     if (f.box) flyer = f.box;
     else {
-      // копия текста поля: место и размер самих глифов (Range), а не всего поля
+      // копия текста поля: место и размер самих глифов (Range), а не всего поля; растёт от их центра
       const range = document.createRange(); range.selectNodeContents(f.text);
-      const g = range.getBoundingClientRect();
+      const g = range.getBoundingClientRect(), t = f.text.getBoundingClientRect();
       if (!g.width) { requestMutation(() => finish(f, msg)); return; }
       src = boxOf(g); flyer = f.text;
+      origin = `${g.left - t.left + g.width / 2}px ${g.top - t.top + g.height / 2}px`;
     }
     const k = dst.height / src.height;
-    const origin = f.box ? '0 0' : `${src.left - f.text.getBoundingClientRect().left}px ${src.top - f.text.getBoundingClientRect().top}px`;
+    // как в tweb: центр едет дугой — по горизонтали (вместе с ростом) быстрая кривая, по вертикали медленная;
+    // растёт от центра, а не от угла
+    const dx = dst.left + dst.width / 2 - (src.left + src.width / 2), dyc = dst.top + dst.height / 2 - (src.top + src.height / 2);
     requestMutation(() => {
+      const up = document.createElement('div');
+      up.className = 'app-flight-up';
+      flyer.replaceWith(up);
+      up.appendChild(flyer);
       flyer.style.transformOrigin = origin;
-      const way = flyer.animate([
-        { transform: 'none' },
-        { transform: `translate(${dst.left - src.left}px, ${dst.top - src.top}px) scale(${k})` },
-      ], { duration: FLIGHT_MS, easing: EASE_Y, fill: 'forwards' });
+      up.animate([{ transform: 'none' }, { transform: `translateY(${dyc}px)` }], { duration: FLIGHT_MS, easing: EASE_Y, fill: 'forwards' });
+      const way = flyer.animate([{ transform: 'none' }, { transform: `translateX(${dx}px) scale(${k})` }], { duration: FLIGHT_MS, easing: EASE_X, fill: 'forwards' });
       follow(f, target, dst.top, remaining);
+      if (sticker && f.box) mirror(f, f.box, sticker);   // после follow: снимает свою остановку поверх его
       landWhen(way, () => finish(f, msg));
     });
   });
+}
+
+/**
+ * В летящий стикер — живые кадры стикера сообщения: пока его анимация не нарисовала первый кадр, виден снимок
+ * ячейки панели; как нарисовала — каждый кадр копируем её канвас поверх, снимок гаснет за 80 мс (как в tweb).
+ */
+function mirror(f: Flight, box: HTMLElement, sticker: HTMLElement): void {
+  const live = document.createElement('canvas');
+  live.className = 'app-flight-live';
+  box.appendChild(live);
+  const shot = box.firstElementChild as HTMLElement | null;
+  let on = true, shown = false;
+  const prev = f.unfollow;
+  f.unfollow = () => { on = false; prev?.(); };
+  const frame = () => {
+    if (!on) return;
+    const src = sticker.querySelector<HTMLCanvasElement>('canvas.rl-sticker-canvas');
+    if (src && sticker.dataset.drawn && src.width) {
+      if (live.width !== src.width) { live.width = src.width; live.height = src.height; }
+      const ctx = live.getContext('2d');
+      if (ctx) { ctx.clearRect(0, 0, live.width, live.height); ctx.drawImage(src, 0, 0); }
+      if (!shown) { shown = true; if (shot && shot !== live) shot.animate([{ opacity: 1 }, { opacity: 0 }], { duration: 80, fill: 'forwards' }); }
+    }
+    requestAnimationFrame(frame);
+  };
+  requestAnimationFrame(frame);
 }
 
 // ---------- голосовое и кружок: круг из поля в сообщение ----------
