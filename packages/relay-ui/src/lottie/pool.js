@@ -142,3 +142,24 @@ export function openRenderer({ url, px }) {
 
 /** Отладка и тесты: живые рендереры. */
 export const liveRenderers = () => renderers.size;
+
+/**
+ * Для раздела разработчика: рендереры, их кадры в памяти (кэш и заготовки, байты ≈ ширина×высота×4) и нагрузка
+ * на воркеры — сколько кадров каждый сейчас рисует.
+ */
+export function lottieStats() {
+  let cached = 0, loose = 0, pending = 0, bytes = 0;
+  const px = (b) => (b && b.width ? b.width * b.height * 4 : 0);
+  for (const r of renderers.values()) {
+    cached += r.cache.size; loose += r.loose.size; pending += r.pending.size;
+    for (const b of r.cache.values()) bytes += px(b);
+    for (const b of r.loose.values()) bytes += px(b);
+  }
+  const pool = Array.from({ length: poolSize() }, (_, i) => workers[i]).map((w, i) => {
+    if (!w) return { index: i, started: false, renderers: 0, inflight: 0 };
+    let inflight = 0;
+    for (const slot of w.waiting.values()) inflight += slot.frames.size;
+    return { index: i, started: true, renderers: w.waiting.size, inflight };
+  });
+  return { renderers: renderers.size, cachedFrames: cached, looseFrames: loose, pendingFrames: pending, bytes, workers: pool, poolSize: poolSize() };
+}

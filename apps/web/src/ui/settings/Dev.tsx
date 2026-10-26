@@ -10,9 +10,10 @@ import { DevErrors } from './DevErrors';
 import { DevLog } from './DevLog';
 import { DevNetwork } from './DevNetwork';
 import { DevOverview } from './DevOverview';
+import { DevPerf } from './DevPerf';
 
-const TABS: DevTab[] = ['overview', 'log', 'network', 'data', 'errors'];
-const LABELS: Record<DevTab, string> = { overview: 'Обзор', log: 'Журнал', network: 'Сеть', data: 'Данные', errors: 'Ошибки' };
+const TABS: DevTab[] = ['overview', 'perf', 'log', 'network', 'data', 'errors'];
+const LABELS: Record<DevTab, string> = { overview: 'Обзор', perf: 'Кадры', log: 'Журнал', network: 'Сеть', data: 'Данные', errors: 'Ошибки' };
 
 /** Счётчик новых ошибок для вкладки (и сброс, пока вкладка открыта). */
 function useNewErrors(active: boolean): number {
@@ -22,7 +23,7 @@ function useNewErrors(active: boolean): number {
   return n;
 }
 
-/** «Для разработчиков» (скрытый раздел): вкладки Обзор / Журнал / Сеть / Данные / Ошибки. Данные живут, только пока страница открыта. */
+/** «Для разработчиков» (скрытый раздел): вкладки Обзор / Кадры / Журнал / Сеть / Данные / Ошибки. Данные живут, только пока страница открыта. */
 export function Dev() {
   const tab = useGlobal((s) => s.devTab);
   const errs = useNewErrors(tab === 'errors');
@@ -43,7 +44,7 @@ export function Dev() {
       </div>
       <div class="app-dev-pages">
         <SlideStack variant="tabs" order={TABS} active={tab} render={(k: DevTab) => (
-          k === 'overview' ? <DevOverview onHide={hide} /> : k === 'log' ? <DevLog /> : k === 'network' ? <DevNetwork /> : k === 'data' ? <DevData /> : <DevErrors />
+          k === 'overview' ? <DevOverview onHide={hide} /> : k === 'perf' ? <DevPerf /> : k === 'log' ? <DevLog /> : k === 'network' ? <DevNetwork /> : k === 'data' ? <DevData /> : <DevErrors />
         )} />
       </div>
     </div>

@@ -6,7 +6,7 @@
 // путь — дуга (по горизонтали и вертикали — разные кривые), 300 мс. Лента едет к низу те же 300 мс по той же
 // вертикальной кривой (FLIGHT_SCROLL) — клон садится ровно на пиксели пузыря, и пузырь показывается вместо него.
 // Без полной анимации (настройка «Анимации», reduced motion), со скрытой вкладкой и для пузыря выше экрана — не летим.
-import { requestMeasure, requestMutation } from '@relay/ui';
+import { forceMeasure, requestMeasure, requestMutation } from '@relay/ui';
 import { getPrefs } from '../prefs';
 import { bezier } from './scrollDrive';
 
@@ -60,11 +60,18 @@ function overlay(): HTMLElement {
  */
 export function captureText(chatId: number, composer: Element | null, field: Element | null): void {
   if (!composer || !field || !canFly()) return;
-  // чтение раскладки в обработчике отправки: поле ещё не очищено — это единственный момент, когда текст на месте
-  const src = boxOf(composer.getBoundingClientRect()), fr = field.getBoundingClientRect();
-  const cs = getComputedStyle(field);
-  const range = document.createRange(); range.selectNodeContents(field);
-  const gr = range.getClientRects()[0];
+  // чтение раскладки в обработчике отправки (осознанное исключение, forceMeasure): поле ещё не очищено — это
+  // единственный момент, когда текст на месте. Стили снимаем значениями здесь же, а не живым объектом
+  let src!: Box, fr!: DOMRect, gr: DOMRect | undefined, radius = '';
+  let cs!: { font: string; lineHeight: string; color: string; padding: string; letterSpacing: string };
+  forceMeasure(() => {
+    src = boxOf(composer.getBoundingClientRect()); fr = field.getBoundingClientRect();
+    const st = getComputedStyle(field);
+    cs = { font: st.font, lineHeight: st.lineHeight, color: st.color, padding: st.padding, letterSpacing: st.letterSpacing };
+    const range = document.createRange(); range.selectNodeContents(field);
+    gr = range.getClientRects()[0];
+    radius = getComputedStyle(composer).borderRadius;
+  });
   const layer = overlay();
   const text = document.createElement('div');
   text.className = 'app-flight-text';
@@ -76,7 +83,7 @@ export function captureText(chatId: number, composer: Element | null, field: Ele
   });
   layer.appendChild(text);
   document.body.appendChild(layer);
-  const f: Flight = { chatId, layer, src, text, first: gr ? { left: gr.left, top: gr.top } : undefined, radius: getComputedStyle(composer).borderRadius, claimed: false, timer: 0 as unknown as ReturnType<typeof setTimeout> };
+  const f: Flight = { chatId, layer, src, text, first: gr ? { left: gr.left, top: gr.top } : undefined, radius, claimed: false, timer: 0 as unknown as ReturnType<typeof setTimeout> };
   f.timer = setTimeout(() => giveUp(f), HOLD_MS);
   pending.push(f);
 }
