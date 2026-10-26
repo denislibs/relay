@@ -1,6 +1,6 @@
 import { afterAll, beforeEach, expect, test } from 'bun:test';
 import { sql } from '../src/db';
-import { getChatMedia, getChatMediaCounts } from '../src/domain/chats';
+import { getChatMedia, getChatMediaCounts, getMediaDays } from '../src/domain/chats';
 import { makeChat, makeUser, resetDb } from './helpers';
 
 beforeEach(resetDb);
@@ -100,4 +100,30 @@ test('music tags and a send group travel with the message', async () => {
   expect(message).toMatchObject({ kind: 'audio', groupId: group, attachment: { title: 'Мы Сверхновая', performer: 'denis1488', duration: 100 } });
   const { message: text } = await sendMessage(a, { chatId: chat, clientId: crypto.randomUUID(), body: 'hi', groupId: group });
   expect(text.groupId).toBeUndefined();   // у текста группы не бывает
+});
+
+test('calendar media days: the newest photo or video per day in the client time zone, nothing else', async () => {
+  const a = await makeUser('Анна'), b = await makeUser('Борис'), c = await makeUser('Чужой');
+  const chat = await makeChat([a, b]);
+  const att = (kind: string, mime: string) => ({ id: crypto.randomUUID(), kind, mime, name: 'x', size: 1, w: null, h: null, thumb: 'data:image/jpeg;base64,AA' });
+  const at = async (id: number, iso: string) => { await sql`update messages set created_at = ${new Date(iso)} where id = ${id}`; return id; };
+  await at(await put(chat, a, 'photo', '', att('photo', 'image/png')), '2026-10-05T08:00:00Z');
+  const newer = await at(await put(chat, b, 'file', '', att('file', 'video/mp4')), '2026-10-05T12:00:00Z');
+  await at(await put(chat, a, 'text', 'текст'), '2026-10-05T13:00:00Z');
+  await at(await put(chat, a, 'file', '', att('file', 'application/pdf')), '2026-10-06T10:00:00Z');   // не медиа
+  // 22:30 UTC 7-го — в Москве уже 8-е
+  const late = await at(await put(chat, a, 'photo', '', att('photo', 'image/png')), '2026-10-07T22:30:00Z');
+  const gone = await at(await put(chat, a, 'photo', '', att('photo', 'image/png')), '2026-10-10T10:00:00Z');
+  await sql`update messages set deleted = true where id = ${gone}`;
+  await at(await put(chat, a, 'photo', '', att('photo', 'image/png')), '2026-11-02T10:00:00Z');   // вне месяца
+
+  const from = '2026-09-30T21:00:00Z', to = '2026-10-31T21:00:00Z';
+  const msk = await getMediaDays(b, chat, from, to, 'Europe/Moscow');
+  expect(msk.map((d) => [d.date, d.id])).toEqual([['2026-10-05', newer], ['2026-10-08', late]]);
+  expect(msk[0].attachment.thumb).toBe('data:image/jpeg;base64,AA');
+  // неизвестный пояс — UTC
+  expect((await getMediaDays(b, chat, from, to, 'Mars/Olympus')).map((d) => d.date)).toEqual(['2026-10-05', '2026-10-07']);
+  await expect(getMediaDays(b, chat, 'junk', to, 'UTC')).rejects.toMatchObject({ code: 'bad_frame' });
+  await expect(getMediaDays(b, chat, '2026-01-01T00:00:00Z', to, 'UTC')).rejects.toMatchObject({ code: 'bad_frame' });   // больше 45 дней
+  await expect(getMediaDays(c, chat, from, to, 'UTC')).rejects.toMatchObject({ code: 'not_member' });
 });

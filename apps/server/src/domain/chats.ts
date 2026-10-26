@@ -1,5 +1,5 @@
 import { shownPoll, withPolls, type PollDef } from './polls';
-import type { ContactCard, Dice, GeoPoint } from '@relay/protocol';
+import type { Attachment, ContactCard, Dice, GeoPoint } from '@relay/protocol';
 import { graphemes, GROUP_ABOUT_MAX, normalizeEntities, type Entity, type Block, type ForwardInfo, type LinkPreview, type MediaCounts, type MediaTab, type Message, type MessageButton, type ProfilePhoto, type ServiceData, type ServiceType, type StickerRef, type Todo } from '@relay/protocol';
 import { sql, type Tx } from '../db';
 import { muteFromDb } from './chatNotify';
@@ -432,6 +432,28 @@ export async function getChatMediaCounts(userId: number, chatId: number): Promis
            count(*) filter (where kind = 'video' or (kind = 'file' and attachment->>'mime' like 'video/%'))::int as video
       from messages where chat_id = ${chatId} and not deleted and id >= ${await historyFrom(chatId, userId)}`;
   return { media: r.media, file: r.file, audio: r.audio, voice: r.voice, link: r.link, video: r.video };
+}
+
+/** Календарь «Перейти к дате» (как в Telegram): по одному фото или видео на день за промежуток [from, to) — самое новое
+ *  за день. Дни — в часовом поясе клиента tz (имя IANA; неизвестное — UTC). Промежуток — не длиннее MEDIA_DAYS_SPAN. */
+export interface MediaDay { date: string; id: number; attachment: Attachment }
+export const MEDIA_DAYS_SPAN = 45 * 86400_000;
+export async function getMediaDays(userId: number, chatId: number, from: string, to: string, tz: string): Promise<MediaDay[]> {
+  const a = new Date(from), b = new Date(to);
+  if (Number.isNaN(a.getTime()) || Number.isNaN(b.getTime()) || b <= a || b.getTime() - a.getTime() > MEDIA_DAYS_SPAN) throw new DomainError('bad_frame', 'from');
+  if (!validZone(tz)) tz = 'UTC';
+  await canRead(sql, chatId, userId);   // публичный канал — и не участнику (превью)
+  const rows = await sql`
+    select distinct on (day) to_char(created_at at time zone ${tz}, 'YYYY-MM-DD') as day, *
+      from messages
+     where chat_id = ${chatId} and created_at >= ${a} and created_at < ${b} and not deleted
+       and ${tabWhere('media')} and id >= ${await historyFrom(chatId, userId)}
+     order by day, created_at desc, id desc`;
+  return (await openRows(rows)).map((r) => ({ date: r.day as string, id: Number(r.id), attachment: toMessage(r).attachment! }));
+}
+function validZone(tz: string): boolean {
+  if (!tz || tz.length > 64) return false;
+  try { new Intl.DateTimeFormat('en', { timeZone: tz }); return true; } catch { return false; }
 }
 
 /** Общая группа с собеседником (вкладка «Группы» в профиле): название, фото, число участников. */
