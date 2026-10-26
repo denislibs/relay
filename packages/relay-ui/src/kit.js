@@ -1585,15 +1585,23 @@ function PanelHeader(props) {
   useEffect(function () {
     var head = ref.current, host = head && head.parentElement;
     if (!host) return;
-    var on = false;
+    var on = false, target = null, queued = false, alive = true;
+    // scrollTop — чтение раскладки: не в самом событии (там оно могло идти после записей кадра и пересчитывать
+    // раскладку принудительно), а в фазе замеров, раз за кадр, по последнему прокрученному соседу
+    var measure = function () {
+      queued = false;
+      if (!alive || !target) return;
+      var next = target.scrollTop > 2;
+      if (next !== on) { on = next; scrolled[1](on); }
+    };
     var onScroll = function (e) {
       var t = e.target;
       if (!t || t === document || !host.contains(t) || head.contains(t)) return;
-      var next = t.scrollTop > 2;
-      if (next !== on) { on = next; scrolled[1](on); }
+      target = t;
+      if (!queued) { queued = true; requestMeasure(measure); }
     };
     host.addEventListener('scroll', onScroll, true);
-    return function () { host.removeEventListener('scroll', onScroll, true); };
+    return function () { alive = false; host.removeEventListener('scroll', onScroll, true); };
   }, []);
   return h('div', { ref: ref, class: cx('rl-panel-head', scrolled[0] && 'is-scrolled', props.class) },
     h(IconButton, { key: props.icon || 'close', icon: props.icon || 'close', label: props.closeLabel || 'Закрыть', onClick: props.onClose, class: 'rl-panel-head-btn' }),
