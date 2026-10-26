@@ -704,7 +704,8 @@ export function Feed({ frameKey, active, chatId, threadId, channel = false, meId
   const burst = useRef({ since: 0, last: 0 });   // серия сообщений подряд: после 600 мс анимации — мгновенно до паузы
   /** Можно ли ехать анимацией: без анимаций, в скрытой вкладке и в потоке сообщений — ставим сразу (как раньше). */
   const canDrive = (stream: boolean) => !reducedMotion() && !document.hidden && (!stream || burstAnimates(burst.current, performance.now()));
-  /** Поехать к цели: далеко — сначала прыжок на экран от неё. Вызывать из requestMutation. Если уже едем — новая
+  /** Поехать к цели: далеко — сначала прыжок на экран от неё. Вызывать из requestMeasure: здесь только чтения
+   *  (цель, позиция, высота экрана), а пишет сам драйвер в своём кадре. Если уже едем — новая
    *  поездка открывает своё окно анимации раньше, чем закроется старое: счётчик не падает до нуля, и отложенная
    *  работа (медиа, сдвиг окна) не стартует посреди пути. */
   const drive = (root: HTMLElement, target: () => number, ms: number) => {
@@ -802,7 +803,7 @@ export function Feed({ frameKey, active, chatId, threadId, channel = false, meId
     if (!a && !down && stick.current && fresh.length > 0 && (metaRef.current?.live ?? true) && canDrive(true)) {
       const own = fresh.every((k) => messages.find((m) => m.key === k)?.senderId === meId);
       // кадр за стеком (скрытый) не едет: там нечего анимировать, а окно анимации задержало бы медиа видимого чата
-      requestMutation(() => { if (activeRef.current) drive(root, () => root.scrollHeight - root.clientHeight, own ? DRIVE_OWN_MS : DRIVE_MS); });
+      requestMeasure(() => { if (activeRef.current) drive(root, () => root.scrollHeight - root.clientHeight, own ? DRIVE_OWN_MS : DRIVE_MS); });
       return;
     }
     // как «forced reflow» в Telegram: поправить прокрутку в том же коммите, до отрисовки — иначе
@@ -1176,7 +1177,7 @@ export function Feed({ frameKey, active, chatId, threadId, channel = false, meId
     if (metaRef.current && !metaRef.current.live) { toBottom.current = true; moveWindow('latest', frameKey); return; }
     const target = () => root.scrollHeight - root.clientHeight;
     if (!canDrive(false)) { requestMeasure(() => { const top = target(); requestMutation(() => { programmatic.current++; root.scrollTop = top; }); }); return; }
-    requestMutation(() => drive(root, target, DRIVE_MS));
+    requestMeasure(() => drive(root, target, DRIVE_MS));
   };
 
   // переход к сообщению: строка в окне — плавно к ней (по центру) и подсветить; нет — ждём новое окно
@@ -1198,7 +1199,7 @@ export function Feed({ frameKey, active, chatId, threadId, channel = false, meId
     } else {
       const target = () => Math.max(0, topIn(root, row) - (root.clientHeight - row.offsetHeight) / 2);
       if (!canDrive(false)) { requestMeasure(() => { const top = target(); requestMutation(() => { programmatic.current++; root.scrollTop = top; }); }); return; }
-      requestMutation(() => {
+      requestMeasure(() => {
         // как в Telegram: далеко — сначала прыжок почти к цели (jumpNear внутри drive), плавно — только последний
         // экран (иначе прокрутка пролетает десятки пузырей и кружков, каждый из которых просыпается — кадры
         // проседают). Пока едем — тяжёлая анимация: кружки не запускают видео, отложенная работа ждёт
