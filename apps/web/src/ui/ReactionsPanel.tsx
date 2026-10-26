@@ -1,6 +1,9 @@
 // Полный пикер реакций — по шеврону панели быстрых реакций, как в Telegram Web K: окно 382×420 «вырастает»
 // из места панели; сверху поиск с рядом категорий, затем первые 16 из быстрого порядка и «Часто используемые».
-// Иконки статичные (webp), при наведении играет select; в чате с ограниченным набором — только сетка.
+// Как в tweb: в ячейке анимация выбора (select), при открытии каждая видимая проигрывается один раз и стоит на
+// последнем кадре, наведение проигрывает её снова. Пока она не нарисовала кадр — статичная картинка в рамке рисунка
+// анимации (у select поля вокруг рисунка, ~86% кадра: иначе при смене значок прыгал бы), а пока грузится и картинка —
+// серый силуэт. В чате с ограниченным набором — только сетка.
 import type { ReactionAsset } from '@relay/protocol';
 import { Icon, IconButton, StickerView, beginHeavyAnimation, reducedMotion } from '@relay/ui';
 import { createPortal } from 'preact/compat';
@@ -23,7 +26,7 @@ type Props = {
 export function ReactionsPanel({ bar, allowed, selected, animated, onPick, onClose }: Props) {
   const [q, setQ] = useState('');
   const [cat, setCat] = useState<number | null>(null);
-  const [hover, setHover] = useState<string | null>(null);
+  const [replay, setReplay] = useState<Record<string, number>>({});   // наведение — проиграть select ещё раз
   const root = useRef<HTMLDivElement>(null);
   const input = useRef<HTMLInputElement>(null);
   const catalog = useMemo(() => catalogFor(allowed), [allowed]);
@@ -46,8 +49,6 @@ export function ReactionsPanel({ bar, allowed, selected, animated, onPick, onClo
     window.addEventListener('keydown', onEsc, true);
     return () => window.removeEventListener('keydown', onEsc, true);
   }, [onClose]);
-  // ячейки сменились (поиск, категория) — наведение больше не на них
-  useEffect(() => { setHover(null); }, [sections]);
 
   const onKey = (e: KeyboardEvent) => {
     if (!e.key.startsWith('Arrow')) return;
@@ -65,9 +66,11 @@ export function ReactionsPanel({ bar, allowed, selected, animated, onPick, onClo
 
   const cell = (r: ReactionAsset) => (
     <button key={r.key} type="button" class={'app-rpanel-cell' + (selected === r.key ? ' is-on' : '')} title={r.title} aria-label={'Реакция ' + r.title} aria-pressed={selected === r.key}
-      onClick={() => onPick(r.key)} onMouseEnter={() => { if (animated && r.select) setHover(r.key); }} onMouseLeave={() => setHover((h) => (h === r.key ? null : h))}>
-      {r.static ? <img src={r.static} alt="" draggable={false} decoding="async" /> : <span>{r.key}</span>}
-      {hover === r.key ? <StickerView src={r.select} w={512} h={512} size={36} group="menu" force loop={false} play={!reducedMotion()} onEnded={() => setHover((h) => (h === r.key ? null : h))} /> : null}
+      onClick={() => onPick(r.key)} onMouseEnter={() => { if (animated && r.select) setReplay((m) => ({ ...m, [r.key]: (m[r.key] ?? 0) + 1 })); }}>
+      {/* порядок для CSS без :has (он пересчитывал стили всей панели на каждый готовый кадр): анимация, картинка, силуэт */}
+      {animated && r.select ? <StickerView src={r.select} w={512} h={512} size={36} group="menu" loop={false} play={!reducedMotion()} replay={replay[r.key]} /> : null}
+      {r.static ? <img src={r.static} alt="" draggable={false} decoding="async" onLoad={(e) => (e.currentTarget as HTMLImageElement).classList.add('is-loaded')} /> : <span>{r.key}</span>}
+      {r.silhouette ? <i class="app-rpanel-sil" aria-hidden="true" style={{ WebkitMaskImage: `url(${r.silhouette})`, maskImage: `url(${r.silhouette})` }} /> : null}
     </button>
   );
 

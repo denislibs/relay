@@ -92,13 +92,48 @@ export class Mirror {
 /** SharedWorker, если он есть; иначе Dedicated Worker с выбором лидера. */
 export function connectEngine(opts: { build: string; config: EngineConfig; sharedUrl: URL | string; dedicatedUrl: URL | string }): EngineClient {
   const name = 'relay@' + opts.build;
+  const dedicated = () => fromMessagePort<FromHost, ToHost>(new Worker(opts.dedicatedUrl, { type: 'module', name }) as unknown as MessagePort);
   if (typeof SharedWorker === 'function') {
     try {
       const w = new SharedWorker(opts.sharedUrl, { type: 'module', name });
       w.port.start();
-      return new EngineClient(fromMessagePort<FromHost, ToHost>(w.port), opts.build, opts.config);
+      const shared = fromMessagePort<FromHost, ToHost>(w.port);
+      return new EngineClient(fallbackPort(shared, (fail) => w.addEventListener('error', fail), dedicated), opts.build, opts.config);
     } catch { /* приватный режим и т. п. — запасной путь */ }
   }
-  const w = new Worker(opts.dedicatedUrl, { type: 'module', name });
-  return new EngineClient(fromMessagePort<FromHost, ToHost>(w as unknown as MessagePort), opts.build, opts.config);
+  return new EngineClient(dedicated(), opts.build, opts.config);
+}
+
+/**
+ * SharedWorker может не загрузиться уже после конструктора: скрипт не получен (самоподписанный сертификат,
+ * встроенный браузер, блокировка). Исключения тогда нет — только событие error, и без запасного пути
+ * приложение вечно ждёт ответа. Поэтому до первого 'ready' запоминаем отправленное (кроме ping);
+ * сбой — переходим на запасной порт и повторяем записанное в том же порядке. После 'ready' сбои не наши.
+ */
+export function fallbackPort(
+  primary: PortLike<FromHost, ToHost>,
+  onFail: (fail: () => void) => void,
+  secondary: () => PortLike<FromHost, ToHost>,
+): PortLike<FromHost, ToHost> {
+  let port = primary;
+  let log: ToHost[] | null = [];
+  let cb: ((m: FromHost) => void) | null = null;
+  const attach = (p: PortLike<FromHost, ToHost>) => p.listen((m) => {
+    if (p !== port) return;               // брошенный порт молчит
+    if (m.t === 'ready') log = null;
+    cb?.(m);
+  });
+  attach(primary);
+  onFail(() => {
+    if (!log) return;
+    const replay = log;
+    log = [];
+    port = secondary();
+    attach(port);
+    for (const m of replay) port.post(m);
+  });
+  return {
+    post: (m) => { if (log && m.t !== 'ping') log.push(m); port.post(m); },
+    listen: (fn) => { cb = fn; },
+  };
 }

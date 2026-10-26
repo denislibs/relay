@@ -339,6 +339,20 @@ function RelayLogo(props) {
       return h('path', { key: i, d: d, fill: i === 0 ? '#fff' : 'none', stroke: i === 0 ? 'none' : 'var(--logo-ink)', 'stroke-width': 1.6, 'stroke-linecap': 'round', 'stroke-linejoin': 'round' });
     }));
 }
+/** Значок Relay целиком: знак на круге фирменного градиента (как у аватара официального чата и иконки уведомлений).
+ *  size — px; x/y/width/height — чтобы вложить в другой SVG (центр QR-кода). */
+var badgeSeq = 0;
+function RelayBadge(props) {
+  var id = useState(function () { return 'rl-badge-' + (++badgeSeq); })[0];
+  var size = props.size || 24;
+  return h('svg', { class: props.class, x: props.x, y: props.y, width: props.width != null ? props.width : size, height: props.height != null ? props.height : size, viewBox: '0 0 24 24', 'aria-hidden': 'true' },
+    h('defs', null, h('linearGradient', { id: id, x1: 0, y1: 0, x2: 1, y2: 1 },
+      h('stop', { offset: 0, 'stop-color': '#2fd38a' }), h('stop', { offset: 0.55, 'stop-color': '#0f9d7a' }), h('stop', { offset: 1, 'stop-color': '#0c7f86' }))),
+    h('circle', { cx: 12, cy: 12, r: 12, fill: 'url(#' + id + ')' }),
+    h('g', { transform: 'translate(4.56 4.56) scale(.62)' }, LOGO_PATHS.map(function (d, i) {
+      return h('path', { key: i, d: d, fill: i === 0 ? '#fff' : 'none', stroke: i === 0 ? 'none' : '#0b8a5f', 'stroke-width': 1.6, 'stroke-linecap': 'round', 'stroke-linejoin': 'round' });
+    })));
+}
 /** Значок подтверждённого (официального) аккаунта рядом с именем. size — px. */
 function Verified(props) {
   var size = props.size || 16;
@@ -1854,4 +1868,4 @@ function ScrollToBottom(props) {
 }
 
 
-export { FolderTags, RowBadge, WebPage, MsgLine, ForwardTitle, peerTone, RelayLogo, Verified, ArchivedRow, ReplyQuote, ReactionChips, metaOrReactions, cx, chain, ripple, reducedMotion, omit, fmtTime, makeWave, ICONS, Icon, Button, IconButton, Avatar, Badge, Chip, ChatRow, ChatRowSkeleton, Bubble, MessageStatus, TypingIndicator, DateDivider, Banner, NavRail, Checkbox, Toast, Card, Steps, MediaArt, ProgressRing, Waveform, VoiceMessage, VoiceRecorder, MediaBubble, MediaPolicy, mediaHeld, FileBubble, MediaThumb, MediaViewer, viewerPreview, Switch, PanelHeader, ProfileHeader, ActionTile, InfoRow, SettingsIcon, ReadMore, Presence, useMinVisible, LazyImage, LazyRoot, lazyObserve, lazyRoots, FlipList, SyncIndicator, LinearProgress, EmptyState, ScrollToBottom, SlideFade };
+export { FolderTags, RowBadge, WebPage, MsgLine, ForwardTitle, peerTone, RelayLogo, RelayBadge, Verified, ArchivedRow, ReplyQuote, ReactionChips, metaOrReactions, cx, chain, ripple, reducedMotion, omit, fmtTime, makeWave, ICONS, Icon, Button, IconButton, Avatar, Badge, Chip, ChatRow, ChatRowSkeleton, Bubble, MessageStatus, TypingIndicator, DateDivider, Banner, NavRail, Checkbox, Toast, Card, Steps, MediaArt, ProgressRing, Waveform, VoiceMessage, VoiceRecorder, MediaBubble, MediaPolicy, mediaHeld, FileBubble, MediaThumb, MediaViewer, viewerPreview, Switch, PanelHeader, ProfileHeader, ActionTile, InfoRow, SettingsIcon, ReadMore, Presence, useMinVisible, LazyImage, LazyRoot, lazyObserve, lazyRoots, FlipList, SyncIndicator, LinearProgress, EmptyState, ScrollToBottom, SlideFade };

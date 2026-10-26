@@ -48,6 +48,7 @@ export interface GlobalState {
   /** превью публичных каналов без подписки (подписка previews движка): как строки списка, preview: true; в списке их нет */
   previews: Item[];
   chatsLoaded: boolean;   // первый снимок списка из воркера уже пришёл
+  installable: boolean;   // браузер разрешил установку как приложения (pwa.ts)
   counters: { unreadChats: number; unreadMessages: number };
   status: Status;
   syncLabel: string | null;   // стадия для поля поиска; каждая держится не меньше 600 мс
@@ -138,6 +139,7 @@ let state: GlobalState = {
   chats: [],
   previews: [],
   chatsLoaded: false,
+  installable: false,
   counters: { unreadChats: 0, unreadMessages: 0 },
   uploads: [],
   preparing: [],

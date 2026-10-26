@@ -6,8 +6,16 @@
   <meta name="theme-color" content="#161717" media="(prefers-color-scheme: dark)">
   <meta name="theme-color" content="#f7f5f3">
   <meta name="color-scheme" content="light dark">
-  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 32 32%22%3E%3Crect width=%2232%22 height=%2232%22 rx=%2216%22 fill=%22%2325d366%22/%3E%3Cpath d=%22M9 12h14M9 17h9%22 stroke=%22white%22 stroke-width=%222.6%22 stroke-linecap=%22round%22/%3E%3C/svg%3E">
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Cdefs%3E%3ClinearGradient id='g' x1='0' y1='0' x2='1' y2='1'%3E%3Cstop offset='0' stop-color='%232fd38a'/%3E%3Cstop offset='.55' stop-color='%230f9d7a'/%3E%3Cstop offset='1' stop-color='%230c7f86'/%3E%3C/linearGradient%3E%3C/defs%3E%3Ccircle cx='12' cy='12' r='12' fill='url%28%23g%29'/%3E%3Cg transform='translate%283.12 3.12%29 scale%28.74%29'%3E%3Cpath d='M6 7.5A3.5 3.5 0 0 1 9.5 4h5A3.5 3.5 0 0 1 18 7.5v4a3.5 3.5 0 0 1-3.5 3.5H11l-3.6 3v-3.2A3.5 3.5 0 0 1 6 11.5z' fill='%23fff'/%3E%3Cpath d='M9.6 8.4h4.6l-1.4-1.3 M14.4 11h-4.6l1.4 1.3' fill='none' stroke='%230b8a5f' stroke-width='1.8' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/g%3E%3C/svg%3E">
+  <link rel="apple-touch-icon" href="/relay-logo-192.png">
   <title>Relay</title>
+  <!-- установка как приложения (PWA): манифест, иконка на домашнем экране iOS, имя под ней -->
+  <link rel="manifest" href="/manifest.webmanifest">
+  <link rel="apple-touch-icon" href="/icons/apple-touch-icon.png">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-title" content="Relay">
+  <meta name="apple-mobile-web-app-status-bar-style" content="default">
   <!-- до загрузки CSS и обоев: фон в цвет темы (boot.js) -->
   <script src="/boot.js"></script>
   <style>

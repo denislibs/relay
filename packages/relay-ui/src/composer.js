@@ -107,6 +107,8 @@ function Composer(props) {
   var recordMode = modes.indexOf(props.recordMode) >= 0 ? props.recordMode : modes[0] || null;
 
   /* ---------- высота ---------- */
+  // сжатие поля после отправки — как полёт сообщения в приложении (sendFlight: 300 мс, вертикальная кривая)
+  var SEND_MS = 300, SEND_EASE = 'cubic-bezier(.1992, .0106, .2792, .9103)';
   function fit(animate) {
     requestMeasure(function () {
       var el = editRef.current, box = boxRef.current;
@@ -120,8 +122,12 @@ function Composer(props) {
         box.classList.toggle('rl-composer-input-over', natural > maxH.current);
         if (hgt === prev) return;
         var d = Math.abs(hgt - prev);
-        // как в Telegram: длительность растёт как логарифм перепада — мелкое мгновенно, большое не тянется
-        box.style.transitionDuration = animate && prev && d > 1 && !reducedMotion() ? Math.round(Math.min(220, 50 * Math.log(d))) + 'ms' : '0ms';
+        // как в Telegram: длительность растёт как логарифм перепада — мелкое мгновенно, большое не тянется.
+        // После отправки поле сжимается в такт полёту сообщения (300 мс, его вертикальная кривая): лента идёт за
+        // полем вниз и одновременно к новому пузырю вверх — на одной кривой строки едут только вверх, без рывка вниз
+        var sent = animate === 'send';
+        box.style.transitionDuration = animate && prev && d > 1 && !reducedMotion() ? (sent ? SEND_MS : Math.round(Math.min(220, 50 * Math.log(d)))) + 'ms' : '0ms';
+        box.style.transitionTimingFunction = sent ? SEND_EASE : '';
         box.style.height = hgt + 'px';
         height.current = hgt;
       });
@@ -256,7 +262,7 @@ function Composer(props) {
         var rest = cur.text.indexOf(sentText) === 0 ? splice(cur, 0, sentText.length, null) : cur.text === sentText ? emptyValue() : cur;
         el.innerHTML = toHtml(rest);
         if (document.activeElement === el) setSelection(el, rest.text.length);
-        sync(true);
+        sync('send');
       });
     }
     Promise.resolve(res).then(clear, clear);

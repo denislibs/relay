@@ -95,3 +95,13 @@ test('bezier: CSS cubic-bezier timing (ends, the standard ease at 0.5, monotonic
   let prev = 0;
   for (let p = 0.05; p <= 1.0001; p += 0.05) { const v = fly(p); expect(v).toBeGreaterThanOrEqual(prev); prev = v; }
 });
+
+test('drive: with since, the first frame already moves (the start was taken earlier)', () => {
+  const c = clock(), root = { scrollTop: 0 };
+  driveScroll(root, { ms: 300, target: () => 600, since: -30, ...c });
+  c.tick(0);                       // 30 мс пути уже прошли
+  expect(root.scrollTop).toBeGreaterThan(0);
+  expect(root.scrollTop).toBeLessThan(600);
+  c.tick(300);
+  expect(root.scrollTop).toBe(600);
+});
