@@ -1458,6 +1458,7 @@ html[data-anim="0"] :is(.app-enter-reload, .app-enter-login) :is(.rl-shell-side,
 .app-flight-x { position: absolute; will-change: transform; }
 .app-flight-y { will-change: transform; }
 .app-flight-bg { position: relative; overflow: hidden; }
+.app-flight-body::before, .app-flight-body::after { display: none; }
 .app-flight-body { position: absolute; left: 0; top: 0; margin: 0 !important; max-width: none !important; transform: none !important; }
 .app-flight-target { visibility: hidden !important; animation: none !important; }
 .app-flight-row :is(.rl-appear-out, .rl-appear-in), .app-flight-row:is(.rl-appear-out, .rl-appear-in) { animation: none !important; }

@@ -25,6 +25,7 @@ export type Flight = {
   circle?: 'voice' | 'round';   // запись: круг кнопки отправки или превью кружка
   layer: HTMLElement;
   src: Box;            // капсула поля (фон вырастает из неё)
+  first?: { left: number; top: number };   // первая буква текста в поле: на неё кладётся первая буква пузыря
   text: HTMLElement;   // копия текста поля (в слое, на своём месте)
   radius: string;
   timer: ReturnType<typeof setTimeout>;
@@ -59,6 +60,8 @@ export function captureText(chatId: number, composer: Element | null, field: Ele
   // чтение раскладки в обработчике отправки: поле ещё не очищено — это единственный момент, когда текст на месте
   const src = boxOf(composer.getBoundingClientRect()), fr = field.getBoundingClientRect();
   const cs = getComputedStyle(field);
+  const range = document.createRange(); range.selectNodeContents(field);
+  const gr = range.getClientRects()[0];
   const layer = overlay();
   const text = document.createElement('div');
   text.className = 'app-flight-text';
@@ -70,7 +73,7 @@ export function captureText(chatId: number, composer: Element | null, field: Ele
   });
   layer.appendChild(text);
   document.body.appendChild(layer);
-  const f: Flight = { chatId, layer, src, text, radius: getComputedStyle(composer).borderRadius, claimed: false, timer: 0 as unknown as ReturnType<typeof setTimeout> };
+  const f: Flight = { chatId, layer, src, text, first: gr ? { left: gr.left, top: gr.top } : undefined, radius: getComputedStyle(composer).borderRadius, claimed: false, timer: 0 as unknown as ReturnType<typeof setTimeout> };
   f.timer = setTimeout(() => giveUp(f), HOLD_MS);
   pending.push(f);
 }
@@ -157,11 +160,11 @@ export function launchBox(f: Flight, msg: HTMLElement, remaining: () => number):
     const origin = f.box ? '0 0' : `${src.left - f.text.getBoundingClientRect().left}px ${src.top - f.text.getBoundingClientRect().top}px`;
     requestMutation(() => {
       flyer.style.transformOrigin = origin;
-      flyer.animate([
+      const way = flyer.animate([
         { transform: 'none' },
         { transform: `translate(${dst.left - src.left}px, ${dst.top - src.top}px) scale(${k})` },
       ], { duration: FLIGHT_MS, easing: EASE_Y, fill: 'forwards' });
-      setTimeout(() => requestMutation(() => finish(f, msg)), FLIGHT_MS + 16);
+      landWhen(way, () => finish(f, msg));
     });
   });
 }
@@ -203,17 +206,15 @@ export function launchCircle(f: Flight, target: HTMLElement, remaining: () => nu
     requestMutation(() => {
       const box = f.box!;
       box.style.transformOrigin = '0 0';
-      box.animate([
+      const way = box.animate([
         { transform: 'none', opacity: 1 },
         { opacity: 1, offset: 0.7 },
         { transform: `translate(${dst.left - src.left}px, ${dst.top - src.top}px) scale(${dst.width / src.width}, ${dst.height / src.height})`, opacity: 0 },
       ], { duration: FLIGHT_MS, easing: EASE_Y, fill: 'forwards' });
-      // цель проявляется последние 30% пути — круг «становится» кнопкой / кружком
-      setTimeout(() => requestMutation(() => {
-        target.classList.remove('app-flight-target');
-        target.animate([{ opacity: 0 }, { opacity: 1 }], { duration: FLIGHT_MS * 0.3, fill: 'backwards' });
-      }), FLIGHT_MS * 0.7);
-      setTimeout(() => requestMutation(() => finish(f, target)), FLIGHT_MS + 16);
+      // цель проявляется последние 30% пути — круг «становится» кнопкой / кружком (по времени самого полёта)
+      const reveal = target.animate([{ opacity: 0 }, { opacity: 0, offset: 0.7 }, { opacity: 1 }], { duration: FLIGHT_MS, fill: 'backwards' });
+      reveal.ready.then(() => requestMutation(() => target.classList.remove('app-flight-target')));
+      landWhen(way, () => finish(f, target));
     });
   });
 }
@@ -243,44 +244,82 @@ export function launch(f: Flight, bubble: HTMLElement, remaining: () => number):
     const bs = getComputedStyle(bubble);
     // пузырь выше экрана — лететь некуда: просто показываем
     if (dst.height > innerHeight * 0.9) { requestMutation(() => { finish(f, bubble); }); return; }
+    // как в tweb: текст пузыря с первого кадра лежит на тексте поля (первая буква на первой букве) и летит вместе
+    // с ним — два текста не расходятся. Фон вырастает из капсулы поля и садится на пузырь; время и галочки
+    // проявляются по пути. Пути — на тех же кривых по осям, поэтому текст всё время внутри растущего фона
+    const glyph = bubble.querySelector('.rl-bubble-text');
+    const range = glyph && document.createRange();
+    range?.selectNodeContents(glyph!);
+    const bf = range?.getClientRects()[0];
+    const from = f.first && bf
+      ? { left: f.first.left - (bf.left - r.left), top: f.first.top - (bf.top - r.top) }
+      : { left: f.src.left, top: f.src.top };
     requestMutation(() => {
-      const fx = document.createElement('div'), fy = document.createElement('div'), bg = document.createElement('div');
-      fx.className = 'app-flight-x'; fy.className = 'app-flight-y'; bg.className = 'app-flight-bg';
-      Object.assign(fx.style, { left: dst.left + 'px', top: dst.top + 'px' });
+      const opts = (easing: string, extra: KeyframeAnimationOptions = {}) => ({ duration: FLIGHT_MS, easing, fill: 'forwards' as const, ...extra });
+      const axes = (left: number, top: number, dx: number, dy: number) => {
+        const x = document.createElement('div'), y = document.createElement('div');
+        x.className = 'app-flight-x'; y.className = 'app-flight-y';
+        Object.assign(x.style, { left: left + 'px', top: top + 'px' });
+        x.appendChild(y);
+        x.animate([{ transform: `translateX(${dx}px)` }, { transform: 'none' }], opts(EASE_X));
+        y.animate([{ transform: `translateY(${dy}px)` }, { transform: 'none' }], opts(EASE_Y));
+        return { x, y };
+      };
+      // фон: капсула → пузырь
+      const back = axes(dst.left, dst.top, f.src.left - dst.left, f.src.top - dst.top);
+      const bg = document.createElement('div');
+      bg.className = 'app-flight-bg';
       bg.style.background = bs.backgroundColor;
       bg.style.boxShadow = bs.boxShadow;
-      // клон пузыря в итоговой раскладке: растущий фон открывает его (overflow hidden), время и цитата — на своих местах
-      const body = bubble.cloneNode(true) as HTMLElement;
-      body.classList.remove('app-flight-target');
-      body.classList.add('app-flight-body');
-      Object.assign(body.style, { width: dst.width + 'px', height: dst.height + 'px', animation: 'none', background: 'transparent', boxShadow: 'none' });
-      bg.appendChild(body);
-      fy.appendChild(bg); fx.appendChild(fy); f.layer.appendChild(fx);
-      const opts = (easing: string, extra: KeyframeAnimationOptions = {}) => ({ duration: FLIGHT_MS, easing, fill: 'forwards' as const, ...extra });
-      fx.animate([{ transform: `translateX(${f.src.left - dst.left}px)` }, { transform: 'none' }], opts(EASE_X));
-      fy.animate([{ transform: `translateY(${f.src.top - dst.top}px)` }, { transform: 'none' }], opts(EASE_Y));
-      bg.animate([
+      back.y.appendChild(bg);
+      const way = bg.animate([
         { width: f.src.width + 'px', height: f.src.height + 'px', borderRadius: f.radius },
         { width: dst.width + 'px', height: dst.height + 'px', borderRadius: bs.borderRadius },
       ], opts(EASE_Y));
       bg.animate([{ opacity: 0 }, { opacity: 1 }], { duration: 100, fill: 'forwards' });
+      // содержимое пузыря (без фона): от текста поля к своему месту
+      const front = axes(dst.left, dst.top, from.left - dst.left, from.top - dst.top);
+      const body = bubble.cloneNode(true) as HTMLElement;
+      body.classList.remove('app-flight-target', 'rl-appear-out', 'rl-appear-in');
+      body.classList.add('app-flight-body');
+      Object.assign(body.style, { width: dst.width + 'px', height: dst.height + 'px', animation: 'none', background: 'transparent', boxShadow: 'none' });
+      front.y.appendChild(body);
       body.animate([{ opacity: 0 }, { opacity: 1 }], { duration: 80, fill: 'backwards' });
-      // текст поля улетает вместе с фоном и гаснет за 100 мс (его сменяет текст пузыря)
-      const tx = f.src.left - dst.left, ty = f.src.top - dst.top;
-      f.text.animate([
-        { transform: 'none', opacity: 1 },
-        { opacity: 0, offset: 100 / FLIGHT_MS },
-        { transform: `translate(${-tx}px, ${-ty}px)`, opacity: 0 },
-      ], { duration: FLIGHT_MS, easing: EASE_Y, fill: 'forwards' });
-      setTimeout(() => requestMutation(() => finish(f, bubble)), FLIGHT_MS + 16);
+      const meta = body.querySelector<HTMLElement>('.rl-bubble-meta');
+      meta?.animate([{ opacity: 0 }, { opacity: 0, offset: 0.2 }, { opacity: 1 }], { duration: FLIGHT_MS * 0.9, fill: 'backwards' });
+      // текст поля летит тем же путём, что текст пузыря, и гаснет за 100 мс — его сменяет такой же
+      const field = axes(0, 0, 0, 0);
+      field.x.animate([{ transform: 'none' }, { transform: `translateX(${dst.left - from.left}px)` }], opts(EASE_X));
+      field.y.animate([{ transform: 'none' }, { transform: `translateY(${dst.top - from.top}px)` }], opts(EASE_Y));
+      field.y.appendChild(f.text);
+      f.text.animate([{ opacity: 1 }, { opacity: 0 }], { duration: 100, fill: 'forwards' });
+      f.layer.append(back.x, front.x, field.x);
+      landWhen(way, () => finish(f, bubble));
     });
   });
 }
 
+/**
+ * Посадка — по концу самого полёта, а не по таймеру: если главный поток занят (сообщение со стикером рисуется
+ * сотни миллисекунд), анимация стартует позже, и таймер снимал копию на полпути — стикер появлялся рывком
+ */
+function landWhen(way: Animation, land: () => void): void {
+  let done = false;
+  const go = () => { if (!done) { done = true; requestMutation(land); } };
+  way.finished.then(go, go);
+  setTimeout(go, FLIGHT_MS * 4);   // анимацию отменили или вкладку спрятали — не держим копию вечно
+}
+
 function finish(f: Flight, el: HTMLElement): void {
   drop(f);
+  const row = el.closest<HTMLElement>('.app-msg');
   el.classList.remove('app-flight-target');
-  el.closest('.app-msg')?.classList.remove('app-flight-row');
+  row?.classList.remove('app-flight-row');
+  // снятое подавление запускает появление строки (rl-msg-in: из прозрачности и на 2rem снизу) заново — пузырь
+  // гас и выезжал второй раз сразу после посадки. Доводим его до конца в том же кадре, до отрисовки
+  for (const n of [el, ...(row ? [row, ...row.querySelectorAll<HTMLElement>('.rl-appear-out, .rl-appear-in')] : [])]) {
+    for (const a of n.getAnimations()) if ((a as CSSAnimation).animationName === 'rl-msg-in') a.finish();
+  }
   f.layer.remove();
   // у стикера и эмодзи прятали всё сообщение: время и ответ проявляются после посадки, как в Telegram
   if (el.classList.contains('rl-sticker-msg')) for (const part of el.querySelectorAll<HTMLElement>('.rl-sticker-meta, .rl-sticker-head')) part.animate([{ opacity: 0 }, { opacity: 1 }], { duration: 150 });
