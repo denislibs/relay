@@ -1,7 +1,12 @@
 // Звуки сообщений — файлы, выбранные владельцем проекта: /sounds/message.mp3 (пришло) и /sounds/sent.mp3 (отправил сам).
-// Каждый декодируется один раз и играет через WebAudio с нужной громкостью. Файл не загрузился — у входящего
-// запасной синтезированный «колокольчик» из двух нот, у отправки — тишина.
-// Звучит, только если браузер разрешил аудио.
+// Играют через <audio> с нужной громкостью; файл не проигрался — у входящего запасной синтезированный «колокольчик»
+// из двух нот (WebAudio), у отправки — тишина. Звучит, только если браузер разрешил аудио.
+//
+// Почему не WebAudio для файлов: первый `new AudioContext()` на странице синхронно поднимает аудиосервис браузера —
+// 230–260 мс главного потока в замере (до 600–730 мс в обычном Chrome), и всё это внутри нажатия «Отправить»
+// первого сообщения. <audio>.play() возвращается за доли миллисекунды, а вывод заводится вне главного потока.
+// Чтобы и первый звук не опаздывал (~300 мс на холодном аудиосервисе), warmSounds() в простое после загрузки
+// проигрывает оба файла без звука (не пустили без жеста — на первом нажатии).
 let ctx: AudioContext | null = null;
 
 function audio(): AudioContext | null {
@@ -10,6 +15,55 @@ function audio(): AudioContext | null {
   ctx ??= new Ctor();
   if (ctx.state === 'suspended') void ctx.resume().catch(() => {});
   return ctx;
+}
+
+const SENT = '/sounds/sent.mp3', MESSAGE = '/sounds/message.mp3';
+const players = new Map<string, HTMLAudioElement>();
+function player(url: string): HTMLAudioElement | null {
+  if (typeof Audio === 'undefined') return null;
+  let a = players.get(url);
+  if (!a) { a = new Audio(url); a.preload = 'auto'; players.set(url, a); }
+  return a;
+}
+/**
+ * Проиграть файл с начала. 'blocked' — браузер не разрешил звук без жеста (запасной звук тоже не прозвучит, а
+ * AudioContext ради него — та же долгая задача), 'failed' — нет файла или аудио.
+ */
+function playFile(url: string, volume: number): Promise<'ok' | 'blocked' | 'failed'> {
+  try {
+    const a = player(url);
+    if (!a) return Promise.resolve('failed');
+    a.muted = false;
+    a.volume = Math.min(1, volume);
+    a.currentTime = 0;
+    return a.play().then(() => 'ok' as const, (e: unknown) => ((e as { name?: string })?.name === 'NotAllowedError' ? 'blocked' : 'failed'));
+  } catch { return Promise.resolve('failed'); }
+}
+
+/**
+ * Заранее завести вывод звука (без звука): тогда первый настоящий звук не опаздывает. Беззвучное <audio> браузер
+ * иногда не пускает без жеста (NotAllowedError) — тогда повторяем на первом нажатии: обычно это клик по чату или
+ * полю ввода, задолго до «Отправить».
+ */
+let armed = false;
+export function warmSounds(): void {
+  for (const url of [SENT, MESSAGE]) {
+    try {
+      const a = player(url);
+      if (!a || !a.paused) continue;
+      a.muted = true;
+      // настоящий звук успел начаться поверх прогрева (он снимает muted) — его не трогаем
+      void a.play().then(() => { if (a.muted) { a.pause(); a.currentTime = 0; } }, () => { if (a.muted) armWarm(); })
+        .finally(() => { a.muted = false; });
+    } catch { /* аудио недоступно — не страшно */ }
+  }
+}
+function armWarm(): void {
+  if (armed || typeof addEventListener !== 'function') return;
+  armed = true;
+  const go = () => { removeEventListener('pointerdown', go, true); removeEventListener('keydown', go, true); armed = false; warmSounds(); };
+  addEventListener('pointerdown', go, true);
+  addEventListener('keydown', go, true);
 }
 
 /**
@@ -31,42 +85,19 @@ function chime(c: AudioContext, out: AudioNode, hz: number, at: number, peak: nu
   }
 }
 
-const buffers = new Map<string, Promise<AudioBuffer | null>>();
-function load(c: AudioContext, url: string): Promise<AudioBuffer | null> {
-  let b = buffers.get(url);
-  if (!b) {
-    b = fetch(url).then((r) => (r.ok ? r.arrayBuffer() : Promise.reject(new Error(String(r.status)))))
-      .then((data) => c.decodeAudioData(data))
-      .catch(() => { buffers.delete(url); return null; });   // в следующий раз попробуем снова
-    buffers.set(url, b);
-  }
-  return b;
-}
-function playBuffer(c: AudioContext, buf: AudioBuffer, volume: number): void {
-  const src = c.createBufferSource(), gain = c.createGain();
-  src.buffer = buf;
-  gain.gain.value = Math.min(1, volume);
-  src.connect(gain).connect(c.destination);
-  src.start();
-}
-
 /** Своё сообщение ушло — короткий «щелчок». volume 0..1; 0 — ничего не играем. */
 export function playSentSound(volume: number): void {
   if (!(volume > 0)) return;
-  try {
-    const c = audio();
-    if (c) void load(c, '/sounds/sent.mp3').then((buf) => { if (buf) playBuffer(c, buf, volume); });
-  } catch { /* аудио недоступно — не страшно */ }
+  void playFile(SENT, volume);
 }
 
 /** Уведомление о новом сообщении. volume 0..1; 0 — ничего не играем. */
 export function playNotifySound(volume: number): void {
   if (!(volume > 0)) return;
-  try {
-    const c = audio();
-    if (!c) return;
-    void load(c, '/sounds/message.mp3').then((buf) => { if (buf) playBuffer(c, buf, volume); else playChime(c, volume); });
-  } catch { /* аудио недоступно — не страшно */ }
+  void playFile(MESSAGE, volume).then((r) => {
+    if (r !== 'failed') return;
+    try { const c = audio(); if (c) playChime(c, volume); } catch { /* аудио недоступно — не страшно */ }
+  });
 }
 
 /** Запасной звук без файла: две ноты вверх (си → ми), ~0.5 с. */
