@@ -1,15 +1,16 @@
-import { FOLDER_LIMITS, folderError, graphemes, nextFolderId, normalizeFolder, type ChatFolder } from '@relay/protocol';
+import { FOLDER_COLORS, FOLDER_LIMITS, folderError, graphemes, nextFolderId, normalizeFolder, type ChatFolder } from '@relay/protocol';
 import type { ProfilePhoto } from '@relay/protocol';
 import { avatarPhoto } from '../../profilePhoto';
-import { Avatar, ConfirmDialog, Fab, Icon, IconButton, InfoRow, PanelHeader, Presence, Section, Sticker, TextField } from '@relay/ui';
+import { Avatar, ConfirmDialog, Fab, Icon, IconButton, InfoRow, PanelHeader, Presence, Section, Sticker, StickerView, TextField, reducedMotion } from '@relay/ui';
 import { useEffect, useRef, useState } from 'preact/hooks';
 import { getGlobal, setGlobal, useGlobal, type FolderDraft } from '../../global';
 import { back, go, setLeaveGuard } from '../../nav';
 import { deleteFolder, failText, saveFolder, showToast } from '../../settingsData';
 import { chatTone, isSystemChat } from '../format';
-import { FOLDER_EMOJI, FOLDER_ICONS } from '../../folders';
+import { animatedEmojiUrl, useAnimatedEmoji } from '../../animatedEmoji';
+import { FolderEmojiPicker, pickerPosition } from './FolderEmojiPicker';
 
-/** Иконки на выбор (как набор иконок папок в Telegram, плюс «без иконки» — по типу). */
+const COLOR_NAMES = ['Красный', 'Оранжевый', 'Фиолетовый', 'Зелёный', 'Бирюзовый', 'Синий', 'Розовый'];
 
 export const INCLUDE_TYPES = [
   { key: 'contacts', icon: 'contacts', title: 'Контакты' },
@@ -21,7 +22,7 @@ export const EXCLUDE_TYPES = [
   { key: 'excludeRead', icon: 'check', title: 'Прочитанные' },
 ] as const;
 
-const blank = (id: number): ChatFolder => ({ id, title: '', emoji: null, include: [], exclude: [], contacts: false, nonContacts: false, groups: false, excludeMuted: false, excludeRead: false });
+const blank = (id: number): ChatFolder => ({ id, title: '', emoji: null, color: null, include: [], exclude: [], contacts: false, nonContacts: false, groups: false, excludeMuted: false, excludeRead: false });
 const same = (a: ChatFolder, b: ChatFolder) => JSON.stringify(normalizeFolder(a)) === JSON.stringify(normalizeFolder(b));
 const SHOWN = 5;   // чатов в разделе до «Показать ещё»
 
@@ -55,6 +56,8 @@ export function FolderEdit({ path }: { path: string }) {
   const [askLeave, setAskLeave] = useState<((ok: boolean) => void) | null>(null);
   const [askDelete, setAskDelete] = useState(false);
   const [err, setErr] = useState<string | null>(null);
+  const [picker, setPicker] = useState<{ left: number; top: number; up: boolean } | null>(null);
+  const [pickerOpen, setPickerOpen] = useState(false);
   const input = useRef<HTMLDivElement>(null);
   const f = draft?.folder;
   const dirty = !!draft && (draft.isNew || !same(draft.folder, draft.original));
@@ -129,22 +132,32 @@ export function FolderEdit({ path }: { path: string }) {
     <div class="rl-sidepage" aria-label={draft.isNew ? 'Новая папка' : 'Изменить папку'}>
       <PanelHeader icon="arrowLeft" closeLabel="Назад" title={draft.isNew ? 'Новая папка' : 'Изменить папку'} onClose={() => void back()} />
       <div class="rl-settings">
-        <div class="app-folder-hero"><Sticker name="folderNew" size={100} replay="click" /></div>
-        <Section title="Название папки">
+        <FolderHero emoji={f.emoji} />
+        <Section title="Название папки" footer="Эмодзи станет иконкой папки во вкладках. Нажмите выбранный ещё раз, чтобы убрать его.">
           <div ref={input}>
             <TextField
               value={f.title} maxLength={FOLDER_LIMITS.title} measure={graphemes} counter={FOLDER_LIMITS.title - graphemes(f.title) <= Math.round(FOLDER_LIMITS.title / 3)} label="Название папки" error={titleErr ?? undefined}
               onInput={(v: string) => { setErr(null); editDraft({ title: v }); }}
               onKeyDown={(e: KeyboardEvent) => { if (e.key === 'Enter') save(); }}
+              trailing={
+                <button type="button" class={'app-folder-emoji-trigger' + (f.emoji ? ' has-emoji' : '') + (pickerOpen ? ' is-open' : '')} aria-haspopup="dialog" aria-expanded={pickerOpen}
+                  aria-label={f.emoji ? 'Иконка папки: ' + f.emoji : 'Выбрать иконку папки'} title="Иконка папки"
+                  onClick={(e) => {
+                    if (pickerOpen) { setPickerOpen(false); return; }
+                    // место окна — по кнопке в момент нажатия (обработчик, не рендер: чтение раскладки разрешено)
+                    const r = (e.currentTarget as HTMLElement).getBoundingClientRect();
+                    setPicker(pickerPosition(r, document.documentElement.clientWidth, innerHeight));
+                    setPickerOpen(true);
+                  }}>
+                  {f.emoji ? <span key={f.emoji} class="app-folder-emoji-glyph">{f.emoji}</span> : <Icon name="smile" size={24} />}
+                </button>
+              }
             />
           </div>
-          <div class="app-folder-emoji" role="radiogroup" aria-label="Иконка папки">
-            <button type="button" role="radio" aria-checked={f.emoji === null ? 'true' : 'false'} class="app-folder-emoji-btn" title="По типу чатов" onClick={() => editDraft({ emoji: null })}><Icon name="folder" size={22} /></button>
-            {FOLDER_EMOJI.map((e) => (
-              <button key={e} type="button" role="radio" aria-checked={f.emoji === e ? 'true' : 'false'} aria-label={e} class="app-folder-emoji-btn" onClick={() => editDraft({ emoji: e })}><Icon name={FOLDER_ICONS[e]} size={22} /></button>
-            ))}
-          </div>
         </Section>
+        <FolderEmojiPicker open={pickerOpen} at={picker} selected={f.emoji}
+          onPick={(e) => { editDraft({ emoji: f.emoji === e ? null : e }); setPickerOpen(false); }}
+          onClose={() => setPickerOpen(false)} />
         <Section title="Включённые чаты" footer="Чаты и типы чатов, которые будут в этой папке.">
           <InfoRow icon="plus" title="Добавить чаты" onClick={() => toChild('include')} />
           {list('include')}
@@ -152,6 +165,18 @@ export function FolderEdit({ path }: { path: string }) {
         <Section title="Исключённые чаты" footer="Этих чатов в папке не будет, даже если они подходят по типу.">
           <InfoRow icon="plus" title="Исключить чаты" onClick={() => toChild('exclude')} />
           {list('exclude')}
+        </Section>
+        <Section
+          title={<span class="app-folder-color-title"><span>Цвет папки в списке чатов</span>{f.color !== null ? <span key={f.color} class="rl-tag app-folder-color-preview" style={{ '--tag': `var(--peer-${f.color})`, '--tag-bg': `var(--peer-${f.color}-bg)` }}>{f.title.trim() || 'Папка'}</span> : null}</span>}
+          footer={f.color !== null ? 'Название папки будет тегом у её чатов в списке.' : 'Без цвета у чатов нет тега этой папки.'}>
+          <div class="app-folder-colors" role="radiogroup" aria-label="Цвет тега папки">
+            {Array.from({ length: FOLDER_COLORS }, (_, i) => (
+              <button key={i} type="button" role="radio" aria-checked={f.color === i ? 'true' : 'false'} aria-label={COLOR_NAMES[i]} title={COLOR_NAMES[i]}
+                class="app-folder-color" style={{ '--c': `var(--peer-${i})` }} onClick={() => editDraft({ color: i })} />
+            ))}
+            <button type="button" role="radio" aria-checked={f.color === null ? 'true' : 'false'} aria-label="Без цвета" title="Без цвета"
+              class="app-folder-color is-none" onClick={() => editDraft({ color: null })}><Icon name="close" size={20} /></button>
+          </div>
         </Section>
         {err && !titleErr ? <div class="app-folder-err" role="alert">{err}</div> : null}
         {!draft.isNew ? <Section><InfoRow icon="trash" danger title="Удалить папку" onClick={() => setAskDelete(true)} /></Section> : null}
@@ -161,6 +186,27 @@ export function FolderEdit({ path }: { path: string }) {
       </Presence>
       <ConfirmDialog open={!!askLeave} danger title="Сбросить изменения?" text="Правки папки не сохранятся." confirm="Сбросить" onCancel={() => leaveAnswer(false)} onConfirm={() => leaveAnswer(true)} />
       <ConfirmDialog open={askDelete} danger title="Удалить папку?" text={`Папка «${draft.original.title}» исчезнет на всех устройствах. Чаты останутся.`} confirm="Удалить" onCancel={() => setAskDelete(false)} onConfirm={remove} />
+    </div>
+  );
+}
+
+/**
+ * Картинка над формой: выбран эмодзи — он сам, крупно (из анимированного набора — играет один раз, клик — заново);
+ * иначе — стикер папки. Смена — проявлением, без скачка высоты (место 100 px всегда).
+ */
+function FolderHero({ emoji }: { emoji: string | null }) {
+  useAnimatedEmoji(!!emoji);
+  const [replay, setReplay] = useState(0);
+  const [failed, setFailed] = useState<string | null>(null);
+  const src = emoji && failed !== emoji ? animatedEmojiUrl(emoji.replace(/\uFE0F/g, '')) : undefined;
+  return (
+    <div class="app-folder-hero">
+      {emoji ? (
+        <span key={emoji} class="app-folder-hero-emoji">
+          {src ? <StickerView src={src} w={512} h={512} size={100} group="menu" loop={false} replay={replay} force title={emoji} play={!reducedMotion()} onError={() => setFailed(emoji)} onClick={() => setReplay((n) => n + 1)} />
+            : <span class="app-folder-hero-glyph" aria-hidden="true">{emoji}</span>}
+        </span>
+      ) : <span key="folder" class="app-folder-hero-emoji"><Sticker name="folderNew" size={100} replay="click" /></span>}
     </div>
   );
 }

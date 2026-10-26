@@ -14,3 +14,12 @@ export function gridLayout(width, cols, gap) {
   }
   return { cell: base, step: base + gap, cols: out };
 }
+
+/** Строка, в которую попадает смещение px, когда у строк разная высота: tops — верхи строк и в конце полная
+ *  высота (tops.length = строк + 1). Последняя строка, чей верх не ниже px; выше начала — 0, ниже конца — последняя. */
+export function rowAt(tops, px) {
+  var lo = 0, hi = tops.length - 2;
+  if (hi < 0) return 0;
+  while (lo < hi) { var mid = (lo + hi + 1) >> 1; if (tops[mid] <= px) lo = mid; else hi = mid - 1; }
+  return lo;
+}

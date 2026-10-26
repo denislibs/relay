@@ -7,6 +7,7 @@ export interface ChatFolder {
   id: number;
   title: string;
   emoji: string | null;   // иконка папки (вкладки слева); null — по типу или общая
+  color: number | null;   // цвет тега папки в списке чатов: 0…6 — палитра собеседников (--peer-N); null — без тега
   include: number[];      // чаты, которые в папке всегда (если не исключены явно)
   exclude: number[];      // чаты, которых в папке нет никогда
   contacts: boolean;      // личные чаты с контактами
@@ -17,6 +18,8 @@ export interface ChatFolder {
 }
 
 export const FOLDER_LIMITS = { folders: 10, chats: 200, title: 16, emoji: 16 } as const;
+/** Цветов тега: столько же, сколько цветов собеседников (как в Telegram — его палитра). */
+export const FOLDER_COLORS = 7;
 /** id своих папок начинаются с 2: 0 — «Все чаты», 1 зарезервирован (архив). */
 export const FOLDER_MIN_ID = 2;
 export const FOLDER_MAX_ID = 1_000_000;
@@ -48,10 +51,12 @@ export function normalizeFolder(v: unknown): ChatFolder | null {
   const include = ids(f.include);
   const inc = new Set(include);
   const emoji = typeof f.emoji === 'string' && f.emoji.trim() ? f.emoji.trim() : null;
+  const color = typeof f.color === 'number' && Number.isInteger(f.color) && f.color >= 0 && f.color < FOLDER_COLORS ? f.color : null;
   return {
     id,
     title: typeof f.title === 'string' ? f.title.replace(/\s+/g, ' ').trim() : '',
     emoji,
+    color,
     include,
     exclude: ids(f.exclude).filter((x) => !inc.has(x)),
     contacts: f.contacts === true,

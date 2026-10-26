@@ -5,7 +5,7 @@ import { requestMeasure, requestMutation, onHeavyAnimationEnd, beginHeavyAnimati
 import { TWallpaper } from 'twallpaper';
 import { cx, ripple, reducedMotion, Presence, Icon, IconButton, Avatar, Badge, Button, Checkbox, MediaArt, MessageStatus, ICONS } from './kit.js';
 import { SearchInput } from './searchInput.js';
-import { gridLayout } from './windowMath.js';
+import { gridLayout, rowAt } from './windowMath.js';
 
 /* Relay UI kit — components added in the Preact version. */
 
@@ -271,7 +271,7 @@ function LoginQR(props) {
    onView (ref, необязательно) — на каждый замер в фазе measure: onView.current(top, scrolled), где top — верх
    видимой области прокрутки относительно начала списка (px, до начала списка — отрицательный), scrolled — замер
    вызван прокруткой (а не сменой размеров) */
-function useWindowRange(host, rh, over, n, onView) {
+function useWindowRange(host, rh, over, n, onView, geom) {
   var range = useState([0, Math.min(n, 20)]);
   var cur = useRef(range[0]); cur.current = range[0];
   var poke = useRef(null);
@@ -285,7 +285,10 @@ function useWindowRange(host, rh, over, n, onView) {
       var offset = el.getBoundingClientRect().top - sc.getBoundingClientRect().top + sc.scrollTop; // where the list starts in the scroller
       var top = sc.scrollTop - offset, bottom = top + sc.clientHeight;
       if (onView && onView.current) onView.current(top, byScroll);
-      var vTop = Math.max(0, Math.floor(top / rh)), vBot = Math.max(0, Math.ceil(bottom / rh));
+      // строки разной высоты (geom) — индекс по смещению двоичным поиском, иначе — делением
+      var g = geom && geom.current;
+      var vTop = g ? g.indexAt(Math.max(0, top)) : Math.max(0, Math.floor(top / rh));
+      var vBot = g ? (bottom <= 0 ? 0 : g.indexAt(bottom) + 1) : Math.max(0, Math.ceil(bottom / rh));
       // запас с гистерезисом: окно сдвигаем, когда израсходована половина запаса, и сразу с полным запасом —
       // иначе перерисовка всего списка на каждые 72 px прокрутки. «Две строки до края», как было, при быстрой
       // прокрутке (≈ 3 строки за кадр) не успевали: окно приходит кадром позже, и у края мелькала пустота
@@ -322,8 +325,9 @@ function useWindowRange(host, rh, over, n, onView) {
     });
     return function () { alive = false; poke.current = null; if (sc) sc.removeEventListener('scroll', onScroll); if (ro) ro.disconnect(); if (mo) mo.disconnect(); };
   }, [rh, over]);
-  // строк стало больше или меньше — окно проверяется заново (высота списка и место под ним поменялись)
-  useLayoutEffect(function () { if (poke.current) poke.current(); }, [n]);
+  // строк стало больше или меньше (или их высоты) — окно проверяется заново (высота списка и место под ним поменялись)
+  var full = geom && geom.current ? geom.current.full : n;
+  useLayoutEffect(function () { if (poke.current) poke.current(); }, [n, full]);
   return range[0];
 }
 
@@ -384,7 +388,18 @@ function KeepList(props) {
   var n = items.length, total = Math.max(n, props.total || 0);
   var over = Math.ceil((props.overscanPx == null ? 288 : props.overscanPx) / rh);
   var host = useRef(null), layer = useRef(null);
-  var range = useWindowRange(host, rh, over, total);
+  // rowHeightOf(item, i) — своя высота у строки (строка чата с тегами папок выше); места без данных — rh.
+  // Верх строки — сумма высот до неё; без rowHeightOf всё как раньше: индекс × rh
+  var tops = null;
+  if (props.rowHeightOf) {
+    tops = new Array(total + 1); tops[0] = 0;
+    for (var t = 0; t < total; t++) tops[t + 1] = tops[t] + (t < n ? props.rowHeightOf(items[t], t) || rh : rh);
+  }
+  var topOf = function (i) { return tops ? tops[i] : i * rh; };
+  var sizeOf = function (i) { return tops ? tops[i + 1] - tops[i] : rh; };
+  var geom = useRef(null);
+  geom.current = tops ? { full: tops[total], indexAt: function (px) { return rowAt(tops, px); } } : null;
+  var range = useWindowRange(host, rh, over, total, null, geom);
   useNearEnd(props.onNearEnd, range[1], n, props.nearEndKey);
   var first = Math.min(range[0], total), last = Math.min(range[1], total);
   var boxes = useRef(new Map());   // ключ → div строки (пока строка в запасе)
@@ -410,8 +425,8 @@ function KeepList(props) {
     boxes.current.forEach(function (box, k) {
       if (!kept.current.has(k)) { if (box.parentNode) box.parentNode.removeChild(box); boxes.current.delete(k); return; }
       var idx = at.get(k);
-      box.style.transform = 'translateY(' + idx * rh + 'px)';
-      box.style.height = rh + 'px';
+      box.style.transform = 'translateY(' + topOf(idx) + 'px)';
+      box.style.height = sizeOf(idx) + 'px';
       box.style.zIndex = String(total - idx);   // поднимающаяся строка едет над соседями
       if (visible.has(k)) {
         if (box.parentNode !== el) el.appendChild(box);
@@ -434,7 +449,7 @@ function KeepList(props) {
   // скелеты на местах без данных; видимый скелет — догрузить
   var ph = [];
   for (var p = Math.max(first, n); p < last; p++) {
-    ph.push(h('div', { key: 'p' + p, role: 'none', class: 'rl-wrow', style: { transform: 'translateY(' + p * rh + 'px)', height: rh } }, props.renderPlaceholder ? props.renderPlaceholder(p) : null));
+    ph.push(h('div', { key: 'p' + p, role: 'none', class: 'rl-wrow', style: { transform: 'translateY(' + topOf(p) + 'px)', height: rh } }, props.renderPlaceholder ? props.renderPlaceholder(p) : null));
   }
   var onPh = useRef(props.onPlaceholder); onPh.current = props.onPlaceholder;
   var needMore = ph.length > 0;
@@ -443,7 +458,7 @@ function KeepList(props) {
     var map = boxes.current;
     return function () { map.forEach(function (box) { if (box.parentNode) box.parentNode.removeChild(box); }); map.clear(); };
   }, []);
-  return h('div', { ref: host, class: cx('rl-wlist', props.class), role: props.role, style: { height: total * rh } },
+  return h('div', { ref: host, class: cx('rl-wlist', props.class), role: props.role, style: { height: tops ? tops[total] : total * rh } },
     h('div', { class: 'rl-wlist-ph', 'aria-hidden': 'true' }, ph),
     h('div', { ref: layer, class: 'rl-wlist-rows' }),   // строки вставляются сюда вручную (см. выше)
     portals);

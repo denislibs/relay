@@ -617,12 +617,27 @@ html[data-anim="0"] .app-chatcol, html[data-anim="0"] .app-chatcol-below, html[d
 .app-folders-none { padding: var(--space-2) var(--space-4) var(--space-3); font: 400 14px/20px var(--font-sans); color: var(--ink-muted); }
 .app-folder-rec { display: flex; align-items: center; gap: var(--space-4); min-height: 56px; padding: var(--space-2) var(--space-4); }
 .app-folder-rec .rl-inforow-text { flex: 1; min-width: 0; }
-.app-folder-hero { display: flex; justify-content: center; padding: var(--space-4) 0 var(--space-2); }
-.app-folder-emoji { display: grid; grid-template-columns: repeat(auto-fill, minmax(40px, 1fr)); gap: 4px; padding: var(--space-2) var(--space-2) var(--space-3); }
-.app-folder-emoji-btn { display: inline-flex; align-items: center; justify-content: center; height: 40px; border: 0; border-radius: 12px; background: transparent; color: var(--ink-muted); font-size: 22px; cursor: pointer; transition: background-color var(--dur-fast) var(--ease-standard), transform var(--dur-fast) var(--ease-standard); }
-.app-folder-emoji-btn:hover { background: var(--hover); }
-.app-folder-emoji-btn[aria-checked="true"] { background: color-mix(in srgb, var(--brand-text) 14%, transparent); color: var(--brand-text); }
-.app-folder-emoji-btn:active { transform: scale(0.92); }
+.app-folder-hero { display: grid; grid-template-rows: 100px; place-items: center; padding: var(--space-4) 0 var(--space-3); }
+/* смена картинки (стикер папки ↔ эмодзи) — проявлением с лёгким ростом, место не меняется */
+.app-folder-hero-emoji { grid-area: 1 / 1; display: grid; place-items: center; width: 100px; height: 100px; animation: app-folder-hero-in 220ms cubic-bezier(.2, 0, 0, 1) both; }
+.app-folder-hero-glyph { font-size: 80px; line-height: 1; }
+@keyframes app-folder-hero-in { from { opacity: 0; transform: scale(.8); } to { opacity: 1; transform: none; } }
+/* кнопка-смайлик в поле названия: выбранный эмодзи — сам, иначе контурный смайлик */
+.app-folder-emoji-trigger { display: grid; place-items: center; width: 40px; height: 40px; padding: 0; border: 0; border-radius: 50%; background: transparent; color: var(--ink-muted); cursor: pointer; transition: background-color var(--dur-fast) var(--ease-standard), color var(--dur-fast) var(--ease-standard); }
+.app-folder-emoji-trigger:hover, .app-folder-emoji-trigger.is-open { background: var(--hover); color: var(--brand-text); }
+.app-folder-emoji-glyph { font-size: 24px; line-height: 1; animation: rl-react-in 260ms cubic-bezier(.2, 0, 0, 1) both; }
+/* цвет тега: семь кругов палитры собеседников и «без цвета»; выбранный — кольцо с зазором */
+.app-folder-color-title { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.app-folder-color-preview { max-width: 50%; overflow: hidden; text-overflow: ellipsis; animation: app-folder-hero-in 180ms cubic-bezier(.2, 0, 0, 1) both; }
+/* восемь кругов в ряд при любой ширине колонки: сетка из 8 равных долей, круг — до 34 px */
+.app-folder-colors { display: grid; grid-template-columns: repeat(8, minmax(0, 1fr)); justify-items: center; gap: 4px; padding: 16px 12px; }
+.app-folder-color { position: relative; display: grid; place-items: center; width: min(34px, calc(100% - 8px)); height: auto; aspect-ratio: 1; padding: 0; border: 0; border-radius: 50%; background: var(--c); color: var(--ink-muted); cursor: pointer; transition: transform var(--dur-fast) var(--ease-standard); }
+.app-folder-color::after { content: ''; position: absolute; inset: -4px; border: 2px solid var(--c); border-radius: 50%; opacity: 0; transform: scale(.85); transition: opacity var(--dur-fast) var(--ease-standard), transform var(--dur-fast) var(--ease-standard); }
+.app-folder-color[aria-checked="true"]::after { opacity: 1; transform: none; }
+.app-folder-color[aria-checked="true"] { transform: scale(.82); }
+.app-folder-color:active { transform: scale(.75); }
+.app-folder-color.is-none { --c: var(--ink-muted); background: var(--hover); }
+html[data-anim="0"] :is(.app-folder-hero-emoji, .app-folder-emoji-glyph, .app-folder-color-preview) { animation: none; }
 .app-folder-chat { display: flex; align-items: center; gap: var(--space-4); min-height: 56px; padding: var(--space-1) var(--space-2) var(--space-1) var(--space-3); }
 .app-folder-chat .rl-inforow-text { flex: 1; min-width: 0; }
 .app-folder-chat .rl-iconbtn { color: var(--ink-muted); }
@@ -1225,6 +1240,12 @@ html[data-anim="0"] :is(.app-hero, .app-hero-photo, .app-hero-info, .app-hero-na
 .app-emoji-grid { display: grid; grid-template-columns: repeat(auto-fill, 42px); grid-auto-rows: 42px; justify-content: space-between; column-gap: 4px; padding: 0 8px; }
 .app-emoji { width: 42px; height: 42px; padding: 0; border: 0; border-radius: 12px; background: transparent; font-size: 34px; line-height: 42px; text-align: center; cursor: pointer; }
 .app-emoji:hover { background: var(--sym-hover); }
+/* анимированный эмодзи под курсором (выбор иконки папки): поверх глифа, глиф прячется с первым кадром */
+.app-emoji { position: relative; }
+.app-emoji > span { display: block; }
+.app-emoji > span.is-under { visibility: hidden; }
+.app-emoji .rl-sticker { position: absolute; left: 4px; top: 4px; pointer-events: none; }
+.app-emoji.is-on { background: var(--accent-soft); }
 .app-stk-grid { display: grid; grid-template-columns: repeat(auto-fill, 72px); grid-auto-rows: 72px; justify-content: space-between; gap: 4px; padding: 0 3px; }
 .app-stk-cell { display: flex; align-items: center; justify-content: center; width: 72px; height: 72px; padding: 0; border: 0; border-radius: 16px; background: transparent; cursor: pointer; }
 .app-stk-cell:hover { background: var(--sym-hover); }
@@ -1430,3 +1451,13 @@ html[data-anim="0"] :is(.app-enter-reload, .app-enter-login) :is(.rl-shell-side,
 .app-hero.is-expanded .app-hero-actions .rl-pact:focus-visible { outline-color: #fff; }
 :root[data-theme="dark"] .app-hero.is-expanded .app-hero-actions .rl-pact { background: rgba(0, 0, 0, .2); }
 @media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) .app-hero.is-expanded .app-hero-actions .rl-pact { background: rgba(0, 0, 0, .2); } }
+
+/* Окно выбора иконки папки (FolderEmojiPicker): как полный пикер реакций — 382×420, «вырастает» от кнопки-смайлика */
+.app-folder-sym-root { position: fixed; inset: 0; z-index: 1502; pointer-events: none; }
+.app-folder-sym-root .rl-pop-scrim { pointer-events: auto; }
+.app-folder-sym { position: fixed; z-index: 1501; display: flex; flex-direction: column; width: 382px; max-width: calc(100vw - 16px); height: 420px; max-height: calc(100vh - 16px); border-radius: 20px; background: var(--raised); box-shadow: 0 5px 10px 5px rgba(16, 35, 47, .14); overflow: hidden; pointer-events: auto; transform-origin: 30px 0; animation: app-rpanel-in 200ms cubic-bezier(.4, 0, .2, 1) both; }
+.app-folder-sym.is-up { transform-origin: 30px 100%; }
+.app-folder-sym-root[data-state="closing"] .app-folder-sym { animation: app-folder-sym-out 150ms cubic-bezier(.4, 0, 1, 1) both; }
+@keyframes app-folder-sym-out { to { opacity: 0; transform: scale(.9); } }
+.app-folder-sym .app-sym-pane { height: 100%; }
+html[data-anim="0"] .app-folder-sym { animation: none !important; }

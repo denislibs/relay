@@ -1,8 +1,8 @@
 import { expect, test } from 'bun:test';
 import type { ChatFolder } from '@relay/protocol';
-import { chatsWord, folderBadge, folderChats, folderIcon, folderSubtitle, inFolder, recommendedFor, RECOMMENDED, type FolderChat } from './folders';
+import { chatFolderTags, chatsWord, fitFolderTags, folderBadge, folderChats, folderIcon, folderSubtitle, inFolder, recommendedFor, RECOMMENDED, type FolderChat } from './folders';
 
-const F = (o: Partial<ChatFolder> = {}): ChatFolder => ({ id: 2, title: 'П', emoji: null, include: [], exclude: [], contacts: false, nonContacts: false, groups: false, excludeMuted: false, excludeRead: false, ...o });
+const F = (o: Partial<ChatFolder> = {}): ChatFolder => ({ id: 2, title: 'П', emoji: null, color: null, include: [], exclude: [], contacts: false, nonContacts: false, groups: false, excludeMuted: false, excludeRead: false, ...o });
 const friend: FolderChat = { id: 1, kind: 'direct', peerId: 100, unread: 0 };
 const stranger: FolderChat = { id: 2, kind: 'direct', peerId: 200, unread: 3 };
 const group: FolderChat = { id: 3, kind: 'group', peerId: null, unread: 1 };
@@ -66,4 +66,24 @@ test('«Отметить как непрочитанное» — непрочи�
   expect(inFolder(unreadOnly, archived, ctx)).toBe(false);
   expect(inFolder({ ...unreadOnly, include: [22] }, archived, ctx)).toBe(true);
   expect(folderBadge(null, [marked, archived], ctx)).toEqual({ count: 1, muted: false });
+});
+
+test('folder tags: colored folders the chat is in, in tab order, without the open one', () => {
+  const ctx = { contacts: new Set<number>(), isMuted: () => false };
+  const chat = { id: 7, kind: 'group' as const, peerId: null, unread: 0 };
+  const work = F({ id: 2, title: 'Работа', color: 4, groups: true });
+  const plain = F({ id: 3, title: 'Без цвета', groups: true });
+  const friends = F({ id: 4, title: 'Друзья', color: 0, include: [7] });
+  const other = F({ id: 5, title: 'Чужая', color: 1, include: [8] });
+  expect(chatFolderTags(chat, [work, plain, friends, other], ctx, 0)).toEqual([{ id: 2, title: 'Работа', color: 4 }, { id: 4, title: 'Друзья', color: 0 }]);
+  expect(chatFolderTags(chat, [work, plain, friends, other], ctx, 2).map((t) => t.id)).toEqual([4]);
+});
+
+test('folder tags fit: as many as fit, the rest go to +N, and +N replaces the last tag when it does not fit', () => {
+  const more = () => 20;
+  expect(fitFolderTags([40, 40], 100, more)).toEqual({ shown: 2, more: 0 });
+  expect(fitFolderTags([40, 40, 40], 108, more)).toEqual({ shown: 2, more: 1 });   // 40+4+40 = 84, +4+20 = 108
+  expect(fitFolderTags([40, 40, 40], 100, more)).toEqual({ shown: 1, more: 2 });   // «+1» не влез — вместо второго
+  expect(fitFolderTags([150, 10], 100, more)).toEqual({ shown: 0, more: 2 });      // первый не влез — только «+2»
+  expect(fitFolderTags([], 100, more)).toEqual({ shown: 0, more: 0 });
 });
