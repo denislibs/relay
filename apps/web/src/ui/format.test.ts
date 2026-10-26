@@ -18,6 +18,16 @@ test('chatTime: today uses the format, other days do not', () => {
   expect(hm(new Date(2026, 0, 1, 15, 30), '12h')).toBe('3:30 PM');
 });
 
+test('chatTime: weekday this week, short date this year, full date another year — no «Вчера»', () => {
+  const now = new Date(2026, 9, 22, 12, 0);   // чт, 22 октября 2026
+  expect(chatTime(new Date(2026, 9, 21, 9, 0).toISOString(), '24h', now).toLowerCase()).toBe('ср');
+  expect(chatTime(new Date(2026, 9, 19, 9, 0).toISOString(), '24h', now).toLowerCase()).toBe('пн');
+  expect(chatTime(new Date(2026, 9, 18, 9, 0).toISOString(), '24h', now)).toBe('18 окт');   // вс — прошлая неделя
+  expect(chatTime(new Date(2026, 2, 3, 9, 0).toISOString(), '24h', now)).toBe('3 мар');
+  expect(chatTime(new Date(2025, 11, 31, 9, 0).toISOString(), '24h', now)).toBe('31.12.2025');
+  expect(chatTime(new Date(2026, 9, 22, 8, 7).toISOString(), '24h', now)).toBe('08:07');
+});
+
 test('sessionTime: today with time, yesterday, older as a date; fullDateTime', async () => {
   const { sessionTime, fullDateTime } = await import('./format');
   const now = new Date(2026, 9, 17, 18, 0);

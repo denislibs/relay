@@ -57,7 +57,7 @@ function MoreLoader() {
 
 /** Строка списка чатов. memo: чат не изменился (тот же объект из Mirror) — строку не трогаем при сдвиге окна. */
 export const SideRow = memo(function SideRow({ c, meId, active, showDraft, muted, onMenu }: { c: Item; meId: number; active: boolean; showDraft: boolean; muted: boolean; onMenu: (id: number, x: number, y: number) => void }) {
-  const last = c.last as (LastMessage & { status: string }) | null;
+  const last = c.last as (LastMessage & { status: string; fwd?: boolean }) | null;
   const thumb = last ? previewThumb(last) : null;
   // имя автора — только в группах (в личке и так ясно, кто пишет); своё — «Вы», чужое — первое слово имени
   const group = c.kind === 'group' && last && !last.deleted && !last.service;   // служебное событие — без «Имя:», текст сам называет автора
@@ -75,13 +75,15 @@ export const SideRow = memo(function SideRow({ c, meId, active, showDraft, muted
       verified={isSystemChat(c)}
       author={author}
       thumb={thumb}
+      forwarded={!!last?.fwd && !last.deleted}
       preview={last ? previewBody(last, !!thumb) : 'Нет сообщений'}
       draft={draft ? previewText(draft, c.draftEntities as LastMessage['entities']) : undefined}
       muted={muted}
       typing={!!c.typing}
       time={chatTime((c.sortAt ?? c.lastAt) as string)}
       unread={c.unread as number}
-      mentioned={(c.mentions as number) > 0}   // непрочитанное упоминание меня — «@» рядом со счётчиком
+      mentioned={(c.mentions as number) > 0}
+      reactions={c.reactions as number}   // непросмотренные реакции на мои сообщения — красное сердце   // непрочитанное упоминание меня — «@» рядом со счётчиком
       unreadMark={hasUnreadMark(c)}
       pinned={isPinned(c)}
       status={!draft && last && last.senderId === meId ? last.status : null}

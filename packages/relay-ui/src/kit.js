@@ -408,10 +408,10 @@ function RowBadge(props) {
   useEffect(function () { return function () { cancelAnimationFrame(raf.current); clearTimeout(timer.current); }; }, []);
   if (phase === 'off') return null;
   // blank — «Отметить как непрочитанное» без непрочитанных сообщений: бейдж без числа, как в Telegram
-  var n = last.current, label = props.blank ? '' : n > 999 ? '999+' : String(n);
+  var n = last.current, label = props.blank ? '' : props.at ? '@' : n > 999 ? '999+' : String(n);
   return h('span', {
     class: cx('rl-badge rl-badge-row', props.muted && 'rl-badge-muted', props.blank && 'rl-badge-blank', phase === 'on' && 'is-on', phase === 'leave' && 'is-leave'),
-    'aria-label': phase === 'leave' ? undefined : props.blank ? 'отмечен как непрочитанный' : label + ' непрочитанных', 'aria-hidden': phase === 'leave' ? 'true' : undefined
+    'aria-label': phase === 'leave' ? undefined : props.blank ? 'отмечен как непрочитанный' : props.at ? 'Вас упомянули' : label + ' непрочитанных', 'aria-hidden': phase === 'leave' ? 'true' : undefined
   }, label);
 }
 
@@ -454,16 +454,19 @@ function TypingIndicator(props) {
 /* ---------- ChatRow ---------- */
 function ChatRow(props) {
   var unread = props.unread || 0;
-  var rest = omit(props, ['verified', 'logo', 'name', 'preview', 'time', 'unread', 'muted', 'status', 'active', 'typing', 'online', 'avatar', 'author', 'thumb', 'pinned', 'draft', 'mentioned', 'className', 'class']);
+  var rest = omit(props, ['verified', 'logo', 'name', 'preview', 'time', 'unread', 'muted', 'status', 'active', 'typing', 'online', 'avatar', 'author', 'thumb', 'pinned', 'draft', 'mentioned', 'forwarded', 'reactions', 'className', 'class']);
   // как в Telegram: «печатает» важнее черновика, черновик важнее сообщения;
   // строка сообщения — «Автор:», миниатюра 20 px (у видео — play), текст
   var thumb = props.thumb;
+  var atOnly = !!props.mentioned && unread === 1;
   var bottom = props.typing
     ? h('span', { class: 'rl-row-preview rl-row-typing' }, h(TypingIndicator, { inline: true }), 'печатает…')
     : props.draft
       ? h('span', { class: 'rl-row-preview' }, h('b', { class: 'rl-row-draft' }, 'Черновик: '), props.draft)
       : h('span', { class: 'rl-row-preview' },
         props.author ? h('span', { class: 'rl-row-author' }, props.author + ': ') : null,
+        // пересланное — серая стрелка перед миниатюрой и текстом; слова «Переслано» и автора оригинала нет (как в Telegram)
+        props.forwarded ? h(Icon, { name: 'forwardFilled', size: 18, title: 'Переслано', class: 'rl-row-fwd' }) : null,
         thumb ? h('span', { class: cx('rl-row-thumb', thumb.round && 'rl-row-thumb-round', thumb.node && 'rl-row-thumb-node') }, thumb.node || h('img', { src: thumb.src, alt: '', draggable: false }),
           thumb.video ? h(Icon, { name: 'play', size: 12 }) : null) : null,
         props.preview);
@@ -473,18 +476,21 @@ function ChatRow(props) {
     h(Avatar, { name: props.avatar === undefined ? props.name : props.avatar, tone: props.avatarTone, online: props.online, logo: props.logo, src: props.avatarSrc, thumb: props.avatarThumb, size: 54 }),   // как в Telegram: 54 в строке 72
     h('span', { class: 'rl-row-main' },
       h('span', { class: 'rl-row-top' },
-        props.verified
-          ? h('span', { class: 'rl-row-name rl-row-name-verified' }, h('span', { class: 'rl-row-name-text' }, props.name), h(Verified, { size: 16 }))
-          : h('span', { class: 'rl-row-name' }, props.name),
+        // значки сразу за названием, а не у правого края: verified, затем «без звука» — серый динамик (как в Telegram)
+        h('span', { class: 'rl-row-name' }, h('span', { class: 'rl-row-name-text' }, props.name),
+          props.verified ? h(Verified, { size: 16 }) : null,
+          props.muted ? h(Icon, { name: 'soundOffFilled', size: 16, title: 'Без звука', class: 'rl-row-mute' }) : null),
         props.status ? h(MessageStatus, { status: props.status, size: 16 }) : null,
         h('span', { class: cx('rl-row-time', (unread > 0 || props.unreadMark) && !props.muted && 'rl-row-time-unread') }, props.time)),
       h('span', { class: 'rl-row-bottom' }, bottom,
         h('span', { class: 'rl-row-meta' },
-          props.mentioned ? h('span', { class: 'rl-row-at', 'aria-label': 'Вас упомянули' }, '@') : null,
-          props.muted ? h(Icon, { name: 'bellOff', size: 16, title: 'Без звука' }) : null,
+          // непросмотренные реакции на мои сообщения — красный кружок с сердцем, левее всех
+          props.reactions > 0 ? h('span', { class: 'rl-row-react', role: 'img', 'aria-label': 'Новые реакции' }, h(Icon, { name: 'heartFilled', size: 14 })) : null,
+          // единственное непрочитанное — упоминание: счётчик сам становится «@»; иначе «@» отдельным кружком
+          props.mentioned && !atOnly ? h('span', { class: 'rl-row-at', 'aria-label': 'Вас упомянули' }, '@') : null,
           // булавка — только без бейджа (как в Telegram: непрочитанное важнее)
           props.pinned && !(unread > 0) && !props.unreadMark ? h(Icon, { name: 'pin', size: 22, title: 'Закреплён', class: 'rl-row-pin' }) : null,   // кнопка-булавка, контур (как в Telegram)
-          h(RowBadge, { count: unread > 0 ? unread : props.unreadMark ? 1 : 0, blank: !(unread > 0) && !!props.unreadMark, muted: props.muted })))));
+          h(RowBadge, { count: unread > 0 ? unread : props.unreadMark ? 1 : 0, blank: !(unread > 0) && !!props.unreadMark, muted: props.muted && !atOnly, at: atOnly })))));
 }
 
 /* ---------- ArchivedRow ----------
