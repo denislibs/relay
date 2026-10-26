@@ -23,6 +23,7 @@ import { asset } from './assets';
 import { compressPhoto } from './media/compressPhoto';
 import { compressVideo, type VideoQuality } from './media/compressVideo';
 import { isOwnChannelPost, postCopyChannel } from './channelText';
+import { onLaunch } from './pwa';
 import { baseOf, findTarget, hashFor, parseHash, positionKey, sameTarget, toTarget, type StackTarget } from './stackTarget';
 
 declare const __BUILD__: string;
@@ -100,6 +101,8 @@ export function startData(me: Me): void {
   // запись истории могла вернуть прежний адрес (#chat=…) — поправить на чат на экране
   addEventListener('popstate', () => queueMicrotask(syncShown));
   startNotify((id, threadId) => { focus(); openNotified(id, threadId); });
+  // установленное приложение уже открыто, а его запустили со ссылкой на чат — открываем здесь же
+  onLaunch((url) => { const t = parseHash(url.hash); if (t) openNotified(t.chatId, t.threadId ?? undefined); });
   // #chat=…&thread=… при загрузке: нижний слой — чат (тред гостя, &via= — канал поста), тред — поверх него (docs/navigation-rules.md)
   const open = parseHash(location.hash);
   if (open) { openChat(baseOf(open)); if (open.threadId != null) whenShown(baseOf(open), () => openInner(open)); }
