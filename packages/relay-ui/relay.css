@@ -2634,3 +2634,31 @@ html[data-anim="0"] .rl-symbols-pop { transition: none; }
 .rl-pact .rl-icon { flex: none; }
 .rl-pact-label { max-width: 100%; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; text-transform: lowercase; }
 @supports (corner-shape: squircle) { .rl-pact { corner-shape: squircle; border-radius: calc(16px * var(--sq)); } }
+
+/* ---------- ответ, имя и «Переслано от» у медиа без пузыря (стикер, большое эмодзи, кружок) — как в Telegram Web K ----------
+   Плашка сбоку от медиа, вровень с его верхом: у своих — слева, у входящих — справа, в 10 px. Фон — цвет служебных плашек
+   от обоев (--action-bg, как «highlighting color» tweb), текст и полоска цитаты белые, по строке с многоточием; не шире
+   15rem и свободного места до края ленты (100cqw — ширина ленты, 100% — ширина медиа). Наверх не уходит никогда. */
+.rl-sticker-msg { position: relative; }
+.rl-sticker-head, .rl-side-head { --quote-tone: #fff; --quote-bg: transparent; --quote-bg-active: rgba(255, 255, 255, .12); --fwd-tone: #fff;
+  box-sizing: border-box; max-width: min(15rem, calc(100cqw - 100% - 36px)); padding: 4px 8px; border-radius: 12px; background: var(--action-bg); box-shadow: none; color: #fff; font: 400 14px/18px var(--font-sans); }
+.rl-sticker-head { position: absolute; top: 0; left: calc(100% + 10px); width: max-content; }
+.rl-sticker-head.rl-sticker-head-out { left: auto; right: calc(100% + 10px); background: var(--action-bg); }
+.rl-sticker-head .rl-bubble-author { color: #fff !important; }
+:is(.rl-sticker-head, .rl-side-head) .rl-quote { min-width: 0; background: transparent; color: #fff; }
+:is(.rl-sticker-head, .rl-side-head) .rl-quote::before { width: 3px; border-radius: 2px; }
+:is(.rl-sticker-head, .rl-side-head) .rl-quote-body { padding: 2px 4px 2px 0; }
+:is(.rl-sticker-head, .rl-side-head) .rl-quote-text { color: rgba(255, 255, 255, .85); }
+:is(.rl-sticker-head, .rl-side-head) .rl-quote-thumb { width: 32px; height: 32px; align-self: center; border-radius: 4px; overflow: hidden; }
+:is(.rl-sticker-head, .rl-side-head) .rl-fwd { color: #fff; }
+/* кружок: голова и кружок в ряд, голова сбоку (у входящего — справа: кружок первым) */
+.rl-msgline:has(> .rl-side-head) { flex-direction: row; align-items: flex-start; gap: 10px; }
+.rl-msgline:not(.rl-msgline-out):has(> .rl-side-head) > .rl-round { order: -1; }
+.rl-side-head { display: flex; flex-direction: column; gap: 4px; max-width: min(15rem, calc(100cqw - 240px - 36px)); }
+.rl-side-head > :is(.rl-fwd-plate, .rl-reply-plate) { padding: 0; border-radius: 0; background: none; box-shadow: none; max-width: 100%; }
+.rl-side-head .rl-reply-plate .rl-quote-in { margin: 0; min-width: 0; }
+/* время на стикере и эмодзи — той же плашкой, что и голова (в tweb — тот же цвет) */
+.rl-sticker-meta { background: var(--action-bg); color: #fff; }
+/* цвет автора цитаты задаётся у самой цитаты (style) — на плашке медиа он белый, как в tweb */
+:is(.rl-sticker-head, .rl-side-head) .rl-quote { --quote-tone: #fff !important; }
+:is(.rl-sticker-head, .rl-side-head) .rl-quote-body b { color: #fff !important; }

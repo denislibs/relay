@@ -84,10 +84,10 @@ export function RoundBubble(props) {
   var dur = props.duration || 0;
   var hasReact = !!(props.reactions && props.reactions.length);
   return h(MsgLine, { aside: props.aside, class: cx('rl-msgline', out && 'rl-msgline-out', props.groupStart && 'rl-msgline-gap', props.fwd && 'rl-round-line-fwd', props.reply && 'rl-round-line-reply', (props.footer || hasReact) && 'rl-round-line-foot') },
-    // у кружка нет пузыря — «Переслано от» плашкой над ним, как подпись к стикеру
-    props.fwd ? h(ForwardTitle, { fwd: props.fwd, class: 'rl-fwd-plate' }) : null,
-    // у кружка нет пузыря — цитата отдельной плашкой рядом с ним, как у стикера в Telegram
-    props.reply ? h('div', { class: 'rl-reply-plate' }, h(ReplyQuote, Object.assign({ inBubble: true }, props.reply))) : null,
+    // у кружка нет пузыря — «Переслано от» и цитата одной плашкой сбоку от него, как у стикера в Telegram Web K
+    props.fwd || props.reply ? h('div', { class: 'rl-side-head' },
+      props.fwd ? h(ForwardTitle, { fwd: props.fwd, class: 'rl-fwd-plate' }) : null,
+      props.reply ? h('div', { class: 'rl-reply-plate' }, h(ReplyQuote, Object.assign({ inBubble: true }, props.reply))) : null) : null,
     h('div', { ref: box, class: cx('rl-round', props.appear && (out ? 'rl-appear-out' : 'rl-appear-in'), s.loaded && 'rl-round-loaded', s.on && 'rl-round-on'), onClick: onTap,
       role: 'button', 'aria-label': s.on && s.playing ? 'Пауза' : 'Воспроизвести видеосообщение' },
       props.thumb ? h('img', { class: 'rl-round-thumb', src: props.thumb, alt: '', 'aria-hidden': 'true' }) : null,
