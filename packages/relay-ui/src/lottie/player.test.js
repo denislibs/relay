@@ -1,7 +1,7 @@
 import { beforeEach, expect, test } from 'bun:test';
 
 globalThis.requestAnimationFrame ??= (fn) => setTimeout(() => fn(performance.now()), 0);
-const { __setWorkerFactory, configureLottie } = await import('./pool.js');
+const { __setWorkerFactory, configureLottie, lottieStats } = await import('./pool.js');
 const { attachSticker, setStickerGroupExclusive, stickerStats } = await import('./player.js');
 
 let made;
@@ -108,4 +108,16 @@ test('atEnd: the last frame is shown at once and stays (old dice); restart plays
   expect(sent('frame').some((m) => m.i > 0 && m.i < 59)).toBe(true);
   v.destroy();
   expect(ended).toBe(0);
+});
+
+test('a sticker that played once and stopped keeps only its shown frame (picker cells)', async () => {
+  const v = attachSticker({ url: '/stk/x/aaaaaaaa/8.tgs', px: 64, canvas: canvas(), loop: false });
+  await wait();
+  v.setVisible(true);
+  await wait(400);
+  expect(lottieStats().cachedFrames).toBeGreaterThan(1);         // играет — кэш копится
+  await wait(1000);
+  expect(stickerStats().playing).toBe(0);
+  expect(lottieStats().cachedFrames).toBe(1);                    // остановилась на последнем кадре — только он
+  v.destroy();
 });
