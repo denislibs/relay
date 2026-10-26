@@ -1369,11 +1369,13 @@ html[data-anim="0"] :is(.app-hero, .app-hero-photo, .app-hero-info, .app-hero-na
 .app-stkrow-skel .app-stkrow-strip { border-radius: 12px; background: var(--hover, rgba(127,127,127,.06)); }
 
 /* ---------- Появление приложения (как в Telegram Web K) ---------- */
-/* запуск: колонки над уже видимыми обоями проявляются за 300 мс */
-.app-enter-reload :is(.rl-shell-side, .rl-shell-main, .rl-frail) { animation: app-fade 300ms cubic-bezier(.4, 0, .2, 1) both; }
+/* запуск: колонки над уже видимыми обоями проявляются за 300 мс. Заполнение backwards, не both: конец анимации — обычный
+   вид, а доигравшая анимация с both держалась бы на колонках до снятия класса (1 с, main.tsx) — Chrome до тех пор не
+   считает их содержимое показанным (LCP «Включите уведомления» на 1,1 с вместо ~0,35) */
+.app-enter-reload :is(.rl-shell-side, .rl-shell-main, .rl-frail) { animation: app-fade 300ms cubic-bezier(.4, 0, .2, 1) backwards; }
 /* после входа: левая колонка выезжает слева, центр проявляется следом */
-.app-enter-login .rl-shell-side, .app-enter-login .rl-frail { animation: app-side-in 320ms cubic-bezier(.2, 0, 0, 1) both; }
-.app-enter-login .rl-shell-main { animation: app-fade 300ms cubic-bezier(.4, 0, .2, 1) 80ms both; }
+.app-enter-login .rl-shell-side, .app-enter-login .rl-frail { animation: app-side-in 320ms cubic-bezier(.2, 0, 0, 1) backwards; }
+.app-enter-login .rl-shell-main { animation: app-fade 300ms cubic-bezier(.4, 0, .2, 1) 80ms backwards; }
 @keyframes app-side-in { from { transform: translateX(calc(-100% - var(--space-float, 12px))); opacity: .4; } to { transform: none; opacity: 1; } }
 /* экран входа поверх приложения, пока гаснет */
 .app-login-layer.is-leaving { position: fixed; inset: 0; z-index: 100; pointer-events: none; animation: app-login-out 220ms cubic-bezier(.4, 0, .2, 1) both; }
