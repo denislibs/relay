@@ -101,12 +101,22 @@ async function build(): Promise<void> {
   // ворклет записи голосового — файлом (CSP не пускает скрипты из blob:)
   assets['voice.worklet.js'] = await hashedWrite(VOICE_WORKLET, tmp, 'voice.worklet.js');
   // первый скрипт страницы (тема до стилей) + таблица адресов; встроенных скриптов нет — CSP пускает только файлы
-  const boot = await hashedWrite(`${await Bun.file(join(root, 'public', 'boot.js')).text()}\nself.__ASSETS__=${JSON.stringify(assets)};\n`, tmp, 'boot.js');
+  // + ранний старт движка (src/early.ts → IIFE): SharedWorker и hello ещё из <head>, задолго до main
+  const early = await Bun.build({ entrypoints: [join(root, 'src', 'early.ts')], target: 'browser', format: 'iife', minify: !isWatch, define: { ...define, __SHARED_URL__: JSON.stringify(assets['shared.worker.js']) } });
+  if (!early.success) throw new AggregateError(early.logs, 'early.ts');
+  const earlyJs = await early.outputs[0].text();
+  const boot = await hashedWrite(`${await Bun.file(join(root, 'public', 'boot.js')).text()}\nself.__ASSETS__=${JSON.stringify(assets)};\n${earlyJs}`, tmp, 'boot.js');
   await rm(join(tmp, 'boot.js'), { force: true });
   // разметка: всё по именам с хэшем и с integrity (SRI) — подменённый по дороге файл браузер не выполнит
   let html = await Bun.file(join(root, 'public', 'index.html')).text();
   for (const [name, url] of Object.entries(css)) html = html.replace(`<link rel="stylesheet" href="/${name}">`, `<link rel="stylesheet" href="${url}" integrity="${await sri(tmp, url)}">`);
   html = html.replace('<script src="/boot.js"></script>', `<script src="${boot}" integrity="${await sri(tmp, boot)}"></script>`);
+  // каркас приложения (public/shell.html — первый кадр боковой колонки без данных): виден до выполнения main, если на
+  // устройстве уже входили (boot.js → html[data-shell]); main.tsx убирает его, когда колонки приложения проявились
+  const shellHtml = (await Bun.file(join(root, 'public', 'shell.html')).text()).trim();
+  await rm(join(tmp, 'shell.html'), { force: true });
+  html = html.replace('<div id="app" class="rl"></div>', `<div id="shell" class="rl" aria-hidden="true" inert>${shellHtml}</div>\n  <div id="app" class="rl"></div>`);
+  if (!html.includes('id="shell"')) throw new Error('index.html: нет места под каркас (#app)');
   // чанки, которые main импортирует статически, — modulepreload рядом с ним: качаются параллельно, а не после разбора main
   const mainCode = await Bun.file(join(tmp, assets['main.js'].slice(1))).text();
   const direct = [...mainCode.matchAll(/(?:^|[;}\s])import\s*(?:[\w${}\s,*]*?from\s*)?"\.\/([\w.-]+\.js)"/g)].map((m) => '/' + m[1]).filter((u) => chunks.includes(u));

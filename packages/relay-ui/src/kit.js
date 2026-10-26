@@ -1704,12 +1704,14 @@ function Presence(props) {
 
 /* ---------- useMinVisible: loaders that never flicker ----------
    Turns on only if `want` lasts longer than `delay` (fast loads show nothing),
-   and once on stays at least `min` ms so it can fade out instead of blinking. */
+   and once on stays at least `min` ms so it can fade out instead of blinking.
+   immediate: on from the very first render if `want` already is (the loader is already on screen — e.g. drawn by
+   the static app shell in index.html — so a delay would only make it blink). */
 function useMinVisible(want, opts) {
   var delay = opts && opts.delay != null ? opts.delay : 150;
   var min = opts && opts.min != null ? opts.min : 600;
-  var st = useState(false), on = st[0];
-  var since = useRef(0), latest = useRef(want);
+  var st = useState(function () { return !!(opts && opts.immediate && want); }), on = st[0];
+  var since = useRef(on ? performance.now() : 0), latest = useRef(want);
   latest.current = want; // таймер может сработать между рендером и эффектом — смотрим на свежее значение
   useEffect(function () {
     var t;

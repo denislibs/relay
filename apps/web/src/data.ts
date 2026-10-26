@@ -54,6 +54,8 @@ export function startData(me: Me, fromUrl = true): void {
     dedicatedUrl: asset('dedicated.worker.js'),
   });
   engine.onReload(() => location.reload());
+  // движок уже открыт ранним стартом из boot.js (early.ts) — его порт больше не нужен
+  void engine.ready.then(() => (self as unknown as { __relayEarly?: { close(): void } }).__relayEarly?.close());
   // ключи зашифрованных вложений — запомнить до того, как ленты их отрисуют (Service Worker расшифровывает /files/<id>)
   engine.onData(rememberKeysIn);
   startFileKeyService();
