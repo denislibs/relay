@@ -20,12 +20,15 @@ export function lazy<P>(load: Loader<P>, idle = true): Lazy<P> {
   const get = () => (pending ??= load().then((c) => (comp = c), (e) => { pending = null; throw e; }));
   function Lazy(props: P) {
     const [, ready] = useState(0);
-    useEffect(() => { if (!comp) get().then(() => ready(1), () => {}); }, []);
     const C = comp;
+    // по тому, что отрисовано: чанк мог догрузиться между отрисовкой (null) и эффектом (предзагрузка) — тогда
+    // проверка comp в эффекте уже видит его и перерисовку не заказывает, и раздел так и остаётся пустым
+    useEffect(() => { if (!C) get().then(() => ready(1), () => {}); }, []);
     return C ? <C {...(props as P & object)} /> : null;
   }
   const out = Lazy as unknown as Lazy<P>;
-  out.preload = () => get().catch(() => {});  if (idle) all.push(out.preload);   // idle = false — только по показу (вход: вошедшему не нужен)
+  out.preload = () => get().catch(() => {});
+  if (idle) all.push(out.preload);   // idle = false — только по показу (вход: вошедшему не нужен)
   return out;
 }
 
