@@ -4,7 +4,7 @@ import './pwa';   // beforeinstallprompt приходит рано — слуш�
 import { installJoinLinks } from './ui/group/JoinLink';
 import { startMuteTimers } from './mute';
 import { startOwnMusic } from './profileLists';
-import { configureLottie, configureSpoilers, configureVoice, configureStickers, installSpoilers, loadPattern } from '@relay/ui';
+import { configureLottie, configureSpoilers, configureVoice, configureStickers, installSpoilers, loadPattern, onFullyIdle } from '@relay/ui';
 import { fetchBuild, onVisible, startUpdateCheck } from './update';
 import { claimMediaCache, sendMediaPolicy } from './storageInfo';
 import { getPrefs, isDark, subscribePrefs, type Prefs } from './prefs';
@@ -18,6 +18,7 @@ import { startScreenBlur } from './screenBlur';
 import { startSettingsData } from './settingsData';
 import { startTitle } from './title';
 import { App } from './ui/App';
+import { warmSounds } from './sound';
 import { asset } from './assets';
 import { installDeviceFetch, startDeviceAuth } from './deviceAuth';
 
@@ -127,3 +128,5 @@ startScreenBlur();
 void loadPattern(getPrefs().wallpaper[isDark(getPrefs().theme) ? 'dark' : 'light'].pattern).catch(() => {});
 render(<App />, document.getElementById('app')!);
 boot();
+// звуки сообщений: вывод звука заводится заранее, в простое — иначе первая отправка ждёт его в обработчике (sound.ts)
+onFullyIdle(() => { if (getPrefs().notify.sound) warmSounds(); });
