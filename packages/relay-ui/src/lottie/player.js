@@ -124,10 +124,14 @@ class Player {
       schedule();
     } else if (!go && active.has(this)) {
       active.delete(this);
-      this.renderer?.trim(this.index);                         // на паузе в памяти только показанный кадр
+      this.needTrim = true;
     }
-    if (!go && this.renderer && ![...this.views].some((v) => v.visible)) this.renderer.drop();
-    if (isHeavyAnimating()) wakeAfterHeavy();
+    // на паузе в памяти только показанный кадр, но освобождаем кэш не посреди тяжёлой анимации (её начало и ставит
+    // плееры на паузу — trim/drop попадали в кадры движения); после неё update() позовут снова (wakeAfterHeavy)
+    const heavy = isHeavyAnimating();
+    if (!go && this.needTrim && !heavy) { this.needTrim = false; this.renderer?.trim(this.index); }
+    if (!go && this.renderer && !heavy && ![...this.views].some((v) => v.visible)) this.renderer.drop();
+    if (heavy) wakeAfterHeavy();
   }
 
   advance(now) {

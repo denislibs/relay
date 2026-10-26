@@ -21,7 +21,10 @@ body { background: var(--bg); color: var(--ink); font-family: var(--font-sans); 
 .app-listwrap > .rl-presence > .app-skel { position: absolute; inset: 0 0 auto 0; z-index: 1; pointer-events: none; }
 /* пока скелетон стоит, список под ним скрыт: данные, пришедшие во время проявления строк, не просвечивают
    сквозь полупрозрачный скелетон; уход скелетона открывает уже готовый список */
-.app-listwrap:has(> .rl-presence[data-state="open"]) > :not(.rl-presence) { visibility: hidden; }
+/* :has — в позиции субъекта (ставит переменную на саму обёртку): с :has в середине селектора («> :not(…)») Chrome
+   пересчитывал стили всей колонки чата (≈1 350 элементов) на каждую вставку или удаление узла в ней */
+.app-listwrap:has(> .rl-presence[data-state="open"]) { --listwrap-under: hidden; }
+.app-listwrap > :not(.rl-presence) { visibility: var(--listwrap-under, inherit); }
 .app-skel > div { background: var(--card); }   /* строки скелетона закрывают готовый список под собой */
 /* уход скелетона — стирание построчно сверху вниз (как в Telegram Web K: 150 мс, сдвиг 15 мс) */
 .app-listwrap > .rl-presence[data-state="closing"] .app-skel > div { animation: app-fade-out 150ms cubic-bezier(.37, 0, .63, 1) both; animation-delay: calc(var(--i) * 15ms); }
@@ -53,7 +56,9 @@ body { background: var(--bg); color: var(--ink); font-family: var(--font-sans); 
 /* sticky top считается от края с учётом padding-top ленты (он уже равен шапке + отступу) */
 .rl-shell .rl-feed .rl-date { position: sticky; top: -32px; z-index: 2; pointer-events: none; }   /* у строки даты отступ 1rem, у ленты — 16px до шапки: плашка встаёт в 8px под шапкой */
 /* под шапкой висит закреп (48 px + 10 px отступа) — плашка даты прилипает ниже него, а не заезжает под него */
-.rl-shell :has(> .rl-glassbar .app-pins) .rl-feed .rl-date { top: 0; }
+/* якорь :has — колонка чата (родитель шапки): без него «любой элемент внутри .rl-shell» делал каждую вставку
+   или удаление узла во всём приложении пересчётом стилей ≈1 350 элементов (с якорем — единицы) */
+.rl-shell .app-chatcol:has(> .rl-glassbar .app-pins) .rl-feed .rl-date { top: 0; }
 .rl-shell .rl-feed .rl-date :is(span, .rl-date-btn) { pointer-events: auto; transition: opacity 300ms var(--ease-out); }
 .rl-shell .rl-feed .rl-date.stuck :is(span, .rl-date-btn) { opacity: 0; pointer-events: none; }
 .rl-shell .rl-feed .rl-date.covered :is(span, .rl-date-btn) { opacity: 0; transition: none; pointer-events: none; }
@@ -1204,17 +1209,11 @@ html[data-anim="0"] :is(.app-hero, .app-hero-photo, .app-hero-info, .app-hero-na
 .app-sym { overflow: hidden; }
 /* Вкладки лежат друг на друге. Смена — как в Telegram Web K: уходящая и новая едут вместе на всю ширину
    (200 мс ease-in-out), без прозрачности — пустой фон панели между ними не виден. */
-.app-sym-body { position: absolute; inset: 0; }
-.app-sym-body.is-prep { visibility: hidden; }   /* новая вкладка уже разложена, кадр до начала движения */
-.app-sym-slide-in-r { animation: app-sym-from-right 200ms ease-in-out; }
-.app-sym-slide-in-l { animation: app-sym-from-left 200ms ease-in-out; }
-.app-sym-slide-out-r { animation: app-sym-to-left 200ms ease-in-out forwards; }   /* вправо по вкладкам: старая уходит влево */
-.app-sym-slide-out-l { animation: app-sym-to-right 200ms ease-in-out forwards; }
-.app-sym-slide-in-r, .app-sym-slide-in-l, .app-sym-slide-out-r, .app-sym-slide-out-l { will-change: transform; pointer-events: none; }
-@keyframes app-sym-from-right { from { transform: translateX(100%); } }
-@keyframes app-sym-from-left { from { transform: translateX(-100%); } }
-@keyframes app-sym-to-left { to { transform: translateX(-100%); } }
-@keyframes app-sym-to-right { to { transform: translateX(100%); } }
+.app-sym-body { position: absolute; inset: 0; will-change: transform; background: var(--panel, var(--bg)); }   /* свой непрозрачный слой: слайд (SymbolMenu, Web Animations) двигает, а не перерисовывает; новая вкладка в кадре подготовки рисуется под текущей */
+/* скрытая вкладка: раскладка и стили сохраняются (показ — доли миллисекунды), содержимое не рисуется и не в фокусе;
+   под видимой (z-index не наследуется — нажатия не перехватывает, а стили детей не пересчитываются) */
+.app-sym-body[data-off] { content-visibility: hidden; z-index: -1; }
+.app-sym-shield { position: absolute; inset: 0; z-index: 1; }   /* нажатия во время слайда вкладок */
 .app-sym-pane { position: relative; display: flex; flex-direction: column; height: 100%; overflow: hidden; }
 /* Фокус в поиске (или запрос, или фильтр) — как в Telegram Web K: полоса категорий уезжает вверх и гаснет,
    содержимое поднимается на её место. Прокрутка ниже края панели на высоту полосы — после подъёма низ не пустеет. */
@@ -1226,12 +1225,21 @@ html[data-anim="0"] :is(.app-hero, .app-hero-photo, .app-hero-info, .app-hero-na
 .app-sym-strip-btn { flex: none; display: flex; align-items: center; justify-content: center; width: 38px; height: 38px; margin: 0 1px; padding: 0; border: 0; border-radius: 50%; background: transparent; color: var(--ink-muted); cursor: pointer; transition: background-color 150ms, color 150ms; }
 .app-sym-strip-btn:hover { color: color-mix(in srgb, var(--ink) 80%, transparent); }
 .app-sym-strip-btn.is-on { background: var(--sym-fill); color: color-mix(in srgb, var(--ink) 80%, transparent); }
+/* категории эмодзи — группой (как в Telegram Web K): свёрнута в одну иконку, пока подсвечены «Часто используемые»;
+   категория внутри — группа раскрыта на подложке, иконки чуть меньше; ширина анимируется 200 мс */
+.app-sym-strip-group { flex: none; display: flex; align-items: center; width: 40px; height: 38px; border-radius: 19px; overflow: hidden; background: transparent;
+  transition: width 200ms ease-in-out, background-color 200ms ease-in-out; }
+.app-sym-strip-group.is-open { width: calc(var(--n) * 40px); background: var(--sym-fill); }
+.app-sym-strip-group .app-sym-strip-btn > * { transition: transform 200ms ease-in-out; }
+.app-sym-strip-group.is-open .app-sym-strip-btn > * { transform: scale(.85); }
+.app-sym-strip-group.is-open .app-sym-strip-btn.is-on { background: color-mix(in srgb, var(--ink) 10%, transparent); }
+:root[data-anim="0"] .app-sym-strip-group, :root[data-anim="0"] .app-sym-strip-group .app-sym-strip-btn > * { transition: none; }
+@media (prefers-reduced-motion: reduce) { .app-sym-strip-group, .app-sym-strip-group .app-sym-strip-btn > * { transition: none; } }
 .app-sym-scroll { flex: 1; min-height: 0; overflow-y: auto; overscroll-behavior: contain; padding: 8px 0 calc(60px + 49px); margin-bottom: -49px; scrollbar-width: thin;   /* снизу — место под вкладками-«пилюлей» */
   transition: transform 200ms cubic-bezier(.4, 0, .2, 1); }
 .app-sym-pane.is-searching .app-sym-scroll { transform: translateY(-49px); }
 :root[data-anim="0"] .app-sym-strip, :root[data-anim="0"] .app-sym-scroll { transition: none; }
-:root[data-anim="0"] .app-sym-body { animation: none !important; }
-@media (prefers-reduced-motion: reduce) { .app-sym-strip, .app-sym-scroll { transition: none; } .app-sym-body { animation: none !important; } }
+@media (prefers-reduced-motion: reduce) { .app-sym-strip, .app-sym-scroll { transition: none; } }
 .app-sym-search { position: relative; display: flex; align-items: center; height: 38px; margin: 0 8px 4px; border-radius: 16px; background: var(--sym-fill); color: var(--ink-muted); }
 .app-sym-search-icon { flex: none; display: flex; align-items: center; justify-content: center; width: 42px; height: 38px; padding: 0 0 0 6px; border: 0; background: none; color: var(--ink-muted); }
 .app-sym-search-icon.is-back { cursor: pointer; }
@@ -1264,6 +1272,28 @@ html[data-anim="0"] :is(.app-hero, .app-hero-photo, .app-hero-info, .app-hero-na
 .app-emoji > span.is-under { visibility: hidden; }
 .app-emoji .rl-sticker { position: absolute; left: 4px; top: 4px; pointer-events: none; }
 .app-emoji.is-on { background: var(--accent-soft); }
+/* меню оттенков кожи: над плиткой (или под ней, если сверху тесно), прозрачность и масштаб за 200 мс */
+.app-sym-tones { position: absolute; z-index: 3; display: flex; gap: 0; padding: 6px; border-radius: 16px; background: var(--panel, var(--bg)); box-shadow: 0 4px 16px rgba(0, 0, 0, .16), 0 0 0 .5px color-mix(in srgb, var(--ink) 8%, transparent);
+  opacity: 0; transform: scale(.9); transform-origin: 50% 100%; transition: opacity 200ms cubic-bezier(.4, 0, .2, 1), transform 200ms cubic-bezier(.4, 0, .2, 1); }
+.app-sym-tones.is-below { transform-origin: 50% 0; }
+.app-sym-tones.is-on { opacity: 1; transform: none; }
+.app-sym-tone { position: relative; width: 32px; height: 32px; padding: 0; border: 0; border-radius: 10px; background: transparent; font-size: 26px; line-height: 32px; text-align: center; cursor: pointer; }
+.app-sym-tone:hover { background: var(--sym-hover); }
+.app-sym-tone.is-on { background: var(--sym-fill); }
+.app-sym-tone .app-emoji-pic { width: 32px; height: 32px; }
+.app-sym-tone .app-emoji-pic img { left: 3px; top: 3px; width: 26px; height: 26px; }
+.app-sym-tone .app-emoji-pic::before { left: 5px; top: 5px; width: 22px; height: 22px; }
+:root[data-anim="0"] .app-sym-tones { transition: none; }
+/* снимок прежнего содержимого при смене «категории ↔ поиск ↔ фильтр» (crossfade в SymbolMenu.tsx) */
+.app-sym-ghost { position: absolute; left: 0; right: 0; z-index: 1; overflow: hidden; pointer-events: none; }
+/* эмодзи картинкой (emojiImage.tsx): серый круг, пока грузится; переход — только на время проявления */
+.app-emoji-pic { position: relative; display: block; width: 42px; height: 42px; }
+.app-emoji-pic img { position: absolute; left: 4px; top: 4px; width: 34px; height: 34px; opacity: 0; user-select: none; }
+.app-emoji-pic::before { content: ''; position: absolute; left: 7px; top: 7px; width: 28px; height: 28px; border-radius: 50%; background: var(--sym-fill, color-mix(in srgb, var(--ink) 6%, transparent)); }
+.app-emoji-pic.is-fade img { opacity: 1; transition: opacity 200ms ease-in-out; }
+.app-emoji-pic.is-fade::before { opacity: 0; transition: opacity 200ms ease-in-out; }
+.app-emoji-pic.is-done img { opacity: 1; }
+.app-emoji-pic.is-done::before { content: none; }
 .app-stk-grid { display: grid; grid-template-columns: repeat(auto-fill, 72px); grid-auto-rows: 72px; justify-content: space-between; gap: 4px; padding: 0 3px; }
 .app-stk-cell { display: flex; align-items: center; justify-content: center; width: 72px; height: 72px; padding: 0; border: 0; border-radius: 16px; background: transparent; cursor: pointer; }
 .app-stk-cell:hover { background: var(--sym-hover); }

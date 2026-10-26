@@ -1,5 +1,7 @@
 // Первый кадр стикера, сохранённый с прошлого показа: со второго раза вместо силуэта сразу картинка.
 // На диске — Cache Storage (переживает перезагрузку), в памяти — до 64 адресов blob: (старые освобождаем).
+import { isHeavyAnimating, onHeavyAnimationEnd } from '../schedule.js';
+
 const CACHE = 'relay-sticker-previews';
 const MAX_URLS = 64;
 const urls = new Map();       // ключ → objectURL (порядок вставки = давность)
@@ -38,6 +40,8 @@ let encodeScheduled = false;
 const idle = (fn) => (self.requestIdleCallback ? self.requestIdleCallback(fn, { timeout: 3000 }) : setTimeout(() => fn({ timeRemaining: () => 50, didTimeout: true }), 200));
 function encodeOne(deadline) {
   encodeScheduled = false;
+  // кодирование одного PNG длиннее остатка простоя (≈30 мс при слабом CPU): во время тяжёлой анимации его не начинаем
+  if (toEncode.length && isHeavyAnimating()) { encodeScheduled = true; onHeavyAnimationEnd(() => idle(encodeOne)); return; }
   if (toEncode.length && (deadline.didTimeout || deadline.timeRemaining() > 12)) {
     const { key, c } = toEncode.shift();
     c.convertToBlob({ type: 'image/png' })
