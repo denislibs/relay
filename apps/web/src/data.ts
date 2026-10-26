@@ -586,13 +586,24 @@ export function openChat(chatId: number | null, target?: { id: number; sort: num
     if (pendingBottom?.frame.key !== frame.key) return;
     whenReleased(hold, () => {
       if (pendingBottom?.frame.key !== frame.key) return;
-      const ready: ChatFrame = { ...pendingBottom.frame, ...patch, ready: true, instant: true };
+      // Как в Telegram Web K: новая лента сначала собирается и встаёт на позицию в скрытой колонке (прежний чат ещё
+      // на экране), а смена — отдельным кадром, только классы: рендер и раскладка нового чата не попадают в кадр,
+      // где он появляется. Повторный выбор чата посреди этого снимет недособранную колонку (cancelPending)
+      const staged: ChatFrame = { ...pendingBottom.frame, ...patch, ready: false, instant: true, swap: true };
       pendingBottom = null;
-      for (const f of stack()) closeSession(f.key);
-      dropParked();
-      dropLayers();
-      setGlobal({ chatStack: [ready], chatLeaving: [], openChatId: chatId, pendingChatId: null });
-      syncShown();
+      setGlobal((s) => ({ chatStack: [...s.chatStack.filter((f) => f.ready), staged] }));
+      const alive = () => stack().some((f) => f.key === staged.key);
+      // кадр N — колонка рендерится и раскладывается скрытой; кадр N+1 — смена
+      requestAnimationFrame(() => requestAnimationFrame(() => requestMutation(() => {
+        if (!alive()) return;
+        for (const f of stack()) if (f.key !== staged.key) closeSession(f.key);
+        dropParked();
+        dropLayers();
+        setGlobal({ chatStack: [{ ...staged, ready: true }], chatLeaving: [], openChatId: chatId, pendingChatId: null });
+        syncShown();
+        // смена без перехода только в этот раз: потом колонка уезжает влево под следующий чат как обычно
+        requestAnimationFrame(() => requestAnimationFrame(() => { if (alive()) patchFrame(staged.key, { swap: false }); }));
+      })));
     });
   });
 }

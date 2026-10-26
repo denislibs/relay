@@ -21,14 +21,14 @@ export function ChatStack() {
   ];
   return (
     <div class="app-chats">
-      {cols.map(({ f, place, instant, pending }) => <ChatColumn key={f.key} frame={f.key} chatId={f.chatId} threadId={f.threadId} place={place} instant={instant} pending={pending} />)}
+      {cols.map(({ f, place, instant, pending }) => <ChatColumn key={f.key} frame={f.key} chatId={f.chatId} threadId={f.threadId} place={place} instant={instant} pending={pending} swap={!!f.swap} />)}
     </div>
   );
 }
 
 type Place = 'below' | 'on' | 'above';
 
-function ChatColumn({ frame, chatId, threadId, place, instant, pending }: { frame: string; chatId: number; threadId?: number; place: Place; instant: boolean; pending: boolean }) {
+function ChatColumn({ frame, chatId, threadId, place, instant, pending, swap }: { frame: string; chatId: number; threadId?: number; place: Place; instant: boolean; pending: boolean; swap: boolean }) {
   // первый кадр колонки — на исходной позиции, иначе переход не с чего начинать; нижний чат встаёт сразу.
   // Колонка, смонтированная справа (готовится поверх), уже стоит на исходной — ей ждать нечего: иначе она
   // въезжала позже, чем уезжал нижний чат (ожидание кадра + длинный рендер переключения ≈ 70 мс рассинхрона)
@@ -52,7 +52,8 @@ function ChatColumn({ frame, chatId, threadId, place, instant, pending }: { fram
     const t = setTimeout(() => requestMutation(() => el.classList.remove('app-chatcol-moving')), 320);
     return () => clearTimeout(t);
   }, [pos]);
-  const cls = 'app-chatcol app-chatcol-' + pos + (instant && !entered ? ' app-chatcol-instant' : '') + (pending ? ' app-chatcol-moving' : '');
+  // swap — подмена нижнего чата: собранная скрытой колонка встаёт на место без перехода
+  const cls = 'app-chatcol app-chatcol-' + pos + ((instant && !entered) || swap ? ' app-chatcol-instant' : '') + (pending && !swap ? ' app-chatcol-moving' : '');
   const hidden = on ? {} : { 'aria-hidden': true, inert: true };
   return (
     <div ref={box} class={cls} data-current={on ? '' : undefined} {...hidden}>

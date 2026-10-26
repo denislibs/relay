@@ -27,6 +27,7 @@ export interface ChatFrame {
   thread?: { header: string | null; loaded: boolean; guest?: ThreadGuest | null };
   ready: boolean;
   instant?: boolean;          // встал на место без анимации (смена нижнего чата)
+  swap?: boolean;             // нижний чат подменяется: собран скрытым, появляется без перехода (один раз)
   messages: Item[];
   feedMeta: FeedMeta | null;
   unreadFrom: number | null;  // lastReadId на момент открытия: разделитель «Непрочитанные» (заморожен)
