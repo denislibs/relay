@@ -17,7 +17,7 @@ import { bindChatFlags, clearUnreadMark } from './chatFlags';
 import { startPeople, wantPeople } from './people';
 import { resetMembers } from './members';
 import { resetCommonGroups } from './commonGroups';
-import { resetMediaTabs } from './mediaTab';
+import { cachedMedia, resetMediaTabs } from './mediaTab';
 import { isSystemChat } from './ui/format';
 import { asset } from './assets';
 import { compressPhoto } from './media/compressPhoto';
@@ -54,7 +54,7 @@ export function startData(me: Me): void {
   engine.onData(rememberKeysIn);
   startFileKeyService();
   startPeople(engine);
-  resetMembers(); resetMediaTabs(); resetCommonGroups();   // вход другим пользователем без перезагрузки: кэши отрисовки прежнего — прочь
+  resetMembers(); resetMediaTabs(); resetMediaDays(); resetCommonGroups();   // вход другим пользователем без перезагрузки: кэши отрисовки прежнего — прочь
   bindMute((chatId, muteUntil) => engine.call({ type: 'setMute', chatId, muteUntil }));
   bindChatFlags((chatId, f) => engine.call({ type: 'setChatFlags', chatId, ...f }));
   bindStickers((a) => engine.call(a as never));
@@ -744,6 +744,52 @@ export async function jumpToDate(chatId: number, day: Date): Promise<boolean> {
   const hit = f?.messages.find((m) => m.id != null && Date.parse(m.createdAt as string) >= from.getTime());
   if (hit) { focusMessage({ id: hit.id as number, sort: hit.sort as number }); return true; }
   return false;
+}
+
+/** День календаря «Перейти к дате» с медиа: картинка (фото — превью, видео — только миниатюра) и её размытая миниатюра. */
+export type CalendarMedia = { src?: string; thumb?: string };
+type DayAtt = { id: string; kind: string; mime: string; thumb?: string | null; preview?: unknown };
+// по чату и месяцу: повторное открытие календаря и листание назад рисуются сразу, без проявления;
+// старше MEDIA_DAYS_FRESH — показывается, но перезапрашивается (новые фото, удалённые)
+const mediaDaysCache = new Map<string, { at: number; days: Record<number, CalendarMedia> }>();
+const MEDIA_DAYS_FRESH = 30_000;
+export function resetMediaDays(): void { mediaDaysCache.clear(); }
+const dayMedia = (a: DayAtt): CalendarMedia | null => {
+  const photo = a.kind === 'photo' || (a.kind === 'file' && a.mime.startsWith('image/'));
+  const src = photo ? (a.preview ? `/files/${a.id}/preview` : `/files/${a.id}`) : undefined;
+  return src || a.thumb ? { src, thumb: a.thumb ?? undefined } : null;   // видео без кадра — просто число
+};
+/** Уже известное календарю без запроса (кэш месяца); null — надо грузить. */
+export const cachedMediaDays = (chatId: number, y: number, m: number): Record<number, CalendarMedia> | null => mediaDaysCache.get(`${chatId}:${y}:${m}`)?.days ?? null;
+/**
+ * Календарь «Перейти к дате» (как в Telegram): по фото или видео на день месяца, ключ — число месяца.
+ * Сервер считает дни в нашем часовом поясе; без сети — по загруженной ленте и вкладке «Медиа» (в кэш не кладём).
+ */
+export async function mediaDays(chatId: number, y: number, m: number): Promise<Record<number, CalendarMedia>> {
+  const key = `${chatId}:${y}:${m}`, hit = mediaDaysCache.get(key);
+  if (hit && Date.now() - hit.at < MEDIA_DAYS_FRESH) return hit.days;
+  const from = new Date(y, m, 1), to = new Date(y, m + 1, 1), out: Record<number, CalendarMedia> = {};
+  try {
+    const tz = Intl.DateTimeFormat().resolvedOptions().timeZone ?? '';
+    const res = await fetch(`/chats/${chatId}/media/days?from=${encodeURIComponent(from.toISOString())}&to=${encodeURIComponent(to.toISOString())}&tz=${encodeURIComponent(tz)}`);
+    if (res.ok) {
+      const { days } = (await res.json()) as { days: { date: string; attachment: DayAtt }[] };
+      rememberKeysIn(days);   // зашифрованные файлы: ключ — Service Worker'у
+      for (const d of days) { const v = dayMedia(d.attachment); if (v) out[Number(d.date.slice(8, 10))] = v; }
+      mediaDaysCache.set(key, { at: Date.now(), days: out });
+      return out;
+    }
+  } catch { /* нет сети — из того, что уже есть */ }
+  if (hit) return hit.days;
+  const f = topReady();
+  const known = [...(f?.chatId === chatId ? f.messages : []), ...(cachedMedia(chatId, 'media')?.items ?? [])];
+  for (const msg of known) {
+    const a = msg.attachment as DayAtt | null | undefined, at = new Date(msg.createdAt as string);
+    if (!a || msg.deleted || at < from || at >= to || !(a.kind === 'photo' || a.kind === 'video' || (a.kind === 'file' && a.mime.startsWith('video/')))) continue;
+    const v = dayMedia(a), day = at.getDate();
+    if (v && !out[day]) out[day] = v;
+  }
+  return out;
 }
 
 export function focusMessage(target: { id: number; sort: number }): void {

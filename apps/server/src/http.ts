@@ -12,7 +12,7 @@ import { countViews } from './domain/views';
 import { getThread, readThread } from './domain/threads';
 import { readBy } from './domain/reads';
 import { readReactions, unreadReactions } from './domain/reactionsUnread';
-import { commonGroups, deleteDirectChat, createChat, createGroup, openDirect, messageAtDate, getChatMedia, getChatMediaCounts, getHistory, getMessagesByIds, listChats, listChatsPage } from './domain/chats';
+import { commonGroups, deleteDirectChat, createChat, createGroup, openDirect, messageAtDate, getChatMedia, getMediaDays, getChatMediaCounts, getHistory, getMessagesByIds, listChats, listChatsPage } from './domain/chats';
 import { sql } from './db';
 import { DomainError } from './domain/errors';
 import { setChatNotify } from './domain/chatNotify';
@@ -350,6 +350,12 @@ export function createServer(opts: { port: number }): Server {
           return Response.json(await pinMessage(userId, Number(pins[1]), body!.messageId as number));
         }
         if (pins && req.method === 'DELETE') return Response.json(await unpinMessage(userId, Number(pins[1]), pins[2] ? Number(pins[2]) : null));
+        // календарь «Перейти к дате»: по медиа на день за месяц
+        const mediaDays = /^\/chats\/(\d+)\/media\/days$/.exec(url.pathname);
+        if (req.method === 'GET' && mediaDays) {
+          const q = url.searchParams;
+          return Response.json({ days: await getMediaDays(userId, Number(mediaDays[1]), q.get('from') ?? '', q.get('to') ?? '', q.get('tz') ?? '') });
+        }
         const mediaCounts = /^\/chats\/(\d+)\/media\/counts$/.exec(url.pathname);
         if (req.method === 'GET' && mediaCounts) return Response.json(await getChatMediaCounts(userId, Number(mediaCounts[1])));
         if (url.pathname === '/push/subscription' && (req.method === 'POST' || req.method === 'DELETE')) {

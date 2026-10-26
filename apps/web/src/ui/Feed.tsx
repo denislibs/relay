@@ -20,7 +20,7 @@ import type { QuoteMsg } from '@relay/sync-engine/src/types';
 import { quoteContent } from './preview';
 import { memo } from 'preact/compat';
 import { useContext, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'preact/hooks';
-import { pressButton, toggleTodo, votePoll, openUserChat, clearFocus, discardUnsent, retrySend, focusMessage, openInner, jumpToDate, localPreview, markListened, moveWindow, react, savePosition, savedPosition, seen, markThreadRead, countViews, nextMention, nextReaction, readReactions } from '../data';
+import { pressButton, toggleTodo, votePoll, openUserChat, clearFocus, discardUnsent, retrySend, focusMessage, openInner, jumpToDate, mediaDays, cachedMediaDays, localPreview, markListened, moveWindow, react, savePosition, savedPosition, seen, markThreadRead, countViews, nextMention, nextReaction, readReactions } from '../data';
 import { isPost } from '@relay/sync-engine/src/channel';
 import { Comments, MentionFab, ReactionFab, postMeta } from './channel';
 import { wantPeople } from '../people';
@@ -1667,6 +1667,7 @@ export function Feed({ frameKey, active, chatId, threadId, channel = false, meId
         />
       ) : null}
       {pickerUsed ? <DatePicker open={!!pickDate} value={pickDate ?? undefined} onClose={() => setPickDate(null)}
+        media={(y: number, m: number) => mediaDays(chatId, y, m)} mediaCached={(y: number, m: number) => cachedMediaDays(chatId, y, m)}
         onPick={(d: Date) => { setPickDate(null); void jumpToDate(chatId, d).then((ok) => { if (!ok) showToast('В этот день сообщений нет'); }); }} /> : null}
       <div class="rl-scrolldown-slot">
         <ReactionFab count={reactionsUnread} raised={away || (meta ? !meta.live : false)} lifted={mentions > 0} onClick={toReaction} onReadAll={() => readReactions(chatId)} />
