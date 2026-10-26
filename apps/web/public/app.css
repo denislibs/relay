@@ -1430,3 +1430,13 @@ html[data-anim="0"] :is(.app-enter-reload, .app-enter-login) :is(.rl-shell-side,
 .app-hero.is-expanded .app-hero-actions .rl-pact:focus-visible { outline-color: #fff; }
 :root[data-theme="dark"] .app-hero.is-expanded .app-hero-actions .rl-pact { background: rgba(0, 0, 0, .2); }
 @media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) .app-hero.is-expanded .app-hero-actions .rl-pact { background: rgba(0, 0, 0, .2); } }
+
+/* ---------- полёт отправленного (sendFlight.ts): слой поверх экрана, клон пузыря растёт из капсулы поля ---------- */
+.app-flight { position: fixed; inset: 0; z-index: 40; pointer-events: none; contain: layout; }
+.app-flight-text { position: absolute; box-sizing: border-box; overflow: hidden; white-space: pre-wrap; word-break: break-word; }
+.app-flight-x { position: absolute; will-change: transform; }
+.app-flight-y { will-change: transform; }
+.app-flight-bg { position: relative; overflow: hidden; }
+.app-flight-body { position: absolute; left: 0; top: 0; margin: 0 !important; max-width: none !important; transform: none !important; }
+.app-flight-target { visibility: hidden !important; animation: none !important; }
+.app-flight-row :is(.rl-appear-out, .rl-appear-in), .app-flight-row:is(.rl-appear-out, .rl-appear-in) { animation: none !important; }

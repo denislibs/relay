@@ -61,6 +61,7 @@ import { showToast, unblockUser, useUser } from '../settingsData';
 import { Feed, type MenuExtra } from './Feed';
 import { chatKindFor, mediaPolicy } from '../autoload';
 import { chatTime, chatTone, fileSize, isSystemChat, lastSeenText, shownBody, snippet } from './format';
+import { captureText } from './sendFlight';
 import { attachmentHit } from '../searchHit';
 import type { ProfilePhoto } from '@relay/protocol';
 import { avatarPhoto } from '../profilePhoto';
@@ -701,6 +702,9 @@ export function Chat({ chatId, frameKey, active, threadId }: { chatId: number; f
           const die = out.text.replace(/\uFE0F/g, '').trim();
           if (!thread && !out.entities.length && isDiceEmoji(die)) { const r = sendSpecial(chatId, { dice: { emoji: die } }, (replyTo?.id as number) ?? null); setReplyKey(null); return r; }
           // превью: убрали крестиком — без него; уже загружено для этой ссылки — сразу в ленте, до ответа сервера
+          // полёт из поля в пузырь (sendFlight): капсула и текст снимаются сейчас, пока поле не очищено
+          const col = (document.activeElement as HTMLElement | null)?.closest('.app-chatcol') ?? document.querySelector('.app-chatcol[data-current]');
+          captureText(chatId, col?.querySelector('.rl-composer') ?? null, col?.querySelector('.rl-composer-editable') ?? null);
           const url = firstUrl(out.text, out.entities);
           const pv = lp && url === lp.url ? (lp.off ? { noLinkPreview: true } : { link: lp.link }) : {};
           lpUrl.current = null; setLp(null);

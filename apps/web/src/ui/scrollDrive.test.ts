@@ -83,3 +83,15 @@ test('jumpNear: farther than two screens — one screen short of the target on t
   expect(jumpNear(5000, 0, 900)).toBe(900);
   expect(jumpNear(0, 1500, 900)).toBeNull();
 });
+
+import { bezier } from './scrollDrive';
+
+test('bezier: CSS cubic-bezier timing (ends, the standard ease at 0.5, monotonic for the flight curve)', () => {
+  const ease = bezier(0.25, 0.1, 0.25, 1);
+  expect(ease(0)).toBe(0);
+  expect(ease(1)).toBe(1);
+  expect(ease(0.5)).toBeCloseTo(0.8024, 3);   // значение браузера для «ease» в середине
+  const fly = bezier(0.1992, 0.0106, 0.2792, 0.9103);
+  let prev = 0;
+  for (let p = 0.05; p <= 1.0001; p += 0.05) { const v = fly(p); expect(v).toBeGreaterThanOrEqual(prev); prev = v; }
+});
