@@ -14,10 +14,12 @@ const AVATAR = 120;
  * Развёрнута: левая треть — назад, правая — вперёд (стрелки при наведении), свайп пальцем; середина — просмотр.
  * Свёрнута: нажатие разворачивает. Видео-аватарка играет без звука по кругу, пока её слайд на экране.
  * music — полоса прикреплённого трека внизу шапки (в обоих видах).
+ * actions — ряд кнопок (ProfileActions) у низа шапки, как в Telegram Web K: в свёрнутой — белые плитки под именем,
+ * в развёрнутой — полупрозрачные поверх фото; ряд едет вместе с низом шапки, имя и статус встают над ним.
  */
-export function ProfileGallery({ photos, index, onIndex, onOpen, name, sub, music, expanded, onExpand }: {
+export function ProfileGallery({ photos, index, onIndex, onOpen, name, sub, music, actions, expanded, onExpand }: {
   photos: UserPhoto[]; index: number; onIndex: (i: number) => void; onOpen: (i: number) => void;
-  name: ComponentChildren; sub: ComponentChildren; music?: ComponentChildren;
+  name: ComponentChildren; sub: ComponentChildren; music?: ComponentChildren; actions?: ComponentChildren;
   expanded: boolean; onExpand: (on: boolean) => void;
 }) {
   const n = photos.length;
@@ -76,7 +78,7 @@ export function ProfileGallery({ photos, index, onIndex, onOpen, name, sub, musi
 
   return (
     <div ref={wrap} class="app-hero-wrap">
-      <div class={'app-hero' + (expanded ? ' is-expanded' : '') + (music ? ' has-music' : '')}>
+      <div class={'app-hero' + (expanded ? ' is-expanded' : '') + (music ? ' has-music' : '') + (actions ? ' has-actions' : '')}>
         <div ref={root} class={'app-gallery app-hero-photo' + (dx ? ' is-dragging' : '')} onPointerDown={down} onPointerMove={move} onPointerUp={up}
           onPointerCancel={() => { drag.current = null; setDx(0); }} onClick={expanded ? undefined : () => onExpand(true)}
           role="group" aria-roledescription="галерея" aria-label={expanded ? `Фото профиля ${i + 1} из ${n}` : 'Развернуть фото профиля'}>
@@ -104,6 +106,7 @@ export function ProfileGallery({ photos, index, onIndex, onOpen, name, sub, musi
           <div class="app-hero-name">{name}</div>
           <div class="app-hero-sub">{sub}</div>
         </div>
+        {actions ? <div class="app-hero-actions">{actions}</div> : null}
         {music}
       </div>
     </div>

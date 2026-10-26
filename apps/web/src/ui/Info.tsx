@@ -226,6 +226,7 @@ export function Info() {
             name={<>{title}{system ? <Verified size={22} /> : null}</>}
             sub={<span class={myPeer?.online ? 'app-online' : ''}>{subtitle || ' '}</span>}
             music={peerId ? <ProfileMusicBar userId={peerId} music={user?.music as ProfileMusicSummary | null | undefined} /> : null}
+            actions={tiles.length || tileMenu.length ? <ProfileActions label="Действия с чатом" actions={tiles} menu={tileMenu} /> : null}
             expanded={expanded} onExpand={setExpanded} />
         ) : (
         <div class={'rl-profile' + (peerId && (user?.music as ProfileMusicSummary | null | undefined)?.top ? ' has-music' : '')}>
@@ -237,7 +238,7 @@ export function Info() {
           {peerId ? <ProfileMusicBar userId={peerId} music={user?.music as ProfileMusicSummary | null | undefined} /> : null}
         </div>
         )}
-        <ProfileActions label="Действия с чатом" actions={tiles} menu={tileMenu} />
+        {gallery.length ? null : <ProfileActions label="Действия с чатом" actions={tiles} menu={tileMenu} />}
         <div class="rl-aside-group app-info-rows">
           {/* как в Telegram: имя уже в шапке — строками только то, чего там нет, и только если поле заполнено */}
           <Expand show={!group && !!user}>{!group && user ? <PeerRows user={user} /> : null}</Expand>
