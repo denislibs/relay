@@ -8,6 +8,23 @@ const workers = [];
 const renderers = new Map(); // key → Renderer
 let nextId = 1;
 
+// Бюджет памяти кадров. Кадр — px×px×4 байт: 200 px в ленте при 2× (400 физ.) — 640 КБ, 180 кадров — 115 МБ,
+// а первый цикл и так рисуется на лету (воркеры успевают 60 кадров/с на стикер). Поэтому:
+// — от NO_CACHE_PX физических пикселей не кэшируем вовсе: рисуем на лету, на два кадра вперёд (заготовки);
+// — все кэши вместе — не больше budget, одна анимация — не больше восьмой части. Нет места — сначала освобождаем
+//   кэши простаивающих (давно не просили кадров), иначе кадр просто не кэшируется. Кэшируется «что влезло первым»,
+//   без вытеснения внутри цикла: у зацикленной анимации LRU по кругу давал бы ноль попаданий.
+const NO_CACHE_PX = 256;
+const IDLE_MS = 1000;            // не просила кадров дольше — простаивает, её кэш можно освободить
+const EVICT_EVERY_MS = 500;      // при полном бюджете не перебираем рендереры на каждом кадре
+const LOOSE_MAX = 3;             // заготовки: на два шага вперёд + запас
+let budget = 32 << 20;
+let cachedBytes = 0;
+let evictedAt = -Infinity;
+
+/** Тесты: сменить бюджет кэша кадров (байты). */
+export function __setFrameBudget(bytes) { budget = bytes; evictedAt = -Infinity; }
+
 /** Где лежат воркер и WASM (адреса из сборки). Без вызова стикеры остаются статичными. */
 export function configureLottie(opts) { config = opts; }
 
@@ -16,6 +33,7 @@ export function __setWorkerFactory(fn) {
   makeWorker = fn;
   workers.length = 0;
   renderers.clear();
+  cachedBytes = 0;
 }
 
 export const lottieAvailable = () => !!config;
@@ -49,12 +67,26 @@ function workerFor(key) {
   return workers[n];
 }
 
-/** Доля кэша: мелкие держим целиком, у крупных выбрасываем каждый четвёртый кадр (память ограничена, пересчёт редкий). */
-const keepFrame = (px, i) => px < 100 || i === 0 || i % 4 !== 0;
+/** Освободить кэши простаивающих рендереров (давние — первыми), пока не найдётся need байт. */
+function evictIdle(need) {
+  const now = performance.now();
+  if (now - evictedAt < EVICT_EVERY_MS) return;
+  evictedAt = now;
+  const idle = [];
+  for (const r of renderers.values()) if (r.bytes && now - r.used > IDLE_MS) idle.push(r);
+  idle.sort((a, b) => a.used - b.used);
+  for (const r of idle) {
+    if (cachedBytes + need <= budget) break;
+    r.trim(-1);
+  }
+}
 
 class Renderer {
   constructor(key, url, px) {
     this.key = key; this.px = px; this.refs = 1; this.id = nextId++;
+    this.size = px * px * 4;     // байт на кадр
+    this.bytes = 0;              // байт в кэше
+    this.used = performance.now();   // последний запрос кадра (простой → кэш можно освободить)
     this.cache = new Map();      // i → ImageBitmap
     this.loose = new Map();      // некэшируемые кадры, отрисованные заранее: отдаются один раз (владелец закрывает)
     this.pending = new Map();    // i → Promise<ImageBitmap>
@@ -68,6 +100,7 @@ class Renderer {
 
   /** Кадр i (из кэша или из воркера). Одновременные запросы одного кадра — один рендер. */
   frame(i) {
+    this.used = performance.now();
     const hit = this.cache.get(i);
     if (hit) return Promise.resolve(hit);
     const ahead = this.loose.get(i);
@@ -78,12 +111,19 @@ class Renderer {
     if (!slot) return Promise.reject(new Error('closed'));
     const p = new Promise((resolve, reject) => slot.frames.set(i, { resolve, reject })).then((bmp) => {
       this.pending.delete(i);
-      if (this.refs > 0 && bmp && keepFrame(this.px, i)) this.cache.set(i, bmp);
+      if (this.refs > 0 && bmp && this.admit()) { this.cache.set(i, bmp); this.bytes += this.size; cachedBytes += this.size; }
       return bmp;
     }, (err) => { this.pending.delete(i); throw err; });
     this.pending.set(i, p);
     this.slot.w.postMessage({ t: 'frame', id: this.id, i });
     return p;
+  }
+
+  /** Есть ли место для ещё одного кадра в кэше (см. бюджет в начале файла). */
+  admit() {
+    if (this.px >= NO_CACHE_PX || this.bytes + this.size > budget / 8) return false;
+    if (cachedBytes + this.size > budget) evictIdle(this.size);
+    return cachedBytes + this.size <= budget;
   }
 
   /** Отрисовать заранее (следующий кадр): кэшируемый ляжет в кэш, остальной — в «заготовку» до первого запроса. */
@@ -93,7 +133,7 @@ class Renderer {
       if (!bmp || this.cache.get(i) === bmp) return;
       if (this.refs <= 0) { bmp.close?.(); return; }
       this.loose.set(i, bmp);
-      while (this.loose.size > 2) { const [k, b] = this.loose.entries().next().value; this.loose.delete(k); b.close?.(); }
+      while (this.loose.size > LOOSE_MAX) { const [k, b] = this.loose.entries().next().value; this.loose.delete(k); b.close?.(); }
     }, () => {});
   }
 
@@ -106,7 +146,11 @@ class Renderer {
 
   /** Пауза: оставить в памяти только показанный кадр. */
   trim(keep) {
-    for (const [i, bmp] of this.cache) if (i !== keep) { bmp.close?.(); this.cache.delete(i); }
+    for (const [i, bmp] of this.cache) {
+      if (i === keep) continue;
+      bmp.close?.(); this.cache.delete(i);
+      this.bytes -= this.size; cachedBytes -= this.size;
+    }
   }
 
   /** Ушёл из вида: кадры больше не нужны. */
@@ -144,7 +188,7 @@ export function openRenderer({ url, px }) {
 export const liveRenderers = () => renderers.size;
 
 /**
- * Для раздела разработчика: рендереры, их кадры в памяти (кэш и заготовки, байты ≈ ширина×высота×4) и нагрузка
+ * Для раздела разработчика: рендереры, их кадры в памяти (кэш и заготовки, байты ≈ ширина×высота×4), бюджет кэша и нагрузка
  * на воркеры — сколько кадров каждый сейчас рисует.
  */
 export function lottieStats() {
@@ -161,5 +205,5 @@ export function lottieStats() {
     for (const slot of w.waiting.values()) inflight += slot.frames.size;
     return { index: i, started: true, renderers: w.waiting.size, inflight };
   });
-  return { renderers: renderers.size, cachedFrames: cached, looseFrames: loose, pendingFrames: pending, bytes, workers: pool, poolSize: poolSize() };
+  return { renderers: renderers.size, cachedFrames: cached, looseFrames: loose, pendingFrames: pending, bytes, budget, workers: pool, poolSize: poolSize() };
 }

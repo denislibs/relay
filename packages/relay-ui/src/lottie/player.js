@@ -147,8 +147,13 @@ class Player {
     }
     if (i !== this.index) this.show(i);
     else if (this.ended) this.finish();
-    const next = (i + r.step) % total;
-    r.prefetch(next);                                          // на шаг вперёд — к следующему тику готов
+    // на два шага вперёд: крупные не кэшируются и рисуются на лету — задержка воркера не роняет кадр.
+    // Без цикла за последний кадр не заглядываем: начало после остановки не нужно
+    if (this.ended) return;
+    for (let k = 1, n = i + r.step; k <= 2; k++, n += r.step) {
+      if (n >= total && !this.loops()) break;
+      r.prefetch(n % total);
+    }
   }
 
   show(i) {
@@ -183,6 +188,10 @@ class Player {
     if (this.finished) return;
     this.finished = true;
     for (const v of this.views) v.onEnded?.();
+    // проиграла один раз и стоит (ячейки панели реакций): кадры больше не нужны, в памяти — только показанный.
+    // Не посреди тяжёлой анимации — освобождение кэша не должно попадать в кадры движения
+    const trim = () => { if (!this.closed && !active.has(this)) this.renderer?.trim(this.index); };
+    if (isHeavyAnimating()) onHeavyAnimationEnd(trim); else trim();
   }
 
   /** Проиграть с начала (повтор по клику у героев настроек). */
