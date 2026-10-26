@@ -8,6 +8,7 @@ import { clearRecentStickers, faveSticker, loadStickerSet, openStickerSet, searc
 import { EMOJI, QUICK, pushRecentEmoji, recentEmoji, searchEmoji } from './emojiData';
 import { useEmojiGroups } from '../../emojiGroups';
 import { StickerPreviewHold } from './StickerPreview';
+import { EmojiGlyph } from './emojiImage';
 
 // Панель эмодзи и стикеров над полем ввода — по образцу Telegram Web K: полоса категорий сверху (49 px),
 // строка поиска с контурными фильтрами прокручивается вместе с содержимым, заголовки секций по центру,
@@ -230,7 +231,7 @@ export function EmojiTab({ onPick, animate, selected }: { onPick(e: string): voi
         {cats.map((c, i) => <EmojiSection key={c.id} cat={c} eager={i < 2} root={s.scroller} onPick={pick} cell={animate ? (e) => (
           <button key={e} type="button" class={'app-emoji' + (selected === e ? ' is-on' : '')} aria-pressed={selected === e} onClick={() => pick(e)}
             onMouseEnter={() => { if (animate(e)) { setDrawn(null); setHover(e); } }} onMouseLeave={() => setHover((h) => (h === e ? null : h))}>
-            <span class={hover === e && drawn === e ? 'is-under' : undefined}>{e}</span>
+            <span class={hover === e && drawn === e ? 'is-under' : undefined}><EmojiGlyph e={e} /></span>
             {hover === e && !reducedMotion() ? <StickerView src={animate(e)!} w={512} h={512} size={34} group="menu" force loop={false} onFirstFrame={() => setDrawn(e)} onEnded={() => setHover((h) => (h === e ? null : h))} /> : null}
           </button>
         ) : undefined} />)}
@@ -255,7 +256,7 @@ function EmojiSection({ cat, eager, root, onPick, cell }: { cat: { id: string; t
     <section ref={el} data-sec class="app-sym-sec">
       <h4>{cat.title}</h4>
       <div class="app-emoji-grid" style={{ minHeight: Math.ceil(cat.list.length / EMOJI_COLS) * EMOJI_ROW + 'px' }}>
-        {shown ? cat.list.map((e) => (cell ? cell(e) : <button key={e} type="button" class="app-emoji" onClick={() => onPick(e)}>{e}</button>)) : null}
+        {shown ? cat.list.map((e) => (cell ? cell(e) : <button key={e} type="button" class="app-emoji" aria-label={e} onClick={() => onPick(e)}><EmojiGlyph e={e} /></button>)) : null}
       </div>
     </section>
   );

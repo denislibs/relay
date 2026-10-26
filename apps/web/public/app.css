@@ -1264,6 +1264,14 @@ html[data-anim="0"] :is(.app-hero, .app-hero-photo, .app-hero-info, .app-hero-na
 .app-emoji > span.is-under { visibility: hidden; }
 .app-emoji .rl-sticker { position: absolute; left: 4px; top: 4px; pointer-events: none; }
 .app-emoji.is-on { background: var(--accent-soft); }
+/* эмодзи картинкой (emojiImage.tsx): серый круг, пока грузится; переход — только на время проявления */
+.app-emoji-pic { position: relative; display: block; width: 42px; height: 42px; }
+.app-emoji-pic img { position: absolute; left: 4px; top: 4px; width: 34px; height: 34px; opacity: 0; user-select: none; }
+.app-emoji-pic::before { content: ''; position: absolute; left: 7px; top: 7px; width: 28px; height: 28px; border-radius: 50%; background: var(--sym-fill, color-mix(in srgb, var(--ink) 6%, transparent)); }
+.app-emoji-pic.is-fade img { opacity: 1; transition: opacity 200ms ease-in-out; }
+.app-emoji-pic.is-fade::before { opacity: 0; transition: opacity 200ms ease-in-out; }
+.app-emoji-pic.is-done img { opacity: 1; }
+.app-emoji-pic.is-done::before { content: none; }
 .app-stk-grid { display: grid; grid-template-columns: repeat(auto-fill, 72px); grid-auto-rows: 72px; justify-content: space-between; gap: 4px; padding: 0 3px; }
 .app-stk-cell { display: flex; align-items: center; justify-content: center; width: 72px; height: 72px; padding: 0; border: 0; border-radius: 16px; background: transparent; cursor: pointer; }
 .app-stk-cell:hover { background: var(--sym-hover); }
