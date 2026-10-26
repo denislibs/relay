@@ -93,7 +93,7 @@ body { background: var(--bg); color: var(--ink); font-family: var(--font-sans); 
 .app-media-cell { position: relative; aspect-ratio: 1; padding: 0; border: 0; overflow: hidden; cursor: pointer; background: var(--field); }
 /* «Медиа» в правой панели — виртуальная сетка (WindowGrid): в DOM только видимые плитки, каждая на своём месте;
    углы — классами от позиции (у :nth-child в виртуальной сетке нет соседей) */
-.app-media-vgrid { margin: 0 var(--space-3) var(--space-4); }
+.app-media-vgrid { margin: 0 0 var(--space-4); }   /* как в Telegram: от края до края панели, без полей по бокам */
 .app-media-vgrid .app-media-cell { display: block; aspect-ratio: auto; width: 100%; height: 100%; }
 /* плашка даты над «Медиа» (как в Telegram): липнет под вкладками (top — их высота, пишет SharedMedia), места в потоке
    не занимает (высота 0); видна, пока панель прокручивают, гаснет через секунду; ниже вкладок по z-index */
@@ -104,10 +104,10 @@ body { background: var(--bg); color: var(--ink); font-family: var(--font-sans); 
 .app-media-vgrid > .app-media-date .rl-date span { background: rgba(0, 0, 0, .45); }
 @media (prefers-reduced-motion: reduce) { .app-media-vgrid > .app-media-date { transition: none; } }
 :root[data-anim="0"] .app-media-vgrid > .app-media-date { transition: none; }
-.app-media-cell.is-tl { border-top-left-radius: 14px; }
-.app-media-cell.is-tr { border-top-right-radius: 14px; }
-.app-media-cell.is-bl { border-bottom-left-radius: 14px; }
-.app-media-cell.is-br { border-bottom-right-radius: 14px; }
+.app-media-cell.is-tl { border-top-left-radius: 20px; }
+.app-media-cell.is-tr { border-top-right-radius: 20px; }
+.app-media-cell.is-bl { border-bottom-left-radius: 20px; }
+.app-media-cell.is-br { border-bottom-right-radius: 20px; }
 
 /* ---------- «Медиа»: вкладки-стекло, меню плитки и выбор (ui/mediaMenu.tsx), как в Telegram Web K ---------- */
 /* место вкладок: в режиме выбора они гаснут, поверх проявляется пилюля «✕ N сообщений ⟶» той же высоты */
@@ -871,7 +871,7 @@ html[data-anim="0"] :is(.app-folder-hero-emoji, .app-folder-emoji-glyph, .app-fo
 .app-hero:not(.is-expanded) :is(.app-gallery-bars, .app-gallery-nav) { opacity: 0; pointer-events: none; }
 .app-gallery-bars { transition: opacity .2s ease; }
 .app-hero-shade { position: absolute; left: 0; top: 0; width: 100%; height: 100cqw; pointer-events: none; opacity: 0; transition: opacity .1s ease;
-  background: linear-gradient(to top, rgba(0, 0, 0, .45), transparent 32%), linear-gradient(to bottom, rgba(0, 0, 0, .3), transparent 22%); }
+  background: linear-gradient(to top, rgba(0, 0, 0, .3) 9px, transparent calc(100px + var(--hero-acts, 0px))), linear-gradient(to bottom, rgba(0, 0, 0, .25), transparent 96px); }
 .app-hero.is-expanded .app-hero-shade { opacity: 1; transition: opacity .15s ease .15s; }
 .app-hero-info { position: absolute; left: 16px; right: 16px; top: calc(var(--hero-top) + 120px + 12px); pointer-events: none; transition: top .3s var(--hero-ease); }
 .app-hero.is-expanded .app-hero-info { top: calc(100cqw - 66px); }
@@ -955,7 +955,7 @@ html[data-anim="0"] :is(.app-hero, .app-hero-photo, .app-hero-info, .app-hero-na
 .app-gsearch-month { padding: 12px 16px 6px; font: 500 14px/20px var(--font-sans); color: var(--ink-muted); }
 .app-gsearch-hit .app-sm-text { min-width: 0; text-align: left; }
 .app-gsearch-sub { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.app-media-vgrid.app-gsearch-grid { margin: 0 8px; }
+.app-media-vgrid.app-gsearch-grid { margin: 0; }
 .app-gsearch-thumb { background: center / cover no-repeat; }
 .app-gsearch-thumb .app-sm-ext-label { display: none; }
 .app-gsearch-voice { position: relative; display: inline-flex; flex-shrink: 0; padding: 0; border: 0; border-radius: 50%; background: none; cursor: pointer; }
@@ -1446,11 +1446,19 @@ html[data-anim="0"] :is(.app-enter-reload, .app-enter-login) :is(.rl-shell-side,
 .app-hero.has-music .app-hero-actions { bottom: 44px; }   /* над полосой музыки (24) */
 .app-hero-actions .rl-pacts { margin: 0 var(--space-3); }
 .app-hero-actions .rl-pact { transition: background-color .3s var(--hero-ease), color .3s var(--hero-ease), box-shadow .3s var(--hero-ease); }
-.app-hero.is-expanded .app-hero-actions .rl-pact { background: rgba(255, 255, 255, .2); color: #fff; box-shadow: none; -webkit-backdrop-filter: blur(12px); backdrop-filter: blur(12px); }
-.app-hero.is-expanded .app-hero-actions .rl-pact:is(:hover, :focus-visible, .is-open) { background: rgba(255, 255, 255, .3); }
+.app-hero.is-expanded .app-hero-actions .rl-pact { background: rgba(255, 255, 255, .15); color: #fff; box-shadow: none; }   /* как в tweb: белая 15% поверх фото, без размытия (оно мутнило плитку) */
+.app-hero.is-expanded .app-hero-actions .rl-pact:is(:hover, :focus-visible, .is-open) { background: rgba(255, 255, 255, .25); }
 .app-hero.is-expanded .app-hero-actions .rl-pact:focus-visible { outline-color: #fff; }
-:root[data-theme="dark"] .app-hero.is-expanded .app-hero-actions .rl-pact { background: rgba(0, 0, 0, .2); }
-@media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) .app-hero.is-expanded .app-hero-actions .rl-pact { background: rgba(0, 0, 0, .2); } }
+/* раскрытое фото — под шапкой панели, как в Telegram: шапка прозрачная, крестик и заголовок белые; лента тела
+   подъезжает под шапку на её высоту (60 px) вместе с ростом фото */
+.rl-sidepage > .rl-aside-body { transition: margin-top .3s cubic-bezier(.4, 0, .2, 1); }
+.rl-sidepage.is-photo-open > .rl-aside-body { margin-top: -60px; }
+.rl-sidepage > .rl-panel-head :is(.rl-panel-head-btn, h2, .rl-iconbtn) { transition: color .3s cubic-bezier(.4, 0, .2, 1); }
+.rl-sidepage.is-photo-open > .rl-panel-head { background: transparent; box-shadow: none; }
+.rl-sidepage.is-photo-open > .rl-panel-head :is(button, h2) { color: #fff; }
+.rl-sidepage.is-photo-open > .rl-panel-head h2 { text-shadow: 0 1px 3px rgba(0, 0, 0, .25); }
+@media (prefers-reduced-motion: reduce) { .rl-sidepage > .rl-aside-body { transition: none; } }
+html[data-anim="0"] .rl-sidepage > .rl-aside-body { transition: none; }
 
 /* ---------- полёт отправленного (sendFlight.ts): слой поверх экрана, клон пузыря растёт из капсулы поля ---------- */
 .app-flight { position: fixed; inset: 0; z-index: 40; pointer-events: none; contain: layout; }
