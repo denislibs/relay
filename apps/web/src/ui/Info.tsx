@@ -217,7 +217,7 @@ export function Info() {
     ) : k === 'edit' && peerId ? (
       <EditContactPanel userId={peerId} onDone={() => setPage('info')} />
     ) : (
-    <div class="rl-sidepage">
+    <div class={'rl-sidepage' + (expanded && gallery.length ? ' is-photo-open' : '')}>
       <PanelHeader class={media ? 'is-media' : undefined} icon={media ? 'arrowLeft' : 'close'} closeLabel={media ? 'Наверх' : 'Закрыть'}
         title={<HeadTitle media={media} plain={channel ? 'Информация о канале' : group ? 'Информация о группе' : 'Информация'} name={title} head={mediaHead} />} onClose={media ? toTop : close} action={media ? undefined : action} />
       <div class="rl-aside-body" ref={body} onScroll={onBodyScroll}>
@@ -225,7 +225,8 @@ export function Info() {
           <ProfileGallery photos={gallery} index={slide} onIndex={setSlide} onOpen={setViewer}
             name={<>{title}{system ? <Verified size={22} /> : null}</>}
             sub={<span class={myPeer?.online ? 'app-online' : ''}>{subtitle || ' '}</span>}
-            music={peerId ? <ProfileMusicBar userId={peerId} music={user?.music as ProfileMusicSummary | null | undefined} /> : null}
+            // полоса музыки и её 24 px — только когда треки есть (иначе пустая полоса раздвигала плитки и карточку)
+            music={peerId && (user?.music as ProfileMusicSummary | null | undefined)?.top ? <ProfileMusicBar userId={peerId} music={user?.music as ProfileMusicSummary | null | undefined} /> : null}
             actions={tiles.length || tileMenu.length ? <ProfileActions label="Действия с чатом" actions={tiles} menu={tileMenu} /> : null}
             expanded={expanded} onExpand={setExpanded} />
         ) : (
