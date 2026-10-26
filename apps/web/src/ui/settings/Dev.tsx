@@ -1,9 +1,9 @@
-import { FolderTabs, PanelHeader, Presence, SlideStack } from '@relay/ui';
-import { useEffect, useRef, useState } from 'preact/hooks';
+import { FolderTabs, PanelHeader, SlideStack } from '@relay/ui';
+import { useEffect, useState } from 'preact/hooks';
 import { markErrorsSeen, newErrorCount, subscribeErrors } from '../../devtools/metrics';
 import { openDevSession, setServerPolling } from '../../devtools/session';
-import { getGlobal, setGlobal, useGlobal, type DevSimFlags, type DevTab } from '../../global';
-import { back, go } from '../../nav';
+import { setGlobal, useGlobal, type DevTab } from '../../global';
+import { back } from '../../nav';
 import { setPref } from '../../prefs';
 import { DevData } from './DevData';
 import { DevErrors } from './DevErrors';
@@ -48,36 +48,5 @@ export function Dev() {
         )} />
       </div>
     </div>
-  );
-}
-
-/** Что включено в имитаторе — для плашки. */
-export function simText(s: DevSimFlags): string {
-  const parts: string[] = [];
-  if (s.offline) parts.push('офлайн');
-  if (s.profile) parts.push(s.profile.lossPct >= 10 && s.profile.latency >= 1500 ? 'плохая сеть' : 'медленная сеть');
-  if (s.dropNextUpdates) parts.push('дыра в журнале');
-  if (s.forceTooLong) parts.push('снимок');
-  return parts.join(', ');
-}
-
-/** Плашка «Режим разработчика: …» над приложением, пока включён любой режим имитатора (во всех вкладках). Клик — вкладка «Сеть». */
-export function DevPlate() {
-  const sim = useGlobal((s) => s.devSim);
-  const last = useRef<DevSimFlags | null>(null);
-  if (sim) last.current = sim;
-  const shown = sim ?? last.current;
-  const open = () => {
-    setGlobal({ devTab: 'network' });
-    if (!getGlobal().prefs.dev.enabled) setPref('dev.enabled', true);
-    void go('settings/dev');
-  };
-  return (
-    <Presence show={!!sim} exitMs={200}>
-      <button type="button" class="app-devplate" onClick={open} aria-label={'Режим разработчика: ' + (shown ? simText(shown) : '') + '. Открыть настройки сети'}>
-        <span class="app-devplate-dot" aria-hidden="true" />
-        Режим разработчика: {shown ? simText(shown) : ''}
-      </button>
-    </Presence>
   );
 }

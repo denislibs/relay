@@ -20,11 +20,16 @@ import type { ProfilePhoto } from '@relay/protocol';
 import { avatarPhoto, useProfilePhotos, userPhoto } from '../profilePhoto';
 import { ProfileGallery } from './ProfileGallery';
 import { PhotoViewer } from './PhotoViewer';
-import { StickersPanel } from './stickers/StickersPanel';
-import { GROUP_PAGES, GroupScreen, isGroupPage, parentOf, type GroupPage, type Params } from './group/Manage';
+import { lazy } from './lazy';
+import { GROUP_PAGES, isGroupPage, parentOf, type GroupPage, type Params } from './group/routes';
 import { canManage, copyText, publicUrl } from '../groups';
 import { subscribersText } from '../channelText';
 import type { GroupInfo, MyMembership } from '@relay/protocol';
+
+// панель наборов стикеров — чанком вместе с остальными стикерами (ui/lazy.tsx)
+const StickersPanel = lazy(() => import('./stickers/StickersPanel').then((m) => m.StickersPanel));
+// экраны управления группой — чанком (маршруты — group/routes.ts, здесь)
+const GroupScreen = lazy(() => import('./group/Manage').then((m) => m.GroupScreen));
 
 const PAGES = ['info', 'stickers', 'edit', ...GROUP_PAGES];   // «Стикеры» — вторая вложенность (из поиска в панели стикеров)   // «Изменить контакт» и управление группой выезжают внутри панели справа налево
 const close = () => setGlobal({ infoOpen: false });

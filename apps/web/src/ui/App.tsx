@@ -1,7 +1,5 @@
 import { JoinLink } from './group/JoinLink';
-import { LinkEdit } from './links/LinkEdit';
 import { ForwardPicker } from './ForwardPicker';
-import { Links } from './links/Links';
 import { FolderColumn, useFolderPlace } from './folderNav';
 import { AsidePanel, FloatShell, ModalRoot, Presence, SideFrame, SlideStack, Toast } from '@relay/ui';
 import { useEffect, useRef, useState } from 'preact/hooks';
@@ -13,26 +11,9 @@ import { ChatStack } from './ChatStack';
 import { Info } from './Info';
 import { Login } from './Login';
 import { NewChat } from './NewChat';
-import { Data } from './settings/Data';
-import { Autoload } from './settings/Autoload';
-import { Performance } from './settings/Performance';
-import { General } from './settings/General';
-import { Main } from './settings/Main';
-import { Notifications } from './settings/Notifications';
-import { Blocked } from './settings/Blocked';
-import { Password } from './settings/Password';
-import { Passkeys } from './settings/Passkeys';
 import { QrConfirm } from './QrLogin';
-import { PeoplePicker } from './settings/PeoplePicker';
-import { Privacy } from './settings/Privacy';
-import { PrivacyRule } from './settings/PrivacyRule';
-import { Profile } from './settings/Profile';
-import { Sessions } from './settings/Sessions';
-import { Folders } from './settings/Folders';
-import { FolderEdit } from './settings/FolderEdit';
-import { FolderChats } from './settings/FolderChats';
-import { Wallpaper, WallpaperColor } from './settings/Wallpaper';
-import { Dev, DevPlate } from './settings/Dev';
+import { DevPlate } from './settings/DevPlate';
+import { lazy } from './lazy';
 import { Contacts } from './contacts/Contacts';
 import { Archive } from './Archive';
 import { NewGroupMembers, NewGroupName } from './newChat/NewGroup';
@@ -40,6 +21,31 @@ import { NewChannelInfo, NewChannelMembers } from './newChat/NewChannel';
 import { EditContact } from './contacts/EditContact';
 import { NewContact } from './contacts/NewContact';
 import { Sidebar } from './Sidebar';
+
+// страницы настроек — отдельным чанком (ui/lazy.tsx, settings/pages.ts): в основной бандл не входят, догружаются в простое
+const pages = () => import('./settings/pages');
+const Main = lazy(() => pages().then((m) => m.Main));
+const Profile = lazy(() => pages().then((m) => m.Profile));
+const Links = lazy(() => pages().then((m) => m.Links));
+const LinkEdit = lazy(() => pages().then((m) => m.LinkEdit));
+const General = lazy(() => pages().then((m) => m.General));
+const Wallpaper = lazy(() => pages().then((m) => m.Wallpaper));
+const WallpaperColor = lazy(() => pages().then((m) => m.WallpaperColor));
+const Notifications = lazy(() => pages().then((m) => m.Notifications));
+const Privacy = lazy(() => pages().then((m) => m.Privacy));
+const Blocked = lazy(() => pages().then((m) => m.Blocked));
+const Password = lazy(() => pages().then((m) => m.Password));
+const Passkeys = lazy(() => pages().then((m) => m.Passkeys));
+const PeoplePicker = lazy(() => pages().then((m) => m.PeoplePicker));
+const PrivacyRule = lazy(() => pages().then((m) => m.PrivacyRule));
+const Performance = lazy(() => pages().then((m) => m.Performance));
+const Sessions = lazy(() => pages().then((m) => m.Sessions));
+const Folders = lazy(() => pages().then((m) => m.Folders));
+const FolderEdit = lazy(() => pages().then((m) => m.FolderEdit));
+const FolderChats = lazy(() => pages().then((m) => m.FolderChats));
+const Data = lazy(() => pages().then((m) => m.Data));
+const Autoload = lazy(() => pages().then((m) => m.Autoload));
+const Dev = lazy(() => pages().then((m) => m.Dev));
 
 
 

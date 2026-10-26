@@ -2,7 +2,7 @@ import { canEditKind, hasMedia, isDiceEmoji, rightForKind, type GeoPoint, type P
 import { emojiKey } from '@relay/protocol';
 import { pushRecentReaction, quickAssets, quickReactions } from '../reactions';
 import { queueReactionFx } from '../reactionFx';
-import { ReactionsPanel } from './ReactionsPanel';
+import { lazy } from './lazy';
 import { getPrefs } from '../prefs';
 import { MEMBER_RIGHT_TEXT } from '../groups';
 import { PinnedBar } from './PinnedBar';
@@ -67,8 +67,12 @@ import type { ProfilePhoto } from '@relay/protocol';
 import { avatarPhoto } from '../profilePhoto';
 import { openStickersPanel, sendStickerHere, setStickerTarget } from '../stickers';
 import { greetingChat } from '../greeting';
-import { SymbolMenu } from './stickers/SymbolMenu';
 import { cancelForwardDraft, endSelect, forwardElsewhere, patchForwardDraft, sendForwardDraft, startForward, startSelect } from '../forward';
+
+// эмодзи, стикеры и полная панель реакций — отдельными чанками (ui/lazy.tsx): с таблицей эмодзи это ~180 КБ кода,
+// не нужного первому экрану; догружаются в простое после старта
+const SymbolMenu = lazy(() => import('./stickers/SymbolMenu').then((m) => m.SymbolMenu));
+const ReactionsPanel = lazy(() => import('./ReactionsPanel').then((m) => m.ReactionsPanel));
 
 
 const NO_MESSAGES: Item[] = [];
