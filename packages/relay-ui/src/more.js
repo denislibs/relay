@@ -1129,7 +1129,8 @@ function FolderTabs(props) {
     if (e.key === 'ArrowLeft' && i > 0) props.onChange(items[i - 1].id);
   }
   function inner(t, active) {
-    return [h('span', { key: 'l' }, t.label),
+    return [t.emoji ? h('span', { key: 'e', class: 'rl-tab-emoji', 'aria-hidden': 'true' }, t.emoji) : null,
+      h('span', { key: 'l' }, t.label),
       t.count ? h('span', { key: 'c' + t.count, class: cx('rl-folder-count', t.muted && 'rl-folder-count-muted', active && 'rl-folder-count-on') }, t.count > 999 ? '999+' : t.count) : null];
   }
   return h('div', { ref: host, class: cx('rl-tabs', props.class), role: 'tablist', 'aria-label': props.label || 'Папки', onKeyDown: onKey },
