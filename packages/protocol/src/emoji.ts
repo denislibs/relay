@@ -18,12 +18,21 @@ export function emojiKey(s: string): string {
 const RGI = /^\p{RGI_Emoji}$/v;
 const isEmoji = (g: string): boolean => RGI.test(g) || RGI.test(g + '\uFE0F');
 const HAS_LETTER = /\p{L}/u;   // буквы в эмодзи не бывают — отказ без разбора на графемы
+// ни одного символа из блоков, где живут эмодзи (©®, U+203C–U+3299 со стрелками, часами, keycap U+20E3, U+1F000+,
+// теги флагов, FE0F) — тоже отказ до RGI: её первая компиляция дорогая, а «123», «—», «…» её не заслуживают
+const MAYBE_EMOJI = /[©®‼-㊙️\u{1F000}-\u{1FAFF}\u{E0020}-\u{E007F}]/u;
 const EMOJI_ONLY_MAX = 100;
 const EMOJI_ONLY_BODY_MAX = 800;
 let segmenter: Intl.Segmenter | null = null;
 
+/** Скомпилировать RGI и создать сегментатор заранее (в простое после первого экрана), а не на первом открытии чата. */
+export function warmEmoji(): void {
+  segmenter ??= new Intl.Segmenter(undefined, { granularity: 'grapheme' });
+  isEmoji('😀');
+}
+
 export function emojiOnly(body: string, entities?: readonly { type: string }[] | null): { count: number; keys: string[] } | null {
-  if (!body || body.length > EMOJI_ONLY_BODY_MAX || (entities && entities.length) || HAS_LETTER.test(body)) return null;
+  if (!body || body.length > EMOJI_ONLY_BODY_MAX || (entities && entities.length) || HAS_LETTER.test(body) || !MAYBE_EMOJI.test(body)) return null;
   const lines = body.split('\n').map((l) => l.replace(/\s+/g, '')).filter((l) => l.length);
   if (!lines.length) return null;
   segmenter ??= new Intl.Segmenter(undefined, { granularity: 'grapheme' });
