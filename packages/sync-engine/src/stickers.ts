@@ -144,12 +144,13 @@ export class Stickers {
   }
 
   /** Без сети: по эмодзи из недавних и уже открытых паков. */
+  /** Без сети: по недавним и известным пакам. emoji — один или группа (чип «Любовь»): подходит любой из них. */
   private async localByEmoji(emoji: string): Promise<StickerRef[]> {
-    const e = emoji.replace(/️/g, '');
+    const want = new Set([...new Intl.Segmenter('en', { granularity: 'grapheme' }).segment(emoji.replace(/\s+/g, ''))].map((x) => x.segment.replace(/️/g, '')));
     const m = await this.cachedMine();
     const seen = new Set<number>(), out: StickerRef[] = [];
     for (const s of [...m.recent, ...[...this.sets.values()].flatMap((x) => x.stickers)]) {
-      if (s.emoji.replace(/️/g, '') === e && !seen.has(s.id)) { seen.add(s.id); out.push(s); }
+      if (want.has(s.emoji.replace(/️/g, '')) && !seen.has(s.id)) { seen.add(s.id); out.push(s); }
     }
     return out;
   }

@@ -1205,10 +1205,19 @@ html[data-anim="0"] :is(.app-hero, .app-hero-photo, .app-hero-info, .app-hero-na
 .app-sym-search input { flex: 1 1 auto; min-width: 96px; width: 120px; border: 0; outline: 0; background: transparent; color: var(--ink); font: 400 16px/20px var(--font-sans); }
 .app-sym-search.is-typing input { flex: 1; }
 .app-sym-search input::placeholder { color: var(--ink-muted); }
-.app-sym-chips { flex: none; display: flex; gap: 3px; margin-right: 6px; overflow-x: auto; scrollbar-width: none; }
+.app-sym-chips { flex: 0 1 auto; min-width: 0; display: flex; gap: 3px; margin-right: 6px; overflow-x: auto; scrollbar-width: none;
+  -webkit-mask-image: linear-gradient(to right, transparent, #000 10px); mask-image: linear-gradient(to right, transparent, #000 10px); }
+/* групп Telegram больше, чем места: полоса чипов сжимается и прокручивается, подсказка поиска не обрезается */
+.app-sym-search:not(.is-typing) input { flex: 0 0 auto; width: 132px; }
 .app-sym-chips::-webkit-scrollbar { display: none; }
 .app-sym-chip { flex: none; display: flex; align-items: center; justify-content: center; width: 28px; height: 28px; padding: 0; border: 0; border-radius: 50%; background: transparent; color: var(--ink); opacity: .3; cursor: pointer; transition: opacity 150ms, background-color 150ms; }
 .app-sym-chip:hover, .app-sym-chip.is-on { opacity: .7; background: var(--sym-fill); }
+.app-sym-chips { animation: rl-fade 150ms var(--ease-out); }   /* группы пришли позже строки — проявляются, а не выскакивают */
+/* иконки групп Telegram белые: в светлой теме — в цвет текста (чёрный), прозрачность — как у контурных */
+.app-sym-chip-tg { display: flex; pointer-events: auto; }
+.app-sym-chip-tg .rl-sticker-canvas { filter: brightness(0); }
+:root[data-theme="dark"] .app-sym-chip-tg .rl-sticker-canvas { filter: none; }
+@media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) .app-sym-chip-tg .rl-sticker-canvas { filter: none; } }
 .app-sym-sec h4 { position: relative; margin: 0; padding: 12px 14px 6px; text-align: center; font: 600 16px/19px var(--font-sans); color: var(--sym-muted); }
 .app-sym-sec h4.is-link { cursor: pointer; }
 .app-sym-clear { position: absolute; right: 8px; top: 50%; transform: translateY(-40%); color: var(--sym-muted); }

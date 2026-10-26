@@ -60,6 +60,7 @@ test('my stickers and packs come from the cache without network; installing on o
   expect(off.sets.map((s) => s.shortName)).toEqual(['duck']);
   expect(((await e1.call({ type: 'stickerSet', id: mine.sets[0].id })) as StickerSet).stickers).toHaveLength(3);
   expect(((await e1.call({ type: 'stickersByEmoji', emoji: '❤' })) as unknown[]).length).toBe(1);   // без сети — из открытых паков
+  expect(((await e1.call({ type: 'stickersByEmoji', emoji: '❤️😂🦄' })) as unknown[]).length).toBe(2);   // группа (чип) — любой из эмодзи
   expect(await e1.call({ type: 'greetingSticker' })).toBeNull();      // приветствие без сети — нет (карточка без стикера)
 
   expect(await e2.call({ type: 'greetingSticker' })).toMatchObject({ emoji: '👍' });   // из приветственных эмодзи

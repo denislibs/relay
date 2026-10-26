@@ -2,7 +2,7 @@ import { statSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 
 /**
- * Файлы стикеров /stk/<пак>/<hash8>/<файл> и реакций /rx/<slug>/<hash8>/<файл>. Публичные и неизменяемые —
+ * Файлы стикеров /stk/<пак>/<hash8>/<файл>, реакций /rx/<slug>/<hash8>/<файл> и иконок групп эмодзи /emj/documents/<hash8>/<файл>. Публичные и неизменяемые —
  * хэш содержимого в пути, поэтому кэш навсегда; новый файл под тем же именем получит новый адрес. Ассеты лежат
  * вне git и образа (ASSETS_DIR, по умолчанию apps/server/assets рядом с кодом — в dev он смонтирован вместе с ./apps).
  */
@@ -15,6 +15,8 @@ const HASH = /^[0-9a-f]{8}$/;
 const assetsDir = (): string => resolve(process.env.ASSETS_DIR ?? join(import.meta.dir, '..', '..', 'assets'));
 export const stickersDir = (): string => join(assetsDir(), 'stickers');
 export const reactionsDir = (): string => join(assetsDir(), 'reactions');
+export const emojiDir = (): string => join(assetsDir(), 'emoji');
+export const greetingDir = (): string => join(assetsDir(), 'greeting');
 
 // sha256 файла считаем один раз на (путь, размер, время изменения)
 const hashes = new Map<string, { size: number; mtime: number; hash: string }>();
@@ -56,3 +58,5 @@ export async function serveAssetFile(root: string, pathname: string, method: str
 
 export const serveStickerFile = (pathname: string, method: string): Promise<Response> => serveAssetFile(stickersDir(), pathname, method);
 export const serveReactionFile = (pathname: string, method: string): Promise<Response> => serveAssetFile(reactionsDir(), pathname, method);
+/** Иконки групп эмодзи: /emj/documents/<hash8>/<id>.tgs. */
+export const serveEmojiFile = (pathname: string, method: string): Promise<Response> => serveAssetFile(emojiDir(), pathname, method);

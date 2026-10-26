@@ -56,10 +56,11 @@ function outlinePath(b64) {
 /**
  * props: src (адрес .tgs/.json/.webp), outline (base64 контур), w, h (размер документа, обычно 512),
  * size (сторона рамки, CSS px), play (по умолчанию да), loop (undefined — как в настройках), group, force (играть
- * вопреки тяжёлой анимации и автоплею), onFirstFrame, onEnded (последний кадр без цикла), class, onClick, title.
+ * вопреки тяжёлой анимации и автоплею), shared (false — свои часы), atEnd (сразу последний кадр: исход броска),
+ * onFirstFrame, onEnded (последний кадр без цикла), class, onClick, title.
  */
 export function StickerView(props) {
-  const { src, outline, size, group = 'feed', play = true, loop, force } = props;
+  const { src, outline, size, group = 'feed', play = true, loop, force, shared = true, atEnd = false } = props;
   const box = stickerBox(props.w, props.h, size);
   const isStatic = /\.webp$/.test(src || '');
   const px = Math.round(Math.max(box.width, box.height) * Math.min(2, Math.max(1, (typeof devicePixelRatio === 'number' && devicePixelRatio) || 1)));
@@ -72,7 +73,7 @@ export function StickerView(props) {
   // превью с прошлого раза (для статичных стикеров сама картинка — превью)
   useEffect(() => {
     setStage('outline'); setPreview(null); hadPreview.current = false;
-    if (isStatic || !src) return;
+    if (isStatic || !src || atEnd) return;   // превью — первый кадр, а показать надо последний
     let live = true;
     getPreview(key).then((url) => {
       if (!live || !url) return;
@@ -83,21 +84,23 @@ export function StickerView(props) {
     return () => { live = false; };
   }, [key]);
 
-  // анимация: подключаемся, когда стикер подъехал к экрану (500 px), играем — пока виден
+  // анимация: подключаемся, когда стикер подъехал к экрану (500 px), играем — пока виден. force (бросок на глазах,
+  // эффект) — сразу: ленивое наблюдение ждёт конца тяжёлой анимации (доезда ленты), а показать надо сейчас
   useEffect(() => {
     const el = root.current;
     if (!el || !src || isStatic || !lottieAvailable()) return;
     let offVisible = null, cancel = null;
-    const offLazy = lazyObserve(el, () => { cancel = queueAttach(() => {
+    const attach = () => { cancel = queueAttach(() => {
       const c = attachSticker({
-        url: src, px, canvas: canvas.current, group, play: play && !reducedMotion(), loop, force,
+        url: src, px, canvas: canvas.current, group, play: play && !reducedMotion(), loop, force, shared, atEnd,
         onFirstFrame: () => { props.onFirstFrame?.(); requestAnimationFrame(() => requestAnimationFrame(() => requestMutation(() => setStage('ready')))); },
         onEnded: () => props.onEnded?.(),
         onError: () => props.onError?.(),
       });
       ctl.current = c;
       offVisible = watchVisible(el, (v) => c.setVisible(v));
-    }); });
+    }); };
+    const offLazy = force ? (attach(), null) : lazyObserve(el, attach);
     return () => { offLazy?.(); cancel?.(); offVisible?.(); ctl.current?.destroy(); ctl.current = null; };
   }, [key, group, force]);
 

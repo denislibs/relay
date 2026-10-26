@@ -2592,6 +2592,10 @@ html[data-anim="0"] .rl-symbols-pop { transition: none; }
 /* ---------- кубики ---------- */
 .rl-dice { display: flex; flex-direction: column; align-items: center; gap: 4px; padding: 0 6px 28px; border: 0; background: transparent; cursor: pointer; line-height: 1; }
 .rl-dice-emoji { font-size: 96px; line-height: 112px; }
+/* грани из набора Telegram: слои друг на друге, исход поверх «летящего» */
+.rl-dice-tg { padding: 0 0 28px; }
+.rl-dice-anim { position: relative; display: block; }
+.rl-dice-anim .rl-dice-layer { position: absolute; left: 0; top: 0; }
 .rl-dice-result { padding: 2px 8px; border-radius: 10px; background: rgba(0,0,0,.4); color: #fff; font: 600 13px/18px var(--font-sans); }
 .rl-dice-roll .rl-dice-die, .rl-dice-roll .rl-dice-emoji { animation: rl-dice-roll 900ms cubic-bezier(.2, .8, .3, 1) both; }
 .rl-dice-roll .rl-dice-result { animation: rl-fade 250ms 850ms var(--ease-out) both; }
