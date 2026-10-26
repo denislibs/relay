@@ -12,7 +12,7 @@ import { fileHash8, reactionsDir } from '../stickers/files';
  */
 
 interface Entry {
-  reaction: string; title: string; slug: string; premium?: boolean; inactive?: boolean;
+  reaction: string; title: string; slug: string; premium?: boolean; inactive?: boolean; silhouette?: string;
   files: { static: string; appear: string; select: string; activate?: string; effect?: string; around?: string; center?: string };
 }
 export interface ReactionCatalog { hash: string; items: ReactionAsset[] }
@@ -47,7 +47,9 @@ async function build(file: string): Promise<ReactionCatalog> {
     const [st, appear, select, center, around] = await Promise.all([url(e.files.static), url(e.files.appear), url(e.files.select), url(e.files.center), url(e.files.around)]);
     // без обязательных файлов реакцию не отдаём: клиенту нечем её нарисовать
     if (!st || !appear || !select) continue;
-    items.push({ key: emojiKey(e.reaction), title: String(e.title ?? ''), inactive: e.inactive === true, static: st, appear, select, center, around });
+    // силуэт — только маленькая PNG data: (её строит tools/reactions/silhouettes.py), иначе не отдаём
+    const silhouette = typeof e.silhouette === 'string' && e.silhouette.startsWith('data:image/png;base64,') && e.silhouette.length < 4096 ? e.silhouette : null;
+    items.push({ key: emojiKey(e.reaction), title: String(e.title ?? ''), inactive: e.inactive === true, static: st, appear, select, center, around, silhouette });
   }
   // хэш результата: адреса уже содержат хэши файлов, так что любая смена файла или json меняет ETag
   const hash = new Bun.CryptoHasher('sha256').update(JSON.stringify(items)).digest('hex').slice(0, 16);
