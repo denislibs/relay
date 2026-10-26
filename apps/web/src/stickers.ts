@@ -1,3 +1,4 @@
+import { captureSticker } from './ui/sendFlight';
 // Стикеры в интерфейсе: вызовы движка (мои паки, паки, отправка) и открытие модалки пака.
 // Движок отдаёт data.ts через bindStickers — здесь своя тонкая обёртка, чтобы стикеры не разрастались в data.ts.
 import type { MyStickers, StickerRef, StickerSet, StickerSetInfo } from '@relay/protocol';
@@ -103,6 +104,7 @@ export const hasStickerTarget = () => !!target;
 /** Отправить в открытый чат (с ответом, если он выбран). false — чата нет. */
 export function sendStickerHere(s: StickerRef): boolean {
   if (!target) return false;
+  captureSticker(target.chatId);   // полёт картинки из панели в сообщение (sendFlight)
   void sendSticker(target.chatId, s, target.replyId(), target.threadId);
   target.sent();
   return true;

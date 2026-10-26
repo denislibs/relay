@@ -36,7 +36,7 @@ import { clock, dayKey, dayLabel, fileSize } from './format';
 import { arrivals, type FeedSeen } from './appear';
 import { anchorShift, deferShift, requestShift, rowFor, shiftWanted } from './windowShift';
 import { burstAnimates, driveScroll, jumpNear, DRIVE_MS, DRIVE_OWN_MS, type Drive } from './scrollDrive';
-import { claim, FLIGHT_SCROLL, giveUp, launch, type Flight } from './sendFlight';
+import { claim, FLIGHT_SCROLL, giveUp, launch, launchBox, type Flight } from './sendFlight';
 import { interiorRemovals, mergeLeaving, LEAVE_HOLD_MS, LEAVE_MS, type Msg } from './leaving';
 
 /*
@@ -810,8 +810,12 @@ export function Feed({ frameKey, active, chatId, threadId, channel = false, meId
       if (own && activeRef.current) for (const k of fresh) {
         const f: Flight | null = claim(chatId);
         if (!f) break;
-        const bubble = root.querySelector<HTMLElement>(`.app-msg[data-key="${CSS.escape(k)}"] .rl-bubble`);
-        if (bubble) { launch(f, bubble, () => goal() - root.scrollTop); flew = true; } else giveUp(f);
+        const row = root.querySelector<HTMLElement>(`.app-msg[data-key="${CSS.escape(k)}"]`);
+        const bubble = f.box ? null : row?.querySelector<HTMLElement>('.rl-bubble');
+        const boxMsg = row?.querySelector<HTMLElement>('.rl-sticker-msg');   // стикер или большое эмодзи
+        if (bubble) { launch(f, bubble, () => goal() - root.scrollTop); flew = true; }
+        else if (boxMsg) { launchBox(f, boxMsg, () => goal() - root.scrollTop); flew = true; }
+        else giveUp(f);
       }
       // кадр за стеком (скрытый) не едет: там нечего анимировать, а окно анимации задержало бы медиа видимого чата
       requestMeasure(() => { if (activeRef.current) drive(root, goal, flew ? FLIGHT_SCROLL.ms : own ? DRIVE_OWN_MS : DRIVE_MS, flew ? FLIGHT_SCROLL.curve : undefined); });
