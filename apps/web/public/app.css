@@ -1209,7 +1209,10 @@ html[data-anim="0"] :is(.app-hero, .app-hero-photo, .app-hero-info, .app-hero-na
 .app-sym { overflow: hidden; }
 /* Вкладки лежат друг на друге. Смена — как в Telegram Web K: уходящая и новая едут вместе на всю ширину
    (200 мс ease-in-out), без прозрачности — пустой фон панели между ними не виден. */
-.app-sym-body { position: absolute; inset: 0; will-change: transform; }   /* свой слой: слайд (SymbolMenu, Web Animations) двигает, а не перерисовывает */
+.app-sym-body { position: absolute; inset: 0; will-change: transform; background: var(--panel, var(--bg)); }   /* свой непрозрачный слой: слайд (SymbolMenu, Web Animations) двигает, а не перерисовывает; новая вкладка в кадре подготовки рисуется под текущей */
+/* скрытая вкладка: раскладка и стили сохраняются (показ — доли миллисекунды), содержимое не рисуется и не в фокусе;
+   под видимой (z-index не наследуется — нажатия не перехватывает, а стили детей не пересчитываются) */
+.app-sym-body[data-off] { content-visibility: hidden; z-index: -1; }
 .app-sym-shield { position: absolute; inset: 0; z-index: 1; }   /* нажатия во время слайда вкладок */
 .app-sym-pane { position: relative; display: flex; flex-direction: column; height: 100%; overflow: hidden; }
 /* Фокус в поиске (или запрос, или фильтр) — как в Telegram Web K: полоса категорий уезжает вверх и гаснет,

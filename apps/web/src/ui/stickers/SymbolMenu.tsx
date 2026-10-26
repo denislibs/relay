@@ -23,6 +23,7 @@ const EMOJI_COLS = 8, EMOJI_ROW = 42;      // ячейка эмодзи 42 px (�
 const STK_COLS = 5, STK_ROW = 76;          // ячейка стикера 72 px + 4 px зазор
 const PREBUILD_MS = 400;                    // после открытия (200 мс) — построить вторую вкладку про запас
 const UNLOAD_MS = 500;                      // секция вдали от экрана столько — опустошается
+const WARM_MS = 150, WARM_MAX_MS = 1500, WARM_STICKERS = 20;   // заранее построенная вкладка рисуется под текущей, пока первые стикеры не нарисуют кадр
 
 export interface SymbolMenuProps {
   open: boolean;
@@ -46,6 +47,28 @@ export function SymbolMenu(p: SymbolMenuProps) {
   const [prep, setPrep] = useState<Tab | null>(null);
   const [slide, setSlide] = useState<{ from: Tab } | null>(null);
   const bodies = useRef<Record<Tab, HTMLDivElement | null>>({ emoji: null, stickers: null });
+  const [warm, setWarm] = useState<Record<Tab, boolean>>({ emoji: false, stickers: false });
+  // построенная вкладка сначала разложена и нарисована под текущей — дальше её можно прятать, не теряя раскладки.
+  // Под текущей, а не за краем: так её стикеры «видны» наблюдателям и успевают нарисовать первый кадр — при первом
+  // показе вкладка въезжает со стикерами, а не с серыми силуэтами
+  useEffect(() => {
+    const cold = (['emoji', 'stickers'] as Tab[]).filter((t) => built[t] && !warm[t]);
+    if (!cold.length) return;
+    const t0 = performance.now();
+    let timer = 0;
+    // готова — когда первые стикеры на экране вкладки нарисовали кадр (силуэтов среди них нет); не дольше WARM_MAX_MS
+    const ready = (t: Tab) => {
+      const first = [...(bodies.current[t]?.querySelectorAll('.rl-sticker') ?? [])].slice(0, WARM_STICKERS);
+      return !first.some((x) => !x.classList.contains('rl-sticker-ready'));
+    };
+    const check = () => {
+      const done = cold.filter((t) => performance.now() - t0 >= WARM_MAX_MS || ready(t));
+      if (done.length) setWarm((w) => ({ ...w, ...Object.fromEntries(done.map((k) => [k, true])) }));
+      if (done.length < cold.length) timer = window.setTimeout(check, WARM_MS);
+    };
+    timer = window.setTimeout(check, WARM_MS);
+    return () => clearTimeout(timer);
+  }, [built.emoji, built.stickers]);
   const leaving = useRef<Animation | null>(null);
   // закрыли панель — со следующего открытия «Недавние» свежие. Вкладки не пересоздаются (как в Telegram Web K:
   // вкладка, прокрутка и подсветка категории остаются), только перечитывают снимок «Недавних» — после анимации
@@ -75,10 +98,11 @@ export function SymbolMenu(p: SymbolMenuProps) {
     setPrep(t);
   };
   const shift = (t: Tab) => (t === 'stickers' ? 100 : -100);   // где новая вкладка ждёт: справа «Стикеры», слева «Эмодзи»
-  // до отрисовки кадра подготовки новая вкладка уже стоит за краем
+  // кадр подготовки: новая вкладка стоит на своём месте, но под текущей (вкладки непрозрачны) — так браузер рисует
+  // её целиком; за краем панели её обрезал бы overflow, и отрисовка досталась бы первому кадру движения
   useLayoutEffect(() => {
     const el = prep && bodies.current[prep];
-    if (el) el.style.transform = `translateX(${shift(prep)}%)`;
+    if (el) el.style.zIndex = '-1';
   }, [prep]);
   // prep отрисован и разложен — со следующей фазы записи обе вкладки едут; уходящая прячется по окончании
   useEffect(() => {
@@ -89,7 +113,7 @@ export function SymbolMenu(p: SymbolMenuProps) {
       beginHeavyAnimation(SLIDE_MS + 50);
       const x = shift(prep), opts = { duration: SLIDE_MS, easing: 'ease-in-out' };
       const inc = bodies.current[prep], out = bodies.current[tab];
-      if (inc) { inc.animate([{ transform: `translateX(${x}%)` }, { transform: 'none' }], opts); inc.style.transform = ''; }
+      if (inc) { inc.animate([{ transform: `translateX(${x}%)` }, { transform: 'none' }], opts); inc.style.zIndex = ''; }
       leaving.current = out ? out.animate([{ transform: 'none' }, { transform: `translateX(${-x}%)` }], { ...opts, fill: 'forwards' }) : null;
       setSlide({ from: tab });
       setTab(prep);
@@ -110,10 +134,15 @@ export function SymbolMenu(p: SymbolMenuProps) {
   useAnimatedEmoji(p.open);   // каталог анимаций эмодзи: под курсором эмодзи панели оживает, как в выборе иконки папки
   const body = (t: Tab) => {
     if (!built[t]) return null;
+    // скрытая вкладка — content-visibility: hidden (не display: none): её стили и раскладка сохраняются, и показ
+    // стоит доли миллисекунды, а не пересчёт 1 300 узлов (стоп-кадр ≈120 мс при CPU ×6). inert не ставим: его смена
+    // пересчитывает стили всего дерева; фокус и поиск по странице content-visibility и так пропускает.
+    // Впервые построенная вкладка WARM_MS рисуется под текущей (warm) — раскладка и кадры стикеров есть до показа
     const off = t !== tab && t !== prep && t !== slide?.from;
+    const hide = off && warm[t];
     return (
-      // inert меняется только вместе с hidden: на видимой вкладке он пересчитывал бы стили всего её дерева
-      <div class="app-sym-body" key={t} ref={(el) => { bodies.current[t] = el; }} hidden={off} inert={off}>
+      <div class="app-sym-body" key={t} ref={(el) => { bodies.current[t] = el; }} data-off={hide ? '' : undefined} aria-hidden={off || undefined}
+        style={off && !warm[t] ? { zIndex: -1 } : undefined}>
         {t === 'emoji' ? <EmojiTabMemo onPick={stable.emoji} animate={stable.animate} tones epoch={epoch} /> : <StickersTabMemo onPick={stable.sticker} epoch={epoch} />}
       </div>
     );
@@ -146,6 +175,8 @@ export function SymbolMenu(p: SymbolMenuProps) {
 interface SectionsState { active: number; top: boolean; subs: Set<() => void>; jump: { i: number; at: number; anim: boolean } | null }
 /** Секции просят наполниться заранее (переход к категории): событие на элементе секции. */
 const SEC_SHOW = 'app-sym-show';
+/** Вкладка скрыта (content-visibility: hidden) — «не пересекается» от её наблюдателей ничего не значит. */
+const tabOff = (el: Element | null) => !el || !!el.closest('[data-off]') || !el.getClientRects().length;
 // Переход к секции — как в Telegram Web K: издалека встаём в 150 px от цели и доезжаем их за 150 мс, а не летим
 // через все категории (полёт перебирал подсветку полосы и показывал недорисованные секции)
 const JUMP_PX = 150, JUMP_MS = 150;
@@ -436,7 +467,7 @@ function EmojiSection({ cat, eager, root, ctx, selected, toneOf }: { cat: { id: 
       const e = es[es.length - 1];
       clearTimeout(t);
       // вкладка или панель скрыты (display: none) — «не пересекается» ничего не значит, держим
-      if (!e.isIntersecting && root.current?.getClientRects().length) t = window.setTimeout(() => setWin(null), UNLOAD_MS);
+      if (!e.isIntersecting && !tabOff(root.current)) t = window.setTimeout(() => setWin(null), UNLOAD_MS);
     }, { root: root.current, rootMargin: '1200px 0px' });
     io.observe(sec);
     // уже наполняется, но не с той стороны, что будет видна после перехода — догнать ту сторону сразу
@@ -638,7 +669,7 @@ function useNear(el: { current: HTMLElement | null }, root: { current: HTMLEleme
     if (!el.current) return;
     const io = new IntersectionObserver((es) => {
       const e = es[es.length - 1];
-      if (!e.isIntersecting && !root.current?.getClientRects().length) return;   // вкладка скрыта
+      if (!e.isIntersecting && tabOff(root.current)) return;   // вкладка скрыта
       setNear(e.isIntersecting);
     }, { root: root.current, rootMargin: '300px 0px' });
     io.observe(el.current);
