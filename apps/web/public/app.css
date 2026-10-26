@@ -1411,3 +1411,22 @@ html[data-anim="0"] :is(.app-enter-reload, .app-enter-login) :is(.rl-shell-side,
 .app-pollres-note { margin: 8px 4px 0; color: var(--ink-muted); font: 400 13px/18px var(--font-sans); }
 /* «Информация»: строки профиля — карточкой; нет ни одной строки (звук теперь кнопкой в ряду над ней) — карточки нет */
 .app-info-rows:not(:has(.rl-inforow)) { display: none; }
+/* ---------- ряд кнопок в шапке с фото (как в Telegram Web K) ----------
+   Ряд прижат к низу шапки и едет вместе с ним (одна раскладка при раскрытии): шапка выше на ряд и отступы (58 + 2 × 15 = 88):
+   от статуса до ряда и от ряда до карточки под шапкой (20 + её 8) — по ~28 px, как в Telegram Web K.
+   Свёрнута — белые плитки под именем; раскрыта — полупрозрачные поверх фото, имя и статус встают над рядом. */
+.app-hero { --hero-acts: 0px; }
+.app-hero.has-actions { --hero-acts: 88px; height: calc(216px + var(--hero-acts)); }
+.app-hero.has-actions.has-music { height: calc(240px + var(--hero-acts)); }
+.app-hero.has-actions.is-expanded { height: 100cqw; }
+.app-hero.is-expanded .app-hero-info { top: calc(100cqw - 66px - var(--hero-acts)); }
+.app-hero.is-expanded.has-music .app-hero-info { top: calc(100cqw - 66px - 24px - var(--hero-acts)); }
+.app-hero-actions { position: absolute; left: 0; right: 0; bottom: 20px; z-index: 2; }
+.app-hero.has-music .app-hero-actions { bottom: 44px; }   /* над полосой музыки (24) */
+.app-hero-actions .rl-pacts { margin: 0 var(--space-3); }
+.app-hero-actions .rl-pact { transition: background-color .3s var(--hero-ease), color .3s var(--hero-ease), box-shadow .3s var(--hero-ease); }
+.app-hero.is-expanded .app-hero-actions .rl-pact { background: rgba(255, 255, 255, .2); color: #fff; box-shadow: none; -webkit-backdrop-filter: blur(12px); backdrop-filter: blur(12px); }
+.app-hero.is-expanded .app-hero-actions .rl-pact:is(:hover, :focus-visible, .is-open) { background: rgba(255, 255, 255, .3); }
+.app-hero.is-expanded .app-hero-actions .rl-pact:focus-visible { outline-color: #fff; }
+:root[data-theme="dark"] .app-hero.is-expanded .app-hero-actions .rl-pact { background: rgba(0, 0, 0, .2); }
+@media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) .app-hero.is-expanded .app-hero-actions .rl-pact { background: rgba(0, 0, 0, .2); } }
