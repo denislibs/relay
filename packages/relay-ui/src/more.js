@@ -834,6 +834,9 @@ function Wallpaper(props) {
         // нарисованный узор ещё грузится: держим прежний (или градиент без узора), а когда придёт — проявится кроссфейдом
         var ready = P.pattern === false || patternReady(set);
         if (!ready) loadPattern(set).then(function () { if (rerun.current === apply) apply(true); }, function () {});
+        // waitPattern: под обоями уже лежит готовая картинка (каркас приложения со снимком обоев) — первые обои не
+        // создаём без узора: в тёмной теме это голый градиент без маски, вспышка цвета. Узор придёт — apply(true)
+        if (!ready && !wp && P.waitPattern && !P.image) return;
         var key = [t.dark, colors.join(), P.pattern, ready, P.intensity, !!P.image].join('|');
         if (theme && key === lastKey) return;
         var modeChanged = theme && t.dark !== theme.dark;
@@ -1041,7 +1044,7 @@ function FloatShell(props) {
     if (props.screen && matchMedia('(max-width: 720px)').matches && !reducedMotion()) beginHeavyAnimation(SCREEN_MS + 20);
   }, [props.screen]);
   return h('div', { ref: ref, class: cx('rl-shell rl-wallpaper', props.wallpaper !== false && 'rl-shell-tw', float && 'rl-shell-float', props.class), style: props.style, 'data-screen': props.screen || undefined },
-    props.wallpaper !== false ? h(Wallpaper, { pattern: props.pattern, colors: props.wallpaperColors, blur: props.wallpaperBlur, dark: props.wallpaperDark, intensity: props.wallpaperIntensity, image: props.wallpaperImage }) : null,
+    props.wallpaper !== false ? h(Wallpaper, { pattern: props.pattern, colors: props.wallpaperColors, blur: props.wallpaperBlur, dark: props.wallpaperDark, intensity: props.wallpaperIntensity, image: props.wallpaperImage, waitPattern: props.wallpaperWaitPattern }) : null,
     props.rail || null,
     props.sidebar ? h('div', { class: 'rl-shell-side' }, props.sidebar,
       props.onSideResize ? h(SideResizer, { min: props.sideMin, max: props.sideMax, onChange: props.onSideResize }) : null) : null,

@@ -192,7 +192,15 @@ render(<App />, document.getElementById('app')!);
             const d = m.shellDiff(m.shellSignature(own), m.shellSignature(app));
             if (d) console.warn('[shell] каркас (public/shell.html) не совпадает с первым кадром приложения:', d, '— обновить: copy(__relayShellSnapshot()) в консоли сразу после загрузки и вставить в public/shell.html');
           });
-          setTimeout(drop, 350);
+          // и обои приложения встали (они ждут узор — Wallpaper waitPattern; до того видны обои каркаса), но не дольше 3 с
+          setTimeout(() => {
+            const has = () => !!document.querySelector('#app .rl-tw canvas');
+            if (has()) { drop(); return; }
+            const tw = document.querySelector('#app .rl-tw');
+            const mo = new MutationObserver(() => { if (has()) { mo.disconnect(); clearTimeout(t); drop(); } });
+            if (tw) mo.observe(tw, { childList: true });
+            const t = setTimeout(() => { mo.disconnect(); drop(); }, 3000);
+          }, 350);
         }));
       }
     });
