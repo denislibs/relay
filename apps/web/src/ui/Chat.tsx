@@ -445,7 +445,7 @@ export function Chat({ chatId, frameKey, active, threadId }: { chatId: number; f
     // композер растёт или сжимается. Во время анимации (панель ответа/правки) отступ ленты не трогаем — иначе
     // каждый кадр перестраивается вся лента: прижатую к низу ленту только сдвигаем transform'ом (композитор),
     // а настоящий отступ ставим один раз, когда анимация кончилась (сдвиг снимаем в том же кадре — без скачка)
-    let committed = parseFloat(main.style.getPropertyValue('--composer-h')) || 0, target = 0, waiting = false;
+    let committed = parseFloat(main.style.getPropertyValue('--composer-h')) || 0, target = 0, exact = 0, waiting = false;
     const commit = () => {
       waiting = false;
       committed = target;
@@ -453,11 +453,13 @@ export function Chat({ chatId, frameKey, active, threadId }: { chatId: number; f
       if (feed) { feed.style.transform = ''; if (stick.current) feed.scrollTop = 1e9; }
     };
     const ro = new ResizeObserver(([e]) => {
-      target = Math.round(e.borderBoxSize?.[0]?.blockSize ?? wrap.offsetHeight);
+      exact = e.borderBoxSize?.[0]?.blockSize ?? wrap.offsetHeight;
+      target = Math.round(exact);
       if (!target) return;   // поле убрали из дерева (замена панелью выбора) — ноль не настоящая высота
       if (!committed || !isHeavyAnimating()) { requestMutation(commit); return; }
       // сдвиг — сразу, в этом же кадре (наблюдатель срабатывает до отрисовки): лента идёт ровно вместе с полем
-      if (feed && stick.current) feed.style.transform = target === committed ? '' : `translateY(${committed - target}px)`;
+      // дробно, как идёт само поле: целые пиксели давали шаг 1–2 px не в такт плавной прокрутке — лента дрожала
+      if (feed && stick.current) feed.style.transform = Math.abs(exact - committed) < 0.01 ? '' : `translateY(${committed - exact}px)`;
       if (!waiting) { waiting = true; onHeavyAnimationEnd(() => requestMutation(commit)); }
     });
     ro.observe(wrap);

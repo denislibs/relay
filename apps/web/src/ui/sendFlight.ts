@@ -8,6 +8,7 @@
 // Без полной анимации (настройка «Анимации», reduced motion), со скрытой вкладкой и для пузыря выше экрана — не летим.
 import { requestMeasure, requestMutation } from '@relay/ui';
 import { getPrefs } from '../prefs';
+import { bezier } from './scrollDrive';
 
 export const FLIGHT_MS = 300;
 const EASE_X = 'cubic-bezier(.23, 1, .32, 1)';
@@ -30,6 +31,8 @@ export type Flight = {
   radius: string;
   timer: ReturnType<typeof setTimeout>;
   claimed: boolean;
+  unfollow?: () => void;   // перестать догонять место посадки (follow)
+  hold?: Animation;        // цель спрятана анимацией: перерисовка строки (сервер подтвердил) класс снимает, анимацию — нет
 };
 
 const pending: Flight[] = [];
@@ -86,6 +89,7 @@ function drop(f: Flight): void {
 
 export function giveUp(f: Flight): void {
   drop(f);
+  f.unfollow?.();
   const a = f.layer.animate([{ opacity: 1 }, { opacity: 0 }], { duration: GIVE_UP_MS, fill: 'forwards' });
   a.onfinish = () => f.layer.remove();
 }
@@ -139,6 +143,11 @@ export function captureSticker(chatId: number): void {
  */
 export function launchBox(f: Flight, msg: HTMLElement, remaining: () => number): void {
   msg.classList.add('app-flight-target');
+  // спрятан и анимацией: перерисовка строки (сервер подтвердил) класс снимает, анимацию — нет
+  f.hold = msg.animate([{ opacity: 0 }, { opacity: 0 }], { duration: FLIGHT_MS * 5, fill: 'forwards' });
+  // стикер сообщения подключаем сейчас: в полёте показывается его живая анимация (как в tweb летит сам стикер)
+  const sticker = f.box ? msg.querySelector<HTMLElement>('.rl-sticker-box .rl-sticker') : null;
+  if (sticker) { sticker.dataset.fly = '1'; sticker.dispatchEvent(new Event('rl-sticker-fly')); }   // метка — если стикер ещё не подписался
   requestMeasure(() => {
     const target = msg.querySelector<HTMLElement>('.rl-emoji-text') ?? msg.querySelector<HTMLElement>('.rl-sticker-box .rl-sticker') ?? msg.querySelector<HTMLElement>('.rl-sticker-box');
     if (!msg.isConnected || !target) { requestMutation(() => finish(f, msg)); return; }
@@ -147,26 +156,59 @@ export function launchBox(f: Flight, msg: HTMLElement, remaining: () => number):
     if (!f.box && target.classList.contains('rl-emoji-text')) { const rg = document.createRange(); rg.selectNodeContents(target); const gr = rg.getBoundingClientRect(); if (gr.width) r = gr; }
     const dy = remaining();
     const dst: Box = { left: r.left, top: r.top - dy, width: r.width, height: r.height };
-    let src = f.src, flyer: HTMLElement;
+    let src = f.src, flyer: HTMLElement, origin = '50% 50%';
     if (f.box) flyer = f.box;
     else {
-      // копия текста поля: место и размер самих глифов (Range), а не всего поля
+      // копия текста поля: место и размер самих глифов (Range), а не всего поля; растёт от их центра
       const range = document.createRange(); range.selectNodeContents(f.text);
-      const g = range.getBoundingClientRect();
+      const g = range.getBoundingClientRect(), t = f.text.getBoundingClientRect();
       if (!g.width) { requestMutation(() => finish(f, msg)); return; }
       src = boxOf(g); flyer = f.text;
+      origin = `${g.left - t.left + g.width / 2}px ${g.top - t.top + g.height / 2}px`;
     }
     const k = dst.height / src.height;
-    const origin = f.box ? '0 0' : `${src.left - f.text.getBoundingClientRect().left}px ${src.top - f.text.getBoundingClientRect().top}px`;
+    // как в tweb: центр едет дугой — по горизонтали (вместе с ростом) быстрая кривая, по вертикали медленная;
+    // растёт от центра, а не от угла
+    const dx = dst.left + dst.width / 2 - (src.left + src.width / 2), dyc = dst.top + dst.height / 2 - (src.top + src.height / 2);
     requestMutation(() => {
+      const up = document.createElement('div');
+      up.className = 'app-flight-up';
+      flyer.replaceWith(up);
+      up.appendChild(flyer);
       flyer.style.transformOrigin = origin;
-      const way = flyer.animate([
-        { transform: 'none' },
-        { transform: `translate(${dst.left - src.left}px, ${dst.top - src.top}px) scale(${k})` },
-      ], { duration: FLIGHT_MS, easing: EASE_Y, fill: 'forwards' });
+      up.animate([{ transform: 'none' }, { transform: `translateY(${dyc}px)` }], { duration: FLIGHT_MS, easing: EASE_Y, fill: 'forwards' });
+      const way = flyer.animate([{ transform: 'none' }, { transform: `translateX(${dx}px) scale(${k})` }], { duration: FLIGHT_MS, easing: EASE_X, fill: 'forwards' });
+      follow(f, target, dst.top, remaining);
+      if (sticker && f.box) mirror(f, f.box, sticker);   // после follow: снимает свою остановку поверх его
       landWhen(way, () => finish(f, msg));
     });
   });
+}
+
+/**
+ * В летящий стикер — живые кадры стикера сообщения: пока его анимация не нарисовала первый кадр, виден снимок
+ * ячейки панели; как нарисовала — каждый кадр копируем её канвас поверх, снимок гаснет за 80 мс (как в tweb).
+ */
+function mirror(f: Flight, box: HTMLElement, sticker: HTMLElement): void {
+  const live = document.createElement('canvas');
+  live.className = 'app-flight-live';
+  box.appendChild(live);
+  const shot = box.firstElementChild as HTMLElement | null;
+  let on = true, shown = false;
+  const prev = f.unfollow;
+  f.unfollow = () => { on = false; prev?.(); };
+  const frame = () => {
+    if (!on) return;
+    const src = sticker.querySelector<HTMLCanvasElement>('canvas.rl-sticker-canvas');
+    if (src && sticker.dataset.drawn && src.width) {
+      if (live.width !== src.width) { live.width = src.width; live.height = src.height; }
+      const ctx = live.getContext('2d');
+      if (ctx) { ctx.clearRect(0, 0, live.width, live.height); ctx.drawImage(src, 0, 0); }
+      if (!shown) { shown = true; if (shot && shot !== live) shot.animate([{ opacity: 1 }, { opacity: 0 }], { duration: 80, fill: 'forwards' }); }
+    }
+    requestAnimationFrame(frame);
+  };
+  requestAnimationFrame(frame);
 }
 
 // ---------- голосовое и кружок: круг из поля в сообщение ----------
@@ -181,8 +223,13 @@ export function captureCircle(chatId: number, el: Element | null, kind: 'voice' 
   const box = document.createElement('div');
   box.className = 'app-flight-box app-flight-circle';
   Object.assign(box.style, { left: r.left + 'px', top: r.top + 'px', width: r.width + 'px', height: r.height + 'px' });
-  if (kind === 'voice') box.style.background = getComputedStyle(el).backgroundColor;
-  else {
+  if (kind === 'voice') {
+    // как в tweb: круг непрозрачный, в нём копия кнопки отправки (микрофон), которая по пути уступает «играть»
+    box.style.background = getComputedStyle(el).backgroundColor;
+    const icon = controlCopy(el);
+    icon.classList.add('app-flight-from');
+    box.appendChild(icon);
+  } else {
     const v = el.querySelector('video'), shot = v ? snapshot(el) : null;
     if (shot) box.appendChild(shot); else box.style.background = '#000';
   }
@@ -194,7 +241,32 @@ export function captureCircle(chatId: number, el: Element | null, kind: 'voice' 
   pending.push(f);
 }
 
-/** Посадка круга: в кнопку «играть» голосового или в кружок. Цель спрятана и проявляется под конец, круг гаснет. */
+/**
+ * Копия значка круглой кнопки: фон и цвет — снятые со стиля (копия живёт вне ленты, классы там не действуют),
+ * видимый значок — клоном svg своего размера, по центру. Кладётся в летящий круг на всю его площадь.
+ */
+function controlCopy(el: Element): HTMLElement {
+  const cs = getComputedStyle(el);
+  const copy = document.createElement('div');
+  copy.className = 'app-flight-icon';
+  copy.style.background = cs.backgroundColor;
+  copy.style.color = cs.color;
+  // видимость не смотрим: кнопка-цель на время полёта спрятана (visibility), а значок нужен её
+  const svg = Array.from(el.querySelectorAll('svg')).find((g) => { const r = g.getBoundingClientRect(), gs = getComputedStyle(g); return r.width > 0 && gs.display !== 'none' && gs.opacity !== '0'; });
+  if (svg) {
+    const r = svg.getBoundingClientRect(), g = svg.cloneNode(true) as SVGElement;
+    g.style.width = r.width + 'px'; g.style.height = r.height + 'px';
+    g.removeAttribute('class');
+    copy.appendChild(g);
+  }
+  return copy;
+}
+
+/**
+ * Посадка круга: в кнопку «играть» голосового или в кружок. Путь — как у пузыря: по горизонтали (сдвиг и размер)
+ * быстрая кривая, по вертикали медленная. Голосовое — как в tweb: круг непрозрачный, микрофон по пути перетекает
+ * в «играть», круг садится на кнопку и уступает ей место. Кружок: кадр видео гаснет, проявляется сам кружок.
+ */
 export function launchCircle(f: Flight, target: HTMLElement, remaining: () => number): void {
   target.classList.add('app-flight-target');
   const row = target.closest('.app-msg');
@@ -203,17 +275,33 @@ export function launchCircle(f: Flight, target: HTMLElement, remaining: () => nu
     if (!target.isConnected || !f.box) { requestMutation(() => finish(f, target)); return; }
     const r = target.getBoundingClientRect(), dy = remaining();
     const dst: Box = { left: r.left, top: r.top - dy, width: r.width, height: r.height }, src = f.src;
+    const voice = f.circle === 'voice', to = voice ? controlCopy(target) : null;
     requestMutation(() => {
       const box = f.box!;
-      box.style.transformOrigin = '0 0';
-      const way = box.animate([
-        { transform: 'none', opacity: 1 },
-        { opacity: 1, offset: 0.7 },
-        { transform: `translate(${dst.left - src.left}px, ${dst.top - src.top}px) scale(${dst.width / src.width}, ${dst.height / src.height})`, opacity: 0 },
-      ], { duration: FLIGHT_MS, easing: EASE_Y, fill: 'forwards' });
-      // цель проявляется последние 30% пути — круг «становится» кнопкой / кружком (по времени самого полёта)
-      const reveal = target.animate([{ opacity: 0 }, { opacity: 0, offset: 0.7 }, { opacity: 1 }], { duration: FLIGHT_MS, fill: 'backwards' });
-      reveal.ready.then(() => requestMutation(() => target.classList.remove('app-flight-target')));
+      const dx = dst.left + dst.width / 2 - (src.left + src.width / 2), dy2 = dst.top + dst.height / 2 - (src.top + src.height / 2);
+      // вертикаль — обёртка (медленная кривая), горизонталь и размер — сам круг от центра (быстрая)
+      const up = document.createElement('div');
+      up.className = 'app-flight-up';
+      box.replaceWith(up);
+      up.appendChild(box);
+      box.style.transformOrigin = '50% 50%';
+      up.animate([{ transform: 'none' }, { transform: `translateY(${dy2}px)` }], { duration: FLIGHT_MS, easing: EASE_Y, fill: 'forwards' });
+      const way = box.animate([{ transform: 'none' }, { transform: `translateX(${dx}px) scale(${dst.width / src.width}, ${dst.height / src.height})` }], { duration: FLIGHT_MS, easing: EASE_X, fill: 'forwards' });
+      if (voice && to) {
+        f.hold = target.animate([{ opacity: 0 }, { opacity: 0 }], { duration: FLIGHT_MS * 5, fill: 'forwards' });
+        // микрофон уступает «играть» по ходу пути вниз (как в tweb); сам круг не гаснет — садится и меняется на кнопку
+        to.classList.add('app-flight-to');
+        box.appendChild(to);
+        box.animate([{ backgroundColor: getComputedStyle(box).backgroundColor }, { backgroundColor: to.style.background }], { duration: FLIGHT_MS, easing: EASE_Y, fill: 'forwards' });
+        box.querySelector<HTMLElement>('.app-flight-from')?.animate([{ opacity: 1 }, { opacity: 0 }], { duration: FLIGHT_MS, easing: EASE_Y, fill: 'forwards' });
+        to.animate([{ opacity: 0 }, { opacity: 1 }], { duration: FLIGHT_MS, easing: EASE_Y, fill: 'forwards' });
+      } else {
+        // кружок: кадр записи гаснет к концу, сам кружок проявляется под ним
+        box.animate([{ opacity: 1 }, { opacity: 1, offset: 0.7 }, { opacity: 0 }], { duration: FLIGHT_MS, fill: 'forwards' });
+        const reveal = target.animate([{ opacity: 0 }, { opacity: 0, offset: 0.7 }, { opacity: 1 }], { duration: FLIGHT_MS, fill: 'backwards' });
+        reveal.ready.then(() => requestMutation(() => target.classList.remove('app-flight-target')));
+      }
+      follow(f, target, dst.top, remaining);
       landWhen(way, () => finish(f, target));
     });
   });
@@ -265,38 +353,78 @@ export function launch(f: Flight, bubble: HTMLElement, remaining: () => number):
         y.animate([{ transform: `translateY(${dy}px)` }, { transform: 'none' }], opts(EASE_Y));
         return { x, y };
       };
-      // фон: капсула → пузырь
-      const back = axes(dst.left, dst.top, f.src.left - dst.left, f.src.top - dst.top);
+      // фон: капсула → пузырь. Ось — целиком на своей кривой: по горизонтали левый край и ширина вместе (быстрая),
+      // по вертикали верх и высота вместе (медленная). Иначе левый край убегает вперёд ширины, и правый край
+      // раздувается за колонку (было до ~190 px). Так правый и нижний края идут ровно от капсулы к пузырю
       const bg = document.createElement('div');
       bg.className = 'app-flight-bg';
       bg.style.background = bs.backgroundColor;
       bg.style.boxShadow = bs.boxShadow;
-      back.y.appendChild(bg);
+      bg.animate([
+        { left: f.src.left + 'px', width: f.src.width + 'px' },
+        { left: dst.left + 'px', width: dst.width + 'px' },
+      ], opts(EASE_X));
       const way = bg.animate([
-        { width: f.src.width + 'px', height: f.src.height + 'px', borderRadius: f.radius },
-        { width: dst.width + 'px', height: dst.height + 'px', borderRadius: bs.borderRadius },
+        { top: f.src.top + 'px', height: f.src.height + 'px', borderRadius: f.radius },
+        { top: dst.top + 'px', height: dst.height + 'px', borderRadius: bs.borderRadius },
       ], opts(EASE_Y));
       bg.animate([{ opacity: 0 }, { opacity: 1 }], { duration: 100, fill: 'forwards' });
+      // время и галочки едут на правом нижнем углу фона, а не с текстом: копия пузыря, где видно только их, движется
+      // так, что её угол всё время совпадает с углом фона (те же кривые по осям)
+      const corner = axes(dst.left, dst.top, f.src.left + f.src.width - dst.width - dst.left, f.src.top + f.src.height - dst.height - dst.top);
+      const metaCopy = bubble.cloneNode(true) as HTMLElement;
+      metaCopy.classList.remove('app-flight-target', 'rl-appear-out', 'rl-appear-in');
+      metaCopy.classList.add('app-flight-body', 'app-flight-meta');
+      Object.assign(metaCopy.style, { width: dst.width + 'px', height: dst.height + 'px', boxSizing: 'border-box', animation: 'none', background: 'transparent', boxShadow: 'none' });
+      corner.y.appendChild(metaCopy);
+      metaCopy.querySelector<HTMLElement>('.rl-bubble-meta')?.animate([{ opacity: 0 }, { opacity: 0, offset: 0.2 }, { opacity: 1 }], { duration: FLIGHT_MS * 0.9, fill: 'backwards' });
       // содержимое пузыря (без фона): от текста поля к своему месту
       const front = axes(dst.left, dst.top, from.left - dst.left, from.top - dst.top);
       const body = bubble.cloneNode(true) as HTMLElement;
       body.classList.remove('app-flight-target', 'rl-appear-out', 'rl-appear-in');
       body.classList.add('app-flight-body');
-      Object.assign(body.style, { width: dst.width + 'px', height: dst.height + 'px', animation: 'none', background: 'transparent', boxShadow: 'none' });
+      Object.assign(body.style, { width: dst.width + 'px', height: dst.height + 'px', boxSizing: 'border-box', animation: 'none', background: 'transparent', boxShadow: 'none' });
       front.y.appendChild(body);
       body.animate([{ opacity: 0 }, { opacity: 1 }], { duration: 80, fill: 'backwards' });
-      const meta = body.querySelector<HTMLElement>('.rl-bubble-meta');
-      meta?.animate([{ opacity: 0 }, { opacity: 0, offset: 0.2 }, { opacity: 1 }], { duration: FLIGHT_MS * 0.9, fill: 'backwards' });
       // текст поля летит тем же путём, что текст пузыря, и гаснет за 100 мс — его сменяет такой же
       const field = axes(0, 0, 0, 0);
       field.x.animate([{ transform: 'none' }, { transform: `translateX(${dst.left - from.left}px)` }], opts(EASE_X));
       field.y.animate([{ transform: 'none' }, { transform: `translateY(${dst.top - from.top}px)` }], opts(EASE_Y));
       field.y.appendChild(f.text);
       f.text.animate([{ opacity: 1 }, { opacity: 0 }], { duration: 100, fill: 'forwards' });
-      f.layer.append(back.x, front.x, field.x);
+      f.layer.append(bg, corner.x, front.x, field.x);
+      follow(f, bubble, dst.top, remaining);
       landWhen(way, () => finish(f, bubble));
     });
   });
+}
+
+const curveY = bezier(...FLIGHT_SCROLL.curve);
+
+/**
+ * Место посадки сдвинулось по дороге (дорисовался стикер, выросло поле ввода, пришло ещё сообщение) — слой плавно
+ * догоняет его, а не прыгает в конце: смещение растёт к новому месту, к концу пути — целиком. Пока место то же,
+ * ничего не пишем. Кадр — одно чтение (measure) и одна запись (mutation).
+ */
+function follow(f: Flight, el: HTMLElement, top: number, remaining: () => number): void {
+  const t0 = performance.now();
+  let on = true, applied = 0;
+  f.unfollow = () => { on = false; };
+  const tick = () => requestMeasure(() => {
+    if (!on || !el.isConnected) return;
+    const delta = el.getBoundingClientRect().top - remaining() - top;   // где пузырь встанет, когда лента доедет
+    const p = Math.min(1, (performance.now() - t0) / FLIGHT_MS);
+    const next = applied + (delta - applied) * Math.max(0.35, curveY(p));
+    requestMutation(() => {
+      if (!on) return;
+      if (Math.abs(next - applied) > 0.25 || (Math.abs(next) > 0.25) !== (Math.abs(applied) > 0.25)) {
+        applied = next;
+        f.layer.style.transform = Math.abs(applied) > 0.25 ? `translateY(${applied}px)` : '';
+      }
+      tick();
+    });
+  });
+  tick();
 }
 
 /**
@@ -312,6 +440,8 @@ function landWhen(way: Animation, land: () => void): void {
 
 function finish(f: Flight, el: HTMLElement): void {
   drop(f);
+  f.unfollow?.();
+  f.hold?.cancel();
   const row = el.closest<HTMLElement>('.app-msg');
   el.classList.remove('app-flight-target');
   row?.classList.remove('app-flight-row');

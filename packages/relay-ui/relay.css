@@ -1255,7 +1255,12 @@ button.rl-tab:hover { color: var(--ink); }
 .rl-pop > .rl-menu { position: relative; min-width: 13.5rem; animation: rl-menu-in 150ms cubic-bezier(.2, 0, .2, 1) both; }
 .rl-pop[data-state="closing"] > .rl-menu, .rl-pop[data-state="closing"] > .rl-pop-header { animation: rl-menu-out 200ms ease-in forwards; }
 @keyframes rl-menu-out { from { opacity: 1; transform: none; } to { opacity: 0; transform: scale(0.85); } }
-.rl-pop-header { position: absolute; left: 0; bottom: calc(100% + 8px); max-width: calc(100% + 40px); }   /* панель реакций выступает за меню вправо на 40 px, как в Telegram */
+/* панель реакций — как в tweb: на 8 px над меню, шире его на 16 px влево и на 40 px вправо (хвостик — справа, к
+   сообщению); кнопки делят ширину поровну, не шире 36 px */
+.rl-pop-header { position: absolute; left: -16px; right: -40px; bottom: calc(100% + 8px); }
+.rl-pop-header > .rl-rpick { display: flex; width: 100%; justify-content: space-between; box-sizing: border-box; }
+.rl-pop-header .rl-rpick-btn { flex: 1 1 0; min-width: 0; max-width: 36px; }
+.rl-pop-header .rl-rpick-more { flex: 0 0 32px; }
 .rl-pop .rl-rpick { background: color-mix(in srgb, var(--raised) 92%, transparent); -webkit-backdrop-filter: blur(50px); backdrop-filter: blur(50px); }
 html[data-blur="0"] .rl-pop .rl-menu, html[data-blur="0"] .rl-pop .rl-rpick { -webkit-backdrop-filter: none; backdrop-filter: none; background: color-mix(in srgb, var(--raised) 96%, transparent); }
 :root[data-screen-blur] .rl-pop { filter: blur(16px) brightness(.8); }

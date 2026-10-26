@@ -209,6 +209,28 @@ class Player {
  * (только со shared:false: у общего плеера часы общие).
  */
 let privateSeq = 0;
+
+// Последний нарисованный кадр каждого адреса — у любого размера. Стикер, который уже виден в одном месте (панель,
+// 64 px), в другом (лента, 200 px) открывает свой рендерер и ждёт кадр из воркера; пока ждёт — вместо силуэта
+// показываем этот кадр. Живые канвасы — как есть; ушедший канвас оставляет копию (последние LAST_MAX адресов)
+const liveCanvases = new Map();   // url → Set<canvas>
+const lastCopies = new Map();     // url → canvas (копия последнего кадра)
+const LAST_MAX = 24;
+function keepCopy(url, canvas) {
+  if (!canvas.width || typeof document === 'undefined') return;
+  const c = document.createElement('canvas');
+  c.width = canvas.width; c.height = canvas.height;
+  try { c.getContext('2d').drawImage(canvas, 0, 0); } catch { return; }
+  lastCopies.delete(url);
+  lastCopies.set(url, c);
+  while (lastCopies.size > LAST_MAX) lastCopies.delete(lastCopies.keys().next().value);
+}
+/** Кадр этого стикера, уже нарисованный где-то ещё (канвас или его копия), или null. */
+export function drawnFrame(url) {
+  for (const c of liveCanvases.get(url) ?? []) if (c.isConnected && c.width) return c;
+  return lastCopies.get(url) ?? null;
+}
+
 export function attachSticker({ url, px, canvas, group = 'feed', play = true, loop, force = false, shared = true, atEnd = false, onFirstFrame, onEnded, onError }) {
   // shared:false — свои часы (эффекты реакций: две копии одной анимации не должны стартовать с середины
   // и заканчиваться вместе); рендерер и кэш кадров всё равно общие (pool)
@@ -223,7 +245,13 @@ export function attachSticker({ url, px, canvas, group = 'feed', play = true, lo
     draw(bmp) {
       ctx.clearRect(0, 0, px, px);
       ctx.drawImage(bmp, 0, 0, px, px);
-      if (first) { first = false; onFirstFrame?.(); }
+      if (first) {
+        first = false;
+        let set = liveCanvases.get(url);
+        if (!set) liveCanvases.set(url, (set = new Set()));
+        set.add(canvas);
+        onFirstFrame?.();
+      }
     },
   };
   pl.attach(view);
@@ -233,7 +261,11 @@ export function attachSticker({ url, px, canvas, group = 'feed', play = true, lo
     setPlay(v) { if (view.play !== v) { view.play = v; pl.update(); } },
     setLoop(v) { view.loop = v; },
     restart() { pl.restart(); },
-    destroy() { pl.detach(view); },
+    destroy() {
+      pl.detach(view);
+      const set = liveCanvases.get(url);
+      if (set?.delete(canvas)) { keepCopy(url, canvas); if (!set.size) liveCanvases.delete(url); }
+    },
   };
 }
 
