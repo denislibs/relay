@@ -332,12 +332,15 @@ html[data-blur="0"] .app-sidemenu .rl-menu { -webkit-backdrop-filter: none; back
 @keyframes app-plate-out { from { opacity: 1; transform: translateX(-50%); } to { opacity: 0; transform: translate(-50%, -12px); } }
 @keyframes app-plate-pulse { 50% { opacity: .35; } }
 
-.app-dev { background: var(--page); }
-.app-dev-tabs { padding: 0 var(--space-2) var(--space-2); }
+.app-dev { background: var(--page); --dev-tabs-h: 64px; }
+/* вкладки плавают над страницами, как в общих медиа: прокрутка уходит под них в растушёвку цветом фона
+   (::before ниже, общий с поиском); страницы начинаются под вкладками — отступ на их высоту */
+.app-dev-tabs { position: relative; z-index: 3; height: var(--dev-tabs-h); margin-bottom: calc(-1 * var(--dev-tabs-h)); box-sizing: border-box; padding: var(--space-2); pointer-events: none; --mtabs-fade: var(--page); }
+.app-dev-tabs > * { pointer-events: auto; }
 .app-dev-tabs .rl-tab { padding: 0 10px; font-size: 14px; }
 .app-dev-pages { position: relative; flex: 1; min-height: 0; display: flex; }
 .app-dev-pages .rl-slide { background: var(--page); }
-.app-dev-scroll { padding-top: var(--space-1); }
+.app-dev-scroll { padding-top: calc(var(--dev-tabs-h) + var(--space-1)); scroll-padding-top: var(--dev-tabs-h); }
 .app-kv { display: flex; align-items: baseline; gap: var(--space-3); min-height: 32px; padding: 6px var(--space-4); font: 400 14px/20px var(--font-sans); }
 .app-kv > span { flex: 1; min-width: 0; color: var(--ink-muted); white-space: pre; overflow: hidden; text-overflow: ellipsis; }
 .app-kv > b { flex: none; max-width: 62%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font: 500 13px/20px var(--font-mono); font-variant-numeric: tabular-nums; color: var(--ink); text-align: right; }
@@ -355,7 +358,7 @@ html[data-blur="0"] .app-sidemenu .rl-menu { -webkit-backdrop-filter: none; back
 .app-dev-pre { margin: 0 var(--space-3) var(--space-3); padding: var(--space-2) var(--space-3); max-height: 320px; overflow: auto; border-radius: var(--radius-md); background: var(--field); color: var(--ink); font: 400 12px/17px var(--font-mono); white-space: pre-wrap; overflow-wrap: anywhere; }
 
 /* журнал */
-.app-dev-log { position: relative; flex: 1; min-height: 0; display: flex; flex-direction: column; }
+.app-dev-log { position: relative; flex: 1; min-height: 0; display: flex; flex-direction: column; padding-top: var(--dev-tabs-h); }
 .app-dev-logtools { padding: var(--space-1) var(--space-2) 0; }
 .app-dev-logtools .rl-search { margin: 0 var(--space-1) var(--space-2); }
 .app-dev-chips { display: flex; flex-wrap: nowrap; gap: 6px; padding: 0 var(--space-2) var(--space-2); overflow-x: auto; scrollbar-width: none; }
@@ -929,7 +932,7 @@ html[data-anim="0"] :is(.app-hero, .app-hero-photo, .app-hero-info, .app-hero-na
 .app-gsearch-tabs > * { pointer-events: auto; }
 /* под вкладками — растушёвка цветом шапки, как menu-horizontal-gradient в Telegram Web K: 80 px от верха прокрутки,
    сверху сплошной цвет, к низу прозрачно; выдача, уехавшая под вкладки, плавно уходит в шапку (тёмная тема — 70 %) */
-.app-gsearch-tabs::before, .rl-aside-tabs::before { content: ''; position: absolute; z-index: -1; top: 0; left: 0; right: 0; height: 80px; pointer-events: none;
+.app-gsearch-tabs::before, .rl-aside-tabs::before, .app-dev-tabs::before { content: ''; position: absolute; z-index: -1; top: 0; left: 0; right: 0; height: 80px; pointer-events: none;
   background: linear-gradient(180deg, color-mix(in srgb, var(--mtabs-fade) var(--mtabs-fade-alpha), transparent), transparent); }
 .app-gsearch-tabs { --mtabs-fade: var(--card); }
 .rl-aside-tabs { --mtabs-fade: var(--page); }
