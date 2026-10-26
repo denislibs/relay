@@ -94,7 +94,7 @@ export class BlocksCache {
 /** blocksChanged из журнала. */
 export function applyBlocksChanged(store: Store, u: Extract<Update, { type: 'blocksChanged' }>, seq?: number): void {
   if (u.blocked) { if (store.blocks.applyBlocked(u.blocked, seq)) store.profile.applyUser(u.blocked.user, seq); }
-  else if (u.unblocked) store.blocks.applyUnblocked(u.unblocked, seq);
+  else if (u.unblocked) { store.blocks.applyUnblocked(u.unblocked, seq); store.refreshUser(u.unblocked); }
 }
 
 export type BlockView = BlockBase & { pending: boolean };

@@ -190,6 +190,8 @@ export class Store {
   profileLists!: ProfileLists;
   /** строке списка нужен профиль собеседника, которого нет в people; движок спросит GET /users/:id */
   wantUser: (userId: number) => void = () => {};
+  /** профиль в кэше мог устареть (разблокировали: прежний сервер присылал заблокированного без фото) — движок спросит заново */
+  refreshUser: (userId: number) => void = () => {};
   /** контакт зрителя с учётом очереди операций (names.ts); движок подставляет вид с очередью */
   contactOf: (userId: number) => { firstName: string; lastName: string; pending?: boolean } | undefined = (id) => this.contacts.table.get(id);
 
