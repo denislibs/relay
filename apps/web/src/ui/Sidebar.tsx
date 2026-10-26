@@ -27,6 +27,9 @@ import type { ProfilePhoto } from '@relay/protocol';
 import { avatarPhoto } from '../profilePhoto';
 import { installApp } from '../pwa';
 
+/** Скелетон списка уже нарисован каркасом приложения из index.html (boot.js → html[data-shell-skel]). */
+const SHELL_SKEL = typeof document !== 'undefined' && document.documentElement.hasAttribute('data-shell-skel');
+
 const rowPhoto = (p: ProfilePhoto | null) => { const a = avatarPhoto(p); return { avatarSrc: a.src, avatarThumb: a.thumb }; };
 
 
@@ -192,7 +195,9 @@ export function Sidebar() {
   const searchStatus = useGlobal((s) => s.syncLabel);
   // данных ещё нет: ждём снимок из кэша или первую загрузку с сервера
   const waiting = !loaded || (!chats.length && !status.hydrated && status.phase !== 'offline');
-  const skeleton = useMinVisible(waiting, { delay: 150, min: 600 });
+  // каркас из index.html уже показал скелетон списка (boot.js: прошлая загрузка была медленной) — свой такой же сразу,
+  // с первого кадра и без всплытия строк: он ложится поверх каркасного, подмена не видна
+  const skeleton = useMinVisible(waiting, { delay: 150, min: 600, immediate: SHELL_SKEL });
   // как в Telegram Web K: скелетон лежит слоем поверх списка; данные пришли — список уже под ним, а строки
   // скелетона стираются по одной (150 мс, сдвиг 15 мс) и открывают готовые диалоги — без пустого кадра
   // список, появившийся под скелетоном, своей анимации не получает и позже (снятие класса запустило бы её поверх стирания)
@@ -245,7 +250,7 @@ export function Sidebar() {
       <>
       <div ref={tagRef} class={'app-listwrap' + (fade ? ' is-fresh' : '')}>
         <Presence show={skeleton} exitMs={320}>
-          <div class="app-skel" aria-busy="true" aria-label="Загрузка чатов">
+          <div class={'app-skel' + (SHELL_SKEL ? ' app-skel-instant' : '')} aria-busy="true" aria-label="Загрузка чатов">
             {Array.from({ length: 9 }, (_, i) => <div key={i} style={{ '--i': i }}><ChatRowSkeleton /></div>)}
           </div>
         </Presence>

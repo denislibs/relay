@@ -13,6 +13,9 @@ html[data-shell] #shell { display: block; position: fixed; inset: 0; pointer-eve
 html:not([data-shell-wp]) #shell .rl-tw > * { display: none; }
 html[data-shell-wp="mask"] #shell .tw-canvas { -webkit-mask: center repeat; -webkit-mask-size: var(--tw-size) auto; -webkit-mask-image: var(--tw-image); mask: center repeat; mask-size: var(--tw-size) auto; mask-image: var(--tw-image); opacity: var(--tw-opacity); }
 html[data-shell-wp="mask"] #shell .tw-pattern { display: none; }
+/* скелетон списка в каркасе — только если прошлая загрузка списка была медленной (boot.js); на быстрых устройствах
+   строки приходят раньше, и мелькнувшие на миг плашки были бы вспышкой */
+html:not([data-shell-skel]) #shell .app-skel { display: none; }
 /* каркас был: обои приложения встают поверх таких же сразу, без проявления (иначе на 600 мс под ним был бы голый фон) */
 html[data-shell-was] #app .rl-tw .tw-canvas { animation: none; }
 .app-center { display: flex; align-items: center; justify-content: center; height: 100%; padding: var(--space-4); box-sizing: border-box; }
@@ -30,6 +33,7 @@ html[data-shell-was] #app .rl-tw .tw-canvas { animation: none; }
 /* скелетон ↔ список: скелетон всплывает построчно, уходит поверх появляющегося списка (crossfade) */
 .app-listwrap { position: relative; }
 .app-skel > div { animation: app-rise 320ms var(--ease-out) both; animation-delay: calc(var(--i) * 35ms); }
+.app-skel-instant > div { animation: none; }   /* скелетон, уже нарисованный каркасом (Sidebar) — на месте, без всплытия */
 /* слоем — сам скелетон: обёртка Presence — display: contents (своей коробки нет, position на ней не работает) */
 .app-listwrap > .rl-presence > .app-skel { position: absolute; inset: 0 0 auto 0; z-index: 1; pointer-events: none; }
 /* пока скелетон стоит, список под ним скрыт: данные, пришедшие во время проявления строк, не просвечивают

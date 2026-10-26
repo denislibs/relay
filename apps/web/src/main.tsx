@@ -149,24 +149,52 @@ render(<App />, document.getElementById('app')!);
 {
   const root = document.documentElement, shell = document.getElementById('shell');
   const drop = () => { shell?.remove(); root.removeAttribute('data-shell'); };
-  // обои каркаса — снимок настоящих (twallpaper): цвет фона, узор, градиент холста. boot.js ставит их переменными
-  // CSS до первого кадра. Обновляем в простое после списка, когда обои уже нарисованы
+  // обои каркаса — снимок настоящих (twallpaper): цвет фона, узор, градиент холста — свой у светлой и тёмной темы
+  // (relay.shellWp.light / .dark), boot.js берёт снимок своей темы и ставит переменными CSS до первого кадра.
+  // Снимаем в простое после списка, когда обои уже нарисованы, и заново — после смены обоев или темы
   const saveWallpaper = () => {
     const tw = document.querySelector<HTMLElement>('#app .rl-tw'), cv = tw?.querySelector<HTMLCanvasElement>('canvas.tw-canvas');
     if (!tw || !cv || !cv.width) return;
     const v = (k: string) => tw.style.getPropertyValue(k);
     try {
-      localStorage.setItem('relay.shellWp', JSON.stringify({ bg: v('--tw-background'), image: v('--tw-image'), size: v('--tw-size'), opacity: v('--tw-opacity'), mask: cv.classList.contains('tw-mask'), grad: cv.toDataURL('image/png') }));
+      localStorage.setItem('relay.shellWp.' + (isDark(getPrefs().theme) ? 'dark' : 'light'), JSON.stringify({ bg: v('--tw-background'), image: v('--tw-image'), size: v('--tw-size'), opacity: v('--tw-opacity'), mask: cv.classList.contains('tw-mask'), grad: cv.toDataURL('image/png') }));
     } catch { /* приватный режим, квота */ }
   };
-  const offWp = subscribeGlobal(() => { if (getGlobal().chatsLoaded) { offWp(); onFullyIdle(saveWallpaper); } });
+  // обои перерисовываются с переходом (300 мс) — снимок после него, в простое
+  let wpTimer: ReturnType<typeof setTimeout> | undefined;
+  const resnap = () => { clearTimeout(wpTimer); wpTimer = setTimeout(() => onFullyIdle(saveWallpaper), 1200); };
+  const wpOf = (p: Prefs) => JSON.stringify([p.theme, p.wallpaper]);
+  let wpKey = wpOf(getPrefs());
+  subscribePrefs((p) => { const k = wpOf(p); if (k !== wpKey) { wpKey = k; resnap(); } });
+  matchMedia('(prefers-color-scheme: dark)').addEventListener('change', resnap);
+  // время до списка — следующий запуск решит, рисовать ли в каркасе скелетон (boot.js: дольше 250 мс)
+  const offWp = subscribeGlobal(() => {
+    if (!getGlobal().chatsLoaded) return;
+    offWp();
+    try { localStorage.setItem('relay.listMs', String(Math.round(performance.now()))); } catch { /* приватный режим */ }
+    onFullyIdle(saveWallpaper);
+  });
   if (!shell || !root.hasAttribute('data-shell')) drop();
   else {
     const off = subscribeGlobal(() => {
       const b = getGlobal().boot;
       if (b === 'login') { off(); drop(); }
       // кадр приложения отрисован (рендер — в мутациях кадра, два rAF — после него), анимация появления доиграла
-      else if (b === 'app') { off(); requestAnimationFrame(() => requestAnimationFrame(() => setTimeout(drop, 350))); }
+      else if (b === 'app') {
+        off();
+        requestAnimationFrame(() => requestAnimationFrame(() => {
+          // dev: каркас совпадает с первым кадром приложения? (поменяли шапку или колонку — пора обновить shell.html)
+          if (__DEV__) void import('./devtools/shellMarkup').then((m) => {
+            const app = document.querySelector('#app > .rl-shell'), own = shell.querySelector('.rl-shell');
+            if (!app || !own) return;
+            const snap = m.snapshotShell(app);   // именно первый кадр: позже в колонке будут вкладки папок и строки
+            (window as unknown as { __relayShellSnapshot: () => string }).__relayShellSnapshot = () => snap;
+            const d = m.shellDiff(m.shellSignature(own), m.shellSignature(app));
+            if (d) console.warn('[shell] каркас (public/shell.html) не совпадает с первым кадром приложения:', d, '— обновить: copy(__relayShellSnapshot()) в консоли сразу после загрузки и вставить в public/shell.html');
+          });
+          setTimeout(drop, 350);
+        }));
+      }
     });
   }
 }

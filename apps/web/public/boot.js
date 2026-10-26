@@ -14,9 +14,12 @@ try { var d = document.documentElement, s = localStorage, p = JSON.parse(s.getIt
     // с открытым по адресу чатом первым экраном будет чат, а не список — тогда без каркаса
     if (s.getItem('relay.me') && !(matchMedia('(max-width: 720px)').matches && /(^#|&)chat=/.test(location.hash))) {
       d.setAttribute('data-shell', ''); d.setAttribute('data-shell-was', '');
+      // скелетон списка в каркасе — если прошлая загрузка списка была дольше 250 мс (main.tsx: relay.listMs)
+      if (Number(s.getItem('relay.listMs')) > 250) d.setAttribute('data-shell-skel', '');
       var sw = Number(s.getItem('relay.sideWidth')); if (sw > 0) d.style.setProperty('--shell-side-w', sw + 'px');
-      // обои — снимок настоящих (main.tsx): цвет, узор, градиент холста
-      var wp = JSON.parse(s.getItem('relay.shellWp') || 'null');
+      // обои — снимок настоящих своей темы (main.tsx): цвет, узор, градиент холста
+      var dk = t === 'dark' || (t !== 'light' && matchMedia('(prefers-color-scheme: dark)').matches);
+      var wp = JSON.parse(s.getItem('relay.shellWp.' + (dk ? 'dark' : 'light')) || 'null');
       if (wp && wp.grad) {
         d.style.setProperty('--shell-tw-background', wp.bg); d.style.setProperty('--shell-tw-image', wp.image);
         d.style.setProperty('--shell-tw-size', wp.size); d.style.setProperty('--shell-tw-opacity', wp.opacity);
