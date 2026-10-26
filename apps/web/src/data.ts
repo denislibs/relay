@@ -34,8 +34,11 @@ let engine: EngineClient;
 // порция ленты — два экрана сообщений (строка-бабл ≈ 40 px), не меньше 30: как и страница диалогов, от высоты окна
 const FEED_PAGE = Math.max(30, Math.ceil((typeof innerHeight === 'number' ? innerHeight : 0) / 40) * 2);   // вне браузера (тесты) — минимум
 
-/** Подписки движка → GlobalState. Несрочное применяем после тяжёлых анимаций. */
-export function startData(me: Me): void {
+/**
+ * Подписки движка → GlobalState. Несрочное применяем после тяжёлых анимаций.
+ * fromUrl: открыть чат из адреса (#chat=…) — при перезагрузке; после входа адрес остался от прошлого сеанса, начинаем со списка.
+ */
+export function startData(me: Me, fromUrl = true): void {
   engine = connectEngine({
     build: __BUILD__,
     config: {
@@ -106,7 +109,8 @@ export function startData(me: Me): void {
   onLaunch((url) => { const t = parseHash(url.hash); if (t) openNotified(t.chatId, t.threadId ?? undefined); });
   // #chat=…&thread=… при загрузке: нижний слой — чат (тред гостя, &via= — канал поста), тред — поверх него (docs/navigation-rules.md)
   const open = parseHash(location.hash);
-  if (open) { openChat(baseOf(open)); if (open.threadId != null) whenShown(baseOf(open), () => openInner(open)); }
+  if (open && !fromUrl) history.replaceState(history.state, '', location.pathname + location.search);
+  else if (open) { openChat(baseOf(open)); if (open.threadId != null) whenShown(baseOf(open), () => openInner(open)); }
 }
 
 /**
@@ -548,6 +552,12 @@ export function refreshPreview(chatId: number): void { engine.call({ type: 'open
 const SCREEN_MS = 320;   // переход экранов (relay.css, телефон: 300 мс) + кадр запаса
 let leaveTimer: ReturnType<typeof setTimeout> | 0 = 0;
 let closingNow = false;
+/** Закрыть все чаты сразу, без анимации ухода к списку: сеанс кончился — следующему входу ничего не остаётся (и адрес чистый). */
+export function closeAllChats(): void {
+  if (leaveTimer) { clearTimeout(leaveTimer); leaveTimer = 0; setGlobal({ listLeaving: false }); }
+  closingNow = true;
+  try { openChat(null); } finally { closingNow = false; }
+}
 export function openChat(chatId: number | null, target?: { id: number; sort: number }, hold?: Hold): void {
   openSeq++;   // любой переход отменяет ждущий openChannel
   if (chatId == null && leaveTimer) return;   // уже едем к списку
