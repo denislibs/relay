@@ -2,6 +2,7 @@
 // (тех же, что и HTML поля ввода), без innerHTML. Подсветка поиска — внутри каждого куска.
 import { Fragment, h } from 'preact';
 import { useLayoutEffect, useRef, useState } from 'preact/hooks';
+import { forceMeasure } from './schedule.js';
 import { Highlight } from './more.js';
 import { safeUrl, segments } from './richtext.js';
 import { Spoiler } from './spoiler.js';
@@ -81,13 +82,39 @@ function blockNodes(list, hl, depth) {
     return null;
   });
 }
+/**
+ * Длинная ли статья — по данным, без раскладки, когда ответ ясен: снизу строк не меньше, чем абзацев, пунктов и
+ * переносов; сверху — как если бы в строку влезало всего 20 символов. true / false — ясно; null — нужно мерить.
+ */
+export function articleTall(list) {
+  var lines = 0, chars = 0, blocks = 0, code = 0;
+  (function walk(bs) {
+    for (var i = 0; i < bs.length; i++) {
+      var b = bs[i]; blocks++;
+      if (b.type === 'p' || b.type === 'h' || b.type === 'code') { var t = b.text || ''; lines += 1 + (t.match(/\n/g) || []).length; chars += t.length; if (b.type === 'code') code++; }
+      else if (b.type === 'ul' || b.type === 'ol') { for (var k = 0; k < b.items.length; k++) walk(b.items[k]); }
+      else if (b.type === 'quote') walk(b.blocks || []);
+      else lines += 1;
+    }
+  })(list || []);
+  var limit = ARTICLE_FOLD + 80;
+  if (lines * 20 + blocks * 4 > limit) return true;               // даже по одной строке на абзац — выше порога
+  if ((lines + chars / 20) * 30 + blocks * 24 + code * 32 <= limit) return false;   // даже узко, крупно и с полями — ниже
+  return null;
+}
+
 function ArticleBlocks(props) {
   var box = useRef(null);
   var st = useState(false), open = st[0];
-  var tall = useState(false);
+  var guess = articleTall(props.blocks);
+  var tall = useState(guess === true);
+  // спорный случай — одно чтение до отрисовки (осознанное исключение: иначе кадр с развёрнутой статьёй и прыжок
+  // ленты); ясный — решён по данным, раскладка не нужна
   useLayoutEffect(function () {
+    if (open) return;
+    if (guess !== null) { if (tall[0] !== guess) tall[1](guess); return; }
     var el = box.current;
-    if (el && !open) tall[1](el.scrollHeight > ARTICLE_FOLD + 80);
+    if (el) forceMeasure(function () { tall[1](el.scrollHeight > ARTICLE_FOLD + 80); });
   }, [props.blocks]);
   var folded = tall[0] && !open;
   return h('div', { class: 'rl-art' + (folded ? ' rl-art-folded' : '') },
