@@ -41,3 +41,15 @@ test('текстовые символы не эмодзи; флаги-теги �
   expect(emojiOnly('✈')?.count).toBe(1);
   expect(emojiOnly('a'.repeat(700) + '😀')).toBeNull();
 });
+
+test('без символов из диапазонов эмодзи — отказ до регулярки; одиночные символы эмодзи-диапазонов не теряются', () => {
+  for (const s of ['123', '—', '…', '+7 (999) 000-00-00', '!!!', '¯\\_(ツ)_/¯', '()', '%']) expect(emojiOnly(s)).toBeNull();
+  for (const s of ['©️', '‼️', '™️', '⌚', '〰️', '㊗️', '🀄', '🫠', '#️⃣', '*️⃣', '❤']) expect(emojiOnly(s)?.count).toBe(1);
+});
+
+test('warmEmoji: прогрев не меняет результат', async () => {
+  const { warmEmoji } = await import('./emoji');
+  warmEmoji();
+  expect(emojiOnly('😀')?.count).toBe(1);
+  expect(emojiOnly('1')).toBeNull();
+});

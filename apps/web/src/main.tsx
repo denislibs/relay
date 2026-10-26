@@ -17,6 +17,7 @@ import * as nav from './nav';
 import { startScreenBlur } from './screenBlur';
 import { startSettingsData } from './settingsData';
 import { startTitle } from './title';
+import { warmEmoji } from '@relay/protocol';
 import { App } from './ui/App';
 import { warmSounds } from './sound';
 import { asset } from './assets';
@@ -114,6 +115,12 @@ if (__DEV__) void import('./devtools/session').then((s) => import('./devtools/me
   (window as unknown as { __dev: object }).__dev = { snapshot: s.devSnapshot, running: () => s.devRunning() || m.metricsRunning() };
 }));
 startTitle();
+// регулярка эмодзи (RGI) и сегментатор — заранее, в простое: иначе их первая компиляция ложится на первое открытие чата
+{
+  const warm = () => { warmEmoji(); };
+  const ric = (window as Window & { requestIdleCallback?: (cb: () => void, o?: { timeout: number }) => number }).requestIdleCallback;
+  if (ric) ric(warm, { timeout: 5000 }); else setTimeout(warm, 2000);
+}
 // спойлеры: частицы рисует воркер (как в Telegram Web K); без него — CSS-точки
 configureSpoilers({ workerUrl: asset('spoiler.worker.js') });
 // голосовые: ворклет — файлом сборки, не из blob: (CSP)
