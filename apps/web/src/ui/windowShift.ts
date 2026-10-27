@@ -65,3 +65,20 @@ export function anchorShift(was: Edges2, now: Edges2, viewHeight: number): numbe
   if (overTop && !overBottom) return now.bottom - was.bottom;
   return now.top - was.top;
 }
+
+/** Порция, пришедшая сдвигом окна: собирается скрытой (Feed), пока не соберётся вся. edge — крайняя прежняя строка
+ *  (новые — до неё у сдвига к старым, после — к новым), total — сколько новых, built — сколько уже собрано. */
+export type Stage = { dir: ShiftDir; edge: string; sort: number; total: number; built: number; done: boolean };
+
+/**
+ * Что пришло сдвигом окна: новые строки с той стороны, куда сдвигали, до первой прежней. Меньше min (или прежних в
+ * окне нет вовсе — переход далеко) — null: собирать по частям незачем, окно рисуется сразу, как раньше.
+ */
+export function stageOf(prev: readonly { key: string }[], next: readonly { key: string; sort?: unknown }[], dir: ShiftDir, min: number): Stage | null {
+  const had = new Set(prev.map((x) => x.key));
+  let i = -1, total = 0;
+  if (dir === 'older') { i = next.findIndex((x) => had.has(x.key)); total = i; }
+  else { for (let j = next.length - 1; j >= 0; j--) if (had.has(next[j].key)) { i = j; break; } total = next.length - 1 - i; }
+  if (i < 0 || total < min) return null;
+  return { dir, edge: next[i].key, sort: Number(next[i].sort), total, built: 0, done: false };
+}
