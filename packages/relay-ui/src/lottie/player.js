@@ -77,6 +77,7 @@ class Player {
     this.wanted = -1;        // кадр, который ждём из воркера
     this.shownOnce = false;
     this.closed = false;
+    this.revisit = false;    // вид снова показался (прокрутили обратно) — доигравшую проиграть заново
     const start = () => {
       if (this.closed) return;
       openRenderer({ url, px }).then((r) => {
@@ -116,9 +117,16 @@ class Player {
   }
 
   update() {
-    const go = this.playable();
+    let go = this.playable();
+    // доигравшая (без цикла) играет снова, только когда её вид снова показался или по restart(): не от любого
+    // пересчёта — ушедшая на свой плеер копия (detach), новая такая же в ленте (attach), конец тяжёлой анимации
+    // запускали заново все одинаковые стикеры на экране
+    if (go && this.ended) {
+      if (this.revisit) { this.ended = false; this.finished = false; this.time = 0; }
+      else go = false;
+    }
+    if (go) this.revisit = false;
     if (go && !active.has(this)) {
-      if (this.ended) { this.ended = false; this.finished = false; this.time = 0; }   // снова на экране — проигрываем заново
       active.add(this);
       this.last = performance.now();
       schedule();
@@ -270,7 +278,7 @@ export function attachSticker({ url, px, canvas, group = 'feed', play = true, lo
   pl.attach(view);
   return {
     key,
-    setVisible(v) { if (view.visible !== v) { view.visible = v; pl.update(); } },
+    setVisible(v) { if (view.visible !== v) { view.visible = v; if (v) pl.revisit = true; pl.update(); } },
     setPlay(v) { if (view.play !== v) { view.play = v; pl.update(); } },
     setLoop(v) { view.loop = v; },
     restart() { pl.restart(); },
