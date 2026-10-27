@@ -527,7 +527,7 @@ function AsidePanel(props) {
   return h(Fragment, null,
     // поверх чата: прозрачная подложка, клик мимо панели закрывает её (как в Telegram); рядом с чатом её нет (CSS)
     props.open && props.onClose ? h('div', { class: 'rl-aside-scrim', 'aria-hidden': 'true', onPointerDown: function (e) { e.preventDefault(); props.onClose(); } }) : null,
-    h(Presence, { show: !!props.open, exitMs: 260 },
+    h(Presence, { show: !!props.open, exitMs: 260, keep: true },
       h('aside', { class: 'rl-shell-aside' },
         h('section', { class: 'rl-panel rl-asidecard', 'aria-label': props.label || 'Панель' }, props.children))));
 }

@@ -631,6 +631,7 @@ html[data-anim="0"] .rl-slidefade-item { animation: none !important; }
 
 /* ---------- Presence exits ---------- */
 .rl-presence { display: contents; }
+.rl-presence[data-state="closed"], .rl-shell > .rl-presence[data-state="closed"] { display: none; }   /* Presence keep: спрятано, не размонтировано */
 .rl-presence[data-state="closing"] .rl-viewer { animation: rl-fade-out var(--dur-base) var(--ease-in) forwards; }
 .rl-presence[data-state="closing"] .rl-viewer-media { animation: rl-pop-out var(--dur-base) var(--ease-in) forwards; }
 .rl-presence[data-state="closing"] .rl-toast { animation: rl-toast-out var(--dur-base) var(--ease-in) forwards; }

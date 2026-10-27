@@ -17,7 +17,8 @@ const AVATAR = 120;
  * actions — ряд кнопок (ProfileActions) у низа шапки, как в Telegram Web K: в свёрнутой — белые плитки под именем,
  * в развёрнутой — полупрозрачные поверх фото; ряд едет вместе с низом шапки, имя и статус встают над ним.
  */
-export function ProfileGallery({ photos, index, onIndex, onOpen, name, sub, music, actions, expanded, onExpand }: {
+export function ProfileGallery({ photos, index, onIndex, onOpen, name, sub, music, actions, expanded, onExpand, still = false }: {
+  still?: boolean;   // панель спрятана (Info держится смонтированной): видео-аватар не крутится, кадр — фото
   photos: UserPhoto[]; index: number; onIndex: (i: number) => void; onOpen: (i: number) => void;
   name: ComponentChildren; sub: ComponentChildren; music?: ComponentChildren; actions?: ComponentChildren;
   expanded: boolean; onExpand: (on: boolean) => void;
@@ -93,7 +94,7 @@ export function ProfileGallery({ photos, index, onIndex, onOpen, name, sub, musi
                 <span class="app-gallery-thumb" style={{ backgroundImage: `url("${p.thumb}")` }} />
                 {Math.abs(k - i) <= 1 ? <img class="app-gallery-img" src={`/files/${p.id}`} alt="" draggable={false} decoding="async"
                   ref={(el) => { if (el && el.complete && el.naturalWidth) el.classList.add('is-ready'); }} onLoad={(e) => (e.currentTarget as HTMLElement).classList.add('is-ready')} /> : null}
-                {p.video && k === i ? <video class="app-gallery-img app-gallery-video" src={`/files/${p.video}`} autoPlay loop muted playsInline disablePictureInPicture
+                {p.video && k === i && !still ? <video class="app-gallery-img app-gallery-video" src={`/files/${p.video}`} autoPlay loop muted playsInline disablePictureInPicture
                   onPlaying={(e) => (e.currentTarget as HTMLElement).classList.add('is-ready')} /> : null}
               </div>
             ))}
