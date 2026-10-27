@@ -1,5 +1,5 @@
 import { expect, test } from 'bun:test';
-import { anchorShift, deferShift, requestShift, rowFor, shiftWanted, type ShiftDir } from './windowShift';
+import { anchorShift, deferShift, requestShift, rowFor, shiftWanted, stageOf, type ShiftDir } from './windowShift';
 
 const both = { hasOlder: true, hasNewer: true };
 
@@ -65,4 +65,17 @@ test('anchorShift: the top edge is held by default; a row clipped at the top kee
   expect(anchorShift({ top: 100, bottom: 1200 }, { top: 150, bottom: 1250 }, view)).toBe(50);        // торчит за низ — верх
   expect(anchorShift({ top: -300, bottom: 1200 }, { top: -300, bottom: 700 }, view)).toBe(-300);     // за оба края и свернулась — её верх к верху экрана
   expect(anchorShift({ top: -300, bottom: 1200 }, { top: -250, bottom: 1250 }, view)).toBe(50);      // за оба края, размер тот же — верх
+});
+
+test('stageOf: новые строки сдвига к старым — до первой прежней', () => {
+  const k = (...ks: string[]) => ks.map((key, i) => ({ key, sort: i }));
+  expect(stageOf(k('c', 'd', 'e'), k('a', 'b', 'c', 'd'), 'older', 1)).toEqual({ dir: 'older', edge: 'c', sort: 2, total: 2, built: 0, done: false });
+  expect(stageOf(k('a', 'b', 'c'), k('b', 'c', 'x', 'y', 'z'), 'newer', 1)).toEqual({ dir: 'newer', edge: 'c', sort: 1, total: 3, built: 0, done: false });
+});
+
+test('stageOf: мало новых или прежних нет — без сборки по частям', () => {
+  const k = (...ks: string[]) => ks.map((key) => ({ key }));
+  expect(stageOf(k('c', 'd'), k('b', 'c', 'd'), 'older', 2)).toBeNull();
+  expect(stageOf(k('c', 'd'), k('x', 'y', 'z'), 'older', 1)).toBeNull();
+  expect(stageOf(k('c', 'd'), k('x', 'y', 'z'), 'newer', 1)).toBeNull();
 });

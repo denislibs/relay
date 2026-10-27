@@ -232,6 +232,8 @@ function watchPeer(chatId: number | null): void {
 
 type Anchor = { sort: number; side: 'end' | 'start' | 'center' };
 const WINDOW = FEED_PAGE * 2;                  // сообщений в DOM: две порции (как окно viewport в Telegram)
+// сдвиг окна — на столько строк (как подгрузка в Telegram Web K: 35–40): меньше порция — короче её сборка (Feed)
+const FEED_STEP = Math.min(36, FEED_PAGE);
 /** Позиция прокрутки чата (и треда — свой ключ chatId:threadId) при уходе: первый видимый бабл и его отступ (нет записи — был внизу).
  *  В памяти — сразу; в IndexedDB движка — через секунду после последней записи и при уходе со страницы: после
  *  перезагрузки чат откроется на том же месте, окно ленты запросится с якорем и придёт из кэша без сети. */
@@ -750,8 +752,8 @@ export function moveWindow(dir: 'older' | 'newer' | 'latest', frameKey?: string)
   const set = (anchor: Anchor | undefined) => { s.anchor = anchor; s.moving = true; s.watch.update(feedQuery(f, anchor)); return true; };
   if (dir === 'latest') return !!s.anchor && set(undefined);
   if (!ms.length) return false;
-  if (dir === 'older' && meta?.hasOlder) return set({ sort: ms[Math.min(ms.length - 1, FEED_PAGE - 1)].sort as number, side: 'end' });
-  if (dir === 'newer' && meta?.hasNewer) return set({ sort: ms[Math.max(0, ms.length - FEED_PAGE)].sort as number, side: 'start' });
+  if (dir === 'older' && meta?.hasOlder) return set({ sort: ms[Math.min(ms.length - 1, WINDOW - FEED_STEP - 1)].sort as number, side: 'end' });
+  if (dir === 'newer' && meta?.hasNewer) return set({ sort: ms[Math.max(0, ms.length - (WINDOW - FEED_STEP))].sort as number, side: 'start' });
   return false;
 }
 

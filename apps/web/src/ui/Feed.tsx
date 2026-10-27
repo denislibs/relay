@@ -34,7 +34,7 @@ import { getPrefs } from '../prefs';
 import { bubbleSrc, viewerPreview } from '../mediaGrid';
 import { clock, dayKey, dayLabel, fileSize } from './format';
 import { arrivals, type FeedSeen } from './appear';
-import { anchorShift, deferShift, requestShift, rowFor, shiftWanted } from './windowShift';
+import { anchorShift, deferShift, requestShift, rowFor, shiftWanted, stageOf, type ShiftDir, type Stage } from './windowShift';
 import { burstAnimates, driveScroll, jumpNear, DRIVE_MS, DRIVE_OWN_MS, type Drive } from './scrollDrive';
 import { claim, FLIGHT_SCROLL, giveUp, launch, launchBox, launchCircle, type Flight } from './sendFlight';
 import { interiorRemovals, mergeLeaving, LEAVE_HOLD_MS, LEAVE_MS, type Msg } from './leaving';
@@ -61,6 +61,8 @@ const BOTTOM = 50;        // «у низа» — ближе 50 px
 const READ_EVERY = 150;   // отправка «вижу до id» не чаще
 const FILL_CHUNK = 16;    // дорисовка окна за пределами первого экрана — по столько строк за кадр
 const FIRST_MARGIN = 300; // первый экран — с таким запасом сверху и снизу (как в Telegram Web K)
+const STAGE_CHUNK = 12;   // порция сдвига окна собирается скрытой — по столько строк за кадр
+const STAGE_WAIT_MS = 300; // и перед показом ждёт декодирования своих картинок не дольше этого
 
 // Оценка высот строк для первого экрана (firstScreen.ts). Ширина текста и шрифт уточняются по настоящей ленте
 // (rememberLayout); до первого замера — ширина окна и шрифт по умолчанию. Поправка общая на вкладку.
@@ -636,6 +638,24 @@ function viewAnchorOf(root: HTMLElement): { key: string; top: number; sort: numb
 }
 /** Строка сообщения: по ключу, а нет — та, что его содержит (альбом, разрезанный окном иначе; windowShift.rowFor). */
 const rowAt = (root: HTMLElement, key: string, sort: number) => rowFor(root.querySelectorAll<HTMLElement>('.app-msg[data-sort]:not(.app-msg-leaving)'), key, sort);
+
+/**
+ * Скрыть собираемую порцию сдвига (data-staged → display: none): всё, что по ту сторону прежней крайней строки, — на
+ * каждом уровне от неё до корня ленты. Плашка даты прежней крайней строки (ближайшая к ней) остаётся: скрытые строки
+ * того же дня места не занимают, и плашка стоит, где стояла. Колонка аватара пачки — не строка, её не трогаем.
+ * Только запись атрибутов, без чтения раскладки.
+ */
+function markStaged(root: HTMLElement, st: Stage): void {
+  const edge = rowAt(root, st.edge, st.sort);
+  let keptDate = st.dir === 'newer';
+  for (let n: Element | null = edge; n && n !== root; n = n.parentElement) {
+    for (let s = st.dir === 'older' ? n.previousElementSibling : n.nextElementSibling; s; s = st.dir === 'older' ? s.previousElementSibling : s.nextElementSibling) {
+      if (s.classList.contains('app-run-col') || s.classList.contains('app-sentinel')) continue;
+      if (!keptDate && n.parentElement === root && s.classList.contains('rl-date')) { keptDate = true; continue; }
+      if (!s.hasAttribute('data-staged')) s.setAttribute('data-staged', '');
+    }
+  }
+}
 const anchorEl = (root: HTMLElement, key: string) =>
   key === 'unread' ? root.querySelector<HTMLElement>('.app-unread-divider') : root.querySelector<HTMLElement>(`[data-key="${CSS.escape(key)}"]`);
 
@@ -751,7 +771,36 @@ export function Feed({ frameKey, active, chatId, threadId, channel = false, meId
     if (f < 0 || t < 0 || f > t) win.current = null;   // крайней строки больше нет (окно сдвинули, удалили) — всё целиком
     else { winFrom = f; winTo = t; }
   }
-  const partial = !!win.current && (winFrom > 0 || winTo < messages.length - 1);
+  // Порция сдвига окна (как Telegram Web K: строки собираются вне раскладки, вставляются одним кадром): пришедшие
+  // строки рисуются скрытыми (markStaged, display: none — без стилей и раскладки) по STAGE_CHUNK за кадр, затем ждут
+  // декодирования своих картинок и показываются все разом вместе с поправкой прокрутки. Раньше вся порция строилась
+  // и раскладывалась одним кадром — рывок при подгрузке истории. Ушедшие из окна строки с дальней стороны (stageKeep)
+  // рисуются до показа и уходят кадром позже: срезанные до показа новых, они укорачивали ленту, и браузер
+  // подрезал прокрутку (короткие строки — срез задевает экран). Пока порция собирается, якорь сдвига держится, и
+  // следующий сдвиг не начинается (датчика края за скрытыми строками нет)
+  const stage = useRef<Stage | null>(null);
+  const stageKeep = useRef<{ dir: ShiftDir; rows: Item[] } | null>(null);
+  const keepGone = useRef(false);   // ушедшие сняты этим рендером — удержать видимое (у сдвига к новым они были сверху)
+  const shifting = useRef<ShiftDir | null>(null);   // запрошен сдвиг: следующее окно — его порция
+  const stagePrev = useRef(messages);
+  const [stageTick, bumpStage] = useState(0);
+  if (stagePrev.current !== messages) {
+    if (shifting.current) {
+      stage.current = stageOf(stagePrev.current as { key: string }[], messages as unknown as { key: string; sort: number }[], shifting.current, STAGE_CHUNK);
+      const now = new Set(messages.map((x) => x.key));
+      stageKeep.current = stage.current ? { dir: stage.current.dir, rows: stagePrev.current.filter((x) => !now.has(x.key)) } : null;
+      shifting.current = null;
+    }
+    stagePrev.current = messages;
+  }
+  const st = stage.current;
+  if (st && !st.done) {
+    const e = messages.findIndex((x) => x.key === st.edge);
+    if (e < 0) stage.current = null;   // прежней крайней строки нет (удалили, окно ушло) — всё целиком
+    else if (st.dir === 'older') winFrom = Math.max(winFrom, e - st.built);
+    else winTo = Math.min(winTo, e + st.built);
+  }
+  const partial = (!!win.current || !!stage.current) && (winFrom > 0 || winTo < messages.length - 1);
   // анимация появления — только у пришедших в живую ленту (appear.ts), не у истории. Отметка живёт APPEAR_MS: потом
   // класс снимается, и строка, пересобранная позже, анимацию не повторит
   const appearAt = useRef(new Map<string, number>());
@@ -840,8 +889,23 @@ export function Feed({ frameKey, active, chatId, threadId, channel = false, meId
       // окно не двинулось (край в кадре уже пуст — лента не успела перерисоваться; прежний сдвиг в пути) — якорь
       // не держим: он ждал бы окна, которое не придёт, и окно встало бы в обе стороны
       anchor.current = requestShift(() => firstVisible(root), () => moveWindow(d, frameKey));
+      if (anchor.current) shifting.current = d;
     });
   });
+
+  /** Что было вверху видимой части (viewAnchor), там и остаётся. Одно чтение и одна запись до отрисовки — иначе кадр
+   *  со сдвинутой лентой. Нет такой строки (удалили саму верхнюю) — держится та, что над ней */
+  const holdView = (root: HTMLElement) => {
+    const va = viewAnchor.current;
+    if (!va) return;
+    forceMeasure(() => {
+      const row = anchorEl(root, va.key);
+      if (!row) return;
+      const top = root.scrollTop, max = root.scrollHeight - root.clientHeight;
+      const next = Math.max(0, Math.min(max, top + (row.getBoundingClientRect().top - root.getBoundingClientRect().top) - va.top));
+      if (Math.abs(next - top) > 0.5) { programmatic.current++; root.scrollTop = next; }
+    });
+  };
 
   // после каждого обновления окна: первая раскладка, якорь или «прилипание» к низу
   useLayoutEffect(() => {
@@ -849,6 +913,25 @@ export function Feed({ frameKey, active, chatId, threadId, channel = false, meId
     if (!root || !messages.length) return;
     const before = shownKeys.current, keys = new Set(rendered.map((m) => m.key as string));
     shownKeys.current = keys;
+    // порция сдвига: пока собирается — новые строки скрыть до отрисовки; собрана — показать все разом (ниже якорь
+    // поправит прокрутку в том же кадре и снимется)
+    const st = stage.current;
+    // Держим то, что вверху видимой части сейчас (viewAnchor — замер после каждой прокрутки, в прошлом кадре), а не
+    // якорь, снятый при запросе сдвига: тот вернул бы ленту к месту запроса, против прокрутки пользователя. И не
+    // перемеряем здесь: ушедшие строки уже сняты, и замер до показа новых подрезал бы прокрутку
+    if (st?.done) {
+      stage.current = null;
+      anchor.current = null;
+      for (const n of root.querySelectorAll('[data-staged]')) n.removeAttribute('data-staged');
+      holdView(root);
+      // ушедшие из окна — следующим кадром: кадр показа и так раскладывает всю порцию, а после него они за дальним
+      // краем экрана, и их уход ничего видимого не сдвигает
+      const k = stageKeep.current;
+      if (k) requestAnimationFrame(() => { if (stageKeep.current !== k) return; stageKeep.current = null; keepGone.current = true; bumpStage((n) => n + 1); });
+      return;
+    }
+    if (keepGone.current) { keepGone.current = false; holdView(root); return; }
+    if (st) { markStaged(root, st); holdView(root); return; }
     if (!placed.current) {
       placed.current = true;
       // первый кадр чата — до отрисовки (осознанное исключение): сохранённая позиция → непрочитанное → низ
@@ -872,15 +955,8 @@ export function Feed({ frameKey, active, chatId, threadId, channel = false, meId
     if (!a && !down && !stick.current) {
       // сообщение удалили (пропало из окна без его сдвига): что было вверху видимой части, там и остаётся — удалённое
       // выше экрана не дёргает ленту, удалённое на экране просто уходит, и нижние поднимаются на его место
-      const va = viewAnchor.current;
-      if (!va || !before || ![...before].some((k) => !keys.has(k))) return;
-      forceMeasure(() => {   // одно чтение и одна запись до отрисовки — иначе кадр со сдвинутой лентой
-        const row = anchorEl(root, va.key);
-        if (!row) return;   // удалили саму верхнюю строку — держится та, что над ней
-        const top = root.scrollTop, max = root.scrollHeight - root.clientHeight;
-        const next = Math.max(0, Math.min(max, top + (row.getBoundingClientRect().top - root.getBoundingClientRect().top) - va.top));
-        if (Math.abs(next - top) > 0.5) { programmatic.current++; root.scrollTop = next; }
-      });
+      if (!before || ![...before].some((k) => !keys.has(k))) return;
+      holdView(root);
       return;
     }
     // пришло новое в живую ленту, прижатую к низу (свежие — из arrivals этого рендера) — доезжаем, как Telegram,
@@ -937,7 +1013,8 @@ export function Feed({ frameKey, active, chatId, threadId, channel = false, meId
       if (a) {
         // якорь дорисовки первого экрана — до рендера, который расширил окно: рендер между замером и им (пришла отметка
         // прочтения) держит позицию тем же якорем, но его не снимает — иначе строки сверху легли бы без поправки
-        if (fillAnchorFor.current == null || winTick >= fillAnchorFor.current) { anchor.current = null; fillAnchorFor.current = null; }
+        // якорь сдвига держится, пока его порция собирается скрытой: снимется кадром показа
+        if (!stage.current && (fillAnchorFor.current == null || winTick >= fillAnchorFor.current)) { anchor.current = null; fillAnchorFor.current = null; }
         const row = rowAt(root, a.key, a.sort);
         // край якоря — по правилу tweb (anchorShift): строка, торчащая за верх (альбом, разрезанный окном иначе и
         // собранный целиком), держится за видимый низ, а не за верх, уехавший за экран
@@ -953,7 +1030,23 @@ export function Feed({ frameKey, active, chatId, threadId, channel = false, meId
       if (next !== null) next = Math.max(0, Math.min(next, max)); // за пределы браузер не прокрутит — и события не будет
       if (next !== null && Math.abs(next - top) > 0.5) { programmatic.current++; root.scrollTop = next; }
     });
-  }, [messages, winTick, leaveTick]);   // каждая порция дорисовки — восстановить якорь; уход строк из буфера — тоже
+  }, [messages, winTick, leaveTick, stageTick]);   // каждая порция дорисовки — восстановить якорь; уход строк из буфера — тоже
+
+  // сборка порции сдвига: следующая часть — в следующем кадре (эффект идёт после отрисовки); собрано — ждём
+  // декодирования картинок скрытых строк (не дольше STAGE_WAIT_MS) и показываем
+  useEffect(() => {
+    const st = stage.current, root = el.current;
+    if (!st || st.done || !root) return;
+    if (st.built < st.total) { st.built += STAGE_CHUNK; bumpStage((n) => n + 1); return; }
+    let alive = true;
+    const imgs = [...root.querySelectorAll<HTMLImageElement>('[data-staged] img')].filter((i) => i.src);
+    Promise.race([Promise.all(imgs.map((i) => i.decode().catch(() => {}))), new Promise((r) => setTimeout(r, STAGE_WAIT_MS))]).then(() => {
+      if (!alive || stage.current !== st) return;
+      st.done = true;
+      bumpStage((n) => n + 1);
+    });
+    return () => { alive = false; };
+  }, [messages, stageTick]);
 
   // удаление с анимацией: уходящие строки ещё в потоке — снять раскладку, вывести их из потока (absolute на своём
   // месте в пачке) и довезти соседей FLIP-переводом; уходящая гаснет. Одно чтение раскладки и одна запись до
@@ -1592,7 +1685,14 @@ export function Feed({ frameKey, active, chatId, threadId, channel = false, meId
   const isPosted = (x: Item) => isPost(x as { post?: boolean }) || (channel && !x.service);   // в канале и своё неподтверждённое — пост
   // датчики краёв — только у достроенного края: пока окно первого экрана дорисовывается, подгрузка не начинается
   if (!partial || winFrom === 0) out.push(<div class="app-sentinel" data-dir="older" key={'o' + (messages[0]?.key ?? '')} aria-hidden="true" />);
-  const shown0 = partial ? mergeLeaving(messages.slice(winFrom, winTo + 1) as unknown as (Item & Msg)[], leaving.current.values() as Iterable<Item & Msg>) as Item[] : rendered;
+  // шов собираемой порции сдвига: пока она скрыта, прежняя крайняя строка рисуется так, будто соседей за швом нет, —
+  // подпись автора, хвост, пачка и альбом у неё те же, что до сдвига (иначе на экране менялись бы раньше показа).
+  // Ушедшие из окна строки — на своём месте с дальней стороны, до кадра после показа
+  const seam = stage.current && !stage.current.done ? stage.current : null;
+  const cutBefore = seam?.dir === 'older' ? seam.edge : null, cutAfter = seam?.dir === 'newer' ? seam.edge : null;
+  let shown0 = partial ? mergeLeaving(messages.slice(winFrom, winTo + 1) as unknown as (Item & Msg)[], leaving.current.values() as Iterable<Item & Msg>) as Item[] : rendered;
+  const keep = stageKeep.current;
+  if (keep?.rows.length) shown0 = keep.dir === 'older' ? [...shown0, ...keep.rows] : [...keep.rows, ...shown0];
   // история не загружена: только своё неотправленное (у него ещё нет id) — отправка без сети видна сразу
   const shown = bare ? shown0.filter((m) => m.id == null && m.senderId === meId) : shown0;
   // соседи для хвостов, дат и пачек — без уходящих строк: раскладка соседей устоялась в кадре FLIP, не при сбросе буфера
@@ -1605,7 +1705,7 @@ export function Feed({ frameKey, active, chatId, threadId, channel = false, meId
     const m = shown[i];
     if (!m.groupId || !isPhoto(m) || inAlbum.has(m.key)) continue;
     const run = [m];
-    while (run.length < 10) { const x = shown[i + run.length]; if (!isPhoto(x) || x.groupId !== m.groupId || x.senderId !== m.senderId) break; run.push(x); }
+    while (run.length < 10) { const x = shown[i + run.length]; if (!isPhoto(x) || x.groupId !== m.groupId || x.senderId !== m.senderId || x.key === cutBefore || run[run.length - 1].key === cutAfter) break; run.push(x); }
     if (run.length > 1) { albums.set(m.key, run); run.slice(1).forEach((x) => inAlbum.add(x.key)); }
   }
   // в группе входящие одного автора — «пачка» в общей обёртке: аватар автора внизу пачки липкий (sticky), как в Telegram —
@@ -1672,13 +1772,14 @@ export function Feed({ frameKey, active, chatId, threadId, channel = false, meId
       return;
     }
     const album = albums.get(m.key);
-    const next = going ? shown[i + 1] : neighbour(i + (album ? album.length : 1) - 1, 1);
+    const next = going ? shown[i + 1] : (album ? album[album.length - 1] : m).key === cutAfter ? undefined : neighbour(i + (album ? album.length : 1) - 1, 1);
     // группа — как в Telegram: тот же отправитель и день, пауза не больше 10 минут, не на границе «Непрочитанные»
     // посты (и копии постов в группе) — пачкой «канала»: отправитель для пачки — 0
     const sender = post ? 0 : m.senderId;
     const nextSender = next ? (isPosted(next) ? 0 : next.senderId) : null;
     // пост канала — всегда отдельный пузырь с хвостиком (как в Telegram: посты в пачку не склеиваются)
-    const prevM = going ? shown[i - 1] : neighbour(i, -1);   // уходящая держит свои прежние хвосты: соседи для неё — как были
+    const prevM = going ? shown[i - 1] : m.key === cutBefore ? undefined : neighbour(i, -1);   // уходящая держит свои прежние хвосты: соседи для неё — как были
+    if (m.key === cutBefore) prevSender = null;
     const start = post || prevSender !== sender || day !== prevDay || breaksGroup(prevM, m, unreadFrom, meId);
     const end = post || !next || nextSender !== sender || dayKey(next.createdAt as string) !== day || breaksGroup(m, next, unreadFrom, meId);
     const quoted = m.reply as Quote | null;
