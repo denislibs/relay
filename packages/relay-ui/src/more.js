@@ -726,6 +726,21 @@ function patternColor(colors, alpha) {
   var f = function (k) { var x = (k + hue / 60) % 6; return Math.round(255 * (val - val * sat * Math.max(0, Math.min(x, 4 - x, 1)))); };
   return 'rgba(' + f(5) + ',' + f(3) + ',' + f(1) + ',' + a + ')';
 }
+/* Плашки дат и служебных строк в тёмной теме — в тон обоям, как в светлой (patternColor), но тёмные: оттенок
+   цветов градиента (он же цвет узора), насыщенность чуть приглушена, яркость — такая, чтобы на почти чёрном фоне
+   плашка читалась, а белый текст на ней — тоже (раньше — нейтральная серо-синяя из CSS при любом цвете темы). */
+function actionColorDark(colors, alpha) {
+  var rgb = [0, 0, 0], n = 0;
+  colors.forEach(function (c) { var x = parseHex(c); if (x) { rgb[0] += x[0]; rgb[1] += x[1]; rgb[2] += x[2]; n++; } });
+  if (!n) return 'rgba(72,87,97,' + alpha + ')';
+  var r = rgb[0] / n / 255, g = rgb[1] / n / 255, b = rgb[2] / n / 255;
+  var max = Math.max(r, g, b), min = Math.min(r, g, b), d = max - min, hue = 0;
+  if (d) hue = max === r ? ((g - b) / d) % 6 : max === g ? (b - r) / d + 2 : (r - g) / d + 4;
+  hue = (hue * 60 + 360) % 360;
+  var sat = Math.min(0.55, (max ? d / max : 0) * 0.8), val = 0.4;
+  var f = function (k) { var x = (k + hue / 60) % 6; return Math.round(255 * (val - val * sat * Math.max(0, Math.min(x, 4 - x, 1)))); };
+  return 'rgba(' + f(5) + ',' + f(3) + ',' + f(1) + ',' + alpha + ')';
+}
 var patternCache = Object.create(null);
 function buildPattern(set, stroke) {
   set = set || 'catsAndDogs';
@@ -860,12 +875,9 @@ function Wallpaper(props) {
           // Пересобираем, только если узора в новом режиме нет
           if (wp && modeChanged && !(pattern && wp.pattern)) { wallpapers.splice(wallpapers.indexOf(wp), 1); wp.dispose(); wp = null; }
           // плашки дат и служебных сообщений — в тон обоям (как в Telegram): светлая тема — цвет узора, но плотнее;
-          // своя картинка — нейтральная тёмная; тёмная тема — из CSS (нейтральная серо-синяя)
+          // тёмная — тот же оттенок, тёмный (actionColorDark); своя картинка — нейтральная тёмная
           var shell = el.parentElement;
-          if (shell) {
-            if (t.dark) shell.style.removeProperty('--action-bg');
-            else shell.style.setProperty('--action-bg', P.image ? 'rgba(0,0,0,0.32)' : patternColor(colors, 0.62));
-          }
+          if (shell) shell.style.setProperty('--action-bg', P.image ? 'rgba(0,0,0,0.32)' : t.dark ? actionColorDark(colors, 0.55) : patternColor(colors, 0.62));
           // обои создавали без узора (файл ещё грузился): у twallpaper тогда нет слоя узора — пересоздаём под снимком
           if (wp && pattern && !wp.pattern) {
             if (animate && !reducedMotion()) crossfadeSnapshot(el);
