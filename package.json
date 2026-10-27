@@ -1,5 +1,8 @@
 {
   "name": "relay",
   "private": true,
-  "workspaces": ["apps/*", "packages/*"]
+  "workspaces": ["apps/*", "packages/*"],
+  "devDependencies": {
+    "@types/bun": "1.4.3"
+  }
 }

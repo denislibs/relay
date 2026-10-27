@@ -1,0 +1,6 @@
+{
+  // для bun test из корня репозитория: JSX — Preact, как в apps/web (иначе Bun ищет react/jsx-dev-runtime).
+  // Проверка типов — в пакетах: apps/web/tsconfig.json (код), apps/web/tsconfig.test.json (тесты)
+  "compilerOptions": { "jsx": "react-jsx", "jsxImportSource": "preact" },
+  "files": []
+}

@@ -292,7 +292,7 @@ export function MediaCell({ m, onOpen, corners }: { m: Msg; onOpen: (m: Msg) => 
   const ctl = useMediaCtl(), key = ctl?.keyOf(m), picking = !!ctl?.picked.size, picked = !!key && !!ctl?.picked.has(key);
   return (
     <button type="button" class={'app-media-cell' + (corners ? ' ' + corners.split(' ').map((c) => 'is-' + c).join(' ') : '') + (picked ? ' is-picked' : '')} data-mid={m.id} data-mkey={key} aria-label={a.name}
-      aria-pressed={picking ? String(picked) : undefined} onClick={() => onOpen(m)}>
+      aria-pressed={picking ? picked : undefined} onClick={() => onOpen(m)}>
       {!bare ? <LazyImage src={video ? '' : tileSrc(a)} thumb={a.thumb ?? undefined} alt={a.name} /> : (
         <span class="app-media-video" ref={box}>
           {near ? <video class={'app-media-frame' + (frame ? ' app-media-frame-in' : '')} src={videoFrameSrc(a)} preload="metadata" muted playsInline tabIndex={-1} aria-hidden="true"
