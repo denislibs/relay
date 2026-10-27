@@ -33,6 +33,7 @@ const GroupScreen = lazy(() => import('./group/Manage').then((m) => m.GroupScree
 
 const PAGES = ['info', 'stickers', 'edit', ...GROUP_PAGES];   // «Стикеры» — вторая вложенность (из поиска в панели стикеров)   // «Изменить контакт» и управление группой выезжают внутри панели справа налево
 const close = () => setGlobal({ infoOpen: false });
+const CLOSED_RESET_MS = 300;   // закрытая панель возвращается на профиль, когда уже уехала (выезд — 240 мс)
 
 /** Значение, которое меняется только вне тяжёлой анимации: во время неё — после её конца. */
 function useSettled<T>(value: T): T {
@@ -50,7 +51,13 @@ function useSettled<T>(value: T): T {
 export function Info() {
   // чат панели догоняет открытый после анимации перехода стека: её перерисовка (профиль, медиа, участники)
   // в первых кадрах перехода съедала бы их
-  const chatId = useSettled(useGlobal((s) => s.openChatId))!;
+  // панель после первого открытия не размонтируется (AsidePanel → Presence keep), а прячется: закрытая держит
+  // прежний чат — смена чата при закрытой панели не перестраивает её и не грузит профиль и медиа впустую
+  const shown = useGlobal((s) => s.infoOpen);
+  const liveId = useGlobal((s) => s.openChatId);
+  const heldId = useRef(liveId);
+  if (shown) heldId.current = liveId;
+  const chatId = useSettled(heldId.current)!;
   const chat = useGlobal((s) => findChat(s, chatId));
   const peer = useGlobal((s) => s.peer);
   const muted = useGlobal((s) => isChatMuted(chatId, s));
@@ -79,6 +86,12 @@ export function Info() {
   }, [infoGo]);
   // после перехода по infoGo (порядок важен: тот читает, была ли панель открыта до этого рендера)
   useEffect(() => { openBefore.current = infoOpen; if (!infoOpen && page === 'stickers') { instant.current = true; setPage('info'); } }, [infoOpen]);
+  // закрыли на внутреннем экране — после того как панель уехала, снова профиль (как раньше, когда она размонтировалась)
+  useEffect(() => {
+    if (infoOpen || page === 'info') return;
+    const t = setTimeout(() => { instant.current = true; setPage('info'); }, CLOSED_RESET_MS);
+    return () => clearTimeout(t);
+  }, [infoOpen, page]);
   useEffect(() => { instant.current = false; }, [page]);
   // группа удалена или меня убрали — панель управления закрывается сама
   useEffect(() => { if (!chat && page !== 'info') setPage('info'); }, [!chat]);
@@ -237,7 +250,7 @@ export function Info() {
         title={<HeadTitle media={media} plain={channel ? 'Информация о канале' : group ? 'Информация о группе' : 'Информация'} name={title} head={mediaHead} />} onClose={media ? toTop : close} action={media ? undefined : action} />
       <div class="rl-aside-body" ref={body} onScroll={onBodyScroll}>
         {gallery.length ? (
-          <ProfileGallery photos={gallery} index={slide} onIndex={setSlide} onOpen={setViewer}
+          <ProfileGallery photos={gallery} index={slide} onIndex={setSlide} onOpen={setViewer} still={!shown}
             name={<>{title}{system ? <Verified size={22} /> : null}</>}
             sub={<span class={myPeer?.online ? 'app-online' : ''}>{subtitle || ' '}</span>}
             // полоса музыки и её 24 px — только когда треки есть (иначе пустая полоса раздвигала плитки и карточку)

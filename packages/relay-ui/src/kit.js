@@ -1691,6 +1691,10 @@ function SlideFade(props) {
 function Presence(props) {
   var st = useState(!!props.show);
   var mounted = st[0];
+  // keep: после первого показа содержимое не размонтируется, а прячется (data-state="closed" → display: none) —
+  // повторный показ не строит его заново (панель «Информация», как правая колонка Telegram Web K)
+  var ever = useRef(!!props.show);
+  if (props.show) ever.current = true;
   useEffect(function () {
     var end = beginHeavyAnimation(props.show ? 300 : (props.exitMs || 220));
     if (props.show) { st[1](true); return end; }
@@ -1698,8 +1702,8 @@ function Presence(props) {
     var t = setTimeout(function () { st[1](false); }, reducedMotion() ? 0 : (props.exitMs || 220));
     return function () { clearTimeout(t); end(); };
   }, [props.show]);
-  if (!mounted && !props.show) return null;
-  return h('div', { class: 'rl-presence', 'data-state': props.show ? 'open' : 'closing' }, props.children);
+  if (!mounted && !props.show && !(props.keep && ever.current)) return null;
+  return h('div', { class: 'rl-presence', 'data-state': props.show ? 'open' : mounted ? 'closing' : 'closed' }, props.children);
 }
 
 /* ---------- useMinVisible: loaders that never flicker ----------
