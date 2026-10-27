@@ -95,13 +95,17 @@ export function StickerView(props) {
 
   // анимация: подключаемся, когда стикер подъехал к экрану (500 px), играем — пока виден. force (бросок на глазах,
   // эффект) — сразу: ленивое наблюдение ждёт конца тяжёлой анимации (доезда ленты), а показать надо сейчас
+  // проигранный по клику (наведению) — на своём плеере: общий плеер одного url и размера — общие часы, и restart
+  // запускал бы заново все такие же на экране (два одинаковых больших эмодзи — кликнул по одному, играли оба).
+  // Переподключаемся при первом повторе, сразу и вопреки ленивому наблюдению: вид на экране, под курсором
+  const own = !!props.replay;
   useEffect(() => {
     const el = root.current;
     if (!el || !src || isStatic || !lottieAvailable()) return;
     let offVisible = null, cancel = null, offLazy = null;
     const connect = (forced) => {
       const c = attachSticker({
-        url: src, px, canvas: canvas.current, group, play: play && !reducedMotion(), loop, force: force || forced, shared, atEnd,
+        url: src, px, canvas: canvas.current, group, play: play && !reducedMotion(), loop, force: force || forced, shared: shared && !own, atEnd,
         onFirstFrame: () => { el.dataset.drawn = '1'; props.onFirstFrame?.(); requestAnimationFrame(() => requestAnimationFrame(() => requestMutation(() => setStage('ready')))); },
         onEnded: () => props.onEnded?.(),
         onError: () => props.onError?.(),
@@ -122,9 +126,10 @@ export function StickerView(props) {
     el.addEventListener('rl-sticker-fly', fly);
     // полёт мог начаться раньше этого эффекта (строка ленты появилась кадром раньше) — метка на элементе
     if (el.dataset.fly) { delete el.dataset.fly; connect(true); }
+    else if (own) connect(true);
     else offLazy = force ? (attach(), null) : lazyObserve(el, attach);
     return () => { el.removeEventListener('rl-sticker-fly', fly); offLazy?.(); cancel?.(); offVisible?.(); ctl.current?.destroy(); ctl.current = null; delete el.dataset.drawn; };
-  }, [key, group, force]);
+  }, [key, group, force, own]);
 
   useEffect(() => { ctl.current?.setPlay(play && !reducedMotion()); }, [play]);
   useEffect(() => { ctl.current?.setLoop(loop); }, [loop]);

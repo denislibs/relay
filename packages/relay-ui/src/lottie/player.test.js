@@ -121,3 +121,21 @@ test('a sticker that played once and stopped keeps only its shown frame (picker 
   expect(lottieStats().cachedFrames).toBe(1);                    // остановилась на последнем кадре — только он
   v.destroy();
 });
+
+test('доигравшая общая анимация не запускается заново от ухода и прихода копий, только от нового показа', async () => {
+  const url = '/stk/x/aaaaaaaa/8.tgs';
+  const a = attachSticker({ url, px: 64, canvas: canvas(), loop: false });
+  const b = attachSticker({ url, px: 64, canvas: canvas(), loop: false });
+  await wait();
+  a.setVisible(true); b.setVisible(true);
+  await wait(1200);
+  expect(stickerStats().playing).toBe(0);   // доиграла
+  b.destroy();                                // копия ушла на свой плеер (повтор по клику) — оставшаяся стоит
+  expect(stickerStats().playing).toBe(0);
+  const c = attachSticker({ url, px: 64, canvas: canvas(), loop: false });   // пришла новая такая же
+  await wait();
+  expect(stickerStats().playing).toBe(0);
+  a.setVisible(false); a.setVisible(true);   // прокрутили обратно — снова играет
+  expect(stickerStats().playing).toBe(1);
+  a.destroy(); c.destroy();
+});
