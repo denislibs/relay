@@ -34,7 +34,7 @@ test('round video: circular thumb', () => {
 });
 
 test('sticker in the chat list: no thumbnail, just «😘 Стикер»', () => {
-  const m = { senderId: 1, body: '', kind: 'sticker', sticker: { url: '/s.webp', w: 512, h: 512, emoji: '😘' } };
+  const m = { senderId: 1, body: '', kind: 'sticker', sticker: { id: 1, setId: 1, format: 'webp' as const, outline: null, url: '/s.webp', w: 512, h: 512, emoji: '😘' } };
   expect(previewThumb(m)).toBeNull();
   expect(flat(previewBody(m, false))).toBe('😘 Стикер');
 });

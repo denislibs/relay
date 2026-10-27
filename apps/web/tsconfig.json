@@ -9,7 +9,9 @@
     "allowJs": true,
     "skipLibCheck": true,
     "noEmit": true,
-    "lib": ["ESNext", "DOM", "DOM.Iterable", "WebWorker"]
+    "lib": ["ESNext", "DOM", "DOM.Iterable", "WebWorker"],
+    "types": []
   },
-  "include": ["src"]
+  "include": ["src"],
+  "exclude": ["src/**/*.test.ts", "src/**/*.test.tsx"]
 }
