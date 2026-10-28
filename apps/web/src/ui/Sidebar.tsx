@@ -26,6 +26,8 @@ import { getGlobal } from '../global';
 import type { ProfilePhoto } from '@relay/protocol';
 import { avatarPhoto } from '../profilePhoto';
 import { installApp } from '../pwa';
+import { startChatSelect, toggleChatSelect, type SelList } from '../chatSelect';
+import { useChatSelectMode } from './chatSelectRun';
 
 /** Скелетон списка уже нарисован каркасом приложения из index.html (boot.js → html[data-shell-skel]). */
 const SHELL_SKEL = typeof document !== 'undefined' && document.documentElement.hasAttribute('data-shell-skel');
@@ -60,7 +62,7 @@ function MoreLoader() {
 }
 
 /** Строка списка чатов. memo: чат не изменился (тот же объект из Mirror) — строку не трогаем при сдвиге окна. */
-export const SideRow = memo(function SideRow({ c, meId, active, showDraft, muted, onMenu, tags, tagSpace }: { c: Item; meId: number; active: boolean; showDraft: boolean; muted: boolean; onMenu: (id: number, x: number, y: number) => void; tags?: RowTag[]; tagSpace?: number }) {
+export const SideRow = memo(function SideRow({ c, meId, active, showDraft, muted, onMenu, tags, tagSpace, selecting, selected }: { c: Item; meId: number; active: boolean; showDraft: boolean; muted: boolean; onMenu: (id: number, x: number, y: number) => void; tags?: RowTag[]; tagSpace?: number; selecting?: boolean; selected?: boolean }) {
   const last = c.last as (LastMessage & { status: string; fwd?: boolean }) | null;
   const thumb = last ? previewThumb(last) : null;
   // имя автора — только в группах (в личке и так ясно, кто пишет); своё — «Вы», чужое — первое слово имени
@@ -95,8 +97,11 @@ export const SideRow = memo(function SideRow({ c, meId, active, showDraft, muted
       tags={tags}
       tagSpace={tagSpace}
       fitTags={fitFolderTags}
-      {...pressOpen(() => prepareChat(c.id as number), () => openChat(c.id as number))}
-      onContextMenu={(e: MouseEvent) => { e.preventDefault(); onMenu(c.id as number, e.clientX, e.clientY); }}
+      selecting={selecting}
+      selected={selected}
+      // в режиме выбора клик и правая кнопка только отмечают строку: чат не открывается, меню строки нет (как в tweb)
+      {...(selecting ? { onClick: () => toggleChatSelect(c.id as number) } : pressOpen(() => prepareChat(c.id as number), () => openChat(c.id as number)))}
+      onContextMenu={(e: MouseEvent) => { e.preventDefault(); if (selecting) toggleChatSelect(c.id as number); else onMenu(c.id as number, e.clientX, e.clientY); }}
     />
   );
 });
@@ -228,6 +233,9 @@ export function Sidebar() {
   // вкладки показываются, только когда есть свои папки; иначе (и при вкладках слева) — одна страница «Все»
   const shown = place === 'none' ? ALL : folder;
   const order = place === 'none' ? [String(ALL)] : items.map((t) => String(t.id));
+  // режим выбора — над строками открытой папки (пропавшие из неё выпадают из выбора)
+  const mode = useChatSelectMode('main', listOf(shown));
+  const rowTagSpace = mode.rowsSelecting ? Math.max(0, tagSpace - 36) : tagSpace;   // место под галочку сужает строку
 
   // одна папка: свой список и своя прокрутка (страница SlideStack)
   // строка «Архив» над «Все» (как в Telegram): имена первых архивных, непрочитанные — ярче; счётчик — чаты с непрочитанным
@@ -248,14 +256,14 @@ export function Sidebar() {
     }
     return (
       <>
-      <div ref={tagRef} class={'app-listwrap' + (fade ? ' is-fresh' : '')}>
+      <div ref={tagRef} class={'app-listwrap' + (fade ? ' is-fresh' : '') + mode.wrapClass}>
         <Presence show={skeleton} exitMs={320}>
           <div class={'app-skel' + (SHELL_SKEL ? ' app-skel-instant' : '')} aria-busy="true" aria-label="Загрузка чатов">
             {Array.from({ length: 9 }, (_, i) => <div key={i} style={{ '--i': i }}><ChatRowSkeleton /></div>)}
           </div>
         </Presence>
         {!waiting && f === ALL && !q && archived.length ? (
-          <ArchivedRow names={archiveNames} count={archiveUnread} onClick={() => void go('archive')} />
+          <ArchivedRow names={archiveNames} count={archiveUnread} onClick={mode.sel ? undefined : () => void go('archive')} />
         ) : null}
         {waiting ? null : list.length ? (
           <>
@@ -272,7 +280,8 @@ export function Sidebar() {
             rowHeight={ROW}
             rowHeightOf={tagsOf ? (c: Item) => (tagsOf.get(c.id as number) ? ROW_TAGGED : ROW) : undefined}
             getKey={(c: Item) => 'c' + c.id}
-            render={(c: Item) => <SideRow c={c} meId={me.userId} active={c.id === openId} showDraft={!!c.draft && c.id !== openId} muted={isMuted(c)} onMenu={onRowMenu} tags={tagsOf?.get(c.id as number)} tagSpace={tagSpace} />}
+            render={(c: Item) => <SideRow c={c} meId={me.userId} active={c.id === openId} showDraft={!!c.draft && c.id !== openId} muted={isMuted(c)} onMenu={onRowMenu} tags={tagsOf?.get(c.id as number)} tagSpace={rowTagSpace}
+              selecting={mode.rowsSelecting} selected={!!mode.sel?.ids.includes(c.id as number)} />}
           />
           {!q && !status.chatsComplete && !(f === ALL && status.chatsTotal) ? (
             <MoreLoader />
@@ -303,14 +312,15 @@ export function Sidebar() {
       class={[searchOpen && 'app-searching', searchAnim.current && 'app-search-' + searchAnim.current].filter(Boolean).join(' ') || undefined}
       embedded
       paged
-      header={<SidebarHeader onMenu={(e: MouseEvent) => setMenu(e.currentTarget as HTMLElement)} back={searchOpen} onBack={closeSearch} status={searchStatus ?? undefined} searchId="side-search" value={search} placeholder="Поиск"
+      // шапка выбора — соседка SidebarHeader: её позиционированный предок — .rl-sidepage, она ровно закрывает 62 px шапки
+      header={<><SidebarHeader onMenu={(e: MouseEvent) => setMenu(e.currentTarget as HTMLElement)} back={searchOpen} onBack={closeSearch} status={searchStatus ?? undefined} searchId="side-search" value={search} placeholder="Поиск"
         onSearchFocus={openSearch} onSearchKey={(e: KeyboardEvent) => { if (e.key === 'Escape') { e.preventDefault(); closeSearch(); } }}
-        onSearch={(e: Event) => setGlobal({ search: (e.target as HTMLInputElement).value, searchOpen: true })} />}
+        onSearch={(e: Event) => setGlobal({ search: (e.target as HTMLInputElement).value, searchOpen: true })} />{mode.header}</>}
       top={<ChatBanner />}
       tabs={place === 'top' ? <FolderTabs class="app-folders" active={folder} onChange={selectFolder} onItemMenu={folderMenu.open} items={items.map((t, i) => (i === 0 ? { ...t, label: 'Все' } : t))} /> : null}
       banner={
         <>
-          <RowMenu at={rowMenu} onClose={() => setRowMenu(null)} />
+          <RowMenu list="main" at={rowMenu} onClose={() => setRowMenu(null)} />
           <MenuPopover
                 open={!!menu && view === 'chats'} anchor={menu ?? undefined} placement="bottom-start" class="app-sidemenu"
                 label="Главное меню"
@@ -340,12 +350,13 @@ export function Sidebar() {
       <SlideStack variant="tabs" order={order} active={String(shown)} render={(f: string) => <div class="rl-page-scroll">{renderFolder(f)}</div>} />
       {searchLayer ? <div class="app-search-layer" inert={!searchOpen}><GlobalSearch /></div> : null}
       {folderMenu.node}
+      {mode.node}
     </SidebarCard>
   );
 }
 
 /** Действия с чатом по правой кнопке: только то, что умеет сервер (удаления/закрепления/архива пока нет). */
-export function RowMenu({ at, onClose }: { at: { id: number; x: number; y: number } | null; onClose: () => void }) {
+export function RowMenu({ list, at, onClose }: { list: SelList; at: { id: number; x: number; y: number } | null; onClose: () => void }) {
   const chat = useGlobal((s) => (at ? s.chats.find((c) => c.id === at.id) : undefined));
   const muted = isMuted(chat);
   const last = useRef(at);
@@ -378,6 +389,7 @@ export function RowMenu({ at, onClose }: { at: { id: number; x: number; y: numbe
               onClose={onClose}
               items={[
                 { icon: 'newTab', label: 'Открыть в новой вкладке', onClick: () => { onClose(); window.open(location.pathname + '#chat=' + id, '_blank', 'noopener'); } },
+                { icon: 'checkCircle', label: 'Выбрать', onClick: () => { onClose(); startChatSelect(list, id); } },
                 // порядок — как в Telegram: прочитанное, папка, закрепить, уведомления, архив
                 ...(unread || marked
                   ? [{ icon: 'markRead', label: 'Отметить как прочитанное', onClick: () => { onClose(); if (unread && lastId) seen(id, lastId); clearUnreadMark(id); } }]

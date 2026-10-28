@@ -32,6 +32,9 @@ html[data-shell-was] #app .rl-tw .tw-canvas { animation: none; }
 @keyframes app-fade { from { opacity: 0; } to { opacity: 1; } }
 /* скелетон ↔ список: скелетон всплывает построчно, уходит поверх появляющегося списка (crossfade) */
 .app-listwrap { position: relative; }
+/* «Архив»: шапка выбора закрывает ровно PanelHeader (60 px, а не 62 px SidebarHeader) — не наезжает на список */
+.app-archive-head { position: relative; flex-shrink: 0; }
+.app-archive-head .rl-selhead { min-height: 0; bottom: 0; padding-block: 0; }
 .app-skel > div { animation: app-rise 320ms var(--ease-out) both; animation-delay: calc(var(--i) * 35ms); }
 .app-skel-instant > div { animation: none; }   /* скелетон, уже нарисованный каркасом (Sidebar) — на месте, без всплытия */
 /* слоем — сам скелетон: обёртка Presence — display: contents (своей коробки нет, position на ней не работает) */
