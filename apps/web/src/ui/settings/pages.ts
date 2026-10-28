@@ -18,6 +18,7 @@ export { Privacy } from './Privacy';
 export { PrivacyRule } from './PrivacyRule';
 export { Profile } from './Profile';
 export { Sessions } from './Sessions';
+export { Shortcuts } from './Shortcuts';
 export { Wallpaper, WallpaperColor } from './Wallpaper';
 export { LinkEdit } from '../links/LinkEdit';
 export { Links } from '../links/Links';

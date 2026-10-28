@@ -78,6 +78,9 @@ export function General() {
             checked={prefs.sendKey === 'ctrlEnter'} onClick={() => setPref('sendKey', 'ctrlEnter')}
           />
         </Section>
+        <Section>
+          <InfoRow icon="keyboard" title="Сочетания клавиш" onClick={() => void go('settings/general/shortcuts')} />
+        </Section>
       </div>
     </div>
   );

@@ -1,6 +1,6 @@
 import { ChatBanner } from './ChatBanner';
 import { UpdatePill } from './UpdatePill';
-import { ArchivedRow, Avatar, ChatRow, Highlight, Icon, MenuPopover, Presence, SlideStack, ChatRowSkeleton, useMinVisible, EmptyState, WindowList, FolderTabs, SidebarCard, SidebarHeader, beginHeavyAnimation, peerTone, reducedMotion, ripple } from '@relay/ui';
+import { ArchivedRow, Avatar, ChatRow, Highlight, Icon, MenuPopover, Presence, SlideStack, ChatRowSkeleton, useMinVisible, EmptyState, WindowList, FolderTabs, SidebarCard, SidebarHeader, beginHeavyAnimation, peerTone, reducedMotion, ripple, addHotkeys } from '@relay/ui';
 import type { Item } from '@relay/sync-engine/src/types';
 import { loadMoreChats, openChat, prepareChat } from '../data';
 import { pressOpen } from './press';
@@ -8,6 +8,7 @@ import { clearUnreadMark, hasUnreadMark, isArchived, isPinned, markUnread, toggl
 import { usePerson } from '../people';
 import { closeSearch, openSearch } from '../search';
 import { GlobalSearch } from './search/GlobalSearch';
+import { NEXT_CHAT, PREV_CHAT } from '../shortcuts';
 import { setGlobal, useGlobal } from '../global';
 import { useEffect, useRef, useState } from 'preact/hooks';
 import { memo } from 'preact/compat';
@@ -173,17 +174,14 @@ export function Sidebar() {
     tagRO.current.observe(el);
   }).current;
   useEffect(() => () => tagRO.current?.disconnect(), []);
-  // Ctrl+Shift+1…9 — папка по номеру (как в Telegram Web A)
+  // Ctrl+Shift+1…9 — папка по номеру (как в Telegram Web A; Ctrl и на Mac)
   useEffect(() => {
     if (place === 'none') return;
-    const onKey = (e: KeyboardEvent) => {
-      if (e.ctrlKey && e.shiftKey && /^Digit[1-9]$/.test(e.code)) {
-        const t = items[Number(e.code.slice(5)) - 1];
-        if (t) { e.preventDefault(); selectFolder(t.id); }
-      }
-    };
-    addEventListener('keydown', onKey);
-    return () => removeEventListener('keydown', onKey);
+    return addHotkeys(Array.from({ length: 9 }, (_, i): [string, () => false | void] => ['ctrl+shift+' + (i + 1), () => {
+      const t = items[i];
+      if (!t) return false;
+      selectFolder(t.id);
+    }]));
   }, [place, items]);
   const status = useGlobal((s) => s.status);
   const folder = useGlobal((s) => s.folder);
@@ -228,6 +226,19 @@ export function Sidebar() {
   // вкладки показываются, только когда есть свои папки; иначе (и при вкладках слева) — одна страница «Все»
   const shown = place === 'none' ? ALL : folder;
   const order = place === 'none' ? [String(ALL)] : items.map((t) => String(t.id));
+  // Alt+↑ / Alt+↓ — соседний чат в открытой папке (как в Telegram); ни один не открыт — первый
+  const stepRef = useRef<(d: number) => false | void>(() => false);
+  stepRef.current = (d) => {
+    const ids = listOf(shown).map((c) => c.id as number);
+    if (!ids.length) return false;
+    const at = openId == null ? -1 : ids.indexOf(openId);
+    const next = at < 0 ? (d > 0 ? 0 : ids.length - 1) : Math.max(0, Math.min(ids.length - 1, at + d));
+    if (ids[next] !== openId) openChat(ids[next]);
+  };
+  useEffect(() => addHotkeys([
+    [PREV_CHAT, () => stepRef.current(-1), { repeat: true }],
+    [NEXT_CHAT, () => stepRef.current(1), { repeat: true }],
+  ]), []);
 
   // одна папка: свой список и своя прокрутка (страница SlideStack)
   // строка «Архив» над «Все» (как в Telegram): имена первых архивных, непрочитанные — ярче; счётчик — чаты с непрочитанным
