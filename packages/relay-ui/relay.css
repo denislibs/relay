@@ -119,9 +119,9 @@ body { margin: 0; font-family: var(--font-sans); color: var(--ink); background: 
 .rl-row-sel-on { background: var(--hover); }
 /* анимация только в момент входа/выхода (класс на обёртке списка ставит Sidebar на 300 мс):
    строки, пришедшие при прокрутке во включённом режиме, появляются уже готовыми */
-.rl-sel-anim .rl-row-check { animation: rl-fade var(--dur-base) var(--ease-out) both; }
-.rl-sel-anim .rl-row-sel > :not(.rl-row-check) { animation: rl-sel-lane var(--dur-base) var(--ease-out) both; }
-.rl-sel-anim.rl-sel-leave .rl-row > :not(.rl-row-check) { animation: rl-sel-lane-out var(--dur-base) var(--ease-out) both; }
+.rl-sel-anim .rl-row-check { animation: rl-fade var(--dur-slow) var(--ease-out) both; }
+.rl-sel-anim .rl-row-sel > :not(.rl-row-check) { animation: rl-sel-lane var(--dur-slow) var(--ease-out) both; }
+.rl-sel-anim.rl-sel-leave .rl-row > :not(.rl-row-check) { animation: rl-sel-lane-out var(--dur-slow) var(--ease-out) both; }
 @keyframes rl-sel-lane { from { transform: translateX(-36px); } to { transform: none; } }
 @keyframes rl-sel-lane-out { from { transform: translateX(36px); } to { transform: none; } }
 @media (prefers-reduced-motion: reduce) { .rl-sel-anim .rl-row-check, .rl-sel-anim .rl-row > * { animation: none; } }
