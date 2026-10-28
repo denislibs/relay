@@ -1,5 +1,6 @@
 import { test, expect, beforeEach } from 'bun:test';
 import { setGlobal, getGlobal } from './global';
+import { bindChatFlags, pinMany } from './chatFlags';
 import { endChatSelect, inListOrder, pinRoom, pruneChatSelect, selectionActions, setChatSelectIds, startChatSelect, stateOf, toggleChatSelect, type SelState } from './chatSelect';
 
 const S = (o: Partial<SelState> = {}): SelState => ({ pinned: false, unread: false, muted: false, archived: false, system: false, owner: false, ...o });
@@ -61,4 +62,21 @@ test('лимит закреплённых — по своему списку', (
   const chats = [1, 2, 3, 4].map((id) => ({ id, pinnedAt: id })).concat([{ id: 10 }, { id: 11 }, { id: 12, archived: true, pinnedAt: 1 }] as never);
   expect(pinRoom([10], chats)).toBe(true);        // 4 + 1 = 5
   expect(pinRoom([10, 11], chats)).toBe(false);   // 4 + 2 > 5
+});
+
+test('pinMany: лимит — один тост, на сервер ничего', async () => {
+  const sent: number[] = [];
+  bindChatFlags(async (id) => { sent.push(id); });
+  setGlobal({ chats: [1, 2, 3, 4].map((id) => ({ id, pinnedAt: id })).concat([{ id: 10 }, { id: 11 }] as never) as never });
+  expect(pinMany([10, 11], true)).toBe(false);
+  expect(sent).toEqual([]);
+  expect(pinMany([10], true)).toBe(true);
+  expect(sent).toEqual([10]);
+});
+test('pinMany: снизу вверх — верхний окажется выше (позже закреплён — выше)', () => {
+  const sent: number[] = [];
+  bindChatFlags(async (id) => { sent.push(id); });
+  setGlobal({ chats: [{ id: 1 }, { id: 2 }, { id: 3 }] as never });
+  pinMany([1, 3], true);
+  expect(sent).toEqual([3, 1]);
 });

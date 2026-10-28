@@ -3,7 +3,7 @@
 // Направление действия — то, что приводит все выбранные к одному состоянию; нельзя хоть с одним — пункта нет.
 import type { MyMembership } from '@relay/protocol';
 import { getGlobal, setGlobal } from './global';
-import { PIN_LIMIT, hasUnreadMark, isArchived, isPinned } from './chatFlags';
+import { hasUnreadMark, inListOrder, isArchived, isPinned, pinRoom } from './chatFlags';
 import { isMuted } from './mute';
 import { isSystemChat } from './ui/format';
 
@@ -51,18 +51,5 @@ export function pruneChatSelect(has: (id: number) => boolean): void {
   if (s && !s.ids.every(has)) put(s.list, s.ids.filter(has));
 }
 
-/** Выбранные в порядке списка, сверху вниз. */
-export function inListOrder(ids: readonly number[], list: readonly { id: unknown }[]): number[] {
-  const set = new Set(ids);
-  return list.map((c) => c.id as number).filter((id) => set.has(id));
-}
-
-/** Хватит ли места закрепить ids: у «Всех» и «Архива» лимит свой (chatFlags.PIN_LIMIT). */
-export function pinRoom(ids: readonly number[], chats: readonly Chat[]): boolean {
-  const byId = new Map(chats.map((c) => [c.id as number, c]));
-  for (const archived of [false, true]) {
-    const add = ids.filter((id) => { const c = byId.get(id); return c && !isPinned(c) && isArchived(c) === archived; }).length;
-    if (add && chats.filter((c) => isPinned(c) && isArchived(c) === archived).length + add > PIN_LIMIT) return false;
-  }
-  return true;
-}
+// inListOrder и pinRoom живут в chatFlags (там же pinMany, без цикла импортов) — отсюда реэкспорт.
+export { inListOrder, pinRoom };

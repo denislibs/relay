@@ -39,3 +39,42 @@ export function toggleArchive(chatId: number): void {
 
 export function markUnread(chatId: number): void { send(chatId, { unreadMark: true }); }
 export function clearUnreadMark(chatId: number): void { if (hasUnreadMark(chatById(chatId))) send(chatId, { unreadMark: false }); }
+
+/** Выбранные в порядке списка, сверху вниз. */
+export function inListOrder(ids: readonly number[], list: readonly object[]): number[] {
+  const set = new Set(ids);
+  return list.map((c) => (c as { id: number }).id).filter((id) => set.has(id));
+}
+
+/** Хватит ли места закрепить ids: у «Всех» и «Архива» лимит свой (PIN_LIMIT). */
+export function pinRoom(ids: readonly number[], chats: readonly (Chat & { id?: unknown })[]): boolean {
+  const byId = new Map(chats.map((c) => [c.id as number, c]));
+  for (const archived of [false, true]) {
+    const add = ids.filter((id) => { const c = byId.get(id); return c && !isPinned(c) && isArchived(c) === archived; }).length;
+    if (add && chats.filter((c) => isPinned(c) && isArchived(c) === archived).length + add > PIN_LIMIT) return false;
+  }
+  return true;
+}
+
+/**
+ * Закрепить / открепить несколько. Порядок закреплённых — по времени закрепления (позже — выше), поэтому
+ * шлём снизу вверх: верхний из выбранных окажется выше. Не влезает в лимит — тост, ничего не уходит.
+ */
+export function pinMany(ids: number[], pinned: boolean): boolean {
+  const chats = getGlobal().chats;
+  const todo = inListOrder(ids, chats).filter((id) => isPinned(chatById(id)) !== pinned);
+  if (pinned && !pinRoom(todo, chats)) { showToast(`Закрепить можно не больше ${PIN_LIMIT} чатов. Открепите один из них.`, 3500); return false; }
+  for (const id of (pinned ? todo.reverse() : todo)) send(id, { pinned });
+  return true;
+}
+
+export function archiveMany(ids: number[], archived: boolean): void {
+  const todo = ids.filter((id) => isArchived(chatById(id)) !== archived);
+  for (const id of todo) send(id, { archived });
+  if (todo.length) showToast(archived ? (todo.length > 1 ? 'Чаты перенесены в архив' : 'Чат перенесён в архив') : (todo.length > 1 ? 'Чаты возвращены из архива' : 'Чат возвращён из архива'));
+}
+
+/** Отметка «непрочитано»; снять — только с тех, у кого она есть (счётчик гасит data.seen в chatSelectRun). */
+export function markUnreadMany(ids: number[], unread: boolean): void {
+  for (const id of ids) if (hasUnreadMark(chatById(id)) !== unread) send(id, { unreadMark: unread });
+}

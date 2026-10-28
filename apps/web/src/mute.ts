@@ -54,6 +54,11 @@ export function unmuteChat(chatId: number): void { dropLegacy(chatId); send(chat
 /** Переключатель: выключенный — включить, иначе выключить навсегда. */
 export function toggleMute(chatId: number): void { if (isChatMuted(chatId)) unmuteChat(chatId); else muteChat(chatId, null); }
 
+/** Звук нескольким сразу: выключить — навсегда (как toggleMute), включить — только тем, у кого выключен. */
+export function muteMany(ids: number[], muted: boolean): void {
+  for (const id of ids) if (isChatMuted(id) !== muted) { if (muted) muteChat(id, null); else unmuteChat(id); }
+}
+
 let started = false;
 /** Один таймер до ближайшего срока; перевзводится при каждой смене списка чатов. */
 export function startMuteTimers(): void {

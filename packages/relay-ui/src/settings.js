@@ -130,7 +130,7 @@ function ConfirmDialog(props) {
       props.extra ? h('button', { key: 'ex', type: 'button', class: 'rl-mdl-btn', onClick: props.extra.onClick }, props.extra.label) : null,
       h('button', { key: 'ok', type: 'button', class: cx('rl-mdl-btn', props.danger && 'rl-mdl-btn-danger'), 'data-autofocus': props.danger ? undefined : '', onClick: props.onConfirm }, props.confirm || 'Ок'),
     ],
-  }, props.text ? h('p', { class: 'rl-mdl-text' }, props.text) : null);
+  }, props.text ? h('p', { class: 'rl-mdl-text' }, props.text) : null, props.children);
 }
 
 /* ---------- RichText: текст → узлы (текст / http(s)-ссылка / @упоминание), без innerHTML ---------- */
