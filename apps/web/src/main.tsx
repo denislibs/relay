@@ -101,10 +101,10 @@ window.addEventListener('relay:signed-in', () => {
 
 // Esc по слоям: меню, окна, поле ввода (ответ, панель формата, упоминания), эмодзи — сами, до window; правая панель —
 // escBusy; выбор сообщений и поиск в чате — свои обработчики на window (позже nav, поэтому здесь пропускаем их);
-// затем выбор чатов в списке слева; затем обычная навигация (закрыть чат, «Назад» страницы).
+// затем выбор чатов в списке слева (поиск смотрим только в текущей колонке стека: нижние чаты смонтированы, их поиск не слушает Esc); затем обычная навигация (закрыть чат, «Назад» страницы).
 const escChatSelect = () => {
   const s = getGlobal();
-  if (!s.chatSelect || s.selecting || document.querySelector('.rl-csearch')) return false;
+  if (!s.chatSelect || s.selecting || document.querySelector('.app-chatcol[data-current] .rl-csearch')) return false;
   endChatSelect();
   return true;
 };

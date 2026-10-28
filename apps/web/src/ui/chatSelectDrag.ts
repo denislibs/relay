@@ -29,17 +29,20 @@ export function chatSelectDrag(e: PointerEvent, rows: readonly Item[], scroller:
   const add = !base.includes(ids[start]);
   const x0 = e.clientX, y0 = e.clientY;
   let moved = false, y = y0, raf = 0;
+  // Видимая область списка начинается ниже плашки поверх прокрутки (.rl-sidecard-over с вкладками папок): её высота — --over-h
+  // хозяина (наследуется). Без неё elementFromPoint у верхнего края попадает во вкладки, а автопрокрутка уходит под плашку.
+  const over = Math.max(0, parseFloat(getComputedStyle(scroller).getPropertyValue('--over-h')) || 0);
   const at = (py: number) => {
     const r = scroller.getBoundingClientRect();
-    return indexOf(document.elementFromPoint(r.left + r.width / 2, Math.max(r.top + 1, Math.min(r.bottom - 1, py))));
+    return indexOf(document.elementFromPoint(r.left + r.width / 2, Math.max(r.top + over + 1, Math.min(r.bottom - 1, py))));
   };
   const apply = () => {
     const i = at(y); if (i < 0) return;
     setChatSelectIds(dragRangeIds(ids, start, i, base, add));
   };
   const tick = () => {
-    const r = scroller.getBoundingClientRect(), edge = 48;
-    const v = y < r.top + edge ? -Math.ceil((r.top + edge - y) / 4) : y > r.bottom - edge ? Math.ceil((y - (r.bottom - edge)) / 4) : 0;
+    const r = scroller.getBoundingClientRect(), edge = 48, top = r.top + over;
+    const v = y < top + edge ? -Math.ceil((top + edge - y) / 4) : y > r.bottom - edge ? Math.ceil((y - (r.bottom - edge)) / 4) : 0;
     if (v) { scroller.scrollTop += v; apply(); }
     raf = requestAnimationFrame(tick);
   };

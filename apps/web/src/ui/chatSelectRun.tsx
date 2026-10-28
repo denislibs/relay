@@ -38,15 +38,19 @@ export function useBulkDelete(onDone: () => void): { open: (ids: number[]) => vo
   const run = async () => {
     const list = ids!; setIds(null); onDone();
     const me = getGlobal().me?.userId;
-    await Promise.all(list.map((id) => findChat(getGlobal(), id)?.kind === 'direct'
+    const open = getGlobal().openChatId as number;
+    // allSettled + catch: отказ одного вызова (движок не запущен и т. п.) не должен стать unhandled rejection и не прерывает остальные
+    const done = await Promise.allSettled(list.map((id) => (findChat(getGlobal(), id)?.kind === 'direct'
       ? act('POST', `/chats/${id}/delete`, { forAll })
-      : act('DELETE', `/groups/${id}/members/${me}`)));
-    if (list.includes(getGlobal().openChatId as number)) closeChat();
+      : act('DELETE', `/groups/${id}/members/${me}`)).catch(() => null)));
+    // открытый чат закрываем, только если его собственный вызов удался (при ошибке act уже показал тост и вернул null)
+    const i = list.indexOf(open);
+    if (i >= 0 && done[i].status === 'fulfilled' && (done[i] as PromiseFulfilledResult<unknown>).value != null && getGlobal().openChatId === open) closeChat();
   };
   const n = ids?.length ?? 0;
   const node = (
     <ConfirmDialog open={!!ids} danger title={`Удалить ${n} ${plural(n, 'чат', 'чата', 'чатов')}`}
-      text="Это действие нельзя отменить. Из групп и каналов вы выйдете." confirm="Удалить"
+      text={'Это действие нельзя отменить.' + (personal.length < n ? ' Из групп и каналов вы выйдете.' : '')} confirm="Удалить"
       onConfirm={() => void run()} onCancel={() => setIds(null)}>
       {personal.length ? <Checkbox id="bulk-del-all" checked={forAll} onChange={() => setForAll(!forAll)}>Удалить и у собеседников, где возможно</Checkbox> : null}
     </ConfirmDialog>
