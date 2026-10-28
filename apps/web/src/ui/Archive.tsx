@@ -7,6 +7,7 @@ import { isMuted } from '../mute';
 import { back } from '../nav';
 import { RowMenu, SideRow } from './Sidebar';
 import { useChatSelectMode } from './chatSelectRun';
+import { chatSelectDrag, dragClickGuard } from './chatSelectDrag';
 
 const ROW = 72;
 
@@ -31,7 +32,9 @@ export function Archive() {
         {mode.header}
       </div>
       <div class="rl-page-scroll">
-        <div class={'app-listwrap' + mode.wrapClass}>
+        <div class={'app-listwrap' + mode.wrapClass}
+          onPointerDownCapture={mode.sel ? (e) => chatSelectDrag(e, list, e.currentTarget.closest('.rl-page-scroll') as HTMLElement) : undefined}
+          onClickCapture={mode.sel ? dragClickGuard : undefined}>
           {list.length ? (
             <WindowList keepAlive overscanPx={900} role="list" items={list} rowHeight={ROW} getKey={(c: Item) => 'c' + c.id}
               render={(c: Item) => <SideRow c={c} meId={me.userId} active={c.id === openId} showDraft={!!c.draft && c.id !== openId} muted={isMuted(c)} onMenu={onMenu}

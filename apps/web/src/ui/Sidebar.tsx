@@ -28,6 +28,7 @@ import { avatarPhoto } from '../profilePhoto';
 import { installApp } from '../pwa';
 import { startChatSelect, toggleChatSelect, type SelList } from '../chatSelect';
 import { useChatSelectMode } from './chatSelectRun';
+import { chatSelectDrag, dragClickGuard } from './chatSelectDrag';
 
 /** Скелетон списка уже нарисован каркасом приложения из index.html (boot.js → html[data-shell-skel]). */
 const SHELL_SKEL = typeof document !== 'undefined' && document.documentElement.hasAttribute('data-shell-skel');
@@ -77,6 +78,7 @@ export const SideRow = memo(function SideRow({ c, meId, active, showDraft, muted
       name={(c.title as string) || 'Чат №' + c.id}
       avatarTone={chatTone(c)}
       {...rowPhoto(c.photo as ProfilePhoto | null)}
+      data-chat-id={c.id}
       logo={isSystemChat(c)}
       verified={isSystemChat(c)}
       author={author}
@@ -256,7 +258,9 @@ export function Sidebar() {
     }
     return (
       <>
-      <div ref={tagRef} class={'app-listwrap' + (fade ? ' is-fresh' : '') + mode.wrapClass}>
+      <div ref={tagRef} class={'app-listwrap' + (fade ? ' is-fresh' : '') + mode.wrapClass}
+        onPointerDownCapture={mode.sel ? (e) => chatSelectDrag(e, list, e.currentTarget.closest('.rl-page-scroll') as HTMLElement) : undefined}
+        onClickCapture={mode.sel ? dragClickGuard : undefined}>
         <Presence show={skeleton} exitMs={320}>
           <div class={'app-skel' + (SHELL_SKEL ? ' app-skel-instant' : '')} aria-busy="true" aria-label="Загрузка чатов">
             {Array.from({ length: 9 }, (_, i) => <div key={i} style={{ '--i': i }}><ChatRowSkeleton /></div>)}
