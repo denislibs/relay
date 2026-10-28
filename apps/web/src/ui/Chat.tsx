@@ -47,7 +47,8 @@ import { membersStatus, useMembers } from '../members';
 import { Playlist } from './Playlist';
 import { inProfile, toggleProfileMusic, type Track } from '../music';
 import { useOwnMusic } from '../profileLists';
-import { Avatar, Button, Chip, Icon, MediaPolicy, peerTone, ChatSearchBar, Highlight, ripple, useMinVisible, requestMeasure, Composer, DropOverlay, GlassBar, IconButton, MenuPopover, Modal, ConfirmDialog, Presence, ReactionsBar, reducedMotion, plural, requestMutation, SelectionBar, isHeavyAnimating, onHeavyAnimationEnd, applyMarkdown, emptyValue, sameValue, voiceSupported, PlayerBar, roundSupported, startRound, Verified, canCopyImage, clipboardHtml, copyImage, copyRich, downloadUrl, TodoModal, PollModal, ContactPicker, TODO_ITEMS_MAX, DateModal, setDateCopiedToast } from '@relay/ui';
+import { SEARCH_IN_CHAT } from '../shortcuts';
+import { Avatar, Button, Chip, Icon, MediaPolicy, peerTone, ChatSearchBar, Highlight, ripple, useMinVisible, requestMeasure, Composer, DropOverlay, GlassBar, IconButton, MenuPopover, Modal, ConfirmDialog, Presence, ReactionsBar, reducedMotion, plural, requestMutation, SelectionBar, isHeavyAnimating, onHeavyAnimationEnd, applyMarkdown, emptyValue, sameValue, voiceSupported, PlayerBar, roundSupported, startRound, Verified, canCopyImage, clipboardHtml, copyImage, copyRich, downloadUrl, TodoModal, PollModal, ContactPicker, TODO_ITEMS_MAX, DateModal, setDateCopiedToast, addHotkeys } from '@relay/ui';
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'preact/hooks';
 import { sendSpecial, sendPoll, votePoll, closePoll, sendTodo, appendTodo, editTodo, closeChat, deleteMessage, editMessage, focusMessage, openInner, openUserChat, pinMessage, unpinMessage, sendFile, sendFiles, sendRound, sendVoice, react, rejectTooBig, PLAYABLE_VIDEO, retrySend, discardUnsent, saveDraft, searchMessages, send, typing, typingDone } from '../data';
 import { wantPeople } from '../people';
@@ -243,6 +244,19 @@ export function Chat({ chatId, frameKey, active, threadId }: { chatId: number; f
     addEventListener('keydown', onKey);
     return () => removeEventListener('keydown', onKey);
   }, [finding]);
+
+  // ⌘F / Ctrl+F — поиск по этому чату (вместо поиска браузера); уже открыт — снова в поле, текст выделен
+  useEffect(() => {
+    if (thread) return;
+    return addHotkeys({
+      [SEARCH_IN_CHAT]: () => {
+        if (!activeRef.current) return false;
+        if (!finding) { setFinding(true); return; }
+        const input = document.getElementById('chat-find') as HTMLInputElement | null;
+        input?.focus(); input?.select();
+      },
+    });
+  }, [thread, finding]);
 
   // вложения: выбор файла (скрепка), перетаскивание, вставка; перед отправкой — окно с превью и подписью
   const picker = useRef<HTMLInputElement>(null);

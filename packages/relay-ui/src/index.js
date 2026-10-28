@@ -6,6 +6,7 @@ export * from './more.js';
 export * from './reactionsBar.js';
 export * from './emojiBubble.js';
 export * from './settings.js';
+export * from './hotkeys.js';
 export * from './profileActions.js';
 export * from './owl.js';
 export * from './schedule.js';
