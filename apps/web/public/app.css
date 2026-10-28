@@ -1588,3 +1588,10 @@ html[data-anim="0"] .rl-sidepage > .rl-aside-body { transition: none; }
 @keyframes app-folder-sym-out { to { opacity: 0; transform: scale(.9); } }
 .app-folder-sym .app-sym-pane { height: 100%; }
 html[data-anim="0"] .app-folder-sym { animation: none !important; }
+
+/* ---------- Сочетания клавиш: строка «действие — клавиши», клавиши чипами ---------- */
+.app-sc-row { display: flex; align-items: center; gap: var(--space-4); min-height: 52px; padding: var(--space-2) var(--space-6); color: var(--ink); }
+.app-sc-keys { display: inline-flex; align-items: center; flex-wrap: wrap; justify-content: flex-end; gap: 6px; flex: none; max-width: 60%; direction: ltr; }
+.app-combo { display: inline-flex; align-items: center; gap: 4px; }
+.app-kbd { display: inline-flex; align-items: center; justify-content: center; min-width: 26px; height: 26px; padding: 0 7px; border-radius: 7px; background: color-mix(in srgb, var(--ink) 7%, transparent); color: var(--ink-muted); font: 600 13px/1 var(--font-sans); white-space: nowrap; }
+.app-combo-plus, .app-combo-or { color: var(--ink-muted); opacity: .6; font: 400 13px/1 var(--font-sans); }

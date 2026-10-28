@@ -12,6 +12,7 @@ import { cx, Icon, IconButton, Presence, ReplyQuote, reducedMotion, ripple } fro
 import { MentionList } from './more.js';
 import { MenuPopover, useHoverMenu } from './popover.js';
 import { beginHeavyAnimation } from './schedule.js';
+import { comboLabel } from './hotkeys.js';
 // что прикрепить, если приложение не передало своё: только то, что работает (сначала медиа, потом файл)
 var ATTACH_ITEMS = [{ key: 'media', icon: 'image', label: 'Фото или видео' }, { key: 'doc', icon: 'file', label: 'Файл' }];
 import { peakHub, RecordBar, voiceSession } from './media/recording.js';
@@ -21,12 +22,12 @@ import { requestMeasure, requestMutation } from './schedule.js';
 import { covers, emptyValue, readDom, replaceContent, safeUrl, setSelection, splice, toggleFormat, toHtml, trimValue, valueFromClipboard } from './richtext.js';
 
 var TOOLBAR = [
-  { type: 'bold', icon: 'bold', label: 'Жирный', keys: '⌘B' },
-  { type: 'italic', icon: 'italic', label: 'Курсив', keys: '⌘I' },
-  { type: 'underline', icon: 'underline', label: 'Подчёркнутый', keys: '⌘U' },
-  { type: 'strike', icon: 'strike', label: 'Зачёркнутый', keys: '⌘⇧X' },
-  { type: 'code', icon: 'mono', label: 'Моноширинный', keys: '⌘⇧M' },
-  { type: 'spoiler', icon: 'spoiler', label: 'Скрытый', keys: '⌘⇧P' },
+  { type: 'bold', icon: 'bold', label: 'Жирный', combo: 'mod+b' },
+  { type: 'italic', icon: 'italic', label: 'Курсив', combo: 'mod+i' },
+  { type: 'underline', icon: 'underline', label: 'Подчёркнутый', combo: 'mod+u' },
+  { type: 'strike', icon: 'strike', label: 'Зачёркнутый', combo: 'mod+shift+x' },
+  { type: 'code', icon: 'mono', label: 'Моноширинный', combo: 'mod+shift+m' },
+  { type: 'spoiler', icon: 'spoiler', label: 'Скрытый', combo: 'mod+shift+p' },
 ];
 
 function isTouchOnly() {
@@ -532,13 +533,13 @@ function Composer(props) {
         } }),
       h(IconButton, { key: 'ok', icon: 'check', label: 'Применить ссылку', size: 20, onClick: function () { applyLink(linkRef.current ? linkRef.current.value : b.url); } }),
     ] : TOOLBAR.map(function (t) {
-      return h('button', { key: t.type, type: 'button', class: cx('rl-fmtbtn', b.active[t.type] && 'rl-fmtbtn-on'), 'aria-pressed': String(!!b.active[t.type]), 'aria-label': t.label, title: t.label + ' ' + t.keys,
+      return h('button', { key: t.type, type: 'button', class: cx('rl-fmtbtn', b.active[t.type] && 'rl-fmtbtn-on'), 'aria-pressed': String(!!b.active[t.type]), 'aria-label': t.label, title: t.label + ' ' + comboLabel(t.combo),
         onClick: function () { format(t.type); } }, h(Icon, { name: t.icon, size: 20 }));
     }).concat([
       // дата на выделении — между моноширинным и ссылкой, как в Telegram Web A
-      props.onPickDate ? h('button', { key: 'date', type: 'button', class: cx('rl-fmtbtn', b.active.date && 'rl-fmtbtn-on'), 'aria-label': 'Дата', title: 'Дата ⌘D', onClick: pickDate }, h(Icon, { name: 'calendar', size: 20 })) : null,
+      props.onPickDate ? h('button', { key: 'date', type: 'button', class: cx('rl-fmtbtn', b.active.date && 'rl-fmtbtn-on'), 'aria-label': 'Дата', title: 'Дата ' + comboLabel('mod+d'), onClick: pickDate }, h(Icon, { name: 'calendar', size: 20 })) : null,
       h('span', { key: 'sep', class: 'rl-fmtbar-sep', 'aria-hidden': 'true' }),
-      h('button', { key: 'link', type: 'button', class: cx('rl-fmtbtn', b.active.link && 'rl-fmtbtn-on'), 'aria-pressed': String(!!b.active.link), 'aria-label': b.active.link ? 'Убрать ссылку' : 'Ссылка', title: 'Ссылка ⌘K',
+      h('button', { key: 'link', type: 'button', class: cx('rl-fmtbtn', b.active.link && 'rl-fmtbtn-on'), 'aria-pressed': String(!!b.active.link), 'aria-label': b.active.link ? 'Убрать ссылку' : 'Ссылка', title: 'Ссылка ' + comboLabel('mod+k'),
         onClick: function () { if (b.active.link) format('link', null); else openLink(); } }, h(Icon, { name: 'link', size: 20 })),
     ])) : null),
     h(MenuPopover, { open: modeMenu[0], anchor: sendRef.current, placement: 'top-end', label: 'Тип сообщения', onClose: function () { modeMenu[1](false); }, items: [
