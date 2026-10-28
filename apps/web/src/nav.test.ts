@@ -49,10 +49,12 @@ function fake() {
     replaceState(s: unknown) { list[pos] = s; },
     go(n: number) { setTimeout(() => { pos = Math.max(0, pos + n); void stack.onPop(list[pos]); }, 0); },
   };
-  const stack = bindForTest({ get: () => view, set: (p) => { view = p; }, escBusy: () => busy }, hist);
+  let mode = false;   // фоновый режим (выбор чатов): Esc снимает его раньше навигации
+  const stack = bindForTest({ get: () => view, set: (p) => { view = p; }, escBusy: () => busy, escMode: () => { if (!mode) return false; mode = false; return true; } }, hist);
   const log: string[] = [];
   return {
     view: () => view, pos: () => pos, setBusy: (b: boolean) => { busy = b; }, log,
+    setMode: (m: boolean) => { mode = m; }, mode: () => mode,
     async userBack(n = 1) { pos -= n; await stack.onPop(list[pos]); await settle(); },
     chat: (key: string) => pushLayer('chat', () => log.push('close ' + key), key),
   };
@@ -210,4 +212,32 @@ test('правая панель: «Назад» браузера закрыва�
   await f.userBack();
   expect(info).toBe(false);
   expect(f.pos()).toBe(0);
+});
+
+test('Esc: выбор чатов снимается раньше «Назад» и закрытия чата, но после модалки и правой панели', async () => {
+  const f = fake();
+  await go('archive');
+  f.chat('a');
+  f.setMode(true);
+  // модалка или правая панель — Esc их, режим остаётся
+  onEscape({ key: 'Escape', defaultPrevented: false }, true);
+  f.setBusy(true);
+  await esc();
+  expect(f.mode()).toBe(true);
+  f.setBusy(false);
+  // слой переднего плана уже взял Esc (preventDefault) — режим остаётся
+  onEscape({ key: 'Escape', defaultPrevented: true }, false);
+  expect(f.mode()).toBe(true);
+  // первый Esc — только режим: чат открыт, страница та же
+  let prevented = false;
+  onEscape({ key: 'Escape', defaultPrevented: false, preventDefault: () => { prevented = true; } }, false);
+  await settle();
+  expect(f.mode()).toBe(false);
+  expect(prevented).toBe(true);
+  expect(f.log).toEqual([]);
+  expect(f.view()).toBe('archive');
+  // следующий — обычная навигация: закрыть чат
+  await esc();
+  expect(f.log).toEqual(['close a']);
+  expect(f.view()).toBe('archive');
 });

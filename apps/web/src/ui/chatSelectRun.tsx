@@ -56,7 +56,7 @@ export function useBulkDelete(onDone: () => void): { open: (ids: number[]) => vo
 
 /**
  * Режим выбора для одного списка (Sidebar — 'main', Archive — 'archive'): шапка поверх своей, класс анимации
- * на обёртку списка на время входа/выхода, Escape, выход при смене страницы/папки/поиска, чистка пропавших.
+ * на обёртку списка на время входа/выхода, выход при смене страницы/папки/поиска, чистка пропавших (Escape — в nav).
  */
 export function useChatSelectMode(list: SelList, rows: readonly Item[]) {
   const sel = useGlobal((s) => (s.chatSelect?.list === list ? s.chatSelect : null));
@@ -86,18 +86,7 @@ export function useChatSelectMode(list: SelList, rows: readonly Item[]) {
     const has = new Set(rows.map((c) => c.id as number));
     pruneChatSelect((id) => has.has(id));
   }, [rows, on]);
-  useEffect(() => {
-    if (!on) return;
-    // На захвате: Esc навигации (nav.onEscape) висит на window с запуска и без preventDefault закрыл бы открытый
-    // чат или страницу «Архив». Открытое меню или окно Esc закрывает само — тогда режим не трогаем.
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key !== 'Escape' || e.defaultPrevented || document.querySelector('[role="dialog"][aria-modal="true"], [role="menu"]')) return;
-      e.preventDefault();
-      endChatSelect();
-    };
-    addEventListener('keydown', onKey, true);
-    return () => removeEventListener('keydown', onKey, true);
-  }, [on]);
+  // Esc снимает режим через навигацию (main.tsx → nav escMode): после слоёв переднего плана, до закрытия чата
   const del = useBulkDelete(endChatSelect);
   const getItems = () => {
     const s = getGlobal(), ids = inListOrder(s.chatSelect?.ids ?? [], s.chats);
