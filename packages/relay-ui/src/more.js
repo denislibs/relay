@@ -5,6 +5,7 @@ import { requestMeasure, requestMutation, onHeavyAnimationEnd, beginHeavyAnimati
 import { TWallpaper } from 'twallpaper';
 import { cx, ripple, reducedMotion, Presence, Icon, IconButton, Avatar, Badge, Button, Checkbox, MediaArt, MessageStatus, ICONS } from './kit.js';
 import { SearchInput } from './searchInput.js';
+import { MenuPopover } from './popover.js';
 import { gridLayout, rowAt } from './windowMath.js';
 
 /* Relay UI kit — components added in the Preact version. */
@@ -145,6 +146,21 @@ function SelectionBar(props) {
     h(IconButton, { icon: 'copy', label: 'Копировать', disabled: !n, onClick: props.onCopy }),
     h(IconButton, { icon: 'forward', label: 'Переслать', disabled: !n, onClick: props.onForward }),
     props.onDelete !== null ? h(IconButton, { icon: 'trash', label: 'Удалить', disabled: !n || !props.onDelete, onClick: props.onDelete }) : null);
+}
+
+/* ---------- SelectHeader: шапка списка в режиме выбора чатов ----------
+   Ложится поверх обычной шапки (SidebarHeader) и проявляется, как в Telegram; уходит через Presence (data-state="closing").
+   Пункты меню собираются при каждом открытии: getItems() видит текущее состояние выбранных (закреплён ли, без звука ли).
+   Ждёт позиционированного предка (.rl-sidecard) — сама ничего не позиционирует снаружи. */
+function SelectHeader(props) {
+  var btn = useRef(null), open = useState(false), items = useState([]);
+  var n = props.count || 0;
+  return h('div', { class: 'rl-selhead', role: 'toolbar', 'aria-label': 'Выбор чатов' },
+    h(IconButton, { icon: 'close', label: 'Отменить выбор', onClick: props.onCancel }),
+    h('span', { class: 'rl-selhead-count', 'aria-live': 'polite' }, 'Выбрано: ' + n + ' ' + plural(n, 'чат', 'чата', 'чатов')),
+    h('span', { ref: btn }, h(IconButton, { icon: 'more', label: 'Действия с выбранными', 'aria-haspopup': 'menu', 'aria-expanded': String(open[0]),
+      onClick: function () { items[1](props.getItems()); open[1](true); } })),
+    h(MenuPopover, { open: open[0], anchor: btn.current || undefined, placement: 'bottom-end', label: 'Действия с выбранными', items: items[0], onClose: function () { open[1](false); } }));
 }
 
 /* ---------- ChatSearchBar + Highlight ---------- */
@@ -1222,4 +1238,4 @@ function GlassBar(props) {
   return h('header', { class: cx('rl-glassbar', props.class) }, props.children);
 }
 
-export { patternColor, intensityAlpha, Wallpaper, nudgeWallpaper, buildPattern, loadPattern, patternSize, PATTERN_FILES, DOODLES, PATTERN_SETS, FloatShell, asideFloats, SideResizer, SidebarCard, SidebarHeader, FolderTabs, FolderRail, Fab, GlassBar, WindowList, WindowGrid, gridLayout, AsidePanel, SideFrame, SlideStack, Menu, MentionList, DropOverlay, LinkPreview, PollBubble, UnreadDivider, SelectionBar, ChatSearchBar, Highlight, ContactPicker, CallRow, StatusAvatar, LoginQR, VirtualList, BottomNav, Tooltip, plural };
+export { patternColor, intensityAlpha, Wallpaper, nudgeWallpaper, buildPattern, loadPattern, patternSize, PATTERN_FILES, DOODLES, PATTERN_SETS, FloatShell, asideFloats, SideResizer, SidebarCard, SidebarHeader, FolderTabs, FolderRail, Fab, GlassBar, WindowList, WindowGrid, gridLayout, AsidePanel, SideFrame, SlideStack, Menu, MentionList, DropOverlay, LinkPreview, PollBubble, UnreadDivider, SelectionBar, SelectHeader, ChatSearchBar, Highlight, ContactPicker, CallRow, StatusAvatar, LoginQR, VirtualList, BottomNav, Tooltip, plural };

@@ -943,6 +943,11 @@ button.rl-quote:active { background: var(--quote-bg-active, var(--pressed)); }
 /* ---------- SelectionBar ---------- */
 .rl-selbar { display: flex; align-items: center; gap: var(--space-2); height: 64px; padding: 0 var(--space-4); background: var(--tray); animation: rl-reply-in var(--dur-base) var(--ease-out) both; }
 .rl-selbar-count { flex: 1; font: 500 16px/22px var(--font-sans); animation: rl-label-in var(--dur-fast) var(--ease-out); }
+/* шапка выбора чатов — поверх шапки списка (.rl-sidecard — позиционированный предок); проявление при монтировании и уход через Presence — по 200 мс */
+.rl-selhead { position: absolute; inset: 0 0 auto 0; z-index: 4; display: flex; align-items: center; gap: var(--space-2); min-height: calc(var(--space-3) + 42px + var(--space-2)); padding: var(--space-3) var(--space-3) var(--space-2); background: var(--card); animation: rl-fade var(--dur-base) var(--ease-out) both; }
+.rl-selhead-count { flex: 1; min-width: 0; font: 600 17px/22px var(--font-sans); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.rl-presence[data-state="closing"] > .rl-selhead { animation: rl-fade-out var(--dur-base) var(--ease-in) forwards; }
+@media (prefers-reduced-motion: reduce) { .rl-selhead { animation: none; } }
 .rl-iconbtn[disabled] { opacity: 0.4; cursor: default; pointer-events: none; }
 
 /* ---------- ChatSearchBar + Highlight ---------- */
