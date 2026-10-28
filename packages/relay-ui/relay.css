@@ -110,6 +110,21 @@ body { margin: 0; font-family: var(--font-sans); color: var(--ink); background: 
 .rl-row { display: flex; align-items: center; gap: 10px; width: 100%; height: var(--size-row); padding: 0 9px; border: 0; border-radius: var(--radius-lg); background: transparent; color: var(--ink); font: inherit; text-align: left; cursor: pointer; transition: background-color var(--dur-instant) var(--ease-out); }
 .rl-row:hover { background: var(--hover); }
 .rl-row[aria-current="true"] { background: var(--selected); }
+/* Выбор нескольких чатов: кружок слева, под него — полоса 36 px. Полоса открывается сразу (раскладка один раз),
+   содержимое догоняет сдвигом — transform, без раскладки на каждом кадре (как в Telegram). */
+.rl-row { position: relative; }
+.rl-row-sel { padding-inline-start: 45px; }
+.rl-row-check { position: absolute; inset-inline-start: 12px; top: 50%; width: 22px; height: 22px; margin-top: -11px; border-radius: 50%; border: 2px solid var(--ink-muted); display: grid; place-items: center; color: transparent; transition: background-color var(--dur-instant) var(--ease-out), border-color var(--dur-instant) var(--ease-out); pointer-events: none; }
+.rl-row-sel-on .rl-row-check { background: var(--brand-strong); border-color: var(--brand-strong); color: var(--on-brand); }
+.rl-row-sel-on { background: var(--hover); }
+/* анимация только в момент входа/выхода (класс на обёртке списка ставит Sidebar на 300 мс):
+   строки, пришедшие при прокрутке во включённом режиме, появляются уже готовыми */
+.rl-sel-anim .rl-row-check { animation: rl-fade var(--dur-slow) var(--ease-out) both; }
+.rl-sel-anim .rl-row-sel > :not(.rl-row-check) { animation: rl-sel-lane var(--dur-slow) var(--ease-out) both; }
+.rl-sel-anim.rl-sel-leave .rl-row > :not(.rl-row-check) { animation: rl-sel-lane-out var(--dur-slow) var(--ease-out) both; }
+@keyframes rl-sel-lane { from { transform: translateX(-36px); } to { transform: none; } }
+@keyframes rl-sel-lane-out { from { transform: translateX(36px); } to { transform: none; } }
+@media (prefers-reduced-motion: reduce) { .rl-sel-anim .rl-row-check, .rl-sel-anim .rl-row > * { animation: none; } }
 .rl-row-main { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 1px; }
 /* строка с тегами папок — выше на полосу тегов (82 вместо 72, как в Telegram); аватар и текст — там же, где у обычной */
 .rl-row.rl-row-tagged { height: 82px; align-items: flex-start; padding-top: 9px; }
@@ -928,6 +943,11 @@ button.rl-quote:active { background: var(--quote-bg-active, var(--pressed)); }
 /* ---------- SelectionBar ---------- */
 .rl-selbar { display: flex; align-items: center; gap: var(--space-2); height: 64px; padding: 0 var(--space-4); background: var(--tray); animation: rl-reply-in var(--dur-base) var(--ease-out) both; }
 .rl-selbar-count { flex: 1; font: 500 16px/22px var(--font-sans); animation: rl-label-in var(--dur-fast) var(--ease-out); }
+/* шапка выбора чатов — поверх шапки списка (.rl-sidecard — позиционированный предок); проявление при монтировании и уход через Presence — по 200 мс */
+.rl-selhead { position: absolute; inset: 0 0 auto 0; z-index: 4; display: flex; align-items: center; gap: var(--space-2); min-height: calc(var(--space-3) + 42px + var(--space-2)); padding: var(--space-3) var(--space-3) var(--space-2); background: var(--card); animation: rl-fade var(--dur-base) var(--ease-out) both; }
+.rl-selhead-count { flex: 1; min-width: 0; font: 600 17px/22px var(--font-sans); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.rl-presence[data-state="closing"] > .rl-selhead { animation: rl-fade-out var(--dur-base) var(--ease-in) forwards; }
+@media (prefers-reduced-motion: reduce) { .rl-selhead { animation: none; } }
 .rl-iconbtn[disabled] { opacity: 0.4; cursor: default; pointer-events: none; }
 
 /* ---------- ChatSearchBar + Highlight ---------- */

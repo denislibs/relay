@@ -14,6 +14,7 @@ import { closeAllChats, openChat, startData } from './data';
 import { installErrorCapture } from './devtools/metrics';
 import { getGlobal, isPhone, setGlobal, subscribeGlobal, type Me } from './global';
 import * as nav from './nav';
+import { endChatSelect } from './chatSelect';
 import { startScreenBlur } from './screenBlur';
 import { startSettingsData } from './settingsData';
 import { startTitle } from './title';
@@ -98,7 +99,16 @@ window.addEventListener('relay:signed-in', () => {
   }).catch(() => location.reload());
 });
 
-nav.installNav({ get: () => getGlobal().sidebarView, set: (p) => setGlobal({ sidebarView: p }), escBusy: () => getGlobal().infoOpen && !!getGlobal().openChatId });
+// Esc по слоям: меню, окна, поле ввода (ответ, панель формата, упоминания), эмодзи — сами, до window; правая панель —
+// escBusy; выбор сообщений и поиск в чате — свои обработчики на window (позже nav, поэтому здесь пропускаем их);
+// затем выбор чатов в списке слева (поиск смотрим только в текущей колонке стека: нижние чаты смонтированы, их поиск не слушает Esc); затем обычная навигация (закрыть чат, «Назад» страницы).
+const escChatSelect = () => {
+  const s = getGlobal();
+  if (!s.chatSelect || s.selecting || document.querySelector('.app-chatcol[data-current] .rl-csearch')) return false;
+  endChatSelect();
+  return true;
+};
+nav.installNav({ get: () => getGlobal().sidebarView, set: (p) => setGlobal({ sidebarView: p }), escBusy: () => getGlobal().infoOpen && !!getGlobal().openChatId, escMode: escChatSelect });
 // правая панель «Информация» — свой слой навигации: «Назад» браузера закрывает её, закрытая из интерфейса — снимает запись
 let infoLayer = 0;
 // телефон: открытый чат — отдельный экран поверх списка (как в Telegram), «Назад» браузера возвращает к списку.

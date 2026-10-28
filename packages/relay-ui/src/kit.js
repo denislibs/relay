@@ -496,7 +496,7 @@ function FolderTags(props) {
 function ChatRow(props) {
   var unread = props.unread || 0;
   var tagged = !!(props.tags && props.tags.length);
-  var rest = omit(props, ['tags', 'tagSpace', 'fitTags', 'verified', 'logo', 'name', 'preview', 'time', 'unread', 'muted', 'status', 'active', 'typing', 'online', 'avatar', 'author', 'thumb', 'pinned', 'draft', 'mentioned', 'forwarded', 'reactions', 'className', 'class']);
+  var rest = omit(props, ['tags', 'tagSpace', 'fitTags', 'verified', 'logo', 'name', 'preview', 'time', 'unread', 'muted', 'status', 'active', 'typing', 'online', 'avatar', 'author', 'thumb', 'pinned', 'draft', 'mentioned', 'forwarded', 'reactions', 'selecting', 'selected', 'className', 'class']);
   // как в Telegram: «печатает» важнее черновика, черновик важнее сообщения;
   // строка сообщения — «Автор:», миниатюра 20 px (у видео — play), текст
   var thumb = props.thumb;
@@ -513,8 +513,11 @@ function ChatRow(props) {
           thumb.video ? h(Icon, { name: 'play', size: 12 }) : null) : null,
         props.preview);
   return h('button', Object.assign({ type: 'button' }, rest, { onPointerDown: chain(rest.onPointerDown, ripple),
-    class: cx('rl-row', tagged && 'rl-row-tagged', (props.className || props.class)), 'aria-current': props.active ? 'true' : undefined
+    class: cx('rl-row', tagged && 'rl-row-tagged', props.selecting && 'rl-row-sel', props.selecting && props.selected && 'rl-row-sel-on', (props.className || props.class)), 'aria-current': props.active ? 'true' : undefined,
+    'aria-pressed': props.selecting ? String(!!props.selected) : undefined
   }),
+    props.selecting ? h('span', { class: 'rl-row-check', 'aria-hidden': 'true' },
+      h('svg', { width: 14, height: 14, viewBox: '0 0 24 24', fill: 'none', stroke: 'currentColor', 'stroke-width': 3, 'stroke-linecap': 'round', 'stroke-linejoin': 'round' }, h('path', { d: 'M5 12.5l4.5 4.5L19 7.5' }))) : null,
     h(Avatar, { name: props.avatar === undefined ? props.name : props.avatar, tone: props.avatarTone, online: props.online, logo: props.logo, src: props.avatarSrc, thumb: props.avatarThumb, size: 54 }),   // как в Telegram: 54 в строке 72
     h('span', { class: 'rl-row-main' },
       h('span', { class: 'rl-row-top' },

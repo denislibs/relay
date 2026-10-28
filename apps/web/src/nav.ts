@@ -80,6 +80,11 @@ interface Binding {
   set: (path: string) => void;
   /** Esc сейчас принадлежит чему-то другому (правая панель и т.п.) */
   escBusy?: () => boolean;
+  /**
+   * Фоновый режим, который Esc снимает раньше навигации (выбор чатов в списке слева): true — снят, дальше не идём.
+   * Спрашивается после модалок/меню и занятой правой панели, но до закрытия открытого чата и «Назад» страницы.
+   */
+  escMode?: () => boolean;
 }
 
 let bind: Binding | null = null;
@@ -141,8 +146,9 @@ export function closeLayer(id: number): void { stack?.close(id); }
 export function closeLayers(type: 'screen' | 'chat' | 'info'): void { stack?.closeAll(type); }
 
 /** Esc → верхний открытый слой; можно перехватить: preventDefault, открытая модалка/меню, правая панель. */
-export function onEscape(e: { key: string; defaultPrevented: boolean }, modalOpen: boolean): void {
+export function onEscape(e: { key: string; defaultPrevented: boolean; preventDefault?: () => void }, modalOpen: boolean): void {
   if (e.key !== 'Escape' || e.defaultPrevented || modalOpen || bind?.escBusy?.()) return;
+  if (bind?.escMode?.()) { e.preventDefault?.(); return; }
   const top = stack?.topOpen();
   if (top && top.type !== 'page' && top.type !== 'root') { stack!.closeType(top.type); return; }
   void back();
