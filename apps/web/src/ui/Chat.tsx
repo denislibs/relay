@@ -588,7 +588,7 @@ export function Chat({ chatId, frameKey, active, threadId }: { chatId: number; f
         <ChatMenu chatId={chatId} title={title} />
         {/* закреплённые — под шапкой, как в Telegram (плеер — над ней); в треде вместо них — плашка поста */}
         {thread ? <ThreadBar header={threadHeader} title={originTitle ?? 'Пост'} onClick={() => { if (threadHeader?.id != null) focusMessage({ id: threadHeader.id as number, sort: threadHeader.sort as number }); }} />
-          : !system ? <PinnedBar chatId={chatId} /> : null}
+          : !system ? <PinnedBar chatId={chatId} frameKey={frameKey} /> : null}
         {!system ? <UploadBar chatId={chatId} /> : null}
         {gInfo && gInfo.requests > 0 && !thread ? (
           <button type="button" class="app-requests-bar" onClick={() => setGlobal({ infoOpen: true, infoGo: 'gRequests' })}>
