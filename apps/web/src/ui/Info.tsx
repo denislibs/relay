@@ -60,7 +60,7 @@ export function Info() {
   if (shown) heldId.current = liveId;
   const chatId = useSettled(heldId.current)!;
   const chat = useGlobal((s) => findChat(s, chatId));
-  const peer = useGlobal((s) => s.peer);
+  const peer = useGlobal((s) => (chat?.peerId != null ? s.presence[chat.peerId as number] ?? null : null));
   const muted = useGlobal((s) => isChatMuted(chatId, s));
   // панель открывают сразу на «Стикерах» (поиск в панели стикеров): она выезжает уже на этой странице
   const [page, setPage] = useState(() => (getGlobal().infoGo === 'stickers' ? 'stickers' : 'info'));

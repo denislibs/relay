@@ -57,7 +57,7 @@ import type { Entity, Todo, TodoInput } from '@relay/protocol';
 
 type Value = { text: string; entities: Entity[] };
 type ComposerApi = { getValue(): Value; setValue(v: Value, opts?: { focus?: boolean; instant?: boolean }): void; focus(opts?: { end?: boolean }): void; insert(v: Value, range?: { start: number; end: number }): void };
-import { frameByKey, setGlobal, useGlobal, getGlobal, findChat } from '../global';
+import { frameByKey, setGlobal, useGlobal, getGlobal, findChat, stackDepth } from '../global';
 import { showToast, unblockUser, useUser } from '../settingsData';
 import { Feed, type MenuExtra } from './Feed';
 import { chatKindFor, mediaPolicy } from '../autoload';
@@ -154,7 +154,9 @@ export function Chat({ chatId, frameKey, active, threadId }: { chatId: number; f
   // плашка над тредом подписана каналом поста (если он в списке)
   const originTitle = useGlobal((s) => { const o = threadHeader?.origin as { chatId: number } | undefined; return o ? (s.chats.find((c) => c.id === o.chatId)?.title as string | undefined) ?? null : null; });
   const messages = useGlobal((s) => frameByKey(s, frameKey)?.messages ?? NO_MESSAGES);
-  const depth = useGlobal((s) => s.chatStack.length);
+  // глубина этой колонки, а не длина стека: новый нижний чат собирается скрытым вторым кадром стека (swap), и по длине
+  // шапка видимого чата на кадр решала, что она вложенная, — показывала «Назад» и сдвигала заголовок
+  const depth = useGlobal((s) => stackDepth(s, frameKey));
   const activeRef = useRef(active); activeRef.current = active;
   // служебный чат «Relay»: только чтение — без поля ввода, реакций, ответов и вложений
   const system = isSystemChat(chat);
@@ -489,7 +491,7 @@ export function Chat({ chatId, frameKey, active, threadId }: { chatId: number; f
   const phaseLabel = useGlobal((s) => s.syncLabel);
   const sendKey = useGlobal((s) => s.prefs.sendKey);
   const infoOpen = useGlobal((s) => s.infoOpen);
-  const peer = useGlobal((s) => s.peer);
+  const peer = useGlobal((s) => (chat?.peerId != null ? s.presence[chat.peerId as number] ?? null : null));
   const [, tick] = useState(0);              // «5 мин. назад» должно стареть само
   useEffect(() => { const t = setInterval(() => tick((n) => n + 1), 30_000); return () => clearInterval(t); }, []);
   const myPeer = peer && chat?.peerId === peer.userId && peer.known ? peer : null;
