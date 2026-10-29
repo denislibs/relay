@@ -69,16 +69,15 @@ export function useChatSelectMode(list: SelList, rows: readonly Item[]) {
   // шапка на выходе (Presence закрывается 200 мс) показывает последнее ненулевое число, а не «Выбрано: 0»
   const lastCount = useRef(0);
   if (sel) lastCount.current = sel.ids.length;
-  // анимация — только в момент смены режима (300 мс), с паузой остальных анимаций приложения
-  const [anim, setAnim] = useState<null | 'in' | 'out'>(null);
-  const was = useRef(on);
+  // Анимация — только в момент смены режима (300 мс), с паузой остальных анимаций приложения.
+  // Класс вычисляется в том же рендере, что и смена режима: из эффекта он приходил кадром позже, и строки
+  // успевали показаться в конечном положении, а потом откатывались к началу анимации (рывок туда-обратно).
+  const was = useRef(on), anim = useRef<null | 'in' | 'out'>(null), [, rerender] = useState(0);
+  if (was.current !== on) { was.current = on; anim.current = reducedMotion() ? null : on ? 'in' : 'out'; }
   useEffect(() => {
-    if (was.current === on) return;
-    was.current = on;
-    if (reducedMotion()) { setAnim(null); return; }
-    setAnim(on ? 'in' : 'out');
+    if (!anim.current) return;
     const end = beginHeavyAnimation(300);
-    const t = setTimeout(() => { setAnim(null); end(); }, 300);
+    const t = setTimeout(() => { anim.current = null; end(); rerender((n) => n + 1); }, 300);
     return () => { clearTimeout(t); end(); };
   }, [on]);
   // Ушли со списка — выбор закончен. Закрываем только свой режим: Sidebar смонтирован всегда, а «Архив»
@@ -111,8 +110,9 @@ export function useChatSelectMode(list: SelList, rows: readonly Item[]) {
       <SelectHeader count={sel?.ids.length ?? lastCount.current} onCancel={endChatSelect} getItems={getItems} />
     </Presence>
   );
-  const wrapClass = anim ? ' rl-sel-anim' + (anim === 'out' ? ' rl-sel-leave' : '') : '';
-  // на выходе строки ещё 300 мс в режиме — кружок гаснет на месте, содержимое едет обратно (rl-sel-leave)
-  const rowsSelecting = on || anim === 'out';
+  const wrapClass = anim.current ? ' rl-sel-anim' + (anim.current === 'out' ? ' rl-sel-leave' : '') : '';
+  // на выходе кружок ещё 300 мс в строке и гаснет на месте; полоса под него закрыта сразу, содержимое едет
+  // обратно сдвигом (rl-sel-leave) — без второго скачка в конце
+  const rowsSelecting = on || anim.current === 'out';
   return { sel, header, wrapClass, rowsSelecting, node: del.node };
 }

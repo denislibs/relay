@@ -517,7 +517,7 @@ function ChatRow(props) {
     'aria-pressed': props.selecting ? String(!!props.selected) : undefined
   }),
     props.selecting ? h('span', { class: 'rl-row-check', 'aria-hidden': 'true' },
-      h('svg', { width: 14, height: 14, viewBox: '0 0 24 24', fill: 'none', stroke: 'currentColor', 'stroke-width': 3, 'stroke-linecap': 'round', 'stroke-linejoin': 'round' }, h('path', { d: 'M5 12.5l4.5 4.5L19 7.5' }))) : null,
+      h('svg', { width: 14, height: 14, viewBox: '0 0 24 24', fill: 'none', stroke: 'currentColor', 'stroke-width': 3, 'stroke-linecap': 'round', 'stroke-linejoin': 'round' }, h('path', { d: 'M5 12.5l4.5 4.5L19 7.5', pathLength: 1 }))) : null,
     h(Avatar, { name: props.avatar === undefined ? props.name : props.avatar, tone: props.avatarTone, online: props.online, logo: props.logo, src: props.avatarSrc, thumb: props.avatarThumb, size: 54 }),   // как в Telegram: 54 в строке 72
     h('span', { class: 'rl-row-main' },
       h('span', { class: 'rl-row-top' },
