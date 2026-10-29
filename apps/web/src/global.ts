@@ -99,6 +99,8 @@ export interface GlobalState {
   people: Record<number, Person>;   // люди по id (подписка people движка, см. people.ts); нет ключа — ещё не знаем
   devSim: DevSimFlags | null;      // имитатор сети движка включён (status.devSim): плашка «Режим разработчика»
   devTab: DevTab;                  // вкладка раздела «Для разработчиков»
+  /** Поиск по настройкам (слой на странице settings): держится, пока открыт пункт из выдачи, — «Назад» вернёт к ней. */
+  settingsSearch: { open: boolean; q: string };
   uploads: UploadItem[];           // неотправленные файлы во всех чатах (подписка uploads движка): индикатор «Отправка N файлов»
   preparing: UploadItem[];         // видео, которые эта вкладка сжимает перед отправкой (ещё не в очереди движка)
 }
@@ -192,6 +194,7 @@ let state: GlobalState = {
   people: {},
   devSim: null,
   devTab: 'overview',
+  settingsSearch: { open: false, q: '' },
 };
 const subscribers = new Set<() => void>();
 

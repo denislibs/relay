@@ -1598,3 +1598,22 @@ html[data-anim="0"] .app-folder-sym { animation: none !important; }
 .app-combo { display: inline-flex; align-items: center; gap: 4px; }
 .app-kbd { display: inline-flex; align-items: center; justify-content: center; min-width: 26px; height: 26px; padding: 0 7px; border-radius: 7px; background: color-mix(in srgb, var(--ink) 7%, transparent); color: var(--ink-muted); font: 600 13px/1 var(--font-sans); white-space: nowrap; }
 .app-combo-plus, .app-combo-or { color: var(--ink-muted); opacity: .6; font: 400 13px/1 var(--font-sans); }
+
+/* ---------- Поиск по настройкам: слой поверх шапки и содержимого страницы settings (SettingsSearch.tsx) ----------
+   Переход — как у поиска в списке чатов (zoomFade, 150 мс); страница под слоем не размонтируется — прокрутка на месте. */
+.app-ss-layer { position: absolute; inset: 0; z-index: 3; display: flex; flex-direction: column; background: var(--page); }
+.app-ssearching:not(.app-ssearch-in) > .rl-settings, .app-ssearching:not(.app-ssearch-in) > .app-contents > .rl-panel-head { visibility: hidden; }
+.app-ssearch-in > .rl-settings, .app-ssearch-in > .app-contents > .rl-panel-head { animation: app-fade-out 150ms ease both; }
+.app-ssearch-in .app-ss { animation: app-gsearch-in 150ms ease both; }
+.app-ssearch-out .app-ss-layer { pointer-events: none; }
+.app-ssearch-out .app-ss { animation: app-gsearch-out 150ms ease both; }
+.app-ssearch-out > .rl-settings, .app-ssearch-out > .app-contents > .rl-panel-head { animation: app-list-back 150ms ease both; transform-origin: 50% 0; }
+.app-ss { display: flex; flex-direction: column; flex: 1; min-height: 0; transform-origin: 50% 0; }
+.app-ss-head { display: flex; align-items: center; height: 60px; padding: 0 var(--space-3); flex-shrink: 0; }
+.app-ss-head .rl-search { flex: 1; min-width: 0; }
+.app-ss-body { padding-top: var(--space-1); }
+.app-ss-group-head { display: flex; align-items: center; justify-content: space-between; padding-right: 8px; }
+.app-ss-gap { width: 32px; flex-shrink: 0; }
+.app-ss-row.is-active { background: var(--hover); }
+.app-ss-row .rl-inforow-text small { overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+.app-ss-none { padding-top: var(--space-6); }

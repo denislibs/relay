@@ -65,16 +65,12 @@ function words(s: string): { w: string; at: number }[] {
 const TITLE_START = 0, TITLE = 1, CRUMBS = 2, KEYWORDS = 3;
 
 const depth = (e: Entry) => e.path.split('/').length + (e.parent ? 1 : 0);
-const topOf = (path: string) => path.split('/').slice(0, 2).join('/');
 
-/** Найденные пункты по разделам верхнего уровня; пустой запрос — пусто. */
-export function searchSettings(entries: Entry[], q: string, ctx: SearchCtx): Group[] {
-  const variants = layoutVariants(q).map((v) => v.split(' '));
-  if (!variants.length) return [];
+/** Крошки пункта: страницы от раздела верхнего уровня (без корня «Настройки» и без самого пункта), затем подраздел. */
+export function crumbsFor(entries: Entry[]): (e: Entry) => string[] {
   const pages = new Map<string, Entry>(), byId = new Map<string, Entry>();
   for (const e of entries) { byId.set(e.id, e); if (e.kind === 'section') pages.set(e.path, e); }
-
-  const crumbsOf = (e: Entry): string[] => {
+  return (e) => {
     const seg = e.path.split('/'), out: string[] = [];
     for (let i = 2; i <= seg.length; i++) {
       const p = pages.get(seg.slice(0, i).join('/'));
@@ -84,6 +80,16 @@ export function searchSettings(entries: Entry[], q: string, ctx: SearchCtx): Gro
     if (parent) out.push(parent.title);
     return out;
   };
+}
+
+/** Раздел верхнего уровня пункта (группа выдачи). */
+export const topPath = (path: string): string => path.split('/').slice(0, 2).join('/');
+
+/** Найденные пункты по разделам верхнего уровня; пустой запрос — пусто. */
+export function searchSettings(entries: Entry[], q: string, ctx: SearchCtx): Group[] {
+  const variants = layoutVariants(q).map((v) => v.split(' '));
+  if (!variants.length) return [];
+  const crumbsOf = crumbsFor(entries);
 
   const found: Hit[] = [];
   for (const e of entries) {
@@ -113,9 +119,9 @@ export function searchSettings(entries: Entry[], q: string, ctx: SearchCtx): Gro
   found.sort(compare);
   const groups = new Map<string, Group>();
   for (const h of found) {
-    const top = topOf(h.entry.path);
+    const top = topPath(h.entry.path);
     let g = groups.get(top);
-    if (!g) groups.set(top, g = { section: pages.get(top) ?? h.entry, items: [] });
+    if (!g) groups.set(top, g = { section: entries.find((e) => e.kind === 'section' && e.path === top) ?? h.entry, items: [] });
     g.items.push(h);
   }
   return [...groups.values()];
