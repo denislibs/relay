@@ -1,4 +1,4 @@
-import { setStickerPolicy } from '@relay/ui';
+import { requestMutation, setStickerPolicy } from '@relay/ui';
 import { ACCENT_IDS, DEFAULT_ACCENT } from './accent';
 import { switchAccent, switchTheme } from './themeSwitch';
 // Настройки устройства: хранятся в localStorage (`relay.prefs`), применяются в apply() и
@@ -162,6 +162,7 @@ function reducedMotion(): boolean { try { return typeof matchMedia !== 'undefine
 let storage: KV | null = defaultStorage();
 let current: Prefs = loadPrefs(storage, reducedMotion());
 let appliedTheme: ThemePref | null = null;
+let appliedTime12: boolean | null = null;
 let appliedAccent: string | null = null;
 const listeners = new Set<(p: Prefs) => void>();
 
@@ -192,7 +193,14 @@ export function applyPrefs(p: Prefs = current): void {
   if (p.accent !== appliedAccent) { switchAccent(root, p.accent, appliedAccent !== null); appliedAccent = p.accent; }   // до темы: тема смешивает уже акцентные цвета
   if (p.theme !== appliedTheme) { switchTheme(root, p.theme, isDark(p.theme), appliedTheme !== null); appliedTheme = p.theme; }
   root.style.setProperty('--message-text-size', p.textSize + 'px');
-  if ((p.timeFormat ?? localeTimeFormat()) === '12h') root.setAttribute('data-time12', ''); else root.removeAttribute('data-time12'); // время в пузыре шире
+  // время в пузыре шире (место под «AM»). При смене — в фазе записи, вместе с рендером ленты (Preact рендерит
+  // через requestMutation): иначе кадр пузыри уже шире, а время в них ещё старое — лента прыгает
+  const time12 = (p.timeFormat ?? localeTimeFormat()) === '12h';
+  if (time12 !== appliedTime12) {
+    const set = () => { if (time12) root.setAttribute('data-time12', ''); else root.removeAttribute('data-time12'); };
+    if (appliedTime12 === null) set(); else requestMutation(set);
+    appliedTime12 = time12;
+  }
   if (p.anim.blur) root.removeAttribute('data-blur'); else root.setAttribute('data-blur', '0');
   if (p.anim.wallpaper) root.removeAttribute('data-wpanim'); else root.setAttribute('data-wpanim', '0');
   setStickerPolicy({ autoplay: p.anim.autoplayStickers, loop: p.anim.loopStickers });   // живые стикеры — сразу
