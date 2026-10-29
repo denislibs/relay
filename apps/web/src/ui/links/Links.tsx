@@ -70,7 +70,7 @@ export function Links() {
               <li><Icon name="lock" size={22} /><div><b>Только настоящие сайты</b><span>Ссылка собирается из имени пользователя, адрес нельзя подменить.</span></div></li>
               <li><Icon name="listOrdered" size={22} /><div><b>Ваш порядок</b><span>Главную ссылку — первой. Порядок меняется перетаскиванием.</span></div></li>
             </ul>
-            <Button variant="primary" onClick={() => void go('settings/profile/links/new')}>Добавить ссылку</Button>
+            <Button data-setting="profile.links.add" variant="primary" onClick={() => void go('settings/profile/links/new')}>Добавить ссылку</Button>
           </div>
         ) : (
           <>
@@ -97,7 +97,7 @@ export function Links() {
                   );
                 })}
               </div>
-              {links.length < MAX_LINKS ? <InfoRow icon="plus" title="Добавить ссылку" onClick={() => void go('settings/profile/links/new')} /> : null}
+              {links.length < MAX_LINKS ? <InfoRow setting="profile.links.add" icon="plus" title="Добавить ссылку" onClick={() => void go('settings/profile/links/new')} /> : null}
             </Section>
           </>
         )}

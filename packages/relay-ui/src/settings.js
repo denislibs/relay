@@ -3,7 +3,8 @@ import { useEffect, useLayoutEffect, useRef, useState } from 'preact/hooks';
 import { Icon, SettingsIcon, cx, ripple } from './kit.js';
 import { Modal } from './modal.js';
 
-/* Компоненты страниц настроек: карточки-секции, радио/чекбокс-строки, слайдер, поле, выбор, подтверждение, текст со ссылками. */
+/* Компоненты страниц настроек: карточки-секции, радио/чекбокс-строки, слайдер, поле, выбор, подтверждение, текст со ссылками.
+   setting — якорь поиска по настройкам (data-setting): к строке прокручивают и подсвечивают её. */
 
 export { SettingsIcon };
 
@@ -36,7 +37,7 @@ function Section(props) {
     var stop = rs.filter(function (r) { return r.getAttribute('aria-checked') === 'true' && !r.disabled; })[0] || rs.filter(function (r) { return !r.disabled; })[0];
     rs.forEach(function (r) { r.tabIndex = r === stop ? 0 : -1; });
   });
-  return h('section', { class: cx('rl-sect', (props.className || props.class)) },
+  return h('section', { class: cx('rl-sect', (props.className || props.class)), 'data-setting': props.setting },
     props.title ? h('h3', { class: 'rl-sect-title', id: id }, props.title) : null,
     h('div', { class: 'rl-sect-card', ref: cardRef, role: props.role, 'aria-labelledby': props.title ? id : undefined, onKeyDown: group ? radioKeys : undefined }, props.children),
     props.footer ? h('p', { class: 'rl-sect-footer' }, props.footer) : null);
@@ -44,14 +45,14 @@ function Section(props) {
 
 /* ---------- RadioRow / CheckRow ---------- */
 function RadioRow(props) {
-  return h('button', { type: 'button', role: 'radio', 'aria-checked': props.checked ? 'true' : 'false', disabled: props.disabled,
+  return h('button', { type: 'button', role: 'radio', 'aria-checked': props.checked ? 'true' : 'false', disabled: props.disabled, 'data-setting': props.setting,
     tabIndex: props.checked ? 0 : -1, class: cx('rl-optrow', props.checked && 'rl-optrow-on'),
     onPointerDown: ripple, onClick: props.onClick || props.onChange },
     h('span', { class: 'rl-radio', 'aria-hidden': 'true' }),
     h('span', { class: 'rl-optrow-text' }, h('span', null, props.label || props.title), props.subtitle ? h('small', null, props.subtitle) : null));
 }
 function CheckRow(props) {
-  return h('label', { class: cx('rl-check', 'rl-optrow', props.disabled && 'rl-optrow-off') },
+  return h('label', { class: cx('rl-check', 'rl-optrow', props.disabled && 'rl-optrow-off'), 'data-setting': props.setting },
     h('input', { type: 'checkbox', checked: !!props.checked, disabled: props.disabled, onChange: function (e) { if (props.onChange) props.onChange(e.currentTarget.checked, e); } }),
     h('span', { class: 'rl-check-box', 'aria-hidden': 'true' },
       h('svg', { width: 14, height: 14, viewBox: '0 0 24 24', fill: 'none', stroke: 'currentColor', 'stroke-width': 3, 'stroke-linecap': 'round', 'stroke-linejoin': 'round' }, h('path', { d: 'M5 12.5l4.5 4.5L19 7.5' }))),
@@ -66,7 +67,7 @@ function RangeRow(props) {
   var pct = max > min ? (value - min) / (max - min) * 100 : 0;
   var id = useId('rl-range-', props.id);
   var marks = props.marks;
-  return h('div', { class: cx('rl-range', props.disabled && 'rl-range-off') },
+  return h('div', { class: cx('rl-range', props.disabled && 'rl-range-off'), 'data-setting': props.setting },
     h('div', { class: 'rl-range-head' },
       h('label', { for: id }, props.label),
       h('output', { class: 'rl-range-value', for: id }, fmt(value))),
@@ -92,7 +93,7 @@ function TextField(props) {
   var Tag = props.multiline ? 'textarea' : 'input';
   var err = props.error;
   // trailing — кнопка внутри поля справа (смайлик выбора иконки папки, как в Telegram)
-  return h('div', { class: cx('rl-tf', value && 'rl-tf-filled', err && 'rl-tf-error', props.multiline && 'rl-tf-multi', props.trailing && 'rl-tf-has-trailing', showCount && 'rl-tf-counting', (props.className || props.class)) },
+  return h('div', { class: cx('rl-tf', value && 'rl-tf-filled', err && 'rl-tf-error', props.multiline && 'rl-tf-multi', props.trailing && 'rl-tf-has-trailing', showCount && 'rl-tf-counting', (props.className || props.class)), 'data-setting': props.setting },
     h('div', { class: 'rl-tf-box' },
       h(Tag, { id: id, class: 'rl-tf-input', value: value, placeholder: ' ', maxLength: props.measure ? undefined : props.maxLength, disabled: props.disabled, rows: props.multiline ? (props.rows || 3) : undefined,
         type: props.multiline ? undefined : (props.type || 'text'), autoComplete: props.autoComplete || 'off', inputMode: props.inputMode, autoFocus: props.autoFocus,
@@ -110,7 +111,7 @@ function SelectRow(props) {
   var id = useId('rl-sel-', props.id);
   var opts = props.options || [];
   var cur = opts.filter(function (o) { return o.value === props.value; })[0];
-  return h('div', { class: cx('rl-selrow', props.disabled && 'rl-optrow-off') },
+  return h('div', { class: cx('rl-selrow', props.disabled && 'rl-optrow-off'), 'data-setting': props.setting },
     h('label', { class: 'rl-selrow-label', for: id }, props.label),
     h('span', { class: 'rl-selrow-value', 'aria-hidden': 'true' }, cur ? cur.label : '', h(Icon, { name: 'chevronDown', size: 18 })),
     h('select', { id: id, class: 'rl-selrow-native', value: props.value, disabled: props.disabled, onChange: function (e) {

@@ -92,7 +92,7 @@ export function Sessions() {
       <PanelHeader icon="arrowLeft" closeLabel="Назад" title="Активные сеансы" onClose={() => void back()} />
       <div class="rl-settings">
         <Section footer="Отсканируйте QR-код на экране входа другого устройства, чтобы войти там без кода.">
-          <InfoRow tile="green" icon="qr" title="Подключить устройство" onClick={() => setScan(true)} />
+          <InfoRow setting="sessions.link" tile="green" icon="qr" title="Подключить устройство" onClick={() => setScan(true)} />
         </Section>
         <div class="app-listwrap">
           <Presence show={skeleton} exitMs={280}>
@@ -111,7 +111,7 @@ export function Sessions() {
                   {allRow.map((r) => (
                     <div key={r.key} class={'app-collapse' + (r.leaving ? ' app-collapse-out' : '')}>
                       <div class={'app-row-lock' + (locked ? ' app-row-off' : '')} aria-disabled={locked ? 'true' : undefined}>
-                        <InfoRow icon="logout" danger title="Завершить все другие сеансы" subtitle={lockSeen.current ? <span class={'app-lock-hint' + (locked ? '' : ' app-lock-hint-off')} aria-hidden={locked ? undefined : 'true'}><span>{LOCKED_HINT}</span></span> : undefined} onClick={locked ? undefined : () => setAskAll(true)} />
+                        <InfoRow setting="sessions.terminateAll" icon="logout" danger title="Завершить все другие сеансы" subtitle={lockSeen.current ? <span class={'app-lock-hint' + (locked ? '' : ' app-lock-hint-off')} aria-hidden={locked ? undefined : 'true'}><span>{LOCKED_HINT}</span></span> : undefined} onClick={locked ? undefined : () => setAskAll(true)} />
                       </div>
                     </div>
                   ))}
@@ -132,7 +132,7 @@ export function Sessions() {
                 </Section>
               ) : null}
               <Section title="Автоматически завершать сеансы">
-                <SelectRow label="Если не активен" value={ttl} options={TTL_OPTIONS} disabled={locked} onChange={(v: number) => { if (Number(v) !== ttl) void setSessionsTtl(Number(v)); }} />
+                <SelectRow setting="sessions.ttl" label="Если не активен" value={ttl} options={TTL_OPTIONS} disabled={locked} onChange={(v: number) => { if (Number(v) !== ttl) void setSessionsTtl(Number(v)); }} />
               </Section>
             </div>
           )}

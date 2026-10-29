@@ -48,7 +48,7 @@ export function Passkeys() {
               <InfoRow tile="purple" icon="shield" title="Надёжное хранение" subtitle="Связка ключей iCloud, Google или ваш менеджер паролей" />
             </Section>
             <div class="app-pw-actions">
-              <Button size="lg" disabled={!supported || busy} onClick={create}>{!supported ? 'Браузер не поддерживает паскеи' : busy ? 'Ждём менеджер паролей…' : 'Создать паскей'}</Button>
+              <Button data-setting="privacy.passkeys.create" size="lg" disabled={!supported || busy} onClick={create}>{!supported ? 'Браузер не поддерживает паскеи' : busy ? 'Ждём менеджер паролей…' : 'Создать паскей'}</Button>
             </div>
           </div>
         ) : (
@@ -59,7 +59,7 @@ export function Passkeys() {
                   subtitle={'Создан ' + fullDateTime(p.createdAt) + (p.lastUsedAt ? ' · использован ' + fullDateTime(p.lastUsedAt) : '')}
                   onClick={() => setAsk(p)} />
               ))}
-              {supported && list.length < max ? <InfoRow icon="plus" title={busy ? 'Ждём менеджер паролей…' : 'Создать паскей'} onClick={busy ? undefined : create} /> : null}
+              {supported && list.length < max ? <InfoRow setting="privacy.passkeys.create" icon="plus" title={busy ? 'Ждём менеджер паролей…' : 'Создать паскей'} onClick={busy ? undefined : create} /> : null}
             </Section>
           </>
         )}
