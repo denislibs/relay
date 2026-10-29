@@ -28,6 +28,13 @@ export function ChatStack() {
 
 type Place = 'below' | 'on' | 'above';
 
+/** Доиграть до конца конечные CSS-анимации внутри колонки (переходы и бесконечные — спиннер, «печатает…» — не трогаем). */
+export function finishEntrances(el: Element): void {
+  for (const a of el.getAnimations({ subtree: true })) {
+    if (a instanceof CSSAnimation && a.effect?.getComputedTiming().iterations !== Infinity) a.finish();
+  }
+}
+
 function ChatColumn({ frame, chatId, threadId, place, instant, pending, swap }: { frame: string; chatId: number; threadId?: number; place: Place; instant: boolean; pending: boolean; swap: boolean }) {
   // первый кадр колонки — на исходной позиции, иначе переход не с чего начинать; нижний чат встаёт сразу.
   // Колонка, смонтированная справа (готовится поверх), уже стоит на исходной — ей ждать нечего: иначе она
@@ -48,6 +55,9 @@ function ChatColumn({ frame, chatId, threadId, place, instant, pending, swap }: 
     prev.current = pos;
     const el = box.current;
     if (!el) return;
+    // подмена: колонка собиралась скрытой, и анимации появления (закреп, реакции, текст закрепа) начались там —
+    // показ застал бы их на середине: закреп полупрозрачным, лента просвечивает. Чат встаёт целиком, как шапка
+    if (swap && pos === 'on') finishEntrances(el);
     el.classList.add('app-chatcol-moving');
     const t = setTimeout(() => requestMutation(() => el.classList.remove('app-chatcol-moving')), 320);
     return () => clearTimeout(t);

@@ -29,7 +29,7 @@ import { toggleMusic, trackTitle, useFileCached } from '../music';
 import { showToast } from '../settingsData';
 import { startForward, toggleSelect } from '../forward';
 import { FileMessage } from './FileMessage';
-import { isCached, keepOffline, offlineUrlNow, useKeptMedia, useOfflineUrl, warmCached } from '../downloads';
+import { isCached, keepOffline, offlineUrlNow, resolveOfflineUrl, useKeptMedia, useOfflineUrl, warmCached } from '../downloads';
 import { getPrefs } from '../prefs';
 import { bubbleSrc, viewerPreview } from '../mediaGrid';
 import { clock, dayKey, dayLabel, fileSize } from './format';
@@ -1605,7 +1605,15 @@ export function Feed({ frameKey, active, chatId, threadId, channel = false, meId
   const openOffline = useOfflineUrl(offlineId);
   const keysRef = useRef(photoKeys); keysRef.current = photoKeys;
   // ключи — из ref: колбэк стабилен (строки мемоизированы), а список фото растёт с новыми сообщениями
-  const onOpen = useRef((m: Item) => { const k = keysRef.current.indexOf(m.key); if (k >= 0) setViewer(-1 - k); }).current;
+  const onOpen = useRef((m: Item) => {
+    const k = keysRef.current.indexOf(m.key);
+    if (k < 0) return;
+    const a = m.attachment as Att | undefined;
+    // видео уже на устройстве — сначала его blob:-адрес, потом вьювер: иначе плеер начинал по сети и через кадр-два
+    // переключался на копию — <video> пересоздавался посреди полёта, ролик мелькал другим кадром и шёл заново
+    if (a?.kind === 'video' && a.id && isCached(a.id) && !offlineUrlNow(a.id)) void resolveOfflineUrl(a.id).catch(() => {}).then(() => setViewer(-1 - k));
+    else setViewer(-1 - k);
+  }).current;
   const originOf = useRef((k: number) => {
     const key = keysRef.current[k];
     // плитка альбома помечена ключом своего сообщения (data-mkey), одиночное фото — ключом строки

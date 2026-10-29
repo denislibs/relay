@@ -394,6 +394,13 @@ const resolving = new Map<string, Promise<void>>();
 /** blob:-адрес файла, если его уже прочитали с устройства в этой вкладке (для очереди плеера: без ожидания). */
 export function offlineUrlNow(id: string | undefined): string | undefined { return id ? objectUrls.get(id) : undefined; }
 
+/** Прочитать blob:-адрес скачанного файла с устройства (один раз на вкладку); после — offlineUrlNow / useOfflineUrl отдают его сразу. */
+export function resolveOfflineUrl(id: string): Promise<void> {
+  if (objectUrls.has(id)) return Promise.resolve();
+  if (!resolving.has(id)) resolving.set(id, readCached(id).then((b) => { if (b && !objectUrls.has(id)) objectUrls.set(id, URL.createObjectURL(b)); }).finally(() => resolving.delete(id)));
+  return resolving.get(id)!;
+}
+
 /** blob:-адрес скачанного файла; не скачан — undefined (играем по сети). */
 export function useOfflineUrl(id: string | undefined): string | undefined {
   const st = useDownload(id);
@@ -402,8 +409,7 @@ export function useOfflineUrl(id: string | undefined): string | undefined {
   useEffect(() => {
     if (!id || !want || objectUrls.has(id)) return undefined;
     let alive = true;
-    if (!resolving.has(id)) resolving.set(id, readCached(id).then((b) => { if (b && !objectUrls.has(id)) objectUrls.set(id, URL.createObjectURL(b)); }).finally(() => resolving.delete(id)));
-    void resolving.get(id)!.then(() => { if (alive) tick((n) => n + 1); });
+    void resolveOfflineUrl(id).then(() => { if (alive) tick((n) => n + 1); });
     return () => { alive = false; };
   }, [id, want]);
   return id ? objectUrls.get(id) : undefined;

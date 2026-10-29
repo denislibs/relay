@@ -1056,6 +1056,9 @@ button.rl-quote:active { background: var(--quote-bg-active, var(--pressed)); }
 .rl-sidecard .rl-row[aria-current="true"] .rl-row-mute { color: var(--on-media); opacity: .7; }
 .rl-sidecard .rl-row[aria-current="true"] .rl-badge { background: var(--on-media); color: var(--row-current); }
 .rl-sidecard .rl-row[aria-current="true"] .rl-badge-muted { background: rgb(255 255 255 / 0.25); color: var(--on-media); }
+/* выбор — одним кадром: при переходе фон уже акцентный, а текст ещё тёмный — название чата на миг пропадало */
+.rl-sidecard .rl-row[aria-current="true"] { transition: transform var(--dur-instant) var(--ease-standard); }
+.rl-sidecard .rl-row[aria-current="true"] .rl-badge { transition: none; }
 .rl-sidecard .rl-row[aria-current="true"] .rl-row-at { background: var(--on-media); color: var(--row-current); }
 @keyframes rl-card-in { from { opacity: 0; transform: translateY(8px) scale(0.985); } to { opacity: 1; transform: none; } }
 
