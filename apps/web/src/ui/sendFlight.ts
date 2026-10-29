@@ -33,6 +33,7 @@ export type Flight = {
   claimed: boolean;
   unfollow?: () => void;   // перестать догонять место посадки (follow)
   hold?: Animation;        // цель спрятана анимацией: перерисовка строки (сервер подтвердил) класс снимает, анимацию — нет
+  from?: Element;          // капсула поля: пока копия стоит над ней, плейсхолдер и курсор поля спрятаны
 };
 
 const pending: Flight[] = [];
@@ -83,22 +84,32 @@ export function captureText(chatId: number, composer: Element | null, field: Ele
   });
   layer.appendChild(text);
   document.body.appendChild(layer);
-  const f: Flight = { chatId, layer, src, text, first: gr ? { left: gr.left, top: gr.top } : undefined, radius, claimed: false, timer: 0 as unknown as ReturnType<typeof setTimeout> };
+  // поле под копией очищается сразу — без этого сквозь копию видны плейсхолдер и курсор в начале строки
+  composer.classList.add('app-flight-src');
+  const f: Flight = { chatId, layer, src, text, first: gr ? { left: gr.left, top: gr.top } : undefined, radius, claimed: false, timer: 0 as unknown as ReturnType<typeof setTimeout>, from: composer };
   f.timer = setTimeout(() => giveUp(f), HOLD_MS);
   pending.push(f);
 }
 
-function drop(f: Flight): void {
+/** Копия ушла с поля (полетела или гаснет): плейсхолдер возвращается. */
+function leaveField(f: Flight): void {
+  f.from?.classList.remove('app-flight-src');
+  f.from = undefined;
+}
+
+function drop(f: Flight, keepField = false): void {
   clearTimeout(f.timer);
+  if (!keepField) leaveField(f);
   const i = pending.indexOf(f);
   if (i >= 0) pending.splice(i, 1);
 }
 
 export function giveUp(f: Flight): void {
-  drop(f);
+  drop(f, true);
   f.unfollow?.();
   const a = f.layer.animate([{ opacity: 1 }, { opacity: 0 }], { duration: GIVE_UP_MS, fill: 'forwards' });
-  a.onfinish = () => f.layer.remove();
+  // плейсхолдер — после копии, а не сквозь неё
+  a.onfinish = () => { f.layer.remove(); leaveField(f); };
 }
 
 // ---------- стикер: снимок нажатой ячейки панели ----------
@@ -314,6 +325,14 @@ export function launchCircle(f: Flight, target: HTMLElement, remaining: () => nu
   });
 }
 
+/**
+ * Своё сообщение встало в ленту, а полёт его не забрал (первая раскладка, порция сдвига, лента не у низа): копии
+ * нечего ждать — гаснет сразу, а не через HOLD_MS поверх пустого поля.
+ */
+export function releaseFlights(chatId: number): void {
+  for (const f of pending.filter((x) => x.chatId === chatId && !x.claimed)) giveUp(f);
+}
+
 /** Новое своё сообщение чата забирает самый ранний ждущий полёт этого чата. */
 export function claim(chatId: number): Flight | null {
   const f = pending.find((x) => x.chatId === chatId && !x.claimed);
@@ -353,6 +372,7 @@ export function launch(f: Flight, bubble: HTMLElement, remaining: () => number):
     // 100 мс просвечивали два текста с разными строками. Строки разные — меняем сразу, без перетекания
     const sameWrap = !!glyph && sameLines(lineWidths(f.text), lineWidths(glyph));
     requestMutation(() => {
+      leaveField(f);
       const opts = (easing: string, extra: KeyframeAnimationOptions = {}) => ({ duration: FLIGHT_MS, easing, fill: 'forwards' as const, ...extra });
       const axes = (left: number, top: number, dx: number, dy: number) => {
         const x = document.createElement('div'), y = document.createElement('div');
