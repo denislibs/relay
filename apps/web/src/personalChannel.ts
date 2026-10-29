@@ -2,6 +2,7 @@
 // Кандидаты (GET /me/personal-channels через движок) предзагружаются при входе в «Настройки», чтобы карточка не
 // ждала сети; пост — кэш движка (IndexedDB) сразу, затем тихо с сервера (GET /groups/:id).
 import { useEffect, useState } from 'preact/hooks';
+import { useKeyedState } from './keyedState';
 import type { Message, PersonalChannel } from '@relay/protocol';
 import { callEngine, registerPrefetch } from './settingsData';
 import type { LastMessage } from './ui/preview';
@@ -42,7 +43,7 @@ const toState = (r: Answer): ChannelPostState | null => (!r ? null : 'gone' in r
 const posts = new Map<number, ChannelPostState>();
 
 export function useChannelPost(chatId: number | null | undefined): ChannelPostState {
-  const [st, setSt] = useState<ChannelPostState>(() => (chatId ? posts.get(chatId) ?? { state: 'unknown' } : { state: 'unknown' }));
+  const [st, setSt] = useKeyedState<number | null | undefined, ChannelPostState>(chatId, (id) => (id ? posts.get(id) ?? { state: 'unknown' } : { state: 'unknown' }));
   useEffect(() => {
     if (!chatId) { setSt({ state: 'unknown' }); return; }
     setSt(posts.get(chatId) ?? { state: 'unknown' });

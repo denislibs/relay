@@ -1,4 +1,5 @@
 import { stopDeviceAuth } from './deviceAuth';
+import { useKeyedState } from './keyedState';
 import type { PersonalChannel, ProfileLink } from '@relay/protocol';
 import { releaseMediaCache } from './storageInfo';
 import { stopOwnMusic } from './profileLists';
@@ -269,7 +270,7 @@ const userCache = new Map<number, Item>();
 
 /** Профиль человека (PublicUser) — подписка движка, пока компонент смонтирован; движок заодно перезапрашивает его с сервера. */
 export function useUser(userId: number | null | undefined): Item | null {
-  const [user, setUser] = useState<Item | null>(() => (userId ? userCache.get(userId) ?? null : null));
+  const [user, setUser] = useKeyedState<number | null | undefined, Item | null>(userId, (id) => (id ? userCache.get(id) ?? null : null));
   useEffect(() => {
     setUser(userId ? userCache.get(userId) ?? null : null);
     if (!userId || !engine) return;

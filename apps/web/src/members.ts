@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'preact/hooks';
+import { useKeyedState } from './keyedState';
 import type { ProfilePhoto } from '@relay/protocol';
 import { Mirror } from '@relay/sync-engine/src/client';
 import type { Patch } from '@relay/sync-engine/src/types';
@@ -41,7 +42,7 @@ export function prefetchMembers(chatId: number): () => void {
 
 /** Участники группы — подписка движка (первый показ из IndexedDB, дальше журнал); без собственных запросов. Не группа — null. */
 export function useMembers(chatId: number, group: boolean): Members | null {
-  const [m, setM] = useState<Members | null>(() => (group ? cachedMembers(chatId) : null));
+  const [m, setM] = useKeyedState<string, Members | null>(group + ':' + chatId, () => (group ? cachedMembers(chatId) : null));
   useEffect(() => {
     if (!group) { setM(null); return; }
     setM(cachedMembers(chatId));

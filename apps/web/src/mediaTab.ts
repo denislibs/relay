@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from 'preact/hooks';
+import { useKeyedState } from './keyedState';
 import type { MediaCounts as ProtocolMediaCounts, MediaTab } from '@relay/protocol';
 import { Mirror } from '@relay/sync-engine/src/client';
 import type { Item, Patch } from '@relay/sync-engine/src/types';
@@ -31,8 +32,9 @@ export function mediaOf(m: Mirror): MediaView | null {
  * more() поднимает limit на страницу — движок сам догружает старее; counts приходят с любой вкладки.
  */
 export function useMedia(chatId: number, tab: MediaTab, page = MEDIA_PAGE): MediaView & { more(): void } {
-  const [view, setView] = useState<MediaView | null>(() => cachedMedia(chatId, tab, page));
-  const [limit, setLimit] = useState(page);
+  const key = keyOf(chatId, tab, page);
+  const [view, setView] = useKeyedState<string, MediaView | null>(key, () => cachedMedia(chatId, tab, page));
+  const [limit, setLimit] = useKeyedState<string, number>(key, () => page);
   const watch = useRef<ReturnType<typeof watchQuery> | null>(null);
   const cur = useRef({ view, limit });
   cur.current = { view, limit };
