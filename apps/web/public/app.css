@@ -1561,6 +1561,9 @@ html[data-anim="0"] .rl-sidepage > .rl-aside-body { transition: none; }
 
 /* ---------- полёт отправленного (sendFlight.ts): слой поверх экрана, клон пузыря растёт из капсулы поля ---------- */
 .app-flight { position: fixed; inset: 0; z-index: 40; pointer-events: none; contain: layout; }
+/* над полем стоит копия отправленного текста: поле под ней уже пустое — плейсхолдер и курсор не просвечивают */
+.rl-composer.app-flight-src .rl-composer-field .rl-composer-ph { opacity: 0; }
+.rl-composer.app-flight-src .rl-composer-editable { caret-color: transparent; }
 .app-flight-text { position: absolute; box-sizing: border-box; overflow: hidden; white-space: pre-wrap; word-break: break-word; }
 .app-flight-x { position: absolute; will-change: transform; }
 .app-flight-y { will-change: transform; }

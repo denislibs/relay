@@ -36,7 +36,7 @@ import { clock, dayKey, dayLabel, fileSize } from './format';
 import { arrivals, type FeedSeen } from './appear';
 import { anchorShift, deferShift, requestShift, rowFor, shiftWanted, stageOf, type ShiftDir, type Stage } from './windowShift';
 import { burstAnimates, driveScroll, jumpNear, DRIVE_MS, DRIVE_OWN_MS, type Drive } from './scrollDrive';
-import { claim, FLIGHT_SCROLL, giveUp, launch, launchBox, launchCircle, type Flight } from './sendFlight';
+import { claim, FLIGHT_SCROLL, giveUp, launch, launchBox, launchCircle, releaseFlights, type Flight } from './sendFlight';
 import { interiorRemovals, mergeLeaving, LEAVE_HOLD_MS, LEAVE_MS, type Msg } from './leaving';
 import { estimateRow, extendWindow, firstWindow, learnScale, type Metrics, type OpenAt, type RowLike } from './firstScreen';
 
@@ -1031,6 +1031,15 @@ export function Feed({ frameKey, active, chatId, threadId, channel = false, meId
       if (next !== null && Math.abs(next - top) > 0.5) { programmatic.current++; root.scrollTop = next; }
     });
   }, [messages, winTick, leaveTick, stageTick]);   // каждая порция дорисовки — восстановить якорь; уход строк из буфера — тоже
+
+  // после эффекта выше (он забирает полёты): новое своё сообщение встало, а ждущий полёт остался — копия гаснет сразу
+  const ownKeys = useRef<Set<string> | null>(null);
+  useLayoutEffect(() => {
+    const own = new Set(messages.filter((m) => m.senderId === meId).map((m) => m.key as string));
+    const prev = ownKeys.current;
+    ownKeys.current = own;
+    if (prev && activeRef.current && [...own].some((k) => !prev.has(k))) releaseFlights(chatId);
+  }, [messages]);
 
   // сборка порции сдвига: следующая часть — в следующем кадре (эффект идёт после отрисовки); собрано — ждём
   // декодирования картинок скрытых строк (не дольше STAGE_WAIT_MS) и показываем
