@@ -15,6 +15,7 @@ import { Presence, ProgressRing, useMinVisible, MediaPolicy, ArticleBlocks, Avat
 import { openStickerSet, sendSticker, useGreetingSticker } from '../stickers';
 import { historyEmpty } from '../greeting';
 import { GreetingCard } from './GreetingCard';
+import { PhotoViewer } from './PhotoViewer';
 import type { StickerRef } from '@relay/protocol';
 import type { QuoteMsg } from '@relay/sync-engine/src/types';
 import { quoteContent } from './preview';
@@ -63,6 +64,8 @@ const FILL_CHUNK = 16;    // дорисовка окна за пределами
 const FIRST_MARGIN = 300; // первый экран — с таким запасом сверху и снизу (как в Telegram Web K)
 const STAGE_CHUNK = 12;   // порция сдвига окна собирается скрытой — по столько строк за кадр
 const STAGE_WAIT_MS = 300; // и перед показом ждёт декодирования своих картинок не дольше этого
+const SVC_PHOTO = 120;     // фото под «Фото группы изменено» — кружок 120 px, как в Telegram Web K
+const SVC_PHOTO_BIG = typeof devicePixelRatio === 'number' && devicePixelRatio > 1.34;   // малое фото 160 px: на ретине — большое
 
 // Оценка высот строк для первого экрана (firstScreen.ts). Ширина текста и шрифт уточняются по настоящей ленте
 // (rememberLayout); до первого замера — ширина окна и шрифт по умолчанию. Поправка общая на вкладку.
@@ -730,6 +733,7 @@ export function Feed({ frameKey, active, chatId, threadId, channel = false, meId
   const activeRef = useRef(active); activeRef.current = active;
   const [flashKey, setFlashKey] = useState<string | null>(null);
   const [viewer, setViewer] = useState<number | null>(null);   // индекс фото в просмотрщике
+  const [svcPhoto, setSvcPhoto] = useState<{ key: string; photo: ProfilePhoto } | null>(null);   // фото из «Фото группы изменено»
   const [pickDate, setPickDate] = useState<Date | null>(null);   // «Перейти к дате» по клику на плашку даты
   const [pickerUsed, setPickerUsed] = useState(false);   // календарь монтируется с первого открытия: закрытый строил сетку месяца в каждом чате
   if (pickDate && !pickerUsed) setPickerUsed(true);
@@ -1778,7 +1782,16 @@ export function Feed({ frameKey, active, chatId, threadId, channel = false, meId
     if (isGroupService(svc?.type)) {
       const text = serviceText(svc!.type as ServiceType, { data: svc!.data, body: m.body as string, mine, sender: people[m.senderId as number]?.name ?? peerName, meId, fromChannel: post || m.senderId === 0 });
       flushRun();
-      out.push(<div class="rl-action" key={m.key} role="note"><span>{text}</span></div>);
+      // новое фото группы/канала — круглой миниатюрой под плашкой, по клику — просмотрщик (как в Telegram);
+      // старые сообщения без фото в данных и «Фото удалено» — одной плашкой
+      const photo = svc!.type === 'photo_changed' ? svc!.data?.photo : undefined;
+      out.push(photo ? (
+        <div class="rl-action app-action-photo" key={m.key} role="note"><span>{text}</span>
+          <button type="button" class="app-action-photo-open" data-svc-photo={m.key} aria-label="Открыть фото" onClick={() => setSvcPhoto({ key: m.key, photo })}>
+            <Avatar size={SVC_PHOTO} {...avatarPhoto(photo, SVC_PHOTO_BIG)} />
+          </button>
+        </div>
+      ) : <div class="rl-action" key={m.key} role="note"><span>{text}</span></div>);
       prevDay = day; prevSender = null;
       return;
     }
@@ -1877,6 +1890,10 @@ export function Feed({ frameKey, active, chatId, threadId, channel = false, meId
           actions={(_it: unknown, i: number) => [{ icon: 'forward', label: 'Переслать', onClick: () => { const p = photos[i]; setViewer(null); if (p) startForward(chatId, [p], nameOf); } }]}
           onClose={() => setViewer(null)}
         />
+      ) : null}
+      {svcPhoto ? (
+        <PhotoViewer photos={[{ pid: svcPhoto.photo.pid ?? 0, id: svcPhoto.photo.id, small: svcPhoto.photo.small, thumb: svcPhoto.photo.thumb, at: svcPhoto.photo.at }]} index={0} name={peerName}
+          origin={() => el.current?.querySelector<HTMLElement>(`[data-svc-photo="${CSS.escape(svcPhoto.key)}"] .rl-avatar`) ?? null} onClose={() => setSvcPhoto(null)} />
       ) : null}
       {pickerUsed ? <DatePicker open={!!pickDate} value={pickDate ?? undefined} onClose={() => setPickDate(null)}
         media={(y: number, m: number) => mediaDays(chatId, y, m)} mediaCached={(y: number, m: number) => cachedMediaDays(chatId, y, m)}

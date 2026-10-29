@@ -115,7 +115,7 @@ export async function setGroupPhoto(userId: number, chatId: number, body: unknow
       const [p] = await tx`insert into chat_photos (chat_id, big, small, thumb) values (${chatId}, ${photo.id}, ${photo.small}, ${photo.thumb}) returning id, created_at`;
       const value = { id: photo.id, small: photo.small, thumb: photo.thumb, at: new Date(p.created_at as string).getTime(), pid: Number(p.id) };
       await tx`update chats set photo = ${tx.json(value as never)} where id = ${chatId}`;
-      await serviceMessage(tx, chatId, userId, 'photo_changed');
+      await serviceMessage(tx, chatId, userId, 'photo_changed', { photo: value });   // новое фото — миниатюрой под плашкой
     } else {
       const [c] = await tx`select photo from chats where id = ${chatId}`;
       if (!c.photo) return { ok: true };
