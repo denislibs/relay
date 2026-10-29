@@ -73,11 +73,11 @@ export function Password() {
           <Section>
             {state.enabled ? (
               <>
-                <InfoRow tile="green" icon="lock" title="Сменить пароль" subtitle={state.hint ? 'Подсказка: ' + state.hint : undefined} onClick={edit} />
-                <InfoRow icon="mail" title="Почта для восстановления" value={state.email ?? 'не задана'} onClick={edit} />
-                <InfoRow icon="trash" danger title="Отключить пароль" onClick={() => { setCurrent(''); setAskOff(true); }} />
+                <InfoRow setting="privacy.password.change" tile="green" icon="lock" title="Сменить пароль" subtitle={state.hint ? 'Подсказка: ' + state.hint : undefined} onClick={edit} />
+                <InfoRow setting="privacy.password.email" icon="mail" title="Почта для восстановления" value={state.email ?? 'не задана'} onClick={edit} />
+                <InfoRow setting="privacy.password.off" icon="trash" danger title="Отключить пароль" onClick={() => { setCurrent(''); setAskOff(true); }} />
               </>
-            ) : <InfoRow tile="green" icon="lock" title="Установить пароль" onClick={edit} />}
+            ) : <InfoRow setting="privacy.password.set" tile="green" icon="lock" title="Установить пароль" onClick={edit} />}
           </Section>
         ) : (
           <form class="app-pw-form" onSubmit={save}>

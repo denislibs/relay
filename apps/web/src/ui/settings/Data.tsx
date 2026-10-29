@@ -81,7 +81,7 @@ export function Data() {
       <PanelHeader icon="arrowLeft" closeLabel="Назад" title="Данные и память" onClose={() => void back()} />
       <div class="rl-settings" ref={scroll.ref} onScroll={scroll.onScroll}>
         <Section title="Автозагрузка медиа" footer="Настройки действуют на этом устройстве.">
-          <InfoRow tile="green" icon="download" title="Автозагрузка медиа" trailing={<Switch id="al-master" label="Автозагрузка медиа" checked={al.enabled} onChange={(e: Event) => setPrefs({ 'autoload.enabled': (e.currentTarget as HTMLInputElement).checked })} />} />
+          <InfoRow setting="data.autoload" tile="green" icon="download" title="Автозагрузка медиа" trailing={<Switch id="al-master" label="Автозагрузка медиа" checked={al.enabled} onChange={(e: Event) => setPrefs({ 'autoload.enabled': (e.currentTarget as HTMLInputElement).checked })} />} />
           {KINDS.map(([k, title, icon, tile]) => (
             <div key={k} class={al.enabled ? '' : 'app-dim'} aria-disabled={al.enabled ? undefined : 'true'} data-autoload={k}>
               <InfoRow tile={tile} icon={icon} title={title} subtitle={autoloadSubtitle(al, k)} onClick={al.enabled ? () => void go('settings/data/autoload/' + k) : undefined} />
@@ -90,10 +90,10 @@ export function Data() {
         </Section>
         <Section>
           <div class={isDef ? 'app-dim' : ''} aria-disabled={isDef ? 'true' : undefined}>
-            <InfoRow icon="history" title="Сбросить настройки автозагрузки" onClick={isDef ? undefined : () => open('autoload')} />
+            <InfoRow setting="data.autoload.reset" icon="history" title="Сбросить настройки автозагрузки" onClick={isDef ? undefined : () => open('autoload')} />
           </div>
         </Section>
-        <Section title="Память">
+        <Section setting="data.storage" title="Память">
           <div class="app-storage">
             <div class="app-storebar" role="img" aria-label={info ? `Занято ${formatBytes(info.used)} из ${formatBytes(info.quota)}` : 'Загрузка'}>
               <span class="app-store-db" style={{ width: pct(info?.db ?? 0) + '%' }} />
@@ -117,14 +117,14 @@ export function Data() {
           <InfoRow icon="cloud" title="Чаты на устройстве" subtitle={`${chats} — доступны без сети`} />
           <InfoRow icon="history" title="Синхронизация" subtitle={status.phase === 'ready' ? (status.outbox ? `В очереди: ${status.outbox}` : 'Всё сохранено на сервере') : status.phase === 'offline' ? 'Ждём сеть' : 'Идёт обновление'} />
         </Section>
-        <Section title="Кэш медиа" footer="Фото, видео и файлы, к которым давно не обращались, удаляются с устройства сами. При необходимости они скачаются снова. Скачанное кнопкой не удаляется — только очисткой ниже.">
-          <RangeRow
+        <Section setting="data.cache" title="Кэш медиа" footer="Фото, видео и файлы, к которым давно не обращались, удаляются с устройства сами. При необходимости они скачаются снова. Скачанное кнопкой не удаляется — только очисткой ниже.">
+          <RangeRow setting="data.cache.keep"
             label="Хранить медиа" min={0} max={KEEP_DAYS.length - 1} step={1} value={Math.max(0, KEEP_DAYS.indexOf(media.keepDays))}
             format={(i: number) => KEEP_LABEL[KEEP_DAYS[i]]}
             marks={KEEP_DAYS.map((d, i) => ({ value: i, label: KEEP_MARK[d] }))}
             onChange={(i: number) => { setPref('media.keepDays', KEEP_DAYS[i]); settle(); }}
           />
-          <RangeRow
+          <RangeRow setting="data.cache.max"
             label="Максимальный размер кэша" min={0} max={CACHE_MB.length - 1} step={1} value={Math.max(0, CACHE_MB.indexOf(media.maxMb))}
             format={(i: number) => mbLabel(CACHE_MB[i])}
             marks={CACHE_MB.map((m, i) => ({ value: i, label: m === 0 ? '∞' : mbLabel(m).replace(' ', '\u00a0') }))}
@@ -132,8 +132,8 @@ export function Data() {
           />
         </Section>
         <Section footer="Очистка локальных данных не удаляет ничего на сервере.">
-          <InfoRow icon="trash" title="Очистить кэш медиа" onClick={() => open('cache')} />
-          <InfoRow icon="trash" danger title="Очистить локальные данные" onClick={busy ? undefined : () => open('local')} trailing={busy ? <span class="app-busy"><ProgressRing size={22} label="Очистка" /></span> : undefined} />
+          <InfoRow setting="data.clearCache" icon="trash" title="Очистить кэш медиа" onClick={() => open('cache')} />
+          <InfoRow setting="data.clearLocal" icon="trash" danger title="Очистить локальные данные" onClick={busy ? undefined : () => open('local')} trailing={busy ? <span class="app-busy"><ProgressRing size={22} label="Очистка" /></span> : undefined} />
         </Section>
       </div>
       <ConfirmDialog open={ask != null} extra={extra} danger={lastAsk !== 'autoload'} title={dialog.title} text={dialog.text} confirm={dialog.confirm} cancel="Отмена" onCancel={() => setAsk(null)} onConfirm={() => void dialog.run()} />

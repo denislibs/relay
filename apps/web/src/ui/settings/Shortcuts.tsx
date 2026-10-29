@@ -25,7 +25,7 @@ function Combo({ combo, range }: { combo: string; range?: string }) {
 function Row({ s }: { s: Shortcut }) {
   const label = s.combos.map((c) => comboKeys(c).join(IS_APPLE ? '' : '+')).join(' или ');
   return (
-    <div class="app-sc-row" role="listitem" aria-label={`${s.title}: ${label}`}>
+    <div class="app-sc-row" role="listitem" data-setting={'shortcut.' + s.id} aria-label={`${s.title}: ${label}`}>
       <span class="rl-optrow-text">
         <span>{s.title}</span>
         {s.hint ? <small>{s.hint}</small> : null}
@@ -55,7 +55,7 @@ export function Shortcuts() {
           <RadioRow label={`${mod}+Enter — отправить`} subtitle="Enter — новая строка" checked={sendKey === 'ctrlEnter'} onClick={() => setPref('sendKey', 'ctrlEnter')} />
         </Section>
         {shortcutSections(sendKey).map((sec) => (
-          <Section key={sec.id} title={sec.title} footer={sec.footer}>
+          <Section setting={'shortcuts.' + sec.id} key={sec.id} title={sec.title} footer={sec.footer}>
             <div role="list">{sec.items.map((s) => <Row key={s.id} s={s} />)}</div>
           </Section>
         ))}

@@ -1648,7 +1648,7 @@ function InfoRow(props) {
     var input = e.currentTarget.querySelector('.rl-switch input');
     if (input && !input.disabled) input.click();
   }
-  return h(Tag, { type: Tag === 'button' ? 'button' : undefined, class: cx('rl-inforow', withSwitch && 'rl-inforow-switch', off && 'rl-inforow-off', props.danger && 'rl-inforow-danger'), onPointerDown: off ? undefined : ripple, onClick: withSwitch ? onSwitchRow : props.onClick },
+  return h(Tag, { type: Tag === 'button' ? 'button' : undefined, class: cx('rl-inforow', withSwitch && 'rl-inforow-switch', off && 'rl-inforow-off', props.danger && 'rl-inforow-danger'), 'data-setting': props.setting, onPointerDown: off ? undefined : ripple, onClick: withSwitch ? onSwitchRow : props.onClick },
     props.tile ? h(SettingsIcon, { icon: props.icon, color: props.tile })
       : h('span', { class: 'rl-inforow-icon' }, h(Icon, { name: props.icon, size: 24 })),
     h('span', { class: 'rl-inforow-text' }, h('span', null, props.title), props.subtitle ? h('small', null, props.subtitle) : null),

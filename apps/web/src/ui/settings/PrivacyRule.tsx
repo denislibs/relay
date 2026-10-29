@@ -38,7 +38,7 @@ export function PrivacyRule({ path }: { path: string }) {
                 {MODES.map((m) => <RadioRow key={m} label={MODE_LABEL[m]} checked={rule.mode === m} onClick={() => pick(m)} />)}
               </Section>
               {key === 'phone' && rule.mode !== 'everyone' ? (
-                <Section title={DISCOVERY_TITLE} role="radiogroup" footer={discoveryCaption(discovery.mode)}>
+                <Section setting="privacy.rule.discovery" title={DISCOVERY_TITLE} role="radiogroup" footer={discoveryCaption(discovery.mode)}>
                   {(['everyone', 'contacts'] as const).map((m) => <RadioRow key={m} label={MODE_LABEL[m]} checked={discovery.mode === m} onClick={() => pickDiscovery(m)} />)}
                 </Section>
               ) : null}
