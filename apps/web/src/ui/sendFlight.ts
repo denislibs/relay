@@ -349,6 +349,9 @@ export function launch(f: Flight, bubble: HTMLElement, remaining: () => number):
     const from = f.first && bf
       ? { left: f.first.left - (bf.left - r.left), top: f.first.top - (bf.top - r.top) }
       : { left: f.src.left, top: f.src.top };
+    // поле уже пузыря (у него свои отступы) — длинный текст переносится иначе, и в смене «текст поля → текст пузыря»
+    // 100 мс просвечивали два текста с разными строками. Строки разные — меняем сразу, без перетекания
+    const sameWrap = !!glyph && sameLines(lineWidths(f.text), lineWidths(glyph));
     requestMutation(() => {
       const opts = (easing: string, extra: KeyframeAnimationOptions = {}) => ({ duration: FLIGHT_MS, easing, fill: 'forwards' as const, ...extra });
       const axes = (left: number, top: number, dx: number, dy: number) => {
@@ -392,14 +395,17 @@ export function launch(f: Flight, bubble: HTMLElement, remaining: () => number):
       body.classList.add('app-flight-body');
       Object.assign(body.style, { width: dst.width + 'px', height: dst.height + 'px', boxSizing: 'border-box', animation: 'none', background: 'transparent', boxShadow: 'none' });
       front.y.appendChild(body);
-      body.animate([{ opacity: 0 }, { opacity: 1 }], { duration: 80, fill: 'backwards' });
-      // текст поля летит тем же путём, что текст пузыря, и гаснет за 100 мс — его сменяет такой же
-      const field = axes(0, 0, 0, 0);
-      field.x.animate([{ transform: 'none' }, { transform: `translateX(${dst.left - from.left}px)` }], opts(EASE_X));
-      field.y.animate([{ transform: 'none' }, { transform: `translateY(${dst.top - from.top}px)` }], opts(EASE_Y));
-      field.y.appendChild(f.text);
-      f.text.animate([{ opacity: 1 }, { opacity: 0 }], { duration: 100, fill: 'forwards' });
-      f.layer.append(bg, corner.x, front.x, field.x);
+      f.layer.append(bg, corner.x, front.x);
+      if (sameWrap) {
+        body.animate([{ opacity: 0 }, { opacity: 1 }], { duration: 80, fill: 'backwards' });
+        // текст поля летит тем же путём, что текст пузыря, и гаснет за 100 мс — его сменяет такой же
+        const field = axes(0, 0, 0, 0);
+        field.x.animate([{ transform: 'none' }, { transform: `translateX(${dst.left - from.left}px)` }], opts(EASE_X));
+        field.y.animate([{ transform: 'none' }, { transform: `translateY(${dst.top - from.top}px)` }], opts(EASE_Y));
+        field.y.appendChild(f.text);
+        f.text.animate([{ opacity: 1 }, { opacity: 0 }], { duration: 100, fill: 'forwards' });
+        f.layer.append(field.x);
+      } else f.text.remove();
       follow(f, bubble, dst.top, remaining);
       landWhen(way, () => finish(f, bubble));
     });
@@ -408,27 +414,44 @@ export function launch(f: Flight, bubble: HTMLElement, remaining: () => number):
 
 const curveY = bezier(...FLIGHT_SCROLL.curve);
 
+/** Ширины строк текста (только текстовые узлы; фрагменты одной строки — суммой). */
+function lineWidths(el: Element): number[] {
+  const out = new Map<number, number>(), walk = document.createTreeWalker(el, NodeFilter.SHOW_TEXT), r = document.createRange();
+  for (let n = walk.nextNode(); n; n = walk.nextNode()) {
+    r.selectNodeContents(n);
+    for (const q of Array.from(r.getClientRects())) if (q.width) { const k = Math.round(q.top); out.set(k, (out.get(k) ?? 0) + q.width); }
+  }
+  return [...out.values()];
+}
+
+const sameLines = (a: readonly number[], b: readonly number[]): boolean =>
+  a.length === b.length && a.every((w, i) => Math.abs(w - b[i]) < 2);
+
 /**
  * Место посадки сдвинулось по дороге (дорисовался стикер, выросло поле ввода, пришло ещё сообщение) — слой плавно
  * догоняет его, а не прыгает в конце: смещение растёт к новому месту, к концу пути — целиком. Пока место то же,
  * ничего не пишем. Кадр — одно чтение (measure) и одна запись (mutation).
+ *
+ * Следующее чтение заказываем из чтения, а не из записи: запись, заказанная в measure, уходит в следующий кадр, и
+ * цепочка «запись → чтение» двигала слой через кадр. Пока поле ввода сжималось после длинного текста (место
+ * посадки уезжало на 150 px), фон летел зигзагом по 8–10 px. Так слой сдвигается каждый кадр (с отставанием в кадр)
  */
 function follow(f: Flight, el: HTMLElement, top: number, remaining: () => number): void {
   const t0 = performance.now();
-  let on = true, applied = 0;
+  let on = true, planned = 0, applied = 0;
   f.unfollow = () => { on = false; };
   const tick = () => requestMeasure(() => {
     if (!on || !el.isConnected) return;
+    tick();
     const delta = el.getBoundingClientRect().top - remaining() - top;   // где пузырь встанет, когда лента доедет
     const p = Math.min(1, (performance.now() - t0) / FLIGHT_MS);
-    const next = applied + (delta - applied) * Math.max(0.35, curveY(p));
+    const next = planned = planned + (delta - planned) * Math.max(0.35, curveY(p));
     requestMutation(() => {
       if (!on) return;
       if (Math.abs(next - applied) > 0.25 || (Math.abs(next) > 0.25) !== (Math.abs(applied) > 0.25)) {
         applied = next;
         f.layer.style.transform = Math.abs(applied) > 0.25 ? `translateY(${applied}px)` : '';
       }
-      tick();
     });
   });
   tick();
