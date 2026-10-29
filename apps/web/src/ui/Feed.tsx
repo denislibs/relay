@@ -824,7 +824,10 @@ export function Feed({ frameKey, active, chatId, threadId, channel = false, meId
       const edges = { atEnd: !!meta?.live && !meta.hasNewer, atStart: !!meta && !meta.hasOlder };
       // выше видимой области (до якоря ширины) — не анимируем: там нечего показывать, а якорь удержит главный эффект
       // синхронно, как раньше; ниже — буфер (вне экрана строка просто уйдёт)
-      const aboveView = viewAnchor.current?.sort ?? -Infinity;
+      // sort якоря — по ключу из прежнего списка: снятый раньше мог устареть (у только что отправленного временный sort,
+      // после подтверждения — серверный), и тогда «выше видимой области» оказывалось всё
+      const va = viewAnchor.current;
+      const aboveView = va ? ((prevList as readonly (Item & Msg)[]).find((m) => m.key === va.key)?.sort ?? va.sort) : -Infinity;
       for (const x of interiorRemovals(prevList as unknown as (Item & Msg)[], messages as unknown as (Item & Msg)[], edges)) if (x.sort > aboveView && !leaving.current.has(x.key)) leaving.current.set(x.key, x);
     }
     for (const m of messages) leaving.current.delete(m.key as string);   // вернулось в окно (повтор отправки) — не уходит
@@ -1109,7 +1112,10 @@ export function Feed({ frameKey, active, chatId, threadId, channel = false, meId
       const removed = going.reduce((n, x) => n + x.rect.height, 0);
       const clamp = Math.max(0, st - Math.max(0, sh - removed - ch));   // подрезка прокрутки у низа: контент опустится
       const above = (top: number) => going.reduce((n, x) => n + (x.rect.top < top ? x.rect.height : 0), 0);
-      for (const x of going) { const style = x.r.style; style.position = 'absolute'; style.top = x.r.offsetTop + 'px'; style.left = x.r.offsetLeft + 'px'; style.width = x.r.offsetWidth + 'px'; }
+      // место — до первой записи: строка с position: absolute в колонке-flex ленты стоит у начала контейнера, и offsetTop,
+      // прочитанный после записи, ставил «призрак» в левый верхний угол ленты
+      const box = going.map((x) => ({ top: x.r.offsetTop, left: x.r.offsetLeft, width: x.r.offsetWidth }));
+      going.forEach((x, i) => { const style = x.r.style; style.position = 'absolute'; style.top = box[i].top + 'px'; style.left = box[i].left + 'px'; style.width = box[i].width + 'px'; });
       if (clamp > 0) leaveScroll.current = st - clamp;
       beginHeavyAnimation(LEAVE_HOLD_MS);
       const ease = 'cubic-bezier(0.2, 0, 0, 1)';
