@@ -929,14 +929,31 @@ function MediaOverlay(props) {
    До первого кадра — размытая встроенная миниатюра; плашка слева сверху — сколько осталось. autoplay=false — стоит
    на первом кадре (preload=metadata), включится в просмотрщике. preview — играет короткий немой ролик сервера (первые
    секунды, 360p, до 1 МБ) вместо оригинала: плашка показывает длительность всего видео, а не ролика. */
-var videoIO = null, videoCbs = typeof WeakMap === 'function' ? new WeakMap() : null;
+var videoIO = null, videoRecs = new Map(), videoHold = 0;
 function videoObserve(el, cb) {
-  if (typeof IntersectionObserver === 'undefined') { cb(true); return function () {}; }
+  var rec = { cb: cb, on: false };
+  if (typeof IntersectionObserver === 'undefined') { rec.on = true; videoRecs.set(el, rec); if (!videoHold) cb(true); return function () { videoRecs.delete(el); }; }
   if (!videoIO) videoIO = new IntersectionObserver(function (es) {
-    es.forEach(function (e) { var f = videoCbs.get(e.target); if (f) f(e.isIntersecting && e.intersectionRatio >= 0.5); });
+    es.forEach(function (e) {
+      var r = videoRecs.get(e.target);
+      if (!r) return;
+      r.on = e.isIntersecting && e.intersectionRatio >= 0.5;
+      if (!videoHold) r.cb(r.on);
+    });
   }, { threshold: [0, 0.5] });
-  videoCbs.set(el, cb); videoIO.observe(el);
-  return function () { videoCbs.delete(el); videoIO.unobserve(el); };
+  videoRecs.set(el, rec); videoIO.observe(el);
+  return function () { videoRecs.delete(el); videoIO.unobserve(el); };
+}
+/* Ролики ленты на паузе, пока поверх открыт просмотрщик: IntersectionObserver не знает о перекрытии, и под ним
+   играли бы все видимые пузыри — лишние декодеры рядом с роликом просмотра. Снятие паузы — только тем, что на экране. */
+function holdInlineVideos() {
+  if (videoHold++ === 0) videoRecs.forEach(function (r) { r.cb(false); });
+  var done = false;
+  return function () {
+    if (done) return;
+    done = true;
+    if (--videoHold === 0) videoRecs.forEach(function (r) { if (r.on) r.cb(true); });
+  };
 }
 /* Истёкшая подписанная ссылка посреди просмотра (как в Telegram — незаметно): /files/<id> отдаёт 302 на ссылку
    хранилища, плеер ходит за кусками уже по ней, и через срок ссылки следующий кусок получает 403 → MEDIA_ERR_NETWORK
@@ -1419,6 +1436,7 @@ function MediaViewer(props) {
   var real = !!it.src;
   var shown = useState(null), alive = useRef(true);
   useEffect(function () { alive.current = true; return function () { alive.current = false; }; }, []);
+  useEffect(holdInlineVideos, []);
   var preview = viewerPreview(it);
   var sharp = !preview || shown[0] === it.src || viewerShown.has(it.src);
   // оригинал загрузился: ждём раскодирования (decode), чтобы проявление не стартовало с пустого кадра
@@ -1886,4 +1904,4 @@ function ScrollToBottom(props) {
 }
 
 
-export { FolderTags, RowBadge, WebPage, MsgLine, ForwardTitle, peerTone, RelayLogo, RelayBadge, Verified, ArchivedRow, ReplyQuote, ReactionChips, metaOrReactions, cx, chain, ripple, reducedMotion, omit, fmtTime, makeWave, ICONS, Icon, Button, IconButton, Avatar, Badge, Chip, ChatRow, ChatRowSkeleton, Bubble, MessageStatus, TypingIndicator, DateDivider, Banner, NavRail, Checkbox, Toast, Card, Steps, MediaArt, ProgressRing, Waveform, VoiceMessage, VoiceRecorder, MediaBubble, MediaPolicy, mediaHeld, FileBubble, MediaThumb, MediaViewer, viewerPreview, Switch, PanelHeader, ProfileHeader, ActionTile, InfoRow, SettingsIcon, ReadMore, Presence, useMinVisible, LazyImage, LazyRoot, lazyObserve, lazyRoots, FlipList, SyncIndicator, LinearProgress, EmptyState, ScrollToBottom, SlideFade };
+export { FolderTags, RowBadge, WebPage, MsgLine, ForwardTitle, peerTone, RelayLogo, RelayBadge, Verified, ArchivedRow, ReplyQuote, ReactionChips, metaOrReactions, cx, chain, ripple, reducedMotion, omit, fmtTime, makeWave, ICONS, Icon, Button, IconButton, Avatar, Badge, Chip, ChatRow, ChatRowSkeleton, Bubble, MessageStatus, TypingIndicator, DateDivider, Banner, NavRail, Checkbox, Toast, Card, Steps, MediaArt, ProgressRing, Waveform, VoiceMessage, VoiceRecorder, MediaBubble, MediaPolicy, mediaHeld, FileBubble, MediaThumb, MediaViewer, viewerPreview, Switch, holdInlineVideos, videoObserve, PanelHeader, ProfileHeader, ActionTile, InfoRow, SettingsIcon, ReadMore, Presence, useMinVisible, LazyImage, LazyRoot, lazyObserve, lazyRoots, FlipList, SyncIndicator, LinearProgress, EmptyState, ScrollToBottom, SlideFade };
