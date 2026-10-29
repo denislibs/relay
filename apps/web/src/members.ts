@@ -23,6 +23,22 @@ export function membersOf(m: Mirror): Members | null {
   return { ownerId: members.find((x) => x.role === 'owner')?.userId ?? null, members };
 }
 
+/**
+ * Открытие группы: подписка заранее, пока собирается лента нового чата, — кэш заполнен до того, как колонка
+ * смонтируется, и шапка встаёт сразу с «N участников», а не «Группа» на несколько кадров (как статус в личном чате).
+ * Уже в кэше — ничего не делаем. Возвращает отписку.
+ */
+export function prefetchMembers(chatId: number): () => void {
+  if (last.has(chatId)) return () => {};
+  const mirror = new Mirror();
+  const w = watchQuery({ kind: 'members', chatId }, (p: Patch) => {
+    mirror.apply(p);
+    const x = membersOf(mirror);
+    if (x) rememberMembers(chatId, x);
+  });
+  return () => w.close();
+}
+
 /** Участники группы — подписка движка (первый показ из IndexedDB, дальше журнал); без собственных запросов. Не группа — null. */
 export function useMembers(chatId: number, group: boolean): Members | null {
   const [m, setM] = useState<Members | null>(() => (group ? cachedMembers(chatId) : null));

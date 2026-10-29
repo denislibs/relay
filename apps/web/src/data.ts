@@ -16,7 +16,7 @@ import { rememberKeysIn, startFileKeyService } from './fileKeys';
 import { bindMute, isMuted, startMuteMigration } from './mute';
 import { bindChatFlags, clearUnreadMark } from './chatFlags';
 import { startPeople, wantPeople } from './people';
-import { resetMembers } from './members';
+import { prefetchMembers, resetMembers } from './members';
 import { resetCommonGroups } from './commonGroups';
 import { resetPersonalChannels } from './personalChannel';
 import { cachedMedia, resetMediaTabs } from './mediaTab';
@@ -377,6 +377,7 @@ function syncShown(): void {
 
 /** Отменить ещё не показанный чат (новый нижний или поверх): его лента не дождалась. */
 function cancelPending(): void {
+  stopMembersPrefetch();
   if (pendingBottom) { closeSession(pendingBottom.frame.key); pendingBottom = null; }
   const half = stack().filter((f) => !f.ready);
   if (half.length) {
@@ -567,6 +568,9 @@ export function closeAllChats(): void {
   closingNow = true;
   try { openChat(null); } finally { closingNow = false; }
 }
+/** Подписка на участников группы, открываемой сейчас (prefetchMembers); снимается после показа или отмены. */
+let stopMembersPrefetch: () => void = () => {};
+
 export function openChat(chatId: number | null, target?: { id: number; sort: number }, hold?: Hold): void {
   openSeq++;   // любой переход отменяет ждущий openChannel
   if (chatId == null && leaveTimer) return;   // уже едем к списку
@@ -603,6 +607,12 @@ export function openChat(chatId: number | null, target?: { id: number; sort: num
   // статус собеседника — пока собирается лента, а не после смены: шапка нового чата встаёт сразу с «был(а) …»
   // (как tweb готовит шапку до показа). Отменили переход — syncShown вернёт подписку на чат на экране
   if (peerFor !== chatId) watchPeer(chatId);
+  // группа — так же участники для подзаголовка; колонка после показа держит свою подписку, эта больше не нужна
+  stopMembersPrefetch();
+  if (findChat(g, chatId)?.kind === 'group') {
+    const stop = prefetchMembers(chatId);
+    stopMembersPrefetch = () => { stopMembersPrefetch = () => {}; stop(); };
+  }
   // пока лента нового чата не готова, на экране остаётся прежний; затем шапка и лента меняются одним кадром
   startFeed(frame, anchor, (patch) => {
     if (pendingBottom?.frame.key !== frame.key) return;
@@ -625,6 +635,7 @@ export function openChat(chatId: number | null, target?: { id: number; sort: num
         dropLayers();
         setGlobal({ chatStack: [{ ...staged, ready: true }], chatLeaving: [], openChatId: chatId, pendingChatId: null });
         syncShown();
+        stopMembersPrefetch();
         // смена без перехода только в этот раз: потом колонка уезжает влево под следующий чат как обычно
         requestAnimationFrame(() => requestAnimationFrame(() => { if (alive()) patchFrame(staged.key, { swap: false }); }));
       });
