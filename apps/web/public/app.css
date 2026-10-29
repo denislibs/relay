@@ -1624,14 +1624,15 @@ html[data-anim="0"] .app-folder-sym { animation: none !important; }
 
 /* ---------- Поиск по настройкам: слой поверх шапки и содержимого страницы settings (SettingsSearch.tsx) ----------
    Переход — как у поиска в списке чатов (zoomFade, 150 мс); страница под слоем не размонтируется — прокрутка на месте. */
-.app-ss-layer { position: absolute; inset: 0; z-index: 3; display: flex; flex-direction: column; background: var(--page); }
+/* фон — у .app-ss, а не у слоя: слой с фоном закрывал страницу на весь переход, и настройки при выходе появлялись одним кадром */
+.app-ss-layer { position: absolute; inset: 0; z-index: 3; display: flex; flex-direction: column; overflow: hidden; }
 .app-ssearching:not(.app-ssearch-in) > .rl-settings, .app-ssearching:not(.app-ssearch-in) > .app-contents > .rl-panel-head { visibility: hidden; }
 .app-ssearch-in > .rl-settings, .app-ssearch-in > .app-contents > .rl-panel-head { animation: app-fade-out 150ms ease both; }
 .app-ssearch-in .app-ss { animation: app-gsearch-in 150ms ease both; }
 .app-ssearch-out .app-ss-layer { pointer-events: none; }
 .app-ssearch-out .app-ss { animation: app-gsearch-out 150ms ease both; }
 .app-ssearch-out > .rl-settings, .app-ssearch-out > .app-contents > .rl-panel-head { animation: app-list-back 150ms ease both; transform-origin: 50% 0; }
-.app-ss { display: flex; flex-direction: column; flex: 1; min-height: 0; transform-origin: 50% 0; }
+.app-ss { display: flex; flex-direction: column; flex: 1; min-height: 0; transform-origin: 50% 0; background: var(--page); }
 .app-ss-head { display: flex; align-items: center; height: 60px; padding: 0 var(--space-3); flex-shrink: 0; }
 .app-ss-head .rl-search { flex: 1; min-width: 0; }
 .app-ss-body { padding-top: var(--space-1); }
