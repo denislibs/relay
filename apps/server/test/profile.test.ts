@@ -110,6 +110,17 @@ test('username stored lowercased, case-insensitively unique, removable, own name
   expect((await call(b, 'PUT', '/me/username', {})).status).toBe(400);
 });
 
+test('usernames are shared with channels: a channel @name is taken for users', async () => {
+  const a = await login('Анна'), b = await login('Борис');
+  const ch = (await (await call(a, 'POST', '/chats', { kind: 'channel', title: 'Новости', memberIds: [] })).json()).id as number;
+  expect((await call(a, 'PUT', `/groups/${ch}/username`, { username: 'news_channel' })).status).toBe(200);
+  expect(await (await call(b, 'GET', '/users/check-username?u=News_Channel')).json()).toEqual({ ok: false, reason: 'taken' });
+  const put = await call(b, 'PUT', '/me/username', { username: 'news_channel' });
+  expect([put.status, (await put.json()).code]).toEqual([409, 'username_taken']);
+  await sql`update chats set deleted_at = now() where id = ${ch}`;   // удалённый канал имя не держит
+  expect(await (await call(b, 'GET', '/users/check-username?u=news_channel')).json()).toEqual({ ok: true });
+});
+
 test('race: two concurrent PUTs of the same username → exactly one 409', async () => {
   const a = await login('Анна'), b = await login('Борис');
   const rs = await Promise.all([call(a, 'PUT', '/me/username', { username: 'racer_one' }), call(b, 'PUT', '/me/username', { username: 'racer_one' })]);

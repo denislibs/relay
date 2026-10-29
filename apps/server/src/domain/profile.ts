@@ -207,8 +207,13 @@ export async function checkUsername(userId: number, raw: unknown): Promise<Usern
   const s = usernameShape(raw);
   if ('reason' in s) return { ok: false, reason: s.reason };
   const [row] = await sql`select id from users where lower(username) = ${s.name}`;
-  return row && row.id !== userId ? { ok: false, reason: 'taken' } : { ok: true };
+  if (row && row.id !== userId) return { ok: false, reason: 'taken' };
+  return (await channelHolds(sql, s.name)) ? { ok: false, reason: 'taken' } : { ok: true };
 }
+
+/** Имена общие с группами и каналами (как checkGroupUsername): /@name не должен стать неоднозначным. Удалённый чат имя не держит. */
+const channelHolds = async (db: Tx | typeof sql, name: string) =>
+  (await db`select 1 from chats where lower(username) = ${name} and deleted_at is null limit 1`).length > 0;
 
 // ---------- запись + журнал ----------
 
@@ -259,7 +264,10 @@ export async function setUsername(userId: number, raw: unknown): Promise<Me> {
     name = s.name;
   }
   try {
-    return await saveProfile(userId, async (tx) => { await tx`update users set username = ${name} where id = ${userId}`; });
+    return await saveProfile(userId, async (tx) => {
+      if (name && (await channelHolds(tx, name))) throw new DomainError('username_taken');
+      await tx`update users set username = ${name} where id = ${userId}`;
+    });
   } catch (e) {
     // гонку решает уникальный индекс, а не проверка «до»
     if ((e as { code?: string }).code === '23505') throw new DomainError('username_taken');
