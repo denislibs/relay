@@ -239,7 +239,8 @@ export function Info() {
         title={<HeadTitle media={media} plain={channel ? 'Информация о канале' : group ? 'Информация о группе' : 'Информация'} name={title} head={mediaHead} />} onClose={media ? toTop : close} action={media ? undefined : action} />
       <div class="rl-aside-body" ref={body} onScroll={onBodyScroll}>
         {gallery.length ? (
-          <ProfileGallery photos={gallery} index={slide} onIndex={setSlide} onOpen={setViewer} still={!shown}
+          // key — чат: другой профиль строится сразу в своей высоте; иначе высота шапки с фото доезжала CSS-переходом
+          <ProfileGallery key={chatId} photos={gallery} index={slide} onIndex={setSlide} onOpen={setViewer} still={!shown}
             name={<>{title}{system ? <Verified size={22} /> : null}</>}
             sub={<span class={myPeer?.online ? 'app-online' : ''}>{subtitle || ' '}</span>}
             // полоса музыки и её 24 px — только когда треки есть (иначе пустая полоса раздвигала плитки и карточку)
@@ -257,7 +258,8 @@ export function Info() {
         </div>
         )}
         {gallery.length ? null : <ProfileActions label="Действия с чатом" actions={tiles} menu={tileMenu} />}
-        <div class="rl-aside-group app-info-rows">
+        {/* key — чат: строки нового профиля (из кэша) стоят сразу; раскрываются только пришедшие позже в этом же чате */}
+        <div key={chatId} class="rl-aside-group app-info-rows">
           {/* как в Telegram: имя уже в шапке — строками только то, чего там нет, и только если поле заполнено */}
           {/* личный канал — первым, над телефоном и @именем (как в Telegram); клик — канал поверх, на последнем посте */}
           <PersonalChannelBlock channel={!group ? (user?.personalChannel as PersonalChannel | null | undefined) : null} from="inner" />

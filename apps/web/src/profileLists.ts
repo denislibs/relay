@@ -1,6 +1,7 @@
 // Музыка и фото профиля — подписки движка (profileMusic, profilePhotos): первый показ из IndexedDB, дальше журнал;
 // без собственных запросов. Своя музыка держится одной подпиской на всё время сеанса — кнопки плеера читают её синхронно.
 import { useEffect, useState } from 'preact/hooks';
+import { useKeyedState } from './keyedState';
 import type { UserPhoto } from '@relay/protocol';
 import { Mirror } from '@relay/sync-engine/src/client';
 import type { Patch, Query } from '@relay/sync-engine/src/types';
@@ -79,7 +80,7 @@ export function resetProfileLists(): void {
 
 /** Музыка профиля человека; null — движок ещё не ответил и показывать нечего. */
 export function useProfileMusic(userId: number | null | undefined): MusicView | null {
-  const [v, setV] = useState<MusicView | null>(() => (userId ? musicLast.get(userId) ?? null : null));
+  const [v, setV] = useKeyedState<number | null | undefined, MusicView | null>(userId, (id) => (id ? musicLast.get(id) ?? null : null));
   useEffect(() => {
     setV(userId ? musicLast.get(userId) ?? null : null);
     if (!userId) return;
@@ -98,7 +99,7 @@ export function useProfileMusic(userId: number | null | undefined): MusicView | 
 
 /** История фото профиля (главное первым) из подписки движка; null — ещё нет. Кэш отрисовки — по человеку: смена главного не схлопывает галерею. */
 export function useProfilePhotoList(userId: number | null | undefined): UserPhoto[] | null {
-  const [v, setV] = useState<PhotosView | null>(() => (userId ? photosLast.get(userId) ?? null : null));
+  const [v, setV] = useKeyedState<number | null | undefined, PhotosView | null>(userId, (id) => (id ? photosLast.get(id) ?? null : null));
   useEffect(() => {
     setV(userId ? photosLast.get(userId) ?? null : null);
     if (!userId) return;

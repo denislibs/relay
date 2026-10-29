@@ -62,6 +62,8 @@ export function SharedMedia({ chatId, group = false, channel = false, peerId = n
   const { counts: known, loading: countsLoading } = useMedia(chatId, 'media', 0);
   // офлайн на холодную: счётчиков нет и не ждём — как раньше, нули (пустое состояние), а не вечная заглушка
   const counts = known ?? (countsLoading ? null : { media: 0, file: 0, link: 0, audio: 0, voice: 0 });
+  // кольцо ожидания счётчиков: показывается после 150 мс ожидания и держится не меньше 600 мс (без мигания)
+  const countsRing = useMinVisible(!counts, { delay: 150, min: 600 });
   // клик по вкладке, пока над ней виден профиль: панель за ~300 мс доезжает вкладками до верха, потом переключаем
   // (содержимое не меняется посреди прокрутки); таблетка и шапка — сразу на новой вкладке
   const [pending, setPending] = useState<Tab | null>(null);
@@ -90,7 +92,9 @@ export function SharedMedia({ chatId, group = false, channel = false, peerId = n
     cancel.current = animateScroll(body, to, 300, reducedMotion(), () => { cancel.current = null; setPending(null); setTab(id); });
   };
 
-  if (!counts && !group) return <div class="app-sm-loading" aria-busy="true" />;
+  // счётчики ещё не пришли — кольцо загрузки (с задержкой, без мигания), а не вкладки «наугад»: у группы иначе
+  // сначала одна «Участники», потом полоса перестраивалась под пришедшие счётчики
+  if (!counts || countsRing) return <CountsWait ring={countsRing} />;
   if (!tabs.length) return null;   // медиа нет — как в Telegram: просто профиль, без вкладок и без заглушки
   return (
     <>
@@ -173,6 +177,15 @@ function TabList({ chatId, tab }: { chatId: number; tab: MediaTab }) {
         onClose={() => setViewer(null)} />
     ) : null}
   </>;
+}
+
+/** Ожидание счётчиков медиа: кольцо — только если ждём дольше 150 мс, и не короче 600 мс (как у вкладки). */
+function CountsWait({ ring }: { ring: boolean }) {
+  return (
+    <div class="app-sm-loading app-sm-wait" aria-busy="true" aria-label="Загрузка">
+      <Presence show={ring} exitMs={200}><Spin /></Presence>
+    </div>
+  );
 }
 
 /** Кольцо загрузки вкладки (как «Загружаем ещё чаты» в списке чатов): крутится сам svg — на композиторе. */
