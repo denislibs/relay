@@ -228,7 +228,11 @@ function watchPeer(chatId: number | null): void {
   const peerId = isSystemChat(chat) ? null : chat?.peerId as number | null | undefined;
   if (!peerId) { setGlobal({ peer: null }); return; }
   const m = new Mirror();
-  peerWatch = engine.watch({ kind: 'presence', userId: peerId }, (p: Patch) => { m.apply(p); setGlobal({ peer: (m.list()[0] as Item) ?? null }); });
+  peerWatch = engine.watch({ kind: 'presence', userId: peerId }, (p: Patch) => {
+    m.apply(p);
+    const it = (m.list()[0] as Item) ?? null;
+    setGlobal((s) => ({ peer: it, presence: it ? { ...s.presence, [peerId]: it } : s.presence }));
+  });
 }
 
 type Anchor = { sort: number; side: 'end' | 'start' | 'center' };
@@ -596,6 +600,9 @@ export function openChat(chatId: number | null, target?: { id: number; sort: num
   const { frame, anchor } = newFrame({ chatId }, target);
   pendingBottom = { frame, target };
   if (hold) { hold.key = frame.key; hold.onCommit = () => setGlobal({ pendingChatId: chatId }); } else setGlobal({ pendingChatId: chatId });
+  // статус собеседника — пока собирается лента, а не после смены: шапка нового чата встаёт сразу с «был(а) …»
+  // (как tweb готовит шапку до показа). Отменили переход — syncShown вернёт подписку на чат на экране
+  if (peerFor !== chatId) watchPeer(chatId);
   // пока лента нового чата не готова, на экране остаётся прежний; затем шапка и лента меняются одним кадром
   startFeed(frame, anchor, (patch) => {
     if (pendingBottom?.frame.key !== frame.key) return;
