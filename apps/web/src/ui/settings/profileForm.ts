@@ -1,4 +1,5 @@
 // Форма «Изменить профиль» без DOM: значения, что изменилось, проверка имени пользователя.
+import type { PersonalChannel } from '@relay/protocol';
 import type { Me } from '../../global';
 import type { Birthday } from '../format';
 
@@ -10,7 +11,8 @@ export const cpLen = (s: string) => [...s].length;
 /** Обрезать до max кодовых точек (суррогатная пара не рвётся). */
 export const clip = (s: string, max: number) => (s.length <= max ? s : [...s].slice(0, max).join(''));
 
-export interface ProfileForm { firstName: string; lastName: string; bio: string; username: string; birthday: Birthday | null }
+/** channel — личный канал (снимок строки из GET /me/personal-channels); уходит своей операцией, не в PATCH имени */
+export interface ProfileForm { firstName: string; lastName: string; bio: string; username: string; birthday: Birthday | null; channel: PersonalChannel | null }
 
 export const USERNAME_TEXT = {
   checking: 'Проверяем…',
@@ -29,6 +31,7 @@ export function formFromMe(me: Me): ProfileForm {
     bio: me.bio ?? '',
     username: me.username ?? '',
     birthday: me.birthday ?? null,
+    channel: me.personalChannel ?? null,
   };
 }
 
@@ -57,7 +60,17 @@ export function profilePatch(me: Me, f: ProfileForm): { firstName?: string; last
 
 export const usernameChanged = (me: Me, f: ProfileForm) => normUsername(f.username) !== normUsername(me.username ?? '');
 
-export const isDirty = (me: Me, f: ProfileForm) => Object.keys(profilePatch(me, f)).length > 0 || usernameChanged(me, f);
+/** Канал сменили или убрали (тот же канал с новым числом подписчиков — не правка). */
+export const channelChanged = (me: Me, f: ProfileForm) => (f.channel?.id ?? null) !== (me.personalChannel?.id ?? null);
+
+export const isDirty = (me: Me, f: ProfileForm) => Object.keys(profilePatch(me, f)).length > 0 || usernameChanged(me, f) || channelChanged(me, f);
+
+const fold = (s: string) => s.toLowerCase().replace(/ё/g, 'е');
+/** Поиск в выборе канала: подстрока названия или @имени, без регистра, ё = е. */
+export function filterChannels(list: PersonalChannel[], q: string): PersonalChannel[] {
+  const t = fold(q.trim().replace(/^@/, ''));
+  return t ? list.filter((c) => fold(c.title).includes(t) || c.username.includes(t)) : list;
+}
 
 /** Можно ли сохранить: имя есть, о себе в пределах, новое имя пользователя свободно (или проверить не удалось — решит сервер). */
 export function canSave(me: Me, f: ProfileForm, status: UsernameStatus): boolean {

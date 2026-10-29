@@ -3,10 +3,15 @@ import { usePhotoPicker } from './usePhotoPicker';
 import { useEffect, useRef, useState } from 'preact/hooks';
 import { useGlobal, type Me } from '../../global';
 import { back, go, setLeaveGuard } from '../../nav';
-import { checkUsername, setUsername, showToast, updateProfile } from '../../settingsData';
+import { checkUsername, setPersonalChannel, setUsername, showToast, updateProfile } from '../../settingsData';
+import { knownPersonalChannels, loadPersonalChannels, useChannelPost } from '../../personalChannel';
+import { Expand } from '../Expand';
+import { PersonalChannelRow } from '../profile/PersonalChannelBlock';
+import { PersonalChannelPicker } from './PersonalChannelPicker';
+import type { PersonalChannel } from '@relay/protocol';
 import { birthdayText, type Birthday } from '../format';
 import {
-  BIO_MAX, canSave, clip, cpLen, daysIn, formFromMe, isDirty, NAME_MAX, normUsername, profilePatch, usernameChanged, usernameShapeOk,
+  BIO_MAX, canSave, channelChanged, clip, cpLen, daysIn, formFromMe, isDirty, NAME_MAX, normUsername, profilePatch, usernameChanged, usernameShapeOk,
   USERNAME_TEXT, type ProfileForm, type UsernameStatus,
 } from './profileForm';
 
@@ -72,7 +77,36 @@ function BirthdayModal({ value, onSave, onClose }: { value: Birthday | null; onS
   );
 }
 
-/** «Изменить профиль»: имя, фамилия, о себе, имя пользователя, день рождения. Сохраняет ✓, уход с правками — вопрос. */
+const NO_CHANNELS = 'Нет подходящих каналов. Подходит публичный канал, которым вы владеете';
+
+/**
+ * Карточка «Личный канал» (последняя, как в Telegram): не выбран — оранжевая плитка-мегафон «Добавить канал»; выбран —
+ * ячейка канала с последним постом. Смена вида — кроссфейд по высоте (Expand). Клик — выбор; каналов нет — тост.
+ */
+function PersonalChannelCard({ value, onChange }: { value: PersonalChannel | null; onChange: (c: PersonalChannel | null) => void }) {
+  const [list, setList] = useState<PersonalChannel[] | null>(null);
+  const post = useChannelPost(value?.id);
+  const pick = () => {
+    // кандидаты уже предзагружены при входе в «Настройки» — модалка открывается тем же кадром
+    const now = knownPersonalChannels();
+    if (now) { open(now); return; }
+    void loadPersonalChannels().then((l) => { if (l) open(l); else showToast('Нет сети — выбрать канал можно, когда связь вернётся'); });
+  };
+  const open = (l: PersonalChannel[]) => {
+    if (!l.length && !value) { showToast(NO_CHANNELS, 3500); return; }
+    setList(l);
+    void loadPersonalChannels().then((f) => { if (f) setList((cur) => (cur ? f : cur)); });   // тихо освежить, пока модалка открыта
+  };
+  return (
+    <Section footer="Покажите в профиле канал, которым вы управляете.">
+      <Expand show={!value}>{!value ? <InfoRow tile="orange" icon="channels" title="Личный канал" subtitle="Добавить канал" onClick={pick} /> : null}</Expand>
+      <Expand show={!!value}>{value ? <PersonalChannelRow channel={value} post={post} onClick={pick} /> : null}</Expand>
+      {list ? <PersonalChannelPicker channels={list} current={value} onClose={() => setList(null)} onPick={(c) => { setList(null); onChange(c); }} /> : null}
+    </Section>
+  );
+}
+
+/** «Изменить профиль»: имя, фамилия, о себе, имя пользователя, день рождения, личный канал. Сохраняет ✓, уход с правками — вопрос. */
 export function Profile() {
   const me = useGlobal((s) => s.me)!;
   const [form, setForm] = useState<ProfileForm>(() => formFromMe(me));
@@ -106,6 +140,7 @@ export function Profile() {
     const jobs: Promise<unknown>[] = [];
     if (Object.keys(patch).length) jobs.push(updateProfile(patch));
     if (usernameChanged(me, form)) jobs.push(setUsername(normUsername(form.username) || null));
+    if (channelChanged(me, form)) jobs.push(setPersonalChannel(form.channel));
     setLeaveGuard(null);
     // правки уже в очереди движка (и видны), сервер подтвердит или откатит с тостом
     void Promise.all(jobs).then(() => back(), () => { arm(); showToast('Не удалось сохранить изменения'); });
@@ -153,6 +188,7 @@ export function Profile() {
           <InfoRow icon="camera" title={photo.has ? 'Сменить фото' : 'Поставить фото'} onClick={photo.pick} />
           {me.photo && !photo.busy ? <InfoRow icon="trash" danger title="Удалить фото" onClick={() => setAskDelete(true)} /> : null}
         </Section>
+        <PersonalChannelCard value={form.channel} onChange={(channel) => set({ channel })} />
       </div>
       <Presence show={dirty && ok} exitMs={200}>
         <div class="rl-fab-slot"><Fab icon="check" label="Сохранить" onClick={save} /></div>

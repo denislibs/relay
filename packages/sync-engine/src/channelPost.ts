@@ -32,7 +32,7 @@ export class ChannelPosts {
   private save(id: number, v: ChannelPost | null): void {
     if (v) this.mem.set(id, v); else this.mem.delete(id);
     const os = this.h.db.transaction('meta', 'readwrite').objectStore('meta');
-    void req(v ? os.put({ k: key(id), v }) : os.delete(key(id))).catch(() => {});
+    void (v ? req(os.put({ k: key(id), v })) : req(os.delete(key(id)))).catch(() => {});
   }
 
   /** cached — только кэш, без сети (первый кадр профиля); иначе сервер, без сети или при сбое — кэш. null — не знаем. */

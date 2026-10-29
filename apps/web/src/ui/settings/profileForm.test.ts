@@ -1,6 +1,6 @@
 import { expect, test } from 'bun:test';
 import { age, birthdayText } from '../format';
-import { canSave, formFromMe, isDirty, profilePatch, usernameShapeOk } from './profileForm';
+import { canSave, channelChanged, filterChannels, formFromMe, isDirty, profilePatch, usernameShapeOk } from './profileForm';
 
 const me = { userId: 1, name: 'Анна Смирнова', firstName: 'Анна', lastName: 'Смирнова', username: 'anna_s', bio: 'Привет', birthday: { day: 29, month: 4, year: 1990 }, phone: '+7900' };
 
@@ -40,4 +40,25 @@ test('save is allowed only with a name and a free (or unverifiable) username', (
   expect(canSave(me, { ...f, username: 'anna_new' }, 'free')).toBe(true);
   expect(canSave(me, { ...f, username: 'anna_new' }, 'offline')).toBe(true);
   expect(canSave(me, { ...f, username: '' }, null)).toBe(true);   // убрать имя пользователя можно
+});
+
+test('personal channel: part of the form, dirty and saved separately; filter by title and @username with ё', () => {
+  const pc = { id: 7, title: 'Новости Ёлки', username: 'elka_news', photo: null, members: 3 };
+  const f = formFromMe(me);
+  expect(f.channel).toBeNull();
+  expect(channelChanged(me, f)).toBe(false);
+  expect(isDirty(me, { ...f, channel: pc })).toBe(true);
+  expect(profilePatch(me, { ...f, channel: pc })).toEqual({});   // канал — своей операцией, не в PATCH имени
+  const withPc = { ...me, personalChannel: pc };
+  expect(formFromMe(withPc).channel).toEqual(pc);
+  expect(channelChanged(withPc, { ...formFromMe(withPc), channel: { ...pc, members: 9 } })).toBe(false);   // тот же канал
+  expect(channelChanged(withPc, { ...formFromMe(withPc), channel: null })).toBe(true);   // «Убрать канал»
+  expect(canSave(withPc, { ...formFromMe(withPc), channel: null }, null)).toBe(true);
+
+  const list = [pc, { id: 8, title: 'Кино', username: 'kino_club', photo: null, members: 1 }];
+  expect(filterChannels(list, '').map((c) => c.id)).toEqual([7, 8]);
+  expect(filterChannels(list, 'елк').map((c) => c.id)).toEqual([7]);
+  expect(filterChannels(list, '@KINO').map((c) => c.id)).toEqual([8]);
+  expect(filterChannels(list, 'news').map((c) => c.id)).toEqual([7]);
+  expect(filterChannels(list, 'музыка')).toEqual([]);
 });
