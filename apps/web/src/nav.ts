@@ -101,12 +101,19 @@ async function canLeave(): Promise<boolean> { return guard ? await guard() : tru
 const shownPath = () => stack?.open('page').at(-1)?.key ?? ROOT;
 const pageBack = () => { if (bind && current() !== shownPath()) bind.set(shownPath()); };
 
-/** Вглубь (или в соседний раздел): новая запись истории. */
-export async function go(path: string): Promise<void> {
+// записи страниц, открытых прямым переходом (пункт из поиска по настройкам): их «Назад» — к странице под ними
+const direct = new Set<number>();
+
+/**
+ * Вглубь (или в соседний раздел): новая запись истории. direct — прыжок через уровни к пункту (поиск по настройкам):
+ * «Назад» с этой страницы вернёт туда, откуда прыгнули, а не к её родителю.
+ */
+export async function go(path: string, o: { direct?: boolean } = {}): Promise<void> {
   if (!bind || !stack || pageIndex(path) < 0 || path === current()) return;
   if (!(await canLeave())) return;
   if (path === ROOT) { closePages(); return; }
-  stack.push('page', pageBack, { key: path });
+  const id = stack.push('page', pageBack, { key: path });
+  if (o.direct) direct.add(id);
   bind.set(path);
 }
 
@@ -123,6 +130,7 @@ export async function back(): Promise<void> {
   const pages = stack.open('page');
   const top = pages.at(-1);
   if (parent === ROOT) { closePages(); return; }   // к списку чатов — все страницы закрыты
+  if (top && top.key === cur && direct.delete(top.id)) { stack.closeType('page'); return; }
   if (top && top.key === cur && (pages.at(-2)?.key ?? ROOT) === parent) { stack.closeType('page'); return; }
   if (top) top.key = parent;   // прыжок через уровень (или страница без записи): та же запись, путь — родитель
   bind.set(parent);

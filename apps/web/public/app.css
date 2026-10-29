@@ -1617,3 +1617,10 @@ html[data-anim="0"] .app-folder-sym { animation: none !important; }
 .app-ss-row.is-active { background: var(--hover); }
 .app-ss-row .rl-inforow-text small { overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
 .app-ss-none { padding-top: var(--space-6); }
+/* пункт, открытый из поиска: вспышка фона акцентом 16 % (highlight.ts); подраздел — цветом заголовка */
+.app-setting-flash { animation: app-setting-flash 1600ms ease both; }
+.app-setting-flash-title { animation: app-setting-flash-title 1600ms ease both; }
+@keyframes app-setting-flash { 0%, 100% { background-color: transparent; } 15%, 65% { background-color: color-mix(in srgb, var(--brand) 16%, transparent); } }
+@keyframes app-setting-flash-title { 15%, 65% { color: var(--brand); } }
+@media (prefers-reduced-motion: reduce) { .app-setting-flash, .app-setting-flash-title, .app-ss, .app-ss-layer { animation: none !important; } }
+html[data-anim="0"] :is(.app-setting-flash, .app-setting-flash-title) { animation: none !important; }
