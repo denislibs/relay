@@ -114,17 +114,29 @@ body { margin: 0; font-family: var(--font-sans); color: var(--ink); background: 
    содержимое догоняет сдвигом — transform, без раскладки на каждом кадре (как в Telegram). */
 .rl-row { position: relative; }
 .rl-row-sel { padding-inline-start: 45px; }
-.rl-row-check { position: absolute; inset-inline-start: 12px; top: 50%; width: 22px; height: 22px; margin-top: -11px; border-radius: 50%; border: 2px solid var(--ink-muted); display: grid; place-items: center; color: transparent; transition: background-color var(--dur-instant) var(--ease-out), border-color var(--dur-instant) var(--ease-out); pointer-events: none; }
-.rl-row-sel-on .rl-row-check { background: var(--brand-strong); border-color: var(--brand-strong); color: var(--on-brand); }
+/* Кружок выбора: заливка вырастает из центра (transform), галочка прорисовывается штрихом — как в Telegram.
+   Галочка всегда белая (on-media): on-brand в светлой теме чёрный — он для цифр бейджа, не для отметки. */
+.rl-row-check { position: absolute; inset-inline-start: 12px; top: 50%; width: 22px; height: 22px; margin-top: -11px; border-radius: 50%; border: 2px solid var(--ink-muted); display: grid; place-items: center; color: var(--on-media); pointer-events: none; transition: border-color var(--dur-fast) var(--ease-out); }
+.rl-row-check::before { content: ''; position: absolute; inset: -2px; border-radius: 50%; background: var(--brand-strong); transform: scale(0); transition: transform var(--dur-fast) var(--ease-out); }
+.rl-row-check svg { position: relative; }
+.rl-row-check path { stroke-dasharray: 1; stroke-dashoffset: 1; transition: stroke-dashoffset 120ms var(--ease-out); }
+.rl-row-sel-on .rl-row-check { border-color: var(--brand-strong); }
+.rl-row-sel-on .rl-row-check::before { transform: scale(1); }
+.rl-row-sel-on .rl-row-check path { stroke-dashoffset: 0; transition: stroke-dashoffset 180ms var(--ease-out) 90ms; }
+/* открытый чат (строка залита акцентом): кружок белый, галочка — цвета строки, иначе отметка сливается с фоном */
+.rl-sidecard .rl-row[aria-current="true"] .rl-row-check { border-color: rgb(255 255 255 / 0.85); color: var(--row-current); }
+.rl-sidecard .rl-row[aria-current="true"] .rl-row-check::before { background: var(--on-media); }
 .rl-row-sel-on { background: var(--hover); }
 /* анимация только в момент входа/выхода (класс на обёртке списка ставит Sidebar на 300 мс):
    строки, пришедшие при прокрутке во включённом режиме, появляются уже готовыми */
 .rl-sel-anim .rl-row-check { animation: rl-fade var(--dur-slow) var(--ease-out) both; }
 .rl-sel-anim .rl-row-sel > :not(.rl-row-check) { animation: rl-sel-lane var(--dur-slow) var(--ease-out) both; }
+.rl-sel-anim.rl-sel-leave .rl-row-sel { padding-inline-start: 9px; }
+.rl-sel-anim.rl-sel-leave .rl-row-check { animation: rl-fade-out var(--dur-base) var(--ease-out) both; }
 .rl-sel-anim.rl-sel-leave .rl-row > :not(.rl-row-check) { animation: rl-sel-lane-out var(--dur-slow) var(--ease-out) both; }
 @keyframes rl-sel-lane { from { transform: translateX(-36px); } to { transform: none; } }
 @keyframes rl-sel-lane-out { from { transform: translateX(36px); } to { transform: none; } }
-@media (prefers-reduced-motion: reduce) { .rl-sel-anim .rl-row-check, .rl-sel-anim .rl-row > * { animation: none; } }
+@media (prefers-reduced-motion: reduce) { .rl-sel-anim .rl-row-check, .rl-sel-anim .rl-row > * { animation: none; } .rl-row-check, .rl-row-check::before, .rl-row-check path { transition: none !important; } }
 .rl-row-main { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 1px; }
 /* строка с тегами папок — выше на полосу тегов (82 вместо 72, как в Telegram); аватар и текст — там же, где у обычной */
 .rl-row.rl-row-tagged { height: 82px; align-items: flex-start; padding-top: 9px; }
