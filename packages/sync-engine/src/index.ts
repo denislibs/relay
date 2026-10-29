@@ -5,3 +5,4 @@ export { createDedicatedHost } from './hosts/dedicated';
 export { computeQuery, diffResults } from './queries';
 export * from './types';
 export { isPost, canPost, shiftCounts, hasUnreadReplies } from './channel';
+export type { ChannelPost, ChannelPostAnswer } from './channelPost';

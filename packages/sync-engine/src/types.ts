@@ -1,7 +1,7 @@
 import type { ContactCard, Dice, DiceEmoji, GeoPoint, Poll, PollInput, StickerRef, StickerSetInfo } from '@relay/protocol';
 import type { StoreName } from './schema';
 import type { GroupInfo, MediaCounts, MediaTab, MyMembership, Replies } from '@relay/protocol';
-import type { Birthday, Block, ChatFolder, Entity, ForwardInfo, ForwardRef, LinkPreview, MessageButton, PrivacyKey, PrivacyMode, ProfileLink, ServiceType, Todo, TodoInput, TodoServiceData, VideoVariant } from '@relay/protocol';
+import type { Birthday, Block, PersonalChannel, ChatFolder, Entity, ForwardInfo, ForwardRef, LinkPreview, MessageButton, PrivacyKey, PrivacyMode, ProfileLink, ServiceType, Todo, TodoInput, TodoServiceData, VideoVariant } from '@relay/protocol';
 
 export type Status = 'pending' | 'sent' | 'read' | 'failed';
 
@@ -256,6 +256,12 @@ export type Action =
   | { type: 'unpin'; chatId: number; id: number | null }
   | { type: 'messagesByIds'; chatId: number; ids: number[] }
   | { type: 'commonGroups'; userId: number }
+  /** личный канал в профиле (null — убрать): очередью, как остальной профиль; channel — строка для своего профиля сразу */
+  | { type: 'setPersonalChannel'; channel: PersonalChannel | null }
+  /** каналы, которые можно поставить в профиль (GET /me/personal-channels): только с сетью, без сети — {offline:true} */
+  | { type: 'personalChannels' }
+  /** последний пост личного канала: cached — только кэш устройства (сразу), иначе сервер; ответ — ChannelPostAnswer */
+  | { type: 'channelPost'; chatId: number; cached?: boolean }
   | { type: 'updateProfile'; firstName?: string; lastName?: string; bio?: string | null; birthday?: Birthday | null }
   | { type: 'setLinks'; links: ProfileLink[] }
   | { type: 'setUsername'; username: string | null }

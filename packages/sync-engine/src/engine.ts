@@ -13,7 +13,8 @@ import { FILE_CHUNK, fromBase64, importFileKey, newFileKey, newNonceBase, sealed
 import { WsTransport } from './transport';
 import { loadOps, Ops, type PendingOp } from './ops';
 import { folderKey, isNotifyOp, normalizeRule, notifyKey, OP_FOLDERS_ORDER, privacyKey, settingsItem, settingsView } from './settings';
-import { applyUserUpdated, meItem, meView, OP_LINKS, OP_PROFILE, OP_USERNAME, userItem } from './profile';
+import { applyUserUpdated, meItem, meView, OP_LINKS, OP_PCHANNEL, OP_PROFILE, OP_USERNAME, userItem } from './profile';
+import { ChannelPosts } from './channelPost';
 import { OP_SESSIONS_TTL, Sessions } from './sessions';
 import { Stickers } from './stickers';
 import { SessionEnd } from './session';
@@ -115,6 +116,7 @@ export class Engine {
   /** активные сеансы (sessions.ts) */
   private readonly sessions: Sessions;
   private readonly stickers: Stickers;
+  private readonly channelPosts: ChannelPosts;
   /** конец сеанса: sessionTerminated / 401 (session.ts) */
   private readonly session: SessionEnd;
   /** чужие профили, которых нет в кэше: подгрузим, когда будет связь; asked — уже спрашивали за это подключение */
@@ -189,6 +191,8 @@ export class Engine {
     this.lists = new ProfileListsLoader(store, { online: () => this.online && this.ready, http: (path) => this.http(path), run: (fn) => this.run(fn), changed: () => this.changed() });
     this.sessions = new Sessions({ ops: this.ops, online: () => this.online, http: (path) => this.http(path) });
     this.stickers = new Stickers({ db, online: () => this.online, http: (path) => this.http(path), enqueue: (op) => this.ops.enqueue(op), bump: () => { this.store.stickersRev++; this.changed(); } });
+    this.channelPosts = new ChannelPosts({ db, online: () => this.online && this.ready,
+      fetch: (path) => this.dev.fetch(this.cfg.httpBase + path, { credentials: 'include', headers: this.cfg.headers }) });
     this.session = new SessionEnd({
       httpBase: cfg.httpBase, headers: cfg.headers, fetch: this.dev.fetch,
       closed: () => this.closed,
@@ -960,7 +964,7 @@ export class Engine {
       if (v?.notify && this.store.settings.apply({ notify: v.notify, sessionsTtlDays: v.sessionsTtlDays, folders: v.folders, privacy: v.privacy }, v.seq)) this.run(() => this.store.flush());
       return;
     }
-    if ((op.key === OP_PROFILE || op.key === OP_USERNAME || op.key === OP_LINKS) && value && typeof value === 'object' && (value as Me).userId === this.cfg.userId) {
+    if ((op.key === OP_PROFILE || op.key === OP_USERNAME || op.key === OP_LINKS || op.key === OP_PCHANNEL) && value && typeof value === 'object' && (value as Me).userId === this.cfg.userId) {
       if (this.store.profile.setMe(value as Me)) this.run(() => this.store.flush());
     }
   }
@@ -1363,6 +1367,13 @@ export class Engine {
       case 'setLinks':
         await this.ops.enqueue({ key: OP_LINKS, method: 'PATCH', path: '/me', body: { links: a.links } });
         return null;
+      case 'setPersonalChannel':
+        await this.ops.enqueue({ key: OP_PCHANNEL, method: 'PATCH', path: '/me', body: { personalChannelId: a.channel?.id ?? null, channel: a.channel } });
+        return null;
+      case 'personalChannels':
+        if (!this.online) return { offline: true };
+        return this.http<{ channels: unknown[] }>('/me/personal-channels').catch(() => ({ offline: true }));
+      case 'channelPost': return this.channelPosts.get(a.chatId, a.cached);
       case 'setUsername':
         await this.ops.enqueue({ key: OP_USERNAME, method: 'PUT', path: '/me/username', body: { username: a.username } });
         return null;
