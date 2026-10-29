@@ -1,4 +1,4 @@
-import { normalizeLinks, USERNAME, type Birthday, type Me, type ProfileLink, type ProfileMusicSummary, type ProfilePhoto, type PublicUser, type UserPhoto } from '@relay/protocol';
+import { normalizeLinks, USERNAME, type Birthday, type Me, type PersonalChannel, type ProfileLink, type ProfileMusicSummary, type ProfilePhoto, type PublicUser, type UserPhoto } from '@relay/protocol';
 import { isTx, sql, type Tx } from '../db';
 import { DomainError } from './errors';
 import { appendUpdates, flushJournals } from './journal';
@@ -7,8 +7,18 @@ import { blocksViewer, canSee, privacyCtx, type PrivacyCtx } from './privacy';
 const RESERVED = new Set(['admin', 'relay', 'support', 'settings', 'help', 'api', 'root', 'system', 'null', 'undefined', 'me']);
 const len = (s: string) => [...s].length;
 
-export type Row = { id: number; name: string; first_name: string | null; last_name: string | null; username: string | null; bio: string | null; birthday: Birthday | null; phone: string | null; links: ProfileLink[]; photo: ProfilePhoto | null; music: ProfileMusicSummary | null };
-export const COLS = sql`id, name, first_name, last_name, username, bio, birthday, phone, links, photo, music`;
+export type Row = { id: number; name: string; first_name: string | null; last_name: string | null; username: string | null; bio: string | null; birthday: Birthday | null; phone: string | null; links: ProfileLink[]; photo: ProfilePhoto | null; music: ProfileMusicSummary | null; personal_channel: PersonalChannel | null };
+
+/**
+ * Личный канал строкой профиля: только пока он публичный, не удалён и принадлежит этому пользователю — даже если
+ * сброс в groups.ts (dropPersonalChannel) разминулся с сохранением профиля, наружу устаревший канал не уйдёт.
+ * u — таблица users в запросе (`users` или алиас).
+ */
+export const personalChannelSql = (u: 'users' | 'u') => sql`(
+  select json_build_object('id', c.id, 'title', coalesce(c.title, ''), 'username', c.username, 'photo', c.photo, 'members', c.members_count)
+    from chats c where c.id = ${sql(u)}.personal_channel_id and c.kind = 'channel' and c.username is not null and c.deleted_at is null and c.owner_id = ${sql(u)}.id
+) as personal_channel`;
+export const COLS = sql`id, name, first_name, last_name, username, bio, birthday, phone, links, photo, music, ${personalChannelSql('users')}`;
 
 export const fullName = (first: string, last: string) => `${first} ${last}`.trim();
 
@@ -24,6 +34,7 @@ function shape(r: Row) {
   return {
     name: r.name, firstName, lastName,
     username: r.username, bio: r.bio, birthday: r.birthday, phone: r.phone, links: r.links ?? [], photo: r.photo ?? null, music: r.music ?? null,
+    personalChannel: r.personal_channel ?? null,
   };
 }
 
@@ -65,6 +76,7 @@ export function publicUser(viewer: number, r: Row, contact: ContactName | null |
     photo: blocksViewer(viewer, r.id, ctx) ? null : s.photo,   // заблокированному — как в Telegram, без фото
     blocksMe: blocksViewer(viewer, r.id, ctx),
     music: blocksViewer(viewer, r.id, ctx) ? null : s.music,   // как listProfileMusic: заблокированному музыки не видно
+    personalChannel: blocksViewer(viewer, r.id, ctx) ? null : s.personalChannel,
   };
 }
 
@@ -217,6 +229,40 @@ const channelHolds = async (db: Tx | typeof sql, name: string) =>
 
 // ---------- запись + журнал ----------
 
+/** userUpdated себе и всем зрителям: каждому — своё представление (скрытые правилами поля; владельцу контакта — его имя для этого человека). */
+async function publishUser(tx: Tx, r: Row): Promise<void> {
+  const viewers = await viewersOf(tx, r.id);
+  const names = await contactNames(tx, r.id, viewers);
+  const ctx = await privacyCtx(tx, viewers.map((v) => [v, r.id]));
+  await appendUpdates(tx, [r.id, ...viewers].map((v) => ({ userId: v, update: { type: 'userUpdated' as const, user: publicUser(v, r, names.get(v), ctx) } })));
+}
+
+/**
+ * Канал перестал подходить в личные (снят @username, сменился владелец, удалён) — в той же транзакции обнулить
+ * поле у тех, кто его показывал, и разослать исправленный профиль. Звать после изменения строки chats.
+ */
+export async function dropPersonalChannel(tx: Tx, chatId: number): Promise<void> {
+  const gone = await tx`
+    update users u set personal_channel_id = null
+      from chats c
+     where u.personal_channel_id = ${chatId} and c.id = u.personal_channel_id
+       and (c.kind <> 'channel' or c.username is null or c.deleted_at is not null or c.owner_id is distinct from u.id)
+    returning u.id`;
+  for (const g of gone) {
+    const [r] = await tx<Row[]>`select ${COLS} from users where id = ${g.id}`;
+    if (r) await publishUser(tx, r);
+  }
+}
+
+/** Каналы, которые можно поставить в профиль: публичные, не удалённые, где я владелец; по названию. */
+export async function personalChannelCandidates(userId: number): Promise<{ channels: PersonalChannel[] }> {
+  const rows = await sql`
+    select c.id, coalesce(c.title, '') as title, c.username, c.photo, c.members_count from chats c
+     where c.owner_id = ${userId} and c.kind = 'channel' and c.username is not null and c.deleted_at is null
+     order by lower(coalesce(c.title, '')), c.id limit 200`;
+  return { channels: rows.map((r) => ({ id: Number(r.id), title: r.title as string, username: r.username as string, photo: (r.photo as ProfilePhoto | null) ?? null, members: Number(r.members_count) })) };
+}
+
 /** Применить изменение профиля и записать userUpdated себе и зрителям — одной транзакцией (и для музыки профиля). */
 export async function saveProfile(userId: number, change: (tx: Tx, cur: Row) => Promise<void>): Promise<Me> {
   return sql.begin(async (tx) => {
@@ -225,11 +271,7 @@ export async function saveProfile(userId: number, change: (tx: Tx, cur: Row) => 
     await change(tx, cur);
     const [r] = await tx<Row[]>`select ${COLS} from users where id = ${userId}`;
     if (JSON.stringify(cur) === JSON.stringify(r)) return { userId: r.id, ...shape(r), seq: await selfSeq(tx, userId) }; // ничего не изменилось — журнал не трогаем
-    const viewers = await viewersOf(tx, userId);
-    const names = await contactNames(tx, userId, viewers);
-    const ctx = await privacyCtx(tx, viewers.map((v) => [v, userId]));
-    // каждому — своё представление (скрытые правилами поля; владельцу контакта — его имя для этого человека)
-    await appendUpdates(tx, [userId, ...viewers].map((v) => ({ userId: v, update: { type: 'userUpdated' as const, user: publicUser(v, r, names.get(v), ctx) } })));
+    await publishUser(tx, r);
     return { userId: r.id, ...shape(r), seq: await selfSeq(tx, userId) };   // seq своей записи userUpdated (строка user_seq под замком транзакции)
   }) as Promise<Me>;
 }
@@ -242,7 +284,17 @@ export async function updateProfile(userId: number, patch: unknown): Promise<Me>
   const bio = 'bio' in p ? validBio(p.bio) : undefined;
   const birthday = 'birthday' in p ? validBirthday(p.birthday) : undefined;
   const links = 'links' in p ? normalizeLinks(p.links) ?? (() => { throw new DomainError('links_invalid'); })() : undefined;
+  const channel = 'personalChannelId' in p ? p.personalChannelId : undefined;
+  if (channel !== undefined && channel !== null && !(Number.isSafeInteger(channel) && (channel as number) > 0)) throw new DomainError('bad_frame', 'personalChannelId');
   return saveProfile(userId, async (tx, cur) => {
+    if (typeof channel === 'number') {
+      // без замка строки chats: замки «users → chats» здесь и «chats → users» в groups.ts сцепились бы; гонку
+      // с dropPersonalChannel закрывает personalChannelSql — устаревший канал наружу не показывается
+      const [c] = await tx`select kind, username, deleted_at, owner_id from chats where id = ${channel}`;
+      if (!c || c.kind !== 'channel') throw new DomainError('bad_frame', 'not a channel');
+      if (Number(c.owner_id) !== userId || c.username === null || c.deleted_at !== null) throw new DomainError('forbidden', 'personal channel');
+    }
+    if (channel !== undefined) await tx`update users set personal_channel_id = ${channel as number | null} where id = ${userId}`;
     const [pf, pl] = parts(cur);
     const f = first ?? pf;
     const l = last ?? pl;

@@ -31,7 +31,7 @@ import { pinMessage, unpinMessage } from './domain/pins';
 import { addProfileMusic, listProfileMusic, removeProfileMusic } from './domain/profileMusic';
 import { journalStats } from './domain/journal';
 import { notifyLatency } from './realtime';
-import { checkUsername, getMe, getUser, setUsername, updateProfile, setPhoto, deletePhoto, setMainPhoto, listPhotos } from './domain/profile';
+import { checkUsername, getMe, getUser, setUsername, updateProfile, personalChannelCandidates, setPhoto, deletePhoto, setMainPhoto, listPhotos } from './domain/profile';
 import { usersByIds } from './domain/users';
 import { subscribe, unsubscribe, vapidKeys, type SubscriptionInput } from './domain/push';
 import { deleteFolder, getSettings, reorderFolders, saveFolder, setNotify, setPrivacy, setSessionsTtl } from './domain/settings';
@@ -172,6 +172,7 @@ export function createServer(opts: { port: number }): Server {
         if (req.method === 'PATCH' && url.pathname === '/me') {
           return Response.json(await updateProfile(userId, await req.json().catch(() => null)));
         }
+        if (req.method === 'GET' && url.pathname === '/me/personal-channels') return Response.json(await personalChannelCandidates(userId));
         if (req.method === 'PUT' && url.pathname === '/me/username') {
           const body = (await req.json().catch(() => null)) as { username?: unknown } | null;
           if (!body || !('username' in body)) return fail('bad_frame');

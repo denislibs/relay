@@ -22,7 +22,7 @@ const updates = async (userId: number) => (await getUpdates(userId, 0)).items.ma
 test('GET /me: extended shape, userId and name kept', async () => {
   const a = await login('Анна Смирнова', '+79001234567');
   const me = await (await call(a, 'GET', '/me')).json();
-  expect(me).toEqual({ userId: a.userId, name: 'Анна Смирнова', firstName: 'Анна', lastName: 'Смирнова', username: null, bio: null, birthday: null, phone: '+79001234567', links: [], photo: null, music: null, seq: expect.any(Number) });   // первый GET /me заводит чат «Relay» — seq уже не 0
+  expect(me).toEqual({ userId: a.userId, name: 'Анна Смирнова', firstName: 'Анна', lastName: 'Смирнова', username: null, bio: null, birthday: null, phone: '+79001234567', links: [], photo: null, music: null, personalChannel: null, seq: expect.any(Number) });   // первый GET /me заводит чат «Relay» — seq уже не 0
 });
 
 test('Me.seq is the seq of the own userUpdated entry (orders responses against the journal)', async () => {
@@ -147,7 +147,7 @@ test('GET /users/:id: self and chat peer ok, stranger 404', async () => {
   const a = await login('Анна', '+79005550001'), b = await login('Борис'), s = await login('Посторонний');
   await makeChat([a.userId, b.userId]);
   await call(a, 'PUT', '/me/username', { username: 'anna_x' });
-  expect(await (await call(b, 'GET', `/users/${a.userId}`)).json()).toEqual({ id: a.userId, name: 'Анна', firstName: 'Анна', lastName: '', publicName: 'Анна', username: 'anna_x', links: [], bio: null, birthday: null, phone: null, photo: null, blocksMe: false, music: null });
+  expect(await (await call(b, 'GET', `/users/${a.userId}`)).json()).toEqual({ id: a.userId, name: 'Анна', firstName: 'Анна', lastName: '', publicName: 'Анна', username: 'anna_x', links: [], bio: null, birthday: null, phone: null, photo: null, blocksMe: false, music: null, personalChannel: null });
   expect((await call(a, 'GET', `/users/${a.userId}`)).status).toBe(200);
   const r = await call(s, 'GET', `/users/${a.userId}`);
   expect([r.status, (await r.json()).code]).toEqual([404, 'not_found']);

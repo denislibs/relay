@@ -358,7 +358,12 @@ export interface PublicUser {
   blocksMe?: boolean;
   /** музыка профиля: сколько треков и последний добавленный (плашка под аватаром); список — GET /users/:id/music */
   music?: ProfileMusicSummary | null;
+  /** личный канал: публичный канал владельца в профиле — снимок для строки; последний пост — GET /groups/:id */
+  personalChannel?: PersonalChannel | null;
 }
+
+/** Канал в профиле (и кандидат в него, GET /me/personal-channels): members — число подписчиков. */
+export interface PersonalChannel { id: Id; title: string; username: string; photo: ProfilePhoto | null; members: number }
 
 export interface ProfileMusicSummary { count: number; top: { id: string; title: string; duration: number | null } }
 
@@ -380,6 +385,7 @@ export interface Me {
   links: ProfileLink[];
   photo?: ProfilePhoto | null;
   music?: ProfileMusicSummary | null;
+  personalChannel?: PersonalChannel | null;
   seq?: number;
 }
 
