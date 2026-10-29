@@ -132,7 +132,7 @@ function reactionChips(m: Item, meId: number, people: Record<number, { name: str
   return chips;
 }
 
-type RowProps = { post?: boolean; pinned?: boolean; discussion?: number | null; chatId: number; voiceTitle: string; author?: string; onAuthor?: (m: Item) => void; onOpen: (m: Item) => void; hl?: string; m: Item; meId: number; out: boolean; start: boolean; end: boolean; pos?: 'single' | 'first' | 'middle' | 'last'; quoted?: Quote | null; quoteAuthor?: string; quoteTone?: number | 'accent'; appear: boolean; flash: boolean; onReact: (m: Item, emoji: string) => void; album?: Item[]; onUser?: (userId: number) => void; sel?: boolean; selIn?: string; onQuickForward?: (m: Item) => void; grp?: boolean; leaving?: boolean; rxv: number; aev: number; bigEmoji: boolean; direct: boolean; people: Record<number, { name: string } | undefined> };
+type RowProps = { post?: boolean; pinned?: boolean; discussion?: number | null; chatId: number; voiceTitle: string; author?: string; onAuthor?: (m: Item) => void; onOpen: (m: Item) => void; hl?: string; m: Item; meId: number; out: boolean; start: boolean; end: boolean; pos?: 'single' | 'first' | 'middle' | 'last'; quoted?: Quote | null; quoteAuthor?: string; quoteTone?: number | 'accent'; appear: boolean; flash: boolean; onReact: (m: Item, emoji: string) => void; album?: Item[]; onUser?: (userId: number) => void; sel?: boolean; selIn?: string; onQuickForward?: (m: Item) => void; grp?: boolean; leaving?: boolean; rxv: number; aev: number; tf: string; bigEmoji: boolean; direct: boolean; people: Record<number, { name: string } | undefined> };
 
 /** Строка ленты: перерисовывается только если изменилось её сообщение или место в группе. */
 /** Тайл карты — с нашего сервера (политика безопасности и приватность: координаты не уходят наружу из браузера). */
@@ -707,6 +707,8 @@ export function Feed({ frameKey, active, chatId, threadId, channel = false, meId
   const rxv = useReactionCatalog();              // каталог реакций пришёл — плашки с картинками вместо глифов
   // крупные эмодзи: каталог анимаций грузим, только когда в окне есть сообщение из одного эмодзи
   const bigEmoji = useGlobal((s) => s.prefs.bigEmoji);
+  // формат времени: строки — memo, без пропа время в пузыре не перерисуется, а место под «AM» (data-time12) уже шире
+  const tf = useGlobal((s) => s.prefs.timeFormat ?? 'locale');
   // и когда есть бросок: его грани — в том же каталоге
   const needEmoji = useMemo(() => messages.some((x) => !x.deleted && (x.kind === 'dice' || (bigEmoji && !x.attachment && !x.sticker && !x.service && emojiOnly(x.body as string, x.entities as { type: string }[] | undefined)?.count === 1))), [messages, bigEmoji]);
   const aev = useAnimatedEmoji(needEmoji);
@@ -1819,6 +1821,7 @@ export function Feed({ frameKey, active, chatId, threadId, channel = false, meId
         rxv={rxv}
         aev={aev}
         bigEmoji={bigEmoji}
+        tf={tf}
         direct={!group && !channel}
         people={(m.reactions as unknown[] | undefined)?.length && (m.reactions as unknown[]).length < 4 ? people : NO_PEOPLE}
         onOpen={onOpen}
