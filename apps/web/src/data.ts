@@ -17,6 +17,7 @@ import { bindMute, isMuted, startMuteMigration } from './mute';
 import { bindChatFlags, clearUnreadMark } from './chatFlags';
 import { startPeople, wantPeople } from './people';
 import { prefetchMembers, resetMembers } from './members';
+import { cachedPinned, rememberPinned, resetPinned, settleWithin } from './pinnedCache';
 import { resetCommonGroups } from './commonGroups';
 import { resetPersonalChannels } from './personalChannel';
 import { cachedMedia, resetMediaTabs } from './mediaTab';
@@ -61,7 +62,7 @@ export function startData(me: Me, fromUrl = true): void {
   engine.onData(rememberKeysIn);
   startFileKeyService();
   startPeople(engine);
-  resetMembers(); resetMediaTabs(); resetMediaDays(); resetCommonGroups(); resetPersonalChannels();   // вход другим пользователем без перезагрузки: кэши отрисовки прежнего — прочь
+  resetMembers(); resetMediaTabs(); resetMediaDays(); resetCommonGroups(); resetPersonalChannels(); resetPinned();   // вход другим пользователем без перезагрузки: кэши отрисовки прежнего — прочь
   bindMute((chatId, muteUntil) => engine.call({ type: 'setMute', chatId, muteUntil }));
   bindChatFlags((chatId, f) => engine.call({ type: 'setChatFlags', chatId, ...f }));
   bindStickers((a) => engine.call(a as never));
@@ -571,6 +572,14 @@ export function closeAllChats(): void {
 /** Подписка на участников группы, открываемой сейчас (prefetchMembers); снимается после показа или отмены. */
 let stopMembersPrefetch: () => void = () => {};
 
+const PIN_WAIT_MS = 400;
+/** Закреплённые чата, которых ещё нет в кэше, — одним запросом; ошибка не мешает показу. */
+function fetchPinned(chatId: number, ids: number[]): Promise<void> {
+  const want = ids.filter((id) => !cachedPinned(chatId, id));
+  if (!want.length) return Promise.resolve();
+  return messagesByIds(chatId, want).then((ms) => rememberPinned(chatId, ms), () => {});
+}
+
 export function openChat(chatId: number | null, target?: { id: number; sort: number }, hold?: Hold): void {
   openSeq++;   // любой переход отменяет ждущий openChannel
   if (chatId == null && leaveTimer) return;   // уже едем к списку
@@ -613,11 +622,21 @@ export function openChat(chatId: number | null, target?: { id: number; sort: num
     const stop = prefetchMembers(chatId);
     stopMembersPrefetch = () => { stopMembersPrefetch = () => {}; stop(); };
   }
+  // текст закреплённых (плашка под шапкой) — вместе с лентой, как tweb готовит плашки до показа: иначе первый
+  // кадр нового чата шёл с «Закреплённое сообщение…», если самого сообщения нет в ленте. Смену ждём не дольше PIN_WAIT_MS
+  const pinsReady = settleWithin(fetchPinned(chatId, (findChat(g, chatId)?.pinned as number[] | undefined) ?? []), PIN_WAIT_MS);
   // пока лента нового чата не готова, на экране остаётся прежний; затем шапка и лента меняются одним кадром
-  startFeed(frame, anchor, (patch) => {
+  let latest: Parameters<Parameters<typeof startFeed>[2]>[0] | null = null;
+  startFeed(frame, anchor, (p) => {
+    if (pendingBottom?.frame.key !== frame.key) return;
+    const first = latest == null;
+    latest = p;
+    if (!first) return;   // ждём закреплённые — возьмём самый свежий патч ленты
+    void pinsReady.then(() => {
     if (pendingBottom?.frame.key !== frame.key) return;
     whenReleased(hold, () => {
       if (pendingBottom?.frame.key !== frame.key) return;
+      const patch = latest!;   // самый свежий на момент показа (переход мог держаться — hold)
       // Как в Telegram Web K: новая лента сначала собирается и встаёт на позицию в скрытой колонке (прежний чат ещё
       // на экране), а смена — отдельным кадром, только классы: рендер и раскладка нового чата не попадают в кадр,
       // где он появляется. Повторный выбор чата посреди этого снимет недособранную колонку (cancelPending)
@@ -639,6 +658,7 @@ export function openChat(chatId: number | null, target?: { id: number; sort: num
         // смена без перехода только в этот раз: потом колонка уезжает влево под следующий чат как обычно
         requestAnimationFrame(() => requestAnimationFrame(() => { if (alive()) patchFrame(staged.key, { swap: false }); }));
       });
+    });
     });
   });
 }

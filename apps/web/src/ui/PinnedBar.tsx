@@ -3,7 +3,8 @@ import { ConfirmDialog, Icon, IconButton, MenuPopover, Presence } from '@relay/u
 import type { Item } from '@relay/sync-engine/src/types';
 import { useEffect, useState } from 'preact/hooks';
 import { focusMessage, messagesByIds, unpinMessage } from '../data';
-import { activeFrame, useGlobal, findChat } from '../global';
+import { frameByKey, useGlobal, findChat } from '../global';
+import { cachedPinned, rememberPinned } from '../pinnedCache';
 import { quoteContent, thumbUnder } from './preview';
 
 // Закреплённые сообщения под шапкой — как в Telegram: слева полоска из сегментов (по числу закреплённых),
@@ -13,12 +14,12 @@ import { quoteContent, thumbUnder } from './preview';
 const KIND: Record<string, string> = { photo: 'Фото', file: 'Файл', audio: 'Музыка', voice: 'Голосовое сообщение', round: 'Видеосообщение' };
 /** Музыка в списке закреплённых: «название — исполнитель», как в превью. */
 const trackOf = (m: Item) => { const a = m.attachment as { title?: string | null; performer?: string | null; name?: string } | null; if (m.kind !== 'audio' || !a) return ''; const t = a.title || (a.name ?? '').replace(/\.[^.]{1,5}$/, ''); return a.performer ? t + ' — ' + a.performer : t; };
-const cache = new Map<string, Item>();          // chatId:id → сообщение (если его нет в загруженной ленте)
 const position = new Map<number, number>();     // чат → какой из закреплённых показан
 
-export function PinnedBar({ chatId }: { chatId: number }) {
+export function PinnedBar({ chatId, frameKey }: { chatId: number; frameKey: string }) {
   const pinned = useGlobal((s) => (findChat(s, chatId)?.pinned as number[] | undefined) ?? []);
-  const loaded = useGlobal((s) => activeFrame(s)?.messages);
+  // лента своей колонки, а не активной: пока чат собирается скрытым, активна ещё прежняя — текст искался бы в ней
+  const loaded = useGlobal((s) => frameByKey(s, frameKey)?.messages);
   const [, rerender] = useState(0);
   const [idx, setIdx] = useState(() => position.get(chatId) ?? 0);
   const [list, setList] = useState<HTMLElement | null>(null);
@@ -26,13 +27,13 @@ export function PinnedBar({ chatId }: { chatId: number }) {
   useEffect(() => { setIdx(position.get(chatId) ?? 0); setList(null); }, [chatId]);
   const i = pinned.length ? Math.min(idx, pinned.length - 1) : 0;
   const id = pinned[i];
-  const find = (mid: number) => loaded?.find((m) => m.id === mid) ?? cache.get(chatId + ':' + mid);
+  const find = (mid: number) => loaded?.find((m) => m.id === mid) ?? cachedPinned(chatId, mid);
   // тексты закреплённых, которых нет в ленте, — одним запросом
   useEffect(() => {
     const want = pinned.filter((x) => !find(x));
     if (!want.length) return;
     let live = true;
-    messagesByIds(chatId, want).then((ms) => { for (const m of ms) cache.set(chatId + ':' + m.id, m); if (live) rerender((n) => n + 1); }).catch(() => {});
+    messagesByIds(chatId, want).then((ms) => { rememberPinned(chatId, ms); if (live) rerender((n) => n + 1); }).catch(() => {});
     return () => { live = false; };
   }, [chatId, pinned.join(',')]);
   const msg = id != null ? find(id) : undefined;

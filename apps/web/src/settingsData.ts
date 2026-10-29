@@ -4,6 +4,7 @@ import type { PersonalChannel, ProfileLink } from '@relay/protocol';
 import { releaseMediaCache } from './storageInfo';
 import { stopOwnMusic } from './profileLists';
 import { resetMembers } from './members';
+import { resetPinned } from './pinnedCache';
 import { resetMediaTabs } from './mediaTab';
 // Данные разделов настроек. Предзагрузка: на главной странице и при наведении на строку раздела —
 // слайд приезжает уже заполненным. Подписки настроек (me, ops, user) живут здесь, а не в data.ts.
@@ -206,7 +207,7 @@ let terminating = false;
 function onTerminated(reason: 'logout' | 'terminated'): void {
   if (terminating) return;
   stopOwnMusic();   // подписка на свою музыку не переживает выход
-  resetMembers(); resetMediaTabs();   // кэши отрисовки прежнего аккаунта — не показывать следующему
+  resetMembers(); resetMediaTabs(); resetPinned();   // кэши отрисовки прежнего аккаунта — не показывать следующему
   stopDeviceAuth();   // ключ устройства этого сеанса больше не нужен
   if (selfLogout) return;
   terminating = true;
