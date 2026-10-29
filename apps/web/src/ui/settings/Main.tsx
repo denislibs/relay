@@ -13,6 +13,7 @@ import { useScrollMemory } from '../useScrollMemory';
 import { usePhotoPicker } from './usePhotoPicker';
 import { avatarPhoto, useProfilePhotos } from '../../profilePhoto';
 import { PhotoViewer } from '../PhotoViewer';
+import { PersonalChannelBlock } from '../profile/PersonalChannelBlock';
 
 declare const __BUILD__: string;
 
@@ -96,7 +97,7 @@ export function Main() {
   const bio = me.bio?.trim() || null;
   const birthday = me.birthday ? birthdayText(me.birthday) : null;
   const links = me.links ?? [];
-  const hasInfo = !!(phone || username || bio || birthday || links.length);
+  const hasInfo = !!(phone || username || bio || birthday || links.length || me.personalChannel);
 
   return (
     <div class="rl-sidepage" aria-label="Настройки">
@@ -121,6 +122,8 @@ export function Main() {
         ) : null}
         {hasInfo ? (
           <Section>
+            {/* свой личный канал — как его видят другие; «Настройки» — левая колонка: канал заменяет стек */}
+            <PersonalChannelBlock channel={me.personalChannel} from="left" />
             {phone ? <InfoRow tile="green" icon="phone" title={phone} subtitle="Телефон" onClick={() => copy(phone)} /> : null}
             {username ? <InfoRow tile="blue" icon="at" title={username} subtitle="Имя пользователя" onClick={() => copy(username)} /> : null}
             {bio ? (

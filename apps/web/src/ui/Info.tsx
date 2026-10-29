@@ -1,5 +1,7 @@
-import type { ProfileLink, ProfileMusicSummary } from '@relay/protocol';
+import type { PersonalChannel, ProfileLink, ProfileMusicSummary } from '@relay/protocol';
 import { ProfileLinks } from './links/ProfileLinks';
+import { Expand } from './Expand';
+import { PersonalChannelBlock } from './profile/PersonalChannelBlock';
 import { SharedMedia, type MediaHead } from './SharedMedia';
 import { membersStatus, useMembers } from '../members';
 import { openInner, openUserChat, startDirectChat } from '../data';
@@ -7,7 +9,6 @@ import { playProfileTop } from '../music';
 import { Avatar, Icon, InfoRow, PanelHeader, ProfileActions, RichText, SettingsIcon, SlideFade, SlideStack, Verified, onHeavyAnimationEnd, peerTone, requestMeasure } from '@relay/ui';
 import type { Item } from '@relay/sync-engine/src/types';
 import { chatTone, isSystemChat } from './format';
-import type { ComponentChildren } from 'preact';
 import { useEffect, useRef, useState } from 'preact/hooks';
 import { activeFrame, setGlobal, useGlobal, getGlobal, findChat } from '../global';
 import { isChatMuted, unmuteChat } from '../mute';
@@ -270,6 +271,8 @@ export function Info() {
         {gallery.length ? null : <ProfileActions label="Действия с чатом" actions={tiles} menu={tileMenu} />}
         <div class="rl-aside-group app-info-rows">
           {/* как в Telegram: имя уже в шапке — строками только то, чего там нет, и только если поле заполнено */}
+          {/* личный канал — первым, над телефоном и @именем (как в Telegram); клик — канал поверх, на последнем посте */}
+          <PersonalChannelBlock channel={!group ? (user?.personalChannel as PersonalChannel | null | undefined) : null} from="inner" />
           <Expand show={!group && !!user}>{!group && user ? <PeerRows user={user} /> : null}</Expand>
           <Expand show={group && !!gInfo?.about}>{group && gInfo?.about ? (
             <div class="rl-inforow rl-inforow-static">
@@ -321,22 +324,6 @@ function PeerRows({ user }: { user: Item }) {
       {birthday ? <InfoRow tile="purple" icon="cake" title={birthday} subtitle="День рождения" /> : null}
     </>
   );
-}
-
-/**
- * Строки, пришедшие позже панели, раскрываются по высоте, а не толкают вкладки рывком.
- * Были с самого начала (кэш) — показываем сразу, без анимации.
- */
-/** unclip — после раскрытия не обрезать содержимое (подсказки над кнопками). */
-function Expand({ show, unclip, children }: { show: boolean; unclip?: boolean; children: ComponentChildren }) {
-  const [state, setState] = useState<'instant' | 'closed' | 'open'>(show ? 'instant' : 'closed');
-  useEffect(() => {
-    if (!show) { setState('closed'); return; }
-    if (state !== 'closed') return;
-    const id = requestAnimationFrame(() => setState('open'));
-    return () => cancelAnimationFrame(id);
-  }, [show]);
-  return <div class={'app-expand' + (unclip ? ' app-expand-unclip' : '')} data-state={show ? state : 'closed'}><div class="app-expand-inner">{children}</div></div>;
 }
 
 /** Музыка профиля — плашка поверх низа аватара (как в Telegram): «♪ трек ›», клик — играть и открыть плейлист.
