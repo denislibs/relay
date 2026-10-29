@@ -6,7 +6,7 @@ import { SharedMedia, type MediaHead } from './SharedMedia';
 import { membersStatus, useMembers } from '../members';
 import { openInner, openUserChat, startDirectChat } from '../data';
 import { playProfileTop } from '../music';
-import { Avatar, Icon, InfoRow, PanelHeader, ProfileActions, RichText, SettingsIcon, SlideFade, SlideStack, Verified, onHeavyAnimationEnd, peerTone, requestMeasure } from '@relay/ui';
+import { Avatar, Icon, InfoRow, PanelHeader, ProfileActions, RichText, SettingsIcon, SlideFade, SlideStack, Verified, peerTone, requestMeasure } from '@relay/ui';
 import type { Item } from '@relay/sync-engine/src/types';
 import { chatTone, isSystemChat } from './format';
 import { useEffect, useRef, useState } from 'preact/hooks';
@@ -36,29 +36,17 @@ const PAGES = ['info', 'stickers', 'edit', ...GROUP_PAGES];   // «Стикер�
 const close = () => setGlobal({ infoOpen: false });
 const CLOSED_RESET_MS = 300;   // закрытая панель возвращается на профиль, когда уже уехала (выезд — 240 мс)
 
-/** Значение, которое меняется только вне тяжёлой анимации: во время неё — после её конца. */
-function useSettled<T>(value: T): T {
-  const [settled, setSettled] = useState(value);
-  useEffect(() => {
-    if (value === settled) return;
-    let alive = true;
-    onHeavyAnimationEnd(() => { if (alive) setSettled(value); });
-    return () => { alive = false; };
-  }, [value]);
-  return settled;
-}
-
 /** Правая панель «Информация» о собеседнике или группе — как User Info в Telegram. */
 export function Info() {
-  // чат панели догоняет открытый после анимации перехода стека: её перерисовка (профиль, медиа, участники)
-  // в первых кадрах перехода съедала бы их
+  // чат панели — тот, что на экране, в том же кадре, что и смена чата (как правая колонка в Telegram). Раньше она
+  // догоняла его после тяжёлой анимации, и ~360 мс — весь выезд панели или переход — показывала прежний чат
   // панель после первого открытия не размонтируется (AsidePanel → Presence keep), а прячется: закрытая держит
   // прежний чат — смена чата при закрытой панели не перестраивает её и не грузит профиль и медиа впустую
   const shown = useGlobal((s) => s.infoOpen);
   const liveId = useGlobal((s) => s.openChatId);
   const heldId = useRef(liveId);
   if (shown) heldId.current = liveId;
-  const chatId = useSettled(heldId.current)!;
+  const chatId = heldId.current!;
   const chat = useGlobal((s) => findChat(s, chatId));
   const peer = useGlobal((s) => (chat?.peerId != null ? s.presence[chat.peerId as number] ?? null : null));
   const muted = useGlobal((s) => isChatMuted(chatId, s));
