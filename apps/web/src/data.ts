@@ -18,6 +18,7 @@ import { bindChatFlags, clearUnreadMark } from './chatFlags';
 import { startPeople, wantPeople } from './people';
 import { resetMembers } from './members';
 import { resetCommonGroups } from './commonGroups';
+import { resetPersonalChannels } from './personalChannel';
 import { cachedMedia, resetMediaTabs } from './mediaTab';
 import { isSystemChat } from './ui/format';
 import { asset } from './assets';
@@ -60,7 +61,7 @@ export function startData(me: Me, fromUrl = true): void {
   engine.onData(rememberKeysIn);
   startFileKeyService();
   startPeople(engine);
-  resetMembers(); resetMediaTabs(); resetMediaDays(); resetCommonGroups();   // вход другим пользователем без перезагрузки: кэши отрисовки прежнего — прочь
+  resetMembers(); resetMediaTabs(); resetMediaDays(); resetCommonGroups(); resetPersonalChannels();   // вход другим пользователем без перезагрузки: кэши отрисовки прежнего — прочь
   bindMute((chatId, muteUntil) => engine.call({ type: 'setMute', chatId, muteUntil }));
   bindChatFlags((chatId, f) => engine.call({ type: 'setChatFlags', chatId, ...f }));
   bindStickers((a) => engine.call(a as never));
@@ -509,13 +510,13 @@ function releasePreview(chatId: number): void {
 /**
  * Открыть публичный канал: подписан — как обычный чат; нет — превью (лента для чтения, «Подписаться»). from —
  * откуда (docs/navigation-rules.md): left — левая колонка (поиск) заменяет стек, inner — ссылка в чате кладёт поверх.
- * false — открыть нечего (приватный канал, удалён, нет сети): тост уже показан.
+ * false — открыть нечего (приватный канал, удалён, нет сети): тост уже показан. target — сразу к посту (личный канал в профиле).
  */
-export function openChannel(chatId: number, from: 'left' | 'inner'): Promise<boolean> {
+export function openChannel(chatId: number, from: 'left' | 'inner', target?: { id: number; sort: number }): Promise<boolean> {
   // двойной клик (или ссылка, нажатая дважды) — тот же переход, не второй
   let p = channelOpening.get(chatId);
   if (!p) {
-    p = openChannelOnce(chatId, from).finally(() => channelOpening.delete(chatId));
+    p = openChannelOnce(chatId, from, target).finally(() => channelOpening.delete(chatId));
     channelOpening.set(chatId, p);
   }
   return p;
@@ -524,8 +525,8 @@ const channelOpening = new Map<number, Promise<boolean>>();
 /** Номер последнего перехода: открыли что-то другое, пока ждали сервер, — запоздалый переход в канал отменяется. */
 let openSeq = 0;
 
-async function openChannelOnce(chatId: number, from: 'left' | 'inner'): Promise<boolean> {
-  const open = () => { if (from === 'left') openChat(chatId); else openInner(chatId); };
+async function openChannelOnce(chatId: number, from: 'left' | 'inner', target?: { id: number; sort: number }): Promise<boolean> {
+  const open = () => { if (from === 'left') openChat(chatId, target); else openInner(chatId, target); };
   if (getGlobal().chats.some((c) => c.id === chatId)) { open(); return true; }
   const tok = ++openSeq;
   const r = await engine.call({ type: 'openPreview', chatId }) as { member: boolean; requested: boolean } | { error: string };

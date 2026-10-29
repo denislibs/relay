@@ -1,5 +1,5 @@
 import { stopDeviceAuth } from './deviceAuth';
-import type { ProfileLink } from '@relay/protocol';
+import type { PersonalChannel, ProfileLink } from '@relay/protocol';
 import { releaseMediaCache } from './storageInfo';
 import { stopOwnMusic } from './profileLists';
 import { resetMembers } from './members';
@@ -234,6 +234,7 @@ export interface ProfilePatch { firstName?: string; lastName?: string; bio?: str
 export const updateProfile = (patch: ProfilePatch): Promise<unknown> => call({ type: 'updateProfile', ...patch });
 export const setLinks = (links: ProfileLink[]): Promise<unknown> => call({ type: 'setLinks', links });
 export const setUsername = (username: string | null): Promise<unknown> => call({ type: 'setUsername', username });
+export const setPersonalChannel = (channel: PersonalChannel | null): Promise<unknown> => call({ type: 'setPersonalChannel', channel });
 export type UsernameCheck = { ok: true } | { ok: false; reason: 'invalid' | 'taken' | 'reserved' } | { offline: true };
 export const checkUsername = (username: string): Promise<UsernameCheck> =>
   call<UsernameCheck>({ type: 'checkUsername', username }).catch(() => ({ offline: true as const }));

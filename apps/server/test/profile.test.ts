@@ -22,7 +22,7 @@ const updates = async (userId: number) => (await getUpdates(userId, 0)).items.ma
 test('GET /me: extended shape, userId and name kept', async () => {
   const a = await login('Анна Смирнова', '+79001234567');
   const me = await (await call(a, 'GET', '/me')).json();
-  expect(me).toEqual({ userId: a.userId, name: 'Анна Смирнова', firstName: 'Анна', lastName: 'Смирнова', username: null, bio: null, birthday: null, phone: '+79001234567', links: [], photo: null, music: null, seq: expect.any(Number) });   // первый GET /me заводит чат «Relay» — seq уже не 0
+  expect(me).toEqual({ userId: a.userId, name: 'Анна Смирнова', firstName: 'Анна', lastName: 'Смирнова', username: null, bio: null, birthday: null, phone: '+79001234567', links: [], photo: null, music: null, personalChannel: null, seq: expect.any(Number) });   // первый GET /me заводит чат «Relay» — seq уже не 0
 });
 
 test('Me.seq is the seq of the own userUpdated entry (orders responses against the journal)', async () => {
@@ -110,6 +110,17 @@ test('username stored lowercased, case-insensitively unique, removable, own name
   expect((await call(b, 'PUT', '/me/username', {})).status).toBe(400);
 });
 
+test('usernames are shared with channels: a channel @name is taken for users', async () => {
+  const a = await login('Анна'), b = await login('Борис');
+  const ch = (await (await call(a, 'POST', '/chats', { kind: 'channel', title: 'Новости', memberIds: [] })).json()).id as number;
+  expect((await call(a, 'PUT', `/groups/${ch}/username`, { username: 'news_channel' })).status).toBe(200);
+  expect(await (await call(b, 'GET', '/users/check-username?u=News_Channel')).json()).toEqual({ ok: false, reason: 'taken' });
+  const put = await call(b, 'PUT', '/me/username', { username: 'news_channel' });
+  expect([put.status, (await put.json()).code]).toEqual([409, 'username_taken']);
+  await sql`update chats set deleted_at = now() where id = ${ch}`;   // удалённый канал имя не держит
+  expect(await (await call(b, 'GET', '/users/check-username?u=news_channel')).json()).toEqual({ ok: true });
+});
+
 test('race: two concurrent PUTs of the same username → exactly one 409', async () => {
   const a = await login('Анна'), b = await login('Борис');
   const rs = await Promise.all([call(a, 'PUT', '/me/username', { username: 'racer_one' }), call(b, 'PUT', '/me/username', { username: 'racer_one' })]);
@@ -136,7 +147,7 @@ test('GET /users/:id: self and chat peer ok, stranger 404', async () => {
   const a = await login('Анна', '+79005550001'), b = await login('Борис'), s = await login('Посторонний');
   await makeChat([a.userId, b.userId]);
   await call(a, 'PUT', '/me/username', { username: 'anna_x' });
-  expect(await (await call(b, 'GET', `/users/${a.userId}`)).json()).toEqual({ id: a.userId, name: 'Анна', firstName: 'Анна', lastName: '', publicName: 'Анна', username: 'anna_x', links: [], bio: null, birthday: null, phone: null, photo: null, blocksMe: false, music: null });
+  expect(await (await call(b, 'GET', `/users/${a.userId}`)).json()).toEqual({ id: a.userId, name: 'Анна', firstName: 'Анна', lastName: '', publicName: 'Анна', username: 'anna_x', links: [], bio: null, birthday: null, phone: null, photo: null, blocksMe: false, music: null, personalChannel: null });
   expect((await call(a, 'GET', `/users/${a.userId}`)).status).toBe(200);
   const r = await call(s, 'GET', `/users/${a.userId}`);
   expect([r.status, (await r.json()).code]).toEqual([404, 'not_found']);

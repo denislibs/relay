@@ -7,7 +7,7 @@ import { GROUP_TITLE_MAX, readOwnPost, toMessage } from './chats';
 import { contentColumns, openRows } from './messageContent';
 import { DomainError } from './errors';
 import { appendUpdates, chatEvent, type ChatNotify } from './journal';
-import { nameForSql } from './profile';
+import { dropPersonalChannel, nameForSql } from './profile';
 import { checkPassword } from './password';
 import { onlineUsers } from './liveRegistry';
 import { presenceFor } from './presence';
@@ -214,6 +214,7 @@ export async function setGroupUsername(userId: number, chatId: number, raw: unkn
       if (u) throw new DomainError('username_taken');
     }
     await tx`update chats set username = ${name ? name.toLowerCase() : null} where id = ${chatId}`;
+    if (!name) await dropPersonalChannel(tx, chatId);   // приватный канал в профиле не показывается
     await broadcastGroup(tx, chatId);
     return { ok: true };
   });
@@ -501,6 +502,7 @@ export async function setGroupRank(userId: number, chatId: number, target: numbe
 async function makeOwner(tx: Tx, chatId: number, target: number, prev: number): Promise<void> {
   const { kind } = await chatSize(tx, chatId);
   await tx`update chats set owner_id = ${target} where id = ${chatId}`;
+  await dropPersonalChannel(tx, chatId);   // личный канал прежнего владельца
   await tx`update chat_members set role = 'owner', admin_rights = null, restricted = null, promoted_by = null where chat_id = ${chatId} and user_id = ${target}`;
   // прежний владелец остаётся админом со всеми правами (как в Telegram)
   await tx`update chat_members set role = 'admin', admin_rights = ${tx.json(allAdminRights(kind) as never)}, promoted_by = ${target} where chat_id = ${chatId} and user_id = ${prev}`;
@@ -547,6 +549,7 @@ export async function transferGroupOwnership(userId: number, chatId: number, tar
 async function deleteGroupTx(tx: Tx, chatId: number): Promise<void> {
   const [c] = await tx`select linked_chat_id from chats where id = ${chatId}`;
   await tx`update chats set deleted_at = now(), linked_chat_id = null where id = ${chatId}`;
+  await dropPersonalChannel(tx, chatId);
   // зрители превью (не участники: им не придёт chatRemoved) — после коммита кадр «чата нет» в топик чата: клиент
   // убирает чат у себя, без syncChat (на канале в 200 000 онлайн — ни одного чтения журнала); участникам chatRemoved — от chat.purge
   const [cs] = await tx`select seq from chat_seq where chat_id = ${chatId}`;

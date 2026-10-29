@@ -1530,7 +1530,7 @@ img.is-loaded ~ .app-rpanel-sil { opacity: 0; }
 .app-pollres-user:hover { background: var(--hover); }
 .app-pollres-note { margin: 8px 4px 0; color: var(--ink-muted); font: 400 13px/18px var(--font-sans); }
 /* «Информация»: строки профиля — карточкой; нет ни одной строки (звук теперь кнопкой в ряду над ней) — карточки нет */
-.app-info-rows:not(:has(.rl-inforow)) { display: none; }
+.app-info-rows:not(:has(.rl-inforow, .app-pc)) { display: none; }
 /* ---------- ряд кнопок в шапке с фото (как в Telegram Web K) ----------
    Ряд прижат к низу шапки и едет вместе с ним (одна раскладка при раскрытии): шапка выше на ряд и отступы (58 + 2 × 15 = 88):
    от статуса до ряда и от ряда до карточки под шапкой (20 + её 8) — по ~28 px, как в Telegram Web K.
@@ -1601,6 +1601,26 @@ html[data-anim="0"] .app-folder-sym { animation: none !important; }
 .app-combo { display: inline-flex; align-items: center; gap: 4px; }
 .app-kbd { display: inline-flex; align-items: center; justify-content: center; min-width: 26px; height: 26px; padding: 0 7px; border-radius: 7px; background: color-mix(in srgb, var(--ink) 7%, transparent); color: var(--ink-muted); font: 600 13px/1 var(--font-sans); white-space: nowrap; }
 .app-combo-plus, .app-combo-or { color: var(--ink-muted); opacity: .6; font: 400 13px/1 var(--font-sans); }
+
+/* ---------- личный канал в профиле (как в Telegram): «Канал · N подписчиков» и ячейка канала с последним постом ---------- */
+.app-pc-head { display: flex; justify-content: space-between; gap: 12px; padding: 6px var(--space-4) 2px; color: var(--ink-muted); font: 500 14px/18px var(--font-sans); }
+.app-pc-head > span:first-child { color: var(--brand-text, var(--brand)); }
+.app-pc .rl-row { border-radius: var(--radius-md); }
+.app-pc-preview { animation: app-fade-in 180ms ease-out both; }
+.rl-settings .app-pc { padding: 4px 0; }
+.rl-settings .app-pc-head { padding-inline: var(--space-6); }
+.app-pcp.rl-mdl-dialog { max-height: min(92vh, 36rem); }
+.app-pcp .rl-mdl-body.app-pcp-body { display: flex; flex-direction: column; gap: 0; padding: 0 8px 8px; }
+.app-pcp-search { position: sticky; top: 0; z-index: 2; padding: 0 4px 8px; background: inherit; }
+.app-pcp-row { display: flex; align-items: center; gap: 12px; width: 100%; padding: 6px 12px; border: 0; border-radius: 12px; background: none; color: var(--ink); font: inherit; text-align: left; cursor: pointer; transition: background-color 150ms ease; }
+.app-pcp-row:hover, .app-pcp-row:focus-visible { background: var(--hover); outline: none; }
+.app-pcp-row.is-on { background: var(--hover); }
+.app-pcp-text { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
+.app-pcp-text b { font: 500 15px/20px var(--font-sans); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.app-pcp-text small { color: var(--ink-muted); font: 400 14px/18px var(--font-sans); }
+.app-pcp-empty { margin: 0; padding: 24px 12px; color: var(--ink-muted); text-align: center; animation: app-fade-in 180ms ease-out both; }
+.app-pcp-remove { margin-top: 6px; width: 100%; height: 48px; padding: 0 12px; border: 0; border-radius: 12px; background: none; color: var(--danger, #e53935); font: 500 15px/1 var(--font-sans); text-align: left; cursor: pointer; transition: background-color 150ms ease; }
+.app-pcp-remove:hover { background: var(--hover); }
 
 /* ---------- Поиск по настройкам: слой поверх шапки и содержимого страницы settings (SettingsSearch.tsx) ----------
    Переход — как у поиска в списке чатов (zoomFade, 150 мс); страница под слоем не размонтируется — прокрутка на месте. */

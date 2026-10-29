@@ -2,6 +2,7 @@ import { afterAll, afterEach, beforeEach, expect, test } from 'bun:test';
 import { Engine } from '../src/engine';
 import { meView } from '../src/profile';
 import { sql } from '../../../apps/server/src/db';
+import { sendMessage } from '../../../apps/server/src/domain/messages';
 import { resetDb, startTestServer, watchInto } from './helpers';
 
 const srv = await startTestServer();
@@ -65,6 +66,39 @@ test('checkUsername passes through to the server; offline answers offline', asyn
   expect(await ea.call({ type: 'checkUsername', username: 'ab' })).toEqual({ ok: false, reason: 'invalid' });
   ea.disconnect();
   expect(await ea.call({ type: 'checkUsername', username: 'anna_free' })).toEqual({ offline: true });
+});
+
+test('personal channel: rides userUpdated to the peer, shows at once for self; channel post is cached for offline', async () => {
+  const a = await srv.login('Анна'), b = await srv.login('Борис');
+  await srv.chat(a.token, [a.userId, b.userId]);
+  const hdr = { cookie: `relay_session=${a.token}`, 'content-type': 'application/json' };
+  const ch = (await (await fetch(`${srv.base}/chats`, { method: 'POST', headers: hdr, body: JSON.stringify({ kind: 'channel', title: 'Новости', memberIds: [] }) })).json()).id as number;
+  await put(a.token, `/groups/${ch}/username`, { username: 'anna_news' });
+  await sendMessage(a.userId, { chatId: ch, clientId: crypto.randomUUID(), body: 'свежий пост' });
+  const ea = await open(srv.config(a)), cfgB = srv.config(b), eb = await open(cfgB);
+  ea.connect(); eb.connect();
+  await Promise.all([ea.whenIdle(), eb.whenIdle()]);
+  expect(await ea.call({ type: 'personalChannels' })).toEqual({ channels: [{ id: ch, title: 'Новости', username: 'anna_news', photo: null, members: 1 }] });
+
+  const peer = watchInto(eb, { kind: 'user', userId: a.userId });
+  await peer.until((l) => l[0]?.name === 'Анна');
+  const self = watchInto(ea, { kind: 'me' });
+  const pc = { id: ch, title: 'Новости', username: 'anna_news', photo: null, members: 1 };
+  await ea.call({ type: 'setPersonalChannel', channel: pc });
+  await self.until((l) => l[0]?.personalChannel?.id === ch);
+  await peer.until((l) => l[0]?.personalChannel?.id === ch);
+
+  expect(await eb.call({ type: 'channelPost', chatId: ch, cached: true })).toBeNull();   // ещё не открывали
+  const post = await eb.call({ type: 'channelPost', chatId: ch }) as { last: { body: string } };
+  expect(post.last.body).toBe('свежий пост');
+
+  await ea.call({ type: 'setPersonalChannel', channel: null });
+  await peer.until((l) => l[0]?.personalChannel === null);
+
+  // кэш поста — в IndexedDB: холодный старт без сети отдаёт его сразу
+  await eb.close(); engines.splice(engines.indexOf(eb), 1);
+  const cold = await open(cfgB);
+  expect((await cold.call({ type: 'channelPost', chatId: ch }) as { last: { body: string } }).last.body).toBe('свежий пост');
 });
 
 test('meView applies queued patches in order', () => {
