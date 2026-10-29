@@ -517,7 +517,7 @@ function ChatRow(props) {
     'aria-pressed': props.selecting ? String(!!props.selected) : undefined
   }),
     props.selecting ? h('span', { class: 'rl-row-check', 'aria-hidden': 'true' },
-      h('svg', { width: 14, height: 14, viewBox: '0 0 24 24', fill: 'none', stroke: 'currentColor', 'stroke-width': 3, 'stroke-linecap': 'round', 'stroke-linejoin': 'round' }, h('path', { d: 'M5 12.5l4.5 4.5L19 7.5' }))) : null,
+      h('svg', { width: 14, height: 14, viewBox: '0 0 24 24', fill: 'none', stroke: 'currentColor', 'stroke-width': 3, 'stroke-linecap': 'round', 'stroke-linejoin': 'round' }, h('path', { d: 'M5 12.5l4.5 4.5L19 7.5', pathLength: 1 }))) : null,
     h(Avatar, { name: props.avatar === undefined ? props.name : props.avatar, tone: props.avatarTone, online: props.online, logo: props.logo, src: props.avatarSrc, thumb: props.avatarThumb, size: 54 }),   // как в Telegram: 54 в строке 72
     h('span', { class: 'rl-row-main' },
       h('span', { class: 'rl-row-top' },
@@ -1648,7 +1648,7 @@ function InfoRow(props) {
     var input = e.currentTarget.querySelector('.rl-switch input');
     if (input && !input.disabled) input.click();
   }
-  return h(Tag, { type: Tag === 'button' ? 'button' : undefined, class: cx('rl-inforow', withSwitch && 'rl-inforow-switch', off && 'rl-inforow-off', props.danger && 'rl-inforow-danger'), onPointerDown: off ? undefined : ripple, onClick: withSwitch ? onSwitchRow : props.onClick },
+  return h(Tag, { type: Tag === 'button' ? 'button' : undefined, class: cx('rl-inforow', withSwitch && 'rl-inforow-switch', off && 'rl-inforow-off', props.danger && 'rl-inforow-danger'), 'data-setting': props.setting, onPointerDown: off ? undefined : ripple, onClick: withSwitch ? onSwitchRow : props.onClick },
     props.tile ? h(SettingsIcon, { icon: props.icon, color: props.tile })
       : h('span', { class: 'rl-inforow-icon' }, h(Icon, { name: props.icon, size: 24 })),
     h('span', { class: 'rl-inforow-text' }, h('span', null, props.title), props.subtitle ? h('small', null, props.subtitle) : null),

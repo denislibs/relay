@@ -47,16 +47,16 @@ export function General() {
             <Bubble from="in" tail time={hm(now)}>Привет! Так выглядит ваш текст.</Bubble>
             <Bubble from="out" tail time={hm(now)} status="read">Отлично, размер подходит.</Bubble>
           </div>
-          <RangeRow label="Размер текста сообщений" min={12} max={20} step={1} value={prefs.textSize} onChange={(v: number) => setPref('textSize', v)} />
+          <RangeRow setting="general.textSize" label="Размер текста сообщений" min={12} max={20} step={1} value={prefs.textSize} onChange={(v: number) => setPref('textSize', v)} />
           <InfoRow
             icon="image" title="Обои чата" onClick={() => void go('settings/general/wallpaper')}
             trailing={<span class="app-swatch-mini" aria-hidden="true">{wpImage ? <span class="app-swatch-fill app-swatch-photo" style={{ backgroundImage: `url("${wpImage}")` }} /> : <Swatch pattern={wp.pattern} colors={wp.colors} dark={dark} intensity={wp.intensity} />}</span>}
           />
         </Section>
-        <Section title="Тема" role="radiogroup">
-          {THEMES.map((t) => <RadioRow key={t.pref} label={t.title} checked={prefs.theme === t.pref} onClick={() => setPref('theme', t.pref)} />)}
+        <Section setting="general.theme" title="Тема" role="radiogroup">
+          {THEMES.map((t) => <RadioRow setting={'general.theme.' + t.pref} key={t.pref} label={t.title} checked={prefs.theme === t.pref} onClick={() => setPref('theme', t.pref)} />)}
         </Section>
-        <Section title="Цвет акцента" role="radiogroup">
+        <Section setting="general.accent" title="Цвет акцента" role="radiogroup">
           <div class="app-accents">
             {ACCENTS.map((a) => (
               <button
@@ -67,13 +67,13 @@ export function General() {
             ))}
           </div>
         </Section>
-        <Section title="Формат времени" role="radiogroup">
-          <RadioRow label="12 часов" subtitle={hm(now, '12h')} checked={fmt === '12h'} onClick={() => setPref('timeFormat', '12h')} />
-          <RadioRow label="24 часа" subtitle={hm(now, '24h')} checked={fmt === '24h'} onClick={() => setPref('timeFormat', '24h')} />
+        <Section setting="general.timeFormat" title="Формат времени" role="radiogroup">
+          <RadioRow setting="general.timeFormat.12h" label="12 часов" subtitle={hm(now, '12h')} checked={fmt === '12h'} onClick={() => setPref('timeFormat', '12h')} />
+          <RadioRow setting="general.timeFormat.24h" label="24 часа" subtitle={hm(now, '24h')} checked={fmt === '24h'} onClick={() => setPref('timeFormat', '24h')} />
         </Section>
-        <Section title="Клавиатура" role="radiogroup">
-          <RadioRow label="Enter — отправить, Shift+Enter — новая строка" checked={prefs.sendKey === 'enter'} onClick={() => setPref('sendKey', 'enter')} />
-          <RadioRow
+        <Section setting="general.sendKey" title="Клавиатура" role="radiogroup">
+          <RadioRow setting="general.sendKey.enter" label="Enter — отправить, Shift+Enter — новая строка" checked={prefs.sendKey === 'enter'} onClick={() => setPref('sendKey', 'enter')} />
+          <RadioRow setting="general.sendKey.ctrlEnter"
             label={isMac ? '⌘+Enter — отправить' : 'Ctrl+Enter — отправить'} subtitle="Enter — новая строка"
             checked={prefs.sendKey === 'ctrlEnter'} onClick={() => setPref('sendKey', 'ctrlEnter')}
           />

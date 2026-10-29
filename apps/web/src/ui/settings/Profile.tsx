@@ -166,12 +166,12 @@ export function Profile() {
         <ProfileHeader name={name} tone={peerTone(me.userId)} size={96} {...photo.avatar} />
         {photo.ui}
         <Section>
-          <TextField label="Имя" value={form.firstName} maxLength={NAME_MAX} measure={cpLen} error={form.firstName.trim() ? undefined : dirty ? 'Укажите имя' : undefined} onInput={limited('firstName', NAME_MAX)} autoComplete="given-name" />
-          <TextField label="Фамилия" value={form.lastName} maxLength={NAME_MAX} measure={cpLen} onInput={limited('lastName', NAME_MAX)} autoComplete="family-name" />
-          <TextField label="О себе" multiline rows={3} counter maxLength={BIO_MAX} measure={cpLen} value={form.bio} hint="Можно добавить пару строк о себе…" onInput={limited('bio', BIO_MAX)} />
+          <TextField setting="profile.firstName" label="Имя" value={form.firstName} maxLength={NAME_MAX} measure={cpLen} error={form.firstName.trim() ? undefined : dirty ? 'Укажите имя' : undefined} onInput={limited('firstName', NAME_MAX)} autoComplete="given-name" />
+          <TextField setting="profile.lastName" label="Фамилия" value={form.lastName} maxLength={NAME_MAX} measure={cpLen} onInput={limited('lastName', NAME_MAX)} autoComplete="family-name" />
+          <TextField setting="profile.bio" label="О себе" multiline rows={3} counter maxLength={BIO_MAX} measure={cpLen} value={form.bio} hint="Можно добавить пару строк о себе…" onInput={limited('bio', BIO_MAX)} />
         </Section>
         <Section title="Имя пользователя">
-          <TextField label="Имя пользователя" value={form.username} maxLength={33} error={unameErr} hint={unameHint} class={status === 'free' ? 'app-tf-ok' : undefined} onInput={(v: string) => set({ username: v })} autoComplete="username" />
+          <TextField setting="profile.username" label="Имя пользователя" value={form.username} maxLength={33} error={unameErr} hint={unameHint} class={status === 'free' ? 'app-tf-ok' : undefined} onInput={(v: string) => set({ username: v })} autoComplete="username" />
           {link ? (
             <button type="button" class="app-uname-link" onClick={() => copy(link)} aria-label={'Скопировать ссылку ' + link}>
               <span>Ссылка:</span> <b>{link}</b>
@@ -179,13 +179,13 @@ export function Profile() {
           ) : null}
         </Section>
         <Section footer={<>Кто видит дату рождения — в <button type="button" class="app-bday-link" onClick={() => void go('settings/privacy/rule/birthday')}>Настройках ›</button></>}>
-          <InfoRow tile="purple" icon="cake" title={form.birthday ? birthdayText(form.birthday) : 'Не указан'} subtitle="День рождения" onClick={() => setBday(true)} />
+          <InfoRow setting="profile.birthday" tile="purple" icon="cake" title={form.birthday ? birthdayText(form.birthday) : 'Не указан'} subtitle="День рождения" onClick={() => setBday(true)} />
         </Section>
         <Section>
           <InfoRow tile="blue" icon="link" title="Ссылки" subtitle={linksText(me.links?.length ?? 0)} onClick={() => void go('settings/profile/links')} />
         </Section>
         <Section>
-          <InfoRow icon="camera" title={photo.has ? 'Сменить фото' : 'Поставить фото'} onClick={photo.pick} />
+          <InfoRow setting="profile.photo" icon="camera" title={photo.has ? 'Сменить фото' : 'Поставить фото'} onClick={photo.pick} />
           {me.photo && !photo.busy ? <InfoRow icon="trash" danger title="Удалить фото" onClick={() => setAskDelete(true)} /> : null}
         </Section>
         <PersonalChannelCard value={form.channel} onChange={(channel) => set({ channel })} />

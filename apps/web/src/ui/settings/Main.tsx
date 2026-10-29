@@ -14,6 +14,7 @@ import { usePhotoPicker } from './usePhotoPicker';
 import { avatarPhoto, useProfilePhotos } from '../../profilePhoto';
 import { PhotoViewer } from '../PhotoViewer';
 import { PersonalChannelBlock } from '../profile/PersonalChannelBlock';
+import { useSettingsSearch } from './SettingsSearch';
 
 declare const __BUILD__: string;
 
@@ -59,6 +60,7 @@ export function Main() {
   // число сеансов справа на строке «Активные сеансы»: появляется, только когда список уже известен (предзагрузка)
   const sessionCount = useGlobal((s) => (s.sessions ? sessionsView(s.sessions, s.opsKeys).length : null));
   const scroll = useScrollMemory('settings');
+  const search = useSettingsSearch();
   const [menu, setMenu] = useState<HTMLElement | null>(null);
   const [confirm, setConfirm] = useState(false);
   const [toast, setToast] = useState<string | null>(null);
@@ -100,11 +102,12 @@ export function Main() {
   const hasInfo = !!(phone || username || bio || birthday || links.length || me.personalChannel);
 
   return (
-    <div class="rl-sidepage" aria-label="Настройки">
+    <div class={'rl-sidepage' + search.class} aria-label="Настройки">
       <div class="app-contents">
       <PanelHeader
         icon="arrowLeft" closeLabel="Назад" title="Настройки" onClose={() => void back()}
         actions={[
+          { icon: 'search', label: 'Поиск по настройкам', onClick: search.toggle },
           { icon: 'userPen', label: 'Изменить профиль', onClick: () => void go('settings/profile') },
           { icon: 'more', label: 'Ещё', popup: true, onClick: (e: MouseEvent) => setMenu(e.currentTarget as HTMLElement) },
         ]}
@@ -156,6 +159,7 @@ export function Main() {
           <InfoRow icon="info" title="Relay" subtitle={'Сборка ' + __BUILD__} onClick={onVersionTap} />
         </Section>
       </div>
+      {search.layer}
       <Presence show={toast != null} exitMs={200}>
         <div class="app-toast"><Toast>{toast ?? lastToast.current}</Toast></div>
       </Presence>

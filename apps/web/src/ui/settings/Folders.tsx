@@ -81,7 +81,7 @@ export function Folders() {
         <div class="app-folders-intro">
           <Sticker name="folder" size={100} replay="click" />
           <p>Создавайте папки для разных групп чатов и быстро переключайтесь между ними.</p>
-          <Button variant="primary" onClick={create}><Icon name="plus" size={20} /> Создать папку</Button>
+          <Button variant="primary" data-setting="folders.create" onClick={create}><Icon name="plus" size={20} /> Создать папку</Button>
         </div>
 
         <Section title="Папки" footer={folders.length > 1 ? 'Перетащите папку за ручку справа, чтобы поменять порядок вкладок.' : undefined}>
@@ -121,9 +121,9 @@ export function Folders() {
           </Section>
         ) : null}
 
-        <Section title="Вид вкладок" role="radiogroup" footer={wide ? undefined : 'На узком окне вкладки всегда сверху.'}>
-          <RadioRow checked={pos === 'left'} label="Слева" subtitle="Колонкой рядом со списком чатов" onClick={() => setPref('folders.position', 'left')} />
-          <RadioRow checked={pos === 'top'} label="Сверху" subtitle="Полосой над списком чатов" onClick={() => setPref('folders.position', 'top')} />
+        <Section setting="folders.position" title="Вид вкладок" role="radiogroup" footer={wide ? undefined : 'На узком окне вкладки всегда сверху.'}>
+          <RadioRow setting="folders.position.left" checked={pos === 'left'} label="Слева" subtitle="Колонкой рядом со списком чатов" onClick={() => setPref('folders.position', 'left')} />
+          <RadioRow setting="folders.position.top" checked={pos === 'top'} label="Сверху" subtitle="Полосой над списком чатов" onClick={() => setPref('folders.position', 'top')} />
         </Section>
       </div>
       <ConfirmDialog

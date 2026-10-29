@@ -100,6 +100,27 @@ test('Esc игнорируется при defaultPrevented, модалке и з
   expect(f.view()).toBe('settings');
 });
 
+test('прямой переход (пункт из поиска по настройкам): «Назад» — к странице, откуда пришли, а не к родителю', async () => {
+  const f = fake();
+  await go('settings');
+  await go('settings/privacy/rule/phone', { direct: true });
+  await go('settings/privacy/rule/phone/allow');
+  await back();
+  expect(f.view()).toBe('settings/privacy/rule/phone');
+  await back();
+  await settle();
+  expect(f.view()).toBe('settings');
+  expect(f.pos()).toBe(1);
+  // и браузерный «Назад» — туда же
+  await go('settings/general/wallpaper', { direct: true });
+  await f.userBack();
+  expect(f.view()).toBe('settings');
+  // обычный переход по тому же пути снова идёт к родителю
+  await go('settings/privacy/rule/phone/allow');
+  await back();
+  expect(f.view()).toBe('settings/privacy/rule/phone');
+});
+
 test('прыжок через уровень: back идёт к родителю, а не к предыдущей записи', async () => {
   const f = fake();
   await go('settings');

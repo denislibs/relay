@@ -55,9 +55,9 @@ export function Notifications() {
   const kind = (k: Kind, title: string) => {
     const p = settings[k];
     return (
-      <Section title={title}>
-        <CheckRow label="Уведомления" checked={!p.muted} onChange={(on: boolean) => void setNotifyDefault(k, { muted: !on })} />
-        <CheckRow label="Предпросмотр сообщений" checked={p.preview} disabled={p.muted} onChange={(on: boolean) => void setNotifyDefault(k, { preview: on })} />
+      <Section setting={'notifications.' + k} title={title}>
+        <CheckRow setting={'notifications.' + k + '.on'} label="Уведомления" checked={!p.muted} onChange={(on: boolean) => void setNotifyDefault(k, { muted: !on })} />
+        <CheckRow setting={'notifications.' + k + '.preview'} label="Предпросмотр сообщений" checked={p.preview} disabled={p.muted} onChange={(on: boolean) => void setNotifyDefault(k, { preview: on })} />
       </Section>
     );
   };
@@ -66,13 +66,13 @@ export function Notifications() {
     <div class="rl-sidepage" aria-label="Уведомления">
       <PanelHeader icon="arrowLeft" closeLabel="Назад" title="Уведомления" onClose={() => void back()} />
       <div class="rl-settings" ref={scroll.ref} onScroll={scroll.onScroll}>
-        <Section title="В браузере" footer="Действует на этом устройстве.">
-          <CheckRow label="Уведомления" subtitle={webHint} checked={webShown} disabled={blocked} onChange={(on: boolean) => void toggleWeb(on)} />
-          <CheckRow label="Когда вкладка закрыта" subtitle={bgHint} checked={bg && webOn} disabled={blocked || !webOn} onChange={toggleBg} />
+        <Section setting="notifications.web" title="В браузере" footer="Действует на этом устройстве.">
+          <CheckRow setting="notifications.web.on" label="Уведомления" subtitle={webHint} checked={webShown} disabled={blocked} onChange={(on: boolean) => void toggleWeb(on)} />
+          <CheckRow setting="notifications.web.background" label="Когда вкладка закрыта" subtitle={bgHint} checked={bg && webOn} disabled={blocked || !webOn} onChange={toggleBg} />
         </Section>
         <Section title="Звук">
-          <CheckRow label="Звук" checked={soundOn(prefs)} onChange={toggleSnd} />
-          <RangeRow
+          <CheckRow setting="notifications.sound" label="Звук" checked={soundOn(prefs)} onChange={toggleSnd} />
+          <RangeRow setting="notifications.volume"
             label="Громкость" min={0} max={100} step={1} value={volumePct(prefs.volume)} format={(v: number) => v + ' %'}
             onChange={(v: number) => apply(volumeFromSlider(v))}
             onCommit={(v: number) => playNotifySound(volumeFromSlider(v).volume)}

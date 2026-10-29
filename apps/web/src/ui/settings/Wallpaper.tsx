@@ -71,13 +71,13 @@ export function Wallpaper() {
       <div class="rl-settings" ref={scroll.ref} onScroll={scroll.onScroll}>
         <Section>
           <input ref={file} type="file" accept="image/*" hidden onChange={(e) => { const f = e.currentTarget.files?.[0]; e.currentTarget.value = ''; void upload(f); }} />
-          <InfoRow icon="camera" title={busy ? 'Загружаем…' : 'Загрузить изображение'} onClick={() => { if (!busy) file.current?.click(); }} />
+          <InfoRow setting="wallpaper.upload" icon="camera" title={busy ? 'Загружаем…' : 'Загрузить изображение'} onClick={() => { if (!busy) file.current?.click(); }} />
           <InfoRow icon="palette" title="Выбрать цвет" subtitle={solid ? solid.toUpperCase() : undefined} onClick={() => void go('settings/general/wallpaper/color')} />
-          <InfoRow icon="history" title="Сбросить" subtitle="Вернуть обои по умолчанию" onClick={reset} />
-          <CheckRow label="Размытие" checked={image && wp.blur} disabled={!image} onChange={(v: boolean) => setPref(`wallpaper.${key}.blur`, v)} />
-          <RangeRow label="Интенсивность узора" min={0} max={100} step={1} value={intensity.value} disabled={image} onChange={intensity.set} onCommit={intensity.commit} />
+          <InfoRow setting="wallpaper.reset" icon="history" title="Сбросить" subtitle="Вернуть обои по умолчанию" onClick={reset} />
+          <CheckRow setting="wallpaper.blur" label="Размытие" checked={image && wp.blur} disabled={!image} onChange={(v: boolean) => setPref(`wallpaper.${key}.blur`, v)} />
+          <RangeRow setting="wallpaper.intensity" label="Интенсивность узора" min={0} max={100} step={1} value={intensity.value} disabled={image} onChange={intensity.set} onCommit={intensity.commit} />
         </Section>
-        <Section title="Узор" role="radiogroup">
+        <Section setting="wallpaper.pattern" title="Узор" role="radiogroup">
           <div class={'app-swatches app-swatches-patterns' + (loaded ? ' app-swatches-ready' : '')}>
             {sets.map((set) => {
               const on = !image && wp.pattern === set;
@@ -92,7 +92,7 @@ export function Wallpaper() {
             })}
           </div>
         </Section>
-        <Section title="Цвета и градиенты" role="radiogroup" footer="Обои для светлой и тёмной темы выбираются отдельно. Своё изображение хранится только на этом устройстве.">
+        <Section setting="wallpaper.colors" title="Цвета и градиенты" role="radiogroup" footer="Обои для светлой и тёмной темы выбираются отдельно. Своё изображение хранится только на этом устройстве.">
           <div class="app-swatches">
             {[{ id: 'theme', name: 'Как в теме', colors: null as string[] | null }, ...presets].map((p) => {
               const on = !image && sameColors(wp.colors, p.colors);
@@ -152,7 +152,7 @@ export function WallpaperColor() {
         <Section>
           <ColorPicker value={shown} onChange={pick} label="Цвет обоев" />
         </Section>
-        <Section title="Готовые цвета" role="radiogroup">
+        <Section setting="wallpaper.color.presets" title="Готовые цвета" role="radiogroup">
           <div class="app-swatches app-solids">
             {SOLID_PRESETS[key].map((c) => {
               const on = !!solid && solid.toLowerCase() === c;

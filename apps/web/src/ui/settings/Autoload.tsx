@@ -23,13 +23,13 @@ export function Autoload({ path }: { path: string }) {
       <PanelHeader icon="arrowLeft" closeLabel="Назад" title={TITLE[kind]} onClose={() => void back()} />
       <div class="rl-settings" ref={scroll.ref} onScroll={scroll.onScroll}>
         <Section title="Автозагрузка" footer="Без автозагрузки вложение скачивается по нажатию.">
-          <CheckRow label="Контакты" checked={v.contacts} onChange={set('contacts')} />
-          <CheckRow label="Личные чаты" checked={v.private} onChange={set('private')} />
-          <CheckRow label="Группы" checked={v.groups} onChange={set('groups')} />
+          <CheckRow setting="autoload.contacts" label="Контакты" checked={v.contacts} onChange={set('contacts')} />
+          <CheckRow setting="autoload.private" label="Личные чаты" checked={v.private} onChange={set('private')} />
+          <CheckRow setting="autoload.groups" label="Группы" checked={v.groups} onChange={set('groups')} />
         </Section>
         {kind === 'file' ? (
           <Section footer="Файлы больше этого размера не загружаются сами.">
-            <RangeRow
+            <RangeRow setting="autoload.maxSize"
               label="Максимальный размер файла" min={0} max={STEPS.length - 1} step={1} value={idx}
               format={(i: number) => `до ${STEPS[i]} МБ`}
               marks={STEPS.map((m, i) => ({ value: i, label: String(m) }))}
