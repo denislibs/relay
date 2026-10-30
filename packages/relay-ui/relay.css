@@ -432,7 +432,7 @@ body { margin: 0; font-family: var(--font-sans); color: var(--ink); background: 
 .rl-media-cell:hover .rl-art:not(.rl-art-blur) { transform: scale(1.03); }
 .rl-media-chip { position: absolute; display: inline-flex; align-items: center; gap: 4px; padding: 2px 6px; border-radius: var(--radius-pill); background: var(--media-scrim); color: var(--on-media); font: 500 11px/15px var(--font-sans); font-variant-numeric: tabular-nums; pointer-events: none; }
 .rl-media-chip .rl-status { color: var(--on-media); }
-.rl-media-chip .rl-status-read { color: #53bdeb; }
+.rl-media-chip .rl-status-read { color: var(--on-media); }
 .rl-media-chip-dur { left: 6px; bottom: 6px; }
 .rl-media-chip-meta { right: 6px; bottom: 6px; }
 .rl-media-more { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; background: var(--media-scrim); color: var(--on-media); font: 500 26px/1 var(--font-sans); }
@@ -755,6 +755,10 @@ html[data-anim="0"] .rl-slidefade-item { animation: none !important; }
 .rl-bubble-out { --out-ink: var(--brand-text); }
 :root[data-theme="dark"] .rl-bubble-out { --out-ink: color-mix(in srgb, var(--brand-text) 35%, #fff); }
 @media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) .rl-bubble-out { --out-ink: color-mix(in srgb, var(--brand-text) 35%, #fff); } }
+/* время и галочки в своих — оттенок акцента на своём фоне, как в Telegram; «прочитано» — второй галочкой, не чужим синим.
+   На фото/видео (плашка поверх медиа) — белые, как и были */
+.rl-bubble-out { --out-meta: color-mix(in srgb, var(--out-ink) 72%, var(--bubble-out)); }
+.rl-bubble-out .rl-bubble-meta:not(.rl-media-chip *), .rl-bubble-out .rl-bubble-meta:not(.rl-media-chip *) .rl-status-read { color: var(--out-meta); }
 .rl-bubble-out .rl-fwd { --fwd-tone: var(--out-ink) !important; }
 .rl-bubble-out .rl-quote { --quote-tone: var(--out-ink) !important; --quote-bg: color-mix(in srgb, var(--out-ink) 12%, transparent) !important; --quote-bg-active: color-mix(in srgb, var(--out-ink) 20%, transparent) !important; }
 .rl-fwd-link:hover .rl-fwd-who b { text-decoration: underline; }
