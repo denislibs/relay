@@ -6,7 +6,7 @@ import { searchChannels } from './domain/channelPreview';
 import { createBus } from './bus';
 import { clientIp } from './device';
 import type { Server } from 'bun';
-import { authenticate, clearSessionCookie, createSession, createUser, deleteSession, readSessionToken, sessionCookie, sessionFromToken } from './auth';
+import { authenticate, clearLegacySessionCookie, clearSessionCookie, createSession, createUser, deleteSession, readSessionToken, sessionCookie, sessionFromToken } from './auth';
 import { accessCookie, ACCESS_SEC, clearAccessCookie, deviceKeyOf, newChallenge, refreshAccess, verifyDevice } from './deviceAuth';
 import { announceLogin, announceSessionsChanged, assertConfirmed, checkSocket, confirmSession, listSessions, sessionEnded, sweepInactive, terminateOthers, terminateSession, trackSocket, untrackSocket } from './domain/sessions';
 import { countViews } from './domain/views';
@@ -269,7 +269,7 @@ export function createServer(opts: { port: number }): Server {
             await announceSessionsChanged(userId).catch((e) => console.error('sessions:', e));
           }
           const h = new Headers({ 'content-type': 'application/json' });
-          h.append('set-cookie', clearSessionCookie()); h.append('set-cookie', clearAccessCookie());
+          h.append('set-cookie', clearSessionCookie()); h.append('set-cookie', clearAccessCookie()); h.append('set-cookie', clearLegacySessionCookie());
           return new Response(JSON.stringify({ ok: true }), { headers: h });
         }
         if (url.pathname === '/ws') {

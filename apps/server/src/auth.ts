@@ -94,14 +94,16 @@ export async function userIdFromToken(token: string | null): Promise<number | nu
 
 export function readSessionToken(req: Request): string | null {
   const cookie = req.headers.get('cookie') ?? '';
-  const m = /(?:^|;\s*)relay_session=([^;]+)/.exec(cookie);
+  // новое имя (__Host-, Secure) — первым; прежнее «relay_session» читаем, пока его не перепишет следующий ответ
+  const m = /(?:^|;\s*)__Host-relay_session=([^;]+)/.exec(cookie) ?? /(?:^|;\s*)relay_session=([^;]+)/.exec(cookie);
   if (m) return decodeURIComponent(m[1]);
   if (process.env.DEV_LOGIN === '1') return new URL(req.url).searchParams.get('token');
   return null;
 }
 
 export function sessionCookie(token: string): string {
-  return `relay_session=${encodeURIComponent(token)}; HttpOnly; SameSite=Lax; Path=/; Max-Age=${SESSION_DAYS * 86400}`;
+  // __Host-: браузер примет только с Secure, без Domain и с Path=/ — cookie не уйдёт по http и не подменится с поддомена
+  return `__Host-relay_session=${encodeURIComponent(token)}; Secure; HttpOnly; SameSite=Lax; Path=/; Max-Age=${SESSION_DAYS * 86400}`;
 }
 
 /** Выход: удаляем строку текущего сеанса; id — чтобы закрыть сокеты этого сеанса в других вкладках. */
@@ -111,5 +113,8 @@ export async function deleteSession(token: string): Promise<number | null> {
 }
 
 export function clearSessionCookie(): string {
-  return 'relay_session=; HttpOnly; SameSite=Lax; Path=/; Max-Age=0';
+  return '__Host-relay_session=; Secure; HttpOnly; SameSite=Lax; Path=/; Max-Age=0';
 }
+
+/** Прежнее имя cookie сеанса (до __Host-): стереть при входе и выходе, чтобы не висело рядом с новым. */
+export const clearLegacySessionCookie = (): string => 'relay_session=; HttpOnly; SameSite=Lax; Path=/; Max-Age=0';

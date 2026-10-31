@@ -264,7 +264,8 @@ async function deviceOf() {
 const cookiesOf = async (path: string, data: unknown) => {
   const res = await fetch(base + path, { method: 'POST', headers: { 'content-type': 'application/json', origin: base }, body: JSON.stringify(data) });
   const set = res.headers.getSetCookie?.() ?? [];
-  const pick = (n: string) => set.find((c) => c.startsWith(n + '='))?.split(';')[0] ?? null;
+  // cookie — под именами с __Host- (Secure); пустые (стирающие) не в счёт
+  const pick = (n: string) => set.find((c) => c.startsWith('__Host-' + n + '=') && !c.startsWith('__Host-' + n + '=;'))?.split(';')[0] ?? null;
   return { status: res.status, json: await res.json().catch(() => ({})) as Record<string, any>, session: pick('relay_session'), access: pick('relay_access') };
 };
 
@@ -274,7 +275,7 @@ test('sign-in with a device key: the session is bound from the start — the lon
   const code = await call('/auth/code', { login: '+79990000060' });
   const r = await cookiesOf('/auth/signin', { attemptId: code.json.attemptId, code: code.json.devCode, device: await dev.proof() });
   expect(r.json).toEqual({ userId });
-  expect(r.access).toMatch(/^relay_access=.+/);
+  expect(r.access).toMatch(/^__Host-relay_access=.+/);
   const [s] = await sql`select device_key is not null as bound from sessions where user_id = ${userId} order by id desc limit 1`;
   expect(s.bound).toBe(true);
   expect((await call('/me', undefined, r.session, 'GET')).status).toBe(401);   // украденный долгий cookie — ничего
@@ -303,7 +304,7 @@ test('QR: only the device that created the code can take the login — not whoev
   expect(stolen.json.status).toBe('expired');
   const mine = await cookiesOf('/auth/qr/poll', { token: qr.json.token, device: await owner.proof() });
   expect(mine.json).toEqual({ userId });
-  expect(mine.access).toMatch(/^relay_access=.+/);
+  expect(mine.access).toMatch(/^__Host-relay_access=.+/);
 });
 
 test('passkey: the challenge carries the device key — finishing it with another key is refused', async () => {
@@ -318,7 +319,7 @@ test('passkey: the challenge carries the device key — finishing it with anothe
   const opt2 = (await call('/auth/passkey/options', { device: await mine.proof() })).json;
   const ok = await cookiesOf('/auth/passkey/finish', { id: opt2.id, response: await auth.get(opt2.options.challenge), device: await mine.proof() });
   expect(ok.json).toEqual({ userId });
-  expect(ok.access).toMatch(/^relay_access=.+/);
+  expect(ok.access).toMatch(/^__Host-relay_access=.+/);
 });
 
 /* ---------- новый сеанс первые сутки; коды скрываются; место входа ---------- */
@@ -396,4 +397,41 @@ test('«new login» names the place and the method, and flags a country the acco
     process.env.TRUST_PROXY = prev;
     setGeoReader(null);
   }
+});
+
+test('AUTH-2: a new recovery code does not reset the attempts; five wrong codes kill the login; at most 3 codes an hour', async () => {
+  const { cookie } = await signUp('+79990000080');
+  await call('/settings/password', { next: { ...(await makeVerifier('pw')), email: 'vera@example.com' } }, cookie, 'PUT');
+  const code = await call('/auth/code', { login: '+79990000080' });
+  const step = await call('/auth/signin', { attemptId: code.json.attemptId, code: code.json.devCode });
+  const pendingId = step.json.pendingId;
+  await call('/auth/password/recover', { pendingId });
+  for (let i = 0; i < 3; i++) expect((await call('/auth/password/recover/check', { pendingId, code: '00000' + i })).json.code).toBe('code_invalid');
+  await call('/auth/password/recover', { pendingId });   // новый код — попыток не прибавилось
+  expect((await call('/auth/password/recover/check', { pendingId, code: '000003' })).json.code).toBe('code_invalid');
+  expect((await call('/auth/password/recover/check', { pendingId, code: '000004' })).json.code).toBe('code_invalid');
+  // пятая ошибка погасила сам вход: дальше — и проверка, и новый код отказывают
+  await drainJobs();
+  const real = (await devOutbox()).at(-1)!.code;
+  expect((await call('/auth/password/recover/check', { pendingId, code: real })).status).not.toBe(200);
+  expect((await call('/auth/password/recover', { pendingId })).status).not.toBe(200);
+  // новый вход: третий код за час — последний, четвёртый — flood
+  const code2 = await call('/auth/code', { login: '+79990000080' });
+  const step2 = await call('/auth/signin', { attemptId: code2.json.attemptId, code: code2.json.devCode });
+  expect((await call('/auth/password/recover', { pendingId: step2.json.pendingId })).status).toBe(200);
+  expect((await call('/auth/password/recover', { pendingId: step2.json.pendingId })).json.code).toBe('flood');
+});
+
+test('AUTH-3: session and access cookies are __Host- and Secure; logout clears the new and the old names', async () => {
+  const res = await fetch(base + '/dev/login', { method: 'POST', body: JSON.stringify({ name: 'Куки' }) });
+  const set = res.headers.getSetCookie();
+  expect(set.find((c) => c.startsWith('__Host-relay_session=') && !c.startsWith('__Host-relay_session=;'))).toMatch(/; Secure; HttpOnly; SameSite=Lax; Path=\//);
+  const cookie = set.find((c) => c.startsWith('__Host-relay_session='))!.split(';')[0];
+  expect((await call('/me', undefined, cookie, 'GET')).status).toBe(200);
+  expect((await call('/me', undefined, 'relay_session=' + cookie.split('=')[1], 'GET')).status).toBe(200);   // прежнее имя ещё читается
+  const out = await fetch(base + '/logout', { method: 'POST', headers: { cookie, origin: base } });
+  const cleared = out.headers.getSetCookie().join('\n');
+  expect(cleared).toContain('__Host-relay_session=;');
+  expect(cleared).toContain('__Host-relay_access=;');
+  expect(cleared).toContain('\nrelay_session=;');
 });

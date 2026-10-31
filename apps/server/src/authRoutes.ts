@@ -1,5 +1,5 @@
 import type { Server } from 'bun';
-import { createSession, hashToken, sessionCookie, type LoginMethod } from './auth';
+import { clearLegacySessionCookie, createSession, hashToken, sessionCookie, type LoginMethod } from './auth';
 import { accessCookie, clearAccessCookie, deviceProof, issueAccess, sameKey } from './deviceAuth';
 import { DomainError } from './domain/errors';
 import { sql } from './db';
@@ -50,6 +50,7 @@ async function reply(step: LoginStep, req: Request, server: Server, device: Uint
   if (!step.session.fresh) await announceLogin(userId, token);
   const h = new Headers();
   h.append('set-cookie', sessionCookie(token));
+  h.append('set-cookie', clearLegacySessionCookie());   // прежнее имя (до __Host-) — прочь
   if (device) {
     const [s] = await sql`select id from sessions where token_hash = ${hashToken(token)}`;
     h.append('set-cookie', accessCookie(await issueAccess(Number(s.id))));
