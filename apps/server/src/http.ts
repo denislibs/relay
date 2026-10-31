@@ -27,6 +27,7 @@ import { abortUpload, confirmUpload, createUpload, uploadParts, uploadStatus, do
 import { resolvePeer, resolvePeers } from './domain/peerRef';
 import { initPeerKeys } from './crypto/peerKey';
 import { THEMES } from './domain/themes';
+import { setChatTheme } from './domain/chatTheme';
 import { handleFrame } from './ws';
 import { pollVoters } from './domain/polls';
 import { mapTile } from './domain/mapTiles';
@@ -237,6 +238,9 @@ export function createServer(opts: { port: number }): Server {
         if (req.method === 'PUT' && chatFlags) return Response.json(await setChatFlags(userId, Number(chatFlags[1]), await req.json().catch(() => null)));
         const chatUnarchive = /^\/chats\/(\d{1,15})\/unarchive$/.exec(url.pathname);
         if (req.method === 'POST' && chatUnarchive) return Response.json(await unarchiveByMessage(userId, Number(chatUnarchive[1]), await req.json().catch(() => null)));
+        // тема чата: { theme: id | null } (domain/chatTheme.ts)
+        const chatTheme = /^\/chats\/(\d{1,15})\/theme$/.exec(url.pathname);
+        if (req.method === 'PUT' && chatTheme) return Response.json(await setChatTheme(userId, Number(chatTheme[1]), ((await req.json().catch(() => null)) as { theme?: unknown } | null)?.theme ?? null));
         const chatNotify = /^\/chats\/(\d{1,15})\/notify$/.exec(url.pathname);
         if (req.method === 'PUT' && chatNotify) return Response.json(await setChatNotify(userId, Number(chatNotify[1]), await req.json().catch(() => null)));
         const privacyKey = /^\/privacy\/([a-zA-Z]{1,16})$/.exec(url.pathname);

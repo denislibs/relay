@@ -108,6 +108,7 @@ export interface ChatSummary {
   unreadReactions?: number;  // непрочитанные реакции на мои сообщения
   last: Message | null;
   peer?: { id: number; key?: string; name: string; system?: true; photo?: ProfilePhoto | null } | null;
+  theme?: string | null;
   peerReadUpTo?: number;
   group?: GroupInfo;
   me?: MyMembership;
@@ -422,6 +423,7 @@ export class Store {
       case 'myStickers': this.stickersRev++; return;
       case 'pins': { const chat = this.chats.get(u.chatId); if (chat) { chat.pinned = u.ids; this.markChat(chat); } return; }
       case 'chatNotify': return this.setMute(u.chatId, u.muteUntil);
+      case 'chatTheme': return this.setTheme(u.chatId, u.theme);
       case 'chatFlags': return this.setFlags(u.chatId, u);
       // requests у каждого своё (joinRequests), общая запись его не несёт — не затирать
       // канал: владельца общая запись не несёт (null — подписчикам он не раскрывается); админ знает его из сводки — не затирать
@@ -529,6 +531,13 @@ export class Store {
   private deletedMessages = new Set<string>();
 
   /** Уведомления чата (журнал, снимок, ответ операции): значение сервера — база; чата в кэше нет — ждать нечего. */
+  /** Тема чата (журнал chatTheme или снимок списка). */
+  setTheme(chatId: number, theme: string | null): void {
+    const chat = this.chats.get(chatId);
+    if (!chat || (chat.theme ?? null) === theme) return;
+    chat.theme = theme; this.markChat(chat);
+  }
+
   setMute(chatId: number, muteUntil: number | null): void {
     const chat = this.chats.get(chatId);
     if (!chat || (chat.muteUntil ?? null) === muteUntil) return;
@@ -575,6 +584,7 @@ export class Store {
       chat.peerId = s.peer?.id ?? null;
       if (s.peer) this.profile.applyPeer(s.peer, seq);
       if (s.peer?.system) chat.system = true; else delete chat.system;
+      if (s.theme !== undefined) chat.theme = s.theme;
       if (s.draft && (!chat.draft || s.draft.at > chat.draft.at) && !this.pendingDrafts.has(s.id)) chat.draft = s.draft;
       if (s.pinned) chat.pinned = s.pinned;
       if (s.muteUntil !== undefined) chat.muteUntil = s.muteUntil;

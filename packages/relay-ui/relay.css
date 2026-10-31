@@ -2753,19 +2753,19 @@ html[data-anim="0"] .rl-symbols-pop { transition: none; }
 :is(.rl-sticker-head, .rl-side-head) .rl-quote-body b { color: #fff !important; }
 
 /* ---------- Темы (apps/web/src/themes): свои пузыри, залитые цветом ----------
-   День, Тёмная и наборы с ярким пузырём: палитра задаёт --theme-out-ink/meta/link, html[data-out-filled] включает их.
+   День, Тёмная и наборы с ярким пузырём: палитра задаёт --theme-out-ink/meta/link, html[data-out-filled] включает их (колонка чата с темой чата — свой атрибут).
    Внутри своего пузыря акцентные цвета становятся цветом текста — кнопки голосовых, музыка, опросы, ссылки и галочки
    читаются на заливке (как в Telegram: в исходящих белое). Правила — в конце файла, чтобы перекрыть тёмные такой же силы. */
-:root[data-out-filled] .rl-bubble-out {
+:is(:root, .app-chatcol)[data-out-filled] .rl-bubble-out {
   color: var(--theme-out-ink); --ink: var(--theme-out-ink); --ink-muted: var(--theme-out-meta);
   --brand: var(--theme-out-ink); --brand-strong: var(--theme-out-ink); --brand-text: var(--theme-out-ink);
   --out-ink: var(--theme-out-ink); --out-meta: var(--theme-out-meta); --bubble-meta: var(--theme-out-meta); --tick-read: var(--theme-out-link);
   --out-accent: var(--theme-out-ink); --out-accent-soft: color-mix(in srgb, var(--theme-out-ink) 30%, var(--bubble-out));
 }
-:root[data-out-filled] .rl-bubble-out a:not(.rl-link-card):not(.rl-webpage), :root[data-out-filled] .rl-bubble.rl-bubble-out .rl-link { color: var(--theme-out-link); text-decoration: underline; text-decoration-color: color-mix(in srgb, currentColor 45%, transparent); }
-:root[data-out-filled] .rl-vb.rl-bubble-out { --voice-progress: var(--theme-out-ink); --voice-fill: color-mix(in srgb, var(--theme-out-ink) 45%, var(--bubble-out)); --voice-btn: var(--theme-out-ink); --voice-btn-ink: var(--bubble-out); }
-:root[data-out-filled] .rl-bubble-out.rl-music { --music-accent: var(--theme-out-ink); --music-sub: var(--theme-out-meta); }
-:root[data-out-filled] .rl-bubble-out .rl-music-play:not(.rl-music-cover), :root[data-out-filled] .rl-bubble-out .rl-music-dl { color: var(--bubble-out); }
+:is(:root, .app-chatcol)[data-out-filled] .rl-bubble-out a:not(.rl-link-card):not(.rl-webpage), :is(:root, .app-chatcol)[data-out-filled] .rl-bubble.rl-bubble-out .rl-link { color: var(--theme-out-link); text-decoration: underline; text-decoration-color: color-mix(in srgb, currentColor 45%, transparent); }
+:is(:root, .app-chatcol)[data-out-filled] .rl-vb.rl-bubble-out { --voice-progress: var(--theme-out-ink); --voice-fill: color-mix(in srgb, var(--theme-out-ink) 45%, var(--bubble-out)); --voice-btn: var(--theme-out-ink); --voice-btn-ink: var(--bubble-out); }
+:is(:root, .app-chatcol)[data-out-filled] .rl-bubble-out.rl-music { --music-accent: var(--theme-out-ink); --music-sub: var(--theme-out-meta); }
+:is(:root, .app-chatcol)[data-out-filled] .rl-bubble-out .rl-music-play:not(.rl-music-cover), :is(:root, .app-chatcol)[data-out-filled] .rl-bubble-out .rl-music-dl { color: var(--bubble-out); }
 
 /* Повышенная контрастность (html.rl-contrast): цвета уже подогнаны палитрой; здесь — подчёркнутые ссылки и подсказки
    полей цветом вторичного текста, а не бледнее него */

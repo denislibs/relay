@@ -5,7 +5,7 @@ import type { ServiceData, ServiceType } from '@relay/protocol';
 
 const GROUP_TYPES = new Set<ServiceType>([
   'group_created', 'channel_created', 'title_changed', 'photo_changed', 'photo_removed', 'members_added', 'member_left', 'member_removed',
-  'joined_by_link', 'joined_by_request', 'owner_changed', 'protected_on', 'protected_off',
+  'joined_by_link', 'joined_by_request', 'owner_changed', 'protected_on', 'protected_off', 'theme_changed',
 ]);
 export const isGroupService = (t: string | undefined): t is ServiceType => !!t && GROUP_TYPES.has(t as ServiceType);
 
@@ -20,6 +20,7 @@ export function serviceText(type: ServiceType, opts: { data?: ServiceData; body?
       case 'photo_removed': return 'Фото канала удалено';
       case 'protected_on': return 'Копирование в канале запрещено';
       case 'protected_off': return 'Копирование в канале разрешено';
+      case 'theme_changed': return data?.emoji ? `Тема канала изменена на ${data.emoji}` : 'Тема канала отключена';
       default: break;
     }
   }
@@ -44,6 +45,8 @@ export function serviceText(type: ServiceType, opts: { data?: ServiceData; body?
     case 'owner_changed': return v('передали права на группу', 'передал(а) права на группу') + ' ' + users;
     case 'protected_on': return v('запретили копирование в группе', 'запретил(а) копирование в группе');
     case 'protected_off': return v('разрешили копирование в группе', 'разрешил(а) копирование в группе');
+    // тема чата (и в личном): как в Telegram — «изменил(а) тему чата на 🐥», снятая — «отключил(а) тему чата»
+    case 'theme_changed': return data?.emoji ? v('изменили тему чата на', 'изменил(а) тему чата на') + ' ' + data.emoji : v('отключили тему чата', 'отключил(а) тему чата');
     default: return opts.body ?? '';
   }
 }

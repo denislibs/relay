@@ -12,9 +12,10 @@ export type Id = number;
 export type ServiceType = 'login_code' | 'new_login' | 'group_created' | 'channel_created' | 'welcome'
   | 'title_changed' | 'photo_changed' | 'photo_removed' | 'members_added' | 'member_left' | 'member_removed'
   | 'joined_by_link' | 'joined_by_request' | 'owner_changed' | 'protected_on' | 'protected_off'
-  | 'todo_done' | 'todo_append';   // чек-лист: автор отметил / добавил задачи в список replyToId (номера — в data)
+  | 'todo_done' | 'todo_append'   // чек-лист: автор отметил / добавил задачи в список replyToId (номера — в data)
+  | 'theme_changed';   // тема чата: data.emoji/title — новая, пусто — снята   // чек-лист: автор отметил / добавил задачи в список replyToId (номера — в data)
 /** Участники служебного события (имена на момент события) и новое название. */
-export interface ServiceData { users?: { id: Id; name: string }[]; title?: string; completed?: number[]; incompleted?: number[]; items?: number[] }   // group_created / channel_created: тело — название, автор — создатель
+export interface ServiceData { users?: { id: Id; name: string }[]; title?: string; completed?: number[]; incompleted?: number[]; items?: number[]; emoji?: string }   // group_created / channel_created: тело — название, автор — создатель
 
 export interface Message {
   id: Id;
@@ -292,6 +293,7 @@ export type Update =
   // состав изменился: у кого строка новая или другая (upsert), кто вышел или удалён (remove)
   | { type: 'members'; chatId: Id; upsert: MemberRow[]; remove: Id[] }
   // чат больше не мой: вышел, удалили, группу удалили
+  | { type: 'chatTheme'; chatId: Id; theme: string | null }   // тема чата сменилась (id из GET /themes, null — снята)
   | { type: 'chatFlags'; chatId: Id; pinnedAt: number | null; archived: boolean; unreadMark: boolean; archivedAtId?: number }   // закреплён (мс; позже — выше), в архиве, «непрочитанное»
   | { type: 'chatNotify'; chatId: Id; muteUntil: number | null }   // уведомления чата: мс эпохи — выключены до, 0 — навсегда, null — включены
   | { type: 'chatRemoved'; chatId: Id }
