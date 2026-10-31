@@ -59,7 +59,7 @@ services:
   # KMS (OpenBao — открытый Vault, движок Transit): проверка настоящего пути главного ключа в тестах.
   # dev-режим держит ключи в памяти — для dev-стека и тестов основного набора KMS_PROVIDER=fake (crypto/kms.ts)
   kms:
-    image: openbao/openbao:2.2.0
+    image: openbao/openbao:2.7.2
     profiles: ["test", "kms"]
     command: ["server", "-dev", "-dev-root-token-id=relay-dev-root", "-dev-listen-address=0.0.0.0:8200"]
     cap_add: [IPC_LOCK]

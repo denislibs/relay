@@ -2,7 +2,8 @@ import { afterAll, beforeEach, expect, test } from 'bun:test';
 import { sql } from '../src/db';
 import { fileFor } from '../src/domain/files';
 import { getUpdates } from '../src/domain/journal';
-import { allowPrivateHostsForTests, firstUrl, getPreview, imageSize, isPublicIp, normalizeUrl, resolvePublic } from '../src/domain/linkPreview';
+import { brotliCompressSync } from 'node:zlib';
+import { allowPrivateHostsForTests, fetchPreview, firstUrl, getPreview, imageSize, isPublicIp, normalizeUrl, resolvePublic } from '../src/domain/linkPreview';
 import { applyLinkPreview, sendMessage } from '../src/domain/messages';
 import { makeChat, makeUser, opened, resetDb } from './helpers';
 
@@ -15,6 +16,9 @@ const page = Bun.serve({ port: 0, fetch(req) {
   const u = new URL(req.url);
   if (u.pathname === '/img.png') return new Response(png, { headers: { 'content-type': 'image/png' } });
   if (u.pathname === '/moved') return Response.redirect('/page', 302);
+  // сервер, который сжимает, даже когда не просили
+  if (u.pathname === '/br') return new Response(brotliCompressSync('<html><head><title>Сжато</title></head></html>'), { headers: { 'content-type': 'text/html', 'content-encoding': 'br' } });
+  if (u.pathname === '/enc') return new Response(`<html><head><title>${req.headers.get('accept-encoding')}</title></head></html>`, { headers: { 'content-type': 'text/html' } });
   return new Response(`<html><head><meta charset="utf-8"><title>Док</title>
     <meta property="og:site_name" content="Тест Магазин"><meta property="og:title" content="Телефон  S25">
     <meta name="description" content="Описание товара"><meta property="og:image" content="/img.png"></head><body>x</body></html>`, { headers: { 'content-type': 'text/html; charset=utf-8' } });
@@ -38,6 +42,12 @@ test('private and service addresses are never fetched', async () => {
   allowPrivateHostsForTests(false);
   expect(await getPreview('http://127.0.0.1/')).toBeNull();
   expect(await getPreview('http://localhost/admin')).toBeNull();
+});
+
+test('CVE-2026-111497: previews ask for no compression and never decompress a compressed answer', async () => {
+  allowPrivateHostsForTests(true);
+  expect((await fetchPreview(`${base}/enc`))?.title).toBe('identity');
+  await expect(fetchPreview(`${base}/br`)).rejects.toThrow('compressed');
 });
 
 test('image size from the file header', () => {

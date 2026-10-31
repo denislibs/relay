@@ -1,4 +1,4 @@
-FROM oven/bun:1.4.2
+FROM oven/bun:1.4.4
 # ffmpeg/ffprobe — обработка видео в воркере (apps/server/src/jobs/video.ts)
 RUN apt-get update && apt-get install -y --no-install-recommends ffmpeg && rm -rf /var/lib/apt/lists/*
 WORKDIR /app

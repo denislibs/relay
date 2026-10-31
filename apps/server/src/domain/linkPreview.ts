@@ -93,7 +93,8 @@ async function safeGet(url: string, accept: string, maxBytes: number): Promise<{
   let cur = url;
   const deadline = AbortSignal.timeout(TIMEOUT_MS);
   for (let hop = 0; hop <= MAX_REDIRECTS; hop++) {
-    const res = await pinnedFetch(new URL(cur), { redirect: 'manual', signal: deadline, headers: { 'user-agent': UA, accept, 'accept-language': 'ru,en;q=0.8' } });
+    // без сжатия: чужой сервер не доберётся до распаковщиков (CVE-2026-111497 — brotli), а потолок размера честный
+    const res = await pinnedFetch(new URL(cur), { redirect: 'manual', signal: deadline, decompress: false, headers: { 'user-agent': UA, accept, 'accept-language': 'ru,en;q=0.8', 'accept-encoding': 'identity' } } as RequestInit);
     if (res.status >= 300 && res.status < 400) {
       const next = res.headers.get('location');
       const n = next ? normalizeUrl(new URL(next, cur).toString()) : null;
@@ -102,6 +103,8 @@ async function safeGet(url: string, accept: string, maxBytes: number): Promise<{
       continue;
     }
     if (!res.ok || !res.body) throw new Error('status ' + res.status);
+    const enc = (res.headers.get('content-encoding') || 'identity').trim().toLowerCase();
+    if (enc !== 'identity') { await res.body.cancel(); throw new Error('compressed'); }
     const len = Number(res.headers.get('content-length') || 0);
     if (len > maxBytes) throw new Error('too big');
     const reader = res.body.getReader();
