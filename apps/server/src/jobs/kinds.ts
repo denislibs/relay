@@ -183,6 +183,16 @@ register('search.purgeChat', async (p: { chatId: number; below: number | null })
   const { purgeChatIndex } = await import('../search/messagesIndex');
   await purgeChatIndex(Number(p.chatId), p.below == null ? null : Number(p.below));
 });
+// срок хранения журнала пользователя (CRYPTO-3): записи старше JOURNAL_DAYS удаляются пачками; отставший сильнее
+// клиент получит tooLong и заберёт снимок заново (getUpdates). Раз в сутки
+export const JOURNAL_DAYS = Number(process.env.JOURNAL_DAYS) || 30;
+register('journal.trim', async () => {
+  for (;;) {
+    const r = await sql`delete from updates where ctid in (select ctid from updates where created_at < now() - make_interval(days => ${JOURNAL_DAYS}) limit 5000)`;
+    if (r.count < 5000) break;
+  }
+  return { again: { inSec: 24 * 3600 } };
+});
 register('attachment.purge', async (p: { keys: string[] }) => {
   await purgeObjects(p.keys);
 });
@@ -206,6 +216,12 @@ register('poll.close', async (p: { chatId: number; id: number }) => {
   await closeExpired(p.chatId, p.id);
 });
 
-register('link.preview', async (p: { chatId: number; id: number; url: string }) => {
+register('link.preview', async (p: { chatId: number; id: number; url?: string }) => {
   await applyLinkPreview(p);
+});
+// срок кэша превью ссылок (CRYPTO-4): раз в сутки
+register('linkPreview.expire', async () => {
+  const { expirePreviews } = await import('../domain/linkPreview');
+  await expirePreviews();
+  return { again: { inSec: 24 * 3600 } };
 });

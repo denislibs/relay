@@ -58,9 +58,19 @@ test('send with a link: pending at once, the job fills the preview, members get 
   const ups = (await getUpdates(b, 0)).items.map((i) => i.update);
   expect(ups.find((u) => u.type === 'linkPreview')).toMatchObject({ chatId: chat, id: message.id, link: { title: 'Телефон S25' } });
   expect(await fileFor(stranger, row.link.photo.id)).not.toBeNull();   // картинка превью — публичная, как сама страница
-  // тот же адрес снова — превью из кэша сразу, без задачи
+  // тот же адрес снова: ответ — тоже «грузится» (по ответу не понять, слал ли ссылку кто-то ещё — CRYPTO-4);
+  // задача берёт превью из кэша и адрес — из шифра сообщения (в задаче его нет)
   const again = await sendMessage(b, { chatId: chat, clientId: cid(), body: url });
-  expect(again.message.link).toMatchObject({ title: 'Телефон S25' });
+  expect(again.message.link).toEqual({ url, pending: true });
+  const [job] = await sql`select payload from jobs where kind = 'link.preview' order by id desc limit 1`;
+  expect(job.payload).toEqual({ chatId: chat, id: again.message.id });
+  await applyLinkPreview(job.payload as never);
+  const [row2] = await opened(await sql`select * from messages where id = ${again.message.id}`);
+  expect(row2.link).toMatchObject({ title: 'Телефон S25' });
+  // в кэше — ни адреса, ни заголовка открытым текстом
+  const cache = await sql`select * from link_previews`;
+  expect(JSON.stringify(cache)).not.toContain('Телефон');
+  expect(JSON.stringify(cache)).not.toContain('localhost');
 });
 
 test('noLinkPreview, attachments and plain text get no preview', async () => {

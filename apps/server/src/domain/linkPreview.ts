@@ -4,6 +4,8 @@
 // внутренних и служебных сетей; редиректы — вручную, с той же проверкой на каждом шаге; таймаут и потолок размера.
 import type { Entity, LinkPreview } from '@relay/protocol';
 import { BlockList, isIP } from 'node:net';
+import { createHmac } from 'node:crypto';
+import { searchKey } from '../crypto/searchKey';
 import { lookup } from 'node:dns/promises';
 import { sql } from '../db';
 import { s3 } from './files';
@@ -203,19 +205,45 @@ export async function fetchPreview(url: string): Promise<LinkPreview | null> {
 }
 
 /** Превью из кэша (свежее суток) или загрузка с записью в кэш. Ошибка загрузки — «превью нет» (тоже кэшируется). */
+/**
+ * Кэш превью без открытого текста (CRYPTO-4): строка ищется по HMAC адреса, данные лежат шифром. Оба ключа выведены
+ * из ключа поиска (KMS): дамп базы не скажет, какие ссылки отправлялись, и не покажет их заголовки.
+ */
+async function cacheKeys(): Promise<{ id: (url: string) => string; aes: CryptoKey }> {
+  const k = await searchKey();
+  const aes = await crypto.subtle.importKey('raw', createHmac('sha256', k).update('link-preview|aes').digest(), 'AES-GCM', false, ['encrypt', 'decrypt']);
+  return { id: (url) => createHmac('sha256', k).update('link-preview|' + url).digest('base64url'), aes };
+}
+const sealData = async (aes: CryptoKey, d: LinkPreview | null): Promise<Buffer> => {
+  const iv = crypto.getRandomValues(new Uint8Array(12));
+  const c = new Uint8Array(await crypto.subtle.encrypt({ name: 'AES-GCM', iv }, aes, new TextEncoder().encode(JSON.stringify(d))));
+  return Buffer.concat([Buffer.from(iv), Buffer.from(c)]);
+};
+const openData = async (aes: CryptoKey, b: Uint8Array): Promise<LinkPreview | null> =>
+  JSON.parse(new TextDecoder().decode(await crypto.subtle.decrypt({ name: 'AES-GCM', iv: b.subarray(0, 12) }, aes, b.subarray(12)))) as LinkPreview | null;
+
 export async function getPreview(url: string): Promise<LinkPreview | null> {
-  const [hit] = await sql`select data, fetched_at from link_previews where url = ${url}`;
-  if (hit && Date.now() - (hit.fetched_at as Date).getTime() < FRESH_MS) return (hit.data as LinkPreview | null) ?? null;
+  const hit = await cachedPreview(url);
+  if (hit !== undefined) return hit;
   let data: LinkPreview | null = null;
   try { data = await fetchPreview(url); } catch { data = null; }
-  await sql`insert into link_previews (url, data, photo_id, fetched_at) values (${url}, ${data ? sql.json(data as never) : null}, ${data?.photo?.id ?? null}, now())
-    on conflict (url) do update set data = excluded.data, photo_id = excluded.photo_id, fetched_at = now()`;
+  const { id, aes } = await cacheKeys();
+  await sql`insert into link_previews (url_hash, sealed, photo_id, fetched_at) values (${id(url)}, ${await sealData(aes, data)}, ${data?.photo?.id ?? null}, now())
+    on conflict (url_hash) do update set sealed = excluded.sealed, photo_id = excluded.photo_id, fetched_at = now()`;
   return data;
+}
+
+/** Срок кэша (задача linkPreview.expire): данные старше FRESH_MS + сутки стираются; строка с картинкой остаётся ради доступа к ней. */
+export async function expirePreviews(): Promise<number> {
+  const r = await sql`update link_previews set sealed = null where sealed is not null and fetched_at < now() - make_interval(secs => ${FRESH_MS / 1000 + 86400})`;
+  await sql`delete from link_previews where photo_id is null and fetched_at < now() - make_interval(secs => ${FRESH_MS / 1000 + 86400})`;
+  return r.count;
 }
 
 /** Готовое превью из кэша без загрузки (для сообщения, которое отправляют прямо сейчас). undefined — в кэше нет. */
 export async function cachedPreview(url: string): Promise<LinkPreview | null | undefined> {
-  const [hit] = await sql`select data, fetched_at from link_previews where url = ${url}`;
-  if (!hit || Date.now() - (hit.fetched_at as Date).getTime() >= FRESH_MS) return undefined;
-  return (hit.data as LinkPreview | null) ?? null;
+  const { id, aes } = await cacheKeys();
+  const [hit] = await sql`select sealed, fetched_at from link_previews where url_hash = ${id(url)}`;
+  if (!hit?.sealed || Date.now() - (hit.fetched_at as Date).getTime() >= FRESH_MS) return undefined;
+  try { return await openData(aes, new Uint8Array(hit.sealed as Uint8Array)); } catch { return undefined; }
 }
