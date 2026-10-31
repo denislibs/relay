@@ -36,6 +36,8 @@ export async function searchMedia(userId: number, tab: MediaTab, opts: { q?: str
       from (select * from messages
              where chat_id in (select cm.chat_id from chat_members cm join chats dc on dc.id = cm.chat_id and dc.deleted_at is null where cm.user_id = ${userId})
                and not deleted and ${tabWhere(tab)}
+               -- скрытая история (вступил позже, «удалить у себя») не видна и здесь — как в медиа чата (AUTHZ-2)
+               and id >= (select h.history_from from chat_members h where h.chat_id = messages.chat_id and h.user_id = ${userId})
                ${q ? textWhere(tab, q) : sql``}
                ${before ? sql`and id < ${before}` : sql``}
              order by id desc limit ${take}) m

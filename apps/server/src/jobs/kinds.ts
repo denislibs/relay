@@ -178,6 +178,11 @@ register('storage.gc', async () => {
 });
 
 // объекты удалённого сборкой мусора вложения: оригинал, перепакованный оригинал, копии видео (удаление идемпотентно)
+// уничтоженная история (shred.ts) или удалённая группа: её документы — из индекса поиска (CRYPTO-1)
+register('search.purgeChat', async (p: { chatId: number; below: number | null }) => {
+  const { purgeChatIndex } = await import('../search/messagesIndex');
+  await purgeChatIndex(Number(p.chatId), p.below == null ? null : Number(p.below));
+});
 register('attachment.purge', async (p: { keys: string[] }) => {
   await purgeObjects(p.keys);
 });

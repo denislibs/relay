@@ -6,7 +6,7 @@ import '../src/jobs/kinds';
 import { drainJobs } from '../src/jobs/worker';
 import { deleteMessage, editMessage } from '../src/domain/messageOps';
 import { indexName, meili, MeiliError, waitTask } from '../src/search/meili';
-import { ensureIndex, liveIndex, reindexAll, reindexStep, searchIds, searchReady, syncMessage, syncMessages } from '../src/search/messagesIndex';
+import { ensureIndex, liveIndex, purgeChatIndex, reindexAll, reindexStep, searchIds, searchReady, syncMessage, syncMessages } from '../src/search/messagesIndex';
 import { enqueue } from '../src/jobs/queue';
 import { makeChat, makeUser, resetDb } from './helpers';
 
@@ -283,4 +283,16 @@ test('syncMessages during a rebuild writes both indexes; removal from a not yet 
     await sql`delete from server_meta where k = 'search_building'`;
     await meili<{ taskUid: number }>(`/indexes/${next}`, { method: 'DELETE' }).then((t) => waitTask(t.taskUid)).catch(() => {});
   }
+});
+
+test('CRYPTO-1: a shredded chat leaves the index — below the border, or the whole chat', async () => {
+  const a = await makeUser('a'), b = await makeUser('b');
+  const ab = await makeChat([a, b]), other = await makeChat([a, await makeUser('c')]);
+  const m1 = await say(a, ab, 'тайна раз'), m2 = await say(a, ab, 'тайна два'), m3 = await say(a, other, 'тайна три');
+  await syncMessages([m1.id, m2.id, m3.id]);
+  expect((await searchIds('тайна', [ab, other], { limit: 10 })).sort()).toEqual([m1.id, m2.id, m3.id].sort());
+  await purgeChatIndex(ab, m2.id);
+  expect((await searchIds('тайна', [ab, other], { limit: 10 })).sort()).toEqual([m2.id, m3.id].sort());
+  await purgeChatIndex(ab, null);
+  expect(await searchIds('тайна', [ab, other], { limit: 10 })).toEqual([m3.id]);
 });

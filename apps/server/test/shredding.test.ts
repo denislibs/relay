@@ -21,9 +21,9 @@ test('«delete for both» destroys the past for real: old key versions are gone,
   expect(versions).toEqual([2]);
   resetChatKeyCache();
   const [row] = await sql`select * from messages where id = ${old.id}`;
-  expect(row.content).not.toBeNull();                       // строка ещё есть, но открыть её нечем
+  // строка остаётся только для нумерации: удалена и пуста, а ключа к прежнему шифру нет (shred.ts)
+  expect(row).toMatchObject({ deleted: true, content: null, attachment: null, body: '' });
   await expect(chatKey(chat, 1)).rejects.toMatchObject({ code: 'no_key' });
-  expect((await opened([row]))[0].body).toBe('');
   const fresh = (await send(b, chat, 'заново')).message;
   expect((await getHistory(a, chat, null, 10)).messages.map((m) => m.body)).toEqual(['заново']);
   expect(fresh.body).toBe('заново');

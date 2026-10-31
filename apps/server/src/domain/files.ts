@@ -263,7 +263,8 @@ export async function fileFor(userId: number, id: string, variant?: string): Pro
        and (a.owner_id = ${userId} or exists (
          select 1 from messages m join chat_members cm on cm.chat_id = m.chat_id and cm.user_id = ${userId}
                                   join chats c on c.id = m.chat_id and c.deleted_at is null   -- удалённый (мягко) чат файлов не отдаёт
-          where m.attachment->>'id' = ${id} and not m.deleted)
+          where m.attachment->>'id' = ${id} and not m.deleted
+            and m.id >= cm.history_from)   -- сообщение из скрытой истории не открывает файл (AUTHZ-3)
        or exists (   -- комментарий в треде: его видит и гость треда — подписчик канала, чья это группа обсуждения (threads.ts threadAccess)
          select 1 from messages m join messages r on r.chat_id = m.chat_id and r.id = m.thread_id
                                   join chats ch on ch.id = (r.origin->>'chatId')::bigint and ch.linked_chat_id = m.chat_id and ch.deleted_at is null
