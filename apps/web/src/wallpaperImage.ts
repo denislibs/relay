@@ -2,7 +2,11 @@
 // В настройках — лишь её id: новая картинка = новый id, поэтому вкладки и кэш URL не путают старую с новой.
 import { useEffect, useState } from 'preact/hooks';
 
-export type ThemeKey = 'light' | 'dark';
+import type { Base } from './themes/presets';
+
+/** Картинка — у каждой темы своя. Прежние версии хранили по «светлая/тёмная»: это Классическая и Ночь. */
+export type ThemeKey = Base;
+const LEGACY: Partial<Record<ThemeKey, string>> = { classic: 'light', night: 'dark' };
 
 const DB = 'relay-wallpaper', STORE = 'images', MAX_SIDE = 2560;
 
@@ -52,6 +56,8 @@ export async function saveImage(key: ThemeKey, file: Blob): Promise<string> {
 
 export async function deleteImage(key: ThemeKey): Promise<void> {
   await tx('readwrite', (s) => s.delete(key));
+  const old = LEGACY[key];
+  if (old) await tx('readwrite', (s) => s.delete(old)).catch(() => {});
   const u = urls.get(key);
   if (u) { URL.revokeObjectURL(u.url); urls.delete(key); }
 }
@@ -62,7 +68,9 @@ const urls = new Map<ThemeKey, { id: string; url: string }>();
 async function urlFor(key: ThemeKey, id: string): Promise<string | null> {
   const have = urls.get(key);
   if (have?.id === id) return have.url;
-  const rec = await tx<{ id: string; blob: Blob } | undefined>('readonly', (s) => s.get(key));
+  let rec = await tx<{ id: string; blob: Blob } | undefined>('readonly', (s) => s.get(key));
+  const old = LEGACY[key];
+  if (!rec && old) rec = await tx<{ id: string; blob: Blob } | undefined>('readonly', (s) => s.get(old));   // картинка прежней версии
   if (!rec || rec.id !== id) return null;   // настройки и база разошлись (другая вкладка уже заменила) — без картинки
   if (have) URL.revokeObjectURL(have.url);
   const url = URL.createObjectURL(rec.blob);

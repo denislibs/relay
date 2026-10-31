@@ -134,6 +134,15 @@ function raiseContrast(out: Record<string, string>, side: Side): void {
   for (const name of ['button', 'fab', 'brand-strong']) out[name] = hex(ensureContrast(solid(name, bg), [255, 255, 255], 4.5));
 }
 
+/**
+ * Свои цвета обоев в «Тёмной»: подмешиваются к тёмному градиенту ближайшего к акценту базового цвета (85% основы),
+ * чтобы выбранный цвет не выпадал из тёмной палитры — как в tweb для любых обоев на этой базе.
+ */
+export function blendForTinted(colors: string[], accent: string): string[] {
+  const target = nearestBaseColor(accent).wallpaper;
+  return colors.map((c, i) => hex(mix(rgb(target[i % 4]), rgb(c), 0.85).map(Math.round) as Rgb));
+}
+
 /** CSS палитр двух сторон — теми же селекторами, что tokens.css: светлая на :root, тёмная по системе и по data-theme. */
 export function paletteCss(light: Record<string, string>, dark: Record<string, string>): string {
   // ключ одной стороны не должен протечь в другую: html:root (светлая) действует и в тёмной для того, чего нет в

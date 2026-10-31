@@ -15,7 +15,7 @@ import { memo } from 'preact/compat';
 import { go } from '../nav';
 import { isDark } from '../theme';
 import { chatTime, chatTone, isSystemChat, shownBody, snippet } from './format';
-import { applyTheme as setTheme } from '../theme';
+import { toggleNight } from '../theme';
 import { previewBody, previewText, previewThumb, type LastMessage } from './preview';
 import { ALL, chatFolderTags, fitFolderTags, inFolder, toggleChatInFolder, type FolderTag } from '../folders';
 import { saveFolder, showToast } from '../settingsData';
@@ -353,7 +353,7 @@ export function Sidebar() {
                   ...(installable ? [{ icon: 'download', label: 'Установить Relay', onClick: () => { setMenu(null); void installApp(); } }] : []),
                   '-',
                   { icon: 'more', label: 'Ещё', submenu: [
-                    { icon: 'moon', label: 'Ночной режим', checked: dark, keepOpen: true, onClick: () => setTheme(dark ? 'light' : 'dark') },
+                    { icon: 'moon', label: 'Ночной режим', checked: dark, keepOpen: true, onClick: () => toggleNight(dark) },
                   ] },
                 ]}
               />

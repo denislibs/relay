@@ -49,9 +49,9 @@ test('every row is marked with data-setting in the page sources', () => {
 test('the index answers the common queries', () => {
   const ctx = { dev: false, hasPassword: true };
   const first = (q: string) => searchSettings(ENTRIES, q, ctx)[0]?.items[0]?.entry.id;
-  expect(first('тёмная')).toBe('general.theme.dark');
+  expect(first('тёмная')).toBe('general.theme.tinted');
   expect(first('ntvf')).toBe('general.theme');
-  expect(first('ночной')).toBe('general.theme.dark');
+  expect(first('ночной')).toBe('general.theme.night');
   expect(first('кэш')).toBe('data.cache');
   expect(first('чёрный')).toBe('privacy.blocked');
   expect(first('пароль')).toBe('privacy.password');
