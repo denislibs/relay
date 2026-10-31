@@ -190,9 +190,9 @@ export function Info() {
   } });
   // шапка справа: контакт — ✎ «Изменить», не контакт — «Добавить в контакты» (как в Telegram)
   const gInfo = (chat?.group as GroupInfo | null) ?? null, gMe = (chat?.me as MyMembership | null) ?? null;
-  const action = group ? (canManage(gMe) ? { icon: 'pencil', label: channel ? 'Изменить канал' : 'Изменить группу', onClick: () => nav.go('gEdit') } : undefined)
+  const action = group ? (canManage(gMe) ? { icon: 'write', label: channel ? 'Изменить канал' : 'Изменить группу', onClick: () => nav.go('gEdit') } : undefined)
     : !peerId || !contactsLoaded ? undefined
-    : contact ? { icon: 'userPen', label: 'Изменить контакт', onClick: () => setPage('edit') }
+    : contact ? { icon: 'write', label: 'Изменить контакт', onClick: () => setPage('edit') }
     : { icon: 'contactAdd', label: 'Добавить в контакты', onClick: addContact };
 
   // ряд кнопок под именем (как в Telegram Web K): вступить, звук, обсуждение, покинуть; у человека «Ещё» —
