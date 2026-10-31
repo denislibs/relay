@@ -273,6 +273,7 @@ export type ChatSummary = {
   last: Message | null;
   peer: { id: number; key: string; name: string; system?: true; photo?: ProfilePhoto | null } | null; // собеседник личного чата (key — ключ доступа к нему)
   peerReadUpTo: number; // до какого id мои сообщения прочитаны всеми остальными участниками
+  theme?: string | null;   // тема чата (id из каталога GET /themes)
   draft?: { text: string; at: string; entities?: Entity[] } | null; // черновик этого пользователя (синхронизируется между устройствами)
   sortAt?: string; // ключ сортировки списка (последнее сообщение или создание чата) — из него курсор страницы
   muteUntil?: number | null; // уведомления выключены: мс эпохи, 0 — навсегда, null — включены
@@ -314,7 +315,7 @@ export async function countChats(userId: number): Promise<number> {
 export async function listChats(userId: number, opts: ListOpts = {}): Promise<ChatSummary[]> {
   // время списка — с точностью до мс: курсор уходит клиенту в ISO (мс), иначе на стыке страниц теряются чаты одной миллисекунды
   const rows = await sql`
-    select c.id, c.kind, c.title, c.created_at as chat_created_at, cm.last_read_id,
+    select c.id, c.kind, c.title, c.theme, c.created_at as chat_created_at, cm.last_read_id,
            c.about, c.photo as g_photo, c.owner_id, c.rights as chat_rights, c.slow_mode, c.history_hidden, c.join_approval, c.username, c.reactions, c.protected, c.signatures, c.linked_chat_id, c.join_to_send,
            cm.mute_until, cm.mute_until = 'infinity' as mute_forever, cm.pinned_at, cm.archived, cm.archived_at_id, cm.unread_mark, cm.role, cm.admin_rights, cm.restricted, cm.history_from, cm.rank,
            coalesce(cs.seq, 0) as seq,
@@ -374,6 +375,7 @@ export async function listChats(userId: number, opts: ListOpts = {}): Promise<Ch
     unreadReactions: Number(r.unread_reactions ?? 0),
     peer: r.peer ? { id: (r.peer as { id: number }).id, key: peerKey(userId, (r.peer as { id: number }).id), name: (r.peer as { name: string }).name, photo: (r.peer as { photo?: ProfilePhoto | null }).photo ?? null, ...((r.peer as { system?: boolean }).system ? { system: true as const } : {}) } : null,
     peerReadUpTo: (r.peer_read_up_to as number) ?? 0,
+    theme: (r.theme as string | null) ?? null,
     sortAt: new Date(r.sort_at as string).toISOString(),
     muteUntil: muteFromDb(r.mute_until as Date | null, r.mute_forever as boolean | null),
     pinnedAt: r.pinned_at ? new Date(r.pinned_at as string).getTime() : null,

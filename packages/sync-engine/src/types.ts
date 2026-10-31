@@ -84,6 +84,7 @@ export interface LocalChat {
   draft?: { text: string; at: string; entities?: Entity[] } | null;   // неотправленный текст композера (общий для вкладок)
   pinned?: number[];      // закреплённые сообщения (новые сверху)
   muteUntil?: number | null;   // уведомления чата выключены до (мс), 0 — навсегда, null/нет — включены
+  theme?: string | null;       // тема чата: id готовой темы (GET /themes), общая для всех участников
   pinnedAt?: number | null;    // чат закреплён (мс; позже закреплённый — выше), null/нет — нет
   archived?: boolean;          // в архиве: не в «Все» и папках, а под строкой «Архив»
   archivedAtId?: number;       // граница архива (max id сообщений при архивировании): сообщение новее — операция unarchive

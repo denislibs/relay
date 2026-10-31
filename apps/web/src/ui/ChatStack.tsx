@@ -1,4 +1,5 @@
 import { requestMutation } from '@relay/ui';
+import { useChatThemeStyle } from '../chatTheme';
 import { useLayoutEffect, useRef, useState } from 'preact/hooks';
 import { activeFrame, useGlobal } from '../global';
 import { Chat } from './Chat';
@@ -65,8 +66,10 @@ function ChatColumn({ frame, chatId, threadId, place, instant, pending, swap }: 
   // swap — подмена нижнего чата: собранная скрытой колонка встаёт на место без перехода
   const cls = 'app-chatcol app-chatcol-' + pos + ((instant && !entered) || swap ? ' app-chatcol-instant' : '') + (pending && !swap ? ' app-chatcol-moving' : '');
   const hidden = on ? {} : { 'aria-hidden': true, inert: true };
+  // тема чата (chatTheme.ts): акцент и свои пузыри — переменными на колонке, поверх темы страницы
+  const themed = useChatThemeStyle(chatId);
   return (
-    <div ref={box} class={cls} data-current={on ? '' : undefined} {...hidden}>
+    <div ref={box} class={cls} data-current={on ? '' : undefined} style={themed?.style} data-out-filled={themed?.filled ? '' : undefined} {...hidden}>
       <Chat frameKey={frame} chatId={chatId} threadId={threadId} active={on} />
     </div>
   );

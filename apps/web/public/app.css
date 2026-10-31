@@ -1648,3 +1648,21 @@ html[data-anim="0"] .app-folder-sym { animation: none !important; }
 @keyframes app-setting-flash-title { 15%, 65% { color: var(--brand); } }
 @media (prefers-reduced-motion: reduce) { .app-setting-flash, .app-setting-flash-title, .app-ss, .app-ss-layer { animation: none !important; } }
 html[data-anim="0"] :is(.app-setting-flash, .app-setting-flash-title) { animation: none !important; }
+
+/* готовые темы плитками (как в Telegram Web): лента с прокруткой вбок; выбранная — кольцо акцента темы */
+.app-theme-tiles { display: flex; gap: 8px; overflow-x: auto; overscroll-behavior-x: contain; padding: 10px var(--space-4) 12px; scrollbar-width: none; scroll-snap-type: x proximity; }
+.app-theme-tiles::-webkit-scrollbar { display: none; }
+.app-theme-tile { position: relative; flex: none; width: 72px; height: 96px; padding: 0; border: 0; border-radius: 12px; overflow: visible; cursor: pointer; background: none; scroll-snap-align: start;
+  transition: transform var(--dur-instant) var(--ease-standard); }
+.app-theme-tile:active { transform: scale(0.96); }
+.app-theme-tile > .app-swatch-fill { position: absolute; inset: 0; width: auto; height: auto; border-radius: 12px; overflow: hidden; }
+.app-theme-tile::before { content: ''; position: absolute; inset: -4px; border: 2px solid var(--tile-ring); border-radius: 15px; opacity: 0; transform: scale(.88);
+  transition: opacity var(--dur-fast) var(--ease-standard), transform var(--dur-fast) var(--ease-out); pointer-events: none; }
+.app-theme-tile-on::before { opacity: 1; transform: none; }
+.app-theme-tile:focus-visible { outline: none; }
+.app-theme-tile:focus-visible::before { opacity: 1; transform: none; border-style: dashed; }
+.app-theme-pill { position: absolute; width: 40px; height: 20px; border-radius: 14px; box-shadow: 0 1px 1px rgba(0,0,0,.12); }
+.app-theme-pill-out { top: 8px; inset-inline-end: 6px; background: var(--tile-out); }
+.app-theme-pill-in { top: 32px; inset-inline-start: 6px; background: var(--tile-in); }
+.app-theme-emoji { position: absolute; inset-inline: 0; bottom: 8px; text-align: center; font: 26px/1 var(--font-emoji, inherit); }
+@media (prefers-reduced-motion: reduce) { .app-theme-tile, .app-theme-tile::before { transition: none; } }

@@ -7,7 +7,8 @@ import { startOwnMusic } from './profileLists';
 import { configureLottie, configureSpoilers, configureVoice, configureStickers, installSpoilers, loadPattern, onFullyIdle } from '@relay/ui';
 import { fetchBuild, onVisible, startUpdateCheck } from './update';
 import { claimMediaCache, sendMediaPolicy } from './storageInfo';
-import { getPrefs, isDark, subscribePrefs, type Prefs } from './prefs';
+import { getPrefs, isDark, resolveBase, subscribePrefs, type Prefs } from './prefs';
+import { loadCatalog } from './themes/catalog';   // до первого применения темы: выбранная готовая тема — из кэша каталога
 import { enableStrictDom } from '@relay/ui';
 import { render } from 'preact';
 import { closeAllChats, openChat, startData } from './data';
@@ -46,6 +47,7 @@ function start(me: Me, enter: 'login' | 'reload' = 'reload'): void {
   setTimeout(() => setGlobal({ enter: null }), 1000);   // анимации входа доиграли
   startDeviceAuth();   // привязать сеанс к ключу этого браузера и держать короткий доступ свежим
   startData(me, enter !== 'login');   // после входа — список, а не чат из адреса прошлого сеанса
+  void loadCatalog();   // готовые темы: свежий каталог (кэш уже применён)
   startMuteTimers();   // «Отключить звук» на время: таймер до ближайшего срока — перерисовать, когда чат включится
   startSettingsData(me);
   installJoinLinks();
@@ -152,7 +154,7 @@ installSpoilers();
 startUpdateCheck({ current: __BUILD__, fetchBuild, onUpdate: () => setGlobal({ updateReady: true }), onVisible });
 startScreenBlur();
 // узор обоев — файлом: начинаем грузить до первого рендера, чтобы он проявился вместе с градиентом
-void loadPattern(getPrefs().wallpaper[isDark(getPrefs().theme) ? 'dark' : 'light'].pattern).catch(() => {});
+void loadPattern(getPrefs().themes[resolveBase(getPrefs())].wallpaper.pattern).catch(() => {});
 render(<App />, document.getElementById('app')!);
 // каркас из index.html (boot.js → html[data-shell]) лежит под приложением, пока его колонки проявляются поверх такой же
 // картинки (app-enter-reload, 300 мс), — потом не нужен. Экран входа — сразу без каркаса
@@ -173,7 +175,7 @@ render(<App />, document.getElementById('app')!);
   // обои перерисовываются с переходом (300 мс) — снимок после него, в простое
   let wpTimer: ReturnType<typeof setTimeout> | undefined;
   const resnap = () => { clearTimeout(wpTimer); wpTimer = setTimeout(() => onFullyIdle(saveWallpaper), 1200); };
-  const wpOf = (p: Prefs) => JSON.stringify([p.theme, p.wallpaper]);
+  const wpOf = (p: Prefs) => JSON.stringify([p.theme, p.themes]);
   let wpKey = wpOf(getPrefs());
   subscribePrefs((p) => { const k = wpOf(p); if (k !== wpKey) { wpKey = k; resnap(); } });
   matchMedia('(prefers-color-scheme: dark)').addEventListener('change', resnap);

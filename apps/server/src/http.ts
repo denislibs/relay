@@ -26,6 +26,8 @@ import { searchMessages } from './domain/search';
 import { abortUpload, confirmUpload, createUpload, uploadParts, uploadStatus, downloadTtl, fileFor, signedDownload } from './domain/files';
 import { resolvePeer, resolvePeers } from './domain/peerRef';
 import { initPeerKeys } from './crypto/peerKey';
+import { THEMES } from './domain/themes';
+import { setChatTheme } from './domain/chatTheme';
 import { handleFrame } from './ws';
 import { pollVoters } from './domain/polls';
 import { mapTile } from './domain/mapTiles';
@@ -94,7 +96,7 @@ const PRE_PROOF_BYTES = 256 * 1024;
 export const WS_MAX_FRAME = 256 * 1024;
 /** кадров в секунду на сокет */
 const WS_RATE = 100;
-const API = /^\/(health|me|users|contacts|settings|privacy|blocks|chats|presence|search|uploads|files|push|sessions|session|ws|dev|logout|auth|link-preview|groups|join|sticker-sets|my-stickers|stickers-by-emoji|stickers|reactions|animated-emoji|emoji-groups|maptile)(\/|$)/;
+const API = /^\/(health|me|users|contacts|settings|privacy|blocks|chats|presence|search|uploads|files|push|sessions|session|ws|dev|logout|auth|link-preview|groups|join|sticker-sets|my-stickers|stickers-by-emoji|stickers|reactions|animated-emoji|emoji-groups|maptile|themes)(\/|$)/;
 
 export function createServer(opts: { port: number }): Server {
   // кадры мимо журнала — через Valkey, чтобы дошли до сокетов в любом процессе
@@ -174,6 +176,8 @@ export function createServer(opts: { port: number }): Server {
         if (ae) return ae;
         const eg = await emojiGroupsRoute(req, url);
         if (eg) return eg;
+        // каталог готовых тем (плитки и тема чата): статичный, клиент кэширует
+        if (req.method === 'GET' && url.pathname === '/themes') return Response.json({ themes: THEMES }, { headers: { 'cache-control': 'private, max-age=3600' } });
         if (req.method === 'GET' && url.pathname === '/me') {
           await ensureServiceChat(userId).catch((e) => console.warn('service chat', String(e)));   // «Relay» в списке у всех
           return Response.json(await getMe(userId));
@@ -234,6 +238,9 @@ export function createServer(opts: { port: number }): Server {
         if (req.method === 'PUT' && chatFlags) return Response.json(await setChatFlags(userId, Number(chatFlags[1]), await req.json().catch(() => null)));
         const chatUnarchive = /^\/chats\/(\d{1,15})\/unarchive$/.exec(url.pathname);
         if (req.method === 'POST' && chatUnarchive) return Response.json(await unarchiveByMessage(userId, Number(chatUnarchive[1]), await req.json().catch(() => null)));
+        // тема чата: { theme: id | null } (domain/chatTheme.ts)
+        const chatTheme = /^\/chats\/(\d{1,15})\/theme$/.exec(url.pathname);
+        if (req.method === 'PUT' && chatTheme) return Response.json(await setChatTheme(userId, Number(chatTheme[1]), ((await req.json().catch(() => null)) as { theme?: unknown } | null)?.theme ?? null));
         const chatNotify = /^\/chats\/(\d{1,15})\/notify$/.exec(url.pathname);
         if (req.method === 'PUT' && chatNotify) return Response.json(await setChatNotify(userId, Number(chatNotify[1]), await req.json().catch(() => null)));
         const privacyKey = /^\/privacy\/([a-zA-Z]{1,16})$/.exec(url.pathname);
