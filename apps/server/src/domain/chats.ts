@@ -1,3 +1,4 @@
+import { shredHistory } from './shred';
 import { shownPoll, withPolls, type PollDef } from './polls';
 import type { Attachment, ContactCard, Dice, GeoPoint } from '@relay/protocol';
 import { graphemes, GROUP_ABOUT_MAX, normalizeEntities, type Entity, type Block, type ForwardInfo, type LinkPreview, type MediaCounts, type MediaTab, type Message, type MessageButton, type ProfilePhoto, type ServiceData, type ServiceType, type StickerRef, type Todo } from '@relay/protocol';
@@ -539,8 +540,8 @@ export async function deleteDirectChat(userId: number, chatId: number, forAll: b
       // «удалить у обоих»: прошлое уничтожается по-настоящему — старые версии ключа чата удаляются (не открыть ни
       // в базе, ни в бэкапах после срока хранения ключей), строки до шифрования — стираются
       await shredChatHistory(tx, chatId);
-      await tx`update messages set body = '', entities = null, todo = null, blocks = null, link = null, content = null
-                where chat_id = ${chatId} and id < ${from} and content is null and body <> ''`;
+      // и то, что на прошлое ссылается: файлы без других ссылок теряют ключ, документы поиска удаляются (shred.ts)
+      await shredHistory(tx, chatId, from);
     }
     await fanOut(tx, who, { type: 'chatRemoved', chatId });
     return { ok: true };

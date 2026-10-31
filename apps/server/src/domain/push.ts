@@ -204,7 +204,8 @@ export async function deliverPush(endpoint: string, push: PushPayload): Promise<
     headers: { authorization: await vapidHeader(endpoint), 'content-encoding': 'aes128gcm', 'content-type': 'application/octet-stream', ttl: '86400', urgency: 'high' },
     body: await encryptPayload(s.p256dh as string, s.auth as string, plain),
     signal: AbortSignal.timeout(PUSH_TIMEOUT_MS),
-  });
+    decompress: false,   // адрес push-сервиса задаёт клиент: его ответ не распаковываем (CVE-2026-111497)
+  } as RequestInit);
   if (res.status === 404 || res.status === 410) { await sql`delete from push_subscriptions where endpoint = ${endpoint}`; return; }
   if (res.status === 429 || res.status >= 500) throw new Error(`push service ${res.status}`);
   if (!res.ok) throw new PermanentError(`push service ${res.status}`);

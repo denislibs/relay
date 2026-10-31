@@ -82,6 +82,21 @@ export async function syncMessages(ids: number[]): Promise<void> {
   await Promise.all(tasks);
 }
 
+/**
+ * Уничтоженная история чата (CRYPTO-1): документы чата ниже below (null — все) удаляются из индекса фильтром.
+ * Токены этих сообщений больше ничего не находят — даже тем, у кого есть ключ поиска.
+ */
+export async function purgeChatIndex(chatId: number, below: number | null): Promise<void> {
+  const filter = below == null ? `chatId = ${Number(chatId)}` : `chatId = ${Number(chatId)} AND id < ${Number(below)}`;
+  for (const uid of await targets()) {
+    try {
+      await waitTask((await meili<{ taskUid: number }>(`/indexes/${uid}/documents/delete`, { method: 'POST', body: { filter } })).taskUid);
+    } catch (e) {
+      if (!(e instanceof MeiliError && e.code === 'index_not_found')) throw e;
+    }
+  }
+}
+
 export async function searchIds(q: string, chatIds: number[], opts: { beforeId?: number; limit: number }): Promise<number[]> {
   if (!chatIds.length) return [];
   const tokens = await queryTokens(q);

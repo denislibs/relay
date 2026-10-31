@@ -549,6 +549,10 @@ export async function transferGroupOwnership(userId: number, chatId: number, tar
 async function deleteGroupTx(tx: Tx, chatId: number): Promise<void> {
   const [c] = await tx`select linked_chat_id from chats where id = ${chatId}`;
   await tx`update chats set deleted_at = now(), linked_chat_id = null where id = ${chatId}`;
+  // ключи — сразу, не дожидаясь постраничной чистки (CRYPTO-7): ей они не нужны, а отправка в удалённый чат закрыта.
+  // Триггер NOTIFY chat_keys сбрасывает кэши ключей во всех процессах. Документы поиска — тоже сразу
+  await tx`delete from keys.chat_keys where chat_id = ${chatId}`;
+  await enqueue(tx, 'search.purgeChat', { chatId, below: null }, { dedupeKey: `search.purgeChat:${chatId}:all` });
   await dropPersonalChannel(tx, chatId);
   // зрители превью (не участники: им не придёт chatRemoved) — после коммита кадр «чата нет» в топик чата: клиент
   // убирает чат у себя, без syncChat (на канале в 200 000 онлайн — ни одного чтения журнала); участникам chatRemoved — от chat.purge

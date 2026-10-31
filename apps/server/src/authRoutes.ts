@@ -1,9 +1,9 @@
 import type { Server } from 'bun';
-import { createSession, hashToken, sessionCookie, type LoginMethod } from './auth';
+import { clearLegacySessionCookie, createSession, hashToken, sessionCookie, type LoginMethod } from './auth';
 import { accessCookie, clearAccessCookie, deviceProof, issueAccess, sameKey } from './deviceAuth';
 import { DomainError } from './domain/errors';
 import { sql } from './db';
-import { clientIp, parseDevice } from './device';
+import { clientIp, devAllowed, parseDevice } from './device';
 import { devOutbox } from './domain/devOutbox';
 import { requestCode, signIn } from './domain/login';
 import { deletePasskey, finishLogin, listPasskeys, loginOptions, registerPasskey, registrationOptions } from './domain/passkeys';
@@ -50,6 +50,7 @@ async function reply(step: LoginStep, req: Request, server: Server, device: Uint
   if (!step.session.fresh) await announceLogin(userId, token);
   const h = new Headers();
   h.append('set-cookie', sessionCookie(token));
+  h.append('set-cookie', clearLegacySessionCookie());   // прежнее имя (до __Host-) — прочь
   if (device) {
     const [s] = await sql`select id from sessions where token_hash = ${hashToken(token)}`;
     h.append('set-cookie', accessCookie(await issueAccess(Number(s.id))));
@@ -63,7 +64,7 @@ export async function publicAuthRoute(req: Request, url: URL, server: Server): P
   if (post && !signInRequestOk(req)) return Response.json({ code: 'bad_frame' }, { status: 400 });
 
   if (req.method === 'GET' && p === '/auth/config') return Response.json({ dev: process.env.DEV_LOGIN === '1' });
-  if (req.method === 'GET' && p === '/dev/codes' && process.env.DEV_LOGIN === '1') return Response.json({ items: await devOutbox() });
+  if (req.method === 'GET' && p === '/dev/codes' && devAllowed(req, server)) return Response.json({ items: await devOutbox() });
 
   if (post && p === '/auth/code') {
     const { login } = await body(req);
