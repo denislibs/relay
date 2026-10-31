@@ -348,6 +348,9 @@ export interface PublicUser {
   /** системный пользователь «Relay»: служебные уведомления, ответить нельзя */
   system?: true;
   id: Id; name: string; firstName: string; lastName: string;
+  /** ключ доступа зрителя к этому человеку (как access_hash): нужен, чтобы обратиться к нему по id —
+   *  личный чат, группа, контакт, блок, карточка контакта, исключения приватности. У себя самого — нет. */
+  key?: string;
   username: string | null; bio: string | null; birthday: Birthday | null; phone: string | null;
   links: ProfileLink[];   // ссылки на профили в других сервисах, в порядке владельца; видны всем
   /** фото профиля; null — нет или зритель заблокирован */
@@ -408,7 +411,7 @@ export type ClientFrame =
   // превью публичного канала: push'и канала в этот сокет без подписки, пока превью открыто; ack.result — {seq}
   | { op: 'watchChat'; reqId: string; chatId: Id }
   | { op: 'unwatchChat'; chatId: Id }
-  | { op: 'send'; reqId: string; clientId: string; chatId: Id; body: string; entities?: Entity[]; replyToId?: Id | null; attachment?: { id: string; thumb?: string | null; spoiler?: boolean } | null; groupId?: string | null; forward?: ForwardRef | null; noLinkPreview?: boolean; blocks?: Block[] | null; todo?: TodoInput; poll?: PollInput; contact?: { userId: Id }; geo?: GeoPoint; dice?: { emoji: DiceEmoji }; sticker?: { id: Id } | null; threadId?: Id; draftHash?: string | null }   // threadId — комментарий в треде (группа обсуждения)
+  | { op: 'send'; reqId: string; clientId: string; chatId: Id; body: string; entities?: Entity[]; replyToId?: Id | null; attachment?: { id: string; thumb?: string | null; spoiler?: boolean } | null; groupId?: string | null; forward?: ForwardRef | null; noLinkPreview?: boolean; blocks?: Block[] | null; todo?: TodoInput; poll?: PollInput; contact?: { userId: Id; key?: string; via?: { chatId: Id; messageId: Id } }; geo?: GeoPoint; dice?: { emoji: DiceEmoji }; sticker?: { id: Id } | null; threadId?: Id; draftHash?: string | null }   // threadId — комментарий в треде (группа обсуждения)
   | { op: 'read'; reqId: string; chatId: Id; upToId: Id }
   | { op: 'typing'; chatId: Id }   // «печатаю» — без ответа, сервер пересылает остальным участникам
   // клики по большому эмодзи (только личный чат): t — секунды от первого клика пачки; сервер пересылает собеседнику, в журнал не пишет
@@ -520,10 +523,14 @@ export function parseClientFrame(raw: string): ClientFrame | null {
       if (f.geo != null && !normalizeGeo(f.geo)) return null;
       if (f.dice != null && !isDiceEmoji((f.dice as { emoji?: unknown }).emoji)) return null;
       if (f.contact != null && !int((f.contact as { userId?: unknown }).userId)) return null;
+      // кем поделиться — ссылка как на любого человека: ключ доступа или сообщение, где он назван (domain/peerRef.ts)
+      const cKey = (f.contact as { key?: unknown } | null)?.key, cVia = (f.contact as { via?: { chatId?: unknown; messageId?: unknown } } | null)?.via;
+      if (f.contact != null && cKey !== undefined && typeof cKey !== 'string') return null;
+      if (f.contact != null && cVia !== undefined && (!cVia || typeof cVia !== 'object' || !int(cVia.chatId) || !int(cVia.messageId))) return null;
       if (f.sticker != null && (typeof f.sticker !== 'object' || !int((f.sticker as { id: unknown }).id))) return null;
       if (f.threadId != null && !int(f.threadId)) return null;
       if (f.draftHash != null && !(typeof f.draftHash === 'string' && DRAFT_HASH.test(f.draftHash))) return null;
-      return { op: 'send', ...(f.draftHash !== undefined ? { draftHash: f.draftHash as string | null } : {}), ...(f.threadId != null ? { threadId: f.threadId as number } : {}), ...(f.sticker != null ? { sticker: { id: (f.sticker as { id: number }).id } } : {}), ...(f.todo != null ? { todo: normalizeTodo(f.todo)! } : {}), ...(f.poll != null ? { poll: normalizePoll(f.poll)! } : {}), ...(f.geo != null ? { geo: normalizeGeo(f.geo)! } : {}), ...(f.dice != null ? { dice: { emoji: (f.dice as { emoji: DiceEmoji }).emoji } } : {}), ...(f.contact != null ? { contact: { userId: (f.contact as { userId: number }).userId } } : {}), reqId: f.reqId, clientId: f.clientId, chatId: f.chatId, body: f.body, entities: normalizeEntities(f.body, f.entities), replyToId: (f.replyToId as number | null) ?? null, attachment: (f.attachment as { id: string; thumb?: string | null; spoiler?: boolean } | null) ?? null, groupId: (f.groupId as string | null) ?? null, forward, ...(f.noLinkPreview === true ? { noLinkPreview: true } : {}), ...(Array.isArray(f.blocks) ? { blocks: f.blocks as Block[] } : {}) };
+      return { op: 'send', ...(f.draftHash !== undefined ? { draftHash: f.draftHash as string | null } : {}), ...(f.threadId != null ? { threadId: f.threadId as number } : {}), ...(f.sticker != null ? { sticker: { id: (f.sticker as { id: number }).id } } : {}), ...(f.todo != null ? { todo: normalizeTodo(f.todo)! } : {}), ...(f.poll != null ? { poll: normalizePoll(f.poll)! } : {}), ...(f.geo != null ? { geo: normalizeGeo(f.geo)! } : {}), ...(f.dice != null ? { dice: { emoji: (f.dice as { emoji: DiceEmoji }).emoji } } : {}), ...(f.contact != null ? { contact: { userId: (f.contact as { userId: number }).userId, ...(typeof cKey === 'string' ? { key: cKey } : {}), ...(cVia ? { via: { chatId: Number(cVia.chatId), messageId: Number(cVia.messageId) } } : {}) } } : {}), reqId: f.reqId, clientId: f.clientId, chatId: f.chatId, body: f.body, entities: normalizeEntities(f.body, f.entities), replyToId: (f.replyToId as number | null) ?? null, attachment: (f.attachment as { id: string; thumb?: string | null; spoiler?: boolean } | null) ?? null, groupId: (f.groupId as string | null) ?? null, forward, ...(f.noLinkPreview === true ? { noLinkPreview: true } : {}), ...(Array.isArray(f.blocks) ? { blocks: f.blocks as Block[] } : {}) };
     case 'read':
       return str(f.reqId, 64) && int(f.chatId) && int(f.upToId) ? { op: 'read', reqId: f.reqId, chatId: f.chatId, upToId: f.upToId } : null;
     default: return null;

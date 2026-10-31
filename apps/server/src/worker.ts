@@ -1,4 +1,5 @@
 import { sql } from './db';
+import { initPeerKeys } from './crypto/peerKey';
 import { SLOW_KINDS } from './jobs/kinds';
 import { enqueue, ensurePeriodic } from './jobs/queue';
 import { startWorker } from './jobs/worker';
@@ -15,6 +16,7 @@ import { scheduleReindexIfStale } from './search/messagesIndex';
     if (/^relay-(video|photo)-/.test(d)) await rm(join(tmpdir(), d), { recursive: true, force: true }).catch(() => {});
   }
 }
+await initPeerKeys();   // задачи публикуют профили (PublicUser несёт ключ доступа)
 await ensurePeriodic('sessions.sweep');
 await ensurePeriodic('uploads.sweep');
 await ensurePeriodic('storage.gc');

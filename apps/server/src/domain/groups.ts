@@ -1,3 +1,4 @@
+import { peerKey } from '../crypto/peerKey';
 import {
   emojiKey, graphemes, normalizeAdminRights, normalizeRights, narrowRights, allAdminRights, ADMIN_RIGHTS_BY_KIND, GROUP_ABOUT_MAX, MEMBERS_MAX, RANK_MAX, SLOW_MODES,
   type AdminRights, type CommunityKind, type ProfilePhoto, type BannedMember, type GroupMember, type GroupReactions, type GroupRole, type Message, type MemberRights, type ServiceData, type ServiceType,
@@ -255,6 +256,7 @@ export async function listGroupMembers(viewer: number, chatId: number, filter = 
     members: rows.map((r) => ({
       ...(Number(r.id) === viewer ? { online: true, lastSeen: null } : (({ online, lastSeen }) => ({ online, lastSeen }))(presenceFor(viewer, Number(r.id), r.last_seen_at, pctx, online.has(Number(r.id))))),
       userId: Number(r.id),
+      ...(Number(r.id) !== viewer ? { key: peerKey(viewer, Number(r.id)) } : {}),
       name: r.name as string,
       username: (r.username as string | null) ?? null,
       photo: (r.photo as GroupMember['photo']) ?? null,

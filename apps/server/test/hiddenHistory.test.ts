@@ -8,7 +8,7 @@ import { startRealtime } from '../src/realtime';
 import { sendMessage } from '../src/domain/messages';
 import { editMessage } from '../src/domain/messageOps';
 import { deleteDirectChat } from '../src/domain/chats';
-import { makeChat, resetDb, uploadFile } from './helpers';
+import { makeChat, resetDb, uploadFile, refs } from './helpers';
 
 const server = createServer({ port: 0 });
 const stopRealtime = await startRealtime(server);
@@ -30,12 +30,12 @@ const send = (u: U, chatId: number, body: string, attachment?: { id: string }) =
 /** Группа a+b, в ней старый текст и старый файл; история скрыта; c вступает позже. */
 async function hiddenGroup() {
   const a = await login('Анна'), b = await login('Борис'), c = await login('Вера');
-  const id = (await ok(a, 'POST', '/chats', { title: 'Дача', memberIds: [b.userId] })).id as number;
+  const id = (await ok(a, 'POST', '/chats', { title: 'Дача', members: refs(a.userId, [b.userId]) })).id as number;
   const old = (await send(a, id, 'тайное слово до вступления')).message;
   const file = await uploadFile(base, a.token, { name: 'план.pdf', mime: 'application/pdf' }, 'pdf-bytes');
   const oldFile = (await send(a, id, '', { id: file.id as string })).message;
   await ok(a, 'PUT', `/groups/${id}/settings`, { historyHidden: true });
-  await ok(a, 'POST', `/groups/${id}/members`, { userIds: [c.userId] });
+  await ok(a, 'POST', `/groups/${id}/members`, { users: refs(a.userId, [c.userId]) });
   return { a, b, c, id, old, oldFile, fileId: file.id as string };
 }
 
@@ -97,7 +97,7 @@ test('CRYPTO-2: a file forwarded elsewhere keeps its key when the original chat 
 
 test('CRYPTO-7: deleting a group destroys its keys at once, before the paged purge', async () => {
   const a = await login('Анна'), b = await login('Борис');
-  const id = (await ok(a, 'POST', '/chats', { title: 'Дача', memberIds: [b.userId] })).id as number;
+  const id = (await ok(a, 'POST', '/chats', { title: 'Дача', members: refs(a.userId, [b.userId]) })).id as number;
   await send(a, id, 'что-то');
   expect((await sql`select 1 from keys.chat_keys where chat_id = ${id}`).length).toBeGreaterThan(0);
   await ok(a, 'DELETE', `/groups/${id}`);

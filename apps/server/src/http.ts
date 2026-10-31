@@ -13,7 +13,7 @@ import { countViews } from './domain/views';
 import { getThread, readThread } from './domain/threads';
 import { readBy } from './domain/reads';
 import { readReactions, unreadReactions } from './domain/reactionsUnread';
-import { commonGroups, deleteDirectChat, createChat, createGroup, openDirect, messageAtDate, getChatMedia, getMediaDays, getChatMediaCounts, getHistory, getMessagesByIds, listChats, listChatsPage } from './domain/chats';
+import { commonGroups, deleteDirectChat, createChat, createGroup, GROUP_MEMBERS_MAX, openDirect, messageAtDate, getChatMedia, getMediaDays, getChatMediaCounts, getHistory, getMessagesByIds, listChats, listChatsPage } from './domain/chats';
 import { sql } from './db';
 import { DomainError } from './domain/errors';
 import { setChatNotify } from './domain/chatNotify';
@@ -24,6 +24,8 @@ import { processAlive } from './domain/liveRegistry';
 import { chatMembers, connected, disconnected, listPresence, type Publish } from './domain/presence';
 import { searchMessages } from './domain/search';
 import { abortUpload, confirmUpload, createUpload, uploadParts, uploadStatus, downloadTtl, fileFor, signedDownload } from './domain/files';
+import { resolvePeer, resolvePeers } from './domain/peerRef';
+import { initPeerKeys } from './crypto/peerKey';
 import { handleFrame } from './ws';
 import { pollVoters } from './domain/polls';
 import { mapTile } from './domain/mapTiles';
@@ -113,6 +115,7 @@ export function createServer(opts: { port: number }): Server {
   const server = Bun.serve<WsData>({
     port: opts.port,
     fetch: async (req, server) => withCookie(req, await (async () => {
+      await initPeerKeys();   // секрет ключей доступа к людям (один раз; дальше — готовое обещание). WebSocket приходит сюда же (upgrade)
       const url = new URL(req.url);
       try {
         if (url.pathname === '/health') return Response.json({ ok: true });
@@ -279,12 +282,16 @@ export function createServer(opts: { port: number }): Server {
         }
         // новая группа или канал ({kind: 'channel'}; создатель — текущий пользователь) и личный чат с человеком (существующий или новый)
         if (req.method === 'POST' && url.pathname === '/chats') {
-          const { chatId } = await createGroup(userId, (await req.json().catch(() => ({}))) as { kind?: unknown; title?: unknown; about?: unknown; memberIds?: unknown });
+          const b = (await req.json().catch(() => ({}))) as { kind?: unknown; title?: unknown; about?: unknown; members?: unknown };
+          // участники — ссылками {id, key} (ключ доступа, crypto/peerKey.ts): голый id ничего не открывает
+          const memberIds = b.members === undefined ? undefined : await resolvePeers(sql, userId, b.members, GROUP_MEMBERS_MAX, 'members');
+          const { chatId } = await createGroup(userId, { kind: b.kind, title: b.title, about: b.about, memberIds });
           return Response.json({ id: chatId });
         }
         if (req.method === 'POST' && url.pathname === '/chats/direct') {
-          const body = (await req.json().catch(() => ({}))) as { userId?: unknown };
-          return Response.json({ id: await openDirect(userId, body.userId) });
+          // {userId, key} или {userId, via: {chatId, messageId}} — человек из сообщения (карточка контакта, «переслано от»)
+          const body = (await req.json().catch(() => ({}))) as Record<string, unknown>;
+          return Response.json({ id: await openDirect(userId, await resolvePeer(sql, userId, body)) });
         }
         if (devAllowed(req, server) && req.method === 'POST' && url.pathname === '/dev/chats') {
           const { kind, title, memberIds } = (await req.json()) as { kind: 'direct' | 'group' | 'channel'; title: string | null; memberIds: number[] };

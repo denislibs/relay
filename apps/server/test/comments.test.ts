@@ -13,7 +13,7 @@ import { PUSH_PAGE } from '../src/jobs/kinds';
 import { drainJobs, runJob } from '../src/jobs/worker';
 import { claim } from '../src/jobs/queue';
 import { markRead } from '../src/domain/reads';
-import { chatEventsOf, journalOf, nextFrame, opened, pushBrowser, resetDb, uploadFile } from './helpers';
+import { chatEventsOf, journalOf, nextFrame, opened, pushBrowser, resetDb, uploadFile, refs, ref } from './helpers';
 
 const server = createServer({ port: 0 });
 const stopRealtime = await startRealtime(server);   // push групп и треды гостей (watchThread)
@@ -32,8 +32,8 @@ const ok = async (u: U, method: string, path: string, body?: unknown) => {
   if (r.status !== 200) throw new Error(`${method} ${path} → ${r.status} ${await r.text()}`);
   return r.json() as Promise<any>;
 };
-const channel = async (owner: U, members: U[] = []) => (await ok(owner, 'POST', '/chats', { kind: 'channel', title: 'Новости', memberIds: members.map((m) => m.userId) })).id as number;
-const group = async (owner: U, members: U[], title = 'Обсуждение') => (await ok(owner, 'POST', '/chats', { title, memberIds: members.map((m) => m.userId) })).id as number;
+const channel = async (owner: U, members: U[] = []) => (await ok(owner, 'POST', '/chats', { kind: 'channel', title: 'Новости', members: refs(owner.userId, members.map((m) => m.userId)) })).id as number;
+const group = async (owner: U, members: U[], title = 'Обсуждение') => (await ok(owner, 'POST', '/chats', { title, members: refs(owner.userId, members.map((m) => m.userId)) })).id as number;
 const send = (u: U, chatId: number, body: string, extra: Record<string, unknown> = {}) => sendMessage(u.userId, { chatId, clientId: crypto.randomUUID(), body, ...extra }).then((r) => r.message);
 const comment = (u: U, g: number, threadId: number, body = 'коммент', extra: Record<string, unknown> = {}) => send(u, g, body, { threadId, ...extra });
 const copyOf = async (ch: number, postId: number) => {
@@ -123,7 +123,7 @@ test('the copy is managed only through the post: edit, delete, checklist toggle 
   const t = await send(a, ch, '', { todo: { title: 'План', items: [{ title: 'раз' }], othersCanAppend: true, othersCanComplete: true } });
   await expect(toggleTodo(a.userId, g, (await copyOf(ch, t.id))!, [1], [])).rejects.toMatchObject({ code: 'forbidden' });
   // пересылка копии — как пересылка поста: от имени канала, ссылкой на пост
-  const dm = (await ok(b, 'POST', '/chats/direct', { userId: a.userId })).id as number;
+  const dm = (await ok(b, 'POST', '/chats/direct', ref(b.userId, a.userId))).id as number;
   const fwd = await send(b, dm, '', { forward: { chatId: g, id: copyId } });
   expect(fwd.fwdFrom).toMatchObject({ userId: null, name: 'Новости', chatId: ch, messageId: p.id });
   // закреп в группе — можно
@@ -399,7 +399,7 @@ test('a channel subscriber outside the group reads the thread (all comments, gue
   expect((await call(d, 'GET', `/chats/${g}/messages?limit=10`)).status).toBe(403);   // лента группы — только участникам
   // профили комментаторов гостю видны (имя над комментарием); участник группы, не писавший в треды, — нет
   const quiet = await login('Тихий');
-  await ok(a, 'POST', `/groups/${g}/members`, { userIds: [quiet.userId] });
+  await ok(a, 'POST', `/groups/${g}/members`, { users: refs(a.userId, [quiet.userId]) });
   const seen = (await ok(d, 'GET', `/users?ids=${b.userId},${quiet.userId}`)).users.map((u: any) => u.id);
   expect(seen).toEqual([b.userId]);
   void a;
@@ -419,15 +419,15 @@ test('neither in the channel nor in the group → not_member everywhere; a copy 
   expect((await call(d, 'GET', `/chats/${g}/threads/${copyId}/messages`)).status).toBe(403);
   // перепривязка: тред старой группы гостю закрыт (группа уже не обсуждение этого канала)
   const e = await login('Ева');
-  await ok(a, 'POST', `/groups/${ch}/members`, { userIds: [e.userId] });
+  await ok(a, 'POST', `/groups/${ch}/members`, { users: refs(a.userId, [e.userId]) });
   expect((await ok(e, 'GET', `/chats/${g}/threads/${copyId}/messages`)).guest).toMatchObject({ channelId: ch });
   await setLinkedChat(a.userId, ch, await group(a, [e], 'Новое'));
   expect((await call(e, 'GET', `/chats/${g}/threads/${copyId}/messages`)).status).toBe(403);
   // исключённый из группы — не гость
   const f = await login('Фёдор');
-  await ok(a, 'POST', `/groups/${ch}/members`, { userIds: [f.userId] });
+  await ok(a, 'POST', `/groups/${ch}/members`, { users: refs(a.userId, [f.userId]) });
   await setLinkedChat(a.userId, ch, g);
-  await ok(a, 'POST', `/groups/${g}/members`, { userIds: [f.userId] });
+  await ok(a, 'POST', `/groups/${g}/members`, { users: refs(a.userId, [f.userId]) });
   await ok(a, 'DELETE', `/groups/${g}/members/${f.userId}`);
   await sql`insert into chat_bans (chat_id, user_id, banned_by) values (${g}, ${f.userId}, ${a.userId}) on conflict do nothing`;
   await expect(comment(f, g, copyId)).rejects.toMatchObject({ code: 'not_member' });
@@ -458,7 +458,7 @@ test('join_to_send: set by group admins, round-trips in GroupInfo; guests read b
   const x = await login('Чужой');
   expect((await call(x, 'POST', `/groups/${g}/join`)).status).toBe(404);
   const e = await login('Ева');
-  await ok(a, 'POST', `/groups/${ch}/members`, { userIds: [e.userId] });
+  await ok(a, 'POST', `/groups/${ch}/members`, { users: refs(a.userId, [e.userId]) });
   expect(await ok(e, 'POST', `/groups/${g}/join`)).toEqual({ chatId: g, requested: false });
 });
 
@@ -541,7 +541,7 @@ test('guest thread subscriptions are revoked: leaving the channel, relinking —
   expect(got.some((f) => f.op === 'threadPush')).toBe(false);
   // перепривязка: подписка гостя на тред старой группы снимается (по groupUpdated), в том числе в чужом процессе
   const e = await login('Ева');
-  await ok(a, 'POST', `/groups/${ch}/members`, { userIds: [e.userId] });
+  await ok(a, 'POST', `/groups/${ch}/members`, { users: refs(a.userId, [e.userId]) });
   const we = await connect(e);
   expect(await frame(we, { op: 'watchThread', reqId: 'w2', chatId: g, threadId: copyId })).toMatchObject({ op: 'ack', result: { guest: true } });
   const gotE = collect(we);
@@ -556,8 +556,8 @@ test('guest thread subscriptions are revoked: leaving the channel, relinking —
 test('restrictions survive leaving the group: the guest keeps the member exception and the hidden-history boundary; rejoining from the thread too; admin re-add clears', async () => {
   const { a, b, ch, g, copyId } = await guests();
   const r = await login('Рома');
-  await ok(a, 'POST', `/groups/${ch}/members`, { userIds: [r.userId] });
-  await ok(a, 'POST', `/groups/${g}/members`, { userIds: [r.userId] });
+  await ok(a, 'POST', `/groups/${ch}/members`, { users: refs(a.userId, [r.userId]) });
+  await ok(a, 'POST', `/groups/${g}/members`, { users: refs(a.userId, [r.userId]) });
   const k1 = await comment(b, g, copyId, 'до');
   await ok(a, 'PUT', `/groups/${g}/members/${r.userId}/restrict`, { rights: { text: false } });
   await sql`update chat_members set history_from = ${k1.id + 1} where chat_id = ${g} and user_id = ${r.userId}`;
@@ -573,7 +573,7 @@ test('restrictions survive leaving the group: the guest keeps the member excepti
   await expect(comment(r, g, copyId, 'вернулся')).rejects.toMatchObject({ code: 'forbidden' });
   // снова вышел; админ добавил — ограничения сняты
   await ok(r, 'DELETE', `/groups/${g}/members/${r.userId}`);
-  await ok(a, 'POST', `/groups/${g}/members`, { userIds: [r.userId] });
+  await ok(a, 'POST', `/groups/${g}/members`, { users: refs(a.userId, [r.userId]) });
   expect((await ok(r, 'GET', '/chats?ids=' + g))[0].me).toMatchObject({ restricted: false, rights: { text: true } });
   await comment(r, g, copyId, 'можно');
   expect((await sql`select 1 from chat_restrictions where chat_id = ${g} and user_id = ${r.userId}`).length).toBe(0);
@@ -592,7 +592,7 @@ test('profiles: a guest sees authors of the thread, group members see guest comm
   expect((await ok(x, 'GET', `/users?ids=${b.userId},${d.userId}`)).users).toEqual([]);   // ни в канале, ни в группе
   // комментарий в группе, но не в треде этого канала (сообщение вне треда) — гостю не виден
   const q = await login('Квентин');
-  await ok(a, 'POST', `/groups/${g}/members`, { userIds: [q.userId] });
+  await ok(a, 'POST', `/groups/${g}/members`, { users: refs(a.userId, [q.userId]) });
   await send(q, g, 'просто в группе');
   expect((await ok(d, 'GET', `/users?ids=${q.userId}`)).users).toEqual([]);
   // гость в бане группы — авторов не видит

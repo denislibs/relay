@@ -107,7 +107,7 @@ export interface ChatSummary {
   unreadMentions?: number;   // непрочитанные упоминания меня (основная лента и треды)
   unreadReactions?: number;  // непрочитанные реакции на мои сообщения
   last: Message | null;
-  peer?: { id: number; name: string; system?: true; photo?: ProfilePhoto | null } | null;
+  peer?: { id: number; key?: string; name: string; system?: true; photo?: ProfilePhoto | null } | null;
   peerReadUpTo?: number;
   group?: GroupInfo;
   me?: MyMembership;

@@ -3,7 +3,7 @@ import type { Update } from '@relay/protocol';
 import { sql } from '../src/db';
 import { createServer } from '../src/http';
 import { getUpdates } from '../src/domain/journal';
-import { makeChat, resetDb } from './helpers';
+import { makeChat, resetDb, refs } from './helpers';
 
 // Личный канал в профиле (как в Telegram): владелец публичного канала показывает его в профиле. Поле едет userUpdated;
 // канал стал приватным, сменил владельца или удалён — поле сбрасывается само, зрителям — исправленный профиль.
@@ -27,7 +27,7 @@ const userUpdates = async (u: U) => (await getUpdates(u.userId, 0)).items.map((i
 const lastSeen = async (viewer: U, of: U) => (await userUpdates(viewer)).filter((x) => x.user.id === of.userId).at(-1)?.user;
 
 async function channel(owner: U, username: string | null, title = 'Новости', members: U[] = []): Promise<number> {
-  const id = (await ok(owner, 'POST', '/chats', { kind: 'channel', title, memberIds: members.map((m) => m.userId) })).id as number;
+  const id = (await ok(owner, 'POST', '/chats', { kind: 'channel', title, members: refs(owner.userId, members.map((m) => m.userId)) })).id as number;
   if (username) await ok(owner, 'PUT', `/groups/${id}/username`, { username });
   return id;
 }
@@ -56,7 +56,7 @@ test('only an own public live channel: a foreign, private, deleted channel or a 
   const priv = await channel(a, null);
   const gone = await channel(a, 'gone_news');
   await ok(a, 'DELETE', `/groups/${gone}`);
-  const group = (await ok(a, 'POST', '/chats', { kind: 'group', title: 'Дача', memberIds: [b.userId] })).id as number;
+  const group = (await ok(a, 'POST', '/chats', { kind: 'group', title: 'Дача', members: refs(a.userId, [b.userId]) })).id as number;
 
   expect(await code(a, 'PATCH', '/me', { personalChannelId: foreign })).toEqual([403, 'forbidden']);
   expect(await code(a, 'PATCH', '/me', { personalChannelId: priv })).toEqual([403, 'forbidden']);
@@ -76,7 +76,7 @@ test('GET /me/personal-channels lists only own public live channels, by title', 
   await ok(a, 'DELETE', `/groups/${gone}`);
   const foreign = await channel(b, 'boris_news', 'Борис', [a]);
   await ok(b, 'PUT', `/groups/${foreign}/admins/${a.userId}`, { rights: { info: true } });
-  await ok(a, 'POST', '/chats', { kind: 'group', title: 'Дача', memberIds: [b.userId] });
+  await ok(a, 'POST', '/chats', { kind: 'group', title: 'Дача', members: refs(a.userId, [b.userId]) });
   const { channels } = await ok(a, 'GET', '/me/personal-channels');
   expect(channels).toEqual([
     { id: x, title: 'Арбузы', username: 'alpha_news', photo: null, members: 1 },

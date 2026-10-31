@@ -991,6 +991,21 @@ export class Engine {
     });
   }
 
+  /**
+   * Ключ доступа к человеку для запросов «по id» (личный чат, группа, карточка контакта). Есть в профиле из кэша — его;
+   * нет (профиль из старого кэша, человек ещё не загружен) — один GET /users?ids=: сервер отдаёт профиль с ключом,
+   * только если зритель этого человека видит. Не видит — null: интерфейс обращается через сообщение (via) или никак.
+   */
+  private async peerKeyOf(userId: number): Promise<string | null> {
+    const known = this.store.users.get(userId)?.key;
+    if (known) return known;
+    let r: { users: PublicUser[]; seq: number };
+    try { r = await this.http(`/users?ids=${userId}`); } catch { return null; }
+    for (const u of r.users) applyUserUpdated(this.store, u, r.seq);
+    if (r.users.length) { await this.store.flush(); this.changed(); }
+    return r.users.find((u) => u.id === userId)?.key ?? null;
+  }
+
   /** Люди подписки people, которых нет в кэше: спросим пачкой (fetchUsers); у вкладок воркера общий набор — один запрос. */
   private wantPeople(ids: readonly number[]): void {
     for (const id of ids) if (id !== this.cfg.userId && !this.store.users.get(id) && !this.usersAsked.has(id)) this.userWants.add(id);
@@ -1083,6 +1098,7 @@ export class Engine {
         await this.ops.enqueue({ key: `reactions-read:${a.chatId}:${ids ? ids.join(',') : 'all'}`, method: 'POST', path: `/chats/${a.chatId}/reactions/read`, body: ids ? { ids } : {} });
         return null;
       }
+      case 'peerKey': return this.peerKeyOf(a.userId);
       case 'readBy': {
         let res: Response;
         try { res = await this.dev.fetch(`${this.cfg.httpBase}/chats/${a.chatId}/messages/${a.id}/read-by`, { credentials: 'include', headers: this.cfg.headers }); }
@@ -1166,7 +1182,10 @@ export class Engine {
         // контакт, точка, кубик — как сообщение: в очередь (переживёт офлайн); значение кубика выберет сервер
         const clientId = crypto.randomUUID();
         this.lastCreated = Math.max(Date.now(), this.lastCreated + 1);
-        const s = a.special, body = s.contact ? s.contact.name : s.geo ? s.geo.title ?? '' : s.dice ? s.dice.emoji : '';
+        let s = a.special;
+        // карточка контакта — ссылкой с ключом доступа (сервер без него не примет); ключ кладём в очередь вместе с сообщением
+        if (s.contact && !s.contact.key) { const key = await this.peerKeyOf(s.contact.userId); if (key) s = { ...s, contact: { ...s.contact, key } }; }
+        const body = s.contact ? s.contact.name : s.geo ? s.geo.title ?? '' : s.dice ? s.dice.emoji : '';
         this.store.addPending({ clientId, chatId: a.chatId, body, entities: [], replyToId: a.replyToId ?? null, createdAt: this.lastCreated, failed: false, special: s });
         await this.store.flush();
         this.changed();
@@ -2413,7 +2432,7 @@ export class Engine {
           if (!next || !this.online) break;
           try {
             const att = next.attachment ? { id: next.attachment.id, thumb: next.attachment.thumb ?? null, ...(next.attachment.spoiler ? { spoiler: true } : {}) } : null;
-            const r = await this.request({ op: 'send', reqId: '', clientId: next.clientId, chatId: next.chatId, body: next.body, entities: next.entities ?? [], replyToId: next.replyToId, attachment: next.forward ? null : att, ...(next.groupId ? { groupId: next.groupId } : {}), ...(next.forward ? { forward: next.forward } : {}), ...(next.noLinkPreview ? { noLinkPreview: true } : {}), ...(next.blocks ? { blocks: next.blocks } : {}), ...(next.sticker ? { sticker: { id: next.sticker.id } } : {}), ...(next.todo ? { todo: { title: next.todo.title, items: next.todo.items.map((x) => ({ title: x.title })), othersCanAppend: next.todo.othersCanAppend, othersCanComplete: next.todo.othersCanComplete } } : {}), ...(next.poll ? { poll: next.poll } : {}), ...(next.special?.contact ? { contact: { userId: next.special.contact.userId } } : {}), ...(next.special?.geo ? { geo: next.special.geo } : {}), ...(next.special?.dice ? { dice: next.special.dice } : {}), ...(next.threadId != null ? { threadId: next.threadId } : {}), ...(next.draftHash !== undefined ? { draftHash: next.draftHash } : {}) });
+            const r = await this.request({ op: 'send', reqId: '', clientId: next.clientId, chatId: next.chatId, body: next.body, entities: next.entities ?? [], replyToId: next.replyToId, attachment: next.forward ? null : att, ...(next.groupId ? { groupId: next.groupId } : {}), ...(next.forward ? { forward: next.forward } : {}), ...(next.noLinkPreview ? { noLinkPreview: true } : {}), ...(next.blocks ? { blocks: next.blocks } : {}), ...(next.sticker ? { sticker: { id: next.sticker.id } } : {}), ...(next.todo ? { todo: { title: next.todo.title, items: next.todo.items.map((x) => ({ title: x.title })), othersCanAppend: next.todo.othersCanAppend, othersCanComplete: next.todo.othersCanComplete } } : {}), ...(next.poll ? { poll: next.poll } : {}), ...(next.special?.contact ? { contact: { userId: next.special.contact.userId, ...(next.special.contact.key ? { key: next.special.contact.key } : {}) } } : {}), ...(next.special?.geo ? { geo: next.special.geo } : {}), ...(next.special?.dice ? { dice: next.special.dice } : {}), ...(next.threadId != null ? { threadId: next.threadId } : {}), ...(next.draftHash !== undefined ? { draftHash: next.draftHash } : {}) });
             this.store.ack(next.clientId, r.id as number, r.createdAt as string);
             // своё опустило начало живого отрезка ниже seed — сообщения между ними догрузить (страница перед seed)
             const c = this.store.chats.get(next.chatId), live = c?.ranges[c.ranges.length - 1];

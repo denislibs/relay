@@ -1,3 +1,4 @@
+import { peerKey } from '../crypto/peerKey';
 import { shredHistory } from './shred';
 import { shownPoll, withPolls, type PollDef } from './polls';
 import type { Attachment, ContactCard, Dice, GeoPoint } from '@relay/protocol';
@@ -270,7 +271,7 @@ export type ChatSummary = {
   unreadMentions?: number;   // непрочитанные упоминания меня (основная лента и треды): бейдж «@»
   unreadReactions?: number;  // непрочитанные реакции на мои сообщения: кнопка «сердце» над «вниз»
   last: Message | null;
-  peer: { id: number; name: string; system?: true; photo?: ProfilePhoto | null } | null; // собеседник личного чата
+  peer: { id: number; key: string; name: string; system?: true; photo?: ProfilePhoto | null } | null; // собеседник личного чата (key — ключ доступа к нему)
   peerReadUpTo: number; // до какого id мои сообщения прочитаны всеми остальными участниками
   draft?: { text: string; at: string; entities?: Entity[] } | null; // черновик этого пользователя (синхронизируется между устройствами)
   sortAt?: string; // ключ сортировки списка (последнее сообщение или создание чата) — из него курсор страницы
@@ -371,7 +372,7 @@ export async function listChats(userId: number, opts: ListOpts = {}): Promise<Ch
     unread: r.unread as number,
     unreadMentions: Number(r.unread_mentions ?? 0),
     unreadReactions: Number(r.unread_reactions ?? 0),
-    peer: r.peer ? { id: (r.peer as { id: number }).id, name: (r.peer as { name: string }).name, photo: (r.peer as { photo?: ProfilePhoto | null }).photo ?? null, ...((r.peer as { system?: boolean }).system ? { system: true as const } : {}) } : null,
+    peer: r.peer ? { id: (r.peer as { id: number }).id, key: peerKey(userId, (r.peer as { id: number }).id), name: (r.peer as { name: string }).name, photo: (r.peer as { photo?: ProfilePhoto | null }).photo ?? null, ...((r.peer as { system?: boolean }).system ? { system: true as const } : {}) } : null,
     peerReadUpTo: (r.peer_read_up_to as number) ?? 0,
     sortAt: new Date(r.sort_at as string).toISOString(),
     muteUntil: muteFromDb(r.mute_until as Date | null, r.mute_forever as boolean | null),

@@ -119,7 +119,7 @@ export interface OutboxEntry {
   entities?: Entity[];
   todo?: Todo;            // чек-лист: уходит вместе с сообщением (задачи пронумерует сервер)
   poll?: PollInput;       // опрос: уходит как ввел пользователь (варианты пронумерует сервер)
-  special?: { contact?: { userId: number; name: string }; geo?: GeoPoint; dice?: { emoji: DiceEmoji } };   // контакт, точка, кубик
+  special?: { contact?: { userId: number; name: string; key?: string }; geo?: GeoPoint; dice?: { emoji: DiceEmoji } };   // контакт, точка, кубик
   error?: string;         // код отказа сервера (failed)
   groupId?: string | null;   // отправлены вместе — один пузырь
   forward?: ForwardRef | null;      // пересылка: сервер копирует оригинал (вложение не загружается заново)
@@ -217,6 +217,8 @@ export type Action =
   | { type: 'readReactions'; chatId: number; ids?: number[] }
   /** «кто прочитал» своё сообщение в небольшой группе: {ok, data: [{id, name}]} | {ok:false, code} */
   | { type: 'readBy'; chatId: number; id: number }
+  /** ключ доступа к человеку (как access_hash): из кэша профилей, иначе GET /users?ids= — null, если человек не виден */
+  | { type: 'peerKey'; userId: number }
   | { type: 'retry'; clientId: string }
   /** неотправленное — убрать из очереди и ленты; идущая загрузка файла прерывается */
   | { type: 'discard'; clientId: string }
@@ -235,7 +237,7 @@ export type Action =
   | { type: 'sendPoll'; chatId: number; poll: PollInput; replyToId?: number | null }
   | { type: 'pollVote'; chatId: number; id: number; options: number[] }   // пусто — отозвать
   | { type: 'pollClose'; chatId: number; id: number }
-  | { type: 'sendSpecial'; chatId: number; special: { contact?: { userId: number; name: string }; geo?: GeoPoint; dice?: { emoji: DiceEmoji } }; replyToId?: number | null }
+  | { type: 'sendSpecial'; chatId: number; special: { contact?: { userId: number; name: string; key?: string }; geo?: GeoPoint; dice?: { emoji: DiceEmoji } }; replyToId?: number | null }
   | { type: 'todoAppend'; chatId: number; id: number; items: string[] }
   | { type: 'todoEdit'; chatId: number; id: number; todo: TodoInput }
   /** нажатие callback-кнопки под сообщением (онлайн): ответ — ButtonAnswer ({toast?}), правка придёт журналом */

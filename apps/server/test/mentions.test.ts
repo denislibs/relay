@@ -11,7 +11,7 @@ import { planPush, subscribe } from '../src/domain/push';
 import { MAX_MENTIONS } from '../src/domain/mentions';
 import '../src/jobs/kinds';
 import { handlers } from '../src/jobs/handlers';
-import { journalOf, pushBrowser, resetDb } from './helpers';
+import { journalOf, pushBrowser, resetDb, refs } from './helpers';
 
 const server = createServer({ port: 0 });
 const base = `http://localhost:${server.port}`;
@@ -30,8 +30,8 @@ const ok = async (u: U, method: string, path: string, body?: unknown) => {
   if (r.status !== 200) throw new Error(`${method} ${path} → ${r.status} ${await r.text()}`);
   return r.json() as Promise<any>;
 };
-const group = async (owner: U, members: U[], title = 'Группа') => (await ok(owner, 'POST', '/chats', { title, memberIds: members.map((m) => m.userId) })).id as number;
-const channel = async (owner: U, members: U[] = []) => (await ok(owner, 'POST', '/chats', { kind: 'channel', title: 'Новости', memberIds: members.map((m) => m.userId) })).id as number;
+const group = async (owner: U, members: U[], title = 'Группа') => (await ok(owner, 'POST', '/chats', { title, members: refs(owner.userId, members.map((m) => m.userId)) })).id as number;
+const channel = async (owner: U, members: U[] = []) => (await ok(owner, 'POST', '/chats', { kind: 'channel', title: 'Новости', members: refs(owner.userId, members.map((m) => m.userId)) })).id as number;
 const send = (u: U, chatId: number, body: string, extra: Record<string, unknown> = {}) => sendMessage(u.userId, { chatId, clientId: crypto.randomUUID(), body, ...extra }).then((r) => r.message);
 const mentionsOf = async (u: U, chatId?: number) => (await sql`
   select message_id, thread_id from message_mentions where user_id = ${u.userId} ${chatId != null ? sql`and chat_id = ${chatId}` : sql``} order by message_id`)

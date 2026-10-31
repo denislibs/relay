@@ -4,7 +4,7 @@ import { createServer } from '../src/http';
 import { sendMessage } from '../src/domain/messages';
 import '../src/jobs/kinds';
 import { drainJobs } from '../src/jobs/worker';
-import { chatEventsOf, journalOf, makeChat, resetDb } from './helpers';
+import { chatEventsOf, journalOf, makeChat, resetDb, refs } from './helpers';
 
 const server = createServer({ port: 0 });
 const base = `http://localhost:${server.port}`;
@@ -19,7 +19,7 @@ const ok = async (u: U, method: string, path: string, body?: unknown) => {
   if (r.status !== 200) throw new Error(`${method} ${path} → ${r.status} ${await r.text()}`);
   return r.json() as Promise<any>;
 };
-const group = async (owner: U, members: U[], title = 'Дача') => (await ok(owner, 'POST', '/chats', { title, memberIds: members.map((m) => m.userId) })).id as number;
+const group = async (owner: U, members: U[], title = 'Дача') => (await ok(owner, 'POST', '/chats', { title, members: refs(owner.userId, members.map((m) => m.userId)) })).id as number;
 const send = (u: U, chatId: number, body = 'привет') => sendMessage(u.userId, { chatId, clientId: crypto.randomUUID(), body });
 const services = async (chatId: number) => (await sql`select service_type, service_data from messages where chat_id = ${chatId} and service_type is not null order by id`).map((r) => r.service_type);
 const lastUpdate = async (u: U, type: string) => (await journalOf(u.userId, type as never)).at(-1) as any;
@@ -196,7 +196,7 @@ test('hidden history: a newcomer sees only messages after joining', async () => 
   const id = await group(a, [b]);
   await send(a, id, 'старое');
   await ok(a, 'PUT', `/groups/${id}/settings`, { historyHidden: true });
-  await ok(a, 'POST', `/groups/${id}/members`, { userIds: [c.userId] });
+  await ok(a, 'POST', `/groups/${id}/members`, { users: refs(a.userId, [c.userId]) });
   await send(a, id, 'новое');
   const h = await ok(c, 'GET', `/chats/${id}/messages`);
   expect(h.messages.map((m: any) => m.body)).toEqual(['', 'новое']);   // «добавил(а)» и новое
@@ -247,9 +247,9 @@ test('adding members: invite right, banned only by someone who can ban, blocked 
   const a = await login('Анна'), b = await login('Борис'), c = await login('Вера'), d = await login('Гена');
   const id = await group(a, [b]);
   await ok(a, 'PUT', `/groups/${id}/rights`, { rights: { invite: false } });
-  expect((await call(b, 'POST', `/groups/${id}/members`, { userIds: [c.userId] })).status).toBe(403);
+  expect((await call(b, 'POST', `/groups/${id}/members`, { users: refs(b.userId, [c.userId]) })).status).toBe(403);
   await sql`insert into blocks (owner_id, user_id) values (${d.userId}, ${a.userId})`;
-  const r = await ok(a, 'POST', `/groups/${id}/members`, { userIds: [c.userId, d.userId] });
+  const r = await ok(a, 'POST', `/groups/${id}/members`, { users: refs(a.userId, [c.userId, d.userId]) });
   expect(r).toEqual({ added: [c.userId], failed: [d.userId] });
   expect(await services(id)).toEqual(['group_created', 'members_added']);
 });
@@ -260,7 +260,7 @@ test('members delta: adding two people gives everyone a members record with two 
   const a = await login('Анна'), b = await login('Борис'), c = await login('Вера'), d = await login('Глеб');
   const id = await group(a, [b]);
   const before = (await chatEventsOf(id, 'members')).length;
-  await ok(a, 'POST', `/groups/${id}/members`, { userIds: [c.userId, d.userId] });
+  await ok(a, 'POST', `/groups/${id}/members`, { users: refs(a.userId, [c.userId, d.userId]) });
   const m = (await chatEventsOf(id, 'members')).at(-1) as any;   // одна запись в журнале чата — всем
   expect(m).toMatchObject({ type: 'members', chatId: id, remove: [] });
   expect(m.upsert.map((r: any) => r.userId).sort()).toEqual([c.userId, d.userId].sort());
@@ -295,7 +295,7 @@ test('members delta: profiles are exchanged only between people who did not see 
   const a = await login('Анна'), b = await login('Борис'), c = await login('Вера'), d = await login('Глеб');
   const id = await group(a, [b]);
   await makeChat([b.userId, c.userId]);   // Борис и Вера уже общаются лично
-  await ok(a, 'POST', `/groups/${id}/members`, { userIds: [c.userId, d.userId] });
+  await ok(a, 'POST', `/groups/${id}/members`, { users: refs(a.userId, [c.userId, d.userId]) });
   const seen = async (u: U) => (await updatesOf(u, 'userUpdated')).map((x) => x.user.id);
   expect(await seen(b)).not.toContain(c.userId);
   expect(await seen(c)).not.toContain(b.userId);

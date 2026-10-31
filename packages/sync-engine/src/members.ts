@@ -13,7 +13,7 @@ export const MEMBERS_PART = 200;
 export type MemberBase = MemberRow & { chatId: number; order: number };
 type Presence = { online: boolean | null; lastSeen: string | null };
 /** Ответ GET /chats/:id/members (сервер: онлайн сверху, до 1000, без системных). */
-export type MembersReply = { ownerId: number | null; members: (MemberRow & Presence & { name: string; username: string | null; photo?: ProfilePhoto | null })[] };
+export type MembersReply = { ownerId: number | null; members: (MemberRow & Presence & { key?: string; name: string; username: string | null; photo?: ProfilePhoto | null })[] };
 
 const keyOf = (chatId: number, userId: number) => chatId + ':' + userId;
 
@@ -147,7 +147,7 @@ export function applyMembersReply(store: Store, chatId: number, r: MembersReply,
   const done = Math.max(r.members.length, chat.group?.members ?? 0) <= MEMBERS_FULL;
   const list = done ? r.members : r.members.slice(0, MEMBERS_PART);
   store.members.applySnapshot(chatId, list.map((m) => ({ userId: m.userId, role: m.role ?? 'member', rank: m.rank ?? null })), seq);
-  for (const m of list) store.profile.applyPeer({ id: m.userId, name: m.name, username: m.username, photo: m.photo ?? null }, seq);
+  for (const m of list) store.profile.applyPeer({ id: m.userId, key: m.key, name: m.name, username: m.username, photo: m.photo ?? null }, seq);
   if (chat.membersDone !== done) { chat.membersDone = done; store.markChat(chat); }
   store.members.touched.add(chatId);   // «загружено» могло смениться и без строк
 }
