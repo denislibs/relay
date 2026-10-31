@@ -8,7 +8,7 @@ services:
       POSTGRES_USER: relay
       POSTGRES_PASSWORD: relay
       POSTGRES_DB: relay
-    ports: ["5433:5432"]
+    ports: ["127.0.0.1:5433:5432"]   # только с этой машины (INFRA-6)
     volumes:
       - pgdata:/var/lib/postgresql/data
       - ./docker/postgres/init.sql:/docker-entrypoint-initdb.d/01-test-db.sql:ro
@@ -22,7 +22,7 @@ services:
   valkey:
     image: valkey/valkey:8.1-alpine
     command: ["valkey-server", "--save", "", "--appendonly", "no"]
-    ports: ["6380:6379"]
+    ports: ["127.0.0.1:6380:6379"]
     healthcheck:
       test: ["CMD", "valkey-cli", "ping"]
       interval: 2s
@@ -132,7 +132,9 @@ services:
   # Сертификат: docker/nginx/dev-cert.sh (mkcert).
   proxy:
     build: { context: docker/nginx }
-    ports: ["443:443", "80:80", "8333:8333"]
+    # dev — только с этой машины: здесь работают /dev/login (вход в любой аккаунт по имени) и коды входа (INFRA-6)
+    # нужен доступ с телефона в той же сети — RELAY_BIND=0.0.0.0 (и помните про /dev/login)
+    ports: ["${RELAY_BIND:-127.0.0.1}:443:443", "${RELAY_BIND:-127.0.0.1}:80:80", "${RELAY_BIND:-127.0.0.1}:8333:8333"]
     volumes:
       - ./docker/nginx/dev.conf:/etc/nginx/http.d/default.conf:ro
       - ./docker/nginx/security-headers.conf:/etc/nginx/snippets/relay-security.conf:ro

@@ -4,7 +4,7 @@ import { getPreview, normalizeUrl } from './domain/linkPreview';
 import { searchMedia, searchPeople, topPeers } from './domain/globalSearch';
 import { searchChannels } from './domain/channelPreview';
 import { createBus } from './bus';
-import { clientIp } from './device';
+import { clientIp, devAllowed } from './device';
 import type { Server } from 'bun';
 import { authenticate, clearLegacySessionCookie, clearSessionCookie, createSession, createUser, deleteSession, readSessionToken, sessionCookie, sessionFromToken } from './auth';
 import { accessCookie, ACCESS_SEC, clearAccessCookie, deviceKeyOf, newChallenge, refreshAccess, verifyDevice } from './deviceAuth';
@@ -123,7 +123,7 @@ export function createServer(opts: { port: number }): Server {
         // только API: статику клиента раздаёт nginx (docker/nginx), сюда доходит лишь то, чего нет в сборке
         if (!API.test(url.pathname)) return fail('not_found');
 
-        if (process.env.DEV_LOGIN === '1' && req.method === 'POST' && url.pathname === '/dev/login') {
+        if (devAllowed(req, server) && req.method === 'POST' && url.pathname === '/dev/login') {
           const { name, phone } = (await req.json()) as { name: string; phone?: string };
           // dev: вход по имени — существующий пользователь (в т.ч. из сида) или новый
           const [found] = await sql`select id from users where name = ${String(name ?? '')} and not system order by id limit 1`;
@@ -286,12 +286,12 @@ export function createServer(opts: { port: number }): Server {
           const body = (await req.json().catch(() => ({}))) as { userId?: unknown };
           return Response.json({ id: await openDirect(userId, body.userId) });
         }
-        if (process.env.DEV_LOGIN === '1' && req.method === 'POST' && url.pathname === '/dev/chats') {
+        if (devAllowed(req, server) && req.method === 'POST' && url.pathname === '/dev/chats') {
           const { kind, title, memberIds } = (await req.json()) as { kind: 'direct' | 'group' | 'channel'; title: string | null; memberIds: number[] };
           const ids = memberIds.includes(userId) ? memberIds : [userId, ...memberIds];
           return Response.json({ id: await createChat(kind, title, ids) });
         }
-        if (process.env.DEV_LOGIN === '1' && req.method === 'GET' && url.pathname === '/dev/stats') {
+        if (devAllowed(req, server) && req.method === 'GET' && url.pathname === '/dev/stats') {
           // count(*) по журналу и pg_notify — не чаще раза в devStatsMs на пользователя: повтор получает тот же ответ
           const hit = devStatsCache.get(userId);
           if (hit && Date.now() - hit.at < devStatsMs) return Response.json(await hit.body);

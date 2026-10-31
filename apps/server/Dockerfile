@@ -11,5 +11,8 @@ COPY apps/web/package.json apps/web/
 RUN bun install --frozen-lockfile
 COPY . .
 RUN bun apps/web/build.ts
+# не от root (INFRA-5): ffmpeg разбирает чужие файлы; процессу не нужно ничего, кроме чтения /app и /tmp
+RUN chown -R bun:bun /app/apps/web/dist
+USER bun
 EXPOSE 3000
 CMD ["bun", "apps/server/src/main.ts"]

@@ -6,6 +6,15 @@ import { startKeyEvents } from './crypto/keyEvents';
 import { scheduleReindexIfStale } from './search/messagesIndex';
 
 // одна на всю систему, сколько бы воркеров ни было
+// расшифрованные медиа прошлого запуска (воркер убит посреди ffmpeg — finally не успел): прочь, до первой задачи (CRYPTO-14)
+{
+  const { readdir, rm } = await import('node:fs/promises');
+  const { tmpdir } = await import('node:os');
+  const { join } = await import('node:path');
+  for (const d of await readdir(tmpdir()).catch(() => [] as string[])) {
+    if (/^relay-(video|photo)-/.test(d)) await rm(join(tmpdir(), d), { recursive: true, force: true }).catch(() => {});
+  }
+}
 await ensurePeriodic('sessions.sweep');
 await ensurePeriodic('uploads.sweep');
 await ensurePeriodic('storage.gc');
