@@ -314,7 +314,8 @@ const Row = memo(function Row({ post, pinned, discussion, chatId, voiceTitle, au
           reactions={chips.length ? chips : undefined} onReact={(emoji: string) => onReact(m, emoji)}
           // из чата — поверх стека (правила навигации): профиль и «Написать» открывают его чат
           canWrite={sel === undefined && c.userId != null && c.userId !== meId}
-          onWrite={() => { void openUserChat(c.userId!); }}
+          // карточка называет человека: даже без ключа (мы его не видим) чат открывается через это сообщение
+          onWrite={() => { void openUserChat(c.userId!, { via: { chatId: m.chatId as number, messageId: m.id as number } }); }}
           onOpen={sel === undefined && c.userId != null && onUser ? () => onUser(c.userId!) : undefined}
         />
         {mark}

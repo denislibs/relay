@@ -3,7 +3,7 @@ import { sql } from '../src/db';
 import { createServer } from '../src/http';
 import { sendMessage } from '../src/domain/messages';
 import { deleteMessage, reactMessage } from '../src/domain/messageOps';
-import { journalOf, resetDb } from './helpers';
+import { journalOf, resetDb, refs } from './helpers';
 
 // непрочитанные реакции на мои сообщения: строка на сообщение, пока не прочитал; журнал reaction / reactionsRead
 
@@ -20,7 +20,7 @@ const ok = async (u: U, method: string, path: string, body?: unknown) => {
   if (r.status !== 200) throw new Error(`${method} ${path} → ${r.status} ${await r.text()}`);
   return r.json() as Promise<any>;
 };
-const group = async (owner: U, members: U[]) => (await ok(owner, 'POST', '/chats', { title: 'Чат', memberIds: members.map((m) => m.userId) })).id as number;
+const group = async (owner: U, members: U[]) => (await ok(owner, 'POST', '/chats', { title: 'Чат', members: refs(owner.userId, members.map((m) => m.userId)) })).id as number;
 const unreadOf = async (u: U, chatId: number) => (await ok(u, 'GET', '/chats/page?limit=20')).chats.find((c: any) => c.id === chatId)?.unreadReactions;
 
 test('a reaction from another member marks my message unread; my own does not; removing the last foreign one clears it', async () => {
@@ -57,7 +57,7 @@ test('a read reaction does not come back: a changed emoji, the same emoji again,
   expect(await journalOf(a.userId, 'reaction')).toHaveLength(1);   // событие — на первое появление строки (вторая чужая реакция легла в ту же)
   // новый реактор — снова непрочитанное
   const d = await login('Дима');
-  await ok(a, 'POST', `/groups/${chatId}/members`, { userIds: [d.userId] });
+  await ok(a, 'POST', `/groups/${chatId}/members`, { users: refs(a.userId, [d.userId]) });
   await reactMessage(d.userId, chatId, message.id, '👍');
   expect(await unreadOf(a, chatId)).toBe(1);
   expect(await journalOf(a.userId, 'reaction')).toHaveLength(2);

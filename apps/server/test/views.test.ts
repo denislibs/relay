@@ -5,7 +5,7 @@ import { sendMessage } from '../src/domain/messages';
 import { deleteMessage } from '../src/domain/messageOps';
 import { countViews, VIEWS } from '../src/domain/views';
 import { searchPostgres } from '../src/domain/search';
-import { chatEventsOf, resetDb } from './helpers';
+import { chatEventsOf, resetDb, refs } from './helpers';
 
 const server = createServer({ port: 0 });
 const base = `http://localhost:${server.port}`;
@@ -23,7 +23,7 @@ const ok = async (u: U, method: string, path: string, body?: unknown) => {
   if (r.status !== 200) throw new Error(`${method} ${path} → ${r.status} ${await r.text()}`);
   return r.json() as Promise<any>;
 };
-const channel = async (owner: U, members: U[] = []) => (await ok(owner, 'POST', '/chats', { kind: 'channel', title: 'Новости', memberIds: members.map((m) => m.userId) })).id as number;
+const channel = async (owner: U, members: U[] = []) => (await ok(owner, 'POST', '/chats', { kind: 'channel', title: 'Новости', members: refs(owner.userId, members.map((m) => m.userId)) })).id as number;
 const post = async (u: U, chatId: number, body = 'пост') => (await sendMessage(u.userId, { chatId, clientId: crypto.randomUUID(), body })).message;
 const stored = async (chatId: number, id: number) => Number((await sql`select views from message_views where chat_id = ${chatId} and message_id = ${id}`)[0]?.views ?? 0);
 
@@ -56,7 +56,7 @@ test('views: at most 100 ids; non-members get not_member; not a channel — bad_
   const r = await call(x, 'POST', `/chats/${id}/views`, { ids: [p.id] });
   expect(r.status).toBe(403);
   expect(await r.json()).toMatchObject({ code: 'not_member' });
-  const g = (await ok(a, 'POST', '/chats', { title: 'Группа', memberIds: [b.userId] })).id;
+  const g = (await ok(a, 'POST', '/chats', { title: 'Группа', members: refs(a.userId, [b.userId]) })).id;
   const gm = await post(a, g);
   const bad = await call(b, 'POST', `/chats/${g}/views`, { ids: [gm.id] });
   expect(bad.status).toBe(400);
@@ -102,7 +102,7 @@ test('views come with history, messages by ids, search and the chat list row; gr
   const p3 = await post(a, id, 'третий');
   expect((await ok(b, 'GET', `/chats/${id}/messages?ids=${p3.id}`)).messages[0].views).toBe(0);
   expect((await chatEventsOf(id, 'newMessage')).map((u: any) => u.message.views)).toEqual([undefined, undefined, undefined, undefined]);
-  const g = (await ok(a, 'POST', '/chats', { title: 'Группа', memberIds: [b.userId] })).id;
+  const g = (await ok(a, 'POST', '/chats', { title: 'Группа', members: refs(a.userId, [b.userId]) })).id;
   await post(a, g, 'в группе');
   expect((await ok(b, 'GET', `/chats/${g}/messages`)).messages.every((m: any) => m.views === undefined)).toBe(true);
 });

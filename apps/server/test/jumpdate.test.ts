@@ -1,7 +1,7 @@
 import { afterAll, beforeEach, expect, test } from 'bun:test';
 import { sql } from '../src/db';
 import { createServer } from '../src/http';
-import { resetDb } from './helpers';
+import { resetDb, ref } from './helpers';
 
 const server = createServer({ port: 0 });
 const base = `http://localhost:${server.port}`;
@@ -12,7 +12,7 @@ const as = (t: string) => ({ cookie: `relay_session=${t}`, 'content-type': 'appl
 
 test('jump to date: first message on or after the moment, otherwise the last; members only', async () => {
   const a = await login('Анна'), b = await login('Борис'), c = await login('Чужой');
-  const { id: chat } = (await (await fetch(`${base}/chats/direct`, { method: 'POST', headers: as(a.token), body: JSON.stringify({ userId: b.userId }) })).json()) as { id: number };
+  const { id: chat } = (await (await fetch(`${base}/chats/direct`, { method: 'POST', headers: as(a.token), body: JSON.stringify(ref(a.userId, b.userId)) })).json()) as { id: number };
   const put = async (at: string, body: string) => Number((await sql`insert into messages (chat_id, sender_id, client_id, body, created_at) values (${chat}, ${a.userId}, ${crypto.randomUUID()}, ${body}, ${at}) returning id`)[0].id);
   const d1 = await put('2026-10-10T08:00:00Z', 'десятое');
   const d2 = await put('2026-10-12T21:30:00Z', 'двенадцатое вечер');

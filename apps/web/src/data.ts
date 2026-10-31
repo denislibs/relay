@@ -768,13 +768,16 @@ export function closeChat(): void {
   else openChat(null);
 }
 
-/** Личный чат с человеком поверх текущего (автор сообщения в группе). Нет такого чата — создать. */
-export async function openUserChat(userId: number): Promise<void> {
+/** Личный чат с человеком поверх текущего (автор сообщения в группе). Нет такого чата — создать.
+ *  hint — ключ (поиск людей, ссылка @имя) или сообщение, где человек назван (карточка контакта): см. peerRef. */
+export async function openUserChat(userId: number, hint?: PeerHint): Promise<void> {
   const me = getGlobal().me;
   if (!me || userId === me.userId) return;
   const found = getGlobal().chats.find((c) => c.kind === 'direct' && c.peerId === userId);
   if (found) { openInner(found.id as number); return; }
-  const id = await createDirectChat(userId);
+  let id: number;
+  // человека не видно (ни ключа, ни сообщения) или сервер не принял — тостом, а не тихой ошибкой
+  try { id = await createDirectChat(userId, hint); } catch (e) { showToastLazy((e as Error).message); return; }
   openInner(id);
 }
 
@@ -1222,10 +1225,37 @@ export function readBy(chatId: number, id: number): Promise<GroupResult<{ id: nu
   return engine.call({ type: 'readBy', chatId, id }) as Promise<GroupResult<{ id: number; name: string }[]>>;
 }
 
-export async function createDirectChat(peerId: number): Promise<number> {
+/**
+ * Как узнали человека, когда ключа в кэше может не быть: key — пришёл с ним (поиск людей, профиль по @имени),
+ * via — сообщение, где он назван (карточка контакта, «переслано от») — как inputUserFromMessage в Telegram.
+ */
+export type PeerHint = { key?: string; via?: { chatId: number; messageId: number } };
+export type PeerRef = { id: number; key: string } | { id: number; via: { chatId: number; messageId: number } };
+
+/**
+ * Ссылка на человека для запросов «по id» (личный чат, группа, добавить в группу): сервер голый id не принимает —
+ * нужен ключ доступа (как access_hash), который он выдал этому зрителю. Ключ — из подсказки, иначе у движка
+ * (кэш профилей или GET /users?ids=); нет ключа — сообщение из подсказки; нет и его — null: человек нам не виден.
+ */
+export async function peerRef(userId: number, hint?: PeerHint): Promise<PeerRef | null> {
+  const key = hint?.key ?? ((await engine.call({ type: 'peerKey', userId }).catch(() => null)) as string | null);
+  if (key) return { id: userId, key };
+  return hint?.via ? { id: userId, via: hint.via } : null;
+}
+
+/** Ссылки на нескольких людей; кого не видно — в missing (их сервер всё равно не примет). */
+export async function peerRefs(ids: readonly number[]): Promise<{ refs: PeerRef[]; missing: number[] }> {
+  const got = await Promise.all(ids.map((id) => peerRef(id)));
+  return { refs: got.filter((r): r is PeerRef => !!r), missing: ids.filter((_, i) => !got[i]) };
+}
+
+export async function createDirectChat(peerId: number, hint?: PeerHint): Promise<number> {
+  const ref = await peerRef(peerId, hint);
+  if (!ref) throw new Error('Написать этому человеку нельзя');
   // существующая личная переписка или новая (сервер не создаёт вторую на ту же пару)
-  const res = await fetch('/chats/direct', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ userId: peerId }) });
-  if (!res.ok) throw new Error(res.status === 401 ? 'Сессия истекла' : 'Не удалось создать чат');
+  const { id: userId, ...access } = ref;
+  const res = await fetch('/chats/direct', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ userId, ...access }) });
+  if (!res.ok) throw new Error(res.status === 401 ? 'Сессия истекла' : res.status === 404 ? 'Написать этому человеку нельзя' : 'Не удалось создать чат');
   const { id } = (await res.json()) as { id: number };
   await engine.call({ type: 'refreshChats' });
   return id;
@@ -1233,8 +1263,11 @@ export async function createDirectChat(peerId: number): Promise<number> {
 
 /** Новая группа: сервер создаёт чат и служебное «создал(а) группу» — по нему чат появится у всех участников. */
 export async function createGroup(title: string, memberIds: number[], channel?: { about: string }): Promise<number> {
+  // участники — ссылками с ключом доступа (peerRef): голые id сервер не принимает
+  const { refs: members, missing } = await peerRefs(memberIds);
+  if (missing.length) throw new Error('Кого-то из выбранных нельзя добавить в группу');
   // канал: {kind: 'channel'}, без участников — подписчиков добавляют следующим шагом (как в Telegram)
-  const res = await fetch('/chats', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(channel ? { kind: 'channel', title, about: channel.about, memberIds } : { title, memberIds }) });
+  const res = await fetch('/chats', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(channel ? { kind: 'channel', title, about: channel.about, members } : { title, members }) });
   if (!res.ok) {
     const code = ((await res.json().catch(() => ({}))) as { code?: string }).code;
     throw new Error(code === 'blocked' ? 'Кого-то из выбранных нельзя добавить в группу'
@@ -1250,8 +1283,8 @@ export async function createGroup(title: string, memberIds: number[], channel?: 
 /** Перечитать список чатов с сервера (число подписчиков канала после добавления: журнал канала состав не несёт). */
 export function refreshChats(): void { engine.call({ type: 'refreshChats' }).catch(() => {}); }
 
-export async function startDirectChat(peerId: number): Promise<void> {
-  openChat(await createDirectChat(peerId));
+export async function startDirectChat(peerId: number, hint?: PeerHint): Promise<void> {
+  openChat(await createDirectChat(peerId, hint));
 }
 
 /* ---------- закреплённые сообщения ---------- */
