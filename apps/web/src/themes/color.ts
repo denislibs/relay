@@ -77,7 +77,11 @@ export function contrast(a: Rgb, b: Rgb): number {
  */
 export function ensureContrast(color: Rgb, bg: Rgb, ratio = 4.9): Rgb {
   if (contrast(color, bg) >= ratio) return color;
-  const toward: Rgb = luminance(bg) > 0.179 ? [0, 0, 0] : [255, 255, 255];
+  // направление — от фона: цвет светлее фона светлеет дальше, темнее — темнеет. Если в эту сторону порога не
+  // достать (белый текст на среднем фоне) — в другую, как в tweb: на светлом фоне к чёрному, на тёмном к белому
+  const black: Rgb = [0, 0, 0], white: Rgb = [255, 255, 255];
+  const own: Rgb = luminance(color) >= luminance(bg) ? white : black;
+  const toward: Rgb = contrast(own, bg) >= ratio ? own : luminance(bg) > 0.179 ? black : white;
   let lo = 0, hi = 1;
   for (let i = 0; i < 20; i++) {
     const t = (lo + hi) / 2;

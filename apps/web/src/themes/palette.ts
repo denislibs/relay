@@ -3,7 +3,7 @@
 // пузырями; Тёмная — все поверхности из акцента по формулам iOS (DefaultDarkTintedPresentationTheme).
 import tokens from '@relay/ui/tokens.json';
 import { accentTokensFor } from '../accent';
-import { average, contrast, ensureContrast, flatten, hex, mix, parse, rgb, toHsv, fromHsv, withMul, type Rgb } from './color';
+import { average, contrast, ensureContrast, flatten, hex, luminance, mix, parse, rgb, toHsv, fromHsv, withMul, type Rgb } from './color';
 import { BASE_ACCENT, nearestBaseColor, sideOf, type Base, type Side, type ThemeSettings } from './presets';
 
 type TokenDef = { name: string; value: string | { light: string; dark: string } };
@@ -97,10 +97,16 @@ function tinted(s: ThemeSettings | null): Record<string, string> {
   return out;
 }
 
-/** Текст, время и ссылки в своём пузыре — по контрасту с ним: белые на насыщенном, тёмные на бледном. */
+/**
+ * Текст, время и ссылки в своём пузыре. Залитый цветом пузырь — белый текст, как у Telegram (tweb в тёмных темах:
+ * текст и галочки исходящих — #fff; мобильный «День» — белое на синем). Тёмный — только на по-настоящему бледном
+ * пузыре (наборы Классической, светлые цвета набора): по контрасту он проигрывал белому и на оранжевом, и на жёлтом,
+ * а там Telegram всё равно пишет белым.
+ */
+export const PALE_BUBBLE = 0.5;   // относительная яркость WCAG: выше — пузырь бледный, текст тёмный
 function setOutInk(out: Record<string, string>, bubble: Rgb): void {
   const white: Rgb = [255, 255, 255], ink: Rgb = [10, 10, 10];
-  const light = contrast(white, bubble) >= 3 ? white : ink;
+  const light = luminance(bubble) > PALE_BUBBLE ? ink : white;
   out['theme-out-ink'] = hex(light);
   out['theme-out-meta'] = hex(mix(light, bubble, 0.72));
   out['theme-out-link'] = hex(light);
@@ -123,9 +129,16 @@ function raiseContrast(out: Record<string, string>, side: Side): void {
   const worst = (a: Rgb, b: Rgb) => (contrast(a, [128, 128, 128]) < contrast(b, [128, 128, 128]) ? a : b);
   const surface = worst(bg, raised);
   for (const name of ['ink-muted', 'brand-text', 'danger']) out[name] = hex(ensureContrast(solid(name, surface), surface));
-  const bubbleIn = solid('bubble-in', bg), bubbleOut = solid('bubble-out', bg);
-  out['tick-read'] = hex(ensureContrast(solid('tick-read', bubbleIn), worst(bubbleIn, bubbleOut)));
+  const bubbleIn = solid('bubble-in', bg);
+  out['tick-read'] = hex(ensureContrast(solid('tick-read', bubbleIn), worst(bubbleIn, solid('bubble-out', bg))));
+  let bubbleOut = solid('bubble-out', bg);
   const outInk = parse(out['theme-out-ink'] ?? '') ? rgb(out['theme-out-ink']) : solid('brand-text', bubbleOut);
+  // белый текст на залитом пузыре: читаемым делаем пузырь (темнее), а не текст — серый текст на оранжевом хуже
+  // (4.9 — как у текста: тогда и время/галочки, светлея к белому, достают тот же порог)
+  if (outInk[0] === 255 && outInk[1] === 255 && outInk[2] === 255 && contrast(outInk, bubbleOut) < 4.9) {
+    bubbleOut = ensureContrast(bubbleOut, outInk, 4.9);
+    out['bubble-out'] = hex(bubbleOut);
+  }
   const fixedInk = ensureContrast(outInk, bubbleOut);
   out['theme-out-ink'] = hex(fixedInk);
   out['theme-out-meta'] = hex(ensureContrast(mix(fixedInk, bubbleOut, 0.72), bubbleOut));

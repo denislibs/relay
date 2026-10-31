@@ -64,10 +64,20 @@ test('a pale bubble in a dark theme gets dark text, a saturated one white', () =
   expect(computePalette('night', { accent: '#00b09b', bubble: ['#1a3a8a'] })['theme-out-ink']).toBe('#ffffff');
 });
 
+test('filled bubbles take white text like Telegram — orange and yellow too; pale ones dark', () => {
+  for (const c of ['#ef7d1a', '#e8a400', '#e05c93', '#2d7ed5', '#109fb4']) expect(computePalette('day', { accent: c, bubble: [c] })['theme-out-ink']).toBe('#ffffff');
+  expect(computePalette('night', { accent: '#ef7d1a', bubble: ['#ffe9d4'] })['theme-out-ink']).toBe('#0a0a0a');
+  expect(computePalette('classic', { accent: '#ef7d1a', bubble: ['#ffe9d4'] })['theme-out-ink']).toBeUndefined();   // светлая с бледным — как кит
+  // контрастность: белый остаётся белым, темнеет пузырь
+  const p = computePalette('day', { accent: '#e8a400', bubble: ['#e8a400'] }, { contrast: true });
+  expect(p['theme-out-ink']).toBe('#ffffff');
+  expect(contrast(rgb(p['theme-out-ink']), rgb(p['bubble-out']))).toBeGreaterThanOrEqual(4.5);
+});
+
 test('every preset computes and stays readable in its own bubble', () => {
   for (const [base, list] of Object.entries(PRESETS)) for (const pr of list) {
     const p = computePalette(base as 'classic', pr.settings);
-    if (p['theme-out-ink']) expect(contrast(rgb(p['theme-out-ink']), rgb(p['bubble-out']))).toBeGreaterThanOrEqual(3);
+    if (p['theme-out-ink']) expect(contrast(rgb(p['theme-out-ink']), rgb(p['bubble-out']))).toBeGreaterThanOrEqual(2);
     for (const v of Object.values(p)) expect(v).toMatch(/^(#[0-9a-f]{6}|rgba\(.+\))$/);
   }
 });
