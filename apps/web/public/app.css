@@ -1648,3 +1648,10 @@ html[data-anim="0"] .app-folder-sym { animation: none !important; }
 @keyframes app-setting-flash-title { 15%, 65% { color: var(--brand); } }
 @media (prefers-reduced-motion: reduce) { .app-setting-flash, .app-setting-flash-title, .app-ss, .app-ss-layer { animation: none !important; } }
 html[data-anim="0"] :is(.app-setting-flash, .app-setting-flash-title) { animation: none !important; }
+/* «Фото группы изменено» — плашка, под ней само фото кружком; по клику — просмотрщик */
+.app-action-photo { flex-direction: column; align-items: center; gap: 6px; }
+.app-action-photo-open { display: block; padding: 0; border: 0; border-radius: 50%; background: none; cursor: pointer; transition: transform var(--dur-base) var(--ease-out); }
+.app-action-photo-open:hover { transform: scale(1.03); }
+.app-action-photo-open:active { transform: scale(.97); }
+.app-action-photo-open:focus-visible { outline: 2px solid var(--brand-text); outline-offset: 3px; }
+@media (prefers-reduced-motion: reduce) { .app-action-photo-open { transition: none; } }

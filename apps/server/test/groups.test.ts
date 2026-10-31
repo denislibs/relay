@@ -53,6 +53,23 @@ test('info: members cannot rename unless allowed; rename makes a service message
   await ok(b, 'PATCH', `/groups/${id}`, { about: 'теперь можно' });
 });
 
+test('photo: a new photo is written into the service message (for the thumbnail under it); removal carries none', async () => {
+  const a = await login('Анна'), b = await login('Борис');
+  const id = await group(a, [b]);
+  const img = async (side: number) => (await sql`insert into attachments (owner_id, mime, name, size, width, height, kind, status)
+    values (${a.userId}, 'image/jpeg', 'photo.jpg', 1000, ${side}, ${side}, 'photo', 'ready') returning id`)[0].id as string;
+  const big = await img(640), small = await img(160), thumb = 'data:image/jpeg;base64,' + 'A'.repeat(200);
+  await ok(a, 'PUT', `/groups/${id}/photo`, { id: big, small, thumb });
+  await ok(a, 'DELETE', `/groups/${id}/photo`);
+  const rows = await sql`select service_type, service_data from messages where chat_id = ${id} and service_type like 'photo_%' order by id`;
+  expect(rows.map((r) => r.service_type)).toEqual(['photo_changed', 'photo_removed']);
+  expect(rows[0].service_data.photo).toMatchObject({ id: big, small, thumb, pid: expect.any(Number), at: expect.any(Number) });
+  expect(rows[1].service_data).toBeNull();
+  // участник видит фото в самом сообщении ленты
+  const { messages } = await ok(b, 'GET', `/chats/${id}/messages`);
+  expect(messages.find((m: any) => m.service?.type === 'photo_changed').service.data.photo.small).toBe(small);
+});
+
 test('member rights: text, media kinds and reactions are enforced; admins are not restricted; links need text', async () => {
   const a = await login('Анна'), b = await login('Борис');
   const id = await group(a, [b]);
