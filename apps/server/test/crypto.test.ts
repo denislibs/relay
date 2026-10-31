@@ -125,3 +125,23 @@ test('Vault/OpenBao Transit: the master key never leaves the KMS; wrapped keys r
   expect((await sql`select kek_id from keys.chat_keys where chat_id = ${chat}`)[0].kek_id).toBe('vault:transit/relay-test-chat-keys');
   await expect(new VaultKms(v.addr, 'wrong-token', 'relay-test-chat-keys').unwrap(w)).rejects.toMatchObject({ code: 'no_key' });
 });
+
+test('CRYPTO-5: a wrapped key is bound to its purpose — a file key the client knows cannot pass for a chat key; legacy keys get bound', async () => {
+  const { bindKey, bindLegacyKeys, chatCtx, fileCtx, unbindKey, unwrapFor, wrapFor } = await import('../src/crypto/keyBinding');
+  const { getKms } = await import('../src/crypto/kms');
+  const kms = getKms();
+  const known = crypto.getRandomValues(new Uint8Array(32));
+  const asFile = await wrapFor(kms, fileCtx('11111111-1111-1111-1111-111111111111'), known);
+  await expect(unwrapFor(chatCtx(5), asFile, kms.id)).rejects.toMatchObject({ code: 'no_key' });
+  expect(await unwrapFor(fileCtx('11111111-1111-1111-1111-111111111111'), asFile, kms.id)).toEqual(known);
+  await expect(unwrapFor(chatCtx(6), await wrapFor(kms, chatCtx(5), known), kms.id)).rejects.toMatchObject({ code: 'no_key' });   // и другой чат
+  expect(unbindKey(chatCtx(5), bindKey(chatCtx(5), known))).toEqual({ dek: known, legacy: false });
+  // старый блоб (голые 32 байта) читается и после задачи — уже с меткой
+  const chat = await makeChat([await makeUser('a'), await makeUser('b')]);
+  await sql`insert into keys.chat_keys (chat_id, version, wrapped_dek, kek_id, bound) values (${chat}, 1, ${Buffer.from(await kms.wrap(known))}, ${kms.id}, false)`;
+  expect(await bindLegacyKeys(sql)).toBe(true);
+  const [row] = await sql`select wrapped_dek, bound from keys.chat_keys where chat_id = ${chat}`;
+  expect(row.bound).toBe(true);
+  expect(unbindKey(chatCtx(chat), await kms.unwrap(new Uint8Array(row.wrapped_dek))).legacy).toBe(false);
+  expect(await unwrapFor(chatCtx(chat), row.wrapped_dek, kms.id)).toEqual(known);
+});

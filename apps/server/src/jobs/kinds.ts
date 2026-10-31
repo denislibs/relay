@@ -193,6 +193,11 @@ register('journal.trim', async () => {
   }
   return { again: { inSec: 24 * 3600 } };
 });
+// ключи старого формата — с меткой назначения (CRYPTO-5): до конца пачками, потом раз в сутки (новых не бывает)
+register('crypto.bind', async () => {
+  const { bindLegacyKeys } = await import('../crypto/keyBinding');
+  return { again: { inSec: (await bindLegacyKeys(sql)) ? 24 * 3600 : 0 } };
+});
 register('attachment.purge', async (p: { keys: string[] }) => {
   await purgeObjects(p.keys);
 });

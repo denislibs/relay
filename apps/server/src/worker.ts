@@ -20,6 +20,7 @@ await ensurePeriodic('uploads.sweep');
 await ensurePeriodic('storage.gc');
 await ensurePeriodic('crypto.rewrap');
 await ensurePeriodic('journal.trim');
+await ensurePeriodic('crypto.bind');
 await ensurePeriodic('linkPreview.expire');
 // строки до шифрования (messageContent.ts): одна задача на запуск, дубль не встанет
 await enqueue(sql, 'crypto.encrypt', {}, { dedupeKey: 'crypto.encrypt' });
