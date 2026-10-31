@@ -2,7 +2,14 @@ import { encryptedSize } from '@relay/protocol';
 import { fileKey, openAttachmentRows, sealMeta, storeFileKey } from '../crypto/fileKeys';
 import { MAX_FILE_BYTES, ROUND_MAX_SECONDS, WAVEFORM_BYTES, type Attachment, type AttachmentKind, type VideoVariant } from '@relay/protocol';
 import { S3Client } from 'bun';
-import { abortMultipart, completeMultipart, createMultipart, listMultipart, listParts, presignPart, type S3Conf } from './s3multipart';
+import { abortMultipart, completeMultipart, copyObject, createMultipart, listMultipart, listParts, presignPart, type S3Conf } from './s3multipart';
+
+/**
+ * Загрузка идёт во временный ключ (UPL-1): подписанные PUT и части — только на pending/<id>. При подтверждении сервер
+ * проверяет объект и копирует его в постоянный ключ <id>, на который подписанных ссылок записи не бывает: после
+ * confirm подменить файл (другой размер, тип, содержимое) нечем.
+ */
+const pendingKey = (id: string) => 'pending/' + id;
 import { sql } from '../db';
 import { enqueue } from '../jobs/queue';
 import { wantsPhotoPreview } from '../jobs/photo';
@@ -121,10 +128,10 @@ export async function createUpload(userId: number, meta: UploadMeta): Promise<{ 
     if (fileKeyRaw) await storeFileKey(tx, id, fileKeyRaw);
   });
   const size = objectSize({ size: meta.size, enc }), type = objectMime({ mime, enc });
-  if (size < multipartFrom) return { id, url: publicS3().presign(id, { method: 'PUT', expiresIn: PUT_TTL }), mime: type, expiresIn: PUT_TTL };
+  if (size < multipartFrom) return { id, url: publicS3().presign(pendingKey(id), { method: 'PUT', expiresIn: PUT_TTL }), mime: type, expiresIn: PUT_TTL };
   // большой: загрузка частями — тип объекта задаётся здесь, ссылки на части клиент берёт в uploadParts
   let uploadId: string;
-  try { uploadId = await createMultipart(mpInternal(), id, type); }
+  try { uploadId = await createMultipart(mpInternal(), pendingKey(id), type); }
   catch (e) { await sql`delete from attachments where id = ${id}`; throw e; }
   await sql`update attachments set upload_id = ${uploadId} where id = ${id}`;
   const partSize = partBytes(size);
@@ -146,7 +153,7 @@ export async function uploadParts(userId: number, id: string, numbers: unknown):
   if (!Array.isArray(numbers) || numbers.length === 0 || numbers.length > PARTS_PER_REQUEST
     || !numbers.every((n) => Number.isInteger(n) && n >= 1 && n <= m.parts)) throw new DomainError('bad_frame', 'parts');
   const pub = mpPublic(), urls: Record<number, string> = {};
-  for (const n of numbers as number[]) urls[n] = presignPart(pub, id, m.uploadId, n, PART_TTL);
+  for (const n of numbers as number[]) urls[n] = presignPart(pub, pendingKey(id), m.uploadId, n, PART_TTL);
   return { urls, expiresIn: PART_TTL };
 }
 
@@ -156,7 +163,7 @@ export async function uploadStatus(userId: number, id: string): Promise<{ partSi
   return { partSize: m.partSize, parts: m.parts, done: (await goodParts(m)).map((p) => p.n) };
 }
 async function goodParts(m: { id: string; uploadId: string; size: number; partSize: number; parts: number }) {
-  const all = await listParts(mpInternal(), m.id, m.uploadId);
+  const all = await listParts(mpInternal(), pendingKey(m.id), m.uploadId);
   const want = (n: number) => (n < m.parts ? m.partSize : m.size - m.partSize * (m.parts - 1));
   return all.filter((p) => p.n >= 1 && p.n <= m.parts && p.size === want(p.n));
 }
@@ -173,7 +180,7 @@ async function completeUpload(a: Record<string, unknown>): Promise<void> {
     throw e;
   }
   if (parts.length !== m.parts) throw new DomainError('upload_incomplete', `${parts.length}/${m.parts} parts`);
-  await completeMultipart(mpInternal(), id, m.uploadId, parts);
+  await completeMultipart(mpInternal(), pendingKey(id), m.uploadId, parts);
   await sql`update attachments set upload_id = null where id = ${id}`;
 }
 
@@ -182,8 +189,8 @@ export async function abortUpload(userId: number, id: string): Promise<void> {
   if (!UUID.test(id)) return;
   const [a] = await sql`delete from attachments where id = ${id} and owner_id = ${userId} and status = 'pending' returning id, upload_id`;
   if (!a) return;
-  if (a.upload_id) await abortMultipart(mpInternal(), id, a.upload_id as string).catch(() => {});
-  await s3().delete(id).catch(() => {});
+  if (a.upload_id) await abortMultipart(mpInternal(), pendingKey(id), a.upload_id as string).catch(() => {});
+  await s3().delete(pendingKey(id)).catch(() => {});
 }
 
 /**
@@ -197,12 +204,22 @@ export async function confirmUpload(userId: number, id: string): Promise<Attachm
   await openAttachmentRows([a]);
   if (a.status === 'ready') return attachmentOf(a, null, await variantsOf(sql, id));
   if (a.upload_id) await completeUpload(a);
-  let stat: { size: number; type: string };
-  try { stat = await s3().file(id).stat(); } catch { throw new DomainError('upload_missing'); }
+  // временный объект; его нет, а постоянный есть — прошлый confirm оборвался после копирования (или загрузка
+  // начата до перехода на pending/): проверяем постоянный
+  let stat: { size: number; type: string }, moved = false;
+  try { stat = await s3().file(pendingKey(id)).stat(); }
+  catch {
+    try { stat = await s3().file(id).stat(); moved = true; } catch { throw new DomainError('upload_missing'); }
+  }
   const type = stat.type.split(';')[0].trim().toLowerCase();
   if (stat.size !== objectSize(a) || Number(a.size) > MAX_FILE || type !== objectMime(a)) {
-    await s3().delete(id).catch(() => {});
+    await s3().delete(moved ? id : pendingKey(id)).catch(() => {});
     throw new DomainError('upload_mismatch', `size ${stat.size}/${objectSize(a)}, type ${type}/${objectMime(a)}`);
+  }
+  if (!moved) {
+    // в постоянный ключ, который клиентам на запись не выдаётся; временный — прочь (его ссылка ещё жива до 5 минут)
+    await copyObject(mpInternal(), pendingKey(id), id);
+    await s3().delete(pendingKey(id)).catch(() => {});
   }
   // видео-медиа: перепаковка (faststart), ролик для ленты и 720p — в воркере; до конца обработки играет оригинал.
   // фото и картинка-файл: уменьшенная копия для сетки — тоже в воркере; до неё плитка грузит оригинал
@@ -310,7 +327,8 @@ export function signedDownload(f: { key: string; mime: string; name: string }, o
 export async function sweepPendingUploads(olderThanMs = 24 * 3600_000): Promise<number> {
   const rows = await sql`delete from attachments where status = 'pending' and created_at < now() - ${olderThanMs / 1000} * interval '1 second' returning id, upload_id`;
   for (const r of rows) {
-    if (r.upload_id) await abortMultipart(mpInternal(), r.id as string, r.upload_id as string).catch(() => {});
+    if (r.upload_id) await abortMultipart(mpInternal(), pendingKey(r.id as string), r.upload_id as string).catch(() => {});
+    await s3().delete(pendingKey(r.id as string)).catch(() => {});
     await s3().delete(r.id as string).catch(() => {});
   }
   // части без записи (запись удалили, а отмена в хранилище не дошла) — тоже, если начаты раньше срока

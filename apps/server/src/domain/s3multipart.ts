@@ -112,3 +112,9 @@ export async function listMultipart(c: S3Conf): Promise<{ key: string; uploadId:
   }
   return out;
 }
+
+/** CopyObject внутри бакета (сервер → S3): объект целиком, тип и тело — как у источника. До 5 ГБ одним вызовом. */
+export async function copyObject(c: S3Conf, from: string, to: string): Promise<void> {
+  const src = '/' + c.bucket + '/' + from.split('/').map(enc).join('/');
+  await call(c, 'PUT', to, {}, '', { 'x-amz-copy-source': src });
+}

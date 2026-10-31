@@ -3,7 +3,7 @@
 // Безопасность (SSRF): только http/https на стандартных портах; каждый адрес из DNS проверяется — никаких localhost,
 // внутренних и служебных сетей; редиректы — вручную, с той же проверкой на каждом шаге; таймаут и потолок размера.
 import type { Entity, LinkPreview } from '@relay/protocol';
-import { isIP } from 'node:net';
+import { BlockList, isIP } from 'node:net';
 import { lookup } from 'node:dns/promises';
 import { sql } from '../db';
 import { s3 } from './files';
@@ -37,51 +37,61 @@ export function normalizeUrl(raw: string): string | null {
   return u.toString().slice(0, 2048);
 }
 
-/** Публичный ли адрес: отсекаем петлю, частные, служебные, link-local, CGNAT, multicast и их IPv6-аналоги. */
+/**
+ * Адреса, куда превью не ходит (SSRF-1): частные, служебные, документационные и все обёртки IPv4 в IPv6 (::ffff:,
+ * ::/96, NAT64 64:ff9b::, 6to4 2002::) — целиком, без попыток разобрать вложенный адрес. Сравнение по байтам
+ * (net.BlockList), а не по тексту: [::ffff:7f00:1] и [::ffff:127.0.0.1] — один и тот же адрес.
+ */
+// два списка: правило ::ffff:0:0/96 в общем BlockList совпадает с ЛЮБЫМ IPv4 (Node сравнивает их как отображённые)
+const BLOCKED4 = new BlockList(), BLOCKED6 = new BlockList();
+(() => {
+  const b = BLOCKED4;
+  for (const [net, len] of [['0.0.0.0', 8], ['10.0.0.0', 8], ['100.64.0.0', 10], ['127.0.0.0', 8], ['169.254.0.0', 16], ['172.16.0.0', 12],
+    ['192.0.0.0', 24], ['192.0.2.0', 24], ['192.88.99.0', 24], ['192.168.0.0', 16], ['198.18.0.0', 15], ['198.51.100.0', 24],
+    ['203.0.113.0', 24], ['224.0.0.0', 3]] as const) b.addSubnet(net, len, 'ipv4');
+  for (const [net, len] of [['::', 96], ['::ffff:0:0', 96], ['64:ff9b::', 96], ['64:ff9b:1::', 48], ['100::', 64], ['2001::', 23],
+    ['2001:db8::', 32], ['2002::', 16], ['fc00::', 7], ['fe80::', 10], ['fec0::', 10], ['ff00::', 8]] as const) BLOCKED6.addSubnet(net, len, 'ipv6');
+})();
+
+/** Публичный ли адрес: всё, что не попало в BLOCKED. */
 export function isPublicIp(ip: string): boolean {
   const v = isIP(ip);
-  if (v === 4) {
-    const [a, b] = ip.split('.').map(Number);
-    if (a === 0 || a === 10 || a === 127 || a >= 224) return false;
-    if (a === 169 && b === 254) return false;
-    if (a === 172 && b >= 16 && b <= 31) return false;
-    if (a === 192 && b === 168) return false;
-    if (a === 100 && b >= 64 && b <= 127) return false;   // CGNAT
-    if (a === 192 && b === 0) return false;
-    if (a === 198 && (b === 18 || b === 19)) return false;
-    return true;
-  }
-  if (v === 6) {
-    const x = ip.toLowerCase();
-    if (x === '::' || x === '::1') return false;
-    const mapped = /^::ffff:(\d+\.\d+\.\d+\.\d+)$/.exec(x);
-    if (mapped) return isPublicIp(mapped[1]);
-    if (/^(fc|fd)/.test(x) || /^fe[89ab]/.test(x) || /^ff/.test(x)) return false;
-    return true;
-  }
-  return false;
+  return v === 4 ? !BLOCKED4.check(ip, 'ipv4') : v === 6 ? !BLOCKED6.check(ip, 'ipv6') : false;
 }
 
 /** Только для тестов: разрешить локальные адреса (тестовая страница поднимается на localhost). */
 let allowPrivate = false;
 export function allowPrivateHostsForTests(on: boolean): void { allowPrivate = on; }
 
-async function assertPublicHost(host: string): Promise<void> {
-  if (allowPrivate) return;
+/**
+ * Имя → один проверенный публичный IP. Соединяемся потом именно с ним (SSRF-2): второго разрешения имени, которое
+ * злоумышленник подменил бы на внутренний адрес (DNS rebinding), нет. Любой непубличный адрес среди ответов — отказ.
+ */
+export async function resolvePublic(host: string): Promise<string> {
   const name = host.replace(/^\[|\]$/g, '');
   if (/^localhost$|\.localhost$|\.local$|\.internal$/i.test(name)) throw new Error('private host');
   const addrs = isIP(name) ? [{ address: name }] : await lookup(name, { all: true });
   if (!addrs.length || !addrs.every((a) => isPublicIp(a.address))) throw new Error('private address');
+  return addrs[0].address;
 }
 
-/** Запрос с проверкой каждого шага и потолком размера тела. Возвращает итоговый адрес, тип и байты. */
+/** Запрос к проверенному IP: имя — в Host и в TLS (SNI и проверка сертификата идут по имени, а не по адресу). */
+async function pinnedFetch(url: URL, init: RequestInit): Promise<Response> {
+  if (allowPrivate) return fetch(url, init);
+  const ip = await resolvePublic(url.hostname);
+  const target = new URL(url);
+  if (!isIP(url.hostname.replace(/^\[|\]$/g, ''))) target.hostname = isIP(ip) === 6 ? `[${ip}]` : ip;
+  const headers = new Headers(init.headers);
+  headers.set('host', url.host);
+  return fetch(target, { ...init, headers, ...(url.protocol === 'https:' ? { tls: { serverName: url.hostname } } : {}) } as RequestInit);
+}
+
+/** Запрос с проверкой каждого шага (и редиректов) и потолком размера тела. Возвращает итоговый адрес, тип и байты. */
 async function safeGet(url: string, accept: string, maxBytes: number): Promise<{ url: string; type: string; bytes: Uint8Array }> {
   let cur = url;
   const deadline = AbortSignal.timeout(TIMEOUT_MS);
   for (let hop = 0; hop <= MAX_REDIRECTS; hop++) {
-    const u = new URL(cur);
-    await assertPublicHost(u.hostname);
-    const res = await fetch(cur, { redirect: 'manual', signal: deadline, headers: { 'user-agent': UA, accept, 'accept-language': 'ru,en;q=0.8' } });
+    const res = await pinnedFetch(new URL(cur), { redirect: 'manual', signal: deadline, headers: { 'user-agent': UA, accept, 'accept-language': 'ru,en;q=0.8' } });
     if (res.status >= 300 && res.status < 400) {
       const next = res.headers.get('location');
       const n = next ? normalizeUrl(new URL(next, cur).toString()) : null;

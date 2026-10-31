@@ -1,3 +1,4 @@
+import { hit } from './valkey';
 import { MEDIA_TABS, parseClientFrame, type MediaTab } from '@relay/protocol';
 import { getPreview, normalizeUrl } from './domain/linkPreview';
 import { searchMedia, searchPeople, topPeers } from './domain/globalSearch';
@@ -393,9 +394,12 @@ export function createServer(opts: { port: number }): Server {
         if (req.method === 'GET' && url.pathname === '/users') {
           return Response.json(await usersByIds(userId, (url.searchParams.get('ids') ?? '').split(',').map(Number)));
         }
-        if (req.method === 'GET' && url.pathname === '/link-preview') {
-          // превью ссылки для поля ввода (до отправки): тот же кэш, что и у сообщений; нет превью — { link: null }
-          const u = normalizeUrl(url.searchParams.get('url') ?? '');
+        if (req.method === 'POST' && url.pathname === '/link-preview') {
+          // превью ссылки для поля ввода (до отправки): тот же кэш, что и у сообщений; нет превью — { link: null }.
+          // POST — адрес в теле, не в строке запроса (не оседает в журналах прокси). Не чаще 30 в минуту на человека
+          if ((await hit(`lp:${userId}`, 60)) > 30) return fail('flood');
+          const body = (await req.json().catch(() => null)) as { url?: unknown } | null;
+          const u = typeof body?.url === 'string' ? normalizeUrl(body.url) : null;
           return Response.json({ link: u ? await getPreview(u) : null });
         }
         if (req.method === 'GET' && url.pathname === '/presence') {

@@ -2,7 +2,7 @@ import { afterAll, beforeEach, expect, test } from 'bun:test';
 import { sql } from '../src/db';
 import { fileFor } from '../src/domain/files';
 import { getUpdates } from '../src/domain/journal';
-import { allowPrivateHostsForTests, firstUrl, getPreview, imageSize, isPublicIp, normalizeUrl } from '../src/domain/linkPreview';
+import { allowPrivateHostsForTests, firstUrl, getPreview, imageSize, isPublicIp, normalizeUrl, resolvePublic } from '../src/domain/linkPreview';
 import { applyLinkPreview, sendMessage } from '../src/domain/messages';
 import { makeChat, makeUser, opened, resetDb } from './helpers';
 
@@ -71,4 +71,15 @@ test('noLinkPreview, attachments and plain text get no preview', async () => {
   expect(off.message.link ?? null).toBeNull();
   const plain = await sendMessage(a, { chatId: chat, clientId: cid(), body: 'привет' });
   expect(plain.message.link ?? null).toBeNull();
+});
+
+test('SSRF-1: IPv4 hidden inside IPv6 in any spelling, NAT64, 6to4, site-local and documentation ranges are not public', async () => {
+  for (const ip of ['::ffff:7f00:1', '::ffff:a9fe:a9fe', '::7f00:1', '64:ff9b::7f00:1', '64:ff9b::808:808', '2002:7f00:1::1', 'fec0::1', '2001:db8::1', '100::1', '198.51.100.7', '203.0.113.9', '192.0.2.1', '240.0.0.1'])
+    expect(isPublicIp(ip)).toBe(false);
+  // URL-парсер превращает [::ffff:127.0.0.1] в [::ffff:7f00:1] — и это тоже не проходит
+  const host = new URL('http://[::ffff:127.0.0.1]/').hostname;
+  expect(host).toBe('[::ffff:7f00:1]');
+  await expect(resolvePublic(host)).rejects.toThrow('private');
+  await expect(resolvePublic('localhost')).rejects.toThrow('private');
+  expect(await resolvePublic('8.8.8.8')).toBe('8.8.8.8');
 });
