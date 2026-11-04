@@ -1,5 +1,5 @@
 import type { ScheduledMessage } from '@relay/protocol';
-import type { ContactCard, Dice, DiceEmoji, GeoPoint, Poll, PollInput, StickerRef, StickerSetInfo } from '@relay/protocol';
+import type { ContactCard, Dice, DiceEmoji, GeoPoint, Poll, PollInput, SavedGif, StickerRef, StickerSetInfo } from '@relay/protocol';
 import type { StoreName } from './schema';
 import type { GroupInfo, MediaCounts, MediaTab, MyMembership, Replies } from '@relay/protocol';
 import type { ReplyQuote } from '@relay/protocol';
@@ -212,6 +212,10 @@ export type Action =
   | { type: 'scheduledSendNow'; chatId: number; clientId: string }
   | { type: 'scheduledDelete'; chatId: number; clientId: string }
   | { type: 'sendSticker'; chatId: number; sticker: StickerRef; replyToId?: number | null; replyQuote?: ReplyQuote; threadId?: number; silent?: boolean; scheduleAt?: number; keepDraft?: boolean }   // threadId — комментарий в треде
+  /** сохранённые GIF (savedGifs.ts): кэш сразу, изменения — очередью операций */
+  | { type: 'savedGifs' }
+  | { type: 'saveGif'; chatId: number; messageId: number; gif: SavedGif }
+  | { type: 'removeGif'; id: string }
   | { type: 'myStickers' }
   | { type: 'stickerSet'; id: number | string; hash?: string }
   | { type: 'installStickerSet'; setId: number; on: boolean; info?: StickerSetInfo }

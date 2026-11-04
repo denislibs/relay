@@ -97,13 +97,15 @@ let lastMine: MyStickers = EMPTY_MINE;
 /** Куда уходит стикер, выбранный в модалке или правой панели: открытый чат и его текущий ответ (ставит Chat). */
 // schedule — страница отложенных: стикер не уходит сразу, спрашивается время
 type When = { silent?: boolean; scheduleAt?: number; keepDraft?: boolean };
-type Target = { chatId: number; threadId?: number; replyId: () => ReplyRef; sent: () => void; schedule?: (send: (w: When) => void) => void };   // threadId — комментарий в треде
+type Target = { chatId: number; threadId?: number; replyId: () => ReplyRef; sent: () => void; schedule?: (send: (w: When) => void) => void; later?: (done: (r: { at: number; silent: boolean }) => void) => void; saved?: boolean };   // threadId — комментарий в треде; later — окно «Отправить позже» (не в треде); saved — «Избранное»
 let target: Target | null = null;
 export function setStickerTarget(t: Target | null): () => void {
   target = t;
   return () => { if (target === t) target = null; };
 }
 export const hasStickerTarget = () => !!target;
+/** Цель отправки: та же для GIF (gifs.ts). */
+export const stickerTarget = () => target;
 /** Отправить в открытый чат (с ответом, если он выбран). false — чата нет. */
 export function sendStickerHere(s: StickerRef): boolean {
   if (!target) return false;

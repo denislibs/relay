@@ -135,7 +135,7 @@ export function startSettingsData(me: Me): void {
     if (seen >= 0) {
       // сеанс уже завершён (404) — то, чего и хотели (или подтверждать уже нечего): не ошибка
       const fresh = failures.filter((f) => f.id > seen && !(isSessionKey(f.key) && f.code === 'not_found'));
-      if (fresh.length) showToast(failText(fresh[fresh.length - 1].code));
+      if (fresh.length) { const last = fresh[fresh.length - 1]; showToast(last.key.startsWith('gifs:') ? 'Эту GIF нельзя сохранить' : failText(last.code)); }
     }
     seen = Math.max(seen, max);
     // ключи очереди — для оптимистичного вида сеансов; завершение ушло на сервер — список заново

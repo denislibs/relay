@@ -76,6 +76,7 @@ import { attachmentHit } from '../searchHit';
 import type { ProfilePhoto } from '@relay/protocol';
 import { avatarPhoto } from '../profilePhoto';
 import { openStickersPanel, sendStickerHere, setStickerTarget } from '../stickers';
+import { isSavedGif, removeSavedGif, saveGifFrom, sendGifHere, type GifAttachment } from '../gifs';
 import { greetingChat } from '../greeting';
 import { cancelForwardDraft, endSelect, forwardElsewhere, patchForwardDraft, sendForwardDraft, startForward, startSelect } from '../forward';
 
@@ -534,8 +535,11 @@ export function Chat({ chatId, frameKey, active, threadId, scheduled = false }: 
   const replyIdRef = useRef<ReplyRef>(null);
   replyIdRef.current = replyRef;
   // цель — только у чата на экране: после «Назад» из треда стикер уходит в группу, а не в оставшийся живым тред
-  useEffect(() => (active ? setStickerTarget({ chatId, ...(thread ? { threadId } : {}), replyId: () => replyIdRef.current, sent: () => setReplyKey(null),
-    ...(scheduled ? { schedule: (send: (w: SendWhen) => void) => askTime((r) => send({ scheduleAt: r.at, silent: r.silent, keepDraft: true })) } : {}) }) : undefined), [chatId, threadId, active, scheduled]);
+  const askTimeRef = useRef(askTime);
+  askTimeRef.current = askTime;
+  useEffect(() => (active ? setStickerTarget({ chatId, ...(thread ? { threadId } : {}), replyId: () => replyIdRef.current, sent: () => setReplyKey(null), saved: isSaved,
+    ...(thread ? {} : { later: (done: (r: { at: number; silent: boolean }) => void) => askTimeRef.current(done) }),
+    ...(scheduled ? { schedule: (send: (w: SendWhen) => void) => askTime((r) => send({ scheduleAt: r.at, silent: r.silent, keepDraft: true })) } : {}) }) : undefined), [chatId, threadId, active, scheduled, isSaved]);
   // отложенных больше нет (опубликованы, удалены, в т. ч. с другого устройства) — страница закрывается сама
   const feedKnown = useGlobal((s) => !!frameByKey(s, frameKey)?.feedMeta);
   const hadItems = useRef(false);
@@ -711,6 +715,7 @@ export function Chat({ chatId, frameKey, active, threadId, scheduled = false }: 
               api.current?.setValue({ text: v.text.slice(0, cut), entities: v.entities.filter((en) => en.offset + en.length <= cut) });
             }}
             onSticker={(s) => { sendStickerHere(s); close(); }}
+            onGif={(g, how) => { sendGifHere(g, how); close(); }}
             onSearch={() => { close(); openStickersPanel(); }}
           />
         )}
@@ -890,6 +895,9 @@ export function Chat({ chatId, frameKey, active, threadId, scheduled = false }: 
                   ...(menuMsg.id != null && !menuMsg.deleted && !system && !menuMsg.service && canPin ? [((chat?.pinned as number[] | undefined) ?? []).includes(menuMsg.id as number)
                     ? { icon: 'pin', label: 'Открепить', onClick: () => void unpinMessage(chatId, menuMsg.id as number) }
                     : { icon: 'pin', label: 'Закрепить', onClick: () => void pinMessage(chatId, menuMsg.id as number) }] : []),
+                  // сохранённые GIF: из защищённого и со сроком — нельзя (сервер отказывает так же), уже сохранённую можно убрать и отсюда
+                  ...(att?.id && att.kind === 'photo' && att.mime === 'image/gif' && menuMsg.id != null && !menuMsg.deleted && isSavedGif(att.id) ? [{ icon: 'trash', label: 'Удалить из GIF', onClick: () => removeSavedGif(att.id as string) }]
+                    : att?.id && att.kind === 'photo' && att.mime === 'image/gif' && menuMsg.id != null && !menuMsg.deleted && !gInfo?.protected && !menuMsg.expiresAt && !guest && !chat?.preview ? [{ icon: 'gif', label: 'Сохранить в GIF', onClick: () => saveGifFrom(chatId, menuMsg.id as number, att as unknown as GifAttachment) }] : []),
                   ...(!menuMsg.deleted && !gInfo?.protected && att?.id ? [{ icon: 'download', label: 'Скачать', onClick: () => downloadUrl(`/files/${att.id}?download=1`, downloadName(att)) }] : []),
                   ...(menuMsg.id != null && !menuMsg.deleted && !menuMsg.service && !gInfo?.protected && !guest ? [{ icon: 'forward', label: 'Переслать', onClick: () => forwardMenuMsg(menuMsg) }] : []),
                   ...(menuMsg.id != null && !menuMsg.deleted && textual && !gInfo?.protected ? [{ icon: 'checkCircle', label: 'Выбрать', onClick: () => startSelect(chatId, groupOf(menuMsg).map((x) => x.key as string)) }] : []),

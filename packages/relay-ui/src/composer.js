@@ -77,7 +77,7 @@ function Composer(props) {
     function away(e) {
       var t = e.target;
       if (popRef.current && popRef.current.contains(t)) return;
-      if (t.closest && (t.closest('.rl-emoji-toggle') || t.closest('.rl-mdl-layer') || t.closest('.app-stkview-host'))) return;
+      if (t.closest && (t.closest('.rl-emoji-toggle') || t.closest('.rl-mdl-layer') || t.closest('.app-stkview-host') || t.closest('.app-sym-keep'))) return;   // app-sym-keep — меню плитки: панель под ним остаётся
       symbols[1](false);
     }
     function esc(e) { if (e.key === 'Escape') { e.stopPropagation(); symbols[1](false); } }
@@ -541,7 +541,8 @@ function Composer(props) {
       h(MentionList, { items: mentionList || [], onPick: pickMention })),
     props.symbolMenu && symMounted.current ? h('div', { class: cx('rl-symbols-pop', symbols[0] && symView[0] === 'active' && 'is-active', !symbols[0] && symView[0] !== 'hidden' && 'is-closing'), ref: popRef, role: 'dialog', 'aria-label': 'Эмодзи и стикеры',
         'aria-hidden': symbols[0] ? undefined : 'true', style: symView[0] === 'hidden' && !symbols[0] ? { display: 'none' } : undefined,
-        onPointerEnter: symbolsHover.onPointerEnter, onPointerLeave: symbolsHover.onPointerLeave,
+        // пока открыто меню плитки, уход мыши на него — не уход с панели
+        onPointerEnter: symbolsHover.onPointerEnter, onPointerLeave: function (e) { if (!document.querySelector('.app-sym-keep')) symbolsHover.onPointerLeave(e); },
         onMouseDown: function (e) { if (e.target.nodeName !== 'INPUT') e.preventDefault(); } },
         props.symbolMenu(function () { symbols[1](false); }, symbols[0])) : null,
     h(MenuPopover, { open: attach[0], hover: true, anchor: wrapRef.current ? wrapRef.current.querySelector('.rl-attach-toggle') : null, placement: 'top-start', label: 'Прикрепить',

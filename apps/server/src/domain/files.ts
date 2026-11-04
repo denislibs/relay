@@ -238,8 +238,9 @@ export async function attachmentForSend(tx: typeof sql | Parameters<Parameters<t
   if (!UUID.test(ref.id)) throw new DomainError('bad_frame', 'attachment id');
   // for share: обработка видео (jobs/video.ts) обновляет строку и снимки в сообщениях под for update — не разминуться с ней
   const [a] = await tx`select * from attachments where id = ${ref.id} for share`;
-  // своё вложение — или трек из своей музыки профиля (его могли добавить из чужого сообщения): «Музыка» в скрепке
-  const mine = a && (a.owner_id === userId || (await tx`select 1 from profile_music where user_id = ${userId} and attachment_id = ${a.id}`).length > 0);
+  // своё вложение — или трек из своей музыки профиля (его могли добавить из чужого сообщения): «Музыка» в скрепке, или своя сохранённая GIF
+  const mine = a && (a.owner_id === userId || (await tx`select 1 from profile_music where user_id = ${userId} and attachment_id = ${a.id}
+    union all select 1 from saved_gifs where user_id = ${userId} and attachment_id = ${a.id}`).length > 0);
   if (!a || !mine) throw new DomainError('not_found', 'attachment');
   if (a.status !== 'ready') throw new DomainError('upload_pending');
   const thumb = ref.thumb && ref.thumb.length <= 8192 && /^data:image\/(jpeg|png|webp);base64,[A-Za-z0-9+/=]+$/.test(ref.thumb) ? ref.thumb : null;
@@ -293,6 +294,7 @@ export async function fileFor(userId: number, id: string, variant?: string): Pro
          select 1 from messages m join chats c on c.id = m.chat_id and c.kind = 'channel' and c.username is not null and c.deleted_at is null
           where m.attachment->>'id' = ${id} and not m.deleted and (m.expires_at is null or m.expires_at > now())
             and not exists (select 1 from chat_bans b where b.chat_id = c.id and b.user_id = ${userId}))
+       or exists (select 1 from saved_gifs sg where sg.attachment_id = a.id and sg.user_id = ${userId})   -- своя сохранённая GIF: остаётся и без исходного сообщения
        or exists (select 1 from link_previews lp where lp.photo_id = a.id)   -- картинка превью ссылки: публичная страница, видна всем
        or exists (   -- трек в чьём-то профиле: его видят все, кого владелец не заблокировал
          select 1 from profile_music p where p.attachment_id = a.id

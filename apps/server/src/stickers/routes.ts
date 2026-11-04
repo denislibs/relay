@@ -1,3 +1,4 @@
+import { listSavedGifs, removeGif, saveGif } from '../domain/savedGifs';
 import { clearRecent, featuredSets, getStickerSet, greetingSticker, myStickers, searchSets, setFaved, setInstalled, stickersByEmoji } from '../domain/stickers';
 
 const fail = (code: string, status: number) => Response.json({ code }, { status });
@@ -21,6 +22,15 @@ export async function stickerRoute(req: Request, url: URL, userId: number): Prom
     const st = await greetingSticker();
     return st ? Response.json(st, { headers: { 'cache-control': 'no-store' } }) : fail('not_found', 404);
   }
+  // сохранённые GIF: list — POST, в теле то, что устройство уже знает (have)
+  if (m === 'POST' && p === '/my-gifs/list') return Response.json(await listSavedGifs(userId, ((await req.json().catch(() => null)) as { have?: unknown } | null)?.have));
+  if (m === 'POST' && p === '/my-gifs') {
+    const b = (await req.json().catch(() => null)) as { chatId?: unknown; messageId?: unknown } | null;
+    if (!b || !Number.isSafeInteger(b.chatId) || !Number.isSafeInteger(b.messageId)) return fail('bad_frame', 400);
+    return Response.json(await saveGif(userId, b.chatId as number, b.messageId as number));
+  }
+  const gif = /^\/my-gifs\/([^/]+)$/.exec(p);
+  if (m === 'DELETE' && gif) return Response.json(await removeGif(userId, gif[1]));
   if (m === 'GET' && p === '/my-stickers') return Response.json(await myStickers(userId));
   if (m === 'POST' && p === '/my-stickers/sets') {
     const b = (await req.json().catch(() => null)) as { setId?: unknown; on?: unknown } | null;

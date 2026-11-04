@@ -57,9 +57,9 @@ const withTimeout = <T>(p: Promise<T>, ms = OP_MS): Promise<T> =>
  *  кусок начала видео — «…@<смещение>». */
 export const attachmentKey = (fileId: string): string => `/files/${fileId}`;
 /** Адрес вложения, который просит страница: оригинал или копия (видео, фото). */
-const FILE_PATH = /^\/files\/([0-9a-f-]{36}(?:\/(?:preview|720|medium))?)$/;
+const FILE_PATH = /^\/files\/([0-9a-f-]{36}(?:\/(?:preview|720|medium|loop))?)$/;
 /** Ключ в кэше: адрес вложения или кусок начала видео. */
-const KEY_PATH = /^\/files\/([0-9a-f-]{36}(?:\/(?:preview|720|medium))?(?:@\d+)?)$/;
+const KEY_PATH = /^\/files\/([0-9a-f-]{36}(?:\/(?:preview|720|medium|loop))?(?:@\d+)?)$/;
 const fileIdOf = (path: string): string | null => FILE_PATH.exec(path)?.[1] ?? null;
 const keyIdOf = (path: string): string | null => KEY_PATH.exec(path)?.[1] ?? null;
 

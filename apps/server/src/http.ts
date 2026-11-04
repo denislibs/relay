@@ -99,7 +99,7 @@ const PRE_PROOF_BYTES = 256 * 1024;
 export const WS_MAX_FRAME = 256 * 1024;
 /** кадров в секунду на сокет */
 const WS_RATE = 100;
-const API = /^\/(health|me|users|contacts|settings|privacy|blocks|chats|presence|search|uploads|files|push|sessions|session|ws|dev|logout|auth|link-preview|groups|join|sticker-sets|my-stickers|stickers-by-emoji|stickers|reactions|animated-emoji|emoji-groups|maptile|themes)(\/|$)/;
+const API = /^\/(health|me|users|contacts|settings|privacy|blocks|chats|presence|search|uploads|files|push|sessions|session|ws|dev|logout|auth|link-preview|groups|join|sticker-sets|my-stickers|my-gifs|stickers-by-emoji|stickers|reactions|animated-emoji|emoji-groups|maptile|themes)(\/|$)/;
 
 export function createServer(opts: { port: number }): Server {
   // кадры мимо журнала — через Valkey, чтобы дошли до сокетов в любом процессе
@@ -350,9 +350,9 @@ export function createServer(opts: { port: number }): Server {
         if (req.method === 'DELETE' && upload) { await abortUpload(userId, upload[1]); return new Response(null, { status: 204 }); }
         const confirmUp = /^\/uploads\/([0-9a-f-]{36})\/confirm$/.exec(url.pathname);
         if (req.method === 'POST' && confirmUp) return Response.json(await confirmUpload(userId, confirmUp[1]));
-        const file = /^\/files\/([0-9a-f-]{36})(?:\/(preview|720|medium))?$/.exec(url.pathname);
+        const file = /^\/files\/([0-9a-f-]{36})(?:\/(preview|720|medium|loop))?$/.exec(url.pathname);
         if ((req.method === 'GET' || req.method === 'HEAD') && file) {
-          // /files/<id>/preview, /files/<id>/720 — копии видео (jobs/video.ts); preview, medium — копии фото (jobs/photo.ts); ещё нет — 404, клиент берёт оригинал
+          // /files/<id>/preview, /files/<id>/720 — копии видео (jobs/video.ts); preview, medium, loop — копии фото и GIF (jobs/photo.ts); ещё нет — 404, клиент берёт оригинал
           const f = await fileFor(userId, file[1], file[2]);
           if (!f) return new Response('Not found', { status: 404 });
           // inline — только то, что браузер покажет как медиа; HTML, SVG и прочее отдаём вложением как octet-stream

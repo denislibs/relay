@@ -83,6 +83,13 @@ export interface StickerRef { id: Id; setId: Id; emoji: string; w: number; h: nu
 export interface StickerSetInfo { id: Id; shortName: string; title: string; kind: 'sticker' | 'emoji'; count: number; cover: StickerRef | null; hash: string }
 export interface StickerSet extends StickerSetInfo { stickers: StickerRef[] }
 /** Мои стикеры: установленные паки по порядку, недавние (до 20) и избранные (до 5), новые сверху. */
+/** Сохранённые GIF: до стольких на пользователя, сверх — самая старая вытесняется (как в Telegram). */
+export const SAVED_GIFS_LIMIT = 200;
+/** Тяжелее сохранить нельзя: воркер не делает таким копий (jobs/photo.ts PHOTO_MAX_BYTES), плитке нечего играть. */
+export const GIF_MAX_BYTES = 40 * 1024 * 1024;
+/** Сохранённая GIF — вложение (тот же id, что в сообщении) и когда сохранена. key и thumb ответа на /my-gifs/list нет
+ *  у того, что устройство уже знает (have). */
+export type SavedGif = Attachment & { savedAt: number };
 export interface MyStickers { sets: StickerSetInfo[]; recent: StickerRef[]; faved: StickerRef[] }
 /** Название чата с самим собой (domain/saved.ts). */
 export const SAVED_TITLE = 'Избранное';
@@ -258,7 +265,7 @@ export interface Attachment {
 }
 /** Копия видео: preview — первые секунды без звука, 360p, до 1 МБ (лента); '720' — H.264 720p (просмотрщик по умолчанию).
  *  У фото и картинки-файла preview — WebP, длинная сторона до 480 px (сетка «Медиа»); medium — WebP до 800 px (пузырь в ленте). */
-export interface VideoVariant { name: 'preview' | '720' | 'medium'; w: number; h: number; size: number }
+export interface VideoVariant { name: 'preview' | '720' | 'medium' | 'loop'; w: number; h: number; size: number }
 /** video — видео как медиа (кадр, длительность, играет в ленте); видео «как файл» остаётся file с mime video/*. */
 export type AttachmentKind = 'photo' | 'video' | 'file' | 'voice' | 'round' | 'audio';
 /** Вкладки «Общих медиа» (как в Telegram): медиа — фото и видео, файлы, музыка, голосовые и кружки, ссылки. */
@@ -377,6 +384,7 @@ export type Update =
   // отложенное появилось или изменилось (только автору; журнал хранит ссылку, не текст) / опубликовано или удалено
   | { type: 'scheduled'; item: ScheduledMessage }
   | { type: 'scheduledRemoved'; chatId: Id; clientId: string }
+  | { type: 'myGifs' }   // сохранённые GIF изменились — перечитать POST /my-gifs/list
   | { type: 'myStickers' };   // мои паки / недавние / избранные изменились — перечитать GET /my-stickers   // превью ссылки сообщения загрузилось (null — превью нет)   // закреплённые сообщения чата целиком (новые сверху)   // список сеансов изменился: новый вход, подтверждение, завершение
 
 /** Строка участника группы в журнале (имя и присутствие — из профиля и присутствия). */

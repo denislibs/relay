@@ -1836,6 +1836,18 @@ function EmptyState(props) {
         h('g', { class: 'rl-empty-sun' }, h('circle', { class: 'rl-empty-sun-fill', cx: 112, cy: 56, r: 7 }), L('rl-empty-d3', { tag: 'circle', cx: 112, cy: 56, r: 7 })),
         L('rl-empty-d3', { d: 'M60 90l20-22 13 13 9-8 26 17' })),
       spark(140, 26), spark(20, 88, 'rl-empty-spark-2'), spark(146, 104, 'rl-empty-spark-3'))
+    : kind === 'gifs'
+    // две карточки-кадра: на передней кнопка «пуск» пульсирует, сверху закладка сохранения покачивается; искорки вокруг
+    ? h('svg', { class: 'rl-empty-art', viewBox: '0 0 160 120', 'aria-hidden': 'true' },
+      h('g', { class: 'rl-empty-float rl-empty-float-2' },
+        h('rect', { class: 'rl-empty-fill rl-empty-fill-in', x: 30, y: 26, width: 66, height: 50, rx: 10, transform: 'rotate(-8 63 51)' }),
+        L('', { tag: 'rect', x: 30, y: 26, width: 66, height: 50, rx: 10, transform: 'rotate(-8 63 51)' })),
+      h('g', { class: 'rl-empty-float' },
+        h('rect', { class: 'rl-empty-fill rl-empty-fill-out', x: 50, y: 38, width: 78, height: 58, rx: 10 }),
+        L('rl-empty-d2', { tag: 'rect', x: 50, y: 38, width: 78, height: 58, rx: 10 }),
+        h('g', { class: 'rl-empty-sun' }, L('rl-empty-d3', { d: 'M81 56.5v21l18-10.5z' })),
+        h('g', { class: 'rl-empty-clip' }, L('rl-empty-d3', { d: 'M110 26h14v24l-7-6-7 6z' }))),
+      spark(140, 22), spark(22, 92, 'rl-empty-spark-2'), spark(146, 106, 'rl-empty-spark-3'))
     : kind === 'files'
     // документ с загнутым уголком, за ним второй; скрепка покачивается, «скачать» подпрыгивает
     ? h('svg', { class: 'rl-empty-art', viewBox: '0 0 160 120', 'aria-hidden': 'true' },

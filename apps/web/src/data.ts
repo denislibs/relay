@@ -1,4 +1,5 @@
 import { bindStickers } from './stickers';
+import { bindGifs, gifsRevChanged } from './gifs';
 import { deviceStore, forgetAttachments } from './mediaCache';
 import { showToast } from './settingsData';
 import { coverThumb, readAudioTags } from './id3';
@@ -68,6 +69,7 @@ export function startData(me: Me, fromUrl = true): void {
   bindMute((chatId, muteUntil) => engine.call({ type: 'setMute', chatId, muteUntil }));
   bindChatFlags((chatId, f) => engine.call({ type: 'setChatFlags', chatId, ...f }));
   bindStickers((a) => engine.call(a as never));
+  bindGifs((a) => engine.call(a as never));
   startMuteMigration();   // прежние relay.muted / relay.mutedUntil — на сервер, один раз (до первого снимка: значки не мигают)
   // позиции прокрутки из IndexedDB — до первого открытия чата (ответ движка приходит раньше списка чатов)
   void engine.call({ type: 'positions' }).then((r) => { for (const [k, v] of Object.entries((r as Record<string, { key: string; sort: number; offset: number }>) ?? {})) if (!dirtyPositions.has(k)) positions.set(k, v); }).catch(() => { /* без кэша — как раньше, только память */ });
@@ -113,7 +115,7 @@ export function startData(me: Me, fromUrl = true): void {
       .catch((e) => console.warn('auto-delete files:', String(e)))
       .finally(() => { clearing = false; });
   };
-  engine.watch({ kind: 'status' }, (p) => { status.apply(p); const s = status.list()[0] as unknown as Status | undefined; if (s) { setGlobal({ status: s }); showPhase(s); clearExpiredFiles(s.expiredFiles); } });
+  engine.watch({ kind: 'status' }, (p) => { status.apply(p); const s = status.list()[0] as unknown as Status | undefined; if (s) { setGlobal({ status: s }); showPhase(s); clearExpiredFiles(s.expiredFiles); gifsRevChanged((s as { gifsRev?: number }).gifsRev ?? 0); } });
   const uploads = new Mirror();
   engine.watch({ kind: 'uploads' }, (p) => { uploads.apply(p); setGlobal({ uploads: uploads.list() as unknown as UploadItem[] }); });
   // закрытие вкладки, пока файл грузится: как в Telegram, спросим (очередь переживёт перезагрузку, но незагруженное придётся догружать)

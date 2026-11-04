@@ -17,6 +17,7 @@ import { applyUserUpdated, meItem, meView, OP_LINKS, OP_PCHANNEL, OP_PROFILE, OP
 import { ChannelPosts } from './channelPost';
 import { OP_SESSIONS_TTL, Sessions } from './sessions';
 import { Stickers } from './stickers';
+import { OP_GIF, SavedGifs } from './savedGifs';
 import { SessionEnd } from './session';
 import { DevTools, loadSim, type SimState, type SubStat } from './devlog';
 import { simFlags, watchLoss } from './devsim';
@@ -119,6 +120,7 @@ export class Engine {
   /** активные сеансы (sessions.ts) */
   private readonly sessions: Sessions;
   private readonly stickers: Stickers;
+  private readonly gifs: SavedGifs;
   private readonly channelPosts: ChannelPosts;
   /** конец сеанса: sessionTerminated / 401 (session.ts) */
   private readonly session: SessionEnd;
@@ -180,6 +182,7 @@ export class Engine {
         this.dev.log.record('engine', type, data);
         // отказ по отложенному: оптимистичное показывает неправду — вернуть то, что на сервере
         if (type === 'opFail' && String((data as { key?: unknown }).key).startsWith(OP_SCHEDULED)) this.refreshScheduled();
+        if (type === 'opFail' && String((data as { key?: unknown }).key).startsWith(OP_GIF)) this.gifs.opFailed(String((data as { key?: unknown }).key));
       },
     });
     this.contacts = new Contacts({
@@ -202,6 +205,7 @@ export class Engine {
     this.lists = new ProfileListsLoader(store, { online: () => this.online && this.ready, http: (path) => this.http(path), run: (fn) => this.run(fn), changed: () => this.changed() });
     this.sessions = new Sessions({ ops: this.ops, online: () => this.online, http: (path) => this.http(path) });
     this.stickers = new Stickers({ db, online: () => this.online, http: (path) => this.http(path), enqueue: (op) => this.ops.enqueue(op), bump: () => { this.store.stickersRev++; this.changed(); } });
+    this.gifs = new SavedGifs({ db, online: () => this.online, http: (path, init) => this.http(path, init), enqueue: (op) => this.ops.enqueue(op), pending: (key) => this.ops.list.some((o) => o.key === key), run: (fn) => this.run(fn), rev: () => this.store.gifsRev, bump: () => { this.store.gifsRev++; this.changed(); } });
     this.channelPosts = new ChannelPosts({ db, online: () => this.online && this.ready,
       fetch: (path) => this.dev.fetch(this.cfg.httpBase + path, { credentials: 'include', headers: this.cfg.headers }) });
     this.session = new SessionEnd({
@@ -469,7 +473,8 @@ export class Engine {
       ...this.session.status(),
       sessionsRev: this.store.sessionsRev,
       clockSkew: this.store.clockSkew,   // поправка часов к серверу: «Удалится через …» в меню сообщения
-      expiredFiles: [...this.store.expiredFiles],   // файлы исчезнувших сообщений: страница чистит кэш и подтверждает
+      expiredFiles: [...this.store.expiredFiles].filter((id) => !this.gifs.has(id)),   // файлы исчезнувших сообщений: страница чистит кэш и подтверждает
+      gifsRev: this.store.gifsRev,   // сохранённые GIF: журнал, подключение, снимок, свои изменения
       stickersRev: this.store.stickersRev,   // мои стикеры: журнал, переподключение, снимок, свои изменения   // растёт на sessionsChanged из журнала, переподключении и снимке: интерфейс перечитывает сеансы
       devSim: simFlags(this.dev.sim),   // имитатор сети включён — плашка «Режим разработчика» во всех вкладках
     };
@@ -984,6 +989,7 @@ export class Engine {
 
   /** Операция подтверждена: ответ профиля — новая база (журнал принесёт то же самое ещё раз — не страшно). */
   private opDone(op: PendingOp, value: unknown): void {
+    if (op.key.startsWith(OP_GIF)) { this.gifs.opDone(op, value); return; }
     if (op.key.startsWith(OP_SCHEDULED)) {
       // ответ — новая база: {item} — строка (правка; «отправить сейчас», которое не вышло), иначе её больше нет
       const clientId = op.key.slice(OP_SCHEDULED.length), v = value as { item?: ScheduledMessage } | null;
@@ -1569,6 +1575,10 @@ export class Engine {
         void this.stickers.bumpRecent(a.sticker);
         return { clientId };
       }
+      case 'savedGifs':
+      case 'saveGif':
+      case 'removeGif':
+        return this.gifs.act(a);
       case 'myStickers':
       case 'stickerSet':
       case 'installStickerSet':
@@ -1693,6 +1703,7 @@ export class Engine {
         this.holding = true;
         // переподключение: пока связи не было, sessionsChanged мог уйти мимо (снимок его не несёт) — интерфейс
         // перечитывает сеансы (плашка «Это вы?»); первое подключение не считаем — там интерфейс грузит список сам
+        this.store.gifsRev++;   // журнал мог быть пропущен, а первый запуск мог быть без сети: список — заново (из кэша сразу)
         if (this.hellos++ > 0) { this.store.sessionsRev++; this.store.stickersRev++; this.changed(); }
         this.run(async () => {
           // другое поколение базы (сервер пересоздан): старый кэш недействителен целиком
@@ -2254,6 +2265,7 @@ export class Engine {
             this.blocks.fetch();
             this.fetchSettings();
             this.store.stickersRev++;
+            this.store.gifsRev++;
             this.store.sessionsRev++;   // снимок пропустил записи журнала, в т.ч. sessionsChanged — список сеансов заново
             await this.loadFirstDialogs();
             this.store.lastSeq = f.op === 'tooLong' ? f.seq : f.to;

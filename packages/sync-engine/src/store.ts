@@ -147,6 +147,7 @@ function postExtras(m: Message, prev: LocalMessage | undefined, threadRead?: (ch
 export class Store {
   /** счётчик sessionsChanged из журнала (не хранится): по нему интерфейс перечитывает сеансы */
   sessionsRev = 0;
+  gifsRev = 0;       // сохранённые GIF изменились: интерфейс перечитывает, движок спрашивает сервер
   stickersRev = 0;   // мои стикеры изменились (журнал, переподключение): интерфейс перечитывает
   chats = new Map<number, LocalChat>();
   outbox = new Map<string, OutboxEntry>();
@@ -430,6 +431,7 @@ export class Store {
       case 'privacyChanged': this.settings.applyPrivacy(u.rules, seq); return;
       case 'blocksChanged': return applyBlocksChanged(this, u, seq);
       case 'sessionsChanged': this.sessionsRev++; return;
+      case 'myGifs': this.gifsRev++; return;
       case 'myStickers': this.stickersRev++; return;
       case 'pins': { const chat = this.chats.get(u.chatId); if (chat) { chat.pinned = u.ids; this.markChat(chat); } return; }
       case 'chatNotify': return this.setMute(u.chatId, u.muteUntil);

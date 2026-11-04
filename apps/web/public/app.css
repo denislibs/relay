@@ -1339,6 +1339,21 @@ html[data-anim="0"] :is(.app-hero, .app-hero-photo, .app-hero-info, .app-hero-na
 .app-stk-grid { display: grid; grid-template-columns: repeat(auto-fill, 72px); grid-auto-rows: 72px; justify-content: space-between; gap: 4px; padding: 0 3px; }
 .app-stk-cell { display: flex; align-items: center; justify-content: center; width: 72px; height: 72px; padding: 0; border: 0; border-radius: 16px; background: transparent; cursor: pointer; }
 .app-stk-cell:hover { background: var(--sym-hover); }
+/* вкладка GIF: плитки стоят абсолютно по расчёту из размеров (gifLayout.ts), слои лежат друг на друге: размытая миниатюра,
+   первый кадр сервера, анимация; каждый следующий проявляется поверх, ничего не прыгает */
+.app-gif-scroll { padding: 6px 6px 60px; margin-bottom: 0; }
+.app-gif-grid { position: relative; }
+.app-gif-tile { position: absolute; display: block; padding: 0; border: 0; border-radius: 8px; overflow: hidden; background: var(--sym-fill); cursor: pointer; contain: strict; -webkit-touch-callout: none; touch-action: pan-y; }
+.app-gif-tile > * { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; pointer-events: none; -webkit-user-select: none; user-select: none; }
+.app-gif-thumb { filter: blur(6px); transform: scale(1.12); }
+.app-gif-still, .app-gif-anim { opacity: 0; transition: opacity 200ms ease-in-out; }
+.app-gif-tile.has-still .app-gif-still, .app-gif-tile.is-drawn .app-gif-anim { opacity: 1; }
+.app-gif-tile:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+.app-gif-tile::after { content: ''; position: absolute; inset: 0; background: transparent; transition: background-color 120ms; pointer-events: none; }
+.app-gif-tile:hover::after { background: color-mix(in srgb, var(--ink) 8%, transparent); }
+:root[data-anim="0"] .app-gif-still, :root[data-anim="0"] .app-gif-anim { transition: none; }
+@media (prefers-reduced-motion: reduce) { .app-gif-still, .app-gif-anim { transition: none; } }
+.app-gif-empty { display: flex; flex: 1; min-height: 0; align-items: center; justify-content: center; padding: 0 16px 56px; }
 /* нижние вкладки — маленькая стеклянная «пилюля» поверх содержимого (как в Telegram для macOS), без полосы и границы;
    выбранная подсвечена подложкой, которая переезжает между равными сегментами */
 .app-sym { --sym-glass: color-mix(in srgb, var(--panel, var(--bg)) 72%, transparent); --sym-glass-line: color-mix(in srgb, var(--ink) 8%, transparent); }

@@ -54,6 +54,18 @@ export async function openAttachmentRows<T extends Record<string, unknown>>(rows
   return rows;
 }
 
+/* ---------- миниатюра сохранённой GIF (domain/savedGifs.ts) — шифром ключа файла: уничтожен ключ — нечитаема и она ---------- */
+
+const thumbAad = (userId: number, id: string) => `saved_gifs|${userId}|${id}|thumb`;
+
+export async function sealThumb(userId: number, attachmentId: string, raw: Uint8Array, thumb: string): Promise<Buffer> {
+  return Buffer.from(await seal(await importAesKey(raw), 0, thumb, thumbAad(userId, attachmentId)));
+}
+export async function openThumb(userId: number, attachmentId: string, raw: Uint8Array, sealed: Uint8Array): Promise<string | null> {
+  try { return await open(await importAesKey(raw), sealed, thumbAad(userId, attachmentId)); }
+  catch (e) { if (e instanceof CryptoError) return null; throw e; }
+}
+
 /* ---------- файлы на диске воркера: потоково, без чтения целиком в память ---------- */
 
 /** Расшифровать объект (файл src) в dst. Не наш формат — просто копия. */
