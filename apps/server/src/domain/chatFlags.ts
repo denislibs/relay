@@ -23,7 +23,7 @@ export async function setChatFlags(userId: number, chatId: number, body: unknown
   for (const k of ['pinned', 'archived', 'unreadMark'] as const) if (b[k] !== undefined && typeof b[k] !== 'boolean') throw new DomainError('bad_frame', k);
   return sql.begin(async (tx) => {
     await assertMember(tx, chatId, userId);
-    const [cur] = await tx`select pinned_at, archived, unread_mark, archived_at_id from chat_members where chat_id = ${chatId} and user_id = ${userId} for update`;
+    const [cur] = await tx`select pinned_at, archived, unread_mark, archived_at_id, exists (select 1 from saved_chats s where s.chat_id = ${chatId}) as saved from chat_members where chat_id = ${chatId} and user_id = ${userId} for update`;
     const was = toFlags(cur as Row);
     const archived = (b.archived as boolean | undefined) ?? was.archived;
     let pinned = was.pinnedAt != null && archived === was.archived;   // в другой список закрепление не переезжает
@@ -34,7 +34,8 @@ export async function setChatFlags(userId: number, chatId: number, body: unknown
       if ((n as number) >= PIN_LIMIT) throw new DomainError('pin_limit');
       pinned = true; pinNow = true;
     }
-    const unreadMark = (b.unreadMark as boolean | undefined) ?? was.unreadMark;
+    // «Избранное» всегда прочитано: пометки «непрочитанное» в нём не бывает
+    const unreadMark = !cur.saved && ((b.unreadMark as boolean | undefined) ?? was.unreadMark);
     const pinnedAt = pinNow ? sql`now()` : pinned ? sql`pinned_at` : sql`null`;
     // граница архива — при каждой записи archived = true (не только на переходе): повторная архивация, ушедшая раньше
     // стоящего в очереди unarchive, должна её сдвинуть. Снятие архива границу не трогает

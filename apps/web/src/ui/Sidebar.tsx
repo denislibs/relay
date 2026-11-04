@@ -2,7 +2,7 @@ import { ChatBanner } from './ChatBanner';
 import { UpdatePill } from './UpdatePill';
 import { ArchivedRow, Avatar, ChatRow, Highlight, Icon, MenuPopover, Presence, SlideStack, ChatRowSkeleton, useMinVisible, EmptyState, WindowList, FolderTabs, SidebarCard, SidebarHeader, beginHeavyAnimation, peerTone, reducedMotion, ripple, addHotkeys } from '@relay/ui';
 import type { Item } from '@relay/sync-engine/src/types';
-import { loadMoreChats, openChat, prepareChat } from '../data';
+import { loadMoreChats, openChat, openSavedChat, prepareChat } from '../data';
 import { pressOpen } from './press';
 import { clearUnreadMark, hasUnreadMark, isArchived, isPinned, markUnread, toggleArchive, togglePin } from '../chatFlags';
 import { usePerson } from '../people';
@@ -14,7 +14,7 @@ import { useEffect, useRef, useState } from 'preact/hooks';
 import { memo } from 'preact/compat';
 import { go } from '../nav';
 import { isDark } from '../theme';
-import { chatTime, chatTone, isSystemChat, shownBody, snippet } from './format';
+import { chatTime, chatTone, isSavedChat, isSystemChat, shownBody, shownStatus, snippet } from './format';
 import { toggleNight } from '../theme';
 import { previewBody, previewText, previewThumb, type LastMessage } from './preview';
 import { ALL, chatFolderTags, fitFolderTags, inFolder, toggleChatInFolder, type FolderTag } from '../folders';
@@ -81,6 +81,7 @@ export const SideRow = memo(function SideRow({ c, meId, active, showDraft, muted
       {...rowPhoto(c.photo as ProfilePhoto | null)}
       data-chat-id={c.id}
       logo={isSystemChat(c)}
+      saved={isSavedChat(c)}
       verified={isSystemChat(c)}
       author={author}
       thumb={thumb}
@@ -95,7 +96,7 @@ export const SideRow = memo(function SideRow({ c, meId, active, showDraft, muted
       reactions={c.reactions as number}   // непросмотренные реакции на мои сообщения — красное сердце   // непрочитанное упоминание меня — «@» рядом со счётчиком
       unreadMark={hasUnreadMark(c)}
       pinned={isPinned(c)}
-      status={!draft && last && last.senderId === meId ? last.status : null}
+      status={!draft && last && last.senderId === meId ? shownStatus(last.status, isSavedChat(c)) ?? null : null}
       active={active}
       tags={tags}
       tagSpace={tagSpace}
@@ -341,13 +342,14 @@ export function Sidebar() {
                 label="Главное меню"
                 onClose={() => setMenu(null)}
                 menuHeader={
-                  <button type="button" role="menuitem" class="rl-menu-item app-menu-profile" onClick={() => { setMenu(null); void go('settings'); }}>
+                  <button type="button" role="menuitem" class="rl-menu-item app-menu-profile" onClick={() => { setMenu(null); void openSavedChat(); }}>
                     <Avatar name={me.name} tone={peerTone(me.userId)} size={32} {...avatarPhoto(me.photo)} /><span>{me.name}</span>
                   </button>
                 }
                 items={[
                   '-',   // под профилем — разделитель, как в Telegram
                   { icon: 'account', label: 'Мой профиль', onClick: () => { setMenu(null); void go('settings'); } },
+                  { icon: 'bookmark', label: 'Избранное', onClick: () => { setMenu(null); void openSavedChat(); } },
                   { icon: 'contacts', label: 'Контакты', onClick: () => { setMenu(null); void go('contacts'); } },
                   { icon: 'settings', label: 'Настройки', onClick: () => { setMenu(null); void go('settings'); } },
                   ...(installable ? [{ icon: 'download', label: 'Установить Relay', onClick: () => { setMenu(null); void installApp(); } }] : []),
@@ -406,12 +408,12 @@ export function RowMenu({ list, at, onClose }: { list: SelList; at: { id: number
                 { icon: 'newTab', label: 'Открыть в новой вкладке', onClick: () => { onClose(); window.open(location.pathname + '#chat=' + id, '_blank', 'noopener'); } },
                 { icon: 'checkCircle', label: 'Выбрать', onClick: () => { onClose(); startChatSelect(list, id); } },
                 // порядок — как в Telegram: прочитанное, папка, закрепить, уведомления, архив
-                ...(unread || marked
+                ...(isSavedChat(chat as never) ? [] : unread || marked   // «Избранное» всегда прочитано
                   ? [{ icon: 'markRead', label: 'Отметить как прочитанное', onClick: () => { onClose(); if (unread && lastId) seen(id, lastId); clearUnreadMark(id); } }]
                   : [{ icon: 'markUnread', label: 'Отметить как непрочитанное', onClick: () => { onClose(); markUnread(id); } }]),
                 ...folderItems,
                 { icon: pinned ? 'unpin' : 'pin', label: pinned ? 'Открепить' : 'Закрепить', onClick: () => { onClose(); togglePin(id); } },
-                { icon: muted ? 'bell' : 'bellOff', label: muted ? 'Включить уведомления' : 'Выключить уведомления', onClick: () => { onClose(); toggleMute(id); } },
+                ...(isSavedChat(chat as never) ? [] : [{ icon: muted ? 'bell' : 'bellOff', label: muted ? 'Включить уведомления' : 'Выключить уведомления', onClick: () => { onClose(); toggleMute(id); } }]),   // в «Избранном» уведомлений нет
                 ...(isSystemChat(chat as never) ? [] : [{ icon: archived ? 'unarchive' : 'archive', label: archived ? 'Вернуть из архива' : 'В архив', onClick: () => { onClose(); toggleArchive(id); } }]),
                 { icon: 'info', label: 'Информация', onClick: () => { onClose(); openChat(id); setGlobal({ infoOpen: true }); } },
               ]}

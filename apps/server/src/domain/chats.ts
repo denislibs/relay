@@ -273,6 +273,7 @@ export type ChatSummary = {
   last: Message | null;
   peer: { id: number; key: string; name: string; system?: true; photo?: ProfilePhoto | null } | null; // собеседник личного чата (key — ключ доступа к нему)
   peerReadUpTo: number; // до какого id мои сообщения прочитаны всеми остальными участниками
+  saved?: true;         // «Избранное»: чат с самим собой (domain/saved.ts); peer — null
   theme?: string | null;   // тема чата (id из каталога GET /themes)
   draft?: { text: string; at: string; entities?: Entity[] } | null; // черновик этого пользователя (синхронизируется между устройствами)
   sortAt?: string; // ключ сортировки списка (последнее сообщение или создание чата) — из него курсор страницы
@@ -305,9 +306,10 @@ export async function listChatsPage(userId: number, limit: number, before?: Dial
 export async function countChats(userId: number): Promise<number> {
   const [r] = await sql`
     select count(*)::int as n from chat_members cm join chats c on c.id = cm.chat_id
+      left join saved_chats sv on sv.chat_id = c.id
      where cm.user_id = ${userId} and not cm.archived   -- архив — не в «Все»
        and c.deleted_at is null
-       and not (c.kind = 'direct' and cm.history_from > 0
+       and not (c.kind = 'direct' and cm.history_from > 0 and coalesce(sv.hidden, true)
                 and not exists (select 1 from messages m where m.chat_id = c.id and m.id >= cm.history_from and not m.deleted))`;
   return r.n as number;
 }
@@ -318,7 +320,7 @@ export async function listChats(userId: number, opts: ListOpts = {}): Promise<Ch
     select c.id, c.kind, c.title, c.theme, c.created_at as chat_created_at, cm.last_read_id,
            c.about, c.photo as g_photo, c.owner_id, c.rights as chat_rights, c.slow_mode, c.history_hidden, c.join_approval, c.username, c.reactions, c.protected, c.signatures, c.linked_chat_id, c.join_to_send,
            cm.mute_until, cm.mute_until = 'infinity' as mute_forever, cm.pinned_at, cm.archived, cm.archived_at_id, cm.unread_mark, cm.role, cm.admin_rights, cm.restricted, cm.history_from, cm.rank,
-           coalesce(cs.seq, 0) as seq,
+           coalesce(cs.seq, 0) as seq, sv.chat_id is not null as saved,
            case when c.kind <> 'direct' then c.members_count end as g_members,   -- держит триггер (миграция 145)
            case when c.kind <> 'direct' then (select count(*)::int from chat_join_requests jr where jr.chat_id = c.id) end as g_pending,
            lm.id as m_id, lm.chat_id as m_chat_id, lm.sender_id as m_sender_id, lm.client_id as m_client_id,
@@ -342,6 +344,7 @@ export async function listChats(userId: number, opts: ListOpts = {}): Promise<Ch
       from chat_members cm
       join chats c on c.id = cm.chat_id
       left join chat_seq cs on cs.chat_id = c.id
+      left join saved_chats sv on sv.chat_id = c.id
       -- последнее — не удалённое (как в Telegram: удалённое исчезает, в превью — предыдущее)
       left join lateral (
         select * from messages where chat_id = c.id and id >= cm.history_from and not deleted order by id desc limit 1
@@ -349,7 +352,8 @@ export async function listChats(userId: number, opts: ListOpts = {}): Promise<Ch
      where cm.user_id = ${userId}
        and c.deleted_at is null   -- удалённый (мягко) канал или группа: строки участников убирает chat.purge
        -- личный чат, который удалили (история сдвинута) и в котором с тех пор ничего нет, — не в списке
-       and not (c.kind = 'direct' and cm.history_from > 0 and lm.id is null)
+       -- («Избранное» — пока его снова не открыли: hidden, domain/saved.ts)
+       and not (c.kind = 'direct' and cm.history_from > 0 and lm.id is null and coalesce(sv.hidden, true))
        ${opts.before ? sql`and (date_trunc('milliseconds', coalesce(lm.created_at, c.created_at)), c.id) < (${opts.before.at}::timestamptz, ${opts.before.id})` : sql``}
        ${opts.ids ? sql`and c.id = any(${opts.ids}::bigint[])` : sql``}
        ${opts.unreadOnly ? sql`and (cm.unread_mark or exists (select 1 from messages m where m.chat_id = c.id and m.id > cm.last_read_id and m.sender_id <> ${userId} and not m.deleted))` : sql``}
@@ -375,6 +379,7 @@ export async function listChats(userId: number, opts: ListOpts = {}): Promise<Ch
     unreadReactions: Number(r.unread_reactions ?? 0),
     peer: r.peer ? { id: (r.peer as { id: number }).id, key: peerKey(userId, (r.peer as { id: number }).id), name: (r.peer as { name: string }).name, photo: (r.peer as { photo?: ProfilePhoto | null }).photo ?? null, ...((r.peer as { system?: boolean }).system ? { system: true as const } : {}) } : null,
     peerReadUpTo: (r.peer_read_up_to as number) ?? 0,
+    ...(r.saved ? { saved: true as const } : {}),
     theme: (r.theme as string | null) ?? null,
     sortAt: new Date(r.sort_at as string).toISOString(),
     muteUntil: muteFromDb(r.mute_until as Date | null, r.mute_forever as boolean | null),
@@ -531,8 +536,10 @@ export async function getHistory(userId: number, chatId: number, before: number 
 export async function deleteDirectChat(userId: number, chatId: number, forAll: boolean): Promise<{ ok: true }> {
   return sql.begin(async (tx) => {
     await assertMember(tx, chatId, userId);
-    const [c] = await tx`select kind from chats where id = ${chatId}`;
+    const [c] = await tx`select c.kind, s.chat_id is not null as saved from chats c left join saved_chats s on s.chat_id = c.id where c.id = ${chatId}`;
     if (c?.kind !== 'direct') throw new DomainError('bad_frame', 'not a direct chat');
+    // «Избранное»: других участников нет — удаляем по-настоящему, история не остаётся в базе; из списка уходит до нового открытия
+    if (c.saved) { forAll = true; await tx`update saved_chats set hidden = true where chat_id = ${chatId}`; }
     const [m] = await tx`select coalesce(max(id), 0)::bigint as max from messages where chat_id = ${chatId}`;
     const from = Number(m.max) + 1;
     const who = forAll
@@ -545,6 +552,7 @@ export async function deleteDirectChat(userId: number, chatId: number, forAll: b
       await shredChatHistory(tx, chatId);
       // и то, что на прошлое ссылается: файлы без других ссылок теряют ключ, документы поиска удаляются (shred.ts)
       await shredHistory(tx, chatId, from);
+      await tx`delete from pinned_messages where chat_id = ${chatId}`;   // закрепы вели на стёртую историю
     }
     await fanOut(tx, who, { type: 'chatRemoved', chatId });
     return { ok: true };

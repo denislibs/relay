@@ -65,6 +65,8 @@ export interface StickerSetInfo { id: Id; shortName: string; title: string; kind
 export interface StickerSet extends StickerSetInfo { stickers: StickerRef[] }
 /** Мои стикеры: установленные паки по порядку, недавние (до 20) и избранные (до 5), новые сверху. */
 export interface MyStickers { sets: StickerSetInfo[]; recent: StickerRef[]; faved: StickerRef[] }
+/** Название чата с самим собой (domain/saved.ts). */
+export const SAVED_TITLE = 'Избранное';
 export const RECENT_STICKERS_LIMIT = 20;
 export const FAVED_STICKERS_LIMIT = 5;
 

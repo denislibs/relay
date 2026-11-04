@@ -772,7 +772,8 @@ export function closeChat(): void {
  *  hint — ключ (поиск людей, ссылка @имя) или сообщение, где человек назван (карточка контакта): см. peerRef. */
 export async function openUserChat(userId: number, hint?: PeerHint): Promise<void> {
   const me = getGlobal().me;
-  if (!me || userId === me.userId) return;
+  if (!me) return;
+  if (userId === me.userId) { await openSavedChat(true); return; }   // «написать себе» — Избранное
   const found = getGlobal().chats.find((c) => c.kind === 'direct' && c.peerId === userId);
   if (found) { openInner(found.id as number); return; }
   let id: number;
@@ -1284,7 +1285,21 @@ export async function createGroup(title: string, memberIds: number[], channel?: 
 export function refreshChats(): void { engine.call({ type: 'refreshChats' }).catch(() => {}); }
 
 export async function startDirectChat(peerId: number, hint?: PeerHint): Promise<void> {
+  if (peerId === getGlobal().me?.userId) { await openSavedChat(); return; }
   openChat(await createDirectChat(peerId, hint));
+}
+
+/** id «Избранного»: чат известен движку — сразу (и без сети), иначе сервер находит или создаёт. */
+export const savedChatId = (): Promise<number> => engine.call({ type: 'savedChat' }) as Promise<number>;
+
+/** Открыть «Избранное»: из левой колонки — заменой стека, изнутри чата (inner) — поверх (docs/navigation-rules.md). */
+export async function openSavedChat(inner = false): Promise<void> {
+  const open = (id: number) => (inner ? openInner(id) : openChat(id));
+  const known = getGlobal().chats.find((c) => c.saved);
+  if (known) { open(known.id as number); return; }   // чат в списке — без ожидания движка
+  let id: number;
+  try { id = await savedChatId(); } catch { showToastLazy('Не удалось открыть Избранное — нет сети?'); return; }
+  open(id);
 }
 
 /* ---------- закреплённые сообщения ---------- */

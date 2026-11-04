@@ -32,7 +32,7 @@ import { FileMessage } from './FileMessage';
 import { isCached, keepOffline, offlineUrlNow, resolveOfflineUrl, useKeptMedia, useOfflineUrl, warmCached } from '../downloads';
 import { getPrefs } from '../prefs';
 import { bubbleSrc, viewerPreview } from '../mediaGrid';
-import { clock, dayKey, dayLabel, fileSize } from './format';
+import { clock, dayKey, dayLabel, fileSize, shownStatus } from './format';
 import { arrivals, type FeedSeen } from './appear';
 import { anchorShift, deferShift, requestShift, rowFor, shiftWanted, stageOf, type ShiftDir, type Stage } from './windowShift';
 import { burstAnimates, driveScroll, jumpNear, DRIVE_MS, DRIVE_OWN_MS, type Drive } from './scrollDrive';
@@ -132,7 +132,7 @@ function reactionChips(m: Item, meId: number, people: Record<number, { name: str
   return chips;
 }
 
-type RowProps = { post?: boolean; pinned?: boolean; discussion?: number | null; chatId: number; voiceTitle: string; author?: string; onAuthor?: (m: Item) => void; onOpen: (m: Item) => void; hl?: string; m: Item; meId: number; out: boolean; start: boolean; end: boolean; pos?: 'single' | 'first' | 'middle' | 'last'; quoted?: Quote | null; quoteAuthor?: string; quoteTone?: number | 'accent'; appear: boolean; flash: boolean; onReact: (m: Item, emoji: string) => void; album?: Item[]; onUser?: (userId: number) => void; sel?: boolean; selIn?: string; onQuickForward?: (m: Item) => void; grp?: boolean; leaving?: boolean; rxv: number; aev: number; tf: string; bigEmoji: boolean; direct: boolean; people: Record<number, { name: string } | undefined> };
+type RowProps = { saved?: boolean; post?: boolean; pinned?: boolean; discussion?: number | null; chatId: number; voiceTitle: string; author?: string; onAuthor?: (m: Item) => void; onOpen: (m: Item) => void; hl?: string; m: Item; meId: number; out: boolean; start: boolean; end: boolean; pos?: 'single' | 'first' | 'middle' | 'last'; quoted?: Quote | null; quoteAuthor?: string; quoteTone?: number | 'accent'; appear: boolean; flash: boolean; onReact: (m: Item, emoji: string) => void; album?: Item[]; onUser?: (userId: number) => void; sel?: boolean; selIn?: string; onQuickForward?: (m: Item) => void; grp?: boolean; leaving?: boolean; rxv: number; aev: number; tf: string; bigEmoji: boolean; direct: boolean; people: Record<number, { name: string } | undefined> };
 
 /** Строка ленты: перерисовывается только если изменилось её сообщение или место в группе. */
 /** Тайл карты — с нашего сервера (политика безопасности и приватность: координаты не уходят наружу из браузера). */
@@ -143,7 +143,7 @@ const openMap = (g: GeoPoint) => {
   window.open(url, '_blank', 'noopener,noreferrer');
 };
 
-const Row = memo(function Row({ post, pinned, discussion, chatId, voiceTitle, author, onAuthor, onOpen, hl, m, meId, out, start, end, pos, quoted, quoteAuthor, quoteTone, appear, flash, onReact, album, onUser, sel, selIn, onQuickForward, grp, leaving, people, bigEmoji, direct }: RowProps) {
+const Row = memo(function Row({ post, pinned, discussion, chatId, voiceTitle, author, onAuthor, onOpen, hl, m, meId, out, start, end, pos, quoted, quoteAuthor, quoteTone, appear, flash, onReact, album, onUser, sel, selIn, onQuickForward, grp, leaving, people, bigEmoji, direct, saved }: RowProps) {
   // реакции: по эмодзи (ключ без FE0F — «❤️» и «❤» одна плашка) — сколько, есть ли моя, кто поставил;
   // картинка — из каталога (rxv — версия каталога: пришёл — строка перерисуется)
   // эффект своей реакции: заявка ждёт, пока плашка появится в DOM после перерисовки строки
@@ -175,7 +175,7 @@ const Row = memo(function Row({ post, pinned, discussion, chatId, voiceTitle, au
   // свой пост, ещё не подтверждённый сервером: пост всегда слева (out = false), но часы/«не отправлено» и отмена загрузки нужны
   const own = !!post && m.id == null && m.senderId === meId;
   const mineSend = out || own;
-  const status = mineSend ? m.status : undefined;
+  const status = mineSend ? shownStatus(m.status, !!saved) : undefined;
   const att = m.attachment as Att | null | undefined;
   // пересланное: «Переслано от» с аватаром и именем автора. Клик (как в Telegram): оригинал доступен — к нему;
   // иначе — чат с автором, а если мы уже в нём — его профиль (панель «Информация»)
@@ -226,7 +226,7 @@ const Row = memo(function Row({ post, pinned, discussion, chatId, voiceTitle, au
           caption={cap ? <MessageText text={cap.body as string} entities={cap.entities as Entity[] | undefined} highlight={hl} /> : undefined}
           metaBefore={metaBefore} footer={footer}
           reactions={chips.length ? chips : undefined} onReact={(emoji: string) => onReact(m, emoji)}
-          time={clock(last.createdAt as string)} status={mineSend ? last.status : undefined}
+          time={clock(last.createdAt as string)} status={mineSend ? shownStatus(last.status, !!saved) : undefined}
           onOpen={(i: number) => onOpen(album[i] ?? m)}
         />
         {album.map((x) => (x.id != null ? <i key={x.key} class="app-mark" data-mid={x.id as number} aria-hidden="true" /> : null))}
@@ -692,8 +692,9 @@ function CachedMusic({ fileId, ...props }: { fileId?: string } & Record<string, 
 const GREET_FLIGHT_MS = 320;   // перелёт стикера-приветствия в пузырь
 const GREET_LAND_MS = 120;     // сколько после посадки ждать первый кадр пузыря (плеер общий с карточкой — обычно уже есть)
 
-export function Feed({ frameKey, active, chatId, threadId, channel = false, meId, peerName, chatPhoto, group, onAuthor, stick, onMenu, highlight, greeting = false }: {
+export function Feed({ frameKey, active, chatId, threadId, channel = false, saved = false, meId, peerName, chatPhoto, group, onAuthor, stick, onMenu, highlight, greeting = false }: {
   frameKey: string; active: boolean;   // кадр стека чатов; active — на экране (только он отмечает прочитанное)
+  saved?: boolean;      // «Избранное»: без галочек
   greeting?: boolean;   // личный чат, где пустую ленту встречает карточка-приветствие (greetingChat)
   chatId: number; meId: number; peerName: string; highlight?: string;
   chatPhoto?: ProfilePhoto | null;   // фото чата: автор поста в просмотрщике — сам канал
@@ -1838,6 +1839,7 @@ export function Feed({ frameKey, active, chatId, threadId, channel = false, meId
         bigEmoji={bigEmoji}
         tf={tf}
         direct={!group && !channel}
+        saved={saved}
         people={(m.reactions as unknown[] | undefined)?.length && (m.reactions as unknown[]).length < 4 ? people : NO_PEOPLE}
         onOpen={onOpen}
         out={mine}

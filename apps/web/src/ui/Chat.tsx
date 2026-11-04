@@ -61,7 +61,7 @@ import { frameByKey, setGlobal, useGlobal, getGlobal, findChat, stackDepth } fro
 import { showToast, unblockUser, useUser } from '../settingsData';
 import { Feed, type MenuExtra } from './Feed';
 import { chatKindFor, mediaPolicy } from '../autoload';
-import { chatTime, chatTone, fileSize, isSystemChat, lastSeenText, shownBody, snippet } from './format';
+import { chatTime, chatTone, fileSize, isSavedChat, isSystemChat, lastSeenText, shownBody, snippet } from './format';
 import { captureCircle, captureText } from './sendFlight';
 import { attachmentHit } from '../searchHit';
 import type { ProfilePhoto } from '@relay/protocol';
@@ -161,6 +161,7 @@ export function Chat({ chatId, frameKey, active, threadId }: { chatId: number; f
   // служебный чат «Relay»: только чтение — без поля ввода, реакций, ответов и вложений
   const system = isSystemChat(chat);
   const systemRef = useRef(system); systemRef.current = system;
+  const isSaved = isSavedChat(chat);   // «Избранное»: в шапке только название
   // «Автозагрузка медиа» / автовоспроизведение для ленты этого чата (MediaBubble кита читает контекст)
   const isContact = useGlobal((s) => chat?.peerId != null && s.contacts.some((c) => c.userId === chat.peerId));
   const autoload = useGlobal((s) => s.prefs.autoload);
@@ -578,10 +579,10 @@ export function Chat({ chatId, frameKey, active, threadId }: { chatId: number; f
         {/* поверх другого чата — «Назад» к нему (и на широком экране), нижний — к списку на узком */}
         <IconButton class={depth > 1 ? 'app-back app-back-inner' : 'app-back'} icon="arrowLeft" label={depth > 1 ? 'Назад' : 'К списку чатов'} onClick={closeChat} />
         <button type="button" class="rl-glassbar-who" aria-label="Информация о чате" onClick={() => setGlobal({ infoOpen: !infoOpen })}>
-          <Avatar name={title} tone={chatTone(chat)} size={40} logo={system} {...avatarPhoto(chat?.photo as ProfilePhoto | null)} />
+          <Avatar name={title} tone={chatTone(chat)} size={40} logo={system} saved={isSaved} {...avatarPhoto(chat?.photo as ProfilePhoto | null)} />
           <span class="rl-glassbar-title">
             <b>{thread ? threadTitle(threadCount) : title}{system ? <Verified size={16} /> : null}</b>
-            <span key={phaseLabel ?? (isTyping ? 'typing' : online ? 'on' : 'off')} class={phaseLabel ? 'app-phase' : isTyping || online ? 'app-online' : undefined}>{phaseLabel ?? (subtitle || '\u00a0')}</span>
+            {isSaved && !phaseLabel ? null : <span key={phaseLabel ?? (isTyping ? 'typing' : online ? 'on' : 'off')} class={phaseLabel ? 'app-phase' : isTyping || online ? 'app-online' : undefined}>{phaseLabel ?? (subtitle || '\u00a0')}</span>}
           </span>
         </button>
         {!thread ? <IconButton icon="search" label="Поиск по чату" onClick={() => setFinding(true)} /> : null}
@@ -635,7 +636,7 @@ export function Chat({ chatId, frameKey, active, threadId }: { chatId: number; f
         ) : null}
       </GlassBar>
       <MediaPolicy.Provider value={policy}>
-        <Feed frameKey={frameKey} active={active} chatId={chatId} threadId={threadId} channel={channel} meId={me.userId} peerName={title} chatPhoto={chat?.photo as ProfilePhoto | null} group={chat?.kind === 'group' || !!guest} onAuthor={openUserChat} stick={stick} greeting={greeting} highlight={found?.q} onMenu={(key, x, y, extra) => setMenu({ key, x, y, extra })} />
+        <Feed frameKey={frameKey} active={active} chatId={chatId} threadId={threadId} channel={channel} saved={isSaved} meId={me.userId} peerName={title} chatPhoto={chat?.photo as ProfilePhoto | null} group={chat?.kind === 'group' || !!guest} onAuthor={openUserChat} stick={stick} greeting={greeting} highlight={found?.q} onMenu={(key, x, y, extra) => setMenu({ key, x, y, extra })} />
       </MediaPolicy.Provider>
       {plate === 'channel' ? <ChannelBar chatId={chatId} member={!!gMe} username={gInfo?.username ?? null} approval={!!gInfo?.joinApproval} requested={!!chat?.requested} />
       : plate === 'join' && guest ? <GuestJoinBar chatId={chatId} guest={guest} />
@@ -956,7 +957,7 @@ export function Chat({ chatId, frameKey, active, threadId }: { chatId: number; f
       ) : null}
       {readByOf != null ? <ReadByModal chatId={chatId} id={readByOf} onClose={() => setReadByOf(null)} /> : null}
       <ConfirmDialog open={!!confirmDelete} danger title={confirmDelete && confirmDelete.ids.length > 1 ? `Удалить ${confirmDelete.ids.length} ${plural(confirmDelete.ids.length, 'сообщение', 'сообщения', 'сообщений')}?` : 'Удалить сообщение?'}
-        text={confirmDelete && confirmDelete.ids.length > 1 ? 'Сообщения исчезнут у всех участников чата.' : 'Сообщение исчезнет у всех участников чата.'} confirm="Удалить у всех"
+        text={isSaved ? 'Это действие нельзя отменить.' : confirmDelete && confirmDelete.ids.length > 1 ? 'Сообщения исчезнут у всех участников чата.' : 'Сообщение исчезнет у всех участников чата.'} confirm={isSaved ? 'Удалить' : 'Удалить у всех'}
         onCancel={() => setConfirmDelete(null)} onConfirm={() => { if (confirmDelete) for (const id of confirmDelete.ids) deleteMessage(chatId, id).catch(() => { if (community) showToast('Не удалось удалить — недостаточно прав?'); }); setConfirmDelete(null); endSelect(); }} />
     </>
   );

@@ -1,3 +1,4 @@
+import { SAVED_TITLE } from '@relay/protocol';
 import { peerTone } from '@relay/ui';
 import { getPrefs, localeTimeFormat } from '../prefs';
 
@@ -145,6 +146,14 @@ export function chatTone(chat: Record<string, unknown> | null | undefined): numb
 
 /** Личный чат с системным пользователем «Relay». */
 export const isSystemChat = (chat: Record<string, unknown> | null | undefined): boolean => !!(chat?.peer as { system?: boolean } | null)?.system;
+
+/** «Избранное» — чат с самим собой. */
+export const isSavedChat = (chat: Record<string, unknown> | null | undefined): boolean => !!chat?.saved;
+/** Галочки своего сообщения: в «Избранном» читать некому — только «отправляется» и «не отправлено» (как в Telegram). */
+export const shownStatus = (status: unknown, saved: boolean): string | undefined =>
+  saved && status !== 'pending' && status !== 'failed' ? 'none' : status as string | undefined;
+/** Запрос подходит к «Избранному» (поиск находит его, даже если чата ещё нет). */
+export const matchesSaved = (q: string): boolean => { const n = q.trim().toLowerCase(); return !!n && SAVED_TITLE.toLowerCase().startsWith(n); };
 
 /** Код входа в превью и уведомлениях: цифры кода — точками. */
 export const hideCode = (text: string): string => text.replace(/\d{5}/, '•••••');

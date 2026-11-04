@@ -108,6 +108,7 @@ export interface ChatSummary {
   unreadReactions?: number;  // непрочитанные реакции на мои сообщения
   last: Message | null;
   peer?: { id: number; key?: string; name: string; system?: true; photo?: ProfilePhoto | null } | null;
+  saved?: true;            // «Избранное»: собеседника нет
   theme?: string | null;
   peerReadUpTo?: number;
   group?: GroupInfo;
@@ -258,7 +259,7 @@ export class Store {
   }
 
   /** Чат известен только по сообщениям: ни собеседника, ни группы — нужен снимок чата с сервера. */
-  static unnamed(c: LocalChat): boolean { return c.kind === 'direct' && c.peerId == null && !c.group; }
+  static unnamed(c: LocalChat): boolean { return c.kind === 'direct' && c.peerId == null && !c.group && !c.saved; }
   unnamed(): number[] { return [...this.chats.values()].filter(Store.unnamed).map((c) => c.id); }
 
   // ---------- чтение ----------
@@ -584,6 +585,7 @@ export class Store {
       chat.peerId = s.peer?.id ?? null;
       if (s.peer) this.profile.applyPeer(s.peer, seq);
       if (s.peer?.system) chat.system = true; else delete chat.system;
+      if (s.saved) chat.saved = true; else delete chat.saved;
       if (s.theme !== undefined) chat.theme = s.theme;
       if (s.draft && (!chat.draft || s.draft.at > chat.draft.at) && !this.pendingDrafts.has(s.id)) chat.draft = s.draft;
       if (s.pinned) chat.pinned = s.pinned;

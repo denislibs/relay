@@ -56,7 +56,7 @@ const sortAt = (c: LocalChat): string => (c.draft && c.draft.at > c.lastAt ? c.d
 const chatItem = (store: Store, c: LocalChat, person: ReturnType<typeof personView> | null, muteUntil: number | null, f: Flags): Item => {
   const title = chatTitle(store, c);
   return {
-  key: 'c' + c.id, id: c.id, kind: c.kind, title, peerId: c.peerId,
+  key: 'c' + c.id, id: c.id, kind: c.kind, title, peerId: c.peerId, saved: !!c.saved,
   // собеседник личного чата; system — служебный чат «Relay» (только чтение)
   peer: c.peerId != null ? { id: c.peerId, name: title, ...(c.system ? { system: true } : null) } : null, unread: c.unread, lastReadId: c.lastReadId, lastAt: c.lastAt,
   // canSend: в канале пишет только админ с правом post (channel.ts)

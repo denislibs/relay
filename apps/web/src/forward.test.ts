@@ -6,10 +6,11 @@ mock.module('./data', () => ({
   forwardMessages: async (a: Record<string, unknown>) => { calls.push(a); },
   openInner: () => {},
   sentSound: () => {},
+  savedChatId: async () => 77,
 }));
 mock.module('./settingsData', () => ({ showToast: () => {} }));
 
-const { forwardTo, startForwardMany } = await import('./forward');
+const { forwardTo, startForwardMany, SAVED_PICK } = await import('./forward');
 const { getGlobal, setGlobal } = await import('./global');
 
 beforeEach(() => { calls.length = 0; setGlobal({ fwdPick: null, fwdDraft: {} }); });
@@ -38,4 +39,15 @@ test('forward to several chats: one call per source chat, comment only with the 
     { toChatIds: [10, 11], comment: { body: 'hi' }, fromChatId: 5, ids: [1] },
     { toChatIds: [10, 11], comment: null, fromChatId: 7, ids: [2] },
   ]);
+});
+
+test('«Избранное» без чата в списке: настоящий id узнаётся при отправке и не задваивается', async () => {
+  calls.length = 0;
+  setGlobal({ fwdPick: { fromChatId: 1, ids: [5], preview: { senders: [], count: 1, text: 'x' } } as never });
+  await forwardTo([SAVED_PICK], '');
+  expect(getGlobal().fwdDraft[77]).toBeTruthy();   // один получатель — черновик в поле ввода, как у обычного чата
+  setGlobal({ fwdPick: { fromChatId: 1, ids: [5], preview: { senders: [], count: 1, text: 'x' } } as never });
+  await forwardTo([SAVED_PICK, 77], '');
+  expect(getGlobal().fwdDraft[77]).toBeTruthy();
+  expect(calls).toEqual([]);
 });

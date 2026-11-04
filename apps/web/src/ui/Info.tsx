@@ -8,7 +8,7 @@ import { openInner, openUserChat, startDirectChat } from '../data';
 import { playProfileTop } from '../music';
 import { Avatar, Icon, InfoRow, PanelHeader, ProfileActions, RichText, SettingsIcon, SlideFade, SlideStack, Verified, peerTone, requestMeasure } from '@relay/ui';
 import type { Item } from '@relay/sync-engine/src/types';
-import { chatTone, isSystemChat } from './format';
+import { chatTone, isSavedChat, isSystemChat } from './format';
 import { useEffect, useRef, useState } from 'preact/hooks';
 import { activeFrame, setGlobal, useGlobal, getGlobal, findChat } from '../global';
 import { isChatMuted, unmuteChat } from '../mute';
@@ -87,6 +87,7 @@ export function Info() {
   // профиль собеседника личного чата: только то, что сервер разрешил показать
   // служебный чат «Relay»: без контакта, телефона и @имени — только уведомления
   const system = isSystemChat(chat);
+  const saved = isSavedChat(chat);
   const peerId = chat?.kind === 'direct' && !system ? (chat.peerId as number | null) : null;
   const user = useUser(peerId);
   // контакт: ✎ в шапке ведёт в «Изменить»; не контакт — «Добавить в контакты»
@@ -207,7 +208,8 @@ export function Info() {
       label: chat?.requested ? 'заявка отправлена' : gInfo?.joinApproval ? 'подать заявку' : channel ? 'подписаться' : 'вступить',
       onClick: () => { if (joining || chat?.requested) return; setJoining(true); void joinChat(chatId).then((r) => { if (r !== 'joined') setJoining(false); }); } }] : []),
     // превью канала без подписки: уведомлений нет — и звук не настраивается
-    ...(chat?.preview ? [] : [muted
+    // «Избранное»: уведомлений нет — и звук не настраивается
+    ...(chat?.preview || saved ? [] : [muted
       ? { key: 'mute', icon: 'bell', label: 'вкл. звук', menuLabel: 'Включить звук', onClick: () => unmuteChat(chatId) }
       : { key: 'mute', icon: 'bellOff', label: 'без звука', menuLabel: 'Отключить звук…', onClick: () => dialogs.open('mute') }]),
     ...(linked != null ? [{ key: 'discussion', icon: 'chats', label: 'обсуждение', onClick: () => openInner(linked) }] : []),
@@ -250,14 +252,14 @@ export function Info() {
         ) : (
         <div class={'rl-profile' + (peerId && (user?.music as ProfileMusicSummary | null | undefined)?.top ? ' has-music' : '')}>
           <div class="app-prof-ava">
-            <Avatar name={title} tone={chatTone(chat)} size={120} logo={system} {...avatarPhoto(chat?.photo as ProfilePhoto | null, true)} />
+            <Avatar name={title} tone={chatTone(chat)} size={120} logo={system} saved={saved} {...avatarPhoto(chat?.photo as ProfilePhoto | null, true)} />
           </div>
           <div class="rl-profile-name">{title}{system ? <Verified size={22} /> : null}</div>
-          <div class={'rl-profile-sub' + (myPeer?.online ? ' app-online' : '')}>{subtitle || ' '}</div>
+          {saved ? null : <div class={'rl-profile-sub' + (myPeer?.online ? ' app-online' : '')}>{subtitle || ' '}</div>}
           {peerId ? <ProfileMusicBar userId={peerId} music={user?.music as ProfileMusicSummary | null | undefined} /> : null}
         </div>
         )}
-        {gallery.length ? null : <ProfileActions label="Действия с чатом" actions={tiles} menu={tileMenu} />}
+        {gallery.length || !(tiles.length || tileMenu.length) ? null : <ProfileActions label="Действия с чатом" actions={tiles} menu={tileMenu} />}
         {/* key — чат: строки нового профиля (из кэша) стоят сразу; раскрываются только пришедшие позже в этом же чате */}
         <div key={chatId} class="rl-aside-group app-info-rows">
           {/* как в Telegram: имя уже в шапке — строками только то, чего там нет, и только если поле заполнено */}

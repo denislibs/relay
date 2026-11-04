@@ -14,6 +14,7 @@ import { getThread, readThread } from './domain/threads';
 import { readBy } from './domain/reads';
 import { readReactions, unreadReactions } from './domain/reactionsUnread';
 import { commonGroups, deleteDirectChat, createChat, createGroup, GROUP_MEMBERS_MAX, openDirect, messageAtDate, getChatMedia, getMediaDays, getChatMediaCounts, getHistory, getMessagesByIds, listChats, listChatsPage } from './domain/chats';
+import { openSavedChat } from './domain/saved';
 import { sql } from './db';
 import { DomainError } from './domain/errors';
 import { setChatNotify } from './domain/chatNotify';
@@ -300,6 +301,8 @@ export function createServer(opts: { port: number }): Server {
           const body = (await req.json().catch(() => ({}))) as Record<string, unknown>;
           return Response.json({ id: await openDirect(userId, await resolvePeer(sql, userId, body)) });
         }
+        // «Избранное» — чат с самим собой: создаётся при первом обращении, повтор возвращает тот же
+        if (req.method === 'POST' && url.pathname === '/chats/saved') return Response.json({ id: await openSavedChat(userId) });
         if (devAllowed(req, server) && req.method === 'POST' && url.pathname === '/dev/chats') {
           const { kind, title, memberIds } = (await req.json()) as { kind: 'direct' | 'group' | 'channel'; title: string | null; memberIds: number[] };
           const ids = memberIds.includes(userId) ? memberIds : [userId, ...memberIds];

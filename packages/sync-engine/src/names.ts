@@ -1,4 +1,4 @@
-import type { Me, ProfilePhoto } from '@relay/protocol';
+import { SAVED_TITLE, type Me, type ProfilePhoto } from '@relay/protocol';
 import { contactName } from './contacts';
 import type { Store } from './store';
 import type { Item, LocalChat } from './types';
@@ -52,6 +52,7 @@ export function peopleResult(store: Store, ids: readonly number[], me: Me | null
 /** Название чата: группа — из group, личный — как зритель видит собеседника (null — ещё не знаем). */
 export function chatTitle(store: Store, c: LocalChat): string | null {
   if (c.group) return c.group.title;
+  if (c.saved) return SAVED_TITLE;
   return c.peerId != null ? displayName(store, c.peerId) || null : null;
 }
 

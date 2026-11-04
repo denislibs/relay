@@ -1124,6 +1124,7 @@ export class Engine {
         if (this.online) this.refreshList();
         return null;
       }
+      case 'savedChat': return this.savedChat();
       case 'setDraft': {
         if (this.store.setDraft(a.chatId, a.text, a.entities)) {
           this.store.pendingDrafts.add(a.chatId);
@@ -1134,7 +1135,8 @@ export class Engine {
         return null;
       }
       case 'typing':
-        if (this.online) this.transport.send({ op: 'typing', chatId: a.chatId });
+        // в «Избранном» «печатает…» показывать некому
+        if (this.online && !this.store.chats.get(a.chatId)?.saved) this.transport.send({ op: 'typing', chatId: a.chatId });
         return null;
       case 'emojiFx':
         if (this.online) this.transport.send({ op: 'emojiFx', chatId: a.chatId, id: a.id, key: a.key, t: a.t });
@@ -2264,6 +2266,20 @@ export class Engine {
       this.chatLoads.set(chatId, p);
     }
     return p;
+  }
+
+  /**
+   * «Избранное»: чат уже на устройстве — сразу (и без сети), иначе сервер находит или создаёт его. Строка чата приходит
+   * до ответа: чат откроется сразу с названием и значком, а не «Чат №N». Без сети и без чата на устройстве — ошибка.
+   */
+  private async savedChat(): Promise<number> {
+    for (const c of this.store.chats.values()) if (c.saved) return c.id;
+    const seq = this.store.lastSeq;
+    const { id } = await this.http<{ id: number }>('/chats/saved', { method: 'POST' });
+    this.store.applyChats(await this.http<ChatSummary[]>(`/chats?ids=${id}`), seq);
+    await this.store.flush();
+    this.changed();
+    return id;
   }
 
   /** После синхронизации: ленты, открытые до снимка или без сети, получают свой чат и историю. Окно открытого

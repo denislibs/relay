@@ -370,6 +370,11 @@ function Avatar(props) {
     return h('span', { class: cx('rl-avatar', 'rl-avatar-logo', (props.className || props.class)), style: { width: size, height: size }, role: 'img', 'aria-label': props.name || 'Relay' },
       h(RelayLogo, { size: Math.round(size * 0.62) }));
   }
+  if (props.saved) {
+    // «Избранное»: закладка вместо инициалов
+    return h('span', { class: cx('rl-avatar', 'rl-avatar-saved', (props.className || props.class)), style: { width: size, height: size }, role: 'img', 'aria-label': props.name || 'Избранное' },
+      h(Icon, { name: 'bookmark', size: Math.round(size * 0.56) }));
+  }
   var tone = props.tone != null ? props.tone : props.name ? nameTone(String(props.name)) : null;
   // фото: под ним инициалы и размытое превью (thumb), само фото проявляется, когда загрузилось, —
   // из кэша сразу, без мигания; ошибка загрузки — остаются превью/инициалы
@@ -443,6 +448,7 @@ function MessageStatus(props) {
   var s = props.status || 'sent';
   var first = useRef(s); // рисуем галочки только при смене статуса, не при появлении на экране
   var size = props.size || 16;
+  if (s === 'none') return null;   // «Избранное»: читать некому — галочек нет
   if (s === 'pending') {
     return h('span', { class: 'rl-status rl-status-clock', role: 'img', 'aria-label': 'в очереди' },
       h('svg', { width: size - 3, height: size - 3, viewBox: '0 0 24 24', fill: 'none', stroke: 'currentColor', 'stroke-width': 2.2, 'stroke-linecap': 'round' },
@@ -496,7 +502,7 @@ function FolderTags(props) {
 function ChatRow(props) {
   var unread = props.unread || 0;
   var tagged = !!(props.tags && props.tags.length);
-  var rest = omit(props, ['tags', 'tagSpace', 'fitTags', 'verified', 'logo', 'name', 'preview', 'time', 'unread', 'muted', 'status', 'active', 'typing', 'online', 'avatar', 'author', 'thumb', 'pinned', 'draft', 'mentioned', 'forwarded', 'reactions', 'selecting', 'selected', 'className', 'class']);
+  var rest = omit(props, ['tags', 'tagSpace', 'fitTags', 'verified', 'logo', 'saved', 'name', 'preview', 'time', 'unread', 'muted', 'status', 'active', 'typing', 'online', 'avatar', 'author', 'thumb', 'pinned', 'draft', 'mentioned', 'forwarded', 'reactions', 'selecting', 'selected', 'className', 'class']);
   // как в Telegram: «печатает» важнее черновика, черновик важнее сообщения;
   // строка сообщения — «Автор:», миниатюра 20 px (у видео — play), текст
   var thumb = props.thumb;
@@ -518,7 +524,7 @@ function ChatRow(props) {
   }),
     props.selecting ? h('span', { class: 'rl-row-check', 'aria-hidden': 'true' },
       h('svg', { width: 14, height: 14, viewBox: '0 0 24 24', fill: 'none', stroke: 'currentColor', 'stroke-width': 3, 'stroke-linecap': 'round', 'stroke-linejoin': 'round' }, h('path', { d: 'M5 12.5l4.5 4.5L19 7.5', pathLength: 1 }))) : null,
-    h(Avatar, { name: props.avatar === undefined ? props.name : props.avatar, tone: props.avatarTone, online: props.online, logo: props.logo, src: props.avatarSrc, thumb: props.avatarThumb, size: 54 }),   // как в Telegram: 54 в строке 72
+    h(Avatar, { name: props.avatar === undefined ? props.name : props.avatar, tone: props.avatarTone, online: props.online, logo: props.logo, saved: props.saved, src: props.avatarSrc, thumb: props.avatarThumb, size: 54 }),   // как в Telegram: 54 в строке 72
     h('span', { class: 'rl-row-main' },
       h('span', { class: 'rl-row-top' },
         // значки сразу за названием, а не у правого края: verified, затем «без звука» — серый динамик (как в Telegram)

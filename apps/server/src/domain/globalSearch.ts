@@ -95,6 +95,7 @@ export async function topPeers(userId: number, limit = 10): Promise<{ chatIds: n
       join chats c on c.id = m.chat_id and c.kind = 'direct'
      where m.created_at > now() - interval '30 days' and not m.deleted
        and not exists (select 1 from service_chats s where s.chat_id = m.chat_id)
+       and not exists (select 1 from saved_chats s where s.chat_id = m.chat_id)   -- «Избранное» — не собеседник
      group by m.chat_id order by n desc limit ${limit}`;
   return { chatIds: rows.map((r) => Number(r.chat_id)) };
 }

@@ -79,6 +79,7 @@ export interface LocalChat {
   seed?: number;          // живой отрезок начат снимком с этого sort: непрерывность ниже него не проверена историей
   peerId: number | null;  // собеседник личного чата: имя и фото — из people (names.ts), копий в чате нет
   system?: true;          // собеседник — системный пользователь «Relay» (служебный чат)
+  saved?: true;           // «Избранное»: чат с самим собой, peerId — null, всегда прочитан
   last: LocalMessage | null;
   lastAt: string;
   draft?: { text: string; at: string; entities?: Entity[] } | null;   // неотправленный текст композера (общий для вкладок)
@@ -227,6 +228,7 @@ export type Action =
   | { type: 'loadMoreChats' }
   | { type: 'setDraft'; chatId: number; text: string; entities?: Entity[] }
   | { type: 'typing'; chatId: number }
+  | { type: 'savedChat' }   // id «Избранного»: известный чат или создать на сервере (ответ — число)
   | { type: 'emojiFx'; chatId: number; id: number; key: string; t: number[] }
   | { type: 'editMessage'; chatId: number; id: number; body: string; entities?: Entity[] }
   | { type: 'deleteMessage'; chatId: number; id: number }
