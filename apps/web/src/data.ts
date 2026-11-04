@@ -1,4 +1,5 @@
 import { bindStickers } from './stickers';
+import { deviceStore, forgetAttachments } from './mediaCache';
 import { showToast } from './settingsData';
 import { coverThumb, readAudioTags } from './id3';
 import { getPrefs } from './prefs';
@@ -12,7 +13,7 @@ import { activeFrame, findChat, frameByKey, getGlobal, isPhone, setGlobal, subsc
 import { closeLayer, closeLayers, pushLayer } from './nav';
 import { notifyIncoming, startNotify } from './notify';
 import { noteIncoming } from './title';
-import { rememberKeysIn, startFileKeyService } from './fileKeys';
+import { dropKeys, rememberKeysIn, startFileKeyService } from './fileKeys';
 import { bindMute, isMuted, startMuteMigration } from './mute';
 import { bindChatFlags, clearUnreadMark } from './chatFlags';
 import { startPeople, wantPeople } from './people';
@@ -100,7 +101,18 @@ export function startData(me: Me, fromUrl = true): void {
   const counters = new Mirror();
   engine.watch({ kind: 'counters' }, (p) => { counters.apply(p); const c = counters.list()[0]; if (c) setGlobal({ counters: { unreadChats: c.unreadChats as number, unreadMessages: c.unreadMessages as number } }); });
   const status = new Mirror();
-  engine.watch({ kind: 'status' }, (p) => { status.apply(p); const s = status.list()[0] as unknown as Status | undefined; if (s) { setGlobal({ status: s }); showPhase(s); } });
+  // файлы исчезнувших сообщений (автоудаление): кэш медиа и ключи на устройстве, потом подтверждение движку. Сбой — не беда:
+  // список лежит в движке и придёт снова при следующем запуске
+  let clearing = false;
+  const clearExpiredFiles = (ids: string[] | undefined) => {
+    if (!ids?.length || clearing) return;
+    clearing = true;
+    void Promise.all([forgetAttachments(deviceStore(), ids), dropKeys(ids)])
+      .then(() => { navigator.serviceWorker?.controller?.postMessage({ type: 'attachments:forget-keys' }); return engine.call({ type: 'ackExpiredFiles', ids }); })
+      .catch((e) => console.warn('auto-delete files:', String(e)))
+      .finally(() => { clearing = false; });
+  };
+  engine.watch({ kind: 'status' }, (p) => { status.apply(p); const s = status.list()[0] as unknown as Status | undefined; if (s) { setGlobal({ status: s }); showPhase(s); clearExpiredFiles(s.expiredFiles); } });
   const uploads = new Mirror();
   engine.watch({ kind: 'uploads' }, (p) => { uploads.apply(p); setGlobal({ uploads: uploads.list() as unknown as UploadItem[] }); });
   // закрытие вкладки, пока файл грузится: как в Telegram, спросим (очередь переживёт перезагрузку, но незагруженное придётся догружать)
@@ -1167,6 +1179,8 @@ function audioDuration(file: File): Promise<number | null> {
 export function editMessage(chatId: number, id: number, body: string, entities: Entity[] = []): Promise<unknown> { return engine.call({ type: 'editMessage', chatId, id, body, entities }); }
 /** Удаление своего сообщения у всех (онлайн). */
 export function deleteMessage(chatId: number, id: number): Promise<unknown> { return engine.call({ type: 'deleteMessage', chatId, id }); }
+/** Автоудаление чата: операция движка (переживает офлайн, значение видно сразу). */
+export function setChatAutoDelete(chatId: number, sec: number | null): Promise<unknown> { return engine.call({ type: 'setAutoDelete', chatId, sec }); }
 /** Реакция (null — снять). У себя применяется сразу. */
 export function react(chatId: number, id: number, emoji: string | null): void { engine.call({ type: 'react', chatId, id, emoji }).catch(() => {}); }
 

@@ -370,10 +370,12 @@ function Avatar(props) {
     return h('span', { class: cx('rl-avatar', 'rl-avatar-logo', (props.className || props.class)), style: { width: size, height: size }, role: 'img', 'aria-label': props.name || 'Relay' },
       h(RelayLogo, { size: Math.round(size * 0.62) }));
   }
+  // автоудаление включено: значок таймера на углу аватара (только индикатор)
+  var timer = props.autoDelete ? h('span', { class: 'rl-avatar-timer', role: 'img', 'aria-label': 'Включено автоудаление' }, h(Icon, { name: 'timer', size: Math.max(10, Math.round(size * 0.27)) })) : null;
   if (props.saved) {
     // «Избранное»: закладка вместо инициалов
     return h('span', { class: cx('rl-avatar', 'rl-avatar-saved', (props.className || props.class)), style: { width: size, height: size }, role: 'img', 'aria-label': props.name || 'Избранное' },
-      h(Icon, { name: 'bookmark', size: Math.round(size * 0.56) }));
+      h(Icon, { name: 'bookmark', size: Math.round(size * 0.56) }), timer);
   }
   var tone = props.tone != null ? props.tone : props.name ? nameTone(String(props.name)) : null;
   // фото: под ним инициалы и размытое превью (thumb), само фото проявляется, когда загрузилось, —
@@ -386,7 +388,8 @@ function Avatar(props) {
     props.name ? initials(props.name) : props.src ? null : h(Icon, { name: 'community', size: Math.round(size * 0.5) }),
     props.src && props.thumb ? h('span', { class: 'rl-avatar-thumb', style: { backgroundImage: 'url("' + props.thumb + '")' }, 'aria-hidden': 'true' }) : null,
     props.src ? h('img', { key: props.src, class: 'rl-avatar-img', src: props.src, alt: '', decoding: 'async', draggable: false, ref: avatarImgReady, onLoad: avatarImgLoad }) : null,
-    props.online ? h('span', { class: 'rl-avatar-dot', 'aria-hidden': 'true' }) : null);
+    props.online ? h('span', { class: 'rl-avatar-dot', 'aria-hidden': 'true' }) : null,
+    timer);
 }
 // уже в кэше браузера — показать сразу (без перехода), иначе — по onLoad с плавным проявлением
 function avatarImgReady(el) { if (el && el.complete && el.naturalWidth) el.classList.add('is-instant', 'is-ready'); }
@@ -502,7 +505,7 @@ function FolderTags(props) {
 function ChatRow(props) {
   var unread = props.unread || 0;
   var tagged = !!(props.tags && props.tags.length);
-  var rest = omit(props, ['tags', 'tagSpace', 'fitTags', 'verified', 'logo', 'saved', 'name', 'preview', 'time', 'unread', 'muted', 'status', 'active', 'typing', 'online', 'avatar', 'author', 'thumb', 'pinned', 'draft', 'mentioned', 'forwarded', 'reactions', 'selecting', 'selected', 'className', 'class']);
+  var rest = omit(props, ['tags', 'tagSpace', 'fitTags', 'verified', 'logo', 'saved', 'autoDelete', 'name', 'preview', 'time', 'unread', 'muted', 'status', 'active', 'typing', 'online', 'avatar', 'author', 'thumb', 'pinned', 'draft', 'mentioned', 'forwarded', 'reactions', 'selecting', 'selected', 'className', 'class']);
   // как в Telegram: «печатает» важнее черновика, черновик важнее сообщения;
   // строка сообщения — «Автор:», миниатюра 20 px (у видео — play), текст
   var thumb = props.thumb;
@@ -524,7 +527,7 @@ function ChatRow(props) {
   }),
     props.selecting ? h('span', { class: 'rl-row-check', 'aria-hidden': 'true' },
       h('svg', { width: 14, height: 14, viewBox: '0 0 24 24', fill: 'none', stroke: 'currentColor', 'stroke-width': 3, 'stroke-linecap': 'round', 'stroke-linejoin': 'round' }, h('path', { d: 'M5 12.5l4.5 4.5L19 7.5', pathLength: 1 }))) : null,
-    h(Avatar, { name: props.avatar === undefined ? props.name : props.avatar, tone: props.avatarTone, online: props.online, logo: props.logo, saved: props.saved, src: props.avatarSrc, thumb: props.avatarThumb, size: 54 }),   // как в Telegram: 54 в строке 72
+    h(Avatar, { name: props.avatar === undefined ? props.name : props.avatar, tone: props.avatarTone, online: props.online, logo: props.logo, saved: props.saved, autoDelete: props.autoDelete, src: props.avatarSrc, thumb: props.avatarThumb, size: 54 }),   // как в Telegram: 54 в строке 72
     h('span', { class: 'rl-row-main' },
       h('span', { class: 'rl-row-top' },
         // значки сразу за названием, а не у правого края: verified, затем «без звука» — серый динамик (как в Telegram)

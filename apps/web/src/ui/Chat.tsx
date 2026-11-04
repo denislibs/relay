@@ -55,6 +55,7 @@ import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'preact/ho
 import { ScheduleModal } from './ScheduleModal';
 import { pressOpen } from './press';
 import { scheduledTitle, scheduledToast } from '../schedule';
+import { leftText } from '../autoDelete';
 import { deleteScheduled, editScheduled, openScheduled, prepareScheduled, sendScheduledNow, type SendWhen } from '../data';
 import { SCHEDULED_LIMIT } from '@relay/protocol';
 import { sendSpecial, sendPoll, votePoll, closePoll, sendTodo, appendTodo, editTodo, closeChat, deleteMessage, editMessage, focusMessage, openInner, openUserChat, pinMessage, unpinMessage, sendFile, sendFiles, sendRound, sendVoice, react, rejectTooBig, PLAYABLE_VIDEO, retrySend, discardUnsent, saveDraft, searchMessages, send, typing, typingDone } from '../data';
@@ -611,7 +612,7 @@ export function Chat({ chatId, frameKey, active, threadId, scheduled = false }: 
         {/* поверх другого чата — «Назад» к нему (и на широком экране), нижний — к списку на узком */}
         <IconButton class={depth > 1 ? 'app-back app-back-inner' : 'app-back'} icon="arrowLeft" label={depth > 1 ? 'Назад' : 'К списку чатов'} onClick={closeChat} />
         <button type="button" class="rl-glassbar-who" aria-label={scheduled ? undefined : 'Информация о чате'} disabled={scheduled} onClick={() => setGlobal({ infoOpen: !infoOpen })}>
-          {scheduled ? null : <Avatar name={title} tone={chatTone(chat)} size={40} logo={system} saved={isSaved} {...avatarPhoto(chat?.photo as ProfilePhoto | null)} />}
+          {scheduled ? null : <Avatar name={title} tone={chatTone(chat)} size={40} logo={system} saved={isSaved} autoDelete={!!chat?.autoDeleteSec} {...avatarPhoto(chat?.photo as ProfilePhoto | null)} />}
           <span class="rl-glassbar-title">
             <b>{scheduled ? scheduledTitle(isSaved) : thread ? threadTitle(threadCount) : title}{system ? <Verified size={16} /> : null}</b>
             {scheduled || (isSaved && !phaseLabel) ? null : <span key={phaseLabel ?? (isTyping ? 'typing' : online ? 'on' : 'off')} class={phaseLabel ? 'app-phase' : isTyping || online ? 'app-online' : undefined}>{phaseLabel ?? (subtitle || '\u00a0')}</span>}
@@ -852,6 +853,7 @@ export function Chat({ chatId, frameKey, active, threadId, scheduled = false }: 
                 })()
               ) : null}
                 label="Действия с сообщением"
+                menuHeader={menuMsg.expiresAt ? <div class="app-msgttl"><Icon name="timer" size={16} />{leftText(menuMsg.expiresAt as number, Date.now() + (getGlobal().status.clockSkew ?? 0))}</div> : undefined}
                 onClose={() => setMenu(null)}
                 items={[
                   ...(menuMsg.id != null && !menuMsg.deleted && !system && !channel ? [{ icon: 'reply', label: 'Ответить', onClick: () => { if (editing) endEdit(editing.draft); setReplyKey(menuMsg.key as string); api.current?.focus({ end: true }); } }] : []),

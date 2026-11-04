@@ -14,6 +14,7 @@ import { setChatTheme } from '../chatTheme';
 import { getGlobal, setGlobal, useGlobal, findChat } from '../global';
 import { blockUser, showToast, unblockUser, useUser } from '../settingsData';
 import { canManage } from '../groups';
+import { canSetAutoDelete, termText } from '../autoDelete';
 import { isSavedChat, isSystemChat } from './format';
 import { startSelect } from '../forward';
 import { isMuted, unmuteChat } from '../mute';
@@ -41,6 +42,7 @@ export function ChatMenu({ chatId, title }: { chatId: number; title: string }) {
   const base = useBase();
   // тема чата: в личном — любой из двоих (не служебный, без блокировки), в группе и канале — кто меняет информацию
   const canTheme = !chat?.preview && (saved || (peerId != null && !iBlocked && !user?.blocksMe) || (gMe != null && canManage(gMe)));
+  const canTimer = canSetAutoDelete({ preview: !!chat?.preview, system, saved, peerId, blocked: iBlocked || !!user?.blocksMe, me: gMe });
   const hover = useHoverMenu(open, setOpen);   // как в Telegram: наведение открывает, уход с кнопки и меню — закрывает
   const dialogs = useChatDialogs(chatId, title);
   const setAsk = (a: 'mute' | 'delete' | 'leave') => { setOpen(false); dialogs.open(a); };
@@ -64,6 +66,7 @@ export function ChatMenu({ chatId, title }: { chatId: number; title: string }) {
       : { icon: 'bellOff', label: 'Отключить звук…', onClick: () => setAsk('mute') }]),
     ...(!system && !gInfo?.protected ? [{ icon: 'checkCircle', label: 'Выбрать сообщения', onClick: () => startSelect(chatId, []) }] : []),
     ...(canTheme ? [{ icon: 'palette', label: 'Тема чата', onClick: () => { setOpen(false); setThemeOpen(true); } }] : []),
+    ...(canTimer ? [{ icon: 'timer', label: chat?.autoDeleteSec ? 'Автоудаление: ' + termText(chat.autoDeleteSec as number) : 'Автоудаление', onClick: () => { setOpen(false); setGlobal({ infoOpen: true, infoGo: 'autoDelete' }); } }] : []),
     ...(peerId ? [iBlocked
       ? { icon: 'block', label: 'Разблокировать', onClick: () => { void unblockUser(peerId).then(() => showToast('Пользователь разблокирован')); } }
       : { icon: 'block', label: 'Заблокировать', onClick: () => { void blockUser(peerId).then(() => showToast('Пользователь заблокирован')); } }] : []),

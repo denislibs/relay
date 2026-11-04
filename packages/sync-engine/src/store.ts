@@ -1,6 +1,6 @@
 import type { GroupInfo, MyMembership, ThreadGuest } from '@relay/protocol';
 import type { Entity, Message, Poll, PollInput, ProfilePhoto, Replies, ScheduledMessage, Update } from '@relay/protocol';
-import { getAll, getByChat, req, termsOf, write, type RowPatch, type WriteBatch } from './idb';
+import { firstExpiry, getAll, getByChat, getExpiredRows, req, termsOf, write, type RowPatch, type WriteBatch } from './idb';
 import { CACHE_STORES, STORES } from './schema';
 import { applyUserUpdated, ProfileCache } from './profile';
 import { applyContactsChanged, ContactsCache } from './contacts';
@@ -40,7 +40,7 @@ const NOTIFY_KEEP = 20;
  */
 const DELETED: Partial<LocalMessage> = {
   body: '', deleted: true, reactions: [], entities: [], attachment: null, link: null, blocks: null, fwdFrom: null, todo: undefined, listened: undefined, buttons: null,
-  reactionCounts: undefined, myReaction: undefined,
+  reactionCounts: undefined, myReaction: undefined, expiresAt: undefined,
 };
 
 /**
@@ -110,6 +110,7 @@ export interface ChatSummary {
   peer?: { id: number; key?: string; name: string; system?: true; photo?: ProfilePhoto | null } | null;
   saved?: true;            // «Избранное»: собеседника нет
   theme?: string | null;
+  autoDeleteSec?: number | null;   // автоудаление: срок новых сообщений
   peerReadUpTo?: number;
   group?: GroupInfo;
   me?: MyMembership;
@@ -233,6 +234,8 @@ export class Store {
       // строка до отрезков истории: отрезок выведем из сообщений при загрузке чата
       if (!c.ranges) { c.ranges = []; s.legacyRanges.add(c.id); }
       s.chats.set(c.id, c);
+      // строка чата несёт копии сообщений и вне ленты: их сроки индекс сообщений не знает
+      for (const m of [c.last, c.snapLast]) if (m?.expiresAt && m.id != null) s.expiring.set(c.id + ':' + m.id, { chatId: c.id, id: m.id, at: m.expiresAt });
     }
     const outbox = (await getAll<OutboxEntry>(db, 'outbox')).sort((a, b) => a.createdAt - b.createdAt);
     for (const o of outbox) s.outbox.set(o.clientId, o);
@@ -242,6 +245,8 @@ export class Store {
     const meta = await getAll<{ k: string; v: number }>(db, 'meta');
     s.lastSeq = s.seqAtFlush = meta.find((m) => m.k === 'lastSeq')?.v ?? 0;
     s.since = Number(meta.find((m) => m.k === 'since')?.v ?? 0);
+    s.clockSkew = Number(meta.find((m) => m.k === 'clockSkew')?.v ?? 0);
+    s.expiredFiles = new Set(((meta as { k: string; v: unknown }[]).find((m) => m.k === 'expiredFiles')?.v as string[] | undefined) ?? []);
     s.hydrated = !!meta.find((m) => m.k === 'hydrated')?.v;
     s.epoch = ((meta as { k: string; v: unknown }[]).find((m) => m.k === 'epoch')?.v as string) ?? null;
     s.dialogsAt = meta.find((m) => m.k === 'dialogsAt')?.v ?? 0;
@@ -429,6 +434,7 @@ export class Store {
       case 'pins': { const chat = this.chats.get(u.chatId); if (chat) { chat.pinned = u.ids; this.markChat(chat); } return; }
       case 'chatNotify': return this.setMute(u.chatId, u.muteUntil);
       case 'chatTheme': return this.setTheme(u.chatId, u.theme);
+      case 'chatAutoDelete': return this.setAutoDelete(u.chatId, u.sec);
       case 'chatFlags': return this.setFlags(u.chatId, u);
       // requests у каждого своё (joinRequests), общая запись его не несёт — не затирать
       // канал: владельца общая запись не несёт (null — подписчикам он не раскрывается); админ знает его из сводки — не затирать
@@ -543,6 +549,13 @@ export class Store {
     chat.theme = theme; this.markChat(chat);
   }
 
+  /** Срок автоудаления чата (журнал chatAutoDelete, снимок списка, ответ операции). */
+  setAutoDelete(chatId: number, sec: number | null): void {
+    const chat = this.chats.get(chatId);
+    if (!chat || (chat.autoDeleteSec ?? null) === sec) return;
+    chat.autoDeleteSec = sec; this.markChat(chat);
+  }
+
   setMute(chatId: number, muteUntil: number | null): void {
     const chat = this.chats.get(chatId);
     if (!chat || (chat.muteUntil ?? null) === muteUntil) return;
@@ -591,6 +604,7 @@ export class Store {
       if (s.peer?.system) chat.system = true; else delete chat.system;
       if (s.saved) chat.saved = true; else delete chat.saved;
       if (s.theme !== undefined) chat.theme = s.theme;
+      if (s.autoDeleteSec !== undefined) chat.autoDeleteSec = s.autoDeleteSec;
       if (s.draft && (!chat.draft || s.draft.at > chat.draft.at) && !this.pendingDrafts.has(s.id)) chat.draft = s.draft;
       if (s.pinned) chat.pinned = s.pinned;
       if (s.muteUntil !== undefined) chat.muteUntil = s.muteUntil;
@@ -730,6 +744,7 @@ export class Store {
       ...(m.postAuthor ? { postAuthor: m.postAuthor } : null),
       ...(m.silent ? { silent: true } : null),
       ...(m.reminder ? { reminder: true } : null),
+      ...(m.expiresAt ? { expiresAt: m.expiresAt } : null),
       ...(m.threadId != null ? { threadId: m.threadId } : null),
       ...(m.origin ? { origin: m.origin } : null),
       ...postExtras(m, prev, (c, t) => this.threadReads.get(c + ':' + t)),
@@ -737,6 +752,7 @@ export class Store {
       ...(m.link ? { link: m.link.pending && prev?.link && !prev.link.pending && prev.link.url === m.link.url ? prev.link : m.link } : null),
     };
     if (local.deleted) Object.assign(local, DELETED);   // сервер ещё отдаёт превью, статью и пересылку удалённого
+    if (local.expiresAt) this.noteExpiry(m.chatId, m.id, local.expiresAt);
     // кнопка комментариев у поста, пришедшего журналом (журнал replies не несёт): копию в группе обсуждения мы видим
     // своим журналом группы — связываем пост и копию в любом порядке прихода (число придёт событием replies)
     if (m.origin && !local.deleted) {
@@ -1292,6 +1308,7 @@ export class Store {
    * удалённое не показывает (queries.ts).
    */
   private removeMessage(chatId: number, id: number): void {
+    this.expiring.delete(chatId + ':' + id);
     this.dropMentions(chatId, (x) => x === id);
     this.dropReactions(chatId, [id], true);
     const k = chatId + ':' + id, m = this.messageById(chatId, id), q = this.quotes.get(k);
@@ -1334,6 +1351,63 @@ export class Store {
     this.touch(chatId);
     onMessage(this, chat, { ...m, ...DELETED }, 'deleted', m);   // last, счётчики вкладок, строка списка
   }
+  // ---------- автоудаление ----------
+
+  /** Поправка часов: сервер минус устройство (из hello), хранится — нужна и при старте без сети. */
+  clockSkew = 0;
+  serverNow(): number { return Date.now() + this.clockSkew; }
+  setClockSkew(ms: number): void {
+    if (Math.abs(ms - this.clockSkew) < 500) return;   // шум задержки сети — не повод писать
+    this.clockSkew = ms; this.dirtyMeta = true;
+  }
+  /** Сроки того, что пришло в этом запуске или лежит в строках чатов; остальное знает индекс byExpiry. */
+  private expiring = new Map<string, { chatId: number; id: number; at: number }>();
+  /** Появился срок: движок ставит общий таймер на ближайший. */
+  onExpiry: (at: number) => void = () => {};
+  private noteExpiry(chatId: number, id: number, at: number): void {
+    this.expiring.set(chatId + ':' + id, { chatId, id, at });
+    this.onExpiry(at);
+  }
+  /** Файлы исчезнувших сообщений: интерфейс чистит кэш медиа и ключи файлов (страница, Service Worker) и подтверждает. */
+  expiredFiles = new Set<string>();
+  ackExpiredFiles(ids: string[]): void {
+    for (const id of ids) this.expiredFiles.delete(id);
+    this.dirtyMeta = true;
+  }
+
+  /** Ближайший срок: что в памяти и что в IndexedDB. */
+  async nextExpiry(): Promise<number | null> {
+    let at = await firstExpiry(this.db);
+    for (const e of this.expiring.values()) if (at == null || e.at < at) at = e.at;
+    return at;
+  }
+
+  /**
+   * Убрать всё, чей срок вышел: тем же путём, что удаление с сервера (removeMessage) — лента, превью, счётчики, упоминания,
+   * цитаты и слова поиска считаются одинаково. Чат не загружен — загружается: иначе не узнать, чьё сообщение и что станет
+   * последним (без сети спросить не у кого). Работает и без связи, и при старте после долгого офлайна.
+   * Возвращает, сколько убрано; записать в IndexedDB — flush вызывающего.
+   */
+  async sweepExpired(now = this.serverNow()): Promise<number> {
+    const due = new Map<string, { chatId: number; id: number; key?: string }>();
+    for (const [k, e] of this.expiring) if (e.at <= now) due.set(k, e);
+    for (const r of await getExpiredRows(this.db, now)) if (r.id != null) due.set(r.chatId + ':' + r.id, { chatId: r.chatId, id: r.id, key: r.key });
+    for (const chatId of new Set([...due.values()].map((d) => d.chatId))) {
+      if (this.chats.has(chatId) && !this.previews.has(chatId) && !this.loaded.has(chatId)) await this.loadChatMessages(chatId);
+    }
+    for (const [k, d] of due) {
+      const chat = this.chats.get(d.chatId), m = this.messageById(d.chatId, d.id);
+      const copy = chat?.last?.id === d.id ? chat.last : chat?.snapLast?.id === d.id ? chat.snapLast : null;
+      const att = (m ?? copy)?.attachment as { id?: string } | null | undefined;
+      if (att?.id) { this.expiredFiles.add(att.id); this.dirtyMeta = true; }
+      // строка чата, которого у нас больше нет: снять её саму, иначе срок всплывал бы снова и снова
+      if (!chat && !this.isGuest(d.chatId)) { this.expiring.delete(k); if (d.key) this.deletedMessages.add(d.key); continue; }
+      if (chat?.pinned?.includes(d.id)) { chat.pinned = chat.pinned.filter((x) => x !== d.id); this.markChat(chat); }
+      this.removeMessage(d.chatId, d.id);
+    }
+    return due.size;
+  }
+
   /** Строке чата нужен свежий снимок с сервера (последнее удалили, а предыдущего в кэше нет); движок спросит /chats?ids. */
   wantRow: (chatId: number) => void = () => {};
 
@@ -1388,6 +1462,7 @@ export class Store {
     const saved = keep.outbox ? [...this.outbox.values()] : [];
     const reads = keep.outbox ? new Map(this.pendingReads) : new Map<number, number>();
     this.resetGen++;
+    this.expiring.clear(); this.expiredFiles.clear();
     for (const id of this.chats.keys()) this.touch(id);
     this.chats.clear(); this.chatV.clear(); this.messages.clear(); this.loaded.clear(); this.sorted.clear(); this.ids.clear(); this.guests.clear();
     this.scheduled.clear(); this.dirtyScheduled.clear(); this.scheduledProgress.clear(); this.scheduledCounts = null;
@@ -1499,7 +1574,7 @@ export class Store {
     this.dirtyScheduled.clear();
     batch.put.pendingReads = [...this.dirtyReads].filter((c) => this.pendingReads.has(c)).map((c) => ({ chatId: c, upToId: this.pendingReads.get(c) }));
     batch.del.pendingReads = [...this.dirtyReads].filter((c) => !this.pendingReads.has(c));
-    if (this.dirtyMeta || this.lastSeq !== this.seqAtFlush) batch.put.meta = [{ k: 'lastSeq', v: this.lastSeq }, { k: 'since', v: this.since }, { k: 'hydrated', v: this.hydrated ? 1 : 0 }, { k: 'dialogsAt', v: this.dialogsAt }, { k: 'dialogsId', v: this.dialogsId }, { k: 'dialogsDone', v: this.dialogsDone ? 1 : 0 }, { k: 'dialogsTotal', v: this.dialogsTotal }, ...(this.epoch ? [{ k: 'epoch', v: this.epoch as unknown as number }] : [])];
+    if (this.dirtyMeta || this.lastSeq !== this.seqAtFlush) batch.put.meta = [{ k: 'lastSeq', v: this.lastSeq }, { k: 'since', v: this.since }, { k: 'clockSkew', v: this.clockSkew }, { k: 'expiredFiles', v: [...this.expiredFiles] as unknown as number }, { k: 'hydrated', v: this.hydrated ? 1 : 0 }, { k: 'dialogsAt', v: this.dialogsAt }, { k: 'dialogsId', v: this.dialogsId }, { k: 'dialogsDone', v: this.dialogsDone ? 1 : 0 }, { k: 'dialogsTotal', v: this.dialogsTotal }, ...(this.epoch ? [{ k: 'epoch', v: this.epoch as unknown as number }] : [])];
     const prof = this.profile.collect();
     if (prof.me) batch.put.meta = [...(batch.put.meta ?? []), prof.me];
     batch.put.users = prof.users;

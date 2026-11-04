@@ -28,7 +28,7 @@ export async function resolvePeer(db: Tx | typeof sql, viewer: number, ref: unkn
     select m.* from messages m
       join chat_members cm on cm.chat_id = m.chat_id and cm.user_id = ${viewer} and m.id >= cm.history_from
       join chats c on c.id = m.chat_id and c.deleted_at is null
-     where m.chat_id = ${chatId} and m.id = ${messageId} and not m.deleted`;
+     where m.chat_id = ${chatId} and m.id = ${messageId} and not m.deleted and (m.expires_at is null or m.expires_at > now())`;
   if (!m) throw new DomainError('not_found', what);
   if (Number(m.sender_id) === id && !m.post) return id;
   if (Number((m.fwd_from as { userId?: unknown } | null)?.userId) === id) return id;

@@ -23,7 +23,7 @@ export async function pinMessage(userId: number, chatId: number, id: number): Pr
   return sql.begin(async (tx) => {
     if (!canPin(await groupCtx(tx, chatId, userId))) throw new DomainError('forbidden', 'pin');
     if (await isServiceChat(tx, chatId)) throw new DomainError('forbidden');
-    const [m] = await tx`select 1 from messages where chat_id = ${chatId} and id = ${id} and not deleted and service_type is null`;
+    const [m] = await tx`select 1 from messages where chat_id = ${chatId} and id = ${id} and not deleted and (expires_at is null or expires_at > now()) and service_type is null`;
     if (!m) throw new DomainError('not_found', 'message');
     const [{ n }] = await tx`select count(*)::int as n from pinned_messages where chat_id = ${chatId}`;
     if (n >= PINS_MAX) throw new DomainError('too_long', 'pins limit');

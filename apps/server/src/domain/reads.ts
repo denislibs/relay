@@ -47,7 +47,7 @@ export async function readBy(userId: number, chatId: number, mid: number): Promi
   if (c.deleted_at) throw new DomainError('not_found', 'chat');
   if (c.kind !== 'group') throw new DomainError('bad_frame', 'not a group');
   if (Number(c.members_count) > READ_BY_MAX) throw new DomainError('forbidden', 'too many members');
-  const [m] = await sql`select sender_id, thread_id, origin, deleted, service_type from messages where chat_id = ${chatId} and id = ${mid}`;
+  const [m] = await sql`select sender_id, thread_id, origin, (deleted or coalesce(expires_at <= now(), false)) as deleted, service_type from messages where chat_id = ${chatId} and id = ${mid}`;
   if (!m || m.deleted) throw new DomainError('not_found', 'message');
   if (Number(m.sender_id) !== userId || m.service_type) throw new DomainError('forbidden', 'not your message');
   if (m.thread_id != null || m.origin != null) throw new DomainError('bad_frame', 'comment or post copy');

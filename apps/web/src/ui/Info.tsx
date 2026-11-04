@@ -17,6 +17,8 @@ import { joinChat, useChatDialogs } from './chatActions';
 import { birthdayText, lastSeenText, type Birthday } from './format';
 import { blockUser, showToast, unblockUser, useUser } from '../settingsData';
 import { EditContactPanel } from './contacts/EditContact';
+import { AutoDeletePage } from './AutoDeletePage';
+import { canSetAutoDelete, termText } from '../autoDelete';
 import type { ProfilePhoto } from '@relay/protocol';
 import { avatarPhoto, useProfilePhotos, userPhoto } from '../profilePhoto';
 import { ProfileGallery } from './ProfileGallery';
@@ -32,7 +34,7 @@ const StickersPanel = lazy(() => import('./stickers/StickersPanel').then((m) => 
 // экраны управления группой — чанком (маршруты — group/routes.ts, здесь)
 const GroupScreen = lazy(() => import('./group/Manage').then((m) => m.GroupScreen));
 
-const PAGES = ['info', 'stickers', 'edit', ...GROUP_PAGES];   // «Стикеры» — вторая вложенность (из поиска в панели стикеров)   // «Изменить контакт» и управление группой выезжают внутри панели справа налево
+const PAGES = ['info', 'autoDelete', 'stickers', 'edit', ...GROUP_PAGES];   // «Стикеры» — вторая вложенность (из поиска в панели стикеров)   // «Изменить контакт» и управление группой выезжают внутри панели справа налево
 const close = () => setGlobal({ infoOpen: false });
 const CLOSED_RESET_MS = 300;   // закрытая панель возвращается на профиль, когда уже уехала (выезд — 240 мс)
 
@@ -69,6 +71,7 @@ export function Info() {
   const openBefore = useRef(infoOpen), instant = useRef(false);
   useEffect(() => {
     if (!infoGo) return;
+    if (infoGo === 'autoDelete') { setGlobal({ infoGo: null }); if (page !== 'autoDelete') { instant.current = !openBefore.current; setPage('autoDelete'); } return; }
     if (infoGo === 'stickers') { setGlobal({ infoGo: null }); if (page !== 'stickers') { instant.current = !openBefore.current; setPage('stickers'); } return; }
     if (isGroupPage(infoGo)) { setGlobal({ infoGo: null }); nav.go(infoGo); }
     else if (infoGo === 'edit') { setGlobal({ infoGo: null }); setPage('edit'); }   // «Изменить» из меню шапки
@@ -96,6 +99,11 @@ export function Info() {
   useEffect(() => {
     if (isGroupPage(page)) {   // в управлении группой Esc — шаг назад
       const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape' && !e.defaultPrevented && !document.querySelector('.rl-mdl')) { e.preventDefault(); nav.back(); } };
+      addEventListener('keydown', onKey);
+      return () => removeEventListener('keydown', onKey);
+    }
+    if (page === 'autoDelete') {   // Esc — назад к профилю; окно своего срока закрывает своё само
+      const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape' && !e.defaultPrevented && !document.querySelector('.rl-mdl')) { e.preventDefault(); setPage('info'); } };
       addEventListener('keydown', onKey);
       return () => removeEventListener('keydown', onKey);
     }
@@ -203,6 +211,7 @@ export function Info() {
   const [joining, setJoining] = useState(false);
   useEffect(() => { setJoining(false); }, [chatId, !!gMe]);
   const linked = channel && gInfo?.linkedChatId != null && getGlobal().chats.some((c) => c.id === gInfo.linkedChatId) ? gInfo.linkedChatId : null;
+  const canTimer = canSetAutoDelete({ preview: !!chat?.preview, system, saved, peerId, blocked: iBlocked || !!user?.blocksMe, me: gMe });
   const tiles = [
     ...(group && !gMe ? [{ key: 'join', icon: 'userPlus',
       label: chat?.requested ? 'заявка отправлена' : gInfo?.joinApproval ? 'подать заявку' : channel ? 'подписаться' : 'вступить',
@@ -229,7 +238,9 @@ export function Info() {
   const openMember = (userId: number) => { void openUserChat(userId); };
 
   return (
-    <SlideStack order={PAGES} active={page} instant={instant.current} render={(k: string) => isGroupPage(k) ? (
+    <SlideStack order={PAGES} active={page} instant={instant.current} render={(k: string) => k === 'autoDelete' ? (
+      <AutoDeletePage chatId={chatId} onBack={() => setPage('info')} />
+    ) : isGroupPage(k) ? (
       group && chat ? <GroupScreen page={k} nav={nav} /> : null
     ) : k === 'stickers' ? (
       <StickersPanel onBack={() => setPage('info')} />
@@ -276,6 +287,10 @@ export function Info() {
             <InfoRow tile="blue" icon="link" title={publicUrl(gInfo.username).replace(/^https?:\/\//, '')} subtitle="Ссылка" onClick={() => copyText(publicUrl(gInfo.username!))} />
           ) : null}</Expand>
           <Expand show={!group && !!(user?.links as ProfileLink[] | undefined)?.length}>{!group && user ? <ProfileLinks links={(user.links as ProfileLink[] | undefined) ?? []} /> : null}</Expand>
+          {/* автоудаление: менять могут не все — остальным строка видна, только когда оно включено */}
+          {system || (!canTimer && !chat?.autoDeleteSec) ? null : (
+            <InfoRow tile="orange" icon="timer" title={chat?.autoDeleteSec ? termText(chat.autoDeleteSec as number) : 'Выкл.'} subtitle="Автоудаление" onClick={canTimer ? () => setPage('autoDelete') : undefined} />
+          )}
           <Expand show={!!contact?.note}>{contact?.note ? (
             <div class="rl-inforow rl-inforow-static">
               <SettingsIcon icon="pencil" color="gray" />

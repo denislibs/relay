@@ -1,4 +1,4 @@
-import { sql } from '../db';
+import { sql, type Tx } from '../db';
 import { enqueue } from '../jobs/queue';
 import { s3 } from './files';
 
@@ -32,6 +32,23 @@ export const referenced = (db: typeof sql) => db`(
   or exists (select 1 from chat_photos cp where cp.big = a.id or cp.small = a.id)
   or exists (select 1 from link_previews lp where lp.photo_id = a.id))`;
 
+/**
+ * Удалить вложения из ids, на которые больше никто не ссылается: запись и ключ файла (каскадом) — в транзакции вызывающего,
+ * объекты — задачей attachment.purge. Занятые (пересылка держит for share) пропускаются: их подберёт обычный обход.
+ */
+export async function dropUnreferenced(tx: Tx, ids: string[]): Promise<number> {
+  const locked = (await tx`select id from attachments where id = any(${ids}::uuid[]) for update skip locked`).map((r) => r.id as string);
+  if (!locked.length) return 0;
+  const variants = await tx`select attachment_id, key from attachment_variants where attachment_id = any(${locked}::uuid[])`;
+  const gone = await tx`delete from attachments a where a.id = any(${locked}::uuid[]) and not ${referenced(tx as never)} returning a.id, a.storage_key`;
+  const keys = new Set<string>();
+  const left = new Set(gone.map((g) => g.id as string));
+  for (const g of gone) { keys.add(g.id as string); if (g.storage_key) keys.add(g.storage_key as string); }
+  for (const v of variants) if (left.has(v.attachment_id as string)) keys.add(v.key as string);
+  if (keys.size) await enqueue(tx, 'attachment.purge', { keys: [...keys] });
+  return gone.length;
+}
+
 export interface GcResult { scanned: number; deleted: number; done: boolean }
 
 /** Несколько пачек обхода. done — дошли до конца (курсор сброшен, следующий запуск начнёт сначала). */
@@ -50,17 +67,7 @@ export async function collectGarbage(opts: { graceMs?: number; batch?: number; m
       out.scanned += rows.length;
       const candidates = rows.filter((r) => r.garbage).map((r) => r.id as string);
       if (candidates.length) {
-        const locked = (await tx`select id from attachments where id = any(${candidates}::uuid[]) for update skip locked`).map((r) => r.id as string);
-        if (locked.length) {
-          const variants = await tx`select attachment_id, key from attachment_variants where attachment_id = any(${locked}::uuid[])`;
-          const gone = await tx`delete from attachments a where a.id = any(${locked}::uuid[]) and not ${referenced(tx as never)} returning a.id, a.storage_key`;
-          const keys = new Set<string>();
-          const ids = new Set(gone.map((g) => g.id as string));
-          for (const g of gone) { keys.add(g.id as string); if (g.storage_key) keys.add(g.storage_key as string); }
-          for (const v of variants) if (ids.has(v.attachment_id as string)) keys.add(v.key as string);
-          if (keys.size) await enqueue(tx, 'attachment.purge', { keys: [...keys] });
-          out.deleted += gone.length;
-        }
+        out.deleted += await dropUnreferenced(tx, candidates);
       }
       if (rows.length < batch) {
         out.done = true;

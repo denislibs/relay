@@ -20,6 +20,7 @@ import { purgeStep, type PurgeJob } from '../domain/chatPurge';
 import { flushReactionCounts } from '../domain/reactionCounts';
 import { flushReplies } from '../domain/threads';
 import { publishScheduled, sweepScheduled } from '../domain/scheduled';
+import { destroyExpiredKeys, expireStep } from '../domain/autoDelete';
 
 /** Подписок на страницу push.message (тесты уменьшают). */
 export const PUSH_PAGE = { size: 1000 };
@@ -37,7 +38,7 @@ register('push.message', async (p: { chatId?: number; id?: number; groupId?: str
   let excludeChatId: number | undefined;
   if (!m && p.chatId != null && p.id != null && p.groupId) {
     // альбом: одно уведомление на все файлы — по первому сообщению, подпись берётся у того, где она есть
-    const rows = await openRows(await sql`select * from messages where chat_id = ${p.chatId} and group_id = ${p.groupId} and not deleted order by id`);
+    const rows = await openRows(await sql`select * from messages where chat_id = ${p.chatId} and group_id = ${p.groupId} and not deleted and (expires_at is null or expires_at > now()) order by id`);
     if (!rows.length) return;
     const captioned = rows.find((r) => (r.body as string)) ?? rows[0];
     m = { ...toMessage(rows[0]), body: captioned.body as string, entities: (captioned.entities as PushMessage['entities']) ?? undefined, senderId: Number(rows[0].sender_id), album: rows.length } as PushMessage;
@@ -56,7 +57,7 @@ register('push.message', async (p: { chatId?: number; id?: number; groupId?: str
   if (!m) return;
   const page = await planPushPage(m, { excludeChatId, after: p.after, limit: PUSH_PAGE.size });
   // текст уведомления — запечатан ключом чата: в jobs/jobs_dead не лежит открытым
-  const sealed = await Promise.all(page.targets.map(async (t) => ({ endpoint: t.endpoint, chatId: t.push.chatId, sealed: await sealForChat(t.push.chatId, t.push, 'jobs|push') })));
+  const sealed = await Promise.all(page.targets.map(async (t) => ({ endpoint: t.endpoint, chatId: t.push.chatId, sealed: await sealForChat(t.push.chatId, t.push, 'jobs|push', m.expiresAt) })));
   const next = page.full && page.last ? page.last : null;
   if (!sealed.length && !next) return;
   let delivered = 0;
@@ -91,7 +92,7 @@ register('push.mention', async (p: { chatId: number; id: number; userId: number 
   const m = { ...toMessage(row), senderId: Number(row.sender_id) } as PushMessage;
   const targets = await planPush(m, { mentionOf: Number(p.userId) });
   if (!targets.length) return;
-  const sealed = await Promise.all(targets.map(async (t) => ({ endpoint: t.endpoint, chatId: t.push.chatId, sealed: await sealForChat(t.push.chatId, t.push, 'jobs|push') })));
+  const sealed = await Promise.all(targets.map(async (t) => ({ endpoint: t.endpoint, chatId: t.push.chatId, sealed: await sealForChat(t.push.chatId, t.push, 'jobs|push', m.expiresAt) })));
   await sql.begin(async (tx) => {
     for (const t of sealed) await enqueue(tx, 'push.deliver', t);
   });
@@ -224,6 +225,14 @@ register('scheduled.send', async (p: { userId: number; clientId: string }) => pu
 register('scheduled.sweep', async () => {
   await sweepScheduled();
   return { again: { inSec: 300 } };
+});
+
+// автоудаление (domain/autoDelete.ts): вышедшие сроки — пачками, потом уничтожение прошедших срочных ключей. Осталось ещё — сразу
+export const EXPIRE_EVERY_SEC = 15;
+register('messages.expire', async () => {
+  const r = await expireStep();
+  await destroyExpiredKeys();
+  return { again: { inSec: r.more ? 0 : EXPIRE_EVERY_SEC } };
 });
 
 register('poll.close', async (p: { chatId: number; id: number }) => {

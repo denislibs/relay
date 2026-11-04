@@ -277,20 +277,21 @@ export async function fileFor(userId: number, id: string, variant?: string): Pro
   const [a] = await sql`
     select a.* from attachments a
      where a.id = ${id} and a.status = 'ready'
-       and (a.owner_id = ${userId} or exists (
+       -- владелец — и без сообщений (ещё не отправил); но вышедший срок автоудаления закрывает файл и ему, пока задача не стёрла строку
+       and ((a.owner_id = ${userId} and not exists (select 1 from messages m where m.attachment->>'id' = ${id} and not m.deleted and m.expires_at <= now())) or exists (
          select 1 from messages m join chat_members cm on cm.chat_id = m.chat_id and cm.user_id = ${userId}
                                   join chats c on c.id = m.chat_id and c.deleted_at is null   -- удалённый (мягко) чат файлов не отдаёт
-          where m.attachment->>'id' = ${id} and not m.deleted
+          where m.attachment->>'id' = ${id} and not m.deleted and (m.expires_at is null or m.expires_at > now())
             and m.id >= cm.history_from)   -- сообщение из скрытой истории не открывает файл (AUTHZ-3)
        or exists (   -- комментарий в треде: его видит и гость треда — подписчик канала, чья это группа обсуждения (threads.ts threadAccess)
          select 1 from messages m join messages r on r.chat_id = m.chat_id and r.id = m.thread_id
                                   join chats ch on ch.id = (r.origin->>'chatId')::bigint and ch.linked_chat_id = m.chat_id and ch.deleted_at is null
                                   join chat_members cm on cm.chat_id = ch.id and cm.user_id = ${userId}
-          where m.attachment->>'id' = ${id} and not m.deleted and m.thread_id is not null
+          where m.attachment->>'id' = ${id} and not m.deleted and (m.expires_at is null or m.expires_at > now()) and m.thread_id is not null
             and not exists (select 1 from chat_bans b where b.chat_id = m.chat_id and b.user_id = ${userId}))
        or exists (   -- пост публичного канала: превью без подписки (те же условия, что у canRead: @имя, не удалён, не в бане)
          select 1 from messages m join chats c on c.id = m.chat_id and c.kind = 'channel' and c.username is not null and c.deleted_at is null
-          where m.attachment->>'id' = ${id} and not m.deleted
+          where m.attachment->>'id' = ${id} and not m.deleted and (m.expires_at is null or m.expires_at > now())
             and not exists (select 1 from chat_bans b where b.chat_id = c.id and b.user_id = ${userId}))
        or exists (select 1 from link_previews lp where lp.photo_id = a.id)   -- картинка превью ссылки: публичная страница, видна всем
        or exists (   -- трек в чьём-то профиле: его видят все, кого владелец не заблокировал

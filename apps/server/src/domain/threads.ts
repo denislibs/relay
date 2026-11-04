@@ -27,13 +27,13 @@ export async function copyPost(tx: Tx, channelId: number, post: Record<string, u
   const c = await contentColumns(groupId, clientId, {
     body: post.body as string, entities: (post.entities as unknown[] | null) ?? null, todo: post.todo ?? null, poll: post.poll ?? null, data: post.data ?? null,
     blocks: (post.blocks as unknown[] | null) ?? null, link: post.link ?? null, attachment,
-  }, tx);
+  }, tx, post.expires_at as Date | null);   // копия живёт сроком поста (и уходит вместе с ним), настройка группы её не касается
   const [row] = await tx`
-    insert into messages (chat_id, sender_id, client_id, kind, body, entities, attachment, group_id, fwd_from, link, blocks, todo, poll, data, sticker, content, has_link, post, post_author, origin, silent)
+    insert into messages (chat_id, sender_id, client_id, kind, body, entities, attachment, group_id, fwd_from, link, blocks, todo, poll, data, sticker, content, has_link, post, post_author, origin, silent, expires_at)
     values (${groupId}, ${authorId}, ${clientId}, ${post.kind as string}, ${c.body}, ${c.entities?.length ? sql.json(c.entities as never) : null}, ${c.attachment ? sql.json(c.attachment as never) : null},
             ${(post.group_id as string | null) ?? null}, ${post.fwd_from ? sql.json(post.fwd_from as never) : null}, ${c.link ? sql.json(c.link as never) : null}, ${c.blocks ? sql.json(c.blocks as never) : null},
             ${c.todo ? sql.json(c.todo as never) : null}, ${c.poll ? sql.json(c.poll as never) : null}, ${c.data ? sql.json(c.data as never) : null}, ${post.sticker ? sql.json(post.sticker as never) : null}, ${c.content}, ${c.hasLink}, true, ${(post.post_author as string | null) ?? null},
-            ${sql.json({ chatId: channelId, id: Number(post.id) } as never)}, ${!!post.silent})
+            ${sql.json({ chatId: channelId, id: Number(post.id) } as never)}, ${!!post.silent}, ${(post.expires_at as Date | null) ?? null})
     returning *`;
   const copy = toMessage((await openRows([row], '', tx))[0]);
   await chatEvent(tx, groupId, { type: 'newMessage', message: copy }, 'group');
@@ -130,9 +130,9 @@ export async function recountThread(tx: Tx, groupId: number, copyId: number): Pr
   if (!key) return;
   const t = await tx`select post_id from message_threads where chat_id = ${key.channelId} and copy_id = ${copyId} order by post_id for update`;
   if (!t.length) return;
-  const [agg] = await tx`select count(*)::int as n, max(id) as last from messages where chat_id = ${groupId} and thread_id = ${copyId} and not deleted`;
+  const [agg] = await tx`select count(*)::int as n, max(id) as last from messages where chat_id = ${groupId} and thread_id = ${copyId} and not deleted and (expires_at is null or expires_at > now())`;
   const recent = await tx`
-    select sender_id from messages where chat_id = ${groupId} and thread_id = ${copyId} and not deleted
+    select sender_id from messages where chat_id = ${groupId} and thread_id = ${copyId} and not deleted and (expires_at is null or expires_at > now())
      group by sender_id order by max(id) desc limit 3`;
   await tx`update message_threads set count = ${agg.n}, last_id = ${agg.last ?? null}, recent = ${recent.map((r) => Number(r.sender_id))}::bigint[]
             where chat_id = ${key.channelId} and copy_id = ${copyId}`;
@@ -228,12 +228,12 @@ export async function getThread(userId: number, groupId: number, copyId: number,
   let rows: Record<string, unknown>[], hasMore: boolean;
   if (after != null) {
     const up = await sql`
-      select * from messages where chat_id = ${groupId} and thread_id = ${copyId} and id > ${after} and id >= ${ctx.historyFrom} and not deleted
+      select * from messages where chat_id = ${groupId} and thread_id = ${copyId} and id > ${after} and id >= ${ctx.historyFrom} and not deleted and (expires_at is null or expires_at > now())
        order by id limit ${take + 1}`;
     rows = up.slice(0, take); hasMore = up.length > take;
   } else {
     const down = await sql`
-      select * from messages where chat_id = ${groupId} and thread_id = ${copyId} and (${before}::bigint is null or id < ${before}) and id >= ${ctx.historyFrom} and not deleted
+      select * from messages where chat_id = ${groupId} and thread_id = ${copyId} and (${before}::bigint is null or id < ${before}) and id >= ${ctx.historyFrom} and not deleted and (expires_at is null or expires_at > now())
        order by id desc limit ${take + 1}`;
     rows = down.slice(0, take).reverse(); hasMore = down.length > take;
   }

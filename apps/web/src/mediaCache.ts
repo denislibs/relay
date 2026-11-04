@@ -247,6 +247,15 @@ async function evictAuto(store: AttachmentStore, bytes: number, keep?: string): 
   return freed;
 }
 
+/** Файлы исчезнувших сообщений (автоудаление): всё на устройстве — оригинал, копии и куски, включая сохранённое пользователем. */
+export async function forgetAttachments(store: AttachmentStore, ids: string[]): Promise<number> {
+  if (!ids.length) return 0;
+  const all = await store.index.all().catch(() => [] as AttachmentOnDevice[]);
+  const hit = all.filter((r) => ids.some((id) => r.fileId === id || r.fileId.startsWith(id + '/') || r.fileId.startsWith(id + '@')));
+  await removeRecords(store, hit);
+  return hit.length;
+}
+
 async function removeRecords(store: AttachmentStore, recs: AttachmentOnDevice[]): Promise<void> {
   if (!recs.length) return;
   const byBucket = new Map<AttachmentBucket, Cache>();

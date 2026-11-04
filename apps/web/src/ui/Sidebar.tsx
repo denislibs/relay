@@ -82,6 +82,7 @@ export const SideRow = memo(function SideRow({ c, meId, active, showDraft, muted
       data-chat-id={c.id}
       logo={isSystemChat(c)}
       saved={isSavedChat(c)}
+      autoDelete={!!c.autoDeleteSec}
       verified={isSystemChat(c)}
       author={author}
       thumb={thumb}

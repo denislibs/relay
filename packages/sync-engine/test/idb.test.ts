@@ -50,8 +50,29 @@ test('schema v4: every store and index exists', async () => {
   const db = await openDb('schema-fresh-' + crypto.randomUUID());
   for (const s of STORES) expect(db.objectStoreNames.contains(s)).toBe(true);
   const tx = db.transaction(['messages', 'members'], 'readonly');
-  expect([...tx.objectStore('messages').indexNames].sort()).toEqual(['byChat', 'byTab']);
+  expect([...tx.objectStore('messages').indexNames].sort()).toEqual(['byChat', 'byExpiry', 'byTab']);
   expect([...tx.objectStore('members').indexNames]).toEqual(['byChat']);
+  db.close();
+});
+
+test('upgrade 7 → 8 adds the expiry index and keeps the cache; rows without a term are not in it', async () => {
+  const name = 'schema-exp-' + crypto.randomUUID();
+  const old = await new Promise<IDBDatabase>((res, rej) => {
+    const q = indexedDB.open(name, 7);
+    q.onupgradeneeded = () => { const m = q.result.createObjectStore('messages', { keyPath: 'key' }); m.createIndex('byChat', ['chatId', 'sort']); m.createIndex('byTab', ['chatId', 'tab', 'sort']); };
+    q.onsuccess = () => res(q.result); q.onerror = () => rej(q.error);
+  });
+  await new Promise<void>((res) => { const t = old.transaction('messages', 'readwrite'); t.objectStore('messages').put({ key: 'k1', chatId: 1, sort: 1 }); t.oncomplete = () => res(); });
+  old.close();
+  const db = await openDb(name);
+  const os = db.transaction('messages', 'readwrite').objectStore('messages');
+  expect([...os.indexNames]).toContain('byExpiry');
+  os.put({ key: 'k2', chatId: 1, sort: 2, expiresAt: 123 });
+  await new Promise<void>((res) => { os.transaction.oncomplete = () => res(); });
+  const read = db.transaction('messages').objectStore('messages');
+  const [all, due] = await Promise.all([new Promise<unknown[]>((r) => { const q = read.getAll(); q.onsuccess = () => r(q.result); }), new Promise<{ key: string }[]>((r) => { const q = read.index('byExpiry').getAll(); q.onsuccess = () => r(q.result); })]);
+  expect(all).toHaveLength(2);   // кэш на месте
+  expect(due.map((x) => x.key)).toEqual(['k2']);
   db.close();
 });
 

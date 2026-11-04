@@ -29,6 +29,7 @@ import { resolvePeer, resolvePeers } from './domain/peerRef';
 import { initPeerKeys } from './crypto/peerKey';
 import { THEMES } from './domain/themes';
 import { setChatTheme } from './domain/chatTheme';
+import { setAutoDelete } from './domain/autoDelete';
 import { deleteScheduled, editScheduled, listScheduled } from './domain/scheduled';
 import { handleFrame } from './ws';
 import { pollVoters } from './domain/polls';
@@ -245,6 +246,9 @@ export function createServer(opts: { port: number }): Server {
         const scheduledOne = /^\/chats\/(\d{1,15})\/scheduled\/([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})$/.exec(url.pathname);
         if (scheduledOne && req.method === 'PATCH') return Response.json(await editScheduled(userId, Number(scheduledOne[1]), scheduledOne[2], await req.json().catch(() => null)));
         if (scheduledOne && req.method === 'DELETE') return Response.json(await deleteScheduled(userId, Number(scheduledOne[1]), scheduledOne[2]));
+        // автоудаление: { sec: число | null } (domain/autoDelete.ts)
+        const autoDelete = /^\/chats\/(\d{1,15})\/auto-delete$/.exec(url.pathname);
+        if (req.method === 'PUT' && autoDelete) return Response.json(await setAutoDelete(userId, Number(autoDelete[1]), ((await req.json().catch(() => ({}))) as { sec?: unknown }).sec));
         // тема чата: { theme: id | null } (domain/chatTheme.ts)
         const chatTheme = /^\/chats\/(\d{1,15})\/theme$/.exec(url.pathname);
         if (req.method === 'PUT' && chatTheme) return Response.json(await setChatTheme(userId, Number(chatTheme[1]), ((await req.json().catch(() => null)) as { theme?: unknown } | null)?.theme ?? null));

@@ -7,6 +7,7 @@ import type { Birthday, Block, PersonalChannel, ChatFolder, Entity, ForwardInfo,
 export type Status = 'pending' | 'sent' | 'read' | 'failed';
 
 export interface LocalMessage {
+  expiresAt?: number;     // автоудаление: мс эпохи по часам сервера, когда сообщение исчезнет
   key: string;            // = clientId: одинаков у черновика, ack и newMessage
   clientId: string;
   id: number | null;      // null, пока сервер не подтвердил
@@ -89,6 +90,7 @@ export interface LocalChat {
   draft?: { text: string; at: string; entities?: Entity[] } | null;   // неотправленный текст композера (общий для вкладок)
   pinned?: number[];      // закреплённые сообщения (новые сверху)
   muteUntil?: number | null;   // уведомления чата выключены до (мс), 0 — навсегда, null/нет — включены
+  autoDeleteSec?: number | null;   // автоудаление: срок новых сообщений в секундах (значение сервера), null — выключено
   theme?: string | null;       // тема чата: id готовой темы (GET /themes), общая для всех участников
   pinnedAt?: number | null;    // чат закреплён (мс; позже закреплённый — выше), null/нет — нет
   archived?: boolean;          // в архиве: не в «Все» и папках, а под строкой «Архив»
@@ -245,6 +247,8 @@ export type Action =
   | { type: 'emojiFx'; chatId: number; id: number; key: string; t: number[] }
   | { type: 'editMessage'; chatId: number; id: number; body: string; entities?: Entity[] }
   | { type: 'deleteMessage'; chatId: number; id: number }
+  | { type: 'setAutoDelete'; chatId: number; sec: number | null }
+  | { type: 'ackExpiredFiles'; ids: string[] }
   | { type: 'react'; chatId: number; id: number; emoji: string | null }
   /** посты канала показаны на экране: просмотр — по разу на пост за сессию, батчем не чаще раза в секунду (channel.ts) */
   | { type: 'countViews'; chatId: number; ids: number[] }

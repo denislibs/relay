@@ -85,7 +85,7 @@ export async function unarchiveByMessage(userId: number, chatId: number, body: u
     if (cur.deleted_at) throw new DomainError('not_found', 'chat');
     const was = toFlags(cur as Row);
     const muted = !!cur.muted;   // в базе: 'infinity' — навсегда
-    const [m] = await tx`select sender_id from messages where chat_id = ${chatId} and id = ${messageId} and not deleted`;
+    const [m] = await tx`select sender_id from messages where chat_id = ${chatId} and id = ${messageId} and not deleted and (expires_at is null or expires_at > now())`;
     const ok = was.archived && !muted && messageId > was.archivedAtId && !!m && Number(m.sender_id) !== userId;
     if (!ok) return { ...was, changed: false };
     const [row] = await tx`update chat_members set archived = false, pinned_at = null where chat_id = ${chatId} and user_id = ${userId} returning pinned_at, archived, unread_mark, archived_at_id`;

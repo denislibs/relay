@@ -25,7 +25,7 @@ export async function readCounts(db: Tx | typeof sql, chatId: number, id: number
 /** Реакция на пост (null — снять) в транзакции reactMessage: права уже проверены. Ответ — счётчики и моя. */
 export async function reactPost(tx: Tx, userId: number, chatId: number, id: number, historyFrom: number, emoji: string | null): Promise<{ reactions: []; counts: Counts; mine: string | null }> {
   // замок строки сообщения: смены счётчиков одного поста идут по очереди, обработчик окна ждёт их (for share)
-  const [m] = await tx`select deleted from messages where chat_id = ${chatId} and id = ${id} and id >= ${historyFrom} for update`;
+  const [m] = await tx`select (deleted or coalesce(expires_at <= now(), false)) as deleted from messages where chat_id = ${chatId} and id = ${id} and id >= ${historyFrom} for update`;
   if (!m || m.deleted) throw new DomainError('not_found', 'message');
   const [old] = await tx`select emoji from reactions where chat_id = ${chatId} and message_id = ${id} and user_id = ${userId}`;
   const prev = (old?.emoji as string | undefined) ?? null;

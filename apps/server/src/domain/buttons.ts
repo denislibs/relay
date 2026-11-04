@@ -13,7 +13,7 @@ import { LOGIN_GONE, LOGIN_OTHERS_ENDED, resolveLoginAlerts, systemUserId } from
  */
 export async function pressButton(userId: number, sessionId: number, chatId: number, id: number, data: string): Promise<ButtonAnswer> {
   await assertMember(sql, chatId, userId);
-  const [m] = await sql`select sender_id, deleted, buttons from messages where chat_id = ${chatId} and id = ${id}`;
+  const [m] = await sql`select sender_id, (deleted or coalesce(expires_at <= now(), false)) as deleted, buttons from messages where chat_id = ${chatId} and id = ${id}`;
   const rows = (m && !m.deleted ? m.buttons : null) as MessageButton[][] | null;
   if (!rows?.some((row) => row.some((b) => b.kind === 'callback' && b.data === data))) throw new DomainError('not_found', 'button');
   if (Number(m.sender_id) !== await systemUserId()) throw new DomainError('forbidden', 'button');

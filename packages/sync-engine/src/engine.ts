@@ -4,7 +4,7 @@ import type { ClientFrame, JournalEntry, Me, ScheduledMessage, SettingsSnapshot,
 import { Blocks } from './blocks';
 import { Contacts } from './contacts';
 import { delBlob, getBlob, openDb, putBlob, write } from './idb';
-import { affects, computeQuery, scheduledResult, diffResults, feedSpan, flagsKey, flagsOf, flagsOverlay, messageWindow, muteKey, rangeAt, muteOverlay, threadView, type Result } from './queries';
+import { affects, autoDeleteKey, autoDeleteOverlay, computeQuery, scheduledResult, diffResults, feedSpan, flagsKey, flagsOf, flagsOverlay, messageWindow, muteKey, rangeAt, muteOverlay, threadView, type Result } from './queries';
 import type { Item } from './types';
 import { countStores } from './devstats';
 import { Store, type ChatSummary } from './store';
@@ -128,6 +128,7 @@ export class Engine {
   private peerSigs = new PeerSigs();
   /** какое значение «уведомлений» из очереди показано в строке чата: изменилось — строку пересчитать */
   private muteShown = new Map<number, number | null>();
+  private autoDeleteShown = new Map<number, number | null>();
   private flagsShown = new Map<number, string>();   // операции setChatFlags в очереди (подпись) — пересчёт строк при их смене
   private usersAsked = new Set<number>();
   /** участники групп, о которых спросил интерфейс; asked — уже загружали за это подключение */
@@ -165,6 +166,8 @@ export class Engine {
     this.dev.restore(sim);
     if (this.dev.sim.offline) this.netDown = true;
     store.onFlush = (keys, ms) => { this.dev.log.record('engine', 'flush', { keys }, undefined, ms); this.scheduleEvict(); };
+    store.onExpiry = (at) => this.armExpiry(at);
+    this.autoDeleteShown = autoDeleteOverlay(ops);
     this.muteShown = muteOverlay(ops);   // операции, восстановленные из IndexedDB: их отказ после перезапуска тоже пересчитает строку
     store.scheduledBusy = (clientId) => this.ops.list.some((o) => o.key === OP_SCHEDULED + clientId);
     this.ops = new Ops(db, ops, { base: cfg.httpBase, headers: cfg.headers, backoffMs: cfg.backoffMs, fetch: this.dev.fetch }, {
@@ -218,6 +221,7 @@ export class Engine {
         if (this.readTimer) { clearTimeout(this.readTimer); this.readTimer = null; }
         if (this.outboxTimer) { clearTimeout(this.outboxTimer); this.outboxTimer = null; }
         if (this.evictTimer) { clearTimeout(this.evictTimer); this.evictTimer = null; }
+        if (this.expiryTimer) { clearTimeout(this.expiryTimer); this.expiryTimer = null; }
         for (const t of this.typingTimers.values()) clearTimeout(t);
         this.typingTimers.clear();
         this.views.close();
@@ -250,7 +254,30 @@ export class Engine {
     const db = await openDb(cfg.dbName, { onVersionChange: () => engine?.obsolete() });
     const store = await Store.open(db, cfg.userId);
     engine = new Engine(cfg, store, db, await loadOps(db), await loadSim(db));
+    await engine.startExpiry();   // до первой подписки: после долгого офлайна вышедшее не должно мелькнуть
     return engine;
+  }
+
+  // ---- автоудаление: один таймер на ближайший срок (store.sweepExpired), работает и без сети ----
+  private expiryTimer: ReturnType<typeof setTimeout> | null = null;
+  private expiryAt = Infinity;
+  private armExpiry(at: number): void {
+    if (this.closed || (this.expiryTimer && at >= this.expiryAt)) return;
+    if (this.expiryTimer) clearTimeout(this.expiryTimer);
+    this.expiryAt = at;
+    this.expiryTimer = setTimeout(() => { this.expiryTimer = null; this.expiryAt = Infinity; this.sweepExpiry(); },
+      Math.min(Math.max(0, at - this.store.serverNow()), 2 ** 31 - 1));
+  }
+  private async sweepNow(): Promise<void> {
+    await this.store.flush();   // индекс должен видеть то, что пока только в памяти, и не видеть убранного
+    if (await this.store.sweepExpired()) { await this.store.flush(); this.changed(); }
+    const next = await this.store.nextExpiry();
+    // не убралось (чужая гонка с записью) — не крутиться: следующий проход через секунду
+    if (next != null) this.armExpiry(Math.max(next, this.store.serverNow() + (next <= this.store.serverNow() ? 1000 : 0)));
+  }
+  private sweepExpiry(): void { this.run(() => this.sweepNow()); }
+  private async startExpiry(): Promise<void> {
+    await this.sweepNow();
   }
 
   private dead = false;
@@ -268,6 +295,7 @@ export class Engine {
     if (this.readTimer) { clearTimeout(this.readTimer); this.readTimer = null; }
     if (this.outboxTimer) { clearTimeout(this.outboxTimer); this.outboxTimer = null; }
     if (this.evictTimer) { clearTimeout(this.evictTimer); this.evictTimer = null; }
+    if (this.expiryTimer) { clearTimeout(this.expiryTimer); this.expiryTimer = null; }
     if (this.safetyTimer) { clearInterval(this.safetyTimer); this.safetyTimer = null; }
     this.watchers.clear();
     this.onObsoleteCb();
@@ -333,6 +361,7 @@ export class Engine {
     if (this.readTimer) { clearTimeout(this.readTimer); this.readTimer = null; }
     if (this.outboxTimer) { clearTimeout(this.outboxTimer); this.outboxTimer = null; }
     if (this.evictTimer) { clearTimeout(this.evictTimer); this.evictTimer = null; }
+    if (this.expiryTimer) { clearTimeout(this.expiryTimer); this.expiryTimer = null; }
     this.watchers.clear();
     await this.whenIdle(2000).catch((e) => console.warn(String(e)));
     await this.evicting?.catch(() => {});   // уборка остановится между порциями — её порция и курсоры дописаны до flush
@@ -439,6 +468,8 @@ export class Engine {
       failed: [...this.store.outbox.values()].filter((o) => o.failed).length,
       ...this.session.status(),
       sessionsRev: this.store.sessionsRev,
+      clockSkew: this.store.clockSkew,   // поправка часов к серверу: «Удалится через …» в меню сообщения
+      expiredFiles: [...this.store.expiredFiles],   // файлы исчезнувших сообщений: страница чистит кэш и подтверждает
       stickersRev: this.store.stickersRev,   // мои стикеры: журнал, переподключение, снимок, свои изменения   // растёт на sessionsChanged из журнала, переподключении и снимке: интерфейс перечитывает сеансы
       devSim: simFlags(this.dev.sim),   // имитатор сети включён — плашка «Режим разработчика» во всех вкладках
     };
@@ -478,7 +509,7 @@ export class Engine {
       const it = q.kind === 'devStats' ? this.dev.stats() : { key: 'devLog' };   // devLog идёт мимо compute (dev.pushLog)
       return { items: new Map([[it.key, it]]), order: [it.key], sig: new Map([[it.key, JSON.stringify(it)]]) };
     }
-    if (q.kind !== 'status') return computeQuery(this.store, q, muteOverlay(this.ops.list), flagsOverlay(this.ops.list));
+    if (q.kind !== 'status') return computeQuery(this.store, q, muteOverlay(this.ops.list), flagsOverlay(this.ops.list), autoDeleteOverlay(this.ops.list));
     const it = this.statusItem();
     return { items: new Map([[it.key, it]]), order: [it.key], sig: new Map([[it.key, JSON.stringify(it)]]) };
   }
@@ -836,11 +867,18 @@ export class Engine {
     this.muteShown = now;
   }
 
+  private retouchAutoDelete(): void {
+    const now = autoDeleteOverlay(this.ops.list);
+    for (const [id, v] of now) if (!this.autoDeleteShown.has(id) || this.autoDeleteShown.get(id) !== v) this.store.retouch(id);
+    for (const id of this.autoDeleteShown.keys()) if (!now.has(id)) this.store.retouch(id);
+    this.autoDeleteShown = now;
+  }
+
   private emit(): void {
     this.contacts.repair();
     // собеседник выглядит иначе (профиль, контакт, очередь) — строки его личных чатов пересчитать
     if (this.store.profile.dirty || this.store.contacts.dirty || this.ops.dirty) this.peerSigs.retouch(this.store);
-    if (this.ops.dirty) { this.retouchMute(); this.retouchFlags(); }
+    if (this.ops.dirty) { this.retouchMute(); this.retouchFlags(); this.retouchAutoDelete(); }
     const hold = this.holding && this.acting === 0;
     const touched = new Set(this.store.touched);
     if (!hold) this.store.touched.clear(); // при удержании изменения копятся до конца догонки
@@ -967,6 +1005,12 @@ export class Engine {
       // ответ — всегда текущие флаги сервера (и при changed: false): оверлей снимается, стор — по ответу
       const v = value as { pinnedAt?: number | null; archived?: boolean; unreadMark?: boolean; archivedAtId?: number } | null;
       if (v && typeof v.archived === 'boolean') { this.store.setFlags(Number(op.key.slice(10)), { pinnedAt: v.pinnedAt ?? null, archived: v.archived, unreadMark: !!v.unreadMark, archivedAtId: v.archivedAtId }); this.run(() => this.store.flush()); }
+      return;
+    }
+    if (op.key.startsWith('autoDelete:')) {
+      // ответ — новая база: между уходом операции и записью журнала значок не мигнёт
+      const v = value as { autoDeleteSec?: number | null } | null;
+      if (v && v.autoDeleteSec !== undefined) { this.store.setAutoDelete(Number(op.key.slice(11)), v.autoDeleteSec); this.run(() => this.store.flush()); }
       return;
     }
     if (op.key.startsWith('mute:')) {
@@ -1465,6 +1509,14 @@ export class Engine {
         return null;
       case 'positions': return this.store.positions();
       case 'setPosition': await this.store.setPosition(a.key, a.pos); return null;
+      case 'setAutoDelete':
+        await this.ops.enqueue({ key: autoDeleteKey(a.chatId), method: 'PUT', path: `/chats/${a.chatId}/auto-delete`, body: { sec: a.sec } });
+        return null;
+      case 'ackExpiredFiles':
+        this.store.ackExpiredFiles(a.ids);
+        await this.store.flush();
+        this.pushStatus();
+        return null;
       case 'setMute':
         await this.ops.enqueue({ key: muteKey(a.chatId), method: 'PUT', path: `/chats/${a.chatId}/notify`, body: { muteUntil: a.muteUntil } });
         return null;
@@ -1636,6 +1688,8 @@ export class Engine {
       case 'hello':
         if (this.resetting) { this.skipped.hello = f; return; }   // resetLocal пошлёт свой hello сама, а при отказе проиграет этот
         this.dev.counters.serverSeq = f.seq;
+        if (typeof f.now === 'number' && f.now > 0) this.store.setClockSkew(f.now - Date.now());
+        this.sweepExpiry();   // часы могли уточниться, а за время без связи — выйти сроки
         this.holding = true;
         // переподключение: пока связи не было, sessionsChanged мог уйти мимо (снимок его не несёт) — интерфейс
         // перечитывает сеансы (плашка «Это вы?»); первое подключение не считаем — там интерфейс грузит список сам

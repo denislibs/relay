@@ -9,6 +9,12 @@ const known = new Map<string, string>();
 const pending: [string, string][] = [];
 let flushing = false;
 
+/** Сообщение с файлом исчезло (автоудаление): ключ — из памяти страницы и IndexedDB. Копия в другом чате принесёт его заново. */
+export function dropKeys(ids: string[]): Promise<void> {
+  for (const id of ids) known.delete(id);
+  return fileKeysStore.delete(ids);
+}
+
 export function rememberKey(id: string, key: string): void {
   if (!id || !key || known.get(id) === key) return;
   known.set(id, key);

@@ -14,9 +14,10 @@ export type ServiceType = 'login_code' | 'new_login' | 'group_created' | 'channe
   | 'joined_by_link' | 'joined_by_request' | 'owner_changed' | 'protected_on' | 'protected_off'
   | 'todo_done' | 'todo_append'   // чек-лист: автор отметил / добавил задачи в список replyToId (номера — в data)
   | 'scheduled_failed'   // отложенное не удалось отправить: текст — куда и почему (сам текст сообщения не раскрывается)
-  | 'theme_changed';   // тема чата: data.emoji/title — новая, пусто — снята   // чек-лист: автор отметил / добавил задачи в список replyToId (номера — в data)
+  | 'theme_changed'   // тема чата: data.emoji/title — новая, пусто — снята   // чек-лист: автор отметил / добавил задачи в список replyToId (номера — в data)
+  | 'auto_delete_changed';   // автоудаление: data.sec — новый срок в секундах, нет — выключено
 /** Участники служебного события (имена на момент события) и новое название. */
-export interface ServiceData { users?: { id: Id; name: string }[]; title?: string; completed?: number[]; incompleted?: number[]; items?: number[]; emoji?: string }   // group_created / channel_created: тело — название, автор — создатель
+export interface ServiceData { users?: { id: Id; name: string }[]; title?: string; completed?: number[]; incompleted?: number[]; items?: number[]; emoji?: string; sec?: number }   // group_created / channel_created: тело — название, автор — создатель
 
 export interface Message {
   id: Id;
@@ -32,6 +33,7 @@ export interface Message {
   deleted?: boolean;
   reactions?: Reaction[];
   attachment?: Attachment | null;
+  expiresAt?: number;    // автоудаление: мс эпохи, когда сообщение исчезнет (ставит только сервер)
   service?: { type: ServiceType; data?: ServiceData };   // есть только у служебных сообщений
   todo?: Todo;           // чек-лист (kind 'todo'): задачи и кто что отметил
   poll?: Poll;           // опрос или викторина (kind 'poll'): счётчики и мои голоса — для этого читателя
@@ -67,6 +69,8 @@ export interface ScheduledMessage {
 export const SCHEDULED_LIMIT = 100;
 /** Самое дальнее время: год. Сервер даёт сутки запаса на високосный год и расхождение часов. */
 export const SCHEDULE_MAX_MS = 365 * 24 * 3600_000;
+/** Автоудаление: свой срок — от часа до года; под DEV_LOGIN сервер принимает и секунды (для ручной проверки). */
+export const AUTO_DELETE_MIN_SEC = 3600, AUTO_DELETE_MAX_SEC = 365 * 24 * 3600, AUTO_DELETE_DEV_MIN_SEC = 1;
 
 /** Комментарии к посту: тред — копия copyId в группе chatId; recent — последние (до 3) комментаторы, свежий первым.
  *  readMaxId — докуда я прочитал тред (только в истории канала; нет — не читал). */
@@ -309,6 +313,7 @@ export type Update =
   // состав изменился: у кого строка новая или другая (upsert), кто вышел или удалён (remove)
   | { type: 'members'; chatId: Id; upsert: MemberRow[]; remove: Id[] }
   // чат больше не мой: вышел, удалили, группу удалили
+  | { type: 'chatAutoDelete'; chatId: Id; sec: number | null }   // срок автоудаления чата сменился (null — выключено)
   | { type: 'chatTheme'; chatId: Id; theme: string | null }   // тема чата сменилась (id из GET /themes, null — снята)
   | { type: 'chatFlags'; chatId: Id; pinnedAt: number | null; archived: boolean; unreadMark: boolean; archivedAtId?: number }   // закреплён (мс; позже — выше), в архиве, «непрочитанное»
   | { type: 'chatNotify'; chatId: Id; muteUntil: number | null }   // уведомления чата: мс эпохи — выключены до, 0 — навсегда, null — включены

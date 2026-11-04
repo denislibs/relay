@@ -365,3 +365,21 @@ describe('encrypted attachments in the service worker', () => {
     expect(await fileKeyOf(s, 'aaaa/preview')).not.toEqual(k);   // копия — выведенным ключом
   });
 });
+
+test('forgetAttachments: the original, copies and pieces of an expired message leave the device, others stay', async () => {
+  const { memoryAttachmentIndex: mem } = await import('./attachmentsOnDevice');
+  const { forgetAttachments, putAttachment, attachmentKey } = await import('./mediaCache');
+  const opened = new Map<string, Map<string, Response>>();
+  const caches = { open: async (n: string) => {
+    const c = opened.get(n) ?? new Map<string, Response>(); opened.set(n, c);
+    return { put: async (k: string, r: Response) => { c.set(k, r); }, match: async (k: string) => c.get(k), delete: async (k: string) => c.delete(k), keys: async () => [] };
+  }, delete: async () => true } as unknown as CacheStorage;
+  const s = { caches, index: mem() };
+  for (const id of ['aaa', 'aaa/preview', 'bbb']) await putAttachment(s, id, new Blob(['x']), 'auto-evictable');
+  await putAttachment(s, 'aaa/720', new Blob(['x']), 'saved-by-user');
+  expect(await forgetAttachments(s, ['aaa'])).toBe(3);
+  expect((await s.index.all()).map((r) => r.fileId)).toEqual(['bbb']);
+  const all = [...opened.values()].flatMap((c) => [...c.keys()]);
+  expect(all).toEqual([attachmentKey('bbb')]);
+  expect(await forgetAttachments(s, [])).toBe(0);
+});

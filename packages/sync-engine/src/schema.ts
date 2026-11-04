@@ -1,12 +1,12 @@
 // Единственное место, где описаны таблицы IndexedDB воркера
-export const SCHEMA_VERSION = 7;
+export const SCHEMA_VERSION = 8;
 
 type Index = { name: string; keyPath: string | string[] };
 type StoreDef = { keyPath: string | string[]; indexes?: Index[]; keep?: true };
 
 export const SCHEMA = {
   chats:         { keyPath: 'id' },
-  messages:      { keyPath: 'key', indexes: [{ name: 'byChat', keyPath: ['chatId', 'sort'] }, { name: 'byTab', keyPath: ['chatId', 'tab', 'sort'] }] },
+  messages:      { keyPath: 'key', indexes: [{ name: 'byChat', keyPath: ['chatId', 'sort'] }, { name: 'byTab', keyPath: ['chatId', 'tab', 'sort'] }, { name: 'byExpiry', keyPath: 'expiresAt' }] },   // byExpiry — только сообщения со сроком (автоудаление): без поля строки в индекс не попадают
   users:         { keyPath: 'id' },
   contacts:      { keyPath: 'userId' },
   blocked:       { keyPath: 'userId' },

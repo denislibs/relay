@@ -12,6 +12,8 @@ export interface Result {
 
 /** Операция «выключить уведомления чата»: ключ mute:<chatId>, тело {muteUntil}. Её значение показывается сразу, до ответа сервера. */
 export const muteKey = (chatId: number) => 'mute:' + chatId;
+/** Операция «автоудаление чата»: ключ autoDelete:<chatId>, тело {sec}. Как и mute: значение видно сразу, до ответа сервера. */
+export const autoDeleteKey = (chatId: number) => 'autoDelete:' + chatId;
 export const flagsKey = (chatId: number) => 'flags:' + chatId;
 
 /** Флаги чата, которые видит список: закреплён (мс), в архиве, пометка «непрочитанное». */
@@ -42,6 +44,12 @@ export function muteOverlay(ops: readonly { key: string; body?: unknown }[]): Ma
   return m;
 }
 
+export function autoDeleteOverlay(ops: readonly { key: string; body?: unknown }[]): Map<number, number | null> {
+  const m = new Map<number, number | null>();
+  for (const o of ops) if (o.key.startsWith('autoDelete:')) m.set(Number(o.key.slice(11)), (o.body as { sec: number | null }).sec);
+  return m;
+}
+
 /** Мелкие служебные элементы (очередь загрузок, счётчики): подпись — сериализация, их единицы. */
 function result(list: Item[]): Result {
   const items = new Map<string, Item>(), sig = new Map<string, string>();
@@ -53,7 +61,7 @@ function result(list: Item[]): Result {
 const sortAt = (c: LocalChat): string => (c.draft && c.draft.at > c.lastAt ? c.draft.at : c.lastAt);
 
 /** Строка списка: название и фото личного чата — из people (personView), группы — из chat.group. */
-const chatItem = (store: Store, c: LocalChat, person: ReturnType<typeof personView> | null, muteUntil: number | null, f: Flags): Item => {
+const chatItem = (store: Store, c: LocalChat, person: ReturnType<typeof personView> | null, muteUntil: number | null, f: Flags, autoDeleteSec: number | null): Item => {
   const title = chatTitle(store, c);
   return {
   key: 'c' + c.id, id: c.id, kind: c.kind, title, peerId: c.peerId, saved: !!c.saved,
@@ -63,7 +71,7 @@ const chatItem = (store: Store, c: LocalChat, person: ReturnType<typeof personVi
   canSend: canPost(c),
   photo: person ? person.photo : c.group?.photo ?? null, group: c.group ?? null, me: c.me ?? null, membersRev: store.members.rev(c.id), sortAt: sortAt(c), draft: c.draft?.text ?? null, draftEntities: c.draft?.entities ?? null, pinned: c.pinned ?? [], muteUntil,
   scheduled: store.scheduledCount(c.id),
-  pinnedAt: f.pinnedAt, archived: f.archived, unreadMark: f.unreadMark, mentions: c.mentions ?? 0, theme: c.theme ?? null,
+  pinnedAt: f.pinnedAt, archived: f.archived, unreadMark: f.unreadMark, mentions: c.mentions ?? 0, theme: c.theme ?? null, autoDeleteSec,
   // непрочитанные реакции на мои сообщения: число и известные id (лента гасит их, увидев сообщение на экране)
   reactions: c.reactions ?? 0, reactionIds: c.reactionIds ?? null,
   last: c.last ? { key: c.last.key, id: c.last.id, senderId: c.last.senderId, body: c.last.body, status: c.last.status, createdAt: c.last.createdAt, deleted: !!c.last.deleted, kind: c.last.kind ?? 'text', attachmentName: c.last.attachment?.name ?? null, attachmentTitle: c.last.attachment?.title ?? null, attachmentPerformer: c.last.attachment?.performer ?? null,
@@ -77,25 +85,26 @@ const chatItem = (store: Store, c: LocalChat, person: ReturnType<typeof personVi
 // строка списка переиспользуется, пока не изменились её входы: версия чата (всё из строки чата, включая last и
 // черновик), вид собеседника (профиль, контакт, операция в очереди) и «печатает»; JSON.stringify не нужен
 const chatCache = new WeakMap<LocalChat, { sig: string; item: Item }>();
-function chatListItem(store: Store, c: LocalChat, mute: Map<number, number | null>, flags: Map<number, FlagsOp>): { item: Item; sig: string } {
+function chatListItem(store: Store, c: LocalChat, mute: Map<number, number | null>, flags: Map<number, FlagsOp>, auto: Map<number, number | null>): { item: Item; sig: string } {
   const person = !c.group && c.peerId != null ? personView(store, c.peerId) : null;
   // профиля собеседника нет (чат узнали из сообщения, строку people вытеснили) — движок его спросит
   if (person && c.peerId != null && !store.users.get(c.peerId)) store.wantUser(c.peerId);
   const typing = store.typing.has(c.id);
   // уведомления: значение неотправленной операции перекрывает значение чата
   const muteUntil = mute.has(c.id) ? mute.get(c.id)! : c.muteUntil ?? null;
+  const autoDeleteSec = auto.has(c.id) ? auto.get(c.id)! : c.autoDeleteSec ?? null;
   // membersRev — счётчик изменений состава в памяти (members.ts) для старого интерфейса участников
   const f = flagsOf(c, flags.get(c.id));
-  const sig = `${store.chatVersion(c.id)}|${person?.sig ?? ''}|${typing}|${muteUntil}|${store.members.rev(c.id)}|${f.pinnedAt}|${f.archived}|${f.unreadMark}`;
+  const sig = `${store.chatVersion(c.id)}|${person?.sig ?? ''}|${typing}|${muteUntil}|${store.members.rev(c.id)}|${f.pinnedAt}|${f.archived}|${f.unreadMark}|${autoDeleteSec}`;
   let hit = chatCache.get(c);
-  if (!hit || hit.sig !== sig) { hit = { sig, item: { ...chatItem(store, c, person, muteUntil, f), typing } }; chatCache.set(c, hit); }
+  if (!hit || hit.sig !== sig) { hit = { sig, item: { ...chatItem(store, c, person, muteUntil, f, autoDeleteSec), typing } }; chatCache.set(c, hit); }
   return hit;
 }
 
 // элемент сообщения переиспользуется, пока сообщение не изменилось: дешёвая подпись вместо JSON.stringify
 // цитата — короткая копия исходного сообщения, если оно есть в кэше (видна, даже когда оригинал вне окна)
 type Quote = QuoteMsg | null;
-const msgSig = (m: LocalMessage, q: Quote, fxAt?: number): string => `${fxAt ?? ''}|${m.id}|${m.status}|${m.sort}|${m.replyToId}|${m.body}|${m.editedAt ?? ''}|${m.deleted ? 1 : 0}|${m.reactions?.map((r) => r.userId + r.emoji).join(',') ?? ''}|${m.attachment ? m.attachment.id + ':' + (m.progress ?? '') + ':' + m.attachment.size + (m.attachment.preview ? ':p' : '') + ':' + (m.attachment.variants?.length ?? 0) : ''}|${q ? q.id + ':' + q.body + ':' + (q.deleted ? 1 : 0) + ':' + (q.attachment?.thumb?.length ?? 0) + ':' + (q.entities?.length ?? 0) : ''}|${m.error ?? ''}|${m.listened ? 1 : 0}|${m.entities?.map((e) => e.type + e.offset + ':' + e.length + (e.url ?? '')).join(',') ?? ''}|${m.todo ? JSON.stringify(m.todo) : ''}|${m.poll ? JSON.stringify(m.poll) : ''}|${m.contact || m.geo || m.dice ? JSON.stringify([m.contact, m.geo, m.dice]) : ''}|${m.service?.data ? JSON.stringify(m.service.data) : ''}|${m.buttons ? JSON.stringify(m.buttons) : ''}|${m.views ?? ''}|${m.reactionCounts?.map((r) => r[0] + r[1]).join(',') ?? ''}|${m.myReaction ?? ''}|${m.postAuthor ?? ''}|${m.replies ? m.replies.count + ':' + m.replies.lastId + ':' + m.replies.recent.join(',') + ':' + (m.replies.readMaxId ?? '') : ''}`;
+const msgSig = (m: LocalMessage, q: Quote, fxAt?: number): string => `${fxAt ?? ''}|${m.id}|${m.expiresAt ?? ''}|${m.status}|${m.sort}|${m.replyToId}|${m.body}|${m.editedAt ?? ''}|${m.deleted ? 1 : 0}|${m.reactions?.map((r) => r.userId + r.emoji).join(',') ?? ''}|${m.attachment ? m.attachment.id + ':' + (m.progress ?? '') + ':' + m.attachment.size + (m.attachment.preview ? ':p' : '') + ':' + (m.attachment.variants?.length ?? 0) : ''}|${q ? q.id + ':' + q.body + ':' + (q.deleted ? 1 : 0) + ':' + (q.attachment?.thumb?.length ?? 0) + ':' + (q.entities?.length ?? 0) : ''}|${m.error ?? ''}|${m.listened ? 1 : 0}|${m.entities?.map((e) => e.type + e.offset + ':' + e.length + (e.url ?? '')).join(',') ?? ''}|${m.todo ? JSON.stringify(m.todo) : ''}|${m.poll ? JSON.stringify(m.poll) : ''}|${m.contact || m.geo || m.dice ? JSON.stringify([m.contact, m.geo, m.dice]) : ''}|${m.service?.data ? JSON.stringify(m.service.data) : ''}|${m.buttons ? JSON.stringify(m.buttons) : ''}|${m.views ?? ''}|${m.reactionCounts?.map((r) => r[0] + r[1]).join(',') ?? ''}|${m.myReaction ?? ''}|${m.postAuthor ?? ''}|${m.replies ? m.replies.count + ':' + m.replies.lastId + ':' + m.replies.recent.join(',') + ':' + (m.replies.readMaxId ?? '') : ''}`;
 const msgCache = new WeakMap<LocalMessage, { sig: string; item: Item }>();
 export const messageItem = (m: LocalMessage, q: Quote, fx?: { key: string; t: number[]; at: number }): { item: Item; sig: string } => {
   const sig = msgSig(m, q, fx?.at);
@@ -207,7 +216,7 @@ export function scheduledResult(store: Store, chatId: number): Result {
   return out;
 }
 
-export function computeQuery(store: Store, q: Query, mute: Map<number, number | null> = new Map(), flags: Map<number, FlagsOp> = new Map()): Result {
+export function computeQuery(store: Store, q: Query, mute: Map<number, number | null> = new Map(), flags: Map<number, FlagsOp> = new Map(), auto: Map<number, number | null> = new Map()): Result {
   switch (q.kind) {
     case 'chatList': {
       // закреплённые — сверху, в порядке закрепления (позже — выше), новые сообщения их не двигают; дальше — по последнему
@@ -219,7 +228,7 @@ export function computeQuery(store: Store, q: Query, mute: Map<number, number | 
       });
       const items = new Map<string, Item>(), sig = new Map<string, string>(), order: string[] = [];
       for (const c of chats.slice(0, q.limit)) {
-        const { item, sig: g } = chatListItem(store, c, mute, flags);
+        const { item, sig: g } = chatListItem(store, c, mute, flags, auto);
         items.set(item.key, item); sig.set(item.key, g); order.push(item.key);
       }
       return { items, sig, order };
@@ -230,7 +239,7 @@ export function computeQuery(store: Store, q: Query, mute: Map<number, number | 
       for (const id of store.previews) {
         const c = store.chats.get(id);
         if (!c) continue;
-        const { item, sig: g } = chatListItem(store, c, mute, flags);
+        const { item, sig: g } = chatListItem(store, c, mute, flags, auto);
         const it = { ...item, preview: true, requested: !!c.requested };
         items.set(it.key, it); sig.set(it.key, g); order.push(it.key);
       }

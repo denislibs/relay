@@ -14,7 +14,7 @@ import { enqueue } from '../jobs/queue';
 import { can, groupCtx, hasAdmin, requireRight } from './groupRights';
 import { stickerForSend } from './stickers';
 import { firstUrl, getPreview } from './linkPreview';
-import { contentColumns, openRows, updateContent, loadOpen } from './messageContent';
+import { chatExpiry, contentColumns, openRows, updateContent, loadOpen, warmExpiringKey } from './messageContent';
 import { currentChatKey } from '../crypto/chatKeys';
 import { copyPost, isThreadRoot, noteComment, threadAccess, withCopy } from './threads';
 import { collectMentions } from './mentions';
@@ -72,6 +72,7 @@ export async function sendMessage(
 
   // ключ чата — в кэш до транзакции: внутри неё он берётся из памяти (создание в транзакции в кэш не попадает)
   await currentChatKey(input.chatId).catch(() => {});
+  await warmExpiringKey(input.chatId).catch(() => {});
   const res = await sql.begin(async (tx) => {
     await hook?.before(tx);
     const out = await (async () => {
@@ -99,7 +100,7 @@ export async function sendMessage(
     if (threadId != null) {
       if (ctx.kind !== 'group') throw new DomainError('bad_frame', 'thread outside a group');
       // for share: удаление поста (и копии) не проскочит между проверкой и вставкой комментария
-      const [root] = await tx`select origin, deleted from messages where chat_id = ${input.chatId} and id = ${threadId} for share`;
+      const [root] = await tx`select origin, deleted or coalesce(expires_at <= now(), false) as deleted from messages where chat_id = ${input.chatId} and id = ${threadId} for share`;
       // корень — только копия, на которую указывает тред поста (копия не первого поста альбома — не корень)
       if (!root || root.origin == null || root.deleted || !(await isThreadRoot(tx, root.origin, threadId))) throw new DomainError('not_found', 'thread');
       // «Комментировать могут только участники» или вступление по заявке — гостю сначала вступить
@@ -108,7 +109,7 @@ export async function sendMessage(
     // копия без «Переслано от» — новое сообщение и может быть ответом; настоящая пересылка — нет (как в Telegram)
     const canReply = !input.forward || !!input.forward.hideSender;
     if (input.replyToId != null && canReply) {
-      const [target] = await tx`select 1 from messages where chat_id = ${input.chatId} and id = ${input.replyToId} and not deleted
+      const [target] = await tx`select 1 from messages where chat_id = ${input.chatId} and id = ${input.replyToId} and not deleted and (expires_at is null or expires_at > now())
                                   and (${threadId}::bigint is null or thread_id = ${threadId} or id = ${threadId})`;
       if (!target) throw new DomainError('not_found', 'reply target');
     }
@@ -128,7 +129,7 @@ export async function sendMessage(
       if (from.protected) throw new DomainError('forbidden', 'protected');   // в группе запрещено копирование
       const [src] = await tx`select m.*, u.name as sender_name, coalesce(oc.title, c.title) as chat_title, coalesce(oc.photo, c.photo) as chat_photo from messages m join users u on u.id = m.sender_id join chats c on c.id = m.chat_id
         left join chats oc on oc.id = (m.origin->>'chatId')::bigint   -- копия поста в группе обсуждения: от имени канала
-        where m.chat_id = ${f.chatId} and m.id = ${f.id} and m.id >= ${from.historyFrom} and not m.deleted and m.service_type is null`;
+        where m.chat_id = ${f.chatId} and m.id = ${f.id} and m.id >= ${from.historyFrom} and not m.deleted and (m.expires_at is null or m.expires_at > now()) and m.service_type is null`;
       if (!src) throw new DomainError('not_found', 'forward source');
       await openRows([src], '', tx);   // текст и вложение оригинала — из шифра его чата
       attachment = (src.attachment as Record<string, unknown> | null) ?? null;
@@ -184,12 +185,14 @@ export async function sendMessage(
       if (last && !sameAlbum && Date.now() - new Date(last.created_at as string).getTime() < ctx.slowMode * 1000) throw new DomainError('flood', 'slow_mode');
     }
     // содержимое — шифром ключа чата (messageContent.ts); открытыми остаются метаданные
-    const c = await contentColumns(input.chatId, input.clientId, { body, entities: entities.length ? entities : null, todo: todo ?? fwdTodo, poll: poll ?? fwdPoll, data, blocks, link, attachment }, tx);
+    // срок — только отсюда: настройка чата на момент публикации (отложенное и пересланное — тоже); от клиента не принимается
+    const expiresAt = await chatExpiry(tx, input.chatId);
+    const c = await contentColumns(input.chatId, input.clientId, { body, entities: entities.length ? entities : null, todo: todo ?? fwdTodo, poll: poll ?? fwdPoll, data, blocks, link, attachment }, tx, expiresAt);
     const inserted = await tx`
-      insert into messages (chat_id, sender_id, client_id, kind, body, entities, reply_to_id, attachment, group_id, fwd_from, link, blocks, todo, poll, data, sticker, content, has_link, post, post_author, thread_id, silent, reminder)
+      insert into messages (chat_id, sender_id, client_id, kind, body, entities, reply_to_id, attachment, group_id, fwd_from, link, blocks, todo, poll, data, sticker, content, has_link, post, post_author, thread_id, silent, reminder, expires_at)
       values (${input.chatId}, ${userId}, ${input.clientId}, ${kind}, ${c.body}, ${c.entities?.length ? sql.json(c.entities as never) : null}, ${canReply ? input.replyToId ?? null : null}, ${c.attachment ? sql.json(c.attachment as never) : null},
               ${attachment && input.groupId && /^[0-9a-f-]{36}$/.test(input.groupId) ? input.groupId : null},   -- группа — только у вложений
-              ${fwdFrom ? sql.json(fwdFrom as never) : null}, ${c.link ? sql.json(c.link as never) : null}, ${c.blocks ? sql.json(c.blocks as never) : null}, ${c.todo ? sql.json(c.todo as never) : null}, ${c.poll ? sql.json(c.poll as never) : null}, ${c.data ? sql.json(c.data as never) : null}, ${sticker ? sql.json(sticker as never) : null}, ${c.content}, ${c.hasLink}, ${!!post}, ${post?.author ?? null}, ${threadId}, ${!!input.silent}, ${!!input.reminder})
+              ${fwdFrom ? sql.json(fwdFrom as never) : null}, ${c.link ? sql.json(c.link as never) : null}, ${c.blocks ? sql.json(c.blocks as never) : null}, ${c.todo ? sql.json(c.todo as never) : null}, ${c.poll ? sql.json(c.poll as never) : null}, ${c.data ? sql.json(c.data as never) : null}, ${sticker ? sql.json(sticker as never) : null}, ${c.content}, ${c.hasLink}, ${!!post}, ${post?.author ?? null}, ${threadId}, ${!!input.silent}, ${!!input.reminder}, ${expiresAt})
       on conflict (sender_id, client_id) do nothing
       returning *`;
     if (inserted.length === 0) {

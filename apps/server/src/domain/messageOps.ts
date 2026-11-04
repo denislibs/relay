@@ -21,7 +21,7 @@ const EMOJI = /^\p{Extended_Pictographic}(️|‍\p{Extended_Pictographic})*$/u;
 
 /** Строка под замком; копия поста в группе обсуждения (origin) из группы не правится и не удаляется — только через пост. */
 async function lockMessage(tx: Parameters<typeof assertMember>[0], chatId: number, id: number) {
-  const [m] = await tx`select sender_id, deleted, service_type, origin, thread_id from messages where chat_id = ${chatId} and id = ${id} for update`;
+  const [m] = await tx`select sender_id, (deleted or coalesce(expires_at <= now(), false)) as deleted, service_type, origin, thread_id from messages where chat_id = ${chatId} and id = ${id} for update`;
   if (!m || m.deleted) throw new DomainError('not_found', 'message');
   if (m.origin != null) throw new DomainError('forbidden', 'post copy');
   return m;
@@ -42,7 +42,7 @@ export async function editMessage(userId: number, chatId: number, id: number, bo
   return sql.begin(async (tx) => {
     const ctx = await messageCtx(tx, chatId, userId, id);   // и гость треда — свой комментарий (threads.ts)
     if (ctx.kind === 'channel' && hasAdmin(ctx, 'edit')) {
-      const [m] = await tx`select deleted, service_type from messages where chat_id = ${chatId} and id = ${id} for update`;
+      const [m] = await tx`select (deleted or coalesce(expires_at <= now(), false)) as deleted, service_type from messages where chat_id = ${chatId} and id = ${id} for update`;
       if (!m || m.deleted || m.service_type) throw new DomainError('not_found', 'message');
     } else await ownMessage(tx, userId, chatId, id);   // в служебном чате — тоже только свои (сообщения Relay не правятся)
     // пересланное — чужой текст: как в Telegram, его не правит ни переславший, ни админ канала
@@ -95,7 +95,7 @@ export async function deleteMessage(userId: number, chatId: number, id: number):
 }
 
 /** Стереть сообщение у всех (замок строки уже взят): текст и шифр целиком, реакции, закреп; событие в журнал чата. */
-async function erase(tx: Tx, chatId: number, id: number, kind: 'direct' | 'group' | 'channel'): Promise<void> {
+export async function erase(tx: Tx, chatId: number, id: number, kind: 'direct' | 'group' | 'channel'): Promise<void> {
   // текст и шифр стираются целиком: у удалённого не остаётся содержимого ни открыто, ни шифром
   // и вложение: у старых (до шифрования) строк в нём открытые имя, название и миниатюра (CRYPTO-9)
   await tx`update messages set body = '', entities = null, todo = null, blocks = null, link = null, content = null, attachment = null, deleted = true where chat_id = ${chatId} and id = ${id}`;
@@ -121,7 +121,7 @@ export async function reactMessage(userId: number, chatId: number, id: number, e
       if (ctx.reactions.mode === 'some' && !ctx.reactions.allowed.some((a) => emojiKey(a) === emojiKey(emoji))) throw new DomainError('forbidden', 'reaction');
     }
     if (ctx.kind === 'channel') return reactPost(tx, userId, chatId, id, ctx.historyFrom, emoji);
-    const [m] = await tx`select deleted from messages where chat_id = ${chatId} and id = ${id} and id >= ${ctx.historyFrom}`;
+    const [m] = await tx`select (deleted or coalesce(expires_at <= now(), false)) as deleted from messages where chat_id = ${chatId} and id = ${id} and id >= ${ctx.historyFrom}`;
     if (!m || m.deleted) throw new DomainError('not_found', 'message');
     if (await blockedInDirect(tx, chatId, userId)) throw new DomainError('blocked');
     const [was] = await tx`select emoji from reactions where chat_id = ${chatId} and message_id = ${id} and user_id = ${userId}`;
@@ -143,7 +143,7 @@ export async function reactMessage(userId: number, chatId: number, id: number, e
 export async function markListened(userId: number, chatId: number, id: number): Promise<{ changed: boolean }> {
   return sql.begin(async (tx) => {
     await assertMember(tx, chatId, userId);
-    const [m] = await tx`select sender_id, kind, deleted, listened from messages where chat_id = ${chatId} and id = ${id} for update`;
+    const [m] = await tx`select sender_id, kind, (deleted or coalesce(expires_at <= now(), false)) as deleted, listened from messages where chat_id = ${chatId} and id = ${id} for update`;
     if (!m || m.deleted) throw new DomainError('not_found', 'message');
     if (m.kind !== 'voice' && m.kind !== 'round') throw new DomainError('bad_frame', 'not a voice message');
     if (m.sender_id === userId || m.listened) return { changed: false };   // своё не «прослушивается»
