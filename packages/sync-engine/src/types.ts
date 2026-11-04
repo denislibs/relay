@@ -2,6 +2,7 @@ import type { ScheduledMessage } from '@relay/protocol';
 import type { ContactCard, Dice, DiceEmoji, GeoPoint, Poll, PollInput, StickerRef, StickerSetInfo } from '@relay/protocol';
 import type { StoreName } from './schema';
 import type { GroupInfo, MediaCounts, MediaTab, MyMembership, Replies } from '@relay/protocol';
+import type { ReplyQuote } from '@relay/protocol';
 import type { Birthday, Block, PersonalChannel, ChatFolder, Entity, ForwardInfo, ForwardRef, LinkPreview, MessageButton, PrivacyKey, PrivacyMode, ProfileLink, ServiceType, Todo, TodoInput, TodoServiceData, VideoVariant } from '@relay/protocol';
 
 export type Status = 'pending' | 'sent' | 'read' | 'failed';
@@ -15,6 +16,7 @@ export interface LocalMessage {
   senderId: number;
   body: string;
   replyToId: number | null;
+  replyQuote?: ReplyQuote;   // цитата части исходного (канонически — от сервера)
   createdAt: string;
   status: Status;
   sort: number;           // id, а у неподтверждённых — PENDING_BASE + время создания
@@ -121,6 +123,7 @@ export interface OutboxEntry {
   chatId: number;
   body: string;
   replyToId: number | null;
+  replyQuote?: ReplyQuote;
   createdAt: number;
   failed: boolean;
   attachment?: LocalAttachment | null;   // id появляется после загрузки файла
@@ -208,7 +211,7 @@ export type Action =
   | { type: 'scheduledEdit'; chatId: number; clientId: string; sendAt?: number; body?: string; entities?: Entity[] }
   | { type: 'scheduledSendNow'; chatId: number; clientId: string }
   | { type: 'scheduledDelete'; chatId: number; clientId: string }
-  | { type: 'sendSticker'; chatId: number; sticker: StickerRef; replyToId?: number | null; threadId?: number; silent?: boolean; scheduleAt?: number; keepDraft?: boolean }   // threadId — комментарий в треде
+  | { type: 'sendSticker'; chatId: number; sticker: StickerRef; replyToId?: number | null; replyQuote?: ReplyQuote; threadId?: number; silent?: boolean; scheduleAt?: number; keepDraft?: boolean }   // threadId — комментарий в треде
   | { type: 'myStickers' }
   | { type: 'stickerSet'; id: number | string; hash?: string }
   | { type: 'installStickerSet'; setId: number; on: boolean; info?: StickerSetInfo }
@@ -220,7 +223,7 @@ export type Action =
   | { type: 'greetingSticker' }   // стикер-приветствие для пустого личного чата (случайный; без сети — null)
   /** управление группой и вступление по ссылке: HTTP мимо очереди ({ok, data} | {ok:false, code}) */
   | { type: 'group'; method: 'GET' | 'POST' | 'PUT' | 'PATCH' | 'DELETE'; path: string; body?: unknown }
-  | { type: 'sendMessage'; chatId: number; body: string; entities?: Entity[]; replyToId?: number | null; noLinkPreview?: boolean; link?: LinkPreview | null; attachment?: LocalAttachment | null; blocks?: Block[] | null; threadId?: number; silent?: boolean; scheduleAt?: number; keepDraft?: boolean }   // threadId — комментарий в треде; blocks — «статья»; attachment — уже загруженный файл (id), например трек из музыки профиля
+  | { type: 'sendMessage'; chatId: number; body: string; entities?: Entity[]; replyToId?: number | null; replyQuote?: ReplyQuote; noLinkPreview?: boolean; link?: LinkPreview | null; attachment?: LocalAttachment | null; blocks?: Block[] | null; threadId?: number; silent?: boolean; scheduleAt?: number; keepDraft?: boolean }   // threadId — комментарий в треде; blocks — «статья»; attachment — уже загруженный файл (id), например трек из музыки профиля
   | { type: 'seen'; chatId: number; upToId: number }
   | { type: 'loadOlder'; chatId: number }
   /** тред: страница старее загруженного (как loadOlder у ленты) */
@@ -252,12 +255,12 @@ export type Action =
   | { type: 'react'; chatId: number; id: number; emoji: string | null }
   /** посты канала показаны на экране: просмотр — по разу на пост за сессию, батчем не чаще раза в секунду (channel.ts) */
   | { type: 'countViews'; chatId: number; ids: number[] }
-  | { type: 'sendTodo'; chatId: number; todo: TodoInput; replyToId?: number | null }
+  | { type: 'sendTodo'; chatId: number; todo: TodoInput; replyToId?: number | null; replyQuote?: ReplyQuote }
   | { type: 'todoToggle'; chatId: number; id: number; itemId: number; done: boolean }
-  | { type: 'sendPoll'; chatId: number; poll: PollInput; replyToId?: number | null }
+  | { type: 'sendPoll'; chatId: number; poll: PollInput; replyToId?: number | null; replyQuote?: ReplyQuote }
   | { type: 'pollVote'; chatId: number; id: number; options: number[] }   // пусто — отозвать
   | { type: 'pollClose'; chatId: number; id: number }
-  | { type: 'sendSpecial'; chatId: number; special: { contact?: { userId: number; name: string; key?: string }; geo?: GeoPoint; dice?: { emoji: DiceEmoji } }; replyToId?: number | null }
+  | { type: 'sendSpecial'; chatId: number; special: { contact?: { userId: number; name: string; key?: string }; geo?: GeoPoint; dice?: { emoji: DiceEmoji } }; replyToId?: number | null; replyQuote?: ReplyQuote }
   | { type: 'todoAppend'; chatId: number; id: number; items: string[] }
   | { type: 'todoEdit'; chatId: number; id: number; todo: TodoInput }
   /** нажатие callback-кнопки под сообщением (онлайн): ответ — ButtonAnswer ({toast?}), правка придёт журналом */
@@ -334,12 +337,12 @@ export type Action =
   | { type: 'storageStats' }
   /** раздел «Для разработчиков»: имитатор сети и служебные команды (devlog.ts) */
   | DevAction
-  | { type: 'sendFile'; chatId: number; body: string; file: Blob; name: string; mime: string; w?: number | null; h?: number | null; thumb?: string | null; replyToId?: number | null;
+  | { type: 'sendFile'; chatId: number; body: string; file: Blob; name: string; mime: string; w?: number | null; h?: number | null; thumb?: string | null; replyToId?: number | null; replyQuote?: ReplyQuote;
       kind?: 'voice' | 'round' | 'audio' | 'video'; duration?: number; waveform?: string | null; title?: string | null; performer?: string | null; groupId?: string | null; spoiler?: boolean; threadId?: number; silent?: boolean; scheduleAt?: number; keepDraft?: boolean }   // keepDraft — со страницы отложенных: черновик чата не трогать
   | { type: 'listened'; chatId: number; id: number }
   /** Переслать сообщения ids (по порядку) из fromChatId в каждый из toChatIds; comment — отдельным сообщением перед ними. */
   /** replyToId — только для копии (hideSender) в один чат: копия — новое сообщение и может быть ответом; пересылка с «Переслано от» — нет */
-  | { type: 'forwardMessages'; fromChatId: number; ids: number[]; toChatIds: number[]; hideSender?: boolean; hideCaption?: boolean; comment?: { body: string; entities?: Entity[] } | null; replyToId?: number | null };
+  | { type: 'forwardMessages'; fromChatId: number; ids: number[]; toChatIds: number[]; hideSender?: boolean; hideCaption?: boolean; comment?: { body: string; entities?: Entity[] } | null; replyToId?: number | null; replyQuote?: ReplyQuote };
 
 /** Медленная сеть: задержка (мс, туда-обратно; на каждое направление — половина), джиттер (мс), потери кадров (%), полоса (Кбит/с, 0 — без ограничения). */
 export interface NetProfile { latency: number; jitter: number; lossPct: number; kbps: number }

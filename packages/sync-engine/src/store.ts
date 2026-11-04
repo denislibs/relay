@@ -726,7 +726,7 @@ export class Store {
     const status = mine && (prev?.status === 'read' || m.id <= (chat?.peerReadUpTo ?? 0)) ? 'read' : 'sent';
     const local: LocalMessage = {
       key: m.clientId, clientId: m.clientId, id: m.id, chatId: m.chatId, senderId: m.senderId,
-      body: m.body, replyToId: m.replyToId, createdAt: m.createdAt, status, sort: m.id,
+      body: m.body, replyToId: m.replyToId, ...(m.replyQuote ? { replyQuote: m.replyQuote } : null), createdAt: m.createdAt, status, sort: m.id,
       editedAt: m.editedAt ?? null, deleted: !!m.deleted, reactions: m.reactions ?? prev?.reactions ?? [],
       kind: m.kind ?? 'text', attachment: m.attachment ?? null, entities: m.entities ?? [], ...(m.listened != null ? { listened: m.listened } : {}),
       ...(m.service ? { service: m.service } : null),
@@ -960,7 +960,7 @@ export class Store {
     this.loaded.add(o.chatId);
     this.putMessage({
       key: o.clientId, clientId: o.clientId, id: null, chatId: o.chatId, senderId: this.userId,
-      body: o.body, entities: o.entities ?? [], replyToId: o.replyToId, createdAt: new Date(o.createdAt).toISOString(),
+      body: o.body, entities: o.entities ?? [], replyToId: o.replyToId, ...(o.replyQuote ? { replyQuote: o.replyQuote } : {}), createdAt: new Date(o.createdAt).toISOString(),
       status: o.failed ? 'failed' : 'pending', sort: PENDING_BASE + o.createdAt,
       kind: o.sticker ? 'sticker' : o.todo ? 'todo' : o.poll ? 'poll' : o.special?.contact ? 'contact' : o.special?.geo ? 'geo' : o.special?.dice ? 'dice' : o.attachment ? o.attachment.kind : 'text', ...(o.sticker ? { sticker: o.sticker } : {}), attachment: o.attachment ?? null, ...(o.todo ? { todo: o.todo } : {}), ...(o.poll ? { poll: pendingPoll(o.poll) } : {}), ...(o.special?.contact ? { contact: { userId: o.special.contact.userId, name: o.special.contact.name } } : {}), ...(o.special?.geo ? { geo: o.special.geo } : {}), ...(o.special?.dice ? { dice: { emoji: o.special.dice.emoji, value: 0 } } : {}), progress: o.attachment && !o.attachment.id ? 0 : undefined,
       ...(o.failed && o.error ? { error: o.error } : {}),
@@ -1091,7 +1091,7 @@ export class Store {
       if (o.chatId !== chatId || o.scheduleAt == null) continue;
       const p = this.scheduledProgress.get(o.clientId);
       rows.push({ at: o.scheduleAt, created: o.createdAt, m: {
-        ...base(o.clientId, o.scheduleAt), body: o.body, entities: o.entities ?? [], replyToId: o.replyToId, status: o.failed ? 'failed' : 'pending',
+        ...base(o.clientId, o.scheduleAt), body: o.body, entities: o.entities ?? [], replyToId: o.replyToId, ...(o.replyQuote ? { replyQuote: o.replyQuote } : {}), status: o.failed ? 'failed' : 'pending',
         kind: o.sticker ? 'sticker' : o.attachment ? o.attachment.kind : 'text', ...(o.sticker ? { sticker: o.sticker } : {}), ...(o.attachment ? { attachment: o.attachment } : {}),
         ...(o.groupId ? { groupId: o.groupId } : {}), ...(o.silent ? { silent: true } : {}), ...(o.failed && o.error ? { error: o.error } : {}),
         ...(p != null && p < 1 ? { progress: p } : {}),
@@ -1100,7 +1100,7 @@ export class Store {
     for (const s of this.scheduled.values()) {
       if (s.chatId !== chatId || this.outbox.has(s.clientId)) continue;
       rows.push({ at: s.sendAt, created: Date.parse(s.createdAt), m: {
-        ...base(s.clientId, s.sendAt), body: s.body, entities: s.entities ?? [], replyToId: s.replyToId, status: s.failed ? 'failed' : 'sent', kind: s.kind,
+        ...base(s.clientId, s.sendAt), body: s.body, entities: s.entities ?? [], replyToId: s.replyToId, ...(s.replyQuote ? { replyQuote: s.replyQuote } : {}), status: s.failed ? 'failed' : 'sent', kind: s.kind,
         ...(s.sticker ? { sticker: s.sticker } : {}), ...(s.attachment ? { attachment: s.attachment as LocalAttachment } : {}),
         ...(s.groupId ? { groupId: s.groupId } : {}), ...(s.silent ? { silent: true } : {}), ...(s.failed ? { error: s.failed } : {}),
       } });
@@ -1220,6 +1220,18 @@ export class Store {
   }
 
   /** Сервер отказал (или отправить нечего). error — код отказа (blocked — собеседник заблокировал отправителя). */
+  /** Цитируемого куска больше нет (сервер ответил quote_gone): неотправленный ответ уйдёт без фрагмента. false — фрагмента и не было. */
+  dropQuote(clientId: string): boolean {
+    const o = this.outbox.get(clientId);
+    if (!o?.replyQuote) return false;
+    delete o.replyQuote;
+    this.dirtyOutbox.add(clientId);
+    if (o.scheduleAt != null) this.touchScheduled(o.chatId);
+    const m = this.messages.get(o.chatId)?.get(clientId);
+    if (m) { const { replyQuote: _q, ...rest } = m; this.putMessage(rest); }
+    return true;
+  }
+
   fail(clientId: string, error?: string): void {
     const o = this.outbox.get(clientId);
     if (!o) return;
@@ -1314,6 +1326,9 @@ export class Store {
     const k = chatId + ':' + id, m = this.messageById(chatId, id), q = this.quotes.get(k);
     // цитата знает о нём и без запроса к серверу (сервер удалённое больше не отдаёт); автор нужен только для цвета полосы
     if (!q?.deleted) { this.quotes.set(k, deletedQuote(id, m?.senderId ?? q?.senderId ?? 0)); this.touch(chatId); }
+    // кусок удалённого в ответах на него: сервер вычистил его у себя, устройство тоже не хранит
+    const here = this.messages.get(chatId);
+    if (here) for (const r of here.values()) if (r.replyToId === id && r.replyQuote) { const { replyQuote: _q, ...rest } = r; this.putMessage(rest); }
     const n = this.notifications.length;
     this.notifications = this.notifications.filter((x) => !(x.chatId === chatId && x.id === id));
     if (this.notifications.length !== n) this.touch(chatId);

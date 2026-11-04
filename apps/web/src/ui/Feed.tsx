@@ -10,14 +10,15 @@ import { emojiOnly } from '@relay/protocol';
 import { FX_READ_DELAY_MS, playFxForMessage, queueReactionFx, takeReactionFx } from '../reactionFx';
 import { groupReactions, type Chip } from '../reactionChips';
 import { emojiKey } from '@relay/protocol';
-import type { ContactCard, Dice, Entity, GeoPoint, MessageButton, Poll, ProfilePhoto, Todo } from '@relay/protocol';
+import type { ContactCard, Dice, Entity, GeoPoint, MessageButton, Poll, ProfilePhoto, ReplyQuote, Todo } from '@relay/protocol';
+import { hitQuote } from './quoteHit';
 import { Presence, ProgressRing, useMinVisible, MediaPolicy, ArticleBlocks, Avatar, Bubble, Icon, peerTone, DateDivider, DatePicker, FileBubble, MediaBubble, MessageText, VoiceBubble, MusicBubble, RoundBubble, player, MediaViewer, ScrollToBottom, beginHeavyAnimation, forceMeasure, isHeavyAnimating, onHeavyAnimationEnd, requestMeasure, requestMutation, selectionValue, TodoBubble, PollMessage, ContactMessage, GeoMessage, DiceMessage, InlineKeyboard, StickerBubble, EmojiBubble, reducedMotion, LazyRoot, stickerMsgSize } from '@relay/ui';
 import { openStickerSet, sendSticker, useGreetingSticker } from '../stickers';
 import { historyEmpty } from '../greeting';
 import { GreetingCard } from './GreetingCard';
 import type { StickerRef } from '@relay/protocol';
 import type { QuoteMsg } from '@relay/sync-engine/src/types';
-import { quoteContent } from './preview';
+import { quoteContent, quoteFragment } from './preview';
 import { memo } from 'preact/compat';
 import { useContext, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'preact/hooks';
 import { pressButton, toggleTodo, votePoll, openUserChat, clearFocus, discardUnsent, retrySend, focusMessage, openInner, jumpToDate, mediaDays, cachedMediaDays, localPreview, markListened, moveWindow, react, savePosition, savedPosition, seen, markThreadRead, countViews, nextMention, nextReaction, readReactions } from '../data';
@@ -53,7 +54,7 @@ import { estimateRow, extendWindow, firstWindow, learnScale, type Metrics, type 
  */
 
 /** Что было под курсором при открытии меню: ссылка и выделенный кусок текста этого сообщения. */
-export type MenuExtra = { link: string | null; selection: { text: string; entities: Entity[] } | null };
+export type MenuExtra = { link: string | null; selection: { text: string; entities: Entity[]; hint?: number } | null };
 
 const EDGE = '750px';     // запас датчиков окна
 const EDGE_PX = 750;
@@ -194,7 +195,7 @@ const Row = memo(function Row({ post, pinned, discussion, chatId, voiceTitle, au
     ? { name: ff.name, tone: peerTone(ff.chatId), avatar: avatarPhoto(getGlobal().chats.find((c) => c.id === ff.chatId)?.photo as ProfilePhoto | null ?? ff.photo), onClick: openFwd }
     : { name: ff.name, tone: peerTone(ff.userId), avatar: senderAvatar(ff.userId), onClick: openFwd }) : undefined;
   // ответ — у любого типа сообщения (как в Telegram); клик по цитате ловит лента (onClick ниже ищет .rl-quote)
-  const replyQ = quoted && !m.deleted ? { author: quoteAuthor, ...quoteContent(quoted as unknown as Record<string, unknown>), tone: quoteTone, onClick: noop } : undefined;
+  const replyQ = quoted && !m.deleted ? { author: quoteAuthor, ...quoteContent(quoted as unknown as Record<string, unknown>), ...(m.replyQuote && !quoted.deleted ? { text: quoteFragment(m.replyQuote as ReplyQuote), fragment: true } : {}), tone: quoteTone, onClick: noop } : undefined;
   // режим выбора: строка отмечается кликом (обработчик — у ленты), кружок-галочка слева
   // уходящая (удалённая, пока доезжают соседи — leaving.ts): без кликов и метки прочтения, вне якорей
   const wrap = (base: string) => base + (flash ? ' app-msg-flash' : '') + (sel !== undefined ? ' app-msg-sel' : '') + (sel ? ' app-msg-on' : '') + (grp ? ' app-msg-grp' : '') + (leaving ? ' app-msg-leaving' : '');
@@ -224,7 +225,7 @@ const Row = memo(function Row({ post, pinned, discussion, chatId, voiceTitle, au
           items={album.map((x) => { const a = x.attachment as Att; const local = localPreview(x.key); return { src: local ?? (a.id ? bubbleSrc(a) : undefined), inline: local ? undefined : inlineUrl(a), thumb: a.thumb, alt: a.name, w: a.w, h: a.h, mkey: x.key, skey: x.key, kind: a.kind === 'video' ? 'video' : 'image', gif: a.mime === 'image/gif', duration: a.duration ?? 0, spoiler: !!a.spoiler,
             sel: selIn !== undefined ? selIn.split(',').includes(x.key as string) : undefined }; })}
           state={busy ? 'loading' : 'ready'} progress={busy ? Math.min(...album.map((x) => (typeof x.progress === 'number' ? x.progress as number : 1))) : undefined}
-          caption={cap ? <MessageText text={cap.body as string} entities={cap.entities as Entity[] | undefined} highlight={hl} /> : undefined}
+          caption={cap ? <MessageText text={cap.body as string} entities={cap.entities as Entity[] | undefined} highlight={hl} scope={cap.key} /> : undefined}
           metaBefore={metaBefore} footer={footer}
           reactions={chips.length ? chips : undefined} onReact={(emoji: string) => onReact(m, emoji)}
           time={clock(last.createdAt as string)} status={mineSend ? shownStatus(last.status, !!saved) : undefined}
@@ -250,7 +251,7 @@ const Row = memo(function Row({ post, pinned, discussion, chatId, voiceTitle, au
           ratio={`${att.w} / ${att.h}`} size={att.kind === 'video' ? fileSize(att.size) : undefined}
           state={pending ? 'loading' : 'ready'} progress={m.progress as number}
           onCancel={pending && mineSend ? () => discardUnsent(m.key as string) : undefined}
-          caption={m.body ? <MessageText text={m.body as string} entities={m.entities as Entity[] | undefined} highlight={hl} /> : undefined}
+          caption={m.body ? <MessageText text={m.body as string} entities={m.entities as Entity[] | undefined} highlight={hl} scope={m.key} /> : undefined}
           metaBefore={metaBefore} footer={footer}
           reactions={chips.length ? chips : undefined} onReact={(emoji: string) => onReact(m, emoji)}
           time={clock(m.createdAt as string)} status={status}
@@ -526,7 +527,7 @@ const Row = memo(function Row({ post, pinned, discussion, chatId, voiceTitle, au
         {stub ? <span class="app-msg-stub">{stub}</span> : null}
         {m.blocks && !m.deleted
           ? <ArticleBlocks blocks={m.blocks} highlight={hl} />
-          : m.body || !stub ? <MessageText text={m.body as string} entities={m.entities as Entity[] | undefined} highlight={hl} /> : null}
+          : m.body || !stub ? <MessageText text={m.body as string} entities={m.entities as Entity[] | undefined} highlight={hl} scope={m.key} /> : null}
       </Bubble>
       {m.id != null ? <i class="app-mark" data-mid={m.id as number} aria-hidden="true" /> : null}
     </div>
@@ -1248,6 +1249,36 @@ export function Feed({ frameKey, active, chatId, threadId, scheduled = false, ch
     return () => ro.disconnect();
   }, []);
 
+  // сворачиваемая цитата меняет высоту (QuoteBlock в relay-ui, плавно): обычно всё под ней просто едет, а прокрутка стоит. Лента
+  // прижата к низу — низ остаётся внизу; цитата торчит за верх экрана — её низ остаётся на месте (правило anchorShift). Обработчик
+  // зовётся в фазе замера; дальше прокрутка считается из конечной высоты, без чтений в кадрах анимации. Первый ввод обрывает поддержку
+  useEffect(() => {
+    const root = el.current;
+    if (!root) return;
+    const onResize = (e: Event) => {
+      const d = (e as CustomEvent<{ adjust: ((delta: number) => void) | null; done: (() => void) | null }>).detail;
+      const top = (e.target as Element).closest('.rl-bq')?.getBoundingClientRect().top ?? 0;
+      if (!stick.current && top >= root.getBoundingClientRect().top) return;
+      const from = root.scrollTop;
+      let user = false, last = from;
+      const stop = () => { user = true; };
+      root.addEventListener('wheel', stop, { passive: true, once: true });
+      root.addEventListener('touchstart', stop, { passive: true, once: true });
+      d.adjust = (delta) => {
+        const next = from + delta;
+        if (user || Math.abs(next - last) < 0.5) return;
+        last = next; programmatic.current++; root.scrollTop = next;
+      };
+      // счётчик своей прокрутки — обратно: последняя запись могла упереться в предел, и события scroll на неё не будет
+      d.done = () => {
+        root.removeEventListener('wheel', stop); root.removeEventListener('touchstart', stop);
+        requestAnimationFrame(() => { programmatic.current = 0; });
+      };
+    };
+    root.addEventListener('rl-quote-resize', onResize);
+    return () => root.removeEventListener('rl-quote-resize', onResize);
+  }, []);
+
   // датчики у краёв окна: видны с запасом 750 px — сдвигаем окно; новые датчики (по ключу) срабатывают сразу
   const edges = useRef<IntersectionObserver | null>(null);
   useEffect(() => {
@@ -1455,7 +1486,9 @@ export function Feed({ frameKey, active, chatId, threadId, scheduled = false, ch
     clearFocus(frameKey);
     stick.current = false;
     anchor.current = null;
-    setFlashKey(row.dataset.key!);
+    // цитата: подсвечивается фрагмент; его больше нет (текст изменили) — всё сообщение, как обычный переход
+    const hitBody = focus.quote ? messages.find((x) => x.sort === focus.sort)?.body as string | undefined : undefined;
+    if (!(focus.quote && hitBody != null && hitQuote(row, hitBody, focus.quote))) setFlashKey(row.dataset.key!);
     if (focus.replaced) {
       // окно заменили целиком — сразу по центру, до отрисовки (иначе кадр со старой позицией и долгая прокрутка)
       forceMeasure(() => {
@@ -1563,7 +1596,8 @@ export function Feed({ frameKey, active, chatId, threadId, scheduled = false, ch
     if (!row) return;
     const m = messages.find((x) => x.key === row.dataset.key);
     const r = m?.reply as Quote | null | undefined;
-    if (r) focusMessage({ id: r.id, sort: r.sort });
+    const q = m?.replyQuote as ReplyQuote | undefined;
+    if (r) focusMessage({ id: r.id, sort: r.sort, ...(q && !r.deleted ? { quote: { text: q.text, offset: q.offset } } : {}) });
   };
 
   // моноширинный фрагмент (не блок кода): клик копирует. Ссылку и скрытый спойлер не перехватываем —
@@ -1696,7 +1730,7 @@ export function Feed({ frameKey, active, chatId, threadId, scheduled = false, ch
     e.preventDefault();
     // что было под курсором и выделено — запоминаем сейчас: при открытии меню выделение может сброситься
     const link = (e.target as Element).closest<HTMLAnchorElement>('a[href]');
-    let selection: { text: string; entities: Entity[] } | null = null;
+    let selection: MenuExtra['selection'] = null;
     for (const el of row.querySelectorAll<HTMLElement>('.rl-bubble-text, .rl-media-caption')) { selection = selectionValue(el) as typeof selection; if (selection) break; }
     onMenu(row.dataset.key!, e.clientX, e.clientY, { link: link && row.contains(link) ? link.href : null, selection });
   };

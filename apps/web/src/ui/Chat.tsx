@@ -12,7 +12,8 @@ import { candidates } from './settings/privacyLogic';
 import { UploadBar } from './UploadBar';
 import { videoCompressSupported, type VideoQuality } from '../media/compressVideo';
 import { entriesOf, filesFromEntries } from '../media/dropFiles';
-import { quoteContent } from './preview';
+import { quoteContent, quoteFragment } from './preview';
+import type { ReplyRef } from '../replyRef';
 import { ChatMenu } from './ChatMenu';
 import { senderAvatar } from '../profilePhoto';
 import { firstUrl, loadPreview } from '../linkUrl';
@@ -57,7 +58,7 @@ import { pressOpen } from './press';
 import { scheduledTitle, scheduledToast } from '../schedule';
 import { leftText } from '../autoDelete';
 import { deleteScheduled, editScheduled, openScheduled, prepareScheduled, sendScheduledNow, type SendWhen } from '../data';
-import { SCHEDULED_LIMIT } from '@relay/protocol';
+import { makeQuote, SCHEDULED_LIMIT, type ReplyQuote } from '@relay/protocol';
 import { sendSpecial, sendPoll, votePoll, closePoll, sendTodo, appendTodo, editTodo, closeChat, deleteMessage, editMessage, focusMessage, openInner, openUserChat, pinMessage, unpinMessage, sendFile, sendFiles, sendRound, sendVoice, react, rejectTooBig, PLAYABLE_VIDEO, retrySend, discardUnsent, saveDraft, searchMessages, send, typing, typingDone } from '../data';
 import { wantPeople } from '../people';
 import type { Item, SearchHit, SearchResult } from '@relay/sync-engine/src/types';
@@ -182,6 +183,7 @@ export function Chat({ chatId, frameKey, active, threadId, scheduled = false }: 
   const [rpanel, setRpanel] = useState<{ bar: { left: number; top: number }; msgId: number; msgKey: string; allowed: string[] | null; mine?: string } | null>(null);
   const [fwdMenu, setFwdMenu] = useState<HTMLElement | null>(null);   // опции пересылки в поле ввода
   const [replyKey, setReplyKey] = useState<string | null>(null);
+  const [replyQ, setReplyQ] = useState<{ key: string; quote: ReplyQuote } | null>(null);
   const [editing, setEditing] = useState<{ id: number; clientId?: string; original: Value; draft: Value } | null>(null);   // правка своего сообщения
   const api = useRef<ComposerApi | null>(null);
   // запись: голосовое — если браузер умеет Opus через WebCodecs, кружок — если умеет MP4 из canvas (не Safari)
@@ -327,7 +329,7 @@ export function Chat({ chatId, frameKey, active, threadId, scheduled = false }: 
     for (const f of pending.files) if (!allowed(rightForKind(/^image\//.test(f.type) && !/gif/.test(f.type) ? 'photo' : /^audio\//.test(f.type) ? 'audio' : 'file', f.type), later)) return;
     if (!later) stick.current = true;
     typingDone(chatId);
-    sendFiles(chatId, pending.files, pending.caption.trim(), (replyTo?.id as number) ?? null, { asFile: pending.asFile, spoiler: pending.spoiler && !pending.asFile, quality: canCompress ? pending.quality ?? savedQuality() : 'original', ...(thread ? { threadId } : {}), ...when }).catch(() => {});
+    sendFiles(chatId, pending.files, pending.caption.trim(), replyRef, { asFile: pending.asFile, spoiler: pending.spoiler && !pending.asFile, quality: canCompress ? pending.quality ?? savedQuality() : 'original', ...(thread ? { threadId } : {}), ...when }).catch(() => {});
     if (later && !scheduled) showToast(scheduledToast(when.scheduleAt!, Date.now(), isSaved));
     if (!scheduled && pending.caption === latest.current.text) { api.current?.setValue(emptyValue()); latest.current = saved.current = emptyValue(); }
     setReplyKey(null);
@@ -515,6 +517,10 @@ export function Chat({ chatId, frameKey, active, threadId, scheduled = false }: 
   const members = useMembers(chatId, chat?.kind === 'group');
   const subtitle = thread ? title : system ? 'служебные уведомления' : isTyping ? 'печатает…' : channel ? (gInfo ? subscribersText(gInfo.members) : 'Канал') : chat?.kind === 'group' ? (members ? membersStatus(members, true) : 'Группа') : myPeer ? lastSeenText(online, myPeer.lastSeen as string | null) : '';
   const replyTo = replyKey ? messages.find((m) => m.key === replyKey) : undefined;
+  useEffect(() => { if (!replyKey) setReplyQ(null); }, [replyKey]);   // ответ ушёл или снят: новый ответ на то же сообщение начинается без цитаты
+  // цитата части сообщения: живёт вместе с ответом на то же сообщение; ответ сняли или сменили — её больше нет
+  const quoteNow = replyQ && replyQ.key === replyKey ? replyQ.quote : null;
+  const replyRef: ReplyRef = replyTo?.id != null ? (quoteNow ? { id: replyTo.id as number, quote: quoteNow } : replyTo.id as number) : null;
   // окно выбора времени (ScheduleModal): done получает время и «без звука»
   const [timePick, setTimePick] = useState<{ initial?: number; done: (r: { at: number; silent: boolean }) => void } | null>(null);
   const askTime = (done: (r: { at: number; silent: boolean }) => void, adding = 1) => {
@@ -525,8 +531,8 @@ export function Chat({ chatId, frameKey, active, threadId, scheduled = false }: 
   const sendWhen = useRef<SendWhen | null>(null);
   const sendVia = (w: SendWhen) => { sendWhen.current = w; (api.current as ComposerApi | null)?.send(); };
   // стикер из модалки пака или правой панели уходит сюда — с текущим ответом
-  const replyIdRef = useRef<number | null>(null);
-  replyIdRef.current = (replyTo?.id as number) ?? null;
+  const replyIdRef = useRef<ReplyRef>(null);
+  replyIdRef.current = replyRef;
   // цель — только у чата на экране: после «Назад» из треда стикер уходит в группу, а не в оставшийся живым тред
   useEffect(() => (active ? setStickerTarget({ chatId, ...(thread ? { threadId } : {}), replyId: () => replyIdRef.current, sent: () => setReplyKey(null),
     ...(scheduled ? { schedule: (send: (w: SendWhen) => void) => askTime((r) => send({ scheduleAt: r.at, silent: r.silent, keepDraft: true })) } : {}) }) : undefined), [chatId, threadId, active, scheduled]);
@@ -537,6 +543,8 @@ export function Chat({ chatId, frameKey, active, threadId, scheduled = false }: 
   useEffect(() => { if (scheduled && feedKnown && !messages.length && activeRef.current && (hadItems.current || !((chat?.scheduled as number | undefined) ?? 0))) closeChat(); }, [scheduled, feedKnown, messages.length]);
   const authorOf = (senderId: unknown) => (senderId === me.userId ? 'Вы' : title);
   const menuMsg = menu ? messages.find((m) => m.key === menu.key) : undefined;
+  // выделение → цитата: уже здесь сверяем с текстом сообщения (выделенное могло задеть дату, показанную иначе, чем написана)
+  const menuQuote = menuMsg && menu?.extra?.selection && menuMsg.body ? makeQuote(menuMsg.body as string, menuMsg.entities as Entity[] | undefined, menu.extra.selection.text, menu.extra.selection.hint ?? 0) : null;
   // пересылка, ждущая в поле ввода: «От: …» (или «Имена отправителей скрыты») и что пересылаем
   const fwd = useGlobal((s) => s.fwdDraft[chatId]) ?? null;
   const sendItems = editing || fwd || art || scheduled ? null : [
@@ -574,7 +582,7 @@ export function Chat({ chatId, frameKey, active, threadId, scheduled = false }: 
     stick.current = true;
     const simple = blocksToText(blocks);
     // ответ, открытый в поле, уходит вместе со статьёй — как с любым сообщением
-    const reply = (replyTo?.id as number) ?? null;
+    const reply = replyRef;
     setReplyKey(null);
     if (simple) { if (simple.text.trim()) void send(chatId, simple.text, reply, simple.entities, thread ? { threadId } : {}); return; }
     void send(chatId, blocksText(blocks), reply, [], { blocks, ...(thread ? { threadId } : {}) });
@@ -719,7 +727,7 @@ export function Chat({ chatId, frameKey, active, threadId, scheduled = false }: 
         replyTo={editing ? { author: 'Редактирование', text: editing.original.text, tone: 'accent', icon: 'pencil' } : fwdQuote ? fwdQuote : artQuote ? artQuote : !replyTo && lp?.link && !lp.off ? {
           icon: 'link', author: lp.link.siteName || lp.link.title || lp.url, text: lp.link.description || lp.link.title || lp.url, tone: 5,
           thumbSrc: lp.link.photo ? `/files/${lp.link.photo.id}` : undefined,
-        } : replyTo ? { author: authorOf(replyTo.senderId), ...quoteContent(replyTo), tone: replyTo.senderId === me.userId ? 'accent' : peerTone(replyTo.senderId) } : null}
+        } : replyTo ? { author: authorOf(replyTo.senderId), ...quoteContent(replyTo), ...(quoteNow ? { text: quoteFragment(quoteNow), fragment: true } : {}), tone: replyTo.senderId === me.userId ? 'accent' : peerTone(replyTo.senderId) } : null}
         onCancelReply={() => {
           if (editing) { endEdit(editing.draft); return; } // правку отменили — вернуть черновик
           if (fwd) { cancelForwardDraft(chatId); return; }
@@ -741,8 +749,8 @@ export function Chat({ chatId, frameKey, active, threadId, scheduled = false }: 
           ? (mode === 'round' ? 'Разрешите доступ к камере и микрофону, чтобы записывать видеосообщения' : 'Разрешите доступ к микрофону, чтобы записывать голосовые')
           : mode === 'round' ? 'Не удалось записать видеосообщение' : 'Не удалось записать голосовое')}
         onRecordSend={(kind: 'voice' | 'round', el: Element | null) => { if (allowed(kind)) captureCircle(chatId, el, kind); }}
-        onSendVoice={(r: { blob: Blob; duration: number; waveform: Uint8Array }) => { if (!allowed('voice')) return; stick.current = true; sendVoice(chatId, r, (replyTo?.id as number) ?? null, threadId).catch(() => {}); setReplyKey(null); }}
-        onSendRound={(r: { blob: Blob; duration: number; size: number; thumb: string | null }) => { if (!allowed('round')) return; stick.current = true; sendRound(chatId, r, (replyTo?.id as number) ?? null, threadId).catch(() => {}); setReplyKey(null); }}
+        onSendVoice={(r: { blob: Blob; duration: number; waveform: Uint8Array }) => { if (!allowed('voice')) return; stick.current = true; sendVoice(chatId, r, replyRef, threadId).catch(() => {}); setReplyKey(null); }}
+        onSendRound={(r: { blob: Blob; duration: number; size: number; thumb: string | null }) => { if (!allowed('round')) return; stick.current = true; sendRound(chatId, r, replyRef, threadId).catch(() => {}); setReplyKey(null); }}
         attachItems={scheduled ? SCHEDULED_ATTACH : thread ? THREAD_ATTACH : ATTACH_ITEMS}
         onExpand={scheduled ? undefined : () => openArticle()}
         onAttach={(k: string) => { if (k === 'music') { if (allowed('music')) setMusicOpen(true); return; } if (k === 'article') { openArticle(); return; } if (k === 'todo') { setTodoOpen({ mode: 'create' }); return; } if (k === 'poll') { setPollOpen(true); return; } if (k === 'geo') { setGeoOpen(true); return; } if (k === 'contact') { setContactOpen(true); return; } if (k === 'date') { setDateOpen({ mode: 'format', done: (r) => { if (r) api.current?.insert(dateValue(r)); } }); return; } const el = picker.current!; el.accept = k === 'media' || k === 'camera' ? 'image/*,video/*' : ''; el.value = ''; el.click(); }}
@@ -777,7 +785,7 @@ export function Chat({ chatId, frameKey, active, threadId, scheduled = false }: 
           if (art) { sendArticle(art.blocks); return false; }
           // одно эмодзи кубика без оформления — бросок (как в Telegram): значение выберет сервер
           const die = out.text.replace(/\uFE0F/g, '').trim();
-          if (!later && !when.silent && !thread && !out.entities.length && isDiceEmoji(die)) { const r = sendSpecial(chatId, { dice: { emoji: die } }, (replyTo?.id as number) ?? null); setReplyKey(null); return r; }
+          if (!later && !when.silent && !thread && !out.entities.length && isDiceEmoji(die)) { const r = sendSpecial(chatId, { dice: { emoji: die } }, replyRef); setReplyKey(null); return r; }
           // превью: убрали крестиком — без него; уже загружено для этой ссылки — сразу в ленте, до ответа сервера
           // полёт из поля в пузырь (sendFlight): капсула и текст снимаются сейчас, пока поле не очищено
           const col = (document.activeElement as HTMLElement | null)?.closest('.app-chatcol') ?? document.querySelector('.app-chatcol[data-current]');
@@ -785,7 +793,7 @@ export function Chat({ chatId, frameKey, active, threadId, scheduled = false }: 
           const url = firstUrl(out.text, out.entities);
           const pv = lp && url === lp.url ? (lp.off ? { noLinkPreview: true } : { link: lp.link }) : {};
           lpUrl.current = null; setLp(null);
-          const sent = send(chatId, out.text, (replyTo?.id as number) ?? null, out.entities, { ...pv, ...when, ...(thread ? { threadId } : {}) });
+          const sent = send(chatId, out.text, replyRef, out.entities, { ...pv, ...when, ...(thread ? { threadId } : {}) });
           if (later && !scheduled) showToast(scheduledToast(when.scheduleAt!, Date.now(), isSaved));
           setReplyKey(null);
           return sent;   // поле очистится, когда сообщение встанет в ленту
@@ -856,7 +864,9 @@ export function Chat({ chatId, frameKey, active, threadId, scheduled = false }: 
                 menuHeader={menuMsg.expiresAt ? <div class="app-msgttl"><Icon name="timer" size={16} />{leftText(menuMsg.expiresAt as number, Date.now() + (getGlobal().status.clockSkew ?? 0))}</div> : undefined}
                 onClose={() => setMenu(null)}
                 items={[
-                  ...(menuMsg.id != null && !menuMsg.deleted && !system && !channel ? [{ icon: 'reply', label: 'Ответить', onClick: () => { if (editing) endEdit(editing.draft); setReplyKey(menuMsg.key as string); api.current?.focus({ end: true }); } }] : []),
+                  ...(menuMsg.id != null && !menuMsg.deleted && !system && !channel ? [{ icon: 'reply', label: 'Ответить', onClick: () => { if (editing) endEdit(editing.draft); setReplyQ(null); setReplyKey(menuMsg.key as string); api.current?.focus({ end: true }); } }] : []),
+                  // выделение в сообщении: ответ с цитатой этой части. В чате с запретом копирования тоже можно: цитата остаётся в том же чате
+                  ...(menuQuote && menuMsg.id != null && !menuMsg.deleted && !menuMsg.service && !system && !channel ? [{ icon: 'quote', label: 'Цитировать', onClick: () => { if (editing) endEdit(editing.draft); setReplyQ({ key: menuMsg.key as string, quote: menuQuote }); setReplyKey(menuMsg.key as string); api.current?.focus({ end: true }); } }] : []),
                   ...(own && !system && !menuMsg.blocks && !menuMsg.fwdFrom && (menuMsg.kind === 'todo' || canEditKind(String(menuMsg.kind ?? 'text'))) ? [{ icon: 'pencil', label: 'Изменить', onClick: () => { if (menuMsg.kind === 'todo') setTodoOpen({ mode: 'edit', msg: menuMsg }); else startEdit(menuMsg); } }] : []),
                   // опрос: отозвать голос (не у викторины и не у закрытого), закрыть — автору
                   ...(menuMsg.kind === 'poll' && menuMsg.poll && menuMsg.id != null && !(menuMsg.poll as Poll).closed && !(menuMsg.poll as Poll).quiz && ((menuMsg.poll as Poll).my ?? []).length
@@ -909,7 +919,7 @@ export function Chat({ chatId, frameKey, active, threadId, scheduled = false }: 
       {rpanel ? <ReactionsPanel bar={rpanel.bar} allowed={rpanel.allowed} selected={rpanel.mine} animated={getPrefs().anim.level > 0 && !reducedMotion()}
         onPick={(key: string) => { const off = rpanel.mine === key; if (!off) { pushRecentReaction(key); queueReactionFx(rpanel.msgKey, key); } react(chatId, rpanel.msgId, off ? null : key); setRpanel(null); }}
         onClose={() => setRpanel(null)} /> : null}
-      <MusicPicker chatId={chatId} open={musicOpen} onClose={() => setMusicOpen(false)} replyToId={(replyTo?.id as number) ?? null} onSent={() => setReplyKey(null)} />
+      <MusicPicker chatId={chatId} open={musicOpen} onClose={() => setMusicOpen(false)} replyToId={replyRef} onSent={() => setReplyKey(null)} />
       {timePick ? (
         <ScheduleModal saved={isSaved} initial={timePick.initial} allowSilent={timePick.initial == null} onClose={() => setTimePick(null)}
           onPick={(r) => { const p = timePick; setTimePick(null); p.done(r); }} />
@@ -924,18 +934,18 @@ export function Chat({ chatId, frameKey, active, threadId, scheduled = false }: 
       {pollOpen ? (
         <PollModal
           onClose={() => setPollOpen(false)}
-          onSubmit={(r: PollInput) => { setPollOpen(false); stick.current = true; void sendPoll(chatId, r, (replyTo?.id as number) ?? null); setReplyKey(null); }}
+          onSubmit={(r: PollInput) => { setPollOpen(false); stick.current = true; void sendPoll(chatId, r, replyRef); setReplyKey(null); }}
         />
       ) : null}
       <PollResults />
-      {geoOpen ? <GeoSend onClose={() => setGeoOpen(false)} onSend={(g: GeoPoint) => { setGeoOpen(false); stick.current = true; void sendSpecial(chatId, { geo: g }, (replyTo?.id as number) ?? null); setReplyKey(null); }} /> : null}
+      {geoOpen ? <GeoSend onClose={() => setGeoOpen(false)} onSend={(g: GeoPoint) => { setGeoOpen(false); stick.current = true; void sendSpecial(chatId, { geo: g }, replyRef); setReplyKey(null); }} /> : null}
       {contactOpen ? (
         <Modal title="Отправить контакт" size="slim" onClose={() => setContactOpen(false)}>
           <div class="app-block-pick">
             <ContactPicker
               contacts={shareable.map((p) => ({ ...p, tone: peerTone(p.id), avatar: senderAvatar(p.id) }))} searchLabel="Поиск контактов" placeholder="Имя или @имя пользователя"
               empty="Здесь будут ваши контакты и собеседники."
-              onPick={(p: { id: number; name: string }) => { setContactOpen(false); stick.current = true; void sendSpecial(chatId, { contact: { userId: p.id, name: p.name } }, (replyTo?.id as number) ?? null); setReplyKey(null); }}
+              onPick={(p: { id: number; name: string }) => { setContactOpen(false); stick.current = true; void sendSpecial(chatId, { contact: { userId: p.id, name: p.name } }, replyRef); setReplyKey(null); }}
             />
           </div>
         </Modal>
@@ -951,7 +961,7 @@ export function Chat({ chatId, frameKey, active, threadId, scheduled = false }: 
           onSubmit={(r: TodoInput & { items: { id?: number; title: string }[] | string[] }) => {
             const t = todoOpen;
             setTodoOpen(null);
-            if (t.mode === 'create') { stick.current = true; void sendTodo(chatId, r as TodoInput, (replyTo?.id as number) ?? null); setReplyKey(null); return; }
+            if (t.mode === 'create') { stick.current = true; void sendTodo(chatId, r as TodoInput, replyRef); setReplyKey(null); return; }
             const id = t.msg!.id as number;
             const done = t.mode === 'append' ? appendTodo(chatId, id, r.items as string[]) : editTodo(chatId, id, r as TodoInput);
             done.catch(() => showToast(t.mode === 'append' ? 'Не удалось добавить задачи' : 'Не удалось изменить чек-лист'));

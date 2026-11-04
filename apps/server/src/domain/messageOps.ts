@@ -99,6 +99,10 @@ export async function erase(tx: Tx, chatId: number, id: number, kind: 'direct' |
   // текст и шифр стираются целиком: у удалённого не остаётся содержимого ни открыто, ни шифром
   // и вложение: у старых (до шифрования) строк в нём открытые имя, название и миниатюра (CRYPTO-9)
   await tx`update messages set body = '', entities = null, todo = null, blocks = null, link = null, content = null, attachment = null, deleted = true where chat_id = ${chatId} and id = ${id}`;
+  // кусок удалённого не должен пережить его в чужих ответах: у них остаётся обычная плашка «удалено»
+  for (const r of await tx`select id from messages where chat_id = ${chatId} and reply_to_id = ${id} and has_quote`) {
+    await updateContent(tx, chatId, Number(r.id), () => ({ quote: null }), () => ({ has_quote: false }));
+  }
   await tx`delete from reactions where chat_id = ${chatId} and message_id = ${id}`;
   await tx`delete from message_mentions where chat_id = ${chatId} and message_id = ${id}`;   // «@» у упомянутых гаснет
   await dropUnreadReactions(tx, chatId, id);   // и «сердце» у автора

@@ -28,6 +28,7 @@ var TOOLBAR = [
   { type: 'strike', icon: 'strike', label: 'Зачёркнутый', combo: 'mod+shift+x' },
   { type: 'code', icon: 'mono', label: 'Моноширинный', combo: 'mod+shift+m' },
   { type: 'spoiler', icon: 'spoiler', label: 'Скрытый', combo: 'mod+shift+p' },
+  { type: 'blockquote', icon: 'quote', label: 'Цитата', combo: 'mod+shift+.' },
 ];
 
 function isTouchOnly() {
@@ -382,7 +383,29 @@ function Composer(props) {
     });
   }
   // нажатие на «плашку» даты в поле — окно с её датой и форматом; сохранили — плашка заменяется
+  /** Перевод строки на пустой последней строке цитаты — выход из неё (иначе из блока в конце поля не выбраться). */
+  function leaveQuote(el) {
+    var sel = selIn(el), node = sel && sel.isCollapsed ? sel.anchorNode : null;
+    var q = node && (node.nodeType === 1 ? node : node.parentNode).closest('blockquote');
+    if (!q || !el.contains(q)) return false;
+    var v = readDom(q, sel);
+    if (v.end !== v.text.length || v.text[v.text.length - 1] !== '\n') return false;
+    while (q.lastChild && q.lastChild.nodeName === 'BR') q.removeChild(q.lastChild);
+    if (!q.nextSibling) q.parentNode.appendChild(document.createElement('br'));
+    var r = document.createRange();
+    r.setStartAfter(q); r.collapse(true);
+    sel.removeAllRanges(); sel.addRange(r);
+    return true;
+  }
   function onEditorClick(e) {
+    // переключатель «сворачивать» на цитате: источник правды — DOM поля, значение прочитает sync
+    var bq = e.target.closest && e.target.closest('[data-bq-toggle]');
+    if (bq) {
+      var quote = bq.parentNode;
+      if (quote.hasAttribute('data-collapsed')) quote.removeAttribute('data-collapsed'); else quote.setAttribute('data-collapsed', '1');
+      sync(false);
+      return;
+    }
     var chip = e.target.closest && e.target.closest('.rl-date-chip');
     if (!chip || !latest.current.onEditDate) return;
     var el = editRef.current, sel = el.ownerDocument.getSelection(), r = el.ownerDocument.createRange();
@@ -418,6 +441,7 @@ function Composer(props) {
       var sendNow = !isTouchOnly() && (p.sendKey === 'ctrlEnter' ? mod : !e.shiftKey && !mod);
       e.preventDefault();
       if (sendNow) { send(); return; }
+      if (leaveQuote(el)) { sync(true); return; }
       // перевод строки — <br>, а не новый <div> (так значение читается однозначно)
       if (!document.execCommand('insertLineBreak')) document.execCommand('insertHTML', false, '<br>');
       return;
@@ -432,6 +456,7 @@ function Composer(props) {
       else if (e.shiftKey && code === 'KeyX') type = 'strike';
       else if (e.shiftKey && code === 'KeyM') type = 'code';
       else if (e.shiftKey && code === 'KeyP') type = 'spoiler';
+      else if (e.shiftKey && code === 'Period') type = 'blockquote';
       if (type) {
         var sel = selIn(el);
         if (!sel || sel.isCollapsed) { if (type !== 'bold' && type !== 'italic' && type !== 'underline') e.preventDefault(); return; }   // B/I/U без выделения — браузер включит стиль для набора

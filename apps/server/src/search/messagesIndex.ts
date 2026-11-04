@@ -36,7 +36,7 @@ export async function ensureIndex(uid: string): Promise<void> {
   await waitTask((await meili<{ taskUid: number }>(`/indexes/${uid}/settings`, { method: 'PATCH', body: SETTINGS })).taskUid);
 }
 
-async function docOf(r: Record<string, unknown>): Promise<Doc | null> {
+export async function docOf(r: Record<string, unknown>): Promise<Doc | null> {
   // удалённые и коды входа не ищутся; копия поста в группе обсуждения — тоже (находится как сам пост канала)
   if (r.deleted || r.service_type === 'login_code' || r.origin) return null;   // и вышедший срок: openRows пометил строку удалённой
   const a = r.attachment as { name?: string; title?: string; performer?: string } | null;

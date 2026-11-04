@@ -26,7 +26,7 @@ export function normalizeBlocks(raw: unknown): Block[] | null {
     if (typeof o.text !== 'string') return null;
     const text = o.text.replace(/\r\n?/g, '\n');
     st.length += text.length;
-    const entities = normalizeEntities(text, o.entities).filter((e) => e.type !== 'pre');   // блок кода — отдельный блок
+    const entities = normalizeEntities(text, o.entities).filter((e) => e.type !== 'pre' && e.type !== 'blockquote');   // блок кода и цитата — отдельные блоки
     return entities.length ? { text, entities } : { text };
   };
   const walk = (list: unknown, depth: number): Block[] | null => {

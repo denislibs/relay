@@ -10,8 +10,8 @@ import { installDefaultPolicy, type TT } from './trustedPolicy';
 
 export { sameOriginScriptUrl } from './trustedPolicy';
 
-/** HTML без исполняемого: поле ввода (contenteditable, data-*), ссылки с target, SVG. */
-export const sanitizeHtml = (s: string): string => DOMPurify.sanitize(s, { ADD_ATTR: ['contenteditable', 'target'] });
+/** HTML без исполняемого: поле ввода (contenteditable, data-*), ссылки с target, SVG; expandable — сворачиваемая цитата при вставке. */
+export const sanitizeHtml = (s: string): string => DOMPurify.sanitize(s, { ADD_ATTR: ['contenteditable', 'target', 'expandable'] });
 
 export function installTrustedTypes(scope: { trustedTypes?: TT } = globalThis as never): boolean {
   return installDefaultPolicy(scope, sanitizeHtml);

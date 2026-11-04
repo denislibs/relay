@@ -23,6 +23,7 @@ export interface Content {
   blocks: unknown[] | null;
   link: unknown | null;
   attachment: Record<string, unknown> | null;   // целиком: в шифр уходят только текстовые поля
+  quote?: unknown | null;   // цитата части исходного в ответе (messages.ts): только в шифре. С RELAY_ENCRYPT=0 (отладка) столбца для неё нет — не хранится
 }
 
 /** Шифровать ли новые записи. Выключение (RELAY_ENCRYPT=0) — только для отладки: чтение шифра работает всегда. */
@@ -67,16 +68,16 @@ export async function contentColumns(chatId: number, clientId: string, c: Conten
   const { plain, text } = splitAttachment(c.attachment);
   // со сроком — срочным ключом: шифр не откроется и из бэкапа, когда срок пройдёт и ключ уничтожат
   const k = expiresAt ? await expiringChatKey(chatId, new Date(expiresAt), tx) : await currentChatKey(chatId, tx);
-  const payload = JSON.stringify({ b: c.body, e: c.entities ?? null, t: c.todo ?? null, k: c.blocks ?? null, l: c.link ?? null, a: text, ...(c.poll ? { p: c.poll } : {}), ...(c.data ? { x: c.data } : {}) });
+  const payload = JSON.stringify({ b: c.body, e: c.entities ?? null, t: c.todo ?? null, k: c.blocks ?? null, l: c.link ?? null, a: text, ...(c.poll ? { p: c.poll } : {}), ...(c.data ? { x: c.data } : {}), ...(c.quote ? { q: c.quote } : {}) });
   const content = Buffer.from(await seal(k.key, k.version, payload, aad(chatId, clientId)));
-  return { body: '', entities: null, todo: null, poll: null, data: null, blocks: null, link: null, attachment: plain, content, hasLink: hasLink(c) };
+  return { body: '', entities: null, todo: null, poll: null, data: null, blocks: null, link: null, attachment: plain, quote: null, content, hasLink: hasLink(c) };
 }
 
 async function openContent(chatId: number, clientId: string, sealed: Uint8Array, tx?: Tx): Promise<Content | null> {
   try {
     const key = await chatKey(chatId, keyVersionOf(sealed), tx);
-    const p = JSON.parse(await open(key, sealed, aad(chatId, clientId))) as { b: string; e: unknown[] | null; t: unknown; k: unknown[] | null; l: unknown; a: Record<string, unknown> | null; p?: unknown; x?: unknown };
-    return { body: p.b, entities: p.e, todo: p.t, poll: p.p ?? null, data: p.x ?? null, blocks: p.k, link: p.l, attachment: p.a };
+    const p = JSON.parse(await open(key, sealed, aad(chatId, clientId))) as { b: string; e: unknown[] | null; t: unknown; k: unknown[] | null; l: unknown; a: Record<string, unknown> | null; p?: unknown; x?: unknown; q?: unknown };
+    return { body: p.b, entities: p.e, todo: p.t, poll: p.p ?? null, data: p.x ?? null, blocks: p.k, link: p.l, attachment: p.a, quote: p.q ?? null };
   } catch (e) {
     // ключ чата уничтожен (чат удалён) — содержимого больше нет; остальное — настоящая ошибка
     if (e instanceof CryptoError && e.code === 'no_key') return null;
@@ -96,13 +97,13 @@ export async function openRows<T extends Record<string, unknown>>(rows: T[], pre
     // содержимое становится открытым, поэтому и проверка здесь (фильтры в запросах отсекают раньше)
     if (isExpired(r[col('expires_at')])) {
       row[col('deleted')] = true; row[col('body')] = ''; row[col('entities')] = null; row[col('todo')] = null; row[col('poll')] = null; row[col('data')] = null;
-      row[col('blocks')] = null; row[col('link')] = null; row[col('attachment')] = null; row[col('content')] = null; row[col('sticker')] = null;
+      row[col('blocks')] = null; row[col('link')] = null; row[col('attachment')] = null; row[col('content')] = null; row[col('sticker')] = null; row[col('quote')] = null;
       return;
     }
     const sealed = r[col('content')] as Uint8Array | null | undefined;
     if (!sealed) return;
     const c = await openContent(Number(r[col('chat_id')]), r[col('client_id')] as string, new Uint8Array(sealed), tx);
-    if (!c) { row[col('body')] = ''; row[col('entities')] = null; row[col('todo')] = null; row[col('poll')] = null; row[col('data')] = null; row[col('blocks')] = null; row[col('link')] = null; return; }
+    if (!c) { row[col('body')] = ''; row[col('entities')] = null; row[col('todo')] = null; row[col('poll')] = null; row[col('data')] = null; row[col('blocks')] = null; row[col('link')] = null; row[col('quote')] = null; return; }
     row[col('body')] = c.body;
     row[col('entities')] = c.entities;
     row[col('todo')] = c.todo;
@@ -110,6 +111,7 @@ export async function openRows<T extends Record<string, unknown>>(rows: T[], pre
     if (c.data != null || col('data') in row) row[col('data')] = c.data ?? null;
     row[col('blocks')] = c.blocks;
     row[col('link')] = c.link;
+    row[col('quote')] = c.quote ?? null;
     if (c.attachment && row[col('attachment')]) row[col('attachment')] = { ...(row[col('attachment')] as object), ...c.attachment };
   }));
   return rows;
@@ -132,7 +134,7 @@ export async function updateContent(tx: Tx, chatId: number, id: number,
   extra: (row: Record<string, unknown>) => Record<string, unknown> = () => ({})): Promise<Record<string, unknown> | null> {
   const row = await lockOpen(tx, chatId, id);
   if (!row || isExpired(row.expires_at)) return null;
-  const cur: Content = { body: row.body as string, entities: (row.entities as unknown[]) ?? null, todo: row.todo ?? null, poll: row.poll ?? null, data: row.data ?? null, blocks: (row.blocks as unknown[]) ?? null, link: row.link ?? null, attachment: (row.attachment as Record<string, unknown>) ?? null };
+  const cur: Content = { body: row.body as string, entities: (row.entities as unknown[]) ?? null, todo: row.todo ?? null, poll: row.poll ?? null, data: row.data ?? null, blocks: (row.blocks as unknown[]) ?? null, link: row.link ?? null, attachment: (row.attachment as Record<string, unknown>) ?? null, quote: row.quote ?? null };
   const patch = change(cur, row);
   if (patch === false) return null;
   const next: Content = { ...cur, ...patch };

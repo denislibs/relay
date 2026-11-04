@@ -28,6 +28,7 @@ export interface Message {
   groupId?: string | null;   // отправлены вместе (несколько файлов) — в ленте одним пузырём
   body: string;
   replyToId: Id | null;
+  replyQuote?: ReplyQuote;   // цитата части исходного: проверена сервером, лежит в шифре вместе с содержимым
   createdAt: string; // ISO
   editedAt?: string | null;
   deleted?: boolean;
@@ -62,7 +63,7 @@ export interface Message {
 /** Отложенное сообщение (видно только автору): id у него появится при публикации, до неё ключ — clientId.
  *  sendAt — мс эпохи. failed — код отказа: опубликовать не вышло, ждёт решения автора. rev — версия строки. */
 export interface ScheduledMessage {
-  clientId: string; chatId: Id; sendAt: number; kind: Message['kind']; body: string; entities?: Entity[]; replyToId: Id | null;
+  clientId: string; chatId: Id; sendAt: number; kind: Message['kind']; body: string; entities?: Entity[]; replyToId: Id | null; replyQuote?: ReplyQuote;
   attachment?: Attachment | null; groupId?: string | null; sticker?: StickerRef | null; silent?: boolean; failed?: string; rev: number; createdAt: string;
 }
 /** Отложенных на чат на пользователя (как в Telegram). */
@@ -110,13 +111,14 @@ export interface ForwardInfo { userId: Id | null; name: string; chatId: Id; mess
 export interface ForwardRef { chatId: Id; id: Id; hideSender?: boolean; hideCaption?: boolean }
 
 /** Оформление куска текста: смещения в единицах UTF-16 (как String.length). Один тип сам с собой не перекрывается. */
-export type EntityType = 'bold' | 'italic' | 'underline' | 'strike' | 'spoiler' | 'code' | 'pre' | 'link' | 'date';
+export type EntityType = 'bold' | 'italic' | 'underline' | 'strike' | 'spoiler' | 'code' | 'pre' | 'link' | 'date' | 'blockquote';
 /** date — дата и время (как messageEntityFormattedDate в Telegram): date — unix-секунды, format — как показывать:
  *  'r' — относительно («завтра в 10:00»), иначе по порядку w (день недели), d / D (дата коротко / полностью),
  *  t / T (время коротко / с секундами); пусто — показать текст сообщения как есть. */
-export interface Entity { type: EntityType; offset: number; length: number; url?: string; date?: number; format?: string }
+/** blockquote — цитата в тексте (блок); collapsed — сворачиваемая: 3 строки, нажатие разворачивает. Не вкладывается сама в себя и не сочетается с pre. */
+export interface Entity { type: EntityType; offset: number; length: number; url?: string; date?: number; format?: string; collapsed?: boolean }
 export const DATE_FORMAT = /^(r|w?[dD]?[tT]?)$/;
-export const ENTITY_TYPES: readonly EntityType[] = ['bold', 'italic', 'underline', 'strike', 'spoiler', 'code', 'pre', 'link', 'date'];
+export const ENTITY_TYPES: readonly EntityType[] = ['bold', 'italic', 'underline', 'strike', 'spoiler', 'code', 'pre', 'link', 'date', 'blockquote'];
 export const MAX_ENTITIES = 100;
 /** Пачка кликов по большому эмодзи: не больше кликов и секунд от первого (как в Telegram — окно в секунду). */
 export const EMOJI_FX_MAX = 10;
@@ -162,7 +164,7 @@ export function normalizeEntities(text: string, raw: unknown): Entity[] {
     if (type === 'date' && (!Number.isSafeInteger(date) || (date as number) < 0 || (date as number) > 4102444800 || typeof format !== 'string' || !DATE_FORMAT.test(format))) continue;
     const key = type === 'link' ? 'link ' + url : type === 'date' ? 'date ' + date + ' ' + format : (type as string);
     const list = by.get(key) ?? [];
-    list.push(url ? { type: 'link', offset: s, length: end - s, url } : type === 'date' ? { type: 'date', offset: s, length: end - s, date: date as number, ...(format ? { format: format as string } : {}) } : { type: type as EntityType, offset: s, length: end - s });
+    list.push(type === 'blockquote' ? { type: 'blockquote', offset: s, length: end - s, ...((e as { collapsed?: unknown }).collapsed === true ? { collapsed: true } : {}) } : url ? { type: 'link', offset: s, length: end - s, url } : type === 'date' ? { type: 'date', offset: s, length: end - s, date: date as number, ...(format ? { format: format as string } : {}) } : { type: type as EntityType, offset: s, length: end - s });
     by.set(key, list);
   }
   const out: Entity[] = [];
@@ -170,11 +172,65 @@ export function normalizeEntities(text: string, raw: unknown): Entity[] {
     list.sort((a, b) => a.offset - b.offset);
     let cur: Entity | null = null;
     for (const e of list) {
-      if (cur && e.offset <= cur.offset + cur.length) cur.length = Math.max(cur.length, e.offset + e.length - cur.offset);
-      else { cur = { ...e }; out.push(cur); }
+      if (cur && e.offset <= cur.offset + cur.length) {
+        cur.length = Math.max(cur.length, e.offset + e.length - cur.offset);
+        if (cur.collapsed && !e.collapsed) delete cur.collapsed;   // склеенная цитата свёрнута, только если свёрнуты обе
+      } else { cur = { ...e }; out.push(cur); }
     }
   }
-  return out.sort((a, b) => a.offset - b.offset || b.length - a.length).slice(0, MAX_ENTITIES);
+  // цитата с блоком кода не сочетается: блок кода остаётся, цитата снимается
+  const pre = out.filter((e) => e.type === 'pre');
+  const kept = pre.length ? out.filter((e) => e.type !== 'blockquote' || !pre.some((p) => p.offset < e.offset + e.length && e.offset < p.offset + p.length)) : out;
+  return kept.sort((a, b) => a.offset - b.offset || b.length - a.length).slice(0, MAX_ENTITIES);
+}
+
+/* ---------- цитата части сообщения в ответе ---------- */
+
+/** Фрагмент исходного сообщения в ответе: текст, смещение в исходном тексте и оформление внутри фрагмента. */
+export interface ReplyQuote { text: string; offset: number; entities?: Entity[] }
+/** Предел длины фрагмента, в единицах UTF-16. */
+export const QUOTE_MAX = 1024;
+/** Что из оформления исходного сохраняется во фрагменте: блоки (цитата, код блоком) и дата (показывается иначе, чем написана) — нет. */
+const QUOTE_TYPES: ReadonlySet<EntityType> = new Set<EntityType>(['bold', 'italic', 'underline', 'strike', 'spoiler', 'code', 'link']);
+
+/** Где фрагмент в тексте: на указанном смещении, а если текст сместился — ближайшее вхождение; -1 — фрагмента нет. */
+export function locateQuote(body: string, text: string, hint: number): number {
+  if (!text) return -1;
+  if (body.startsWith(text, hint)) return hint;
+  let best = -1;
+  for (let at = body.indexOf(text); at >= 0; at = body.indexOf(text, at + 1)) {
+    if (best < 0 || Math.abs(at - hint) < Math.abs(best - hint)) best = at;
+  }
+  return best;
+}
+
+/** Оформление исходного, обрезанное по фрагменту и сдвинутое к его началу. */
+export function clipQuoteEntities(body: string, entities: readonly Entity[] | null | undefined, offset: number, length: number): Entity[] {
+  const text = body.slice(offset, offset + length), cut: Entity[] = [];
+  for (const e of entities ?? []) {
+    if (!QUOTE_TYPES.has(e.type)) continue;
+    const s = Math.max(e.offset, offset), end = Math.min(e.offset + e.length, offset + length);
+    if (end > s) cut.push({ ...e, offset: s - offset, length: end - s });
+  }
+  return normalizeEntities(text, cut);
+}
+
+/**
+ * Фрагмент из выделенного текста (клиент: что показать сразу, пока не ответил сервер): пробелы по краям срезаются, длинное
+ * обрезается по границе символа; null — такого в сообщении нет (выделение задело дату, которая показана иначе, чем написана).
+ */
+export function makeQuote(body: string, entities: readonly Entity[] | null | undefined, selected: string, hint: number): ReplyQuote | null {
+  const lead = selected.length - selected.trimStart().length;
+  let text = selected.trim();
+  if (!text) return null;
+  const at = locateQuote(body, text, hint + lead);
+  if (at < 0) return null;
+  if (text.length > QUOTE_MAX) {
+    const c = text.charCodeAt(QUOTE_MAX - 1);
+    text = text.slice(0, c >= 0xd800 && c <= 0xdbff ? QUOTE_MAX - 1 : QUOTE_MAX).trimEnd();
+  }
+  const list = clipQuoteEntities(body, entities, at, text.length);
+  return { text, offset: at, ...(list.length ? { entities: list } : {}) };
 }
 
 /** Обрезать пробелы по краям текста и сдвинуть оформление вместе с ним. */
@@ -427,6 +483,7 @@ export type ErrorCode = 'bad_frame' | 'pin_limit' | 'unauthorized' | 'not_member
   | 'folder_title' | 'folder_empty' | 'folder_too_many_chats' | 'folder_emoji' | 'folders_limit'
   | 'upload_limit' | 'upload_quota'   // пределы загрузок на пользователя (apps/server/src/domain/uploadLimits.ts)
   | 'upload_missing' | 'upload_mismatch' | 'upload_pending' | 'upload_incomplete' | 'photo_invalid' | 'file_too_big'
+  | 'quote_gone'   // цитаты нет в исходном сообщении (подделка или текст изменили, пока ответ ждал сети)
   | 'schedule_past' | 'schedule_far' | 'schedule_limit';   // отложенные (domain/scheduled.ts): время прошло, дальше года, больше SCHEDULED_LIMIT на чат
 
 export type ClientFrame =
@@ -438,7 +495,7 @@ export type ClientFrame =
   // превью публичного канала: push'и канала в этот сокет без подписки, пока превью открыто; ack.result — {seq}
   | { op: 'watchChat'; reqId: string; chatId: Id }
   | { op: 'unwatchChat'; chatId: Id }
-  | { op: 'send'; reqId: string; clientId: string; chatId: Id; body: string; entities?: Entity[]; replyToId?: Id | null; attachment?: { id: string; thumb?: string | null; spoiler?: boolean } | null; groupId?: string | null; forward?: ForwardRef | null; noLinkPreview?: boolean; blocks?: Block[] | null; todo?: TodoInput; poll?: PollInput; contact?: { userId: Id; key?: string; via?: { chatId: Id; messageId: Id } }; geo?: GeoPoint; dice?: { emoji: DiceEmoji }; sticker?: { id: Id } | null; threadId?: Id; draftHash?: string | null; silent?: boolean; scheduleAt?: number }   // threadId — комментарий в треде (группа обсуждения); silent — без звука; scheduleAt — мс эпохи: отложить
+  | { op: 'send'; reqId: string; clientId: string; chatId: Id; body: string; entities?: Entity[]; replyToId?: Id | null; replyQuote?: { text: string; offset: number }; attachment?: { id: string; thumb?: string | null; spoiler?: boolean } | null; groupId?: string | null; forward?: ForwardRef | null; noLinkPreview?: boolean; blocks?: Block[] | null; todo?: TodoInput; poll?: PollInput; contact?: { userId: Id; key?: string; via?: { chatId: Id; messageId: Id } }; geo?: GeoPoint; dice?: { emoji: DiceEmoji }; sticker?: { id: Id } | null; threadId?: Id; draftHash?: string | null; silent?: boolean; scheduleAt?: number }   // threadId — комментарий в треде (группа обсуждения); silent — без звука; scheduleAt — мс эпохи: отложить
   | { op: 'read'; reqId: string; chatId: Id; upToId: Id }
   | { op: 'typing'; chatId: Id }   // «печатаю» — без ответа, сервер пересылает остальным участникам
   // клики по большому эмодзи (только личный чат): t — секунды от первого клика пачки; сервер пересылает собеседнику, в журнал не пишет
@@ -537,6 +594,9 @@ export function parseClientFrame(raw: string): ClientFrame | null {
     case 'send':
       if (!str(f.reqId, 64) || !str(f.clientId, 36) || !UUID.test(f.clientId) || !int(f.chatId) || typeof f.body !== 'string') return null;
       if (f.replyToId != null && !int(f.replyToId)) return null;
+      // цитата: только текст и смещение. Оформление сервер берёт из исходного сообщения, от клиента не принимает
+      const rq = f.replyQuote as { text?: unknown; offset?: unknown } | null | undefined;
+      if (rq != null && (typeof rq !== 'object' || typeof rq.text !== 'string' || !Number.isSafeInteger(rq.offset))) return null;
       if (f.attachment != null && (typeof f.attachment !== 'object' || !str((f.attachment as { id: unknown }).id, 36))) return null;
       if (f.groupId != null && !(typeof f.groupId === 'string' && UUID.test(f.groupId))) return null;
       let forward: ForwardRef | null = null;
@@ -558,7 +618,7 @@ export function parseClientFrame(raw: string): ClientFrame | null {
       if (f.threadId != null && !int(f.threadId)) return null;
       if (f.draftHash != null && !(typeof f.draftHash === 'string' && DRAFT_HASH.test(f.draftHash))) return null;
       if (f.scheduleAt != null && !int(f.scheduleAt)) return null;
-      return { op: 'send', ...(f.silent === true ? { silent: true } : {}), ...(f.scheduleAt != null ? { scheduleAt: f.scheduleAt as number } : {}), ...(f.draftHash !== undefined ? { draftHash: f.draftHash as string | null } : {}), ...(f.threadId != null ? { threadId: f.threadId as number } : {}), ...(f.sticker != null ? { sticker: { id: (f.sticker as { id: number }).id } } : {}), ...(f.todo != null ? { todo: normalizeTodo(f.todo)! } : {}), ...(f.poll != null ? { poll: normalizePoll(f.poll)! } : {}), ...(f.geo != null ? { geo: normalizeGeo(f.geo)! } : {}), ...(f.dice != null ? { dice: { emoji: (f.dice as { emoji: DiceEmoji }).emoji } } : {}), ...(f.contact != null ? { contact: { userId: (f.contact as { userId: number }).userId, ...(typeof cKey === 'string' ? { key: cKey } : {}), ...(cVia ? { via: { chatId: Number(cVia.chatId), messageId: Number(cVia.messageId) } } : {}) } } : {}), reqId: f.reqId, clientId: f.clientId, chatId: f.chatId, body: f.body, entities: normalizeEntities(f.body, f.entities), replyToId: (f.replyToId as number | null) ?? null, attachment: (f.attachment as { id: string; thumb?: string | null; spoiler?: boolean } | null) ?? null, groupId: (f.groupId as string | null) ?? null, forward, ...(f.noLinkPreview === true ? { noLinkPreview: true } : {}), ...(Array.isArray(f.blocks) ? { blocks: f.blocks as Block[] } : {}) };
+      return { op: 'send', ...(f.silent === true ? { silent: true } : {}), ...(f.scheduleAt != null ? { scheduleAt: f.scheduleAt as number } : {}), ...(f.draftHash !== undefined ? { draftHash: f.draftHash as string | null } : {}), ...(f.threadId != null ? { threadId: f.threadId as number } : {}), ...(f.sticker != null ? { sticker: { id: (f.sticker as { id: number }).id } } : {}), ...(f.todo != null ? { todo: normalizeTodo(f.todo)! } : {}), ...(f.poll != null ? { poll: normalizePoll(f.poll)! } : {}), ...(f.geo != null ? { geo: normalizeGeo(f.geo)! } : {}), ...(f.dice != null ? { dice: { emoji: (f.dice as { emoji: DiceEmoji }).emoji } } : {}), ...(f.contact != null ? { contact: { userId: (f.contact as { userId: number }).userId, ...(typeof cKey === 'string' ? { key: cKey } : {}), ...(cVia ? { via: { chatId: Number(cVia.chatId), messageId: Number(cVia.messageId) } } : {}) } } : {}), reqId: f.reqId, clientId: f.clientId, chatId: f.chatId, body: f.body, entities: normalizeEntities(f.body, f.entities), replyToId: (f.replyToId as number | null) ?? null, ...(rq != null && f.replyToId != null ? { replyQuote: { text: rq.text as string, offset: rq.offset as number } } : {}), attachment: (f.attachment as { id: string; thumb?: string | null; spoiler?: boolean } | null) ?? null, groupId: (f.groupId as string | null) ?? null, forward, ...(f.noLinkPreview === true ? { noLinkPreview: true } : {}), ...(Array.isArray(f.blocks) ? { blocks: f.blocks as Block[] } : {}) };
     case 'read':
       return str(f.reqId, 64) && int(f.chatId) && int(f.upToId) ? { op: 'read', reqId: f.reqId, chatId: f.chatId, upToId: f.upToId } : null;
     default: return null;

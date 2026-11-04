@@ -1,3 +1,4 @@
+import { replyArgs, type ReplyRef } from './replyRef';
 import { captureSticker } from './ui/sendFlight';
 // Стикеры в интерфейсе: вызовы движка (мои паки, паки, отправка) и открытие модалки пака.
 // Движок отдаёт data.ts через bindStickers — здесь своя тонкая обёртка, чтобы стикеры не разрастались в data.ts.
@@ -22,7 +23,7 @@ export const installSet = (setId: number, on: boolean, info?: StickerSetInfo) =>
 export const faveSticker = (s: StickerRef, on: boolean) => call({ type: 'faveSticker', id: s.id, on, sticker: s });
 export const clearRecentStickers = (id?: number) => call({ type: 'clearRecentStickers', ...(id != null ? { id } : {}) });
 export const greetingSticker = () => call({ type: 'greetingSticker' }) as Promise<StickerRef | null>;
-export const sendSticker = (chatId: number, sticker: StickerRef, replyToId?: number | null, threadId?: number, when: { silent?: boolean; scheduleAt?: number; keepDraft?: boolean } = {}) => call({ type: 'sendSticker', ...when, chatId, sticker, replyToId: replyToId ?? null, ...(threadId != null ? { threadId } : {}) });
+export const sendSticker = (chatId: number, sticker: StickerRef, replyToId?: ReplyRef, threadId?: number, when: { silent?: boolean; scheduleAt?: number; keepDraft?: boolean } = {}) => call({ type: 'sendSticker', ...when, chatId, sticker, ...replyArgs(replyToId), ...(threadId != null ? { threadId } : {}) });
 
 /*
  * Стикер-приветствие пустого личного чата: случайный, но один на открытие чата (кадр стека) — перерисовки и
@@ -96,7 +97,7 @@ let lastMine: MyStickers = EMPTY_MINE;
 /** Куда уходит стикер, выбранный в модалке или правой панели: открытый чат и его текущий ответ (ставит Chat). */
 // schedule — страница отложенных: стикер не уходит сразу, спрашивается время
 type When = { silent?: boolean; scheduleAt?: number; keepDraft?: boolean };
-type Target = { chatId: number; threadId?: number; replyId: () => number | null; sent: () => void; schedule?: (send: (w: When) => void) => void };   // threadId — комментарий в треде
+type Target = { chatId: number; threadId?: number; replyId: () => ReplyRef; sent: () => void; schedule?: (send: (w: When) => void) => void };   // threadId — комментарий в треде
 let target: Target | null = null;
 export function setStickerTarget(t: Target | null): () => void {
   target = t;

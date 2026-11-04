@@ -82,3 +82,46 @@ test('date entities: kept with date and format, chip HTML, Telegram tg-time on c
   expect(clipboardHtml(v0.text, v0.entities)).toBe('встреча <tg-time unix="1792400000" format="r">завтра</tg-time>');
   expect(toggleFormat(v('в 10 утра'), 'date', 2, 9, { date: 100, format: '' }).entities).toEqual([{ type: 'date', offset: 2, length: 7, date: 100 }]);
 });
+
+const bq = (offset, length, extra = {}) => ({ type: 'blockquote', offset, length, ...extra });
+
+test('blockquote: one block in the field, adjacent newlines replaced by it, a filler line after it at the end', () => {
+  expect(toHtml(v('a\nq\nb', [bq(2, 1)]))).toBe('a<blockquote class="rl-bq-edit"><span class="rl-bq-edit-toggle" contenteditable="false" role="button" aria-label="Сворачивать цитату" data-bq-toggle="1"></span>q</blockquote>b');
+  expect(toHtml(v('qq', [bq(0, 2, { collapsed: true }), { type: 'bold', offset: 0, length: 1 }]))).toContain('data-collapsed="1"');
+  expect(toHtml(v('qq', [bq(0, 2), { type: 'bold', offset: 0, length: 1 }])).match(/<blockquote/g).length).toBe(1);
+  expect(toHtml(v('q', [bq(0, 1)])).endsWith('</blockquote><br>')).toBe(true);
+  // пустая строка рядом остаётся
+  expect(toHtml(v('a\n\nq', [bq(3, 1)])).startsWith('a<br><blockquote')).toBe(true);
+});
+
+test('blockquote: clean merges, does not mix with pre, keeps only true collapsed', () => {
+  expect(clean('abcdef', [bq(0, 3, { collapsed: true }), bq(2, 2, { collapsed: true })])).toEqual([bq(0, 4, { collapsed: true })]);
+  expect(clean('abcdef', [bq(0, 3, { collapsed: true }), bq(2, 2)])).toEqual([bq(0, 4)]);
+  expect(clean('abcdef', [bq(0, 4), { type: 'pre', offset: 2, length: 2 }])).toEqual([{ type: 'pre', offset: 2, length: 2 }]);
+});
+
+test('blockquote toggle: whole lines, removes pre, keeps other formatting; code inside is fine, pre takes the quote off', () => {
+  const t = v('one\ntwo\nthree');
+  expect(toggleFormat(t, 'blockquote', 5, 6).entities).toEqual([bq(4, 3)]);
+  expect(toggleFormat(v('one\ntwo', [bq(4, 3)]), 'blockquote', 4, 7).entities).toEqual([]);
+  const withPre = toggleFormat(v('one', [{ type: 'pre', offset: 0, length: 3 }]), 'blockquote', 0, 3);
+  expect(withPre.entities).toEqual([bq(0, 3)]);
+  const code = toggleFormat(v('one two', [bq(0, 7)]), 'code', 0, 3);
+  expect(code.entities).toEqual([bq(0, 7), { type: 'code', offset: 0, length: 3 }]);
+  expect(toggleFormat(v('one two', [bq(0, 7)]), 'pre', 0, 3).entities).toEqual([{ type: 'pre', offset: 0, length: 3 }, bq(4, 3)]);
+  expect(toggleFormat(v('one two', [bq(0, 7)]), 'bold', 0, 3).entities.map((e) => e.type).sort()).toEqual(['blockquote', 'bold']);
+});
+
+test('markdown: lines with > become one quote, markers removed; not inside a code block', () => {
+  expect(applyMarkdown(v('> раз\n> два\nтри'))).toEqual(v('раз\nдва\nтри', [bq(0, 7)]));
+  expect(applyMarkdown(v('a\n> q'))).toEqual(v('a\nq', [bq(2, 1)]));
+  expect(applyMarkdown(v('> a\nb\n> c'))).toEqual(v('a\nb\nc', [bq(0, 1), bq(4, 1)]));
+  expect(applyMarkdown(v('1 > 2'))).toEqual(v('1 > 2'));
+  expect(applyMarkdown(v('```\n> a```')).entities.map((e) => e.type)).toEqual(['pre']);
+});
+
+test('clipboardHtml: blockquote is one block, expandable for collapsed', async () => {
+  const { clipboardHtml } = await import('./messageCopy.js');
+  expect(clipboardHtml('a\nqq', [bq(2, 2), { type: 'bold', offset: 2, length: 1 }])).toBe('a<br><blockquote><strong>q</strong>q</blockquote>');
+  expect(clipboardHtml('q', [bq(0, 1, { collapsed: true })])).toBe('<blockquote expandable>q</blockquote>');
+});

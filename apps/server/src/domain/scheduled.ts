@@ -1,5 +1,5 @@
 import { blockedInDirect } from './privacy';
-import { normalizeEntities, rightForKind, SCHEDULED_LIMIT, SCHEDULE_MAX_MS, trimFormatted, type Attachment, type Entity, type ErrorCode, type ScheduledMessage, type StickerRef } from '@relay/protocol';
+import { normalizeEntities, type ReplyQuote, rightForKind, SCHEDULED_LIMIT, SCHEDULE_MAX_MS, trimFormatted, type Attachment, type Entity, type ErrorCode, type ScheduledMessage, type StickerRef } from '@relay/protocol';
 import { sql, type Tx } from '../db';
 import { CryptoError, keyVersionOf, open, seal } from '../crypto/aead';
 import { chatKey, currentChatKey } from '../crypto/chatKeys';
@@ -9,7 +9,7 @@ import { DomainError } from './errors';
 import { attachmentForSend } from './files';
 import { groupCtx, hasAdmin, requireRight } from './groupRights';
 import { appendUpdates } from './journal';
-import { MAX_BODY, sendMessage } from './messages';
+import { checkReplyQuote, MAX_BODY, sendMessage } from './messages';
 import { postService } from './service';
 import { stickerForSend } from './stickers';
 
@@ -29,7 +29,7 @@ import { stickerForSend } from './stickers';
  */
 
 /** Полезная нагрузка шифра: что нужно для показа в списке и для публикации. */
-interface Sealed { b: string; e: Entity[] | null; a?: Attachment | null; s?: StickerRef | null; n?: boolean }
+interface Sealed { b: string; e: Entity[] | null; a?: Attachment | null; s?: StickerRef | null; n?: boolean; q?: ReplyQuote }
 
 const aad = (chatId: number, userId: number, clientId: string) => `scheduled|${chatId}|${userId}|${clientId}`;
 
@@ -53,7 +53,7 @@ export async function toItem(r: Record<string, unknown>, tx?: Tx): Promise<Sched
   const c = await openContent(r, tx);
   return {
     clientId: r.client_id as string, chatId: Number(r.chat_id), sendAt: new Date(r.send_at as string).getTime(), kind: r.kind as ScheduledMessage['kind'],
-    body: c?.b ?? '', ...(c?.e?.length ? { entities: c.e } : {}), replyToId: r.reply_to_id == null ? null : Number(r.reply_to_id),
+    body: c?.b ?? '', ...(c?.e?.length ? { entities: c.e } : {}), replyToId: r.reply_to_id == null ? null : Number(r.reply_to_id), ...(c?.q ? { replyQuote: c.q } : {}),
     ...(c?.a ? { attachment: c.a } : {}), ...(r.group_id ? { groupId: r.group_id as string } : {}), ...(c?.s ? { sticker: c.s } : {}),
     ...(r.silent ? { silent: true } : {}), ...(!c ? { failed: 'not_found' } : r.failed ? { failed: r.failed as string } : {}),
     rev: Number(r.rev), createdAt: new Date(r.created_at as string).toISOString(),
@@ -82,7 +82,7 @@ const queueSend = (tx: Tx | typeof sql, userId: number, clientId: string, at: nu
   enqueue(tx, 'scheduled.send', { userId, clientId }, { runAt: new Date(at), dedupeKey: `scheduled:${clientId}:${at}`, maxAttempts: 30 });
 
 type ScheduleInput = {
-  chatId: number; clientId: string; body: string; entities?: Entity[]; replyToId?: number | null; attachment?: { id: string; thumb?: string | null; spoiler?: boolean } | null;
+  chatId: number; clientId: string; body: string; entities?: Entity[]; replyToId?: number | null; replyQuote?: { text: string; offset: number } | null; attachment?: { id: string; thumb?: string | null; spoiler?: boolean } | null;
   groupId?: string | null; noLinkPreview?: boolean; sticker?: { id: number } | null; draftHash?: string | null; silent?: boolean; scheduleAt?: number;
   forward?: unknown; blocks?: unknown; todo?: unknown; poll?: unknown; contact?: unknown; geo?: unknown; dice?: unknown; threadId?: number | null;
 };
@@ -112,9 +112,11 @@ export async function scheduleMessage(userId: number, input: ScheduleInput): Pro
       if (!hasAdmin(ctx, 'post')) throw new DomainError('forbidden', 'post');
       if (input.replyToId != null) throw new DomainError('bad_frame', 'reply in channel');
     }
+    let quote: ReplyQuote | null = null;
     if (input.replyToId != null) {
       const [target] = await tx`select 1 from messages where chat_id = ${input.chatId} and id = ${input.replyToId} and not deleted`;
       if (!target) throw new DomainError('not_found', 'reply target');
+      if (input.replyQuote) quote = await checkReplyQuote(tx, input.chatId, input.replyToId, input.replyQuote, ctx.historyFrom);
     }
     const attachment = input.attachment ? await attachmentForSend(tx, userId, input.attachment) : null;
     const sticker = stickerId != null ? await stickerForSend(tx, userId, stickerId) : null;
@@ -124,7 +126,7 @@ export async function scheduleMessage(userId: number, input: ScheduleInput): Pro
     await tx`select pg_advisory_xact_lock(hashtextextended(${`scheduled:${userId}:${input.chatId}`}, 0))`;
     const [{ n }] = await tx`select count(*)::int as n from scheduled_messages where user_id = ${userId} and chat_id = ${input.chatId}`;
     if ((n as number) >= SCHEDULED_LIMIT) throw new DomainError('schedule_limit');
-    const content = await sealContent(input.chatId, userId, input.clientId, { b: body, e: entities.length ? entities : null, ...(attachment ? { a: attachment } : {}), ...(sticker ? { s: sticker } : {}), ...(input.noLinkPreview ? { n: true } : {}) }, tx);
+    const content = await sealContent(input.chatId, userId, input.clientId, { b: body, e: entities.length ? entities : null, ...(attachment ? { a: attachment } : {}), ...(sticker ? { s: sticker } : {}), ...(input.noLinkPreview ? { n: true } : {}), ...(quote ? { q: quote } : {}) }, tx);
     const groupId = attachment && input.groupId && /^[0-9a-f-]{36}$/.test(input.groupId) ? input.groupId : null;
     const [row] = await tx`
       insert into scheduled_messages (user_id, client_id, chat_id, kind, send_at, silent, reply_to_id, group_id, attachment_id, content)
@@ -217,8 +219,8 @@ async function publishOne(userId: number, clientId: string, force: boolean): Pro
   const silent = !!row.silent;
   // себе в «Избранное» — напоминание: автору приходит обычное уведомление (если не «без звука»)
   const saved = (await sql`select 1 from saved_chats where user_id = ${userId} and chat_id = ${chatId}`).length > 0;
-  const send = (replyToId: number | null) => sendMessage(userId, {
-    chatId, clientId, body: c.b, entities: c.e ?? [], replyToId, draftHash: null, silent, reminder: saved && !silent,
+  const send = (replyToId: number | null, replyQuote?: ReplyQuote | null) => sendMessage(userId, {
+    chatId, clientId, body: c.b, entities: c.e ?? [], replyToId, ...(replyQuote ? { replyQuote } : {}), draftHash: null, silent, reminder: saved && !silent,
     ...(row.group_id ? { groupId: row.group_id as string } : {}), ...(c.n ? { noLinkPreview: true } : {}),
     ...(c.a ? { attachment: { id: c.a.id, thumb: c.a.thumb ?? null, ...(c.a.spoiler ? { spoiler: true } : {}) } } : {}), ...(c.s ? { sticker: { id: c.s.id } } : {}),
   }, {
@@ -232,10 +234,13 @@ async function publishOne(userId: number, clientId: string, force: boolean): Pro
     },
   });
   try {
-    try { await send(row.reply_to_id == null ? null : Number(row.reply_to_id)); }
+    const replyId = row.reply_to_id == null ? null : Number(row.reply_to_id);
+    try { await send(replyId, c.q); }
     catch (e) {
       // сообщение, на которое отвечали, удалили: уходит без цитаты (как в Telegram), это не повод не отправлять
       if (e instanceof DomainError && e.code === 'not_found' && e.message === 'reply target') await send(null);
+      // цитируемый кусок из него убрали правкой: ответ остаётся, но без фрагмента — приписать слова, которых больше нет, нельзя
+      else if (e instanceof DomainError && e.code === 'quote_gone') await send(replyId);
       else throw e;
     }
     return null;

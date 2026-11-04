@@ -658,7 +658,7 @@ function ReplyQuote(props) {
   var n = props.tone != null ? props.tone : 5;
   var accent = n === 'accent';
   var tone = accent ? 'var(--brand-text)' : 'var(--peer-' + n + ')';
-  return h(props.onClick ? 'button' : 'div', { type: props.onClick ? 'button' : undefined, class: cx('rl-quote', props.inBubble && 'rl-quote-in'),
+  return h(props.onClick ? 'button' : 'div', { type: props.onClick ? 'button' : undefined, class: cx('rl-quote', props.inBubble && 'rl-quote-in', props.fragment && 'rl-quote-frag'),
     style: { '--quote-tone': tone,
       '--quote-bg': accent ? 'color-mix(in srgb, var(--brand-text) 12%, transparent)' : 'var(--peer-' + n + '-bg)',
       '--quote-bg-active': accent ? 'color-mix(in srgb, var(--brand-text) 20%, transparent)' : 'var(--peer-' + n + '-bg-active)' }, onClick: props.onClick },
@@ -672,6 +672,8 @@ function ReplyQuote(props) {
     h('span', { class: 'rl-quote-body' },
       h('b', { style: { color: 'var(--quote-tone)' } }, props.author),
       h('span', { class: 'rl-quote-text' }, props.icon ? h(Icon, { name: props.icon, size: 14 }) : null, props.text)),
+    // цитата части сообщения: значок кавычек в углу (как в Telegram), текст — только фрагмент
+    props.fragment ? h(Icon, { name: 'quote', size: 12, class: 'rl-quote-frag-icon' }) : null,
     props.thumb !== undefined ? h('span', { class: 'rl-quote-thumb' }, h(MediaArt, { seed: props.thumb })) : null,
     props.onCancel ? h(IconButton, { icon: 'close', label: 'Отменить ответ', onClick: props.onCancel, size: 18 }) : null);
 }

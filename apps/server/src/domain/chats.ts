@@ -3,7 +3,7 @@ import { shredHistory } from './shred';
 import { dropScheduledInChat } from './scheduled';
 import { shownPoll, withPolls, type PollDef } from './polls';
 import type { Attachment, ContactCard, Dice, GeoPoint } from '@relay/protocol';
-import { graphemes, GROUP_ABOUT_MAX, normalizeEntities, type Entity, type Block, type ForwardInfo, type LinkPreview, type MediaCounts, type MediaTab, type Message, type MessageButton, type ProfilePhoto, type ServiceData, type ServiceType, type StickerRef, type Todo } from '@relay/protocol';
+import { graphemes, GROUP_ABOUT_MAX, normalizeEntities, type ReplyQuote, type Entity, type Block, type ForwardInfo, type LinkPreview, type MediaCounts, type MediaTab, type Message, type MessageButton, type ProfilePhoto, type ServiceData, type ServiceType, type StickerRef, type Todo } from '@relay/protocol';
 import { sql, type Tx } from '../db';
 import { muteFromDb } from './chatNotify';
 import { DomainError } from './errors';
@@ -174,6 +174,7 @@ export function toMessage(r: Record<string, unknown>): Message {
     ...(r.views != null ? { views: Number(r.views) } : {}),
     ...(r.thread_id != null ? { threadId: Number(r.thread_id) } : {}),
     ...(r.origin ? { origin: { chatId: Number((r.origin as { chatId: unknown }).chatId), id: Number((r.origin as { id: unknown }).id) } } : {}),
+    ...(r.quote && !r.deleted ? { replyQuote: r.quote as ReplyQuote } : {}),
     ...(r.silent ? { silent: true } : {}),
     ...(r.reminder ? { reminder: true } : {}),
     ...(r.expires_at && !r.deleted ? { expiresAt: new Date(r.expires_at as string).getTime() } : {}),
@@ -398,7 +399,7 @@ export async function listChats(userId: number, opts: ListOpts = {}): Promise<Ch
     draft: r.draft ? { text: (r.draft as { text: string }).text, at: new Date((r.draft as { at: string }).at).toISOString(), ...((r.draft as { entities?: Entity[] | null }).entities?.length ? { entities: normalizeEntities((r.draft as { text: string }).text, (r.draft as { entities: Entity[] }).entities) } : {}) } : null,
     last: r.m_id == null ? null : toMessage({
       id: r.m_id, chat_id: r.m_chat_id, sender_id: r.m_sender_id, client_id: r.m_client_id,
-      body: r.m_body, kind: r.m_kind, attachment: r.m_attachment, reply_to_id: r.m_reply_to_id, created_at: r.m_created_at, edited_at: r.m_edited_at, deleted: r.m_deleted, expires_at: r.m_expires_at, entities: r.m_entities, service_type: r.m_service_type, service_data: r.m_service_data, todo: r.m_todo, poll: r.m_poll, data: r.m_data, fwd_from: r.m_fwd_from, buttons: r.m_buttons, sticker: r.m_sticker,
+      body: r.m_body, kind: r.m_kind, attachment: r.m_attachment, reply_to_id: r.m_reply_to_id, quote: r.m_quote, created_at: r.m_created_at, edited_at: r.m_edited_at, deleted: r.m_deleted, expires_at: r.m_expires_at, entities: r.m_entities, service_type: r.m_service_type, service_data: r.m_service_data, todo: r.m_todo, poll: r.m_poll, data: r.m_data, fwd_from: r.m_fwd_from, buttons: r.m_buttons, sticker: r.m_sticker,
       post: r.m_post, post_author: r.m_post_author, views: r.m_views, thread_id: r.m_thread_id, origin: r.m_origin,
     }),
   }));

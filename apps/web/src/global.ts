@@ -12,7 +12,7 @@ import { defaultPrivacy, type ChatFolder, type PrivacyRules, type SessionInfo } 
 /** filling — окно у живого края не набрано: история не дошла до начала, сообщений меньше лимита (движок, queries.ts). */
 export interface FeedMeta { hasOlder: boolean; hasNewer: boolean; live: boolean; filling?: boolean }
 
-export type Focus = { id: number; sort: number; nonce: number; replaced: boolean };
+export type Focus = { id: number; sort: number; nonce: number; replaced: boolean; quote?: { text: string; offset: number } };   // quote — цитата: подсветить фрагмент, а не всё сообщение
 
 /**
  * Чат в стеке (как Chat в стеке Telegram Web): у каждого своя лента и своя колонка в DOM.

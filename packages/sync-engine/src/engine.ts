@@ -1155,7 +1155,7 @@ export class Engine {
         const clientId = crypto.randomUUID();
         const draft = a.keepDraft ? null : await this.takeDraft(a.chatId);   // отправили — черновик больше не нужен
         this.lastCreated = Math.max(Date.now(), this.lastCreated + 1); // порядок черновиков внутри одной миллисекунды
-        this.store.addPending({ clientId, chatId: a.chatId, body: a.body, entities: a.entities ?? [], replyToId: a.replyToId ?? null, createdAt: this.lastCreated, failed: false, draftHash: draft,
+        this.store.addPending({ clientId, chatId: a.chatId, body: a.body, entities: a.entities ?? [], replyToId: a.replyToId ?? null, ...(a.replyToId != null && a.replyQuote ? { replyQuote: a.replyQuote } : {}), createdAt: this.lastCreated, failed: false, draftHash: draft,
           ...(a.noLinkPreview ? { noLinkPreview: true } : a.link ? { link: a.link } : {}),
           ...(a.attachment && a.attachment.id ? { attachment: a.attachment } : {}),
           ...(a.blocks && a.blocks.length ? { blocks: a.blocks } : {}),
@@ -1266,7 +1266,7 @@ export class Engine {
         const clientId = crypto.randomUUID();
         this.lastCreated = Math.max(Date.now(), this.lastCreated + 1);
         const todo = { title: a.todo.title, items: a.todo.items.map((it, i) => ({ id: i + 1, title: it.title })), othersCanAppend: a.todo.othersCanAppend, othersCanComplete: a.todo.othersCanComplete, completions: [] };
-        this.store.addPending({ clientId, chatId: a.chatId, body: a.todo.title, entities: [], replyToId: a.replyToId ?? null, createdAt: this.lastCreated, failed: false, todo, draftHash: null });
+        this.store.addPending({ clientId, chatId: a.chatId, body: a.todo.title, entities: [], replyToId: a.replyToId ?? null, ...(a.replyToId != null && a.replyQuote ? { replyQuote: a.replyQuote } : {}), createdAt: this.lastCreated, failed: false, todo, draftHash: null });
         await this.store.flush();
         this.changed();
         this.pumpOutbox();
@@ -1276,7 +1276,7 @@ export class Engine {
         // опрос — как сообщение: в очередь (переживёт офлайн); варианты пронумерует сервер
         const clientId = crypto.randomUUID();
         this.lastCreated = Math.max(Date.now(), this.lastCreated + 1);
-        this.store.addPending({ clientId, chatId: a.chatId, body: a.poll.question, entities: [], replyToId: a.replyToId ?? null, createdAt: this.lastCreated, failed: false, poll: a.poll });
+        this.store.addPending({ clientId, chatId: a.chatId, body: a.poll.question, entities: [], replyToId: a.replyToId ?? null, ...(a.replyToId != null && a.replyQuote ? { replyQuote: a.replyQuote } : {}), createdAt: this.lastCreated, failed: false, poll: a.poll });
         await this.store.flush();
         this.changed();
         this.pumpOutbox();
@@ -1290,7 +1290,7 @@ export class Engine {
         // карточка контакта — ссылкой с ключом доступа (сервер без него не примет); ключ кладём в очередь вместе с сообщением
         if (s.contact && !s.contact.key) { const key = await this.peerKeyOf(s.contact.userId); if (key) s = { ...s, contact: { ...s.contact, key } }; }
         const body = s.contact ? s.contact.name : s.geo ? s.geo.title ?? '' : s.dice ? s.dice.emoji : '';
-        this.store.addPending({ clientId, chatId: a.chatId, body, entities: [], replyToId: a.replyToId ?? null, createdAt: this.lastCreated, failed: false, special: s });
+        this.store.addPending({ clientId, chatId: a.chatId, body, entities: [], replyToId: a.replyToId ?? null, ...(a.replyToId != null && a.replyQuote ? { replyQuote: a.replyQuote } : {}), createdAt: this.lastCreated, failed: false, special: s });
         await this.store.flush();
         this.changed();
         this.pumpOutbox();
@@ -1429,7 +1429,7 @@ export class Engine {
         await putBlob(this.db, clientId, a.file).catch((err) => { this.dev.log.error('putBlob', err); this.memBlobs.set(clientId, a.file); });
         const photo = !a.kind && /^image\//.test(a.mime) && !!a.w && !!a.h;
         const sized = photo || a.kind === 'round' || a.kind === 'video';
-        this.store.addPending({ clientId, chatId: a.chatId, body: a.body, replyToId: a.replyToId ?? null, createdAt: this.lastCreated, failed: false, draftHash: draft,
+        this.store.addPending({ clientId, chatId: a.chatId, body: a.body, replyToId: a.replyToId ?? null, ...(a.replyToId != null && a.replyQuote ? { replyQuote: a.replyQuote } : {}), createdAt: this.lastCreated, failed: false, draftHash: draft,
           ...(a.groupId ? { groupId: a.groupId } : {}), ...(a.threadId != null ? { threadId: a.threadId } : {}),
           ...(a.silent ? { silent: true } : {}), ...(a.scheduleAt != null ? { scheduleAt: a.scheduleAt } : {}),
           attachment: { id: '', kind: a.kind ?? (photo ? 'photo' : 'file'), mime: a.mime, name: a.name, size: a.file.size, w: sized ? a.w ?? null : null, h: sized ? a.h ?? null : null, thumb: a.thumb ?? null,
@@ -1455,11 +1455,11 @@ export class Engine {
         };
         // ответ — у первого сообщения (подписи или первой копии), и только у копии в один чат
         let reply = a.hideSender && a.toChatIds.length === 1 ? a.replyToId ?? null : null;
-        const takeReply = () => { const r = reply; reply = null; return r; };
+        const takeReply = () => { const r = reply; reply = null; return r != null && a.replyQuote ? { replyToId: r, replyQuote: a.replyQuote } : { replyToId: r }; };
         for (const chatId of a.toChatIds) {
           const comment = a.comment?.body.trim() ? a.comment : null;
           // подпись набрана в поле ввода — она и забирает черновик чата
-          if (comment) queue({ chatId, body: comment.body, entities: comment.entities ?? [], replyToId: takeReply(), draftHash: await this.takeDraft(chatId) });
+          if (comment) queue({ chatId, body: comment.body, entities: comment.entities ?? [], ...takeReply(), draftHash: await this.takeDraft(chatId) });
           const groups = new Map<string, string>();
           for (const m of srcs) {
             const dropCaption = !!a.hideCaption && !!m.attachment;
@@ -1469,7 +1469,7 @@ export class Engine {
               : { userId: m.senderId, name: this.nameOf(m.senderId), chatId: a.fromChatId, messageId: m.id!, at: m.createdAt });
             let groupId: string | null = null;
             if (m.groupId && m.attachment) { groupId = groups.get(m.groupId) ?? crypto.randomUUID(); groups.set(m.groupId, groupId); }
-            queue({ chatId, body: dropCaption ? '' : m.body, entities: dropCaption ? [] : m.entities ?? [], replyToId: takeReply(), attachment: m.attachment ?? null, draftHash: null,
+            queue({ chatId, body: dropCaption ? '' : m.body, entities: dropCaption ? [] : m.entities ?? [], ...takeReply(), attachment: m.attachment ?? null, draftHash: null,
               ...(groupId ? { groupId } : {}), forward: { chatId: a.fromChatId, id: m.id!, ...(a.hideSender ? { hideSender: true } : {}), ...(a.hideCaption ? { hideCaption: true } : {}) }, fwdFrom });
           }
         }
@@ -1562,7 +1562,7 @@ export class Engine {
       case 'sendSticker': {
         const clientId = crypto.randomUUID();
         this.lastCreated = Math.max(Date.now(), this.lastCreated + 1);
-        this.store.addPending({ clientId, chatId: a.chatId, body: '', entities: [], replyToId: a.replyToId ?? null, createdAt: this.lastCreated, failed: false, sticker: a.sticker, draftHash: null, ...(a.silent ? { silent: true } : {}), ...(a.scheduleAt != null ? { scheduleAt: a.scheduleAt } : {}), ...(a.threadId != null ? { threadId: a.threadId } : {}) });
+        this.store.addPending({ clientId, chatId: a.chatId, body: '', entities: [], replyToId: a.replyToId ?? null, ...(a.replyToId != null && a.replyQuote ? { replyQuote: a.replyQuote } : {}), createdAt: this.lastCreated, failed: false, sticker: a.sticker, draftHash: null, ...(a.silent ? { silent: true } : {}), ...(a.scheduleAt != null ? { scheduleAt: a.scheduleAt } : {}), ...(a.threadId != null ? { threadId: a.threadId } : {}) });
         await this.store.flush();
         this.changed();
         this.pumpOutbox();
@@ -2565,7 +2565,7 @@ export class Engine {
           const planned = next.scheduleAt != null ? { at: next.scheduleAt, body: next.body, entities: next.entities } : null;
           try {
             const att = next.attachment ? { id: next.attachment.id, thumb: next.attachment.thumb ?? null, ...(next.attachment.spoiler ? { spoiler: true } : {}) } : null;
-            const r = await this.request({ op: 'send', reqId: '', clientId: next.clientId, chatId: next.chatId, body: next.body, entities: next.entities ?? [], replyToId: next.replyToId, attachment: next.forward ? null : att, ...(next.groupId ? { groupId: next.groupId } : {}), ...(next.forward ? { forward: next.forward } : {}), ...(next.noLinkPreview ? { noLinkPreview: true } : {}), ...(next.blocks ? { blocks: next.blocks } : {}), ...(next.sticker ? { sticker: { id: next.sticker.id } } : {}), ...(next.todo ? { todo: { title: next.todo.title, items: next.todo.items.map((x) => ({ title: x.title })), othersCanAppend: next.todo.othersCanAppend, othersCanComplete: next.todo.othersCanComplete } } : {}), ...(next.poll ? { poll: next.poll } : {}), ...(next.special?.contact ? { contact: { userId: next.special.contact.userId, ...(next.special.contact.key ? { key: next.special.contact.key } : {}) } } : {}), ...(next.special?.geo ? { geo: next.special.geo } : {}), ...(next.special?.dice ? { dice: next.special.dice } : {}), ...(next.silent ? { silent: true } : {}), ...(planned ? { scheduleAt: planned.at } : {}), ...(next.threadId != null ? { threadId: next.threadId } : {}), ...(next.draftHash !== undefined ? { draftHash: next.draftHash } : {}) });
+            const r = await this.request({ op: 'send', reqId: '', clientId: next.clientId, chatId: next.chatId, body: next.body, entities: next.entities ?? [], replyToId: next.replyToId, ...(next.replyQuote ? { replyQuote: { text: next.replyQuote.text, offset: next.replyQuote.offset } } : {}), attachment: next.forward ? null : att, ...(next.groupId ? { groupId: next.groupId } : {}), ...(next.forward ? { forward: next.forward } : {}), ...(next.noLinkPreview ? { noLinkPreview: true } : {}), ...(next.blocks ? { blocks: next.blocks } : {}), ...(next.sticker ? { sticker: { id: next.sticker.id } } : {}), ...(next.todo ? { todo: { title: next.todo.title, items: next.todo.items.map((x) => ({ title: x.title })), othersCanAppend: next.todo.othersCanAppend, othersCanComplete: next.todo.othersCanComplete } } : {}), ...(next.poll ? { poll: next.poll } : {}), ...(next.special?.contact ? { contact: { userId: next.special.contact.userId, ...(next.special.contact.key ? { key: next.special.contact.key } : {}) } } : {}), ...(next.special?.geo ? { geo: next.special.geo } : {}), ...(next.special?.dice ? { dice: next.special.dice } : {}), ...(next.silent ? { silent: true } : {}), ...(planned ? { scheduleAt: planned.at } : {}), ...(next.threadId != null ? { threadId: next.threadId } : {}), ...(next.draftHash !== undefined ? { draftHash: next.draftHash } : {}) });
             if (planned) {
               // пока кадр летел, его могли поправить или удалить в очереди: сервер этого не знает — догнать операцией
               const now = this.store.outbox.get(next.clientId);
@@ -2591,6 +2591,8 @@ export class Engine {
           } catch (e) {
             // время прошло по часам сервера (свои отстают): как и с отложенным без сети — уходит сразу
             if ((e as ReqError).code === 'schedule_past' && this.store.outbox.has(next.clientId)) this.promoteToSend(next.clientId);
+            // цитируемый кусок убрали, пока ответ ждал сети: ответ уходит без фрагмента (тем же циклом), а не висит с ошибкой
+            else if ((e as ReqError).code === 'quote_gone' && this.store.dropQuote(next.clientId)) { /* следующий круг отправит его снова */ }
             // отказ сервера: код остаётся у сообщения (blocked — интерфейс заменит поле ввода плашкой)
             else if ((e as ReqError).retry === false) this.store.fail(next.clientId, (e as ReqError).code);
             else { if ((e as ReqError).code !== 'offline') this.retryOutboxLater(); break; } // сеть — дождёмся переподключения, порядок сохранится
