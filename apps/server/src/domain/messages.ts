@@ -3,7 +3,7 @@ import { attachmentForSend } from './files';
 import { clearDraftInTx } from './drafts';
 import { rightForKind, normalizeEntities, trimFormatted, type Block, blocksText, normalizeBlocks, type Entity, type ForwardInfo, type ForwardRef, type ProfilePhoto, type LinkPreview, type Message, type StickerRef, type Todo, type TodoInput, type PollInput, normalizeGeo, isDiceEmoji, DICE_FACES, type ContactCard, type GeoPoint, type Dice, type DiceEmoji } from '@relay/protocol';
 import { newTodo } from './todo';
-import { sql } from '../db';
+import { sql, type Tx } from '../db';
 import { assertMember, readOwnPost, shownTodo, toMessage } from './chats';
 import { DomainError } from './errors';
 import { appendUpdates, chatEvent } from './journal';
@@ -32,7 +32,10 @@ export function rollDice(emoji: DiceEmoji): number {
 
 export async function sendMessage(
   userId: number,
-  input: { chatId: number; clientId: string; body: string; entities?: Entity[]; replyToId?: number | null; attachment?: { id: string; thumb?: string | null } | null; groupId?: string | null; forward?: ForwardRef | null; noLinkPreview?: boolean; blocks?: unknown; todo?: TodoInput | null; poll?: PollInput | null; contact?: { userId: number } | null; geo?: GeoPoint | null; dice?: { emoji: DiceEmoji } | null; sticker?: { id: number } | null; threadId?: number | null; draftHash?: string | null },
+  input: { chatId: number; clientId: string; body: string; entities?: Entity[]; replyToId?: number | null; attachment?: { id: string; thumb?: string | null } | null; groupId?: string | null; forward?: ForwardRef | null; noLinkPreview?: boolean; blocks?: unknown; todo?: TodoInput | null; poll?: PollInput | null; contact?: { userId: number } | null; geo?: GeoPoint | null; dice?: { emoji: DiceEmoji } | null; sticker?: { id: number } | null; threadId?: number | null; draftHash?: string | null; silent?: boolean; reminder?: boolean },
+  // публикация отложенного (scheduled.ts): before держит и проверяет его строку, after удаляет её — в этой же транзакции:
+  // сообщение появляется ровно вместе с уходом строки, правка или удаление не проскочат между ними
+  hook?: { before(tx: Tx): Promise<void>; after(tx: Tx, message: Message): Promise<void> },
 ): Promise<{ message: Message; duplicate: boolean }> {
   // пробелы по краям срезаем вместе с оформлением; оформление — только проверенное
   let { text: body, entities } = trimFormatted(input.body, normalizeEntities(input.body, input.entities));
@@ -70,6 +73,8 @@ export async function sendMessage(
   // ключ чата — в кэш до транзакции: внутри неё он берётся из памяти (создание в транзакции в кэш не попадает)
   await currentChatKey(input.chatId).catch(() => {});
   const res = await sql.begin(async (tx) => {
+    await hook?.before(tx);
+    const out = await (async () => {
     // комментарий может написать и не участник группы — подписчик канала (threadAccess: гость треда)
     const { ctx, guest } = input.threadId != null ? await threadAccess(tx, input.chatId, userId, input.threadId) : { ctx: await groupCtx(tx, input.chatId, userId), guest: null };
     // повтор уже принятого — ack, даже если права с тех пор отобрали
@@ -181,10 +186,10 @@ export async function sendMessage(
     // содержимое — шифром ключа чата (messageContent.ts); открытыми остаются метаданные
     const c = await contentColumns(input.chatId, input.clientId, { body, entities: entities.length ? entities : null, todo: todo ?? fwdTodo, poll: poll ?? fwdPoll, data, blocks, link, attachment }, tx);
     const inserted = await tx`
-      insert into messages (chat_id, sender_id, client_id, kind, body, entities, reply_to_id, attachment, group_id, fwd_from, link, blocks, todo, poll, data, sticker, content, has_link, post, post_author, thread_id)
+      insert into messages (chat_id, sender_id, client_id, kind, body, entities, reply_to_id, attachment, group_id, fwd_from, link, blocks, todo, poll, data, sticker, content, has_link, post, post_author, thread_id, silent, reminder)
       values (${input.chatId}, ${userId}, ${input.clientId}, ${kind}, ${c.body}, ${c.entities?.length ? sql.json(c.entities as never) : null}, ${canReply ? input.replyToId ?? null : null}, ${c.attachment ? sql.json(c.attachment as never) : null},
               ${attachment && input.groupId && /^[0-9a-f-]{36}$/.test(input.groupId) ? input.groupId : null},   -- группа — только у вложений
-              ${fwdFrom ? sql.json(fwdFrom as never) : null}, ${c.link ? sql.json(c.link as never) : null}, ${c.blocks ? sql.json(c.blocks as never) : null}, ${c.todo ? sql.json(c.todo as never) : null}, ${c.poll ? sql.json(c.poll as never) : null}, ${c.data ? sql.json(c.data as never) : null}, ${sticker ? sql.json(sticker as never) : null}, ${c.content}, ${c.hasLink}, ${!!post}, ${post?.author ?? null}, ${threadId})
+              ${fwdFrom ? sql.json(fwdFrom as never) : null}, ${c.link ? sql.json(c.link as never) : null}, ${c.blocks ? sql.json(c.blocks as never) : null}, ${c.todo ? sql.json(c.todo as never) : null}, ${c.poll ? sql.json(c.poll as never) : null}, ${c.data ? sql.json(c.data as never) : null}, ${sticker ? sql.json(sticker as never) : null}, ${c.content}, ${c.hasLink}, ${!!post}, ${post?.author ?? null}, ${threadId}, ${!!input.silent}, ${!!input.reminder})
       on conflict (sender_id, client_id) do nothing
       returning *`;
     if (inserted.length === 0) {
@@ -219,6 +224,9 @@ export async function sendMessage(
     // в задаче — только ссылка на сообщение: адрес задача прочтёт из шифра (в jobs и jobs_dead открытых URL нет)
     if (fetchLink) await enqueue(tx, 'link.preview', { chatId: input.chatId, id: message.id }, { maxAttempts: 2 });
     return { message, duplicate: false };
+    })();
+    await hook?.after(tx, out.message);
+    return out;
   });
   return res;
 }

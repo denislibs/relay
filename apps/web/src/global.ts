@@ -22,6 +22,7 @@ export type Focus = { id: number; sort: number; nonce: number; replaced: boolean
 export interface ChatFrame {
   key: string;
   chatId: number;
+  scheduled?: boolean;        // страница отложенных этого чата (лента — Query scheduled, в адрес не попадает)
   threadId?: number;          // тред комментариев в группе обсуждения: id копии поста (лента — Query thread)
   // тред: ключ шапки (копии поста) в messages; загружен ли с сервера; guest — я не участник группы (комментирую как подписчик канала)
   thread?: { header: string | null; loaded: boolean; guest?: ThreadGuest | null };

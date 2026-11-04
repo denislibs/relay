@@ -182,6 +182,7 @@ function Composer(props) {
     props.apiRef.current = {
       getValue: function () { return editRef.current ? readDom(editRef.current) : emptyValue(); },
       setValue: setValue,
+      send: function () { send(); },   // отправить из меню кнопки (без звука, отложить): та же дорога, что и по кнопке
       focus: function (opts) { if (opts && opts.end) focusEnd(); else if (editRef.current) editRef.current.focus({ preventScroll: true }); },
       element: function () { return editRef.current; },
       /** Вставить значение (с оформлением) туда, где был курсор, — даже если фокус ушёл в окно. range — свой диапазон. */
@@ -497,6 +498,9 @@ function Composer(props) {
   var mode = rec[0] ? 'send' : props.editing ? 'edit' : st.hasText || props.sendEmpty ? 'send' : recordMode === 'round' ? 'round' : recordMode ? 'mic' : 'send';
   var canSwitch = modes.length > 1 && (mode === 'mic' || mode === 'round');
   var pressTimer = useRef(null);
+  // меню кнопки в режиме отправки (правый клик, долгое нажатие): «Отправить без звука», «Отправить позже»
+  var sendItems = mode === 'send' && !rec[0] && props.sendItems && props.sendItems.length ? props.sendItems : null;
+  var sendMenu = useState(false);
   var ready = useRef(false);
   // после первой отрисовки, в фазе mutate кадра: запись из обычной задачи «пачкала» раскладку до следующей прокрутки
   useEffect(function () {
@@ -542,6 +546,7 @@ function Composer(props) {
       h('button', { key: 'link', type: 'button', class: cx('rl-fmtbtn', b.active.link && 'rl-fmtbtn-on'), 'aria-pressed': String(!!b.active.link), 'aria-label': b.active.link ? 'Убрать ссылку' : 'Ссылка', title: 'Ссылка ' + comboLabel('mod+k'),
         onClick: function () { if (b.active.link) format('link', null); else openLink(); } }, h(Icon, { name: 'link', size: 20 })),
     ])) : null),
+    h(MenuPopover, { open: sendMenu[0] && !!sendItems, anchor: sendRef.current, placement: 'top-end', label: 'Параметры отправки', onClose: function () { sendMenu[1](false); }, items: sendItems || [] }),
     h(MenuPopover, { open: modeMenu[0], anchor: sendRef.current, placement: 'top-end', label: 'Тип сообщения', onClose: function () { modeMenu[1](false); }, items: [
       { icon: 'mic', label: 'Голосовое сообщение', onClick: function () { if (props.onRecordModeChange) props.onRecordModeChange('voice'); } },
       { icon: 'roundVideo', label: 'Видеосообщение', onClick: function () { if (props.onRecordModeChange) props.onRecordModeChange('round'); } },
@@ -580,17 +585,25 @@ function Composer(props) {
         h(IconButton, { icon: 'smile', label: 'Эмодзи и стикеры', class: cx('rl-emoji-toggle', symbols[0] && 'rl-emoji-toggle-on'), 'aria-expanded': props.symbolMenu ? symbols[0] : undefined,
           onPointerEnter: props.symbolMenu ? symbolsHover.onPointerEnter : undefined, onPointerLeave: props.symbolMenu ? symbolsHover.onPointerLeave : undefined,
           onMouseDown: function (e) { e.preventDefault(); },   // фокус остаётся в поле: эмодзи вставляются туда, где курсор
-          onClick: props.symbolMenu ? symbolsHover.toggle : undefined })),
+          onClick: props.symbolMenu ? symbolsHover.toggle : undefined }),
+        // отложенные этого чата: значок часов со счётчиком (appear — появляется плавно, без сдвига поля)
+        h(Presence, { show: props.scheduledCount > 0, exitMs: 160 }, h('button', Object.assign({ type: 'button', class: 'rl-composer-sched', 'aria-label': props.scheduledLabel || 'Отложенные сообщения' }, props.scheduledPress || {}),
+          h(Icon, { name: 'clock', size: 22 }), h('span', { class: 'rl-composer-sched-n' }, props.scheduledCount)))),
       h('button', {
         type: 'button', ref: sendRef, class: cx('rl-composer-send', 'rl-send-' + mode), 'aria-label': mode === 'edit' ? 'Сохранить' : mode === 'send' ? 'Отправить' : mode === 'round' ? 'Записать видеосообщение' : 'Записать голосовое',
         onPointerDown: function (e) {
           ripple(e);
           // долгое нажатие пальцем — выбор: голосовое или кружок (мышью — правая кнопка)
           if (canSwitch && e.pointerType === 'touch') pressTimer.current = setTimeout(function () { pressTimer.current = 'fired'; modeMenu[1](true); }, 200);
+          // и меню отправки: дольше — короткое касание остаётся отправкой
+          else if (sendItems && e.pointerType === 'touch') pressTimer.current = setTimeout(function () { pressTimer.current = 'fired'; sendMenu[1](true); }, 400);
         },
         onPointerUp: function () { if (pressTimer.current && pressTimer.current !== 'fired') clearTimeout(pressTimer.current); },
         onMouseDown: function (e) { e.preventDefault(); },   // фокус остаётся в поле (клавиатура телефона не прячется)
-        onContextMenu: function (e) { if (!canSwitch) return; e.preventDefault(); modeMenu[1](true); },
+        onPointerCancel: function () { if (pressTimer.current && pressTimer.current !== 'fired') clearTimeout(pressTimer.current); },
+        // меню уже открыто под пальцем: отпускание не должно стать кликом — он пришёлся бы в подложку и закрыл его
+        onTouchEnd: function (e) { if (pressTimer.current === 'fired') { e.preventDefault(); pressTimer.current = null; } },
+        onContextMenu: function (e) { if (sendItems) { e.preventDefault(); sendMenu[1](true); return; } if (!canSwitch) return; e.preventDefault(); modeMenu[1](true); },
         onClick: function () { if (pressTimer.current === 'fired') { pressTimer.current = null; return; } send(); },
       },
         // кнопка отправки — залитые значки, как у Telegram

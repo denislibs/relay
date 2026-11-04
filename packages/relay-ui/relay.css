@@ -2772,3 +2772,10 @@ html[data-anim="0"] .rl-symbols-pop { transition: none; }
    полей цветом вторичного текста, а не бледнее него */
 .rl-contrast .rl-bubble a:not(.rl-link-card):not(.rl-webpage), .rl-contrast .rl-link { text-decoration: underline; }
 .rl-contrast input::placeholder, .rl-contrast textarea::placeholder, .rl-contrast [data-placeholder]::before { color: var(--ink-muted); opacity: 1; }
+
+/* Отложенные: значок часов со счётчиком у поля ввода */
+.rl-composer-sched { position: relative; display: grid; place-items: center; width: 2.5rem; height: 2.5rem; flex: none; padding: 0; border: 0; border-radius: 50%; background: transparent; color: var(--ink-muted); cursor: pointer; transition: color 120ms ease; }
+.rl-composer-sched:hover { color: var(--brand-strong); }
+.rl-composer-sched-n { position: absolute; top: 3px; right: 1px; min-width: 16px; height: 16px; padding: 0 4px; border-radius: 8px; background: var(--brand); color: #fff; font: 600 11px/16px var(--font-sans); text-align: center; pointer-events: none; }
+.rl-presence[data-state="open"] > .rl-composer-sched { animation: rl-pop-in 160ms var(--ease-out, ease-out) both; }
+.rl-presence[data-state="closing"] > .rl-composer-sched { animation: rl-pop-out 140ms var(--ease-in, ease-in) forwards; }

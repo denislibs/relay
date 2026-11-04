@@ -29,11 +29,11 @@ export async function copyPost(tx: Tx, channelId: number, post: Record<string, u
     blocks: (post.blocks as unknown[] | null) ?? null, link: post.link ?? null, attachment,
   }, tx);
   const [row] = await tx`
-    insert into messages (chat_id, sender_id, client_id, kind, body, entities, attachment, group_id, fwd_from, link, blocks, todo, poll, data, sticker, content, has_link, post, post_author, origin)
+    insert into messages (chat_id, sender_id, client_id, kind, body, entities, attachment, group_id, fwd_from, link, blocks, todo, poll, data, sticker, content, has_link, post, post_author, origin, silent)
     values (${groupId}, ${authorId}, ${clientId}, ${post.kind as string}, ${c.body}, ${c.entities?.length ? sql.json(c.entities as never) : null}, ${c.attachment ? sql.json(c.attachment as never) : null},
             ${(post.group_id as string | null) ?? null}, ${post.fwd_from ? sql.json(post.fwd_from as never) : null}, ${c.link ? sql.json(c.link as never) : null}, ${c.blocks ? sql.json(c.blocks as never) : null},
             ${c.todo ? sql.json(c.todo as never) : null}, ${c.poll ? sql.json(c.poll as never) : null}, ${c.data ? sql.json(c.data as never) : null}, ${post.sticker ? sql.json(post.sticker as never) : null}, ${c.content}, ${c.hasLink}, true, ${(post.post_author as string | null) ?? null},
-            ${sql.json({ chatId: channelId, id: Number(post.id) } as never)})
+            ${sql.json({ chatId: channelId, id: Number(post.id) } as never)}, ${!!post.silent})
     returning *`;
   const copy = toMessage((await openRows([row], '', tx))[0]);
   await chatEvent(tx, groupId, { type: 'newMessage', message: copy }, 'group');

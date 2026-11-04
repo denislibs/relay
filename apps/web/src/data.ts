@@ -162,7 +162,7 @@ function watchNotifications(meId: number): void {
       if (shown.has(n.key)) continue;
       shown.add(n.key);
       const chatId = n.chatId as number;
-      if (n.senderId === meId && !n.post) continue;
+      if (n.senderId === meId && !n.post && !n.reminder) continue;   // своё не уведомляет; напоминание себе — уведомляет
       const item = { chatId, post: !!n.post, mention: !!n.mention };
       // копия поста в группе обсуждения: подписчик канала уже уведомлён самим постом; открыт канал — пост на экране
       const copyOf = postCopyChannel(item, chatOf);
@@ -173,7 +173,7 @@ function watchNotifications(meId: number): void {
       noteIncoming(chatId, { muted: isMuted(c ?? { id: chatId }) && !item.mention, createdAt: n.createdAt as string });
       notifyIncoming({ id: chatId, title: (c?.title as string) || 'Чат №' + chatId, muted: isMuted(c ?? { id: chatId }), system: isSystemChat(c) },
         { id: n.id as number, body: hideSpoilers(String(n.body ?? ''), n.entities as Entity[] | undefined), kind: n.kind as string | undefined, attachmentName: n.attachmentName as string | null, createdAt: n.createdAt as string, service: n.service as { type: string } | undefined, threadId: n.threadId as number | undefined },
-        { mention: !!n.mention });
+        { mention: !!n.mention, reminder: !!n.reminder });
     }
     // держим только ключи, что ещё в списке движка (он сам хранит последние)
     if (shown.size > items.length * 2 + 50) shown = new Set(items.map((n) => n.key));
@@ -266,7 +266,7 @@ export function savedPosition(t: StackTarget) { return positions.get(positionKey
  * изнутри чата) — новый чат поверх, прежний остаётся живым в DOM (вернуться — мгновенно, на том же месте).
  * У каждого кадра — своя подписка на окно ленты. */
 
-interface Session { chatId: number; threadId?: number; watch: { update(q: Query): void; close(): void }; mirror: Mirror; anchor: Anchor | undefined; moving: boolean; first: boolean; timer: ReturnType<typeof setTimeout> | null }
+interface Session { chatId: number; threadId?: number; scheduled?: boolean; watch: { update(q: Query): void; close(): void }; mirror: Mirror; anchor: Anchor | undefined; moving: boolean; first: boolean; timer: ReturnType<typeof setTimeout> | null }
 const sessions = new Map<string, Session>();
 let frameSeq = 0;
 let pendingBottom: { frame: ChatFrame; target?: { id: number; sort: number } } | null = null;   // новый нижний чат, лента ещё не готова
@@ -310,7 +310,7 @@ function toastUploadRefusals(items: Item[]): void {
 
 /** Окно ленты кадра; onFirst — первый снимок (или 700 мс без него: не держим пользователя на прежнем чате). */
 function startFeed(frame: ChatFrame, anchor: Anchor | undefined, onFirst: (patch: Partial<ChatFrame>) => void): void {
-  const s: Session = { chatId: frame.chatId, threadId: frame.threadId, mirror: new Mirror(), anchor, moving: true, first: true, timer: null, watch: null as never };
+  const s: Session = { chatId: frame.chatId, threadId: frame.threadId, scheduled: frame.scheduled, mirror: new Mirror(), anchor, moving: true, first: true, timer: null, watch: null as never };
   sessions.set(frame.key, s);
   const asked = performance.now();
   // сколько лента ждала первый снимок от движка (SharedWorker → IndexedDB → сюда) — видно во вкладке Performance
@@ -341,20 +341,21 @@ function mirrorPatch(s: Session): Partial<ChatFrame> {
 }
 
 /** Окно ленты кадра: чат — messages, тред — thread (шапка-копия поста и комментарии из кэша группы). */
-function feedQuery(f: { chatId: number; threadId?: number }, anchor: Anchor | undefined): Query {
+function feedQuery(f: { chatId: number; threadId?: number; scheduled?: boolean }, anchor: Anchor | undefined): Query {
+  if (f.scheduled) return { kind: 'scheduled', chatId: f.chatId };
   return f.threadId != null ? { kind: 'thread', chatId: f.chatId, threadId: f.threadId, limit: WINDOW, anchor } : { kind: 'messages', chatId: f.chatId, limit: WINDOW, anchor };
 }
 
 function newFrame(t: StackTarget, target?: { id: number; sort: number }): { frame: ChatFrame; anchor: Anchor | undefined } {
   const chatId = t.chatId;
   const chat = findChat(getGlobal(), chatId);
-  const pos = positions.get(positionKey(t));
+  const pos = t.scheduled ? null : positions.get(positionKey(t));   // отложенные открываются снизу: ближайшие — у поля ввода
   // разделитель «Непрочитанные» — только у ленты чата (у треда своя прочитанность, readMaxId)
-  const unread = t.threadId == null && (chat?.unread as number) > 0 ? (chat!.lastReadId as number) : null;
+  const unread = t.threadId == null && !t.scheduled && (chat?.unread as number) > 0 ? (chat!.lastReadId as number) : null;
   // открыть на найденном сообщении; иначе: ушли из середины истории — туда же; непрочитанное; низ
   const anchor: Anchor | undefined = target ? { sort: target.sort, side: 'center' } : pos ? { sort: pos.sort, side: 'center' } : unread != null ? { sort: unread + 0.5, side: 'center' } : undefined;
   const frame: ChatFrame = {
-    key: 'c' + ++frameSeq, chatId, ...(t.threadId != null ? { threadId: t.threadId, thread: { header: null, loaded: false } } : {}), ready: false, messages: [], feedMeta: null,
+    key: 'c' + ++frameSeq, chatId, ...(t.scheduled ? { scheduled: true } : {}), ...(t.threadId != null ? { threadId: t.threadId, thread: { header: null, loaded: false } } : {}), ready: false, messages: [], feedMeta: null,
     unreadFrom: target ? null : unread,
     focus: target ? { ...target, nonce: Date.now(), replaced: true } : null,
   };
@@ -586,7 +587,7 @@ export function openChat(chatId: number | null, target?: { id: number; sort: num
   if (leaveTimer) { clearTimeout(leaveTimer); leaveTimer = 0; setGlobal({ listLeaving: false }); }
   const g = getGlobal(), st = g.chatStack, top = topReady();
   // тот же чат на экране — только прокрутка; его тред поверх — другой слой (ниже вернёмся к самой группе)
-  if (chatId != null && (g.pendingChatId ?? top?.chatId) === chatId && top?.threadId == null && (st.length <= 1 || top?.chatId === chatId)) {
+  if (chatId != null && (g.pendingChatId ?? top?.chatId) === chatId && top?.threadId == null && !top?.scheduled && (st.length <= 1 || top?.chatId === chatId)) {
     if (target) focusMessage(target);
     return;
   }
@@ -865,6 +866,9 @@ export async function mediaDays(chatId: number, y: number, m: number): Promise<R
 }
 
 export function focusMessage(target: { id: number; sort: number }): void {
+  // цитата на странице отложенных: сообщение — в ленте чата под ней
+  const under = topReady();
+  if (under?.scheduled) { const st = stack(); popTo(st.length - 2); }
   const f = topReady();
   const s = f && sessions.get(f.key);
   if (!f || !s) return;
@@ -895,10 +899,12 @@ export function sentSound(): void {
   if (p.sound) playSentSound(p.volume);
 }
 
-export async function send(chatId: number, body: string, replyToId: number | null = null, entities: Entity[] = [], opts: { noLinkPreview?: boolean; link?: LinkPreview | null; blocks?: Block[] | null; threadId?: number } = {}): Promise<void> {
-  sentSound();
-  nudgeWallpaper();
-  toLatestOf(chatId); // своё сообщение — внизу, как в Telegram
+export async function send(chatId: number, body: string, replyToId: number | null = null, entities: Entity[] = [], opts: { noLinkPreview?: boolean; link?: LinkPreview | null; blocks?: Block[] | null; threadId?: number } & SendWhen = {}): Promise<void> {
+  if (opts.scheduleAt == null) {   // отложенное в ленту не идёт: ни звука, ни прокрутки
+    sentSound();
+    nudgeWallpaper();
+    toLatestOf(chatId); // своё сообщение — внизу, как в Telegram
+  }
   await engine.call({ type: 'sendMessage', chatId, body, entities, replyToId, ...opts });
 }
 
@@ -993,7 +999,28 @@ export function describeVideo(file: Blob): Promise<{ w: number; h: number; durat
 
 /** Как отправить: asFile — документом (без сжатия и превью, как «Отправить как файл» в Telegram); spoiler — фото/видео размыто;
  *  quality — видео: '720'/'1080' — пережать в браузере (WebCodecs, где есть), 'original' — как есть. */
-export interface SendOpts { asFile?: boolean; spoiler?: boolean; quality?: VideoQuality; threadId?: number }   // threadId — комментарий в треде
+/** Без звука и отложить (keepDraft — со страницы отложенных: черновик чата не трогать). */
+export interface SendWhen { silent?: boolean; scheduleAt?: number; keepDraft?: boolean }
+const whenOf = (o: SendWhen): SendWhen => ({ ...(o.silent ? { silent: true } : {}), ...(o.scheduleAt != null ? { scheduleAt: o.scheduleAt } : {}), ...(o.keepDraft ? { keepDraft: true } : {}) });
+
+/* ---------- отложенные: всё оптимистично, дальше — очередью движка ---------- */
+export function openScheduled(chatId: number): void { openInner({ chatId, scheduled: true }); }
+/** Заготовка страницы по нажатию мыши (ui/press.ts): колонка раскладывается скрытой, клик только переключает. */
+export function prepareScheduled(chatId: number): Prepared | null {
+  if (!topReady() || findTarget(stack(), { chatId, scheduled: true }) >= 0) return null;
+  const hold: Hold = { released: false, key: null, waiting: null, onCommit: null };
+  openInner({ chatId, scheduled: true }, undefined, hold);
+  return holdHandle(hold);
+}
+export function editScheduled(chatId: number, clientId: string, p: { sendAt?: number; body?: string; entities?: Entity[] }): void { engine.call({ type: 'scheduledEdit', chatId, clientId, ...p }).catch(() => {}); }
+export function sendScheduledNow(chatId: number, clientId: string): void { engine.call({ type: 'scheduledSendNow', chatId, clientId }).catch(() => {}); }
+export function deleteScheduled(chatId: number, clientId: string): void {
+  const url = localPreviews.get(clientId);
+  if (url) { URL.revokeObjectURL(url); localPreviews.delete(clientId); }
+  engine.call({ type: 'scheduledDelete', chatId, clientId }).catch(() => {});
+}
+
+export interface SendOpts extends SendWhen { asFile?: boolean; spoiler?: boolean; quality?: VideoQuality; threadId?: number }   // threadId — комментарий в треде
 
 /** Видео, которые сейчас сжимаются (ещё не в очереди движка): отмена из плашки «Сжатие видео». */
 const preparing = new Map<string, AbortController>();
@@ -1052,14 +1079,16 @@ export function groupCall<T = unknown>(method: 'GET' | 'POST' | 'PUT' | 'PATCH' 
 export function markListened(chatId: number, id: number): void { engine.call({ type: 'listened', chatId, id }).catch(() => {}); }
 
 export async function sendFile(chatId: number, file: File, caption: string, replyToId: number | null = null, groupId: string | null = null, opts: SendOpts = {}): Promise<void> {
-  sentSound();
-  nudgeWallpaper();
-  toLatestOf(chatId);
+  if (opts.scheduleAt == null) {
+    sentSound();
+    nudgeWallpaper();
+    toLatestOf(chatId);
+  }
   // фото — как в Telegram: до 2560 px и перекодировано (оригинал — только «как файл»); видео — по выбору «Качество»
   if (!opts.asFile) file = await shrinkForSend(chatId, file, opts.quality ?? 'original');
   const img = opts.asFile ? null : await describeImage(file);
   const vid = opts.asFile || img ? null : await describeVideo(file);
-  const thread = opts.threadId != null ? { threadId: opts.threadId } : {};
+  const thread = { ...(opts.threadId != null ? { threadId: opts.threadId } : {}), ...whenOf(opts) };
   if (vid) {
     const res = (await engine.call({ type: 'sendFile', chatId, body: caption, file, name: file.name || 'video.mp4', mime: file.type, kind: 'video', w: vid.w, h: vid.h, duration: vid.duration, thumb: vid.thumb, replyToId,
       ...(opts.spoiler ? { spoiler: true } : {}), ...(groupId ? { groupId } : {}), ...thread })) as { clientId: string };
@@ -1098,7 +1127,7 @@ const ALBUM_MAX = 10;
 export async function sendFiles(chatId: number, files: File[], caption: string, replyToId: number | null = null, opts: SendOpts = {}): Promise<void> {
   files = rejectTooBig(files);
   if (!files.length) return;
-  sentSound();
+  if (opts.scheduleAt == null) sentSound();
   if (files.length === 1) return sendFile(chatId, files[0], caption, replyToId, null, opts);
   // отменённое сжатие одного видео (× в плашке) не отменяет остальные файлы альбома
   const skipCancelled = (e: unknown) => { if ((e as Error)?.name !== 'AbortError') throw e; };

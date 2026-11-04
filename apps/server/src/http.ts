@@ -29,6 +29,7 @@ import { resolvePeer, resolvePeers } from './domain/peerRef';
 import { initPeerKeys } from './crypto/peerKey';
 import { THEMES } from './domain/themes';
 import { setChatTheme } from './domain/chatTheme';
+import { deleteScheduled, editScheduled, listScheduled } from './domain/scheduled';
 import { handleFrame } from './ws';
 import { pollVoters } from './domain/polls';
 import { mapTile } from './domain/mapTiles';
@@ -50,7 +51,7 @@ import { reactionsRoute } from './reactions/routes';
 import { animatedEmojiRoute } from './reactions/emoji';
 import { stickerRoute } from './stickers/routes';
 
-const STATUS: Record<string, number> = { bad_frame: 400, pin_limit: 409, too_long: 400, file_too_big: 413, username_invalid: 400, username_reserved: 400, username_taken: 409, bio_too_long: 400, note_too_long: 400, name_invalid: 400, birthday_invalid: 400, links_invalid: 400, folder_title: 400, folder_empty: 400, folder_too_many_chats: 400, folder_emoji: 400, folders_limit: 400, unauthorized: 401, not_member: 403, blocked: 403, not_found: 404, code_invalid: 400, code_expired: 400, flood: 429, fresh_session: 403, device_invalid: 400, password_invalid: 400, password_missing: 400, recovery_unavailable: 400, email_invalid: 400, qr_expired: 400, passkey_not_found: 404, passkey_invalid: 400, forbidden: 403, upload_missing: 409, upload_mismatch: 400, upload_pending: 409, upload_incomplete: 409, upload_limit: 429, upload_quota: 429, photo_invalid: 400 };
+const STATUS: Record<string, number> = { schedule_past: 400, schedule_far: 400, schedule_limit: 409, bad_frame: 400, pin_limit: 409, too_long: 400, file_too_big: 413, username_invalid: 400, username_reserved: 400, username_taken: 409, bio_too_long: 400, note_too_long: 400, name_invalid: 400, birthday_invalid: 400, links_invalid: 400, folder_title: 400, folder_empty: 400, folder_too_many_chats: 400, folder_emoji: 400, folders_limit: 400, unauthorized: 401, not_member: 403, blocked: 403, not_found: 404, code_invalid: 400, code_expired: 400, flood: 429, fresh_session: 403, device_invalid: 400, password_invalid: 400, password_missing: 400, recovery_unavailable: 400, email_invalid: 400, qr_expired: 400, passkey_not_found: 404, passkey_invalid: 400, forbidden: 403, upload_missing: 409, upload_mismatch: 400, upload_pending: 409, upload_incomplete: 409, upload_limit: 429, upload_quota: 429, photo_invalid: 400 };
 const fail = (code: string, retryAfter?: number) => retryAfter
   ? Response.json({ code, retryAfter }, { status: STATUS[code] ?? 500, headers: { 'retry-after': String(retryAfter) } })
   : Response.json({ code }, { status: STATUS[code] ?? 500 });
@@ -239,6 +240,11 @@ export function createServer(opts: { port: number }): Server {
         if (req.method === 'PUT' && chatFlags) return Response.json(await setChatFlags(userId, Number(chatFlags[1]), await req.json().catch(() => null)));
         const chatUnarchive = /^\/chats\/(\d{1,15})\/unarchive$/.exec(url.pathname);
         if (req.method === 'POST' && chatUnarchive) return Response.json(await unarchiveByMessage(userId, Number(chatUnarchive[1]), await req.json().catch(() => null)));
+        // отложенные сообщения (domain/scheduled.ts): снимок, правка (время, текст, send — отправить сейчас), удаление
+        if (req.method === 'GET' && url.pathname === '/chats/scheduled') return Response.json(await listScheduled(userId));
+        const scheduledOne = /^\/chats\/(\d{1,15})\/scheduled\/([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})$/.exec(url.pathname);
+        if (scheduledOne && req.method === 'PATCH') return Response.json(await editScheduled(userId, Number(scheduledOne[1]), scheduledOne[2], await req.json().catch(() => null)));
+        if (scheduledOne && req.method === 'DELETE') return Response.json(await deleteScheduled(userId, Number(scheduledOne[1]), scheduledOne[2]));
         // тема чата: { theme: id | null } (domain/chatTheme.ts)
         const chatTheme = /^\/chats\/(\d{1,15})\/theme$/.exec(url.pathname);
         if (req.method === 'PUT' && chatTheme) return Response.json(await setChatTheme(userId, Number(chatTheme[1]), ((await req.json().catch(() => null)) as { theme?: unknown } | null)?.theme ?? null));

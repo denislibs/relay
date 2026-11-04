@@ -24,6 +24,7 @@ await ensurePeriodic('crypto.rewrap');
 await ensurePeriodic('journal.trim');
 await ensurePeriodic('crypto.bind');
 await ensurePeriodic('linkPreview.expire');
+await ensurePeriodic('scheduled.sweep');
 // строки до шифрования (messageContent.ts): одна задача на запуск, дубль не встанет
 await enqueue(sql, 'crypto.encrypt', {}, { dedupeKey: 'crypto.encrypt' });
 // индекс поиска не той версии или ещё не построен — перестройка (до её конца поиск идёт по Postgres)

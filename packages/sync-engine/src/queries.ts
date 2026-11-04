@@ -62,6 +62,7 @@ const chatItem = (store: Store, c: LocalChat, person: ReturnType<typeof personVi
   // canSend: в канале пишет только админ с правом post (channel.ts)
   canSend: canPost(c),
   photo: person ? person.photo : c.group?.photo ?? null, group: c.group ?? null, me: c.me ?? null, membersRev: store.members.rev(c.id), sortAt: sortAt(c), draft: c.draft?.text ?? null, draftEntities: c.draft?.entities ?? null, pinned: c.pinned ?? [], muteUntil,
+  scheduled: store.scheduledCount(c.id),
   pinnedAt: f.pinnedAt, archived: f.archived, unreadMark: f.unreadMark, mentions: c.mentions ?? 0, theme: c.theme ?? null,
   // непрочитанные реакции на мои сообщения: число и известные id (лента гасит их, увидев сообщение на экране)
   reactions: c.reactions ?? 0, reactionIds: c.reactionIds ?? null,
@@ -196,6 +197,16 @@ function windowItems(store: Store, chatId: number, all: LocalMessage[], from: nu
   if (missingQuotes.size) store.wantQuotes(chatId, [...missingQuotes]);
 }
 
+/** Отложенные чата: те же элементы, что у ленты, с цитатами; окно — все (больше сотни их не бывает). */
+export function scheduledResult(store: Store, chatId: number): Result {
+  const all = store.scheduledMessages(chatId);
+  const out: Result = { items: new Map(), sig: new Map(), order: [] };
+  windowItems(store, chatId, all, 0, all.length, out);
+  const meta: Item = { key: '~window', hasOlder: false, hasNewer: false, live: true };
+  out.items.set(meta.key, meta); out.sig.set(meta.key, JSON.stringify(meta)); out.order.push(meta.key);
+  return out;
+}
+
 export function computeQuery(store: Store, q: Query, mute: Map<number, number | null> = new Map(), flags: Map<number, FlagsOp> = new Map()): Result {
   switch (q.kind) {
     case 'chatList': {
@@ -291,6 +302,7 @@ export function computeQuery(store: Store, q: Query, mute: Map<number, number | 
       return result([{ key: 'counters', unreadChats, unreadMessages, archivedUnread }]);
     }
     case 'notifications': return result(store.notifications);
+    case 'scheduled': return scheduledResult(store, q.chatId);
     case 'status':
     case 'presence':
     case 'me':
@@ -314,7 +326,7 @@ export function computeQuery(store: Store, q: Query, mute: Map<number, number | 
 export function affects(q: Query, touched: Set<number>): boolean {
   if (!touched.size) return false;
   if (q.kind === 'status' || q.kind === 'me' || q.kind === 'user' || q.kind === 'people' || q.kind === 'ops' || q.kind === 'contacts' || q.kind === 'settings' || q.kind === 'blocked' || q.kind === 'members' || q.kind === 'profileMusic' || q.kind === 'profilePhotos' || q.kind === 'devStats' || q.kind === 'devLog') return false;   // у них свои флаги в движке
-  return q.kind === 'messages' || q.kind === 'media' || q.kind === 'thread' ? touched.has(q.chatId) : true;
+  return q.kind === 'messages' || q.kind === 'media' || q.kind === 'thread' || q.kind === 'scheduled' ? touched.has(q.chatId) : true;
 }
 
 export function diffResults(prev: Result | null, next: Result): Patch | null {

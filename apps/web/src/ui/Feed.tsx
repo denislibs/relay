@@ -33,6 +33,7 @@ import { isCached, keepOffline, offlineUrlNow, resolveOfflineUrl, useKeptMedia, 
 import { getPrefs } from '../prefs';
 import { bubbleSrc, viewerPreview } from '../mediaGrid';
 import { clock, dayKey, dayLabel, fileSize, shownStatus } from './format';
+import { scheduledDay, scheduledFailText } from '../schedule';
 import { arrivals, type FeedSeen } from './appear';
 import { anchorShift, deferShift, requestShift, rowFor, shiftWanted, stageOf, type ShiftDir, type Stage } from './windowShift';
 import { burstAnimates, driveScroll, jumpNear, DRIVE_MS, DRIVE_OWN_MS, type Drive } from './scrollDrive';
@@ -692,12 +693,13 @@ function CachedMusic({ fileId, ...props }: { fileId?: string } & Record<string, 
 const GREET_FLIGHT_MS = 320;   // перелёт стикера-приветствия в пузырь
 const GREET_LAND_MS = 120;     // сколько после посадки ждать первый кадр пузыря (плеер общий с карточкой — обычно уже есть)
 
-export function Feed({ frameKey, active, chatId, threadId, channel = false, saved = false, meId, peerName, chatPhoto, group, onAuthor, stick, onMenu, highlight, greeting = false }: {
+export function Feed({ frameKey, active, chatId, threadId, scheduled = false, channel = false, saved = false, meId, peerName, chatPhoto, group, onAuthor, stick, onMenu, highlight, greeting = false }: {
   frameKey: string; active: boolean;   // кадр стека чатов; active — на экране (только он отмечает прочитанное)
   saved?: boolean;      // «Избранное»: без галочек
   greeting?: boolean;   // личный чат, где пустую ленту встречает карточка-приветствие (greetingChat)
   chatId: number; meId: number; peerName: string; highlight?: string;
   chatPhoto?: ProfilePhoto | null;   // фото чата: автор поста в просмотрщике — сам канал
+  scheduled?: boolean;  // страница отложенных: createdAt — на когда, id нет; без галочек и перехода к дате
   threadId?: number;    // тред комментариев: прочитанность — markThreadRead, позиция — своим ключом
   channel?: boolean;    // лента канала: все сообщения — посты (слева, без автора), просмотры засчитываются по видимости
   group: boolean; onAuthor: (userId: number) => void;   // в группе — имя автора над пачкой; клик — личный чат поверх
@@ -750,7 +752,7 @@ export function Feed({ frameKey, active, chatId, threadId, channel = false, save
   // Первый экран (как в Telegram Web K): в первом кадре — только строки, что заполняют экран вокруг точки открытия
   // (низ, непрочитанное, сохранённая позиция, переход), остальное окно — порциями после показа. Окно — ключами
   // крайних строк: пришедшее посреди дорисовки сообщение индексы сдвинет, а ключи останутся. null — строить всё
-  const here = { chatId, threadId };   // слой стека: позиция прокрутки треда — своим ключом
+  const here = { chatId, threadId, scheduled };   // слой стека: позиция прокрутки треда — своим ключом
   const win = useRef<{ from: string; to: string } | null | undefined>(undefined);   // undefined — ещё не решено
   const [winTick, bumpWin] = useState(0);
   const fillAnchorFor = useRef<number | null>(null);   // якорь шага дорисовки снимается рендером с winTick не меньше этого
@@ -1398,7 +1400,7 @@ export function Feed({ frameKey, active, chatId, threadId, channel = false, save
   const storePosition = (root: HTMLElement) => {
     const atBottom = root.scrollHeight - root.scrollTop - root.clientHeight < BOTTOM && (metaRef.current?.live ?? true);
     const v = atBottom ? null : firstVisible(root);
-    savePosition(here, v ? { key: v.key, sort: v.sort, offset: v.top } : null);
+    if (!scheduled) savePosition(here, v ? { key: v.key, sort: v.sort, offset: v.top } : null);   // отложенные всегда открываются снизу
   };
   // уходим из чата, а сохранение ещё ждёт паузы — сохранить сейчас (DOM ещё на месте)
   useLayoutEffect(() => () => {
@@ -1775,7 +1777,7 @@ export function Feed({ frameKey, active, chatId, threadId, channel = false, save
     const mine = !post && m.senderId === meId;
     const going = isLeaving(m);   // уходящая: рисуется на месте, но дату, пачку и группу соседей не меняет
     if (!going && day !== prevDay) flushRun();
-    if (!going && !bare && day !== prevDay) { const at = m.createdAt as string; out.push(<DateDivider key={'d' + day} onClick={() => setPickDate(new Date(at))}>{dayLabel(at)}</DateDivider>); }
+    if (!going && !bare && day !== prevDay) { const at = m.createdAt as string; out.push(<DateDivider key={'d' + day} onClick={scheduled ? undefined : () => setPickDate(new Date(at))}>{scheduled ? scheduledDay(at, Date.now()) : dayLabel(at)}</DateDivider>); }
     if (!going && !bare && !unreadShown && unreadFrom != null && !mine && m.id != null && (m.id as number) > unreadFrom) {
       unreadShown = true;
       flushRun();
@@ -1839,7 +1841,7 @@ export function Feed({ frameKey, active, chatId, threadId, channel = false, save
         bigEmoji={bigEmoji}
         tf={tf}
         direct={!group && !channel}
-        saved={saved}
+        saved={saved || scheduled}
         people={(m.reactions as unknown[] | undefined)?.length && (m.reactions as unknown[]).length < 4 ? people : NO_PEOPLE}
         onOpen={onOpen}
         out={mine}
@@ -1868,6 +1870,8 @@ export function Feed({ frameKey, active, chatId, threadId, channel = false, save
       flushRun();
       out.push(row);
     }
+    // отложенное, которое не ушло: почему, строкой под ним (m.id нет — у обычной ленты такой строки не бывает)
+    if (scheduled && m.status === 'failed' && !going) { out.push(<div class="rl-action app-sched-fail" key={'fail' + m.key} role="note"><span>{scheduledFailText(String(m.error ?? ''))}</span></div>); }
     prevDay = day; prevSender = sender;
     if (threadId != null && m.key === threadHead?.header) threadStart();
   });

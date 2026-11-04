@@ -1666,3 +1666,14 @@ html[data-anim="0"] :is(.app-setting-flash, .app-setting-flash-title) { animatio
 .app-theme-pill-in { top: 32px; inset-inline-start: 6px; background: var(--tile-in); }
 .app-theme-emoji { position: absolute; inset-inline: 0; bottom: 8px; text-align: center; font: 26px/1 var(--font-emoji, inherit); }
 @media (prefers-reduced-motion: reduce) { .app-theme-tile, .app-theme-tile::before { transition: none; } }
+
+/* Окно «Отправить позже»: быстрые варианты, ошибка времени */
+.app-sched-quick { display: flex; flex-direction: column; gap: 4px; margin-bottom: 8px; }
+.app-sched-opt { display: flex; align-items: center; gap: 12px; width: 100%; padding: 10px 12px; border: 0; border-radius: 10px; background: var(--hover); color: var(--ink); font: 400 15px/20px var(--font-sans); text-align: left; cursor: pointer; }
+.app-sched-opt svg { color: var(--brand-text, var(--brand)); }
+.app-sched-opt:hover { background: var(--hover-strong, var(--hover)); }
+.app-sched-err { margin: 8px 4px 0; color: var(--danger, #e53935); font: 400 13px/18px var(--font-sans); }
+.app-sched-modal .rl-todo-submit { height: auto; min-height: 2rem; padding: 7px 14px; line-height: 18px; }
+/* Строка под отложенным, которое не ушло */
+.app-sched-fail { padding-top: 0; }
+.app-sched-fail span { background: var(--danger, #e53935); }

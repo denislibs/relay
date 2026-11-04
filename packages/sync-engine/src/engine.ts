@@ -1,10 +1,10 @@
 import { deviceFetch, signDevice } from './device';
 import { draftHash, MAX_FILE_BYTES, MEDIA_TABS, type MediaTab } from '@relay/protocol';
-import type { ClientFrame, JournalEntry, Me, SettingsSnapshot, Message, PublicUser, ServerFrame, ThreadGuest } from '@relay/protocol';
+import type { ClientFrame, JournalEntry, Me, ScheduledMessage, SettingsSnapshot, Message, PublicUser, ServerFrame, ThreadGuest } from '@relay/protocol';
 import { Blocks } from './blocks';
 import { Contacts } from './contacts';
 import { delBlob, getBlob, openDb, putBlob, write } from './idb';
-import { affects, computeQuery, diffResults, feedSpan, flagsKey, flagsOf, flagsOverlay, messageWindow, muteKey, rangeAt, muteOverlay, threadView, type Result } from './queries';
+import { affects, computeQuery, scheduledResult, diffResults, feedSpan, flagsKey, flagsOf, flagsOverlay, messageWindow, muteKey, rangeAt, muteOverlay, threadView, type Result } from './queries';
 import type { Item } from './types';
 import { countStores } from './devstats';
 import { Store, type ChatSummary } from './store';
@@ -34,6 +34,9 @@ export interface WatchHandle { update(q: Query): void; close(): void }
 
 interface Watcher { id: number; q: Query; cb: (p: Patch) => void; prev: Result | null; force: boolean; gated: boolean; stat?: SubStat; cursor?: number; first?: number }
 type ReqError = { code: string; retry: boolean };
+/** Операция над отложенным: одна на строку (правки схлопываются, удаление заменяет правки). */
+const OP_SCHEDULED = 'scheduled:';
+
 type SyncReply = Extract<ServerFrame, { op: 'updates' | 'tooLong' }>;
 type ChatPush = Extract<ServerFrame, { op: 'push' }> & { chatId: number };
 /** Страница треда; guest — я не участник группы (тред гостя, store.guests). */
@@ -163,13 +166,18 @@ export class Engine {
     if (this.dev.sim.offline) this.netDown = true;
     store.onFlush = (keys, ms) => { this.dev.log.record('engine', 'flush', { keys }, undefined, ms); this.scheduleEvict(); };
     this.muteShown = muteOverlay(ops);   // операции, восстановленные из IndexedDB: их отказ после перезапуска тоже пересчитает строку
+    store.scheduledBusy = (clientId) => this.ops.list.some((o) => o.key === OP_SCHEDULED + clientId);
     this.ops = new Ops(db, ops, { base: cfg.httpBase, headers: cfg.headers, backoffMs: cfg.backoffMs, fetch: this.dev.fetch }, {
       canSend: () => this.online && this.ready && !this.closed && !this.resetting,
       done: (op, value) => this.opDone(op, value),
       changed: () => this.changed(),
       run: (fn) => this.run(fn),
       unauthorized: () => this.session.end('terminated'),
-      log: (type, data) => this.dev.log.record('engine', type, data),
+      log: (type, data) => {
+        this.dev.log.record('engine', type, data);
+        // отказ по отложенному: оптимистичное показывает неправду — вернуть то, что на сервере
+        if (type === 'opFail' && String((data as { key?: unknown }).key).startsWith(OP_SCHEDULED)) this.refreshScheduled();
+      },
     });
     this.contacts = new Contacts({
       store, ops: this.ops, httpBase: cfg.httpBase, headers: cfg.headers, fetch: this.dev.fetch,
@@ -460,6 +468,7 @@ export class Engine {
       if (q.kind === 'user' && !list.length && q.userId !== this.cfg.userId) this.userWants.add(q.userId);
       return { items: new Map(list.map((it) => [it.key, it])), order: list.map((it) => it.key), sig: new Map(list.map((it) => [it.key, JSON.stringify(it)])) };
     }
+    if (q.kind === 'scheduled') return scheduledResult(this.store, q.chatId);
     if (q.kind === 'members') return membersResult(this.store, q.chatId, this.presence, this.meNow());
     if (q.kind === 'media') return mediaResult(this.store, q, this.media.loading(q.chatId, q.tab));
     if (q.kind === 'profileMusic') return profileMusicResult(this.store, q.userId, this.ops.list, this.lists.loading(q));
@@ -937,6 +946,14 @@ export class Engine {
 
   /** Операция подтверждена: ответ профиля — новая база (журнал принесёт то же самое ещё раз — не страшно). */
   private opDone(op: PendingOp, value: unknown): void {
+    if (op.key.startsWith(OP_SCHEDULED)) {
+      // ответ — новая база: {item} — строка (правка; «отправить сейчас», которое не вышло), иначе её больше нет
+      const clientId = op.key.slice(OP_SCHEDULED.length), v = value as { item?: ScheduledMessage } | null;
+      if (v?.item) this.store.applyScheduled(v.item, true);
+      else { const c = this.store.scheduled.get(clientId); if (c) this.store.removeScheduled(c.chatId, clientId); }
+      this.run(() => this.store.flush());
+      return;
+    }
     if (this.contacts.opDone(op, value)) return;
     if (this.blocks.opDone(op, value)) return;
     if (this.lists.opDone(op, value)) return;
@@ -967,6 +984,22 @@ export class Engine {
     if ((op.key === OP_PROFILE || op.key === OP_USERNAME || op.key === OP_LINKS || op.key === OP_PCHANNEL) && value && typeof value === 'object' && (value as Me).userId === this.cfg.userId) {
       if (this.store.profile.setMe(value as Me)) this.run(() => this.store.flush());
     }
+  }
+
+  /** Снимок отложенных — после каждого hello (журнал мог быть подрезан). Журнал пришёл, пока ждали ответ, — снять заново. */
+  private refreshScheduled(): void {
+    this.run(async () => {
+      for (let i = 0; i < 3; i++) {
+        const rev = this.store.scheduledRev;
+        const r = await this.http<{ items: ScheduledMessage[] }>('/chats/scheduled').catch(() => null);
+        if (!r) return;
+        if (rev !== this.store.scheduledRev) continue;
+        this.store.replaceScheduled(r.items);
+        await this.store.flush();
+        this.changed();
+        return;
+      }
+    });
   }
 
   /** Настройки аккаунта с сервера — после каждого hello (журнал мог потерять settingsChanged). */
@@ -1050,14 +1083,39 @@ export class Engine {
 
   private async act(a: Action): Promise<unknown> {
     switch (a.type) {
+      case 'scheduledEdit': {
+        const p = { ...(a.sendAt != null ? { sendAt: a.sendAt } : {}), ...(a.body != null ? { body: a.body, entities: a.entities ?? [] } : {}) };
+        // ещё не дошло до сервера: правится прямо в очереди
+        if (this.store.outbox.has(a.clientId)) { this.store.patchOutboxScheduled(a.clientId, p); await this.store.flush(); this.changed(); return null; }
+        this.store.patchScheduled(a.clientId, p);
+        await this.store.flush();
+        await this.ops.enqueue({ key: OP_SCHEDULED + a.clientId, method: 'PATCH', path: `/chats/${a.chatId}/scheduled/${a.clientId}`, body: p });
+        return null;
+      }
+      case 'scheduledSendNow': {
+        // ещё не дошло: срок «сейчас» — очередь отправит обычным сообщением
+        if (this.store.outbox.has(a.clientId)) { this.store.patchOutboxScheduled(a.clientId, { sendAt: 1 }); await this.store.flush(); this.changed(); this.pumpOutbox(); return null; }
+        this.store.removeScheduled(a.chatId, a.clientId);
+        await this.store.flush();
+        await this.ops.enqueue({ key: OP_SCHEDULED + a.clientId, method: 'PATCH', path: `/chats/${a.chatId}/scheduled/${a.clientId}`, body: { send: true } });
+        return null;
+      }
+      case 'scheduledDelete': {
+        if (this.store.outbox.has(a.clientId)) return this.act({ type: 'discard', clientId: a.clientId });
+        this.store.removeScheduled(a.chatId, a.clientId);
+        await this.store.flush();
+        await this.ops.enqueue({ key: OP_SCHEDULED + a.clientId, method: 'DELETE', path: `/chats/${a.chatId}/scheduled/${a.clientId}` });
+        return null;
+      }
       case 'sendMessage': {
         const clientId = crypto.randomUUID();
-        const draft = await this.takeDraft(a.chatId);   // отправили — черновик больше не нужен
+        const draft = a.keepDraft ? null : await this.takeDraft(a.chatId);   // отправили — черновик больше не нужен
         this.lastCreated = Math.max(Date.now(), this.lastCreated + 1); // порядок черновиков внутри одной миллисекунды
         this.store.addPending({ clientId, chatId: a.chatId, body: a.body, entities: a.entities ?? [], replyToId: a.replyToId ?? null, createdAt: this.lastCreated, failed: false, draftHash: draft,
           ...(a.noLinkPreview ? { noLinkPreview: true } : a.link ? { link: a.link } : {}),
           ...(a.attachment && a.attachment.id ? { attachment: a.attachment } : {}),
           ...(a.blocks && a.blocks.length ? { blocks: a.blocks } : {}),
+          ...(a.silent ? { silent: true } : {}), ...(a.scheduleAt != null ? { scheduleAt: a.scheduleAt } : {}),
           ...(a.threadId != null ? { threadId: a.threadId } : {}) });
         await this.store.flush();
         this.changed();
@@ -1321,7 +1379,7 @@ export class Engine {
         // больше предела — не ставим в очередь вовсе (интерфейс уже показал, почему): сервер всё равно откажет
         if (a.file.size > MAX_FILE_BYTES) throw new Error('file_too_big');
         const clientId = crypto.randomUUID();
-        const draft = await this.takeDraft(a.chatId);
+        const draft = a.keepDraft ? null : await this.takeDraft(a.chatId);
         this.lastCreated = Math.max(Date.now(), this.lastCreated + 1);
         // большой файл может не влезть в квоту IndexedDB — тогда держим его в памяти (не переживёт перезагрузку, но уйдёт)
         await putBlob(this.db, clientId, a.file).catch((err) => { this.dev.log.error('putBlob', err); this.memBlobs.set(clientId, a.file); });
@@ -1329,6 +1387,7 @@ export class Engine {
         const sized = photo || a.kind === 'round' || a.kind === 'video';
         this.store.addPending({ clientId, chatId: a.chatId, body: a.body, replyToId: a.replyToId ?? null, createdAt: this.lastCreated, failed: false, draftHash: draft,
           ...(a.groupId ? { groupId: a.groupId } : {}), ...(a.threadId != null ? { threadId: a.threadId } : {}),
+          ...(a.silent ? { silent: true } : {}), ...(a.scheduleAt != null ? { scheduleAt: a.scheduleAt } : {}),
           attachment: { id: '', kind: a.kind ?? (photo ? 'photo' : 'file'), mime: a.mime, name: a.name, size: a.file.size, w: sized ? a.w ?? null : null, h: sized ? a.h ?? null : null, thumb: a.thumb ?? null,
             ...(a.kind ? { duration: a.duration ?? null, waveform: a.waveform ?? null } : {}),
             ...(a.kind === 'audio' ? { title: a.title ?? null, performer: a.performer ?? null } : {}),
@@ -1451,7 +1510,7 @@ export class Engine {
       case 'sendSticker': {
         const clientId = crypto.randomUUID();
         this.lastCreated = Math.max(Date.now(), this.lastCreated + 1);
-        this.store.addPending({ clientId, chatId: a.chatId, body: '', entities: [], replyToId: a.replyToId ?? null, createdAt: this.lastCreated, failed: false, sticker: a.sticker, draftHash: null, ...(a.threadId != null ? { threadId: a.threadId } : {}) });
+        this.store.addPending({ clientId, chatId: a.chatId, body: '', entities: [], replyToId: a.replyToId ?? null, createdAt: this.lastCreated, failed: false, sticker: a.sticker, draftHash: null, ...(a.silent ? { silent: true } : {}), ...(a.scheduleAt != null ? { scheduleAt: a.scheduleAt } : {}), ...(a.threadId != null ? { threadId: a.threadId } : {}) });
         await this.store.flush();
         this.changed();
         this.pumpOutbox();
@@ -1588,6 +1647,7 @@ export class Engine {
           // снимок — только когда кэш пуст; lastSeq = 0 бывает и у заполненного кэша (журнал пользователя ещё пуст)
           this.fetchMe();
           this.fetchSettings();
+          this.refreshScheduled();
           this.contacts.fetch();
           this.blocks.fetch();
           if (!this.store.hydrated) await this.bootstrap(f.seq);
@@ -2446,9 +2506,28 @@ export class Engine {
         for (;;) {
           const next = this.nextToSend();
           if (!next || !this.online) break;
+          // отложенное, чей срок прошёл, пока не было сети: уходит сразу, обычным сообщением (как в Telegram)
+          if (next.scheduleAt != null && next.scheduleAt <= Date.now()) { this.promoteToSend(next.clientId); await this.store.flush(); this.changed(); }
+          const planned = next.scheduleAt != null ? { at: next.scheduleAt, body: next.body, entities: next.entities } : null;
           try {
             const att = next.attachment ? { id: next.attachment.id, thumb: next.attachment.thumb ?? null, ...(next.attachment.spoiler ? { spoiler: true } : {}) } : null;
-            const r = await this.request({ op: 'send', reqId: '', clientId: next.clientId, chatId: next.chatId, body: next.body, entities: next.entities ?? [], replyToId: next.replyToId, attachment: next.forward ? null : att, ...(next.groupId ? { groupId: next.groupId } : {}), ...(next.forward ? { forward: next.forward } : {}), ...(next.noLinkPreview ? { noLinkPreview: true } : {}), ...(next.blocks ? { blocks: next.blocks } : {}), ...(next.sticker ? { sticker: { id: next.sticker.id } } : {}), ...(next.todo ? { todo: { title: next.todo.title, items: next.todo.items.map((x) => ({ title: x.title })), othersCanAppend: next.todo.othersCanAppend, othersCanComplete: next.todo.othersCanComplete } } : {}), ...(next.poll ? { poll: next.poll } : {}), ...(next.special?.contact ? { contact: { userId: next.special.contact.userId, ...(next.special.contact.key ? { key: next.special.contact.key } : {}) } } : {}), ...(next.special?.geo ? { geo: next.special.geo } : {}), ...(next.special?.dice ? { dice: next.special.dice } : {}), ...(next.threadId != null ? { threadId: next.threadId } : {}), ...(next.draftHash !== undefined ? { draftHash: next.draftHash } : {}) });
+            const r = await this.request({ op: 'send', reqId: '', clientId: next.clientId, chatId: next.chatId, body: next.body, entities: next.entities ?? [], replyToId: next.replyToId, attachment: next.forward ? null : att, ...(next.groupId ? { groupId: next.groupId } : {}), ...(next.forward ? { forward: next.forward } : {}), ...(next.noLinkPreview ? { noLinkPreview: true } : {}), ...(next.blocks ? { blocks: next.blocks } : {}), ...(next.sticker ? { sticker: { id: next.sticker.id } } : {}), ...(next.todo ? { todo: { title: next.todo.title, items: next.todo.items.map((x) => ({ title: x.title })), othersCanAppend: next.todo.othersCanAppend, othersCanComplete: next.todo.othersCanComplete } } : {}), ...(next.poll ? { poll: next.poll } : {}), ...(next.special?.contact ? { contact: { userId: next.special.contact.userId, ...(next.special.contact.key ? { key: next.special.contact.key } : {}) } } : {}), ...(next.special?.geo ? { geo: next.special.geo } : {}), ...(next.special?.dice ? { dice: next.special.dice } : {}), ...(next.silent ? { silent: true } : {}), ...(planned ? { scheduleAt: planned.at } : {}), ...(next.threadId != null ? { threadId: next.threadId } : {}), ...(next.draftHash !== undefined ? { draftHash: next.draftHash } : {}) });
+            if (planned) {
+              // пока кадр летел, его могли поправить или удалить в очереди: сервер этого не знает — догнать операцией
+              const now = this.store.outbox.get(next.clientId);
+              this.store.ackScheduled(next.clientId, r.item as ScheduledMessage | undefined);
+              const path = `/chats/${next.chatId}/scheduled/${next.clientId}`;
+              if (!now) { this.store.removeScheduled(next.chatId, next.clientId); await this.ops.enqueue({ key: OP_SCHEDULED + next.clientId, method: 'DELETE', path }); }
+              else if (now.scheduleAt !== planned.at || now.body !== planned.body || now.entities !== planned.entities) {
+                const p = { sendAt: now.scheduleAt, body: now.body, entities: now.entities ?? [] };
+                this.store.patchScheduled(next.clientId, p);
+                await this.ops.enqueue({ key: OP_SCHEDULED + next.clientId, method: 'PATCH', path, body: p });
+              }
+              if (att) { this.memBlobs.delete(next.clientId); delBlob(this.db, next.clientId).catch(() => {}); }
+              await this.store.flush();
+              this.changed();
+              continue;
+            }
             this.store.ack(next.clientId, r.id as number, r.createdAt as string);
             // своё опустило начало живого отрезка ниже seed — сообщения между ними догрузить (страница перед seed)
             const c = this.store.chats.get(next.chatId), live = c?.ranges[c.ranges.length - 1];
@@ -2456,8 +2535,10 @@ export class Engine {
             this.outboxAttempt = 0;
             if (att) { this.memBlobs.delete(next.clientId); delBlob(this.db, next.clientId).catch(() => {}); }
           } catch (e) {
+            // время прошло по часам сервера (свои отстают): как и с отложенным без сети — уходит сразу
+            if ((e as ReqError).code === 'schedule_past' && this.store.outbox.has(next.clientId)) this.promoteToSend(next.clientId);
             // отказ сервера: код остаётся у сообщения (blocked — интерфейс заменит поле ввода плашкой)
-            if ((e as ReqError).retry === false) this.store.fail(next.clientId, (e as ReqError).code);
+            else if ((e as ReqError).retry === false) this.store.fail(next.clientId, (e as ReqError).code);
             else { if ((e as ReqError).code !== 'offline') this.retryOutboxLater(); break; } // сеть — дождёмся переподключения, порядок сохранится
           }
           await this.store.flush();
@@ -2468,6 +2549,11 @@ export class Engine {
         this.pumping = false;
       }
     });
+  }
+
+  private promoteToSend(clientId: string): void {
+    this.lastCreated = Math.max(Date.now(), this.lastCreated + 1);
+    this.store.promoteScheduled(clientId, this.lastCreated);
   }
 
   /** Первое готовое к отправке: текст и пересылки — сразу; файл — когда в его чате нет недогруженных файлов, поставленных раньше. */

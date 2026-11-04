@@ -1,3 +1,4 @@
+import type { ScheduledMessage } from '@relay/protocol';
 import type { ContactCard, Dice, DiceEmoji, GeoPoint, Poll, PollInput, StickerRef, StickerSetInfo } from '@relay/protocol';
 import type { StoreName } from './schema';
 import type { GroupInfo, MediaCounts, MediaTab, MyMembership, Replies } from '@relay/protocol';
@@ -46,6 +47,9 @@ export interface LocalMessage {
   threadId?: number;                  // комментарий: id копии поста в группе обсуждения (корень треда)
   origin?: { chatId: number; id: number };   // копия поста в группе обсуждения: канал и пост
   replies?: Replies;                  // пост с обсуждением: число комментариев, последние, моя прочитанность треда
+  silent?: boolean;                   // без звука: получателю ни push, ни звука
+  reminder?: boolean;                 // отложенное себе в «Избранное»: автору — уведомление
+  scheduled?: true;                   // только в элементе запроса scheduled: createdAt — на когда запланировано
 }
 
 /** Отрезки истории треда (как у ленты чата): страницы треда — свой эндпоинт, живой отрезок продлевают комментарии из журнала. */
@@ -132,6 +136,8 @@ export interface OutboxEntry {
   upload?: { id: string; partSize: number; parts: number; done: number[]; key?: string; base?: string };
   sticker?: StickerRef | null;      // стикер: снимок для показа до ответа, на сервер уходит только id   // большой файл частями: что уже принято (докачка)
   threadId?: number;                // комментарий в треде (группа обсуждения)
+  silent?: boolean;                 // без звука
+  scheduleAt?: number;              // отложить на (мс эпохи): в ленту не попадает, ждёт в списке отложенных; срок прошёл — уйдёт сразу
   draftHash?: string | null;        // черновик, который забрала отправка (protocol draftHash); null — не трогала; нет — старая запись: сервер стирает всегда
 }
 
@@ -150,6 +156,9 @@ export type Query =
   /** последние уведомления (новое чужое сообщение или упоминание меня), по порядку прихода: одно на сообщение;
    *  mention — сквозь mute; элемент {key, chatId, id, mention, threadId?, senderId, body, kind, createdAt, …} */
   | { kind: 'notifications' }
+  /** отложенные чата: как окно ленты (элементы — LocalMessage, createdAt — на когда, id нет, key — clientId), с ещё не
+   *  дошедшими до сервера; служебный ~window */
+  | { kind: 'scheduled'; chatId: number }
   | { kind: 'status' }
   | { kind: 'uploads' }   // неотправленные файлы во всех чатах: имя, размер, прогресс
   | { kind: 'presence'; userId: number }
@@ -193,7 +202,11 @@ export type Patch =
 
 export type Action =
   /** стикеры (stickers.ts): мои паки/недавние/избранные и паки — из кэша без сети; изменения — очередью операций */
-  | { type: 'sendSticker'; chatId: number; sticker: StickerRef; replyToId?: number | null; threadId?: number }   // threadId — комментарий в треде
+  /** отложенные: время, текст, отправить сейчас, удалить — оптимистично, дальше очередью операций (или правкой ещё не ушедшего) */
+  | { type: 'scheduledEdit'; chatId: number; clientId: string; sendAt?: number; body?: string; entities?: Entity[] }
+  | { type: 'scheduledSendNow'; chatId: number; clientId: string }
+  | { type: 'scheduledDelete'; chatId: number; clientId: string }
+  | { type: 'sendSticker'; chatId: number; sticker: StickerRef; replyToId?: number | null; threadId?: number; silent?: boolean; scheduleAt?: number; keepDraft?: boolean }   // threadId — комментарий в треде
   | { type: 'myStickers' }
   | { type: 'stickerSet'; id: number | string; hash?: string }
   | { type: 'installStickerSet'; setId: number; on: boolean; info?: StickerSetInfo }
@@ -205,7 +218,7 @@ export type Action =
   | { type: 'greetingSticker' }   // стикер-приветствие для пустого личного чата (случайный; без сети — null)
   /** управление группой и вступление по ссылке: HTTP мимо очереди ({ok, data} | {ok:false, code}) */
   | { type: 'group'; method: 'GET' | 'POST' | 'PUT' | 'PATCH' | 'DELETE'; path: string; body?: unknown }
-  | { type: 'sendMessage'; chatId: number; body: string; entities?: Entity[]; replyToId?: number | null; noLinkPreview?: boolean; link?: LinkPreview | null; attachment?: LocalAttachment | null; blocks?: Block[] | null; threadId?: number }   // threadId — комментарий в треде; blocks — «статья»; attachment — уже загруженный файл (id), например трек из музыки профиля
+  | { type: 'sendMessage'; chatId: number; body: string; entities?: Entity[]; replyToId?: number | null; noLinkPreview?: boolean; link?: LinkPreview | null; attachment?: LocalAttachment | null; blocks?: Block[] | null; threadId?: number; silent?: boolean; scheduleAt?: number; keepDraft?: boolean }   // threadId — комментарий в треде; blocks — «статья»; attachment — уже загруженный файл (id), например трек из музыки профиля
   | { type: 'seen'; chatId: number; upToId: number }
   | { type: 'loadOlder'; chatId: number }
   /** тред: страница старее загруженного (как loadOlder у ленты) */
@@ -318,7 +331,7 @@ export type Action =
   /** раздел «Для разработчиков»: имитатор сети и служебные команды (devlog.ts) */
   | DevAction
   | { type: 'sendFile'; chatId: number; body: string; file: Blob; name: string; mime: string; w?: number | null; h?: number | null; thumb?: string | null; replyToId?: number | null;
-      kind?: 'voice' | 'round' | 'audio' | 'video'; duration?: number; waveform?: string | null; title?: string | null; performer?: string | null; groupId?: string | null; spoiler?: boolean; threadId?: number }
+      kind?: 'voice' | 'round' | 'audio' | 'video'; duration?: number; waveform?: string | null; title?: string | null; performer?: string | null; groupId?: string | null; spoiler?: boolean; threadId?: number; silent?: boolean; scheduleAt?: number; keepDraft?: boolean }   // keepDraft — со страницы отложенных: черновик чата не трогать
   | { type: 'listened'; chatId: number; id: number }
   /** Переслать сообщения ids (по порядку) из fromChatId в каждый из toChatIds; comment — отдельным сообщением перед ними. */
   /** replyToId — только для копии (hideSender) в один чат: копия — новое сообщение и может быть ответом; пересылка с «Переслано от» — нет */

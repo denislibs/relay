@@ -1,9 +1,10 @@
 import { withPolls } from './polls';
-import { normalizeEntities, type Entity, type JournalEntry, type MyMembership, type Update } from '@relay/protocol';
+import { normalizeEntities, type Entity, type JournalEntry, type MyMembership, type ScheduledMessage, type Update } from '@relay/protocol';
 import { beforeCommit, isTx, onCommit, sql, type Tx } from '../db';
 import { DomainError } from './errors';
 import { toMessage } from './chats';
 import { openDrafts, openRows } from './messageContent';
+import { scheduledByIds } from './scheduled';
 
 export const MAX_BATCH = 500;
 
@@ -203,7 +204,7 @@ export function notifyPayloads(written: Written[]): string[] {
  * в группе на 200 человек текст лежал 200 раз, а удалённое сообщение оставалось в журнале. Клиент получает прежний
  * формат: подстановка — на сервере, при отдаче.
  */
-export type Stored = Update | { type: MessageRef; chatId: number; id: number; ref: 1 } | { type: 'mention'; chatId: number; id: number; threadId?: number; ref: 1 } | { type: 'draft'; chatId: number; at: string; ref: 1 };
+export type Stored = Update | { type: MessageRef; chatId: number; id: number; ref: 1 } | { type: 'mention'; chatId: number; id: number; threadId?: number; ref: 1 } | { type: 'draft'; chatId: number; at: string; ref: 1 } | { type: 'scheduled'; chatId: number; clientId: string; ref: 1 };
 type MessageRef = 'newMessage' | 'messageEdited' | 'messageMarkup' | 'todoUpdated' | 'linkPreview' | 'attachmentUpdated';
 
 export function stored(u: Update): Stored {
@@ -212,6 +213,7 @@ export function stored(u: Update): Stored {
     case 'messageEdited': case 'messageMarkup': case 'todoUpdated': case 'linkPreview': case 'attachmentUpdated':
       return { type: u.type, chatId: u.chatId, id: u.id, ref: 1 };
     case 'draft': return { type: 'draft', chatId: u.chatId, at: u.at, ref: 1 };
+    case 'scheduled': return { type: 'scheduled', chatId: u.item.chatId, clientId: u.item.clientId, ref: 1 };   // текст отложенного — только в его шифре
     case 'mention': return { type: 'mention', chatId: u.message.chatId, id: u.message.id, ...(u.threadId != null ? { threadId: u.threadId } : {}), ref: 1 };
     default: return u;
   }
@@ -220,7 +222,7 @@ export function stored(u: Update): Stored {
 /** Ссылки журнала → полные события: сообщения одним запросом, черновики — вторым. Сообщения уже нет или оно удалено —
  *  messageDeleted (клиент его убирает; удалённое в ленту не попадает даже на миг). */
 export async function hydrate(userId: number | null, rows: { seq: number; payload: Stored }[]): Promise<JournalEntry[]> {
-  const refs = rows.filter((r) => 'ref' in r.payload && r.payload.type !== 'draft') as { payload: { chatId: number; id: number } }[];
+  const refs = rows.filter((r) => 'ref' in r.payload && r.payload.type !== 'draft' && r.payload.type !== 'scheduled') as { payload: { chatId: number; id: number } }[];
   const drafts = rows.filter((r) => 'ref' in r.payload && r.payload.type === 'draft') as { payload: { chatId: number } }[];
   const byKey = new Map<string, Record<string, unknown>>();
   if (refs.length) {
@@ -234,8 +236,15 @@ export async function hydrate(userId: number | null, rows: { seq: number; payloa
     const ds = await openDrafts(await sql`select user_id, chat_id, text, entities, content, updated_at from drafts where user_id = ${userId} and chat_id = any(${[...new Set(drafts.map((d) => d.payload.chatId))]}::bigint[])`);
     for (const d of ds) draftBy.set(Number(d.chat_id), d);
   }
+  // отложенные: строки уже нет (опубликовано, удалено) — как его удаление; свою запись об этом журнал несёт дальше
+  const scheduled = rows.filter((r) => 'ref' in r.payload && r.payload.type === 'scheduled').map((r) => (r.payload as { clientId: string }).clientId);
+  const planned = scheduled.length && userId != null ? await scheduledByIds(userId, [...new Set(scheduled)]) : new Map<string, ScheduledMessage>();
   const out = rows.map(({ seq, payload: p }): JournalEntry => {
     if (!('ref' in p)) return { seq, update: p };
+    if (p.type === 'scheduled') {
+      const item = planned.get(p.clientId);
+      return { seq, update: item ? { type: 'scheduled', item } : { type: 'scheduledRemoved', chatId: p.chatId, clientId: p.clientId } };
+    }
     if (p.type === 'draft') {
       const d = draftBy.get(p.chatId);
       const text = (d?.text as string | undefined) ?? '';

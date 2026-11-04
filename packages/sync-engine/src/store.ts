@@ -1,5 +1,5 @@
 import type { GroupInfo, MyMembership, ThreadGuest } from '@relay/protocol';
-import type { Entity, Message, Poll, PollInput, ProfilePhoto, Replies, Update } from '@relay/protocol';
+import type { Entity, Message, Poll, PollInput, ProfilePhoto, Replies, ScheduledMessage, Update } from '@relay/protocol';
 import { getAll, getByChat, req, termsOf, write, type RowPatch, type WriteBatch } from './idb';
 import { CACHE_STORES, STORES } from './schema';
 import { applyUserUpdated, ProfileCache } from './profile';
@@ -10,7 +10,7 @@ import { applyMembersUpdate, MembersCache } from './members';
 import { ProfileLists } from './profileLists';
 import { onMessage, recomputeLast, tabsOf, unreadAfterRead, unreadOnArrival } from './derive';
 import { nextV } from './rows';
-import { PENDING_BASE, toQuote, type Item, type LocalChat, type LocalMessage, type OutboxEntry, type QuoteMsg, type ThreadRanges } from './types';
+import { PENDING_BASE, toQuote, type Item, type LocalAttachment, type LocalChat, type LocalMessage, type OutboxEntry, type QuoteMsg, type ThreadRanges } from './types';
 
 /** Тот же черновик: текст и оформление (порядок ключей в сущностях не важен). */
 function sameDraft(a: { text: string; entities?: Entity[] } | null | undefined, b: { text: string; entities?: Entity[] } | null | undefined): boolean {
@@ -238,6 +238,7 @@ export class Store {
     for (const o of outbox) s.outbox.set(o.clientId, o);
     for (const r of await getAll<{ chatId: number; upToId: number }>(db, 'pendingReads')) s.pendingReads.set(r.chatId, r.upToId);
     for (const r of await getAll<{ chatId: number; seq: number }>(db, 'chatSeq')) s.chatSeq.set(r.chatId, r.seq);
+    for (const r of await getAll<ScheduledMessage>(db, 'scheduled')) s.scheduled.set(r.clientId, r);
     const meta = await getAll<{ k: string; v: number }>(db, 'meta');
     s.lastSeq = s.seqAtFlush = meta.find((m) => m.k === 'lastSeq')?.v ?? 0;
     s.since = Number(meta.find((m) => m.k === 'since')?.v ?? 0);
@@ -381,9 +382,12 @@ export class Store {
         this.setTyping(u.message.chatId, u.message.senderId, false); // написал — уже не «печатает»
         const own = this.isOwn(u.message);   // до applyMessage: у своего поста с сервера senderId 0
         this.applyMessage(u.message, true, 'journal');
-        if (!own) this.notify(u.message, false);
+        // своё не уведомляет; напоминание себе в «Избранное» — как раз уведомляет
+        if (!own || u.message.reminder) this.notify(u.message, false);
         return;
       }
+      case 'scheduled': this.scheduledRev++; return this.applyScheduled(u.item);
+      case 'scheduledRemoved': this.scheduledRev++; return this.removeScheduled(u.chatId, u.clientId);
       case 'mention': return this.applyMention(u.message, u.threadId);
       case 'reaction': return this.applyReaction(u.chatId, u.id);
       case 'reactionsRead': return this.dropReactions(u.chatId, u.ids);
@@ -724,6 +728,8 @@ export class Store {
       ...(m.sticker ? { sticker: m.sticker } : null),
       ...(m.post ? { post: true } : null),
       ...(m.postAuthor ? { postAuthor: m.postAuthor } : null),
+      ...(m.silent ? { silent: true } : null),
+      ...(m.reminder ? { reminder: true } : null),
       ...(m.threadId != null ? { threadId: m.threadId } : null),
       ...(m.origin ? { origin: m.origin } : null),
       ...postExtras(m, prev, (c, t) => this.threadReads.get(c + ':' + t)),
@@ -876,6 +882,7 @@ export class Store {
   private notifiedIds = new Set<string>();
   private notify(m: Message, mention: boolean, threadId?: number): void {
     if (this.previews.has(m.chatId)) return;   // превью канала: не подписан — не уведомляем
+    if (m.silent) return;   // без звука: сообщение и счётчик пришли как обычно, уведомления и звука нет
     const k = m.chatId + ':' + m.id;
     if (this.notifiedIds.has(k)) return;
     this.notifiedIds.add(k);
@@ -891,7 +898,7 @@ export class Store {
     this.notifications.push({
       key: 'n' + k, chatId: m.chatId, id: m.id, mention, ...(thread != null ? { threadId: thread } : {}),
       senderId: m.senderId, body: m.body, kind: m.kind ?? 'text', createdAt: m.createdAt, attachmentName: m.attachment?.name ?? null,
-      ...(m.entities?.length ? { entities: m.entities } : {}), ...(m.service ? { service: m.service } : {}), ...(m.post ? { post: true } : {}),
+      ...(m.entities?.length ? { entities: m.entities } : {}), ...(m.service ? { service: m.service } : {}), ...(m.post ? { post: true } : {}), ...(m.reminder ? { reminder: true } : {}),
     });
     if (this.notifications.length > NOTIFY_KEEP) this.notifications.splice(0, this.notifications.length - NOTIFY_KEEP);
     this.touch(m.chatId);
@@ -928,6 +935,8 @@ export class Store {
   addPending(o: OutboxEntry): void {
     this.outbox.set(o.clientId, o);
     this.dirtyOutbox.add(o.clientId);
+    // отложенное: только очередь, в ленту не попадает — его показывает запрос scheduled
+    if (o.scheduleAt != null) { this.touchScheduled(o.chatId); return; }
     // комментарий в чат без строки, а треда гостя в памяти нет (wipe, перезапуск): только очередь — строку не заводим,
     // сообщение придёт с краем треда, когда его откроют
     if (o.threadId != null && !this.chats.has(o.chatId) && !this.guests.has(o.chatId)) return;
@@ -967,6 +976,122 @@ export class Store {
     // свой комментарий: продлевает живой отрезок треда, и тред прочитан до него (сервер так же поднял thread_reads)
     if (m?.threadId != null) { this.extendThread(chatId, m.threadId, id, true); this.applyThreadRead(chatId, m.threadId, id); }
     this.markChat(chat);
+  }
+
+  // ---------- отложенные сообщения ----------
+
+  /** База: что знает сервер (журнал, снимок, ответы). Ещё не дошедшие — в outbox со scheduleAt. */
+  scheduled = new Map<string, ScheduledMessage>();
+  private dirtyScheduled = new Set<string>();
+  private scheduledProgress = new Map<string, number>();
+  private scheduledCounts: Map<number, number> | null = null;
+  /** растёт на каждую запись журнала об отложенных: снимок, снятый раньше неё, устарел */
+  scheduledRev = 0;
+  /** по этому отложенному есть неотправленная операция: журнал не откатывает оптимистичное (движок) */
+  scheduledBusy: (clientId: string) => boolean = () => false;
+
+  private touchScheduled(chatId: number): void {
+    this.scheduledCounts = null;
+    const c = this.chats.get(chatId);
+    if (c) this.markChat(c); else this.touch(chatId);   // счётчик у поля ввода — в строке чата
+  }
+  /** Сколько отложено в чате (значок у поля ввода, лимит). */
+  scheduledCount(chatId: number): number {
+    if (!this.scheduledCounts) {
+      const n = this.scheduledCounts = new Map<number, number>();
+      for (const s of this.scheduled.values()) if (!this.outbox.has(s.clientId)) n.set(s.chatId, (n.get(s.chatId) ?? 0) + 1);
+      for (const o of this.outbox.values()) if (o.scheduleAt != null) n.set(o.chatId, (n.get(o.chatId) ?? 0) + 1);
+    }
+    return this.scheduledCounts.get(chatId) ?? 0;
+  }
+  applyScheduled(item: ScheduledMessage, force = false): void {
+    if (!force && this.scheduledBusy(item.clientId)) return;
+    const cur = this.scheduled.get(item.clientId);
+    if (cur && cur.rev > item.rev) return;   // запоздавший ответ не откатывает
+    this.scheduled.set(item.clientId, item);
+    this.dirtyScheduled.add(item.clientId);
+    this.touchScheduled(item.chatId);
+  }
+  removeScheduled(chatId: number, clientId: string): void {
+    if (!this.scheduled.delete(clientId)) return;
+    this.dirtyScheduled.add(clientId);
+    this.touchScheduled(chatId);
+  }
+  /** Снимок сервера. По чему есть неотправленная операция — остаётся, как показано (она ещё дойдёт). */
+  replaceScheduled(items: ScheduledMessage[]): void {
+    const next = new Map(items.filter((x) => !this.scheduledBusy(x.clientId)).map((x) => [x.clientId, x]));
+    for (const [k, v] of this.scheduled) if (this.scheduledBusy(k)) next.set(k, v);
+    for (const [k, v] of this.scheduled) if (!next.has(k)) { this.dirtyScheduled.add(k); this.touchScheduled(v.chatId); }
+    for (const [k, v] of next) {
+      if (JSON.stringify(this.scheduled.get(k)) === JSON.stringify(v)) continue;
+      this.dirtyScheduled.add(k);
+      this.touchScheduled(v.chatId);
+    }
+    this.scheduled = next;
+    this.scheduledCounts = null;
+  }
+  /** Оптимистичная правка: на экране сразу, ответ или журнал подтвердят. */
+  patchScheduled(clientId: string, p: { sendAt?: number; body?: string; entities?: Entity[] }): void {
+    const cur = this.scheduled.get(clientId);
+    if (!cur) return;
+    const { failed: _f, ...rest } = cur;
+    this.scheduled.set(clientId, { ...rest, ...p });
+    this.dirtyScheduled.add(clientId);
+    this.touchScheduled(cur.chatId);
+  }
+  /** Правка ещё не ушедшего на сервер: просто в очереди. */
+  patchOutboxScheduled(clientId: string, p: { sendAt?: number; body?: string; entities?: Entity[] }): void {
+    const o = this.outbox.get(clientId);
+    if (!o) return;
+    if (p.sendAt != null) o.scheduleAt = p.sendAt;
+    if (p.body != null) o.body = p.body;
+    if (p.entities != null) o.entities = p.entities;
+    o.failed = false; delete o.error;
+    this.dirtyOutbox.add(clientId);
+    this.touchScheduled(o.chatId);
+  }
+  /** Сервер принял отложенное: из очереди — в базу. */
+  ackScheduled(clientId: string, item: ScheduledMessage | undefined): void {
+    const o = this.outbox.get(clientId);
+    if (o) { this.outbox.delete(clientId); this.dirtyOutbox.add(clientId); this.touchScheduled(o.chatId); }
+    this.scheduledProgress.delete(clientId);
+    if (item) this.applyScheduled(item, true);
+  }
+  /** Срок прошёл, пока ждали сеть: уходит сразу, обычным сообщением (как в Telegram) — теперь оно и в ленте. */
+  promoteScheduled(clientId: string, createdAt: number): void {
+    const o = this.outbox.get(clientId);
+    if (o?.scheduleAt == null) return;
+    delete o.scheduleAt;
+    o.createdAt = createdAt;
+    this.scheduledCounts = null;
+    this.addPending(o);
+    this.touchScheduled(o.chatId);
+  }
+  /** Отложенные чата строками ленты: по времени, ещё не дошедшие до сервера — вместе с остальными. */
+  scheduledMessages(chatId: number): LocalMessage[] {
+    const rows: { at: number; created: number; m: LocalMessage }[] = [];
+    const base = (clientId: string, at: number) => ({ key: clientId, clientId, id: null, chatId, senderId: this.userId, replyToId: null as number | null, createdAt: new Date(at).toISOString(), sort: at, scheduled: true as const });
+    for (const o of this.outbox.values()) {
+      if (o.chatId !== chatId || o.scheduleAt == null) continue;
+      const p = this.scheduledProgress.get(o.clientId);
+      rows.push({ at: o.scheduleAt, created: o.createdAt, m: {
+        ...base(o.clientId, o.scheduleAt), body: o.body, entities: o.entities ?? [], replyToId: o.replyToId, status: o.failed ? 'failed' : 'pending',
+        kind: o.sticker ? 'sticker' : o.attachment ? o.attachment.kind : 'text', ...(o.sticker ? { sticker: o.sticker } : {}), ...(o.attachment ? { attachment: o.attachment } : {}),
+        ...(o.groupId ? { groupId: o.groupId } : {}), ...(o.silent ? { silent: true } : {}), ...(o.failed && o.error ? { error: o.error } : {}),
+        ...(p != null && p < 1 ? { progress: p } : {}),
+      } });
+    }
+    for (const s of this.scheduled.values()) {
+      if (s.chatId !== chatId || this.outbox.has(s.clientId)) continue;
+      rows.push({ at: s.sendAt, created: Date.parse(s.createdAt), m: {
+        ...base(s.clientId, s.sendAt), body: s.body, entities: s.entities ?? [], replyToId: s.replyToId, status: s.failed ? 'failed' : 'sent', kind: s.kind,
+        ...(s.sticker ? { sticker: s.sticker } : {}), ...(s.attachment ? { attachment: s.attachment as LocalAttachment } : {}),
+        ...(s.groupId ? { groupId: s.groupId } : {}), ...(s.silent ? { silent: true } : {}), ...(s.failed ? { error: s.failed } : {}),
+      } });
+    }
+    rows.sort((a, b) => a.at - b.at || a.created - b.created);
+    // одно время у нескольких (альбом): порядок постановки; sort — ключ порядка в ленте, он должен быть разным
+    return rows.map((r, i) => ({ ...r.m, sort: r.at + i / 1000 }));
   }
 
   // ---------- треды комментариев (группа обсуждения) ----------
@@ -1085,6 +1210,7 @@ export class Store {
     o.failed = true;
     if (error) o.error = error; else delete o.error;
     this.dirtyOutbox.add(clientId);
+    if (o.scheduleAt != null) this.touchScheduled(o.chatId);
     const m = this.messages.get(o.chatId)?.get(clientId);
     if (m) this.putMessage({ ...m, status: 'failed', ...(error ? { error } : {}) });
   }
@@ -1095,6 +1221,7 @@ export class Store {
     o.failed = false;
     delete o.error;
     this.dirtyOutbox.add(clientId);
+    if (o.scheduleAt != null) this.touchScheduled(o.chatId);
     const m = this.messages.get(o.chatId)?.get(clientId);
     if (m) { const { error: _e, ...rest } = m; this.putMessage({ ...rest, status: 'pending' }); }
     return true;
@@ -1115,6 +1242,7 @@ export class Store {
       this.outbox.delete(o.clientId);
       this.dirtyOutbox.add(o.clientId);
       this.dirtyMessages.delete(o.clientId);
+      if (o.scheduleAt != null) this.touchScheduled(o.chatId);
       this.messages.get(o.chatId)?.delete(o.clientId);
       this.touch(o.chatId);
       const chat = this.chats.get(o.chatId);
@@ -1143,11 +1271,14 @@ export class Store {
   /** Прогресс загрузки неотправленного файла (0…1; нет сообщения — 0). */
   progressOf(clientId: string): number {
     const chatId = this.outbox.get(clientId)?.chatId;
+    if (this.scheduledProgress.has(clientId)) return this.scheduledProgress.get(clientId)!;
     return (chatId != null ? this.messages.get(chatId)?.get(clientId)?.progress : undefined) ?? 0;
   }
   /** Прогресс загрузки файла неотправленного сообщения (в ленте — кольцо). */
   setProgress(clientId: string, p: number): void {
-    const chatId = this.outbox.get(clientId)?.chatId;
+    const o = this.outbox.get(clientId);
+    if (o?.scheduleAt != null) { this.scheduledProgress.set(clientId, p); this.touch(o.chatId); return; }
+    const chatId = o?.chatId;
     const m = chatId != null ? this.messages.get(chatId)?.get(clientId) : undefined;
     if (m) this.putMessage({ ...m, progress: p });
   }
@@ -1259,6 +1390,7 @@ export class Store {
     this.resetGen++;
     for (const id of this.chats.keys()) this.touch(id);
     this.chats.clear(); this.chatV.clear(); this.messages.clear(); this.loaded.clear(); this.sorted.clear(); this.ids.clear(); this.guests.clear();
+    this.scheduled.clear(); this.dirtyScheduled.clear(); this.scheduledProgress.clear(); this.scheduledCounts = null;
     this.outbox.clear(); this.pendingReads.clear(); this.profile.reset(); this.contacts.reset(); this.settings.reset(); this.blocks.reset(); this.members.reset(); this.profileLists.reset();
     this.dirtyChats.clear(); this.dirtyMessages.clear(); this.dirtyOutbox.clear(); this.dirtyReads.clear();
     this.rowPatches.clear();
@@ -1362,6 +1494,9 @@ export class Store {
     this.staleTerms.clear();
     batch.put.outbox = [...this.dirtyOutbox].map((k) => this.outbox.get(k)).filter(Boolean) as OutboxEntry[];
     batch.del.outbox = [...this.dirtyOutbox].filter((k) => !this.outbox.has(k));
+    batch.put.scheduled = [...this.dirtyScheduled].map((k) => this.scheduled.get(k)).filter(Boolean) as ScheduledMessage[];
+    batch.del.scheduled = [...this.dirtyScheduled].filter((k) => !this.scheduled.has(k));
+    this.dirtyScheduled.clear();
     batch.put.pendingReads = [...this.dirtyReads].filter((c) => this.pendingReads.has(c)).map((c) => ({ chatId: c, upToId: this.pendingReads.get(c) }));
     batch.del.pendingReads = [...this.dirtyReads].filter((c) => !this.pendingReads.has(c));
     if (this.dirtyMeta || this.lastSeq !== this.seqAtFlush) batch.put.meta = [{ k: 'lastSeq', v: this.lastSeq }, { k: 'since', v: this.since }, { k: 'hydrated', v: this.hydrated ? 1 : 0 }, { k: 'dialogsAt', v: this.dialogsAt }, { k: 'dialogsId', v: this.dialogsId }, { k: 'dialogsDone', v: this.dialogsDone ? 1 : 0 }, { k: 'dialogsTotal', v: this.dialogsTotal }, ...(this.epoch ? [{ k: 'epoch', v: this.epoch as unknown as number }] : [])];

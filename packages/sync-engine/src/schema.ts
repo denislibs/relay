@@ -1,5 +1,5 @@
 // Единственное место, где описаны таблицы IndexedDB воркера
-export const SCHEMA_VERSION = 6;
+export const SCHEMA_VERSION = 7;
 
 type Index = { name: string; keyPath: string | string[] };
 type StoreDef = { keyPath: string | string[]; indexes?: Index[]; keep?: true };
@@ -14,6 +14,7 @@ export const SCHEMA = {
   profileMusic:  { keyPath: ['userId', 'attId'], indexes: [{ name: 'byUser', keyPath: ['userId', 'addedAt'] }] },
   profilePhotos: { keyPath: ['userId', 'pid'], indexes: [{ name: 'byUser', keyPath: ['userId', 'at'] }] },
   terms:         { keyPath: ['term', 'chatId', 'sort'] },
+  scheduled:     { keyPath: 'clientId' },   // отложенные сообщения: кэш сервера (journal и снимок GET /chats/scheduled)
   chatSeq:       { keyPath: 'chatId' },   // журналы чатов (группы, каналы): номер, до которого применён
   meta:          { keyPath: 'k' },
   outbox:        { keyPath: 'clientId', keep: true },

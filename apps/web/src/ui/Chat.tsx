@@ -38,6 +38,8 @@ const ATTACH_ITEMS = [
 /** В треде — то, что уходит комментарием (чек-лист и трек из музыки профиля отправляются без треда). */
 // контакт, геопозиция и опрос пока уходят без треда — в треде их нет
 const THREAD_ATTACH = ATTACH_ITEMS.filter((x) => !['todo', 'poll', 'geo', 'contact', 'music'].includes(x.key));
+/** На странице отложенных — только то, что можно отложить. */
+const SCHEDULED_ATTACH = ATTACH_ITEMS.filter((x) => x.key === 'media' || x.key === 'doc');
 
 /** Дата из окна → значение для вставки: текст по умолчанию, вся строка — одна сущность даты с выбранным форматом. */
 // после даты — пробел вне неё (как в Telegram): дальше набирается обычный текст, а не продолжение даты
@@ -48,15 +50,20 @@ import { Playlist } from './Playlist';
 import { inProfile, toggleProfileMusic, type Track } from '../music';
 import { useOwnMusic } from '../profileLists';
 import { SEARCH_IN_CHAT } from '../shortcuts';
-import { Avatar, Button, Chip, Icon, MediaPolicy, peerTone, ChatSearchBar, Highlight, ripple, useMinVisible, requestMeasure, Composer, DropOverlay, GlassBar, IconButton, MenuPopover, Modal, ConfirmDialog, Presence, ReactionsBar, reducedMotion, plural, requestMutation, SelectionBar, isHeavyAnimating, onHeavyAnimationEnd, applyMarkdown, emptyValue, sameValue, voiceSupported, PlayerBar, roundSupported, startRound, Verified, canCopyImage, clipboardHtml, copyImage, copyRich, downloadUrl, TodoModal, PollModal, ContactPicker, TODO_ITEMS_MAX, DateModal, setDateCopiedToast, addHotkeys } from '@relay/ui';
+import { Avatar, Button, Chip, confirmModal, Icon, MediaPolicy, peerTone, ChatSearchBar, Highlight, ripple, useMinVisible, requestMeasure, Composer, DropOverlay, GlassBar, IconButton, MenuPopover, Modal, ConfirmDialog, Presence, ReactionsBar, reducedMotion, plural, requestMutation, SelectionBar, isHeavyAnimating, onHeavyAnimationEnd, applyMarkdown, emptyValue, sameValue, voiceSupported, PlayerBar, roundSupported, startRound, Verified, canCopyImage, clipboardHtml, copyImage, copyRich, downloadUrl, TodoModal, PollModal, ContactPicker, TODO_ITEMS_MAX, DateModal, setDateCopiedToast, addHotkeys } from '@relay/ui';
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'preact/hooks';
+import { ScheduleModal } from './ScheduleModal';
+import { pressOpen } from './press';
+import { scheduledTitle, scheduledToast } from '../schedule';
+import { deleteScheduled, editScheduled, openScheduled, prepareScheduled, sendScheduledNow, type SendWhen } from '../data';
+import { SCHEDULED_LIMIT } from '@relay/protocol';
 import { sendSpecial, sendPoll, votePoll, closePoll, sendTodo, appendTodo, editTodo, closeChat, deleteMessage, editMessage, focusMessage, openInner, openUserChat, pinMessage, unpinMessage, sendFile, sendFiles, sendRound, sendVoice, react, rejectTooBig, PLAYABLE_VIDEO, retrySend, discardUnsent, saveDraft, searchMessages, send, typing, typingDone } from '../data';
 import { wantPeople } from '../people';
 import type { Item, SearchHit, SearchResult } from '@relay/sync-engine/src/types';
 import type { Entity, Todo, TodoInput } from '@relay/protocol';
 
 type Value = { text: string; entities: Entity[] };
-type ComposerApi = { getValue(): Value; setValue(v: Value, opts?: { focus?: boolean; instant?: boolean }): void; focus(opts?: { end?: boolean }): void; insert(v: Value, range?: { start: number; end: number }): void };
+type ComposerApi = { send(): void; getValue(): Value; setValue(v: Value, opts?: { focus?: boolean; instant?: boolean }): void; focus(opts?: { end?: boolean }): void; insert(v: Value, range?: { start: number; end: number }): void };
 import { frameByKey, setGlobal, useGlobal, getGlobal, findChat, stackDepth } from '../global';
 import { showToast, unblockUser, useUser } from '../settingsData';
 import { Feed, type MenuExtra } from './Feed';
@@ -136,7 +143,7 @@ function useThreadCount(frameKey: string): number {
   });
 }
 
-export function Chat({ chatId, frameKey, active, threadId }: { chatId: number; frameKey: string; active: boolean; threadId?: number }) {
+export function Chat({ chatId, frameKey, active, threadId, scheduled = false }: { chatId: number; frameKey: string; active: boolean; threadId?: number; scheduled?: boolean }) {
   const me = useGlobal((s) => s.me)!;
   useOwnMusic();   // кнопка «в профиль» в плеере
   const chat = useGlobal((s) => findChat(s, chatId));
@@ -174,7 +181,7 @@ export function Chat({ chatId, frameKey, active, threadId }: { chatId: number; f
   const [rpanel, setRpanel] = useState<{ bar: { left: number; top: number }; msgId: number; msgKey: string; allowed: string[] | null; mine?: string } | null>(null);
   const [fwdMenu, setFwdMenu] = useState<HTMLElement | null>(null);   // опции пересылки в поле ввода
   const [replyKey, setReplyKey] = useState<string | null>(null);
-  const [editing, setEditing] = useState<{ id: number; original: Value; draft: Value } | null>(null);   // правка своего сообщения
+  const [editing, setEditing] = useState<{ id: number; clientId?: string; original: Value; draft: Value } | null>(null);   // правка своего сообщения
   const api = useRef<ComposerApi | null>(null);
   // запись: голосовое — если браузер умеет Opus через WebCodecs, кружок — если умеет MP4 из canvas (не Safari)
   const [recordModes, setRecordModes] = useState<string[]>([]);
@@ -310,14 +317,18 @@ export function Chat({ chatId, frameKey, active, threadId }: { chatId: number; f
   // ссылки на превью — после ухода окна: оно ещё гаснет с картинками (раньше — «битые» превью и ERR_FILE_NOT_FOUND)
   const revokePending = (p: NonNullable<typeof pending>) => { const urls = [p.url, ...(p.thumbs ?? [])].filter((u): u is string => !!u); setTimeout(() => { for (const u of urls) URL.revokeObjectURL(u); }, 1000); };
   const closePending = () => { if (pending) revokePending(pending); setPending(null); };
-  const sendPending = () => {
+  const sendPending = (when: SendWhen = {}) => {
     if (!pending) return;
-    if (pending.caption.trim() && !allowed('text')) return;
-    for (const f of pending.files) if (!allowed(rightForKind(/^image\//.test(f.type) && !/gif/.test(f.type) ? 'photo' : /^audio\//.test(f.type) ? 'audio' : 'file', f.type))) return;
-    stick.current = true;
+    const later = when.scheduleAt != null;
+    // страница отложенных: сначала — когда
+    if (scheduled && !later) { askTime((r) => sendPending({ scheduleAt: r.at, silent: r.silent, keepDraft: true }), pending.files.length); return; }
+    if (pending.caption.trim() && !allowed('text', later)) return;
+    for (const f of pending.files) if (!allowed(rightForKind(/^image\//.test(f.type) && !/gif/.test(f.type) ? 'photo' : /^audio\//.test(f.type) ? 'audio' : 'file', f.type), later)) return;
+    if (!later) stick.current = true;
     typingDone(chatId);
-    sendFiles(chatId, pending.files, pending.caption.trim(), (replyTo?.id as number) ?? null, { asFile: pending.asFile, spoiler: pending.spoiler && !pending.asFile, quality: canCompress ? pending.quality ?? savedQuality() : 'original', ...(thread ? { threadId } : {}) }).catch(() => {});
-    if (pending.caption === latest.current.text) { api.current?.setValue(emptyValue()); latest.current = saved.current = emptyValue(); }
+    sendFiles(chatId, pending.files, pending.caption.trim(), (replyTo?.id as number) ?? null, { asFile: pending.asFile, spoiler: pending.spoiler && !pending.asFile, quality: canCompress ? pending.quality ?? savedQuality() : 'original', ...(thread ? { threadId } : {}), ...when }).catch(() => {});
+    if (later && !scheduled) showToast(scheduledToast(when.scheduleAt!, Date.now(), isSaved));
+    if (!scheduled && pending.caption === latest.current.text) { api.current?.setValue(emptyValue()); latest.current = saved.current = emptyValue(); }
     setReplyKey(null);
     closePending();
   };
@@ -347,13 +358,14 @@ export function Chat({ chatId, frameKey, active, threadId }: { chatId: number; f
   // сразу — при уходе из чата и закрытии вкладки; после отправки движок сам его очищает
   // в элементе списка черновик — строка, оформление рядом
   const draftOf = (c: Item | undefined): Value => ({ text: (c?.draft as string | null) ?? '', entities: (c?.draftEntities as Entity[] | null) ?? [] });
-  const initial = useMemo<Value>(() => draftOf(chat), []);
+  // страница отложенных — своё пустое поле: черновик остаётся у чата
+  const initial = useMemo<Value>(() => (scheduled ? emptyValue() : draftOf(chat)), []);
   const saved = useRef<Value>(initial);
   const latest = useRef<Value>(initial);
   const draftTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const flushDraft = () => {
     if (draftTimer.current) { clearTimeout(draftTimer.current); draftTimer.current = null; }
-    if (editing) return;   // в поле — правка сообщения, а не черновик
+    if (editing || scheduled) return;   // в поле — правка сообщения, а не черновик
     if (!sameValue(latest.current, saved.current)) { saved.current = latest.current; saveDraft(chatId, latest.current.text, latest.current.entities); }
   };
   // превью ссылки в поле ввода, как в Telegram: первая ссылка текста → через 400 мс спросить сервер; крестик — отправить без превью
@@ -371,16 +383,16 @@ export function Chat({ chatId, frameKey, active, threadId }: { chatId: number; f
   useEffect(() => { lpUrl.current = null; setLp(null); }, [chatId]);
   const onType = (v: Value) => {
     if (!editing) watchLink(v);
-    if (v.text.trim() && v.text.length > latest.current.text.length && !editing) typing(chatId); // набирают (а не стирают) — «печатает…» у собеседника
+    if (v.text.trim() && v.text.length > latest.current.text.length && !editing && !scheduled) typing(chatId); // набирают (а не стирают) — «печатает…» у собеседника
     latest.current = v;
     if (draftTimer.current) clearTimeout(draftTimer.current);
-    if (!editing) draftTimer.current = setTimeout(flushDraft, 2500);
+    if (!editing && !scheduled) draftTimer.current = setTimeout(flushDraft, 2500);
   };
   // черновик поменяли на другом устройстве (или стёрли отправкой там): здесь ничего не набирали — подхватываем
   const remoteDraft = draftOf(chat);
   const remoteKey = JSON.stringify(remoteDraft);
   useEffect(() => {
-    if (editing || draftTimer.current || !sameValue(latest.current, saved.current) || sameValue(remoteDraft, latest.current)) return;
+    if (scheduled || editing || draftTimer.current || !sameValue(latest.current, saved.current) || sameValue(remoteDraft, latest.current)) return;
     saved.current = latest.current = remoteDraft;
     api.current?.setValue(latest.current, { instant: true });
   }, [remoteKey]);
@@ -397,7 +409,7 @@ export function Chat({ chatId, frameKey, active, threadId }: { chatId: number; f
     flushDraft();
     setReplyKey(null);
     const original: Value = { text: m.body as string, entities: (m.entities as Entity[] | undefined) ?? [] };
-    setEditing({ id: m.id as number, original, draft: latest.current });
+    setEditing({ id: (m.id as number | null) ?? 0, ...(scheduled ? { clientId: m.key as string } : {}), original, draft: latest.current });
     api.current?.setValue(original, { focus: true });
   };
   const endEdit = (draft: Value) => {
@@ -445,9 +457,10 @@ export function Chat({ chatId, frameKey, active, threadId }: { chatId: number; f
   // поле ввода смонтировалось только ради правки (панель канала) — startEdit не застал его, текст кладём сейчас
   useEffect(() => { if (editing && channelBar) api.current?.setValue(editing.original, { focus: true }); }, [editing?.id, channelBar]);
   /** Можно ли отправить сейчас (вид сообщения и медленный режим); нельзя — тост и false. */
-  const allowed = (right: MemberRight): boolean => {
+  const allowed = (right: MemberRight, later = false): boolean => {
     if (gRights && !gRights[right]) { showToast(right === 'text' ? 'В этой группе нельзя отправлять текст' : `В этой группе нельзя отправлять: ${MEMBER_RIGHT_TEXT[right].toLowerCase()}`); return false; }
-    if (slowMode && gRights) {
+    // медленный режим считается в момент отправки: отложенное подождёт его на сервере
+    if (slowMode && gRights && !later) {
       const last = messages.filter((m) => m.senderId === me.userId && !m.service && m.id != null).pop();
       const left = last ? Math.ceil(slowMode - (Date.now() - Date.parse(last.createdAt as string)) / 1000) : 0;
       if (left > 0) { showToast(`Медленный режим: следующее сообщение — через ${left} с`); return false; }
@@ -501,15 +514,34 @@ export function Chat({ chatId, frameKey, active, threadId }: { chatId: number; f
   const members = useMembers(chatId, chat?.kind === 'group');
   const subtitle = thread ? title : system ? 'служебные уведомления' : isTyping ? 'печатает…' : channel ? (gInfo ? subscribersText(gInfo.members) : 'Канал') : chat?.kind === 'group' ? (members ? membersStatus(members, true) : 'Группа') : myPeer ? lastSeenText(online, myPeer.lastSeen as string | null) : '';
   const replyTo = replyKey ? messages.find((m) => m.key === replyKey) : undefined;
+  // окно выбора времени (ScheduleModal): done получает время и «без звука»
+  const [timePick, setTimePick] = useState<{ initial?: number; done: (r: { at: number; silent: boolean }) => void } | null>(null);
+  const askTime = (done: (r: { at: number; silent: boolean }) => void, adding = 1) => {
+    if (((chat?.scheduled as number | undefined) ?? 0) + adding > SCHEDULED_LIMIT) { showToast(`Можно запланировать не больше ${SCHEDULED_LIMIT} сообщений на чат`); return; }
+    setTimePick({ done });
+  };
+  // отправка с условиями идёт той же дорогой, что и кнопка (onSend): поле очищает сам композер
+  const sendWhen = useRef<SendWhen | null>(null);
+  const sendVia = (w: SendWhen) => { sendWhen.current = w; (api.current as ComposerApi | null)?.send(); };
   // стикер из модалки пака или правой панели уходит сюда — с текущим ответом
   const replyIdRef = useRef<number | null>(null);
   replyIdRef.current = (replyTo?.id as number) ?? null;
   // цель — только у чата на экране: после «Назад» из треда стикер уходит в группу, а не в оставшийся живым тред
-  useEffect(() => (active ? setStickerTarget({ chatId, ...(thread ? { threadId } : {}), replyId: () => replyIdRef.current, sent: () => setReplyKey(null) }) : undefined), [chatId, threadId, active]);
+  useEffect(() => (active ? setStickerTarget({ chatId, ...(thread ? { threadId } : {}), replyId: () => replyIdRef.current, sent: () => setReplyKey(null),
+    ...(scheduled ? { schedule: (send: (w: SendWhen) => void) => askTime((r) => send({ scheduleAt: r.at, silent: r.silent, keepDraft: true })) } : {}) }) : undefined), [chatId, threadId, active, scheduled]);
+  // отложенных больше нет (опубликованы, удалены, в т. ч. с другого устройства) — страница закрывается сама
+  const feedKnown = useGlobal((s) => !!frameByKey(s, frameKey)?.feedMeta);
+  const hadItems = useRef(false);
+  if (scheduled && messages.length) hadItems.current = true;
+  useEffect(() => { if (scheduled && feedKnown && !messages.length && activeRef.current && (hadItems.current || !((chat?.scheduled as number | undefined) ?? 0))) closeChat(); }, [scheduled, feedKnown, messages.length]);
   const authorOf = (senderId: unknown) => (senderId === me.userId ? 'Вы' : title);
   const menuMsg = menu ? messages.find((m) => m.key === menu.key) : undefined;
   // пересылка, ждущая в поле ввода: «От: …» (или «Имена отправителей скрыты») и что пересылаем
   const fwd = useGlobal((s) => s.fwdDraft[chatId]) ?? null;
+  const sendItems = editing || fwd || art || scheduled ? null : [
+    ...(!isSaved ? [{ icon: 'bellOff', label: 'Отправить без звука', onClick: () => sendVia({ silent: true }) }] : []),
+    ...(!thread ? [{ icon: 'calendar', label: isSaved ? 'Напомнить' : 'Отправить позже', onClick: () => askTime((r) => sendVia({ scheduleAt: r.at, silent: r.silent })) }] : []),
+  ];
   const fwdQuote = fwd && !editing ? {
     icon: 'forward',
     author: fwd.hideSender ? 'Имена отправителей скрыты' : 'От: ' + fwd.preview.senders.map((s) => (s.id === me.userId ? me.name : s.name)).join(', '),
@@ -578,20 +610,20 @@ export function Chat({ chatId, frameKey, active, threadId }: { chatId: number; f
       <GlassBar class={finding ? 'app-finding' : ''}>
         {/* поверх другого чата — «Назад» к нему (и на широком экране), нижний — к списку на узком */}
         <IconButton class={depth > 1 ? 'app-back app-back-inner' : 'app-back'} icon="arrowLeft" label={depth > 1 ? 'Назад' : 'К списку чатов'} onClick={closeChat} />
-        <button type="button" class="rl-glassbar-who" aria-label="Информация о чате" onClick={() => setGlobal({ infoOpen: !infoOpen })}>
-          <Avatar name={title} tone={chatTone(chat)} size={40} logo={system} saved={isSaved} {...avatarPhoto(chat?.photo as ProfilePhoto | null)} />
+        <button type="button" class="rl-glassbar-who" aria-label={scheduled ? undefined : 'Информация о чате'} disabled={scheduled} onClick={() => setGlobal({ infoOpen: !infoOpen })}>
+          {scheduled ? null : <Avatar name={title} tone={chatTone(chat)} size={40} logo={system} saved={isSaved} {...avatarPhoto(chat?.photo as ProfilePhoto | null)} />}
           <span class="rl-glassbar-title">
-            <b>{thread ? threadTitle(threadCount) : title}{system ? <Verified size={16} /> : null}</b>
-            {isSaved && !phaseLabel ? null : <span key={phaseLabel ?? (isTyping ? 'typing' : online ? 'on' : 'off')} class={phaseLabel ? 'app-phase' : isTyping || online ? 'app-online' : undefined}>{phaseLabel ?? (subtitle || '\u00a0')}</span>}
+            <b>{scheduled ? scheduledTitle(isSaved) : thread ? threadTitle(threadCount) : title}{system ? <Verified size={16} /> : null}</b>
+            {scheduled || (isSaved && !phaseLabel) ? null : <span key={phaseLabel ?? (isTyping ? 'typing' : online ? 'on' : 'off')} class={phaseLabel ? 'app-phase' : isTyping || online ? 'app-online' : undefined}>{phaseLabel ?? (subtitle || '\u00a0')}</span>}
           </span>
         </button>
-        {!thread ? <IconButton icon="search" label="Поиск по чату" onClick={() => setFinding(true)} /> : null}
-        <ChatMenu chatId={chatId} title={title} />
+        {!thread && !scheduled ? <IconButton icon="search" label="Поиск по чату" onClick={() => setFinding(true)} /> : null}
+        {scheduled ? null : <ChatMenu chatId={chatId} title={title} />}
         {/* закреплённые — под шапкой, как в Telegram (плеер — над ней); в треде вместо них — плашка поста */}
         {thread ? <ThreadBar header={threadHeader} title={originTitle ?? 'Пост'} onClick={() => { if (threadHeader?.id != null) focusMessage({ id: threadHeader.id as number, sort: threadHeader.sort as number }); }} />
-          : !system ? <PinnedBar chatId={chatId} frameKey={frameKey} /> : null}
-        {!system ? <UploadBar chatId={chatId} /> : null}
-        {gInfo && gInfo.requests > 0 && !thread ? (
+          : !system && !scheduled ? <PinnedBar chatId={chatId} frameKey={frameKey} /> : null}
+        {!system && !scheduled ? <UploadBar chatId={chatId} /> : null}
+        {gInfo && gInfo.requests > 0 && !thread && !scheduled ? (
           <button type="button" class="app-requests-bar" onClick={() => setGlobal({ infoOpen: true, infoGo: 'gRequests' })}>
             <Icon name="userPlus" size={18} /><span>{gInfo.requests} {plural(gInfo.requests, 'заявка', 'заявки', 'заявок')} на вступление</span><Icon name="chevronRight" size={18} />
           </button>
@@ -636,7 +668,7 @@ export function Chat({ chatId, frameKey, active, threadId }: { chatId: number; f
         ) : null}
       </GlassBar>
       <MediaPolicy.Provider value={policy}>
-        <Feed frameKey={frameKey} active={active} chatId={chatId} threadId={threadId} channel={channel} saved={isSaved} meId={me.userId} peerName={title} chatPhoto={chat?.photo as ProfilePhoto | null} group={chat?.kind === 'group' || !!guest} onAuthor={openUserChat} stick={stick} greeting={greeting} highlight={found?.q} onMenu={(key, x, y, extra) => setMenu({ key, x, y, extra })} />
+        <Feed frameKey={frameKey} active={active} chatId={chatId} threadId={threadId} scheduled={scheduled} channel={channel && !scheduled} saved={isSaved} meId={me.userId} peerName={title} chatPhoto={chat?.photo as ProfilePhoto | null} group={(chat?.kind === 'group' || !!guest) && !scheduled} onAuthor={openUserChat} stick={stick} greeting={scheduled ? false : greeting} highlight={found?.q} onMenu={(key, x, y, extra) => setMenu({ key, x, y, extra })} />
       </MediaPolicy.Provider>
       {plate === 'channel' ? <ChannelBar chatId={chatId} member={!!gMe} username={gInfo?.username ?? null} approval={!!gInfo?.joinApproval} requested={!!chat?.requested} />
       : plate === 'join' && guest ? <GuestJoinBar chatId={chatId} guest={guest} />
@@ -651,6 +683,8 @@ export function Chat({ chatId, frameKey, active, threadId }: { chatId: number; f
               </>
             ) : plate === 'group' ? <span>Администраторы запретили писать в этой группе</span>
               : <span>Вы не можете отправлять сообщения этому пользователю</span>}
+            {/* писать нельзя, а отложенные остались (не ушли — видна причина): список всё равно доступен */}
+            {!scheduled && !thread && ((chat?.scheduled as number | undefined) ?? 0) > 0 ? <Button variant="ghost" onClick={() => openScheduled(chatId)}>{`${scheduledTitle(isSaved)}: ${chat!.scheduled}`}</Button> : null}
           </div>
         </div>
       ) : <div class={'app-composer-host' + (selKeys ? ' is-selecting' : '') + (art?.open && !art.closing ? ' is-article' : '')}><Composer
@@ -677,6 +711,10 @@ export function Chat({ chatId, frameKey, active, threadId }: { chatId: number; f
         placeholder={thread ? 'Комментарий' : channel ? 'Публикация' : 'Сообщение'}
         editing={!!editing}
         sendEmpty={!!fwdQuote || !!artQuote}
+        sendItems={sendItems}
+        scheduledCount={thread || scheduled ? 0 : (chat?.scheduled as number | undefined) ?? 0}
+        scheduledLabel={scheduledTitle(isSaved)}
+        scheduledPress={pressOpen(() => prepareScheduled(chatId), () => openScheduled(chatId))}
         replyTo={editing ? { author: 'Редактирование', text: editing.original.text, tone: 'accent', icon: 'pencil' } : fwdQuote ? fwdQuote : artQuote ? artQuote : !replyTo && lp?.link && !lp.off ? {
           icon: 'link', author: lp.link.siteName || lp.link.title || lp.url, text: lp.link.description || lp.link.title || lp.url, tone: 5,
           thumbSrc: lp.link.photo ? `/files/${lp.link.photo.id}` : undefined,
@@ -694,9 +732,9 @@ export function Chat({ chatId, frameKey, active, threadId }: { chatId: number; f
         onEditLast={editLast}
         onReplyNav={channel ? undefined : replyNav}
         chatKey={chatId}
-        recordModes={recordModes.filter((m) => !gRights || gRights[m === 'round' ? 'round' : 'voice'])}
+        recordModes={scheduled ? [] : recordModes.filter((m) => !gRights || gRights[m === 'round' ? 'round' : 'voice'])}
         startRound={startRound}
-        recordMode={recordMode}
+        recordMode={scheduled ? null : recordMode}
         onRecordModeChange={(m: string) => { setRecordMode(m); try { localStorage.setItem('relay.recordMode', m); } catch { /* без хранилища — до перезагрузки */ } }}
         onRecordError={(err: { name?: string }, mode: string) => showToast(err?.name === 'NotAllowedError' || err?.name === 'NotFoundError'
           ? (mode === 'round' ? 'Разрешите доступ к камере и микрофону, чтобы записывать видеосообщения' : 'Разрешите доступ к микрофону, чтобы записывать голосовые')
@@ -704,18 +742,32 @@ export function Chat({ chatId, frameKey, active, threadId }: { chatId: number; f
         onRecordSend={(kind: 'voice' | 'round', el: Element | null) => { if (allowed(kind)) captureCircle(chatId, el, kind); }}
         onSendVoice={(r: { blob: Blob; duration: number; waveform: Uint8Array }) => { if (!allowed('voice')) return; stick.current = true; sendVoice(chatId, r, (replyTo?.id as number) ?? null, threadId).catch(() => {}); setReplyKey(null); }}
         onSendRound={(r: { blob: Blob; duration: number; size: number; thumb: string | null }) => { if (!allowed('round')) return; stick.current = true; sendRound(chatId, r, (replyTo?.id as number) ?? null, threadId).catch(() => {}); setReplyKey(null); }}
-        attachItems={thread ? THREAD_ATTACH : ATTACH_ITEMS}
-        onExpand={() => openArticle()}
+        attachItems={scheduled ? SCHEDULED_ATTACH : thread ? THREAD_ATTACH : ATTACH_ITEMS}
+        onExpand={scheduled ? undefined : () => openArticle()}
         onAttach={(k: string) => { if (k === 'music') { if (allowed('music')) setMusicOpen(true); return; } if (k === 'article') { openArticle(); return; } if (k === 'todo') { setTodoOpen({ mode: 'create' }); return; } if (k === 'poll') { setPollOpen(true); return; } if (k === 'geo') { setGeoOpen(true); return; } if (k === 'contact') { setContactOpen(true); return; } if (k === 'date') { setDateOpen({ mode: 'format', done: (r) => { if (r) api.current?.insert(dateValue(r)); } }); return; } const el = picker.current!; el.accept = k === 'media' || k === 'camera' ? 'image/*,video/*' : ''; el.value = ''; el.click(); }}
         onSend={(v: Value) => {
+          const when = sendWhen.current ?? {};
+          sendWhen.current = null;
+          const later = when.scheduleAt != null;
+          if (editing?.clientId) {
+            const next = applyMarkdown(v);
+            if (!sameValue(next, editing.original)) editScheduled(chatId, editing.clientId, { body: next.text, entities: next.entities });
+            endEdit(editing.draft);
+            return false;
+          }
+          // страница отложенных: сначала — когда; поле останется как есть, пока не выбрали
+          if (scheduled && !later) {
+            if (allowed('text', true)) askTime((r) => sendVia({ scheduleAt: r.at, silent: r.silent, keepDraft: true }));
+            return false;
+          }
           if (editing) {
             const next = applyMarkdown(v);
             if (!sameValue(next, editing.original)) editMessage(chatId, editing.id, next.text, next.entities).catch(() => { if (channel) showToast('Не удалось изменить — недостаточно прав?'); });
             endEdit(editing.draft);
             return false;   // в поле уже черновик — композер его не трогает
           }
-          if (!allowed('text')) return false;
-          stick.current = true;
+          if (!allowed('text', later)) return false;
+          if (!later) stick.current = true;
           if (draftTimer.current) { clearTimeout(draftTimer.current); draftTimer.current = null; }
           saved.current = latest.current = emptyValue();   // черновик очищает сам движок вместе с отправкой
           typingDone(chatId);
@@ -724,15 +776,16 @@ export function Chat({ chatId, frameKey, active, threadId }: { chatId: number; f
           if (art) { sendArticle(art.blocks); return false; }
           // одно эмодзи кубика без оформления — бросок (как в Telegram): значение выберет сервер
           const die = out.text.replace(/\uFE0F/g, '').trim();
-          if (!thread && !out.entities.length && isDiceEmoji(die)) { const r = sendSpecial(chatId, { dice: { emoji: die } }, (replyTo?.id as number) ?? null); setReplyKey(null); return r; }
+          if (!later && !when.silent && !thread && !out.entities.length && isDiceEmoji(die)) { const r = sendSpecial(chatId, { dice: { emoji: die } }, (replyTo?.id as number) ?? null); setReplyKey(null); return r; }
           // превью: убрали крестиком — без него; уже загружено для этой ссылки — сразу в ленте, до ответа сервера
           // полёт из поля в пузырь (sendFlight): капсула и текст снимаются сейчас, пока поле не очищено
           const col = (document.activeElement as HTMLElement | null)?.closest('.app-chatcol') ?? document.querySelector('.app-chatcol[data-current]');
-          captureText(chatId, col?.querySelector('.rl-composer') ?? null, col?.querySelector('.rl-composer-editable') ?? null);
+          if (!later) captureText(chatId, col?.querySelector('.rl-composer') ?? null, col?.querySelector('.rl-composer-editable') ?? null);
           const url = firstUrl(out.text, out.entities);
           const pv = lp && url === lp.url ? (lp.off ? { noLinkPreview: true } : { link: lp.link }) : {};
           lpUrl.current = null; setLp(null);
-          const sent = send(chatId, out.text, (replyTo?.id as number) ?? null, out.entities, thread ? { ...pv, threadId } : pv);
+          const sent = send(chatId, out.text, (replyTo?.id as number) ?? null, out.entities, { ...pv, ...when, ...(thread ? { threadId } : {}) });
+          if (later && !scheduled) showToast(scheduledToast(when.scheduleAt!, Date.now(), isSaved));
           setReplyKey(null);
           return sent;   // поле очистится, когда сообщение встанет в ленту
         }}
@@ -751,6 +804,21 @@ export function Chat({ chatId, frameKey, active, threadId }: { chatId: number; f
       {/* меню сообщения: левый верхний угол — у курсора, реакции — над ним (как в Telegram) */}
       {(() => {
         if (!menu || !menuMsg) return <MenuPopover open={false} />;
+        // отложенное: отправить сейчас, другое время, правка, удаление; у альбома — всё вместе
+        if (scheduled) {
+          const group = groupOf(menuMsg);
+          const editable = group.find((m) => m.body) ?? menuMsg;
+          return (
+            <MenuPopover open anchor={menu} class="app-msgmenu" label="Действия с отложенным сообщением" onClose={() => setMenu(null)}
+              items={[
+                { icon: 'send', label: 'Отправить сейчас', onClick: () => { for (const m of group) sendScheduledNow(chatId, m.key as string); } },
+                { icon: 'calendar', label: 'Изменить время', onClick: () => setTimePick({ initial: Date.parse(menuMsg.createdAt as string), done: (r) => { for (const m of group) editScheduled(chatId, m.key as string, { sendAt: r.at }); } }) },
+                ...(canEditKind(String(editable.kind ?? 'text')) ? [{ icon: 'pencil', label: 'Изменить', onClick: () => startEdit(editable) }] : []),
+                '-',
+                { icon: 'trash', label: 'Удалить', danger: true, onClick: () => { void confirmModal({ title: group.length > 1 ? 'Удалить отложенные сообщения?' : 'Удалить отложенное сообщение?', text: 'Оно не будет отправлено.', confirmText: 'Удалить', danger: true }).then((ok: boolean) => { if (ok) for (const m of group) deleteScheduled(chatId, m.key as string); }); } },
+              ]} />
+          );
+        }
         // пост канала: автор скрыт (senderId 0) — править может админ с post (своё) или edit (чужое), сервер проверит;
         // копию поста в группе обсуждения не правят и не удаляют (только пост в канале)
         const postMsg = channel && !menuMsg.service;
@@ -840,6 +908,10 @@ export function Chat({ chatId, frameKey, active, threadId }: { chatId: number; f
         onPick={(key: string) => { const off = rpanel.mine === key; if (!off) { pushRecentReaction(key); queueReactionFx(rpanel.msgKey, key); } react(chatId, rpanel.msgId, off ? null : key); setRpanel(null); }}
         onClose={() => setRpanel(null)} /> : null}
       <MusicPicker chatId={chatId} open={musicOpen} onClose={() => setMusicOpen(false)} replyToId={(replyTo?.id as number) ?? null} onSent={() => setReplyKey(null)} />
+      {timePick ? (
+        <ScheduleModal saved={isSaved} initial={timePick.initial} allowSilent={timePick.initial == null} onClose={() => setTimePick(null)}
+          onPick={(r) => { const p = timePick; setTimePick(null); p.done(r); }} />
+      ) : null}
       {dateOpen ? (
         <DateModal
           mode={dateOpen.mode} initial={dateOpen.initial}
@@ -900,7 +972,7 @@ export function Chat({ chatId, frameKey, active, threadId }: { chatId: number; f
           headerActions={<IconButton icon="more" label="Параметры отправки" onClick={(e: MouseEvent) => setSendMenu(e.currentTarget as HTMLElement)} />}
           actions={[
           <Button key="c" variant="ghost" onClick={closePending}>Отмена</Button>,
-          <Button key="s" onClick={sendPending}>Отправить</Button>,
+          <Button key="s" onClick={() => sendPending()}>Отправить</Button>,
         ]}>
           {pending.url && !asFile && isVideo(pending.file) ? (
             <div class={'app-send-media' + (pending.spoiler ? ' app-send-spoiler' : '')}>
@@ -942,6 +1014,8 @@ export function Chat({ chatId, frameKey, active, threadId }: { chatId: number; f
           />
           <MenuPopover open={!!sendMenu} anchor={sendMenu ?? undefined} placement="bottom-end" label="Параметры отправки" onClose={() => setSendMenu(null)}
             items={[
+              ...(!scheduled && !isSaved ? [{ icon: 'bellOff', label: 'Отправить без звука', onClick: () => sendPending({ silent: true }) }] : []),
+              ...(!scheduled && !thread ? [{ icon: 'calendar', label: isSaved ? 'Напомнить' : 'Отправить позже', onClick: () => askTime((r) => sendPending({ scheduleAt: r.at, silent: r.silent }), pending.files.length) }] : []),
               { icon: 'plus', label: 'Добавить', onClick: () => { adding.current = true; const el = picker.current!; el.accept = ''; el.value = ''; el.click(); } },
               ...(anyMedia ? [pending.asFile
                 ? { icon: 'image', label: n > 1 ? 'Отправить как медиа' : isVideo(pending.file) ? 'Отправить как видео' : 'Отправить как фото', onClick: () => setPending({ ...pending, asFile: false }) }

@@ -19,6 +19,7 @@ import { enqueue, type Job } from './queue';
 import { purgeStep, type PurgeJob } from '../domain/chatPurge';
 import { flushReactionCounts } from '../domain/reactionCounts';
 import { flushReplies } from '../domain/threads';
+import { publishScheduled, sweepScheduled } from '../domain/scheduled';
 
 /** Подписок на страницу push.message (тесты уменьшают). */
 export const PUSH_PAGE = { size: 1000 };
@@ -215,6 +216,14 @@ register('replies.flush', async (p: { chatId: number; postId: number }) => {
 // реакции поста канала: счётчики одним событием reactionCounts на секундное окно (reactionCounts.ts)
 register('reactions.flush', async (p: { chatId: number; id: number }) => {
   await flushReactionCounts(p);
+});
+
+// отложенное сообщение: опубликовать, когда подошло время (domain/scheduled.ts); идемпотентно
+register('scheduled.send', async (p: { userId: number; clientId: string }) => publishScheduled(Number(p.userId), p.clientId));
+// страховка: срок прошёл, а задача умерла после всех попыток
+register('scheduled.sweep', async () => {
+  await sweepScheduled();
+  return { again: { inSec: 300 } };
 });
 
 register('poll.close', async (p: { chatId: number; id: number }) => {

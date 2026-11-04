@@ -6,7 +6,7 @@ import { s3 } from './files';
  * Сборка мусора в хранилище: готовое вложение, на которое больше ничто не ссылается, удаляется вместе с объектами в S3.
  * «Ссылается» — ровно то, что даёт доступ к файлу в fileFor (кроме владельца): не удалённое сообщение (пересылки
  * хранят тот же id — пока жива хоть одна копия, файл жив), музыка профиля, фото профиля (история и текущее),
- * фото группы, картинка превью ссылки. Файл, который никто, кроме владельца, открыть не может, — мусор.
+ * фото группы, картинка превью ссылки, отложенное сообщение. Файл, который никто, кроме владельца, открыть не может, — мусор.
  * Отсрочка grace: только что загруженное ещё не успели отправить (очередь клиента, офлайн) — его не трогаем.
  *
  * Обход — курсором по (created_at, id) пачками, курсор в server_meta: таблица может быть большой, один запуск
@@ -25,6 +25,7 @@ const CURSOR = 'storage_gc_cursor';
 /** Условие «на вложение a кто-то ссылается» (тот же набор, что в fileFor). */
 export const referenced = (db: typeof sql) => db`(
      exists (select 1 from messages m where m.attachment->>'id' = a.id::text and not m.deleted)
+  or exists (select 1 from scheduled_messages s where s.attachment_id = a.id)   -- отложенное: файл уже загружен и ждёт публикации
   or exists (select 1 from profile_music pm where pm.attachment_id = a.id)
   or exists (select 1 from user_photos up where up.big = a.id or up.small = a.id or up.video = a.id)
   or exists (select 1 from users u where u.photo is not null and (u.photo->>'id' = a.id::text or u.photo->>'small' = a.id::text))

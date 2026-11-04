@@ -22,7 +22,7 @@ export function ChatStack() {
   ];
   return (
     <div class="app-chats">
-      {cols.map(({ f, place, instant, pending }) => <ChatColumn key={f.key} frame={f.key} chatId={f.chatId} threadId={f.threadId} place={place} instant={instant} pending={pending} swap={!!f.swap} />)}
+      {cols.map(({ f, place, instant, pending }) => <ChatColumn key={f.key} frame={f.key} chatId={f.chatId} threadId={f.threadId} scheduled={f.scheduled} place={place} instant={instant} pending={pending} swap={!!f.swap} />)}
     </div>
   );
 }
@@ -36,7 +36,7 @@ export function finishEntrances(el: Element): void {
   }
 }
 
-function ChatColumn({ frame, chatId, threadId, place, instant, pending, swap }: { frame: string; chatId: number; threadId?: number; place: Place; instant: boolean; pending: boolean; swap: boolean }) {
+function ChatColumn({ frame, chatId, threadId, scheduled, place, instant, pending, swap }: { frame: string; chatId: number; threadId?: number; scheduled?: boolean; place: Place; instant: boolean; pending: boolean; swap: boolean }) {
   // первый кадр колонки — на исходной позиции, иначе переход не с чего начинать; нижний чат встаёт сразу.
   // Колонка, смонтированная справа (готовится поверх), уже стоит на исходной — ей ждать нечего: иначе она
   // въезжала позже, чем уезжал нижний чат (ожидание кадра + длинный рендер переключения ≈ 70 мс рассинхрона)
@@ -70,7 +70,7 @@ function ChatColumn({ frame, chatId, threadId, place, instant, pending, swap }: 
   const themed = useChatThemeStyle(chatId);
   return (
     <div ref={box} class={cls} data-current={on ? '' : undefined} style={themed?.style} data-out-filled={themed?.filled ? '' : undefined} {...hidden}>
-      <Chat frameKey={frame} chatId={chatId} threadId={threadId} active={on} />
+      <Chat frameKey={frame} chatId={chatId} threadId={threadId} scheduled={scheduled} active={on} />
     </div>
   );
 }

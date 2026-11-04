@@ -1,5 +1,6 @@
 import { peerKey } from '../crypto/peerKey';
 import { shredHistory } from './shred';
+import { dropScheduledInChat } from './scheduled';
 import { shownPoll, withPolls, type PollDef } from './polls';
 import type { Attachment, ContactCard, Dice, GeoPoint } from '@relay/protocol';
 import { graphemes, GROUP_ABOUT_MAX, normalizeEntities, type Entity, type Block, type ForwardInfo, type LinkPreview, type MediaCounts, type MediaTab, type Message, type MessageButton, type ProfilePhoto, type ServiceData, type ServiceType, type StickerRef, type Todo } from '@relay/protocol';
@@ -173,6 +174,8 @@ export function toMessage(r: Record<string, unknown>): Message {
     ...(r.views != null ? { views: Number(r.views) } : {}),
     ...(r.thread_id != null ? { threadId: Number(r.thread_id) } : {}),
     ...(r.origin ? { origin: { chatId: Number((r.origin as { chatId: unknown }).chatId), id: Number((r.origin as { id: unknown }).id) } } : {}),
+    ...(r.silent ? { silent: true } : {}),
+    ...(r.reminder ? { reminder: true } : {}),
   };
 }
 
@@ -546,6 +549,8 @@ export async function deleteDirectChat(userId: number, chatId: number, forAll: b
       ? (await tx`select user_id from chat_members where chat_id = ${chatId}`).map((r) => Number(r.user_id))
       : [userId];
     await tx`update chat_members set history_from = ${from}, last_read_id = greatest(last_read_id, ${from - 1}) where chat_id = ${chatId} and user_id = any(${who}::bigint[])`;
+    // отложенные тех, у кого чат удаляется: до уничтожения ключа (запечатаны им) и до проверки ссылок на файлы
+    await dropScheduledInChat(tx, chatId, who, userId);
     if (forAll) {
       // «удалить у обоих»: прошлое уничтожается по-настоящему — старые версии ключа чата удаляются (не открыть ни
       // в базе, ни в бэкапах после срока хранения ключей), строки до шифрования — стираются

@@ -13,6 +13,7 @@ export type ServiceType = 'login_code' | 'new_login' | 'group_created' | 'channe
   | 'title_changed' | 'photo_changed' | 'photo_removed' | 'members_added' | 'member_left' | 'member_removed'
   | 'joined_by_link' | 'joined_by_request' | 'owner_changed' | 'protected_on' | 'protected_off'
   | 'todo_done' | 'todo_append'   // чек-лист: автор отметил / добавил задачи в список replyToId (номера — в data)
+  | 'scheduled_failed'   // отложенное не удалось отправить: текст — куда и почему (сам текст сообщения не раскрывается)
   | 'theme_changed';   // тема чата: data.emoji/title — новая, пусто — снята   // чек-лист: автор отметил / добавил задачи в список replyToId (номера — в data)
 /** Участники служебного события (имена на момент события) и новое название. */
 export interface ServiceData { users?: { id: Id; name: string }[]; title?: string; completed?: number[]; incompleted?: number[]; items?: number[]; emoji?: string }   // group_created / channel_created: тело — название, автор — создатель
@@ -52,7 +53,20 @@ export interface Message {
   threadId?: Id;         // комментарий: id копии поста в группе обсуждения (корень треда)
   origin?: { chatId: Id; id: Id };   // копия поста в группе обсуждения: канал и пост-оригинал (управляется только через пост)
   replies?: Replies;     // пост канала с обсуждением: кнопка «N комментариев» (только история канала, в журнале нет)
+  silent?: boolean;      // без звука: получателю ни push, ни звука; сообщение и счётчик — как обычно
+  reminder?: boolean;    // отложенное себе в «Избранное»: автору — уведомление о напоминании
 }
+
+/** Отложенное сообщение (видно только автору): id у него появится при публикации, до неё ключ — clientId.
+ *  sendAt — мс эпохи. failed — код отказа: опубликовать не вышло, ждёт решения автора. rev — версия строки. */
+export interface ScheduledMessage {
+  clientId: string; chatId: Id; sendAt: number; kind: Message['kind']; body: string; entities?: Entity[]; replyToId: Id | null;
+  attachment?: Attachment | null; groupId?: string | null; sticker?: StickerRef | null; silent?: boolean; failed?: string; rev: number; createdAt: string;
+}
+/** Отложенных на чат на пользователя (как в Telegram). */
+export const SCHEDULED_LIMIT = 100;
+/** Самое дальнее время: год. Сервер даёт сутки запаса на високосный год и расхождение часов. */
+export const SCHEDULE_MAX_MS = 365 * 24 * 3600_000;
 
 /** Комментарии к посту: тред — копия copyId в группе chatId; recent — последние (до 3) комментаторы, свежий первым.
  *  readMaxId — докуда я прочитал тред (только в истории канала; нет — не читал). */
@@ -299,6 +313,9 @@ export type Update =
   | { type: 'chatFlags'; chatId: Id; pinnedAt: number | null; archived: boolean; unreadMark: boolean; archivedAtId?: number }   // закреплён (мс; позже — выше), в архиве, «непрочитанное»
   | { type: 'chatNotify'; chatId: Id; muteUntil: number | null }   // уведомления чата: мс эпохи — выключены до, 0 — навсегда, null — включены
   | { type: 'chatRemoved'; chatId: Id }
+  // отложенное появилось или изменилось (только автору; журнал хранит ссылку, не текст) / опубликовано или удалено
+  | { type: 'scheduled'; item: ScheduledMessage }
+  | { type: 'scheduledRemoved'; chatId: Id; clientId: string }
   | { type: 'myStickers' };   // мои паки / недавние / избранные изменились — перечитать GET /my-stickers   // превью ссылки сообщения загрузилось (null — превью нет)   // закреплённые сообщения чата целиком (новые сверху)   // список сеансов изменился: новый вход, подтверждение, завершение
 
 /** Строка участника группы в журнале (имя и присутствие — из профиля и присутствия). */
@@ -404,7 +421,8 @@ export type ErrorCode = 'bad_frame' | 'pin_limit' | 'unauthorized' | 'not_member
   | 'password_invalid' | 'password_missing' | 'recovery_unavailable' | 'email_invalid' | 'qr_expired' | 'passkey_not_found' | 'passkey_invalid'
   | 'folder_title' | 'folder_empty' | 'folder_too_many_chats' | 'folder_emoji' | 'folders_limit'
   | 'upload_limit' | 'upload_quota'   // пределы загрузок на пользователя (apps/server/src/domain/uploadLimits.ts)
-  | 'upload_missing' | 'upload_mismatch' | 'upload_pending' | 'upload_incomplete' | 'photo_invalid' | 'file_too_big';
+  | 'upload_missing' | 'upload_mismatch' | 'upload_pending' | 'upload_incomplete' | 'photo_invalid' | 'file_too_big'
+  | 'schedule_past' | 'schedule_far' | 'schedule_limit';   // отложенные (domain/scheduled.ts): время прошло, дальше года, больше SCHEDULED_LIMIT на чат
 
 export type ClientFrame =
   | { op: 'prove'; sig: string }   // ответ на challenge: подпись «relay-device|ws|<nonce>» ключом устройства
@@ -415,7 +433,7 @@ export type ClientFrame =
   // превью публичного канала: push'и канала в этот сокет без подписки, пока превью открыто; ack.result — {seq}
   | { op: 'watchChat'; reqId: string; chatId: Id }
   | { op: 'unwatchChat'; chatId: Id }
-  | { op: 'send'; reqId: string; clientId: string; chatId: Id; body: string; entities?: Entity[]; replyToId?: Id | null; attachment?: { id: string; thumb?: string | null; spoiler?: boolean } | null; groupId?: string | null; forward?: ForwardRef | null; noLinkPreview?: boolean; blocks?: Block[] | null; todo?: TodoInput; poll?: PollInput; contact?: { userId: Id; key?: string; via?: { chatId: Id; messageId: Id } }; geo?: GeoPoint; dice?: { emoji: DiceEmoji }; sticker?: { id: Id } | null; threadId?: Id; draftHash?: string | null }   // threadId — комментарий в треде (группа обсуждения)
+  | { op: 'send'; reqId: string; clientId: string; chatId: Id; body: string; entities?: Entity[]; replyToId?: Id | null; attachment?: { id: string; thumb?: string | null; spoiler?: boolean } | null; groupId?: string | null; forward?: ForwardRef | null; noLinkPreview?: boolean; blocks?: Block[] | null; todo?: TodoInput; poll?: PollInput; contact?: { userId: Id; key?: string; via?: { chatId: Id; messageId: Id } }; geo?: GeoPoint; dice?: { emoji: DiceEmoji }; sticker?: { id: Id } | null; threadId?: Id; draftHash?: string | null; silent?: boolean; scheduleAt?: number }   // threadId — комментарий в треде (группа обсуждения); silent — без звука; scheduleAt — мс эпохи: отложить
   | { op: 'read'; reqId: string; chatId: Id; upToId: Id }
   | { op: 'typing'; chatId: Id }   // «печатаю» — без ответа, сервер пересылает остальным участникам
   // клики по большому эмодзи (только личный чат): t — секунды от первого клика пачки; сервер пересылает собеседнику, в журнал не пишет
@@ -534,7 +552,8 @@ export function parseClientFrame(raw: string): ClientFrame | null {
       if (f.sticker != null && (typeof f.sticker !== 'object' || !int((f.sticker as { id: unknown }).id))) return null;
       if (f.threadId != null && !int(f.threadId)) return null;
       if (f.draftHash != null && !(typeof f.draftHash === 'string' && DRAFT_HASH.test(f.draftHash))) return null;
-      return { op: 'send', ...(f.draftHash !== undefined ? { draftHash: f.draftHash as string | null } : {}), ...(f.threadId != null ? { threadId: f.threadId as number } : {}), ...(f.sticker != null ? { sticker: { id: (f.sticker as { id: number }).id } } : {}), ...(f.todo != null ? { todo: normalizeTodo(f.todo)! } : {}), ...(f.poll != null ? { poll: normalizePoll(f.poll)! } : {}), ...(f.geo != null ? { geo: normalizeGeo(f.geo)! } : {}), ...(f.dice != null ? { dice: { emoji: (f.dice as { emoji: DiceEmoji }).emoji } } : {}), ...(f.contact != null ? { contact: { userId: (f.contact as { userId: number }).userId, ...(typeof cKey === 'string' ? { key: cKey } : {}), ...(cVia ? { via: { chatId: Number(cVia.chatId), messageId: Number(cVia.messageId) } } : {}) } } : {}), reqId: f.reqId, clientId: f.clientId, chatId: f.chatId, body: f.body, entities: normalizeEntities(f.body, f.entities), replyToId: (f.replyToId as number | null) ?? null, attachment: (f.attachment as { id: string; thumb?: string | null; spoiler?: boolean } | null) ?? null, groupId: (f.groupId as string | null) ?? null, forward, ...(f.noLinkPreview === true ? { noLinkPreview: true } : {}), ...(Array.isArray(f.blocks) ? { blocks: f.blocks as Block[] } : {}) };
+      if (f.scheduleAt != null && !int(f.scheduleAt)) return null;
+      return { op: 'send', ...(f.silent === true ? { silent: true } : {}), ...(f.scheduleAt != null ? { scheduleAt: f.scheduleAt as number } : {}), ...(f.draftHash !== undefined ? { draftHash: f.draftHash as string | null } : {}), ...(f.threadId != null ? { threadId: f.threadId as number } : {}), ...(f.sticker != null ? { sticker: { id: (f.sticker as { id: number }).id } } : {}), ...(f.todo != null ? { todo: normalizeTodo(f.todo)! } : {}), ...(f.poll != null ? { poll: normalizePoll(f.poll)! } : {}), ...(f.geo != null ? { geo: normalizeGeo(f.geo)! } : {}), ...(f.dice != null ? { dice: { emoji: (f.dice as { emoji: DiceEmoji }).emoji } } : {}), ...(f.contact != null ? { contact: { userId: (f.contact as { userId: number }).userId, ...(typeof cKey === 'string' ? { key: cKey } : {}), ...(cVia ? { via: { chatId: Number(cVia.chatId), messageId: Number(cVia.messageId) } } : {}) } } : {}), reqId: f.reqId, clientId: f.clientId, chatId: f.chatId, body: f.body, entities: normalizeEntities(f.body, f.entities), replyToId: (f.replyToId as number | null) ?? null, attachment: (f.attachment as { id: string; thumb?: string | null; spoiler?: boolean } | null) ?? null, groupId: (f.groupId as string | null) ?? null, forward, ...(f.noLinkPreview === true ? { noLinkPreview: true } : {}), ...(Array.isArray(f.blocks) ? { blocks: f.blocks as Block[] } : {}) };
     case 'read':
       return str(f.reqId, 64) && int(f.chatId) && int(f.upToId) ? { op: 'read', reqId: f.reqId, chatId: f.chatId, upToId: f.upToId } : null;
     default: return null;
