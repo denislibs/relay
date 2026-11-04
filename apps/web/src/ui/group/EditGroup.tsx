@@ -1,5 +1,5 @@
 import { ConfirmDialog, InfoRow, ProfileHeader, RadioRow, Section, Switch, TextField, peerTone } from '@relay/ui';
-import { GROUP_ABOUT_MAX, MEMBER_RIGHTS, rightsCount, type GroupInvite } from '@relay/protocol';
+import { GROUP_ABOUT_MAX, MEMBER_RIGHTS, isAdminRole, rightsCount, type GroupInvite } from '@relay/protocol';
 import { useEffect, useRef, useState } from 'preact/hooks';
 import { groupCall } from '../../data';
 import { useGlobal } from '../../global';
@@ -86,6 +86,8 @@ export function EditGroup({ nav }: { nav: Nav }) {
         <InfoRow tile="purple" icon="shield" title="Администраторы" subtitle={admins != null ? String(admins) : '…'} onClick={() => nav.go('gAdmins')} />
         {adminCan(me, 'invite') ? <InfoRow tile="green" icon="link" title="Пригласительные ссылки" subtitle={live != null ? String(live) : '…'} onClick={() => nav.go('gInvites')} /> : null}
         {group.requests > 0 ? <InfoRow tile="red" icon="userPlus" title="Заявки на вступление" subtitle={String(group.requests)} onClick={() => nav.go('gRequests')} /> : null}
+        {/* журнал действий — любому админу: право проверяет и сервер */}
+        {isAdminRole(me.role) ? <InfoRow tile="orange" icon="history" title="Недавние действия" onClick={() => nav.go('gLog')} /> : null}
       </Section>
       {channel && adminCan(me, 'info') ? (
         <Section footer={group.signatures ? 'Под постами видно имя администратора, который их опубликовал.' : 'Посты публикуются от имени канала, без имени автора.'}>

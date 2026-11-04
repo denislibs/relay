@@ -1,6 +1,7 @@
 import { unpinDeleted } from './pins';
 import { canEditKind, emojiKey, normalizeEntities, trimFormatted, type Entity, type Reaction } from '@relay/protocol';
 import { sql } from '../db';
+import { logAdminAction } from './adminLog';
 import { assertMember } from './chats';
 import { DomainError } from './errors';
 import { dropUnreadReactions, noteReaction } from './reactionsUnread';
@@ -21,7 +22,7 @@ const EMOJI = /^\p{Extended_Pictographic}(️|‍\p{Extended_Pictographic})*$/u;
 
 /** Строка под замком; копия поста в группе обсуждения (origin) из группы не правится и не удаляется — только через пост. */
 async function lockMessage(tx: Parameters<typeof assertMember>[0], chatId: number, id: number) {
-  const [m] = await tx`select sender_id, (deleted or coalesce(expires_at <= now(), false)) as deleted, service_type, origin, thread_id from messages where chat_id = ${chatId} and id = ${id} for update`;
+  const [m] = await tx`select sender_id, created_at, (deleted or coalesce(expires_at <= now(), false)) as deleted, service_type, origin, thread_id from messages where chat_id = ${chatId} and id = ${id} for update`;
   if (!m || m.deleted) throw new DomainError('not_found', 'message');
   if (m.origin != null) throw new DomainError('forbidden', 'post copy');
   return m;
@@ -41,9 +42,11 @@ export async function editMessage(userId: number, chatId: number, id: number, bo
   if (text.length > MAX_BODY) throw new DomainError('too_long');
   return sql.begin(async (tx) => {
     const ctx = await messageCtx(tx, chatId, userId, id);   // и гость треда — свой комментарий (threads.ts)
+    let foreign: number | null = null;   // автор чужого поста: только такая правка — действие админа
     if (ctx.kind === 'channel' && hasAdmin(ctx, 'edit')) {
-      const [m] = await tx`select (deleted or coalesce(expires_at <= now(), false)) as deleted, service_type from messages where chat_id = ${chatId} and id = ${id} for update`;
+      const [m] = await tx`select sender_id, (deleted or coalesce(expires_at <= now(), false)) as deleted, service_type from messages where chat_id = ${chatId} and id = ${id} for update`;
       if (!m || m.deleted || m.service_type) throw new DomainError('not_found', 'message');
+      foreign = Number(m.sender_id) === userId ? null : Number(m.sender_id);
     } else await ownMessage(tx, userId, chatId, id);   // в служебном чате — тоже только свои (сообщения Relay не правятся)
     // пересланное — чужой текст: как в Telegram, его не правит ни переславший, ни админ канала
     // (пересылка «без автора» — уже своё сообщение, fwd_from у неё нет)
@@ -62,6 +65,7 @@ export async function editMessage(userId: number, chatId: number, id: number, bo
     }, () => ({ edited_at: sql`now()` })))!;
     const editedAt = new Date(row.edited_at as string).toISOString();
     await chatEvent(tx, chatId, { type: 'messageEdited', chatId, id, body: text, editedAt, entities });
+    if (foreign != null) await logAdminAction(tx, chatId, userId, 'message_edited', { messageId: id, target: foreign });
     await enqueue(tx, 'search.sync', { id });
     // новые @имена правки — новые упоминания; убранные остаются (как в Telegram)
     await collectMentions(tx, ctx, row);
@@ -86,6 +90,8 @@ export async function deleteMessage(userId: number, chatId: number, id: number):
       if (m.service_type) throw new DomainError('not_found', 'message');
     } else m = await ownMessage(tx, userId, chatId, id);
     await erase(tx, chatId, id, ctx.kind);
+    // чужое — действие админа: в журнал только автор, id и дата; текст стёрт выше и никуда не копируется (docs/SECURITY.md)
+    if (Number(m.sender_id) !== userId) await logAdminAction(tx, chatId, userId, 'message_deleted', { messageId: id, target: Number(m.sender_id), at: new Date(m.created_at as string).toISOString() });
     // пост канала — копия в группе обсуждения удаляется тоже: из ленты группы пропадает, тред остаётся (шапка «Пост удалён»)
     if (ctx.kind === 'channel') await withCopy(tx, chatId, id, (groupId, copyId) => erase(tx, groupId, copyId, 'group'));
     // комментарий — счётчики треда заново

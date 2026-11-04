@@ -21,6 +21,7 @@ import { flushReactionCounts } from '../domain/reactionCounts';
 import { flushReplies } from '../domain/threads';
 import { publishScheduled, sweepScheduled } from '../domain/scheduled';
 import { destroyExpiredKeys, expireStep } from '../domain/autoDelete';
+import { trimAdminLog } from '../domain/adminLog';
 
 /** Подписок на страницу push.message (тесты уменьшают). */
 export const PUSH_PAGE = { size: 1000 };
@@ -233,6 +234,13 @@ register('messages.expire', async () => {
   const r = await expireStep();
   await destroyExpiredKeys();
   return { again: { inSec: r.more ? 0 : EXPIRE_EVERY_SEC } };
+});
+
+// журнал действий админов: срок 48 часов (domain/adminLog.ts). Чтение отсекает старше само, задача только освобождает место
+export const ADMIN_LOG_TRIM_EVERY_SEC = 900;
+register('adminLog.trim', async () => {
+  await trimAdminLog();
+  return { again: { inSec: ADMIN_LOG_TRIM_EVERY_SEC } };
 });
 
 register('poll.close', async (p: { chatId: number; id: number }) => {

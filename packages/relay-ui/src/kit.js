@@ -1877,6 +1877,22 @@ function EmptyState(props) {
           L('rl-empty-d2', { tag: 'rect', x: 72, y: 48, width: 54, height: 24, rx: 12 }))),
       h('g', { class: 'rl-empty-link-spark' }, spark(80, 60)),
       spark(132, 24, 'rl-empty-spark-2'), spark(26, 96, 'rl-empty-spark-3'))
+    : kind === 'log'
+    // планшет со списком действий, строки дорисовываются; рядом покачиваются часы: журнал за последнее время
+    ? h('svg', { class: 'rl-empty-art', viewBox: '0 0 160 120', 'aria-hidden': 'true' },
+      h('circle', { class: 'rl-empty-fill rl-empty-fill-soft', cx: 76, cy: 62, r: 46 }),
+      h('g', { class: 'rl-empty-float' },
+        h('rect', { class: 'rl-empty-fill rl-empty-fill-out', x: 44, y: 22, width: 64, height: 82, rx: 9 }),
+        L('', { tag: 'rect', x: 44, y: 22, width: 64, height: 82, rx: 9 }),
+        L('rl-empty-d2', { d: 'M64 22v-3a4 4 0 0 1 4-4h16a4 4 0 0 1 4 4v3' }),
+        h('circle', { class: 'rl-empty-dot', cx: 57, cy: 44, r: 3 }), L('rl-empty-d2', { d: 'M67 44h28' }),
+        h('circle', { class: 'rl-empty-dot', cx: 57, cy: 62, r: 3 }), L('rl-empty-d3', { d: 'M67 62h22' }),
+        h('circle', { class: 'rl-empty-dot', cx: 57, cy: 80, r: 3 }), L('rl-empty-d3', { d: 'M67 80h26' })),
+      h('g', { class: 'rl-empty-bob' },
+        h('circle', { class: 'rl-empty-fill rl-empty-fill-in', cx: 118, cy: 84, r: 17 }),
+        L('rl-empty-d2', { tag: 'circle', cx: 118, cy: 84, r: 17 }),
+        L('rl-empty-d3', { d: 'M118 74v10l7 4' })),
+      spark(134, 30), spark(26, 40, 'rl-empty-spark-2'), spark(28, 96, 'rl-empty-spark-3'))
     : kind === 'contacts'
     // двое: задний чуть выше и покачивается не в такт переднему; рядом подпрыгивает «+», вокруг мерцают искорки
     ? h('svg', { class: 'rl-empty-art', viewBox: '0 0 160 120', 'aria-hidden': 'true' },

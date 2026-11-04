@@ -1,5 +1,6 @@
 import { AUTO_DELETE_DEV_MIN_SEC, AUTO_DELETE_MAX_SEC, AUTO_DELETE_MIN_SEC } from '@relay/protocol';
 import { sql } from '../db';
+import { logAdminAction } from './adminLog';
 import { DomainError } from './errors';
 import { groupCtx, hasAdmin, isCommunity } from './groupRights';
 import { serviceMessage } from './groups';
@@ -57,6 +58,7 @@ export async function setAutoDelete(userId: number, chatId: number, raw: unknown
     await tx`update chats set auto_delete_sec = ${sec} where id = ${chatId}`;
     // само служебное сообщение срока не получает: serviceMessage его не ставит (история смены настройки остаётся)
     await serviceMessage(tx, chatId, userId, 'auto_delete_changed', sec ? { sec } : {}, '', kind);
+    await logAdminAction(tx, chatId, userId, 'auto_delete_changed', { from: c.auto_delete_sec == null ? null : Number(c.auto_delete_sec), to: sec });   // в личном чате не пишется
     await chatEvent(tx, chatId, { type: 'chatAutoDelete', chatId, sec }, kind);
     return { autoDeleteSec: sec };
   });

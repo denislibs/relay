@@ -1695,3 +1695,26 @@ html[data-anim="0"] :is(.app-setting-flash, .app-setting-flash-title) { animatio
 /* Строка под отложенным, которое не ушло */
 .app-sched-fail { padding-top: 0; }
 .app-sched-fail span { background: var(--danger, #e53935); }
+
+/* «Недавние действия» (ui/group/AdminLog.tsx): строки равной высоты для WindowList, текст зажат */
+.app-log-chips { display: flex; flex-wrap: wrap; gap: var(--space-1); padding: var(--space-2) var(--space-3) 0; }
+.app-log-daylabel { position: sticky; top: 0; z-index: 2; margin: 0; padding: var(--space-2) var(--space-4) var(--space-1); background: var(--page); color: var(--brand-text); font: 500 14px/20px var(--font-sans); }
+.app-log-row { display: flex; align-items: center; gap: var(--space-3); height: 84px; box-sizing: border-box; padding: var(--space-2) var(--space-4); }
+.app-log-ava { flex: none; display: block; padding: 0; border: 0; border-radius: 50%; background: none; cursor: pointer; }
+span.app-log-ava { cursor: default; }
+.app-log-main { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
+.app-log-text { display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 3; overflow: hidden; font: 400 14px/20px var(--font-sans); color: var(--ink); overflow-wrap: anywhere; }
+.app-log-text.is-two { -webkit-line-clamp: 2; }
+.app-log-text b { font-weight: 500; }
+.app-log-name { display: inline; padding: 0; border: 0; background: none; color: var(--ink); font: inherit; font-weight: 500; text-align: left; cursor: pointer; }
+.app-log-name:hover { color: var(--brand-text); text-decoration: underline; }
+.app-log-msg, .app-log-more { align-self: flex-start; max-width: 100%; padding: 0; border: 0; background: none; color: var(--brand-text); font: 400 13px/18px var(--font-sans); text-align: left; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; cursor: pointer; }
+.app-log-msg:hover, .app-log-more:hover { text-decoration: underline; }
+.app-log-sub { font: 400 13px/18px var(--font-sans); color: var(--ink-muted); }
+.app-log-time { flex: none; align-self: flex-start; font: 400 12px/20px var(--font-sans); color: var(--ink-muted); }
+.app-log-tail { display: flex; align-items: center; justify-content: center; gap: var(--space-2); min-height: 48px; color: var(--ink-muted); font: 400 13px/18px var(--font-sans); }
+.app-log-full { overflow-wrap: anywhere; white-space: pre-wrap; }
+.app-log-full b { font-weight: 500; }
+.app-log-filter { display: flex; flex-direction: column; gap: var(--space-2); }
+.app-log-filter-wait { min-height: 52px; }
+.app-log-filter .app-gm-expand { width: 40px; height: 40px; }

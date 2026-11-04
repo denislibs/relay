@@ -7,6 +7,7 @@ import { sql, type Tx } from '../db';
 import { GROUP_TITLE_MAX, readOwnPost, toMessage } from './chats';
 import { contentColumns, openRows } from './messageContent';
 import { DomainError } from './errors';
+import { logAdminAction } from './adminLog';
 import { appendUpdates, chatEvent, type ChatNotify } from './journal';
 import { dropPersonalChannel, nameForSql } from './profile';
 import { checkPassword } from './password';
@@ -79,6 +80,7 @@ export async function updateGroupInfo(userId: number, chatId: number, body: { ti
       if (title !== c.title) {
         await tx`update chats set title = ${title} where id = ${chatId}`;
         await serviceMessage(tx, chatId, userId, 'title_changed', { title }, title);
+        await logAdminAction(tx, chatId, userId, 'title_changed', { from: (c.title as string | null) ?? '', to: title });
         changed = true;
       }
     }
@@ -86,6 +88,7 @@ export async function updateGroupInfo(userId: number, chatId: number, body: { ti
       const about = validAbout(body.about);
       if (about !== ((c.about as string | null) ?? '')) {
         await tx`update chats set about = ${about || null} where id = ${chatId}`;
+        await logAdminAction(tx, chatId, userId, 'about_changed', { from: (c.about as string | null) ?? '', to: about });
         changed = true;
       }
     }
@@ -117,16 +120,21 @@ export async function setGroupPhoto(userId: number, chatId: number, body: unknow
       const value = { id: photo.id, small: photo.small, thumb: photo.thumb, at: new Date(p.created_at as string).getTime(), pid: Number(p.id) };
       await tx`update chats set photo = ${tx.json(value as never)} where id = ${chatId}`;
       await serviceMessage(tx, chatId, userId, 'photo_changed');
+      await logAdminAction(tx, chatId, userId, 'photo_changed', {});
     } else {
       const [c] = await tx`select photo from chats where id = ${chatId}`;
       if (!c.photo) return { ok: true };
       await tx`update chats set photo = null where id = ${chatId}`;
       await serviceMessage(tx, chatId, userId, 'photo_removed');
+      await logAdminAction(tx, chatId, userId, 'photo_removed', {});
     }
     await broadcastGroup(tx, chatId);
     return { ok: true };
   });
 }
+
+/** Два набора прав-флагов совпадают (порядок ключей в jsonb не важен). */
+const sameFlags = (a: Record<string, boolean>, b: Record<string, boolean>) => Object.keys({ ...a, ...b }).every((k) => !!a[k] === !!b[k]);
 
 /** Права участников по умолчанию и медленный режим (админ с правом блокировать). Каждому — его новые права. */
 export async function setGroupRights(userId: number, chatId: number, body: { rights?: unknown; slowMode?: unknown }): Promise<{ ok: true }> {
@@ -134,11 +142,16 @@ export async function setGroupRights(userId: number, chatId: number, body: { rig
     const ctx = await groupCtx(tx, chatId, userId, { lock: true });
     isGroup(ctx);   // права участников и медленный режим — только у группы
     requireAdmin(ctx, 'ban');
-    if (body.rights !== undefined) await tx`update chats set rights = ${tx.json(normalizeRights(body.rights) as never)} where id = ${chatId}`;
+    if (body.rights !== undefined) {
+      const rights = normalizeRights(body.rights);
+      await tx`update chats set rights = ${tx.json(rights as never)} where id = ${chatId}`;
+      if (!sameFlags(ctx.defaults, rights)) await logAdminAction(tx, chatId, userId, 'default_rights_changed', { from: ctx.defaults, to: rights });
+    }
     if (body.slowMode !== undefined) {
       const s = Number(body.slowMode);
       if (!SLOW_MODES.includes(s)) throw new DomainError('bad_frame', 'slowMode');
       await tx`update chats set slow_mode = ${s} where id = ${chatId}`;
+      if (s !== ctx.slowMode) await logAdminAction(tx, chatId, userId, 'slow_mode_changed', { from: ctx.slowMode, to: s });
     }
     await broadcastGroup(tx, chatId);
     for (const id of await membersOf(tx, chatId)) await sendMembership(tx, chatId, id);
@@ -151,28 +164,32 @@ export async function setGroupSettings(userId: number, chatId: number, body: { h
   return sql.begin(async (tx) => {
     const ctx = await groupCtx(tx, chatId, userId, { lock: true });
     isCommunity(ctx);
-    const [c] = await tx`select history_hidden, join_approval, protected, linked_chat_id from chats where id = ${chatId}`;
+    const [c] = await tx`select history_hidden, join_approval, protected, linked_chat_id, join_to_send, signatures from chats where id = ${chatId}`;
     if (body.historyHidden !== undefined) {
       isGroup(ctx);
       requireAdmin(ctx, 'ban');
       // группа обсуждения канала: история видна всем (тред читают и вступившие позже)
       if (body.historyHidden === true && c.linked_chat_id != null) throw new DomainError('forbidden', 'linked');
       await tx`update chats set history_hidden = ${body.historyHidden === true} where id = ${chatId}`;
+      if ((body.historyHidden === true) !== !!c.history_hidden) await logAdminAction(tx, chatId, userId, 'history_toggled', { hidden: body.historyHidden === true });
     }
     // группа обсуждения: писать в тред — только вступившим (иначе комментируют и подписчики канала, не вступая)
     if (body.joinToSend !== undefined) {
       isGroup(ctx);
       if (!hasAdmin(ctx, 'ban') && !hasAdmin(ctx, 'info')) throw new DomainError('forbidden', 'ban');
       await tx`update chats set join_to_send = ${body.joinToSend === true} where id = ${chatId}`;
+      if ((body.joinToSend === true) !== !!c.join_to_send) await logAdminAction(tx, chatId, userId, 'join_to_send_toggled', { on: body.joinToSend === true });
     }
     if (body.signatures !== undefined) {
       if (ctx.kind !== 'channel') throw new DomainError('bad_frame', 'not a channel');
       requireAdmin(ctx, 'info');
       await tx`update chats set signatures = ${body.signatures === true} where id = ${chatId}`;
+      if ((body.signatures === true) !== !!c.signatures) await logAdminAction(tx, chatId, userId, 'signatures_toggled', { on: body.signatures === true });
     }
     if (body.joinApproval !== undefined) {
       requireAdmin(ctx, 'invite');
       await tx`update chats set join_approval = ${body.joinApproval === true} where id = ${chatId}`;
+      if ((body.joinApproval === true) !== !!c.join_approval) await logAdminAction(tx, chatId, userId, 'join_approval_toggled', { on: body.joinApproval === true });
       // одобрение выключили — ждущие заявки принимаются
       if (body.joinApproval !== true && c.join_approval) {
         for (const r of await tx`select user_id from chat_join_requests where chat_id = ${chatId}`) await acceptMember(tx, chatId, Number(r.user_id), userId, 'joined_by_request');
@@ -185,6 +202,7 @@ export async function setGroupSettings(userId: number, chatId: number, body: { h
       if (on !== !!c.protected) {
         await tx`update chats set protected = ${on} where id = ${chatId}`;
         await serviceMessage(tx, chatId, userId, on ? 'protected_on' : 'protected_off');
+        await logAdminAction(tx, chatId, userId, 'protected_toggled', { on });
       }
     }
     if (body.reactions !== undefined) {
@@ -196,6 +214,8 @@ export async function setGroupSettings(userId: number, chatId: number, body: { h
       const allowed = mode === 'some' && Array.isArray(o.allowed) ? [...new Set(o.allowed.filter((e): e is string => typeof e === 'string' && e.length <= 16).map(emojiKey))].slice(0, 100) : [];
       const value: GroupReactions = { mode, allowed };
       await tx`update chats set reactions = ${tx.json(value as never)} where id = ${chatId}`;
+      const was = ctx.reactions;
+      if (was.mode !== mode || was.allowed.map(emojiKey).sort().join() !== [...allowed].sort().join()) await logAdminAction(tx, chatId, userId, 'reactions_changed', { from: was, to: value });
     }
     await broadcastGroup(tx, chatId);
     return { ok: true };
@@ -214,7 +234,10 @@ export async function setGroupUsername(userId: number, chatId: number, raw: unkn
       const [u] = await tx`select 1 from users where lower(username) = lower(${name}) union all select 1 from chats where lower(username) = lower(${name}) and id <> ${chatId} limit 1`;
       if (u) throw new DomainError('username_taken');
     }
-    await tx`update chats set username = ${name ? name.toLowerCase() : null} where id = ${chatId}`;
+    const [was] = await tx`select username from chats where id = ${chatId}`;
+    const next = name ? name.toLowerCase() : null, prev = (was.username as string | null) ?? null;
+    await tx`update chats set username = ${next} where id = ${chatId}`;
+    if (next !== prev) await logAdminAction(tx, chatId, userId, 'username_changed', { from: prev, to: next });
     if (!name) await dropPersonalChannel(tx, chatId);   // приватный канал в профиле не показывается
     await broadcastGroup(tx, chatId);
     return { ok: true };
@@ -308,11 +331,14 @@ async function chatSize(db: Db, chatId: number): Promise<{ kind: CommunityKind; 
  * Вступление по ссылке, юзернейму или принятой заявке: участник, служебное, всем — новый состав.
  * Канал: только membership новичку — ни служебного, ни groupUpdated, ни members (O(1) на вступление при 200 000).
  */
-export async function acceptMember(tx: Tx, chatId: number, userId: number, actorId: number | null, type: 'joined_by_link' | 'joined_by_request' | 'members_added'): Promise<boolean> {
+export async function acceptMember(tx: Tx, chatId: number, userId: number, actorId: number | null, type: 'joined_by_link' | 'joined_by_request' | 'members_added', how: { via: 'link' | 'username' | 'discussion'; mask?: string } = { via: 'link' }): Promise<boolean> {
   const { kind, n } = await chatSize(tx, chatId);
   if (n >= MEMBERS_MAX[kind]) throw new DomainError('too_long', 'members');
   if (!(await insertMember(tx, chatId, userId, actorId, type !== 'members_added'))) return false;
   await tx`delete from chat_join_requests where chat_id = ${chatId} and user_id = ${userId}`;
+  if (type === 'joined_by_request') await logAdminAction(tx, chatId, actorId, 'request_approved', { target: userId });
+  else if (type === 'members_added') await logAdminAction(tx, chatId, actorId, 'member_added', { target: userId });
+  else await logAdminAction(tx, chatId, userId, 'member_joined', { target: userId, ...how });
   if (kind === 'channel') {
     // канал: вступивший начинает с прочитанного (как в Telegram) — история не становится сотней непрочитанных
     await tx`update chat_members set last_read_id = (select coalesce(max(id), 0) from messages where chat_id = ${chatId}) where chat_id = ${chatId} and user_id = ${userId}`;
@@ -351,8 +377,14 @@ export async function addGroupMembers(userId: number, chatId: number, rawIds: un
     for (const id of okIds) {
       if (banned.has(id) && !canUnban) continue;
       if ((await chatSize(tx, chatId)).n >= max) break;
-      if (banned.has(id)) await tx`delete from chat_bans where chat_id = ${chatId} and user_id = ${id}`;
-      if (await insertMember(tx, chatId, id, userId, false)) added.push(id);
+      if (banned.has(id)) {
+        await tx`delete from chat_bans where chat_id = ${chatId} and user_id = ${id}`;
+        await logAdminAction(tx, chatId, userId, 'member_unbanned', { target: id });
+      }
+      if (await insertMember(tx, chatId, id, userId, false)) {
+        added.push(id);
+        await logAdminAction(tx, chatId, userId, 'member_added', { target: id });
+      }
     }
     const already = new Set((await tx`select user_id from chat_members where chat_id = ${chatId} and user_id = any(${ids}::bigint[])`).map((r) => Number(r.user_id)));
     const failed = ids.filter((id) => !already.has(id));
@@ -380,6 +412,7 @@ async function dropMember(tx: Tx, chatId: number, target: number, actor: number,
      where chat_id = ${chatId} and user_id = ${target} and role = 'member' and (restricted is not null or history_from > 0)
     on conflict (chat_id, user_id) do update set restricted = excluded.restricted, history_from = excluded.history_from`;
   await tx`delete from chat_members where chat_id = ${chatId} and user_id = ${target}`;
+  await logAdminAction(tx, chatId, actor, type === 'member_left' ? 'member_left' : 'member_banned', { target });
   await tx`delete from drafts where chat_id = ${chatId} and user_id = ${target}`;
   await tx`delete from message_mentions where user_id = ${target} and chat_id = ${chatId}`;
   await tx`delete from unread_reactions where user_id = ${target} and chat_id = ${chatId}`;
@@ -412,8 +445,8 @@ export async function removeGroupMember(userId: number, chatId: number, target: 
                                  ${ctx.kind === 'channel' ? tx`and role = 'admin'` : tx``}
                                  order by case role when 'admin' then 0 else 1 end, joined_at limit 1`;
         if (!next && ctx.kind === 'channel') throw new DomainError('forbidden', 'transfer ownership first');
-        if (!next) { await deleteGroupTx(tx, chatId); return { ok: true }; }
-        await makeOwner(tx, chatId, Number(next.user_id), userId);
+        if (!next) { await deleteGroupTx(tx, chatId, userId); return { ok: true }; }
+        await makeOwner(tx, chatId, Number(next.user_id), userId, true);
       }
       await dropMember(tx, chatId, userId, userId, 'member_left', ctx.kind);
       return { ok: true };
@@ -432,7 +465,8 @@ export async function removeGroupMember(userId: number, chatId: number, target: 
 export async function unbanGroupMember(userId: number, chatId: number, target: number): Promise<{ ok: true }> {
   return sql.begin(async (tx) => {
     requireAdmin(await groupCtx(tx, chatId, userId), 'ban');
-    await tx`delete from chat_bans where chat_id = ${chatId} and user_id = ${target}`;
+    const gone = await tx`delete from chat_bans where chat_id = ${chatId} and user_id = ${target} returning 1`;
+    if (gone.length) await logAdminAction(tx, chatId, userId, 'member_unbanned', { target });
     return { ok: true };
   });
 }
@@ -443,13 +477,16 @@ export async function restrictGroupMember(userId: number, chatId: number, target
     const ctx = await groupCtx(tx, chatId, userId, { lock: true });
     isGroup(ctx);   // исключения — только у группы
     requireAdmin(ctx, 'ban');
-    const [t] = await tx`select role from chat_members where chat_id = ${chatId} and user_id = ${target}`;
+    const [t] = await tx`select role, restricted from chat_members where chat_id = ${chatId} and user_id = ${target}`;
     if (!t) throw new DomainError('not_found', 'member');
     if (t.role !== 'member') throw new DomainError('forbidden', 'admin');
     const value = raw == null ? null : narrowRights(normalizeRights(raw), ctx.defaults);
     // совпадает с умолчаниями — это не исключение
     const same = value && Object.keys(value).every((k) => value[k as keyof MemberRights] === ctx.defaults[k as keyof MemberRights]);
     await tx`update chat_members set restricted = ${value && !same ? tx.json(value as never) : null} where chat_id = ${chatId} and user_id = ${target}`;
+    const was = t.restricted ? narrowRights(normalizeRights(t.restricted), ctx.defaults) : null, now = value && !same ? value : null;
+    if (now && (!was || !sameFlags(was, now))) await logAdminAction(tx, chatId, userId, 'member_restricted', { target, from: was ?? ctx.defaults, to: now });   // без исключения действовали умолчания группы
+    else if (!now && was) await logAdminAction(tx, chatId, userId, 'member_unrestricted', { target });
     await sendMembership(tx, chatId, target);
     await broadcastMembers(tx, chatId, { upsert: [target] });
     return { ok: true };
@@ -461,11 +498,12 @@ export async function setGroupAdmin(userId: number, chatId: number, target: numb
   return sql.begin(async (tx) => {
     const ctx = await groupCtx(tx, chatId, userId, { lock: true });
     requireAdmin(ctx, 'addAdmins');
-    const [t] = await tx`select role, promoted_by from chat_members where chat_id = ${chatId} and user_id = ${target}`;
+    const [t] = await tx`select role, promoted_by, admin_rights, rank from chat_members where chat_id = ${chatId} and user_id = ${target}`;
     if (!t) throw new DomainError('not_found', 'member');
     if (!canManageAdmin(ctx, t as never)) throw new DomainError('forbidden', 'admin');
     if (body.rights === null) {
       await tx`update chat_members set role = 'member', admin_rights = null, rank = null, promoted_by = null where chat_id = ${chatId} and user_id = ${target}`;
+      if (t.role === 'admin') await logAdminAction(tx, chatId, userId, 'admin_demoted', { target });
     } else {
       const ck: CommunityKind = ctx.kind === 'channel' ? 'channel' : 'group';
       const rights: AdminRights = normalizeAdminRights(body.rights, ck);
@@ -475,6 +513,13 @@ export async function setGroupAdmin(userId: number, chatId: number, target: numb
                  promoted_by = case when role = 'admin' then promoted_by else ${userId} end
                  ${rank !== undefined ? tx`, rank = ${rank}` : tx``}
                where chat_id = ${chatId} and user_id = ${target}`;
+      const wasRank = (t.rank as string | null) ?? null;
+      if (t.role !== 'admin') await logAdminAction(tx, chatId, userId, 'admin_promoted', { target, rights, rank: rank ?? null });
+      else {
+        const was = normalizeAdminRights(t.admin_rights, ck);
+        if (!sameFlags(was, rights)) await logAdminAction(tx, chatId, userId, 'admin_edited', { target, from: was, to: rights });
+        if (rank !== undefined && rank !== wasRank) await logAdminAction(tx, chatId, userId, 'admin_rank_changed', { target, from: wasRank, to: rank });
+      }
     }
     await sendMembership(tx, chatId, target);
     await broadcastGroup(tx, chatId, [target]);   // список тех, кто видит заявки, мог поменяться: снятому — joinRequests 0
@@ -489,25 +534,28 @@ export async function setGroupRank(userId: number, chatId: number, target: numbe
   return sql.begin(async (tx) => {
     const ctx = await groupCtx(tx, chatId, userId);
     isGroup(ctx);
-    const [t] = await tx`select role, promoted_by from chat_members where chat_id = ${chatId} and user_id = ${target}`;
+    const [t] = await tx`select role, promoted_by, rank from chat_members where chat_id = ${chatId} and user_id = ${target}`;
     if (!t) throw new DomainError('not_found', 'member');
     if (t.role === 'member') throw new DomainError('forbidden', 'not admin');
     const own = target === userId;
     if (!own && !(ctx.role === 'owner' || canManageAdmin(ctx, t as never))) throw new DomainError('forbidden', 'rank');
     await tx`update chat_members set rank = ${rank} where chat_id = ${chatId} and user_id = ${target}`;
+    if (((t.rank as string | null) ?? null) !== rank) await logAdminAction(tx, chatId, userId, 'admin_rank_changed', { target, from: (t.rank as string | null) ?? null, to: rank });
     await sendMembership(tx, chatId, target);
     await broadcastMembers(tx, chatId, { upsert: [target] });
     return { ok: true };
   });
 }
 
-async function makeOwner(tx: Tx, chatId: number, target: number, prev: number): Promise<void> {
+/** auto — прежний владелец вышел, не передав права: новый выбран сервером. */
+async function makeOwner(tx: Tx, chatId: number, target: number, prev: number, auto = false): Promise<void> {
   const { kind } = await chatSize(tx, chatId);
   await tx`update chats set owner_id = ${target} where id = ${chatId}`;
   await dropPersonalChannel(tx, chatId);   // личный канал прежнего владельца
   await tx`update chat_members set role = 'owner', admin_rights = null, restricted = null, promoted_by = null where chat_id = ${chatId} and user_id = ${target}`;
   // прежний владелец остаётся админом со всеми правами (как в Telegram)
   await tx`update chat_members set role = 'admin', admin_rights = ${tx.json(allAdminRights(kind) as never)}, promoted_by = ${target} where chat_id = ${chatId} and user_id = ${prev}`;
+  await logAdminAction(tx, chatId, prev, 'owner_transferred', { target, ...(auto ? { auto } : {}) });
   // в канале владелец подписчикам не раскрывается — служебного «X теперь владелец» там нет
   if (kind !== 'channel') await serviceMessage(tx, chatId, prev, 'owner_changed', { users: await names(tx, [target]) });
   await sendMembership(tx, chatId, target);
@@ -548,9 +596,10 @@ export async function transferGroupOwnership(userId: number, chatId: number, tar
  * syncChat → not_found/chatGone). Строки участников (chatRemoved каждому), сообщения и сам чат убирает задача
  * chat.purge страницами (chatPurge.ts) — без одной гигантской транзакции на 200 000 участников.
  */
-async function deleteGroupTx(tx: Tx, chatId: number): Promise<void> {
+async function deleteGroupTx(tx: Tx, chatId: number, actorId: number): Promise<void> {
   const [c] = await tx`select linked_chat_id from chats where id = ${chatId}`;
   await tx`update chats set deleted_at = now(), linked_chat_id = null where id = ${chatId}`;
+  await tx`delete from admin_log where chat_id = ${chatId}`;   // журнал уходит вместе с чатом сразу, не дожидаясь chat.purge
   // ключи — сразу, не дожидаясь постраничной чистки (CRYPTO-7): ей они не нужны, а отправка в удалённый чат закрыта.
   // Триггер NOTIFY chat_keys сбрасывает кэши ключей во всех процессах. Документы поиска — тоже сразу
   await tx`delete from keys.chat_keys where chat_id = ${chatId}`;
@@ -563,6 +612,7 @@ async function deleteGroupTx(tx: Tx, chatId: number): Promise<void> {
   await tx`select pg_notify('chat_updates', ${JSON.stringify({ c: chatId, f: seq, t: seq, g: 1 } satisfies ChatNotify)})`;
   if (c?.linked_chat_id != null) {   // связанный канал или группа отвязывается
     await tx`update chats set linked_chat_id = null where id = ${c.linked_chat_id} and linked_chat_id = ${chatId}`;
+    await logAdminAction(tx, Number(c.linked_chat_id), actorId, 'linked_chat_changed', { from: chatId, to: null });
     await broadcastGroup(tx, Number(c.linked_chat_id));
   }
   await enqueue(tx, 'chat.purge', { chatId, after: 0 }, { dedupeKey: `chat.purge:${chatId}:m:0` });
@@ -598,7 +648,7 @@ export async function deleteGroup(userId: number, chatId: number): Promise<{ ok:
     const ctx = await groupCtx(tx, chatId, userId, { lock: true });
     isCommunity(ctx);
     if (ctx.role !== 'owner') throw new DomainError('forbidden', 'owner');
-    await deleteGroupTx(tx, chatId);
+    await deleteGroupTx(tx, chatId, userId);
     return { ok: true };
   });
 }
@@ -641,7 +691,14 @@ export async function setLinkedChat(userId: number, channelId: number, groupId: 
     if (prev === groupId) return { ok: true };
     if (prev != null) await tx`update chats set linked_chat_id = null where id = ${prev}`;
     await tx`update chats set linked_chat_id = ${groupId} where id = ${channelId}`;
-    if (groupId != null) await tx`update chats set linked_chat_id = ${channelId}, history_hidden = false where id = ${groupId}`;
+    await logAdminAction(tx, channelId, userId, 'linked_chat_changed', { from: prev, to: groupId });
+    if (prev != null) await logAdminAction(tx, prev, userId, 'linked_chat_changed', { from: channelId, to: null });
+    if (groupId != null) {
+      const [was] = await tx`select history_hidden from chats where id = ${groupId}`;
+      await tx`update chats set linked_chat_id = ${channelId}, history_hidden = false where id = ${groupId}`;
+      await logAdminAction(tx, groupId, userId, 'linked_chat_changed', { from: null, to: channelId });
+      if (was.history_hidden) await logAdminAction(tx, groupId, userId, 'history_toggled', { hidden: false });
+    }
     for (const id of [channelId, groupId, prev].filter((x): x is number => x != null).sort((a, b) => a - b)) await broadcastGroup(tx, id);
     return { ok: true };
   });

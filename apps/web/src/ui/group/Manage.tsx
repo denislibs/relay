@@ -5,6 +5,7 @@ import { AddMembers, ManageMembers } from './Members';
 import { InviteEdit, InviteInfo, Invites, Requests } from './Invites';
 import { Reactions } from './Reactions';
 import { Discussion } from './Discussion';
+import { AdminLog } from './AdminLog';
 import type { GroupPage, Nav } from './routes';
 
 export { GROUP_PAGES, isGroupPage, parentOf, type GroupPage, type Nav, type Params } from './routes';
@@ -29,5 +30,6 @@ export function GroupScreen({ page, nav }: { page: GroupPage; nav: Nav }) {
     case 'gInvite': return <InviteEdit nav={nav} />;
     case 'gInviteInfo': return <InviteInfo nav={nav} />;
     case 'gDiscussion': return <Discussion nav={nav} />;
+    case 'gLog': return <AdminLog nav={nav} />;
   }
 }

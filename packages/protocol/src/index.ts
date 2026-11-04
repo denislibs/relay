@@ -702,6 +702,7 @@ export function searchTerms(text: string): string[] {
 }
 
 export * from './groups';
+export * from './adminLog';
 export * from './polls';
 export * from './special';
 import { isDiceEmoji, normalizeGeo, type ContactCard, type Dice, type DiceEmoji, type GeoPoint } from './special';

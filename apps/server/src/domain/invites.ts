@@ -1,5 +1,6 @@
-import { INVITE_USAGE_MAX, type GroupInvite, type InvitePreview, type JoinRequest } from '@relay/protocol';
+import { INVITE_USAGE_MAX, type GroupInvite, type InviteFields, type InvitePreview, type JoinRequest } from '@relay/protocol';
 import { sql, type Tx } from '../db';
+import { logAdminAction, maskInvite } from './adminLog';
 import { DomainError } from './errors';
 import { acceptMember } from './groups';
 import { broadcastGroup, broadcastRequests, groupCtx, hasAdmin, requireAdmin } from './groupRights';
@@ -32,9 +33,11 @@ const toInvite = (r: Record<string, unknown>): GroupInvite => ({
 });
 
 /** Основная ссылка: создаётся при первом обращении. */
-async function primaryInvite(tx: Tx, chatId: number, creatorId: number): Promise<void> {
+async function primaryInvite(tx: Tx, chatId: number, creatorId: number): Promise<{ id: number; token: string } | null> {
   const [p] = await tx`select 1 from chat_invites where chat_id = ${chatId} and primary_link and not revoked`;
-  if (!p) await tx`insert into chat_invites (chat_id, token, creator_id, primary_link) values (${chatId}, ${token()}, ${creatorId}, true)`;
+  if (p) return null;
+  const [r] = await tx`insert into chat_invites (chat_id, token, creator_id, primary_link) values (${chatId}, ${token()}, ${creatorId}, true) returning id, token`;
+  return { id: Number(r.id), token: r.token as string };
 }
 
 export async function listInvites(userId: number, chatId: number): Promise<{ invites: GroupInvite[] }> {
@@ -62,13 +65,17 @@ function inviteFields(body: Record<string, unknown>): { title: string | null; ex
   return { title, expiresAt, usageLimit, approval };
 }
 
+const logFields = (f: { title: string | null; expiresAt: Date | null; usageLimit: number | null; approval: boolean }): InviteFields =>
+  ({ title: f.title, expiresAt: f.expiresAt ? f.expiresAt.toISOString() : null, usageLimit: f.usageLimit, approval: f.approval });
+
 export async function createInvite(userId: number, chatId: number, body: Record<string, unknown>): Promise<GroupInvite> {
   const f = inviteFields(body);
   if (f.expiresAt && f.expiresAt.getTime() < Date.now()) throw new DomainError('bad_frame', 'expiresAt');
   return sql.begin(async (tx) => {
     requireAdmin(await groupCtx(tx, chatId, userId), 'invite');
     const [r] = await tx`insert into chat_invites (chat_id, token, creator_id, title, expires_at, usage_limit, approval)
-      values (${chatId}, ${token()}, ${userId}, ${f.title}, ${f.expiresAt}, ${f.usageLimit}, ${f.approval}) returning id`;
+      values (${chatId}, ${token()}, ${userId}, ${f.title}, ${f.expiresAt}, ${f.usageLimit}, ${f.approval}) returning id, token`;
+    await logAdminAction(tx, chatId, userId, 'invite_created', { inviteId: Number(r.id), mask: maskInvite(r.token as string), ...logFields(f) });
     return oneInvite(tx, chatId, Number(r.id));
   });
 }
@@ -84,18 +91,25 @@ export async function editInvite(userId: number, chatId: number, id: number, bod
   return sql.begin(async (tx) => {
     const ctx = await groupCtx(tx, chatId, userId);
     requireAdmin(ctx, 'invite');
-    const [i] = await tx`select primary_link, revoked from chat_invites where chat_id = ${chatId} and id = ${id} for update`;
+    const [i] = await tx`select primary_link, revoked, token, title, expires_at, usage_limit, approval from chat_invites where chat_id = ${chatId} and id = ${id} for update`;
     if (!i) throw new DomainError('not_found', 'invite');
     if (body.revoked === true) {
       await tx`update chat_invites set revoked = true where id = ${id}`;
       await tx`delete from chat_join_requests where invite_id = ${id}`;
-      if (i.primary_link) await primaryInvite(tx, chatId, userId);
+      if (!i.revoked) await logAdminAction(tx, chatId, userId, 'invite_revoked', { inviteId: id, mask: maskInvite(i.token as string), title: (i.title as string | null) ?? null, ...(i.primary_link ? { primary: true } : {}) });
+      if (i.primary_link) {
+        // отзыв основной сразу даёт новую — отдельной записью, после отзыва (создание при чтении списка — не действие админа)
+        const fresh = await primaryInvite(tx, chatId, userId);
+        if (fresh) await logAdminAction(tx, chatId, userId, 'invite_created', { inviteId: fresh.id, mask: maskInvite(fresh.token), title: null, expiresAt: null, usageLimit: null, approval: false, primary: true });
+      }
       await (ctx.kind === 'channel' ? broadcastRequests(tx, chatId) : broadcastGroup(tx, chatId));   // в канале — только заявки
       return oneInvite(tx, chatId, id);
     }
     if (i.primary_link || i.revoked) throw new DomainError('forbidden', 'invite');
     const f = inviteFields(body);
     await tx`update chat_invites set title = ${f.title}, expires_at = ${f.expiresAt}, usage_limit = ${f.usageLimit}, approval = ${f.approval} where id = ${id}`;
+    const from = logFields({ title: (i.title as string | null) ?? null, expiresAt: i.expires_at ? new Date(i.expires_at as string) : null, usageLimit: i.usage_limit == null ? null : Number(i.usage_limit), approval: !!i.approval }), to = logFields(f);
+    if (JSON.stringify(from) !== JSON.stringify(to)) await logAdminAction(tx, chatId, userId, 'invite_edited', { inviteId: id, mask: maskInvite(i.token as string), from, to });
     return oneInvite(tx, chatId, id);
   });
 }
@@ -104,11 +118,11 @@ export async function editInvite(userId: number, chatId: number, id: number, bod
 export async function deleteInvites(userId: number, chatId: number, id: number | null): Promise<{ ok: true }> {
   return sql.begin(async (tx) => {
     requireAdmin(await groupCtx(tx, chatId, userId), 'invite');
-    if (id == null) await tx`delete from chat_invites where chat_id = ${chatId} and revoked`;
-    else {
-      const del = await tx`delete from chat_invites where chat_id = ${chatId} and id = ${id} and revoked returning 1`;
-      if (!del.length) throw new DomainError('forbidden', 'not revoked');
-    }
+    const del = id == null
+      ? await tx`delete from chat_invites where chat_id = ${chatId} and revoked returning id, token, title`
+      : await tx`delete from chat_invites where chat_id = ${chatId} and id = ${id} and revoked returning id, token, title`;
+    if (id != null && !del.length) throw new DomainError('forbidden', 'not revoked');
+    for (const r of del) await logAdminAction(tx, chatId, userId, 'invite_deleted', { inviteId: Number(r.id), mask: maskInvite(r.token as string), title: (r.title as string | null) ?? null });
     return { ok: true };
   });
 }
@@ -146,7 +160,7 @@ export async function decideRequests(userId: number, chatId: number, target: num
         if (await acceptMember(tx, chatId, Number(r.user_id), userId, 'joined_by_request') && r.invite_id != null) {
           await tx`insert into chat_invite_joins (invite_id, user_id, via_request) values (${r.invite_id}, ${r.user_id}, true) on conflict do nothing`;
         }
-      }
+      } else await logAdminAction(tx, chatId, userId, 'request_declined', { target: Number(r.user_id) });
     }
     await tx`delete from chat_join_requests where chat_id = ${chatId} ${target != null ? tx`and user_id = ${target}` : tx``}`;
     // канал: принятые получили membership, groupUpdated всем подписчикам не нужен — только заявки
@@ -155,20 +169,20 @@ export async function decideRequests(userId: number, chatId: number, target: num
   });
 }
 
-type Target = { chatId: number; inviteId: number | null; approval: boolean; live: boolean };
+type Target = { chatId: number; inviteId: number | null; approval: boolean; live: boolean; how: { via: 'link' | 'username' | 'discussion'; mask?: string } };
 
 /** Что открывает ссылка: «+токен» — приглашение, «@имя» — публичная группа или канал. Удалённый (мягко) — нет. */
 async function resolve(db: Db, key: string): Promise<Target> {
   if (key.startsWith('@')) {
     const [c] = await db`select id, join_approval from chats where kind in ('group', 'channel') and deleted_at is null and lower(username) = lower(${key.slice(1)})`;
     if (!c) throw new DomainError('not_found', 'group');
-    return { chatId: Number(c.id), inviteId: null, approval: !!c.join_approval, live: true };
+    return { chatId: Number(c.id), inviteId: null, approval: !!c.join_approval, live: true, how: { via: 'username' } };
   }
-  const [i] = await db`select i.id, i.chat_id, i.approval, i.revoked, i.expires_at, i.usage_limit, i.usage, i.primary_link, c.join_approval
+  const [i] = await db`select i.id, i.chat_id, i.token, i.approval, i.revoked, i.expires_at, i.usage_limit, i.usage, i.primary_link, c.join_approval
                          from chat_invites i join chats c on c.id = i.chat_id and c.deleted_at is null where i.token = ${key}`;
   if (!i) throw new DomainError('not_found', 'invite');
   const live = !i.revoked && (!i.expires_at || new Date(i.expires_at as string).getTime() > Date.now()) && (i.usage_limit == null || Number(i.usage) < Number(i.usage_limit));
-  return { chatId: Number(i.chat_id), inviteId: Number(i.id), approval: !!i.approval || (!!i.join_approval && !!i.primary_link), live };
+  return { chatId: Number(i.chat_id), inviteId: Number(i.id), approval: !!i.approval || (!!i.join_approval && !!i.primary_link), live, how: { via: 'link', mask: maskInvite(i.token as string) } };
 }
 
 export async function previewInvite(userId: number, key: string): Promise<InvitePreview> {
@@ -204,7 +218,7 @@ export async function joinDiscussion(userId: number, groupId: number): Promise<{
         join chat_members cm on cm.chat_id = ch.id and cm.user_id = ${userId}
        where g.id = ${groupId} and g.kind = 'group' and g.deleted_at is null and g.linked_chat_id = ch.id`;
     if (!g) throw new DomainError('not_found', 'group');
-    return joinTarget(tx, userId, { chatId: groupId, inviteId: null, approval: !!g.join_approval, live: true });
+    return joinTarget(tx, userId, { chatId: groupId, inviteId: null, approval: !!g.join_approval, live: true, how: { via: 'discussion' } });
   });
 }
 
@@ -223,7 +237,7 @@ async function joinTarget(tx: Tx, userId: number, t: Target): Promise<{ chatId: 
     await (c.kind === 'channel' ? broadcastRequests(tx, t.chatId) : broadcastGroup(tx, t.chatId));
     return { chatId: t.chatId, requested: true };
   }
-  await acceptMember(tx, t.chatId, userId, null, 'joined_by_link');
+  await acceptMember(tx, t.chatId, userId, null, 'joined_by_link', t.how);
   if (t.inviteId != null) {
     await tx`update chat_invites set usage = usage + 1 where id = ${t.inviteId}`;
     await tx`insert into chat_invite_joins (invite_id, user_id) values (${t.inviteId}, ${userId}) on conflict do nothing`;
