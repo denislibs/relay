@@ -978,7 +978,10 @@ export function Feed({ frameKey, active, chatId, threadId, scheduled = false, sa
     // а не прыгаем: контент остаётся на месте, лента едет к новому низу. Остальное (якорь, «вниз», перераскладка
     // при stick) — как раньше, одним кадром
     const fresh = [...appearAt.current.keys()].filter((k) => !before?.has(k));
-    if (!a && !down && stick.current && fresh.length > 0 && (metaRef.current?.live ?? true) && canDrive(true)) {
+    // колонка ещё не на экране (переход из канала в обсуждение: копия поста приходит, пока группа готовится) — не едем,
+    // а ставим низ сразу общим путём ниже; иначе ни поездки, ни низа: новая строка уходила под поле ввода и лента
+    // больше не считалась прижатой
+    if (!a && !down && stick.current && fresh.length > 0 && activeRef.current && (metaRef.current?.live ?? true) && canDrive(true)) {
       const own = fresh.every((k) => messages.find((m) => m.key === k)?.senderId === meId);
       // своё, отправленное из поля ввода, — полёт из поля в пузырь (sendFlight): пузырь прячется сейчас (фаза записи),
       // клон летит 300 мс, и лента едет к низу те же 300 мс по той же кривой — клон садится на пиксели пузыря
