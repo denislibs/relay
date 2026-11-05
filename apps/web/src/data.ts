@@ -437,6 +437,49 @@ function dropParked(keys?: string[]): void {
   setGlobal((s) => ({ chatLeaving: s.chatLeaving.filter((f) => !drop.includes(f)) }));
 }
 
+/** Припарковать снятые колонки нижнего стека (смена чата из списка): прячутся сразу, без ухода; лишние — сразу прочь. */
+function parkQuietly(frames: ChatFrame[]): void {
+  const ready = frames.filter((f) => f.ready).map((f) => ({ ...f, swap: true, wake: false }));
+  frames.filter((f) => !f.ready).forEach((f) => closeSession(f.key));
+  if (!ready.length) return;
+  setGlobal((s) => ({ chatLeaving: [...s.chatLeaving.filter((f) => !ready.some((r) => r.key === f.key)), ...ready] }));
+  for (const f of ready) { clearTimeout(parkTimers.get(f.key)); parkTimers.set(f.key, setTimeout(() => dropParked([f.key]), PARK_MS)); }
+  const extra = getGlobal().chatLeaving.slice(0, -PARK_MAX).map((f) => f.key);
+  if (extra.length) dropParked(extra);
+}
+
+/**
+ * Чат из списка, колонка которого уже собрана (лежит в стеке под верхним или припаркована: A → B → A), — встаёт
+ * нижним без подготовки, на своей прокрутке; прежний стек паркуется. Кадр N — колонку раскрыть (wake снимает
+ * content-visibility: её стили и раскладка считаются, пока на экране прежний чат), кадр N+1 — смена, как у нового.
+ */
+function reuseBottom(frame: ChatFrame, target?: { id: number; sort: number }): void {
+  const chatId = frame.chatId, seq = openSeq;
+  clearTimeout(parkTimers.get(frame.key)); parkTimers.delete(frame.key);
+  const s = sessions.get(frame.key);
+  const fresh: ChatFrame = { ...(s && !s.first ? { ...frame, ...mirrorPatch(s) } : frame), wake: true };
+  const put = (f: ChatFrame) => (f.key === frame.key ? fresh : f);
+  setGlobal((g) => ({ chatStack: g.chatStack.map(put), chatLeaving: g.chatLeaving.map(put), pendingChatId: chatId }));
+  if (peerFor !== chatId) watchPeer(chatId);
+  requestAnimationFrame(() => {
+    const g = getGlobal();
+    const cur = g.chatStack.find((f) => f.key === frame.key) ?? g.chatLeaving.find((f) => f.key === frame.key);
+    if (!cur) return;
+    if (seq !== openSeq) {   // за этот кадр открыли другое — колонка снова накрывается там, где была
+      const back = (f: ChatFrame) => (f.key === frame.key ? { ...f, wake: false } : f);
+      setGlobal((x) => ({ chatStack: x.chatStack.map(back), chatLeaving: x.chatLeaving.map(back) }));
+      return;
+    }
+    const old = g.chatStack.filter((f) => f.key !== frame.key);
+    dropLayers();
+    setGlobal((x) => ({ chatStack: [{ ...cur, wake: false, ready: true, swap: true }], chatLeaving: x.chatLeaving.filter((f) => f.key !== frame.key), openChatId: chatId, pendingChatId: null }));
+    parkQuietly(old);
+    syncShown();
+    requestAnimationFrame(() => requestAnimationFrame(() => { if (stack().some((f) => f.key === cur.key)) patchFrame(cur.key, { swap: false }); }));
+    if (target) focusMessage(target);
+  });
+}
+
 /** Снять со стека всё выше index (анимация ухода). */
 function popTo(index: number): void {
   const st = stack();
@@ -459,7 +502,7 @@ function revive(parked: ChatFrame, target?: { id: number; sort: number }): void 
   clearTimeout(parkTimers.get(parked.key)); parkTimers.delete(parked.key);
   // запаркованный кадр патчей не получает (patchFrame — только стек), а подписка жива: что пришло за это время — из зеркала
   const s = sessions.get(parked.key);
-  const frame: ChatFrame = s && !s.first ? { ...parked, ...mirrorPatch(s) } : parked;
+  const frame: ChatFrame = { ...(s && !s.first ? { ...parked, ...mirrorPatch(s) } : parked), swap: false, wake: false };
   beginHeavyAnimation(LEAVE_MS + 50);
   setGlobal((g) => ({ chatStack: [...g.chatStack, frame], chatLeaving: g.chatLeaving.filter((f) => f.key !== frame.key), openChatId: frame.chatId, pendingChatId: null }));
   addLayer(frame.key);
@@ -646,6 +689,10 @@ export function openChat(chatId: number | null, target?: { id: number; sort: num
     if (target) focusMessage(target);
     return;
   }
+  // колонка этого чата уже собрана — выше в стеке или припаркована недавно (A → B → A из списка): без подготовки
+  const plain = (f: ChatFrame) => f.chatId === chatId && f.threadId == null && !f.scheduled && !f.savedPeer;
+  const built = st.slice(1).find((f) => f.ready && plain(f)) ?? g.chatLeaving.find(plain);
+  if (built && !hold) { reuseBottom(built, target); return; }
   const { frame, anchor } = newFrame({ chatId }, target);
   pendingBottom = { frame, target };
   if (hold) { hold.key = frame.key; hold.onCommit = () => setGlobal({ pendingChatId: chatId }); } else setGlobal({ pendingChatId: chatId });
@@ -685,10 +732,11 @@ export function openChat(chatId: number | null, target?: { id: number; sort: num
       // (из requestMutation смена ушла бы ещё на кадр позже — рендер, заказанный в мутации, идёт следующим кадром)
       requestAnimationFrame(() => {
         if (!alive()) return;
-        for (const f of stack()) if (f.key !== staged.key) closeSession(f.key);
-        dropParked();
+        // прежний стек не уничтожается, а паркуется (до PARK_MS, не больше PARK_MAX): вернуться к нему из списка — без сборки
+        const old = stack().filter((f) => f.key !== staged.key);
         dropLayers();
-        setGlobal({ chatStack: [{ ...staged, ready: true }], chatLeaving: [], openChatId: chatId, pendingChatId: null });
+        setGlobal({ chatStack: [{ ...staged, ready: true }], openChatId: chatId, pendingChatId: null });
+        parkQuietly(old);
         syncShown();
         stopMembersPrefetch();
         // смена без перехода только в этот раз: потом колонка уезжает влево под следующий чат как обычно
@@ -780,7 +828,7 @@ function holdHandle(hold: Hold): Prepared {
 /** Заготовка нижнего чата (строка списка). Тот же чат или уже в стеке — заготавливать нечего: обычный клик. */
 export function prepareChat(chatId: number): Prepared | null {
   const g = getGlobal(), st = g.chatStack, top = topReady();
-  if ((g.pendingChatId ?? top?.chatId) === chatId || st.some((f) => f.chatId === chatId)) return null;
+  if ((g.pendingChatId ?? top?.chatId) === chatId || st.some((f) => f.chatId === chatId) || g.chatLeaving.some((f) => f.chatId === chatId && f.threadId == null && !f.scheduled && !f.savedPeer)) return null;
   const hold: Hold = { released: false, key: null, waiting: null, onCommit: null };
   openChat(chatId, undefined, hold);
   return holdHandle(hold);
