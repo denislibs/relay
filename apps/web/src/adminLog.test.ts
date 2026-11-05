@@ -40,8 +40,8 @@ test('settings texts: from → to in bold, with (а)', () => {
   expect(say(entry('join_approval_toggled', { on: true }))).toBe('Анна включил(а) вступление по заявке');
   expect(say(entry('join_to_send_toggled', { on: true }))).toBe('Анна разрешил(а) комментировать только участникам');
   expect(say(entry('reactions_changed', { from: { mode: 'all', allowed: [] }, to: { mode: 'some', allowed: ['👍', '❤'] } }))).toBe('Анна изменил(а) реакции: все → 👍 ❤');
-  expect(say(entry('default_rights_changed', { from: ON, to: { ...ON, photos: false, pin: false } }))).toBe('Анна изменил(а) права участников: запрещено: Фото, Закрепление сообщений');
-  expect(say(entry('default_rights_changed', { from: { ...ON, photos: false }, to: { ...ON, pin: false } }))).toBe('Анна изменил(а) права участников: разрешено: Фото; запрещено: Закрепление сообщений');
+  expect(say(entry('default_rights_changed', { from: ON, to: { ...ON, photos: false, pin: false } }))).toBe('Анна изменил(а) права участников — запрещено: Фото, Закрепление сообщений');
+  expect(say(entry('default_rights_changed', { from: { ...ON, photos: false }, to: { ...ON, pin: false } }))).toBe('Анна изменил(а) права участников — разрешено: Фото; запрещено: Закрепление сообщений');
 });
 
 test('the linked chat is named only when the server gave its title', () => {
@@ -59,14 +59,14 @@ test('members, admins, requests', () => {
   expect(say(entry('member_left', { target: 1 }))).toBe('Анна вышел(а)');
   expect(say(entry('member_banned', { target: 2 }))).toBe('Анна исключил(а) Борис');
   expect(say(entry('member_unbanned', { target: 2 }))).toBe('Анна снял(а) исключение с Борис');
-  expect(say(entry('member_restricted', { target: 2, from: ON, to: { ...ON, text: false } }))).toBe('Анна ограничил(а) Борис: запрещено: Отправка сообщений');
+  expect(say(entry('member_restricted', { target: 2, from: ON, to: { ...ON, text: false } }))).toBe('Анна ограничил(а) Борис — запрещено: Отправка сообщений');
   expect(say(entry('member_unrestricted', { target: 2 }))).toBe('Анна снял(а) ограничения с Борис');
   expect(say(entry('request_approved', { target: 2 }))).toBe('Анна одобрил(а) заявку Борис');
   expect(say(entry('request_declined', { target: 2 }))).toBe('Анна отклонил(а) заявку Борис');
   const rights = { info: false, post: false, edit: false, delete: true, ban: false, invite: false, pin: false, addAdmins: false };
   expect(say(entry('admin_promoted', { target: 2, rights, rank: 'Мод' }))).toBe('Анна назначил(а) администратором Борис со званием Мод: Удаление сообщений');
   expect(say(entry('admin_promoted', { target: 2, rights, rank: null }), ctx('channel'))).toBe('Анна назначил(а) администратором Борис: Удаление чужих публикаций');
-  expect(say(entry('admin_edited', { target: 2, from: rights, to: { ...rights, delete: false, pin: true } }))).toBe('Анна изменил(а) права администратора Борис: добавлено: Закрепление сообщений; убрано: Удаление сообщений');
+  expect(say(entry('admin_edited', { target: 2, from: rights, to: { ...rights, delete: false, pin: true } }))).toBe('Анна изменил(а) права администратора Борис — добавлено: Закрепление сообщений; убрано: Удаление сообщений');
   expect(say(entry('admin_demoted', { target: 2 }))).toBe('Анна снял(а) с поста администратора Борис');
   expect(say(entry('admin_rank_changed', { target: 2, from: null, to: 'Глава' }))).toBe('Анна изменил(а) звание Борис: Глава');
   expect(say(entry('admin_rank_changed', { target: 2, from: 'Глава', to: null }))).toBe('Анна убрал(а) звание Борис');

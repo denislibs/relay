@@ -1083,7 +1083,7 @@ button.rl-quote:active { background: var(--quote-bg-active, var(--pressed)); }
 /* =====================================================================
    Floating layout — cards over the wallpaper (Telegram Web K–style)
    ===================================================================== */
-.rl-shell { position: relative; display: flex; gap: var(--space-float); height: 100%; padding: var(--space-float); overflow: hidden; }
+.rl-shell { position: relative; display: flex; gap: var(--space-float); height: 100%; padding: var(--space-float); overflow: clip; }   /* clip, не hidden: focus и scrollIntoView не сдвинут слой, скрытые кадры стека шире окна */
 .rl-shell-side { position: relative; z-index: 2; flex: 0 0 var(--side-w, var(--side-default, clamp(256px, 33vw, 424px))); min-width: 0; display: flex; }
 .rl-shell-main { position: relative; flex: 1; min-width: 0; display: flex; flex-direction: column; gap: var(--space-float); }
 

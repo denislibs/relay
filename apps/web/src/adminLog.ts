@@ -103,14 +103,14 @@ export function adminLogText(e: AdminLogEntry, c: TextCtx): Seg[] {
       return line(text(e.data.from == null ? `привязал(а) ${noun}` : `сменил(а) ${noun}`), ...(to ? [text(' '), bold(to)] : []));
     }
     case 'reactions_changed': return line(text('изменил(а) реакции: '), ...fromTo(reactionsText(e.data.from), reactionsText(e.data.to)));
-    case 'default_rights_changed': return line(text('изменил(а) права участников'), ...withColon(diffRights(e.data.from, e.data.to, (k: MemberRight) => MEMBER_RIGHT_TEXT[k], MEMBER_KEYS, 'разрешено', 'запрещено')));
+    case 'default_rights_changed': return line(text('изменил(а) права участников'), ...withDash(diffRights(e.data.from, e.data.to, (k: MemberRight) => MEMBER_RIGHT_TEXT[k], MEMBER_KEYS, 'разрешено', 'запрещено')));
     case 'member_added': return line(text('добавил(а) '), target(e.data.target));
     case 'member_joined':
       return e.data.via === 'link' && e.data.mask ? line(text('вступил(а) по ссылке '), bold(e.data.mask)) : e.data.via === 'discussion' ? line(text('вступил(а) из обсуждения')) : line(text('вступил(а)'));
     case 'member_left': return line(text('вышел(а)'));
     case 'member_banned': return line(text('исключил(а) '), target(e.data.target));
     case 'member_unbanned': return line(text('снял(а) исключение с '), target(e.data.target));
-    case 'member_restricted': return line(text('ограничил(а) '), target(e.data.target), ...withColon(diffRights(e.data.from, e.data.to, (k: MemberRight) => MEMBER_RIGHT_TEXT[k], MEMBER_KEYS, 'разрешено', 'запрещено')));
+    case 'member_restricted': return line(text('ограничил(а) '), target(e.data.target), ...withDash(diffRights(e.data.from, e.data.to, (k: MemberRight) => MEMBER_RIGHT_TEXT[k], MEMBER_KEYS, 'разрешено', 'запрещено')));
     case 'member_unrestricted': return line(text('снял(а) ограничения с '), target(e.data.target));
     case 'request_approved': return line(text('одобрил(а) заявку '), target(e.data.target));
     case 'request_declined': return line(text('отклонил(а) заявку '), target(e.data.target));
@@ -118,7 +118,7 @@ export function adminLogText(e: AdminLogEntry, c: TextCtx): Seg[] {
       const on = ADMIN_KEYS.filter((k) => e.data.rights[k]).map((k) => adminRightText(k, c.kind));
       return line(text('назначил(а) администратором '), target(e.data.target), ...(e.data.rank ? [text(' со званием '), bold(e.data.rank)] : []), ...(on.length ? [text(': '), bold(on.join(', '))] : []));
     }
-    case 'admin_edited': return line(text('изменил(а) права администратора '), target(e.data.target), ...withColon(diffRights(e.data.from as AdminRights, e.data.to as AdminRights, (k: AdminRight) => adminRightText(k, c.kind), ADMIN_KEYS, 'добавлено', 'убрано')));
+    case 'admin_edited': return line(text('изменил(а) права администратора '), target(e.data.target), ...withDash(diffRights(e.data.from as AdminRights, e.data.to as AdminRights, (k: AdminRight) => adminRightText(k, c.kind), ADMIN_KEYS, 'добавлено', 'убрано')));
     case 'admin_demoted': return line(text('снял(а) с поста администратора '), target(e.data.target));
     case 'admin_rank_changed':
       return e.data.to ? line(text('изменил(а) звание '), target(e.data.target), text(': '), bold(e.data.to)) : line(text('убрал(а) звание '), target(e.data.target));
@@ -137,6 +137,8 @@ export function adminLogText(e: AdminLogEntry, c: TextCtx): Seg[] {
   }
 }
 const withColon = (rest: Seg[]): Seg[] => (rest.length ? [text(': '), ...rest] : []);
+/** Перед списком с собственными подписями («запрещено: …»): второе двоеточие подряд читается плохо. */
+const withDash = (rest: Seg[]): Seg[] => (rest.length ? [text(' — '), ...rest] : []);
 
 /** Текст записи одной строкой: для aria-метки и решения, нужен ли «Подробнее». */
 export const segsText = (segs: Seg[]): string => segs.map((s) => (s.t === 'user' ? s.name : s.v)).join('');

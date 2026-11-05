@@ -125,3 +125,9 @@ test('clipboardHtml: blockquote is one block, expandable for collapsed', async (
   expect(clipboardHtml('a\nqq', [bq(2, 2), { type: 'bold', offset: 2, length: 1 }])).toBe('a<br><blockquote><strong>q</strong>q</blockquote>');
   expect(clipboardHtml('q', [bq(0, 1, { collapsed: true })])).toBe('<blockquote expandable>q</blockquote>');
 });
+
+test('quote marker needs a space: ">5 минут" stays text with its ">"', () => {
+  expect(applyMarkdown(v('>5 минут назад'))).toEqual(v('>5 минут назад'));
+  expect(applyMarkdown(v('> цитата')).text).toBe('цитата');
+  expect(applyMarkdown(v('> цитата')).entities).toEqual([bq(0, 6)]);
+});

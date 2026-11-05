@@ -176,7 +176,7 @@ html[data-shell-was] #app .rl-tw .tw-canvas { animation: none; }
 .app-menu-profile > span:last-child { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
 /* профиль (B2) */
-.app-toast-global { position: fixed; bottom: 24px; z-index: 1001; }
+.app-toast-global { position: fixed; bottom: 88px; z-index: 1001; }   /* над полем ввода */
 .app-bday { display: flex; flex-direction: column; align-items: center; padding: 0 8px 8px; }
 .app-bday .rl-tf { padding: 0; }
 .app-bday-modal .rl-mdl-dialog { max-width: 26rem; }

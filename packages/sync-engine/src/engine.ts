@@ -1415,7 +1415,7 @@ export class Engine {
         // карточка контакта — ссылкой с ключом доступа (сервер без него не примет); ключ кладём в очередь вместе с сообщением
         if (s.contact && !s.contact.key) { const key = await this.peerKeyOf(s.contact.userId); if (key) s = { ...s, contact: { ...s.contact, key } }; }
         const body = s.contact ? s.contact.name : s.geo ? s.geo.title ?? '' : s.dice ? s.dice.emoji : '';
-        this.store.addPending({ clientId, chatId: a.chatId, body, entities: [], replyToId: a.replyToId ?? null, ...(a.replyToId != null && a.replyQuote ? { replyQuote: a.replyQuote } : {}), createdAt: this.lastCreated, failed: false, special: s });
+        this.store.addPending({ clientId, chatId: a.chatId, body, entities: [], replyToId: a.replyToId ?? null, ...(a.replyToId != null && a.replyQuote ? { replyQuote: a.replyQuote } : {}), createdAt: this.lastCreated, failed: false, special: s, ...(a.silent ? { silent: true } : {}) });
         await this.store.flush();
         this.changed();
         this.pumpOutbox();

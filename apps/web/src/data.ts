@@ -130,7 +130,25 @@ export function startData(me: Me, fromUrl = true): void {
   // #chat=…&thread=… при загрузке: нижний слой — чат (тред гостя, &via= — канал поста), тред — поверх него (docs/navigation-rules.md)
   const open = parseHash(location.hash);
   if (open && !fromUrl) history.replaceState(history.state, '', location.pathname + location.search);
-  else if (open) { openChat(baseOf(open)); if (open.threadId != null) whenShown(baseOf(open), () => openInner(open)); }
+  else if (open) { openChat(baseOf(open)); if (open.threadId != null) whenShown(baseOf(open), () => openInner(open)); closeIfForeign(baseOf(open)); }
+}
+
+/**
+ * В адресе чат, которого у меня нет (чужая ссылка, вышел с другого устройства): без этого — вечная загрузка с полем ввода.
+ * Решает только ответ сервера: нет сети или он недоступен — чат остаётся, кэш может быть на устройстве. Читается, но не мой —
+ * публичный канал без подписки (перезагрузка превью): превью открывается снова.
+ */
+function closeIfForeign(chatId: number): void {
+  void fetch(`/chats/${chatId}/messages?limit=1`).then((r) => {
+    const g = getGlobal();
+    if (findChat(g, chatId) || g.previews.some((x) => x.id === chatId)) return;
+    if (r.ok) { void engine.call({ type: 'openPreview', chatId }); return; }
+    if (r.status !== 403) return;
+    if ((g.pendingChatId ?? activeFrame(g)?.chatId) !== chatId) return;   // уже ушли сами
+    setGlobal({ infoOpen: false });
+    openChat(null);
+    showToast('Чат недоступен');
+  }).catch(() => {});
 }
 
 /**
@@ -1232,10 +1250,10 @@ export async function sendPoll(chatId: number, poll: PollInput, replyToId: Reply
   await engine.call({ type: 'sendPoll', chatId, poll, ...replyArgs(replyToId) });
 }
 /** Контакт, точка или кубик — как сообщение (очередь, офлайн); значение кубика выбирает сервер. */
-export async function sendSpecial(chatId: number, special: { contact?: { userId: number; name: string }; geo?: GeoPoint; dice?: { emoji: DiceEmoji } }, replyToId: ReplyRef = null): Promise<void> {
+export async function sendSpecial(chatId: number, special: { contact?: { userId: number; name: string }; geo?: GeoPoint; dice?: { emoji: DiceEmoji } }, replyToId: ReplyRef = null, silent = false): Promise<void> {
   nudgeWallpaper();
   toLatestOf(chatId);
-  await engine.call({ type: 'sendSpecial', chatId, special, ...replyArgs(replyToId) });
+  await engine.call({ type: 'sendSpecial', chatId, special, ...replyArgs(replyToId), ...(silent ? { silent: true } : {}) });
 }
 /** Голос у себя — сразу; ошибка (закрыт, нет прав, нет сети) — откат и false. Пусто — отозвать голос. */
 export function votePoll(chatId: number, id: number, options: number[]): Promise<boolean> {

@@ -279,7 +279,7 @@ export type Action =
   | { type: 'sendPoll'; chatId: number; poll: PollInput; replyToId?: number | null; replyQuote?: ReplyQuote }
   | { type: 'pollVote'; chatId: number; id: number; options: number[] }   // пусто — отозвать
   | { type: 'pollClose'; chatId: number; id: number }
-  | { type: 'sendSpecial'; chatId: number; special: { contact?: { userId: number; name: string; key?: string }; geo?: GeoPoint; dice?: { emoji: DiceEmoji } }; replyToId?: number | null; replyQuote?: ReplyQuote }
+  | { type: 'sendSpecial'; chatId: number; special: { contact?: { userId: number; name: string; key?: string }; geo?: GeoPoint; dice?: { emoji: DiceEmoji } }; replyToId?: number | null; replyQuote?: ReplyQuote; silent?: boolean }
   | { type: 'todoAppend'; chatId: number; id: number; items: string[] }
   | { type: 'todoEdit'; chatId: number; id: number; todo: TodoInput }
   /** нажатие callback-кнопки под сообщением (онлайн): ответ — ButtonAnswer ({toast?}), правка придёт журналом */

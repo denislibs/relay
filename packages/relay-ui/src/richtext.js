@@ -385,8 +385,8 @@ function quoteLines(v) {
   var at = 0, lines = v.text.split('\n'), cuts = [], runs = [], run = null, gone = 0;
   for (var i = 0; i < lines.length; i++) {
     var line = lines[i], here = at;
-    if (/^> ?\S/.test(line) && !v.entities.some(function (e) { return MONO[e.type] && e.offset <= here && e.offset + e.length > here; })) {
-      var m = line[1] === ' ' ? 2 : 1, s = at - gone, end = s + line.length - m;
+    if (/^> \S/.test(line) && !v.entities.some(function (e) { return MONO[e.type] && e.offset <= here && e.offset + e.length > here; })) {
+      var m = 2, s = at - gone, end = s + line.length - m;
       cuts.push([at, at + m]);
       if (run) run.length = end - run.offset; else run = { type: 'blockquote', offset: s, length: end - s };
       gone += m;

@@ -822,7 +822,7 @@ export function Chat({ chatId, frameKey, active, threadId, scheduled = false, sa
           if (art) { sendArticle(art.blocks); return false; }
           // одно эмодзи кубика без оформления — бросок (как в Telegram): значение выберет сервер
           const die = out.text.replace(/\uFE0F/g, '').trim();
-          if (!later && !when.silent && !thread && !out.entities.length && isDiceEmoji(die)) { const r = sendSpecial(chatId, { dice: { emoji: die } }, replyRef); setReplyKey(null); return r; }
+          if (!later && !thread && !out.entities.length && isDiceEmoji(die)) { const r = sendSpecial(chatId, { dice: { emoji: die } }, replyRef, !!when.silent); setReplyKey(null); return r; }
           // превью: убрали крестиком — без него; уже загружено для этой ссылки — сразу в ленте, до ответа сервера
           // полёт из поля в пузырь (sendFlight): капсула и текст снимаются сейчас, пока поле не очищено
           const col = (document.activeElement as HTMLElement | null)?.closest('.app-chatcol') ?? document.querySelector('.app-chatcol[data-current]');
