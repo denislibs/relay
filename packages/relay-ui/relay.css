@@ -1997,7 +1997,7 @@ html[data-blur="0"] .rl-menu { -webkit-backdrop-filter: none; backdrop-filter: n
 .rl-round-badge, .rl-round-meta { background: var(--action-bg); }
 /* служебные сообщения в ленте («создал(а) группу») — такая же плашка, как дата, но не липнет */
 .rl-action { display: flex; justify-content: center; padding: .5rem 0; }
-.rl-action span { max-width: min(28rem, 85%); padding: 3px 8px; border-radius: 15px; background: var(--action-bg); color: #fff; text-align: center;
+.rl-action > span { max-width: min(28rem, 85%); padding: 3px 8px; border-radius: 15px; background: var(--action-bg); color: #fff; text-align: center;
   font: 500 calc(var(--message-text-size, 16px) - 1px)/1.25 var(--font-sans); }
 /* новое сообщение выезжает снизу и проявляется; своё — от правого нижнего угла */
 .rl-appear-out, .rl-appear-in { animation: rl-msg-in 200ms ease-out both; transform-origin: 0 100%; }
