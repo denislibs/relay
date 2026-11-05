@@ -12,8 +12,11 @@ import { FormattedDate } from './dateView.js';
 /** Тост «Дата скопирована» — приложение подставляет свой показ (setDateCopiedToast). */
 var dateCopied = null;
 export function setDateCopiedToast(fn) { dateCopied = fn; }
+/** Клик по @имени в тексте — приложение открывает человека, группу или канал (setMentionOpener). */
+var mentionOpen = null;
+export function setMentionOpener(fn) { mentionOpen = fn; }
 
-var ORDER = ['link', 'date', 'pre', 'code', 'spoiler', 'bold', 'italic', 'underline', 'strike'];
+var ORDER = ['link', 'mention', 'date', 'pre', 'code', 'spoiler', 'bold', 'italic', 'underline', 'strike'];
 
 function wrap(type, value, child) {
   switch (type) {
@@ -47,6 +50,24 @@ function autoLinks(text, list) {
     if (!taken && raw) out.push({ type: 'link', offset: from, length: raw.length, url: /^www\./i.test(raw) ? 'https://' + raw : raw });
   }
   return out;
+}
+
+/* @имя — ссылкой, как в Telegram (то же правило, что MENTION_RE в protocol: 5–32 знака, не внутри слова, почты и
+   адреса); внутри ссылки, кода и блока кода — просто текст */
+var MENTION_RE = /(?<![\p{L}\p{N}_@./])@[A-Za-z][A-Za-z0-9_]{4,31}(?![\p{L}\p{N}_])/gu;
+function autoMentions(text, list) {
+  if (text.indexOf('@') < 0) return list;
+  var out = list ? list.slice() : [], m;
+  MENTION_RE.lastIndex = 0;
+  while ((m = MENTION_RE.exec(text))) {
+    var from = m.index, to = from + m[0].length;
+    var taken = out.some(function (e) { return (e.type === 'link' || e.type === 'code' || e.type === 'pre') && e.offset < to && e.offset + e.length > from; });
+    if (!taken) out.push({ type: 'mention', offset: from, length: m[0].length });
+  }
+  return out;
+}
+function mentionLink(name, child) {
+  return h('a', { class: 'rl-link rl-mention-link', href: '#', onClick: function (e) { e.preventDefault(); e.stopPropagation(); if (mentionOpen) mentionOpen(name); } }, child);
 }
 
 /* ---------- цитата в тексте (blockquote) ----------
@@ -139,13 +160,13 @@ function QuoteBlock(props) {
 }
 
 function MessageText(props) {
-  var text = props.text || '', list = autoLinks(text, props.entities);
+  var text = props.text || '', list = autoMentions(text, autoLinks(text, props.entities));
   if (!list || !list.length) return props.highlight ? h(Highlight, { text: text, query: props.highlight }) : text;
   function inline(sg, str, i) {
     var node = props.highlight ? h(Highlight, { text: str, query: props.highlight }) : str;
     for (var k = ORDER.length - 1; k >= 0; k--) {
       var t = ORDER[k];
-      if (sg.marks[t]) node = wrap(t, sg.marks[t], node);
+      if (sg.marks[t]) node = t === 'mention' ? mentionLink(sg.text.slice(1), node) : wrap(t, sg.marks[t], node);
     }
     return h(Fragment, { key: i }, node);
   }

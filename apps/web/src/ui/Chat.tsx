@@ -51,7 +51,7 @@ import { Playlist } from './Playlist';
 import { inProfile, toggleProfileMusic, type Track } from '../music';
 import { useOwnMusic } from '../profileLists';
 import { SEARCH_IN_CHAT } from '../shortcuts';
-import { Avatar, Button, Chip, confirmModal, Icon, MediaPolicy, peerTone, ChatSearchBar, Highlight, ripple, useMinVisible, requestMeasure, Composer, DropOverlay, GlassBar, IconButton, MenuPopover, Modal, ConfirmDialog, Presence, ReactionsBar, reducedMotion, plural, requestMutation, SelectionBar, isHeavyAnimating, onHeavyAnimationEnd, applyMarkdown, emptyValue, sameValue, voiceSupported, PlayerBar, roundSupported, startRound, Verified, canCopyImage, clipboardHtml, copyImage, copyRich, downloadUrl, TodoModal, PollModal, ContactPicker, TODO_ITEMS_MAX, DateModal, setDateCopiedToast, addHotkeys } from '@relay/ui';
+import { Avatar, Button, Chip, confirmModal, Icon, MediaPolicy, peerTone, ChatSearchBar, Highlight, ripple, useMinVisible, requestMeasure, Composer, DropOverlay, GlassBar, IconButton, MenuPopover, Modal, ConfirmDialog, Presence, ReactionsBar, reducedMotion, plural, requestMutation, SelectionBar, isHeavyAnimating, onHeavyAnimationEnd, applyMarkdown, emptyValue, sameValue, voiceSupported, PlayerBar, roundSupported, startRound, Verified, canCopyImage, clipboardHtml, copyImage, copyRich, downloadUrl, TodoModal, PollModal, ContactPicker, TODO_ITEMS_MAX, DateModal, setDateCopiedToast, setMentionOpener, addHotkeys } from '@relay/ui';
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'preact/hooks';
 import { ScheduleModal } from './ScheduleModal';
 import { pressOpen } from './press';
@@ -91,6 +91,7 @@ const NO_MESSAGES: Item[] = [];
 
 /** Чат в стеке. active — он на экране: только он ловит ввод, файлы и Esc; остальные живут тихо. */
 setDateCopiedToast(() => showToast('Дата скопирована'));
+setMentionOpener((name: string) => setGlobal({ joinLink: '@' + name }));   // @имя в пузыре: человек, группа или канал
 
 /** Имя файла для «Скачать»: исходное, иначе по виду (как в Telegram: voice — .ogg, кружок — .mp4, фото — .jpg). */
 /** Длительность видео в окне отправки: 0:07, 17:32, 1:02:03. */
