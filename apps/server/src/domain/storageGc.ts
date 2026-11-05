@@ -30,7 +30,7 @@ export const referenced = (db: typeof sql) => db`(
   or exists (select 1 from profile_music pm where pm.attachment_id = a.id)
   or exists (select 1 from user_photos up where up.big = a.id or up.small = a.id or up.video = a.id)
   or exists (select 1 from users u where u.photo is not null and (u.photo->>'id' = a.id::text or u.photo->>'small' = a.id::text))
-  or exists (select 1 from chat_photos cp where cp.big = a.id or cp.small = a.id)
+  or exists (select 1 from chat_photos cp where cp.big = a.id or cp.small = a.id or cp.video = a.id)
   or exists (select 1 from link_previews lp where lp.photo_id = a.id))`;
 
 /**

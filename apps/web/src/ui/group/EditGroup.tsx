@@ -40,8 +40,9 @@ export function EditGroup({ nav }: { nav: Nav }) {
   const info = canChangeInfo(me);
   const photo = usePhotoPicker(group?.photo, {
     set: async (c) => {
-      const [id, small] = await Promise.all([upload(c.big, 640), upload(c.small, 160)]);
-      const r = await groupCall('PUT', `/groups/${chatId}/photo`, { id, small, thumb: c.thumb });
+      // GIF и видео — видео-аватаркой (как фото профиля): big/small — её кадр
+      const [id, small, video] = await Promise.all([upload(c.big, 640), upload(c.small, 160), c.video ? upload(c.video.blob, c.video.side, c.video) : undefined]);
+      const r = await groupCall('PUT', `/groups/${chatId}/photo`, { id, small, thumb: c.thumb, ...(video ? { video } : {}) });
       if (!r.ok) throw new Error(r.code);
     },
     remove: async () => { const r = await groupCall('DELETE', `/groups/${chatId}/photo`); if (!r.ok) throw new Error(r.code); },

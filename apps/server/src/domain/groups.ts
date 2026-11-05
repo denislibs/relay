@@ -97,27 +97,35 @@ export async function updateGroupInfo(userId: number, chatId: number, body: { ti
   });
 }
 
-/** Фото группы: клиент сам обрезал до 640 и 160 и загрузил (как фото профиля). null — убрать. */
+/** Фото группы: клиент сам обрезал до 640 и 160 и загрузил (как фото профиля). video — видео-аватарка (GIF или
+ *  видео: квадратное до 1280 и 15 с), тогда big/small — её кадр. null — убрать. */
 export async function setGroupPhoto(userId: number, chatId: number, body: unknown): Promise<{ ok: true }> {
-  let photo: { id: string; small: string; thumb: string } | null = null;
+  let photo: { id: string; small: string; thumb: string; video?: string } | null = null;
   if (body !== null) {
-    const { id, small, thumb } = (body && typeof body === 'object' ? body : {}) as Record<string, unknown>;
+    const { id, small, thumb, video } = (body && typeof body === 'object' ? body : {}) as Record<string, unknown>;
     const bad = () => new DomainError('photo_invalid');
     if (typeof id !== 'string' || typeof small !== 'string' || id === small || !UUID.test(id) || !UUID.test(small)) throw bad();
     if (typeof thumb !== 'string' || !THUMB.test(thumb)) throw bad();
-    const rows = await sql`select id, width, height, mime from attachments where enc = 0 and id = any(${[id, small]}::uuid[]) and owner_id = ${userId} and status = 'ready'`;
-    const side = (x: string) => { const r = rows.find((a) => a.id === x); return r && /^image\//.test(r.mime as string) && r.width === r.height ? Number(r.width) : 0; };
+    if (video !== undefined && (typeof video !== 'string' || !UUID.test(video) || video === id || video === small)) throw bad();
+    const ids = video ? [id, small, video as string] : [id, small];
+    const rows = await sql`select id, width, height, mime, duration from attachments where enc = 0 and id = any(${ids}::uuid[]) and owner_id = ${userId} and status = 'ready'`;
+    const row = (x: string) => rows.find((a) => a.id === x);
+    const side = (x: string) => { const r = row(x); return r && /^image\//.test(r.mime as string) && r.width === r.height ? Number(r.width) : 0; };
     const b = side(id), s = side(small);
     if (b < 160 || b > 1280 || s < 48 || s > 320) throw bad();
-    photo = { id, small, thumb };
+    if (video) {
+      const v = row(video as string);
+      if (!v || !/^video\/(mp4|webm)/.test(v.mime as string) || !v.width || v.width !== v.height || Number(v.width) > 1280 || Number(v.duration ?? 0) > 15) throw bad();
+    }
+    photo = { id, small, thumb, ...(video ? { video: video as string } : {}) };
   }
   return sql.begin(async (tx) => {
     const ctx = await groupCtx(tx, chatId, userId, { lock: true });
     isCommunity(ctx);
     if (!canChangeInfo(ctx)) throw new DomainError('forbidden', 'info');
     if (photo) {
-      const [p] = await tx`insert into chat_photos (chat_id, big, small, thumb) values (${chatId}, ${photo.id}, ${photo.small}, ${photo.thumb}) returning id, created_at`;
-      const value = { id: photo.id, small: photo.small, thumb: photo.thumb, at: new Date(p.created_at as string).getTime(), pid: Number(p.id) };
+      const [p] = await tx`insert into chat_photos (chat_id, big, small, thumb, video) values (${chatId}, ${photo.id}, ${photo.small}, ${photo.thumb}, ${photo.video ?? null}) returning id, created_at`;
+      const value = { id: photo.id, small: photo.small, thumb: photo.thumb, at: new Date(p.created_at as string).getTime(), pid: Number(p.id), ...(photo.video ? { video: photo.video } : {}) };
       await tx`update chats set photo = ${tx.json(value as never)} where id = ${chatId}`;
       await serviceMessage(tx, chatId, userId, 'photo_changed', { photo: value });   // новое фото — миниатюрой под плашкой
       await logAdminAction(tx, chatId, userId, 'photo_changed', {});

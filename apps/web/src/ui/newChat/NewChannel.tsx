@@ -16,7 +16,7 @@ import { GROUP_TITLE_MAX } from './NewGroup';
 // шаг 2 — «Добавить подписчиков» (можно пропустить), затем канал открывается. Тип и @имя — потом, в настройках.
 // Черновик живёт в global.newChannel между шагами; после создания в нём chatId.
 
-type Cropped = { big: Blob; small: Blob; thumb: string };
+type Cropped = { big: Blob; small: Blob; thumb: string; video?: { blob: Blob; side: number; duration: number } };
 const cpLen = (s: string) => [...s].length;
 const clip = (s: string, max: number) => [...s].slice(0, max).join('');
 
@@ -45,8 +45,8 @@ export function NewChannelInfo() {
       const c = photoRef.current;
       if (c) {
         // фото — отдельным запросом после создания (как в Telegram); не вышло — канал всё равно есть
-        void Promise.all([upload(c.big, 640), upload(c.small, 160)])
-          .then(([big, small]) => groupCall('PUT', `/groups/${id}/photo`, { id: big, small, thumb: c.thumb }))
+        void Promise.all([upload(c.big, 640), upload(c.small, 160), c.video ? upload(c.video.blob, c.video.side, c.video) : undefined])
+          .then(([big, small, video]) => groupCall('PUT', `/groups/${id}/photo`, { id: big, small, thumb: c.thumb, ...(video ? { video } : {}) }))
           .then((r) => { if (!r.ok) showToast('Не удалось поставить фото канала'); }, () => showToast('Не удалось поставить фото канала'));
       }
       void go('newChannel/members');
