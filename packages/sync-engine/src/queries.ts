@@ -1,4 +1,4 @@
-import { chatTitle, personView } from './names';
+import { chatTitle, displayName, personView } from './names';
 import { canPost } from './channel';
 import type { Store } from './store';
 import { PENDING_BASE, toQuote, type Item, type LocalChat, type LocalMessage, type Patch, type Query, type QuoteMsg } from './types';
@@ -12,6 +12,8 @@ export interface Result {
 
 /** Операция «выключить уведомления чата»: ключ mute:<chatId>, тело {muteUntil}. Её значение показывается сразу, до ответа сервера. */
 export const muteKey = (chatId: number) => 'mute:' + chatId;
+/** Операция «автоудаление чата»: ключ autoDelete:<chatId>, тело {sec}. Как и mute: значение видно сразу, до ответа сервера. */
+export const autoDeleteKey = (chatId: number) => 'autoDelete:' + chatId;
 export const flagsKey = (chatId: number) => 'flags:' + chatId;
 
 /** Флаги чата, которые видит список: закреплён (мс), в архиве, пометка «непрочитанное». */
@@ -42,6 +44,12 @@ export function muteOverlay(ops: readonly { key: string; body?: unknown }[]): Ma
   return m;
 }
 
+export function autoDeleteOverlay(ops: readonly { key: string; body?: unknown }[]): Map<number, number | null> {
+  const m = new Map<number, number | null>();
+  for (const o of ops) if (o.key.startsWith('autoDelete:')) m.set(Number(o.key.slice(11)), (o.body as { sec: number | null }).sec);
+  return m;
+}
+
 /** Мелкие служебные элементы (очередь загрузок, счётчики): подпись — сериализация, их единицы. */
 function result(list: Item[]): Result {
   const items = new Map<string, Item>(), sig = new Map<string, string>();
@@ -53,16 +61,17 @@ function result(list: Item[]): Result {
 const sortAt = (c: LocalChat): string => (c.draft && c.draft.at > c.lastAt ? c.draft.at : c.lastAt);
 
 /** Строка списка: название и фото личного чата — из people (personView), группы — из chat.group. */
-const chatItem = (store: Store, c: LocalChat, person: ReturnType<typeof personView> | null, muteUntil: number | null, f: Flags): Item => {
+const chatItem = (store: Store, c: LocalChat, person: ReturnType<typeof personView> | null, muteUntil: number | null, f: Flags, autoDeleteSec: number | null): Item => {
   const title = chatTitle(store, c);
   return {
-  key: 'c' + c.id, id: c.id, kind: c.kind, title, peerId: c.peerId,
+  key: 'c' + c.id, id: c.id, kind: c.kind, title, peerId: c.peerId, saved: !!c.saved,
   // собеседник личного чата; system — служебный чат «Relay» (только чтение)
   peer: c.peerId != null ? { id: c.peerId, name: title, ...(c.system ? { system: true } : null) } : null, unread: c.unread, lastReadId: c.lastReadId, lastAt: c.lastAt,
   // canSend: в канале пишет только админ с правом post (channel.ts)
   canSend: canPost(c),
   photo: person ? person.photo : c.group?.photo ?? null, group: c.group ?? null, me: c.me ?? null, membersRev: store.members.rev(c.id), sortAt: sortAt(c), draft: c.draft?.text ?? null, draftEntities: c.draft?.entities ?? null, pinned: c.pinned ?? [], muteUntil,
-  pinnedAt: f.pinnedAt, archived: f.archived, unreadMark: f.unreadMark, mentions: c.mentions ?? 0, theme: c.theme ?? null,
+  scheduled: store.scheduledCount(c.id),
+  pinnedAt: f.pinnedAt, archived: f.archived, unreadMark: f.unreadMark, mentions: c.mentions ?? 0, theme: c.theme ?? null, autoDeleteSec,
   // непрочитанные реакции на мои сообщения: число и известные id (лента гасит их, увидев сообщение на экране)
   reactions: c.reactions ?? 0, reactionIds: c.reactionIds ?? null,
   last: c.last ? { key: c.last.key, id: c.last.id, senderId: c.last.senderId, body: c.last.body, status: c.last.status, createdAt: c.last.createdAt, deleted: !!c.last.deleted, kind: c.last.kind ?? 'text', attachmentName: c.last.attachment?.name ?? null, attachmentTitle: c.last.attachment?.title ?? null, attachmentPerformer: c.last.attachment?.performer ?? null,
@@ -76,25 +85,31 @@ const chatItem = (store: Store, c: LocalChat, person: ReturnType<typeof personVi
 // строка списка переиспользуется, пока не изменились её входы: версия чата (всё из строки чата, включая last и
 // черновик), вид собеседника (профиль, контакт, операция в очереди) и «печатает»; JSON.stringify не нужен
 const chatCache = new WeakMap<LocalChat, { sig: string; item: Item }>();
-function chatListItem(store: Store, c: LocalChat, mute: Map<number, number | null>, flags: Map<number, FlagsOp>): { item: Item; sig: string } {
+function chatListItem(store: Store, c: LocalChat, mute: Map<number, number | null>, flags: Map<number, FlagsOp>, auto: Map<number, number | null>): { item: Item; sig: string } {
   const person = !c.group && c.peerId != null ? personView(store, c.peerId) : null;
   // профиля собеседника нет (чат узнали из сообщения, строку people вытеснили) — движок его спросит
   if (person && c.peerId != null && !store.users.get(c.peerId)) store.wantUser(c.peerId);
   const typing = store.typing.has(c.id);
+  // группа: кто именно печатает (имена в порядке начала), как в Telegram — «Васян и Петя печатают…»
+  const typers = c.group ? [...(store.typing.get(c.id) ?? [])].map((u) => {
+    if (!store.users.get(u)) store.wantUser(u);
+    return displayName(store, u).split(' ')[0];
+  }) : [];
   // уведомления: значение неотправленной операции перекрывает значение чата
   const muteUntil = mute.has(c.id) ? mute.get(c.id)! : c.muteUntil ?? null;
+  const autoDeleteSec = auto.has(c.id) ? auto.get(c.id)! : c.autoDeleteSec ?? null;
   // membersRev — счётчик изменений состава в памяти (members.ts) для старого интерфейса участников
   const f = flagsOf(c, flags.get(c.id));
-  const sig = `${store.chatVersion(c.id)}|${person?.sig ?? ''}|${typing}|${muteUntil}|${store.members.rev(c.id)}|${f.pinnedAt}|${f.archived}|${f.unreadMark}`;
+  const sig = `${store.chatVersion(c.id)}|${person?.sig ?? ''}|${typing}:${typers.join(',')}|${muteUntil}|${store.members.rev(c.id)}|${f.pinnedAt}|${f.archived}|${f.unreadMark}|${autoDeleteSec}`;
   let hit = chatCache.get(c);
-  if (!hit || hit.sig !== sig) { hit = { sig, item: { ...chatItem(store, c, person, muteUntil, f), typing } }; chatCache.set(c, hit); }
+  if (!hit || hit.sig !== sig) { hit = { sig, item: { ...chatItem(store, c, person, muteUntil, f, autoDeleteSec), typing, ...(typers.length ? { typers } : null) } }; chatCache.set(c, hit); }
   return hit;
 }
 
 // элемент сообщения переиспользуется, пока сообщение не изменилось: дешёвая подпись вместо JSON.stringify
 // цитата — короткая копия исходного сообщения, если оно есть в кэше (видна, даже когда оригинал вне окна)
 type Quote = QuoteMsg | null;
-const msgSig = (m: LocalMessage, q: Quote, fxAt?: number): string => `${fxAt ?? ''}|${m.id}|${m.status}|${m.sort}|${m.replyToId}|${m.body}|${m.editedAt ?? ''}|${m.deleted ? 1 : 0}|${m.reactions?.map((r) => r.userId + r.emoji).join(',') ?? ''}|${m.attachment ? m.attachment.id + ':' + (m.progress ?? '') + ':' + m.attachment.size + (m.attachment.preview ? ':p' : '') + ':' + (m.attachment.variants?.length ?? 0) : ''}|${q ? q.id + ':' + q.body + ':' + (q.deleted ? 1 : 0) + ':' + (q.attachment?.thumb?.length ?? 0) + ':' + (q.entities?.length ?? 0) : ''}|${m.error ?? ''}|${m.listened ? 1 : 0}|${m.entities?.map((e) => e.type + e.offset + ':' + e.length + (e.url ?? '')).join(',') ?? ''}|${m.todo ? JSON.stringify(m.todo) : ''}|${m.poll ? JSON.stringify(m.poll) : ''}|${m.contact || m.geo || m.dice ? JSON.stringify([m.contact, m.geo, m.dice]) : ''}|${m.service?.data ? JSON.stringify(m.service.data) : ''}|${m.buttons ? JSON.stringify(m.buttons) : ''}|${m.views ?? ''}|${m.reactionCounts?.map((r) => r[0] + r[1]).join(',') ?? ''}|${m.myReaction ?? ''}|${m.postAuthor ?? ''}|${m.replies ? m.replies.count + ':' + m.replies.lastId + ':' + m.replies.recent.join(',') + ':' + (m.replies.readMaxId ?? '') : ''}`;
+const msgSig = (m: LocalMessage, q: Quote, fxAt?: number): string => `${fxAt ?? ''}|${m.id}|${m.expiresAt ?? ''}|${m.status}|${m.sort}|${m.replyToId}|${m.replyQuote ? m.replyQuote.offset + ':' + m.replyQuote.text + ':' + (m.replyQuote.entities?.length ?? 0) : ''}|${m.body}|${m.editedAt ?? ''}|${m.deleted ? 1 : 0}|${m.reactions?.map((r) => r.userId + r.emoji).join(',') ?? ''}|${m.attachment ? m.attachment.id + ':' + (m.progress ?? '') + ':' + m.attachment.size + (m.attachment.preview ? ':p' : '') + ':' + (m.attachment.variants?.length ?? 0) : ''}|${q ? q.id + ':' + q.body + ':' + (q.deleted ? 1 : 0) + ':' + (q.attachment?.thumb?.length ?? 0) + ':' + (q.entities?.length ?? 0) : ''}|${m.error ?? ''}|${m.listened ? 1 : 0}|${m.entities?.map((e) => e.type + e.offset + ':' + e.length + (e.url ?? '') + (e.collapsed ? 'c' : '')).join(',') ?? ''}|${m.todo ? JSON.stringify(m.todo) : ''}|${m.poll ? JSON.stringify(m.poll) : ''}|${m.contact || m.geo || m.dice ? JSON.stringify([m.contact, m.geo, m.dice]) : ''}|${m.service?.data ? JSON.stringify(m.service.data) : ''}|${m.buttons ? JSON.stringify(m.buttons) : ''}|${m.views ?? ''}|${m.reactionCounts?.map((r) => r[0] + r[1]).join(',') ?? ''}|${m.myReaction ?? ''}|${m.postAuthor ?? ''}|${m.replies ? m.replies.count + ':' + m.replies.lastId + ':' + m.replies.recent.join(',') + ':' + (m.replies.readMaxId ?? '') : ''}`;
 const msgCache = new WeakMap<LocalMessage, { sig: string; item: Item }>();
 export const messageItem = (m: LocalMessage, q: Quote, fx?: { key: string; t: number[]; at: number }): { item: Item; sig: string } => {
   const sig = msgSig(m, q, fx?.at);
@@ -104,7 +119,7 @@ export const messageItem = (m: LocalMessage, q: Quote, fx?: { key: string; t: nu
 };
 
 /** Первый индекс в [lo, hi) с sort >= s (массив отсортирован по sort). */
-function lowerBound(arr: LocalMessage[], s: number, lo = 0, hi = arr.length): number {
+export function lowerBound(arr: LocalMessage[], s: number, lo = 0, hi = arr.length): number {
   while (lo < hi) { const mid = (lo + hi) >> 1; if (arr[mid].sort < s) lo = mid + 1; else hi = mid; }
   return lo;
 }
@@ -180,7 +195,7 @@ export function threadView(store: Store, q: Extract<Query, { kind: 'thread' }>) 
 }
 
 /** Окно сообщений → элементы с цитатами (лента чата и тред). */
-function windowItems(store: Store, chatId: number, all: LocalMessage[], from: number, to: number, out: Result): void {
+export function windowItems(store: Store, chatId: number, all: LocalMessage[], from: number, to: number, out: Result): void {
   const missingQuotes = new Set<number>();
   for (let k = from; k < to; k++) {
     const m = all[k];
@@ -196,7 +211,17 @@ function windowItems(store: Store, chatId: number, all: LocalMessage[], from: nu
   if (missingQuotes.size) store.wantQuotes(chatId, [...missingQuotes]);
 }
 
-export function computeQuery(store: Store, q: Query, mute: Map<number, number | null> = new Map(), flags: Map<number, FlagsOp> = new Map()): Result {
+/** Отложенные чата: те же элементы, что у ленты, с цитатами; окно — все (больше сотни их не бывает). */
+export function scheduledResult(store: Store, chatId: number): Result {
+  const all = store.scheduledMessages(chatId);
+  const out: Result = { items: new Map(), sig: new Map(), order: [] };
+  windowItems(store, chatId, all, 0, all.length, out);
+  const meta: Item = { key: '~window', hasOlder: false, hasNewer: false, live: true };
+  out.items.set(meta.key, meta); out.sig.set(meta.key, JSON.stringify(meta)); out.order.push(meta.key);
+  return out;
+}
+
+export function computeQuery(store: Store, q: Query, mute: Map<number, number | null> = new Map(), flags: Map<number, FlagsOp> = new Map(), auto: Map<number, number | null> = new Map()): Result {
   switch (q.kind) {
     case 'chatList': {
       // закреплённые — сверху, в порядке закрепления (позже — выше), новые сообщения их не двигают; дальше — по последнему
@@ -208,7 +233,7 @@ export function computeQuery(store: Store, q: Query, mute: Map<number, number | 
       });
       const items = new Map<string, Item>(), sig = new Map<string, string>(), order: string[] = [];
       for (const c of chats.slice(0, q.limit)) {
-        const { item, sig: g } = chatListItem(store, c, mute, flags);
+        const { item, sig: g } = chatListItem(store, c, mute, flags, auto);
         items.set(item.key, item); sig.set(item.key, g); order.push(item.key);
       }
       return { items, sig, order };
@@ -219,7 +244,7 @@ export function computeQuery(store: Store, q: Query, mute: Map<number, number | 
       for (const id of store.previews) {
         const c = store.chats.get(id);
         if (!c) continue;
-        const { item, sig: g } = chatListItem(store, c, mute, flags);
+        const { item, sig: g } = chatListItem(store, c, mute, flags, auto);
         const it = { ...item, preview: true, requested: !!c.requested };
         items.set(it.key, it); sig.set(it.key, g); order.push(it.key);
       }
@@ -291,6 +316,7 @@ export function computeQuery(store: Store, q: Query, mute: Map<number, number | 
       return result([{ key: 'counters', unreadChats, unreadMessages, archivedUnread }]);
     }
     case 'notifications': return result(store.notifications);
+    case 'scheduled': return scheduledResult(store, q.chatId);
     case 'status':
     case 'presence':
     case 'me':
@@ -302,6 +328,8 @@ export function computeQuery(store: Store, q: Query, mute: Map<number, number | 
     case 'blocked':
     case 'members':
     case 'media':
+    case 'savedFeed':
+    case 'savedDialogs':
     case 'profileMusic':
     case 'profilePhotos':
     case 'devStats':
@@ -314,7 +342,7 @@ export function computeQuery(store: Store, q: Query, mute: Map<number, number | 
 export function affects(q: Query, touched: Set<number>): boolean {
   if (!touched.size) return false;
   if (q.kind === 'status' || q.kind === 'me' || q.kind === 'user' || q.kind === 'people' || q.kind === 'ops' || q.kind === 'contacts' || q.kind === 'settings' || q.kind === 'blocked' || q.kind === 'members' || q.kind === 'profileMusic' || q.kind === 'profilePhotos' || q.kind === 'devStats' || q.kind === 'devLog') return false;   // у них свои флаги в движке
-  return q.kind === 'messages' || q.kind === 'media' || q.kind === 'thread' ? touched.has(q.chatId) : true;
+  return q.kind === 'messages' || q.kind === 'media' || q.kind === 'thread' || q.kind === 'scheduled' || q.kind === 'savedFeed' ? touched.has(q.chatId) : true;
 }
 
 export function diffResults(prev: Result | null, next: Result): Patch | null {

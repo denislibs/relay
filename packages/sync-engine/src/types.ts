@@ -1,11 +1,14 @@
-import type { ContactCard, Dice, DiceEmoji, GeoPoint, Poll, PollInput, StickerRef, StickerSetInfo } from '@relay/protocol';
+import type { ScheduledMessage } from '@relay/protocol';
+import type { ContactCard, Dice, DiceEmoji, GeoPoint, Poll, PollInput, SavedGif, StickerRef, StickerSetInfo } from '@relay/protocol';
 import type { StoreName } from './schema';
 import type { GroupInfo, MediaCounts, MediaTab, MyMembership, Replies } from '@relay/protocol';
+import type { ReplyQuote } from '@relay/protocol';
 import type { Birthday, Block, PersonalChannel, ChatFolder, Entity, ForwardInfo, ForwardRef, LinkPreview, MessageButton, PrivacyKey, PrivacyMode, ProfileLink, ServiceType, Todo, TodoInput, TodoServiceData, VideoVariant } from '@relay/protocol';
 
 export type Status = 'pending' | 'sent' | 'read' | 'failed';
 
 export interface LocalMessage {
+  expiresAt?: number;     // автоудаление: мс эпохи по часам сервера, когда сообщение исчезнет
   key: string;            // = clientId: одинаков у черновика, ack и newMessage
   clientId: string;
   id: number | null;      // null, пока сервер не подтвердил
@@ -13,6 +16,7 @@ export interface LocalMessage {
   senderId: number;
   body: string;
   replyToId: number | null;
+  replyQuote?: ReplyQuote;   // цитата части исходного (канонически — от сервера)
   createdAt: string;
   status: Status;
   sort: number;           // id, а у неподтверждённых — PENDING_BASE + время создания
@@ -35,6 +39,7 @@ export interface LocalMessage {
   geo?: GeoPoint;         // геопозиция или место
   dice?: Dice;            // кубики: эмодзи и выпавшее (у неотправленного значения ещё нет)
   fwdFrom?: ForwardInfo | null;      // пересланное: исходный автор, откуда и когда
+  savedPeer?: string;                // «Избранное»: подчат сообщения (от сервера; неотправленному и старой строке кэша — по тому же правилу на устройстве)
   link?: LinkPreview | null;         // превью ссылки (pending — сервер ещё загружает)
   blocks?: Block[] | null;           // «статья»
   buttons?: MessageButton[][] | null; // кнопки под сообщением (inline-клавиатура)
@@ -46,6 +51,9 @@ export interface LocalMessage {
   threadId?: number;                  // комментарий: id копии поста в группе обсуждения (корень треда)
   origin?: { chatId: number; id: number };   // копия поста в группе обсуждения: канал и пост
   replies?: Replies;                  // пост с обсуждением: число комментариев, последние, моя прочитанность треда
+  silent?: boolean;                   // без звука: получателю ни push, ни звука
+  reminder?: boolean;                 // отложенное себе в «Избранное»: автору — уведомление
+  scheduled?: true;                   // только в элементе запроса scheduled: createdAt — на когда запланировано
 }
 
 /** Отрезки истории треда (как у ленты чата): страницы треда — свой эндпоинт, живой отрезок продлевают комментарии из журнала. */
@@ -79,11 +87,13 @@ export interface LocalChat {
   seed?: number;          // живой отрезок начат снимком с этого sort: непрерывность ниже него не проверена историей
   peerId: number | null;  // собеседник личного чата: имя и фото — из people (names.ts), копий в чате нет
   system?: true;          // собеседник — системный пользователь «Relay» (служебный чат)
+  saved?: true;           // «Избранное»: чат с самим собой, peerId — null, всегда прочитан
   last: LocalMessage | null;
   lastAt: string;
   draft?: { text: string; at: string; entities?: Entity[] } | null;   // неотправленный текст композера (общий для вкладок)
   pinned?: number[];      // закреплённые сообщения (новые сверху)
   muteUntil?: number | null;   // уведомления чата выключены до (мс), 0 — навсегда, null/нет — включены
+  autoDeleteSec?: number | null;   // автоудаление: срок новых сообщений в секундах (значение сервера), null — выключено
   theme?: string | null;       // тема чата: id готовой темы (GET /themes), общая для всех участников
   pinnedAt?: number | null;    // чат закреплён (мс; позже закреплённый — выше), null/нет — нет
   archived?: boolean;          // в архиве: не в «Все» и папках, а под строкой «Архив»
@@ -97,6 +107,8 @@ export interface LocalChat {
   mediaCountsAt?: number; // до какого id сообщения уже учтены в mediaCounts (новее — прибавляются по приходу)
   /** вкладка известна подряд от новых: true — целиком, число — с этого id (страницы старше просим с него) */
   mediaDone?: Partial<Record<MediaTab, number | true>>;
+  /** подчаты «Избранного»: что известно о ленте и вкладках подчата (savedDialogs.ts, media.ts); стирается вместе с mediaDone */
+  savedViews?: Record<string, SavedView>;
   openedAt?: number;      // когда ленту чата открывали в последний раз (мс): уборка урезает давно не открытые (evict.ts)
   /** группа обсуждения: отрезки тредов по id копии; нет — тред не открывали (перезагрузится при открытии) */
   threads?: Record<number, ThreadRanges>;
@@ -109,11 +121,15 @@ export interface LocalChat {
   reactionIds?: number[];
 }
 
+/** Подчат «Избранного» на устройстве: floor — с какого id лента известна подряд от новых (true — целиком), остальное — как у чата. */
+export interface SavedView { floor?: number | true; mediaDone?: Partial<Record<MediaTab, number | true>>; mediaCounts?: MediaCounts; mediaCountsAt?: number }
+
 export interface OutboxEntry {
   clientId: string;
   chatId: number;
   body: string;
   replyToId: number | null;
+  replyQuote?: ReplyQuote;
   createdAt: number;
   failed: boolean;
   attachment?: LocalAttachment | null;   // id появляется после загрузки файла
@@ -131,6 +147,8 @@ export interface OutboxEntry {
   upload?: { id: string; partSize: number; parts: number; done: number[]; key?: string; base?: string };
   sticker?: StickerRef | null;      // стикер: снимок для показа до ответа, на сервер уходит только id   // большой файл частями: что уже принято (докачка)
   threadId?: number;                // комментарий в треде (группа обсуждения)
+  silent?: boolean;                 // без звука
+  scheduleAt?: number;              // отложить на (мс эпохи): в ленту не попадает, ждёт в списке отложенных; срок прошёл — уйдёт сразу
   draftHash?: string | null;        // черновик, который забрала отправка (protocol draftHash); null — не трогала; нет — старая запись: сервер стирает всегда
 }
 
@@ -143,12 +161,19 @@ export type Query =
    *  по тем же правилам, что messages; служебные ~window и ~thread {header: ключ шапки или null, guest?: ThreadGuest —
    *  я не участник группы, тред живым видом без строки чата} */
   | { kind: 'thread'; chatId: number; threadId: number; limit: number; anchor?: { sort: number; side: 'end' | 'start' | 'center' } }
+  /** лента подчата «Избранного» (фильтр сообщений чата по savedPeer): окно и ~window — как у messages */
+  | { kind: 'savedFeed'; chatId: number; peer: string; limit: number; anchor?: { sort: number; side: 'end' | 'start' | 'center' } }
+  /** подчаты «Избранного» (savedDialogs.ts): строки {peer, count, last, pinnedAt, title, photo, kind, access, …} и служебный ~saved {loaded, total, messages, done, chatId} */
+  | { kind: 'savedDialogs' }
   | { kind: 'counters' }
   /** превью публичных каналов без подписки (openPreview): элементы — как строки chatList (preview: true), в список не входят */
   | { kind: 'previews' }
   /** последние уведомления (новое чужое сообщение или упоминание меня), по порядку прихода: одно на сообщение;
    *  mention — сквозь mute; элемент {key, chatId, id, mention, threadId?, senderId, body, kind, createdAt, …} */
   | { kind: 'notifications' }
+  /** отложенные чата: как окно ленты (элементы — LocalMessage, createdAt — на когда, id нет, key — clientId), с ещё не
+   *  дошедшими до сервера; служебный ~window */
+  | { kind: 'scheduled'; chatId: number }
   | { kind: 'status' }
   | { kind: 'uploads' }   // неотправленные файлы во всех чатах: имя, размер, прогресс
   | { kind: 'presence'; userId: number }
@@ -171,7 +196,7 @@ export type Query =
   | { kind: 'members'; chatId: number }
   /** вкладка «Общих медиа» (media.ts): сообщения вкладки, новые сверху, до limit; служебный ~media {done, loading, counts} —
    *  done: больше нет ни в памяти, ни на сервере; counts — сколько во всех вкладках (null — ещё не знаем) */
-  | { kind: 'media'; chatId: number; tab: MediaTab; limit: number }
+  | { kind: 'media'; chatId: number; tab: MediaTab; limit: number; savedPeer?: string }   // savedPeer — только этот подчат «Избранного»
   /** музыка профиля (profileLists.ts): треки новые сверху, до 100; свои — с ещё не подтверждёнными правками (pending);
    *  служебный ~profileMusic {loaded, loading} */
   | { kind: 'profileMusic'; userId: number }
@@ -192,7 +217,15 @@ export type Patch =
 
 export type Action =
   /** стикеры (stickers.ts): мои паки/недавние/избранные и паки — из кэша без сети; изменения — очередью операций */
-  | { type: 'sendSticker'; chatId: number; sticker: StickerRef; replyToId?: number | null; threadId?: number }   // threadId — комментарий в треде
+  /** отложенные: время, текст, отправить сейчас, удалить — оптимистично, дальше очередью операций (или правкой ещё не ушедшего) */
+  | { type: 'scheduledEdit'; chatId: number; clientId: string; sendAt?: number; body?: string; entities?: Entity[] }
+  | { type: 'scheduledSendNow'; chatId: number; clientId: string }
+  | { type: 'scheduledDelete'; chatId: number; clientId: string }
+  | { type: 'sendSticker'; chatId: number; sticker: StickerRef; replyToId?: number | null; replyQuote?: ReplyQuote; threadId?: number; silent?: boolean; scheduleAt?: number; keepDraft?: boolean }   // threadId — комментарий в треде
+  /** сохранённые GIF (savedGifs.ts): кэш сразу, изменения — очередью операций */
+  | { type: 'savedGifs' }
+  | { type: 'saveGif'; chatId: number; messageId: number; gif: SavedGif }
+  | { type: 'removeGif'; id: string }
   | { type: 'myStickers' }
   | { type: 'stickerSet'; id: number | string; hash?: string }
   | { type: 'installStickerSet'; setId: number; on: boolean; info?: StickerSetInfo }
@@ -204,7 +237,7 @@ export type Action =
   | { type: 'greetingSticker' }   // стикер-приветствие для пустого личного чата (случайный; без сети — null)
   /** управление группой и вступление по ссылке: HTTP мимо очереди ({ok, data} | {ok:false, code}) */
   | { type: 'group'; method: 'GET' | 'POST' | 'PUT' | 'PATCH' | 'DELETE'; path: string; body?: unknown }
-  | { type: 'sendMessage'; chatId: number; body: string; entities?: Entity[]; replyToId?: number | null; noLinkPreview?: boolean; link?: LinkPreview | null; attachment?: LocalAttachment | null; blocks?: Block[] | null; threadId?: number }   // threadId — комментарий в треде; blocks — «статья»; attachment — уже загруженный файл (id), например трек из музыки профиля
+  | { type: 'sendMessage'; chatId: number; body: string; entities?: Entity[]; replyToId?: number | null; replyQuote?: ReplyQuote; noLinkPreview?: boolean; link?: LinkPreview | null; attachment?: LocalAttachment | null; blocks?: Block[] | null; threadId?: number; silent?: boolean; scheduleAt?: number; keepDraft?: boolean }   // threadId — комментарий в треде; blocks — «статья»; attachment — уже загруженный файл (id), например трек из музыки профиля
   | { type: 'seen'; chatId: number; upToId: number }
   | { type: 'loadOlder'; chatId: number }
   /** тред: страница старее загруженного (как loadOlder у ленты) */
@@ -227,24 +260,32 @@ export type Action =
   | { type: 'loadMoreChats' }
   | { type: 'setDraft'; chatId: number; text: string; entities?: Entity[] }
   | { type: 'typing'; chatId: number }
+  /** подчаты «Избранного»: следующая страница; лента — страница старее; закрепить и удалить — сразу видно, уходит очередью */
+  | { type: 'loadSavedDialogs' }
+  | { type: 'loadSaved'; chatId: number; peer: string }
+  | { type: 'savedDialogPin'; peer: string; pinned: boolean }
+  | { type: 'savedDialogDelete'; peer: string }
+  | { type: 'savedChat' }   // id «Избранного»: известный чат или создать на сервере (ответ — число)
   | { type: 'emojiFx'; chatId: number; id: number; key: string; t: number[] }
   | { type: 'editMessage'; chatId: number; id: number; body: string; entities?: Entity[] }
   | { type: 'deleteMessage'; chatId: number; id: number }
+  | { type: 'setAutoDelete'; chatId: number; sec: number | null }
+  | { type: 'ackExpiredFiles'; ids: string[] }
   | { type: 'react'; chatId: number; id: number; emoji: string | null }
   /** посты канала показаны на экране: просмотр — по разу на пост за сессию, батчем не чаще раза в секунду (channel.ts) */
   | { type: 'countViews'; chatId: number; ids: number[] }
-  | { type: 'sendTodo'; chatId: number; todo: TodoInput; replyToId?: number | null }
+  | { type: 'sendTodo'; chatId: number; todo: TodoInput; replyToId?: number | null; replyQuote?: ReplyQuote }
   | { type: 'todoToggle'; chatId: number; id: number; itemId: number; done: boolean }
-  | { type: 'sendPoll'; chatId: number; poll: PollInput; replyToId?: number | null }
+  | { type: 'sendPoll'; chatId: number; poll: PollInput; replyToId?: number | null; replyQuote?: ReplyQuote }
   | { type: 'pollVote'; chatId: number; id: number; options: number[] }   // пусто — отозвать
   | { type: 'pollClose'; chatId: number; id: number }
-  | { type: 'sendSpecial'; chatId: number; special: { contact?: { userId: number; name: string; key?: string }; geo?: GeoPoint; dice?: { emoji: DiceEmoji } }; replyToId?: number | null }
+  | { type: 'sendSpecial'; chatId: number; special: { contact?: { userId: number; name: string; key?: string }; geo?: GeoPoint; dice?: { emoji: DiceEmoji } }; replyToId?: number | null; replyQuote?: ReplyQuote; silent?: boolean }
   | { type: 'todoAppend'; chatId: number; id: number; items: string[] }
   | { type: 'todoEdit'; chatId: number; id: number; todo: TodoInput }
   /** нажатие callback-кнопки под сообщением (онлайн): ответ — ButtonAnswer ({toast?}), правка придёт журналом */
   | { type: 'pressButton'; chatId: number; id: number; data: string }
   /** local: только с устройства, без сети (быстрый первый ответ; полный — тем же вызовом без local) */
-  | { type: 'search'; q: string; chatId?: number; beforeId?: number; limit?: number; local?: boolean }
+  | { type: 'search'; q: string; chatId?: number; beforeId?: number; limit?: number; local?: boolean; savedPeer?: string }
   /** глобальный поиск левой колонки: с сетью — сервер, без сети или при ошибке — с устройства (globalSearch.ts) */
   | { type: 'searchPeople'; q: string }
   | { type: 'searchMedia'; kind: MediaTab; q: string; before?: number }
@@ -315,12 +356,12 @@ export type Action =
   | { type: 'storageStats' }
   /** раздел «Для разработчиков»: имитатор сети и служебные команды (devlog.ts) */
   | DevAction
-  | { type: 'sendFile'; chatId: number; body: string; file: Blob; name: string; mime: string; w?: number | null; h?: number | null; thumb?: string | null; replyToId?: number | null;
-      kind?: 'voice' | 'round' | 'audio' | 'video'; duration?: number; waveform?: string | null; title?: string | null; performer?: string | null; groupId?: string | null; spoiler?: boolean; threadId?: number }
+  | { type: 'sendFile'; chatId: number; body: string; file: Blob; name: string; mime: string; w?: number | null; h?: number | null; thumb?: string | null; replyToId?: number | null; replyQuote?: ReplyQuote;
+      kind?: 'voice' | 'round' | 'audio' | 'video'; duration?: number; waveform?: string | null; title?: string | null; performer?: string | null; groupId?: string | null; spoiler?: boolean; threadId?: number; silent?: boolean; scheduleAt?: number; keepDraft?: boolean }   // keepDraft — со страницы отложенных: черновик чата не трогать
   | { type: 'listened'; chatId: number; id: number }
   /** Переслать сообщения ids (по порядку) из fromChatId в каждый из toChatIds; comment — отдельным сообщением перед ними. */
   /** replyToId — только для копии (hideSender) в один чат: копия — новое сообщение и может быть ответом; пересылка с «Переслано от» — нет */
-  | { type: 'forwardMessages'; fromChatId: number; ids: number[]; toChatIds: number[]; hideSender?: boolean; hideCaption?: boolean; comment?: { body: string; entities?: Entity[] } | null; replyToId?: number | null };
+  | { type: 'forwardMessages'; fromChatId: number; ids: number[]; toChatIds: number[]; hideSender?: boolean; hideCaption?: boolean; comment?: { body: string; entities?: Entity[] } | null; replyToId?: number | null; replyQuote?: ReplyQuote };
 
 /** Медленная сеть: задержка (мс, туда-обратно; на каждое направление — половина), джиттер (мс), потери кадров (%), полоса (Кбит/с, 0 — без ограничения). */
 export interface NetProfile { latency: number; jitter: number; lossPct: number; kbps: number }

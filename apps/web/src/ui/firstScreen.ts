@@ -16,6 +16,8 @@ export interface RowLike {
   sticker?: { w?: number | null; h?: number | null } | null;
   attachment?: { kind?: string; w?: number | null; h?: number | null } | null;
   replyToId?: number | null;
+  replyQuote?: { text: string } | null;
+  entities?: readonly { type: string; offset: number; length: number; collapsed?: boolean }[] | null;
   fwdFrom?: unknown;
   link?: unknown;
   reactions?: unknown[] | null;
@@ -48,6 +50,20 @@ export function textLines(body: string, x: Pick<Metrics, 'textW' | 'measure'>): 
   return n;
 }
 
+/** Строк текста сообщения с учётом сворачиваемых цитат: у свёрнутой на экране не больше трёх (развёрнутая — выше, оценка снизу верна). */
+export function bodyLines(m: Pick<RowLike, 'body' | 'entities'>, x: Pick<Metrics, 'textW' | 'measure'>): number {
+  const body = m.body ?? '';
+  const quotes = m.entities?.filter((e) => e.type === 'blockquote' && e.collapsed);
+  if (!quotes?.length) return textLines(body, x);
+  let rest = '', at = 0, n = 0;
+  for (const q of [...quotes].sort((a, b) => a.offset - b.offset)) {
+    rest += body.slice(at, q.offset);
+    n += Math.min(3, textLines(body.slice(q.offset, q.offset + q.length), x));
+    at = q.offset + q.length;
+  }
+  return n + textLines((rest + body.slice(at)).trim(), x);
+}
+
 /** Высота строки ленты, px (снизу). */
 export function estimateRow(m: RowLike, x: Metrics): number {
   let h: number;
@@ -58,15 +74,15 @@ export function estimateRow(m: RowLike, x: Metrics): number {
     if (k === 'photo' || k === 'video') h = fit(m.attachment.w, m.attachment.h, x.mediaW, x.mediaH, 120);
     else if (k === 'round') h = 200;
     else h = 52;   // голосовое, музыка, файл
-    if (m.body) h += textLines(m.body, x) * x.lineH + 8;
+    if (m.body) h += bodyLines(m, x) * x.lineH + 8;
   } else if (m.poll || m.todo) h = 120;
   else if (m.geo) h = 150;
   else if (m.blocks) h = 150;
   else if (m.dice) h = 100;
   else if (m.contact) h = 64;
-  else h = x.pad + Math.max(1, textLines(m.body ?? '', x)) * x.lineH;
+  else h = x.pad + Math.max(1, bodyLines(m, x)) * x.lineH;
   if (!m.deleted && !m.service) {
-    if (m.replyToId != null) h += 40;
+    if (m.replyToId != null) h += 40 + (m.replyQuote ? (Math.min(3, textLines(m.replyQuote.text, x)) - 1) * 18 : 0);   // фрагмент в плашке — до трёх строк
     if (m.fwdFrom) h += 20;
     if (m.link) h += 60;
     if (m.buttons) h += 40;

@@ -10,6 +10,7 @@ import { syncSubscriptions, unwatchChat, unwatchThread, watchChat, watchThread, 
 import { canRead } from './domain/chats';
 import { threadAccess } from './domain/threads';
 import { sendMessage } from './domain/messages';
+import { scheduleMessage } from './domain/scheduled';
 import { markRead } from './domain/reads';
 import { saveDraft } from './domain/drafts';
 import { deleteMessage, editMessage, markListened, reactMessage } from './domain/messageOps';
@@ -109,6 +110,8 @@ export async function handleFrame(userId: number, frame: ClientFrame, publish: (
       case 'send': {
         // карточка контакта: человек — по ссылке (ключ или сообщение), иначе id ничего не открывает и не раскрывает имя
         if (frame.contact) frame.contact = { userId: await resolvePeer(sql, userId, { id: frame.contact.userId, key: frame.contact.key, via: frame.contact.via }, 'contact') };
+        // отложить: сообщения ещё нет, только строка отложенных (domain/scheduled.ts)
+        if (frame.scheduleAt != null) return [{ op: 'ack', reqId: frame.reqId, result: { clientId: frame.clientId, ...await scheduleMessage(userId, frame) } }];
         const { message, duplicate } = await sendMessage(userId, frame);
         return [{ op: 'ack', reqId: frame.reqId, result: { clientId: message.clientId, id: message.id, createdAt: message.createdAt, duplicate } }];
       }

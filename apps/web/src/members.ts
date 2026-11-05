@@ -20,7 +20,7 @@ export function resetMembers(): void { last.clear(); }
 export function membersOf(m: Mirror): Members | null {
   const items = m.list();
   if (!items.length && !m.meta('~members')?.loaded) return null;
-  const members = items.map((i) => ({ userId: i.userId, name: i.name, online: i.online, lastSeen: i.lastSeen, photo: i.photo, role: i.role, rank: i.rank }) as Member);
+  const members = items.map((i) => ({ userId: i.userId, name: i.name, username: (i.username as string | null) ?? null, online: i.online, lastSeen: i.lastSeen, photo: i.photo, role: i.role, rank: i.rank }) as Member);
   return { ownerId: members.find((x) => x.role === 'owner')?.userId ?? null, members };
 }
 

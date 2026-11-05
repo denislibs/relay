@@ -50,3 +50,13 @@ describe('stackTarget', () => {
     expect(toTarget({ chatId: 4, threadId: 1 })).toEqual({ chatId: 4, threadId: 1 });
   });
 });
+
+test('подчат «Избранного» — свой слой поверх общей ленты: дубль по паре чат+подчат, своя позиция, в адрес не попадает', () => {
+  expect(sameTarget({ chatId: 5, savedPeer: 'me' }, { chatId: 5, savedPeer: 'me' })).toBe(true);
+  expect(sameTarget({ chatId: 5, savedPeer: 'me' }, { chatId: 5 })).toBe(false);
+  expect(sameTarget({ chatId: 5, savedPeer: 'me' }, { chatId: 5, savedPeer: 'u7' })).toBe(false);
+  expect(findTarget([{ chatId: 5 }, { chatId: 5, savedPeer: 'u7' }], { chatId: 5, savedPeer: 'u7' })).toBe(1);
+  expect(positionKey({ chatId: 5, savedPeer: 'u7' })).toBe('5:saved:u7');
+  expect(positionKey({ chatId: 5, savedPeer: 'u7' })).not.toBe(positionKey({ chatId: 5 }));
+  expect(hashFor({ chatId: 5, savedPeer: 'u7' })).toBe('#chat=5');
+});

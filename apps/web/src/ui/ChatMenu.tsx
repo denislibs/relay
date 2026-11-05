@@ -14,17 +14,22 @@ import { setChatTheme } from '../chatTheme';
 import { getGlobal, setGlobal, useGlobal, findChat } from '../global';
 import { blockUser, showToast, unblockUser, useUser } from '../settingsData';
 import { canManage } from '../groups';
-import { isSystemChat } from './format';
+import { canSetAutoDelete, termText } from '../autoDelete';
+import { isSavedChat, isSystemChat } from './format';
 import { startSelect } from '../forward';
 import { isMuted, unmuteChat } from '../mute';
 import { openInner } from '../data';
 import { useChatDialogs } from './chatActions';
+import { canOpenSource, openSourceLabel, savedRow, useSavedDialogs } from '../savedDialogs';
+import { openSavedSource } from '../data';
+import { askDeleteSaved } from './saved/SavedChatsTab';
 
 
-export function ChatMenu({ chatId, title }: { chatId: number; title: string }) {
+export function ChatMenu({ chatId, title, savedPeer }: { chatId: number; title: string; savedPeer?: string }) {
   const chat = useGlobal((s) => findChat(s, chatId));
   const muted = useGlobal((s) => isMuted(findChat(s, chatId)));
   const system = isSystemChat(chat);
+  const saved = isSavedChat(chat);
   const peerId = chat?.kind === 'direct' && !system ? (chat.peerId as number | null) : null;
   const user = useUser(peerId);
   const contact = useGlobal((s) => (peerId ? s.contacts.some((c) => c.userId === peerId) : false));
@@ -39,7 +44,8 @@ export function ChatMenu({ chatId, title }: { chatId: number; title: string }) {
   const [themeOpen, setThemeOpen] = useState(false);
   const base = useBase();
   // тема чата: в личном — любой из двоих (не служебный, без блокировки), в группе и канале — кто меняет информацию
-  const canTheme = !chat?.preview && ((peerId != null && !iBlocked && !user?.blocksMe) || (gMe != null && canManage(gMe)));
+  const canTheme = !chat?.preview && (saved || (peerId != null && !iBlocked && !user?.blocksMe) || (gMe != null && canManage(gMe)));
+  const canTimer = canSetAutoDelete({ preview: !!chat?.preview, system, saved, peerId, blocked: iBlocked || !!user?.blocksMe, me: gMe });
   const hover = useHoverMenu(open, setOpen);   // как в Telegram: наведение открывает, уход с кнопки и меню — закрывает
   const dialogs = useChatDialogs(chatId, title);
   const setAsk = (a: 'mute' | 'delete' | 'leave') => { setOpen(false); dialogs.open(a); };
@@ -51,21 +57,32 @@ export function ChatMenu({ chatId, title }: { chatId: number; title: string }) {
     firstName: String(user?.firstName ?? title.split(' ')[0] ?? ''), lastName: String(user?.lastName ?? ''),
   } });
 
-  const items = [
+  const savedList = useSavedDialogs(!!savedPeer);
+  const savedItem = savedPeer ? savedList.items.find((d) => d.peer === savedPeer) ?? savedRow(savedPeer) : null;
+  // подчат «Избранного» (как меню строки): выбрать сообщения, открыть источник, удалить подчат
+  const items = savedPeer ? [
+    { icon: 'checkCircle', label: 'Выбрать сообщения', onClick: () => startSelect(chatId, []) },
+    ...(savedItem && canOpenSource(savedItem) ? [{ icon: savedItem.kind === 'channel' ? 'channels' : savedItem.kind === 'group' ? 'community' : 'chats', label: openSourceLabel(savedItem), onClick: () => { setOpen(false); openSavedSource(savedItem); } }] : []),
+    ...(savedItem ? ['-' as const, { icon: 'trash', label: 'Удалить', danger: true, onClick: () => { setOpen(false); askDeleteSaved(savedItem); } }] : []),
+  ] : [
+    // «Избранное»: панель с подчатами — и из меню, не только кликом по шапке
+    ...(saved ? [{ icon: 'chats', label: 'Чаты', onClick: () => { setOpen(false); setGlobal({ infoOpen: true }); } }] : []),
     ...(peerId && contactsLoaded ? [contact
       ? { icon: 'pencil', label: 'Изменить', onClick: () => setGlobal({ infoOpen: true, infoGo: 'edit' }) }
       : { icon: 'userPlus', label: 'Добавить в контакты', onClick: addContact }] : []),
     ...(gMe && canManage(gMe) ? [{ icon: 'pencil', label: 'Изменить', onClick: () => setGlobal({ infoOpen: true, infoGo: 'gEdit' }) }] : []),
     // превью канала (не подписан): звук не настраивается — уведомлений и так нет
-    ...(chat?.preview ? [] : [muted
+    // «Избранное»: уведомлений нет — и звук не настраивается
+    ...(chat?.preview || saved ? [] : [muted
       ? { icon: 'bell', label: 'Включить звук', onClick: () => unmuteChat(chatId) }
       : { icon: 'bellOff', label: 'Отключить звук…', onClick: () => setAsk('mute') }]),
     ...(!system && !gInfo?.protected ? [{ icon: 'checkCircle', label: 'Выбрать сообщения', onClick: () => startSelect(chatId, []) }] : []),
     ...(canTheme ? [{ icon: 'palette', label: 'Тема чата', onClick: () => { setOpen(false); setThemeOpen(true); } }] : []),
+    ...(canTimer ? [{ icon: 'timer', label: chat?.autoDeleteSec ? 'Автоудаление: ' + termText(chat.autoDeleteSec as number) : 'Автоудаление', onClick: () => { setOpen(false); setGlobal({ infoOpen: true, infoGo: 'autoDelete' }); } }] : []),
     ...(peerId ? [iBlocked
       ? { icon: 'block', label: 'Разблокировать', onClick: () => { void unblockUser(peerId).then(() => showToast('Пользователь разблокирован')); } }
       : { icon: 'block', label: 'Заблокировать', onClick: () => { void blockUser(peerId).then(() => showToast('Пользователь заблокирован')); } }] : []),
-    ...(peerId ? ['-' as const, { icon: 'trash', label: 'Удалить чат', danger: true, onClick: () => setAsk('delete') }] : []),
+    ...(peerId || saved ? ['-' as const, { icon: 'trash', label: 'Удалить чат', danger: true, onClick: () => setAsk('delete') }] : []),
     // канал с обсуждением — «Обсуждение»: группа комментариев поверх (если я в ней)
     ...(channel && gInfo?.linkedChatId != null && getGlobal().chats.some((c) => c.id === gInfo.linkedChatId) ? [{ icon: 'chats', label: 'Обсуждение', onClick: () => openInner(gInfo.linkedChatId!) }] : []),
     ...(gMe ? ['-' as const, { icon: owner ? 'trash' : 'logout', label: owner ? 'Удалить и покинуть' : channel ? 'Покинуть канал' : 'Покинуть группу', danger: true, onClick: () => setAsk('leave') }] : []),
@@ -81,7 +98,7 @@ export function ChatMenu({ chatId, title }: { chatId: number; title: string }) {
         items={items} onClose={() => setOpen(false)} onPointerEnter={hover.onPointerEnter} onPointerLeave={hover.onPointerLeave} />
       {dialogs.node}
       <Modal open={themeOpen} title="Тема чата" size="slim" onClose={() => setThemeOpen(false)}>
-        <p class="rl-mdl-text app-chattheme-hint">{peerId ? 'Тему увидите вы оба.' : 'Тему увидят все участники.'} Светлая или тёмная — как у каждого в настройках.</p>
+        <p class="rl-mdl-text app-chattheme-hint">{saved ? 'Тема будет на всех ваших устройствах.' : peerId ? 'Тему увидите вы оба.' : 'Тему увидят все участники.'} Светлая или тёмная — как у каждого в настройках.</p>
         <ThemeTiles base={base} selected={(chat?.theme as string | null) ?? null} onPick={(id) => { void setChatTheme(chatId, id); }} />
       </Modal>
     </>

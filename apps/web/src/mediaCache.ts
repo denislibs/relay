@@ -57,9 +57,9 @@ const withTimeout = <T>(p: Promise<T>, ms = OP_MS): Promise<T> =>
  *  кусок начала видео — «…@<смещение>». */
 export const attachmentKey = (fileId: string): string => `/files/${fileId}`;
 /** Адрес вложения, который просит страница: оригинал или копия (видео, фото). */
-const FILE_PATH = /^\/files\/([0-9a-f-]{36}(?:\/(?:preview|720|medium))?)$/;
+const FILE_PATH = /^\/files\/([0-9a-f-]{36}(?:\/(?:preview|720|medium|loop))?)$/;
 /** Ключ в кэше: адрес вложения или кусок начала видео. */
-const KEY_PATH = /^\/files\/([0-9a-f-]{36}(?:\/(?:preview|720|medium))?(?:@\d+)?)$/;
+const KEY_PATH = /^\/files\/([0-9a-f-]{36}(?:\/(?:preview|720|medium|loop))?(?:@\d+)?)$/;
 const fileIdOf = (path: string): string | null => FILE_PATH.exec(path)?.[1] ?? null;
 const keyIdOf = (path: string): string | null => KEY_PATH.exec(path)?.[1] ?? null;
 
@@ -245,6 +245,15 @@ async function evictAuto(store: AttachmentStore, bytes: number, keep?: string): 
   for (const r of auto) { if (freed >= bytes) break; drop.push(r); freed += r.sizeBytes; }
   await removeRecords(store, drop);
   return freed;
+}
+
+/** Файлы исчезнувших сообщений (автоудаление): всё на устройстве — оригинал, копии и куски, включая сохранённое пользователем. */
+export async function forgetAttachments(store: AttachmentStore, ids: string[]): Promise<number> {
+  if (!ids.length) return 0;
+  const all = await store.index.all().catch(() => [] as AttachmentOnDevice[]);
+  const hit = all.filter((r) => ids.some((id) => r.fileId === id || r.fileId.startsWith(id + '/') || r.fileId.startsWith(id + '@')));
+  await removeRecords(store, hit);
+  return hit.length;
 }
 
 async function removeRecords(store: AttachmentStore, recs: AttachmentOnDevice[]): Promise<void> {

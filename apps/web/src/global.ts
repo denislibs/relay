@@ -12,7 +12,7 @@ import { defaultPrivacy, type ChatFolder, type PrivacyRules, type SessionInfo } 
 /** filling — окно у живого края не набрано: история не дошла до начала, сообщений меньше лимита (движок, queries.ts). */
 export interface FeedMeta { hasOlder: boolean; hasNewer: boolean; live: boolean; filling?: boolean }
 
-export type Focus = { id: number; sort: number; nonce: number; replaced: boolean };
+export type Focus = { id: number; sort: number; nonce: number; replaced: boolean; quote?: { text: string; offset: number } };   // quote — цитата: подсветить фрагмент, а не всё сообщение
 
 /**
  * Чат в стеке (как Chat в стеке Telegram Web): у каждого своя лента и своя колонка в DOM.
@@ -22,6 +22,9 @@ export type Focus = { id: number; sort: number; nonce: number; replaced: boolean
 export interface ChatFrame {
   key: string;
   chatId: number;
+  scheduled?: boolean;        // страница отложенных этого чата (лента — Query scheduled, в адрес не попадает)
+  savedPeer?: string;         // подчат «Избранного» (лента — Query savedFeed, в адрес не попадает)
+  fromPanel?: boolean;        // открыт из панели, лежавшей поверх чата (телефон): «Назад» возвращает её на экран
   threadId?: number;          // тред комментариев в группе обсуждения: id копии поста (лента — Query thread)
   // тред: ключ шапки (копии поста) в messages; загружен ли с сервера; guest — я не участник группы (комментирую как подписчик канала)
   thread?: { header: string | null; loaded: boolean; guest?: ThreadGuest | null };
@@ -38,7 +41,7 @@ export interface ChatFrame {
 /** Свой профиль (GET /me, дальше — подписка me движка). Поля опциональны: старый кэш relay.me их не знает. */
 export interface Me { userId: number; name: string; firstName?: string; lastName?: string; username?: string | null; bio?: string | null; birthday?: { day: number; month: number; year?: number } | null; phone?: string | null; links?: ProfileLink[]; photo?: ProfilePhoto | null; personalChannel?: PersonalChannel | null }
 export type Phase = 'connecting' | 'offline' | 'loading' | 'updating' | 'ready';
-export interface Status { phase: Phase; hydrated: boolean; chatsComplete?: boolean; chatsCursorAt?: number; chatsTotal?: number; online: boolean; synced: boolean; syncing: boolean; outbox: number; failed: number; sessionsRev?: number; terminated?: boolean; terminatedReason?: 'logout' | 'terminated' }   // terminated — сеанс завершён (B9)
+export interface Status { clockSkew?: number; expiredFiles?: string[]; phase: Phase; hydrated: boolean; chatsComplete?: boolean; chatsCursorAt?: number; chatsTotal?: number; online: boolean; synced: boolean; syncing: boolean; outbox: number; failed: number; sessionsRev?: number; terminated?: boolean; terminatedReason?: 'logout' | 'terminated' }   // terminated — сеанс завершён (B9)
 
 /** Один объект: зеркало видимых данных из воркера + состояние интерфейса этой вкладки. */
 export interface GlobalState {

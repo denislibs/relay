@@ -5,20 +5,20 @@ import type { MyMembership } from '@relay/protocol';
 import { getGlobal, setGlobal } from './global';
 import { hasUnreadMark, inListOrder, isArchived, isPinned, pinRoom } from './chatFlags';
 import { isMuted } from './mute';
-import { isSystemChat } from './ui/format';
+import { isSavedChat, isSystemChat } from './ui/format';
 
 export type SelList = 'main' | 'archive';
 type Chat = Record<string, unknown>;
 
 /** Что можно сделать с выбранным: нет ключа — пункта нет; значение — направление (pin: false — открепить, read: false — непрочитанные). */
 export type SelActions = Partial<Record<'read' | 'pin' | 'mute' | 'archive' | 'delete', boolean>>;
-export type SelState = { pinned: boolean; unread: boolean; muted: boolean; archived: boolean; system: boolean; owner: boolean };
+export type SelState = { pinned: boolean; unread: boolean; muted: boolean; archived: boolean; system: boolean; owner: boolean; saved?: boolean };
 
 export function stateOf(c: Chat, now = Date.now()): SelState {
   const me = (c.me as MyMembership | null | undefined) ?? null;
   return {
     pinned: isPinned(c), unread: (c.unread as number) > 0 || hasUnreadMark(c), muted: isMuted(c, now),
-    archived: isArchived(c), system: isSystemChat(c),
+    archived: isArchived(c), system: isSystemChat(c), saved: isSavedChat(c),
     owner: (c.kind === 'group' || c.kind === 'channel') && me?.role === 'owner',
   };
 }
@@ -30,6 +30,7 @@ export function selectionActions(list: SelState[]): SelActions {
     pin: list.some((s) => !s.pinned),
     mute: !list.some((s) => s.muted),   // один без звука — включить звук всем (как в Android)
   };
+  if (list.some((s) => s.saved)) delete a.mute;   // в «Избранном» уведомлений нет
   if (!list.some((s) => s.system)) a.archive = !list.some((s) => s.archived);
   if (!list.some((s) => s.system || s.owner)) a.delete = true;   // своя группа удаляется только целиком — не из списка
   return a;

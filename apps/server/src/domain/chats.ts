@@ -1,8 +1,9 @@
 import { peerKey } from '../crypto/peerKey';
 import { shredHistory } from './shred';
+import { dropScheduledInChat } from './scheduled';
 import { shownPoll, withPolls, type PollDef } from './polls';
 import type { Attachment, ContactCard, Dice, GeoPoint } from '@relay/protocol';
-import { graphemes, GROUP_ABOUT_MAX, normalizeEntities, type Entity, type Block, type ForwardInfo, type LinkPreview, type MediaCounts, type MediaTab, type Message, type MessageButton, type ProfilePhoto, type ServiceData, type ServiceType, type StickerRef, type Todo } from '@relay/protocol';
+import { graphemes, GROUP_ABOUT_MAX, normalizeEntities, type ReplyQuote, type Entity, type Block, type ForwardInfo, type LinkPreview, type MediaCounts, type MediaTab, type Message, type MessageButton, type ProfilePhoto, type ServiceData, type ServiceType, type StickerRef, type Todo } from '@relay/protocol';
 import { sql, type Tx } from '../db';
 import { muteFromDb } from './chatNotify';
 import { DomainError } from './errors';
@@ -165,6 +166,7 @@ export function toMessage(r: Record<string, unknown>): Message {
     ...(r.kind === 'sticker' && r.sticker && !r.deleted ? { sticker: r.sticker as StickerRef } : {}),
     ...(r.group_id ? { groupId: r.group_id as string } : {}),
     ...(r.fwd_from ? { fwdFrom: r.fwd_from as ForwardInfo } : {}),
+    ...(r.saved_peer ? { savedPeer: r.saved_peer as string } : {}),
     ...(r.link ? { link: r.link as LinkPreview } : {}),
     ...(r.blocks ? { blocks: r.blocks as Block[] } : {}),
     ...(Array.isArray(r.buttons) && r.buttons.length && !r.deleted ? { buttons: r.buttons as MessageButton[][] } : {}),
@@ -173,6 +175,10 @@ export function toMessage(r: Record<string, unknown>): Message {
     ...(r.views != null ? { views: Number(r.views) } : {}),
     ...(r.thread_id != null ? { threadId: Number(r.thread_id) } : {}),
     ...(r.origin ? { origin: { chatId: Number((r.origin as { chatId: unknown }).chatId), id: Number((r.origin as { id: unknown }).id) } } : {}),
+    ...(r.quote && !r.deleted ? { replyQuote: r.quote as ReplyQuote } : {}),
+    ...(r.silent ? { silent: true } : {}),
+    ...(r.reminder ? { reminder: true } : {}),
+    ...(r.expires_at && !r.deleted ? { expiresAt: new Date(r.expires_at as string).getTime() } : {}),
   };
 }
 
@@ -273,6 +279,7 @@ export type ChatSummary = {
   last: Message | null;
   peer: { id: number; key: string; name: string; system?: true; photo?: ProfilePhoto | null } | null; // собеседник личного чата (key — ключ доступа к нему)
   peerReadUpTo: number; // до какого id мои сообщения прочитаны всеми остальными участниками
+  saved?: true;         // «Избранное»: чат с самим собой (domain/saved.ts); peer — null
   theme?: string | null;   // тема чата (id из каталога GET /themes)
   draft?: { text: string; at: string; entities?: Entity[] } | null; // черновик этого пользователя (синхронизируется между устройствами)
   sortAt?: string; // ключ сортировки списка (последнее сообщение или создание чата) — из него курсор страницы
@@ -305,27 +312,28 @@ export async function listChatsPage(userId: number, limit: number, before?: Dial
 export async function countChats(userId: number): Promise<number> {
   const [r] = await sql`
     select count(*)::int as n from chat_members cm join chats c on c.id = cm.chat_id
+      left join saved_chats sv on sv.chat_id = c.id
      where cm.user_id = ${userId} and not cm.archived   -- архив — не в «Все»
        and c.deleted_at is null
-       and not (c.kind = 'direct' and cm.history_from > 0
-                and not exists (select 1 from messages m where m.chat_id = c.id and m.id >= cm.history_from and not m.deleted))`;
+       and not (c.kind = 'direct' and cm.history_from > 0 and coalesce(sv.hidden, true)
+                and not exists (select 1 from messages m where m.chat_id = c.id and m.id >= cm.history_from and not m.deleted and (m.expires_at is null or m.expires_at > now())))`;
   return r.n as number;
 }
 
 export async function listChats(userId: number, opts: ListOpts = {}): Promise<ChatSummary[]> {
   // время списка — с точностью до мс: курсор уходит клиенту в ISO (мс), иначе на стыке страниц теряются чаты одной миллисекунды
   const rows = await sql`
-    select c.id, c.kind, c.title, c.theme, c.created_at as chat_created_at, cm.last_read_id,
+    select c.id, c.kind, c.title, c.theme, c.auto_delete_sec, c.created_at as chat_created_at, cm.last_read_id,
            c.about, c.photo as g_photo, c.owner_id, c.rights as chat_rights, c.slow_mode, c.history_hidden, c.join_approval, c.username, c.reactions, c.protected, c.signatures, c.linked_chat_id, c.join_to_send,
            cm.mute_until, cm.mute_until = 'infinity' as mute_forever, cm.pinned_at, cm.archived, cm.archived_at_id, cm.unread_mark, cm.role, cm.admin_rights, cm.restricted, cm.history_from, cm.rank,
-           coalesce(cs.seq, 0) as seq,
+           coalesce(cs.seq, 0) as seq, sv.chat_id is not null as saved,
            case when c.kind <> 'direct' then c.members_count end as g_members,   -- держит триггер (миграция 145)
            case when c.kind <> 'direct' then (select count(*)::int from chat_join_requests jr where jr.chat_id = c.id) end as g_pending,
            lm.id as m_id, lm.chat_id as m_chat_id, lm.sender_id as m_sender_id, lm.client_id as m_client_id,
-           lm.body as m_body, lm.kind as m_kind, lm.attachment as m_attachment, lm.reply_to_id as m_reply_to_id, lm.created_at as m_created_at, lm.edited_at as m_edited_at, lm.deleted as m_deleted, lm.entities as m_entities, lm.service_type as m_service_type, lm.service_data as m_service_data, lm.todo as m_todo, lm.poll as m_poll, lm.data as m_data, lm.fwd_from as m_fwd_from, lm.buttons as m_buttons, lm.sticker as m_sticker, lm.content as m_content, lm.post as m_post, lm.post_author as m_post_author, lm.thread_id as m_thread_id, lm.origin as m_origin,
+           lm.body as m_body, lm.kind as m_kind, lm.attachment as m_attachment, lm.reply_to_id as m_reply_to_id, lm.created_at as m_created_at, lm.edited_at as m_edited_at, lm.deleted as m_deleted, lm.expires_at as m_expires_at, lm.entities as m_entities, lm.service_type as m_service_type, lm.service_data as m_service_data, lm.todo as m_todo, lm.poll as m_poll, lm.data as m_data, lm.fwd_from as m_fwd_from, lm.buttons as m_buttons, lm.sticker as m_sticker, lm.content as m_content, lm.post as m_post, lm.post_author as m_post_author, lm.thread_id as m_thread_id, lm.origin as m_origin, lm.saved_peer as m_saved_peer,
            case when lm.post and lm.service_type is null then coalesce((select v.views from message_views v where v.chat_id = lm.chat_id and v.message_id = lm.id), 0) end as m_views,
            (select count(*) from messages m
-             where m.chat_id = c.id and m.id > cm.last_read_id and m.id >= cm.history_from and m.sender_id <> ${userId} and not m.deleted)::int as unread,
+             where m.chat_id = c.id and m.id > cm.last_read_id and m.id >= cm.history_from and m.sender_id <> ${userId} and not m.deleted and (m.expires_at is null or m.expires_at > now()))::int as unread,
            (select count(*) from message_mentions mm where mm.user_id = ${userId} and mm.chat_id = c.id)::int as unread_mentions,   -- префикс PK
            (select count(*) from unread_reactions ur where ur.user_id = ${userId} and ur.chat_id = c.id)::int as unread_reactions,
            (select json_build_object('id', u.id, 'name', ${nameForSql(userId)}, 'system', u.system,   -- контактное имя — только владельцу
@@ -342,17 +350,19 @@ export async function listChats(userId: number, opts: ListOpts = {}): Promise<Ch
       from chat_members cm
       join chats c on c.id = cm.chat_id
       left join chat_seq cs on cs.chat_id = c.id
+      left join saved_chats sv on sv.chat_id = c.id
       -- последнее — не удалённое (как в Telegram: удалённое исчезает, в превью — предыдущее)
       left join lateral (
-        select * from messages where chat_id = c.id and id >= cm.history_from and not deleted order by id desc limit 1
+        select * from messages where chat_id = c.id and id >= cm.history_from and not deleted and (expires_at is null or expires_at > now()) order by id desc limit 1
       ) lm on true
      where cm.user_id = ${userId}
        and c.deleted_at is null   -- удалённый (мягко) канал или группа: строки участников убирает chat.purge
        -- личный чат, который удалили (история сдвинута) и в котором с тех пор ничего нет, — не в списке
-       and not (c.kind = 'direct' and cm.history_from > 0 and lm.id is null)
+       -- («Избранное» — пока его снова не открыли: hidden, domain/saved.ts)
+       and not (c.kind = 'direct' and cm.history_from > 0 and lm.id is null and coalesce(sv.hidden, true))
        ${opts.before ? sql`and (date_trunc('milliseconds', coalesce(lm.created_at, c.created_at)), c.id) < (${opts.before.at}::timestamptz, ${opts.before.id})` : sql``}
        ${opts.ids ? sql`and c.id = any(${opts.ids}::bigint[])` : sql``}
-       ${opts.unreadOnly ? sql`and (cm.unread_mark or exists (select 1 from messages m where m.chat_id = c.id and m.id > cm.last_read_id and m.sender_id <> ${userId} and not m.deleted))` : sql``}
+       ${opts.unreadOnly ? sql`and (cm.unread_mark or exists (select 1 from messages m where m.chat_id = c.id and m.id > cm.last_read_id and m.sender_id <> ${userId} and not m.deleted and (m.expires_at is null or m.expires_at > now())))` : sql``}
        ${opts.pinnedOnly ? sql`and cm.pinned_at is not null` : sql``}
        ${opts.archivedOnly ? sql`and cm.archived` : sql``}
      order by date_trunc('milliseconds', coalesce(lm.created_at, c.created_at)) desc, c.id desc
@@ -375,7 +385,9 @@ export async function listChats(userId: number, opts: ListOpts = {}): Promise<Ch
     unreadReactions: Number(r.unread_reactions ?? 0),
     peer: r.peer ? { id: (r.peer as { id: number }).id, key: peerKey(userId, (r.peer as { id: number }).id), name: (r.peer as { name: string }).name, photo: (r.peer as { photo?: ProfilePhoto | null }).photo ?? null, ...((r.peer as { system?: boolean }).system ? { system: true as const } : {}) } : null,
     peerReadUpTo: (r.peer_read_up_to as number) ?? 0,
+    ...(r.saved ? { saved: true as const } : {}),
     theme: (r.theme as string | null) ?? null,
+    autoDeleteSec: (r.auto_delete_sec as number | null) ?? null,
     sortAt: new Date(r.sort_at as string).toISOString(),
     muteUntil: muteFromDb(r.mute_until as Date | null, r.mute_forever as boolean | null),
     pinnedAt: r.pinned_at ? new Date(r.pinned_at as string).getTime() : null,
@@ -388,8 +400,8 @@ export async function listChats(userId: number, opts: ListOpts = {}): Promise<Ch
     draft: r.draft ? { text: (r.draft as { text: string }).text, at: new Date((r.draft as { at: string }).at).toISOString(), ...((r.draft as { entities?: Entity[] | null }).entities?.length ? { entities: normalizeEntities((r.draft as { text: string }).text, (r.draft as { entities: Entity[] }).entities) } : {}) } : null,
     last: r.m_id == null ? null : toMessage({
       id: r.m_id, chat_id: r.m_chat_id, sender_id: r.m_sender_id, client_id: r.m_client_id,
-      body: r.m_body, kind: r.m_kind, attachment: r.m_attachment, reply_to_id: r.m_reply_to_id, created_at: r.m_created_at, edited_at: r.m_edited_at, deleted: r.m_deleted, entities: r.m_entities, service_type: r.m_service_type, service_data: r.m_service_data, todo: r.m_todo, poll: r.m_poll, data: r.m_data, fwd_from: r.m_fwd_from, buttons: r.m_buttons, sticker: r.m_sticker,
-      post: r.m_post, post_author: r.m_post_author, views: r.m_views, thread_id: r.m_thread_id, origin: r.m_origin,
+      body: r.m_body, kind: r.m_kind, attachment: r.m_attachment, reply_to_id: r.m_reply_to_id, quote: r.m_quote, created_at: r.m_created_at, edited_at: r.m_edited_at, deleted: r.m_deleted, expires_at: r.m_expires_at, entities: r.m_entities, service_type: r.m_service_type, service_data: r.m_service_data, todo: r.m_todo, poll: r.m_poll, data: r.m_data, fwd_from: r.m_fwd_from, buttons: r.m_buttons, sticker: r.m_sticker,
+      post: r.m_post, post_author: r.m_post_author, views: r.m_views, thread_id: r.m_thread_id, origin: r.m_origin, saved_peer: r.m_saved_peer,
     }),
   }));
   // последнее сообщение — с реакциями (и у поста канала — с кнопкой комментариев): устройство, узнавшее его только из
@@ -413,19 +425,20 @@ export function tabWhere(tab: MediaTab) {
 /** Вкладка «Общих медиа»: новые сверху, страницами по id (курсор beforeId — id последнего показанного).
  *  limit — размер страницы, 1…MEDIA_PAGE_MAX; не число — MEDIA_PAGE. */
 export const MEDIA_PAGE = 40, MEDIA_PAGE_MAX = 100;
-export async function getChatMedia(userId: number, chatId: number, tab: MediaTab, beforeId: number | null, limit = MEDIA_PAGE): Promise<{ messages: Message[]; hasMore: boolean }> {
+export async function getChatMedia(userId: number, chatId: number, tab: MediaTab, beforeId: number | null, limit = MEDIA_PAGE, savedPeer: string | null = null): Promise<{ messages: Message[]; hasMore: boolean }> {
   limit = Number.isFinite(limit) && limit >= 1 ? Math.min(MEDIA_PAGE_MAX, Math.floor(limit)) : MEDIA_PAGE;
   await canRead(sql, chatId, userId);   // публичный канал — и не участнику (превью)
   const rows = await sql`
     select * from messages
-     where chat_id = ${chatId} and not deleted and ${tabWhere(tab)} and id >= ${await historyFrom(chatId, userId)}
+     where chat_id = ${chatId} and not deleted and (expires_at is null or expires_at > now()) and ${tabWhere(tab)} and id >= ${await historyFrom(chatId, userId)}
        ${beforeId ? sql`and id < ${beforeId}` : sql``}
+       ${savedPeer ? sql`and saved_peer = ${savedPeer}` : sql``}
      order by id desc limit ${limit + 1}`;
   return { messages: (await openRows(rows.slice(0, limit))).map(toMessage), hasMore: rows.length > limit };
 }
 
 /** Сколько всего в каждой вкладке — пустые вкладки панель не показывает (как в Telegram Web K). */
-export async function getChatMediaCounts(userId: number, chatId: number): Promise<MediaCounts> {
+export async function getChatMediaCounts(userId: number, chatId: number, savedPeer: string | null = null): Promise<MediaCounts> {
   await canRead(sql, chatId, userId);   // публичный канал — и не участнику (превью)
   const [r] = await sql`
     select count(*) filter (where ${tabWhere('media')})::int as media,
@@ -434,7 +447,8 @@ export async function getChatMediaCounts(userId: number, chatId: number): Promis
            count(*) filter (where ${tabWhere('voice')})::int as voice,
            count(*) filter (where ${tabWhere('link')})::int as link,
            count(*) filter (where kind = 'video' or (kind = 'file' and attachment->>'mime' like 'video/%'))::int as video
-      from messages where chat_id = ${chatId} and not deleted and id >= ${await historyFrom(chatId, userId)}`;
+      from messages where chat_id = ${chatId} and not deleted and (expires_at is null or expires_at > now()) and id >= ${await historyFrom(chatId, userId)}
+       ${savedPeer ? sql`and saved_peer = ${savedPeer}` : sql``}`;
   return { media: r.media, file: r.file, audio: r.audio, voice: r.voice, link: r.link, video: r.video };
 }
 
@@ -450,7 +464,7 @@ export async function getMediaDays(userId: number, chatId: number, from: string,
   const rows = await sql`
     select distinct on (day) to_char(created_at at time zone ${tz}, 'YYYY-MM-DD') as day, *
       from messages
-     where chat_id = ${chatId} and created_at >= ${a} and created_at < ${b} and not deleted
+     where chat_id = ${chatId} and created_at >= ${a} and created_at < ${b} and not deleted and (expires_at is null or expires_at > now())
        and ${tabWhere('media')} and id >= ${await historyFrom(chatId, userId)}
      order by day, created_at desc, id desc`;
   return (await openRows(rows)).map((r) => ({ date: r.day as string, id: Number(r.id), attachment: toMessage(r).attachment! }));
@@ -484,9 +498,9 @@ export async function messageAtDate(userId: number, chatId: number, from: string
   if (Number.isNaN(at.getTime())) throw new DomainError('bad_frame', 'from');
   await canRead(sql, chatId, userId);   // публичный канал — и не участнику (превью)
   const visible = await historyFrom(chatId, userId);
-  const [first] = await sql`select id from messages where chat_id = ${chatId} and id >= ${visible} and created_at >= ${at} and not deleted order by created_at, id limit 1`;
+  const [first] = await sql`select id from messages where chat_id = ${chatId} and id >= ${visible} and created_at >= ${at} and not deleted and (expires_at is null or expires_at > now()) order by created_at, id limit 1`;
   if (first) return { id: Number(first.id) };
-  const [last] = await sql`select id from messages where chat_id = ${chatId} and id >= ${visible} and not deleted order by id desc limit 1`;
+  const [last] = await sql`select id from messages where chat_id = ${chatId} and id >= ${visible} and not deleted and (expires_at is null or expires_at > now()) order by id desc limit 1`;
   return { id: last ? Number(last.id) : null };
 }
 
@@ -495,7 +509,7 @@ export async function messageAtDate(userId: number, chatId: number, from: string
 export async function getMessagesByIds(userId: number, chatId: number, ids: number[]): Promise<Message[]> {
   await canRead(sql, chatId, userId);   // публичный канал — и не участнику (превью)
   if (!ids.length) return [];
-  const rows = await sql`select * from messages where chat_id = ${chatId} and id = any(${ids}::bigint[]) and id >= ${await historyFrom(chatId, userId)} and not deleted order by id`;
+  const rows = await sql`select * from messages where chat_id = ${chatId} and id = any(${ids}::bigint[]) and id >= ${await historyFrom(chatId, userId)} and not deleted and (expires_at is null or expires_at > now()) order by id`;
   return withAllReactions((await openRows(rows)).map(toMessage), userId);
 }
 
@@ -504,20 +518,22 @@ export async function getMessagesByIds(userId: number, chatId: number, ids: numb
  * догружает дыру между отрезками своей истории). hasMore — за страницей в ту же сторону есть ещё. Удалённых в
  * истории нет (как в Telegram): на их месте в отрезке клиента просто нет id.
  */
-export async function getHistory(userId: number, chatId: number, before: number | null, limit: number, after: number | null = null): Promise<{ messages: Message[]; hasMore: boolean }> {
+export async function getHistory(userId: number, chatId: number, before: number | null, limit: number, after: number | null = null, savedPeer: string | null = null): Promise<{ messages: Message[]; hasMore: boolean }> {
   await canRead(sql, chatId, userId);   // публичный канал — и не участнику (превью)
   const take = Math.min(Math.max(limit, 1), 200);
   if (after != null) {
     const up = await sql`
       select * from messages
-       where chat_id = ${chatId} and id > ${after} and id >= ${await historyFrom(chatId, userId)} and not deleted
+       where chat_id = ${chatId} and id > ${after} and id >= ${await historyFrom(chatId, userId)} and not deleted and (expires_at is null or expires_at > now())
+         ${savedPeer ? sql`and saved_peer = ${savedPeer}` : sql``}
        order by id
        limit ${take + 1}`;
     return { messages: await withAllReactions((await openRows(up.slice(0, take))).map(toMessage), userId), hasMore: up.length > take };
   }
   const rows = await sql`
     select * from messages
-     where chat_id = ${chatId} and (${before}::bigint is null or id < ${before}) and id >= ${await historyFrom(chatId, userId)} and not deleted
+     where chat_id = ${chatId} and (${before}::bigint is null or id < ${before}) and id >= ${await historyFrom(chatId, userId)} and not deleted and (expires_at is null or expires_at > now())
+       ${savedPeer ? sql`and saved_peer = ${savedPeer}` : sql``}
      order by id desc
      limit ${take + 1}`;
   const hasMore = rows.length > take;
@@ -531,20 +547,25 @@ export async function getHistory(userId: number, chatId: number, before: number 
 export async function deleteDirectChat(userId: number, chatId: number, forAll: boolean): Promise<{ ok: true }> {
   return sql.begin(async (tx) => {
     await assertMember(tx, chatId, userId);
-    const [c] = await tx`select kind from chats where id = ${chatId}`;
+    const [c] = await tx`select c.kind, s.chat_id is not null as saved from chats c left join saved_chats s on s.chat_id = c.id where c.id = ${chatId}`;
     if (c?.kind !== 'direct') throw new DomainError('bad_frame', 'not a direct chat');
+    // «Избранное»: других участников нет — удаляем по-настоящему, история не остаётся в базе; из списка уходит до нового открытия
+    if (c.saved) { forAll = true; await tx`update saved_chats set hidden = true where chat_id = ${chatId}`; await tx`delete from saved_dialog_pins where user_id = ${userId}`; await tx`update messages set saved_peer = null where chat_id = ${chatId} and saved_peer is not null`; }
     const [m] = await tx`select coalesce(max(id), 0)::bigint as max from messages where chat_id = ${chatId}`;
     const from = Number(m.max) + 1;
     const who = forAll
       ? (await tx`select user_id from chat_members where chat_id = ${chatId}`).map((r) => Number(r.user_id))
       : [userId];
     await tx`update chat_members set history_from = ${from}, last_read_id = greatest(last_read_id, ${from - 1}) where chat_id = ${chatId} and user_id = any(${who}::bigint[])`;
+    // отложенные тех, у кого чат удаляется: до уничтожения ключа (запечатаны им) и до проверки ссылок на файлы
+    await dropScheduledInChat(tx, chatId, who, userId);
     if (forAll) {
       // «удалить у обоих»: прошлое уничтожается по-настоящему — старые версии ключа чата удаляются (не открыть ни
       // в базе, ни в бэкапах после срока хранения ключей), строки до шифрования — стираются
       await shredChatHistory(tx, chatId);
       // и то, что на прошлое ссылается: файлы без других ссылок теряют ключ, документы поиска удаляются (shred.ts)
       await shredHistory(tx, chatId, from);
+      await tx`delete from pinned_messages where chat_id = ${chatId}`;   // закрепы вели на стёртую историю
     }
     await fanOut(tx, who, { type: 'chatRemoved', chatId });
     return { ok: true };

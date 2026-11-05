@@ -1,3 +1,4 @@
+import { SAVED_TITLE } from '@relay/protocol';
 import { peerTone } from '@relay/ui';
 import { getPrefs, localeTimeFormat } from '../prefs';
 
@@ -146,9 +147,26 @@ export function chatTone(chat: Record<string, unknown> | null | undefined): numb
 /** Личный чат с системным пользователем «Relay». */
 export const isSystemChat = (chat: Record<string, unknown> | null | undefined): boolean => !!(chat?.peer as { system?: boolean } | null)?.system;
 
+/** «Избранное» — чат с самим собой. */
+export const isSavedChat = (chat: Record<string, unknown> | null | undefined): boolean => !!chat?.saved;
+/** Галочки своего сообщения: в «Избранном» читать некому — только «отправляется» и «не отправлено» (как в Telegram). */
+export const shownStatus = (status: unknown, saved: boolean): string | undefined =>
+  saved && status !== 'pending' && status !== 'failed' ? 'none' : status as string | undefined;
+/** Запрос подходит к «Избранному» (поиск находит его, даже если чата ещё нет). */
+export const matchesSaved = (q: string): boolean => { const n = q.trim().toLowerCase(); return !!n && SAVED_TITLE.toLowerCase().startsWith(n); };
+
 /** Код входа в превью и уведомлениях: цифры кода — точками. */
 export const hideCode = (text: string): string => text.replace(/\d{5}/, '•••••');
 
 /** Текст сообщения для строк поиска и уведомлений: у кода входа (login_code) код скрыт. */
 export const shownBody = (m: { body: string; service?: { type: string } | null }): string =>
   m.service?.type === 'login_code' ? hideCode(m.body) : m.body;
+
+/** «печатает…» как в Telegram: в группе — с именами (имя, два имени, имя и ещё N); имён не знаем — числом. */
+export function typingText(typers?: string[] | null): string {
+  const n = typers?.length ?? 0, [a, b] = typers ?? [];
+  if (n <= 1) return a ? `${a} печатает…` : 'печатает…';
+  if (n === 2 && a && b) return `${a} и ${b} печатают…`;
+  if (a) return `${a} и ещё ${n - 1} печатают…`;
+  return `${n} ${n % 10 >= 2 && n % 10 <= 4 && (n % 100 < 12 || n % 100 > 14) ? 'человека' : 'человек'} печатают…`;
+}

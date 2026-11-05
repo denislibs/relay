@@ -36,6 +36,7 @@ export function shortcutSections(sendKey: 'enter' | 'ctrlEnter'): ShortcutSectio
         { id: 'strike', title: 'Зачёркнутый', combos: ['mod+shift+x'] },
         { id: 'mono', title: 'Моноширинный', combos: ['mod+shift+m'] },
         { id: 'spoiler', title: 'Скрытый текст', combos: ['mod+shift+p'] },
+        { id: 'blockquote', title: 'Цитата', combos: ['mod+shift+.'] },
         { id: 'link', title: 'Ссылка', combos: ['mod+k'] },
         { id: 'date', title: 'Дата', combos: ['mod+d'] },
       ],

@@ -186,8 +186,10 @@ export function membersResult(store: Store, chatId: number, presence: ReadonlyMa
       name = v.name; photo = v.photo; g = v.sig; p = presence.get(r.userId);
     }
     const online = p?.online ?? false, lastSeen = p?.lastSeen ?? null;
-    items.set(key, { key, userId: r.userId, role: r.role, rank: r.rank, name, photo, online, lastSeen });
-    sig.set(key, `${r.v}|${g}|${online}|${lastSeen}`);
+    // username — для подсказки «@» в поле ввода (упоминание адресуется по нему)
+    const username = (r.userId === store.userId ? me?.username : store.users.get(r.userId)?.username) ?? null;
+    items.set(key, { key, userId: r.userId, role: r.role, rank: r.rank, name, username, photo, online, lastSeen });
+    sig.set(key, `${r.v}|${g}|${username}|${online}|${lastSeen}`);
     order.push(key);
   }
   const done = store.chats.get(chatId)?.membersDone;

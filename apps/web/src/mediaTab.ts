@@ -13,9 +13,9 @@ export const MEDIA_PAGE = 40;
 
 /** Последний вид по чату и вкладке — только кэш отрисовки: повторное открытие рисуется сразу, без мигания. */
 const last = new Map<string, MediaView>();
-const keyOf = (chatId: number, tab: MediaTab, page: number) => chatId + ':' + tab + (page ? '' : ':counts');   // счётчики-только не затирают кэш вкладки
-export const cachedMedia = (chatId: number, tab: MediaTab, page = MEDIA_PAGE): MediaView | null => last.get(keyOf(chatId, tab, page)) ?? null;
-export const rememberMedia = (chatId: number, tab: MediaTab, page: number, v: MediaView): void => { last.set(keyOf(chatId, tab, page), v); };
+const keyOf = (chatId: number, tab: MediaTab, page: number, savedPeer?: string | null) => chatId + ':' + tab + (page ? '' : ':counts') + (savedPeer ? ':' + savedPeer : '');   // счётчики-только не затирают кэш вкладки
+export const cachedMedia = (chatId: number, tab: MediaTab, page = MEDIA_PAGE, savedPeer?: string | null): MediaView | null => last.get(keyOf(chatId, tab, page, savedPeer)) ?? null;
+export const rememberMedia = (chatId: number, tab: MediaTab, page: number, v: MediaView, savedPeer?: string | null): void => { last.set(keyOf(chatId, tab, page, savedPeer), v); };
 /** Выход и вход другим пользователем без перезагрузки: медиа прежнего аккаунта не показываются. */
 export function resetMediaTabs(): void { last.clear(); }
 
@@ -31,27 +31,28 @@ export function mediaOf(m: Mirror): MediaView | null {
  * page — размер страницы и начальный limit; 0 — только счётчики (элементов нет, вкладка не грузится).
  * more() поднимает limit на страницу — движок сам догружает старее; counts приходят с любой вкладки.
  */
-export function useMedia(chatId: number, tab: MediaTab, page = MEDIA_PAGE): MediaView & { more(): void } {
-  const key = keyOf(chatId, tab, page);
-  const [view, setView] = useKeyedState<string, MediaView | null>(key, () => cachedMedia(chatId, tab, page));
+export function useMedia(chatId: number, tab: MediaTab, page = MEDIA_PAGE, savedPeer?: string | null): MediaView & { more(): void } {
+  const key = keyOf(chatId, tab, page, savedPeer);
+  const peer = savedPeer ? { savedPeer } : {};
+  const [view, setView] = useKeyedState<string, MediaView | null>(key, () => cachedMedia(chatId, tab, page, savedPeer));
   const [limit, setLimit] = useKeyedState<string, number>(key, () => page);
   const watch = useRef<ReturnType<typeof watchQuery> | null>(null);
   const cur = useRef({ view, limit });
   cur.current = { view, limit };
   useEffect(() => {
-    setView(cachedMedia(chatId, tab, page));
+    setView(cachedMedia(chatId, tab, page, savedPeer));
     setLimit(page);
     const mirror = new Mirror();
-    const w = watchQuery({ kind: 'media', chatId, tab, limit: page }, (p: Patch) => {
+    const w = watchQuery({ kind: 'media', chatId, tab, limit: page, ...peer }, (p: Patch) => {
       mirror.apply(p);
       const v = mediaOf(mirror);
       if (!v) return;
-      if (v.items.length || !v.loading) rememberMedia(chatId, tab, page, v);   // пустой «ещё грузится» не затирает показанное
+      if (v.items.length || !v.loading) rememberMedia(chatId, tab, page, v, savedPeer);   // пустой «ещё грузится» не затирает показанное
       setView(v);
     });
     watch.current = w;
     return () => { w.close(); watch.current = null; };
-  }, [chatId, tab, page]);
+  }, [chatId, tab, page, savedPeer]);
   const more = () => {
     const { view: v, limit: l } = cur.current;
     // страница ещё в пути (меньше элементов, чем просили) или всё уже есть — поднимать нечего
@@ -59,7 +60,7 @@ export function useMedia(chatId: number, tab: MediaTab, page = MEDIA_PAGE): Medi
     const next = l + page;
     cur.current.limit = next;
     setLimit(next);
-    watch.current?.update({ kind: 'media', chatId, tab, limit: next });
+    watch.current?.update({ kind: 'media', chatId, tab, limit: next, ...peer });
   };
   return { ...(view ?? { items: [], done: false, loading: true, counts: null }), more };
 }

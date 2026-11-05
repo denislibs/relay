@@ -176,7 +176,7 @@ html[data-shell-was] #app .rl-tw .tw-canvas { animation: none; }
 .app-menu-profile > span:last-child { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
 /* профиль (B2) */
-.app-toast-global { position: fixed; bottom: 24px; z-index: 1001; }
+.app-toast-global { position: fixed; bottom: 88px; z-index: 1001; }   /* над полем ввода */
 .app-bday { display: flex; flex-direction: column; align-items: center; padding: 0 8px 8px; }
 .app-bday .rl-tf { padding: 0; }
 .app-bday-modal .rl-mdl-dialog { max-width: 26rem; }
@@ -1341,6 +1341,21 @@ html[data-anim="0"] :is(.app-hero, .app-hero-photo, .app-hero-info, .app-hero-na
 .app-stk-grid { display: grid; grid-template-columns: repeat(auto-fill, 72px); grid-auto-rows: 72px; justify-content: space-between; gap: 4px; padding: 0 3px; }
 .app-stk-cell { display: flex; align-items: center; justify-content: center; width: 72px; height: 72px; padding: 0; border: 0; border-radius: 16px; background: transparent; cursor: pointer; }
 .app-stk-cell:hover { background: var(--sym-hover); }
+/* вкладка GIF: плитки стоят абсолютно по расчёту из размеров (gifLayout.ts), слои лежат друг на друге: размытая миниатюра,
+   первый кадр сервера, анимация; каждый следующий проявляется поверх, ничего не прыгает */
+.app-gif-scroll { padding: 6px 6px 60px; margin-bottom: 0; }
+.app-gif-grid { position: relative; }
+.app-gif-tile { position: absolute; display: block; padding: 0; border: 0; border-radius: 8px; overflow: hidden; background: var(--sym-fill); cursor: pointer; contain: strict; -webkit-touch-callout: none; touch-action: pan-y; }
+.app-gif-tile > * { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; pointer-events: none; -webkit-user-select: none; user-select: none; }
+.app-gif-thumb { filter: blur(6px); transform: scale(1.12); }
+.app-gif-still, .app-gif-anim { opacity: 0; transition: opacity 200ms ease-in-out; }
+.app-gif-tile.has-still .app-gif-still, .app-gif-tile.is-drawn .app-gif-anim { opacity: 1; }
+.app-gif-tile:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+.app-gif-tile::after { content: ''; position: absolute; inset: 0; background: transparent; transition: background-color 120ms; pointer-events: none; }
+.app-gif-tile:hover::after { background: color-mix(in srgb, var(--ink) 8%, transparent); }
+:root[data-anim="0"] .app-gif-still, :root[data-anim="0"] .app-gif-anim { transition: none; }
+@media (prefers-reduced-motion: reduce) { .app-gif-still, .app-gif-anim { transition: none; } }
+.app-gif-empty { display: flex; flex: 1; min-height: 0; align-items: center; justify-content: center; padding: 0 16px 56px; }
 /* нижние вкладки — маленькая стеклянная «пилюля» поверх содержимого (как в Telegram для macOS), без полосы и границы;
    выбранная подсвечена подложкой, которая переезжает между равными сегментами */
 .app-sym { --sym-glass: color-mix(in srgb, var(--panel, var(--bg)) 72%, transparent); --sym-glass-line: color-mix(in srgb, var(--ink) 8%, transparent); }
@@ -1675,3 +1690,46 @@ html[data-anim="0"] :is(.app-setting-flash, .app-setting-flash-title) { animatio
 .app-theme-pill-in { top: 32px; inset-inline-start: 6px; background: var(--tile-in); }
 .app-theme-emoji { position: absolute; inset-inline: 0; bottom: 8px; text-align: center; font: 26px/1 var(--font-emoji, inherit); }
 @media (prefers-reduced-motion: reduce) { .app-theme-tile, .app-theme-tile::before { transition: none; } }
+
+/* Окно «Отправить позже»: быстрые варианты, ошибка времени */
+.app-sched-quick { display: flex; flex-direction: column; gap: 4px; margin-bottom: 8px; }
+.app-sched-opt { display: flex; align-items: center; gap: 12px; width: 100%; padding: 10px 12px; border: 0; border-radius: 10px; background: var(--hover); color: var(--ink); font: 400 15px/20px var(--font-sans); text-align: left; cursor: pointer; }
+.app-sched-opt svg { color: var(--brand-text, var(--brand)); }
+.app-sched-opt:hover { background: var(--hover-strong, var(--hover)); }
+.app-sched-err { margin: 8px 4px 0; color: var(--danger, #e53935); font: 400 13px/18px var(--font-sans); }
+/* Автоудаление: окно своего срока и строка в меню сообщения */
+.app-autodel-form { display: flex; flex-direction: column; gap: 12px; }
+.app-msgttl { display: flex; align-items: center; gap: 8px; padding: 6px 18px 6px 12px; color: var(--ink-muted); font: 400 13px/18px var(--font-sans); white-space: nowrap; }
+/* Строка под отложенным, которое не ушло */
+.app-sched-fail { padding-top: 0; }
+.app-sched-fail span { background: var(--danger, #e53935); }
+
+/* «Недавние действия» (ui/group/AdminLog.tsx): строки равной высоты для WindowList, текст зажат */
+.app-log-chips { display: flex; flex-wrap: wrap; gap: var(--space-1); padding: var(--space-2) var(--space-3) 0; }
+.app-log-daylabel { position: sticky; top: 0; z-index: 2; margin: 0; padding: var(--space-2) var(--space-4) var(--space-1); background: var(--page); color: var(--brand-text); font: 500 14px/20px var(--font-sans); }
+.app-log-row { display: flex; align-items: center; gap: var(--space-3); height: 84px; box-sizing: border-box; padding: var(--space-2) var(--space-4); }
+.app-log-ava { flex: none; display: block; padding: 0; border: 0; border-radius: 50%; background: none; cursor: pointer; }
+span.app-log-ava { cursor: default; }
+.app-log-main { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
+.app-log-text { display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 3; overflow: hidden; font: 400 14px/20px var(--font-sans); color: var(--ink); overflow-wrap: anywhere; }
+.app-log-text.is-two { -webkit-line-clamp: 2; }
+.app-log-text b { font-weight: 500; }
+.app-log-name { display: inline; padding: 0; border: 0; background: none; color: var(--ink); font: inherit; font-weight: 500; text-align: left; cursor: pointer; }
+.app-log-name:hover { color: var(--brand-text); text-decoration: underline; }
+.app-log-msg, .app-log-more { align-self: flex-start; max-width: 100%; padding: 0; border: 0; background: none; color: var(--brand-text); font: 400 13px/18px var(--font-sans); text-align: left; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; cursor: pointer; }
+.app-log-msg:hover, .app-log-more:hover { text-decoration: underline; }
+.app-log-sub { font: 400 13px/18px var(--font-sans); color: var(--ink-muted); }
+.app-log-time { flex: none; align-self: flex-start; font: 400 12px/20px var(--font-sans); color: var(--ink-muted); }
+.app-log-tail { display: flex; align-items: center; justify-content: center; gap: var(--space-2); min-height: 48px; color: var(--ink-muted); font: 400 13px/18px var(--font-sans); }
+.app-log-full { overflow-wrap: anywhere; white-space: pre-wrap; }
+.app-log-full b { font-weight: 500; }
+.app-log-filter { display: flex; flex-direction: column; gap: var(--space-2); }
+.app-log-filter-wait { min-height: 52px; }
+.app-log-filter .app-gm-expand { width: 40px; height: 40px; }
+
+/* ---------- Панель «Избранного» (подчаты) ---------- */
+.app-saved-list { padding: 4px; margin-bottom: var(--space-3); }
+.app-saved-list .rl-row { border-radius: var(--radius-md); }
+.app-saved-sub { display: block; font: 400 13px/18px var(--font-sans); color: var(--ink-muted); }
+.app-sm-none { padding: var(--space-5) var(--space-4); text-align: center; color: var(--ink-muted); font-size: 14px; }
+.app-saved-plate { position: relative; }

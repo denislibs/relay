@@ -13,9 +13,11 @@ export type ServiceType = 'login_code' | 'new_login' | 'group_created' | 'channe
   | 'title_changed' | 'photo_changed' | 'photo_removed' | 'members_added' | 'member_left' | 'member_removed'
   | 'joined_by_link' | 'joined_by_request' | 'owner_changed' | 'protected_on' | 'protected_off'
   | 'todo_done' | 'todo_append'   // чек-лист: автор отметил / добавил задачи в список replyToId (номера — в data)
-  | 'theme_changed';   // тема чата: data.emoji/title — новая, пусто — снята   // чек-лист: автор отметил / добавил задачи в список replyToId (номера — в data)
+  | 'scheduled_failed'   // отложенное не удалось отправить: текст — куда и почему (сам текст сообщения не раскрывается)
+  | 'theme_changed'   // тема чата: data.emoji/title — новая, пусто — снята   // чек-лист: автор отметил / добавил задачи в список replyToId (номера — в data)
+  | 'auto_delete_changed';   // автоудаление: data.sec — новый срок в секундах, нет — выключено
 /** Участники служебного события (имена на момент события), новое название и новое фото (photo_changed). */
-export interface ServiceData { users?: { id: Id; name: string }[]; title?: string; completed?: number[]; incompleted?: number[]; items?: number[]; emoji?: string; photo?: ProfilePhoto }   // group_created / channel_created: тело — название, автор — создатель
+export interface ServiceData { users?: { id: Id; name: string }[]; title?: string; completed?: number[]; incompleted?: number[]; items?: number[]; emoji?: string; sec?: number; photo?: ProfilePhoto }   // group_created / channel_created: тело — название, автор — создатель
 
 export interface Message {
   id: Id;
@@ -26,11 +28,13 @@ export interface Message {
   groupId?: string | null;   // отправлены вместе (несколько файлов) — в ленте одним пузырём
   body: string;
   replyToId: Id | null;
+  replyQuote?: ReplyQuote;   // цитата части исходного: проверена сервером, лежит в шифре вместе с содержимым
   createdAt: string; // ISO
   editedAt?: string | null;
   deleted?: boolean;
   reactions?: Reaction[];
   attachment?: Attachment | null;
+  expiresAt?: number;    // автоудаление: мс эпохи, когда сообщение исчезнет (ставит только сервер)
   service?: { type: ServiceType; data?: ServiceData };   // есть только у служебных сообщений
   todo?: Todo;           // чек-лист (kind 'todo'): задачи и кто что отметил
   poll?: Poll;           // опрос или викторина (kind 'poll'): счётчики и мои голоса — для этого читателя
@@ -40,6 +44,7 @@ export interface Message {
   entities?: Entity[];   // оформление текста; нет или пусто — простой текст
   listened?: boolean;    // голосовое/кружок прослушан получателем
   fwdFrom?: ForwardInfo | null;   // переслано: откуда (нет — своё или отправитель скрыт)
+  savedPeer?: string;    // сообщение «Избранного»: его подчат ('me', 'hidden', 'u<id>', 'c<id>'; savedPeerRule)
   link?: LinkPreview | null;      // превью первой ссылки в тексте (pending — сервер ещё загружает страницу)
   blocks?: Block[] | null;        // «статья»: блоки (body — её простой текст)
   buttons?: MessageButton[][] | null;   // кнопки под сообщением (как inline-клавиатура в Telegram): ряды слева направо
@@ -52,7 +57,22 @@ export interface Message {
   threadId?: Id;         // комментарий: id копии поста в группе обсуждения (корень треда)
   origin?: { chatId: Id; id: Id };   // копия поста в группе обсуждения: канал и пост-оригинал (управляется только через пост)
   replies?: Replies;     // пост канала с обсуждением: кнопка «N комментариев» (только история канала, в журнале нет)
+  silent?: boolean;      // без звука: получателю ни push, ни звука; сообщение и счётчик — как обычно
+  reminder?: boolean;    // отложенное себе в «Избранное»: автору — уведомление о напоминании
 }
+
+/** Отложенное сообщение (видно только автору): id у него появится при публикации, до неё ключ — clientId.
+ *  sendAt — мс эпохи. failed — код отказа: опубликовать не вышло, ждёт решения автора. rev — версия строки. */
+export interface ScheduledMessage {
+  clientId: string; chatId: Id; sendAt: number; kind: Message['kind']; body: string; entities?: Entity[]; replyToId: Id | null; replyQuote?: ReplyQuote;
+  attachment?: Attachment | null; groupId?: string | null; sticker?: StickerRef | null; silent?: boolean; failed?: string; rev: number; createdAt: string;
+}
+/** Отложенных на чат на пользователя (как в Telegram). */
+export const SCHEDULED_LIMIT = 100;
+/** Самое дальнее время: год. Сервер даёт сутки запаса на високосный год и расхождение часов. */
+export const SCHEDULE_MAX_MS = 365 * 24 * 3600_000;
+/** Автоудаление: свой срок — от часа до года; под DEV_LOGIN сервер принимает и секунды (для ручной проверки). */
+export const AUTO_DELETE_MIN_SEC = 3600, AUTO_DELETE_MAX_SEC = 365 * 24 * 3600, AUTO_DELETE_DEV_MIN_SEC = 1;
 
 /** Комментарии к посту: тред — копия copyId в группе chatId; recent — последние (до 3) комментаторы, свежий первым.
  *  readMaxId — докуда я прочитал тред (только в истории канала; нет — не читал). */
@@ -64,7 +84,16 @@ export interface StickerRef { id: Id; setId: Id; emoji: string; w: number; h: nu
 export interface StickerSetInfo { id: Id; shortName: string; title: string; kind: 'sticker' | 'emoji'; count: number; cover: StickerRef | null; hash: string }
 export interface StickerSet extends StickerSetInfo { stickers: StickerRef[] }
 /** Мои стикеры: установленные паки по порядку, недавние (до 20) и избранные (до 5), новые сверху. */
+/** Сохранённые GIF: до стольких на пользователя, сверх — самая старая вытесняется (как в Telegram). */
+export const SAVED_GIFS_LIMIT = 200;
+/** Тяжелее сохранить нельзя: воркер не делает таким копий (jobs/photo.ts PHOTO_MAX_BYTES), плитке нечего играть. */
+export const GIF_MAX_BYTES = 40 * 1024 * 1024;
+/** Сохранённая GIF — вложение (тот же id, что в сообщении) и когда сохранена. key и thumb ответа на /my-gifs/list нет
+ *  у того, что устройство уже знает (have). */
+export type SavedGif = Attachment & { savedAt: number };
 export interface MyStickers { sets: StickerSetInfo[]; recent: StickerRef[]; faved: StickerRef[] }
+/** Название чата с самим собой (domain/saved.ts). */
+export const SAVED_TITLE = 'Избранное';
 export const RECENT_STICKERS_LIMIT = 20;
 export const FAVED_STICKERS_LIMIT = 5;
 
@@ -86,17 +115,37 @@ export interface LinkPreview {
 /** Откуда пересланное: исходный автор (имя — на момент пересылки), чат и сообщение оригинала, когда оно написано. */
 /** Переслан пост канала: userId null, name — название канала (автор не раскрывается), postAuthor — подпись поста. */
 export interface ForwardInfo { userId: Id | null; name: string; chatId: Id; messageId: Id; at: string; postAuthor?: string; photo?: ProfilePhoto | null }   // userId null — от канала (photo — его фото на момент пересылки)
+/**
+ * Подчат «Избранного» (saved_peer_id в Telegram): своё и копия без заголовка — 'me' («Мои заметки»); переслано из моего
+ * личного чата — 'u<собеседник>'; из группы или канала — 'c<чат>'; источник не читается (чужая переписка в пересланном
+ * пересланного, чата больше нет) — 'hidden' («Автор скрыт»). Источник — fwd_from.chatId, то есть оригинал, а не чат, откуда
+ * переслали: заголовок «Переслано от» и подчат говорят об одном. У служебных сообщений и вне «Избранного» подчата нет.
+ */
+export const SAVED_NOTES = 'me', SAVED_HIDDEN = 'hidden';
+export function savedPeerRule(fwd: { chatId: Id } | null | undefined, savedChatId: Id, src: { kind: 'direct' | 'group' | 'channel'; gone?: boolean; peerId?: Id | null } | null): string {
+  if (!fwd || Number(fwd.chatId) === Number(savedChatId)) return SAVED_NOTES;
+  if (!src || src.gone) return SAVED_HIDDEN;
+  if (src.kind === 'direct') return src.peerId != null ? 'u' + src.peerId : SAVED_HIDDEN;
+  return 'c' + fwd.chatId;
+}
+/** Строка списка подчатов. title и photo — актуальные, если зритель может читать источник (access), иначе то, что сохранено
+ *  в пересланном сообщении (как заголовок «Переслано от»); у заметок и «Автор скрыт» их нет — клиент подписывает сам. */
+export interface SavedDialog { peer: string; count: number; lastId: number | null; last: Message | null; pinnedAt: number | null; title: string | null; photo: ProfilePhoto | null; kind: 'user' | 'group' | 'channel' | null; userId?: Id; key?: string; sourceChatId?: Id; access: boolean }
+/** Страница подчатов: total — всего подчатов, messages — всего сообщений в них (шапка «N сообщений»), next — курсор следующей. */
+export interface SavedDialogsPage { dialogs: SavedDialog[]; total: number; messages: number; next: number | null }
+
 /** Ссылка на пересылаемое в кадре send: сервер сам берёт текст, оформление и вложение оригинала. */
 export interface ForwardRef { chatId: Id; id: Id; hideSender?: boolean; hideCaption?: boolean }
 
 /** Оформление куска текста: смещения в единицах UTF-16 (как String.length). Один тип сам с собой не перекрывается. */
-export type EntityType = 'bold' | 'italic' | 'underline' | 'strike' | 'spoiler' | 'code' | 'pre' | 'link' | 'date';
+export type EntityType = 'bold' | 'italic' | 'underline' | 'strike' | 'spoiler' | 'code' | 'pre' | 'link' | 'date' | 'blockquote';
 /** date — дата и время (как messageEntityFormattedDate в Telegram): date — unix-секунды, format — как показывать:
  *  'r' — относительно («завтра в 10:00»), иначе по порядку w (день недели), d / D (дата коротко / полностью),
  *  t / T (время коротко / с секундами); пусто — показать текст сообщения как есть. */
-export interface Entity { type: EntityType; offset: number; length: number; url?: string; date?: number; format?: string }
+/** blockquote — цитата в тексте (блок); collapsed — сворачиваемая: 3 строки, нажатие разворачивает. Не вкладывается сама в себя и не сочетается с pre. */
+export interface Entity { type: EntityType; offset: number; length: number; url?: string; date?: number; format?: string; collapsed?: boolean }
 export const DATE_FORMAT = /^(r|w?[dD]?[tT]?)$/;
-export const ENTITY_TYPES: readonly EntityType[] = ['bold', 'italic', 'underline', 'strike', 'spoiler', 'code', 'pre', 'link', 'date'];
+export const ENTITY_TYPES: readonly EntityType[] = ['bold', 'italic', 'underline', 'strike', 'spoiler', 'code', 'pre', 'link', 'date', 'blockquote'];
 export const MAX_ENTITIES = 100;
 /** Пачка кликов по большому эмодзи: не больше кликов и секунд от первого (как в Telegram — окно в секунду). */
 export const EMOJI_FX_MAX = 10;
@@ -142,7 +191,7 @@ export function normalizeEntities(text: string, raw: unknown): Entity[] {
     if (type === 'date' && (!Number.isSafeInteger(date) || (date as number) < 0 || (date as number) > 4102444800 || typeof format !== 'string' || !DATE_FORMAT.test(format))) continue;
     const key = type === 'link' ? 'link ' + url : type === 'date' ? 'date ' + date + ' ' + format : (type as string);
     const list = by.get(key) ?? [];
-    list.push(url ? { type: 'link', offset: s, length: end - s, url } : type === 'date' ? { type: 'date', offset: s, length: end - s, date: date as number, ...(format ? { format: format as string } : {}) } : { type: type as EntityType, offset: s, length: end - s });
+    list.push(type === 'blockquote' ? { type: 'blockquote', offset: s, length: end - s, ...((e as { collapsed?: unknown }).collapsed === true ? { collapsed: true } : {}) } : url ? { type: 'link', offset: s, length: end - s, url } : type === 'date' ? { type: 'date', offset: s, length: end - s, date: date as number, ...(format ? { format: format as string } : {}) } : { type: type as EntityType, offset: s, length: end - s });
     by.set(key, list);
   }
   const out: Entity[] = [];
@@ -150,11 +199,65 @@ export function normalizeEntities(text: string, raw: unknown): Entity[] {
     list.sort((a, b) => a.offset - b.offset);
     let cur: Entity | null = null;
     for (const e of list) {
-      if (cur && e.offset <= cur.offset + cur.length) cur.length = Math.max(cur.length, e.offset + e.length - cur.offset);
-      else { cur = { ...e }; out.push(cur); }
+      if (cur && e.offset <= cur.offset + cur.length) {
+        cur.length = Math.max(cur.length, e.offset + e.length - cur.offset);
+        if (cur.collapsed && !e.collapsed) delete cur.collapsed;   // склеенная цитата свёрнута, только если свёрнуты обе
+      } else { cur = { ...e }; out.push(cur); }
     }
   }
-  return out.sort((a, b) => a.offset - b.offset || b.length - a.length).slice(0, MAX_ENTITIES);
+  // цитата с блоком кода не сочетается: блок кода остаётся, цитата снимается
+  const pre = out.filter((e) => e.type === 'pre');
+  const kept = pre.length ? out.filter((e) => e.type !== 'blockquote' || !pre.some((p) => p.offset < e.offset + e.length && e.offset < p.offset + p.length)) : out;
+  return kept.sort((a, b) => a.offset - b.offset || b.length - a.length).slice(0, MAX_ENTITIES);
+}
+
+/* ---------- цитата части сообщения в ответе ---------- */
+
+/** Фрагмент исходного сообщения в ответе: текст, смещение в исходном тексте и оформление внутри фрагмента. */
+export interface ReplyQuote { text: string; offset: number; entities?: Entity[] }
+/** Предел длины фрагмента, в единицах UTF-16. */
+export const QUOTE_MAX = 1024;
+/** Что из оформления исходного сохраняется во фрагменте: блоки (цитата, код блоком) и дата (показывается иначе, чем написана) — нет. */
+const QUOTE_TYPES: ReadonlySet<EntityType> = new Set<EntityType>(['bold', 'italic', 'underline', 'strike', 'spoiler', 'code', 'link']);
+
+/** Где фрагмент в тексте: на указанном смещении, а если текст сместился — ближайшее вхождение; -1 — фрагмента нет. */
+export function locateQuote(body: string, text: string, hint: number): number {
+  if (!text) return -1;
+  if (body.startsWith(text, hint)) return hint;
+  let best = -1;
+  for (let at = body.indexOf(text); at >= 0; at = body.indexOf(text, at + 1)) {
+    if (best < 0 || Math.abs(at - hint) < Math.abs(best - hint)) best = at;
+  }
+  return best;
+}
+
+/** Оформление исходного, обрезанное по фрагменту и сдвинутое к его началу. */
+export function clipQuoteEntities(body: string, entities: readonly Entity[] | null | undefined, offset: number, length: number): Entity[] {
+  const text = body.slice(offset, offset + length), cut: Entity[] = [];
+  for (const e of entities ?? []) {
+    if (!QUOTE_TYPES.has(e.type)) continue;
+    const s = Math.max(e.offset, offset), end = Math.min(e.offset + e.length, offset + length);
+    if (end > s) cut.push({ ...e, offset: s - offset, length: end - s });
+  }
+  return normalizeEntities(text, cut);
+}
+
+/**
+ * Фрагмент из выделенного текста (клиент: что показать сразу, пока не ответил сервер): пробелы по краям срезаются, длинное
+ * обрезается по границе символа; null — такого в сообщении нет (выделение задело дату, которая показана иначе, чем написана).
+ */
+export function makeQuote(body: string, entities: readonly Entity[] | null | undefined, selected: string, hint: number): ReplyQuote | null {
+  const lead = selected.length - selected.trimStart().length;
+  let text = selected.trim();
+  if (!text) return null;
+  const at = locateQuote(body, text, hint + lead);
+  if (at < 0) return null;
+  if (text.length > QUOTE_MAX) {
+    const c = text.charCodeAt(QUOTE_MAX - 1);
+    text = text.slice(0, c >= 0xd800 && c <= 0xdbff ? QUOTE_MAX - 1 : QUOTE_MAX).trimEnd();
+  }
+  const list = clipQuoteEntities(body, entities, at, text.length);
+  return { text, offset: at, ...(list.length ? { entities: list } : {}) };
 }
 
 /** Обрезать пробелы по краям текста и сдвинуть оформление вместе с ним. */
@@ -182,7 +285,7 @@ export interface Attachment {
 }
 /** Копия видео: preview — первые секунды без звука, 360p, до 1 МБ (лента); '720' — H.264 720p (просмотрщик по умолчанию).
  *  У фото и картинки-файла preview — WebP, длинная сторона до 480 px (сетка «Медиа»); medium — WebP до 800 px (пузырь в ленте). */
-export interface VideoVariant { name: 'preview' | '720' | 'medium'; w: number; h: number; size: number }
+export interface VideoVariant { name: 'preview' | '720' | 'medium' | 'loop'; w: number; h: number; size: number }
 /** video — видео как медиа (кадр, длительность, играет в ленте); видео «как файл» остаётся file с mime video/*. */
 export type AttachmentKind = 'photo' | 'video' | 'file' | 'voice' | 'round' | 'audio';
 /** Вкладки «Общих медиа» (как в Telegram): медиа — фото и видео, файлы, музыка, голосовые и кружки, ссылки. */
@@ -293,10 +396,17 @@ export type Update =
   // состав изменился: у кого строка новая или другая (upsert), кто вышел или удалён (remove)
   | { type: 'members'; chatId: Id; upsert: MemberRow[]; remove: Id[] }
   // чат больше не мой: вышел, удалили, группу удалили
+  | { type: 'chatAutoDelete'; chatId: Id; sec: number | null }   // срок автоудаления чата сменился (null — выключено)
   | { type: 'chatTheme'; chatId: Id; theme: string | null }   // тема чата сменилась (id из GET /themes, null — снята)
+  /** Подчат «Избранного» изменился: итоги владельцу (count 0 — исчез). Содержимого нет: последнее — по lastId из кэша или страницей. */
+  | { type: 'savedDialog'; chatId: Id; peer: string; count: number; lastId: number | null; pinnedAt: number | null; dialogs: number; messages: number }
   | { type: 'chatFlags'; chatId: Id; pinnedAt: number | null; archived: boolean; unreadMark: boolean; archivedAtId?: number }   // закреплён (мс; позже — выше), в архиве, «непрочитанное»
   | { type: 'chatNotify'; chatId: Id; muteUntil: number | null }   // уведомления чата: мс эпохи — выключены до, 0 — навсегда, null — включены
   | { type: 'chatRemoved'; chatId: Id }
+  // отложенное появилось или изменилось (только автору; журнал хранит ссылку, не текст) / опубликовано или удалено
+  | { type: 'scheduled'; item: ScheduledMessage }
+  | { type: 'scheduledRemoved'; chatId: Id; clientId: string }
+  | { type: 'myGifs' }   // сохранённые GIF изменились — перечитать POST /my-gifs/list
   | { type: 'myStickers' };   // мои паки / недавние / избранные изменились — перечитать GET /my-stickers   // превью ссылки сообщения загрузилось (null — превью нет)   // закреплённые сообщения чата целиком (новые сверху)   // список сеансов изменился: новый вход, подтверждение, завершение
 
 /** Строка участника группы в журнале (имя и присутствие — из профиля и присутствия). */
@@ -402,7 +512,9 @@ export type ErrorCode = 'bad_frame' | 'pin_limit' | 'unauthorized' | 'not_member
   | 'password_invalid' | 'password_missing' | 'recovery_unavailable' | 'email_invalid' | 'qr_expired' | 'passkey_not_found' | 'passkey_invalid'
   | 'folder_title' | 'folder_empty' | 'folder_too_many_chats' | 'folder_emoji' | 'folders_limit'
   | 'upload_limit' | 'upload_quota'   // пределы загрузок на пользователя (apps/server/src/domain/uploadLimits.ts)
-  | 'upload_missing' | 'upload_mismatch' | 'upload_pending' | 'upload_incomplete' | 'photo_invalid' | 'file_too_big';
+  | 'upload_missing' | 'upload_mismatch' | 'upload_pending' | 'upload_incomplete' | 'photo_invalid' | 'file_too_big'
+  | 'quote_gone'   // цитаты нет в исходном сообщении (подделка или текст изменили, пока ответ ждал сети)
+  | 'schedule_past' | 'schedule_far' | 'schedule_limit';   // отложенные (domain/scheduled.ts): время прошло, дальше года, больше SCHEDULED_LIMIT на чат
 
 export type ClientFrame =
   | { op: 'prove'; sig: string }   // ответ на challenge: подпись «relay-device|ws|<nonce>» ключом устройства
@@ -413,7 +525,7 @@ export type ClientFrame =
   // превью публичного канала: push'и канала в этот сокет без подписки, пока превью открыто; ack.result — {seq}
   | { op: 'watchChat'; reqId: string; chatId: Id }
   | { op: 'unwatchChat'; chatId: Id }
-  | { op: 'send'; reqId: string; clientId: string; chatId: Id; body: string; entities?: Entity[]; replyToId?: Id | null; attachment?: { id: string; thumb?: string | null; spoiler?: boolean } | null; groupId?: string | null; forward?: ForwardRef | null; noLinkPreview?: boolean; blocks?: Block[] | null; todo?: TodoInput; poll?: PollInput; contact?: { userId: Id; key?: string; via?: { chatId: Id; messageId: Id } }; geo?: GeoPoint; dice?: { emoji: DiceEmoji }; sticker?: { id: Id } | null; threadId?: Id; draftHash?: string | null }   // threadId — комментарий в треде (группа обсуждения)
+  | { op: 'send'; reqId: string; clientId: string; chatId: Id; body: string; entities?: Entity[]; replyToId?: Id | null; replyQuote?: { text: string; offset: number }; attachment?: { id: string; thumb?: string | null; spoiler?: boolean } | null; groupId?: string | null; forward?: ForwardRef | null; noLinkPreview?: boolean; blocks?: Block[] | null; todo?: TodoInput; poll?: PollInput; contact?: { userId: Id; key?: string; via?: { chatId: Id; messageId: Id } }; geo?: GeoPoint; dice?: { emoji: DiceEmoji }; sticker?: { id: Id } | null; threadId?: Id; draftHash?: string | null; silent?: boolean; scheduleAt?: number }   // threadId — комментарий в треде (группа обсуждения); silent — без звука; scheduleAt — мс эпохи: отложить
   | { op: 'read'; reqId: string; chatId: Id; upToId: Id }
   | { op: 'typing'; chatId: Id }   // «печатаю» — без ответа, сервер пересылает остальным участникам
   // клики по большому эмодзи (только личный чат): t — секунды от первого клика пачки; сервер пересылает собеседнику, в журнал не пишет
@@ -512,6 +624,9 @@ export function parseClientFrame(raw: string): ClientFrame | null {
     case 'send':
       if (!str(f.reqId, 64) || !str(f.clientId, 36) || !UUID.test(f.clientId) || !int(f.chatId) || typeof f.body !== 'string') return null;
       if (f.replyToId != null && !int(f.replyToId)) return null;
+      // цитата: только текст и смещение. Оформление сервер берёт из исходного сообщения, от клиента не принимает
+      const rq = f.replyQuote as { text?: unknown; offset?: unknown } | null | undefined;
+      if (rq != null && (typeof rq !== 'object' || typeof rq.text !== 'string' || !Number.isSafeInteger(rq.offset))) return null;
       if (f.attachment != null && (typeof f.attachment !== 'object' || !str((f.attachment as { id: unknown }).id, 36))) return null;
       if (f.groupId != null && !(typeof f.groupId === 'string' && UUID.test(f.groupId))) return null;
       let forward: ForwardRef | null = null;
@@ -532,7 +647,8 @@ export function parseClientFrame(raw: string): ClientFrame | null {
       if (f.sticker != null && (typeof f.sticker !== 'object' || !int((f.sticker as { id: unknown }).id))) return null;
       if (f.threadId != null && !int(f.threadId)) return null;
       if (f.draftHash != null && !(typeof f.draftHash === 'string' && DRAFT_HASH.test(f.draftHash))) return null;
-      return { op: 'send', ...(f.draftHash !== undefined ? { draftHash: f.draftHash as string | null } : {}), ...(f.threadId != null ? { threadId: f.threadId as number } : {}), ...(f.sticker != null ? { sticker: { id: (f.sticker as { id: number }).id } } : {}), ...(f.todo != null ? { todo: normalizeTodo(f.todo)! } : {}), ...(f.poll != null ? { poll: normalizePoll(f.poll)! } : {}), ...(f.geo != null ? { geo: normalizeGeo(f.geo)! } : {}), ...(f.dice != null ? { dice: { emoji: (f.dice as { emoji: DiceEmoji }).emoji } } : {}), ...(f.contact != null ? { contact: { userId: (f.contact as { userId: number }).userId, ...(typeof cKey === 'string' ? { key: cKey } : {}), ...(cVia ? { via: { chatId: Number(cVia.chatId), messageId: Number(cVia.messageId) } } : {}) } } : {}), reqId: f.reqId, clientId: f.clientId, chatId: f.chatId, body: f.body, entities: normalizeEntities(f.body, f.entities), replyToId: (f.replyToId as number | null) ?? null, attachment: (f.attachment as { id: string; thumb?: string | null; spoiler?: boolean } | null) ?? null, groupId: (f.groupId as string | null) ?? null, forward, ...(f.noLinkPreview === true ? { noLinkPreview: true } : {}), ...(Array.isArray(f.blocks) ? { blocks: f.blocks as Block[] } : {}) };
+      if (f.scheduleAt != null && !int(f.scheduleAt)) return null;
+      return { op: 'send', ...(f.silent === true ? { silent: true } : {}), ...(f.scheduleAt != null ? { scheduleAt: f.scheduleAt as number } : {}), ...(f.draftHash !== undefined ? { draftHash: f.draftHash as string | null } : {}), ...(f.threadId != null ? { threadId: f.threadId as number } : {}), ...(f.sticker != null ? { sticker: { id: (f.sticker as { id: number }).id } } : {}), ...(f.todo != null ? { todo: normalizeTodo(f.todo)! } : {}), ...(f.poll != null ? { poll: normalizePoll(f.poll)! } : {}), ...(f.geo != null ? { geo: normalizeGeo(f.geo)! } : {}), ...(f.dice != null ? { dice: { emoji: (f.dice as { emoji: DiceEmoji }).emoji } } : {}), ...(f.contact != null ? { contact: { userId: (f.contact as { userId: number }).userId, ...(typeof cKey === 'string' ? { key: cKey } : {}), ...(cVia ? { via: { chatId: Number(cVia.chatId), messageId: Number(cVia.messageId) } } : {}) } } : {}), reqId: f.reqId, clientId: f.clientId, chatId: f.chatId, body: f.body, entities: normalizeEntities(f.body, f.entities), replyToId: (f.replyToId as number | null) ?? null, ...(rq != null && f.replyToId != null ? { replyQuote: { text: rq.text as string, offset: rq.offset as number } } : {}), attachment: (f.attachment as { id: string; thumb?: string | null; spoiler?: boolean } | null) ?? null, groupId: (f.groupId as string | null) ?? null, forward, ...(f.noLinkPreview === true ? { noLinkPreview: true } : {}), ...(Array.isArray(f.blocks) ? { blocks: f.blocks as Block[] } : {}) };
     case 'read':
       return str(f.reqId, 64) && int(f.chatId) && int(f.upToId) ? { op: 'read', reqId: f.reqId, chatId: f.chatId, upToId: f.upToId } : null;
     default: return null;
@@ -608,6 +724,7 @@ export function searchTerms(text: string): string[] {
 }
 
 export * from './groups';
+export * from './adminLog';
 export * from './polls';
 export * from './special';
 import { isDiceEmoji, normalizeGeo, type ContactCard, type Dice, type DiceEmoji, type GeoPoint } from './special';

@@ -41,9 +41,20 @@ export function rowFor<R extends Row>(rows: Iterable<R>, key: string, sort: numb
   return hit;
 }
 
+/**
+ * Датчик края ещё в зоне: сдвиг запрашивают раньше, чем выполняют (кадр measure, конец тяжёлой анимации), и лента
+ * за это время может уйти от края. Пример: колонка обсуждения монтируется пустой, верхний датчик срабатывает сразу,
+ * сдвиг ждёт конца перехода, а к тому времени лента встала у низа — сдвиг к старым срезал бы самые новые строки.
+ * Датчика нет (окно первого экрана дорисовывается, порция сдвига собирается) — края нет, сдвигать некуда.
+ */
+export function edgeInZone(dir: ShiftDir, sentinel: { top: number; bottom: number } | null, view: { top: number; bottom: number }, margin: number): boolean {
+  if (!sentinel) return false;
+  return dir === 'older' ? sentinel.bottom >= view.top - margin : sentinel.top <= view.bottom + margin;
+}
+
 /** Сдвиг окна во время тяжёлой анимации (переход стека, доезд ленты) откладывается до её конца: перераскладка
  *  ленты съедала бы кадры анимации. Запоминаются оба направления (у короткой ленты оба датчика в кадре сразу);
- *  после анимации каждый сдвиг сам перепроверит, нужен ли он ещё. */
+ *  после анимации каждый сдвиг сам перепроверит, нужен ли он ещё (shiftWanted и edgeInZone). */
 export function deferShift(box: { dirs: Set<ShiftDir> }, dir: ShiftDir, heavy: boolean, later: (fn: () => void) => void, run: (dir: ShiftDir) => void): void {
   if (!heavy) { run(dir); return; }
   const waiting = box.dirs.size > 0;

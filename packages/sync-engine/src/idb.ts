@@ -107,6 +107,16 @@ export function write(db: IDBDatabase, batch: WriteBatch): Promise<void> {
   });
 }
 
+/** Автоудаление: строки сообщений со сроком не позже at (индекс byExpiry; без срока в индекс не попадают). */
+export async function getExpiredRows(db: IDBDatabase, at: number): Promise<LocalMessage[]> {
+  return (await req(db.transaction('messages').objectStore('messages').index('byExpiry').getAll(IDBKeyRange.upperBound(at)))) as LocalMessage[];
+}
+/** Ближайший срок среди строк IndexedDB; null — сроков нет. */
+export async function firstExpiry(db: IDBDatabase): Promise<number | null> {
+  const c = await req(db.transaction('messages').objectStore('messages').index('byExpiry').openKeyCursor());
+  return c ? c.key as number : null;
+}
+
 /** Файл неотправленного сообщения: лежит в IDB, чтобы отправка пережила офлайн и перезагрузку. */
 export function putBlob(db: IDBDatabase, clientId: string, blob: Blob): Promise<unknown> {
   return req(db.transaction('blobs', 'readwrite').objectStore('blobs').put({ clientId, blob }));

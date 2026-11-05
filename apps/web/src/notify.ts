@@ -116,17 +116,18 @@ const FRESH_MS = 2 * 60_000;   // догоняющая синхронизаци�
  * Пришло чужое сообщение или упоминание (запрос notifications движка — одно на сообщение): показать, если окно не в
  * фокусе. Упоминание пробивает выключенный звук чата и умолчание вида (как в Telegram).
  */
-export function notifyIncoming(chat: { id: number; title: string; muted: boolean; system?: boolean }, m: { id: number; body: string; kind?: string; attachmentName?: string | null; createdAt: string; service?: { type: string } | null; threadId?: number }, o: { mention?: boolean } = {}): void {
+export function notifyIncoming(chat: { id: number; title: string; muted: boolean; system?: boolean }, m: { id: number; body: string; kind?: string; attachmentName?: string | null; createdAt: string; service?: { type: string } | null; threadId?: number }, o: { mention?: boolean; reminder?: boolean; silent?: boolean } = {}): void {
+  if (o.silent) return;   // без звука: ни уведомления, ни звука (движок и так их не шлёт — страховка)
   if (Date.now() - Date.parse(m.createdAt) > FRESH_MS) return;
   const g = getGlobal();
   const ck = g.chats.find((c) => c.id === chat.id)?.kind;
   const kind = ck === 'channel' ? 'channel' : ck === 'group' ? 'group' : 'direct';
   const notify = g.settings.notify as Record<string, { muted: boolean; preview: boolean } | undefined>;
   const pref = notify[kind] ?? notify.group ?? { muted: false, preview: true };
-  const plan = planIncoming({ state: g.notify, device: getPrefs().notify, chatMuted: chat.muted && !o.mention, pref: o.mention ? { ...pref, muted: false } : pref, hasFocus: document.hasFocus() });
+  const plan = planIncoming({ state: g.notify, device: getPrefs().notify, chatMuted: chat.muted && !o.mention, pref: o.mention ? { ...pref, muted: false } : pref, hasFocus: document.hasFocus() && !o.reminder });   // напоминание — и в открытом окне: открытый чат отсеян раньше
   if (!plan.show) return;
   const text = incomingText(m);
-  const t = notifyText({ title: chat.title, text }, { preview: plan.preview, hideText: getPrefs().screen.hideNotifyText });
+  const t = notifyText({ title: o.reminder ? 'Напоминание' : chat.title, text }, { preview: plan.preview, hideText: getPrefs().screen.hideNotifyText });
   quietly(navigator.serviceWorker.ready.then((reg) => reg.showNotification(t.title, { body: t.body, tag: 'chat-' + chat.id, data: { chatId: chat.id, ...(m.threadId != null ? { threadId: m.threadId } : {}) }, ...(chat.system ? { icon: '/relay-logo-192.png' } : {}) })));
   playNotifySound(plan.volume);
 }

@@ -113,7 +113,7 @@ window.addEventListener('relay:signed-in', () => {
 });
 
 // Esc по слоям: меню, окна, поле ввода (ответ, панель формата, упоминания), эмодзи — сами, до window; правая панель —
-// escBusy; выбор сообщений и поиск в чате — свои обработчики на window (позже nav, поэтому здесь пропускаем их);
+// escBusy; выбор сообщений и поиск в чате — свои обработчики на window (позже nav: тоже escBusy, иначе тот же Esc снимал бы и чат поверх);
 // затем выбор чатов в списке слева (поиск смотрим только в текущей колонке стека: нижние чаты смонтированы, их поиск не слушает Esc); затем обычная навигация (закрыть чат, «Назад» страницы).
 const escChatSelect = () => {
   const s = getGlobal();
@@ -121,7 +121,7 @@ const escChatSelect = () => {
   endChatSelect();
   return true;
 };
-nav.installNav({ get: () => getGlobal().sidebarView, set: (p) => setGlobal({ sidebarView: p }), escBusy: () => getGlobal().infoOpen && !!getGlobal().openChatId, escMode: escChatSelect });
+nav.installNav({ get: () => getGlobal().sidebarView, set: (p) => setGlobal({ sidebarView: p }), escBusy: () => (getGlobal().infoOpen && !!getGlobal().openChatId) || !!getGlobal().selecting || !!document.querySelector('.app-chatcol[data-current] .rl-csearch'), escMode: escChatSelect });
 // правая панель «Информация» — свой слой навигации: «Назад» браузера закрывает её, закрытая из интерфейса — снимает запись
 let infoLayer = 0;
 // телефон: открытый чат — отдельный экран поверх списка (как в Telegram), «Назад» браузера возвращает к списку.

@@ -238,8 +238,9 @@ export async function attachmentForSend(tx: typeof sql | Parameters<Parameters<t
   if (!UUID.test(ref.id)) throw new DomainError('bad_frame', 'attachment id');
   // for share: обработка видео (jobs/video.ts) обновляет строку и снимки в сообщениях под for update — не разминуться с ней
   const [a] = await tx`select * from attachments where id = ${ref.id} for share`;
-  // своё вложение — или трек из своей музыки профиля (его могли добавить из чужого сообщения): «Музыка» в скрепке
-  const mine = a && (a.owner_id === userId || (await tx`select 1 from profile_music where user_id = ${userId} and attachment_id = ${a.id}`).length > 0);
+  // своё вложение — или трек из своей музыки профиля (его могли добавить из чужого сообщения): «Музыка» в скрепке, или своя сохранённая GIF
+  const mine = a && (a.owner_id === userId || (await tx`select 1 from profile_music where user_id = ${userId} and attachment_id = ${a.id}
+    union all select 1 from saved_gifs where user_id = ${userId} and attachment_id = ${a.id}`).length > 0);
   if (!a || !mine) throw new DomainError('not_found', 'attachment');
   if (a.status !== 'ready') throw new DomainError('upload_pending');
   const thumb = ref.thumb && ref.thumb.length <= 8192 && /^data:image\/(jpeg|png|webp);base64,[A-Za-z0-9+/=]+$/.test(ref.thumb) ? ref.thumb : null;
@@ -277,26 +278,28 @@ export async function fileFor(userId: number, id: string, variant?: string): Pro
   const [a] = await sql`
     select a.* from attachments a
      where a.id = ${id} and a.status = 'ready'
-       and (a.owner_id = ${userId} or exists (
+       -- владелец — и без сообщений (ещё не отправил); но вышедший срок автоудаления закрывает файл и ему, пока задача не стёрла строку
+       and ((a.owner_id = ${userId} and not exists (select 1 from messages m where m.attachment->>'id' = ${id} and not m.deleted and m.expires_at <= now())) or exists (
          select 1 from messages m join chat_members cm on cm.chat_id = m.chat_id and cm.user_id = ${userId}
                                   join chats c on c.id = m.chat_id and c.deleted_at is null   -- удалённый (мягко) чат файлов не отдаёт
-          where m.attachment->>'id' = ${id} and not m.deleted
+          where m.attachment->>'id' = ${id} and not m.deleted and (m.expires_at is null or m.expires_at > now())
             and m.id >= cm.history_from)   -- сообщение из скрытой истории не открывает файл (AUTHZ-3)
        or exists (   -- комментарий в треде: его видит и гость треда — подписчик канала, чья это группа обсуждения (threads.ts threadAccess)
          select 1 from messages m join messages r on r.chat_id = m.chat_id and r.id = m.thread_id
                                   join chats ch on ch.id = (r.origin->>'chatId')::bigint and ch.linked_chat_id = m.chat_id and ch.deleted_at is null
                                   join chat_members cm on cm.chat_id = ch.id and cm.user_id = ${userId}
-          where m.attachment->>'id' = ${id} and not m.deleted and m.thread_id is not null
+          where m.attachment->>'id' = ${id} and not m.deleted and (m.expires_at is null or m.expires_at > now()) and m.thread_id is not null
             and not exists (select 1 from chat_bans b where b.chat_id = m.chat_id and b.user_id = ${userId}))
        or exists (   -- пост публичного канала: превью без подписки (те же условия, что у canRead: @имя, не удалён, не в бане)
          select 1 from messages m join chats c on c.id = m.chat_id and c.kind = 'channel' and c.username is not null and c.deleted_at is null
-          where m.attachment->>'id' = ${id} and not m.deleted
+          where m.attachment->>'id' = ${id} and not m.deleted and (m.expires_at is null or m.expires_at > now())
             and not exists (select 1 from chat_bans b where b.chat_id = c.id and b.user_id = ${userId}))
+       or exists (select 1 from saved_gifs sg where sg.attachment_id = a.id and sg.user_id = ${userId})   -- своя сохранённая GIF: остаётся и без исходного сообщения
        or exists (select 1 from link_previews lp where lp.photo_id = a.id)   -- картинка превью ссылки: публичная страница, видна всем
        or exists (   -- трек в чьём-то профиле: его видят все, кого владелец не заблокировал
          select 1 from profile_music p where p.attachment_id = a.id
             and not exists (select 1 from blocks b where b.owner_id = p.user_id and b.user_id = ${userId}))
-       or exists (select 1 from chat_photos cp where cp.big = a.id or cp.small = a.id)   -- фото группы: видно и в приглашении
+       or exists (select 1 from chat_photos cp where cp.big = a.id or cp.small = a.id or cp.video = a.id)   -- фото группы: видно и в приглашении
        or exists (   -- фото профиля: как и сам профиль — всем, кого владелец не заблокировал
          select 1 from user_photos p where (p.big = a.id or p.small = a.id or p.video = a.id)
             and not exists (select 1 from blocks b where b.owner_id = p.user_id and b.user_id = ${userId})))`;

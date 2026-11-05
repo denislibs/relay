@@ -120,12 +120,12 @@ export const nameForSql = (viewer: number | ReturnType<typeof sql>) =>
 export const commentPeerSql = (db: Tx | typeof sql, viewer: number, target: number | ReturnType<typeof sql>) => db`(
   exists (select 1 from chat_members vm
             join chats ch on ch.id = vm.chat_id and ch.kind = 'channel' and ch.deleted_at is null and ch.linked_chat_id is not null
-            join messages cm on cm.chat_id = ch.linked_chat_id and cm.sender_id = ${target} and cm.thread_id is not null and not cm.deleted
+            join messages cm on cm.chat_id = ch.linked_chat_id and cm.sender_id = ${target} and cm.thread_id is not null and not cm.deleted and (cm.expires_at is null or cm.expires_at > now())
             join messages r on r.chat_id = cm.chat_id and r.id = cm.thread_id and (r.origin->>'chatId')::bigint = ch.id
            where vm.user_id = ${viewer}
              and not exists (select 1 from chat_bans b where b.chat_id = ch.linked_chat_id and b.user_id = ${viewer}))
   or exists (select 1 from chat_members gm join chats g on g.id = gm.chat_id and g.kind = 'group' and g.deleted_at is null
-               join messages cm on cm.chat_id = gm.chat_id and cm.sender_id = ${target} and cm.thread_id is not null and not cm.deleted
+               join messages cm on cm.chat_id = gm.chat_id and cm.sender_id = ${target} and cm.thread_id is not null and not cm.deleted and (cm.expires_at is null or cm.expires_at > now())
               where gm.user_id = ${viewer}))`;
 
 /** Может ли зритель смотреть профиль: общий чат (не канал) или человек у зрителя в контактах.

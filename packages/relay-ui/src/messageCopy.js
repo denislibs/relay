@@ -1,6 +1,6 @@
 // Копирование из сообщений — как в Telegram Web A:
 //  • текст — одним элементом буфера: простой текст + HTML в разметке Bot API (strong, em, u, del, code, pre>code,
-//    a, tg-spoiler); скрытый текст копируется целиком; запасные пути — writeText, затем скрытое поле и execCommand;
+//    a, tg-spoiler, blockquote); скрытый текст копируется целиком; запасные пути — writeText, затем скрытое поле и execCommand;
 //  • выделенный кусок — клон выделения, обёрнутый в своё оформление до корня текста: полужирное слово остаётся полужирным;
 //  • картинка — в PNG через ClipboardItem с обещанием (запись начинается сразу, пока жест пользователя ещё «живой»).
 import { readDom, segments } from './richtext.js';
@@ -17,12 +17,16 @@ var CLOSE = { bold: '</strong>', italic: '</em>', underline: '</u>', strike: '</
 
 /** Текст с оформлением → HTML для буфера (разметка Bot API, переводы строк — <br>). */
 export function clipboardHtml(text, entities) {
-  var html = '', segs = segments(text || '', entities || []);
+  var html = '', segs = segments(text || '', entities || []), inQuote = false;
   for (var i = 0; i < segs.length; i++) {
     var sg = segs[i], open = '', close = '';
+    // цитата — один блок на все свои куски; expandable — сворачиваемая (как в разметке Telegram)
+    if (sg.marks.blockquote && !inQuote) { html += sg.marks.blockquote === 'c' ? '<blockquote expandable>' : '<blockquote>'; inQuote = true; }
+    if (!sg.marks.blockquote && inQuote) { html += '</blockquote>'; inQuote = false; }
     for (var k = 0; k < ORDER.length; k++) { var t = ORDER[k]; if (sg.marks[t]) { open += OPEN[t](sg.marks[t]); close = CLOSE[t] + close; } }
     html += open + (sg.marks.pre ? esc(sg.text) : esc(sg.text).replace(/\n/g, '<br>')) + close;
   }
+  if (inQuote) html += '</blockquote>';
   return html;
 }
 
@@ -52,7 +56,14 @@ export function selectionValue(root) {
   var box = root.ownerDocument.createElement('div');
   box.appendChild(frag);
   var v = readDom(box);
-  return v.text.replace(/\s+/g, '') ? v : null;
+  if (!v.text.replace(/\s+/g, '')) return null;
+  // где выделение в тексте сообщения: подсказка для цитаты (одно и то же слово может встречаться дважды)
+  var before = root.ownerDocument.createRange(), pre = root.ownerDocument.createElement('div');
+  before.selectNodeContents(root);
+  before.setEnd(range.startContainer, range.startOffset);
+  pre.appendChild(before.cloneContents());
+  v.hint = readDom(pre).text.length;
+  return v;
 }
 
 /** Записать текст (и HTML) в буфер. Возвращает обещание: true — записано. */

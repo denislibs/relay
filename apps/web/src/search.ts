@@ -55,12 +55,15 @@ export const searchChannels = (q: string) => callEngine<ChannelHit[]>({ type: 's
 
 /** «Частые собеседники» — личные чаты; ответ кэшируем на минуту (как Top people в Telegram). */
 let top: { at: number; ids: Promise<number[]> } | null = null;
+let topNow: number[] | null = null;   // последний ответ — синхронно, для первого кадра окна «Переслать»
 export function topChats(): Promise<number[]> {
   if (!top || Date.now() - top.at > 60_000) {
-    top = { at: Date.now(), ids: callEngine<number[]>({ type: 'topChats' }).catch(() => { top = null; return []; }) };
+    top = { at: Date.now(), ids: callEngine<number[]>({ type: 'topChats' }).then((ids) => { topNow = ids; return ids; }, () => { top = null; return []; }) };
   }
   return top.ids;
 }
+/** Частые собеседники, если уже известны (иначе null) — без ожидания. */
+export const topChatsNow = (): number[] | null => topNow;
 
 /** «Октябрь 2026» — заголовок месяца в выдаче. */
 const MONTHS = ['Январь', 'Февраль', 'Март', 'Апрель', 'Май', 'Июнь', 'Июль', 'Август', 'Сентябрь', 'Октябрь', 'Ноябрь', 'Декабрь'];

@@ -92,10 +92,17 @@ function TextField(props) {
   var showCount = props.counter && left != null;
   var Tag = props.multiline ? 'textarea' : 'input';
   var err = props.error;
+  var input = useRef(null);
+  // атрибут autofocus на вставленном позже поле браузер не выполняет. После кадра: поле могло появиться в выезжающей панели
+  useEffect(function () {
+    if (!props.autoFocus) return undefined;
+    var raf = requestAnimationFrame(function () { if (input.current) input.current.focus({ preventScroll: true }); });
+    return function () { cancelAnimationFrame(raf); };
+  }, []);
   // trailing — кнопка внутри поля справа (смайлик выбора иконки папки, как в Telegram)
   return h('div', { class: cx('rl-tf', value && 'rl-tf-filled', err && 'rl-tf-error', props.multiline && 'rl-tf-multi', props.trailing && 'rl-tf-has-trailing', showCount && 'rl-tf-counting', (props.className || props.class)), 'data-setting': props.setting },
     h('div', { class: 'rl-tf-box' },
-      h(Tag, { id: id, class: 'rl-tf-input', value: value, placeholder: ' ', maxLength: props.measure ? undefined : props.maxLength, disabled: props.disabled, rows: props.multiline ? (props.rows || 3) : undefined,
+      h(Tag, { id: id, ref: input, class: 'rl-tf-input', value: value, placeholder: ' ', maxLength: props.measure ? undefined : props.maxLength, disabled: props.disabled, rows: props.multiline ? (props.rows || 3) : undefined,
         type: props.multiline ? undefined : (props.type || 'text'), autoComplete: props.autoComplete || 'off', inputMode: props.inputMode, autoFocus: props.autoFocus,
         'aria-invalid': err ? 'true' : undefined, 'aria-describedby': err ? id + '-err' : undefined,
         onInput: function (e) { if (props.onInput) props.onInput(e.currentTarget.value, e); },

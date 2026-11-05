@@ -98,8 +98,11 @@ export function VideoPlayer(props) {
     var v = video.current;
     if (!v) return undefined;
     var on = function (type, fn) { v.addEventListener(type, fn); return function () { v.removeEventListener(type, fn); }; };
+    // видео и музыка не играют вместе: видео ставит плеер на паузу, новый трек плеера — видео
+    var stop = function () { v.pause(); };
     var offs = [
-      on('play', function () { set({ playing: true }); poke(); }),
+      function () { player.release(stop); },
+      on('play', function () { player.claim(stop); set({ playing: true }); poke(); }),
       on('pause', function () { set({ playing: false, shown: true }); }),
       on('waiting', function () { set({ waiting: true }); }),
       on('playing', function () { set({ waiting: false }); }),
@@ -111,6 +114,7 @@ export function VideoPlayer(props) {
       on('leavepictureinpicture', function () { set({ pip: false }); }),
     ];
     set({ duration: v.duration || 0, playing: !v.paused });
+    if (!v.paused) player.claim(stop);   // autoplay успел начаться до подписки
     return function () { offs.forEach(function (f) { f(); }); };
   }, [props.src]);
 

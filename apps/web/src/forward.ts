@@ -1,9 +1,10 @@
 // Пересылка сообщений, как в Telegram Web: «Переслать» → окно выбора чатов. Один чат — открываем его, пересылка
 // ждёт в поле ввода (можно дописать комментарий, скрыть отправителя или подписи); несколько — уходит сразу во все.
 import type { Entity } from '@relay/protocol';
-import { forwardMessages, openInner, sentSound } from './data';
+import { forwardMessages, openInner, savedChatId, sentSound } from './data';
 import { getGlobal, setGlobal, type ForwardDraft, type ForwardPick } from './global';
 import { showToast } from './settingsData';
+import { topChats } from './search';
 import { plural } from '@relay/ui';
 
 type Src = Record<string, unknown>;
@@ -15,10 +16,10 @@ export function startForward(fromChatId: number, items: Src[], nameOf: (userId: 
 }
 
 /** То же для сообщений из нескольких чатов (выбор в глобальном поиске): пересылаются по чатам, в порядке групп. */
-export function startForwardMany(groups: { chatId: number; items: Src[] }[], nameOf: (userId: number) => string): void {
+export function startForwardMany(groups: { chatId: number; items: Src[] }[], nameOf: (userId: number) => string): Promise<void> {
   const parts = groups.map((g) => ({ chatId: g.chatId, list: g.items.filter((m) => m.id != null && !m.deleted && !m.service).sort((a, b) => (a.id as number) - (b.id as number)) }))
     .filter((g) => g.list.length);
-  if (!parts.length) return;
+  if (!parts.length) return Promise.resolve();
   const list = parts.flatMap((g) => g.list);
   const senders: { id: number; name: string }[] = [];
   for (const m of list) {
@@ -32,17 +33,38 @@ export function startForwardMany(groups: { chatId: number; items: Src[] }[], nam
   const text = (first.body as string) || (att ? (att.kind === 'file' && att.name ? att.name : KIND[att.kind ?? ''] ?? 'Вложение') : '');
   const captions = list.some((m) => !!m.attachment && !!m.body);
   const [head, ...rest] = parts;
-  setGlobal({ fwdPick: { fromChatId: head.chatId, ids: head.list.map((m) => m.id as number), ...(rest.length ? { more: rest.map((g) => ({ fromChatId: g.chatId, ids: g.list.map((m) => m.id as number) })) } : {}),
-    preview: { senders, text, count: list.length, captions } } });
+  return showPick({ fromChatId: head.chatId, ids: head.list.map((m) => m.id as number), ...(rest.length ? { more: rest.map((g) => ({ fromChatId: g.chatId, ids: g.list.map((m) => m.id as number) })) } : {}),
+    preview: { senders, text, count: list.length, captions } });
 }
 
-export function closeForwardPick(): void { setGlobal({ fwdPick: null }); }
+let pickSeq = 0;
+/**
+ * Окно открывается уже собранным: полоса частых собеседников приходит из движка, и пришедшая после первого кадра
+ * сдвигала вкладки и список вниз. Ждём её (из кэша — сразу, иначе не дольше PICK_WAIT_MS), потом показываем.
+ */
+const PICK_WAIT_MS = 200;
+function showPick(pick: ForwardPick): Promise<void> {
+  const seq = ++pickSeq;
+  return Promise.race([topChats(), new Promise((r) => setTimeout(r, PICK_WAIT_MS))]).then(() => {
+    if (seq === pickSeq) setGlobal({ fwdPick: pick });   // за это время могли открыть другое или закрыть
+  });
+}
+
+export function closeForwardPick(): void { pickSeq++; setGlobal({ fwdPick: null }); }
 
 /** Выбор в окне: один чат — панель пересылки в его поле ввода; несколько — сразу во все, с подписью первой. */
+/** Строка «Избранное» в окне пересылки, пока чата нет в загруженном списке: настоящий id узнаётся при отправке. */
+export const SAVED_PICK = -1;
+
 export async function forwardTo(chatIds: number[], comment: string): Promise<void> {
   const pick = getGlobal().fwdPick;
   if (!pick || !chatIds.length) return;
   setGlobal({ fwdPick: null });
+  if (chatIds.includes(SAVED_PICK)) {
+    let saved: number;
+    try { saved = await savedChatId(); } catch { showToast('Не удалось открыть Избранное — нет сети?'); return; }
+    chatIds = [...new Set(chatIds.map((id) => (id === SAVED_PICK ? saved : id)))];
+  }
   if (chatIds.length === 1) {
     const chatId = chatIds[0];
     setGlobal({ fwdDraft: { ...getGlobal().fwdDraft, [chatId]: { ...pick, hideSender: false, hideCaption: false } } });
@@ -74,7 +96,7 @@ export function forwardElsewhere(chatId: number): void {
   const d = getGlobal().fwdDraft[chatId];
   if (!d) return;
   cancelForwardDraft(chatId);
-  setGlobal({ fwdPick: { fromChatId: d.fromChatId, ids: d.ids, ...(d.more ? { more: d.more } : {}), preview: d.preview } });
+  void showPick({ fromChatId: d.fromChatId, ids: d.ids, ...(d.more ? { more: d.more } : {}), preview: d.preview });
 }
 
 /** Отправка из поля ввода: комментарий (если есть) первым, затем пересланное. */

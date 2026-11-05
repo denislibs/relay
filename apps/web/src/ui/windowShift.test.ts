@@ -1,5 +1,5 @@
 import { expect, test } from 'bun:test';
-import { anchorShift, deferShift, requestShift, rowFor, shiftWanted, stageOf, type ShiftDir } from './windowShift';
+import { anchorShift, deferShift, edgeInZone, requestShift, rowFor, shiftWanted, stageOf, type ShiftDir } from './windowShift';
 
 const both = { hasOlder: true, hasNewer: true };
 
@@ -18,6 +18,18 @@ test('restored at the start of history, the user scrolled up and then down: the 
   const atStart = { hasOlder: false, hasNewer: true };
   expect(shiftWanted('newer', atStart, -1)).toBe(false);
   expect(shiftWanted('newer', atStart, 1)).toBe(true);
+});
+
+test('edgeInZone: a shift runs only while its edge sentinel is still within the margin of the view', () => {
+  const view = { top: 0, bottom: 700 };
+  expect(edgeInZone('older', { top: -500, bottom: -500 }, view, 750)).toBe(true);
+  expect(edgeInZone('newer', { top: 1200, bottom: 1200 }, view, 750)).toBe(true);
+  // переход из канала в обсуждение: пустая колонка (датчик сработал), сдвиг отложен до конца перехода, а к тому
+  // времени лента встала у низа — верхний датчик в 2500 px выше: сдвиг к старым срезал бы самые новые строки
+  expect(edgeInZone('older', { top: -2500, bottom: -2500 }, view, 750)).toBe(false);
+  expect(edgeInZone('newer', { top: 1600, bottom: 1600 }, view, 750)).toBe(false);
+  // датчика нет (окно первого экрана ещё дорисовывается, порция сдвига собирается) — и сдвига нет
+  expect(edgeInZone('older', null, view, 750)).toBe(false);
 });
 
 test('anchor is kept only while a shift is really on its way', () => {

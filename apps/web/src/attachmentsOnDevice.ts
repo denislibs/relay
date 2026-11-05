@@ -109,5 +109,6 @@ export function announceOnDeviceChanged(): void {
 export const fileKeysStore = {
   get: (fileId: string): Promise<string | undefined> => run(STORE_FILE_KEYS, 'readonly', (s) => s.get(fileId)),
   putMany: (entries: [string, string][]): Promise<void> => (entries.length ? run(STORE_FILE_KEYS, 'readwrite', (s) => { for (const [id, k] of entries) s.put(k, id); }) : Promise.resolve()),
+  delete: (ids: string[]): Promise<void> => (ids.length ? run(STORE_FILE_KEYS, 'readwrite', (s) => { for (const id of ids) s.delete(id); }) : Promise.resolve()),
   clear: (): Promise<void> => run(STORE_FILE_KEYS, 'readwrite', (s) => { s.clear(); }),
 };

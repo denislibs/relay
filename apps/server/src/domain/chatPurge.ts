@@ -1,6 +1,7 @@
 import { sql } from '../db';
 import { enqueue } from '../jobs/queue';
 import { appendUpdates } from './journal';
+import { dropScheduledOfPurged } from './scheduled';
 
 /**
  * Задача chat.purge {chatId, after, phase?}: чистка мягко удалённого (deleted_at) канала или группы страницами —
@@ -44,6 +45,7 @@ export async function purgeStep(p: PurgeJob): Promise<void> {
       await enqueue(tx, 'chat.purge', { chatId, phase: 'messages', after: last }, { dedupeKey: `chat.purge:${chatId}:x:${last}` });
       return;
     }
+    await dropScheduledOfPurged(tx, chatId);   // отложенные участников: каскад убрал бы их молча
     await tx`delete from chats where id = ${chatId}`;
   });
 }

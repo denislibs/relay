@@ -6,7 +6,7 @@ import { useEffect, useRef, useState } from 'preact/hooks';
 import { getGlobal, setGlobal, useGlobal, type FolderDraft } from '../../global';
 import { back, go, setLeaveGuard } from '../../nav';
 import { deleteFolder, failText, saveFolder, showToast } from '../../settingsData';
-import { chatTone, isSystemChat } from '../format';
+import { chatTone, isSavedChat, isSystemChat } from '../format';
 import { animatedEmojiUrl, useAnimatedEmoji } from '../../animatedEmoji';
 import { FolderEmojiPicker, pickerPosition } from './FolderEmojiPicker';
 
@@ -85,7 +85,7 @@ export function FolderEdit({ path }: { path: string }) {
     const name = (c?.title as string) || 'Чат №' + id;
     return (
       <div key={list + id} class="app-folder-chat">
-        <Avatar name={name} tone={chatTone(c ?? { id })} size={40} logo={isSystemChat(c)} {...avatarPhoto(c?.photo as ProfilePhoto | null | undefined)} />
+        <Avatar name={name} tone={chatTone(c ?? { id })} size={40} logo={isSystemChat(c)} saved={isSavedChat(c)} {...avatarPhoto(c?.photo as ProfilePhoto | null | undefined)} />
         <span class="rl-inforow-text"><span>{name}</span><small>{c?.kind === 'group' ? 'группа' : 'личный чат'}</small></span>
         <IconButton icon="close" label={'Убрать ' + name} onClick={() => editDraft({ [list]: f[list].filter((x) => x !== id) })} />
       </div>

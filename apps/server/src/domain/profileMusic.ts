@@ -27,7 +27,7 @@ export async function listProfileMusic(viewer: number, userId: number): Promise<
 /** Добавить трек из сообщения: только музыка из своего чата; повтор — без ошибки. */
 export async function addProfileMusic(userId: number, chatId: number, messageId: number): Promise<ProfileTrack[]> {
   await assertMember(sql, chatId, userId);
-  const [m] = await sql`select chat_id, client_id, attachment, content from messages where chat_id = ${chatId} and id = ${messageId} and not deleted and kind = 'audio'`;
+  const [m] = await sql`select chat_id, client_id, attachment, content from messages where chat_id = ${chatId} and id = ${messageId} and not deleted and (expires_at is null or expires_at > now()) and kind = 'audio'`;
   if (m) await openRows([m]);   // имя трека — в шифре сообщения; в профиле оно публично (музыка профиля видна всем)
   const att = m?.attachment as { id: string; name: string; duration?: number } | undefined;
   if (!att?.id) throw new DomainError('not_found', 'track');
