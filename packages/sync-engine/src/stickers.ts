@@ -40,7 +40,10 @@ export class Stickers {
   }
 
   private async cachedMine(): Promise<MyStickers> {
-    this.mine ??= (await this.load<MyStickers>(MINE)) ?? null;
+    if (!this.mine) {
+      const loaded = await this.load<MyStickers>(MINE);
+      this.mine ??= loaded;   // пока ждали чтение, список могли изменить: прочитанное старее, его не ставим поверх
+    }
     return this.mine ?? EMPTY;
   }
   private setMine(m: MyStickers, persist = true): void {

@@ -1,9 +1,11 @@
 import { afterAll, afterEach, beforeAll, beforeEach, expect, test } from 'bun:test';
 import { mkdirSync, rmSync, writeFileSync } from 'node:fs';
-import type { MyStickers, StickerSet } from '@relay/protocol';
+import type { MyStickers, StickerRef, StickerSet } from '@relay/protocol';
 import { sql } from '../../../apps/server/src/db';
 import { importStickers } from '../../../apps/server/src/stickers/import';
 import { Engine } from '../src/engine';
+import { openDb } from '../src/idb';
+import { Stickers } from '../src/stickers';
 import { resetDb, startTestServer, watchInto } from './helpers';
 
 // маленький пак-фикстура: настоящих ассетов в тестах нет
@@ -43,6 +45,28 @@ test('a sticker sent offline shows at once with its snapshot and goes out as {st
   const [row] = await sql`select kind, sticker from messages where chat_id = ${chatId}`;
   expect(row.kind).toBe('sticker');
   expect(row.sticker.id).toBe(set.stickers[1].id);
+});
+
+test('a read racing the first cache load does not undo a sticker just sent', async () => {
+  const ref = (id: number) => ({ id, emoji: '👍' }) as StickerRef;
+  const db = await openDb('stickers-' + crypto.randomUUID());
+  const offline = () => new Stickers({ db, online: () => false, http: async () => { throw new Error('offline'); }, enqueue: async () => {}, bump: () => {} });
+  const recent = async (s: Stickers) => ((await s.act({ type: 'myStickers' })) as MyStickers).recent.map((x) => x.id);
+
+  // кэша ещё нет: чтение стартует, пока поднятие недавних ждёт свою загрузку
+  const first = offline();
+  const bump = first.bumpRecent(ref(1));
+  expect(await recent(first)).toEqual([1]);
+  await bump;
+  expect(await recent(first)).toEqual([1]);
+
+  // кэш есть: опоздавшая загрузка не возвращает старый список поверх нового — и следующий стикер его не теряет
+  const second = offline();
+  const bump2 = second.bumpRecent(ref(2));
+  expect(await recent(second)).toEqual([2, 1]);
+  await bump2;
+  await second.bumpRecent(ref(3));
+  expect(await recent(second)).toEqual([3, 2, 1]);
 });
 
 test('my stickers and packs come from the cache without network; installing on one device bumps the other', async () => {
