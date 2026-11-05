@@ -1,4 +1,5 @@
 import { createServer } from './http';
+import { initPeerKeys } from './crypto/peerKey';
 import { watchMigrations } from './migrate';
 import { startRealtime } from './realtime';
 import { startKeyEvents } from './crypto/keyEvents';
@@ -7,6 +8,7 @@ import { hasStickerAssets, importStickers } from './stickers/import';
 // dev: новые миграции применяются сами, до первого запроса (см. watchMigrations)
 if (process.env.DEV_MIGRATE === '1') await watchMigrations().ready;
 
+await initPeerKeys();   // ключи доступа к людям считаются синхронно — секрет нужен до первого запроса
 const server = createServer({ port: Number(process.env.PORT ?? 3000) });
 const stopRealtime = await startRealtime(server);
 const stopKeyEvents = await startKeyEvents();   // уничтоженный ключ чата забывается в памяти сразу

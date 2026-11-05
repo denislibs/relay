@@ -1,8 +1,10 @@
 import { stopDeviceAuth } from './deviceAuth';
+import { useKeyedState } from './keyedState';
 import type { PersonalChannel, ProfileLink } from '@relay/protocol';
 import { releaseMediaCache } from './storageInfo';
 import { stopOwnMusic } from './profileLists';
 import { resetMembers } from './members';
+import { resetPinned } from './pinnedCache';
 import { resetMediaTabs } from './mediaTab';
 // Данные разделов настроек. Предзагрузка: на главной странице и при наведении на строку раздела —
 // слайд приезжает уже заполненным. Подписки настроек (me, ops, user) живут здесь, а не в data.ts.
@@ -205,7 +207,7 @@ let terminating = false;
 function onTerminated(reason: 'logout' | 'terminated'): void {
   if (terminating) return;
   stopOwnMusic();   // подписка на свою музыку не переживает выход
-  resetMembers(); resetMediaTabs();   // кэши отрисовки прежнего аккаунта — не показывать следующему
+  resetMembers(); resetMediaTabs(); resetPinned();   // кэши отрисовки прежнего аккаунта — не показывать следующему
   stopDeviceAuth();   // ключ устройства этого сеанса больше не нужен
   if (selfLogout) return;
   terminating = true;
@@ -269,7 +271,7 @@ const userCache = new Map<number, Item>();
 
 /** Профиль человека (PublicUser) — подписка движка, пока компонент смонтирован; движок заодно перезапрашивает его с сервера. */
 export function useUser(userId: number | null | undefined): Item | null {
-  const [user, setUser] = useState<Item | null>(() => (userId ? userCache.get(userId) ?? null : null));
+  const [user, setUser] = useKeyedState<number | null | undefined, Item | null>(userId, (id) => (id ? userCache.get(id) ?? null : null));
   useEffect(() => {
     setUser(userId ? userCache.get(userId) ?? null : null);
     if (!userId || !engine) return;

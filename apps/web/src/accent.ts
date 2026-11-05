@@ -103,7 +103,12 @@ const valueOf = (name: string, theme: 'light' | 'dark') => { const v = ALL.find(
 export function accentTokens(id: string, theme: 'light' | 'dark'): Record<string, string> {
   const preset = ACCENTS.find((a) => a.id === id);
   if (!preset || id === DEFAULT_ACCENT) return {};
-  const baseRgb = hexToRgb(valueOf('brand', theme) ?? ''), accRgb = hexToRgb(preset.color);
+  return accentTokensFor(preset.color, theme);
+}
+
+/** То же для любого цвета акцента (наборы тем, готовые темы): сдвиг фирменных токенов от зелёного кита к color. */
+export function accentTokensFor(color: string, theme: 'light' | 'dark'): Record<string, string> {
+  const baseRgb = hexToRgb(valueOf('brand', theme) ?? ''), accRgb = hexToRgb(color);
   if (!baseRgb || !accRgb) return {};
   const base = rgbToHsv(baseRgb), acc = rgbToHsv(accRgb);
   const out: Record<string, string> = {};

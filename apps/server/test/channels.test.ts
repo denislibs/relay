@@ -17,7 +17,7 @@ import { PURGE } from '../src/domain/chatPurge';
 import { DomainError } from '../src/domain/errors';
 import '../src/jobs/kinds';
 import { drainJobs } from '../src/jobs/worker';
-import { chatEventsOf, journalOf, makeChat, makeUser, pushBrowser, resetDb } from './helpers';
+import { chatEventsOf, journalOf, makeChat, makeUser, pushBrowser, resetDb, refs } from './helpers';
 
 const server = createServer({ port: 0 });
 const base = `http://localhost:${server.port}`;
@@ -36,8 +36,8 @@ const ok = async (u: U, method: string, path: string, body?: unknown) => {
   if (r.status !== 200) throw new Error(`${method} ${path} → ${r.status} ${await r.text()}`);
   return r.json() as Promise<any>;
 };
-const channel = async (owner: U, members: U[] = [], title = 'Новости') => (await ok(owner, 'POST', '/chats', { kind: 'channel', title, memberIds: members.map((m) => m.userId) })).id as number;
-const group = async (owner: U, members: U[], title = 'Обсуждение') => (await ok(owner, 'POST', '/chats', { title, memberIds: members.map((m) => m.userId) })).id as number;
+const channel = async (owner: U, members: U[] = [], title = 'Новости') => (await ok(owner, 'POST', '/chats', { kind: 'channel', title, members: refs(owner.userId, members.map((m) => m.userId)) })).id as number;
+const group = async (owner: U, members: U[], title = 'Обсуждение') => (await ok(owner, 'POST', '/chats', { title, members: refs(owner.userId, members.map((m) => m.userId)) })).id as number;
 const post = (u: U, chatId: number, body = 'пост', extra: Record<string, unknown> = {}) => sendMessage(u.userId, { chatId, clientId: crypto.randomUUID(), body, ...extra });
 const summary = async (u: U, id: number) => { const l = await ok(u, 'GET', `/chats?ids=${id}`); return (l.chats ?? l).find((x: any) => x.id === id); };
 const membersCount = async (id: number) => Number((await sql`select members_count from chats where id = ${id}`)[0].members_count);
@@ -62,8 +62,8 @@ test('create: a channel with zero members (creator is the owner) and with subscr
   // чат приходит подписчику через membership с seq журнала канала
   expect((await journalOf(b.userId, 'membership')).at(-1)).toMatchObject({ chatId: id });
   // группа без участников — как раньше нельзя; неизвестный вид — 400
-  expect((await call(a, 'POST', '/chats', { title: 'Г', memberIds: [] })).status).toBe(400);
-  expect((await call(a, 'POST', '/chats', { kind: 'forum', title: 'Ф', memberIds: [b.userId] })).status).toBe(400);
+  expect((await call(a, 'POST', '/chats', { title: 'Г', members: refs(a.userId, []) })).status).toBe(400);
+  expect((await call(a, 'POST', '/chats', { kind: 'forum', title: 'Ф', members: refs(a.userId, [b.userId]) })).status).toBe(400);
   // about — сразу при создании
   const { chatId } = await createGroup(a.userId, { kind: 'channel', title: 'С описанием', about: '  про всё  ' });
   expect((await sql`select about, kind from chats where id = ${chatId}`)[0]).toMatchObject({ about: 'про всё', kind: 'channel' });
@@ -76,7 +76,7 @@ test('members_count is kept by the trigger on every path: createChat, createGrou
   const g = await group(a, [b]);
   expect(await membersCount(g)).toBe(2);
   const id = await channel(a, [b]);
-  await ok(a, 'POST', `/groups/${id}/members`, { userIds: [c.userId] });
+  await ok(a, 'POST', `/groups/${id}/members`, { users: refs(a.userId, [c.userId]) });
   expect(await membersCount(id)).toBe(3);
   await ok(b, 'DELETE', `/groups/${id}/members/${b.userId}`);   // вышел сам
   expect(await membersCount(id)).toBe(2);
@@ -422,7 +422,7 @@ test('the owner leaving a channel: ownership goes to the oldest admin only (not 
   expect(r.status).toBe(403);   // админа нет — сначала передать права
   expect(await realCount(id)).toBe(2);
   const d = await login('Глеб');
-  await ok(a, 'POST', `/groups/${id}/members`, { userIds: [c.userId, d.userId] });
+  await ok(a, 'POST', `/groups/${id}/members`, { users: refs(a.userId, [c.userId, d.userId]) });
   await makeAdmin(a, id, c, { post: true });
   await makeAdmin(a, id, d, { post: true });
   await ok(a, 'DELETE', `/groups/${id}/members/${a.userId}`);

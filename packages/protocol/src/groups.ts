@@ -83,6 +83,8 @@ export interface MyMembership {
 
 export interface GroupMember {
   userId: Id;
+  /** ключ доступа зрителя к участнику (PublicUser.key); у себя — нет */
+  key?: string;
   name: string;
   username: string | null;
   photo: ProfilePhoto | null;

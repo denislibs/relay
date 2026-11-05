@@ -1,5 +1,6 @@
 // Глобальный поиск (левая колонка, как в Telegram Web): медиа/ссылки/файлы/музыка/голосовые по всем чатам,
 // люди по имени и «частые собеседники». Права — только чаты, где пользователь состоит; удалённое не отдаём.
+import { peerKey } from '../crypto/peerKey';
 import type { MediaTab, Message } from '@relay/protocol';
 import { sql } from '../db';
 import { tabWhere, toMessage, withAllReactions } from './chats';
@@ -36,6 +37,8 @@ export async function searchMedia(userId: number, tab: MediaTab, opts: { q?: str
       from (select * from messages
              where chat_id in (select cm.chat_id from chat_members cm join chats dc on dc.id = cm.chat_id and dc.deleted_at is null where cm.user_id = ${userId})
                and not deleted and ${tabWhere(tab)}
+               -- скрытая история (вступил позже, «удалить у себя») не видна и здесь — как в медиа чата (AUTHZ-2)
+               and id >= (select h.history_from from chat_members h where h.chat_id = messages.chat_id and h.user_id = ${userId})
                ${q ? textWhere(tab, q) : sql``}
                ${before ? sql`and id < ${before}` : sql``}
              order by id desc limit ${take}) m
@@ -51,7 +54,7 @@ export async function searchMedia(userId: number, tab: MediaTab, opts: { q?: str
   };
 }
 
-export interface PersonHit { id: number; name: string; username: string | null; photo: unknown; chatId: number | null }
+export interface PersonHit { id: number; key: string; name: string; username: string | null; photo: unknown; chatId: number | null }
 
 /**
  * Люди по имени и @имени среди тех, кого пользователь уже видит (контакты и общие чаты), плюс точное @имя
@@ -80,7 +83,7 @@ export async function searchPeople(userId: number, raw: string, limit = 20): Pro
             or lower(u.username) = ${exact})
      order by exact desc, (${nameForSql(userId)} ilike ${q.replace(/[\\%_]/g, (c) => '\\' + c) + '%'}) desc, name
      limit ${Math.min(Math.max(limit, 1), 50)}`;
-  return { people: rows.map((r) => ({ id: Number(r.id), name: r.name as string, username: (r.username as string | null) ?? null, photo: r.photo ?? null, chatId: r.chat_id != null ? Number(r.chat_id) : null })) };
+  return { people: rows.map((r) => ({ id: Number(r.id), key: peerKey(userId, Number(r.id)), name: r.name as string, username: (r.username as string | null) ?? null, photo: r.photo ?? null, chatId: r.chat_id != null ? Number(r.chat_id) : null })) };
 }
 
 /** «Частые собеседники»: личные чаты с наибольшим числом сообщений за 30 дней (как Top people в Telegram). */

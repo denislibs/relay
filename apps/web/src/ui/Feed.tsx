@@ -30,7 +30,7 @@ import { toggleMusic, trackTitle, useFileCached } from '../music';
 import { showToast } from '../settingsData';
 import { startForward, toggleSelect } from '../forward';
 import { FileMessage } from './FileMessage';
-import { isCached, keepOffline, offlineUrlNow, useKeptMedia, useOfflineUrl, warmCached } from '../downloads';
+import { isCached, keepOffline, offlineUrlNow, resolveOfflineUrl, useKeptMedia, useOfflineUrl, warmCached } from '../downloads';
 import { getPrefs } from '../prefs';
 import { bubbleSrc, viewerPreview } from '../mediaGrid';
 import { clock, dayKey, dayLabel, fileSize } from './format';
@@ -317,7 +317,8 @@ const Row = memo(function Row({ post, pinned, discussion, chatId, voiceTitle, au
           reactions={chips.length ? chips : undefined} onReact={(emoji: string) => onReact(m, emoji)}
           // из чата — поверх стека (правила навигации): профиль и «Написать» открывают его чат
           canWrite={sel === undefined && c.userId != null && c.userId !== meId}
-          onWrite={() => { void openUserChat(c.userId!); }}
+          // карточка называет человека: даже без ключа (мы его не видим) чат открывается через это сообщение
+          onWrite={() => { void openUserChat(c.userId!, { via: { chatId: m.chatId as number, messageId: m.id as number } }); }}
           onOpen={sel === undefined && c.userId != null && onUser ? () => onUser(c.userId!) : undefined}
         />
         {mark}
@@ -828,7 +829,10 @@ export function Feed({ frameKey, active, chatId, threadId, channel = false, meId
       const edges = { atEnd: !!meta?.live && !meta.hasNewer, atStart: !!meta && !meta.hasOlder };
       // выше видимой области (до якоря ширины) — не анимируем: там нечего показывать, а якорь удержит главный эффект
       // синхронно, как раньше; ниже — буфер (вне экрана строка просто уйдёт)
-      const aboveView = viewAnchor.current?.sort ?? -Infinity;
+      // sort якоря — по ключу из прежнего списка: снятый раньше мог устареть (у только что отправленного временный sort,
+      // после подтверждения — серверный), и тогда «выше видимой области» оказывалось всё
+      const va = viewAnchor.current;
+      const aboveView = va ? ((prevList as readonly (Item & Msg)[]).find((m) => m.key === va.key)?.sort ?? va.sort) : -Infinity;
       for (const x of interiorRemovals(prevList as unknown as (Item & Msg)[], messages as unknown as (Item & Msg)[], edges)) if (x.sort > aboveView && !leaving.current.has(x.key)) leaving.current.set(x.key, x);
     }
     for (const m of messages) leaving.current.delete(m.key as string);   // вернулось в окно (повтор отправки) — не уходит
@@ -1113,7 +1117,10 @@ export function Feed({ frameKey, active, chatId, threadId, channel = false, meId
       const removed = going.reduce((n, x) => n + x.rect.height, 0);
       const clamp = Math.max(0, st - Math.max(0, sh - removed - ch));   // подрезка прокрутки у низа: контент опустится
       const above = (top: number) => going.reduce((n, x) => n + (x.rect.top < top ? x.rect.height : 0), 0);
-      for (const x of going) { const style = x.r.style; style.position = 'absolute'; style.top = x.r.offsetTop + 'px'; style.left = x.r.offsetLeft + 'px'; style.width = x.r.offsetWidth + 'px'; }
+      // место — до первой записи: строка с position: absolute в колонке-flex ленты стоит у начала контейнера, и offsetTop,
+      // прочитанный после записи, ставил «призрак» в левый верхний угол ленты
+      const box = going.map((x) => ({ top: x.r.offsetTop, left: x.r.offsetLeft, width: x.r.offsetWidth }));
+      going.forEach((x, i) => { const style = x.r.style; style.position = 'absolute'; style.top = box[i].top + 'px'; style.left = box[i].left + 'px'; style.width = box[i].width + 'px'; });
       if (clamp > 0) leaveScroll.current = st - clamp;
       beginHeavyAnimation(LEAVE_HOLD_MS);
       const ease = 'cubic-bezier(0.2, 0, 0, 1)';
@@ -1603,7 +1610,15 @@ export function Feed({ frameKey, active, chatId, threadId, channel = false, meId
   const openOffline = useOfflineUrl(offlineId);
   const keysRef = useRef(photoKeys); keysRef.current = photoKeys;
   // ключи — из ref: колбэк стабилен (строки мемоизированы), а список фото растёт с новыми сообщениями
-  const onOpen = useRef((m: Item) => { const k = keysRef.current.indexOf(m.key); if (k >= 0) setViewer(-1 - k); }).current;
+  const onOpen = useRef((m: Item) => {
+    const k = keysRef.current.indexOf(m.key);
+    if (k < 0) return;
+    const a = m.attachment as Att | undefined;
+    // видео уже на устройстве — сначала его blob:-адрес, потом вьювер: иначе плеер начинал по сети и через кадр-два
+    // переключался на копию — <video> пересоздавался посреди полёта, ролик мелькал другим кадром и шёл заново
+    if (a?.kind === 'video' && a.id && isCached(a.id) && !offlineUrlNow(a.id)) void resolveOfflineUrl(a.id).catch(() => {}).then(() => setViewer(-1 - k));
+    else setViewer(-1 - k);
+  }).current;
   const originOf = useRef((k: number) => {
     const key = keysRef.current[k];
     // плитка альбома помечена ключом своего сообщения (data-mkey), одиночное фото — ключом строки

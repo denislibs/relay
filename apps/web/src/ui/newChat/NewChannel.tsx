@@ -1,7 +1,7 @@
 import { Button, ContactPicker, EmptyState, Fab, PanelHeader, Presence, ProfileHeader, ProgressRing, Section, TextField, peerTone } from '@relay/ui';
 import { GROUP_ABOUT_MAX } from '@relay/protocol';
 import { useEffect, useRef, useState } from 'preact/hooks';
-import { createGroup, groupCall, openChat, refreshChats } from '../../data';
+import { createGroup, groupCall, openChat, peerRefs, refreshChats } from '../../data';
 import { getGlobal, setGlobal, useGlobal } from '../../global';
 import { back, go, home } from '../../nav';
 import { senderAvatar, upload } from '../../profilePhoto';
@@ -104,10 +104,11 @@ export function NewChannelMembers() {
     if (!chatId) return;
     if (!picked.length) { void finish(); return; }
     setBusy(true);
-    const r = await groupCall<{ added: number[]; failed: number[] }>('POST', `/groups/${chatId}/members`, { userIds: picked });
+    const { refs, missing } = await peerRefs(picked);   // ссылки с ключом доступа: голые id сервер не принимает
+    const r = refs.length ? await groupCall<{ added: number[]; failed: number[] }>('POST', `/groups/${chatId}/members`, { users: refs }) : { ok: true as const, data: { added: [], failed: [] } };
     setBusy(false);
     if (!r.ok) { showToast(errorText(r.code)); return; }
-    if (r.data.failed.length) showToast(`Не удалось добавить: ${r.data.failed.length}`);
+    if (r.data.failed.length + missing.length) showToast(`Не удалось добавить: ${r.data.failed.length + missing.length}`);
     refreshChats();   // «N подписчиков» в шапке — из строки списка
     void finish();
   };

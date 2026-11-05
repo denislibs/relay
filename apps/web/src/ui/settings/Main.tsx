@@ -108,7 +108,7 @@ export function Main() {
         icon="arrowLeft" closeLabel="Назад" title="Настройки" onClose={() => void back()}
         actions={[
           { icon: 'search', label: 'Поиск по настройкам', onClick: search.toggle },
-          { icon: 'userPen', label: 'Изменить профиль', onClick: () => void go('settings/profile') },
+          { icon: 'write', label: 'Изменить профиль', onClick: () => void go('settings/profile') },
           { icon: 'more', label: 'Ещё', popup: true, onClick: (e: MouseEvent) => setMenu(e.currentTarget as HTMLElement) },
         ]}
       />

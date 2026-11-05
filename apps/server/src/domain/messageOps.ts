@@ -97,7 +97,8 @@ export async function deleteMessage(userId: number, chatId: number, id: number):
 /** Стереть сообщение у всех (замок строки уже взят): текст и шифр целиком, реакции, закреп; событие в журнал чата. */
 async function erase(tx: Tx, chatId: number, id: number, kind: 'direct' | 'group' | 'channel'): Promise<void> {
   // текст и шифр стираются целиком: у удалённого не остаётся содержимого ни открыто, ни шифром
-  await tx`update messages set body = '', entities = null, todo = null, blocks = null, link = null, content = null, deleted = true where chat_id = ${chatId} and id = ${id}`;
+  // и вложение: у старых (до шифрования) строк в нём открытые имя, название и миниатюра (CRYPTO-9)
+  await tx`update messages set body = '', entities = null, todo = null, blocks = null, link = null, content = null, attachment = null, deleted = true where chat_id = ${chatId} and id = ${id}`;
   await tx`delete from reactions where chat_id = ${chatId} and message_id = ${id}`;
   await tx`delete from message_mentions where chat_id = ${chatId} and message_id = ${id}`;   // «@» у упомянутых гаснет
   await dropUnreadReactions(tx, chatId, id);   // и «сердце» у автора

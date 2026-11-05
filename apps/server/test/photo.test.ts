@@ -12,7 +12,7 @@ import { backfillPhotos, PHOTO_MEDIUM_SIDE, PHOTO_PREVIEW_SIDE } from '../src/jo
 import { SLOW_KINDS } from '../src/jobs/kinds';
 import { claim, enqueue } from '../src/jobs/queue';
 import { drainJobs } from '../src/jobs/worker';
-import { journalOf, nextFrame, opened, resetDb, uploadFile } from './helpers';
+import { journalOf, nextFrame, opened, resetDb, uploadFile, refs } from './helpers';
 
 const server = createServer({ port: 0 });
 const stopRealtime = await startRealtime(server);   // живые кадры push сокетам — через шину уведомлений
@@ -241,7 +241,7 @@ test('ffmpeg input is pinned: only the local file protocol and the declared form
 
 test('attachmentUpdated reaches online clients with the sealed text of the attachment (name, thumb), not the bare jsonb row', async () => {
   const a = await login('Анна'), b = await login('Борис');
-  const { id: chatId } = (await (await fetch(`${base}/chats`, { method: 'POST', headers: { ...as(a.token), 'content-type': 'application/json' }, body: JSON.stringify({ title: 'Фото', memberIds: [b.userId] }) })).json()) as { id: number };
+  const { id: chatId } = (await (await fetch(`${base}/chats`, { method: 'POST', headers: { ...as(a.token), 'content-type': 'application/json' }, body: JSON.stringify({ title: 'Фото', members: refs(a.userId, [b.userId]) }) })).json()) as { id: number };
   const ws = new WebSocket(`ws://localhost:${server.port}/ws?token=${b.token}`);
   await new Promise((r, j) => { ws.onopen = r; ws.onerror = j; });
   ws.send(JSON.stringify({ op: 'hello', lastSeq: 0, since: 0 }));

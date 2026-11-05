@@ -13,9 +13,10 @@ async function song(chatId: number, sender: number, name = 'Мы Сверхно�
   return { msg: Number(m.id), att: a.id as string };
 }
 
-test('add a track from a chat to the profile; strangers see it and can play the file; blocked users cannot', async () => {
-  const a = await makeUser('Анна'), b = await makeUser('Борис'), c = await makeUser('Вера'), d = await makeUser('Глеб');
+test('add a track from a chat to the profile; whoever sees the user sees it and can play the file; blocked users and strangers cannot', async () => {
+  const a = await makeUser('Анна'), b = await makeUser('Борис'), c = await makeUser('Вера'), d = await makeUser('Глеб'), e = await makeUser('Посторонний');
   const chat = await makeChat([a, b]);
+  await makeChat([a, c]); await makeChat([a, d]);   // c и d видят Анну (общий чат), e — нет
   const t = await song(chat, b);
   expect(await fileFor(c, t.att)).toBeNull();                     // пока трек только в чате — чужим нельзя
   const mine = await addProfileMusic(a, chat, t.msg);
@@ -23,6 +24,7 @@ test('add a track from a chat to the profile; strangers see it and can play the 
   await addProfileMusic(a, chat, t.msg);                            // повтор — без дубля
   expect((await listProfileMusic(c, a)).map((x) => x.id)).toEqual([t.att]);
   expect(await fileFor(c, t.att)).not.toBeNull();                 // в профиле — слушать может любой
+  await expect(listProfileMusic(e, a)).rejects.toMatchObject({ code: 'not_found' });   // без общего чата и контакта — как профиль: 404
   await sql`insert into blocks (owner_id, user_id) values (${a}, ${d})`;
   expect(await listProfileMusic(d, a)).toEqual([]);
   expect(await fileFor(d, t.att)).toBeNull();

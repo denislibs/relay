@@ -1,6 +1,6 @@
 import { beginHeavyAnimation, flushFrames, reducedMotion, requestMutation } from '@relay/ui';
 import tokens from '@relay/ui/tokens.json';
-import { accentCss, accentTokens } from './accent';
+import { paletteCss } from './themes/palette';
 // Смена темы: новая тема раскрывается кругом из точки нажатия (View Transitions, как в мобильном Telegram).
 // Где View Transitions нет — и для смены акцента — цвета токенов смешиваются на <html> кадр за кадром
 // (≈200 мс), а обои тают вместе с ними (Wallpaper в relay-ui). Остальные transition на это время выключены
@@ -27,9 +27,8 @@ function parseColor(c: string): Rgba | null {
 
 const BASE = tokens.color.tokens as { name: string; value: string | { light: string; dark: string } }[];
 
-/** Цвета всех токенов темы с учётом акцента — то, что сейчас на экране. */
-function palette(theme: Theme, accent: string): Map<string, Rgba> {
-  const over = accentTokens(accent, theme);
+/** Цвета всех токенов стороны с поверх положенной палитрой темы (themes/palette.ts) — то, что будет на экране. */
+function palette(theme: Theme, over: Record<string, string>): Map<string, Rgba> {
   const out = new Map<string, Rgba>();
   for (const t of BASE) {
     const raw = over[t.name] ?? (typeof t.value === 'string' ? t.value : t.value[theme]);
@@ -45,7 +44,7 @@ let running = 0;
 let blended: string[] = [];   // какие свойства сейчас стоят инлайном
 
 const rgba = (c: Rgba) => `rgba(${c[0]},${c[1]},${c[2]},${c[3]})`;
-const setAttr = (root: HTMLElement, pref: string) => { if (pref === 'system') root.removeAttribute('data-theme'); else root.setAttribute('data-theme', pref); };
+const setAttr = (root: HTMLElement, theme: Theme | null) => { if (theme === null) root.removeAttribute('data-theme'); else root.setAttribute('data-theme', theme); };
 const clear = (root: HTMLElement) => { for (const n of blended) root.style.removeProperty(n); blended = []; root.classList.remove('rl-theme-switching'); };
 const themeNow = (root: HTMLElement): Theme => {
   const attr = root.getAttribute('data-theme');
@@ -155,7 +154,7 @@ export function circleClip(x: number, y: number, radius: number, w: number, h: n
 
 const STUCK_MS = 2000;   // переход завис (браузер не дождался кадра и т. п.) — завершить, страница не остаётся снимком
 
-function circleSwitch(root: HTMLElement, pref: 'system' | 'light' | 'dark', toDark: boolean): void {
+function circleSwitch(root: HTMLElement, swap: () => void, toDark: boolean): void {
   running++;            // прервать смешивание, если шло
   clear(root);
   stopCircle();
@@ -168,7 +167,7 @@ function circleSwitch(root: HTMLElement, pref: 'system' | 'light' | 'dark', toDa
   root.classList.add('rl-theme-vt');
   root.classList.toggle('rl-theme-shrink', !grow);
   const t = (document as DocVT).startViewTransition!(() => {
-    setAttr(root, pref);
+    swap();
     // браузер ждёт новое состояние и не даёт кадров (requestAnimationFrame молчит): перерисовка темы и
     // обоев — сейчас, иначе в круге сначала окажутся старые обои
     flushFrames(6);
@@ -195,33 +194,57 @@ function circleSwitch(root: HTMLElement, pref: 'system' | 'light' | 'dark', toDa
   });
 }
 
-let accentNow = 'green';
-
-/**
- * Ставит тему на <html>. animate=false (первое применение) — сразу. Иначе, если светлость меняется
- * и движение не урезано (reducedMotion учитывает data-anim="0"), — смешивание по кадрам.
- */
-export function switchTheme(root: HTMLElement, pref: 'system' | 'light' | 'dark', toDark: boolean, animate: boolean): void {
-  const from = themeNow(root), to: Theme = toDark ? 'dark' : 'light';
-  if (animate && from !== to && canCircle()) { circleSwitch(root, pref, toDark); return; }
-  blend(root, palette(from, accentNow), palette(to, accentNow), () => setAttr(root, pref), animate && from !== to);
+/** Что ставит тема на <html>: палитры обеих сторон и атрибуты (prefs.applyTheme). */
+export interface ThemeState {
+  light: Record<string, string>; dark: Record<string, string>;
+  theme: Theme | null;      // data-theme; null — по системе
+  base: string;             // data-base: классическая, день, ночь, тёмная
+  outFilled: boolean;       // data-out-filled: свои пузыри залиты цветом
+  contrast: boolean;        // html.rl-contrast
+  bar: { light: string; dark: string };   // цвет строки браузера (meta theme-color)
 }
 
-const ACCENT_CSS_KEY = 'relay.accentCss';
+let shown: ThemeState | null = null;
+const THEME_CSS_KEY = 'relay.themeCss', BOOT_KEY = 'relay.themeBoot';
 
-/** Стиль акцента: один <style id="rl-accent"> в <head> (его же ставит index.html до первой отрисовки). */
-function accentStyle(): HTMLStyleElement {
-  let el = document.getElementById('rl-accent') as HTMLStyleElement | null;
-  if (!el) { el = document.createElement('style'); el.id = 'rl-accent'; document.head.appendChild(el); }
+/** Стиль темы: один <style id="rl-theme"> в <head> (его же ставит boot.js до первой отрисовки). */
+function themeStyle(): HTMLStyleElement {
+  let el = document.getElementById('rl-theme') as HTMLStyleElement | null;
+  if (!el) { el = document.createElement('style'); el.id = 'rl-theme'; document.head.appendChild(el); }
+  document.getElementById('rl-accent')?.remove();   // стиль акцента прежних версий
   return el;
 }
 
-/** Меняет акцент; CSS запоминается для index.html, чтобы следующий запуск сразу был нужного цвета. */
-export function switchAccent(root: HTMLElement, id: string, animate: boolean): void {
-  const theme = themeNow(root);
-  const from = palette(theme, accentNow);
-  accentNow = id;
-  const css = accentCss(id);
-  try { if (css) localStorage.setItem(ACCENT_CSS_KEY, css); else localStorage.removeItem(ACCENT_CSS_KEY); } catch { /* приватный режим */ }
-  blend(root, from, palette(theme, id), () => { const el = accentStyle(); if (el.textContent !== css) el.textContent = css; }, animate);
+function put(root: HTMLElement, s: ThemeState, css: string): void {
+  const el = themeStyle();
+  if (el.textContent !== css) el.textContent = css;
+  setAttr(root, s.theme);
+  root.setAttribute('data-base', s.base);
+  root.toggleAttribute('data-out-filled', s.outFilled);
+  root.classList.toggle('rl-contrast', s.contrast);
+  for (const m of document.querySelectorAll<HTMLMetaElement>('meta[name="theme-color"]')) {
+    m.content = /dark/.test(m.media) ? s.bar.dark : /light/.test(m.media) ? s.bar.light : (s.theme === 'dark' ? s.bar.dark : s.bar.light);
+  }
+}
+
+/**
+ * Ставит тему. animate=false (первое применение) — сразу. Иначе: сменилась сторона (светлая ↔ тёмная) — круг из
+ * точки нажатия; та же сторона (Ночь ↔ Тёмная, другой набор, контрастность) — цвета смешиваются по кадрам.
+ * CSS и атрибуты запоминаются для boot.js: следующий запуск сразу в этой теме, без вспышки.
+ */
+export function switchPalette(root: HTMLElement, s: ThemeState, animate: boolean): void {
+  const css = paletteCss(s.light, s.dark);
+  try {
+    if (css) localStorage.setItem(THEME_CSS_KEY, css); else localStorage.removeItem(THEME_CSS_KEY);
+    localStorage.setItem(BOOT_KEY, JSON.stringify({ base: s.base, outFilled: s.outFilled, contrast: s.contrast }));
+    localStorage.removeItem('relay.accentCss');
+  } catch { /* приватный режим */ }
+  const from = themeNow(root), prev = shown;
+  shown = s;
+  const toDark = s.theme ? s.theme === 'dark' : matchMedia('(prefers-color-scheme: dark)').matches;
+  const to: Theme = toDark ? 'dark' : 'light';
+  const swap = () => put(root, s, css);
+  if (animate && from !== to && canCircle()) { circleSwitch(root, swap, toDark); return; }
+  const before = prev ? prev[from] : {};
+  blend(root, palette(from, before), palette(to, s[to]), swap, animate);
 }

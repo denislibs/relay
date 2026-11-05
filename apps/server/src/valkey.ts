@@ -33,3 +33,16 @@ export async function flushOwn(): Promise<void> {
     if (keys.length) await valkey().send('DEL', keys);
   } while (cursor !== '0');
 }
+
+/**
+ * Счётчик в окне: n-е обращение за windowSec секунд (окна по часам, ключ живёт два окна). Valkey недоступен — 0
+ * (лимит не мешает работе; защита от злоупотреблений — не повод отказывать всем).
+ */
+export async function hit(name: string, windowSec: number): Promise<number> {
+  try {
+    const k = key(`rate:${name}:${Math.floor(Date.now() / 1000 / windowSec)}`);
+    const n = Number(await valkey().incr(k));
+    if (n === 1) await valkey().expire(k, windowSec * 2);
+    return n;
+  } catch { return 0; }
+}

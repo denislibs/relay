@@ -5,8 +5,10 @@ import { applyMembersReply, type MembersReply } from '../src/members';
 import { Store } from '../src/store';
 import { allRights } from '@relay/protocol';
 import { resetDb, startTestServer, watchInto } from './helpers';
+import { initPeerKeys, peerKey } from '../../../apps/server/src/crypto/peerKey';
 
 const srv = await startTestServer();
+await initPeerKeys();
 afterAll(() => srv.stop());
 const engines: Engine[] = [];
 beforeEach(resetDb);
@@ -18,7 +20,8 @@ const api = async (token: string, method: string, path: string, body?: unknown) 
   if (!r.ok) throw new Error(`${method} ${path}: ${r.status} ${await r.text()}`);
   return r.json();
 };
-const group = async (owner: { token: string }, ids: number[]) => (await api(owner.token, 'POST', '/chats', { title: 'Дача', memberIds: ids })).id as number;
+// участники — ссылками с ключом доступа владельца (как их пришлёт клиент, который этих людей видит)
+const group = async (owner: { token: string; userId: number }, ids: number[]) => (await api(owner.token, 'POST', '/chats', { title: 'Дача', members: ids.map((id) => ({ id, key: peerKey(owner.userId, id) })) })).id as number;
 
 /** Считает запросы движка к GET /chats/:id/members (fetch подменяется на время теста). */
 function countMembersRequests() {
@@ -87,7 +90,7 @@ test('members: journal add, role change and removal reach the subscriber as delt
     const before = w.patches.length;
 
     // добавили Глеба: одна новая строка в конце, профиль — из userUpdated журнала
-    await api(a.token, 'POST', `/groups/${chatId}/members`, { userIds: [d.userId] });
+    await api(a.token, 'POST', `/groups/${chatId}/members`, { users: [{ id: d.userId, key: peerKey(a.userId, d.userId) }] });
     const l = await w.until((x) => x.length === 4 && x[3].name === 'Глеб');
     expect(l[3]).toMatchObject({ userId: d.userId, role: 'member', rank: null });
     const added = w.patches.slice(before).flatMap((p) => (p.op === 'diff' ? p.upsert : p.items)).filter((it) => !it.key.startsWith('~'));

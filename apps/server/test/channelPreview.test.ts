@@ -5,7 +5,7 @@ import { createServer } from '../src/http';
 import { startRealtime } from '../src/realtime';
 import { sendMessage } from '../src/domain/messages';
 import { handleFrame } from '../src/ws';
-import { nextFrame, resetDb, uploadFile } from './helpers';
+import { nextFrame, resetDb, uploadFile, refs } from './helpers';
 import { fileFor } from '../src/domain/files';
 
 // Превью публичного канала до подписки (как в Telegram): не участник читает историю, закрепы и медиа канала с
@@ -31,7 +31,7 @@ const code = async (u: U, method: string, path: string, body?: unknown) => { con
 const post = (u: U, chatId: number, body = 'пост', extra: Record<string, unknown> = {}) => sendMessage(u.userId, { chatId, clientId: crypto.randomUUID(), body, ...extra });
 /** Публичный канал (с @именем) с одним постом. */
 async function publicChannel(owner: U, username = 'news_ch', members: U[] = []): Promise<number> {
-  const id = (await ok(owner, 'POST', '/chats', { kind: 'channel', title: 'Новости', memberIds: members.map((m) => m.userId) })).id as number;
+  const id = (await ok(owner, 'POST', '/chats', { kind: 'channel', title: 'Новости', members: refs(owner.userId, members.map((m) => m.userId)) })).id as number;
   await ok(owner, 'PUT', `/groups/${id}/username`, { username });
   return id;
 }

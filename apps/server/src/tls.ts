@@ -1,7 +1,7 @@
 // TLS между сервисами (этап 1 плана шифрования): Postgres, Valkey, а для HTTPS-клиентов (S3, Meilisearch,
 // сервис ключей) — общий доверенный CA через NODE_EXTRA_CA_CERTS. В dev всё в одной docker-сети — без TLS;
-// в production без TLS к базе и Valkey процесс не запускается (assertTransportSecure), если явно не сказано, что
-// внутренняя сеть уже зашифрована (RELAY_PLAIN_INTERNAL=1: одна машина или WireGuard между хостами).
+// в production без TLS к базе и Valkey процесс не запускается (assertTransportSecure). Обхода нет (аудит 2026-10-25,
+// INFRA-1): прежний RELAY_PLAIN_INTERNAL=1 подталкивал выключить проверку целиком; в production он — ошибка.
 import { readFileSync } from 'node:fs';
 
 type Env = Record<string, string | undefined>;
@@ -28,8 +28,11 @@ export function valkeyTls(env: Env = process.env): undefined | boolean | { ca?: 
 
 /** production: связь с базой и Valkey — только по TLS с проверкой сервера; S3/Meilisearch/сервис ключей — https. */
 export function assertTransportSecure(env: Env = process.env): void {
-  if (env.NODE_ENV !== 'production' || env.RELAY_PLAIN_INTERNAL === '1') return;
+  if (env.NODE_ENV !== 'production') return;
   const problems: string[] = [];
+  if (env.RELAY_PLAIN_INTERNAL === '1') problems.push('RELAY_PLAIN_INTERNAL is not allowed in production');
+  // dev-входы в production — вход в любой аккаунт по имени и коды входа без авторизации (INFRA-6)
+  if (env.DEV_LOGIN === '1') problems.push('DEV_LOGIN=1 is not allowed in production');
   const db = dbSsl(env);
   if (db === false || db === 'require') problems.push('database: DB_SSL=verify-full with DB_CA');
   if (env.VALKEY_URL && !env.VALKEY_URL.startsWith('rediss://')) problems.push('valkey: VALKEY_URL=rediss://…');
@@ -37,6 +40,6 @@ export function assertTransportSecure(env: Env = process.env): void {
     if (env[k] && !env[k]!.startsWith('https://')) problems.push(`${k}: https://…`);
   }
   if (problems.length) {
-    throw new Error(`production refuses plain internal connections (set RELAY_PLAIN_INTERNAL=1 only if the network itself is encrypted):\n  - ${problems.join('\n  - ')}`);
+    throw new Error(`production refuses to start:\n  - ${problems.join('\n  - ')}`);
   }
 }

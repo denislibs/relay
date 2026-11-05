@@ -1,3 +1,4 @@
+import { peerKey } from '../crypto/peerKey';
 import {
   emojiKey, graphemes, normalizeAdminRights, normalizeRights, narrowRights, allAdminRights, ADMIN_RIGHTS_BY_KIND, GROUP_ABOUT_MAX, MEMBERS_MAX, RANK_MAX, SLOW_MODES,
   type AdminRights, type CommunityKind, type ProfilePhoto, type BannedMember, type GroupMember, type GroupReactions, type GroupRole, type Message, type MemberRights, type ServiceData, type ServiceType,
@@ -30,7 +31,7 @@ async function names(db: Db, ids: number[]): Promise<{ id: number; name: string 
 
 /** Служебное сообщение группы: в ленту всем участникам (и extra — тем, кого уже нет, чтобы увидели «вас удалили»).
  *  В канале — от имени канала (post: senderId 0), как и посты: какой админ сменил название, подписчики не видят. */
-export async function serviceMessage(tx: Tx, chatId: number, senderId: number, type: ServiceType, data: ServiceData = {}, body = ''): Promise<Message> {
+export async function serviceMessage(tx: Tx, chatId: number, senderId: number, type: ServiceType, data: ServiceData = {}, body = '', kind: 'direct' | 'group' | 'channel' = 'group'): Promise<Message> {
   const clientId = crypto.randomUUID();
   const c = await contentColumns(chatId, clientId, { body, entities: null, todo: null, blocks: null, link: null, attachment: null }, tx);
   const [row] = await tx`
@@ -38,7 +39,7 @@ export async function serviceMessage(tx: Tx, chatId: number, senderId: number, t
     values (${chatId}, ${senderId}, ${clientId}, 'text', ${c.body}, ${type}, ${Object.keys(data).length ? tx.json(data as never) : null}, ${c.content},
             (select kind = 'channel' from chats where id = ${chatId})) returning *`;
   const message = toMessage((await openRows([row], '', tx))[0]);
-  await chatEvent(tx, chatId, { type: 'newMessage', message }, 'group');
+  await chatEvent(tx, chatId, { type: 'newMessage', message }, kind === 'direct' ? 'direct' : 'group');
   if (message.post) await readOwnPost(tx, chatId, senderId, message.id);   // в канале — от канала: своё не непрочитанное
   return message;
 }
@@ -255,6 +256,7 @@ export async function listGroupMembers(viewer: number, chatId: number, filter = 
     members: rows.map((r) => ({
       ...(Number(r.id) === viewer ? { online: true, lastSeen: null } : (({ online, lastSeen }) => ({ online, lastSeen }))(presenceFor(viewer, Number(r.id), r.last_seen_at, pctx, online.has(Number(r.id))))),
       userId: Number(r.id),
+      ...(Number(r.id) !== viewer ? { key: peerKey(viewer, Number(r.id)) } : {}),
       name: r.name as string,
       username: (r.username as string | null) ?? null,
       photo: (r.photo as GroupMember['photo']) ?? null,
@@ -549,6 +551,10 @@ export async function transferGroupOwnership(userId: number, chatId: number, tar
 async function deleteGroupTx(tx: Tx, chatId: number): Promise<void> {
   const [c] = await tx`select linked_chat_id from chats where id = ${chatId}`;
   await tx`update chats set deleted_at = now(), linked_chat_id = null where id = ${chatId}`;
+  // ключи — сразу, не дожидаясь постраничной чистки (CRYPTO-7): ей они не нужны, а отправка в удалённый чат закрыта.
+  // Триггер NOTIFY chat_keys сбрасывает кэши ключей во всех процессах. Документы поиска — тоже сразу
+  await tx`delete from keys.chat_keys where chat_id = ${chatId}`;
+  await enqueue(tx, 'search.purgeChat', { chatId, below: null }, { dedupeKey: `search.purgeChat:${chatId}:all` });
   await dropPersonalChannel(tx, chatId);
   // зрители превью (не участники: им не придёт chatRemoved) — после коммита кадр «чата нет» в топик чата: клиент
   // убирает чат у себя, без syncChat (на канале в 200 000 онлайн — ни одного чтения журнала); участникам chatRemoved — от chat.purge

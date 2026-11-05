@@ -1,3 +1,4 @@
+import { peerKey } from '../crypto/peerKey';
 import { RECENTLY, type PresenceItem } from '@relay/protocol';
 import { sql } from '../db';
 import { connect, connectionCount, disconnect, leave, onlineUsers, PROCESS_ID } from './liveRegistry';
@@ -150,7 +151,7 @@ export function resetPresence(): void {
  * Участники группы для панели «Информация»: имя (как его видит зритель), @имя, присутствие с учётом приватности
  * и владелец — создатель группы (автор служебного «создал(а) группу»). Онлайн сверху, дальше — по последнему визиту.
  */
-export async function chatMembers(viewer: number, chatId: number): Promise<{ ownerId: number | null; members: (PresenceItem & { name: string; username: string | null; photo: unknown })[] }> {
+export async function chatMembers(viewer: number, chatId: number): Promise<{ ownerId: number | null; members: (PresenceItem & { key?: string; name: string; username: string | null; photo: unknown })[] }> {
   const [me] = await sql`select m.role, c.kind, c.deleted_at from chat_members m join chats c on c.id = m.chat_id where m.chat_id = ${chatId} and m.user_id = ${viewer}`;
   if (!me) throw new DomainError('not_member');
   if (me.deleted_at) throw new DomainError('not_found', 'chat');
@@ -167,7 +168,7 @@ export async function chatMembers(viewer: number, chatId: number): Promise<{ own
   const members = rows.map((r) => {
     const id = Number(r.id);
     const p = id === viewer ? { userId: id, online: true, lastSeen: null } : presenceFor(viewer, id, r.last_seen_at, ctx, online.has(id));
-    return { ...p, name: r.name as string, username: (r.username as string | null) ?? null, photo: r.photo ?? null, role: (r.role as string) ?? 'member', rank: (r.rank as string | null) ?? null };
+    return { ...p, ...(id !== viewer ? { key: peerKey(viewer, id) } : {}), name: r.name as string, username: (r.username as string | null) ?? null, photo: r.photo ?? null, role: (r.role as string) ?? 'member', rank: (r.rank as string | null) ?? null };
   });
   const seen = (m: { lastSeen: string | null }) => (m.lastSeen && m.lastSeen !== RECENTLY ? Date.parse(m.lastSeen) || 0 : 0);
   members.sort((a, b) => Number(!!b.online) - Number(!!a.online) || seen(b) - seen(a) || a.name.localeCompare(b.name, 'ru'));

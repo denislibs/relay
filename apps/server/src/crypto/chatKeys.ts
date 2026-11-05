@@ -4,7 +4,8 @@
 // которого нет в базе, иначе сообщения запечатаются ключом-призраком.
 import { sql, type Tx } from '../db';
 import { CryptoError, importAesKey, randomKey } from './aead';
-import { getKms, kmsFor } from './kms';
+import { getKms } from './kms';
+import { chatCtx, unwrapFor, wrapFor } from './keyBinding';
 
 export interface ChatKey { version: number; key: CryptoKey }
 
@@ -33,7 +34,7 @@ function once<T>(id: string, fn: () => Promise<T>): Promise<T> {
 }
 
 async function unwrapRow(chatId: number, version: number, wrapped: Uint8Array, kekId?: string): Promise<CryptoKey> {
-  const key = await importAesKey(await kmsFor(kekId).unwrap(new Uint8Array(wrapped), kekId));
+  const key = await importAesKey(await unwrapFor(chatCtx(chatId), wrapped, kekId));
   remember(chatId, version, key);
   return key;
 }
@@ -48,7 +49,7 @@ export async function chatKey(chatId: number, version: number, tx?: Tx): Promise
   if (tx) {
     const [row] = await tx`select wrapped_dek, kek_id from keys.chat_keys where chat_id = ${chatId} and version = ${version}`;
     if (!row) throw new CryptoError('no_key', `no key for chat ${chatId} v${version}`);
-    return importAesKey(await kmsFor(row.kek_id as string).unwrap(new Uint8Array(row.wrapped_dek as Uint8Array), row.kek_id as string));
+    return importAesKey(await unwrapFor(chatCtx(chatId), row.wrapped_dek as Uint8Array, row.kek_id as string));
   }
   return once(`k:${chatId}:${version}`, async () => {
     const [row] = await sql`select wrapped_dek, kek_id from keys.chat_keys where chat_id = ${chatId} and version = ${version}`;
@@ -72,19 +73,19 @@ export async function currentChatKey(chatId: number, tx?: Tx): Promise<ChatKey> 
     let [row] = await tx`select version, wrapped_dek, kek_id from keys.chat_keys where chat_id = ${chatId} order by version desc limit 1`;
     if (!row) {
       const kms = getKms();
-      const wrapped = await kms.wrap(randomKey());
-      [row] = await tx`insert into keys.chat_keys (chat_id, version, wrapped_dek, kek_id) values (${chatId}, 1, ${Buffer.from(wrapped)}, ${kms.id})
+      const wrapped = await wrapFor(kms, chatCtx(chatId), randomKey());
+      [row] = await tx`insert into keys.chat_keys (chat_id, version, wrapped_dek, kek_id, bound) values (${chatId}, 1, ${Buffer.from(wrapped)}, ${kms.id}, true)
         on conflict (chat_id, version) do update set chat_id = excluded.chat_id returning version, wrapped_dek, kek_id`;
     }
-    return { version: row.version as number, key: await importAesKey(await kmsFor(row.kek_id as string).unwrap(new Uint8Array(row.wrapped_dek as Uint8Array), row.kek_id as string)) };
+    return { version: row.version as number, key: await importAesKey(await unwrapFor(chatCtx(chatId), row.wrapped_dek as Uint8Array, row.kek_id as string)) };
   }
   return once(`c:${chatId}`, async () => {
     let [row] = await sql`select version, wrapped_dek, kek_id from keys.chat_keys where chat_id = ${chatId} order by version desc limit 1`;
     if (!row) {
       const kms = getKms();
-      const wrapped = await kms.wrap(randomKey());
+      const wrapped = await wrapFor(kms, chatCtx(chatId), randomKey());
       // параллельный процесс мог создать раньше — тогда берём его ключ
-      await sql`insert into keys.chat_keys (chat_id, version, wrapped_dek, kek_id) values (${chatId}, 1, ${Buffer.from(wrapped)}, ${kms.id}) on conflict do nothing`;
+      await sql`insert into keys.chat_keys (chat_id, version, wrapped_dek, kek_id, bound) values (${chatId}, 1, ${Buffer.from(wrapped)}, ${kms.id}, true) on conflict do nothing`;
       [row] = await sql`select version, wrapped_dek, kek_id from keys.chat_keys where chat_id = ${chatId} order by version desc limit 1`;
       if (!row) throw new CryptoError('no_key', `chat ${chatId} is gone`);
     }
@@ -98,11 +99,11 @@ export async function currentChatKey(chatId: number, tx?: Tx): Promise<ChatKey> 
 /** Новая версия ключа чата: новые записи — им, старые читаются своими версиями. tx — в транзакции вызывающего. */
 export async function rotateChatKey(chatId: number, tx?: Tx): Promise<number> {
   const kms = getKms();
-  const wrapped = await kms.wrap(randomKey());
+  const wrapped = await wrapFor(kms, chatCtx(chatId), randomKey());
   const db = tx ?? sql;
   const [row] = await db`
-    insert into keys.chat_keys (chat_id, version, wrapped_dek, kek_id)
-    select ${chatId}, coalesce(max(version), 0) + 1, ${Buffer.from(wrapped)}, ${kms.id} from keys.chat_keys where chat_id = ${chatId}
+    insert into keys.chat_keys (chat_id, version, wrapped_dek, kek_id, bound)
+    select ${chatId}, coalesce(max(version), 0) + 1, ${Buffer.from(wrapped)}, ${kms.id}, true from keys.chat_keys where chat_id = ${chatId}
     returning version`;
   current.delete(chatId);
   return row.version as number;

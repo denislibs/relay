@@ -103,11 +103,12 @@ export async function deviceProof(v: unknown): Promise<Uint8Array | null> {
 export const sameKey = (a: Uint8Array | null | undefined, b: Uint8Array | null | undefined): boolean =>
   !!a && !!b && a.length === b.length && Buffer.from(a).equals(Buffer.from(b));
 
-export const accessCookie = (token: string) => `relay_access=${encodeURIComponent(token)}; HttpOnly; SameSite=Lax; Path=/; Max-Age=${ACCESS_SEC}`;
-export const clearAccessCookie = () => 'relay_access=; HttpOnly; SameSite=Lax; Path=/; Max-Age=0';
+export const accessCookie = (token: string) => `__Host-relay_access=${encodeURIComponent(token)}; Secure; HttpOnly; SameSite=Lax; Path=/; Max-Age=${ACCESS_SEC}`;
+export const clearAccessCookie = () => '__Host-relay_access=; Secure; HttpOnly; SameSite=Lax; Path=/; Max-Age=0';
 
 export function readAccessToken(req: Request): string | null {
-  const m = /(?:^|;\s*)relay_access=([^;]+)/.exec(req.headers.get('cookie') ?? '');
+  const c = req.headers.get('cookie') ?? '';
+  const m = /(?:^|;\s*)__Host-relay_access=([^;]+)/.exec(c) ?? /(?:^|;\s*)relay_access=([^;]+)/.exec(c);
   return m ? decodeURIComponent(m[1]) : null;
 }
 

@@ -152,7 +152,7 @@ export function InviteInfo({ nav }: { nav: Nav }) {
   if (!i) return <GPage title="Ссылка" onBack={nav.back}><Loading /></GPage>;
   const revoke = async () => { setAsk(false); if (await act('PATCH', `/groups/${chatId}/invites/${i.id}`, { revoked: true }, 'Ссылка отозвана')) nav.back(); };
   return (
-    <GPage title={i.title || 'Ссылка'} onBack={nav.back} action={!i.revoked && !i.primary ? { icon: 'pencil', label: 'Изменить', onClick: () => nav.go('gInvite', { inviteId: i.id }) } : undefined}>
+    <GPage title={i.title || 'Ссылка'} onBack={nav.back} action={!i.revoked && !i.primary ? { icon: 'write', label: 'Изменить', onClick: () => nav.go('gInvite', { inviteId: i.id }) } : undefined}>
       <Section footer={inviteSubtitle(i)}>
         <InfoRow tile={tone(i)} icon="link" title={short(inviteUrl(i.link))} subtitle="Нажмите, чтобы скопировать" onClick={() => copyText(inviteUrl(i.link))} />
         {!i.revoked ? <InfoRow icon="close" danger title="Отозвать ссылку" onClick={() => setAsk(true)} /> : null}

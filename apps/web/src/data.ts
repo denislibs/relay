@@ -16,7 +16,8 @@ import { rememberKeysIn, startFileKeyService } from './fileKeys';
 import { bindMute, isMuted, startMuteMigration } from './mute';
 import { bindChatFlags, clearUnreadMark } from './chatFlags';
 import { startPeople, wantPeople } from './people';
-import { resetMembers } from './members';
+import { prefetchMembers, resetMembers } from './members';
+import { cachedPinned, rememberPinned, resetPinned, settleWithin } from './pinnedCache';
 import { resetCommonGroups } from './commonGroups';
 import { resetPersonalChannels } from './personalChannel';
 import { cachedMedia, resetMediaTabs } from './mediaTab';
@@ -61,7 +62,7 @@ export function startData(me: Me, fromUrl = true): void {
   engine.onData(rememberKeysIn);
   startFileKeyService();
   startPeople(engine);
-  resetMembers(); resetMediaTabs(); resetMediaDays(); resetCommonGroups(); resetPersonalChannels();   // вход другим пользователем без перезагрузки: кэши отрисовки прежнего — прочь
+  resetMembers(); resetMediaTabs(); resetMediaDays(); resetCommonGroups(); resetPersonalChannels(); resetPinned();   // вход другим пользователем без перезагрузки: кэши отрисовки прежнего — прочь
   bindMute((chatId, muteUntil) => engine.call({ type: 'setMute', chatId, muteUntil }));
   bindChatFlags((chatId, f) => engine.call({ type: 'setChatFlags', chatId, ...f }));
   bindStickers((a) => engine.call(a as never));
@@ -228,7 +229,11 @@ function watchPeer(chatId: number | null): void {
   const peerId = isSystemChat(chat) ? null : chat?.peerId as number | null | undefined;
   if (!peerId) { setGlobal({ peer: null }); return; }
   const m = new Mirror();
-  peerWatch = engine.watch({ kind: 'presence', userId: peerId }, (p: Patch) => { m.apply(p); setGlobal({ peer: (m.list()[0] as Item) ?? null }); });
+  peerWatch = engine.watch({ kind: 'presence', userId: peerId }, (p: Patch) => {
+    m.apply(p);
+    const it = (m.list()[0] as Item) ?? null;
+    setGlobal((s) => ({ peer: it, presence: it ? { ...s.presence, [peerId]: it } : s.presence }));
+  });
 }
 
 type Anchor = { sort: number; side: 'end' | 'start' | 'center' };
@@ -373,6 +378,7 @@ function syncShown(): void {
 
 /** Отменить ещё не показанный чат (новый нижний или поверх): его лента не дождалась. */
 function cancelPending(): void {
+  stopMembersPrefetch();
   if (pendingBottom) { closeSession(pendingBottom.frame.key); pendingBottom = null; }
   const half = stack().filter((f) => !f.ready);
   if (half.length) {
@@ -563,6 +569,17 @@ export function closeAllChats(): void {
   closingNow = true;
   try { openChat(null); } finally { closingNow = false; }
 }
+/** Подписка на участников группы, открываемой сейчас (prefetchMembers); снимается после показа или отмены. */
+let stopMembersPrefetch: () => void = () => {};
+
+const PIN_WAIT_MS = 400;
+/** Закреплённые чата, которых ещё нет в кэше, — одним запросом; ошибка не мешает показу. */
+function fetchPinned(chatId: number, ids: number[]): Promise<void> {
+  const want = ids.filter((id) => !cachedPinned(chatId, id));
+  if (!want.length) return Promise.resolve();
+  return messagesByIds(chatId, want).then((ms) => rememberPinned(chatId, ms), () => {});
+}
+
 export function openChat(chatId: number | null, target?: { id: number; sort: number }, hold?: Hold): void {
   openSeq++;   // любой переход отменяет ждущий openChannel
   if (chatId == null && leaveTimer) return;   // уже едем к списку
@@ -596,11 +613,30 @@ export function openChat(chatId: number | null, target?: { id: number; sort: num
   const { frame, anchor } = newFrame({ chatId }, target);
   pendingBottom = { frame, target };
   if (hold) { hold.key = frame.key; hold.onCommit = () => setGlobal({ pendingChatId: chatId }); } else setGlobal({ pendingChatId: chatId });
+  // статус собеседника — пока собирается лента, а не после смены: шапка нового чата встаёт сразу с «был(а) …»
+  // (как tweb готовит шапку до показа). Отменили переход — syncShown вернёт подписку на чат на экране
+  if (peerFor !== chatId) watchPeer(chatId);
+  // группа — так же участники для подзаголовка; колонка после показа держит свою подписку, эта больше не нужна
+  stopMembersPrefetch();
+  if (findChat(g, chatId)?.kind === 'group') {
+    const stop = prefetchMembers(chatId);
+    stopMembersPrefetch = () => { stopMembersPrefetch = () => {}; stop(); };
+  }
+  // текст закреплённых (плашка под шапкой) — вместе с лентой, как tweb готовит плашки до показа: иначе первый
+  // кадр нового чата шёл с «Закреплённое сообщение…», если самого сообщения нет в ленте. Смену ждём не дольше PIN_WAIT_MS
+  const pinsReady = settleWithin(fetchPinned(chatId, (findChat(g, chatId)?.pinned as number[] | undefined) ?? []), PIN_WAIT_MS);
   // пока лента нового чата не готова, на экране остаётся прежний; затем шапка и лента меняются одним кадром
-  startFeed(frame, anchor, (patch) => {
+  let latest: Parameters<Parameters<typeof startFeed>[2]>[0] | null = null;
+  startFeed(frame, anchor, (p) => {
+    if (pendingBottom?.frame.key !== frame.key) return;
+    const first = latest == null;
+    latest = p;
+    if (!first) return;   // ждём закреплённые — возьмём самый свежий патч ленты
+    void pinsReady.then(() => {
     if (pendingBottom?.frame.key !== frame.key) return;
     whenReleased(hold, () => {
       if (pendingBottom?.frame.key !== frame.key) return;
+      const patch = latest!;   // самый свежий на момент показа (переход мог держаться — hold)
       // Как в Telegram Web K: новая лента сначала собирается и встаёт на позицию в скрытой колонке (прежний чат ещё
       // на экране), а смена — отдельным кадром, только классы: рендер и раскладка нового чата не попадают в кадр,
       // где он появляется. Повторный выбор чата посреди этого снимет недособранную колонку (cancelPending)
@@ -618,9 +654,11 @@ export function openChat(chatId: number | null, target?: { id: number; sort: num
         dropLayers();
         setGlobal({ chatStack: [{ ...staged, ready: true }], chatLeaving: [], openChatId: chatId, pendingChatId: null });
         syncShown();
+        stopMembersPrefetch();
         // смена без перехода только в этот раз: потом колонка уезжает влево под следующий чат как обычно
         requestAnimationFrame(() => requestAnimationFrame(() => { if (alive()) patchFrame(staged.key, { swap: false }); }));
       });
+    });
     });
   });
 }
@@ -730,13 +768,16 @@ export function closeChat(): void {
   else openChat(null);
 }
 
-/** Личный чат с человеком поверх текущего (автор сообщения в группе). Нет такого чата — создать. */
-export async function openUserChat(userId: number): Promise<void> {
+/** Личный чат с человеком поверх текущего (автор сообщения в группе). Нет такого чата — создать.
+ *  hint — ключ (поиск людей, ссылка @имя) или сообщение, где человек назван (карточка контакта): см. peerRef. */
+export async function openUserChat(userId: number, hint?: PeerHint): Promise<void> {
   const me = getGlobal().me;
   if (!me || userId === me.userId) return;
   const found = getGlobal().chats.find((c) => c.kind === 'direct' && c.peerId === userId);
   if (found) { openInner(found.id as number); return; }
-  const id = await createDirectChat(userId);
+  let id: number;
+  // человека не видно (ни ключа, ни сообщения) или сервер не принял — тостом, а не тихой ошибкой
+  try { id = await createDirectChat(userId, hint); } catch (e) { showToastLazy((e as Error).message); return; }
   openInner(id);
 }
 
@@ -1184,10 +1225,37 @@ export function readBy(chatId: number, id: number): Promise<GroupResult<{ id: nu
   return engine.call({ type: 'readBy', chatId, id }) as Promise<GroupResult<{ id: number; name: string }[]>>;
 }
 
-export async function createDirectChat(peerId: number): Promise<number> {
+/**
+ * Как узнали человека, когда ключа в кэше может не быть: key — пришёл с ним (поиск людей, профиль по @имени),
+ * via — сообщение, где он назван (карточка контакта, «переслано от») — как inputUserFromMessage в Telegram.
+ */
+export type PeerHint = { key?: string; via?: { chatId: number; messageId: number } };
+export type PeerRef = { id: number; key: string } | { id: number; via: { chatId: number; messageId: number } };
+
+/**
+ * Ссылка на человека для запросов «по id» (личный чат, группа, добавить в группу): сервер голый id не принимает —
+ * нужен ключ доступа (как access_hash), который он выдал этому зрителю. Ключ — из подсказки, иначе у движка
+ * (кэш профилей или GET /users?ids=); нет ключа — сообщение из подсказки; нет и его — null: человек нам не виден.
+ */
+export async function peerRef(userId: number, hint?: PeerHint): Promise<PeerRef | null> {
+  const key = hint?.key ?? ((await engine.call({ type: 'peerKey', userId }).catch(() => null)) as string | null);
+  if (key) return { id: userId, key };
+  return hint?.via ? { id: userId, via: hint.via } : null;
+}
+
+/** Ссылки на нескольких людей; кого не видно — в missing (их сервер всё равно не примет). */
+export async function peerRefs(ids: readonly number[]): Promise<{ refs: PeerRef[]; missing: number[] }> {
+  const got = await Promise.all(ids.map((id) => peerRef(id)));
+  return { refs: got.filter((r): r is PeerRef => !!r), missing: ids.filter((_, i) => !got[i]) };
+}
+
+export async function createDirectChat(peerId: number, hint?: PeerHint): Promise<number> {
+  const ref = await peerRef(peerId, hint);
+  if (!ref) throw new Error('Написать этому человеку нельзя');
   // существующая личная переписка или новая (сервер не создаёт вторую на ту же пару)
-  const res = await fetch('/chats/direct', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ userId: peerId }) });
-  if (!res.ok) throw new Error(res.status === 401 ? 'Сессия истекла' : 'Не удалось создать чат');
+  const { id: userId, ...access } = ref;
+  const res = await fetch('/chats/direct', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ userId, ...access }) });
+  if (!res.ok) throw new Error(res.status === 401 ? 'Сессия истекла' : res.status === 404 ? 'Написать этому человеку нельзя' : 'Не удалось создать чат');
   const { id } = (await res.json()) as { id: number };
   await engine.call({ type: 'refreshChats' });
   return id;
@@ -1195,8 +1263,11 @@ export async function createDirectChat(peerId: number): Promise<number> {
 
 /** Новая группа: сервер создаёт чат и служебное «создал(а) группу» — по нему чат появится у всех участников. */
 export async function createGroup(title: string, memberIds: number[], channel?: { about: string }): Promise<number> {
+  // участники — ссылками с ключом доступа (peerRef): голые id сервер не принимает
+  const { refs: members, missing } = await peerRefs(memberIds);
+  if (missing.length) throw new Error('Кого-то из выбранных нельзя добавить в группу');
   // канал: {kind: 'channel'}, без участников — подписчиков добавляют следующим шагом (как в Telegram)
-  const res = await fetch('/chats', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(channel ? { kind: 'channel', title, about: channel.about, memberIds } : { title, memberIds }) });
+  const res = await fetch('/chats', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(channel ? { kind: 'channel', title, about: channel.about, members } : { title, members }) });
   if (!res.ok) {
     const code = ((await res.json().catch(() => ({}))) as { code?: string }).code;
     throw new Error(code === 'blocked' ? 'Кого-то из выбранных нельзя добавить в группу'
@@ -1212,8 +1283,8 @@ export async function createGroup(title: string, memberIds: number[], channel?: 
 /** Перечитать список чатов с сервера (число подписчиков канала после добавления: журнал канала состав не несёт). */
 export function refreshChats(): void { engine.call({ type: 'refreshChats' }).catch(() => {}); }
 
-export async function startDirectChat(peerId: number): Promise<void> {
-  openChat(await createDirectChat(peerId));
+export async function startDirectChat(peerId: number, hint?: PeerHint): Promise<void> {
+  openChat(await createDirectChat(peerId, hint));
 }
 
 /* ---------- закреплённые сообщения ---------- */

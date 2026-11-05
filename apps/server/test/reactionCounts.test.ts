@@ -7,7 +7,7 @@ import '../src/jobs/kinds';
 import { handlers } from '../src/jobs/handlers';
 import { claim, complete } from '../src/jobs/queue';
 import { drainJobs } from '../src/jobs/worker';
-import { chatEventsOf, resetDb } from './helpers';
+import { chatEventsOf, resetDb, refs } from './helpers';
 
 const server = createServer({ port: 0 });
 const base = `http://localhost:${server.port}`;
@@ -22,7 +22,7 @@ const ok = async (u: U, method: string, path: string, body?: unknown) => {
   if (r.status !== 200) throw new Error(`${method} ${path} → ${r.status} ${await r.text()}`);
   return r.json() as Promise<any>;
 };
-const create = async (owner: U, members: U[], kind?: 'channel') => (await ok(owner, 'POST', '/chats', { ...(kind ? { kind } : {}), title: 'Чат', memberIds: members.map((m) => m.userId) })).id as number;
+const create = async (owner: U, members: U[], kind?: 'channel') => (await ok(owner, 'POST', '/chats', { ...(kind ? { kind } : {}), title: 'Чат', members: refs(owner.userId, members.map((m) => m.userId)) })).id as number;
 const post = async (u: U, chatId: number) => (await sendMessage(u.userId, { chatId, clientId: crypto.randomUUID(), body: 'пост' })).message;
 const countsRows = async (chatId: number, id: number) => (await sql`select emoji, n from message_reaction_counts where chat_id = ${chatId} and message_id = ${id} order by emoji`).map((r) => [r.emoji, r.n]);
 const mineRows = async (chatId: number, id: number) => (await sql`select user_id, emoji from reactions where chat_id = ${chatId} and message_id = ${id} order by user_id`).map((r) => [Number(r.user_id), r.emoji]);

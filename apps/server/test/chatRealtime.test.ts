@@ -3,7 +3,7 @@ import { afterAll, beforeEach, expect, test } from 'bun:test';
 import { createServer } from '../src/http';
 import { startRealtime } from '../src/realtime';
 import { sendMessage } from '../src/domain/messages';
-import { nextFrame, resetDb } from './helpers';
+import { nextFrame, resetDb, refs } from './helpers';
 
 // два «процесса» на одной базе и шине: запись через один, сокет на другом
 const servers = [createServer({ port: 0 }), createServer({ port: 0 })];
@@ -19,7 +19,7 @@ const api = async (u: U, method: string, path: string, body?: unknown) => {
   const res = await fetch(base() + path, { method, headers: hdr(u), body: body === undefined ? undefined : JSON.stringify(body) });
   return { status: res.status, json: await res.json().catch(() => null) as any };
 };
-const group = async (owner: U, members: U[]) => (await api(owner, 'POST', '/chats', { title: 'Дача', memberIds: members.map((m) => m.userId) })).json.id as number;
+const group = async (owner: U, members: U[]) => (await api(owner, 'POST', '/chats', { title: 'Дача', members: refs(owner.userId, members.map((m) => m.userId)) })).json.id as number;
 async function connect(u: U, i = 0): Promise<WebSocket> {
   const ws = new WebSocket(`ws://localhost:${servers[i].port}/ws?token=${u.token}`);
   await new Promise((r, j) => { ws.onopen = r; ws.onerror = j; });
@@ -76,7 +76,7 @@ test('joining subscribes the live socket (membership.seq = chat seq, next push a
   await hello(wd);
   const got = collect(wd);
   const poked = nextFrame(wd, (f) => f.op === 'poke');
-  await api(a, 'POST', `/groups/${id}/members`, { userIds: [d.userId] });
+  await api(a, 'POST', `/groups/${id}/members`, { users: refs(a.userId, [d.userId]) });
   await poked;   // о группе Дина узнаёт личным журналом: membership с seq чата на момент коммита (служебное + members + groupUpdated)
   send(wd, { op: 'sync', since: 0 });
   const upd = (await nextFrame(wd, (f) => f.op === 'updates')) as Extract<ServerFrame, { op: 'updates' }>;

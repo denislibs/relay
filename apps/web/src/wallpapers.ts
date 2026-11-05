@@ -1,8 +1,9 @@
 // Обои чата: наборы цветов приложения (свои, не из Telegram) и хук «какая тема сейчас». Узоры — PATTERN_SETS кита.
 import { useEffect, useState } from 'preact/hooks';
 import { useGlobal } from './global';
-import { isDark, type WallpaperPref } from './prefs';
-import tokens from '@relay/ui/tokens.json';
+import { getPrefs, resolveBase, themeSettings, type WallpaperPref } from './prefs';
+import { computePalette, tokenValue } from './themes/palette';
+import { sideOf, type Base } from './themes/presets';
 
 export interface ColorPreset { id: string; name: string; colors: string[] }
 
@@ -23,13 +24,10 @@ export const COLOR_PRESETS: { light: ColorPreset[]; dark: ColorPreset[] } = {
   ],
 };
 
-/** Цвета градиента «как в теме» (--wallpaper-1…4 из tokens.json) — для превью, где CSS-переменные не годятся. */
-export function themeWallpaperColors(dark: boolean): string[] {
-  const all = tokens.color.tokens as { name: string; value: string | { light: string; dark: string } }[];
-  return [1, 2, 3, 4].map((i) => {
-    const v = all.find((t) => t.name === 'wallpaper-' + i)?.value;
-    return typeof v === 'string' ? v : v ? v[dark ? 'dark' : 'light'] : '#dfe9d6';
-  });
+/** Цвета градиента «как в теме» базы (с её набором или готовой темой) — для превью, где CSS-переменные не годятся. */
+export function themeWallpaperColors(base: Base): string[] {
+  const p = computePalette(base, themeSettings(getPrefs(), base));
+  return [1, 2, 3, 4].map((i) => p['wallpaper-' + i] ?? tokenValue('wallpaper-' + i, sideOf(base)) ?? '#dfe9d6');
 }
 
 export const PATTERN_NAMES: Record<string, string> = {
@@ -47,9 +45,10 @@ export const DEFAULT_PATTERN = 'cuteMix';
 export const sameColors = (a: string[] | null, b: string[] | null): boolean =>
   a === b || (!!a && !!b && a.length === b.length && a.every((c, i) => c === b[i]));
 
-/** Текущая тема с учётом «Как в системе»: считается прямо при рендере (без отставания), ОС-настройка — по подписке. */
-export function useIsDark(): boolean {
-  const pref = useGlobal((s) => s.prefs.theme);
+/** База на экране с учётом «Как в системе»: считается прямо при рендере (без отставания), ОС-настройка — по подписке. */
+export function useBase(): Base {
+  const prefs = useGlobal((s) => s.prefs);
+  const pref = prefs.theme;
   const [, tick] = useState(0);
   useEffect(() => {
     if (pref !== 'system' || typeof matchMedia === 'undefined') return;
@@ -58,13 +57,15 @@ export function useIsDark(): boolean {
     mq.addEventListener('change', on);
     return () => mq.removeEventListener('change', on);
   }, [pref]);
-  return isDark(pref);
+  return resolveBase(prefs);
 }
 
-/** Обои текущей темы. */
-export function useWallpaper(): { dark: boolean; key: 'light' | 'dark'; wp: WallpaperPref } {
-  const dark = useIsDark();
-  const key = dark ? 'dark' : 'light';
-  const wp = useGlobal((s) => s.prefs.wallpaper[key]);
-  return { dark, key, wp };
+/** Тёмная ли тема на экране. */
+export const useIsDark = (): boolean => sideOf(useBase()) === 'dark';
+
+/** Обои текущей темы: key — база (у каждой темы свои обои), dark — сторона. */
+export function useWallpaper(): { dark: boolean; key: Base; wp: WallpaperPref } {
+  const key = useBase();
+  const wp = useGlobal((s) => s.prefs.themes[key].wallpaper);
+  return { dark: sideOf(key) === 'dark', key, wp };
 }

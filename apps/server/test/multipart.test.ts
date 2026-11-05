@@ -37,7 +37,7 @@ test('start: a big file gets a multipart upload instead of a single PUT; a small
   const [row] = await sql`select status, upload_id from attachments where id = ${res.id as string}`;
   expect(row.status).toBe('pending');
   expect(row.upload_id).toBeTruthy();
-  expect((await listMultipart(conf())).some((u) => u.key === res.id && u.uploadId === row.upload_id)).toBe(true);
+  expect((await listMultipart(conf())).some((u) => u.key === 'pending/' + res.id && u.uploadId === row.upload_id)).toBe(true);   // во временном ключе (UPL-1)
   const small = await (await uploadIntent(base, a.token, { name: 'a.txt', mime: 'text/plain', size: 5 * MB - 1 })).json() as Record<string, unknown>;
   expect(typeof small.url).toBe('string');
   expect(small.multipart).toBeUndefined();

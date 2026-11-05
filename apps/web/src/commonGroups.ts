@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'preact/hooks';
+import { useKeyedState } from './keyedState';
 import type { ProfilePhoto } from '@relay/protocol';
 import { callEngine } from './settingsData';
 
@@ -11,7 +12,7 @@ export function resetCommonGroups(): void { last.clear(); }
 
 /** Общие группы с собеседником (вкладка «Группы» в профиле, как в Telegram); null — ещё не знаем; нет собеседника — null. */
 export function useCommonGroups(peerId: number | null | undefined): CommonGroup[] | null {
-  const [groups, setGroups] = useState<CommonGroup[] | null>(() => (peerId ? last.get(peerId) ?? null : null));
+  const [groups, setGroups] = useKeyedState<number | null | undefined, CommonGroup[] | null>(peerId, (id) => (id ? last.get(id) ?? null : null));
   useEffect(() => {
     if (!peerId) { setGroups(null); return; }
     setGroups(last.get(peerId) ?? null);

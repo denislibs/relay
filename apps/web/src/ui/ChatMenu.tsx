@@ -7,7 +7,10 @@
 // «Отключить звук…» — окно со сроками (без подменю), «Включить звук» — сразу.
 import { useEffect, useRef, useState } from 'preact/hooks';
 import type { GroupInfo, MyMembership } from '@relay/protocol';
-import { IconButton, MenuPopover, useHoverMenu } from '@relay/ui';
+import { IconButton, MenuPopover, Modal, useHoverMenu } from '@relay/ui';
+import { ThemeTiles } from './settings/ThemeTiles';
+import { useBase } from '../wallpapers';
+import { setChatTheme } from '../chatTheme';
 import { getGlobal, setGlobal, useGlobal, findChat } from '../global';
 import { blockUser, showToast, unblockUser, useUser } from '../settingsData';
 import { canManage } from '../groups';
@@ -33,6 +36,10 @@ export function ChatMenu({ chatId, title }: { chatId: number; title: string }) {
   const owner = gMe?.role === 'owner';
 
   const [open, setOpen] = useState(false);
+  const [themeOpen, setThemeOpen] = useState(false);
+  const base = useBase();
+  // тема чата: в личном — любой из двоих (не служебный, без блокировки), в группе и канале — кто меняет информацию
+  const canTheme = !chat?.preview && ((peerId != null && !iBlocked && !user?.blocksMe) || (gMe != null && canManage(gMe)));
   const hover = useHoverMenu(open, setOpen);   // как в Telegram: наведение открывает, уход с кнопки и меню — закрывает
   const dialogs = useChatDialogs(chatId, title);
   const setAsk = (a: 'mute' | 'delete' | 'leave') => { setOpen(false); dialogs.open(a); };
@@ -54,6 +61,7 @@ export function ChatMenu({ chatId, title }: { chatId: number; title: string }) {
       ? { icon: 'bell', label: 'Включить звук', onClick: () => unmuteChat(chatId) }
       : { icon: 'bellOff', label: 'Отключить звук…', onClick: () => setAsk('mute') }]),
     ...(!system && !gInfo?.protected ? [{ icon: 'checkCircle', label: 'Выбрать сообщения', onClick: () => startSelect(chatId, []) }] : []),
+    ...(canTheme ? [{ icon: 'palette', label: 'Тема чата', onClick: () => { setOpen(false); setThemeOpen(true); } }] : []),
     ...(peerId ? [iBlocked
       ? { icon: 'block', label: 'Разблокировать', onClick: () => { void unblockUser(peerId).then(() => showToast('Пользователь разблокирован')); } }
       : { icon: 'block', label: 'Заблокировать', onClick: () => { void blockUser(peerId).then(() => showToast('Пользователь заблокирован')); } }] : []),
@@ -72,6 +80,10 @@ export function ChatMenu({ chatId, title }: { chatId: number; title: string }) {
       <MenuPopover open={open} hover anchor={btn.current?.firstElementChild ?? undefined} placement="bottom-end" label="Действия с чатом"
         items={items} onClose={() => setOpen(false)} onPointerEnter={hover.onPointerEnter} onPointerLeave={hover.onPointerLeave} />
       {dialogs.node}
+      <Modal open={themeOpen} title="Тема чата" size="slim" onClose={() => setThemeOpen(false)}>
+        <p class="rl-mdl-text app-chattheme-hint">{peerId ? 'Тему увидите вы оба.' : 'Тему увидят все участники.'} Светлая или тёмная — как у каждого в настройках.</p>
+        <ThemeTiles base={base} selected={(chat?.theme as string | null) ?? null} onPick={(id) => { void setChatTheme(chatId, id); }} />
+      </Modal>
     </>
   );
 }

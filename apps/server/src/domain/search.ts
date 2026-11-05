@@ -40,7 +40,8 @@ export async function searchMessages(userId: number, q: string, opts: { chatId?:
       from messages m
       join chat_members cm on cm.chat_id = m.chat_id and cm.user_id = ${userId}
       join chats c on c.id = m.chat_id and c.deleted_at is null   -- удалённый (мягко) чат не ищется
-     where m.id = any(${page}::bigint[]) and not m.deleted`;
+     where m.id = any(${page}::bigint[]) and not m.deleted
+       and m.id >= cm.history_from   -- скрытая история (вступил позже, «удалить у себя») не ищется — AUTHZ-1`;
   await openRows(rows);
   const byId = new Map(rows.map((r) => [Number(r.id), r]));
   const ordered = page.map((id) => byId.get(id)).filter((r): r is NonNullable<typeof r> => !!r);
@@ -69,7 +70,7 @@ export async function searchPostgres(userId: number, q: string, opts: { chatId?:
       from messages m
       join chat_members cm on cm.chat_id = m.chat_id and cm.user_id = ${userId}
       join chats c on c.id = m.chat_id and c.deleted_at is null   -- удалённый (мягко) чат не ищется
-     where not m.deleted
+     where not m.deleted and m.id >= cm.history_from   -- скрытая история не ищется (AUTHZ-1)
        and (m.content is not null or m.body ilike ${pattern}
             or (m.attachment is not null   -- то же выражение, что в индексе messages_attachment_trgm
                 and (coalesce(m.attachment->>'name', '') || E'\n' || coalesce(m.attachment->>'title', '') || E'\n' || coalesce(m.attachment->>'performer', '')) ilike ${pattern}))

@@ -216,7 +216,7 @@ function ChannelRow({ c, q }: { c: ChannelHit; q: string }) {
 function PersonRow({ p, q }: { p: PersonHit; q: string }) {
   const open = () => {
     if (p.chatId) { pickChat(p.chatId); return; }
-    void import('../../data').then((d) => d.startDirectChat(p.id)).then(() => closeSearch());
+    void import('../../data').then((d) => d.startDirectChat(p.id, p.key ? { key: p.key } : undefined)).then(() => closeSearch());
   };
   return (
     <button type="button" class="rl-row app-gsearch-row" onClick={open}>

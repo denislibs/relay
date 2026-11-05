@@ -8,7 +8,7 @@ import { chatTitle, displayName } from './names';
 import type { Store } from './store';
 import type { LocalMessage } from './types';
 
-export interface PersonHit { id: number; name: string; username: string | null; photo: ProfilePhoto | null; chatId: number | null }
+export interface PersonHit { id: number; key?: string; name: string; username: string | null; photo: ProfilePhoto | null; chatId: number | null }
 export interface MediaHit { message: Message; chatTitle: string | null; chatKind: 'direct' | 'group' | 'channel' }
 
 /** Слова для сравнения — как searchTerms (NFC, нижний регистр, ё → е, по не-буквам), но и однобуквенные: «а» ищет «Анна». */

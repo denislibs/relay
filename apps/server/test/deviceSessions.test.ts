@@ -1,11 +1,14 @@
 import { afterAll, beforeEach, expect, test } from 'bun:test';
 import { createServer } from '../src/http';
 import { newChallenge } from '../src/deviceAuth';
-import { resetDb } from './helpers';
+import { makeChat, resetDb } from './helpers';
+import { startRealtime } from '../src/realtime';
+import { sendMessage } from '../src/domain/messages';
 
 const server = createServer({ port: 0 });
+const stopRealtime = await startRealtime(server);
 const base = `http://localhost:${server.port}`;
-afterAll(() => server.stop(true));
+afterAll(async () => { await stopRealtime(); server.stop(true); });
 beforeEach(resetDb);
 
 const login = async (name: string) => (await (await fetch(`${base}/dev/login`, { method: 'POST', body: JSON.stringify({ name }) })).json()) as { userId: number; token: string };
@@ -74,14 +77,10 @@ test('WebSocket of a bound session runs frames only after the device signs the c
   expect(await s.until(() => s.frames.some((f) => f.op === 'hello'))).toBe(true);   // кадр из очереди выполнен
   s.ws.close();
 
-  // доступ истёк — сокет открывается и по долгому cookie, но тоже ждёт подписи
+  // один долгий cookie (доступ истёк или украден) — сокет не открывается вовсе (AUTH-1)
   const longOnly = socket(cookie(a.token));
-  await longOnly.opened;
-  await longOnly.until(() => longOnly.frames.some((f) => f.op === 'challenge'));
-  longOnly.ws.send(JSON.stringify({ op: 'hello', lastSeq: 0 }));
-  longOnly.ws.send(JSON.stringify({ op: 'prove', sig: await dev.sign('ws', longOnly.frames[0].nonce as string) }));
-  expect(await longOnly.until(() => longOnly.frames.some((f) => f.op === 'hello'))).toBe(true);
-  longOnly.ws.close();
+  expect(await longOnly.until(() => longOnly.closed() !== null)).toBe(true);
+  expect(longOnly.frames).toEqual([]);
 
   const bad = socket(cookie(a.token, access));
   await bad.opened;
@@ -109,4 +108,33 @@ test('a new sign-in in the same browser drops the short access cookie of the pre
   const set = (res.headers.getSetCookie?.() ?? [res.headers.get('set-cookie') ?? '']).join(' ');
   expect(set).toContain('relay_session=');
   expect(set).toContain('relay_access=;');
+});
+
+test('AUTH-1: until the device proof the socket gets nothing — not even a new direct message; after it, sync brings the message', async () => {
+  const a = await login('Анна'), b = await login('Борис'), dev = await device();
+  const access = accessOf(await refresh(a.token, dev))!;
+  const chatId = await makeChat([a.userId, b.userId]);
+  const s = socket(cookie(a.token, access));
+  await s.opened;
+  await s.until(() => s.frames.some((f) => f.op === 'challenge'));
+  await sendMessage(b.userId, { chatId, clientId: crypto.randomUUID(), body: 'секрет до подписи' });
+  await Bun.sleep(400);
+  expect(s.frames.map((f) => f.op)).toEqual(['challenge']);   // ни push, ни typing, ни presence
+  s.ws.send(JSON.stringify({ op: 'prove', sig: await dev.sign('ws', s.frames[0].nonce as string) }));
+  s.ws.send(JSON.stringify({ op: 'hello', lastSeq: 0 }));
+  s.ws.send(JSON.stringify({ op: 'sync', since: 0 }));
+  expect(await s.until(() => JSON.stringify(s.frames).includes('секрет до подписи'))).toBe(true);
+  s.ws.close();
+});
+
+test('DOS-1: oversized frames and frame floods close the socket', async () => {
+  const a = await login('Вера');
+  const big = socket(cookie(a.token));
+  await big.opened;
+  big.ws.send(JSON.stringify({ op: 'typing', chatId: 1, pad: 'x'.repeat(300 * 1024) }));
+  expect(await big.until(() => big.closed() !== null)).toBe(true);
+  const flood = socket(cookie(a.token));
+  await flood.opened;
+  for (let i = 0; i < 150; i++) flood.ws.send(JSON.stringify({ op: 'ping' }));
+  expect(await flood.until(() => flood.closed() === 4008)).toBe(true);
 });

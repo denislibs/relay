@@ -23,7 +23,7 @@ export const gcGraceMs = (): number => {
 const CURSOR = 'storage_gc_cursor';
 
 /** Условие «на вложение a кто-то ссылается» (тот же набор, что в fileFor). */
-const referenced = (db: typeof sql) => db`(
+export const referenced = (db: typeof sql) => db`(
      exists (select 1 from messages m where m.attachment->>'id' = a.id::text and not m.deleted)
   or exists (select 1 from profile_music pm where pm.attachment_id = a.id)
   or exists (select 1 from user_photos up where up.big = a.id or up.small = a.id or up.video = a.id)

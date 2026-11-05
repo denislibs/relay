@@ -1,4 +1,5 @@
 import { requestMutation } from '@relay/ui';
+import { useChatThemeStyle } from '../chatTheme';
 import { useLayoutEffect, useRef, useState } from 'preact/hooks';
 import { activeFrame, useGlobal } from '../global';
 import { Chat } from './Chat';
@@ -28,6 +29,13 @@ export function ChatStack() {
 
 type Place = 'below' | 'on' | 'above';
 
+/** Доиграть до конца конечные CSS-анимации внутри колонки (переходы и бесконечные — спиннер, «печатает…» — не трогаем). */
+export function finishEntrances(el: Element): void {
+  for (const a of el.getAnimations({ subtree: true })) {
+    if (a instanceof CSSAnimation && a.effect?.getComputedTiming().iterations !== Infinity) a.finish();
+  }
+}
+
 function ChatColumn({ frame, chatId, threadId, place, instant, pending, swap }: { frame: string; chatId: number; threadId?: number; place: Place; instant: boolean; pending: boolean; swap: boolean }) {
   // первый кадр колонки — на исходной позиции, иначе переход не с чего начинать; нижний чат встаёт сразу.
   // Колонка, смонтированная справа (готовится поверх), уже стоит на исходной — ей ждать нечего: иначе она
@@ -48,6 +56,9 @@ function ChatColumn({ frame, chatId, threadId, place, instant, pending, swap }: 
     prev.current = pos;
     const el = box.current;
     if (!el) return;
+    // подмена: колонка собиралась скрытой, и анимации появления (закреп, реакции, текст закрепа) начались там —
+    // показ застал бы их на середине: закреп полупрозрачным, лента просвечивает. Чат встаёт целиком, как шапка
+    if (swap && pos === 'on') finishEntrances(el);
     el.classList.add('app-chatcol-moving');
     const t = setTimeout(() => requestMutation(() => el.classList.remove('app-chatcol-moving')), 320);
     return () => clearTimeout(t);
@@ -55,8 +66,10 @@ function ChatColumn({ frame, chatId, threadId, place, instant, pending, swap }: 
   // swap — подмена нижнего чата: собранная скрытой колонка встаёт на место без перехода
   const cls = 'app-chatcol app-chatcol-' + pos + ((instant && !entered) || swap ? ' app-chatcol-instant' : '') + (pending && !swap ? ' app-chatcol-moving' : '');
   const hidden = on ? {} : { 'aria-hidden': true, inert: true };
+  // тема чата (chatTheme.ts): акцент и свои пузыри — переменными на колонке, поверх темы страницы
+  const themed = useChatThemeStyle(chatId);
   return (
-    <div ref={box} class={cls} data-current={on ? '' : undefined} {...hidden}>
+    <div ref={box} class={cls} data-current={on ? '' : undefined} style={themed?.style} data-out-filled={themed?.filled ? '' : undefined} {...hidden}>
       <Chat frameKey={frame} chatId={chatId} threadId={threadId} active={on} />
     </div>
   );

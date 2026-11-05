@@ -4,7 +4,7 @@ import { createServer } from '../src/http';
 import { sendMessage } from '../src/domain/messages';
 import { markRead, READ_BY_MAX } from '../src/domain/reads';
 import { setLinkedChat } from '../src/domain/groups';
-import { makeChat, resetDb } from './helpers';
+import { makeChat, resetDb, refs } from './helpers';
 
 const server = createServer({ port: 0 });
 const base = `http://localhost:${server.port}`;
@@ -26,7 +26,7 @@ const readBy = (u: U, chatId: number, id: number) => ok(u, 'GET', `/chats/${chat
 
 test('group: the author sees who read (names as the author sees them), not themself; others are forbidden', async () => {
   const a = await login('Анна'), b = await login('Борис'), c = await login('Вера'), d = await login('Глеб');
-  const g = (await ok(a, 'POST', '/chats', { title: 'Группа', memberIds: [b.userId, c.userId, d.userId] })).id as number;
+  const g = (await ok(a, 'POST', '/chats', { title: 'Группа', members: refs(a.userId, [b.userId, c.userId, d.userId]) })).id as number;
   const m = await send(a, g, 'всем');
   const later = await send(a, g, 'потом');
   await markRead(b.userId, g, later.id);
@@ -43,14 +43,14 @@ test('only groups up to READ_BY_MAX members; direct chats are bad_frame; comment
   const dm = await makeChat([a.userId, b.userId], 'direct');
   const dmMsg = await send(a, dm, 'лично');
   expect(await code(a, `/chats/${dm}/messages/${dmMsg.id}/read-by`)).toBe('bad_frame');
-  const g = (await ok(a, 'POST', '/chats', { title: 'Группа', memberIds: [b.userId] })).id as number;
+  const g = (await ok(a, 'POST', '/chats', { title: 'Группа', members: refs(a.userId, [b.userId]) })).id as number;
   const m = await send(a, g, 'x');
   await sql`update chats set members_count = ${READ_BY_MAX + 1} where id = ${g}`;
   expect(await code(a, `/chats/${g}/messages/${m.id}/read-by`)).toBe('forbidden');
   await sql`update chats set members_count = ${READ_BY_MAX} where id = ${g}`;
   expect(await readBy(a, g, m.id)).toEqual([]);
   // канал с группой обсуждения: копия поста и комментарий в группе — без «кто прочитал»
-  const ch = (await ok(a, 'POST', '/chats', { kind: 'channel', title: 'Новости', memberIds: [b.userId] })).id as number;
+  const ch = (await ok(a, 'POST', '/chats', { kind: 'channel', title: 'Новости', members: refs(a.userId, [b.userId]) })).id as number;
   expect(await code(a, `/chats/${ch}/messages/${(await send(a, ch, 'пост')).id}/read-by`)).toBe('bad_frame');
   await sql`update chats set members_count = 2 where id = ${g}`;
   await setLinkedChat(a.userId, ch, g);

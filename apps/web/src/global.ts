@@ -57,6 +57,9 @@ export interface GlobalState {
   openThreadId: number | null;   // тред на экране (верхний кадр — тред этого чата), иначе null
   pendingChatId: number | null;  // выбран, но лента ещё не готова: на экране прежний чат, строка уже подсвечена
   peer: Item | null;   // присутствие собеседника открытого личного чата {userId, known, online, lastSeen}
+  /** Последнее известное присутствие по userId (как статусы пользователей в Telegram): шапка нового чата
+   *  берёт его в первом же кадре, а уходящая колонка не теряет своё, когда подписка переключилась на другого. */
+  presence: Record<number, Item>;
   chatStack: ChatFrame[];        // стек чатов, снизу вверх
   chatLeaving: ChatFrame[];      // снятые со стека: доигрывают уход и ждут скрытыми до минуты (повторное открытие — без подготовки)
   folder: number;      // активная папка: 0 — «Все чаты», иначе id своей папки
@@ -153,6 +156,7 @@ let state: GlobalState = {
   openThreadId: null,
   pendingChatId: null,
   peer: null,
+  presence: {},
   chatStack: [],
   chatLeaving: [],
   folder: 0,
@@ -251,6 +255,19 @@ export function findChat(s: GlobalState, id: number | null | undefined): Item | 
 export function activeFrame(s: GlobalState): ChatFrame | undefined {
   for (let i = s.chatStack.length - 1; i >= 0; i--) if (s.chatStack[i].ready) return s.chatStack[i];
   return undefined;
+}
+/**
+ * Глубина колонки в стеке — она сама и всё под ней (стрелка «Назад» у шапки — с двух). Собираемая подмена нижнего чата
+ * (swap) уровнем не считается: это тот же нижний. Колонка, снятая со стека (уходит после «Назад»), была вложенной —
+ * стрелка у неё остаётся до конца ухода, иначе заголовок прыгал бы посреди перехода.
+ */
+export function stackDepth(s: Pick<GlobalState, 'chatStack' | 'chatLeaving'>, key: string): number {
+  const i = s.chatStack.findIndex((f) => f.key === key);
+  if (i < 0) return s.chatLeaving.some((f) => f.key === key) ? 2 : 1;
+  if (s.chatStack[i].swap) return 1;
+  let n = 0;
+  for (let j = 0; j <= i; j++) if (!s.chatStack[j].swap) n++;
+  return n;
 }
 export const frameByKey = (s: GlobalState, key: string): ChatFrame | undefined =>
   s.chatStack.find((f) => f.key === key) ?? s.chatLeaving.find((f) => f.key === key);

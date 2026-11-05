@@ -2,7 +2,7 @@ import { openRows } from './messageContent';
 import { sql, type Tx } from '../db';
 import { assertMember } from './chats';
 import { DomainError } from './errors';
-import { saveProfile } from './profile';
+import { canView, saveProfile } from './profile';
 
 // Музыка в профиле: человек добавляет трек из чата, где он участник; видят все, кого он не заблокировал.
 // Файл трека после этого доступен и тем, кто видит профиль (fileFor), — как в Telegram.
@@ -14,6 +14,8 @@ export const PROFILE_MUSIC_MAX = 100;
 export interface ProfileTrack { id: string; title: string; duration: number | null; mime: string; addedAt: string }
 
 export async function listProfileMusic(viewer: number, userId: number): Promise<ProfileTrack[]> {
+  // как профиль: без общего чата или контакта человека не видно (иначе id-перебор открывал бы музыку любого)
+  if (viewer !== userId && !(await canView(sql, viewer, userId))) throw new DomainError('not_found');
   const [blocked] = await sql`select 1 from blocks where owner_id = ${userId} and user_id = ${viewer}`;
   if (blocked && viewer !== userId) return [];
   const rows = await sql`

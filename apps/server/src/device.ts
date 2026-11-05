@@ -1,3 +1,4 @@
+import { isPrivateIp } from './geoip';
 /** Грубое имя устройства по User-Agent: «Chrome 141, macOS». Только браузер, старшая версия и ОС — без точных сборок. */
 
 // порядок важен: Edge/Opera/Яндекс тоже пишут Chrome/, Chrome пишет Safari/
@@ -51,4 +52,11 @@ export function clientIp(req: Request, server: IpSource): string | null {
   if (!ip) ip = server.requestIP(req)?.address ?? null;
   if (!ip) return null;
   return ip.replace(/^::ffff:(\d+\.\d+\.\d+\.\d+)$/, '$1').slice(0, 64);
+}
+
+/** dev-входы: только с DEV_LOGIN=1 и только с этой машины или из частной сети (INFRA-6) — не с публичного адреса */
+export function devAllowed(req: Request, server: IpSource): boolean {
+  if (process.env.DEV_LOGIN !== '1') return false;
+  const ip = clientIp(req, server);
+  return ip === null || isPrivateIp(ip);
 }

@@ -1,3 +1,4 @@
+import { peerKey } from '../crypto/peerKey';
 import { normalizeLinks, USERNAME, type Birthday, type Me, type PersonalChannel, type ProfileLink, type ProfileMusicSummary, type ProfilePhoto, type PublicUser, type UserPhoto } from '@relay/protocol';
 import { isTx, sql, type Tx } from '../db';
 import { DomainError } from './errors';
@@ -67,7 +68,8 @@ export function publicUser(viewer: number, r: Row, contact: ContactName | null |
   const s = shape(r);
   const c = contact && r.id !== viewer ? contact : null;
   return {
-    id: r.id, name: c ? fullName(c.first_name, c.last_name) : s.name,
+    id: r.id, ...(r.id !== viewer ? { key: peerKey(viewer, r.id) } : {}),
+    name: c ? fullName(c.first_name, c.last_name) : s.name,
     firstName: c ? c.first_name : s.firstName, lastName: c ? c.last_name : s.lastName, publicName: s.name,
     username: s.username, links: s.links,   // как @username — видны всем, кто видит профиль
     bio: canSee(viewer, r.id, 'bio', ctx) ? s.bio : null,

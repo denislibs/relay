@@ -1,20 +1,49 @@
-import { Bubble, InfoRow, PanelHeader, RadioRow, RangeRow, Section } from '@relay/ui';
+import { Bubble, CheckRow, InfoRow, PanelHeader, RadioRow, RangeRow, Section } from '@relay/ui';
 import { useEffect, useState } from 'preact/hooks';
 import { useGlobal } from '../../global';
 import { back, go } from '../../nav';
-import { ACCENTS } from '../../accent';
-import { setPref, type ThemePref } from '../../prefs';
-import { useWallpaper } from '../../wallpapers';
+import { setPref, setPrefs, type ThemePref } from '../../prefs';
+import { BASE_ACCENT, PRESETS, type Base, type Preset } from '../../themes/presets';
+import { useBase, useWallpaper } from '../../wallpapers';
+import { ThemeTiles } from './ThemeTiles';
 import { useWallpaperImage } from '../../wallpaperImage';
 import { hm, localeTimeFormat } from '../format';
 import { useScrollMemory } from '../useScrollMemory';
 import { Swatch, swatchBackground } from './Wallpaper';
 
-const THEMES: { pref: ThemePref; title: string }[] = [
-  { pref: 'system', title: 'Как в системе' },
-  { pref: 'light', title: 'Светлая' },
-  { pref: 'dark', title: 'Тёмная' },
-];
+/** Порядок и названия — как в Telegram Web: Classic, Night, Day, Dark, System Default. */
+export const THEME_TITLES: Record<ThemePref, string> = { classic: 'Классическая', night: 'Ночь', day: 'День', tinted: 'Тёмная', system: 'Как в системе' };
+const THEMES: ThemePref[] = ['classic', 'night', 'day', 'tinted', 'system'];
+
+/** Кружок набора: цвет пузыря (два — диагональным градиентом, как кружки акцентов у Telegram) или акцент. */
+const swatchOf = (p: Preset): string => {
+  const b = p.settings.bubble;
+  return b && b.length > 1 ? `linear-gradient(135deg, ${b[0]}, ${b[1]})` : (b?.[0] && b[0].toLowerCase() !== '#ffffff' && p.settings.accent === b[0] ? b[0] : p.settings.accent);
+};
+
+/** Ряд наборов текущей темы: «как в теме» и наборы базы. Выбор сбрасывает готовую тему (плитку). */
+function Accents({ base }: { base: Base }) {
+  const choice = useGlobal((s) => s.prefs.themes[base]);
+  const pick = (preset: string | null) => setPrefs({ [`themes.${base}.preset`]: preset, [`themes.${base}.catalog`]: null });
+  const items: { id: string | null; name: string; bg: string }[] = [
+    { id: null, name: 'Как в теме', bg: BASE_ACCENT[base] },
+    ...PRESETS[base].map((p, i) => ({ id: p.id, name: 'Набор ' + (i + 1), bg: swatchOf(p) })),
+  ];
+  return (
+    <div class="app-accents" role="radiogroup" aria-label="Цвет">
+      {items.map((a) => {
+        const on = !choice.catalog && choice.preset === a.id;
+        return (
+          <button
+            key={a.id ?? 'default'} type="button" role="radio" class="app-accent" aria-checked={on ? 'true' : 'false'}
+            aria-label={a.name} title={a.name} style={{ '--swatch': a.bg.startsWith('linear') ? 'var(--brand)' : a.bg, background: a.bg }}
+            onClick={() => pick(a.id)}
+          />
+        );
+      })}
+    </div>
+  );
+}
 
 const isMac = typeof navigator !== 'undefined' && /Mac|iPhone|iPad/.test(navigator.platform || navigator.userAgent);
 
@@ -32,6 +61,7 @@ function useNow(): Date {
 
 export function General() {
   const prefs = useGlobal((s) => s.prefs);
+  const base = useBase();
   const { dark, wp, key } = useWallpaper();
   const wpImage = useWallpaperImage(key, wp.image);
   const scroll = useScrollMemory('settings/general');
@@ -53,19 +83,18 @@ export function General() {
             trailing={<span class="app-swatch-mini" aria-hidden="true">{wpImage ? <span class="app-swatch-fill app-swatch-photo" style={{ backgroundImage: `url("${wpImage}")` }} /> : <Swatch pattern={wp.pattern} colors={wp.colors} dark={dark} intensity={wp.intensity} />}</span>}
           />
         </Section>
-        <Section setting="general.theme" title="Тема" role="radiogroup">
-          {THEMES.map((t) => <RadioRow setting={'general.theme.' + t.pref} key={t.pref} label={t.title} checked={prefs.theme === t.pref} onClick={() => setPref('theme', t.pref)} />)}
-        </Section>
-        <Section setting="general.accent" title="Цвет акцента" role="radiogroup">
-          <div class="app-accents">
-            {ACCENTS.map((a) => (
-              <button
-                key={a.id} type="button" role="radio" class="app-accent" aria-checked={prefs.accent === a.id ? 'true' : 'false'}
-                aria-label={a.name} title={a.name} style={{ '--swatch': a.color }}
-                onClick={() => setPref('accent', a.id)}
+        <Section setting="general.theme" title="Цветовая тема">
+          <ThemeTiles base={base} />
+          <div role="radiogroup" aria-label="Тема">
+            {THEMES.map((t) => (
+              <RadioRow
+                setting={'general.theme.' + t} key={t} label={THEME_TITLES[t]} checked={prefs.theme === t} onClick={() => setPref('theme', t)}
+                subtitle={t === 'system' ? `Днём — ${THEME_TITLES[prefs.lastLight].toLowerCase()}, ночью — ${THEME_TITLES[prefs.lastDark].toLowerCase()}` : undefined}
               />
             ))}
           </div>
+          <div data-setting="general.accent"><Accents base={base} /></div>
+          <CheckRow setting="general.contrast" label="Повышенная контрастность" subtitle="Текст и ссылки ярче на любом фоне" checked={prefs.contrast} onChange={(v: boolean) => setPref('contrast', v)} />
         </Section>
         <Section setting="general.timeFormat" title="Формат времени" role="radiogroup">
           <RadioRow setting="general.timeFormat.12h" label="12 часов" subtitle={hm(now, '12h')} checked={fmt === '12h'} onClick={() => setPref('timeFormat', '12h')} />

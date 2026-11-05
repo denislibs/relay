@@ -12,6 +12,17 @@ import { DomainError } from './errors';
 
 const PENDING_MIN = 10, CHALLENGE_SEC = 60, MAX_PENDING_TRIES = 5, MAX_WRONG_PER_HOUR = 10;
 const RECOVERY_MIN = 10, RECOVERY_TRIES = 5;
+/** Восстановление на аккаунт в час: писем с кодом и неверных кодов (AUTH-2) */
+const RECOVERY_SENDS_PER_HOUR = 3, RECOVERY_WRONG_PER_HOUR = 10;
+
+/** Восстановления пользователя за час: сколько кодов отправлено и сколько неверных введено (по всем попыткам входа). */
+async function recoveryLastHour(userId: number): Promise<{ sends: number; wrong: number }> {
+  const [r] = await sql`
+    select coalesce(sum(r.sends), 0)::int as sends, coalesce(sum(r.tries), 0)::int as wrong
+      from password_recovery r join login_pending lp on lp.id = r.pending_id
+     where lp.user_id = ${userId} and r.created_at > now() - interval '1 hour'`;
+  return { sends: r.sends, wrong: r.wrong };
+}
 const MAX_HINT = 64, MAX_EMAIL = 254;
 const hashCode = (code: string) => createHash('sha256').update('relay-recovery:' + code).digest('hex');
 
@@ -121,10 +132,13 @@ export async function startRecovery(pendingId: unknown): Promise<{ emailPattern:
   const p = await livePending(pendingId, 'password');
   const [pw] = await sql`select email from user_passwords where user_id = ${p.user_id}`;
   if (!pw?.email) throw new DomainError('recovery_unavailable');
+  // не чаще RECOVERY_SENDS_PER_HOUR писем в час: и перебор, и засыпание почты письмами
+  if ((await recoveryLastHour(Number(p.user_id))).sends >= RECOVERY_SENDS_PER_HOUR) throw new DomainError('flood');
   const code = String(randomInt(0, 1e6)).padStart(6, '0');
   await sql.begin(async (tx) => {
+    // новый код — но счётчик неверных попыток прежний: повторная отправка не даёт новых пяти попыток
     await tx`insert into password_recovery (pending_id, code_hash, expires_at) values (${p.id}, ${hashCode(code)}, now() + ${RECOVERY_MIN + ' minutes'}::interval)
-              on conflict (pending_id) do update set code_hash = excluded.code_hash, tries = 0, expires_at = excluded.expires_at`;
+              on conflict (pending_id) do update set code_hash = excluded.code_hash, sends = password_recovery.sends + 1, expires_at = excluded.expires_at`;
     // код — под secret: в jobs_dead не копируется; письмо, не ушедшее за срок жизни кода, бесполезно
     await enqueue(tx, 'mail.recovery', { to: pw.email as string, secret: { code } }, { maxAttempts: 5 });
   });
@@ -134,10 +148,13 @@ export async function startRecovery(pendingId: unknown): Promise<{ emailPattern:
 /** Верный код восстановления снимает облачный пароль и завершает вход (сеанс неподтверждённый, как после кода). */
 export async function finishRecovery(pendingId: unknown, code: unknown): Promise<FirstFactor> {
   const p = await livePending(pendingId, 'password');
+  if ((await recoveryLastHour(Number(p.user_id))).wrong >= RECOVERY_WRONG_PER_HOUR) throw new DomainError('flood');
   const [r] = await sql`select code_hash, tries from password_recovery where pending_id = ${p.id} and expires_at > now()`;
   if (!r || r.tries >= RECOVERY_TRIES) throw new DomainError('code_expired');
   if (typeof code !== 'string' || hashCode(code.trim()) !== r.code_hash) {
-    await sql`update password_recovery set tries = tries + 1 where pending_id = ${p.id}`;
+    const [t] = await sql`update password_recovery set tries = tries + 1 where pending_id = ${p.id} returning tries`;
+    // исчерпал попытки — гаснет и сам вход: начать заново можно только с первого шага (кода из Relay)
+    if (Number(t.tries) >= RECOVERY_TRIES) await sql`update login_pending set dead_at = now() where id = ${p.id}`;
     throw new DomainError('code_invalid');
   }
   await sql.begin(async (tx) => {

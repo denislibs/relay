@@ -1,7 +1,7 @@
 import { ContactPicker, Modal, SearchInput, peerTone } from '@relay/ui';
 import type { GroupInvite, GroupMember } from '@relay/protocol';
 import { useState } from 'preact/hooks';
-import { createDirectChat, engineSend, openUserChat, refreshChats } from '../../data';
+import { createDirectChat, engineSend, openUserChat, peerRefs, refreshChats } from '../../data';
 import { useGlobal } from '../../global';
 import { act, adminCan, canInvite, inviteUrl, plural, useGroup, useGroupData } from '../../groups';
 import { senderAvatar } from '../../profilePhoto';
@@ -75,9 +75,12 @@ export function AddMembers({ nav }: { nav: Nav }) {
   const add = async () => {
     if (!picked.length) return;
     setBusy(true);
-    const r = await act<{ added: number[]; failed: number[] }>('POST', `/groups/${chatId}/members`, { userIds: picked });
+    // кого добавить — ссылками с ключом доступа (сервер голые id не принимает); кого не видно — сразу в «не удалось»
+    const { refs, missing } = await peerRefs(picked);
+    const r = refs.length ? await act<{ added: number[]; failed: number[] }>('POST', `/groups/${chatId}/members`, { users: refs }) : { added: [], failed: [] };
     setBusy(false);
     if (!r) return;
+    r.failed = [...r.failed, ...missing];
     if (r.added.length && kind === 'channel') refreshChats();   // число подписчиков журнал канала не несёт
     if (r.added.length) showToast(r.added.length === 1 ? `${nameOf(r.added[0])} в группе` : `Добавлено: ${r.added.length}`);
     if (r.failed.length) setFailed(r.failed); else nav.back();

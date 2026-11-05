@@ -5,6 +5,9 @@ import {
 import { createInvite, decideRequests, deleteInvites, editInvite, inviteJoined, joinByInvite, joinDiscussion, listInvites, listRequests, previewInvite } from './domain/invites';
 import { DomainError } from './domain/errors';
 import { channelPreview } from './domain/channelPreview';
+import { resolvePeers } from './domain/peerRef';
+import { sql } from './db';
+import { MEMBERS_MAX } from '@relay/protocol';
 
 // Управление группой и каналом: /groups/:id/... и вступление по ссылке /join/:key («+токен» или «@имя»). Права проверяет домен.
 
@@ -57,7 +60,8 @@ export async function groupRoute(req: Request, url: URL, userId: number): Promis
 
   if (rest === '/members') {
     if (m === 'GET') return json(await listGroupMembers(userId, chatId, url.searchParams.get('filter') ?? 'all', url.searchParams.get('q') ?? ''));
-    if (m === 'POST') return json(await addGroupMembers(userId, chatId, (await body(req)).userIds));
+    // кого добавить — ссылками {id, key} или {id, via} (domain/peerRef.ts): голый id ничего не открывает
+    if (m === 'POST') return json(await addGroupMembers(userId, chatId, await resolvePeers(sql, userId, (await body(req)).users, MEMBERS_MAX.group, 'users')));
   }
   if ((r = /^\/members\/(\d{1,15})$/.exec(rest)) && m === 'DELETE') return json(await removeGroupMember(userId, chatId, Number(r[1])));
   if ((r = /^\/members\/(\d{1,15})\/restrict$/.exec(rest)) && m === 'PUT') return json(await restrictGroupMember(userId, chatId, Number(r[1]), (await body(req)).rights ?? null));

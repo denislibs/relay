@@ -6,3 +6,5 @@ storybook-static
 docker/nginx/certs
 apps/server/assets/
 .adversarial-review/
+# ключи и сертификаты развёртывания (tools/tls/make-internal-certs.sh) — только на сервере
+secrets/

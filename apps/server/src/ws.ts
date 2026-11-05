@@ -1,5 +1,6 @@
 import { closePoll, votePoll } from './domain/polls';
 import { sql } from './db';
+import { resolvePeer } from './domain/peerRef';
 import { currentEpoch } from './domain/epoch';
 import type { ClientFrame, ServerFrame } from '@relay/protocol';
 import { DomainError } from './domain/errors';
@@ -106,6 +107,8 @@ export async function handleFrame(userId: number, frame: ClientFrame, publish: (
         return [{ op: 'updates', from: frame.since, to, items: page.items, more: page.more }];
       }
       case 'send': {
+        // карточка контакта: человек — по ссылке (ключ или сообщение), иначе id ничего не открывает и не раскрывает имя
+        if (frame.contact) frame.contact = { userId: await resolvePeer(sql, userId, { id: frame.contact.userId, key: frame.contact.key, via: frame.contact.via }, 'contact') };
         const { message, duplicate } = await sendMessage(userId, frame);
         return [{ op: 'ack', reqId: frame.reqId, result: { clientId: message.clientId, id: message.id, createdAt: message.createdAt, duplicate } }];
       }

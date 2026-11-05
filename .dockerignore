@@ -2,3 +2,11 @@ node_modules
 **/node_modules
 .git
 apps/server/assets
+# секреты и локальное — не в образ (INFRA-5)
+secrets
+docker/nginx/certs
+.env
+.env.*
+.playwright-mcp
+.claude
+apps/web/dist

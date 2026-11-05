@@ -4,14 +4,15 @@
 import { encryptedSize, FILE_CHUNK, FILE_HEADER, chunkCount, importFileKey, newNonceBase, openChunk, readHeader, sealChunk, sealedRange, writeHeader } from '@relay/protocol';
 import { sql, type Tx } from '../db';
 import { CryptoError, importAesKey, open, seal } from './aead';
-import { getKms, kmsFor } from './kms';
+import { getKms } from './kms';
+import { fileCtx, unwrapFor, wrapFor } from './keyBinding';
 
 const TTL_MS = 10 * 60_000, MAX = 2000;
 const keys = new Map<string, { raw: Uint8Array; at: number }>();
 
 export async function storeFileKey(db: Tx | typeof sql, attachmentId: string, raw: Uint8Array): Promise<void> {
   const kms = getKms();
-  await db`insert into keys.attachment_keys (attachment_id, wrapped, kek_id) values (${attachmentId}, ${Buffer.from(await kms.wrap(raw))}, ${kms.id})
+  await db`insert into keys.attachment_keys (attachment_id, wrapped, kek_id, bound) values (${attachmentId}, ${Buffer.from(await wrapFor(kms, fileCtx(attachmentId), raw))}, ${kms.id}, true)
            on conflict (attachment_id) do nothing`;
 }
 
@@ -21,7 +22,7 @@ export async function fileKey(attachmentId: string, db: Tx | typeof sql = sql): 
   if (e && Date.now() - e.at < TTL_MS) return e.raw;
   const [row] = await db`select wrapped, kek_id from keys.attachment_keys where attachment_id = ${attachmentId}`;
   if (!row) return null;
-  const raw = await kmsFor(row.kek_id as string).unwrap(new Uint8Array(row.wrapped as Uint8Array), row.kek_id as string);
+  const raw = await unwrapFor(fileCtx(attachmentId), row.wrapped as Uint8Array, row.kek_id as string);
   if (db === sql) { keys.set(attachmentId, { raw, at: Date.now() }); if (keys.size > MAX) keys.delete(keys.keys().next().value!); }
   return raw;
 }

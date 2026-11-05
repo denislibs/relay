@@ -22,7 +22,8 @@ const cache = new Map<string, Promise<LinkPreview | null>>();
 export function loadPreview(url: string): Promise<LinkPreview | null> {
   let p = cache.get(url);
   if (!p) {
-    p = fetch('/link-preview?url=' + encodeURIComponent(url)).then((r) => (r.ok ? r.json() : Promise.reject(new Error(String(r.status)))))
+    // POST: адрес в теле, не в строке запроса — не оседает в журналах прокси (CRYPTO-4)
+    p = fetch('/link-preview', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ url }) }).then((r) => (r.ok ? r.json() : Promise.reject(new Error(String(r.status)))))
       .then((j: { link: LinkPreview | null }) => j.link).catch(() => { cache.delete(url); return null; });
     cache.set(url, p);
   }

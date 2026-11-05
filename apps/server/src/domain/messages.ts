@@ -13,8 +13,8 @@ import { burnCodes } from './login';
 import { enqueue } from '../jobs/queue';
 import { can, groupCtx, hasAdmin, requireRight } from './groupRights';
 import { stickerForSend } from './stickers';
-import { cachedPreview, firstUrl, getPreview } from './linkPreview';
-import { contentColumns, openRows, updateContent } from './messageContent';
+import { firstUrl, getPreview } from './linkPreview';
+import { contentColumns, openRows, updateContent, loadOpen } from './messageContent';
 import { currentChatKey } from '../crypto/chatKeys';
 import { copyPost, isThreadRoot, noteComment, threadAccess, withCopy } from './threads';
 import { collectMentions } from './mentions';
@@ -165,12 +165,10 @@ export async function sendMessage(
         body = u.name as string;
       }
       kind = sticker ? 'sticker' : todo ? 'todo' : poll ? 'poll' : contactId != null ? 'contact' : geo ? 'geo' : dice ? 'dice' : attachment ? attachment.kind as string : 'text';
-      // превью первой ссылки (как в Telegram): готовое в кэше — сразу, иначе «грузится» и задача link.preview
+      // превью первой ссылки: всегда «грузится» и задача link.preview — даже если оно уже в кэше (CRYPTO-4): иначе
+      // ответ отправителю выдавал бы, слал ли эту ссылку кто-то ещё. Из кэша задача ответит за миллисекунды
       const url = !attachment && !blocks && !todo && !poll && !data && !sticker && !input.noLinkPreview ? firstUrl(body, entities) : null;
-      if (url) {
-        const cached = await cachedPreview(url);
-        if (cached === undefined) { link = { url, pending: true }; fetchLink = url; } else link = cached;
-      }
+      if (url) { link = { url, pending: true }; fetchLink = url; }
     }
     // права участника группы: вид сообщения, превью ссылок, медленный режим (админов не касается)
     requireRight(ctx, rightForKind(kind, attachment?.mime as string | undefined));
@@ -218,7 +216,8 @@ export async function sendMessage(
     await enqueue(tx, 'push.message', album ? { chatId: input.chatId, id: message.id, groupId: album } : { chatId: input.chatId, id: message.id },
       album ? { dedupeKey: `push.album:${input.chatId}:${album}`, runAt: new Date(Date.now() + ALBUM_PUSH_DELAY_MS) } : {});
     await enqueue(tx, 'search.sync', { id: message.id });   // в индекс поиска — тоже после коммита
-    if (fetchLink) await enqueue(tx, 'link.preview', { chatId: input.chatId, id: message.id, url: fetchLink }, { maxAttempts: 2 });
+    // в задаче — только ссылка на сообщение: адрес задача прочтёт из шифра (в jobs и jobs_dead открытых URL нет)
+    if (fetchLink) await enqueue(tx, 'link.preview', { chatId: input.chatId, id: message.id }, { maxAttempts: 2 });
     return { message, duplicate: false };
   });
   return res;
@@ -226,7 +225,13 @@ export async function sendMessage(
 
 /** Задача link.preview: загрузить превью и отдать его сообщению — если оно всё ещё ждёт именно эту ссылку
  *  (текст могли изменить или удалить). Участникам чата — обновление linkPreview. */
-export async function applyLinkPreview(p: { chatId: number; id: number; url: string }): Promise<void> {
+export async function applyLinkPreview(job: { chatId: number; id: number; url?: string }): Promise<void> {
+  // адрес — из самого сообщения (шифр): в задаче его нет (старые задачи ещё могут его нести)
+  const row = await loadOpen(job.chatId, job.id);
+  const pending = row?.link as { url?: string; pending?: boolean } | null | undefined;
+  const url = job.url ?? (pending?.pending ? pending.url : undefined);
+  if (!url || row?.deleted) return;
+  const p = { chatId: job.chatId, id: job.id, url };
   const data = await getPreview(p.url);
   await sql.begin(async (tx) => {
     // ссылка теперь в шифре — сверяем после открытия строки, под блокировкой

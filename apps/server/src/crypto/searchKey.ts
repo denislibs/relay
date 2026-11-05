@@ -4,6 +4,7 @@
 import { sql } from '../db';
 import { randomKey } from './aead';
 import { getKms, kmsFor } from './kms';
+import { SEARCH_CTX, unwrapFor, wrapFor } from './keyBinding';
 
 let key: Promise<Buffer> | null = null;
 
@@ -13,10 +14,10 @@ export function searchKey(): Promise<Buffer> {
     if (!row) {
       const kms = getKms();
       await kms.init?.();
-      await sql`insert into keys.search_key (id, wrapped, kek_id) values (1, ${Buffer.from(await kms.wrap(randomKey()))}, ${kms.id}) on conflict (id) do nothing`;
+      await sql`insert into keys.search_key (id, wrapped, kek_id, bound) values (1, ${Buffer.from(await wrapFor(kms, SEARCH_CTX, randomKey()))}, ${kms.id}, true) on conflict (id) do nothing`;
       [row] = await sql`select wrapped, kek_id from keys.search_key where id = 1`;   // гонка процессов — берём записанный первым
     }
-    return Buffer.from(await kmsFor(row.kek_id as string).unwrap(new Uint8Array(row.wrapped as Uint8Array), row.kek_id as string));
+    return Buffer.from(await unwrapFor(SEARCH_CTX, row.wrapped as Uint8Array, row.kek_id as string));
   })().catch((e) => { key = null; throw e; });
 }
 

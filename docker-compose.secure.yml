@@ -1,24 +1,30 @@
-# Продакшен-усиление поверх docker-compose.yml (план docs/plans/2026-10-21-relay-at-rest-encryption.md):
+# Продакшен поверх docker-compose.yml (план docs/plans/2026-10-21-relay-at-rest-encryption.md, аудит 2026-10-25):
+#   sh tools/tls/make-internal-certs.sh            # внутренний CA и сертификаты сервисов → secrets/tls/
+#   cp <сертификат домена> secrets/public/server.pem; cp <ключ> secrets/public/server-key.pem
 #   docker compose -f docker-compose.yml -f docker-compose.secure.yml up -d
 # Секреты — только из окружения (без значений по умолчанию): compose не запустится, если их нет.
 #
-# TLS между сервисами (apps/server/src/tls.ts): server/worker/keys в production без него не стартуют.
-#   - Postgres: ssl=on + в pg_hba.conf только hostssl (иначе база всё ещё пускает без TLS); клиенты — DB_SSL=verify-full,
-#     DB_CA и клиентский сертификат DB_CERT/DB_KEY (mTLS: база пускает только наши процессы);
-#   - Valkey: только tls-port, VALKEY_URL=rediss://…, VALKEY_CA;
-#   - S3, Meilisearch, Vault, сервис ключей — https; общий внутренний CA — NODE_EXTRA_CA_CERTS;
-#   - все хосты в одной зашифрованной сети (WireGuard) — можно RELAY_PLAIN_INTERNAL=1 вместо всего этого.
+# Что здесь иначе, чем в dev:
+#   - наружу опубликован только proxy (443/80/8333); Postgres, Valkey, S3, поиск и KMS — без портов (INFRA-1);
+#   - Postgres и Valkey — во внутренней сети `data`, только TLS: Postgres hostssl + клиентский сертификат (mTLS)
+#     и пароль, Valkey — tls-port и пароль; S3, поиск и сервис ключей — https; общий CA — NODE_EXTRA_CA_CERTS.
+#     Без этого server/worker/keys в production не стартуют (tls.ts, обхода нет);
+#   - S3: учётка из окружения (не из репозитория), без прав администратора бакета; :8333 пропускает только
+#     подписанные запросы к объектам (docker/nginx/production.conf, INFRA-2);
+#   - образы без исходников на томах, без --watch, файловая система только для чтения, временные файлы — tmpfs
+#     (расшифрованные медиа воркера не ложатся на диск, CRYPTO-14), процесс не от root (INFRA-5);
+#   - HSTS (INFRA-3), dev-входы выключены и запрещены (INFRA-6).
 #
-# Индекс поиска хранит расшифрованный текст сообщений, поэтому:
-#   - Meilisearch в своей внутренней сети `search` — его видят только server и worker, остальные сервисы и наружу — нет;
+# Индекс поиска хранит только HMAC-токены слов (search/tokens.ts), но всё равно изолирован:
+#   - Meilisearch в своей внутренней сети `search` — его видят только server и worker;
 #   - server ходит с ключом «только поиск» (MEILI_API_KEY, выпуск: bun apps/server/src/dev/meiliKeys.ts),
-#     мастер-ключ — только у worker (он пишет в индекс);
-#   - том meili не бэкапится: индекс восстанавливается из базы задачей search.reindex.
+#     мастер-ключ — только у worker (он пишет в индекс); том meili не бэкапится.
 #
 # Главный ключ (KMS): учётные данные Vault — только у сервиса ключей (apps/server/src/keyService.ts) в своей
-# внутренней сети `keys`; server и worker просят его завернуть/развернуть ключ по своим токенам
-# (KEY_SERVICE_TOKENS), каждое обращение — в его журнале, массовая выгрузка упирается в предел и даёт тревогу.
+# внутренней сети `keys`; server и worker просят его завернуть/развернуть ключ по своим токенам.
 networks:
+  data:
+    internal: true
   search:
     internal: true
   keys:
@@ -26,56 +32,170 @@ networks:
   # выход к Vault (может быть на другом хосте) — только у сервиса ключей
   kms-egress: {}
 
+x-tls-client: &tls-client
+  NODE_EXTRA_CA_CERTS: /certs/ca.pem
+  DATABASE_URL: postgres://relay:${PG_PASSWORD:?set PG_PASSWORD}@postgres:5432/relay
+  DB_SSL: verify-full
+  DB_CA: /certs/ca.pem
+  DB_CERT: /certs/client.pem
+  DB_KEY: /certs/client-key.pem
+  VALKEY_URL: rediss://:${VALKEY_PASSWORD:?set VALKEY_PASSWORD}@valkey:6379
+  VALKEY_CA: /certs/ca.pem
+  S3_ENDPOINT: https://s3:8333
+  S3_ACCESS_KEY_ID: ${S3_ACCESS_KEY_ID:?set S3_ACCESS_KEY_ID}
+  S3_SECRET_ACCESS_KEY: ${S3_SECRET_ACCESS_KEY:?set S3_SECRET_ACCESS_KEY}
+  S3_PUBLIC_ENDPOINT: ${S3_PUBLIC_ENDPOINT:?set S3_PUBLIC_ENDPOINT (https://example.com:8333)}
+  MEILI_URL: https://search:7700
+  KMS_PROVIDER: service
+  KEY_SERVICE_URL: https://keys:7800
+  DEV_LOGIN: "0"
+  DEV_MIGRATE: "0"
+  NODE_ENV: production
+
+x-hardened: &hardened
+  read_only: true
+  tmpfs: ["/tmp:size=256m,mode=1777"]
+  volumes: !override
+    - ./secrets/tls:/certs:ro
+  restart: unless-stopped
+
 services:
+  postgres:
+    ports: !reset []
+    environment:
+      POSTGRES_PASSWORD: ${PG_PASSWORD:?set PG_PASSWORD}
+    # ключ сервера Postgres читает, только если он принадлежит его пользователю: копия с правами — при старте
+    entrypoint: ["sh", "-c", "install -d -o postgres -m 700 /run/pgtls && install -o postgres -m 600 /certs/postgres.pem /certs/postgres-key.pem /certs/ca.pem /run/pgtls/ && exec docker-entrypoint.sh \"$$@\"", "--"]
+    command: ["postgres", "-c", "wal_compression=on", "-c", "shared_buffers=512MB", "-c", "effective_cache_size=1536MB",
+              "-c", "ssl=on", "-c", "ssl_cert_file=/run/pgtls/postgres.pem", "-c", "ssl_key_file=/run/pgtls/postgres-key.pem",
+              "-c", "ssl_ca_file=/run/pgtls/ca.pem", "-c", "hba_file=/etc/postgresql/pg_hba.conf"]
+    volumes:
+      - ./secrets/tls:/certs:ro
+      - ./docker/postgres/pg_hba.secure.conf:/etc/postgresql/pg_hba.conf:ro
+    networks: [data]
+
+  valkey:
+    ports: !reset []
+    command: ["valkey-server", "--save", "", "--appendonly", "no", "--port", "0", "--tls-port", "6379",
+              "--tls-cert-file", "/certs/valkey.pem", "--tls-key-file", "/certs/valkey-key.pem", "--tls-ca-cert-file", "/certs/ca.pem",
+              "--tls-auth-clients", "no", "--requirepass", "${VALKEY_PASSWORD:?set VALKEY_PASSWORD}"]
+    environment:
+      VALKEY_PASSWORD: ${VALKEY_PASSWORD:?set VALKEY_PASSWORD}
+    volumes:
+      - ./secrets/tls:/certs:ro
+    healthcheck:
+      test: ["CMD-SHELL", "valkey-cli --tls --cacert /certs/ca.pem -h valkey -a \"$$VALKEY_PASSWORD\" --no-auth-warning ping | grep -q PONG"]
+    networks: [data]
+
+  # учётка S3 — из окружения, без Admin (бакет создаёт s3-init через мастер); S3 — только https
+  s3:
+    entrypoint: ["sh", "/s3-secure.sh"]
+    command: []
+    environment:
+      S3_ACCESS_KEY_ID: ${S3_ACCESS_KEY_ID:?set S3_ACCESS_KEY_ID}
+      S3_SECRET_ACCESS_KEY: ${S3_SECRET_ACCESS_KEY:?set S3_SECRET_ACCESS_KEY}
+      S3_BUCKET: relay-files
+    volumes:
+      - s3data:/data
+      - ./secrets/tls:/certs:ro
+      - ./docker/seaweedfs/s3-secure.sh:/s3-secure.sh:ro
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q -O /dev/null --no-check-certificate https://127.0.0.1:8333/healthz"]
+    networks: [default, data]
+
+  s3-init:
+    networks: [default, data]
+
   search:
     environment:
       MEILI_MASTER_KEY: ${MEILI_MASTER_KEY:?set MEILI_MASTER_KEY}
       MEILI_ENV: production
+      MEILI_SSL_CERT_PATH: /certs/search.pem
+      MEILI_SSL_KEY_PATH: /certs/search-key.pem
+    volumes:
+      - meili:/meili_data
+      - ./secrets/tls:/certs:ro
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "--no-check-certificate", "https://127.0.0.1:7700/health"]
     networks: [search]
 
   keys:
     build: { context: ., dockerfile: apps/server/Dockerfile }
     command: ["bun", "apps/server/src/keyService.ts"]
+    <<: *hardened
+    volumes: !override
+      - ./secrets/tls:/certs:ro
+      - keys-audit:/var/log/relay-keys
     environment:
+      NODE_EXTRA_CA_CERTS: /certs/ca.pem
       KMS_PROVIDER: vault
-      VAULT_ADDR: ${VAULT_ADDR:?set VAULT_ADDR}
+      VAULT_ADDR: ${VAULT_ADDR:?set VAULT_ADDR (https)}
       VAULT_TOKEN: ${VAULT_TOKEN:?set VAULT_TOKEN (the only holder of KMS credentials)}
       VAULT_TRANSIT_KEY: relay-chat-keys
       KEY_SERVICE_PORT: "7800"
+      KEY_SERVICE_TLS_CERT: /certs/keys.pem
+      KEY_SERVICE_TLS_KEY: /certs/keys-key.pem
       KEY_SERVICE_TOKENS: server:${KEY_TOKEN_SERVER:?set KEY_TOKEN_SERVER},worker:${KEY_TOKEN_WORKER:?set KEY_TOKEN_WORKER}
       KEY_SERVICE_UNWRAP_PER_MIN: "6000"
       # журнал аудита — цепочка с HMAC (auditLog.ts): ключ — только здесь и у того, кто проверяет журнал
       KEY_SERVICE_AUDIT_KEY: ${KEY_SERVICE_AUDIT_KEY:?set KEY_SERVICE_AUDIT_KEY (32 bytes, base64)}
       KEY_SERVICE_AUDIT_FILE: /var/log/relay-keys/audit.log
       NODE_ENV: production
-    volumes:
-      - keys-audit:/var/log/relay-keys
     networks: [keys, kms-egress]
-    restart: unless-stopped
+
+  migrate:
+    <<: *hardened
+    restart: "no"
+    environment:
+      <<: *tls-client
+    networks: [data]
+
+  # сборка клиента — один раз, в том, который отдаёт proxy (исходники не монтируются)
+  web:
+    command: ["bun", "apps/web/build.ts"]
+    user: "0"   # разовая сборка своего кода (без чужих данных): пишет во временную папку рядом с томом
+    restart: "no"
+    environment:
+      WEB_OUT: /srv/dist
+    volumes: !override
+      - webdist:/srv/dist
 
   server:
+    command: ["bun", "apps/server/src/main.ts"]
+    <<: *hardened
     environment:
-      DEV_LOGIN: "0"
-      DEV_MIGRATE: "0"
+      <<: *tls-client
+      PORT: "3000"
+      TRUST_PROXY: "1"
       MEILI_MASTER_KEY: ""
       MEILI_API_KEY: ${MEILI_SEARCH_KEY:?set MEILI_SEARCH_KEY (bun apps/server/src/dev/meiliKeys.ts)}
-      KMS_PROVIDER: service
-      KEY_SERVICE_URL: http://keys:7800
       KEY_SERVICE_TOKEN: ${KEY_TOKEN_SERVER:?set KEY_TOKEN_SERVER}
-      NODE_ENV: production
-    networks: [default, search, keys]
+    networks: [default, data, search, keys]
     depends_on: [keys]
 
   worker:
+    command: ["bun", "apps/server/src/worker.ts"]
+    <<: *hardened
+    # медиа расшифровываются во временные файлы: только в памяти, на диск не ложатся (CRYPTO-14)
+    tmpfs: ["/tmp:size=2g,mode=1777"]
     environment:
-      DEV_LOGIN: "0"
+      <<: *tls-client
       MEILI_MASTER_KEY: ${MEILI_MASTER_KEY:?set MEILI_MASTER_KEY}
-      KMS_PROVIDER: service
-      KEY_SERVICE_URL: http://keys:7800
       KEY_SERVICE_TOKEN: ${KEY_TOKEN_WORKER:?set KEY_TOKEN_WORKER}
-      NODE_ENV: production
-    networks: [default, search, keys]
+    networks: [default, data, search, keys]
     depends_on: [keys]
+
+  proxy:
+    ports: !override ["${RELAY_HTTPS_PORT:-443}:443", "${RELAY_HTTP_PORT:-80}:80", "${RELAY_S3_PORT:-8333}:8333"]
+    volumes: !override
+      - ./docker/nginx/production.conf:/etc/nginx/http.d/default.conf:ro
+      - ./docker/nginx/security-headers.conf:/etc/nginx/snippets/relay-security.conf:ro
+      - ./docker/nginx/hsts.conf:/etc/nginx/snippets/relay-hsts.conf:ro
+      - ./secrets/public:/etc/nginx/certs:ro
+      - ./secrets/tls/ca.pem:/etc/nginx/internal-ca.pem:ro
+      - webdist:/srv/dist:ro
+    restart: unless-stopped
 
 volumes:
   keys-audit: {}
+  webdist: {}

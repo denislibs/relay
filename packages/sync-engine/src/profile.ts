@@ -78,7 +78,7 @@ export class ProfileCache {
    * seq — позиция журнала клиента до запроса: ответ не старее её, поэтому перетирает профиль, записанный раньше (в том числе
    * снимок /users, если смену фото нам не прислали — общих чатов тогда не было), но не запись журнала новее. Без seq — 0.
    */
-  applyPeer(p: { id: number; name: string; system?: true; photo?: ProfilePhoto | null; username?: string | null }, seq = 0): void {
+  applyPeer(p: { id: number; key?: string; name: string; system?: true; photo?: ProfilePhoto | null; username?: string | null }, seq = 0): void {
     if (p.id === this.userId) return;
     const prev = this.users.get(p.id);
     let base: PublicUser;
@@ -87,6 +87,7 @@ export class ProfileCache {
     const next: PublicUser = { ...base, name: p.name, photo: p.photo !== undefined ? p.photo : base.photo ?? null };   // нет поля — фото не знаем, не стираем
     if (p.username !== undefined) next.username = p.username;   // список участников знает и @имя
     if (p.system) next.system = true;
+    if (p.key) next.key = p.key;   // ключ доступа (как access_hash): открывает личный чат и добавление в группу
     if (this.users.put(p.id, next, seq)) this.dirty = true;
   }
 

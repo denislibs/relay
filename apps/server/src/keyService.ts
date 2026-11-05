@@ -76,7 +76,8 @@ export function createKeyService(o: KeyServiceOptions) {
         switch (url.pathname) {
           case '/wrap': {
             const dek = bytes(body?.dek);
-            if (!dek || dek.length !== 32) return new Response('bad dek', { status: 400 });
+            // ключ с меткой назначения (keyBinding.ts): 32 байта ключа + метка до 255 байт
+            if (!dek || dek.length < 32 || dek.length > 32 + 6 + 255) return new Response('bad dek', { status: 400 });
             const k = kms();
             audit({ client, op: 'wrap' });
             return Response.json({ wrapped: b64(await k.wrap(dek)), kekId: k.id });

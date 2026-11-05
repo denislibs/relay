@@ -3,7 +3,7 @@ import type { Update } from '@relay/protocol';
 import { sql } from '../src/db';
 import { createServer } from '../src/http';
 import { getUpdates } from '../src/domain/journal';
-import { makeChat, resetDb } from './helpers';
+import { makeChat, resetDb, refs } from './helpers';
 
 const server = createServer({ port: 0 });
 const base = `http://localhost:${server.port}`;
@@ -112,7 +112,7 @@ test('username stored lowercased, case-insensitively unique, removable, own name
 
 test('usernames are shared with channels: a channel @name is taken for users', async () => {
   const a = await login('Анна'), b = await login('Борис');
-  const ch = (await (await call(a, 'POST', '/chats', { kind: 'channel', title: 'Новости', memberIds: [] })).json()).id as number;
+  const ch = (await (await call(a, 'POST', '/chats', { kind: 'channel', title: 'Новости', members: refs(a.userId, []) })).json()).id as number;
   expect((await call(a, 'PUT', `/groups/${ch}/username`, { username: 'news_channel' })).status).toBe(200);
   expect(await (await call(b, 'GET', '/users/check-username?u=News_Channel')).json()).toEqual({ ok: false, reason: 'taken' });
   const put = await call(b, 'PUT', '/me/username', { username: 'news_channel' });
@@ -147,7 +147,7 @@ test('GET /users/:id: self and chat peer ok, stranger 404', async () => {
   const a = await login('Анна', '+79005550001'), b = await login('Борис'), s = await login('Посторонний');
   await makeChat([a.userId, b.userId]);
   await call(a, 'PUT', '/me/username', { username: 'anna_x' });
-  expect(await (await call(b, 'GET', `/users/${a.userId}`)).json()).toEqual({ id: a.userId, name: 'Анна', firstName: 'Анна', lastName: '', publicName: 'Анна', username: 'anna_x', links: [], bio: null, birthday: null, phone: null, photo: null, blocksMe: false, music: null, personalChannel: null });
+  expect(await (await call(b, 'GET', `/users/${a.userId}`)).json()).toEqual({ id: a.userId, key: expect.any(String), name: 'Анна', firstName: 'Анна', lastName: '', publicName: 'Анна', username: 'anna_x', links: [], bio: null, birthday: null, phone: null, photo: null, blocksMe: false, music: null, personalChannel: null });
   expect((await call(a, 'GET', `/users/${a.userId}`)).status).toBe(200);
   const r = await call(s, 'GET', `/users/${a.userId}`);
   expect([r.status, (await r.json()).code]).toEqual([404, 'not_found']);

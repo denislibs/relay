@@ -1,6 +1,8 @@
 import { CheckRow, ColorPicker, InfoRow, PanelHeader, PATTERN_SETS, RangeRow, buildPattern, intensityAlpha, loadPattern, patternColor, patternSize, Section } from '@relay/ui';
 import { useEffect, useRef, useState } from 'preact/hooks';
-import { setPref, type WallpaperPref } from '../../prefs';
+import { getPrefs, resolveBase, setPref, themeSettings, type WallpaperPref } from '../../prefs';
+import { blendForTinted } from '../../themes/palette';
+import { BASE_ACCENT } from '../../themes/presets';
 import { showToast } from '../../settingsData';
 import { deleteImage, saveImage } from '../../wallpaperImage';
 import { back, go } from '../../nav';
@@ -25,7 +27,7 @@ export function Swatch({ pattern, colors, dark, size, intensity }: { pattern: st
   const tile = Math.round(patternSize(pattern) * 150 / 420);
   return (
     <span class={'app-swatch-fill' + (dark ? ' app-swatch-dark' : '')} style={{ background: swatchBackground(colors, dark), ...(size ? { width: size + 'px', height: size + 'px' } : null) }}>
-      <span class="app-swatch-pattern" style={{ '--swatch-pattern': `url(${buildPattern(pattern)})`, '--swatch-tile': tile + 'px', ...(dark ? { background: gradient(colors), opacity: intensityAlpha(intensity, true) } : { background: patternColor(colors ?? themeWallpaperColors(false), intensityAlpha(intensity, false)), opacity: 1 }) }} />
+      <span class="app-swatch-pattern" style={{ '--swatch-pattern': `url(${buildPattern(pattern)})`, '--swatch-tile': tile + 'px', ...(dark ? { background: gradient(colors), opacity: intensityAlpha(intensity, true) } : { background: patternColor(colors ?? themeWallpaperColors(resolveBase(getPrefs())), intensityAlpha(intensity, false)), opacity: 1 }) }} />
     </span>
   );
 }
@@ -36,15 +38,19 @@ export const SOLID_PRESETS: { light: string[]; dark: string[] } = {
   dark: ['#1d242b', '#13222e', '#0f2a3d', '#16261d', '#232a17', '#1b3324', '#2b2416', '#2e1d18', '#3a2219', '#2c1b25', '#221d33', '#1a1a1d'],
 };
 
+/** В «Тёмной» свои цвета подмешиваются к тёмному градиенту акцента (themes/palette.ts blendForTinted). */
+const tintedColors = (key: string, colors: string[] | null): string[] | null =>
+  key === 'tinted' && colors ? blendForTinted(colors, themeSettings(getPrefs(), 'tinted')?.accent ?? BASE_ACCENT.tinted) : colors;
+
 const solidOf = (wp: WallpaperPref): string | null => (wp.colors && wp.colors.every((c) => c.toLowerCase() === wp.colors![0].toLowerCase()) ? wp.colors[0] : null);
 
 export function Wallpaper() {
   const { dark, key, wp } = useWallpaper();
   const scroll = useScrollMemory('settings/general/wallpaper');
-  const presets = COLOR_PRESETS[key];
+  const presets = COLOR_PRESETS[dark ? 'dark' : 'light'];
   const isDefault = wp.pattern === DEFAULT_WP.pattern && wp.colors === null && !wp.blur && wp.intensity === DEFAULT_WP.intensity && !wp.image;
   // выбрали узор или цвет — своя картинка уступает место обоям
-  const choose = (pattern: string, colors: string[] | null) => { setPref(`wallpaper.${key}`, { ...wp, pattern, colors, image: null }); if (wp.image) void deleteImage(key); };
+  const choose = (pattern: string, colors: string[] | null) => { setPref(`themes.${key}.wallpaper`, { ...wp, pattern, colors: tintedColors(key, colors), image: null }); if (wp.image) void deleteImage(key); };
   const sets = Object.keys(PATTERN_SETS);
   const known = sets.includes(wp.pattern) ? wp.pattern : DEFAULT_PATTERN;
   const image = !!wp.image;
@@ -56,13 +62,13 @@ export function Wallpaper() {
   const upload = async (f: File | undefined) => {
     if (!f) return;
     setBusy(true);
-    try { setPref(`wallpaper.${key}`, { ...wp, image: await saveImage(key, f) }); }
+    try { setPref(`themes.${key}.wallpaper`, { ...wp, image: await saveImage(key, f) }); }
     catch { showToast('Не удалось открыть изображение'); }
     finally { setBusy(false); }
   };
-  const reset = () => { if (isDefault) return; setPref(`wallpaper.${key}`, DEFAULT_WP); if (wp.image) void deleteImage(key); };
+  const reset = () => { if (isDefault) return; setPref(`themes.${key}.wallpaper`, DEFAULT_WP); if (wp.image) void deleteImage(key); };
   // ползунок шлёт значение на каждом шаге: живое превью без записи настроек чаще 10 раз в секунду
-  const intensity = useThrottledPref(`wallpaper.${key}.intensity`, wp.intensity);
+  const intensity = useThrottledPref(`themes.${key}.wallpaper.intensity`, wp.intensity);
   const solid = solidOf(wp);
 
   return (
@@ -74,7 +80,7 @@ export function Wallpaper() {
           <InfoRow setting="wallpaper.upload" icon="camera" title={busy ? 'Загружаем…' : 'Загрузить изображение'} onClick={() => { if (!busy) file.current?.click(); }} />
           <InfoRow icon="palette" title="Выбрать цвет" subtitle={solid ? solid.toUpperCase() : undefined} onClick={() => void go('settings/general/wallpaper/color')} />
           <InfoRow setting="wallpaper.reset" icon="history" title="Сбросить" subtitle="Вернуть обои по умолчанию" onClick={reset} />
-          <CheckRow setting="wallpaper.blur" label="Размытие" checked={image && wp.blur} disabled={!image} onChange={(v: boolean) => setPref(`wallpaper.${key}.blur`, v)} />
+          <CheckRow setting="wallpaper.blur" label="Размытие" checked={image && wp.blur} disabled={!image} onChange={(v: boolean) => setPref(`themes.${key}.wallpaper.blur`, v)} />
           <RangeRow setting="wallpaper.intensity" label="Интенсивность узора" min={0} max={100} step={1} value={intensity.value} disabled={image} onChange={intensity.set} onCommit={intensity.commit} />
         </Section>
         <Section setting="wallpaper.pattern" title="Узор" role="radiogroup">
@@ -92,10 +98,10 @@ export function Wallpaper() {
             })}
           </div>
         </Section>
-        <Section setting="wallpaper.colors" title="Цвета и градиенты" role="radiogroup" footer="Обои для светлой и тёмной темы выбираются отдельно. Своё изображение хранится только на этом устройстве.">
+        <Section setting="wallpaper.colors" title="Цвета и градиенты" role="radiogroup" footer="У каждой темы свои обои. Своё изображение хранится только на этом устройстве.">
           <div class="app-swatches">
             {[{ id: 'theme', name: 'Как в теме', colors: null as string[] | null }, ...presets].map((p) => {
-              const on = !image && sameColors(wp.colors, p.colors);
+              const on = !image && sameColors(wp.colors, tintedColors(key, p.colors));
               return (
                 <button
                   key={p.id} type="button" role="radio" aria-checked={on} aria-label={'Цвет: ' + p.name} title={p.name}
@@ -131,8 +137,8 @@ function useThrottledPref<T>(path: string, stored: T): { value: T; set: (v: T) =
 /** «Выбрать цвет»: однотонные обои (все четыре цвета градиента одинаковые), узор остаётся. */
 export function WallpaperColor() {
   const { dark, key, wp } = useWallpaper();
-  const current = solidOf(wp) ?? (wp.colors ?? themeWallpaperColors(dark))[0];
-  const apply = (c: string) => { setPref(`wallpaper.${key}`, { ...wp, colors: [c, c, c, c], image: null }); if (wp.image) void deleteImage(key); };
+  const current = solidOf(wp) ?? (wp.colors ?? themeWallpaperColors(key))[0];
+  const apply = (c: string) => { setPref(`themes.${key}.wallpaper`, { ...wp, colors: tintedColors(key, [c, c, c, c]), image: null }); if (wp.image) void deleteImage(key); };
   const [shown, setShown] = useState(current);
   const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const last = useRef(current);
@@ -154,7 +160,7 @@ export function WallpaperColor() {
         </Section>
         <Section setting="wallpaper.color.presets" title="Готовые цвета" role="radiogroup">
           <div class="app-swatches app-solids">
-            {SOLID_PRESETS[key].map((c) => {
+            {SOLID_PRESETS[dark ? 'dark' : 'light'].map((c) => {
               const on = !!solid && solid.toLowerCase() === c;
               return (
                 <button key={c} type="button" role="radio" aria-checked={on} aria-label={'Цвет ' + c.toUpperCase()} title={c.toUpperCase()}

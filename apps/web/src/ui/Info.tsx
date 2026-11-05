@@ -6,7 +6,7 @@ import { SharedMedia, type MediaHead } from './SharedMedia';
 import { membersStatus, useMembers } from '../members';
 import { openInner, openUserChat, startDirectChat } from '../data';
 import { playProfileTop } from '../music';
-import { Avatar, Icon, InfoRow, PanelHeader, ProfileActions, RichText, SettingsIcon, SlideFade, SlideStack, Verified, onHeavyAnimationEnd, peerTone, requestMeasure } from '@relay/ui';
+import { Avatar, Icon, InfoRow, PanelHeader, ProfileActions, RichText, SettingsIcon, SlideFade, SlideStack, Verified, peerTone, requestMeasure } from '@relay/ui';
 import type { Item } from '@relay/sync-engine/src/types';
 import { chatTone, isSystemChat } from './format';
 import { useEffect, useRef, useState } from 'preact/hooks';
@@ -36,31 +36,19 @@ const PAGES = ['info', 'stickers', 'edit', ...GROUP_PAGES];   // «Стикер�
 const close = () => setGlobal({ infoOpen: false });
 const CLOSED_RESET_MS = 300;   // закрытая панель возвращается на профиль, когда уже уехала (выезд — 240 мс)
 
-/** Значение, которое меняется только вне тяжёлой анимации: во время неё — после её конца. */
-function useSettled<T>(value: T): T {
-  const [settled, setSettled] = useState(value);
-  useEffect(() => {
-    if (value === settled) return;
-    let alive = true;
-    onHeavyAnimationEnd(() => { if (alive) setSettled(value); });
-    return () => { alive = false; };
-  }, [value]);
-  return settled;
-}
-
 /** Правая панель «Информация» о собеседнике или группе — как User Info в Telegram. */
 export function Info() {
-  // чат панели догоняет открытый после анимации перехода стека: её перерисовка (профиль, медиа, участники)
-  // в первых кадрах перехода съедала бы их
+  // чат панели — тот, что на экране, в том же кадре, что и смена чата (как правая колонка в Telegram). Раньше она
+  // догоняла его после тяжёлой анимации, и ~360 мс — весь выезд панели или переход — показывала прежний чат
   // панель после первого открытия не размонтируется (AsidePanel → Presence keep), а прячется: закрытая держит
   // прежний чат — смена чата при закрытой панели не перестраивает её и не грузит профиль и медиа впустую
   const shown = useGlobal((s) => s.infoOpen);
   const liveId = useGlobal((s) => s.openChatId);
   const heldId = useRef(liveId);
   if (shown) heldId.current = liveId;
-  const chatId = useSettled(heldId.current)!;
+  const chatId = heldId.current!;
   const chat = useGlobal((s) => findChat(s, chatId));
-  const peer = useGlobal((s) => s.peer);
+  const peer = useGlobal((s) => (chat?.peerId != null ? s.presence[chat.peerId as number] ?? null : null));
   const muted = useGlobal((s) => isChatMuted(chatId, s));
   // панель открывают сразу на «Стикерах» (поиск в панели стикеров): она выезжает уже на этой странице
   const [page, setPage] = useState(() => (getGlobal().infoGo === 'stickers' ? 'stickers' : 'info'));
@@ -202,9 +190,9 @@ export function Info() {
   } });
   // шапка справа: контакт — ✎ «Изменить», не контакт — «Добавить в контакты» (как в Telegram)
   const gInfo = (chat?.group as GroupInfo | null) ?? null, gMe = (chat?.me as MyMembership | null) ?? null;
-  const action = group ? (canManage(gMe) ? { icon: 'pencil', label: channel ? 'Изменить канал' : 'Изменить группу', onClick: () => nav.go('gEdit') } : undefined)
+  const action = group ? (canManage(gMe) ? { icon: 'write', label: channel ? 'Изменить канал' : 'Изменить группу', onClick: () => nav.go('gEdit') } : undefined)
     : !peerId || !contactsLoaded ? undefined
-    : contact ? { icon: 'userPen', label: 'Изменить контакт', onClick: () => setPage('edit') }
+    : contact ? { icon: 'write', label: 'Изменить контакт', onClick: () => setPage('edit') }
     : { icon: 'contactAdd', label: 'Добавить в контакты', onClick: addContact };
 
   // ряд кнопок под именем (как в Telegram Web K): вступить, звук, обсуждение, покинуть; у человека «Ещё» —
@@ -251,7 +239,8 @@ export function Info() {
         title={<HeadTitle media={media} plain={channel ? 'Информация о канале' : group ? 'Информация о группе' : 'Информация'} name={title} head={mediaHead} />} onClose={media ? toTop : close} action={media ? undefined : action} />
       <div class="rl-aside-body" ref={body} onScroll={onBodyScroll}>
         {gallery.length ? (
-          <ProfileGallery photos={gallery} index={slide} onIndex={setSlide} onOpen={setViewer} still={!shown}
+          // key — чат: другой профиль строится сразу в своей высоте; иначе высота шапки с фото доезжала CSS-переходом
+          <ProfileGallery key={chatId} photos={gallery} index={slide} onIndex={setSlide} onOpen={setViewer} still={!shown}
             name={<>{title}{system ? <Verified size={22} /> : null}</>}
             sub={<span class={myPeer?.online ? 'app-online' : ''}>{subtitle || ' '}</span>}
             // полоса музыки и её 24 px — только когда треки есть (иначе пустая полоса раздвигала плитки и карточку)
@@ -269,7 +258,8 @@ export function Info() {
         </div>
         )}
         {gallery.length ? null : <ProfileActions label="Действия с чатом" actions={tiles} menu={tileMenu} />}
-        <div class="rl-aside-group app-info-rows">
+        {/* key — чат: строки нового профиля (из кэша) стоят сразу; раскрываются только пришедшие позже в этом же чате */}
+        <div key={chatId} class="rl-aside-group app-info-rows">
           {/* как в Telegram: имя уже в шапке — строками только то, чего там нет, и только если поле заполнено */}
           {/* личный канал — первым, над телефоном и @именем (как в Telegram); клик — канал поверх, на последнем посте */}
           <PersonalChannelBlock channel={!group ? (user?.personalChannel as PersonalChannel | null | undefined) : null} from="inner" />

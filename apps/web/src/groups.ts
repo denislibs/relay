@@ -3,6 +3,7 @@ import {
   type AdminRight, type AdminRights, type CommunityKind, type GroupInfo, type MemberRight, type MemberRights, type MyMembership,
 } from '@relay/protocol';
 import { useEffect, useState } from 'preact/hooks';
+import { useKeyedState } from './keyedState';
 import { groupCall, type GroupResult } from './data';
 import { findChat, useGlobal } from './global';
 import { showToast } from './settingsData';
@@ -85,8 +86,8 @@ const cache = new Map<string, unknown>();
 
 /** GET списка управления: сразу из кэша (без мигания при возврате), потом свежий; rev — перечитать. */
 export function useGroupData<T>(path: string | null, rev: unknown = 0): { data: T | null; error: string | null; reload: () => void } {
-  const [data, setData] = useState<T | null>(() => (path ? (cache.get(path) as T) ?? null : null));
-  const [error, setError] = useState<string | null>(null);
+  const [data, setData] = useKeyedState<string | null, T | null>(path, (p) => (p ? (cache.get(p) as T) ?? null : null));
+  const [error, setError] = useKeyedState<string | null, string | null>(path, () => null);
   const [n, setN] = useState(0);
   useEffect(() => {
     if (!path) return;

@@ -158,9 +158,31 @@ export async function rewrapStep(sql: import('postgres').Sql<{ bigint: number }>
   }
   const last = rows.at(-1);
   const done = rows.length < batch;
-  // ключ поиска — тем же проходом; его сбой не отменяет перезаворачивание ключей чатов (повторится следующей задачей)
+  // ключи файлов и ключ поиска — тем же проходом (CRYPTO-6); их сбой не отменяет перезаворачивание ключей чатов
   if (done) {
+    try { rewrapped += await rewrapFileKeys(sql); } catch (e) { console.warn('rewrap file keys:', String(e)); }
     try { if (await (await import('./searchKey')).rewrapSearchKey()) rewrapped++; } catch (e) { console.warn('rewrap search key:', String(e)); }
   }
   return { rewrapped, next: last ? [Number(last.chat_id), Number(last.version)] : after, done };
+}
+
+/** Ключи файлов (keys.attachment_keys), завёрнутые не текущим главным ключом, — заново текущим, пачками по id. */
+export async function rewrapFileKeys(sql: import('postgres').Sql<{ bigint: number }>, batch = 200): Promise<number> {
+  const cur = getKms();
+  await cur.init?.();
+  let after = '00000000-0000-0000-0000-000000000000', n = 0;
+  for (;;) {
+    const rows = await sql`select attachment_id, wrapped, kek_id from keys.attachment_keys where attachment_id > ${after}::uuid order by attachment_id limit ${batch}`;
+    for (const r of rows) {
+      const wrapped = new Uint8Array(r.wrapped as Uint8Array);
+      const sameKek = r.kek_id === cur.id;
+      if (sameKek && !(await cur.stale?.(wrapped))) continue;
+      const next = sameKek && cur.rewrap ? await cur.rewrap(wrapped) : await cur.wrap(await kmsFor(r.kek_id as string).unwrap(wrapped, r.kek_id as string));
+      await sql`update keys.attachment_keys set wrapped = ${Buffer.from(next)}, kek_id = ${cur.id}
+                 where attachment_id = ${r.attachment_id} and wrapped = ${Buffer.from(wrapped)}`;
+      n++;
+    }
+    if (rows.length < batch) return n;
+    after = String(rows[rows.length - 1].attachment_id);
+  }
 }

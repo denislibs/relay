@@ -62,7 +62,7 @@ export function JoinLink() {
       if (key.startsWith('@') && r.code === 'not_found') {
         const u = await resolveUser(key);
         if (!live) return;
-        if ('user' in u) { close(); void openUserChat(u.user.id); return; }
+        if ('user' in u) { close(); void openUserChat(u.user.id, u.user.key ? { key: u.user.key } : undefined); return; }
       }
       setError(r.code === 'not_found' ? 'Ссылка недействительна или срок её действия истёк.' : errorText(r.code));
     });

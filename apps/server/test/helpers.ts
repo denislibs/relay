@@ -111,3 +111,9 @@ export async function chatEventsOf(chatId: number, type?: Update['type']): Promi
 import { openRows } from '../src/domain/messageContent';
 /** Строки messages, как их видит сервер: содержимое — из шифра (для проверок текста в тестах). */
 export const opened = <T extends Record<string, unknown>>(rows: T[]): Promise<T[]> => openRows(rows);
+
+import { peerKey } from '../src/crypto/peerKey';
+
+/** Ссылки на людей с ключом доступа зрителя — как их пришлёт клиент, который этих людей видит (crypto/peerKey.ts). */
+export const refs = (viewer: number, ids: number[]) => ids.map((id) => ({ id, key: peerKey(viewer, id) }));
+export const ref = (viewer: number, id: number) => ({ userId: id, key: peerKey(viewer, id) });

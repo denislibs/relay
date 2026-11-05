@@ -99,21 +99,37 @@ export async function startRealtime(server: Server): Promise<() => Promise<void>
   // длинное событие (без e — не влезло в 8000 байт): записи читаются один раз на процесс, а не syncChat каждого сокета.
   // Пока чтение в полёте, следующие NOTIFY этого чата встают за ним — push уходят по порядку seq
   const chatQueues = new Map<number, Promise<void>>();
+  /**
+   * Скрытая история (AUTHZ-4): push в chat:<id> один на всех, а у участников разные history_from. Событие с содержимым
+   * (правка, реакции, чек-лист, превью…) о сообщении ниже чьей-то границы публиковать нельзя — вместо пачки уходит
+   * пустой push, и каждый клиент догоняет чат через syncChat, где сервер фильтрует для него (getChatUpdates).
+   */
+  const refOf = (u: JournalEntry['update']): number | null =>
+    u.type === 'newMessage' || u.type === 'messageDeleted' || u.type === 'pins' ? null : 'id' in u && typeof u.id === 'number' ? u.id : null;
+  const hidesAny = async (c: number, items: JournalEntry[]): Promise<boolean> => {
+    const ids = items.map((it) => refOf(it.update)).filter((x): x is number => x != null);
+    if (!ids.length) return false;
+    const [r] = await sql`select coalesce(max(history_from), 0) as h from chat_members where chat_id = ${c}`;
+    return Math.min(...ids) < Number(r.h);
+  };
   const subChats = await sql.listen('chat_updates', (payload) => {
     let n: ChatNotify;
     try { n = JSON.parse(payload); } catch { return; }
     // чат удалён: всем в топике — push с gone, клиенты убирают чат сами (без syncChat)
     if (n.g) { server.publish(`chat:${n.c}`, JSON.stringify({ op: 'push', chatId: n.c, from: n.f, to: n.t, items: [], gone: true } satisfies ServerFrame)); return; }
     const queued = chatQueues.get(n.c);
-    if (n.e && !queued) {   // быстрый путь — синхронно, как раньше
-      publishChat(n.c, n.f, n.t, n.e.map((update, i) => ({ seq: n.f + 1 + i, update })));
+    const inline = n.e?.map((update, i) => ({ seq: n.f + 1 + i, update }));
+    // быстрый путь — синхронно, как раньше; события о старых сообщениях — через очередь с проверкой скрытой истории
+    if (inline && !queued && !inline.some((it) => refOf(it.update) != null)) {
+      publishChat(n.c, n.f, n.t, inline);
       return;
     }
     const step = async () => {
-      if (n.e) { publishChat(n.c, n.f, n.t, n.e.map((update, i) => ({ seq: n.f + 1 + i, update }))); return; }
-      const items = await getChatUpdatesRange(n.c, n.f, n.t).catch((e) => { console.error('chat_updates range:', e); return null; });
-      // не прочитали (или записей больше пачки) — пустой push: клиенты догонят чат сами (syncChat)
-      publishChat(n.c, n.f, n.t, items && items.length === n.t - n.f ? items : []);
+      const items = inline ?? await getChatUpdatesRange(n.c, n.f, n.t).catch((e) => { console.error('chat_updates range:', e); return null; });
+      // не прочитали, записей больше пачки или кому-то это скрытая история — пустой push: клиенты догонят чат сами (syncChat)
+      const whole = items && items.length === n.t - n.f ? items : null;
+      const hidden = whole ? await hidesAny(n.c, whole).catch(() => true) : false;
+      publishChat(n.c, n.f, n.t, whole && !hidden ? whole : []);
     };
     const next: Promise<void> = (queued ?? Promise.resolve()).then(step).catch((e) => { console.error('chat_updates:', e); })
       .finally(() => { if (chatQueues.get(n.c) === next) chatQueues.delete(n.c); });

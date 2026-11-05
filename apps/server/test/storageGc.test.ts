@@ -89,7 +89,7 @@ test('profile music, profile photos (current and history, video avatar), group p
   await sql`insert into user_photos (user_id, big, small, thumb, video) values (${a}, ${big}, ${small}, '', ${video})`;
   await sql`update users set photo = ${sql.json({ id: curBig, small: curSmall, thumb: '', at: Date.now() } as never)} where id = ${a}`;
   await sql`insert into chat_photos (chat_id, big, small, thumb) values (${chat}, ${gBig}, ${gSmall}, '')`;
-  await sql`insert into link_previews (url, photo_id) values ('https://example.com/', ${lp})`;
+  await sql`insert into link_previews (url_hash, photo_id) values ('test', ${lp})`;
   const loose = await attachment(a);
 
   expect((await gc()).deleted).toBe(1);

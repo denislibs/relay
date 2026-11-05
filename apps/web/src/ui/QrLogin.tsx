@@ -4,8 +4,9 @@ import { acceptQr, qrInfo } from '../authSettings';
 import { showToast } from '../settingsData';
 
 /**
- * Подтверждение входа по QR на вошедшем устройстве. Токен приходит двумя путями:
- * ссылка «/#qr=<токен>» (камера телефона открыла Relay) или сканер «Подключить устройство».
+ * Подтверждение входа по QR на вошедшем устройстве. Токен — только из встроенного сканера «Подключить устройство»
+ * (WEB-1): ссылку «/#qr=<токен>» мог прислать кто угодно (письмо, сайт, чат), и окно «Войти?» из неё — увод аккаунта
+ * в один клик. Ссылка лишь открывает сканер: войти можно, только отсканировав код, который сейчас на экране.
  */
 let openFor: ((token: string) => void) | null = null;
 export function confirmQr(token: string): void { openFor?.(token); }
@@ -14,16 +15,16 @@ const tokenOf = (text: string) => /[#&]qr=([A-Za-z0-9_-]{43})/.exec(text)?.[1] ?
 
 export function QrConfirm() {
   const [token, setToken] = useState<string | null>(null);
+  const [rescan, setRescan] = useState(false);
   const [info, setInfo] = useState<{ device: string | null; ip: string | null } | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
 
   useEffect(() => {
     openFor = (t) => { setToken(t); setInfo(null); setError(null); };
-    const t = tokenOf(location.hash);
-    if (t) {
-      history.replaceState(null, '', location.pathname + location.search);   // токен не остаётся в адресе
-      openFor(t);
+    if (tokenOf(location.hash)) {
+      history.replaceState(null, '', location.pathname + location.search);   // токен не остаётся в адресе и не используется
+      setRescan(true);
     }
     return () => { openFor = null; };
   }, []);
@@ -36,6 +37,7 @@ export function QrConfirm() {
     });
   }, [token]);
 
+  if (rescan && !token) return <QrScanner onClose={() => setRescan(false)} fromLink />;
   if (!token) return null;
   const close = () => setToken(null);
   async function accept() {
@@ -52,7 +54,7 @@ export function QrConfirm() {
     )}>
       {error ? <p class="app-qr-text">{error}</p> : (
         <p class="app-qr-text">
-          {info ? <>Кто-то входит в ваш аккаунт: <b>{info.device ?? 'браузер'}</b>{info.ip ? <>, IP <b>{info.ip}</b></> : null}. Подтверждайте, только если это вы.</> : 'Проверяем код…'}
+          {info ? <>Кто-то входит в ваш аккаунт: <b>{info.device ?? 'браузер'}</b>{info.ip ? <>, IP <b>{info.ip}</b></> : null}. Подтверждайте, только если это вы и новое устройство сейчас перед вами.</> : 'Проверяем код…'}
         </p>
       )}
     </Modal>
@@ -60,7 +62,7 @@ export function QrConfirm() {
 }
 
 /** Сканер QR камерой (BarcodeDetector). Нет поддержки — подсказка открыть код камерой телефона. */
-export function QrScanner(props: { onClose(): void }) {
+export function QrScanner(props: { onClose(): void; fromLink?: boolean }) {
   const video = useRef<HTMLVideoElement>(null);
   const [error, setError] = useState<string | null>(null);
   const supported = typeof (window as unknown as { BarcodeDetector?: unknown }).BarcodeDetector === 'function';
@@ -95,11 +97,13 @@ export function QrScanner(props: { onClose(): void }) {
   return (
     <Modal title="Подключить устройство" size="slim" onClose={props.onClose}>
       {!supported || error ? (
-        <p class="app-qr-text">{error ?? 'Этот браузер не умеет сканировать QR. Наведите камеру телефона на код — Relay откроется и спросит, подтвердить ли вход.'}</p>
+        <p class="app-qr-text">{error ?? 'Этот браузер не умеет сканировать QR-коды. Войдите на новом устройстве по номеру телефона — код придёт сюда, в чат «Relay».'}</p>
       ) : (
         <>
           <div class="app-qr-video"><video ref={video} muted playsInline /><span class="app-qr-frame" /></div>
-          <p class="app-qr-text">Наведите камеру на QR-код на экране входа нового устройства.</p>
+          <p class="app-qr-text">{props.fromLink
+            ? 'Чтобы войти на новом устройстве, отсканируйте QR-код с его экрана. Если ссылку вам прислали — не сканируйте чужие коды: так крадут аккаунты.'
+            : 'Наведите камеру на QR-код на экране входа нового устройства.'}</p>
         </>
       )}
     </Modal>
