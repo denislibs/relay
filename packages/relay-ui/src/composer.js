@@ -415,13 +415,13 @@ function Composer(props) {
   }
 
   /* ---------- упоминания ---------- */
-  var mentionList = st.mention && props.members ? props.members.filter(function (x) { return x.name.toLowerCase().indexOf(st.mention.q.toLowerCase()) >= 0; }).slice(0, 5) : null;
+  var mentionList = st.mention && props.members ? props.members.filter(function (x) { var q = st.mention.q.toLowerCase(); return x.name.toLowerCase().indexOf(q) >= 0 || (!!x.username && x.username.toLowerCase().indexOf(q) >= 0); }).slice(0, 5) : null;
   function pickMention(x) {
     var el = editRef.current, mn = st.mention;
     if (!el || !mn) return;
     el.focus({ preventScroll: true });
     setSelection(el, mn.at, mn.at + mn.q.length + 1);
-    document.execCommand('insertText', false, '@' + x.name + ' ');
+    document.execCommand('insertText', false, '@' + (x.username || x.name) + ' ');
     sync(true);
   }
 

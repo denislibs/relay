@@ -245,6 +245,24 @@ test('typing from myself or from a blocked user is dropped (group topic sends it
   expect(chatOf(list.list(), g)?.typing).toBe(false);
 });
 
+test('group typing names who types, in the order they started; the row drops them when they stop', async () => {
+  const { a, b, c, g } = await group();
+  const eb = await open({ ...srv.config(b), typingMs: 3000 });
+  eb.connect(); await eb.whenIdle();
+  const list = watchInto(eb, { kind: 'chatList', limit: 50 });
+  await list.until((l) => !!chatOf(l, g));
+  // открытая группа знает участников (имена — оттуда)
+  const members = watchInto(eb, { kind: 'members', chatId: g });
+  await members.until((l) => l.length >= 3, 4000);
+  inject(eb, { op: 'typing', chatId: g, userId: c.userId });
+  inject(eb, { op: 'typing', chatId: g, userId: a.userId });
+  // имён ещё может не быть (профиль спрашивается отдельно) — ждём оба
+  await list.until((l) => ((chatOf(l, g)?.typers as string[] | undefined) ?? []).every(Boolean) && (chatOf(l, g)?.typers as string[] | undefined)?.length === 2, 4000);
+  expect(chatOf(list.list(), g)?.typers).toEqual(['c', 'a']);
+  await list.until((l) => chatOf(l, g)?.typing === false, 6000);
+  expect(chatOf(list.list(), g)?.typers).toBeUndefined();
+});
+
 test('emojiFx from the peer marks the message (fx: key, t, at) without touching the store; my own is dropped', async () => {
   const { a, b, g } = await group();
   const eb = await open(srv.config(b));

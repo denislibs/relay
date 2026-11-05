@@ -516,7 +516,7 @@ function ChatRow(props) {
   var thumb = props.thumb;
   var atOnly = !!props.mentioned && unread === 1;
   var bottom = props.typing
-    ? h('span', { class: 'rl-row-preview rl-row-typing' }, h(TypingIndicator, { inline: true }), 'печатает…')
+    ? h('span', { class: 'rl-row-preview rl-row-typing' }, h(TypingIndicator, { inline: true }), typeof props.typing === 'string' ? props.typing : 'печатает…')
     : props.draft
       ? h('span', { class: 'rl-row-preview' }, h('b', { class: 'rl-row-draft' }, 'Черновик: '), props.draft)
       : h('span', { class: 'rl-row-preview' },

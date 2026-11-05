@@ -1,5 +1,5 @@
 import { expect, test } from 'bun:test';
-import { chatTime, clock, dayLabel, hideCode, hm, isSavedChat, isSystemChat, matchesSaved, shownBody, shownStatus, snippet } from './format';
+import { chatTime, clock, dayLabel, hideCode, hm, isSavedChat, isSystemChat, matchesSaved, shownBody, shownStatus, snippet, typingText } from './format';
 
 const at = (h: number, m: number) => new Date(2026, 9, 17, h, m).toISOString();
 
@@ -80,4 +80,13 @@ test('«Избранное»: без галочек, но «отправляет
   for (const s of ['pending', 'failed']) expect(shownStatus(s, true)).toBe(s);
   for (const q of ['Избранное', 'избр', ' ИЗБРАН ']) expect(matchesSaved(q)).toBe(true);
   for (const q of ['', '  ', 'бран', 'избранное2']) expect(matchesSaved(q)).toBe(false);
+});
+
+test('typing label names people like Telegram', () => {
+  expect(typingText(undefined)).toBe('печатает…');
+  expect(typingText(['Васян'])).toBe('Васян печатает…');
+  expect(typingText(['Васян', 'Петя'])).toBe('Васян и Петя печатают…');
+  expect(typingText(['Васян', 'Петя', 'Оля'])).toBe('Васян и ещё 2 печатают…');
+  expect(typingText(['', ''])).toBe('2 человека печатают…');
+  expect(typingText(['', '', '', '', ''])).toBe('5 человек печатают…');
 });

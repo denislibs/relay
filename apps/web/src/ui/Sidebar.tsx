@@ -14,7 +14,7 @@ import { useEffect, useRef, useState } from 'preact/hooks';
 import { memo } from 'preact/compat';
 import { go } from '../nav';
 import { isDark } from '../theme';
-import { chatTime, chatTone, isSavedChat, isSystemChat, shownBody, shownStatus, snippet } from './format';
+import { chatTime, chatTone, isSavedChat, isSystemChat, shownBody, shownStatus, snippet, typingText } from './format';
 import { toggleNight } from '../theme';
 import { previewBody, previewText, previewThumb, type LastMessage } from './preview';
 import { ALL, chatFolderTags, fitFolderTags, inFolder, toggleChatInFolder, type FolderTag } from '../folders';
@@ -90,7 +90,7 @@ export const SideRow = memo(function SideRow({ c, meId, active, showDraft, muted
       preview={last ? previewBody(last, !!thumb) : 'Нет сообщений'}
       draft={draft ? previewText(draft, c.draftEntities as LastMessage['entities']) : undefined}
       muted={muted}
-      typing={!!c.typing}
+      typing={c.typing ? typingText(c.typers as string[] | undefined) : false}
       time={chatTime((c.sortAt ?? c.lastAt) as string)}
       unread={c.unread as number}
       mentioned={(c.mentions as number) > 0}

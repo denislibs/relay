@@ -71,7 +71,7 @@ import { frameByKey, setGlobal, useGlobal, getGlobal, findChat, stackDepth } fro
 import { showToast, unblockUser, useUser } from '../settingsData';
 import { Feed, type MenuExtra } from './Feed';
 import { chatKindFor, mediaPolicy } from '../autoload';
-import { chatTime, chatTone, fileSize, isSavedChat, isSystemChat, lastSeenText, shownBody, snippet } from './format';
+import { chatTime, chatTone, fileSize, isSavedChat, isSystemChat, lastSeenText, shownBody, snippet, typingText } from './format';
 import { captureCircle, captureText } from './sendFlight';
 import { attachmentHit } from '../searchHit';
 import type { ProfilePhoto } from '@relay/protocol';
@@ -523,7 +523,11 @@ export function Chat({ chatId, frameKey, active, threadId, scheduled = false, sa
   const online = !!myPeer?.online;
   const isTyping = !!chat?.typing && !channel;   // в канале «печатает…» не показывается
   const members = useMembers(chatId, chat?.kind === 'group');
-  const subtitle = savedPeer ? (sub ? messagesText(sub.count) : '') : isSaved ? (savedList.meta?.loaded ? messagesText(savedList.meta.messages) : '') : thread ? title : system ? 'служебные уведомления' : isTyping ? 'печатает…' : channel ? (gInfo ? subscribersText(gInfo.members) : 'Канал') : chat?.kind === 'group' ? (members ? membersStatus(members, true) : 'Группа') : myPeer ? lastSeenText(online, myPeer.lastSeen as string | null) : '';
+  // подсказка «@» в группе: участники с именем пользователя (упоминание адресуется по нему, как в Telegram), кроме себя
+  const mentionables = useMemo(() => members?.members
+    .filter((m) => m.username && m.userId !== me.userId)
+    .map((m) => ({ name: m.name, username: m.username!, sub: '@' + m.username })), [members, me.userId]);
+  const subtitle = savedPeer ? (sub ? messagesText(sub.count) : '') : isSaved ? (savedList.meta?.loaded ? messagesText(savedList.meta.messages) : '') : thread ? title : system ? 'служебные уведомления' : isTyping ? typingText(chat?.typers as string[] | undefined) : channel ? (gInfo ? subscribersText(gInfo.members) : 'Канал') : chat?.kind === 'group' ? (members ? membersStatus(members, true) : 'Группа') : myPeer ? lastSeenText(online, myPeer.lastSeen as string | null) : '';
   const replyTo = replyKey ? messages.find((m) => m.key === replyKey) : undefined;
   useEffect(() => { if (!replyKey) setReplyQ(null); }, [replyKey]);   // ответ ушёл или снят: новый ответ на то же сообщение начинается без цитаты
   // цитата части сообщения: живёт вместе с ответом на то же сообщение; ответ сняли или сменили — её больше нет
@@ -735,6 +739,7 @@ export function Chat({ chatId, frameKey, active, threadId, scheduled = false, sa
       ) : <div class={'app-composer-host' + (selKeys ? ' is-selecting' : '') + (art?.open && !art.closing ? ' is-article' : '')}><Composer
         id="composer"
         apiRef={api}
+        members={mentionables}
         symbolMenu={editing ? undefined : (close: () => void, open: boolean) => (
           <SymbolMenu
             open={open}

@@ -1,4 +1,4 @@
-import { chatTitle, personView } from './names';
+import { chatTitle, displayName, personView } from './names';
 import { canPost } from './channel';
 import type { Store } from './store';
 import { PENDING_BASE, toQuote, type Item, type LocalChat, type LocalMessage, type Patch, type Query, type QuoteMsg } from './types';
@@ -90,14 +90,19 @@ function chatListItem(store: Store, c: LocalChat, mute: Map<number, number | nul
   // профиля собеседника нет (чат узнали из сообщения, строку people вытеснили) — движок его спросит
   if (person && c.peerId != null && !store.users.get(c.peerId)) store.wantUser(c.peerId);
   const typing = store.typing.has(c.id);
+  // группа: кто именно печатает (имена в порядке начала), как в Telegram — «Васян и Петя печатают…»
+  const typers = c.group ? [...(store.typing.get(c.id) ?? [])].map((u) => {
+    if (!store.users.get(u)) store.wantUser(u);
+    return displayName(store, u).split(' ')[0];
+  }) : [];
   // уведомления: значение неотправленной операции перекрывает значение чата
   const muteUntil = mute.has(c.id) ? mute.get(c.id)! : c.muteUntil ?? null;
   const autoDeleteSec = auto.has(c.id) ? auto.get(c.id)! : c.autoDeleteSec ?? null;
   // membersRev — счётчик изменений состава в памяти (members.ts) для старого интерфейса участников
   const f = flagsOf(c, flags.get(c.id));
-  const sig = `${store.chatVersion(c.id)}|${person?.sig ?? ''}|${typing}|${muteUntil}|${store.members.rev(c.id)}|${f.pinnedAt}|${f.archived}|${f.unreadMark}|${autoDeleteSec}`;
+  const sig = `${store.chatVersion(c.id)}|${person?.sig ?? ''}|${typing}:${typers.join(',')}|${muteUntil}|${store.members.rev(c.id)}|${f.pinnedAt}|${f.archived}|${f.unreadMark}|${autoDeleteSec}`;
   let hit = chatCache.get(c);
-  if (!hit || hit.sig !== sig) { hit = { sig, item: { ...chatItem(store, c, person, muteUntil, f, autoDeleteSec), typing } }; chatCache.set(c, hit); }
+  if (!hit || hit.sig !== sig) { hit = { sig, item: { ...chatItem(store, c, person, muteUntil, f, autoDeleteSec), typing, ...(typers.length ? { typers } : null) } }; chatCache.set(c, hit); }
   return hit;
 }
 

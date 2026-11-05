@@ -161,3 +161,12 @@ export const hideCode = (text: string): string => text.replace(/\d{5}/, '••�
 /** Текст сообщения для строк поиска и уведомлений: у кода входа (login_code) код скрыт. */
 export const shownBody = (m: { body: string; service?: { type: string } | null }): string =>
   m.service?.type === 'login_code' ? hideCode(m.body) : m.body;
+
+/** «печатает…» как в Telegram: в группе — с именами (имя, два имени, имя и ещё N); имён не знаем — числом. */
+export function typingText(typers?: string[] | null): string {
+  const n = typers?.length ?? 0, [a, b] = typers ?? [];
+  if (n <= 1) return a ? `${a} печатает…` : 'печатает…';
+  if (n === 2 && a && b) return `${a} и ${b} печатают…`;
+  if (a) return `${a} и ещё ${n - 1} печатают…`;
+  return `${n} ${n % 10 >= 2 && n % 10 <= 4 && (n % 100 < 12 || n % 100 > 14) ? 'человека' : 'человек'} печатают…`;
+}
