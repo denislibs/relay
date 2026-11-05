@@ -366,6 +366,22 @@ function startFeed(frame: ChatFrame, anchor: Anchor | undefined, onFirst: (patch
   s.timer = setTimeout(() => { if (s.first) first({}); }, 700);
 }
 
+/** Кадр, долго не получавший патчей (припаркован), — свежим из зеркала его подписки. Тот же список — тем же массивом:
+ *  mirror.list() всегда новый, а новая ссылка заставляла ленту при первом же рендере (кадр смены) заново держать
+ *  якорь — принудительная раскладка всего чата, 20–40 мс при CPU ×4 */
+function freshFrame(f: ChatFrame, s: Session | undefined): ChatFrame {
+  if (!s || s.first) return f;
+  const p = mirrorPatch(s);
+  const same = p.messages!.length === f.messages.length && p.messages!.every((m, i) => m === f.messages[i]);
+  return { ...f, ...p, messages: same ? f.messages : p.messages!, feedMeta: shallowSame(p.feedMeta, f.feedMeta) ? f.feedMeta : p.feedMeta ?? null };
+}
+function shallowSame(a: object | null | undefined, b: object | null | undefined): boolean {
+  if (a === b) return true;
+  if (!a || !b) return false;
+  const ka = Object.keys(a), kb = Object.keys(b);
+  return ka.length === kb.length && ka.every((k) => (a as Record<string, unknown>)[k] === (b as Record<string, unknown>)[k]);
+}
+
 /** Лента кадра из зеркала подписки: сообщения, окно и (тред) шапка, загружен ли, гость ли я. */
 function mirrorPatch(s: Session): Partial<ChatFrame> {
   const patch: Partial<ChatFrame> = { messages: s.mirror.list() as Item[], feedMeta: (s.mirror.meta('~window') as unknown as FeedMeta) ?? null };
@@ -458,7 +474,7 @@ function reuseBottom(frame: ChatFrame, target?: { id: number; sort: number }, ho
   const chatId = frame.chatId, seq = openSeq;
   clearTimeout(parkTimers.get(frame.key)); parkTimers.delete(frame.key);
   const s = sessions.get(frame.key);
-  const fresh: ChatFrame = { ...(s && !s.first ? { ...frame, ...mirrorPatch(s) } : frame), wake: true };
+  const fresh: ChatFrame = { ...freshFrame(frame, s), wake: true };
   const put = (f: ChatFrame) => (f.key === frame.key ? fresh : f);
   setGlobal((g) => ({ chatStack: g.chatStack.map(put), chatLeaving: g.chatLeaving.map(put), ...(hold ? {} : { pendingChatId: chatId }) }));
   if (peerFor !== chatId) watchPeer(chatId);
@@ -519,7 +535,7 @@ function revive(parked: ChatFrame, target?: { id: number; sort: number }): void 
   clearTimeout(parkTimers.get(parked.key)); parkTimers.delete(parked.key);
   // запаркованный кадр патчей не получает (patchFrame — только стек), а подписка жива: что пришло за это время — из зеркала
   const s = sessions.get(parked.key);
-  const frame: ChatFrame = { ...(s && !s.first ? { ...parked, ...mirrorPatch(s) } : parked), swap: false, wake: false };
+  const frame: ChatFrame = { ...freshFrame(parked, s), swap: false, wake: false };
   beginHeavyAnimation(LEAVE_MS + 50);
   setGlobal((g) => ({ chatStack: [...g.chatStack, frame], chatLeaving: g.chatLeaving.filter((f) => f.key !== frame.key), openChatId: frame.chatId, pendingChatId: null }));
   addLayer(frame.key);
