@@ -1453,7 +1453,7 @@ export class Engine {
         await this.store.flush();
         this.changed();
         this.pumpOutbox();
-        void this.stickers.bumpRecent(a.sticker);
+        await this.stickers.bumpRecent(a.sticker).catch(() => {});   // ответ — уже в недавних; сбой кэша отправку не отменяет
         return { clientId };
       }
       case 'myStickers':
