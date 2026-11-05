@@ -970,7 +970,7 @@ button.rl-quote:active { background: var(--quote-bg-active, var(--pressed)); }
 .rl-mention span { display: flex; flex-direction: column; font: 400 14px/18px var(--font-sans); }
 .rl-mention b { font-weight: 500; font-size: 15px; }
 .rl-mention small { color: var(--ink-muted); font-size: 12px; }
-.rl-mention:hover, .rl-mention-active { background: var(--hover); }
+.rl-mention-active { background: var(--hover); }   /* одна подсветка: мышь двигает выбор, как стрелки */
 
 /* ---------- DropOverlay ---------- */
 .rl-drop { position: absolute; inset: 0; z-index: 15; display: flex; align-items: center; justify-content: center; padding: var(--space-6); background: var(--attach-drop); backdrop-filter: blur(2px); animation: rl-fade var(--dur-base) var(--ease-out) both; }
