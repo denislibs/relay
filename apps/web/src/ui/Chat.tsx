@@ -4,7 +4,7 @@ import { pushRecentReaction, quickAssets, quickReactions } from '../reactions';
 import { queueReactionFx } from '../reactionFx';
 import { lazy } from './lazy';
 import { getPrefs } from '../prefs';
-import { MEMBER_RIGHT_TEXT } from '../groups';
+import { copyText, MEMBER_RIGHT_TEXT, messageLink } from '../groups';
 import { PinnedBar } from './PinnedBar';
 import { PollResults } from './PollResults';
 import { GeoSend } from './GeoSend';
@@ -79,7 +79,10 @@ import { avatarPhoto } from '../profilePhoto';
 import { openStickersPanel, sendStickerHere, setStickerTarget } from '../stickers';
 import { isSavedGif, removeSavedGif, saveGifFrom, sendGifHere, type GifAttachment } from '../gifs';
 import { greetingChat } from '../greeting';
-import { cancelForwardDraft, endSelect, forwardElsewhere, patchForwardDraft, sendForwardDraft, startForward, startSelect } from '../forward';
+import { cancelForwardDraft, endSelect, forwardElsewhere, forwardQuick, patchForwardDraft, sendForwardDraft, startForward, startSelect } from '../forward';
+import { forwardSubmenu } from './forwardMenu';
+import { useFolderCtx } from './folderNav';
+import { topChats } from '../search';
 
 // эмодзи, стикеры и полная панель реакций — отдельными чанками (ui/lazy.tsx): с таблицей эмодзи это ~180 КБ кода,
 // не нужного первому экрану; догружаются в простое после старта
@@ -614,6 +617,9 @@ export function Chat({ chatId, frameKey, active, threadId, scheduled = false, sa
   // «Переслать» из меню: у альбома — весь альбом
   const groupOf = (m: Item) => (m.groupId ? messages.filter((x) => x.groupId === m.groupId && x.senderId === m.senderId) : [m]);
   const forwardMenuMsg = (m: Item) => startForward(chatId, groupOf(m), nameOf);
+  // подменю «Переслать»: частые собеседники нужны сразу при открытии меню — кэш движка прогреваем заранее
+  const folderCtx = useFolderCtx();
+  useEffect(() => { void topChats(); }, []);
   // режим выбора: вместо поля ввода — панель «Выбрано: N» (Переслать / Копировать / Удалить, если все свои)
   const selected = selKeys ? messages.filter((m) => selKeys.includes(m.key as string)) : [];
   useEffect(() => endSelect, [chatId]);   // ушли из чата — выбор сбрасывается
@@ -929,7 +935,13 @@ export function Chat({ chatId, frameKey, active, threadId, scheduled = false, sa
                   ...(att?.id && att.kind === 'photo' && att.mime === 'image/gif' && menuMsg.id != null && !menuMsg.deleted && isSavedGif(att.id) ? [{ icon: 'trash', label: 'Удалить из GIF', onClick: () => removeSavedGif(att.id as string) }]
                     : att?.id && att.kind === 'photo' && att.mime === 'image/gif' && menuMsg.id != null && !menuMsg.deleted && !gInfo?.protected && !menuMsg.expiresAt && !guest && !chat?.preview ? [{ icon: 'gif', label: 'Сохранить в GIF', onClick: () => saveGifFrom(chatId, menuMsg.id as number, att as unknown as GifAttachment) }] : []),
                   ...(!menuMsg.deleted && !gInfo?.protected && att?.id ? [{ icon: 'download', label: 'Скачать', onClick: () => downloadUrl(`/files/${att.id}?download=1`, downloadName(att)) }] : []),
-                  ...(menuMsg.id != null && !menuMsg.deleted && !menuMsg.service && !gInfo?.protected && !guest ? [{ icon: 'forward', label: 'Переслать', onClick: () => forwardMenuMsg(menuMsg) }] : []),
+                  // ссылка на сообщение — в группах и каналах (как в Telegram): публичный — /@имя/id, закрытый — /c/чат/id (откроется у участников)
+                  ...(community && !thread && menuMsg.id != null && !menuMsg.deleted && !menuMsg.service ? [{ icon: 'link', label: 'Копировать ссылку на сообщение', onClick: () => copyText(messageLink(chatId, gInfo?.username, menuMsg.id as number)) }] : []),
+                  ...(menuMsg.id != null && !menuMsg.deleted && !menuMsg.service && !gInfo?.protected && !guest ? [{ icon: 'forward', label: 'Переслать', submenu: forwardSubmenu({
+                    chats: getGlobal().chats, blocked: getGlobal().blocked, folders: getGlobal().settings.folders, ctx: folderCtx,
+                    onPick: (to, title) => { void forwardQuick(chatId, groupOf(menuMsg), nameOf, to, title); },
+                    onMore: () => forwardMenuMsg(menuMsg),
+                  }) }] : []),
                   ...(menuMsg.id != null && !menuMsg.deleted && textual && !gInfo?.protected ? [{ icon: 'checkCircle', label: 'Выбрать', onClick: () => startSelect(chatId, groupOf(menuMsg).map((x) => x.key as string)) }] : []),
                   ...(canAskReadBy(menuMsg, chat?.kind === 'group' && gInfo ? { kind: 'group', members: gInfo.members } : null, me.userId) ? [{ icon: 'markRead', label: 'Кто прочитал', onClick: () => setReadByOf(menuMsg.id as number) }] : []),
                   ...(canDelete ? ['-' as const, { icon: 'trash', label: 'Удалить', danger: true, onClick: () => setConfirmDelete({ ids: [menuMsg.id as number] }) }] : []),
