@@ -4,7 +4,8 @@ import { Fragment, h } from 'preact';
 import { useLayoutEffect, useRef, useState } from 'preact/hooks';
 import { forceMeasure } from './schedule.js';
 import { Highlight } from './more.js';
-import { safeUrl, segments } from './richtext.js';
+import { codeFromPlain, safeUrl, segments } from './richtext.js';
+import { emojiNodes } from './emojiImg.js';
 import { Spoiler } from './spoiler.js';
 import { FormattedDate } from './dateView.js';
 
@@ -49,10 +50,13 @@ function autoLinks(text, list) {
 }
 
 function MessageText(props) {
-  var text = props.text || '', list = autoLinks(text, props.entities);
-  if (!list || !list.length) return props.highlight ? h(Highlight, { text: text, query: props.highlight }) : text;
+  var text = props.text || '', ents = props.entities;
+  var plain = codeFromPlain(text, ents);
+  if (plain) { text = plain.text; ents = plain.entities; }
+  var list = autoLinks(text, ents);
+  if (!list || !list.length) return props.highlight ? h(Highlight, { text: text, query: props.highlight }) : emojiNodes(text);
   return segments(text, list).map(function (sg, i) {
-    var node = props.highlight ? h(Highlight, { text: sg.text, query: props.highlight }) : sg.text;
+    var node = props.highlight ? h(Highlight, { text: sg.text, query: props.highlight }) : emojiNodes(sg.text, i + ':');
     for (var k = ORDER.length - 1; k >= 0; k--) {
       var t = ORDER[k];
       if (sg.marks[t]) node = wrap(t, sg.marks[t], node);

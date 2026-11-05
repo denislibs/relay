@@ -6,6 +6,7 @@ import { h } from 'preact';
 import { useState } from 'preact/hooks';
 import { cx, MsgLine, ForwardTitle, ReplyQuote, ReactionChips, MessageStatus } from './kit.js';
 import { StickerView } from './StickerView.js';
+import { emojiNodes } from './emojiImg.js';
 
 export const EMOJI_STICKER_PX = 112;
 
@@ -35,7 +36,7 @@ export function EmojiBubble(props) {
       h('div', { class: cx('rl-sticker-box rl-emoji-box', single && 'rl-emoji-one', animated && 'rl-emoji-anim') },
         // один эмодзи: бокс 112 px и глиф всегда, анимация ложится сверху и прячет глиф, когда нарисован первый кадр —
         // ни пустого бокса, ни скачка высоты, когда каталог пришёл; ошибка загрузки — остаётся глиф
-        h('span', { class: 'rl-emoji-text', style: { fontSize: size + 'px' } }, props.text),
+        h('span', { class: 'rl-emoji-text', style: { fontSize: size + 'px' } }, emojiNodes(props.text)),
         animated ? h(StickerView, { src: props.src, w: 512, h: 512, size: EMOJI_STICKER_PX, group: 'feed', loop: false, replay, force: replay > 0, title: props.text,
           onError: () => setFailed(true),
           // клик — заново, и при выключенном автоплее стикеров тоже (force)

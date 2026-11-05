@@ -3,6 +3,25 @@
    не уходит третьим лицам. Свой JetBrains Mono можно положить в сборку (@font-face, font-src 'self'). */
 
 /* Relay — component styles. Colors, radii, durations come from tokens.css only. */
+
+/* Классические полосы прокрутки (Windows, Linux; класс ставит main.tsx) — как в tweb: 6 px, без стрелок и дорожки,
+   скруглённый палец только при наведении на прокручиваемое. В Chromium свои полосы рисует ::-webkit-scrollbar,
+   а он не действует там, где задан scrollbar-width / scrollbar-color, — поэтому «тонкие» правила ниже читают их
+   из --sb-width / --sb-color, и здесь они сброшены в auto (scrollbar-width: none остаётся). Firefox — тонкие
+   стандартные. */
+@supports selector(::-webkit-scrollbar) {
+  .rl-classic-scroll { --sb-width: auto; --sb-color: auto; }
+  .rl-classic-scroll ::-webkit-scrollbar { width: 6px; height: 6px; background: transparent; }
+  .rl-classic-scroll ::-webkit-scrollbar-button { display: none; width: 0; height: 0; }
+  .rl-classic-scroll ::-webkit-scrollbar-track, .rl-classic-scroll ::-webkit-scrollbar-corner { background: transparent; }
+  .rl-classic-scroll ::-webkit-scrollbar-thumb { min-height: 40px; border-radius: 3px; background: transparent; }
+  .rl-classic-scroll :hover::-webkit-scrollbar-thumb { background: color-mix(in srgb, var(--ink) 20%, transparent); }
+}
+@supports not selector(::-webkit-scrollbar) {
+  :where(.rl-classic-scroll) * { scrollbar-width: thin; scrollbar-color: transparent transparent; }
+  :where(.rl-classic-scroll *:hover) { scrollbar-color: color-mix(in srgb, var(--ink) 20%, transparent) transparent; }
+}
+
 body { margin: 0; font-family: var(--font-sans); color: var(--ink); background: var(--bg); -webkit-font-smoothing: antialiased; }
 .rl, .rl *, .rl *::before, .rl *::after { box-sizing: border-box; }
 .rl-sr { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
@@ -220,7 +239,7 @@ body { margin: 0; font-family: var(--font-sans); color: var(--ink); background: 
 .rl-composer-input { --line: round(calc(var(--message-text-size, 15px) * 1.3125), 1px); position: relative; flex: 1; min-width: 0; box-sizing: border-box;
   height: calc(var(--line) + 19px); min-height: calc(var(--line) + 19px); max-height: min(240px, 40vh); overflow: hidden;
   transition: height 120ms var(--ease-out); }
-.rl-composer-input-over { overflow-y: auto; overscroll-behavior: contain; scrollbar-width: thin; }
+.rl-composer-input-over { overflow-y: auto; overscroll-behavior: contain; scrollbar-width: var(--sb-width, thin); }
 .rl-composer-editable { box-sizing: border-box; min-height: calc(var(--line) + 19px);   /* не 100%: иначе пустое поле меряется высотой прежнего текста и не сжимается */
    padding: 9.5px 6px; outline: none; color: var(--ink); caret-color: var(--brand);
   font: 400 var(--message-text-size, 15px)/var(--line) var(--font-sans); white-space: pre-wrap; overflow-wrap: anywhere; word-break: break-word; cursor: text; }
@@ -1046,7 +1065,7 @@ button.rl-quote:active { background: var(--quote-bg-active, var(--pressed)); }
 
 /* ---------- SidebarCard ---------- */
 .rl-sidecard { position: relative; flex: 1; min-width: 0; display: flex; flex-direction: column; border-radius: var(--radius-panel); background: var(--card); color: var(--ink); box-shadow: var(--shadow-panel); overflow: hidden; }
-.rl-sidecard-body { flex: 1; min-height: 0; overflow-y: auto; padding: 0 var(--space-2) 88px; overscroll-behavior: contain; scrollbar-width: thin; scrollbar-color: var(--line) transparent; }
+.rl-sidecard-body { flex: 1; min-height: 0; overflow-y: auto; padding: 0 var(--space-2) 88px; overscroll-behavior: contain; scrollbar-width: var(--sb-width, thin); scrollbar-color: var(--sb-color, var(--line) transparent); }
 .rl-sidecard .rl-row { border-radius: var(--radius-md); }
 /* выбранный чат: в светлой теме — фирменный зелёный, в тёмной — приглушённый (неон на чёрном режет глаз) */
 :root { --row-current: var(--brand-strong); }
@@ -1124,7 +1143,7 @@ button.rl-tab:hover { color: var(--ink); }
 .rl-glassbar button.rl-glassbar-who { display: flex; align-items: center; gap: var(--space-3); flex: 1; min-width: 0; padding: 0; border: 0; background: transparent; color: inherit; text-align: left; cursor: pointer; }
 
 /* ---------- Feed and composer inside the shell ---------- */
-.rl-shell .rl-feed { flex: 1; min-height: 0; overflow-y: auto; padding: var(--space-3) 0 var(--space-3); display: flex; flex-direction: column; scrollbar-width: thin; scrollbar-color: var(--wave-unplayed) transparent; }
+.rl-shell .rl-feed { flex: 1; min-height: 0; overflow-y: auto; padding: var(--space-3) 0 var(--space-3); display: flex; flex-direction: column; scrollbar-width: var(--sb-width, thin); scrollbar-color: var(--sb-color, var(--wave-unplayed) transparent); }
 .rl-shell .rl-feed > :first-child { margin-top: auto; }
 .rl-shell .rl-msgline { padding: 0 clamp(var(--space-2), 8%, 96px); }
 .rl-shell .rl-composer-wrap { background: transparent; padding: 0 clamp(0px, 8%, 96px); }
@@ -1401,7 +1420,7 @@ html[data-blur="0"] .rl-pop .rl-menu, html[data-blur="0"] .rl-pop .rl-rpick { -w
 @media (prefers-reduced-motion: reduce) { .rl-slide { animation-duration: 1ms !important; } }
 
 /* settings page */
-.rl-settings { flex: 1; min-height: 0; overflow-y: auto; padding: 0 0 var(--space-6); background: var(--page); scrollbar-width: thin; }
+.rl-settings { flex: 1; min-height: 0; overflow-y: auto; padding: 0 0 var(--space-6); background: var(--page); scrollbar-width: var(--sb-width, thin); }
 .rl-settings-group { margin: var(--space-2) var(--space-2) 0; padding: var(--space-1) 0; border-radius: var(--radius-lg); background: var(--card); overflow: hidden; }
 .rl-settings-caption { padding: var(--space-2) var(--space-4) var(--space-1); color: var(--brand-text); font: 500 14px/20px var(--font-sans); }
 .rl-settings .rl-inforow { border-radius: var(--radius-md); }
@@ -1411,7 +1430,7 @@ html[data-blur="0"] .rl-pop .rl-menu, html[data-blur="0"] .rl-pop .rl-rpick { -w
 /* paged sidebar body: pages (SlideStack) scroll on their own */
 .rl-sidecard-paged { display: flex; overflow: hidden; padding: 0; }
 .rl-sidecard-paged .rl-slide { background: transparent; }
-.rl-page-scroll { flex: 1; min-height: 0; overflow-y: auto; padding: 0 var(--space-2) 88px; overscroll-behavior: contain; scrollbar-width: thin; scrollbar-color: var(--line) transparent; }
+.rl-page-scroll { flex: 1; min-height: 0; overflow-y: auto; padding: 0 var(--space-2) 88px; overscroll-behavior: contain; scrollbar-width: var(--sb-width, thin); scrollbar-color: var(--sb-color, var(--line) transparent); }
 /* tabs variant: folders swap sideways at full width, no dimming (deeper = to the right) */
 .rl-slides-tabs .rl-slide-in-push { animation-name: rl-tab-from-right; box-shadow: none; }
 .rl-slides-tabs .rl-slide-out-push { animation-name: rl-tab-to-left; }
@@ -1452,7 +1471,7 @@ html[data-anim="0"] .rl-shell > .rl-shell-main { transition: none; }
 @keyframes rl-aside-out { from { transform: none; opacity: 1; } to { transform: translateX(calc(100% + var(--space-float))); opacity: 0.4; } }
 .rl-asidecard { display: flex; flex-direction: column; min-height: 0; overflow: hidden; color: var(--ink); }
 .rl-asidecard .rl-panel-head h2 { flex: 1; font: 500 19px/24px var(--font-sans); margin: 0; }
-.rl-aside-body { flex: 1; min-height: 0; display: flex; flex-direction: column; overflow-y: auto; scrollbar-width: thin; }
+.rl-aside-body { flex: 1; min-height: 0; display: flex; flex-direction: column; overflow-y: auto; scrollbar-width: var(--sb-width, thin); }
 .rl-aside-group { margin: var(--space-2) var(--space-3) 0; padding: var(--space-2); border-radius: var(--radius-lg); background: var(--raised); box-shadow: var(--tg-shadow-bubble, 0 1px 2px rgba(0,0,0,.1)); }
 .rl-aside-group .rl-inforow { border-radius: var(--radius-md); }
 .rl-aside-tabs { margin: var(--space-3) var(--space-3) 0; }
@@ -2150,7 +2169,7 @@ html[data-anim="0"] .rl-cal-media-in { animation: none; }
 .rl-tf-select.is-open .rl-tf-input { border-color: var(--brand-strong); box-shadow: inset 0 0 0 .5px var(--brand-strong); }
 .rl-tf-select.is-open .rl-tf-label { color: var(--brand-text); }
 .rl-select-pop { position: fixed; z-index: 2000; overflow-y: auto; overscroll-behavior: contain; padding: 4px; border-radius: 14px; background: var(--menu-bg); color: var(--ink); box-shadow: var(--menu-shadow);
-  -webkit-backdrop-filter: blur(24px) saturate(1.8); backdrop-filter: blur(24px) saturate(1.8); scrollbar-width: thin; transform-origin: top center; animation: rl-select-in 160ms cubic-bezier(.2, .8, .2, 1) both; }
+  -webkit-backdrop-filter: blur(24px) saturate(1.8); backdrop-filter: blur(24px) saturate(1.8); scrollbar-width: var(--sb-width, thin); transform-origin: top center; animation: rl-select-in 160ms cubic-bezier(.2, .8, .2, 1) both; }
 .rl-select-up { transform-origin: bottom center; }
 @keyframes rl-select-in { from { opacity: 0; transform: translateY(-4px) scale(.97); } }
 .rl-select-up { animation-name: rl-select-in-up; }
@@ -2549,6 +2568,10 @@ html[data-anim="0"] .rl-cal-media-in { animation: none; }
 .rl-sticker-canvas { opacity: 0; }
 .rl-sticker-ready .rl-sticker-canvas { opacity: 1; }
 .rl-sticker-fade .rl-sticker-canvas, .rl-sticker-fade .rl-sticker-static { animation: rl-fade var(--dur-base, 200ms) var(--ease-out, ease-out); }
+/* статичный стикер до загрузки не рисуется построчно поверх силуэта — проявится целиком */
+.rl-sticker:not(.rl-sticker-ready) .rl-sticker-static { opacity: 0; }
+/* силуэт гаснет под проявляющимся стикером, в то же время */
+.rl-sticker-outline-out { animation: rl-fade-out var(--dur-base, 200ms) var(--ease-out, ease-out) forwards; }
 .rl-sticker[role="button"] { cursor: pointer; }
 .rl-sticker-msg { display: flex; flex-direction: column; align-items: flex-start; gap: 4px; max-width: min(80%, 420px); }
 .rl-sticker-msg-out { align-items: flex-end; }
@@ -2565,6 +2588,11 @@ html[data-anim="0"] .rl-cal-media-in { animation: none; }
 .rl-emoji-one { position: relative; width: 112px; height: 112px; margin-bottom: 0; }
 .rl-emoji-one .rl-emoji-text { padding: 0; font-size: 96px !important; line-height: 112px; text-align: center; }
 .rl-emoji-one .rl-sticker { position: absolute; left: 0; top: 0; }
+/* эмодзи картинкой (emojiImg.js, не Apple-платформы): в строке — по кеглю и на месте глифа, не раздвигая строку;
+   крупные — ровно в кегль, один — по центру бокса, как глиф под анимацией */
+img.rl-emoji { display: inline-block; width: 1.2em; height: 1.2em; margin: 0 .04em; vertical-align: -.24em; object-fit: contain; }
+.rl-emoji-text img.rl-emoji { width: 1em; height: 1em; margin: 0 .03em; vertical-align: -.12em; }
+.rl-emoji-one .rl-emoji-text img.rl-emoji { vertical-align: middle; margin: 0; }
 .rl-emoji-one:has(.rl-sticker-ready) .rl-emoji-text { visibility: hidden; }
 .rl-emoji-one .rl-sticker-meta { bottom: 0; }
 
