@@ -1,5 +1,5 @@
 import { expect, test } from 'bun:test';
-import { applyMarkdown, clean, covers, safeUrl, segments, splice, toggleFormat, toHtml, trimValue } from './richtext.js';
+import { applyMarkdown, clean, codeFromPlain, covers, safeUrl, segments, splice, toggleFormat, toHtml, trimValue } from './richtext.js';
 
 const v = (text, entities = []) => ({ text, entities });
 
@@ -81,6 +81,16 @@ test('date entities: kept with date and format, chip HTML, Telegram tg-time on c
   expect(toHtml(v0)).toBe('встреча <span class="rl-date-chip" contenteditable="false" data-date="1792400000" data-format="r">завтра</span>');
   expect(clipboardHtml(v0.text, v0.entities)).toBe('встреча <tg-time unix="1792400000" format="r">завтра</tg-time>');
   expect(toggleFormat(v('в 10 утра'), 'date', 2, 9, { date: 100, format: '' }).entities).toEqual([{ type: 'date', offset: 2, length: 7, date: 100 }]);
+});
+
+test('codeFromPlain: code fences in text that came without formatting; other markup and formatted text untouched', () => {
+  const t = 'та держи\n\n```js\nfunction f(a) {\n  return a;\n}\n```';
+  const r = codeFromPlain(t, []);
+  expect(r.text).toBe('та держи\n\nfunction f(a) {\n  return a;\n}');
+  expect(r.entities).toEqual([{ type: 'pre', offset: 10, length: r.text.length - 10 }]);
+  expect(codeFromPlain('run `ls` **now**', null)).toEqual({ text: 'run ls **now**', entities: [{ type: 'code', offset: 4, length: 2 }] });
+  expect(codeFromPlain('**bold** only', [])).toBe(null);
+  expect(codeFromPlain('```x```', [{ type: 'bold', offset: 0, length: 7 }])).toBe(null);
 });
 
 const bq = (offset, length, extra = {}) => ({ type: 'blockquote', offset, length, ...extra });

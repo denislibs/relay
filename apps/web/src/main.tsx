@@ -33,6 +33,17 @@ installDeviceFetch();
 declare const __DEV__: boolean;
 declare const __BUILD__: string;
 
+// Классические полосы прокрутки (Windows, Linux, macOS с «показывать всегда») занимают место и рисуются со
+// стрелками — тогда делаем их тонкими и проявляем при наведении (relay.css .rl-classic-scroll), как оверлейные на
+// macOS. Одно чтение раскладки при старте — до проверки measure/mutate.
+{
+  const probe = document.createElement('div');
+  probe.style.cssText = 'position:absolute;top:-200px;width:100px;height:100px;overflow:scroll;visibility:hidden';
+  document.documentElement.appendChild(probe);
+  if (probe.offsetWidth - probe.clientWidth > 0) document.documentElement.classList.add('rl-classic-scroll');
+  probe.remove();
+}
+
 // dev-сборка: проверка дисциплины measure/mutate (чтение раскладки в фазе записи и наоборот)
 if (__DEV__) enableStrictDom({ ignore: /twallpaper/ });
 

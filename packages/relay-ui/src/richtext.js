@@ -1,3 +1,4 @@
+import { emojiHtml } from './emojiImg.js';
 // Текст с форматированием: модель { text, entities } и её отображение в DOM поля ввода и обратно.
 // Сущность — { type, offset, length, url? } в единицах UTF-16 (как String.length), без вложенности:
 // разные типы могут перекрываться, один тип — нет (соседние куски одного типа склеиваются).
@@ -199,7 +200,7 @@ export function toHtml(value) {
       var t = ORDER[k];
       if (sg.marks[t]) { open += OPEN[t](sg.marks[t]); close = CLOSE[t] + close; }
     }
-    if (text) html += open + esc(text).replace(/\n/g, '<br>') + close;
+    if (text) html += open + emojiHtml(esc(text)).replace(/\n/g, '<br>') + close;
   }
   // цитата в самом конце: пустая строка под ней (подпорка, в значение не входит) — иначе из блока не выйти курсором
   if (inQuote) html += '</blockquote><br>';
@@ -355,11 +356,12 @@ function insideMono(value, a, b) {
   return value.entities.some(function (en) { return MONO[en.type] && en.offset < b && en.offset + en.length > a; });
 }
 
-/** Разметка в тексте → оформление; внутри кода разметку не трогаем. */
-export function applyMarkdown(value) {
+/** Разметка в тексте → оформление; внутри кода разметку не трогаем. rules — подмножество MD (по умолчанию все). */
+export function applyMarkdown(value, rules) {
   var v = { text: value.text, entities: value.entities.slice() };
-  for (var r = 0; r < MD.length; r++) {
-    var rule = MD[r], from = 0, guard = 0;
+  var list = rules || MD;
+  for (var r = 0; r < list.length; r++) {
+    var rule = list[r], from = 0, guard = 0;
     while (guard++ < 500) {
       var m = rule.re.exec(v.text.slice(from));
       if (!m) break;
@@ -396,6 +398,18 @@ function quoteLines(v) {
   if (run) runs.push(run);
   for (var k = cuts.length - 1; k >= 0; k--) v = splice(v, cuts[k][0], cuts[k][1], EMPTY);
   return runs.length ? { text: v.text, entities: clean(v.text, v.entities.concat(runs)) } : v;
+}
+
+var CODE_MD = MD.slice(0, 2);   // ```блок``` и `строка`
+/**
+ * Текст без оформления, пришедший не из нашего поля (API, бот, старый клиент), с разметкой кода — блоки ```…``` и
+ * `…` при показе становятся кодом. Остальную разметку (**, __) не трогаем: в простом тексте она может быть
+ * буквальной. С оформлением — как есть: наше поле уже разобрало разметку при отправке.
+ */
+export function codeFromPlain(text, entities) {
+  if ((entities && entities.length) || !text || text.indexOf('`') < 0) return null;
+  var v = applyMarkdown({ text: text, entities: [] }, CODE_MD);
+  return v.entities.length ? trimValue(v) : null;   // перевод строки перед закрывающими ``` — не строка текста
 }
 
 /* ---------- вставка из буфера ---------- */
@@ -453,6 +467,14 @@ export function pointAt(root, target) {
         continue;
       }
       if (c.nodeType !== 1) continue;
+      if (c.nodeName === 'IMG') {   // эмодзи картинкой: в тексте — его alt; курсор только до или после
+        var al = (c.getAttribute('alt') || '').length;
+        if (!al) continue;
+        if (target === pos && !best) best = [node, i];
+        if (target > pos && target <= pos + al) { best = [node, i + 1]; pos += al; if (target < pos) return true; continue; }
+        pos += al;
+        continue;
+      }
       if (c.nodeName === 'BR') {
         if (trailingBr(c, root)) continue;
         if (target === pos && !best) best = [node, i];

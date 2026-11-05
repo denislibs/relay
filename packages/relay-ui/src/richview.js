@@ -5,7 +5,8 @@ import { useEffect, useLayoutEffect, useRef, useState } from 'preact/hooks';
 import { beginHeavyAnimation, forceMeasure, requestMeasure, requestMutation } from './schedule.js';
 import { Icon, reducedMotion } from './kit.js';
 import { Highlight } from './more.js';
-import { safeUrl, segments } from './richtext.js';
+import { codeFromPlain, safeUrl, segments } from './richtext.js';
+import { emojiNodes } from './emojiImg.js';
 import { Spoiler } from './spoiler.js';
 import { FormattedDate } from './dateView.js';
 
@@ -160,10 +161,13 @@ function QuoteBlock(props) {
 }
 
 function MessageText(props) {
-  var text = props.text || '', list = autoMentions(text, autoLinks(text, props.entities));
-  if (!list || !list.length) return props.highlight ? h(Highlight, { text: text, query: props.highlight }) : text;
+  var text = props.text || '', ents = props.entities;
+  var plain = codeFromPlain(text, ents);
+  if (plain) { text = plain.text; ents = plain.entities; }
+  var list = autoMentions(text, autoLinks(text, ents));
+  if (!list || !list.length) return props.highlight ? h(Highlight, { text: text, query: props.highlight }) : emojiNodes(text);
   function inline(sg, str, i) {
-    var node = props.highlight ? h(Highlight, { text: str, query: props.highlight }) : str;
+    var node = props.highlight ? h(Highlight, { text: str, query: props.highlight }) : emojiNodes(str, i + ':');
     for (var k = ORDER.length - 1; k >= 0; k--) {
       var t = ORDER[k];
       if (sg.marks[t]) node = t === 'mention' ? mentionLink(sg.text.slice(1), node) : wrap(t, sg.marks[t], node);

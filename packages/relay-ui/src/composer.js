@@ -20,6 +20,7 @@ import { startVoice } from './media/voiceRecorder.js';
 import { RoundRecorderView } from './media/roundView.js';
 import { requestMeasure, requestMutation } from './schedule.js';
 import { covers, emptyValue, readDom, replaceContent, safeUrl, setSelection, splice, toggleFormat, toHtml, trimValue, valueFromClipboard } from './richtext.js';
+import { emojifyDom } from './emojiImg.js';
 
 var TOOLBAR = [
   { type: 'bold', icon: 'bold', label: 'Жирный', combo: 'mod+b' },
@@ -142,6 +143,9 @@ function Composer(props) {
     if (!el) return;
     var sel = selIn(el);
     var v = readDom(el, sel);
+    // эмодзи, набранные текстом (Win+., вставка, автозамена), — картинками, как в пикере и пузырях (emojiImg.js);
+    // во время набора IME не трогаем; курсор — на том же месте в тексте
+    if (!composing.current && emojifyDom(el) && sel) setSelection(el, v.start, v.end);
     // пустое поле браузер оставляет с <br> или пустым блоком — чистим (иначе плейсхолдер и высота врут);
     // новое выделение сбрасывает «запомненный» стиль набора: стёрли всё — дальше пишем без оформления
     if (!v.text && !composing.current) {

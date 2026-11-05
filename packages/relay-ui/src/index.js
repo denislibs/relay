@@ -13,6 +13,7 @@ export * from './schedule.js';
 export { enableStrictDom, strictDomEnabled, strictDomReport, strictDomReset, subscribeStrictDom } from './strict.js';
 export * from './composer.js';
 export * from './richtext.js';
+export * from './emojiImg.js';
 export * from './richview.js';
 export * from './spoiler.js';
 export * from './media/waveform.js';

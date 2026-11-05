@@ -402,7 +402,7 @@ button.app-perf-row:hover { background: var(--hover); }
 .app-dev-chips { display: flex; flex-wrap: nowrap; gap: 6px; padding: 0 var(--space-2) var(--space-2); overflow-x: auto; scrollbar-width: none; }
 .app-dev-chips .rl-chip { flex: none; height: 28px; font-size: 13px; }
 .app-dev-logtools .app-dev-actions { padding: 0 var(--space-2) var(--space-2); }
-.app-dev-logscroll { position: relative; flex: 1; min-height: 0; overflow-y: auto; overflow-anchor: none; margin: 0 var(--space-2) var(--space-2); border-radius: var(--radius-lg); background: var(--card); scrollbar-width: thin; }
+.app-dev-logscroll { position: relative; flex: 1; min-height: 0; overflow-y: auto; overflow-anchor: none; margin: 0 var(--space-2) var(--space-2); border-radius: var(--radius-lg); background: var(--card); scrollbar-width: var(--sb-width, thin); }
 .app-dev-ev { display: grid; grid-template-columns: 84px 10px minmax(36px, max-content) minmax(0, 1fr) 44px 48px; gap: 5px; align-items: center; width: 100%; height: 28px; padding: 0 8px; border: 0; background: transparent; color: var(--ink); text-align: left; font: 400 11.5px/28px var(--font-mono); font-variant-numeric: tabular-nums; cursor: pointer; }
 .app-dev-ev:hover { background: var(--hover); }
 .app-dev-ev-on { background: var(--selected) !important; }
@@ -425,7 +425,7 @@ button.app-perf-row:hover { background: var(--hover); }
 
 /* сеть, данные, ошибки */
 .app-dev-custom { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: var(--space-2); padding: 0 var(--space-3); }
-.app-dev-idb { position: relative; height: 330px; overflow-y: auto; overflow-anchor: none; margin: 0 var(--space-2) var(--space-2); scrollbar-width: thin; }
+.app-dev-idb { position: relative; height: 330px; overflow-y: auto; overflow-anchor: none; margin: 0 var(--space-2) var(--space-2); scrollbar-width: var(--sb-width, thin); }
 .app-dev-idbrow { display: flex; align-items: center; gap: var(--space-3); width: 100%; min-height: 30px; padding: 4px var(--space-3); border: 0; border-radius: var(--radius-sm); background: transparent; color: var(--ink); text-align: left; font: 400 12px/18px var(--font-mono); cursor: pointer; }
 .app-dev-idbrow:hover { background: var(--hover); }
 .app-dev-idbrow b { flex: none; font-weight: 600; }
@@ -795,7 +795,7 @@ html[data-anim="0"] :is(.app-folder-hero-emoji, .app-folder-emoji-glyph, .app-fo
 /* Окно плейлиста (Playlist.tsx) — как в Telegram */
 .app-pl-dialog { background: var(--card); }
 .app-pl { display: flex; flex-direction: column; gap: 12px; padding: 0 16px 16px; }
-.app-pl-list { max-height: 24rem; overflow-y: auto; padding: 6px; border-radius: 16px; background: var(--raised); scrollbar-width: thin; }
+.app-pl-list { max-height: 24rem; overflow-y: auto; padding: 6px; border-radius: 16px; background: var(--raised); scrollbar-width: var(--sb-width, thin); }
 .app-pl-row { display: flex; align-items: center; gap: 12px; width: 100%; padding: 6px; border: 0; border-radius: 12px; background: none; text-align: left; cursor: pointer; color: var(--ink); }
 .app-pl-row:hover { background: var(--hover); }
 .app-pl-row .app-sm-play { width: 44px; height: 44px; }
@@ -980,7 +980,7 @@ html[data-anim="0"] :is(.app-hero, .app-hero-photo, .app-hero-info, .app-hero-na
 @media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) { --mtabs-fade-alpha: 70%; } }
 .app-gsearch-pages { position: relative; flex: 1; min-height: 0; min-width: 0; display: flex; overflow: hidden; }
 .app-gsearch-pages > * { flex: 1; min-width: 0; }
-.app-gsearch-scroll { height: 100%; overflow-y: auto; padding: var(--gs-tabs-h) 0 16px; scroll-padding-top: var(--gs-tabs-h); scrollbar-width: thin; }
+.app-gsearch-scroll { height: 100%; overflow-y: auto; padding: var(--gs-tabs-h) 0 16px; scroll-padding-top: var(--gs-tabs-h); scrollbar-width: var(--sb-width, thin); }
 .app-gsearch-sect { margin: 0 8px 8px; padding: 6px 0 4px; border-radius: 16px; background: var(--card); }
 .app-gsearch-sect-head { display: flex; align-items: center; justify-content: space-between; min-height: 32px; padding: 0 8px 0 16px; font: 500 14px/20px var(--font-sans); color: var(--ink-muted); }
 .app-gsearch-clear { display: inline-flex; padding: 6px; border: 0; border-radius: 50%; background: none; color: var(--ink-muted); cursor: pointer; }
@@ -1224,7 +1224,9 @@ html[data-anim="0"] :is(.app-hero, .app-hero-photo, .app-hero-info, .app-hero-na
 
 /* ---------- Модалка стикерпака ---------- */
 .app-stkset-body { padding: 0 !important; overflow: hidden !important; display: flex; }
-.app-stkset-wrap { position: relative; flex: 1; min-width: 0; display: flex; flex-direction: column; height: min(600px, calc(100vh - 160px)); }
+/* высота — у окна (не больше, чем позволяет .rl-mdl-slim): своя высота содержимого выше окна срезала низ с кнопкой */
+.rl-mdl-dialog.app-stkset { height: min(92vh, 36rem); }
+.app-stkset-wrap { position: relative; flex: 1; min-width: 0; min-height: 0; display: flex; flex-direction: column; }
 .app-stkset-grid { flex: 1; min-height: 0; align-content: start; }
 .app-stkset-head { display: flex; align-items: center; gap: 8px; padding: 8px 8px 8px 8px; }
 .app-stkset-head h2 { flex: 1; margin: 0 0 0 8px; font: 600 20px/26px var(--font-sans); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
@@ -1277,7 +1279,7 @@ html[data-anim="0"] :is(.app-hero, .app-hero-photo, .app-hero-info, .app-hero-na
 .app-sym-strip-group.is-open .app-sym-strip-btn.is-on { background: color-mix(in srgb, var(--ink) 10%, transparent); }
 :root[data-anim="0"] .app-sym-strip-group, :root[data-anim="0"] .app-sym-strip-group .app-sym-strip-btn > * { transition: none; }
 @media (prefers-reduced-motion: reduce) { .app-sym-strip-group, .app-sym-strip-group .app-sym-strip-btn > * { transition: none; } }
-.app-sym-scroll { flex: 1; min-height: 0; overflow-y: auto; overscroll-behavior: contain; padding: 8px 0 calc(60px + 49px); margin-bottom: -49px; scrollbar-width: thin;   /* снизу — место под вкладками-«пилюлей» */
+.app-sym-scroll { flex: 1; min-height: 0; overflow-y: auto; overscroll-behavior: contain; padding: 8px 0 calc(60px + 49px); margin-bottom: -49px; scrollbar-width: var(--sb-width, thin);   /* снизу — место под вкладками-«пилюлей» */
   transition: transform 200ms cubic-bezier(.4, 0, .2, 1); }
 .app-sym-pane.is-searching .app-sym-scroll { transform: translateY(-49px); }
 :root[data-anim="0"] .app-sym-strip, :root[data-anim="0"] .app-sym-scroll { transition: none; }

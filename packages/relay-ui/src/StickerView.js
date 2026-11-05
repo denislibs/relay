@@ -59,6 +59,8 @@ function outlinePath(b64) {
  * вопреки тяжёлой анимации и автоплею), shared (false — свои часы), atEnd (сразу последний кадр: исход броска),
  * onFirstFrame, onEnded (последний кадр без цикла), class, onClick, title.
  */
+const staticLoaded = new Set();   // статичные стикеры, уже загруженные в этой вкладке: встают сразу, без силуэта и проявления
+
 export function StickerView(props) {
   const { src, outline, size, group = 'feed', play = true, loop, force, shared = true, atEnd = false } = props;
   const box = stickerBox(props.w, props.h, size);
@@ -67,8 +69,12 @@ export function StickerView(props) {
   const key = src + '|' + px;
   const root = useRef(null), canvas = useRef(null), ctl = useRef(null);
   const [preview, setPreview] = useState(null);
-  const [stage, setStage] = useState('outline');      // outline → ready (+ fade, если превью не было)
-  const hadPreview = useRef(false);
+  const cached = isStatic && staticLoaded.has(src);
+  const [stage, setStage] = useState(cached ? 'ready' : 'outline');      // outline → ready (+ fade, если превью не было)
+  const hadPreview = useRef(cached);
+  // силуэт не пропадает разом: стикер проявляется поверх, силуэт под ним гаснет за то же время (как в tweb) и
+  // только потом снимается. Без этого был провал — силуэт исчез, стикер ещё прозрачный
+  const [outlineGone, setOutlineGone] = useState(false);
   // этот стикер уже нарисован где-то ещё (панель, откуда его отправили): его кадр — сразу, без силуэта
   const drawn = useMemo(() => (isStatic || !src || atEnd ? null : drawnFrame(src)), [key]);
   const drawnRef = useRef(null);
@@ -81,7 +87,8 @@ export function StickerView(props) {
 
   // превью с прошлого раза (для статичных стикеров сама картинка — превью)
   useEffect(() => {
-    setStage('outline'); setPreview(null); hadPreview.current = false;
+    const known = isStatic && staticLoaded.has(src);
+    setStage(known ? 'ready' : 'outline'); setPreview(null); hadPreview.current = known; setOutlineGone(false);
     if (isStatic || !src || atEnd) return;   // превью — первый кадр, а показать надо последний
     let live = true;
     getPreview(key).then((url) => {
@@ -138,18 +145,25 @@ export function StickerView(props) {
 
   const path = outlinePath(outline);
   const ready = stage === 'ready';
+  const fading = ready && !hadPreview.current && !drawn;
+  useEffect(() => {
+    if (!fading || outlineGone) return;
+    const t = setTimeout(() => setOutlineGone(true), reducedMotion() ? 0 : 260);
+    return () => clearTimeout(t);
+  }, [fading]);
+  const showOutline = path && !drawn && (!ready || (fading && !outlineGone));
   return h('div', {
     ref: root,
-    class: cx('rl-sticker', ready && 'rl-sticker-ready', ready && !hadPreview.current && !drawn && 'rl-sticker-fade', props.class),
+    class: cx('rl-sticker', ready && 'rl-sticker-ready', fading && 'rl-sticker-fade', props.class),
     style: { width: box.width + 'px', height: box.height + 'px' },
     onClick: props.onClick,
     title: props.title,
     role: props.onClick ? 'button' : 'img',
     'aria-label': props.title || 'Стикер',
   },
-    !ready && path && !drawn ? h('svg', { class: 'rl-sticker-outline', viewBox: `0 0 ${props.w || 512} ${props.h || 512}`, 'aria-hidden': 'true' }, h('path', { d: path })) : null,
+    showOutline ? h('svg', { key: 'o', class: cx('rl-sticker-outline', ready && 'rl-sticker-outline-out'), viewBox: `0 0 ${props.w || 512} ${props.h || 512}`, 'aria-hidden': 'true' }, h('path', { d: path })) : null,
     isStatic
-      ? h('img', { class: 'rl-sticker-static', src, alt: '', draggable: false, decoding: 'async', onLoad: () => setStage('ready') })
+      ? h('img', { key: 's', class: 'rl-sticker-static', src, alt: '', draggable: false, decoding: 'async', onLoad: () => { staticLoaded.add(src); setStage('ready'); } })
       : [
         !ready && preview ? h('img', { key: 'p', class: 'rl-sticker-preview', src: preview, alt: '', draggable: false }) : null,
         !ready && !preview && drawn ? h('canvas', { key: 'd', ref: drawnRef, class: 'rl-sticker-preview', 'aria-hidden': 'true' }) : null,
