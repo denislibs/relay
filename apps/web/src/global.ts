@@ -31,6 +31,7 @@ export interface ChatFrame {
   ready: boolean;
   instant?: boolean;          // встал на место без анимации (смена нижнего чата)
   swap?: boolean;             // нижний чат подменяется: собран скрытым, появляется без перехода (один раз)
+  wake?: boolean;             // накрытая колонка раскрывается кадром раньше показа (ChatStack: content-visibility)
   messages: Item[];
   feedMeta: FeedMeta | null;
   unreadFrom: number | null;  // lastReadId на момент открытия: разделитель «Непрочитанные» (заморожен)
