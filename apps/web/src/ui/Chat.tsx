@@ -527,7 +527,7 @@ export function Chat({ chatId, frameKey, active, threadId, scheduled = false, sa
   // подсказка «@» в группе: участники с именем пользователя (упоминание адресуется по нему, как в Telegram), кроме себя
   const mentionables = useMemo(() => members?.members
     .filter((m) => m.username && m.userId !== me.userId)
-    .map((m) => ({ name: m.name, username: m.username!, sub: '@' + m.username })), [members, me.userId]);
+    .map((m) => ({ name: m.name, username: m.username!, sub: '@' + m.username, avatar: { tone: peerTone(m.userId), ...avatarPhoto(m.photo ?? null) } })), [members, me.userId]);
   const subtitle = savedPeer ? (sub ? messagesText(sub.count) : '') : isSaved ? (savedList.meta?.loaded ? messagesText(savedList.meta.messages) : '') : thread ? title : system ? 'служебные уведомления' : isTyping ? typingText(chat?.typers as string[] | undefined) : channel ? (gInfo ? subscribersText(gInfo.members) : 'Канал') : chat?.kind === 'group' ? (members ? membersStatus(members, true) : 'Группа') : myPeer ? lastSeenText(online, myPeer.lastSeen as string | null) : '';
   const replyTo = replyKey ? messages.find((m) => m.key === replyKey) : undefined;
   useEffect(() => { if (!replyKey) setReplyQ(null); }, [replyKey]);   // ответ ушёл или снят: новый ответ на то же сообщение начинается без цитаты

@@ -72,11 +72,22 @@ function Menu(props) {
 }
 
 /* ---------- MentionList: @-autocomplete above the composer ---------- */
+/* Подсказка «@»: одна выбранная строка (стрелки в поле или мышь), она же уходит по Enter / Tab; выбранная всегда
+   видна в списке. x.avatar — { src, thumb, tone } для Avatar (фото, как в списке участников). */
 function MentionList(props) {
-  return h('div', { class: 'rl-mentions', role: 'listbox', 'aria-label': 'Участники' },
+  var box = useRef(null);
+  var active = props.active || 0;
+  useEffect(function () {
+    var el = box.current && box.current.children[active];
+    if (el) requestMutation(function () { el.scrollIntoView({ block: 'nearest' }); });
+  }, [active]);
+  return h('div', { class: 'rl-mentions', role: 'listbox', 'aria-label': 'Участники', ref: box },
     props.items.map(function (x, i) {
-      return h('button', { key: x.name, type: 'button', role: 'option', 'aria-selected': String(i === 0), class: cx('rl-mention', i === 0 && 'rl-mention-active'), onPointerDown: function (e) { e.preventDefault(); }, onClick: function () { props.onPick(x); } },
-        h(Avatar, { name: x.name, size: 32 }), h('span', null, h('b', null, x.name), x.sub ? h('small', null, x.sub) : null));
+      return h('button', { key: x.username || x.name, type: 'button', role: 'option', tabIndex: -1, 'aria-selected': String(i === active), class: cx('rl-mention', i === active && 'rl-mention-active'),
+        onPointerDown: function (e) { e.preventDefault(); },
+        onPointerMove: function () { if (i !== active && props.onActive) props.onActive(i); },
+        onClick: function () { props.onPick(x); } },
+        h(Avatar, Object.assign({ name: x.name, size: 32 }, x.avatar)), h('span', null, h('b', null, x.name), x.sub ? h('small', null, x.sub) : null));
     }));
 }
 

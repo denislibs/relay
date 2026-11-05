@@ -91,6 +91,8 @@ function Composer(props) {
   var lastRange = useRef(null);   // где был курсор в последний раз: окна (дата) вставляют туда
   barNow.current = bar[0];           // свежее состояние панели для отложенных обработчиков
   var dismissed = useRef(null);      // упоминание, закрытое Esc, — пока не напечатают другое
+  var mentionPick = useState({ key: '', i: 0 });   // выбранная строка подсказки «@» (стрелки, мышь) — для этого запроса
+  var mentionShown = useRef([]);     // последний непустой список: пока подсказка гаснет, в ней те же строки, а не пустая карточка
   var height = useRef(0), maxH = useRef(0);
   var sending = useRef(false);
   var composing = useRef(false);
@@ -420,6 +422,13 @@ function Composer(props) {
 
   /* ---------- упоминания ---------- */
   var mentionList = st.mention && props.members ? props.members.filter(function (x) { var q = st.mention.q.toLowerCase(); return x.name.toLowerCase().indexOf(q) >= 0 || (!!x.username && x.username.toLowerCase().indexOf(q) >= 0); }).slice(0, 5) : null;
+  var mentionKey = st.mention ? st.mention.at + ':' + st.mention.q : '';
+  var mentionActive = mentionList && mentionList.length && mentionPick[0].key === mentionKey ? Math.min(mentionPick[0].i, mentionList.length - 1) : 0;
+  if (mentionList && mentionList.length) mentionShown.current = mentionList;
+  function moveMention(d) {
+    var n = mentionList.length;
+    mentionPick[1]({ key: mentionKey, i: (mentionActive + d + n) % n });   // по кругу, как в Telegram
+  }
   function pickMention(x) {
     var el = editRef.current, mn = st.mention;
     if (!el || !mn) return;
@@ -440,7 +449,8 @@ function Composer(props) {
       if (p.replyTo && p.onCancelReply) { e.preventDefault(); p.onCancelReply(); }
       return;
     }
-    if (mentionList && mentionList.length && (e.key === 'Enter' || e.key === 'Tab') && !e.shiftKey) { e.preventDefault(); pickMention(mentionList[0]); return; }
+    if (mentionList && mentionList.length && (e.key === 'ArrowDown' || e.key === 'ArrowUp') && !e.shiftKey && !mod && !e.altKey) { e.preventDefault(); moveMention(e.key === 'ArrowDown' ? 1 : -1); return; }
+    if (mentionList && mentionList.length && (e.key === 'Enter' || e.key === 'Tab') && !e.shiftKey) { e.preventDefault(); pickMention(mentionList[mentionActive]); return; }
     if (e.key === 'Enter') {
       var sendNow = !isTouchOnly() && (p.sendKey === 'ctrlEnter' ? mod : !e.shiftKey && !mod);
       e.preventDefault();
@@ -542,7 +552,7 @@ function Composer(props) {
   var b = bar[0];
   return h('div', { class: cx('rl-composer-wrap', props.className || props.class), ref: wrapRef },
     h(Presence, { show: !!(mentionList && mentionList.length), exitMs: 120 },
-      h(MentionList, { items: mentionList || [], onPick: pickMention })),
+      h(MentionList, { items: mentionList && mentionList.length ? mentionList : mentionShown.current, active: mentionActive, onActive: function (i) { mentionPick[1]({ key: mentionKey, i: i }); }, onPick: pickMention })),
     props.symbolMenu && symMounted.current ? h('div', { class: cx('rl-symbols-pop', symbols[0] && symView[0] === 'active' && 'is-active', !symbols[0] && symView[0] !== 'hidden' && 'is-closing'), ref: popRef, role: 'dialog', 'aria-label': 'Эмодзи и стикеры',
         'aria-hidden': symbols[0] ? undefined : 'true', style: symView[0] === 'hidden' && !symbols[0] ? { display: 'none' } : undefined,
         // пока открыто меню плитки, уход мыши на него — не уход с панели
