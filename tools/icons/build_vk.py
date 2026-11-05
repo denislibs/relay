@@ -55,7 +55,7 @@ FILLED = {
     'starFilled': 'favorite', 'heartFilled': 'like', 'eyeFilled': 'view', 'eyeOffFilled': 'hide', 'folderFilled': 'folder',
     'bellFilled': 'notification', 'bellOffFilled': 'notification_disable', 'statusFilled': 'story', 'alertFilled': 'error_circle',
     'checkCircleFilled': 'check_circle_on', 'forwardFilled': 'share', 'imageFilled': 'picture', 'videoFilled': 'videocam',
-    'settingsFilled': 'settings', 'bookmarkFilled': 'bookmark', 'communityFilled': 'users', 'briefcaseFilled': 'work',
+    'settingsFilled': 'settings', 'bookmarkFilled': 'bookmark', 'notesFilled': 'note', 'ghostFilled': 'ghost', 'communityFilled': 'users', 'briefcaseFilled': 'work',
     'gamepadFilled': 'game', 'timerFilled': 'clock', 'soundOffFilled': 'mute', 'volumeOffFilled': 'mute', 'fileFilled': 'document',
     'graduationFilled': 'education', 'banFilled': 'block', 'blockFilled': 'block', 'trashFilled': 'delete',
     'accountFilled': 'user', 'userXFilled': 'user_slash', 'shieldFilled': 'privacy', 'infoFilled': 'info',

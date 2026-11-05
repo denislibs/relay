@@ -44,6 +44,7 @@ export interface Message {
   entities?: Entity[];   // оформление текста; нет или пусто — простой текст
   listened?: boolean;    // голосовое/кружок прослушан получателем
   fwdFrom?: ForwardInfo | null;   // переслано: откуда (нет — своё или отправитель скрыт)
+  savedPeer?: string;    // сообщение «Избранного»: его подчат ('me', 'hidden', 'u<id>', 'c<id>'; savedPeerRule)
   link?: LinkPreview | null;      // превью первой ссылки в тексте (pending — сервер ещё загружает страницу)
   blocks?: Block[] | null;        // «статья»: блоки (body — её простой текст)
   buttons?: MessageButton[][] | null;   // кнопки под сообщением (как inline-клавиатура в Telegram): ряды слева направо
@@ -114,6 +115,25 @@ export interface LinkPreview {
 /** Откуда пересланное: исходный автор (имя — на момент пересылки), чат и сообщение оригинала, когда оно написано. */
 /** Переслан пост канала: userId null, name — название канала (автор не раскрывается), postAuthor — подпись поста. */
 export interface ForwardInfo { userId: Id | null; name: string; chatId: Id; messageId: Id; at: string; postAuthor?: string; photo?: ProfilePhoto | null }   // userId null — от канала (photo — его фото на момент пересылки)
+/**
+ * Подчат «Избранного» (saved_peer_id в Telegram): своё и копия без заголовка — 'me' («Мои заметки»); переслано из моего
+ * личного чата — 'u<собеседник>'; из группы или канала — 'c<чат>'; источник не читается (чужая переписка в пересланном
+ * пересланного, чата больше нет) — 'hidden' («Автор скрыт»). Источник — fwd_from.chatId, то есть оригинал, а не чат, откуда
+ * переслали: заголовок «Переслано от» и подчат говорят об одном. У служебных сообщений и вне «Избранного» подчата нет.
+ */
+export const SAVED_NOTES = 'me', SAVED_HIDDEN = 'hidden';
+export function savedPeerRule(fwd: { chatId: Id } | null | undefined, savedChatId: Id, src: { kind: 'direct' | 'group' | 'channel'; gone?: boolean; peerId?: Id | null } | null): string {
+  if (!fwd || Number(fwd.chatId) === Number(savedChatId)) return SAVED_NOTES;
+  if (!src || src.gone) return SAVED_HIDDEN;
+  if (src.kind === 'direct') return src.peerId != null ? 'u' + src.peerId : SAVED_HIDDEN;
+  return 'c' + fwd.chatId;
+}
+/** Строка списка подчатов. title и photo — актуальные, если зритель может читать источник (access), иначе то, что сохранено
+ *  в пересланном сообщении (как заголовок «Переслано от»); у заметок и «Автор скрыт» их нет — клиент подписывает сам. */
+export interface SavedDialog { peer: string; count: number; lastId: number | null; last: Message | null; pinnedAt: number | null; title: string | null; photo: ProfilePhoto | null; kind: 'user' | 'group' | 'channel' | null; userId?: Id; key?: string; sourceChatId?: Id; access: boolean }
+/** Страница подчатов: total — всего подчатов, messages — всего сообщений в них (шапка «N сообщений»), next — курсор следующей. */
+export interface SavedDialogsPage { dialogs: SavedDialog[]; total: number; messages: number; next: number | null }
+
 /** Ссылка на пересылаемое в кадре send: сервер сам берёт текст, оформление и вложение оригинала. */
 export interface ForwardRef { chatId: Id; id: Id; hideSender?: boolean; hideCaption?: boolean }
 
@@ -378,6 +398,8 @@ export type Update =
   // чат больше не мой: вышел, удалили, группу удалили
   | { type: 'chatAutoDelete'; chatId: Id; sec: number | null }   // срок автоудаления чата сменился (null — выключено)
   | { type: 'chatTheme'; chatId: Id; theme: string | null }   // тема чата сменилась (id из GET /themes, null — снята)
+  /** Подчат «Избранного» изменился: итоги владельцу (count 0 — исчез). Содержимого нет: последнее — по lastId из кэша или страницей. */
+  | { type: 'savedDialog'; chatId: Id; peer: string; count: number; lastId: number | null; pinnedAt: number | null; dialogs: number; messages: number }
   | { type: 'chatFlags'; chatId: Id; pinnedAt: number | null; archived: boolean; unreadMark: boolean; archivedAtId?: number }   // закреплён (мс; позже — выше), в архиве, «непрочитанное»
   | { type: 'chatNotify'; chatId: Id; muteUntil: number | null }   // уведомления чата: мс эпохи — выключены до, 0 — навсегда, null — включены
   | { type: 'chatRemoved'; chatId: Id }

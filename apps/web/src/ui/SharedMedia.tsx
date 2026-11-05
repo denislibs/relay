@@ -5,11 +5,12 @@ import { avatarPhoto, userPhoto } from '../profilePhoto';
 import { senderAvatar } from '../profilePhoto';
 import type { Item } from '@relay/sync-engine/src/types';
 import type { ProfilePhoto } from '@relay/protocol';
+import type { ComponentChildren } from 'preact';
 import { useContext, useEffect, useLayoutEffect, useRef, useState } from 'preact/hooks';
-import { openInner, type MediaTab } from '../data';
+import { focusMessage, openInner, type MediaTab } from '../data';
 import { useMedia } from '../mediaTab';
 import { animateScroll, gridCorners, gridDateIndex, tabCounter, tabLabel, tabScrollTarget, tileSrc, videoFrameSrc, type SharedTab } from '../mediaGrid';
-import { getGlobal, setGlobal, useGlobal, findChat } from '../global';
+import { activeFrame, getGlobal, setGlobal, useGlobal, findChat } from '../global';
 import { toggleMusic, trackTitle } from '../music';
 import { clock, dayLabel, fileSize, lastSeenText } from './format';
 import { openUserChat, prepareUserChat } from '../data';
@@ -34,7 +35,12 @@ export const dur = (s?: number | null) => { s = Math.max(0, Math.round(s ?? 0));
 export const fileUrl = (a: Att) => `/files/${a.id}`;
 /** Переход к сообщению из правой панели — поверх стека (docs/navigation-rules.md): чат уже наверху — только
  *  прокрутка; поверх него тред — снимается до чата; иначе чат кладётся сверху. */
-const show = (m: Msg) => openInner(m.chatId as number, { id: m.id, sort: m.id });
+const show = (m: Msg) => {
+  // панель подчата «Избранного»: сообщение в этом же подчате — прокрутка на месте, общая лента снизу не трогается
+  const top = activeFrame(getGlobal());
+  if (top?.savedPeer && top.chatId === m.chatId && top.savedPeer === m.savedPeer) { focusMessage({ id: m.id, sort: m.id }); return; }
+  openInner(m.chatId as number, { id: m.id, sort: m.id });
+};
 /** «Показать в чате» из меню плитки; когда панель лежит поверх чата
  *  (места рядом нет), она закрывается, иначе переход не виден (как в Telegram). */
 const showInChat = (m: Msg) => { show(m); if (asideFloats()) setGlobal({ infoOpen: false }); };
@@ -53,13 +59,16 @@ type Tab = SharedTab;
  *  onHead — вкладки, показанная и их счётчики: шапка панели пишет счётчик, когда вкладки прилипли к верху.
  *  onMember — клик по участнику (без него — переписка с ним поверх текущего чата, через стек). */
 export interface MediaHead { tabs: Tab[]; shown: Tab; counters: (string | null)[] }
-export function SharedMedia({ chatId, group = false, channel = false, peerId = null, onHead, onMember }: { chatId: number; group?: boolean; channel?: boolean; peerId?: number | null; onHead?: (h: MediaHead | null) => void; onMember?: (userId: number) => void }) {
+export function SharedMedia({ chatId, group = false, channel = false, peerId = null, onHead, onMember, savedPeer = null, chatsTab }: { chatId: number; group?: boolean; channel?: boolean; peerId?: number | null; onHead?: (h: MediaHead | null) => void; onMember?: (userId: number) => void;
+  savedPeer?: string | null;   // только этот подчат «Избранного»
+  chatsTab?: ComponentChildren;   // панель «Избранного»: первая вкладка «Чаты» (подчаты) — есть всегда, как в Telegram Web K
+}) {
   const [tab, setTab] = useState<Tab | null>(null);
   const members = useMembers(chatId, group);
   // личный чат: группы, где состоите оба (как в Telegram — последней вкладкой)
   const common = useCommonGroups(group ? null : peerId);
   // счётчики приходят с любой подпиской media этого чата и обновляются журналом (новое сообщение — новый счётчик)
-  const { counts: known, loading: countsLoading } = useMedia(chatId, 'media', 0);
+  const { counts: known, loading: countsLoading } = useMedia(chatId, 'media', 0, savedPeer);
   // офлайн на холодную: счётчиков нет и не ждём — как раньше, нули (пустое состояние), а не вечная заглушка
   const counts = known ?? (countsLoading ? null : { media: 0, file: 0, link: 0, audio: 0, voice: 0 });
   // кольцо ожидания счётчиков: показывается после 150 мс ожидания и держится не меньше 600 мс (без мигания)
@@ -72,10 +81,10 @@ export function SharedMedia({ chatId, group = false, channel = false, peerId = n
   useLayoutEffect(() => { const r = pages.current?.closest('.rl-aside-body') ?? null; if (r !== root) setRoot(r); });
   const bar = useRef<HTMLDivElement>(null);
   const cancel = useRef<(() => void) | null>(null);
-  useEffect(() => { setTab(null); setPending(null); }, [chatId]);
+  useEffect(() => { setTab(null); setPending(null); }, [chatId, savedPeer]);
   const pick = useMediaPick(chatId, chatId);
   useEffect(() => () => cancel.current?.(), [chatId]);
-  const tabs: Tab[] = [...(group ? ['members' as const] : []), ...(counts ? ORDER.filter((t) => counts[t] > 0) : []), ...(common?.length ? ['groups' as const] : [])];
+  const tabs: Tab[] = [...(chatsTab ? ['chats' as const] : []), ...(group ? ['members' as const] : []), ...(counts ? ORDER.filter((t) => counts[t] > 0) : []), ...(common?.length ? ['groups' as const] : [])];
   const active = tab && tabs.includes(tab) ? tab : tabs[0] ?? null;
   const shown = pending && tabs.includes(pending) ? pending : active;
   // канал (админу): вкладка подписчиков вместо участников
@@ -94,13 +103,14 @@ export function SharedMedia({ chatId, group = false, channel = false, peerId = n
 
   // счётчики ещё не пришли — кольцо загрузки (с задержкой, без мигания), а не вкладки «наугад»: у группы иначе
   // сначала одна «Участники», потом полоса перестраивалась под пришедшие счётчики
-  if (!counts || countsRing) return <CountsWait ring={countsRing} />;
-  if (!tabs.length) return null;   // медиа нет — как в Telegram: просто профиль, без вкладок и без заглушки
+  // «Избранное»: список подчатов не ждёт счётчиков (вкладки медиа добавятся рядом, полоса уже стоит на месте)
+  if ((!counts || countsRing) && !chatsTab) return <CountsWait ring={countsRing} />;
+  if (!tabs.length) return savedPeer ? <div class="app-sm-none">Здесь пока нет медиа и файлов</div> : null;   // медиа нет — как в Telegram: просто профиль, без вкладок и без заглушки
   return (
     <>
       {/* одна непустая вкладка — переключать нечего: вместо одинокой плашки заголовок раздела */}
       {/* в режиме выбора медиа вместо вкладок — пилюля «✕ N сообщений ⟶» на том же месте (липнет так же) */}
-      {tabs.length > 1 ? (
+      {tabs.length > 1 || chatsTab ? (
         <div class="rl-aside-tabs" ref={bar}>
           <MediaTabsSlot pick={pick}>
             <FolderTabs label="Общие медиа" active={shown} onChange={pickTab} items={tabs.map((t) => ({ id: t, label: channel && t === 'members' ? 'Подписчики' : tabLabel(t) }))} />
@@ -111,7 +121,7 @@ export function SharedMedia({ chatId, group = false, channel = false, peerId = n
         {/* ленивые картинки и кадры видео меряют запас от прокрутки панели, а не от окна (её край их обрезает) */}
         <LazyRoot.Provider value={root}>
           <MediaActions chatId={chatId} pick={pick} show={showInChat}>
-            <SlideStack variant="tabs" order={tabs} active={active} render={(k: string) => k === 'members' ? <MembersList key={chatId + k} data={members} onOpen={onMember ?? ((id) => void openUserChat(id))} /> : k === 'groups' ? <GroupsList key={chatId + k} groups={common ?? []} /> : <TabList key={chatId + k} chatId={chatId} tab={k as MediaTab} />} />
+            <SlideStack variant="tabs" order={tabs} active={active} render={(k: string) => k === 'chats' ? chatsTab : k === 'members' ? <MembersList key={chatId + k} data={members} onOpen={onMember ?? ((id) => void openUserChat(id))} /> : k === 'groups' ? <GroupsList key={chatId + k} groups={common ?? []} /> : <TabList key={chatId + k + (savedPeer ?? '')} chatId={chatId} tab={k as MediaTab} savedPeer={savedPeer} />} />
           </MediaActions>
         </LazyRoot.Provider>
       </div>
@@ -120,8 +130,8 @@ export function SharedMedia({ chatId, group = false, channel = false, peerId = n
 }
 
 /** Список вкладки: первая страница при открытии, следующие — когда низ списка близко. */
-function TabList({ chatId, tab }: { chatId: number; tab: MediaTab }) {
-  const { items: list0, done, loading, more } = useMedia(chatId, tab);
+function TabList({ chatId, tab, savedPeer }: { chatId: number; tab: MediaTab; savedPeer?: string | null }) {
+  const { items: list0, done, loading, more } = useMedia(chatId, tab, undefined, savedPeer);
   const items = list0 as Msg[];
   // следующая страница — когда окно виртуального списка (видимое + запас) дошло до хвоста; страница догрузилась,
   // а окно всё ещё у хвоста — проверка повторяется (nearEnd)

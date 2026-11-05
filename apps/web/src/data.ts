@@ -24,6 +24,7 @@ import { cachedPinned, rememberPinned, resetPinned, settleWithin } from './pinne
 import { resetCommonGroups } from './commonGroups';
 import { resetPersonalChannels } from './personalChannel';
 import { cachedMedia, resetMediaTabs } from './mediaTab';
+import { resetSavedDialogs } from './savedDialogs';
 import { isSystemChat } from './ui/format';
 import { asset } from './assets';
 import { compressPhoto } from './media/compressPhoto';
@@ -65,7 +66,7 @@ export function startData(me: Me, fromUrl = true): void {
   engine.onData(rememberKeysIn);
   startFileKeyService();
   startPeople(engine);
-  resetMembers(); resetMediaTabs(); resetMediaDays(); resetCommonGroups(); resetPersonalChannels(); resetPinned();   // вход другим пользователем без перезагрузки: кэши отрисовки прежнего — прочь
+  resetSavedDialogs(); resetMembers(); resetMediaTabs(); resetMediaDays(); resetCommonGroups(); resetPersonalChannels(); resetPinned();   // вход другим пользователем без перезагрузки: кэши отрисовки прежнего — прочь
   bindMute((chatId, muteUntil) => engine.call({ type: 'setMute', chatId, muteUntil }));
   bindChatFlags((chatId, f) => engine.call({ type: 'setChatFlags', chatId, ...f }));
   bindStickers((a) => engine.call(a as never));
@@ -281,7 +282,7 @@ export function savedPosition(t: StackTarget) { return positions.get(positionKey
  * изнутри чата) — новый чат поверх, прежний остаётся живым в DOM (вернуться — мгновенно, на том же месте).
  * У каждого кадра — своя подписка на окно ленты. */
 
-interface Session { chatId: number; threadId?: number; scheduled?: boolean; watch: { update(q: Query): void; close(): void }; mirror: Mirror; anchor: Anchor | undefined; moving: boolean; first: boolean; timer: ReturnType<typeof setTimeout> | null }
+interface Session { chatId: number; threadId?: number; scheduled?: boolean; savedPeer?: string; watch: { update(q: Query): void; close(): void }; mirror: Mirror; anchor: Anchor | undefined; moving: boolean; first: boolean; timer: ReturnType<typeof setTimeout> | null }
 const sessions = new Map<string, Session>();
 let frameSeq = 0;
 let pendingBottom: { frame: ChatFrame; target?: { id: number; sort: number } } | null = null;   // новый нижний чат, лента ещё не готова
@@ -325,7 +326,7 @@ function toastUploadRefusals(items: Item[]): void {
 
 /** Окно ленты кадра; onFirst — первый снимок (или 700 мс без него: не держим пользователя на прежнем чате). */
 function startFeed(frame: ChatFrame, anchor: Anchor | undefined, onFirst: (patch: Partial<ChatFrame>) => void): void {
-  const s: Session = { chatId: frame.chatId, threadId: frame.threadId, scheduled: frame.scheduled, mirror: new Mirror(), anchor, moving: true, first: true, timer: null, watch: null as never };
+  const s: Session = { chatId: frame.chatId, threadId: frame.threadId, scheduled: frame.scheduled, savedPeer: frame.savedPeer, mirror: new Mirror(), anchor, moving: true, first: true, timer: null, watch: null as never };
   sessions.set(frame.key, s);
   const asked = performance.now();
   // сколько лента ждала первый снимок от движка (SharedWorker → IndexedDB → сюда) — видно во вкладке Performance
@@ -356,8 +357,9 @@ function mirrorPatch(s: Session): Partial<ChatFrame> {
 }
 
 /** Окно ленты кадра: чат — messages, тред — thread (шапка-копия поста и комментарии из кэша группы). */
-function feedQuery(f: { chatId: number; threadId?: number; scheduled?: boolean }, anchor: Anchor | undefined): Query {
+function feedQuery(f: { chatId: number; threadId?: number; scheduled?: boolean; savedPeer?: string }, anchor: Anchor | undefined): Query {
   if (f.scheduled) return { kind: 'scheduled', chatId: f.chatId };
+  if (f.savedPeer) return { kind: 'savedFeed', chatId: f.chatId, peer: f.savedPeer, limit: WINDOW, anchor };
   return f.threadId != null ? { kind: 'thread', chatId: f.chatId, threadId: f.threadId, limit: WINDOW, anchor } : { kind: 'messages', chatId: f.chatId, limit: WINDOW, anchor };
 }
 
@@ -366,11 +368,11 @@ function newFrame(t: StackTarget, target?: { id: number; sort: number }): { fram
   const chat = findChat(getGlobal(), chatId);
   const pos = t.scheduled ? null : positions.get(positionKey(t));   // отложенные открываются снизу: ближайшие — у поля ввода
   // разделитель «Непрочитанные» — только у ленты чата (у треда своя прочитанность, readMaxId)
-  const unread = t.threadId == null && !t.scheduled && (chat?.unread as number) > 0 ? (chat!.lastReadId as number) : null;
+  const unread = t.threadId == null && !t.scheduled && !t.savedPeer && (chat?.unread as number) > 0 ? (chat!.lastReadId as number) : null;
   // открыть на найденном сообщении; иначе: ушли из середины истории — туда же; непрочитанное; низ
   const anchor: Anchor | undefined = target ? { sort: target.sort, side: 'center' } : pos ? { sort: pos.sort, side: 'center' } : unread != null ? { sort: unread + 0.5, side: 'center' } : undefined;
   const frame: ChatFrame = {
-    key: 'c' + ++frameSeq, chatId, ...(t.scheduled ? { scheduled: true } : {}), ...(t.threadId != null ? { threadId: t.threadId, thread: { header: null, loaded: false } } : {}), ready: false, messages: [], feedMeta: null,
+    key: 'c' + ++frameSeq, chatId, ...(t.scheduled ? { scheduled: true } : {}), ...(t.savedPeer ? { savedPeer: t.savedPeer } : {}), ...(t.threadId != null ? { threadId: t.threadId, thread: { header: null, loaded: false } } : {}), ready: false, messages: [], feedMeta: null,
     unreadFrom: target ? null : unread,
     focus: target ? { ...target, nonce: Date.now(), replaced: true } : null,
   };
@@ -602,7 +604,7 @@ export function openChat(chatId: number | null, target?: { id: number; sort: num
   if (leaveTimer) { clearTimeout(leaveTimer); leaveTimer = 0; setGlobal({ listLeaving: false }); }
   const g = getGlobal(), st = g.chatStack, top = topReady();
   // тот же чат на экране — только прокрутка; его тред поверх — другой слой (ниже вернёмся к самой группе)
-  if (chatId != null && (g.pendingChatId ?? top?.chatId) === chatId && top?.threadId == null && !top?.scheduled && (st.length <= 1 || top?.chatId === chatId)) {
+  if (chatId != null && (g.pendingChatId ?? top?.chatId) === chatId && top?.threadId == null && !top?.scheduled && !top?.savedPeer && (st.length <= 1 || top?.chatId === chatId)) {
     if (target) focusMessage(target);
     return;
   }
@@ -780,6 +782,8 @@ export function prepareUserChat(userId: number): Prepared | null {
 /** Стрелка «Назад» в шапке: снять верхний чат; нижний — к списку чатов. */
 export function closeChat(): void {
   const st = stack();
+  // подчат «Избранного», открытый из панели на телефоне: назад — снова панель со списком
+  if (st[st.length - 1]?.fromPanel) setGlobal({ infoOpen: true });
   if (st.length > 1) popTo(st.length - 2);
   else openChat(null);
 }
@@ -952,10 +956,11 @@ export function emojiFx(chatId: number, id: number, key: string, t: number[]): v
  * Поиск сообщений: по словам на устройстве, с сетью — вместе с сервером (вся история).
  * onLocal — найденное на устройстве, сразу (если полный ответ ещё не пришёл); потом промис — полный ответ.
  */
-export function searchMessages(q: string, chatId?: number, beforeId?: number, onLocal?: (r: SearchResult) => void): Promise<SearchResult> {
+export function searchMessages(q: string, chatId?: number, beforeId?: number, onLocal?: (r: SearchResult) => void, savedPeer?: string): Promise<SearchResult> {
   let done = false;
-  if (onLocal) (engine.call({ type: 'search', q, chatId, beforeId, local: true }) as Promise<SearchResult>).then((r) => { if (!done) onLocal(r); }, () => {});
-  return (engine.call({ type: 'search', q, chatId, beforeId }) as Promise<SearchResult>).finally(() => { done = true; });
+  const peer = savedPeer ? { savedPeer } : {};
+  if (onLocal) (engine.call({ type: 'search', q, chatId, beforeId, local: true, ...peer }) as Promise<SearchResult>).then((r) => { if (!done) onLocal(r); }, () => {});
+  return (engine.call({ type: 'search', q, chatId, beforeId, ...peer }) as Promise<SearchResult>).finally(() => { done = true; });
 }
 
 /** Локальные копии своих файлов (objectURL) до и сразу после отправки — показываем без загрузки с сервера. */
@@ -1017,6 +1022,30 @@ export function describeVideo(file: Blob): Promise<{ w: number; h: number; durat
 /** Без звука и отложить (keepDraft — со страницы отложенных: черновик чата не трогать). */
 export interface SendWhen { silent?: boolean; scheduleAt?: number; keepDraft?: boolean }
 const whenOf = (o: SendWhen): SendWhen => ({ ...(o.silent ? { silent: true } : {}), ...(o.scheduleAt != null ? { scheduleAt: o.scheduleAt } : {}), ...(o.keepDraft ? { keepDraft: true } : {}) });
+
+/* ---------- подчаты «Избранного»: кадр поверх общей ленты (в адрес не попадает, как страница отложенных) ---------- */
+export function openSavedDialog(chatId: number, peer: string, fromPanel = false): void {
+  openInner({ chatId, savedPeer: peer });
+  if (fromPanel) { const f = stack().find((x) => x.chatId === chatId && x.savedPeer === peer); if (f) patchFrame(f.key, { fromPanel: true }); }
+}
+/** Заготовка по нажатию мыши (ui/press.ts): колонка раскладывается скрытой, клик только переключает. */
+export function prepareSavedDialog(chatId: number, peer: string): Prepared | null {
+  if (!topReady() || findTarget(stack(), { chatId, savedPeer: peer }) >= 0) return null;
+  const hold: Hold = { released: false, key: null, waiting: null, onCommit: null };
+  openInner({ chatId, savedPeer: peer }, undefined, hold);
+  return holdHandle(hold);
+}
+
+/** Источник подчата — поверх стека (docs/navigation-rules.md); канал без подписки — превью. */
+export function openSavedSource(d: { kind: string | null; userId?: number; peerKey?: string; sourceChatId?: number }): void {
+  if (d.kind === 'user' && d.userId != null) { void openUserChat(d.userId, d.peerKey ? { key: d.peerKey } : undefined); return; }
+  if (d.sourceChatId == null) return;
+  if (getGlobal().chats.some((c) => c.id === d.sourceChatId)) openInner(d.sourceChatId);
+  else void openChannel(d.sourceChatId, 'inner');
+}
+export const pinSavedDialog = (peer: string, pinned: boolean) => engine.call({ type: 'savedDialogPin', peer, pinned }).catch(() => {});
+export const deleteSavedDialog = (peer: string) => engine.call({ type: 'savedDialogDelete', peer }).catch(() => {});
+export const loadMoreSavedDialogs = () => { engine.call({ type: 'loadSavedDialogs' }).catch(() => {}); };
 
 /* ---------- отложенные: всё оптимистично, дальше — очередью движка ---------- */
 export function openScheduled(chatId: number): void { openInner({ chatId, scheduled: true }); }

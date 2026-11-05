@@ -20,9 +20,12 @@ import { startSelect } from '../forward';
 import { isMuted, unmuteChat } from '../mute';
 import { openInner } from '../data';
 import { useChatDialogs } from './chatActions';
+import { canOpenSource, openSourceLabel, savedRow, useSavedDialogs } from '../savedDialogs';
+import { openSavedSource } from '../data';
+import { askDeleteSaved } from './saved/SavedChatsTab';
 
 
-export function ChatMenu({ chatId, title }: { chatId: number; title: string }) {
+export function ChatMenu({ chatId, title, savedPeer }: { chatId: number; title: string; savedPeer?: string }) {
   const chat = useGlobal((s) => findChat(s, chatId));
   const muted = useGlobal((s) => isMuted(findChat(s, chatId)));
   const system = isSystemChat(chat);
@@ -54,7 +57,16 @@ export function ChatMenu({ chatId, title }: { chatId: number; title: string }) {
     firstName: String(user?.firstName ?? title.split(' ')[0] ?? ''), lastName: String(user?.lastName ?? ''),
   } });
 
-  const items = [
+  const savedList = useSavedDialogs(!!savedPeer);
+  const savedItem = savedPeer ? savedList.items.find((d) => d.peer === savedPeer) ?? savedRow(savedPeer) : null;
+  // подчат «Избранного» (как меню строки): выбрать сообщения, открыть источник, удалить подчат
+  const items = savedPeer ? [
+    { icon: 'checkCircle', label: 'Выбрать сообщения', onClick: () => startSelect(chatId, []) },
+    ...(savedItem && canOpenSource(savedItem) ? [{ icon: savedItem.kind === 'channel' ? 'channels' : savedItem.kind === 'group' ? 'community' : 'chats', label: openSourceLabel(savedItem), onClick: () => { setOpen(false); openSavedSource(savedItem); } }] : []),
+    ...(savedItem ? ['-' as const, { icon: 'trash', label: 'Удалить', danger: true, onClick: () => { setOpen(false); askDeleteSaved(savedItem); } }] : []),
+  ] : [
+    // «Избранное»: панель с подчатами — и из меню, не только кликом по шапке
+    ...(saved ? [{ icon: 'chats', label: 'Чаты', onClick: () => { setOpen(false); setGlobal({ infoOpen: true }); } }] : []),
     ...(peerId && contactsLoaded ? [contact
       ? { icon: 'pencil', label: 'Изменить', onClick: () => setGlobal({ infoOpen: true, infoGo: 'edit' }) }
       : { icon: 'userPlus', label: 'Добавить в контакты', onClick: addContact }] : []),

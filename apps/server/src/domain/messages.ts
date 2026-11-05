@@ -18,6 +18,7 @@ import { chatExpiry, contentColumns, openRows, updateContent, loadOpen, warmExpi
 import { currentChatKey } from '../crypto/chatKeys';
 import { copyPost, isThreadRoot, noteComment, threadAccess, withCopy } from './threads';
 import { collectMentions } from './mentions';
+import { savedPeerFor, touchSavedDialog } from './saved';
 
 export const MAX_BODY = 4096;
 /** Сколько ждать остальные файлы альбома перед уведомлением (клиент грузит их по очереди). */
@@ -208,12 +209,14 @@ export async function sendMessage(
     // содержимое — шифром ключа чата (messageContent.ts); открытыми остаются метаданные
     // срок — только отсюда: настройка чата на момент публикации (отложенное и пересланное — тоже); от клиента не принимается
     const expiresAt = await chatExpiry(tx, input.chatId);
+    // «Избранное»: подчат — из того, что уже есть в заголовке пересылки (saved.ts); копия без заголовка — как своё
+    const savedPeer = ctx.kind === 'direct' ? await savedPeerFor(tx, input.chatId, fwdFrom) : null;
     const c = await contentColumns(input.chatId, input.clientId, { body, entities: entities.length ? entities : null, todo: todo ?? fwdTodo, poll: poll ?? fwdPoll, data, blocks, link, attachment, quote: replyQuote }, tx, expiresAt);
     const inserted = await tx`
-      insert into messages (chat_id, sender_id, client_id, kind, body, entities, reply_to_id, attachment, group_id, fwd_from, link, blocks, todo, poll, data, sticker, content, has_link, post, post_author, thread_id, silent, reminder, expires_at, has_quote)
+      insert into messages (chat_id, sender_id, client_id, kind, body, entities, reply_to_id, attachment, group_id, fwd_from, link, blocks, todo, poll, data, sticker, content, has_link, post, post_author, thread_id, silent, reminder, expires_at, has_quote, saved_peer)
       values (${input.chatId}, ${userId}, ${input.clientId}, ${kind}, ${c.body}, ${c.entities?.length ? sql.json(c.entities as never) : null}, ${canReply ? input.replyToId ?? null : null}, ${c.attachment ? sql.json(c.attachment as never) : null},
               ${attachment && input.groupId && /^[0-9a-f-]{36}$/.test(input.groupId) ? input.groupId : null},   -- группа — только у вложений
-              ${fwdFrom ? sql.json(fwdFrom as never) : null}, ${c.link ? sql.json(c.link as never) : null}, ${c.blocks ? sql.json(c.blocks as never) : null}, ${c.todo ? sql.json(c.todo as never) : null}, ${c.poll ? sql.json(c.poll as never) : null}, ${c.data ? sql.json(c.data as never) : null}, ${sticker ? sql.json(sticker as never) : null}, ${c.content}, ${c.hasLink}, ${!!post}, ${post?.author ?? null}, ${threadId}, ${!!input.silent}, ${!!input.reminder}, ${expiresAt}, ${!!replyQuote})
+              ${fwdFrom ? sql.json(fwdFrom as never) : null}, ${c.link ? sql.json(c.link as never) : null}, ${c.blocks ? sql.json(c.blocks as never) : null}, ${c.todo ? sql.json(c.todo as never) : null}, ${c.poll ? sql.json(c.poll as never) : null}, ${c.data ? sql.json(c.data as never) : null}, ${sticker ? sql.json(sticker as never) : null}, ${c.content}, ${c.hasLink}, ${!!post}, ${post?.author ?? null}, ${threadId}, ${!!input.silent}, ${!!input.reminder}, ${expiresAt}, ${!!replyQuote}, ${savedPeer})
       on conflict (sender_id, client_id) do nothing
       returning *`;
     if (inserted.length === 0) {
@@ -223,6 +226,7 @@ export async function sendMessage(
     const message = toMessage((await openRows([inserted[0]], '', tx))[0]);
     await burnCodes(tx, userId, body);
     await chatEvent(tx, input.chatId, { type: 'newMessage', message }, ctx.kind);
+    if (savedPeer) touchSavedDialog(tx, input.chatId, savedPeer);
     if (poll ?? fwdPoll) await scheduleClose(tx, input.chatId, message.id, (poll ?? fwdPoll)!);
     if (post) {
       // свой пост — не непрочитанный: senderId у поста 0, другие устройства автора сняли бы +1 только по readOwn

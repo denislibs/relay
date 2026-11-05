@@ -39,6 +39,7 @@ export interface LocalMessage {
   geo?: GeoPoint;         // геопозиция или место
   dice?: Dice;            // кубики: эмодзи и выпавшее (у неотправленного значения ещё нет)
   fwdFrom?: ForwardInfo | null;      // пересланное: исходный автор, откуда и когда
+  savedPeer?: string;                // «Избранное»: подчат сообщения (от сервера; неотправленному и старой строке кэша — по тому же правилу на устройстве)
   link?: LinkPreview | null;         // превью ссылки (pending — сервер ещё загружает)
   blocks?: Block[] | null;           // «статья»
   buttons?: MessageButton[][] | null; // кнопки под сообщением (inline-клавиатура)
@@ -106,6 +107,8 @@ export interface LocalChat {
   mediaCountsAt?: number; // до какого id сообщения уже учтены в mediaCounts (новее — прибавляются по приходу)
   /** вкладка известна подряд от новых: true — целиком, число — с этого id (страницы старше просим с него) */
   mediaDone?: Partial<Record<MediaTab, number | true>>;
+  /** подчаты «Избранного»: что известно о ленте и вкладках подчата (savedDialogs.ts, media.ts); стирается вместе с mediaDone */
+  savedViews?: Record<string, SavedView>;
   openedAt?: number;      // когда ленту чата открывали в последний раз (мс): уборка урезает давно не открытые (evict.ts)
   /** группа обсуждения: отрезки тредов по id копии; нет — тред не открывали (перезагрузится при открытии) */
   threads?: Record<number, ThreadRanges>;
@@ -117,6 +120,9 @@ export interface LocalChat {
   reactions?: number;
   reactionIds?: number[];
 }
+
+/** Подчат «Избранного» на устройстве: floor — с какого id лента известна подряд от новых (true — целиком), остальное — как у чата. */
+export interface SavedView { floor?: number | true; mediaDone?: Partial<Record<MediaTab, number | true>>; mediaCounts?: MediaCounts; mediaCountsAt?: number }
 
 export interface OutboxEntry {
   clientId: string;
@@ -155,6 +161,10 @@ export type Query =
    *  по тем же правилам, что messages; служебные ~window и ~thread {header: ключ шапки или null, guest?: ThreadGuest —
    *  я не участник группы, тред живым видом без строки чата} */
   | { kind: 'thread'; chatId: number; threadId: number; limit: number; anchor?: { sort: number; side: 'end' | 'start' | 'center' } }
+  /** лента подчата «Избранного» (фильтр сообщений чата по savedPeer): окно и ~window — как у messages */
+  | { kind: 'savedFeed'; chatId: number; peer: string; limit: number; anchor?: { sort: number; side: 'end' | 'start' | 'center' } }
+  /** подчаты «Избранного» (savedDialogs.ts): строки {peer, count, last, pinnedAt, title, photo, kind, access, …} и служебный ~saved {loaded, total, messages, done, chatId} */
+  | { kind: 'savedDialogs' }
   | { kind: 'counters' }
   /** превью публичных каналов без подписки (openPreview): элементы — как строки chatList (preview: true), в список не входят */
   | { kind: 'previews' }
@@ -186,7 +196,7 @@ export type Query =
   | { kind: 'members'; chatId: number }
   /** вкладка «Общих медиа» (media.ts): сообщения вкладки, новые сверху, до limit; служебный ~media {done, loading, counts} —
    *  done: больше нет ни в памяти, ни на сервере; counts — сколько во всех вкладках (null — ещё не знаем) */
-  | { kind: 'media'; chatId: number; tab: MediaTab; limit: number }
+  | { kind: 'media'; chatId: number; tab: MediaTab; limit: number; savedPeer?: string }   // savedPeer — только этот подчат «Избранного»
   /** музыка профиля (profileLists.ts): треки новые сверху, до 100; свои — с ещё не подтверждёнными правками (pending);
    *  служебный ~profileMusic {loaded, loading} */
   | { kind: 'profileMusic'; userId: number }
@@ -250,6 +260,11 @@ export type Action =
   | { type: 'loadMoreChats' }
   | { type: 'setDraft'; chatId: number; text: string; entities?: Entity[] }
   | { type: 'typing'; chatId: number }
+  /** подчаты «Избранного»: следующая страница; лента — страница старее; закрепить и удалить — сразу видно, уходит очередью */
+  | { type: 'loadSavedDialogs' }
+  | { type: 'loadSaved'; chatId: number; peer: string }
+  | { type: 'savedDialogPin'; peer: string; pinned: boolean }
+  | { type: 'savedDialogDelete'; peer: string }
   | { type: 'savedChat' }   // id «Избранного»: известный чат или создать на сервере (ответ — число)
   | { type: 'emojiFx'; chatId: number; id: number; key: string; t: number[] }
   | { type: 'editMessage'; chatId: number; id: number; body: string; entities?: Entity[] }
@@ -270,7 +285,7 @@ export type Action =
   /** нажатие callback-кнопки под сообщением (онлайн): ответ — ButtonAnswer ({toast?}), правка придёт журналом */
   | { type: 'pressButton'; chatId: number; id: number; data: string }
   /** local: только с устройства, без сети (быстрый первый ответ; полный — тем же вызовом без local) */
-  | { type: 'search'; q: string; chatId?: number; beforeId?: number; limit?: number; local?: boolean }
+  | { type: 'search'; q: string; chatId?: number; beforeId?: number; limit?: number; local?: boolean; savedPeer?: string }
   /** глобальный поиск левой колонки: с сетью — сервер, без сети или при ошибке — с устройства (globalSearch.ts) */
   | { type: 'searchPeople'; q: string }
   | { type: 'searchMedia'; kind: MediaTab; q: string; before?: number }

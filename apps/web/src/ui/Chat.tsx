@@ -57,7 +57,8 @@ import { ScheduleModal } from './ScheduleModal';
 import { pressOpen } from './press';
 import { scheduledTitle, scheduledToast } from '../schedule';
 import { leftText } from '../autoDelete';
-import { deleteScheduled, editScheduled, openScheduled, prepareScheduled, sendScheduledNow, type SendWhen } from '../data';
+import { canOpenSource, messagesText, openSourceLabel, savedTitle, useSavedDialogs } from '../savedDialogs';
+import { openSavedSource, deleteScheduled, editScheduled, openScheduled, prepareScheduled, sendScheduledNow, type SendWhen } from '../data';
 import { makeQuote, SCHEDULED_LIMIT, type ReplyQuote } from '@relay/protocol';
 import { sendSpecial, sendPoll, votePoll, closePoll, sendTodo, appendTodo, editTodo, closeChat, deleteMessage, editMessage, focusMessage, openInner, openUserChat, pinMessage, unpinMessage, sendFile, sendFiles, sendRound, sendVoice, react, rejectTooBig, PLAYABLE_VIDEO, retrySend, discardUnsent, saveDraft, searchMessages, send, typing, typingDone } from '../data';
 import { wantPeople } from '../people';
@@ -146,7 +147,7 @@ function useThreadCount(frameKey: string): number {
   });
 }
 
-export function Chat({ chatId, frameKey, active, threadId, scheduled = false }: { chatId: number; frameKey: string; active: boolean; threadId?: number; scheduled?: boolean }) {
+export function Chat({ chatId, frameKey, active, threadId, scheduled = false, savedPeer }: { chatId: number; frameKey: string; active: boolean; threadId?: number; scheduled?: boolean; savedPeer?: string }) {
   const me = useGlobal((s) => s.me)!;
   useOwnMusic();   // кнопка «в профиль» в плеере
   const chat = useGlobal((s) => findChat(s, chatId));
@@ -171,7 +172,13 @@ export function Chat({ chatId, frameKey, active, threadId, scheduled = false }: 
   // служебный чат «Relay»: только чтение — без поля ввода, реакций, ответов и вложений
   const system = isSystemChat(chat);
   const systemRef = useRef(system); systemRef.current = system;
-  const isSaved = isSavedChat(chat);   // «Избранное»: в шапке только название
+  const isSaved = isSavedChat(chat);   // «Избранное»: в шапке название и число сообщений
+  // подчаты «Избранного»: шапка общей ленты и кадр подчата; список — одна подписка на приложение (savedDialogs.ts)
+  const savedList = useSavedDialogs(isSaved);
+  const savedItem = savedPeer ? savedList.items.find((d) => d.peer === savedPeer) ?? null : null;
+  const savedHeld = useRef(savedItem);   // пока кадр уезжает, а строка уже исчезла — заголовок на месте
+  if (savedItem) savedHeld.current = savedItem;
+  const sub = savedHeld.current;
   // «Автозагрузка медиа» / автовоспроизведение для ленты этого чата (MediaBubble кита читает контекст)
   const isContact = useGlobal((s) => chat?.peerId != null && s.contacts.some((c) => c.userId === chat.peerId));
   const autoload = useGlobal((s) => s.prefs.autoload);
@@ -212,7 +219,7 @@ export function Chat({ chatId, frameKey, active, threadId, scheduled = false }: 
       });
       wantPeople(r.hits.map((x) => x.senderId));
     };
-    const t = setTimeout(() => searchMessages(q, chatId, undefined, (r) => show(r, true)).then((r) => show(r, false)).catch(() => {}), 300);
+    const t = setTimeout(() => searchMessages(q, chatId, undefined, (r) => show(r, true), savedPeer).then((r) => show(r, false)).catch(() => {}), 300);
     return () => { live = false; clearTimeout(t); };
   }, [findQ, finding]);
   const pick = (at: number) => setFound((f) => {
@@ -516,7 +523,7 @@ export function Chat({ chatId, frameKey, active, threadId, scheduled = false }: 
   const online = !!myPeer?.online;
   const isTyping = !!chat?.typing && !channel;   // в канале «печатает…» не показывается
   const members = useMembers(chatId, chat?.kind === 'group');
-  const subtitle = thread ? title : system ? 'служебные уведомления' : isTyping ? 'печатает…' : channel ? (gInfo ? subscribersText(gInfo.members) : 'Канал') : chat?.kind === 'group' ? (members ? membersStatus(members, true) : 'Группа') : myPeer ? lastSeenText(online, myPeer.lastSeen as string | null) : '';
+  const subtitle = savedPeer ? (sub ? messagesText(sub.count) : '') : isSaved ? (savedList.meta?.loaded ? messagesText(savedList.meta.messages) : '') : thread ? title : system ? 'служебные уведомления' : isTyping ? 'печатает…' : channel ? (gInfo ? subscribersText(gInfo.members) : 'Канал') : chat?.kind === 'group' ? (members ? membersStatus(members, true) : 'Группа') : myPeer ? lastSeenText(online, myPeer.lastSeen as string | null) : '';
   const replyTo = replyKey ? messages.find((m) => m.key === replyKey) : undefined;
   useEffect(() => { if (!replyKey) setReplyQ(null); }, [replyKey]);   // ответ ушёл или снят: новый ответ на то же сообщение начинается без цитаты
   // цитата части сообщения: живёт вместе с ответом на то же сообщение; ответ сняли или сменили — её больше нет
@@ -544,6 +551,9 @@ export function Chat({ chatId, frameKey, active, threadId, scheduled = false }: 
   const feedKnown = useGlobal((s) => !!frameByKey(s, frameKey)?.feedMeta);
   const hadItems = useRef(false);
   if (scheduled && messages.length) hadItems.current = true;
+  // подчат опустел (удалили, срок вышел, в том числе на другом устройстве) — кадр закрывается сам, как страница отложенных
+  const savedGone = !!savedPeer && !!savedList.meta?.loaded && !savedItem && !!sub;
+  useEffect(() => { if (savedGone && activeRef.current) closeChat(); }, [savedGone, active]);
   useEffect(() => { if (scheduled && feedKnown && !messages.length && activeRef.current && (hadItems.current || !((chat?.scheduled as number | undefined) ?? 0))) closeChat(); }, [scheduled, feedKnown, messages.length]);
   const authorOf = (senderId: unknown) => (senderId === me.userId ? 'Вы' : title);
   const menuMsg = menu ? messages.find((m) => m.key === menu.key) : undefined;
@@ -609,6 +619,17 @@ export function Chat({ chatId, frameKey, active, threadId, scheduled = false }: 
     return () => removeEventListener('keydown', onKey);
   }, [!!selKeys]);
 
+  // режим выбора: панель «Выбрано: N» проявляется поверх поля ввода (поле остаётся на месте и гаснет), как в Telegram
+  const selectionBar = (
+    <Presence show={!!selKeys} exitMs={200}>
+      <div class="app-selbar-layer">
+        <SelectionBar count={selected.length} onCancel={endSelect}
+          onForward={() => { const list = selected; endSelect(); startForward(chatId, list, nameOf); }}
+          onCopy={() => { navigator.clipboard?.writeText(selected.filter((m) => m.body).map((m) => m.body as string).join('\n\n')).catch(() => {}); showToast('Скопировано'); endSelect(); }}
+          onDelete={selected.length && !selected.some((m) => m.origin != null) && (gMe?.admin?.delete || selected.every((m) => m.senderId === me.userId)) ? () => setConfirmDelete({ ids: selected.map((m) => m.id as number) }) : undefined} />
+      </div>
+    </Presence>
+  );
   return (
     <>
       <span ref={shell} hidden />
@@ -624,17 +645,18 @@ export function Chat({ chatId, frameKey, active, threadId, scheduled = false }: 
         {/* поверх другого чата — «Назад» к нему (и на широком экране), нижний — к списку на узком */}
         <IconButton class={depth > 1 ? 'app-back app-back-inner' : 'app-back'} icon="arrowLeft" label={depth > 1 ? 'Назад' : 'К списку чатов'} onClick={closeChat} />
         <button type="button" class="rl-glassbar-who" aria-label={scheduled ? undefined : 'Информация о чате'} disabled={scheduled} onClick={() => setGlobal({ infoOpen: !infoOpen })}>
-          {scheduled ? null : <Avatar name={title} tone={chatTone(chat)} size={40} logo={system} saved={isSaved} autoDelete={!!chat?.autoDeleteSec} {...avatarPhoto(chat?.photo as ProfilePhoto | null)} />}
+          {scheduled ? null : (savedPeer ? <Avatar name={savedTitle(sub, savedPeer)} tone={peerTone(Number(savedPeer.slice(1)) || 0)} size={40} glyph={savedPeer === 'me' ? 'notes' : savedPeer === 'hidden' ? 'hidden' : undefined} {...avatarPhoto(sub?.photo as ProfilePhoto | null)} />
+            : <Avatar name={title} tone={chatTone(chat)} size={40} logo={system} saved={isSaved} autoDelete={!!chat?.autoDeleteSec} {...avatarPhoto(chat?.photo as ProfilePhoto | null)} />)}
           <span class="rl-glassbar-title">
-            <b>{scheduled ? scheduledTitle(isSaved) : thread ? threadTitle(threadCount) : title}{system ? <Verified size={16} /> : null}</b>
-            {scheduled || (isSaved && !phaseLabel) ? null : <span key={phaseLabel ?? (isTyping ? 'typing' : online ? 'on' : 'off')} class={phaseLabel ? 'app-phase' : isTyping || online ? 'app-online' : undefined}>{phaseLabel ?? (subtitle || '\u00a0')}</span>}
+            <b>{savedPeer ? savedTitle(sub, savedPeer) : scheduled ? scheduledTitle(isSaved) : thread ? threadTitle(threadCount) : title}{system ? <Verified size={16} /> : null}</b>
+            {scheduled ? null : <span key={phaseLabel ?? (isTyping ? 'typing' : online ? 'on' : 'off')} class={phaseLabel ? 'app-phase' : isTyping || online ? 'app-online' : undefined}>{phaseLabel ?? (subtitle || '\u00a0')}</span>}
           </span>
         </button>
         {!thread && !scheduled ? <IconButton icon="search" label="Поиск по чату" onClick={() => setFinding(true)} /> : null}
-        {scheduled ? null : <ChatMenu chatId={chatId} title={title} />}
+        {scheduled ? null : <ChatMenu chatId={chatId} title={title} savedPeer={savedPeer} />}
         {/* закреплённые — под шапкой, как в Telegram (плеер — над ней); в треде вместо них — плашка поста */}
         {thread ? <ThreadBar header={threadHeader} title={originTitle ?? 'Пост'} onClick={() => { if (threadHeader?.id != null) focusMessage({ id: threadHeader.id as number, sort: threadHeader.sort as number }); }} />
-          : !system && !scheduled ? <PinnedBar chatId={chatId} frameKey={frameKey} /> : null}
+          : !system && !scheduled && !savedPeer ? <PinnedBar chatId={chatId} frameKey={frameKey} /> : null}
         {!system && !scheduled ? <UploadBar chatId={chatId} /> : null}
         {gInfo && gInfo.requests > 0 && !thread && !scheduled ? (
           <button type="button" class="app-requests-bar" onClick={() => setGlobal({ infoOpen: true, infoGo: 'gRequests' })}>
@@ -681,9 +703,19 @@ export function Chat({ chatId, frameKey, active, threadId, scheduled = false }: 
         ) : null}
       </GlassBar>
       <MediaPolicy.Provider value={policy}>
-        <Feed frameKey={frameKey} active={active} chatId={chatId} threadId={threadId} scheduled={scheduled} channel={channel && !scheduled} saved={isSaved} meId={me.userId} peerName={title} chatPhoto={chat?.photo as ProfilePhoto | null} group={(chat?.kind === 'group' || !!guest) && !scheduled} onAuthor={openUserChat} stick={stick} greeting={scheduled ? false : greeting} highlight={found?.q} onMenu={(key, x, y, extra) => setMenu({ key, x, y, extra })} />
+        <Feed frameKey={frameKey} active={active} chatId={chatId} threadId={threadId} scheduled={scheduled} savedPeer={savedPeer} channel={channel && !scheduled} saved={isSaved} meId={me.userId} peerName={title} chatPhoto={chat?.photo as ProfilePhoto | null} group={(chat?.kind === 'group' || !!guest) && !scheduled} onAuthor={openUserChat} stick={stick} greeting={scheduled ? false : greeting} highlight={found?.q} onMenu={(key, x, y, extra) => setMenu({ key, x, y, extra })} />
       </MediaPolicy.Provider>
-      {plate === 'channel' ? <ChannelBar chatId={chatId} member={!!gMe} username={gInfo?.username ?? null} approval={!!gInfo?.joinApproval} requested={!!chat?.requested} />
+      {savedPeer && savedPeer !== 'me' ? (
+        // подчат чужого источника: писать некуда (как в Telegram) — кнопка в источник, если он доступен; выбор сообщений — поверх неё
+        <div class={'app-composer-host app-saved-plate' + (selKeys ? ' is-selecting' : '')}>
+          <div class="rl-composer-wrap app-plate-wrap">
+            <div class="rl-composer app-plate" role="status">
+              {sub && canOpenSource(sub) ? <Button variant="ghost" onClick={() => openSavedSource(sub)}>{openSourceLabel(sub)}</Button> : <span>Исходный чат недоступен</span>}
+            </div>
+          </div>
+          {selectionBar}
+        </div>
+      ) : plate === 'channel' ? <ChannelBar chatId={chatId} member={!!gMe} username={gInfo?.username ?? null} approval={!!gInfo?.joinApproval} requested={!!chat?.requested} />
       : plate === 'join' && guest ? <GuestJoinBar chatId={chatId} guest={guest} />
       : plate === 'wait' ? <div class="rl-composer-wrap app-plate-wrap" aria-hidden="true"><div class="rl-composer app-plate app-plate-wait" /></div>
       : plate ? (
@@ -726,7 +758,7 @@ export function Chat({ chatId, frameKey, active, threadId, scheduled = false }: 
         editing={!!editing}
         sendEmpty={!!fwdQuote || !!artQuote}
         sendItems={sendItems}
-        scheduledCount={thread || scheduled ? 0 : (chat?.scheduled as number | undefined) ?? 0}
+        scheduledCount={thread || scheduled || savedPeer ? 0 : (chat?.scheduled as number | undefined) ?? 0}
         scheduledLabel={scheduledTitle(isSaved)}
         scheduledPress={pressOpen(() => prepareScheduled(chatId), () => openScheduled(chatId))}
         replyTo={editing ? { author: 'Редактирование', text: editing.original.text, tone: 'accent', icon: 'pencil' } : fwdQuote ? fwdQuote : artQuote ? artQuote : !replyTo && lp?.link && !lp.off ? {
@@ -805,15 +837,7 @@ export function Chat({ chatId, frameKey, active, threadId, scheduled = false }: 
         }}
       />
         {art?.open ? <ArticleComposer key={chatId} blocks={art.blocks} onCollapse={collapseArticle} onSend={sendArticle} onClosing={() => setArt((a) => (a ? { ...a, closing: true } : a))} /> : null}
-        {/* режим выбора: панель «Выбрано: N» проявляется поверх поля ввода (поле остаётся на месте и гаснет), как в Telegram */}
-        <Presence show={!!selKeys} exitMs={200}>
-          <div class="app-selbar-layer">
-            <SelectionBar count={selected.length} onCancel={endSelect}
-              onForward={() => { const list = selected; endSelect(); startForward(chatId, list, nameOf); }}
-              onCopy={() => { navigator.clipboard?.writeText(selected.filter((m) => m.body).map((m) => m.body as string).join('\n\n')).catch(() => {}); showToast('Скопировано'); endSelect(); }}
- onDelete={selected.length && !selected.some((m) => m.origin != null) && (gMe?.admin?.delete || selected.every((m) => m.senderId === me.userId)) ? () => setConfirmDelete({ ids: selected.map((m) => m.id as number) }) : undefined} />
-          </div>
-        </Presence>
+        {selectionBar}
       </div>}
       {/* меню сообщения: левый верхний угол — у курсора, реакции — над ним (как в Telegram) */}
       {(() => {

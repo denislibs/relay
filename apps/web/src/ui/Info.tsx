@@ -3,6 +3,8 @@ import { ProfileLinks } from './links/ProfileLinks';
 import { Expand } from './Expand';
 import { PersonalChannelBlock } from './profile/PersonalChannelBlock';
 import { SharedMedia, type MediaHead } from './SharedMedia';
+import { SavedChatsTab } from './saved/SavedChatsTab';
+import { chatsText, messagesText, savedTitle, useSavedDialogs } from '../savedDialogs';
 import { membersStatus, useMembers } from '../members';
 import { openInner, openUserChat, startDirectChat } from '../data';
 import { playProfileTop } from '../music';
@@ -46,6 +48,7 @@ export function Info() {
   // прежний чат — смена чата при закрытой панели не перестраивает её и не грузит профиль и медиа впустую
   const shown = useGlobal((s) => s.infoOpen);
   const liveId = useGlobal((s) => s.openChatId);
+  const peerLive = useGlobal((s) => activeFrame(s)?.savedPeer ?? null);
   const heldId = useRef(liveId);
   if (shown) heldId.current = liveId;
   const chatId = heldId.current!;
@@ -107,11 +110,11 @@ export function Info() {
       addEventListener('keydown', onKey);
       return () => removeEventListener('keydown', onKey);
     }
-    if (page !== 'info') return;   // на правке Esc — «Назад», его ловит форма
+    if (page !== 'info' || !shown) return;   // на правке Esc — «Назад», его ловит форма; закрытая панель (не размонтируется) Esc не забирает
     const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape' && !e.defaultPrevented) { e.preventDefault(); close(); } };
     addEventListener('keydown', onKey);
     return () => removeEventListener('keydown', onKey);
-  }, [page]);
+  }, [page, shown]);
 
   const title = (chat?.title as string) || 'Чат №' + chatId;
   // группа или канал: у канала — подписчики числом, без онлайна; список подписчиков — только админам
@@ -247,6 +250,7 @@ export function Info() {
     ) : k === 'edit' && peerId ? (
       <EditContactPanel userId={peerId} onDone={() => setPage('info')} />
     ) : (
+    saved ? <SavedAside chatId={chatId} peer={peerLive} /> :
     <div class={'rl-sidepage' + (expanded && gallery.length ? ' is-photo-open' : '')}>
       <PanelHeader class={media ? 'is-media' : undefined} icon={media ? 'arrowLeft' : 'close'} closeLabel={media ? 'Наверх' : 'Закрыть'}
         title={<HeadTitle media={media} plain={channel ? 'Информация о канале' : group ? 'Информация о группе' : 'Информация'} name={title} head={mediaHead} />} onClose={media ? toTop : close} action={media ? undefined : action} />
@@ -311,6 +315,31 @@ export function Info() {
 }
 
 const copy = (text: string) => { navigator.clipboard?.writeText(text).then(() => showToast('Скопировано')).catch(() => { /* буфер недоступен */ }); };
+
+/**
+ * Панель «Избранного»: список подчатов и (кадр подчата сверху) панель этого подчата — страницы SlideStack. Корень не
+ * размонтируется, поэтому назад — та же вкладка и та же прокрутка; вкладки — полоса SharedMedia.
+ */
+function SavedAside({ chatId, peer }: { chatId: number; peer: string | null }) {
+  const held = useRef(peer);
+  if (peer) held.current = peer;
+  const pages = held.current ? ['list', held.current] : ['list'];
+  return <SlideStack order={pages} active={peer ?? 'list'} render={(k: string) => <SavedPage key={k} chatId={chatId} peer={k === 'list' ? null : k} />} />;
+}
+function SavedPage({ chatId, peer }: { chatId: number; peer: string | null }) {
+  const { items, meta } = useSavedDialogs();
+  const row = peer ? items.find((d) => d.peer === peer) ?? null : null;
+  const name = peer ? savedTitle(row, peer) : 'Избранное';
+  const sub = peer ? (row ? messagesText(row.count) : '\u00a0') : meta?.loaded ? chatsText(meta.total) : '\u00a0';
+  return (
+    <div class="rl-sidepage">
+      <PanelHeader title={<span class="app-head-rows"><b>{name}</b><span class="app-head-sub app-saved-sub">{sub}</span></span>} onClose={close} closeLabel="Закрыть" />
+      <div class="rl-aside-body">
+        <SharedMedia chatId={chatId} savedPeer={peer} chatsTab={peer ? undefined : <SavedChatsTab chatId={chatId} />} />
+      </div>
+    </div>
+  );
+}
 
 /** @username, «Телефон», «О себе», «День рождения» — каждая строка, только если поле видно. */
 function PeerRows({ user }: { user: Item }) {

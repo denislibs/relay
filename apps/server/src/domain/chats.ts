@@ -166,6 +166,7 @@ export function toMessage(r: Record<string, unknown>): Message {
     ...(r.kind === 'sticker' && r.sticker && !r.deleted ? { sticker: r.sticker as StickerRef } : {}),
     ...(r.group_id ? { groupId: r.group_id as string } : {}),
     ...(r.fwd_from ? { fwdFrom: r.fwd_from as ForwardInfo } : {}),
+    ...(r.saved_peer ? { savedPeer: r.saved_peer as string } : {}),
     ...(r.link ? { link: r.link as LinkPreview } : {}),
     ...(r.blocks ? { blocks: r.blocks as Block[] } : {}),
     ...(Array.isArray(r.buttons) && r.buttons.length && !r.deleted ? { buttons: r.buttons as MessageButton[][] } : {}),
@@ -329,7 +330,7 @@ export async function listChats(userId: number, opts: ListOpts = {}): Promise<Ch
            case when c.kind <> 'direct' then c.members_count end as g_members,   -- держит триггер (миграция 145)
            case when c.kind <> 'direct' then (select count(*)::int from chat_join_requests jr where jr.chat_id = c.id) end as g_pending,
            lm.id as m_id, lm.chat_id as m_chat_id, lm.sender_id as m_sender_id, lm.client_id as m_client_id,
-           lm.body as m_body, lm.kind as m_kind, lm.attachment as m_attachment, lm.reply_to_id as m_reply_to_id, lm.created_at as m_created_at, lm.edited_at as m_edited_at, lm.deleted as m_deleted, lm.expires_at as m_expires_at, lm.entities as m_entities, lm.service_type as m_service_type, lm.service_data as m_service_data, lm.todo as m_todo, lm.poll as m_poll, lm.data as m_data, lm.fwd_from as m_fwd_from, lm.buttons as m_buttons, lm.sticker as m_sticker, lm.content as m_content, lm.post as m_post, lm.post_author as m_post_author, lm.thread_id as m_thread_id, lm.origin as m_origin,
+           lm.body as m_body, lm.kind as m_kind, lm.attachment as m_attachment, lm.reply_to_id as m_reply_to_id, lm.created_at as m_created_at, lm.edited_at as m_edited_at, lm.deleted as m_deleted, lm.expires_at as m_expires_at, lm.entities as m_entities, lm.service_type as m_service_type, lm.service_data as m_service_data, lm.todo as m_todo, lm.poll as m_poll, lm.data as m_data, lm.fwd_from as m_fwd_from, lm.buttons as m_buttons, lm.sticker as m_sticker, lm.content as m_content, lm.post as m_post, lm.post_author as m_post_author, lm.thread_id as m_thread_id, lm.origin as m_origin, lm.saved_peer as m_saved_peer,
            case when lm.post and lm.service_type is null then coalesce((select v.views from message_views v where v.chat_id = lm.chat_id and v.message_id = lm.id), 0) end as m_views,
            (select count(*) from messages m
              where m.chat_id = c.id and m.id > cm.last_read_id and m.id >= cm.history_from and m.sender_id <> ${userId} and not m.deleted and (m.expires_at is null or m.expires_at > now()))::int as unread,
@@ -400,7 +401,7 @@ export async function listChats(userId: number, opts: ListOpts = {}): Promise<Ch
     last: r.m_id == null ? null : toMessage({
       id: r.m_id, chat_id: r.m_chat_id, sender_id: r.m_sender_id, client_id: r.m_client_id,
       body: r.m_body, kind: r.m_kind, attachment: r.m_attachment, reply_to_id: r.m_reply_to_id, quote: r.m_quote, created_at: r.m_created_at, edited_at: r.m_edited_at, deleted: r.m_deleted, expires_at: r.m_expires_at, entities: r.m_entities, service_type: r.m_service_type, service_data: r.m_service_data, todo: r.m_todo, poll: r.m_poll, data: r.m_data, fwd_from: r.m_fwd_from, buttons: r.m_buttons, sticker: r.m_sticker,
-      post: r.m_post, post_author: r.m_post_author, views: r.m_views, thread_id: r.m_thread_id, origin: r.m_origin,
+      post: r.m_post, post_author: r.m_post_author, views: r.m_views, thread_id: r.m_thread_id, origin: r.m_origin, saved_peer: r.m_saved_peer,
     }),
   }));
   // последнее сообщение — с реакциями (и у поста канала — с кнопкой комментариев): устройство, узнавшее его только из
@@ -424,19 +425,20 @@ export function tabWhere(tab: MediaTab) {
 /** Вкладка «Общих медиа»: новые сверху, страницами по id (курсор beforeId — id последнего показанного).
  *  limit — размер страницы, 1…MEDIA_PAGE_MAX; не число — MEDIA_PAGE. */
 export const MEDIA_PAGE = 40, MEDIA_PAGE_MAX = 100;
-export async function getChatMedia(userId: number, chatId: number, tab: MediaTab, beforeId: number | null, limit = MEDIA_PAGE): Promise<{ messages: Message[]; hasMore: boolean }> {
+export async function getChatMedia(userId: number, chatId: number, tab: MediaTab, beforeId: number | null, limit = MEDIA_PAGE, savedPeer: string | null = null): Promise<{ messages: Message[]; hasMore: boolean }> {
   limit = Number.isFinite(limit) && limit >= 1 ? Math.min(MEDIA_PAGE_MAX, Math.floor(limit)) : MEDIA_PAGE;
   await canRead(sql, chatId, userId);   // публичный канал — и не участнику (превью)
   const rows = await sql`
     select * from messages
      where chat_id = ${chatId} and not deleted and (expires_at is null or expires_at > now()) and ${tabWhere(tab)} and id >= ${await historyFrom(chatId, userId)}
        ${beforeId ? sql`and id < ${beforeId}` : sql``}
+       ${savedPeer ? sql`and saved_peer = ${savedPeer}` : sql``}
      order by id desc limit ${limit + 1}`;
   return { messages: (await openRows(rows.slice(0, limit))).map(toMessage), hasMore: rows.length > limit };
 }
 
 /** Сколько всего в каждой вкладке — пустые вкладки панель не показывает (как в Telegram Web K). */
-export async function getChatMediaCounts(userId: number, chatId: number): Promise<MediaCounts> {
+export async function getChatMediaCounts(userId: number, chatId: number, savedPeer: string | null = null): Promise<MediaCounts> {
   await canRead(sql, chatId, userId);   // публичный канал — и не участнику (превью)
   const [r] = await sql`
     select count(*) filter (where ${tabWhere('media')})::int as media,
@@ -445,7 +447,8 @@ export async function getChatMediaCounts(userId: number, chatId: number): Promis
            count(*) filter (where ${tabWhere('voice')})::int as voice,
            count(*) filter (where ${tabWhere('link')})::int as link,
            count(*) filter (where kind = 'video' or (kind = 'file' and attachment->>'mime' like 'video/%'))::int as video
-      from messages where chat_id = ${chatId} and not deleted and (expires_at is null or expires_at > now()) and id >= ${await historyFrom(chatId, userId)}`;
+      from messages where chat_id = ${chatId} and not deleted and (expires_at is null or expires_at > now()) and id >= ${await historyFrom(chatId, userId)}
+       ${savedPeer ? sql`and saved_peer = ${savedPeer}` : sql``}`;
   return { media: r.media, file: r.file, audio: r.audio, voice: r.voice, link: r.link, video: r.video };
 }
 
@@ -515,13 +518,14 @@ export async function getMessagesByIds(userId: number, chatId: number, ids: numb
  * догружает дыру между отрезками своей истории). hasMore — за страницей в ту же сторону есть ещё. Удалённых в
  * истории нет (как в Telegram): на их месте в отрезке клиента просто нет id.
  */
-export async function getHistory(userId: number, chatId: number, before: number | null, limit: number, after: number | null = null): Promise<{ messages: Message[]; hasMore: boolean }> {
+export async function getHistory(userId: number, chatId: number, before: number | null, limit: number, after: number | null = null, savedPeer: string | null = null): Promise<{ messages: Message[]; hasMore: boolean }> {
   await canRead(sql, chatId, userId);   // публичный канал — и не участнику (превью)
   const take = Math.min(Math.max(limit, 1), 200);
   if (after != null) {
     const up = await sql`
       select * from messages
        where chat_id = ${chatId} and id > ${after} and id >= ${await historyFrom(chatId, userId)} and not deleted and (expires_at is null or expires_at > now())
+         ${savedPeer ? sql`and saved_peer = ${savedPeer}` : sql``}
        order by id
        limit ${take + 1}`;
     return { messages: await withAllReactions((await openRows(up.slice(0, take))).map(toMessage), userId), hasMore: up.length > take };
@@ -529,6 +533,7 @@ export async function getHistory(userId: number, chatId: number, before: number 
   const rows = await sql`
     select * from messages
      where chat_id = ${chatId} and (${before}::bigint is null or id < ${before}) and id >= ${await historyFrom(chatId, userId)} and not deleted and (expires_at is null or expires_at > now())
+       ${savedPeer ? sql`and saved_peer = ${savedPeer}` : sql``}
      order by id desc
      limit ${take + 1}`;
   const hasMore = rows.length > take;
@@ -545,7 +550,7 @@ export async function deleteDirectChat(userId: number, chatId: number, forAll: b
     const [c] = await tx`select c.kind, s.chat_id is not null as saved from chats c left join saved_chats s on s.chat_id = c.id where c.id = ${chatId}`;
     if (c?.kind !== 'direct') throw new DomainError('bad_frame', 'not a direct chat');
     // «Избранное»: других участников нет — удаляем по-настоящему, история не остаётся в базе; из списка уходит до нового открытия
-    if (c.saved) { forAll = true; await tx`update saved_chats set hidden = true where chat_id = ${chatId}`; }
+    if (c.saved) { forAll = true; await tx`update saved_chats set hidden = true where chat_id = ${chatId}`; await tx`delete from saved_dialog_pins where user_id = ${userId}`; await tx`update messages set saved_peer = null where chat_id = ${chatId} and saved_peer is not null`; }
     const [m] = await tx`select coalesce(max(id), 0)::bigint as max from messages where chat_id = ${chatId}`;
     const from = Number(m.max) + 1;
     const who = forAll

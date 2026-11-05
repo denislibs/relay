@@ -1,3 +1,4 @@
+import { touchSavedDialog } from './saved';
 import { unpinDeleted } from './pins';
 import { canEditKind, emojiKey, normalizeEntities, trimFormatted, type Entity, type Reaction } from '@relay/protocol';
 import { sql } from '../db';
@@ -104,7 +105,10 @@ export async function deleteMessage(userId: number, chatId: number, id: number):
 export async function erase(tx: Tx, chatId: number, id: number, kind: 'direct' | 'group' | 'channel'): Promise<void> {
   // текст и шифр стираются целиком: у удалённого не остаётся содержимого ни открыто, ни шифром
   // и вложение: у старых (до шифрования) строк в нём открытые имя, название и миниатюра (CRYPTO-9)
-  await tx`update messages set body = '', entities = null, todo = null, blocks = null, link = null, content = null, attachment = null, deleted = true where chat_id = ${chatId} and id = ${id}`;
+  // saved_peer — тоже: у стёртого не остаётся следа, откуда оно было; подчат «Избранного» пересчитывается перед коммитом
+  const [was] = kind === 'direct' ? await tx`select saved_peer from messages where chat_id = ${chatId} and id = ${id}` : [];
+  await tx`update messages set body = '', entities = null, todo = null, blocks = null, link = null, content = null, attachment = null, saved_peer = null, deleted = true where chat_id = ${chatId} and id = ${id}`;
+  if (was?.saved_peer) touchSavedDialog(tx, chatId, was.saved_peer as string);
   // кусок удалённого не должен пережить его в чужих ответах: у них остаётся обычная плашка «удалено»
   for (const r of await tx`select id from messages where chat_id = ${chatId} and reply_to_id = ${id} and has_quote`) {
     await updateContent(tx, chatId, Number(r.id), () => ({ quote: null }), () => ({ has_quote: false }));

@@ -114,7 +114,7 @@ export const messageItem = (m: LocalMessage, q: Quote, fx?: { key: string; t: nu
 };
 
 /** Первый индекс в [lo, hi) с sort >= s (массив отсортирован по sort). */
-function lowerBound(arr: LocalMessage[], s: number, lo = 0, hi = arr.length): number {
+export function lowerBound(arr: LocalMessage[], s: number, lo = 0, hi = arr.length): number {
   while (lo < hi) { const mid = (lo + hi) >> 1; if (arr[mid].sort < s) lo = mid + 1; else hi = mid; }
   return lo;
 }
@@ -190,7 +190,7 @@ export function threadView(store: Store, q: Extract<Query, { kind: 'thread' }>) 
 }
 
 /** Окно сообщений → элементы с цитатами (лента чата и тред). */
-function windowItems(store: Store, chatId: number, all: LocalMessage[], from: number, to: number, out: Result): void {
+export function windowItems(store: Store, chatId: number, all: LocalMessage[], from: number, to: number, out: Result): void {
   const missingQuotes = new Set<number>();
   for (let k = from; k < to; k++) {
     const m = all[k];
@@ -323,6 +323,8 @@ export function computeQuery(store: Store, q: Query, mute: Map<number, number | 
     case 'blocked':
     case 'members':
     case 'media':
+    case 'savedFeed':
+    case 'savedDialogs':
     case 'profileMusic':
     case 'profilePhotos':
     case 'devStats':
@@ -335,7 +337,7 @@ export function computeQuery(store: Store, q: Query, mute: Map<number, number | 
 export function affects(q: Query, touched: Set<number>): boolean {
   if (!touched.size) return false;
   if (q.kind === 'status' || q.kind === 'me' || q.kind === 'user' || q.kind === 'people' || q.kind === 'ops' || q.kind === 'contacts' || q.kind === 'settings' || q.kind === 'blocked' || q.kind === 'members' || q.kind === 'profileMusic' || q.kind === 'profilePhotos' || q.kind === 'devStats' || q.kind === 'devLog') return false;   // у них свои флаги в движке
-  return q.kind === 'messages' || q.kind === 'media' || q.kind === 'thread' || q.kind === 'scheduled' ? touched.has(q.chatId) : true;
+  return q.kind === 'messages' || q.kind === 'media' || q.kind === 'thread' || q.kind === 'scheduled' || q.kind === 'savedFeed' ? touched.has(q.chatId) : true;
 }
 
 export function diffResults(prev: Result | null, next: Result): Patch | null {

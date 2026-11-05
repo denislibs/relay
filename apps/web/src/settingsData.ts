@@ -6,6 +6,7 @@ import { stopOwnMusic } from './profileLists';
 import { resetMembers } from './members';
 import { resetPinned } from './pinnedCache';
 import { resetMediaTabs } from './mediaTab';
+import { resetSavedDialogs } from './savedDialogs';
 // Данные разделов настроек. Предзагрузка: на главной странице и при наведении на строку раздела —
 // слайд приезжает уже заполненным. Подписки настроек (me, ops, user) живут здесь, а не в data.ts.
 
@@ -56,6 +57,7 @@ const FAIL_TEXT: Record<string, string> = {
   note_too_long: 'Слишком длинная заметка',
   not_found: 'Пользователь не найден в Relay',
   fresh_session: 'С нового входа это можно сделать через сутки или после подтверждения на другом устройстве',
+  pin_limit: 'Закрепить можно не больше 5 чатов',
   folder_title: 'Укажите название папки (до 16 символов)',
   folder_empty: 'Добавьте в папку хотя бы один чат или тип чатов',
   folder_too_many_chats: 'В папке может быть не больше 200 чатов',
@@ -207,7 +209,7 @@ let terminating = false;
 function onTerminated(reason: 'logout' | 'terminated'): void {
   if (terminating) return;
   stopOwnMusic();   // подписка на свою музыку не переживает выход
-  resetMembers(); resetMediaTabs(); resetPinned();   // кэши отрисовки прежнего аккаунта — не показывать следующему
+  resetSavedDialogs(); resetMembers(); resetMediaTabs(); resetPinned();   // кэши отрисовки прежнего аккаунта — не показывать следующему
   stopDeviceAuth();   // ключ устройства этого сеанса больше не нужен
   if (selfLogout) return;
   terminating = true;

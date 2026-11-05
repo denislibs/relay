@@ -1,4 +1,5 @@
 import { isVideoMedia, mediaTabs, type MediaTab, type Message } from '@relay/protocol';
+import { savedOnMessage } from './savedDialogs';
 import type { Store } from './store';
 import { PENDING_BASE, type LocalChat, type LocalMessage } from './types';
 
@@ -16,6 +17,11 @@ import { PENDING_BASE, type LocalChat, type LocalMessage } from './types';
  */
 export function onMessage(store: Store, chat: LocalChat, m: LocalMessage, kind: 'added' | 'edited' | 'deleted', prev?: LocalMessage): void {
   countMedia(chat, m, prev);
+  if (chat.saved) {
+    const view = m.savedPeer ? chat.savedViews?.[m.savedPeer] : undefined;
+    if (view) countMedia(view, m, prev);   // счётчики вкладок подчата — по тем же правилам
+    savedOnMessage(store, chat, m, kind, prev);
+  }
   const last = chat.last;
   if (kind === 'deleted') {
     if (last?.key === m.key) {
@@ -81,7 +87,7 @@ export function tabsOf(m: LocalMessage): MediaTab[] {
  * границу: повторный приход того же (снимок, перезапуск, страница) не считается дважды. Уже учтённое — разница
  * вкладок до и после (правка добавила или убрала ссылку, удаление — минус); прежнее неизвестно — не трогаем.
  */
-function countMedia(chat: LocalChat, m: LocalMessage, prev: LocalMessage | undefined): void {
+function countMedia(chat: Pick<LocalChat, 'mediaCounts' | 'mediaCountsAt'>, m: LocalMessage, prev: LocalMessage | undefined): void {
   const counts = chat.mediaCounts;
   if (!counts || m.id == null) return;
   // видео среди «Медиа» (counts.video) — пока сервер его прислал; удалённое видео — минус

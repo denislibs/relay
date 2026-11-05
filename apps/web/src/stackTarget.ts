@@ -3,10 +3,10 @@
 
 /** Слой стека: чат, а у треда — ещё id копии поста в группе обсуждения (корень треда). via — канал поста: тред гостя
  *  (я не в группе обсуждения) открывается поверх канала, а не группы. */
-export interface StackTarget { chatId: number; threadId?: number; via?: number; scheduled?: boolean }   // scheduled — страница отложенных чата, поверх его ленты
+export interface StackTarget { chatId: number; threadId?: number; via?: number; scheduled?: boolean; savedPeer?: string }   // scheduled — страница отложенных чата, поверх его ленты; savedPeer — подчат «Избранного», поверх общей ленты
 
 /** Тот же слой: чат и тред совпадают (лента группы и её тред — разные слои). */
-export const sameTarget = (a: StackTarget, b: StackTarget): boolean => a.chatId === b.chatId && (a.threadId ?? null) === (b.threadId ?? null) && !!a.scheduled === !!b.scheduled;
+export const sameTarget = (a: StackTarget, b: StackTarget): boolean => a.chatId === b.chatId && (a.threadId ?? null) === (b.threadId ?? null) && !!a.scheduled === !!b.scheduled && (a.savedPeer ?? null) === (b.savedPeer ?? null);
 
 /** Где этот слой в стеке (снизу вверх), -1 — нет. */
 export function findTarget(stack: readonly StackTarget[], t: StackTarget): number {
@@ -14,7 +14,7 @@ export function findTarget(stack: readonly StackTarget[], t: StackTarget): numbe
 }
 
 /** Ключ позиции прокрутки: у ленты чата — id, у треда — chatId:threadId (не путаются с лентой группы). */
-export const positionKey = (t: StackTarget): string => (t.scheduled ? 's' + t.chatId : t.threadId != null ? t.chatId + ':' + t.threadId : String(t.chatId));
+export const positionKey = (t: StackTarget): string => (t.savedPeer ? t.chatId + ':saved:' + t.savedPeer : t.scheduled ? 's' + t.chatId : t.threadId != null ? t.chatId + ':' + t.threadId : String(t.chatId));
 
 /** Адрес верхнего слоя: #chat=1, #chat=1&thread=2 или (тред гостя) #chat=1&thread=2&via=3; ничего не открыто — пусто. */
 export function hashFor(t: StackTarget | null | undefined): string {

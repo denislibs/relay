@@ -41,6 +41,9 @@ body { margin: 0; font-family: var(--font-sans); color: var(--ink); background: 
 .rl-avatar { position: relative; display: inline-flex; align-items: center; justify-content: center; flex-shrink: 0; border-radius: 50%; background: var(--avatar-bg); color: var(--avatar-fg); font-weight: 600; overflow: visible; user-select: none; }
 .rl-avatar img { width: 100%; height: 100%; border-radius: 50%; object-fit: cover; }
 .rl-avatar-saved { background: var(--brand-text); color: #fff; }
+/* подчаты «Избранного»: «Мои заметки» — акцентом, как закладка; «Автор скрыт» — приглушённо-фиолетовым */
+.rl-avatar-notes { background: var(--brand-text); color: #fff; }
+.rl-avatar-hidden { background: #8a7fb0; color: #fff; }
 /* автоудаление: значок на углу, слева — справа точка «в сети» */
 .rl-avatar-timer { position: absolute; left: -2px; bottom: -2px; display: inline-flex; align-items: center; justify-content: center; padding: 1px; border-radius: 50%; background: var(--brand-text); color: #fff; box-shadow: 0 0 0 2px var(--surface, #fff); line-height: 0; }
 .rl-avatar-logo { --logo-ink: #0b8a5f; background: linear-gradient(145deg, #2fd38a, #0f9d7a 55%, #0c7f86); box-shadow: inset 0 0 0 1px rgba(255,255,255,.12); }

@@ -1717,3 +1717,10 @@ span.app-log-ava { cursor: default; }
 .app-log-filter { display: flex; flex-direction: column; gap: var(--space-2); }
 .app-log-filter-wait { min-height: 52px; }
 .app-log-filter .app-gm-expand { width: 40px; height: 40px; }
+
+/* ---------- Панель «Избранного» (подчаты) ---------- */
+.app-saved-list { padding: 4px; margin-bottom: var(--space-3); }
+.app-saved-list .rl-row { border-radius: var(--radius-md); }
+.app-saved-sub { display: block; font: 400 13px/18px var(--font-sans); color: var(--ink-muted); }
+.app-sm-none { padding: var(--space-5) var(--space-4); text-align: center; color: var(--ink-muted); font-size: 14px; }
+.app-saved-plate { position: relative; }

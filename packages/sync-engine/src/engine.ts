@@ -1,9 +1,10 @@
 import { deviceFetch, signDevice } from './device';
 import { draftHash, MAX_FILE_BYTES, MEDIA_TABS, type MediaTab } from '@relay/protocol';
-import type { ClientFrame, JournalEntry, Me, ScheduledMessage, SettingsSnapshot, Message, PublicUser, ServerFrame, ThreadGuest } from '@relay/protocol';
+import type { SavedDialogsPage, ClientFrame, JournalEntry, Me, ScheduledMessage, SettingsSnapshot, Message, PublicUser, ServerFrame, ThreadGuest } from '@relay/protocol';
 import { Blocks } from './blocks';
 import { Contacts } from './contacts';
 import { delBlob, getBlob, openDb, putBlob, write } from './idb';
+import { applySavedPage, dropSavedLocally, savedChatOf, savedDeleteKey, savedDialogsResult, savedFeedResult, savedPinKey, savedView } from './savedDialogs';
 import { affects, autoDeleteKey, autoDeleteOverlay, computeQuery, scheduledResult, diffResults, feedSpan, flagsKey, flagsOf, flagsOverlay, messageWindow, muteKey, rangeAt, muteOverlay, threadView, type Result } from './queries';
 import type { Item } from './types';
 import { countStores } from './devstats';
@@ -378,7 +379,7 @@ export class Engine {
   // =====================================================================
 
   watch(q: Query, cb: (p: Patch) => void): WatchHandle {
-    const w: Watcher = { id: this.nextWatch++, q, cb, prev: null, force: true, gated: q.kind === 'messages' || q.kind === 'thread' };
+    const w: Watcher = { id: this.nextWatch++, q, cb, prev: null, force: true, gated: q.kind === 'messages' || q.kind === 'thread' || q.kind === 'savedFeed' };
     this.watchers.set(w.id, w);
     if (q.kind === 'messages') this.store.noteOpened(q.chatId);   // уборка урезает давно не открытые первыми
     if (q.kind === 'devStats' || q.kind === 'devLog') this.dev.track(this.watchers.values());
@@ -400,6 +401,8 @@ export class Engine {
     // музыка и фото профиля: из IndexedDB сразу; с сервера — если не загружали или сводка в профиле сменилась
     if (w.q.kind === 'profileMusic' || w.q.kind === 'profilePhotos') { this.lists.want(w.q); return; }
     if (w.q.kind === 'thread') { this.prepareThread(w); return; }
+    if (w.q.kind === 'savedFeed') { this.prepareSaved(w); return; }
+    if (w.q.kind === 'savedDialogs') { if (!this.store.savedDialogs.meta.loaded) this.refreshSavedDialogs(); return; }
     if (w.q.kind !== 'messages') return;
     const { chatId, limit } = w.q;
     const q = w.q;
@@ -436,6 +439,93 @@ export class Engine {
       }
     });
   }
+
+  /** Лента подчата «Избранного»: кэш чата из IndexedDB, затем страницы подчата под окно; первый снимок — как у ленты. */
+  private prepareSaved(w: Watcher): void {
+    const q = w.q as Extract<Query, { kind: 'savedFeed' }>;
+    const open = () => { if (w.q === q && w.gated) { w.gated = false; this.changed(); } };
+    this.run(async () => {
+      try {
+        await this.store.loadChatMessages(q.chatId);
+        const history = this.ensureSavedWindow(q);
+        if (this.online && w.gated) await Promise.race([history.catch(() => {}), new Promise((r) => setTimeout(r, HISTORY_GATE_MS))]);
+        open();
+        await history;
+      } finally {
+        open();
+      }
+    });
+  }
+
+  /** Догрузить ленту подчата под окно: страницы старее floor (подряд от новых); якорь старее известного — до него. */
+  private async ensureSavedWindow(q: Extract<Query, { kind: 'savedFeed' }>): Promise<void> {
+    const page = this.cfg.historyPage ?? 50;
+    for (let guard = 0; guard < 50; guard++) {
+      if (!this.online || !this.store.chats.has(q.chatId)) return;
+      const { all, lo, hi, floor } = savedView(this.store, q);
+      if (floor === true) return;
+      const { from, to } = savedView(this.store, q);
+      const short = !q.anchor ? hi - lo < q.limit : !(hi > lo && all[lo].sort <= q.anchor.sort) || (q.anchor.side !== 'start' && from === lo && to - from < q.limit);
+      if (!short) return;
+      if (!(await this.loadSavedPage(q.chatId, q.peer)) && savedView(this.store, q).floor !== true) return;
+    }
+  }
+
+  /** Страница подчата старее известного. Одна на подчат; ответ — сколько пришло. */
+  private loadSavedPage(chatId: number, peer: string): Promise<number> {
+    const k = chatId + ':' + peer, running = this.savedLoads.get(k);
+    if (running) return running.then(() => 0);
+    const floor = savedView(this.store, { kind: 'savedFeed', chatId, peer, limit: 1 }).floor;
+    if (floor === true) return Promise.resolve(0);
+    const page = this.cfg.historyPage ?? 50, gen = this.store.resetGen, trims = this.store.trimGen(chatId);
+    const p = (async () => {
+      const res = await this.http<{ messages: Message[]; hasMore: boolean }>(`/chats/${chatId}/messages?limit=${page}&savedPeer=${encodeURIComponent(peer)}${Number.isFinite(floor) ? `&before=${floor}` : ''}`);
+      const c = this.store.chats.get(chatId);
+      if (!c || gen !== this.store.resetGen) return 0;
+      this.store.addLoose(chatId, res.messages);
+      if (trims === this.store.trimGen(chatId)) {
+        let lo = floor as number;
+        for (const m of res.messages) if (m.id < lo) lo = m.id;
+        const views = (c.savedViews ??= {});
+        views[peer] = { ...views[peer], floor: res.hasMore && res.messages.length ? lo : true };
+        this.store.markChat(c);
+      }
+      await this.store.flush();
+      this.changed();
+      return res.messages.length;
+    })().finally(() => this.savedLoads.delete(k));
+    this.savedLoads.set(k, p);
+    return p;
+  }
+  private savedLoads = new Map<string, Promise<number>>();
+
+  /**
+   * Список подчатов: страница сервера в кэш (at — следующая). Журнал новее страницы, начатой раньше него (rev), — страницу
+   * выбрасываем и просим заново. Без сети — только кэш; сеть вернулась — sync спросит сам.
+   */
+  private refreshSavedDialogs(next = false): Promise<void> {
+    if (this.savedLoading) { if (!next) this.savedAgain = true; return this.savedLoading; }
+    const chat = savedChatOf(this.store);
+    if (!chat || !this.online || !this.ready) return Promise.resolve();
+    const cache = this.store.savedDialogs, rev = cache.rev, at = next ? cache.meta.next : null;
+    if (next && at == null) return Promise.resolve();
+    cache.want = false;
+    const p = (async () => {
+      const page = await this.http<SavedDialogsPage>(`/chats/${chat.id}/saved-dialogs${at != null ? '?before=' + at : ''}`);
+      if (rev !== cache.rev) { this.savedAgain = true; return; }
+      await this.store.loadChatMessages(chat.id);
+      applySavedPage(this.store, chat.id, page, at);
+      await this.store.flush();
+      this.changed();
+    })().finally(() => {
+      this.savedLoading = null;
+      if (this.savedAgain) { this.savedAgain = false; this.run(() => this.refreshSavedDialogs()); }
+    });
+    this.savedLoading = p;
+    return p;
+  }
+  private savedLoading: Promise<void> | null = null;
+  private savedAgain = false;
 
   private changed(): void { this.handleSeqHints(); this.syncThreadWatches(); this.pushStatus(); this.schedule(); }
 
@@ -506,7 +596,9 @@ export class Engine {
     }
     if (q.kind === 'scheduled') return scheduledResult(this.store, q.chatId);
     if (q.kind === 'members') return membersResult(this.store, q.chatId, this.presence, this.meNow());
-    if (q.kind === 'media') return mediaResult(this.store, q, this.media.loading(q.chatId, q.tab));
+    if (q.kind === 'media') return mediaResult(this.store, q, this.media.loading(q.chatId, q.tab, q.savedPeer));
+    if (q.kind === 'savedFeed') return savedFeedResult(this.store, q);
+    if (q.kind === 'savedDialogs') return savedDialogsResult(this.store, this.ops.list);
     if (q.kind === 'profileMusic') return profileMusicResult(this.store, q.userId, this.ops.list, this.lists.loading(q));
     if (q.kind === 'profilePhotos') return profilePhotosResult(this.store, q.userId, this.meNow(), this.lists.loading(q));
     if (q.kind === 'people') return peopleResult(this.store, q.ids, q.ids.includes(this.cfg.userId) ? this.meNow() : null);
@@ -732,6 +824,7 @@ export class Engine {
       const qs = new URLSearchParams({ q: a.q, limit: String(limit) });
       if (a.chatId) qs.set('chatId', String(a.chatId));
       if (a.beforeId) qs.set('beforeId', String(a.beforeId));
+      if (a.savedPeer) qs.set('savedPeer', a.savedPeer);
       res = await this.http(`/search?${qs}`);
     } catch { return local; }   // сеть пропала посреди запроса — только локальные
     const mine = await local.catch((): SearchResult => ({ hits: [], hasMore: false, source: 'local' }));   // локальная часть упала — ответ сервера не теряем
@@ -782,7 +875,7 @@ export class Engine {
    * делят один промис — пока он идёт и ещё SEARCH_MEMO_MS после (за это время кэш почти не меняется).
    */
   private searchLocal(a: Extract<Action, { type: 'search' }>, limit: number): Promise<SearchResult> {
-    const key = [a.q, a.chatId ?? '', a.beforeId ?? '', limit].join('\0');
+    const key = [a.q, a.chatId ?? '', a.savedPeer ?? '', a.beforeId ?? '', limit].join('\0');
     let p = this.searchMemo.get(key);
     if (!p) {
       p = this.searchLocalNow(a, limit);
@@ -797,7 +890,8 @@ export class Engine {
   /** Указатель дописан (flush — только если он отстаёт от памяти), затем searchLocal по нему. */
   private async searchLocalNow(a: Extract<Action, { type: 'search' }>, limit: number): Promise<SearchResult> {
     if (this.store.termsDirty) await this.store.flush();   // слова последних сообщений — в указатель
-    const { list, hasMore } = await searchLocal(this.db, a.q, { chatId: a.chatId, beforeId: a.beforeId, limit }, (c, k) => this.store.loadedMessage(c, k));
+    const { list: found, hasMore } = await searchLocal(this.db, a.q, { chatId: a.chatId, beforeId: a.beforeId, limit }, (c, k) => this.store.loadedMessage(c, k));
+    const list = a.savedPeer ? found.filter((m) => m.savedPeer === a.savedPeer) : found;   // подчат: совпадения других подчатов не показываем
     return {
       hits: list.map((m) => ({ chatId: m.chatId, chatTitle: this.titleOfChat(m.chatId), id: m.id!, sort: m.sort, senderId: m.senderId, body: m.body, createdAt: m.createdAt, kind: m.kind, attachment: (m.attachment as never) ?? null, entities: m.entities ?? null, ...(m.service ? { service: m.service } : {}), source: 'local' as const })),
       hasMore, source: 'local',
@@ -911,7 +1005,7 @@ export class Engine {
     this.statusSig = sig;
     for (const w of this.watchers.values()) {
       if (w.q.kind === 'devLog') { this.dev.pushLog(w); continue; }   // журнал: только новые события, пачкой раз в 250 мс
-      const own = (w.q.kind === 'devStats' && devDirty) || (w.q.kind === 'status' && statusChanged) || (w.q.kind === 'presence' && presenceDirty) || (w.q.kind === 'ops' && opsDirty) || ((w.q.kind === 'me' || w.q.kind === 'user') && profileDirty) || (w.q.kind === 'people' && peopleDirty) || (w.q.kind === 'contacts' && contactsDirty) || (w.q.kind === 'settings' && settingsDirty) || (w.q.kind === 'blocked' && blocksDirty) || (w.q.kind === 'members' && (membersTouched.has(w.q.chatId) || peopleDirty || presenceDirty))
+      const own = (w.q.kind === 'devStats' && devDirty) || (w.q.kind === 'status' && statusChanged) || (w.q.kind === 'presence' && presenceDirty) || (w.q.kind === 'ops' && opsDirty) || ((w.q.kind === 'me' || w.q.kind === 'user') && profileDirty) || (w.q.kind === 'people' && peopleDirty) || (w.q.kind === 'savedDialogs' && (opsDirty || peopleDirty)) || (w.q.kind === 'contacts' && contactsDirty) || (w.q.kind === 'settings' && settingsDirty) || (w.q.kind === 'blocked' && blocksDirty) || (w.q.kind === 'members' && (membersTouched.has(w.q.chatId) || peopleDirty || presenceDirty))
         || (w.q.kind === 'profileMusic' && (listsTouched.has('m:' + w.q.userId) || (opsDirty && w.q.userId === this.cfg.userId)))
         || (w.q.kind === 'profilePhotos' && (listsTouched.has('p:' + w.q.userId) || profileDirty));
       if (!w.force && !affects(w.q, touched) && !own) continue;
@@ -939,6 +1033,7 @@ export class Engine {
       if (w.q.kind === 'media') this.media.want(w.q);
       else if (w.q.kind === 'profileMusic' || w.q.kind === 'profilePhotos') this.lists.want(w.q);   // устарел (сводка сменилась) — перечитать
     }
+    if (this.store.savedDialogs.want && this.ready && this.online) this.run(() => this.refreshSavedDialogs());
   }
 
   /** Присутствие из ответа сервера, если живого ещё нет (без связи — не знаем). */
@@ -1233,6 +1328,30 @@ export class Engine {
         return null;
       }
       case 'savedChat': return this.savedChat();
+      case 'loadSavedDialogs': if (this.online) await this.refreshSavedDialogs(true); return null;
+      case 'loadSaved': {
+        await this.store.loadChatMessages(a.chatId);
+        if (this.online) await this.loadSavedPage(a.chatId, a.peer);
+        return null;
+      }
+      case 'savedDialogPin': {
+        const chat = savedChatOf(this.store);
+        if (!chat) return null;
+        await this.ops.enqueue({ key: savedPinKey(a.peer), method: 'PUT', path: `/chats/${chat.id}/saved-dialogs/${a.peer}/pin`, body: { pinned: a.pinned, at: Date.now() } });
+        return null;
+      }
+      case 'savedDialogDelete': {
+        // как у личного чата: строка и кэш — сразу, сервер стирает очередью; upToId — что уже видели: дошедшее позже остаётся
+        const chat = savedChatOf(this.store);
+        const row = this.store.savedDialogs.rows.get(a.peer);
+        if (!chat || row?.lastId == null) return null;
+        await this.store.loadChatMessages(chat.id);
+        dropSavedLocally(this.store, chat.id, a.peer, row.lastId);
+        await this.ops.enqueue({ key: savedDeleteKey(a.peer), method: 'DELETE', path: `/chats/${chat.id}/saved-dialogs/${a.peer}?upToId=${row.lastId}` });
+        await this.store.flush();
+        this.changed();
+        return null;
+      }
       case 'setDraft': {
         if (this.store.setDraft(a.chatId, a.text, a.entities)) {
           this.store.pendingDrafts.add(a.chatId);
@@ -2302,6 +2421,8 @@ export class Engine {
       this.pushDrafts();
       if (this.store.unnamed().length) this.refreshList();
       this.loadOpenChats();
+      // подчаты «Избранного»: к этому месту журнал уже догнан; кэш нужен и тем, кто откроет панель без сети
+      this.run(() => this.refreshSavedDialogs());
       if (!this.presenceFetched) this.fetchPresence();
       this.ops.resume();
       if (!this.peersRefreshed) this.refreshPeers();
@@ -2416,6 +2537,7 @@ export class Engine {
       const q = w.q;
       // тред, открытый без сети (перезагрузка с адресом треда): страница не грузилась — гостю строки чата не будет
       if (q.kind === 'thread') { if (!this.store.threadRanges(q.chatId, q.threadId)) this.run(() => this.ensureThreadWindow(q)); continue; }
+      if (q.kind === 'savedFeed') { this.run(() => this.ensureSavedWindow(q)); continue; }
       if (q.kind !== 'messages') continue;
       const c = this.store.chats.get(q.chatId);
       // окно полное или история дочитана — ensureWindow вернётся сразу; недобранное — догрузит страницы
@@ -2941,6 +3063,7 @@ export class Engine {
     const keep: EvictKeep = { windows: new Map(), people: new Set(this.contacts.view().keys()), members: new Set(), busy: new Set() };
     // грузятся: история, страница новее, точечная подгрузка, медиа
     for (const id of [...this.historyLoads.keys(), ...this.newerLoads.keys(), ...this.chatLoads.keys()]) keep.busy.add(id);
+    for (const k of this.savedLoads.keys()) keep.busy.add(parseInt(k, 10));
     for (const id of this.media.busyChats()) keep.busy.add(id);
     const win = (chatId: number) => { let s = keep.windows.get(chatId); if (!s) { s = new Set(); keep.windows.set(chatId, s); } return s; };
     for (const w of this.watchers.values()) {
@@ -2964,9 +3087,13 @@ export class Engine {
         const h = this.store.messageById(q.chatId, q.threadId);
         if (h) set.add(h.key);
         for (let k = from; k < to; k++) { set.add(all[k].key); const r = all[k].replyToId != null ? this.store.messageById(q.chatId, all[k].replyToId!) : undefined; if (r) set.add(r.key); }
+      } else if (q.kind === 'savedFeed') {
+        if (w.gated || !this.store.isLoaded(q.chatId)) keep.busy.add(q.chatId);
+        const set = win(q.chatId), { all, from, to } = savedView(this.store, q);
+        for (let k = from; k < to; k++) { set.add(all[k].key); const r = all[k].replyToId != null ? this.store.messageById(q.chatId, all[k].replyToId!) : undefined; if (r) set.add(r.key); }
       } else if (q.kind === 'media') {
         const set = win(q.chatId);
-        for (const m of tabMessages(this.store, q.chatId, q.tab).slice(-q.limit)) set.add(m.key);
+        for (const m of tabMessages(this.store, q.chatId, q.tab, q.savedPeer).slice(-q.limit)) set.add(m.key);
       } else if (q.kind === 'people') for (const id of q.ids) keep.people.add(id);
       else if (q.kind === 'user' || q.kind === 'presence' || q.kind === 'profileMusic' || q.kind === 'profilePhotos') keep.people.add(q.userId);
       else if (q.kind === 'members') keep.members.add(q.chatId);

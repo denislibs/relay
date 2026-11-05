@@ -694,7 +694,7 @@ function CachedMusic({ fileId, ...props }: { fileId?: string } & Record<string, 
 const GREET_FLIGHT_MS = 320;   // перелёт стикера-приветствия в пузырь
 const GREET_LAND_MS = 120;     // сколько после посадки ждать первый кадр пузыря (плеер общий с карточкой — обычно уже есть)
 
-export function Feed({ frameKey, active, chatId, threadId, scheduled = false, channel = false, saved = false, meId, peerName, chatPhoto, group, onAuthor, stick, onMenu, highlight, greeting = false }: {
+export function Feed({ frameKey, active, chatId, threadId, scheduled = false, savedPeer, channel = false, saved = false, meId, peerName, chatPhoto, group, onAuthor, stick, onMenu, highlight, greeting = false }: {
   frameKey: string; active: boolean;   // кадр стека чатов; active — на экране (только он отмечает прочитанное)
   saved?: boolean;      // «Избранное»: без галочек
   greeting?: boolean;   // личный чат, где пустую ленту встречает карточка-приветствие (greetingChat)
@@ -702,6 +702,7 @@ export function Feed({ frameKey, active, chatId, threadId, scheduled = false, ch
   chatPhoto?: ProfilePhoto | null;   // фото чата: автор поста в просмотрщике — сам канал
   scheduled?: boolean;  // страница отложенных: createdAt — на когда, id нет; без галочек и перехода к дате
   threadId?: number;    // тред комментариев: прочитанность — markThreadRead, позиция — своим ключом
+  savedPeer?: string;   // подчат «Избранного»: окно — фильтр общей ленты, позиция — своим ключом
   channel?: boolean;    // лента канала: все сообщения — посты (слева, без автора), просмотры засчитываются по видимости
   group: boolean; onAuthor: (userId: number) => void;   // в группе — имя автора над пачкой; клик — личный чат поверх
   stick: { current: boolean };
@@ -753,7 +754,7 @@ export function Feed({ frameKey, active, chatId, threadId, scheduled = false, ch
   // Первый экран (как в Telegram Web K): в первом кадре — только строки, что заполняют экран вокруг точки открытия
   // (низ, непрочитанное, сохранённая позиция, переход), остальное окно — порциями после показа. Окно — ключами
   // крайних строк: пришедшее посреди дорисовки сообщение индексы сдвинет, а ключи останутся. null — строить всё
-  const here = { chatId, threadId, scheduled };   // слой стека: позиция прокрутки треда — своим ключом
+  const here = { chatId, threadId, scheduled, savedPeer };   // слой стека: позиция прокрутки треда — своим ключом
   const win = useRef<{ from: string; to: string } | null | undefined>(undefined);   // undefined — ещё не решено
   const [winTick, bumpWin] = useState(0);
   const fillAnchorFor = useRef<number | null>(null);   // якорь шага дорисовки снимается рендером с winTick не меньше этого

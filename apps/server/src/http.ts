@@ -14,7 +14,7 @@ import { getThread, readThread } from './domain/threads';
 import { readBy } from './domain/reads';
 import { readReactions, unreadReactions } from './domain/reactionsUnread';
 import { commonGroups, deleteDirectChat, createChat, createGroup, GROUP_MEMBERS_MAX, openDirect, messageAtDate, getChatMedia, getMediaDays, getChatMediaCounts, getHistory, getMessagesByIds, listChats, listChatsPage } from './domain/chats';
-import { openSavedChat } from './domain/saved';
+import { deleteSavedDialog, listSavedDialogs, openSavedChat, savedPeerParam, setSavedDialogPin } from './domain/saved';
 import { sql } from './db';
 import { DomainError } from './domain/errors';
 import { setChatNotify } from './domain/chatNotify';
@@ -313,6 +313,17 @@ export function createServer(opts: { port: number }): Server {
         }
         // «Избранное» — чат с самим собой: создаётся при первом обращении, повтор возвращает тот же
         if (req.method === 'POST' && url.pathname === '/chats/saved') return Response.json({ id: await openSavedChat(userId) });
+        // подчаты «Избранного» (saved.ts): только владельцу чата
+        const sd = /^\/chats\/(\d+)\/saved-dialogs(?:\/([^/]+)(?:\/(pin))?)?$/.exec(url.pathname);
+        if (sd && req.method === 'GET' && !sd[2]) {
+          const before = Number(url.searchParams.get('before')), limit = Number(url.searchParams.get('limit'));
+          return Response.json(await listSavedDialogs(userId, Number(sd[1]), { before: Number.isInteger(before) && before > 0 ? before : null, ...(limit ? { limit } : {}) }));
+        }
+        if (sd && sd[3] === 'pin' && req.method === 'PUT') {
+          const body = (await req.json().catch(() => null)) as { pinned?: unknown } | null;
+          return Response.json(await setSavedDialogPin(userId, Number(sd[1]), sd[2], body?.pinned));
+        }
+        if (sd && sd[2] && !sd[3] && req.method === 'DELETE') return Response.json(await deleteSavedDialog(userId, Number(sd[1]), sd[2], url.searchParams.get('upToId')));
         if (devAllowed(req, server) && req.method === 'POST' && url.pathname === '/dev/chats') {
           const { kind, title, memberIds } = (await req.json()) as { kind: 'direct' | 'group' | 'channel'; title: string | null; memberIds: number[] };
           const ids = memberIds.includes(userId) ? memberIds : [userId, ...memberIds];
@@ -370,7 +381,7 @@ export function createServer(opts: { port: number }): Server {
           const tab: MediaTab = raw === 'photo' ? 'media' : (MEDIA_TABS as readonly string[]).includes(raw ?? '') ? raw as MediaTab : 'media';   // photo — прежнее имя вкладки
           const before = Number(url.searchParams.get('beforeId')) || null;
           const limit = url.searchParams.has('limit') ? Number(url.searchParams.get('limit')) : undefined;
-          return Response.json(await getChatMedia(userId, Number(media[1]), tab, before, limit));
+          return Response.json(await getChatMedia(userId, Number(media[1]), tab, before, limit, savedPeerParam(url.searchParams.get('savedPeer'))));
         }
         const del = /^\/chats\/(\d+)\/delete$/.exec(url.pathname);
         if (del && req.method === 'POST') {
@@ -391,7 +402,7 @@ export function createServer(opts: { port: number }): Server {
           return Response.json({ days: await getMediaDays(userId, Number(mediaDays[1]), q.get('from') ?? '', q.get('to') ?? '', q.get('tz') ?? '') });
         }
         const mediaCounts = /^\/chats\/(\d+)\/media\/counts$/.exec(url.pathname);
-        if (req.method === 'GET' && mediaCounts) return Response.json(await getChatMediaCounts(userId, Number(mediaCounts[1])));
+        if (req.method === 'GET' && mediaCounts) return Response.json(await getChatMediaCounts(userId, Number(mediaCounts[1]), savedPeerParam(url.searchParams.get('savedPeer'))));
         if (url.pathname === '/push/subscription' && (req.method === 'POST' || req.method === 'DELETE')) {
           const body = (await req.json().catch(() => null)) as SubscriptionInput | null;
           if (typeof body?.endpoint !== 'string') return fail('bad_frame');
@@ -416,7 +427,7 @@ export function createServer(opts: { port: number }): Server {
         if (req.method === 'GET' && url.pathname === '/search') {
           // ?q=текст[&chatId=N][&beforeId=M][&limit=K]
           const num = (k: string) => { const v = Number(url.searchParams.get(k)); return Number.isInteger(v) && v > 0 ? v : undefined; };
-          return Response.json(await searchMessages(userId, url.searchParams.get('q') ?? '', { chatId: num('chatId'), beforeId: num('beforeId'), limit: num('limit') }));
+          return Response.json(await searchMessages(userId, url.searchParams.get('q') ?? '', { chatId: num('chatId'), beforeId: num('beforeId'), limit: num('limit'), savedPeer: savedPeerParam(url.searchParams.get('savedPeer')) }));
         }
         if (req.method === 'GET' && url.pathname === '/users') {
           return Response.json(await usersByIds(userId, (url.searchParams.get('ids') ?? '').split(',').map(Number)));
@@ -494,7 +505,7 @@ export function createServer(opts: { port: number }): Server {
           if (ids) return Response.json({ messages: await getMessagesByIds(userId, Number(hist[1]), ids.split(',').map(Number).filter((n) => Number.isInteger(n) && n > 0).slice(0, 100)) });
           const before = url.searchParams.get('before'), after = Number(url.searchParams.get('after'));
           const limit = Number(url.searchParams.get('limit') ?? 50);
-          return Response.json(await getHistory(userId, Number(hist[1]), before ? Number(before) : null, limit, Number.isInteger(after) && after > 0 ? after : null));
+          return Response.json(await getHistory(userId, Number(hist[1]), before ? Number(before) : null, limit, Number.isInteger(after) && after > 0 ? after : null, savedPeerParam(url.searchParams.get('savedPeer'))));
         }
         return new Response('Not found', { status: 404 });
       } catch (err) {

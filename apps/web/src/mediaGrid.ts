@@ -34,8 +34,8 @@ export const viewerPreview = (a: BubbleAtt): string | undefined => {
  *  #t=0.1 — не чёрный самый первый кадр. */
 export const videoFrameSrc = (a: TileAtt): string => (a.preview ? `/files/${a.id}/preview` : `/files/${a.id}`) + '#t=0.1';
 
-export type SharedTab = MediaTab | 'members' | 'groups';
-export const TAB_LABEL: Record<SharedTab, string> = { members: 'Участники', media: 'Медиа', file: 'Файлы', link: 'Ссылки', audio: 'Музыка', voice: 'Голосовые', groups: 'Группы' };
+export type SharedTab = MediaTab | 'members' | 'groups' | 'chats';   // chats — подчаты в панели «Избранного»
+export const TAB_LABEL: Record<SharedTab, string> = { members: 'Участники', media: 'Медиа', file: 'Файлы', link: 'Ссылки', audio: 'Музыка', voice: 'Голосовые', groups: 'Группы', chats: 'Чаты' };
 /** Название вкладки: на самой вкладке и в шапке панели, когда вкладки прилипли к верху (как в Telegram). */
 export const tabLabel = (t: SharedTab): string => TAB_LABEL[t];
 
@@ -48,6 +48,7 @@ const ru = (n: number, one: string, few: string, many: string) => {
 export function tabCounter(t: SharedTab, counts: (Partial<Record<MediaTab, number>> & { video?: number }) | null, members?: number | null, groups?: number | null): string | null {
   if (t === 'members') return members == null ? null : ru(members, 'участник', 'участника', 'участников');
   if (t === 'groups') return groups == null ? null : ru(groups, 'общая группа', 'общие группы', 'общих групп');
+  if (t === 'chats') return null;
   const n = counts?.[t];
   if (n == null) return null;
   switch (t) {
