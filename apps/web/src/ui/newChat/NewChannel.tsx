@@ -120,7 +120,7 @@ export function NewChannelMembers() {
       <div class="rl-page-scroll app-newgroup">
         {people.length ? (
           <ContactPicker multi selected={picked} contacts={people.map((p) => ({ ...p, tone: peerTone(p.id), avatar: senderAvatar(p.id) }))}
-            searchLabel="Поиск людей" placeholder="Кого добавить?" onChange={(next: number[]) => setPicked(next)} />
+            searchLabel="Поиск людей" placeholder="Кого добавить?" autoFocus onChange={(next: number[]) => setPicked(next)} />
         ) : (
           <EmptyState kind="contacts" title="Некого добавить" text="Подписчики появятся, когда вы поделитесь ссылкой на канал." />
         )}

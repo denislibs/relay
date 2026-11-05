@@ -47,7 +47,7 @@ export function NewGroupMembers() {
       <div class="rl-page-scroll app-newgroup">
         {people.length ? (
           <ContactPicker multi selected={ids} contacts={people.map((p) => ({ ...p, tone: peerTone(p.id), avatar: senderAvatar(p.id) }))}
-            searchLabel="Поиск людей" placeholder="Кого добавить?" onChange={(next: number[]) => setIds(next)} />
+            searchLabel="Поиск людей" placeholder="Кого добавить?" autoFocus onChange={(next: number[]) => setIds(next)} />
         ) : (
           <EmptyState kind="contacts" title="Некого добавить" text="Добавьте людей в контакты или начните с ними переписку — они появятся здесь." />
         )}
