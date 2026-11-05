@@ -15,6 +15,7 @@ export interface StickersHost {
   http<T>(path: string): Promise<T>;
   enqueue(op: OpSpec): Promise<void>;
   bump(): void;   // stickersRev++ и changed(): интерфейс перечитает мои стикеры
+  unsentStickers(): { sticker: StickerRef; at: number }[];   // в очереди отправки: сервер о них ещё не знает
 }
 
 const MINE = 'stickers:mine';
@@ -64,7 +65,9 @@ export class Stickers {
         const cached = await this.cachedMine();
         if (!this.h.online()) return { ...cached, offline: true };
         try {
-          const fresh = this.overlay(await this.h.http<MyStickers>('/my-stickers'));
+          const unsent = this.h.unsentStickers();   // ушедшее за время запроса из очереди пропадёт, а ответ мог быть собран раньше
+          const answer = await this.h.http<MyStickers>('/my-stickers');
+          const fresh = this.overlay(answer, [...unsent, ...this.h.unsentStickers()]);
           this.setMine(fresh);
           return fresh;
         } catch { return { ...cached, offline: true }; }
@@ -125,8 +128,9 @@ export class Stickers {
   }
 
   /** Ответ сервера + ещё не подтверждённые свои изменения. Подтверждённое (или старше минуты) забываем. */
-  private overlay(m: MyStickers): MyStickers {
+  private overlay(m: MyStickers, unsent: { sticker: StickerRef; at: number }[]): MyStickers {
     const stale = Date.now() - 60_000;
+    const cleared = new Map(this.unrecent);
     let { sets, recent, faved } = m;
     for (const [id, o] of this.installs) {
       const has = sets.some((s) => s.id === id);
@@ -142,6 +146,11 @@ export class Stickers {
       const left = id === 'all' ? recent.length > 0 : recent.some((s) => s.id === id);
       if (!left || at < stale) { this.unrecent.delete(id); continue; }
       recent = id === 'all' ? [] : recent.filter((s) => s.id !== id);
+    }
+    // недавние из очереди держим, пока сообщение не уйдёт: сколько бы ни ждало (долгий офлайн), срока нет
+    for (const { sticker, at } of unsent.sort((x, y) => x.at - y.at)) {
+      if (at < (cleared.get('all') ?? 0) || at < (cleared.get(sticker.id) ?? 0)) continue;   // убрали уже после отправки
+      recent = [sticker, ...recent.filter((s) => s.id !== sticker.id)].slice(0, RECENT_STICKERS_LIMIT);
     }
     return { sets, recent, faved };
   }

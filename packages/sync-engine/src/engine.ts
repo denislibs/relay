@@ -190,7 +190,8 @@ export class Engine {
     this.media = new MediaLoader(store, { online: () => this.online && this.ready, http: (path) => this.http(path), run: (fn) => this.run(fn), changed: () => this.changed() });
     this.lists = new ProfileListsLoader(store, { online: () => this.online && this.ready, http: (path) => this.http(path), run: (fn) => this.run(fn), changed: () => this.changed() });
     this.sessions = new Sessions({ ops: this.ops, online: () => this.online, http: (path) => this.http(path) });
-    this.stickers = new Stickers({ db, online: () => this.online, http: (path) => this.http(path), enqueue: (op) => this.ops.enqueue(op), bump: () => { this.store.stickersRev++; this.changed(); } });
+    this.stickers = new Stickers({ db, online: () => this.online, http: (path) => this.http(path), enqueue: (op) => this.ops.enqueue(op), bump: () => { this.store.stickersRev++; this.changed(); },
+      unsentStickers: () => [...this.store.outbox.values()].flatMap((o) => (o.sticker && !o.failed ? [{ sticker: o.sticker, at: o.createdAt }] : [])) });
     this.channelPosts = new ChannelPosts({ db, online: () => this.online && this.ready,
       fetch: (path) => this.dev.fetch(this.cfg.httpBase + path, { credentials: 'include', headers: this.cfg.headers }) });
     this.session = new SessionEnd({
