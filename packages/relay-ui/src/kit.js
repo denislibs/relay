@@ -375,7 +375,7 @@ function Avatar(props) {
   if (props.saved) {
     // «Избранное»: закладка вместо инициалов
     return h('span', { class: cx('rl-avatar', 'rl-avatar-saved', (props.className || props.class)), style: { width: size, height: size }, role: 'img', 'aria-label': props.name || 'Избранное' },
-      h(Icon, { name: 'bookmark', size: Math.round(size * 0.56) }), timer);
+      h(Icon, { name: 'bookmarkFilled', size: Math.round(size * 0.56) }), timer);
   }
   var tone = props.tone != null ? props.tone : props.name ? nameTone(String(props.name)) : null;
   // фото: под ним инициалы и размытое превью (thumb), само фото проявляется, когда загрузилось, —
