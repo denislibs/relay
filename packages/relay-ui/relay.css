@@ -1320,7 +1320,10 @@ button.rl-tab:hover { color: var(--ink); }
 .rl-shell .rl-composer-field { align-items: flex-end; min-height: 40px; padding: 0; border-radius: 0; background: transparent; box-shadow: none; }
 .rl-shell .rl-composer-field :is(input, textarea) { font-size: var(--message-text-size, 16px); line-height: round(calc(var(--message-text-size, 16px) * 1.3125), 1px); padding-inline: 4px; }
 .rl-shell .rl-composer-input { --line: round(calc(var(--message-text-size, 16px) * 1.3125), 1px); }
-.rl-shell .rl-composer-editable, .rl-shell .rl-composer-ph { padding-inline: 4px; left: 4px; }
+/* плейсхолдер и каретка на одной вертикали: начинают с одной точки, текст не сдвигается при вводе */
+.rl-shell .rl-composer-input { margin-inline-start: -4px; }
+.rl-shell .rl-composer-editable, .rl-shell .rl-composer-ph { padding-inline: 2px; left: 0; }
+.rl-shell .rl-composer-field > .rl-iconbtn > .rl-icon { width: 24px; height: 24px; }
 .rl-shell .rl-composer-field .rl-iconbtn { width: 40px; height: 40px; color: var(--ink-muted); }
 .rl-shell .rl-composer-send { width: 40px; height: 40px; box-shadow: none; }
 

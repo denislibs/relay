@@ -1,4 +1,4 @@
-import { Checkbox, DatePicker, Icon, Modal } from '@relay/ui';
+import { Button, Checkbox, DatePicker, Icon, Modal } from '@relay/ui';
 import { useState } from 'preact/hooks';
 import { checkSchedule, clockOf, maxScheduleDay, nextSlot, quickOptions, SCHEDULE_ERROR_TEXT, submitLabel, whenText, withClock } from '../schedule';
 
@@ -12,7 +12,7 @@ export function ScheduleModal({ saved, initial, allowSilent = true, onPick, onCl
   const submit = () => { if (!checkSchedule(at, Date.now())) onPick({ at, silent }); };
   return (
     <Modal open size="slim" class="rl-dm app-sched-modal" title={saved ? 'Напомнить' : 'Отправить позже'} onClose={onClose}
-      actions={[<button key="s" type="button" class="rl-todo-submit" disabled={!!err} onClick={submit}>{submitLabel(at, Date.now(), saved)}</button>]}>
+      actions={[<Button key="s" variant="primary" disabled={!!err} onClick={submit}>{submitLabel(at, Date.now(), saved)}</Button>]}>
       <div onKeyDown={(e) => { if (e.key === 'Enter' && (e.target as Element).nodeName !== 'BUTTON') { e.preventDefault(); submit(); } }}>
         {initial == null ? (
           <div class="app-sched-quick">
