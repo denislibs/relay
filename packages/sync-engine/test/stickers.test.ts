@@ -1,9 +1,11 @@
 import { afterAll, afterEach, beforeAll, beforeEach, expect, test } from 'bun:test';
 import { mkdirSync, rmSync, writeFileSync } from 'node:fs';
-import type { MyStickers, StickerSet } from '@relay/protocol';
+import type { MyStickers, StickerRef, StickerSet } from '@relay/protocol';
 import { sql } from '../../../apps/server/src/db';
 import { importStickers } from '../../../apps/server/src/stickers/import';
 import { Engine } from '../src/engine';
+import { openDb } from '../src/idb';
+import { Stickers, type StickersHost } from '../src/stickers';
 import { resetDb, startTestServer, watchInto } from './helpers';
 
 // маленький пак-фикстура: настоящих ассетов в тестах нет
@@ -43,6 +45,99 @@ test('a sticker sent offline shows at once with its snapshot and goes out as {st
   const [row] = await sql`select kind, sticker from messages where chat_id = ${chatId}`;
   expect(row.kind).toBe('sticker');
   expect(row.sticker.id).toBe(set.stickers[1].id);
+});
+
+test('a read racing the first cache load does not undo a sticker just sent', async () => {
+  const ref = (id: number) => ({ id, emoji: '👍' }) as StickerRef;
+  const db = await openDb('stickers-' + crypto.randomUUID());
+  const offline = () => new Stickers({ db, online: () => false, http: async () => { throw new Error('offline'); }, enqueue: async () => {}, bump: () => {}, unsentStickers: () => [] });
+  const recent = async (s: Stickers) => ((await s.act({ type: 'myStickers' })) as MyStickers).recent.map((x) => x.id);
+
+  // кэша ещё нет: чтение стартует, пока поднятие недавних ждёт свою загрузку
+  const first = offline();
+  const bump = first.bumpRecent(ref(1));
+  expect(await recent(first)).toEqual([1]);
+  await bump;
+  expect(await recent(first)).toEqual([1]);
+
+  // кэш есть: опоздавшая загрузка не возвращает старый список поверх нового — и следующий стикер его не теряет
+  const second = offline();
+  const bump2 = second.bumpRecent(ref(2));
+  expect(await recent(second)).toEqual([2, 1]);
+  await bump2;
+  await second.bumpRecent(ref(3));
+  expect(await recent(second)).toEqual([3, 2, 1]);
+});
+
+test('a sticker just sent stays in recents while the server answer does not know it yet', async () => {
+  const a = await srv.login('a'), b = await srv.login('b');
+  const chatId = await srv.chat(a.token, [a.userId, b.userId]);
+  const ea = await open(srv.config(a));
+  const recent = async () => ((await ea.call({ type: 'myStickers' })) as MyStickers).recent.map((s) => s.id);
+  ea.connect(); await ea.whenIdle();
+  const { stickers: [one, two] } = await ea.call({ type: 'stickerSet', id: 'duck' }) as StickerSet;
+
+  // онлайн: читаем сразу после отправки, сообщение ещё в очереди
+  await ea.call({ type: 'sendSticker', chatId, sticker: one });
+  expect(await recent()).toEqual([one.id]);
+  await ea.whenIdle();
+  expect(await recent()).toEqual([one.id]);
+
+  // из офлайна: сеть уже есть, а очередь ждёт догонку журнала — первый запрос сервера о стикере не знает
+  ea.disconnect();
+  await ea.call({ type: 'sendSticker', chatId, sticker: two });
+  ea.connect();
+  expect(await recent()).toEqual([two.id, one.id]);
+  await ea.whenIdle();
+  expect(await recent()).toEqual([two.id, one.id]);
+});
+
+test('a sticker the server refused does not stay in recents', async () => {
+  const a = await srv.login('a'), b = await srv.login('b');
+  const chatId = await srv.chat(a.token, [a.userId, b.userId]);
+  const ea = await open(srv.config(a));
+  ea.connect(); await ea.whenIdle();
+  const feed = watchInto(ea, { kind: 'messages', chatId, limit: 50 });
+  await ea.call({ type: 'sendSticker', chatId, sticker: { id: 999_999, emoji: '👍' } as StickerRef });
+  await feed.until((l) => l[0]?.status === 'failed');
+  expect(((await ea.call({ type: 'myStickers' })) as MyStickers).recent).toEqual([]);
+});
+
+test('the answer of /my-stickers is merged with what is still unsent', async () => {
+  const ref = (id: number) => ({ id, emoji: '👍' }) as StickerRef;
+  const db = await openDb('stickers-' + crypto.randomUUID());
+  let unsent: { sticker: StickerRef; at: number }[] = [];
+  let server: StickerRef[] = [];
+  let during = () => {};
+  const s = new Stickers({
+    db, online: () => true, enqueue: async () => {}, bump: () => {}, unsentStickers: () => unsent,
+    http: (async () => { during(); return { sets: [], recent: server, faved: [] }; }) as StickersHost['http'],
+  });
+  const recent = async () => ((await s.act({ type: 'myStickers' })) as MyStickers).recent.map((x) => x.id);
+
+  // в очереди давно (долгий офлайн) — на верху списка и со сроком не пропадает; порядок — от нового к старому
+  server = [ref(5), ref(1)];
+  unsent = [{ sticker: ref(1), at: Date.now() - 3_600_000 }, { sticker: ref(2), at: Date.now() - 1_800_000 }];
+  expect(await recent()).toEqual([2, 1, 5]);
+
+  // ушёл, пока шёл запрос: в очереди его больше нет, а ответ мог быть собран раньше
+  server = [ref(5)];
+  unsent = [{ sticker: ref(3), at: Date.now() }];
+  during = () => { unsent = []; };
+  expect(await recent()).toEqual([3, 5]);
+
+  // отправили, пока шёл запрос: ответ старше отправки
+  during = () => { unsent = [{ sticker: ref(4), at: Date.now() }]; };
+  expect(await recent()).toEqual([4, 5]);
+  during = () => {};
+
+  // убрали из недавних уже после отправки: не возвращается; отправленный после очистки — на месте
+  await Bun.sleep(2);
+  await s.act({ type: 'clearRecentStickers', id: 4 });
+  expect(await recent()).toEqual([5]);
+  await Bun.sleep(2);
+  unsent = [{ sticker: ref(4), at: Date.now() }];
+  expect(await recent()).toEqual([4, 5]);
 });
 
 test('my stickers and packs come from the cache without network; installing on one device bumps the other', async () => {

@@ -16,8 +16,8 @@ export type ServiceType = 'login_code' | 'new_login' | 'group_created' | 'channe
   | 'scheduled_failed'   // отложенное не удалось отправить: текст — куда и почему (сам текст сообщения не раскрывается)
   | 'theme_changed'   // тема чата: data.emoji/title — новая, пусто — снята   // чек-лист: автор отметил / добавил задачи в список replyToId (номера — в data)
   | 'auto_delete_changed';   // автоудаление: data.sec — новый срок в секундах, нет — выключено
-/** Участники служебного события (имена на момент события) и новое название. */
-export interface ServiceData { users?: { id: Id; name: string }[]; title?: string; completed?: number[]; incompleted?: number[]; items?: number[]; emoji?: string; sec?: number }   // group_created / channel_created: тело — название, автор — создатель
+/** Участники служебного события (имена на момент события), новое название и новое фото (photo_changed). */
+export interface ServiceData { users?: { id: Id; name: string }[]; title?: string; completed?: number[]; incompleted?: number[]; items?: number[]; emoji?: string; sec?: number; photo?: ProfilePhoto }   // group_created / channel_created: тело — название, автор — создатель
 
 export interface Message {
   id: Id;
