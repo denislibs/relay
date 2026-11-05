@@ -1,6 +1,6 @@
 import type { GroupInfo, MyMembership, ThreadGuest } from '@relay/protocol';
-import type { Entity, Message, Poll, PollInput, ProfilePhoto, Replies, Update } from '@relay/protocol';
-import { getAll, getByChat, req, termsOf, write, type RowPatch, type WriteBatch } from './idb';
+import type { Entity, Message, Poll, PollInput, ProfilePhoto, Replies, ScheduledMessage, Update } from '@relay/protocol';
+import { firstExpiry, getAll, getByChat, getExpiredRows, req, termsOf, write, type RowPatch, type WriteBatch } from './idb';
 import { CACHE_STORES, STORES } from './schema';
 import { applyUserUpdated, ProfileCache } from './profile';
 import { applyContactsChanged, ContactsCache } from './contacts';
@@ -10,7 +10,9 @@ import { applyMembersUpdate, MembersCache } from './members';
 import { ProfileLists } from './profileLists';
 import { onMessage, recomputeLast, tabsOf, unreadAfterRead, unreadOnArrival } from './derive';
 import { nextV } from './rows';
-import { PENDING_BASE, toQuote, type Item, type LocalChat, type LocalMessage, type OutboxEntry, type QuoteMsg, type ThreadRanges } from './types';
+import { applySavedEvent, SavedDialogsCache, type SavedRow } from './savedDialogs';
+import { savedPeerRule } from '@relay/protocol';
+import { PENDING_BASE, toQuote, type Item, type LocalAttachment, type LocalChat, type LocalMessage, type OutboxEntry, type QuoteMsg, type ThreadRanges } from './types';
 
 /** Тот же черновик: текст и оформление (порядок ключей в сущностях не важен). */
 function sameDraft(a: { text: string; entities?: Entity[] } | null | undefined, b: { text: string; entities?: Entity[] } | null | undefined): boolean {
@@ -40,7 +42,7 @@ const NOTIFY_KEEP = 20;
  */
 const DELETED: Partial<LocalMessage> = {
   body: '', deleted: true, reactions: [], entities: [], attachment: null, link: null, blocks: null, fwdFrom: null, todo: undefined, listened: undefined, buttons: null,
-  reactionCounts: undefined, myReaction: undefined,
+  reactionCounts: undefined, myReaction: undefined, expiresAt: undefined,
 };
 
 /**
@@ -108,7 +110,9 @@ export interface ChatSummary {
   unreadReactions?: number;  // непрочитанные реакции на мои сообщения
   last: Message | null;
   peer?: { id: number; key?: string; name: string; system?: true; photo?: ProfilePhoto | null } | null;
+  saved?: true;            // «Избранное»: собеседника нет
   theme?: string | null;
+  autoDeleteSec?: number | null;   // автоудаление: срок новых сообщений
   peerReadUpTo?: number;
   group?: GroupInfo;
   me?: MyMembership;
@@ -145,6 +149,7 @@ function postExtras(m: Message, prev: LocalMessage | undefined, threadRead?: (ch
 export class Store {
   /** счётчик sessionsChanged из журнала (не хранится): по нему интерфейс перечитывает сеансы */
   sessionsRev = 0;
+  gifsRev = 0;       // сохранённые GIF изменились: интерфейс перечитывает, движок спрашивает сервер
   stickersRev = 0;   // мои стикеры изменились (журнал, переподключение): интерфейс перечитывает
   chats = new Map<number, LocalChat>();
   outbox = new Map<string, OutboxEntry>();
@@ -232,14 +237,19 @@ export class Store {
       // строка до отрезков истории: отрезок выведем из сообщений при загрузке чата
       if (!c.ranges) { c.ranges = []; s.legacyRanges.add(c.id); }
       s.chats.set(c.id, c);
+      // строка чата несёт копии сообщений и вне ленты: их сроки индекс сообщений не знает
+      for (const m of [c.last, c.snapLast]) if (m?.expiresAt && m.id != null) s.expiring.set(c.id + ':' + m.id, { chatId: c.id, id: m.id, at: m.expiresAt });
     }
     const outbox = (await getAll<OutboxEntry>(db, 'outbox')).sort((a, b) => a.createdAt - b.createdAt);
     for (const o of outbox) s.outbox.set(o.clientId, o);
     for (const r of await getAll<{ chatId: number; upToId: number }>(db, 'pendingReads')) s.pendingReads.set(r.chatId, r.upToId);
     for (const r of await getAll<{ chatId: number; seq: number }>(db, 'chatSeq')) s.chatSeq.set(r.chatId, r.seq);
+    for (const r of await getAll<ScheduledMessage>(db, 'scheduled')) s.scheduled.set(r.clientId, r);
     const meta = await getAll<{ k: string; v: number }>(db, 'meta');
     s.lastSeq = s.seqAtFlush = meta.find((m) => m.k === 'lastSeq')?.v ?? 0;
     s.since = Number(meta.find((m) => m.k === 'since')?.v ?? 0);
+    s.clockSkew = Number(meta.find((m) => m.k === 'clockSkew')?.v ?? 0);
+    s.expiredFiles = new Set(((meta as { k: string; v: unknown }[]).find((m) => m.k === 'expiredFiles')?.v as string[] | undefined) ?? []);
     s.hydrated = !!meta.find((m) => m.k === 'hydrated')?.v;
     s.epoch = ((meta as { k: string; v: unknown }[]).find((m) => m.k === 'epoch')?.v as string) ?? null;
     s.dialogsAt = meta.find((m) => m.k === 'dialogsAt')?.v ?? 0;
@@ -252,13 +262,27 @@ export class Store {
     s.blocks = await BlocksCache.load(db, meta as { k: string; v: unknown }[]);
     s.members = await MembersCache.load(db);
     s.profileLists = await ProfileLists.load(db, meta as { k: string; v: unknown }[]);
+    s.savedDialogs = await SavedDialogsCache.load(await getAll<SavedRow>(db, 'savedDialogs'), meta as { k: string; v: unknown }[]);
     // чаты с неотправленным — сразу в память, чтобы черновики были видны
     for (const chatId of new Set(outbox.map((o) => o.chatId))) await s.loadChatMessages(chatId);
     return s;
   }
 
+  /** Подчаты «Избранного» (savedDialogs.ts). */
+  savedDialogs = new SavedDialogsCache();
+  /** Сообщение без ответа сервера (неотправленное, старая строка кэша): подчат по правилу протокола из чатов устройства. */
+  savedPeerOf(savedChatId: number, fwd: { chatId: number } | null | undefined): string {
+    const src = fwd ? this.chats.get(fwd.chatId) : null;
+    return savedPeerRule(fwd, savedChatId, src ? { kind: src.kind, peerId: src.peerId } : null);
+  }
+  /** Сообщение сервера → строка кэша, без записи в ленту (последнее подчата, которое ещё не загружено). */
+  localOf(m: Message): LocalMessage {
+    const { reactions: _r, ...rest } = m;
+    return { ...rest, key: m.clientId, status: 'sent', sort: m.id, kind: m.kind ?? 'text' } as unknown as LocalMessage;
+  }
+
   /** Чат известен только по сообщениям: ни собеседника, ни группы — нужен снимок чата с сервера. */
-  static unnamed(c: LocalChat): boolean { return c.kind === 'direct' && c.peerId == null && !c.group; }
+  static unnamed(c: LocalChat): boolean { return c.kind === 'direct' && c.peerId == null && !c.group && !c.saved; }
   unnamed(): number[] { return [...this.chats.values()].filter(Store.unnamed).map((c) => c.id); }
 
   // ---------- чтение ----------
@@ -268,9 +292,11 @@ export class Store {
   async loadChatMessages(chatId: number): Promise<void> {
     if (this.loaded.has(chatId)) return;
     const rows = await getByChat(this.db, chatId);
-    const map = this.map(chatId);
+    const map = this.map(chatId), saved = !!this.chats.get(chatId)?.saved;
     for (const m of rows) {
       delete (m as LocalMessage & { tab?: string }).tab;   // поле индекса byTab — только в IndexedDB
+      // строка кэша до версии 9: подчата в ней нет — то же правило, что на сервере, из того, что есть на устройстве
+      if (saved && !m.savedPeer && !m.service && !m.deleted) { m.savedPeer = this.savedPeerOf(chatId, m.fwdFrom); this.dirtyMessages.set(m.key, m); }
       if (!map.has(m.key)) map.set(m.key, m); // не затираем то, что пришло, пока читали
     }
     // правки, пришедшие, пока сообщения были не загружены, — на загруженные строки (в память; запись и слова — обычным путём)
@@ -380,9 +406,12 @@ export class Store {
         this.setTyping(u.message.chatId, u.message.senderId, false); // написал — уже не «печатает»
         const own = this.isOwn(u.message);   // до applyMessage: у своего поста с сервера senderId 0
         this.applyMessage(u.message, true, 'journal');
-        if (!own) this.notify(u.message, false);
+        // своё не уведомляет; напоминание себе в «Избранное» — как раз уведомляет
+        if (!own || u.message.reminder) this.notify(u.message, false);
         return;
       }
+      case 'scheduled': this.scheduledRev++; return this.applyScheduled(u.item);
+      case 'scheduledRemoved': this.scheduledRev++; return this.removeScheduled(u.chatId, u.clientId);
       case 'mention': return this.applyMention(u.message, u.threadId);
       case 'reaction': return this.applyReaction(u.chatId, u.id);
       case 'reactionsRead': return this.dropReactions(u.chatId, u.ids);
@@ -420,11 +449,14 @@ export class Store {
       case 'privacyChanged': this.settings.applyPrivacy(u.rules, seq); return;
       case 'blocksChanged': return applyBlocksChanged(this, u, seq);
       case 'sessionsChanged': this.sessionsRev++; return;
+      case 'myGifs': this.gifsRev++; return;
       case 'myStickers': this.stickersRev++; return;
       case 'pins': { const chat = this.chats.get(u.chatId); if (chat) { chat.pinned = u.ids; this.markChat(chat); } return; }
       case 'chatNotify': return this.setMute(u.chatId, u.muteUntil);
       case 'chatTheme': return this.setTheme(u.chatId, u.theme);
+      case 'chatAutoDelete': return this.setAutoDelete(u.chatId, u.sec);
       case 'chatFlags': return this.setFlags(u.chatId, u);
+      case 'savedDialog': return applySavedEvent(this, u);
       // requests у каждого своё (joinRequests), общая запись его не несёт — не затирать
       // канал: владельца общая запись не несёт (null — подписчикам он не раскрывается); админ знает его из сводки — не затирать
       case 'groupUpdated': {
@@ -524,7 +556,7 @@ export class Store {
       this.rowPatches.delete(`${chatId}:${m.id}`);
     }
     this.loaded.delete(chatId);
-    c.ranges = []; delete c.historyStart; delete c.snapLast; delete c.seed; delete c.mediaDone; delete c.mediaCounts; delete c.mediaCountsAt; delete c.threads;
+    c.ranges = []; delete c.historyStart; delete c.snapLast; delete c.seed; delete c.mediaDone; delete c.savedViews; delete c.mediaCounts; delete c.mediaCountsAt; delete c.threads;
     this.resetGen++;   // страницы истории, начатые до сброса, устарели
     this.markChat(c);
   }
@@ -538,6 +570,13 @@ export class Store {
     chat.theme = theme; this.markChat(chat);
   }
 
+  /** Срок автоудаления чата (журнал chatAutoDelete, снимок списка, ответ операции). */
+  setAutoDelete(chatId: number, sec: number | null): void {
+    const chat = this.chats.get(chatId);
+    if (!chat || (chat.autoDeleteSec ?? null) === sec) return;
+    chat.autoDeleteSec = sec; this.markChat(chat);
+  }
+
   setMute(chatId: number, muteUntil: number | null): void {
     const chat = this.chats.get(chatId);
     if (!chat || (chat.muteUntil ?? null) === muteUntil) return;
@@ -547,6 +586,7 @@ export class Store {
   /** Чат больше не мой (вышел, удалили, группу удалили): из памяти, очереди и IndexedDB вместе с сообщениями. */
   removeChat(id: number): void {
     if (!this.chats.has(id)) return;
+    if (this.chats.get(id)!.saved) this.savedDialogs.reset();   // «Избранное» удалили: подчатов больше нет
     this.chats.delete(id); this.chatV.delete(id); this.messages.delete(id); this.loaded.delete(id); this.members.dropChat(id);
     for (const k of [...this.threadReads.keys()]) if (k.startsWith(id + ':')) { this.threadReads.delete(k); this.pendingThreadReads.delete(k); }
     if (this.chatSeq.delete(id)) this.dirtyChatSeq.add(id);   // вернёмся — чат снова «незнакомый», seq из membership
@@ -584,7 +624,9 @@ export class Store {
       chat.peerId = s.peer?.id ?? null;
       if (s.peer) this.profile.applyPeer(s.peer, seq);
       if (s.peer?.system) chat.system = true; else delete chat.system;
+      if (s.saved) chat.saved = true; else delete chat.saved;
       if (s.theme !== undefined) chat.theme = s.theme;
+      if (s.autoDeleteSec !== undefined) chat.autoDeleteSec = s.autoDeleteSec;
       if (s.draft && (!chat.draft || s.draft.at > chat.draft.at) && !this.pendingDrafts.has(s.id)) chat.draft = s.draft;
       if (s.pinned) chat.pinned = s.pinned;
       if (s.muteUntil !== undefined) chat.muteUntil = s.muteUntil;
@@ -654,7 +696,7 @@ export class Store {
     const snap = chat.snapLast?.sort, last = chat.ranges[chat.ranges.length - 1];
     if (snap == null || sort <= snap || (last && snap <= last[1])) { extendLive(chat, sort, own); return; }
     chat.ranges.push([snap, sort]); chat.seed = snap;
-    delete chat.mediaDone;   // над известным во вкладках теперь дыра — их заново от нового края
+    delete chat.mediaDone; delete chat.savedViews;   // над известным во вкладках теперь дыра — их заново от нового края
     this.placeSnapLast(chat);
   }
 
@@ -682,7 +724,7 @@ export class Store {
       const c = this.chats.get(id);
       if (!c || c.snapLast?.sort !== sort) continue;
       const last = c.ranges[c.ranges.length - 1];
-      if (!last || sort > last[1]) { c.ranges.push([sort, sort]); c.seed = sort; delete c.mediaDone; }
+      if (!last || sort > last[1]) { c.ranges.push([sort, sort]); c.seed = sort; delete c.mediaDone; delete c.savedViews; }
       this.placeSnapLast(c);
       this.markChat(c);
     }
@@ -706,7 +748,7 @@ export class Store {
     const status = mine && (prev?.status === 'read' || m.id <= (chat?.peerReadUpTo ?? 0)) ? 'read' : 'sent';
     const local: LocalMessage = {
       key: m.clientId, clientId: m.clientId, id: m.id, chatId: m.chatId, senderId: m.senderId,
-      body: m.body, replyToId: m.replyToId, createdAt: m.createdAt, status, sort: m.id,
+      body: m.body, replyToId: m.replyToId, ...(m.replyQuote ? { replyQuote: m.replyQuote } : null), createdAt: m.createdAt, status, sort: m.id,
       editedAt: m.editedAt ?? null, deleted: !!m.deleted, reactions: m.reactions ?? prev?.reactions ?? [],
       kind: m.kind ?? 'text', attachment: m.attachment ?? null, entities: m.entities ?? [], ...(m.listened != null ? { listened: m.listened } : {}),
       ...(m.service ? { service: m.service } : null),
@@ -717,11 +759,15 @@ export class Store {
       ...(m.dice ? { dice: m.dice } : null),
       ...(m.groupId ? { groupId: m.groupId } : null),
       ...(m.fwdFrom ? { fwdFrom: m.fwdFrom } : null),
+      ...(m.savedPeer ? { savedPeer: m.savedPeer } : prev?.savedPeer && !m.deleted ? { savedPeer: prev.savedPeer } : null),
       ...(m.blocks ? { blocks: m.blocks } : null),
       ...(m.buttons ? { buttons: m.buttons } : null),
       ...(m.sticker ? { sticker: m.sticker } : null),
       ...(m.post ? { post: true } : null),
       ...(m.postAuthor ? { postAuthor: m.postAuthor } : null),
+      ...(m.silent ? { silent: true } : null),
+      ...(m.reminder ? { reminder: true } : null),
+      ...(m.expiresAt ? { expiresAt: m.expiresAt } : null),
       ...(m.threadId != null ? { threadId: m.threadId } : null),
       ...(m.origin ? { origin: m.origin } : null),
       ...postExtras(m, prev, (c, t) => this.threadReads.get(c + ':' + t)),
@@ -729,6 +775,7 @@ export class Store {
       ...(m.link ? { link: m.link.pending && prev?.link && !prev.link.pending && prev.link.url === m.link.url ? prev.link : m.link } : null),
     };
     if (local.deleted) Object.assign(local, DELETED);   // сервер ещё отдаёт превью, статью и пересылку удалённого
+    if (local.expiresAt) this.noteExpiry(m.chatId, m.id, local.expiresAt);
     // кнопка комментариев у поста, пришедшего журналом (журнал replies не несёт): копию в группе обсуждения мы видим
     // своим журналом группы — связываем пост и копию в любом порядке прихода (число придёт событием replies)
     if (m.origin && !local.deleted) {
@@ -874,6 +921,7 @@ export class Store {
   private notifiedIds = new Set<string>();
   private notify(m: Message, mention: boolean, threadId?: number): void {
     if (this.previews.has(m.chatId)) return;   // превью канала: не подписан — не уведомляем
+    if (m.silent) return;   // без звука: сообщение и счётчик пришли как обычно, уведомления и звука нет
     const k = m.chatId + ':' + m.id;
     if (this.notifiedIds.has(k)) return;
     this.notifiedIds.add(k);
@@ -889,7 +937,7 @@ export class Store {
     this.notifications.push({
       key: 'n' + k, chatId: m.chatId, id: m.id, mention, ...(thread != null ? { threadId: thread } : {}),
       senderId: m.senderId, body: m.body, kind: m.kind ?? 'text', createdAt: m.createdAt, attachmentName: m.attachment?.name ?? null,
-      ...(m.entities?.length ? { entities: m.entities } : {}), ...(m.service ? { service: m.service } : {}), ...(m.post ? { post: true } : {}),
+      ...(m.entities?.length ? { entities: m.entities } : {}), ...(m.service ? { service: m.service } : {}), ...(m.post ? { post: true } : {}), ...(m.reminder ? { reminder: true } : {}),
     });
     if (this.notifications.length > NOTIFY_KEEP) this.notifications.splice(0, this.notifications.length - NOTIFY_KEEP);
     this.touch(m.chatId);
@@ -926,6 +974,8 @@ export class Store {
   addPending(o: OutboxEntry): void {
     this.outbox.set(o.clientId, o);
     this.dirtyOutbox.add(o.clientId);
+    // отложенное: только очередь, в ленту не попадает — его показывает запрос scheduled
+    if (o.scheduleAt != null) { this.touchScheduled(o.chatId); return; }
     // комментарий в чат без строки, а треда гостя в памяти нет (wipe, перезапуск): только очередь — строку не заводим,
     // сообщение придёт с краем треда, когда его откроют
     if (o.threadId != null && !this.chats.has(o.chatId) && !this.guests.has(o.chatId)) return;
@@ -933,12 +983,13 @@ export class Store {
     this.loaded.add(o.chatId);
     this.putMessage({
       key: o.clientId, clientId: o.clientId, id: null, chatId: o.chatId, senderId: this.userId,
-      body: o.body, entities: o.entities ?? [], replyToId: o.replyToId, createdAt: new Date(o.createdAt).toISOString(),
+      body: o.body, entities: o.entities ?? [], replyToId: o.replyToId, ...(o.replyQuote ? { replyQuote: o.replyQuote } : {}), createdAt: new Date(o.createdAt).toISOString(),
       status: o.failed ? 'failed' : 'pending', sort: PENDING_BASE + o.createdAt,
       kind: o.sticker ? 'sticker' : o.todo ? 'todo' : o.poll ? 'poll' : o.special?.contact ? 'contact' : o.special?.geo ? 'geo' : o.special?.dice ? 'dice' : o.attachment ? o.attachment.kind : 'text', ...(o.sticker ? { sticker: o.sticker } : {}), attachment: o.attachment ?? null, ...(o.todo ? { todo: o.todo } : {}), ...(o.poll ? { poll: pendingPoll(o.poll) } : {}), ...(o.special?.contact ? { contact: { userId: o.special.contact.userId, name: o.special.contact.name } } : {}), ...(o.special?.geo ? { geo: o.special.geo } : {}), ...(o.special?.dice ? { dice: { emoji: o.special.dice.emoji, value: 0 } } : {}), progress: o.attachment && !o.attachment.id ? 0 : undefined,
       ...(o.failed && o.error ? { error: o.error } : {}),
       ...(o.groupId ? { groupId: o.groupId } : {}),
       ...(o.fwdFrom ? { fwdFrom: o.fwdFrom } : {}),
+      ...(this.chats.get(o.chatId)?.saved ? { savedPeer: this.savedPeerOf(o.chatId, o.fwdFrom ?? null) } : {}),
       ...(o.link ? { link: o.link } : {}),
       ...(o.blocks ? { blocks: o.blocks } : {}),
       ...(o.threadId != null ? { threadId: o.threadId } : {}),
@@ -965,6 +1016,122 @@ export class Store {
     // свой комментарий: продлевает живой отрезок треда, и тред прочитан до него (сервер так же поднял thread_reads)
     if (m?.threadId != null) { this.extendThread(chatId, m.threadId, id, true); this.applyThreadRead(chatId, m.threadId, id); }
     this.markChat(chat);
+  }
+
+  // ---------- отложенные сообщения ----------
+
+  /** База: что знает сервер (журнал, снимок, ответы). Ещё не дошедшие — в outbox со scheduleAt. */
+  scheduled = new Map<string, ScheduledMessage>();
+  private dirtyScheduled = new Set<string>();
+  private scheduledProgress = new Map<string, number>();
+  private scheduledCounts: Map<number, number> | null = null;
+  /** растёт на каждую запись журнала об отложенных: снимок, снятый раньше неё, устарел */
+  scheduledRev = 0;
+  /** по этому отложенному есть неотправленная операция: журнал не откатывает оптимистичное (движок) */
+  scheduledBusy: (clientId: string) => boolean = () => false;
+
+  private touchScheduled(chatId: number): void {
+    this.scheduledCounts = null;
+    const c = this.chats.get(chatId);
+    if (c) this.markChat(c); else this.touch(chatId);   // счётчик у поля ввода — в строке чата
+  }
+  /** Сколько отложено в чате (значок у поля ввода, лимит). */
+  scheduledCount(chatId: number): number {
+    if (!this.scheduledCounts) {
+      const n = this.scheduledCounts = new Map<number, number>();
+      for (const s of this.scheduled.values()) if (!this.outbox.has(s.clientId)) n.set(s.chatId, (n.get(s.chatId) ?? 0) + 1);
+      for (const o of this.outbox.values()) if (o.scheduleAt != null) n.set(o.chatId, (n.get(o.chatId) ?? 0) + 1);
+    }
+    return this.scheduledCounts.get(chatId) ?? 0;
+  }
+  applyScheduled(item: ScheduledMessage, force = false): void {
+    if (!force && this.scheduledBusy(item.clientId)) return;
+    const cur = this.scheduled.get(item.clientId);
+    if (cur && cur.rev > item.rev) return;   // запоздавший ответ не откатывает
+    this.scheduled.set(item.clientId, item);
+    this.dirtyScheduled.add(item.clientId);
+    this.touchScheduled(item.chatId);
+  }
+  removeScheduled(chatId: number, clientId: string): void {
+    if (!this.scheduled.delete(clientId)) return;
+    this.dirtyScheduled.add(clientId);
+    this.touchScheduled(chatId);
+  }
+  /** Снимок сервера. По чему есть неотправленная операция — остаётся, как показано (она ещё дойдёт). */
+  replaceScheduled(items: ScheduledMessage[]): void {
+    const next = new Map(items.filter((x) => !this.scheduledBusy(x.clientId)).map((x) => [x.clientId, x]));
+    for (const [k, v] of this.scheduled) if (this.scheduledBusy(k)) next.set(k, v);
+    for (const [k, v] of this.scheduled) if (!next.has(k)) { this.dirtyScheduled.add(k); this.touchScheduled(v.chatId); }
+    for (const [k, v] of next) {
+      if (JSON.stringify(this.scheduled.get(k)) === JSON.stringify(v)) continue;
+      this.dirtyScheduled.add(k);
+      this.touchScheduled(v.chatId);
+    }
+    this.scheduled = next;
+    this.scheduledCounts = null;
+  }
+  /** Оптимистичная правка: на экране сразу, ответ или журнал подтвердят. */
+  patchScheduled(clientId: string, p: { sendAt?: number; body?: string; entities?: Entity[] }): void {
+    const cur = this.scheduled.get(clientId);
+    if (!cur) return;
+    const { failed: _f, ...rest } = cur;
+    this.scheduled.set(clientId, { ...rest, ...p });
+    this.dirtyScheduled.add(clientId);
+    this.touchScheduled(cur.chatId);
+  }
+  /** Правка ещё не ушедшего на сервер: просто в очереди. */
+  patchOutboxScheduled(clientId: string, p: { sendAt?: number; body?: string; entities?: Entity[] }): void {
+    const o = this.outbox.get(clientId);
+    if (!o) return;
+    if (p.sendAt != null) o.scheduleAt = p.sendAt;
+    if (p.body != null) o.body = p.body;
+    if (p.entities != null) o.entities = p.entities;
+    o.failed = false; delete o.error;
+    this.dirtyOutbox.add(clientId);
+    this.touchScheduled(o.chatId);
+  }
+  /** Сервер принял отложенное: из очереди — в базу. */
+  ackScheduled(clientId: string, item: ScheduledMessage | undefined): void {
+    const o = this.outbox.get(clientId);
+    if (o) { this.outbox.delete(clientId); this.dirtyOutbox.add(clientId); this.touchScheduled(o.chatId); }
+    this.scheduledProgress.delete(clientId);
+    if (item) this.applyScheduled(item, true);
+  }
+  /** Срок прошёл, пока ждали сеть: уходит сразу, обычным сообщением (как в Telegram) — теперь оно и в ленте. */
+  promoteScheduled(clientId: string, createdAt: number): void {
+    const o = this.outbox.get(clientId);
+    if (o?.scheduleAt == null) return;
+    delete o.scheduleAt;
+    o.createdAt = createdAt;
+    this.scheduledCounts = null;
+    this.addPending(o);
+    this.touchScheduled(o.chatId);
+  }
+  /** Отложенные чата строками ленты: по времени, ещё не дошедшие до сервера — вместе с остальными. */
+  scheduledMessages(chatId: number): LocalMessage[] {
+    const rows: { at: number; created: number; m: LocalMessage }[] = [];
+    const base = (clientId: string, at: number) => ({ key: clientId, clientId, id: null, chatId, senderId: this.userId, replyToId: null as number | null, createdAt: new Date(at).toISOString(), sort: at, scheduled: true as const });
+    for (const o of this.outbox.values()) {
+      if (o.chatId !== chatId || o.scheduleAt == null) continue;
+      const p = this.scheduledProgress.get(o.clientId);
+      rows.push({ at: o.scheduleAt, created: o.createdAt, m: {
+        ...base(o.clientId, o.scheduleAt), body: o.body, entities: o.entities ?? [], replyToId: o.replyToId, ...(o.replyQuote ? { replyQuote: o.replyQuote } : {}), status: o.failed ? 'failed' : 'pending',
+        kind: o.sticker ? 'sticker' : o.attachment ? o.attachment.kind : 'text', ...(o.sticker ? { sticker: o.sticker } : {}), ...(o.attachment ? { attachment: o.attachment } : {}),
+        ...(o.groupId ? { groupId: o.groupId } : {}), ...(o.silent ? { silent: true } : {}), ...(o.failed && o.error ? { error: o.error } : {}),
+        ...(p != null && p < 1 ? { progress: p } : {}),
+      } });
+    }
+    for (const s of this.scheduled.values()) {
+      if (s.chatId !== chatId || this.outbox.has(s.clientId)) continue;
+      rows.push({ at: s.sendAt, created: Date.parse(s.createdAt), m: {
+        ...base(s.clientId, s.sendAt), body: s.body, entities: s.entities ?? [], replyToId: s.replyToId, ...(s.replyQuote ? { replyQuote: s.replyQuote } : {}), status: s.failed ? 'failed' : 'sent', kind: s.kind,
+        ...(s.sticker ? { sticker: s.sticker } : {}), ...(s.attachment ? { attachment: s.attachment as LocalAttachment } : {}),
+        ...(s.groupId ? { groupId: s.groupId } : {}), ...(s.silent ? { silent: true } : {}), ...(s.failed ? { error: s.failed } : {}),
+      } });
+    }
+    rows.sort((a, b) => a.at - b.at || a.created - b.created);
+    // одно время у нескольких (альбом): порядок постановки; sort — ключ порядка в ленте, он должен быть разным
+    return rows.map((r, i) => ({ ...r.m, sort: r.at + i / 1000 }));
   }
 
   // ---------- треды комментариев (группа обсуждения) ----------
@@ -1077,12 +1244,25 @@ export class Store {
   }
 
   /** Сервер отказал (или отправить нечего). error — код отказа (blocked — собеседник заблокировал отправителя). */
+  /** Цитируемого куска больше нет (сервер ответил quote_gone): неотправленный ответ уйдёт без фрагмента. false — фрагмента и не было. */
+  dropQuote(clientId: string): boolean {
+    const o = this.outbox.get(clientId);
+    if (!o?.replyQuote) return false;
+    delete o.replyQuote;
+    this.dirtyOutbox.add(clientId);
+    if (o.scheduleAt != null) this.touchScheduled(o.chatId);
+    const m = this.messages.get(o.chatId)?.get(clientId);
+    if (m) { const { replyQuote: _q, ...rest } = m; this.putMessage(rest); }
+    return true;
+  }
+
   fail(clientId: string, error?: string): void {
     const o = this.outbox.get(clientId);
     if (!o) return;
     o.failed = true;
     if (error) o.error = error; else delete o.error;
     this.dirtyOutbox.add(clientId);
+    if (o.scheduleAt != null) this.touchScheduled(o.chatId);
     const m = this.messages.get(o.chatId)?.get(clientId);
     if (m) this.putMessage({ ...m, status: 'failed', ...(error ? { error } : {}) });
   }
@@ -1093,6 +1273,7 @@ export class Store {
     o.failed = false;
     delete o.error;
     this.dirtyOutbox.add(clientId);
+    if (o.scheduleAt != null) this.touchScheduled(o.chatId);
     const m = this.messages.get(o.chatId)?.get(clientId);
     if (m) { const { error: _e, ...rest } = m; this.putMessage({ ...rest, status: 'pending' }); }
     return true;
@@ -1113,6 +1294,7 @@ export class Store {
       this.outbox.delete(o.clientId);
       this.dirtyOutbox.add(o.clientId);
       this.dirtyMessages.delete(o.clientId);
+      if (o.scheduleAt != null) this.touchScheduled(o.chatId);
       this.messages.get(o.chatId)?.delete(o.clientId);
       this.touch(o.chatId);
       const chat = this.chats.get(o.chatId);
@@ -1141,11 +1323,14 @@ export class Store {
   /** Прогресс загрузки неотправленного файла (0…1; нет сообщения — 0). */
   progressOf(clientId: string): number {
     const chatId = this.outbox.get(clientId)?.chatId;
+    if (this.scheduledProgress.has(clientId)) return this.scheduledProgress.get(clientId)!;
     return (chatId != null ? this.messages.get(chatId)?.get(clientId)?.progress : undefined) ?? 0;
   }
   /** Прогресс загрузки файла неотправленного сообщения (в ленте — кольцо). */
   setProgress(clientId: string, p: number): void {
-    const chatId = this.outbox.get(clientId)?.chatId;
+    const o = this.outbox.get(clientId);
+    if (o?.scheduleAt != null) { this.scheduledProgress.set(clientId, p); this.touch(o.chatId); return; }
+    const chatId = o?.chatId;
     const m = chatId != null ? this.messages.get(chatId)?.get(clientId) : undefined;
     if (m) this.putMessage({ ...m, progress: p });
   }
@@ -1159,11 +1344,15 @@ export class Store {
    * удалённое не показывает (queries.ts).
    */
   private removeMessage(chatId: number, id: number): void {
+    this.expiring.delete(chatId + ':' + id);
     this.dropMentions(chatId, (x) => x === id);
     this.dropReactions(chatId, [id], true);
     const k = chatId + ':' + id, m = this.messageById(chatId, id), q = this.quotes.get(k);
     // цитата знает о нём и без запроса к серверу (сервер удалённое больше не отдаёт); автор нужен только для цвета полосы
     if (!q?.deleted) { this.quotes.set(k, deletedQuote(id, m?.senderId ?? q?.senderId ?? 0)); this.touch(chatId); }
+    // кусок удалённого в ответах на него: сервер вычистил его у себя, устройство тоже не хранит
+    const here = this.messages.get(chatId);
+    if (here) for (const r of here.values()) if (r.replyToId === id && r.replyQuote) { const { replyQuote: _q, ...rest } = r; this.putMessage(rest); }
     const n = this.notifications.length;
     this.notifications = this.notifications.filter((x) => !(x.chatId === chatId && x.id === id));
     if (this.notifications.length !== n) this.touch(chatId);
@@ -1189,6 +1378,7 @@ export class Store {
       // чьё оно — не знаем: непрочитанное (новее прочитанного) — счётчик возьмём у сервера
       if (id > chat.lastReadId && chat.unread > 0) this.wantRow(chatId);
       if (chat.mediaCounts && id <= (chat.mediaCountsAt ?? 0)) { delete chat.mediaCounts; delete chat.mediaCountsAt; this.markChat(chat); }   // могло быть во вкладке — спросим заново
+      if (chat.saved && chat.savedViews) { delete chat.savedViews; this.markChat(chat); this.savedDialogs.want = true; }
       return;
     }
     if (m.deleted) return;   // уже пометка (копия поста)
@@ -1201,6 +1391,63 @@ export class Store {
     this.touch(chatId);
     onMessage(this, chat, { ...m, ...DELETED }, 'deleted', m);   // last, счётчики вкладок, строка списка
   }
+  // ---------- автоудаление ----------
+
+  /** Поправка часов: сервер минус устройство (из hello), хранится — нужна и при старте без сети. */
+  clockSkew = 0;
+  serverNow(): number { return Date.now() + this.clockSkew; }
+  setClockSkew(ms: number): void {
+    if (Math.abs(ms - this.clockSkew) < 500) return;   // шум задержки сети — не повод писать
+    this.clockSkew = ms; this.dirtyMeta = true;
+  }
+  /** Сроки того, что пришло в этом запуске или лежит в строках чатов; остальное знает индекс byExpiry. */
+  private expiring = new Map<string, { chatId: number; id: number; at: number }>();
+  /** Появился срок: движок ставит общий таймер на ближайший. */
+  onExpiry: (at: number) => void = () => {};
+  private noteExpiry(chatId: number, id: number, at: number): void {
+    this.expiring.set(chatId + ':' + id, { chatId, id, at });
+    this.onExpiry(at);
+  }
+  /** Файлы исчезнувших сообщений: интерфейс чистит кэш медиа и ключи файлов (страница, Service Worker) и подтверждает. */
+  expiredFiles = new Set<string>();
+  ackExpiredFiles(ids: string[]): void {
+    for (const id of ids) this.expiredFiles.delete(id);
+    this.dirtyMeta = true;
+  }
+
+  /** Ближайший срок: что в памяти и что в IndexedDB. */
+  async nextExpiry(): Promise<number | null> {
+    let at = await firstExpiry(this.db);
+    for (const e of this.expiring.values()) if (at == null || e.at < at) at = e.at;
+    return at;
+  }
+
+  /**
+   * Убрать всё, чей срок вышел: тем же путём, что удаление с сервера (removeMessage) — лента, превью, счётчики, упоминания,
+   * цитаты и слова поиска считаются одинаково. Чат не загружен — загружается: иначе не узнать, чьё сообщение и что станет
+   * последним (без сети спросить не у кого). Работает и без связи, и при старте после долгого офлайна.
+   * Возвращает, сколько убрано; записать в IndexedDB — flush вызывающего.
+   */
+  async sweepExpired(now = this.serverNow()): Promise<number> {
+    const due = new Map<string, { chatId: number; id: number; key?: string }>();
+    for (const [k, e] of this.expiring) if (e.at <= now) due.set(k, e);
+    for (const r of await getExpiredRows(this.db, now)) if (r.id != null) due.set(r.chatId + ':' + r.id, { chatId: r.chatId, id: r.id, key: r.key });
+    for (const chatId of new Set([...due.values()].map((d) => d.chatId))) {
+      if (this.chats.has(chatId) && !this.previews.has(chatId) && !this.loaded.has(chatId)) await this.loadChatMessages(chatId);
+    }
+    for (const [k, d] of due) {
+      const chat = this.chats.get(d.chatId), m = this.messageById(d.chatId, d.id);
+      const copy = chat?.last?.id === d.id ? chat.last : chat?.snapLast?.id === d.id ? chat.snapLast : null;
+      const att = (m ?? copy)?.attachment as { id?: string } | null | undefined;
+      if (att?.id) { this.expiredFiles.add(att.id); this.dirtyMeta = true; }
+      // строка чата, которого у нас больше нет: снять её саму, иначе срок всплывал бы снова и снова
+      if (!chat && !this.isGuest(d.chatId)) { this.expiring.delete(k); if (d.key) this.deletedMessages.add(d.key); continue; }
+      if (chat?.pinned?.includes(d.id)) { chat.pinned = chat.pinned.filter((x) => x !== d.id); this.markChat(chat); }
+      this.removeMessage(d.chatId, d.id);
+    }
+    return due.size;
+  }
+
   /** Строке чата нужен свежий снимок с сервера (последнее удалили, а предыдущего в кэше нет); движок спросит /chats?ids. */
   wantRow: (chatId: number) => void = () => {};
 
@@ -1214,6 +1461,8 @@ export class Store {
     this.rowPatches.set(rk, { ...prevP, chatId, id, patch: { ...prevP?.patch, ...patch } });
     const chat0 = this.chats.get(chatId);
     if (chat0?.snapLast?.id === id) { chat0.snapLast = { ...chat0.snapLast, ...patch }; this.markChat(chat0); }   // ждёт журнала — правка не теряется
+    // последнее подчата «Избранного» — своя копия в строке: сообщение не в памяти, а превью правки должно быть видно
+    if (chat0?.saved) for (const r of this.savedDialogs.rows.values()) if (r.last?.id === id) { this.savedDialogs.put({ ...r, last: { ...r.last, ...patch } }); this.touch(chatId); break; }
     // сообщение не загружено — правится только превью последнего
     const chat = this.chats.get(chatId);
     if (chat?.last && chat.last.id === id) { onMessage(this, chat, { ...chat.last, ...patch }, patch.deleted && !chat.last.deleted ? 'deleted' : 'edited', chat.last); return; }
@@ -1255,9 +1504,11 @@ export class Store {
     const saved = keep.outbox ? [...this.outbox.values()] : [];
     const reads = keep.outbox ? new Map(this.pendingReads) : new Map<number, number>();
     this.resetGen++;
+    this.expiring.clear(); this.expiredFiles.clear();
     for (const id of this.chats.keys()) this.touch(id);
     this.chats.clear(); this.chatV.clear(); this.messages.clear(); this.loaded.clear(); this.sorted.clear(); this.ids.clear(); this.guests.clear();
-    this.outbox.clear(); this.pendingReads.clear(); this.profile.reset(); this.contacts.reset(); this.settings.reset(); this.blocks.reset(); this.members.reset(); this.profileLists.reset();
+    this.scheduled.clear(); this.dirtyScheduled.clear(); this.scheduledProgress.clear(); this.scheduledCounts = null;
+    this.outbox.clear(); this.pendingReads.clear(); this.profile.reset(); this.contacts.reset(); this.settings.reset(); this.blocks.reset(); this.members.reset(); this.profileLists.reset(); this.savedDialogs = new SavedDialogsCache();
     this.dirtyChats.clear(); this.dirtyMessages.clear(); this.dirtyOutbox.clear(); this.dirtyReads.clear();
     this.rowPatches.clear();
     this.quotes.clear(); this.quoteAsked.clear(); this.quoteWants.clear();   // цитаты старого кэша — спросим заново
@@ -1309,7 +1560,7 @@ export class Store {
       if (map) for (const [k, m] of map) if (m.id != null) { map.delete(k); }
       const c = this.chats.get(chatId)!;
       c.unread = 0; c.knownMaxId = 0; c.ranges = []; delete c.historyStart; delete c.snapLast; delete c.seed; delete c.threads; c.last = null;
-      delete c.mediaCounts; delete c.mediaCountsAt; delete c.mediaDone;
+      delete c.mediaCounts; delete c.mediaCountsAt; delete c.mediaDone; delete c.savedViews;
       this.markChat(c);
     }
     this.lastSeq = 0;
@@ -1360,9 +1611,12 @@ export class Store {
     this.staleTerms.clear();
     batch.put.outbox = [...this.dirtyOutbox].map((k) => this.outbox.get(k)).filter(Boolean) as OutboxEntry[];
     batch.del.outbox = [...this.dirtyOutbox].filter((k) => !this.outbox.has(k));
+    batch.put.scheduled = [...this.dirtyScheduled].map((k) => this.scheduled.get(k)).filter(Boolean) as ScheduledMessage[];
+    batch.del.scheduled = [...this.dirtyScheduled].filter((k) => !this.scheduled.has(k));
+    this.dirtyScheduled.clear();
     batch.put.pendingReads = [...this.dirtyReads].filter((c) => this.pendingReads.has(c)).map((c) => ({ chatId: c, upToId: this.pendingReads.get(c) }));
     batch.del.pendingReads = [...this.dirtyReads].filter((c) => !this.pendingReads.has(c));
-    if (this.dirtyMeta || this.lastSeq !== this.seqAtFlush) batch.put.meta = [{ k: 'lastSeq', v: this.lastSeq }, { k: 'since', v: this.since }, { k: 'hydrated', v: this.hydrated ? 1 : 0 }, { k: 'dialogsAt', v: this.dialogsAt }, { k: 'dialogsId', v: this.dialogsId }, { k: 'dialogsDone', v: this.dialogsDone ? 1 : 0 }, { k: 'dialogsTotal', v: this.dialogsTotal }, ...(this.epoch ? [{ k: 'epoch', v: this.epoch as unknown as number }] : [])];
+    if (this.dirtyMeta || this.lastSeq !== this.seqAtFlush) batch.put.meta = [{ k: 'lastSeq', v: this.lastSeq }, { k: 'since', v: this.since }, { k: 'clockSkew', v: this.clockSkew }, { k: 'expiredFiles', v: [...this.expiredFiles] as unknown as number }, { k: 'hydrated', v: this.hydrated ? 1 : 0 }, { k: 'dialogsAt', v: this.dialogsAt }, { k: 'dialogsId', v: this.dialogsId }, { k: 'dialogsDone', v: this.dialogsDone ? 1 : 0 }, { k: 'dialogsTotal', v: this.dialogsTotal }, ...(this.epoch ? [{ k: 'epoch', v: this.epoch as unknown as number }] : [])];
     const prof = this.profile.collect();
     if (prof.me) batch.put.meta = [...(batch.put.meta ?? []), prof.me];
     batch.put.users = prof.users;
@@ -1386,6 +1640,10 @@ export class Store {
     batch.put.profilePhotos = lists.photos.put;
     batch.del.profilePhotos = lists.photos.del;
     if (lists.meta) batch.put.meta = [...(batch.put.meta ?? []), lists.meta];
+    const saved = this.savedDialogs.collect();
+    batch.put.savedDialogs = saved.put;
+    batch.del.savedDialogs = saved.del;
+    if (saved.meta) batch.put.meta = [...(batch.put.meta ?? []), saved.meta];
     this.dirtyChats.clear(); this.dirtyMessages.clear(); this.dirtyOutbox.clear(); this.dirtyReads.clear(); this.dirtyMeta = false;
     for (const id of held) this.dirtyChats.add(id);   // запишется следующим flush, уже сжатой
     const seq = this.lastSeq;
@@ -1478,7 +1736,7 @@ export class Store {
 
   /** Строка чата в подписках пересчитается (название зависит не только от самого чата). */
   retouch(chatId: number): void { this.touch(chatId); }
-  private touch(chatId: number): void { this.touched.add(chatId); this.sorted.delete(chatId); this.ids.delete(chatId); }
+  touch(chatId: number): void { this.touched.add(chatId); this.sorted.delete(chatId); this.ids.delete(chatId); }
 
   private findChatOf(clientId: string): number | null {
     for (const [chatId, map] of this.messages) if (map.has(clientId)) return chatId;

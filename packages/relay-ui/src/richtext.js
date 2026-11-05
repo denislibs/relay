@@ -1,9 +1,11 @@
 // Текст с форматированием: модель { text, entities } и её отображение в DOM поля ввода и обратно.
 // Сущность — { type, offset, length, url? } в единицах UTF-16 (как String.length), без вложенности:
 // разные типы могут перекрываться, один тип — нет (соседние куски одного типа склеиваются).
+// Исключение — blockquote: это блок. В поле он один элемент на всю цитату, перевод строки на его границах не рисуется
+// (его заменяет сам блок), с блоком кода не сочетается.
 // Источник правды при вводе — DOM поля: значение читается из него одним обходом, когда нужно.
 
-export var FORMATS = ['bold', 'italic', 'underline', 'strike', 'spoiler', 'code', 'pre', 'link', 'date'];
+export var FORMATS = ['bold', 'italic', 'underline', 'strike', 'spoiler', 'code', 'pre', 'link', 'date', 'blockquote'];
 var DATE_FORMAT = /^(r|w?[dD]?[tT]?)$/;
 // порядок обёрток снаружи внутрь: ссылка и моноширинный — внешние, остальное — внутри
 var ORDER = ['link', 'date', 'pre', 'code', 'spoiler', 'bold', 'italic', 'underline', 'strike'];
@@ -27,6 +29,8 @@ function marksOf(el, parent) {
   else if (tag === 'S' || tag === 'STRIKE' || tag === 'DEL') add('strike');
   else if (tag === 'CODE' || tag === 'KBD' || tag === 'SAMP' || tag === 'TT') add(el.getAttribute('data-pre') != null || (el.classList && el.classList.contains('rl-pre')) || (el.parentNode && el.parentNode.nodeName === 'PRE') ? 'pre' : 'code');
   else if (tag === 'PRE') add('pre');
+  // цитата: в поле и из буфера — <blockquote> (data-collapsed / expandable из разметки Telegram), в пузыре — span.rl-bq
+  if (tag === 'BLOCKQUOTE' || (el.classList && el.classList.contains('rl-bq'))) add('blockquote', el.getAttribute('data-collapsed') != null || el.getAttribute('expandable') != null ? 'c' : true);
   else if (tag === 'A') { var href = el.getAttribute('href'); if (href && safeUrl(href)) add('link', safeUrl(href)); }
   // дата: «плашка» в поле (data-date) или разметка Telegram при вставке (<tg-time unix format>)
   var unix = el.getAttribute && (el.getAttribute('data-date') || (tag === 'TG-TIME' ? el.getAttribute('unix') : null));
@@ -98,6 +102,7 @@ export function readDom(root, sel) {
         cur = { type: type, offset: pos, length: chunk.length };
         if (type === 'link') cur.url = marks.link;
         if (type === 'date') { var dp = marks.date.split('|'); cur.date = +dp[0]; if (dp[1]) cur.format = dp[1]; }
+        if (type === 'blockquote' && marks.blockquote === 'c') cur.collapsed = true;
         entities.push(cur); open[type] = cur;
       }
     }
@@ -121,10 +126,11 @@ export function readDom(root, sel) {
       if (tag === 'BR') { if (!trailingBr(c, root)) push('\n', marks); continue; }
       if (tag === 'IMG') { var alt = c.getAttribute('alt'); if (alt) push(alt, marks); continue; }
       if (tag === 'SCRIPT' || tag === 'STYLE' || tag === 'TEMPLATE' || tag === 'HEAD' || tag === 'TITLE' || tag === 'META') continue;
-      var block = BLOCK.test(tag);
-      if (block && out && out[out.length - 1] !== '\n') push('\n', {});
+      var block = BLOCK.test(tag), quote = tag === 'BLOCKQUOTE';
+      // границы цитаты — всегда перевод строки: toHtml снимает по одному с каждой стороны, пустая строка рядом — это ещё один
+      if (block && out && (quote || out[out.length - 1] !== '\n')) push('\n', {});
       walk(c, marksOf(c, marks));
-      if (block && (tag === 'P' || /^H[1-6]$/.test(tag)) && c.nextSibling && out && out[out.length - 1] !== '\n') push('\n', {});
+      if (quote ? c.nextSibling && !(c.nextSibling.nodeName === 'BR' && !c.nextSibling.nextSibling) : block && (tag === 'P' || /^H[1-6]$/.test(tag)) && c.nextSibling && out && out[out.length - 1] !== '\n') push('\n', {});
     }
     at(node, kids.length, out.length);
   }
@@ -158,7 +164,7 @@ export function segments(text, entities) {
     var marks = {};
     for (var j = 0; j < list.length; j++) {
       var en = list[j];
-      if (en.offset <= s && en.offset + en.length >= e) marks[en.type] = en.type === 'link' ? en.url : en.type === 'date' ? en.date + '|' + (en.format || '') : true;
+      if (en.offset <= s && en.offset + en.length >= e) marks[en.type] = en.type === 'link' ? en.url : en.type === 'date' ? en.date + '|' + (en.format || '') : en.type === 'blockquote' && en.collapsed ? 'c' : true;
     }
     out.push({ text: text.slice(s, e), marks: marks });
   }
@@ -176,19 +182,28 @@ var OPEN = {
 };
 var CLOSE = { bold: '</b>', italic: '</i>', underline: '</u>', strike: '</s>', code: '</code>', pre: '</code>', spoiler: '</span>', link: '</a>', date: '</span>' };
 
+/** Переключатель «свернуть» на цитате в поле: не текст (contenteditable=false), readDom его не читает. */
+var BQ_TOGGLE = '<span class="rl-bq-edit-toggle" contenteditable="false" role="button" aria-label="Сворачивать цитату" data-bq-toggle="1"></span>';
+
 /** HTML для поля ввода. Перевод строки — <br>; в конце текста — ещё один, иначе последняя пустая строка не видна. */
 export function toHtml(value) {
-  var v = value || EMPTY, html = '';
+  var v = value || EMPTY, html = '', inQuote = false;
   var segs = segments(v.text, v.entities);
   for (var i = 0; i < segs.length; i++) {
-    var sg = segs[i], open = '', close = '';
+    var sg = segs[i], open = '', close = '', text = sg.text, quote = sg.marks.blockquote;
+    // цитата — один блок на все свои куски; перевод строки вплотную к ней заменяет сам блок
+    if (quote && !inQuote) { html += '<blockquote class="rl-bq-edit"' + (quote === 'c' ? ' data-collapsed="1"' : '') + '>' + BQ_TOGGLE; inQuote = true; }
+    if (!quote && inQuote) { html += '</blockquote>'; inQuote = false; if (text[0] === '\n') text = text.slice(1); }
+    if (!quote && text[text.length - 1] === '\n' && segs[i + 1] && segs[i + 1].marks.blockquote) text = text.slice(0, -1);
     for (var k = 0; k < ORDER.length; k++) {
       var t = ORDER[k];
       if (sg.marks[t]) { open += OPEN[t](sg.marks[t]); close = CLOSE[t] + close; }
     }
-    html += open + esc(sg.text).replace(/\n/g, '<br>') + close;
+    if (text) html += open + esc(text).replace(/\n/g, '<br>') + close;
   }
-  if (v.text && v.text[v.text.length - 1] === '\n') html += '<br>';
+  // цитата в самом конце: пустая строка под ней (подпорка, в значение не входит) — иначе из блока не выйти курсором
+  if (inQuote) html += '</blockquote><br>';
+  if (v.text && v.text[v.text.length - 1] === '\n' && !/<\/blockquote><br>$/.test(html)) html += '<br>';
   return html;
 }
 
@@ -210,22 +225,26 @@ export function clean(text, entities) {
     var key = e.type === 'link' ? 'link\u0000' + e.url : e.type === 'date' ? 'date\u0000' + e.date + '|' + (e.format || '') : e.type;
     if (e.type === 'link' && !safeUrl(e.url)) return;
     if (e.type === 'date' && (!(e.date >= 0 && e.date <= 4102444800 && e.date % 1 === 0) || !DATE_FORMAT.test(e.format || ''))) return;
-    (by[key] = by[key] || []).push({ type: e.type, offset: s, length: en - s, url: e.url, date: e.date, format: e.format });
+    (by[key] = by[key] || []).push({ type: e.type, offset: s, length: en - s, url: e.url, date: e.date, format: e.format, collapsed: e.collapsed });
   });
   var out = [];
   Object.keys(by).forEach(function (key) {
     var list = by[key].sort(function (x, y) { return x.offset - y.offset; });
     var cur = null;
     list.forEach(function (e) {
-      if (cur && e.offset <= cur.offset + cur.length) cur.length = Math.max(cur.length, e.offset + e.length - cur.offset);
+      if (cur && e.offset <= cur.offset + cur.length) { cur.length = Math.max(cur.length, e.offset + e.length - cur.offset); if (cur.collapsed && !e.collapsed) delete cur.collapsed; }
       else {
         cur = { type: e.type, offset: e.offset, length: e.length };
         if (e.type === 'link') cur.url = safeUrl(e.url);
         if (e.type === 'date') { cur.date = e.date; if (e.format) cur.format = e.format; }
+        if (e.type === 'blockquote' && e.collapsed) cur.collapsed = true;
         out.push(cur);
       }
     });
   });
+  // цитата с блоком кода не сочетается (как normalizeEntities на сервере)
+  var pre = out.filter(function (e) { return e.type === 'pre'; });
+  if (pre.length) out = out.filter(function (e) { return e.type !== 'blockquote' || !pre.some(function (p) { return p.offset < e.offset + e.length && e.offset < p.offset + p.length; }); });
   // разные ссылки не перекрываются: позже начавшаяся обрезает раннюю
   return sortEntities(out);
 }
@@ -270,10 +289,18 @@ export function toggleFormat(value, type, s, e, url) {
     if (url) { list = subtract(list, function (x) { return MONO[x.type]; }, s, e); list.push({ type: 'link', offset: s, length: e - s, url: url }); }
     return { text: value.text, entities: clean(value.text, list) };
   }
+  if (type === 'blockquote') {
+    // цитата — блок: берём строки целиком. Снимает блок кода (не сочетаются) и поглощает задетые цитаты, остальное оформление внутри живёт
+    if (covers(value, type, s, e)) { list = subtract(list, function (x) { return x.type === type; }, s, e); return { text: value.text, entities: clean(value.text, list) }; }
+    var from = s > 0 ? value.text.lastIndexOf('\n', s - 1) + 1 : 0, nl = value.text.indexOf('\n', e > s && value.text[e - 1] === '\n' ? e - 1 : e), to = nl < 0 ? value.text.length : nl;
+    list = subtract(list, function (x) { return x.type === 'pre'; }, from, to);
+    list.push({ type: type, offset: from, length: to - from });
+    return { text: value.text, entities: clean(value.text, list) };
+  }
   if (covers(value, type, s, e)) list = subtract(list, function (x) { return x.type === type; }, s, e);
   else {
-    // моноширинный снимает остальное оформление, а остальное — моноширинный
-    list = subtract(list, MONO[type] ? function (x) { return x.type !== type; } : function (x) { return !!MONO[x.type]; }, s, e);
+    // моноширинный снимает остальное оформление, а остальное — моноширинный; цитату снимает только блок кода
+    list = subtract(list, MONO[type] ? function (x) { return x.type !== type && (type === 'pre' || x.type !== 'blockquote'); } : function (x) { return !!MONO[x.type]; }, s, e);
     list.push({ type: type, offset: s, length: e - s });
   }
   return { text: value.text, entities: clean(value.text, list) };
@@ -304,7 +331,7 @@ export function trimValue(value) {
 }
 
 function entityKey(list) {
-  return (list || []).map(function (e) { return [e.type, e.offset, e.length, e.url || ''].join(':'); }).sort().join('|');
+  return (list || []).map(function (e) { return [e.type, e.offset, e.length, e.url || '', e.collapsed ? 'c' : ''].join(':'); }).sort().join('|');
 }
 /** Одно и то же значение (порядок сущностей и ключей в них не важен). */
 export function sameValue(x, y) {
@@ -312,7 +339,7 @@ export function sameValue(x, y) {
   return x.text === y.text && entityKey(x.entities) === entityKey(y.entities);
 }
 
-/* ---------- разметка при отправке: **жирный**, __курсив__, ~~зачёркнутый~~, ||скрытый||, `код`, ```блок```, [текст](ссылка) ---------- */
+/* ---------- разметка при отправке: **жирный**, __курсив__, ~~зачёркнутый~~, ||скрытый||, `код`, ```блок```, [текст](ссылка), «> » в начале строки ---------- */
 
 var MD = [
   { re: /```([a-zA-Z0-9_+-]{1,32}\n)?([\s\S]+?)```/, type: 'pre', group: 2, open: 3, lang: 1 },
@@ -349,7 +376,26 @@ export function applyMarkdown(value) {
       from = at + inner.length;
     }
   }
-  return v;
+  return quoteLines(v);
+}
+
+/** Строки подряд, начатые с «> », — цитата; маркеры снимаются. Строки внутри блока кода не трогаем. */
+function quoteLines(v) {
+  if (v.text.indexOf('>') < 0) return v;
+  var at = 0, lines = v.text.split('\n'), cuts = [], runs = [], run = null, gone = 0;
+  for (var i = 0; i < lines.length; i++) {
+    var line = lines[i], here = at;
+    if (/^> \S/.test(line) && !v.entities.some(function (e) { return MONO[e.type] && e.offset <= here && e.offset + e.length > here; })) {
+      var m = 2, s = at - gone, end = s + line.length - m;
+      cuts.push([at, at + m]);
+      if (run) run.length = end - run.offset; else run = { type: 'blockquote', offset: s, length: end - s };
+      gone += m;
+    } else if (run) { runs.push(run); run = null; }
+    at += line.length + 1;
+  }
+  if (run) runs.push(run);
+  for (var k = cuts.length - 1; k >= 0; k--) v = splice(v, cuts[k][0], cuts[k][1], EMPTY);
+  return runs.length ? { text: v.text, entities: clean(v.text, v.entities.concat(runs)) } : v;
 }
 
 /* ---------- вставка из буфера ---------- */
@@ -416,6 +462,8 @@ export function pointAt(root, target) {
       }
       if (BLOCK.test(c.nodeName) && pos > 0) { if (target === pos && !best) best = [node, i]; pos += 1; }
       if (walk(c)) return true;
+      // выход из цитаты — тоже перевод строки (как в readDom)
+      if (c.nodeName === 'BLOCKQUOTE' && c.nextSibling && !(c.nextSibling.nodeName === 'BR' && !c.nextSibling.nextSibling)) { pos += 1; if (target === pos) best = [node, i + 1]; }
     }
     return false;
   }

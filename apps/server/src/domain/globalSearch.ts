@@ -36,7 +36,7 @@ export async function searchMedia(userId: number, tab: MediaTab, opts: { q?: str
                                where c.kind = 'direct' and pm.chat_id = c.id and pm.user_id <> ${userId} limit 1)) as chat_title
       from (select * from messages
              where chat_id in (select cm.chat_id from chat_members cm join chats dc on dc.id = cm.chat_id and dc.deleted_at is null where cm.user_id = ${userId})
-               and not deleted and ${tabWhere(tab)}
+               and not deleted and (expires_at is null or expires_at > now()) and ${tabWhere(tab)}
                -- скрытая история (вступил позже, «удалить у себя») не видна и здесь — как в медиа чата (AUTHZ-2)
                and id >= (select h.history_from from chat_members h where h.chat_id = messages.chat_id and h.user_id = ${userId})
                ${q ? textWhere(tab, q) : sql``}
@@ -93,8 +93,9 @@ export async function topPeers(userId: number, limit = 10): Promise<{ chatIds: n
       from messages m
       join chat_members cm on cm.chat_id = m.chat_id and cm.user_id = ${userId}
       join chats c on c.id = m.chat_id and c.kind = 'direct'
-     where m.created_at > now() - interval '30 days' and not m.deleted
+     where m.created_at > now() - interval '30 days' and not m.deleted and (m.expires_at is null or m.expires_at > now())
        and not exists (select 1 from service_chats s where s.chat_id = m.chat_id)
+       and not exists (select 1 from saved_chats s where s.chat_id = m.chat_id)   -- «Избранное» — не собеседник
      group by m.chat_id order by n desc limit ${limit}`;
   return { chatIds: rows.map((r) => Number(r.chat_id)) };
 }

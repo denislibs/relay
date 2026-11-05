@@ -1,7 +1,7 @@
 // Пересылка сообщений, как в Telegram Web: «Переслать» → окно выбора чатов. Один чат — открываем его, пересылка
 // ждёт в поле ввода (можно дописать комментарий, скрыть отправителя или подписи); несколько — уходит сразу во все.
 import type { Entity } from '@relay/protocol';
-import { forwardMessages, openInner, sentSound } from './data';
+import { forwardMessages, openInner, savedChatId, sentSound } from './data';
 import { getGlobal, setGlobal, type ForwardDraft, type ForwardPick } from './global';
 import { showToast } from './settingsData';
 import { plural } from '@relay/ui';
@@ -39,10 +39,18 @@ export function startForwardMany(groups: { chatId: number; items: Src[] }[], nam
 export function closeForwardPick(): void { setGlobal({ fwdPick: null }); }
 
 /** Выбор в окне: один чат — панель пересылки в его поле ввода; несколько — сразу во все, с подписью первой. */
+/** Строка «Избранное» в окне пересылки, пока чата нет в загруженном списке: настоящий id узнаётся при отправке. */
+export const SAVED_PICK = -1;
+
 export async function forwardTo(chatIds: number[], comment: string): Promise<void> {
   const pick = getGlobal().fwdPick;
   if (!pick || !chatIds.length) return;
   setGlobal({ fwdPick: null });
+  if (chatIds.includes(SAVED_PICK)) {
+    let saved: number;
+    try { saved = await savedChatId(); } catch { showToast('Не удалось открыть Избранное — нет сети?'); return; }
+    chatIds = [...new Set(chatIds.map((id) => (id === SAVED_PICK ? saved : id)))];
+  }
   if (chatIds.length === 1) {
     const chatId = chatIds[0];
     setGlobal({ fwdDraft: { ...getGlobal().fwdDraft, [chatId]: { ...pick, hideSender: false, hideCaption: false } } });

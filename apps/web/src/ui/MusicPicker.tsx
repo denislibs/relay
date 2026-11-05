@@ -1,3 +1,4 @@
+import type { ReplyRef } from '../replyRef';
 // «Музыка» из меню вложений, как в Telegram Web: поиск, «Выбрать из файлов», музыка профиля и музыка из чатов.
 // Клик по строке — отправить трек (тот же файл, без новой загрузки); клик по кругу — послушать (кольцо вокруг обложки
 // пляшет под звук). Поиск — с 3 символов, через 300 мс; ответы на устаревший запрос отбрасываются.
@@ -45,7 +46,7 @@ function TrackLine({ r }: { r: Row }) {
 }
 
 /** replyToId — открытый в поле ответ: трек уходит ответом на него (как любое сообщение); onSent — ответ отработан, снять его. */
-export function MusicPicker({ chatId, open, onClose, replyToId = null, onSent }: { chatId: number; open: boolean; onClose: () => void; replyToId?: number | null; onSent?: () => void }) {
+export function MusicPicker({ chatId, open, onClose, replyToId = null, onSent }: { chatId: number; open: boolean; onClose: () => void; replyToId?: ReplyRef; onSent?: () => void }) {
   const [q, setQ] = useState('');
   const profile: ProfileTrack[] | null = useProfileMusic(open ? getGlobal().me?.userId : null)?.tracks ?? null;
   const [shared, setShared] = useState<{ hits: MediaHit[]; more: boolean; loading: boolean; next?: number }>({ hits: [], more: true, loading: false });

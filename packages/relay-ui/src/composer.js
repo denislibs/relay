@@ -28,6 +28,7 @@ var TOOLBAR = [
   { type: 'strike', icon: 'strike', label: 'Зачёркнутый', combo: 'mod+shift+x' },
   { type: 'code', icon: 'mono', label: 'Моноширинный', combo: 'mod+shift+m' },
   { type: 'spoiler', icon: 'spoiler', label: 'Скрытый', combo: 'mod+shift+p' },
+  { type: 'blockquote', icon: 'quote', label: 'Цитата', combo: 'mod+shift+.' },
 ];
 
 function isTouchOnly() {
@@ -76,7 +77,7 @@ function Composer(props) {
     function away(e) {
       var t = e.target;
       if (popRef.current && popRef.current.contains(t)) return;
-      if (t.closest && (t.closest('.rl-emoji-toggle') || t.closest('.rl-mdl-layer') || t.closest('.app-stkview-host'))) return;
+      if (t.closest && (t.closest('.rl-emoji-toggle') || t.closest('.rl-mdl-layer') || t.closest('.app-stkview-host') || t.closest('.app-sym-keep'))) return;   // app-sym-keep — меню плитки: панель под ним остаётся
       symbols[1](false);
     }
     function esc(e) { if (e.key === 'Escape') { e.stopPropagation(); symbols[1](false); } }
@@ -182,6 +183,7 @@ function Composer(props) {
     props.apiRef.current = {
       getValue: function () { return editRef.current ? readDom(editRef.current) : emptyValue(); },
       setValue: setValue,
+      send: function () { send(); },   // отправить из меню кнопки (без звука, отложить): та же дорога, что и по кнопке
       focus: function (opts) { if (opts && opts.end) focusEnd(); else if (editRef.current) editRef.current.focus({ preventScroll: true }); },
       element: function () { return editRef.current; },
       /** Вставить значение (с оформлением) туда, где был курсор, — даже если фокус ушёл в окно. range — свой диапазон. */
@@ -381,7 +383,29 @@ function Composer(props) {
     });
   }
   // нажатие на «плашку» даты в поле — окно с её датой и форматом; сохранили — плашка заменяется
+  /** Перевод строки на пустой последней строке цитаты — выход из неё (иначе из блока в конце поля не выбраться). */
+  function leaveQuote(el) {
+    var sel = selIn(el), node = sel && sel.isCollapsed ? sel.anchorNode : null;
+    var q = node && (node.nodeType === 1 ? node : node.parentNode).closest('blockquote');
+    if (!q || !el.contains(q)) return false;
+    var v = readDom(q, sel);
+    if (v.end !== v.text.length || v.text[v.text.length - 1] !== '\n') return false;
+    while (q.lastChild && q.lastChild.nodeName === 'BR') q.removeChild(q.lastChild);
+    if (!q.nextSibling) q.parentNode.appendChild(document.createElement('br'));
+    var r = document.createRange();
+    r.setStartAfter(q); r.collapse(true);
+    sel.removeAllRanges(); sel.addRange(r);
+    return true;
+  }
   function onEditorClick(e) {
+    // переключатель «сворачивать» на цитате: источник правды — DOM поля, значение прочитает sync
+    var bq = e.target.closest && e.target.closest('[data-bq-toggle]');
+    if (bq) {
+      var quote = bq.parentNode;
+      if (quote.hasAttribute('data-collapsed')) quote.removeAttribute('data-collapsed'); else quote.setAttribute('data-collapsed', '1');
+      sync(false);
+      return;
+    }
     var chip = e.target.closest && e.target.closest('.rl-date-chip');
     if (!chip || !latest.current.onEditDate) return;
     var el = editRef.current, sel = el.ownerDocument.getSelection(), r = el.ownerDocument.createRange();
@@ -391,13 +415,13 @@ function Composer(props) {
   }
 
   /* ---------- упоминания ---------- */
-  var mentionList = st.mention && props.members ? props.members.filter(function (x) { return x.name.toLowerCase().indexOf(st.mention.q.toLowerCase()) >= 0; }).slice(0, 5) : null;
+  var mentionList = st.mention && props.members ? props.members.filter(function (x) { var q = st.mention.q.toLowerCase(); return x.name.toLowerCase().indexOf(q) >= 0 || (!!x.username && x.username.toLowerCase().indexOf(q) >= 0); }).slice(0, 5) : null;
   function pickMention(x) {
     var el = editRef.current, mn = st.mention;
     if (!el || !mn) return;
     el.focus({ preventScroll: true });
     setSelection(el, mn.at, mn.at + mn.q.length + 1);
-    document.execCommand('insertText', false, '@' + x.name + ' ');
+    document.execCommand('insertText', false, '@' + (x.username || x.name) + ' ');
     sync(true);
   }
 
@@ -417,6 +441,7 @@ function Composer(props) {
       var sendNow = !isTouchOnly() && (p.sendKey === 'ctrlEnter' ? mod : !e.shiftKey && !mod);
       e.preventDefault();
       if (sendNow) { send(); return; }
+      if (leaveQuote(el)) { sync(true); return; }
       // перевод строки — <br>, а не новый <div> (так значение читается однозначно)
       if (!document.execCommand('insertLineBreak')) document.execCommand('insertHTML', false, '<br>');
       return;
@@ -431,6 +456,7 @@ function Composer(props) {
       else if (e.shiftKey && code === 'KeyX') type = 'strike';
       else if (e.shiftKey && code === 'KeyM') type = 'code';
       else if (e.shiftKey && code === 'KeyP') type = 'spoiler';
+      else if (e.shiftKey && code === 'Period') type = 'blockquote';
       if (type) {
         var sel = selIn(el);
         if (!sel || sel.isCollapsed) { if (type !== 'bold' && type !== 'italic' && type !== 'underline') e.preventDefault(); return; }   // B/I/U без выделения — браузер включит стиль для набора
@@ -497,6 +523,9 @@ function Composer(props) {
   var mode = rec[0] ? 'send' : props.editing ? 'edit' : st.hasText || props.sendEmpty ? 'send' : recordMode === 'round' ? 'round' : recordMode ? 'mic' : 'send';
   var canSwitch = modes.length > 1 && (mode === 'mic' || mode === 'round');
   var pressTimer = useRef(null);
+  // меню кнопки в режиме отправки (правый клик, долгое нажатие): «Отправить без звука», «Отправить позже»
+  var sendItems = mode === 'send' && !rec[0] && props.sendItems && props.sendItems.length ? props.sendItems : null;
+  var sendMenu = useState(false);
   var ready = useRef(false);
   // после первой отрисовки, в фазе mutate кадра: запись из обычной задачи «пачкала» раскладку до следующей прокрутки
   useEffect(function () {
@@ -512,7 +541,8 @@ function Composer(props) {
       h(MentionList, { items: mentionList || [], onPick: pickMention })),
     props.symbolMenu && symMounted.current ? h('div', { class: cx('rl-symbols-pop', symbols[0] && symView[0] === 'active' && 'is-active', !symbols[0] && symView[0] !== 'hidden' && 'is-closing'), ref: popRef, role: 'dialog', 'aria-label': 'Эмодзи и стикеры',
         'aria-hidden': symbols[0] ? undefined : 'true', style: symView[0] === 'hidden' && !symbols[0] ? { display: 'none' } : undefined,
-        onPointerEnter: symbolsHover.onPointerEnter, onPointerLeave: symbolsHover.onPointerLeave,
+        // пока открыто меню плитки, уход мыши на него — не уход с панели
+        onPointerEnter: symbolsHover.onPointerEnter, onPointerLeave: function (e) { if (!document.querySelector('.app-sym-keep')) symbolsHover.onPointerLeave(e); },
         onMouseDown: function (e) { if (e.target.nodeName !== 'INPUT') e.preventDefault(); } },
         props.symbolMenu(function () { symbols[1](false); }, symbols[0])) : null,
     h(MenuPopover, { open: attach[0], hover: true, anchor: wrapRef.current ? wrapRef.current.querySelector('.rl-attach-toggle') : null, placement: 'top-start', label: 'Прикрепить',
@@ -542,6 +572,7 @@ function Composer(props) {
       h('button', { key: 'link', type: 'button', class: cx('rl-fmtbtn', b.active.link && 'rl-fmtbtn-on'), 'aria-pressed': String(!!b.active.link), 'aria-label': b.active.link ? 'Убрать ссылку' : 'Ссылка', title: 'Ссылка ' + comboLabel('mod+k'),
         onClick: function () { if (b.active.link) format('link', null); else openLink(); } }, h(Icon, { name: 'link', size: 20 })),
     ])) : null),
+    h(MenuPopover, { open: sendMenu[0] && !!sendItems, anchor: sendRef.current, placement: 'top-end', label: 'Параметры отправки', onClose: function () { sendMenu[1](false); }, items: sendItems || [] }),
     h(MenuPopover, { open: modeMenu[0], anchor: sendRef.current, placement: 'top-end', label: 'Тип сообщения', onClose: function () { modeMenu[1](false); }, items: [
       { icon: 'mic', label: 'Голосовое сообщение', onClick: function () { if (props.onRecordModeChange) props.onRecordModeChange('voice'); } },
       { icon: 'roundVideo', label: 'Видеосообщение', onClick: function () { if (props.onRecordModeChange) props.onRecordModeChange('round'); } },
@@ -580,17 +611,25 @@ function Composer(props) {
         h(IconButton, { icon: 'smile', label: 'Эмодзи и стикеры', class: cx('rl-emoji-toggle', symbols[0] && 'rl-emoji-toggle-on'), 'aria-expanded': props.symbolMenu ? symbols[0] : undefined,
           onPointerEnter: props.symbolMenu ? symbolsHover.onPointerEnter : undefined, onPointerLeave: props.symbolMenu ? symbolsHover.onPointerLeave : undefined,
           onMouseDown: function (e) { e.preventDefault(); },   // фокус остаётся в поле: эмодзи вставляются туда, где курсор
-          onClick: props.symbolMenu ? symbolsHover.toggle : undefined })),
+          onClick: props.symbolMenu ? symbolsHover.toggle : undefined }),
+        // отложенные этого чата: значок часов со счётчиком (appear — появляется плавно, без сдвига поля)
+        h(Presence, { show: props.scheduledCount > 0, exitMs: 160 }, h('button', Object.assign({ type: 'button', class: 'rl-composer-sched', 'aria-label': props.scheduledLabel || 'Отложенные сообщения' }, props.scheduledPress || {}),
+          h(Icon, { name: 'clock', size: 22 }), h('span', { class: 'rl-composer-sched-n' }, props.scheduledCount)))),
       h('button', {
         type: 'button', ref: sendRef, class: cx('rl-composer-send', 'rl-send-' + mode), 'aria-label': mode === 'edit' ? 'Сохранить' : mode === 'send' ? 'Отправить' : mode === 'round' ? 'Записать видеосообщение' : 'Записать голосовое',
         onPointerDown: function (e) {
           ripple(e);
           // долгое нажатие пальцем — выбор: голосовое или кружок (мышью — правая кнопка)
           if (canSwitch && e.pointerType === 'touch') pressTimer.current = setTimeout(function () { pressTimer.current = 'fired'; modeMenu[1](true); }, 200);
+          // и меню отправки: дольше — короткое касание остаётся отправкой
+          else if (sendItems && e.pointerType === 'touch') pressTimer.current = setTimeout(function () { pressTimer.current = 'fired'; sendMenu[1](true); }, 400);
         },
         onPointerUp: function () { if (pressTimer.current && pressTimer.current !== 'fired') clearTimeout(pressTimer.current); },
         onMouseDown: function (e) { e.preventDefault(); },   // фокус остаётся в поле (клавиатура телефона не прячется)
-        onContextMenu: function (e) { if (!canSwitch) return; e.preventDefault(); modeMenu[1](true); },
+        onPointerCancel: function () { if (pressTimer.current && pressTimer.current !== 'fired') clearTimeout(pressTimer.current); },
+        // меню уже открыто под пальцем: отпускание не должно стать кликом — он пришёлся бы в подложку и закрыл его
+        onTouchEnd: function (e) { if (pressTimer.current === 'fired') { e.preventDefault(); pressTimer.current = null; } },
+        onContextMenu: function (e) { if (sendItems) { e.preventDefault(); sendMenu[1](true); return; } if (!canSwitch) return; e.preventDefault(); modeMenu[1](true); },
         onClick: function () { if (pressTimer.current === 'fired') { pressTimer.current = null; return; } send(); },
       },
         // кнопка отправки — залитые значки, как у Telegram

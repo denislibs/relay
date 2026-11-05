@@ -1,4 +1,4 @@
-import { sql } from '../db';
+import { sql, type Tx } from '../db';
 import { enqueue } from '../jobs/queue';
 import { s3 } from './files';
 
@@ -6,7 +6,7 @@ import { s3 } from './files';
  * Сборка мусора в хранилище: готовое вложение, на которое больше ничто не ссылается, удаляется вместе с объектами в S3.
  * «Ссылается» — ровно то, что даёт доступ к файлу в fileFor (кроме владельца): не удалённое сообщение (пересылки
  * хранят тот же id — пока жива хоть одна копия, файл жив), музыка профиля, фото профиля (история и текущее),
- * фото группы, картинка превью ссылки. Файл, который никто, кроме владельца, открыть не может, — мусор.
+ * фото группы, картинка превью ссылки, отложенное сообщение, сохранённая GIF. Файл, который никто, кроме владельца, открыть не может, — мусор.
  * Отсрочка grace: только что загруженное ещё не успели отправить (очередь клиента, офлайн) — его не трогаем.
  *
  * Обход — курсором по (created_at, id) пачками, курсор в server_meta: таблица может быть большой, один запуск
@@ -25,11 +25,30 @@ const CURSOR = 'storage_gc_cursor';
 /** Условие «на вложение a кто-то ссылается» (тот же набор, что в fileFor). */
 export const referenced = (db: typeof sql) => db`(
      exists (select 1 from messages m where m.attachment->>'id' = a.id::text and not m.deleted)
+  or exists (select 1 from scheduled_messages s where s.attachment_id = a.id)   -- отложенное: файл уже загружен и ждёт публикации
+  or exists (select 1 from saved_gifs sg where sg.attachment_id = a.id)   -- личная копия, пока не убрана из сохранённых
   or exists (select 1 from profile_music pm where pm.attachment_id = a.id)
   or exists (select 1 from user_photos up where up.big = a.id or up.small = a.id or up.video = a.id)
   or exists (select 1 from users u where u.photo is not null and (u.photo->>'id' = a.id::text or u.photo->>'small' = a.id::text))
-  or exists (select 1 from chat_photos cp where cp.big = a.id or cp.small = a.id)
+  or exists (select 1 from chat_photos cp where cp.big = a.id or cp.small = a.id or cp.video = a.id)
   or exists (select 1 from link_previews lp where lp.photo_id = a.id))`;
+
+/**
+ * Удалить вложения из ids, на которые больше никто не ссылается: запись и ключ файла (каскадом) — в транзакции вызывающего,
+ * объекты — задачей attachment.purge. Занятые (пересылка держит for share) пропускаются: их подберёт обычный обход.
+ */
+export async function dropUnreferenced(tx: Tx, ids: string[]): Promise<number> {
+  const locked = (await tx`select id from attachments where id = any(${ids}::uuid[]) for update skip locked`).map((r) => r.id as string);
+  if (!locked.length) return 0;
+  const variants = await tx`select attachment_id, key from attachment_variants where attachment_id = any(${locked}::uuid[])`;
+  const gone = await tx`delete from attachments a where a.id = any(${locked}::uuid[]) and not ${referenced(tx as never)} returning a.id, a.storage_key`;
+  const keys = new Set<string>();
+  const left = new Set(gone.map((g) => g.id as string));
+  for (const g of gone) { keys.add(g.id as string); if (g.storage_key) keys.add(g.storage_key as string); }
+  for (const v of variants) if (left.has(v.attachment_id as string)) keys.add(v.key as string);
+  if (keys.size) await enqueue(tx, 'attachment.purge', { keys: [...keys] });
+  return gone.length;
+}
 
 export interface GcResult { scanned: number; deleted: number; done: boolean }
 
@@ -49,17 +68,7 @@ export async function collectGarbage(opts: { graceMs?: number; batch?: number; m
       out.scanned += rows.length;
       const candidates = rows.filter((r) => r.garbage).map((r) => r.id as string);
       if (candidates.length) {
-        const locked = (await tx`select id from attachments where id = any(${candidates}::uuid[]) for update skip locked`).map((r) => r.id as string);
-        if (locked.length) {
-          const variants = await tx`select attachment_id, key from attachment_variants where attachment_id = any(${locked}::uuid[])`;
-          const gone = await tx`delete from attachments a where a.id = any(${locked}::uuid[]) and not ${referenced(tx as never)} returning a.id, a.storage_key`;
-          const keys = new Set<string>();
-          const ids = new Set(gone.map((g) => g.id as string));
-          for (const g of gone) { keys.add(g.id as string); if (g.storage_key) keys.add(g.storage_key as string); }
-          for (const v of variants) if (ids.has(v.attachment_id as string)) keys.add(v.key as string);
-          if (keys.size) await enqueue(tx, 'attachment.purge', { keys: [...keys] });
-          out.deleted += gone.length;
-        }
+        out.deleted += await dropUnreferenced(tx, candidates);
       }
       if (rows.length < batch) {
         out.done = true;

@@ -4,6 +4,7 @@ import {
 } from './domain/groups';
 import { createInvite, decideRequests, deleteInvites, editInvite, inviteJoined, joinByInvite, joinDiscussion, listInvites, listRequests, previewInvite } from './domain/invites';
 import { DomainError } from './domain/errors';
+import { adminLogPage } from './domain/adminLogRead';
 import { channelPreview } from './domain/channelPreview';
 import { resolvePeers } from './domain/peerRef';
 import { sql } from './db';
@@ -32,6 +33,10 @@ export async function groupRoute(req: Request, url: URL, userId: number): Promis
     const chat = Number(url.searchParams.get('chatId')) || undefined;
     return json(await checkGroupUsername(url.searchParams.get('username') ?? '', chat));
   }
+
+  // журнал действий админов — только онлайн и только админам (domain/adminLogRead.ts)
+  const log = /^\/chats\/(\d{1,15})\/admin-log$/.exec(p);
+  if (log && m === 'GET') return Response.json(await adminLogPage(userId, Number(log[1]), url.searchParams), { headers: { 'cache-control': 'no-store' } });
 
   const g = /^\/groups\/(\d{1,15})(\/.*)?$/.exec(p);
   if (!g) return null;

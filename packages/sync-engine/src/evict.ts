@@ -149,6 +149,8 @@ function narrow(chat: LocalChat, floor: number, removed: Removed[], kept: number
   if (chat.seed != null && (!live || live[0] > chat.seed)) delete chat.seed;
   // вкладки медиа знали страницы подряд — среди них стёртые: заново с сервера (счётчики верны)
   if (removed.some((r) => r.media)) delete chat.mediaDone;
+  // подчаты «Избранного» знали страницы подряд — среди них могли быть стёртые: заново с сервера
+  if (removed.length) delete chat.savedViews;
   // отрезки тредов — так же, по стёртым комментариям своего треда (открытый тред не теряет загруженное)
   if (chat.threads) for (const [k, t] of Object.entries(chat.threads)) {
     const cut = removed.filter((r) => r.threadId === Number(k)).map((r) => r.sort).sort((x, y) => x - y);

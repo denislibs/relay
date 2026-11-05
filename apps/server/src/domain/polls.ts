@@ -1,6 +1,7 @@
 import type { Message, Poll, PollInput, Update } from '@relay/protocol';
 import { sql, type Tx } from '../db';
 import { enqueue } from '../jobs/queue';
+import { logAdminAction } from './adminLog';
 import { groupCtx, hasAdmin } from './groupRights';
 import { DomainError } from './errors';
 import { appendUpdates, chatEvent } from './journal';
@@ -158,6 +159,7 @@ export async function closePoll(userId: number, chatId: number, id: number): Pro
     const next: PollDef = { ...def, closed: true };
     await updateContent(tx, chatId, id, () => ({ poll: next }));
     await publish(tx, ctx.kind, chatId, id, next);
+    if (author !== userId) await logAdminAction(tx, chatId, userId, 'poll_closed', { messageId: id, target: author });
     return { changed: true };
   });
 }

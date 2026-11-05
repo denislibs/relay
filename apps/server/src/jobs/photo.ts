@@ -3,7 +3,9 @@ import { decryptFile, encryptFile, fileKey } from '../crypto/fileKeys';
 // Копии фото в воркере (задача photo.process, ставится при подтверждении загрузки фото и картинки-файла):
 //   preview — для сетки «Медиа» и плиток: длинная сторона не больше 480 px, WebP ~80;
 //   medium  — для пузыря в ленте: длинная сторона не больше 800 px, WebP ~85 (как средний размер у Telegram);
-//             оригинал остаётся для просмотрщика.
+//             оригинал остаётся для просмотрщика;
+//   loop    — только GIF: немой H.264, длинная сторона до 320 px, для плиток панели GIF: <video> ставится на паузу и
+//             декодируется не в потоке страницы, <img> с GIF — ни то ни другое. Лента по-прежнему играет оригинал.
 // Плитке на 120 px и пузырю на 400 px не нужен оригинал на несколько мегабайт. Маленький и лёгкий оригинал сам себе
 // копия; файл, который ffmpeg не разобрал (или слишком большой), помечается skipped — показывается оригинал, как раньше.
 // redo — дозаполнение уже обработанных фото (backfillPhotos.ts): делаются только недостающие копии.
@@ -12,6 +14,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { sql } from '../db';
 import { attachmentOf, s3, variantsOf } from '../domain/files';
+import { gifVariantsChanged } from '../domain/savedGifs';
 import { inputOf, patchMessages, probe, run } from './video';
 import { enqueue } from './queue';
 
@@ -34,6 +37,9 @@ const DEMUXER: Record<string, string> = { 'image/jpeg': 'jpeg_pipe', 'image/png'
 /** Предел одного запуска ffmpeg: аренда обычной задачи — 5 минут (queue.ts). */
 const FFMPEG_TIMEOUT_MS = 2 * 60_000;
 
+/** Копия GIF для плиток: длинная сторона, предел длительности (длиннее — первые секунды, цикл всё равно). */
+const GIF_LOOP_SIDE = 320, GIF_LOOP_SECONDS = 60;   // плитка панели меньше 200 CSS px: 320 — с запасом на плотный экран и в разы дешевле декодировать
+
 /** Длинная сторона не больше side, без увеличения; вторая — по пропорции. */
 const scaleLong = (side: number) => `scale='if(gte(iw,ih),min(${side},iw),-1)':'if(gte(iw,ih),-1,min(${side},ih))'`;
 
@@ -46,7 +52,18 @@ const skip = async (id: string, why: string) => {
   await sql`update attachments set processed = 'skipped' where id = ${id} and processed is null`;
 };
 
-type Made = { name: PhotoVariantName; path: string; w: number; h: number; size: number };
+type Made = { name: PhotoVariantName | 'loop'; path: string; w: number; h: number; size: number };
+
+/** Немой зацикленный ролик из GIF. Прозрачное — на белом фоне (в H.264 альфы нет, без подложки было бы чёрным);
+ *  стороны чётные: иначе yuv420p не кодируется. */
+async function encodeLoop(src: string, out: string): Promise<boolean> {
+  const fit = `scale='if(gte(iw,ih),min(${GIF_LOOP_SIDE},iw),-2)':'if(gte(iw,ih),-2,min(${GIF_LOOP_SIDE},ih))',crop=trunc(iw/2)*2:trunc(ih/2)*2`;
+  const r = await run(['ffmpeg', '-v', 'error', '-y', '-max_pixels', String(PHOTO_MAX_PIXELS), ...inputOf(src, 'gif'), '-t', String(GIF_LOOP_SECONDS), '-an', '-sn', '-dn',
+    '-filter_complex', `[0:v]${fit},format=rgba[v];color=c=white:s=2x2[b];[b][v]scale2ref[b2][v2];[b2][v2]overlay=shortest=1,format=yuv420p[o]`, '-map', '[o]',
+    '-c:v', 'libx264', '-preset', 'veryfast', '-profile:v', 'main', '-crf', '26', '-movflags', '+faststart', '-map_metadata', '-1', out], FFMPEG_TIMEOUT_MS);
+  if (r.code !== 0) console.warn(`photo: loop failed: ${r.err}`);
+  return r.code === 0;
+}
 
 export async function processPhoto(payload: { id: string; redo?: boolean }): Promise<void> {
   const [a] = await sql`select * from attachments where id = ${payload.id}`;
@@ -55,7 +72,8 @@ export async function processPhoto(payload: { id: string; redo?: boolean }): Pro
   const id = a.id as string, key = (a.storage_key as string | null) ?? id, fmt = DEMUXER[a.mime as string];
   const have = new Set(payload.redo ? (await variantsOf(sql, id)).map((v) => v.name as string) : []);
   const todo = PHOTO_VARIANTS.filter((v) => !have.has(v.name));
-  if (!todo.length) return;
+  const wantLoop = a.kind === 'photo' && a.mime === 'image/gif' && !have.has('loop');
+  if (!todo.length && !wantLoop) return;
   const dir = await mkdtemp(join(tmpdir(), 'relay-photo-'));
   try {
     const src = join(dir, 'src');
@@ -87,11 +105,15 @@ export async function processPhoto(payload: { id: string; redo?: boolean }): Pro
         if (d) made.push({ name: v.name, path: out, w: d.w, h: d.h, size });
       }
     }
+    if (wantLoop) {
+      const out = join(dir, 'loop.mp4');
+      if (await encodeLoop(src, out)) { const d = await probe(out, 'mov'); if (d) made.push({ name: 'loop', path: out, w: d.w, h: d.h, size: Bun.file(out).size }); }
+    }
     for (const m of made) {
       if (raw) {
         await encryptFile(m.path, m.path + '.enc', await variantKey(raw, m.name));
         await s3().write(`${id}.${m.name}`, Bun.file(m.path + '.enc'), { type: 'application/octet-stream' });
-      } else await s3().write(`${id}.${m.name}`, Bun.file(m.path), { type: 'image/webp' });
+      } else await s3().write(`${id}.${m.name}`, Bun.file(m.path), { type: m.name === 'loop' ? 'video/mp4' : 'image/webp' });
     }
     await sql.begin(async (tx) => {
       // под замком строки вложения: отправка того же фото (attachmentForSend, for share) ждёт — как у видео
@@ -99,11 +121,12 @@ export async function processPhoto(payload: { id: string; redo?: boolean }): Pro
       if (!row || (payload.redo ? row.processed !== 'done' : row.processed)) return;
       for (const m of made) {
         await tx`insert into attachment_variants (attachment_id, name, key, mime, size, width, height)
-          values (${id}, ${m.name}, ${`${id}.${m.name}`}, 'image/webp', ${m.size}, ${m.w}, ${m.h})
+          values (${id}, ${m.name}, ${`${id}.${m.name}`}, ${m.name === 'loop' ? 'video/mp4' : 'image/webp'}, ${m.size}, ${m.w}, ${m.h})
           on conflict (attachment_id, name) do update set key = excluded.key, mime = excluded.mime, size = excluded.size, width = excluded.width, height = excluded.height`;
       }
       const [upd] = payload.redo ? [row] : await tx`update attachments set processed = 'done' where id = ${id} returning *`;
       if (made.length) await patchMessages(tx, attachmentOf(upd, null, await variantsOf(tx, id)));
+      if (made.some((m) => m.name === 'loop')) await gifVariantsChanged(tx, id);
     });
     const said = made.map((m) => `${m.name} ${m.w}x${m.h} ${Math.round(m.size / 1024)} KB`).join(', ');
     console.log(`photo: ${id} ${p.w}x${p.h} → ${said || 'nothing to do'}`);

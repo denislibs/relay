@@ -80,3 +80,11 @@ test('pinMany: снизу вверх — верхний окажется выш�
   pinMany([1, 3], true);
   expect(sent).toEqual([3, 1]);
 });
+
+test('«Избранное» среди выбранных: звук не предлагаем, архив и удаление — как у обычного чата', () => {
+  const base = { pinned: false, unread: false, muted: false, archived: false, system: false, owner: false };
+  const a = selectionActions([{ ...base, saved: true }, base]);
+  expect(a.mute).toBeUndefined();
+  expect(a.archive).toBe(true);
+  expect(a.delete).toBe(true);
+});

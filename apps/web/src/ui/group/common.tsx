@@ -6,14 +6,15 @@ import { avatarPhoto, userPhoto } from '../../profilePhoto';
 import { wantPeople } from '../../people';
 
 /** Экран управления группой: шапка со стрелкой, прокрутка, круглая кнопка внизу (появляется плавно). */
-export function GPage({ title, onBack, children, fab, action }: {
+export function GPage({ title, onBack, children, fab, action, actions }: {
   title: string; onBack: () => void; children: ComponentChildren;
   fab?: { show: boolean; icon: string; label: string; onClick: () => void; busy?: boolean };
   action?: { icon: string; label: string; onClick: () => void };
+  actions?: { icon: string; label: string; onClick: () => void }[];
 }) {
   return (
     <div class="rl-sidepage" aria-label={title}>
-      <PanelHeader icon="arrowLeft" closeLabel="Назад" title={title} onClose={onBack} action={action} />
+      <PanelHeader icon="arrowLeft" closeLabel="Назад" title={title} onClose={onBack} action={action} actions={actions} />
       <div class="rl-settings app-gm">{children}</div>
       {fab ? (
         <Presence show={fab.show} exitMs={200}>

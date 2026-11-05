@@ -53,6 +53,22 @@ test('info: members cannot rename unless allowed; rename makes a service message
   await ok(b, 'PATCH', `/groups/${id}`, { about: 'теперь можно' });
 });
 
+test('photo: a GIF or video avatar is kept with its frame, its file opens for members; a non-square or long video is refused', async () => {
+  const a = await login('Анна'), b = await login('Борис');
+  const id = await group(a, [b]);
+  const file = async (mime: string, kind: string, w: number, h: number, duration: number | null = null) => (await sql`insert into attachments (owner_id, mime, name, size, width, height, kind, duration, status)
+    values (${a.userId}, ${mime}, 'f', 1000, ${w}, ${h}, ${kind}, ${duration}, 'ready') returning id`)[0].id as string;
+  const big = await file('image/jpeg', 'photo', 640, 640), small = await file('image/jpeg', 'photo', 160, 160), thumb = 'data:image/jpeg;base64,' + 'A'.repeat(200);
+  const video = await file('video/mp4', 'round', 640, 640, 4);
+  expect((await call(a, 'PUT', `/groups/${id}/photo`, { id: big, small, thumb, video: await file('video/mp4', 'round', 640, 360, 4) })).status).toBe(400);
+  expect((await call(a, 'PUT', `/groups/${id}/photo`, { id: big, small, thumb, video: await file('video/mp4', 'round', 640, 640, 40) })).status).toBe(400);
+  await ok(a, 'PUT', `/groups/${id}/photo`, { id: big, small, thumb, video });
+  const [c] = await sql`select photo from chats where id = ${id}`;
+  expect(c.photo).toMatchObject({ id: big, small, video });
+  const { fileFor } = await import('../src/domain/files');
+  expect(await fileFor(b.userId, video)).not.toBeNull();
+});
+
 test('photo: a new photo is written into the service message (for the thumbnail under it); removal carries none', async () => {
   const a = await login('Анна'), b = await login('Борис');
   const id = await group(a, [b]);

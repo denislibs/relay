@@ -4,14 +4,14 @@
 
 export const GROUP_PAGES = [
   'gEdit', 'gType', 'gReactions', 'gPerms', 'gBanned', 'gBanPick', 'gExceptionPick', 'gException',
-  'gAdmins', 'gAdminPick', 'gAdminRights', 'gMembers', 'gAddMembers', 'gRequests', 'gInvites', 'gInvite', 'gInviteInfo', 'gDiscussion',
+  'gAdmins', 'gAdminPick', 'gAdminRights', 'gMembers', 'gAddMembers', 'gRequests', 'gInvites', 'gInvite', 'gInviteInfo', 'gDiscussion', 'gLog',
 ] as const;
 export type GroupPage = (typeof GROUP_PAGES)[number];
 
 const PARENT: Record<GroupPage, GroupPage | 'info'> = {
   gEdit: 'info', gType: 'gEdit', gReactions: 'gEdit', gPerms: 'gEdit', gBanned: 'gPerms', gBanPick: 'gBanned',
   gExceptionPick: 'gPerms', gException: 'gPerms', gAdmins: 'gEdit', gAdminPick: 'gAdmins', gAdminRights: 'gAdmins',
-  gMembers: 'gEdit', gAddMembers: 'gMembers', gRequests: 'gEdit', gInvites: 'gEdit', gInvite: 'gInvites', gInviteInfo: 'gInvites', gDiscussion: 'gEdit',
+  gMembers: 'gEdit', gAddMembers: 'gMembers', gRequests: 'gEdit', gInvites: 'gEdit', gInvite: 'gInvites', gInviteInfo: 'gInvites', gDiscussion: 'gEdit', gLog: 'gEdit',
 };
 export const parentOf = (p: GroupPage) => PARENT[p];
 export const isGroupPage = (p: string): p is GroupPage => (GROUP_PAGES as readonly string[]).includes(p);

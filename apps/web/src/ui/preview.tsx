@@ -2,8 +2,8 @@ import { isGroupService, serviceText } from './serviceText';
 import type { ServiceData, ServiceType } from '@relay/protocol';
 import { getGlobal } from '../global';
 import { personName } from '../people';
-import { SPOILER_FILL } from '@relay/protocol';
-import { SpoilerText, StickerView } from '@relay/ui';
+import { hideSpoilers, SPOILER_FILL, type ReplyQuote } from '@relay/protocol';
+import { segments, SpoilerText, StickerView } from '@relay/ui';
 import type { StickerRef } from '@relay/protocol';
 import type { ComponentChildren } from 'preact';
 import { hideCode } from './format';
@@ -113,6 +113,24 @@ export function previewBody(m: LastMessage, withThumb: boolean): ComponentChildr
   if (caption) return caption;
   // пустая строка в списке выглядит как ошибка: неизвестный тип или содержимое, которое не открылось
   return KNOWN_PREVIEW.has(String(m.kind ?? 'text')) ? (m.kind === 'text' && !m.service ? 'Сообщение недоступно' : '') : 'Сообщение не поддерживается';
+}
+
+/** Цитата части сообщения в плашке ответа: оформление сохраняется, скрытый текст — заглушкой (настоящего в DOM нет: плашка его
+ *  не раскрывает), ссылка — просто текст (вся плашка — кнопка перехода). */
+export function quoteFragment(q: ReplyQuote): ComponentChildren {
+  const shown = hideSpoilers(q.text, q.entities);
+  let at = 0;
+  return (segments(q.text, q.entities ?? []) as { text: string; marks: Record<string, unknown> }[]).map((sg, i) => {
+    const part = shown.slice(at, at + sg.text.length);
+    at += sg.text.length;
+    let n: ComponentChildren = sg.marks.spoiler ? <SpoilerText>{part}</SpoilerText> : part;
+    if (sg.marks.code) n = <code>{n}</code>;   // без rl-code: клик по плашке — переход, а не копирование кода
+    if (sg.marks.bold) n = <b>{n}</b>;
+    if (sg.marks.italic) n = <i>{n}</i>;
+    if (sg.marks.underline) n = <u>{n}</u>;
+    if (sg.marks.strike) n = <s>{n}</s>;
+    return <span key={i}>{n}</span>;
+  });
 }
 
 /** Цитата (в пузыре и над полем ввода) для сообщения любого типа: что в нём — текстом, а у медиа — миниатюра,

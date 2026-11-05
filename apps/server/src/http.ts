@@ -14,6 +14,7 @@ import { getThread, readThread } from './domain/threads';
 import { readBy } from './domain/reads';
 import { readReactions, unreadReactions } from './domain/reactionsUnread';
 import { commonGroups, deleteDirectChat, createChat, createGroup, GROUP_MEMBERS_MAX, openDirect, messageAtDate, getChatMedia, getMediaDays, getChatMediaCounts, getHistory, getMessagesByIds, listChats, listChatsPage } from './domain/chats';
+import { deleteSavedDialog, listSavedDialogs, openSavedChat, savedPeerParam, setSavedDialogPin } from './domain/saved';
 import { sql } from './db';
 import { DomainError } from './domain/errors';
 import { setChatNotify } from './domain/chatNotify';
@@ -28,6 +29,8 @@ import { resolvePeer, resolvePeers } from './domain/peerRef';
 import { initPeerKeys } from './crypto/peerKey';
 import { THEMES } from './domain/themes';
 import { setChatTheme } from './domain/chatTheme';
+import { setAutoDelete } from './domain/autoDelete';
+import { deleteScheduled, editScheduled, listScheduled } from './domain/scheduled';
 import { handleFrame } from './ws';
 import { pollVoters } from './domain/polls';
 import { mapTile } from './domain/mapTiles';
@@ -49,7 +52,7 @@ import { reactionsRoute } from './reactions/routes';
 import { animatedEmojiRoute } from './reactions/emoji';
 import { stickerRoute } from './stickers/routes';
 
-const STATUS: Record<string, number> = { bad_frame: 400, pin_limit: 409, too_long: 400, file_too_big: 413, username_invalid: 400, username_reserved: 400, username_taken: 409, bio_too_long: 400, note_too_long: 400, name_invalid: 400, birthday_invalid: 400, links_invalid: 400, folder_title: 400, folder_empty: 400, folder_too_many_chats: 400, folder_emoji: 400, folders_limit: 400, unauthorized: 401, not_member: 403, blocked: 403, not_found: 404, code_invalid: 400, code_expired: 400, flood: 429, fresh_session: 403, device_invalid: 400, password_invalid: 400, password_missing: 400, recovery_unavailable: 400, email_invalid: 400, qr_expired: 400, passkey_not_found: 404, passkey_invalid: 400, forbidden: 403, upload_missing: 409, upload_mismatch: 400, upload_pending: 409, upload_incomplete: 409, upload_limit: 429, upload_quota: 429, photo_invalid: 400 };
+const STATUS: Record<string, number> = { schedule_past: 400, schedule_far: 400, schedule_limit: 409, bad_frame: 400, pin_limit: 409, too_long: 400, file_too_big: 413, username_invalid: 400, username_reserved: 400, username_taken: 409, bio_too_long: 400, note_too_long: 400, name_invalid: 400, birthday_invalid: 400, links_invalid: 400, folder_title: 400, folder_empty: 400, folder_too_many_chats: 400, folder_emoji: 400, folders_limit: 400, unauthorized: 401, not_member: 403, blocked: 403, not_found: 404, code_invalid: 400, code_expired: 400, flood: 429, fresh_session: 403, device_invalid: 400, password_invalid: 400, password_missing: 400, recovery_unavailable: 400, email_invalid: 400, qr_expired: 400, passkey_not_found: 404, passkey_invalid: 400, forbidden: 403, upload_missing: 409, upload_mismatch: 400, upload_pending: 409, upload_incomplete: 409, upload_limit: 429, upload_quota: 429, photo_invalid: 400 };
 const fail = (code: string, retryAfter?: number) => retryAfter
   ? Response.json({ code, retryAfter }, { status: STATUS[code] ?? 500, headers: { 'retry-after': String(retryAfter) } })
   : Response.json({ code }, { status: STATUS[code] ?? 500 });
@@ -96,7 +99,7 @@ const PRE_PROOF_BYTES = 256 * 1024;
 export const WS_MAX_FRAME = 256 * 1024;
 /** кадров в секунду на сокет */
 const WS_RATE = 100;
-const API = /^\/(health|me|users|contacts|settings|privacy|blocks|chats|presence|search|uploads|files|push|sessions|session|ws|dev|logout|auth|link-preview|groups|join|sticker-sets|my-stickers|stickers-by-emoji|stickers|reactions|animated-emoji|emoji-groups|maptile|themes)(\/|$)/;
+const API = /^\/(health|me|users|contacts|settings|privacy|blocks|chats|presence|search|uploads|files|push|sessions|session|ws|dev|logout|auth|link-preview|groups|join|sticker-sets|my-stickers|my-gifs|stickers-by-emoji|stickers|reactions|animated-emoji|emoji-groups|maptile|themes)(\/|$)/;
 
 export function createServer(opts: { port: number }): Server {
   // кадры мимо журнала — через Valkey, чтобы дошли до сокетов в любом процессе
@@ -238,6 +241,14 @@ export function createServer(opts: { port: number }): Server {
         if (req.method === 'PUT' && chatFlags) return Response.json(await setChatFlags(userId, Number(chatFlags[1]), await req.json().catch(() => null)));
         const chatUnarchive = /^\/chats\/(\d{1,15})\/unarchive$/.exec(url.pathname);
         if (req.method === 'POST' && chatUnarchive) return Response.json(await unarchiveByMessage(userId, Number(chatUnarchive[1]), await req.json().catch(() => null)));
+        // отложенные сообщения (domain/scheduled.ts): снимок, правка (время, текст, send — отправить сейчас), удаление
+        if (req.method === 'GET' && url.pathname === '/chats/scheduled') return Response.json(await listScheduled(userId));
+        const scheduledOne = /^\/chats\/(\d{1,15})\/scheduled\/([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})$/.exec(url.pathname);
+        if (scheduledOne && req.method === 'PATCH') return Response.json(await editScheduled(userId, Number(scheduledOne[1]), scheduledOne[2], await req.json().catch(() => null)));
+        if (scheduledOne && req.method === 'DELETE') return Response.json(await deleteScheduled(userId, Number(scheduledOne[1]), scheduledOne[2]));
+        // автоудаление: { sec: число | null } (domain/autoDelete.ts)
+        const autoDelete = /^\/chats\/(\d{1,15})\/auto-delete$/.exec(url.pathname);
+        if (req.method === 'PUT' && autoDelete) return Response.json(await setAutoDelete(userId, Number(autoDelete[1]), ((await req.json().catch(() => ({}))) as { sec?: unknown }).sec));
         // тема чата: { theme: id | null } (domain/chatTheme.ts)
         const chatTheme = /^\/chats\/(\d{1,15})\/theme$/.exec(url.pathname);
         if (req.method === 'PUT' && chatTheme) return Response.json(await setChatTheme(userId, Number(chatTheme[1]), ((await req.json().catch(() => null)) as { theme?: unknown } | null)?.theme ?? null));
@@ -300,6 +311,19 @@ export function createServer(opts: { port: number }): Server {
           const body = (await req.json().catch(() => ({}))) as Record<string, unknown>;
           return Response.json({ id: await openDirect(userId, await resolvePeer(sql, userId, body)) });
         }
+        // «Избранное» — чат с самим собой: создаётся при первом обращении, повтор возвращает тот же
+        if (req.method === 'POST' && url.pathname === '/chats/saved') return Response.json({ id: await openSavedChat(userId) });
+        // подчаты «Избранного» (saved.ts): только владельцу чата
+        const sd = /^\/chats\/(\d+)\/saved-dialogs(?:\/([^/]+)(?:\/(pin))?)?$/.exec(url.pathname);
+        if (sd && req.method === 'GET' && !sd[2]) {
+          const before = Number(url.searchParams.get('before')), limit = Number(url.searchParams.get('limit'));
+          return Response.json(await listSavedDialogs(userId, Number(sd[1]), { before: Number.isInteger(before) && before > 0 ? before : null, ...(limit ? { limit } : {}) }));
+        }
+        if (sd && sd[3] === 'pin' && req.method === 'PUT') {
+          const body = (await req.json().catch(() => null)) as { pinned?: unknown } | null;
+          return Response.json(await setSavedDialogPin(userId, Number(sd[1]), sd[2], body?.pinned));
+        }
+        if (sd && sd[2] && !sd[3] && req.method === 'DELETE') return Response.json(await deleteSavedDialog(userId, Number(sd[1]), sd[2], url.searchParams.get('upToId')));
         if (devAllowed(req, server) && req.method === 'POST' && url.pathname === '/dev/chats') {
           const { kind, title, memberIds } = (await req.json()) as { kind: 'direct' | 'group' | 'channel'; title: string | null; memberIds: number[] };
           const ids = memberIds.includes(userId) ? memberIds : [userId, ...memberIds];
@@ -337,9 +361,9 @@ export function createServer(opts: { port: number }): Server {
         if (req.method === 'DELETE' && upload) { await abortUpload(userId, upload[1]); return new Response(null, { status: 204 }); }
         const confirmUp = /^\/uploads\/([0-9a-f-]{36})\/confirm$/.exec(url.pathname);
         if (req.method === 'POST' && confirmUp) return Response.json(await confirmUpload(userId, confirmUp[1]));
-        const file = /^\/files\/([0-9a-f-]{36})(?:\/(preview|720|medium))?$/.exec(url.pathname);
+        const file = /^\/files\/([0-9a-f-]{36})(?:\/(preview|720|medium|loop))?$/.exec(url.pathname);
         if ((req.method === 'GET' || req.method === 'HEAD') && file) {
-          // /files/<id>/preview, /files/<id>/720 — копии видео (jobs/video.ts); preview, medium — копии фото (jobs/photo.ts); ещё нет — 404, клиент берёт оригинал
+          // /files/<id>/preview, /files/<id>/720 — копии видео (jobs/video.ts); preview, medium, loop — копии фото и GIF (jobs/photo.ts); ещё нет — 404, клиент берёт оригинал
           const f = await fileFor(userId, file[1], file[2]);
           if (!f) return new Response('Not found', { status: 404 });
           // inline — только то, что браузер покажет как медиа; HTML, SVG и прочее отдаём вложением как octet-stream
@@ -357,7 +381,7 @@ export function createServer(opts: { port: number }): Server {
           const tab: MediaTab = raw === 'photo' ? 'media' : (MEDIA_TABS as readonly string[]).includes(raw ?? '') ? raw as MediaTab : 'media';   // photo — прежнее имя вкладки
           const before = Number(url.searchParams.get('beforeId')) || null;
           const limit = url.searchParams.has('limit') ? Number(url.searchParams.get('limit')) : undefined;
-          return Response.json(await getChatMedia(userId, Number(media[1]), tab, before, limit));
+          return Response.json(await getChatMedia(userId, Number(media[1]), tab, before, limit, savedPeerParam(url.searchParams.get('savedPeer'))));
         }
         const del = /^\/chats\/(\d+)\/delete$/.exec(url.pathname);
         if (del && req.method === 'POST') {
@@ -378,7 +402,7 @@ export function createServer(opts: { port: number }): Server {
           return Response.json({ days: await getMediaDays(userId, Number(mediaDays[1]), q.get('from') ?? '', q.get('to') ?? '', q.get('tz') ?? '') });
         }
         const mediaCounts = /^\/chats\/(\d+)\/media\/counts$/.exec(url.pathname);
-        if (req.method === 'GET' && mediaCounts) return Response.json(await getChatMediaCounts(userId, Number(mediaCounts[1])));
+        if (req.method === 'GET' && mediaCounts) return Response.json(await getChatMediaCounts(userId, Number(mediaCounts[1]), savedPeerParam(url.searchParams.get('savedPeer'))));
         if (url.pathname === '/push/subscription' && (req.method === 'POST' || req.method === 'DELETE')) {
           const body = (await req.json().catch(() => null)) as SubscriptionInput | null;
           if (typeof body?.endpoint !== 'string') return fail('bad_frame');
@@ -403,7 +427,7 @@ export function createServer(opts: { port: number }): Server {
         if (req.method === 'GET' && url.pathname === '/search') {
           // ?q=текст[&chatId=N][&beforeId=M][&limit=K]
           const num = (k: string) => { const v = Number(url.searchParams.get(k)); return Number.isInteger(v) && v > 0 ? v : undefined; };
-          return Response.json(await searchMessages(userId, url.searchParams.get('q') ?? '', { chatId: num('chatId'), beforeId: num('beforeId'), limit: num('limit') }));
+          return Response.json(await searchMessages(userId, url.searchParams.get('q') ?? '', { chatId: num('chatId'), beforeId: num('beforeId'), limit: num('limit'), savedPeer: savedPeerParam(url.searchParams.get('savedPeer')) }));
         }
         if (req.method === 'GET' && url.pathname === '/users') {
           return Response.json(await usersByIds(userId, (url.searchParams.get('ids') ?? '').split(',').map(Number)));
@@ -481,7 +505,7 @@ export function createServer(opts: { port: number }): Server {
           if (ids) return Response.json({ messages: await getMessagesByIds(userId, Number(hist[1]), ids.split(',').map(Number).filter((n) => Number.isInteger(n) && n > 0).slice(0, 100)) });
           const before = url.searchParams.get('before'), after = Number(url.searchParams.get('after'));
           const limit = Number(url.searchParams.get('limit') ?? 50);
-          return Response.json(await getHistory(userId, Number(hist[1]), before ? Number(before) : null, limit, Number.isInteger(after) && after > 0 ? after : null));
+          return Response.json(await getHistory(userId, Number(hist[1]), before ? Number(before) : null, limit, Number.isInteger(after) && after > 0 ? after : null, savedPeerParam(url.searchParams.get('savedPeer'))));
         }
         return new Response('Not found', { status: 404 });
       } catch (err) {

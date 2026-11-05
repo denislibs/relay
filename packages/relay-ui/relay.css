@@ -40,6 +40,12 @@ body { margin: 0; font-family: var(--font-sans); color: var(--ink); background: 
 /* ---------- Avatar ---------- */
 .rl-avatar { position: relative; display: inline-flex; align-items: center; justify-content: center; flex-shrink: 0; border-radius: 50%; background: var(--avatar-bg); color: var(--avatar-fg); font-weight: 600; overflow: visible; user-select: none; }
 .rl-avatar img { width: 100%; height: 100%; border-radius: 50%; object-fit: cover; }
+.rl-avatar-saved { background: var(--brand-text); color: #fff; }
+/* подчаты «Избранного»: «Мои заметки» — акцентом, как закладка; «Автор скрыт» — приглушённо-фиолетовым */
+.rl-avatar-notes { background: var(--brand-text); color: #fff; }
+.rl-avatar-hidden { background: #8a7fb0; color: #fff; }
+/* автоудаление: значок на углу, слева — справа точка «в сети» */
+.rl-avatar-timer { position: absolute; left: -2px; bottom: -2px; display: inline-flex; align-items: center; justify-content: center; padding: 1px; border-radius: 50%; background: var(--brand-text); color: #fff; box-shadow: 0 0 0 2px var(--surface, #fff); line-height: 0; }
 .rl-avatar-logo { --logo-ink: #0b8a5f; background: linear-gradient(145deg, #2fd38a, #0f9d7a 55%, #0c7f86); box-shadow: inset 0 0 0 1px rgba(255,255,255,.12); }
 /* фото: инициалы под ним, размытое превью поверх, само фото проявляется по загрузке (из кэша — сразу) */
 .rl-avatar-thumb, .rl-avatar > .rl-avatar-img { position: absolute; inset: 0; border-radius: 50%; }
@@ -179,6 +185,30 @@ body { margin: 0; font-family: var(--font-sans); color: var(--ink); background: 
 .rl-bubble-author-link:hover { text-decoration: underline; }
 .rl-bubble-author-link:focus-visible { outline: 2px solid currentColor; outline-offset: 2px; border-radius: 4px; }
 .rl-bubble-text { white-space: pre-wrap; }
+/* цитата в тексте: цвет — как у остальных акцентов пузыря (--bq-tone: свои — --out-ink, чужие — акцент темы) */
+@property --rl-bq-fade { syntax: '<length>'; inherits: false; initial-value: 0px; }
+.rl-bq { --bq-tone: var(--brand-text, var(--brand)); position: relative; display: block; margin: 4px 0; padding: 3px 22px 3px 10px; border-radius: 6px; overflow: hidden; background: color-mix(in srgb, var(--bq-tone) 12%, transparent); }
+.rl-bubble-out .rl-bq { --bq-tone: var(--out-ink); }
+.rl-bq::before { content: ""; position: absolute; left: 0; top: 0; bottom: 0; width: 3px; background: var(--bq-tone); }
+.rl-bq-icon { position: absolute; top: 4px; right: 5px; color: var(--bq-tone); opacity: .8; }
+.rl-bq-body { display: block; }
+.rl-bq-nl { display: none; }
+/* свёрнутая высота — CSS с первого кадра: и строка ленты, и оценка первого экрана знают её без замеров */
+.rl-bq-collapsible:not(.rl-bq-open) > .rl-bq-body { max-height: calc(3lh); overflow: hidden; }
+.rl-bq-collapsible > .rl-bq-body { overflow: hidden; }
+.rl-bq-fold > .rl-bq-body { --rl-bq-fade: 0px; transition: --rl-bq-fade 260ms var(--ease-out); -webkit-mask-image: linear-gradient(to bottom, #000 calc(100% - var(--rl-bq-fade)), transparent); mask-image: linear-gradient(to bottom, #000 calc(100% - var(--rl-bq-fade)), transparent); }
+.rl-bq-fold:not(.rl-bq-open) > .rl-bq-body { --rl-bq-fade: 1.2lh; }
+.rl-bq-fold:not(.rl-bq-open) { cursor: pointer; }
+.rl-bq-toggle { position: absolute; right: 2px; bottom: 2px; display: inline-flex; align-items: center; justify-content: center; width: 20px; height: 20px; padding: 0; border: 0; border-radius: 50%; background: transparent; color: var(--bq-tone); cursor: pointer; }
+.rl-bq-toggle:hover { background: color-mix(in srgb, var(--bq-tone) 16%, transparent); }
+.rl-bq-toggle > svg { transition: transform 260ms var(--ease-out); }
+.rl-bq-open > .rl-bq-toggle > svg { transform: rotate(180deg); }
+@media (prefers-reduced-motion: reduce) { .rl-bq-fold > .rl-bq-body, .rl-bq-toggle > svg { transition: none; } }
+/* подсветка цитируемого фрагмента в исходном: Custom Highlight API, DOM не меняется; угасание — ступенями (quoteHit.ts) */
+::highlight(rl-quote-hit-1) { background-color: rgba(255, 196, 0, .5); }
+::highlight(rl-quote-hit-2) { background-color: rgba(255, 196, 0, .36); }
+::highlight(rl-quote-hit-3) { background-color: rgba(255, 196, 0, .22); }
+::highlight(rl-quote-hit-4) { background-color: rgba(255, 196, 0, .1); }
 .rl-bubble-spacer { display: inline-block; width: 68px; height: 1px; }
 .rl-bubble-in-side .rl-bubble-spacer { width: 44px; }
 :root[data-time12] .rl-bubble-spacer { width: 96px; }
@@ -227,6 +257,13 @@ body { margin: 0; font-family: var(--font-sans); color: var(--ink); background: 
 .rl-composer-editable :is(b, strong) { font-weight: 600; }
 .rl-composer-editable code { font-family: var(--font-mono, ui-monospace, SFMono-Regular, Menlo, monospace); font-size: .92em; color: var(--brand-text, var(--brand)); }
 .rl-composer-editable a { color: var(--brand-text, var(--brand)); text-decoration: underline; text-underline-offset: 2px; }
+/* цитата в поле: блок с полосой; переключатель «сворачивать» — нарисованная стрелка, в значение не входит */
+.rl-composer-editable blockquote { position: relative; display: block; margin: 2px 0; padding: 2px 30px 2px 10px; border-radius: 6px; border-left: 3px solid var(--brand-text, var(--brand)); background: color-mix(in srgb, var(--brand-text, var(--brand)) 10%, transparent); }
+.rl-bq-edit-toggle { position: absolute; top: 3px; right: 4px; width: 20px; height: 20px; border-radius: 50%; cursor: pointer; user-select: none; color: var(--ink-muted); opacity: .85; }
+.rl-bq-edit-toggle:hover { background: color-mix(in srgb, var(--ink) 10%, transparent); }
+.rl-bq-edit-toggle::before { content: ""; position: absolute; left: 6px; top: 8px; width: 6px; height: 6px; border: solid currentColor; border-width: 2px 2px 0 0; transform: rotate(-45deg); transition: transform var(--dur-fast, 140ms) var(--ease-out); }
+blockquote[data-collapsed] > .rl-bq-edit-toggle { color: var(--brand-text, var(--brand)); }
+blockquote[data-collapsed] > .rl-bq-edit-toggle::before { top: 4px; transform: rotate(135deg); }
 .rl-composer-editable .rl-spoiler-edit { border-radius: 4px; background: var(--rl-spoiler-dots-gray) 0 0 / 60px 20px, color-mix(in srgb, var(--ink) 10%, transparent); animation: rl-spoiler-dots-bg 7s linear infinite; }   /* в поле ввода текст виден, поверх бледные точки */
 @keyframes rl-spoiler-dots-bg { to { background-position: 60px 20px, 0 0; } }
 /* плейсхолдер — отдельный слой: при вводе уезжает вперёд и гаснет, при очистке возвращается */
@@ -803,6 +840,12 @@ button.rl-quote:active { background: var(--quote-bg-active, var(--pressed)); }
 .rl-quote-text { display: block; font: 400 calc(var(--message-text-size, 16px) - 2px)/calc(var(--message-text-size, 16px) + 2px) var(--font-sans); color: var(--bubble-meta); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .rl-quote-text > svg { display: inline-block; vertical-align: -2px; margin-right: 4px; }
 .rl-quote-thumb { width: 52px; flex-shrink: 0; }
+/* цитата части сообщения: текст фрагмента до трёх строк, без замеров (высота — по содержимому, line-clamp) */
+.rl-quote-frag .rl-quote-text { display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 3; line-clamp: 3; white-space: pre-wrap; overflow-wrap: anywhere; color: var(--ink); text-align: left; }
+.rl-bubble-out .rl-quote-frag .rl-quote-text { color: inherit; }
+.rl-quote-frag .rl-quote-body { padding-right: 20px; }
+.rl-quote-frag-icon { position: absolute; top: 5px; right: 5px; color: var(--quote-tone); opacity: .75; }
+.rl-composer-reply .rl-quote-frag .rl-quote-text { -webkit-line-clamp: 1; line-clamp: 1; }
 .rl-quote .rl-iconbtn { align-self: center; width: 32px; height: 32px; margin-right: 4px; }
 
 /* ---------- Reactions (как в Telegram) ---------- */
@@ -1040,7 +1083,7 @@ button.rl-quote:active { background: var(--quote-bg-active, var(--pressed)); }
 /* =====================================================================
    Floating layout — cards over the wallpaper (Telegram Web K–style)
    ===================================================================== */
-.rl-shell { position: relative; display: flex; gap: var(--space-float); height: 100%; padding: var(--space-float); overflow: hidden; }
+.rl-shell { position: relative; display: flex; gap: var(--space-float); height: 100%; padding: var(--space-float); overflow: clip; }   /* clip, не hidden: focus и scrollIntoView не сдвинут слой, скрытые кадры стека шире окна */
 .rl-shell-side { position: relative; z-index: 2; flex: 0 0 var(--side-w, var(--side-default, clamp(256px, 33vw, 424px))); min-width: 0; display: flex; }
 .rl-shell-main { position: relative; flex: 1; min-width: 0; display: flex; flex-direction: column; gap: var(--space-float); }
 
@@ -1280,7 +1323,10 @@ button.rl-tab:hover { color: var(--ink); }
 .rl-shell .rl-composer-field { align-items: flex-end; min-height: 40px; padding: 0; border-radius: 0; background: transparent; box-shadow: none; }
 .rl-shell .rl-composer-field :is(input, textarea) { font-size: var(--message-text-size, 16px); line-height: round(calc(var(--message-text-size, 16px) * 1.3125), 1px); padding-inline: 4px; }
 .rl-shell .rl-composer-input { --line: round(calc(var(--message-text-size, 16px) * 1.3125), 1px); }
-.rl-shell .rl-composer-editable, .rl-shell .rl-composer-ph { padding-inline: 4px; left: 4px; }
+/* плейсхолдер и каретка на одной вертикали: начинают с одной точки, текст не сдвигается при вводе */
+.rl-shell .rl-composer-input { margin-inline-start: -4px; }
+.rl-shell .rl-composer-editable, .rl-shell .rl-composer-ph { padding-inline: 2px; left: 0; }
+.rl-shell .rl-composer-field > .rl-iconbtn > .rl-icon { width: 24px; height: 24px; }
 .rl-shell .rl-composer-field .rl-iconbtn { width: 40px; height: 40px; color: var(--ink-muted); }
 .rl-shell .rl-composer-send { width: 40px; height: 40px; box-shadow: none; }
 
@@ -2771,3 +2817,10 @@ html[data-anim="0"] .rl-symbols-pop { transition: none; }
    полей цветом вторичного текста, а не бледнее него */
 .rl-contrast .rl-bubble a:not(.rl-link-card):not(.rl-webpage), .rl-contrast .rl-link { text-decoration: underline; }
 .rl-contrast input::placeholder, .rl-contrast textarea::placeholder, .rl-contrast [data-placeholder]::before { color: var(--ink-muted); opacity: 1; }
+
+/* Отложенные: значок часов со счётчиком у поля ввода */
+.rl-composer-sched { position: relative; display: grid; place-items: center; width: 2.5rem; height: 2.5rem; flex: none; padding: 0; border: 0; border-radius: 50%; background: transparent; color: var(--ink-muted); cursor: pointer; transition: color 120ms ease; }
+.rl-composer-sched:hover { color: var(--brand-strong); }
+.rl-composer-sched-n { position: absolute; top: 3px; right: 1px; min-width: 16px; height: 16px; padding: 0 4px; border-radius: 8px; background: var(--brand); color: #fff; font: 600 11px/16px var(--font-sans); text-align: center; pointer-events: none; }
+.rl-presence[data-state="open"] > .rl-composer-sched { animation: rl-pop-in 160ms var(--ease-out, ease-out) both; }
+.rl-presence[data-state="closing"] > .rl-composer-sched { animation: rl-pop-out 140ms var(--ease-in, ease-in) forwards; }

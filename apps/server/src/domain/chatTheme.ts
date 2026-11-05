@@ -1,4 +1,5 @@
 import { sql } from '../db';
+import { logAdminAction } from './adminLog';
 import { DomainError } from './errors';
 import { canChangeInfo, groupCtx, isCommunity } from './groupRights';
 import { chatEvent } from './journal';
@@ -35,6 +36,8 @@ export async function setChatTheme(userId: number, chatId: number, raw: unknown)
     await tx`update chats set theme = ${theme} where id = ${chatId}`;
     const t = theme ? themeById(theme)! : null;
     await serviceMessage(tx, chatId, userId, 'theme_changed', t ? { emoji: t.emoji, title: t.title } : {}, '', kind);
+    const was = c.theme ? themeById(c.theme as string) : null;
+    await logAdminAction(tx, chatId, userId, 'theme_changed', { from: was ? { emoji: was.emoji, title: was.title } : null, to: t ? { emoji: t.emoji, title: t.title } : null });   // в личном чате не пишется
     await chatEvent(tx, chatId, { type: 'chatTheme', chatId, theme }, kind);
     return { ok: true };
   });

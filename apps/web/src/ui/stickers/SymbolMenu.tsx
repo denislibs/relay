@@ -10,12 +10,16 @@ import { useEmojiGroups } from '../../emojiGroups';
 import { animatedEmojiUrl, useAnimatedEmoji } from '../../animatedEmoji';
 import { StickerPreviewHold } from './StickerPreview';
 import { EmojiGlyph } from './emojiImage';
+import { GifsTab } from './GifsTab';
+import type { SavedGif } from '@relay/protocol';
+import type { GifSend } from '../../gifs';
 
 // Панель эмодзи и стикеров над полем ввода — по образцу Telegram Web K: полоса категорий сверху (49 px),
 // строка поиска с контурными фильтрами прокручивается вместе с содержимым, заголовки секций по центру,
 // вкладки внизу. Панель живёт в DOM и после закрытия (composer.js), поэтому «Недавние» обновляются только
 // когда она закрыта — под курсором ничего не перестраивается.
-type Tab = 'emoji' | 'stickers';
+type Tab = 'emoji' | 'stickers' | 'gifs';
+const TABS: Tab[] = ['emoji', 'stickers', 'gifs'];
 const TAB_KEY = 'relay.symbols.tab';
 const CLOSE_MS = 180;   // закрытие панели (composer.js, relay.css .rl-symbols-pop.is-closing)
 const SLIDE_MS = 200;   // смена вкладки: обе едут вместе (Web Animations, SymbolMenu)
@@ -30,6 +34,7 @@ export interface SymbolMenuProps {
   onEmoji(e: string): void;
   onBackspace(): void;
   onSticker(s: StickerRef): void;
+  onGif(g: SavedGif, how?: GifSend): void;
   onSearch(): void;   // правая панель «Стикеры»
 }
 
@@ -37,7 +42,7 @@ export function SymbolMenu(p: SymbolMenuProps) {
   const [tab, setTab] = useState<Tab>(() => { try { return (localStorage.getItem(TAB_KEY) as Tab) || 'emoji'; } catch { return 'emoji'; } });
   // как в Telegram Web K: обе вкладки, раз построенные, живут в DOM (скрытая — display: none, её стикеры стоят).
   // Переключение — только показ: без перерисовки сетки, новых плееров стикеров и сборки мусора от старых
-  const [built, setBuilt] = useState<Record<Tab, boolean>>(() => ({ emoji: tab === 'emoji', stickers: tab === 'stickers' }));
+  const [built, setBuilt] = useState<Record<Tab, boolean>>(() => ({ emoji: tab === 'emoji', stickers: tab === 'stickers', gifs: tab === 'gifs' }));
   // Смена вкладки — как в Telegram Web K: уходящая и новая едут вместе на всю ширину, без прозрачности (затухание
   // показывало пустой фон панели — «вспышку белым»). Два шага: prep — новая вкладка показана из display: none,
   // разложена и нарисована за краем панели (это и есть дорогой кадр, но до начала движения); следующим кадром —
@@ -46,13 +51,13 @@ export function SymbolMenu(p: SymbolMenuProps) {
   // Обе вкладки — постоянные слои (will-change в CSS): слайд не перерисовывает, а двигает их
   const [prep, setPrep] = useState<Tab | null>(null);
   const [slide, setSlide] = useState<{ from: Tab } | null>(null);
-  const bodies = useRef<Record<Tab, HTMLDivElement | null>>({ emoji: null, stickers: null });
-  const [warm, setWarm] = useState<Record<Tab, boolean>>({ emoji: false, stickers: false });
+  const bodies = useRef<Record<Tab, HTMLDivElement | null>>({ emoji: null, stickers: null, gifs: null });
+  const [warm, setWarm] = useState<Record<Tab, boolean>>({ emoji: false, stickers: false, gifs: false });
   // построенная вкладка сначала разложена и нарисована под текущей — дальше её можно прятать, не теряя раскладки.
   // Под текущей, а не за краем: так её стикеры «видны» наблюдателям и успевают нарисовать первый кадр — при первом
   // показе вкладка въезжает со стикерами, а не с серыми силуэтами
   useEffect(() => {
-    const cold = (['emoji', 'stickers'] as Tab[]).filter((t) => built[t] && !warm[t]);
+    const cold = TABS.filter((t) => built[t] && !warm[t]);
     if (!cold.length) return;
     const t0 = performance.now();
     let timer = 0;
@@ -68,7 +73,7 @@ export function SymbolMenu(p: SymbolMenuProps) {
     };
     timer = window.setTimeout(check, WARM_MS);
     return () => clearTimeout(timer);
-  }, [built.emoji, built.stickers]);
+  }, [built.emoji, built.stickers, built.gifs]);
   const leaving = useRef<Animation | null>(null);
   // закрыли панель — со следующего открытия «Недавние» свежие. Вкладки не пересоздаются (как в Telegram Web K:
   // вкладка, прокрутка и подсветка категории остаются), только перечитывают снимок «Недавних» — после анимации
@@ -85,11 +90,11 @@ export function SymbolMenu(p: SymbolMenuProps) {
   // вторая вкладка строится заранее, скрытой (display: none), когда панель уже открылась и анимация прошла:
   // к нажатию на неё данные паков на месте — в кадре подготовки уже стоит сетка, а не въезжает пустая вкладка
   useEffect(() => {
-    if (!p.open || (built.emoji && built.stickers)) return;
-    const other: Tab = tab === 'emoji' ? 'stickers' : 'emoji';
+    const other = TABS.find((x) => !built[x]);   // по одной: тяжёлые вкладки не строятся в одном кадре
+    if (!p.open || !other) return;
     const t = setTimeout(() => setBuilt((b) => (b[other] ? b : { ...b, [other]: true })), PREBUILD_MS);
     return () => clearTimeout(t);
-  }, [p.open, built.emoji && built.stickers]);
+  }, [p.open, built.emoji, built.stickers, built.gifs]);
   const pick = (t: Tab) => {
     if (t === tab || t === prep) return;
     setBuilt((b) => (b[t] ? b : { ...b, [t]: true }));
@@ -97,7 +102,7 @@ export function SymbolMenu(p: SymbolMenuProps) {
     if (reducedMotion()) { setSlide(null); setTab(t); return; }
     setPrep(t);
   };
-  const shift = (t: Tab) => (t === 'stickers' ? 100 : -100);   // где новая вкладка ждёт: справа «Стикеры», слева «Эмодзи»
+  const shift = (t: Tab) => (TABS.indexOf(t) > TABS.indexOf(tab) ? 100 : -100);   // где новая вкладка ждёт: правее текущей — справа
   // кадр подготовки: новая вкладка стоит на своём месте, но под текущей (вкладки непрозрачны) — так браузер рисует
   // её целиком; за краем панели её обрезал бы overflow, и отрисовка досталась бы первому кадру движения
   useLayoutEffect(() => {
@@ -130,7 +135,7 @@ export function SymbolMenu(p: SymbolMenuProps) {
   // не перерисовывает сотни стикеров и эмодзи (без этого кадр старта длился ~50 мс)
   const handlers = useRef(p);
   handlers.current = p;
-  const stable = useRef({ emoji: (e: string) => handlers.current.onEmoji(e), sticker: (s: StickerRef) => handlers.current.onSticker(s), animate: (e: string) => animatedEmojiUrl(e.replace(/\uFE0F/g, '')) }).current;
+  const stable = useRef({ emoji: (e: string) => handlers.current.onEmoji(e), sticker: (s: StickerRef) => handlers.current.onSticker(s), gif: (g: SavedGif, how?: GifSend) => handlers.current.onGif(g, how), animate: (e: string) => animatedEmojiUrl(e.replace(/\uFE0F/g, '')) }).current;
   useAnimatedEmoji(p.open);   // каталог анимаций эмодзи: под курсором эмодзи панели оживает, как в выборе иконки папки
   const body = (t: Tab) => {
     if (!built[t]) return null;
@@ -143,7 +148,10 @@ export function SymbolMenu(p: SymbolMenuProps) {
     return (
       <div class="app-sym-body" key={t} ref={(el) => { bodies.current[t] = el; }} data-off={hide ? '' : undefined} aria-hidden={off || undefined}
         style={off && !warm[t] ? { zIndex: -1 } : undefined}>
-        {t === 'emoji' ? <EmojiTabMemo onPick={stable.emoji} animate={stable.animate} tones epoch={epoch} /> : <StickersTabMemo onPick={stable.sticker} epoch={epoch} />}
+        {t === 'emoji' ? <EmojiTabMemo onPick={stable.emoji} animate={stable.animate} tones epoch={epoch} />
+          : t === 'stickers' ? <StickersTabMemo onPick={stable.sticker} epoch={epoch} />
+          // играет только показанная вкладка открытой панели: заранее построенная и закрытая стоят
+          : <GifsTab active={p.open && tab === 'gifs'} onPick={stable.gif} />}
       </div>
     );
   };
@@ -151,16 +159,17 @@ export function SymbolMenu(p: SymbolMenuProps) {
     <div class="app-sym">
       {body('emoji')}
       {body('stickers')}
+      {body('gifs')}
       {/* на время слайда нажатия ловит прозрачный щит: pointer-events на самих вкладках наследуется и стоил бы пересчёта стилей */}
       {prep || slide ? <div class="app-sym-shield" /> : null}
       {/* вкладки — маленькой «пилюлей» поверх содержимого, как в Telegram для macOS; по бокам — круглые кнопки */}
       <div class="app-sym-bar">
         {tab === 'stickers' ? <IconButton class="app-sym-bar-btn app-sym-bar-left" icon="search" size={20} label="Найти стикеры" onClick={p.onSearch} /> : null}
-        <div class="app-sym-tabs" role="tablist" style={{ '--sym-at': tab === 'emoji' ? 0 : 1 }}>
+        <div class="app-sym-tabs" role="tablist" style={{ '--sym-at': TABS.indexOf(tab) }}>
           <span class="app-sym-tabs-pill" aria-hidden="true" />
           <button type="button" role="tab" aria-selected={tab === 'emoji'} class={'app-sym-tab' + (tab === 'emoji' ? ' is-on' : '')} onClick={() => pick('emoji')}>Эмодзи</button>
           <button type="button" role="tab" aria-selected={tab === 'stickers'} class={'app-sym-tab' + (tab === 'stickers' ? ' is-on' : '')} onClick={() => pick('stickers')}>Стикеры</button>
-          <button type="button" role="tab" aria-selected={false} class="app-sym-tab" disabled title="GIF — скоро">GIF</button>
+          <button type="button" role="tab" aria-selected={tab === 'gifs'} class={'app-sym-tab' + (tab === 'gifs' ? ' is-on' : '')} onClick={() => pick('gifs')}>GIF</button>
         </div>
         {tab === 'emoji' ? <IconButton class="app-sym-bar-btn app-sym-bar-right" icon="backspace" size={20} label="Стереть" onClick={p.onBackspace} /> : null}
       </div>

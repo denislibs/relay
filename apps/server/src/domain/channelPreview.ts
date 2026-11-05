@@ -23,17 +23,17 @@ export async function channelPreview(userId: number, chatId: number): Promise<Ch
   }
   const { pending: _p, kind: _k, ...info } = await groupInfo(sql, chatId);
   const [rows, pins, seq, [req]] = await Promise.all([
-    sql`select * from messages where chat_id = ${chatId} and not deleted order by id desc limit 1`,   // последнее — не удалённое (как listChats)
+    sql`select * from messages where chat_id = ${chatId} and not deleted and (expires_at is null or expires_at > now()) order by id desc limit 1`,   // последнее — не удалённое (как listChats)
     sql`select message_id from pinned_messages where chat_id = ${chatId} order by message_id desc limit 100`,
     chatSeqOf(chatId),
-    sql`select exists (select 1 from chat_join_requests r where r.chat_id = ${chatId} and r.user_id = ${userId}) as requested`,
+    sql`select exists (select 1 from chat_join_requests r where r.chat_id = ${chatId} and r.user_id = ${userId}) as requested, (select auto_delete_sec from chats where id = ${chatId}) as auto_delete_sec`,
   ]);
   const last = (await withAllReactions((await openRows(rows)).map(toMessage), userId))[0] ?? null;
   return {
     member: false,
     requested: !!req?.requested,
     chat: {
-      id: chatId, kind: 'channel', title: info.title, lastReadId: 0, unread: 0, last, peer: null, peerReadUpTo: 0, seq,
+      id: chatId, kind: 'channel', title: info.title, lastReadId: 0, unread: 0, last, peer: null, peerReadUpTo: 0, seq, autoDeleteSec: (req?.auto_delete_sec as number | null) ?? null,
       pinned: pins.map((r) => Number(r.message_id)),
       // владельца канала подписчикам не раскрываем; заявки — только тем, кто их принимает
       group: { ...info, ownerId: null, requests: 0 },

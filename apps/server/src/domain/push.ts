@@ -103,7 +103,7 @@ export async function unsubscribe(userId: number, endpoint: string): Promise<voi
 /** mention — упоминание меня (push.mention): SW может показать его даже в заглушённом чате. */
 export type PushPayload = { chatId: number; id: number; title: string; body: string; system?: true; mention?: true };
 
-export type PushMessage = { chatId: number; id: number; senderId: number; body: string; entities?: { type: string; offset: number; length: number }[]; kind?: string; attachment?: { name?: string } | null; service?: { type: string }; sticker?: { emoji?: string } | null; post?: boolean; album?: number };   // album — файлов в альбоме (одно уведомление на все)
+export type PushMessage = { chatId: number; id: number; senderId: number; body: string; entities?: { type: string; offset: number; length: number }[]; kind?: string; attachment?: { name?: string } | null; service?: { type: string }; sticker?: { emoji?: string } | null; post?: boolean; album?: number; silent?: boolean; reminder?: boolean };   // album — файлов в альбоме (одно уведомление на все)
 
 /** Новое сообщение → кому и что слать (задача push.message): подписки участников без соединения в любом процессе,
  *  кроме отправителя, заглушивших чат и заблокировавших отправителя.
@@ -127,6 +127,8 @@ export type PushCursor = [number, string];
  */
 export async function planPushPage(m: PushMessage, opts: { excludeChatId?: number; mentionOf?: number; after?: PushCursor; limit?: number } = {}):
   Promise<{ targets: { endpoint: string; push: PushPayload }[]; last: PushCursor | null; full: boolean }> {
+  // «без звука»: сообщение и счётчик приходят журналом, push нет никому — и упомянутым тоже
+  if (m.silent) return { targets: [], last: null, full: false };
   const excl = opts.excludeChatId ?? null, only = opts.mentionOf ?? null;
   const [afterUid, afterEp] = opts.after ?? [0, ''];
   const limit = opts.limit ?? null;
@@ -141,7 +143,7 @@ export async function planPushPage(m: PushMessage, opts: { excludeChatId?: numbe
     join chat_members cm on cm.user_id = s.user_id and cm.chat_id = ${m.chatId}
     join sessions se on se.id = s.session_id
     left join user_settings us on us.user_id = s.user_id
-    where s.user_id <> ${m.senderId}
+    where ${m.reminder ? sql`true` : sql`s.user_id <> ${m.senderId}`}   -- своё не уведомляет; напоминание себе в «Избранное» — как раз уведомляет
       ${only != null ? sql`and s.user_id = ${only}` : sql`
       and not (${m.chatId} = any(s.muted))
       and (cm.mute_until is null or cm.mute_until <= now())   -- выключенный на аккаунте чат: мьют 'infinity' в будущем всегда
@@ -177,6 +179,8 @@ export async function planPushPage(m: PushMessage, opts: { excludeChatId?: numbe
     // пост (канал или его копия в группе) — от имени канала: заголовок — название чата, имени автора нет
     const push: PushPayload = s.hide_text === true
       ? { chatId: m.chatId, id: m.id, title: 'Relay', body: NO_PREVIEW }
+      : m.reminder
+      ? { chatId: m.chatId, id: m.id, title: 'Напоминание', body: shown ? preview : NO_PREVIEW }
       : kind === 'channel' || m.post
       ? { chatId: m.chatId, id: m.id, title: (info.title as string) ?? 'Канал', body: shown ? preview : NO_PREVIEW }
       : kind === 'group'

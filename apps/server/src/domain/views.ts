@@ -38,7 +38,7 @@ export async function countViews(userId: number, chatId: number, raw: unknown): 
   // только посты этого канала, видимые подписчику; служебные и удалённые не считаются
   const posts = (await sql`
     select id from messages where chat_id = ${chatId} and id = any(${asked}::bigint[]) and id >= ${ctx.historyFrom}
-       and post and not deleted and service_type is null`).map((r) => Number(r.id));
+       and post and not deleted and (expires_at is null or expires_at > now()) and service_type is null`).map((r) => Number(r.id));
   if (!posts.length) return { views: [] };
   let fresh: number[] = [];
   try {

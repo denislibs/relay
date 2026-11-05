@@ -1,4 +1,6 @@
 import { bindStickers } from './stickers';
+import { bindGifs, gifsRevChanged } from './gifs';
+import { deviceStore, forgetAttachments } from './mediaCache';
 import { showToast } from './settingsData';
 import { coverThumb, readAudioTags } from './id3';
 import { getPrefs } from './prefs';
@@ -8,11 +10,12 @@ import { beginHeavyAnimation, nudgeWallpaper, requestMutation, toBase64 } from '
 import { connectEngine, EngineClient, Mirror } from '@relay/sync-engine/src/client';
 import type { Item, Patch, Query, SearchResult } from '@relay/sync-engine/src/types';
 import { hideSpoilers, MAX_FILE_BYTES, type Entity } from '@relay/protocol';
+import { replyArgs, type ReplyRef } from './replyRef';
 import { activeFrame, findChat, frameByKey, getGlobal, isPhone, setGlobal, subscribeGlobal, type ChatFrame, type FeedMeta, type Me, type Status, type UploadItem } from './global';
 import { closeLayer, closeLayers, pushLayer } from './nav';
 import { notifyIncoming, startNotify } from './notify';
 import { noteIncoming } from './title';
-import { rememberKeysIn, startFileKeyService } from './fileKeys';
+import { dropKeys, rememberKeysIn, startFileKeyService } from './fileKeys';
 import { bindMute, isMuted, startMuteMigration } from './mute';
 import { bindChatFlags, clearUnreadMark } from './chatFlags';
 import { startPeople, wantPeople } from './people';
@@ -21,6 +24,7 @@ import { cachedPinned, rememberPinned, resetPinned, settleWithin } from './pinne
 import { resetCommonGroups } from './commonGroups';
 import { resetPersonalChannels } from './personalChannel';
 import { cachedMedia, resetMediaTabs } from './mediaTab';
+import { resetSavedDialogs } from './savedDialogs';
 import { isSystemChat } from './ui/format';
 import { asset } from './assets';
 import { compressPhoto } from './media/compressPhoto';
@@ -62,10 +66,11 @@ export function startData(me: Me, fromUrl = true): void {
   engine.onData(rememberKeysIn);
   startFileKeyService();
   startPeople(engine);
-  resetMembers(); resetMediaTabs(); resetMediaDays(); resetCommonGroups(); resetPersonalChannels(); resetPinned();   // вход другим пользователем без перезагрузки: кэши отрисовки прежнего — прочь
+  resetSavedDialogs(); resetMembers(); resetMediaTabs(); resetMediaDays(); resetCommonGroups(); resetPersonalChannels(); resetPinned();   // вход другим пользователем без перезагрузки: кэши отрисовки прежнего — прочь
   bindMute((chatId, muteUntil) => engine.call({ type: 'setMute', chatId, muteUntil }));
   bindChatFlags((chatId, f) => engine.call({ type: 'setChatFlags', chatId, ...f }));
   bindStickers((a) => engine.call(a as never));
+  bindGifs((a) => engine.call(a as never));
   startMuteMigration();   // прежние relay.muted / relay.mutedUntil — на сервер, один раз (до первого снимка: значки не мигают)
   // позиции прокрутки из IndexedDB — до первого открытия чата (ответ движка приходит раньше списка чатов)
   void engine.call({ type: 'positions' }).then((r) => { for (const [k, v] of Object.entries((r as Record<string, { key: string; sort: number; offset: number }>) ?? {})) if (!dirtyPositions.has(k)) positions.set(k, v); }).catch(() => { /* без кэша — как раньше, только память */ });
@@ -100,7 +105,18 @@ export function startData(me: Me, fromUrl = true): void {
   const counters = new Mirror();
   engine.watch({ kind: 'counters' }, (p) => { counters.apply(p); const c = counters.list()[0]; if (c) setGlobal({ counters: { unreadChats: c.unreadChats as number, unreadMessages: c.unreadMessages as number } }); });
   const status = new Mirror();
-  engine.watch({ kind: 'status' }, (p) => { status.apply(p); const s = status.list()[0] as unknown as Status | undefined; if (s) { setGlobal({ status: s }); showPhase(s); } });
+  // файлы исчезнувших сообщений (автоудаление): кэш медиа и ключи на устройстве, потом подтверждение движку. Сбой — не беда:
+  // список лежит в движке и придёт снова при следующем запуске
+  let clearing = false;
+  const clearExpiredFiles = (ids: string[] | undefined) => {
+    if (!ids?.length || clearing) return;
+    clearing = true;
+    void Promise.all([forgetAttachments(deviceStore(), ids), dropKeys(ids)])
+      .then(() => { navigator.serviceWorker?.controller?.postMessage({ type: 'attachments:forget-keys' }); return engine.call({ type: 'ackExpiredFiles', ids }); })
+      .catch((e) => console.warn('auto-delete files:', String(e)))
+      .finally(() => { clearing = false; });
+  };
+  engine.watch({ kind: 'status' }, (p) => { status.apply(p); const s = status.list()[0] as unknown as Status | undefined; if (s) { setGlobal({ status: s }); showPhase(s); clearExpiredFiles(s.expiredFiles); gifsRevChanged((s as { gifsRev?: number }).gifsRev ?? 0); } });
   const uploads = new Mirror();
   engine.watch({ kind: 'uploads' }, (p) => { uploads.apply(p); setGlobal({ uploads: uploads.list() as unknown as UploadItem[] }); });
   // закрытие вкладки, пока файл грузится: как в Telegram, спросим (очередь переживёт перезагрузку, но незагруженное придётся догружать)
@@ -114,7 +130,25 @@ export function startData(me: Me, fromUrl = true): void {
   // #chat=…&thread=… при загрузке: нижний слой — чат (тред гостя, &via= — канал поста), тред — поверх него (docs/navigation-rules.md)
   const open = parseHash(location.hash);
   if (open && !fromUrl) history.replaceState(history.state, '', location.pathname + location.search);
-  else if (open) { openChat(baseOf(open)); if (open.threadId != null) whenShown(baseOf(open), () => openInner(open)); }
+  else if (open) { openChat(baseOf(open)); if (open.threadId != null) whenShown(baseOf(open), () => openInner(open)); closeIfForeign(baseOf(open)); }
+}
+
+/**
+ * В адресе чат, которого у меня нет (чужая ссылка, вышел с другого устройства): без этого — вечная загрузка с полем ввода.
+ * Решает только ответ сервера: нет сети или он недоступен — чат остаётся, кэш может быть на устройстве. Читается, но не мой —
+ * публичный канал без подписки (перезагрузка превью): превью открывается снова.
+ */
+function closeIfForeign(chatId: number): void {
+  void fetch(`/chats/${chatId}/messages?limit=1`).then((r) => {
+    const g = getGlobal();
+    if (findChat(g, chatId) || g.previews.some((x) => x.id === chatId)) return;
+    if (r.ok) { void engine.call({ type: 'openPreview', chatId }); return; }
+    if (r.status !== 403) return;
+    if ((g.pendingChatId ?? activeFrame(g)?.chatId) !== chatId) return;   // уже ушли сами
+    setGlobal({ infoOpen: false });
+    openChat(null);
+    showToast('Чат недоступен');
+  }).catch(() => {});
 }
 
 /**
@@ -162,7 +196,7 @@ function watchNotifications(meId: number): void {
       if (shown.has(n.key)) continue;
       shown.add(n.key);
       const chatId = n.chatId as number;
-      if (n.senderId === meId && !n.post) continue;
+      if (n.senderId === meId && !n.post && !n.reminder) continue;   // своё не уведомляет; напоминание себе — уведомляет
       const item = { chatId, post: !!n.post, mention: !!n.mention };
       // копия поста в группе обсуждения: подписчик канала уже уведомлён самим постом; открыт канал — пост на экране
       const copyOf = postCopyChannel(item, chatOf);
@@ -173,7 +207,7 @@ function watchNotifications(meId: number): void {
       noteIncoming(chatId, { muted: isMuted(c ?? { id: chatId }) && !item.mention, createdAt: n.createdAt as string });
       notifyIncoming({ id: chatId, title: (c?.title as string) || 'Чат №' + chatId, muted: isMuted(c ?? { id: chatId }), system: isSystemChat(c) },
         { id: n.id as number, body: hideSpoilers(String(n.body ?? ''), n.entities as Entity[] | undefined), kind: n.kind as string | undefined, attachmentName: n.attachmentName as string | null, createdAt: n.createdAt as string, service: n.service as { type: string } | undefined, threadId: n.threadId as number | undefined },
-        { mention: !!n.mention });
+        { mention: !!n.mention, reminder: !!n.reminder });
     }
     // держим только ключи, что ещё в списке движка (он сам хранит последние)
     if (shown.size > items.length * 2 + 50) shown = new Set(items.map((n) => n.key));
@@ -266,7 +300,7 @@ export function savedPosition(t: StackTarget) { return positions.get(positionKey
  * изнутри чата) — новый чат поверх, прежний остаётся живым в DOM (вернуться — мгновенно, на том же месте).
  * У каждого кадра — своя подписка на окно ленты. */
 
-interface Session { chatId: number; threadId?: number; watch: { update(q: Query): void; close(): void }; mirror: Mirror; anchor: Anchor | undefined; moving: boolean; first: boolean; timer: ReturnType<typeof setTimeout> | null }
+interface Session { chatId: number; threadId?: number; scheduled?: boolean; savedPeer?: string; watch: { update(q: Query): void; close(): void }; mirror: Mirror; anchor: Anchor | undefined; moving: boolean; first: boolean; timer: ReturnType<typeof setTimeout> | null }
 const sessions = new Map<string, Session>();
 let frameSeq = 0;
 let pendingBottom: { frame: ChatFrame; target?: { id: number; sort: number } } | null = null;   // новый нижний чат, лента ещё не готова
@@ -310,7 +344,7 @@ function toastUploadRefusals(items: Item[]): void {
 
 /** Окно ленты кадра; onFirst — первый снимок (или 700 мс без него: не держим пользователя на прежнем чате). */
 function startFeed(frame: ChatFrame, anchor: Anchor | undefined, onFirst: (patch: Partial<ChatFrame>) => void): void {
-  const s: Session = { chatId: frame.chatId, threadId: frame.threadId, mirror: new Mirror(), anchor, moving: true, first: true, timer: null, watch: null as never };
+  const s: Session = { chatId: frame.chatId, threadId: frame.threadId, scheduled: frame.scheduled, savedPeer: frame.savedPeer, mirror: new Mirror(), anchor, moving: true, first: true, timer: null, watch: null as never };
   sessions.set(frame.key, s);
   const asked = performance.now();
   // сколько лента ждала первый снимок от движка (SharedWorker → IndexedDB → сюда) — видно во вкладке Performance
@@ -341,20 +375,22 @@ function mirrorPatch(s: Session): Partial<ChatFrame> {
 }
 
 /** Окно ленты кадра: чат — messages, тред — thread (шапка-копия поста и комментарии из кэша группы). */
-function feedQuery(f: { chatId: number; threadId?: number }, anchor: Anchor | undefined): Query {
+function feedQuery(f: { chatId: number; threadId?: number; scheduled?: boolean; savedPeer?: string }, anchor: Anchor | undefined): Query {
+  if (f.scheduled) return { kind: 'scheduled', chatId: f.chatId };
+  if (f.savedPeer) return { kind: 'savedFeed', chatId: f.chatId, peer: f.savedPeer, limit: WINDOW, anchor };
   return f.threadId != null ? { kind: 'thread', chatId: f.chatId, threadId: f.threadId, limit: WINDOW, anchor } : { kind: 'messages', chatId: f.chatId, limit: WINDOW, anchor };
 }
 
 function newFrame(t: StackTarget, target?: { id: number; sort: number }): { frame: ChatFrame; anchor: Anchor | undefined } {
   const chatId = t.chatId;
   const chat = findChat(getGlobal(), chatId);
-  const pos = positions.get(positionKey(t));
+  const pos = t.scheduled ? null : positions.get(positionKey(t));   // отложенные открываются снизу: ближайшие — у поля ввода
   // разделитель «Непрочитанные» — только у ленты чата (у треда своя прочитанность, readMaxId)
-  const unread = t.threadId == null && (chat?.unread as number) > 0 ? (chat!.lastReadId as number) : null;
+  const unread = t.threadId == null && !t.scheduled && !t.savedPeer && (chat?.unread as number) > 0 ? (chat!.lastReadId as number) : null;
   // открыть на найденном сообщении; иначе: ушли из середины истории — туда же; непрочитанное; низ
   const anchor: Anchor | undefined = target ? { sort: target.sort, side: 'center' } : pos ? { sort: pos.sort, side: 'center' } : unread != null ? { sort: unread + 0.5, side: 'center' } : undefined;
   const frame: ChatFrame = {
-    key: 'c' + ++frameSeq, chatId, ...(t.threadId != null ? { threadId: t.threadId, thread: { header: null, loaded: false } } : {}), ready: false, messages: [], feedMeta: null,
+    key: 'c' + ++frameSeq, chatId, ...(t.scheduled ? { scheduled: true } : {}), ...(t.savedPeer ? { savedPeer: t.savedPeer } : {}), ...(t.threadId != null ? { threadId: t.threadId, thread: { header: null, loaded: false } } : {}), ready: false, messages: [], feedMeta: null,
     unreadFrom: target ? null : unread,
     focus: target ? { ...target, nonce: Date.now(), replaced: true } : null,
   };
@@ -586,7 +622,7 @@ export function openChat(chatId: number | null, target?: { id: number; sort: num
   if (leaveTimer) { clearTimeout(leaveTimer); leaveTimer = 0; setGlobal({ listLeaving: false }); }
   const g = getGlobal(), st = g.chatStack, top = topReady();
   // тот же чат на экране — только прокрутка; его тред поверх — другой слой (ниже вернёмся к самой группе)
-  if (chatId != null && (g.pendingChatId ?? top?.chatId) === chatId && top?.threadId == null && (st.length <= 1 || top?.chatId === chatId)) {
+  if (chatId != null && (g.pendingChatId ?? top?.chatId) === chatId && top?.threadId == null && !top?.scheduled && !top?.savedPeer && (st.length <= 1 || top?.chatId === chatId)) {
     if (target) focusMessage(target);
     return;
   }
@@ -764,6 +800,8 @@ export function prepareUserChat(userId: number): Prepared | null {
 /** Стрелка «Назад» в шапке: снять верхний чат; нижний — к списку чатов. */
 export function closeChat(): void {
   const st = stack();
+  // подчат «Избранного», открытый из панели на телефоне: назад — снова панель со списком
+  if (st[st.length - 1]?.fromPanel) setGlobal({ infoOpen: true });
   if (st.length > 1) popTo(st.length - 2);
   else openChat(null);
 }
@@ -772,7 +810,8 @@ export function closeChat(): void {
  *  hint — ключ (поиск людей, ссылка @имя) или сообщение, где человек назван (карточка контакта): см. peerRef. */
 export async function openUserChat(userId: number, hint?: PeerHint): Promise<void> {
   const me = getGlobal().me;
-  if (!me || userId === me.userId) return;
+  if (!me) return;
+  if (userId === me.userId) { await openSavedChat(true); return; }   // «написать себе» — Избранное
   const found = getGlobal().chats.find((c) => c.kind === 'direct' && c.peerId === userId);
   if (found) { openInner(found.id as number); return; }
   let id: number;
@@ -863,7 +902,10 @@ export async function mediaDays(chatId: number, y: number, m: number): Promise<R
   return out;
 }
 
-export function focusMessage(target: { id: number; sort: number }): void {
+export function focusMessage(target: { id: number; sort: number; quote?: { text: string; offset: number } }): void {
+  // цитата на странице отложенных: сообщение — в ленте чата под ней
+  const under = topReady();
+  if (under?.scheduled) { const st = stack(); popTo(st.length - 2); }
   const f = topReady();
   const s = f && sessions.get(f.key);
   if (!f || !s) return;
@@ -894,11 +936,13 @@ export function sentSound(): void {
   if (p.sound) playSentSound(p.volume);
 }
 
-export async function send(chatId: number, body: string, replyToId: number | null = null, entities: Entity[] = [], opts: { noLinkPreview?: boolean; link?: LinkPreview | null; blocks?: Block[] | null; threadId?: number } = {}): Promise<void> {
-  sentSound();
-  nudgeWallpaper();
-  toLatestOf(chatId); // своё сообщение — внизу, как в Telegram
-  await engine.call({ type: 'sendMessage', chatId, body, entities, replyToId, ...opts });
+export async function send(chatId: number, body: string, replyToId: ReplyRef = null, entities: Entity[] = [], opts: { noLinkPreview?: boolean; link?: LinkPreview | null; blocks?: Block[] | null; threadId?: number } & SendWhen = {}): Promise<void> {
+  if (opts.scheduleAt == null) {   // отложенное в ленту не идёт: ни звука, ни прокрутки
+    sentSound();
+    nudgeWallpaper();
+    toLatestOf(chatId); // своё сообщение — внизу, как в Telegram
+  }
+  await engine.call({ type: 'sendMessage', chatId, body, entities, ...replyArgs(replyToId), ...opts });
 }
 
 /** Отправить текст без звука и прокрутки (приглашение в личку из управления группой). */
@@ -907,10 +951,10 @@ export async function engineSend(chatId: number, body: string): Promise<void> {
 }
 
 /** Пересылка (forward.ts): копии сразу в ленте целевых чатов; в открытом чате — к низу, как своё сообщение. */
-export async function forwardMessages(a: { fromChatId: number; ids: number[]; toChatIds: number[]; hideSender?: boolean; hideCaption?: boolean; comment?: { body: string; entities?: Entity[] } | null; replyToId?: number | null }): Promise<void> {
+export async function forwardMessages(a: { fromChatId: number; ids: number[]; toChatIds: number[]; hideSender?: boolean; hideCaption?: boolean; comment?: { body: string; entities?: Entity[] } | null; replyToId?: ReplyRef }): Promise<void> {
   nudgeWallpaper();
   for (const id of a.toChatIds) toLatestOf(id);
-  await engine.call({ type: 'forwardMessages', ...a });
+  await engine.call({ type: 'forwardMessages', ...a, ...replyArgs(a.replyToId) });
 }
 
 const typingSent = new Map<number, number>();
@@ -930,10 +974,11 @@ export function emojiFx(chatId: number, id: number, key: string, t: number[]): v
  * Поиск сообщений: по словам на устройстве, с сетью — вместе с сервером (вся история).
  * onLocal — найденное на устройстве, сразу (если полный ответ ещё не пришёл); потом промис — полный ответ.
  */
-export function searchMessages(q: string, chatId?: number, beforeId?: number, onLocal?: (r: SearchResult) => void): Promise<SearchResult> {
+export function searchMessages(q: string, chatId?: number, beforeId?: number, onLocal?: (r: SearchResult) => void, savedPeer?: string): Promise<SearchResult> {
   let done = false;
-  if (onLocal) (engine.call({ type: 'search', q, chatId, beforeId, local: true }) as Promise<SearchResult>).then((r) => { if (!done) onLocal(r); }, () => {});
-  return (engine.call({ type: 'search', q, chatId, beforeId }) as Promise<SearchResult>).finally(() => { done = true; });
+  const peer = savedPeer ? { savedPeer } : {};
+  if (onLocal) (engine.call({ type: 'search', q, chatId, beforeId, local: true, ...peer }) as Promise<SearchResult>).then((r) => { if (!done) onLocal(r); }, () => {});
+  return (engine.call({ type: 'search', q, chatId, beforeId, ...peer }) as Promise<SearchResult>).finally(() => { done = true; });
 }
 
 /** Локальные копии своих файлов (objectURL) до и сразу после отправки — показываем без загрузки с сервера. */
@@ -992,7 +1037,52 @@ export function describeVideo(file: Blob): Promise<{ w: number; h: number; durat
 
 /** Как отправить: asFile — документом (без сжатия и превью, как «Отправить как файл» в Telegram); spoiler — фото/видео размыто;
  *  quality — видео: '720'/'1080' — пережать в браузере (WebCodecs, где есть), 'original' — как есть. */
-export interface SendOpts { asFile?: boolean; spoiler?: boolean; quality?: VideoQuality; threadId?: number }   // threadId — комментарий в треде
+/** Без звука и отложить (keepDraft — со страницы отложенных: черновик чата не трогать). */
+export interface SendWhen { silent?: boolean; scheduleAt?: number; keepDraft?: boolean }
+const whenOf = (o: SendWhen): SendWhen => ({ ...(o.silent ? { silent: true } : {}), ...(o.scheduleAt != null ? { scheduleAt: o.scheduleAt } : {}), ...(o.keepDraft ? { keepDraft: true } : {}) });
+
+/* ---------- подчаты «Избранного»: кадр поверх общей ленты (в адрес не попадает, как страница отложенных) ---------- */
+export function openSavedDialog(chatId: number, peer: string, fromPanel = false): void {
+  openInner({ chatId, savedPeer: peer });
+  if (fromPanel) { const f = stack().find((x) => x.chatId === chatId && x.savedPeer === peer); if (f) patchFrame(f.key, { fromPanel: true }); }
+}
+/** Заготовка по нажатию мыши (ui/press.ts): колонка раскладывается скрытой, клик только переключает. */
+export function prepareSavedDialog(chatId: number, peer: string): Prepared | null {
+  if (!topReady() || findTarget(stack(), { chatId, savedPeer: peer }) >= 0) return null;
+  const hold: Hold = { released: false, key: null, waiting: null, onCommit: null };
+  openInner({ chatId, savedPeer: peer }, undefined, hold);
+  return holdHandle(hold);
+}
+
+/** Источник подчата — поверх стека (docs/navigation-rules.md); канал без подписки — превью. */
+export function openSavedSource(d: { kind: string | null; userId?: number; peerKey?: string; sourceChatId?: number }): void {
+  if (d.kind === 'user' && d.userId != null) { void openUserChat(d.userId, d.peerKey ? { key: d.peerKey } : undefined); return; }
+  if (d.sourceChatId == null) return;
+  if (getGlobal().chats.some((c) => c.id === d.sourceChatId)) openInner(d.sourceChatId);
+  else void openChannel(d.sourceChatId, 'inner');
+}
+export const pinSavedDialog = (peer: string, pinned: boolean) => engine.call({ type: 'savedDialogPin', peer, pinned }).catch(() => {});
+export const deleteSavedDialog = (peer: string) => engine.call({ type: 'savedDialogDelete', peer }).catch(() => {});
+export const loadMoreSavedDialogs = () => { engine.call({ type: 'loadSavedDialogs' }).catch(() => {}); };
+
+/* ---------- отложенные: всё оптимистично, дальше — очередью движка ---------- */
+export function openScheduled(chatId: number): void { openInner({ chatId, scheduled: true }); }
+/** Заготовка страницы по нажатию мыши (ui/press.ts): колонка раскладывается скрытой, клик только переключает. */
+export function prepareScheduled(chatId: number): Prepared | null {
+  if (!topReady() || findTarget(stack(), { chatId, scheduled: true }) >= 0) return null;
+  const hold: Hold = { released: false, key: null, waiting: null, onCommit: null };
+  openInner({ chatId, scheduled: true }, undefined, hold);
+  return holdHandle(hold);
+}
+export function editScheduled(chatId: number, clientId: string, p: { sendAt?: number; body?: string; entities?: Entity[] }): void { engine.call({ type: 'scheduledEdit', chatId, clientId, ...p }).catch(() => {}); }
+export function sendScheduledNow(chatId: number, clientId: string): void { engine.call({ type: 'scheduledSendNow', chatId, clientId }).catch(() => {}); }
+export function deleteScheduled(chatId: number, clientId: string): void {
+  const url = localPreviews.get(clientId);
+  if (url) { URL.revokeObjectURL(url); localPreviews.delete(clientId); }
+  engine.call({ type: 'scheduledDelete', chatId, clientId }).catch(() => {});
+}
+
+export interface SendOpts extends SendWhen { asFile?: boolean; spoiler?: boolean; quality?: VideoQuality; threadId?: number }   // threadId — комментарий в треде
 
 /** Видео, которые сейчас сжимаются (ещё не в очереди движка): отмена из плашки «Сжатие видео». */
 const preparing = new Map<string, AbortController>();
@@ -1024,20 +1114,20 @@ async function shrinkForSend(chatId: number, file: File, quality: VideoQuality):
 
 /** Отправить файл (фото — с размерами и превью). Офлайн — уйдёт, когда появится сеть. */
 /** Голосовое: Ogg/Opus, длительность в секундах и волна (63 байта). Локально играет сам записанный файл. */
-export async function sendVoice(chatId: number, rec: { blob: Blob; duration: number; waveform: Uint8Array }, replyToId: number | null = null, threadId?: number): Promise<void> {
+export async function sendVoice(chatId: number, rec: { blob: Blob; duration: number; waveform: Uint8Array }, replyToId: ReplyRef = null, threadId?: number): Promise<void> {
   sentSound();
   nudgeWallpaper();
   toLatestOf(chatId);
-  const res = (await engine.call({ type: 'sendFile', chatId, body: '', file: rec.blob, name: 'voice.ogg', mime: 'audio/ogg', kind: 'voice', duration: rec.duration, waveform: toBase64(rec.waveform), replyToId, ...(threadId != null ? { threadId } : {}) })) as { clientId: string };
+  const res = (await engine.call({ type: 'sendFile', chatId, body: '', file: rec.blob, name: 'voice.ogg', mime: 'audio/ogg', kind: 'voice', duration: rec.duration, waveform: toBase64(rec.waveform), ...replyArgs(replyToId), ...(threadId != null ? { threadId } : {}) })) as { clientId: string };
   localPreviews.set(res.clientId, URL.createObjectURL(rec.blob));
 }
 
 /** Кружок: квадрат 400×400, до 60 с; превью — кадр из записи. */
-export async function sendRound(chatId: number, rec: { blob: Blob; duration: number; size: number; thumb: string | null }, replyToId: number | null = null, threadId?: number): Promise<void> {
+export async function sendRound(chatId: number, rec: { blob: Blob; duration: number; size: number; thumb: string | null }, replyToId: ReplyRef = null, threadId?: number): Promise<void> {
   sentSound();
   nudgeWallpaper();
   toLatestOf(chatId);
-  const res = (await engine.call({ type: 'sendFile', chatId, body: '', file: rec.blob, name: 'video.mp4', mime: rec.blob.type.split(';')[0] || 'video/mp4', kind: 'round', duration: rec.duration, w: rec.size, h: rec.size, thumb: rec.thumb, replyToId, ...(threadId != null ? { threadId } : {}) })) as { clientId: string };
+  const res = (await engine.call({ type: 'sendFile', chatId, body: '', file: rec.blob, name: 'video.mp4', mime: rec.blob.type.split(';')[0] || 'video/mp4', kind: 'round', duration: rec.duration, w: rec.size, h: rec.size, thumb: rec.thumb, ...replyArgs(replyToId), ...(threadId != null ? { threadId } : {}) })) as { clientId: string };
   localPreviews.set(res.clientId, URL.createObjectURL(rec.blob));
 }
 
@@ -1050,17 +1140,19 @@ export function groupCall<T = unknown>(method: 'GET' | 'POST' | 'PUT' | 'PATCH' 
 
 export function markListened(chatId: number, id: number): void { engine.call({ type: 'listened', chatId, id }).catch(() => {}); }
 
-export async function sendFile(chatId: number, file: File, caption: string, replyToId: number | null = null, groupId: string | null = null, opts: SendOpts = {}): Promise<void> {
-  sentSound();
-  nudgeWallpaper();
-  toLatestOf(chatId);
+export async function sendFile(chatId: number, file: File, caption: string, replyToId: ReplyRef = null, groupId: string | null = null, opts: SendOpts = {}): Promise<void> {
+  if (opts.scheduleAt == null) {
+    sentSound();
+    nudgeWallpaper();
+    toLatestOf(chatId);
+  }
   // фото — как в Telegram: до 2560 px и перекодировано (оригинал — только «как файл»); видео — по выбору «Качество»
   if (!opts.asFile) file = await shrinkForSend(chatId, file, opts.quality ?? 'original');
   const img = opts.asFile ? null : await describeImage(file);
   const vid = opts.asFile || img ? null : await describeVideo(file);
-  const thread = opts.threadId != null ? { threadId: opts.threadId } : {};
+  const thread = { ...(opts.threadId != null ? { threadId: opts.threadId } : {}), ...whenOf(opts) };
   if (vid) {
-    const res = (await engine.call({ type: 'sendFile', chatId, body: caption, file, name: file.name || 'video.mp4', mime: file.type, kind: 'video', w: vid.w, h: vid.h, duration: vid.duration, thumb: vid.thumb, replyToId,
+    const res = (await engine.call({ type: 'sendFile', chatId, body: caption, file, name: file.name || 'video.mp4', mime: file.type, kind: 'video', w: vid.w, h: vid.h, duration: vid.duration, thumb: vid.thumb, ...replyArgs(replyToId),
       ...(opts.spoiler ? { spoiler: true } : {}), ...(groupId ? { groupId } : {}), ...thread })) as { clientId: string };
     // своё видео играет из самого файла, пока грузится (как в Telegram) и сразу после
     localPreviews.set(res.clientId, URL.createObjectURL(file));
@@ -1070,7 +1162,7 @@ export async function sendFile(chatId: number, file: File, caption: string, repl
   // музыка: название, исполнитель и обложка из тегов (как в Telegram); обложка — превью 96 px
   const tags = seconds ? await readAudioTags(file) : null;
   const cover = tags?.cover ? await coverThumb(tags.cover) : null;
-  const res = (await engine.call({ type: 'sendFile', chatId, body: caption, file, name: file.name || 'file', mime: file.type || 'application/octet-stream', w: img?.w ?? null, h: img?.h ?? null, thumb: img?.thumb ?? cover ?? null, replyToId,
+  const res = (await engine.call({ type: 'sendFile', chatId, body: caption, file, name: file.name || 'file', mime: file.type || 'application/octet-stream', w: img?.w ?? null, h: img?.h ?? null, thumb: img?.thumb ?? cover ?? null, ...replyArgs(replyToId),
     ...(seconds ? { kind: 'audio' as const, duration: seconds, title: tags?.title ?? null, performer: tags?.performer ?? null } : {}),
     ...(img && opts.spoiler ? { spoiler: true } : {}), ...(groupId ? { groupId } : {}), ...thread })) as { clientId: string };
   if (img) localPreviews.set(res.clientId, URL.createObjectURL(file));
@@ -1094,10 +1186,10 @@ export function discardUnsent(clientId: string): void {
 /** Файлов в одном альбоме (пузыре), как в Telegram. */
 const ALBUM_MAX = 10;
 /** Несколько файлов разом — одной группой (в ленте один пузырь, как альбом в Telegram); подпись — у последнего. */
-export async function sendFiles(chatId: number, files: File[], caption: string, replyToId: number | null = null, opts: SendOpts = {}): Promise<void> {
+export async function sendFiles(chatId: number, files: File[], caption: string, replyToId: ReplyRef = null, opts: SendOpts = {}): Promise<void> {
   files = rejectTooBig(files);
   if (!files.length) return;
-  sentSound();
+  if (opts.scheduleAt == null) sentSound();
   if (files.length === 1) return sendFile(chatId, files[0], caption, replyToId, null, opts);
   // отменённое сжатие одного видео (× в плашке) не отменяет остальные файлы альбома
   const skipCancelled = (e: unknown) => { if ((e as Error)?.name !== 'AbortError') throw e; };
@@ -1110,10 +1202,10 @@ export async function sendFiles(chatId: number, files: File[], caption: string, 
 }
 
 /** Уже загруженный трек (из музыки профиля) — в чат без новой загрузки: тот же файл по id. */
-export async function sendTrack(chatId: number, attachment: { id: string; kind: 'audio'; mime: string; name: string; size: number; w: null; h: null; duration: number | null; title?: string | null }, replyToId: number | null = null): Promise<void> {
+export async function sendTrack(chatId: number, attachment: { id: string; kind: 'audio'; mime: string; name: string; size: number; w: null; h: null; duration: number | null; title?: string | null }, replyToId: ReplyRef = null): Promise<void> {
   sentSound();
   toLatestOf(chatId);
-  await engine.call({ type: 'sendMessage', chatId, body: '', attachment, replyToId });
+  await engine.call({ type: 'sendMessage', chatId, body: '', attachment, ...replyArgs(replyToId) });
 }
 
 /** Вкладка «Общих медиа» панели «Информация» (содержимое — подписка media, см. mediaTab.ts). */
@@ -1137,29 +1229,31 @@ function audioDuration(file: File): Promise<number | null> {
 export function editMessage(chatId: number, id: number, body: string, entities: Entity[] = []): Promise<unknown> { return engine.call({ type: 'editMessage', chatId, id, body, entities }); }
 /** Удаление своего сообщения у всех (онлайн). */
 export function deleteMessage(chatId: number, id: number): Promise<unknown> { return engine.call({ type: 'deleteMessage', chatId, id }); }
+/** Автоудаление чата: операция движка (переживает офлайн, значение видно сразу). */
+export function setChatAutoDelete(chatId: number, sec: number | null): Promise<unknown> { return engine.call({ type: 'setAutoDelete', chatId, sec }); }
 /** Реакция (null — снять). У себя применяется сразу. */
 export function react(chatId: number, id: number, emoji: string | null): void { engine.call({ type: 'react', chatId, id, emoji }).catch(() => {}); }
 
 /* ---------- чек-листы ---------- */
-export async function sendTodo(chatId: number, todo: TodoInput, replyToId: number | null = null): Promise<void> {
+export async function sendTodo(chatId: number, todo: TodoInput, replyToId: ReplyRef = null): Promise<void> {
   nudgeWallpaper();
   toLatestOf(chatId);
-  await engine.call({ type: 'sendTodo', chatId, todo, replyToId });
+  await engine.call({ type: 'sendTodo', chatId, todo, ...replyArgs(replyToId) });
 }
 /** Отметка у себя — сразу; ошибка (нет прав, нет сети) — откат и false. */
 export function toggleTodo(chatId: number, id: number, itemId: number, done: boolean): Promise<boolean> {
   return engine.call({ type: 'todoToggle', chatId, id, itemId, done }).then(() => true, () => false);
 }
-export async function sendPoll(chatId: number, poll: PollInput, replyToId: number | null = null): Promise<void> {
+export async function sendPoll(chatId: number, poll: PollInput, replyToId: ReplyRef = null): Promise<void> {
   nudgeWallpaper();
   toLatestOf(chatId);
-  await engine.call({ type: 'sendPoll', chatId, poll, replyToId });
+  await engine.call({ type: 'sendPoll', chatId, poll, ...replyArgs(replyToId) });
 }
 /** Контакт, точка или кубик — как сообщение (очередь, офлайн); значение кубика выбирает сервер. */
-export async function sendSpecial(chatId: number, special: { contact?: { userId: number; name: string }; geo?: GeoPoint; dice?: { emoji: DiceEmoji } }, replyToId: number | null = null): Promise<void> {
+export async function sendSpecial(chatId: number, special: { contact?: { userId: number; name: string }; geo?: GeoPoint; dice?: { emoji: DiceEmoji } }, replyToId: ReplyRef = null, silent = false): Promise<void> {
   nudgeWallpaper();
   toLatestOf(chatId);
-  await engine.call({ type: 'sendSpecial', chatId, special, replyToId });
+  await engine.call({ type: 'sendSpecial', chatId, special, ...replyArgs(replyToId), ...(silent ? { silent: true } : {}) });
 }
 /** Голос у себя — сразу; ошибка (закрыт, нет прав, нет сети) — откат и false. Пусто — отозвать голос. */
 export function votePoll(chatId: number, id: number, options: number[]): Promise<boolean> {
@@ -1284,7 +1378,21 @@ export async function createGroup(title: string, memberIds: number[], channel?: 
 export function refreshChats(): void { engine.call({ type: 'refreshChats' }).catch(() => {}); }
 
 export async function startDirectChat(peerId: number, hint?: PeerHint): Promise<void> {
+  if (peerId === getGlobal().me?.userId) { await openSavedChat(); return; }
   openChat(await createDirectChat(peerId, hint));
+}
+
+/** id «Избранного»: чат известен движку — сразу (и без сети), иначе сервер находит или создаёт. */
+export const savedChatId = (): Promise<number> => engine.call({ type: 'savedChat' }) as Promise<number>;
+
+/** Открыть «Избранное»: из левой колонки — заменой стека, изнутри чата (inner) — поверх (docs/navigation-rules.md). */
+export async function openSavedChat(inner = false): Promise<void> {
+  const open = (id: number) => (inner ? openInner(id) : openChat(id));
+  const known = getGlobal().chats.find((c) => c.saved);
+  if (known) { open(known.id as number); return; }   // чат в списке — без ожидания движка
+  let id: number;
+  try { id = await savedChatId(); } catch { showToastLazy('Не удалось открыть Избранное — нет сети?'); return; }
+  open(id);
 }
 
 /* ---------- закреплённые сообщения ---------- */

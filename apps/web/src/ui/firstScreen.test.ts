@@ -68,3 +68,12 @@ test('learnScale: низкий процентиль отношений, с пр�
   // оценки уже умножены на прежнюю поправку — сравнение идёт с базовой оценкой
   expect(learnScale([{ actual: 60, estimate: 60 }, { actual: 60, estimate: 60 }, { actual: 60, estimate: 60 }], 1.5)).toBe(1.5);
 });
+
+test('estimateRow: свёрнутая цитата считается не выше трёх строк, обычная — целиком; фрагмент в плашке — до трёх строк', () => {
+  const body = Array.from({ length: 8 }, (_, i) => 'строка ' + i).join('\n');
+  const full = 8 * 20 + 16 + 4;
+  expect(estimateRow({ key: 'q', body, entities: [{ type: 'blockquote', offset: 0, length: body.length }] }, x)).toBe(full);
+  expect(estimateRow({ key: 'q', body, entities: [{ type: 'blockquote', offset: 0, length: body.length, collapsed: true }] }, x)).toBe(3 * 20 + 16 + 4);
+  expect(estimateRow({ key: 'r', body: 'a', replyToId: 1, replyQuote: { text: 'x\ny\nz\nw\nv' } }, x)).toBe(16 + 20 + 40 + 36 + 4);
+  expect(estimateRow({ key: 'r', body: 'a', replyToId: 1, replyQuote: { text: 'x' } }, x)).toBe(16 + 20 + 40 + 4);
+});

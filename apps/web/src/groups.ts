@@ -7,6 +7,7 @@ import { useKeyedState } from './keyedState';
 import { groupCall, type GroupResult } from './data';
 import { findChat, useGlobal } from './global';
 import { showToast } from './settingsData';
+export { ADMIN_RIGHT_TEXT, adminRightText, CHANNEL_ADMIN_RIGHT_TEXT, MEMBER_RIGHT_TEXT, SLOW_TEXT } from './rightsText';
 
 // Группа на клиенте: моё место в ней, тексты прав и ошибок, загрузка списков управления (участники, ссылки, заявки…).
 // Списки перечитываются, когда журнал сообщает об изменении (membersRev, groupUpdated).
@@ -26,13 +27,6 @@ export const adminCan = (me: MyMembership | null, r: AdminRight) => !!me?.admin?
 export const canChangeInfo = (me: MyMembership | null) => adminCan(me, 'info') || !!me?.rights.info;
 export const canInvite = (me: MyMembership | null) => adminCan(me, 'invite') || !!me?.rights.invite;
 
-export const MEMBER_RIGHT_TEXT: Record<MemberRight, string> = {
-  text: 'Отправка сообщений', photos: 'Фото', videos: 'Видео', files: 'Файлы', music: 'Музыка', voice: 'Голосовые сообщения', stickers: 'Стикеры и GIF',
-  round: 'Видеосообщения', links: 'Превью ссылок', react: 'Реакции', invite: 'Добавление участников', pin: 'Закрепление сообщений', info: 'Изменение профиля группы',
-};
-export const ADMIN_RIGHT_TEXT: Record<AdminRight, string> = {
-  info: 'Изменение профиля группы', post: 'Публикация сообщений', edit: 'Изменение чужих публикаций', delete: 'Удаление сообщений', ban: 'Блокировка пользователей', invite: 'Пригласительные ссылки', pin: 'Закрепление сообщений', addAdmins: 'Назначение администраторов',
-};
 export { ADMIN_RIGHTS, MEDIA_RIGHTS, MEMBER_RIGHTS };
 export const PLAIN_RIGHTS: MemberRight[] = ['react', 'invite', 'pin', 'info'];
 
@@ -51,13 +45,6 @@ export function toggleRight(r: MemberRights, key: MemberRight | 'media', on: boo
 export const mediaCount = (r: MemberRights) => MEDIA_RIGHTS.filter((k) => r[k]).length;
 export const sameRights = <T extends Record<string, boolean>>(a: T, b: T) => Object.keys(a).every((k) => a[k] === b[k]);
 export const sameAdmin = (a: AdminRights, b: AdminRights) => (Object.keys(a) as AdminRight[]).every((k) => a[k] === b[k]);
-/** Права админа канала — своими словами (у канала публикации и подписчики, а не сообщения и участники). */
-export const CHANNEL_ADMIN_RIGHT_TEXT: Partial<Record<AdminRight, string>> = {
-  info: 'Изменение профиля канала', post: 'Публикация сообщений', edit: 'Изменение чужих публикаций', delete: 'Удаление чужих публикаций',
-  ban: 'Блокировка подписчиков', invite: 'Добавление подписчиков', addAdmins: 'Назначение администраторов',
-};
-export const adminRightText = (k: AdminRight, kind: CommunityKind) => (kind === 'channel' ? CHANNEL_ADMIN_RIGHT_TEXT[k] : undefined) ?? ADMIN_RIGHT_TEXT[k];
-
 const ERRORS: Record<string, string> = {
   offline: 'Нет сети — попробуйте позже',
   forbidden: 'Недостаточно прав',
@@ -109,4 +96,3 @@ export const copyText = (text: string, toast = 'Ссылка скопирова�
 export const plural = (n: number, one: string, few: string, many: string) =>
   n % 10 === 1 && n % 100 !== 11 ? one : n % 10 >= 2 && n % 10 <= 4 && (n % 100 < 12 || n % 100 > 14) ? few : many;
 
-export const SLOW_TEXT: Record<number, string> = { 0: 'Выкл.', 10: '10 с', 30: '30 с', 60: '1 мин', 300: '5 мин', 900: '15 мин', 3600: '1 ч' };

@@ -15,7 +15,8 @@ import {
   addRecent, clearRecent, closeSearch, getRecent, monthKey, monthLabel, SEARCH_TABS, searchChannels, searchGlobalMedia, searchPeople, setSearchTab,
   subscribeRecent, topChats, type ChannelHit, type MediaHit, type PersonHit, type SearchTab,
 } from '../../search';
-import { chatTime, chatTone, fileSize, isSystemChat, shownBody, snippet } from '../format';
+import { SAVED_TITLE } from '@relay/protocol';
+import { chatTime, chatTone, fileSize, isSavedChat, isSystemChat, matchesSaved, shownBody, snippet } from '../format';
 import { attachmentHit } from '../../searchHit';
 import { subscribersText } from '../../channelText';
 import { dur, extTone, fileUrl, MediaGrid, type Msg, when } from '../SharedMedia';
@@ -96,7 +97,7 @@ function RecentChats() {
         <div class="app-gsearch-top" role="list" aria-label="Частые собеседники">
           {topChatsList.map((c) => (
             <button key={c.id} type="button" role="listitem" class="app-gsearch-top-item" onClick={() => pickChat(c.id as number)}>
-              <Avatar name={String(c.title ?? '')} tone={chatTone(c)} size={54} logo={isSystemChat(c)} {...chatPhoto(c)} />
+              <Avatar name={String(c.title ?? '')} tone={chatTone(c)} size={54} logo={isSystemChat(c)} saved={isSavedChat(c)} {...chatPhoto(c)} />
               <span>{String(c.title ?? '').split(' ')[0]}</span>
             </button>
           ))}
@@ -120,12 +121,23 @@ function Section({ title, action, children }: { title: ComponentChildren; action
   );
 }
 
+/** «Избранное», которого нет в загруженном списке: движок найдёт его или создаст. */
+function SavedResult({ q }: { q: string }) {
+  const open = () => { void import('../../data').then((d) => d.openSavedChat()).then(() => closeSearch()); };
+  return (
+    <button type="button" class="rl-row app-gsearch-row" onClick={open}>
+      <Avatar name={SAVED_TITLE} saved size={48} />
+      <span class="rl-row-main"><span class="rl-row-name"><Highlight text={SAVED_TITLE} query={q} /></span></span>
+    </button>
+  );
+}
+
 function ChatResult({ c, q }: { c: Item; q?: string }) {
   const name = String(c.title ?? 'Чат');
   const sub = c.kind === 'group' ? 'группа' : isSystemChat(c) ? 'служебные уведомления' : '';
   return (
     <button type="button" class="rl-row app-gsearch-row" onClick={() => pickChat(c.id as number)}>
-      <Avatar name={name} tone={chatTone(c)} size={48} logo={isSystemChat(c)} {...chatPhoto(c)} />
+      <Avatar name={name} tone={chatTone(c)} size={48} logo={isSystemChat(c)} saved={isSavedChat(c)} {...chatPhoto(c)} />
       <span class="rl-row-main">
         <span class="rl-row-name">{q ? <Highlight text={name} query={q} /> : name}</span>
         {sub ? <span class="rl-row-preview">{sub}</span> : null}
@@ -154,8 +166,11 @@ function ChatResults({ q }: { q: string }) {
   const shownIds = new Set(local.chats.map((c) => c.peerId as number | null).filter(Boolean));
   for (const x of local.contacts) shownIds.add(x.userId as number);
   const global = (people ?? []).filter((p) => !shownIds.has(p.id));
-  const localCount = local.chats.length + local.contacts.length;
+  // «Избранное» находится всегда: чат мог ещё не создаваться или лежать глубже загруженного списка
+  const savedRow = matchesSaved(q) && !local.chats.some(isSavedChat);
+  const localCount = local.chats.length + local.contacts.length + (savedRow ? 1 : 0);
   const localRows = [
+    ...(savedRow ? [<SavedResult key="saved" q={q} />] : []),
     ...local.chats.map((c) => <ChatResult key={'c' + c.id} c={c} q={q} />),
     ...local.contacts.map((x) => <PersonRow key={'u' + x.userId} p={{ id: x.userId as number, name: String(x.name ?? ''), username: (x.user as { username?: string } | undefined)?.username ?? null, photo: ((x.user as { photo?: ProfilePhoto } | undefined)?.photo) ?? null, chatId: null }} q={q} />),
   ];
@@ -274,7 +289,7 @@ function MessageResults({ q, empty }: { q: string; empty: boolean }) {
         const who = h.senderId === meId ? 'Вы' : chat?.kind === 'group' ? (people[h.senderId]?.name ?? '').split(' ')[0] : '';
         return (
           <button key={h.chatId + ':' + h.id} type="button" class="rl-row app-gsearch-row app-gsearch-msg" onClick={() => showMessage(h.chatId, h.id)}>
-            <Avatar name={title} tone={chat ? chatTone(chat) : peerTone(h.chatId)} size={48} logo={chat ? isSystemChat(chat) : false} {...(chat ? chatPhoto(chat) : {})} />
+            <Avatar name={title} tone={chat ? chatTone(chat) : peerTone(h.chatId)} size={48} logo={chat ? isSystemChat(chat) : false} saved={chat ? isSavedChat(chat) : false} {...(chat ? chatPhoto(chat) : {})} />
             <span class="rl-row-main">
               <span class="app-gsearch-line"><span class="rl-row-name">{title}</span><span class="rl-row-time">{chatTime(h.createdAt)}</span></span>
               <span class="rl-row-preview">{who ? <span class="rl-row-author">{who}: </span> : null}<Highlight text={attachmentHit(shownBody(h), h.attachment, q) ?? snippet(shownBody(h), q)} query={q} /></span>

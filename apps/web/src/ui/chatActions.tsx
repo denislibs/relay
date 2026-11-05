@@ -15,6 +15,7 @@ type Ask = null | 'mute' | 'delete' | 'leave';
 export function useChatDialogs(chatId: number, title: string): { open: (a: Exclude<Ask, null>) => void; node: preact.JSX.Element } {
   const chat = useGlobal((s) => findChat(s, chatId));
   const channel = chat?.kind === 'channel';
+  const saved = !!chat?.saved;
   const gMe = chat?.kind === 'group' || channel ? (chat!.me as MyMembership | null) ?? null : null;
   const owner = gMe?.role === 'owner';
   const what = channel ? 'канал' : 'группу';
@@ -43,7 +44,9 @@ export function useChatDialogs(chatId: number, title: string): { open: (a: Exclu
           {MUTE_PRESETS.map((p, i) => <RadioRow key={p.label} label={p.label} checked={i === preset} onClick={() => setPreset(i)} />)}
         </div>
       </Modal>
-      <Modal open={ask === 'delete'} onClose={() => setAsk(null)} title="Удалить чат" size="confirm" role="alertdialog" closeButton={false}>
+      <ConfirmDialog open={ask === 'delete' && saved} danger title="Удалить чат" text="Удалить всё из «Избранного»? Это действие нельзя отменить."
+        confirm="Удалить" onConfirm={() => void remove(true)} onCancel={() => setAsk(null)} />
+      <Modal open={ask === 'delete' && !saved} onClose={() => setAsk(null)} title="Удалить чат" size="confirm" role="alertdialog" closeButton={false}>
         <p class="rl-mdl-text">Удалить чат с <b>{title}</b>? Это действие нельзя отменить.</p>
         <div class="app-delchat-actions">
           <button type="button" class="rl-mdl-btn rl-mdl-btn-danger" onClick={() => void remove(true)}>Удалить для меня и {title}</button>

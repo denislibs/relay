@@ -370,6 +370,18 @@ function Avatar(props) {
     return h('span', { class: cx('rl-avatar', 'rl-avatar-logo', (props.className || props.class)), style: { width: size, height: size }, role: 'img', 'aria-label': props.name || 'Relay' },
       h(RelayLogo, { size: Math.round(size * 0.62) }));
   }
+  // автоудаление включено: значок таймера на углу аватара (только индикатор)
+  var timer = props.autoDelete ? h('span', { class: 'rl-avatar-timer', role: 'img', 'aria-label': 'Включено автоудаление' }, h(Icon, { name: 'timer', size: Math.max(10, Math.round(size * 0.27)) })) : null;
+  if (props.saved) {
+    // «Избранное»: закладка вместо инициалов
+    return h('span', { class: cx('rl-avatar', 'rl-avatar-saved', (props.className || props.class)), style: { width: size, height: size }, role: 'img', 'aria-label': props.name || 'Избранное' },
+      h(Icon, { name: 'bookmarkFilled', size: Math.round(size * 0.56) }), timer);
+  }
+  if (props.glyph) {
+    // подчаты «Избранного»: «Мои заметки» и «Автор скрыт» — значок на своём фоне вместо инициалов
+    return h('span', { class: cx('rl-avatar', 'rl-avatar-glyph', 'rl-avatar-' + props.glyph, (props.className || props.class)), style: { width: size, height: size }, role: 'img', 'aria-label': props.name || undefined },
+      h(Icon, { name: props.glyph === 'notes' ? 'notesFilled' : 'ghostFilled', size: Math.round(size * 0.56) }));
+  }
   var tone = props.tone != null ? props.tone : props.name ? nameTone(String(props.name)) : null;
   // фото: под ним инициалы и размытое превью (thumb), само фото проявляется, когда загрузилось, —
   // из кэша сразу, без мигания; ошибка загрузки — остаются превью/инициалы
@@ -381,7 +393,8 @@ function Avatar(props) {
     props.name ? initials(props.name) : props.src ? null : h(Icon, { name: 'community', size: Math.round(size * 0.5) }),
     props.src && props.thumb ? h('span', { class: 'rl-avatar-thumb', style: { backgroundImage: 'url("' + props.thumb + '")' }, 'aria-hidden': 'true' }) : null,
     props.src ? h('img', { key: props.src, class: 'rl-avatar-img', src: props.src, alt: '', decoding: 'async', draggable: false, ref: avatarImgReady, onLoad: avatarImgLoad }) : null,
-    props.online ? h('span', { class: 'rl-avatar-dot', 'aria-hidden': 'true' }) : null);
+    props.online ? h('span', { class: 'rl-avatar-dot', 'aria-hidden': 'true' }) : null,
+    timer);
 }
 // уже в кэше браузера — показать сразу (без перехода), иначе — по onLoad с плавным проявлением
 function avatarImgReady(el) { if (el && el.complete && el.naturalWidth) el.classList.add('is-instant', 'is-ready'); }
@@ -443,6 +456,7 @@ function MessageStatus(props) {
   var s = props.status || 'sent';
   var first = useRef(s); // рисуем галочки только при смене статуса, не при появлении на экране
   var size = props.size || 16;
+  if (s === 'none') return null;   // «Избранное»: читать некому — галочек нет
   if (s === 'pending') {
     return h('span', { class: 'rl-status rl-status-clock', role: 'img', 'aria-label': 'в очереди' },
       h('svg', { width: size - 3, height: size - 3, viewBox: '0 0 24 24', fill: 'none', stroke: 'currentColor', 'stroke-width': 2.2, 'stroke-linecap': 'round' },
@@ -496,13 +510,13 @@ function FolderTags(props) {
 function ChatRow(props) {
   var unread = props.unread || 0;
   var tagged = !!(props.tags && props.tags.length);
-  var rest = omit(props, ['tags', 'tagSpace', 'fitTags', 'verified', 'logo', 'name', 'preview', 'time', 'unread', 'muted', 'status', 'active', 'typing', 'online', 'avatar', 'author', 'thumb', 'pinned', 'draft', 'mentioned', 'forwarded', 'reactions', 'selecting', 'selected', 'className', 'class']);
+  var rest = omit(props, ['tags', 'tagSpace', 'fitTags', 'verified', 'logo', 'saved', 'glyph', 'autoDelete', 'name', 'preview', 'time', 'unread', 'muted', 'status', 'active', 'typing', 'online', 'avatar', 'author', 'thumb', 'pinned', 'draft', 'mentioned', 'forwarded', 'reactions', 'selecting', 'selected', 'className', 'class']);
   // как в Telegram: «печатает» важнее черновика, черновик важнее сообщения;
   // строка сообщения — «Автор:», миниатюра 20 px (у видео — play), текст
   var thumb = props.thumb;
   var atOnly = !!props.mentioned && unread === 1;
   var bottom = props.typing
-    ? h('span', { class: 'rl-row-preview rl-row-typing' }, h(TypingIndicator, { inline: true }), 'печатает…')
+    ? h('span', { class: 'rl-row-preview rl-row-typing' }, h(TypingIndicator, { inline: true }), typeof props.typing === 'string' ? props.typing : 'печатает…')
     : props.draft
       ? h('span', { class: 'rl-row-preview' }, h('b', { class: 'rl-row-draft' }, 'Черновик: '), props.draft)
       : h('span', { class: 'rl-row-preview' },
@@ -518,7 +532,7 @@ function ChatRow(props) {
   }),
     props.selecting ? h('span', { class: 'rl-row-check', 'aria-hidden': 'true' },
       h('svg', { width: 14, height: 14, viewBox: '0 0 24 24', fill: 'none', stroke: 'currentColor', 'stroke-width': 3, 'stroke-linecap': 'round', 'stroke-linejoin': 'round' }, h('path', { d: 'M5 12.5l4.5 4.5L19 7.5', pathLength: 1 }))) : null,
-    h(Avatar, { name: props.avatar === undefined ? props.name : props.avatar, tone: props.avatarTone, online: props.online, logo: props.logo, src: props.avatarSrc, thumb: props.avatarThumb, size: 54 }),   // как в Telegram: 54 в строке 72
+    h(Avatar, { name: props.avatar === undefined ? props.name : props.avatar, tone: props.avatarTone, online: props.online, logo: props.logo, saved: props.saved, glyph: props.glyph, autoDelete: props.autoDelete, src: props.avatarSrc, thumb: props.avatarThumb, size: 54 }),   // как в Telegram: 54 в строке 72
     h('span', { class: 'rl-row-main' },
       h('span', { class: 'rl-row-top' },
         // значки сразу за названием, а не у правого края: verified, затем «без звука» — серый динамик (как в Telegram)
@@ -649,7 +663,7 @@ function ReplyQuote(props) {
   var n = props.tone != null ? props.tone : 5;
   var accent = n === 'accent';
   var tone = accent ? 'var(--brand-text)' : 'var(--peer-' + n + ')';
-  return h(props.onClick ? 'button' : 'div', { type: props.onClick ? 'button' : undefined, class: cx('rl-quote', props.inBubble && 'rl-quote-in'),
+  return h(props.onClick ? 'button' : 'div', { type: props.onClick ? 'button' : undefined, class: cx('rl-quote', props.inBubble && 'rl-quote-in', props.fragment && 'rl-quote-frag'),
     style: { '--quote-tone': tone,
       '--quote-bg': accent ? 'color-mix(in srgb, var(--brand-text) 12%, transparent)' : 'var(--peer-' + n + '-bg)',
       '--quote-bg-active': accent ? 'color-mix(in srgb, var(--brand-text) 20%, transparent)' : 'var(--peer-' + n + '-bg-active)' }, onClick: props.onClick },
@@ -663,6 +677,8 @@ function ReplyQuote(props) {
     h('span', { class: 'rl-quote-body' },
       h('b', { style: { color: 'var(--quote-tone)' } }, props.author),
       h('span', { class: 'rl-quote-text' }, props.icon ? h(Icon, { name: props.icon, size: 14 }) : null, props.text)),
+    // цитата части сообщения: значок кавычек в углу (как в Telegram), текст — только фрагмент
+    props.fragment ? h(Icon, { name: 'quote', size: 12, class: 'rl-quote-frag-icon' }) : null,
     props.thumb !== undefined ? h('span', { class: 'rl-quote-thumb' }, h(MediaArt, { seed: props.thumb })) : null,
     props.onCancel ? h(IconButton, { icon: 'close', label: 'Отменить ответ', onClick: props.onCancel, size: 18 }) : null);
 }
@@ -1825,6 +1841,18 @@ function EmptyState(props) {
         h('g', { class: 'rl-empty-sun' }, h('circle', { class: 'rl-empty-sun-fill', cx: 112, cy: 56, r: 7 }), L('rl-empty-d3', { tag: 'circle', cx: 112, cy: 56, r: 7 })),
         L('rl-empty-d3', { d: 'M60 90l20-22 13 13 9-8 26 17' })),
       spark(140, 26), spark(20, 88, 'rl-empty-spark-2'), spark(146, 104, 'rl-empty-spark-3'))
+    : kind === 'gifs'
+    // две карточки-кадра: на передней кнопка «пуск» пульсирует, сверху закладка сохранения покачивается; искорки вокруг
+    ? h('svg', { class: 'rl-empty-art', viewBox: '0 0 160 120', 'aria-hidden': 'true' },
+      h('g', { class: 'rl-empty-float rl-empty-float-2' },
+        h('rect', { class: 'rl-empty-fill rl-empty-fill-in', x: 30, y: 26, width: 66, height: 50, rx: 10, transform: 'rotate(-8 63 51)' }),
+        L('', { tag: 'rect', x: 30, y: 26, width: 66, height: 50, rx: 10, transform: 'rotate(-8 63 51)' })),
+      h('g', { class: 'rl-empty-float' },
+        h('rect', { class: 'rl-empty-fill rl-empty-fill-out', x: 50, y: 38, width: 78, height: 58, rx: 10 }),
+        L('rl-empty-d2', { tag: 'rect', x: 50, y: 38, width: 78, height: 58, rx: 10 }),
+        h('g', { class: 'rl-empty-sun' }, L('rl-empty-d3', { d: 'M81 56.5v21l18-10.5z' })),
+        h('g', { class: 'rl-empty-clip' }, L('rl-empty-d3', { d: 'M110 26h14v24l-7-6-7 6z' }))),
+      spark(140, 22), spark(22, 92, 'rl-empty-spark-2'), spark(146, 106, 'rl-empty-spark-3'))
     : kind === 'files'
     // документ с загнутым уголком, за ним второй; скрепка покачивается, «скачать» подпрыгивает
     ? h('svg', { class: 'rl-empty-art', viewBox: '0 0 160 120', 'aria-hidden': 'true' },
@@ -1854,6 +1882,22 @@ function EmptyState(props) {
           L('rl-empty-d2', { tag: 'rect', x: 72, y: 48, width: 54, height: 24, rx: 12 }))),
       h('g', { class: 'rl-empty-link-spark' }, spark(80, 60)),
       spark(132, 24, 'rl-empty-spark-2'), spark(26, 96, 'rl-empty-spark-3'))
+    : kind === 'log'
+    // планшет со списком действий, строки дорисовываются; рядом покачиваются часы: журнал за последнее время
+    ? h('svg', { class: 'rl-empty-art', viewBox: '0 0 160 120', 'aria-hidden': 'true' },
+      h('circle', { class: 'rl-empty-fill rl-empty-fill-soft', cx: 76, cy: 62, r: 46 }),
+      h('g', { class: 'rl-empty-float' },
+        h('rect', { class: 'rl-empty-fill rl-empty-fill-out', x: 44, y: 22, width: 64, height: 82, rx: 9 }),
+        L('', { tag: 'rect', x: 44, y: 22, width: 64, height: 82, rx: 9 }),
+        L('rl-empty-d2', { d: 'M64 22v-3a4 4 0 0 1 4-4h16a4 4 0 0 1 4 4v3' }),
+        h('circle', { class: 'rl-empty-dot', cx: 57, cy: 44, r: 3 }), L('rl-empty-d2', { d: 'M67 44h28' }),
+        h('circle', { class: 'rl-empty-dot', cx: 57, cy: 62, r: 3 }), L('rl-empty-d3', { d: 'M67 62h22' }),
+        h('circle', { class: 'rl-empty-dot', cx: 57, cy: 80, r: 3 }), L('rl-empty-d3', { d: 'M67 80h26' })),
+      h('g', { class: 'rl-empty-bob' },
+        h('circle', { class: 'rl-empty-fill rl-empty-fill-in', cx: 118, cy: 84, r: 17 }),
+        L('rl-empty-d2', { tag: 'circle', cx: 118, cy: 84, r: 17 }),
+        L('rl-empty-d3', { d: 'M118 74v10l7 4' })),
+      spark(134, 30), spark(26, 40, 'rl-empty-spark-2'), spark(28, 96, 'rl-empty-spark-3'))
     : kind === 'contacts'
     // двое: задний чуть выше и покачивается не в такт переднему; рядом подпрыгивает «+», вокруг мерцают искорки
     ? h('svg', { class: 'rl-empty-art', viewBox: '0 0 160 120', 'aria-hidden': 'true' },

@@ -13,12 +13,14 @@ export interface SearchHit { message: Message; chatTitle: string | null }
  * Индекс не знает прав: фильтр — чаты пользователя из Postgres, найденное перепроверяется в Postgres
  * (членство, не удалено). Индекс не готов или недоступен — прежний поиск подстроки по Postgres.
  */
-export async function searchMessages(userId: number, q: string, opts: { chatId?: number; beforeId?: number; limit?: number } = {}): Promise<{ hits: SearchHit[]; hasMore: boolean }> {
+export async function searchMessages(userId: number, q: string, opts: { chatId?: number; beforeId?: number; limit?: number; savedPeer?: string | null } = {}): Promise<{ hits: SearchHit[]; hasMore: boolean }> {
   const text = q.trim();
   if (text.length < 2) throw new DomainError('bad_frame', 'query too short');
   if (text.length > 100) throw new DomainError('too_long');
   if (opts.chatId) await assertMember(sql, opts.chatId, userId);
   const limit = Math.min(Math.max(opts.limit ?? 30, 1), 100);
+  // подчат «Избранного»: индекс о нём не знает, а фильтр после индекса оставлял бы пустые страницы (чат невелик — поиск по строкам)
+  if (opts.savedPeer) return searchPostgres(userId, q, opts);
   let ids: number[];
   try {
     if (!(await searchReady())) return searchPostgres(userId, q, opts);
@@ -40,7 +42,7 @@ export async function searchMessages(userId: number, q: string, opts: { chatId?:
       from messages m
       join chat_members cm on cm.chat_id = m.chat_id and cm.user_id = ${userId}
       join chats c on c.id = m.chat_id and c.deleted_at is null   -- удалённый (мягко) чат не ищется
-     where m.id = any(${page}::bigint[]) and not m.deleted
+     where m.id = any(${page}::bigint[]) and not m.deleted and (m.expires_at is null or m.expires_at > now())
        and m.id >= cm.history_from   -- скрытая история (вступил позже, «удалить у себя») не ищется — AUTHZ-1`;
   await openRows(rows);
   const byId = new Map(rows.map((r) => [Number(r.id), r]));
@@ -54,7 +56,7 @@ export async function searchMessages(userId: number, q: string, opts: { chatId?:
  * Ищет в тексте и во вложении: имя файла, название и исполнитель трека (как индекс Meilisearch).
  * chatId — внутри одного чата; без него — по всем чатам пользователя. Удалённые не ищутся.
  */
-export async function searchPostgres(userId: number, q: string, opts: { chatId?: number; beforeId?: number; limit?: number } = {}): Promise<{ hits: SearchHit[]; hasMore: boolean }> {
+export async function searchPostgres(userId: number, q: string, opts: { chatId?: number; beforeId?: number; limit?: number; savedPeer?: string | null } = {}): Promise<{ hits: SearchHit[]; hasMore: boolean }> {
   const text = q.trim();
   if (text.length < 2) throw new DomainError('bad_frame', 'query too short');
   if (text.length > 100) throw new DomainError('too_long');
@@ -70,11 +72,12 @@ export async function searchPostgres(userId: number, q: string, opts: { chatId?:
       from messages m
       join chat_members cm on cm.chat_id = m.chat_id and cm.user_id = ${userId}
       join chats c on c.id = m.chat_id and c.deleted_at is null   -- удалённый (мягко) чат не ищется
-     where not m.deleted and m.id >= cm.history_from   -- скрытая история не ищется (AUTHZ-1)
+     where not m.deleted and (m.expires_at is null or m.expires_at > now()) and m.id >= cm.history_from   -- скрытая история не ищется (AUTHZ-1)
        and (m.content is not null or m.body ilike ${pattern}
             or (m.attachment is not null   -- то же выражение, что в индексе messages_attachment_trgm
                 and (coalesce(m.attachment->>'name', '') || E'\n' || coalesce(m.attachment->>'title', '') || E'\n' || coalesce(m.attachment->>'performer', '')) ilike ${pattern}))
        ${opts.chatId ? sql`and m.chat_id = ${opts.chatId}` : sql``}
+       ${opts.savedPeer ? sql`and m.saved_peer = ${opts.savedPeer}` : sql``}
        ${before ? sql`and m.id < ${before}` : sql``}
      order by m.id desc
      limit ${SCAN_BATCH}`, (r) => rowMatches(r, text), limit, opts.beforeId ?? null);

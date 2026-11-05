@@ -1,5 +1,5 @@
 import { expect, test } from 'bun:test';
-import { chatTime, clock, dayLabel, hideCode, hm, isSystemChat, shownBody, snippet } from './format';
+import { chatTime, clock, dayLabel, hideCode, hm, isSavedChat, isSystemChat, matchesSaved, shownBody, shownStatus, snippet, typingText } from './format';
 
 const at = (h: number, m: number) => new Date(2026, 9, 17, h, m).toISOString();
 
@@ -71,4 +71,22 @@ test('dayLabel: сегодня, вчера, дата этого и прошло�
 test('dayLabel: два момента одного дня — одна подпись', () => {
   expect(dayLabel(new Date(2020, 4, 9, 0, 5).toISOString())).toBe(dayLabel(new Date(2020, 4, 9, 23, 55).toISOString()));
   expect(dayLabel(new Date(2020, 4, 9, 12).toISOString())).toBe('9 мая 2020 г.');
+});
+
+test('«Избранное»: без галочек, но «отправляется» и «не отправлено» видны; поиск — по началу названия', () => {
+  expect(isSavedChat({ saved: true })).toBe(true);
+  expect(isSavedChat({ saved: false, peer: null })).toBe(false);
+  for (const s of ['sent', 'read']) { expect(shownStatus(s, true)).toBe('none'); expect(shownStatus(s, false)).toBe(s); }
+  for (const s of ['pending', 'failed']) expect(shownStatus(s, true)).toBe(s);
+  for (const q of ['Избранное', 'избр', ' ИЗБРАН ']) expect(matchesSaved(q)).toBe(true);
+  for (const q of ['', '  ', 'бран', 'избранное2']) expect(matchesSaved(q)).toBe(false);
+});
+
+test('typing label names people like Telegram', () => {
+  expect(typingText(undefined)).toBe('печатает…');
+  expect(typingText(['Васян'])).toBe('Васян печатает…');
+  expect(typingText(['Васян', 'Петя'])).toBe('Васян и Петя печатают…');
+  expect(typingText(['Васян', 'Петя', 'Оля'])).toBe('Васян и ещё 2 печатают…');
+  expect(typingText(['', ''])).toBe('2 человека печатают…');
+  expect(typingText(['', '', '', '', ''])).toBe('5 человек печатают…');
 });

@@ -3,12 +3,14 @@ import { ProfileLinks } from './links/ProfileLinks';
 import { Expand } from './Expand';
 import { PersonalChannelBlock } from './profile/PersonalChannelBlock';
 import { SharedMedia, type MediaHead } from './SharedMedia';
+import { SavedChatsTab } from './saved/SavedChatsTab';
+import { chatsText, messagesText, savedTitle, useSavedDialogs } from '../savedDialogs';
 import { membersStatus, useMembers } from '../members';
 import { openInner, openUserChat, startDirectChat } from '../data';
 import { playProfileTop } from '../music';
 import { Avatar, Icon, InfoRow, PanelHeader, ProfileActions, RichText, SettingsIcon, SlideFade, SlideStack, Verified, peerTone, requestMeasure } from '@relay/ui';
 import type { Item } from '@relay/sync-engine/src/types';
-import { chatTone, isSystemChat } from './format';
+import { chatTone, isSavedChat, isSystemChat } from './format';
 import { useEffect, useRef, useState } from 'preact/hooks';
 import { activeFrame, setGlobal, useGlobal, getGlobal, findChat } from '../global';
 import { isChatMuted, unmuteChat } from '../mute';
@@ -17,6 +19,8 @@ import { joinChat, useChatDialogs } from './chatActions';
 import { birthdayText, lastSeenText, type Birthday } from './format';
 import { blockUser, showToast, unblockUser, useUser } from '../settingsData';
 import { EditContactPanel } from './contacts/EditContact';
+import { AutoDeletePage } from './AutoDeletePage';
+import { canSetAutoDelete, termText } from '../autoDelete';
 import type { ProfilePhoto } from '@relay/protocol';
 import { avatarPhoto, useProfilePhotos, userPhoto } from '../profilePhoto';
 import { ProfileGallery } from './ProfileGallery';
@@ -32,7 +36,7 @@ const StickersPanel = lazy(() => import('./stickers/StickersPanel').then((m) => 
 // экраны управления группой — чанком (маршруты — group/routes.ts, здесь)
 const GroupScreen = lazy(() => import('./group/Manage').then((m) => m.GroupScreen));
 
-const PAGES = ['info', 'stickers', 'edit', ...GROUP_PAGES];   // «Стикеры» — вторая вложенность (из поиска в панели стикеров)   // «Изменить контакт» и управление группой выезжают внутри панели справа налево
+const PAGES = ['info', 'autoDelete', 'stickers', 'edit', ...GROUP_PAGES];   // «Стикеры» — вторая вложенность (из поиска в панели стикеров)   // «Изменить контакт» и управление группой выезжают внутри панели справа налево
 const close = () => setGlobal({ infoOpen: false });
 const CLOSED_RESET_MS = 300;   // закрытая панель возвращается на профиль, когда уже уехала (выезд — 240 мс)
 
@@ -44,6 +48,7 @@ export function Info() {
   // прежний чат — смена чата при закрытой панели не перестраивает её и не грузит профиль и медиа впустую
   const shown = useGlobal((s) => s.infoOpen);
   const liveId = useGlobal((s) => s.openChatId);
+  const peerLive = useGlobal((s) => activeFrame(s)?.savedPeer ?? null);
   const heldId = useRef(liveId);
   if (shown) heldId.current = liveId;
   const chatId = heldId.current!;
@@ -69,6 +74,7 @@ export function Info() {
   const openBefore = useRef(infoOpen), instant = useRef(false);
   useEffect(() => {
     if (!infoGo) return;
+    if (infoGo === 'autoDelete') { setGlobal({ infoGo: null }); if (page !== 'autoDelete') { instant.current = !openBefore.current; setPage('autoDelete'); } return; }
     if (infoGo === 'stickers') { setGlobal({ infoGo: null }); if (page !== 'stickers') { instant.current = !openBefore.current; setPage('stickers'); } return; }
     if (isGroupPage(infoGo)) { setGlobal({ infoGo: null }); nav.go(infoGo); }
     else if (infoGo === 'edit') { setGlobal({ infoGo: null }); setPage('edit'); }   // «Изменить» из меню шапки
@@ -87,6 +93,7 @@ export function Info() {
   // профиль собеседника личного чата: только то, что сервер разрешил показать
   // служебный чат «Relay»: без контакта, телефона и @имени — только уведомления
   const system = isSystemChat(chat);
+  const saved = isSavedChat(chat);
   const peerId = chat?.kind === 'direct' && !system ? (chat.peerId as number | null) : null;
   const user = useUser(peerId);
   // контакт: ✎ в шапке ведёт в «Изменить»; не контакт — «Добавить в контакты»
@@ -98,11 +105,16 @@ export function Info() {
       addEventListener('keydown', onKey);
       return () => removeEventListener('keydown', onKey);
     }
-    if (page !== 'info') return;   // на правке Esc — «Назад», его ловит форма
+    if (page === 'autoDelete') {   // Esc — назад к профилю; окно своего срока закрывает своё само
+      const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape' && !e.defaultPrevented && !document.querySelector('.rl-mdl')) { e.preventDefault(); setPage('info'); } };
+      addEventListener('keydown', onKey);
+      return () => removeEventListener('keydown', onKey);
+    }
+    if (page !== 'info' || !shown) return;   // на правке Esc — «Назад», его ловит форма; закрытая панель (не размонтируется) Esc не забирает
     const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape' && !e.defaultPrevented) { e.preventDefault(); close(); } };
     addEventListener('keydown', onKey);
     return () => removeEventListener('keydown', onKey);
-  }, [page]);
+  }, [page, shown]);
 
   const title = (chat?.title as string) || 'Чат №' + chatId;
   // группа или канал: у канала — подписчики числом, без онлайна; список подписчиков — только админам
@@ -202,12 +214,14 @@ export function Info() {
   const [joining, setJoining] = useState(false);
   useEffect(() => { setJoining(false); }, [chatId, !!gMe]);
   const linked = channel && gInfo?.linkedChatId != null && getGlobal().chats.some((c) => c.id === gInfo.linkedChatId) ? gInfo.linkedChatId : null;
+  const canTimer = canSetAutoDelete({ preview: !!chat?.preview, system, saved, peerId, blocked: iBlocked || !!user?.blocksMe, me: gMe });
   const tiles = [
     ...(group && !gMe ? [{ key: 'join', icon: 'userPlus',
       label: chat?.requested ? 'заявка отправлена' : gInfo?.joinApproval ? 'подать заявку' : channel ? 'подписаться' : 'вступить',
       onClick: () => { if (joining || chat?.requested) return; setJoining(true); void joinChat(chatId).then((r) => { if (r !== 'joined') setJoining(false); }); } }] : []),
     // превью канала без подписки: уведомлений нет — и звук не настраивается
-    ...(chat?.preview ? [] : [muted
+    // «Избранное»: уведомлений нет — и звук не настраивается
+    ...(chat?.preview || saved ? [] : [muted
       ? { key: 'mute', icon: 'bell', label: 'вкл. звук', menuLabel: 'Включить звук', onClick: () => unmuteChat(chatId) }
       : { key: 'mute', icon: 'bellOff', label: 'без звука', menuLabel: 'Отключить звук…', onClick: () => dialogs.open('mute') }]),
     ...(linked != null ? [{ key: 'discussion', icon: 'chats', label: 'обсуждение', onClick: () => openInner(linked) }] : []),
@@ -227,13 +241,16 @@ export function Info() {
   const openMember = (userId: number) => { void openUserChat(userId); };
 
   return (
-    <SlideStack order={PAGES} active={page} instant={instant.current} render={(k: string) => isGroupPage(k) ? (
+    <SlideStack order={PAGES} active={page} instant={instant.current} render={(k: string) => k === 'autoDelete' ? (
+      <AutoDeletePage chatId={chatId} onBack={() => setPage('info')} />
+    ) : isGroupPage(k) ? (
       group && chat ? <GroupScreen page={k} nav={nav} /> : null
     ) : k === 'stickers' ? (
       <StickersPanel onBack={() => setPage('info')} />
     ) : k === 'edit' && peerId ? (
       <EditContactPanel userId={peerId} onDone={() => setPage('info')} />
     ) : (
+    saved ? <SavedAside chatId={chatId} peer={peerLive} /> :
     <div class={'rl-sidepage' + (expanded && gallery.length ? ' is-photo-open' : '')}>
       <PanelHeader class={media ? 'is-media' : undefined} icon={media ? 'arrowLeft' : 'close'} closeLabel={media ? 'Наверх' : 'Закрыть'}
         title={<HeadTitle media={media} plain={channel ? 'Информация о канале' : group ? 'Информация о группе' : 'Информация'} name={title} head={mediaHead} />} onClose={media ? toTop : close} action={media ? undefined : action} />
@@ -250,14 +267,14 @@ export function Info() {
         ) : (
         <div class={'rl-profile' + (peerId && (user?.music as ProfileMusicSummary | null | undefined)?.top ? ' has-music' : '')}>
           <div class="app-prof-ava">
-            <Avatar name={title} tone={chatTone(chat)} size={120} logo={system} {...avatarPhoto(chat?.photo as ProfilePhoto | null, true)} />
+            <Avatar name={title} tone={chatTone(chat)} size={120} logo={system} saved={saved} {...avatarPhoto(chat?.photo as ProfilePhoto | null, true)} />
           </div>
           <div class="rl-profile-name">{title}{system ? <Verified size={22} /> : null}</div>
-          <div class={'rl-profile-sub' + (myPeer?.online ? ' app-online' : '')}>{subtitle || ' '}</div>
+          {saved ? null : <div class={'rl-profile-sub' + (myPeer?.online ? ' app-online' : '')}>{subtitle || ' '}</div>}
           {peerId ? <ProfileMusicBar userId={peerId} music={user?.music as ProfileMusicSummary | null | undefined} /> : null}
         </div>
         )}
-        {gallery.length ? null : <ProfileActions label="Действия с чатом" actions={tiles} menu={tileMenu} />}
+        {gallery.length || !(tiles.length || tileMenu.length) ? null : <ProfileActions label="Действия с чатом" actions={tiles} menu={tileMenu} />}
         {/* key — чат: строки нового профиля (из кэша) стоят сразу; раскрываются только пришедшие позже в этом же чате */}
         <div key={chatId} class="rl-aside-group app-info-rows">
           {/* как в Telegram: имя уже в шапке — строками только то, чего там нет, и только если поле заполнено */}
@@ -274,6 +291,10 @@ export function Info() {
             <InfoRow tile="blue" icon="link" title={publicUrl(gInfo.username).replace(/^https?:\/\//, '')} subtitle="Ссылка" onClick={() => copyText(publicUrl(gInfo.username!))} />
           ) : null}</Expand>
           <Expand show={!group && !!(user?.links as ProfileLink[] | undefined)?.length}>{!group && user ? <ProfileLinks links={(user.links as ProfileLink[] | undefined) ?? []} /> : null}</Expand>
+          {/* автоудаление: менять могут не все — остальным строка видна, только когда оно включено */}
+          {system || (!canTimer && !chat?.autoDeleteSec) ? null : (
+            <InfoRow tile="orange" icon="timer" title={chat?.autoDeleteSec ? termText(chat.autoDeleteSec as number) : 'Выкл.'} subtitle="Автоудаление" onClick={canTimer ? () => setPage('autoDelete') : undefined} />
+          )}
           <Expand show={!!contact?.note}>{contact?.note ? (
             <div class="rl-inforow rl-inforow-static">
               <SettingsIcon icon="pencil" color="gray" />
@@ -294,6 +315,31 @@ export function Info() {
 }
 
 const copy = (text: string) => { navigator.clipboard?.writeText(text).then(() => showToast('Скопировано')).catch(() => { /* буфер недоступен */ }); };
+
+/**
+ * Панель «Избранного»: список подчатов и (кадр подчата сверху) панель этого подчата — страницы SlideStack. Корень не
+ * размонтируется, поэтому назад — та же вкладка и та же прокрутка; вкладки — полоса SharedMedia.
+ */
+function SavedAside({ chatId, peer }: { chatId: number; peer: string | null }) {
+  const held = useRef(peer);
+  if (peer) held.current = peer;
+  const pages = held.current ? ['list', held.current] : ['list'];
+  return <SlideStack order={pages} active={peer ?? 'list'} render={(k: string) => <SavedPage key={k} chatId={chatId} peer={k === 'list' ? null : k} />} />;
+}
+function SavedPage({ chatId, peer }: { chatId: number; peer: string | null }) {
+  const { items, meta } = useSavedDialogs();
+  const row = peer ? items.find((d) => d.peer === peer) ?? null : null;
+  const name = peer ? savedTitle(row, peer) : 'Избранное';
+  const sub = peer ? (row ? messagesText(row.count) : '\u00a0') : meta?.loaded ? chatsText(meta.total) : '\u00a0';
+  return (
+    <div class="rl-sidepage">
+      <PanelHeader title={<span class="app-head-rows"><b>{name}</b><span class="app-head-sub app-saved-sub">{sub}</span></span>} onClose={close} closeLabel="Закрыть" />
+      <div class="rl-aside-body">
+        <SharedMedia chatId={chatId} savedPeer={peer} chatsTab={peer ? undefined : <SavedChatsTab chatId={chatId} />} />
+      </div>
+    </div>
+  );
+}
 
 /** @username, «Телефон», «О себе», «День рождения» — каждая строка, только если поле видно. */
 function PeerRows({ user }: { user: Item }) {
