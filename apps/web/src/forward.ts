@@ -17,9 +17,15 @@ export function startForward(fromChatId: number, items: Src[], nameOf: (userId: 
 
 /** То же для сообщений из нескольких чатов (выбор в глобальном поиске): пересылаются по чатам, в порядке групп. */
 export function startForwardMany(groups: { chatId: number; items: Src[] }[], nameOf: (userId: number) => string): Promise<void> {
+  const pick = buildPick(groups, nameOf);
+  return pick ? showPick(pick) : Promise.resolve();
+}
+
+/** Что пересылаем: части по чатам-источникам и превью для панели. Нечего (удалённые, служебные) — null. */
+function buildPick(groups: { chatId: number; items: Src[] }[], nameOf: (userId: number) => string): ForwardPick | null {
   const parts = groups.map((g) => ({ chatId: g.chatId, list: g.items.filter((m) => m.id != null && !m.deleted && !m.service).sort((a, b) => (a.id as number) - (b.id as number)) }))
     .filter((g) => g.list.length);
-  if (!parts.length) return Promise.resolve();
+  if (!parts.length) return null;
   const list = parts.flatMap((g) => g.list);
   const senders: { id: number; name: string }[] = [];
   for (const m of list) {
@@ -33,8 +39,8 @@ export function startForwardMany(groups: { chatId: number; items: Src[] }[], nam
   const text = (first.body as string) || (att ? (att.kind === 'file' && att.name ? att.name : KIND[att.kind ?? ''] ?? 'Вложение') : '');
   const captions = list.some((m) => !!m.attachment && !!m.body);
   const [head, ...rest] = parts;
-  return showPick({ fromChatId: head.chatId, ids: head.list.map((m) => m.id as number), ...(rest.length ? { more: rest.map((g) => ({ fromChatId: g.chatId, ids: g.list.map((m) => m.id as number) })) } : {}),
-    preview: { senders, text, count: list.length, captions } });
+  return { fromChatId: head.chatId, ids: head.list.map((m) => m.id as number), ...(rest.length ? { more: rest.map((g) => ({ fromChatId: g.chatId, ids: g.list.map((m) => m.id as number) })) } : {}),
+    preview: { senders, text, count: list.length, captions } };
 }
 
 let pickSeq = 0;
@@ -55,6 +61,23 @@ export function closeForwardPick(): void { pickSeq++; setGlobal({ fwdPick: null 
 /** Выбор в окне: один чат — панель пересылки в его поле ввода; несколько — сразу во все, с подписью первой. */
 /** Строка «Избранное» в окне пересылки, пока чата нет в загруженном списке: настоящий id узнаётся при отправке. */
 export const SAVED_PICK = -1;
+
+/**
+ * Подменю «Переслать» у сообщения (как в Telegram): клик по чату — пересылка сразу, без окна выбора, и тост.
+ * to — id чата или SAVED_PICK («Избранное», которого ещё может не быть).
+ */
+export async function forwardQuick(fromChatId: number, items: Src[], nameOf: (userId: number) => string, to: number, title: string): Promise<void> {
+  const pick = buildPick([{ chatId: fromChatId, items }], nameOf);
+  if (!pick) return;
+  let chatId = to;
+  if (to === SAVED_PICK) {
+    try { chatId = await savedChatId(); } catch { showToast('Не удалось открыть Избранное — нет сети?'); return; }
+  }
+  sentSound();
+  await forwardParts(pick, { toChatIds: [chatId], comment: null });
+  const many = pick.ids.length + (pick.more ?? []).reduce((n, p) => n + p.ids.length, 0) > 1;
+  showToast(`${many ? 'Сообщения пересланы' : 'Сообщение переслано'} ${to === SAVED_PICK ? 'в Избранное' : `в «${title}»`}`);
+}
 
 export async function forwardTo(chatIds: number[], comment: string): Promise<void> {
   const pick = getGlobal().fwdPick;

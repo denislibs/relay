@@ -91,6 +91,9 @@ export function useGroupData<T>(path: string | null, rev: unknown = 0): { data: 
 
 export const inviteUrl = (token: string) => location.origin + '/+' + token;
 export const publicUrl = (username: string) => location.origin + '/@' + username;
+/** Ссылка на сообщение группы или канала (как t.me): публичный — /@имя/id, закрытый — /c/чат/id (откроется у участников). */
+export const messageLink = (chatId: number, username: string | null | undefined, msgId: number) =>
+  location.origin + (username ? '/@' + username : '/c/' + chatId) + '/' + msgId;
 export const copyText = (text: string, toast = 'Ссылка скопирована') => { navigator.clipboard?.writeText(text).then(() => showToast(toast)).catch(() => {}); };
 
 export const plural = (n: number, one: string, few: string, many: string) =>

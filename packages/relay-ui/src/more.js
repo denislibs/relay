@@ -17,13 +17,15 @@ function Menu(props) {
   var sub = useState(null), open = sub[0];   // { index, top } пункта с подменю
   var items = props.items || [];
   useEffect(function () {
-    var first = ref.current && ref.current.querySelector(':scope > [role="menuitem"]');
+    var first = ref.current && ref.current.querySelector(':scope > [role^="menuitem"]');
     if (first && !props.noFocus) first.focus({ preventScroll: true });
     return function () { clearTimeout(timer.current); };
   }, []);
-  function openSub(i, el, now) {
+  // курсор ушёл в подменю (и глубже — подменю подменю): закрытие этого и всех родительских отменяется
+  function hold() { clearTimeout(timer.current); if (props.onHold) props.onHold(); }
+  function openSub(i, el, now, byKey) {
     clearTimeout(timer.current);
-    var go = function () { var r = el.getBoundingClientRect(); sub[1]({ index: i, left: r.right - 24, top: r.top - 4 }); };
+    var go = function () { var r = el.getBoundingClientRect(); sub[1]({ index: i, left: r.right - 24, right: r.left + 24, top: r.top - 4, key: !!byKey }); };
     if (now) go(); else timer.current = setTimeout(go, 120);
   }
   function closeSub(now) {
@@ -38,7 +40,7 @@ function Menu(props) {
     var it = isNaN(di) ? null : items[di];
     if (e.key === 'ArrowDown') { e.preventDefault(); list[(i + 1) % list.length].focus(); }
     else if (e.key === 'ArrowUp') { e.preventDefault(); list[(i - 1 + list.length) % list.length].focus(); }
-    else if (e.key === 'ArrowRight' && it && it.submenu) { e.preventDefault(); openSub(di, document.activeElement, true); }
+    else if (e.key === 'ArrowRight' && it && it.submenu) { e.preventDefault(); openSub(di, document.activeElement, true, true); }
     else if (e.key === 'ArrowLeft' && props.onBack) { e.preventDefault(); e.stopPropagation(); props.onBack(); }
     else if (e.key === 'Escape') { if (props.onClose) props.onClose(); }
   }
@@ -49,7 +51,7 @@ function Menu(props) {
     items.map(function (it, i) {
       if (it === '-') return h('hr', { key: 'sep' + i, class: 'rl-menu-sep' });
       var toggle = typeof it.checked === 'boolean';
-      return h('button', { key: it.label, type: 'button', 'data-i': i, role: toggle ? 'menuitemcheckbox' : 'menuitem', 'aria-checked': toggle ? String(it.checked) : undefined,
+      return h('button', { key: it.key || it.label, type: 'button', 'data-i': i, role: toggle ? 'menuitemcheckbox' : 'menuitem', 'aria-checked': toggle ? String(it.checked) : undefined,
         'aria-haspopup': it.submenu ? 'menu' : undefined, 'aria-expanded': it.submenu ? String(!!(open && open.index === i)) : undefined,
         class: cx('rl-menu-item', it.danger && 'rl-menu-danger', open && open.index === i && 'rl-menu-item-open'),
         onPointerEnter: function (e) { if (it.submenu) openSub(i, e.currentTarget); else if (open) closeSub(); },
@@ -59,16 +61,34 @@ function Menu(props) {
           if (it.onClick) it.onClick();
           if (!it.keepOpen && props.onClose) props.onClose();
         } },
-        it.icon ? h(Icon, { name: it.icon, size: 20 }) : null, h('span', null, it.label),
+        it.leading ? h('span', { class: 'rl-menu-lead', 'aria-hidden': 'true' }, it.leading) : it.icon ? h(Icon, { name: it.icon, size: 20 }) : null, h('span', null, it.label),
         toggle ? h('i', { class: cx('rl-menu-switch', it.checked && 'rl-menu-switch-on'), 'aria-hidden': 'true' }) : null,
         it.submenu ? h(Icon, { name: 'chevronRight', size: 18 }) : null,
         it.hint ? h('kbd', null, it.hint) : null);
     }),
     // подменю — порталом в body с координатами пункта: панель вокруг меню его не обрежет
-    opened ? createPortal(h('div', { class: 'rl rl-submenu', style: { left: Math.min(open.left, window.innerWidth - 260) + 'px', top: open.top + 'px' },
-      onPointerEnter: function () { clearTimeout(timer.current); }, onPointerLeave: function () { closeSub(); } },
-      h(Menu, { items: opened.submenu, label: opened.label, noFocus: true, onClose: props.onClose,
+    opened ? createPortal(h(SubmenuBox, { at: open, onEnter: hold, onLeave: function () { closeSub(); if (props.onLeave) props.onLeave(); } },
+      h(Menu, { key: open.index, items: opened.submenu, label: opened.label, noFocus: !open.key, onClose: props.onClose, onHold: hold, onLeave: function () { closeSub(); if (props.onLeave) props.onLeave(); },
         onBack: function () { closeSub(true); var b = ref.current && ref.current.querySelector('.rl-menu-item-open'); if (b) b.focus(); } })), document.body) : null);
+}
+
+/* Карточка подменю: справа от пункта, а не влезает — слева от меню (как в Telegram); снизу не уходит за экран.
+   Размер известен только после раскладки — одно чтение до показа (forceMeasure), карточка стоит на месте с первого кадра. */
+function SubmenuBox(props) {
+  var ref = useRef(null), at = props.at;
+  var pos = useState({ left: at.left, top: at.top, ready: false });
+  useLayoutEffect(function () {
+    var el = ref.current;
+    if (!el) return;
+    forceMeasure(function () {
+      var w = el.offsetWidth, hgt = el.offsetHeight, vw = window.innerWidth, vh = window.innerHeight;
+      var left = at.left + w > vw - 8 ? Math.max(8, at.right - w) : at.left;
+      var top = Math.max(8, Math.min(at.top, vh - hgt - 8));
+      pos[1]({ left: left, top: top, ready: true });
+    });
+  }, [at.left, at.top]);
+  return h('div', { ref: ref, class: 'rl rl-submenu', style: { left: pos[0].left + 'px', top: pos[0].top + 'px', visibility: pos[0].ready ? null : 'hidden' },
+    onPointerEnter: props.onEnter, onPointerLeave: props.onLeave }, props.children);
 }
 
 /* ---------- MentionList: @-autocomplete above the composer ---------- */
