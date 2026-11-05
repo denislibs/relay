@@ -1,9 +1,13 @@
-import { requestMutation } from '@relay/ui';
+import { requestMeasure, requestMutation } from '@relay/ui';
 import { useChatThemeStyle } from '../chatTheme';
 import { memo } from 'preact/compat';
 import { useLayoutEffect, useRef, useState } from 'preact/hooks';
 import { activeFrame, useGlobal } from '../global';
 import { Chat } from './Chat';
+
+// Чат — memo, и «на экране» (active) доходит до него кадром позже смены: в кадре смены меняются только классы
+// колонок, а рендеры обоих чатов (уходящий перестаёт ловить ввод, пришедший — начинает) идут следующим кадром
+const StackChat = memo(Chat);
 
 /*
  * Стек чатов, как в Telegram Web: каждая колонка — свой чат (шапка, лента, композер), все лежат рядом.
@@ -66,9 +70,6 @@ const ChatColumn = memo(function ChatColumn({ frame, chatId, threadId, scheduled
     prev.current = pos;
     const el = box.current;
     if (!el) return;
-    // подмена: колонка собиралась скрытой, и анимации появления (закреп, реакции, текст закрепа) начались там —
-    // показ застал бы их на середине: закреп полупрозрачным, лента просвечивает. Чат встаёт целиком, как шапка
-    if (swap && pos === 'on') finishEntrances(el);
     el.classList.add('app-chatcol-moving');
     const t = setTimeout(() => requestMutation(() => el.classList.remove('app-chatcol-moving')), 320);
     return () => clearTimeout(t);
@@ -91,12 +92,27 @@ const ChatColumn = memo(function ChatColumn({ frame, chatId, threadId, scheduled
     const t = setTimeout(() => requestMutation(() => { coveredRef.current = true; el.classList.add('app-chatcol-covered'); }), COVER_MS);
     return () => clearTimeout(t);
   }, [settled, cls]);
+  // Колонка собирается скрытой (pending: новый чат, раскрытие припаркованного), и анимации появления (закреп,
+  // реакции, текст закрепа) начинаются там — показ застал бы их на середине: закреп полупрозрачным, лента
+  // просвечивает. Доигрываем их в фазе замера следующего кадра, когда стили собранной колонки уже посчитаны:
+  // getAnimations в кадре смены (классы уже сменились) пересчитывал стили всего чата — ~50 мс при CPU ×4
+  useLayoutEffect(() => {
+    const el = box.current;
+    if (!pending || !el) return;
+    requestMeasure(() => { if (el.isConnected) finishEntrances(el); });
+  }, [pending]);
   const hidden = on ? {} : { 'aria-hidden': true, inert: true };
+  const [chatActive, setChatActive] = useState(on);
+  const onRef = useRef(on); onRef.current = on;
+  useLayoutEffect(() => {
+    // эффект идёт в фазе записи кадра смены; запись, заказанная из неё, — следующим кадром
+    if (chatActive !== on) requestMutation(() => setChatActive(onRef.current));
+  }, [on, chatActive]);
   // тема чата (chatTheme.ts): акцент и свои пузыри — переменными на колонке, поверх темы страницы
   const themed = useChatThemeStyle(chatId);
   return (
     <div ref={box} class={cls} data-current={on ? '' : undefined} style={themed?.style} data-out-filled={themed?.filled ? '' : undefined} {...hidden}>
-      <Chat frameKey={frame} chatId={chatId} threadId={threadId} scheduled={scheduled} savedPeer={savedPeer} active={on} />
+      <StackChat frameKey={frame} chatId={chatId} threadId={threadId} scheduled={scheduled} savedPeer={savedPeer} active={chatActive} />
     </div>
   );
 });
