@@ -5,7 +5,7 @@ import { folderChats, type FolderChat } from '../folders';
 import { closeForwardPick, forwardTo } from '../forward';
 import { useGlobal } from '../global';
 import { avatarPhoto } from '../profilePhoto';
-import { topChats } from '../search';
+import { topChats, topChatsNow } from '../search';
 import { useFolderCtx } from './folderNav';
 import { chatTone, isSystemChat } from './format';
 
@@ -16,8 +16,11 @@ export function ForwardPicker() {
   const blocked = useGlobal((s) => s.blocked);
   const folders = useGlobal((s) => s.settings.folders);
   const ctx = useFolderCtx();
-  const [top, setTop] = useState<number[]>([]);
-  useEffect(() => { if (!pick) return; let live = true; void topChats().then((ids) => { if (live) setTop(ids); }); return () => { live = false; }; }, [!!pick]);
+  // частые — синхронно из кэша (окно открывается, когда они уже есть: forward.ts showPick), с первого кадра;
+  // устаревший кэш обновится в фоне, и полоса перерисуется, только если ответ изменился
+  const [, bump] = useState(0);
+  const top = topChatsNow() ?? [];
+  useEffect(() => { if (!pick) return; let live = true; void topChats().then((ids) => { if (live && ids !== top) bump((n) => n + 1); }); return () => { live = false; }; }, [!!pick]);
 
   const list = useMemo(() => chats.filter((c) => !isSystemChat(c) && !(c.kind === 'direct' && c.peerId != null && blocked.some((b) => b.userId === c.peerId))), [chats, blocked]);
   const items = useMemo(() => list.map((c) => ({
