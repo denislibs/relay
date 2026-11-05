@@ -37,7 +37,7 @@ import { bubbleSrc, viewerPreview } from '../mediaGrid';
 import { clock, dayKey, dayLabel, fileSize, shownStatus } from './format';
 import { scheduledDay, scheduledFailText } from '../schedule';
 import { arrivals, type FeedSeen } from './appear';
-import { anchorShift, deferShift, requestShift, rowFor, shiftWanted, stageOf, type ShiftDir, type Stage } from './windowShift';
+import { anchorShift, deferShift, edgeInZone, requestShift, rowFor, shiftWanted, stageOf, type ShiftDir, type Stage } from './windowShift';
 import { burstAnimates, driveScroll, jumpNear, DRIVE_MS, DRIVE_OWN_MS, type Drive } from './scrollDrive';
 import { claim, FLIGHT_SCROLL, giveUp, launch, launchBox, launchCircle, releaseFlights, type Flight } from './sendFlight';
 import { interiorRemovals, mergeLeaving, LEAVE_HOLD_MS, LEAVE_MS, type Msg } from './leaving';
@@ -901,6 +901,9 @@ export function Feed({ frameKey, active, chatId, threadId, scheduled = false, sa
     if (!root || !placed.current || !shiftWanted(d, metaRef.current, scrollDir.current)) return;
     requestMeasure(() => {
       if (anchor.current) return; // предыдущий сдвиг ещё не применён
+      // датчик мог сработать задолго до сдвига (пустая колонка, сдвиг отложен до конца перехода) — край ещё рядом?
+      const s = root.querySelector<HTMLElement>(`.app-sentinel[data-dir="${d}"]`);
+      if (!edgeInZone(d, s?.getBoundingClientRect() ?? null, root.getBoundingClientRect(), EDGE_PX)) return;
       // окно не двинулось (край в кадре уже пуст — лента не успела перерисоваться; прежний сдвиг в пути) — якорь
       // не держим: он ждал бы окна, которое не придёт, и окно встало бы в обе стороны
       anchor.current = requestShift(() => firstVisible(root), () => moveWindow(d, frameKey));
