@@ -1134,7 +1134,7 @@ export function Feed({ frameKey, active, chatId, threadId, scheduled = false, sa
       going.forEach((x, i) => { const style = x.r.style; style.position = 'absolute'; style.top = box[i].top + 'px'; style.left = box[i].left + 'px'; style.width = box[i].width + 'px'; });
       if (clamp > 0) leaveScroll.current = st - clamp;
       beginHeavyAnimation(LEAVE_HOLD_MS);
-      const ease = 'cubic-bezier(0.2, 0, 0, 1)';
+      const ease = 'cubic-bezier(0.4, 0, 0.2, 1)';
       for (const x of near) {
         if (fresh.has(x.key) || leaving.current.has(x.key)) continue;
         const d = above(x.rect.top) - clamp;   // было − стало

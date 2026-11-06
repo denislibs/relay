@@ -668,16 +668,16 @@ html[data-anim="0"] .app-chatcol, html[data-anim="0"] .app-chatcol-below, html[d
 .app-folder-rec .rl-inforow-text { flex: 1; min-width: 0; }
 .app-folder-hero { display: grid; grid-template-rows: 100px; place-items: center; padding: var(--space-4) 0 var(--space-3); }
 /* смена картинки (стикер папки ↔ эмодзи) — проявлением с лёгким ростом, место не меняется */
-.app-folder-hero-emoji { grid-area: 1 / 1; display: grid; place-items: center; width: 100px; height: 100px; animation: app-folder-hero-in 220ms cubic-bezier(.2, 0, 0, 1) both; }
+.app-folder-hero-emoji { grid-area: 1 / 1; display: grid; place-items: center; width: 100px; height: 100px; animation: app-folder-hero-in 220ms var(--ease-standard) both; }
 .app-folder-hero-glyph { font-size: 80px; line-height: 1; }
 @keyframes app-folder-hero-in { from { opacity: 0; transform: scale(.8); } to { opacity: 1; transform: none; } }
 /* кнопка-смайлик в поле названия: выбранный эмодзи — сам, иначе контурный смайлик */
 .app-folder-emoji-trigger { display: grid; place-items: center; width: 40px; height: 40px; padding: 0; border: 0; border-radius: 50%; background: transparent; color: var(--ink-muted); cursor: pointer; transition: background-color var(--dur-fast) var(--ease-standard), color var(--dur-fast) var(--ease-standard); }
 .app-folder-emoji-trigger:hover, .app-folder-emoji-trigger.is-open { background: var(--hover); color: var(--brand-text); }
-.app-folder-emoji-glyph { font-size: 24px; line-height: 1; animation: rl-react-in 260ms cubic-bezier(.2, 0, 0, 1) both; }
+.app-folder-emoji-glyph { font-size: 24px; line-height: 1; animation: rl-react-in 260ms var(--ease-standard) both; }
 /* цвет тега: семь кругов палитры собеседников и «без цвета»; выбранный — кольцо с зазором */
 .app-folder-color-title { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
-.app-folder-color-preview { max-width: 50%; overflow: hidden; text-overflow: ellipsis; animation: app-folder-hero-in 180ms cubic-bezier(.2, 0, 0, 1) both; }
+.app-folder-color-preview { max-width: 50%; overflow: hidden; text-overflow: ellipsis; animation: app-folder-hero-in 180ms var(--ease-standard) both; }
 /* восемь кругов в ряд при любой ширине колонки: сетка из 8 равных долей, круг — до 34 px */
 .app-folder-colors { display: grid; grid-template-columns: repeat(8, minmax(0, 1fr)); justify-items: center; gap: 4px; padding: 16px 12px; }
 .app-folder-color { position: relative; display: grid; place-items: center; width: min(34px, calc(100% - 8px)); height: auto; aspect-ratio: 1; padding: 0; border: 0; border-radius: 50%; background: var(--c); color: var(--ink-muted); cursor: pointer; transition: transform var(--dur-fast) var(--ease-standard); }
@@ -1415,7 +1415,7 @@ html[data-anim="0"] :is(.app-hero, .app-hero-photo, .app-hero-info, .app-hero-na
    считает их содержимое показанным (LCP «Включите уведомления» на 1,1 с вместо ~0,35) */
 .app-enter-reload :is(.rl-shell-side, .rl-shell-main, .rl-frail) { animation: app-fade 300ms cubic-bezier(.4, 0, .2, 1) backwards; }
 /* после входа: левая колонка выезжает слева, центр проявляется следом */
-.app-enter-login .rl-shell-side, .app-enter-login .rl-frail { animation: app-side-in 320ms cubic-bezier(.2, 0, 0, 1) backwards; }
+.app-enter-login .rl-shell-side, .app-enter-login .rl-frail { animation: app-side-in 320ms var(--ease-standard) backwards; }
 .app-enter-login .rl-shell-main { animation: app-fade 300ms cubic-bezier(.4, 0, .2, 1) 80ms backwards; }
 @keyframes app-side-in { from { transform: translateX(calc(-100% - var(--space-float, 12px))); opacity: .4; } to { transform: none; opacity: 1; } }
 /* экран входа поверх приложения, пока гаснет */
