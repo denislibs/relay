@@ -189,3 +189,63 @@ test('members: after resetLocal an open members subscription loads the list agai
     expect((await w.until((x) => x.length === 2)).map((m) => m.userId).sort()).toEqual([a.userId, b.userId].sort());
   } finally { reqs.restore(); }
 });
+
+test('members: a long personal journal does not hide changes from the chat journal (its own numbering)', async () => {
+  const a = await srv.login('Анна'), b = await srv.login('Борис'), c = await srv.login('Вера');
+  // личный журнал Анны далеко впереди журнала будущей группы
+  for (let i = 0; i < 30; i++) await api(a.token, 'PATCH', '/me', { firstName: 'Анна' + i });
+  const chatId = await group(a, [b.userId, c.userId]);
+  const cfg = srv.config(a);
+  const ea = await open(cfg);
+  ea.connect();
+  await ea.whenIdle();
+  const w = watchInto(ea, { kind: 'members', chatId });
+  await w.until((x) => x.length === 3);
+  await ea.whenIdle();
+
+  await api(c.token, 'DELETE', `/groups/${chatId}/members/${c.userId}`);   // вышла сама
+  const l = await w.until((x) => x.length === 2);
+  expect(l.map((m) => m.userId)).not.toContain(c.userId);
+
+  await api(a.token, 'PUT', `/groups/${chatId}/admins/${b.userId}`, { rights: { pin: true }, rank: 'Завхоз' });
+  await w.until((x) => x.find((m) => m.userId === b.userId)?.role === 'admin');
+
+  // после перезапуска правки тоже доходят
+  await ea.whenIdle();
+  await closeOne(ea);
+  const e2 = await open(cfg);
+  e2.connect();
+  const w2 = watchInto(e2, { kind: 'members', chatId });
+  await w2.until((x) => x.length === 2);
+  await e2.whenIdle();
+  await api(b.token, 'DELETE', `/groups/${chatId}/members/${b.userId}`);
+  await w2.until((x) => x.length === 1);
+});
+
+test('members: rows cached by an older version with personal journal numbers still accept chat journal records', async () => {
+  const a = await srv.login('Анна'), b = await srv.login('Борис'), c = await srv.login('Вера');
+  const chatId = await group(a, [b.userId, c.userId]);
+  const cfg = srv.config(a);
+  const ea = await open(cfg);
+  ea.connect();
+  await ea.whenIdle();
+  const w = watchInto(ea, { kind: 'members', chatId });
+  await w.until((x) => x.length === 3);
+  await ea.whenIdle();
+  await closeOne(ea);
+  const db = await openDb(cfg.dbName);
+  const rows = await getAll<{ seq: number }>(db, 'members');
+  await new Promise<void>((res, rej) => {
+    const tx = db.transaction('members', 'readwrite');
+    for (const r of rows) tx.objectStore('members').put({ ...r, seq: 100000 });
+    tx.oncomplete = () => res(); tx.onerror = () => rej(tx.error);
+  });
+  db.close();
+  const e2 = await open(cfg);
+  e2.connect();
+  const w2 = watchInto(e2, { kind: 'members', chatId });
+  await w2.until((x) => x.length === 3);
+  await e2.whenIdle();
+  await api(c.token, 'DELETE', `/groups/${chatId}/members/${c.userId}`);
+  await w2.until((x) => x.length === 2);
+});

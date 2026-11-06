@@ -260,7 +260,7 @@ export class Store {
     s.contacts = await ContactsCache.load(db, meta as { k: string; v: unknown }[]);
     s.settings = SettingsCache.load(meta as { k: string; v: unknown }[]);
     s.blocks = await BlocksCache.load(db, meta as { k: string; v: unknown }[]);
-    s.members = await MembersCache.load(db);
+    s.members = await MembersCache.load(db, s.chatSeq);
     s.profileLists = await ProfileLists.load(db, meta as { k: string; v: unknown }[]);
     s.savedDialogs = await SavedDialogsCache.load(await getAll<SavedRow>(db, 'savedDialogs'), meta as { k: string; v: unknown }[]);
     // чаты с неотправленным — сразу в память, чтобы черновики были видны

@@ -89,6 +89,8 @@ export class Engine {
   /** Присутствие собеседников: состояние момента, только в памяти; без связи — неизвестно. */
   private presence = new Map<number, { online: boolean | null; lastSeen: string | null }>();
   private presenceFetched = false;
+  private presenceTries = new Map<number, { n: number; at: number }>();
+  private presenceRetry: ReturnType<typeof setTimeout> | null = null;
   private peersRefreshed = false;   // профили собеседников верхних чатов освежены в этой сессии движка
   private presenceDirty = false;   // присутствие не трогает чаты — свой флаг для подписок presence
   private acting = 0;       // действия пользователя в работе: их результат показываем сразу, даже во время догонки
@@ -1026,6 +1028,7 @@ export class Engine {
       }
     }
     this.dev.afterEmit();
+    this.askUnknownPresence();
     this.fetchQuotes();
     this.fetchPosts();
     this.fetchUsers();
@@ -1054,7 +1057,7 @@ export class Engine {
       this.membersWants.delete(chatId);
       if (this.membersAsked.has(chatId)) continue;
       this.membersAsked.add(chatId);
-      const seq = this.store.lastSeq;
+      const seq = this.store.lastSeq, chatAt = this.store.chatSeq.get(chatId) ?? 0;
       // записи журнала, пришедшие пока ждём снимок, применяются сразу (раньше снимка) — снимок их не откатит
       if (chat.membersDone === undefined) this.store.members.loading.add(chatId);
       this.run(async () => {
@@ -1065,7 +1068,7 @@ export class Engine {
           if (!this.online) { this.membersAsked.delete(chatId); this.membersWants.add(chatId); }   // спросим после переподключения
           throw err;
         }
-        applyMembersReply(this.store, chatId, r, seq);
+        applyMembersReply(this.store, chatId, r, seq, chatAt);
         for (const m of r.members) if (m.userId !== this.cfg.userId) this.seedPresence(m.userId, { online: m.online, lastSeen: m.lastSeen });
         await this.store.flush();
         this.changed();
@@ -1783,6 +1786,7 @@ export class Engine {
     this.presence.clear();            // без связи не знаем, кто в сети
     this.presenceDirty = true;
     this.presenceFetched = false;
+    this.presenceTries.clear();
     this.forgetAsked();   // новое подключение — журнал мог потеряться (tooLong): спросим заново
     if (this.wantOnline) this.failures++;
     this.ready = false;
@@ -2448,6 +2452,31 @@ export class Engine {
   }
 
   /** Снимок присутствия собеседников — раз на подключение; дальше приходят кадры presence. */
+  /**
+   * Открыт чат с человеком, о котором присутствия нет (собеседник появился после снимка при подключении):
+   * живые кадры о нём приходят только при смене статуса — спрашиваем сами. Несколько попыток: чат мог ещё не дойти до сервера.
+   */
+  private askUnknownPresence(): void {
+    if (!this.online || !this.presenceFetched) return;
+    const now = Date.now();
+    for (const w of this.watchers.values()) {
+      if (w.q.kind !== 'presence' || this.presence.has(w.q.userId) || w.q.userId === this.cfg.userId) continue;
+      const t = this.presenceTries.get(w.q.userId);
+      if (t && t.n >= 5) continue;
+      if (t && now - t.at < 1500) {
+        // новых событий может больше не быть — следующая попытка сама по таймеру
+        if (!this.presenceRetry) {
+          this.presenceRetry = setTimeout(() => { this.presenceRetry = null; this.askUnknownPresence(); }, 1500 - (now - t.at));
+          (this.presenceRetry as { unref?: () => void }).unref?.();
+        }
+        return;
+      }
+      this.presenceTries.set(w.q.userId, { n: (t?.n ?? 0) + 1, at: now });
+      this.fetchPresence();
+      return;
+    }
+  }
+
   private fetchPresence(): void {
     this.presenceFetched = true;
     this.run(async () => {

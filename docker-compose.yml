@@ -107,13 +107,15 @@ services:
     environment:
       DATABASE_URL: postgres://relay:relay@postgres:5432/relay
       PORT: "3000"
-      DEV_LOGIN: "1"
+      DEV_LOGIN: "${DEV_LOGIN:-0}"                 # вход по имени и коды без SMS; включить: DEV_LOGIN=1 docker compose up -d
+      LOG_LOGIN_CODES: "${LOG_LOGIN_CODES:-1}"     # коды входа и восстановления — в лог сервера/воркера (SMS и почты нет)
       DEV_MIGRATE: "1"                             # новые migrations/*.sql применяются сами (migrate.watchMigrations)
       S3_ENDPOINT: http://s3:8333
       S3_BUCKET: relay-files
       S3_ACCESS_KEY_ID: relaydev
       S3_SECRET_ACCESS_KEY: relaydevsecret
-      S3_PUBLIC_ENDPOINT: https://localhost:8333   # для подписанных ссылок браузеру (подпись включает хост); это proxy
+      # для подписанных ссылок браузеру (подпись включает хост); это proxy. Публичная ссылка: S3_PUBLIC_ENDPOINT=https://<туннель>
+      S3_PUBLIC_ENDPOINT: "${S3_PUBLIC_ENDPOINT:-https://localhost:8333}"
       TRUST_PROXY: "1"                             # перед сервером ровно один прокси (nginx): X-Forwarded-* от него
       VALKEY_URL: redis://valkey:6379
       MEILI_URL: http://search:7700
@@ -150,7 +152,8 @@ services:
     command: ["bun", "--watch", "apps/server/src/worker.ts"]
     environment:
       DATABASE_URL: postgres://relay:relay@postgres:5432/relay
-      DEV_LOGIN: "1"
+      DEV_LOGIN: "${DEV_LOGIN:-0}"                 # вход по имени и коды без SMS; включить: DEV_LOGIN=1 docker compose up -d
+      LOG_LOGIN_CODES: "${LOG_LOGIN_CODES:-1}"     # коды входа и восстановления — в лог сервера/воркера (SMS и почты нет)
       VALKEY_URL: redis://valkey:6379
       MEILI_URL: http://search:7700
       MEILI_MASTER_KEY: relay-dev-master-key-change-me

@@ -49,6 +49,7 @@ function NewContactForm({ draft }: { draft: NewContactDraft }) {
     e?.preventDefault();
     if (!ready) return;
     let userId = known;
+    let found: string | undefined;   // незнакомого сервер добавит только по тому запросу, которым его нашли
     if (!userId) {
       setBusy(true);
       const r = await resolveUser(query.trim());
@@ -57,8 +58,9 @@ function NewContactForm({ draft }: { draft: NewContactDraft }) {
       if ('notFound' in r) { setError(NOT_FOUND); return; }
       if ('offline' in r) { setError('Нет подключения к сети'); return; }
       userId = r.user.id;
+      found = query.trim();
     }
-    void addContact(userId, first.trim(), lastName.trim()).catch(() => showToast('Не удалось сохранить изменения'));
+    void addContact(userId, first.trim(), lastName.trim(), found).catch(() => showToast('Не удалось сохранить изменения'));
     close();
   }
 

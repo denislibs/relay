@@ -1,4 +1,4 @@
-import { beforeEach, expect, test } from 'bun:test';
+import { beforeEach, expect, test, spyOn } from 'bun:test';
 import { sql } from '../src/db';
 import { createSession } from '../src/auth';
 import { requestCode, signIn } from '../src/domain/login';
@@ -103,6 +103,34 @@ test('no live session: the stored hash is unmatchable outside dev', async () => 
     const [row] = await sql`select dead_at from login_attempts where id = ${r.attemptId}`;
     expect(row.dead_at).not.toBeNull();
   } finally { process.env.DEV_LOGIN = '1'; }
+});
+
+test('LOG_LOGIN_CODES: the code goes to the server log, never to the response; a new number can sign up', async () => {
+  const id = await makeUser('Рита');
+  await sql`update users set username = 'rita_x' where id = ${id}`;
+  const lines: string[] = [];
+  const log = spyOn(console, 'log').mockImplementation((m: string) => { lines.push(String(m)); });
+  process.env.DEV_LOGIN = '0';
+  process.env.LOG_LOGIN_CODES = '1';
+  try {
+    const codeIn = () => /: (\d{5})$/.exec(lines.at(-1)!)![1];
+    const fresh = await requestCode('+79990001122');
+    expect(fresh.devCode).toBeUndefined();
+    expect(lines.at(-1)).toContain('+79990001122');
+    expect(await signIn(fresh.attemptId, codeIn())).toEqual({ signupPhone: '+79990001122' });
+    // аккаунт без открытых сеансов тоже может войти: код есть кому передать
+    const known = await requestCode('@rita_x');
+    expect(known.devCode).toBeUndefined();
+    expect(await signIn(known.attemptId, codeIn())).toEqual({ userId: id });
+    // неизвестное имя регистрации не даёт и в лог ничего не пишет
+    const before = lines.length;
+    await requestCode('@nobody_z');
+    expect(lines.length).toBe(before);
+  } finally {
+    log.mockRestore();
+    delete process.env.LOG_LOGIN_CODES;
+    process.env.DEV_LOGIN = '1';
+  }
 });
 
 test('codes split by separators or glued to digits are burned; editing burns too', async () => {

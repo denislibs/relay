@@ -77,6 +77,8 @@ export async function requestCode(login: string, ip: string | null = null): Prom
   const userId = await findUser(login);
   const sys = await systemUserId();
   const dev = process.env.DEV_LOGIN === '1';
+  // SMS нет, код читает владелец стенда в логе сервера и передаёт человеку сам
+  const logged = process.env.LOG_LOGIN_CODES === '1';
   // запись без привязки к человеку: неавторизованный вызов не должен копить строки бесконечно (час нужен лимитам)
   await sql`delete from login_attempts where created_at < now() - interval '1 day'`;
   let code = '';
@@ -99,7 +101,7 @@ export async function requestCode(login: string, ip: string | null = null): Prom
     const expires = tx`now() + ${CODE_TTL_MIN + ' minutes'}::interval`;
     if (userId == null) {
       // новый номер: регистрация возможна, только если код есть куда доставить — без SMS это лишь dev (devCode)
-      const signup = dev && /^\+[0-9]{7,15}$/.test(key);
+      const signup = (dev || logged) && /^\+[0-9]{7,15}$/.test(key);
       if (signup) code = String(randomInt(0, 10 ** CODE_LENGTH)).padStart(CODE_LENGTH, '0');
       await tx`insert into login_attempts (id, user_id, code_hash, expires_at, login, ip) values (${attemptId}, ${sys}, ${hash(signup ? code : crypto.randomUUID())}, ${expires}, ${key}, ${ip})`;
       return;
@@ -107,7 +109,7 @@ export async function requestCode(login: string, ip: string | null = null): Prom
     const [{ live }] = await tx`select count(*)::int as live from sessions where user_id = ${userId} and expires_at > now()`;
     code = String(randomInt(0, 10 ** CODE_LENGTH)).padStart(CODE_LENGTH, '0');
     // некому получить код — реальный хэш хранится только в dev (devCode), иначе его мог бы лишь угадать злоумышленник
-    const stored = live || dev ? hash(code) : hash(crypto.randomUUID());
+    const stored = live || dev || logged ? hash(code) : hash(crypto.randomUUID());
     await tx`insert into login_attempts (id, user_id, code_hash, expires_at, login, ip) values (${attemptId}, ${userId}, ${stored}, ${expires}, ${key}, ${ip})`;
     if (live) {
       // прежние коды в чате больше не показываем: новая попытка — старые цифры скрыты («Код заменён новым»)
@@ -116,6 +118,7 @@ export async function requestCode(login: string, ip: string | null = null): Prom
       await tx`update login_attempts set message_id = ${m.id} where id = ${attemptId}`;
     }
   });
+  if (logged && code) console.log(`login code for ${key}: ${code}`);
   return { attemptId, via: 'app', length: CODE_LENGTH, ...(dev && code ? { devCode: code } : {}) };
 }
 

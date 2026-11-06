@@ -23,5 +23,6 @@ test('production refuses plain internal connections and dev logins — no bypass
   // обхода больше нет: RELAY_PLAIN_INTERNAL и dev-входы в production — отказ (INFRA-1, INFRA-6)
   expect(() => assertTransportSecure({ ...ok, RELAY_PLAIN_INTERNAL: '1' })).toThrow('RELAY_PLAIN_INTERNAL');
   expect(() => assertTransportSecure({ ...ok, DEV_LOGIN: '1' })).toThrow('DEV_LOGIN');
+  expect(() => assertTransportSecure({ ...ok, LOG_LOGIN_CODES: '1' })).toThrow('LOG_LOGIN_CODES');
   expect(() => assertTransportSecure({ DB_SSL: 'disable' })).not.toThrow();   // dev
 });
