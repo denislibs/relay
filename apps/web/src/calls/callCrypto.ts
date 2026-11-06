@@ -133,5 +133,6 @@ export const EMOJI = [...
 ].slice(0, 256);
 
 function emojiOf(sas: Uint8Array): string[] {
-  return [0, 1, 2, 3].map((i) => EMOJI[sas[i] % EMOJI.length]);
+  // U+FE0F — цветное начертание: ⌨, ✈, ❄ и др. без него рисуются текстовым значком
+  return [0, 1, 2, 3].map((i) => EMOJI[sas[i] % EMOJI.length] + '\uFE0F');
 }
