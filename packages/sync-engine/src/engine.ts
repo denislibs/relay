@@ -1,6 +1,6 @@
 import { deviceFetch, signDevice } from './device';
 import { draftHash, MAX_FILE_BYTES, MEDIA_TABS, type MediaTab } from '@relay/protocol';
-import type { CallServerFrame, SavedDialogsPage, ClientFrame, JournalEntry, Me, ScheduledMessage, SettingsSnapshot, Message, PublicUser, ServerFrame, ThreadGuest } from '@relay/protocol';
+import type { CallServerFrame, GroupCallServerFrame, SavedDialogsPage, ClientFrame, JournalEntry, Me, ScheduledMessage, SettingsSnapshot, Message, PublicUser, ServerFrame, ThreadGuest } from '@relay/protocol';
 import { Blocks } from './blocks';
 import { Contacts } from './contacts';
 import { delBlob, getBlob, openDb, putBlob, write } from './idb';
@@ -9,7 +9,7 @@ import { affects, autoDeleteKey, autoDeleteOverlay, computeQuery, scheduledResul
 import type { Item } from './types';
 
 /** Кадр звонка для вкладок; callResync — сокет переподключился (кадры могли потеряться), сверить звонок callGet. */
-export type CallEvent = CallServerFrame | { op: 'callResync' };
+export type CallEvent = CallServerFrame | GroupCallServerFrame | { op: 'callResync' };
 import { countStores } from './devstats';
 import { Store, type ChatSummary } from './store';
 import { uploadParts, type MultipartState, type UploadSource } from './multipart';
@@ -1386,7 +1386,8 @@ export class Engine {
         if (!this.online) throw new Error('offline');
         // запрос, принятие и «мой звонок» ждут ответа сервера (reqId ставит request), остальное — без ответа
         const f = a.frame;
-        if (f.op === 'callRequest' || f.op === 'callAccept' || f.op === 'callGet') return this.request({ ...f, reqId: '' });
+        if (f.op === 'callRequest' || f.op === 'callAccept' || f.op === 'callGet' || f.op === 'groupCallStart' || f.op === 'groupCallJoin' || f.op === 'groupCallGet'
+          || f.op === 'groupCallEnd' || f.op === 'groupCallMute' || f.op === 'groupCallKick') return this.request({ ...f, reqId: '' });
         this.transport.send(f);
         return null;
       }
@@ -1947,6 +1948,7 @@ export class Engine {
         void signDevice('ws', f.nonce).then((sig) => this.transport.send({ op: 'prove', sig }), () => this.transport.drop());
         return;
       case 'callIncoming': case 'callRinging': case 'callAccepted': case 'callConfirm': case 'callSignal': case 'callEnded':
+      case 'groupCallState': case 'groupCallKeys': case 'groupCallEnded': case 'groupCallMuted': case 'groupCallKicked':
         this.callEvent(f);
         return;
       case 'sessionTerminated':

@@ -1,3 +1,4 @@
+import type { GroupCallView } from './calls/groupCall';
 import type { CallView } from './calls/callController';
 import type { PersonalChannel, ProfileLink, ProfilePhoto, ThreadGuest } from '@relay/protocol';
 import type { NotifyState } from './notify';
@@ -77,6 +78,8 @@ export interface GlobalState {
   infoOpen: boolean;   // правая панель «Информация»
   call: CallView | null;   // звонок: входящий, исходящий или разговор (calls/callController.ts)
   callMin: boolean;        // звонок свёрнут в плашку над шапкой чата (ui/call/CallSlot.tsx)
+  groupCall: GroupCallView | null;   // групповой звонок, в котором я сейчас (calls/groupCall.ts)
+  groupCallMin: boolean;             // свёрнут в плашку над шапкой
   listLeaving: boolean;   // телефон: чат закрыли — экран уже едет к списку, лента снимется после перехода (data.ts)
   pollResults: { chatId: number; id: number } | null;   // окно «Результаты» неанонимного опроса
   muteTick: number;    // истёк срок «Отключить звук» какого-то чата (mute.ts): повод перерисовать
@@ -176,6 +179,8 @@ let state: GlobalState = {
   infoOpen: false,
   call: null,
   callMin: false,
+  groupCall: null,
+  groupCallMin: false,
   listLeaving: false,
   muteTick: 0,
   theme: loadTheme(),

@@ -1,3 +1,4 @@
+import { bindGroupCalls } from './calls/groupCall';
 import { bindCalls, bindCallToast } from './calls/callController';
 import { bindStickers } from './stickers';
 import { bindGifs, gifsRevChanged } from './gifs';
@@ -63,6 +64,7 @@ export function startData(me: Me, fromUrl = true): void {
   engine.onReload(() => location.reload());
   bindCallToast(showToast);
   bindCalls({ userId: me.userId, send: (frame) => engine.call({ type: 'callFrame', frame: frame as never }), onCall: (cb) => engine.onCall(cb) });
+  bindGroupCalls({ userId: me.userId, send: (frame) => engine.call({ type: 'callFrame', frame: frame as never }), onCall: (cb) => engine.onCall(cb), toast: showToast });
   // движок уже открыт ранним стартом из boot.js (early.ts) — его порт больше не нужен
   void engine.ready.then(() => (self as unknown as { __relayEarly?: { close(): void } }).__relayEarly?.close());
   // ключи зашифрованных вложений — запомнить до того, как ленты их отрисуют (Service Worker расшифровывает /files/<id>)

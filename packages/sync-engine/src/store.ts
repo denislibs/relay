@@ -112,6 +112,7 @@ export interface ChatSummary {
   peer?: { id: number; key?: string; name: string; system?: true; photo?: ProfilePhoto | null } | null;
   saved?: true;            // «Избранное»: собеседника нет
   theme?: string | null;
+  groupCall?: import('@relay/protocol').GroupCallSummary | null;
   autoDeleteSec?: number | null;   // автоудаление: срок новых сообщений
   peerReadUpTo?: number;
   group?: GroupInfo;
@@ -454,6 +455,7 @@ export class Store {
       case 'pins': { const chat = this.chats.get(u.chatId); if (chat) { chat.pinned = u.ids; this.markChat(chat); } return; }
       case 'chatNotify': return this.setMute(u.chatId, u.muteUntil);
       case 'chatTheme': return this.setTheme(u.chatId, u.theme);
+      case 'groupCall': { const chat = this.chats.get(u.chatId); if (chat) { chat.groupCall = u.call; this.markChat(chat); } return; }
       case 'chatAutoDelete': return this.setAutoDelete(u.chatId, u.sec);
       case 'chatFlags': return this.setFlags(u.chatId, u);
       case 'savedDialog': return applySavedEvent(this, u);
@@ -626,6 +628,7 @@ export class Store {
       if (s.peer?.system) chat.system = true; else delete chat.system;
       if (s.saved) chat.saved = true; else delete chat.saved;
       if (s.theme !== undefined) chat.theme = s.theme;
+      if (s.groupCall !== undefined) chat.groupCall = s.groupCall;
       if (s.autoDeleteSec !== undefined) chat.autoDeleteSec = s.autoDeleteSec;
       if (s.draft && (!chat.draft || s.draft.at > chat.draft.at) && !this.pendingDrafts.has(s.id)) chat.draft = s.draft;
       if (s.pinned) chat.pinned = s.pinned;

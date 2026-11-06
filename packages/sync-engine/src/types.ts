@@ -95,6 +95,7 @@ export interface LocalChat {
   muteUntil?: number | null;   // уведомления чата выключены до (мс), 0 — навсегда, null/нет — включены
   autoDeleteSec?: number | null;   // автоудаление: срок новых сообщений в секундах (значение сервера), null — выключено
   theme?: string | null;       // тема чата: id готовой темы (GET /themes), общая для всех участников
+  groupCall?: import('@relay/protocol').GroupCallSummary | null;   // группа: идёт звонок (плашка «Идёт звонок»)
   pinnedAt?: number | null;    // чат закреплён (мс; позже закреплённый — выше), null/нет — нет
   archived?: boolean;          // в архиве: не в «Все» и папках, а под строкой «Архив»
   archivedAtId?: number;       // граница архива (max id сообщений при архивировании): сообщение новее — операция unarchive
@@ -268,7 +269,7 @@ export type Action =
   | { type: 'savedChat' }   // id «Избранного»: известный чат или создать на сервере (ответ — число)
   | { type: 'emojiFx'; chatId: number; id: number; key: string; t: number[] }
   // звонок: кадр как есть (сигналинг зашифрован на странице); с reqId — ответ сервера результатом
-  | { type: 'callFrame'; frame: import('@relay/protocol').CallClientFrame }
+  | { type: 'callFrame'; frame: import('@relay/protocol').CallClientFrame | import('@relay/protocol').GroupCallClientFrame }
   | { type: 'editMessage'; chatId: number; id: number; body: string; entities?: Entity[] }
   | { type: 'deleteMessage'; chatId: number; id: number }
   | { type: 'setAutoDelete'; chatId: number; sec: number | null }
