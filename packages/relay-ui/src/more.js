@@ -994,7 +994,7 @@ function Wallpaper(props) {
    The width lives in a CSS variable on the shell (--side-w), changed once per frame while dragging —
    no Preact render per pointer move. Double-click restores the default. onChange(width|null) on release. */
 function SideResizer(props) {
-  var min = props.min || 280, max = props.max || 600;
+  var min = props.min || 320, max = props.max || 480;   // как в Telegram Web K
   function clamp(w) { return Math.round(Math.max(min, Math.min(w, Math.min(max, window.innerWidth * 0.45)))); }
   function shellOf(el) { return el.closest('.rl-shell'); }
   function onPointerDown(e) {
@@ -1048,8 +1048,8 @@ function SideResizer(props) {
 
 /* Правая панель встаёт рядом с чатом, только когда рядом с ней чату остаётся полная ширина (--chat-max),
    как в Telegram Web K; иначе она выезжает поверх, а чат не двигается (класс rl-shell-float на оболочке).
-   Ширина панели — то же правило, что в CSS (--aside-default): 408px, с 1276px — 25vw − 16px в пределах 408…464px. */
-function asideWidthFor(vw) { return vw >= 1276 ? Math.min(464, Math.max(408, vw * 0.25 - 16)) : 408; }
+   Ширина панели — та же, что в CSS (--aside-default): 360px. */
+function asideWidthFor() { return 360; }
 function asideFloats() { return !!document.querySelector('.rl-shell.rl-shell-float'); }
 function useAsideMode(ref) {
   // в состоянии, а не classList: рендер оболочки переписывает class целиком
@@ -1070,7 +1070,7 @@ function useAsideMode(ref) {
         var gap = parseFloat(cs.getPropertyValue('--space-float')) || 16;
         var chat = parseFloat(cs.getPropertyValue('--chat-max')) || 696;
         // всё, что левее колонки чата (папки, список, отступы), + чат полной ширины + панель + отступы справа
-        var need = main.offsetLeft + chat + gap + asideWidthFor(innerWidth) + gap;
+        var need = main.offsetLeft + chat + gap + asideWidthFor() + gap;
         return shell.clientWidth < need || innerWidth <= 720;
       });
       if (f === last) return;

@@ -56,7 +56,7 @@ const Dev = lazy(() => pages().then((m) => m.Dev));
 const SIDE_KEY = 'relay.sideWidth';
 // каркас из index.html был показан (boot.js): его обои уже на экране — свои без узора не показываем (Wallpaper waitPattern)
 const SHELL_SHOWN = typeof document !== 'undefined' && document.documentElement.hasAttribute('data-shell-was');
-const savedSide = (() => { try { const v = Number(localStorage.getItem(SIDE_KEY)); return v > 0 ? v : undefined; } catch { return undefined; } })();
+const savedSide = (() => { try { const v = Number(localStorage.getItem(SIDE_KEY)); return v > 0 ? Math.min(480, Math.max(320, v)) : undefined; } catch { return undefined; } })();   // в пределах перетаскивания, 320…480
 const saveSide = (w: number | null) => { try { if (w) localStorage.setItem(SIDE_KEY, String(w)); else localStorage.removeItem(SIDE_KEY); } catch { /* приватный режим */ } };
 
 export function App() {

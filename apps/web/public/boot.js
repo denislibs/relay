@@ -22,7 +22,7 @@ try { var d = document.documentElement, s = localStorage, p = JSON.parse(s.getIt
       d.setAttribute('data-shell', ''); d.setAttribute('data-shell-was', '');
       // скелетон списка в каркасе — если прошлая загрузка списка была дольше 250 мс (main.tsx: relay.listMs)
       if (Number(s.getItem('relay.listMs')) > 250) d.setAttribute('data-shell-skel', '');
-      var sw = Number(s.getItem('relay.sideWidth')); if (sw > 0) d.style.setProperty('--shell-side-w', sw + 'px');
+      var sw = Number(s.getItem('relay.sideWidth')); if (sw > 0) d.style.setProperty('--shell-side-w', Math.min(480, Math.max(320, sw)) + 'px');   // сохранённое до 320…480 — в новые пределы
       // обои — снимок настоящих своей темы (main.tsx): цвет, узор, градиент холста
       var dk = t === 'dark' || (t !== 'light' && matchMedia('(prefers-color-scheme: dark)').matches);
       var wp = JSON.parse(s.getItem('relay.shellWp.' + (dk ? 'dark' : 'light')) || 'null');

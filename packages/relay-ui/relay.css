@@ -1109,7 +1109,7 @@ button.rl-quote:active { background: var(--quote-bg-active, var(--pressed)); }
    Floating layout — cards over the wallpaper (Telegram Web K–style)
    ===================================================================== */
 .rl-shell { position: relative; display: flex; gap: var(--space-float); height: 100%; padding: var(--space-float); overflow: clip; }   /* clip, не hidden: focus и scrollIntoView не сдвинут слой, скрытые кадры стека шире окна */
-.rl-shell-side { position: relative; z-index: 2; flex: 0 0 var(--side-w, var(--side-default, clamp(256px, 33vw, 424px))); min-width: 0; display: flex; }
+.rl-shell-side { position: relative; z-index: 2; flex: 0 0 var(--side-w, var(--side-default, 360px)); min-width: 0; display: flex; }
 .rl-shell-main { position: relative; flex: 1; min-width: 0; display: flex; flex-direction: column; gap: var(--space-float); }
 
 /* ---------- SidebarCard ---------- */
@@ -1509,10 +1509,10 @@ html[data-blur="0"] .rl-pop .rl-menu, html[data-blur="0"] .rl-pop .rl-rpick { -w
    прокрутки одновременно сужается симметрично: центр ленты на месте, сообщения (--chat-max) не перестраиваются,
    полоса прокрутки встаёт вплотную к панели. Раньше колонка сужалась (flex) и догонялась FLIP-сдвигом —
    перестройка ленты на каждом открытии и гонка с выбором режима */
-.rl-shell { --aside-half: calc((var(--aside-w, var(--aside-default, 408px)) + var(--space-float)) / 2); }
+.rl-shell { --aside-half: calc((var(--aside-w, var(--aside-default, 360px)) + var(--space-float)) / 2); }
 .rl-shell > .rl-presence { display: flex; position: absolute; top: var(--space-float); right: var(--space-float); bottom: var(--space-float); z-index: 6; }
 .rl-shell > .rl-presence[data-state="closing"] { pointer-events: none; }
-.rl-shell .rl-shell-aside { flex: none; width: var(--aside-w, var(--aside-default, 408px)); animation: rl-aside-in 280ms var(--ease-standard) both; }
+.rl-shell .rl-shell-aside { flex: none; width: var(--aside-w, var(--aside-default, 360px)); animation: rl-aside-in 280ms var(--ease-standard) both; }
 .rl-presence[data-state="closing"] > .rl-shell-aside { animation: rl-aside-out 240ms cubic-bezier(0.4, 0, 1, 1) both; }
 .rl-shell > .rl-shell-main { transition: transform 280ms var(--ease-standard); }
 .rl-shell:not(.rl-shell-float):has(> .rl-presence[data-state="open"] > .rl-shell-aside) > .rl-shell-main { transform: translateX(calc(-1 * var(--aside-half))); }
@@ -2569,14 +2569,9 @@ html[data-anim="0"] .rl-cal-media-in { animation: none; }
 .rl-aside-group .rl-inforow-text small { font-size: 13px; line-height: 18px; }
 .rl-sicon { background-image: linear-gradient(180deg, rgba(255, 255, 255, .14), rgba(0, 0, 0, .06)); }
 
-/* ---------- Ширины колонок по умолчанию — как у Telegram (telegram-tt: #LeftColumn, --right-column-width) ----------
-   левая: 33vw (256…424px), с 926px — 33vw, с 1276px — 25vw; правая: 26.5rem − 1rem отступа (408px), с 1276px — 25vw − 1rem, но не уже 408 и не шире 464px.
-   Перетаскивание края (--side-w) и сохранённая ширина — поверх. */
-.rl-shell { --side-default: clamp(256px, 33vw, 424px); --aside-default: 408px; }
-@media (min-width: 926px) { .rl-shell { --side-default: 33vw; } }
-@media (min-width: 1276px) { .rl-shell { --side-default: 25vw; } }
-/* правая панель не уже 408px (в Telegram поверх чата — 26.5rem): 25vw − 16px давали 303…392px на 1276…1630px — узко */
-@media (min-width: 1276px) { .rl-shell { --aside-default: clamp(408px, calc(25vw - 16px), 464px); } }
+/* ---------- Ширины колонок по умолчанию — как в Telegram Web K: обе 360px на любом экране ----------
+   Перетаскивание края списка (--side-w, 320…480px) и сохранённая ширина — поверх. */
+.rl-shell { --side-default: min(360px, 100vw); --aside-default: 360px; }
 
 /* ---------- Кнопки под сообщением (inline-клавиатура, как в Telegram) ----------
    Ряды во всю ширину пузыря (пузырь растягивается до клавиатуры), зазоры 4px; плашка цвета обоев с белым текстом —
