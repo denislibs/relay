@@ -39,7 +39,7 @@ export function ChatStack() {
 
 type Place = 'below' | 'on' | 'above';
 const seq = (key: string) => Number(key.slice(1)) || 0;
-const COVER_MS = 400;   // переход 250 мс + запас: накрываем, когда колонка уже не видна
+const COVER_MS = 400;   // переход 200 мс + запас: накрываем, когда колонка уже не видна
 
 /** Доиграть до конца конечные CSS-анимации внутри колонки (переходы и бесконечные — спиннер, «печатает…» — не трогаем). */
 export function finishEntrances(el: Element): void {

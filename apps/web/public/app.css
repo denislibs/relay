@@ -487,15 +487,17 @@ button.app-perf-row:hover { background: var(--hover); }
 @media (prefers-reduced-motion: reduce) { .app-banner-slot { animation: none; transition: none; } }
 
 /* Стек чатов (как в Telegram Web): колонки лежат друг на друге, на экране — верхняя готовая.
-   Ниже неё — уехавшие влево, выше (готовится / уходит) — справа; смена — переход transform+opacity. */
+   Ниже неё — уехавшие влево, выше (готовится / уходит) — справа; смена — переход transform+opacity.
+   200 мс ease-in-out, как у Telegram Web K: скорость растёт и спадает плавно. Прежняя cubic-bezier(0.2, 0, 0, 1)
+   за 3 кадра (120 Гц) разгонялась до 26 px за кадр и потом ~100 мс доползала по 1–3 px — на глаз рывок, хотя кадры все. */
 .app-chats { position: relative; flex: 1; min-height: 0; display: flex; }
 .app-chatcol {
   position: absolute; inset: 0; display: flex; flex-direction: column; gap: var(--space-float);
-  transition: transform 250ms cubic-bezier(0.2, 0, 0, 1), opacity 250ms cubic-bezier(0.2, 0, 0, 1), visibility 0s linear 0s;
+  transition: transform 200ms ease-in-out, opacity 200ms ease-in-out, visibility 0s linear 0s;
 }
 .app-chatcol-below, .app-chatcol-above {
   opacity: 0; pointer-events: none; visibility: hidden;
-  transition: transform 250ms cubic-bezier(0.2, 0, 0, 1), opacity 250ms cubic-bezier(0.2, 0, 0, 1), visibility 0s linear 250ms;
+  transition: transform 200ms ease-in-out, opacity 200ms ease-in-out, visibility 0s linear 200ms;
 }
 .app-chatcol-below { transform: translate3d(-200px, 0, 0); }
 .app-chatcol-above { transform: translate3d(200px, 0, 0); z-index: 1; }
