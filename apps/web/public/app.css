@@ -1789,20 +1789,20 @@ span.app-log-ava { cursor: default; }
 @property --cp-c1 { syntax: '<color>'; inherits: false; initial-value: #8599aa; }
 @property --cp-c2 { syntax: '<color>'; inherits: false; initial-value: #8599aa; }
 .app-callslot .rl-playerclip > .app-callplate { margin-bottom: 10px; }
-.app-callplate { position: relative; z-index: 4; display: flex; align-items: stretch; gap: 2px; height: 36px; padding: 2px; box-sizing: border-box;
-  border-radius: 18px; background: var(--glass, var(--raised)); box-shadow: var(--shadow-panel, var(--shadow-float)); color: #fff;
+.app-callplate { position: relative; z-index: 4; display: flex; align-items: stretch; gap: 3px; height: 3rem; padding: 3px; box-sizing: border-box;
+  border-radius: var(--radius-panel, 16px); background: var(--glass, var(--raised)); box-shadow: var(--shadow-panel, var(--shadow-float)); color: #fff;
   -webkit-backdrop-filter: blur(20px) saturate(1.4); backdrop-filter: blur(20px) saturate(1.4); animation: rl-pbar-in 300ms cubic-bezier(.25, 1, .5, 1) both; }
 .rl-presence[data-state="closing"] .app-callplate { animation: rl-pbar-out 300ms cubic-bezier(.33, 1, .68, 1) forwards; }
 .rl-playerslot-still .app-callplate { animation: none; }
-.app-callplate-side { flex: 0 0 44px; display: grid; place-items: center; border: 0; border-radius: 16px; color: #fff; cursor: pointer; transition: background-color 250ms ease; }
+.app-callplate-side { flex: 0 0 52px; display: grid; place-items: center; border: 0; border-radius: calc(var(--radius-panel, 16px) - 3px); color: #fff; cursor: pointer; transition: background-color 250ms ease; }
 .app-callplate-mic { background: #3390ec; }
 .app-callplate-mic:hover { background: #2a7ccb; }
 .app-callplate.is-talking .app-callplate-mic { background: #54b655; }
 .app-callplate.is-talking .app-callplate-mic:hover { background: #4d9f4c; }
 .app-callplate-end { background: #e5484d; }
 .app-callplate-end:hover { background: #d13d42; }
-.app-callplate-center { --cp-c1: #8599aa; --cp-c2: #8599aa; flex: 1 1 auto; min-width: 0; display: flex; align-items: center; gap: 8px; padding: 0 12px 0 8px; border: 0; border-radius: 16px;
-  background: linear-gradient(90deg, var(--cp-c1), var(--cp-c2)); color: #fff; cursor: pointer; font: 400 13px/18px var(--font-sans); white-space: nowrap;
+.app-callplate-center { --cp-c1: #8599aa; --cp-c2: #8599aa; flex: 1 1 auto; min-width: 0; display: flex; align-items: center; gap: 10px; padding: 0 14px 0 8px; border: 0; border-radius: calc(var(--radius-panel, 16px) - 3px);
+  background: linear-gradient(90deg, var(--cp-c1), var(--cp-c2)); color: #fff; cursor: pointer; font: 400 14px/20px var(--font-sans); white-space: nowrap;
   transition: --cp-c1 250ms ease, --cp-c2 250ms ease; }
 .app-callplate.is-talking .app-callplate-center { --cp-c1: #52ce5d; --cp-c2: #00b1c0; }
 .app-callplate.is-muted .app-callplate-center { --cp-c1: #0976e3; --cp-c2: #2bceff; }

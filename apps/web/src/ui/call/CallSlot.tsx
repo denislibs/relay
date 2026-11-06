@@ -52,15 +52,15 @@ export function CallPlate({ v, floating = false }: { v: CallView; floating?: boo
   return (
     <div class={'app-callplate ' + state + (floating ? ' app-callplate-float' : '')} role="region" aria-label="Звонок">
       <button type="button" class="app-callplate-side app-callplate-mic" aria-label={v.mic ? 'Выключить микрофон' : 'Включить микрофон'} onClick={toggleMic}>
-        <Icon name={v.mic ? 'micFilled' : 'micOff'} size={18} />
+        <Icon name={v.mic ? 'micFilled' : 'micOff'} size={22} />
       </button>
       <button type="button" class="app-callplate-center" aria-label="Открыть звонок" onClick={() => setGlobal({ callMin: false })}>
-        <Avatar name={name} tone={chatTone(chat)} size={18} {...avatarPhoto((chat?.photo as ProfilePhoto | null) ?? null)} />
+        <Avatar name={name} tone={chatTone(chat)} size={30} {...avatarPhoto((chat?.photo as ProfilePhoto | null) ?? null)} />
         <b>{name}</b>
         <span aria-live={v.phase === 'active' ? 'off' : 'polite'}>{callStatus(v, now)}</span>
       </button>
       <button type="button" class="app-callplate-side app-callplate-end" aria-label="Завершить" onClick={hangup}>
-        <Icon name="phoneDown" size={20} />
+        <Icon name="phoneDown" size={24} />
       </button>
     </div>
   );

@@ -11,7 +11,7 @@ import { ruleSubtitle } from './privacyLogic';
 
 registerPrefetch('settings/calls', () => { void refreshSettings(); });
 
-const RING_LABEL: Record<string, string> = { classic: 'Классическая', chime: 'Колокольчики', pulse: 'Пульс' };
+const RING_LABEL: Record<string, string> = { classic: 'Стандартная', chime: 'Колокольчики', pulse: 'Пульс' };
 const IDLE_MS = 60_000;   // проверка камеры или микрофона без действий — выключить
 
 type Lists = Awaited<ReturnType<typeof listDevices>>;

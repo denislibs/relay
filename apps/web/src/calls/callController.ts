@@ -476,6 +476,7 @@ function onConnection(a: Active): void {
   if (cur !== a || a.ended) return;
   if (st === 'connected') {
     if (a.disconnectTimer) { clearTimeout(a.disconnectTimer); a.disconnectTimer = null; }
+    if (a.reconnectSince != null) sounds.stop();   // переподключились — гудок переподключения стихает
     a.reconnectSince = null;
     const first = a.view.startedAt == null;
     view({ phase: 'active', startedAt: a.view.startedAt ?? Date.now() });
@@ -497,7 +498,7 @@ function onIce(a: Active): void {
 
 function beginReconnect(a: Active, failed: boolean): void {
   if (a.view.startedAt == null) { if (failed) hangupFailed(a); return; }   // ни разу не соединились — таймер соединения решит
-  if (a.view.phase !== 'reconnecting') view({ phase: 'reconnecting' });
+  if (a.view.phase !== 'reconnecting') { view({ phase: 'reconnecting' }); sounds.reconnecting(vol()); }
   a.reconnectSince ??= Date.now();
   later(a, RECONNECT_MS, () => { if (cur === a && !a.ended && a.reconnectSince != null && Date.now() - a.reconnectSince >= RECONNECT_MS - 50) hangupFailed(a); });
   // перезапускает звонящий; адресат ждёт его (как у Telegram), иначе встречные offer
@@ -556,7 +557,8 @@ function finish(a: Active, reason: CallFailure, sound: boolean, duration?: numbe
   stopStream(a.local);
   if (a.audio) { a.audio.pause(); a.audio.srcObject = null; }
   sounds.stop();
-  if (sound && reason !== 'security') sounds.ended(vol());
+  if (sound && (reason === 'failed' || reason === 'security')) sounds.failed(vol());
+  else if (sound) sounds.ended(vol());
   a.releaseLock?.();
   a.releaseLock = null;
   const dur = duration ?? (a.view.startedAt ? Math.round((Date.now() - a.view.startedAt) / 1000) : undefined);

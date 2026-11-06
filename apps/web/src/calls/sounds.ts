@@ -1,10 +1,13 @@
 /**
- * Звуки звонка — свои, синтезированные (без файлов и без чужих мелодий): гудки звонящему, мелодия входящего,
- * короткие сигналы «соединились» / «звонок окончен» / «занято».
+ * Звуки звонка: гудки звонящему, мелодия входящего, «соединились», «звонок окончен», «занято», «переподключение»,
+ * «не удалось».
+ *
+ * Звуки — файлы apps/web/public/sounds/calls/<имя>.mp3 (какие положить — решает владелец проекта; список имён —
+ * FILES ниже). Файла нет — играет свой синтезированный тон: ноты считаются в PCM один раз (WAV в Blob URL).
  *
  * Не WebAudio: первый new AudioContext() синхронно поднимает аудиосервис (250–600 мс главного потока, docs/SMOOTH-UI.md
- * §5) — и это пришлось бы на нажатие «Позвонить». Поэтому ноты считаются в PCM один раз (WAV в Blob URL) и играют
- * через <audio>: play() возвращается сразу, вывод — вне главного потока, динамик выбирается setSinkId.
+ * §5) — и это пришлось бы на нажатие «Позвонить». <audio>.play() возвращается сразу, вывод — вне главного потока,
+ * динамик выбирается setSinkId.
  */
 
 type Note = { f: number[]; at: number; dur: number };
@@ -12,16 +15,25 @@ type Tone = { notes: Note[]; period: number };   // period — длина фай
 
 const RATE = 22050;
 
+/** Свои тоны — запасные, когда файла звука нет, и мелодии «Колокольчики» / «Пульс». */
 const TONES: Record<string, Tone> = {
-  ringback: { notes: [{ f: [425], at: 0, dur: 1 }], period: 4 },
+  outgoing: { notes: [{ f: [425], at: 0, dur: 1 }], period: 4 },
   busy: { notes: [{ f: [425], at: 0, dur: 0.35 }], period: 0.7 },
-  connected: { notes: [{ f: [880], at: 0, dur: 0.12 }, { f: [1320], at: 0.14, dur: 0.16 }], period: 0.35 },
-  ended: { notes: [{ f: [480], at: 0, dur: 0.18 }, { f: [360], at: 0.22, dur: 0.3 }], period: 0.6 },
+  connect: { notes: [{ f: [880], at: 0, dur: 0.12 }, { f: [1320], at: 0.14, dur: 0.16 }], period: 0.35 },
+  end: { notes: [{ f: [480], at: 0, dur: 0.18 }, { f: [360], at: 0.22, dur: 0.3 }], period: 0.6 },
+  connecting: { notes: [{ f: [600], at: 0, dur: 0.1 }], period: 1.2 },
+  failed: { notes: [{ f: [520], at: 0, dur: 0.15 }, { f: [390], at: 0.2, dur: 0.15 }, { f: [290], at: 0.4, dur: 0.3 }], period: 0.8 },
   test: { notes: [{ f: [440], at: 0, dur: 0.25 }, { f: [554], at: 0.3, dur: 0.25 }, { f: [659], at: 0.6, dur: 0.4 }], period: 1.05 },
   'ring:classic': { notes: [{ f: [660, 880], at: 0, dur: 0.4 }, { f: [660, 880], at: 0.6, dur: 0.4 }], period: 2.5 },
   'ring:chime': { notes: [{ f: [784], at: 0, dur: 0.25 }, { f: [988], at: 0.25, dur: 0.25 }, { f: [1175], at: 0.5, dur: 0.45 }], period: 2.5 },
   'ring:pulse': { notes: [{ f: [523], at: 0, dur: 0.15 }, { f: [523], at: 0.25, dur: 0.15 }, { f: [523], at: 0.5, dur: 0.15 }, { f: [698], at: 0.75, dur: 0.35 }], period: 2.5 },
 };
+
+/** Звук → файл в /sounds/calls/ (мелодия «Стандартная» — incoming). */
+export const FILES: Record<string, string> = {
+  outgoing: 'outgoing', busy: 'busy', connect: 'connect', end: 'end', connecting: 'connecting', failed: 'failed', 'ring:classic': 'incoming',
+};
+const fileUrl = (name: string) => `/sounds/calls/${FILES[name]}.mp3`;
 
 /** WAV (PCM 16 бит, моно) с огибающей без щелчков. */
 export function renderWav(t: Tone): Uint8Array {
@@ -48,12 +60,16 @@ export function renderWav(t: Tone): Uint8Array {
   return out;
 }
 
-const urls = new Map<string, string>();
-function url(name: string): string {
-  let u = urls.get(name);
-  if (!u) { u = URL.createObjectURL(new Blob([renderWav(TONES[name])], { type: 'audio/wav' })); urls.set(name, u); }
+const synth = new Map<string, string>();
+function synthUrl(name: string): string {
+  let u = synth.get(name);
+  if (!u) { u = URL.createObjectURL(new Blob([renderWav(TONES[name])], { type: 'audio/wav' })); synth.set(name, u); }
   return u;
 }
+
+/** Файла звука нет — запоминаем после первой ошибки и дальше сразу играем свой тон. */
+const hasFile = new Map<string, boolean>();
+const urlOf = (name: string) => (FILES[name] && hasFile.get(name) !== false ? fileUrl(name) : synthUrl(name));
 
 let el: HTMLAudioElement | null = null;
 let sink: string | null = null;
@@ -63,32 +79,41 @@ function play(name: string, volume: number, loop: boolean, stopAfterMs = 0): voi
   if (typeof Audio === 'undefined' || !TONES[name]) return;
   stopNow();
   el ??= new Audio();
-  el.src = url(name);
-  el.loop = loop;
-  el.volume = Math.max(0, Math.min(1, volume));
-  const e = el as HTMLAudioElement & { setSinkId?: (id: string) => Promise<void> };
-  void (e.setSinkId ? e.setSinkId(sink ?? '').catch(() => {}) : Promise.resolve()).then(() => e.play().catch(() => {}));
+  const a = el as HTMLAudioElement & { setSinkId?: (id: string) => Promise<void> };
+  a.loop = loop;
+  a.volume = Math.max(0, Math.min(1, volume));
+  a.src = urlOf(name);
+  // файла нет (404) — запоминаем и играем свой тон
+  a.onerror = () => { if (FILES[name] && hasFile.get(name) !== false) { hasFile.set(name, false); if (el === a) { a.src = synthUrl(name); void a.play().catch(() => {}); } } };
+  void (a.setSinkId ? a.setSinkId(sink ?? '').catch(() => {}) : Promise.resolve()).then(() => a.play().catch(() => {}));
   if (stopAfterMs) stopTimer = setTimeout(stopNow, stopAfterMs);
 }
 
 function stopNow(): void {
   if (stopTimer) { clearTimeout(stopTimer); stopTimer = null; }
-  if (el) { el.pause(); el.currentTime = 0; }
+  if (el) { el.onerror = null; el.pause(); el.currentTime = 0; }
 }
 
 /** Выход для звуков звонка (динамик из настроек; null — системный). */
 export async function soundSink(deviceId: string | null): Promise<void> { sink = deviceId; }
 
-/** Заранее посчитать звуки (в простое после загрузки): первый звонок не ждёт синтеза. */
-export function warmCallSounds(): void { for (const k of Object.keys(TONES)) url(k); }
+/** В простое после загрузки: посчитать запасные тоны — первый звонок ничего не ждёт. Есть ли файлы, выясняется при первом
+ *  проигрывании (лишних запросов на каждом открытии страницы нет). */
+export function warmCallSounds(): void {
+  for (const k of Object.keys(TONES)) synthUrl(k);
+}
+
+const ring = (name: string) => 'ring:' + (TONES['ring:' + name] ? name : 'classic');
 
 export const sounds = {
-  ringback(volume: number): void { play('ringback', volume, true); },
-  ringtone(name: string, volume: number): void { play('ring:' + (TONES['ring:' + name] ? name : 'classic'), volume, true); },
-  preview(name: string, volume: number): void { play('ring:' + (TONES['ring:' + name] ? name : 'classic'), volume, false); },
+  ringback(volume: number): void { play('outgoing', volume, true); },
+  ringtone(name: string, volume: number): void { play(ring(name), volume, true); },
+  preview(name: string, volume: number): void { play(ring(name), volume, false); },
   test(volume: number): void { play('test', volume, false); },
-  connected(volume: number): void { play('connected', volume, false); },
-  ended(volume: number): void { play('ended', volume, false); },
+  connected(volume: number): void { play('connect', volume, false); },
+  ended(volume: number): void { play('end', volume, false); },
   busy(volume: number): void { play('busy', volume, true, 3000); },
+  reconnecting(volume: number): void { play('connecting', volume, true); },
+  failed(volume: number): void { play('failed', volume, false); },
   stop(): void { stopNow(); },
 };
