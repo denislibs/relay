@@ -1784,22 +1784,49 @@ span.app-log-ava { cursor: default; }
 @keyframes app-call-pulse { 0%, 100% { box-shadow: 0 0 0 0 rgba(49,181,69,.5); } 50% { box-shadow: 0 0 0 12px rgba(49,181,69,0); } }
 :root[data-anim="0"] .app-call, :root[data-anim="0"] .app-call * { animation: none !important; transition: none !important; }
 
-.app-callbar { position: fixed; top: 10px; left: 50%; z-index: 1000; display: flex; align-items: center; gap: 4px; transform: translateX(-50%); padding: 4px 4px 4px 12px;
-  border-radius: 24px; background: #31b545; color: #fff; box-shadow: 0 4px 16px rgba(0,0,0,.2); }
-.rl-presence[data-state="open"] > .app-callbar { animation: app-callbar-in 200ms var(--ease-out) both; }
-.rl-presence[data-state="closing"] > .app-callbar { animation: app-callbar-out 160ms var(--ease-in) both; }
-@keyframes app-callbar-in { from { opacity: 0; transform: translate(-50%, -8px); } }
-@keyframes app-callbar-out { to { opacity: 0; transform: translate(-50%, -8px); } }
-.app-callbar-open { display: flex; align-items: center; gap: 8px; border: 0; background: none; color: inherit; font: 400 14px/20px var(--font-sans); cursor: pointer; font-variant-numeric: tabular-nums; }
-.app-callbar-open b { font-weight: 600; max-width: 180px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.app-callbar-btn { width: 36px; height: 36px; border: 0; border-radius: 50%; display: grid; place-items: center; background: rgba(255,255,255,.18); color: #fff; cursor: pointer; }
-.app-callbar-btn.is-danger { background: #e5484d; }
+/* свёрнутый звонок — плашка над шапкой (ui/call/CallSlot.tsx), как в Telegram Web: микрофон | собеседник на градиенте | завершить.
+   Цвета градиента — отдельные свойства (@property): браузер плавно перетекает между состояниями, а не обрывает */
+@property --cp-c1 { syntax: '<color>'; inherits: false; initial-value: #8599aa; }
+@property --cp-c2 { syntax: '<color>'; inherits: false; initial-value: #8599aa; }
+.app-callslot .rl-playerclip > .app-callplate { margin-bottom: 10px; }
+.app-callplate { position: relative; z-index: 4; display: flex; align-items: stretch; gap: 2px; height: 36px; padding: 2px; box-sizing: border-box;
+  border-radius: 18px; background: var(--glass, var(--raised)); box-shadow: var(--shadow-panel, var(--shadow-float)); color: #fff;
+  -webkit-backdrop-filter: blur(20px) saturate(1.4); backdrop-filter: blur(20px) saturate(1.4); animation: rl-pbar-in 300ms cubic-bezier(.25, 1, .5, 1) both; }
+.rl-presence[data-state="closing"] .app-callplate { animation: rl-pbar-out 300ms cubic-bezier(.33, 1, .68, 1) forwards; }
+.rl-playerslot-still .app-callplate { animation: none; }
+.app-callplate-side { flex: 0 0 44px; display: grid; place-items: center; border: 0; border-radius: 16px; color: #fff; cursor: pointer; transition: background-color 250ms ease; }
+.app-callplate-mic { background: #3390ec; }
+.app-callplate-mic:hover { background: #2a7ccb; }
+.app-callplate.is-talking .app-callplate-mic { background: #54b655; }
+.app-callplate.is-talking .app-callplate-mic:hover { background: #4d9f4c; }
+.app-callplate-end { background: #e5484d; }
+.app-callplate-end:hover { background: #d13d42; }
+.app-callplate-center { --cp-c1: #8599aa; --cp-c2: #8599aa; flex: 1 1 auto; min-width: 0; display: flex; align-items: center; gap: 8px; padding: 0 12px 0 8px; border: 0; border-radius: 16px;
+  background: linear-gradient(90deg, var(--cp-c1), var(--cp-c2)); color: #fff; cursor: pointer; font: 400 13px/18px var(--font-sans); white-space: nowrap;
+  transition: --cp-c1 250ms ease, --cp-c2 250ms ease; }
+.app-callplate.is-talking .app-callplate-center { --cp-c1: #52ce5d; --cp-c2: #00b1c0; }
+.app-callplate.is-muted .app-callplate-center { --cp-c1: #0976e3; --cp-c2: #2bceff; }
+.app-callplate-center b { font-weight: 600; overflow: hidden; text-overflow: ellipsis; }
+.app-callplate-center span { opacity: .85; font-variant-numeric: tabular-nums; }
+.app-callplate-center .rl-avatar { flex-shrink: 0; }
+/* чат не открыт — та же плашка сверху средней колонки */
+.app-callfloat { position: fixed; top: 16px; left: calc(var(--side-w, 360px) + 32px); right: 16px; z-index: 1000; display: flex; justify-content: center; pointer-events: none; }
+.app-callfloat > .app-callplate { width: min(100%, 720px); pointer-events: auto; }
+:root[data-anim="0"] .app-callplate, :root[data-anim="0"] .app-callplate * { animation: none !important; transition: none !important; }
 
-.app-action-call > button { display: inline-flex; align-items: center; gap: 6px; max-width: min(28rem, 85%); padding: 3px 10px; border: 0; border-radius: 15px;
-  background: var(--action-bg); color: #fff; font: 500 14px/20px var(--font-sans); cursor: pointer; }
-.app-action-call > button:hover { filter: brightness(1.1); }
-.app-action-call > button time { opacity: .75; font-weight: 400; font-size: 12px; }
-.app-action-call-missed > button .rl-icon { color: #ff8a8a; }
+/* звонок в ленте — пузырём со стороны звонившего (как в Telegram): название, стрелка и «время, длительность», справа трубка */
+.app-callbubble { min-width: 220px; }
+.app-callbubble .rl-bubble-spacer, .app-callbubble .rl-bubble-meta { display: none; }
+.app-callbubble-in { position: relative; display: flex; flex-direction: column; gap: 1px; width: 100%; padding: 2px 52px 2px 2px; border: 0; background: none;
+  color: inherit; font: inherit; text-align: left; cursor: pointer; }
+.app-callbubble-title { font-weight: 600; }
+.app-callbubble-sub { display: flex; align-items: center; gap: 2px; margin-left: -3px; font-size: 13px; line-height: 18px; color: var(--bubble-meta); font-variant-numeric: tabular-nums; white-space: nowrap; }
+.app-callbubble-arrow { color: var(--brand-text, var(--brand)); }
+.app-callbubble-arrow.is-out { transform: rotate(-45deg); }
+.app-callbubble-arrow.is-in { transform: rotate(135deg); }
+.app-callbubble-arrow.is-missed { color: var(--danger); }
+.app-callbubble-icon { position: absolute; right: 4px; top: 50%; display: grid; place-items: center; transform: translateY(-50%); color: var(--brand-text, var(--brand)); }
+
 /* настройки → «Звонки»: индикатор микрофона и предпросмотр камеры */
 .app-calls-meter { height: 6px; margin: 4px 16px 10px; border-radius: 3px; background: var(--input-bg, rgba(127,127,127,.15)); overflow: hidden; }
 .app-calls-meter > i { display: block; height: 100%; background: var(--brand, #31b545); transform-origin: left center; transform: scaleX(0); transition: transform 80ms linear; }

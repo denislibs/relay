@@ -15,24 +15,22 @@ export function callLength(sec: number): string {
   return m < 60 ? `${m} мин` : `${Math.floor(m / 60)} ч ${String(m % 60).padStart(2, '0')} мин`;
 }
 
-/** Строка истории звонка в чате и в списке: mine — я звонил. */
+/**
+ * Как назывался звонок (пузырь в ленте и строка в списке чатов), как в клиентах Telegram: исходящий без разговора —
+ * «Отменённый», входящий без ответа — «Пропущенный», сброшенный адресатом — «Отклонённый». mine — я звонил.
+ */
+export function callTitle(c: CallServiceData | undefined, mine: boolean): string {
+  const v = !!c?.video;
+  const kind = (adj: string) => `${adj} ${v ? 'видеозвонок' : 'звонок'}`;
+  if (c?.reason === 'ended') return kind(mine ? 'Исходящий' : 'Входящий');
+  if (c?.reason === 'declined') return kind('Отклонённый');
+  return kind(mine ? 'Отменённый' : 'Пропущенный');
+}
+
+/** Строка в списке чатов и в поиске: название и длительность, если говорили. */
 export function callServiceText(c: CallServiceData | undefined, mine: boolean): string {
-  if (!c) return 'Звонок';
-  const what = c.video ? 'видеозвонок' : 'звонок';
-  const What = c.video ? 'Видеозвонок' : 'Звонок';
-  if (c.reason === 'ended' && c.duration != null) return `${mine ? 'Исходящий' : 'Входящий'} ${what} · ${callLength(c.duration)}`;
-  if (mine) {
-    if (c.reason === 'declined') return `${What} отклонён`;
-    if (c.reason === 'busy') return 'Абонент занят';
-    if (c.reason === 'cancelled') return `Отменённый ${what}`;
-    if (c.reason === 'missed') return `${What} без ответа`;
-    if (c.reason === 'failed') return `${What} не удался`;
-    return `Исходящий ${what}`;
-  }
-  if (c.reason === 'declined') return `Отклонённый ${what}`;
-  if (c.reason === 'failed') return `${What} не удался`;
-  if (c.reason === 'missed' || c.reason === 'cancelled' || c.reason === 'busy') return `Пропущенный ${what}`;
-  return `Входящий ${what}`;
+  const t = callTitle(c, mine);
+  return c?.reason === 'ended' && c.duration != null ? `${t} (${callLength(c.duration)})` : t;
 }
 
 /** Строка состояния под именем на экране звонка. */

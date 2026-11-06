@@ -3,7 +3,8 @@ import { Avatar, Icon, Presence, ripple } from '@relay/ui';
 import { useEffect, useRef, useState } from 'preact/hooks';
 import { acceptCall, callStreams, declineCall, hangup, toggleCam, toggleMic, type CallView } from '../../calls/callController';
 import { callStatus } from '../../calls/callText';
-import { useGlobal } from '../../global';
+import { setGlobal, useGlobal } from '../../global';
+import { CallPlate, useNow } from './CallSlot';
 import { avatarPhoto } from '../../profilePhoto';
 import { chatTone } from '../format';
 
@@ -14,16 +15,17 @@ import { chatTone } from '../format';
  */
 export function CallLayer() {
   const call = useGlobal((s) => s.call);
+  const min = useGlobal((s) => s.callMin);
+  const chatOpen = useGlobal((s) => s.openChatId != null);
   const last = useRef<CallView | null>(null);
   if (call) last.current = call;
   const v = call ?? last.current;
-  const [min, setMin] = useState(false);
-  useEffect(() => { if (!call) setMin(false); }, [!!call]);
-  useEffect(() => { if (call?.phase === 'incoming') setMin(false); }, [call?.phase]);
+  // свёрнут: плашка над шапкой открытого чата (CallSlot в Chat); чата нет — та же плашка сверху средней колонки
+  const floating = !!call && min && !chatOpen && call.phase !== 'incoming' && call.phase !== 'ended';
   return (
     <>
-      <Presence show={!!call && !min} exitMs={220}>{v ? <CallScreen v={v} onMin={() => setMin(true)} /> : null}</Presence>
-      <Presence show={!!call && min} exitMs={180}>{v ? <CallBar v={v} onOpen={() => setMin(false)} /> : null}</Presence>
+      <Presence show={!!call && (!min || call.phase === 'incoming')} exitMs={220}>{v ? <CallScreen v={v} onMin={() => setGlobal({ callMin: true })} /> : null}</Presence>
+      <Presence show={floating} exitMs={180}>{v ? <div class="app-callfloat"><CallPlate v={v} floating /></div> : null}</Presence>
     </>
   );
 }
@@ -31,17 +33,6 @@ export function CallLayer() {
 function usePeer(v: CallView) {
   const chat = useGlobal((s) => s.chats.find((c) => c.id === v.chatId));
   return { name: (chat?.title as string) || 'Собеседник', tone: chatTone(chat), photo: avatarPhoto((chat?.photo as ProfilePhoto | null) ?? null) };
-}
-
-/** Секундомер: перерисовка раз в секунду только во время разговора. */
-function useNow(on: boolean): number {
-  const [now, setNow] = useState(Date.now());
-  useEffect(() => {
-    if (!on) return;
-    const t = setInterval(() => setNow(Date.now()), 1000);
-    return () => clearInterval(t);
-  }, [on]);
-  return now;
 }
 
 function CallScreen({ v, onMin }: { v: CallView; onMin: () => void }) {
@@ -110,21 +101,6 @@ function CallButton({ icon, label, onClick, danger, accept, on, disabled }: { ic
         <Icon name={icon} size={28} />
       </button>
       <span>{label}</span>
-    </div>
-  );
-}
-
-/** Свёрнутый звонок: полоска сверху — имя, время, микрофон, завершить; нажатие — развернуть. */
-function CallBar({ v, onOpen }: { v: CallView; onOpen: () => void }) {
-  const peer = usePeer(v);
-  const now = useNow(v.phase === 'active');
-  return (
-    <div class="app-callbar" role="region" aria-label="Звонок">
-      <button type="button" class="app-callbar-open" onClick={onOpen}>
-        <Icon name="phone" size={18} /><b>{peer.name}</b><span>{callStatus(v, now)}</span>
-      </button>
-      <button type="button" class="app-callbar-btn" aria-label={v.mic ? 'Выключить микрофон' : 'Включить микрофон'} onClick={toggleMic}><Icon name={v.mic ? 'mic' : 'micOff'} size={20} /></button>
-      <button type="button" class="app-callbar-btn is-danger" aria-label="Завершить" onClick={hangup}><Icon name="phoneDown" size={20} /></button>
     </div>
   );
 }

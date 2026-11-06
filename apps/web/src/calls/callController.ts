@@ -561,7 +561,8 @@ function finish(a: Active, reason: CallFailure, sound: boolean, duration?: numbe
   a.releaseLock = null;
   const dur = duration ?? (a.view.startedAt ? Math.round((Date.now() - a.view.startedAt) / 1000) : undefined);
   view({ phase: 'ended', reason, duration: dur, rev: a.view.rev + 1 });
-  setTimeout(() => { if (cur === a) { cur = null; if (!incoming) setGlobal({ call: null }); } }, ENDED_SHOW_MS);
+  setGlobal({ callMin: false });   // свёрнутый — разворачивается, чтобы было видно, чем кончился
+  setTimeout(() => { if (cur === a) { cur = null; if (!incoming) setGlobal({ call: null, callMin: false }); } }, ENDED_SHOW_MS);
 }
 
 function armConnectTimeout(a: Active): void {

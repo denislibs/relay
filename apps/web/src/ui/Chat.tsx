@@ -1,3 +1,4 @@
+import { CallSlot } from './call/CallSlot';
 import { callBack, canCall } from '../calls/callUi';
 import { canEditKind, hasMedia, isDiceEmoji, rightForKind, type GeoPoint, type Poll, type PollInput, type GroupInfo, type MemberRight, type MyMembership } from '@relay/protocol';
 import { emojiKey } from '@relay/protocol';
@@ -646,7 +647,8 @@ export function Chat({ chatId, frameKey, active, threadId, scheduled = false, sa
   return (
     <>
       <span ref={shell} hidden />
-      {/* плеер — остров над шапкой (как в Telegram): шапка плавно уезжает вниз, пока он открыт */}
+      {/* свёрнутый звонок и плеер — острова над шапкой (как в Telegram): шапка плавно уезжает вниз, пока они открыты */}
+      <CallSlot />
       <PlayerBar
         onTitle={(t: Track) => { if (t.msgId != null && t.chatId) { if (t.chatId === chatId) focusMessage({ id: t.msgId, sort: t.msgId }); else openInner(t.chatId, { id: t.msgId, sort: t.msgId }); } }}
         onPlaylist={() => setGlobal({ playlistOpen: true })}
