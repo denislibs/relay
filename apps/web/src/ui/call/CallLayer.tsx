@@ -72,7 +72,7 @@ function CallScreen({ v, onMin }: { v: CallView; onMin: () => void }) {
       {emojiHint && v.emoji ? (
         <div class="app-call-hint" role="note">
           <div class="app-call-hint-emoji">{v.emoji.join(' ')}</div>
-          <p>Если у {peer.name} такие же эмодзи, звонок защищён сквозным шифрованием: его не может прослушать никто, включая сервер Relay.</p>
+          <p>Сверьте их с собеседником: если у него такие же, звонок защищён сквозным шифрованием и его не может прослушать никто, включая сервер Relay.</p>
           {v.relay ? <p>Звонок идёт через сервер-посредник — ваш IP-адрес собеседнику не виден.</p> : null}
           <button type="button" class="app-call-hint-ok" onClick={() => setEmojiHint(false)}>Понятно</button>
         </div>
@@ -81,7 +81,7 @@ function CallScreen({ v, onMin }: { v: CallView; onMin: () => void }) {
         <Avatar name={peer.name} tone={peer.tone} size={showRemote ? 48 : 120} {...peer.photo} />
         <b>{peer.name}</b>
         <span class="app-call-status" aria-live="polite">{callStatus(v, now)}</span>
-        {!v.peerMic && v.phase === 'active' ? <span class="app-call-note"><Icon name="micOff" size={16} /> У {peer.name} выключен микрофон</span> : null}
+        {!v.peerMic && v.phase === 'active' ? <span class="app-call-note"><Icon name="micOff" size={16} /> {peer.name}: микрофон выключен</span> : null}
       </div>
       <video ref={localVideo} class={'app-call-local' + (v.cam && !incoming ? ' is-on' : '')} autoplay playsInline muted aria-hidden="true" />
       <div class="app-call-controls">
