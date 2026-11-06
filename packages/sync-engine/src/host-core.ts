@@ -1,4 +1,4 @@
-import type { Engine, WatchHandle } from './engine';
+import type { CallEvent, Engine, WatchHandle } from './engine';
 import type { Action, EngineConfig, Patch, Query } from './types';
 
 /** Сообщения от вкладки к хосту. */
@@ -16,6 +16,7 @@ export type FromHost =
   | { t: 'patches'; items: { sub: number; patch: Patch }[] }
   | { t: 'result'; id: number; ok: boolean; value?: unknown; error?: string }
   | { t: 'reload' }
+  | { t: 'call'; frame: CallEvent }   // кадр звонка (всем вкладкам; звонок ведёт одна, остальные смотрят callId)
   | { t: 'pong' };
 
 export interface PortLike<In, Out> {
@@ -123,6 +124,7 @@ export class HostCore {
     this.cfg = cfg;
     return this.opts.open(cfg).then((e) => {
       e.onObsolete(() => this.obsolete());
+      e.onCall((frame) => { for (const c of this.clients) c.port.post({ t: 'call', frame }); });
       // сеанс завершён: движок стёр данные и закрылся; следующий вход (hello после входа) откроет новый
       e.onTerminated(() => { if (this.live === e) { this.engine = null; this.live = null; } });
       e.dev.host = { build: this.opts.build, kind: this.opts.kind ?? 'shared', clients: () => this.clients.size, startedAt: this.startedAt };

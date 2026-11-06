@@ -3,7 +3,7 @@ import { ChatRowSkeleton, InfoRow, PanelHeader, Presence, RadioRow, Section, use
 import { useGlobal } from '../../global';
 import { back, go } from '../../nav';
 import { setPrivacy } from '../../settingsData';
-import { DISCOVERY_TITLE, discoveryCaption, EXCEPTIONS_FOOTER, MODE_LABEL, parseRulePath, peopleCount, RULE_QUESTION, RULE_TITLE, ruleCaption } from './privacyLogic';
+import { EXCEPTION_TITLE, DISCOVERY_TITLE, discoveryCaption, EXCEPTIONS_FOOTER, MODE_LABEL, parseRulePath, peopleCount, RULE_QUESTION, RULE_TITLE, ruleCaption } from './privacyLogic';
 
 const MODES: PrivacyMode[] = ['everyone', 'contacts', 'nobody'];
 
@@ -43,8 +43,8 @@ export function PrivacyRule({ path }: { path: string }) {
                 </Section>
               ) : null}
               <Section title="Исключения" footer={rule.mode === 'contacts' ? EXCEPTIONS_FOOTER : undefined}>
-                {rule.mode !== 'everyone' ? <InfoRow icon="userPlus" title="Всегда показывать" subtitle={peopleCount(rule.allow.length)} onClick={() => void go(path + '/allow')} /> : null}
-                {rule.mode !== 'nobody' ? <InfoRow icon="block" title="Никогда не показывать" subtitle={peopleCount(rule.deny.length)} onClick={() => void go(path + '/deny')} /> : null}
+                {rule.mode !== 'everyone' ? <InfoRow icon="userPlus" title={EXCEPTION_TITLE[key].allow} subtitle={peopleCount(rule.allow.length)} onClick={() => void go(path + '/allow')} /> : null}
+                {rule.mode !== 'nobody' ? <InfoRow icon="block" title={EXCEPTION_TITLE[key].deny} subtitle={peopleCount(rule.deny.length)} onClick={() => void go(path + '/deny')} /> : null}
               </Section>
             </>
           )}

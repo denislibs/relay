@@ -4,7 +4,7 @@ import { useEffect, useState } from 'preact/hooks';
 import { useGlobal } from '../../global';
 import { back, setLeaveGuard } from '../../nav';
 import { setPrivacy, showToast } from '../../settingsData';
-import { candidates, parseRulePath, RULE_TITLE, samePeople, withPeople, type RuleKey } from './privacyLogic';
+import { EXCEPTION_TITLE, candidates, parseRulePath, RULE_TITLE, samePeople, withPeople, type RuleKey } from './privacyLogic';
 
 /** Выбор людей для исключения «Всегда показывать» / «Никогда не показывать»: контакты и собеседники, поиск, ✓ — сохранить. */
 export function PeoplePicker({ path }: { path: string }) {
@@ -13,7 +13,7 @@ export function PeoplePicker({ path }: { path: string }) {
   const list = parsed?.list ?? 'allow';
   const rule = useGlobal((s) => s.settings.privacy[key]);
   const loaded = useGlobal((s) => s.settings.loaded);
-  const title = list === 'allow' ? 'Всегда показывать' : 'Никогда не показывать';
+  const title = EXCEPTION_TITLE[key][list];
   return (
     <div class="rl-sidepage" aria-label={`${RULE_TITLE[key]}: ${title}`}>
       {/* ключ — по загрузке: выбор начинается с того, что уже сохранено на сервере */}

@@ -79,7 +79,7 @@ const KNOWN_PREVIEW = new Set(['text', 'photo', 'video', 'file', 'voice', 'round
 
 export function previewBody(m: LastMessage, withThumb: boolean): ComponentChildren {
   if (m.deleted) return 'Сообщение удалено';
-  if (isGroupService(m.service?.type)) {
+  if (isGroupService(m.service?.type) || m.service?.type === 'call') {
     const g = getGlobal();
     return serviceText(m.service!.type as ServiceType, { data: (m.service as { data?: ServiceData }).data, body: m.body, mine: m.senderId === g.me?.userId, sender: personName(m.senderId), meId: g.me?.userId ?? 0, fromChannel: m.senderId === 0 });
   }

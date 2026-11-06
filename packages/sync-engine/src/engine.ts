@@ -1,12 +1,15 @@
 import { deviceFetch, signDevice } from './device';
 import { draftHash, MAX_FILE_BYTES, MEDIA_TABS, type MediaTab } from '@relay/protocol';
-import type { SavedDialogsPage, ClientFrame, JournalEntry, Me, ScheduledMessage, SettingsSnapshot, Message, PublicUser, ServerFrame, ThreadGuest } from '@relay/protocol';
+import type { CallServerFrame, SavedDialogsPage, ClientFrame, JournalEntry, Me, ScheduledMessage, SettingsSnapshot, Message, PublicUser, ServerFrame, ThreadGuest } from '@relay/protocol';
 import { Blocks } from './blocks';
 import { Contacts } from './contacts';
 import { delBlob, getBlob, openDb, putBlob, write } from './idb';
 import { applySavedPage, dropSavedLocally, savedChatOf, savedDeleteKey, savedDialogsResult, savedFeedResult, savedPinKey, savedView } from './savedDialogs';
 import { affects, autoDeleteKey, autoDeleteOverlay, computeQuery, scheduledResult, diffResults, feedSpan, flagsKey, flagsOf, flagsOverlay, messageWindow, muteKey, rangeAt, muteOverlay, threadView, type Result } from './queries';
 import type { Item } from './types';
+
+/** Кадр звонка для вкладок; callResync — сокет переподключился (кадры могли потеряться), сверить звонок callGet. */
+export type CallEvent = CallServerFrame | { op: 'callResync' };
 import { countStores } from './devstats';
 import { Store, type ChatSummary } from './store';
 import { uploadParts, type MultipartState, type UploadSource } from './multipart';
@@ -308,6 +311,11 @@ export class Engine {
     this.watchers.clear();
     this.onObsoleteCb();
   }
+
+  private callCbs = new Set<(f: CallEvent) => void>();
+  /** Кадры звонка с сервера — вкладкам как есть (ключи и WebRTC — на странице). callResync — новый сокет: сверить звонок. */
+  onCall(cb: (f: CallEvent) => void): () => void { this.callCbs.add(cb); return () => this.callCbs.delete(cb); }
+  private callEvent(f: CallEvent): void { for (const cb of this.callCbs) cb(f); }
 
   /** Движок стёр локальные данные и закрылся после завершения сеанса (хост забывает его). */
   onTerminated(cb: () => void): void { this.session.onDone(cb); }
@@ -1372,6 +1380,16 @@ export class Engine {
       case 'emojiFx':
         if (this.online) this.transport.send({ op: 'emojiFx', chatId: a.chatId, id: a.id, key: a.key, t: a.t });
         return null;
+      case 'callFrame': {
+        // звонок живёт на странице (RTCPeerConnection в воркере нет); движок — только сокет. Без сети — ошибка сразу:
+        // звонок не ставится в очередь, как сообщения
+        if (!this.online) throw new Error('offline');
+        // запрос, принятие и «мой звонок» ждут ответа сервера (reqId ставит request), остальное — без ответа
+        const f = a.frame;
+        if (f.op === 'callRequest' || f.op === 'callAccept' || f.op === 'callGet') return this.request({ ...f, reqId: '' });
+        this.transport.send(f);
+        return null;
+      }
       case 'editMessage': {
         if (!this.online) throw new Error('offline');
         await this.request({ op: 'edit', reqId: '', chatId: a.chatId, id: a.id, body: a.body, entities: a.entities ?? [] });
@@ -1822,6 +1840,7 @@ export class Engine {
       case 'hello':
         if (this.resetting) { this.skipped.hello = f; return; }   // resetLocal пошлёт свой hello сама, а при отказе проиграет этот
         this.dev.counters.serverSeq = f.seq;
+        this.callEvent({ op: 'callResync' });   // новый сокет: кадры звонка за время обрыва могли пропасть
         if (typeof f.now === 'number' && f.now > 0) this.store.setClockSkew(f.now - Date.now());
         this.sweepExpiry();   // часы могли уточниться, а за время без связи — выйти сроки
         this.holding = true;
@@ -1926,6 +1945,9 @@ export class Engine {
       case 'challenge':
         // сеанс привязан к устройству: сокет выполнит кадры (они ждут на сервере) после подписи вызова
         void signDevice('ws', f.nonce).then((sig) => this.transport.send({ op: 'prove', sig }), () => this.transport.drop());
+        return;
+      case 'callIncoming': case 'callRinging': case 'callAccepted': case 'callConfirm': case 'callSignal': case 'callEnded':
+        this.callEvent(f);
         return;
       case 'sessionTerminated':
         this.session.end(f.reason === 'logout' ? 'logout' : 'terminated');

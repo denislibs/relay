@@ -12,6 +12,8 @@ import { groupReactions, type Chip } from '../reactionChips';
 import { emojiKey } from '@relay/protocol';
 import type { ContactCard, Dice, Entity, GeoPoint, MessageButton, Poll, ProfilePhoto, ReplyQuote, Todo } from '@relay/protocol';
 import { hitQuote } from './quoteHit';
+import { callBack } from '../calls/callUi';
+import { callServiceText } from '../calls/callText';
 import { Presence, ProgressRing, useMinVisible, MediaPolicy, ArticleBlocks, Avatar, Bubble, Icon, peerTone, DateDivider, DatePicker, FileBubble, MediaBubble, MessageText, VoiceBubble, MusicBubble, RoundBubble, player, MediaViewer, ScrollToBottom, beginHeavyAnimation, forceMeasure, isHeavyAnimating, onHeavyAnimationEnd, requestMeasure, requestMutation, selectionValue, TodoBubble, PollMessage, ContactMessage, GeoMessage, DiceMessage, InlineKeyboard, StickerBubble, EmojiBubble, reducedMotion, LazyRoot, stickerMsgSize } from '@relay/ui';
 import { openStickerSet, sendSticker, useGreetingSticker } from '../stickers';
 import { historyEmpty } from '../greeting';
@@ -1835,6 +1837,22 @@ export function Feed({ frameKey, active, chatId, threadId, scheduled = false, sa
       flushRun();
       const list = messages.find((x) => x.id === m.replyToId)?.todo as { title: string; items: { id: number; title: string }[] } | undefined;
       out.push(<div class="rl-action" key={m.key} role="note"><span>{todoLine(svc.type, svc.data ?? {}, mine ? 'Вы' : people[m.senderId as number]?.name ?? peerName, list)}</span></div>);
+      prevDay = day; prevSender = null;
+      return;
+    }
+    // звонок: плашка с трубкой и временем; нажатие — перезвонить (тем же видом звонка)
+    if (svc?.type === 'call') {
+      flushRun();
+      const c = svc.data?.call;
+      const missed = !mine && c?.reason !== 'ended' && c?.reason !== 'declined';
+      out.push(
+        <div class={'rl-action app-action-call' + (missed ? ' app-action-call-missed' : '')} key={m.key} role="note">
+          <button type="button" onClick={() => callBack(chatId, !!c?.video)} aria-label={'Перезвонить: ' + callServiceText(c, mine)}>
+            <Icon name={c?.video ? 'video' : mine ? 'phone' : 'phoneIn'} size={16} />
+            <span>{callServiceText(c, mine)}</span><time>{clock(m.createdAt as string)}</time>
+          </button>
+        </div>,
+      );
       prevDay = day; prevSender = null;
       return;
     }

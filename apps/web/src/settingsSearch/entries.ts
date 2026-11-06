@@ -20,6 +20,8 @@ const RULES: [key: string, title: string, keywords: string[]][] = [
   ['lastSeen', 'Последний визит и «в сети»', ['онлайн', 'был в сети', 'время захода', 'статус']],
   ['bio', 'О себе', ['кто видит описание']],
   ['birthday', 'День рождения', ['кто видит дату рождения']],
+  ['calls', 'Звонки', ['кто может звонить', 'звонок', 'созвон']],
+  ['p2p', 'Пиринговые соединения', ['p2p', 'ip-адрес', 'напрямую', 'turn']],
 ];
 
 const AUTOLOAD: [kind: string, title: string][] = [['photo', 'Фото'], ['video', 'Видео'], ['file', 'Файлы']];
@@ -73,6 +75,8 @@ export const ENTRIES: E[] = [
   { id: 'wallpaper.colors', path: WP, title: 'Цвета и градиенты', kind: 'subsection', keywords: ['градиент'] },
 
   // ---------- Уведомления ----------
+  { id: 'calls', path: 'settings/calls', title: 'Звонки', kind: 'section', icon: 'phone', tile: 'green', keywords: ['микрофон', 'камера', 'динамики', 'звук звонка', 'мелодия', 'видео'] },
+  { id: 'calls.accept', path: 'settings/calls', title: 'Принимать звонки на этом устройстве', kind: 'row', keywords: ['входящие звонки'] },
   { id: 'notifications', path: NOTIFY, title: 'Уведомления', kind: 'section', icon: 'bell', tile: 'red', keywords: ['оповещения', 'пуш', 'push'] },
   { id: 'notifications.web', path: NOTIFY, title: 'В браузере', kind: 'subsection' },
   { id: 'notifications.web.on', path: NOTIFY, parent: 'notifications.web', title: 'Уведомления', kind: 'toggle', keywords: ['разрешить уведомления', 'пуш', 'push'] },

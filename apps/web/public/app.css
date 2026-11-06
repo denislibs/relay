@@ -1736,3 +1736,74 @@ span.app-log-ava { cursor: default; }
 .app-saved-sub { display: block; font: 400 13px/18px var(--font-sans); color: var(--ink-muted); }
 .app-sm-none { padding: var(--space-5) var(--space-4); text-align: center; color: var(--ink-muted); font-size: 14px; }
 .app-saved-plate { position: relative; }
+
+/* ---------- Звонок (ui/call/CallLayer.tsx): экран поверх всего, свёрнутая полоска, плашка в ленте ---------- */
+.app-call { position: fixed; inset: 0; z-index: 1000; display: flex; flex-direction: column; align-items: center; justify-content: space-between;
+  padding: max(16px, env(safe-area-inset-top)) 16px max(28px, env(safe-area-inset-bottom)); color: #fff; overflow: hidden;
+  background: radial-gradient(120% 90% at 20% 0%, #3d6f96 0%, transparent 60%), radial-gradient(120% 90% at 100% 100%, #2c4d6b 0%, transparent 55%), #1c2733;
+  transition: background-color .4s var(--ease-out); }
+.app-call[data-phase="incoming"], .app-call[data-phase="calling"], .app-call[data-phase="ringing"] { background-color: #1f3a2c; }
+.app-call[data-phase="reconnecting"] { background-color: #3a2f1c; }
+.app-call-ended { background-color: #3a1f24; }
+.rl-presence[data-state="open"] > .app-call { animation: app-call-in 260ms var(--ease-out) both; }
+.rl-presence[data-state="closing"] > .app-call { animation: app-call-out 200ms var(--ease-in) both; }
+@keyframes app-call-in { from { opacity: 0; transform: scale(1.03); } }
+@keyframes app-call-out { to { opacity: 0; transform: scale(1.03); } }
+.app-call-remote { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; opacity: 0; transition: opacity .3s var(--ease-out); background: #000; pointer-events: none; }
+.app-call-video .app-call-remote { opacity: 1; }
+.app-call-top { position: relative; width: 100%; display: grid; grid-template-columns: 48px 1fr 48px; align-items: center; }
+.app-call-icon { width: 44px; height: 44px; border: 0; border-radius: 50%; background: rgba(255,255,255,.12); color: #fff; display: grid; place-items: center; cursor: pointer; }
+.app-call-icon:hover { background: rgba(255,255,255,.2); }
+.app-call-emoji { justify-self: center; display: flex; gap: 6px; padding: 6px 12px; border: 0; border-radius: 18px; background: rgba(0,0,0,.25); font-size: 22px; line-height: 28px; cursor: pointer; animation: app-call-fade 300ms var(--ease-out) both; }
+@keyframes app-call-fade { from { opacity: 0; transform: translateY(-4px); } }
+.app-call-hint { position: absolute; top: 76px; left: 50%; z-index: 2; width: min(340px, calc(100% - 32px)); transform: translateX(-50%); padding: 18px; border-radius: 16px;
+  background: rgba(20,28,36,.92); text-align: center; animation: app-call-fade 200ms var(--ease-out) both; }
+.app-call-hint-emoji { font-size: 34px; letter-spacing: 6px; margin-bottom: 8px; }
+.app-call-hint p { margin: 8px 0 0; font: 400 14px/20px var(--font-sans); color: rgba(255,255,255,.85); }
+.app-call-hint-ok { margin-top: 14px; padding: 8px 22px; border: 0; border-radius: 10px; background: rgba(255,255,255,.14); color: #fff; font: 500 15px/20px var(--font-sans); cursor: pointer; }
+.app-call-who { position: relative; display: flex; flex-direction: column; align-items: center; gap: 6px; margin-top: -40px; transition: transform .3s var(--ease-out); }
+.app-call-who > b { margin-top: 14px; font: 600 24px/30px var(--font-sans); text-align: center; text-shadow: 0 1px 4px rgba(0,0,0,.3); }
+.app-call-status { font: 400 16px/22px var(--font-sans); color: rgba(255,255,255,.8); font-variant-numeric: tabular-nums; text-shadow: 0 1px 4px rgba(0,0,0,.3); }
+.app-call-note { display: inline-flex; align-items: center; gap: 6px; margin-top: 6px; padding: 4px 10px; border-radius: 12px; background: rgba(0,0,0,.3); font: 400 13px/18px var(--font-sans); }
+.app-call-who-small { position: absolute; top: max(68px, env(safe-area-inset-top)); left: 24px; flex-direction: row; gap: 10px; margin: 0; align-items: center; }
+.app-call-who-small > b { margin: 0; font-size: 17px; line-height: 22px; }
+.app-call-local { position: absolute; right: 20px; bottom: 140px; width: 168px; aspect-ratio: 4 / 3; border-radius: 12px; object-fit: cover; transform: scaleX(-1) scale(.8);
+  background: #000; opacity: 0; box-shadow: 0 4px 16px rgba(0,0,0,.35); transition: opacity .25s var(--ease-out), transform .25s var(--ease-out); pointer-events: none; }
+.app-call-local.is-on { opacity: 1; transform: scaleX(-1); }
+.app-call-controls { position: relative; display: flex; gap: 28px; justify-content: center; align-items: flex-start; }
+.app-call-btn { display: flex; flex-direction: column; align-items: center; gap: 8px; width: 76px; font: 400 13px/16px var(--font-sans); color: rgba(255,255,255,.85); text-align: center; }
+.app-call-round { position: relative; overflow: hidden; width: 60px; height: 60px; border: 0; border-radius: 50%; display: grid; place-items: center; cursor: pointer;
+  background: rgba(255,255,255,.18); color: #fff; transition: background-color .15s var(--ease-standard), transform .15s var(--ease-standard); }
+.app-call-round:hover { background: rgba(255,255,255,.26); }
+.app-call-round:active { transform: scale(.94); }
+.app-call-round.is-off { background: #fff; color: #1c2733; }
+.app-call-round.is-danger { background: #e5484d; }
+.app-call-round.is-danger:hover { background: #f05358; }
+.app-call-round.is-accept { background: #31b545; animation: app-call-pulse 1.6s ease-in-out infinite; }
+.app-call-round:disabled { opacity: .5; cursor: default; }
+@keyframes app-call-pulse { 0%, 100% { box-shadow: 0 0 0 0 rgba(49,181,69,.5); } 50% { box-shadow: 0 0 0 12px rgba(49,181,69,0); } }
+:root[data-anim="0"] .app-call, :root[data-anim="0"] .app-call * { animation: none !important; transition: none !important; }
+
+.app-callbar { position: fixed; top: 10px; left: 50%; z-index: 1000; display: flex; align-items: center; gap: 4px; transform: translateX(-50%); padding: 4px 4px 4px 12px;
+  border-radius: 24px; background: #31b545; color: #fff; box-shadow: 0 4px 16px rgba(0,0,0,.2); }
+.rl-presence[data-state="open"] > .app-callbar { animation: app-callbar-in 200ms var(--ease-out) both; }
+.rl-presence[data-state="closing"] > .app-callbar { animation: app-callbar-out 160ms var(--ease-in) both; }
+@keyframes app-callbar-in { from { opacity: 0; transform: translate(-50%, -8px); } }
+@keyframes app-callbar-out { to { opacity: 0; transform: translate(-50%, -8px); } }
+.app-callbar-open { display: flex; align-items: center; gap: 8px; border: 0; background: none; color: inherit; font: 400 14px/20px var(--font-sans); cursor: pointer; font-variant-numeric: tabular-nums; }
+.app-callbar-open b { font-weight: 600; max-width: 180px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.app-callbar-btn { width: 36px; height: 36px; border: 0; border-radius: 50%; display: grid; place-items: center; background: rgba(255,255,255,.18); color: #fff; cursor: pointer; }
+.app-callbar-btn.is-danger { background: #e5484d; }
+
+.app-action-call > button { display: inline-flex; align-items: center; gap: 6px; max-width: min(28rem, 85%); padding: 3px 10px; border: 0; border-radius: 15px;
+  background: var(--action-bg); color: #fff; font: 500 14px/20px var(--font-sans); cursor: pointer; }
+.app-action-call > button:hover { filter: brightness(1.1); }
+.app-action-call > button time { opacity: .75; font-weight: 400; font-size: 12px; }
+.app-action-call-missed > button .rl-icon { color: #ff8a8a; }
+/* настройки → «Звонки»: индикатор микрофона и предпросмотр камеры */
+.app-calls-meter { height: 6px; margin: 4px 16px 10px; border-radius: 3px; background: var(--input-bg, rgba(127,127,127,.15)); overflow: hidden; }
+.app-calls-meter > i { display: block; height: 100%; background: var(--brand, #31b545); transform-origin: left center; transform: scaleX(0); transition: transform 80ms linear; }
+.app-calls-preview { display: none; padding: 4px 16px 8px; }
+.app-calls-preview.is-open { display: block; }
+.app-calls-preview video { display: block; width: 100%; aspect-ratio: 16 / 9; border-radius: 12px; background: #000; object-fit: cover; transform: scaleX(-1); opacity: 0; transition: opacity .25s var(--ease-out); }
+.app-calls-preview video.is-on { opacity: 1; }

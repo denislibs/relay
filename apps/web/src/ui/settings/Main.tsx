@@ -26,6 +26,7 @@ const SECTIONS: SectionRow[] = [
   { path: 'settings/profile', icon: 'account', tile: 'blue', title: 'Аккаунт', subtitle: 'Имя пользователя, о себе, день рождения' },
   { path: 'settings/general', icon: 'general', tile: 'orange', title: 'Общие настройки', subtitle: 'Обои, тема, клавиатура' },
   { path: 'settings/notifications', icon: 'bell', tile: 'red', title: 'Уведомления', subtitle: 'Звуки, типы чатов' },
+  { path: 'settings/calls', icon: 'phone', tile: 'green', title: 'Звонки', subtitle: 'Микрофон, камера, динамики' },
   { path: 'settings/privacy', icon: 'lock', tile: 'gray', title: 'Конфиденциальность', subtitle: 'Последний визит, блокировка' },
   { path: 'settings/folders', icon: 'folder', tile: 'blue', title: 'Папки с чатами', subtitle: 'Сортировка чатов по папкам' },
   { path: 'settings/data', icon: 'storage', tile: 'green', title: 'Данные и память', subtitle: 'Автозагрузка, кэш' },

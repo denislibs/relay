@@ -3,8 +3,8 @@ import type { PrivacyMode, PrivacyRule } from '@relay/protocol';
 import type { Item } from '@relay/sync-engine/src/types';
 
 /** Правила, которые настраиваются со страницы «Конфиденциальность» (phoneDiscovery — внутри экрана номера). */
-export type RuleKey = 'phone' | 'lastSeen' | 'bio' | 'birthday';
-export const RULE_KEYS: RuleKey[] = ['phone', 'lastSeen', 'bio', 'birthday'];
+export type RuleKey = 'phone' | 'lastSeen' | 'bio' | 'birthday' | 'calls' | 'p2p';
+export const RULE_KEYS: RuleKey[] = ['phone', 'lastSeen', 'bio', 'birthday', 'calls', 'p2p'];
 export const isRuleKey = (k: string): k is RuleKey => (RULE_KEYS as string[]).includes(k);
 
 export const MODE_LABEL: Record<PrivacyMode, string> = { everyone: 'Все', contacts: 'Мои контакты', nobody: 'Никто' };
@@ -15,6 +15,8 @@ export const RULE_TITLE: Record<RuleKey, string> = {
   lastSeen: 'Последний визит и «в сети»',
   bio: 'О себе',
   birthday: 'День рождения',
+  calls: 'Звонки',
+  p2p: 'Пиринговые соединения',
 };
 
 /** Заголовок секции с радио на экране правила. */
@@ -23,6 +25,18 @@ export const RULE_QUESTION: Record<RuleKey, string> = {
   lastSeen: 'Кто видит время моего последнего визита',
   bio: 'Кто видит информацию «О себе»',
   birthday: 'Кто видит мой день рождения',
+  calls: 'Кто может мне звонить',
+  p2p: 'С кем звонок идёт напрямую',
+};
+
+/** Подписи списков исключений: у звонков — «разрешать», у остального — «показывать». */
+export const EXCEPTION_TITLE: Record<RuleKey, { allow: string; deny: string }> = {
+  phone: { allow: 'Всегда показывать', deny: 'Никогда не показывать' },
+  lastSeen: { allow: 'Всегда показывать', deny: 'Никогда не показывать' },
+  bio: { allow: 'Всегда показывать', deny: 'Никогда не показывать' },
+  birthday: { allow: 'Всегда показывать', deny: 'Никогда не показывать' },
+  calls: { allow: 'Всегда разрешать', deny: 'Никогда не разрешать' },
+  p2p: { allow: 'Всегда напрямую', deny: 'Никогда напрямую' },
 };
 
 const WHAT: Record<RuleKey, [string, string]> = {
@@ -31,10 +45,17 @@ const WHAT: Record<RuleKey, [string, string]> = {
   lastSeen: ['Время вашего последнего визита и статус «в сети»', 'видят'],
   bio: ['Информацию «О себе»', 'видят'],
   birthday: ['Ваш день рождения', 'видят'],
+  calls: ['', ''],
+  p2p: ['', ''],
 };
 
 /** Подпись под радио: меняется по выбору. */
 export function ruleCaption(key: RuleKey, mode: PrivacyMode): string {
+  if (key === 'calls') return mode === 'everyone' ? 'Позвонить вам может любой, с кем у вас есть чат.' : mode === 'contacts' ? 'Позвонить вам могут только ваши контакты.' : 'Позвонить вам не может никто, кроме людей из исключений.';
+  if (key === 'p2p') {
+    const tail = ' Через сервер-посредник собеседник не видит ваш IP-адрес; звонок в обоих случаях защищён сквозным шифрованием.';
+    return (mode === 'everyone' ? 'Звонки со всеми идут напрямую — так быстрее и качественнее.' : mode === 'contacts' ? 'Напрямую — только с контактами, остальные звонки идут через сервер-посредник.' : 'Все звонки идут через сервер-посредник.') + tail;
+  }
   const [what, verb] = WHAT[key];
   const base = mode === 'everyone' ? `${what} ${verb} все, кто с вами общается.`
     : mode === 'contacts' ? `${what} ${verb} только ваши контакты.`

@@ -1,3 +1,4 @@
+import { callBack, canCall } from '../calls/callUi';
 // Меню «⋮» в шапке чата — как в Telegram Web A: карточка у кнопки (растёт из правого верхнего угла),
 // пункты по виду чата, разделитель и опасное действие последним, красным.
 //  • личный: Изменить / Добавить в контакты, Отключить звук… / Включить звук, Выбрать сообщения,
@@ -67,6 +68,7 @@ export function ChatMenu({ chatId, title, savedPeer }: { chatId: number; title: 
   ] : [
     // «Избранное»: панель с подчатами — и из меню, не только кликом по шапке
     ...(saved ? [{ icon: 'chats', label: 'Чаты', onClick: () => { setOpen(false); setGlobal({ infoOpen: true }); } }] : []),
+    ...(canCall(chat, { system, saved, blocked: iBlocked || !!user?.blocksMe }) ? [{ icon: 'video', label: 'Видеозвонок', onClick: () => { setOpen(false); callBack(chatId, true); } }] : []),
     ...(peerId && contactsLoaded ? [contact
       ? { icon: 'pencil', label: 'Изменить', onClick: () => setGlobal({ infoOpen: true, infoGo: 'edit' }) }
       : { icon: 'userPlus', label: 'Добавить в контакты', onClick: addContact }] : []),
