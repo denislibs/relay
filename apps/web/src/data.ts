@@ -304,7 +304,7 @@ interface Session { chatId: number; threadId?: number; scheduled?: boolean; save
 const sessions = new Map<string, Session>();
 let frameSeq = 0;
 let pendingBottom: { frame: ChatFrame; target?: { id: number; sort: number } } | null = null;   // новый нижний чат, лента ещё не готова
-const LEAVE_MS = 350;   // уход снятого чата: анимация 250 мс + запас
+const LEAVE_MS = 350;   // уход снятого чата: анимация 200 мс + запас
 
 const stack = () => getGlobal().chatStack;
 const topReady = () => activeFrame(getGlobal());
