@@ -1,5 +1,6 @@
 import type { ServiceData, ServiceType } from '@relay/protocol';
 import { termText } from '../autoDelete';
+import { callServiceText } from '../calls/callText';
 
 // Тексты служебных событий группы (как action-сообщения в Telegram): «Вы …» за свои, «Имя …(а)» за чужие,
 // «вас» — когда событие о вас. Имена участников — те, что сервер записал в момент события.
@@ -50,6 +51,7 @@ export function serviceText(type: ServiceType, opts: { data?: ServiceData; body?
     // тема чата (и в личном): как в Telegram — «изменил(а) тему чата на 🐥», снятая — «отключил(а) тему чата»
     case 'theme_changed': return data?.emoji ? v('изменили тему чата на', 'изменил(а) тему чата на') + ' ' + data.emoji : v('отключили тему чата', 'отключил(а) тему чата');
     case 'auto_delete_changed': return data?.sec ? v('включили автоудаление:', 'включил(а) автоудаление:') + ' ' + termText(data.sec) : v('выключили автоудаление', 'выключил(а) автоудаление');
+    case 'call': return callServiceText(data?.call, mine);
     default: return opts.body ?? '';
   }
 }

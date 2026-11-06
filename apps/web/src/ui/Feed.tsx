@@ -12,6 +12,8 @@ import { groupReactions, type Chip } from '../reactionChips';
 import { emojiKey } from '@relay/protocol';
 import type { ContactCard, Dice, Entity, GeoPoint, MessageButton, Poll, ProfilePhoto, ReplyQuote, Todo } from '@relay/protocol';
 import { hitQuote } from './quoteHit';
+import { callBack } from '../calls/callUi';
+import { callLength, callTitle } from '../calls/callText';
 import { Presence, ProgressRing, useMinVisible, MediaPolicy, ArticleBlocks, Avatar, Bubble, Icon, peerTone, DateDivider, DatePicker, FileBubble, MediaBubble, MessageText, VoiceBubble, MusicBubble, RoundBubble, player, MediaViewer, ScrollToBottom, beginHeavyAnimation, forceMeasure, isHeavyAnimating, onHeavyAnimationEnd, requestMeasure, requestMutation, selectionValue, TodoBubble, PollMessage, ContactMessage, GeoMessage, DiceMessage, InlineKeyboard, StickerBubble, EmojiBubble, reducedMotion, LazyRoot, stickerMsgSize } from '@relay/ui';
 import { openStickerSet, sendSticker, useGreetingSticker } from '../stickers';
 import { historyEmpty } from '../greeting';
@@ -212,6 +214,28 @@ const Row = memo(function Row({ post, pinned, discussion, chatId, voiceTitle, au
   const check = sel !== undefined ? <span class="app-msg-check" aria-hidden="true"><Icon name="check" size={14} strokeWidth={3} /></span> : null;
   const pending = m.status === 'pending' && typeof m.progress === 'number' && (m.progress as number) < 1;
   const mark = m.id != null && !leaving ? <i class="app-mark" data-mid={m.id as number} aria-hidden="true" /> : null;
+  // звонок — пузырём со стороны звонившего (как в Telegram): что за звонок, время и длительность, справа трубка;
+  // нажатие — перезвонить тем же видом звонка
+  const callInfo = (m.service as { type?: string; data?: ServiceData } | undefined)?.type === 'call' ? ((m.service as { data?: ServiceData }).data?.call ?? null) : undefined;
+  if (callInfo !== undefined && !m.deleted) {
+    const ok = callInfo?.reason === 'ended' && callInfo.duration != null;
+    return (
+      <div class={wrap('app-msg app-msg-call')} data-key={m.key} data-sort={m.sort as number}>
+        {check}
+        <Bubble from={out ? 'out' : 'in'} tail={end} groupStart={start} appear={appear} class="app-callbubble" selectable={sel !== undefined}>
+          <button type="button" class="app-callbubble-in" onClick={() => callBack(chatId, !!callInfo?.video)} aria-label={callTitle(callInfo ?? undefined, out) + '. Перезвонить'}>
+            <b class="app-callbubble-title">{callTitle(callInfo ?? undefined, out)}</b>
+            <span class="app-callbubble-sub">
+              <Icon name="arrowRight" size={16} class={'app-callbubble-arrow' + (out ? ' is-out' : ' is-in') + (ok ? '' : ' is-missed')} />
+              {clock(m.createdAt as string)}{ok ? ', ' + callLength(callInfo!.duration!) : ''}
+            </span>
+            <span class="app-callbubble-icon"><Icon name={callInfo?.video ? 'video' : 'phone'} size={24} /></span>
+          </button>
+        </Bubble>
+        {mark}
+      </div>
+    );
+  }
   if (album && album.length > 1) {
     // альбом — фото, отправленные вместе (один groupId): один пузырь с мозаикой, как в Telegram;
     // время и статус — у последнего, подпись — у первого, где она есть

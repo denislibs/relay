@@ -267,6 +267,8 @@ export type Action =
   | { type: 'savedDialogDelete'; peer: string }
   | { type: 'savedChat' }   // id «Избранного»: известный чат или создать на сервере (ответ — число)
   | { type: 'emojiFx'; chatId: number; id: number; key: string; t: number[] }
+  // звонок: кадр как есть (сигналинг зашифрован на странице); с reqId — ответ сервера результатом
+  | { type: 'callFrame'; frame: import('@relay/protocol').CallClientFrame }
   | { type: 'editMessage'; chatId: number; id: number; body: string; entities?: Entity[] }
   | { type: 'deleteMessage'; chatId: number; id: number }
   | { type: 'setAutoDelete'; chatId: number; sec: number | null }

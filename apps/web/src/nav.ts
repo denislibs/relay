@@ -13,6 +13,7 @@ export const PAGES = [
   'settings/general/wallpaper/color',
   'settings/general/shortcuts',
   'settings/notifications',
+  'settings/calls',
   'settings/privacy',
   'settings/privacy/rule/:key',
   'settings/privacy/rule/:key/allow',

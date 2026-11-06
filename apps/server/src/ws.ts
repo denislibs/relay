@@ -17,6 +17,7 @@ import { deleteMessage, editMessage, markListened, reactMessage } from './domain
 import { appendTodo, editTodo, toggleTodo } from './domain/todo';
 import { pressButton } from './domain/buttons';
 import { ctxFromRow, hasAdmin } from './domain/groupRights';
+import { acceptCall, confirmCall, currentCall, declineCall, hangupCall, pingCall, receivedCall, relaySignal, requestCall } from './domain/calls';
 
 /** Ждать open сокета (подписки на журналы чатов), но не дольше ms: Valkey недоступен — отвечаем, сверка догонит. */
 const opened = (sock: ChatSocket | undefined, ms = 5000) => sock?.data.opened ? Promise.race([sock.data.opened, new Promise<void>((r) => setTimeout(r, ms))]) : Promise.resolve();
@@ -146,6 +147,23 @@ export async function handleFrame(userId: number, frame: ClientFrame, publish: (
       case 'unwatchThread':
         if (sock) unwatchThread(sock, frame.chatId, frame.threadId);
         return [{ op: 'ack', reqId: frame.reqId, result: { ok: true } }];
+      // звонки 1:1 (domain/calls.ts): сессия нужна — сигналинг идёт между сессиями, которые ведут звонок
+      case 'callRequest': case 'callAccept': case 'callGet':
+      case 'callReceived': case 'callConfirm': case 'callDecline': case 'callHangup': case 'callSignal': case 'callPing': {
+        if (sessionId == null) throw new DomainError('unauthorized');
+        switch (frame.op) {
+          case 'callRequest': return [{ op: 'ack', reqId: frame.reqId, result: await requestCall(publish, userId, sessionId, frame) }];
+          case 'callAccept': return [{ op: 'ack', reqId: frame.reqId, result: await acceptCall(publish, userId, sessionId, frame) }];
+          case 'callGet': return [{ op: 'ack', reqId: frame.reqId, result: { call: await currentCall(userId) } }];
+          case 'callReceived': await receivedCall(publish, userId, frame.callId); return [];
+          case 'callConfirm': await confirmCall(publish, userId, sessionId, frame); return [];
+          case 'callDecline': await declineCall(publish, userId, sessionId, frame.callId); return [];
+          case 'callHangup': await hangupCall(publish, userId, sessionId, frame); return [];
+          case 'callSignal': await relaySignal(publish, userId, sessionId, frame); return [];
+          case 'callPing': await pingCall(userId, sessionId, frame.callId); return [];
+        }
+        return [];
+      }
       case 'ping':
         return [{ op: 'pong' }];
     }

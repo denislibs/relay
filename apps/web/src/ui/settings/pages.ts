@@ -2,6 +2,7 @@
 // Мелкие общие помощники (privacyLogic, profileForm, usePhotoPicker) импортируются напрямую и остаются в основном.
 export { Autoload } from './Autoload';
 export { Blocked } from './Blocked';
+export { Calls } from './Calls';
 export { Data } from './Data';
 export { Dev } from './Dev';
 export { FolderChats } from './FolderChats';

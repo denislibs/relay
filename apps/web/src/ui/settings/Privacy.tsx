@@ -13,7 +13,7 @@ registerPrefetch('settings/privacy', () => { void refreshSettings(); });
 for (const k of RULE_KEYS) registerPrefetch('settings/privacy/rule/' + k, () => { void refreshSettings(); });
 
 const ICON: Record<string, [string, 'green' | 'blue' | 'gray' | 'purple']> = {
-  phone: ['phone', 'green'], lastSeen: ['clock', 'blue'], bio: ['info', 'gray'], birthday: ['cake', 'purple'],
+  phone: ['smartphone', 'green'], lastSeen: ['clock', 'blue'], bio: ['info', 'gray'], birthday: ['cake', 'purple'], calls: ['phone', 'green'], p2p: ['shield', 'blue'],
 };
 
 /** «Конфиденциальность»: правила (подпись — режим и исключения) и чёрный список. */
@@ -51,7 +51,7 @@ export function Privacy() {
         <div class="app-listwrap">
           <Presence show={skeleton} exitMs={280}>
             <div class="app-skel" aria-busy="true" aria-label="Загрузка правил">
-              <Section>{[0, 1, 2, 3].map((i) => <div key={i} style={{ '--i': i }}><ChatRowSkeleton /></div>)}</Section>
+              <Section>{[0, 1, 2, 3, 4, 5].map((i) => <div key={i} style={{ '--i': i }}><ChatRowSkeleton /></div>)}</Section>
             </div>
           </Presence>
           {waiting || skeleton ? null : (

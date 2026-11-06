@@ -1,4 +1,5 @@
 import { fromMessagePort, type FromHost, type PortLike, type ToHost } from './host-core';
+import type { CallEvent } from './engine';
 import type { Action, EngineConfig, Item, Patch, Query } from './types';
 
 /** Главный поток: подписки и действия поверх порта хоста. */
@@ -10,6 +11,7 @@ export class EngineClient {
   private nextCall = 1;
   private onReloadCb: () => void = () => {};
   private onDataCb: ((v: unknown) => void) | null = null;
+  private callCbs = new Set<(f: CallEvent) => void>();
   private ping: ReturnType<typeof setInterval> | null = null;
   private markReady!: () => void;
 
@@ -39,6 +41,8 @@ export class EngineClient {
   }
 
   onReload(cb: () => void): void { this.onReloadCb = cb; }
+  /** Кадры звонка с сервера (calls/callController.ts). */
+  onCall(cb: (f: CallEvent) => void): () => void { this.callCbs.add(cb); return () => this.callCbs.delete(cb); }
   /** Всё, что приходит от движка (патчи и ответы), — приложению до подписчиков (например, запомнить ключи файлов). */
   onData(cb: (v: unknown) => void): void { this.onDataCb = cb; }
 
@@ -60,6 +64,7 @@ export class EngineClient {
         return;
       }
       case 'reload': this.onReloadCb(); return;
+      case 'call': for (const cb of this.callCbs) cb(m.frame); return;
       case 'pong': return;
     }
   }

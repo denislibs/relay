@@ -22,6 +22,8 @@ import { flushReplies } from '../domain/threads';
 import { publishScheduled, sweepScheduled } from '../domain/scheduled';
 import { destroyExpiredKeys, expireStep } from '../domain/autoDelete';
 import { trimAdminLog } from '../domain/adminLog';
+import { expireRing } from '../domain/calls';
+import { publishTopic } from '../bus';
 
 /** Подписок на страницу push.message (тесты уменьшают). */
 export const PUSH_PAGE = { size: 1000 };
@@ -256,3 +258,6 @@ register('linkPreview.expire', async () => {
   await expirePreviews();
   return { again: { inSec: 24 * 3600 } };
 });
+
+// звонок без ответа CALL_RING_MS — пропущен (если ещё звонит); кадр callEnded — через шину процессам с сокетами
+register('call.ring', async (p: { callId: string }) => expireRing(publishTopic, String(p.callId)));

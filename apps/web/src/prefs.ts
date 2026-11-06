@@ -37,6 +37,9 @@ export interface Prefs {
   dev: { enabled: boolean };
   bigEmoji: boolean;   // сообщение из одних эмодзи — крупно, один эмодзи — анимированный (как в Telegram)
   folders: { position: 'top' | 'left' };   // вкладки папок: полосой над списком или колонкой слева
+  /** звонки на этом устройстве: выбранные микрофон/динамик/камера (null — системные), обработка звука, качество видео,
+   *  принимать ли звонки здесь, мелодия и громкость звонка */
+  calls: { mic: string | null; speaker: string | null; camera: string | null; noise: boolean; agc: boolean; video: 'auto' | 'saver' | 'high'; accept: boolean; ringtone: string; volume: number };
 }
 
 export interface KV { getItem(k: string): string | null; setItem(k: string, v: string): void; removeItem(k: string): void }
@@ -67,6 +70,7 @@ export function defaultPrefs(reduced = false): Prefs {
     dev: { enabled: false },
     bigEmoji: true,
     folders: { position: 'top' },
+    calls: { mic: null, speaker: null, camera: null, noise: true, agc: true, video: 'auto', accept: true, ringtone: 'classic', volume: 0.8 },
   };
 }
 
@@ -89,6 +93,8 @@ export const THEMES: ThemePref[] = ['system', 'classic', 'night', 'day', 'tinted
 const FILE_MB = [1, 5, 10, 50, 100];
 const BLUR_DELAY = [0, 5, 30];
 export const KEEP_DAYS = [1, 7, 30, 0];
+/** Мелодии входящего звонка (calls/sounds.ts): свои, синтезированные. */
+export const RINGTONES = ['classic', 'chime', 'pulse'];
 export const CACHE_MB = [500, 1000, 2000, 5000, 0];
 const nearest = (steps: number[], v: number): number => steps.reduce((a, b) => (Math.abs(b - v) < Math.abs(a - v) ? b : a));
 const num = (v: unknown, d: number): number => (typeof v === 'number' && Number.isFinite(v) ? v : d);
@@ -123,6 +129,11 @@ function sanitize(src: Prefs, d: Prefs): Prefs {
   p.screen.blurDelay = nearest(BLUR_DELAY, num(p.screen.blurDelay, 0));
   if (!KEEP_DAYS.includes(p.media.keepDays)) p.media.keepDays = d.media.keepDays;
   if (!CACHE_MB.includes(p.media.maxMb)) p.media.maxMb = d.media.maxMb;
+  // устройства — непрозрачные id браузера (до 256 знаков), иначе системные
+  for (const k of ['mic', 'speaker', 'camera'] as const) { const v = p.calls[k] as unknown; if (!(typeof v === 'string' && v.length > 0 && v.length <= 256)) p.calls[k] = null; }
+  if (!['auto', 'saver', 'high'].includes(p.calls.video)) p.calls.video = d.calls.video;
+  if (!RINGTONES.includes(p.calls.ringtone)) p.calls.ringtone = d.calls.ringtone;
+  p.calls.volume = Math.min(1, Math.max(0, num(p.calls.volume, d.calls.volume)));
   for (const t of BASES) {
     const c0 = p.themes[t];
     if (c0.preset !== null && !presetById(t, c0.preset)) c0.preset = null;   // набор только из ряда своей базы

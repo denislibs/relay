@@ -1,3 +1,4 @@
+import type { CallView } from './calls/callController';
 import type { PersonalChannel, ProfileLink, ProfilePhoto, ThreadGuest } from '@relay/protocol';
 import type { NotifyState } from './notify';
 import { options } from 'preact';
@@ -74,6 +75,8 @@ export interface GlobalState {
   newChatOpen: boolean;
   sidebarView: string;   // путь страницы боковой панели, см. nav.ts
   infoOpen: boolean;   // правая панель «Информация»
+  call: CallView | null;   // звонок: входящий, исходящий или разговор (calls/callController.ts)
+  callMin: boolean;        // звонок свёрнут в плашку над шапкой чата (ui/call/CallSlot.tsx)
   listLeaving: boolean;   // телефон: чат закрыли — экран уже едет к списку, лента снимется после перехода (data.ts)
   pollResults: { chatId: number; id: number } | null;   // окно «Результаты» неанонимного опроса
   muteTick: number;    // истёк срок «Отключить звук» какого-то чата (mute.ts): повод перерисовать
@@ -171,6 +174,8 @@ let state: GlobalState = {
   newChatOpen: false,
   sidebarView: 'chats',
   infoOpen: false,
+  call: null,
+  callMin: false,
   listLeaving: false,
   muteTick: 0,
   theme: loadTheme(),
