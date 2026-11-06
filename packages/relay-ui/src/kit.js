@@ -1787,8 +1787,8 @@ function FlipList(props) {
       }
       if (moved) beginHeavyAnimation(320);
       for (i = 0; i < todo.length; i++) { // then mutate
-        if (todo[i][1] === null) todo[i][0].animate([{ opacity: 0, transform: 'scale(0.96)' }, { opacity: 1, transform: 'none' }], { duration: 220, easing: 'cubic-bezier(0.1, 0.82, 0.25, 1)' });
-        else todo[i][0].animate([{ transform: 'translateY(' + todo[i][1] + 'px)' }, { transform: 'none' }], { duration: 320, easing: 'cubic-bezier(0.2, 0, 0, 1)' });
+        if (todo[i][1] === null) todo[i][0].animate([{ opacity: 0, transform: 'scale(0.96)' }, { opacity: 1, transform: 'none' }], { duration: 220, easing: 'cubic-bezier(0.2, 0, 0.2, 1)' });
+        else todo[i][0].animate([{ transform: 'translateY(' + todo[i][1] + 'px)' }, { transform: 'none' }], { duration: 320, easing: 'cubic-bezier(0.4, 0, 0.2, 1)' });
       }
     }
     prev.current = next;

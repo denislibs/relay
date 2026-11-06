@@ -1237,7 +1237,7 @@ button.rl-tab:hover { color: var(--ink); }
   .rl-shell[data-screen] > :is(.rl-shell-side, .rl-shell-main, .rl-tw, .rl-tw-photo) {
     position: absolute; inset: 0; flex: none;
     /* translate, а не transform: у фото-обоев свой transform (размытие) */
-    transition: translate 300ms cubic-bezier(0.2, 0, 0, 1), opacity 300ms cubic-bezier(0.2, 0, 0, 1), visibility 0s linear 0s, filter 300ms var(--ease-out), transform 300ms var(--ease-out);   /* последние два — свои у фото-обоев */
+    transition: translate 300ms var(--ease-standard), opacity 300ms var(--ease-standard), visibility 0s linear 0s, filter 300ms var(--ease-out), transform 300ms var(--ease-out);   /* последние два — свои у фото-обоев */
   }
   .rl-shell[data-screen] > .rl-shell-side { z-index: 1; }
   .rl-shell[data-screen] > .rl-tw { z-index: 2; box-shadow: -8px 0 24px rgba(0, 0, 0, 0.08); }
@@ -1399,7 +1399,7 @@ html[data-blur="0"] .rl-pop .rl-menu, html[data-blur="0"] .rl-pop .rl-rpick { -w
 
 /* WindowList: absolutely placed rows; a reorder slides, a scroll does not */
 .rl-wlist { position: relative; contain: strict; width: 100%; }
-.rl-wrow { position: absolute; left: 0; right: 0; top: 0; transition: transform 320ms cubic-bezier(0.2, 0, 0, 1); }
+.rl-wrow { position: absolute; left: 0; right: 0; top: 0; transition: transform 320ms var(--ease-standard); }
 /* will-change у строк нет нарочно: слой на каждую строку — лишняя память; на время перестановки браузер поднимет их сам */
 .rl-wlist-ph, .rl-wlist-rows { position: absolute; inset: 0; }   /* KeepList: слой скелетов и слой строк */
 @media (prefers-reduced-motion: reduce) { .rl-wrow { transition: none; } }
@@ -1461,10 +1461,10 @@ html[data-blur="0"] .rl-pop .rl-menu, html[data-blur="0"] .rl-pop .rl-rpick { -w
 .rl-slide { position: absolute; inset: 0; display: flex; flex-direction: column; background: var(--card); }
 .rl-slide:focus { outline: none; }   /* фокус ставится программно при смене страницы — без рамки */
 .rl-slide-parked { visibility: hidden; pointer-events: none; }
-.rl-slide-in-push { z-index: 2; animation: rl-slide-from-right 300ms cubic-bezier(0.2, 0, 0, 1) both; box-shadow: -8px 0 24px rgba(0,0,0,0.08); }
-.rl-slide-out-push { z-index: 1; animation: rl-slide-to-left 300ms cubic-bezier(0.2, 0, 0, 1) both; }
-.rl-slide-in-pop { z-index: 1; animation: rl-slide-from-left 300ms cubic-bezier(0.2, 0, 0, 1) both; }
-.rl-slide-out-pop { z-index: 2; animation: rl-slide-to-right 300ms cubic-bezier(0.2, 0, 0, 1) both; box-shadow: -8px 0 24px rgba(0,0,0,0.08); }
+.rl-slide-in-push { z-index: 2; animation: rl-slide-from-right 300ms var(--ease-standard) both; box-shadow: -8px 0 24px rgba(0,0,0,0.08); }
+.rl-slide-out-push { z-index: 1; animation: rl-slide-to-left 300ms var(--ease-standard) both; }
+.rl-slide-in-pop { z-index: 1; animation: rl-slide-from-left 300ms var(--ease-standard) both; }
+.rl-slide-out-pop { z-index: 2; animation: rl-slide-to-right 300ms var(--ease-standard) both; box-shadow: -8px 0 24px rgba(0,0,0,0.08); }
 @keyframes rl-slide-from-right { from { transform: translateX(100%); } to { transform: none; } }
 @keyframes rl-slide-to-left { from { transform: none; opacity: 1; } to { transform: translateX(-25%); opacity: 0.4; } }
 @keyframes rl-slide-from-left { from { transform: translateX(-25%); opacity: 0.4; } to { transform: none; opacity: 1; } }
@@ -1512,9 +1512,9 @@ html[data-blur="0"] .rl-pop .rl-menu, html[data-blur="0"] .rl-pop .rl-rpick { -w
 .rl-shell { --aside-half: calc((var(--aside-w, var(--aside-default, 408px)) + var(--space-float)) / 2); }
 .rl-shell > .rl-presence { display: flex; position: absolute; top: var(--space-float); right: var(--space-float); bottom: var(--space-float); z-index: 6; }
 .rl-shell > .rl-presence[data-state="closing"] { pointer-events: none; }
-.rl-shell .rl-shell-aside { flex: none; width: var(--aside-w, var(--aside-default, 408px)); animation: rl-aside-in 280ms cubic-bezier(0.2, 0, 0, 1) both; }
+.rl-shell .rl-shell-aside { flex: none; width: var(--aside-w, var(--aside-default, 408px)); animation: rl-aside-in 280ms var(--ease-standard) both; }
 .rl-presence[data-state="closing"] > .rl-shell-aside { animation: rl-aside-out 240ms cubic-bezier(0.4, 0, 1, 1) both; }
-.rl-shell > .rl-shell-main { transition: transform 280ms cubic-bezier(0.2, 0, 0, 1); }
+.rl-shell > .rl-shell-main { transition: transform 280ms var(--ease-standard); }
 .rl-shell:not(.rl-shell-float):has(> .rl-presence[data-state="open"] > .rl-shell-aside) > .rl-shell-main { transform: translateX(calc(-1 * var(--aside-half))); }
 .rl-shell:not(.rl-shell-float):has(> .rl-presence[data-state="open"] > .rl-shell-aside) .rl-feed { margin-inline: calc(var(--aside-half) - var(--space-float)); }
 @media (prefers-reduced-motion: reduce) { .rl-shell > .rl-shell-main { transition: none; } }
@@ -1547,8 +1547,8 @@ html[data-anim="0"] .rl-shell > .rl-shell-main { transition: none; }
   .rl-shell .rl-shell-aside, .rl-shell.rl-shell-float .rl-shell-aside { flex: 1 1 auto; width: auto; box-shadow: -8px 0 24px rgba(0, 0, 0, 0.08); }
   .rl-shell .rl-shell-aside, .rl-shell.rl-shell-float .rl-shell-aside, .rl-shell-aside > .rl-panel { border-radius: 0; }
   /* въезжает и уезжает, как страница SlideStack: справа на весь экран; чат под ней сдвигается на четверть (data-screen) */
-  .rl-shell .rl-shell-aside { animation: rl-slide-from-right 300ms cubic-bezier(0.2, 0, 0, 1) both; }
-  .rl-presence[data-state="closing"] > .rl-shell-aside { animation: rl-slide-to-right 300ms cubic-bezier(0.2, 0, 0, 1) both; }
+  .rl-shell .rl-shell-aside { animation: rl-slide-from-right 300ms var(--ease-standard) both; }
+  .rl-presence[data-state="closing"] > .rl-shell-aside { animation: rl-slide-to-right 300ms var(--ease-standard) both; }
   .rl-shell > .rl-presence[data-state="closing"] { inset: 0; }
 }
 
