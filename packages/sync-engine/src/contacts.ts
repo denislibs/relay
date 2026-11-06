@@ -290,7 +290,7 @@ export class Contacts {
     const ops = this.h.ops;
     switch (a.type) {
       case 'addContact':
-        await ops.enqueue({ key: contactKey(a.userId), method: 'POST', path: '/contacts', body: { userId: a.userId, firstName: a.firstName, lastName: a.lastName ?? '', ...(a.note !== undefined ? { note: a.note } : {}) } });
+        await ops.enqueue({ key: contactKey(a.userId), method: 'POST', path: '/contacts', body: { userId: a.userId, ...(a.query !== undefined ? { query: a.query } : {}), firstName: a.firstName, lastName: a.lastName ?? '', ...(a.note !== undefined ? { note: a.note } : {}) } });
         return null;
       case 'updateContact': {
         if (!this.view().has(a.userId)) return null;   // контакта нет (или уже удаляется) — править нечего

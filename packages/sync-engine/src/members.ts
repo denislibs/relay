@@ -35,9 +35,12 @@ export class MembersCache {
   /** чаты, чей первый снимок ещё в пути: записи журнала копятся в таблице, снимок их не откатит (seq) */
   readonly loading = new Set<number>();
 
-  static async load(db: IDBDatabase): Promise<MembersCache> {
+  /** chatSeq — до какого номера журнала применён чат: строка не может быть новее. Прежние версии писали сюда номер
+   *  личного журнала (он обычно намного больше) — такие строки отвергали бы все записи журнала чата. */
+  static async load(db: IDBDatabase, chatSeq: Map<number, number>): Promise<MembersCache> {
     const c = new MembersCache();
     const rows = await getAll<MemberBase & { seq: number }>(db, 'members');
+    for (const r of rows) r.seq = Math.min(r.seq, chatSeq.get(r.chatId) ?? 0);
     c.table.load(rows, (x) => keyOf(x.chatId, x.userId));
     for (const r of rows) c.keys(r.chatId).add(keyOf(r.chatId, r.userId));
     return c;
@@ -138,15 +141,15 @@ export class MembersCache {
   }
 }
 
-/** Снимок участников с сервера (на момент seq): строки, профили в people (поверх известного), «загружено целиком». */
-export function applyMembersReply(store: Store, chatId: number, r: MembersReply, seq: number): void {
+/** Снимок участников с сервера: seq — личный журнал (профили), chatAt — журнал чата (состав, у него своя нумерация). Строки, профили в people (поверх известного), «загружено целиком». */
+export function applyMembersReply(store: Store, chatId: number, r: MembersReply, seq: number, chatAt = 0): void {
   store.members.loading.delete(chatId);
   const chat = store.chats.get(chatId);
   if (!chat) return;
   // сервер отдаёт не больше MEMBERS_FULL: больше ли группа — видно по числу участников в group
   const done = Math.max(r.members.length, chat.group?.members ?? 0) <= MEMBERS_FULL;
   const list = done ? r.members : r.members.slice(0, MEMBERS_PART);
-  store.members.applySnapshot(chatId, list.map((m) => ({ userId: m.userId, role: m.role ?? 'member', rank: m.rank ?? null })), seq);
+  store.members.applySnapshot(chatId, list.map((m) => ({ userId: m.userId, role: m.role ?? 'member', rank: m.rank ?? null })), chatAt);
   for (const m of list) store.profile.applyPeer({ id: m.userId, key: m.key, name: m.name, username: m.username, photo: m.photo ?? null }, seq);
   if (chat.membersDone !== done) { chat.membersDone = done; store.markChat(chat); }
   store.members.touched.add(chatId);   // «загружено» могло смениться и без строк

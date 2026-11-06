@@ -112,13 +112,17 @@ export async function addContact(owner: number, body: unknown, publish?: Publish
   const last = validName(body.lastName ?? '', 0);
   const note = body.note !== undefined ? validNote(body.note) : undefined;
   let userId: number;
-  if (body.userId !== undefined) {
+  if (body.query !== undefined) {
+    // нашли по телефону или @имени: право видеть проверяет сам поиск (правило «кто найдёт меня по номеру»), общий чат не нужен
+    userId = (await resolveUser(owner, body.query)).id;
+    if (body.userId !== undefined && body.userId !== userId) throw new DomainError('not_found');   // показали другого человека
+  } else if (body.userId !== undefined) {
     if (typeof body.userId !== 'number' || !Number.isSafeInteger(body.userId) || body.userId <= 0) throw new DomainError('bad_frame');
     userId = body.userId;
     // по id — только тех, кого и так видно (общий чат, контакт): иначе перебором id можно узнать всех
     if (userId === owner || !(await canView(sql, owner, userId))) throw new DomainError('not_found');
   } else {
-    userId = (await resolveUser(owner, body.query)).id;
+    throw new DomainError('bad_frame');
   }
   if (userId === await systemUserId()) throw new DomainError('forbidden');   // «Relay» — не контакт
   let change: PairChange | null = null;

@@ -33,6 +33,7 @@ export function assertTransportSecure(env: Env = process.env): void {
   if (env.RELAY_PLAIN_INTERNAL === '1') problems.push('RELAY_PLAIN_INTERNAL is not allowed in production');
   // dev-входы в production — вход в любой аккаунт по имени и коды входа без авторизации (INFRA-6)
   if (env.DEV_LOGIN === '1') problems.push('DEV_LOGIN=1 is not allowed in production');
+  if (env.LOG_LOGIN_CODES === '1') problems.push('LOG_LOGIN_CODES=1 is not allowed in production');
   const db = dbSsl(env);
   if (db === false || db === 'require') problems.push('database: DB_SSL=verify-full with DB_CA');
   if (env.VALKEY_URL && !env.VALKEY_URL.startsWith('rediss://')) problems.push('valkey: VALKEY_URL=rediss://…');

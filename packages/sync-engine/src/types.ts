@@ -312,7 +312,7 @@ export type Action =
   /** проверка имени пользователя мимо очереди: {ok} | {ok:false, reason} | {offline:true} */
   | { type: 'checkUsername'; username: string }
   /** контакты — через очередь операций (видно сразу, в том числе без сети) */
-  | { type: 'addContact'; userId: number; firstName: string; lastName?: string; note?: string }
+  | { type: 'addContact'; userId: number; query?: string; firstName: string; lastName?: string; note?: string }
   | { type: 'updateContact'; userId: number; firstName?: string; lastName?: string; note?: string }
   | { type: 'removeContact'; userId: number }
   /** найти человека по @имени или номеру мимо очереди: {user} | {notFound:true} | {offline:true} */

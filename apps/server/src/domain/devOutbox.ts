@@ -13,6 +13,8 @@ export async function deliver(item: Omit<OutboxItem, 'at'>): Promise<void> {
   if (process.env.DEV_LOGIN === '1') {
     await sql`insert into dev_mail (to_addr, kind, code) values (${item.to}, ${item.kind}, ${item.code})`;
     await sql`delete from dev_mail where id not in (select id from dev_mail order by id desc limit ${MAX})`;
+  } else if (process.env.LOG_LOGIN_CODES === '1') {
+    console.log(`${item.kind} code for ${item.to}: ${item.code}`);
   } else {
     console.warn(`outbox: ${item.kind} code for ${item.to.replace(/(.).*@/, '$1…@')} — no mail gateway configured`);
   }

@@ -212,3 +212,19 @@ test('after reset (epoch wipe) contacts are not «loaded» until a real snapshot
   c.reset();
   expect((await ContactsCache.load(db, c.collect().meta)).loaded).toBe(false);
 });
+
+test('adding someone found by @name or phone works without a shared chat; a bare id still does not', async () => {
+  const a = await srv.login('Анна'), b = await srv.login('Борис'), c = await srv.login('Вера');
+  expect((await api(b.token, 'PUT', '/me/username', { username: 'boris_found' })).ok).toBe(true);
+  const ea = await open(srv.config(a));
+  ea.connect();
+  await ea.whenIdle();
+  const r = await ea.call({ type: 'resolveUser', query: '@boris_found' }) as { user: { id: number } };
+  await ea.call({ type: 'addContact', userId: r.user.id, query: '@boris_found', firstName: 'Боря' });
+  await ea.whenIdle();
+  const list = await (await api(a.token, 'GET', '/contacts')).json() as { contacts: { userId: number }[] };
+  expect(list.contacts.map((x) => x.userId)).toEqual([b.userId]);
+  expect((await api(a.token, 'POST', '/contacts', { userId: c.userId, firstName: 'Вера' })).status).toBe(404);
+  // запрос ведёт к другому человеку — не тот, кого показали: не добавляем
+  expect((await api(a.token, 'POST', '/contacts', { userId: c.userId, query: '@boris_found', firstName: 'Вера' })).status).toBe(404);
+});

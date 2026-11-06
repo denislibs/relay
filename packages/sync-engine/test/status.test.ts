@@ -586,3 +586,18 @@ test('after a restart the chat list shows a peer photo we were never told about 
   const l = await list.until((x) => (x.find((c) => c.id === chatId)?.photo as { id?: string } | null)?.id === 'p1', 5000);
   expect(l.find((c) => c.id === chatId)?.photo).toMatchObject({ id: 'p1', small: 's1' });
 });
+
+test('presence of a peer who appeared after connecting is asked for, not left unknown', async () => {
+  const a = await srv.login('Анна'), b = await srv.login('Борис');
+  const ea = await Engine.open(srv.config(a));
+  ea.connect();
+  await ea.whenIdle();
+  const p = watchInto(ea, { kind: 'presence', userId: b.userId });   // чата ещё нет: сервер о нём ничего не скажет
+  await ea.whenIdle();
+  const chatId = await srv.chat(a.token, [a.userId, b.userId]);
+  await fetch(`${srv.base}/chats/${chatId}/messages?limit=1`, { headers: { cookie: `relay_session=${a.token}` } });
+  ea.call({ type: 'sendMessage', chatId, body: 'привет' });
+  const l = await p.until((x) => x[0]?.known === true);
+  expect(l[0]).toMatchObject({ userId: b.userId, online: false });
+  await ea.close();
+});
