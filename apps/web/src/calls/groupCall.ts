@@ -44,6 +44,7 @@ interface Active {
   room: import('livekit-client').Room;
   keys: SenderKeys;
   myKeys: Map<number, Uint8Array>;      // эпоха → мой ключ отправителя
+  sent: Set<number>;                     // эпохи, ключ которых я уже раздал
   pending: Map<string, { epoch: number; from: number; userId: number; data: string }[]>;   // ключи, пришедшие раньше состава
   ping: ReturnType<typeof setInterval> | null;
   releaseLock: (() => void) | null;
@@ -57,6 +58,8 @@ const SWITCH_MS = 400;   // свой новый ключ — в дело чут�
 let send: Send = async () => { throw new Error('group calls not started'); };
 let me = 0;
 let cur: Active | null = null;
+/** Входим в этот звонок: кадры состава и ключей могут прийти раньше ответа на вход — копим и применяем после. */
+let joining: { callId: string; early: CallEvent[] } | null = null;
 let toast: (t: string) => void = (t) => console.warn(t);
 
 let SenderKeys: new () => SenderKeys;
@@ -108,8 +111,9 @@ export async function joinGroupCall(chatId: number, callId: string): Promise<voi
   SenderKeys ??= makeKeyProvider(lk);
   const mine = await ephemeral();
   let j: { token: string; identity: string; epoch: number };
+  joining = { callId, early: [] };
   try { j = await send({ op: 'groupCallJoin', callId, pub: mine.pub, muted: false, video: false }) as { token: string; identity: string; epoch: number }; }
-  catch { release(); toast('Звонок уже закончился'); return; }
+  catch { joining = null; release(); toast('Звонок уже закончился'); return; }
   const session = Number(/-s(\d+)$/.exec(j.identity)?.[1] ?? 0);
   const keys = new SenderKeys();
   const room = new lk.Room({
@@ -120,11 +124,18 @@ export async function joinGroupCall(chatId: number, callId: string): Promise<voi
   });
   const a: Active = {
     view: { callId, chatId, phase: 'joining', epoch: j.epoch, members: [], emoji: null, mic: true, cam: false, screen: false, hand: false, mutedByAdmin: false, startedBy: null, reason: null, rev: 0 },
-    mine, session, identity: j.identity, lk, room, keys, myKeys: new Map(), pending: new Map(), ping: null, releaseLock: release, ended: false, audios: new Map(),
+    mine, session, identity: j.identity, lk, room, keys, myKeys: new Map(), sent: new Set(), pending: new Map(), ping: null, releaseLock: release, ended: false, audios: new Map(),
   };
   cur = a;
+  const early = joining?.callId === callId ? joining.early : [];
+  joining = null;
   setGlobal({ groupCall: a.view, groupCallMin: false });
   wireRoom(a);
+  for (const f of early) await onEvent(f).catch((e) => console.warn('group call:', e));
+  // свой ключ первой эпохи — до того, как пойдёт микрофон: иначе первые кадры шифровать нечем
+  const first = senderKey();
+  a.myKeys.set(j.epoch, first);
+  await keys.set(a.identity, first, j.epoch % KEYRING);
   try {
     await room.setE2EEEnabled(true);
     const url = (location.protocol === 'https:' ? 'wss://' : 'ws://') + location.host + '/livekit';
@@ -244,6 +255,7 @@ function wireRoom(a: Active): void {
 async function onEvent(f: CallEvent): Promise<void> {
   const a = cur;
   if (f.op === 'callResync') { if (a && !a.ended) await rejoin(a); return; }
+  if (!a && joining && 'callId' in f && f.callId === joining.callId) { if (joining.early.length < 64) joining.early.push(f); return; }
   if (!a || a.ended || !('callId' in f) || f.callId !== a.view.callId) return;
   switch (f.op) {
     case 'groupCallState': return onState(a, f.epoch, f.members);
@@ -266,22 +278,24 @@ async function onState(a: Active, epoch: number, members: GroupCallMember[]): Pr
     return { ...m, identity, me: m.session === a.session, speaking: speaking.has(identity) };
   });
   const mine = list.find((m) => m.me);
-  const newEpoch = epoch !== a.view.epoch || !a.myKeys.has(epoch);
   view({ members: list, epoch, mutedByAdmin: !!mine?.mutedByAdmin, emoji: await membersEmoji(a.view.callId, members) });
   // ключи, пришедшие раньше состава (отправитель ещё не был известен)
   for (const [id, waiting] of a.pending) { a.pending.delete(id); for (const k of waiting) await onKeys(a, k); }
-  if (newEpoch) await rekey(a, epoch);
+  if (!a.sent.has(epoch)) await rekey(a, epoch);
 }
 
 /** Свой ключ отправителя эпохи: каждому участнику — адресно, себе — в провайдер чуть позже (у получателей уже будет). */
 async function rekey(a: Active, epoch: number): Promise<void> {
-  const key = senderKey();
+  a.sent.add(epoch);
+  const fresh = !a.myKeys.has(epoch);   // ключ первой эпохи уже стоит (поставлен до подключения) — только раздать
+  const key = a.myKeys.get(epoch) ?? senderKey();
   a.myKeys.set(epoch, key);
+  for (const e of [...a.sent]) if (e < epoch - 2) a.sent.delete(e);
   for (const e of [...a.myKeys.keys()]) if (e < epoch - 2) a.myKeys.delete(e);
   const others = a.view.members.filter((m) => !m.me);
   const to = await Promise.all(others.map(async (m) => ({ session: m.session, data: await sealSenderKey({ mine: a.mine, theirPub: m.pub, callId: a.view.callId, epoch, from: a.session, to: m.session, key }) })));
   if (to.length) await send({ op: 'groupCallKeys', callId: a.view.callId, epoch, to }).catch(() => {});
-  setTimeout(() => { if (cur === a && !a.ended && a.view.epoch === epoch) void a.keys.set(a.identity, key, epoch % KEYRING); }, others.length ? SWITCH_MS : 0);
+  if (fresh) setTimeout(() => { if (cur === a && !a.ended && a.view.epoch === epoch) void a.keys.set(a.identity, key, epoch % KEYRING); }, others.length ? SWITCH_MS : 0);
 }
 
 async function onKeys(a: Active, f: { epoch: number; from: number; userId: number; data: string }): Promise<void> {

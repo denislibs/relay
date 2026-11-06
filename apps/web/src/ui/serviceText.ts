@@ -1,13 +1,13 @@
 import type { ServiceData, ServiceType } from '@relay/protocol';
 import { termText } from '../autoDelete';
-import { callServiceText } from '../calls/callText';
+import { callLength, callServiceText } from '../calls/callText';
 
 // Тексты служебных событий группы (как action-сообщения в Telegram): «Вы …» за свои, «Имя …(а)» за чужие,
 // «вас» — когда событие о вас. Имена участников — те, что сервер записал в момент события.
 
 const GROUP_TYPES = new Set<ServiceType>([
   'group_created', 'channel_created', 'title_changed', 'photo_changed', 'photo_removed', 'members_added', 'member_left', 'member_removed',
-  'joined_by_link', 'joined_by_request', 'owner_changed', 'protected_on', 'protected_off', 'theme_changed', 'auto_delete_changed',
+  'joined_by_link', 'joined_by_request', 'owner_changed', 'protected_on', 'protected_off', 'theme_changed', 'auto_delete_changed', 'group_call',
 ]);
 export const isGroupService = (t: string | undefined): t is ServiceType => !!t && GROUP_TYPES.has(t as ServiceType);
 
@@ -52,6 +52,9 @@ export function serviceText(type: ServiceType, opts: { data?: ServiceData; body?
     case 'theme_changed': return data?.emoji ? v('изменили тему чата на', 'изменил(а) тему чата на') + ' ' + data.emoji : v('отключили тему чата', 'отключил(а) тему чата');
     case 'auto_delete_changed': return data?.sec ? v('включили автоудаление:', 'включил(а) автоудаление:') + ' ' + termText(data.sec) : v('выключили автоудаление', 'выключил(а) автоудаление');
     case 'call': return callServiceText(data?.call, mine);
+    case 'group_call': return data?.groupCall?.state === 'ended'
+      ? 'Звонок завершён' + (data.groupCall.duration ? ` (${callLength(data.groupCall.duration)})` : '')
+      : v('начали звонок', 'начал(а) звонок');
     default: return opts.body ?? '';
   }
 }

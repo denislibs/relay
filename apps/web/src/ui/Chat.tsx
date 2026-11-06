@@ -1,3 +1,5 @@
+import { GroupCallSlot } from './call/GroupCall';
+import { joinGroupCall, startGroupCall } from '../calls/groupCall';
 import { CallSlot } from './call/CallSlot';
 import { callBack, canCall } from '../calls/callUi';
 import { canEditKind, hasMedia, isDiceEmoji, rightForKind, type GeoPoint, type Poll, type PollInput, type GroupInfo, type MemberRight, type MyMembership } from '@relay/protocol';
@@ -458,6 +460,9 @@ export function Chat({ chatId, frameKey, active, threadId, scheduled = false, sa
   const peerUser = useUser(chat?.kind === 'direct' ? (chat.peerId as number | null) : null);
   const theyBlocked = !!peerUser?.blocksMe;
   const callable = !savedPeer && canCall(chat, { system, saved: isSaved, blocked: iBlocked || theyBlocked });
+  // группа: звонок идёт — войти, нет — начать (кто может начать, решает сервер)
+  const groupCallable = chat?.kind === 'group' && !chat.preview && typeof RTCPeerConnection !== 'undefined';
+  const groupCallNow = (chat?.groupCall as { callId: string } | null | undefined) ?? null;
   // пустой личный чат встречает карточка-приветствие со стикером (писать туда должно быть можно)
   const greeting = greetingChat(chat, me.userId, { thread, blocked: iBlocked || theyBlocked });
   // группа: мои права участника (у админов — все), медленный режим, запрет копирования
@@ -649,6 +654,7 @@ export function Chat({ chatId, frameKey, active, threadId, scheduled = false, sa
       <span ref={shell} hidden />
       {/* свёрнутый звонок и плеер — острова над шапкой (как в Telegram): шапка плавно уезжает вниз, пока они открыты */}
       <CallSlot />
+      {chat?.kind === 'group' ? <GroupCallSlot chatId={chatId} /> : null}
       <PlayerBar
         onTitle={(t: Track) => { if (t.msgId != null && t.chatId) { if (t.chatId === chatId) focusMessage({ id: t.msgId, sort: t.msgId }); else openInner(t.chatId, { id: t.msgId, sort: t.msgId }); } }}
         onPlaylist={() => setGlobal({ playlistOpen: true })}
@@ -668,6 +674,7 @@ export function Chat({ chatId, frameKey, active, threadId, scheduled = false, sa
           </span>
         </button>
         {!thread && !scheduled && callable ? <IconButton icon="phone" label="Позвонить" onClick={() => callBack(chatId, false)} /> : null}
+        {!thread && !scheduled && groupCallable ? <IconButton icon="phone" label={groupCallNow ? 'Войти в звонок' : 'Начать звонок'} onClick={() => void (groupCallNow ? joinGroupCall(chatId, groupCallNow.callId) : startGroupCall(chatId))} /> : null}
         {!thread && !scheduled ? <IconButton icon="search" label="Поиск по чату" onClick={() => setFinding(true)} /> : null}
         {scheduled ? null : <ChatMenu chatId={chatId} title={title} savedPeer={savedPeer} />}
         {/* закреплённые — под шапкой, как в Telegram (плеер — над ней); в треде вместо них — плашка поста */}
