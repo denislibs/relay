@@ -1,0 +1,17 @@
+# LiveKit — сервер-пересыльщик (SFU) групповых звонков (docs/plans/2026-11-07-relay-group-calls.md).
+# Медиа приходит уже зашифрованным на устройствах (E2EE кадров): ключей у LiveKit нет. Комнаты создаёт и пускает
+# в них только сервер Relay (пропуск — JWT с ключом из LIVEKIT_KEYS); ключи и внешний адрес — флагами из docker-compose.
+port: 7880
+rtc:
+  tcp_port: 7881
+  port_range_start: 50000
+  port_range_end: 50060
+  use_external_ip: false
+room:
+  # комнату создаёт первый вошедший с пропуском; пустая закрывается быстро
+  empty_timeout: 30
+  departure_timeout: 20
+  max_participants: 200
+logging:
+  level: info
+  json: false

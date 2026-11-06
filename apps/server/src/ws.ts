@@ -17,6 +17,7 @@ import { deleteMessage, editMessage, markListened, reactMessage } from './domain
 import { appendTodo, editTodo, toggleTodo } from './domain/todo';
 import { pressButton } from './domain/buttons';
 import { ctxFromRow, hasAdmin } from './domain/groupRights';
+import { currentGroupCall, endGroupCallBy, joinGroupCall, kickGroupMember, leaveGroupCall, muteGroupMember, pingGroupCall, relayGroupKeys, startGroupCall, updateGroupMember } from './domain/groupCalls';
 import { acceptCall, confirmCall, currentCall, declineCall, hangupCall, pingCall, receivedCall, relaySignal, requestCall } from './domain/calls';
 
 /** Ждать open сокета (подписки на журналы чатов), но не дольше ms: Valkey недоступен — отвечаем, сверка догонит. */
@@ -161,6 +162,24 @@ export async function handleFrame(userId: number, frame: ClientFrame, publish: (
           case 'callHangup': await hangupCall(publish, userId, sessionId, frame); return [];
           case 'callSignal': await relaySignal(publish, userId, sessionId, frame); return [];
           case 'callPing': await pingCall(userId, sessionId, frame.callId); return [];
+        }
+        return [];
+      }
+      // групповые звонки (domain/groupCalls.ts)
+      case 'groupCallStart': case 'groupCallJoin': case 'groupCallLeave': case 'groupCallKeys': case 'groupCallUpdate':
+      case 'groupCallPing': case 'groupCallGet': case 'groupCallEnd': case 'groupCallMute': case 'groupCallKick': {
+        if (sessionId == null) throw new DomainError('unauthorized');
+        switch (frame.op) {
+          case 'groupCallStart': return [{ op: 'ack', reqId: frame.reqId, result: await startGroupCall(userId, frame.chatId) }];
+          case 'groupCallJoin': return [{ op: 'ack', reqId: frame.reqId, result: await joinGroupCall(publish, userId, sessionId, frame) }];
+          case 'groupCallGet': return [{ op: 'ack', reqId: frame.reqId, result: { call: await currentGroupCall(userId, frame.chatId) } }];
+          case 'groupCallEnd': return [{ op: 'ack', reqId: frame.reqId, result: await endGroupCallBy(publish, userId, frame.callId) }];
+          case 'groupCallMute': return [{ op: 'ack', reqId: frame.reqId, result: await muteGroupMember(publish, userId, frame) }];
+          case 'groupCallKick': return [{ op: 'ack', reqId: frame.reqId, result: await kickGroupMember(publish, userId, frame) }];
+          case 'groupCallLeave': await leaveGroupCall(publish, frame.callId, sessionId); return [];
+          case 'groupCallKeys': await relayGroupKeys(publish, userId, sessionId, frame); return [];
+          case 'groupCallUpdate': await updateGroupMember(publish, userId, sessionId, frame); return [];
+          case 'groupCallPing': await pingGroupCall(userId, sessionId, frame.callId); return [];
         }
         return [];
       }

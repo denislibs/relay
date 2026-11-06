@@ -23,6 +23,7 @@ import { publishScheduled, sweepScheduled } from '../domain/scheduled';
 import { destroyExpiredKeys, expireStep } from '../domain/autoDelete';
 import { trimAdminLog } from '../domain/adminLog';
 import { expireRing } from '../domain/calls';
+import { checkGroupCall } from '../domain/groupCalls';
 import { publishTopic } from '../bus';
 
 /** Подписок на страницу push.message (тесты уменьшают). */
@@ -261,3 +262,6 @@ register('linkPreview.expire', async () => {
 
 // звонок без ответа CALL_RING_MS — пропущен (если ещё звонит); кадр callEnded — через шину процессам с сокетами
 register('call.ring', async (p: { callId: string }) => expireRing(publishTopic, String(p.callId)));
+
+// групповой звонок: ушедшие без пинга — из состава, пустой — завершить (domain/groupCalls.ts)
+register('groupcall.check', async (p: { callId: string }) => checkGroupCall(publishTopic, String(p.callId)));

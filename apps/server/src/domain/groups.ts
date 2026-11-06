@@ -1,3 +1,5 @@
+import { leftGroup } from './groupCalls';
+import { publishTopic } from '../bus';
 import { peerKey } from '../crypto/peerKey';
 import {
   emojiKey, graphemes, normalizeAdminRights, normalizeRights, narrowRights, allAdminRights, ADMIN_RIGHTS_BY_KIND, GROUP_ABOUT_MAX, MEMBERS_MAX, RANK_MAX, SLOW_MODES,
@@ -440,6 +442,13 @@ function canManageAdmin(ctx: GroupCtx, target: { role: GroupRole; promoted_by: u
 
 /** Удалить участника (бан: в «Удалённые») или выйти самому. Владелец выходит — права переходят дальше. */
 export async function removeGroupMember(userId: number, chatId: number, target: number): Promise<{ ok: true }> {
+  const res = await removeGroupMemberTx(userId, chatId, target);
+  // ушёл из группы — уходит и из идущего звонка (ключи сменятся, LiveKit отключит)
+  void leftGroup(publishTopic, chatId, target).catch((e) => console.warn('group call:', String(e)));
+  return res;
+}
+
+async function removeGroupMemberTx(userId: number, chatId: number, target: number): Promise<{ ok: true }> {
   return sql.begin(async (tx) => {
     // свой выход может удалить чат (последний владелец) — тогда запирается и связанный: оба замка заранее, по порядку
     if (target === userId) await lockWithLinked(tx, chatId);

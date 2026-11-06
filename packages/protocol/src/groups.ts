@@ -13,12 +13,12 @@ export const MEDIA_RIGHTS: readonly MemberRight[] = ['photos', 'videos', 'files'
 export type CommunityKind = 'group' | 'channel';
 
 /** Права администратора. Владелец имеет все неявно. post/edit — только у канала: публиковать и править чужие посты. */
-export type AdminRight = 'info' | 'post' | 'edit' | 'delete' | 'ban' | 'invite' | 'pin' | 'addAdmins';
+export type AdminRight = 'info' | 'post' | 'edit' | 'delete' | 'ban' | 'invite' | 'pin' | 'calls' | 'addAdmins';
 export type AdminRights = Record<AdminRight, boolean>;
-const ANY_ADMIN_RIGHTS: readonly AdminRight[] = ['info', 'post', 'edit', 'delete', 'ban', 'invite', 'pin', 'addAdmins'];
+const ANY_ADMIN_RIGHTS: readonly AdminRight[] = ['info', 'post', 'edit', 'delete', 'ban', 'invite', 'pin', 'calls', 'addAdmins'];
 /** Какие права админа бывают у вида чата (порядок — как на экране прав). */
 export const ADMIN_RIGHTS_BY_KIND: Record<CommunityKind, readonly AdminRight[]> = {
-  group: ['info', 'delete', 'ban', 'invite', 'pin', 'addAdmins'],
+  group: ['info', 'delete', 'ban', 'invite', 'pin', 'calls', 'addAdmins'],   // calls — управлять звонками (выключить микрофон, удалить, завершить)
   channel: ['info', 'post', 'edit', 'delete', 'ban', 'invite', 'addAdmins'],
 };
 /** Права админа группы (экран прав группы). */

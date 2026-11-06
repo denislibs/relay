@@ -124,6 +124,10 @@ services:
       RELAY_STUN_URLS: "stun:${RELAY_TURN_HOST:-127.0.0.1}:${RELAY_TURN_PORT:-3478}"
       RELAY_TURN_URLS: "turn:${RELAY_TURN_HOST:-127.0.0.1}:${RELAY_TURN_PORT:-3478}?transport=udp,turn:${RELAY_TURN_HOST:-127.0.0.1}:${RELAY_TURN_PORT:-3478}?transport=tcp"
       RELAY_TURN_SECRET: "${RELAY_TURN_SECRET:-relay-dev-turn-secret}"
+      # групповые звонки: LiveKit (сервис livekit ниже) — пропуски подписываются этим ключом (domain/groupCalls.ts)
+      LIVEKIT_URL: http://livekit:7880
+      LIVEKIT_API_KEY: "${LIVEKIT_API_KEY:-relaydev}"
+      LIVEKIT_API_SECRET: "${LIVEKIT_API_SECRET:-relay-dev-livekit-secret-0123456789abcdef}"
     # наружу не открыт: только API за proxy
     volumes:
       - ./apps:/app/apps
@@ -148,6 +152,17 @@ services:
     ports: ["${RELAY_BIND:-127.0.0.1}:${RELAY_TURN_PORT:-3478}:3478/udp", "${RELAY_BIND:-127.0.0.1}:${RELAY_TURN_PORT:-3478}:3478/tcp",
             "${RELAY_BIND:-127.0.0.1}:49160-49200:49160-49200/udp"]
 
+  # LiveKit (Apache-2.0) — сервер-пересыльщик групповых звонков. Сигналинг — через proxy (wss://<host>/livekit),
+  # медиа — UDP 50000–50060 / TCP 7881 напрямую. node-ip — адрес, который видят браузеры (dev — 127.0.0.1)
+  livekit:
+    image: livekit/livekit-server:v1.13.10
+    command: ["--config", "/etc/livekit.yaml", "--node-ip", "${LIVEKIT_NODE_IP:-127.0.0.1}"]
+    environment:
+      LIVEKIT_KEYS: "${LIVEKIT_API_KEY:-relaydev}: ${LIVEKIT_API_SECRET:-relay-dev-livekit-secret-0123456789abcdef}"
+    volumes:
+      - ./docker/livekit/livekit.yaml:/etc/livekit.yaml:ro
+    ports: ["${RELAY_BIND:-127.0.0.1}:7881:7881/tcp", "${RELAY_BIND:-127.0.0.1}:50000-50060:50000-50060/udp"]
+
   # Вход: https://localhost — статика из dist (gzip/brotli), API и WebSocket → server, :8333 → S3.
   # Сертификат: docker/nginx/dev-cert.sh (mkcert).
   proxy:
@@ -164,6 +179,7 @@ services:
       server: { condition: service_started }
       web: { condition: service_started }
       s3: { condition: service_healthy }
+      livekit: { condition: service_started }
 
   worker:
     build: { context: ., dockerfile: apps/server/Dockerfile }
