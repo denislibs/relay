@@ -120,6 +120,10 @@ services:
       VALKEY_URL: redis://valkey:6379
       MEILI_URL: http://search:7700
       MEILI_MASTER_KEY: relay-dev-master-key-change-me
+      # звонки: STUN/TURN — сервис turn ниже; учётки на звонок подписываются этим секретом (domain/calls.ts)
+      RELAY_STUN_URLS: "stun:${RELAY_TURN_HOST:-127.0.0.1}:${RELAY_TURN_PORT:-3478}"
+      RELAY_TURN_URLS: "turn:${RELAY_TURN_HOST:-127.0.0.1}:${RELAY_TURN_PORT:-3478}?transport=udp,turn:${RELAY_TURN_HOST:-127.0.0.1}:${RELAY_TURN_PORT:-3478}?transport=tcp"
+      RELAY_TURN_SECRET: "${RELAY_TURN_SECRET:-relay-dev-turn-secret}"
     # наружу не открыт: только API за proxy
     volumes:
       - ./apps:/app/apps
@@ -129,6 +133,20 @@ services:
       s3-init: { condition: service_completed_successfully }
       valkey: { condition: service_healthy }
       search: { condition: service_healthy }
+
+  # TURN/STUN для звонков (coturn, BSD): медиа идёт мимо сервера Relay, через TURN — только когда напрямую нельзя.
+  # external-ip — адрес, который видят браузеры (dev — 127.0.0.1); docker/coturn/start.sh связывает его с адресом контейнера
+  turn:
+    image: coturn/coturn:4.6.3
+    entrypoint: ["sh", "/start.sh"]
+    environment:
+      RELAY_TURN_SECRET: "${RELAY_TURN_SECRET:-relay-dev-turn-secret}"
+      RELAY_TURN_EXTERNAL_IP: "${RELAY_TURN_EXTERNAL_IP:-127.0.0.1}"
+    volumes:
+      - ./docker/coturn/turnserver.conf:/etc/coturn/turnserver.conf:ro
+      - ./docker/coturn/start.sh:/start.sh:ro
+    ports: ["${RELAY_BIND:-127.0.0.1}:${RELAY_TURN_PORT:-3478}:3478/udp", "${RELAY_BIND:-127.0.0.1}:${RELAY_TURN_PORT:-3478}:3478/tcp",
+            "${RELAY_BIND:-127.0.0.1}:49160-49200:49160-49200/udp"]
 
   # Вход: https://localhost — статика из dist (gzip/brotli), API и WebSocket → server, :8333 → S3.
   # Сертификат: docker/nginx/dev-cert.sh (mkcert).
