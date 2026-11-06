@@ -15,9 +15,10 @@ export type ServiceType = 'login_code' | 'new_login' | 'group_created' | 'channe
   | 'todo_done' | 'todo_append'   // чек-лист: автор отметил / добавил задачи в список replyToId (номера — в data)
   | 'scheduled_failed'   // отложенное не удалось отправить: текст — куда и почему (сам текст сообщения не раскрывается)
   | 'theme_changed'   // тема чата: data.emoji/title — новая, пусто — снята   // чек-лист: автор отметил / добавил задачи в список replyToId (номера — в data)
-  | 'auto_delete_changed';   // автоудаление: data.sec — новый срок в секундах, нет — выключено
+  | 'auto_delete_changed'   // автоудаление: data.sec — новый срок в секундах, нет — выключено
+  | 'call';   // звонок: data.call — видео ли, чем кончился и сколько длился; автор — звонящий
 /** Участники служебного события (имена на момент события), новое название и новое фото (photo_changed). */
-export interface ServiceData { users?: { id: Id; name: string }[]; title?: string; completed?: number[]; incompleted?: number[]; items?: number[]; emoji?: string; sec?: number; photo?: ProfilePhoto }   // group_created / channel_created: тело — название, автор — создатель
+export interface ServiceData { users?: { id: Id; name: string }[]; title?: string; completed?: number[]; incompleted?: number[]; items?: number[]; emoji?: string; sec?: number; photo?: ProfilePhoto; call?: CallServiceData }   // group_created / channel_created: тело — название, автор — создатель
 
 export interface Message {
   id: Id;
@@ -431,17 +432,18 @@ export interface SessionInfo { id: Id; device: string; ip: string | null; create
   limited?: boolean; place?: string | null; method?: 'code' | 'password' | 'recovery' | 'signup' | 'passkey' | 'qr' | 'dev' | null }
 
 /** Правила конфиденциальности. phoneDiscovery — «Кто найдёт меня по номеру» (только everyone | contacts). */
-export type PrivacyKey = 'phone' | 'phoneDiscovery' | 'lastSeen' | 'bio' | 'birthday';
+/** calls — «Кто может мне звонить»; p2p — с кем звонок идёт напрямую (остальным — через TURN, мой IP им не виден). */
+export type PrivacyKey = 'phone' | 'phoneDiscovery' | 'lastSeen' | 'bio' | 'birthday' | 'calls' | 'p2p';
 export type PrivacyMode = 'everyone' | 'contacts' | 'nobody';
-export const PRIVACY_KEYS: readonly PrivacyKey[] = ['phone', 'phoneDiscovery', 'lastSeen', 'bio', 'birthday'];
+export const PRIVACY_KEYS: readonly PrivacyKey[] = ['phone', 'phoneDiscovery', 'lastSeen', 'bio', 'birthday', 'calls', 'p2p'];
 /** Исключения: deny главнее allow, allow главнее mode. */
 export interface PrivacyRule { mode: PrivacyMode; allow: Id[]; deny: Id[] }
 export type PrivacyRules = Record<PrivacyKey, PrivacyRule>;
-/** Умолчания, когда правила нет: номер — контактам, остальное — всем. */
-export const defaultPrivacyRule = (key: PrivacyKey): PrivacyRule => ({ mode: key === 'phone' ? 'contacts' : 'everyone', allow: [], deny: [] });
+/** Умолчания, когда правила нет: номер и прямые соединения в звонках — контактам, остальное — всем. */
+export const defaultPrivacyRule = (key: PrivacyKey): PrivacyRule => ({ mode: key === 'phone' || key === 'p2p' ? 'contacts' : 'everyone', allow: [], deny: [] });
 export const defaultPrivacy = (): PrivacyRules => ({
   phone: defaultPrivacyRule('phone'), phoneDiscovery: defaultPrivacyRule('phoneDiscovery'), lastSeen: defaultPrivacyRule('lastSeen'),
-  bio: defaultPrivacyRule('bio'), birthday: defaultPrivacyRule('birthday'),
+  bio: defaultPrivacyRule('bio'), birthday: defaultPrivacyRule('birthday'), calls: defaultPrivacyRule('calls'), p2p: defaultPrivacyRule('p2p'),
 });
 
 /** Заблокированный: профиль глазами владельца списка и когда заблокирован. seq — как у Contact. */
@@ -545,6 +547,7 @@ export type ClientFrame =
   | { op: 'unwatchThread'; reqId: string; chatId: Id; threadId: Id }
   // нажата callback-кнопка; ack.result — ButtonAnswer
   | { op: 'button'; reqId: string; chatId: Id; id: Id; data: string }
+  | CallClientFrame
   | { op: 'ping' };
 
 /** Ответ на нажатие кнопки: короткий тост (нет — молча). */
@@ -580,6 +583,7 @@ export type ServerFrame =
   // сеанс этого сокета завершён; следом сокет закрывается. reason: logout — выход в другой вкладке этого же браузера,
   // terminated — с другого устройства, автозавершением или сеанс пропал
   | { op: 'sessionTerminated'; reason?: 'logout' | 'terminated' }
+  | CallServerFrame
   | { op: 'pong' };
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -651,7 +655,7 @@ export function parseClientFrame(raw: string): ClientFrame | null {
       return { op: 'send', ...(f.silent === true ? { silent: true } : {}), ...(f.scheduleAt != null ? { scheduleAt: f.scheduleAt as number } : {}), ...(f.draftHash !== undefined ? { draftHash: f.draftHash as string | null } : {}), ...(f.threadId != null ? { threadId: f.threadId as number } : {}), ...(f.sticker != null ? { sticker: { id: (f.sticker as { id: number }).id } } : {}), ...(f.todo != null ? { todo: normalizeTodo(f.todo)! } : {}), ...(f.poll != null ? { poll: normalizePoll(f.poll)! } : {}), ...(f.geo != null ? { geo: normalizeGeo(f.geo)! } : {}), ...(f.dice != null ? { dice: { emoji: (f.dice as { emoji: DiceEmoji }).emoji } } : {}), ...(f.contact != null ? { contact: { userId: (f.contact as { userId: number }).userId, ...(typeof cKey === 'string' ? { key: cKey } : {}), ...(cVia ? { via: { chatId: Number(cVia.chatId), messageId: Number(cVia.messageId) } } : {}) } } : {}), reqId: f.reqId, clientId: f.clientId, chatId: f.chatId, body: f.body, entities: normalizeEntities(f.body, f.entities), replyToId: (f.replyToId as number | null) ?? null, ...(rq != null && f.replyToId != null ? { replyQuote: { text: rq.text as string, offset: rq.offset as number } } : {}), attachment: (f.attachment as { id: string; thumb?: string | null; spoiler?: boolean } | null) ?? null, groupId: (f.groupId as string | null) ?? null, forward, ...(f.noLinkPreview === true ? { noLinkPreview: true } : {}), ...(Array.isArray(f.blocks) ? { blocks: f.blocks as Block[] } : {}) };
     case 'read':
       return str(f.reqId, 64) && int(f.chatId) && int(f.upToId) ? { op: 'read', reqId: f.reqId, chatId: f.chatId, upToId: f.upToId } : null;
-    default: return null;
+    default: return parseCallFrame(f);
   }
 }
 
@@ -732,6 +736,8 @@ import { normalizePoll, POLL_OPTIONS_MAX, type Poll, type PollInput } from './po
 export * from './blocks';
 export * from './fileCrypto';
 export * from './mentions';
+export * from './calls';
+import { parseCallFrame, type CallClientFrame, type CallServerFrame, type CallServiceData } from './calls';
 
 /** Можно ли править текст сообщения этого вида (как в Telegram): у стикера, кружка, голосового и опроса текста нет,
  *  чек-лист правится своей операцией. Общее правило для меню клиента и проверки сервера. */

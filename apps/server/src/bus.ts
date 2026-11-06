@@ -19,6 +19,11 @@ export interface Bus {
 }
 
 const RETRY_MS = 2000;
+
+/** Опубликовать кадр в топик без своей шины — из воркера (задачи): процессы с сокетами раздадут его подписчикам. */
+export function publishTopic(topic: string, msg: string): void {
+  valkey().publish(key('t:' + topic), msg).catch((e) => console.error('bus publish:', e));
+}
 type Conn = { client: Promise<RedisClient>; topics: Set<string> };
 
 export function createBus(deliver: (topic: string, msg: string) => void): Bus {
