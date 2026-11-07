@@ -158,6 +158,13 @@ nginx или свой; тот же id — в заголовке ответа), `
 | `RelayTelegramDeliveryFailed` (critical) | код входа не ушёл (`failed`) или упёрся в дневной предел (`capped`) | люди не могут войти | логи воркера `grep 'code delivery'`; `capped` — поднять `TELEGRAM_DAILY_CAP`; `failed` — токен, бот заблокирован, сеть |
 | `RelayDeployRolledBack` (critical) | шлёт `deploy.sh`, когда наблюдение после выката откатило сборку | новая сборка хуже прежней: причина — в тексте | лог шага deploy в Actions; починить и выкатить заново ([deploy.md](deploy.md), «Наблюдение после выката») |
 | `RelayZombieProcesses` (warning) | зомби-процессов на хосте > 100, 10 мин | процесс №1 какого-то контейнера не хоронит детей; через часы — лимит процессов, контейнер перестаёт запускать что-либо | найти родителя (`ps -eo ppid,stat`), контейнеру `init: true` в compose, перезапустить |
+| `RelayContainerUnhealthy` (critical) | контейнер нездоров или не запущен, 3 мин (`deploy/host-metrics.sh`) | зависящие сервисы не поднимутся при выкате (S3, 2026-11-07) | `deploy/compose.sh ps`, логи контейнера |
+| `RelayContainerRestarting` (warning) | > 2 перезапусков за 15 мин | падает по кругу | логи контейнера |
+| `RelayCertExpiring` (warning) | сертификат истекает через < 21 дня | certbot не продлил или внутренним год | certbot renew / `deploy/certs.sh` |
+| `RelayBackupStale` (warning) | файлам бэкапа > 26 ч | ночной бэкап не прошёл | `/home/deploy/relay-cron.log`, `deploy/backup.sh` руками |
+| `RelayBaoTokenExpiring` (critical) | токену OpenBao < 7 дней (`deploy/bao-renew.sh` пишет срок; 0 — продлить не удалось) | истечёт — ключи чатов не разворачиваются | `deploy/bao-renew.sh`, OpenBao распечатан? |
+| `RelayHostMetricsStale` (warning) | `host-metrics.sh` не отрабатывал > 10 мин | тревоги выше слепы | cron пользователя deploy |
+| `RelayProcessMemoryHigh` (warning) | RSS server/worker > 1,5 ГБ, 30 мин | утечка памяти | heap snapshot, перезапуск |
 | `RelayHostMemoryLow` (warning) | свободно < 10 % памяти, 10 мин | скоро OOM | панель «Память контейнеров»; первыми растут worker (ffmpeg) и postgres |
 
 Проверить доставку тревог без поломки: `deploy/compose.sh exec alertmanager amtool alert add test severity=warning --annotation=summary=проверка --alertmanager.url=http://127.0.0.1:9093`.

@@ -28,6 +28,7 @@ services:
   # главный ключ (Transit relay-chat-keys). После старта — запечатан: deploy/bao-unseal.sh (ключи — у владельца).
   # Первый раз: deploy/bao-init.sh. Ключ TLS доступен только root на хосте — копия с правами openbao при старте.
   openbao:
+    ulimits: { nofile: { soft: 65536, hard: 65536 } }   # по умолчанию 1024 — около 500 соединений (2026-11-07)
     image: openbao/openbao:2.7.2
     # старт от root только ради копии ключа TLS (на хосте он root/600); дальше entrypoint образа сам переходит
     # на пользователя openbao (su-exec) — сервер работает не от root
@@ -104,6 +105,7 @@ services:
     profiles: ["never"]
 
   proxy:
+    ulimits: { nofile: { soft: 65536, hard: 65536 } }   # по умолчанию 1024 — около 500 соединений (2026-11-07)
     image: ${RELAY_REGISTRY:-ghcr.io/denislibs}/relay-proxy:${RELAY_TAG:?set RELAY_TAG}
     build: !reset null
     volumes: !override
@@ -127,6 +129,7 @@ services:
 
   # вложения — на отдельном разделе хоста (20 ГБ ext4), а не в томе docker
   s3:
+    ulimits: { nofile: { soft: 65536, hard: 65536 } }   # по умолчанию 1024 — около 500 соединений (2026-11-07)
     volumes:
       - ${RELAY_S3_DIR:-/srv/relay-s3}:/data
     restart: unless-stopped
@@ -138,10 +141,12 @@ services:
     ports: !override ["3478:3478/udp", "3478:3478/tcp", "49152-49952:49152-49952/udp"]
 
   postgres:
+    ulimits: { nofile: { soft: 65536, hard: 65536 } }   # по умолчанию 1024 — около 500 соединений (2026-11-07)
     restart: unless-stopped
   valkey:
     restart: unless-stopped
   search:
+    ulimits: { nofile: { soft: 65536, hard: 65536 } }   # по умолчанию 1024 — около 500 соединений (2026-11-07)
     restart: unless-stopped
 
 volumes:

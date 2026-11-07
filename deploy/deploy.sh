@@ -47,6 +47,7 @@ main() {
     printf '%s\n' "$sha" > "$STATE_DIR/current"
     printf '%s deploy %s ok\n' "$(date -u +%FT%TZ)" "$sha" >> "$STATE_DIR/history"
     log "deployed $sha"
+    prune_images "$sha" "$prev"
     return 0
   fi
 
@@ -149,6 +150,20 @@ bake() {
   log "[$tag] bake failed: ${reason:-bake.ts exited with $rc}"
   bake_alert "$tag" "${reason:-bake.ts exited with $rc}"
   return 1
+}
+
+# Старые образы Relay: каждый выкат приносит ~1,75 ГБ (server + proxy), сами не удаляются — диск кончился бы через
+# несколько десятков выкатов (2026-11-07: 9 ГБ за день). Остаются текущая и прежняя сборки (на прежнюю — откат).
+prune_images() {
+  keep_a="$1"; keep_b="${2:-}"; reg="${RELAY_REGISTRY:-ghcr.io/denislibs}"; n=0
+  for repo in relay-server relay-proxy; do
+    for tag in $(docker images --format '{{.Tag}}' "$reg/$repo"); do
+      case "$tag" in "$keep_a" | "$keep_b" | latest) continue ;; esac
+      docker rmi "$reg/$repo:$tag" >/dev/null 2>&1 && n=$((n + 1))
+    done
+  done
+  docker image prune -f >/dev/null 2>&1 || true
+  log "old images removed: $n ($(df -h / | awk 'NR == 2 {print $4}') free)"
 }
 
 # перезапуски и время старта контейнеров server и worker — сравнить до и после наблюдения

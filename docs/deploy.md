@@ -326,6 +326,8 @@ Actions → deploy → Run workflow (ветка master, tag пустой) — CI
 20 4 * * * /opt/relay/deploy/bao-renew.sh >> /home/deploy/relay-cron.log 2>&1
 # бэкап (age), копии вне сервера — rclone
 15 3 * * * /opt/relay/deploy/backup.sh >> /home/deploy/relay-cron.log 2>&1
+# метрики тихих поломок (здоровье контейнеров, сроки сертификатов, свежесть бэкапа) — node-exporter
+* * * * * /opt/relay/deploy/host-metrics.sh >> /home/deploy/relay-cron.log 2>&1
 ```
 
 ## Ежедневно: выкат

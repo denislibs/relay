@@ -257,6 +257,7 @@ services:
 
   worker:
     command: ["bun", "apps/server/src/worker.ts"]
+    init: true   # запускает ffmpeg и др.: осиротевших внуков хоронит init, не bun (зомби — см. s3)
     <<: *hardened
     # медиа расшифровываются во временные файлы: только в памяти, на диск не ложатся (CRYPTO-14)
     tmpfs: ["/tmp:size=2g,mode=1777"]

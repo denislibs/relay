@@ -204,6 +204,8 @@ register('journal.trim', async () => {
     const r = await sql`delete from updates where ctid in (select ctid from updates where created_at < now() - make_interval(days => ${JOURNAL_DAYS}) limit 5000)`;
     if (r.count < 5000) break;
   }
+  // задачи, упавшие навсегда, нужны для разбора (тревога RelayJobsDead) — не дольше месяца, иначе таблица только растёт
+  await sql`delete from jobs_dead where failed_at < now() - interval '30 days'`;
   return { again: { inSec: 24 * 3600 } };
 });
 // ключи старого формата — с меткой назначения (CRYPTO-5): до конца пачками, потом раз в сутки (новых не бывает)
