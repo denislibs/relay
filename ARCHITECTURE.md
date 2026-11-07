@@ -856,8 +856,8 @@ docker compose --profile test run --rm test-engine          # тесты дви�
 ## 18. Что дальше
 
 - **Доставка кодов входа** (SMS или почта) или регистрация по приглашениям — без этого новому человеку не войти.
-- **Подготовка к реальному запуску:** конфигурация уже есть (`docker-compose.secure.yml`: секреты из окружения,
-  TLS между сервисами, сервис ключей, без `--watch` и dev-входов); не хватает резервных копий Postgres и S3 и домена.
+- **Реальный запуск:** выкат на denigram.site готов ([docs/deploy.md](docs/deploy.md): образы из CI, OpenBao на
+  сервере, бэкапы age); дальше — canary поверх этого CD на метриках наблюдаемости.
 - **Наблюдаемость:** база есть ([docs/observability.md](docs/observability.md): `/ready`, `/metrics` с меткой сборки,
   JSON-логи, отчёты об ошибках клиентов, VictoriaMetrics + Grafana + тревоги в Telegram); не хватает задержки push,
   ошибок Meilisearch, страницы для `jobs_dead` и сбора логов (Loki).

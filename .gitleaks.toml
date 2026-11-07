@@ -1,0 +1,23 @@
+# Поиск секретов (CI: .github/workflows/ci.yml, job secrets). Правила — стандартные gitleaks, плюс исключения ниже.
+# Исключения — только заведомо не секреты: dev-значения по умолчанию из docker-compose.yml (работают только на
+# localhost, production с ними не стартует — tls.ts, ${VAR:?} в docker-compose.secure.yml) и тестовые фикстуры.
+# Новое исключение — с причиной; настоящий секрет в git не исключать, а отзывать (docs/deploy.md, «Секреты»).
+[extend]
+useDefault = true
+
+[[allowlists]]
+description = "dev defaults of docker-compose.yml and test fixtures — not secrets"
+regexTarget = "match"
+regexes = [
+  '''relaydevsecret''',
+  '''\brelaydev\b''',
+  '''relay-dev-[a-z0-9-]*''',                        # relay-dev-turn-secret, relay-dev-livekit-secret-…, relay-dev-root
+  '''relay-dev-master-key-change-me''',
+  '''cmVsYXktZGV2LW1hc3Rlci1rZXktbm90LWZvci1wcm9k''',  # base64 «relay-dev-master-key-not-for-prod» (FakeKms, dev)
+  '''dGhlIHNhbXBsZSBub25jZQ==''',                      # «the sample nonce» — пример Sec-WebSocket-Key из RFC 6455
+  '''test-secret-[0-9a-f]+''',                         # тестовые ключи (apps/server/test)
+]
+
+[[allowlists]]
+description = "AAGUID of passkey authenticators (public identifiers)"
+paths = ['''apps/server/src/domain/passkeys\.ts''']

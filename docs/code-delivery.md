@@ -31,29 +31,35 @@
 ## Настройка (production)
 
 1. **Бот.** В Telegram откройте @BotFather → `/newbot` → имя и username (например `denigram_codes_bot`).
-   BotFather пришлёт токен вида `123456789:AA…` — это секрет: только в `.env` на сервере, не в репозиторий и не в чат.
+   BotFather пришлёт токен вида `123456789:AA…` — это секрет: только в файле `secrets/run/telegram_bot_token` на
+   сервере (docker secret, [deploy.md](deploy.md) «Секреты»), не в `.env`, не в репозиторий и не в чат.
 2. **/start.** Из своего аккаунта Telegram откройте бота и отправьте `/start` — без этого бот не может вам писать.
-3. **id чата.** На сервере (или локально, где есть `bun`):
+3. **id чата.** Локально, где есть `bun` (токен — из переменной окружения, не аргументом; `read -s` — без эха и
+   без истории shell):
 
    ```bash
-   TELEGRAM_BOT_TOKEN='123456789:AA…' bun tools/telegram/chatId.ts
+   read -rs TELEGRAM_BOT_TOKEN && export TELEGRAM_BOT_TOKEN && bun tools/telegram/chatId.ts; unset TELEGRAM_BOT_TOKEN
    ```
 
    Скрипт напечатает `TELEGRAM_OWNER_CHAT_ID=…`. Без `bun` — то же руками: откройте
    `https://api.telegram.org/bot<токен>/getUpdates` и возьмите `result[].message.chat.id` своего сообщения
    (у бота не должно быть webhook; ссылка содержит токен — не пересылайте её).
-4. **`.env`** рядом с `docker-compose.secure.yml` (права `600`):
+4. **Токен — в файл секрета, id чата — в `.env`** (сервер — [deploy.md](deploy.md)):
+
+   ```bash
+   sudo -u deploy sh -c 'cat > /opt/relay/secrets/run/telegram_bot_token'   # вставить токен, Enter, Ctrl-D
+   ```
 
    ```
-   TELEGRAM_BOT_TOKEN=123456789:AA…
+   # /opt/relay/.env
    TELEGRAM_OWNER_CHAT_ID=123456789
    # необязательно:
    # TELEGRAM_DAILY_CAP=300
    # CODE_TIME_ZONE=Europe/Moscow     # в каком поясе писать «Действует до …», по умолчанию UTC
    ```
 
-   `docker-compose.secure.yml` передаёт их `server` и `worker` (`CODE_DELIVERY=telegram` по умолчанию) и без них
-   не запустится; `server` в production проверяет то же сам (`assertTransportSecure`, `tls.ts`) и не стартует
+   `docker-compose.secure.yml` монтирует токен `server` и `worker` (`TELEGRAM_BOT_TOKEN_FILE`,
+   `CODE_DELIVERY=telegram` по умолчанию) и без id чата не запустится; `server` в production проверяет то же сам (`assertTransportSecure`, `tls.ts`) и не стартует
    с `CODE_DELIVERY=telegram` без токена или числового id, с `CODE_DELIVERY=dev|log`, с `DEV_LOGIN=1` или
    `LOG_LOGIN_CODES=1`.
 5. `docker compose -f docker-compose.yml -f docker-compose.secure.yml up -d server worker` и проверка: запросить
@@ -68,7 +74,8 @@
 
    Код моноширинный — в Telegram копируется нажатием. Передавайте его только тому, чей это номер.
 
-Сменить токен: @BotFather → `/revoke`, новый — в `.env`, перезапустить `server worker`.
+Сменить токен: @BotFather → `/revoke`, новый — в `secrets/run/telegram_bot_token`, затем
+`deploy/compose.sh restart server worker`.
 
 ## Проверка без Telegram
 
@@ -111,9 +118,9 @@ CODE_DELIVERY=telegram TELEGRAM_BOT_TOKEN=1:test TELEGRAM_OWNER_CHAT_ID=1 \
 ```
 TELEGRAM_LOGIN=1
 TELEGRAM_BOT_USERNAME=denigram_codes_bot        # без @
-# webhook (production): адрес сервера и секрет заголовка X-Telegram-Bot-Api-Secret-Token
+# webhook (production): адрес сервера; секрет заголовка X-Telegram-Bot-Api-Secret-Token — файлом
+# secrets/run/telegram_webhook_secret (его создаёт deploy/make-secrets.sh; в dev — TELEGRAM_WEBHOOK_SECRET)
 TELEGRAM_WEBHOOK_URL=https://denigram.site/auth/telegram/webhook
-TELEGRAM_WEBHOOK_SECRET=<openssl rand -hex 32>
 ```
 
 Воркер при старте сам вызывает `setWebhook` (адрес, секрет, только `message` и `callback_query`). Без

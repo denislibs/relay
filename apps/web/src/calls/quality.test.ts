@@ -10,8 +10,8 @@ test('level by loss, delay and jitter', () => {
 
 test('smoothing: down after two bad samples, up after three good ones — no flicker', () => {
   const s = smoother();
-  expect([3, 1, 3, 1, 1].map(s)).toEqual([3, 3, 3, 3, 1]);
-  expect([3, 3].map(s)).toEqual([1, 1]);
+  expect(([3, 1, 3, 1, 1] as const).map(s)).toEqual([3, 3, 3, 3, 1]);
+  expect(([3, 3] as const).map(s)).toEqual([1, 1]);
   expect(s(3)).toBe(3);
 });
 

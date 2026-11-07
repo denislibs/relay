@@ -27,6 +27,13 @@ test('production refuses plain internal connections and dev logins — no bypass
   expect(() => assertTransportSecure({ DB_SSL: 'disable' })).not.toThrow();   // dev
 });
 
+test('production without a database (key service): no database check; a plain DATABASE_URL is still refused', () => {
+  const keys = { NODE_ENV: 'production', KMS_PROVIDER: 'vault', VAULT_ADDR: 'https://openbao:8200' };
+  expect(() => assertTransportSecure(keys)).not.toThrow();
+  expect(() => assertTransportSecure({ ...keys, VAULT_ADDR: 'http://openbao:8200' })).toThrow('VAULT_ADDR');
+  expect(() => assertTransportSecure({ ...keys, DATABASE_URL: 'postgres://u:p@db/relay' })).toThrow(/database/);
+});
+
 test('production code delivery: telegram only with a token and an owner chat id; dev and log channels refused', () => {
   const ok = { NODE_ENV: 'production', DB_SSL: 'verify-full', VALKEY_URL: 'rediss://v', S3_ENDPOINT: 'https://s3', MEILI_URL: 'https://m', KEY_SERVICE_URL: 'https://k' };
   const tg = { ...ok, CODE_DELIVERY: 'telegram', TELEGRAM_BOT_TOKEN: '1:abc', TELEGRAM_OWNER_CHAT_ID: '12345' };

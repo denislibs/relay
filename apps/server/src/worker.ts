@@ -1,3 +1,5 @@
+// секреты из *_FILE (secretFiles.ts) — до всего, что читает окружение
+import './secretFiles';
 import { sql } from './db';
 import { startMetricsServer } from './obs/server';
 import { collectQueueMetrics } from './obs/jobsMetrics';

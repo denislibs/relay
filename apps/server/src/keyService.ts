@@ -10,6 +10,8 @@
 //   GET  /info                       → {kekId}
 // Байты — base64. Доступ — Bearer-токен клиента (KEY_SERVICE_TOKENS: «server:токен,worker:токен»); в продакшене —
 // ещё и внутренняя сеть + mTLS (docker-compose.secure.yml). Запуск: bun apps/server/src/keyService.ts
+// секреты из *_FILE (secretFiles.ts) — до всего, что читает окружение
+import './secretFiles';
 import { getKms, kmsFor, type Kms } from './crypto/kms';
 import { assertTransportSecure } from './tls';
 import { auditKeyFromEnv, createAuditChain } from './auditLog';

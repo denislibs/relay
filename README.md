@@ -21,6 +21,9 @@ Dev-вход (`DEV_LOGIN=1`): `POST /dev/login {"name":"Анна"}` → cookie `
 
 Как всё устроено — [ARCHITECTURE.md](ARCHITECTURE.md). Планы: `docs/plans/`.
 
+Боевой сервер (denigram.site) — образы собирает GitHub Actions, выкат по push в master, откат, OpenBao, бэкапы:
+[docs/deploy.md](docs/deploy.md).
+
 ## Пакеты
 
 - `apps/server` — Bun + Postgres: журнал изменений, send/sync/read, WebSocket, LISTEN/NOTIFY.

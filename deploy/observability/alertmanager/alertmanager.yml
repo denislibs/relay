@@ -16,7 +16,7 @@ inhibit_rules:
 receivers:
   - name: owner
     telegram_configs:
-      - bot_token_file: /run/am/bot_token
+      - bot_token_file: /run/secrets/telegram_bot_token
         chat_id: __TELEGRAM_OWNER_CHAT_ID__
         parse_mode: HTML
         send_resolved: true

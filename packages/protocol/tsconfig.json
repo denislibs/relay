@@ -1,0 +1,5 @@
+{
+  // проверка типов пакета (CI): исходники и тесты
+  "compilerOptions": { "target": "ESNext", "module": "ESNext", "moduleResolution": "bundler", "strict": true, "skipLibCheck": true, "noEmit": true, "types": ["bun"] },
+  "include": ["src", "test"]
+}
