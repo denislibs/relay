@@ -58,7 +58,9 @@ export async function hideLoginCodes(tx: Tx, userId: number, note: string): Prom
 
 /** Нормализованный логин — ключ лимитов: телефон как есть (после trim), имя без «@» и в нижнем регистре. */
 const normalize = (login: string) => { const s = login.trim(); return s.startsWith('+') ? s : s.replace(/^@/, '').toLowerCase(); };
-const MAX_WRONG_PER_HOUR = 15, MAX_PER_IP_HOUR = 30;
+const MAX_WRONG_PER_HOUR = 15;
+/** кодов с одного адреса в час: только против явного перебора — за адресом CGNAT тысячи людей (RELAY_LOGIN_PER_IP_HOUR) */
+const maxPerIpHour = () => Number(process.env.RELAY_LOGIN_PER_IP_HOUR) || 200;
 /** burnCodes: серии длиннее — не код, а мусор; окон на сообщение не больше BURN_MAX_WINDOWS (работа ограничена). */
 const BURN_MAX_RUN = 64, BURN_MAX_WINDOWS = 256;
 
@@ -92,7 +94,7 @@ export async function requestCode(login: string, ip: string | null = null): Prom
     if (ip) {
       await tx`select pg_advisory_xact_lock(hashtext(${'ip:' + ip}))`;
       const [{ n, wait }] = await tx`select count(*)::int as n, greatest(1, ceil(extract(epoch from min(created_at) + interval '1 hour' - now())))::int as wait from login_attempts where ip = ${ip} and created_at > now() - interval '1 hour'`;
-      if (n >= MAX_PER_IP_HOUR) throw new DomainError('flood', 'login ip', wait);
+      if (n >= maxPerIpHour()) throw new DomainError('flood', 'login ip', wait);
     }
     const [{ n, wait }] = await tx`select count(*)::int as n, greatest(1, ceil(extract(epoch from min(created_at) + interval '1 hour' - now())))::int as wait from login_attempts where login = ${key} and created_at > now() - interval '1 hour'`;
     if (n >= MAX_PER_HOUR) throw new DomainError('flood', 'login', wait);

@@ -4,6 +4,7 @@ import { usePerson, wantPeople } from '../../people';
 import { useEffect, useRef, useState } from 'preact/hooks';
 import { setGlobal, useGlobal, type NewContactDraft } from '../../global';
 import { addContact, resolveUser, showToast } from '../../settingsData';
+import { floodText } from '../../flood';
 import { clip, cpLen, initialsOf, NAME_MAX } from './contactsLogic';
 
 const NOT_FOUND = 'Пользователь не найден в Relay';
@@ -57,6 +58,7 @@ function NewContactForm({ draft }: { draft: NewContactDraft }) {
       setBusy(false);
       if ('notFound' in r) { setError(NOT_FOUND); return; }
       if ('offline' in r) { setError('Нет подключения к сети'); return; }
+      if ('flood' in r) { setError(floodText(r.flood, 'Слишком много поисков')); return; }
       userId = r.user.id;
       found = query.trim();
     }

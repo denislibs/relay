@@ -76,10 +76,13 @@ test('unknown login hits the hourly limit just like a real one', async () => {
   await expect(requestCode('@NoBody_x')).rejects.toMatchObject({ code: 'flood' });
 });
 
-test('per-IP limit: 30 an hour', async () => {
-  for (let i = 0; i < 30; i++) await requestCode('@ghost_' + i, '10.0.0.7');
-  await expect(requestCode('@ghost_x', '10.0.0.7')).rejects.toMatchObject({ code: 'flood' });
-  await requestCode('@ghost_x', '10.0.0.8');
+test('per-IP limit: 200 an hour by default, RELAY_LOGIN_PER_IP_HOUR overrides it', async () => {
+  process.env.RELAY_LOGIN_PER_IP_HOUR = '30';   // 200 запросов в тесте — долго; механизм тот же
+  try {
+    for (let i = 0; i < 30; i++) await requestCode('@ghost_' + i, '10.0.0.7');
+    await expect(requestCode('@ghost_x', '10.0.0.7')).rejects.toMatchObject({ code: 'flood' });
+    await requestCode('@ghost_x', '10.0.0.8');
+  } finally { delete process.env.RELAY_LOGIN_PER_IP_HOUR; }
 });
 
 test('old attempts are swept on request', async () => {

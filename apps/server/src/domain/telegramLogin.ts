@@ -17,7 +17,9 @@ import { botApi } from './telegramBot';
  * человеку (codeDelivery.ts). Отвязать — /stop в боте. Вход необязательный: Telegram узнаёт, что человек пользуется Relay.
  */
 export const TG_LOGIN_TTL_SEC = 300;
-const MAX_PER_IP_HOUR = 20, MAX_PER_TG_HOUR = 10;
+const MAX_PER_TG_HOUR = 10;
+/** входов с одного адреса в час: только против явного перебора — за адресом CGNAT тысячи людей (RELAY_TG_LOGIN_PER_IP_HOUR) */
+const maxPerIpHour = () => Number(process.env.RELAY_TG_LOGIN_PER_IP_HOUR) || 120;
 const hash = (t: string) => createHash('sha256').update('relay-tg:' + t).digest('hex');
 const valid = (t: unknown): t is string => typeof t === 'string' && /^[A-Za-z0-9_-]{43}$/.test(t);
 const PHONE = /^\+[0-9]{7,15}$/;
@@ -37,7 +39,7 @@ export async function createTelegramLogin(ip: string | null, deviceKey: Uint8Arr
     if (ip) {
       await tx`select pg_advisory_xact_lock(hashtext(${'tg-ip:' + ip}))`;
       const [{ n, wait }] = await tx`select count(*)::int as n, greatest(1, ceil(extract(epoch from min(created_at) + interval '1 hour' - now())))::int as wait from telegram_logins where ip = ${ip} and created_at > now() - interval '1 hour'`;
-      if (n >= MAX_PER_IP_HOUR) throw new DomainError('flood', 'telegram ip', wait);
+      if (n >= maxPerIpHour()) throw new DomainError('flood', 'telegram ip', wait);
     }
     const [r] = await tx`
       insert into telegram_logins (id, token_hash, device_key, ip, expires_at)
