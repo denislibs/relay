@@ -59,6 +59,15 @@ function CheckRow(props) {
     h('span', { class: 'rl-optrow-text' }, h('span', null, props.label || props.title), props.subtitle ? h('small', null, props.subtitle) : null));
 }
 
+/* ---------- SwitchRow: подпись слева, переключатель справа; кликабельна вся строка (как в Telegram) ---------- */
+function SwitchRow(props) {
+  return h('label', { class: cx('rl-optrow', 'rl-switchrow', props.disabled && 'rl-optrow-off'), 'data-setting': props.setting },
+    h('span', { class: 'rl-optrow-text' }, h('span', null, props.label || props.title), props.subtitle ? h('small', null, props.subtitle) : null),
+    h('span', { class: 'rl-switch' },
+      h('input', { type: 'checkbox', role: 'switch', checked: !!props.checked, disabled: props.disabled, onChange: function (e) { if (props.onChange) props.onChange(e.currentTarget.checked, e); } }),
+      h('span', { class: 'rl-switch-track', 'aria-hidden': 'true' }, h('span', { class: 'rl-switch-knob' }))));
+}
+
 /* ---------- RangeRow: подпись, значение справа, слайдер (←/→ нативно, aria-valuetext); onChange — пока тянут, onCommit — когда отпустили ---------- */
 function RangeRow(props) {
   var min = props.min != null ? props.min : 0, max = props.max != null ? props.max : 100, step = props.step || 1;
@@ -281,4 +290,4 @@ function ColorPicker(props) {
       })));
 }
 
-export { Section, RadioRow, CheckRow, RangeRow, TextField, SelectRow, ConfirmDialog, RichText, parseRich, ColorPicker, hexToRgb, rgbToHex, rgbToHsv, hsvToRgb };
+export { Section, RadioRow, CheckRow, SwitchRow, RangeRow, TextField, SelectRow, ConfirmDialog, RichText, parseRich, ColorPicker, hexToRgb, rgbToHex, rgbToHsv, hsvToRgb };

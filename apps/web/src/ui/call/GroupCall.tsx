@@ -92,7 +92,7 @@ function LinkPanel({ admin, onClose }: { admin: boolean; onClose: () => void }) 
   const make = async () => { const u = await callLinkUrl(approval); if (u) { setUrl(u); void navigator.clipboard?.writeText(u).catch(() => {}); } };
   return (
     <div class="app-gcall-linkpanel" role="dialog" aria-label="Ссылка на звонок">
-      <label class="app-gcall-setting"><input type="checkbox" checked={approval} onChange={(e) => setApproval((e.target as HTMLInputElement).checked)} /><span>Вход по одобрению</span></label>
+      <label class="app-gcall-setting"><span>Вход по одобрению</span><span class="rl-switch"><input type="checkbox" role="switch" checked={approval} onChange={(e) => setApproval((e.target as HTMLInputElement).checked)} /><span class="rl-switch-track" aria-hidden="true"><span class="rl-switch-knob" /></span></span></label>
       {url ? <input class="app-gcall-titleedit app-gcall-linkurl" readOnly value={url} aria-label="Ссылка на звонок" onFocus={(e) => (e.target as HTMLInputElement).select()} /> : null}
       <div class="app-gcall-linkbtns">
         <button type="button" class="app-gcall-linkbtn" onClick={() => void make()}>{url ? 'Новая ссылка' : 'Создать и скопировать'}</button>
@@ -267,8 +267,8 @@ function GroupCallScreen({ v }: { v: GroupCallView }) {
             {admin ? <TitleEdit v={v} /> : null}
             {admin ? (
               <label class="app-gcall-setting">
-                <input type="checkbox" checked={v.joinMuted} onChange={(e) => void setJoinMuted((e.target as HTMLInputElement).checked)} />
                 <span>Новые участники — без микрофона</span>
+                <span class="rl-switch"><input type="checkbox" role="switch" checked={v.joinMuted} onChange={(e) => void setJoinMuted((e.target as HTMLInputElement).checked)} /><span class="rl-switch-track" aria-hidden="true"><span class="rl-switch-knob" /></span></span>
               </label>
             ) : null}
             {[...v.members].sort((a, b) => (b.hand ?? 0) - (a.hand ?? 0)).map((m) => <Row key={m.identity} m={m} admin={admin && m.userId !== meId} />)}

@@ -1701,6 +1701,9 @@ html[data-anim="0"] .rl-shell > .rl-shell-main { transition: none; }
 .rl-sect-card :is(.rl-inforow, .rl-optrow, .rl-selrow) { gap: var(--space-4); min-height: 52px; padding: var(--space-2) var(--space-3); border-radius: calc(var(--radius-lg) - var(--space-2)); }
 .rl-sect-card .rl-inforow-icon { width: 32px; justify-content: center; flex-shrink: 0; }
 .rl-sect-card :is(.rl-check-box, .rl-radio) { flex-shrink: 0; margin: 0 6px; }
+.rl-switchrow .rl-switch { margin-inline: var(--space-2) 2px; }
+.rl-switchrow:active .rl-switch-knob { width: 24px; }
+.rl-switchrow:active input:checked + .rl-switch-track .rl-switch-knob { transform: translateX(12px); }
 .rl-sect-card .rl-range { padding: var(--space-2) var(--space-3) var(--space-3); }
 .rl-sect-card .rl-tf { padding: var(--space-2) var(--space-3) 0; }
 .rl-sect-card :is(.rl-optrow, .rl-selrow, .rl-inforow):focus-visible, .rl-sect-card .rl-selrow:focus-within { outline-offset: -2px; border-radius: calc(var(--radius-lg) - var(--space-2)); }

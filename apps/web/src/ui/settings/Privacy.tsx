@@ -1,4 +1,4 @@
-import { CheckRow, ChatRowSkeleton, InfoRow, PanelHeader, Presence, Section, SelectRow, useMinVisible } from '@relay/ui';
+import { SwitchRow, ChatRowSkeleton, InfoRow, PanelHeader, Presence, Section, SelectRow, useMinVisible } from '@relay/ui';
 import { useEffect, useState } from 'preact/hooks';
 import { getPassword, listPasskeys } from '../../authSettings';
 import { useGlobal } from '../../global';
@@ -65,16 +65,16 @@ export function Privacy() {
           )}
         </div>
         <Section setting="privacy.screen" title="Экран" footer="Эти настройки действуют только на этом устройстве.">
-          <CheckRow setting="privacy.screen.blur" label="Размывать, когда вкладка не в фокусе" checked={screen.blur} onChange={(on: boolean) => setPref('screen.blur', on)} />
+          <SwitchRow setting="privacy.screen.blur" label="Размывать, когда вкладка не в фокусе" checked={screen.blur} onChange={(on: boolean) => setPref('screen.blur', on)} />
           <Presence show={screen.blur} exitMs={200}>
             <SelectRow
               label="Задержка" value={screen.blurDelay} onChange={(v: number | string) => setPref('screen.blurDelay', Number(v))}
               options={[{ value: 0, label: 'Сразу' }, { value: 5, label: '5 секунд' }, { value: 30, label: '30 секунд' }]}
             />
           </Presence>
-          <CheckRow setting="privacy.screen.title" label="Не показывать чат в заголовке вкладки" checked={screen.hideChatInTitle} onChange={(on: boolean) => setPref('screen.hideChatInTitle', on)} />
-          <CheckRow setting="privacy.screen.unread" label="Не показывать непрочитанные в заголовке и значке" checked={screen.hideUnreadInTitle} onChange={(on: boolean) => setPref('screen.hideUnreadInTitle', on)} />
-          <CheckRow setting="privacy.screen.notifyText" label="Скрывать текст в уведомлениях" checked={screen.hideNotifyText} onChange={(on: boolean) => setPref('screen.hideNotifyText', on)} />
+          <SwitchRow setting="privacy.screen.title" label="Не показывать чат в заголовке вкладки" checked={screen.hideChatInTitle} onChange={(on: boolean) => setPref('screen.hideChatInTitle', on)} />
+          <SwitchRow setting="privacy.screen.unread" label="Не показывать непрочитанные в заголовке и значке" checked={screen.hideUnreadInTitle} onChange={(on: boolean) => setPref('screen.hideUnreadInTitle', on)} />
+          <SwitchRow setting="privacy.screen.notifyText" label="Скрывать текст в уведомлениях" checked={screen.hideNotifyText} onChange={(on: boolean) => setPref('screen.hideNotifyText', on)} />
         </Section>
       </div>
     </div>

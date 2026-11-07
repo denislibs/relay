@@ -1,4 +1,4 @@
-import { CheckRow, ConfirmDialog, Fab, InfoRow, PanelHeader, Presence, ProfileHeader, Section, TextField, peerTone } from '@relay/ui';
+import { SwitchRow, ConfirmDialog, Fab, InfoRow, PanelHeader, Presence, ProfileHeader, Section, TextField, peerTone } from '@relay/ui';
 import { avatarPhoto, userPhoto } from '../../profilePhoto';
 import type { Item } from '@relay/sync-engine/src/types';
 import { useEffect, useRef, useState } from 'preact/hooks';
@@ -119,7 +119,7 @@ function EditForm({ contact, leave, onBack, navGuard }: { contact: Item; leave: 
           <TextField label="Заметки" multiline rows={3} counter maxLength={NOTE_MAX} measure={cpLen} value={form.note} onInput={limited('note', NOTE_MAX)} />
         </Section>
         <Section>
-          <CheckRow label="Уведомления" subtitle={on ? 'Включены' : 'Выключены'} checked={on} disabled={chatId == null}
+          <SwitchRow label="Уведомления" subtitle={on ? 'Включены' : 'Выключены'} checked={on} disabled={chatId == null}
             onChange={() => { if (chatId != null) toggleMute(chatId); }} />
         </Section>
         <Section>

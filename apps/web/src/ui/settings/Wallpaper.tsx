@@ -1,4 +1,4 @@
-import { CheckRow, ColorPicker, InfoRow, PanelHeader, PATTERN_SETS, RangeRow, buildPattern, intensityAlpha, loadPattern, patternColor, patternSize, Section } from '@relay/ui';
+import { SwitchRow, ColorPicker, InfoRow, PanelHeader, PATTERN_SETS, RangeRow, buildPattern, intensityAlpha, loadPattern, patternColor, patternSize, Section } from '@relay/ui';
 import { useEffect, useRef, useState } from 'preact/hooks';
 import { getPrefs, resolveBase, setPref, themeSettings, type WallpaperPref } from '../../prefs';
 import { blendForTinted } from '../../themes/palette';
@@ -80,7 +80,7 @@ export function Wallpaper() {
           <InfoRow setting="wallpaper.upload" icon="camera" title={busy ? 'Загружаем…' : 'Загрузить изображение'} onClick={() => { if (!busy) file.current?.click(); }} />
           <InfoRow icon="palette" title="Выбрать цвет" subtitle={solid ? solid.toUpperCase() : undefined} onClick={() => void go('settings/general/wallpaper/color')} />
           <InfoRow setting="wallpaper.reset" icon="history" title="Сбросить" subtitle="Вернуть обои по умолчанию" onClick={reset} />
-          <CheckRow setting="wallpaper.blur" label="Размытие" checked={image && wp.blur} disabled={!image} onChange={(v: boolean) => setPref(`themes.${key}.wallpaper.blur`, v)} />
+          <SwitchRow setting="wallpaper.blur" label="Размытие" checked={image && wp.blur} disabled={!image} onChange={(v: boolean) => setPref(`themes.${key}.wallpaper.blur`, v)} />
           <RangeRow setting="wallpaper.intensity" label="Интенсивность узора" min={0} max={100} step={1} value={intensity.value} disabled={image} onChange={intensity.set} onCommit={intensity.commit} />
         </Section>
         <Section setting="wallpaper.pattern" title="Узор" role="radiogroup">

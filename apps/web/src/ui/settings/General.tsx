@@ -1,4 +1,4 @@
-import { Bubble, CheckRow, InfoRow, PanelHeader, RadioRow, RangeRow, Section } from '@relay/ui';
+import { Bubble, SwitchRow, InfoRow, PanelHeader, RadioRow, RangeRow, Section } from '@relay/ui';
 import { useEffect, useState } from 'preact/hooks';
 import { useGlobal } from '../../global';
 import { back, go } from '../../nav';
@@ -94,7 +94,7 @@ export function General() {
             ))}
           </div>
           <div data-setting="general.accent"><Accents base={base} /></div>
-          <CheckRow setting="general.contrast" label="Повышенная контрастность" subtitle="Текст и ссылки ярче на любом фоне" checked={prefs.contrast} onChange={(v: boolean) => setPref('contrast', v)} />
+          <SwitchRow setting="general.contrast" label="Повышенная контрастность" subtitle="Текст и ссылки ярче на любом фоне" checked={prefs.contrast} onChange={(v: boolean) => setPref('contrast', v)} />
         </Section>
         <Section setting="general.timeFormat" title="Формат времени" role="radiogroup">
           <RadioRow setting="general.timeFormat.12h" label="12 часов" subtitle={hm(now, '12h')} checked={fmt === '12h'} onClick={() => setPref('timeFormat', '12h')} />

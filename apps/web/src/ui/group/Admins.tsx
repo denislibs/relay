@@ -1,4 +1,4 @@
-import { CheckRow, ConfirmDialog, InfoRow, Modal, Section, TextField } from '@relay/ui';
+import { SwitchRow, ConfirmDialog, InfoRow, Modal, Section, TextField } from '@relay/ui';
 import { ADMIN_RIGHTS_BY_KIND, RANK_MAX, allAdminRights, noAdminRights, type AdminRights, type GroupMember } from '@relay/protocol';
 import { useState } from 'preact/hooks';
 import { proofOf } from '../../authSettings';
@@ -84,7 +84,7 @@ export function AdminRightsPage({ nav }: { nav: Nav }) {
       </Section>
       <Section title="Что может этот администратор" footer={!editable && !isOwner ? 'Менять права может владелец или тот, кто назначил этого администратора.' : isOwner ? 'У владельца все права.' : undefined}>
         {ADMIN_RIGHTS_BY_KIND[kind].map((k) => (
-          <CheckRow key={k} label={adminRightText(k, kind)} checked={rights[k]} disabled={!editable || !mine[k]}
+          <SwitchRow key={k} label={adminRightText(k, kind)} checked={rights[k]} disabled={!editable || !mine[k]}
             onChange={(on: boolean) => setDraft({ ...rights, [k]: on })} />
         ))}
       </Section>

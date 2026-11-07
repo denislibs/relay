@@ -1,4 +1,4 @@
-import { CheckRow, InfoRow, Section, SelectRow, Switch, TextField } from '@relay/ui';
+import { SwitchRow, InfoRow, Section, SelectRow, Switch, TextField } from '@relay/ui';
 import { useEffect, useRef, useState } from 'preact/hooks';
 import { useDevStats } from '../../devtools/session';
 import { useGlobal } from '../../global';
@@ -60,7 +60,7 @@ export function DevNetwork() {
             <TextField label="Потери, %" inputMode="numeric" value={String(custom.lossPct)} onInput={editCustom('lossPct', 100)} />
           </div>
         ) : null}
-        <CheckRow label="Сохранять после перезагрузки" subtitle="Офлайн и медленная сеть останутся включёнными" checked={persist} onChange={(on: boolean) => { setPersist(on); run('persist', { on }); }} />
+        <SwitchRow label="Сохранять после перезагрузки" subtitle="Офлайн и медленная сеть останутся включёнными" checked={persist} onChange={(on: boolean) => { setPersist(on); run('persist', { on }); }} />
       </Section>
       <Section title="Проверки" footer="Разрыв — код 4000, как обрыв: движок переподключится и догонит журнал через sync.">
         <InfoRow icon="close" title="Разорвать сокет" subtitle="Переподключение и догон" onClick={() => run('dropSocket', undefined, 'Сокет разорван')} />
