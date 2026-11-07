@@ -24,10 +24,13 @@ export type Card =
   | { name: 'code'; phone: string; attemptId: string; via: 'app' | 'none'; length: number; devCode?: string; sentAt: number }
   | { name: 'password'; pendingId: string; hint: string }
   | { name: 'recover'; pendingId: string; hint: string; emailPattern: string }
-  | { name: 'signup'; pendingId: string; phone: string }
+  | { name: 'signup'; pendingId: string; phone: string; prefill?: SignupPrefill }
   | { name: 'dev' };
 
-type Flow = { go(card: Card, opts?: { instant?: boolean }): void; finish(step: Step, from?: { phone?: string }): void; dev: boolean; telegram: boolean };
+/** Подсказка формы регистрации из Telegram: имя, фамилия, есть ли фото (само фото — /auth/signup/photo). */
+export type SignupPrefill = { firstName: string; lastName: string; photo: boolean };
+
+type Flow = { go(card: Card, opts?: { instant?: boolean }): void; finish(step: Step, from?: { phone?: string; prefill?: SignupPrefill }): void; dev: boolean; telegram: boolean };
 const FlowCtx = createContext<Flow>(null as unknown as Flow);
 export const useFlow = () => useContext(FlowCtx);
 
@@ -78,7 +81,7 @@ export function AuthFlow() {
     },
     finish(step, from) {
       if ('passwordNeeded' in step) return flow.go({ name: 'password', pendingId: step.pendingId, hint: step.hint });
-      if ('signupRequired' in step) return flow.go({ name: 'signup', pendingId: step.pendingId, phone: from?.phone ?? '' });
+      if ('signupRequired' in step) return flow.go({ name: 'signup', pendingId: step.pendingId, phone: from?.phone ?? '', ...(from?.prefill ? { prefill: from.prefill } : {}) });
       // сеанс выдан: карточка гаснет, затем стартует приложение
       try { sessionStorage.removeItem(KEY); } catch { /* ok */ }
       setLeaving(true);

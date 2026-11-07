@@ -54,15 +54,22 @@ export async function createTelegramLogin(ip: string | null, deviceKey: Uint8Arr
  * Опрос из браузера: 'wait' — бот ещё не подтвердил, 'denied' — отменили в боте, 'expired' — нужен новый вход,
  * phone — подтверждённый номер (выдаётся один раз и только устройству, начавшему вход).
  */
-export async function pollTelegramLogin(token: unknown, deviceKey: Uint8Array | null): Promise<'wait' | 'denied' | 'expired' | { phone: string }> {
+export type TelegramPrefill = { first: string | null; last: string | null; photo: string | null };
+
+export async function pollTelegramLogin(token: unknown, deviceKey: Uint8Array | null): Promise<'wait' | 'denied' | 'expired' | { phone: string; prefill: TelegramPrefill | null }> {
   if (!valid(token)) return 'expired';
   // подтверждённый вход годится ещё минуту после срока: подтверждение могло прийти на последней секунде
+  // подсказка для регистрации уходит вместе с номером и здесь больше не хранится
   const [r] = await sql`
-    update telegram_logins set status = 'used'
-     where token_hash = ${hash(token)} and status = 'approved' and expires_at > now() - interval '60 seconds'
-       and (device_key is null or device_key = ${deviceKey ? Buffer.from(deviceKey) : null})
-     returning phone`;
-  if (r) return { phone: r.phone as string };
+    update telegram_logins l set status = 'used', tg_first = null, tg_last = null, tg_photo = null
+      from (select id, tg_first, tg_last, tg_photo from telegram_logins where token_hash = ${hash(token)} for update) o
+     where l.id = o.id and l.status = 'approved' and l.expires_at > now() - interval '60 seconds'
+       and (l.device_key is null or l.device_key = ${deviceKey ? Buffer.from(deviceKey) : null})
+     returning l.phone, o.tg_first, o.tg_last, o.tg_photo`;
+  if (r) {
+    const prefill = r.tg_first || r.tg_last || r.tg_photo ? { first: r.tg_first as string | null, last: r.tg_last as string | null, photo: r.tg_photo as string | null } : null;
+    return { phone: r.phone as string, prefill };
+  }
   const [live] = await sql`select status from telegram_logins where token_hash = ${hash(token)} and expires_at > now()`;
   return live?.status === 'wait' ? 'wait' : live?.status === 'denied' ? 'denied' : 'expired';
 }
@@ -82,7 +89,7 @@ export const normalizePhone = (raw: string): string | null => {
 };
 
 type Chat = { id: number; type: string };
-type From = { id: number; is_bot?: boolean };
+type From = { id: number; is_bot?: boolean; first_name?: string; last_name?: string };
 export type BotUpdate = {
   update_id: number;
   message?: { message_id: number; from?: From; chat: Chat; text?: string; contact?: { phone_number: string; user_id?: number } };
@@ -124,7 +131,7 @@ export async function handleBotUpdate(u: BotUpdate, env: Env = process.env): Pro
 async function onMessage(m: NonNullable<BotUpdate['message']>, env: Env): Promise<void> {
   if (m.chat.type !== 'private' || !m.from || m.from.is_bot) return;
   const me = m.from.id, chat = m.chat.id;
-  if (m.contact) return onContact(me, chat, m.contact, env);
+  if (m.contact) return onContact(m.from, chat, m.contact, env);
   const text = (m.text ?? '').trim();
   if (text === '/stop') {
     await sql`delete from telegram_links where tg_user_id = ${me}`;
@@ -153,22 +160,48 @@ async function onMessage(m: NonNullable<BotUpdate['message']>, env: Env): Promis
   }, env);
 }
 
-async function onContact(me: number, chat: number, contact: { phone_number: string; user_id?: number }, env: Env): Promise<void> {
+async function onContact(from: From, chat: number, contact: { phone_number: string; user_id?: number }, env: Env): Promise<void> {
+  const me = from.id;
   // свой контакт: кнопка request_contact шлёт его с user_id отправителя; пересланная карточка чужого — нет
   if (contact.user_id !== me) { await askContact(chat, env, TEXT.notOwn); return; }
   const phone = normalizePhone(contact.phone_number);
   if (!phone) { await say(chat, TEXT.badPhone, NO_KEYBOARD, env); return; }
+  const pre = await prefillFor(from, phone, env);
   const approved = await sql.begin(async (tx) => {
     await tx`delete from telegram_links where phone = ${phone} and tg_user_id <> ${me}`;
     await tx`insert into telegram_links (tg_user_id, chat_id, phone) values (${me}, ${chat}, ${phone})
              on conflict (tg_user_id) do update set chat_id = excluded.chat_id, phone = excluded.phone, verified_at = now()`;
     const rows = await tx`
-      update telegram_logins set status = 'approved', phone = ${phone}
+      update telegram_logins set status = 'approved', phone = ${phone}, tg_first = ${pre.first}, tg_last = ${pre.last}, tg_photo = ${pre.photo}
        where id = (select id from telegram_logins where tg_user_id = ${me} and status = 'wait' and expires_at > now() order by created_at desc limit 1)
        returning id`;
     return rows.length > 0;
   });
   await say(chat, approved ? TEXT.approved : TEXT.saved, NO_KEYBOARD, env);
+}
+
+const NO_PREFILL: TelegramPrefill = { first: null, last: null, photo: null };
+const clip = (s: string | undefined, n: number) => { const t = (s ?? '').replace(/[\u0000-\u001f\u007f]/g, '').trim().slice(0, n); return t || null; };
+
+/**
+ * Номер ещё не зарегистрирован — имя, фамилия и фото из Telegram станут подсказкой в форме регистрации.
+ * Имя — из профиля Telegram (from), фото — первое из профиля (если человек его не скрыл); без фото — не беда,
+ * поэтому ошибки и медленный Bot API (больше 3 с) просто оставляют форму без фото.
+ */
+async function prefillFor(from: From, phone: string, env: Env): Promise<TelegramPrefill> {
+  const [u] = await sql`select 1 from users where phone = ${phone}`;
+  if (u) return NO_PREFILL;   // вход в существующий аккаунт: профиль не трогаем
+  let photo: string | null = null;
+  try {
+    const r = await botApi<{ photos: { file_id: string; width: number; file_size?: number }[][] }>('getUserProfilePhotos', { user_id: from.id, limit: 1 }, env, 3_000);
+    const sizes = r.photos?.[0] ?? [];
+    // самый крупный до 800 (у Telegram это обычно 640): больше форме не нужно
+    const fit = sizes.filter((s) => s.width <= 800).sort((a, b) => b.width - a.width)[0] ?? sizes[0];
+    photo = typeof fit?.file_id === 'string' && fit.file_id.length <= 300 ? fit.file_id : null;
+  } catch (e) {
+    console.warn(`telegram login: profile photo — ${(e as Error).message}`);
+  }
+  return { first: clip(from.first_name, 70), last: clip(from.last_name, 64), photo };
 }
 
 async function onCallback(q: NonNullable<BotUpdate['callback_query']>, env: Env): Promise<void> {
@@ -186,8 +219,10 @@ async function onCallback(q: NonNullable<BotUpdate['callback_query']>, env: Env)
     await done(); await close(TEXT.denied); return;
   }
   // номер — из связки, подтверждённой контактом раньше
+  const [link] = await sql`select phone from telegram_links where tg_user_id = ${q.from.id}`;
+  const pre = link ? await prefillFor(q.from, link.phone as string, env) : NO_PREFILL;
   const [r] = await sql`
-    update telegram_logins l set status = 'approved', phone = k.phone
+    update telegram_logins l set status = 'approved', phone = k.phone, tg_first = ${pre.first}, tg_last = ${pre.last}, tg_photo = ${pre.photo}
       from telegram_links k
      where l.id = ${id} and l.status = 'wait' and k.tg_user_id = ${q.from.id}
      returning l.id`;
